@@ -24,6 +24,7 @@ import re
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -270,6 +271,176 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     self.assertLessEqual(lv["margin_pct_of_equity"], 100.0, lv)
             finally:
                 await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_exchange_leverage_is_stable_across_hold(self) -> None:
+        """🔴거래소 레버리지는 보유시간 선택에 흔들리면 안 된다(2026-09-13 라이브 회귀).
+
+        한 번 걸어 두는 값인데 지평별 모델 상한을 따라가고 있었다. 기준은 정책 천장
+        (원장·순자산의 작은 쪽)이어야 한다. 로컬에서는 순자산 상한이 묶여 증상이 안 보였다.
+        """
+        async def exercise() -> None:
+            client = TestClient(TestServer(server.make_app()))
+            await client.start_server()
+            try:
+                seen = set()
+                for h in HOLDS:
+                    body = await (await client.get(
+                        f"/api/manual-entry/preview?side=LONG&hold={h}")).json()
+                    rx = body["plan"]["trade_plan"]["prescription"]
+                    seen.add(rx["exchange_leverage"]["setting"])
+                self.assertEqual(len(seen), 1,
+                                 f"보유시간에 따라 거래소 설정이 흔들린다: {sorted(seen)}")
+            finally:
+                await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_leverage_gauge_overrides_model(self) -> None:
+        """게이지가 값을 주면 그걸 쓰고, 없으면 모델 추천을 쓴다. 범위 밖이면 모델로 떨어진다.
+
+        `target_leverage` 가 집행기로 넘어가는 유일한 값이라 여기서 계약을 고정한다 --
+        이 값이 틀리면 실계좌 레버리지가 틀리게 걸린다.
+        """
+        async def exercise() -> None:
+            client = TestClient(TestServer(server.make_app()))
+            await client.start_server()
+            try:
+                base = await (await client.get(
+                    "/api/manual-entry/preview?side=LONG&hold=240")).json()
+                p0 = base["plan"]
+                self.assertEqual(p0["leverage_source"], "model", p0)
+                self.assertEqual(p0["target_leverage"], p0["leverage_model"], p0)
+                self.assertTrue(p0["leverage_steps"], p0)
+
+                man = await (await client.get(
+                    "/api/manual-entry/preview?side=LONG&hold=240&lev=25")).json()
+                p1 = man["plan"]
+                self.assertEqual(p1["target_leverage"], 25, p1)
+                self.assertEqual(p1["leverage_source"], "manual", p1)
+                # 모델 추천은 게이지와 무관하게 그대로여야 한다(화면이 둘을 나란히 보여준다)
+                self.assertEqual(p1["leverage_model"], p0["leverage_model"], p1)
+
+                for bad in ("0", "999", "abc", "-3"):
+                    r = await (await client.get(
+                        f"/api/manual-entry/preview?side=LONG&hold=240&lev={bad}")).json()
+                    self.assertEqual(r["plan"]["leverage_source"], "model",
+                                     f"lev={bad} 가 조용히 먹혔다: {r['plan']}")
+            finally:
+                await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_leverage_floor_respects_open_position(self) -> None:
+        """🔴열린 포지션이 큰 상태에서 모델이 «내릴 수 없는 값»을 권하면 안 된다.
+
+        레버리지를 내리면 기존 포지션의 초기증거금이 올라가고, 순자산을 넘으면 거래소가
+        -2028(MIN_LEVERAGE_RATIO)로 거부한다. 그 바닥 위를 권해야 실제로 걸린다.
+        (격리였다면 -4161 로 아예 막힌다 -- 이 계좌는 cross 라 해당 없다.)
+        """
+        big = dict(FAKE_ACCOUNT)
+        # 순자산 1,000 · 명목 11,000 = 11배. 10배로 내리면 증거금 1,100 > 1,000 이라 거부된다.
+        big["positions"] = [{**FAKE_ACCOUNT["positions"][0], "qty": 4.4, "notional": 11000.0}]
+
+        async def fake_account(*_a, **_k):
+            return big
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    body = await (await client.get(
+                        "/api/manual-entry/preview?side=LONG&hold=240")).json()
+                    p = body["plan"]
+                    lv = p["trade_plan"]["prescription"]["exchange_leverage"]
+                    self.assertTrue(lv["forced_by_position"], lv)
+                    self.assertGreaterEqual(lv["setting"] * 1000.0, 11000.0,
+                                            f"이 설정으로는 기존 포지션을 못 버텨 거부된다: {lv}")
+                    self.assertEqual(p["target_leverage"], lv["setting"], p)
+                    self.assertIsNotNone(p["leverage_position_floor"], p)
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_hold_is_fixed_and_does_not_extend_on_scale_in(self) -> None:
+        """🔴보유시간은 4시간 **고정**이고, 물타기해도 시계가 늘어나지 않는다(2026-09-13).
+
+        ① 쿼리로 다른 보유시간을 주어도 서버가 무시한다 -- 화면에 선택지가 없으므로
+           쿼리로만 바꿀 수 있으면 «화면과 다른 크기»가 나간다.
+        ② 포지션이 이미 2시간 묵었으면 남은 시간은 4시간이 아니라 그 나머지다.
+           `entry_at` 은 첫 체결 시각이라 추가 진입에도 안 움직인다.
+        """
+        aged = dict(FAKE_ACCOUNT)
+        old_entry = (datetime.now(timezone.utc) - timedelta(minutes=125)).isoformat()
+        aged["positions"] = [{**FAKE_ACCOUNT["positions"][0], "entry_at": old_entry}]
+
+        async def fake_account(*_a, **_k):
+            return aged
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    for q in ("", "&hold=60", "&hold=1440", "&hold=abc"):
+                        b = await (await client.get(
+                            f"/api/manual-entry/preview?side=LONG{q}")).json()
+                        p = b["plan"]
+                        self.assertEqual(p["hold_fixed_min"], 240, f"{q}: {p['hold_fixed_min']}")
+                        # 125분 묵었으니 남은 115분 -> 모델 지평으로 올림하면 120
+                        self.assertEqual(p["hold_remaining_min"], 120,
+                                         f"{q}: 물타기로 시계가 늘어났다 {p['hold_remaining_min']}")
+                    x = await (await client.get("/api/manual-exit/preview?side=LONG")).json()
+                    self.assertEqual(x["plan"]["hold_remaining_min"], 120, x["plan"])
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_stop_plan_follows_blended_vwap(self) -> None:
+        """🔴손절은 **체결 후 평단** 기준이고, 물타기하면 따라 내려온다(2026-09-13).
+
+        기존 포지션이 있으면 «기존 + 이번 주문»의 가중평균이 새 평단이다. 기존 진입가만
+        보거나 이번 주문 가격만 보면 손절이 엉뚱한 자리에 걸린다.
+        주문 형태도 같이 고정한다 -- 헤지 모드라 reduceOnly 가 거부되고(-1106)
+        closePosition 주문에 수량을 실으면 거래소가 거부한다.
+        """
+        held = dict(FAKE_ACCOUNT)
+        held["positions"] = [{**FAKE_ACCOUNT["positions"][0], "qty": 1.0,
+                              "entry_price": 3000.0, "notional": 3000.0}]
+
+        async def fake_account(*_a, **_k):
+            return held
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
+                    p = b["plan"]
+                    sp = p.get("stop_plan")
+                    self.assertIsNotNone(sp, p)
+                    self.assertEqual(sp["type"], "STOP_MARKET", sp)
+                    self.assertEqual(sp["closePosition"], "true", sp)
+                    self.assertNotIn("quantity", sp, "closePosition 주문에 수량을 실으면 거부된다")
+                    self.assertNotIn("reduceOnly", sp, "헤지 모드에서 reduceOnly 는 -1106")
+                    # 평단은 기존 3000 과 신규 2500.00 사이여야 한다
+                    self.assertGreater(sp["entry_price"], 2500.0, sp)
+                    self.assertLess(sp["entry_price"], 3000.0, sp)
+                    # 손절은 그 평단의 3% 아래
+                    self.assertAlmostEqual(sp["stopPrice"] / sp["entry_price"], 0.97,
+                                           places=3, msg=str(sp))
+                finally:
+                    await client.close()
 
         with _isolated_dirs():
             asyncio.run(exercise())

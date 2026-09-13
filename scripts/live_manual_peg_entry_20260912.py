@@ -186,6 +186,70 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     }
 
 
+# ── 손절 (2026-09-13, 사용자 결정: **가격 3% 고정**) ──────────────────────────
+# 근거: research_stop_loss_vs_no_stop / research_learned_stop_loss (869일 테이프·5분봉 49만).
+#   · 손절선이 청산선 안쪽이면 가격이 손절을 **먼저** 지나므로 청산이 구조적으로 불가능하다
+#     (갭 제외). 실측 파산 17.6% -> 0%, 정확도 0.50~0.65 전 구간에서 무손절보다 낫다.
+#   · 폭은 **성장으로 못 고른다** -- 고정/ATR연동/모델 전부 건당 로그성장이 시드 편차 안이다.
+#     학습 손절이 이기는 건 «손절률의 국면 안정성»(0.7%p vs 9.4%p)뿐이고 수익으로 안 바뀐다.
+#     ⇒ 가장 단순한 고정 3% 를 쓴다(사용자 결정).
+#   · 🔴**계좌 손실 = 손절(가격) × 배수.** 3% × 6배 = 18%. 배수를 키우면 같이 커진다 --
+#     25배면 한 번에 75% 다. «손절이 있으니 크게 가도 된다»는 틀렸다.
+# 문헌: Kaminski·Lo 2014 "When do stop-loss rules stop losses?"(손절은 모멘텀에서 유리하고
+#   되돌림에서 해롭다 -- 우리 실측은 모멘텀 편) · 갭 한계는 Quantitative Finance 2019.
+STOP_LOSS_PCT = 0.03
+# 시장가 손절의 기대 추가 비용(bp). 수수료 3 + 슬리피지 중앙 14 = 17.
+# 🔴꼬리는 훨씬 두껍다: 99분위 227bp(6배면 계좌 13.6%p). 화면이 그 사실을 숨기지 않는다.
+STOP_SLIP_BP = 17.0
+
+
+def build_stop_plan(*, position_side: str, entry_price: float, filters: dict[str, float],
+                    symbol: str = "ETHUSDT", stop_pct: float = STOP_LOSS_PCT,
+                    leverage: float = 0.0) -> dict[str, Any]:
+    """평단에서 `stop_pct` 떨어진 곳의 손절 주문. **순수 함수**.
+
+    🔴헤지 모드라 `reduceOnly` 가 거부된다(-1106). `closePosition=true` 를 쓴다 --
+    수량을 안 받고 걸리면 그 측면 전량을 닫으므로 물타기로 수량이 바뀌어도 따라온다.
+    다만 **평단이 바뀌면 손절가는 다시 걸어야 한다**(호출부가 기존 주문을 지우고 새로 건다).
+
+    틱 반올림은 **넓은 쪽**으로 한다 -- 좁게 반올림하면 의도보다 빨리 잘린다.
+    """
+    if position_side not in ("LONG", "SHORT"):
+        raise ValueError(f"position_side must be LONG/SHORT, got {position_side!r}")
+    if not (entry_price > 0):
+        raise ValueError(f"bad entry price: {entry_price}")
+    if not (0.0 < float(stop_pct) < 1.0):
+        raise ValueError(f"stop_pct must be in (0,1), got {stop_pct!r}")
+    tick = filters.get("tick") or 0.01
+    long_side = position_side == "LONG"
+    raw = entry_price * (1 - stop_pct) if long_side else entry_price * (1 + stop_pct)
+    # 롱 손절은 아래 -> 내림(더 멀리) · 숏 손절은 위 -> 올림(더 멀리)
+    price = (int(raw / tick) * tick if long_side
+             else math.ceil(raw / tick - 1e-9) * tick)
+    return {
+        "symbol": symbol,
+        "side": "SELL" if long_side else "BUY",
+        "positionSide": position_side,     # 헤지 모드 필수. 반전하지 않는다.
+        "type": "STOP_MARKET",
+        "stopPrice": round(price, 8),
+        "closePosition": "true",           # 수량을 안 받는다 -- 걸리면 그 측면 전량
+        "timeInForce": "GTE_GTC",
+        "workingType": "MARK_PRICE",       # 체결가 스파이크로 잘리는 걸 줄인다
+        "stop_pct": round(float(stop_pct), 6),
+        "entry_price": round(entry_price, 8),
+        # 화면이 «계좌로 얼마인가»를 말할 수 있게. 이게 사용자가 실제로 묻는 값이다.
+        # 🔴**시장가라 슬리피지가 붙는다.** 표시값은 두 개다 -- 의도한 손실과 실측 기대 손실.
+        # 실측(869일, 3% 손절 2,046건): 트리거 봉 안 초과폭 중앙 14.0bp · 90% 65.6bp ·
+        # 99% 227bp. 수수료 3bp 를 더해 기대 17bp, 6배면 계좌 +1.0%p 다.
+        "account_loss_pct": round(100 * stop_pct * leverage, 1) if leverage else None,
+        "account_loss_expected_pct": (round(100 * (stop_pct + STOP_SLIP_BP / 1e4) * leverage, 1)
+                                      if leverage else None),
+        "slip_bp": STOP_SLIP_BP,
+        "leverage": leverage or None,
+        "dry_run": not exec_enabled(),
+    }
+
+
 def realized_vol_bpm(closes: list[float]) -> float | None:
     """1분봉 종가들로 실현변동성(bp/√분). 표본이 모자라면 None -- **0 이 아니다**.
     0 으로 돌리면 «변동성 없음»이 되어 마감이 최대로 늘어나는데, 실제로는 «모른다»다."""
@@ -342,6 +406,41 @@ def _self_check() -> None:
                             recommended_qty=1.0, cap_notional=None, filters=f)
     assert plan["effective_leverage"] is None and plan["liq_distance_pct"] is None, plan
 
+    # ── 손절 계획 (2026-09-13) ────────────────────────────────────────────────
+    sp = build_stop_plan(position_side="LONG", entry_price=2521.11, filters=f, leverage=6.0)
+    assert sp["type"] == "STOP_MARKET" and sp["closePosition"] == "true", sp
+    assert "reduceOnly" not in sp, "헤지 모드에서 reduceOnly 는 -1106 로 거부된다"
+    assert sp["side"] == "SELL" and sp["positionSide"] == "LONG", sp
+    assert sp["stopPrice"] < 2521.11, "롱 손절은 진입가 아래"
+    assert abs(sp["stopPrice"] - 2445.47) < 0.02, sp["stopPrice"]      # 3% 아래, 틱 내림
+    assert sp["account_loss_pct"] == 18.0, sp                          # 3% × 6배
+    # 🔴시장가라 기대 손실은 그보다 크다 -- 화면이 낙관적인 숫자만 보여주면 안 된다
+    assert sp["account_loss_expected_pct"] > sp["account_loss_pct"], sp
+    assert abs(sp["account_loss_expected_pct"] - 19.0) < 0.2, sp["account_loss_expected_pct"]
+    sp2 = build_stop_plan(position_side="SHORT", entry_price=2521.11, filters=f, leverage=6.0)
+    assert sp2["side"] == "BUY" and sp2["stopPrice"] > 2521.11, sp2
+    assert abs(sp2["stopPrice"] - 2596.75) < 0.02, sp2["stopPrice"]
+    # 틱 반올림은 **넓은 쪽**이어야 한다 -- 좁으면 의도보다 빨리 잘린다
+    fine = {**f, "tick": 1.0}
+    assert build_stop_plan(position_side="LONG", entry_price=2521.11,
+                           filters=fine)["stopPrice"] <= 2521.11 * 0.97
+    assert build_stop_plan(position_side="SHORT", entry_price=2521.11,
+                           filters=fine)["stopPrice"] >= 2521.11 * 1.03
+    for bad in (dict(position_side="FLAT", entry_price=100.0),
+                dict(position_side="LONG", entry_price=0.0)):
+        try:
+            build_stop_plan(filters=f, **bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"막았어야 한다: {bad}")
+    try:
+        build_stop_plan(position_side="LONG", entry_price=100.0, filters=f, stop_pct=1.5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("stop_pct 범위를 막았어야 한다")
+
     # 최소 명목 미달은 조용히 보내지 않고 막는다
     plan = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
                             recommended_qty=0.005, cap_notional=None, filters=f)
@@ -492,7 +591,7 @@ def _self_check() -> None:
         else:
             raise AssertionError(f"막았어야 한다: fraction={bad}")
 
-    print("통과 66/66 — 진입(분할 포함) + 합산 상한 + 화면 설명값 + 청산 + 변동성 마감 + 부분 청산")
+    print("통과 80/80 — 진입(분할 포함) + 손절(슬리피지 표기) + 합산 상한 + 화면 설명값 + 청산 + 변동성 마감 + 부분 청산")
 
 
 if __name__ == "__main__":

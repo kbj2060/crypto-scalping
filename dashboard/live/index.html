@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260913-topdetect">
+  <link rel="stylesheet" href="styles.css?v=20260913-topdetect2">
 </head>
 <body>
     <main class="app">
@@ -301,16 +301,28 @@
                들고 있으면 이 정도 역행을 각오해야 한다»를 주고, 그 역수가 허용 레버리지다.
                세 상한(원장·순자산·모델)의 **작은 쪽**을 쓰므로 이 선택이 크기를 키우지는 않는다. -->
           <div class="manual-entry-row actions">
-            <label class="exit-frac" for="snapHold">
+            <!-- 2026-09-13 보유시간 **4시간 고정**(사용자 결정). 선택지를 없앴다 --
+                 고를 수 있으면 «크기를 키우려고 짧게 고르는» 길이 열리는데, 그건 약속이
+                 아니라 핑계가 된다. 물타기를 해도 시계는 안 늘어난다(첫 체결 기준). -->
+            <label class="exit-frac">
               <span class="entry-cap">보유 예정</span>
-              <select id="snapHold" class="notify-btn small" aria-label="보유 예정 시간">
-                <option value="60">1시간</option>
-                <option value="120">2시간</option>
-                <option value="240">4시간</option>
-                <option value="480">8시간</option>
-                <option value="1440" selected>1일</option>
-              </select>
+              <b id="snapHoldFixed" class="entry-val">4시간</b>
               <b id="snapHoldRisk" class="entry-was">—</b>
+            </label>
+          </div>
+          <!-- 2026-09-13 거래소 레버리지 게이지. 위험이 아니라 «총 명목의 천장»을 정하는 값이다
+               (교차 마진이라 청산거리 = 순자산/총명목, 설정값은 안 들어간다). 자동이면 모델
+               추천대로 따라가고, 끄면 손으로 고른다. 주문 직전에 API 로 실제 설정한다. -->
+          <div class="manual-entry-row actions">
+            <label class="exit-frac" for="snapLevGauge">
+              <span class="entry-cap">레버리지</span>
+              <input type="range" id="snapLevGauge" min="0" max="14" step="1" value="5"
+                     aria-label="거래소 레버리지">
+              <b id="snapLevVal">-</b>
+            </label>
+            <label class="lev-auto" for="snapLevAuto">
+              <input type="checkbox" id="snapLevAuto" checked>
+              <span>자동</span>
             </label>
           </div>
           <div class="manual-entry-row actions">
@@ -409,7 +421,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260913-topdetect"></script>
+  <script src="./app.js?v=20260913-topdetect2"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
