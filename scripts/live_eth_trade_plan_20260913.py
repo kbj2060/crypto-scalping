@@ -30,7 +30,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
     HARD_CAP_X, recommended_tranches)
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
-    EXIT_TAKER_VOL_BPM, FALLBACK_SEC, exit_deadline_sec)
+    EXIT_TAKER_VOL_BPM, FALLBACK_SEC, STOP_LOSS_PCT, exit_deadline_sec)
 
 HOLD_CHOICES = (60, 120, 240, 480, 1440)
 ROUND_TRIP_COST_BP = 5.88            # static 진입 + peg 청산 실측(2026-09-13)
@@ -248,6 +248,47 @@ def choose_leverage(*, min_feasible: float, cap_x: float) -> float:
     return max(min_feasible, cap_x) * 1.2
 
 
+# ── 손절이 생기면 «위험»의 정의가 바뀐다 (2026-09-13) ────────────────────────
+# 🔴손절 3% 가 청산선(100/L = 16.7% @6배)보다 **먼저** 오므로 청산은 구조적으로 도달 불가다
+# (테이프 실측 파산율 전 구간 0%, 30배에서도 1.27%). 그러면 생존 제약이 아무것도 안 막는다.
+# 대신 묶는 것은 **손절의 반복**이다: 손절당 손실 = 손절폭 × 배수 이고, 그게 쌓여 MDD 가 된다.
+#   6배: 손절당 18% · 1년 중앙 계좌 9.19배 · 중앙 MDD 82.9%
+#   16배: 손절당 48% · 1년 중앙 **0.00** · MDD 100%  ← 파산율은 0% 인데 계좌가 안 남는다
+# ⇒ 배수를 고르는 기준이 «파산 확률»에서 **«감당 가능한 MDD»** 로 옮겨간다.
+# 화면도 청산거리 대신 이 값들을 앞세운다 -- 도달 못 하는 선을 위험 지표로 쓰면 안 된다.
+STOP_HIT_RATE_4H = 0.043      # 3% 손절 · 4시간 보유 실측(869일 테이프). 국면에 따라 달라진다.
+
+
+def stop_risk(*, stop_pct: float, leverage: float, hold_min: int = 240,
+              hit_rate: float = STOP_HIT_RATE_4H) -> dict:
+    """손절이 있을 때의 위험. 청산거리가 아니라 **이 값들이 진짜 지표다**.
+
+    `consecutive_to_half` 는 «몇 번 연속 잘리면 계좌가 반토막인가»다 -- 손절당 손실이
+    커질수록 급격히 줄어든다(18%면 4회, 48%면 2회)."""
+    if not (leverage > 0 and stop_pct > 0):
+        return {"available": False}
+    per = stop_pct * leverage                       # 손절당 계좌 손실(비용 전)
+    def consec(target: float) -> int | None:
+        if per >= 1.0:
+            return 1
+        n, w = 0, 1.0
+        while w > 1 - target and n < 99:
+            w *= (1 - per); n += 1
+        return n
+    trades_per_year = 735                           # 실계좌 빈도(하루 2.01건)
+    return {
+        "available": True,
+        "per_stop_pct": round(100 * per, 1),
+        "consecutive_to_half": consec(0.5),
+        "consecutive_to_80": consec(0.8),
+        "hit_rate": hit_rate,
+        "expected_stops_per_year": int(round(hit_rate * trades_per_year)),
+        # 청산선은 이제 «도달 불가»다. 그 사실 자체를 값으로 낸다.
+        "liq_unreachable": stop_pct < 1.0 / leverage,
+        "liq_distance_pct": round(100.0 / leverage, 1),
+    }
+
+
 def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: float,
               cap_x: float, acc: float = PRESCRIBE_ACC,
               existing_notional: float = 0.0,
@@ -308,6 +349,7 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
         "growth_per_hour": row["growth_per_hour"],
         "none_positive": hold.get("none_positive"),
         "hold_by_acc": sens,
+        "stop_risk": stop_risk(stop_pct=STOP_LOSS_PCT, leverage=L or 0.0, hold_min=H),
         "size_source": "MAE 분위 모델(방향 가정 없음)",
         "tranche_reason": ("일괄 — 분할은 «같은 평균 노출의 작은 단일 진입»에 869일 6/6 칸 전패,"
                            " 생존선 위에서는 파산도 못 줄였습니다. 노출을 낮추려면 배수를 낮춥니다"),
@@ -413,6 +455,21 @@ def _self_check() -> None:
                  risk_table=live, vol_bpm=None, cap_x=8.0, hold_min=1440)
     assert p["hold_min"] == 1440
     assert p["size"]["leverage"] < 5 and p["entry_split"]["tranches"] == 1, p["size"]
+    # ── 손절 기준 위험 지표 ──────────────────────────────────────────────────
+    sr = stop_risk(stop_pct=0.03, leverage=6.0)
+    assert sr["per_stop_pct"] == 18.0, sr           # 3% × 6배
+    assert sr["liq_unreachable"] is True, "3% < 16.7% 이므로 청산은 도달 불가"
+    assert sr["consecutive_to_half"] == 4, sr       # 0.82^4 = 0.45
+    # 배수를 키우면 손절당 손실이 커지고 견디는 횟수가 급격히 준다
+    prev = 99
+    for L in (4.0, 6.0, 10.0, 16.0, 25.0):
+        c = stop_risk(stop_pct=0.03, leverage=L)["consecutive_to_half"]
+        assert c <= prev, (L, c, prev); prev = c
+    assert stop_risk(stop_pct=0.03, leverage=16.0)["per_stop_pct"] == 48.0
+    # 🔴손절이 청산선 밖이면 보호가 사라진다 -- 그 사실을 값으로 내야 한다
+    assert stop_risk(stop_pct=0.03, leverage=40.0)["liq_unreachable"] is False
+    assert stop_risk(stop_pct=0.0, leverage=6.0)["available"] is False
+
     # ── 처방: 세 값을 한 번에 ────────────────────────────────────────────────
     rx = prescribe(risk_table=live, atr_pct=0.000387, side="LONG", equity=1000.0, cap_x=8.0)
     assert rx["available"] and rx["tranches"] == 1, "분할은 자유 변수가 아니다(869일 6/6 전패)"
@@ -483,7 +540,7 @@ def _self_check() -> None:
     p = plan_now(side="LONG", equity=0.0, existing_notional=0.0, unrealized_pnl=0.0,
                  risk_table={}, vol_bpm=None, cap_x=8.0)
     assert p["size"]["leverage"] is None and p["exit_ladder"]["budget_min"] == 0
-    print("통과 58/58 — 처방(배수·보유·분할·거래소설정) · 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
+    print("통과 65/65 — 손절기준 위험 · 처방(배수·보유·분할·거래소설정) · 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
 
 
 if __name__ == "__main__":

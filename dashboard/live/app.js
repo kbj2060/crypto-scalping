@@ -5275,9 +5275,20 @@ function tradePlanLines(tp) {
   if (rx && rx.available) {
     const hb = Object.entries(rx.hold_by_acc || {})
       .map(([a, m]) => `${Math.round(100 * Number(a))}%→${m}분`).join(" ");
+    // 🔴손절이 있으면 청산거리는 **도달 못 하는 선**이다. 위험 지표를 손절 기준으로 바꾼다
+    // (2026-09-13): 손절당 계좌 손실과 «연속 몇 번 견디나»가 실제로 계좌를 정한다.
+    const sr = rx.stop_risk || {};
     out.push(`처방 ${rx.leverage}배 · ${rx.hold_min}분 · ${rx.tranches}회(일괄)`
-      + ` — 청산거리 ${rx.liq_distance_pct}% · 손익분기 실력 ${Math.round(100 * rx.breakeven_acc)}%`
-      + ` (실력 ${Math.round(100 * rx.acc_assumed)}% 가정${hb ? `, 가정별 보유 ${hb}` : ""})`);
+      + (sr.available
+         ? ` — 손절당 계좌 ${sr.per_stop_pct}% · 연속 ${sr.consecutive_to_half}회면 반토막`
+           + ` · 연 ${sr.expected_stops_per_year}회 예상`
+         : ` — 청산거리 ${rx.liq_distance_pct}%`)
+      + ` · 손익분기 실력 ${Math.round(100 * rx.breakeven_acc)}%`);
+    if (sr.available) {
+      out.push(sr.liq_unreachable
+        ? `청산선 ${sr.liq_distance_pct}% 는 손절(3%)이 먼저 와서 **도달 불가** — 위험은 손절 반복에서 옵니다`
+        : `🔴손절이 청산선 ${sr.liq_distance_pct}% 밖입니다 — 보호가 안 됩니다`);
+    }
     out.push(`크기는 ${rx.size_source} · 분할 ${rx.tranche_reason}`);
     // 거래소 레버리지 설정. 위험이 아니라 «상한을 거래소에 새기는 값»이라 문구도 그렇게 쓴다.
     const lv = rx.exchange_leverage;

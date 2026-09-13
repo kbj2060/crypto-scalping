@@ -265,6 +265,14 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     self.assertAlmostEqual(rx["liq_distance_pct"], 100.0 / rx["leverage"],
                                            delta=0.1, msg=str(rx))
                     # 거래소 레버리지: 정책 상한만큼은 반드시 열려야 한다
+                    # 🔴손절이 있으면 위험 지표가 손절 기준이어야 한다(2026-09-13)
+                    sr = rx["stop_risk"]
+                    self.assertTrue(sr["available"], sr)
+                    self.assertTrue(sr["liq_unreachable"],
+                                    f"3% 손절이 청산선 밖이면 보호가 없다: {sr}")
+                    self.assertAlmostEqual(sr["per_stop_pct"], 3.0 * rx["leverage"],
+                                           places=1, msg=str(sr))
+                    self.assertGreaterEqual(sr["consecutive_to_half"], 1, sr)
                     lv = rx["exchange_leverage"]
                     self.assertTrue(lv["available"], lv)
                     self.assertGreaterEqual(lv["setting"], lv["min_feasible"], lv)
