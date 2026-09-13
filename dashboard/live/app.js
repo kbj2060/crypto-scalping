@@ -5217,9 +5217,21 @@ function manualEntryPlanHtml(data) {
   if (sl) {
     parts.push(entryNote(`손절 ${Number(sl.stopPrice).toFixed(2)} `
       + `(평단 ${Number(sl.entry_price).toFixed(2)} 에서 ${(100 * sl.stop_pct).toFixed(1)}%)`
+      // 🔴꼬리를 **숫자로** 말한다. 「급락 시 더」는 크기를 안 알려줘 사용자가 배수를 못 잡는다 --
+      // 6배에서 보통 19% 인데 100번에 1번은 32% 라 자릿수가 다르다(2026-09-14 봉단위 검사에서
+      // 실제 한 건 -22.8%). 값이 없으면 예전 문구로 떨어진다.
       + (sl.account_loss_pct != null
          ? ` — 걸리면 계좌 ${sl.account_loss_pct}% 손실`
-           + (sl.account_loss_expected_pct ? ` (시장가라 실제 ~${sl.account_loss_expected_pct}%, 급락 시 더)` : "")
+           + (sl.account_loss_expected_pct
+              ? ` (시장가라 보통 ~${sl.account_loss_expected_pct}%`
+                + (sl.account_loss_tail_pct
+                   // 🔴꼬리가 100% 를 넘으면 «132%» 가 아니라 «전액»이라고 말해야 한다.
+                   // 그 배수에서는 꼬리 손절이 청산선 밖이라 실제로는 청산이 먼저 온다.
+                   ? (sl.account_loss_tail_pct >= 100
+                      ? `, 100번에 1번은 **전액**)`
+                      : `, 100번에 1번은 ~${sl.account_loss_tail_pct}%)`)
+                   : `, 급락 시 더)`)
+              : "")
          : "")));
   }
   const er = (data.cap || {}).risk;
@@ -5278,9 +5290,16 @@ function tradePlanLines(tp) {
         + ` (파산은 손절이 막지만 낙폭은 안 막습니다)`);
     }
     if (sr.available) {
-      out.push(sr.liq_unreachable
-        ? `청산선 ${sr.liq_distance_pct}% 는 손절(3%)이 먼저 와서 **도달 불가** — 위험은 손절 반복에서 옵니다`
-        : `🔴손절이 청산선 ${sr.liq_distance_pct}% 밖입니다 — 보호가 안 됩니다`);
+      // 🔴«도달 불가»는 **명목 3% 기준** 주장이다. 시장가라 실제 이동은 손절폭+슬리피지이고
+      // 99분위면 5.3% 라, 20배부터는 꼬리에서 **청산이 먼저 온다**(하드캡 25배 안이다).
+      // 중앙값으로 «안전»을 말하고 꼬리를 안 적으면 화면이 낙관을 판다 -- 세 갈래로 말한다.
+      out.push(!sr.liq_unreachable
+        ? `🔴손절이 청산선 ${sr.liq_distance_pct}% 밖입니다 — 보호가 안 됩니다`
+        : sr.liq_unreachable_tail === false
+          ? `청산선 ${sr.liq_distance_pct}% 는 보통 손절(3%)이 먼저 막지만, 🔴**급락 시(99분위 5.3%)`
+            + `에는 청산이 먼저 옵니다** — 이 배수에서는 손절이 끝까지 지켜주지 않습니다`
+          : `청산선 ${sr.liq_distance_pct}% 는 손절이 먼저 와서 **도달 불가** (급락 99분위 5.3% 까지도)`
+            + ` — 위험은 손절 반복에서 옵니다`);
     }
     out.push(`크기는 ${rx.size_source} · 분할 ${rx.tranche_reason}`);
     // 거래소 레버리지 설정. 위험이 아니라 «상한을 거래소에 새기는 값»이라 문구도 그렇게 쓴다.

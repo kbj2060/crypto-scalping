@@ -29,6 +29,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from scripts.live_eth_risk_sizing_policy_20260913 import HARD_CAP_X  # noqa: E402
+from scripts.live_manual_peg_entry_20260912 import STOP_SLIP_P99_BP  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_TAKER_VOL_BPM, FALLBACK_SEC, STOP_LOSS_PCT, exit_deadline_sec)
 
@@ -416,6 +417,11 @@ def stop_risk(*, stop_pct: float, leverage: float, hold_min: int = 240,
         "expected_stops_per_year": int(round(hit_rate * trades_per_year)),
         # 청산선은 이제 «도달 불가»다. 그 사실 자체를 값으로 낸다.
         "liq_unreachable": stop_pct < 1.0 / leverage,
+        # 🔴그런데 **명목 손절폭으로 판정하면 꼬리를 놓친다**(2026-09-14). 시장가라 실제
+        # 이동은 손절폭 + 슬리피지이고 99분위면 3% 가 아니라 5.3% 다. 20배부터는 그 이동이
+        # 청산선 밖이라 **꼬리 상황에서는 손절이 아니라 청산이 먼저 온다** -- 하드캡 25배 안이다.
+        # 「도달 불가」는 중앙값 기준 주장이므로 꼬리 기준 판정을 따로 낸다.
+        "liq_unreachable_tail": (stop_pct + STOP_SLIP_P99_BP / 1e4) < 1.0 / leverage,
         "liq_distance_pct": round(100.0 / leverage, 1),
     }
 
@@ -666,6 +672,11 @@ def _self_check() -> None:
     assert stop_risk(stop_pct=0.03, leverage=16.0)["per_stop_pct"] == 48.0
     # 🔴손절이 청산선 밖이면 보호가 사라진다 -- 그 사실을 값으로 내야 한다
     assert stop_risk(stop_pct=0.03, leverage=40.0)["liq_unreachable"] is False
+    # 🔴꼬리 기준은 훨씬 일찍 깨진다 -- 명목으로는 «안전»인 20배가 꼬리에서는 청산이 먼저다
+    assert stop_risk(stop_pct=0.03, leverage=16.0)["liq_unreachable_tail"] is True
+    assert stop_risk(stop_pct=0.03, leverage=20.0)["liq_unreachable"] is True, "명목은 여전히 안전"
+    assert stop_risk(stop_pct=0.03, leverage=20.0)["liq_unreachable_tail"] is False, \
+        "꼬리 이동 5.3% > 청산선 5.0% 이므로 청산이 먼저다"
     assert stop_risk(stop_pct=0.0, leverage=6.0)["available"] is False
 
     # ── 처방: 세 값을 한 번에 ────────────────────────────────────────────────

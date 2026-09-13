@@ -210,6 +210,10 @@ STOP_LOSS_PCT = 0.03
 # 시장가 손절의 기대 추가 비용(bp). 수수료 3 + 슬리피지 중앙 14 = 17.
 # 🔴꼬리는 훨씬 두껍다: 99분위 227bp(6배면 계좌 13.6%p). 화면이 그 사실을 숨기지 않는다.
 STOP_SLIP_BP = 17.0
+# 🔴꼬리를 **숫자로** 낸다. 「급락 시 더」라는 말은 크기를 안 알려준다 -- 6배에서 중앙은 +1.0%p
+# 인데 99분위는 +13.6%p 라 자릿수가 다르다. 2026-09-14 봉단위 검사에서 실제로 한 건 -22.8%
+# 가 나왔고(설계 상한 -19.3%), 그건 결함이 아니라 이 꼬리가 표본에 나타난 것이었다.
+STOP_SLIP_P99_BP = 230.0     # 수수료 3 + 초과폭 99분위 227
 
 
 def build_stop_plan(*, position_side: str, entry_price: float, filters: dict[str, float],
@@ -253,7 +257,11 @@ def build_stop_plan(*, position_side: str, entry_price: float, filters: dict[str
         "account_loss_pct": round(100 * stop_pct * leverage, 1) if leverage else None,
         "account_loss_expected_pct": (round(100 * (stop_pct + STOP_SLIP_BP / 1e4) * leverage, 1)
                                       if leverage else None),
+        # 🔴100번에 1번은 이만큼이다. 「급락 시 더」로 두면 사용자가 크기를 못 잡는다.
+        "account_loss_tail_pct": (round(100 * (stop_pct + STOP_SLIP_P99_BP / 1e4) * leverage, 1)
+                                  if leverage else None),
         "slip_bp": STOP_SLIP_BP,
+        "slip_tail_bp": STOP_SLIP_P99_BP,
         "leverage": leverage or None,
         "dry_run": not exec_enabled(),
     }
@@ -432,6 +440,12 @@ def _self_check() -> None:
     # 🔴시장가라 기대 손실은 그보다 크다 -- 화면이 낙관적인 숫자만 보여주면 안 된다
     assert sp["account_loss_expected_pct"] > sp["account_loss_pct"], sp
     assert abs(sp["account_loss_expected_pct"] - 19.0) < 0.2, sp["account_loss_expected_pct"]
+    # 🔴꼬리는 중앙의 **1.5배 이상**이다 -- 한 값으로 뭉뚱그리면 안 된다는 근거
+    assert sp["account_loss_tail_pct"] > sp["account_loss_expected_pct"] * 1.5, sp
+    assert abs(sp["account_loss_tail_pct"] - 31.8) < 0.3, sp["account_loss_tail_pct"]
+    # 배수가 0 이면 셋 다 None (화면이 «None%» 을 찍지 않게)
+    assert build_stop_plan(position_side="LONG", entry_price=2521.11, filters=f,
+                           leverage=0.0)["account_loss_tail_pct"] is None
     sp2 = build_stop_plan(position_side="SHORT", entry_price=2521.11, filters=f, leverage=6.0)
     assert sp2["side"] == "BUY" and sp2["stopPrice"] > 2521.11, sp2
     assert abs(sp2["stopPrice"] - 2596.75) < 0.02, sp2["stopPrice"]
