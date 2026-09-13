@@ -9,9 +9,10 @@ const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional"
 // 증거신호 파이프라인이 있는 자산만 EVIDENCE_SIGNAL_SUPPORTED_ASSETS로 게이팅한다.
 // ⚠️2026-09-03: XRP 파이프라인을 만들고 URL 라우팅까지 했는데 **이 목록에 넣는 걸 빠뜨려서**
 // XRP 탭이 계속 "미지원"으로 나왔다(사용자 신고). 새 자산을 붙일 땐 라우팅과 이 목록을 함께 본다.
-const API_BTC_EVIDENCE_SIGNALS_URL = "/api/btc-evidence-signals";
-const API_XRP_EVIDENCE_SIGNALS_URL = "/api/xrp-evidence-signals";
-const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth", "btc", "xrp"];   // 2026-09-03 XRP 추가
+const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth"];   // 2026-09-14 사용자 결정: 우선 ETH 만.
+// BTC/XRP 증거신호 계산을 내렸다(TabPFN 7개씩 상주 -- 이 서버는 3070 Ti 8GB 한 장인데
+// VRAM 여유가 420MiB 였고 실효 성능이 이론치의 10% 였다). 되살리려면 이 배열에 다시 넣고
+// 서버의 btc/xrp evidence 엔드포인트와 워커를 복구하면 된다.
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
@@ -2652,9 +2653,7 @@ async function refreshEvidenceSignals() {
   }
   // 2026-09-03: XRP 추가. 그 전엔 XRP 페이지가 ETH 신호를 그대로 보여줬다
   // (BTC에서 사용자가 신고했던 것과 같은 버그의 XRP판).
-  const url = activeSnapshotAsset === "btc" ? API_BTC_EVIDENCE_SIGNALS_URL
-    : activeSnapshotAsset === "xrp" ? API_XRP_EVIDENCE_SIGNALS_URL
-    : API_EVIDENCE_SIGNALS_URL;
+  const url = API_EVIDENCE_SIGNALS_URL;   // 2026-09-14 ETH 전용 (위 게이트가 나머지를 막는다)
   try {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`evidence signals ${res.status}`);
