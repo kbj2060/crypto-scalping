@@ -262,12 +262,29 @@ dashboard_imports_changed && dashboard_changed=1
 # ~2min while this script went on to log "deploy OK". Escalate to SIGKILL if it doesn't exit.
 restart_dashboard() {
   local child_pid_file="$ROOT/data/live/dashboard_external.child.pid"
-  [[ -f "$child_pid_file" ]] || { log "no dashboard child pid file, nothing to restart"; return 0; }
-  local pid
-  pid="$(cat "$child_pid_file" 2>/dev/null)"
-  [[ -n "$pid" ]] || return 0
-  kill -0 "$pid" 2>/dev/null || { log "dashboard child $pid already gone"; return 0; }
+  local pid=""
+  [[ -f "$child_pid_file" ]] && pid="$(cat "$child_pid_file" 2>/dev/null)"
 
+  # 🔴2026-09-14: pid 파일이 없거나 낡았으면 예전엔 "nothing to restart" 로 **조용히 성공
+  #   반환**했다. 그러면 워처는 머지하고 last_deployed_sha 를 갱신하고 `deploy OK` 까지 찍는데
+  #   프로세스는 옛 코드를 메모리에 들고 계속 돈다 -- 2026-09-13 배포에서 실제로 그랬다
+  #   (디스크는 새 코드인데 API 응답은 옛 필드 그대로).
+  #   ⭐헬스체크가 못 잡는다: "8787 리슨 중"은 **아무것도 안 죽였을 때 가장 확실히 통과**한다.
+  #   pid 파일은 감독이 SIGKILL 로 죽거나 감독이 둘 이상이면 남지 않는다(09-12·09-13 둘 다 겪음).
+  #   그때는 **포트 주인을 직접 찾는다** -- supervise_server.sh 의 port_owner_pid() 와 같은 방법.
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    local why="stale pid '$pid'"; [[ -z "$pid" ]] && why="no pid file"
+    pid="$(ss -ltnp "sport = :${DASHBOARD_PORT}" 2>/dev/null \
+           | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
+    if [[ -n "$pid" ]]; then
+      log "dashboard restart: $why -- falling back to port owner $pid"
+    else
+      log "dashboard restart: $why and nothing owns ${DASHBOARD_PORT} -- supervisor will start it"
+      return 0
+    fi
+  fi
+
+  log "restarting dashboard child $pid"
   kill "$pid" 2>/dev/null
   local waited=0
   while (( waited < DASHBOARD_SIGTERM_GRACE_SECONDS * 2 )); do
@@ -289,7 +306,15 @@ restart_units() {
       failed=1
     fi
   done
-  [[ "$dashboard_changed" == "1" ]] && { log "restarting dashboard"; restart_dashboard; }
+  # 재기동 **직전**의 포트 주인을 기록해 둔다 -- 아래 헬스체크가 "새 프로세스인가"로
+  # 판정하는 근거다(리슨 여부만 보면 아무것도 안 죽였을 때 통과한다, 2026-09-13 실장애).
+  dashboard_pid_before=""
+  if [[ "$dashboard_changed" == "1" ]]; then
+    dashboard_pid_before="$(ss -ltnp "sport = :${DASHBOARD_PORT}" 2>/dev/null \
+                            | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
+    log "restarting dashboard"
+    restart_dashboard
+  fi
   return $failed
 }
 
@@ -379,7 +404,18 @@ if [[ "$dashboard_changed" == "1" ]]; then
     sleep 5
   done
   if [[ "$dash_ok" == "1" ]]; then
-    log "dashboard is listening on ${DASHBOARD_PORT}"
+    # 🔴2026-09-14: "리슨 중"만으로는 재시작을 판정할 수 없다 -- **아무것도 안 죽였을 때
+    #   가장 확실히 통과**하기 때문이다. 실제로 2026-09-13 에 pid 파일이 없어 restart 가
+    #   건너뛰어졌는데 이 검사는 초록이었고 `deploy OK` 까지 찍혔다(디스크는 새 코드,
+    #   프로세스는 옛 코드). 포트를 **누가** 쥐고 있는지가 바뀌었는지로 판정한다.
+    local_now="$(ss -ltnp "sport = :${DASHBOARD_PORT}" 2>/dev/null \
+                 | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
+    if [[ -n "$dashboard_pid_before" && "$local_now" == "$dashboard_pid_before" ]]; then
+      log "dashboard STILL pid ${local_now} after restart -- old code still serving, regression"
+      healthy=0
+    else
+      log "dashboard is listening on ${DASHBOARD_PORT} (pid ${dashboard_pid_before:-?} -> ${local_now:-?})"
+    fi
   else
     log "dashboard is NOT listening on ${DASHBOARD_PORT} after restart -- regression"
     healthy=0
