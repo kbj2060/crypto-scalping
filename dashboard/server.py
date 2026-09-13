@@ -134,7 +134,6 @@ from scripts.live_liquidation_map_20260824 import compute_spliced_levels, comput
 # 20260827 memory) and the user asked to match the GBM3-based analysis. GBM2 remains a valid,
 # separately-loadable model for anything that specifically wants a low-flip label; it is simply not
 # what this dashboard endpoint serves right now.
-from scripts.live_regime_gbm3_signal_20260826 import compute_regime_gbm3_signal as compute_regime_wide24_signal  # noqa: E402
 # BTC-native regime scorer (2026-09-02). Until now the Snapshot tab's BTC ribbon was a hard-coded
 # grey "model not available" band -- app.js gated the ribbon on activeSnapshotAsset === "eth" to stop
 # ETH's classifier being drawn over BTC candles (memory eth-dashboard-btc-regime-classifier-not-
@@ -144,11 +143,9 @@ from scripts.live_regime_gbm3_signal_20260826 import compute_regime_gbm3_signal 
 # choice -- ETH's S12_K3 scores only 3/10 on BTC. Same return contract, so it caches/serves
 # identically. See scripts/live_regime_btc_signal_20260902.py and
 # docs/experiments/btc_regime_s24k3_label_train_20260902.md.
-from scripts.live_regime_btc_signal_20260902 import compute_regime_btc_signal  # noqa: E402
 # 2026-09-03: XRP 레짐(S96_K9, 같은 날 S48_K6에서 교체 -- 격자 경계 감사).
 # 자산마다 교차자산 슬롯이 다르다 -- XRP는 BTC를 넣는다
 # (BTC 캐노니컬은 ETH가 들어있다). live_regime_xrp_signal_20260903.py docstring 참조.
-from scripts.live_regime_xrp_signal_20260903 import compute_regime_xrp_signal  # noqa: E402
 # Session-open volatility risk alert for the evidence-signal chip row (2026-08-26) -- pure
 # calendar/clock computation (pandas_market_calendars), no price data, so it needs no cache of its
 # own; computed fresh on every evidence-signal refresh. See that module's docstring for the
@@ -157,7 +154,7 @@ from scripts.live_session_volatility_alert_20260826 import compute_session_volat
 # US macro/corporate event calendar for the Snapshot tab (2026-08-26) -- see that module's
 # docstring for the 6 sources (FRED/FOMC-static/Fed Chair HTML/EIA-rule-based/Finnhub/Treasury) and their
 # individual caveats. Independent of evidence-signal's klines fetch -- own cache below.
-from scripts.live_macro_calendar_20260826 import compute_macro_calendar, compute_macro_event_alert  # noqa: E402
+from scripts.live_macro_calendar_20260826 import compute_macro_event_alert  # noqa: E402
 # 2026-08-31: per-coin registry for the 4 Snapshot-tab signals wired to BTC this session (basis
 # liquidation, liquidation direction, liquidation 5m, liquidation map) -- see
 # docs/eth_dashboard_multicoin_expansion_design_20260831.md section 6. Evidence signals/regime/
@@ -413,6 +410,12 @@ BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_sig
 # (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
 V_REBOUND_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_v_rebound_state.json"
 BTC_EVIDENCE_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_state.json"
+REGIME_WIDE24_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_wide24_state.json"
+REGIME_BTC_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_btc_state.json"
+REGIME_XRP_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_xrp_state.json"
+REGIME_MAX_AGE_MIN = 20.0                  # 레짐 워커 주기 300초 + 사이클 13초 여유
+MACRO_CALENDAR_STATE_PATH = REPO_ROOT / "data" / "live" / "macro_calendar_state.json"
+MACRO_CALENDAR_MAX_AGE_MIN = 90.0          # 달력이라 분 단위 신선도가 의미 없다
 XRP_EVIDENCE_STATE_PATH = REPO_ROOT / "data" / "live" / "xrp_evidence_signal_state.json"
 COIN_EVIDENCE_MAX_AGE_MIN = 15.0           # 5분봉 3개
 V_REBOUND_MAX_AGE_MIN = 15.0               # 5분봉 3개
@@ -968,6 +971,19 @@ def worker_payload(path: Path, max_age_min: float, *, ts_field: str = "updated_u
     if age is not None and age > max_age_min:
         return {**st, **base, "error": "worker_stale", "stale_min": stale}
     return {**st, **({"available": True} if stamp_available else {}), "stale_min": stale}
+
+
+def regime_payload(path: Path) -> dict[str, Any]:
+    """레짐 리본 워커 상태(2026-09-14). 셋 다 **매 사이클 13초**로 일정해서(서버 실측
+    wide24 13.73/12.86/13.30s) 캐시가 만료될 때마다 그대로 다시 낸다 -- 요청 경로에 둘 이유가 없다.
+    셋은 워커 **한 프로세스**가 순서대로 돈다(live_signal_worker.py 의 --compute/--state 반복)."""
+    return worker_payload(path, REGIME_MAX_AGE_MIN, extra_missing={"regime": None, "history": []})
+
+
+def macro_calendar_payload() -> dict[str, Any]:
+    """거시 달력 워커 상태(2026-09-14, 콜드 51.03초 -- 외부 6개 소스를 동기 requests 로 친다)."""
+    return worker_payload(MACRO_CALENDAR_STATE_PATH, MACRO_CALENDAR_MAX_AGE_MIN,
+                          ts_field="generated_at", extra_missing={"events": []})
 
 
 def btc_evidence_payload() -> dict[str, Any]:
@@ -2245,14 +2261,18 @@ def make_app() -> web.Application:
 
     async def load_regime_wide24() -> dict[str, Any]:
         """wide24 HMM regime overlay for the Snapshot tab's liquidation-map chart -- see
-        scripts/live_regime_wide24_signal_20260826.py docstring. compute_regime_wide24_signal()
-        itself never raises (degrades to warmed_up=False), and its own fetch/compute is blocking
-        (requests + pandas/HMM), so it's offloaded via asyncio.to_thread same as
-        compute_liquidation_levels() above rather than converted to aiohttp -- keeps the ported
-        logic identical to the validated scratchpad script it came from."""
+        scripts/live_regime_gbm3_signal_20260826.py docstring.
+
+        ⚠️모듈 이름이 화면 이름과 다르다 -- wide24 는 **live_regime_gbm3_signal_20260826** 의
+        compute_regime_gbm3_signal() 이다(별칭으로 import 돼 있었다). 워커 spec 을 쓸 때
+        파일명을 짐작하면 틀린다.
+
+        2026-09-14: **워커 상태 파일을 읽기만 한다.** 매 사이클 13초로 일정했고(서버 실측
+        13.73/12.86/13.30s) 캐시 만료마다 그대로 다시 냈다. BTC/XRP 판과 함께 워커 한 프로세스가
+        순서대로 돈다."""
         return await swr_cached(
             "regime_wide24", REGIME_WIDE24_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_regime_wide24_signal),
+            lambda: asyncio.to_thread(regime_payload, REGIME_WIDE24_STATE_PATH),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -2264,7 +2284,7 @@ def make_app() -> web.Application:
         breaking the chart)."""
         return await swr_cached(
             "regime_btc", REGIME_WIDE24_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_regime_btc_signal),
+            lambda: asyncio.to_thread(regime_payload, REGIME_BTC_STATE_PATH),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -2273,18 +2293,20 @@ def make_app() -> web.Application:
         같은 캐시 TTL / asyncio.to_thread / never-raises 계약."""
         return await swr_cached(
             "regime_xrp", REGIME_WIDE24_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_regime_xrp_signal),
+            lambda: asyncio.to_thread(regime_payload, REGIME_XRP_STATE_PATH),
             max_stale=STALE_GRACE_SECONDS,
         )
 
     async def load_macro_calendar() -> dict[str, Any]:
         """US macro/corporate event calendar for the Snapshot tab -- see scripts/live_macro_
-        calendar_20260826.py docstring for the 6 sources. compute_macro_calendar() is blocking
-        (requests, no aiohttp) and never raises (each source degrades independently), same
-        asyncio.to_thread pattern as load_regime_wide24() above."""
+        calendar_20260826.py docstring for the 6 sources.
+
+        2026-09-14: **워커 상태 파일을 읽기만 한다.** 그 전에는 여기서 compute_macro_calendar()
+        (동기 requests 로 외부 6개 소스)를 돌렸고 콜드 51.03초였다(서버 실측). 계산은
+        scripts/live_signal_worker.py 가 compute_macro_calendar_from_env() 로 대신 돈다."""
         return await swr_cached(
             "macro_calendar", MACRO_CALENDAR_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_macro_calendar, os.getenv("FRED_API_KEY"), os.getenv("EIA_API_KEY"), os.getenv("FINNHUB_API_KEY")),
+            lambda: asyncio.to_thread(macro_calendar_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
 

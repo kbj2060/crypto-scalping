@@ -591,6 +591,14 @@ def fetch_treasury_events(today: date) -> list[dict]:
     return events
 
 
+def compute_macro_calendar_from_env() -> dict:
+    """워커용 무인자 진입점(2026-09-14). 키를 환경에서 읽는 것 말고는
+    compute_macro_calendar() 와 완전히 같다 -- 대시보드가 쓰던 os.getenv 3개를 그대로 옮겼다."""
+    import os as _os
+    return compute_macro_calendar(_os.getenv("FRED_API_KEY"), _os.getenv("EIA_API_KEY"),
+                                  _os.getenv("FINNHUB_API_KEY"))
+
+
 def compute_macro_calendar(fred_key: str | None, eia_key: str | None, finnhub_key: str | None,
                             now: datetime | None = None) -> dict:
     """Never raises. Returns {"generated_at", "events": [...]} sorted soonest-first, each event
