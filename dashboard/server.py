@@ -2770,7 +2770,7 @@ def make_app() -> web.Application:
             pass
         return None
 
-    async def assemble_entry_plan(side: str, fraction: float = 1.0, hold_min: int = 1440,
+    async def assemble_entry_plan(side: str, fraction: float = 1.0,
                                   want_lev: int | None = None):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
@@ -2792,10 +2792,6 @@ def make_app() -> web.Application:
             existing = sum(abs(float(p.get("notional") or 0.0)) for p in positions)
             # 추가 진입 맥락은 **같은 방향**만 본다 -- 헤지 모드에서 반대 다리는 다른 결정이다.
             same = [p for p in positions if p.get("side") == side]
-            # 같은 방향에 포지션이 있으면 **그 포지션의 남은 시간**이 기준이다 -- 추가한다고
-            # 4시간이 새로 생기지 않는다(2026-09-13 사용자 질문: "물타기하면 시간이 늘어나나?").
-            if same:
-                hold_min = remaining_hold(same[0].get("entry_at"))
             same_unrealized = sum(float(p.get("unrealized_pnl") or 0.0) for p in same)
             equity = float((account.get("balance") or {}).get("margin") or 0.0)
             # 포지션이 없으면 positions 가 비어 있다 -- 그때도 설정 레버리지는 알아야
@@ -2818,9 +2814,13 @@ def make_app() -> web.Application:
             policy_only = [v for v in (cap_ledger, cap_equity) if v]
             policy_cap_x = (min(policy_only) / equity) if policy_only and equity > 0 else None
             # 🔴상한을 계산할 지평 = 처방이 고를 지평(2026-09-13 감사). 같은 방향 포지션이
-            # 있으면 그 포지션의 **남은 시간**이 이긴다 -- 추가한다고 시계가 새로 생기지 않는다.
-            if not same:
-                hold_min = planning_hold(sizing, side, policy_cap_x)
+            # 있으면 그 포지션의 **남은 시간**이 이긴다 -- 추가한다고 시계가 새로 생기지 않는다
+            # (2026-09-13 사용자 질문: "물타기하면 시간이 늘어나나?").
+            # 🔴그 시계의 **길이**도 처방 지평이다(2026-09-14). 240분 상수를 쓰면 24시간
+            # 처방으로 들어간 포지션의 추가분이 4시간 예산으로 계산된다.
+            plan_hold = planning_hold(sizing, side, policy_cap_x)
+            hold_min = (remaining_hold(same[0].get("entry_at"), fixed=plan_hold)
+                        if same else plan_hold)
             # 2026-09-13 세 번째 상한: 보유시간 조건부 위험 모델. 있으면 같이 경쟁시킨다.
             risk = risk_sizing(sizing, hold_min, side)
             cap_model = None
@@ -2907,7 +2907,9 @@ def make_app() -> web.Application:
             plan["leverage_min_feasible"] = _lv.get("min_feasible")
             # 열린 포지션이 만드는 바닥. 이 아래를 고르면 거래소가 -2028 로 거부한다.
             plan["leverage_position_floor"] = _lv.get("position_floor")
-            plan["hold_fixed_min"] = HOLD_FIXED_MIN
+            # 🔴화면이 띄울 **계획 지평**. 상수가 아니라 크기를 실제로 정한 그 값이다
+            # (2026-09-14). 상수를 보내면 화면엔 4시간인데 1440분 셀로 크기가 나간다.
+            plan["hold_fixed_min"] = plan_hold
             plan["hold_remaining_min"] = hold_min
             plan["leverage_steps"] = list(LEVERAGE_STEPS)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
@@ -2926,7 +2928,7 @@ def make_app() -> web.Application:
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
-        plan, cap, sizing, error = await assemble_entry_plan(side, frac, query_hold(request),
+        plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
@@ -2960,7 +2962,7 @@ def make_app() -> web.Application:
                                       "state": manual_entry_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
-        plan, cap, sizing, error = await assemble_entry_plan(side, frac, query_hold(request),
+        plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
@@ -2993,6 +2995,9 @@ def make_app() -> web.Application:
             pass
         return None
 
+    # 🔴지평의 단일 출처는 `planning_hold()` 다(2026-09-14 사용자 결정). 이 상수는 그 함수가
+    # 고르지 못할 때(워커 없음·표 없음)의 **폴백**일 뿐, 정책 지평이 아니다 -- 상수로 쓰면
+    # 화면엔 4시간인데 크기는 1440분 셀로 나간다(실측 허용 배수 6.0 vs 4.3배).
     HOLD_FIXED_MIN = 240
 
     def remaining_hold(entry_at: str | None, fixed: int = HOLD_FIXED_MIN) -> int:
@@ -3014,11 +3019,6 @@ def make_app() -> web.Application:
         if left <= 0:                      # 약속한 시간을 넘겼다 -- 가장 짧은 표를 쓴다
             return min(HOLD_CHOICES)
         return next((h for h in sorted(HOLD_CHOICES) if h >= left), fixed)
-
-    def query_hold(request: web.Request) -> int:
-        """보유시간은 **고정**이다(2026-09-13). 쿼리는 무시한다 -- 화면에 선택지가 없으므로
-        쿼리로만 바꿀 수 있으면 «화면과 다른 크기»가 나간다."""
-        return HOLD_FIXED_MIN
 
     def planning_hold(sizing: dict[str, Any], side: str, policy_cap_x: float | None) -> int:
         """**상한을 계산할 지평**. 처방이 고를 지평과 같아야 한다.
@@ -3078,7 +3078,7 @@ def make_app() -> web.Application:
         return pct / 100.0 if 0.0 < pct <= 100.0 else None
 
     async def assemble_exit_plan(position_side: str, fraction: float = 1.0,
-                                 hold_min: int = 1440, fresh: bool = False):
+                                 fresh: bool = False):
         """청산 계획 조립. 진입과 같은 이유로 **여기 한 곳뿐**이다.
 
         수량은 반드시 **방금 읽은 포지션**에서 온다 -- 헤지 모드라 reduceOnly 를 못 써서
@@ -3118,11 +3118,21 @@ def make_app() -> web.Application:
                                for p in (account.get("positions") or [])
                                if p.get("symbol") == symbol)
             sz = await asyncio.to_thread(position_sizing_payload)
+            # 🔴지평을 고를 정책 천장은 **지평과 무관**해야 순환이 끊긴다(진입과 같은 구조).
+            # safe_mae_pct=None 이면 effective_cap 이 모델 후보를 빼고 원장∧순자산만 본다.
+            policy_n, _, _ = effective_cap(sz, eq, None)
+            policy_cap_x = (policy_n / eq) if policy_n and eq > 0 else None
             # 🔴이미 든 시간만큼 깎은 **남은** 보유시간으로 잰다. 물타기로 칸이 늘어도 시계는
             # 그대로라, 늦게 추가할수록 남은 시간이 짧아 허용 배수가 커진다 -- 그건 «그 시각에
             # 실제로 닫는다»는 전제 위에서만 맞다. 화면이 남은 시간을 같이 띄운다.
-            hold_min = remaining_hold(position.get("entry_at"))
+            # 🔴시계의 **길이**는 진입이 처방한 지평이다(2026-09-14). 예전에는 240분 상수라
+            # 24시간 처방으로 들어간 포지션을 4시간 예산으로 재고, 4시간이 지나면 60분 셀로
+            # 떨어져 «여유가 더 생겼다»고 말했다 -- 지평이 짧을수록 허용 배수가 커지기 때문이다.
+            plan_hold = planning_hold(sz, position_side, policy_cap_x)
+            hold_min = remaining_hold(position.get("entry_at"), fixed=plan_hold)
             risk = risk_sizing(sz, hold_min, position_side)
+            # 위험모델이 없으면 모델 후보가 빠진 정책 천장이 그대로 실효 상한이다.
+            eff_x = policy_cap_x or SIZING_CAP_EQUITY_X
             if risk.get("available") and eq > 0 and cur_notional > 0:
                 # 🔴진입과 **같은 상한**을 쓴다. 정책상한 25배로 재면 진입이 8배에서 막은
                 # 포지션을 청산은 «닫을 필요 없음»이라고 말한다(같은 카드에 모순된 두 숫자).
@@ -3139,14 +3149,18 @@ def make_app() -> web.Application:
                                 "leverage": round(r["leverage"], 2), "binding": r["binding"]}
             else:
                 plan["risk"] = risk
-            plan["hold_fixed_min"] = HOLD_FIXED_MIN
+            plan["hold_fixed_min"] = plan_hold
             plan["hold_remaining_min"] = hold_min
+            # 🔴상한은 **위에서 이미 고른 실효 상한**이다(2026-09-14). 상수 6.0 을 쓰면 같은
+            # 카드가 «상한 넘었으니 닫아라»(risk, effective_cap 기준)와 «15,000 더 넣을 여유
+            # 있음»(trade_plan, 6.0배 기준)을 나란히 띄운다 -- effective_cap 이 막으려고 생긴
+            # 바로 그 모순인데, 74441ad 감사가 risk 블록에만 적용되고 이 줄을 지나쳤다.
             plan["trade_plan"] = plan_now(
                 side=position_side, equity=eq, existing_notional=cur_notional,
                 unrealized_pnl=float(position.get("unrealized_pnl") or 0.0),
                 risk_table=sz.get("risk_mae") or {}, vol_bpm=vol_bpm,
-                cap_x=SIZING_CAP_EQUITY_X, atr_pct=sz.get("atr_pct"), hold_min=hold_min,
-                policy_cap_x=SIZING_CAP_EQUITY_X,
+                cap_x=eff_x, atr_pct=sz.get("atr_pct"), hold_min=hold_min,
+                policy_cap_x=policy_cap_x or SIZING_CAP_EQUITY_X,
                 funding_bp_8h=await funding_now(symbol))
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
@@ -3162,7 +3176,7 @@ def make_app() -> web.Application:
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "청산 비율은 0 초과 100 이하여야 합니다"}, status=400)
-        plan, error = await assemble_exit_plan(side, frac, query_hold(request))
+        plan, error = await assemble_exit_plan(side, frac)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "exec_enabled": exec_enabled()},
@@ -3189,7 +3203,7 @@ def make_app() -> web.Application:
                                       "state": manual_entry_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 포지션도 다시 읽으므로 미리보기 이후에 포지션이
         # 줄었으면 그만큼 줄어든 수량이 나간다(프런트가 계산한 수량을 받지 않는 이유).
-        plan, error = await assemble_exit_plan(side, frac, query_hold(request), fresh=True)
+        plan, error = await assemble_exit_plan(side, frac, fresh=True)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):

@@ -377,13 +377,15 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
-    def test_hold_is_fixed_and_does_not_extend_on_scale_in(self) -> None:
-        """🔴보유시간은 4시간 **고정**이고, 물타기해도 시계가 늘어나지 않는다(2026-09-13).
+    def test_hold_ignores_query_and_does_not_extend_on_scale_in(self) -> None:
+        """🔴지평은 **서버가 정하고**(planning_hold), 물타기해도 시계가 안 늘어난다.
 
-        ① 쿼리로 다른 보유시간을 주어도 서버가 무시한다 -- 화면에 선택지가 없으므로
-           쿼리로만 바꿀 수 있으면 «화면과 다른 크기»가 나간다.
-        ② 포지션이 이미 2시간 묵었으면 남은 시간은 4시간이 아니라 그 나머지다.
+        ① 쿼리로 다른 보유시간을 주어도 서버가 무시한다 -- 2026-09-14 부터는 읽는 코드
+           자체가 없다(`query_hold` 삭제). 쿼리로만 바꿀 수 있으면 «화면과 다른 크기»가 나간다.
+        ② 포지션이 이미 2시간 묵었으면 남은 시간은 계획 지평이 아니라 그 나머지다.
            `entry_at` 은 첫 체결 시각이라 추가 진입에도 안 움직인다.
+        이 픽스처에서는 planning_hold 가 240 을 고른다 -- 240 이라는 **상수**를 고정하는 게
+        아니라 «서버가 고른 값이 그대로 내려온다»를 고정한다(가변 지평은 아래 테스트).
         """
         aged = dict(FAKE_ACCOUNT)
         old_entry = (datetime.now(timezone.utc) - timedelta(minutes=125)).isoformat()
@@ -447,6 +449,70 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     # 손절은 그 평단의 3% 아래
                     self.assertAlmostEqual(sp["stopPrice"] / sp["entry_price"], 0.97,
                                            places=3, msg=str(sp))
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_entry_and_exit_share_one_horizon_and_one_cap(self) -> None:
+        """🔴진입과 청산이 **같은 지평·같은 상한**을 쓴다(2026-09-14 병합 감사).
+
+        두 가지가 갈라져 있었다:
+        ① 청산 카드의 `trade_plan` 이 상한을 상수 6.0 배로 계산했다. 같은 카드의 `risk` 는
+           `effective_cap`(원장∧순자산∧모델)을 쓰므로, 원장이 낮게 묶으면 한 카드가
+           «상한 넘었으니 닫아라»와 «더 넣을 여유 있음»을 나란히 띄웠다.
+        ② 청산·추가진입의 시계 길이가 240분 상수였다. 진입이 1440분으로 처방하고 크기까지
+           그 셀로 정했는데 청산은 4시간 예산으로 쟀고, 4시간이 지나면 60분 셀로 떨어져
+           «여유가 더 생겼다»고 말했다(지평이 짧을수록 허용 배수가 커지기 때문).
+
+        원장 상한 4.0배(순자산 6.0배보다 낮다)를 심고 planning_hold 를 1440분으로 고정해
+        두 결함을 동시에 드러낸다. 수정 전 값: 청산 배수 4.18(상수 6.0 기준) · 남은 시계 120분.
+        """
+        aged = dict(FAKE_ACCOUNT)
+        old_entry = (datetime.now(timezone.utc) - timedelta(minutes=125)).isoformat()
+        aged["positions"] = [{**FAKE_ACCOUNT["positions"][0], "entry_at": old_entry}]
+
+        async def fake_account(*_a, **_k):
+            return aged
+
+        real_payload = server.position_sizing_payload
+
+        def with_ledger_cap():
+            # 순자산 상한(1000 x 6 = 6000)보다 **낮은** 원장 상한. 이게 있어야 두 상한이 갈린다.
+            pay = real_payload()
+            pay["cap"] = {"available": True, "cap_notional_usdt": 4000.0,
+                          "trips": 20, "need": 10}
+            return pay
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account), \
+                 mock.patch.object(server, "position_sizing_payload", with_ledger_cap), \
+                 mock.patch.object(server, "recommend_hold", lambda *a, **k: {
+                     "available": True, "recommended_min": 1440}):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    e = (await (await client.get(
+                        "/api/manual-entry/preview?side=LONG")).json())["plan"]
+                    x = (await (await client.get(
+                        "/api/manual-exit/preview?side=LONG")).json())["plan"]
+
+                    # ② 지평 단일 출처: 두 카드가 같은 계획 지평을 말한다.
+                    self.assertEqual(e["hold_fixed_min"], 1440, e["hold_fixed_min"])
+                    self.assertEqual(x["hold_fixed_min"], e["hold_fixed_min"],
+                                     f"진입 {e['hold_fixed_min']} vs 청산 {x['hold_fixed_min']}")
+                    # 125분 묵었고 계획이 1440분이면 남은 1315 -> 모델 지평으로 올림하면 1440.
+                    # 240분 상수를 쓰던 시절에는 120 이 나왔다.
+                    self.assertEqual(x["hold_remaining_min"], 1440,
+                                     f"청산 시계가 계획 지평을 안 따른다: {x['hold_remaining_min']}")
+
+                    # ① 상한 단일 출처: 원장 4.0배가 묶었으니 양쪽 다 4.0 이어야 한다.
+                    self.assertEqual(x["risk"]["effective_x"], 4.0, x["risk"])
+                    for who, p in (("진입", e), ("청산", x)):
+                        lev = p["trade_plan"]["size"]["leverage"]
+                        self.assertEqual(lev, 4.0,
+                                         f"{who} trade_plan 이 실효 상한을 안 쓴다: {lev}")
                 finally:
                     await client.close()
 
