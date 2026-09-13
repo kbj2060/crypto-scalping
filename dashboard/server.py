@@ -2704,9 +2704,8 @@ def make_app() -> web.Application:
             # 헤지 모드라 롱·숏이 동시에 열린다. 위험 상쇄를 가정하지 않고 **절대값 합**으로 본다
             # -- 두 다리 다 증거금을 먹고, 둘 다 청산될 수 있다.
             existing = sum(abs(float(p.get("notional") or 0.0)) for p in positions)
-            # 물타기 판정은 **같은 방향**만 본다 -- 헤지 모드에서 반대 다리를 여는 건 물타기가 아니다.
+            # 추가 진입 맥락은 **같은 방향**만 본다 -- 헤지 모드에서 반대 다리는 다른 결정이다.
             same = [p for p in positions if p.get("side") == side]
-            same_notional = sum(abs(float(p.get("notional") or 0.0)) for p in same)
             same_unrealized = sum(float(p.get("unrealized_pnl") or 0.0) for p in same)
             equity = float((account.get("balance") or {}).get("margin") or 0.0)
             # 포지션이 없으면 positions 가 비어 있다 -- 그때도 설정 레버리지는 알아야
@@ -2763,8 +2762,7 @@ def make_app() -> web.Application:
                 recommended_qty=rec_qty,
                 cap_notional=cap_notional,
                 filters=filters, symbol=symbol, existing_notional=existing,
-                equity=equity, leverage=leverage, fraction=fraction,
-                same_side_notional=same_notional, same_side_unrealized=same_unrealized)
+                equity=equity, leverage=leverage, fraction=fraction)
             plan["recommended_source"] = rec_src
             plan["recommended_qty"] = round(rec_qty, 8)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)
@@ -2831,11 +2829,6 @@ def make_app() -> web.Application:
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
-        # 🔴물타기는 **별도 확인**을 요구한다(2026-09-13). 화면에만 «금지»라고 적어 두면 규칙이
-        # 아니라 장식이다. 완전히 막지 않는 이유는 상한 없는 거래소 화면으로 밀어내지 않기 위함.
-        if plan.get("averaging_down") and request.query.get("avgdown") != "1":
-            return web.json_response({"ok": False, "error": "averaging_down",
-                                      "detail": plan["averaging_down"]}, status=400)
         manual_entry_state.clear()
         manual_entry_state.update(phase="submitting", side=side, plan=plan,
                                   started_at=datetime.now(timezone.utc).isoformat())

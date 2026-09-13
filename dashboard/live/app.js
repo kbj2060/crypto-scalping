@@ -5189,7 +5189,6 @@ function manualEntryPlanHtml(data) {
   }
 
   (plan.notes || []).forEach((note) => parts.push(`<div class="entry-note">⚠ ${escapeHtml(note)}</div>`));
-  if (plan.averaging_down) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.averaging_down)}</div>`);
   if (plan.blocked) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.blocked)}</div>`);
   const er = (data.cap || {}).risk;
   if (er) parts.push(`<div class="entry-cap">${escapeHtml(riskLine(er))}</div>`);
@@ -5223,7 +5222,7 @@ function tradePlanLines(tp) {
     out.push(`기대 체결 ${ex.expected_fill_sec}초 (메이커 ${ex.maker_bp}bp · 폴백 테이커 ${ex.taker_bp}bp) — ${ex.note}`);
   }
   const sp = tp.entry_split || {};
-  if (sp.rule) out.push(`${sp.tranches === 1 ? "일괄" : sp.tranches + "분할"} · 추가 ${sp.add_allowed ? "가능" : "금지"} — ${sp.rule}`);
+  if (sp.rule) out.push(`${sp.tranches === 1 ? "일괄" : sp.tranches + "분할"} — ${sp.rule}`);
   const lad = tp.exit_ladder || {};
   if ((lad.ladder || []).length) {
     const steps = lad.ladder.filter((r) => r.required_fraction > 0)
@@ -5401,17 +5400,13 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   const btn = el("snapEntryConfirm");
   if (!btn || plan.blocked) return;
   const pct = Math.round(100 * (plan.fraction ?? 1));
-  manualEntryPending = { side, quantity: plan.quantity, kind, pct, hold: manualHoldMin(),
-                         avgdown: Boolean(plan.averaging_down) };
+  manualEntryPending = { side, quantity: plan.quantity, kind, pct, hold: manualHoldMin() };
   // 모델이 요구하는 최소 청산 비율보다 적게 닫으려 하면 **확인 버튼에** 적는다.
   // 미리보기에만 띄우면 슬라이더를 다시 내린 뒤에는 안 보인다.
   const need = Math.round(100 * ((plan.risk || {}).required_fraction || 0));
   const short = kind === "exit" && need > pct ? ` ⚠한도 복귀엔 ${need}% 필요` : "";
-  // 물타기면 확인 버튼에 그대로 적는다 -- 미리보기 문구는 스크롤로 밀려나도 이건 안 밀린다.
-  if (plan.averaging_down) manualEntryPending.avgdown = true;
   btn.textContent = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH `
-    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short
-    + (plan.averaging_down ? " 🔴물타기" : "");
+    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short;
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
   manualEntryTimer = setTimeout(manualEntryClearConfirm, CONFIRM_WINDOW_MS);
@@ -5455,8 +5450,7 @@ async function manualEntrySubmit() {
   box.hidden = false;
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
-    const q = `&pct=${pending.pct ?? 100}&hold=${pending.hold ?? manualHoldMin()}`
-      + (pending.avgdown ? "&avgdown=1" : "");
+    const q = `&pct=${pending.pct ?? 100}&hold=${pending.hold ?? manualHoldMin()}`;
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&confirm=1${q}`,
       { method: "POST", cache: "no-store" });

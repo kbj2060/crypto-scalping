@@ -158,54 +158,18 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
-    def test_averaging_down_submit_is_rejected(self) -> None:
-        """🔴같은 방향이 평가손실 중이면 submit 이 **거부**한다(2026-09-13).
+    def test_unrealized_loss_does_not_block_entry(self) -> None:
+        """🔴2026-09-13 철회 고정: 같은 방향이 평가손실 중이어도 진입을 **막지 않는다**.
 
-        규칙이 화면 문자열로만 있으면 규칙이 아니다. 여기서는 게이트를 열고 실제 submit 을
-        때리되 `run_entry` 를 갈아끼워 **주문이 절대 못 나가게** 한 뒤, 거부되는 것과
-        run_entry 가 한 번도 안 불린 것을 같이 확인한다(음성 대조 포함).
+        같은 날 오전에 «역행 중 추가 금지»를 submit 게이트로 올렸다가 사용자 실계좌 69왕복으로
+        되재고 철회했다(분할 자체는 건당 수익률과 무관, 상관 −0.04 · 95%CI 0 포함).
+        근거: research_user_scaling_in_pnl_attribution_20260913. 이 테스트는 그 게이트가 다시
+        기어들어오면 실패한다 -- 게이트를 되살리려면 사용자 데이터로 근거를 먼저 만들어야 한다.
+
+        `run_entry` 를 갈아끼워 **주문이 절대 못 나가게** 한 뒤 계획까지만 확인한다.
         """
         losing = dict(FAKE_ACCOUNT)
         losing["positions"] = [{**FAKE_ACCOUNT["positions"][0], "unrealized_pnl": -120.0}]
-
-        async def exercise(account, expect_reject: bool) -> None:
-            fired = []
-
-            async def never_run(_session, plan, state):
-                fired.append(plan)
-                state.update(phase="filled_maker")
-                return state
-
-            async def fake_account(*_a, **_k):
-                return account
-
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "exec_enabled", lambda: True), \
-                 mock.patch.object(server, "run_entry", never_run):
-                client = TestClient(TestServer(server.make_app()))
-                await client.start_server()
-                try:
-                    resp = await client.post(
-                        "/api/manual-entry/submit?side=LONG&confirm=1&hold=240&pct=50")
-                    body = await resp.json()
-                    if expect_reject:
-                        self.assertEqual(resp.status, 400, body)
-                        self.assertEqual(body.get("error"), "averaging_down", body)
-                        self.assertEqual(fired, [], "거부됐는데 주문 경로가 불렸다")
-                    else:
-                        self.assertTrue(body.get("ok"), body)
-                        self.assertEqual(len(fired), 1, "통과했으면 주문 경로가 불려야 한다")
-                finally:
-                    await client.close()
-
-        with _isolated_dirs():
-            asyncio.run(exercise(losing, True))
-            # 음성 대조 ①: 같은 요청에 avgdown=1 을 붙이면 통과해야 한다(막기만 하면 못 쓴다).
-            asyncio.run(self._submit_with_override(losing))
-            # 음성 대조 ②: 평가이익 중이면 애초에 걸리지 않는다.
-            asyncio.run(exercise(FAKE_ACCOUNT, False))
-
-    async def _submit_with_override(self, account) -> None:
         fired = []
 
         async def never_run(_session, plan, state):
@@ -214,21 +178,32 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             return state
 
         async def fake_account(*_a, **_k):
-            return account
+            return losing
 
-        with mock.patch.object(server, "fetch_account", fake_account), \
-             mock.patch.object(server, "exec_enabled", lambda: True), \
-             mock.patch.object(server, "run_entry", never_run):
-            client = TestClient(TestServer(server.make_app()))
-            await client.start_server()
-            try:
-                resp = await client.post(
-                    "/api/manual-entry/submit?side=LONG&confirm=1&hold=240&pct=50&avgdown=1")
-                body = await resp.json()
-                self.assertTrue(body.get("ok"), body)
-                self.assertEqual(len(fired), 1, "확인을 거쳤으면 나가야 한다")
-            finally:
-                await client.close()
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account), \
+                 mock.patch.object(server, "exec_enabled", lambda: True), \
+                 mock.patch.object(server, "run_entry", never_run):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    prev = await (await client.get(
+                        "/api/manual-entry/preview?side=LONG&hold=240&pct=50")).json()
+                    self.assertTrue(prev.get("ok"), prev)
+                    self.assertNotIn("averaging_down", prev["plan"],
+                                     "철회한 물타기 판정이 계획에 다시 붙었다")
+                    self.assertNotIn("add_allowed", prev["plan"]["trade_plan"]["entry_split"])
+                    resp = await client.post(
+                        "/api/manual-entry/submit?side=LONG&confirm=1&hold=240&pct=50")
+                    body = await resp.json()
+                    self.assertTrue(body.get("ok"),
+                                    f"평가손실 중 진입이 막혔다(철회한 규칙이 살아있다): {body}")
+                    self.assertEqual(len(fired), 1, "통과했으면 주문 경로가 불려야 한다")
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
 
     def test_bad_inputs_are_rejected_not_crashed(self) -> None:
         """잘못된 입력은 **검증**으로 막혀야지 예외로 죽으면 안 된다."""

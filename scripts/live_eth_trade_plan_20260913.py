@@ -152,9 +152,16 @@ def plan_now(*, side: str, equity: float, existing_notional: float, unrealized_p
         "entry_split": {
             **(recommended_tranches(m, min(L, cap_x), H) if m and L else
                {"tranches": 1, "reason": "위험모델 없음 — 일괄", "spread_min": 0}),
-            # 추가 칸은 «순행 중»에만. 역행 중 추가(물타기)는 크기 매칭 후 24/24 전패였다.
-            "add_allowed": bool(existing_notional <= 0 or (unrealized_pnl >= 0 and room > 0)),
-            "rule": "첫 칸 뒤 추가는 평가손익 ≥ 0 이고 상한 여유가 남았을 때만 (역행 중 추가 금지)"},
+            # 🔴«역행 중 추가 금지»를 여기서 제거했다(2026-09-13). 사용자 실계좌 69왕복에서
+            # 분할 자체는 건당 수익률과 **무관**했다(순위상관 −0.04 · 단일 대비 차 95%CI 0 포함)
+            # 이고 순손익의 60%(+153/+253)를 분할 거래가 만들었다. 09-06 «24/24 전패»는 칩 신호
+            # 위 시뮬레이션이라 이 모집단이 아니다. 진짜 결합은 **분할→크기**(상관 +0.51)이고
+            # 최악 1건도 분할 탓이 아니라 명목 35,291(30배)·보유 28.7시간이었다 -- 둘 다 이미
+            # 상한과 예산 사다리가 막는다. 근거: research_user_scaling_in_pnl_attribution_20260913
+            "room_notional": round(room, 2),
+            "rule": ("추가는 상한 여유 안에서만 하면 됩니다 — 실계좌 69왕복에서 분할 자체는"
+                     " 건당 수익률과 무관했고(상관 −0.04), 손실을 만든 건 분할이 데려온"
+                     " 크기(상관 +0.51)와 보유시간이었습니다")},
         "exit_ladder": hold_budget(equity, existing_notional, risk_table, side, cap_x),
     }
 
@@ -196,23 +203,28 @@ def _self_check() -> None:
     # 역행으로 순자산이 줄면 같은 명목에서 사다리가 조여진다
     assert (hold_budget(800.0, 5000.0, live, "LONG", 8.0)["ladder"][-1]["required_fraction"]
             > b["ladder"][-1]["required_fraction"])
-    # 플랜: 역행 중엔 추가 금지, 순행이고 여유 있으면 허용, 포지션 없으면 첫 칸은 허용
+    # 플랜: 추가 여부는 **상한 여유**로만 말한다(2026-09-13 물타기 금지 철회 -- 위 주석).
     p = plan_now(side="LONG", equity=1000.0, existing_notional=4000.0, unrealized_pnl=-30.0,
                  risk_table=live, vol_bpm=8.0, cap_x=8.0, atr_pct=0.000387)
-    assert p["hold_min"] == p["hold"]["recommended_min"] and p["entry_split"]["add_allowed"] is False
+    assert p["hold_min"] == p["hold"]["recommended_min"]
+    assert "add_allowed" not in p["entry_split"], "평가손익으로 추가를 막지 않는다"
+    # 평가손익 부호가 계획을 바꾸면 안 된다 -- 그게 철회한 규칙이었다
+    q = plan_now(side="LONG", equity=1000.0, existing_notional=4000.0, unrealized_pnl=+30.0,
+                 risk_table=live, vol_bpm=8.0, cap_x=8.0, atr_pct=0.000387)
+    assert q["entry_split"] == p["entry_split"], "평가손익이 분할 계획을 바꿨다"
     assert abs(p["size"]["room_notional"] - max(0.0, 1000.0 * p["size"]["leverage"] - 4000.0)) < 10.0  # leverage 는 소수 2자리 반올림
     assert p["execution"]["exit"]["mode"] == "peg_repeg"
-    p = plan_now(side="LONG", equity=1000.0, existing_notional=4000.0, unrealized_pnl=+30.0,
-                 risk_table=live, vol_bpm=8.0, cap_x=8.0)
-    assert p["entry_split"]["add_allowed"] is True
     p = plan_now(side="SHORT", equity=1000.0, existing_notional=0.0, unrealized_pnl=0.0,
                  risk_table=live, vol_bpm=None, cap_x=8.0, hold_min=1440)
-    assert p["hold_min"] == 1440 and p["entry_split"]["add_allowed"] is True
+    assert p["hold_min"] == 1440
     assert p["size"]["leverage"] < 5 and p["entry_split"]["tranches"] == 1, p["size"]
+    full = plan_now(side="LONG", equity=1000.0, existing_notional=99999.0, unrealized_pnl=0.0,
+                    risk_table=live, vol_bpm=8.0, cap_x=8.0, atr_pct=0.000387)
+    assert full["entry_split"]["room_notional"] == 0.0, "상한을 채웠으면 여유가 0 이어야 한다"
     p = plan_now(side="LONG", equity=0.0, existing_notional=0.0, unrealized_pnl=0.0,
                  risk_table={}, vol_bpm=None, cap_x=8.0)
     assert p["size"]["leverage"] is None and p["exit_ladder"]["budget_min"] == 0
-    print("통과 24/24 — 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
+    print("통과 26/26 — 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
 
 
 if __name__ == "__main__":
