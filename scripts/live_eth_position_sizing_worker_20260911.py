@@ -157,19 +157,25 @@ def risk_mae_table(kl: pd.DataFrame) -> dict:
     q = pd.to_numeric(kl["q"], errors="coerce").to_numpy(float)
     n = pd.to_numeric(kl["n"], errors="coerce").to_numpy(float)
     out: dict[str, dict] = {}
+    why: str | None = None          # 조용히 비우지 않는다 -- 왜 없는지 한 번은 남긴다
     for h in RISK_HOLD_MINUTES:
         cell = {}
         for side in ("LONG", "SHORT"):
             try:
                 m = maq.safe_mae_now(c, q, n, kl["h"].to_numpy(float), kl["l"].to_numpy(float),
                                      kl["timestamp"], float(h), side)
-            except Exception:  # noqa: BLE001 -- 한 칸이 실패해도 나머지는 쓸 수 있다
+                if m is None:
+                    why = why or "safe_mae_now=None(피쳐 비유한 또는 모델 부재)"
+            except Exception as e:  # noqa: BLE001 -- 한 칸이 실패해도 나머지는 쓸 수 있다
                 m = None
+                why = why or f"{type(e).__name__}: {e}"
             if m and m > 0:
                 cell[side] = {"safe_mae_pct": round(float(m), 3),
                               "max_leverage": round(100.0 / float(m), 2)}
         if cell:
             out[str(h)] = cell
+    if not out and why:
+        log(f"위험모델 계산 실패 -- {why}")
     return out
 
 
