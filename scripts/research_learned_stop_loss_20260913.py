@@ -44,7 +44,13 @@ import live_eth_sizing_vol_model_20260912 as svm  # noqa: E402
 KL = pathlib.Path("/home/kbj20/crypto-scalping/binance_data/klines/ETHUSDT/ETHUSDT-5m-api.csv")
 TRIPS = ROOT / "data/live/account_round_trips.jsonl"
 HOLD_BARS = 48               # 4시간 = 5분봉 48개 (사용자 고정)
-COST_BP, TAKER_EXTRA_BP = 5.88, 3.0
+COST_BP = 5.88
+# 🔴손절은 **시장가**라 수수료 차이(3bp)만이 아니라 슬리피지가 붙는다.
+# 실측(869일 1분봉, 3% 손절 발동 2,046건): 트리거 봉 안에서 손절선을 지나친 폭이
+#   중앙 14.0bp · 90% 65.6bp · 99% 227bp · 최악 1,207bp (평균 28.9bp).
+#   트리거 봉 종가가 이미 손절선 너머인 경우가 44.3% 다.
+# 봉내 최저가 기준이라 상단이고, 운영 추정은 **중앙 14bp**를 쓴다. 수수료 3 + 슬리피지 14.
+TAKER_EXTRA_BP = 17.0
 LEV = 6.0                    # 배포 상한
 SEED = 20260913
 

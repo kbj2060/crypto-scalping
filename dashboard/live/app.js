@@ -5214,7 +5214,10 @@ function manualEntryPlanHtml(data) {
   if (sl) {
     parts.push(entryNote(`손절 ${Number(sl.stopPrice).toFixed(2)} `
       + `(평단 ${Number(sl.entry_price).toFixed(2)} 에서 ${(100 * sl.stop_pct).toFixed(1)}%)`
-      + (sl.account_loss_pct != null ? ` — 걸리면 계좌 ${sl.account_loss_pct}% 손실` : "")));
+      + (sl.account_loss_pct != null
+         ? ` — 걸리면 계좌 ${sl.account_loss_pct}% 손실`
+           + (sl.account_loss_expected_pct ? ` (시장가라 실제 ~${sl.account_loss_expected_pct}%, 급락 시 더)` : "")
+         : "")));
   }
   const er = (data.cap || {}).risk;
   const detail = [

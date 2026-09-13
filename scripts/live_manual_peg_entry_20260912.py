@@ -198,6 +198,9 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
 # 문헌: Kaminski·Lo 2014 "When do stop-loss rules stop losses?"(손절은 모멘텀에서 유리하고
 #   되돌림에서 해롭다 -- 우리 실측은 모멘텀 편) · 갭 한계는 Quantitative Finance 2019.
 STOP_LOSS_PCT = 0.03
+# 시장가 손절의 기대 추가 비용(bp). 수수료 3 + 슬리피지 중앙 14 = 17.
+# 🔴꼬리는 훨씬 두껍다: 99분위 227bp(6배면 계좌 13.6%p). 화면이 그 사실을 숨기지 않는다.
+STOP_SLIP_BP = 17.0
 
 
 def build_stop_plan(*, position_side: str, entry_price: float, filters: dict[str, float],
@@ -235,7 +238,13 @@ def build_stop_plan(*, position_side: str, entry_price: float, filters: dict[str
         "stop_pct": round(float(stop_pct), 6),
         "entry_price": round(entry_price, 8),
         # 화면이 «계좌로 얼마인가»를 말할 수 있게. 이게 사용자가 실제로 묻는 값이다.
+        # 🔴**시장가라 슬리피지가 붙는다.** 표시값은 두 개다 -- 의도한 손실과 실측 기대 손실.
+        # 실측(869일, 3% 손절 2,046건): 트리거 봉 안 초과폭 중앙 14.0bp · 90% 65.6bp ·
+        # 99% 227bp. 수수료 3bp 를 더해 기대 17bp, 6배면 계좌 +1.0%p 다.
         "account_loss_pct": round(100 * stop_pct * leverage, 1) if leverage else None,
+        "account_loss_expected_pct": (round(100 * (stop_pct + STOP_SLIP_BP / 1e4) * leverage, 1)
+                                      if leverage else None),
+        "slip_bp": STOP_SLIP_BP,
         "leverage": leverage or None,
         "dry_run": not exec_enabled(),
     }
@@ -405,6 +414,9 @@ def _self_check() -> None:
     assert sp["stopPrice"] < 2521.11, "롱 손절은 진입가 아래"
     assert abs(sp["stopPrice"] - 2445.47) < 0.02, sp["stopPrice"]      # 3% 아래, 틱 내림
     assert sp["account_loss_pct"] == 18.0, sp                          # 3% × 6배
+    # 🔴시장가라 기대 손실은 그보다 크다 -- 화면이 낙관적인 숫자만 보여주면 안 된다
+    assert sp["account_loss_expected_pct"] > sp["account_loss_pct"], sp
+    assert abs(sp["account_loss_expected_pct"] - 19.0) < 0.2, sp["account_loss_expected_pct"]
     sp2 = build_stop_plan(position_side="SHORT", entry_price=2521.11, filters=f, leverage=6.0)
     assert sp2["side"] == "BUY" and sp2["stopPrice"] > 2521.11, sp2
     assert abs(sp2["stopPrice"] - 2596.75) < 0.02, sp2["stopPrice"]
@@ -579,7 +591,7 @@ def _self_check() -> None:
         else:
             raise AssertionError(f"막았어야 한다: fraction={bad}")
 
-    print("통과 78/78 — 진입(분할 포함) + 손절 + 합산 상한 + 화면 설명값 + 청산 + 변동성 마감 + 부분 청산")
+    print("통과 80/80 — 진입(분할 포함) + 손절(슬리피지 표기) + 합산 상한 + 화면 설명값 + 청산 + 변동성 마감 + 부분 청산")
 
 
 if __name__ == "__main__":

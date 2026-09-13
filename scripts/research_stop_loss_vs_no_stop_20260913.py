@@ -37,7 +37,12 @@ TAPE_CANDIDATES = (ROOT / "data/research/eth_tape_1m_20260906.parquet",
                    pathlib.Path("/home/kbj20/crypto-scalping/data/research/eth_tape_1m_20260906.parquet"))
 TRIPS = ROOT / "data/live/account_round_trips.jsonl"
 COST_BP = 5.88
-TAKER_EXTRA_BP = 3.0        # 손절은 시장가로 나간다 -- 메이커 청산 대비 추가분
+# 🔴손절은 **시장가**라 수수료 차이(3bp)만이 아니라 슬리피지가 붙는다.
+# 실측(869일 1분봉, 3% 손절 발동 2,046건): 트리거 봉 안에서 손절선을 지나친 폭이
+#   중앙 14.0bp · 90% 65.6bp · 99% 227bp · 최악 1,207bp (평균 28.9bp).
+#   트리거 봉 종가가 이미 손절선 너머인 경우가 44.3% 다.
+# 봉내 최저가 기준이라 상단이고, 운영 추정은 **중앙 14bp**를 쓴다. 수수료 3 + 슬리피지 14.
+TAKER_EXTRA_BP = 17.0
 HOLD = 240                  # 사용자 고정 보유시간
 SEED = 20260913
 
