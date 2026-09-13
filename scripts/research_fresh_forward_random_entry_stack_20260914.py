@@ -202,7 +202,13 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
                             continue
                     if not use_ladder:                 # 추가만 켠 팔은 «줄이는» 쪽을 안 한다
                         continue
-                    need = exit_fraction_required(eq_now, m_now, notion_now)["required_fraction"]
+                    # 🔴`hard_cap` 을 안 넘기면 기본값 25배가 쓰여 **라이브보다 훨씬 느슨한**
+                    # 사다리를 재게 된다(2026-09-14 발견). 라이브는 `hard_cap=eff_x`(≈6배)다 --
+                    # 120분 지평에서 허용 배수가 16.89 대 6.00 이라 8% 역행에도 하네스는 0% 를
+                    # 요구했다. 바로 위 `allowed` 는 이미 cap_x 를 쓰고 있어 **한 블록 안에서
+                    # 두 문턱이 섞여** 있었다(추가매수는 6배, 청산은 25배 기준).
+                    need = exit_fraction_required(eq_now, m_now, notion_now,
+                                                  hard_cap=cap_x)["required_fraction"]
                     if need > 0.01:                        # 1% 미만은 격자·수수료에 묻힌다
                         cut = min(1.0, need)
                         closed = qty * cut
