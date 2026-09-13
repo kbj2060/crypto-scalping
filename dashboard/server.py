@@ -62,7 +62,6 @@ from scripts.live_eth_chart_markers_20260909 import compute_chart_markers  # noq
 # these stay in the "증거 신호" row and reuse the klines/compute_signals() this endpoint already
 # computed each cycle, rather than becoming new standalone "모델 내부 지표" chips with their own
 # fetch+cache). See docs/experiments/eth_taker_delta_climax_metalabel_20260829.md.
-from scripts.live_evidence_signal_metalabel_20260829 import compute_evidence_signal_metalabels  # noqa: E402
 # 2026-09-14 사용자 결정: **BTC/XRP 증거신호 계산을 내렸다. 우선 ETH 만 한다.**
 # 엔드포인트(/api/btc-evidence-signals, /api/xrp-evidence-signals)·로더·워커를 전부 제거했고,
 # 프런트는 EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth"] 게이트로 «미지원»을 표시한다.
@@ -410,6 +409,8 @@ BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_sig
 # 2026-09-10 극점 탐지기 -- 채점은 워커가 하고 대시보드는 읽기만 한다
 # (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
 V_REBOUND_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_v_rebound_state.json"
+EVIDENCE_METALABEL_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_evidence_metalabel_state.json"
+EVIDENCE_METALABEL_MAX_AGE_MIN = 20.0      # 실제 게이트는 호출부의 봉 일치 비교다
 REGIME_WIDE24_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_wide24_state.json"
 REGIME_BTC_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_btc_state.json"
 REGIME_XRP_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_xrp_state.json"
@@ -982,6 +983,26 @@ def macro_calendar_payload() -> dict[str, Any]:
     """거시 달력 워커 상태(2026-09-14, 콜드 51.03초 -- 외부 6개 소스를 동기 requests 로 친다)."""
     return worker_payload(MACRO_CALENDAR_STATE_PATH, MACRO_CALENDAR_MAX_AGE_MIN,
                           ts_field="generated_at", extra_missing={"events": []})
+
+
+def _same_bar(a: str, b: str) -> bool:
+    """두 ISO 타임스탬프가 같은 순간인가. 문자열 비교로는 안 된다 --
+    한쪽은 '+00:00', 다른 쪽은 'Z' 로 끝나고 마이크로초 표기도 다를 수 있다."""
+    try:
+        from datetime import datetime as _dt
+        return _dt.fromisoformat(a.replace("Z", "+00:00")) == _dt.fromisoformat(b.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return False
+
+
+def evidence_metalabel_payload() -> dict[str, Any]:
+    """ETH 증거신호 metalabel 워커 상태(2026-09-14).
+
+    max_age 를 넉넉히(20분) 두는 대신 **호출부가 봉 일치를 직접 본다** -- 나이가 아니라
+    «같은 봉인가»가 정확한 조건이다. 나이만 보면 봉 경계 직후 옛 봉 값을 새 봉에 붙일 수 있다.
+    """
+    return worker_payload(EVIDENCE_METALABEL_STATE_PATH, EVIDENCE_METALABEL_MAX_AGE_MIN,
+                          extra_missing={"bar_utc": None, "metalabels": {}})
 
 
 def v_rebound_payload() -> dict[str, Any]:
@@ -1846,14 +1867,22 @@ def make_app() -> web.Application:
             # see METALABEL_SIGNALS' own module docstring) -- reuses this cycle's already-fetched
             # `df` and already-computed `latest` fire state, no separate fetch/compute_signals()
             # call. Fail-soft: a GPU/TabPFN hiccup must not block the other signals from rendering.
+            # 2026-09-14: metalabel(TabPFN) 레그는 **워커가 계산한다**(요청 경로 콜드 160초였다).
+            # 나머지 레그(klines fetch + compute_signals)는 여기 남는다 -- 캔들 차트와
+            # provisional 이 evidence_signal_cache["frames"] 에 의존하기 때문이다.
+            # 🔴**봉이 같을 때만 병합한다.** 워커가 뒤처졌으면 그 칩들은 «미발동»으로 읽히는데,
+            # 그건 TabPFN 이 실패했을 때의 기존 fail-soft 와 정확히 같은 상태다. 봉을 안 맞추고
+            # 붙이면 옛 확률이 새 봉의 값인 척한다.
             metalabels: dict[str, dict] = {}
             if warmed_up:
-                try:
-                    metalabels = await asyncio.to_thread(compute_evidence_signal_metalabels, df, sig)
-                except Exception as metalabel_exc:  # noqa: BLE001
-                    print(f"evidence-signal metalabel leg failed (taker_delta_z_climax/"
-                          f"short_term_return_z/liquidity_sweep/orthogonal_combo/smt_divergence/"
-                          f"fib_extension_exhaustion will read as not-fired this cycle): {metalabel_exc}", flush=True)
+                snap = await asyncio.to_thread(evidence_metalabel_payload)
+                want = utc_iso(latest["timestamp"])
+                got = snap.get("bar_utc")
+                if snap.get("warmed_up") and got and want and _same_bar(got, want):
+                    metalabels = snap.get("metalabels") or {}
+                else:
+                    print(f"evidence-signal metalabel leg unusable (칩은 미발동으로 읽힘): "
+                          f"worker_bar={got} dashboard_bar={want} err={snap.get('error')}", flush=True)
             signals_payload = []
             for name, description in EVIDENCE_SIGNAL_ORDER:
                 bcol, tcol = f"bottom_{name}", f"top_{name}"

@@ -628,3 +628,47 @@ def _predict_proba(signal_name: str, feature_row: pd.Series) -> float:
     clf.fit(train[feature_cols], train["hit"].to_numpy().astype(int))
     X = feature_row[feature_cols].to_frame().T
     return float(clf.predict_proba(X)[:, 1][0])
+
+
+def compute_eth_evidence_metalabels_snapshot() -> dict:
+    """워커용 무인자 진입점(2026-09-14). ETH 증거신호의 **metalabel(TabPFN) 레그만** 계산한다.
+
+    ## 왜 이것만 떼나
+    ETH 증거신호 전체를 워커로 옮길 수는 없다 -- **캔들 차트가 그 fetch 에 의존**한다
+    (dashboard/server.py 의 load_market_history_from_evidence_cache 가
+    evidence_signal_cache["frames"] 를 슬라이스하고, 비어 있으면 load_evidence_signals() 를
+    불러 채운다). 통째로 파일 읽기로 바꾸면 차트가 502 가 된다.
+    비싼 건 TabPFN 쪽이고(2026-09-13 실측 콜드 160초), provisional 경로는 metalabel 을 쓰지
+    않으므로(compute_signals 만 쓴다) 이 레그만 떼면 결합을 건드리지 않는다.
+
+    ## 계약
+    `{"bar_utc": <마감봉 ISO>, "metalabels": {...}, "warmed_up": bool, "error": str|None}`.
+    🔴**대시보드는 bar_utc 가 자기 마감봉과 같을 때만 병합한다** -- 워커가 뒤처졌으면
+    그 칩들은 «미발동»으로 읽힌다(TabPFN 이 실패했을 때의 기존 fail-soft 와 같은 상태).
+    봉을 맞추지 않고 병합하면 옛 확률이 새 봉의 값인 척한다.
+
+    fetch/compute_signals 파라미터는 대시보드와 **같은 모듈 상수**를 쓴다(FETCH_LIMIT 등) --
+    대시보드가 그 상수를 import 해 쓰고 있으므로 둘이 갈라질 여지가 없다.
+    """
+    from live_evidence_signal_dashboard_20260823 import (  # noqa: PLC0415
+        compute_signals, fetch_btc_klines_safe, fetch_funding_safe, fetch_klines,
+    )
+    try:
+        df = fetch_klines()
+    except RuntimeError as exc:
+        return {"warmed_up": False, "error": f"klines_fetch_failed: {exc}",
+                "bar_utc": None, "metalabels": {}}
+    sig = compute_signals(df, btc_df=fetch_btc_klines_safe(), funding_df=fetch_funding_safe())
+    if not len(sig):
+        return {"warmed_up": False, "error": "empty_signal_frame", "bar_utc": None, "metalabels": {}}
+    latest = sig.iloc[-1]
+    if not (pd.notna(latest.get("p_fast")) and pd.notna(latest.get("p_slow"))):
+        return {"warmed_up": False, "error": "not_warmed_up", "bar_utc": None, "metalabels": {}}
+    try:
+        metalabels = compute_evidence_signal_metalabels(df, sig)
+    except Exception as exc:  # noqa: BLE001 -- 워커는 죽지 않는다. 대시보드는 «미발동»으로 읽는다.
+        return {"warmed_up": False, "error": f"metalabel_failed: {type(exc).__name__}: {exc}",
+                "bar_utc": None, "metalabels": {}}
+    return {"warmed_up": True, "error": None,
+            "bar_utc": pd.Timestamp(latest["timestamp"]).tz_convert("UTC").isoformat(),
+            "metalabels": metalabels}
