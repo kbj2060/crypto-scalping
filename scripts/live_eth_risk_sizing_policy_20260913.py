@@ -107,7 +107,11 @@ def recommended_tranches(safe_mae_pct: float, leverage: float,
     liq = 100.0 / max(leverage, 1e-9)
     if not (safe_mae_pct > 0):
         return {"tranches": 1, "reason": "위험모델 없음 — 일괄", "spread_min": 0}
-    if liq >= safe_mae_pct:
+    # 🔴상대 허용오차 (2026-09-13). 위험모델이 상한을 묶으면 leverage == 100/safe_mae 라
+    # liq 와 safe_mae 가 **구성상 같은 값**인데, 100/(100/m) 이 m 보다 3e-15 작게 나와
+    # «안전선 안»으로 판정되어 «청산거리 23.2% 가 안전선 23.2% 안» 같은 문장과 함께 2분할이
+    # 권고됐다. 경계는 «밖»으로 친다 -- 딱 맞게 사이즈된 상태는 나눌 이유가 없다.
+    if liq >= safe_mae_pct * (1 - 1e-9):
         return {"tranches": 1, "spread_min": 0,
                 "reason": (f"청산거리 {liq:.1f}% 가 {hold_min}분 안전선 {safe_mae_pct:.1f}% 밖 "
                            "— 나누면 엣지만 깎입니다")}
@@ -161,7 +165,10 @@ def _self_check() -> None:
         t = recommended_tranches(23.89, L, 1440)["tranches"]
         assert t >= prev, (L, t, prev); prev = t
     assert recommended_tranches(0.0, 5.0, 240)["tranches"] == 1, "모델 없으면 일괄"
-    print("통과 21/21 — 생존/성장 최솟값 · 진입 여유 · 청산 최소비율 · 분할 권고")
+    # 🔴경계(위험모델이 상한을 묶어 청산거리 == 안전선)는 부동소수 잡음으로 갈리면 안 된다
+    for m in (23.236, 7.67, 3.54, 1.821):
+        assert recommended_tranches(m, 100.0 / m, 1440)["tranches"] == 1, f"경계 {m} 가 분할로 샜다"
+    print("통과 25/25 — 생존/성장 최솟값 · 진입 여유 · 청산 최소비율 · 분할 권고")
 
 
 if __name__ == "__main__":

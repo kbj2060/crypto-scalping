@@ -88,10 +88,20 @@ def recommend_hold(risk_table: dict, side: str, cap_x: float, atr_pct: float | N
     if not rows:
         return {"available": False, "reason": "위험모델 없음"}
     best = max(rows, key=lambda r: r["growth"])
+    # 🔴전부 음수면 «권고»가 아니다 -- «덜 나쁜 것»이다(2026-09-13). 잔잔한 국면에서는 실제로
+    # 전 지평이 음수가 된다(atr 3.87bp/봉 · 55% 가정에서 −0.0038 ~ −0.0004). 그걸 «권고 1440분»
+    # 으로만 적으면 «그 시간 들면 번다»로 읽힌다. 부호를 문장으로 말한다.
+    none_positive = best["growth"] <= 0
+    need = min(r["breakeven_acc"] for r in rows)
+    head = (f"🔴정확도 {int(100*acc)}% 로는 **어느 보유시간도 비용을 못 넘습니다**"
+            f"(최소 필요 {int(round(100*need))}%) — 덜 나쁜 쪽이 {best['hold_min']}분"
+            if none_positive else
+            f"정확도 {int(100*acc)}% 가정 시 {best['hold_min']}분이 건당 로그성장 최대"
+            f"({best['growth']:+.4f})")
     return {"available": True, "recommended_min": best["hold_min"], "acc": acc, "table": rows,
             "best_by_acc": {str(x): h for x, (h, _) in best_by_acc.items()},
-            "reason": (f"정확도 {int(100*acc)}% 가정 시 {best['hold_min']}분이 건당 로그성장 최대"
-                       f"({best['growth']:+.4f}) · 손익분기 정확도 "
+            "none_positive": none_positive, "breakeven_min_acc": round(need, 3),
+            "reason": (head + " · 손익분기 정확도 "
                        + " ".join(f"{r['hold_min']}분 {int(round(100*r['breakeven_acc']))}%" for r in rows))}
 
 
@@ -185,6 +195,12 @@ def _self_check() -> None:
     # 격변기(atr_pct 3배)에는 같은 정확도에서 짧은 지평도 비용을 넘는다
     h2 = recommend_hold(live, "LONG", 8.0, 0.000387 * 3)
     assert h2["table"][0]["breakeven_acc"] < be[0]
+    # 🔴전부 음수인 국면은 «권고»가 아니라 «전부 비용 미달»이라고 말해야 한다
+    assert h["none_positive"] is True and "못 넘습니다" in h["reason"], h["reason"]
+    assert abs(h["breakeven_min_acc"] - min(r["breakeven_acc"] for r in h["table"])) < 1e-9
+    # 정확도를 손익분기 위로 올리면 양수가 되고 문장도 바뀐다
+    hi = recommend_hold(live, "LONG", 8.0, 0.000387, acc=0.70)
+    assert hi["none_positive"] is False and "최대" in hi["reason"], hi["reason"]
     assert recommend_hold(live, "LONG", 8.0, None)["available"] is False
     assert recommend_hold({}, "LONG", 8.0, 0.001)["available"] is False
     assert allowed_x(live, 60, "LONG", 8.0) == 8.0 and allowed_x(live, 1440, "LONG", 8.0) < 5, "상한·생존 최솟값"
@@ -224,7 +240,7 @@ def _self_check() -> None:
     p = plan_now(side="LONG", equity=0.0, existing_notional=0.0, unrealized_pnl=0.0,
                  risk_table={}, vol_bpm=None, cap_x=8.0)
     assert p["size"]["leverage"] is None and p["exit_ladder"]["budget_min"] == 0
-    print("통과 26/26 — 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
+    print("통과 29/29 — 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
 
 
 if __name__ == "__main__":
