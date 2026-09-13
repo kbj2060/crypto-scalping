@@ -38,7 +38,7 @@ _sp = importlib.util.spec_from_file_location(
 H = importlib.util.module_from_spec(_sp); _sp.loader.exec_module(H)
 
 SAFETY = 100.0
-CONSTS = (2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 15.0)
+CONSTS = (2.0, 4.0, 5.0, 6.0, 8.0, 10.0)
 # 🔴상태의존 팔의 범위. 상단을 6(배포값)으로 막으면 «위험이 낮을 때 키우기」가 원천봉쇄되어
 # 오라클이 상수 6 과 동일해진다(2026-09-14 1차 실행에서 실제로 그랬다). 프런티어를 재려면
 # 위아래로 움직일 수 있어야 한다.
@@ -67,6 +67,17 @@ def make_arms(d: pd.DataFrame, sm: dict, train_hi: int):
         return float(np.clip(SAFETY / m, CAP_LO, CAP_HI))
 
     arms.append(("위험 오라클(천장)", orc, None))
+
+    # ⭐**모델 전권** -- 배포 모델에서 상수 6배를 떼고 상한을 모델이 직접 정한다.
+    # 지금 라이브는 min(100/safe_mae, 6) 이고 상한이 94% 를 묶는다. 이 팔은 그 6 을 없앤
+    # 것이라 「모델이 크기를 정하게 하면 이기는가」에 대한 **가장 직접적인** 답이다.
+    # 새 학습이 없다 -- 이미 검증된 아티팩트를 그대로 쓴다(표본외 초과율 0.096%).
+    def model_only(i, side):
+        m = float(sm[(240, side)][i])
+        if not (m > 0):
+            return 6.0
+        return float(np.clip(SAFETY / m, CAP_LO, CAP_HI))
+    arms.append(("모델 전권(상수 제거)", model_only, None))
 
     # 🔴모델 없는 규칙 -- 계수는 **학습구간에서만** 정한다. 평균 상한이 6 근처가 되게 맞춘다.
     a_tr = atr[:train_hi]
@@ -128,38 +139,48 @@ def main() -> int:
     print("⚠️상한을 낮추면 MDD 는 거저 준다 -- **같은 노출의 상수**를 이겨야 통과다")
     print("⚠️acc 를 주입하면 «레버리지가 클수록 좋다」가 기계적으로 나온다(가짜 엣지의 복리).")
     print("   그래서 «어느 상수가 최선인가」는 여기서 못 답한다 -- 답하는 건 **같은 노출에서**")
-    print("   상태의존이 상수를 이기는가뿐이다. 그게 `Δ프런티어` 열이다.\n")
+    print("   상태의존이 상수를 이기는가뿐이다. 그게 `Δ프런티어` 열이다(✅ = 2SE 초과).\n")
     for wname, (w0, w1) in H.WINDOWS.items():
         lo_i = max(int(np.searchsorted(ts, np.datetime64(w0))), svm_warmup())
         hi_i = int(np.searchsorted(ts, np.datetime64(w1 + "T23:59:59")))
         print(f"{wname}  (봉 {hi_i-lo_i:,})")
-        print(f"{'팔':>18} {'로그성장':>9} {'배율중앙':>9} {'MDD':>7} {'파산':>5} "
-              f"{'평균상한':>8} {'시간노출':>8} {'거래':>6} {'차단':>7} {'최악%':>7} {'Δ프런티어':>10}")
-        res = []
-        for nm, fn, cst in arms:
-            g, mu, md, ru, cp, ex, tr, wo, bl = ([] for _ in range(9))
-            for sd in range(a.seeds):
+        # 🔴**씨드를 짝짓는다.** 복리 로그성장은 분산이 거대해(같은 창에서 배율 중앙 5~86)
+        # 팔 사이 차이를 삼킨다. 상수 프런티어도 4 씨드에서 비단조였다. 그래서 씨드마다
+        # **그 씨드의 상수들로** 프런티어를 만들고 같은 씨드의 상태의존 팔과 뺀다.
+        # 그 차이의 씨드간 평균 ± SE 가 판정값이다
+        # ([[feedback_paired_seeds_required_when_side_is_injected_20260914]]).
+        per_seed = {nm: [] for nm, _, _ in arms}
+        for sd in range(a.seeds):
+            for nm, fn, cst in arms:
                 r = H.walk(d, sm, lo_i, hi_i, acc=a.acc, p_entry=1.0, use_stop=True,
                            use_ladder=True, selector=True,
                            cap_x=(cst if cst is not None else 6.0),
                            cap_fn=fn, rng=np.random.default_rng(H.SEED + 1000 * sd))
-                g.append(np.log(max(r["mult"], 1e-9))); mu.append(r["mult"])
-                md.append(r["mdd"]); ru.append(r["ruin"]); cp.append(r["mean_cap_x"])
-                ex.append(r["expo_time_x"]); tr.append(r["trades"]); bl.append(r["blocked_margin"])
-                wo.append(r["worst_trade_pct"])
-            res.append({"nm": nm, "cst": cst, "g": float(np.mean(g)),
-                        "mu": float(np.median(mu)), "md": float(np.mean(md)),
-                        "ru": int(sum(ru)), "cp": float(np.mean(cp)),
-                        "ex": float(np.mean(ex)), "tr": float(np.mean(tr)),
-                        "bl": float(np.mean(bl)), "wo": float(np.nanmean(wo))})
-        # 🔴상수 프런티어(노출 -> 로그성장). 상태의존 팔은 **같은 노출의 상수**를 이겨야 한다.
-        fr = sorted([(r["ex"], r["g"]) for r in res if r["cst"] is not None])
-        fx = np.array([x for x, _ in fr]); fy = np.array([y for _, y in fr])
-        for r in res:
-            gap = "" if r["cst"] is not None else f"{r['g'] - float(np.interp(r['ex'], fx, fy)):+10.3f}"
-            print(f"{r['nm']:>18} {r['g']:>9.3f} {r['mu']:>9.2f} {100*r['md']:>6.1f}% "
-                  f"{r['ru']:>4}/{a.seeds} {r['cp']:>8.2f} {r['ex']:>8.2f} "
-                  f"{r['tr']:>6.0f} {r['bl']:>7.0f} {r['wo']:>6.1f}% {gap:>10}")
+                per_seed[nm].append({"g": float(np.log(max(r["mult"], 1e-9))),
+                                     "ex": r["expo_time_x"], "md": r["mdd"],
+                                     "cp": r["mean_cap_x"], "tr": r["trades"],
+                                     "wo": r["worst_trade_pct"], "ru": int(r["ruin"])})
+        cn = [nm for nm, _, cst in arms if cst is not None]
+        print(f"{'팔':>18} {'로그성장':>9} {'MDD':>7} {'평균상한':>8} {'시간노출':>8} "
+              f"{'거래':>6} {'최악%':>7} {'Δ프런티어(짝지음)':>18}")
+        for nm, fn, cst in arms:
+            v = per_seed[nm]
+            g = np.array([x["g"] for x in v]); ex = np.array([x["ex"] for x in v])
+            gap = ""
+            if cst is None:
+                dd = []
+                for k in range(a.seeds):        # 같은 씨드의 상수들로 프런티어를 만든다
+                    fr = sorted((per_seed[c][k]["ex"], per_seed[c][k]["g"]) for c in cn)
+                    fx = np.array([x for x, _ in fr]); fy = np.array([y for _, y in fr])
+                    dd.append(v[k]["g"] - float(np.interp(v[k]["ex"], fx, fy)))
+                dd = np.array(dd)
+                se = dd.std(ddof=1) / np.sqrt(len(dd)) if len(dd) > 1 else 0.0
+                mark = "✅" if dd.mean() - 2 * se > 0 else ("🔴" if dd.mean() + 2 * se < 0 else "–")
+                gap = f"{dd.mean():+7.3f}±{se:<5.3f}{mark}"
+            print(f"{nm:>18} {g.mean():>9.3f} {100*np.mean([x['md'] for x in v]):>6.1f}% "
+                  f"{np.mean([x['cp'] for x in v]):>8.2f} {ex.mean():>8.2f} "
+                  f"{np.mean([x['tr'] for x in v]):>6.0f} "
+                  f"{np.mean([x['wo'] for x in v]):>6.1f}% {gap:>18}")
         print()
     return 0
 
