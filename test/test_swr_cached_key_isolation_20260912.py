@@ -10,7 +10,8 @@ src = (Path(__file__).resolve().parents[1] / "dashboard" / "server.py").read_tex
 start = src.index("    def _schedule_refresh(")
 end = src.index("    # Shared, connection-pooled session")
 chunk = re.sub(r"^    ", "", src[start:end], flags=re.M)          # 클로저 들여쓰기 제거
-ns = {"asyncio": asyncio, "time": time, "Any": object, "refresh_tasks": {}}
+ns = {"asyncio": asyncio, "time": time, "Any": object, "refresh_tasks": {},
+      "SWR_SLOW_LOG_SECONDS": 1e9}   # 느린-갱신 로그는 이 시험의 관심사가 아니다
 exec(compile(chunk, "swr_cached", "exec"), ns)
 swr_cached = ns["swr_cached"]
 
