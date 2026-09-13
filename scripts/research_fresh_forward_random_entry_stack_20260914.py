@@ -48,7 +48,8 @@ import live_eth_mae_quantile_model_20260913 as maq  # noqa: E402
 import live_eth_sizing_vol_model_20260912 as svm  # noqa: E402
 from scripts.live_eth_risk_sizing_policy_20260913 import policy_leverage  # noqa: E402
 from scripts.live_eth_risk_sizing_policy_20260913 import exit_fraction_required  # noqa: E402
-from scripts.live_eth_trade_plan_20260913 import leverage_setting  # noqa: E402
+from scripts.live_eth_trade_plan_20260913 import (  # noqa: E402
+    HOLD_CHOICES, PRESCRIBE_ACC, leverage_setting, recommend_hold)
 from scripts.live_manual_peg_entry_20260912 import STOP_LOSS_PCT  # noqa: E402
 from scripts.live_eth_trade_plan_20260913 import funding_cost_bp  # noqa: E402
 
@@ -58,6 +59,7 @@ KL = pathlib.Path("/home/kbj20/crypto-scalping/binance_data/klines/ETHUSDT/ETHUS
 # 5.74% 대 32.0% 다. 2026-09-14 병합 감사에서 배포본의 단일 출처가 `planning_hold` 로
 # 정리됐고 그 함수는 실제 위험표에서 **1440분**을 고른다 -- 48(4시간)만 재면 배포본이
 # 아닌 스택을 평가하게 된다. `--hold-bars` 로 둘 다 잰다(48 = 4시간, 288 = 24시간).
+ATR_BARS = 288                 # 사이징 워커와 같은 정의(24시간). recommend_hold 의 atr_pct.
 HOLD_BARS = 48
 CAP_X = 6.0                    # 순자산 상한(배포값)
 # 🔴비용은 **다리별**로 쪼갠다. 배포본의 ROUND_TRIP_COST_BP(5.88) = 진입 + peg 청산이고,
@@ -90,24 +92,53 @@ def load() -> pd.DataFrame:
 
 
 def safe_mae_series(d: pd.DataFrame) -> dict:
-    """각 봉에서 «4시간 동안 각오할 역행폭». 라이브와 같은 피쳐 빌더·아티팩트·보정계수."""
+    """각 봉에서 «H 분 동안 각오할 역행폭». 라이브와 같은 피쳐 빌더·아티팩트·보정계수.
+
+    선택기 모드(`--hold-mode selector`)가 쓸 수 있게 **HOLD_CHOICES 5지평 전부** 낸다.
+    `out[side]` 는 고정 모드가 쓰는 현재 HOLD_BARS 지평이고, `out[(H, side)]` 가 5지평 표다.
+    `atr_pct` 는 사이징 워커와 같은 정의(288봉 |diff| 평균 / 종가) -- recommend_hold 의 인자다.
+    """
     art = maq.load_model()
     assert art is not None, "모델 아티팩트가 없다 -- 검사가 라이브를 대표하지 못한다"
-    X = svm.build_features(d.timestamp, d.close.to_numpy(float), d.quote_volume.to_numpy(float),
+    c = d.close.to_numpy(float)
+    X = svm.build_features(d.timestamp, c, d.quote_volume.to_numpy(float),
                            d.trades.to_numpy(float), d.high.to_numpy(float), d.low.to_numpy(float))
     out = {}
-    for side, sv in (("LONG", 1), ("SHORT", -1)):
-        f = X.copy()
-        f["log_h"] = np.log(HOLD_BARS * 5.0)
-        f["side"] = sv
-        out[side] = maq.safe_mae(art["models"], f, art["mult"])
+    for H in sorted(set(HOLD_CHOICES) | {HOLD_BARS * 5}):
+        for side, sv in (("LONG", 1), ("SHORT", -1)):
+            f = X.copy()
+            f["log_h"] = np.log(float(H))
+            f["side"] = sv
+            out[(H, side)] = maq.safe_mae(art["models"], f, art["mult"])
+    for side in ("LONG", "SHORT"):
+        out[side] = out[(HOLD_BARS * 5, side)]
+    atr = pd.Series(np.abs(np.diff(c, prepend=c[0]))).rolling(
+        ATR_BARS, min_periods=200).mean().to_numpy()
+    out["atr_pct"] = atr / c
     out["ok"] = np.isfinite(X.to_numpy(float)).all(1)
     return out
 
 
+def pick_hold_bars(sm: dict, i: int, side: str, cap_x: float) -> int | None:
+    """배포된 `planning_hold` 와 **같은 경로**로 이 봉의 지평을 고른다.
+
+    라이브: `planning_hold()` -> `recommend_hold(표, 측면, 정책천장, atr_pct, acc=PRESCRIBE_ACC)`.
+    🔴`acc` 는 시뮬의 정확도가 아니라 **항상 PRESCRIBE_ACC(0.60)** 다 -- 라이브는 사용자의
+    진짜 실력을 모르고 이 상수로 고른다. 시뮬 acc 를 넣으면 라이브가 모르는 걸 아는 셈이 된다.
+    반환은 **봉 수**(5분봉)."""
+    atr = float(sm["atr_pct"][i])
+    if not (atr > 0):
+        return None
+    table = {str(H): {side: {"safe_mae_pct": float(sm[(H, side)][i])}} for H in HOLD_CHOICES}
+    h = recommend_hold(table, side, cap_x, atr, acc=PRESCRIBE_ACC)
+    if not h.get("available"):
+        return None
+    return int(h["recommended_min"]) // 5
+
+
 def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry: float,
          use_stop: bool, cap_x: float, rng, use_ladder: bool = False,
-         use_add: bool = False) -> dict:
+         use_add: bool = False, selector: bool = False) -> dict:
     """봉 하나씩 전진한다. 포지션이 없을 때만 진입하고, 있으면 손절·사다리·만기를 본다.
 
     🔴`use_ladder`: 배포된 **예산 사다리**(`exit_fraction_required`)를 실제로 따른다.
@@ -125,6 +156,7 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
     peak = eq; mdd = 0.0
     pos = None
     trades = []; stops = 0; expiries = 0; ruin = False; ladder_cuts = 0; adds = 0
+    hold_bars_used = []        # 선택기가 실제로 고른 지평 -- 결과 해석에 필요하다
     overshoot_bp = []          # 손절선을 지나친 폭 -- 독립 실측(중앙 14 · 99% 227)과 대조한다
     blocked_by_margin = 0
     # 🔴🔴**시간적분 노출**. `mean_lev` 는 **진입 시점** 배수라 추가매수를 못 잡는다 --
@@ -135,17 +167,23 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
     for i in range(lo_i, hi_i):
         # ── 보유 중이면 청산만 본다 ────────────────────────────────────────
         if pos is not None:
-            s, entry, qty, stop_px, end_i, lev = pos
+            s, entry, qty, stop_px, end_i, lev, hb = pos
             expo_sum += qty * c[i] / max(eq, 1e-9); expo_bars += 1
             adverse = (entry - lo[i]) / entry if s > 0 else (hi[i] - entry) / entry
             hit = use_stop and stop_px is not None and adverse >= STOP_LOSS_PCT
             # ── 예산 사다리: 손절보다 **먼저** 본다(손절은 마지막 방어선이다) ──────
-            if use_ladder and not hit and i < end_i:
+            # 🔴`use_add` 가 이 블록 **안에** 있었다(2026-09-14 발견). 그래서 사다리를 끄면
+            # 추가매수가 아예 안 돌아, 「예산 추가만」 팔이 「손절만」과 **글자 그대로 같은 숫자**를
+            # 냈다(463거래·6손절·계좌 0.173 전부 일치 · `추가` 열이 모든 실행에서 0).
+            # 이름과 다른 걸 재는 팔이었다. 둘 중 하나라도 켜지면 들어오게 풀고, 자르는 쪽만
+            # `use_ladder` 로 다시 막는다. ⚠️앞선 예산 추가매수 기각은 「+예산 추가매수」
+            # (사다리 켠 팔)로 났으므로 그 결론은 이 버그의 영향을 받지 않는다.
+            if (use_ladder or use_add) and not hit and i < end_i:
                 mark = c[i]
                 unreal = qty * entry * s * (mark / entry - 1)
                 eq_now = eq + unreal                      # 교차 마진 순자산
                 notion_now = qty * mark
-                m_now = float(sm["LONG" if s > 0 else "SHORT"][i])
+                m_now = float(sm[(hb * 5, "LONG" if s > 0 else "SHORT")][i])
                 if eq_now > 0 and m_now > 0:
                     allowed = eq_now * min(policy_leverage(m_now)["leverage"], cap_x)
                     # ── 거울상: 한도가 명목보다 크면 그 여유만큼 **추가**한다 ──────
@@ -160,8 +198,10 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
                                        else entry * (1 + STOP_LOSS_PCT)) if use_stop else None
                             eq -= add_qty * mark * ENTRY_BP / 1e4   # 진입 수수료
                             adds += 1
-                            pos = (s, entry, qty, stop_px, end_i, lev)
+                            pos = (s, entry, qty, stop_px, end_i, lev, hb)
                             continue
+                    if not use_ladder:                 # 추가만 켠 팔은 «줄이는» 쪽을 안 한다
+                        continue
                     need = exit_fraction_required(eq_now, m_now, notion_now)["required_fraction"]
                     if need > 0.01:                        # 1% 미만은 격자·수수료에 묻힌다
                         cut = min(1.0, need)
@@ -177,7 +217,7 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
                         peak = max(peak, eq); mdd = max(mdd, 1 - eq / peak)
                         if qty <= 1e-9:
                             pos = None; continue
-                        pos = (s, entry, qty, stop_px, end_i, lev)
+                        pos = (s, entry, qty, stop_px, end_i, lev, hb)
                         continue
             if hit:
                 # 손절선에서 체결. 봉이 그 너머에서 마감했으면 더 나쁜 쪽(보수적).
@@ -193,7 +233,7 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
                 expiries += 1
             else:
                 continue
-            held_min = 5 * (i - (end_i - HOLD_BARS))
+            held_min = 5 * (i - (end_i - hb))
             cost += funding_cost_bp(held_min, "LONG" if s > 0 else "SHORT")
             pnl = qty * entry * (fill_move - cost / 1e4)
             eq += pnl
@@ -205,12 +245,31 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
             pos = None
             continue
         # ── 비어 있으면 무작위로 진입 ─────────────────────────────────────
-        if rng.random() >= p_entry or not sm["ok"][i] or i + HOLD_BARS >= hi_i:
+        if rng.random() >= p_entry or not sm["ok"][i]:
             continue
-        truth = 1.0 if c[min(i + HOLD_BARS, len(c) - 1)] >= c[i] else -1.0
+        # ── 지평을 고른다 ────────────────────────────────────────────────
+        # 🔴선택기 모드는 **배포된 planning_hold 와 같은 경로**로 봉마다 고른다.
+        # 라이브에서는 사용자가 측면을 먼저 정하고 그 다음 기계가 지평을 고른다. 그래서 여기서도
+        # **공정한 동전으로 «사용자의 방향 견해» s_view 를 먼저 뽑고** 그걸로 지평을 고른다.
+        # ⚠️최종 측면(정확도 주입 결과)으로 지평을 고르면 **미래참조**다 -- acc>0.5 면 최종
+        # 측면이 미래 수익률과 상관되는데 recommend_hold 는 측면별 손절률·펀딩을 보므로,
+        # 미래를 아는 측면이 지평 선택에 새어든다. s_view 는 미래와 독립이라 그 경로가 막힌다.
+        # ⚠️근사: 지평은 s_view 기준이고 최종 측면은 다를 수 있다. 두 측면의 안전MAE 표는
+        # 거의 같아(실측 선택 분포 차 2%p 미만) 무시할 수준이지만, 근사인 건 기록해 둔다.
+        if selector:
+            s_view = "LONG" if rng.random() < 0.5 else "SHORT"
+            hb = pick_hold_bars(sm, i, s_view, cap_x)
+            if hb is None:
+                continue
+        else:
+            hb = HOLD_BARS
+        if i + hb >= hi_i:
+            continue
+        truth = 1.0 if c[min(i + hb, len(c) - 1)] >= c[i] else -1.0
         s = truth if rng.random() < acc else -truth
         side = "LONG" if s > 0 else "SHORT"
-        m = float(sm[side][i])
+        # 크기는 **고른 그 지평**의 안전MAE 로 낸다(라이브: risk_sizing(sizing, hold_min, side)).
+        m = float(sm[(hb * 5, side)][i])
         if not (m > 0):
             continue
         # 🔴배포된 정책 함수를 그대로 쓴다(재구현 아님)
@@ -225,7 +284,8 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
         qty = notional / entry
         stop_px = (entry * (1 - STOP_LOSS_PCT) if s > 0 else entry * (1 + STOP_LOSS_PCT)) \
             if use_stop else None
-        pos = (s, entry, qty, stop_px, i + HOLD_BARS, L)
+        pos = (s, entry, qty, stop_px, i + hb, L, hb)
+        hold_bars_used.append(hb)
     n = len(trades)
     rets = np.array([t["ret_eq"] for t in trades]) if n else np.array([0.0])
     return {"trades": n, "stops": stops, "expiries": expiries, "ladder_cuts": ladder_cuts, "adds": adds,
@@ -244,6 +304,12 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
             # 시간적분 기준 1440분 +0.040 vs 120분 **+0.736**). 지평 비교는 이 열로 한다.
             "expo_time_x": expo_sum / max(hi_i - lo_i, 1),
             "worst_trade_pct": float(100 * rets.min()) if n else 0.0,
+            "hold_med_min": (5 * float(np.median(hold_bars_used))) if hold_bars_used else 0.0,
+            "hold_mix": (" ".join(
+                f"{5*b}분{100*hold_bars_used.count(b)/len(hold_bars_used):.0f}%"
+                for b in sorted(set(hold_bars_used),
+                                key=lambda x: -hold_bars_used.count(x))[:3])
+                if hold_bars_used else ""),
             "overshoot_med_bp": float(np.median(overshoot_bp)) if overshoot_bp else 0.0,
             "overshoot_p99_bp": float(np.percentile(overshoot_bp, 99)) if overshoot_bp else 0.0}
 
@@ -255,13 +321,17 @@ def main() -> int:
     ap.add_argument("--p-entry", type=float, default=0.02, help="빈 봉에서 진입할 확률")
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--hold-bars", type=int, default=HOLD_BARS,
-                    help="보유 봉 수. 48=4시간 · 288=24시간(planning_hold 실제 선택)")
+                    help="고정 모드의 보유 봉 수. 12=60분 · 48=4시간 · 288=24시간")
+    ap.add_argument("--selector", action="store_true",
+                    help="지평을 고정하지 않고 **배포된 planning_hold 경로**로 거래마다 고른다")
     a = ap.parse_args()
     HOLD_BARS = a.hold_bars
     d = load()
     sm = safe_mae_series(d)
     print(f"5분봉 {len(d):,} ({d.timestamp.min().date()}~{d.timestamp.max().date()})")
-    print(f"보유 {HOLD_BARS*5}분 고정 · 상한 {CAP_X}배 · 손절 {100*STOP_LOSS_PCT:.0f}% 시장가"
+    mode = ("지평 = 배포 선택기(planning_hold 경로, acc 상수 "
+            f"{PRESCRIBE_ACC})" if a.selector else f"보유 {HOLD_BARS*5}분 고정")
+    print(f"{mode} · 상한 {CAP_X}배 · 손절 {100*STOP_LOSS_PCT:.0f}% 시장가"
           f"(슬리피지는 봉에서 실현) · 펀딩 포함 · 정확도 {a.acc} · 진입확률 {a.p_entry}\n")
     print("fresh_forward_bar_by_bar=true · trade_ledgers_used_as_input=false"
           " · saved_parent_exit_timestamps_used=false · future_rows_used_for_entry=false\n")
@@ -276,15 +346,20 @@ def main() -> int:
         print(f"  {'팔':>18} {'거래':>5} {'손절':>5} {'사다리':>6} {'추가':>5} {'계좌배수':>9} "
               f"{'노출':>6} {'노출당':>8} {'적분노출':>8} {'노출당T':>9} "
               f"{'MDD':>7} {'최악1건':>8} {'파산':>5}")
-        for lab, use_stop, cap, ladder, add in (
-                ("손절+사다리(배포)", True, CAP_X, True, False),
+        # 🔴«배포» 는 손절과 사다리를 **같이** 켠 팔이다. 그 팔과 «둘 다 없음» 만 비교하면
+        # 「손절이 이겼다/졌다」를 말할 수 없다 -- 둘의 합을 재고 손절 탓으로 적는 셈이다
+        # (2026-09-14 발견). 각각만 켠 팔 둘을 넣어 분해한다.
+        arms = (("손절+사다리(배포)", True, CAP_X, True, False),
+                ("손절만", True, CAP_X, False, False),
+                ("사다리만", False, CAP_X, True, False),
                 ("+예산 추가매수", True, CAP_X, True, True),
                 ("예산 추가만", True, CAP_X, False, True),
-                ("둘 다 없음", False, CAP_X, False, False)):
+                ("둘 다 없음", False, CAP_X, False, False))
+        for lab, use_stop, cap, ladder, add in arms:
             ms, mm, ex, ext, rn = [], [], [], [], 0
             for k in range(a.seeds):
                 r = walk(d, sm, lo_i, hi_i, acc=a.acc, p_entry=a.p_entry, use_ladder=ladder,
-                         use_add=add, use_stop=use_stop, cap_x=cap,
+                         use_add=add, use_stop=use_stop, cap_x=cap, selector=a.selector,
                          rng=np.random.default_rng(SEED + k))
                 ms.append(r["mult"]); mm.append(r["mdd"]); rn += int(r["ruin"])
                 ex.append(r["mean_expo_x"]); ext.append(r["expo_time_x"])
@@ -302,14 +377,16 @@ def main() -> int:
                   f"{base['ladder_cuts']:>6} {base['adds']:>5} {np.median(ms):>9.3f} "
                   f"{expo:>6.2f} {per:>8.4f} {expo_t:>8.2f} {per_t:>9.4f} "
                   f"{100*np.median(mm):>6.1f}% "
-                  f"{base['worst_trade_pct']:>7.1f}% {rn:>3}/{a.seeds}")
+                  f"{base['worst_trade_pct']:>7.1f}% {rn:>3}/{a.seeds}"
+                  + (f"  [{base['hold_mix']} · 중앙 {base['hold_med_min']:.0f}분]"
+                     if a.selector else ""))
         print()
 
     # ── 계약 검사: 기계가 설계대로 도는가 ────────────────────────────────────
     lo_i = max(int(np.searchsorted(ts, np.datetime64("2026-01-01"))), svm.WARMUP)
     hi_i = int(np.searchsorted(ts, np.datetime64("2026-09-10T23:59:59")))
     r = walk(d, sm, lo_i, hi_i, acc=a.acc, p_entry=a.p_entry, use_stop=True,
-             cap_x=CAP_X, rng=np.random.default_rng(SEED))
+             cap_x=CAP_X, selector=a.selector, rng=np.random.default_rng(SEED))
     assert r["trades"] > 200, f"거래가 너무 적어 판정 불가: {r['trades']}"
     assert not r["ruin"], "손절이 있는데 파산했다 -- 손절 판정이 깨졌다"
     assert r["mean_lev"] <= CAP_X + 1e-9, f"상한을 넘었다: {r['mean_lev']}"
@@ -331,7 +408,7 @@ def main() -> int:
         f"초과폭 99% {r['overshoot_p99_bp']:.0f}bp -- 봉이 만드는 꼬리가 사라졌다(실측 227)"
     bound_med = 100 * (STOP_LOSS_PCT + (r["overshoot_med_bp"] + fee) / 1e4) * CAP_X
     rn = walk(d, sm, lo_i, hi_i, acc=a.acc, p_entry=a.p_entry, use_stop=False,
-              cap_x=CAP_X, rng=np.random.default_rng(SEED))
+              cap_x=CAP_X, selector=a.selector, rng=np.random.default_rng(SEED))
     assert rn["worst_trade_pct"] < r["worst_trade_pct"], \
         "손절 없는 팔의 최악 1건이 더 나쁘지 않다 -- 손절이 실제로 자르고 있는지 의심"
     print(f"확인: 초과폭 중앙 {r['overshoot_med_bp']:.1f}bp / 99% {r['overshoot_p99_bp']:.0f}bp "
