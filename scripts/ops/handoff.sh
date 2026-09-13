@@ -181,6 +181,44 @@ do_logs() {
 }
 
 [[ $# -ge 1 ]] || usage
+# ── 폭주 방지 (2026-09-13) ────────────────────────────────────────────────────
+# 🔴2026-09-13 사고: 다른 세션이 `until handoff.sh logs ...` 를 **sleep 없이** 돌려
+# 28.8시간 동안 초당 2~3회 SSH 를 열었다. 서버가 21시간에 26,353 세션을 받았고(분당 156),
+# 세션마다 sshd 포크 + PAM + systemd 스코프 생성·삭제가 일어났다. 21:51:55 에 서버 WSL 의
+# 시계가 튀고 DNS 가 죽어 사람이 강제 재부팅했다(리눅스 쪽 OOM·커널오류는 없었다).
+#
+# 고아 프로세스를 나이로 죽이는 건 위험하다 -- 진짜 워커도 며칠씩 돈다. 대신 **이 파일이
+# 이 저장소의 모든 SSH 가 지나는 단일 통로**이므로 여기서 호출 빈도를 막는다. 어떤 에이전트가
+# 어떤 루프를 짜든 걸린다.
+#
+# 잠들지 않고 **거부**한다 -- 잠들면 루프가 조용히 계속되고 버그가 안 보인다.
+# 사람이 쓰는 속도(분당 수 회)보다 한참 위라 정상 사용은 안 걸린다.
+HANDOFF_MAX_PER_MIN="${HANDOFF_MAX_PER_MIN:-30}"
+rate_guard() {
+  local stamp="${TMPDIR:-/tmp}/.handoff_calls_$(id -u)"
+  local now; now=$(date +%s)
+  local recent=0 line
+  if [[ -f "$stamp" ]]; then
+    # 최근 60초치만 남긴다. 파일이 커지지 않는다.
+    awk -v c="$now" '$1 > c - 60' "$stamp" > "$stamp.tmp" 2>/dev/null && mv "$stamp.tmp" "$stamp"
+    recent=$(wc -l < "$stamp" 2>/dev/null || echo 0)
+  fi
+  if (( recent >= HANDOFF_MAX_PER_MIN )); then
+    cat >&2 <<MSG
+handoff.sh: 최근 60초에 ${recent}회 호출 -- 상한 ${HANDOFF_MAX_PER_MIN}회를 넘었습니다. 거부합니다.
+
+  폴링 루프에 sleep 이 빠졌을 가능성이 큽니다. 2026-09-13 에 같은 실수로 서버가 멈췄습니다
+  (28.8시간 동안 분당 156회, 세션 26,353개).
+  대기하려면 루프에 'sleep 30' 이상을 넣으세요. 한 번에 오래 기다릴 일이면
+  'handoff.sh launch' 로 서버에서 돌리고 결과만 한 번 가져오세요.
+  상한을 바꾸려면 HANDOFF_MAX_PER_MIN 환경변수를 쓰세요.
+MSG
+    exit 3
+  fi
+  echo "$now" >> "$stamp"
+}
+rate_guard
+
 cmd="$1"; shift
 case "$cmd" in
   push)   [[ $# -ge 2 ]] || usage; do_push "$@" ;;
