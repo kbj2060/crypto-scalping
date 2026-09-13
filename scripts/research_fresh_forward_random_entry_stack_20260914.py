@@ -53,7 +53,12 @@ from scripts.live_manual_peg_entry_20260912 import STOP_LOSS_PCT  # noqa: E402
 from scripts.live_eth_trade_plan_20260913 import funding_cost_bp  # noqa: E402
 
 KL = pathlib.Path("/home/kbj20/crypto-scalping/binance_data/klines/ETHUSDT/ETHUSDT-5m-api.csv")
-HOLD_BARS = 48                 # 4시간 고정(배포값)
+# 🔴보유 지평은 **크기를 정하는 셀**이다 -- 안전MAE 가 지평마다 다르고(240분 3.36% vs
+# 1440분 23.24%) 생존 배수 = 100/안전MAE 이므로 6.0배와 4.30배로 갈린다. 손절 발동률도
+# 5.74% 대 32.0% 다. 2026-09-14 병합 감사에서 배포본의 단일 출처가 `planning_hold` 로
+# 정리됐고 그 함수는 실제 위험표에서 **1440분**을 고른다 -- 48(4시간)만 재면 배포본이
+# 아닌 스택을 평가하게 된다. `--hold-bars` 로 둘 다 잰다(48 = 4시간, 288 = 24시간).
+HOLD_BARS = 48
 CAP_X = 6.0                    # 순자산 상한(배포값)
 # 🔴비용은 **다리별**로 쪼갠다. 배포본의 ROUND_TRIP_COST_BP(5.88) = 진입 + peg 청산이고,
 # STOP_EXTRA_COST_BP(16.08) = 테이커 5.0 + 슬리피지 중앙 14.0 − peg 청산 2.93 이다.
@@ -236,11 +241,15 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
 
 
 def main() -> int:
+    global HOLD_BARS
     ap = argparse.ArgumentParser()
     ap.add_argument("--acc", type=float, default=0.50, help="방향 정확도(0.50=실력 없음)")
     ap.add_argument("--p-entry", type=float, default=0.02, help="빈 봉에서 진입할 확률")
     ap.add_argument("--seeds", type=int, default=5)
+    ap.add_argument("--hold-bars", type=int, default=HOLD_BARS,
+                    help="보유 봉 수. 48=4시간 · 288=24시간(planning_hold 실제 선택)")
     a = ap.parse_args()
+    HOLD_BARS = a.hold_bars
     d = load()
     sm = safe_mae_series(d)
     print(f"5분봉 {len(d):,} ({d.timestamp.min().date()}~{d.timestamp.max().date()})")
