@@ -5348,7 +5348,7 @@ const manualEntryPct = () => sliderPct("snapEntryFrac");
 
 // 🔴보유 예정 지평은 **서버가 정한다**(planning_hold, 2026-09-14). 여기 상수를 두면
 // «화면엔 4시간인데 1440분 셀로 크기가 나가는» 일이 생긴다 -- 실제로 그랬다.
-// 서버가 `hold_fixed_min` 으로 돌려주는 값만 표시하고, 쿼리로는 안 보낸다.
+// 서버가 `hold_planned_min` 으로 돌려주는 값만 표시하고, 쿼리로는 안 보낸다.
 
 // ── 2026-09-13 거래소 레버리지 게이지 ────────────────────────────────────────
 // 위험이 아니라 **총 명목의 천장**을 정하는 값이다(교차 마진이라 청산거리는 순자산/총명목).
@@ -5517,8 +5517,8 @@ async function manualEntryRefreshSize() {
       renderLevGauge(plan);
       // 남은 보유시간을 같이 띄운다 -- 물타기를 해도 시계가 안 늘어난다는 사실이 보여야 한다.
       const left = plan.hold_remaining_min;
-      const planned = plan.hold_fixed_min;   // 크기를 실제로 정한 그 지평
-      const hf = el("snapHoldFixed");
+      const planned = plan.hold_planned_min;   // 크기를 실제로 정한 그 지평
+      const hf = el("snapHoldPlanned");
       if (hf) hf.textContent = !planned ? "—"
         : (left && left < planned ? `${planned / 60}시간 (남은 ~${left}분)`
                                   : `${planned / 60}시간`);

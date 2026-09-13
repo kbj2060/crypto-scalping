@@ -403,7 +403,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                         b = await (await client.get(
                             f"/api/manual-entry/preview?side=LONG{q}")).json()
                         p = b["plan"]
-                        self.assertEqual(p["hold_fixed_min"], 240, f"{q}: {p['hold_fixed_min']}")
+                        self.assertEqual(p["hold_planned_min"], 240, f"{q}: {p['hold_planned_min']}")
                         # 125분 묵었으니 남은 115분 -> 모델 지평으로 올림하면 120
                         self.assertEqual(p["hold_remaining_min"], 120,
                                          f"{q}: 물타기로 시계가 늘어났다 {p['hold_remaining_min']}")
@@ -499,9 +499,9 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                         "/api/manual-exit/preview?side=LONG")).json())["plan"]
 
                     # ② 지평 단일 출처: 두 카드가 같은 계획 지평을 말한다.
-                    self.assertEqual(e["hold_fixed_min"], 1440, e["hold_fixed_min"])
-                    self.assertEqual(x["hold_fixed_min"], e["hold_fixed_min"],
-                                     f"진입 {e['hold_fixed_min']} vs 청산 {x['hold_fixed_min']}")
+                    self.assertEqual(e["hold_planned_min"], 1440, e["hold_planned_min"])
+                    self.assertEqual(x["hold_planned_min"], e["hold_planned_min"],
+                                     f"진입 {e['hold_planned_min']} vs 청산 {x['hold_planned_min']}")
                     # 125분 묵었고 계획이 1440분이면 남은 1315 -> 모델 지평으로 올림하면 1440.
                     # 240분 상수를 쓰던 시절에는 120 이 나왔다.
                     self.assertEqual(x["hold_remaining_min"], 1440,

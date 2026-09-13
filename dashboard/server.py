@@ -2909,7 +2909,7 @@ def make_app() -> web.Application:
             plan["leverage_position_floor"] = _lv.get("position_floor")
             # 🔴화면이 띄울 **계획 지평**. 상수가 아니라 크기를 실제로 정한 그 값이다
             # (2026-09-14). 상수를 보내면 화면엔 4시간인데 1440분 셀로 크기가 나간다.
-            plan["hold_fixed_min"] = plan_hold
+            plan["hold_planned_min"] = plan_hold
             plan["hold_remaining_min"] = hold_min
             plan["leverage_steps"] = list(LEVERAGE_STEPS)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
@@ -3149,7 +3149,7 @@ def make_app() -> web.Application:
                                 "leverage": round(r["leverage"], 2), "binding": r["binding"]}
             else:
                 plan["risk"] = risk
-            plan["hold_fixed_min"] = plan_hold
+            plan["hold_planned_min"] = plan_hold
             plan["hold_remaining_min"] = hold_min
             # 🔴상한은 **위에서 이미 고른 실효 상한**이다(2026-09-14). 상수 6.0 을 쓰면 같은
             # 카드가 «상한 넘었으니 닫아라»(risk, effective_cap 기준)와 «15,000 더 넣을 여유
