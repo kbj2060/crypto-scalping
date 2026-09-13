@@ -233,7 +233,8 @@ def choose_leverage(*, min_feasible: float, cap_x: float) -> float:
 
 def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: float,
               cap_x: float, acc: float = PRESCRIBE_ACC,
-              existing_notional: float = 0.0) -> dict:
+              existing_notional: float = 0.0,
+              policy_cap_x: float | None = None) -> dict:
     """진입 때마다 정해 주는 **세 값**: 명목배수 · 보유시간 · 분할 횟수.
 
     사용자: *"레버리지·보유시간·분할 횟수를 모델링해서 진입할 때마다 픽스해 줬으면"* +
@@ -271,7 +272,12 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
             sens[str(x)] = h2["recommended_min"]
     # 거래소에 걸 설정값. 기준은 **정책 상한**이지 이 지평의 배수가 아니다 -- 사용자가 보유
     # 시간을 바꾸면 배수가 달라지므로, 거래소에 새기는 천장은 전 지평의 상한이어야 한다.
-    lev = leverage_setting(cap_notional=equity * cap_x, equity=equity,
+    # 🔴`policy_cap_x` 는 **지평과 무관한** 정책 천장이다(원장·순자산 상한의 작은 쪽).
+    # cap_x 를 쓰면 안 된다 -- 그건 위험모델의 지평별 배수까지 min 한 값이라 사용자가 보유시간
+    # 선택을 바꿀 때마다 거래소 설정이 따라 움직인다. 거래소 레버리지는 한 번 걸어 두는 값이다.
+    # (2026-09-13 라이브 확인에서 실제로 이 값이 4.49 를 따라가 설정이 8배로 내려가고
+    #  enforces_cap 이 False 로 떴다. 로컬에서는 순자산 상한이 묶여 증상이 안 보였다.)
+    lev = leverage_setting(cap_notional=equity * (policy_cap_x or cap_x), equity=equity,
                            existing_notional=existing_notional)
     return {
         "available": True,
@@ -294,11 +300,13 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
 
 def plan_now(*, side: str, equity: float, existing_notional: float, unrealized_pnl: float,
              risk_table: dict, vol_bpm: float | None, cap_x: float,
-             atr_pct: float | None = None, hold_min: int | None = None) -> dict:
+             atr_pct: float | None = None, hold_min: int | None = None,
+             policy_cap_x: float | None = None) -> dict:
     """한 번에 넷: 보유시간 권고 · 크기(그 보유시간의 허용 배수) · 집행 · 분할."""
     hold = recommend_hold(risk_table, side, cap_x, atr_pct)
     rx = prescribe(risk_table=risk_table, atr_pct=atr_pct, side=side, equity=equity,
-                   cap_x=cap_x, existing_notional=existing_notional)
+                   cap_x=cap_x, existing_notional=existing_notional,
+                   policy_cap_x=policy_cap_x)
     H = hold_min or (hold.get("recommended_min") if hold.get("available") else max(HOLD_CHOICES))
     L = allowed_x(risk_table, H, side, cap_x)
     room = max(0.0, equity * L - existing_notional) if L else 0.0
@@ -398,6 +406,17 @@ def _self_check() -> None:
     # ── 거래소 레버리지 설정 ──────────────────────────────────────────────────
     lv = rx["exchange_leverage"]
     assert lv["available"] and lv["setting"] in LEVERAGE_STEPS, lv
+    # 🔴거래소 설정은 **보유시간 선택에 흔들리면 안 된다**(2026-09-13 라이브 회귀).
+    # 정책 천장을 주면 지평이 달라져도 같은 값이 나와야 한다.
+    setts = {prescribe(risk_table=live, atr_pct=0.000387, side="LONG", equity=1085.0,
+                       cap_x=allowed_x(live, hh, "LONG", 8.0), policy_cap_x=8.0
+                       )["exchange_leverage"]["setting"] for hh in HOLD_CHOICES}
+    assert len(setts) == 1, f"보유시간에 따라 거래소 설정이 흔들린다: {setts}"
+    # 정책 천장을 안 주면 옛 동작(지평별 배수)으로 떨어진다 -- 그게 회귀의 원인이었다
+    drift = {prescribe(risk_table=live, atr_pct=0.000387, side="LONG", equity=1085.0,
+                       cap_x=allowed_x(live, hh, "LONG", 8.0)
+                       )["exchange_leverage"]["setting"] for hh in HOLD_CHOICES}
+    assert len(drift) > 1, "대조군이 안 흔들린다 -- 이 검사가 회귀를 못 잡는다"
     # 🔴기존 포지션이 설정을 바꾸면 안 된다(이중 계상 회귀 방지). 정책 상한은 총 명목에 걸린다.
     a0 = leverage_setting(cap_notional=8000.0, equity=1000.0, existing_notional=0.0)
     a1 = leverage_setting(cap_notional=8000.0, equity=1000.0, existing_notional=4000.0)

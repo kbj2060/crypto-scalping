@@ -274,6 +274,30 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
+    def test_exchange_leverage_is_stable_across_hold(self) -> None:
+        """🔴거래소 레버리지는 보유시간 선택에 흔들리면 안 된다(2026-09-13 라이브 회귀).
+
+        한 번 걸어 두는 값인데 지평별 모델 상한을 따라가고 있었다. 기준은 정책 천장
+        (원장·순자산의 작은 쪽)이어야 한다. 로컬에서는 순자산 상한이 묶여 증상이 안 보였다.
+        """
+        async def exercise() -> None:
+            client = TestClient(TestServer(server.make_app()))
+            await client.start_server()
+            try:
+                seen = set()
+                for h in HOLDS:
+                    body = await (await client.get(
+                        f"/api/manual-entry/preview?side=LONG&hold={h}")).json()
+                    rx = body["plan"]["trade_plan"]["prescription"]
+                    seen.add(rx["exchange_leverage"]["setting"])
+                self.assertEqual(len(seen), 1,
+                                 f"보유시간에 따라 거래소 설정이 흔들린다: {sorted(seen)}")
+            finally:
+                await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
     def test_bad_inputs_are_rejected_not_crashed(self) -> None:
         """잘못된 입력은 **검증**으로 막혀야지 예외로 죽으면 안 된다."""
         self._get_all([("/api/manual-entry/preview?side=NOPE", 400),

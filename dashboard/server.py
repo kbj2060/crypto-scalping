@@ -2752,6 +2752,11 @@ def make_app() -> web.Application:
             binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity"),
                                            (cap_model, "model")) if v]
             cap_notional = min(v for v, _ in binding) if binding else None
+            # 🔴거래소 레버리지의 기준은 **지평과 무관한** 정책 천장이다 -- 모델 상한을 빼고
+            # 원장·순자산만 본다. 모델 상한을 넣으면 보유시간 선택마다 설정이 움직인다
+            # (2026-09-13 라이브에서 실제로 그랬다: 설정이 4.49 를 따라 8배로 내려앉았다).
+            policy_only = [v for v in (cap_ledger, cap_equity) if v]
+            policy_cap_x = (min(policy_only) / equity) if policy_only and equity > 0 else None
             # 분할 권고는 **적용된 상한**의 실효 배수로 낸다 -- 모델이 25배를 허용해도
             # 실제로 들어가는 건 min(원장, 순자산, 모델)이라 그쪽이 위험을 정한다.
             # ⚠️cap_notional 이 정해진 **뒤**에 와야 한다(2026-09-13: 앞에 뒀다가
@@ -2796,7 +2801,8 @@ def make_app() -> web.Application:
                 risk_table=sizing.get("risk_mae") or {},
                 vol_bpm=await realized_vol_now(symbol),
                 cap_x=(cap_notional / equity) if cap_notional and equity > 0 else SIZING_CAP_EQUITY_X,
-                atr_pct=sizing.get("atr_pct"), hold_min=hold_min)
+                atr_pct=sizing.get("atr_pct"), hold_min=hold_min,
+                policy_cap_x=policy_cap_x)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, {}, {}, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, cap, sizing, None
@@ -2961,7 +2967,8 @@ def make_app() -> web.Application:
                 side=position_side, equity=eq, existing_notional=cur_notional,
                 unrealized_pnl=float(position.get("unrealized_pnl") or 0.0),
                 risk_table=sz.get("risk_mae") or {}, vol_bpm=vol_bpm,
-                cap_x=SIZING_CAP_EQUITY_X, atr_pct=sz.get("atr_pct"), hold_min=hold_min)
+                cap_x=SIZING_CAP_EQUITY_X, atr_pct=sz.get("atr_pct"), hold_min=hold_min,
+                policy_cap_x=SIZING_CAP_EQUITY_X)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, None
