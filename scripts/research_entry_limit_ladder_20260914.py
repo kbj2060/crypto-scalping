@@ -133,9 +133,11 @@ def run_plan(d, a) -> int:
     use_stop = not a.no_stop
     arms = [("단일 90만(전량)", 1.0, None), ("절반 45만만", 0.5, None)]
     arms += [(f"45/45 · −{p:.1f}%", 0.5, p / 100) for p in (1.0, 1.5, 2.0, 3.0)]
-    arms += [(f"−{p:.1f}% · {fb}분후채움", 0.5, p / 100, fb)
-             for p in (1.0, 1.5, 2.0) for fb in (30, 60)]
-    arms = [(x + (None,))[:4] if len(x) == 3 else x for x in arms]
+    # 🔴크기 맞춘 대조군 -- 계획의 실현 노출(0.53) 과 같은 **고정 크기** 단일.
+    # 「−1.5% 조건」이 값을 하려면 이걸 이겨야 한다. 못 이기면 계획은 «무작위로 크기가
+    # 정해지는 진입」일 뿐이다.
+    arms += [(f"고정 {int(100*q)}% 단일", q, None) for q in (0.50, 0.55, 0.60)]
+    arms = [x if len(x) == 4 else x + (None,) for x in arms]
     acc = float(a.acc.split(",")[0])
     print(f"1분봉 {len(d):,} · 보유 {a.hold}분 · 정확도 {acc} · 씨드 {a.seeds} · "
           f"손절 {'평단 3%(재무장)' if use_stop else '없음'}")
