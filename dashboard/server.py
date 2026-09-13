@@ -1417,7 +1417,11 @@ def make_app() -> web.Application:
         response = await handler(request)
         asset_name = Path(request.path).name
         if asset_name in {"app.js", "styles.css"}:
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            # 🔴immutable 금지. 이 둘은 배포마다 바뀌는데 캐시버스터가 날짜라 같은 날
+            # 두 번째 배포는 브라우저/Cloudflare 캐시를 못 뚫는다(2026-09-13 실제 사고).
+            # no-cache 는 «캐시하지 마라»가 아니라 «쓰기 전에 물어봐라»다 -- 안 바뀌었으면
+            # ETag 로 304(본문 0바이트)라 아끼는 건 조건부 요청 한 번뿐이고, 대가가 사고였다.
+            response.headers["Cache-Control"] = "no-cache"
             response.enable_compression()
         elif asset_name.endswith(".ttf"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"

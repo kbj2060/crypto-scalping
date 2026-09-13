@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -428,3 +429,34 @@ class DashboardServerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StaticAssetCacheHeaderTest(unittest.TestCase):
+    """배포마다 바뀌는 정적 파일은 재검증돼야 한다.
+
+    2026-09-13: app.js 가 immutable(1년)인데 캐시버스터는 날짜라, 같은 날 두 번째
+    배포가 사용자 브라우저에 영영 안 갔다. index.html 은 헤더가 아예 없어 함께 묵었다.
+    """
+
+    def test_mutable_assets_revalidate_and_fonts_stay_immutable(self) -> None:
+        async def exercise() -> None:
+            client = TestClient(TestServer(server.make_app()))
+            await client.start_server()
+            try:
+                for path in ("app.js", "styles.css", "index.html"):
+                    response = await client.get(f"/dashboard/live/{path}")
+                    self.assertEqual(response.status, 200, path)
+                    self.assertEqual(
+                        response.headers.get("Cache-Control"), "no-cache", path
+                    )
+            finally:
+                await client.close()
+
+        asyncio.run(exercise())
+
+    def test_index_buster_points_at_a_file_that_exists(self) -> None:
+        index = (server.DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
+        referenced = re.findall(r'(?:src|href)="\.?/?([\w.-]+\.(?:js|css))\?v=', index)
+        self.assertTrue(referenced)
+        for name in referenced:
+            self.assertTrue((server.DASHBOARD_DIR / name).is_file(), name)
