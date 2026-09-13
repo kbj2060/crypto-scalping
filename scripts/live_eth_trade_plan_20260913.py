@@ -27,13 +27,24 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
-    HARD_CAP_X, recommended_tranches)
+from scripts.live_eth_risk_sizing_policy_20260913 import HARD_CAP_X  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_TAKER_VOL_BPM, FALLBACK_SEC, STOP_LOSS_PCT, exit_deadline_sec)
 
 HOLD_CHOICES = (60, 120, 240, 480, 1440)
 ROUND_TRIP_COST_BP = 5.88            # static 진입 + peg 청산 실측(2026-09-13)
+# 🔴손절로 끝나는 거래는 청산 다리가 **시장가**라 더 비싸다: 테이커 5.0 + 슬리피지 중앙 14.0
+# = 19.0bp 이고, 정상 peg 청산 2.93bp 를 대신하므로 **추가분**은 그 차액이다(2026-09-13).
+# 꼬리는 훨씬 두껍다(90% 65.6 · 99% 227bp) -- 여기서 쓰는 건 기대값이라 중앙값을 쓴다.
+STOP_EXTRA_COST_BP = 16.08
+# 펀딩. 8시간마다 정산되므로 **보유시간에 비례**하고 롱/숏 부호가 반대다. 라이브 값을 못
+# 읽으면 최근 30일 중앙값(+0.52bp/8h, 롱이 낸다)을 쓴다 -- 0 으로 두면 긴 지평이 공짜가 된다.
+FUNDING_BP_8H_FALLBACK = 0.52
+# 보유시간별 **손절 발동률**(869일 1분봉 봉내 기준, research_stop_hit_rate_by_horizon_20260913).
+# 🔴이 표가 생기기 전에는 4시간 실측 0.043 을 전 지평에 썼다 -- 1440분에서 7.4배 과소였다.
+STOP_HIT_RATE_BY_HOLD = {60: (0.0085, 0.0064), 120: (0.0230, 0.0178),
+                         240: (0.0574, 0.0457), 480: (0.1229, 0.1066),
+                         1440: (0.3195, 0.3007)}
 # 과거 869일 5분봉의 스케일 없는 계수 (k_b = E|r_H|/atr_pct, k_s = SD(r_H)/atr_pct).
 # 변동성 5분위·TRAIN→TEST 모두 ±15% 안에서 안정(연구 스크립트 assert). 원장과 무관하다.
 K_HORIZON = {60: (3.518, 5.488), 120: (5.055, 7.838), 240: (7.367, 11.289),
@@ -53,16 +64,42 @@ MAKER_BP, TAKER_BP = 2.0, 5.0
 REBALANCE_BAND = 0.25
 
 
-def growth_per_trade(L: float, move_bp: float, sd_bp: float, acc: float) -> float:
+def stop_hit_rate(hold_min: int, side: str = "LONG") -> float:
+    """이 보유시간에 손절이 걸릴 확률. 표에 없는 지평이면 가장 가까운 칸을 쓴다."""
+    key = min(STOP_HIT_RATE_BY_HOLD, key=lambda h: abs(h - int(hold_min)))
+    return STOP_HIT_RATE_BY_HOLD[key][0 if str(side).upper() == "LONG" else 1]
+
+
+def funding_cost_bp(hold_min: int, side: str, rate_bp_8h: float | None = None) -> float:
+    """이 보유시간 동안 **내는** 펀딩(bp). 양수 = 비용. 롱은 rate 그대로, 숏은 부호 반대다."""
+    r = FUNDING_BP_8H_FALLBACK if rate_bp_8h is None else float(rate_bp_8h)
+    return (r if str(side).upper() == "LONG" else -r) * (hold_min / 480.0)
+
+
+def expected_cost_bp(hold_min: int, side: str = "LONG",
+                     funding_bp_8h: float | None = None) -> float:
+    """이 지평 한 건의 **기대 왕복비용**. 세 조각이고 전부 보유시간에 따라 달라진다.
+
+    ① 정상 왕복(peg 진입 + peg 청산) ② 손절로 끝날 확률 × 시장가 추가비용 ③ 펀딩.
+    ⚠️손절은 **왼쪽 꼬리를 자르기도** 하는데 그 효과는 여기 없다 -- 아래 growth 의 분산항이
+    정규 근사라서다. 즉 이 비용은 지평 **순위**용이고 절대 수익 예측이 아니다."""
+    p = stop_hit_rate(hold_min, side)
+    return (ROUND_TRIP_COST_BP + p * STOP_EXTRA_COST_BP
+            + funding_cost_bp(hold_min, side, funding_bp_8h))
+
+
+def growth_per_trade(L: float, move_bp: float, sd_bp: float, acc: float,
+                     cost_bp: float = ROUND_TRIP_COST_BP) -> float:
     """정확도 acc 인 사람이 이 지평을 L 배로 들 때의 건당 로그성장 근사."""
-    return L * ((2 * acc - 1) * move_bp - ROUND_TRIP_COST_BP) / 1e4 - 0.5 * (L * sd_bp / 1e4) ** 2
+    return L * ((2 * acc - 1) * move_bp - cost_bp) / 1e4 - 0.5 * (L * sd_bp / 1e4) ** 2
 
 
-def growth_per_hour(L: float, move_bp: float, sd_bp: float, acc: float, hold_min: int) -> float:
+def growth_per_hour(L: float, move_bp: float, sd_bp: float, acc: float, hold_min: int,
+                    cost_bp: float = ROUND_TRIP_COST_BP) -> float:
     """**시간당** 로그성장. 건당으로 고르면 무조건 긴 쪽이 이긴다 -- 짧은 지평은 여러 번
     굴릴 수 있다는 사실이 건당 지표에 안 들어가기 때문이다(2026-09-13 실측: 건당 기준은
     전 국면·전 정확도에서 1440분으로 퇴화했다)."""
-    return growth_per_trade(L, move_bp, sd_bp, acc) / (hold_min / 60.0)
+    return growth_per_trade(L, move_bp, sd_bp, acc, cost_bp) / (hold_min / 60.0)
 
 
 def safe_mae(risk_table: dict, hold: int, side: str) -> float | None:
@@ -78,7 +115,7 @@ def allowed_x(risk_table: dict, hold: int, side: str, cap_x: float) -> float | N
 
 
 def recommend_hold(risk_table: dict, side: str, cap_x: float, atr_pct: float | None,
-                   acc: float = ACC_DEFAULT) -> dict:
+                   acc: float = ACC_DEFAULT, funding_bp_8h: float | None = None) -> dict:
     """지평별 프런티어. 권고는 기준 정확도 acc 에서의 최대, 격자별 최적도 같이 준다."""
     if not atr_pct or atr_pct <= 0:
         return {"available": False, "reason": "atr_pct 없음"}
@@ -89,11 +126,15 @@ def recommend_hold(risk_table: dict, side: str, cap_x: float, atr_pct: float | N
             continue
         kb, ks = K_HORIZON[H]
         b, sd = kb * atr_pct * 1e4, ks * atr_pct * 1e4
+        # 🔴비용은 지평마다 다르다(손절률·펀딩). 5.88 고정을 쓰면 긴 지평이 실제보다 싸 보인다.
+        cost = expected_cost_bp(H, side, funding_bp_8h)
         row = {"hold_min": H, "leverage": round(L, 2), "move_bp": round(b, 1), "sd_bp": round(sd, 1),
-               "breakeven_acc": round(0.5 + ROUND_TRIP_COST_BP / (2 * b), 3),
-               "growth": round(growth_per_trade(L, b, sd, acc), 5),
-               "growth_per_hour": round(growth_per_hour(L, b, sd, acc, H), 6),
-               "growth_by_acc": {str(x): round(growth_per_hour(L, b, sd, x, H), 6)
+               "cost_bp": round(cost, 2), "stop_hit_rate": stop_hit_rate(H, side),
+               "funding_bp": round(funding_cost_bp(H, side, funding_bp_8h), 2),
+               "breakeven_acc": round(0.5 + cost / (2 * b), 3),
+               "growth": round(growth_per_trade(L, b, sd, acc, cost), 5),
+               "growth_per_hour": round(growth_per_hour(L, b, sd, acc, H, cost), 6),
+               "growth_by_acc": {str(x): round(growth_per_hour(L, b, sd, x, H, cost), 6)
                                  for x in ACC_GRID}}
         rows.append(row)
         for x in ACC_GRID:
@@ -124,11 +165,22 @@ def expected_fill_sec(vol_bpm: float | None) -> float | None:
     return None if not vol_bpm or vol_bpm <= 0 else FILL_K / vol_bpm ** FILL_EXP
 
 
-def execution_plan(vol_bpm: float | None) -> dict:
+def execution_plan(vol_bpm: float | None, hold_min: int = 240, side: str = "LONG",
+                   funding_bp_8h: float | None = None) -> dict:
     fill = expected_fill_sec(vol_bpm)
     market = vol_bpm is not None and vol_bpm >= EXIT_TAKER_VOL_BPM
+    fund = funding_cost_bp(hold_min, side, funding_bp_8h)
     return {
         "vol_bpm": round(vol_bpm, 2) if vol_bpm is not None else None,
+        # 비용을 한 줄로 합치지 않는다 -- 어느 조각이 큰지 보여야 지평 선택이 설명된다.
+        "cost": {"round_trip_bp": ROUND_TRIP_COST_BP,
+                 "stop_hit_rate": stop_hit_rate(hold_min, side),
+                 "stop_extra_bp": round(stop_hit_rate(hold_min, side) * STOP_EXTRA_COST_BP, 2),
+                 "funding_bp": round(fund, 2),
+                 "funding_rate_bp_8h": round(FUNDING_BP_8H_FALLBACK if funding_bp_8h is None
+                                             else float(funding_bp_8h), 3),
+                 "funding_is_live": funding_bp_8h is not None,
+                 "total_bp": round(expected_cost_bp(hold_min, side, funding_bp_8h), 2)},
         "entry": {"mode": "peg_gtx", "expected_fill_sec": round(fill, 1) if fill else None,
                   "fallback_sec": FALLBACK_SEC, "maker_bp": MAKER_BP, "taker_bp": TAKER_BP,
                   "note": ("저변동은 체결이 느리고 미체결이 몰립니다 — 진입 미체결은 무해하니 기다립니다"
@@ -256,17 +308,19 @@ def choose_leverage(*, min_feasible: float, cap_x: float) -> float:
 #   16배: 손절당 48% · 1년 중앙 **0.00** · MDD 100%  ← 파산율은 0% 인데 계좌가 안 남는다
 # ⇒ 배수를 고르는 기준이 «파산 확률»에서 **«감당 가능한 MDD»** 로 옮겨간다.
 # 화면도 청산거리 대신 이 값들을 앞세운다 -- 도달 못 하는 선을 위험 지표로 쓰면 안 된다.
-STOP_HIT_RATE_4H = 0.043      # 3% 손절 · 4시간 보유 실측(869일 테이프). 국면에 따라 달라진다.
+# 발동률 자체는 위 STOP_HIT_RATE_BY_HOLD(지평별 실측)를 쓴다.
 
 
 def stop_risk(*, stop_pct: float, leverage: float, hold_min: int = 240,
-              hit_rate: float = STOP_HIT_RATE_4H) -> dict:
+              side: str = "LONG", hit_rate: float | None = None) -> dict:
     """손절이 있을 때의 위험. 청산거리가 아니라 **이 값들이 진짜 지표다**.
 
     `consecutive_to_half` 는 «몇 번 연속 잘리면 계좌가 반토막인가»다 -- 손절당 손실이
     커질수록 급격히 줄어든다(18%면 4회, 48%면 2회)."""
     if not (leverage > 0 and stop_pct > 0):
         return {"available": False}
+    # 🔴보유시간마다 다르다. 예전에는 4시간 실측 0.043 을 전 지평에 썼다(1440분 7.4배 과소).
+    hit_rate = stop_hit_rate(hold_min, side) if hit_rate is None else float(hit_rate)
     per = stop_pct * leverage                       # 손절당 계좌 손실(비용 전)
     def consec(target: float) -> int | None:
         if per >= 1.0:
@@ -275,13 +329,17 @@ def stop_risk(*, stop_pct: float, leverage: float, hold_min: int = 240,
         while w > 1 - target and n < 99:
             w *= (1 - per); n += 1
         return n
-    trades_per_year = 735                           # 실계좌 빈도(하루 2.01건)
+    # 실계좌 빈도(하루 2.01건)지만 **지평이 물리적 상한을 만든다** -- 1440분을 들면서
+    # 하루 2건은 불가능하다. 둘의 작은 쪽을 쓴다.
+    trades_per_year = min(735.0, 525_600.0 / max(1, hold_min))
     return {
         "available": True,
         "per_stop_pct": round(100 * per, 1),
         "consecutive_to_half": consec(0.5),
         "consecutive_to_80": consec(0.8),
-        "hit_rate": hit_rate,
+        "hit_rate": round(hit_rate, 4),
+        "hold_min": hold_min,
+        "trades_per_year": int(round(trades_per_year)),
         "expected_stops_per_year": int(round(hit_rate * trades_per_year)),
         # 청산선은 이제 «도달 불가»다. 그 사실 자체를 값으로 낸다.
         "liq_unreachable": stop_pct < 1.0 / leverage,
@@ -292,7 +350,9 @@ def stop_risk(*, stop_pct: float, leverage: float, hold_min: int = 240,
 def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: float,
               cap_x: float, acc: float = PRESCRIBE_ACC,
               existing_notional: float = 0.0,
-              policy_cap_x: float | None = None) -> dict:
+              policy_cap_x: float | None = None,
+              hold_override: int | None = None,
+              funding_bp_8h: float | None = None) -> dict:
     """진입 때마다 정해 주는 **세 값**: 명목배수 · 보유시간 · 분할 횟수.
 
     사용자: *"레버리지·보유시간·분할 횟수를 모델링해서 진입할 때마다 픽스해 줬으면"* +
@@ -314,10 +374,14 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
     목적함수는 **시간당** 로그성장이다. 건당으로 고르면 짧은 지평을 여러 번 굴린다는 사실이
     빠져 전 국면에서 1440분으로 퇴화한다(실측).
     """
-    hold = recommend_hold(risk_table, side, cap_x, atr_pct, acc)
+    hold = recommend_hold(risk_table, side, cap_x, atr_pct, acc, funding_bp_8h)
     if not hold.get("available"):
         return {"available": False, "reason": hold.get("reason", "위험모델 없음")}
-    H = hold["recommended_min"]
+    # 🔴호출부가 지평을 정했으면 그걸 쓴다. 여기서 다시 고르면 «상한을 계산한 지평»과
+    # «권고 지평»이 갈라져, 권고대로 들면 진입 직후 예산 사다리를 위반한다(2026-09-13 감사).
+    H = int(hold_override) if hold_override else hold["recommended_min"]
+    if H not in {r["hold_min"] for r in hold["table"]}:
+        H = hold["recommended_min"]
     L = allowed_x(risk_table, H, side, cap_x)
     m = safe_mae(risk_table, H, side)
     total = equity * L if (equity > 0 and L) else 0.0
@@ -325,7 +389,7 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
     # a 를 흔들었을 때 처방이 얼마나 움직이나. 화면이 «이 값이 얼마나 믿을 만한가»를 말한다.
     sens = {}
     for x in (0.58, 0.60, 0.65, 0.70):
-        h2 = recommend_hold(risk_table, side, cap_x, atr_pct, x)
+        h2 = recommend_hold(risk_table, side, cap_x, atr_pct, x, funding_bp_8h)
         if h2.get("available"):
             sens[str(x)] = h2["recommended_min"]
     # 거래소에 걸 설정값. 기준은 **정책 상한**이지 이 지평의 배수가 아니다 -- 사용자가 보유
@@ -349,7 +413,8 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
         "growth_per_hour": row["growth_per_hour"],
         "none_positive": hold.get("none_positive"),
         "hold_by_acc": sens,
-        "stop_risk": stop_risk(stop_pct=STOP_LOSS_PCT, leverage=L or 0.0, hold_min=H),
+        "stop_risk": stop_risk(stop_pct=STOP_LOSS_PCT, leverage=L or 0.0, hold_min=H, side=side),
+        "cost_bp": row["cost_bp"], "funding_bp": row["funding_bp"],
         "size_source": "MAE 분위 모델(방향 가정 없음)",
         "tranche_reason": ("일괄 — 분할은 «같은 평균 노출의 작은 단일 진입»에 869일 6/6 칸 전패,"
                            " 생존선 위에서는 파산도 못 줄였습니다. 노출을 낮추려면 배수를 낮춥니다"),
@@ -361,12 +426,17 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
 def plan_now(*, side: str, equity: float, existing_notional: float, unrealized_pnl: float,
              risk_table: dict, vol_bpm: float | None, cap_x: float,
              atr_pct: float | None = None, hold_min: int | None = None,
-             policy_cap_x: float | None = None) -> dict:
-    """한 번에 넷: 보유시간 권고 · 크기(그 보유시간의 허용 배수) · 집행 · 분할."""
-    hold = recommend_hold(risk_table, side, cap_x, atr_pct)
+             policy_cap_x: float | None = None,
+             funding_bp_8h: float | None = None) -> dict:
+    """한 번에 넷: 보유시간 권고 · 크기(그 보유시간의 허용 배수) · 집행 · 분할.
+
+    🔴`hold_min` 이 오면 **처방도 그 지평을 쓴다**. 예전에는 처방이 독자적으로 다시 골라
+    «상한은 240분 · 권고는 1440분» 처럼 갈라졌고, 권고대로 들면 예산 사다리를 즉시 위반했다."""
+    hold = recommend_hold(risk_table, side, cap_x, atr_pct, funding_bp_8h=funding_bp_8h)
     rx = prescribe(risk_table=risk_table, atr_pct=atr_pct, side=side, equity=equity,
                    cap_x=cap_x, existing_notional=existing_notional,
-                   policy_cap_x=policy_cap_x)
+                   policy_cap_x=policy_cap_x, hold_override=hold_min,
+                   funding_bp_8h=funding_bp_8h)
     H = hold_min or (hold.get("recommended_min") if hold.get("available") else max(HOLD_CHOICES))
     L = allowed_x(risk_table, H, side, cap_x)
     room = max(0.0, equity * L - existing_notional) if L else 0.0
@@ -376,7 +446,8 @@ def plan_now(*, side: str, equity: float, existing_notional: float, unrealized_p
         "size": {"leverage": round(L, 2) if L else None, "safe_mae_pct": m,
                  "total_notional": round(equity * L, 2) if L else None,
                  "room_notional": round(room, 2)},
-        "execution": execution_plan(vol_bpm),
+        "execution": execution_plan(vol_bpm, hold_min=H, side=side,
+                                    funding_bp_8h=funding_bp_8h),
         "entry_split": {
             # 🔴k 는 자유 변수가 아니다(2026-09-13 실측) -- 아래 prescribe 주석 참조.
             "tranches": 1, "spread_min": 0,
@@ -403,10 +474,30 @@ def _self_check() -> None:
             "1440": {"LONG": {"safe_mae_pct": 23.236}, "SHORT": {"safe_mae_pct": 21.643}}}
     # 프런티어(과거 계수 × 지금 atr_pct): 손익분기 정확도는 지평에 단조 감소, 잔잔한 장에서
     # 1시간은 비용을 못 넘는다(실측 3.87bp/봉 → 1h |r| 13.6bp → a* 71.6%)
+    # ── 비용 세 조각 (2026-09-13 감사 수정) ──────────────────────────────────
+    # 손절률은 지평에 단조 증가하고 롱이 숏보다 높다(하락이 더 빠르다)
+    rates = [stop_hit_rate(H, "LONG") for H in HOLD_CHOICES]
+    assert all(a < b for a, b in zip(rates, rates[1:])), rates
+    assert all(stop_hit_rate(H, "LONG") > stop_hit_rate(H, "SHORT") for H in HOLD_CHOICES)
+    assert abs(stop_hit_rate(1440, "LONG") - 0.3195) < 1e-9, "실측표가 바뀌면 연구 스크립트부터"
+    # 🔴예전 버그: 4시간 실측 0.043 을 전 지평에 썼다. 1440분이 7배 넘게 달라야 한다.
+    assert stop_hit_rate(1440, "LONG") / stop_hit_rate(60, "LONG") > 7.0
+    # 비용은 지평에 단조 증가하고, 펀딩 때문에 **롱이 숏보다 비싸다**(현 국면)
+    costs = [expected_cost_bp(H, "LONG") for H in HOLD_CHOICES]
+    assert all(a < b for a, b in zip(costs, costs[1:])), costs
+    assert expected_cost_bp(1440, "LONG") > expected_cost_bp(1440, "SHORT") + 3.0
+    assert funding_cost_bp(480, "LONG") > 0 > funding_cost_bp(480, "SHORT")
+    assert funding_cost_bp(1440, "LONG") == 3 * funding_cost_bp(480, "LONG")
+    # 라이브 펀딩이 0 이면 비용에서 펀딩이 빠진다(폴백을 조용히 안 쓴다)
+    assert expected_cost_bp(1440, "LONG", 0.0) < expected_cost_bp(1440, "LONG")
+
     h = recommend_hold(live, "LONG", 8.0, 0.000387)
     assert h["available"], h
     be = [r["breakeven_acc"] for r in h["table"]]
-    assert be == sorted(be, reverse=True) and abs(be[0] - 0.716) < 0.01, be
+    assert be == sorted(be, reverse=True) and abs(be[0] - 0.723) < 0.002, be
+    # 🔴긴 지평이 더 이상 «거의 공짜»가 아니다: 1440분 손익분기가 0.527 -> 0.579 로 올랐다
+    assert abs(h["table"][-1]["breakeven_acc"] - 0.579) < 0.002, h["table"][-1]
+    assert h["table"][-1]["cost_bp"] > 2 * ROUND_TRIP_COST_BP * 0.9, "긴 지평 비용이 두 배 넘는다"
     assert abs(h["table"][0]["move_bp"] - 13.6) < 0.2, h["table"][0]
     # 🔴**시간당** 기준이면 정확도가 오를수록 최적 지평이 **짧아진다**(2026-09-13 목적함수 교체).
     # 건당 기준일 때와 방향이 반대다 -- 짧은 지평은 여러 번 굴릴 수 있기 때문이고, 그 사실이
@@ -456,6 +547,12 @@ def _self_check() -> None:
     assert p["hold_min"] == 1440
     assert p["size"]["leverage"] < 5 and p["entry_split"]["tranches"] == 1, p["size"]
     # ── 손절 기준 위험 지표 ──────────────────────────────────────────────────
+    # 🔴stop_risk 가 hold_min 을 **실제로 쓴다**(예전엔 받고도 무시해 전 지평이 같았다)
+    assert (stop_risk(stop_pct=0.03, leverage=6.0, hold_min=1440)["hit_rate"]
+            > 7 * stop_risk(stop_pct=0.03, leverage=6.0, hold_min=60)["hit_rate"])
+    # 1440분을 들면서 하루 2건은 불가능하다 -- 빈도가 지평 상한에 묶여야 한다
+    assert stop_risk(stop_pct=0.03, leverage=6.0, hold_min=1440)["trades_per_year"] == 365
+    assert stop_risk(stop_pct=0.03, leverage=6.0, hold_min=60)["trades_per_year"] == 735
     sr = stop_risk(stop_pct=0.03, leverage=6.0)
     assert sr["per_stop_pct"] == 18.0, sr           # 3% × 6배
     assert sr["liq_unreachable"] is True, "3% < 16.7% 이므로 청산은 도달 불가"
@@ -476,6 +573,17 @@ def _self_check() -> None:
     assert abs(rx["leverage"] - allowed_x(live, rx["hold_min"], "LONG", 8.0)) < 0.01, "배수는 생존·상한의 min"
     assert abs(rx["total_notional"] - 1000.0 * rx["leverage"]) < 10.0  # leverage 는 반올림값
     assert abs(rx["liq_distance_pct"] - 100.0 / rx["leverage"]) < 0.1   # 둘 다 반올림값
+    # 🔴호출부가 지평을 정하면 처방이 그걸 따른다 -- 안 따르면 «상한 지평»과 «권고 지평»이
+    # 갈라져 권고대로 들 때 예산 사다리를 즉시 위반한다(2026-09-13 감사에서 실제로 그랬다).
+    for H in HOLD_CHOICES:
+        r3 = prescribe(risk_table=live, atr_pct=0.000387, side="LONG", equity=1000.0,
+                       cap_x=8.0, hold_override=H)
+        assert r3["hold_min"] == H, (H, r3["hold_min"])
+        assert abs(r3["leverage"] - allowed_x(live, H, "LONG", 8.0)) < 0.01, H
+        assert r3["stop_risk"]["hold_min"] == H
+    # 위험표에 없는 지평을 넘기면 조용히 따르지 않고 권고로 되돌린다
+    assert prescribe(risk_table=live, atr_pct=0.000387, side="LONG", equity=1000.0,
+                     cap_x=8.0, hold_override=999)["hold_min"] in HOLD_CHOICES
     hb = rx["hold_by_acc"]
     assert hb["0.58"] >= hb["0.7"], hb        # 시간당 목적함수: 실력이 오르면 짧아진다
     # ── 거래소 레버리지 설정 ──────────────────────────────────────────────────
@@ -540,7 +648,8 @@ def _self_check() -> None:
     p = plan_now(side="LONG", equity=0.0, existing_notional=0.0, unrealized_pnl=0.0,
                  risk_table={}, vol_bpm=None, cap_x=8.0)
     assert p["size"]["leverage"] is None and p["exit_ladder"]["budget_min"] == 0
-    print("통과 65/65 — 손절기준 위험 · 처방(배수·보유·분할·거래소설정) · 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
+    print("통과 — 비용 세 조각(수수료·손절·펀딩) · 손절기준 위험 · 처방(배수·보유·분할·거래소설정)"
+          " · 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
 
 
 if __name__ == "__main__":

@@ -5391,10 +5391,7 @@ function riskLine(r) {
   const head = r.effective_x != null && r.leverage != null && r.effective_x < r.leverage
     ? `최대 ${lev}배 (위험 모델은 ${r.leverage}배까지 허용)`
     : `최대 ${lev}배`;
-  const sp = r.split
-    ? ` · 권고 ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"} (${r.split.reason})`
-    : "";
-  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → ${head} · ${who}이 묶음${sp}`;
+  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → ${head} · ${who}이 묶음`;
 }
 
 // 2026-09-13 청산 미리보기. 진입 카드는 상한·증거금 타일이 주인공이지만 청산은 «얼마를
@@ -5493,13 +5490,12 @@ async function manualEntryRefreshSize() {
     const hb = el("snapHoldRisk");
     if (hb) {
       const r = (data.cap || {}).risk;
-      const sp = r && r.split ? ` · ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"}` : "";
       renderLevGauge(plan);
       // 남은 보유시간을 같이 띄운다 -- 물타기를 해도 시계가 안 늘어난다는 사실이 보여야 한다.
       const left = plan.hold_remaining_min;
       const hf = el("snapHoldFixed");
       if (hf) hf.textContent = left && left < HOLD_FIXED_MIN ? `4시간 (남은 ~${left}분)` : "4시간";
-      hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배${sp}`
+      hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배`
         : (r ? "모델 없음" : "—");
     }
   } catch (err) {
@@ -5560,10 +5556,15 @@ function manualEntryStateText(state) {
       (state.taker_qty ? ` (테이커 ${Number(state.taker_qty)})` : ""));
   }
   const sl = state?.stop;
+  const filledQty = Number(state?.filled || 0);
   if (sl && sl.placed) {
     rows.push(`손절 ${sl.stop_price} 걸림` + (sl.replaced ? ` (기존 ${sl.replaced}건 교체)` : ""));
-  } else if (sl) {
-    rows.push(`🔴손절을 못 걸었습니다 — 포지션이 무방비입니다 (${sl.error || sl.reason})`);
+  } else if (sl && sl.no_position) {
+    // 체결이 0 이면 걸 포지션이 없다 -- 경고가 아니다. 이걸 안 가르면 «무방비» 가 거짓으로 뜬다.
+  } else if (sl || filledQty > 0) {
+    // 🔴`sl` 이 **없는데 체결은 있는** 경우가 진짜 위험하다(2026-09-13 감사). 예전에는
+    // 이 조건이 `sl` 존재에만 걸려 있어, 손절 시도 자체가 없던 경로에서 경고가 조용했다.
+    rows.push(`🔴손절을 못 걸었습니다 — 포지션이 무방비입니다 (${sl?.error || sl?.reason || "손절 시도 기록 없음"})`);
   }
   const lv = state?.leverage;
   if (lv && lv.error) rows.push(`⚠레버리지 ${lv.to}배 설정 실패 — 거래소 천장이 그대로입니다 (${lv.error})`);
