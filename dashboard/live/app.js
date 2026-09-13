@@ -5256,8 +5256,9 @@ function tradePlanLines(tp) {
     if (lv && lv.available) {
       out.push(`거래소 레버리지 ${lv.setting}배로 설정 — ${lv.note}`
         + ` · 증거금 ${lv.margin_pct_of_equity}% 잠김`
-        + (lv.enforces_cap ? " · 화면을 우회해도 상한이 걸립니다"
-                           : ` · ⚠거래소 천장이 상한보다 큽니다(눈금이 성깁니다)`));
+        + (lv.forced_by_position ? "" :
+           lv.enforces_cap ? " · 화면을 우회해도 상한이 걸립니다"
+                           : " · ⚠거래소 천장이 상한보다 큽니다(눈금이 성깁니다)"));
     }
   }
   const h = tp.hold || {};
@@ -5328,10 +5329,15 @@ function renderLevGauge(plan) {
   g.disabled = manualLevAuto();
   const v = manualLevValue();
   const min = plan.leverage_min_feasible;
-  const low = min != null && v < min;
+  const floor = plan.leverage_position_floor;
+  // 포지션 바닥 아래는 **거래소가 거부한다**(-2028). 상한 경고보다 이게 먼저다.
+  const rejected = floor != null && v < floor;
+  const low = !rejected && min != null && v < min;
   out.textContent = `${v}배` + (manualLevAuto() ? " (모델)" : " (수동)")
     + (plan.leverage_model && v !== plan.leverage_model ? ` · 모델 ${plan.leverage_model}배` : "")
-    + (low ? ` · ⚠상한만큼 못 엽니다(최소 ${Math.ceil(min)}배)` : "");
+    + (rejected ? ` · 🔴거래소가 거부합니다(포지션 때문에 최소 ${Math.ceil(floor)}배)`
+       : low ? ` · ⚠상한만큼 못 엽니다(최소 ${Math.ceil(min)}배)` : "");
+  out.className = (rejected || low) ? "entry-was bad" : "entry-was";
   out.className = low ? "entry-was bad" : "entry-was";
 }
 

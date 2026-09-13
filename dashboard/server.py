@@ -2814,6 +2814,8 @@ def make_app() -> web.Application:
             plan["leverage_source"] = "manual" if want_lev else "model"
             plan["leverage_model"] = _lv.get("setting")
             plan["leverage_min_feasible"] = _lv.get("min_feasible")
+            # 열린 포지션이 만드는 바닥. 이 아래를 고르면 거래소가 -2028 로 거부한다.
+            plan["leverage_position_floor"] = _lv.get("position_floor")
             plan["leverage_steps"] = list(LEVERAGE_STEPS)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, {}, {}, ({"error": f"{type(exc).__name__}: {exc}"}, 502)

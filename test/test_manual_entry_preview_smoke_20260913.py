@@ -334,6 +334,40 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
+    def test_leverage_floor_respects_open_position(self) -> None:
+        """🔴열린 포지션이 큰 상태에서 모델이 «내릴 수 없는 값»을 권하면 안 된다.
+
+        레버리지를 내리면 기존 포지션의 초기증거금이 올라가고, 순자산을 넘으면 거래소가
+        -2028(MIN_LEVERAGE_RATIO)로 거부한다. 그 바닥 위를 권해야 실제로 걸린다.
+        (격리였다면 -4161 로 아예 막힌다 -- 이 계좌는 cross 라 해당 없다.)
+        """
+        big = dict(FAKE_ACCOUNT)
+        # 순자산 1,000 · 명목 11,000 = 11배. 10배로 내리면 증거금 1,100 > 1,000 이라 거부된다.
+        big["positions"] = [{**FAKE_ACCOUNT["positions"][0], "qty": 4.4, "notional": 11000.0}]
+
+        async def fake_account(*_a, **_k):
+            return big
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    body = await (await client.get(
+                        "/api/manual-entry/preview?side=LONG&hold=240")).json()
+                    p = body["plan"]
+                    lv = p["trade_plan"]["prescription"]["exchange_leverage"]
+                    self.assertTrue(lv["forced_by_position"], lv)
+                    self.assertGreaterEqual(lv["setting"] * 1000.0, 11000.0,
+                                            f"이 설정으로는 기존 포지션을 못 버텨 거부된다: {lv}")
+                    self.assertEqual(p["target_leverage"], lv["setting"], p)
+                    self.assertIsNotNone(p["leverage_position_floor"], p)
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
     def test_bad_inputs_are_rejected_not_crashed(self) -> None:
         """잘못된 입력은 **검증**으로 막혀야지 예외로 죽으면 안 된다."""
         self._get_all([("/api/manual-entry/preview?side=NOPE", 400),

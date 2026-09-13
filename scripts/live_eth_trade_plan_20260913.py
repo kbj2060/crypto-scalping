@@ -175,7 +175,8 @@ LEVERAGE_STEPS = (1, 2, 3, 5, 8, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150)
 
 
 def leverage_setting(*, cap_notional: float, equity: float,
-                     existing_notional: float = 0.0) -> dict:
+                     existing_notional: float = 0.0,
+                     current_notional: float = 0.0) -> dict:
     """거래소에 설정할 레버리지. **위험이 아니라 «상한을 거래소에 새기는 값»** 이다.
 
     돌려주는 것:
@@ -192,9 +193,19 @@ def leverage_setting(*, cap_notional: float, equity: float,
     # (첫 판에 (cap+existing)/equity 로 짰다가 이중 계상을 잡았다 -- 그러면 설정이 두 배로
     #  뛰어 거래소 상한이 정책의 2.5배가 되고 방어가 무의미해진다.)
     min_feasible = cap_notional / equity
+    # 🔴**이미 열린 포지션이 바닥을 만든다**(2026-09-13). 레버리지를 내리면 기존 포지션의
+    # 초기증거금(명목/레버리지)이 올라가고, 순자산을 넘으면 거래소가 **-2028
+    # MIN_LEVERAGE_RATIO «Leverage is smaller than permitted: insufficient margin balance»**
+    # 로 거부한다. (격리였다면 아예 -4161 로 막힌다 -- 이 계좌는 cross 라 해당 없다.)
+    # 포지션이 정책 상한을 넘긴 상태면 이 바닥이 정책값보다 높아진다. 그건 사실이므로
+    # 숨기지 않고 그대로 올린다 -- 대신 왜 그런지 화면에 적는다.
+    position_floor = max(0.0, current_notional) / equity
     target = choose_leverage(min_feasible=min_feasible, cap_x=cap_notional / equity)
+    target = max(target, position_floor)
     setting = next((x for x in LEVERAGE_STEPS if x >= target), EXCHANGE_MAX_LEVERAGE)
     setting = min(setting, EXCHANGE_MAX_LEVERAGE)
+    forced = position_floor > choose_leverage(min_feasible=min_feasible,
+                                              cap_x=cap_notional / equity)
     max_notional = equity * setting
     return {
         "available": True,
@@ -206,7 +217,13 @@ def leverage_setting(*, cap_notional: float, equity: float,
         "margin_pct_of_equity": round(100.0 * cap_notional / setting / equity, 1),
         "enforces_cap": max_notional <= cap_notional * 1.25,
         "exchange_max": EXCHANGE_MAX_LEVERAGE,
-        "note": (f"거래소 레버리지를 {setting}배로 두면 열 수 있는 총 명목이 "
+        "position_floor": round(position_floor, 2),
+        "forced_by_position": forced,
+        "note": ((f"지금 포지션 {current_notional:,.0f} USDT 때문에 {setting}배 아래로는 못 내립니다"
+                  f" (내리면 증거금이 순자산을 넘어 거래소가 -2028 로 거부합니다)"
+                  f" — 포지션을 줄이면 {choose_leverage(min_feasible=min_feasible, cap_x=cap_notional/equity):.1f}배까지 내려갑니다")
+                 if forced else
+                 f"거래소 레버리지를 {setting}배로 두면 열 수 있는 총 명목이 "
                  f"{max_notional:,.0f} USDT 로 묶입니다 (정책 상한 {cap_notional:,.0f})"),
     }
 
@@ -278,7 +295,8 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
     # (2026-09-13 라이브 확인에서 실제로 이 값이 4.49 를 따라가 설정이 8배로 내려가고
     #  enforces_cap 이 False 로 떴다. 로컬에서는 순자산 상한이 묶여 증상이 안 보였다.)
     lev = leverage_setting(cap_notional=equity * (policy_cap_x or cap_x), equity=equity,
-                           existing_notional=existing_notional)
+                           existing_notional=existing_notional,
+                           current_notional=existing_notional)
     return {
         "available": True,
         "leverage": round(L, 2), "hold_min": H, "tranches": 1,
@@ -430,6 +448,21 @@ def _self_check() -> None:
     # 여유는 정책의 1.2배 목표 -- 거래소 천장이 정책을 크게 넘으면 방어가 죽는다
     assert a0["max_notional"] <= 8000.0 * 1.25 and a0["enforces_cap"] is True, a0
     assert leverage_setting(cap_notional=0.0, equity=1000.0)["available"] is False
+    # 🔴열린 포지션이 바닥을 만든다 -- 내리면 -2028 로 거부되므로 애초에 그 아래를 권하지 않는다.
+    big = leverage_setting(cap_notional=8000.0, equity=1000.0,
+                           existing_notional=11000.0, current_notional=11000.0)
+    assert big["forced_by_position"] is True and big["setting"] >= 11, big
+    assert big["setting"] * 1000.0 >= 11000.0, "설정으로 기존 포지션을 못 버티면 거부된다"
+    assert "-2028" in big["note"] and "줄이면" in big["note"], big["note"]
+    small = leverage_setting(cap_notional=8000.0, equity=1000.0,
+                             existing_notional=3000.0, current_notional=3000.0)
+    assert small["forced_by_position"] is False and small["setting"] == 10, small
+    # 포지션이 커질수록 바닥이 단조 증가해야 한다
+    prev = 0
+    for n in (0.0, 3000.0, 8000.0, 11000.0, 20000.0):
+        st = leverage_setting(cap_notional=8000.0, equity=1000.0,
+                              existing_notional=n, current_notional=n)["setting"]
+        assert st >= prev, (n, st, prev); prev = st
     assert leverage_setting(cap_notional=8000.0, equity=0.0)["available"] is False
     # 분할 횟수는 어떤 입력에서도 1 이다 -- 여기가 흔들리면 실험을 다시 돌려야 한다
     for cx in (2.0, 8.0, 25.0):
@@ -450,7 +483,7 @@ def _self_check() -> None:
     p = plan_now(side="LONG", equity=0.0, existing_notional=0.0, unrealized_pnl=0.0,
                  risk_table={}, vol_bpm=None, cap_x=8.0)
     assert p["size"]["leverage"] is None and p["exit_ladder"]["budget_min"] == 0
-    print("통과 52/52 — 처방(배수·보유·분할·거래소설정) · 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
+    print("통과 58/58 — 처방(배수·보유·분할·거래소설정) · 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
 
 
 if __name__ == "__main__":
