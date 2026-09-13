@@ -179,10 +179,12 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
                      "z": None if not np.isfinite(x[i]) else round(float(x[i]), 3),
                      "threshold": None if not np.isfinite(thr) else round(thr, 3)})
     out["prewarn"] = prewarn
-    # 지속 판정은 최근 몇 봉만 필요하다 -- 전 구간에 _thr_all_at 를 돌리면 O(n x 창) 이라 느리다
+    # 🔴2026-09-14 띠(HIST_BARS)까지 채운다. 전에는 최근 7봉만 채웠는데 아래 띠 루프가 이
+    # 배열을 읽으므로, 발동이 i-6 밖으로 밀리는 순간 4시간 띠에서 **35분 만에 사라졌다**.
+    # 전 구간에 _thr_all_at 를 돌리면 O(n x 창) 이라 느리다 -- 필요한 범위만 채운다.
     _zc = {(col, w): _z(col, w) for _lb, col, w, _q in DETECT}
     det_fire = np.zeros(len(d), bool)
-    for j in range(max(i - max(SUSTAIN.values()), 0), i + 1):
+    for j in range(max(i - HIST_BARS - SUSTAIN["detect"] + 1, 0), i + 1):
         det_fire[j] = all(bool(np.isfinite(_zc[(col, w)][j])
                                and _zc[(col, w)][j] >= _thr_all_at(_zc[(col, w)], q, j))
                           for _lb, col, w, q in DETECT)
@@ -199,11 +201,8 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     #      경보기: warn / neutral  (예고 확률)
     #      탐지기: bad  / neutral  (발동 여부)
     #    그래서 띠도 둘이다. 한 띠에 warn·bad 를 섞으면 어느 카드의 색인지 못 읽는다.
-    detect_v = [_z(col, w) for _, col, w, _q in DETECT]
     hist, pw, times = [], [], []
     for j in range(max(i - HIST_BARS + 1, 0), i + 1):
-        det_j = all(bool(np.isfinite(x[j]) and x[j] >= _thr_all_at(x, dd[3], j))
-                    for x, dd in zip(detect_v, DETECT))
         hist.append("bad" if _sustain(det_fire, j, SUSTAIN["detect"])[0] else "neutral")
         pw.append("warn" if _sustain(pw_hist, j, SUSTAIN["prewarn"])[0] else "neutral")
         times.append(str(pd.Timestamp(d["timestamp"].iloc[j]).tz_localize("UTC").isoformat()))
@@ -305,7 +304,19 @@ def _self_check() -> None:
         if pwh is not None:
             assert len(pwh) == HIST_BARS, len(pwh)
             assert set(pwh) <= {"warn", "neutral"}, set(pwh)                # 경보 띠는 2색
-    print("self-check OK  (경보3종 제거 · AND 게이트 · 비압축 탐지 · 띠 2개 분리 · 색 분리)")
+    # ⭐2026-09-14 회귀검사: **발동이 띠에서 사라지지 않는다**. 위 단언들은 띠의 색 집합과
+    #   마지막 칸만 봐서, 발동 배열을 7봉만 채우던 버그(35분 뒤 neutral 로 되돌아감)를 못 잡았다.
+    g = _mk(quiet=0)
+    k = len(g) - 1 - 20                      # 발동 후 20봉(100분) 더 흐르게 둔다 -- 띠(48봉) 안이다
+    g.loc[g.index[k - 2:k + 1], "n"] = 60000
+    g.loc[g.index[k - 2:k + 1], "qv"] = 6.0e7
+    ts = str(pd.Timestamp(g["timestamp"].iloc[k]).tz_localize("UTC").isoformat())
+    r0 = compute_signals(g.iloc[:k + 1])
+    assert dict(zip(r0["times"], r0["history"]))[ts] == "bad", "발동 당시부터 안 칠해진다"
+    r1 = compute_signals(g)
+    assert dict(zip(r1["times"], r1["history"]))[ts] == "bad", "발동이 띠에서 사라졌다"
+
+    print("self-check OK  (경보3종 제거 · AND 게이트 · 비압축 탐지 · 띠 2개 분리 · 색 분리 · 띠 보존)")
 
 
 if __name__ == "__main__":
