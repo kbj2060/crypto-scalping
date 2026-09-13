@@ -179,7 +179,7 @@ from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
     HARD_CAP_X, entry_notional, exit_fraction_required)
 from scripts.live_eth_trade_plan_20260913 import (  # noqa: E402
-    EXCHANGE_MAX_LEVERAGE, LEVERAGE_STEPS, plan_now)
+    EXCHANGE_MAX_LEVERAGE, LEVERAGE_STEPS, PRESCRIBE_ACC, plan_now, recommend_hold)
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -2706,7 +2706,8 @@ def make_app() -> web.Application:
                 cands.append((entry_notional(equity, safe_mae_pct)["total_notional"], "model"))
         if not cands:
             return None, None, cap
-        notional, who = min(cands)
+        # 🔴값만 비교한다 -- 튜플 min 은 값이 같을 때 이름 알파벳순으로 갈린다.
+        notional, who = min(cands, key=lambda t: t[0])
         return notional, who, cap
 
     async def realized_vol_now(symbol: str) -> float | None:
@@ -2764,6 +2765,17 @@ def make_app() -> web.Application:
             # 줄어든다 -- 소급 초과가 생기지 않는다. 어느 쪽이 묶었는지 화면에 남긴다.
             cap_ledger = cap.get("cap_notional_usdt") if cap.get("available") else None
             cap_equity = equity * SIZING_CAP_EQUITY_X if equity > 0 else None
+            # 🔴거래소 레버리지의 기준은 **지평과 무관한** 정책 천장이다 -- 모델 상한을 빼고
+            # 원장·순자산만 본다. 모델 상한을 넣으면 보유시간 선택마다 설정이 움직인다
+            # (2026-09-13 라이브에서 실제로 그랬다: 설정이 4.49 를 따라 8배로 내려앉았다).
+            # ⭐이 값이 **지평 선택의 순환을 끊는다**: 지평에는 상한이, 상한에는 지평이 필요한데
+            #   정책 천장은 지평과 무관하므로 먼저 정해진다(planning_hold 주석 참조).
+            policy_only = [v for v in (cap_ledger, cap_equity) if v]
+            policy_cap_x = (min(policy_only) / equity) if policy_only and equity > 0 else None
+            # 🔴상한을 계산할 지평 = 처방이 고를 지평(2026-09-13 감사). 같은 방향 포지션이
+            # 있으면 그 포지션의 **남은 시간**이 이긴다 -- 추가한다고 시계가 새로 생기지 않는다.
+            if not same:
+                hold_min = planning_hold(sizing, side, policy_cap_x)
             # 2026-09-13 세 번째 상한: 보유시간 조건부 위험 모델. 있으면 같이 경쟁시킨다.
             risk = risk_sizing(sizing, hold_min, side)
             cap_model = None
@@ -2776,19 +2788,13 @@ def make_app() -> web.Application:
             binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity"),
                                            (cap_model, "model")) if v]
             cap_notional = min(v for v, _ in binding) if binding else None
-            # 🔴거래소 레버리지의 기준은 **지평과 무관한** 정책 천장이다 -- 모델 상한을 빼고
-            # 원장·순자산만 본다. 모델 상한을 넣으면 보유시간 선택마다 설정이 움직인다
-            # (2026-09-13 라이브에서 실제로 그랬다: 설정이 4.49 를 따라 8배로 내려앉았다).
-            policy_only = [v for v in (cap_ledger, cap_equity) if v]
-            policy_cap_x = (min(policy_only) / equity) if policy_only and equity > 0 else None
-            # ⚠️cap_notional 이 정해진 **뒤**에 와야 한다(2026-09-13: 앞에 뒀다가
-            #   UnboundLocalError 로 진입 미리보기가 통째로 죽었다).
             if risk.get("available") and equity > 0 and cap_notional:
                 eff = cap_notional / equity
                 risk["effective_x"] = round(eff, 2)
                 # 화면이 «무엇이 묶었나»를 말할 때 쓰는 값. policy_leverage 의 binding 은
                 # 순자산·원장 상한을 **모르므로** 그대로 보여주면 «정책상한 25배»라고 거짓말한다.
-                risk["applied_binding"] = min(binding)[1]
+                # 🔴키로 **값만** 비교한다 -- 튜플 min 은 값이 같을 때 이름 알파벳순으로 갈린다.
+                risk["applied_binding"] = min(binding, key=lambda t: t[0])[1]
             if cap_notional is not None:
                 cap.update(available=True, cap_notional_usdt=round(cap_notional, 2),
                            cap_equity_usdt=round(cap_equity, 2) if cap_equity else None,
@@ -2823,7 +2829,8 @@ def make_app() -> web.Application:
                 vol_bpm=await realized_vol_now(symbol),
                 cap_x=(cap_notional / equity) if cap_notional and equity > 0 else SIZING_CAP_EQUITY_X,
                 atr_pct=sizing.get("atr_pct"), hold_min=hold_min,
-                policy_cap_x=policy_cap_x)
+                policy_cap_x=policy_cap_x,
+                funding_bp_8h=await funding_now(symbol))
             # 집행기는 계획 dict 하나만 받는다. 처방 깊숙이 손을 넣게 하지 않고 여기서 꺼내 준다.
             _rx = (plan["trade_plan"] or {}).get("prescription") or {}
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
@@ -2837,9 +2844,15 @@ def make_app() -> web.Application:
             _np = float(plan.get("price") or 0.0)
             _vwap = ((_sv + _nq * _np) / (_sq + _nq)) if (_sq + _nq) > 0 else 0.0
             if _vwap > 0:
+                # 🔴«계좌로 얼마인가»는 **이 주문 뒤 실제 명목**으로 재야 한다(2026-09-13 감사).
+                # 상한 배수를 쓰면 분할 진입에서는 과대, **상한을 넘긴 상태에서는 과소**로 나온다
+                # (실계좌 실측: 화면 18% vs 실제 45.4%). 손절 손실은 사용자가 «버틸 수 있나»를
+                # 판단하는 바로 그 숫자라 상한이 아니라 사실을 적는다.
+                _total_x = (float(plan.get("total_notional_usdt") or 0.0) / equity
+                            if equity > 0 else 0.0)
                 plan["stop_plan"] = build_stop_plan(
                     position_side=side, entry_price=_vwap, filters=filters, symbol=symbol,
-                    leverage=(cap_notional / equity) if cap_notional and equity > 0 else 0.0)
+                    leverage=_total_x)
                 plan["stop_pct"] = STOP_LOSS_PCT
             # 게이지가 값을 주면 그걸 쓰고, «자동»이면 모델 추천을 쓴다. 어느 쪽인지 남긴다 --
             # 안 남기면 나중에 «왜 30배로 걸렸지»를 못 푼다.
@@ -2922,6 +2935,19 @@ def make_app() -> web.Application:
     # 🔴2026-09-13 사용자 결정: 보유시간을 **4시간 고정**. 화면 선택지를 없앤다.
     # 근거: 생존 상한이 보유시간에 가파르게 반응한다(1일 4.30배 -> 4시간 8배 이상).
     # «지렛대는 크기가 아니라 보유시간»(09-13 반사실)의 직접 적용이다.
+    async def funding_now(symbol: str) -> float | None:
+        """현재 펀딩률(bp/8h). 🔴비용 모델에 **없던 항목**이다(2026-09-13 감사) -- 8시간마다
+        정산되므로 보유시간에 비례하고 롱/숏 부호가 반대다. 1440분 보유면 왕복비용의 28%다.
+        못 읽으면 None -- 그때는 최근 30일 중앙값 폴백을 쓴다(0 으로 두면 긴 지평이 공짜가 된다)."""
+        try:
+            r = await fetch_binance_json("https://fapi.binance.com/fapi/v1/premiumIndex",
+                                         {"symbol": symbol}, timeout=5.0, error_reason=None)
+            if r and r.get("lastFundingRate") is not None:
+                return float(r["lastFundingRate"]) * 1e4
+        except Exception:  # noqa: BLE001 -- 있으면 좋은 값이지 필수가 아니다
+            pass
+        return None
+
     HOLD_FIXED_MIN = 240
 
     def remaining_hold(entry_at: str | None, fixed: int = HOLD_FIXED_MIN) -> int:
@@ -2948,6 +2974,23 @@ def make_app() -> web.Application:
         """보유시간은 **고정**이다(2026-09-13). 쿼리는 무시한다 -- 화면에 선택지가 없으므로
         쿼리로만 바꿀 수 있으면 «화면과 다른 크기»가 나간다."""
         return HOLD_FIXED_MIN
+
+    def planning_hold(sizing: dict[str, Any], side: str, policy_cap_x: float | None) -> int:
+        """**상한을 계산할 지평**. 처방이 고를 지평과 같아야 한다.
+
+        🔴예전에는 상한을 240분 셀로 계산하면서 화면은 1440분을 권고했다(2026-09-13 감사).
+        1440분의 허용 배수는 240분의 3분의 1 수준이라, 권고대로 들면 진입 직후 예산 사다리를
+        35% 위반했다. 여기서 한 번 고르고 그 값을 상한·처방·손절 표시가 **공유**한다.
+
+        지평 선택에는 상한이 필요하고 상한에는 지평이 필요한 순환이 있다 -- **지평과 무관한**
+        정책 천장(원장 ∧ 순자산)으로 끊는다. 위험모델 상한은 그 뒤에 min 으로 들어간다."""
+        table = (sizing or {}).get("risk_mae") or {}
+        atr = (sizing or {}).get("atr_pct")
+        if not table or not atr:
+            return HOLD_FIXED_MIN
+        h = recommend_hold(table, side, policy_cap_x or SIZING_CAP_EQUITY_X, atr,
+                           acc=PRESCRIBE_ACC)
+        return int(h["recommended_min"]) if h.get("available") else HOLD_FIXED_MIN
 
     def risk_sizing(sizing: dict[str, Any], hold_min: int, side: str) -> dict[str, Any]:
         """이 보유시간에서 각오할 역행폭. **사이징 워커가 300초마다 계산해 둔 값을 읽는다.**
@@ -3058,7 +3101,8 @@ def make_app() -> web.Application:
                 unrealized_pnl=float(position.get("unrealized_pnl") or 0.0),
                 risk_table=sz.get("risk_mae") or {}, vol_bpm=vol_bpm,
                 cap_x=SIZING_CAP_EQUITY_X, atr_pct=sz.get("atr_pct"), hold_min=hold_min,
-                policy_cap_x=SIZING_CAP_EQUITY_X)
+                policy_cap_x=SIZING_CAP_EQUITY_X,
+                funding_bp_8h=await funding_now(symbol))
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, None

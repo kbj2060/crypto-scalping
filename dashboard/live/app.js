@@ -5556,10 +5556,15 @@ function manualEntryStateText(state) {
       (state.taker_qty ? ` (테이커 ${Number(state.taker_qty)})` : ""));
   }
   const sl = state?.stop;
+  const filledQty = Number(state?.filled || 0);
   if (sl && sl.placed) {
     rows.push(`손절 ${sl.stop_price} 걸림` + (sl.replaced ? ` (기존 ${sl.replaced}건 교체)` : ""));
-  } else if (sl) {
-    rows.push(`🔴손절을 못 걸었습니다 — 포지션이 무방비입니다 (${sl.error || sl.reason})`);
+  } else if (sl && sl.no_position) {
+    // 체결이 0 이면 걸 포지션이 없다 -- 경고가 아니다. 이걸 안 가르면 «무방비» 가 거짓으로 뜬다.
+  } else if (sl || filledQty > 0) {
+    // 🔴`sl` 이 **없는데 체결은 있는** 경우가 진짜 위험하다(2026-09-13 감사). 예전에는
+    // 이 조건이 `sl` 존재에만 걸려 있어, 손절 시도 자체가 없던 경로에서 경고가 조용했다.
+    rows.push(`🔴손절을 못 걸었습니다 — 포지션이 무방비입니다 (${sl?.error || sl?.reason || "손절 시도 기록 없음"})`);
   }
   const lv = state?.leverage;
   if (lv && lv.error) rows.push(`⚠레버리지 ${lv.to}배 설정 실패 — 거래소 천장이 그대로입니다 (${lv.error})`);

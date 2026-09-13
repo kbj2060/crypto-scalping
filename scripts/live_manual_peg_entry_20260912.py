@@ -87,6 +87,14 @@ def _floor_to(value: float, grid: float) -> float:
     return int(value / grid + 1e-9) * grid
 
 
+def _ceil_to(value: float, grid: float) -> float:
+    """격자에 **올림**. 매도 쪽 peg 에 쓴다 -- 내리면 한 틱 공격적이 되어 GTX 가 거부한다.
+    (거래소 호가는 이미 격자 위라 보통 항등이지만, 대칭을 코드로 보장해 둔다.)"""
+    if grid <= 0:
+        return value
+    return math.ceil(value / grid - 1e-9) * grid
+
+
 def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended_qty: float,
                      cap_notional: float | None, filters: dict[str, float],
                      symbol: str = "ETHUSDT", existing_notional: float = 0.0,
@@ -116,7 +124,8 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     if not (0.0 < float(fraction) <= 1.0):
         raise ValueError(f"fraction must be in (0, 1], got {fraction!r}")
 
-    price = _floor_to(best_bid, filters["tick"]) if side == "LONG" else best_ask
+    price = (_floor_to(best_bid, filters["tick"]) if side == "LONG"
+             else _ceil_to(best_ask, filters["tick"]))
     notes: list[str] = []
     qty = max(0.0, float(recommended_qty))
     existing_notional = max(0.0, float(existing_notional))
@@ -297,8 +306,10 @@ def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float,
     if not (0.0 < float(fraction) <= 1.0):
         raise ValueError(f"fraction must be in (0, 1], got {fraction!r}")
 
+    dust_reason = None
     closing_long = position_side == "LONG"
-    price = best_ask if closing_long else _floor_to(best_bid, filters["tick"])
+    price = (_ceil_to(best_ask, filters["tick"]) if closing_long
+             else _floor_to(best_bid, filters["tick"]))
     held = max(0.0, float(position_qty))
     # 전량이면 곱셈을 아예 안 한다 -- 부동소수로 한 스텝 모자라 «거의 전량»이 남는 걸 막는다.
     want = held if float(fraction) >= 1.0 else held * float(fraction)
@@ -314,9 +325,12 @@ def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float,
                    f"{int(round(100 * fraction))}% 는 {qty} ETH 라 최소 {filters['min_qty']} 미만입니다"
                    " -- 비율을 올리세요")
     elif filters["min_notional"] and qty * price < filters["min_notional"]:
-        # 지정가로는 못 보낸다. 조용히 시장가로 바꾸지 않고 화면에 그대로 말한다.
-        blocked = (f"명목 {qty * price:,.0f} 가 최소 {filters['min_notional']:,.0f} USDT 미만입니다"
-                   " -- 이 크기는 시장가로 닫아야 합니다")
+        # 🔴예전에는 여기서 **막았다**. 그러면 최소명목 미만으로 남은 «먼지 포지션»을 화면에서
+        # 영영 못 닫는다(2026-09-13 감사). 지정가는 거래소가 안 받으므로 시장가로 바꾸되,
+        # 조용히 바꾸지 않고 이유를 화면에 남긴다 -- 비용이 더 드는 선택이기 때문이다.
+        market = True
+        dust_reason = (f"명목 {qty * price:,.0f} 가 거래소 최소 {filters['min_notional']:,.0f}"
+                       " USDT 미만이라 지정가로는 못 보냅니다 — 시장가로 닫습니다")
 
     notional = qty * price
     move = ((price - entry_price) / entry_price if closing_long else
@@ -342,9 +356,10 @@ def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float,
         "fallback": "taker",
         "repeg": not market,             # 진입과 다르다 -- 위 주석 참조
         "vol_bpm": round(vol_bpm, 2) if vol_bpm is not None else None,
-        "market_reason": (f"변동성 {vol_bpm:.1f} ≥ {EXIT_TAKER_VOL_BPM:.0f} bp/√분 — "
-                          "지정가를 걸지 않고 즉시 시장가로 닫습니다"
-                          f" (비용은 메이커보다 약 1.7bp 비쌉니다)") if market else None,
+        "market_reason": (dust_reason if dust_reason else
+                          (f"변동성 {vol_bpm:.1f} ≥ {EXIT_TAKER_VOL_BPM:.0f} bp/√분 — "
+                           "지정가를 걸지 않고 즉시 시장가로 닫습니다"
+                           f" (비용은 메이커보다 약 1.7bp 비쌉니다)") if market else None),
         "notes": [],
         "blocked": blocked,
         "dry_run": not exec_enabled(),
@@ -475,7 +490,11 @@ def _self_check() -> None:
     # 수량은 포지션 위로 절대 안 올라간다(헤지 모드엔 reduceOnly 가 없어 이게 유일한 안전장치)
     x = build_exit_plan(position_side="LONG", position_qty=0.0015, best_bid=2470.00,
                         best_ask=2470.01, filters=f)
-    assert x["quantity"] == 0.001 and "최소" in (x["blocked"] or ""), x
+    # 🔴먼지 포지션(최소명목 미만)은 **막지 않는다** -- 막으면 화면에서 영영 못 닫는다.
+    # 지정가는 거래소가 안 받으므로 시장가로 바꾸되, 이유를 화면에 남긴다(2026-09-13 감사).
+    assert x["quantity"] == 0.001 and x["blocked"] is None, x
+    assert x["type"] == "MARKET" and "최소" in (x["market_reason"] or ""), x
+    assert "price" not in x, "시장가 계획에 지정가를 실으면 안 된다"
     x = build_exit_plan(position_side="LONG", position_qty=0.0,
                         best_bid=2470.00, best_ask=2470.01, filters=f)
     assert x["blocked"] == "닫을 포지션이 없습니다", x

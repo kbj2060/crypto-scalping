@@ -123,7 +123,15 @@ async def ensure_stop(session, stop_plan: dict, key: str, secret: str, offset: i
 
 async def _place_stop(session, plan: dict, state: dict, key, secret, offset) -> None:
     """체결 뒤 손절을 건다. **실패해도 진입을 되돌리지 않는다**(이미 체결됐다) -- 대신 상태에
-    실어 화면이 «손절 없음»을 크게 말하게 한다. 무방비 포지션은 조용하면 안 된다."""
+    실어 화면이 «손절 없음»을 크게 말하게 한다. 무방비 포지션은 조용하면 안 된다.
+
+    🔴**모든 종료 경로에서 불려야 한다**(2026-09-13 감사). 예전에는 전량 메이커 체결과
+    테이커 성공에서만 불렀다 -- peg 가 일부만 체결된 뒤 폴백 시장가가 에러나면 실제 포지션이
+    남는데 손절이 안 걸렸고, `state["stop"]` 이 아예 없어서 **화면 경고도 안 떴다**.
+    체결이 0 이면 걸 포지션이 없으므로 그 사실을 기록만 한다(경고 아님)."""
+    if not (float(state.get("filled") or 0.0) > 0):
+        state["stop"] = {"placed": False, "no_position": True, "reason": "체결 없음"}
+        return
     sp = plan.get("stop_plan")
     if not sp:
         state["stop"] = {"placed": False, "reason": "손절 계획 없음"}
@@ -178,6 +186,8 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
     if status not in TERMINAL:
         confirmed = await ensure_closed(session, common, state["order_id"], key, secret, offset)
         if confirmed is None:
+            # 체결량을 확정 못 했지만 마지막 폴링값이 양수면 **포지션이 있다**. 손절부터 건다.
+            await _place_stop(session, plan, state, key, secret, offset)
             state.update(phase="error", done_at=now_iso(),
                          error=f"주문 {state['order_id']} 취소를 확인하지 못했습니다 — 직접 확인하세요")
             return state
@@ -194,10 +204,15 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
                          {**common, "type": "MARKET", "quantity": remaining},
                          key, secret, offset)
     if "__error__" in taker:
-        state.update(phase="taker_failed", taker_qty=0.0,
-                     error=taker["__error__"], done_at=now_iso())
+        # 🔴peg 로 일부 체결됐을 수 있다 -- 그건 **무방비 포지션**이다. 손절을 걸고 끝낸다.
+        state.update(phase="taker_failed", taker_qty=0.0, error=taker["__error__"])
+        await _place_stop(session, plan, state, key, secret, offset)
+        state.update(done_at=now_iso())
         return state
-    state.update(phase="filled_taker", taker_qty=remaining, filled=float(plan["quantity"]),
+    # 체결량은 **응답에서 읽는다**. 시장가는 보통 전량이지만 «보통»을 상태에 적으면 안 된다.
+    done = executed_qty(taker) or remaining
+    state.update(phase="filled_taker", taker_qty=done,
+                 filled=round(state["filled"] + done, 8),
                  taker_order_id=taker.get("orderId"))
     await _place_stop(session, plan, state, key, secret, offset)
     state.update(done_at=now_iso())
@@ -382,9 +397,24 @@ def _self_check() -> None:
     assert "reduceOnly" not in sent, "헤지 모드에서 reduceOnly 는 -1106"
     # 손절 계획이 없으면 조용히 넘어가지 않고 이유를 남긴다
     import asyncio as _a2
-    st = {}
+    st = {"filled": 1.0}
     _a2.run(_place_stop(None, {}, st, "", "", 0))
     assert st["stop"]["placed"] is False and st["stop"]["reason"], st
+    assert not st["stop"].get("no_position"), "체결이 있는데 «포지션 없음»으로 빠지면 안 된다"
+    # 🔴체결이 0 이면 걸 포지션이 없다 -- 경고가 아니라 사실 기록이다(화면이 구분해야 한다)
+    st0 = {"filled": 0.0}
+    _a2.run(_place_stop(None, {"stop_plan": sp}, st0, "", "", 0))
+    assert st0["stop"]["no_position"] is True and st0["stop"]["placed"] is False, st0
+    # 🔴**체결이 남을 수 있는** 두 종료 경로가 손절을 걸어야 한다(2026-09-13 감사).
+    # 그 경로에서 peg 가 일부 체결돼 있으면 포지션이 무방비로 남는데, state["stop"] 이
+    # 아예 없어서 화면 경고("🔴손절을 못 걸었습니다")조차 안 떴다.
+    # (GTX 거부·API키 없음 경로는 체결이 0 이라 여기 해당 없다.)
+    import inspect as _i
+    _src = _i.getsource(run_entry)
+    for _mark in ('phase="taker_failed"', "if confirmed is None:"):
+        _blk = _src[_src.index(_mark):]
+        _blk = _blk[:_blk.index("return state")]
+        assert "_place_stop" in _blk, f"{_mark} 경로에 손절이 없다"
 
     # ── 레버리지 설정 (2026-09-13) ───────────────────────────────────────────
     # 네트워크를 안 타는 계약만 본다: 목표가 없으면 아무것도 안 보낸다.
