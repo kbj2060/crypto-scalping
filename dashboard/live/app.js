@@ -5446,6 +5446,22 @@ el("snapExitLong")?.addEventListener("click", () => manualEntryPreview("LONG", "
 el("snapExitShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "exit"));
 el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
 // 비율을 바꾸면 화면에 떠 있던 확인 버튼은 **다른 계획**의 것이다. 지운다.
+// 계좌 강제 조회. refreshBinanceAccount 의 30초 자체 게이트를 넘겨야 하므로 시각을 지운다.
+el("snapAcctRefresh")?.addEventListener("click", async () => {
+  const btn = el("snapAcctRefresh");
+  if (!btn || btn.disabled) return;
+  btn.disabled = true; btn.classList.add("spin");
+  try {
+    binanceAccountLastFetchAt = 0;
+    await refreshBinanceAccount();
+    manualExitSyncButtons();      // 포지션이 바뀌었으면 버튼도 바로 맞춘다
+    manualEntryRefreshSize();
+  } finally {
+    btn.classList.remove("spin");
+    setTimeout(() => { btn.disabled = false; }, 3000);   // 연타로 거래소 한도를 때리지 않게
+  }
+});
+
 el("snapHold")?.addEventListener("change", () => {
   manualEntryClearConfirm();          // 보유시간이 바뀌면 크기가 바뀐다 -- 다른 계획이다
   manualEntryRefreshSize();
