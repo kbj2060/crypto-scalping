@@ -2952,6 +2952,21 @@ function breakoutPrewarnIndicatorItem() {
     history: w.history || [], times: w.times || [] };
 }
 
+// 상단 칩. 스냅샷 탭 카드와 **같은 함수**로 상태를 얻는다 -- 판정을 두 벌로 두면 어긋난다.
+// 확률이 있는 경보기만 숫자를 붙인다(규약 §3: 확률인 행만 게이지/숫자).
+function renderTopDetectChips() {
+  const set = (id, prefix, item) => {
+    const node = el(id);
+    if (!node || !item) return;
+    const pct = item.proba != null ? ` ${item.proba}%` : "";
+    node.textContent = `${prefix} ${item.subText || "—"}${pct}`;
+    node.className = `top-chip${item.tone && item.tone !== "neutral" ? " " + item.tone : ""}`;
+    if (item.derivedTitle) node.title = `${item.label} — ${item.derivedTitle}`;
+  };
+  set("topPrewarn", "경보", breakoutPrewarnIndicatorItem());
+  set("topDetect", "탐지", breakoutDetectorIndicatorItem());
+}
+
 async function refreshBreakoutDetector() {
   const now = Date.now();
   if (now - breakoutDetectorLastFetchAt < BREAKOUT_DETECTOR_POLL_MS) return;
@@ -2964,6 +2979,7 @@ async function refreshBreakoutDetector() {
     console.error("Breakout detector fetch error:", error);
     latestBreakoutDetector = { error: "fetch_failed" };
   }
+  renderTopDetectChips();     // 성공·실패 둘 다 반영한다(실패면 «오류»로 보여야 한다)
 }
 
 async function refreshVReboundSignal() {
