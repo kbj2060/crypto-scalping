@@ -1421,6 +1421,14 @@ def make_app() -> web.Application:
             response.enable_compression()
         elif asset_name.endswith(".ttf"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif asset_name.endswith(".html"):
+            # 🔴index.html 은 **절대** 캐시하면 안 된다. 그 안에 캐시버스터가 들어 있어서,
+            # 이 파일이 묵으면 옛 `app.js?v=...` 를 가리키고 그 app.js 는 immutable(1년) 이라
+            # 브라우저도 Cloudflare 도 새 코드를 영영 안 가져온다.
+            # 2026-09-13 실제 증상: 사용자 화면의 «특화 감지기»가 이틀 전 판본(2행)이었고
+            # Ctrl+Shift+R 로도 안 바뀌었다. 디렉터리 경로(/dashboard/live/)로 열 때만
+            # no-cache 가 붙고, index.html 을 직접 열면 헤더가 아예 없었다.
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     app = web.Application(middlewares=[static_asset_headers])
