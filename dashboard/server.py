@@ -177,7 +177,7 @@ from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
-    entry_notional, exit_fraction_required)
+    entry_notional, exit_fraction_required, recommended_tranches)
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -2699,6 +2699,12 @@ def make_app() -> web.Application:
                 risk.update(leverage=round(e["leverage"], 2), binding=e["binding"],
                             survival_x=round(e["survival_x"], 2),
                             growth_x=round(e["growth_x"], 2) if e["growth_x"] else None)
+            # 분할 권고는 **적용된 상한**의 실효 배수로 낸다 -- 모델이 25배를 허용해도
+            # 실제로 들어가는 건 min(원장, 순자산, 모델)이라 그쪽이 위험을 정한다.
+            if risk.get("available") and equity > 0:
+                eff = (min(v for v, _ in binding) / equity) if binding else e["leverage"]
+                risk["split"] = recommended_tranches(risk["safe_mae_pct"], eff, hold_min)
+                risk["effective_x"] = round(eff, 2)
             binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity"),
                                            (cap_model, "model")) if v]
             cap_notional = min(v for v, _ in binding) if binding else None
@@ -2880,6 +2886,8 @@ def make_app() -> web.Application:
             risk = risk_sizing(sz, hold_min, position_side)
             if risk.get("available") and eq > 0 and cur_notional > 0:
                 r = exit_fraction_required(eq, risk["safe_mae_pct"], cur_notional)
+                risk["split"] = recommended_tranches(risk["safe_mae_pct"],
+                                                     cur_notional / eq, hold_min)
                 plan["risk"] = {**risk, "required_fraction": round(r["required_fraction"], 4),
                                 "allowed_notional": round(r["allowed_notional"], 2),
                                 "excess_notional": round(r["excess_notional"], 2),

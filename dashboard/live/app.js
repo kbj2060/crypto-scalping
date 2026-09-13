@@ -5225,7 +5225,10 @@ function riskLine(r) {
   if (!r.available) return `위험모델 없음 (${r.reason || "?"}) — 기존 상한만 적용`;
   const who = { survival: "생존(청산거리)", growth: "성장(켈리 하한)",
                 cap: "정책상한" }[r.binding] || r.binding;
-  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → 최대 ${r.leverage}배 · ${who}이 묶음`;
+  const sp = r.split
+    ? ` · 권고 ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"} (${r.split.reason})`
+    : "";
+  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → 최대 ${r.leverage}배 · ${who}이 묶음${sp}`;
 }
 
 // 2026-09-13 청산 미리보기. 진입 카드는 상한·증거금 타일이 주인공이지만 청산은 «얼마를
@@ -5320,7 +5323,8 @@ async function manualEntryRefreshSize() {
     const hb = el("snapHoldRisk");
     if (hb) {
       const r = (data.cap || {}).risk;
-      hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배`
+      const sp = r && r.split ? ` · ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"}` : "";
+      hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배${sp}`
         : (r ? "모델 없음" : "—");
     }
   } catch (err) {
