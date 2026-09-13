@@ -106,6 +106,56 @@ def heikin_bollinger(df, *, n=20, m=2.0, recent=12):
             "HA전환&최근BB": (flip_up & near_lo, flip_dn & near_hi)}
 
 
+BD = pathlib.Path("/home/kbj20/crypto-scalping/data/research/eth_bookdepth_30s_20260908.parquet")
+
+
+def _both(v, lo=1.0):
+    """z 벡터 하나에서 **부호 두 방향**을 다 만든다. 롱 기준 (높을 때, 낮을 때).
+
+    🔴이 저장소는 호가/체결 가설의 **부호가 뒤집힌 전과**가 있다(벽 취소→지속이 −0.027).
+    그래서 부호를 미리 정하지 않고 둘 다 재고, 대신 «4 개를 재서 1 개가 이겼다」는 걸
+    판정에 반영한다 -- 3/3 + 대조군 초과가 아니면 통과가 아니다."""
+    hi = np.nan_to_num(v, nan=-9e9) >= lo
+    lo_ = np.nan_to_num(v, nan=+9e9) <= -lo
+    return (hi, lo_), (lo_, hi)          # (높을때: 롱/숏), (낮을때: 롱/숏)
+
+
+def flow_signals(df, *, win=288, roll=12):
+    """**체결흐름** — 새 데이터 없이 klines 의 taker_buy_base/volume/trades 로 만든다.
+
+    imb = (2·테이커매수 − 거래량)/거래량 ∈ [−1,1] · CVD 는 그 12 봉 누적.
+    전부 봉 τ 자신의 확정값까지만 본다(행 τ = 봉 τ 종가 -- 저장소 피쳐 프레임 규약)."""
+    v = df.volume.to_numpy(float); tb = df.taker_buy_base.to_numpy(float)
+    imb = np.where(v > 0, (2 * tb - v) / np.maximum(v, 1e-12), np.nan)
+    zs = lambda x: ((x - x.rolling(win).mean()) / x.rolling(win).std()).to_numpy()   # noqa: E731
+    imb_z = zs(pd.Series(imb))
+    cvd_z = zs(pd.Series(2 * tb - v).rolling(roll, min_periods=roll).sum())
+    nt_z = zs(pd.Series(df.trades.to_numpy(float)))
+    a, b = _both(imb_z); cc, dd = _both(cvd_z); e, _ = _both(nt_z)
+    return {"체결 매수우위": a, "체결 매도쏠림": b, "CVD 순행": cc, "CVD 역행": dd,
+            "체결건수 급증": e}
+
+
+def book_signals(df, *, win=288):
+    """**호가** — 30 초 패널을 봉 종가로 asof 병합. OBI=(매수 −1% − 매도 +1%)/합.
+
+    🔴`bd_ok=0` 구간(2025-10/11 38 일 등)은 값이 상수라 **결측으로 만든다**. 그 구간을
+    0 으로 채우면 «벽이 균형」이라는 가짜 신호가 된다.
+    반환에 `ok`(봉 단위 유효)를 같이 준다 -- 호출부가 표본 자체를 제한하는 데 쓴다."""
+    bd = pd.read_parquet(BD, columns=["ts", "d1p0", "dm1p0", "bd_ok"]).sort_values("ts")
+    bd.loc[bd.bd_ok == 0, ["d1p0", "dm1p0"]] = np.nan
+    m = pd.merge_asof(pd.DataFrame({"ts": pd.DatetimeIndex(df.ts)}), bd, on="ts",
+                      direction="backward", tolerance=pd.Timedelta(minutes=5))
+    bid, ask = m.dm1p0.to_numpy(float), m.d1p0.to_numpy(float)
+    obi = (bid - ask) / np.maximum(bid + ask, 1e-9)
+    zs = lambda x: ((x - x.rolling(win).mean()) / x.rolling(win).std()).to_numpy()   # noqa: E731
+    obi_z = zs(pd.Series(obi))
+    d_obi_z = zs(pd.Series(obi).diff(12))
+    a, b = _both(obi_z); cc, dd = _both(d_obi_z)
+    return ({"호가 매수벽": a, "호가 매도벽": b, "호가 매수벽 증가": cc, "호가 매수벽 감소": dd},
+            np.isfinite(obi_z))
+
+
 def arm_rule(c, idx, sides, w, k, z, eps, use_model=True, gate=None):
     """분위 규칙. `z[e, t]` = 예측 잔여 하락폭을 **그 시점의 전형값으로 나눈 값**.
 
@@ -179,7 +229,87 @@ def _self_check() -> None:
     assert s2["HA전환"][0].sum() == 1 and s2["HA전환"][0][38:44].any(), np.where(s2["HA전환"][0])
     # 교집합은 «터치가 최근에 있었나」라 단독 HA 전환보다 많을 수 없고, 터치가 없으면 0 이다
     assert s2["HA전환&최근BB"][0].sum() <= s2["HA전환"][0].sum()
-    print("통과 — 비용 항등 · 물타기 조건 · 바닥 조건 · 예산 상한 · 게이트 · HA 전환")
+    # _both: 부호 두 방향이 서로의 거울이고, 결측은 **어느 쪽도 발동 안 한다**
+    zz = np.array([2.0, -2.0, 0.0, np.nan])
+    (hl, hs), (ll, ls) = _both(zz)
+    assert list(hl) == [1, 0, 0, 0] and list(ll) == [0, 1, 0, 0], (hl, ll)
+    assert list(hs) == list(ll) and list(ls) == list(hl), "숏이 롱의 거울이 아니다"
+    # 체결흐름: 전량 테이커 매수면 imb=+1 -> z 가 양, 전량 매도면 음
+    n = 400
+    fd = pd.DataFrame({"ts": pd.date_range("2026-01-01", periods=n, freq="5min"),
+                       "volume": 100.0, "taker_buy_base": 50.0, "trades": 100.0})
+    fd.loc[350:, "taker_buy_base"] = 100.0                 # 마지막만 전량 매수
+    fs = flow_signals(fd)
+    assert fs["체결 매수우위"][0][360] and not fs["체결 매도쏠림"][0][360], "imb 부호가 반대다"
+    print("통과 — 비용 항등 · 물타기 조건 · 바닥 조건 · 예산 상한 · 게이트 · HA 전환 · "
+          "부호 거울 · 체결 부호")
+
+
+def multiseed(a) -> int:
+    """🔴같은 표본·같은 정확도인데 **씨드만 바꿔도** 단일이 3.76~9.70 으로 흔들렸다(OOS 539건).
+    즉 팔 사이 차이(1~3bp)보다 동전던지기 잡음이 크다. 한 씨드의 순위는 판정이 아니다.
+
+    팔들은 **같은 씨드 안에서 같은 sides 를 공유**하므로 짝지은 비교가 가능하다.
+    여기서는 (게이트 − 단일) 과 (게이트 − 대조군) 의 씨드간 평균 ± SE 를 낸다.
+    분위 모델 팔은 이미 기각됐고 예측 비용이 커서 뺀다(게이트는 모델을 안 쓴다)."""
+    df = maq._load_klines()
+    c = df.close.to_numpy(float)
+    X = svm.build_features(df.ts, c, df.quote_volume.to_numpy(float), df.trades.to_numpy(float),
+                           df.high.to_numpy(float), df.low.to_numpy(float))
+    ts = df.ts.to_numpy()
+    ok = np.isfinite(X.to_numpy(float)).all(1)
+    if a.gates == "book":
+        sig, ok_bar = book_signals(df)
+    else:
+        sig = heikin_bollinger(df) if a.gates == "price" else flow_signals(df)
+        ok_bar = None
+    w = a.hold_bars
+    acc = float(a.acc.split(",")[0])
+    print(f"5분봉 {len(df):,} · 보유 {w*5}분 · k={a.k} · 게이트 {a.gates} · "
+          f"정확도 {acc} · 씨드 {a.seeds}개")
+    print("⚠️같은 씨드 안에서 모든 팔이 같은 방향을 쓴다 -- **짝지은** 차이라 잡음이 상쇄된다\n")
+    for wname, (w0, w1) in WINDOWS.items():
+        lo_i = max(int(np.searchsorted(ts, np.datetime64(w0))), svm.WARMUP)
+        hi_i = int(np.searchsorted(ts, np.datetime64(w1 + "T23:59:59"))) - w - 1
+        if hi_i - lo_i < 1000:
+            continue
+        idx = np.array([i for i in range(lo_i, hi_i, a.every) if ok[i]])
+        if ok_bar is not None:
+            okw = (pd.Series(ok_bar.astype(float))[::-1]
+                   .rolling(w + 1, min_periods=w + 1).min()[::-1].to_numpy())
+            idx = idx[np.nan_to_num(okw[idx]) > 0]
+        if len(idx) < 200:
+            continue
+        truth = np.where(c[idx + w] >= c[idx], 1.0, -1.0)
+        bars = idx[:, None] + 1 + np.arange(w - 1)[None, :]
+        zdum = np.zeros((len(idx), w - 1))
+        acc_d = {nm: [] for nm in list(sig) + ["대조군"]}
+        for sd in range(a.seeds):
+            r = np.random.default_rng(SEED + 1000 * sd)
+            sides = np.where(r.random(len(idx)) < acc, truth, -truth)
+            base = arm_single(c, idx, sides, w)
+            ctl = arm_rule(c, idx, sides, w, a.k, zdum, 0.0, use_model=False)
+            acc_d["대조군"].append((ctl["net_bp"] - base["net_bp"],
+                                  ctl["net_bp"] / ctl["expo"] - base["net_bp"], ctl["expo"]))
+            ls = sides[:, None] > 0
+            for nm, (lg, sh) in sig.items():
+                g = np.where(ls, lg[bars], sh[bars])
+                rr = arm_rule(c, idx, sides, w, a.k, zdum, 0.0, use_model=False, gate=g)
+                acc_d[nm].append((rr["net_bp"] - base["net_bp"],
+                                  rr["net_bp"] / rr["expo"] - base["net_bp"], rr["expo"]))
+        print(f"{wname}  (진입 {len(idx):,}건)")
+        print(f"{'팔':>16} {'Δ의도명목당bp':>14} {'Δ노출당bp':>14} {'노출':>6}")
+        for nm, v in acc_d.items():
+            arr = np.array(v)
+            m0, m1 = arr[:, 0].mean(), arr[:, 1].mean()
+            s0 = arr[:, 0].std(ddof=1) / np.sqrt(len(arr))
+            s1 = arr[:, 1].std(ddof=1) / np.sqrt(len(arr))
+            star = "✅" if m0 - 2 * s0 > 0 else ("△" if m1 - 2 * s1 > 0 else "")
+            print(f"{nm:>16} {m0:>8.2f}±{s0:<5.2f} {m1:>8.2f}±{s1:<5.2f} "
+                  f"{arr[:, 2].mean():>6.2f} {star}")
+        print()
+    print("✅ = 의도명목당이 단일보다 2SE 초과 · △ = 노출당만 통과(노출만 줄여도 나온다)")
+    return 0
 
 
 def main() -> int:
@@ -189,10 +319,16 @@ def main() -> int:
     ap.add_argument("--acc", default="0.60,0.50")
     ap.add_argument("--every", type=int, default=48)
     ap.add_argument("--q", type=float, default=0.6, help="바닥 조건에 쓸 분위")
+    ap.add_argument("--gates", default="price", choices=("price", "flow", "book"))
+    ap.add_argument("--seeds", type=int, default=0,
+                    help=">0 이면 방향 동전던지기를 N 씨드로 반복해 **짝지은 차이**의 SE 를 낸다")
     ap.add_argument("--self-check", action="store_true")
     a = ap.parse_args()
     if a.self_check:
         _self_check(); return 0
+
+    if a.seeds:
+        return multiseed(a)
 
     import joblib
     art = ROOT / "data" / "live" / f"eth_ladder_depth_q{a.k}.joblib"
@@ -201,7 +337,12 @@ def main() -> int:
 
     df = maq._load_klines()
     c = df.close.to_numpy(float)
-    sig = heikin_bollinger(df)
+    if a.gates == "price":
+        sig, ok_bar = heikin_bollinger(df), None
+    elif a.gates == "flow":
+        sig, ok_bar = flow_signals(df), None
+    else:
+        sig, ok_bar = book_signals(df)
     X = svm.build_features(df.ts, c, df.quote_volume.to_numpy(float), df.trades.to_numpy(float),
                            df.high.to_numpy(float), df.low.to_numpy(float))
     atrp = (pd.Series(np.abs(np.diff(c, prepend=c[0]))).rolling(288, min_periods=200).mean()
@@ -222,6 +363,17 @@ def main() -> int:
             if hi_i - lo_i < 1000:
                 continue
             idx = np.array([i for i in range(lo_i, hi_i, a.every) if ok[i]])
+            if ok_bar is not None:
+                # 🔴호가가 결측인 창을 빼면 **모든 팔**의 표본이 같이 줄어야 한다.
+                # 게이트만 막고 단일/대조군을 전체표본으로 두면 호가팔이 부당하게 진다.
+                okw = (pd.Series(ok_bar.astype(float))[::-1]
+                       .rolling(w + 1, min_periods=w + 1).min()[::-1].to_numpy())
+                keep = np.nan_to_num(okw[idx]) > 0
+                print(f"{wname:>18} {'호가 유효창':>16} {keep.sum():>6,}/{len(idx):,} "
+                      f"({100*keep.mean():.1f}%)")
+                idx = idx[keep]
+                if len(idx) < 200:
+                    print(f"{wname:>18} 표본 부족 -- 건너뜀"); continue
             truth = np.where(c[idx + w] >= c[idx], 1.0, -1.0)
             sides = np.where(rng.random(len(idx)) < acc, truth, -truth)
             # depth[e, t]: 봉 i+1+t 에서 **남은 r=w-1-t 봉** 동안의 추가 하락폭 q 분위
