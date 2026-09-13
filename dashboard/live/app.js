@@ -2958,8 +2958,10 @@ function renderTopDetectChips() {
   const set = (id, prefix, item) => {
     const node = el(id);
     if (!node || !item) return;
-    const pct = item.proba != null ? ` ${item.proba}%` : "";
-    node.textContent = `${prefix} ${item.subText || "—"}${pct}`;
+    // 🔴`proba` 는 게이지 **채움값(0~1)** 이지 확률이 아니다(발동이면 1로 고정된다).
+    // 사람이 읽을 숫자는 meterNote 에 있다 -- «예고 38.1%» / «탐지 2/3» / «지속 20분».
+    const note = item.meterNote ? ` · ${item.meterNote}` : "";
+    node.textContent = `${prefix} ${item.subText || "—"}${note}`;
     node.className = `top-chip${item.tone && item.tone !== "neutral" ? " " + item.tone : ""}`;
     if (item.derivedTitle) node.title = `${item.label} — ${item.derivedTitle}`;
   };
