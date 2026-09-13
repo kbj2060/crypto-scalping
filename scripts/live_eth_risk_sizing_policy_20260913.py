@@ -129,39 +129,6 @@ def exit_fraction_required(equity: float, safe_mae_pct: float, current_notional:
             "allowed_notional": allowed, "excess_notional": current_notional - allowed}
 
 
-# 분할 권고. 고정 기본값이 아니라 **지금 상태에서 계산**한다.
-# 근거: research_entry_tranche_count_20260913.py
-#   분할 순이득 = Δp_ruin − (1 − 포착률)·L·μ
-#   나눠 넣는 동안 노출이 모자라 엣지를 덜 먹는 게 비용(사용자는 엣지가 실재한다, t=3.08),
-#   초기 노출이 낮아 파산이 주는 게 이득이다.
-# 실측 결론: **4시간 보유는 전 국면·전 노출에서 일괄이 낫다**(파산이 너무 작아 이득이 없다).
-#   분할이 이기는 칸은 «1일 보유 + 12배 이상» 뿐이고, 5배 상한이 그걸 막는다.
-# 화면 판정은 시뮬레이션을 매번 돌리는 대신 **모델의 안전 MAE 와 청산거리를 비교**한다 --
-#   청산거리가 안전 MAE 밖이면 파산 < 0.1% 라 나눌 이유가 없다. 시뮬레이션과 같은 결론을 준다.
-SPLIT_SPREAD_FRAC = 0.5       # 나눈다면 보유시간의 절반에 걸쳐
-
-
-def recommended_tranches(safe_mae_pct: float, leverage: float,
-                         hold_min: int) -> dict[str, object]:
-    """지금 몇 분할이 좋은가. 1 이면 «일괄»이다."""
-    liq = 100.0 / max(leverage, 1e-9)
-    if not (safe_mae_pct > 0):
-        return {"tranches": 1, "reason": "위험모델 없음 — 일괄", "spread_min": 0}
-    # 🔴상대 허용오차 (2026-09-13). 위험모델이 상한을 묶으면 leverage == 100/safe_mae 라
-    # liq 와 safe_mae 가 **구성상 같은 값**인데, 100/(100/m) 이 m 보다 3e-15 작게 나와
-    # «안전선 안»으로 판정되어 «청산거리 23.2% 가 안전선 23.2% 안» 같은 문장과 함께 2분할이
-    # 권고됐다. 경계는 «밖»으로 친다 -- 딱 맞게 사이즈된 상태는 나눌 이유가 없다.
-    if liq >= safe_mae_pct * (1 - 1e-9):
-        return {"tranches": 1, "spread_min": 0,
-                "reason": (f"청산거리 {liq:.1f}% 가 {hold_min}분 안전선 {safe_mae_pct:.1f}% 밖 "
-                           "— 나누면 엣지만 깎입니다")}
-    ratio = safe_mae_pct / liq
-    k = 2 if ratio < 1.5 else 3
-    return {"tranches": k, "spread_min": int(hold_min * SPLIT_SPREAD_FRAC),
-            "reason": (f"청산거리 {liq:.1f}% 가 {hold_min}분 안전선 {safe_mae_pct:.1f}% 안 "
-                       f"— {k}분할로 {int(hold_min*SPLIT_SPREAD_FRAC)}분에 걸쳐 넣는 게 낫습니다")}
-
-
 def _self_check() -> None:
     k = kelly_robust_leverage()
     assert 30 < k < 45, f"엣지 하한 켈리가 {k:.1f} -- 원장이 바뀌었으면 상단 상수를 다시 재라"
@@ -193,22 +160,7 @@ def _self_check() -> None:
     assert abs(y["required_fraction"] - 0.5) < 1e-9, y
     z = exit_fraction_required(1089.45, 21.66, current_notional=allowed * 2)
     assert z["required_fraction"] > y["required_fraction"], "오래 들 생각이면 더 닫아야 한다"
-    # ── 분할 권고 ────────────────────────────────────────────────────────────
-    # 실측 표(4시간 보유는 전 국면 일괄)와 같은 판정을 내야 한다.
-    assert recommended_tranches(3.04, 5.0, 240)["tranches"] == 1, "4h·5배는 일괄"
-    assert recommended_tranches(3.04, 12.0, 240)["tranches"] == 1, "4h·12배도 일괄"
-    assert recommended_tranches(23.89, 5.0, 1440)["tranches"] > 1, "1일·5배는 안전선 안"
-    assert recommended_tranches(23.89, 12.0, 1440)["tranches"] == 3, "1일·12배는 깊이 들어간다"
-    # 노출이 커질수록(=청산거리가 좁을수록) 칸이 늘거나 같아야 한다
-    prev = 0
-    for L in (2.0, 5.0, 8.0, 12.0, 20.0):
-        t = recommended_tranches(23.89, L, 1440)["tranches"]
-        assert t >= prev, (L, t, prev); prev = t
-    assert recommended_tranches(0.0, 5.0, 240)["tranches"] == 1, "모델 없으면 일괄"
-    # 🔴경계(위험모델이 상한을 묶어 청산거리 == 안전선)는 부동소수 잡음으로 갈리면 안 된다
-    for m in (23.236, 7.67, 3.54, 1.821):
-        assert recommended_tranches(m, 100.0 / m, 1440)["tranches"] == 1, f"경계 {m} 가 분할로 샜다"
-    print("통과 25/25 — 생존/성장 최솟값 · 진입 여유 · 청산 최소비율 · 분할 권고")
+    print("통과 — 생존/성장 최솟값 · 진입 여유 · 청산 최소비율")
 
 
 if __name__ == "__main__":

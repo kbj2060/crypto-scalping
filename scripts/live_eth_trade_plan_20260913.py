@@ -27,8 +27,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
-    HARD_CAP_X, recommended_tranches)
+from scripts.live_eth_risk_sizing_policy_20260913 import HARD_CAP_X  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_TAKER_VOL_BPM, FALLBACK_SEC, STOP_LOSS_PCT, exit_deadline_sec)
 

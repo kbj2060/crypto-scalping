@@ -5387,10 +5387,7 @@ function riskLine(r) {
   const head = r.effective_x != null && r.leverage != null && r.effective_x < r.leverage
     ? `최대 ${lev}배 (위험 모델은 ${r.leverage}배까지 허용)`
     : `최대 ${lev}배`;
-  const sp = r.split
-    ? ` · 권고 ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"} (${r.split.reason})`
-    : "";
-  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → ${head} · ${who}이 묶음${sp}`;
+  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → ${head} · ${who}이 묶음`;
 }
 
 // 2026-09-13 청산 미리보기. 진입 카드는 상한·증거금 타일이 주인공이지만 청산은 «얼마를
@@ -5489,13 +5486,12 @@ async function manualEntryRefreshSize() {
     const hb = el("snapHoldRisk");
     if (hb) {
       const r = (data.cap || {}).risk;
-      const sp = r && r.split ? ` · ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"}` : "";
       renderLevGauge(plan);
       // 남은 보유시간을 같이 띄운다 -- 물타기를 해도 시계가 안 늘어난다는 사실이 보여야 한다.
       const left = plan.hold_remaining_min;
       const hf = el("snapHoldFixed");
       if (hf) hf.textContent = left && left < HOLD_FIXED_MIN ? `4시간 (남은 ~${left}분)` : "4시간";
-      hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배${sp}`
+      hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배`
         : (r ? "모델 없음" : "—");
     }
   } catch (err) {
