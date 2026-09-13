@@ -92,6 +92,45 @@ async def ensure_leverage(session, symbol: str, target: int, key: str, secret: s
     return {"changed": True, "from": now, "to": int(float(r.get("leverage") or target))}
 
 
+async def ensure_stop(session, stop_plan: dict, key: str, secret: str, offset: int) -> dict:
+    """손절을 **다시 건다**. 기존 같은 측면 STOP_MARKET 을 지우고 새로 넣는다.
+
+    🔴다시 거는 이유: 물타기로 평단이 움직이면 옛 손절은 엉뚱한 자리에 남는다. 수량은
+    `closePosition=true` 가 알아서 따라오지만 **가격은 안 따라온다**.
+    취소를 재조회로 확인하지 않는 이유: 여기서는 남아도 과청산이 안 생긴다(closePosition 이
+    막는다). 대신 지운 개수를 상태에 싣는다 -- 계속 늘면 취소가 안 되고 있다는 신호다.
+    """
+    sym, pside = stop_plan["symbol"], stop_plan["positionSide"]
+    opens = await signed(session, "GET", "/fapi/v1/openOrders", {"symbol": sym},
+                         key, secret, offset)
+    stale = 0
+    if isinstance(opens, list):
+        for o in opens:
+            if o.get("type") == "STOP_MARKET" and o.get("positionSide") == pside:
+                await signed(session, "DELETE", "/fapi/v1/order",
+                             {"symbol": sym, "orderId": o.get("orderId")}, key, secret, offset)
+                stale += 1
+    params = {k: v for k, v in stop_plan.items()
+              if k in ("symbol", "side", "positionSide", "type", "stopPrice",
+                       "closePosition", "timeInForce", "workingType")}
+    r = await signed(session, "POST", "/fapi/v1/order", params, key, secret, offset)
+    if "__error__" in r:
+        return {"placed": False, "replaced": stale, "stop_price": stop_plan["stopPrice"],
+                "error": r["__error__"]}
+    return {"placed": True, "replaced": stale, "stop_price": stop_plan["stopPrice"],
+            "order_id": r.get("orderId")}
+
+
+async def _place_stop(session, plan: dict, state: dict, key, secret, offset) -> None:
+    """체결 뒤 손절을 건다. **실패해도 진입을 되돌리지 않는다**(이미 체결됐다) -- 대신 상태에
+    실어 화면이 «손절 없음»을 크게 말하게 한다. 무방비 포지션은 조용하면 안 된다."""
+    sp = plan.get("stop_plan")
+    if not sp:
+        state["stop"] = {"placed": False, "reason": "손절 계획 없음"}
+        return
+    state["stop"] = await ensure_stop(session, sp, key, secret, offset)
+
+
 async def run_entry(session, plan: dict, state: dict) -> dict:
     """peg 를 걸고 지켜보다가 남은 수량만 테이커로 넘긴다. state 를 제자리에서 갱신한다
     (프런트가 /api/manual-entry/status 로 같은 dict 를 읽는다)."""
@@ -146,7 +185,9 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
 
     remaining = round(float(plan["quantity"]) - state["filled"], 8)
     if remaining <= 0:
-        state.update(phase="filled_maker", taker_qty=0.0, done_at=now_iso())
+        state.update(phase="filled_maker", taker_qty=0.0)
+        await _place_stop(session, plan, state, key, secret, offset)
+        state.update(done_at=now_iso())
         return state
 
     taker = await signed(session, "POST", "/fapi/v1/order",
@@ -157,7 +198,9 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
                      error=taker["__error__"], done_at=now_iso())
         return state
     state.update(phase="filled_taker", taker_qty=remaining, filled=float(plan["quantity"]),
-                 taker_order_id=taker.get("orderId"), done_at=now_iso())
+                 taker_order_id=taker.get("orderId"))
+    await _place_stop(session, plan, state, key, secret, offset)
+    state.update(done_at=now_iso())
     return state
 
 
@@ -326,6 +369,23 @@ def _self_check() -> None:
     assert "NEW" not in TERMINAL and "PARTIALLY_FILLED" not in TERMINAL, \
         "부분체결·대기는 종료 상태가 아니다 -- 종료로 치면 잔량을 테이커로 안 넘긴다"
 
+    # ── 손절 (2026-09-13) ────────────────────────────────────────────────────
+    from scripts.live_manual_peg_entry_20260912 import build_stop_plan
+    f2 = {"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 20.0}
+    sp = build_stop_plan(position_side="LONG", entry_price=2521.11, filters=f2, leverage=6.0)
+    sent = {k: v for k, v in sp.items()
+            if k in ("symbol", "side", "positionSide", "type", "stopPrice",
+                     "closePosition", "timeInForce", "workingType")}
+    assert set(sent) == {"symbol", "side", "positionSide", "type", "stopPrice",
+                         "closePosition", "timeInForce", "workingType"}, sent
+    assert "quantity" not in sent, "closePosition 주문에 수량을 실으면 거래소가 거부한다"
+    assert "reduceOnly" not in sent, "헤지 모드에서 reduceOnly 는 -1106"
+    # 손절 계획이 없으면 조용히 넘어가지 않고 이유를 남긴다
+    import asyncio as _a2
+    st = {}
+    _a2.run(_place_stop(None, {}, st, "", "", 0))
+    assert st["stop"]["placed"] is False and st["stop"]["reason"], st
+
     # ── 레버리지 설정 (2026-09-13) ───────────────────────────────────────────
     # 네트워크를 안 타는 계약만 본다: 목표가 없으면 아무것도 안 보낸다.
     import asyncio as _a
@@ -358,7 +418,7 @@ def _self_check() -> None:
     calm = build_exit_plan(position_side="LONG", position_qty=2.0, best_bid=2470.00,
                            best_ask=2470.01, filters=f, vol_bpm=None)
     assert calm["fallback_after_sec"] == exit_deadline_sec(None) == 120.0
-    print("통과 17/17 — 집행 보조 함수 + 청산 리페그 판정 + 변동성 마감 계약 유지")
+    print("통과 21/21 — 집행 보조 함수 + 손절 주문 형태 + 청산 리페그 판정 + 변동성 마감 계약 유지")
 
 
 if __name__ == "__main__":

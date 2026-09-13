@@ -5209,6 +5209,13 @@ function manualEntryPlanHtml(data) {
   // 막는 것만 항상 보인다. 나머지 설명은 «자세히» 뒤로 접는다(사용자 요청 2026-09-13) --
   // 진입 화면은 «얼마를 넣나»와 «왜 못 넣나»만 보이면 되고, 근거는 펼쳐서 읽는 것이다.
   if (plan.blocked) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.blocked)}</div>`);
+  // 손절은 **접지 않는다** -- «얼마를 잃을 수 있나»는 행동을 바꾸는 값이다.
+  const sl = plan.stop_plan;
+  if (sl) {
+    parts.push(entryNote(`손절 ${Number(sl.stopPrice).toFixed(2)} `
+      + `(평단 ${Number(sl.entry_price).toFixed(2)} 에서 ${(100 * sl.stop_pct).toFixed(1)}%)`
+      + (sl.account_loss_pct != null ? ` — 걸리면 계좌 ${sl.account_loss_pct}% 손실` : "")));
+  }
   const er = (data.cap || {}).risk;
   const detail = [
     ...(plan.notes || []).map((n) => `⚠ ${escapeHtml(n)}`),
@@ -5533,6 +5540,12 @@ function manualEntryStateText(state) {
   if (state?.quantity !== undefined) {
     rows.push(`체결 ${Number(state.filled || 0)} / ${Number(state.quantity)} ETH` +
       (state.taker_qty ? ` (테이커 ${Number(state.taker_qty)})` : ""));
+  }
+  const sl = state?.stop;
+  if (sl && sl.placed) {
+    rows.push(`손절 ${sl.stop_price} 걸림` + (sl.replaced ? ` (기존 ${sl.replaced}건 교체)` : ""));
+  } else if (sl) {
+    rows.push(`🔴손절을 못 걸었습니다 — 포지션이 무방비입니다 (${sl.error || sl.reason})`);
   }
   const lv = state?.leverage;
   if (lv && lv.error) rows.push(`⚠레버리지 ${lv.to}배 설정 실패 — 거래소 천장이 그대로입니다 (${lv.error})`);

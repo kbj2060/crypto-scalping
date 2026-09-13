@@ -405,6 +405,46 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
+    def test_stop_plan_follows_blended_vwap(self) -> None:
+        """🔴손절은 **체결 후 평단** 기준이고, 물타기하면 따라 내려온다(2026-09-13).
+
+        기존 포지션이 있으면 «기존 + 이번 주문»의 가중평균이 새 평단이다. 기존 진입가만
+        보거나 이번 주문 가격만 보면 손절이 엉뚱한 자리에 걸린다.
+        주문 형태도 같이 고정한다 -- 헤지 모드라 reduceOnly 가 거부되고(-1106)
+        closePosition 주문에 수량을 실으면 거래소가 거부한다.
+        """
+        held = dict(FAKE_ACCOUNT)
+        held["positions"] = [{**FAKE_ACCOUNT["positions"][0], "qty": 1.0,
+                              "entry_price": 3000.0, "notional": 3000.0}]
+
+        async def fake_account(*_a, **_k):
+            return held
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
+                    p = b["plan"]
+                    sp = p.get("stop_plan")
+                    self.assertIsNotNone(sp, p)
+                    self.assertEqual(sp["type"], "STOP_MARKET", sp)
+                    self.assertEqual(sp["closePosition"], "true", sp)
+                    self.assertNotIn("quantity", sp, "closePosition 주문에 수량을 실으면 거부된다")
+                    self.assertNotIn("reduceOnly", sp, "헤지 모드에서 reduceOnly 는 -1106")
+                    # 평단은 기존 3000 과 신규 2500.00 사이여야 한다
+                    self.assertGreater(sp["entry_price"], 2500.0, sp)
+                    self.assertLess(sp["entry_price"], 3000.0, sp)
+                    # 손절은 그 평단의 3% 아래
+                    self.assertAlmostEqual(sp["stopPrice"] / sp["entry_price"], 0.97,
+                                           places=3, msg=str(sp))
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
     def test_bad_inputs_are_rejected_not_crashed(self) -> None:
         """잘못된 입력은 **검증**으로 막혀야지 예외로 죽으면 안 된다."""
         self._get_all([("/api/manual-entry/preview?side=NOPE", 400),

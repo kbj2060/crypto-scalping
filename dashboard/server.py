@@ -171,8 +171,8 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 # trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
-    EXIT_VOL_WINDOW, build_entry_plan, build_exit_plan, exec_enabled, load_filters,
-    realized_vol_bpm)
+    EXIT_VOL_WINDOW, STOP_LOSS_PCT, build_entry_plan, build_exit_plan, build_stop_plan,
+    exec_enabled, load_filters, realized_vol_bpm)
 from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa: E402
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
@@ -2818,6 +2818,20 @@ def make_app() -> web.Application:
             # 집행기는 계획 dict 하나만 받는다. 처방 깊숙이 손을 넣게 하지 않고 여기서 꺼내 준다.
             _rx = (plan["trade_plan"] or {}).get("prescription") or {}
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
+            # 🔴손절은 **체결 후 평단** 기준이다(2026-09-13, 사용자 결정 가격 3%).
+            # 기존 포지션이 있으면 «기존 + 이번 주문»의 가중평균이 새 평단이 된다 --
+            # 물타기하면 손절가가 따라 내려온다(기존 주문은 집행기가 지우고 다시 건다).
+            _sq = sum(abs(float(p.get("qty") or 0.0)) for p in same)
+            _sv = sum(abs(float(p.get("qty") or 0.0)) * float(p.get("entry_price") or 0.0)
+                      for p in same)
+            _nq = float(plan.get("quantity") or 0.0)
+            _np = float(plan.get("price") or 0.0)
+            _vwap = ((_sv + _nq * _np) / (_sq + _nq)) if (_sq + _nq) > 0 else 0.0
+            if _vwap > 0:
+                plan["stop_plan"] = build_stop_plan(
+                    position_side=side, entry_price=_vwap, filters=filters, symbol=symbol,
+                    leverage=(cap_notional / equity) if cap_notional and equity > 0 else 0.0)
+                plan["stop_pct"] = STOP_LOSS_PCT
             # 게이지가 값을 주면 그걸 쓰고, «자동»이면 모델 추천을 쓴다. 어느 쪽인지 남긴다 --
             # 안 남기면 나중에 «왜 30배로 걸렸지»를 못 푼다.
             plan["target_leverage"] = want_lev or _lv.get("setting")
