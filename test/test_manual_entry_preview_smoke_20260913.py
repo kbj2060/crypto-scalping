@@ -24,6 +24,7 @@ import re
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -362,6 +363,42 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                                             f"이 설정으로는 기존 포지션을 못 버텨 거부된다: {lv}")
                     self.assertEqual(p["target_leverage"], lv["setting"], p)
                     self.assertIsNotNone(p["leverage_position_floor"], p)
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_hold_is_fixed_and_does_not_extend_on_scale_in(self) -> None:
+        """🔴보유시간은 4시간 **고정**이고, 물타기해도 시계가 늘어나지 않는다(2026-09-13).
+
+        ① 쿼리로 다른 보유시간을 주어도 서버가 무시한다 -- 화면에 선택지가 없으므로
+           쿼리로만 바꿀 수 있으면 «화면과 다른 크기»가 나간다.
+        ② 포지션이 이미 2시간 묵었으면 남은 시간은 4시간이 아니라 그 나머지다.
+           `entry_at` 은 첫 체결 시각이라 추가 진입에도 안 움직인다.
+        """
+        aged = dict(FAKE_ACCOUNT)
+        old_entry = (datetime.now(timezone.utc) - timedelta(minutes=125)).isoformat()
+        aged["positions"] = [{**FAKE_ACCOUNT["positions"][0], "entry_at": old_entry}]
+
+        async def fake_account(*_a, **_k):
+            return aged
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    for q in ("", "&hold=60", "&hold=1440", "&hold=abc"):
+                        b = await (await client.get(
+                            f"/api/manual-entry/preview?side=LONG{q}")).json()
+                        p = b["plan"]
+                        self.assertEqual(p["hold_fixed_min"], 240, f"{q}: {p['hold_fixed_min']}")
+                        # 125분 묵었으니 남은 115분 -> 모델 지평으로 올림하면 120
+                        self.assertEqual(p["hold_remaining_min"], 120,
+                                         f"{q}: 물타기로 시계가 늘어났다 {p['hold_remaining_min']}")
+                    x = await (await client.get("/api/manual-exit/preview?side=LONG")).json()
+                    self.assertEqual(x["plan"]["hold_remaining_min"], 120, x["plan"])
                 finally:
                     await client.close()
 

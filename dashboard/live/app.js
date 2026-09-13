@@ -5295,8 +5295,10 @@ function sliderPct(id) {
 const manualExitPct = () => sliderPct("snapExitFrac");
 const manualEntryPct = () => sliderPct("snapEntryFrac");
 
-// 보유 예정 시간. **크기를 정하는 입력**이라 진입·청산이 같은 값을 쓴다.
-const manualHoldMin = () => Number(el("snapHold")?.value) || 1440;
+// 보유 예정 시간은 **4시간 고정**(2026-09-13). 서버가 쿼리를 무시하므로 여기 값은 표시용이다.
+// 화면과 서버가 갈라지면 «화면엔 4시간인데 다른 크기로 나가는» 일이 생겨, 서버를 단일 진실로 둔다.
+const HOLD_FIXED_MIN = 240;
+const manualHoldMin = () => HOLD_FIXED_MIN;
 
 // ── 2026-09-13 거래소 레버리지 게이지 ────────────────────────────────────────
 // 위험이 아니라 **총 명목의 천장**을 정하는 값이다(교차 마진이라 청산거리는 순자산/총명목).
@@ -5468,9 +5470,11 @@ async function manualEntryRefreshSize() {
       const r = (data.cap || {}).risk;
       const sp = r && r.split ? ` · ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"}` : "";
       renderLevGauge(plan);
-      const rh = ((plan.trade_plan || {}).hold || {}).recommended_min;
+      // 남은 보유시간을 같이 띄운다 -- 물타기를 해도 시계가 안 늘어난다는 사실이 보여야 한다.
+      const left = plan.hold_remaining_min;
+      const hf = el("snapHoldFixed");
+      if (hf) hf.textContent = left && left < HOLD_FIXED_MIN ? `4시간 (남은 ~${left}분)` : "4시간";
       hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배${sp}`
-        + (rh ? ` · 권고 ${rh}분` : "")
         : (r ? "모델 없음" : "—");
     }
   } catch (err) {

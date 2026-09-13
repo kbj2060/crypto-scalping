@@ -295,15 +295,12 @@
                들고 있으면 이 정도 역행을 각오해야 한다»를 주고, 그 역수가 허용 레버리지다.
                세 상한(원장·순자산·모델)의 **작은 쪽**을 쓰므로 이 선택이 크기를 키우지는 않는다. -->
           <div class="manual-entry-row actions">
-            <label class="exit-frac" for="snapHold">
+            <!-- 2026-09-13 보유시간 **4시간 고정**(사용자 결정). 선택지를 없앴다 --
+                 고를 수 있으면 «크기를 키우려고 짧게 고르는» 길이 열리는데, 그건 약속이
+                 아니라 핑계가 된다. 물타기를 해도 시계는 안 늘어난다(첫 체결 기준). -->
+            <label class="exit-frac">
               <span class="entry-cap">보유 예정</span>
-              <select id="snapHold" class="notify-btn small" aria-label="보유 예정 시간">
-                <option value="60">1시간</option>
-                <option value="120">2시간</option>
-                <option value="240">4시간</option>
-                <option value="480">8시간</option>
-                <option value="1440" selected>1일</option>
-              </select>
+              <b id="snapHoldFixed" class="entry-val">4시간</b>
               <b id="snapHoldRisk" class="entry-was">—</b>
             </label>
           </div>
@@ -418,7 +415,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260913-levfloor"></script>
+  <script src="./app.js?v=20260913-hold4h"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

@@ -59,20 +59,51 @@ def kelly_robust_leverage(mu_bp: float = EDGE_MU_BP, sd_bp: float = EDGE_SD_BP,
     return lcb / (sd_bp / 1e4) ** 2
 
 
-def survival_leverage(safe_mae_pct: float) -> float:
-    """청산선까지의 거리를 «학습된 안전 MAE» 로 두면 허용 레버리지는 그 역수다."""
-    return 100.0 / max(safe_mae_pct, 1e-6)
+# ── 드로다운 배리어 (2026-09-13, Risk-Constrained Kelly 계열) ────────────────
+# 🔴지금까지 배리어는 **전손**이었다: «안전 MAE 만큼 역행하면 계좌가 0» 이 되는 배수를 썼다.
+# 그런데 제약은 한 건이 아니라 **경로 전체**에 걸어야 한다(Busseti·Ryu·Boyd 2016,
+# Risk-Constrained Kelly Gambling, J. Investing; MacLean·Thorp·Ziemba 의 드로다운 제약 계열).
+# 실측(2026-09-13): 건당 파산 예산 0.1% 는 사용자 실제 빈도(하루 2.01건, 연 735건)에서
+#   1주 1.4% · 1개월 5.9% · 3개월 16.6% · **1년 52.1%** 로 쌓인다.
+# 배리어를 D(<1)로 낮추면 같은 사건이 전손이 아니라 D 만큼의 손실이 되어 경로가 살아남는다:
+#   허용배수 = D × 100 / 안전MAE
+# D=1.0 이 현행(전손 배리어)이고, 바꾸면 크기가 그만큼 줄어든다.
+#
+# 배리어별 허용 배수(2026-09-13 라이브 위험표 · 순자산 상한 8배 적용 후):
+#     보유      안전MAE   D=1.0   D=0.5   D=0.3   D=0.2
+#      60분      1.82%     8.00    8.00    8.00    8.00
+#     240분      3.36%     8.00    8.00    8.00    5.95
+#     480분      6.97%     8.00    7.18    4.31    2.87
+#    1440분     23.24%     4.30    2.15    1.29    0.86
+# 연 파산확률 근사(하루 2.01건): D=1.0 → 52% · D=0.5 → 27% · D=0.3 → 13% · D=0.2 → 4%
+# ⭐짧은 보유는 순자산 상한이 먼저 묶어 **배리어를 낮춰도 안 변한다**. 줄어드는 건 긴 보유뿐인데,
+#   거기가 2026-09-13 반사실에서 «위험의 거의 전부»로 지목된 꼬리다.
+MAX_DRAWDOWN = 1.0  # TODO(human)
+
+
+def survival_leverage(safe_mae_pct: float, max_drawdown: float = None) -> float:
+    """«안전 MAE 만큼 역행해도 손실이 D 를 넘지 않는» 최대 배수.
+
+    D=1.0 이면 종전과 같다(전손까지 허용). D<1 이면 그 비율만큼 작아진다."""
+    d = MAX_DRAWDOWN if max_drawdown is None else max_drawdown
+    return max(0.0, d) * 100.0 / max(safe_mae_pct, 1e-6)
 
 
 def policy_leverage(safe_mae_pct: float, *, hard_cap: float = HARD_CAP_X,
-                    growth_off: bool = False) -> dict[str, float]:
-    """운영 레버리지 = min(생존, 성장, 정책상한). 어느 쪽이 묶었는지 같이 돌려준다."""
-    surv = survival_leverage(safe_mae_pct)
+                    growth_off: bool = False,
+                    max_drawdown: float = None) -> dict[str, float]:
+    """운영 레버리지 = min(생존, 성장, 정책상한). 어느 쪽이 묶었는지 같이 돌려준다.
+
+    ⭐min() 이 맞는 이유(Risk-Constrained Kelly): g(f)=fμ−½f²σ² 는 f* 까지 **증가**하므로,
+    제약 상한이 f* 보다 작으면 제약 아래에서의 최적해는 그 상한 자체다. 여기서는 생존 상한이
+    항상 켈리(35.5배)보다 작아 min() 이 곧 제약 최적해다."""
+    surv = survival_leverage(safe_mae_pct, max_drawdown)
     grow = float("inf") if growth_off else kelly_robust_leverage()
     lev = min(surv, grow, hard_cap)
     binding = "survival" if lev == surv else ("growth" if lev == grow else "cap")
     return {"leverage": max(MIN_X, lev), "survival_x": surv,
-            "growth_x": None if growth_off else grow, "cap_x": hard_cap, "binding": binding}
+            "growth_x": None if growth_off else grow, "cap_x": hard_cap, "binding": binding,
+            "max_drawdown": MAX_DRAWDOWN if max_drawdown is None else max_drawdown}
 
 
 def entry_notional(equity: float, safe_mae_pct: float, existing_notional: float = 0.0,
