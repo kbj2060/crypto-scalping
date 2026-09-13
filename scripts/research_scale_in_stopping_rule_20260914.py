@@ -76,7 +76,37 @@ def arm_oracle(c, idx, sides, w, k):
             "worst": float(np.min(net)), "adds": float(np.mean(adds)), "n": len(net)}
 
 
-def arm_rule(c, idx, sides, w, k, z, eps, use_model=True):
+def heikin_bollinger(df, *, n=20, m=2.0, recent=12):
+    """봉별 «지금 바닥 신호인가» 벡터 4 개. 전부 봉 t 종가까지만 본다(자기 봉 포함 = 저장소 규약).
+
+    HA 전환 = 직전 봉이 음(ha_close<=ha_open)이었다가 이번 봉이 양 -> 하락이 꺾인 자리.
+    BB 는 (20, 2) -- `features/engineering.py:272` 와 같은 파라미터."""
+    o, h, l, c = (df[x].to_numpy(float) for x in ("open", "high", "low", "close"))
+    ha_c = (o + h + l + c) / 4.0
+    ha_o = np.empty_like(ha_c)
+    ha_o[0] = (o[0] + c[0]) / 2.0
+    for i in range(1, len(ha_c)):                      # 재귀라 벡터화 불가
+        ha_o[i] = (ha_o[i - 1] + ha_c[i - 1]) / 2.0
+    bull = ha_c > ha_o
+    flip_up = np.r_[False, bull[1:] & ~bull[:-1]]      # 음 -> 양
+    flip_dn = np.r_[False, ~bull[1:] & bull[:-1]]
+    mid = pd.Series(c).rolling(n, min_periods=n).mean().to_numpy()
+    sd = pd.Series(c).rolling(n, min_periods=n).std(ddof=0).to_numpy()
+    up, dn = mid + m * sd, mid - m * sd
+    touch_lo, touch_hi = c <= dn, c >= up
+    back_lo = np.r_[False, touch_lo[:-1] & ~touch_lo[1:]]   # 이탈했다가 복귀
+    back_hi = np.r_[False, touch_hi[:-1] & ~touch_hi[1:]]
+    # 🔴같은 봉에서 «HA 양전 & 종가가 하단 밖」은 49 만 봉 중 12 회뿐이다 -- 정의상 거의 배타라
+    # 교집합 팔은 결과가 아니라 «0 칸」이 나온다. 실제 규칙은 **하단을 찍고 난 뒤** 양전이므로
+    # 최근 recent 봉 안에 터치가 있었는지로 본다(현재 봉 포함 = 인과적).
+    near_lo = pd.Series(touch_lo).rolling(recent, min_periods=1).max().to_numpy().astype(bool)
+    near_hi = pd.Series(touch_hi).rolling(recent, min_periods=1).max().to_numpy().astype(bool)
+    return {"HA전환": (flip_up, flip_dn), "BB터치": (touch_lo, touch_hi),
+            "BB복귀": (back_lo, back_hi),
+            "HA전환&최근BB": (flip_up & near_lo, flip_dn & near_hi)}
+
+
+def arm_rule(c, idx, sides, w, k, z, eps, use_model=True, gate=None):
     """분위 규칙. `z[e, t]` = 예측 잔여 하락폭을 **그 시점의 전형값으로 나눈 값**.
 
     🔴첫 판은 문턱을 `eps * atr_pct` 로 잡았는데 d_q(240분)=0.806% 대 eps=2 에서 0.22% 라
@@ -84,7 +114,9 @@ def arm_rule(c, idx, sides, w, k, z, eps, use_model=True):
     ⭐게다가 d_q(r) 은 r 이 줄면 **기계적으로** 작아진다 -- 절대값으로 문턱을 잡으면 그건
     «창 끝에 사라」는 시계 규칙이지 모델이 아니다. 그 시점의 전형값으로 나눠 **«이 시점 치고
     유난히 작은가»** 만 남긴다. `use_model=False` 는 그 정규화를 빼고 시간+물타기 조건만 보는
-    **대조군**이다 -- 모델이 시계 이상을 하는지 이 둘의 차이로 판정한다."""
+    **대조군**이다 -- 모델이 시계 이상을 하는지 이 둘의 차이로 판정한다.
+    `gate[r, t]` 은 추가 시점을 더 좁히는 **외부 신호**(HA/BB)다. 물타기 조건 위에 얹는다 --
+    그래야 «신호가 보태는 것」만 대조군과의 차이로 읽힌다."""
     net, expo, adds = [], [], []
     size = 1.0 / k
     for r, (i, s) in enumerate(zip(idx, sides)):
@@ -96,6 +128,8 @@ def arm_rule(c, idx, sides, w, k, z, eps, use_model=True):
                 break
             p = c[i + 1 + t]
             cond = (z[r, t] <= eps) if use_model else True
+            if gate is not None and not gate[r, t]:
+                continue
             if (p < e0 if s > 0 else p > e0) and cond:
                 px.append(float(p)); tt.append(t); j -= 1
         net.append(1e4 * sum(size * (s * (ex / p - 1.0) - (PEG_BP + EXIT_BP) / 1e4) for p in px))
@@ -125,7 +159,27 @@ def _self_check() -> None:
     # 🔴대조군은 z 를 무시한다 -- z 가 커도 물타기 조건만 맞으면 넣는다
     r4 = arm_rule(c2, idx, sd, w, k, np.full((1, w), 9.0), 1.0, use_model=False)
     assert r4["adds"] == k - 1, r4
-    print("통과 — 비용 항등 · 물타기 조건 · 바닥 조건 · 예산 상한")
+    # 게이트가 전부 거짓이면 한 칸도 안 들어간다 / 전부 참이면 대조군과 같다
+    g0 = np.zeros((1, w), bool)
+    assert arm_rule(c2, idx, sd, w, k, z0, 1.0, use_model=False, gate=g0)["adds"] == 0
+    assert arm_rule(c2, idx, sd, w, k, z0, 1.0, use_model=False,
+                    gate=~g0)["adds"] == r4["adds"]
+    # HA/BB: 단조 상승이면 HA 는 계속 양이라 **전환이 없다**(첫 봉 제외)
+    n = 80
+    up = pd.DataFrame({"open": np.arange(n) + 100.0, "high": np.arange(n) + 100.5,
+                       "low": np.arange(n) + 99.5, "close": np.arange(n) + 100.2})
+    sig = heikin_bollinger(up)
+    # 🔴봉 1 의 전환은 **초기화 과도기**다(ha_open[0] 을 (o+c)/2 로 잡아 첫 봉만 음이 된다).
+    # 실데이터에서는 워밍업에 묻히지만 자체점검에서는 보이므로 봉 2 부터 본다.
+    assert sig["HA전환"][0][2:].sum() == 0, np.where(sig["HA전환"][0])
+    # V 자면 바닥 뒤에 롱 전환이 정확히 한 번 생긴다
+    v = np.r_[np.linspace(120, 100, 40), np.linspace(100, 120, 40)]
+    vd = pd.DataFrame({"open": v, "high": v + 0.5, "low": v - 0.5, "close": v})
+    s2 = heikin_bollinger(vd)
+    assert s2["HA전환"][0].sum() == 1 and s2["HA전환"][0][38:44].any(), np.where(s2["HA전환"][0])
+    # 교집합은 «터치가 최근에 있었나」라 단독 HA 전환보다 많을 수 없고, 터치가 없으면 0 이다
+    assert s2["HA전환&최근BB"][0].sum() <= s2["HA전환"][0].sum()
+    print("통과 — 비용 항등 · 물타기 조건 · 바닥 조건 · 예산 상한 · 게이트 · HA 전환")
 
 
 def main() -> int:
@@ -147,6 +201,7 @@ def main() -> int:
 
     df = maq._load_klines()
     c = df.close.to_numpy(float)
+    sig = heikin_bollinger(df)
     X = svm.build_features(df.ts, c, df.quote_volume.to_numpy(float), df.trades.to_numpy(float),
                            df.high.to_numpy(float), df.low.to_numpy(float))
     atrp = (pd.Series(np.abs(np.diff(c, prepend=c[0]))).rolling(288, min_periods=200).mean()
@@ -184,11 +239,21 @@ def main() -> int:
             base = arm_single(c, idx, sides, w)
             orc = arm_oracle(c, idx, sides, w, a.k)
             ctl = arm_rule(c, idx, sides, w, a.k, z, 0.0, use_model=False)
+            bars = idx[:, None] + 1 + np.arange(w - 1)[None, :]
+            long_side = sides[:, None] > 0
+            gates = {nm: np.where(long_side, lg[bars], sh[bars])
+                     for nm, (lg, sh) in sig.items()}
             cc = ((ctl["net_bp"] - base["net_bp"]) / (orc["net_bp"] - base["net_bp"])
                   if orc["net_bp"] > base["net_bp"] else float("nan"))
             print(f"{wname:>18} {'대조군(모델없음)':>16} {ctl['net_bp']:>12.2f} "
                   f"{ctl['expo']:>6.2f} {ctl['adds']:>7.2f} {ctl['worst']:>9.1f} "
                   f"{100*cc:>10.1f}%")
+            for nm, g in gates.items():
+                r = arm_rule(c, idx, sides, w, a.k, z, 0.0, use_model=False, gate=g)
+                cap = ((r["net_bp"] - base["net_bp"]) / (orc["net_bp"] - base["net_bp"])
+                       if orc["net_bp"] > base["net_bp"] else float("nan"))
+                print(f"{wname:>18} {'+' + nm:>16} {r['net_bp']:>12.2f} {r['expo']:>6.2f} "
+                      f"{r['adds']:>7.2f} {r['worst']:>9.1f} {100*cap:>10.1f}%")
             for eps in (0.7, 0.85, 1.0, 1.2):
                 r = arm_rule(c, idx, sides, w, a.k, z, eps)
                 cap = ((r["net_bp"] - base["net_bp"]) / (orc["net_bp"] - base["net_bp"])
