@@ -2848,7 +2848,7 @@ def make_app() -> web.Application:
         return pct / 100.0 if 0.0 < pct <= 100.0 else None
 
     async def assemble_exit_plan(position_side: str, fraction: float = 1.0,
-                                 hold_min: int = 1440):
+                                 hold_min: int = 1440, fresh: bool = False):
         """청산 계획 조립. 진입과 같은 이유로 **여기 한 곳뿐**이다.
 
         수량은 반드시 **방금 읽은 포지션**에서 온다 -- 헤지 모드라 reduceOnly 를 못 써서
@@ -2856,8 +2856,11 @@ def make_app() -> web.Application:
         다시 닫으려다 반대 방향으로 열릴 수 있다."""
         symbol = MARKET_SYMBOLS["eth"]
         try:
-            account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
-                                       produce_account, max_stale=STALE_GRACE_SECONDS)
+            # 🔴실주문(fresh=True)은 30초 캐시를 **우회**한다. 헤지 모드라 reduceOnly 가 없어
+            # 과청산 방어가 수량뿐인데, 그 수량이 30초 묵으면 방어가 30초 묵는다.
+            account = (await produce_account() if fresh else
+                       await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
+                                        produce_account, max_stale=STALE_GRACE_SECONDS))
             match = [p for p in (account.get("positions") or [])
                      if p.get("symbol") == symbol and p.get("side") == position_side]
             if not match:
@@ -2949,7 +2952,7 @@ def make_app() -> web.Application:
                                       "state": manual_entry_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 포지션도 다시 읽으므로 미리보기 이후에 포지션이
         # 줄었으면 그만큼 줄어든 수량이 나간다(프런트가 계산한 수량을 받지 않는 이유).
-        plan, error = await assemble_exit_plan(side, frac, query_hold(request))
+        plan, error = await assemble_exit_plan(side, frac, query_hold(request), fresh=True)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
