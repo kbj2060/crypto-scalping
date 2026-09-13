@@ -307,6 +307,21 @@
               <b id="snapHoldRisk" class="entry-was">—</b>
             </label>
           </div>
+          <!-- 2026-09-13 거래소 레버리지 게이지. 위험이 아니라 «총 명목의 천장»을 정하는 값이다
+               (교차 마진이라 청산거리 = 순자산/총명목, 설정값은 안 들어간다). 자동이면 모델
+               추천대로 따라가고, 끄면 손으로 고른다. 주문 직전에 API 로 실제 설정한다. -->
+          <div class="manual-entry-row actions">
+            <label class="exit-frac" for="snapLevGauge">
+              <span class="entry-cap">레버리지</span>
+              <input type="range" id="snapLevGauge" min="0" max="14" step="1" value="5"
+                     aria-label="거래소 레버리지">
+              <b id="snapLevVal">-</b>
+            </label>
+            <label class="lev-auto" for="snapLevAuto">
+              <input type="checkbox" id="snapLevAuto" checked>
+              <span>자동</span>
+            </label>
+          </div>
           <div class="manual-entry-row actions">
             <label class="exit-frac" for="snapEntryFrac">
               <span class="entry-cap">진입 비율</span>
@@ -403,7 +418,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260913-levset"></script>
+  <script src="./app.js?v=20260913-levgauge"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

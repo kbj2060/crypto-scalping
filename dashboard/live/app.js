@@ -5269,9 +5269,48 @@ const manualEntryPct = () => sliderPct("snapEntryFrac");
 // 보유 예정 시간. **크기를 정하는 입력**이라 진입·청산이 같은 값을 쓴다.
 const manualHoldMin = () => Number(el("snapHold")?.value) || 1440;
 
+// ── 2026-09-13 거래소 레버리지 게이지 ────────────────────────────────────────
+// 위험이 아니라 **총 명목의 천장**을 정하는 값이다(교차 마진이라 청산거리는 순자산/총명목).
+// 게이지는 거래소가 받는 눈금 위에서만 움직인다 -- 그 사이 값을 보내면 거래소가 반올림해서
+// 화면과 실제가 어긋난다. 서버가 plan.leverage_steps 로 같은 배열을 내려준다.
+let LEV_STEPS = [1, 2, 3, 5, 8, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150];
+const manualLevAuto = () => el("snapLevAuto")?.checked !== false;
+function manualLevValue() {
+  const g = el("snapLevGauge");
+  if (!g) return null;
+  const i = Math.min(LEV_STEPS.length - 1, Math.max(0, Number(g.value) || 0));
+  return LEV_STEPS[i];
+}
+// 자동이면 서버에 아무것도 안 보낸다 -- 서버가 모델 추천을 쓴다(단일 진실 원천).
+const manualLevQuery = () => (manualLevAuto() ? "" : `&lev=${manualLevValue()}`);
+
+function renderLevGauge(plan) {
+  const g = el("snapLevGauge");
+  const out = el("snapLevVal");
+  if (!g || !out) return;
+  if (Array.isArray(plan.leverage_steps) && plan.leverage_steps.length) {
+    LEV_STEPS = plan.leverage_steps;
+    g.max = String(LEV_STEPS.length - 1);
+  }
+  // 자동이면 모델값으로 스냅한다. 손으로 만지는 중이면 건드리지 않는다.
+  if (manualLevAuto() && plan.leverage_model) {
+    const i = LEV_STEPS.indexOf(plan.leverage_model);
+    if (i >= 0) g.value = String(i);
+  }
+  g.disabled = manualLevAuto();
+  const v = manualLevValue();
+  const min = plan.leverage_min_feasible;
+  const low = min != null && v < min;
+  out.textContent = `${v}배` + (manualLevAuto() ? " (모델)" : " (수동)")
+    + (plan.leverage_model && v !== plan.leverage_model ? ` · 모델 ${plan.leverage_model}배` : "")
+    + (low ? ` · ⚠상한만큼 못 엽니다(최소 ${Math.ceil(min)}배)` : "");
+  out.className = low ? "entry-was bad" : "entry-was";
+}
+
 async function manualEntryFetch(side, kind = "entry") {
   const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`
-    + `&hold=${manualHoldMin()}`;
+    + `&hold=${manualHoldMin()}`
+    + (kind === "exit" ? "" : manualLevQuery());
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}${q}`, { cache: "no-store" });
   return res.json();
 }
@@ -5391,6 +5430,7 @@ async function manualEntryRefreshSize() {
     if (hb) {
       const r = (data.cap || {}).risk;
       const sp = r && r.split ? ` · ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"}` : "";
+      renderLevGauge(plan);
       const rh = ((plan.trade_plan || {}).hold || {}).recommended_min;
       hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배${sp}`
         + (rh ? ` · 권고 ${rh}분` : "")
@@ -5433,7 +5473,8 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   const btn = el("snapEntryConfirm");
   if (!btn || plan.blocked) return;
   const pct = Math.round(100 * (plan.fraction ?? 1));
-  manualEntryPending = { side, quantity: plan.quantity, kind, pct, hold: manualHoldMin() };
+  manualEntryPending = { side, quantity: plan.quantity, kind, pct, hold: manualHoldMin(),
+                         lev: manualLevAuto() ? null : manualLevValue() };
   // 모델이 요구하는 최소 청산 비율보다 적게 닫으려 하면 **확인 버튼에** 적는다.
   // 미리보기에만 띄우면 슬라이더를 다시 내린 뒤에는 안 보인다.
   const need = Math.round(100 * ((plan.risk || {}).required_fraction || 0));
@@ -5452,6 +5493,9 @@ function manualEntryStateText(state) {
     rows.push(`체결 ${Number(state.filled || 0)} / ${Number(state.quantity)} ETH` +
       (state.taker_qty ? ` (테이커 ${Number(state.taker_qty)})` : ""));
   }
+  const lv = state?.leverage;
+  if (lv && lv.error) rows.push(`⚠레버리지 ${lv.to}배 설정 실패 — 거래소 천장이 그대로입니다 (${lv.error})`);
+  else if (lv && lv.changed) rows.push(`레버리지 ${lv.from}배 → ${lv.to}배 적용`);
   if (state?.error) rows.push(`사유: ${state.error}`);
   return rows.join("\n");
 }
@@ -5483,7 +5527,8 @@ async function manualEntrySubmit() {
   box.hidden = false;
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
-    const q = `&pct=${pending.pct ?? 100}&hold=${pending.hold ?? manualHoldMin()}`;
+    const q = `&pct=${pending.pct ?? 100}&hold=${pending.hold ?? manualHoldMin()}`
+      + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : ""));
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&confirm=1${q}`,
       { method: "POST", cache: "no-store" });
@@ -5499,6 +5544,11 @@ async function manualEntrySubmit() {
   }
 }
 
+el("snapLevAuto")?.addEventListener("change", () => manualEntryRefreshSize());
+el("snapLevGauge")?.addEventListener("input", () => {
+  const out = el("snapLevVal");
+  if (out) out.textContent = `${manualLevValue()}배 (수동)`;
+});
 el("snapEntryLong")?.addEventListener("click", () => manualEntryPreview("LONG", "entry"));
 el("snapEntryShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "entry"));
 el("snapExitLong")?.addEventListener("click", () => manualEntryPreview("LONG", "exit"));

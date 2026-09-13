@@ -298,6 +298,42 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
+    def test_leverage_gauge_overrides_model(self) -> None:
+        """게이지가 값을 주면 그걸 쓰고, 없으면 모델 추천을 쓴다. 범위 밖이면 모델로 떨어진다.
+
+        `target_leverage` 가 집행기로 넘어가는 유일한 값이라 여기서 계약을 고정한다 --
+        이 값이 틀리면 실계좌 레버리지가 틀리게 걸린다.
+        """
+        async def exercise() -> None:
+            client = TestClient(TestServer(server.make_app()))
+            await client.start_server()
+            try:
+                base = await (await client.get(
+                    "/api/manual-entry/preview?side=LONG&hold=240")).json()
+                p0 = base["plan"]
+                self.assertEqual(p0["leverage_source"], "model", p0)
+                self.assertEqual(p0["target_leverage"], p0["leverage_model"], p0)
+                self.assertTrue(p0["leverage_steps"], p0)
+
+                man = await (await client.get(
+                    "/api/manual-entry/preview?side=LONG&hold=240&lev=25")).json()
+                p1 = man["plan"]
+                self.assertEqual(p1["target_leverage"], 25, p1)
+                self.assertEqual(p1["leverage_source"], "manual", p1)
+                # 모델 추천은 게이지와 무관하게 그대로여야 한다(화면이 둘을 나란히 보여준다)
+                self.assertEqual(p1["leverage_model"], p0["leverage_model"], p1)
+
+                for bad in ("0", "999", "abc", "-3"):
+                    r = await (await client.get(
+                        f"/api/manual-entry/preview?side=LONG&hold=240&lev={bad}")).json()
+                    self.assertEqual(r["plan"]["leverage_source"], "model",
+                                     f"lev={bad} 가 조용히 먹혔다: {r['plan']}")
+            finally:
+                await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
     def test_bad_inputs_are_rejected_not_crashed(self) -> None:
         """잘못된 입력은 **검증**으로 막혀야지 예외로 죽으면 안 된다."""
         self._get_all([("/api/manual-entry/preview?side=NOPE", 400),

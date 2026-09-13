@@ -178,7 +178,8 @@ from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
     HARD_CAP_X, entry_notional, exit_fraction_required, recommended_tranches)
-from scripts.live_eth_trade_plan_20260913 import plan_now  # noqa: E402
+from scripts.live_eth_trade_plan_20260913 import (  # noqa: E402
+    EXCHANGE_MAX_LEVERAGE, LEVERAGE_STEPS, plan_now)
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -2705,7 +2706,8 @@ def make_app() -> web.Application:
             pass
         return None
 
-    async def assemble_entry_plan(side: str, fraction: float = 1.0, hold_min: int = 1440):
+    async def assemble_entry_plan(side: str, fraction: float = 1.0, hold_min: int = 1440,
+                                  want_lev: int | None = None):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
@@ -2803,6 +2805,16 @@ def make_app() -> web.Application:
                 cap_x=(cap_notional / equity) if cap_notional and equity > 0 else SIZING_CAP_EQUITY_X,
                 atr_pct=sizing.get("atr_pct"), hold_min=hold_min,
                 policy_cap_x=policy_cap_x)
+            # 집행기는 계획 dict 하나만 받는다. 처방 깊숙이 손을 넣게 하지 않고 여기서 꺼내 준다.
+            _rx = (plan["trade_plan"] or {}).get("prescription") or {}
+            _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
+            # 게이지가 값을 주면 그걸 쓰고, «자동»이면 모델 추천을 쓴다. 어느 쪽인지 남긴다 --
+            # 안 남기면 나중에 «왜 30배로 걸렸지»를 못 푼다.
+            plan["target_leverage"] = want_lev or _lv.get("setting")
+            plan["leverage_source"] = "manual" if want_lev else "model"
+            plan["leverage_model"] = _lv.get("setting")
+            plan["leverage_min_feasible"] = _lv.get("min_feasible")
+            plan["leverage_steps"] = list(LEVERAGE_STEPS)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, {}, {}, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, cap, sizing, None
@@ -2819,7 +2831,8 @@ def make_app() -> web.Application:
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
-        plan, cap, sizing, error = await assemble_entry_plan(side, frac, query_hold(request))
+        plan, cap, sizing, error = await assemble_entry_plan(side, frac, query_hold(request),
+                                                             query_leverage(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
@@ -2852,7 +2865,8 @@ def make_app() -> web.Application:
                                       "state": manual_entry_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
-        plan, cap, sizing, error = await assemble_entry_plan(side, frac, query_hold(request))
+        plan, cap, sizing, error = await assemble_entry_plan(side, frac, query_hold(request),
+                                                             query_leverage(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -2889,6 +2903,20 @@ def make_app() -> web.Application:
                     "reason": "worker_no_risk" if sizing.get("available") else "sizing_unavailable"}
         return {"available": True, "hold_min": hold_min,
                 "safe_mae_pct": cell["safe_mae_pct"]}
+
+    def query_leverage(request: web.Request) -> int | None:
+        """화면 게이지가 고른 거래소 레버리지. 없으면 None -- 그때는 **모델 추천**을 쓴다.
+
+        범위를 벗어나면 조용히 자르지 않고 None 을 돌려 모델값으로 떨어뜨린다.
+        (자르면 «10 을 눌렀는데 1 이 걸림» 같은 일이 생긴다.)"""
+        raw = request.query.get("lev")
+        if raw in (None, ""):
+            return None
+        try:
+            v = int(float(raw))
+        except (TypeError, ValueError):
+            return None
+        return v if 1 <= v <= EXCHANGE_MAX_LEVERAGE else None
 
     def query_fraction(request: web.Request) -> float | None:
         """쿼리의 비율(%)을 0<f<=1 로 바꾼다. 진입 분할과 부분 청산이 **같은 함수**를 쓴다.
