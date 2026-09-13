@@ -203,6 +203,11 @@ const VREB_ECON_SHADOW_POLL_MS = 60000;
 // 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
 // 서버가 이미 30초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
 let latestBinanceAccount = null;
+// 🔴마지막으로 **성공한** 계좌. latestBinanceAccount 는 실패 시 null 이 되는데, 그걸로
+// 청산 버튼을 숨기면 «조회 실패»와 «포지션 없음»이 구분되지 않는다 -- 정작 닫아야 할 때
+// 버튼이 사라진다(2026-09-13 사용자 신고). 버튼은 이 값으로 판단하고, 낡았으면 표시만 한다.
+let lastGoodAccount = null;
+let lastGoodAccountAt = 0;
 let binanceAccountLastFetchAt = 0;
 const BINANCE_ACCOUNT_POLL_MS = 30000;
 let sessionAlertsLastFetchAt = 0;
@@ -1142,6 +1147,7 @@ function renderSnapshotAccount() {
 function renderBinanceAccount(payload) {
   // 스냅샷 탭 요약과 청산맵 진입선이 같은 값을 쓴다 -- 두 번 받지 않도록 여기서 보관한다.
   latestBinanceAccount = payload?.ok ? payload : null;
+  if (payload?.ok) { lastGoodAccount = payload; lastGoodAccountAt = Date.now(); }
   renderSnapshotAccount();
   renderSnapshotChart();
   // 🔴계좌가 **도착하는 즉시** 청산 버튼을 맞춘다. 예전에는 60초 주기(MANUAL_ENTRY_REFRESH_MS)
@@ -5481,6 +5487,22 @@ el("snapExitLong")?.addEventListener("click", () => manualEntryPreview("LONG", "
 el("snapExitShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "exit"));
 el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
 // 비율을 바꾸면 화면에 떠 있던 확인 버튼은 **다른 계획**의 것이다. 지운다.
+// 계좌 강제 조회. refreshBinanceAccount 의 30초 자체 게이트를 넘겨야 하므로 시각을 지운다.
+el("snapAcctRefresh")?.addEventListener("click", async () => {
+  const btn = el("snapAcctRefresh");
+  if (!btn || btn.disabled) return;
+  btn.disabled = true; btn.classList.add("spin");
+  try {
+    binanceAccountLastFetchAt = 0;
+    await refreshBinanceAccount();
+    manualExitSyncButtons();      // 포지션이 바뀌었으면 버튼도 바로 맞춘다
+    manualEntryRefreshSize();
+  } finally {
+    btn.classList.remove("spin");
+    setTimeout(() => { btn.disabled = false; }, 3000);   // 연타로 거래소 한도를 때리지 않게
+  }
+});
+
 el("snapHold")?.addEventListener("change", () => {
   manualEntryClearConfirm();          // 보유시간이 바뀌면 크기가 바뀐다 -- 다른 계획이다
   manualEntryRefreshSize();
@@ -5502,13 +5524,21 @@ function manualExitSyncButtons() {
   if (!row) return;
   // 서버의 청산 경로는 ETH 전용이다(assemble_exit_plan 이 MARKET_SYMBOLS["eth"] 고정).
   const sym = ASSET_CONFIG.eth?.symbol || "ETHUSDT";
-  const open = (latestBinanceAccount?.positions || [])
+  // 실패해도 마지막으로 알던 포지션을 유지한다. 5분 넘게 갱신이 없으면 그때는 숨긴다 --
+  // 그쯤 되면 «닫을 게 남아 있는지»를 화면이 주장할 근거가 없다.
+  const STALE_MS = 300000;
+  const src = latestBinanceAccount
+    || (Date.now() - lastGoodAccountAt < STALE_MS ? lastGoodAccount : null);
+  const stale = !latestBinanceAccount && !!src;
+  const open = (src?.positions || [])
     .filter((p) => p.symbol === sym && Number(p.qty) > 0)
     .map((p) => p.side);
   const hasLong = open.includes("LONG");
   const hasShort = open.includes("SHORT");
-  const bl = el("snapExitLong"); if (bl) bl.hidden = !hasLong;
-  const bs = el("snapExitShort"); if (bs) bs.hidden = !hasShort;
+  const bl = el("snapExitLong");
+  if (bl) { bl.hidden = !hasLong; bl.textContent = stale ? "롱 청산 (정보 낡음)" : "롱 청산"; }
+  const bs = el("snapExitShort");
+  if (bs) { bs.hidden = !hasShort; bs.textContent = stale ? "숏 청산 (정보 낡음)" : "숏 청산"; }
   row.hidden = !(hasLong || hasShort);
 }
 if (el("snapEntryPlan")) {

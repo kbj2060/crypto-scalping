@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260913-split2">
+  <link rel="stylesheet" href="styles.css?v=20260913-refresh">
 </head>
 <body>
     <main class="app">
@@ -273,6 +273,10 @@
           <div class="ops-health-head-tools">
             <span id="snapAcctSummary" class="ops-health-summary">-</span>
             <span class="ops-readonly">거래소 실계좌 · 읽기 전용 · 30초 갱신</span>
+            <!-- 2026-09-13 강제 새로고침. 30초 폴링을 기다리지 않고 지금 받는다 --
+                 조회가 끊겨 청산 버튼이 «정보 낡음»일 때 사람이 직접 되살릴 수단이다. -->
+            <button type="button" id="snapAcctRefresh" class="acct-refresh"
+                    title="계좌 강제 조회" aria-label="계좌 강제 조회">⟳</button>
           </div>
         </div>
         <div id="snapAcctPosition" class="ops-health-list"></div>
@@ -399,7 +403,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260913-binding"></script>
+  <script src="./app.js?v=20260913-refresh-binding"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
