@@ -1771,6 +1771,10 @@ function horizonBadgeHtml(key, progress, extraTitle) {
 const MODEL_CHIP_IDS = {
   v_rebound: "modelChipVRebound",
   extreme_detector: "modelChipExtreme",   // 2026-09-09 극점 탐지기
+  // 🔴칩은 index.html 의 고정 요소다. 목록(snapSpecializedSignalList)에 항목을 넣어도
+  // 여기에 id 를 등록하고 index.html 에 칩 div 를 만들지 않으면 상단 요약엔 안 나온다.
+  breakout_prewarn: "modelChipBreakoutPrewarn",     // 2026-09-11 추세 전환 경보기
+  breakout_detector: "modelChipBreakoutDetector",   // 2026-09-11 추세 전환 탐지기
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
   whale: "modelChipWhale",
