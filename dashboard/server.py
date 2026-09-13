@@ -50,7 +50,6 @@ from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
 # docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md). Own klines fetch +
 # a frozen historical TabPFN context, NOT from trading_bot.py's dashboard_state.json -- computed
 # dashboard-side so it never touches the live bot.
-from scripts.live_eth_sweep_v_rebound_signal_20260829 import compute_eth_sweep_v_rebound_signal  # noqa: E402
 # 2026-09-09 극점 탐지기: 증거신호 8종을 피쳐로 쓴 "이 봉이 ±60분 국소 극점일 확률" 모델.
 # 표본외 161일 정밀도 강 66.0%(1.46건/일) · 중 53.2% · 약 32.1% (발동봉 기저 24.2% · 무작위 봉 2.9%).
 # 🔴강한 추세 구간(ret144 7일 분위 상하 20%)에서는 콜을 억제한다 -- 게이트 없이는 순 -3.36bp,
@@ -69,10 +68,8 @@ from scripts.live_evidence_signal_metalabel_20260829 import compute_evidence_sig
 # ETH의 compute_signals()를 재사용하되 BTC 자체 그리드스크린 K/HORIZON·TabPFN 모델로 채점하는
 # compute_btc_evidence_signals_panel()을 새로 추가(기존 compute_btc_evidence_signals()는 섀도우
 # 러너 전용 다른 모양이라 그대로 둠). 자세한 내용은 그 함수 docstring 참고.
-from scripts.live_btc_evidence_signal_metalabel_20260902 import compute_btc_evidence_signals_panel  # noqa: E402
 # 2026-09-03: XRP 증거신호 5종. XRP 페이지는 그동안 ETH 신호를 그대로 보여주고 있었다
 # (BTC에서 사용자가 신고했던 것과 같은 버그의 XRP판). 자산별 라우팅으로 해소한다.
-from scripts.live_xrp_evidence_signal_metalabel_20260903 import compute_xrp_evidence_signals_panel  # noqa: E402
 # 2026-08-30: liquidity_sweep now trained on the SAME Tier0+rsi schema as taker/short_term_
 # return_z/dalton_rule2_balance_edge (standard touch-based-MFE redo, replacing the V_REBOUND-model
 # relay bridge this import used to be) -- it lives in METALABEL_SIGNALS above and is handled by
@@ -414,6 +411,11 @@ V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
 # 2026-09-10 극점 탐지기 -- 채점은 워커가 하고 대시보드는 읽기만 한다
 # (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
+V_REBOUND_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_v_rebound_state.json"
+BTC_EVIDENCE_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_state.json"
+XRP_EVIDENCE_STATE_PATH = REPO_ROOT / "data" / "live" / "xrp_evidence_signal_state.json"
+COIN_EVIDENCE_MAX_AGE_MIN = 15.0           # 5분봉 3개
+V_REBOUND_MAX_AGE_MIN = 15.0               # 5분봉 3개
 EXTREME_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_extreme_detector_state.json"
 EXTREME_DETECTOR_MAX_AGE_MIN = 15.0        # 5분봉 3개
 
@@ -966,6 +968,31 @@ def worker_payload(path: Path, max_age_min: float, *, ts_field: str = "updated_u
     if age is not None and age > max_age_min:
         return {**st, **base, "error": "worker_stale", "stale_min": stale}
     return {**st, **({"available": True} if stamp_available else {}), "stale_min": stale}
+
+
+def btc_evidence_payload() -> dict[str, Any]:
+    """BTC 증거신호 워커 상태(2026-09-13 요청 경로에서 뺌 -- 콜드 4.02초, 서버 실측)."""
+    return worker_payload(BTC_EVIDENCE_STATE_PATH, COIN_EVIDENCE_MAX_AGE_MIN,
+                          extra_missing={"signals": [], "warmed_up": False})
+
+
+def xrp_evidence_payload() -> dict[str, Any]:
+    """XRP 증거신호 워커 상태. BTC 판과 같은 구조(콜드 3.53초)."""
+    return worker_payload(XRP_EVIDENCE_STATE_PATH, COIN_EVIDENCE_MAX_AGE_MIN,
+                          extra_missing={"signals": [], "warmed_up": False})
+
+
+def v_rebound_payload() -> dict[str, Any]:
+    """V자 급등락 워커 상태. 극점 탐지기와 같은 구조.
+
+    2026-09-13 에 요청 경로에서 뺐다 -- 대시보드 재시작 직후 첫 요청이 **137초**를 기다렸고
+    (서버 실측), 그 사이 화면은 "웜업"을 띄웠다. 배포 워처가 하루 12회쯤 재시작하므로
+    사용자가 자주 만나는 구간이었다. 함수 주석의 "GPU 에서 3초"는 이 서버에 GPU 가 없어 무효.
+    """
+    return worker_payload(V_REBOUND_STATE_PATH, V_REBOUND_MAX_AGE_MIN,
+                          extra_missing={"event_active": False, "call": None, "direction": None,
+                                         "proba_rebound": None, "tp_price": None,
+                                         "history": [], "times": []})
 
 
 def extreme_detector_payload() -> dict[str, Any]:
@@ -2039,15 +2066,13 @@ def make_app() -> web.Application:
 
     async def load_btc_evidence_signals() -> dict[str, Any]:
         """BTC 코인 페이지의 메인 증거신호 패널(2026-09-02) -- load_evidence_signals()의 BTC판.
-        compute_btc_evidence_signals_panel()이 klines 페치+지표 계산+TabPFN 채점을 전부 자체
-        처리하므로(BTC 전용 그리드스크린 K/HORIZON, live_btc_evidence_signal_metalabel_20260902.py
-        참고) 여기서는 캐시/락만 감싼다 -- load_evidence_signals()처럼 별도 klines 페치 단계가
-        없다. 첫 호출은 TabPFN 7개를 새로 적합(수 초)하지만 이후 같은 프로세스 안에서는
-        캐시된 모델을 재사용(그 함수의 _load_models() 참고)하므로 이 EVIDENCE_SIGNAL_CACHE_SECONDS
-        (ETH와 동일 60초) 캐시는 매 사이클의 재적합 비용이 아니라 klines 재페치+추론 비용만 아낀다."""
+        2026-09-13: **워커 상태 파일을 읽기만 한다.** 그 전에는 여기서
+        compute_btc_evidence_signals_panel()(klines 페치+지표+TabPFN 7개)을 인라인으로 돌렸고,
+        대시보드 재시작 후 첫 호출이 4.02초였다(서버 실측). 계산은
+        scripts/live_signal_worker.py 가 대신 돈다 -- 함수와 인자는 그대로라 숫자는 안 바뀐다."""
         return await swr_cached(
             "btc_evidence_signal", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_btc_evidence_signals_panel),
+            lambda: asyncio.to_thread(btc_evidence_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -2057,7 +2082,7 @@ def make_app() -> web.Application:
         구조/캐시 정책은 BTC판과 동일하다."""
         return await swr_cached(
             "xrp_evidence_signal", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_xrp_evidence_signals_panel),
+            lambda: asyncio.to_thread(xrp_evidence_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -2070,7 +2095,7 @@ def make_app() -> web.Application:
         same reasoning as load_evidence_signals() above."""
         return await swr_cached(
             "v_rebound", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_eth_sweep_v_rebound_signal),
+            lambda: asyncio.to_thread(v_rebound_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
 
