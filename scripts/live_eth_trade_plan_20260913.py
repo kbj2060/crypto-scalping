@@ -66,6 +66,15 @@ REBALANCE_BAND = 0.25
 
 
 EULER_GAMMA = 0.5772156649
+# 🔴**경로 뭉침 보정**(2026-09-14, 사용자 지적). 위 식은 증분이 독립이라고 본다. 실제 연대순
+# 수열로 재면 낙폭이 더 깊다 -- 로그 공간 중앙 비율 1.10(80칸, research 3차).
+# ⚠️정직하게: 이 보정은 **정확도를 안 올린다**(평균절대오차 0.066 → 0.065). 없애는 건 **편향**
+# 뿐이다(−0.025 → +0.003). 위험 표시라 «낮게 부르는» 편향은 그대로 두면 안 되므로 적용한다.
+# ⚠️효과는 지평마다 다르다(60분 1.10 · 240분 1.07 · **480분 0.95** · 1440분 1.28). 그런데
+# 실제 연대순 창은 869일에서 나와 **독립 연수가 2.4개**뿐이라 지평별 표를 만들면 과적합이다.
+# ⇒ 상수 하나만 쓴다. 블록 부트로는 재현이 안 된다(1일·1주·1달·3달 전부 IID 와 같았다) --
+#   즉 이건 단기 변동성 뭉침이 아니라 **그 해에 실제로 일어난 순서**의 효과다.
+MDD_CLUSTER_UPLIFT = 1.10
 
 
 def expected_max_drawdown(L: float, move_bp: float, sd_bp: float, acc: float,
@@ -107,7 +116,7 @@ def expected_max_drawdown(L: float, move_bp: float, sd_bp: float, acc: float,
     arg = 2.0 * g * g * n / v if g > 0 else 0.0
     log_dd = ((v / (2.0 * g)) * (math.log(arg) + EULER_GAMMA) if arg > math.e
               else math.sqrt(v) * math.sqrt(math.pi * n / 8.0))
-    return float(min(1.0, 1.0 - math.exp(-log_dd)))
+    return float(min(1.0, 1.0 - math.exp(-MDD_CLUSTER_UPLIFT * log_dd)))
 
 
 def stop_hit_rate(hold_min: int, side: str = "LONG") -> float:
@@ -628,9 +637,10 @@ def _self_check() -> None:
     # 🔴파산이 아니라 이 값이 배수를 묶는다. 배수가 오르면 낙폭도 단조 증가해야 한다.
     # 🔴**실측 대조**: research_ruin_term_in_objective_20260914 의 테이프 표본
     #    (869일 · H=240 · a=0.62 · b=92.6bp · sd=141.7bp)에서 잰 1년 중앙 MDD 다.
-    #    파라미터를 바꾸면 기준값도 바뀌므로 **같은 표본값으로** 불러야 한다.
+    #    🔴기준값은 **실제 연대순 1년 창**이다(IID 리샘플 아님) -- 뭉침이 들어간 진짜 값이라야
+    #    보정 상수까지 같이 검사된다. 파라미터를 바꾸면 기준값도 바뀐다.
     TAPE_B, TAPE_SD = 92.6, 141.7
-    truth = {2: 0.321, 3: 0.453, 4: 0.567, 6: 0.743, 8: 0.861, 10: 0.935}
+    truth = {2: 0.364, 3: 0.503, 4: 0.618, 6: 0.784, 8: 0.886}
     for L, want in truth.items():
         got = expected_max_drawdown(L, TAPE_B, TAPE_SD, 0.62, 240)
         assert abs(got - want) < 0.10, (L, got, want)

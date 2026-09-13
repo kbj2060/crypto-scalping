@@ -180,7 +180,105 @@ def verdict_ruin(df) -> None:
           "무손절이면 위험 · 3차항 발산")
 
 
+
+
+# ── 3차: 경로 뭉침 (2026-09-14, 사용자 지적) ────────────────────────────────
+# 2차까지의 MDD 는 거래를 **독립으로 리샘플**해서 냈다. 실제로는 변동성이 뭉치므로
+# 연패가 붙어 낙폭이 더 깊어진다. 여기서는 세 가지를 잰다:
+#   ① **실제 연대순** 1년 창을 굴린 MDD (뭉침이 정의상 들어간 진짜 값)
+#   ② 블록 부트(블록 길이를 키우며) -- 뭉침이 얼마나 깊게 만드는지의 크기
+#   ③ 장기분산(Newey-West)을 닫힌 식에 넣으면 그 차이가 닫히는가
+
+def trade_sequence(c, hi, lo, H, a, L, seed):
+    """**연대순** 거래 수열의 건당 로그수익. 진입은 겹치지 않는 간격으로 놓는다."""
+    n_year = int(min(735, 525_600 / H))
+    spacing = int(max(H, round(525_600 / n_year)))
+    idx = np.arange(0, len(c) - H - 2, spacing)
+    r, tL, tS = simulate(c, hi, lo, idx, H)
+    mL, cL, _a, _b = legs(r, tL, +1.0, H, 0.0)
+    mS, cS, _d, _e = legs(r, tS, -1.0, H, 0.0)
+    lr = r > 0
+    m_ok, m_no = np.where(lr, mL, mS), np.where(lr, mS, mL)
+    c_ok, c_no = np.where(lr, cL, cS), np.where(lr, cS, cL)
+    rng = np.random.default_rng(seed)
+    right = rng.random(len(idx)) < a          # 확률 a 로 맞는 쪽을 고른다
+    move = np.where(right, m_ok, m_no)
+    cost = np.where(right, c_ok, c_no)
+    x = L * (move - cost / 1e4)
+    return np.log1p(np.clip(x, -0.999999, None)), n_year
+
+
+def mdd_of(seq):
+    """로그수익 수열 하나의 최대낙폭(비율)."""
+    cum = np.cumsum(seq)
+    return float(1.0 - np.exp((cum - np.maximum.accumulate(cum)).min()))
+
+
+def rolling_year_mdd(seq, n_year):
+    """실제 연대순 1년 창들의 MDD 중앙값. 창은 겹치므로 **독립 연수는 전체/365일**이다."""
+    if len(seq) <= n_year:
+        return np.nan, 0
+    out = [mdd_of(seq[i:i + n_year]) for i in range(0, len(seq) - n_year, max(1, n_year // 20))]
+    return float(np.median(out)), len(out)
+
+
+def block_boot_mdd(seq, n_year, block, n_path=1500, seed=11):
+    """블록 부트: 연속 `block` 개를 통째로 뽑아 뭉침을 보존한다. block=1 이면 IID."""
+    rng = np.random.default_rng(seed)
+    nb = int(np.ceil(n_year / block))
+    starts = rng.integers(0, max(1, len(seq) - block), size=(n_path, nb))
+    out = np.empty(n_path)
+    for k in range(n_path):
+        s = np.concatenate([seq[i:i + block] for i in starts[k]])[:n_year]
+        out[k] = mdd_of(s)
+    return float(np.median(out))
+
+
+def variance_inflation(seq, max_lag=None) -> float:
+    """장기분산 / 건당분산 (Newey-West·Bartlett). 뭉침이 있으면 1보다 크다."""
+    n = len(seq)
+    K = max_lag or max(1, int(round(n ** (1 / 3))))
+    x = seq - seq.mean()
+    v0 = float(np.mean(x * x))
+    if v0 <= 0:
+        return 1.0
+    s = v0
+    for k in range(1, K + 1):
+        s += 2.0 * (1.0 - k / (K + 1.0)) * float(np.mean(x[k:] * x[:-k]))
+    return max(0.2, s / v0)
+
+
+def stage_cluster() -> None:
+    d = pd.read_parquet(TAPE, columns=["px_last", "px_max", "px_min"])
+    c, hi, lo = (d[k].to_numpy(float) for k in ("px_last", "px_max", "px_min"))
+    print("\n=== 3차: 경로 뭉침 반영 MDD ===")
+    print(f"{'H':>5} {'a':>5} {'L':>4} {'IID':>7} {'블록1일':>8} {'블록1주':>8} "
+          f"{'실제연대순':>10} {'뭉침배수':>8} {'VIF':>6}")
+    rows = []
+    for H in (240, 1440):
+        for a in (0.60, 0.66):
+            for L in (3.0, 6.0, 10.0):
+                seqs = [trade_sequence(c, hi, lo, H, a, L, s) for s in range(6)]
+                n_year = seqs[0][1]
+                per_day = max(1, int(round(1440 / max(H, 525_600 / n_year))))
+                real = np.median([rolling_year_mdd(s, n_year)[0] for s, _ in seqs])
+                iid = np.median([block_boot_mdd(s, n_year, 1) for s, _ in seqs])
+                b1d = np.median([block_boot_mdd(s, n_year, per_day) for s, _ in seqs])
+                b1w = np.median([block_boot_mdd(s, n_year, per_day * 7) for s, _ in seqs])
+                vif = float(np.median([variance_inflation(s) for s, _ in seqs]))
+                rows.append({"H": H, "a": a, "L": L, "iid": iid, "d1": b1d, "w1": b1w,
+                             "real": real, "vif": vif})
+                print(f"{H:>5} {a:>5} {L:>4.0f} {iid:>7.3f} {b1d:>8.3f} {b1w:>8.3f} "
+                      f"{real:>10.3f} {real/max(iid,1e-9):>8.2f}배 {vif:>6.2f}")
+    df = pd.DataFrame(rows)
+    print(f"\n뭉침 배수(실제/IID) 중앙 {(df.real/df.iid).median():.2f} · "
+          f"최대 {(df.real/df.iid).max():.2f} · VIF 중앙 {df.vif.median():.2f}")
+    return df
+
+
 if __name__ == "__main__":
-    if "mdd" not in sys.argv:
+    if "mdd" not in sys.argv and "cluster" not in sys.argv:
         verdict_ruin(main())
-    stage_mdd()
+        stage_mdd()
+    if "cluster" in sys.argv or "mdd" not in sys.argv:
+        stage_cluster()
