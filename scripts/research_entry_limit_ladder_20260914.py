@@ -126,17 +126,64 @@ def _self_check() -> None:
     print("통과 — 평평하면 미체결 · 단일은 노출 1.0 · 도달하면 체결 · 시간가중 반영")
 
 
+def run_plan(d, a) -> int:
+    """🔴씨드를 짝지어 잰다 -- 방향 동전던지기 잡음이 팔 차이보다 크다
+    ([[feedback_paired_seeds_required_when_side_is_injected_20260914]])."""
+    ts = d.timestamp.to_numpy(); c = d.close.to_numpy(float)
+    use_stop = not a.no_stop
+    arms = [("단일 90만(전량)", 1.0, None), ("절반 45만만", 0.5, None)]
+    arms += [(f"45/45 · −{p:.1f}%", 0.5, p / 100) for p in (1.0, 1.5, 2.0, 3.0)]
+    acc = float(a.acc.split(",")[0])
+    print(f"1분봉 {len(d):,} · 보유 {a.hold}분 · 정확도 {acc} · 씨드 {a.seeds} · "
+          f"손절 {'평단 3%(재무장)' if use_stop else '없음'}")
+    print("⚠️의도 명목(90 만) 1 단위당 bp -- 레버리지에 무관하다. 계좌 %는 배수만큼 곱한다\n")
+    for wname, (w0, w1) in WINDOWS.items():
+        lo_i = max(int(np.searchsorted(ts, np.datetime64(w0))), ATR_MIN)
+        hi_i = int(np.searchsorted(ts, np.datetime64(w1 + "T23:59:59"))) - a.hold - 1
+        if hi_i - lo_i < 5000:
+            continue
+        idx = np.arange(lo_i, hi_i, a.every)
+        truth = np.where(c[idx + a.hold] >= c[idx], 1.0, -1.0)
+        res = {nm: [] for nm, _, _ in arms}
+        for sdd in range(a.seeds):
+            rng = np.random.default_rng(SEED + 1000 * sdd)
+            sides = np.where(rng.random(len(idx)) < acc, truth, -truth)
+            base = None
+            for nm, first, pct in arms:
+                r = simulate_plan(d, idx, sides, pct=pct, hold=a.hold, first=first,
+                                  use_stop=use_stop)
+                base = r["net_bp"] if base is None else base
+                res[nm].append((r["net_bp"] - base, r["net_bp"], r["expo"], r["fill"],
+                                r["stop"], r["p05"], r["worst"]))
+        print(f"{wname}  (진입 {len(idx):,}건)")
+        print(f"{'팔':>16} {'Δ단일bp':>12} {'노출':>6} {'추가체결':>8} {'손절률':>7} "
+              f"{'하위5%':>9} {'최악':>9}")
+        for nm, _, _ in arms:
+            v = np.array(res[nm]); m = v[:, 0].mean()
+            se = v[:, 0].std(ddof=1) / np.sqrt(len(v)) if v[:, 0].std() > 0 else 0.0
+            print(f"{nm:>16} {m:>7.2f}±{se:<4.2f} {v[:, 2].mean():>6.2f} "
+                  f"{100*v[:, 3].mean():>7.1f}% {100*v[:, 4].mean():>6.1f}% "
+                  f"{v[:, 5].mean():>9.1f} {v[:, 6].mean():>9.1f}")
+        print()
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--acc", default="0.50,0.55,0.60")
     ap.add_argument("--hold", type=int, default=240)
     ap.add_argument("--every", type=int, default=120, help="몇 분마다 한 번 진입을 표집하나")
+    ap.add_argument("--plan", action="store_true", help="사용자 계획(45/45 · −pct) 비교")
+    ap.add_argument("--seeds", type=int, default=12)
+    ap.add_argument("--no-stop", action="store_true")
     ap.add_argument("--self-check", action="store_true")
     a = ap.parse_args()
     if a.self_check:
-        _self_check(); return 0
+        _self_check(); _check_plan(); return 0
 
     d = load()
+    if a.plan:
+        return run_plan(d, a)
     ts = d.timestamp.to_numpy()
     print(f"1분봉 {len(d):,} ({d.timestamp.min().date()}~{d.timestamp.max().date()}) · "
           f"보유 {a.hold}분 · {a.every}분마다 표집\n")
@@ -170,6 +217,79 @@ def main() -> int:
           "같은 주문을 냈을 때의 절대 성과다. 둘을 같이 읽는다.")
     return 0
 
+
+# ── 사용자 계획: 「증거금 상한 90 만. 45 만 진입, −1.5% 에 45 만 추가」 (2026-09-14) ───────
+# 🔴이 계획은 크기만 나누는 게 아니라 **손절 위치를 옮긴다**. 배포 손절은 평단 3% 이고
+# 물타기로 평단이 바뀌면 다시 건다(`live_manual_peg_entry_20260912.build_stop_plan`,
+# closePosition=true). 45/45 가 −1.5% 에서 다 차면 평단 −0.75% -> 손절은 원진입가 대비
+# **−3.72%** 로 멀어진다. 즉 「덜 잘리지만, 잘리면 같은 크기」다 -- 그걸 같이 재야 한다.
+# ⚠️결과는 **의도 명목 1 단위당**이라 레버리지에 무관하다. 계좌 %만 배수만큼 곱해진다.
+STOP_PCT, STOP_SLIP_BP, TAKER_BP = 0.03, 14.0, 4.5
+
+
+def simulate_plan(d, idx, sides, *, pct, hold, first=0.5, use_stop=True):
+    """칸0 즉시 `first`, 칸1 은 `-pct` 지정가에 나머지. 미체결이면 **덜 산 채로** 끝난다.
+
+    봉 안 순서: 롱이 내려갈 때 −1.5% 지정가가 −3.72% 손절보다 **먼저** 닿는다(물리적으로
+    가까운 쪽이 먼저다) -- 낙관 가정이 아니라 순서가 정해져 있다. 그래서 체결 -> 손절 순.
+    `first=1.0` 이면 단일 진입, `pct=None` 이면 칸1 없음(= `first` 크기 단일)."""
+    c = d.close.to_numpy(float); hi = d.high.to_numpy(float); lo = d.low.to_numpy(float)
+    net, expo, fills, stops = [], [], [], []
+    for i, s in zip(idx, sides):
+        e0 = c[i]
+        if i + hold >= len(c):
+            continue
+        size, avg, cost = first, e0, first * (PEG_BP + EXIT_BP) / 1e4
+        lvl = None if pct is None or first >= 1.0 else e0 * (1 - s * pct)
+        stop = avg * (1 - s * STOP_PCT) if use_stop else None
+        t_fill, out, texit = None, None, hold
+        for t in range(hold):
+            b = i + 1 + t
+            if lvl is not None and (lo[b] <= lvl if s > 0 else hi[b] >= lvl):
+                add = 1.0 - first
+                avg = (avg * size + lvl * add) / (size + add)
+                size += add; cost += add * (MAKER_BP + EXIT_BP) / 1e4
+                t_fill, lvl = t, None
+                stop = avg * (1 - s * STOP_PCT) if use_stop else None
+            if stop is not None and (lo[b] <= stop if s > 0 else hi[b] >= stop):
+                out, texit = stop, t
+                cost += size * (TAKER_BP + STOP_SLIP_BP - EXIT_BP) / 1e4   # 지정가청산 -> 시장가
+                break
+        px = c[i + hold] if out is None else out * (1 - s * STOP_SLIP_BP / 1e4)
+        net.append(1e4 * (size * s * (px / avg - 1.0) - cost))
+        expo.append(first * texit / hold
+                    + (0.0 if t_fill is None else (1 - first) * (texit - t_fill) / hold))
+        fills.append(int(t_fill is not None)); stops.append(int(out is not None))
+    n = np.array(net); e = np.array(expo)
+    return {"net_bp": float(n.mean()), "expo": float(e.mean()), "fill": float(np.mean(fills)),
+            "stop": float(np.mean(stops)), "worst": float(n.min()),
+            "p05": float(np.quantile(n, 0.05)), "n": len(n)}
+
+
+def _check_plan() -> None:
+    n = 900
+    flat = pd.DataFrame({"timestamp": pd.date_range("2026-01-01", periods=n, freq="1min"),
+                         "close": 100.0, "high": 100.0, "low": 100.0, "atr_pct": 0.01})
+    ix, sd = np.array([10]), np.array([1.0])
+    # 평평하면 칸1 미체결 · 손절 미발동 · 노출은 first
+    r = simulate_plan(flat, ix, sd, pct=0.015, hold=240)
+    assert r["fill"] == 0 and r["stop"] == 0 and abs(r["expo"] - 0.5) < 1e-9, r
+    assert abs(r["net_bp"] + 0.5 * (PEG_BP + EXIT_BP)) < 1e-6, r   # 절반만 샀으니 비용도 절반
+    # 정확히 −1.5% 로 내려가 머물면 칸1 체결, 손절(평단 −3%)은 미발동
+    v = np.r_[np.full(12, 100.0), np.full(n - 12, 98.5)]
+    d2 = flat.copy(); d2[["close", "high", "low"]] = np.c_[v, v, v]
+    r2 = simulate_plan(d2, ix, sd, pct=0.015, hold=240)
+    assert r2["fill"] == 1 and r2["stop"] == 0, r2
+    # 🔴핵심 -- **−3.5% 까지만 내렸다 회복**하는 길. 단일은 −3% 에서 잘리지만,
+    # 사다리는 평단이 99.25 로 내려가 손절이 96.2725(원진입가 −3.73%)라 **안 잘린다**.
+    v3 = np.r_[np.full(12, 100.0), np.linspace(100, 96.5, 120), np.linspace(96.5, 101, n - 132)]
+    d3 = flat.copy(); d3[["close", "high", "low"]] = np.c_[v3, v3, v3]
+    r3 = simulate_plan(d3, ix, sd, pct=0.015, hold=240)
+    r4 = simulate_plan(d3, ix, sd, pct=None, hold=240, first=1.0)
+    assert r3["fill"] == 1 and r3["stop"] == 0, r3
+    assert r4["stop"] == 1, r4
+    assert r3["net_bp"] > r4["net_bp"], (r3, r4)
+    print("통과 — 미체결/체결/손절 · 평단 재무장이 손절을 −3.0%->−3.73% 로 민다")
 
 if __name__ == "__main__":
     raise SystemExit(main())
