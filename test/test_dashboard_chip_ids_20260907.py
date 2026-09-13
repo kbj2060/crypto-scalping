@@ -65,3 +65,39 @@ class ChipIdWiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpecializedDetectorChipsExistTest(unittest.TestCase):
+    """특화 감지기 목록에 넣은 항목은 상단 요약 칩도 있어야 한다.
+
+    2026-09-13: 경보기·탐지기를 목록에 넣었는데 상단 요약엔 안 나왔다. 칩은 index.html 의
+    고정 요소라 MODEL_CHIP_IDS 등록 + div 생성이 따로 필요한데 둘 다 빠져 있었다.
+    """
+
+    def test_every_chip_id_exists_in_index_html(self) -> None:
+        app = APP_JS.read_text(encoding="utf-8")
+        index = INDEX.read_text(encoding="utf-8")
+        block = re.search(r"const MODEL_CHIP_IDS = \{(.*?)\n\};", app, re.S)
+        self.assertIsNotNone(block, "MODEL_CHIP_IDS 블록을 못 찾음")
+        ids = re.findall(r'"([A-Za-z0-9_]+)"', block.group(1))
+        self.assertTrue(ids)
+        for chip_id in ids:
+            self.assertIn(f'id="{chip_id}"', index, chip_id)
+
+    def test_specialized_list_items_all_have_chips(self) -> None:
+        app = APP_JS.read_text(encoding="utf-8")
+        block = re.search(
+            r"renderModelIndicatorList\(\[(.*?)\], \"snapSpecializedSignalList\"", app, re.S
+        )
+        self.assertIsNotNone(block, "특화 감지기 목록을 못 찾음")
+        # 인라인 객체의 key, 그리고 *IndicatorItem() 빌더가 쓰는 key 둘 다 모은다.
+        keys = set(re.findall(r'key:\s*"([a-z0-9_]+)"', block.group(1)))
+        for fn in re.findall(r"(\w+IndicatorItem)\(\)", block.group(1)):
+            body = re.search(rf"function {fn}\(\).*?\n\}}", app, re.S)
+            self.assertIsNotNone(body, fn)
+            found = re.search(r'key:\s*"([a-z0-9_]+)"', body.group(0))
+            self.assertIsNotNone(found, fn)
+            keys.add(found.group(1))
+        chip_map = re.search(r"const MODEL_CHIP_IDS = \{(.*?)\n\};", app, re.S).group(1)
+        for key in sorted(keys):
+            self.assertRegex(chip_map, rf"\b{key}:", f"{key} 가 MODEL_CHIP_IDS 에 없음")

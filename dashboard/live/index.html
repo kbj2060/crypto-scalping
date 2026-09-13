@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260913-revalidate">
+  <link rel="stylesheet" href="styles.css?v=20260913-topchips">
 </head>
 <body>
     <main class="app">
@@ -260,6 +260,16 @@
               <span class="signal-chip-label">극점 탐지기</span>
               <span class="signal-chip-state">-</span>
             </div>
+            <div id="modelChipBreakoutPrewarn" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">추세 전환 경보기</span>
+              <span class="signal-chip-state">-</span>
+            </div>
+            <div id="modelChipBreakoutDetector" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">추세 전환 탐지기</span>
+              <span class="signal-chip-state">-</span>
+            </div>
           </div>
         </div>
       </section>
@@ -415,7 +425,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260913-revalidate-stoprisk"></script>
+  <script src="./app.js?v=20260913-topchips"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
