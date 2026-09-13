@@ -159,6 +159,78 @@ def hold_budget(equity: float, notional: float, risk_table: dict, side: str,
                      "지금 크기는 어떤 보유시간 예산도 넘습니다 — 사다리대로 줄이세요")}
 
 
+# ── 거래소 레버리지 설정 (2026-09-13) ────────────────────────────────────────
+# 🔴교차 마진에서 **설정 레버리지는 위험을 안 바꾼다**. 청산거리는 순자산/총명목이고 설정값이
+# 거기 안 들어간다(2026-09-12 실측: 설정 30배인데 청산까지 13.48%, 격리 30배면 ~3%여야 한다).
+# 설정이 정하는 것은 둘뿐이다:
+#   ① 잠기는 증거금 = 명목 / 설정레버리지
+#   ② **열 수 있는 총 명목의 하드 상한** = 가용증거금 × 설정레버리지
+# ②가 이 함수의 존재 이유다. 설정을 우리 정책 상한에 맞추면 대시보드 상한이 **거래소가
+# 강제하는 상한**이 된다 -- 화면을 우회해도(거래소 앱에서 직접 주문해도) 살아남는 유일한 방어다.
+# ETHUSDT 실측 브래킷(2026-09-13): 1구간 30만 USDT 까지 **150배 · 유지증거금률 0.40%**.
+# 우리 크기(순자산 1,089 × 8배 = 8,716)는 전부 1구간이라 거래소는 아무것도 안 막는다.
+EXCHANGE_MAX_LEVERAGE = 150
+MAINT_MARGIN_RATE = 0.004
+LEVERAGE_STEPS = (1, 2, 3, 5, 8, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150)
+
+
+def leverage_setting(*, cap_notional: float, equity: float,
+                     existing_notional: float = 0.0) -> dict:
+    """거래소에 설정할 레버리지. **위험이 아니라 «상한을 거래소에 새기는 값»** 이다.
+
+    돌려주는 것:
+      · `setting`        실제로 걸 값(거래소가 받는 눈금으로 올림)
+      · `min_feasible`   이 아래로 내리면 정책 상한만큼도 못 연다(주문 거부)
+      · `max_notional`   그 설정에서 거래소가 열어 주는 총 명목 = 순자산 × 설정
+      · `enforces_cap`   거래소 상한이 우리 정책 상한과 같은가(같아야 방어가 선다)
+    """
+    if equity <= 0 or cap_notional <= 0:
+        return {"available": False, "reason": "순자산 또는 상한 없음"}
+    # 정책 상한을 그대로 열려면 최소 이만큼은 있어야 한다.
+    # 🔴기존 포지션을 더하지 **않는다**. 정책 상한은 기존을 **포함한 총 명목**에 걸리므로
+    # 필요한 증거금은 cap/L_set 하나뿐이고, 기존 다리는 이미 그 cap 안에 들어 있다.
+    # (첫 판에 (cap+existing)/equity 로 짰다가 이중 계상을 잡았다 -- 그러면 설정이 두 배로
+    #  뛰어 거래소 상한이 정책의 2.5배가 되고 방어가 무의미해진다.)
+    min_feasible = cap_notional / equity
+    target = choose_leverage(min_feasible=min_feasible, cap_x=cap_notional / equity)
+    setting = next((x for x in LEVERAGE_STEPS if x >= target), EXCHANGE_MAX_LEVERAGE)
+    setting = min(setting, EXCHANGE_MAX_LEVERAGE)
+    max_notional = equity * setting
+    return {
+        "available": True,
+        "setting": setting,
+        "min_feasible": round(min_feasible, 2),
+        "cap_x": round(cap_notional / equity, 2),
+        "max_notional": round(max_notional, 2),
+        "margin_locked": round(cap_notional / setting, 2),
+        "margin_pct_of_equity": round(100.0 * cap_notional / setting / equity, 1),
+        "enforces_cap": max_notional <= cap_notional * 1.25,
+        "exchange_max": EXCHANGE_MAX_LEVERAGE,
+        "note": (f"거래소 레버리지를 {setting}배로 두면 열 수 있는 총 명목이 "
+                 f"{max_notional:,.0f} USDT 로 묶입니다 (정책 상한 {cap_notional:,.0f})"),
+    }
+
+
+def choose_leverage(*, min_feasible: float, cap_x: float) -> float:
+    """설정 레버리지의 **목표값**(눈금 올림 전). 여유를 얼마나 둘지가 유일한 판단이다.
+
+    min_feasible 아래면 정책 상한만큼도 못 열어 주문이 거부된다.
+    cap_x 에 딱 붙이면 거래소가 우리 상한을 강제해 주지만 수수료·헤지 반대다리 몫이 없다.
+    위로 멀어질수록 주문은 편해지고 거래소 방어는 약해진다.
+    """
+    # **cap_x 의 1.2배**로 정한다. 근거 셋:
+    #   ① 딱 붙이면(1.0배) 정책 상한만큼 열 때 초기증거금이 순자산의 100% 가 된다. 거래소는
+    #      가용증거금을 **초과**하면 거부하므로 수수료·펀딩 차감분에서 마지막 주문이 막힌다.
+    #      눈금이 (…5, 8, 10, 15…)로 성기어 «조금만 위»라는 선택지가 없다.
+    #   ② 1.2배면 상한까지 열어도 증거금이 순자산의 83% 라 17% 가 남는다 -- 수수료·펀딩·
+    #      반올림에 충분하고, 헤지 두 다리를 합쳐도 cap 안이면 그대로 성립한다.
+    #   ③ 그래도 거래소 천장이 정책의 1.2배라 **방어가 산다**(enforces_cap 판정 1.25배 안).
+    #      설정을 안 만지면 천장이 150배라 정책의 18배까지 열린다 -- 그게 지금 상태다.
+    # 여유를 더 주고 싶으면 이 배수만 올린다. 1.25 를 넘기면 enforces_cap 이 False 가 되고
+    # 화면이 «거래소가 상한을 강제하지 않습니다»라고 말한다.
+    return max(min_feasible, cap_x) * 1.2
+
+
 def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: float,
               cap_x: float, acc: float = PRESCRIBE_ACC,
               existing_notional: float = 0.0) -> dict:
@@ -197,9 +269,14 @@ def prescribe(*, risk_table: dict, atr_pct: float | None, side: str, equity: flo
         h2 = recommend_hold(risk_table, side, cap_x, atr_pct, x)
         if h2.get("available"):
             sens[str(x)] = h2["recommended_min"]
+    # 거래소에 걸 설정값. 기준은 **정책 상한**이지 이 지평의 배수가 아니다 -- 사용자가 보유
+    # 시간을 바꾸면 배수가 달라지므로, 거래소에 새기는 천장은 전 지평의 상한이어야 한다.
+    lev = leverage_setting(cap_notional=equity * cap_x, equity=equity,
+                           existing_notional=existing_notional)
     return {
         "available": True,
         "leverage": round(L, 2), "hold_min": H, "tranches": 1,
+        "exchange_leverage": lev,
         "total_notional": round(total, 2),
         "room_notional": round(max(0.0, total - max(0.0, existing_notional)), 2),
         "safe_mae_pct": m, "liq_distance_pct": round(100.0 / L, 2) if L else None,
@@ -318,6 +395,23 @@ def _self_check() -> None:
     assert abs(rx["liq_distance_pct"] - 100.0 / rx["leverage"]) < 0.1   # 둘 다 반올림값
     hb = rx["hold_by_acc"]
     assert hb["0.58"] >= hb["0.7"], hb        # 시간당 목적함수: 실력이 오르면 짧아진다
+    # ── 거래소 레버리지 설정 ──────────────────────────────────────────────────
+    lv = rx["exchange_leverage"]
+    assert lv["available"] and lv["setting"] in LEVERAGE_STEPS, lv
+    # 🔴기존 포지션이 설정을 바꾸면 안 된다(이중 계상 회귀 방지). 정책 상한은 총 명목에 걸린다.
+    a0 = leverage_setting(cap_notional=8000.0, equity=1000.0, existing_notional=0.0)
+    a1 = leverage_setting(cap_notional=8000.0, equity=1000.0, existing_notional=4000.0)
+    assert a0["setting"] == a1["setting"] == 10, (a0["setting"], a1["setting"])
+    # 정책 상한만큼은 반드시 열려야 한다 -- 설정이 min_feasible 아래면 주문이 거부된다
+    for cap_n, eq in ((8000.0, 1000.0), (2000.0, 1000.0), (500.0, 1000.0), (40000.0, 1000.0)):
+        r = leverage_setting(cap_notional=cap_n, equity=eq)
+        assert r["max_notional"] >= cap_n - 1e-6, (cap_n, eq, r)
+        assert r["margin_pct_of_equity"] <= 100.0, r
+        assert r["setting"] <= EXCHANGE_MAX_LEVERAGE
+    # 여유는 정책의 1.2배 목표 -- 거래소 천장이 정책을 크게 넘으면 방어가 죽는다
+    assert a0["max_notional"] <= 8000.0 * 1.25 and a0["enforces_cap"] is True, a0
+    assert leverage_setting(cap_notional=0.0, equity=1000.0)["available"] is False
+    assert leverage_setting(cap_notional=8000.0, equity=0.0)["available"] is False
     # 분할 횟수는 어떤 입력에서도 1 이다 -- 여기가 흔들리면 실험을 다시 돌려야 한다
     for cx in (2.0, 8.0, 25.0):
         for apx in (0.0002, 0.001, 0.003):
@@ -337,7 +431,7 @@ def _self_check() -> None:
     p = plan_now(side="LONG", equity=0.0, existing_notional=0.0, unrealized_pnl=0.0,
                  risk_table={}, vol_bpm=None, cap_x=8.0)
     assert p["size"]["leverage"] is None and p["exit_ladder"]["budget_min"] == 0
-    print("통과 41/41 — 처방(배수·보유·분할) · 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
+    print("통과 52/52 — 처방(배수·보유·분할·거래소설정) · 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
 
 
 if __name__ == "__main__":

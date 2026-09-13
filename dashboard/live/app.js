@@ -5223,6 +5223,14 @@ function tradePlanLines(tp) {
       + ` — 청산거리 ${rx.liq_distance_pct}% · 손익분기 실력 ${Math.round(100 * rx.breakeven_acc)}%`
       + ` (실력 ${Math.round(100 * rx.acc_assumed)}% 가정${hb ? `, 가정별 보유 ${hb}` : ""})`);
     out.push(`크기는 ${rx.size_source} · 분할 ${rx.tranche_reason}`);
+    // 거래소 레버리지 설정. 위험이 아니라 «상한을 거래소에 새기는 값»이라 문구도 그렇게 쓴다.
+    const lv = rx.exchange_leverage;
+    if (lv && lv.available) {
+      out.push(`거래소 레버리지 ${lv.setting}배로 설정 — ${lv.note}`
+        + ` · 증거금 ${lv.margin_pct_of_equity}% 잠김`
+        + (lv.enforces_cap ? " · 화면을 우회해도 상한이 걸립니다"
+                           : ` · ⚠거래소 천장이 상한보다 큽니다(눈금이 성깁니다)`));
+    }
   }
   const h = tp.hold || {};
   if (h.available) {

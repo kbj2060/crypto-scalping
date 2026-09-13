@@ -2780,7 +2780,6 @@ def make_app() -> web.Application:
             if risk.get("available") and equity > 0 and price_ref > 0:
                 rec_qty = entry_notional(equity, risk["safe_mae_pct"])["total_notional"] / price_ref
                 rec_src = "risk_model"
-
             plan = build_entry_plan(
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 recommended_qty=rec_qty,

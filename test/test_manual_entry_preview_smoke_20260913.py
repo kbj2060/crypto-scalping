@@ -263,6 +263,11 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     self.assertGreater(rx["leverage"], 0, rx)
                     self.assertAlmostEqual(rx["liq_distance_pct"], 100.0 / rx["leverage"],
                                            delta=0.1, msg=str(rx))
+                    # 거래소 레버리지: 정책 상한만큼은 반드시 열려야 한다
+                    lv = rx["exchange_leverage"]
+                    self.assertTrue(lv["available"], lv)
+                    self.assertGreaterEqual(lv["setting"], lv["min_feasible"], lv)
+                    self.assertLessEqual(lv["margin_pct_of_equity"], 100.0, lv)
             finally:
                 await client.close()
 
