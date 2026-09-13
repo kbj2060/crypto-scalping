@@ -442,6 +442,7 @@ EVENT_POLL_SECONDS = 2.5
 # Sized to cover a worst-case TabPFN refit (43s measured under GPU contention) with wide margin:
 # past this the payload is treated as cold again and the request blocks for a current reading.
 STALE_GRACE_SECONDS = 600
+SWR_SLOW_LOG_SECONDS = 0.30   # 이 아래는 «파일 읽기» 취급, 로그에 안 남긴다
 MARKET_HISTORY_CACHE_SECONDS = 300
 # 3 + N개의 서명 GET(weight 5씩)이라 폴링 자체는 싸다. 포지션은 실시간성이 필요하고
 # 체결내역은 안 변하지만, 캐시를 둘로 쪼개는 값어치는 없어서 한 페이로드 30초로 묶었다.
@@ -1517,7 +1518,7 @@ def make_app() -> web.Application:
                 async with lock:
                     if time.monotonic() - cache.get("ts", 0.0) < ttl:
                         return  # another path refreshed it while this one queued on the lock
-                    payload = await produce()
+                    payload = await _timed_produce(key, produce)
                     cache["payload"] = payload
                     cache["ts"] = time.monotonic()
             except Exception as exc:  # noqa: BLE001 -- a failed BACKGROUND refresh must never
@@ -1526,6 +1527,18 @@ def make_app() -> web.Application:
                 # this raise would only kill an orphan task and lose the reason.
                 print(f"cache refresh failed for {key} (still serving stale): {exc}", flush=True)
         refresh_tasks[key] = asyncio.create_task(_run())
+
+    async def _timed_produce(key: str, produce):
+        """produce() 한 번의 실제 소요시간을 남긴다 -- 어떤 엔드포인트를 워커로 빼야 하는지
+        추측이 아니라 실측으로 정하기 위해서다(2026-09-13). 이미 도는 갱신 경로에만 걸리므로
+        계산 횟수가 늘지 않는다. 임계 미만은 안 찍는다 -- 파일 한 줄 읽는 것들이 로그를 덮는다."""
+        t0 = time.monotonic()
+        try:
+            return await produce()
+        finally:
+            took = time.monotonic() - t0
+            if took >= SWR_SLOW_LOG_SECONDS:
+                print(f"swr produce {key} {took:.2f}s", flush=True)
 
     swr_store: dict[str, dict] = {}
     swr_locks: dict[str, asyncio.Lock] = {}
@@ -1562,7 +1575,7 @@ def make_app() -> web.Application:
             payload = cache.get("payload")
             if payload is not None and time.monotonic() - cache.get("ts", 0.0) < ttl:
                 return payload
-            payload = await produce()
+            payload = await _timed_produce(key, produce)
             cache["payload"] = payload
             cache["ts"] = time.monotonic()
             return payload
