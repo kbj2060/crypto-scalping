@@ -2704,6 +2704,10 @@ def make_app() -> web.Application:
             # 헤지 모드라 롱·숏이 동시에 열린다. 위험 상쇄를 가정하지 않고 **절대값 합**으로 본다
             # -- 두 다리 다 증거금을 먹고, 둘 다 청산될 수 있다.
             existing = sum(abs(float(p.get("notional") or 0.0)) for p in positions)
+            # 물타기 판정은 **같은 방향**만 본다 -- 헤지 모드에서 반대 다리를 여는 건 물타기가 아니다.
+            same = [p for p in positions if p.get("side") == side]
+            same_notional = sum(abs(float(p.get("notional") or 0.0)) for p in same)
+            same_unrealized = sum(float(p.get("unrealized_pnl") or 0.0) for p in same)
             equity = float((account.get("balance") or {}).get("margin") or 0.0)
             # 포지션이 없으면 positions 가 비어 있다 -- 그때도 설정 레버리지는 알아야
             # «증거금 얼마»를 말할 수 있다(교차 마진에서 증거금 = 명목/레버리지).
@@ -2759,14 +2763,15 @@ def make_app() -> web.Application:
                 recommended_qty=rec_qty,
                 cap_notional=cap_notional,
                 filters=filters, symbol=symbol, existing_notional=existing,
-                equity=equity, leverage=leverage, fraction=fraction)
+                equity=equity, leverage=leverage, fraction=fraction,
+                same_side_notional=same_notional, same_side_unrealized=same_unrealized)
             plan["recommended_source"] = rec_src
             plan["recommended_qty"] = round(rec_qty, 8)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)
             # 2026-09-13 «지금 상황» 플랜: 보유시간 권고·집행·분할·예산 사다리. 상한은 적용된 실효 배수.
             plan["trade_plan"] = plan_now(
                 side=side, equity=equity, existing_notional=existing,
-                unrealized_pnl=sum(float(p.get("unrealized_pnl") or 0.0) for p in positions),
+                unrealized_pnl=same_unrealized,
                 risk_table=sizing.get("risk_mae") or {},
                 vol_bpm=await realized_vol_now(symbol),
                 cap_x=(cap_notional / equity) if cap_notional and equity > 0 else SIZING_CAP_EQUITY_X,
@@ -2826,6 +2831,11 @@ def make_app() -> web.Application:
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
+        # 🔴물타기는 **별도 확인**을 요구한다(2026-09-13). 화면에만 «금지»라고 적어 두면 규칙이
+        # 아니라 장식이다. 완전히 막지 않는 이유는 상한 없는 거래소 화면으로 밀어내지 않기 위함.
+        if plan.get("averaging_down") and request.query.get("avgdown") != "1":
+            return web.json_response({"ok": False, "error": "averaging_down",
+                                      "detail": plan["averaging_down"]}, status=400)
         manual_entry_state.clear()
         manual_entry_state.update(phase="submitting", side=side, plan=plan,
                                   started_at=datetime.now(timezone.utc).isoformat())

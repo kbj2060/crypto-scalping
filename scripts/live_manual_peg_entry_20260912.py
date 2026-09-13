@@ -91,7 +91,8 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
                      cap_notional: float | None, filters: dict[str, float],
                      symbol: str = "ETHUSDT", existing_notional: float = 0.0,
                      equity: float = 0.0, leverage: float = 0.0,
-                     fraction: float = 1.0) -> dict[str, Any]:
+                     fraction: float = 1.0, same_side_notional: float = 0.0,
+                     same_side_unrealized: float = 0.0) -> dict[str, Any]:
     """보낼 주문 하나를 만든다. **순수 함수** -- 네트워크도 시계도 안 본다(그래야 검사가 된다).
 
     peg 는 «내가 메이커로 남는 가격»이다: 롱은 최우선 매수호가, 숏은 최우선 매도호가.
@@ -101,6 +102,13 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     얼마든지 넘길 수 있는데, 막아야 할 대상은 −548.88 을 만든 그 왕복의 `max_qty` 14.273 --
     즉 **왕복 중 최대 포지션**이지 주문 크기가 아니다. 실제로 기존 숏 3.025(7,642)가 열린
     상태에서 2.693(6,803)을 더하면 14,444 로 상한 13,579 를 넘고 있었다.
+
+    🔴`same_side_*` 는 **물타기 판정용**이다(2026-09-13). 같은 방향 포지션이 평가손실 중인데
+    더 넣는 것이 물타기이고, 2026-09-06 감사에서 크기를 맞춰 재면 **24/24 전패**였다(이득처럼
+    보이던 건 전부 크기 효과). 그래서 계획에 `averaging_down` 을 실어 보내고 submit 이
+    `avgdown=1` 없이는 거부한다 -- 여기서 `blocked` 로 막지 **않는** 이유는 미리보기 자체는
+    보여야 하고, 완전히 막으면 상한 없는 거래소 화면으로 가 버리기 때문이다(그게 더 나쁘다).
+    반대 방향은 해당 없다 -- 헤지 모드에서 반대 다리를 여는 건 물타기가 아니다.
 
     equity/leverage 는 **화면 설명용**이다. 교차 마진이라 청산 거리는 대략
     `순자산 / 총명목` 이고(실측 1,065/7,642 = 13.9% vs 거래소 13.48%), 설정 레버리지는
@@ -172,6 +180,12 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
         "liq_distance_pct": round(100 * equity / total_notional, 1) if equity and total_notional else None,
         "cap_used_pct": round(100 * total_notional / cap_notional, 0) if cap_notional else None,
         "fraction": round(float(fraction), 4),
+        # 같은 방향이 평가손실 중이면 «추가 금지» 규칙에 걸린다. submit 이 이 값을 본다.
+        "averaging_down": (
+            f"같은 방향 포지션 {same_side_notional:,.0f} USDT 가 평가손실 "
+            f"{same_side_unrealized:,.2f} 중입니다 — 물타기는 크기를 맞춰 재면 24/24 전패였습니다"
+            " (2026-09-06 감사). 그래도 넣으려면 확인을 한 번 더 누르세요"
+            if same_side_notional > 0 and same_side_unrealized < 0 else None),
         # 비율 적용 **전**, 상한까지 자른 양. 화면이 «이 중 얼마»를 쓴다.
         "available_qty": round(available_qty, 8),
         # 이번 주문 뒤에 상한까지 남는 여유. 분할 진입의 다음 칸을 가늠하는 값이다.
@@ -342,6 +356,24 @@ def _self_check() -> None:
                             recommended_qty=1.0, cap_notional=None, filters=f)
     assert plan["effective_leverage"] is None and plan["liq_distance_pct"] is None, plan
 
+    # ── 물타기 판정 (2026-09-13) ─────────────────────────────────────────────
+    down = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
+                            recommended_qty=1.0, cap_notional=None, filters=f,
+                            same_side_notional=5000.0, same_side_unrealized=-120.0)
+    assert down["averaging_down"] and "24/24" in down["averaging_down"], down["averaging_down"]
+    assert down["blocked"] is None, "미리보기 자체는 보여야 한다 -- 막는 건 submit 이다"
+    up = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
+                          recommended_qty=1.0, cap_notional=None, filters=f,
+                          same_side_notional=5000.0, same_side_unrealized=+120.0)
+    assert up["averaging_down"] is None, "순행 중 추가(피라미딩)는 이 규칙 대상이 아니다"
+    flat = build_entry_plan(side="SHORT", best_bid=2470.00, best_ask=2470.01,
+                            recommended_qty=1.0, cap_notional=None, filters=f,
+                            same_side_notional=0.0, same_side_unrealized=-120.0)
+    assert flat["averaging_down"] is None, "같은 방향 포지션이 없으면 물타기가 아니다"
+    assert build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
+                            recommended_qty=1.0, cap_notional=None,
+                            filters=f)["averaging_down"] is None, "기본값은 무해해야 한다"
+
     # 최소 명목 미달은 조용히 보내지 않고 막는다
     plan = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,
                             recommended_qty=0.005, cap_notional=None, filters=f)
@@ -492,7 +524,7 @@ def _self_check() -> None:
         else:
             raise AssertionError(f"막았어야 한다: fraction={bad}")
 
-    print("통과 66/66 — 진입(분할 포함) + 합산 상한 + 화면 설명값 + 청산 + 변동성 마감 + 부분 청산")
+    print("통과 71/71 — 진입(분할 포함) + 물타기 판정 + 합산 상한 + 화면 설명값 + 청산 + 변동성 마감 + 부분 청산")
 
 
 if __name__ == "__main__":

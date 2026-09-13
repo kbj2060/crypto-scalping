@@ -5189,6 +5189,7 @@ function manualEntryPlanHtml(data) {
   }
 
   (plan.notes || []).forEach((note) => parts.push(`<div class="entry-note">⚠ ${escapeHtml(note)}</div>`));
+  if (plan.averaging_down) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.averaging_down)}</div>`);
   if (plan.blocked) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.blocked)}</div>`);
   const er = (data.cap || {}).risk;
   if (er) parts.push(`<div class="entry-cap">${escapeHtml(riskLine(er))}</div>`);
@@ -5400,13 +5401,17 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   const btn = el("snapEntryConfirm");
   if (!btn || plan.blocked) return;
   const pct = Math.round(100 * (plan.fraction ?? 1));
-  manualEntryPending = { side, quantity: plan.quantity, kind, pct, hold: manualHoldMin() };
+  manualEntryPending = { side, quantity: plan.quantity, kind, pct, hold: manualHoldMin(),
+                         avgdown: Boolean(plan.averaging_down) };
   // 모델이 요구하는 최소 청산 비율보다 적게 닫으려 하면 **확인 버튼에** 적는다.
   // 미리보기에만 띄우면 슬라이더를 다시 내린 뒤에는 안 보인다.
   const need = Math.round(100 * ((plan.risk || {}).required_fraction || 0));
   const short = kind === "exit" && need > pct ? ` ⚠한도 복귀엔 ${need}% 필요` : "";
+  // 물타기면 확인 버튼에 그대로 적는다 -- 미리보기 문구는 스크롤로 밀려나도 이건 안 밀린다.
+  if (plan.averaging_down) manualEntryPending.avgdown = true;
   btn.textContent = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH `
-    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short;
+    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short
+    + (plan.averaging_down ? " 🔴물타기" : "");
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
   manualEntryTimer = setTimeout(manualEntryClearConfirm, CONFIRM_WINDOW_MS);
@@ -5450,7 +5455,8 @@ async function manualEntrySubmit() {
   box.hidden = false;
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
-    const q = `&pct=${pending.pct ?? 100}&hold=${pending.hold ?? manualHoldMin()}`;
+    const q = `&pct=${pending.pct ?? 100}&hold=${pending.hold ?? manualHoldMin()}`
+      + (pending.avgdown ? "&avgdown=1" : "");
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&confirm=1${q}`,
       { method: "POST", cache: "no-store" });
