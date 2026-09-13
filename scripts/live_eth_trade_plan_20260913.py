@@ -82,7 +82,17 @@ def expected_cost_bp(hold_min: int, side: str = "LONG",
 
     ① 정상 왕복(peg 진입 + peg 청산) ② 손절로 끝날 확률 × 시장가 추가비용 ③ 펀딩.
     ⚠️손절은 **왼쪽 꼬리를 자르기도** 하는데 그 효과는 여기 없다 -- 아래 growth 의 분산항이
-    정규 근사라서다. 즉 이 비용은 지평 **순위**용이고 절대 수익 예측이 아니다."""
+    정규 근사라서다. **그 한계를 2026-09-14 에 실측했다**
+    (research_stop_truncation_vs_gaussian_objective_20260914, 869일 1분봉 실제 경로):
+      · 🔴**최적 지평은 안 바뀐다** -- 40칸(H×L×a) 전부, 잔잔·험함 두 국면 전부 argmax 일치.
+        근사를 «순위»에 쓰는 건 실측으로 정당화됐다.
+      · 오차 방향은 **한쪽**이다: 40칸 중 34칸에서 공식이 **낮게** 본다. «번다»는데 실제가
+        손실인 칸은 **0**. 즉 틀리는 방향이 안전하다.
+      · 크기는 작지 않다: 잔잔한 국면 1440분에서 시간당 0.52 vs 실제 3.76(×1e4) -- **7배**.
+        절반은 적률(꼬리 절단), 절반은 분포 모양 + 조기 종료다.
+      · z = 손절폭/σ_H 하나로는 **안 무너진다**(같은 z 에서 잔잔 +1.94 vs 험함 −0.16).
+        보정 함수를 하나 적합하면 10칸에 과적합이라 **안 고치고 한계로 문서화한다**.
+    ⇒ 이 값은 지평 **순위**용이고, 수준은 **보수적 하한**으로 읽어야 한다."""
     p = stop_hit_rate(hold_min, side)
     return (ROUND_TRIP_COST_BP + p * STOP_EXTRA_COST_BP
             + funding_cost_bp(hold_min, side, funding_bp_8h))
@@ -149,14 +159,22 @@ def recommend_hold(risk_table: dict, side: str, cap_x: float, atr_pct: float | N
     # 으로만 적으면 «그 시간 들면 번다»로 읽힌다. 부호를 문장으로 말한다.
     none_positive = best["growth_per_hour"] <= 0
     need = min(r["breakeven_acc"] for r in rows)
-    head = (f"🔴정확도 {int(100*acc)}% 로는 **어느 보유시간도 비용을 못 넘습니다**"
+    # 🔴«못 넘습니다»를 사실로 단정하지 않는다. 이 추정은 손절의 꼬리 절단이 빠져 있어
+    # 실측 40칸 중 34칸에서 **낮게** 나왔다(2026-09-14). 부호가 뒤집힌 칸도 2개 있었다.
+    head = (f"🔴정확도 {int(100*acc)}% 로는 **어느 보유시간도 비용을 못 넘는 것으로 나옵니다**"
             f"(최소 필요 {int(round(100*need))}%) — 덜 나쁜 쪽이 {best['hold_min']}분"
+            f" · 이 추정은 손절의 꼬리 절단이 빠져 **보수적**입니다"
             if none_positive else
             f"정확도 {int(100*acc)}% 가정 시 {best['hold_min']}분이 건당 로그성장 최대"
             f"({best['growth']:+.4f})")
     return {"available": True, "recommended_min": best["hold_min"], "acc": acc, "table": rows,
             "best_by_acc": {str(x): h for x, (h, _) in best_by_acc.items()},
             "none_positive": none_positive, "breakeven_min_acc": round(need, 3),
+            # 화면이 «이 숫자를 어떻게 읽어야 하나»를 말할 수 있게. 실측 근거는 위 주석.
+            "estimate_is_conservative": True,
+            "bias_note": ("정규 근사라 손절의 꼬리 절단이 빠져 있습니다 — 실측 40칸 중 34칸에서"
+                          " 실제보다 낮게 나왔고, 잔잔한 장 1440분에서는 7배까지 낮았습니다."
+                          " 최적 보유시간 자체는 40칸 전부에서 바뀌지 않았습니다"),
             "reason": (head + " · 손익분기 정확도 "
                        + " ".join(f"{r['hold_min']}분 {int(round(100*r['breakeven_acc']))}%" for r in rows))}
 
@@ -508,7 +526,11 @@ def _self_check() -> None:
     h2 = recommend_hold(live, "LONG", 8.0, 0.000387 * 3)
     assert h2["table"][0]["breakeven_acc"] < be[0]
     # 🔴전부 음수인 국면은 «권고»가 아니라 «전부 비용 미달»이라고 말해야 한다
-    assert h["none_positive"] is True and "못 넘습니다" in h["reason"], h["reason"]
+    assert h["none_positive"] is True and "못 넘는 것으로 나옵니다" in h["reason"], h["reason"]
+    # 🔴«못 넘는다»를 사실로 단정하지 않는다 -- 이 추정은 실측 40칸 중 34칸에서 낮게 나왔다
+    #   (2026-09-14 절단 연구). 보수적이라는 사실이 문구와 필드 둘 다에 있어야 한다.
+    assert h["estimate_is_conservative"] is True and "보수적" in h["reason"], h["reason"]
+    assert "바뀌지 않았습니다" in h["bias_note"], h["bias_note"]
     assert abs(h["breakeven_min_acc"] - min(r["breakeven_acc"] for r in h["table"])) < 1e-9
     # 정확도를 손익분기 위로 올리면 양수가 되고 문장도 바뀐다
     hi = recommend_hold(live, "LONG", 8.0, 0.000387, acc=0.70)
