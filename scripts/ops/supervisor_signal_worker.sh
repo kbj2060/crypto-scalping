@@ -20,6 +20,14 @@ NAME="${1:?이름이 필요합니다}"
 COMPUTE="${2:?module:function 이 필요합니다}"
 STATE="${3:?상태파일 경로가 필요합니다}"
 INTERVAL="${4:-60}"
+shift 4 || true
+# 5번째 인자부터는 **추가 compute/state 짝**이다 -- 한 프로세스가 여러 신호를 순서대로 돈다.
+# 예) ... regime <c1> <s1> 300 <c2> <s2> <c3> <s3>
+EXTRA=()
+while [[ $# -ge 2 ]]; do
+  EXTRA+=(--compute "$1" --state "$2"); shift 2
+done
+[[ $# -eq 0 ]] || { echo "추가 인자는 compute/state 짝이어야 합니다 (남은 것: $*)" >&2; exit 2; }
 
 if pgrep -f "live_signal_worker.py --compute ${COMPUTE} " >/dev/null 2>&1; then
   echo "[$(date -Iseconds)] ${NAME} 워커: 이미 실행 중 -- supervisor를 켜지 않는다(중복 방지)." >&2
@@ -41,4 +49,4 @@ exec "$ROOT/scripts/ops/_supervise.sh" \
   "$ROOT/data/live/.supervisor_signal_worker_${NAME}.lock" \
   "$ROOT/logs/supervisor/signal_worker_${NAME}" \
   "$PY" -u "$ROOT/scripts/live_signal_worker.py" \
-    --compute "$COMPUTE" --state "$STATE" --interval "$INTERVAL" --loop
+    --compute "$COMPUTE" --state "$STATE" "${EXTRA[@]}" --interval "$INTERVAL" --loop
