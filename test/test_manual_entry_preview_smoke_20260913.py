@@ -205,6 +205,44 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
+    def test_entry_and_exit_use_the_same_cap(self) -> None:
+        """🔴진입과 청산이 **같은 상한**을 본다(2026-09-13).
+
+        예전에는 진입만 세 상한(원장·순자산·모델)의 최솟값을 쓰고 청산의 «최소 청산 비율»은
+        정책상한 25배 기준이었다. 그래서 20배 포지션에서 같은 카드가 «최소 청산 0%»와
+        «예산 사다리 60%»를 나란히 띄웠다. 두 숫자가 같은 상한에서 나오는지 고정한다.
+        """
+        big = dict(FAKE_ACCOUNT)
+        # 순자산 1,000 · 명목 20,000 = 20배. 순자산 상한 8배를 크게 넘는다.
+        big["positions"] = [{**FAKE_ACCOUNT["positions"][0], "qty": 8.0, "notional": 20000.0}]
+
+        async def fake_account(*_a, **_k):
+            return big
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    body = await (await client.get(
+                        "/api/manual-exit/preview?side=LONG&hold=60")).json()
+                    plan = body["plan"]
+                    risk = plan["risk"]
+                    ladder = plan["trade_plan"]["exit_ladder"]["ladder"]
+                    same = [r for r in ladder if r["hold_min"] == risk["hold_min"]][0]
+                    self.assertGreater(risk["required_fraction"], 0.0,
+                                       "20배 포지션인데 닫을 필요가 없다고 한다")
+                    self.assertAlmostEqual(risk["required_fraction"],
+                                           same["required_fraction"], places=3,
+                                           msg=f"최소 청산과 사다리가 다른 상한을 쓴다: {risk} / {same}")
+                    self.assertIn(risk.get("applied_binding"),
+                                  ("ledger", "equity", "model"), risk)
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
     def test_bad_inputs_are_rejected_not_crashed(self) -> None:
         """잘못된 입력은 **검증**으로 막혀야지 예외로 죽으면 안 된다."""
         self._get_all([("/api/manual-entry/preview?side=NOPE", 400),

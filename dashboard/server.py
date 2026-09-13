@@ -177,7 +177,7 @@ from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
-    entry_notional, exit_fraction_required, recommended_tranches)
+    HARD_CAP_X, entry_notional, exit_fraction_required, recommended_tranches)
 from scripts.live_eth_trade_plan_20260913 import plan_now  # noqa: E402
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
@@ -2670,6 +2670,26 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers=NOCACHE)
 
+    def effective_cap(sizing: dict[str, Any], equity: float,
+                      safe_mae_pct: float | None) -> tuple[float | None, str | None, dict]:
+        """세 상한(원장·순자산·위험모델)의 **작은 쪽**과 어느 쪽이 묶었는지.
+
+        🔴진입과 청산이 이 함수를 **같이** 쓴다(2026-09-13). 예전에는 진입만 세 상한을 쓰고
+        청산의 «최소 청산 비율»은 정책상한 25배를 기준으로 계산해서, 20배 포지션에서 같은
+        카드가 «최소 청산 0%»와 «예산 사다리 60%»를 나란히 띄웠다."""
+        cap = dict(sizing.get("cap") or {})
+        cands = []
+        if cap.get("available") and cap.get("cap_notional_usdt"):
+            cands.append((float(cap["cap_notional_usdt"]), "ledger"))
+        if equity > 0:
+            cands.append((equity * SIZING_CAP_EQUITY_X, "equity"))
+            if safe_mae_pct and safe_mae_pct > 0:
+                cands.append((entry_notional(equity, safe_mae_pct)["total_notional"], "model"))
+        if not cands:
+            return None, None, cap
+        notional, who = min(cands)
+        return notional, who, cap
+
     async def realized_vol_now(symbol: str) -> float | None:
         """청산 마감·기대 체결시간을 정하는 1분봉 실현변동성. 실패해도 주문을 막지 않는다 --
         None 이면 exit_deadline_sec 이 보수적으로 최대(120초)를 쓴다."""
@@ -2740,6 +2760,9 @@ def make_app() -> web.Application:
                 eff = cap_notional / equity
                 risk["split"] = recommended_tranches(risk["safe_mae_pct"], eff, hold_min)
                 risk["effective_x"] = round(eff, 2)
+                # 화면이 «무엇이 묶었나»를 말할 때 쓰는 값. policy_leverage 의 binding 은
+                # 순자산·원장 상한을 **모르므로** 그대로 보여주면 «정책상한 25배»라고 거짓말한다.
+                risk["applied_binding"] = min(binding)[1]
             if cap_notional is not None:
                 cap.update(available=True, cap_notional_usdt=round(cap_notional, 2),
                            cap_equity_usdt=round(cap_equity, 2) if cap_equity else None,
@@ -2913,7 +2936,14 @@ def make_app() -> web.Application:
             sz = await asyncio.to_thread(position_sizing_payload)
             risk = risk_sizing(sz, hold_min, position_side)
             if risk.get("available") and eq > 0 and cur_notional > 0:
-                r = exit_fraction_required(eq, risk["safe_mae_pct"], cur_notional)
+                # 🔴진입과 **같은 상한**을 쓴다. 정책상한 25배로 재면 진입이 8배에서 막은
+                # 포지션을 청산은 «닫을 필요 없음»이라고 말한다(같은 카드에 모순된 두 숫자).
+                cap_n, who, _ = effective_cap(sz, eq, risk["safe_mae_pct"])
+                eff_x = (cap_n / eq) if cap_n else HARD_CAP_X
+                r = exit_fraction_required(eq, risk["safe_mae_pct"], cur_notional,
+                                           hard_cap=eff_x)
+                risk["effective_x"] = round(eff_x, 2)
+                risk["applied_binding"] = who
                 risk["split"] = recommended_tranches(risk["safe_mae_pct"],
                                                      cur_notional / eq, hold_min)
                 plan["risk"] = {**risk, "required_fraction": round(r["required_fraction"], 4),

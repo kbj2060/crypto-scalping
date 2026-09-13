@@ -5256,12 +5256,21 @@ async function manualEntryFetch(side, kind = "entry") {
 function riskLine(r) {
   if (!r) return "";
   if (!r.available) return `위험모델 없음 (${r.reason || "?"}) — 기존 상한만 적용`;
-  const who = { survival: "생존(청산거리)", growth: "성장(켈리 하한)",
-                cap: "정책상한" }[r.binding] || r.binding;
+  // 🔴«묶은 것»은 **적용된 상한**을 말해야 한다(2026-09-13). r.binding 은 위험 정책 안에서만
+  // 고른 값이라 순자산·원장 상한을 모른다 -- 그대로 쓰면 «최대 25배 · 정책상한»이라고 적히는데
+  // 버튼은 8배까지만 낸다. 실효 배수(effective_x)와 applied_binding 이 진짜다.
+  const NAMES = { survival: "생존(청산거리)", growth: "성장(켈리 하한)", cap: "정책상한",
+                  ledger: "원장 상한", equity: "순자산 상한", model: "위험 모델" };
+  const who = NAMES[r.applied_binding || r.binding] || r.applied_binding || r.binding;
+  const lev = r.effective_x != null ? r.effective_x : r.leverage;
+  // 위험 정책이 허용한 값과 실제로 적용된 값이 다르면 둘 다 보여 준다.
+  const head = r.effective_x != null && r.leverage != null && r.effective_x < r.leverage
+    ? `최대 ${lev}배 (위험 모델은 ${r.leverage}배까지 허용)`
+    : `최대 ${lev}배`;
   const sp = r.split
     ? ` · 권고 ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"} (${r.split.reason})`
     : "";
-  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → 최대 ${r.leverage}배 · ${who}이 묶음${sp}`;
+  return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}% → ${head} · ${who}이 묶음${sp}`;
 }
 
 // 2026-09-13 청산 미리보기. 진입 카드는 상한·증거금 타일이 주인공이지만 청산은 «얼마를
