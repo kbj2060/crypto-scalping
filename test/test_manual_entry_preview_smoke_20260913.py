@@ -133,6 +133,27 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             "/api/manual-exit/preview?side=SHORT&hold=240&pct=50",
         ])
 
+    def test_trade_plan_is_attached(self) -> None:
+        """2026-09-13 «지금 상황» 플랜이 진입·청산 미리보기에 실려 온다(보유 권고·사다리)."""
+        async def exercise() -> None:
+            client = TestClient(TestServer(server.make_app()))
+            await client.start_server()
+            try:
+                for path in ("/api/manual-entry/preview?side=LONG&hold=240",
+                             "/api/manual-exit/preview?side=LONG&hold=240"):
+                    body = await (await client.get(path)).json()
+                    tp = (body.get("plan") or {}).get("trade_plan") or {}
+                    self.assertEqual(tp.get("hold_min"), 240, path)
+                    self.assertTrue(tp["hold"]["available"], path)
+                    self.assertIn(tp["hold"]["recommended_min"], HOLDS, path)
+                    self.assertTrue(tp["exit_ladder"]["ladder"], path)
+                    self.assertIn(tp["execution"]["exit"]["mode"], ("peg_repeg", "market"), path)
+            finally:
+                await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
     def test_bad_inputs_are_rejected_not_crashed(self) -> None:
         """잘못된 입력은 **검증**으로 막혀야지 예외로 죽으면 안 된다."""
         self._get_all([("/api/manual-entry/preview?side=NOPE", 400),

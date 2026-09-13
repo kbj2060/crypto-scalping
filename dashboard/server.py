@@ -178,6 +178,7 @@ from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
     entry_notional, exit_fraction_required, recommended_tranches)
+from scripts.live_eth_trade_plan_20260913 import plan_now  # noqa: E402
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -2669,6 +2670,21 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers=NOCACHE)
 
+    async def realized_vol_now(symbol: str) -> float | None:
+        """청산 마감·기대 체결시간을 정하는 1분봉 실현변동성. 실패해도 주문을 막지 않는다 --
+        None 이면 exit_deadline_sec 이 보수적으로 최대(120초)를 쓴다."""
+        try:
+            kl = await fetch_binance_json(
+                "https://fapi.binance.com/fapi/v1/klines",
+                {"symbol": symbol, "interval": "1m", "limit": EXIT_VOL_WINDOW + 2},
+                timeout=5.0, error_reason=None)
+            if kl:
+                # 마지막 봉은 **미완결**이라 버린다. 종가는 인덱스 4.
+                return realized_vol_bpm([float(row[4]) for row in kl[:-1]])
+        except Exception:  # noqa: BLE001 -- 변동성은 있으면 좋은 값이지 필수가 아니다
+            pass
+        return None
+
     async def assemble_entry_plan(side: str, fraction: float = 1.0, hold_min: int = 1440):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
@@ -2747,6 +2763,14 @@ def make_app() -> web.Application:
             plan["recommended_source"] = rec_src
             plan["recommended_qty"] = round(rec_qty, 8)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)
+            # 2026-09-13 «지금 상황» 플랜: 보유시간 권고·집행·분할·예산 사다리. 상한은 적용된 실효 배수.
+            plan["trade_plan"] = plan_now(
+                side=side, equity=equity, existing_notional=existing,
+                unrealized_pnl=sum(float(p.get("unrealized_pnl") or 0.0) for p in positions),
+                risk_table=sizing.get("risk_mae") or {},
+                vol_bpm=await realized_vol_now(symbol),
+                cap_x=(cap_notional / equity) if cap_notional and equity > 0 else SIZING_CAP_EQUITY_X,
+                hold_min=hold_min)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, {}, {}, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, cap, sizing, None
@@ -2867,19 +2891,7 @@ def make_app() -> web.Application:
             book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
                                             {"symbol": symbol}, error_reason="book_ticker_failed")
             filters = await load_filters(binance_session(), symbol)
-            # 마감 시간을 정하는 실현변동성. 실패해도 청산을 막지 않는다 -- None 이면
-            # exit_deadline_sec 이 보수적으로 최대(120초)를 쓴다.
-            vol_bpm = None
-            try:
-                kl = await fetch_binance_json(
-                    "https://fapi.binance.com/fapi/v1/klines",
-                    {"symbol": symbol, "interval": "1m", "limit": EXIT_VOL_WINDOW + 2},
-                    timeout=5.0, error_reason=None)
-                if kl:
-                    # 마지막 봉은 **미완결**이라 버린다. 종가는 인덱스 4.
-                    vol_bpm = realized_vol_bpm([float(row[4]) for row in kl[:-1]])
-            except Exception:  # noqa: BLE001 -- 변동성은 있으면 좋은 값이지 필수가 아니다
-                vol_bpm = None
+            vol_bpm = await realized_vol_now(symbol)
             plan = build_exit_plan(
                 position_side=position_side, position_qty=float(position.get("qty") or 0.0),
                 best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
@@ -2908,6 +2920,11 @@ def make_app() -> web.Application:
                                 "leverage": round(r["leverage"], 2), "binding": r["binding"]}
             else:
                 plan["risk"] = risk
+            plan["trade_plan"] = plan_now(
+                side=position_side, equity=eq, existing_notional=cur_notional,
+                unrealized_pnl=float(position.get("unrealized_pnl") or 0.0),
+                risk_table=sz.get("risk_mae") or {}, vol_bpm=vol_bpm,
+                cap_x=SIZING_CAP_EQUITY_X, hold_min=hold_min)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, None

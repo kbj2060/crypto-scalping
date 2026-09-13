@@ -5192,6 +5192,7 @@ function manualEntryPlanHtml(data) {
   if (plan.blocked) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.blocked)}</div>`);
   const er = (data.cap || {}).risk;
   if (er) parts.push(`<div class="entry-cap">${escapeHtml(riskLine(er))}</div>`);
+  tradePlanLines(plan.trade_plan).forEach((t) => parts.push(`<div class="entry-cap">${escapeHtml(t)}</div>`));
   parts.push(`<div class="entry-note${plan.dry_run ? "" : " live"}">${
     plan.dry_run ? "미리보기 전용 — 주문은 나가지 않습니다."
                  : "확인 버튼을 누르면 실제 주문이 나갑니다."} · peg 지정가(메이커), 미체결 ${
@@ -5201,6 +5202,32 @@ function manualEntryPlanHtml(data) {
 
 function entryNote(text, tone) {
   return `<div class="entry-note${tone ? " " + tone : ""}">${escapeHtml(text)}</div>`;
+}
+
+// 2026-09-13 «지금 상황» 플랜 한 줄: 보유시간 권고 · 기대 체결 · 예산 사다리. 서버 plan.trade_plan.
+function tradePlanLines(tp) {
+  if (!tp) return [];
+  const out = [];
+  const h = tp.hold || {};
+  if (h.available) {
+    const cur = (h.table || []).find((r) => r.hold_min === tp.hold_min);
+    out.push(`권고 보유 ${h.recommended_min}분 (건당 로그성장 최대)`
+      + (cur && tp.hold_min !== h.recommended_min ? ` · 선택 ${tp.hold_min}분은 ${cur.growth}` : "")
+      + ` — ${h.reason}`);
+  }
+  const ex = (tp.execution || {}).entry || {};
+  if (ex.expected_fill_sec != null) {
+    out.push(`기대 체결 ${ex.expected_fill_sec}초 (메이커 ${ex.maker_bp}bp · 폴백 테이커 ${ex.taker_bp}bp) — ${ex.note}`);
+  }
+  const sp = tp.entry_split || {};
+  if (sp.rule) out.push(`${sp.tranches === 1 ? "일괄" : sp.tranches + "분할"} · 추가 ${sp.add_allowed ? "가능" : "금지"} — ${sp.rule}`);
+  const lad = tp.exit_ladder || {};
+  if ((lad.ladder || []).length) {
+    const steps = lad.ladder.filter((r) => r.required_fraction > 0)
+      .map((r) => `${r.hold_min}분 → ${Math.round(100 * r.required_fraction)}% 닫기`);
+    out.push(`${lad.note}${steps.length ? " · " + steps.join(" · ") : ""}`);
+  }
+  return out;
 }
 
 // 청산 비율(%)을 읽는 **유일한** 곳. 미리보기와 실주문이 같은 값을 쓰게 한다.
@@ -5263,6 +5290,7 @@ function manualExitPlanHtml(plan) {
   if (plan.blocked) parts.push(entryNote(plan.blocked, "bad"));
   // 시장가로 전환된 경우엔 이유를 **위쪽에** 띄운다 -- 비용이 더 드는 선택이라 묻히면 안 된다.
   if (plan.market_reason) parts.push(entryNote(plan.market_reason, "live"));
+  tradePlanLines(plan.trade_plan).forEach((t) => parts.push(`<div class="entry-cap">${escapeHtml(t)}</div>`));
   const vol = plan.vol_bpm != null ? ` · 변동성 ${plan.vol_bpm} bp/√분` : "";
   const how = plan.type === "MARKET"
     ? "시장가 즉시 체결"
@@ -5328,7 +5356,9 @@ async function manualEntryRefreshSize() {
     if (hb) {
       const r = (data.cap || {}).risk;
       const sp = r && r.split ? ` · ${r.split.tranches === 1 ? "일괄" : r.split.tranches + "분할"}` : "";
+      const rh = ((plan.trade_plan || {}).hold || {}).recommended_min;
       hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배${sp}`
+        + (rh ? ` · 권고 ${rh}분` : "")
         : (r ? "모델 없음" : "—");
     }
   } catch (err) {
