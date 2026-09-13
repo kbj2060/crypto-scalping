@@ -63,13 +63,14 @@ from scripts.live_eth_chart_markers_20260909 import compute_chart_markers  # noq
 # computed each cycle, rather than becoming new standalone "모델 내부 지표" chips with their own
 # fetch+cache). See docs/experiments/eth_taker_delta_climax_metalabel_20260829.md.
 from scripts.live_evidence_signal_metalabel_20260829 import compute_evidence_signal_metalabels  # noqa: E402
-# BTC 코인 페이지의 메인 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH의
-# /api/evidence-signals를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가 나온다").
-# ETH의 compute_signals()를 재사용하되 BTC 자체 그리드스크린 K/HORIZON·TabPFN 모델로 채점하는
-# compute_btc_evidence_signals_panel()을 새로 추가(기존 compute_btc_evidence_signals()는 섀도우
-# 러너 전용 다른 모양이라 그대로 둠). 자세한 내용은 그 함수 docstring 참고.
-# 2026-09-03: XRP 증거신호 5종. XRP 페이지는 그동안 ETH 신호를 그대로 보여주고 있었다
-# (BTC에서 사용자가 신고했던 것과 같은 버그의 XRP판). 자산별 라우팅으로 해소한다.
+# 2026-09-14 사용자 결정: **BTC/XRP 증거신호 계산을 내렸다. 우선 ETH 만 한다.**
+# 엔드포인트(/api/btc-evidence-signals, /api/xrp-evidence-signals)·로더·워커를 전부 제거했고,
+# 프런트는 EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth"] 게이트로 «미지원»을 표시한다.
+# 이유: 이 서버는 RTX 3070 Ti 8GB 한 장인데 파이썬 9개가 CUDA 컨텍스트를 들고 VRAM 여유가
+# 420MiB 였고, 실효 성능이 이론치의 10%(2.0/21.7 TFLOPS)였다. 자산당 TabPFN 7개(BTC)·5개(XRP)가
+# 그 압박의 일부였다. 되살리려면 `git log -S compute_btc_evidence_signals_panel` 로 이 커밋을 찾아
+# 되돌리고 워커를 다시 등록하면 된다 -- 계산 모듈(scripts/live_*_evidence_signal_metalabel_*.py)은
+# 지우지 않았다.
 # 2026-08-30: liquidity_sweep now trained on the SAME Tier0+rsi schema as taker/short_term_
 # return_z/dalton_rule2_balance_edge (standard touch-based-MFE redo, replacing the V_REBOUND-model
 # relay bridge this import used to be) -- it lives in METALABEL_SIGNALS above and is handled by
@@ -409,15 +410,12 @@ BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_sig
 # 2026-09-10 극점 탐지기 -- 채점은 워커가 하고 대시보드는 읽기만 한다
 # (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
 V_REBOUND_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_v_rebound_state.json"
-BTC_EVIDENCE_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_state.json"
 REGIME_WIDE24_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_wide24_state.json"
 REGIME_BTC_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_btc_state.json"
 REGIME_XRP_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_xrp_state.json"
 REGIME_MAX_AGE_MIN = 20.0                  # 레짐 워커 주기 300초 + 사이클 13초 여유
 MACRO_CALENDAR_STATE_PATH = REPO_ROOT / "data" / "live" / "macro_calendar_state.json"
 MACRO_CALENDAR_MAX_AGE_MIN = 90.0          # 달력이라 분 단위 신선도가 의미 없다
-XRP_EVIDENCE_STATE_PATH = REPO_ROOT / "data" / "live" / "xrp_evidence_signal_state.json"
-COIN_EVIDENCE_MAX_AGE_MIN = 15.0           # 5분봉 3개
 V_REBOUND_MAX_AGE_MIN = 15.0               # 5분봉 3개
 EXTREME_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_extreme_detector_state.json"
 EXTREME_DETECTOR_MAX_AGE_MIN = 15.0        # 5분봉 3개
@@ -984,18 +982,6 @@ def macro_calendar_payload() -> dict[str, Any]:
     """거시 달력 워커 상태(2026-09-14, 콜드 51.03초 -- 외부 6개 소스를 동기 requests 로 친다)."""
     return worker_payload(MACRO_CALENDAR_STATE_PATH, MACRO_CALENDAR_MAX_AGE_MIN,
                           ts_field="generated_at", extra_missing={"events": []})
-
-
-def btc_evidence_payload() -> dict[str, Any]:
-    """BTC 증거신호 워커 상태(2026-09-13 요청 경로에서 뺌 -- 콜드 4.02초, 서버 실측)."""
-    return worker_payload(BTC_EVIDENCE_STATE_PATH, COIN_EVIDENCE_MAX_AGE_MIN,
-                          extra_missing={"signals": [], "warmed_up": False})
-
-
-def xrp_evidence_payload() -> dict[str, Any]:
-    """XRP 증거신호 워커 상태. BTC 판과 같은 구조(콜드 3.53초)."""
-    return worker_payload(XRP_EVIDENCE_STATE_PATH, COIN_EVIDENCE_MAX_AGE_MIN,
-                          extra_missing={"signals": [], "warmed_up": False})
 
 
 def v_rebound_payload() -> dict[str, Any]:
@@ -2080,28 +2066,6 @@ def make_app() -> web.Application:
                 "signals": signals_payload,
             })
 
-    async def load_btc_evidence_signals() -> dict[str, Any]:
-        """BTC 코인 페이지의 메인 증거신호 패널(2026-09-02) -- load_evidence_signals()의 BTC판.
-        2026-09-13: **워커 상태 파일을 읽기만 한다.** 그 전에는 여기서
-        compute_btc_evidence_signals_panel()(klines 페치+지표+TabPFN 7개)을 인라인으로 돌렸고,
-        대시보드 재시작 후 첫 호출이 4.02초였다(서버 실측). 계산은
-        scripts/live_signal_worker.py 가 대신 돈다 -- 함수와 인자는 그대로라 숫자는 안 바뀐다."""
-        return await swr_cached(
-            "btc_evidence_signal", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(btc_evidence_payload),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
-    async def load_xrp_evidence_signals() -> dict[str, Any]:
-        """XRP 코인 페이지의 메인 증거신호 패널(2026-09-03) -- load_btc_evidence_signals()의 XRP판.
-        서빙 5종(liquidity_sweep/fib_extension_exhaustion은 HOLDOUT AUC가 무작위 미만이라 제외).
-        구조/캐시 정책은 BTC판과 동일하다."""
-        return await swr_cached(
-            "xrp_evidence_signal", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(xrp_evidence_payload),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
     async def load_v_rebound_signal() -> dict[str, Any]:
         """유동성스윕 반등예측 event-triggered signal -- see
         scripts/live_eth_sweep_v_rebound_signal_20260829.py docstring for the VAL/OOS/holdout-
@@ -2522,14 +2486,6 @@ def make_app() -> web.Application:
                 status=web.HTTPBadGateway.status_code,
                 headers=NOCACHE,
             )
-        return web.json_response(payload, headers=NOCACHE)
-
-    async def api_btc_evidence_signals(request: web.Request) -> web.Response:
-        payload = await load_btc_evidence_signals()
-        return web.json_response(payload, headers=NOCACHE)
-
-    async def api_xrp_evidence_signals(request: web.Request) -> web.Response:
-        payload = await load_xrp_evidence_signals()
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_v_rebound_signal(request: web.Request) -> web.Response:
@@ -3347,8 +3303,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/evidence-signals", api_evidence_signals)
     app.router.add_get("/api/evidence-signals-provisional", api_evidence_signals_provisional)
-    app.router.add_get("/api/btc-evidence-signals", api_btc_evidence_signals)
-    app.router.add_get("/api/xrp-evidence-signals", api_xrp_evidence_signals)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/extreme-detector", api_extreme_detector)
     app.router.add_get("/api/breakout-detector", api_breakout_detector)

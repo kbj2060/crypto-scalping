@@ -28,6 +28,14 @@ fi
 
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
+# GPU 를 안 쓰는 워커는 CUDA 컨텍스트를 열지 않게 막는다(2026-09-14).
+# 이 서버는 RTX 3070 Ti 8GB 한 장인데 이미 파이썬 9개가 컨텍스트를 들고 VRAM 이 96%(7,849/8,192)다.
+# 컨텍스트 하나가 수백 MB 를 상주로 먹으므로, torch 를 안 쓰는 워커까지 여는 건 순손해다.
+# NO_GPU=1 을 주면 그 워커는 CPU 전용이 된다 -- 레짐 3종(joblib/sklearn)·거시 달력(requests)이 대상.
+if [[ "${NO_GPU:-0}" == "1" ]]; then
+  export CUDA_VISIBLE_DEVICES=""
+fi
+
 exec "$ROOT/scripts/ops/_supervise.sh" \
   "live_signal_worker.py --compute ${COMPUTE}" \
   "$ROOT/data/live/.supervisor_signal_worker_${NAME}.lock" \
