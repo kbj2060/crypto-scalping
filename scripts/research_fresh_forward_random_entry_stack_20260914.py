@@ -235,6 +235,14 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
             # 봉당 평균 명목/순자산. 팔 사이 **크기 매칭 여부를 판정하는 값**이다.
             "mean_expo_x": expo_sum / expo_bars if expo_bars else 0.0,
             "expo_bars": expo_bars,
+            # 🔴🔴**시간적분 노출** -- 위 `mean_expo_x` 는 «포지션을 들고 있는 동안» 의 평균이라
+            # **시장 체류 시간을 안 나눈다**. 같은 지평 안에서 팔을 비교할 땐 체류가 비슷해 문제가
+            # 없지만, **지평을 가로질러 비교하면 크기 매칭이 깨진다**(2026-09-14 발견):
+            # VAL 무손절 기준 체류가 60분 지평 20.1% · 1440분 85.2% 라 시간적분 노출이 1.20 대
+            # 3.77 로 3배 차이인데 `mean_expo_x` 는 6.00 대 4.42 로 거꾸로 보인다.
+            # 그 때문에 순위가 실제로 뒤집힌다(무손절 VAL: 현행 기준 1440분 +0.034 > 60분 −0.044,
+            # 시간적분 기준 1440분 +0.040 vs 120분 **+0.736**). 지평 비교는 이 열로 한다.
+            "expo_time_x": expo_sum / max(hi_i - lo_i, 1),
             "worst_trade_pct": float(100 * rets.min()) if n else 0.0,
             "overshoot_med_bp": float(np.median(overshoot_bp)) if overshoot_bp else 0.0,
             "overshoot_p99_bp": float(np.percentile(overshoot_bp, 99)) if overshoot_bp else 0.0}
@@ -265,29 +273,35 @@ def main() -> int:
         if hi_i - lo_i < 2000:
             print(f"[{wname}] 표본 부족 -- 건너뜀"); continue
         print(f"[{wname}]  봉 {hi_i-lo_i:,}")
-        print(f"  {'팔':>18} {'청산':>5} {'손절':>5} {'사다리':>6} {'추가':>5} {'계좌배수':>9} "
-              f"{'노출':>6} {'노출당':>8} {'MDD':>7} {'최악1건':>8} {'파산':>5}")
+        print(f"  {'팔':>18} {'거래':>5} {'손절':>5} {'사다리':>6} {'추가':>5} {'계좌배수':>9} "
+              f"{'노출':>6} {'노출당':>8} {'적분노출':>8} {'노출당T':>9} "
+              f"{'MDD':>7} {'최악1건':>8} {'파산':>5}")
         for lab, use_stop, cap, ladder, add in (
                 ("손절+사다리(배포)", True, CAP_X, True, False),
                 ("+예산 추가매수", True, CAP_X, True, True),
                 ("예산 추가만", True, CAP_X, False, True),
                 ("둘 다 없음", False, CAP_X, False, False)):
-            ms, mm, ex, rn = [], [], [], 0
+            ms, mm, ex, ext, rn = [], [], [], [], 0
             for k in range(a.seeds):
                 r = walk(d, sm, lo_i, hi_i, acc=a.acc, p_entry=a.p_entry, use_ladder=ladder,
                          use_add=add, use_stop=use_stop, cap_x=cap,
                          rng=np.random.default_rng(SEED + k))
                 ms.append(r["mult"]); mm.append(r["mdd"]); rn += int(r["ruin"])
-                ex.append(r["mean_expo_x"])
+                ex.append(r["mean_expo_x"]); ext.append(r["expo_time_x"])
                 if k == 0:
                     base = r
             # 🔴**노출당**으로 나눠야 팔 비교가 성립한다. 계좌배수만 보면 «더 크게 걸었다»를
             # «더 잘했다»로 읽는다 -- 이 저장소가 물타기에서 세 번 밟은 실수다.
             expo = float(np.median(ex))
-            per = math.log(max(np.median(ms), 1e-9)) / expo if expo > 0 else 0.0
+            lg = math.log(max(np.median(ms), 1e-9))
+            per = lg / expo if expo > 0 else 0.0
+            # 🔴지평을 가로지르는 비교는 **이 값**으로 한다(위 주석 참조).
+            expo_t = float(np.median(ext))
+            per_t = lg / expo_t if expo_t > 0 else 0.0
             print(f"  {lab:>18} {base['trades']:>5} {base['stops']:>5} "
                   f"{base['ladder_cuts']:>6} {base['adds']:>5} {np.median(ms):>9.3f} "
-                  f"{expo:>6.2f} {per:>8.4f} {100*np.median(mm):>6.1f}% "
+                  f"{expo:>6.2f} {per:>8.4f} {expo_t:>8.2f} {per_t:>9.4f} "
+                  f"{100*np.median(mm):>6.1f}% "
                   f"{base['worst_trade_pct']:>7.1f}% {rn:>3}/{a.seeds}")
         print()
 
