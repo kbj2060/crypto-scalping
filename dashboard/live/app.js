@@ -1144,6 +1144,10 @@ function renderBinanceAccount(payload) {
   latestBinanceAccount = payload?.ok ? payload : null;
   renderSnapshotAccount();
   renderSnapshotChart();
+  // 🔴계좌가 **도착하는 즉시** 청산 버튼을 맞춘다. 예전에는 60초 주기(MANUAL_ENTRY_REFRESH_MS)
+  // 에만 맞춰서, 화면을 열고 **63초 뒤에야** 청산 버튼이 나타났다(2026-09-13 실측).
+  // 급히 닫으려고 연 사람에게 1분을 기다리게 하는 건 이 버튼의 존재 이유와 정면으로 어긋난다.
+  if (typeof manualExitSyncButtons === "function") manualExitSyncButtons();
   const summary = el("acctSummary");
   if (!payload?.ok) {
     const msg = payload?.hint || payload?.error || "계정을 불러오지 못했습니다.";
