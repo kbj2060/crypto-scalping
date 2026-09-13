@@ -12,6 +12,9 @@
 끝나 문제의 줄에 도달조차 안 했고, 게다가 청산 쪽은 **실계좌와 바이낸스를 그대로 때렸다**.
 그래서 여기서는 워커 상태파일을 심고 네트워크·계좌를 전부 갈아끼워 **상한 계산 구간까지
 실제로 지나가게** 한다. 음성 대조(버그 재주입)로 이 테스트가 정말 잡는지 확인했다.
+🔴2026-09-13 둘째 판: `produce_account`/`fetch_binance_json` 은 make_app **클로저**라 모듈 패치가
+닿지 않았다(청산 미리보기가 no_position 400 으로 끝나 내용 검사가 불가능했다). 계좌는 모듈 수준
+`fetch_account` 를 갈아끼워 해결했다. 호가/클라인은 아직 클로저라 실제 공개 엔드포인트를 친다.
 """
 from __future__ import annotations
 
@@ -79,7 +82,7 @@ def _isolated_dirs():
         (live / "eth_position_sizing_state.json").write_text(
             _json.dumps(FAKE_STATE), encoding="utf-8")
 
-        async def fake_account():
+        async def fake_account(*_a, **_k):
             return FAKE_ACCOUNT
 
         with mock.patch.object(server, "LIVE_DIR", live), \
@@ -89,6 +92,7 @@ def _isolated_dirs():
              mock.patch.object(server, "POSITION_SIZING_MAX_AGE_MIN", 10 ** 9), \
              mock.patch.object(server, "fetch_binance_json", _fake_binance, create=True), \
              mock.patch.object(server, "produce_account", fake_account, create=True), \
+             mock.patch.object(server, "fetch_account", fake_account), \
              mock.patch.object(server, "load_filters", mock.AsyncMock(return_value={
                  "step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 20.0})):
             yield

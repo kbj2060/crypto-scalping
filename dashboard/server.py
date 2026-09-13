@@ -2770,7 +2770,7 @@ def make_app() -> web.Application:
                 risk_table=sizing.get("risk_mae") or {},
                 vol_bpm=await realized_vol_now(symbol),
                 cap_x=(cap_notional / equity) if cap_notional and equity > 0 else SIZING_CAP_EQUITY_X,
-                hold_min=hold_min)
+                atr_pct=sizing.get("atr_pct"), hold_min=hold_min)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, {}, {}, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, cap, sizing, None
@@ -2924,7 +2924,7 @@ def make_app() -> web.Application:
                 side=position_side, equity=eq, existing_notional=cur_notional,
                 unrealized_pnl=float(position.get("unrealized_pnl") or 0.0),
                 risk_table=sz.get("risk_mae") or {}, vol_bpm=vol_bpm,
-                cap_x=SIZING_CAP_EQUITY_X, hold_min=hold_min)
+                cap_x=SIZING_CAP_EQUITY_X, atr_pct=sz.get("atr_pct"), hold_min=hold_min)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, None

@@ -5211,9 +5211,11 @@ function tradePlanLines(tp) {
   const h = tp.hold || {};
   if (h.available) {
     const cur = (h.table || []).find((r) => r.hold_min === tp.hold_min);
-    out.push(`권고 보유 ${h.recommended_min}분 (건당 로그성장 최대)`
-      + (cur && tp.hold_min !== h.recommended_min ? ` · 선택 ${tp.hold_min}분은 ${cur.growth}` : "")
-      + ` — ${h.reason}`);
+    const grid = Object.entries(h.best_by_acc || {})
+      .map(([a, m]) => `${Math.round(100 * Number(a))}%→${m}분`).join(" ");
+    out.push(`${h.reason}`
+      + (cur ? ` · 선택 ${tp.hold_min}분: 움직임 ${cur.move_bp}bp · 손익분기 ${Math.round(100 * cur.breakeven_acc)}%` : "")
+      + (grid ? ` · 정확도별 최적 ${grid}` : ""));
   }
   const ex = (tp.execution || {}).entry || {};
   if (ex.expected_fill_sec != null) {

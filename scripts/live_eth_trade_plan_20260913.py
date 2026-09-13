@@ -4,13 +4,12 @@
 좋을지 예측 및 분석하는 모델 … 분할 매매 및 분할 청산을 전략적으로"*.
 
 새로 계산하는 건 둘뿐이고 나머지는 기존 함수를 조립한다.
-  ① **보유시간 권고** = 보유시간별 로그성장 g(H) = L(H)·(μ_H−비용) − ½(L(H)·σ_H)² 의 최대.
-     L(H) 는 생존 모델(보유시간 조건부 MAE 분위, 매 5분 갱신)의 허용 배수이고,
-     μ_H·σ_H 는 68왕복의 **방향·시점 고정 + 고정 H 청산** 반사실
-     (research_hold_time_counterfactual_68trips_20260913). 실측: 60분만 t=2.29 로 유의,
-     길수록 σ 가 커져 성장이 떨어지고 1일은 음수. 사용자 실제 청산(중앙 67분)은 어떤
-     고정 시계보다 낫다(21.25bp, t=3.70) -- 그래서 시계는 **크기와 예산**을 정하지
-     «언제 나가라»를 정하지 않는다.
+  ① **보유시간 프런티어** = 지평별 로그성장 g(H,a) = L(H)·((2a−1)·b_H − 비용) − ½(L(H)·σ_H)².
+     L(H) 는 생존 모델(보유시간 조건부 MAE 분위, 매 5분 갱신)의 허용 배수. b_H·σ_H 는 **과거
+     데이터**(869일 5분봉, research_hold_horizon_frontier_history_20260913)에서 잰 스케일 없는
+     계수 × 지금 atr_pct 다 -- 원장을 쓰지 않는다(사용자: *"원장은 정답이 아니야"*).
+     방향 정확도 a 는 파라미터다: 표는 a 격자마다 최적 H 와 손익분기 정확도 a*(H)=½+비용/(2b_H) 를 준다.
+     ⚠️(2a−1)·E|r| 은 정확도가 움직임 크기와 독립일 때만 맞다 -- H 사이의 **순위**용이다.
   ② **보유 예산 사다리**(분할 청산) = 지금 순자산·명목에서 «R 분 더 들려면 얼마를 닫아야
      하나»를 R 마다 낸다. 같은 부등식 N ≤ E·L(R) 을 R 에 대해 푼 것이라 단일 시점
      `exit_fraction_required` 의 일반화다. 역행으로 E 가 줄면 사다리가 자동으로 조여진다.
@@ -35,20 +34,22 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
 
 HOLD_CHOICES = (60, 120, 240, 480, 1440)
 ROUND_TRIP_COST_BP = 5.88            # static 진입 + peg 청산 실측(2026-09-13)
-# 68왕복 고정-H 반사실, 비용 차감 후 (μ bp, σ bp). 원장이 갱신되면 연구 스크립트를 다시 돌려 바꾼다.
-EDGE_BY_HOLD = {60: (11.35, 40.79), 120: (7.25, 55.95), 240: (8.79, 105.36),
-                480: (15.55, 140.93), 1440: (-3.55, 195.62)}
-EDGE_ACTUAL_BP, EDGE_ACTUAL_HOLD_MED = 21.25, 67
+# 과거 869일 5분봉의 스케일 없는 계수 (k_b = E|r_H|/atr_pct, k_s = SD(r_H)/atr_pct).
+# 변동성 5분위·TRAIN→TEST 모두 ±15% 안에서 안정(연구 스크립트 assert). 원장과 무관하다.
+K_HORIZON = {60: (3.518, 5.488), 120: (5.055, 7.838), 240: (7.367, 11.289),
+             480: (10.862, 16.401), 1440: (20.691, 30.599)}
+ACC_GRID = (0.52, 0.55, 0.58, 0.62, 0.66)
+# ponytail: 단일 권고에 쓰는 기준 정확도는 고정 55%. 원장에서 뽑지 않는다. 화면 슬라이더로 바꾸려면 쿼리 인자 하나.
+ACC_DEFAULT = 0.55
 FILL_K, FILL_EXP = 52.0, 1.472       # 중앙 체결시간(초) ≈ 52 / vol^1.472
 MAKER_BP, TAKER_BP = 2.0, 5.0
 # ponytail: 재조정 무거래 밴드는 고정 25%. 비용(왕복 5.88bp) 대 파산감소로 최적화하면 더 낫다.
 REBALANCE_BAND = 0.25
 
 
-def growth_per_trade(L: float, mu_bp: float, sd_bp: float) -> float:
-    """건당 로그성장 근사. μ 는 비용 차감 후."""
-    r, s = mu_bp / 1e4, sd_bp / 1e4
-    return L * r - 0.5 * (L * s) ** 2
+def growth_per_trade(L: float, move_bp: float, sd_bp: float, acc: float) -> float:
+    """정확도 acc 인 사람이 이 지평을 L 배로 들 때의 건당 로그성장 근사."""
+    return L * ((2 * acc - 1) * move_bp - ROUND_TRIP_COST_BP) / 1e4 - 0.5 * (L * sd_bp / 1e4) ** 2
 
 
 def safe_mae(risk_table: dict, hold: int, side: str) -> float | None:
@@ -63,25 +64,35 @@ def allowed_x(risk_table: dict, hold: int, side: str, cap_x: float) -> float | N
     return None if m is None else min(100.0 / m, cap_x, HARD_CAP_X)
 
 
-def recommend_hold(risk_table: dict, side: str, cap_x: float) -> dict:
-    """보유시간별 성장표와 최대점. 동률이면 짧은 쪽(꼬리가 위험의 대부분이다)."""
-    rows, best = [], None
+def recommend_hold(risk_table: dict, side: str, cap_x: float, atr_pct: float | None,
+                   acc: float = ACC_DEFAULT) -> dict:
+    """지평별 프런티어. 권고는 기준 정확도 acc 에서의 최대, 격자별 최적도 같이 준다."""
+    if not atr_pct or atr_pct <= 0:
+        return {"available": False, "reason": "atr_pct 없음"}
+    rows, best_by_acc = [], {}
     for H in HOLD_CHOICES:
         L = allowed_x(risk_table, H, side, cap_x)
         if L is None:
             continue
-        mu, sd = EDGE_BY_HOLD[H]
-        g = growth_per_trade(L, mu, sd)
-        rows.append({"hold_min": H, "leverage": round(L, 2), "edge_bp": mu, "sd_bp": sd,
-                     "growth": round(g, 5)})
-        if best is None or g > best["growth"]:
-            best = rows[-1]
-    if best is None:
+        kb, ks = K_HORIZON[H]
+        b, sd = kb * atr_pct * 1e4, ks * atr_pct * 1e4
+        row = {"hold_min": H, "leverage": round(L, 2), "move_bp": round(b, 1), "sd_bp": round(sd, 1),
+               "breakeven_acc": round(0.5 + ROUND_TRIP_COST_BP / (2 * b), 3),
+               "growth": round(growth_per_trade(L, b, sd, acc), 5),
+               "growth_by_acc": {str(x): round(growth_per_trade(L, b, sd, x), 5) for x in ACC_GRID}}
+        rows.append(row)
+        for x in ACC_GRID:
+            g = row["growth_by_acc"][str(x)]
+            if x not in best_by_acc or g > best_by_acc[x][1]:
+                best_by_acc[x] = (H, g)
+    if not rows:
         return {"available": False, "reason": "위험모델 없음"}
-    return {"available": True, "recommended_min": best["hold_min"], "table": rows,
-            "reason": (f"{best['hold_min']}분이 건당 로그성장 최대({best['growth']:.4f}) · "
-                       f"실제 청산(중앙 {EDGE_ACTUAL_HOLD_MED}분)은 고정 시계보다 낫습니다"
-                       f"({EDGE_ACTUAL_BP}bp) — 시계는 크기와 예산을 정합니다")}
+    best = max(rows, key=lambda r: r["growth"])
+    return {"available": True, "recommended_min": best["hold_min"], "acc": acc, "table": rows,
+            "best_by_acc": {str(x): h for x, (h, _) in best_by_acc.items()},
+            "reason": (f"정확도 {int(100*acc)}% 가정 시 {best['hold_min']}분이 건당 로그성장 최대"
+                       f"({best['growth']:+.4f}) · 손익분기 정확도 "
+                       + " ".join(f"{r['hold_min']}분 {int(round(100*r['breakeven_acc']))}%" for r in rows))}
 
 
 def expected_fill_sec(vol_bpm: float | None) -> float | None:
@@ -125,9 +136,9 @@ def hold_budget(equity: float, notional: float, risk_table: dict, side: str,
 
 def plan_now(*, side: str, equity: float, existing_notional: float, unrealized_pnl: float,
              risk_table: dict, vol_bpm: float | None, cap_x: float,
-             hold_min: int | None = None) -> dict:
+             atr_pct: float | None = None, hold_min: int | None = None) -> dict:
     """한 번에 넷: 보유시간 권고 · 크기(그 보유시간의 허용 배수) · 집행 · 분할."""
-    hold = recommend_hold(risk_table, side, cap_x)
+    hold = recommend_hold(risk_table, side, cap_x, atr_pct)
     H = hold_min or (hold.get("recommended_min") if hold.get("available") else max(HOLD_CHOICES))
     L = allowed_x(risk_table, H, side, cap_x)
     room = max(0.0, equity * L - existing_notional) if L else 0.0
@@ -154,13 +165,22 @@ def _self_check() -> None:
             "240": {"LONG": {"safe_mae_pct": 3.36}, "SHORT": {"safe_mae_pct": 3.168}},
             "480": {"LONG": {"safe_mae_pct": 6.967}, "SHORT": {"safe_mae_pct": 6.117}},
             "1440": {"LONG": {"safe_mae_pct": 23.236}, "SHORT": {"safe_mae_pct": 21.643}}}
-    # 성장: 상한 8배에서는 60분이 최대(엣지 t 유일 유의), 1일은 음수
-    h = recommend_hold(live, "LONG", 8.0)
-    assert h["available"] and h["recommended_min"] == 60, h
-    g = {r["hold_min"]: r["growth"] for r in h["table"]}
-    assert g[1440] < 0 < g[60] and g[60] > g[480], g
+    # 프런티어(과거 계수 × 지금 atr_pct): 손익분기 정확도는 지평에 단조 감소, 잔잔한 장에서
+    # 1시간은 비용을 못 넘는다(실측 3.87bp/봉 → 1h |r| 13.6bp → a* 71.6%)
+    h = recommend_hold(live, "LONG", 8.0, 0.000387)
+    assert h["available"], h
+    be = [r["breakeven_acc"] for r in h["table"]]
+    assert be == sorted(be, reverse=True) and abs(be[0] - 0.716) < 0.01, be
+    assert abs(h["table"][0]["move_bp"] - 13.6) < 0.2, h["table"][0]
+    # 정확도가 오르면 최적 지평이 길어진다(비용 상각 > 분산 페널티)
+    bba = h["best_by_acc"]
+    assert bba["0.52"] <= bba["0.66"], bba
+    # 격변기(atr_pct 3배)에는 같은 정확도에서 짧은 지평도 비용을 넘는다
+    h2 = recommend_hold(live, "LONG", 8.0, 0.000387 * 3)
+    assert h2["table"][0]["breakeven_acc"] < be[0]
+    assert recommend_hold(live, "LONG", 8.0, None)["available"] is False
+    assert recommend_hold({}, "LONG", 8.0, 0.001)["available"] is False
     assert allowed_x(live, 60, "LONG", 8.0) == 8.0 and allowed_x(live, 1440, "LONG", 8.0) < 5, "상한·생존 최솟값"
-    assert recommend_hold({}, "LONG", 8.0)["available"] is False
     # 집행: 변동성이 오르면 기대 체결이 줄고, 극단이면 시장가
     assert expected_fill_sec(None) is None and expected_fill_sec(2.67) > expected_fill_sec(9.97)
     assert abs(expected_fill_sec(9.97) - 1.76) < 0.1, expected_fill_sec(9.97)
@@ -178,9 +198,10 @@ def _self_check() -> None:
             > b["ladder"][-1]["required_fraction"])
     # 플랜: 역행 중엔 추가 금지, 순행이고 여유 있으면 허용, 포지션 없으면 첫 칸은 허용
     p = plan_now(side="LONG", equity=1000.0, existing_notional=4000.0, unrealized_pnl=-30.0,
-                 risk_table=live, vol_bpm=8.0, cap_x=8.0)
-    assert p["hold_min"] == 60 and p["entry_split"]["add_allowed"] is False, p["entry_split"]
-    assert p["size"]["room_notional"] == 4000.0 and p["execution"]["exit"]["mode"] == "peg_repeg"
+                 risk_table=live, vol_bpm=8.0, cap_x=8.0, atr_pct=0.000387)
+    assert p["hold_min"] == p["hold"]["recommended_min"] and p["entry_split"]["add_allowed"] is False
+    assert abs(p["size"]["room_notional"] - max(0.0, 1000.0 * p["size"]["leverage"] - 4000.0)) < 10.0  # leverage 는 소수 2자리 반올림
+    assert p["execution"]["exit"]["mode"] == "peg_repeg"
     p = plan_now(side="LONG", equity=1000.0, existing_notional=4000.0, unrealized_pnl=+30.0,
                  risk_table=live, vol_bpm=8.0, cap_x=8.0)
     assert p["entry_split"]["add_allowed"] is True
@@ -191,7 +212,7 @@ def _self_check() -> None:
     p = plan_now(side="LONG", equity=0.0, existing_notional=0.0, unrealized_pnl=0.0,
                  risk_table={}, vol_bpm=None, cap_x=8.0)
     assert p["size"]["leverage"] is None and p["exit_ladder"]["budget_min"] == 0
-    print("통과 24/24 — 보유시간 성장표 · 집행 · 예산 사다리 · 플랜 조립")
+    print("통과 24/24 — 보유시간 프런티어 · 집행 · 예산 사다리 · 플랜 조립")
 
 
 if __name__ == "__main__":
