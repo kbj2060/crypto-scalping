@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
 import sys
 
@@ -121,10 +122,16 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
     trades = []; stops = 0; expiries = 0; ruin = False; ladder_cuts = 0; adds = 0
     overshoot_bp = []          # 손절선을 지나친 폭 -- 독립 실측(중앙 14 · 99% 227)과 대조한다
     blocked_by_margin = 0
+    # 🔴🔴**시간적분 노출**. `mean_lev` 는 **진입 시점** 배수라 추가매수를 못 잡는다 --
+    # 추가 팔은 같은 6배 상한 안에서도 «한도까지 다시 채우므로» 평균 노출이 더 높다.
+    # 크기를 안 맞추고 팔을 비교하면 크기 효과를 전략 효과로 읽는다(이 저장소가 세 번 밟았다:
+    # 물타기 §5.31 · 시간분할 · 손절폭). ⇒ 봉마다 명목/순자산을 쌓아 **노출당 수익**을 낸다.
+    expo_sum = 0.0; expo_bars = 0
     for i in range(lo_i, hi_i):
         # ── 보유 중이면 청산만 본다 ────────────────────────────────────────
         if pos is not None:
             s, entry, qty, stop_px, end_i, lev = pos
+            expo_sum += qty * c[i] / max(eq, 1e-9); expo_bars += 1
             adverse = (entry - lo[i]) / entry if s > 0 else (hi[i] - entry) / entry
             hit = use_stop and stop_px is not None and adverse >= STOP_LOSS_PCT
             # ── 예산 사다리: 손절보다 **먼저** 본다(손절은 마지막 방어선이다) ──────
@@ -220,6 +227,9 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
             "stop_rate": stops / max(n, 1), "equity": eq, "mult": eq / START_EQUITY,
             "mdd": mdd, "ruin": ruin, "blocked_margin": blocked_by_margin,
             "mean_lev": float(np.mean([t["lev"] for t in trades])) if n else 0.0,
+            # 봉당 평균 명목/순자산. 팔 사이 **크기 매칭 여부를 판정하는 값**이다.
+            "mean_expo_x": expo_sum / expo_bars if expo_bars else 0.0,
+            "expo_bars": expo_bars,
             "worst_trade_pct": float(100 * rets.min()) if n else 0.0,
             "overshoot_med_bp": float(np.median(overshoot_bp)) if overshoot_bp else 0.0,
             "overshoot_p99_bp": float(np.percentile(overshoot_bp, 99)) if overshoot_bp else 0.0}
@@ -247,22 +257,28 @@ def main() -> int:
             print(f"[{wname}] 표본 부족 -- 건너뜀"); continue
         print(f"[{wname}]  봉 {hi_i-lo_i:,}")
         print(f"  {'팔':>18} {'청산':>5} {'손절':>5} {'사다리':>6} {'추가':>5} {'계좌배수':>9} "
-              f"{'MDD':>7} {'최악1건':>8} {'파산':>5}")
+              f"{'노출':>6} {'노출당':>8} {'MDD':>7} {'최악1건':>8} {'파산':>5}")
         for lab, use_stop, cap, ladder, add in (
                 ("손절+사다리(배포)", True, CAP_X, True, False),
                 ("+예산 추가매수", True, CAP_X, True, True),
                 ("예산 추가만", True, CAP_X, False, True),
                 ("둘 다 없음", False, CAP_X, False, False)):
-            ms, mm, rn = [], [], 0
+            ms, mm, ex, rn = [], [], [], 0
             for k in range(a.seeds):
                 r = walk(d, sm, lo_i, hi_i, acc=a.acc, p_entry=a.p_entry, use_ladder=ladder,
                          use_add=add, use_stop=use_stop, cap_x=cap,
                          rng=np.random.default_rng(SEED + k))
                 ms.append(r["mult"]); mm.append(r["mdd"]); rn += int(r["ruin"])
+                ex.append(r["mean_expo_x"])
                 if k == 0:
                     base = r
+            # 🔴**노출당**으로 나눠야 팔 비교가 성립한다. 계좌배수만 보면 «더 크게 걸었다»를
+            # «더 잘했다»로 읽는다 -- 이 저장소가 물타기에서 세 번 밟은 실수다.
+            expo = float(np.median(ex))
+            per = math.log(max(np.median(ms), 1e-9)) / expo if expo > 0 else 0.0
             print(f"  {lab:>18} {base['trades']:>5} {base['stops']:>5} "
-                  f"{base['ladder_cuts']:>6} {base['adds']:>5} {np.median(ms):>9.3f} {100*np.median(mm):>6.1f}% "
+                  f"{base['ladder_cuts']:>6} {base['adds']:>5} {np.median(ms):>9.3f} "
+                  f"{expo:>6.2f} {per:>8.4f} {100*np.median(mm):>6.1f}% "
                   f"{base['worst_trade_pct']:>7.1f}% {rn:>3}/{a.seeds}")
         print()
 
