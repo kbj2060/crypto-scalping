@@ -2699,15 +2699,17 @@ def make_app() -> web.Application:
                 risk.update(leverage=round(e["leverage"], 2), binding=e["binding"],
                             survival_x=round(e["survival_x"], 2),
                             growth_x=round(e["growth_x"], 2) if e["growth_x"] else None)
-            # 분할 권고는 **적용된 상한**의 실효 배수로 낸다 -- 모델이 25배를 허용해도
-            # 실제로 들어가는 건 min(원장, 순자산, 모델)이라 그쪽이 위험을 정한다.
-            if risk.get("available") and equity > 0:
-                eff = (min(v for v, _ in binding) / equity) if binding else e["leverage"]
-                risk["split"] = recommended_tranches(risk["safe_mae_pct"], eff, hold_min)
-                risk["effective_x"] = round(eff, 2)
             binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity"),
                                            (cap_model, "model")) if v]
             cap_notional = min(v for v, _ in binding) if binding else None
+            # 분할 권고는 **적용된 상한**의 실효 배수로 낸다 -- 모델이 25배를 허용해도
+            # 실제로 들어가는 건 min(원장, 순자산, 모델)이라 그쪽이 위험을 정한다.
+            # ⚠️cap_notional 이 정해진 **뒤**에 와야 한다(2026-09-13: 앞에 뒀다가
+            #   UnboundLocalError 로 진입 미리보기가 통째로 죽었다).
+            if risk.get("available") and equity > 0 and cap_notional:
+                eff = cap_notional / equity
+                risk["split"] = recommended_tranches(risk["safe_mae_pct"], eff, hold_min)
+                risk["effective_x"] = round(eff, 2)
             if cap_notional is not None:
                 cap.update(available=True, cap_notional_usdt=round(cap_notional, 2),
                            cap_equity_usdt=round(cap_equity, 2) if cap_equity else None,
