@@ -40,6 +40,9 @@ import requests
 # «좀 이상한 수량»으로만 나타난다.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import live_eth_sizing_vol_model_20260912 as svm  # noqa: E402
+# 2026-09-13 보유시간 조건부 MAE 분위 모델. **여기서** 계산해 상태파일에 싣는다 --
+# 대시보드 요청 경로에서 돌리면 스레드 풀이 고갈된다(2026-09-10 실장애).
+import live_eth_mae_quantile_model_20260913 as maq  # noqa: E402
 
 # 🔴경로를 하드코딩하지 않는다. 2026-09-11 배포에서 **개발 머신의 홈 경로**를 박아
 #   서버(리눅스 계정이 다르다)에서 FileNotFoundError 로 워커가 못 떴다.
@@ -55,7 +58,15 @@ HOLDS = {"1h": 12, "4h": 48, "24h": 288}
 DIST_GRID_BP = [50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500, 700, 1000, 1500, 2000]
 VOL_BAND = 0.15                     # 현재 atr_pct 대비 ±15% 를 "비슷한 국면"으로 본다
 QS = (0.5, 0.9, 0.95)
-BASE_QTY_DEFAULT = 2.727            # 실계좌 관측 중앙 수량 — 사용자가 바꿀 수 있는 기준점
+# 🔴2026-09-13: 이 값은 **권고 수량의 기준점이 아니다**. 예전에는 «사용자가 해온 크기의
+# 중앙값»을 앵커로 삼았는데, 고치려던 대상이 바로 그 습관이라 자기참조였다(상한에서 이미
+# 같은 이유로 원장 기반을 순자산 기반으로 바꿨다). 이제 권고 수량은
+# `risk_mae` 로부터 **순자산 × 허용배수**로 나온다 -- 습관이 아니라 위험이 정한다.
+# 이 상수는 옛 1/ATR 공식(`vol_equivalent_qty_formula`)의 대조용으로만 남긴다.
+BASE_QTY_DEFAULT = 2.727            # 대조용 -- 권고 경로에서는 더 이상 쓰이지 않는다
+
+# 보유시간별 안전 MAE 를 미리 계산해 둔다. 화면의 «보유 예정» 선택지와 같아야 한다.
+RISK_HOLD_MINUTES = (60, 120, 240, 480, 1440)
 CALIB_END = "2025-08-31"            # 계수 적합 구간의 끝(그 뒤는 건드리지 않는다)
 
 
@@ -135,6 +146,33 @@ def model_equivalent_qty(kl: pd.DataFrame, base_qty: float, art) -> tuple[float,
         return float("nan"), {"used": False, "reason": f"{type(e).__name__}: {e}"}
 
 
+def risk_mae_table(kl: pd.DataFrame) -> dict:
+    """보유시간 × 방향 별 «각오해야 할 역행폭(%)». 모델이 없으면 빈 dict.
+
+    순자산을 모르므로 **명목을 여기서 정하지 않는다** -- 허용 배수(=100/MAE)까지만 낸다.
+    계좌와 곱하는 건 대시보드 몫이다(워커는 계좌를 안 본다)."""
+    if maq.load_model() is None:
+        return {}
+    c = kl["c"].to_numpy(float)
+    q = pd.to_numeric(kl["q"], errors="coerce").to_numpy(float)
+    n = pd.to_numeric(kl["n"], errors="coerce").to_numpy(float)
+    out: dict[str, dict] = {}
+    for h in RISK_HOLD_MINUTES:
+        cell = {}
+        for side in ("LONG", "SHORT"):
+            try:
+                m = maq.safe_mae_now(c, q, n, kl["h"].to_numpy(float), kl["l"].to_numpy(float),
+                                     kl["timestamp"], float(h), side)
+            except Exception:  # noqa: BLE001 -- 한 칸이 실패해도 나머지는 쓸 수 있다
+                m = None
+            if m and m > 0:
+                cell[side] = {"safe_mae_pct": round(float(m), 3),
+                              "max_leverage": round(100.0 / float(m), 2)}
+        if cell:
+            out[str(h)] = cell
+    return out
+
+
 def compute(kl: pd.DataFrame, cal: dict, base_qty: float, art=None) -> dict:
     c = kl["c"].to_numpy(float)
     atr = pd.Series(np.abs(np.diff(c, prepend=c[0]))).rolling(ATR_BARS, min_periods=200).mean().to_numpy()
@@ -161,6 +199,7 @@ def compute(kl: pd.DataFrame, cal: dict, base_qty: float, art=None) -> dict:
                             "숏_bp": float(k["숏"] * ap * np.sqrt(H) * 1e4)}
         out["horizons"][name] = cell
     out["touch_prob"] = touch_probability(ap)
+    out["risk_mae"] = risk_mae_table(kl)
     return out
 
 
@@ -216,11 +255,15 @@ def main(argv: list[str] | None = None) -> int:
                 STATE.write_text(json.dumps(st, ensure_ascii=False, indent=1))
                 h = st["horizons"]["4h"]["0.9"]
                 mi = st["sizing_model"]
+                rm = st.get("risk_mae") or {}
+                r4 = (rm.get("240") or {}).get("LONG") or {}
                 log(f"atr_pct {st['atr_pct']:.5f}(분위 {st['atr_pct_percentile']:.0%}) · "
                     f"수량 {st['vol_equivalent_qty']:.3f} ETH "
                     f"({'모델' if mi.get('used') else '공식:' + str(mi.get('reason'))}"
                     f", 공식이면 {st['vol_equivalent_qty_formula']:.3f}) · "
-                    f"4h 불리이탈 q90 롱 {h['롱_bp']:.0f}bp / 숏 {h['숏_bp']:.0f}bp")
+                    f"4h 불리이탈 q90 롱 {h['롱_bp']:.0f}bp / 숏 {h['숏_bp']:.0f}bp · "
+                    f"위험모델 {len(rm)}칸"
+                    + (f" (4h 롱 역행 {r4['safe_mae_pct']}% -> {r4['max_leverage']}배)" if r4 else ""))
             except Exception as e:
                 log(f"계산 실패 {type(e).__name__}: {e}")
                 STATE.write_text(json.dumps({"ok": False, "error": str(e)[:200]}, ensure_ascii=False))

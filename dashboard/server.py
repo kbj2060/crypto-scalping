@@ -174,9 +174,8 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, build_entry_plan, build_exit_plan, exec_enabled, load_filters,
     realized_vol_bpm)
 from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa: E402
-# 2026-09-13 보유시간 조건부 위험 사이징. 모델이 없으면 safe_mae_now 가 None 을 주고
-# 호출부가 기존 상한 경로로 떨어진다 -- 모델 부재가 진입을 막지는 않는다.
-from scripts.live_eth_mae_quantile_model_20260913 import safe_mae_now  # noqa: E402
+# 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
+# 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
     entry_notional, exit_fraction_required)
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
@@ -1030,8 +1029,8 @@ SIZING_CAP_WINDOW = 30      # 최근 N 왕복만 본다(2026-09-13). 아래 sizi
 #           8%      12.5배     9.9%    1.70%    85.9%   <- 옛 값
 #          10%      10.0배    21.7%    1.19%    66.9%
 #        12.5%       8.0배    39.5%    0.76%    46.3%
-#        14.9%       6.7배    55.0%    0.52%    33.0%   <- 채택(2026-09-13)
-#          20%       5.0배    77.5%    0.29%    18.9%
+#        14.9%       6.7배    55.0%    0.52%    33.0%
+#          20%       5.0배    77.5%    0.29%    18.9%   <- 채택(2026-09-13, 사용자 결정)
 #   🔴같은 날 **초판 계산이 틀렸다**(6.7배를 19.0% 로 봤다). 두 가지였다:
 #     ① 저변동을 후행 atr_pct 로 정의 — 배포 경로는 `live_eth_sizing_vol_model_20260912`
 #        의 **전방 변동성 예측**이다. 후행으로 재면 «저변동일수록 꼬리가 두껍다»가 나오는데
@@ -1040,7 +1039,7 @@ SIZING_CAP_WINDOW = 30      # 최근 N 왕복만 본다(2026-09-13). 아래 sizi
 #   ①은 부풀리고 ②는 줄이는데 ②가 커서 합치면 과소평가였다.
 #   근거 스크립트: research_sizing_cap_liquidation_risk_20260913.py (두 함정을 assert 로 고정)
 # 두 상한의 **작은 쪽**을 쓴다 — 순자산 연동이 주 방어선, 원장 기반은 보조.
-SIZING_CAP_EQUITY_X = 6.7
+SIZING_CAP_EQUITY_X = 5.0
 
 
 def entry_projection(plan: dict, account: dict, positions: list, existing: float,
@@ -2692,7 +2691,7 @@ def make_app() -> web.Application:
             cap_ledger = cap.get("cap_notional_usdt") if cap.get("available") else None
             cap_equity = equity * SIZING_CAP_EQUITY_X if equity > 0 else None
             # 2026-09-13 세 번째 상한: 보유시간 조건부 위험 모델. 있으면 같이 경쟁시킨다.
-            risk = await risk_sizing(symbol, hold_min, side)
+            risk = risk_sizing(sizing, hold_min, side)
             cap_model = None
             if risk.get("available") and equity > 0:
                 e = entry_notional(equity, risk["safe_mae_pct"], existing_notional=existing)
@@ -2712,12 +2711,22 @@ def make_app() -> web.Application:
                            equity_x=SIZING_CAP_EQUITY_X,
                            liq_floor_pct=round(100.0 / SIZING_CAP_EQUITY_X, 1),
                            binding=min(binding)[1])
+            # ⭐권고 수량의 기준점이 «습관 중앙값»에서 «위험»으로 바뀌었다(2026-09-13).
+            # 모델이 있으면 순자산 × 허용배수 ÷ 가격, 없으면 옛 1/변동성 경로.
+            price_ref = float(book["askPrice"]) if side == "LONG" else float(book["bidPrice"])
+            rec_qty = float(sizing.get("vol_equivalent_qty") or 0.0)
+            rec_src = "vol_equivalent"
+            if risk.get("available") and equity > 0 and price_ref > 0:
+                rec_qty = entry_notional(equity, risk["safe_mae_pct"])["total_notional"] / price_ref
+                rec_src = "risk_model"
             plan = build_entry_plan(
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
-                recommended_qty=float(sizing.get("vol_equivalent_qty") or 0.0),
+                recommended_qty=rec_qty,
                 cap_notional=cap_notional,
                 filters=filters, symbol=symbol, existing_notional=existing,
                 equity=equity, leverage=leverage, fraction=fraction)
+            plan["recommended_source"] = rec_src
+            plan["recommended_qty"] = round(rec_qty, 8)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, {}, {}, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
@@ -2739,7 +2748,8 @@ def make_app() -> web.Application:
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
-                                  "recommended_qty": sizing.get("vol_equivalent_qty"),
+                                  "recommended_qty": plan.get("recommended_qty"),
+                                  "recommended_source": plan.get("recommended_source"),
                                   "exec_enabled": exec_enabled()},
                                  headers=NOCACHE)
 
@@ -2792,29 +2802,18 @@ def make_app() -> web.Application:
             h = 0
         return h if h in HOLD_CHOICES else max(HOLD_CHOICES)
 
-    async def risk_sizing(symbol: str, hold_min: int, side: str) -> dict[str, Any]:
-        """지금 상태·이 보유시간에서 허용 명목. 모델이 없거나 데이터가 모자라면 available=False."""
-        try:
-            kl = await fetch_binance_json(
-                "https://fapi.binance.com/fapi/v1/klines",
-                {"symbol": symbol, "interval": "5m", "limit": 520},
-                timeout=6.0, error_reason=None)
-            if not kl or len(kl) < 420:
-                return {"available": False, "reason": "klines_short"}
-            rows = kl[:-1]                      # 미완결 봉 제외
-            import numpy as _np
-            ts = pd.to_datetime([int(r[0]) for r in rows], unit="ms")
-            mae = await asyncio.to_thread(
-                safe_mae_now,
-                _np.array([float(r[4]) for r in rows]), _np.array([float(r[7]) for r in rows]),
-                _np.array([float(r[8]) for r in rows]), _np.array([float(r[2]) for r in rows]),
-                _np.array([float(r[3]) for r in rows]), ts, float(hold_min), side)
-            if mae is None or not (mae > 0):
-                return {"available": False, "reason": "model_unavailable"}
-            return {"available": True, "safe_mae_pct": round(float(mae), 3),
-                    "hold_min": hold_min}
-        except Exception as exc:  # noqa: BLE001 -- 사이징 보조값이지 필수가 아니다
-            return {"available": False, "reason": f"{type(exc).__name__}"}
+    def risk_sizing(sizing: dict[str, Any], hold_min: int, side: str) -> dict[str, Any]:
+        """이 보유시간에서 각오할 역행폭. **사이징 워커가 300초마다 계산해 둔 값을 읽는다.**
+
+        🔴요청 경로에서 모델을 돌리지 않는다 -- 대시보드는 60초마다 이 미리보기를 폴링하므로
+        그러면 to_thread 풀이 고갈된다(2026-09-10 실장애, 워커가 애초에 존재하는 이유).
+        워커 상태가 낡았으면 available=False 로 내려가고 호출부는 기존 상한만 쓴다."""
+        cell = ((sizing.get("risk_mae") or {}).get(str(hold_min)) or {}).get(side.upper())
+        if not cell or not (cell.get("safe_mae_pct", 0) > 0):
+            return {"available": False, "hold_min": hold_min,
+                    "reason": "worker_no_risk" if sizing.get("available") else "sizing_unavailable"}
+        return {"available": True, "hold_min": hold_min,
+                "safe_mae_pct": cell["safe_mae_pct"]}
 
     def query_fraction(request: web.Request) -> float | None:
         """쿼리의 비율(%)을 0<f<=1 로 바꾼다. 진입 분할과 부분 청산이 **같은 함수**를 쓴다.
@@ -2877,7 +2876,8 @@ def make_app() -> web.Application:
             cur_notional = sum(abs(float(p.get("notional") or 0.0))
                                for p in (acct.get("positions") or [])
                                if p.get("symbol") == symbol)
-            risk = await risk_sizing(symbol, hold_min, position_side)
+            sz = await asyncio.to_thread(position_sizing_payload)
+            risk = risk_sizing(sz, hold_min, position_side)
             if risk.get("available") and eq > 0 and cur_notional > 0:
                 r = exit_fraction_required(eq, risk["safe_mae_pct"], cur_notional)
                 plan["risk"] = {**risk, "required_fraction": round(r["required_fraction"], 4),
