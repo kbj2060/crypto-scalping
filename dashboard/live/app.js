@@ -1571,6 +1571,18 @@ function toggleSignalDetail(btn, key) {
   btn.setAttribute("aria-expanded", String(open));
 }
 
+// 진입/청산 미리보기 카드의 «자세히». 기존 toggleSignalDetail 은 .ops-health-row 안에서만
+// 동작해서(closest) 이 카드에는 못 쓴다. 여기서는 버튼 **바로 다음 형제**를 연다.
+// 열림 상태를 detailOpenKeys 에 남겨, 미리보기를 다시 띄워도 사용자의 선택이 유지된다.
+function toggleEntryDetail(btn) {
+  const detail = btn.nextElementSibling;
+  const open = detailOpenKeys.has("entrycard")
+    ? (detailOpenKeys.delete("entrycard"), false) : (detailOpenKeys.add("entrycard"), true);
+  if (detail) detail.classList.toggle("open", open);
+  btn.textContent = open ? "접기 ▴" : "자세히 ▾";
+  btn.setAttribute("aria-expanded", String(open));
+}
+
 // Full-detail Korean explanations for the 6 model-internal indicators (formula + live threshold +
 // what it means for a trader) -- shown only when the user clicks "자세히" next to each tile, so
 // the default compact view stays uncluttered. Sourced from microstructure_scanner.py /
@@ -5194,16 +5206,32 @@ function manualEntryPlanHtml(data) {
     }
   }
 
-  (plan.notes || []).forEach((note) => parts.push(`<div class="entry-note">⚠ ${escapeHtml(note)}</div>`));
+  // 막는 것만 항상 보인다. 나머지 설명은 «자세히» 뒤로 접는다(사용자 요청 2026-09-13) --
+  // 진입 화면은 «얼마를 넣나»와 «왜 못 넣나»만 보이면 되고, 근거는 펼쳐서 읽는 것이다.
   if (plan.blocked) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.blocked)}</div>`);
   const er = (data.cap || {}).risk;
-  if (er) parts.push(`<div class="entry-cap">${escapeHtml(riskLine(er))}</div>`);
-  tradePlanLines(plan.trade_plan).forEach((t) => parts.push(`<div class="entry-cap">${escapeHtml(t)}</div>`));
+  const detail = [
+    ...(plan.notes || []).map((n) => `⚠ ${escapeHtml(n)}`),
+    ...(er ? [escapeHtml(riskLine(er))] : []),
+    ...tradePlanLines(plan.trade_plan).map(escapeHtml),
+  ];
+  parts.push(entryDetailHtml(detail));
   parts.push(`<div class="entry-note${plan.dry_run ? "" : " live"}">${
     plan.dry_run ? "미리보기 전용 — 주문은 나가지 않습니다."
                  : "확인 버튼을 누르면 실제 주문이 나갑니다."} · peg 지정가(메이커), 미체결 ${
     plan.fallback_after_sec}초 후 테이커 전환</div>`);
   return parts.join("");
+}
+
+// 접히는 설명 블록. 줄이 없으면 버튼도 안 만든다(빈 «자세히»는 노이즈다).
+function entryDetailHtml(lines) {
+  const rows = (lines || []).filter(Boolean);
+  if (!rows.length) return "";
+  const open = detailOpenKeys.has("entrycard");
+  return `<button type="button" class="detail-toggle" aria-expanded="${open}"`
+    + ` onclick="toggleEntryDetail(this)">${open ? "접기 ▴" : "자세히 ▾"}</button>`
+    + `<div class="signal-detail${open ? " open" : ""}">`
+    + rows.map((r) => `<div class="entry-cap">${r}</div>`).join("") + `</div>`;
 }
 
 function entryNote(text, tone) {
@@ -5358,18 +5386,21 @@ function manualExitPlanHtml(plan) {
       `${r.hold_min}분 더 들 생각이면 명목 ${Math.round(r.allowed_notional).toLocaleString()} 까지가 한도입니다`
       + ` (지금 ${Math.round(r.current_notional).toLocaleString()}) — `
       + `최소 ${Math.round(100 * r.required_fraction)}% 는 닫아야 합니다`, "bad"));
-  } else if (r) {
-    parts.push(`<div class="entry-cap">${escapeHtml(riskLine(r))}</div>`);
   }
   if (plan.blocked) parts.push(entryNote(plan.blocked, "bad"));
   // 시장가로 전환된 경우엔 이유를 **위쪽에** 띄운다 -- 비용이 더 드는 선택이라 묻히면 안 된다.
   if (plan.market_reason) parts.push(entryNote(plan.market_reason, "live"));
-  tradePlanLines(plan.trade_plan).forEach((t) => parts.push(`<div class="entry-cap">${escapeHtml(t)}</div>`));
   const vol = plan.vol_bpm != null ? ` · 변동성 ${plan.vol_bpm} bp/√분` : "";
   const how = plan.type === "MARKET"
     ? "시장가 즉시 체결"
     : `peg 지정가(메이커), 호가가 달아나면 재호가하고 ${plan.fallback_after_sec}초 뒤에도 `
       + "남으면 테이커 전환";
+  // 진입 카드와 **같은 규칙**으로 접는다(2026-09-13 병합). 위험모델 한 줄과 처방 줄들이
+  // 대상이고, «최소 N% 는 닫아야 합니다»는 행동을 바꾸는 값이라 위에서 이미 항상 보인다.
+  parts.push(entryDetailHtml([
+    ...(r && !(r.required_fraction > 0) ? [escapeHtml(riskLine(r))] : []),
+    ...tradePlanLines(plan.trade_plan).map(escapeHtml),
+  ]));
   parts.push(`<div class="entry-cap">${plan.dry_run
     ? "미리보기 전용 — 주문은 나가지 않습니다."
     : "확인 버튼을 누르면 실제 청산 주문이 나갑니다."} · ${how}${vol}</div>`);

@@ -2072,6 +2072,10 @@ svg {
 .acct-refresh:hover:not(:disabled) { color: var(--text); border-color: var(--good); }
 .acct-refresh:disabled { opacity: .5; cursor: default; }
 .acct-refresh.spin { animation: acct-spin .8s linear infinite; }
+/* 진입/청산 카드 안의 «자세히» -- .detail-toggle/.signal-detail 을 그대로 쓰되
+   카드 폭에 맞춰 여백만 맞춘다. */
+.manual-entry-result .detail-toggle { margin: 2px 0 0; }
+.manual-entry-result .signal-detail { margin-top: 4px; }
 @keyframes acct-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .acct-refresh.spin { animation: none; } }
 .exit-frac b.entry-was { min-width: 0; text-align: left; white-space: nowrap; }
