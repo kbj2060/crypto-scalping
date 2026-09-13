@@ -297,7 +297,14 @@ def hold_budget(equity: float, notional: float, risk_table: dict, side: str,
 # 우리 크기(순자산 1,089 × 8배 = 8,716)는 전부 1구간이라 거래소는 아무것도 안 막는다.
 EXCHANGE_MAX_LEVERAGE = 150
 MAINT_MARGIN_RATE = 0.004
-LEVERAGE_STEPS = (1, 2, 3, 5, 8, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150)
+# 🔴6·7 은 2026-09-14 에 추가했다. 눈금이 (…3, 5, 8…)이라 정책 상한 6 배에서 고를 칸이
+# 없었다 -- 5 배는 min_feasible 아래라 주문이 거부되고 8 배는 방어창(1.25배)을 넘겼다.
+# 이 목록은 **거래소 제약이 아니라 우리 눈금**이다(바이낸스는 1~125 정수를 다 받는다).
+LEVERAGE_STEPS = (1, 2, 3, 4, 5, 6, 7, 8, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150)
+# 거래소 천장이 정책 상한의 이 배수 안이면 «거래소가 상한을 강제한다»고 본다.
+# 설정 선택과 enforces_cap 판정이 **같은 값**을 써야 한다 -- 따로 두면 «여유는 얻었는데
+# 방어는 잃은» 상태가 조용히 생긴다(2026-09-14 실제로 그랬다: 설정 8, 판정 7.5).
+ENFORCE_SLACK = 1.25
 
 
 def leverage_setting(*, cap_notional: float, equity: float,
@@ -328,7 +335,25 @@ def leverage_setting(*, cap_notional: float, equity: float,
     position_floor = max(0.0, current_notional) / equity
     target = choose_leverage(min_feasible=min_feasible, cap_x=cap_notional / equity)
     target = max(target, position_floor)
-    setting = next((x for x in LEVERAGE_STEPS if x >= target), EXCHANGE_MAX_LEVERAGE)
+    # 🔴**올림이 아니라 «방어창 안에서 가장 큰 칸»** 을 고른다(2026-09-14).
+    # 올림이면 목표 7.2 가 8 로 올라가 창(6×1.25=7.5)을 넘어 방어가 죽는다.
+    # 창 안에서 큰 값일수록 묶이는 증거금이 적다(명목/설정) -- 여유와 방어를 동시에 얻는다.
+    # 창에 칸이 하나도 없으면(포지션 바닥이 창보다 높을 때 등) 옛 동작으로 떨어지고,
+    # enforces_cap 이 False 로 그 사실을 그대로 말한다.
+    # 🔴창은 **열린 구간**이다(x > floor_x). 경계에 딱 붙이면 묶이는 증거금이 순자산의
+    # 100% 가 되어 수수료 몫이 없다 -- 1.2 배를 곱던 이유가 바로 그것이고, 닫힌 구간으로
+    # 짰다가 상한 3·10 배에서 그 실패를 되살렸다(2026-09-14 1 차판).
+    # 🔴상대 엡실론이 필요하다. `cap_notional/equity` 는 나눗셈이라 상한 3 배에서
+    # 2.9999999999999996 이 나오고, 그러면 «> floor_x» 가 **3 배를 통과시킨다**
+    # -- 설정=상한이라 증거금이 순자산 100% 가 되고, `max_notional` 이 2 자리로 반올림되는
+    # 순간 주문이 거부된다(2026-09-14 하네스에서 46,000 봉 중 45,148 봉 차단으로 드러났다).
+    floor_x = max(min_feasible, position_floor) * (1.0 + 1e-9)
+    window = [x for x in LEVERAGE_STEPS
+              if floor_x < x <= (cap_notional / equity) * ENFORCE_SLACK]
+    # 창이 비면(예: 상한 3 배 -> (3, 3.75] 에 정수가 없다) 여유를 우선한다.
+    # 주문 거부는 즉시 보이지만 방어 꺼짐은 조용하기 때문이다 -- 대신 enforces_cap 이 말한다.
+    setting = (max(window) if window
+               else next((x for x in LEVERAGE_STEPS if x > floor_x), EXCHANGE_MAX_LEVERAGE))
     setting = min(setting, EXCHANGE_MAX_LEVERAGE)
     forced = position_floor > choose_leverage(min_feasible=min_feasible,
                                               cap_x=cap_notional / equity)
@@ -341,7 +366,7 @@ def leverage_setting(*, cap_notional: float, equity: float,
         "max_notional": round(max_notional, 2),
         "margin_locked": round(cap_notional / setting, 2),
         "margin_pct_of_equity": round(100.0 * cap_notional / setting / equity, 1),
-        "enforces_cap": max_notional <= cap_notional * 1.25,
+        "enforces_cap": max_notional <= cap_notional * ENFORCE_SLACK,
         "exchange_max": EXCHANGE_MAX_LEVERAGE,
         "position_floor": round(position_floor, 2),
         "forced_by_position": forced,
@@ -369,8 +394,10 @@ def choose_leverage(*, min_feasible: float, cap_x: float) -> float:
     #      반올림에 충분하고, 헤지 두 다리를 합쳐도 cap 안이면 그대로 성립한다.
     #   ③ 그래도 거래소 천장이 정책의 1.2배라 **방어가 산다**(enforces_cap 판정 1.25배 안).
     #      설정을 안 만지면 천장이 150배라 정책의 18배까지 열린다 -- 그게 지금 상태다.
-    # 여유를 더 주고 싶으면 이 배수만 올린다. 1.25 를 넘기면 enforces_cap 이 False 가 되고
-    # 화면이 «거래소가 상한을 강제하지 않습니다»라고 말한다.
+    # 여유를 더 주고 싶으면 이 배수만 올린다. ENFORCE_SLACK 을 넘기면 enforces_cap 이
+    # False 가 되고 화면이 «거래소가 상한을 강제하지 않습니다»라고 말한다.
+    # ⚠️2026-09-14 부터 이 값은 **창에 칸이 없을 때의 폴백**이다 -- 평소 선택은
+    # `leverage_setting` 이 방어창 안에서 직접 고른다.
     return max(min_feasible, cap_x) * 1.2
 
 
@@ -701,6 +728,28 @@ def _self_check() -> None:
     # ── 거래소 레버리지 설정 ──────────────────────────────────────────────────
     lv = rx["exchange_leverage"]
     assert lv["available"] and lv["setting"] in LEVERAGE_STEPS, lv
+    # 🔴2026-09-14 회귀 -- 정책 상한 6 배에서 눈금이 (…5, 8…)뿐이라 설정이 8 이 됐고
+    # 8 > 6×1.25 라 **거래소 방어가 꺼져 있었다**. 창 안에서 가장 큰 칸을 고르면 7 이다.
+    b6 = leverage_setting(cap_notional=6000.0, equity=1000.0)
+    assert b6["setting"] == 7, b6
+    assert b6["enforces_cap"], b6
+    # 딱 붙이면(6 배) 증거금이 순자산 100% 라 수수료 몫이 없어 마지막 주문이 거부된다
+    assert 80.0 < b6["margin_pct_of_equity"] < 90.0, b6
+    # 🔴어떤 상한에서도 증거금이 순자산 100% 가 되면 안 된다(수수료 몫이 없어 주문이 거부된다).
+    # 닫힌 구간으로 짰을 때 상한 3·10 배에서 정확히 그렇게 됐다.
+    for _c in (3, 4, 5, 6, 7, 8, 10):
+        _r = leverage_setting(cap_notional=1000.0 * _c, equity=1000.0)
+        assert _r["margin_pct_of_equity"] < 95.0, (_c, _r)
+        assert _r["setting"] > _c, (_c, _r)        # 설정 = 상한이면 증거금 100%
+        # 🔴반올림된 max_notional 로도 정책 상한이 들어가야 한다(2 자리 반올림이 주문을 막았다)
+        assert _r["max_notional"] >= 1000.0 * _c, (_c, _r)
+    # 나눗셈 오차가 있는 순자산에서도 같아야 한다 -- 985.3101 에서 실제로 깨졌다
+    for _e in (985.3101, 1234.5678, 7777.77):
+        _r = leverage_setting(cap_notional=_e * 3.0, equity=_e)
+        assert _r["setting"] > 3 and _r["max_notional"] >= _e * 3.0, (_e, _r)
+    # 창 안에 칸이 없으면(포지션 바닥이 창 위) 옛 동작으로 떨어지고 방어 꺼짐을 **말한다**
+    b_hi = leverage_setting(cap_notional=6000.0, equity=1000.0, current_notional=7800.0)
+    assert b_hi["setting"] >= 8 and not b_hi["enforces_cap"], b_hi
     # 🔴거래소 설정은 **보유시간 선택에 흔들리면 안 된다**(2026-09-13 라이브 회귀).
     # 정책 천장을 주면 지평이 달라져도 같은 값이 나와야 한다.
     setts = {prescribe(risk_table=live, atr_pct=0.000387, side="LONG", equity=1085.0,

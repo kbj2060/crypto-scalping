@@ -138,13 +138,18 @@ def pick_hold_bars(sm: dict, i: int, side: str, cap_x: float) -> int | None:
 
 def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry: float,
          use_stop: bool, cap_x: float, rng, use_ladder: bool = False,
-         use_add: bool = False, selector: bool = False) -> dict:
+         use_add: bool = False, selector: bool = False, cap_fn=None) -> dict:
     """봉 하나씩 전진한다. 포지션이 없을 때만 진입하고, 있으면 손절·사다리·만기를 본다.
 
     🔴`use_ladder`: 배포된 **예산 사다리**(`exit_fraction_required`)를 실제로 따른다.
     진입 시점에는 4시간 기준으로 사이징하므로 사다리가 0% 지만, **보유 중 역행하면
     순자산(=미실현 포함)이 줄어 같은 명목이 한도를 넘는다.** 그때 요구 비율만큼 부분 청산한다.
     첫 판(2026-09-14)에 이 경로를 통째로 빠뜨렸다 -- 순자산을 청산 시점에만 갱신했기 때문이다.
+
+    ⭐`cap_fn(i, side) -> 상한배수`: 상한을 **상태의 함수**로 만든다(2026-09-14, 사용자 요청
+    «지평·레버리지·증거금 상한을 정해주는 모델»). None 이면 상수 `cap_x` 로 배포와 같다.
+    🔴상한은 **진입 시점에 고정**되고 보유 중에는 안 바뀐다 -- 라이브도 그렇고(진입 때 정한
+    명목으로 주문이 나간다), 보유 중에 바꾸면 사다리 문턱이 움직여 팔 비교가 오염된다.
 
     🔴`use_add`: **청산 사다리의 거울상**. 예산이 «줄면 닫는다»의 반대로 «늘면 더 넣는다».
     시간 분할(TWAP)은 크기 매칭 6/6 전패, 가격 분할(물타기)은 비용선 통과 0/9 로 이미 기각됐다.
@@ -155,6 +160,8 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
     eq = START_EQUITY
     peak = eq; mdd = 0.0
     pos = None
+    pos_cap = cap_x                 # 이 포지션이 진입할 때 적용된 상한(보유 중 불변)
+    caps_used = []
     trades = []; stops = 0; expiries = 0; ruin = False; ladder_cuts = 0; adds = 0
     hold_bars_used = []        # 선택기가 실제로 고른 지평 -- 결과 해석에 필요하다
     overshoot_bp = []          # 손절선을 지나친 폭 -- 독립 실측(중앙 14 · 99% 227)과 대조한다
@@ -185,7 +192,7 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
                 notion_now = qty * mark
                 m_now = float(sm[(hb * 5, "LONG" if s > 0 else "SHORT")][i])
                 if eq_now > 0 and m_now > 0:
-                    allowed = eq_now * min(policy_leverage(m_now)["leverage"], cap_x)
+                    allowed = eq_now * min(policy_leverage(m_now)["leverage"], pos_cap)
                     # ── 거울상: 한도가 명목보다 크면 그 여유만큼 **추가**한다 ──────
                     if use_add and notion_now < allowed * 0.97:
                         room = allowed - notion_now
@@ -208,7 +215,7 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
                     # 요구했다. 바로 위 `allowed` 는 이미 cap_x 를 쓰고 있어 **한 블록 안에서
                     # 두 문턱이 섞여** 있었다(추가매수는 6배, 청산은 25배 기준).
                     need = exit_fraction_required(eq_now, m_now, notion_now,
-                                                  hard_cap=cap_x)["required_fraction"]
+                                                  hard_cap=pos_cap)["required_fraction"]
                     if need > 0.01:                        # 1% 미만은 격자·수수료에 묻힌다
                         cut = min(1.0, need)
                         closed = qty * cut
@@ -262,9 +269,12 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
         # 미래를 아는 측면이 지평 선택에 새어든다. s_view 는 미래와 독립이라 그 경로가 막힌다.
         # ⚠️근사: 지평은 s_view 기준이고 최종 측면은 다를 수 있다. 두 측면의 안전MAE 표는
         # 거의 같아(실측 선택 분포 차 2%p 미만) 무시할 수준이지만, 근사인 건 기록해 둔다.
+        s_view = "LONG" if rng.random() < 0.5 else "SHORT"
+        cap_now = float(cap_fn(i, s_view)) if cap_fn is not None else cap_x
+        if not (cap_now > 0):
+            continue
         if selector:
-            s_view = "LONG" if rng.random() < 0.5 else "SHORT"
-            hb = pick_hold_bars(sm, i, s_view, cap_x)
+            hb = pick_hold_bars(sm, i, s_view, cap_now)
             if hb is None:
                 continue
         else:
@@ -279,10 +289,10 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
         if not (m > 0):
             continue
         # 🔴배포된 정책 함수를 그대로 쓴다(재구현 아님)
-        L = min(policy_leverage(m)["leverage"], cap_x)
+        L = min(policy_leverage(m)["leverage"], cap_now)
         notional = eq * L
         # 거래소 레버리지 설정이 이 명목을 감당하는지 -- 못 열면 진입 자체가 안 된다
-        lv = leverage_setting(cap_notional=eq * cap_x, equity=eq, current_notional=0.0)
+        lv = leverage_setting(cap_notional=eq * cap_now, equity=eq, current_notional=0.0)
         if lv.get("available") and notional > lv["max_notional"] + 1e-6:
             blocked_by_margin += 1
             continue
@@ -291,6 +301,8 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
         stop_px = (entry * (1 - STOP_LOSS_PCT) if s > 0 else entry * (1 + STOP_LOSS_PCT)) \
             if use_stop else None
         pos = (s, entry, qty, stop_px, i + hb, L, hb)
+        pos_cap = cap_now
+        caps_used.append(cap_now)
         hold_bars_used.append(hb)
     n = len(trades)
     rets = np.array([t["ret_eq"] for t in trades]) if n else np.array([0.0])
@@ -309,6 +321,7 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
             # 그 때문에 순위가 실제로 뒤집힌다(무손절 VAL: 현행 기준 1440분 +0.034 > 60분 −0.044,
             # 시간적분 기준 1440분 +0.040 vs 120분 **+0.736**). 지평 비교는 이 열로 한다.
             "expo_time_x": expo_sum / max(hi_i - lo_i, 1),
+            "mean_cap_x": float(np.mean(caps_used)) if caps_used else float(cap_x),
             "worst_trade_pct": float(100 * rets.min()) if n else 0.0,
             "hold_med_min": (5 * float(np.median(hold_bars_used))) if hold_bars_used else 0.0,
             "hold_mix": (" ".join(
