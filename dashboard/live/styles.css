@@ -2058,10 +2058,19 @@ svg {
    둘 다 미달로 떨어진다. 그래서 기존 .notify-btn:hover 처럼 테두리만 바꾼다. */
 .manual-entry-row.actions { justify-content: center; }
 .manual-entry-row.actions .notify-btn { text-align: center; min-width: 128px; }
-.manual-entry-row.exit-row { gap: 10px; border-top: 1px solid var(--soft-line); padding-top: 8px; }
+/* 2026-09-14 청산 행이 카드 맨 위로 올라갔다 -- 구분선도 아래쪽이다. */
+.manual-entry-row.exit-row { gap: 10px; border-bottom: 1px solid var(--soft-line); padding-bottom: 10px; }
 .manual-entry-row[hidden] { display: none; }
 .exit-frac { display: flex; align-items: center; gap: 8px; }
-.exit-frac input[type="range"] { width: 110px; accent-color: var(--good); cursor: pointer; }
+/* 2026-09-14 보유 예정 / 레버리지 / 진입 비율 세 행의 **왼쪽 끝을 맞춘다**. .actions 의
+   가운데정렬 아래에서는 라벨 길이가 제각각이라 시작점이 들쑥날쑥했다. 라벨 열 폭을 고정하면
+   라벨도 그 오른쪽의 슬라이더·값도 같은 x 에서 시작한다(가장 긴 «보유 예정» 기준 54px). */
+.manual-entry-row.fields { justify-content: flex-start; }
+.manual-entry-row.fields .entry-cap { flex: 0 0 54px; }
+/* 2026-09-14 accent 를 --good(녹색)에서 --accent(중립 시안)로. 녹색은 «롱/이익»이라는
+   뜻을 이미 가진 색이라 **숏 진입 비율**과 **청산 비율**에 붙으면 거짓말을 한다. */
+.exit-frac input[type="range"] { width: 110px; accent-color: var(--accent); cursor: pointer;
+  margin: 0; }   /* 브라우저 기본 좌우 2px 마진 -- 슬라이더 행만 밀려 왼쪽 정렬이 깨진다 */
 .exit-frac b { font: 700 12px/1 var(--font-mono); color: var(--text); min-width: 38px;
   text-align: right; font-variant-numeric: tabular-nums; }
 .exit-frac select { padding: 5px 8px; font: 700 11px/1.2 var(--font-sans); }
@@ -2079,10 +2088,29 @@ svg {
 @keyframes acct-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .acct-refresh.spin { animation: none; } }
 .exit-frac b.entry-was { min-width: 0; text-align: left; white-space: nowrap; }
+/* 2026-09-14 청산 행 아래 한 줄(닫는 수량·남김·지금 손익). flex-basis 100% 로 제 줄을 쓴다. */
+.exit-now { flex: 1 0 100%; margin: 0; font: 600 11px/1.5 var(--font-sans); color: var(--muted); }
+.exit-now:empty { display: none; }
+.exit-now b { font: 700 11.5px/1.5 var(--font-mono); color: var(--text); }
 .notify-btn.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 .notify-btn.short { color: #dd8b80; border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }
 .notify-btn.short:hover:not(:disabled) { border-color: var(--bad); }
+
+/* 2026-09-14 청산 버튼은 **채움**이다. 진입(아웃라인)과 색이 아니라 «형태»로 갈린다 --
+   롱 진입과 롱 청산이 둘 다 녹색 아웃라인이라 흑백·색약에서 구분이 안 됐고, 실제 방어가
+   2단 확인 하나뿐이었다. 방향색을 버리는 것도 의도다: 청산은 방향이 아니라 «닫기»다.
+   🔴.notify-btn.long/.short 와 특이도가 같으므로 반드시 **그 규칙들보다 뒤**에 와야 한다. */
+.exit-row .notify-btn { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.exit-row .notify-btn:hover:not(:disabled) { background: #fff; border-color: #fff; }
+
+/* 2026-09-14 진입 블록 접기. <details> 가 .manual-entry 의 flex 자식이 되면서 안쪽 행들은
+   더 이상 그 gap 을 못 받는다 -- 여기서 같은 간격을 준다. summary 는 display 를 바꾸지
+   않는다(바꾸면 브라우저가 그리는 펼침 삼각형이 사라진다). 높이는 패딩으로만 올린다. */
+.entry-fold { display: flex; flex-direction: column; gap: 8px; }
+.entry-fold > summary { font: 700 11.5px/1.4 var(--font-sans); color: var(--muted);
+  cursor: pointer; padding: 9px 2px; }
+.entry-fold > summary:hover, .entry-fold[open] > summary { color: var(--text); }
 .manual-entry-result { margin: 0; display: grid; gap: 10px; color: var(--text); }
 /* 계좌 카드의 .acct-tile 을 그대로 쓰고, «전 → 후»만 덧입힌다.
    눈금(u)은 이전 값의 자리다 -- 값이 늘든 줄든 같은 읽기 규칙이라 측면마다 뒤집지 않아도 된다. */

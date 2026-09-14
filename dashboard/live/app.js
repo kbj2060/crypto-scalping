@@ -5461,12 +5461,14 @@ function manualExitPlanHtml(plan) {
   return parts.join("");
 }
 
+const MANUAL_BTN_IDS = ["snapEntryLong", "snapEntryShort", "snapExitLong", "snapExitShort"];
+const manualButtonsDisabled = (v) =>
+  MANUAL_BTN_IDS.forEach((id) => { const b = el(id); if (b) b.disabled = v; });
+
 async function manualEntryPreview(side, kind = "entry") {
   const box = el("snapEntryResult");
-  const buttons = [el("snapEntryLong"), el("snapEntryShort"),
-                   el("snapExitLong"), el("snapExitShort")];
-  if (!box) return;
-  buttons.forEach((btn) => { if (btn) btn.disabled = true; });
+  if (!box || manualOrderBusy) return;   // 진행 중인 주문 표시를 덮지 않는다
+  manualButtonsDisabled(true);
   box.hidden = false;
   box.innerHTML = entryNote("확인 중…");
   manualEntryClearConfirm();   // 다른 방향을 눌렀는데 옛 확인 버튼이 남아 있으면 안 된다
@@ -5480,7 +5482,7 @@ async function manualEntryPreview(side, kind = "entry") {
   } catch (err) {
     box.innerHTML = entryNote(`실패: ${err && err.message ? err.message : err}`, "bad");
   } finally {
-    buttons.forEach((btn) => { if (btn) btn.disabled = false; });
+    if (!manualOrderBusy) manualButtonsDisabled(false);
   }
 }
 
@@ -5505,10 +5507,20 @@ async function manualEntryRefreshSize() {
     }
     const plan = data.plan || {};
     const cap = data.cap || {};
-    const capQty = cap.available && plan.price ? cap.cap_notional_usdt / plan.price : null;
-    line.textContent = capQty
-      ? `권고 ${Number(data.recommended_qty).toFixed(3)} ETH · 상한 ${capQty.toFixed(3)} ETH`
-      : `권고 ${Number(data.recommended_qty).toFixed(3)} ETH · 상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)`;
+    // 🔴헤드라인은 **실제로 나가는 수량**이다(2026-09-14). 옛 판은 «권고 6.764 · 상한 2.739»
+    //   처럼 둘을 나란히 놨는데, 나가는 건 둘 다 아니라 비율까지 먹인 plan.quantity 였다 --
+    //   큰 숫자가 왼쪽에 먼저 오니 그게 주문량으로 읽혔다. 권고·가능치는 뒤로 내린다.
+    //   (서버가 이 요청에 슬라이더 pct 를 이미 실어 보내므로 plan.quantity 가 그 비율의 값이다.)
+    const q = Number(plan.quantity) || 0;
+    const rec = Number(data.recommended_qty) || 0;
+    const avail = Number(plan.available_qty) || 0;
+    const capNote = cap.available ? `가능 ${avail.toFixed(3)}`
+      : `상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)`;
+    line.innerHTML = plan.blocked
+      ? `<b class="entry-val bad">주문 불가</b> <span class="entry-was">${escapeHtml(plan.blocked)}</span>`
+      : `<b class="entry-val">${q.toFixed(3)} ETH</b>`
+        + `<span class="entry-was"> · ${Math.round(Number(plan.notional_usdt) || 0).toLocaleString()} USDT`
+        + ` · 권고 ${rec.toFixed(3)} · ${capNote}</span>`;
     setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
@@ -5539,6 +5551,10 @@ const CONFIRM_WINDOW_MS = 15000;
 const STATUS_POLL_MS = 3000;
 let manualEntryPending = null;
 let manualEntryTimer = null;
+let manualEntryTick = null;
+// 주문이 나간 뒤 상태를 폴링하는 동안엔 미리보기를 막는다 -- 결과 상자가 하나뿐이라
+// 새 미리보기가 «체결 진행 중» 표시를 덮어쓴다(2026-09-14).
+let manualOrderBusy = false;
 
 const MANUAL_ENTRY_PHASE_KO = {
   submitting: "주문 전송 중…",
@@ -5554,6 +5570,7 @@ const MANUAL_ENTRY_PHASE_KO = {
 function manualEntryClearConfirm() {
   manualEntryPending = null;
   if (manualEntryTimer) { clearTimeout(manualEntryTimer); manualEntryTimer = null; }
+  if (manualEntryTick) { clearInterval(manualEntryTick); manualEntryTick = null; }
   const btn = el("snapEntryConfirm");
   if (btn) { btn.hidden = true; btn.textContent = ""; }
 }
@@ -5568,11 +5585,21 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   // 미리보기에만 띄우면 슬라이더를 다시 내린 뒤에는 안 보인다.
   const need = Math.round(100 * ((plan.risk || {}).required_fraction || 0));
   const short = kind === "exit" && need > pct ? ` ⚠한도 복귀엔 ${need}% 필요` : "";
-  btn.textContent = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH `
+  const base = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH `
     + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short;
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
+  if (manualEntryTick) clearInterval(manualEntryTick);
+  // 2026-09-14 남은 초를 버튼에 적는다. 창이 조용히 닫히면 «왜 사라졌지»가 되고, 그 다음
+  // 행동은 대개 «버튼을 다시 누른다»라 미리보기를 한 번 더 돌게 된다.
+  let left = Math.round(CONFIRM_WINDOW_MS / 1000);
+  const paint = () => { btn.textContent = `${base} · ${left}초`; };
+  paint();
+  manualEntryTick = setInterval(() => { left -= 1; if (left > 0) paint(); }, 1000);
   manualEntryTimer = setTimeout(manualEntryClearConfirm, CONFIRM_WINDOW_MS);
+  // 미리보기가 길면 확인 버튼이 접힌 화면 밖에 남는다(모바일). 눈앞으로 데려온다 --
+  // 순서를 바꿔 결과 위에 두면 «계획을 읽기 전에» 확인이 먼저 보여서 더 나쁘다.
+  btn.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 function manualEntryStateText(state) {
@@ -5612,10 +5639,15 @@ async function manualEntryPollStatus() {
     if (phase === "submitting" || phase === "working") {
       setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
     } else {
+      manualOrderBusy = false;
+      manualButtonsDisabled(false);
       manualEntryRefreshSize();   // 체결되면 포지션·상한 표시를 갱신한다
     }
   } catch (err) {
     box.innerHTML = entryNote(`상태 조회 실패: ${err && err.message ? err.message : err}`, "bad");
+    // 🔴조회가 실패했다고 버튼을 잠근 채 두면 그 포지션을 **못 닫는다**. 푼다.
+    manualOrderBusy = false;
+    manualButtonsDisabled(false);
   }
 }
 
@@ -5624,6 +5656,8 @@ async function manualEntrySubmit() {
   const box = el("snapEntryResult");
   if (!pending || !box) return;
   manualEntryClearConfirm();
+  manualOrderBusy = true;
+  manualButtonsDisabled(true);
   box.hidden = false;
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
@@ -5635,12 +5669,16 @@ async function manualEntrySubmit() {
     const data = await res.json();
     if (!data.ok) {
       box.innerHTML = entryNote(`주문 실패: ${data.detail || data.error || res.status}`, "bad");
+      manualOrderBusy = false;
+      manualButtonsDisabled(false);
       return;
     }
     box.innerHTML = entryNote(manualEntryStateText(data.state), "live");
     setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
   } catch (err) {
     box.innerHTML = entryNote(`주문 실패: ${err && err.message ? err.message : err}`, "bad");
+    manualOrderBusy = false;
+    manualButtonsDisabled(false);
   }
 }
 
@@ -5676,38 +5714,102 @@ el("snapHold")?.addEventListener("change", () => {
   manualEntryRefreshSize();
 });
 
+let entrySizeDebounce = null;
 for (const [slider, label, kind] of [["snapExitFrac", "snapExitFracVal", "exit"],
                                      ["snapEntryFrac", "snapEntryFracVal", "entry"]]) {
   el(slider)?.addEventListener("input", () => {
     const lab = el(label);
     if (lab) lab.textContent = `${sliderPct(slider)}%`;
     if (manualEntryPending?.kind === kind) manualEntryClearConfirm();
+    // 2026-09-14 비율을 움직이면 «그래서 얼마»가 따라와야 한다. 청산은 계좌 payload 만으로
+    // 되므로 화면이 바로 계산하고, 진입 수량은 **서버가 정하므로**(상한·틱·최소수량) 다시
+    // 묻는다 -- 슬라이더가 멈춘 뒤에. 손가락 한 번에 요청 열 번을 보내지 않는다.
+    if (kind === "exit") renderExitNow();
+    else {
+      clearTimeout(entrySizeDebounce);
+      entrySizeDebounce = setTimeout(manualEntryRefreshSize, 250);
+    }
   });
 }
 
 // 포지션이 열린 측면의 청산 버튼만 띄운다. latestBinanceAccount 는 계좌 패널이 이미
 // 주기적으로 받아 두는 값이라 여기서 따로 요청하지 않는다(없으면 그냥 숨긴 채 둔다).
+let entryFoldHadPos = null;
+// 슬라이더를 움직일 때마다 계좌를 다시 받지 않으려고 마지막 포지션을 들고 있는다.
+let lastExitPositions = new Map();
+let lastExitStaleMin = 0;
+
+// 「지금 닫으면 얼마인가」를 미리보기 **전에** 그린다. 손익은 거래소가 준 unrealized_pnl 에
+// 비율을 곱한 것이고(우리가 VWAP 을 다시 계산하지 않는다), 수수료·체결가는 안 들어가므로 ≈ 다.
+function renderExitNow() {
+  const box = el("snapExitNow");
+  if (!box) return;
+  const pct = manualExitPct();
+  const rows = [];
+  for (const pos of lastExitPositions.values()) {
+    const qty = Number(pos.qty) || 0;
+    if (!(qty > 0)) continue;
+    const entry = Number(pos.entry_price) || 0;
+    const mark = Number(pos.mark_price) || 0;
+    const dir = pos.side === "LONG" ? 1 : -1;
+    const close = qty * pct / 100;
+    const move = entry > 0 && mark > 0 ? (mark - entry) / entry * 100 * dir : null;
+    // 거래소 값이 없을 때만 가격으로 되짚는다 -- 있으면 그게 진실이다.
+    const full = Number.isFinite(Number(pos.unrealized_pnl)) ? Number(pos.unrealized_pnl)
+      : (entry > 0 && mark > 0 ? qty * (mark - entry) * dir : null);
+    const pnl = full === null ? null : full * pct / 100;
+    rows.push(`${pos.side === "LONG" ? "롱" : "숏"} ≈<b>${close.toFixed(3)}</b> 닫고 `
+      + `<b>${(qty - close).toFixed(3)}</b> 남김`
+      + (pnl === null ? "" : ` · 지금 닫으면 <span class="${pnl >= 0 ? "good" : "bad"}">`
+        + (move === null ? "" : `${move >= 0 ? "+" : ""}${move.toFixed(2)}% `)
+        + `${pnl >= 0 ? "+" : ""}${fmtUsd(pnl)}</span> (수수료 전)`));
+  }
+  // 낡음 경고는 버튼 라벨이 아니라 여기 적는다 -- 라벨에 넣으면 「롱 2.754 닫기」가 길어져
+  // 모바일에서 줄바꿈되고, 정작 «무엇이 낡았는지»는 안 보인다.
+  const warn = lastExitStaleMin > 0
+    ? `<span class="bad">⚠조회가 ${lastExitStaleMin}분째 낡음 — ⟳ 로 갱신 (아래는 그때 기준)</span>`
+    : "";
+  box.innerHTML = [warn, ...rows].filter(Boolean).join("<br>");
+}
+
 function manualExitSyncButtons() {
   const row = el("snapExitRow");
   if (!row) return;
   // 서버의 청산 경로는 ETH 전용이다(assemble_exit_plan 이 MARKET_SYMBOLS["eth"] 고정).
   const sym = ASSET_CONFIG.eth?.symbol || "ETHUSDT";
-  // 실패해도 마지막으로 알던 포지션을 유지한다. 5분 넘게 갱신이 없으면 그때는 숨긴다 --
-  // 그쯤 되면 «닫을 게 남아 있는지»를 화면이 주장할 근거가 없다.
-  const STALE_MS = 300000;
-  const src = latestBinanceAccount
-    || (Date.now() - lastGoodAccountAt < STALE_MS ? lastGoodAccount : null);
+  // 🔴낡았다고 **버튼을 치우지 않는다**(2026-09-14). 옛 판은 5분이 지나면 행을 통째로 숨겼다 --
+  //   급히 닫으려고 연 사람에게서 버튼이 사라지는 건 이 버튼의 존재 이유와 정면으로 어긋난다.
+  //   이미 닫힌 포지션을 눌러도 서버가 no_position 으로 막으므로 대가는 헛클릭 한 번이고,
+  //   숨김의 대가는 «못 닫음»이다. 대신 얼마나 낡았는지를 행 아래에 크게 적는다.
+  const src = latestBinanceAccount || lastGoodAccount;
   const stale = !latestBinanceAccount && !!src;
-  const open = (src?.positions || [])
+  lastExitStaleMin = stale ? Math.max(1, Math.round((Date.now() - lastGoodAccountAt) / 60000)) : 0;
+  // 🔴측면만이 아니라 **포지션 전체**를 들고 간다. "롱 청산"은 «롱으로 청산»인지 «롱을 청산»
+  // 인지 읽는 순간 멈칫한다 -- 대상을 적으면(「롱 2.754 닫기」) 그 모호함이 사라지고,
+  // 부분 청산 슬라이더를 만질 때 분모와 지금 손익이 같은 줄에 있다.
+  lastExitPositions = new Map((src?.positions || [])
     .filter((p) => p.symbol === sym && Number(p.qty) > 0)
-    .map((p) => p.side);
-  const hasLong = open.includes("LONG");
-  const hasShort = open.includes("SHORT");
+    .map((p) => [p.side, p]));
+  const label = (side, ko) => `${ko} ${lastExitPositions.get(side).qty} 닫기`;
   const bl = el("snapExitLong");
-  if (bl) { bl.hidden = !hasLong; bl.textContent = stale ? "롱 청산 (정보 낡음)" : "롱 청산"; }
+  if (bl) {
+    bl.hidden = !lastExitPositions.has("LONG");
+    if (!bl.hidden) bl.textContent = label("LONG", "롱");
+  }
   const bs = el("snapExitShort");
-  if (bs) { bs.hidden = !hasShort; bs.textContent = stale ? "숏 청산 (정보 낡음)" : "숏 청산"; }
-  row.hidden = !(hasLong || hasShort);
+  if (bs) {
+    bs.hidden = !lastExitPositions.has("SHORT");
+    if (!bs.hidden) bs.textContent = label("SHORT", "숏");
+  }
+  const hasPos = lastExitPositions.size > 0;
+  row.hidden = !hasPos;
+  renderExitNow();
+  // 진입 블록은 포지션이 있으면 접는다. 포지션 유무가 **바뀔 때만** 건드린다 -- 매 갱신마다
+  // 쓰면 사람이 물타기를 보려고 펼쳐 둔 걸 30초마다 도로 닫는다.
+  const box = el("snapEntryBox");
+  if (box && entryFoldHadPos !== hasPos) { box.open = !hasPos; entryFoldHadPos = hasPos; }
+  const sum = el("snapEntrySummary");
+  if (sum) sum.textContent = hasPos ? "추가 진입 (물타기)" : "진입";
 }
 if (el("snapEntryPlan")) {
   manualEntryRefreshSize();
