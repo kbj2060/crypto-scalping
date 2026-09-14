@@ -172,6 +172,10 @@ ADV_NORM = "batch"
 #   결정 시퀀스 뒤로 감쇠시켜 크리틱에 편향을 남긴다. 액터는 λ=0.95 로 두고 **크리틱만 λ=1**.
 #   우리 실측 설명분산이 +0.001 이라(크리틱이 상수를 학습 중) 정확히 겨냥되는 자리다.
 CRITIC_LAMBDA = None    # None = 액터와 같은 LAMBDA
+# 🔴EPOCHS/MB -- 2026-09-14: --mb/--epochs 가 파싱만 되고 ppo_update 로 **전달되지 않아**
+# real_mb1024/real_bandit_mb1024 두 팔이 기본값(4/8192)으로 돌았다. 합성 절제는 자기
+# 학습루프를 가진 poscontrol 스크립트라 무사했다. 전역으로 올려 호출부에서 읽는다.
+EPOCHS, MB = 4, 8192
 # 🔴직교 초기화 + 정책 최종층 gain 0.01 (arXiv:2006.05990 · ICLR Blog Track 2022). 기본 PyTorch
 #   초기화는 정책 로짓을 크게 시작시켜 초기에 한 행동으로 쏠리게 만든다.
 ORTHO_INIT = False
@@ -310,7 +314,7 @@ def train(d, sm, S, win, *, seed: int, iters: int, ent_coef: float, lr: float, n
         ec = ent_coef if ent_anneal is None else ent_anneal + (ent_coef - ent_anneal) * (it / max(iters - 1, 1))
         global ANTI_FLAT_EFF
         ANTI_FLAT_EFF = ANTI_FLAT_LAMBDA * max(0.0, 1.0 - it / max(iters - 1, 1))
-        st = ppo_update(model, opt, S_list, batches, ent_coef=ec)
+        st = ppo_update(model, opt, S_list, batches, ent_coef=ec, epochs=EPOCHS, mb=MB)
         if it % 10 == 0 or it == iters - 1:
             log(f"    it {it:3d} pg {st[0]:+.4f} v {st[1]:.5f} ent {st[2]:.3f} **ev {st[3]:+.3f}**"
                 + (f" · 거래/창 {np.mean(tr_n):.0f} 순bp {np.mean(tr_bp):+.2f}" if tr_n else "")
@@ -452,10 +456,10 @@ def main() -> int:
     fam = tuple(a.families.split(","))
     d, sm, win, S, cols, volexp = prepare(fam)
     cost = {"entry_bp": 5.0, "peg_exit_bp": 5.0} if a.taker else None
-    global FORCED, HOLD_PENALTY, ANTI_FLAT_LAMBDA, ANTI_FLAT_MIN, DIRECTION_REG, CREDIT, ADV_SCALE, SIGMA_HAT, ADV_NORM, ORTHO_INIT, CRITIC_LAMBDA
+    global FORCED, HOLD_PENALTY, ANTI_FLAT_LAMBDA, ANTI_FLAT_MIN, DIRECTION_REG, CREDIT, ADV_SCALE, SIGMA_HAT, ADV_NORM, ORTHO_INIT, CRITIC_LAMBDA, EPOCHS, MB
     DIRECTION_REG = a.direction_reg
     CREDIT = a.credit; ADV_SCALE = a.adv_scale; ADV_NORM = a.adv_norm; ORTHO_INIT = a.ortho_init
-    CRITIC_LAMBDA = a.critic_lambda
+    CRITIC_LAMBDA = a.critic_lambda; EPOCHS = a.epochs; MB = a.mb
     if ADV_SCALE == "vol":
         SIGMA_HAT = sigma_hat(d, win["TRAIN"])
     FORCED = a.reward_mode == "forced"
@@ -468,10 +472,14 @@ def main() -> int:
         print(s, flush=True); logf.write(s + "\n"); logf.flush()
     log(f"\n=== {a.tag} · 신용 {a.credit} · 이득눈금 {a.adv_scale} · 이득정규화 {a.adv_norm}"
         f"{' · 직교초기화' if a.ortho_init else ''} · 보상 {a.reward_mode}{'(λ=%g)' % a.hold_penalty if a.reward_mode == 'holdpen' else ''} · 군 {fam} · 상태 {S.shape[1]}D · 창 {[(k, v[1]-v[0]) for k, v in win.items()]}"
-        f" · 씨드 {SEEDS[:a.seeds]} · 비용 {'테이커 10bp' if a.taker else 'peg 5.88bp'}")
+        f" · 씨드 {SEEDS[:a.seeds]} · 비용 {'테이커 10bp' if a.taker else 'peg 5.88bp'}"
+        f" · epochs {EPOCHS} · mb {MB}")
     report = {"tag": a.tag, "families": fam, "dim": int(S.shape[1]), "seeds": SEEDS[:a.seeds], "taker": a.taker,
               "fresh_forward_bar_by_bar": True, "trade_ledgers_used_as_input": False,
-              "saved_parent_exit_timestamps_used": False, "future_rows_used_for_entry": False}
+              "saved_parent_exit_timestamps_used": False, "future_rows_used_for_entry": False,
+              "credit": CREDIT, "adv_norm": ADV_NORM, "adv_scale": ADV_SCALE,
+              "ortho_init": ORTHO_INIT, "critic_lambda": CRITIC_LAMBDA,
+              "epochs": EPOCHS, "mb": MB, "reward_mode": a.reward_mode}
 
     # ── G1 양성대조 ──────────────────────────────────────────────────────────
     if a.positive_control:
