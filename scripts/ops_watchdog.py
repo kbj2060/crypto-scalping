@@ -370,10 +370,11 @@ def check_duckdb_table_freshness(component: str, db_path: Path, table: str, ts_c
 # 트레일링 청산의 "걸 수 없는 스톱" 결함으로 경제성 근거가 무효화됐고, 청산과 무관한 경로 측정에서도
 # 방향 정보가 없었다(지속 규칙 H200 0.5054 [0.4981,0.5127] · B2 H200 VAL 0.5029/OOS 0.5186 -- 둘 다 동전).
 # 러너 정지 + crontab @reboot + supervisor까지 함께 제거했다. 되살리려면 그 판정부터 다시 세울 것.
+# 2026-09-14 은퇴: shadow_evidence_chip_{btc,xrp} (2줄) 제거. 러너를 **의도적으로** 정지시킨
+# 것(09-14 01:00)이라 사망 자체가 알릴 일이 아닌데, 표에 줄이 남아 CRITICAL 이 계속 나갔다.
+# 위 경고의 재발이다 -- 은퇴는 러너 정지와 이 표에서 줄 지우기가 **한 쌍**이다.
 SHADOW_RUNNERS: tuple[tuple[str, str], ...] = (
     ("shadow_v_rebound_econ", "v_rebound_econ_shadow_state.json"),
-    ("shadow_evidence_chip_btc", "btc_evidence_signal_shadow_state.json"),
-    ("shadow_evidence_chip_xrp", "xrp_evidence_signal_shadow_state.json"),
 )
 
 

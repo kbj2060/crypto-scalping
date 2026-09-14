@@ -3176,7 +3176,11 @@ def make_app() -> web.Application:
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "청산 비율은 0 초과 100 이하여야 합니다"}, status=400)
-        plan, error = await assemble_exit_plan(side, frac)
+        # 🔴청산 미리보기도 **fresh** 다(2026-09-14, 사용자 요청 «청산 누르면 강제 조회부터»).
+        # 사람이 버튼을 눌러야만 오는 경로라 호출이 잦지 않고, 30초 캐시로 그리면 화면이
+        # 「2.754 닫는다」고 말한 뒤 submit(이미 fresh)이 다른 수량을 내보낼 수 있다.
+        # 미리보기와 실주문이 **같은 수량을 보는 것**이 이 화면의 존재 이유다.
+        plan, error = await assemble_exit_plan(side, frac, fresh=True)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "exec_enabled": exec_enabled()},
