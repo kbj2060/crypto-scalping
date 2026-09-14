@@ -1052,20 +1052,31 @@ def breakout_detector_payload() -> dict[str, Any]:
 # 근거: research_eth_vol_forecast_head_to_head_20260914.py — 이 모델은 앞으로 4시간 실현변동성
 #   **수준**을 맞히고(1시간 앞 ρ .642 · 4시간 .712, 단순 rv48 은 .553/.486), 「확장」은 못 맞힌다
 #   (AUC .46~.52). 그래서 어휘는 위험도 3등급이고 **방향 신호가 아니다**.
-VOL_LEVEL_RATIO_CALM = 1.39        # 이 아래 = 안정(평소 이하) — 학습창 상위 20% 경계
-VOL_LEVEL_RATIO_HOT = 1.88         # 이 위 = 위험 — 학습창 상위 5% 경계
+# 🔴2026-09-15 «안정만 뜬다»(사용자). 버그가 아니라 **기준이 고정**이어서였다 -- `ref_pred` 는
+#   학습창(2021-12~2025-08) 예측 중앙값으로 아티팩트에 박히는데 2026-04 이후 ETH 가 그 「평소」보다
+#   25% 조용하다(비율 중앙값 0.78). 고정 기준 ÷ 내려앉은 분포 = 최근 7일 98.3% 「안정」.
+#   실현변동성 비율도 같은 방향(p50 0.73)이라 **모델이 틀린 게 아니라 레짐이 내려앉은 것**이다.
+#   그래서 등급은 워커가 주는 **최근 30일 예측 중앙값**(`ref_pred_recent`)으로 자른다.
+#   재현: 컷 그대로 두고 기준만 롤링하면 전구간(2022-06~) 81.2/13.5/5.3%, 최근 30일 80.3/14.6/5.1%.
+#   ⚠️**수량 배수는 그대로 고정 기준**이다 -- 사이징은 «평소보다 조용하면 크게»가 의도이고
+#   배포 공식(`ref_pred/pred`)이 그것이다. 둘을 같은 값으로 합치면 안 된다.
+VOL_LEVEL_RATIO_CALM = 1.39        # 이 아래 = 안정(평소 이하) — 상위 20% 경계
+VOL_LEVEL_RATIO_HOT = 1.88         # 이 위 = 위험 — 상위 5% 경계
 VOL_LEVEL_REF_FALLBACK = 0.00160   # 워커가 ref_pred 를 안 줄 때만 (서버 아티팩트 기준)
 
 
 def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
-    """예측 변동성 등급 + 그것이 정하는 **수량 배수**(배포 공식 = ref_pred / pred)."""
+    """예측 변동성 등급(기준 = 최근 30일) + **수량 배수**(배포 공식 = 고정 ref_pred / pred)."""
     sm = (state or {}).get("sizing_model") or {}
     pred = sm.get("pred_vol")
     if not sm.get("used") or not isinstance(pred, (int, float)) or not (float(pred) > 0):
         return {"available": False, "grade": "데이터 없음", "tone": "neutral"}
     pred = float(pred)
-    ref = float(sm.get("ref_pred") or VOL_LEVEL_REF_FALLBACK)
-    if not (ref > 0):
+    ref_fixed = float(sm.get("ref_pred") or VOL_LEVEL_REF_FALLBACK)
+    recent = sm.get("ref_pred_recent")
+    use_recent = isinstance(recent, (int, float)) and float(recent) > 0
+    ref = float(recent) if use_recent else ref_fixed
+    if not (ref > 0 and ref_fixed > 0):
         return {"available": False, "grade": "데이터 없음", "tone": "neutral"}
     ratio = pred / ref
     if ratio < VOL_LEVEL_RATIO_CALM:
@@ -1075,7 +1086,11 @@ def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
     else:
         grade, tone = "주의", "warn"
     return {"available": True, "grade": grade, "tone": tone, "pred_vol": pred, "ref_pred": ref,
-            "ratio": ratio, "qty_mult": 1.0 / ratio,
+            "ratio": ratio, "qty_mult": ref_fixed / pred,
+            # 어느 기준으로 잘랐는지 숨기지 않는다(고정으로 떨어졌으면 화면도 그렇게 말한다).
+            "ref_source": "recent" if use_recent else "train",
+            "ref_days": sm.get("ref_recent_days"), "ref_asof": sm.get("ref_recent_asof"),
+            "ref_error": sm.get("ref_recent_error"),
             "cuts": {"calm": VOL_LEVEL_RATIO_CALM, "hot": VOL_LEVEL_RATIO_HOT}}
 
 

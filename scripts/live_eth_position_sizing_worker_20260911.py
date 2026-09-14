@@ -43,6 +43,8 @@ import live_eth_sizing_vol_model_20260912 as svm  # noqa: E402
 # 2026-09-13 보유시간 조건부 MAE 분위 모델. **여기서** 계산해 상태파일에 싣는다 --
 # 대시보드 요청 경로에서 돌리면 스레드 풀이 고갈된다(2026-09-10 실장애).
 import live_eth_mae_quantile_model_20260913 as maq  # noqa: E402
+# 2026-09-15 칩 등급용 «최근 30일» 기준. 페이지네이션 fetch 는 이미 있는 걸 쓴다.
+import extend_klines_20260713 as ekl  # noqa: E402
 
 # 🔴경로를 하드코딩하지 않는다. 2026-09-11 배포에서 **개발 머신의 홈 경로**를 박아
 #   서버(리눅스 계정이 다르다)에서 FileNotFoundError 로 워커가 못 떴다.
@@ -71,6 +73,17 @@ CALIB_END = "2025-08-31"            # 계수 적합 구간의 끝(그 뒤는 건
 
 
 _TOUCH_CACHE: dict = {}
+
+# 2026-09-15 «변동성 예측 칩이 안정만 뜬다»(사용자). 버그가 아니라 눈금 문제였다 --
+# `ref_pred`(아티팩트에 박힌 **학습창 2021-12~2025-08 예측 중앙값**)로 나누는데 2026-04 이후
+# ETH 가 그 「평소」보다 25% 조용해서 비율이 1 아래에 눌러앉았다(최근 7일 98.3% 「안정」).
+# 🔴사이징 배수(`ref_pred/pred`)의 고정 기준은 **의도**다 -- 조용하면 수량을 키우라는 뜻이라
+#   롤링으로 바꾸면 항상 평균 수량이 된다. 그래서 **칩 등급에만** 쓸 상대 기준을 따로 낸다.
+# 창 길이는 30일: 전구간(2022-06~) 점유 81.2/13.5/5.3%로 설계 의도(80/15/5)에 가장 가깝고
+# (90일은 최근 구간이 86.6% 안정으로 다시 치우친다) 8,640봉이라 예측도 1.2초면 끝난다.
+VOL_REF_DAYS = 30
+VOL_REF_REFRESH_S = 3600            # 30일 중앙값은 굼뜨다 -- 매 주기(300초) 다시 뽑을 이유가 없다
+_VOL_REF: dict = {}
 
 
 def log(m):
@@ -146,6 +159,45 @@ def model_equivalent_qty(kl: pd.DataFrame, base_qty: float, art) -> tuple[float,
         return float("nan"), {"used": False, "reason": f"{type(e).__name__}: {e}"}
 
 
+def recent_ref_pred(art) -> dict:
+    """칩 등급용 **최근 30일 예측 중앙값**. 실패하면 빈 dict — 서버가 고정 기준으로 떨어진다.
+
+    여기서 예외를 올리면 워커가 죽고 화면이 통째로 빈다(`model_equivalent_qty` 와 같은 규율).
+    """
+    if art is None:
+        return {}
+    if time.time() - _VOL_REF.get("t", 0) < VOL_REF_REFRESH_S:
+        return _VOL_REF.get("val", {})
+    try:
+        end_ms = int(time.time() * 1000)
+        span_days = VOL_REF_DAYS + 2            # +2일 = 피쳐 워밍업(400봉) 여유
+        rows = ekl.fetch_klines(SYMBOL, "5m", end_ms - span_days * 86_400_000, end_ms)
+        d = pd.DataFrame(rows, columns=ekl.COLUMNS)
+        ts = pd.to_datetime(pd.to_numeric(d["timestamp"]), unit="ms")
+        num = {k: pd.to_numeric(d[k], errors="coerce").to_numpy(float)
+               for k in ("close", "high", "low", "quote_volume", "trades")}
+        X = svm.build_features(ts, num["close"], num["quote_volume"], num["trades"],
+                               num["high"], num["low"])
+        keep = X.iloc[svm.WARMUP:]
+        keep = keep[np.isfinite(keep.to_numpy(float)).all(1)].tail(VOL_REF_DAYS * 288)
+        if len(keep) < VOL_REF_DAYS * 288 // 2:
+            raise ValueError(f"창이 짧다({len(keep)}봉)")
+        ref = float(np.median(svm.predict_vol(art["models"], keep)))
+        if not (ref > 0):
+            raise ValueError(f"기준값 이상({ref})")
+        val = {"ref_pred_recent": ref, "ref_recent_days": VOL_REF_DAYS,
+               "ref_recent_bars": int(len(keep)), "ref_recent_asof": str(ts.iloc[-1])}
+        _VOL_REF.update(t=time.time(), val=val)
+        log(f"칩 기준 갱신 · 최근 {VOL_REF_DAYS}일 예측 중앙값 {ref:.6g} "
+            f"(고정 기준 {float(art['ref_pred']):.6g} 대비 {ref / float(art['ref_pred']):.2f}배)")
+        return val
+    except Exception as e:  # noqa: BLE001
+        # 🔴조용히 고정 기준으로 떨어지지 않는다 -- 왜 떨어졌는지 상태파일에 남긴다.
+        _VOL_REF.update(t=time.time(), val={"ref_recent_error": f"{type(e).__name__}: {e}"[:120]})
+        log(f"칩 기준 갱신 실패 {type(e).__name__}: {e}")
+        return _VOL_REF["val"]
+
+
 def risk_mae_table(kl: pd.DataFrame) -> dict:
     """보유시간 × 방향 별 «각오해야 할 역행폭(%)». 모델이 없으면 빈 dict.
 
@@ -188,6 +240,7 @@ def compute(kl: pd.DataFrame, cal: dict, base_qty: float, art=None) -> dict:
     ref = float(cal["atr_pct_ref"])
     formula_qty = base_qty * (ref / ap) if ap > 0 else float("nan")
     model_qty, model_info = model_equivalent_qty(kl, base_qty, art)
+    model_info.update(recent_ref_pred(art))       # 칩 등급용 상대 기준(사이징 배수는 안 건드린다)
     # 모델이 못 나오면 조용히 공식으로 간다. **어느 쪽을 썼는지 상태파일에 남긴다** --
     # 안 남기면 "모델 배포했는데 왜 숫자가 그대로지"를 나중에 못 푼다.
     eq_qty = model_qty if np.isfinite(model_qty) else formula_qty
