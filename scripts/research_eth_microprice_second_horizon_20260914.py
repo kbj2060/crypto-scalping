@@ -126,12 +126,18 @@ def trailing_sum(ts, x, win_ms):
 
 def forward_return(ts, lm, h_ms):
     """**시각 기준** 전방 로그수익. 이벤트 데이터에서 행 shift 는 지평이 아니다 --
-    1,129행/초 구간의 10행과 정체 구간의 10행은 전혀 다른 시간이다."""
+    676행/초 구간의 10행과 정체 구간의 10행은 전혀 다른 시간이다.
+
+    🔴수집 구멍을 뛰어넘지 않는다: 착지 시각이 목표를 h_ms 넘게 지나치면(=실경과 2H 초과)
+    버린다. 래스터에 43초 구멍이 6개 있어 1초 E|r| 이 0.62 → 14.6bp 로 부풀었던 자리다.
+    bookTicker 는 지금 최대 359ms 라 영향이 없지만, WS 재연결이 쌓이면 같은 함정이 생긴다."""
     j = np.searchsorted(ts, ts + h_ms, side="left")
     ok = j < len(ts)
     fwd = np.full(len(ts), np.nan)
     fwd[ok] = lm[j[ok]] - lm[ok]
-    return fwd
+    over = np.full(len(ts), np.inf)
+    over[ok] = ts[j[ok]] - (ts[ok] + h_ms)
+    return np.where(over <= h_ms, fwd, np.nan)
 
 
 def nonoverlap_idx(ts, h_ms):
@@ -253,6 +259,9 @@ def _selfcheck() -> None:
     lm = np.log(np.array([100.0, 101.0, 102.0, 103.0]))
     f = forward_return(ts, lm, 200)
     assert np.isclose(f[0], lm[2] - lm[0]) and np.isnan(f[3]), "전방수익 시각기준"
+    # 구멍 건너뛰기 금지: 0ms 다음 유효행이 5,000ms 면 200ms 지평은 답이 없다
+    g = forward_return(np.array([0, 5000, 5100], dtype=np.int64), np.log(np.array([1.0, 2.0, 3.0])), 200)
+    assert np.isnan(g[0]), f"43초 구멍을 뛰어넘었다: {g[0]}"
     assert list(nonoverlap_idx(ts, 200)) == [0, 2], "비겹침 선택"
     print("자체점검 통과")
 
