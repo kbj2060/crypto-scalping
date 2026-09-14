@@ -2092,6 +2092,14 @@ svg {
 .exit-now { flex: 1 0 100%; margin: 0; font: 600 11px/1.5 var(--font-sans); color: var(--muted); }
 .exit-now:empty { display: none; }
 .exit-now b { font: 700 11.5px/1.5 var(--font-mono); color: var(--text); }
+/* 2026-09-14 «지금 닫으면 순손익». 이 줄에서 제일 먼저 읽혀야 하는 숫자라 한 단계 크게 쓰고
+   부호를 색으로도 준다(+ 초록 / − 빨강). 색만으로는 부족하므로 숫자에 부호를 항상 붙인다. */
+/* 🔴`.exit-now b`(0,1,1)가 `.exit-net`(0,1,0)를 이긴다 -- 부모 클래스를 붙여 특이도를 올린다.
+   실측으로 잡았다: 규칙을 넣었는데 fontSize 가 11.5px 그대로였다. */
+.exit-now .exit-net, .entry-note .exit-net { font: 800 13.5px/1.4 var(--font-mono); }
+.exit-now .exit-net.good, .entry-note .exit-net.good { color: var(--good); }
+.exit-now .exit-net.bad, .entry-note .exit-net.bad { color: var(--bad); }
+.entry-note .exit-net { margin-left: 2px; }
 .notify-btn.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 .notify-btn.short { color: #dd8b80; border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }

@@ -5430,7 +5430,21 @@ function manualExitPlanHtml(plan) {
   const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ETH 청산</b>${of}`
     + `<span>${Number(plan.price ?? plan.reference_price).toFixed(2)}`
     + `${plan.type === "MARKET" ? " 근처" : ""} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>`];
-  if (move != null) {
+  // 🔴미리보기 카드의 주인공은 «지금 닫으면 순손익 얼마»다(2026-09-14, 사용자 요청).
+  // 여기서는 plan.type 을 알므로 고변동 시장가 전환이면 테이커 5.0bp 로 바꿔 계산한다.
+  const upnl = Number(plan.unrealized_pnl);
+  const feeBp = plan.type === "MARKET" ? EXIT_FEE_BP_TAKER : EXIT_FEE_BP_PEG;
+  const fee = (Number(plan.notional_usdt) || 0) * feeBp / 10000;
+  if (Number.isFinite(upnl)) {
+    const gross = upnl * (plan.fraction ?? 1);
+    const net = gross - fee;
+    parts.push(`<div class="entry-note"><span class="entry-cap">지금 닫으면</span> `
+      + `<b class="exit-net ${net >= 0 ? "good" : "bad"}">${usd2(net)}</b>`
+      + `<span class="entry-was"> 순손익 · 미실현 ${usd2(gross)}`
+      + ` − ${plan.type === "MARKET" ? "테이커" : "peg"} 수수료 ≈$${fee.toFixed(2)} (${feeBp}bp)`
+      + (move != null ? ` · 진입가 대비 ${move > 0 ? "+" : ""}${move}%` : "")
+      + ` · 진입 수수료는 이미 나갔습니다</span></div>`);
+  } else if (move != null) {
     parts.push(entryNote(`이 가격이면 진입가 대비 ${move > 0 ? "+" : ""}${move}% (수수료 전)`,
       move >= 0 ? null : "bad"));
   }
@@ -5689,8 +5703,23 @@ el("snapLevGauge")?.addEventListener("input", () => {
 });
 el("snapEntryLong")?.addEventListener("click", () => manualEntryPreview("LONG", "entry"));
 el("snapEntryShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "entry"));
-el("snapExitLong")?.addEventListener("click", () => manualEntryPreview("LONG", "exit"));
-el("snapExitShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "exit"));
+// 2026-09-14 사용자 요청: **청산은 강제 조회부터**. 화면 숫자가 30초(조회가 끊겼으면 그
+// 이상) 묵어 있을 수 있어서, 미리보기를 그리기 전에 계좌를 다시 받아 카드·아래 줄을 맞춘다.
+// 서버의 청산 미리보기도 같은 이유로 fresh 다(server.py api_manual_exit_preview).
+// 조회가 실패해도 미리보기는 진행한다 -- 급히 닫으려는 사람을 여기서 세우면 안 된다.
+async function manualExitPreview(side) {
+  manualButtonsDisabled(true);
+  try {
+    binanceAccountLastFetchAt = 0;      // 클라이언트 30초 게이트 우회
+    await refreshBinanceAccount();
+    manualExitSyncButtons();
+  } catch (err) {
+    /* 무시 -- 아래 미리보기가 서버에서 다시 읽는다 */
+  }
+  return manualEntryPreview(side, "exit");
+}
+el("snapExitLong")?.addEventListener("click", () => manualExitPreview("LONG"));
+el("snapExitShort")?.addEventListener("click", () => manualExitPreview("SHORT"));
 el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
 // 비율을 바꾸면 화면에 떠 있던 확인 버튼은 **다른 계획**의 것이다. 지운다.
 // 계좌 강제 조회. refreshBinanceAccount 의 30초 자체 게이트를 넘겨야 하므로 시각을 지운다.
@@ -5739,8 +5768,19 @@ let entryFoldHadPos = null;
 let lastExitPositions = new Map();
 let lastExitStaleMin = 0;
 
+// peg 청산의 **실측** 왕복비용(2026-09-13 섀도우 23,332legs). 이 계좌 수수료는 메이커 2.0bp ·
+// 테이커 5.0bp 이고, peg 는 vol 5분위 전 구간에서 3.03~3.09bp 로 평평했다(체결률 99.2%).
+// 시장가로 넘어가는 고변동 구간(EXIT_TAKER_VOL_BPM=30)에서는 테이커 5.0bp 다.
+// ponytail: 화면이 vol 을 모르므로 항상 peg 값을 쓴다 -- 미리보기 카드는 plan.type 을 알아서
+// 시장가면 5.0 으로 바꿔 계산한다. 수수료 우대는 가정하지 않는다(표준 요율).
+const EXIT_FEE_BP_PEG = 3.0;
+const EXIT_FEE_BP_TAKER = 5.0;
+// 돈은 센트까지만 쓴다. fmtUsd 는 10달러 미만을 소수 4자리로 그리는데(코인 수량용), 수수료가
+// «≈$2.0831» 로 찍히면 정밀해 보일 뿐 읽기 나쁘다. 부호는 항상 붙인다 -- 색만으로는 부족하다.
+const usd2 = (v) => `${v < 0 ? "-" : "+"}$${Math.abs(Number(v) || 0).toFixed(2)}`;
+
 // 「지금 닫으면 얼마인가」를 미리보기 **전에** 그린다. 손익은 거래소가 준 unrealized_pnl 에
-// 비율을 곱한 것이고(우리가 VWAP 을 다시 계산하지 않는다), 수수료·체결가는 안 들어가므로 ≈ 다.
+// 비율을 곱한 것이고(우리가 VWAP 을 다시 계산하지 않는다), 체결가는 모르므로 ≈ 다.
 function renderExitNow() {
   const box = el("snapExitNow");
   if (!box) return;
@@ -5757,12 +5797,24 @@ function renderExitNow() {
     // 거래소 값이 없을 때만 가격으로 되짚는다 -- 있으면 그게 진실이다.
     const full = Number.isFinite(Number(pos.unrealized_pnl)) ? Number(pos.unrealized_pnl)
       : (entry > 0 && mark > 0 ? qty * (mark - entry) * dir : null);
-    const pnl = full === null ? null : full * pct / 100;
-    rows.push(`${pos.side === "LONG" ? "롱" : "숏"} ≈<b>${close.toFixed(3)}</b> 닫고 `
-      + `<b>${(qty - close).toFixed(3)}</b> 남김`
-      + (pnl === null ? "" : ` · 지금 닫으면 <span class="${pnl >= 0 ? "good" : "bad"}">`
-        + (move === null ? "" : `${move >= 0 ? "+" : ""}${move.toFixed(2)}% `)
-        + `${pnl >= 0 ? "+" : ""}${fmtUsd(pnl)}</span> (수수료 전)`));
+    const gross = full === null ? null : full * pct / 100;
+    // 청산 수수료만 뺀다. 진입 수수료는 **이미 지갑에서 빠져 나갔으므로**, 여기 숫자가
+    // «지금 닫으면 지갑이 얼마 늘어나는가»와 일치하려면 빼면 안 된다(title 에 적어 둔다).
+    const fee = mark > 0 ? close * mark * EXIT_FEE_BP_PEG / 10000 : 0;
+    const net = gross === null ? null : gross - fee;
+    const head = `${pos.side === "LONG" ? "롱" : "숏"} `
+      + (pct >= 100 ? `전량 <b>${qty.toFixed(3)}</b>`
+                    : `≈<b>${close.toFixed(3)}</b> 닫고 <b>${(qty - close).toFixed(3)}</b> 남김`);
+    if (net === null) { rows.push(head); continue; }
+    rows.push(`${head} · 지금 닫으면 `
+      + `<b class="exit-net ${net >= 0 ? "good" : "bad"}" title="${escapeHtml(
+          `미실현 ${usd2(gross)} − 청산 수수료 ≈$${fee.toFixed(2)} (peg 실측 ${EXIT_FEE_BP_PEG}bp)\n`
+          + "진입 수수료는 이미 지갑에서 빠졌으므로 여기서 다시 빼지 않습니다.\n"
+          + "체결가·고변동 시장가 전환에 따라 달라질 수 있는 추정치입니다.")}">`
+      + `${usd2(net)}</b>`
+      + `<span class="entry-was"> 순손익 · 미실현 ${usd2(gross)}`
+      + ` − 수수료 ≈$${fee.toFixed(2)}`
+      + (move === null ? "" : ` · ${move >= 0 ? "+" : ""}${move.toFixed(2)}%`) + `</span>`);
   }
   // 낡음 경고는 버튼 라벨이 아니라 여기 적는다 -- 라벨에 넣으면 「롱 2.754 닫기」가 길어져
   // 모바일에서 줄바꿈되고, 정작 «무엇이 낡았는지»는 안 보인다.
