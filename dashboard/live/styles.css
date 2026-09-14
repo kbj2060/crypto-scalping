@@ -2097,12 +2097,6 @@ svg {
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }
 .notify-btn.short:hover:not(:disabled) { border-color: var(--bad); }
 
-/* 2026-09-14 청산 버튼은 **채움**이다. 진입(아웃라인)과 색이 아니라 «형태»로 갈린다 --
-   롱 진입과 롱 청산이 둘 다 녹색 아웃라인이라 흑백·색약에서 구분이 안 됐고, 실제 방어가
-   2단 확인 하나뿐이었다. 방향색을 버리는 것도 의도다: 청산은 방향이 아니라 «닫기»다.
-   🔴.notify-btn.long/.short 와 특이도가 같으므로 반드시 **그 규칙들보다 뒤**에 와야 한다. */
-.exit-row .notify-btn { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-.exit-row .notify-btn:hover:not(:disabled) { background: #fff; border-color: #fff; }
 
 /* 2026-09-14 진입 블록 접기. <details> 가 .manual-entry 의 flex 자식이 되면서 안쪽 행들은
    더 이상 그 gap 을 못 받는다 -- 여기서 같은 간격을 준다. summary 는 display 를 바꾸지
