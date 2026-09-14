@@ -2074,12 +2074,30 @@ svg {
 .exit-frac b { font: 700 12px/1 var(--font-mono); color: var(--text); min-width: 38px;
   text-align: right; font-variant-numeric: tabular-nums; }
 .exit-frac select { padding: 5px 8px; font: 700 11px/1.2 var(--font-sans); }
-/* 계좌 강제 새로고침. 아이콘 하나라 .notify-btn 을 쓰지 않고 최소 스타일만 준다. */
-.acct-refresh { border: 1px solid var(--line); border-radius: 8px; background: transparent;
-  color: var(--muted); cursor: pointer; width: 26px; height: 26px; line-height: 1;
-  font-size: 14px; padding: 0; transition: color .16s ease, border-color .16s ease; }
+/* 계좌 강제 새로고침. 아이콘 하나라 .notify-btn 을 쓰지 않고 최소 스타일만 준다.
+   🔴flex-shrink 를 0 으로 **못박는다**(2026-09-14). 기본값 1 이라 좁은 화면에서 지정한
+   폭이 무시되고 찌그러졌다 -- 375px 실측 14×26px, 손가락 접촉면(권장 44px)의 3분의 1. */
+.acct-refresh { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 10px;
+  background: transparent; color: var(--muted); cursor: pointer;
+  width: 34px; height: 34px; line-height: 1;
+  font-size: 15px; padding: 0; transition: color .16s ease, border-color .16s ease; }
 .acct-refresh:hover:not(:disabled) { color: var(--text); border-color: var(--good); }
 .acct-refresh:disabled { opacity: .5; cursor: default; }
+/* 2026-09-14 모바일 배열. 「거래소 실계좌 · 읽기 전용 · 30초 갱신」 알약이 231px 라
+   375px 에서 행이 넘쳤다(실측). 버튼을 키우면 더 넘치므로 **알약을 제 줄로 내린다** --
+   1행: [롱 보유] ……… [⟳](40px) · 2행: [거래소 실계좌 …].
+   margin-left:auto 가 1행의 남은 폭을 먹어 알약이 자연히 다음 줄로 간다. */
+@media (max-width: 720px) {
+  .acct-tools { flex-wrap: wrap; }
+  /* 1행의 두 요소는 **같은 높이**여야 한 줄로 읽힌다. 알약은 padding 으로만 크던 터라
+     40px 버튼 옆에서 31px 로 떠 보였다. 읽기전용 알약(2행)은 컨트롤이 아니라 라벨이라
+     원래 크기 그대로 둔다 -- 같게 만들면 그것도 누를 수 있어 보인다. */
+  .acct-tools .ops-health-summary { order: 1; min-height: 40px; display: inline-flex;
+    align-items: center; }
+  .acct-tools .acct-refresh { order: 2; margin-left: auto; width: 40px; height: 40px;
+    font-size: 18px; }
+  .acct-tools .ops-readonly { order: 3; }
+}
 .acct-refresh.spin { animation: acct-spin .8s linear infinite; }
 /* 진입/청산 카드 안의 «자세히» -- .detail-toggle/.signal-detail 을 그대로 쓰되
    카드 폭에 맞춰 여백만 맞춘다. */
