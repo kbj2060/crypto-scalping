@@ -19,9 +19,11 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import pathlib
 import struct
+import sys
 
 import numpy as np
 from scipy.stats import spearmanr
@@ -60,60 +62,203 @@ def best_levels(q: np.ndarray):
     return bid_i, ask_i, qb, qa
 
 
+# ── bookTicker(.bt) 리더 — 진짜 최우선 호가 (2026-09-14 추가) ────────────────────
+BT_ROOT = ROOT / "data/live/orderflow/bookticker/ETHUSDT"
+BT_HDR = struct.Struct("<4sHHqQII")        # magic"BTKR", ver, rowsz, hour_ms, first_u, flags, rsv
+BT_ROW = struct.Struct("<qdfdf")           # ts_ms, bid_px, bid_qty, ask_px, ask_qty
+
+
+def read_bt(p: pathlib.Path) -> dict:
+    """시각 파일 하나를 읽는다. `.bt.gz` 도 그대로 받는다(지난 시각은 수집기가 압축한다).
+
+    ⚠️수집기가 WS 재연결 때 같은 파일에 이어붙이므로 **헤더는 파일당 하나**다. 행은 불규칙
+    시각이고 여기서 리샘플하지 않는다 — 이벤트 해상도가 이 파일의 존재 이유다."""
+    raw = gzip.decompress(p.read_bytes()) if p.suffix == ".gz" else p.read_bytes()
+    magic, ver, rowsz, _hour_ms, _first_u, _f, _r = BT_HDR.unpack_from(raw, 0)
+    assert magic == b"BTKR", f"{p.name}: magic {magic!r}"
+    assert rowsz == BT_ROW.size, f"{p.name}: rowsz {rowsz}"
+    n = (len(raw) - BT_HDR.size) // rowsz
+    buf = np.frombuffer(raw, dtype=np.uint8, offset=BT_HDR.size, count=n * rowsz).reshape(n, rowsz)
+    return {"ts": buf[:, 0:8].copy().view("<i8").ravel(),
+            "bid_px": buf[:, 8:16].copy().view("<f8").ravel(),
+            "bid_qty": buf[:, 16:20].copy().view("<f4").ravel().astype(np.float64),
+            "ask_px": buf[:, 20:28].copy().view("<f8").ravel(),
+            "ask_qty": buf[:, 28:32].copy().view("<f4").ravel().astype(np.float64),
+            "ver": int(ver)}
+
+
+def load_bt(glob: str = "*.bt*"):
+    files = sorted(BT_ROOT.glob(glob))
+    assert files, f"bookTicker 파일이 없다: {BT_ROOT}"
+    parts = [read_bt(p) for p in files]
+    ts = np.concatenate([x["ts"] for x in parts])
+    bid = np.concatenate([x["bid_px"] for x in parts])
+    ask = np.concatenate([x["ask_px"] for x in parts])
+    qb = np.concatenate([x["bid_qty"] for x in parts])
+    qa = np.concatenate([x["ask_qty"] for x in parts])
+    o = np.argsort(ts, kind="stable")          # 재연결 구간이 섞일 수 있다
+    ts, bid, ask, qb, qa = ts[o], bid[o], ask[o], qb[o], qa[o]
+    span = (ts[-1] - ts[0]) / 1000
+    print(f"bookTicker {len(files)}파일 · {len(ts):,}행 · {span/60:.1f}분 · {len(ts)/max(span,1e-9):,.0f}행/초")
+    return ts, bid, ask, qb, qa
+
+
+def cont_ofi(bid, ask, qb, qa):
+    """Cont·Kukanov·Stoikov(2013) 식 (3) 의 주문흐름 불균형, **이벤트 단위**.
+
+    e_n = 1[b_n≥b_{n-1}]·Qb_n − 1[b_n≤b_{n-1}]·Qb_{n-1}
+        − 1[a_n≤a_{n-1}]·Qa_n + 1[a_n≥a_{n-1}]·Qa_{n-1}
+    가격이 오르면 그 잔량 전부가 새 매수압, 내리면 사라진 잔량 전부가 매도압이다 — 잔량 차분
+    (`dqb−dqa`, 래스터판이 쓴 근사)은 **가격이 움직인 이벤트에서 부호가 틀린다**."""
+    b0, a0, qb0, qa0 = bid[:-1], ask[:-1], qb[:-1], qa[:-1]
+    b1, a1, qb1, qa1 = bid[1:], ask[1:], qb[1:], qa[1:]
+    e = (np.where(b1 >= b0, qb1, 0.0) - np.where(b1 <= b0, qb0, 0.0)
+         - np.where(a1 <= a0, qa1, 0.0) + np.where(a1 >= a0, qa0, 0.0))
+    return np.concatenate([[np.nan], e])
+
+
+def trailing_sum(ts, x, win_ms):
+    """[t−win, t] 구간 합. 누적합 + searchsorted — 불규칙 시각에 맞는 유일한 방식."""
+    c = np.concatenate([[0.0], np.nancumsum(np.nan_to_num(x))])
+    lo = np.searchsorted(ts, ts - win_ms, side="left")
+    return c[np.arange(len(ts)) + 1] - c[lo]
+
+
+def forward_return(ts, lm, h_ms):
+    """**시각 기준** 전방 로그수익. 이벤트 데이터에서 행 shift 는 지평이 아니다 --
+    1,129행/초 구간의 10행과 정체 구간의 10행은 전혀 다른 시간이다."""
+    j = np.searchsorted(ts, ts + h_ms, side="left")
+    ok = j < len(ts)
+    fwd = np.full(len(ts), np.nan)
+    fwd[ok] = lm[j[ok]] - lm[ok]
+    return fwd
+
+
+def nonoverlap_idx(ts, h_ms):
+    """겹치지 않는 결정만 고른다. 이벤트 IC 의 t 는 겹침 때문에 몇 배로 부푼다."""
+    out, i, n = [], 0, len(ts)
+    while i < n:
+        out.append(i)
+        j = int(np.searchsorted(ts, ts[i] + h_ms, side="left"))
+        i = j if j > i else i + 1
+    return np.array(out, dtype=np.int64)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--horizons", default="1,2,3,5,10,20,30,60,120,300")
-    ap.add_argument("--tag", default="microprice_second")
+    ap.add_argument("--source", choices=["raster", "bt"], default="bt",
+                    help="raster=$0.50 빈(인공물 기록) · bt=최우선 호가 원천")
+    ap.add_argument("--horizons", default="0.1,0.25,0.5,1,2,5,10,30,60")
+    ap.add_argument("--cost-bp", type=float, default=5.88, help="왕복 비용(진입 2.95+peg 청산 2.93)")
+    ap.add_argument("--tag", default="microprice_bt")
     a = ap.parse_args()
-    files = sorted(RASTER.glob("*.f32"))
-    assert files, f"래스터 파일이 없다: {RASTER}"
-    parts = [read_hour(p) for p in files]
-    ts = np.concatenate([x["ts"] for x in parts])
-    mid = np.concatenate([x["mid"] for x in parts])
-    blo = np.concatenate([x["bin_lo"] for x in parts])
-    qty = np.vstack([x["qty"] for x in parts])
-    bs = parts[0]["bin_size"]
-    ok = np.isfinite(mid) & (mid > 0)
-    print(f"래스터 {len(files)}시간 · {len(ts):,}초 · 유효 {ok.mean():.1%} · 빈 {parts[0]['n_bins']} × {bs}")
-    bi, ai, qb, qa = best_levels(qty)
-    bid_px = (blo + bi) * bs; ask_px = (blo + ai) * bs
-    good = ok & (bi >= 0) & (ai >= 0) & np.isfinite(qb) & np.isfinite(qa) & (qb + qa > 0)
-    spread = ask_px - bid_px
-    good &= (spread > 0) & (spread < 5 * bs)      # 비정상 스프레드 제외
-    print(f"  최우선 양측 존재 {good.mean():.1%} · 스프레드 중앙 {np.nanmedian(spread[good]):.3f}달러 "
-          f"({1e4*np.nanmedian(spread[good]/mid[good]):.2f}bp)")
+
+    if a.source == "bt":
+        ts, bid_px, ask_px, qb, qa = load_bt()
+        mid = (bid_px + ask_px) / 2.0
+        spread = ask_px - bid_px
+        good = (np.isfinite(mid) & (mid > 0) & (spread > 0) & (qb > 0) & (qa > 0))
+        tick = 0.01
+        print(f"  스프레드 중앙 ${np.median(spread[good]):.4f} "
+              f"({1e4*np.median(spread[good]/mid[good]):.3f}bp) · {np.median(spread[good])/tick:.1f}틱 · "
+              f"1틱 비율 {np.mean(np.isclose(spread[good], tick)):.1%}")
+    else:
+        files = sorted(RASTER.glob("*.f32"))
+        assert files, f"래스터 파일이 없다: {RASTER}"
+        parts = [read_hour(p) for p in files]
+        ts = np.concatenate([x["ts"] for x in parts])
+        mid = np.concatenate([x["mid"] for x in parts])
+        blo = np.concatenate([x["bin_lo"] for x in parts])
+        qty = np.vstack([x["qty"] for x in parts])
+        bs = parts[0]["bin_size"]
+        # 🔴래스터에는 ts=0 행이 섞여 있다(2026-09-14 실측 8,836행 중 228행). 시각기준 전방수익이
+        # 그 구멍을 뛰어넘어 1초 E|r| 을 0.8 → 14.6bp 로 부풀렸다. 원본 수집기 쪽 결함이다.
+        keep = ts > 0
+        ts, mid, blo, qty = ts[keep], mid[keep], blo[keep], qty[keep]
+        bi, ai, qb, qa = best_levels(qty)
+        bid_px = (blo + bi) * bs
+        ask_px = (blo + ai) * bs
+        spread = ask_px - bid_px
+        good = (np.isfinite(mid) & (mid > 0) & (bi >= 0) & (ai >= 0)
+                & np.isfinite(qb) & np.isfinite(qa) & (qb + qa > 0) & (spread > 0) & (spread < 5 * bs))
+        print(f"래스터 {len(files)}시간 · {len(ts):,}초 · 최우선 양측 {good.mean():.1%} · 빈 {bs}")
 
     QI = np.where(good, (qb - qa) / (qb + qa), np.nan)
     MP = np.where(good, (bid_px * qa + ask_px * qb) / (qb + qa), np.nan)
-    dMP = np.where(good, (MP - mid) / np.maximum(spread, 1e-9), np.nan)   # 스프레드 단위
-    dqb = np.diff(qb, prepend=np.nan); dqa = np.diff(qa, prepend=np.nan)
-    OFI = np.where(good, dqb - dqa, np.nan)
+    dMP = np.where(good, (MP - mid) / np.maximum(spread, 1e-9), np.nan)
+    OFI = np.where(good, cont_ofi(bid_px, ask_px, qb, qa), np.nan)
+
+    # ⭐자체점검: 진짜 최우선 호가면 (MP−mid)/spread ≡ QI/2 다(대수 항등식). 래스터는 이게
+    #   깨져서 dMP +0.279 / QI −0.029 로 갈렸고, 그 격차 자체가 빈격자 잔차였다.
+    gap = float(np.nanmax(np.abs(dMP - QI / 2)))
+    print(f"\n항등식 |dMP − QI/2| 최대 = {gap:.3e}  → "
+          + ("✅원천이 정확하다(두 IC 는 반드시 일치)" if gap < 1e-9
+             else f"🔴격자 잔차 {gap:.4f} — dMP 의 초과 IC 는 신호가 아니다"))
+    if a.source == "bt":
+        assert gap < 1e-9, f"bookTicker 인데 항등식이 깨졌다: {gap}"
+
     lm = np.log(np.maximum(mid, 1e-9))
-    preds = {"QI 큐불균형": QI, "dMP 마이크로프라이스편차": dMP, "OFI 잔량변화": OFI}
-    print(f"\n{'지표':>22} {'지평':>5} {'전방 IC':>9} {'t':>7} {'E|r|bp':>8} {'손익분기IC':>10} {'관측/필요':>8}")
-    rep = {}
-    for name, x in preds.items():
+    hs = [float(v) for v in a.horizons.split(",")]
+    rep: dict = {}
+    print(f"\n{'지표':>10} {'지평':>7} {'전방IC':>9} {'n겹침':>10} {'n비겹':>7} "
+          f"{'E|r|bp':>7} {'총bp':>7} {'블록t':>7} {'순bp':>8}")
+    for name, x in {"QI": QI, "OFI": OFI}.items():
         rep[name] = {}
-        for H in [int(v) for v in a.horizons.split(",")]:
-            fwd = np.full(len(lm), np.nan); fwd[:-H] = lm[H:] - lm[:-H]
-            m = np.isfinite(x) & np.isfinite(fwd)
+        for H in hs:
+            h_ms = int(round(H * 1000))
+            xx = trailing_sum(ts, x, h_ms) if name == "OFI" else x
+            xx = np.where(good, xx, np.nan)
+            fwd = forward_return(ts, lm, h_ms)
+            m = np.isfinite(xx) & np.isfinite(fwd)
             if m.sum() < 500:
                 continue
-            ic = float(spearmanr(x[m], fwd[m]).statistic)
+            ic = float(spearmanr(xx[m], fwd[m]).statistic)
             e = float(np.mean(np.abs(fwd[m])) * 1e4)
-            be = 5.88 / (e * 0.7979) if e > 0 else np.nan
-            s = np.sign(x[m]); s[s == 0] = 1
-            r = s * fwd[m] * 1e4
+            k = nonoverlap_idx(ts, h_ms)
+            k = k[m[k]]
+            s = np.sign(xx[k]); s[s == 0] = 1
+            r = s * fwd[k] * 1e4
             t = float(r.mean() / (r.std(ddof=1) / np.sqrt(len(r)))) if len(r) > 2 else np.nan
-            rep[name][H] = {"ic": ic, "e_abs_bp": e, "breakeven_ic": be, "t": t, "n": int(m.sum())}
-            print(f"{name:>22} {H:>4}초 {ic:>+9.4f} {t:>+7.2f} {e:>8.2f} {be:>10.3f} "
-                  f"{ic/be if be > 0 else np.nan:>7.0%}")
+            net = float(r.mean() - a.cost_bp)
+            rep[name][H] = {"ic": ic, "n": int(m.sum()), "n_nonoverlap": int(len(r)),
+                            "e_abs_bp": e, "gross_bp": float(r.mean()), "t_block": t, "net_bp": net}
+            print(f"{name:>10} {H:>6}초 {ic:>+9.4f} {m.sum():>10,} {len(r):>7,} "
+                  f"{e:>7.3f} {r.mean():>+7.3f} {t:>+7.2f} {net:>+8.3f}")
         print()
+    print(f"dMP 는 QI 의 단조변환이라 IC 가 동일하다 — 따로 싣지 않는다(항등식 점검 위 참조).")
+
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / f"{a.tag}.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False))
-    print(f"저장: {OUT/(a.tag+'.json')}  ⚠️표본 {len(files)}시간 — 탐색적")
+    (OUT / f"{a.tag}.json").write_text(json.dumps(
+        {"source": a.source, "identity_gap": gap, "cost_bp": a.cost_bp, "rows": int(len(ts)),
+         "span_sec": float((ts[-1] - ts[0]) / 1000), "metrics": rep}, indent=1, ensure_ascii=False))
+    print(f"저장: {OUT/(a.tag+'.json')}")
     return 0
 
 
+def _selfcheck() -> None:
+    """항등식과 OFI 부호를 손으로 계산한 예로 확인한다(프레임워크 없이)."""
+    b = np.array([100.0, 100.0, 100.01]); a_ = np.array([100.01, 100.01, 100.02])
+    qb_ = np.array([10.0, 30.0, 5.0]); qa_ = np.array([10.0, 10.0, 10.0])
+    mid = (b + a_) / 2; sp = a_ - b
+    qi = (qb_ - qa_) / (qb_ + qa_)
+    mp = (b * qa_ + a_ * qb_) / (qb_ + qa_)
+    assert np.allclose((mp - mid) / sp, qi / 2, atol=1e-12), "항등식이 깨졌다"
+    e = cont_ofi(b, a_, qb_, qa_)
+    assert e[1] == 20.0, f"매수잔량만 +20 인데 {e[1]}"          # 가격 그대로, 매수 10→30
+    # 매수·매도호가 둘 다 상승: 새 매수잔량 +5, 옛 매수잔량은 차감 안 함(소진=매수압),
+    # 매도호가가 올라갔으니 사라진 옛 매도잔량 +10 → +15
+    assert e[2] == 15.0, f"양측 호가 상승 이벤트: {e[2]}"
+    ts = np.array([0, 100, 250, 400], dtype=np.int64)
+    assert np.allclose(trailing_sum(ts, np.ones(4), 200), [1, 2, 2, 2]), "구간합"
+    lm = np.log(np.array([100.0, 101.0, 102.0, 103.0]))
+    f = forward_return(ts, lm, 200)
+    assert np.isclose(f[0], lm[2] - lm[0]) and np.isnan(f[3]), "전방수익 시각기준"
+    assert list(nonoverlap_idx(ts, 200)) == [0, 2], "비겹침 선택"
+    print("자체점검 통과")
+
+
 if __name__ == "__main__":
+    if "--selfcheck" in sys.argv:
+        _selfcheck()
+        raise SystemExit(0)
     raise SystemExit(main())
