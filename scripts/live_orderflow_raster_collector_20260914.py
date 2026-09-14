@@ -361,12 +361,16 @@ class OrderflowRasterCollector:
     async def _raster_loop(self) -> None:
         tick = 0
         target = int(time.time()) + 1
+        late_ms: list[float] = []
+        body_ms: list[float] = []
         while self._running:
             delay = target - time.time()
             if delay > 0:
                 await asyncio.sleep(delay)
             else:
                 self.ticks_late += 1
+            woke = time.time()
+            late_ms.append((woke - target) * 1000)
             sec_ms = target * 1000
             row = self._row()
             if row is None:
@@ -381,12 +385,24 @@ class OrderflowRasterCollector:
                     self._want_resync = True
                 if tick % 60 == 0:
                     self._prune(mid)
-            target = next_tick(target, time.time())
+            body_ms.append((time.time() - woke) * 1000)
+            nxt = next_tick(target, time.time())
+            if nxt > target + 1:
+                # 왜 건너뛰었는지를 그 자리에서 남긴다 -- 사후에 파일만 보면 "무효행"일 뿐,
+                # 지각인지 본문 지연인지 구분이 안 된다(2026-09-14 에 두 번 헛짚었다).
+                logger.warning("틱 건너뜀 %d→%d  지각 %.0fms 본문 %.0fms",
+                               target, nxt, late_ms[-1], body_ms[-1])
+            target = nxt
             tick += 1
             if tick % 300 == 0:
-                logger.info("래스터 %d행(무효 %d, 지각 %d) 호가 bid/ask=%d/%d",
+                lm, bm = sorted(late_ms), sorted(body_ms)
+                q = lambda v, f: v[min(len(v) - 1, int(len(v) * f))]
+                logger.info("래스터 %d행(무효 %d, 지각 %d) 호가 bid/ask=%d/%d | "
+                            "깨어남지각 p50 %.0f p99 %.0f max %.0fms · 본문 p50 %.0f p99 %.0f max %.0fms",
                             self.rows_written, self.rows_invalid, self.ticks_late,
-                            len(self._bids), len(self._asks))
+                            len(self._bids), len(self._asks),
+                            q(lm, .5), q(lm, .99), lm[-1], q(bm, .5), q(bm, .99), bm[-1])
+                late_ms.clear(); body_ms.clear()
             if tick % 3600 == 0:
                 self._purge_old()
 
