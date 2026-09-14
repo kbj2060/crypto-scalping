@@ -4800,6 +4800,7 @@ async function tick() {
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshBreakoutDetector();     // 2026-09-11 횡보→추세 전환
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
+      refreshVolLevel();             // 2026-09-14 사이징 모델 변동성 예측(4시간 수준)
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
