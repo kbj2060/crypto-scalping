@@ -37,8 +37,7 @@ def main() -> int:
     pipe = BaseChronosPipeline.from_pretrained(a.model, device_map="cpu", torch_dtype=torch.float32)
     d, sm, win, S, cols, _ = P.prepare(G.DEFAULT_FAMILIES)
     lp = np.log(d.close.to_numpy(float))
-    z_ = np.load(P.OUT / "direction_labels.npz", allow_pickle=True)
-    lab = {k: (z_[f"{k}_idx"], z_[f"{k}_y"]) for k in z_["names"]}
+    lab = P.load_labels(d)   # 🔴타임스탬프로 정렬 -- 머신마다 klines 길이가 다르다
     rng = np.random.default_rng(P.SEEDS[0])
     ti, ty = lab["TRAIN"]; sub = rng.choice(len(ti), size=min(a.train_sub, len(ti)), replace=False)
     lab = {"TRAIN": (ti[sub], ty[sub]), **{w: lab[w] for w in ("VAL", "OOS", "TEST")}}

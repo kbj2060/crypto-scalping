@@ -83,11 +83,13 @@ def load_frame() -> pd.DataFrame:
     d["hour_sin"], d["hour_cos"] = np.sin(2 * np.pi * h / 24), np.cos(2 * np.pi * h / 24)
     d["wd_sin"], d["wd_cos"] = np.sin(2 * np.pi * wd / 7), np.cos(2 * np.pi * wd / 7)
     if EXT_PARQUET.exists():
+        # 🔴**타임스탬프로 정렬**한다(위치 정렬 금지). klines 파일이 머신마다 길이가 달라
+        # 위치로 붙이면 조용히 어긋난다 -- 2026-09-14 서버 이관에서 단언문이 실제로 잡았다.
         e = pd.read_parquet(EXT_PARQUET)
-        assert len(e) == len(d) and (e.timestamp.to_numpy() == d.timestamp.to_numpy()).all(), "확장 피쳐 정렬 불일치"
-        for c in e.columns:
-            if c != "timestamp" and c not in d.columns:
-                d[c] = e[c].to_numpy()
+        keep = [c for c in e.columns if c == "timestamp" or c not in d.columns]
+        d = d.merge(e[keep], on="timestamp", how="left")
+        cov = float(np.isfinite(d[[c for c in keep if c != "timestamp"][0]].to_numpy(float)).mean())
+        assert cov > 0.5, f"확장 피쳐 커버리지 {cov:.2f} -- 타임스탬프가 거의 안 겹친다"
     return d
 
 

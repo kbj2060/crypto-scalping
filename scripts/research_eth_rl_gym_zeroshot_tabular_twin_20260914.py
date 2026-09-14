@@ -35,8 +35,7 @@ def main() -> int:
     from tabicl import TabICLRegressor
     fam = tuple(a.families.split(","))
     d, sm, win, S, cols, _ = P.prepare(fam)
-    z_ = np.load(P.OUT / "direction_labels.npz", allow_pickle=True)
-    lab = {k: (z_[f"{k}_idx"], z_[f"{k}_y"]) for k in z_["names"]}
+    lab = P.load_labels(d)   # 🔴타임스탬프로 정렬 -- 머신마다 klines 길이가 다르다
     tr_idx, tr_y = lab["TRAIN"]
     rng = np.random.default_rng(P.SEEDS[0])
     sub = rng.choice(len(tr_idx), size=min(a.context, len(tr_idx)), replace=False)

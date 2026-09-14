@@ -77,13 +77,66 @@ def prepare(families):
     return d, sm, win, S, cols, volexp
 
 
+def sigma_hat(d, train_win) -> np.ndarray:
+    """봉별 예측 변동성(학습창 평균 1로 정규화, [0.3,3] 클립).
+
+    r ≈ L·(움직임 − 비용) 이고 |움직임| 의 눈금은 실현변동성이 거의 다 설명한다. 이 저장소가
+    방향은 못 맞혀도 **크기는 맞힌다**(AUC .82). 그 하나를 기울기 가중에 쓴다."""
+    v = d["rv48"].to_numpy(float) if "rv48" in d.columns else d["atr_pct"].to_numpy(float)
+    lo, hi = train_win
+    base = float(np.nanmedian(v[lo:hi]))
+    s = np.nan_to_num(v / max(base, 1e-12), nan=1.0, posinf=1.0, neginf=1.0)
+    return np.clip(s, 0.3, 3.0).astype(np.float64)
+
+
+def load_labels(d):
+    """라벨을 **타임스탬프로** 프레임에 맞춘다.
+
+    🔴`direction_labels.npz` 는 원래 정수 위치(idx)만 담았다. 위치는 **그 프레임에만** 유효한데,
+    klines 파일은 머신마다 길이가 다르다(2026-09-14 서버 이관: 로컬 62MB / 서버 33MB).
+    위치를 그대로 쓰면 **다른 봉을 가리킨 채 조용히** 틀린 결과가 나온다 -- 오류도 안 난다.
+    그래서 `*_ts`(int64 ns)가 있으면 그걸로 현재 프레임의 위치를 다시 찾는다.
+    없으면 프레임 길이가 저장 당시와 같은지 단언한다.
+    """
+    z = np.load(OUT / "direction_labels.npz", allow_pickle=True)
+    ts = d.timestamp.to_numpy().astype("datetime64[ns]").astype(np.int64)
+    order = np.argsort(ts)
+    out = {}
+    for k in [str(x) for x in z["names"]]:
+        y = z[f"{k}_y"]
+        if f"{k}_ts" in z.files:
+            want = z[f"{k}_ts"]
+            j = order[np.searchsorted(ts[order], want)]
+            ok = (j < len(ts)) & (ts[j] == want)
+            out[k] = (j[ok], y[ok])
+            if ok.sum() < len(want):
+                print(f"  ⚠️{k}: 라벨 {len(want):,} 중 {int(ok.sum()):,} 만 이 프레임에 있다", flush=True)
+        else:
+            n = int(z["frame_len"]) if "frame_len" in z.files else len(ts)
+            assert len(ts) == n, (f"라벨이 위치 기반인데 프레임 길이가 다르다({len(ts)} != {n}) -- "
+                                  "add_label_timestamps 로 *_ts 를 넣어라")
+            out[k] = (z[f"{k}_idx"], y)
+    return out
+
+
 # ── 모델 ────────────────────────────────────────────────────────────────────
+def _ortho(layer: nn.Linear, gain: float) -> nn.Linear:
+    nn.init.orthogonal_(layer.weight, gain); nn.init.constant_(layer.bias, 0.0)
+    return layer
+
+
 class ActorCritic(nn.Module):
     def __init__(self, dim: int, hidden: int = 64):
         super().__init__()
         self.body = nn.Sequential(nn.Linear(dim, hidden), nn.Tanh(), nn.Linear(hidden, hidden), nn.Tanh())
         self.pi = nn.Linear(hidden, 3)
         self.v = nn.Linear(hidden, 1)
+        if ORTHO_INIT:
+            # 몸통 gain=√2(tanh 관행) · 정책 머리 **0.01**(초기 로짓을 거의 균일하게) · 가치 머리 1.0
+            for m_ in self.body:
+                if isinstance(m_, nn.Linear):
+                    _ortho(m_, np.sqrt(2))
+            _ortho(self.pi, 0.01); _ortho(self.v, 1.0)
 
     def forward(self, x):
         h = self.body(x)
@@ -99,6 +152,32 @@ HOLD_PENALTY = 0.0      # --reward-mode holdpen: 홀드 결정마다 −λ (보�
 ANTI_FLAT_LAMBDA = 0.0
 ANTI_FLAT_MIN = 0.05
 ANTI_FLAT_EFF = 0.0     # 학습 루프가 반복마다 갱신
+# ── 2026-09-14 구조 수정 2건 (사용자: "홀드 신용 문제랑 상수 가치함수 둘 다 고쳐서") ──────
+# CREDIT="bandit": **GAE 사슬을 끊는다.** 이 문제는 «결정 → 한 번 관측 → 다시 플랫」이라 결정 간
+#   결합이 슬롯 점유와 복리뿐이다. GAE 를 걸면 보상 0 인 홀드가 λ 가중으로 **자기가 만들지 않은**
+#   뒤따르는 거래의 공과를 받는다(유효 신용 지평 ≈20결정, 진입 간격 ≈17결정 -- 거의 모든 홀드가
+#   다음 거래를 떠안는다). 밴딧이면 이득 = r − V(s) 로 그 경로가 사라진다.
+# ADV_SCALE="vol": **이득을 상태별 예측 변동성으로 나눈다.** 가치함수가 «상수가 최적」인 이유는
+#   결과가 예측 불가라서인데, **분산의 출처(움직임 크기)는 이 저장소가 유일하게 잘 맞히는 것**이다
+#   (크기 AUC .82). 고변동 봉의 거대한 |r| 이 기울기를 지배하던 것을 제거한다.
+#   ⚠️이건 보상을 바꾸는 게 아니라 **기울기 가중**만 바꾼다 -- 판정 지표(순bp)는 원래대로다.
+# 🔴ADV_NORM -- 2026-09-14 문헌조사가 **1순위 원인**으로 지목한 자리(arXiv:2508.08221 · 2601.08521).
+#   기존: ADV = (ADV − 배치평균) / 배치표준편차.
+#   우리 분포는 결정의 95% 가 홀드(이득 ≈ 0)다. 비용 때문에 배치평균이 **음수**면, 평균을 빼는
+#   순간 **모든 홀드가 상태와 무관하게 균일한 양의 이득**을 받는다 → 상태 의존성 없는 홀드 붕괴.
+#   같은 논문: 「보상 분포가 한 점에 몰리면 std 로 나누지 말라」(작은 std 가 기울기를 과증폭).
+#   batch = 기존 · std_only = 평균 안 뺌 · center_only = std 로 안 나눔 · none = 원값 그대로
+ADV_NORM = "batch"
+# 🔴CRITIC_LAMBDA -- VC-PPO(arXiv:2503.01491): 희소 **종단** 보상에서 λ<1 은 그 한 개의 보상을
+#   결정 시퀀스 뒤로 감쇠시켜 크리틱에 편향을 남긴다. 액터는 λ=0.95 로 두고 **크리틱만 λ=1**.
+#   우리 실측 설명분산이 +0.001 이라(크리틱이 상수를 학습 중) 정확히 겨냥되는 자리다.
+CRITIC_LAMBDA = None    # None = 액터와 같은 LAMBDA
+# 🔴직교 초기화 + 정책 최종층 gain 0.01 (arXiv:2006.05990 · ICLR Blog Track 2022). 기본 PyTorch
+#   초기화는 정책 로짓을 크게 시작시켜 초기에 한 행동으로 쏠리게 만든다.
+ORTHO_INIT = False
+CREDIT = "gae"          # gae | bandit
+ADV_SCALE = "none"      # none | vol
+SIGMA_HAT = None        # 봉별 예측 변동성(평균 1로 정규화). ADV_SCALE="vol" 일 때만 쓴다.
 
 
 @torch.no_grad()
@@ -135,12 +214,24 @@ def transitions(res: dict, logp: np.ndarray, v: np.ndarray, lo: int, hi: int):
     vnext = np.where((nx >= 0) & (nx < hi), v[np.clip(nx, lo, hi - 1) - lo], 0.0)
     dt = np.where(nx >= 0, nx - i, 1).astype(float)
     disc = GAMMA_BAR ** dt
-    delta = r + disc * vnext - vi
-    adv = np.zeros_like(delta); g = 0.0
-    for k in range(len(delta) - 1, -1, -1):
-        g = delta[k] + disc[k] * LAMBDA * g
-        adv[k] = g
-    return {"idx": i - lo, "a": a, "logp": logp[i - lo, a], "adv": adv, "ret": adv + vi}
+    def _gae(lam: float) -> np.ndarray:
+        delta = r + disc * vnext - vi
+        out = np.zeros_like(delta); g = 0.0
+        for k in range(len(delta) - 1, -1, -1):
+            g = delta[k] + disc[k] * lam * g
+            out[k] = g
+        return out
+    if CREDIT == "bandit":
+        # 밴딧: 각 결정은 자기 보상만 책임진다. 홀드는 r=0 이므로 이득 = −V(s).
+        adv = r - vi
+        ret = r
+    else:
+        adv = _gae(LAMBDA)
+        # 크리틱 목표만 다른 λ 로 따로 만든다(액터의 이득은 그대로) -- VC-PPO
+        ret = (_gae(CRITIC_LAMBDA) + vi) if CRITIC_LAMBDA is not None else (adv + vi)
+    if ADV_SCALE == "vol" and SIGMA_HAT is not None:
+        adv = adv / SIGMA_HAT[i]
+    return {"idx": i - lo, "a": a, "logp": logp[i - lo, a], "adv": adv, "ret": ret}
 
 
 def ppo_update(model, opt, S_win_list, batches, *, ent_coef: float, epochs: int = 4, mb: int = 8192,
@@ -150,8 +241,13 @@ def ppo_update(model, opt, S_win_list, batches, *, ent_coef: float, epochs: int 
     LP = torch.as_tensor(np.concatenate([b["logp"] for b in batches]), dtype=torch.float32)
     ADV = torch.as_tensor(np.concatenate([b["adv"] for b in batches]), dtype=torch.float32)
     RET = torch.as_tensor(np.concatenate([b["ret"] for b in batches]), dtype=torch.float32)
-    ADV = (ADV - ADV.mean()) / (ADV.std() + 1e-8)
-    n = len(X); stats = []
+    if ADV_NORM == "batch":
+        ADV = (ADV - ADV.mean()) / (ADV.std() + 1e-8)
+    elif ADV_NORM == "std_only":
+        ADV = ADV / (ADV.std() + 1e-8)
+    elif ADV_NORM == "center_only":
+        ADV = ADV - ADV.mean()
+    n = len(X); stats = []; ev_ = []
     for _ in range(epochs):
         perm = torch.randperm(n)
         for s in range(0, n, mb):
@@ -167,11 +263,16 @@ def ppo_update(model, opt, S_win_list, batches, *, ent_coef: float, epochs: int 
             # 드리프트 방어 -- **액터 손실 한 곳**: 배치 평균 (P롱 − P숏)² (DSAC 정정 원칙)
             dreg = ((p[:, 1] - p[:, 2]).mean()) ** 2
             loss = pg + 0.5 * vl - ent_coef * ent + DIRECTION_REG * dreg
+            with torch.no_grad():
+                vr = RET[j].var()
+                ev_.append(float(1.0 - (RET[j] - v).var() / vr) if vr > 1e-12 else 0.0)
             if ANTI_FLAT_EFF > 0:
                 loss = loss + ANTI_FLAT_EFF * torch.relu(torch.tensor(ANTI_FLAT_MIN) - p[:, 1:].sum(1).mean())
             opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(model.parameters(), 0.5); opt.step()
             stats.append((pg.item(), vl.item(), ent.item()))
-    return np.mean(stats, axis=0)
+    m = np.mean(stats, axis=0)
+    # ⭐**설명분산** -- 크리틱이 실제로 배우는지 보이는 유일한 숫자. 0 근처면 «상수를 학습 중」이다.
+    return np.append(m, float(np.mean(ev_)) if ev_ else 0.0)
 
 
 def train(d, sm, S, win, *, seed: int, iters: int, ent_coef: float, lr: float, n_env: int,
@@ -211,7 +312,7 @@ def train(d, sm, S, win, *, seed: int, iters: int, ent_coef: float, lr: float, n
         ANTI_FLAT_EFF = ANTI_FLAT_LAMBDA * max(0.0, 1.0 - it / max(iters - 1, 1))
         st = ppo_update(model, opt, S_list, batches, ent_coef=ec)
         if it % 10 == 0 or it == iters - 1:
-            log(f"    it {it:3d} pg {st[0]:+.4f} v {st[1]:.5f} ent {st[2]:.3f}"
+            log(f"    it {it:3d} pg {st[0]:+.4f} v {st[1]:.5f} ent {st[2]:.3f} **ev {st[3]:+.3f}**"
                 + (f" · 거래/창 {np.mean(tr_n):.0f} 순bp {np.mean(tr_bp):+.2f}" if tr_n else "")
                 + f" · {time.time()-t0:.0f}s")
     return model
@@ -335,13 +436,28 @@ def main() -> int:
     ap.add_argument("--direction-reg", type=float, default=0.20,
                     help="액터 손실의 측면 균형 항 계수. forced 모드에서 0.2 는 «항상 숏」 붕괴를 못 막았다(2026-09-14)")
     ap.add_argument("--anti-flat-min", type=float, default=0.05)
+    ap.add_argument("--credit", choices=["gae", "bandit"], default="gae",
+                    help="bandit = GAE 사슬을 끊는다(홀드가 남의 거래 공과를 안 받는다)")
+    ap.add_argument("--adv-scale", choices=["none", "vol"], default="none",
+                    help="vol = 이득을 상태별 예측 변동성으로 나눈다(기울기 가중만 바뀐다)")
+    ap.add_argument("--adv-norm", choices=["batch", "std_only", "center_only", "none"], default="batch",
+                    help="batch(기존) 는 홀드 95%% 분포에서 상태 무관 홀드 편향을 만든다(arXiv:2508.08221)")
+    ap.add_argument("--ortho-init", action="store_true", help="직교 초기화 + 정책머리 gain 0.01")
+    ap.add_argument("--critic-lambda", type=float, default=None,
+                    help="크리틱 GAE 의 λ 를 액터와 분리(1.0 = VC-PPO, arXiv:2503.01491)")
+    ap.add_argument("--epochs", type=int, default=4)
+    ap.add_argument("--mb", type=int, default=8192)
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     fam = tuple(a.families.split(","))
     d, sm, win, S, cols, volexp = prepare(fam)
     cost = {"entry_bp": 5.0, "peg_exit_bp": 5.0} if a.taker else None
-    global FORCED, HOLD_PENALTY, ANTI_FLAT_LAMBDA, ANTI_FLAT_MIN, DIRECTION_REG
+    global FORCED, HOLD_PENALTY, ANTI_FLAT_LAMBDA, ANTI_FLAT_MIN, DIRECTION_REG, CREDIT, ADV_SCALE, SIGMA_HAT, ADV_NORM, ORTHO_INIT, CRITIC_LAMBDA
     DIRECTION_REG = a.direction_reg
+    CREDIT = a.credit; ADV_SCALE = a.adv_scale; ADV_NORM = a.adv_norm; ORTHO_INIT = a.ortho_init
+    CRITIC_LAMBDA = a.critic_lambda
+    if ADV_SCALE == "vol":
+        SIGMA_HAT = sigma_hat(d, win["TRAIN"])
     FORCED = a.reward_mode == "forced"
     ANTI_FLAT_LAMBDA = a.anti_flat_lambda if a.reward_mode == "antiflat" else 0.0
     ANTI_FLAT_MIN = a.anti_flat_min
@@ -350,7 +466,8 @@ def main() -> int:
     logf = open(OUT / f"log_{a.tag}.txt", "a")
     def log(s):
         print(s, flush=True); logf.write(s + "\n"); logf.flush()
-    log(f"\n=== {a.tag} · 보상 {a.reward_mode}{'(λ=%g)' % a.hold_penalty if a.reward_mode == 'holdpen' else ''} · 군 {fam} · 상태 {S.shape[1]}D · 창 {[(k, v[1]-v[0]) for k, v in win.items()]}"
+    log(f"\n=== {a.tag} · 신용 {a.credit} · 이득눈금 {a.adv_scale} · 이득정규화 {a.adv_norm}"
+        f"{' · 직교초기화' if a.ortho_init else ''} · 보상 {a.reward_mode}{'(λ=%g)' % a.hold_penalty if a.reward_mode == 'holdpen' else ''} · 군 {fam} · 상태 {S.shape[1]}D · 창 {[(k, v[1]-v[0]) for k, v in win.items()]}"
         f" · 씨드 {SEEDS[:a.seeds]} · 비용 {'테이커 10bp' if a.taker else 'peg 5.88bp'}")
     report = {"tag": a.tag, "families": fam, "dim": int(S.shape[1]), "seeds": SEEDS[:a.seeds], "taker": a.taker,
               "fresh_forward_bar_by_bar": True, "trade_ledgers_used_as_input": False,
