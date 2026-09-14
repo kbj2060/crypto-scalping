@@ -1,7 +1,6 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
-const API_VREB_ECON_SHADOW_URL = "/api/v-rebound-econ-shadow";
 const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
 const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
 // BTC 코인 페이지 전용 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH
@@ -202,8 +201,6 @@ let regimeBtcLastFetchAt = 0;
 let regimeXrpLastFetchAt = 0;
 let coinIndicatorsLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
-let vrebEconShadowLastFetchAt = 0;
-const VREB_ECON_SHADOW_POLL_MS = 60000;
 // 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
 // 서버가 이미 30초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
 let latestBinanceAccount = null;
@@ -3217,175 +3214,6 @@ function fmtMacroCalendarTime(iso) {
   const timePart = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   return `${datePart} ${timePart}`;
 }
-// 2026-09-02 (사용자 요청): V자반등 **경제라벨** 후보의 섀도우 원장 표시.
-// ⚠️위쪽 V자반등 칩(매 봉 giveback 모델)과는 **다른 모델**이다 -- 라벨 정의부터 다르다.
-// 이건 주문을 내지 않는 가상 원장이고, HOLDOUT이 1회 노출로 소진돼 남은 유일한 검증 경로다.
-// 근거: docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md
-async function refreshVrebEconShadow() {
-  const now = Date.now();
-  if (now - vrebEconShadowLastFetchAt < VREB_ECON_SHADOW_POLL_MS) return;
-  vrebEconShadowLastFetchAt = now;
-  try {
-    const res = await fetch(API_VREB_ECON_SHADOW_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`vreb econ shadow ${res.status}`);
-    renderVrebEconShadow(await res.json());
-  } catch (error) {
-    console.error("V-rebound econ shadow fetch error:", error);
-    const sub = el("vrebEconShadowSub");
-    if (sub) sub.textContent = "불러오기 실패";
-  }
-}
-// 청산 사유 표기. 2026-09-04 사용자 신고: "최근 청산이 익절인데 손절선 도달이라고 적혀있다".
-// 원인은 러너의 `reason`이 "stop" 하나로 **초기 손절과 무장 후 트레일링 익절을 둘 다** 덮는데,
-// 대시보드가 그걸 무조건 "손절선 도달"로 찍고 있었던 것이다(신고 시점 원장 17건 중 12건 오표기).
-// BRACKET이 sl_atr=5.0 / arm_atr=1.5 / trail_atr=0.1이라 무장 스톱은 항상 진입가 위이므로,
-// 두 경우는 애초에 반대 사건이다.
-function vshadowRawMovePct(t) {
-  // 비용(COST_BP) 차감 전 원시 가격 이동. pnl_bp는 비용이 빠져 있어 부호가 뒤집힐 수 있으므로
-  // (예: 원시 +8bp, 비용 10bp -> pnl -2bp) 사유 판정에는 반드시 이 값을 써야 한다.
-  if (t.entry == null || t.exit == null || !Number(t.entry)) return null;
-  const sgn = t.side === "long" ? 1 : -1;
-  return (sgn * (Number(t.exit) - Number(t.entry))) / Number(t.entry) * 100;
-}
-// 화면에 찍는 "진입 시각". entry_utc는 **신호가 난 봉**이고, 실제 체결은 배리어 평가가
-// 시작된 봉(entry_bar_utc)에서 그 시점 마크가격으로 일어난다 -- 원장의 `entry` 가격이 바로
-// 그 값이다. 그래서 체결 봉을 쓴다. 그러지 않으면 같은 줄의 가격과 시각이 서로 다른 봉을
-// 가리킨다(최대 3봉 차이, SCORE_TAIL_BARS=3). entry_bar_utc가 없는 과거 행은 신호봉으로 대체.
-function vshadowFillTs(t) {
-  return t.entry_bar_utc || t.entry_utc;
-}
-function vshadowHeldText(t) {
-  // 러너의 `bars_held`를 쓰지 않는다 -- 2026-09-04 이전 행은 스톱 청산 봉을 빠뜨려 전부
-  // 어긋나 있다(실측 17/17건). 화면에 함께 찍는 두 시각에서 직접 계산하면 서로 검증되고,
-  // 과거 행에서도 맞는다.
-  const a = Date.parse(vshadowFillTs(t)), b = Date.parse(t.exit_utc);
-  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return "";
-  const min = Math.round((b - a) / 60000);
-  if (min < 60) return ` · ${min}분`;
-  const h = Math.floor(min / 60), m = min % 60;
-  return m ? ` · ${h}시간 ${m}분` : ` · ${h}시간`;
-}
-function vshadowExitLabel(t) {
-  if (t.reason !== "stop") return { text: "보유 만기", tone: "neutral" };
-  // `armed`는 2026-09-04부터 러너가 원장에 남긴다. 그 이전 행에는 없으므로 가격 이동 부호로
-  // 보완한다 -- 무장 스톱은 항상 진입가 위라서 이 대체 판정은 근사가 아니라 정확히 일치한다.
-  const move = vshadowRawMovePct(t);
-  const armed = t.armed != null ? !!t.armed : (move != null && move > 0);
-  return armed ? { text: "트레일링 익절", tone: "good" } : { text: "초기 손절", tone: "bad" };
-}
-function renderVrebEconShadow(p) {
-  const sub = el("vrebEconShadowSub");
-  const body = el("vrebEconShadowBody");
-  if (!body) return;
-  if (!p || typeof p !== "object") {
-    if (sub) sub.textContent = "데이터 없음";
-    body.innerHTML = `<div class="vshadow-empty">섀도우 러너가 아직 기록을 남기지 않았습니다.</div>`;
-    return;
-  }
-  const n = Number(p.closed_trades || 0);
-  const ref = p.backtest_reference || {};
-  const v = p.verdict || {};
-  const bp = (x, d = 2) => (x == null ? "-" : `${x > 0 ? "+" : ""}${Number(x).toFixed(d)}bp`);
-  const pct = (x) => (x == null ? "-" : `${(Number(x) * 100).toFixed(1)}%`);
-
-  if (sub) {
-    const days = p.days_running == null ? null : Number(p.days_running);
-    sub.textContent = days == null ? "가상 원장" : `가동 ${days.toFixed(1)}일 · 가상 원장`;
-  }
-
-  const out = [];
-
-  // ① 한 줄 판정 -- 원시 숫자보다 먼저, 말로 답한다
-  out.push(`<div class="vshadow-verdict ${v.tone || "neutral"}">
-    <strong>${v.headline || "기록 없음"}</strong>
-    ${v.detail ? `<span>${v.detail}</span>` : ""}
-  </div>`);
-
-  // ② 진행도 -- "언제쯤 판단할 수 있나"에 답한다
-  const tgt = Number(p.target_trades || 0);
-  if (tgt) {
-    const w = Math.max(0, Math.min(100, Number(p.progress_pct || 0)));
-    out.push(`<div class="vshadow-progress">
-      <div class="vshadow-progress-top"><span>판단에 필요한 표본</span><span>${n} / ${tgt}건</span></div>
-      <div class="vshadow-progress-track"><div class="vshadow-progress-fill" style="width:${w}%"></div></div>
-    </div>`);
-  }
-
-  // ③ 핵심 3지표를 백테스트와 나란히 -- 비교 대상 없이 숫자만 보면 해석이 안 된다
-  // ⚠️2026-09-08: 백테스트 기준선이 **음수**로 바뀌었다(스톱 회계 수정). "기준선보다 높다=좋다"가
-  // 더는 성립하지 않으므로 기대값 타일은 **절대 부호**로 판정한다 -- 손실이면 bad, 양수면
-  // "백테스트(손실 기대)와 어긋남"이라 warn이다. 승률만 기준선과 비교한다(일치성 점검).
-  const expTone = (a) => (a == null ? "neutral" : a > 0 ? "warn" : "bad");
-  const cardTone = (a, b) => (a == null ? "neutral" : a >= b ? "good" : "warn");
-  const cards = [
-    { name: "건당 기대값", val: n ? bp(p.exp_bp) : "-",
-      tone: n ? expTone(p.exp_bp) : "neutral",
-      ref: `백테스트 ${bp(ref.holdout_exp_bp)}` },
-    { name: "승률", val: n ? pct(p.win_rate) : "-",
-      tone: n ? cardTone(p.win_rate, ref.holdout_win_rate) : "neutral",
-      ref: `백테스트 ${pct(ref.holdout_win_rate)}` },
-    { name: "하루 체결", val: p.trades_per_day == null ? "-" : `${Number(p.trades_per_day).toFixed(1)}건`,
-      tone: "neutral",
-      ref: `백테스트 ${ref.holdout_trades_per_day ?? "-"}건` },
-  ];
-  out.push(`<div class="vshadow-cards">${cards.map((c) => `
-    <div class="vshadow-card ${c.tone}">
-      <span class="vshadow-card-name">${c.name}</span>
-      <strong class="vshadow-card-value">${c.val}</strong>
-      <span class="vshadow-card-ref">${c.ref}</span>
-    </div>`).join("")}</div>`);
-
-  // ④ 보유 중 -- "최악이어도 얼마"가 가장 알고 싶은 값
-  const open = p.open_positions || [];
-  out.push(`<div class="vshadow-section-title">보유 중 <em>${p.n_open || 0}건</em></div>`);
-  if (!open.length) {
-    out.push(`<div class="vshadow-empty">열린 포지션 없음</div>`);
-  } else {
-    out.push(open.map((q) => `<div class="vshadow-row">
-      <span class="vshadow-side ${q.side}">${q.side === "long" ? "롱" : "숏"}</span>
-      <div class="vshadow-row-main">
-        <strong>${q.armed ? "이익 확보됨" : "손절선 대기"}</strong>
-        <span>진입 ${Number(q.entry).toFixed(2)} · ${q.bars_held ?? 0}봉 보유</span>
-      </div>
-      <span class="vshadow-row-value ${Number(q.locked_bp) > 0 ? "good" : "warn"}">${bp(q.locked_bp)}
-        <em>최악 시</em></span>
-    </div>`).join(""));
-  }
-
-  // ⑤ 최근 청산 -- 진입가/청산가/시각까지 (2026-09-04 사용자 요청)
-  const rec = (p.recent_trades || []).slice().reverse().slice(0, 5);
-  if (rec.length) {
-    out.push(`<div class="vshadow-section-title">최근 청산</div>`);
-    out.push(rec.map((t) => {
-      const ex = vshadowExitLabel(t);
-      const move = vshadowRawMovePct(t);
-      const held = vshadowHeldText(t);
-      // 신호가 묵은 뒤 들어간 건만 표시한다. 0봉(즉시 체결)이 정상이라 매 줄에 "0봉"을
-      // 찍으면 신호 대 잡음만 나빠진다.
-      const lag = Number(t.signal_lag_bars) > 0
-        ? ` <em class="vshadow-lag" title="신호가 발생한 봉과 실제 체결 봉의 간격입니다. 체결은 신호봉 종가가 아니라 처리 시점의 마크가격으로 일어납니다.">신호 ${t.signal_lag_bars}봉 전</em>`
-        : "";
-      const prob = t.proba == null ? "" : ` · p ${Number(t.proba).toFixed(3)}`;
-      return `<div class="vshadow-row vshadow-row-detail">
-      <span class="vshadow-side ${t.side}">${t.side === "long" ? "롱" : "숏"}</span>
-      <div class="vshadow-row-main">
-        <strong class="${ex.tone}">${ex.text}</strong>
-        <span class="vshadow-trade-px">진입 ${fmtNum(t.entry, 2)} → 청산 ${fmtNum(t.exit, 2)}${
-          move == null ? "" : ` <em class="${move > 0 ? "good" : "bad"}">${move > 0 ? "+" : ""}${move.toFixed(2)}%</em>`}</span>
-        <span class="vshadow-trade-ts">${fmtMacroCalendarTime(vshadowFillTs(t))} → ${fmtMacroCalendarTime(t.exit_utc)}${held}${prob}${lag}</span>
-      </div>
-      <span class="vshadow-row-value ${Number(t.pnl_bp) > 0 ? "good" : "bad"}">${bp(t.pnl_bp)}</span>
-    </div>`;
-    }).join(""));
-  }
-
-  // ⑥ 부가 지표는 맨 아래 한 줄로 -- 평소엔 볼 필요 없다
-  if (n) {
-    out.push(`<div class="vshadow-foot">누적 ${bp(p.total_bp, 0)} · 최대낙폭 ${bp(p.max_dd_bp, 0)}
-      · 손익비 ${p.payoff ?? "-"} · 연속손실 ${p.consec_loss ?? 0}</div>`);
-  }
-  body.innerHTML = out.join("");
-}
 async function refreshMacroCalendar() {
   const now = Date.now();
   if (now - macroCalendarLastFetchAt < MACRO_CALENDAR_POLL_MS) return;
@@ -3465,7 +3293,6 @@ function setupPageTabs() {
       regimeXrpLastFetchAt = 0; refreshRegimeXrp();
       coinIndicatorsLastFetchAt = 0; refreshCoinIndicators();
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
-      vrebEconShadowLastFetchAt = 0; refreshVrebEconShadow();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
       lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
     }
@@ -4814,7 +4641,6 @@ async function tick() {
       refreshActiveRegime();
       refreshCoinIndicators();
       refreshMacroCalendar();
-      refreshVrebEconShadow();
       refreshSessionAlerts();
       maybeFetchSnapshotChartHistory();
     }

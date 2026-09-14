@@ -404,7 +404,6 @@ def record_account_trips(payload: dict, seen: dict[str, tuple[str, str, int, int
 # tail_risk block (see its _write_liq_burst_state() docstring) -- written the instant a new
 # liquidation event arrives, not on a 10s timer, for sub-few-second "sudden liquidation" alerting.
 LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
-V_REBOUND_ECON_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "v_rebound_econ_shadow_state.json"
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
 # 2026-09-10 극점 탐지기 -- 채점은 워커가 하고 대시보드는 읽기만 한다
 # (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
@@ -1353,140 +1352,6 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
     except Exception as e:                                     # noqa: BLE001 -- 절대 raise 안 함
         out["error"] = f"coin_indicators_error: {e}"
     return out
-
-
-def v_rebound_econ_shadow_payload() -> dict[str, Any]:
-    """V자반등 **경제라벨** 후보의 섀도우(가상) 원장. 주문은 내지 않는다 -- 표시 전용.
-
-    근거: docs/model_contracts/eth_v_rebound_econ_label_autotrade_spec_20260902.md
-    러너: scripts/live_eth_v_rebound_econ_shadow_runner_20260902.py
-    ⚠️배포 대시보드 칩(매 봉 giveback 모델)과는 **다른 모델**이다 -- 라벨 정의부터 다르다.
-    """
-    state = load_json(V_REBOUND_ECON_SHADOW_STATE_PATH) or {}
-    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
-    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
-
-    pnls: list[float] = []
-    for row in ledger:
-        try:
-            pnls.append(float(row["pnl_bp"]))
-        except (KeyError, TypeError, ValueError):
-            continue
-    n = len(pnls)
-    wins = [x for x in pnls if x > 0]
-    losses = [x for x in pnls if x <= 0]
-    equity: list[dict[str, Any]] = []
-    run = 0.0
-    peak = 0.0
-    mdd = 0.0
-    for row, v in zip([r for r in ledger if "pnl_bp" in r], pnls):
-        run += v
-        peak = max(peak, run)
-        mdd = min(mdd, run - peak)
-        equity.append({"ts": row.get("exit_utc"), "cum_bp": round(run, 2)})
-
-    # ── 사람이 바로 읽을 수 있는 해석값 (대시보드가 원시 숫자만 나열하지 않도록) ──
-    # ⚠️2026-09-08 기준선 갱신. 이전 값(+6.09bp / 13.18건 / 승률 78.0%)은 **legacy `sim_exit`**
-    # (걸 수 없는 자리에 트레일 스톱을 놓고 그 가격에 체결시키던 결함판)으로 계산돼 무효다.
-    # 2026-09-07 수정 회계(`infeasible="exit"`)로 **같은 창(2026-04~08)·같은 서빙 규격**
-    # (동결 컨텍스트 3시드 p>=0.8221 · 셀 5.0/1.5/0.1 · 상한 200봉 · 동시보유 5 · 비용 10bp)을
-    # 재계산한 값으로 교체했다. 근거: docs/experiments/eth_v_rebound_econ_hold_cap_removal_20260908.md
-    # ⇒ 이 후보의 백테스트 기대값은 **음수**다. 카드가 묻는 것도 "백테스트만큼 버는가"가 아니라
-    #   "백테스트가 예고한 손실과 일치하는가"로 바뀐다.
-    # 목표 표본: 백테스트 빈도(12.41건/일) x 2주.
-    HOLDOUT_EXP_BP, HOLDOUT_PER_DAY = -8.42, 12.41
-    target = int(round(HOLDOUT_PER_DAY * 14))
-    days = 0.0
-    started = state.get("started_utc")
-    if started:
-        try:
-            days = max((datetime.now(timezone.utc)
-                        - datetime.fromisoformat(str(started))).total_seconds() / 86400.0, 0.0)
-        except (TypeError, ValueError):
-            days = 0.0
-    exp = (sum(pnls) / n) if n else None
-    if n < 30:
-        verdict = {"tone": "neutral", "headline": "표본이 아직 적습니다",
-                   "detail": f"{n}건 청산 · 판단에는 {target}건 정도가 필요합니다"}
-    elif exp is None:
-        verdict = {"tone": "neutral", "headline": "기록 없음", "detail": ""}
-    elif exp <= HOLDOUT_EXP_BP * 2:
-        verdict = {"tone": "bad", "headline": "백테스트보다 더 나쁩니다",
-                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp(수정 회계)의 "
-                             f"{exp / HOLDOUT_EXP_BP:.1f}배 손실"}
-    elif exp <= HOLDOUT_EXP_BP:
-        verdict = {"tone": "bad", "headline": "백테스트가 예고한 손실대로입니다",
-                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp(수정 회계)"}
-    elif exp <= 0:
-        verdict = {"tone": "bad", "headline": "손실이지만 백테스트보다는 낫습니다",
-                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp(수정 회계)"}
-    else:
-        verdict = {"tone": "warn", "headline": "백테스트(손실 기대)와 어긋납니다",
-                   "detail": f"건당 {exp:+.2f}bp — 백테스트 기대 {HOLDOUT_EXP_BP:+.2f}bp(수정 회계). "
-                             f"표본이 작거나 계측이 느슨하지 않은지 먼저 의심할 것"}
-
-    return {
-        "started_utc": state.get("started_utc"),
-        "open_positions": [
-            {
-                "side": p.get("side"), "entry": p.get("entry"), "stop": p.get("stop"),
-                "best": p.get("best"), "armed": bool(p.get("armed")),
-                "proba": p.get("proba"), "opened_utc": p.get("opened_utc"),
-                "bars_held": p.get("bars_held"),
-                # 손절선이 이미 확정한 손익. 무장 전이면 최대손실, 무장 후면 확보이익이 될 수 있다.
-                # 현재가 없이도 계산되고, "최악이어도 얼마"라는 직관적 의미를 준다.
-                "locked_bp": _locked_bp(p),
-            }
-            for p in positions[-10:]
-        ],
-        "n_open": len(positions),
-        "closed_trades": n,
-        "exp_bp": round(sum(pnls) / n, 2) if n else None,
-        "total_bp": round(sum(pnls), 1) if n else None,
-        "win_rate": round(len(wins) / n, 4) if n else None,
-        "payoff": (round((sum(wins) / len(wins)) / abs(sum(losses) / len(losses)), 3)
-                   if wins and losses else None),
-        "max_dd_bp": round(mdd, 1) if n else None,
-        "consec_loss": state.get("consec_loss"),
-        "equity_curve": equity[-300:],
-        "recent_trades": [
-            {
-                "side": r.get("side"), "entry_utc": r.get("entry_utc"),
-                "exit_utc": r.get("exit_utc"), "entry": r.get("entry"),
-                "exit": r.get("exit"), "pnl_bp": r.get("pnl_bp"),
-                "reason": r.get("reason"), "proba": r.get("proba"),
-                # bars_held는 일부러 내보내지 않는다: 러너의 카운터가 배리어 평가 패스마다
-                # 증가해 실제 경과 봉수를 과소계상한다(2026-09-04 실측 17/17건 불일치, 실제
-                # 3봉을 1봉으로 기록한 예까지 있었다). 프론트는 entry_utc/exit_utc 차이로
-                # 경과 시간을 직접 계산해 화면 안에서 서로 검증되게 한다.
-                # entry_bar_utc는 배리어 평가가 실제로 시작된 봉 = 사실상의 체결 봉이다.
-                # 원장의 `entry` 가격도 그 시점의 마크가격이므로, 화면에는 entry_utc(신호봉)가
-                # 아니라 이 값을 진입 시각으로 찍어야 가격과 시각이 같은 봉을 가리킨다.
-                # signal_lag_bars는 그 둘의 간격 -- 0이 아니면 신호가 묵은 뒤 들어간 것이다.
-                "entry_bar_utc": r.get("entry_bar_utc"),
-                "signal_lag_bars": r.get("signal_lag_bars"),
-                # `armed`는 2026-09-04부터 러너가 기록한다. 그 이전 행에는 없으므로 None으로
-                # 나가고, 프론트가 진입가/청산가의 부호로 보완한다 -- 이 둘이 없으면 트레일링
-                # 익절과 초기 손절을 구분할 수 없다(그게 사용자가 신고한 오표기의 원인이었다).
-                "armed": r.get("armed"),
-            }
-            for r in ledger[-8:]
-        ],
-        # 2026-09-08 갱신 -- 전부 수정 회계(`infeasible="exit"`) 재계산값, 동시보유 5 순차 포트폴리오.
-        # OOS 2026-01~03 / HOLDOUT 2026-04~08, 라이브와 같은 3시드 서빙 규격.
-        "backtest_reference": {"oos_exp_bp": -9.05, "holdout_exp_bp": -8.42,
-                               "holdout_win_rate": 0.698, "holdout_payoff": 0.306,
-                               "holdout_trades_per_day": 12.41,
-                               "accounting": "fixed_20260907",
-                               "note": "2026-09-07 스톱 회계 수정본으로 재계산 "
-                                       "(이전 +6.09bp/13.18건/78.0%는 결함 회계 값)"},
-        "days_running": days,
-        "trades_per_day": round(n / days, 2) if (n and days > 0) else None,
-        "target_trades": target,
-        "progress_pct": round(min(n / target, 1.0) * 100, 1) if target else None,
-        "verdict": verdict,
-        "note": "섀도우 -- 주문 없음. 배포 칩(매 봉 giveback)과 다른 모델.",
-    }
 
 
 def no_cache(resp: web.StreamResponse) -> web.StreamResponse:
@@ -3376,15 +3241,6 @@ def make_app() -> web.Application:
             return json_response(request, None, etag)
         return json_response(request, btc_evidence_shadow_payload(), etag)
 
-    async def api_v_rebound_econ_shadow(request: web.Request) -> web.Response:
-        etag = make_etag(
-            "v-rebound-econ-shadow",
-            file_signature(V_REBOUND_ECON_SHADOW_STATE_PATH),
-        )
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-        return json_response(request, v_rebound_econ_shadow_payload(), etag)
-
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
@@ -3430,7 +3286,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
     app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
-    app.router.add_get("/api/v-rebound-econ-shadow", api_v_rebound_econ_shadow)
     app.router.add_get("/api/btc-evidence-shadow", api_btc_evidence_shadow)
     # show_index=False to match /data/live/ below: this directory is reachable from the
     # public tunnel, and a listing advertised every file sitting in it (e.g. the
