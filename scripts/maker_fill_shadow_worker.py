@@ -15,11 +15,13 @@
   호가 크로스 → 보장 체결 / 큐 감소는 체결로만(취소 무시) / 배치·리페그 후 200ms 지연.
 - 도착 스케줄: MAKER_SHADOW_SPACING_S(기본 300s)마다 buy/sell × policies(기본 peg,static),
   타임아웃 MAKER_SHADOW_TIMEOUT_S(기본 120s) → taker 폴백 가격 기록.
-- 결정시점 동기화 arm (2026-08-24): 봇의 orderbook_decision_snapshots
-  (record_reason=final_governor_decision, context_json.final_action)를 폴링해 액션 전이
-  (진입/청산 결정) 순간에도 legs를 스폰한다(trigger='decision', 양방향 스폰 — 결정 반대측이
-  같은 순간의 대조군). 기존 300s 스케줄 legs는 trigger='schedule'로 구분. 봇 duckdb는
-  read_only 연결 + 락 실패 시 해당 사이클 스킵(단일 writer 원칙, 쓰기 없음).
+- ⚠️결정시점 동기화 arm은 **2026-09-15에 제거**했다(2026-08-24 도입). 봇의 final_action은
+  23일 중 99.5%를 값 2에 머물러 전이가 4건뿐이었고(0.17건/일) leg 16개만 만들었다 —
+  통계적으로 아무것도 못 한다. 그 대가로 10초마다 봇 duckdb(292MB)에 락을 걸어 ETH에서만
+  5,705회 충돌했다. BTC/SOL 테이블은 애초에 final_action을 담지 않아(record_reason=
+  omega4_6_1_shadow_decision, 키가 asset/price뿐) 전이 0건이었고, init이 빈 결과를 받으면
+  last_ts=""가 그대로 남아 `recorded_at_kst > ''`가 영구 ConversionException이 됐다
+  (BTC 86,417 · SOL 86,418회). 원장의 trigger 컬럼은 과거 행(ETH decision 16건)을 위해 남긴다.
 - 기록: 자체 duckdb(단일 writer 원칙, data/live/maker_fill_shadow.duckdb) — leg 원장 +
   하트비트(스트림 카운터; tail_risk의 '핸드셰이크만 확인한 가짜 양성' 전례 재발 방지).
 - 스트림 stale(북 나이>30s) 상태의 leg는 비용을 지어내지 않고 aborted_stale로 폐기 기록.
@@ -49,18 +51,6 @@ TAKER_FEE_BP = 5.0
 LATENCY_MS = 200
 STALE_S = 30.0
 HEARTBEAT_S = 300
-
-# 결정시점 동기화 arm
-DECISION_ENABLED = os.environ.get("MAKER_SHADOW_DECISION_ENABLED", "1").strip().lower() not in ("0", "false", "")
-DECISION_DB = Path(os.environ.get("MAKER_SHADOW_DECISION_DB", str(ROOT / "data/live/microstructure.duckdb")))
-DECISION_TABLE = os.environ.get("MAKER_SHADOW_DECISION_TABLE", "orderbook_decision_snapshots")
-# 스냅샷 테이블의 symbol은 ccxt 포맷("ETH/USDT:USDT") — 워커 SYMBOL("ETHUSDT")과 다름
-DECISION_SYMBOL = os.environ.get(
-    "MAKER_SHADOW_DECISION_SYMBOL",
-    f"{SYMBOL[:-4]}/USDT:USDT" if SYMBOL.endswith("USDT") else SYMBOL,
-)
-DECISION_POLL_S = int(os.environ.get("MAKER_SHADOW_DECISION_POLL_S", "10"))
-DECISION_MAX_AGE_S = int(os.environ.get("MAKER_SHADOW_DECISION_MAX_AGE_S", "180"))
 
 # 2026-09-02: @aggTrade -> @trade. Binance USD-M stopped delivering @aggTrade -- the
 # subscription is still ACCEPTED (SUBSCRIBE returns result:null, no error) but zero messages
@@ -99,10 +89,6 @@ class Leg:
     side: str            # "buy" / "sell"
     timeout_s: int
     arrival: Book
-    trigger: str = "schedule"        # "schedule" | "decision"
-    decision_action: int | None = None  # trigger="decision"일 때 봇 final_action(신규값)
-    decision_prev_action: int | None = None  # 직전 final_action(전이 출발값)
-    decision_ts: str = ""            # trigger="decision"일 때 결정 스냅샷 recorded_at_kst
     my_px: float = 0.0
     queue: float = 0.0
     active_from_ms: int = 0
@@ -214,12 +200,11 @@ class Worker:
             create table if not exists maker_fill_shadow_heartbeat(
               recorded_at_utc timestamp, symbol varchar, book_msgs bigint, trade_msgs bigint,
               legs_done bigint, legs_active integer, book_age_s double)""")
-        # 결정시점 arm 마이그레이션 (orderbook_recorder의 E1 마이그레이션 패턴 재사용)
+        # trigger 컬럼은 결정시점 arm(2026-08-24~09-15) 잔재다. 과거 행에 'decision'이 남아
+        # 있으므로 컬럼과 값 기록은 유지하고, 새 행은 항상 'schedule'이다.
         existing = {c[1] for c in self.con.execute("PRAGMA table_info('maker_fill_shadow_legs')").fetchall()}
-        for col, typ in (("trigger", "VARCHAR"), ("decision_action", "INTEGER"),
-                        ("decision_prev_action", "INTEGER"), ("decision_ts", "VARCHAR")):
-            if col not in existing:
-                self.con.execute(f"ALTER TABLE maker_fill_shadow_legs ADD COLUMN {col} {typ}")
+        if "trigger" not in existing:
+            self.con.execute("ALTER TABLE maker_fill_shadow_legs ADD COLUMN trigger VARCHAR")
         self.con.execute("UPDATE maker_fill_shadow_legs SET trigger='schedule' WHERE trigger IS NULL")
 
     def write_leg(self, leg: Leg) -> None:
@@ -230,16 +215,15 @@ class Worker:
                  recorded_at_utc, symbol, policy, timeout_s, side, arrival_ex_ts,
                  arrival_bid, arrival_ask, arrival_mid, arrival_bid_qty, arrival_ask_qty,
                  spread_bp, filled, fill_mode, fill_price, fill_t_ms, repegs, cost_bp,
-                 maker_fee_bp, taker_fee_bp, trigger, decision_action, decision_prev_action, decision_ts
-               ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 maker_fee_bp, taker_fee_bp, trigger
+               ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             [datetime.now(timezone.utc), SYMBOL, leg.policy, leg.timeout_s, leg.side,
              a.ex_ts, a.bid, a.ask, a.mid, a.bid_qty, a.ask_qty,
              (a.ask - a.bid) / a.mid * 1e4, r["filled"], r["fill_mode"], r["fill_price"],
-             r["fill_t_ms"], leg.repegs, r["cost_bp"], MAKER_FEE_BP, TAKER_FEE_BP,
-             leg.trigger, leg.decision_action, leg.decision_prev_action, leg.decision_ts or None])
+             r["fill_t_ms"], leg.repegs, r["cost_bp"], MAKER_FEE_BP, TAKER_FEE_BP, "schedule"])
         self.legs_done += 1
-        logger.info("leg done: %s %s %s %s cost=%s mode=%s t=%sms repegs=%d",
-                    leg.trigger, leg.policy, leg.side, f"T{leg.timeout_s}",
+        logger.info("leg done: %s %s %s cost=%s mode=%s t=%sms repegs=%d",
+                    leg.policy, leg.side, f"T{leg.timeout_s}",
                     f"{r['cost_bp']:.2f}bp" if r["cost_bp"] is not None else "NA",
                     r["fill_mode"], r["fill_t_ms"], leg.repegs)
 
@@ -314,98 +298,6 @@ class Worker:
             self._sweep()
             await asyncio.sleep(1.0)
 
-    # ---- 결정시점 동기화 arm ----
-
-    @staticmethod
-    def _decision_rows_sync(last_ts: str, tail_limit: int | None = None) -> list[tuple[str, dict]]:
-        """봇 duckdb에서 final_governor_decision 행을 읽는다(read_only, 쓰기 없음).
-
-        락 충돌 시 예외를 그대로 올려 호출측이 사이클을 스킵한다.
-        """
-        import duckdb
-        con = duckdb.connect(str(DECISION_DB), read_only=True)
-        try:
-            if tail_limit is not None:
-                rows = con.execute(
-                    f"select recorded_at_kst, context_json from {DECISION_TABLE} "
-                    "where symbol = ? order by recorded_at_kst desc limit ?",
-                    [DECISION_SYMBOL, tail_limit]).fetchall()
-                rows = rows[::-1]
-            else:
-                rows = con.execute(
-                    f"select recorded_at_kst, context_json from {DECISION_TABLE} "
-                    "where symbol = ? and recorded_at_kst > ? order by recorded_at_kst",
-                    [DECISION_SYMBOL, last_ts]).fetchall()
-        finally:
-            con.close()
-        out: list[tuple[str, dict]] = []
-        for ts, ctx in rows:
-            try:
-                c = json.loads(ctx or "{}")
-            except (TypeError, ValueError):
-                continue
-            if c.get("record_reason") == "final_governor_decision" and "final_action" in c:
-                out.append((str(ts), c))
-        return out
-
-    def _spawn_decision_legs(self, old: int, action: int, ts: str) -> None:
-        if self.book.age_s() < 5.0 and self.book.bid > 0:
-            arrival = Book(**vars(self.book))
-            for policy in POLICIES:
-                for side in ("buy", "sell"):
-                    self.legs.append(Leg(policy=policy, side=side, timeout_s=TIMEOUT_S, arrival=arrival,
-                                         trigger="decision", decision_action=action,
-                                         decision_prev_action=old, decision_ts=ts))
-            logger.info("decision transition %d->%d @ %s: spawned %d legs bid=%.2f ask=%.2f",
-                        old, action, ts, 2 * len(POLICIES), arrival.bid, arrival.ask)
-        else:
-            logger.warning("decision transition %d->%d @ %s but book stale (age=%.1fs) — skip spawn",
-                           old, action, ts, self.book.age_s())
-
-    async def decision_loop(self) -> None:
-        if not DECISION_ENABLED:
-            logger.info("decision arm disabled by env")
-            return
-        if not DECISION_DB.exists():
-            logger.warning("decision arm disabled: %s not found", DECISION_DB)
-            return
-        last_ts = ""
-        prev_action: int | None = None
-        try:
-            tail = await asyncio.to_thread(self._decision_rows_sync, "", 200)
-            if tail:
-                last_ts = tail[-1][0]
-                prev_action = int(tail[-1][1]["final_action"])
-            logger.info("decision arm init: symbol=%s last_ts=%s prev_action=%s", DECISION_SYMBOL, last_ts or "none", prev_action)
-        except Exception as e:  # noqa: BLE001 — 봇 writer와의 락 경합은 정상 경로
-            logger.warning("decision arm init deferred (%r)", e)
-        while True:
-            await asyncio.sleep(DECISION_POLL_S)
-            try:
-                rows = await asyncio.to_thread(self._decision_rows_sync, last_ts)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("decision poll skipped: %r", e)
-                continue
-            for ts, c in rows:
-                last_ts = ts
-                action = int(c["final_action"])
-                if prev_action is None or action == prev_action:
-                    prev_action = action
-                    continue
-                old, prev_action = prev_action, action
-                try:
-                    ts_dt = datetime.fromisoformat(ts)
-                    if ts_dt.tzinfo is None:
-                        age = 0.0
-                    else:
-                        age = (datetime.now(timezone.utc) - ts_dt.astimezone(timezone.utc)).total_seconds()
-                except ValueError:
-                    age = 0.0
-                if age > DECISION_MAX_AGE_S:
-                    logger.info("decision transition %d->%d @ %s too old (%.0fs) — state only", old, action, ts, age)
-                    continue
-                self._spawn_decision_legs(old, action, ts)
-
     async def heartbeat_loop(self) -> None:
         while True:
             await asyncio.sleep(HEARTBEAT_S)
@@ -415,8 +307,7 @@ class Worker:
         logger.info("maker_fill_shadow start: symbol=%s spacing=%ds timeout=%ds policies=%s db=%s",
                     SYMBOL, SPACING_S, TIMEOUT_S, POLICIES, DB_PATH)
         await asyncio.gather(self.ws_loop(), self.scheduler_loop(),
-                             self.ticker_loop(), self.heartbeat_loop(),
-                             self.decision_loop())
+                             self.ticker_loop(), self.heartbeat_loop())
 
 
 if __name__ == "__main__":
