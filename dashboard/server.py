@@ -1043,13 +1043,18 @@ def breakout_detector_payload() -> dict[str, Any]:
 #   -- 학습 CSV 길이가 다르기 때문이다(모듈 verify() 주석: 로컬 385k · 서버 175k). 2026-09-14 실측
 #   md5 도 달랐고 ref_pred 가 0.0015594(로컬) vs 0.0016025(서버)였다. 절대 분위를 박으면 배포 기계에서
 #   어긋난다. 비율은 같은 분포의 중앙으로 나눈 값이라 기계가 달라도 거의 같다:
-#   학습창 40%/80% 분위 ÷ 중앙 = 서버 0.916/1.392 · 로컬 0.892/1.459 ⇒ 경계는 그 사이 0.90/1.42.
 #   ref_pred 는 워커가 내려주는 그 아티팩트 자신의 값을 쓴다(자기보정).
+# 🔴2026-09-14 재설정(사용자 지적 "텍스트는 평소라는데 라벨은 주의"): 처음엔 학습창 40%/80%
+#   분위를 경계로 썼는데, 그러면 **40~80% 구간 = 평소**를 「주의」라고 부르고 시간의 40%를
+#   주황으로 칠하게 된다. 위험도 어휘(안정/주의/위험)는 «지금 위험한가»를 말하는 자리다.
+#   그래서 **평소는 안정**으로 옮긴다: 안정 = 학습창 하위 80%(<1.39배) · 주의 = 상위 20~5%
+#   · 위험 = 상위 5%(>=1.88배). 서버 실측 비율 분위 80/90/95 = 1.392 / 1.646 / 1.882.
+#   최근 구간 점유율: OOS 74.7/15.6/9.7% · TEST 94.0/4.4/1.5%.
 # 근거: research_eth_vol_forecast_head_to_head_20260914.py — 이 모델은 앞으로 4시간 실현변동성
 #   **수준**을 맞히고(1시간 앞 ρ .642 · 4시간 .712, 단순 rv48 은 .553/.486), 「확장」은 못 맞힌다
 #   (AUC .46~.52). 그래서 어휘는 위험도 3등급이고 **방향 신호가 아니다**.
-VOL_LEVEL_RATIO_Q40 = 0.90         # 이 아래 = 안정(평소보다 조용)
-VOL_LEVEL_RATIO_Q80 = 1.42         # 이 위 = 위험(평소보다 험함)
+VOL_LEVEL_RATIO_CALM = 1.39        # 이 아래 = 안정(평소 이하) — 학습창 상위 20% 경계
+VOL_LEVEL_RATIO_HOT = 1.88         # 이 위 = 위험 — 학습창 상위 5% 경계
 VOL_LEVEL_REF_FALLBACK = 0.00160   # 워커가 ref_pred 를 안 줄 때만 (서버 아티팩트 기준)
 
 
@@ -1064,15 +1069,15 @@ def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
     if not (ref > 0):
         return {"available": False, "grade": "데이터 없음", "tone": "neutral"}
     ratio = pred / ref
-    if ratio < VOL_LEVEL_RATIO_Q40:
+    if ratio < VOL_LEVEL_RATIO_CALM:
         grade, tone = "안정", "good"
-    elif ratio >= VOL_LEVEL_RATIO_Q80:
+    elif ratio >= VOL_LEVEL_RATIO_HOT:
         grade, tone = "위험", "bad"
     else:
         grade, tone = "주의", "warn"
     return {"available": True, "grade": grade, "tone": tone, "pred_vol": pred, "ref_pred": ref,
             "ratio": ratio, "qty_mult": 1.0 / ratio,
-            "cuts": {"ratio_q40": VOL_LEVEL_RATIO_Q40, "ratio_q80": VOL_LEVEL_RATIO_Q80}}
+            "cuts": {"calm": VOL_LEVEL_RATIO_CALM, "hot": VOL_LEVEL_RATIO_HOT}}
 
 
 def position_sizing_payload() -> dict[str, Any]:
