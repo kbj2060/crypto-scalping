@@ -173,6 +173,8 @@ def causality_check(d: pd.DataFrame, sm: dict, ext: pd.DataFrame, cut: int) -> N
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--labels", type=pathlib.Path, default=OUT / "direction_labels.npz",
+                    help="라벨 npz. 지평/손절폭을 바꾼 라벨로 군을 다시 거르려면 여기에 준다")
     ap.add_argument("--rebuild", action="store_true")
     a = ap.parse_args()
     d, sm, win, S43, cols43, _ = P.prepare(G.DEFAULT_FAMILIES)
@@ -191,8 +193,12 @@ def main() -> int:
             ext[c] = d[c].to_numpy()
     assert (ext.timestamp.to_numpy() == d.timestamp.to_numpy()).all()
 
-    z_ = np.load(OUT / "direction_labels.npz", allow_pickle=True)
+    z_ = np.load(a.labels, allow_pickle=True)
     lab = {k: (z_[f"{k}_idx"], z_[f"{k}_y"]) for k in z_["names"]}
+    # 표류항 m 이 있으면 베팅 순손익까지 잰다(r_long = m + y). IC 증분만 보면 안 된다 --
+    # 09-14 스윕에서 IC +0.016 인데 순손익 −4.67bp 인 셀이 나왔다.
+    drift = {k: z_[f"{k}_m"] for k in z_["names"]} if f"OOS_m" in z_ else None
+    print(f"라벨: {a.labels.name} · TRAIN {len(lab['TRAIN'][0]):,} · 순손익 읽기값 {'있음' if drift else '없음'}")
     tr_idx, tr_y = lab["TRAIN"]
     norm_cols = [c for k in fams for c in fams[k]]
     normx = G.fit_normalizer(ext, norm_cols, *win["TRAIN"])
@@ -215,11 +221,23 @@ def main() -> int:
 
     # ── 군 단위 쌍둥이 IC 증분 (43열 기준 vs 43열+군) ─────────────────────────
     from sklearn.ensemble import HistGradientBoostingRegressor
+    SEEDS3 = P.SEEDS[:3]              # 🔴짝지은 씨드 -- 단일 씨드 비교는 이 저장소에서 두 번 뒤집혔다
     def twin_ic(Xtr, Xev: dict) -> dict:
-        m = HistGradientBoostingRegressor(max_iter=300, learning_rate=0.05, max_leaf_nodes=15,
-                                          min_samples_leaf=200, l2_regularization=1.0, random_state=P.SEEDS[0])
-        m.fit(Xtr, tr_y)
-        return {w: float(spearmanr(m.predict(X), lab[w][1]).statistic) for w, X in Xev.items()}
+        ic = {w: [] for w in Xev}; net = {w: [] for w in Xev}
+        for sd in SEEDS3:
+            m = HistGradientBoostingRegressor(max_iter=300, learning_rate=0.05, max_leaf_nodes=15,
+                                              min_samples_leaf=200, l2_regularization=1.0, random_state=sd)
+            m.fit(Xtr, tr_y)
+            for w, X in Xev.items():
+                pr = m.predict(X); y = lab[w][1]
+                ic[w].append(float(spearmanr(pr, y).statistic))
+                if drift is not None:
+                    sg = np.sign(pr); sg[sg == 0] = 1.0
+                    net[w].append(float((drift[w] + sg * y).mean()))
+        out = {w: float(np.mean(v)) for w, v in ic.items()}
+        if drift is not None:
+            out |= {f"net_{w}": float(np.mean(v)) for w, v in net.items()}
+        return out
     ev_w = ("VAL", "OOS", "TEST")
     base = twin_ic(S43[tr_idx], {w: S43[lab[w][0]] for w in ev_w})
     fam_res = {"base43": base}
@@ -237,16 +255,20 @@ def main() -> int:
         sub = df[df.family == k]
         best = sub.loc[sub["TRAIN"].abs().idxmax()] if sub["TRAIN"].notna().any() else None
         inc = {w: fam_res[k][w] - base[w] for w in ev_w}
+        netinc = ({w: fam_res[k][f"net_{w}"] - base[f"net_{w}"] for w in ev_w} if drift is not None else None)
         a_rule = bool(((sub["TRAIN"].abs() >= 0.05) & (sub["sign_keep"] == 3)).any())
         b_rule = bool(inc["OOS"] >= 0.01 and inc["TEST"] >= 0.01)
         verdict[k] = {"n": len(sub), "coverage": float(sub.cover.mean()),
                       "max_abs_train_ic": float(sub["TRAIN"].abs().max()), "best": None if best is None else best.feature,
                       "sign_keep3": int((sub.sign_keep == 3).sum()), "twin_inc": inc, "rule_a": a_rule, "rule_b": b_rule,
+                      "net_inc": netinc, "rule_c": (netinc is not None and netinc["OOS"] > 0 and netinc["TEST"] > 0),
                       "select": a_rule or b_rule}
         v = verdict[k]
         print(f"  {k:<9} {v['n']:>3}열 · 커버 {100*v['coverage']:.0f}% · max|IC| {v['max_abs_train_ic']:.4f}({v['best']})"
               f" · 3/3 {v['sign_keep3']} · 증분 {inc['VAL']:+.4f}/{inc['OOS']:+.4f}/{inc['TEST']:+.4f}"
-              f" · {'⭐선택' if v['select'] else '탈락'}")
+              f" · {'⭐선택' if v['select'] else '탈락'}"
+              + ("" if netinc is None else f" · 순손익증분 {netinc['VAL']:+.2f}/{netinc['OOS']:+.2f}/{netinc['TEST']:+.2f}bp"
+                                           f" {'✔' if v['rule_c'] else '✘'}"))
     inc_all = {w: fam_res["all"][w] - base[w] for w in ev_w}
     print(f"  {'all':<9} {SX.shape[1]:>3}열 · 증분 {inc_all['VAL']:+.4f}/{inc_all['OOS']:+.4f}/{inc_all['TEST']:+.4f}"
           f"  (기준 43열 쌍둥이 IC {base['VAL']:+.4f}/{base['OOS']:+.4f}/{base['TEST']:+.4f})")
