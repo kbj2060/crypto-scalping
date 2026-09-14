@@ -49,6 +49,12 @@ REGIME_COLS = [f"reg_eth_{k}" for k in (-1, 0, 1, 2)] + [f"reg_btc_{k}" for k in
 TIME_COLS = ["hour_sin", "hour_cos", "wd_sin", "wd_cos"]
 FAMILIES = {"material": MATERIAL_COLS, "vol": VOL_COLS, "regime": REGIME_COLS,
             "btc": BTC_COLS, "time": TIME_COLS}
+# 확장 피쳐(research_eth_rl_gym_feature_expansion_20260914 가 만든 parquet + 군 목록). 있으면 군으로 등록한다.
+EXT_PARQUET = ROOT / "data/research/eth_rl_gym_direction_20260914/ext_features.parquet"
+EXT_FAMILIES = ROOT / "data/research/eth_rl_gym_direction_20260914/ext_families.json"
+if EXT_FAMILIES.exists():
+    import json as _json
+    FAMILIES.update(_json.load(open(EXT_FAMILIES)))
 DEFAULT_FAMILIES = ("material", "vol", "regime")        # BTC·시간대는 절제 팔로만(방향 증분 음수)
 
 
@@ -76,6 +82,12 @@ def load_frame() -> pd.DataFrame:
     wd = d.timestamp.dt.weekday.to_numpy(float)
     d["hour_sin"], d["hour_cos"] = np.sin(2 * np.pi * h / 24), np.cos(2 * np.pi * h / 24)
     d["wd_sin"], d["wd_cos"] = np.sin(2 * np.pi * wd / 7), np.cos(2 * np.pi * wd / 7)
+    if EXT_PARQUET.exists():
+        e = pd.read_parquet(EXT_PARQUET)
+        assert len(e) == len(d) and (e.timestamp.to_numpy() == d.timestamp.to_numpy()).all(), "확장 피쳐 정렬 불일치"
+        for c in e.columns:
+            if c != "timestamp" and c not in d.columns:
+                d[c] = e[c].to_numpy()
     return d
 
 
