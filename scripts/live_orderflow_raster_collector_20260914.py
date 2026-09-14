@@ -105,6 +105,20 @@ def seq_decision(synced: bool, last_u: int, ev: dict) -> str:
     return "apply" if pu == last_u else "resnapshot"
 
 
+def next_tick(target_sec: int, now: float) -> int:
+    """다음에 쓸 초. "경계까지 남은 시간을 잔다"가 아니라 **목표 초를 명시적으로 센다**.
+
+    앞의 방식은 본문 시간과 스케줄러 지연이 누적되면 조용히 틀어진다 -- 2026-09-14 실측에서
+    서버는 33~34초마다 한 초를 건너뛰었고(무효행 3.14%), 로컬은 반대로 165초에 182회 기록
+    (같은 초 중복)했다. 목표 초를 세면 둘 다 구조적으로 불가능하다.
+
+    1초 이내로 늦었으면 **지금 속한 초를 즉시 쓴다**(그 초의 북 상태는 여전히 유효한 표본이다).
+    더 밀렸으면 현재 초로 따라잡고, 건너뛴 초는 writer 가 무효행으로 메운다(보간 아님)."""
+    nxt = target_sec + 1
+    now_sec = int(now)
+    return nxt if nxt >= now_sec else now_sec
+
+
 class _RasterWriter:
     """시각별 고정폭 파일에 초당 한 행. 수집이 멈췄던 초는 무효행으로 메워 오프셋 산식을 지킨다."""
 
@@ -243,6 +257,7 @@ class OrderflowRasterCollector:
         self._writer = _RasterWriter(self.symbol)
         self.rows_written = 0
         self.rows_invalid = 0
+        self.ticks_late = 0
 
     # ── 호가북 ────────────────────────────────────────────────────────────────
     async def _fetch_snapshot(self) -> dict:
@@ -345,9 +360,14 @@ class OrderflowRasterCollector:
 
     async def _raster_loop(self) -> None:
         tick = 0
+        target = int(time.time()) + 1
         while self._running:
-            await asyncio.sleep(1.0 - time.time() % 1.0)
-            sec_ms = int(time.time()) * 1000
+            delay = target - time.time()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            else:
+                self.ticks_late += 1
+            sec_ms = target * 1000
             row = self._row()
             if row is None:
                 self._writer.write(sec_ms, 0, math.nan, None)
@@ -361,10 +381,12 @@ class OrderflowRasterCollector:
                     self._want_resync = True
                 if tick % 60 == 0:
                     self._prune(mid)
+            target = next_tick(target, time.time())
             tick += 1
             if tick % 300 == 0:
-                logger.info("래스터 %d행(무효 %d) 호가 bid/ask=%d/%d",
-                            self.rows_written, self.rows_invalid, len(self._bids), len(self._asks))
+                logger.info("래스터 %d행(무효 %d, 지각 %d) 호가 bid/ask=%d/%d",
+                            self.rows_written, self.rows_invalid, self.ticks_late,
+                            len(self._bids), len(self._asks))
             if tick % 3600 == 0:
                 self._purge_old()
 
@@ -401,6 +423,12 @@ def _selftest() -> None:
     assert seq_decision(False, 100, ev(101, 130, 100)) == "resnapshot"  # 사이에 구멍
     assert seq_decision(True, 130, ev(131, 140, 130)) == "apply"      # pu 체인 정상
     assert seq_decision(True, 130, ev(150, 160, 149)) == "resnapshot"  # 체인 단절
+
+    assert next_tick(100, 100.5) == 101      # 제때 -- 다음 초를 기다린다
+    assert next_tick(100, 100.999) == 101
+    assert next_tick(100, 101.5) == 101      # 1초 이내 지각 -- 지금 속한 초를 즉시 쓴다
+    assert next_tick(100, 105.2) == 105      # 심한 지각 -- 따라잡고 101~104 는 무효행
+    assert next_tick(100, 101.0) == 101
 
     tmp = Path(tempfile.mkdtemp())
     try:
