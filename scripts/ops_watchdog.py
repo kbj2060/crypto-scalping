@@ -373,9 +373,10 @@ def check_duckdb_table_freshness(component: str, db_path: Path, table: str, ts_c
 # 2026-09-14 은퇴: shadow_evidence_chip_{btc,xrp} (2줄) 제거. 러너를 **의도적으로** 정지시킨
 # 것(09-14 01:00)이라 사망 자체가 알릴 일이 아닌데, 표에 줄이 남아 CRITICAL 이 계속 나갔다.
 # 위 경고의 재발이다 -- 은퇴는 러너 정지와 이 표에서 줄 지우기가 **한 쌍**이다.
-SHADOW_RUNNERS: tuple[tuple[str, str], ...] = (
-    ("shadow_v_rebound_econ", "v_rebound_econ_shadow_state.json"),
-)
+# 2026-09-15 은퇴: shadow_v_rebound_econ (마지막 1줄) 제거. 섀도우 원장 139건(09-05 리셋 이후
+# 단일 설정)이 기대값 -20.68bp · t -2.71 · 95%CI [-35.6,-5.7]로 백테스트 주장치 +6.09bp를 기각했다
+# (최악 10건을 빼도 -2.68bp, 전·후반·양 측면 모두 음수). 러너 정지 + crontab @reboot 제거와 한 쌍.
+SHADOW_RUNNERS: tuple[tuple[str, str], ...] = ()
 
 
 def check_shadow_runner(component: str, filename: str, warn_minutes: float = 15,
