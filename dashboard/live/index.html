@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260914-acctcard">
+  <link rel="stylesheet" href="styles.css?v=20260914-vollevel">
 </head>
 <body>
     <main class="app">
@@ -182,6 +182,14 @@
               <div id="modelChipLiqCascade" class="signal-chip neutral">
                 <span class="signal-chip-dot" aria-hidden="true"></span>
                 <span class="signal-chip-label">청산 캐스케이드</span>
+                <span class="signal-chip-state">-</span>
+              </div>
+              <!-- 2026-09-14 사용자 요청: 사이징 변동성 모델(앞으로 4시간 실현변동성 수준)을
+                   지표로 띄운다. 방향 신호가 아니라 위험도 3등급이다 — 이 모델은 「수준」은
+                   맞히지만(1h ρ .642) 「확장」은 못 맞힌다(AUC .46~.52). -->
+              <div id="modelChipVolLevel" class="signal-chip neutral">
+                <span class="signal-chip-dot" aria-hidden="true"></span>
+                <span class="signal-chip-label">변동성 예측</span>
                 <span class="signal-chip-state">-</span>
               </div>
             </div>
@@ -439,7 +447,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260914-acctcard"></script>
+  <script src="./app.js?v=20260914-vollevel"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

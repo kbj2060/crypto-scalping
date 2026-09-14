@@ -15,6 +15,7 @@ const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth"];   // 2026-09-14 사용자 결�
 // 서버의 btc/xrp evidence 엔드포인트와 워커를 복구하면 된다.
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
+const API_POSITION_SIZING_URL = "/api/position-sizing";
 const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
@@ -77,11 +78,11 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key
 // later -- some tones (tail risk) depend on more than one raw field, so capturing the tone at
 // computation time is the only way to stay exactly consistent with what the live cards show,
 // instead of an approximation that ignores the cross-field dependency.
-const toneHistory = { whale: [], liq_cascade: [], retail_flow: [] };
+const toneHistory = { whale: [], liq_cascade: [], retail_flow: [], vol_level: [] };
 // Parallel to toneHistory, same keys/push/shift cadence -- these 5 indicators have no server-side
 // timestamp per reading (client-accumulated tally, see comment above), so the only honest per-bar
 // time is "when this browser tab actually pushed the reading", recorded here at push time.
-const toneHistoryTimes = { whale: [], liq_cascade: [], retail_flow: [] };
+const toneHistoryTimes = { whale: [], liq_cascade: [], retail_flow: [], vol_level: [] };
 function pushToneHistory(key, tone) {
   const arr = toneHistory[key];
   if (!arr) return;
@@ -156,6 +157,8 @@ let liquidation5mLastFetchAt = 0;
 // dashboard-side-computed category as latestVRebound above (scripts/live_spot_perp_basis_signal_
 // 20260827.py). RISK GAUGE, not a price-direction claim -- see MODEL_INDICATOR_DETAIL.liq_pressure.
 let latestBasisLiquidation = null;
+let latestVolLevel = null;
+let volLevelLastFetchAt = 0;
 let basisLiquidationLastFetchAt = 0;
 // Sudden-liquidation alert (2026-08-27) -- backed by tail_risk_interceptor.py's event-triggered
 // liq_burst_state.json (own file, own writer, updated the instant a new @forceOrder event lands),
@@ -245,6 +248,7 @@ const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-
 // and already proven not to have this problem) -- polling faster than the data changes never shows
 // a value sooner than it's true, it only shrinks the worst-case detection lag.
 const BASIS_LIQUIDATION_POLL_MS = 60000;
+const VOL_LEVEL_POLL_MS = 60000;          // 사이징 워커 주기 300초 — 1분 폴링이면 충분하다
 // 2026-08-27: liq_burst_state.json is written the instant a new liquidation event arrives (see
 // tail_risk_interceptor.py::_write_liq_burst_state()), not on a timer -- polling faster than ~1s
 // wouldn't surface anything sooner than the file itself changes, given the remaining hop (this
@@ -338,6 +342,7 @@ async function setActiveSnapshotAsset(asset) {
   // this, the panels would keep showing the PREVIOUS coin's numbers (mislabeled as the new one)
   // until each signal's own poll interval next elapses (up to 5min for the slowest).
   latestBasisLiquidation = null;
+  latestVolLevel = null; volLevelLastFetchAt = 0;
   latestLiquidationDirection = null;
   latestLiquidation5m = null;
   latestLiquidation5mHist = [];
@@ -390,6 +395,7 @@ async function setActiveSnapshotAsset(asset) {
   await Promise.all([
     settleScope("indicators", [
       refreshBasisLiquiditySignal(),
+      refreshVolLevel(),
       refreshLiquidationDirectionSignal(),
       refreshCoinIndicators(),
     ]),
@@ -1592,6 +1598,14 @@ function toggleEntryDetail(btn) {
 // indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
+  // 2026-09-14 변동성 예측(사이징 모델). ⚠️키는 subText 문자열이다(규약 §5-1).
+  vol_level: {
+    "안정": "앞으로 4시간 예상 변동폭이 **평소보다 작습니다**(학습창 하위 40%). 같은 위험을 지려면 수량을 평소보다 **키워야** 합니다 — 배포 공식이 이미 그렇게 계산합니다.",
+    "주의": "앞으로 4시간 예상 변동폭이 **평소 수준**입니다(학습창 40~80%). 수량 배수는 1배 부근입니다.",
+    "위험": "앞으로 4시간 예상 변동폭이 **평소보다 큽니다**(학습창 상위 20%). 같은 위험을 지려면 수량을 **줄여야** 합니다. 방향 경고가 아닙니다 — 이 모델은 방향을 예측하지 않습니다.",
+    "웜업": "사이징 워커가 아직 첫 예측을 내지 않았습니다.",
+    "데이터 없음": "사이징 워커 상태파일에서 예측값을 읽지 못했습니다.",
+  },
   // 2026-09-09 극점 탐지기. ⚠️키는 subText 문자열이다(규약 §5-1).
   v_rebound: {
     "급등": "앞으로 60분 안에 **위로 터질** 확률이 높다는 뜻입니다 — 30분 안에 종가 기준 1.5×ATR 이상 오르고, 그 정점을 20% 넘게 반납하지 않는 움직임을 말합니다.",
@@ -1653,6 +1667,19 @@ const MODEL_INDICATOR_MEANING = {
 };
 
 const MODEL_INDICATOR_DETAIL = {
+  vol_level:
+    "**앞으로 4시간(48봉) 실현변동성의 수준**을 예측합니다. 방향도 수익도 예측하지 않습니다 — "
+    + "이 값이 정하는 것은 **수량**입니다(배포 공식: 수량 = 기준수량 × 기준예측 ÷ 현재예측).\n\n"
+    + "모델은 HGB 8시드 앙상블이고 입력은 공개 kline 22열(ATR·실현변동성 3종·변동성확장비·시간대·"
+    + "거래대금·체결건수·가격기하 12열)입니다. 학습은 2025-08-31 까지이고, 그 뒤 구간은 전부 표본외입니다.\n\n"
+    + "성적(2026-09-14 재측정): 앞으로 1시간 변동성과 스피어만 **0.642**, 4시간 **0.712** — 같은 자리에서 "
+    + "단순 rv48 은 0.553 / 0.486 입니다. 2022~23 을 학습에서 도려낸 홀드아웃 판도 그 시기를 0.81 로 맞힙니다.\n\n"
+    + "🔴 **「곧 커진다」는 못 맞힙니다**(확장 AUC 0.46~0.52 = 동전). 그 질문은 청산맵 아래 변동성 전망 "
+    + "리본(24시간 지평, HAR+DVOL)이 답하고, 다만 그 리본의 우위도 24시간에서만 실재합니다.\n\n"
+    + "등급 경계는 **평소 대비 배수**입니다 — 0.90배 미만이면 안정, 1.42배 이상이면 위험. "
+    + "이 아티팩트는 기계마다 다르게 학습되므로(학습 CSV 길이가 다름) 절대값이 아니라 비율로 "
+    + "자릅니다. 학습창 40%/80% 분위 ÷ 중앙 실측이 서버 0.916/1.392, 로컬 0.892/1.459 였고 "
+    + "그 사이를 경계로 잡았습니다. 등급 비율은 대략 안정 40% · 주의 40% · 위험 20% 입니다.",
   breakout_detector:
     "변동성이 추세로 넘어가는 **시점**만 잡습니다. 2026-09-11 압축 게이트를 제거해 «횡보를 거친» "
     + "전환뿐 아니라 **모든** 전환을 봅니다 -- 실제로 전환의 77%는 압축을 거치지 않고 일어납니다. "
@@ -1778,6 +1805,7 @@ const MODEL_CHIP_IDS = {
   breakout_detector: "modelChipBreakoutDetector",   // 2026-09-11 추세 전환 탐지기
   liq_pressure: "modelChipBasisLiq",
   liq_cascade: "modelChipLiqCascade",
+  vol_level: "modelChipVolLevel",
   whale: "modelChipWhale",
   retail_flow: "modelChipRetailFlow",
 };
@@ -1884,6 +1912,14 @@ function coinIndicator(item, kind) {
 // 전부 회색이다. 스트립 SVG는 이미 flat 을 neutral 과 같은 회색으로 칠하고 있었으니(toneStripSvg 의
 // fill 폴백) 배지·행·칩만 법칙에서 벗어나 있었다. 여기서 한 번에 정규화한다.
 function toneClass(tone) { return tone === "flat" ? "neutral" : (tone || "neutral"); }
+
+// 2026-09-14: 등급(안정/주의/위험)만으로는 «얼마나»를 못 본다. 실시간 배수를 툴팁에 싣는다 --
+// 상태 열은 92px nowrap 이라 문장을 못 넣는다(규약 §3).
+function volLevelTitle(v) {
+  const base = "봇 내부 상태가 아니라 배포된 사이징 변동성 모델의 예측 -- 이미 수량 공식에 쓰이고 있다(수량 = 기준수량 x 기준예측/현재예측).";
+  if (!v || !v.available || !Number.isFinite(v.ratio)) return base;
+  return `${base} 지금 예상 변동폭은 평소의 ${v.ratio.toFixed(2)}배, 같은 위험 기준 수량 배수는 ${v.qty_mult.toFixed(2)}배.`;
+}
 
 function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { forceMeter = false } = {}) {
   // 2026-08-25: perf pass -- render() drives this on every SSE push (~2.5s), but the underlying
@@ -3000,6 +3036,24 @@ async function refreshLiquidation5mSignal() {
     console.error("Liquidation 5m signal fetch error:", error);
     latestLiquidation5m = { warmed_up: false, error: "fetch_failed" };
   }
+}
+
+// 2026-09-14 변동성 예측 칩. /api/position-sizing 은 **파일 하나만 읽는 엔드포인트**라
+// (서버 position_sizing_payload 주석 참조) 새 계산을 요청 경로에 넣지 않는다.
+async function refreshVolLevel() {
+  const now = Date.now();
+  if (now - volLevelLastFetchAt < VOL_LEVEL_POLL_MS) return;
+  volLevelLastFetchAt = now;
+  try {
+    const res = await fetch(API_POSITION_SIZING_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`position sizing ${res.status}`);
+    const j = await res.json();
+    latestVolLevel = (j && j.vol_level) || { available: false, grade: "데이터 없음", tone: "neutral" };
+  } catch (error) {
+    console.error("Vol level fetch error:", error);
+    latestVolLevel = { available: false, grade: "오류", tone: "neutral" };
+  }
+  pushToneHistory("vol_level", (latestVolLevel && latestVolLevel.tone) || "neutral");
 }
 
 async function refreshBasisLiquiditySignal() {
@@ -4707,6 +4761,14 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         times: evenlySpacedBarTimes(latestBasisLiquidation && latestBasisLiquidation.latest_ts_utc, (latestBasisLiquidation && latestBasisLiquidation.tone_history || []).length, 5),
         derivedTag: "= 대시보드 자체계산·탐색적",
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 spot/perp klines를 직접 fetch해 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 청산크라우딩 상관은 ~1개월 탐색적 표본(3-split 재현 전). 자세히 보기 참고.",
+      },
+      {
+        key: "vol_level", label: "변동성 예측",
+        tone: (latestVolLevel && latestVolLevel.tone) || "neutral",
+        subText: (latestVolLevel && latestVolLevel.grade) || "웜업",
+        history: toneHistory.vol_level, times: toneHistoryTimes.vol_level,
+        derivedTag: "= 사이징 모델",
+        derivedTitle: volLevelTitle(latestVolLevel),
       },
       coinIndicator({
         key: "liq_cascade", label: "청산 캐스케이드", tone: ci.liq_cascade.tone,

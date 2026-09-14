@@ -1036,6 +1036,45 @@ def breakout_detector_payload() -> dict[str, Any]:
                           extra_missing={"history": [], "times": []})
 
 
+# 2026-09-14 사용자 요청: 사이징 변동성 모델(A)을 «모델 내부 지표»에 신호로 띄운다.
+# 🔴여기서 **모델을 돌리지 않는다** -- 사이징 워커(`live_eth_position_sizing_worker_20260911`)가
+#   이미 매 300초 `sizing_model.pred_vol` 을 상태파일에 남긴다. 요청 경로 계산 금지(2026-09-10 실장애).
+# 🔴컷은 **절대값이 아니라 비율(pred / ref_pred)** 이다. 이 아티팩트는 **기계마다 다르게 학습된다**
+#   -- 학습 CSV 길이가 다르기 때문이다(모듈 verify() 주석: 로컬 385k · 서버 175k). 2026-09-14 실측
+#   md5 도 달랐고 ref_pred 가 0.0015594(로컬) vs 0.0016025(서버)였다. 절대 분위를 박으면 배포 기계에서
+#   어긋난다. 비율은 같은 분포의 중앙으로 나눈 값이라 기계가 달라도 거의 같다:
+#   학습창 40%/80% 분위 ÷ 중앙 = 서버 0.916/1.392 · 로컬 0.892/1.459 ⇒ 경계는 그 사이 0.90/1.42.
+#   ref_pred 는 워커가 내려주는 그 아티팩트 자신의 값을 쓴다(자기보정).
+# 근거: research_eth_vol_forecast_head_to_head_20260914.py — 이 모델은 앞으로 4시간 실현변동성
+#   **수준**을 맞히고(1시간 앞 ρ .642 · 4시간 .712, 단순 rv48 은 .553/.486), 「확장」은 못 맞힌다
+#   (AUC .46~.52). 그래서 어휘는 위험도 3등급이고 **방향 신호가 아니다**.
+VOL_LEVEL_RATIO_Q40 = 0.90         # 이 아래 = 안정(평소보다 조용)
+VOL_LEVEL_RATIO_Q80 = 1.42         # 이 위 = 위험(평소보다 험함)
+VOL_LEVEL_REF_FALLBACK = 0.00160   # 워커가 ref_pred 를 안 줄 때만 (서버 아티팩트 기준)
+
+
+def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
+    """예측 변동성 등급 + 그것이 정하는 **수량 배수**(배포 공식 = ref_pred / pred)."""
+    sm = (state or {}).get("sizing_model") or {}
+    pred = sm.get("pred_vol")
+    if not sm.get("used") or not isinstance(pred, (int, float)) or not (float(pred) > 0):
+        return {"available": False, "grade": "데이터 없음", "tone": "neutral"}
+    pred = float(pred)
+    ref = float(sm.get("ref_pred") or VOL_LEVEL_REF_FALLBACK)
+    if not (ref > 0):
+        return {"available": False, "grade": "데이터 없음", "tone": "neutral"}
+    ratio = pred / ref
+    if ratio < VOL_LEVEL_RATIO_Q40:
+        grade, tone = "안정", "good"
+    elif ratio >= VOL_LEVEL_RATIO_Q80:
+        grade, tone = "위험", "bad"
+    else:
+        grade, tone = "주의", "warn"
+    return {"available": True, "grade": grade, "tone": tone, "pred_vol": pred, "ref_pred": ref,
+            "ratio": ratio, "qty_mult": 1.0 / ratio,
+            "cuts": {"ratio_q40": VOL_LEVEL_RATIO_Q40, "ratio_q80": VOL_LEVEL_RATIO_Q80}}
+
+
 def position_sizing_payload() -> dict[str, Any]:
     """크기 가늠자 상태. **계좌 포지션과의 결합은 프런트가 한다** -- 프런트는 이미
     `/api/binance-account` 를 들고 있어(app.js latestBinanceAccount) 서버에 비동기 의존을
@@ -1043,7 +1082,9 @@ def position_sizing_payload() -> dict[str, Any]:
     out = worker_payload(POSITION_SIZING_STATE_PATH, POSITION_SIZING_MAX_AGE_MIN,
                          ts_field="generated_at", require_ok=True, stamp_available=True,
                          bare_missing=True)
-    return {**out, "cap": sizing_cap()} if out.get("available") else out
+    if not out.get("available"):
+        return {**out, "vol_level": {"available": False, "grade": "웜업", "tone": "neutral"}}
+    return {**out, "cap": sizing_cap(), "vol_level": vol_level_item(out)}
 
 
 # 2026-09-12 단건 상한. ⚠️이 값은 처음 19왕복에서 골랐는데 **그 원장이 틀려 있었다** --
