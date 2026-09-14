@@ -138,13 +138,19 @@ def pick_hold_bars(sm: dict, i: int, side: str, cap_x: float) -> int | None:
 
 def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry: float,
          use_stop: bool, cap_x: float, rng, use_ladder: bool = False,
-         use_add: bool = False, selector: bool = False, cap_fn=None) -> dict:
+         use_add: bool = False, selector: bool = False, cap_fn=None,
+         policy_cap_x: float | None = None) -> dict:
     """봉 하나씩 전진한다. 포지션이 없을 때만 진입하고, 있으면 손절·사다리·만기를 본다.
 
     🔴`use_ladder`: 배포된 **예산 사다리**(`exit_fraction_required`)를 실제로 따른다.
     진입 시점에는 4시간 기준으로 사이징하므로 사다리가 0% 지만, **보유 중 역행하면
     순자산(=미실현 포함)이 줄어 같은 명목이 한도를 넘는다.** 그때 요구 비율만큼 부분 청산한다.
     첫 판(2026-09-14)에 이 경로를 통째로 빠뜨렸다 -- 순자산을 청산 시점에만 갱신했기 때문이다.
+
+    ⭐`policy_cap_x`: **지평 선택에 쓰는 천장**. 배포는 `planning_hold(sz, side, policy_cap_x)`
+    이고 그 값은 `effective_cap(sz, eq, None)` = min(원장, 순자산×6) -- **위험모델과 무관**하다.
+    None 이면 `cap_x` 를 쓴다(기존 동작). 🔴사이징 상한을 바꾸는 실험에서 이걸 분리하지 않으면
+    상한이 지평까지 바꿔 **거래 목록이 달라진다**(2026-09-14: cap 2/6/10 에서 816/838/803건).
 
     ⭐`cap_fn(i, side) -> 상한배수`: 상한을 **상태의 함수**로 만든다(2026-09-14, 사용자 요청
     «지평·레버리지·증거금 상한을 정해주는 모델»). None 이면 상수 `cap_x` 로 배포와 같다.
@@ -251,7 +257,11 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
             pnl = qty * entry * (fill_move - cost / 1e4)
             eq += pnl
             trades.append({"ret_eq": pnl / max(peak, 1e-9), "stopped": hit,
-                           "move": fill_move, "lev": lev})
+                           "move": fill_move, "lev": lev,
+                           # ⭐크기와 무관한 부분. 사다리를 끄면 이 셋이 상한에 불변이라
+                           # 「거래를 고정하고 크기만 바꾸는」 실험의 입력이 된다.
+                           "i": end_i - hb, "exit_i": i, "hb": hb, "side": s,
+                           "cost_bp": cost, "r": fill_move - cost / 1e4})
             if eq <= 0:
                 ruin = True; eq = 0.0; break
             peak = max(peak, eq); mdd = max(mdd, 1 - eq / peak)
@@ -274,7 +284,11 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
         if not (cap_now > 0):
             continue
         if selector:
-            hb = pick_hold_bars(sm, i, s_view, cap_now)
+            # 🔴지평은 **정책 천장**으로 고른다(배포: `effective_cap(sz, eq, None)` -> 모델 제외).
+            # 사이징 상한(cap_now)으로 고르면 상한을 바꿀 때 거래 목록까지 바뀌어
+            # 「크기만 바꾼 비교」가 불가능해진다(2026-09-14).
+            hb = pick_hold_bars(sm, i, s_view,
+                                cap_x if policy_cap_x is None else policy_cap_x)
             if hb is None:
                 continue
         else:
@@ -322,6 +336,9 @@ def walk(d: pd.DataFrame, sm: dict, lo_i: int, hi_i: int, *, acc: float, p_entry
             # 시간적분 기준 1440분 +0.040 vs 120분 **+0.736**). 지평 비교는 이 열로 한다.
             "expo_time_x": expo_sum / max(hi_i - lo_i, 1),
             "mean_cap_x": float(np.mean(caps_used)) if caps_used else float(cap_x),
+            # ⭐거래 원장. 사다리를 끄면 (i, side, hb, r) 이 상한에 **불변**이라
+            # 「거래를 고정하고 크기만 바꾸는」 실험이 이걸 입력으로 쓴다.
+            "_trades": trades,
             "worst_trade_pct": float(100 * rets.min()) if n else 0.0,
             "hold_med_min": (5 * float(np.median(hold_bars_used))) if hold_bars_used else 0.0,
             "hold_mix": (" ".join(
