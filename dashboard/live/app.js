@@ -5784,23 +5784,18 @@ function manualExitSyncButtons() {
   const src = latestBinanceAccount || lastGoodAccount;
   const stale = !latestBinanceAccount && !!src;
   lastExitStaleMin = stale ? Math.max(1, Math.round((Date.now() - lastGoodAccountAt) / 60000)) : 0;
-  // 🔴측면만이 아니라 **포지션 전체**를 들고 간다. "롱 청산"은 «롱으로 청산»인지 «롱을 청산»
-  // 인지 읽는 순간 멈칫한다 -- 대상을 적으면(「롱 2.754 닫기」) 그 모호함이 사라지고,
-  // 부분 청산 슬라이더를 만질 때 분모와 지금 손익이 같은 줄에 있다.
+  // 측면만이 아니라 **포지션 전체**를 들고 간다 -- 수량·진입가·마크가로 아래 줄(renderExitNow)이
+  // 「≈얼마 닫고 얼마 남김 · 지금 닫으면 얼마」를 그린다.
+  // 2026-09-14 버튼 라벨은 「롱 청산 / 숏 청산」 고정이다(사용자 결정). 한때 수량을 박았는데
+  // (「롱 2.754 닫기」) 수량은 바로 아래 줄에 이미 있고, 라벨이 안 변하면 여기서 textContent 를
+  // 쓸 이유도 없다 -- index.html 의 글자가 그대로 남는다.
   lastExitPositions = new Map((src?.positions || [])
     .filter((p) => p.symbol === sym && Number(p.qty) > 0)
     .map((p) => [p.side, p]));
-  const label = (side, ko) => `${ko} ${lastExitPositions.get(side).qty} 닫기`;
   const bl = el("snapExitLong");
-  if (bl) {
-    bl.hidden = !lastExitPositions.has("LONG");
-    if (!bl.hidden) bl.textContent = label("LONG", "롱");
-  }
+  if (bl) bl.hidden = !lastExitPositions.has("LONG");
   const bs = el("snapExitShort");
-  if (bs) {
-    bs.hidden = !lastExitPositions.has("SHORT");
-    if (!bs.hidden) bs.textContent = label("SHORT", "숏");
-  }
+  if (bs) bs.hidden = !lastExitPositions.has("SHORT");
   const hasPos = lastExitPositions.size > 0;
   row.hidden = !hasPos;
   renderExitNow();
