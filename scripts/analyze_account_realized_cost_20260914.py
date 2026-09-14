@@ -14,10 +14,14 @@ import json, sys
 from pathlib import Path
 import numpy as np, pandas as pd
 
+RNG_ = np.random.default_rng(20260914)
+
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "data/live/account_round_trips.jsonl"
 REFS = [(4.00, "메이커 양다리(수수료 하한)"), (5.52, "peg 양다리(섀도우 실측)"),
         (5.88, "static진입+peg청산"), (7.80, "peg진입+테이커청산"), (10.00, "테이커 양다리")]
+# peg 진입 배포 2026-09-12 · peg 청산 배포 2026-09-13 (KST). 청산시각 UTC 기준 경계.
+PEG_DEPLOY = pd.Timestamp("2026-09-12 00:00:00")
 
 
 def selftest() -> None:
@@ -56,7 +60,21 @@ def main() -> int:
         print(f"  {k}  n={len(s):>3}  중앙 {s.cost_bp.median():>5.2f}bp  "
               f"테이커양다리 {(s.cost_bp>9.5).mean()*100:>4.0f}%")
     print(f"\n합계: 실현 {d.realized_pnl.sum():+.2f} · 수수료 {-d.commission.sum():+.2f} · 순 {net:+.2f} USDT")
-    print("⚠️peg 진입 배포 09-12 · peg 청산 배포 09-13 — 둘 다 이 원장 마지막 청산 이후다(미측정).")
+
+    # --- peg 배포 전후 ---
+    pre, post = d[d.t < PEG_DEPLOY], d[d.t >= PEG_DEPLOY]
+    print(f"\n{'='*72}\npeg 배포(09-12/13) 전후")
+    print(f"{'구간':<22}{'n':>4}{'중앙bp':>9}{'평균bp':>9}{'테이커양다리':>12}{'메이커비중':>11}")
+    for tag, s_ in (("배포 전 (~09-11)", pre), ("배포 후 (09-12~)", post)):
+        if not len(s_): continue
+        c_ = s_.cost_bp
+        print(f"{tag:<22}{len(s_):>4}{c_.median():>9.2f}{c_.mean():>9.2f}"
+              f"{(c_>9.5).mean()*100:>11.0f}%{np.median((10.0-c_)/6.0)*100:>10.0f}%")
+    if len(post) >= 2:
+        boot = np.array([np.median(RNG_.choice(post.cost_bp.values, len(post))) for _ in range(4000)])
+        print(f"\n배포 후 중앙의 부트스트랩 95% CI: [{np.percentile(boot,2.5):.2f}, {np.percentile(boot,97.5):.2f}]"
+              f"  ⚠️n={len(post)} — 측정이지 판정이 아니다")
+        print(f"배포 후 왕복별: " + " · ".join(f"{v:.2f}" for v in sorted(post.cost_bp.values)))
     return 0
 
 
