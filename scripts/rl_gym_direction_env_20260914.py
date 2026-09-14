@@ -184,7 +184,7 @@ class DirectionGym:
                 peak = max(peak, eq); mdd = max(mdd, 1 - eq / peak)
                 self._close(decisions, pending, eq, eq_entry, i)
                 trades.append({"i": end_i - hb, "exit_i": i, "side": s, "hb": hb, "lev": lev,
-                               "stopped": hit, "r": fill_move - cost / 1e4,
+                               "stopped": hit, "r": fill_move - cost / 1e4, "cost_bp": cost,
                                "logret": np.log(eq / eq_entry)})
                 pos = None; pending = None
                 continue

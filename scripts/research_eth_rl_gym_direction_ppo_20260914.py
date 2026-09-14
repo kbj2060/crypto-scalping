@@ -90,9 +90,22 @@ class ActorCritic(nn.Module):
         return self.pi(h), self.v(h).squeeze(-1)
 
 
+FORCED = False          # --reward-mode forced: 홀드를 행동에서 뺀다(빈 슬롯마다 롱/숏 강제)
+HOLD_PENALTY = 0.0      # --reward-mode holdpen: 홀드 결정마다 −λ (보상 눈금 기준) = DSAC 의 r5_idle
+# --reward-mode antiflat: 사용자 DSAC(`ensemble/train_rl_dsac_agent.py` anti_flat_lambda=0.08,
+# min_abs=0.18, anneal) 의 **액터 손실** 항을 이식. 거래확률 평균이 바닥 아래면 λ·relu(바닥−P거래),
+# λ 는 반복에 따라 0 으로 선형 감쇠(DSAC anti_flat_anneal_updates). 보상이 아니라 액터에 걸리므로
+# 크리틱이 배워야 하는 간접 경로가 없다(09-12 정정 원칙과 같은 자리).
+ANTI_FLAT_LAMBDA = 0.0
+ANTI_FLAT_MIN = 0.05
+ANTI_FLAT_EFF = 0.0     # 학습 루프가 반복마다 갱신
+
+
 @torch.no_grad()
 def policy_table(model, S_win: np.ndarray):
     logits, v = model(torch.as_tensor(S_win))
+    if FORCED:
+        logits = logits.clone(); logits[:, 0] = -1e9
     return torch.log_softmax(logits, -1).numpy(), v.numpy()
 
 
@@ -116,6 +129,8 @@ def transitions(res: dict, logp: np.ndarray, v: np.ndarray, lo: int, hi: int):
     if len(dec) == 0:
         return None
     i = dec[:, 0].astype(int); a = dec[:, 1].astype(int); r = dec[:, 2] * REWARD_SCALE; nx = dec[:, 3].astype(int)
+    if HOLD_PENALTY > 0:
+        r = r - HOLD_PENALTY * (a == 0)
     vi = v[i - lo]
     vnext = np.where((nx >= 0) & (nx < hi), v[np.clip(nx, lo, hi - 1) - lo], 0.0)
     dt = np.where(nx >= 0, nx - i, 1).astype(float)
@@ -152,13 +167,17 @@ def ppo_update(model, opt, S_win_list, batches, *, ent_coef: float, epochs: int 
             # 드리프트 방어 -- **액터 손실 한 곳**: 배치 평균 (P롱 − P숏)² (DSAC 정정 원칙)
             dreg = ((p[:, 1] - p[:, 2]).mean()) ** 2
             loss = pg + 0.5 * vl - ent_coef * ent + DIRECTION_REG * dreg
+            if ANTI_FLAT_EFF > 0:
+                loss = loss + ANTI_FLAT_EFF * torch.relu(torch.tensor(ANTI_FLAT_MIN) - p[:, 1:].sum(1).mean())
             opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(model.parameters(), 0.5); opt.step()
             stats.append((pg.item(), vl.item(), ent.item()))
     return np.mean(stats, axis=0)
 
 
 def train(d, sm, S, win, *, seed: int, iters: int, ent_coef: float, lr: float, n_env: int,
-          positive: np.ndarray | None = None, cost=None, log=print, ent_anneal: float | None = None):
+          positive: np.ndarray | None = None, cost=None, log=print, ent_anneal: float | None = None,
+          train_cost=None):
+    """train_cost: 학습 환경에만 쓰는 비용(gross 모드 = 수수료 0). 평가는 항상 cost(실제)."""
     """positive 가 주어지면 양성대조: 보상 = 롱이면 (2·volexp−1), 숏이면 그 반대, 홀드 0."""
     torch.manual_seed(seed); rng = np.random.default_rng(seed)
     model = ActorCritic(S.shape[1]); opt = torch.optim.Adam(model.parameters(), lr=lr)
@@ -178,7 +197,7 @@ def train(d, sm, S, win, *, seed: int, iters: int, ent_coef: float, lr: float, n
                 i = np.arange(len(A)); nx = np.append(i[1:] + lo, -1)
                 res = {"_decisions": np.column_stack([i + lo, A, r, nx]).astype(float)}
             else:
-                gym = G.DirectionGym(d, sm, lo, hi, prices=prices, **(cost or {}))
+                gym = G.DirectionGym(d, sm, lo, hi, prices=prices, **((train_cost if train_cost is not None else cost) or {}))
                 res = rollout(gym, logp, rng, greedy=False)
                 tr_n.append(res["trades"]); tr_bp.append(res["net_bp_mean"])
             b = transitions(res, logp, v, lo, hi)
@@ -188,6 +207,8 @@ def train(d, sm, S, win, *, seed: int, iters: int, ent_coef: float, lr: float, n
         # 0.008 로 죽어 창당 1~3 거래로 **조기 수렴**했다. «엣지가 없어서 관망」과 «탐색이 먼저
         # 죽어서 관망」이 구분이 안 된다. ent_anneal 을 주면 그 값에서 ent_coef 로 선형 감쇠한다.
         ec = ent_coef if ent_anneal is None else ent_anneal + (ent_coef - ent_anneal) * (it / max(iters - 1, 1))
+        global ANTI_FLAT_EFF
+        ANTI_FLAT_EFF = ANTI_FLAT_LAMBDA * max(0.0, 1.0 - it / max(iters - 1, 1))
         st = ppo_update(model, opt, S_list, batches, ent_coef=ec)
         if it % 10 == 0 or it == iters - 1:
             log(f"    it {it:3d} pg {st[0]:+.4f} v {st[1]:.5f} ent {st[2]:.3f}"
@@ -209,7 +230,10 @@ def metrics(res: dict, d: pd.DataFrame) -> dict:
         t_day = t_tr = 0.0
     longs = sum(1 for t in tr if t["side"] > 0)
     logm = math.log(max(res["mult"], 1e-12))
+    gross = np.array([t["r"] + t["cost_bp"] / 1e4 for t in tr if "cost_bp" in t]) * 1e4
+    hit = float((gross > 0).mean()) if len(gross) else 0.0
     return {"trades": n, "net_bp": float(r.mean()) if n else 0.0, "t_trade": t_tr, "t_day": t_day,
+            "gross_bp": float(gross.mean()) if len(gross) else 0.0, "hit_rate": hit,
             "log_mult": logm, "expo_time_x": res["expo_time_x"],
             "growth_per_expo": logm / res["expo_time_x"] if res["expo_time_x"] > 0 else 0.0,
             "mdd": res["mdd"], "stops": res["stops"], "side_share": max(longs, n - longs) / n if n else 0.0,
@@ -304,15 +328,29 @@ def main() -> int:
     ap.add_argument("--twin-stride", type=int, default=4)
     ap.add_argument("--taker", action="store_true", help="G9: 진입·청산 테이커 5+5bp")
     ap.add_argument("--tag", type=str, default="main")
+    ap.add_argument("--reward-mode", choices=["pnl", "forced", "holdpen", "gross", "antiflat"], default="pnl",
+                    help="pnl=순손익 그대로 · forced=홀드 제거 · holdpen=홀드마다 −λ · gross=학습만 수수료 0")
+    ap.add_argument("--hold-penalty", type=float, default=0.02)
+    ap.add_argument("--anti-flat-lambda", type=float, default=0.08)
+    ap.add_argument("--direction-reg", type=float, default=0.20,
+                    help="액터 손실의 측면 균형 항 계수. forced 모드에서 0.2 는 «항상 숏」 붕괴를 못 막았다(2026-09-14)")
+    ap.add_argument("--anti-flat-min", type=float, default=0.05)
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     fam = tuple(a.families.split(","))
     d, sm, win, S, cols, volexp = prepare(fam)
     cost = {"entry_bp": 5.0, "peg_exit_bp": 5.0} if a.taker else None
+    global FORCED, HOLD_PENALTY, ANTI_FLAT_LAMBDA, ANTI_FLAT_MIN, DIRECTION_REG
+    DIRECTION_REG = a.direction_reg
+    FORCED = a.reward_mode == "forced"
+    ANTI_FLAT_LAMBDA = a.anti_flat_lambda if a.reward_mode == "antiflat" else 0.0
+    ANTI_FLAT_MIN = a.anti_flat_min
+    HOLD_PENALTY = a.hold_penalty if a.reward_mode == "holdpen" else 0.0
+    train_cost = {"entry_bp": 0.0, "peg_exit_bp": 0.0, "taker_exit_bp": 0.0} if a.reward_mode == "gross" else None
     logf = open(OUT / f"log_{a.tag}.txt", "a")
     def log(s):
         print(s, flush=True); logf.write(s + "\n"); logf.flush()
-    log(f"\n=== {a.tag} · 군 {fam} · 상태 {S.shape[1]}D · 창 {[(k, v[1]-v[0]) for k, v in win.items()]}"
+    log(f"\n=== {a.tag} · 보상 {a.reward_mode}{'(λ=%g)' % a.hold_penalty if a.reward_mode == 'holdpen' else ''} · 군 {fam} · 상태 {S.shape[1]}D · 창 {[(k, v[1]-v[0]) for k, v in win.items()]}"
         f" · 씨드 {SEEDS[:a.seeds]} · 비용 {'테이커 10bp' if a.taker else 'peg 5.88bp'}")
     report = {"tag": a.tag, "families": fam, "dim": int(S.shape[1]), "seeds": SEEDS[:a.seeds], "taker": a.taker,
               "fresh_forward_bar_by_bar": True, "trade_ledgers_used_as_input": False,
@@ -339,12 +377,12 @@ def main() -> int:
         for seed in SEEDS[:a.seeds]:
             log(f"[train] ent {ent} seed {seed}")
             m = train(d, sm, S, win, seed=seed, iters=a.iters, ent_coef=ent, lr=a.lr, n_env=a.n_env,
-                      cost=cost, log=log, ent_anneal=a.ent_anneal)
+                      cost=cost, log=log, ent_anneal=a.ent_anneal, train_cost=train_cost)
             ev = {}; acts = {}
             for w in ("TRAIN", "VAL", "OOS", "TEST", "BACK22_23"):
                 ev[w], acts[w] = eval_policy(m, d, sm, S, win, w, cost=cost)
             log("    " + " | ".join(f"{w} n{ev[w]['trades']} {ev[w]['net_bp']:+.2f}bp t{ev[w]['t_day']:+.1f} "
-                                    f"g{ev[w]['log_mult']:+.3f} side{ev[w]['side_share']:.2f}"
+                                    f"g{ev[w]['log_mult']:+.3f} side{ev[w]['side_share']:.2f} hit{100*ev[w]['hit_rate']:.1f}"
                                     for w in ("VAL", "OOS", "TEST", "BACK22_23")))
             torch.save(m.state_dict(), OUT / f"policy_{a.tag}_ent{ent}_seed{seed}.pt")
             runs.append({"ent": ent, "seed": seed, "eval": ev, "_model": m, "_acts": acts})
@@ -366,12 +404,17 @@ def main() -> int:
             c["policy"] = r["eval"][w]
             rows.append(c)
         c1 = eval_policy(sel[0]["_model"], d, sm, S, win, w, A_override=one_feature_rule(d, win, w, q_lo, q_hi), cost=cost)[0]
-        agg = {k: {m_: float(np.mean([row[k][m_] for row in rows])) for m_ in ("trades", "net_bp", "t_day", "log_mult", "growth_per_expo", "side_share", "mdd")}
-               for k in rows[0]}
-        agg["one_feature_rule"] = {k: float(c1[k]) for k in ("trades", "net_bp", "t_day", "log_mult", "growth_per_expo", "side_share", "mdd")}
+        KEYS = ("trades", "net_bp", "gross_bp", "hit_rate", "t_day", "log_mult", "growth_per_expo", "side_share", "mdd")
+        agg = {k: {m_: float(np.mean([row[k][m_] for row in rows])) for m_ in KEYS} for k in rows[0]}
+        agg["one_feature_rule"] = {k: float(c1[k]) for k in KEYS}
         ctrl_all[w] = agg
-        log(f"  [{w}] " + "  ".join(f"{k}: n{v['trades']:.0f} {v['net_bp']:+.2f}bp t{v['t_day']:+.1f} g{v['log_mult']:+.3f}"
+        log(f"  [{w}] " + "  ".join(f"{k}: n{v['trades']:.0f} {v['net_bp']:+.2f}bp hit{100*v['hit_rate']:.1f} t{v['t_day']:+.1f}"
                                     for k, v in agg.items()))
+        # ⭐강제/유도 거래의 판정 통계: 같은 측면 무작위 대비 Δ(씨드별 짝지음) ± SE
+        dl = [row["policy"]["net_bp"] - row["same_side_random"]["net_bp"] for row in rows]
+        agg["_delta_vs_ssr"] = {"mean": float(np.mean(dl)), "se": float(np.std(dl, ddof=1) / math.sqrt(len(dl))) if len(dl) > 1 else float("nan")}
+        log(f"        Δ(정책−같은측면무작위) {agg['_delta_vs_ssr']['mean']:+.2f} ± {agg['_delta_vs_ssr']['se']:.2f}bp"
+            f" · 정책 적중 {100*agg['policy']['hit_rate']:.1f}% · 역방향 {agg['reversed']['net_bp']:+.2f}bp")
         pol = [row["policy"] for row in rows]
         se = lambda key, arr: float(np.std([x[key] for x in arr], ddof=1) / math.sqrt(len(arr))) if len(arr) > 1 else float("nan")
         if w in EVAL_WINDOWS:
