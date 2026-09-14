@@ -5536,6 +5536,12 @@ function manualEntryStateText(state) {
     // 이 조건이 `sl` 존재에만 걸려 있어, 손절 시도 자체가 없던 경로에서 경고가 조용했다.
     rows.push(`🔴손절을 못 걸었습니다 — 포지션이 무방비입니다 (${sl?.error || sl?.reason || "손절 시도 기록 없음"})`);
   }
+  // 2026-09-15 진입도 리페그한다. 쫓아간 횟수는 «의도한 가격보다 높게 들어갔을 수 있다»는
+  // 뜻이라 숨기지 않는다 -- 청산과 달리 진입은 안 사도 되는 선택지가 있었기 때문이다.
+  if (Number(state?.repegs || 0) > 0) {
+    rows.push(`리페그 ${Number(state.repegs)}회 — 호가를 따라갔습니다` +
+      (state.limit_price ? ` (현재 지정가 ${state.limit_price})` : ""));
+  }
   const lv = state?.leverage;
   if (lv && lv.error) rows.push(`⚠레버리지 ${lv.to}배 설정 실패 — 거래소 천장이 그대로입니다 (${lv.error})`);
   else if (lv && lv.changed) rows.push(`레버리지 ${lv.from}배 → ${lv.to}배 적용`);

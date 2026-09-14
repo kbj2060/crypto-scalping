@@ -201,12 +201,27 @@ def main() -> int:
     except AssertionError as e:
         fails.append(str(e))
 
+    # 10) 진입도 리페그한다 (2026-09-15). 예전에는 한 번 걸고 마감까지 기다리기만 했다 --
+    #     그 모양이 섀도우 static 과 같고 미체결 7.6~14.4% 가 시장가로 끝났다.
+    #     여기서 고정하는 것: 리페그를 돌아도 ①계획 수량을 안 넘고 ②지정가가 둘이 안 되고
+    #     ③종료 상태로 끝나며 ④진입 특유의 **손절**이 걸린다.
+    fx = FakeExchange(fill_after=99)
+    ep = {**BASE, "side": "BUY", "positionSide": "LONG"}
+    st = run(ep, fx, entry=True, drift=True)
+    try:
+        f, tk, placed = check("진입/리페그", st, fx, 2.0)
+        assert int(st.get("repegs") or 0) >= 1, f"진입이 리페그를 안 했다: {st}"
+        assert placed <= 2.0 * (ex.REPEG_MAX + 2), f"주문 총량 폭주 {placed}"
+        assert "stop" in st, f"진입 종료인데 손절 기록이 없다: {st}"
+    except AssertionError as e:
+        fails.append("진입리페그: " + str(e))
+
     if fails:
         print(f"🔴 불변식 위반 {len(fails)}건")
         for f in fails:
             print("   -", f)
         return 1
-    print("통과 9/9 — 과청산 없음 · 중복 주문 없음 · 항상 종료 · 실패시 멈춤")
+    print("통과 10/10 — 과청산 없음 · 중복 주문 없음 · 항상 종료 · 실패시 멈춤 · 진입 리페그")
     return 0
 
 

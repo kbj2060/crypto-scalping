@@ -7,13 +7,19 @@
 정책(사용자 선택 b): peg post-only(GTX) 로 걸고 FALLBACK_SEC 까지 지켜본 뒤
 **남은 수량만** 테이커로 넘긴다. 실측 1,340legs 에서 peg 2.76bp/leg, 폴백분 14.82bp.
 
-**진입은 리페그하지 않고, 청산은 리페그한다.** 같은 정책이 아닌 이유가 있다.
-  진입(run_entry): 호가가 달아나면 체결이 안 되고 그대로 테이커로 간다. 사용자가 손으로
-    넣던 방식이 어차피 테이커라 «되면 2.2bp 이득, 안 되면 현행과 동일»이다 -- 순수 개선.
-  청산(run_exit, 2026-09-13 추가): 미체결이 «현행과 동일»이 아니다. **포지션이 남는다.**
-    섀도우 23,332legs 실측에서 걸어두기만 하면 90.4%, 리페그하면 99.2% 체결이었고
-    그 차이 9.6% 가 청산에서는 비용이 아니라 «못 닫음»이다. 그래서 취소·재호가 경쟁
-    상태를 감수한다 -- 대신 REPEG_MAX 로 폭주를 막고, 취소 응답이 아니라 재조회 값을 믿는다.
+**진입과 청산이 같은 리페그 루프를 쓴다**(`fill_maker`). 2026-09-15 이전에는 진입만
+리페그하지 않았는데, 그 근거("어차피 테이커였으니 순수 개선")는 **배포 전 기준**이라
+배포 후에는 더 이상 맞지 않았다.
+  청산(2026-09-13): 미체결이 «안 닫음»이라 리페그. 섀도우 23,332legs 에서 90.4% → 99.2%.
+  진입(2026-09-15): 사용자 *"좀 비싸게 사고 있는 것 같다"* 에서 출발한 재측정. 리페그 없는
+    진입은 섀도우의 `static` 과 같은 모양이고, 그 다리의 **미체결이 저변동 14.4% ·
+    고변동 7.6%** 다. 미체결은 120초 뒤 시장가로 끝나 평균 **8.75~11.5bp**(체결 다리 1.98).
+    평균은 두 정책이 거의 같지만(2.957 vs 2.999) **꼬리가 다르다 — 최악 20.8 vs 87.3bp**.
+    ⚠️리페그는 «쫓아가며 산다»는 뜻이라 의도한 가격보다 높게 들어갈 수 있다. 그래도 택한
+    이유는 시장가 전락(5.0bp + 이미 달아난 가격)이 그보다 비싸기 때문이다.
+🔴**오프셋(호가보다 깊게 눕히기)은 지렛대가 아니다**(같은 날 검토·기각). 1틱 = 0.0405bp 인데
+  스프레드가 정확히 1틱이고, 체결 대기 4.2초 동안 가격이 1.25bp(31틱) 흔들린다. 미체결 한 건이
+  +9.07bp 라 1틱당 체결률이 0.45%p 만 떨어져도 본전이다. 비용의 82%는 수수료(2.0bp)다.
 """
 from __future__ import annotations
 
@@ -140,8 +146,9 @@ async def _place_stop(session, plan: dict, state: dict, key, secret, offset) -> 
 
 
 async def run_entry(session, plan: dict, state: dict) -> dict:
-    """peg 를 걸고 지켜보다가 남은 수량만 테이커로 넘긴다. state 를 제자리에서 갱신한다
-    (프런트가 /api/manual-entry/status 로 같은 dict 를 읽는다)."""
+    """peg 를 걸고 **호가가 달아나면 따라가며 다시 걸다가**, 마감까지 남은 수량만 테이커로
+    넘긴다. state 를 제자리에서 갱신한다(프런트가 /api/manual-entry/status 로 같은 dict 를
+    읽는다). 리페그를 붙인 근거는 모듈 설명 참조(2026-09-15)."""
     key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
     if not (key and secret):
         state.update(phase="error", error="API 키가 없습니다", done_at=now_iso())
@@ -158,42 +165,26 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
                                 key, secret, offset)
     state["leverage"] = lev
 
-    order = await signed(session, "POST", "/fapi/v1/order",
-                         {**common, "type": "LIMIT", "timeInForce": "GTX",
-                          "price": plan["price"], "quantity": plan["quantity"]},
-                         key, secret, offset)
-    if "__error__" in order:
-        # GTX 는 «지금 걸면 테이커가 된다» 싶으면 거부한다(-5022). 실패가 아니라 정상 동작이라
-        # 사용자에게 그대로 보여주고 끝낸다 -- 몰래 테이커로 바꿔 넣지 않는다.
-        state.update(phase="rejected", error=order["__error__"], done_at=now_iso())
+    total = float(plan["quantity"])
+    state.update(phase="working", filled=0.0, limit_price=plan["price"], quantity=total,
+                 repegs=0, deadline_sec=FALLBACK_SEC)
+
+    # 2026-09-15: 진입도 청산과 **같은 루프**를 쓴다. 걸어두기만 하면 호가가 달아났을 때
+    # 미체결로 남고(섀도우 static: 저변동 14.4% · 고변동 7.6%) 그 다리는 120초 뒤 시장가라
+    # 평균 8.75~11.5bp 다 -- 체결 다리 1.98bp 의 네댓 배.
+    done, price, repegs, err = await fill_maker(
+        session, common=common, price=float(plan["price"]), total=total,
+        deadline=time.monotonic() + FALLBACK_SEC, state=state,
+        key=key, secret=secret, offset=offset)
+    state.update(filled=done, repegs=repegs, limit_price=price)
+    if err is not None:
+        # 🔴부분체결이 남아 있을 수 있다 -- 그건 **무방비 포지션**이라 손절부터 건다.
+        # (GTX 거부처럼 체결이 0 인 경로는 _place_stop 이 «포지션 없음»으로 기록한다.)
+        await _place_stop(session, plan, state, key, secret, offset)
+        state.update(phase=err["phase"], error=err["error"], done_at=now_iso())
         return state
-    state.update(phase="working", order_id=order.get("orderId"), filled=0.0,
-                 limit_price=plan["price"], quantity=plan["quantity"])
 
-    deadline = time.monotonic() + FALLBACK_SEC
-    status = ""
-    while time.monotonic() < deadline:
-        await asyncio.sleep(POLL_SEC)
-        cur = await signed(session, "GET", "/fapi/v1/order",
-                           {**common, "orderId": state["order_id"]}, key, secret, offset)
-        if "__error__" in cur:
-            continue           # 조회 실패는 재시도한다 -- 주문 자체는 거래소에 살아 있다
-        state["filled"] = executed_qty(cur)
-        status = str(cur.get("status") or "")
-        if status in TERMINAL:
-            break
-
-    if status not in TERMINAL:
-        confirmed = await ensure_closed(session, common, state["order_id"], key, secret, offset)
-        if confirmed is None:
-            # 체결량을 확정 못 했지만 마지막 폴링값이 양수면 **포지션이 있다**. 손절부터 건다.
-            await _place_stop(session, plan, state, key, secret, offset)
-            state.update(phase="error", done_at=now_iso(),
-                         error=f"주문 {state['order_id']} 취소를 확인하지 못했습니다 — 직접 확인하세요")
-            return state
-        state["filled"] = confirmed
-
-    remaining = round(float(plan["quantity"]) - state["filled"], 8)
+    remaining = round(total - state["filled"], 8)
     if remaining <= 0:
         state.update(phase="filled_maker", taker_qty=0.0)
         await _place_stop(session, plan, state, key, secret, offset)
@@ -242,20 +233,90 @@ async def ensure_closed(session, common: dict, oid, key: str, secret: str, offse
 REPEG_MAX = 40          # 3초 폴링 × 120초면 40회가 물리적 상한. 폭주 방지용 이중 안전장치.
 
 
-async def maker_price(session, position_side: str) -> tuple[float, float, float]:
-    """지금 **메이커로 남는** 가격. 롱을 닫으면 SELL 이라 최우선 매도호가, 숏이면 매수호가.
-    공개 엔드포인트라 서명하지 않는다."""
+async def maker_price(session, order_side: str) -> tuple[float, float, float]:
+    """지금 **메이커로 남는** 가격. 매수는 최우선 매수호가, 매도는 최우선 매도호가.
+    공개 엔드포인트라 서명하지 않는다.
+
+    ⚠️키는 **주문 측면(BUY/SELL)** 이지 포지션 방향이 아니다 -- 진입 롱과 청산 숏은 둘 다
+    BUY 라 역학이 같다. 포지션 방향으로 키를 잡으면 같은 것을 둘로 다루게 된다."""
     async with session.get(f"{FAPI}/fapi/v1/ticker/bookTicker",
                            params={"symbol": "ETHUSDT"}) as response:
         book = await response.json()
     bid, ask = float(book["bidPrice"]), float(book["askPrice"])
-    return (ask if position_side == "LONG" else bid), bid, ask
+    return (bid if order_side == "BUY" else ask), bid, ask
 
 
-def drifted(position_side: str, price: float, bid: float, ask: float) -> bool:
-    """내 지정가가 시장에서 떨어졌나. 롱 청산(매도)은 최우선 매도호가가 **내 밑으로** 내려가면
-    (=누가 나를 앞질렀으면) 체결이 안 된다. 숏 청산은 거울상."""
-    return ask < price if position_side == "LONG" else bid > price
+def drifted(order_side: str, price: float, bid: float, ask: float) -> bool:
+    """내 지정가가 시장에서 떨어졌나. 매수는 최우선 매수호가가 **내 위로** 올라가면
+    (=누가 나를 앞질렀으면) 그 뒤에 서게 되어 체결이 안 된다. 매도는 거울상."""
+    return bid > price if order_side == "BUY" else ask < price
+
+
+async def fill_maker(session, *, common: dict, price: float, total: float, deadline: float,
+                     state: dict, key: str, secret: str,
+                     offset: int) -> tuple[float, float, int, dict | None]:
+    """GTX 로 `total` 을 채운다 — 호가가 달아나면 취소하고 **새 호가에 다시 건다**.
+
+    반환 `(체결량, 마지막 지정가, 리페그 수, 오류|None)`. 오류가 나오면 호출부가 멈춘다
+    (`phase` 는 주문 거부면 "rejected", 취소를 확인 못 했으면 "error").
+
+    진입과 청산이 이 루프 **한 벌**을 쓴다(2026-09-15). 두 벌로 두면 한쪽만 고쳐진다.
+    다른 점은 호출부에 남는다 -- 레버리지·손절(진입), 극단변동성 시장가·변동성 연동
+    마감(청산), 잔량을 테이커로 넘기는 처리(양쪽).
+    """
+    side = str(common["side"])          # BUY/SELL -- 포지션 방향이 아니다(maker_price 주석)
+    done, repegs = 0.0, 0
+    while time.monotonic() < deadline and round(total - done, 8) > 0 and repegs <= REPEG_MAX:
+        remaining = round(total - done, 8)
+        order = await signed(session, "POST", "/fapi/v1/order",
+                             {**common, "type": "LIMIT", "timeInForce": "GTX",
+                              "price": round(price, 8), "quantity": remaining},
+                             key, secret, offset)
+        if "__error__" in order:
+            # -5022 = «지금 걸면 테이커가 된다». 실패가 아니라 호가가 움직였다는 뜻이라
+            # 새 호가로 다시 건다. 그 외 오류는 그대로 멈춘다 -- 몰래 테이커로 바꾸지 않는다.
+            if "5022" in str(order["__error__"]) and repegs < REPEG_MAX:
+                price, _, _ = await maker_price(session, side)
+                repegs += 1
+                state.update(repegs=repegs, limit_price=price)
+                continue
+            return done, price, repegs, {"phase": "rejected", "error": order["__error__"]}
+
+        oid = order.get("orderId")
+        state.update(order_id=oid, limit_price=price)
+        this_filled, status, need_repeg = 0.0, "", False
+        while time.monotonic() < deadline:
+            await asyncio.sleep(POLL_SEC)
+            cur = await signed(session, "GET", "/fapi/v1/order",
+                               {**common, "orderId": oid}, key, secret, offset)
+            if "__error__" in cur:
+                continue        # 조회 실패는 재시도 -- 주문은 거래소에 살아 있다
+            this_filled = executed_qty(cur)
+            status = str(cur.get("status") or "")
+            state["filled"] = round(done + this_filled, 8)
+            if status in TERMINAL:
+                break
+            price_now, bid, ask = await maker_price(session, side)
+            if drifted(side, price, bid, ask):
+                need_repeg, price = True, price_now
+                break
+
+        if status not in TERMINAL:
+            confirmed = await ensure_closed(session, common, oid, key, secret, offset)
+            if confirmed is None:
+                # 살아 있는지 아닌지를 모르는 채로 **또 걸면 안 된다**. 멈추고 사람에게 넘긴다.
+                return done, price, repegs, {
+                    "phase": "error",
+                    "error": f"주문 {oid} 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요"}
+            this_filled = confirmed
+
+        done = round(done + this_filled, 8)
+        state["filled"] = done
+        if not need_repeg:
+            break
+        repegs += 1
+        state.update(repegs=repegs, limit_price=price)
+    return done, price, repegs, None
 
 
 async def run_exit(session, plan: dict, state: dict) -> dict:
@@ -292,68 +353,20 @@ async def run_exit(session, plan: dict, state: dict) -> dict:
         return state
 
     price = float(plan["price"])
-    done = 0.0
-    repegs = 0
     # 마감은 **계획이 정한다** -- 변동성에 따라 15~120초로 달라진다(build_exit_plan 주석 참조).
     # 모듈 상수를 그대로 쓰면 변동성 연동이 조용히 무력화된다.
     window = float(plan.get("fallback_after_sec") or FALLBACK_SEC)
-    deadline = time.monotonic() + window
     state.update(phase="working", kind="exit", quantity=total, filled=0.0,
                  limit_price=price, repegs=0, deadline_sec=window,
                  vol_bpm=plan.get("vol_bpm"))
 
-    while time.monotonic() < deadline and round(total - done, 8) > 0 and repegs <= REPEG_MAX:
-        remaining = round(total - done, 8)
-        order = await signed(session, "POST", "/fapi/v1/order",
-                             {**common, "type": "LIMIT", "timeInForce": "GTX",
-                              "price": round(price, 8), "quantity": remaining},
-                             key, secret, offset)
-        if "__error__" in order:
-            # -5022 = «지금 걸면 테이커가 된다». 실패가 아니라 호가가 움직였다는 뜻이라
-            # 새 호가로 다시 건다. 그 외 오류는 그대로 멈춘다 -- 몰래 테이커로 바꾸지 않는다.
-            if "5022" in str(order["__error__"]) and repegs < REPEG_MAX:
-                price, _, _ = await maker_price(session, pside)
-                repegs += 1
-                state.update(repegs=repegs, limit_price=price)
-                continue
-            state.update(phase="rejected", error=order["__error__"], filled=done, done_at=now_iso())
-            return state
-
-        oid = order.get("orderId")
-        state.update(order_id=oid, limit_price=price)
-        this_filled, status, need_repeg = 0.0, "", False
-        while time.monotonic() < deadline:
-            await asyncio.sleep(POLL_SEC)
-            cur = await signed(session, "GET", "/fapi/v1/order",
-                               {**common, "orderId": oid}, key, secret, offset)
-            if "__error__" in cur:
-                continue        # 조회 실패는 재시도 -- 주문은 거래소에 살아 있다
-            this_filled = executed_qty(cur)
-            status = str(cur.get("status") or "")
-            state["filled"] = round(done + this_filled, 8)
-            if status in TERMINAL:
-                break
-            price_now, bid, ask = await maker_price(session, pside)
-            if drifted(pside, price, bid, ask):
-                need_repeg, price = True, price_now
-                break
-
-        if status not in TERMINAL:
-            confirmed = await ensure_closed(session, common, oid, key, secret, offset)
-            if confirmed is None:
-                # 살아 있는지 아닌지를 모르는 채로 **또 걸면 안 된다**. 여기서 멈추고 사람에게 넘긴다.
-                state.update(phase="error", filled=done, repegs=repegs,
-                             error=f"주문 {oid} 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요",
-                             done_at=now_iso())
-                return state
-            this_filled = confirmed
-
-        done = round(done + this_filled, 8)
-        state["filled"] = done
-        if not need_repeg:
-            break
-        repegs += 1
-        state.update(repegs=repegs, limit_price=price)
+    done, price, repegs, err = await fill_maker(
+        session, common=common, price=price, total=total,
+        deadline=time.monotonic() + window, state=state, key=key, secret=secret, offset=offset)
+    if err is not None:
+        state.update(phase=err["phase"], error=err["error"], filled=done, repegs=repegs,
+                     done_at=now_iso())
+        return state
 
     remaining = round(total - done, 8)
     if remaining <= 0:
@@ -411,10 +424,22 @@ def _self_check() -> None:
     # (GTX 거부·API키 없음 경로는 체결이 0 이라 여기 해당 없다.)
     import inspect as _i
     _src = _i.getsource(run_entry)
-    for _mark in ('phase="taker_failed"', "if confirmed is None:"):
+    # 마커는 «체결이 남을 수 있는 종료 경로»다. 2026-09-15 리페그 도입으로 취소 미확인 경로가
+    # fill_maker 안으로 들어가면서 진입 쪽 마커가 `if err is not None:` 로 바뀌었다.
+    for _mark in ('phase="taker_failed"', "if err is not None:"):
         _blk = _src[_src.index(_mark):]
         _blk = _blk[:_blk.index("return state")]
         assert "_place_stop" in _blk, f"{_mark} 경로에 손절이 없다"
+
+    # ── 리페그 루프 공유 (2026-09-15) ────────────────────────────────────────
+    # 진입과 청산이 **같은 함수**를 쓴다. 한쪽만 고쳐지는 걸 막는 검사다.
+    for _fn in (run_entry, run_exit):
+        assert "fill_maker(" in _i.getsource(_fn), f"{_fn.__name__} 이 공용 루프를 안 쓴다"
+    # 호가 기준은 **주문 측면**이다. 진입 롱과 청산 숏은 둘 다 BUY 라 같은 값이어야 한다.
+    assert drifted("BUY", 100.0, 100.01, 100.02) is True, "매수는 최우선 매수호가가 위로 가면 밀린다"
+    assert drifted("BUY", 100.0, 100.00, 100.01) is False
+    assert drifted("SELL", 100.0, 99.98, 99.99) is True, "매도는 최우선 매도호가가 밑으로 가면 밀린다"
+    assert drifted("SELL", 100.0, 99.99, 100.00) is False
 
     # ── 레버리지 설정 (2026-09-13) ───────────────────────────────────────────
     # 네트워크를 안 타는 계약만 본다: 목표가 없으면 아무것도 안 보낸다.
@@ -422,15 +447,16 @@ def _self_check() -> None:
     assert _a.run(ensure_leverage(None, "ETHUSDT", 0, "", "", 0))["changed"] is False
     assert _a.run(ensure_leverage(None, "ETHUSDT", -5, "", "", 0))["changed"] is False
 
-    # ── 리페그 판정(청산) ────────────────────────────────────────────────────
+    # ── 리페그 판정 ──────────────────────────────────────────────────────────
+    # ⚠️2026-09-15 키가 포지션 방향 → **주문 측면**으로 바뀌었다(진입·청산 공용).
     # 롱 청산 = 매도. 내 지정가 2470.01 인데 최우선 매도호가가 2470.00 이면 누가 앞질렀다.
-    assert drifted("LONG", 2470.01, 2470.00, 2470.00) is True
-    assert drifted("LONG", 2470.01, 2470.00, 2470.01) is False   # 내가 아직 최우선
-    assert drifted("LONG", 2470.01, 2470.50, 2470.60) is False   # 시장이 위로 -- 그대로 둔다
-    # 숏 청산 = 매수. 거울상이라 부등호가 반대다.
-    assert drifted("SHORT", 2470.00, 2470.01, 2470.02) is True
-    assert drifted("SHORT", 2470.00, 2470.00, 2470.01) is False
-    assert drifted("SHORT", 2470.00, 2469.50, 2469.60) is False
+    assert drifted("SELL", 2470.01, 2470.00, 2470.00) is True
+    assert drifted("SELL", 2470.01, 2470.00, 2470.01) is False   # 내가 아직 최우선
+    assert drifted("SELL", 2470.01, 2470.50, 2470.60) is False   # 시장이 위로 -- 그대로 둔다
+    # 숏 청산과 **롱 진입**은 둘 다 매수다. 거울상이라 부등호가 반대다.
+    assert drifted("BUY", 2470.00, 2470.01, 2470.02) is True
+    assert drifted("BUY", 2470.00, 2470.00, 2470.01) is False
+    assert drifted("BUY", 2470.00, 2469.50, 2469.60) is False
     assert REPEG_MAX * POLL_SEC >= FALLBACK_SEC, \
         "리페그 상한이 마감보다 먼저 걸리면 남은 시간을 못 쓴다"
 
