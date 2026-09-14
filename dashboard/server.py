@@ -1412,7 +1412,36 @@ def make_app() -> web.Application:
             response.headers["Cache-Control"] = "no-cache"
         return response
 
-    app = web.Application(middlewares=[static_asset_headers])
+    # 2026-09-15: JSON 응답 압축·ETag 를 **한 곳**에서 건다.
+    # 왜: 응답을 만드는 자리가 둘이었다 -- json_response() 헬퍼(11곳)는 압축+ETag 를 붙이는데
+    # 날 web.json_response()(61곳)는 둘 다 없었다. 실측: trades 302,580B -> 23,881B(12.7배),
+    # state 43,076 -> 6,156 은 압축됐고, model-indicator-history 194,437 · liquidation-map
+    # 46,898 · regime-wide24 19,960 은 gzip 을 요청해도 그대로 나갔다.
+    # 61곳을 고치는 대신 미들웨어로 잡는다 -- 앞으로 추가되는 엔드포인트도 자동으로 걸린다.
+    # ⚠️ETag 는 클라가 조건부 요청을 보내야 뜻이 있다. app.js 의 fetch 가 `cache: "no-store"`
+    #   면 브라우저가 HTTP 캐시를 통째로 건너뛰어 If-None-Match 를 **안 보낸다**. 같은 커밋에서
+    #   28곳을 "no-cache"(=캐시하되 쓰기 전에 물어봐라)로 바꿨다. 서버가 Cache-Control:
+    #   no-cache 를 주므로 재검증 없이 옛 본문이 나갈 일은 없다.
+    @web.middleware
+    async def json_compress_etag(request: web.Request, handler: Any) -> web.StreamResponse:
+        response = await handler(request)
+        # SSE(StreamResponse)·POST·비JSON·비200 은 건드리지 않는다. 304 는 본문이 없어야 한다.
+        if (request.method != "GET" or not isinstance(response, web.Response)
+                or response.status != 200 or response.body is None
+                or (response.content_type or "") != "application/json"):
+            return response
+        if "ETag" not in response.headers:          # json_response() 가 이미 붙인 건 그대로 둔다
+            etag = f'W/"body-{hashlib.sha256(response.body).hexdigest()[:16]}"'
+            response.headers["ETag"] = etag
+            response.headers.setdefault("Cache-Control", "no-cache")
+            if etag_matches(request, etag):
+                return web.Response(status=web.HTTPNotModified.status_code,
+                                    headers={"ETag": etag,
+                                             "Cache-Control": response.headers["Cache-Control"]})
+        response.enable_compression()               # Accept-Encoding 에 맞춰 협상된다
+        return response
+
+    app = web.Application(middlewares=[static_asset_headers, json_compress_etag])
     json_cache: dict[Path, tuple[tuple[int, int] | None, Any]] = {}
     trade_cache: dict[str, Any] = {
         "signature": None,

@@ -52,8 +52,8 @@ def append_log(p: dict) -> None:
     LOG.parent.mkdir(parents=True, exist_ok=True)
     row = {"ts": p.get("timestamp"), "close": p.get("close"), "state": p.get("state"),
            "volexp": p.get("volexp"), "compressed": p.get("compressed"),
-           "alert_lit": p.get("alert", {}).get("lit"),
-           "alert_on": [x["name"] for x in p.get("alert", {}).get("lights", []) if x["on"]],
+           "prewarn_on": p.get("prewarn", {}).get("on"),
+           "prewarn_proba": p.get("prewarn", {}).get("proba"),
            "detect_on": p.get("detect", {}).get("on"),
            "detect_count": p.get("detect", {}).get("count"),
            "logged_utc": datetime.now(timezone.utc).isoformat()}
@@ -76,9 +76,10 @@ def cycle() -> dict:
     if changed:
         append_log(p)
         _LAST.update(state=p["state"], ts=p["timestamp"])
-    lit = [x["name"] for x in p["alert"]["lights"] if x["on"]]
+    pw = p.get("prewarn", {})
     log(f"{p['state']:8s} · {p['timestamp'][11:16]} · {p['close']:.2f} "
-        f"· volexp {p['volexp']:.2f} · 경보 {p['alert']['lit']}등{lit if lit else ''} "
+        f"· volexp {p['volexp']:.2f} · 예경보 {'ON' if pw.get('on') else 'off'}"
+        f"(p {pw.get('proba')}/{pw.get('threshold')}) "
         f"· 탐지 {p['detect']['count']}/{len(p['detect']['signals'])}"
         f"{' ★기록' if changed else ''} · {time.time()-t0:.1f}s")
     return p

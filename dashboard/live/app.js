@@ -730,7 +730,7 @@ function axisTicks(min, max, targetTicks = 4) {
 
 async function fetchBinanceHistory(asset) {
   try {
-    const res = await fetch(`/api/market-history?asset=${asset}`, { cache: "no-store" });
+    const res = await fetch(`/api/market-history?asset=${asset}`, { cache: "no-cache" });
     if (!res.ok) return;
     const payload = await res.json();
     candleHistoryByAsset[asset] = Array.isArray(payload?.candles) ? payload.candles : [];
@@ -1220,7 +1220,7 @@ async function refreshBinanceAccount() {
   if (now - binanceAccountLastFetchAt < BINANCE_ACCOUNT_POLL_MS) return;
   binanceAccountLastFetchAt = now;
   try {
-    const res = await fetch(API_BINANCE_ACCOUNT_URL, { cache: "no-store" });
+    const res = await fetch(API_BINANCE_ACCOUNT_URL, { cache: "no-cache" });
     renderBinanceAccount(await res.json());
   } catch (error) {
     console.error("Binance account fetch error:", error);
@@ -1235,7 +1235,7 @@ async function refreshOpsStatus() {
   opsLastFetchAt = now;
   refreshBinanceAccount();
   try {
-    const res = await fetch(API_OPS_STATUS_URL, { cache: "no-store", headers: opsStatusEtag ? { "If-None-Match": opsStatusEtag } : {} });
+    const res = await fetch(API_OPS_STATUS_URL, { cache: "no-cache", headers: opsStatusEtag ? { "If-None-Match": opsStatusEtag } : {} });
     if (res.status === 304) return;
     if (!res.ok) throw new Error(`ops status ${res.status}`);
     opsStatusEtag = res.headers.get("ETag") || opsStatusEtag;
@@ -2365,7 +2365,7 @@ async function refreshSessionAlerts() {
   if (now - sessionAlertsLastFetchAt < SESSION_ALERTS_POLL_MS) return;
   sessionAlertsLastFetchAt = now;
   try {
-    const res = await fetch(API_SESSION_ALERTS_URL, { cache: "no-store" });
+    const res = await fetch(API_SESSION_ALERTS_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`session alerts ${res.status}`);
     const data = await res.json();
     renderSessionVolatilityAlert(data.session_volatility_alert);
@@ -2701,7 +2701,7 @@ async function refreshEvidenceSignals() {
   // (BTC에서 사용자가 신고했던 것과 같은 버그의 XRP판).
   const url = API_EVIDENCE_SIGNALS_URL;   // 2026-09-14 ETH 전용 (위 게이트가 나머지를 막는다)
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-cache" });
     if (!res.ok) throw new Error(`evidence signals ${res.status}`);
     renderEvidenceSignals(await res.json());
   } catch (error) {
@@ -2791,7 +2791,7 @@ async function refreshEvidenceSignalsProvisional() {
   if (now - evidenceProvisionalLastFetchAt < EVIDENCE_PROVISIONAL_POLL_MS) return;
   evidenceProvisionalLastFetchAt = now;
   try {
-    const res = await fetch(API_EVIDENCE_SIGNALS_PROVISIONAL_URL, { cache: "no-store" });
+    const res = await fetch(API_EVIDENCE_SIGNALS_PROVISIONAL_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`evidence signals provisional ${res.status}`);
     const payload = await res.json();
     latestEvidenceSignalsProvisional = payload; // see its declaration above -- V자반등 진행중 미리보기가 재사용
@@ -2817,7 +2817,7 @@ async function refreshChartMarkers() {
   if (now - chartMarkersLastFetchAt < CHART_MARKERS_POLL_MS) return;
   chartMarkersLastFetchAt = now;
   try {
-    const res = await fetch(`${API_CHART_MARKERS_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
+    const res = await fetch(`${API_CHART_MARKERS_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`chart markers ${res.status}`);
     latestChartMarkers = await res.json();
   } catch (error) {
@@ -2831,7 +2831,7 @@ async function refreshExtremeDetector() {
   if (now - extremeLastFetchAt < EXTREME_POLL_MS) return;
   extremeLastFetchAt = now;
   try {
-    const res = await fetch(API_EXTREME_URL, { cache: "no-store" });
+    const res = await fetch(API_EXTREME_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`extreme detector ${res.status}`);
     latestExtreme = await res.json();
   } catch (error) {
@@ -2845,7 +2845,7 @@ async function refreshVolForecast() {
   if (now - volForecastLastFetchAt < VOL_FORECAST_POLL_MS) return;
   volForecastLastFetchAt = now;
   try {
-    const res = await fetch(API_VOL_FORECAST_URL, { cache: "no-store" });
+    const res = await fetch(API_VOL_FORECAST_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`vol forecast ${res.status}`);
     latestVolForecast = await res.json();
   } catch (error) {
@@ -3006,7 +3006,7 @@ async function refreshBreakoutDetector() {
   if (now - breakoutDetectorLastFetchAt < BREAKOUT_DETECTOR_POLL_MS) return;
   breakoutDetectorLastFetchAt = now;
   try {
-    const res = await fetch(API_BREAKOUT_DETECTOR_URL, { cache: "no-store" });
+    const res = await fetch(API_BREAKOUT_DETECTOR_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`breakout detector ${res.status}`);
     latestBreakoutDetector = await res.json();
   } catch (error) {
@@ -3020,7 +3020,7 @@ async function refreshVReboundSignal() {
   if (now - vReboundLastFetchAt < V_REBOUND_POLL_MS) return;
   vReboundLastFetchAt = now;
   try {
-    const res = await fetch(API_V_REBOUND_URL, { cache: "no-store" });
+    const res = await fetch(API_V_REBOUND_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`v-rebound signal ${res.status}`);
     latestVRebound = await res.json();
   } catch (error) {
@@ -3034,11 +3034,11 @@ async function refreshLiquidation5mSignal() {
   if (now - liquidation5mLastFetchAt < LIQUIDATION_5M_POLL_MS) return;
   liquidation5mLastFetchAt = now;
   try {
-    const res = await fetch(`${API_LIQUIDATION_5M_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
+    const res = await fetch(`${API_LIQUIDATION_5M_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`liquidation 5m signal ${res.status}`);
     latestLiquidation5m = await res.json();
     try {
-      const rh = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
+      const rh = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
       const jh = await rh.json();
       latestLiquidation5mHist = (jh && jh.warmed_up && Array.isArray(jh.bars)) ? jh.bars : [];
     } catch (e) { latestLiquidation5mHist = []; }
@@ -3055,7 +3055,7 @@ async function refreshVolLevel() {
   if (now - volLevelLastFetchAt < VOL_LEVEL_POLL_MS) return;
   volLevelLastFetchAt = now;
   try {
-    const res = await fetch(API_POSITION_SIZING_URL, { cache: "no-store" });
+    const res = await fetch(API_POSITION_SIZING_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`position sizing ${res.status}`);
     const j = await res.json();
     latestVolLevel = (j && j.vol_level) || { available: false, grade: "데이터 없음", tone: "neutral" };
@@ -3071,7 +3071,7 @@ async function refreshBasisLiquiditySignal() {
   if (now - basisLiquidationLastFetchAt < BASIS_LIQUIDATION_POLL_MS) return;
   basisLiquidationLastFetchAt = now;
   try {
-    const res = await fetch(`${API_BASIS_LIQUIDATION_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASIS_LIQUIDATION_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`basis liquidation signal ${res.status}`);
     latestBasisLiquidation = await res.json();
   } catch (error) {
@@ -3085,7 +3085,7 @@ async function refreshLiqBurstState() {
   if (now - liqBurstStateLastFetchAt < LIQ_BURST_STATE_POLL_MS) return;
   liqBurstStateLastFetchAt = now;
   try {
-    const res = await fetch(API_LIQ_BURST_STATE_URL, { cache: "no-store" });
+    const res = await fetch(API_LIQ_BURST_STATE_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`liq burst state ${res.status}`);
     latestLiqBurstState = await res.json();
   } catch (error) {
@@ -3109,7 +3109,7 @@ async function refreshLiquidationMap() {
   if (now - liquidationMapLastFetchAt < LIQUIDATION_MAP_POLL_MS) return;
   liquidationMapLastFetchAt = now;
   try {
-    const res = await fetch(`${API_LIQUIDATION_MAP_URL}?asset=${activeSnapshotAsset}`, { cache: "no-store" });
+    const res = await fetch(`${API_LIQUIDATION_MAP_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`liquidation map ${res.status}`);
     latestLiquidationMap = await res.json();
   } catch (error) {
@@ -3128,7 +3128,7 @@ async function refreshRegimeWide24() {
   if (now - regimeWide24LastFetchAt < REGIME_WIDE24_POLL_MS) return;
   regimeWide24LastFetchAt = now;
   try {
-    const res = await fetch(API_REGIME_WIDE24_URL, { cache: "no-store" });
+    const res = await fetch(API_REGIME_WIDE24_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`regime wide24 ${res.status}`);
     latestRegimeWide24 = await res.json();
   } catch (error) {
@@ -3147,7 +3147,7 @@ async function refreshRegimeBtc() {
   if (now - regimeBtcLastFetchAt < REGIME_WIDE24_POLL_MS) return;
   regimeBtcLastFetchAt = now;
   try {
-    const res = await fetch(API_REGIME_BTC_URL, { cache: "no-store" });
+    const res = await fetch(API_REGIME_BTC_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`regime btc ${res.status}`);
     latestRegimeBtc = await res.json();
   } catch (error) {
@@ -3164,7 +3164,7 @@ async function refreshRegimeXrp() {
   if (now - regimeXrpLastFetchAt < REGIME_WIDE24_POLL_MS) return;
   regimeXrpLastFetchAt = now;
   try {
-    const res = await fetch(API_REGIME_XRP_URL, { cache: "no-store" });
+    const res = await fetch(API_REGIME_XRP_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`regime xrp ${res.status}`);
     latestRegimeXrp = await res.json();
   } catch (error) {
@@ -3196,7 +3196,7 @@ async function refreshCoinIndicators() {
   coinIndicatorsLastFetchAt = now;
   const asset = activeSnapshotAsset;
   try {
-    const res = await fetch(`${API_COIN_INDICATORS_URL}?asset=${encodeURIComponent(asset)}`, { cache: "no-store" });
+    const res = await fetch(`${API_COIN_INDICATORS_URL}?asset=${encodeURIComponent(asset)}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`coin indicators ${res.status}`);
     latestCoinIndicators[asset] = await res.json();
   } catch (error) {
@@ -3229,7 +3229,7 @@ async function refreshMacroCalendar() {
   if (now - macroCalendarLastFetchAt < MACRO_CALENDAR_POLL_MS) return;
   macroCalendarLastFetchAt = now;
   try {
-    const res = await fetch(API_MACRO_CALENDAR_URL, { cache: "no-store" });
+    const res = await fetch(API_MACRO_CALENDAR_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`macro calendar ${res.status}`);
     renderMacroCalendar(await res.json());
   } catch (error) {
@@ -4669,7 +4669,7 @@ async function tick() {
 // strip looking exactly as un-warmed-up as before this feature existed.
 async function seedModelIndicatorHistory() {
   try {
-    const res = await fetch("/api/model-indicator-history", { cache: "no-store", signal: AbortSignal.timeout(5000) });
+    const res = await fetch("/api/model-indicator-history", { cache: "no-cache", signal: AbortSignal.timeout(5000) });
     if (!res.ok) return;
     const payload = await res.json();
     const samples = Array.isArray(payload.samples) ? payload.samples : [];
@@ -4910,7 +4910,7 @@ function setNotifyTestResult(text, tone) {
 async function refreshNotifyPage() {
   if (!pushSupported()) { renderNotifyChecks(); renderNotifyMain(); return; }
   try {
-    notifyState.config = await (await fetch("/api/push/config", { cache: "no-store" })).json();
+    notifyState.config = await (await fetch("/api/push/config", { cache: "no-cache" })).json();
   } catch (e) { notifyState.config = null; }
   try {
     notifyState.registration = (await navigator.serviceWorker.getRegistration("/dashboard/live/")) || null;
@@ -4918,7 +4918,7 @@ async function refreshNotifyPage() {
       ? await notifyState.registration.pushManager.getSubscription() : null;
   } catch (e) { notifyState.registration = null; notifyState.subscription = null; }
   try {
-    notifyState.devices = (await (await fetch("/api/push/devices", { cache: "no-store" })).json()).devices || [];
+    notifyState.devices = (await (await fetch("/api/push/devices", { cache: "no-cache" })).json()).devices || [];
   } catch (e) { notifyState.devices = []; }
   renderNotifyChecks(); renderNotifyMain(); renderNotifyDevices();
 }
@@ -5298,7 +5298,7 @@ function renderLevGauge(plan) {
 async function manualEntryFetch(side, kind = "entry") {
   const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`
     + (kind === "exit" ? "" : manualLevQuery());
-  const res = await fetch(`/api/manual-${kind}/preview?side=${side}${q}`, { cache: "no-store" });
+  const res = await fetch(`/api/manual-${kind}/preview?side=${side}${q}`, { cache: "no-cache" });
   return res.json();
 }
 
@@ -5553,7 +5553,7 @@ async function manualEntryPollStatus() {
   const box = el("snapEntryResult");
   if (!box) return;
   try {
-    const res = await fetch("/api/manual-entry/status", { cache: "no-store" });
+    const res = await fetch("/api/manual-entry/status", { cache: "no-cache" });
     const data = await res.json();
     box.innerHTML = entryNote(manualEntryStateText(data.state),
       /^(error|taker_failed|rejected)$/.test(data.state?.phase || "") ? "bad" : "live");
@@ -5587,7 +5587,7 @@ async function manualEntrySubmit() {
       + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : ""));
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&confirm=1${q}`,
-      { method: "POST", cache: "no-store" });
+      { method: "POST", cache: "no-cache" });
     const data = await res.json();
     if (!data.ok) {
       box.innerHTML = entryNote(`주문 실패: ${data.detail || data.error || res.status}`, "bad");
