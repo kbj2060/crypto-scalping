@@ -3797,16 +3797,22 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   한 시간이 12개 봉에 같은 색으로 깔린다. 청산 레인의 5분 키와 혼동하면 안 된다.
   // ⭐등급을 색 하나로 뭉개지 않는다: 「위험」 홀드아웃 정밀도 0.793 vs 「주의」 0.161 이라
   //   같은 주황으로 칠하면 16% 짜리가 79% 처럼 보인다. 진하기로 셋을 가른다.
-  if (volRibbonOn && candles.length) {
+  // 변동성 시각->값 매핑. 리본과 **툴팁이 같은 지도를 쓴다** -- 따로 만들면 화면의 두 곳이
+  // 다른 값을 말하는 날이 온다(이 파일에서 반복된 실패).
+  const volByHour = new Map();
+  if (volRibbonOn) {
     const vf = latestVolForecast;
     const grades = Array.isArray(vf.grades) ? vf.grades : [];
     const probas = Array.isArray(vf.probas) ? vf.probas : [];
-    const byHour = new Map();
-    vf.times.forEach((iso, i) => {
+    (vf.times || []).forEach((iso, i) => {
       const t = Date.parse(iso);
       if (!Number.isFinite(t)) return;
-      byHour.set(Math.floor(t / 1000), { grade: grades[i] || null, p: probas[i], tone: (vf.history || [])[i] });
+      volByHour.set(Math.floor(t / 1000), { grade: grades[i] || null, p: probas[i], tone: (vf.history || [])[i] });
     });
+  }
+  if (volRibbonOn && candles.length) {
+    const vf = latestVolForecast;
+    const byHour = volByHour;
     // 2026-09-11 사용자: "평소엔 회색, 경고면 중간 주황, 위험이면 강한 주황".
     // ⭐색은 등급이 정하고, **진하기만** 등급 안에서 확률로 미세하게 움직인다 -- 등급만
     //   쓰면 조용한 구간이 통째로 같은 색이라 칩이 "안 움직인다"던 문제가 그대로 옮겨온다.
@@ -4393,12 +4399,49 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const regimeLine = r
       ? `<br>레짐: ${regimeDominant(r) === "bull" ? "강세" : regimeDominant(r) === "bear" ? "약세" : "횡보"} ${Math.round(Math.max(r.bull_prob, r.bear_prob, r.chop_prob) * 100)}%`
       : "";
+    // 2026-09-16: 툴팁이 **그 봉에 표시된 모든 것**을 말한다. 그전에는 시각·OHLC·레짐뿐이라
+    // 변동성 리본도, 새로 붙인 트리거 표시도 «왜 떴는지»를 화면에서 물어볼 데가 없었다.
+    // 원칙: 값이 없는 항목은 줄 자체를 안 만든다(빈 줄은 «0» 으로 오독된다).
+    const vv = volByHour.get(Math.floor(c.time / 3600) * 3600);
+    const volLine = vv
+      ? `<br>변동성: ${vv.grade || (vv.tone === "warn" ? "주의" : "안정")}`
+        + (vv.p == null ? "" : ` · 확장 확률 ${(Number(vv.p) * 100).toFixed(1)}%`)
+      : "";
+    const cmNow = latestChartMarkers;
+    let trigLines = "";
+    if (isSnapshotChart && cmNow && cmNow.available) {
+      const k = (cmNow.times || []).findIndex((t) => Math.floor(Date.parse(t) / 1000) === c.time);
+      (cmNow.events || []).forEach((ev) => {
+        if (Math.floor(Date.parse(ev.t) / 1000) !== c.time) return;
+        trigLines += `<br>${ev.side === "bottom" ? "▲" : "▼"} ${ev.label}`
+          + (ev.grade ? ` ${ev.grade}등급` : "")
+          + (ev.p != null ? ` · 확률 ${(Number(ev.p) * 100).toFixed(0)}%` : "")
+          + (ev.demoted ? " · 손실가중 헤드가 컷 미달로 강등" : "");
+      });
+      if (k >= 0) {
+        const sp = cmNow.spans || {}, meta = cmNow.span_meta || {};
+        const at = (arr) => (Array.isArray(arr) ? arr[k] : undefined);
+        if (at(sp.trend_prewarn)) {
+          const pp = at(meta.trend_prewarn_p), th = at(meta.trend_prewarn_thr);
+          trigLines += "<br>전환 예고 (앞으로 30분 내 발동 확률)"
+            + (pp == null ? "" : ` ${(pp * 100).toFixed(1)}%`)
+            + (th == null ? "" : ` / 임계 ${(th * 100).toFixed(1)}%`);
+        }
+        if (at(sp.trend_detect)) trigLines += "<br>전환 탐지 지속 중 (거래대금·체결속도 둘 다 q90 초과)";
+        if (at(sp.evr_gate)) {
+          const ra = at(meta.evr_gate_ratio);
+          trigLines += "<br>변동폭 게이트 발동 (24시간 기대변동 상위 10%)"
+            + (ra == null ? "" : ` · 임계의 ${Number(ra).toFixed(2)}배`)
+            + ((cmNow.spans_partial || []).includes("evr_gate") ? " · 과거 이력 없음(현재만)" : "");
+        }
+      }
+    }
     showTooltip(evt.pageX, evt.pageY, `
       <b>${fmtDateTick(c.time * 1000)}</b><br>
       시가: ${fmtNum(c.open, 2)}<br>
       고가: ${fmtNum(c.high, 2)}<br>
       저가: ${fmtNum(c.low, 2)}<br>
-      종가: ${fmtNum(c.close, 2)}${regimeLine}
+      종가: ${fmtNum(c.close, 2)}${regimeLine}${volLine}${trigLines}
     `);
   };
   svg.onmouseleave = () => {

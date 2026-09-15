@@ -65,7 +65,13 @@ def _merge_history(out: dict[str, dict], payload: dict | None, kind: str, label:
     grades = payload.get("grades") or []
     if len(grades) != len(tones):
         grades = [None] * len(tones)
-    for tone, t, grade in zip(tones, times, grades):
+    probas = payload.get("probas") or []
+    if len(probas) != len(tones):
+        probas = [None] * len(tones)
+    demoted = payload.get("demoted") or []
+    if len(demoted) != len(tones):
+        demoted = [False] * len(tones)
+    for tone, t, grade, proba, dem in zip(tones, times, grades, probas, demoted):
         if tone not in ("good", "bad"):
             continue
         ts_ = pd.Timestamp(str(t).replace("Z", "+00:00"))
@@ -75,6 +81,10 @@ def _merge_history(out: dict[str, dict], payload: dict | None, kind: str, label:
         ev = {"kind": kind, "label": label, "side": "bottom" if tone == "good" else "top"}
         if grade:
             ev["grade"] = grade
+        if proba is not None:
+            ev["p"] = proba
+        if dem:
+            ev["demoted"] = True      # 강 -> 약 강등(손실가중 헤드가 컷을 못 넘음)
         out[key].setdefault("events", []).append(ev)
 
 
@@ -100,6 +110,27 @@ def _span_from_points(times: list[str], points: list[tuple[str, bool]]) -> list[
         k = int((t - t0) // step)
         if 0 <= k < len(times):
             out[k] = 1
+    return out
+
+
+def _value_grid(times: list[str], points: list[tuple[str, Any]]) -> list[Any]:
+    """(시각, 값) 을 차트 격자에 얹는다. 값이 없는 봉은 None -- «0» 과 «모름» 을 구분한다."""
+    out: list[Any] = [None] * len(times)
+    if not times:
+        return out
+    step = pd.Timedelta(minutes=5)
+    t0 = pd.Timestamp(times[0])
+    for ts_, v in points:
+        if v is None:
+            continue
+        try:
+            t = pd.Timestamp(str(ts_).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        t = (t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC"))
+        k = int((t - t0) // step)
+        if 0 <= k < len(times):
+            out[k] = v
     return out
 
 
@@ -203,6 +234,16 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         # 게이트만 이력이 이제 막 쌓이기 시작한다(2026-09-16 워커에 추가). 그 전 구간은 «발동
         # 안 함»이 아니라 **모름**이라, 이력이 아직 없으면 지금 상태만 마지막 봉에 찍고 그
         # 사실을 spans_partial 로 밝힌다.
+        # 툴팁이 그 봉의 **숫자**로 답할 수 있게 값 격자도 같이 보낸다(0/1 만으로는 «왜»를
+        # 말할 수 없다). 값이 없는 봉은 None 이다 -- 0 으로 채우면 «발동 0배»처럼 읽힌다.
+        pre_times = pre.get("times") or []
+        span_meta = {
+            "trend_prewarn_p": _value_grid(times, list(zip(pre_times, pre.get("probas") or []))),
+            "trend_prewarn_thr": _value_grid(times, list(zip(pre_times, pre.get("thresholds") or []))),
+            "evr_gate_ratio": _value_grid(times, [
+                (h.get("ts"), h.get("eth_ratio")) for h in ((evr_gate or {}).get("history") or [])
+                if isinstance(h, dict) and h.get("eth_fired")]),
+        }
         gate_hist = _history_points(evr_gate)
         if times and not gate_hist:
             eth_now = any(str(f.get("asset", "")).upper() == "ETH"
@@ -210,7 +251,7 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
             if eth_now:
                 spans["evr_gate"][-1] = 1
         return {
-            "spans": spans,
+            "spans": spans, "span_meta": span_meta,
             "spans_partial": [] if gate_hist else ["evr_gate"],
             "available": True, "asset": asset, "bars": CHART_BARS,
             "latest_ts_utc": times[-1] if times else None,
