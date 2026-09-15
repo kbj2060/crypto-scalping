@@ -3098,8 +3098,13 @@ function extremeDetectorIndicatorItem() {
   const base = { key: "extreme_detector", label: "극점 탐지기", probaSlot: true,
                  derivedTag: "= 대시보드 자체계산",
                  derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 동결 모델로 매 봉 계산합니다(워커). "
-                   + "2026-09-10 v2: `강` 등급은 극점 확률과 손실가중 헤드가 **둘 다** 강 컷을 넘을 "
-                   + "때만 줍니다 — 못 넘으면 `약`으로 강등합니다. 표본외 강 정밀도 .582→.689. "
+                   + "⭐2026-09-16: 증거신호 의존을 제거했습니다 — 피쳐 9열과 «증거신호가 발동한 봉만 "
+                   + "채점한다»는 모집단 제약을 둘 다 뺐습니다. 콜 빈도를 고정한 채 정밀도가 "
+                   + "강 66.0→69.4% · 중 53.2→66.1% · 약 32.1→54.3% 로 올랐습니다(워크포워드 "
+                   + "2창×시드 2셋 4/4 재현). 제약이 후보 봉을 12배 줄여 더 좋은 자리를 고를 기회를 "
+                   + "뺏고 있었습니다. "
+                   + "2026-09-10 v2 의 손실가중 이중조건은 이 모집단에서 강등이 235건 중 3건(정밀도 "
+                   + "69.4%→69.4%)으로 무력해져 **내렸습니다** — 부모가 이미 그 일을 합니다. "
                    + "매매에는 연결돼 있지 않습니다." };
   if (!p || p.error || !p.available) {
     return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업",
@@ -3112,7 +3117,8 @@ function extremeDetectorIndicatorItem() {
     prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (하루 ${(p.per_day || {})[p.grade]}건)` : "",
     p.signals ? `발동 신호: ${p.signals}` : "",
     p.gated_now ? `강한 추세 구간이라 억제 중 (추세분위 ${p.trend_q})` : "",
-    `발동봉 기저 ${(Number(p.base_rate) * 100).toFixed(1)}% · 무작위 봉 2.9% · AUC ${p.auc_oos}`,
+    // 2026-09-16: 모집단이 «발동 봉»에서 «전체 봉»으로 바뀌어 기저가 곧 무작위 봉 값이다.
+    `기저(무작위 봉) ${(Number(p.base_rate) * 100).toFixed(1)}% · AUC ${p.auc_oos}`,
     // 2026-09-10 v2 이중조건 -- 켜져 있다는 사실과 강등 이유를 화면이 말해야 한다.
     p.costw_rule_id
       ? (p.proba_costw != null
