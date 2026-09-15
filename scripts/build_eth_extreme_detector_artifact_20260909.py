@@ -31,7 +31,9 @@ import live_eth_extreme_detector_20260909 as LD          # 피쳐 정의는 라�
 ART = ROOT / "data/live/eth_extreme_detector_artifact"
 TRAIN_END = pd.Timestamp("2026-04-01")
 SEEDS = [20260909, 771233, 305610, 517758, 961476]
-RULE_ID = "eth_extreme_detector_w12_gated_20260909"
+# 2026-09-16 모집단·피쳐가 바뀌었으므로 rule_id 도 바꾼다 -- 화면·로그가 두 아티팩트를
+# 구분할 수 없으면 "평가된 모델 = 배포되는 모델" 동결 원칙이 확인 불가능해진다.
+RULE_ID = "eth_extreme_detector_w12_gated_allbars_20260916"
 
 
 def main() -> int:
@@ -70,10 +72,15 @@ def main() -> int:
         m.fit(tr[LD.FEATS], tr._y); models.append(m)
         P += m.predict_proba(oo[LD.FEATS])[:, 1] / len(SEEDS)
     oo["p"] = P
-    cuts = {g: float(oo.p.quantile(1 - q)) for g, q in (("강", 0.05), ("중", 0.10), ("약", 0.25))}
-    oo["grade"] = LD.grade_of(oo.p.to_numpy(), cuts)
     oo["gated"] = LD.gated_of(oo._tq.to_numpy(), oo._long.to_numpy())
     days = (oo._ts.max() - oo._ts.min()).total_seconds() / 86400
+    # 🔴2026-09-16: 컷을 «모집단 분위»가 아니라 **하루 콜 건수**로 잡는다. 모집단이 발동 봉에서
+    #   전체 봉으로 바뀌면서(12배) 같은 분위가 12배 많은 콜이 되기 때문이다. 목표 건수는 옛
+    #   배포판과 같다(강 1.46 · 강+중 2.93 · 강+중+약 7.22건/일) -- 화면에 뜨는 빈도를 보존한다.
+    ung = oo[~oo.gated].sort_values("p", ascending=False).reset_index(drop=True)
+    cuts = {g: float(ung.p.iloc[min(int(round(cum * days)), len(ung)) - 1])
+            for g, cum in (("강", 1.46), ("중", 2.93), ("약", 7.22))}
+    oo["grade"] = LD.grade_of(oo.p.to_numpy(), cuts)
     auc = float(roc_auc_score(oo._y, oo.p))
     prec, cov = {}, {}
     ung = oo[~oo.gated]
@@ -90,11 +97,20 @@ def main() -> int:
                                "window_bars": LD.TREND_W, "rank_bars": LD.RANK_W},
         "precision": prec, "per_day": cov,
         "gated_suppressed_per_day": round(len(oo[oo.gated & (oo.grade != "-")]) / days, 2),
-        "note": ("사람이 보는 위치 탐지기다. 매매 트리거가 아니다 -- 등급대로 매매하면 "
-                 "표본외 순 +2.27bp(강+중, 2.93건/일)로 비용 여유가 없다. "
-                 "게이트 없이는 -3.36bp 였다."),
+        "population": "all bars (2026-09-16: 증거신호 발동 필터 제거)",
+        "note": ("사람이 보는 위치 탐지기다. 매매 트리거가 아니다 -- 경제성은 여전히 0 이다. "
+                 "2026-09-16 증거신호(발동 더미 9열 + 발동봉 모집단 제약)를 제거했다: "
+                 "같은 건/일에서 정밀도 57.5% -> 67.7%, 리프트 2.38 -> 3.62x. "
+                 "컷은 분위가 아니라 하루 콜 건수(1.46/2.93/7.22)로 잡는다."),
     }
     ART.mkdir(parents=True, exist_ok=True)
+    # 손실가중 사이드카 빌더가 같은 모집단·피쳐로 학습하도록 프레임을 같이 남긴다
+    FR = ROOT / "tmp/eth_extreme_frame_allbars_20260916"
+    FR.mkdir(parents=True, exist_ok=True)
+    A[[c for c in LD.FEATS] + ["_y", "_ts", "_long", "_tq"]].to_parquet(FR / "extreme_frame.parquet")
+    (FR / "extreme_frame_meta.json").write_text(json.dumps(
+        {"feats": LD.FEATS, "val0": str(TRAIN_END), "w": LD.W,
+         "population": "all bars (증거신호 발동 필터 제거, 2026-09-16)"}, ensure_ascii=False))
     joblib.dump(models, ART / "model.joblib")
     (ART / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
     print(f"AUC(OOS) {auc:.4f} · 기저 {meta['base_rate']*100:.1f}% · {days:.0f}일")
