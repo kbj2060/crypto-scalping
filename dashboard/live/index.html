@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260916-chartmode">
+  <link rel="stylesheet" href="styles.css?v=20260916-shadowcard-chartmode">
 </head>
 <body>
     <main class="app">
@@ -441,18 +441,17 @@
         <div id="snapSpecializedSignalList" class="ops-health-list"></div>
       </section>
 
-      <!-- 2026-09-15 저변동 스트래들 섀도우. 🔴연구용이고 주문을 내지 않는다. 이 패널의 첫 임무는
-           «아직 판정 불가»를 정직하게 보이는 것이다 — 어제 연구에서 5창 전부 양수인데 블록 t 가
-           0.86 이었고(창당 독립 쌍 12~76개), 연 60~130쌍이 쌓여야 t≈1.8 이 된다. 그래서 수익보다
-           **표본 진척과 t** 를 앞에 둔다. -->
+      <!-- 2026-09-16 섀도우 진행. 🔴전부 연구용이고 주문을 내지 않는다. 한 섀도우 = 한 줄로
+           표본 진척 · 판정 · 수익 · 승률만 낸다. 수익이 아니라 **표본과 판정**이 앞에 오는 이유는
+           스트래들 연구에서 5창 전부 양수인데 블록 t 가 0.86 이었기 때문이다. -->
       <section class="panel ops-health-panel">
         <div class="ops-health-head">
-          <div><h3>스트래들 섀도우</h3><p id="straddleShadowSub" class="muted">불러오는 중…</p></div>
+          <div><h3>섀도우 진행</h3><p id="shadowsSub" class="muted">불러오는 중…</p></div>
           <div class="ops-health-head-tools">
             <span class="ops-readonly">연구용 · 주문 없음 · 5분 갱신</span>
           </div>
         </div>
-        <div id="straddleShadowList" class="ops-health-list"></div>
+        <div id="shadowsList" class="ops-health-list"></div>
       </section>
 
       <section class="panel ops-health-panel macro-calendar-panel">
@@ -467,7 +466,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260916-chartmode"></script>
+  <script src="./app.js?v=20260916-shadowcard-chartmode"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

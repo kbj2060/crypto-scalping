@@ -1127,55 +1127,74 @@ def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
 
 
 # 2026-09-15 저변동 스트래들 섀도우 요약 (사용자 요청).
-# 🔴이 패널의 첫 임무는 «아직 판정 불가»를 정직하게 보이는 것이다. 어제 연구에서 5창 전부 양수인데
-#   블록 t 가 **0.86** 이었다 — 창당 독립 쌍이 12~76개뿐이라서다. 연 60~130쌍이 쌓여야 t≈1.8 이 된다.
-#   그래서 «수익»보다 **표본 진척(n/100)과 t** 를 앞에 둔다. t<1 이면 해석하지 않는 게 규율이다.
-# 원장은 JSONL 이라 파일 하나만 읽는다(요청 경로 계산 금지 규칙 — 모델도 duckdb 락도 없다).
+# 섀도우 진행 카드 (2026-09-16). **한 섀도우 = 한 줄**: 표본 진척 · 판정 · 수익 · 승률.
+# 🔴판정 규율: |t| < 1 이면 「판정 불가」다. 스트래들 연구에서 5창 전부 양수인데 블록 t 가 0.86
+#   이었던 게(창당 독립 쌍 12~76개) 이 규율이 생긴 이유다. 수익보다 표본과 t 가 먼저다.
+# 🔴목표 표본(분모)은 섀도우마다 출처가 다르고, **유도할 수 없으면 만들지 않는다**:
+#   · 스트래들 100쌍   — t≈1.8 이 되는 수(연 60~130쌍이므로 ~1년)
+#   · 방향 게이트 2,214건 — 연구가 쓴 사건 수 그 자체. 거기 도달하면 독립 재현이다
+#     (건당 +20.48bp · 날짜블록 CI [−10.23,+50.63] · 하루 ~2.6건이라 ~2.3년 걸린다).
+# 🔴방향 게이트는 **모델 팔과 무조건 롱 팔을 각각 한 줄**로 낸다. 미달 관문 「모델−롱 증분 CI 가
+#   0 을 포함한다」는 두 팔을 나란히 놓아야만 갈린다(09-15 18:13 동결 커밋).
+# 원장은 파일 하나씩만 읽는다(요청 경로 계산 금지 — 모델도 duckdb 도 없다, 2026-09-10 실장애).
 STRADDLE_SHADOW_LEDGER = REPO_ROOT / "data" / "live" / "lowvol_straddle_shadow.jsonl"
-STRADDLE_SHADOW_STATE = REPO_ROOT / "data" / "live" / "lowvol_straddle_shadow_state.json"
-STRADDLE_SHADOW_TARGET_N = 100        # 판정 목표 — t≈1.8 이 되는 표본 수(연 60~130쌍이므로 ~1년)
+DIRECTION_SHADOW_LEDGER = REPO_ROOT / "data" / "live" / "shadow_1d_top10_20260915" / "decisions.csv"
 
 
-def straddle_shadow_payload() -> dict[str, Any]:
-    """쌍 원장 요약 + 지금 무엇을 기다리는지. 계산은 평균/표준오차뿐이다."""
-    out: dict[str, Any] = {"available": True, "target_n": STRADDLE_SHADOW_TARGET_N,
-                           "rule": "익절 +10% / 손절 −3% · 예측변동성 하위 20% · 한 번에 한 쌍"}
-    rows = []
-    try:
-        if STRADDLE_SHADOW_LEDGER.exists():
-            for line in STRADDLE_SHADOW_LEDGER.read_text().splitlines():
-                line = line.strip()
-                if line:
-                    rows.append(json.loads(line))
-    except (OSError, ValueError) as exc:
-        return {"available": False, "error": f"ledger_read_failed: {type(exc).__name__}"}
-    bps = [float(r.get("pair_bp")) for r in rows if isinstance(r.get("pair_bp"), (int, float))]
+def _shadow_stats(bps: list[float]) -> dict[str, Any]:
+    """평균/표준오차/t/승률. 이게 이 카드의 계산 전부다."""
     n = len(bps)
-    out["n"] = n
-    if n:
-        mean = sum(bps) / n
-        var = sum((b - mean) ** 2 for b in bps) / (n - 1) if n > 1 else float("nan")
-        se = (var / n) ** 0.5 if n > 1 and var == var else float("nan")
-        holds = sorted(float(r.get("hold_h", 0.0)) for r in rows)
-        out |= {"mean_bp": mean, "se_bp": se,
-                "t": (mean / se) if se and se == se and se > 0 else None,
-                "win_rate": sum(1 for b in bps if b > 0) / n,
-                "total_bp": sum(bps), "best_bp": max(bps), "worst_bp": min(bps),
-                "median_hold_h": holds[n // 2] if holds else None,
-                "last_closed_utc": rows[-1].get("closed_utc")}
-    try:
-        st = json.loads(STRADDLE_SHADOW_STATE.read_text()) if STRADDLE_SHADOW_STATE.exists() else {}
-    except (OSError, ValueError):
-        st = {}
-    op = st.get("open")
-    out["last_check_utc"] = st.get("last_check_utc")
-    out["open"] = ({"entry": op.get("entry"), "gate_ratio": op.get("gate_ratio"),
-                    "opened_utc": op.get("opened_utc")} if op else None)
-    # 판정 규율: t 가 1 을 넘기 전에는 「번다/안 번다」로 읽지 않는다.
-    out["verdict"] = ("표본 없음" if n == 0 else
-                      ("판정 불가" if (out.get("t") is None or abs(out["t"]) < 1.0) else
-                       ("양수 신호" if out["t"] > 0 else "음수 신호")))
+    if not n:
+        return {"n": 0, "verdict": "표본 없음"}
+    mean = sum(bps) / n
+    se = (statistics.variance(bps) / n) ** 0.5 if n > 1 else float("nan")
+    t = (mean / se) if se == se and se > 0 else None
+    return {"n": n, "mean_bp": mean, "total_bp": sum(bps),
+            "se_bp": se if se == se else None, "t": t,
+            "win_rate": sum(1 for b in bps if b > 0) / n,
+            "verdict": ("판정 불가" if t is None or abs(t) < 1.0 else
+                        ("양수 신호" if t > 0 else "음수 신호"))}
+
+
+def _straddle_bps() -> list[float]:
+    if not STRADDLE_SHADOW_LEDGER.exists():
+        return []
+    out = []
+    for line in STRADDLE_SHADOW_LEDGER.read_text().splitlines():
+        if line.strip():
+            v = json.loads(line).get("pair_bp")
+            if isinstance(v, (int, float)):
+                out.append(float(v))
     return out
+
+
+def _direction_bps(field: str) -> list[float]:
+    """정산된 행만. 만기(288봉=24시간) 전 결정은 빈 칸이라 그대로 건너뛴다."""
+    if not DIRECTION_SHADOW_LEDGER.exists():
+        return []
+    with DIRECTION_SHADOW_LEDGER.open(newline="") as fh:
+        return [float(r[field]) for r in csv.DictReader(fh) if (r.get(field) or "").strip()]
+
+
+def shadows_payload() -> dict[str, Any]:
+    """진행 중인 섀도우 한 줄씩. 🔴전부 주문을 내지 않는 기록 장치다."""
+    specs = (
+        ("저변동 스트래들", "익절 +10% / 손절 −3% · 예측변동성 하위 20%", "쌍", 100,
+         _straddle_bps),
+        ("방향 게이트 · 모델", "1d × E|r| 상위10% × 20자산 · 방향 모델", "건", 2214,
+         lambda: _direction_bps("net_model_bp")),
+        ("방향 게이트 · 무조건 롱", "같은 사건, 방향만 롱 고정 (모델−롱 대조군)", "건", 2214,
+         lambda: _direction_bps("net_long_bp")),
+    )
+    rows = []
+    for name, note, unit, target, reader in specs:
+        try:
+            stats = _shadow_stats(reader())
+        except (OSError, ValueError, KeyError) as exc:
+            rows.append({"name": name, "note": note, "error": type(exc).__name__})
+            continue
+        rows.append({"name": name, "note": note, "unit": unit, "target_n": target, **stats})
+    return {"available": True, "rows": rows}
 
 
 def position_sizing_payload() -> dict[str, Any]:
@@ -2821,8 +2840,8 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers=NOCACHE)
 
-    async def api_straddle_shadow(request: web.Request) -> web.Response:
-        return web.json_response(await asyncio.to_thread(straddle_shadow_payload))
+    async def api_shadows(request: web.Request) -> web.Response:
+        return web.json_response(await asyncio.to_thread(shadows_payload))
 
     async def api_position_sizing(request: web.Request) -> web.Response:
         payload = await swr_cached(
@@ -3669,7 +3688,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
     app.router.add_get("/api/position-sizing", api_position_sizing)
-    app.router.add_get("/api/straddle-shadow", api_straddle_shadow)
+    app.router.add_get("/api/shadows", api_shadows)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
