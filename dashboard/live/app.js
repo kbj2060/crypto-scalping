@@ -5338,12 +5338,18 @@ const manualEntryPct = () => sliderPct("snapEntryFrac");
 // 서버가 모델값을 쓴다(단일 진실 원천). 서버 기본은 1.0 이고 모델의 `entry_split.tranches`
 // 도 1(일괄)이라 자동은 늘 100% 다 -- 그 «왜»를 눈금 옆에 쓴다.
 const manualEntryFracAuto = () => el("snapEntryFracAuto")?.checked !== false;
+// 마지막으로 서버가 준 권고(%). 첫 조회 전에도 «자동」이 옮겨갈 자리가 있어야 한다.
+let FRAC_MODEL_PCT = 100;
 
 function renderFracGauge(plan) {
   const g = el("snapEntryFrac");
   const out = el("snapEntryFracVal");
   if (!g || !out) return;
-  const model = Math.round(100 * (plan.fraction ?? 1));
+  // 🔴`plan.fraction` 은 **요청을 되돌려준 값**이라 권고가 아니다(자동이면 pct 를 안 보내서
+  //   서버 기본 1.0 이 돌아온다). 권고는 서버가 처방에서 뽑아 주는 `fraction_model` 이다 --
+  //   레버리지의 `leverage_model` 과 같은 자리. 없으면 100% 로 떨어진다.
+  const model = Math.round(100 * (plan.fraction_model ?? 1));
+  FRAC_MODEL_PCT = model;
   if (manualEntryFracAuto()) g.value = String(model);
   g.disabled = manualEntryFracAuto();
   const v = manualEntryFracAuto() ? model : manualEntryPct();
@@ -5750,8 +5756,13 @@ el("snapEntryFracAuto")?.addEventListener("change", () => {
 function syncFracGaugeLock() {
   const g = el("snapEntryFrac");
   const out = el("snapEntryFracVal");
-  if (g) g.disabled = manualEntryFracAuto();
-  if (out && manualEntryFracAuto()) out.textContent = `${sliderPct("snapEntryFrac")}% (모델)`;
+  if (!g) return;
+  g.disabled = manualEntryFracAuto();
+  // 🔴체크하는 **즉시** 권고 자리로 옮긴다. 미리보기 왕복을 기다리면 손잡이가 안 움직여
+  //   «자동인데 그대로»로 보이고, 미리보기가 실패하면 영영 안 움직인다(2026-09-15 사용자 보고).
+  if (manualEntryFracAuto()) g.value = String(FRAC_MODEL_PCT);
+  if (out) out.textContent = `${sliderPct("snapEntryFrac")}%`
+    + (manualEntryFracAuto() ? " (모델)" : " (수동)");
 }
 syncFracGaugeLock();          // 초기값도 체크박스를 따른다
 el("snapLevGauge")?.addEventListener("input", () => {
