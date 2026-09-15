@@ -3723,6 +3723,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     candles.forEach((c, i) => {
       const r = regimeByTsForChart.get(c.time);
       if (!r) return;
+      // 2026-09-16 사용자 "회색칸을 제거해야해. chop 은 그냥 백그라운드로": 횡보는 **안 그린다**.
+      // 회색 칸을 채우면 «신호가 있다»처럼 읽히는데 횡보는 오히려 «아무것도 아니다»다.
+      // 빈 트랙이 그 뜻을 그대로 말한다 -- 칸이 없는 구간 = 횡보. (값은 툴팁으로 계속 읽힌다)
+      if (regimeDominant(r) === "chop") return;
       const rect = document.createElementNS(NS, "rect");
       rect.setAttribute("x", xAt(i)); rect.setAttribute("y", REGIME_RIBBON_Y);
       rect.setAttribute("width", laneW); rect.setAttribute("height", REGIME_RIBBON_H);
@@ -3823,7 +3827,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     candles.forEach((c, i) => {
       const v = byHour.get(Math.floor(c.time / 3600) * 3600);
       if (!v) return;
-      drew += 1;
+      drew += 1;   // «값이 있는 봉» 수다(라벨 툴팁의 근거) -- 아래에서 안 그려도 센다
+      // 레짐의 chop 과 같은 규칙: 「안정」= 변동성 없음은 **안 그린다**. 빈 트랙이 그 뜻이다.
+      if ((v.grade || (v.tone === "warn" ? "주의" : "안정")) === "안정") return;
       const rect = document.createElementNS(NS, "rect");
       rect.setAttribute("x", xAt(i)); rect.setAttribute("y", VOL_RIBBON_Y);
       rect.setAttribute("width", laneW); rect.setAttribute("height", VOL_RIBBON_H);
@@ -3924,9 +3930,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
     barRows.forEach((rows, i) => {
       const c = candles[i], x = xAt(i);
-      let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0;
+      let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0, lowKey = Infinity;
       rows.forEach((cell, key) => {
         buyTot += cell[0]; sellTot += cell[1];
+        if (key < lowKey) lowKey = key;
         if (cell[0] + cell[1] > pocVol) { pocVol = cell[0] + cell[1]; pocKey = key; }
       });
       rows.forEach((cell, key) => {
@@ -3963,12 +3970,21 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       body.setAttribute("stroke-opacity", "0.6");
       svg.appendChild(body);
 
-      // 봉 델타(매수-매도) -- 플롯 맨 위. 셀 숫자를 다 더하지 않아도 그 봉의 승부가 보이게.
+      // 봉 델타(매수-매도). 2026-09-16 사용자 요청으로 **플롯 맨 위 -> 그 봉 바로 아래**로
+      // 옮기고 굵게 했다. 맨 위에 있을 때는 어느 봉의 숫자인지 눈이 세로로 훑어야 했다 --
+      // 봉 밑에 붙으면 그 봉의 것임이 위치로 자명하다. y 는 그 봉의 **저가** 기준이라
+      // 봉마다 높이가 다르다(고정 행이 아니다).
       const delta = buyTot - sellTot;
       if (buyTot + sellTot > 0) {
         const dTxt = document.createElementNS(NS, "text");
-        dTxt.setAttribute("x", x + bw / 2); dTxt.setAttribute("y", mt + 9);
-        dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", "9");
+        // 기준은 캔들 저가가 아니라 **가장 아래 셀 행의 바닥**이다. 저가로 잡았더니 그 아래로
+        // 더 내려오는 마지막 행과 글씨가 겹쳤다(2026-09-16 첫 판에서 실제로 겹쳤다) --
+        // 행은 rowSize 격자라 저가보다 최대 한 행만큼 더 내려간다.
+        const cellsBottom = Number.isFinite(lowKey) ? yAt(lowKey * rowSize) : yAt(c.low);
+        const dY = Math.min(plotBottom - 3, Math.max(cellsBottom, yAt(c.low)) + 13);
+        dTxt.setAttribute("x", x + bw / 2); dTxt.setAttribute("y", dY);
+        dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", "11");
+        dTxt.setAttribute("font-weight", "bold");
         dTxt.setAttribute("fill", delta >= 0 ? "var(--good)" : "var(--bad)");
         dTxt.textContent = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
         const dTitle = document.createElementNS(NS, "title");
