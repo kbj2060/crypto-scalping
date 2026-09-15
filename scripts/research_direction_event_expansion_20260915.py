@@ -1441,7 +1441,12 @@ def stage_fixedml(a):
         thr = pd.Series(E.pred.to_numpy()).expanding(200).quantile(a.drop).shift(1).to_numpy()
         take = np.isfinite(thr) & (E.pred.to_numpy() > thr)
         for nm, sel in (("전량(ML 없음)", np.isfinite(thr)), (f"ML 하위{a.drop:.0%} 제외", take)):
-            trades = [(int(i), int(sd), 1.0, int(h))
+            # 🔴**건당 비중 w 는 상한과 함께 정해야 한다.** w=1.0·상한 1.0 이면 겹치는 진입이
+            #   통째로 거절된다 — 선택 사건의 **49.8%가 직전 보유구간과 겹치므로** 좋은 구간
+            #   (사건은 변동성 구간에 뭉친다)을 골라서 버린다. 실측: 상한 없는 이론값
+            #   +26.95bp/일 vs w=1.0 상한1.0 측정 +3.14bp/일 = **8.6배 손실**. w 를 나누면
+            #   같은 평균 노출에서 동시 보유가 가능해진다.
+            trades = [(int(i), int(sd), a.w, int(h))
                       for i, sd, h, k in zip(E.i, E.side, E.H, sel) if k]
             pr, expo, gross, took = simulate(trades, D[A]["n"], D[A]["r"], a.cap)
             ts, yr = D[A]["ts"], D[A]["yr"]
@@ -1498,8 +1503,8 @@ def stage_fixedml(a):
               f"CI [{lo:+.2f}, {hi:+.2f}] **{'0배제 ✅' if lo>0 else '0포함 ❌'}**")
         print("  " + " · ".join(f"{y}: {port[(yrv==y).to_numpy()].mean()*1e4:+.2f}" for y in YEARS))
         print(f"  양수 자산 {npos}/8 · 부호검정 p {binomtest(npos, 8, 0.5, 'greater').pvalue:.4f}")
-    T.to_csv(OUT / f"fixedml_drop{int(a.drop*100)}.csv", index=False)
-    print(f"\n저장: {OUT/f'fixedml_drop{int(a.drop*100)}.csv'}")
+    T.to_csv(OUT / f"fixedml_drop{int(a.drop*100)}_w{a.w}_cap{a.cap}.csv", index=False)
+    print(f"\n저장: {OUT/f'fixedml_drop{int(a.drop*100)}_w{a.w}_cap{a.cap}.csv'}")
 
 
 # ── 축 1a-3. ⭐⭐⭐크로스자산 × 시간 워크포워드 = 마지막 관문 ────────────────
@@ -1618,11 +1623,166 @@ def stage_crosswf(a):
     print(f"\n저장: {OUT/f'crosswf_{a.src}.csv'}")
 
 
+# ── 축 5. ⭐⭐⭐⭐완전 표본외 — LOAO 규칙선택 × 인과 E|r| 게이트 × 분할 비중 ─────
+def stage_wfml(a):
+    """**이 파일의 결론 실험.** 세 조각을 전부 표본외로 놓고 합친다.
+
+    ① **규칙 선택** — 매월, 대상 자산을 빼고, 그 시점까지의 자료만으로 (시간+자산 이중 표본외)
+    ② **E|r| 게이트** — 「지금 큰 움직임이 예상되는가」. 🔴타깃이 |수익| 이라 **규칙과 무관**하다
+       ⇒ 사건이 아니라 **전 봉**에서 학습한다(자산 풀링·월 확장 WF·시간당 1봉 표집).
+       그래서 이 게이트는 규칙 선택의 과적합을 물려받지 않는다.
+       임계는 **인과 확장창 분위**(전수 분위는 미래참조).
+    ③ **건당 비중 w** — w=1.0·상한 1.0 이면 겹치는 진입이 통째로 거절된다. 선택 사건의
+       **49.8%가 직전 보유구간과 겹치므로**(사건은 변동성 구간에 뭉친다) 좋은 구간을 골라
+       버린다: 상한 무시 이론값 +26.95bp/일 vs w=1.0 측정 +3.14bp/일. w 를 나누면 같은
+       평균 노출로 동시 보유가 가능해진다.
+
+    대조군 둘을 **반드시 같이** 낸다: 순환이동 귀무(체결 수 보존)와 같은 노출 롱홀드.
+    게이트 없는 판도 같이 내서 **게이트의 증분**을 짝지어 잰다."""
+    from sklearn.ensemble import HistGradientBoostingRegressor
+    rng = np.random.default_rng(SEED)
+    base = cached_panel("XRP")
+    cols = [c for c in featcols(base) if c != "hour_f"]
+    print(f"9자산 공통 피쳐 {len(cols)}개 · 건당비중 {a.w} · 상한 {a.cap} · 게이트 하위{a.drop:.0%} 제외")
+    M, PAN = {}, {}
+    for A in ASSETS9:
+        M[A] = materialize_light(A, cols)
+        p, lc, yr, dayno = prep(A)
+        PAN[A] = (p[cols].to_numpy(np.float32), lc, yr, p["timestamp"])
+        print(f"  [{A}] 셀 {len(M[A][0]):,}")
+    keys = sorted(set.intersection(*[set(M[A][0]) for A in ASSETS9]), key=str)
+    print(f"공통 셀 {len(keys):,}\n")
+
+    # ── ② E|r| 게이트: 전 봉 학습(시간당 1봉), 지평별 모델, 월 확장 WF ──────────
+    PRED = {A: {hn: np.full(len(PAN[A][1]), np.nan) for hn in HS} for A in ASSETS9}
+    STRIDE = 12
+    for hn, H in HS.items():
+        Y = {A: np.log(np.maximum(np.abs(fwd_of(PAN[A][1], H)), 1.0)) for A in ASSETS9}
+        for m0 in pd.date_range("2024-07-01", "2026-08-01", freq="MS"):
+            m1 = m0 + pd.DateOffset(months=1)
+            Xs, ys = [], []
+            for A in ASSETS9:
+                X, lc, yr, ts = PAN[A]
+                tr = np.flatnonzero(((ts < m0 - pd.Timedelta(minutes=5 * H)).to_numpy())
+                                    & np.isfinite(Y[A]))[::STRIDE]
+                if len(tr):
+                    Xs.append(X[tr]); ys.append(Y[A][tr])
+            if not Xs:
+                continue
+            Xt = np.vstack(Xs); yt = np.concatenate(ys)
+            if len(yt) < 2000:
+                continue
+            mdl = [HistGradientBoostingRegressor(max_iter=150, learning_rate=0.06, max_depth=4,
+                                                 l2_regularization=3.0, random_state=sd).fit(Xt, yt)
+                   for sd in (11, 907)]
+            for A in ASSETS9:
+                X, lc, yr, ts = PAN[A]
+                te = np.flatnonzero(((ts >= m0) & (ts < m1)).to_numpy())
+                if len(te):
+                    PRED[A][hn][te] = np.mean([m.predict(X[te]) for m in mdl], axis=0)
+        print(f"  [E|r| 게이트 {hn}] 학습 완료")
+
+    # ── ① LOAO 규칙선택 + ③ 분할 비중 ─────────────────────────────────────────
+    books, rows = {}, []
+    for tgt in ASSETS9:
+        cand = []
+        for m0 in pd.date_range(a.start, "2026-08-01", freq="MS"):
+            m1 = m0 + pd.DateOffset(months=1)
+            sel = []
+            for key in keys:
+                pn, ex, npos = [], [], 0
+                for A in ASSETS9:
+                    if A == tgt:
+                        continue
+                    _, tk, p_, e_, _ = M[A][0][key]
+                    tr = tk < np.datetime64(m0)
+                    if tr.sum() < 60:
+                        continue
+                    pn.append(p_[tr]); ex.append(e_[tr]); npos += int(p_[tr].mean() > 0)
+                if len(pn) < 6:
+                    continue
+                PN = np.concatenate(pn); EX = np.concatenate(ex)
+                if len(PN) < a.minn or PN.mean() <= 0 or EX.mean() <= 0 or npos < a.minpos:
+                    continue
+                sd_ = EX.std(ddof=1)
+                if sd_ <= 0 or EX.mean() / (sd_ / np.sqrt(len(EX))) < a.tsel:
+                    continue
+                sel.append((key, float(EX.mean())))
+            for key, _ in sorted(sel, key=lambda x: -x[1])[:a.top]:
+                idx, tk, _, _, H = M[tgt][0][key]
+                m = (tk >= np.datetime64(m0)) & (tk < np.datetime64(m1))
+                for i in idx[m]:
+                    cand.append((int(i), key[4], H, key[1]))
+        cand.sort()
+        cells, ts, r, yr, n = M[tgt]
+        pr_ = np.array([PRED[tgt][hn][i] for i, _, _, hn in cand])
+        thr = pd.Series(pr_).expanding(200).quantile(a.drop).shift(1).to_numpy()
+        gate = np.isfinite(thr) & (pr_ > thr)
+        for nm, sel_ in (("게이트 없음", np.isfinite(thr)), (f"E|r| 게이트", gate)):
+            trades = [(i, sd_, a.w, H) for (i, sd_, H, _), k in zip(cand, sel_) if k]
+            if not trades:
+                continue
+            prs, expo, gross, took = simulate(trades, n, r, a.cap)
+            mask = (ts >= pd.Timestamp(a.start)).to_numpy()
+            g = pd.DataFrame({"pr": prs[mask], "day": ts[mask].dt.floor("D").values,
+                              "y": yr[mask]}).groupby("day").agg(pr=("pr", "sum"), y=("y", "first"))
+            books[(tgt, nm)] = g
+            nl, nltook = random_entry_null(trades, n, r, a.cap, ts, rng, B=a.nullb // 2)
+            act = g.pr.mean() * 1e4
+            bh = pd.Series(r[mask] * gross[mask].mean()).groupby(
+                ts[mask].dt.floor("D").values).sum().mean() * 1e4
+            rows.append({"자산": tgt, "구성": nm, "일평균bp": act, "순환귀무": float(nl.mean()),
+                         "초과": act - float(nl.mean()), "백분위": float((nl < act).mean()),
+                         "롱홀드동노출": bh,
+                         "샤프": float(g.pr.mean() / g.pr.std() * np.sqrt(365)),
+                         "MDD%": float((g.pr.cumsum() - g.pr.cumsum().cummax()).min() * 100),
+                         "e25": float(g[g.y == 2025].pr.mean() * 1e4),
+                         "e26": float(g[g.y == 2026].pr.mean() * 1e4),
+                         "체결": took, "후보": len(trades), "평균노출": float(gross[mask].mean())})
+        print(f"  [{tgt}] 게이트없음 {rows[-2]['일평균bp']:+.2f} → 게이트 {rows[-1]['일평균bp']:+.2f} bp/일 "
+              f"· 귀무 {rows[-1]['순환귀무']:+.2f} · 체결 {rows[-1]['체결']}")
+    T = pd.DataFrame(rows)
+    T.to_csv(OUT / f"wfml_top{a.top}_w{a.w}_cap{a.cap}_drop{int(a.drop*100)}.csv", index=False)
+    print("\n=== 자산별 ===")
+    print(T.to_string(index=False, float_format=lambda x: f"{x:9.2f}"))
+    from scipy.stats import binomtest
+    daily = {}
+    for nm in ("게이트 없음", "E|r| 게이트"):
+        allday = sorted(set().union(*[set(books[(A, nm)].index) for A in ASSETS9 if (A, nm) in books]))
+        P = pd.DataFrame(index=allday)
+        for A in ASSETS9:
+            if (A, nm) in books:
+                P[A] = books[(A, nm)].pr.reindex(allday).fillna(0.0)
+        port = P.mean(axis=1); daily[nm] = port
+        days = P.index.to_numpy()
+        bs = np.array([port.loc[rng.choice(days, len(days), replace=True)].mean() * 1e4
+                       for _ in range(3000)])
+        lo, hi = np.quantile(bs, [0.025, 0.975])
+        sub = T[T.구성 == nm]
+        npos = int((sub.일평균bp > 0).sum())
+        yrv = pd.Series(pd.to_datetime(P.index).year, index=P.index)
+        print(f"\n=== ⭐9자산 합산 · {nm} (시간+자산 이중 표본외) ===")
+        print(f"  일평균 **{port.mean()*1e4:+.2f}bp** · 샤프 **{port.mean()/port.std()*np.sqrt(365):.2f}** · "
+              f"MDD {(port.cumsum()-port.cumsum().cummax()).min()*100:.2f}% · 누적 {port.sum()*100:+.2f}%")
+        print(f"  날짜블록 CI [{lo:+.2f}, {hi:+.2f}] · **0배제 {'✅' if lo>0 else '❌'}**")
+        print("  " + " · ".join(f"{y}: {port[(yrv==y).to_numpy()].mean()*1e4:+.2f}" for y in YEARS
+                                if (yrv == y).sum() > 20))
+        print(f"  양수 자산 {npos}/9 · 부호검정 p {binomtest(npos, 9, 0.5, 'greater').pvalue:.4f} · "
+              f"순환귀무 대비 초과 평균 {sub.초과.mean():+.2f}bp · 백분위 중앙 {sub.백분위.median():.0%}")
+    d = daily["E|r| 게이트"] - daily["게이트 없음"]
+    days = d.index.to_numpy()
+    bs = np.array([d.loc[rng.choice(days, len(days), replace=True)].mean() * 1e4 for _ in range(3000)])
+    lo, hi = np.quantile(bs, [0.025, 0.975])
+    print(f"\n⭐**게이트의 짝지은 증분**: {d.mean()*1e4:+.2f}bp/일 · CI [{lo:+.2f}, {hi:+.2f}] "
+          f"**{'0배제 ✅' if lo>0 else '0포함 ❌'}**")
+    print(f"\n저장: {OUT/f'wfml_top{a.top}_w{a.w}_cap{a.cap}_drop{int(a.drop*100)}.csv'}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reuse", action="store_true", help="저장된 스크린 CSV 재사용")
     ap.add_argument("--stage", required=True,
-                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf"])
+                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml"])
     ap.add_argument("--minn", type=int, default=120, help="WF 선택 최소 사건 수")
     ap.add_argument("--tsel", type=float, default=2.0, help="WF 선택 초과 t 임계")
     ap.add_argument("--start", default="2025-01-01", help="WF 거래 시작 월")
@@ -1635,6 +1795,7 @@ def main() -> int:
     ap.add_argument("--only", default=None, help="이 피쳐 규칙만")
     ap.add_argument("--src", default="BTC", help="크로스자산 트리거 출처")
     ap.add_argument("--nullb", type=int, default=100, help="무작위 시점 귀무 반복")
+    ap.add_argument("--w", type=float, default=1.0, help="건당 비중(상한 대비)")
     ap.add_argument("--drop", type=float, default=0.4, help="ML: 예측 E|r| 하위 이 분위는 거래 안 함")
     ap.add_argument("--minpos", type=int, default=6, help="LOAO: 몇 개 자산에서 양수여야 하나(/8)")
     a = ap.parse_args()
@@ -1642,7 +1803,8 @@ def main() -> int:
      "fdr": stage_fdr, "oictl": stage_oictl, "conj": stage_conj,
      "size": stage_size, "wf": stage_wf, "wfmulti": stage_wfmulti,
      "loao": stage_loao, "fixed": stage_fixed, "crossfix": stage_crossfix,
-     "fixedml": stage_fixedml, "crosswf": stage_crosswf}[a.stage](a)
+     "fixedml": stage_fixedml, "crosswf": stage_crosswf,
+     "wfml": stage_wfml}[a.stage](a)
     return 0
 
 
