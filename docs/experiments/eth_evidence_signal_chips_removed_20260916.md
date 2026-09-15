@@ -61,3 +61,19 @@
 이 칩들은 **매매 근거로 쓸 수 없다는 게 측정으로 확인된 상태**다(위 표). 되살린다면
 «사람이 보는 맥락» 이상으로 쓰지 말 것. 화면 %는 신호마다 라벨 난이도가 달라
 (0.7ATR/40분 ~ 4.2ATR/6시간) **서로 비교할 수 없다** — 이번 세션의 출발점이 그 착시였다.
+
+## 실행 기록 (2026-09-16)
+- (1/3) 화면 `6091e51` — index.html 66줄 + app.js 764줄 제거
+- (2/3) 서버 `97f3ac7` — server.py −324/+28줄. **차트 캔들 갱신 주체 소실 버그를 같이 고쳤다**
+  (frames 를 «None 일 때만» 데우고 있었고 주기 갱신이 증거신호 엔드포인트에 얹혀 있었다).
+- (3/3) 백그라운드 — TabPFN 메타라벨 워커(PID 557035, **RSS 1.82GB**, 47시간 상주)와 그
+  supervisor 종료, crontab `@reboot` 줄 제거. 서버 백업:
+  `data/live/backups/crontab_before_evidence_retire_20260916.txt`.
+  🔴순서가 중요하다: crontab -> supervisor -> worker. supervisor 를 먼저 끄지 않으면 워커가
+  재기동되고, `pkill -f '<워커>.py'` 는 supervisor 명령줄에도 걸린다(같은 날 극점 워커에서 겪음).
+
+### 복원 시 체크리스트
+1. 위 세 커밋을 revert → 화면·서버 복귀
+2. 워커 재기동 + crontab 줄 복원(위 원문 또는 서버 백업 파일)
+3. `load_market_history_from_evidence_cache()` 의 «매번 부른다» 주석을 보고, 갱신 주체가
+   둘이 되지 않는지 확인(엔드포인트가 돌아오면 중복 호출은 swr_cached 가 흡수한다)
