@@ -3848,6 +3848,13 @@ let liveLineCtx = null;
 let priceWs = null, priceWsAsset = null, lastFastPriceAt = 0, priceWsRetryAt = 0;
 const FAST_PRICE_MIN_INTERVAL_MS = 80;   // 12.5Hz. 사람 눈에는 연속이고 DOM 은 세 번만 만진다
 
+// 삼각형 좌표는 여기 한 곳에서만 만든다(그리는 쪽·옮기는 쪽이 같은 모양을 써야 한다).
+// 꼭짓점이 x 에 닿고 몸통이 오른쪽으로 -- 플롯을 침범하지 않고 행만 가리킨다.
+const MARKER_W = 8, MARKER_H = 10;
+function markerPoints(x, y) {
+  return `${x},${y} ${x + MARKER_W},${y - MARKER_H / 2} ${x + MARKER_W},${y + MARKER_H / 2}`;
+}
+
 function updateLivePriceFast(price) {
   const c = liveLineCtx;
   if (!c || !(price > 0) || !c.svg.isConnected) return;
@@ -3859,13 +3866,17 @@ function updateLivePriceFast(price) {
   // 축 밖으로 나가면 가장자리에 붙인다 -- 다음 전체 렌더(1초 안)가 축을 다시 잡는다.
   const y = Math.max(c.mt, Math.min(c.mt + c.ch, raw));
   const line = c.svg.querySelector('[data-live="line"]');
+  const tri = c.svg.querySelector('[data-live="tri"]');
   const box = c.svg.querySelector('[data-live="box"]');
   const txt = c.svg.querySelector('[data-live="text"]');
-  if (!line || !box || !txt) return;   // 아직 안 그렸거나 현재가 선이 없는 판
-  line.setAttribute("y1", y); line.setAttribute("y2", y);
+  const lab = c.svg.querySelector('[data-live="label"]');
+  if (!box || !txt || !(line || tri)) return;   // 아직 안 그렸거나 현재가 표시가 없는 판
+  if (line) { line.setAttribute("y1", y); line.setAttribute("y2", y); }
+  if (tri) tri.setAttribute("points", markerPoints(c.markerX, y));
   const labelY = Math.max(c.mt + 9, Math.min(c.mt + c.ch - 9, y));
   box.setAttribute("y", labelY - 9);
   txt.setAttribute("y", labelY + 4);
+  if (lab) lab.setAttribute("y", labelY + 4);
   txt.textContent = fmtNum(price, 1);
 }
 
@@ -4329,10 +4340,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // Rendering (the actual lines/boxes) still happens later, after candles/markers, so paint order
   // is unchanged.
   const priceLabels = [];
-  // 2026-09-16 사용자 요청: 풋프린트에서는 현재가 선을 뺀다. 셀이 가격 행을 이미 촘촘히 채워서
-  // 가로선 하나가 그 위를 덮으면 그 행의 숫자를 못 읽는다(현재가 근처가 제일 중요한 행이다).
-  // 캔들 테두리의 종가가 같은 정보를 준다. 청산맵 모드에서는 그대로 그린다.
-  if (includeCurrentPrice && currentPrice > 0 && !footprint) priceLabels.push({ val: currentPrice, color: "var(--accent)", label: "현재", dashed: true, width: 2 });
+  // 2026-09-16 풋프린트에서는 현재가를 **가로선이 아니라 삼각형**으로 찍는다(사용자 요청).
+  // 선은 가격 행을 가로질러 셀 숫자를 덮는데, 하필 현재가 근처가 제일 중요한 행이다.
+  // 삼각형은 플롯 **바깥**(오른쪽 가장자리)에 앉아 어느 행인지만 가리키고 아무것도 안 가린다.
+  // 청산맵 모드는 그대로 선이다 -- 거기선 덮을 셀이 없고, 선이 가격대를 가로로 읽게 해 준다.
+  if (includeCurrentPrice && currentPrice > 0) {
+    priceLabels.push({ val: currentPrice, color: "var(--accent)", label: "현재", dashed: true,
+                       width: 2, marker: !!footprint });
+  }
   if (entryPrice > 0) priceLabels.push({ val: entryPrice, color: "var(--amber)", label: "진입", dashed: false, width: 3 });
   (riskLevels || []).forEach((level) => {
     if (Number(level.val) > 0) priceLabels.push(level);
@@ -4879,14 +4894,28 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const lineDashed = p.dashed || p.outOfView;
 
     // Line stays at real (clamped) price position
-    const line = document.createElementNS(NS, "line");
-    line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
-    line.setAttribute("y1", p.realY); line.setAttribute("y2", p.realY);
-    line.setAttribute("stroke", p.color);
-    line.setAttribute("stroke-width", String(p.width || 2));
-    if (lineDashed) line.setAttribute("stroke-dasharray", "4,4");
-    if (p.outOfView) line.setAttribute("opacity", "0.72");
-    svg.appendChild(line);
+    let line = null;
+    if (p.marker) {
+      // 플롯 오른쪽 가장자리에서 **왼쪽을 가리키는** 삼각형. 꼭짓점이 곧 그 가격의 행이다.
+      const tri = document.createElementNS(NS, "polygon");
+      tri.setAttribute("points", markerPoints(ml + cw, p.realY));
+      tri.setAttribute("fill", p.color);
+      if (p.outOfView) tri.setAttribute("opacity", "0.72");
+      // ⚠️여기서 append 하지 않는다. 플롯 오른쪽 끝(ml+cw)과 가격 배지(w-mr+4)가 4px 차이라
+      //   먼저 그리면 배지에 **가려진다**(2026-09-16 첫 판이 그래서 안 보였다). 배지 뒤에
+      //   붙여 배지의 «꼬리»처럼 보이게 한다 -- 꼭짓점은 여전히 진짜 가격 행을 가리킨다
+      //   (배지 자체는 겹침 회피로 위아래로 밀릴 수 있어서 행을 정확히 못 가리킨다).
+      line = tri;   // 아래 data-live 표식과 빠른 갱신이 같은 변수를 쓴다
+    } else {
+      line = document.createElementNS(NS, "line");
+      line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
+      line.setAttribute("y1", p.realY); line.setAttribute("y2", p.realY);
+      line.setAttribute("stroke", p.color);
+      line.setAttribute("stroke-width", String(p.width || 2));
+      if (lineDashed) line.setAttribute("stroke-dasharray", "4,4");
+      if (p.outOfView) line.setAttribute("opacity", "0.72");
+      svg.appendChild(line);
+    }
 
     // Left label (follows label position)
     const txt = document.createElementNS(NS, "text");
@@ -4910,19 +4939,21 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     pTxt.setAttribute("fill", "#1a1208");
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
+    if (p.marker) svg.appendChild(line);   // 배지 위에 -- 위 주석 참조
 
     // 현재가 줄만 표식을 단다 -- 틱마다 **이 세 요소만** 옮기려는 것이다(전체 재렌더는 1초).
     // 표식이 없으면 빠른 갱신이 어느 줄을 움직여야 하는지 알 수 없다.
     if (p.label === "현재" && isSnapshotChart) {
-      line.dataset.live = "line";
+      line.dataset.live = p.marker ? "tri" : "line";
       rect.dataset.live = "box";
       pTxt.dataset.live = "text";
+      txt.dataset.live = "label";
     }
   });
   // 빠른 갱신이 가격 -> y 를 계산하려면 이번 렌더의 축 규약이 필요하다. 다음 전체 렌더가
   // 덮어쓴다 -- 즉 이 값은 항상 «지금 화면에 그려진 것»과 같다.
   if (isSnapshotChart) {
-    liveLineCtx = { svg, yMin, yMax, mt, ch, mobileChart };
+    liveLineCtx = { svg, yMin, yMax, mt, ch, markerX: ml + cw };
   }
 
   // 2026-09-09 사용자 요청: 청산 밀도 가이드를 **차트 위(패널 HTML)** 로 옮겼다.
