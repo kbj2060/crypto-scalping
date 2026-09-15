@@ -5519,16 +5519,11 @@ async function manualEntryRefreshSize() {
     const avail = Number(plan.available_qty) || 0;
     const capNote = cap.available ? `가능 ${avail.toFixed(3)}`
       : `상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)`;
-    // 2026-09-15 권고 수량에 E|r| 배수가 곱해진다. **왜 줄었는지 화면에 없으면 규칙이 아니다.**
-    const ev = ((cap.risk || {}).evr) || {};
-    const evNote = ev.evr_ok
-      ? ` ×${Number(ev.evr_mult).toFixed(2)}(E|r| 상위 ${Math.round((1 - ev.evr_q) * 100)}%)`
-      : (ev.evr_why ? ` ×1.00(${escapeHtml(ev.evr_why)})` : "");
     line.innerHTML = plan.blocked
       ? `<b class="entry-val bad">주문 불가</b> <span class="entry-was">${escapeHtml(plan.blocked)}</span>`
       : `<b class="entry-val">${q.toFixed(3)} ETH</b>`
         + `<span class="entry-was"> · ${Math.round(Number(plan.notional_usdt) || 0).toLocaleString()} USDT`
-        + ` · 권고 ${rec.toFixed(3)}${evNote} · ${capNote}</span>`;
+        + ` · 권고 ${rec.toFixed(3)} · ${capNote}</span>`;
     setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
