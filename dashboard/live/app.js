@@ -139,6 +139,20 @@ let latestVolForecast = null;
 let volForecastLastFetchAt = 0;
 const API_VOL_FORECAST_URL = "/api/vol-forecast";
 const VOL_FORECAST_POLL_MS = 120000;
+
+// ── 볼륨 풋프린트 (2026-09-15) ────────────────────────────────────────────────
+// 캔들 하나를 가격 행으로 쪼개 «그 가격에서 누가 공격했는지»(시장가 매수/매도 체결량)를 보인다.
+// 서버 /api/footprint 가 체결 테이프를 누적한다(WS @trade 실시간 + aggTrades 백필) --
+// klines 에는 없는 정보다(봉당 taker_buy 합계 하나뿐).
+// ETH 전용: 코인마다 스트림·백필이 붙어서, 일단 하나만 켠다.
+let latestFootprint = null;
+let footprintLastFetchAt = 0;
+const API_FOOTPRINT_URL = "/api/footprint";
+const FOOTPRINT_POLL_MS = 10000;        // 차트 자체가 5초마다 다시 그려진다 -- 그보다 잦을 이유가 없다
+const FOOTPRINT_MIN_ROW_PX = 11;        // 셀에 숫자가 들어가는 최소 행 높이
+const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
+// 셀 배경 4단계(TradingView: 최소~최대의 0~25/25~50/50~75/75%~). 매수·매도는 각자 최대로 나눈다.
+const FOOTPRINT_SHADE = [0.10, 0.22, 0.36, 0.54];
 const API_EXTREME_URL = "/api/extreme-detector";
 // 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
 // 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
@@ -3645,6 +3659,47 @@ function renderLiqDensityLegend(hasDensity) {
   if (host.innerHTML !== html) host.innerHTML = html;
 }
 
+async function refreshFootprint() {
+  if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
+  const now = Date.now();
+  if (now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
+  footprintLastFetchAt = now;
+  try {
+    const res = await fetch(API_FOOTPRINT_URL, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`footprint ${res.status}`);
+    latestFootprint = await res.json();
+  } catch (error) {
+    console.error("Footprint fetch error:", error);
+    latestFootprint = null;   // null 이면 차트가 그냥 예전 캔들로 되돌아간다
+  }
+  scheduleSnapshotChartRender();
+}
+
+// 풋프린트가 없으면(다른 코인 · 서버 웜업 · fetch 실패) null 을 돌려주고, 차트는 캔들로 그린다.
+function footprintForChart() {
+  if (activeSnapshotAsset !== "eth") return null;
+  const payload = latestFootprint;
+  const bars = Array.isArray(payload && payload.bars)
+    ? payload.bars.filter((b) => Array.isArray(b.levels) && b.levels.length) : [];
+  if (!bars.length) return null;
+  return {
+    bucket: Number(payload.bucket) || 0.5,
+    ready: !!payload.ready,
+    barsExpected: Number(payload.barsExpected) || bars.length,
+    barCount: bars.length,
+    firstTime: bars[0].time,
+    byTime: new Map(bars.map((b) => [b.time, b.levels])),
+  };
+}
+
+// 체결량 표기 -- 셀 폭이 30px 대라 네 글자를 넘기면 안 된다(ETH 수량 기준).
+function fmtFootprintQty(v) {
+  if (!(v > 0)) return "";
+  if (v >= 1000) return (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "k";
+  if (v >= 100) return v.toFixed(0);
+  return v.toFixed(1);
+}
+
 // Snapshot tab's own candlestick chart -- same renderCandleSvg() the Live tab uses, always ETH, no
 // bot position context (entryPrice=0, journal=[]), with the liquidation map drawn as a density
 // profile strip plus a single line for the nearest support/resistance level (2026-08-24: the full
@@ -3666,7 +3721,13 @@ function renderSnapshotChart() {
   // Sliced to SNAPSHOT_CHART_MAX_CANDLES (6h) -- narrower than the shared candleHistoryByAsset
   // cache (still 8h, CHART_MAX_CANDLES) so the density-history overlay always has a real snapshot
   // behind every visible column (see that constant's comment).
-  const candles = fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
+  // 풋프린트 모드면 테이프가 덮는 구간(최대 12봉=1시간)만 그린다 -- 72봉을 1200px 에 넣으면
+  // 봉당 16px 라 셀이 물리적으로 안 들어간다. 대신 청산밀도 히트맵은 끈다(셀과 같은 자리를
+  // 다투고, 정확한 레벨은 차트 아래 목록에 그대로 있다). 2026-09-15 사용자 결정 "완전 교체".
+  const footprint = footprintForChart();
+  const candles = footprint
+    ? fullCandles.filter((c) => c.time >= footprint.firstTime)
+    : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel(), ...evidenceSignalTpLevels()];
   const densityHistory = liquidationDensityHistory();
@@ -3676,9 +3737,9 @@ function renderSnapshotChart() {
   // 2026-09-11 8번째 인자 = 봉별 청산 레인. **이 줄이 빠져 있어 레인이 통째로 안 그려졌다**
   //   (liqBars 기본값 [] -> peak 0 -> 블록 전체 skip, 오류도 안 남). 치환 대상 문자열을
   //   확인 없이 바꾸려다 조용히 실패했던 자리다.
-  renderCandleSvg(svg, candles, [], entryPrice, currentPrice, riskLevels, densityHistory,
-    latestLiquidation5mHist);
-  renderLiqDensityLegend((densityHistory || []).length > 0);
+  renderCandleSvg(svg, candles, [], entryPrice, currentPrice, riskLevels,
+    footprint ? [] : densityHistory, latestLiquidation5mHist, footprint);
+  renderLiqDensityLegend(!footprint && (densityHistory || []).length > 0);
 }
 
 // wide24/GBM3 regime overlay -- drawn as a ribbon INSIDE renderCandleSvg() itself (2026-08-26,
@@ -3750,7 +3811,7 @@ function densityColor(t) {
   return `rgb(${last[0]},${last[1]},${last[2]})`;
 }
 
-function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = []) {
+function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = [], footprint = null) {
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
   const parentH = svg.parentElement ? svg.parentElement.clientHeight : 0;
   const mobileChart = isMobileChartMode();
@@ -3776,7 +3837,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 140;
   const cw = w - ml - mr, ch = h - mt - mb;
   const NS = "http://www.w3.org/2000/svg";
-  const viewport = visibleCandleWindow(candles);
+  // 풋프린트는 서버가 주는 12봉이 곧 창이다 -- 모바일 핀치줌(visibleCandleWindow)으로 더
+  // 잘라내면 셀만 커지고 볼 구간이 사라진다.
+  const viewport = footprint ? { candles, includeCurrent: true } : visibleCandleWindow(candles);
   candles = viewport.candles;
   const includeCurrentPrice = viewport.includeCurrent;
 
@@ -4185,7 +4248,143 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(volLabel);
   }
 
-  // Candles
+  // Candles -- 풋프린트 모드(ETH)면 몸통 대신 «가격 행별 공격적 매수/매도 체결량» 셀을 그리고,
+  // 캔들은 얇은 테두리로만 남긴다(2026-09-15, TradingView 볼륨 풋프린트 '매수 및 매도' 유형).
+  if (footprint) {
+    // 행 크기는 TradingView '자동'(0.2 x ATR)에서 출발하되, 서버 버킷(0.5달러)의 배수여야 하고
+    // 화면에서 FOOTPRINT_MIN_ROW_PX 이상이어야 한다. 조용한 날 ATR 만 따르면 행이 3px 로
+    // 뭉개져 숫자가 안 들어간다 -- 읽히게 만드는 건 ATR 이 아니라 이 픽셀 하한이다.
+    const bucket = footprint.bucket;
+    const trs = candles.map((c, i) => (i === 0 ? c.high - c.low : Math.max(
+      c.high - c.low, Math.abs(c.high - candles[i - 1].close), Math.abs(c.low - candles[i - 1].close))));
+    const atr = trs.reduce((a, b) => a + b, 0) / Math.max(trs.length, 1);
+    const minRow = Math.ceil((ySpan * FOOTPRINT_MIN_ROW_PX / ch) / bucket) * bucket;
+    const rowSize = Math.max(bucket, minRow, Math.round(0.2 * atr / bucket) * bucket);
+    const rowPx = rowSize * ch / ySpan;
+
+    // 서버 버킷을 화면 행으로 묶는다. 서버는 0.5달러로만 모아 보내고, 행 크기는 여기서 정한다
+    // -- 행을 바꾸려고 테이프를 다시 수집할 일이 없게.
+    const barRows = candles.map((c) => {
+      const rows = new Map();
+      (footprint.byTime.get(c.time) || []).forEach((lvl) => {
+        const key = Math.floor(lvl[0] / rowSize);
+        const cell = rows.get(key) || [0, 0];
+        cell[0] += lvl[1]; cell[1] += lvl[2];
+        rows.set(key, cell);
+      });
+      return rows;
+    });
+    // 배경 4단계는 매수·매도 각각의 최대로 나눈다(TradingView: "매수/매도 측은 별도로 계산").
+    let maxBuy = 0, maxSell = 0;
+    barRows.forEach((rows) => rows.forEach((cell) => {
+      maxBuy = Math.max(maxBuy, cell[0]); maxSell = Math.max(maxSell, cell[1]);
+    }));
+    const shade = (v, max) => FOOTPRINT_SHADE[Math.min(3, Math.floor((max > 0 ? v / max : 0) * 4))];
+    const fontPx = Math.min(9, Math.max(6, rowPx - 3));
+    const half = Math.max(2, bw / 2 - 0.5);
+    // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
+    // 숫자를 욱여넣으면 옆 칸을 침범해서 둘 다 못 읽는다. 값은 눌러서 툴팁으로 본다.
+    const showQty = half >= 18;
+
+    // 한 칸: 배경(거래량 비율 4단계) + 숫자 + 불균형 표시(반대편의 300% 초과면 바깥쪽 세로선).
+    const drawCell = (cx, yTop, v, other, max, color, edgeX, price) => {
+      const rect = document.createElementNS(NS, "rect");
+      rect.setAttribute("x", cx); rect.setAttribute("y", yTop);
+      rect.setAttribute("width", half); rect.setAttribute("height", rowPx);
+      rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", shade(v, max));
+      const title = document.createElementNS(NS, "title");
+      const ratio = other > 0 ? v / other : Infinity;
+      title.textContent = price.toFixed(1) + " · " + (color === "var(--good)" ? "매수 " : "매도 ")
+        + v.toFixed(1) + " (반대편 " + other.toFixed(1) + ")"
+        + (v > 0 && v > other * FOOTPRINT_IMBALANCE_RATIO
+          ? " · 불균형 " + (Number.isFinite(ratio) ? ratio.toFixed(1) + "배" : "일방") : "");
+      rect.appendChild(title);
+      svg.appendChild(rect);
+      if (v > 0 && rowPx >= 7 && showQty) {
+        const txt = document.createElementNS(NS, "text");
+        txt.setAttribute("x", cx + half / 2); txt.setAttribute("y", yTop + rowPx / 2 + fontPx * 0.36);
+        txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", fontPx);
+        txt.setAttribute("fill", "var(--text)"); txt.setAttribute("fill-opacity", "0.82");
+        txt.textContent = fmtFootprintQty(v);
+        svg.appendChild(txt);
+      }
+      if (v > 0 && v > other * FOOTPRINT_IMBALANCE_RATIO) {
+        const mark = document.createElementNS(NS, "rect");
+        mark.setAttribute("x", edgeX); mark.setAttribute("y", yTop + 0.5);
+        mark.setAttribute("width", 2); mark.setAttribute("height", Math.max(1, rowPx - 1));
+        mark.setAttribute("fill", color);
+        svg.appendChild(mark);
+      }
+    };
+
+    barRows.forEach((rows, i) => {
+      const c = candles[i], x = xAt(i);
+      let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0;
+      rows.forEach((cell, key) => {
+        buyTot += cell[0]; sellTot += cell[1];
+        if (cell[0] + cell[1] > pocVol) { pocVol = cell[0] + cell[1]; pocKey = key; }
+      });
+      rows.forEach((cell, key) => {
+        const yTop = yAt((key + 1) * rowSize);
+        if (yTop + rowPx < mt || yTop > mt + ch) return;   // 창 밖 행은 건너뛴다
+        const price = key * rowSize + rowSize / 2;
+        drawCell(x, yTop, cell[1], cell[0], maxSell, "var(--bad)", x - 2, price);          // 왼쪽 = 매도
+        drawCell(x + bw / 2 + 0.5, yTop, cell[0], cell[1], maxBuy, "var(--good)", x + bw, price); // 오른쪽 = 매수
+        if (key === pocKey) {   // POC -- 그 봉에서 가장 많이 거래된 가격 행
+          const poc = document.createElementNS(NS, "rect");
+          poc.setAttribute("x", x); poc.setAttribute("y", yTop);
+          poc.setAttribute("width", bw); poc.setAttribute("height", rowPx);
+          poc.setAttribute("fill", "none"); poc.setAttribute("stroke", "var(--amber)");
+          poc.setAttribute("stroke-opacity", "0.85");
+          const pocTitle = document.createElementNS(NS, "title");
+          pocTitle.textContent = "POC " + price.toFixed(1) + " · 총 " + pocVol.toFixed(1);
+          poc.appendChild(pocTitle);
+          svg.appendChild(poc);
+        }
+      });
+
+      // 캔들은 테두리로만 남긴다 -- 셀을 덮지 않으면서 시가/종가/꼬리를 잃지 않으려는 것.
+      const isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
+      const wick = document.createElementNS(NS, "line");
+      wick.setAttribute("x1", x + bw / 2); wick.setAttribute("x2", x + bw / 2);
+      wick.setAttribute("y1", yAt(c.high)); wick.setAttribute("y2", yAt(c.low));
+      wick.setAttribute("stroke", color); wick.setAttribute("stroke-opacity", "0.5");
+      svg.appendChild(wick);
+      const body = document.createElementNS(NS, "rect");
+      const yTop = yAt(Math.max(c.open, c.close)), yBot = yAt(Math.min(c.open, c.close));
+      body.setAttribute("x", x); body.setAttribute("y", yTop);
+      body.setAttribute("width", bw); body.setAttribute("height", Math.max(yBot - yTop, 1));
+      body.setAttribute("fill", "none"); body.setAttribute("stroke", color);
+      body.setAttribute("stroke-opacity", "0.6");
+      svg.appendChild(body);
+
+      // 봉 델타(매수-매도) -- 플롯 맨 위. 셀 숫자를 다 더하지 않아도 그 봉의 승부가 보이게.
+      const delta = buyTot - sellTot;
+      if (buyTot + sellTot > 0) {
+        const dTxt = document.createElementNS(NS, "text");
+        dTxt.setAttribute("x", x + bw / 2); dTxt.setAttribute("y", mt + 9);
+        dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", "9");
+        dTxt.setAttribute("fill", delta >= 0 ? "var(--good)" : "var(--bad)");
+        dTxt.textContent = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
+        const dTitle = document.createElementNS(NS, "title");
+        dTitle.textContent = fmtDateTick(c.time * 1000) + " 델타 " + delta.toFixed(1)
+          + " · 매수 " + buyTot.toFixed(1) + " / 매도 " + sellTot.toFixed(1);
+        dTxt.appendChild(dTitle);
+        svg.appendChild(dTxt);
+      }
+    });
+
+    // 백필 중에는 왼쪽 봉들이 아직 비어 있다 -- 그걸 «거래가 없었다»로 읽지 않게 말해 둔다.
+    // 판정은 **수집기 상태(ready)** 만 본다. 캔들 개수로 재면, 봉이 바뀌는 순간 캔들 이력이
+    // 아직 그 봉을 모를 때 다 찼는데도 「수집 중」이 남는다(2026-09-15 화면에서 실제로 봤다).
+    if (!footprint.ready) {
+      const warm = document.createElementNS(NS, "text");
+      warm.setAttribute("x", ml + 4); warm.setAttribute("y", mt + ch - 4);
+      warm.setAttribute("font-size", "9"); warm.setAttribute("fill", "var(--muted)");
+      warm.textContent = "체결 테이프 수집 중 " + footprint.barCount + "/" + footprint.barsExpected + "봉";
+      svg.appendChild(warm);
+    }
+  } else {
   candles.forEach((c, i) => {
     const x = xAt(i), isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
     const wick = document.createElementNS(NS, "line");
@@ -4200,6 +4399,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     body.setAttribute("fill", isUp ? "transparent" : color);
     body.setAttribute("stroke", color); svg.appendChild(body);
   });
+  }
 
   // Trade Markers
   // Track markers per candle to avoid overlap
@@ -4802,6 +5002,7 @@ async function tick() {
       refreshCoinIndicators();
       refreshMacroCalendar();
       refreshSessionAlerts();
+      refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       maybeFetchSnapshotChartHistory();
     }
   } catch (e) {
