@@ -988,6 +988,12 @@ function bindAcctChartTip() {
   host.addEventListener("focusout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
 }
 
+// 2026-09-15 «추가 진입을 누르면 진입 비율에 따라 계좌 카드 게이지도 같이 움직이게»(사용자).
+// 크기 갱신이 슬라이더 값대로 이미 받아오는 `plan.projection` 을 여기 담아 카드가 읽는다.
+// null 이면 카드는 **실제 계좌**를 그린다 -- 미리보기가 꺼지면 반드시 여기로 돌아온다.
+let entryProjPreview = null;
+let entryProjKey = "";
+
 function renderSnapshotAccount() {
   const summary = el("snapAcctSummary");
   if (!el("snapAcctPosition")) return;
@@ -1120,21 +1126,44 @@ function renderSnapshotAccount() {
   const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
   const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
   // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
-  const tile = (lab, val, tone, fill, title) => `<div class="acct-tile"${
+  // ⭐진입 미리보기가 켜져 있으면 **그 값으로** 그린다. 지금 값은 레일 위 유령 눈금(u)으로
+  //   남겨 «어디서 어디로»가 한 눈에 보이게 한다 -- 진입 결과 카드와 같은 규약(.entry-rail u).
+  //   🔴실제 계좌인 척하면 안 된다: 컨테이너에 preview 를 달고 라벨 위에 한 줄 적는다.
+  const pv = entryProjPreview && entryProjPreview.after ? entryProjPreview : null;
+  const tile = (lab, val, tone, fill, title, ghost) => `<div class="acct-tile"${
       title ? ` title="${escapeHtml(title)}"` : ""}>
       <span class="acct-tile-lab">${lab}</span>
       <b class="acct-tile-val ${tone}">${val}</b>
-      <span class="acct-rail"><i class="${tone}" style="width:${clamp01(fill) * 100}%"></i></span>
+      <span class="acct-rail${ghost != null ? " entry-rail" : ""}"><i class="${tone}" style="width:${
+        clamp01(fill) * 100}%"></i>${ghost != null
+          ? `<u style="left:${clamp01(ghost) * 100}%" title="지금 ${lab}"></u>` : ""}</span>
     </div>`;
-  const tiles = `<div class="acct-tiles">
-      ${tile("청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
+  const P_liq = pv ? Number(pv.after.liq_pct) : null;
+  const P_used = pv ? Number(pv.after.margin_used_pct) : null;
+  const P_expo = pv ? Number(pv.after.exposure_x) : null;
+  const tiles = (pv ? `<div class="entry-cap">진입 미리보기 — 지금 넣으면 (실제 계좌 아님)</div>` : "")
+    + `<div class="acct-tiles${pv ? " preview" : ""}">
+      ${P_liq != null && Number.isFinite(P_liq)
+        ? tile("청산까지", `${P_liq.toFixed(2)}%`, acctRiskTone(P_liq), P_liq / LIQ_FULL,
+               `진입 미리보기 -- 지금 ${liqPct.toFixed(2)}% → 넣으면 ${P_liq.toFixed(2)}%`,
+               liqPct / LIQ_FULL)
+        : tile("청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
              `마크 ${fmtUsd(mark)} → 청산 ${fmtUsd(liq)}\n교차증거금이라 1/레버리지(${
                (100 / (Number(pos.leverage) || 1)).toFixed(2)}%)가 아니라 지갑 전체가 버팁니다.`)}
-      ${tile("증거금 사용", `${usedPct.toFixed(0)}%`,
+      ${P_used != null && Number.isFinite(P_used)
+        ? tile("증거금 사용", `${P_used.toFixed(0)}%`,
+               P_used > 80 ? "bad" : P_used > 60 ? "warn" : "good", P_used / 100,
+               `진입 미리보기 -- 지금 ${usedPct.toFixed(0)}% → 넣으면 ${P_used.toFixed(0)}%`,
+               usedPct / 100)
+        : tile("증거금 사용", `${usedPct.toFixed(0)}%`,
              usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100,
              `사용 ${fmtUsd(usedMargin)} ÷ 순자산 ${fmtUsd(equity)}\n= 명목 ${
                fmtUsd(pos.notional)} ÷ 레버리지 ${pos.leverage}배`)}
-      ${tile("계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
+      ${P_expo != null && Number.isFinite(P_expo)
+        ? tile("계좌 노출", `${P_expo.toFixed(1)}배`, P_expo > 15 ? "bad" : "warn", P_expo / EXPO_CAP,
+               `진입 미리보기 -- 지금 ${expo.toFixed(1)}배 → 넣으면 ${P_expo.toFixed(1)}배`,
+               expo / EXPO_CAP)
+        : tile("계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
              `명목 ${fmtUsd(pos.notional)} ÷ 순자산 ${fmtUsd(equity)}\n포지션 레버리지(${
                pos.leverage}배)와 다른 값입니다 — 증거금을 계좌의 일부만 썼기 때문입니다.`)}
     </div>`;
@@ -5774,6 +5803,21 @@ function renderEntryFoldNote(plan) {
   note.className = `entry-was ${acctRiskTone(a.liq_pct)}`;
 }
 
+// 2026-09-15 계좌 카드 게이지를 진입 미리보기로 움직인다(사용자 요청). 값이 실제로 바뀔 때만
+// 카드를 다시 그린다 -- 30초마다 같은 값으로 재그리면 툴팁이 닫히고 스크롤이 튄다.
+// 🔴켜는 조건은 «진입 블록이 펼쳐져 있다» 다. 접혀 있으면 사용자는 진입을 보고 있지 않으므로
+//    계좌 카드는 **실제 계좌**여야 한다. 실패·차단·투영 없음도 전부 끄는 쪽이다.
+function setEntryProjPreview(plan) {
+  const box = el("snapEntryBox");
+  const pr = plan && !plan.blocked && Number(plan.quantity) > 0 ? plan.projection : null;
+  const on = pr && pr.after && box && box.open ? pr : null;
+  const key = on ? `${on.after.liq_pct}|${on.after.margin_used_pct}|${on.after.exposure_x}` : "";
+  if (key === entryProjKey) return;
+  entryProjKey = key;
+  entryProjPreview = on;
+  renderSnapshotAccount();
+}
+
 async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
   const mode = el("snapEntryMode");
@@ -5791,6 +5835,7 @@ async function manualEntryRefreshSize() {
         : (data.error || "알 수 없음");
       line.textContent = `크기 확인 실패 — ${why}`;
       setMode("확인 실패");
+      setEntryProjPreview(null);   // 🔴옛 투영을 남기지 않는다
       return;
     }
     const plan = data.plan || {};
@@ -5811,6 +5856,7 @@ async function manualEntryRefreshSize() {
     // 사이징 권고 → 상한 → 주문. 세 값이 왜 다른지가 이 사슬 하나로 읽혀야 한다.
     renderEntryChain(rec, avail, q, cap, plan);
     renderEntryFoldNote(plan);
+    setEntryProjPreview(plan);
     setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
@@ -5830,6 +5876,7 @@ async function manualEntryRefreshSize() {
   } catch (err) {
     line.textContent = "크기 확인 실패 — 서버 응답 없음";
     setMode("확인 실패");
+    setEntryProjPreview(null);
   }
 }
 
@@ -6172,7 +6219,8 @@ function manualExitSyncButtons() {
       const n = el("snapEntryFoldNote");
       // 펼치면 아래에 카드가 그대로 보인다 -- 같은 숫자를 두 번 쓰지 않는다.
       if (box.open) { if (n) { n.textContent = ""; n.className = "entry-was"; } }
-      else manualEntryRefreshSize();
+      else { setEntryProjPreview(null); }   // 접으면 계좌 카드는 실제 값으로 돌아온다
+      manualEntryRefreshSize();
     });
   }
   if (box && entryFoldHadPos !== hasPos) { box.open = !hasPos; entryFoldHadPos = hasPos; }

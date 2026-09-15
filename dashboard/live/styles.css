@@ -1988,6 +1988,10 @@ svg {
 .entry-was { font: 600 11px/1 var(--font-sans); color: var(--muted); }
 .entry-arrow { font: 600 11px/1 var(--font-sans); color: var(--muted); margin: 0 3px; }
 .acct-rail.entry-rail { position: relative; overflow: visible; }
+/* 2026-09-15 계좌 카드가 «진입 미리보기»를 그릴 때. 🔴실제 계좌인 척하면 안 되므로 테두리를
+   점선으로 바꿔 한눈에 가른다 -- 위의 라벨 한 줄과 함께 두 겹으로 표시한다. */
+.acct-tiles.preview .acct-tile { border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .acct-rail.entry-rail i { position: absolute; left: 0; top: 0; }
 .acct-rail.entry-rail u { position: absolute; top: -2px; bottom: -2px; width: 2px;
   background: var(--muted); opacity: .85; text-decoration: none; }
