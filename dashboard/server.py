@@ -3139,12 +3139,6 @@ def make_app() -> web.Application:
             plan["target_leverage"] = want_lev or _lv.get("setting")
             plan["leverage_source"] = "manual" if want_lev else "model"
             plan["leverage_model"] = _lv.get("setting")
-            # 2026-09-15 비율에도 **권고를 따로** 싣는다. 옛 판은 화면이 `plan["fraction"]`
-            # 을 «모델값»으로 읽었는데 그건 **요청을 되돌려준 값**이다 -- 자동이라 pct 를
-            # 안 보내면 서버 기본 1.0 이 돌아오고, 그게 우연히 권고와 같아 버그가 안 보였다.
-            # 권고의 출처는 처방의 `entry_split.tranches`(지금은 1=일괄)다.
-            _tr = ((plan.get("trade_plan") or {}).get("entry_split") or {}).get("tranches")
-            plan["fraction_model"] = round(1.0 / _tr, 4) if _tr and _tr > 0 else 1.0
             plan["leverage_min_feasible"] = _lv.get("min_feasible")
             # 열린 포지션이 만드는 바닥. 이 아래를 고르면 거래소가 -2028 로 거부한다.
             plan["leverage_position_floor"] = _lv.get("position_floor")
