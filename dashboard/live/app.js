@@ -2362,6 +2362,34 @@ async function refreshVolForecast() {
 // 규약: 색 §2 위험/주의=warn(주황) · 안정도 같은 주황을 옅게 -- **5번째 색을 만들지 않는다**.
 // ⭐방향 신호가 아니다. 리본은 renderCandleSvg() 안에서 레짐 리본 바로 아래에 그린다.
 // 칩이 갖고 있던 숫자는 전부 이 툴팁으로 옮겼다 -- 칩을 지워도 근거가 사라지지 않게.
+// ── 변동성 전망 카드 (2026-09-16, 차트 리본에서 옮김) ──────────────────────────────
+// 왜 카드인가: 이 값은 **1시간 격자·24시간 지평**이라 5분봉 시간축 위에서는 12봉이 한 색이고
+// 풋프린트(1시간 창)에서는 값이 하나다 -- 그림으로 얻는 게 없다. 숫자 한 줄이 정보량이 같다.
+// 🔴버리지 않는 이유: 09-14 정면비교에서 셋 중 **유일하게 «확장»을 본다**(현재변동성과 ρ
+//   −0.817). 게이트와도 겹치지 않는다(상관 −0.389 · 상위10% 겹침 0.7%).
+function volForecastIndicatorItem() {
+  const p = latestVolForecast;
+  const base = { key: "vol_forecast", label: "변동성 확장 (24시간)",
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "봇 내부 상태가 아니라 전용 워커가 HAR-RV + Deribit DVOL 로 계산합니다. "
+                   + "«오늘 성격이 바뀌나»만 말합니다 — 방향도 수익도 예측하지 않습니다." };
+  if (!p || p.error || !p.available) {
+    return { ...base, tone: "neutral",
+             subText: !p ? "웜업" : (p.error ? "오류" : "데이터 없음"), history: [], times: [] };
+  }
+  return { ...base, probaSlot: true,
+    tone: p.grade === "위험" ? "bad" : p.grade === "주의" ? "warn" : "neutral",
+    subText: p.grade || "안정",
+    proba: p.proba != null ? Number(p.proba) : null,
+    // 지평이 24시간이라는 걸 미터 옆에 상시로 적는다 -- 5분 결정에 그대로 쓰면 안 되는 값이다.
+    meterNote: "24시간 지평",
+    meterNoteTitle: "1시간 격자·24시간 지평입니다. 5분 결정에 직접 쓰지 마세요 — 09-14 정면비교에서 "
+      + "1시간 지평 AUC 는 «현재 변동성이 낮은가»(0.611)와 동률(0.612)이고 4시간은 더 나빴습니다(0.593 vs 0.720). "
+      + "우위는 24시간에서만 실재합니다(0.812 vs 0.625).",
+    stateTitle: volForecastRibbonTitle(0),
+    history: p.history || [], times: p.times || [] };
+}
+
 function volForecastRibbonTitle(nBars) {
   const p = latestVolForecast;
   if (!p || p.error || !p.available) return "변동성 전망: 웜업 중이거나 갱신 실패";
@@ -2375,7 +2403,7 @@ function volForecastRibbonTitle(nBars) {
     `예측 실현변동성 ${p.rv_fwd_pred}`,
     prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (기저 ${(Number(p.base_rate_holdout) * 100).toFixed(1)}%)` : "",
     `AUC 학습 ${auc.TRAIN} · 표본외 ${auc.OOS} · 봉인 홀드아웃 ${auc.HOLDOUT}`,
-    `시간봉 신호입니다 — 한 시간이 5분봉 12개에 같은 색으로 깔립니다 (${nBars}봉 채색)`,
+    "시간봉 신호입니다 — 값 하나가 5분봉 12개를 덮습니다. 그래서 차트 줄이 아니라 카드입니다",
     plain,
     "⚠️변동성만 예측합니다 — 방향도 수익도 예측하지 않습니다. 크기·손절폭·관망 판단용입니다",
   ].filter(Boolean).join("\n");
@@ -3416,8 +3444,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-16 줄 배치: 천장 레인이 위 여백에서 빠져 mt 를 22 -> 12 로 줄이고(플롯이 그만큼
   // 커진다), 아래는 바닥 레인 자리를 회수한 뒤 구간 2줄(추세 전환·변동폭 게이트)을 붙였다.
   // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 레짐 +28~+43 · 변동성 +49~+64 ·
-  //                 추세 전환 +70~+85 · 변동폭 게이트 +91~+106
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 112;
+  //                 추세 전환 +49~+64 · 변동폭 게이트 +70~+85
+  // (2026-09-16 변동성 리본이 카드로 빠지면서 한 줄 21px 를 가격 플롯에 돌려줬다)
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 91;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   const cw = w - ml - mr, ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
@@ -3525,10 +3554,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   };
   const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = LANE_H;
   // 변동성 전망 리본 -- 레짐 바로 아래, 같은 두께. ETH 전용 모델이라 다른 코인에선 안 그린다.
-  const VOL_RIBBON_Y = h - mb + 49, VOL_RIBBON_H = LANE_H;   // 레짐(+28~+43)과 6px 간격
-  // 방향 없는 두 신호의 구간 줄. 이름을 왼쪽 여백에 적는 것까지 레짐·변동성과 같은 규약이다.
-  const TREND_ROW_Y = h - mb + 70, GATE_ROW_Y = h - mb + 91;
-  const volRibbonOn = isSnapshotChart && activeSnapshotAsset === "eth"
+  // 방향 없는 두 신호의 구간 줄. 이름을 왼쪽 여백에 적는 것까지 레짐 리본과 같은 규약이다.
+  const TREND_ROW_Y = h - mb + 49, GATE_ROW_Y = h - mb + 70;
+  // 변동성 값은 이제 카드가 보여준다. 차트에는 **툴팁용 지도**만 남긴다(리본은 내렸다).
+  const volMapOn = isSnapshotChart && activeSnapshotAsset === "eth"
     && latestVolForecast && latestVolForecast.available
     && Array.isArray(latestVolForecast.times) && latestVolForecast.times.length > 0;
 
@@ -3800,7 +3829,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 변동성 시각->값 매핑. 리본과 **툴팁이 같은 지도를 쓴다** -- 따로 만들면 화면의 두 곳이
   // 다른 값을 말하는 날이 온다(이 파일에서 반복된 실패).
   const volByHour = new Map();
-  if (volRibbonOn) {
+  if (volMapOn) {
     const vf = latestVolForecast;
     const grades = Array.isArray(vf.grades) ? vf.grades : [];
     const probas = Array.isArray(vf.probas) ? vf.probas : [];
@@ -3810,73 +3839,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       volByHour.set(Math.floor(t / 1000), { grade: grades[i] || null, p: probas[i], tone: (vf.history || [])[i] });
     });
   }
-  if (volRibbonOn && candles.length) {
-    const vf = latestVolForecast;
-    const byHour = volByHour;
-    // 2026-09-11 사용자: "평소엔 회색, 경고면 중간 주황, 위험이면 강한 주황".
-    // ⭐색은 등급이 정하고, **진하기만** 등급 안에서 확률로 미세하게 움직인다 -- 등급만
-    //   쓰면 조용한 구간이 통째로 같은 색이라 칩이 "안 움직인다"던 문제가 그대로 옮겨온다.
-    // grades/cuts 가 아직 없는 낡은 워커 상태파일이면 tone 두 단계로 물러선다(빈 리본 금지).
-    const cuts = latestVolForecast.cuts || {};
-    const c1 = Number(cuts["주의"]), c2 = Number(cuts["위험"]);
-    const rampOk = Number.isFinite(c1) && Number.isFinite(c2) && c2 > c1 && c1 > 0;
-    // [색, 최소 진하기, 최대 진하기]
-    // 🔴회색은 **레짐 chop 과 같은 값**을 쓴다(사용자 요청). 색상은 원래도 같은 #8b91a6
-    //   이었고 달라 보인 건 투명도였다 -- 레짐은 0.55~1.00, 여기는 0.14~0.26 이었다.
-    //   REGIME_DOMINANT_COLOR.chop 을 직접 참조해 둘이 영영 어긋나지 않게 한다.
-    // 회색이 진해진 만큼 주황도 같은 대역으로 올리고, 주의/위험은 **농도로** 가른다
-    //   (같은 대역에서 투명도만으로는 둘이 안 구분된다).
-    const STYLE = { "안정": [REGIME_DOMINANT_COLOR.chop, 0.55, 1.00],
-                    "주의": ["#dc8f4a", 0.62, 0.86],
-                    "위험": ["#b8541a", 0.88, 1.00] };
-    const styleOf = (v) => {
-      const g = v.grade || (v.tone === "warn" ? "주의" : "안정");
-      const sp = STYLE[g] || STYLE["안정"];
-      const q = Number(v.p);
-      let f = 0.5;                                     // 확률을 모르면 등급의 중간값
-      if (rampOk && Number.isFinite(q)) {
-        f = g === "안정" ? q / c1
-          : g === "주의" ? (q - c1) / (c2 - c1)
-          : (q - c2) / (1 - c2);
-      }
-      return { color: sp[0], opacity: sp[1] + (sp[2] - sp[1]) * clamp01(f) };
-    };
-    let drew = 0;
-    drawLaneTrack(VOL_RIBBON_Y);   // 천장·바닥과 같은 트랙 (2026-09-16)
-    candles.forEach((c, i) => {
-      const v = byHour.get(Math.floor(c.time / 3600) * 3600);
-      if (!v) return;
-      drew += 1;   // «값이 있는 봉» 수다(라벨 툴팁의 근거) -- 아래에서 안 그려도 센다
-      // 레짐의 chop 과 같은 규칙: 「안정」= 변동성 없음은 **안 그린다**. 빈 트랙이 그 뜻이다.
-      if ((v.grade || (v.tone === "warn" ? "주의" : "안정")) === "안정") return;
-      const rect = document.createElementNS(NS, "rect");
-      rect.setAttribute("x", xAt(i)); rect.setAttribute("y", VOL_RIBBON_Y);
-      rect.setAttribute("width", laneW); rect.setAttribute("height", VOL_RIBBON_H);
-      rect.setAttribute("rx", laneRx);
-      const st = styleOf(v);
-      rect.setAttribute("fill", st.color);
-      rect.setAttribute("fill-opacity", st.opacity.toFixed(2));
-      const title = document.createElementNS(NS, "title");
-      title.textContent = fmtDateTick(c.time * 1000) + " 변동성 전망 "
-        + (v.grade || (v.tone === "warn" ? "주의 이상" : "안정"))
-        + (v.p === undefined || v.p === null ? ""
-          : " · 확장 확률 " + (v.p * 100).toFixed(1) + "%");
-      rect.appendChild(title);
-      svg.appendChild(rect);
-    });
-    const volLabel = document.createElementNS(NS, "text");
-    volLabel.setAttribute("x", ml - 6);
-    volLabel.setAttribute("y", VOL_RIBBON_Y + VOL_RIBBON_H / 2 + 3);
-    volLabel.setAttribute("text-anchor", "end");
-    volLabel.setAttribute("font-size", "9");
-    volLabel.setAttribute("fill", "var(--muted)");
-    volLabel.textContent = "변동성";
-    const labelTitle = document.createElementNS(NS, "title");
-    // 칩이 툴팁에 갖고 있던 숫자를 여기로 옮긴다 -- 칩을 지워도 정보가 사라지지 않게.
-    labelTitle.textContent = volForecastRibbonTitle(drew);
-    volLabel.appendChild(labelTitle);
-    svg.appendChild(volLabel);
-  }
+  // 2026-09-16 **변동성 리본을 차트에서 내렸다**(카드로 옮김). 중복이어서가 아니라 **해상도**
+  // 때문이다 -- 리본은 1시간 격자·24시간 지평인데 차트는 5분봉이라 12봉이 한 색이고, 풋프린트
+  // (1시간 창)에서는 값이 **하나**다. 실측: 최근 48시간 중 29시간이 연속 '안정'.
+  // ⚠️버리는 게 아니다. 09-14 정면비교에서 셋 중 **유일하게 «확장»을 보는** 지표이고
+  //   (현재변동성과 ρ −0.817) 게이트와도 중복이 아니다(상관 −0.389 · 상위10% 겹침 0.7%).
+  //   다만 그 우위는 **24시간에서만** 실재한다(1h AUC .612 vs 공짜 대조군 .611 동률,
+  //   4h .593 vs .720 더 나쁨, 24h .812 vs .625 진짜). 24시간 판단은 카드 한 줄이 맞는 자리다.
+
 
   // Candles -- 풋프린트 모드(ETH)면 몸통 대신 «가격 행별 공격적 매수/매도 체결량» 셀을 그리고,
   // 캔들은 얇은 테두리로만 남긴다(2026-09-15, TradingView 볼륨 풋프린트 '매수 및 매도' 유형).
@@ -4306,8 +4276,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const vLine = document.createElementNS(NS, "line");
   vLine.setAttribute("x1", 0); vLine.setAttribute("x2", 0);
   vLine.setAttribute("y1", mt);
-  vLine.setAttribute("y2", volRibbonOn ? VOL_RIBBON_Y + VOL_RIBBON_H
-    : regimeByTsForChart ? REGIME_RIBBON_Y + REGIME_RIBBON_H : h - mb);
+  // 십자선은 아래 줄들까지 걸친다 -- 호버한 봉이 어느 구간에 속하는지 눈으로 잇게.
+  vLine.setAttribute("y2", GATE_ROW_Y + LANE_H);
   vLine.setAttribute("stroke", "var(--hover-line)");
   vLine.setAttribute("stroke-dasharray", "4,4");
   vLine.style.display = "none";
@@ -4687,6 +4657,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       ethOnlyIndicator(breakoutPrewarnIndicatorItem()),   // 2026-09-11 추세 전환 경보기
       ethOnlyIndicator(breakoutDetectorIndicatorItem()),  // 2026-09-11 추세 전환 탐지기
       // 🔴ethOnlyIndicator 로 감싸지 않는다 — 이 게이트는 **20자산 포트폴리오** 지표다.
+      ethOnlyIndicator(volForecastIndicatorItem()),       // 2026-09-16 변동성 전망(24h 확장)
       evrGateIndicatorItem(),                             // 2026-09-15 변동폭 게이트(24시간)
     ], "snapSpecializedSignalList", { forceMeter: true });
 
@@ -4701,7 +4672,11 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 spot/perp klines를 직접 fetch해 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 청산크라우딩 상관은 ~1개월 탐색적 표본(3-split 재현 전). 자세히 보기 참고.",
       },
       {
-        key: "vol_level", label: "변동성 예측",
+        // 2026-09-16 «변동성 예측» -> «변동성 수준». 셋이 같은 단어를 쓰면서 다른 질문을
+        // 답하고 있었다: 이건 **수준**(지금 얼마나 출렁이나 · 4시간), 카드 하나 아래는
+        // **확장**(오늘 성격이 바뀌나 · 24시간), 게이트는 **진입 여부**다.
+        // 🔴이 값은 «곧 커진다»를 못 맞힌다(확장 AUC .46~.52 = 동전) -- 이름이 그걸 말해야 한다.
+        key: "vol_level", label: "변동성 수준 (4시간)",
         tone: (latestVolLevel && latestVolLevel.tone) || "neutral",
         subText: (latestVolLevel && latestVolLevel.grade) || "웜업",
         history: toneHistory.vol_level, times: toneHistoryTimes.vol_level,
