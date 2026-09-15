@@ -812,10 +812,19 @@ async function maybeFetchSnapshotChartHistory() {
 
 // 스로틀된 차트 갱신. render() 경로와 SSE 시세 경로가 **같은 게이트**를 공유한다.
 // 스냅샷 탭이 아닐 때는 그리지 않는다(숨은 패널을 그리는 건 순수 낭비 -- 2026-08-25 규약).
+// 풋프린트 모드는 셀이 체결마다 자란다 -- 더 짧은 간격이 실제로 새 그림을 만든다.
+// 청산맵 모드는 데이터가 5분·1시간 단위라 짧게 해봐야 같은 그림을 다시 그릴 뿐이다.
+// (현재가 선은 전체 렌더와 무관하게 updateLivePriceFast 가 80ms 로 따로 움직인다)
+const FOOTPRINT_RENDER_MIN_INTERVAL_MS = 400;
+function chartRenderGateMs() {
+  return chartMode === "footprint" ? FOOTPRINT_RENDER_MIN_INTERVAL_MS
+    : SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS;
+}
+
 function maybeRenderSnapshotChartNow() {
   if (activePageTab !== "snapshot" || isScrolling) return;
   const now = Date.now();
-  if (now - lastSnapshotChartRenderAt < SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS) return;
+  if (now - lastSnapshotChartRenderAt < chartRenderGateMs()) return;
   lastSnapshotChartRenderAt = now;
   updateSnapshotCandleLive();
   renderSnapshotChart();
@@ -3860,6 +3869,49 @@ function updateLivePriceFast(price) {
   txt.textContent = fmtNum(price, 1);
 }
 
+// ── 진행 중인 봉의 셀을 브라우저가 직접 쌓는다 (2026-09-16) ───────────────────────
+// 이미 현재가용으로 **모든 체결**을 WS 로 받고 있다. 같은 규칙으로 버킷에 넣으면 진행 중인
+// 봉은 서버 폴링(2초)을 기다릴 필요가 없다 -- 틱 단위로 자란다.
+// ⚠️이중계상을 막는 규약: **WS 가 그 봉이 열리기 전부터 붙어 있었을 때만** 서버 값을 내 값으로
+//   갈아끼운다. 봉 중간에 붙었으면 앞부분이 없으므로 서버 값을 그대로 쓴다(반쪽을 진짜처럼
+//   보여주지 않는다 -- 서버 스냅샷에서 겪은 그 실패다).
+let footprintLive = { barStart: 0, since: Infinity, bucket: 0.5, cells: new Map() };
+
+// ⚠️서버(파이썬)의 round() 는 **은행가 반올림**이다: 4880.5 -> 4880, 4881.5 -> 4882.
+// JS Math.round 는 올림이라 4881, 4882 가 된다. 버킷이 0.5 이고 ETH 틱이 0.01 이라 가격이
+// .25/.75 로 끝나면 정확히 .5 가 되는데, 그게 전체의 약 2% 다 -- 그만큼이 **다른 행**에 들어가
+// 인계 순간 셀이 한 칸 튄다. 같은 격자를 쓰려면 같은 규약을 써야 한다.
+function roundHalfEven(x) {
+  const f = Math.floor(x), d = x - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
+}
+
+function footprintLiveAdd(price, qty, tsMs, sell) {
+  const barSec = Math.floor(tsMs / 1000 / CHART_CANDLE_MIN / 60) * CHART_CANDLE_MIN * 60;
+  if (barSec !== footprintLive.barStart) {
+    footprintLive.barStart = barSec;
+    footprintLive.cells = new Map();
+  }
+  if (footprintLive.since === Infinity) footprintLive.since = tsMs;   // WS 가 붙은 시각
+  const key = roundHalfEven(price / footprintLive.bucket);
+  const cell = footprintLive.cells.get(key) || [0, 0];
+  cell[sell ? 1 : 0] += qty;
+  footprintLive.cells.set(key, cell);
+}
+
+// 서버 payload 의 마지막 봉을 내 실시간 버킷으로 바꾼다(조건을 만족할 때만).
+function footprintMergeLive(byTime, bucket) {
+  footprintLive.bucket = bucket;   // 서버가 정한 격자를 따른다 -- 둘이 다르면 섞이면 안 된다
+  const bar = footprintLive.barStart;
+  if (!bar || !byTime.has(bar)) return;
+  if (footprintLive.since > bar * 1000) return;   // 봉 중간에 붙었다 -> 서버 값 유지
+  byTime.set(bar, [...footprintLive.cells.entries()]
+    .map(([k, c]) => [k * bucket, c[0], c[1]])
+    .sort((a, b) => a[0] - b[0]));
+}
+
 function ensurePriceWs() {
   const asset = activeSnapshotAsset;
   const symbol = ((ASSET_CONFIG[asset] || {}).symbol || "").toLowerCase();
@@ -3885,6 +3937,12 @@ function ensurePriceWs() {
         if (!(price > 0)) return;   // 바이낸스가 p:"0" 을 섞어 보낸다(실측 0.3%)
         latestLivePriceByAsset[priceWsAsset] = price;
         updateLivePriceFast(price);
+        const qty = Number(d.q);
+        if (qty > 0 && priceWsAsset === "eth") {
+          footprintLiveAdd(price, qty, Number(d.T), !!d.m);
+          // 체결이 곧 셀의 변화다. 스로틀은 maybeRenderSnapshotChartNow 안에 있다(모드별).
+          if (chartMode === "footprint") maybeRenderSnapshotChartNow();
+        }
       } catch (e) { /* 한 메시지가 깨져도 스트림은 계속 간다 */ }
     };
     ws.onclose = () => { if (priceWs === ws) { priceWs = null; priceWsAsset = null; } };
@@ -3919,13 +3977,16 @@ function footprintForChart() {
   const bars = Array.isArray(payload && payload.bars)
     ? payload.bars.filter((b) => Array.isArray(b.levels) && b.levels.length) : [];
   if (!bars.length) return null;
+  const bucket = Number(payload.bucket) || 0.5;
+  const byTime = new Map(bars.map((b) => [b.time, b.levels]));
+  footprintMergeLive(byTime, bucket);   // 진행 중인 봉만 실시간 값으로 대체
   return {
-    bucket: Number(payload.bucket) || 0.5,
+    bucket,
     ready: !!payload.ready,
     barsExpected: Number(payload.barsExpected) || bars.length,
     barCount: bars.length,
     firstTime: bars[0].time,
-    byTime: new Map(bars.map((b) => [b.time, b.levels])),
+    byTime,
   };
 }
 
@@ -4268,7 +4329,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // Rendering (the actual lines/boxes) still happens later, after candles/markers, so paint order
   // is unchanged.
   const priceLabels = [];
-  if (includeCurrentPrice && currentPrice > 0) priceLabels.push({ val: currentPrice, color: "var(--accent)", label: "현재", dashed: true, width: 2 });
+  // 2026-09-16 사용자 요청: 풋프린트에서는 현재가 선을 뺀다. 셀이 가격 행을 이미 촘촘히 채워서
+  // 가로선 하나가 그 위를 덮으면 그 행의 숫자를 못 읽는다(현재가 근처가 제일 중요한 행이다).
+  // 캔들 테두리의 종가가 같은 정보를 준다. 청산맵 모드에서는 그대로 그린다.
+  if (includeCurrentPrice && currentPrice > 0 && !footprint) priceLabels.push({ val: currentPrice, color: "var(--accent)", label: "현재", dashed: true, width: 2 });
   if (entryPrice > 0) priceLabels.push({ val: entryPrice, color: "var(--amber)", label: "진입", dashed: false, width: 3 });
   (riskLevels || []).forEach((level) => {
     if (Number(level.val) > 0) priceLabels.push(level);
@@ -5173,7 +5237,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
     // definition for why Snapshot can afford a coarser interval) -- cheap since renderSnapshotChart()
     // only redraws from already-cached data, no network fetch of its own.
     const nowForSnapshotChart = Date.now();
-    if (nowForSnapshotChart - lastSnapshotChartRenderAt >= SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS) {
+    if (nowForSnapshotChart - lastSnapshotChartRenderAt >= chartRenderGateMs()) {
       lastSnapshotChartRenderAt = nowForSnapshotChart;
       updateSnapshotCandleLive();
       renderSnapshotChart();
