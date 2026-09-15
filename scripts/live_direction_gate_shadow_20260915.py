@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""**`4h × 예측 E|r| 상위5%` 섀도우 기록기** — 시계를 오늘 시작한다. (2026-09-15)
+"""**방향 게이트 섀도우 기록기** — 지평·분위는 아티팩트 manifest 가 정한다. (2026-09-15)
 
-왜 섀도우인가: 이 후보는 **증명되지 않았다**(다중성 보정 p **0.0610** · 건당 순손익 날짜블록
-CI [−1.37, +33.95]). 그리고 **탐색으로는 못 넘는다** — 칸을 늘리면 max-t 귀무가 올라 p 가
-나빠진다. 남은 경로는 **독립 관측 증가** 하나뿐이고, 그건 오늘 기록을 시작해야 는다.
-전문: `docs/experiments/direction_event_trigger_expansion_and_oos_audit_20260915.md` (13절)
+기본 아티팩트 = **`1d × 예측 E|r| 상위10% × 20자산`**(사용자 승인 1순위). 왜 이것인가:
+사용자 기준(2024·25·26 각 해 순손익>0 · 메이커 5.52bp)으로 19칸을 재면 **4칸이 통과**하는데
+그 중 이 칸만 **감쇠가 없고**(+17.9/+18.9/**+29.1** — 2026 이 최대) **모델이 무조건 롱보다
+낫다**(+21.72). 나머지 셋은 2026 에 꺼지거나(4h) 롱과 구분이 안 된다.
+
+🔴**20자산 포트폴리오로만 성립한다.** ETH 단독은 네 칸 모두 세 해 양수가 아니다
+(1d×10% ETH 는 2024 −8.5). 사용자 승인(09-15): 다른 자산도 함께 계산해도 된다.
+🔴그리고 통과와 별개로 남는 위험: 건당 순손익 날짜블록 CI 가 0 을 포함하고
+(1d×10%: [−10.23,+50.63]) 다중성 보정 max-t p = 0.0610 이다.
+전문: `docs/experiments/direction_event_trigger_expansion_and_oos_audit_20260915.md` (13~14절)
 
 ⭐**두 팔을 반드시 같이 기록한다**: `model`(방향 모델) 과 `long`(무조건 롱).
 미달 관문 셋 중 하나가 「모델−롱 증분 CI 0 포함」이라 **같은 사건에서 두 팔을 짝지어** 모아야
@@ -24,6 +30,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -33,12 +40,15 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-ART = ROOT / "data/models/direction_4h_top5_20260915"
-LED = ROOT / "data/live/direction_4h_top5_shadow"
+# 🔴지평·분위를 **manifest 에서 읽는다.** 하드코딩하면 아티팩트를 바꿨을 때 조용히 어긋난다
+#   (학습 1d/상위10% · 서빙 4h/상위5% 같은 사고가 정확히 이렇게 난다).
+ART = ROOT / os.environ.get("DIR_ARTIFACT", "data/models/direction_1d_top10_20260915")
+LED = ROOT / "data/live" / (ART.name.replace("direction_", "shadow_"))
 FAPI = "https://fapi.binance.com"
-H = 48                      # 4시간
-GATE_Q = 0.95               # 예측 E|r| 상위 5%
 WARM = 500                  # 확장창 분위 최소 관측
+_MAN = json.loads((ART / "manifest.json").read_text()) if (ART / "manifest.json").exists() else {}
+H = int(_MAN.get("horizon_bars", 288))
+GATE_Q = float(_MAN.get("gate_quantile", 0.90))
 
 
 def _research():
@@ -172,8 +182,10 @@ def main() -> int:
     art["sha"] = man["models_sha256"]
     assets = a.assets.split(",") if a.assets else man["assets"]
     LED.mkdir(parents=True, exist_ok=True)
+    assert man.get("horizon_bars", H) == H and abs(man.get("gate_quantile", GATE_Q) - GATE_Q) < 1e-9, \
+        "manifest 와 런타임의 지평/분위가 다르다 — 학습·서빙 괴리"
     print(f"섀도우 {man['name']} · status={man['status']} · 자산 {len(assets)} · "
-          f"게이트 상위{(1-GATE_Q):.0%} · 지평 {H}봉")
+          f"게이트 상위{(1-GATE_Q):.0%} · 지평 {H}봉({H*5//60}시간)")
     print("🔴이 스크립트는 주문을 내지 않는다. 기록만 한다.")
     while True:
         try:
@@ -205,10 +217,12 @@ def _selfcheck() -> None:
     if man_cols:
         assert all(c in p.columns for c in man_cols), "manifest 피쳐가 패널에 없다 = 학습/서빙 괴리"
         assert list(p[man_cols].columns) == man_cols, "피쳐 **순서**가 다르다"
-    # 게이트 산술: 상위 5% 는 대략 5% 가 발동해야 한다
+    # 게이트 산술: 상위 (1−q) 만큼만 발동해야 한다 — **분위를 하드코딩하지 않는다**
+    # (아티팩트를 1d/상위10% 로 바꿨는데 점검이 5% 를 가정해 실패한 적이 있다)
     v = np.random.default_rng(0).normal(size=20000)
     thr = np.quantile(v[:-1], GATE_Q)
-    assert 0.03 < float((v > thr).mean()) < 0.07, "게이트 분위 계산이 틀렸다"
+    fire = float((v > thr).mean()); want = 1.0 - GATE_Q
+    assert 0.6 * want < fire < 1.4 * want, f"게이트 분위: 기대 {want:.1%} · 실제 {fire:.1%}"
     # 정산 부호: 숏이면 가격이 내려야 이익
     lc = np.log(np.array([100.0, 99.0]))
     r = (lc[1] - lc[0]) * 1e4

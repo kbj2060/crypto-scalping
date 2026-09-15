@@ -2886,9 +2886,11 @@ def stage_freeze(a):
     from sklearn.ensemble import HistGradientBoostingRegressor, HistGradientBoostingClassifier
     global SINCE
     SINCE = "2022-01-01"
-    H, HN, TOPQ = 48, "4h", 0.95
+    HN = a.hz
+    H, TOPQ = HS[HN], a.gateq
     assets = [A for A in ASSETS20 if (BV_PANEL / f"{A}USDT.parquet").exists()]
-    dst = ROOT / "data/models/direction_4h_top5_20260915"
+    # 🔴`int((1-0.90)*100)` 은 부동소수 때문에 **9** 가 된다(0.09999…). round 를 쓴다.
+    dst = ROOT / f"data/models/direction_{HN}_top{round((1 - TOPQ) * 100)}_20260915"
     dst.mkdir(parents=True, exist_ok=True)
     cols = None
     Xs, ys, hist, last = [], [], {}, {}
@@ -2920,7 +2922,7 @@ def stage_freeze(a):
         ok = np.isfinite(fwd)
         hist[A] = {"ts": [str(x) for x in ts.iloc[::12]],
                    "pred": [round(float(v), 6) for v in pred[::12]]}
-        thr20 = np.quantile(pred[ok], 0.80)
+        thr20 = np.quantile(pred[ok], a.dirpop)
         m = ok & (pred > thr20)
         keep = nonoverlap(np.flatnonzero(m), H)
         DX.append(Xf[keep]); DY.append((fwd[keep] > 0).astype(int)); DW.append(np.abs(fwd[keep]))
@@ -2935,34 +2937,27 @@ def stage_freeze(a):
     (dst / "evr_history.json").write_text(json.dumps(hist))
     sha = hashlib.sha256((dst / "models.joblib").read_bytes()).hexdigest()
     man = {
-        "name": "direction_4h_top5_20260915",
+        "name": dst.name,
         "created_utc": pd.Timestamp.utcnow().isoformat(),
         "horizon_bars": H, "horizon": HN, "gate_quantile": TOPQ,
-        "dir_train_population_quantile": 0.80,
+        "dir_train_population_quantile": a.dirpop,
         "assets": assets, "n_features": len(cols), "features": cols,
         "train_since": SINCE, "train_until": last,
         "models_sha256": sha,
-        "evidence": {
-            "gross_bp_per_trade": 23.10, "gross_dateblock_ci": [3.46, 39.09],
-            "net_bp_at_maker_552": 17.58, "net_dateblock_ci_at_552": [-1.37, 33.95],
-            "years_2024_2025_2026_at_552": [35.1, 6.7, 4.7],
-            "assets_positive": "17/20", "asset_sign_test_p": 0.0013,
-            "multiplicity_maxt_p": 0.0610, "n_cells_swept": 19,
-            "independent_days": 580, "n_events": 4664,
-            "model_minus_long": 5.46, "model_minus_long_ci": [-13.1, 24.3],
-        },
-        "status": "SHADOW_CANDIDATE_NOT_PROVEN",
+        "evidence_ref": ("data/research/eth_event_expansion_20260915/wall_sweep_2024-01.csv "
+                         "· 판정 기준은 사용자 결정(2024·25·26 각 해 순손익>0 · 메이커 5.52bp)"),
+        "status": "USER_APPROVED_2024_2026_ECONOMICS",
         "gates_failed": ["net_dateblock_ci_includes_zero",
                          "multiplicity_p_0.061_above_0.05",
-                         "model_minus_long_ci_includes_zero"],
-        "why_shadow": ("탐색으로는 못 넘는다 — 칸을 늘리면 max-t 귀무가 올라 p 가 나빠진다. "
-                       "독립 관측(시간)과 모델팔/롱팔 병행 기록만이 남은 경로다."),
+                         "model_minus_long_ci_includes_zero_except_1d_top10"],
+        "portfolio_only": ("🔴ETH 단독은 세 해 양수가 아니다 — **20자산 포트폴리오로만 성립한다.** "
+                           "사용자 승인(2026-09-15): 다른 자산도 함께 계산해도 된다."),
         "doc": "docs/experiments/direction_event_trigger_expansion_and_oos_audit_20260915.md",
     }
     (dst / "manifest.json").write_text(json.dumps(man, ensure_ascii=False, indent=2))
     print(f"\n⭐아티팩트 저장: {dst}")
     print(f"  models.joblib sha256 {sha[:16]}… · evr_history.json (웜스타트) · manifest.json")
-    print(f"  🔴status = SHADOW_CANDIDATE_NOT_PROVEN · 미통과 관문 3개를 manifest 에 박았다")
+    print(f"  status = {man['status']} · 미통과 관문 {len(man['gates_failed'])}개를 manifest 에 기록")
 
 
 def stage_confirm(a):
@@ -3062,6 +3057,9 @@ def main() -> int:
     ap.add_argument("--src", default="BTC", help="크로스자산 트리거 출처")
     ap.add_argument("--nullb", type=int, default=100, help="무작위 시점 귀무 반복")
     ap.add_argument("--selend", default="2024-01-01", help="선택창 끝 = 시험창 시작")
+    ap.add_argument("--hz", default="4h", choices=list(HS), help="freeze: 동결할 지평")
+    ap.add_argument("--gateq", type=float, default=0.95, help="freeze: 게이트 분위(상위 1-q)")
+    ap.add_argument("--dirpop", type=float, default=0.80, help="freeze: 방향 학습 모집단 분위")
     ap.add_argument("--w", type=float, default=1.0, help="건당 비중(상한 대비)")
     ap.add_argument("--drop", type=float, default=0.4, help="ML: 예측 E|r| 하위 이 분위는 거래 안 함")
     ap.add_argument("--minpos", type=int, default=6, help="LOAO: 몇 개 자산에서 양수여야 하나(/8)")
