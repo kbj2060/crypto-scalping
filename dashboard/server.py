@@ -16,7 +16,7 @@ from typing import Any
 
 import duckdb
 import pandas as pd
-from aiohttp import ClientSession, ClientTimeout, TCPConnector, web
+from aiohttp import ClientSession, ClientTimeout, TCPConnector, WSMsgType, web
 from dotenv import load_dotenv
 
 
@@ -450,6 +450,16 @@ POSITION_SIZING_MAX_AGE_MIN = 30.0         # 워커 주기 300초 x 6
 
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
+# 볼륨 풋프린트 (2026-09-15) -- ETH 만. 자세한 근거는 collect_footprint() 주석.
+FOOTPRINT_SYMBOL = "ETHUSDT"
+FOOTPRINT_BAR_SECONDS = 300      # 차트 캔들과 같은 5분봉
+FOOTPRINT_BARS = 12              # 1시간
+FOOTPRINT_BUCKET = 0.5           # 가격 버킷(달러). 화면 행 크기는 이것의 배수로 클라가 묶는다
+# 백필 페이스. 요청당 가중치 20 이므로 2.5초 = ~480/분. 한도는 IP 당 2400/분인데 그 IP 를
+# **트레이딩 봇과 대시보드의 다른 폴링이 같이 쓴다** -- 1.2초(~1000/분)로 돌렸더니 2026-09-15
+# 실제로 429 가 났다. 차트 하나 빨리 채우자고 주문 경로를 위협할 이유가 없다(백필은 최신 봉부터
+# 채우므로 느려도 «지금 보는 자리»는 1분 안에 찬다).
+FOOTPRINT_CATCHUP_SECONDS = 2.5
 EVENT_POLL_SECONDS = 2.5
 # How long a cached payload may keep being served while its (expensive) replacement computes.
 # Sized to cover a worst-case TabPFN refit (43s measured under GPU contention) with wide margin:
@@ -1744,6 +1754,168 @@ def make_app() -> web.Application:
             max_stale=STALE_GRACE_SECONDS,
         )
 
+    # ── 볼륨 풋프린트 체결 테이프 (2026-09-15) ────────────────────────────────────
+    # 봉 하나를 가격레벨로 쪼개 **공격적 매수/매도** 체결량을 따로 센다. klines 에는 이 정보가
+    # 없다(봉당 taker_buy 합계 하나뿐) -- 그래서 체결 테이프를 직접 누적한다.
+    # `m` = "매수자가 메이커" 이므로 m=True 면 **공격자는 매도자**다(check_footprint_tape 로 검증).
+    #
+    # 실시간은 WS, 과거는 REST 다. 처음엔 REST 폴링만으로 만들었다가 갈아엎었다 -- 2026-09-15
+    # 22:35 봉이 275,040 ETH(평소의 8배)로 터지자 1000건/요청 페이스가 **25분** 뒤처졌다.
+    # 풋프린트가 가장 필요한 순간이 바로 그때인데 그때 밀린다. WS 는 가중치가 0이라 급증에도
+    # 안 밀리고, REST 는 «연결 이전 구간» 백필에만 쓴다(이건 늦어도 라벨로 알리면 그만이다).
+    # ⚠️@aggTrade 는 2026-09-02 부터 바이낸스가 배달을 멈췄다(구독은 에러 없이 되고 메시지만
+    #   안 온다 -- 2026-09-15 재확인: 10초에 0건). @trade 를 쓴다(개별 체결, 같은 p/q/T/m).
+    FOOTPRINT_AGG_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
+    FOOTPRINT_WS_URL = f"wss://fstream.binance.com/ws/{FOOTPRINT_SYMBOL.lower()}@trade"
+    footprint_state: dict[str, Any] = {"bars": {}, "ready": False, "updated": 0.0, "last_ms": 0}
+
+    def footprint_bar_start(ts_ms: float) -> int:
+        return (int(ts_ms) // 1000) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
+
+    def footprint_add(price: float, qty: float, ts_ms: int, sell: bool) -> None:
+        bars = footprint_state["bars"]
+        bar = footprint_bar_start(ts_ms)
+        cells = bars.get(bar)
+        if cells is None:
+            cutoff = (footprint_bar_start(time.time() * 1000)
+                      - (FOOTPRINT_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+            if bar < cutoff:
+                return              # 창을 벗어난 봉 -- 넣어봐야 바로 아래에서 지워진다
+            cells = bars[bar] = {}
+            for old_bar in [b for b in bars if b < cutoff]:
+                del bars[old_bar]   # 새 봉이 생길 때만 정리한다 -- 체결마다 돌 일이 아니다(266/s)
+        cell = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)), [0.0, 0.0])
+        cell[1 if sell else 0] += qty
+        footprint_state["updated"] = time.time()
+
+    async def footprint_backfill(gap_from_ms: int, until_ms: int) -> None:
+        """WS 가 못 준 구간을 aggTrades 로 메운다. 최신 봉부터, 봉마다 «받을 창»을 따로 잡는다.
+
+        창 계산이 이 함수의 전부다:
+          - state 에 **없는** 봉  -> 봉 전체(단 until_ms 까지). 처음 뜰 때·WS 가 오래 끊겼을 때.
+          - state에 **있는** 봉   -> [gap_from_ms, until_ms] 와 겹치는 부분만. gap_from_ms 는
+            끊기기 직전 마지막 WS 체결 시각이라, 이미 센 체결을 다시 세지 않는다.
+        이 구분이 없으면 둘 중 하나가 깨진다 -- 「있는 봉은 건너뛴다」로 두면 **서버가 뜬 봉의
+        앞부분**이 통째로 빈다(2026-09-15 실측 43% 누락), 무조건 다시 받으면 이중계상이다.
+
+        왜 최신 봉부터인가: 오래된 쪽부터 한 줄로 걸었더니 거래량이 8배로 터진 봉(275,040 ETH
+        ≈ 요청 130회)에 막혀 **정작 사용자가 보는 최근 봉이 계속 비어 있었다**.
+
+        요청당 1000건·가중치 20 이라 FOOTPRINT_CATCHUP_SECONDS 로 페이스를 걸고, 총 요청 수에
+        상한을 둔다(폭주 구간에서 무한정 긁지 않도록)."""
+        budget = 400          # 총 요청 상한 ≈ 17분·가중치 8000. 평소 1시간 백필은 ~200회면 끝난다
+        MISS_LIMIT = 10       # 빈 응답(429·5xx) 연속 허용치 -- 한 번에 포기하면 조용히 죽는다
+        now_bar = footprint_bar_start(until_ms)
+        window_floor = (now_bar - (FOOTPRINT_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+        try:
+            for bar in [now_bar - i * FOOTPRINT_BAR_SECONDS for i in range(FOOTPRINT_BARS)]:
+                if bar < window_floor:
+                    continue
+                lo = (bar * 1000 if bar not in footprint_state["bars"]
+                      else max(bar * 1000, gap_from_ms))
+                hi = min((bar + FOOTPRINT_BAR_SECONDS) * 1000, until_ms)
+                if lo >= hi:
+                    continue                  # 이 봉은 이미 채워져 있다(겹치는 공백이 없다)
+                next_id, misses = None, 0
+                while budget > 0:
+                    budget -= 1
+                    rows = None
+                    if next_id is None:
+                        seed = await fetch_binance_json(FOOTPRINT_AGG_URL, {
+                            "symbol": FOOTPRINT_SYMBOL, "startTime": lo,
+                            "endTime": lo + 2000, "limit": 1})
+                        if seed:
+                            next_id, misses = int(seed[0]["a"]), 0
+                            continue
+                    else:
+                        rows = await fetch_binance_json(FOOTPRINT_AGG_URL, {
+                            "symbol": FOOTPRINT_SYMBOL, "fromId": next_id, "limit": 1000})
+                    if not rows:
+                        misses += 1
+                        if misses > MISS_LIMIT:
+                            print(f"footprint backfill: {bar} 봉 빈 응답 {MISS_LIMIT}회, 포기",
+                                  flush=True)
+                            break
+                        await asyncio.sleep(5.0)
+                        continue
+                    misses = 0
+                    for row in rows:
+                        ts_ms = int(row["T"])
+                        if lo <= ts_ms < hi:   # 창 밖은 그 창의 차례에 받는다(또는 이미 있다)
+                            footprint_add(float(row["p"]), float(row["q"]), ts_ms, bool(row["m"]))
+                    next_id = int(rows[-1]["a"]) + 1
+                    if len(rows) < 1000 or int(rows[-1]["T"]) >= hi:
+                        break                  # 이 봉 끝
+                    await asyncio.sleep(FOOTPRINT_CATCHUP_SECONDS)
+                if budget <= 0:
+                    print("footprint backfill: 요청 상한 소진 -- 남은 봉은 다음 재연결에", flush=True)
+                    return
+            footprint_state["ready"] = True    # 공백이 없다 = 화면의 「수집 중」을 내린다
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- 실패하면 ready 가 False 로 남아 화면이
+            # 계속 「수집 중」이라고 말한다. 다음 재연결이 다시 시도한다.
+            print(f"footprint backfill failed: {exc}", flush=True)
+
+    async def collect_footprint(app: web.Application) -> None:
+        backfill: asyncio.Task | None = None
+        # 공용 세션(binance_session)은 total=10초라 WS 에 못 쓴다 -- aiohttp 버전에 따라 그
+        # 타임아웃이 WS 에도 걸려 10초마다 끊긴다(끊길 때마다 백필이 다시 뜬다). 전용 세션을
+        # 쓰되 total=None 을 **명시**한다: aiohttp 기본값은 5분이라 그냥 두면 5분마다 끊긴다.
+        ws_session = ClientSession(timeout=ClientTimeout(total=None),
+                                   connector=TCPConnector(limit=2))
+        try:
+            while True:
+                try:
+                    async with ws_session.ws_connect(FOOTPRINT_WS_URL, heartbeat=30) as ws:
+                        # WS 는 연결 이후만 준다 -- 그 앞의 빈 봉은 REST 가 메운다. 메시지를
+                        # 읽으면서 **동시에** 채운다(백필을 기다리면 그동안 오는 체결이 aiohttp
+                        # 큐에 수만 건 쌓인다).
+                        first_ms: int | None = None
+                        async for msg in ws:
+                            if msg.type is not WSMsgType.TEXT:
+                                break
+                            trade = json.loads(msg.data)
+                            if trade.get("e") != "trade":
+                                continue
+                            ts_ms = int(trade["T"])
+                            if first_ms is None:
+                                # 백필의 경계를 **로컬 시계가 아니라 첫 체결의 거래소 시각**으로
+                                # 잡는다. time.time() 으로 잡았더니 시계 차이만큼 REST 와 WS 가
+                                # 겹쳐 그 봉만 +0.54% 더 세어졌다(2026-09-15 klines 대조).
+                                first_ms = ts_ms
+                                # 돌고 있는 백필이 있으면 새로 띄우지 않는다(REST 가중치가 두 배).
+                                # 대가: 첫 백필 도중 WS 가 끊기면 그 공백은 다음 재연결 때 메워진다.
+                                if backfill is None or backfill.done():
+                                    footprint_state["ready"] = False
+                                    backfill = asyncio.create_task(footprint_backfill(
+                                        footprint_state["last_ms"], first_ms))
+                            footprint_add(float(trade["p"]), float(trade["q"]),
+                                          ts_ms, bool(trade["m"]))
+                            footprint_state["last_ms"] = ts_ms   # 다음 재연결이 메울 공백의 시작
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- 한 번의 끊김/에러가 수집기를 영구히
+                    # 죽이면 재시작 전까지 풋프린트가 통째로 빈다(publish_dashboard_events 와
+                    # 같은 이유). 끊기면 3초 뒤 다시 붙는다.
+                    print(f"footprint collector cycle failed (will reconnect): {exc}", flush=True)
+                await asyncio.sleep(3.0)
+        finally:
+            if backfill is not None:
+                backfill.cancel()
+            await ws_session.close()
+
+    async def start_footprint_collector(app: web.Application) -> None:
+        app["footprint_task"] = asyncio.create_task(collect_footprint(app))
+
+    async def stop_footprint_collector(app: web.Application) -> None:
+        task = app["footprint_task"]
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
     async def load_evidence_signals() -> dict[str, Any]:
         """Informational-only reversal-evidence-signal readout for the Snapshot tab -- NOT a
         trading signal (see docstring in the imported module). Mirrors load_market_history()'s
@@ -2468,6 +2640,25 @@ def make_app() -> web.Application:
             raise web.HTTPBadRequest(reason="unsupported_market_history_asset")
         candles = await load_market_history(asset)
         return web.json_response({"asset": asset, "candles": candles}, headers=NOCACHE)
+
+    async def api_footprint(request: web.Request) -> web.Response:
+        """가격레벨별 매수/매도 체결량. 레벨은 [가격, 매수량, 매도량] 3칸 배열 -- 키 이름을 반복해
+        싣지 않으려는 것(12봉 x 수십 레벨을 10초마다 보낸다)."""
+        bars = footprint_state["bars"]
+        return web.json_response({
+            "symbol": FOOTPRINT_SYMBOL,
+            "bucket": FOOTPRINT_BUCKET,
+            "barSeconds": FOOTPRINT_BAR_SECONDS,
+            "barsExpected": FOOTPRINT_BARS,
+            "ready": bool(footprint_state["ready"]),
+            "updated": footprint_state["updated"],
+            "bars": [
+                {"time": bar,
+                 "levels": [[round(k * FOOTPRINT_BUCKET, 2), round(v[0], 3), round(v[1], 3)]
+                            for k, v in sorted(cells.items())]}
+                for bar, cells in sorted(bars.items())
+            ],
+        }, headers=NOCACHE)
 
     async def api_model_indicator_history(request: web.Request) -> web.Response:
         return web.json_response(
@@ -3329,6 +3520,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/state", api_state)
     app.router.add_get("/api/events", api_events)
     app.router.add_get("/api/market-history", api_market_history)
+    app.router.add_get("/api/footprint", api_footprint)
     app.router.add_get("/api/evidence-signals", api_evidence_signals)
     app.router.add_get("/api/evidence-signals-provisional", api_evidence_signals_provisional)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
@@ -3378,6 +3570,8 @@ def make_app() -> web.Application:
     # stop_http_session LAST for the mirror-image reason.
     app.on_startup.append(start_http_session)
     app.on_startup.append(start_dashboard_events)
+    app.on_startup.append(start_footprint_collector)
+    app.on_cleanup.append(stop_footprint_collector)
     app.on_cleanup.append(stop_dashboard_events)
     app.on_cleanup.append(stop_http_session)
     return app
