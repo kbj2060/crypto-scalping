@@ -15,6 +15,7 @@ const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth"];   // 2026-09-14 사용자 결�
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_POSITION_SIZING_URL = "/api/position-sizing";
+const API_STRADDLE_SHADOW_URL = "/api/straddle-shadow";
 const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
@@ -179,6 +180,8 @@ let liquidation5mLastFetchAt = 0;
 let latestBasisLiquidation = null;
 let latestVolLevel = null;
 let volLevelLastFetchAt = 0;
+let latestStraddleShadow = null;
+let straddleShadowLastFetchAt = 0;
 let basisLiquidationLastFetchAt = 0;
 // Sudden-liquidation alert (2026-08-27) -- backed by tail_risk_interceptor.py's event-triggered
 // liq_burst_state.json (own file, own writer, updated the instant a new @forceOrder event lands),
@@ -3163,6 +3166,65 @@ async function refreshVolLevel() {
   pushToneHistory("vol_level", (latestVolLevel && latestVolLevel.tone) || "neutral");
 }
 
+// 2026-09-15 스트래들 섀도우 요약. 파일 하나만 읽는 엔드포인트라 5분 폴링으로 충분하다
+// (워커 주기가 300초이므로 더 자주 받아도 같은 값이다).
+async function refreshStraddleShadow() {
+  const now = Date.now();
+  if (now - straddleShadowLastFetchAt < 300000) return;
+  straddleShadowLastFetchAt = now;
+  try {
+    const res = await fetch(API_STRADDLE_SHADOW_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`straddle shadow ${res.status}`);
+    latestStraddleShadow = await res.json();
+  } catch (error) {
+    console.error("Straddle shadow fetch error:", error);
+    latestStraddleShadow = { available: false, error: "fetch_failed" };
+  }
+  renderStraddleShadow();
+}
+
+// 🔴규율: t 가 1 을 넘기 전에는 「번다/안 번다」로 읽지 않는다. 그래서 평균bp 보다 **표본과 t** 를
+// 먼저 적고, 판정 문구도 「판정 불가」를 기본으로 둔다. 색은 위험도가 아니라 중립(회색)이다 --
+// 방향 신호가 아니고 아직 성과 주장도 아니기 때문이다(표시 규약 §2: 방향 없음 = neutral).
+function renderStraddleShadow() {
+  const v = latestStraddleShadow;
+  const sub = el("straddleShadowSub");
+  if (!v || v.available === false) {
+    if (sub) sub.textContent = v ? "데이터 없음" : "웜업";
+    setH("straddleShadowList", `<p class="muted" style="padding:16px;">섀도우 원장을 불러오지 못했습니다.</p>`);
+    return;
+  }
+  const n = v.n || 0;
+  const target = v.target_n || 100;
+  if (sub) sub.textContent = `${v.rule || ""} · 표본 ${n}/${target}쌍`;
+  const rows = [];
+  const pct = Math.min(100, Math.round((n / target) * 100));
+  rows.push(`<div class="ops-health-row"><span class="ops-health-label">표본 진척</span>`
+    + `<span class="ops-health-status-badge neutral">${n} / ${target}쌍 (${pct}%)</span></div>`);
+  if (n > 0) {
+    const t = Number.isFinite(v.t) ? v.t.toFixed(2) : "-";
+    rows.push(`<div class="ops-health-row"><span class="ops-health-label">쌍당 평균</span>`
+      + `<span class="ops-health-status-badge neutral">${v.mean_bp >= 0 ? "+" : ""}${v.mean_bp.toFixed(1)}bp `
+      + `± ${Number.isFinite(v.se_bp) ? v.se_bp.toFixed(1) : "-"} · t ${t}</span></div>`);
+    rows.push(`<div class="ops-health-row"><span class="ops-health-label">승률 · 보유</span>`
+      + `<span class="ops-health-status-badge neutral">${(v.win_rate * 100).toFixed(0)}% · `
+      + `중앙 ${Number.isFinite(v.median_hold_h) ? v.median_hold_h.toFixed(0) : "-"}시간</span></div>`);
+    rows.push(`<div class="ops-health-row"><span class="ops-health-label">최고 · 최악</span>`
+      + `<span class="ops-health-status-badge neutral">${v.best_bp.toFixed(0)} / ${v.worst_bp.toFixed(0)}bp</span></div>`);
+  }
+  const open = v.open;
+  rows.push(`<div class="ops-health-row"><span class="ops-health-label">지금</span>`
+    + `<span class="ops-health-status-badge neutral">`
+    + (open ? `보유 중 · 진입 ${Number(open.entry).toFixed(2)} · 게이트 ${Number(open.gate_ratio).toFixed(3)}`
+            : `대기 중 (게이트 통과 기다림)`) + `</span></div>`);
+  rows.push(`<div class="ops-health-row"><span class="ops-health-label">판정</span>`
+    + `<span class="ops-health-status-badge neutral">${escapeHtml(v.verdict || "-")}</span></div>`);
+  rows.push(`<p class="muted" style="padding:8px 16px 4px;">`
+    + `t 가 1 을 넘기 전에는 성과로 읽지 않습니다 — 연구에서 5창 전부 양수였지만 블록 t 가 0.86 이었고,`
+    + ` 이 섀도우는 그 판정에 필요한 표본을 모으는 장치입니다(연 60~130쌍).</p>`);
+  setH("straddleShadowList", rows.join(""));
+}
+
 async function refreshBasisLiquiditySignal() {
   const now = Date.now();
   if (now - basisLiquidationLastFetchAt < BASIS_LIQUIDATION_POLL_MS) return;
@@ -4925,6 +4987,7 @@ async function tick() {
       refreshEvrGate();              // 2026-09-15 변동폭 게이트(20자산)
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshVolLevel();             // 2026-09-14 사이징 모델 변동성 예측(4시간 수준)
+      refreshStraddleShadow();       // 2026-09-15 저변동 스트래들 섀도우 요약
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
@@ -5536,12 +5599,18 @@ const manualEntryPct = () => sliderPct("snapEntryFrac");
 // 서버가 모델값을 쓴다(단일 진실 원천). 서버 기본은 1.0 이고 모델의 `entry_split.tranches`
 // 도 1(일괄)이라 자동은 늘 100% 다 -- 그 «왜»를 눈금 옆에 쓴다.
 const manualEntryFracAuto = () => el("snapEntryFracAuto")?.checked !== false;
+// 마지막으로 서버가 준 권고(%). 첫 조회 전에도 «자동」이 옮겨갈 자리가 있어야 한다.
+let FRAC_MODEL_PCT = 100;
 
 function renderFracGauge(plan) {
   const g = el("snapEntryFrac");
   const out = el("snapEntryFracVal");
   if (!g || !out) return;
-  const model = Math.round(100 * (plan.fraction ?? 1));
+  // 🔴`plan.fraction` 은 **요청을 되돌려준 값**이라 권고가 아니다(자동이면 pct 를 안 보내서
+  //   서버 기본 1.0 이 돌아온다). 권고는 서버가 처방에서 뽑아 주는 `fraction_model` 이다 --
+  //   레버리지의 `leverage_model` 과 같은 자리. 없으면 100% 로 떨어진다.
+  const model = Math.round(100 * (plan.fraction_model ?? 1));
+  FRAC_MODEL_PCT = model;
   if (manualEntryFracAuto()) g.value = String(model);
   g.disabled = manualEntryFracAuto();
   const v = manualEntryFracAuto() ? model : manualEntryPct();
@@ -5948,8 +6017,13 @@ el("snapEntryFracAuto")?.addEventListener("change", () => {
 function syncFracGaugeLock() {
   const g = el("snapEntryFrac");
   const out = el("snapEntryFracVal");
-  if (g) g.disabled = manualEntryFracAuto();
-  if (out && manualEntryFracAuto()) out.textContent = `${sliderPct("snapEntryFrac")}% (모델)`;
+  if (!g) return;
+  g.disabled = manualEntryFracAuto();
+  // 🔴체크하는 **즉시** 권고 자리로 옮긴다. 미리보기 왕복을 기다리면 손잡이가 안 움직여
+  //   «자동인데 그대로»로 보이고, 미리보기가 실패하면 영영 안 움직인다(2026-09-15 사용자 보고).
+  if (manualEntryFracAuto()) g.value = String(FRAC_MODEL_PCT);
+  if (out) out.textContent = `${sliderPct("snapEntryFrac")}%`
+    + (manualEntryFracAuto() ? " (모델)" : " (수동)");
 }
 syncFracGaugeLock();          // 초기값도 체크박스를 따른다
 el("snapLevGauge")?.addEventListener("input", () => {
