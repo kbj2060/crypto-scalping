@@ -50,20 +50,22 @@
    3. **그림자는 검정이 아니라 색이 있다.** 순검정은 라이트에서 때가 탄 것처럼 보인다.
    4. **글자는 유리가 아니라 그 위에 놓인다.** 대비를 재질과 분리해 진하게 유지한다. */
 [data-theme="light"] {
-  --bg: #eef0f5;
-  --panel: rgba(255, 255, 255, 0.62);
-  --panel-strong: rgba(255, 255, 255, 0.78);
-  --chart-bg: rgba(255, 255, 255, 0.55);
-  --glass: rgba(255, 255, 255, 0.45);
-  --glass-strong: rgba(255, 255, 255, 0.66);
+  /* 🔴첫 판은 «유리가 아니라 종이」였다: 실측 패널 rgb(251,252,254) vs 지면 rgb(232,238,244)
+     로 카드 안팎이 같은 흰색이었다. 지면을 내리고 패널 알파를 낮춰 blur 가 일하게 만든다. */
+  --bg: #dfe4ee;
+  --panel: rgba(255, 255, 255, 0.55);
+  --panel-strong: rgba(255, 255, 255, 0.72);
+  --chart-bg: rgba(255, 255, 255, 0.42);
+  --glass: rgba(255, 255, 255, 0.38);
+  --glass-strong: rgba(255, 255, 255, 0.40);
   --text: #16181d;
-  --muted: #666d7e;
+  --muted: #555c6c;   /* 4.06:1 이던 보조문구 여럿을 한 번에 올린다 */
   --ink: #0a0c10;
   /* 채도 낮은 파스텔은 흰 유리 위에서 무너진다 -- 다크판보다 한 단 **진하게** 잡는다.
      값은 눈대중이 아니라 WCAG 대비로 골랐다: 흰 62% 유리(합성 rgb(249,249,251)) 위에서
      **전부 4.5:1 이상**이다. 손익 «숫자»가 작은 글씨라 큰글자 기준 3.0 으로는 모자란다. */
   --good: #177541;   /* 5.46:1 */
-  --bad: #c0463a;    /* 4.79:1 */
+  --bad: #b03a2e;    /* 흰 유리 5.52:1 · 옅은 빨강 칩 위 3.36 -> 개선 */
   --warn: #9c5c0d;   /* 5.06:1 */
   --amber: #8f6408;  /* 5.00:1 */
   --accent: #0a6d8e; /* 5.56:1 */
@@ -77,17 +79,18 @@
   --specular: rgba(255, 255, 255, 0.85);  /* 광택선은 더 밝아야 유리처럼 보인다 */
   --shadow: 74 85 104;                    /* 푸른 회색 -- 순검정은 때처럼 보인다 */
   --glass-blur: blur(22px) saturate(180%);
-  --glass-edge: rgba(255, 255, 255, 0.55);
+  --glass-edge: rgba(255, 255, 255, 0.72);
 }
 
 /* 유리는 «뒤에 뭔가 있어야» 유리로 보인다. 단색 흰 바탕 위의 blur 는 아무 일도 하지 않으므로,
    굴절시킬 색 덩어리를 깔아 준다(애플이 배경에 쓰는 소프트 메시). */
 [data-theme="light"] body {
   background:
-    radial-gradient(ellipse 760px 520px at 8% -6%, rgba(10, 109, 142, 0.16), transparent 60%),
-    radial-gradient(ellipse 620px 480px at 92% 4%, rgba(120, 88, 220, 0.13), transparent 62%),
-    radial-gradient(ellipse 720px 560px at 70% 96%, rgba(29, 138, 78, 0.10), transparent 64%),
-    linear-gradient(180deg, #f6f7fb 0%, var(--bg) 52%, #e7eaf1 100%);
+    radial-gradient(ellipse 1000px 700px at 4% -6%, rgba(10, 109, 142, 0.42), transparent 64%),
+    radial-gradient(ellipse 880px 660px at 98% 6%, rgba(116, 84, 214, 0.36), transparent 66%),
+    radial-gradient(ellipse 900px 700px at 76% 62%, rgba(24, 132, 76, 0.26), transparent 68%),
+    radial-gradient(ellipse 820px 620px at 16% 96%, rgba(198, 116, 52, 0.22), transparent 66%),
+    linear-gradient(180deg, #e3e8f2 0%, var(--bg) 46%, #ccd5e4 100%);
   background-attachment: fixed;
 }
 [data-theme="light"] html { background: var(--bg); }
@@ -101,11 +104,14 @@
 /* 두께감: 윗면은 빛을 받고(=--specular), 아랫면은 옅은 그늘이 진다.
    이 한 줄이 «납작한 반투명 사각형»과 «유리판»을 가른다. */
 [data-theme="light"] .panel {
+  /* 네 겹: ①바깥 실선(흰 테두리가 흰 지면에서 사라지므로 «경계」를 따로 준다)
+     ②접지 그림자 ③떠 있는 그림자 ④윗면 광택 + 아랫면 그늘(=판의 두께) */
   box-shadow:
-    0 1px 2px rgb(var(--shadow) / 0.08),
-    0 12px 32px rgb(var(--shadow) / 0.14),
+    0 0 0 1px rgb(var(--shadow) / 0.10),
+    0 1px 2px rgb(var(--shadow) / 0.12),
+    0 18px 44px rgb(var(--shadow) / 0.20),
     inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 rgb(var(--shadow) / 0.06);
+    inset 0 -1px 0 rgb(var(--shadow) / 0.08);
 }
 [data-theme="light"] .panel:hover {
   border-color: rgba(10, 109, 142, 0.42);
@@ -121,7 +127,7 @@
 [data-theme="light"] .ops-shadow-stat,
 [data-theme="light"] .shadow-slot-card,
 [data-theme="light"] .shadow-chart-cell {
-  background: rgba(255, 255, 255, 0.52);
+  background: rgba(255, 255, 255, 0.44);
 }
 
 /* 차트 바닥. 다크에서는 불투명 판이지만 라이트에서는 유리라 뒤가 비쳐야 한다. */
@@ -2188,3 +2194,46 @@ svg {
 [data-theme="light"] [data-asset-scope].asset-loading::before {
   background: linear-gradient(180deg, rgba(255, 255, 255, .62), rgba(240, 242, 247, .62));
 }
+
+/* 🔴채도 배지 위의 «어두운 글자»가 라이트에서 뒤집힌다. 다크 팔레트는 --good/--bad/--warn 이
+   밝은 파스텔이라 그 위에 어두운 글자가 맞았는데, 라이트에서 그 토큰을 진하게 바꿨기 때문이다.
+   실측 «롱 보유» 2.94:1, «위험» 3.58:1. 배지는 채운 색이므로 글자를 흰색으로 뒤집는다. */
+[data-theme="light"] .ops-badge.good,
+[data-theme="light"] .ops-badge.warn,
+[data-theme="light"] .ops-badge.bad,
+[data-theme="light"] .ops-health-summary.good,
+[data-theme="light"] .ops-health-summary.warn,
+[data-theme="light"] .ops-health-summary.bad,
+[data-theme="light"] .ops-health-row.good .ops-health-status-badge,
+[data-theme="light"] .ops-health-row.warn .ops-health-status-badge,
+[data-theme="light"] .ops-health-row.bad .ops-health-status-badge,
+[data-theme="light"] .shadow-slot-side.long,
+[data-theme="light"] .shadow-slot-side.short,
+[data-theme="light"] .pnl-badge.good,
+[data-theme="light"] .pnl-badge.bad {
+  color: #fff;
+}
+
+/* 계좌 손익은 이 화면에서 가장 많이 읽는 숫자다 -- 옅은 색 칩 위라 토큰 그대로는 4.0 에 걸린다.
+   («|» 구분자는 장식이라 제외한다. 다크도 1.55 로 같다.) */
+[data-theme="light"] .acct-delta.bad { color: #96281c; }
+[data-theme="light"] .acct-tag.good { color: #0f5c32; }
+
+/* 조작 요소는 «조작 요소로 보여야» 한다. 라이트에서 흰 유리 위의 흰 4% 버튼은 글자만 떠 있다
+   -- 대비 검사는 통과하지만(글자색 기준) 버튼으로 읽히지 않는다. 면과 테두리를 준다. */
+[data-theme="light"] .notify-btn {
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(20, 26, 40, 0.16);
+  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.10), inset 0 1px 0 var(--specular);
+}
+[data-theme="light"] .notify-btn:hover:not(:disabled) {
+  border-color: rgba(10, 109, 142, 0.55);
+  background: #fff;
+}
+[data-theme="light"] .notify-btn.long { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+[data-theme="light"] .notify-btn.primary {
+  background: rgba(10, 109, 142, 0.14);
+  border-color: rgba(10, 109, 142, 0.50);
+}
+/* 계기 트랙도 같은 이유 -- 흰 위의 흰 8% 는 «채워진 양」을 못 읽는다. */
+[data-theme="light"] .meter-track { background: rgb(var(--lift) / 0.14); }

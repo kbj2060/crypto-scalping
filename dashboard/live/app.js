@@ -131,7 +131,13 @@ const FOOTPRINT_POLL_MS = 2000;
 const FOOTPRINT_MIN_ROW_PX = 11;        // 셀에 숫자가 들어가는 최소 행 높이
 const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 셀 배경 4단계(TradingView: 최소~최대의 0~25/25~50/50~75/75%~). 매수·매도는 각자 최대로 나눈다.
-const FOOTPRINT_SHADE = [0.10, 0.22, 0.36, 0.54];
+// 4단계 농담. 라이트에서는 «흰 유리 위」라 같은 알파가 훨씬 옅게 보여 한 단씩 올린다
+// (다크 배열은 현행 그대로다). 숫자를 덮지 않는 선이 상한이라 0.66 에서 멈춘다.
+const FOOTPRINT_SHADE_DARK = [0.10, 0.22, 0.36, 0.54];
+const FOOTPRINT_SHADE_LIGHT = [0.16, 0.32, 0.48, 0.66];
+const footprintShades = () =>
+  (document.documentElement.getAttribute("data-theme") === "light"
+    ? FOOTPRINT_SHADE_LIGHT : FOOTPRINT_SHADE_DARK);
 const API_EXTREME_URL = "/api/extreme-detector";
 // 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
 // 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
@@ -3919,12 +3925,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     barRows.forEach((rows) => rows.forEach((cell) => {
       maxBuy = Math.max(maxBuy, cell[0]); maxSell = Math.max(maxSell, cell[1]);
     }));
-    const shade = (v, max) => FOOTPRINT_SHADE[Math.min(3, Math.floor((max > 0 ? v / max : 0) * 4))];
+    const SHADES = footprintShades();
+    const shade = (v, max) => SHADES[Math.min(3, Math.floor((max > 0 ? v / max : 0) * 4))];
     const fontPx = Math.min(9, Math.max(6, rowPx - 3));
     const half = Math.max(2, bw / 2 - 0.5);
     // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
     // 숫자를 욱여넣으면 옆 칸을 침범해서 둘 다 못 읽는다. 값은 눌러서 툴팁으로 본다.
     const showQty = half >= 18;
+    // 라이트는 셀 배경이 밝아 글자를 거의 불투명하게 올려야 읽힌다(다크는 현행 0.82).
+    const INK_OPACITY =
+      document.documentElement.getAttribute("data-theme") === "light" ? "0.95" : "0.82";
 
     // 한 칸: 배경(거래량 비율 4단계) + 숫자 + 불균형 표시(반대편의 300% 초과면 바깥쪽 세로선).
     const drawCell = (cx, yTop, v, other, max, color, edgeX, price) => {
@@ -3944,7 +3954,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const txt = document.createElementNS(NS, "text");
         txt.setAttribute("x", cx + half / 2); txt.setAttribute("y", yTop + rowPx / 2 + fontPx * 0.36);
         txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", fontPx);
-        txt.setAttribute("fill", "var(--text)"); txt.setAttribute("fill-opacity", "0.82");
+        txt.setAttribute("fill", "var(--ink)"); txt.setAttribute("fill-opacity", INK_OPACITY);
         txt.textContent = fmtFootprintQty(v);
         svg.appendChild(txt);
       }
