@@ -34,7 +34,13 @@ print(f"{'사전':34s} {'이전':>5} {'현재':>5}  변화")
 for n in allk:
     a,b=base.get(n),cur.get(n)
     if a is None: print(f"{n:34s} {'-':>5} {len(b):>5}  신규"); continue
-    if b is None: print(f"{n:34s} {len(a):>5} {'-':>5}  🔴사전 자체 소실"); bad=True; continue
+    if b is None:
+        # 사전 **통째로** 지운 것도 의도일 수 있다(2026-09-16 증거신호 8칩 제거). 사전 이름을
+        # 인자로 넘기면 의도된 제거로 본다 -- 그 전엔 선언할 방법이 없어 게이트가 항상 빨갰다.
+        ok = n in EXPECTED_REMOVED
+        print(f"{n:34s} {len(a):>5} {'-':>5}  {'✅사전 제거(의도)' if ok else '🔴사전 자체 소실'}")
+        if not ok: bad=True
+        continue
     lost=sorted(set(a)-set(b)); add=sorted(set(b)-set(a))
     mark="✅" if not lost and not add else ("🔴 소실 "+str(lost) if lost else "＋"+str(add))
     if lost and not (set(lost) <= EXPECTED_REMOVED): bad=True
