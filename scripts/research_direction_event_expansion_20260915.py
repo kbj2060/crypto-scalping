@@ -2532,7 +2532,11 @@ def stage_wall(a):
     HS = {"4h": 48, "12h": 144, "1d": 288, "3d": 864, "7d": 2016}
     rng = np.random.default_rng(SEED)
     assets = [A for A in ASSETS20 if (BV_PANEL / f"{A}USDT.parquet").exists()]
-    QUARTERS = pd.date_range("2024-01-01", "2026-07-01", freq="QS")
+    # 🔴`--teststart` 는 **셀을 고정한 채 시험 구간만** 앞으로 미는 용도다. 셀을 늘리면
+    #   max-t 귀무가 올라 p 가 나빠지지만, **사전 등록된 단일 셀을 새 기간에 거는 건 다중성이
+    #   늘지 않는다**. 2022-07~2023-12 는 이 세션에서 **채점에 한 번도 안 쓴 18개월**이다
+    #   (E|r| 모델 학습에만 썼다) — 독립일을 늘리는 유일하게 정직한 길.
+    QUARTERS = pd.date_range(a.teststart, "2026-07-01", freq="QS")
     QGRID = (0.80, 0.90, 0.95, 0.975, 0.99)
     COSTS = (10.0, 8.03, 5.52, 0.0)
     print(f"자산 {len(assets)} · 지평 {list(HS)} · 분위 {[f'{1-q:.1%}' for q in QGRID]}", flush=True)
@@ -2653,7 +2657,7 @@ def stage_wall(a):
                 d[f"q{int(q*1000)}"] = (np.isfinite(c["th"][q]) & (c["pred"] > c["th"][q]))[m]
             recs.append(pd.DataFrame(d))
     REC = pd.concat(recs, ignore_index=True)
-    REC.to_parquet(OUT / "wall_records.parquet")
+    REC.to_parquet(OUT / f"wall_records_{a.teststart[:7]}.parquet")
     print(f"  건별 레코드 {len(REC):,} 저장 → wall_records.parquet", flush=True)
 
     rows = []
@@ -2686,7 +2690,7 @@ def stage_wall(a):
                 r[f"net@{c_:g}"] = (2 * acc - 1) * ear - c_
             rows.append(r)
     D = pd.DataFrame(rows)
-    D.to_csv(OUT / "wall_sweep.csv", index=False)
+    D.to_csv(OUT / f"wall_sweep_{a.teststart[:7]}.csv", index=False)
     print("\n=== ⭐벽까지의 거리 (적중 − 벽, pp) · 괄호는 t = (적중−벽)/SE ===")
     print(f"{'지평':>5} {'상위':>7} {'n':>7} {'E|r|':>7} {'적중%':>7} {'SE':>5} {'롱적중%':>8} |"
           + "".join(f"{'벽@'+f'{c:g}bp':>17}" for c in COSTS))
@@ -2702,7 +2706,7 @@ def stage_wall(a):
                    "t@5.52", "net@10", "net@5.52"]].to_string(index=False,
                                                               float_format=lambda v: f"{v:8.2f}"))
     HS = HS_OLD
-    print(f"\n저장: {OUT/'wall_sweep.csv'}")
+    print(f"\n저장: {OUT/f'wall_sweep_{a.teststart[:7]}.csv'}")
 
 
 def stage_wallcheck(a):
@@ -2961,11 +2965,89 @@ def stage_freeze(a):
     print(f"  🔴status = SHADOW_CANDIDATE_NOT_PROVEN · 미통과 관문 3개를 manifest 에 박았다")
 
 
+def stage_confirm(a):
+    """⭐**사전 등록된 단일 셀을 «채점에 한 번도 안 쓴 기간»에 건다.**
+
+    13절: 다중성 보정 p **0.0610**. 그리고 「더 파면 p 가 나빠진다」 — 맞다, **셀을 늘리면**.
+    그러나 **셀을 고정한 채 시험 구간만 새로 여는 건 다중성이 늘지 않는다.**
+    이 세션의 모든 스윕은 **2024-01 부터만** 채점했고 **2022-07~2023-12 18개월**은 E|r| 모델
+    학습에만 쓰였다 — 채점에는 한 번도 안 썼다. 거기 걸면 독립일이 늘고 다중성은 그대로다.
+
+    🔴사전 등록(이 stage 는 **단 하나의 셀**만 본다): `4h × 예측 E|r| 인과 상위 5%` ·
+    방향 = 상위20% 모집단 학습 3씨드 · w/상한 없음(건당 기준) · 비용 메이커 5.52bp ·
+    판정 = **날짜블록 CI 0배제 AND 세 해 양수**. 스윕이 아니므로 max-t 보정은 필요 없다.
+    🔴정직한 한계: 2022~23 은 **레짐이 다르고**(§5.30 이 「23년 이전 제외」라 적은 구간),
+    초기 분기는 학습 데이터가 얇다(2022-01~07 = 6개월). 음수면 「신호 없음」과 「레짐 불일치」를
+    못 가른다 — 그래서 **세 구간을 나란히** 싣는다."""
+    from scipy.stats import binomtest
+    rng = np.random.default_rng(SEED)
+    f_new = OUT / "wall_records_2022-07.parquet"
+    f_old = OUT / "wall_records_2024-01.parquet"
+    if not f_new.exists():
+        print(f"없음: {f_new} — `--stage wall --teststart 2022-07-01` 먼저"); return
+    R = pd.read_parquet(f_new)
+    R["ts"] = pd.to_datetime(R["ts"]); R["day"] = R.ts.dt.floor("D"); R["year"] = R.ts.dt.year
+    R["side"] = np.where(R.prob > 0.5, 1, -1)
+    R = R[(R.H == "4h") & R["q950"]]                       # ⭐사전 등록 셀 하나
+    print(f"사전 등록 셀 = 4h × 예측 E|r| 상위5% · 전체 레코드 {len(R):,}\n")
+
+    def blk(v, d, B=6000):
+        days = np.unique(d); by = {x: v[d == x] for x in days}
+        bs = np.array([np.concatenate([by[x] for x in rng.choice(days, len(days), replace=True)]
+                                      ).mean() for _ in range(B)])
+        return float(np.quantile(bs, 0.025)), float(np.quantile(bs, 0.975))
+
+    def cse(x, d):
+        r = x - x.mean(); s = pd.Series(r).groupby(d).sum().to_numpy()
+        return float(np.sqrt((s ** 2).sum())) / len(x)
+
+    COST = 5.52
+    print(f"{'구간':>22} {'n':>6} {'독립일':>6} {'E|r|':>7} {'그로스':>8} {'클러t':>6} "
+          f"{'메이커 건당':>10} {'날짜블록 CI':>21} {'연도별':>34} {'자산':>7} {'모델−롱':>8}")
+    rows = []
+    segs = [("⭐신규 2022-07~2023-12", (R.ts >= "2022-07-01") & (R.ts < "2024-01-01")),
+            ("기존 2024-01~2026-08", R.ts >= "2024-01-01"),
+            ("**합산 2022-07~2026-08**", R.ts >= "2022-07-01")]
+    for lab, m in segs:
+        s = R[m]
+        if len(s) < 100:
+            print(f"{lab:>22} {len(s):>6}  표본 부족"); continue
+        g = (s.side * s.fwd).to_numpy(); d = s.day.values
+        net = g - COST
+        lo, hi = blk(net, d)
+        yrs = sorted(s.year.unique())
+        ys = [(y, float((s[s.year == y].side * s[s.year == y].fwd - COST).mean()))
+              for y in yrs if (s.year == y).sum() >= 30]
+        per = s.groupby("asset").apply(lambda t: float((t.side * t.fwd - COST).mean()),
+                                       include_groups=False)
+        npos = int((per > 0).sum()); pv = binomtest(npos, len(per), 0.5, "greater").pvalue
+        dif = net - (s.fwd - COST).to_numpy()
+        dl, dh = blk(dif, d)
+        y3 = all(v > 0 for _, v in ys)
+        print(f"{lab:>22} {len(s):>6} {len(np.unique(d)):>6} {float(s.fwd.abs().mean()):>7.1f} "
+              f"{g.mean():>+8.2f} {g.mean()/cse(g,d):>+6.2f} {net.mean():>+10.2f} "
+              f"[{lo:>+8.2f},{hi:>+8.2f}]{'✅' if lo>0 else '❌'} "
+              + " ".join(f"{y}:{v:+.0f}" for y, v in ys) + f"{'✅' if y3 else '❌'}"
+              + f" {npos:>2}/{len(per):<2} p{pv:.3f} {dif.mean():>+7.2f}{'✅' if dl>0 else '❌'}")
+        rows.append({"구간": lab, "n": len(s), "독립일": len(np.unique(d)),
+                     "E|r|": float(s.fwd.abs().mean()), "그로스": g.mean(),
+                     "클러스터t": g.mean() / cse(g, d), "메이커건당": net.mean(),
+                     "CI_lo": lo, "CI_hi": hi, "세해양수": y3, "양수자산": npos,
+                     "자산수": len(per), "부호p": pv, "모델−롱": dif.mean(),
+                     "증분lo": dl, "증분hi": dh})
+    pd.DataFrame(rows).to_csv(OUT / "confirm_prereg_cell.csv", index=False)
+    print("\n🔴판정: **날짜블록 CI 0배제 AND 연도 전부 양수** 둘 다여야 통과다. "
+          "스윕이 아니므로 다중성 보정은 필요 없다.")
+    print("🔴한계: 2022~23 은 레짐이 다르고(§5.30 이 「23년 이전 제외」라 적은 구간) 초기 분기는"
+          "\n   학습이 얇다(2022-01~07 = 6개월) ⇒ **음수면 「신호 없음」과 「레짐 불일치」를 못 가른다.**")
+    print(f"\n저장: {OUT/'confirm_prereg_cell.csv'}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reuse", action="store_true", help="저장된 스크린 CSV 재사용")
     ap.add_argument("--stage", required=True,
-                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit", "wall", "wallcheck", "multi", "freeze"])
+                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit", "wall", "wallcheck", "multi", "freeze", "confirm"])
     ap.add_argument("--minn", type=int, default=120, help="WF 선택 최소 사건 수")
     ap.add_argument("--tsel", type=float, default=2.0, help="WF 선택 초과 t 임계")
     ap.add_argument("--start", default="2025-01-01", help="WF 거래 시작 월")
@@ -2973,6 +3055,7 @@ def main() -> int:
     ap.add_argument("--top", type=int, default=999, help="WF 선택 상위 K")
     ap.add_argument("--cap", type=float, default=1.0, help="총 노출 상한")
     ap.add_argument("--nperm", type=int, default=200, help="순환이동 귀무 반복")
+    ap.add_argument("--teststart", default="2024-01-01", help="wall: 시험 구간 시작 분기")
     ap.add_argument("--rules", default="doc", choices=["doc", "mine"], help="고정 규칙 출처")
     ap.add_argument("--fam1", action="store_true", help="피쳐군마다 1개만")
     ap.add_argument("--only", default=None, help="이 피쳐 규칙만")
@@ -2991,7 +3074,8 @@ def main() -> int:
      "wfml": stage_wfml, "proof": stage_proof,
      "highvol": stage_highvol, "exit": stage_exit,
      "wall": stage_wall, "wallcheck": stage_wallcheck,
-     "multi": stage_multi, "freeze": stage_freeze}[a.stage](a)
+     "multi": stage_multi, "freeze": stage_freeze,
+     "confirm": stage_confirm}[a.stage](a)
     return 0
 
 
