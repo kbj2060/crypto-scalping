@@ -391,6 +391,43 @@ async function setActiveSnapshotAsset(asset) {
   if (latestMainState) render(latestMainState, latestCompactState);
 }
 
+/* 테마 토글 (2026-09-16). 다크 = 현행 화면, 라이트 = 애플 «Liquid Glass».
+   첫 페인트는 index.html 의 인라인 스크립트가 이미 입혔다 -- 여기서는 «바꾸기」만 한다.
+   ⭐색을 하드코딩한 사본을 만들지 않는다: 차트는 SVG 속성에 `var(--good)` 를 그대로 넣고
+   브라우저가 실시간으로 푼다. 다만 `cssVar()` 게터로 읽는 곳(레짐 색)은 다시 그려야 반영된다. */
+const THEME_KEY = "dashTheme";
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+function applyTheme(theme) {
+  const light = theme === "light";
+  if (light) document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
+  // 모바일 브라우저 크롬(주소창) 색까지 같이 간다 -- 안 맞추면 유리 화면 위에 검은 띠가 남는다.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", light ? "#eef0f5" : "#0b0d13");
+  const btn = document.getElementById("themeToggle");
+  const label = document.getElementById("themeToggleLabel");
+  if (btn) {
+    btn.setAttribute("aria-pressed", light ? "true" : "false");
+    btn.dataset.state = light ? "on" : "off";
+  }
+  if (label) label.textContent = light ? "글래스" : "다크";
+}
+function setupThemeToggle() {
+  const btn = document.getElementById("themeToggle");
+  applyTheme(currentTheme());                 // 버튼 라벨을 저장된 상태에 맞춘다
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const next = currentTheme() === "light" ? "dark" : "light";
+    applyTheme(next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* 저장 못 해도 동작은 한다 */ }
+    // 게터로 토큰을 읽는 곳(레짐 색 등)은 다시 그려야 새 팔레트가 들어간다.
+    renderSnapshotChart();
+    if (latestMainState) render(latestMainState, latestCompactState);
+  });
+}
+
 function setupChartModeTabs() {
   document.querySelectorAll("#chartModeTabs .asset-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -4783,6 +4820,7 @@ document.addEventListener("visibilitychange", () => {
   tick();
 });
 setupSnapshotAssetTabs();
+setupThemeToggle();
 setupChartModeTabs();
 setupPageTabs();
 setupScrollRendering();
