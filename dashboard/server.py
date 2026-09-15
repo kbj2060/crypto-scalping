@@ -475,7 +475,11 @@ FOOTPRINT_CATCHUP_SECONDS = 2.5
 # «꺼져 있던 시간»으로 줄어든다 -- 보통 몇 초다.
 FOOTPRINT_SNAPSHOT_PATH = LIVE_DIR / "footprint_eth.json"
 FOOTPRINT_SNAPSHOT_SECONDS = 30.0
-EVENT_POLL_SECONDS = 2.5
+# 2026-09-16 2.5 -> 1.0 (사용자 "최대한 빠르게"). 이 값이 곧 **현재가 선의 지연**이다 --
+# 차트는 SSE 푸시마다 다시 그린다. 코인을 ETH 하나로 줄이면서(DASHBOARD_ASSETS) 티커 요청이
+# 2.5초×5코인 = 120/분 이었던 것이 1초×1코인 = 60/분 이 된다 -- **더 빨라지면서 절반이다**.
+# 상태 파일은 stat 으로 바뀐 것만 다시 읽으므로(etag) 주기를 당겨도 재직렬화가 늘지 않는다.
+EVENT_POLL_SECONDS = 1.0
 # How long a cached payload may keep being served while its (expensive) replacement computes.
 # Sized to cover a worst-case TabPFN refit (43s measured under GPU contention) with wide margin:
 # past this the payload is treated as cold again and the request blocks for a current reading.

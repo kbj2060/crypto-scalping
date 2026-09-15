@@ -29,7 +29,8 @@ const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
 // 주므로 지나간 봉은 이 이력에서 온다. 캔들과 같은 **5분** 정렬이다(게이지 BAR_MINUTES=30 과 별개).
 const API_LIQUIDATION_5M_HIST_URL = "/api/liquidation-5m-history";
 const API_SESSION_ALERTS_URL = "/api/session-alerts";
-const POLL_MS = 2500;
+const POLL_MS = 1000;   // 2026-09-16 2500 -> 1000. 각 refresh 는 자기 게이트를 갖고 있어
+                        // 이 값은 «게이트를 얼마나 자주 확인하나»일 뿐이다(가장 잦은 게이트가 곧 상한).
 // 코인별 실시간 지표 폴링(2026-09-03). 서버 캐시가 20초이므로 그보다 자주 때릴 이유가 없다.
 const MODEL_INDICATOR_POLL_MS = 20000;
 // 2026-08-25 에 20초로 잡았던 근거는 «이 차트의 데이터(청산맵)가 5분에 한 번만 바뀌니 자주
@@ -37,11 +38,12 @@ const MODEL_INDICATOR_POLL_MS = 20000;
 // 현재가 선도 SSE(2.5초)마다 움직인다. 20초 묶음 때문에 화면이 최대 20초 뒤처졌다(사용자 신고
 // "래깅이 있어"). SSE 주기와 맞춘다.
 // 비용은 실측했다: renderSnapshotChart 한 번이 **2~5ms**(모바일 뷰 기준, DOM 1,164 노드).
-// 2.5초마다면 0.1~0.2% 다. 20초 -> 2.5초는 그 비용을 8배 쓰는 대신 지연을 8배 줄인다.
+// 1초마다면 0.2~0.5% 다. 20초 -> 1초는 그 비용을 20배 쓰는 대신 지연을 20배 줄인다.
+// 바닥은 여기다 -- 더 당겨도 SSE 푸시(EVENT_POLL_SECONDS=1초)보다 새 값이 오지 않는다.
 // ⚠️여전히 **하나의 주기**로 묶어 둔다(캔들 2.5초 / 밀도 5분 식으로 쪼개지 않는다) -- 밀도
 // 띠의 sweep-darkening 이 라이브 고가/저가에 달려 있어서, 쪼개면 실제 스윕이 최대 5분간
 // 반영되지 않는다. 같이 그리는 쪽이 맞다.
-const SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS = 2500;
+const SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS = 1000;
 const CANDLE_HISTORY_POLL_MS = 300000;
 const MICRO_HISTORY_MAX = 48; // matches MODEL_INDICATOR_HISTORY_MAX in server.py (4h @ 5min samples)
 // Kept post-Live-tab-removal solely as the SSE ticker payload's asset allowlist (see
@@ -155,9 +157,10 @@ let chartMode = (() => {
 })();
 const API_FOOTPRINT_URL = "/api/footprint";
 // 🔴여기 있던 "차트 자체가 5초마다 다시 그려진다"는 **틀린 주석**이었다(실제는 20초였다).
-// 서버는 WS 로 계속 누적하므로 이 폴링 간격이 곧 셀의 지연이다. 5초면 사람이 못 느끼고,
-// 모바일 데이터는 gzip 후 ~4KB/회 = 2.9MB/시간이다(2.5초면 두 배).
-const FOOTPRINT_POLL_MS = 5000;
+// 서버는 WS 로 계속 누적하므로 이 폴링 간격이 곧 셀의 지연이다. 실측 gzip 2.0KB/회 이므로
+// 2초면 시간당 3.6MB -- 모바일에서 감당 가능한 선이라 보고 여기까지 당겼다.
+// 더 당기려면 폴링이 아니라 SSE 에 실어야 한다(요청 왕복이 사라진다). 지금 필요하진 않다.
+const FOOTPRINT_POLL_MS = 2000;
 const FOOTPRINT_MIN_ROW_PX = 11;        // 셀에 숫자가 들어가는 최소 행 높이
 const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 셀 배경 4단계(TradingView: 최소~최대의 0~25/25~50/50~75/75%~). 매수·매도는 각자 최대로 나눈다.
