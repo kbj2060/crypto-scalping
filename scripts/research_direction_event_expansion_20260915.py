@@ -2509,11 +2509,279 @@ def stage_exit(a):
     print(f"\n저장: {OUT/'exit_grid.parquet'}")
 
 
+def stage_wall(a):
+    """⭐**벽을 실측 적중률 아래로 끌어내릴 수 있나** — 산술이 지목하는 마지막 자리.
+
+    H 절 실측: 4h 적중 **50.54% ±0.23** vs 벽@**0bp** 50.00% ⇒ **+0.54pp = 2.3σ**.
+    즉 **총수익 기준으로는 이미 유의하게 양수**고 문제는 오직 `비용/(2·E|r|)` 이다.
+    벽 = 0.5 + 비용/(2·E|r|) 은 **E|r| 가 커지면 계속 내려간다**. 1d 에서 E|r|=345.7 ·
+    벽@5.52bp=50.80% · 실측 50.48% — 간극이 **0.32pp** 까지 좁혀져 있었다.
+
+    아직 안 당긴 레버 둘을 여기서 당긴다:
+      ① **더 극단 분위** — 지금까지 상위 20% 만 봤다. 10/5/2.5/1% 로 조이면 E|r| 가 오른다.
+      ② **더 긴 지평** — 4h/12h/1d 만 봤다. 3d·7d 는 §5.30 A 표에서 E|r| 449·695bp 다.
+    🔴**분모를 키우면 표본이 준다** — 적중률 SE 가 같이 커진다. 그래서 «벽 아래로 내려갔다」가
+    아니라 **«적중 − 벽» 을 SE 로 나눈 t** 로 판정한다. 그리고 상위 분위는 **인과 확장창**이다.
+
+    계산 절약: 방향 모델은 **상위 20% 모집단에서 한 번만** 학습하고 더 좁은 분위는 그 **부분집합**
+    이므로 그대로 적용한다(재학습 없음 = 새 다중검정 없음)."""
+    from sklearn.ensemble import HistGradientBoostingRegressor, HistGradientBoostingClassifier
+    global SINCE, HS
+    SINCE = "2022-01-01"
+    HS_OLD = HS
+    HS = {"4h": 48, "12h": 144, "1d": 288, "3d": 864, "7d": 2016}
+    rng = np.random.default_rng(SEED)
+    assets = [A for A in ASSETS20 if (BV_PANEL / f"{A}USDT.parquet").exists()]
+    QUARTERS = pd.date_range("2024-01-01", "2026-07-01", freq="QS")
+    QGRID = (0.80, 0.90, 0.95, 0.975, 0.99)
+    COSTS = (10.0, 8.03, 5.52, 0.0)
+    print(f"자산 {len(assets)} · 지평 {list(HS)} · 분위 {[f'{1-q:.1%}' for q in QGRID]}", flush=True)
+    cols, TRAIN, META = None, {}, {}
+    for A in assets:
+        p = panel(A, since=SINCE)
+        if cols is None:
+            cols = [c for c in featcols(p) if c != "hour_f" and not c.startswith("tf_")
+                    and not c.startswith("ztf_")]
+        lc = p["__lc__"].to_numpy(); ts = p["timestamp"]
+        X = p[cols].to_numpy(np.float32)
+        sub = {}
+        for hn, H in HS.items():
+            y = np.log(np.maximum(np.abs(fwd_of(lc, H)), 1.0))
+            idx = np.flatnonzero(np.isfinite(y))[::36]
+            sub[hn] = (idx, y[idx])
+        un = np.unique(np.concatenate([sub[h][0] for h in HS]))
+        TRAIN[A] = (X[un], sub, un)
+        META[A] = (ts, lc, len(lc))
+        del p, X
+    print("  1패스 완료", flush=True)
+    EMOD = {}
+    for hn, H in HS.items():
+        for q0 in QUARTERS:
+            Xs, ys = [], []
+            for A in assets:
+                Xa, sub, un = TRAIN[A]
+                idx, y = sub[hn]
+                m = META[A][0].to_numpy()[idx] < np.datetime64(q0 - pd.Timedelta(minutes=5 * H))
+                if m.sum() < 100:
+                    continue
+                Xs.append(Xa[np.searchsorted(un, idx[m])]); ys.append(y[m])
+            if Xs:
+                EMOD[(hn, q0)] = HistGradientBoostingRegressor(
+                    max_iter=120, learning_rate=0.06, max_depth=4, l2_regularization=3.0,
+                    random_state=11).fit(np.vstack(Xs), np.concatenate(ys))
+        print(f"  [E|r| {hn}] 완료", flush=True)
+    del TRAIN
+    CAND = {}
+    for A in assets:
+        p = panel(A, since=SINCE)
+        ts = p["timestamp"]; lc = p["__lc__"].to_numpy()
+        Xf = p[cols].to_numpy(np.float32)
+        for hn, H in HS.items():
+            pred = np.full(len(lc), np.nan)
+            for q0 in QUARTERS:
+                mdl = EMOD.get((hn, q0))
+                if mdl is None:
+                    continue
+                te = np.flatnonzero(((ts >= q0) & (ts < q0 + pd.DateOffset(months=3))).to_numpy())
+                if len(te):
+                    pred[te] = mdl.predict(Xf[te])
+            fwd = fwd_of(lc, H)
+            oi = np.flatnonzero(np.isfinite(pred) & np.isfinite(fwd))
+            if len(oi) < 600:
+                continue
+            # 각 분위의 인과 임계를 한 번에 — 좁은 분위는 넓은 분위의 부분집합이다
+            E = pd.Series(pred[oi]).expanding(500)
+            TH = {q: E.quantile(q).shift(1).to_numpy() for q in QGRID}
+            base = np.isfinite(TH[QGRID[0]]) & (pred[oi] > TH[QGRID[0]])
+            keep = nonoverlap(oi[base], H)
+            if len(keep) < 40:
+                continue
+            pos = np.searchsorted(oi, keep)
+            CAND[(A, hn)] = dict(i=keep.astype(np.int32), ts=ts.to_numpy()[keep],
+                                 X=Xf[keep], fwd=fwd[keep].astype(np.float32),
+                                 pred=pred[keep],
+                                 th={q: TH[q][pos] for q in QGRID})
+        del p, Xf
+    del EMOD
+    print("  후보 추출 완료 · " + " · ".join(
+        f"{hn} {sum(len(CAND[(A,hn)]['i']) for A in assets if (A,hn) in CAND):,}" for hn in HS),
+        flush=True)
+    DIRP = {}
+    for hn, H in HS.items():
+        for q0 in QUARTERS:
+            Xs, ys, ws = [], [], []
+            for A in assets:
+                c = CAND.get((A, hn))
+                if c is None:
+                    continue
+                m = c["ts"] < np.datetime64(q0 - pd.Timedelta(minutes=5 * H))
+                if m.sum() < 40:
+                    continue
+                Xs.append(c["X"][m]); ys.append((c["fwd"][m] > 0).astype(int))
+                ws.append(np.abs(c["fwd"][m]))
+            if not Xs:
+                continue
+            X = np.vstack(Xs); y = np.concatenate(ys); w = np.concatenate(ws)
+            if len(y) < 300 or y.mean() in (0.0, 1.0):
+                continue
+            clfs = [HistGradientBoostingClassifier(
+                max_iter=150, learning_rate=0.05, max_depth=3, l2_regularization=3.0,
+                random_state=sd).fit(X, y, sample_weight=w / w.mean()) for sd in (11, 907, 4231)]
+            for A in assets:
+                c = CAND.get((A, hn))
+                if c is None:
+                    continue
+                te = (c["ts"] >= np.datetime64(q0)) & (c["ts"] < np.datetime64(
+                    q0 + pd.DateOffset(months=3)))
+                if te.sum():
+                    DIRP.setdefault((A, hn), np.full(len(c["i"]), np.nan))[te] = np.mean(
+                        [cf.predict_proba(c["X"][te])[:, 1] for cf in clfs], axis=0)
+        print(f"  [방향 {hn}] 완료", flush=True)
+    # 🔴건별 레코드를 반드시 남긴다 — 이항 SE 는 **틀린다**. 20자산의 극단-E|r| 봉은 같은 날에
+    #   뭉치므로(시장 전체 변동성 급등) 진짜 SE 는 훨씬 크다. 날짜블록 검정을 하려면 원본이 있어야 한다.
+    recs = []
+    for hn in HS:
+        for A in assets:
+            c = CAND.get((A, hn)); p_ = DIRP.get((A, hn))
+            if c is None or p_ is None:
+                continue
+            m = np.isfinite(p_)
+            if not m.sum():
+                continue
+            d = {"asset": A, "H": hn, "ts": c["ts"][m], "fwd": c["fwd"][m], "prob": p_[m]}
+            for q in QGRID:
+                d[f"q{int(q*1000)}"] = (np.isfinite(c["th"][q]) & (c["pred"] > c["th"][q]))[m]
+            recs.append(pd.DataFrame(d))
+    REC = pd.concat(recs, ignore_index=True)
+    REC.to_parquet(OUT / "wall_records.parquet")
+    print(f"  건별 레코드 {len(REC):,} 저장 → wall_records.parquet", flush=True)
+
+    rows = []
+    for hn in HS:
+        for q in QGRID:
+            fw, pr = [], []
+            for A in assets:
+                c = CAND.get((A, hn)); p_ = DIRP.get((A, hn))
+                if c is None or p_ is None:
+                    continue
+                m = np.isfinite(p_) & np.isfinite(c["th"][q]) & (c["pred"] > c["th"][q])
+                if m.sum():
+                    fw.append(c["fwd"][m]); pr.append(p_[m])
+            if not fw:
+                continue
+            fw = np.concatenate(fw); pr = np.concatenate(pr)
+            if len(fw) < 200:
+                continue
+            side = np.where(pr > 0.5, 1, -1)
+            acc = float((side * fw > 0).mean()); n = len(fw)
+            se = float(np.sqrt(acc * (1 - acc) / n))
+            ear = float(np.abs(fw).mean())
+            r = {"H": hn, "상위%": f"{1-q:.1%}", "n": n, "E|r|": ear,
+                 "적중%": acc * 100, "SE": se * 100,
+                 "롱적중%": float((fw > 0).mean()) * 100}
+            for c_ in COSTS:
+                wall = 0.5 + c_ / (2 * ear)
+                r[f"벽@{c_:g}"] = (acc - wall) * 100
+                r[f"t@{c_:g}"] = (acc - wall) / se if se > 0 else np.nan
+                r[f"net@{c_:g}"] = (2 * acc - 1) * ear - c_
+            rows.append(r)
+    D = pd.DataFrame(rows)
+    D.to_csv(OUT / "wall_sweep.csv", index=False)
+    print("\n=== ⭐벽까지의 거리 (적중 − 벽, pp) · 괄호는 t = (적중−벽)/SE ===")
+    print(f"{'지평':>5} {'상위':>7} {'n':>7} {'E|r|':>7} {'적중%':>7} {'SE':>5} {'롱적중%':>8} |"
+          + "".join(f"{'벽@'+f'{c:g}bp':>17}" for c in COSTS))
+    for _, x in D.iterrows():
+        print(f"{x['H']:>5} {x['상위%']:>7} {int(x['n']):>7} {x['E|r|']:>7.1f} {x['적중%']:>7.2f} "
+              f"{x['SE']:>5.2f} {x['롱적중%']:>8.2f} |"
+              + "".join(f"{x[f'벽@{c:g}']:>+9.2f} ({x[f't@{c:g}']:>+4.1f})" for c in COSTS))
+    win = D[(D["t@5.52"] > 1.0) | (D["t@10"] > 1.0)]
+    print(f"\n🔴**t > 1.0 인 칸: {len(win)} / {len(D)}** "
+          + ("" if len(win) else "— 어떤 (지평 × 분위)에서도 벽을 유의하게 넘지 못한다."))
+    if len(win):
+        print(win[["H", "상위%", "n", "E|r|", "적중%", "SE", "벽@10", "t@10", "벽@5.52",
+                   "t@5.52", "net@10", "net@5.52"]].to_string(index=False,
+                                                              float_format=lambda v: f"{v:8.2f}"))
+    HS = HS_OLD
+    print(f"\n저장: {OUT/'wall_sweep.csv'}")
+
+
+def stage_wallcheck(a):
+    """🔴**`--stage wall` 의 「벽을 넘었다」를 정직하게 다시 잰다.**
+
+    wall 의 SE 는 **이항(iid)** 이라 틀린다: 20자산의 극단-E|r| 봉은 **같은 날에 뭉친다**
+    (시장 전체 변동성 급등). 여기서는 전부 **날짜블록 부트스트랩**으로 다시 내고, 동시에
+    「모델이 무조건 롱보다 나은가」·「연도별로 사는가」·「자산 부호가 일치하는가」·
+    「독립 일수가 몇인가」를 같이 낸다. 다중성(19칸 스윕)도 명시한다."""
+    from scipy.stats import binomtest
+    rng = np.random.default_rng(SEED)
+    R = pd.read_parquet(OUT / "wall_records.parquet")
+    R["ts"] = pd.to_datetime(R["ts"])
+    R["day"] = R.ts.dt.floor("D")
+    R["year"] = R.ts.dt.year
+    R["side"] = np.where(R.prob > 0.5, 1, -1)
+    QCOLS = [c for c in R.columns if c.startswith("q")]
+    print(f"레코드 {len(R):,} · 지평 {sorted(R.H.unique())} · 분위열 {QCOLS}\n")
+
+    def dblock(v, d, B=4000):
+        days = np.unique(d)
+        by = {x: v[d == x] for x in days}
+        bs = np.empty(B)
+        for b in range(B):
+            pick = rng.choice(days, len(days), replace=True)
+            bs[b] = np.concatenate([by[x] for x in pick]).mean()
+        return float(np.quantile(bs, 0.025)), float(np.quantile(bs, 0.975))
+
+    print(f"{'지평':>4} {'상위':>6} {'n':>6} {'독립일':>6} {'E|r|':>7} | "
+          f"{'모델 건당net':>25} | {'롱 건당net':>25} | {'모델−롱':>22} | {'24/25/26':>24} {'자산':>6}")
+    out = []
+    for hn in ("4h", "12h", "1d", "3d", "7d"):
+        for qc in QCOLS:
+            s = R[(R.H == hn) & R[qc]]
+            if len(s) < 150:
+                continue
+            d = s.day.values
+            ear = float(s.fwd.abs().mean())
+            mdl = (s.side * s.fwd - COST_BP).to_numpy()
+            lng = (s.fwd - COST_BP).to_numpy()
+            dif = mdl - lng
+            l1, h1 = dblock(mdl, d); l2, h2 = dblock(lng, d); l3, h3 = dblock(dif, d)
+            ys = [float((s[s.year == y].side * s[s.year == y].fwd - COST_BP).mean())
+                  if (s.year == y).sum() >= 30 else np.nan for y in YEARS]
+            per = s.groupby("asset").apply(
+                lambda g: float((g.side * g.fwd - COST_BP).mean()), include_groups=False)
+            npos = int((per > 0).sum())
+            q = 1 - int(qc[1:]) / 1000
+            out.append({"H": hn, "상위%": q * 100, "n": len(s), "독립일": len(np.unique(d)),
+                        "E|r|": ear, "모델net": mdl.mean(), "모델lo": l1, "모델hi": h1,
+                        "롱net": lng.mean(), "롱lo": l2, "롱hi": h2,
+                        "증분": dif.mean(), "증분lo": l3, "증분hi": h3,
+                        "e24": ys[0], "e25": ys[1], "e26": ys[2],
+                        "양수자산": npos, "자산수": len(per),
+                        "signp": binomtest(npos, len(per), 0.5, "greater").pvalue})
+            print(f"{hn:>4} {1-int(qc[1:])/1000:>6.1%} {len(s):>6} {len(np.unique(d)):>6} "
+                  f"{ear:>7.1f} | {mdl.mean():>+8.2f} [{l1:>+7.2f},{h1:>+7.2f}] {'✅' if l1>0 else '  '}"
+                  f" | {lng.mean():>+8.2f} [{l2:>+7.2f},{h2:>+7.2f}] {'✅' if l2>0 else '  '}"
+                  f" | {dif.mean():>+7.2f} [{l3:>+6.1f},{h3:>+6.1f}] {'✅' if l3>0 else '  '}"
+                  f" | " + "".join(f"{v:>+8.1f}" for v in ys) + f" {npos:>3}/{len(per):<3}")
+    D = pd.DataFrame(out)
+    D.to_csv(OUT / "wall_check.csv", index=False)
+    ok = D[(D.모델lo > 0) & (D[["e24", "e25", "e26"]] > 0).all(axis=1) & (D.signp < 0.05)]
+    print(f"\n🔴**세 관문 동시 통과**(모델 건당net 날짜블록 CI 0배제 & 세 해 양수 & "
+          f"자산 부호검정 p<0.05): **{len(ok)} / {len(D)}칸**")
+    if len(ok):
+        print(ok[["H", "상위%", "n", "독립일", "E|r|", "모델net", "모델lo", "모델hi", "증분",
+                  "증분lo", "e24", "e25", "e26", "양수자산", "자산수", "signp"]].to_string(
+            index=False, float_format=lambda v: f"{v:8.2f}"))
+    print(f"\n⚠️다중성: 이 표는 **{len(D)}칸** 스윕이다(지평 5 × 분위 5). 통과 칸은 그 사실과 함께 읽는다."
+          f"\n⚠️독립일수 열을 보라 — n 이 커도 **같은 날에 뭉쳐 있으면** 실효 표본은 그 날 수다.")
+    print(f"\n저장: {OUT/'wall_check.csv'}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reuse", action="store_true", help="저장된 스크린 CSV 재사용")
     ap.add_argument("--stage", required=True,
-                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit"])
+                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit", "wall", "wallcheck"])
     ap.add_argument("--minn", type=int, default=120, help="WF 선택 최소 사건 수")
     ap.add_argument("--tsel", type=float, default=2.0, help="WF 선택 초과 t 임계")
     ap.add_argument("--start", default="2025-01-01", help="WF 거래 시작 월")
@@ -2537,7 +2805,8 @@ def main() -> int:
      "loao": stage_loao, "fixed": stage_fixed, "crossfix": stage_crossfix,
      "fixedml": stage_fixedml, "crosswf": stage_crosswf,
      "wfml": stage_wfml, "proof": stage_proof,
-     "highvol": stage_highvol, "exit": stage_exit}[a.stage](a)
+     "highvol": stage_highvol, "exit": stage_exit,
+     "wall": stage_wall, "wallcheck": stage_wallcheck}[a.stage](a)
     return 0
 
 
