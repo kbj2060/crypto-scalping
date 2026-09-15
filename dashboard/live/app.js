@@ -3828,6 +3828,72 @@ function renderLiqDensityLegend(hasDensity) {
   if (host.innerHTML !== html) host.innerHTML = html;
 }
 
+// ── 현재가 빠른 갱신 (2026-09-16) ──────────────────────────────────────────────
+// 왜 브라우저가 직접 WS 를 여는가: 서버 경유 경로의 상한은 SSE 주기(1초)다. 현재가 선은
+// «지금 값»이라 1초도 느리게 보인다. 공개 스트림이라 인증이 없고, 브라우저 -> 바이낸스 직결이
+// 서버를 거치지 않으므로 서버 부하도 0 이다. 실패하면 조용히 SSE 값으로 돌아간다(있던 게
+// 사라지지 않는다) -- 그래서 «실패하면 아무 일도 없음»이 이 코드의 기본 동작이다.
+// ⚠️전체 재렌더를 틱마다 하지 않는다. 한 번이 2~5ms 라 10Hz 면 모바일에서 배터리를 먹는다.
+//   대신 표식이 달린 **세 요소만** 옮긴다(선·배지·숫자). 전체 렌더는 그대로 1초.
+let liveLineCtx = null;
+let priceWs = null, priceWsAsset = null, lastFastPriceAt = 0, priceWsRetryAt = 0;
+const FAST_PRICE_MIN_INTERVAL_MS = 80;   // 12.5Hz. 사람 눈에는 연속이고 DOM 은 세 번만 만진다
+
+function updateLivePriceFast(price) {
+  const c = liveLineCtx;
+  if (!c || !(price > 0) || !c.svg.isConnected) return;
+  const now = Date.now();
+  if (now - lastFastPriceAt < FAST_PRICE_MIN_INTERVAL_MS) return;
+  lastFastPriceAt = now;
+  const span = Math.max(c.yMax - c.yMin, 1e-5);
+  const raw = c.mt + ((c.yMax - price) * c.ch) / span;
+  // 축 밖으로 나가면 가장자리에 붙인다 -- 다음 전체 렌더(1초 안)가 축을 다시 잡는다.
+  const y = Math.max(c.mt, Math.min(c.mt + c.ch, raw));
+  const line = c.svg.querySelector('[data-live="line"]');
+  const box = c.svg.querySelector('[data-live="box"]');
+  const txt = c.svg.querySelector('[data-live="text"]');
+  if (!line || !box || !txt) return;   // 아직 안 그렸거나 현재가 선이 없는 판
+  line.setAttribute("y1", y); line.setAttribute("y2", y);
+  const labelY = Math.max(c.mt + 9, Math.min(c.mt + c.ch - 9, y));
+  box.setAttribute("y", labelY - 9);
+  txt.setAttribute("y", labelY + 4);
+  txt.textContent = fmtNum(price, 1);
+}
+
+function ensurePriceWs() {
+  const asset = activeSnapshotAsset;
+  const symbol = ((ASSET_CONFIG[asset] || {}).symbol || "").toLowerCase();
+  const want = activePageTab === "snapshot" && symbol && !document.hidden;
+  if (!want || priceWsAsset !== asset) {
+    if (priceWs) { try { priceWs.close(); } catch (e) { /* 이미 닫혔으면 그만이다 */ } priceWs = null; }
+    priceWsAsset = null;
+    if (!want) return;
+  }
+  if (priceWs) return;
+  // 막힌 환경(회사망·차단)에서 tick 마다 다시 열면 초당 한 번씩 실패를 반복한다. 5초 간격으로.
+  if (Date.now() < priceWsRetryAt) return;
+  priceWsRetryAt = Date.now() + 5000;
+  priceWsAsset = asset;
+  try {
+    const ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol}@trade`);
+    priceWs = ws;
+    ws.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        if (d.e !== "trade") return;
+        const price = Number(d.p);
+        if (!(price > 0)) return;   // 바이낸스가 p:"0" 을 섞어 보낸다(실측 0.3%)
+        latestLivePriceByAsset[priceWsAsset] = price;
+        updateLivePriceFast(price);
+      } catch (e) { /* 한 메시지가 깨져도 스트림은 계속 간다 */ }
+    };
+    ws.onclose = () => { if (priceWs === ws) { priceWs = null; priceWsAsset = null; } };
+    ws.onerror = () => { try { ws.close(); } catch (e) { /* noop */ } };
+  } catch (e) {
+    priceWs = null; priceWsAsset = null;   // WS 자체가 막힌 환경 -- SSE 값으로 산다
+  }
+}
+
 async function refreshFootprint() {
   if (chartMode !== "footprint") return;       // 청산맵을 보는 동안은 받을 이유가 없다
   if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
@@ -4780,7 +4846,20 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     pTxt.setAttribute("fill", "#1a1208");
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
+
+    // 현재가 줄만 표식을 단다 -- 틱마다 **이 세 요소만** 옮기려는 것이다(전체 재렌더는 1초).
+    // 표식이 없으면 빠른 갱신이 어느 줄을 움직여야 하는지 알 수 없다.
+    if (p.label === "현재" && isSnapshotChart) {
+      line.dataset.live = "line";
+      rect.dataset.live = "box";
+      pTxt.dataset.live = "text";
+    }
   });
+  // 빠른 갱신이 가격 -> y 를 계산하려면 이번 렌더의 축 규약이 필요하다. 다음 전체 렌더가
+  // 덮어쓴다 -- 즉 이 값은 항상 «지금 화면에 그려진 것»과 같다.
+  if (isSnapshotChart) {
+    liveLineCtx = { svg, yMin, yMax, mt, ch, mobileChart };
+  }
 
   // 2026-09-09 사용자 요청: 청산 밀도 가이드를 **차트 위(패널 HTML)** 로 옮겼다.
   //   기존에는 SVG 안 오른쪽 위 인셋(backing 이 y=0..34)이라, 같은 자리에 새로 생긴
@@ -5208,6 +5287,7 @@ async function tick() {
       refreshMacroCalendar();
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
+      ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }
   } catch (e) {
@@ -5254,6 +5334,7 @@ setInterval(() => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     disconnectDashboardEvents();
+    ensurePriceWs();   // 숨으면 닫는다 -- 백그라운드 탭이 초당 수백 메시지를 받을 이유가 없다
     return;
   }
   connectDashboardEvents();
