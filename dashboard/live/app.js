@@ -15,7 +15,7 @@ const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth"];   // 2026-09-14 사용자 결�
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_POSITION_SIZING_URL = "/api/position-sizing";
-const API_STRADDLE_SHADOW_URL = "/api/straddle-shadow";
+const API_SHADOWS_URL = "/api/shadows";
 const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
@@ -180,8 +180,8 @@ let liquidation5mLastFetchAt = 0;
 let latestBasisLiquidation = null;
 let latestVolLevel = null;
 let volLevelLastFetchAt = 0;
-let latestStraddleShadow = null;
-let straddleShadowLastFetchAt = 0;
+let latestShadows = null;
+let shadowsLastFetchAt = 0;
 let basisLiquidationLastFetchAt = 0;
 // Sudden-liquidation alert (2026-08-27) -- backed by tail_risk_interceptor.py's event-triggered
 // liq_burst_state.json (own file, own writer, updated the instant a new @forceOrder event lands),
@@ -3262,63 +3262,59 @@ async function refreshVolLevel() {
   pushToneHistory("vol_level", (latestVolLevel && latestVolLevel.tone) || "neutral");
 }
 
-// 2026-09-15 스트래들 섀도우 요약. 파일 하나만 읽는 엔드포인트라 5분 폴링으로 충분하다
-// (워커 주기가 300초이므로 더 자주 받아도 같은 값이다).
-async function refreshStraddleShadow() {
+// 2026-09-16 섀도우 진행. 파일만 읽는 엔드포인트라 5분 폴링으로 충분하다(워커 주기가 300초).
+async function refreshShadows() {
   const now = Date.now();
-  if (now - straddleShadowLastFetchAt < 300000) return;
-  straddleShadowLastFetchAt = now;
+  if (now - shadowsLastFetchAt < 300000) return;
+  shadowsLastFetchAt = now;
   try {
-    const res = await fetch(API_STRADDLE_SHADOW_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`straddle shadow ${res.status}`);
-    latestStraddleShadow = await res.json();
+    const res = await fetch(API_SHADOWS_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`shadows ${res.status}`);
+    latestShadows = await res.json();
   } catch (error) {
-    console.error("Straddle shadow fetch error:", error);
-    latestStraddleShadow = { available: false, error: "fetch_failed" };
+    console.error("Shadows fetch error:", error);
+    latestShadows = { available: false, error: "fetch_failed" };
   }
-  renderStraddleShadow();
+  renderShadows();
 }
 
-// 🔴규율: t 가 1 을 넘기 전에는 「번다/안 번다」로 읽지 않는다. 그래서 평균bp 보다 **표본과 t** 를
-// 먼저 적고, 판정 문구도 「판정 불가」를 기본으로 둔다. 색은 위험도가 아니라 중립(회색)이다 --
-// 방향 신호가 아니고 아직 성과 주장도 아니기 때문이다(표시 규약 §2: 방향 없음 = neutral).
-function renderStraddleShadow() {
-  const v = latestStraddleShadow;
-  const sub = el("straddleShadowSub");
-  if (!v || v.available === false) {
+// 🔴규율: |t| 가 1 을 넘기 전에는 「번다/안 번다」로 읽지 않는다. 그래서 표본 진척과 판정이
+// 수익보다 앞에 온다. 색은 전부 중립(회색)이다 -- 방향 신호가 아니고 아직 성과 주장도 아니다
+// (표시 규약 §2: 방향 없음 = neutral).
+function renderShadows() {
+  const v = latestShadows;
+  const sub = el("shadowsSub");
+  if (!v || v.available === false || !Array.isArray(v.rows)) {
     if (sub) sub.textContent = v ? "데이터 없음" : "웜업";
-    setH("straddleShadowList", `<p class="muted" style="padding:16px;">섀도우 원장을 불러오지 못했습니다.</p>`);
+    setH("shadowsList", `<p class="muted" style="padding:16px;">섀도우 원장을 불러오지 못했습니다.</p>`);
     return;
   }
-  const n = v.n || 0;
-  const target = v.target_n || 100;
-  if (sub) sub.textContent = `${v.rule || ""} · 표본 ${n}/${target}쌍`;
-  const rows = [];
-  const pct = Math.min(100, Math.round((n / target) * 100));
-  rows.push(`<div class="ops-health-row"><span class="ops-health-label">표본 진척</span>`
-    + `<span class="ops-health-status-badge neutral">${n} / ${target}쌍 (${pct}%)</span></div>`);
-  if (n > 0) {
-    const t = Number.isFinite(v.t) ? v.t.toFixed(2) : "-";
-    rows.push(`<div class="ops-health-row"><span class="ops-health-label">쌍당 평균</span>`
-      + `<span class="ops-health-status-badge neutral">${v.mean_bp >= 0 ? "+" : ""}${v.mean_bp.toFixed(1)}bp `
-      + `± ${Number.isFinite(v.se_bp) ? v.se_bp.toFixed(1) : "-"} · t ${t}</span></div>`);
-    rows.push(`<div class="ops-health-row"><span class="ops-health-label">승률 · 보유</span>`
-      + `<span class="ops-health-status-badge neutral">${(v.win_rate * 100).toFixed(0)}% · `
-      + `중앙 ${Number.isFinite(v.median_hold_h) ? v.median_hold_h.toFixed(0) : "-"}시간</span></div>`);
-    rows.push(`<div class="ops-health-row"><span class="ops-health-label">최고 · 최악</span>`
-      + `<span class="ops-health-status-badge neutral">${v.best_bp.toFixed(0)} / ${v.worst_bp.toFixed(0)}bp</span></div>`);
-  }
-  const open = v.open;
-  rows.push(`<div class="ops-health-row"><span class="ops-health-label">지금</span>`
-    + `<span class="ops-health-status-badge neutral">`
-    + (open ? `보유 중 · 진입 ${Number(open.entry).toFixed(2)} · 게이트 ${Number(open.gate_ratio).toFixed(3)}`
-            : `대기 중 (게이트 통과 기다림)`) + `</span></div>`);
-  rows.push(`<div class="ops-health-row"><span class="ops-health-label">판정</span>`
-    + `<span class="ops-health-status-badge neutral">${escapeHtml(v.verdict || "-")}</span></div>`);
+  if (sub) sub.textContent = `${v.rows.length}개 · 표본 진척 · 판정 · 수익 · 승률`;
+  const rows = v.rows.map((r) => {
+    let cells;
+    if (r.error) {
+      cells = "원장 읽기 실패";
+    } else {
+      const n = r.n || 0;
+      const target = r.target_n || 0;
+      const pct = target ? Math.min(100, Math.round((n / target) * 100)) : 0;
+      const progress = `${n}/${target}${r.unit || ""} (${pct}%)`;
+      const profit = n
+        ? `${r.mean_bp >= 0 ? "+" : ""}${r.mean_bp.toFixed(1)}bp`
+          + (Number.isFinite(r.t) ? ` t${r.t >= 0 ? "+" : ""}${r.t.toFixed(2)}` : "")
+        : "—";
+      const win = n ? `${(r.win_rate * 100).toFixed(0)}%` : "—";
+      cells = `${progress} · ${escapeHtml(r.verdict || "-")} · ${profit} · ${win}`;
+    }
+    return `<div class="ops-health-row" title="${escapeHtml(r.note || "")}">`
+      + `<span class="ops-health-label">${escapeHtml(r.name)}</span>`
+      + `<span class="ops-health-status-badge neutral">${cells}</span></div>`;
+  });
   rows.push(`<p class="muted" style="padding:8px 16px 4px;">`
-    + `t 가 1 을 넘기 전에는 성과로 읽지 않습니다 — 연구에서 5창 전부 양수였지만 블록 t 가 0.86 이었고,`
-    + ` 이 섀도우는 그 판정에 필요한 표본을 모으는 장치입니다(연 60~130쌍).</p>`);
-  setH("straddleShadowList", rows.join(""));
+    + `|t| 가 1 을 넘기 전에는 성과로 읽지 않습니다. 분모는 그 섀도우가 «독립 재현」이 되는 표본 수입니다`
+    + ` — 스트래들 100쌍(t≈1.8), 방향 게이트 2,214건(연구가 쓴 사건 수, 하루 ~2.6건).`
+    + ` 방향 게이트의 두 줄은 짝입니다: 모델이 무조건 롱을 이기는지가 미해결 관문입니다.</p>`);
+  setH("shadowsList", rows.join(""));
 }
 
 async function refreshBasisLiquiditySignal() {
@@ -5086,7 +5082,7 @@ async function tick() {
       refreshEvrGate();              // 2026-09-15 변동폭 게이트(20자산)
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshVolLevel();             // 2026-09-14 사이징 모델 변동성 예측(4시간 수준)
-      refreshStraddleShadow();       // 2026-09-15 저변동 스트래들 섀도우 요약
+      refreshShadows();              // 2026-09-16 섀도우 진행 (한 줄씩)
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
