@@ -65,3 +65,26 @@
 ## ⚠️바뀌지 않는 것
 경제성은 여전히 0 이다(③ 페이드 +0.58bp/건, 일블록 t −0.35). **더 정확한 위치 표시기**가
 되는 것이지 매매 신호가 되는 게 아니다 — 아티팩트 자신의 "매매 트리거가 아니다"는 그대로다.
+
+## 배포 기록 (2026-09-16)
+`main 4a5fcb9` · 서버 `SERVER_HEAD = LAST_DEPLOYED = 4a5fcb9` · 드리프트 게이트 exit 0.
+라이브 페이로드 확인: `rule_id = eth_extreme_detector_w12_gated_allbars_20260916` ·
+`available: true` · 정밀도 강 69.7 / 중 56.2 / 약 50.8% · 건/일 2.59 / 2.39 / 6.77 ·
+`costw_rule_id: null`(옛 38피쳐 사이드카가 피쳐 형상 검사에 걸려 자동 배제) · 대시보드 API 서빙 확인.
+
+순서: 아티팩트 스테이징 전송 → 코드 푸시 → 워처 배포 확인 → 원자적 `mv` 교체 + 워커 재시작 → 검증.
+이 순서라야 «코드는 29피쳐 기대 / 아티팩트는 38피쳐» 인 죽은 구간이 안 생긴다.
+
+**롤백**: 서버 `data/live/backups/eth_extreme_detector_artifact_tabpfn_20260916` 을
+`data/live/eth_extreme_detector_artifact` 로 되돌리고 `4a5fcb9` 를 revert 하면 끝이다(md5 확인해 뒀다).
+
+## 🔴운영 함정 — 이 워커를 `pkill -f` 로 끄면 supervisor 도 같이 죽는다
+`pkill -f 'live_eth_extreme_detector_worker_20260910.py --loop'` 은 supervisor 의 명령줄
+(`_supervise.sh live_eth_extreme_detector_worker_20260910.py … --loop`)에도 걸려 **둘 다 죽인다.**
+이 supervisor 는 crontab `@reboot` 에서만 뜨므로 자가복구가 안 되고, 워커가 조용히 멈춘다
+(2026-09-16 실제 발생 — 상태 파일이 3분간 안 갱신됐다).
+- 워커만 끄려면: `pgrep -f live_eth_extreme_detector_worker | grep -v _supervise` 로 PID 를 골라 kill.
+- 이미 supervisor 까지 죽였으면: `setsid nohup bash scripts/ops/supervisor_extreme_detector_worker.sh
+  >> logs/supervisor/extreme_detector_worker_reboot.log 2>&1 < /dev/null &` (@reboot 과 같은 방식).
+- **끈 뒤에는 반드시 상태 파일 mtime 과 `rule_id` 를 확인한다** — "교체 완료" 로그만 보고 끝내면
+  워커가 죽은 채로 옛 페이로드가 화면에 남는다.
