@@ -460,6 +460,11 @@ FOOTPRINT_BUCKET = 0.5           # 가격 버킷(달러). 화면 행 크기는 �
 # 실제로 429 가 났다. 차트 하나 빨리 채우자고 주문 경로를 위협할 이유가 없다(백필은 최신 봉부터
 # 채우므로 느려도 «지금 보는 자리»는 1분 안에 찬다).
 FOOTPRINT_CATCHUP_SECONDS = 2.5
+# 받은 테이프를 디스크에 남긴다. 안 남기면 재시작마다 1시간을 REST 로 다시 사와야 하는데,
+# 대시보드는 배포마다 재시작된다(2026-09-15 하루에도 여러 번). 남기면 재시작 뒤 메울 구간이
+# «꺼져 있던 시간»으로 줄어든다 -- 보통 몇 초다.
+FOOTPRINT_SNAPSHOT_PATH = LIVE_DIR / "footprint_eth.json"
+FOOTPRINT_SNAPSHOT_SECONDS = 30.0
 EVENT_POLL_SECONDS = 2.5
 # How long a cached payload may keep being served while its (expensive) replacement computes.
 # Sized to cover a worst-case TabPFN refit (43s measured under GPU contention) with wide margin:
@@ -1819,7 +1824,8 @@ def make_app() -> web.Application:
     #   안 온다 -- 2026-09-15 재확인: 10초에 0건). @trade 를 쓴다(개별 체결, 같은 p/q/T/m).
     FOOTPRINT_AGG_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
     FOOTPRINT_WS_URL = f"wss://fstream.binance.com/ws/{FOOTPRINT_SYMBOL.lower()}@trade"
-    footprint_state: dict[str, Any] = {"bars": {}, "ready": False, "updated": 0.0, "last_ms": 0}
+    footprint_state: dict[str, Any] = {"bars": {}, "ready": False, "updated": 0.0,
+                                   "last_ms": 0, "saved_at": 0.0}
 
     def footprint_bar_start(ts_ms: float) -> int:
         return (int(ts_ms) // 1000) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
@@ -1838,7 +1844,52 @@ def make_app() -> web.Application:
                 del bars[old_bar]   # 새 봉이 생길 때만 정리한다 -- 체결마다 돌 일이 아니다(266/s)
         cell = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)), [0.0, 0.0])
         cell[1 if sell else 0] += qty
-        footprint_state["updated"] = time.time()
+        now = time.time()
+        footprint_state["updated"] = now
+        # ⚠️ready 일 때만 저장한다. 백필이 **진행 중인 봉**을 저장하면, 다음 판이 그걸 «이미 있는
+        # 봉»으로 보고 건너뛰어 반쪽짜리로 굳는다(2026-09-15 시험에서 한 봉이 -83.7% 로 남았다).
+        # 저장된 스냅샷의 계약은 «last_ms 까지 공백이 없다» 이고, 그 보증이 곧 ready 다.
+        if footprint_state["ready"] and now - footprint_state["saved_at"] >= FOOTPRINT_SNAPSHOT_SECONDS:
+            footprint_save()   # 30초마다 -- 죽어도 잃는 건 30초어치이고 그건 REST 로 메운다
+
+    def footprint_save() -> None:
+        """봉 상태를 통째로 덮어쓴다(수십 KB). 증분 append 를 안 쓰는 이유는 진행 중인 봉이
+        계속 자라기 때문 -- 어차피 마지막 상태만 쓸모 있다. tmp -> replace 로 원자적으로."""
+        try:
+            tmp = FOOTPRINT_SNAPSHOT_PATH.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({
+                "bar_seconds": FOOTPRINT_BAR_SECONDS, "bucket": FOOTPRINT_BUCKET,
+                "symbol": FOOTPRINT_SYMBOL, "last_ms": footprint_state["last_ms"],
+                "bars": {str(bar): {str(k): v for k, v in cells.items()}
+                         for bar, cells in footprint_state["bars"].items()},
+            }))
+            tmp.replace(FOOTPRINT_SNAPSHOT_PATH)
+            footprint_state["saved_at"] = time.time()
+        except OSError as exc:
+            footprint_state["saved_at"] = time.time()   # 매 체결마다 재시도하지 않게
+            print(f"footprint snapshot save failed: {exc}", flush=True)
+
+    def footprint_load() -> None:
+        """재시작 직후 1회. 창 밖 봉은 버리고, last_ms 를 복원해 백필이 «꺼져 있던 구간»만
+        메우게 한다. 봉 길이나 버킷이 바뀌었으면 통째로 무시한다 -- 섞이면 조용히 틀린다."""
+        try:
+            saved = json.loads(FOOTPRINT_SNAPSHOT_PATH.read_text())
+        except (OSError, ValueError):
+            return
+        if (saved.get("bar_seconds") != FOOTPRINT_BAR_SECONDS
+                or saved.get("bucket") != FOOTPRINT_BUCKET
+                or saved.get("symbol") != FOOTPRINT_SYMBOL):
+            print("footprint snapshot: 설정이 달라 무시한다", flush=True)
+            return
+        cutoff = (footprint_bar_start(time.time() * 1000)
+                  - (FOOTPRINT_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+        bars = {int(bar): {int(k): [float(v[0]), float(v[1])] for k, v in cells.items()}
+                for bar, cells in (saved.get("bars") or {}).items() if int(bar) >= cutoff}
+        if not bars:
+            return
+        footprint_state["bars"] = bars
+        footprint_state["last_ms"] = int(saved.get("last_ms") or 0)
+        print(f"footprint snapshot: {len(bars)}봉 복원", flush=True)
 
     async def footprint_backfill(gap_from_ms: int, until_ms: int) -> None:
         """WS 가 못 준 구간을 aggTrades 로 메운다. 최신 봉부터, 봉마다 «받을 창»을 따로 잡는다.
@@ -1911,6 +1962,7 @@ def make_app() -> web.Application:
 
     async def collect_footprint(app: web.Application) -> None:
         backfill: asyncio.Task | None = None
+        footprint_load()   # 지난 판이 남긴 봉들 -- 이게 있으면 아래 백필은 공백만 메운다
         # 공용 세션(binance_session)은 total=10초라 WS 에 못 쓴다 -- aiohttp 버전에 따라 그
         # 타임아웃이 WS 에도 걸려 10초마다 끊긴다(끊길 때마다 백필이 다시 뜬다). 전용 세션을
         # 쓰되 total=None 을 **명시**한다: aiohttp 기본값은 5분이라 그냥 두면 5분마다 끊긴다.
@@ -1961,6 +2013,10 @@ def make_app() -> web.Application:
         app["footprint_task"] = asyncio.create_task(collect_footprint(app))
 
     async def stop_footprint_collector(app: web.Application) -> None:
+        # 내려가기 직전에 한 번 더 남긴다 -- 이러면 다음 판이 메울 공백이 «재시작에 걸린 시간»
+        # (보통 1분 남짓)으로 줄어든다. 배포 재시작이 잦은 저장소라 이 한 줄이 제일 크게 먹는다.
+        if footprint_state["ready"]:
+            footprint_save()
         task = app["footprint_task"]
         task.cancel()
         try:
