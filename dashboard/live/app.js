@@ -4481,6 +4481,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     candles.forEach((c, i) => {
       const r = regimeByTsForChart.get(c.time);
       if (!r) return;
+      // 2026-09-16 사용자 "회색칸을 제거해야해. chop 은 그냥 백그라운드로": 횡보는 **안 그린다**.
+      // 회색 칸을 채우면 «신호가 있다»처럼 읽히는데 횡보는 오히려 «아무것도 아니다»다.
+      // 빈 트랙이 그 뜻을 그대로 말한다 -- 칸이 없는 구간 = 횡보. (값은 툴팁으로 계속 읽힌다)
+      if (regimeDominant(r) === "chop") return;
       const rect = document.createElementNS(NS, "rect");
       rect.setAttribute("x", xAt(i)); rect.setAttribute("y", REGIME_RIBBON_Y);
       rect.setAttribute("width", laneW); rect.setAttribute("height", REGIME_RIBBON_H);
@@ -4581,7 +4585,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     candles.forEach((c, i) => {
       const v = byHour.get(Math.floor(c.time / 3600) * 3600);
       if (!v) return;
-      drew += 1;
+      drew += 1;   // «값이 있는 봉» 수다(라벨 툴팁의 근거) -- 아래에서 안 그려도 센다
+      // 레짐의 chop 과 같은 규칙: 「안정」= 변동성 없음은 **안 그린다**. 빈 트랙이 그 뜻이다.
+      if ((v.grade || (v.tone === "warn" ? "주의" : "안정")) === "안정") return;
       const rect = document.createElementNS(NS, "rect");
       rect.setAttribute("x", xAt(i)); rect.setAttribute("y", VOL_RIBBON_Y);
       rect.setAttribute("width", laneW); rect.setAttribute("height", VOL_RIBBON_H);
