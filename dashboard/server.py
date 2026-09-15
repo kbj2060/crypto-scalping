@@ -1111,6 +1111,58 @@ def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
             "cuts": {"calm": VOL_LEVEL_RATIO_CALM, "hot": VOL_LEVEL_RATIO_HOT}}
 
 
+# 2026-09-15 저변동 스트래들 섀도우 요약 (사용자 요청).
+# 🔴이 패널의 첫 임무는 «아직 판정 불가»를 정직하게 보이는 것이다. 어제 연구에서 5창 전부 양수인데
+#   블록 t 가 **0.86** 이었다 — 창당 독립 쌍이 12~76개뿐이라서다. 연 60~130쌍이 쌓여야 t≈1.8 이 된다.
+#   그래서 «수익»보다 **표본 진척(n/100)과 t** 를 앞에 둔다. t<1 이면 해석하지 않는 게 규율이다.
+# 원장은 JSONL 이라 파일 하나만 읽는다(요청 경로 계산 금지 규칙 — 모델도 duckdb 락도 없다).
+STRADDLE_SHADOW_LEDGER = REPO_ROOT / "data" / "live" / "lowvol_straddle_shadow.jsonl"
+STRADDLE_SHADOW_STATE = REPO_ROOT / "data" / "live" / "lowvol_straddle_shadow_state.json"
+STRADDLE_SHADOW_TARGET_N = 100        # 판정 목표 — t≈1.8 이 되는 표본 수(연 60~130쌍이므로 ~1년)
+
+
+def straddle_shadow_payload() -> dict[str, Any]:
+    """쌍 원장 요약 + 지금 무엇을 기다리는지. 계산은 평균/표준오차뿐이다."""
+    out: dict[str, Any] = {"available": True, "target_n": STRADDLE_SHADOW_TARGET_N,
+                           "rule": "익절 +10% / 손절 −3% · 예측변동성 하위 20% · 한 번에 한 쌍"}
+    rows = []
+    try:
+        if STRADDLE_SHADOW_LEDGER.exists():
+            for line in STRADDLE_SHADOW_LEDGER.read_text().splitlines():
+                line = line.strip()
+                if line:
+                    rows.append(json.loads(line))
+    except (OSError, ValueError) as exc:
+        return {"available": False, "error": f"ledger_read_failed: {type(exc).__name__}"}
+    bps = [float(r.get("pair_bp")) for r in rows if isinstance(r.get("pair_bp"), (int, float))]
+    n = len(bps)
+    out["n"] = n
+    if n:
+        mean = sum(bps) / n
+        var = sum((b - mean) ** 2 for b in bps) / (n - 1) if n > 1 else float("nan")
+        se = (var / n) ** 0.5 if n > 1 and var == var else float("nan")
+        holds = sorted(float(r.get("hold_h", 0.0)) for r in rows)
+        out |= {"mean_bp": mean, "se_bp": se,
+                "t": (mean / se) if se and se == se and se > 0 else None,
+                "win_rate": sum(1 for b in bps if b > 0) / n,
+                "total_bp": sum(bps), "best_bp": max(bps), "worst_bp": min(bps),
+                "median_hold_h": holds[n // 2] if holds else None,
+                "last_closed_utc": rows[-1].get("closed_utc")}
+    try:
+        st = json.loads(STRADDLE_SHADOW_STATE.read_text()) if STRADDLE_SHADOW_STATE.exists() else {}
+    except (OSError, ValueError):
+        st = {}
+    op = st.get("open")
+    out["last_check_utc"] = st.get("last_check_utc")
+    out["open"] = ({"entry": op.get("entry"), "gate_ratio": op.get("gate_ratio"),
+                    "opened_utc": op.get("opened_utc")} if op else None)
+    # 판정 규율: t 가 1 을 넘기 전에는 「번다/안 번다」로 읽지 않는다.
+    out["verdict"] = ("표본 없음" if n == 0 else
+                      ("판정 불가" if (out.get("t") is None or abs(out["t"]) < 1.0) else
+                       ("양수 신호" if out["t"] > 0 else "음수 신호")))
+    return out
+
+
 def position_sizing_payload() -> dict[str, Any]:
     """크기 가늠자 상태. **계좌 포지션과의 결합은 프런트가 한다** -- 프런트는 이미
     `/api/binance-account` 를 들고 있어(app.js latestBinanceAccount) 서버에 비동기 의존을
@@ -2517,6 +2569,9 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_straddle_shadow(request: web.Request) -> web.Response:
+        return web.json_response(await asyncio.to_thread(straddle_shadow_payload))
+
     async def api_position_sizing(request: web.Request) -> web.Response:
         payload = await swr_cached(
             "position_sizing", 30.0, lambda: asyncio.to_thread(position_sizing_payload),
@@ -3367,6 +3422,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
     app.router.add_get("/api/position-sizing", api_position_sizing)
+    app.router.add_get("/api/straddle-shadow", api_straddle_shadow)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
