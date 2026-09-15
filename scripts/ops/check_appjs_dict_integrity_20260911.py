@@ -47,7 +47,9 @@ src=open('dashboard/live/app.js').read()
 defined=set(re.findall(r'^(?:async )?function ([A-Za-z_$][\w$]*)', src, re.M))
 defined |= set(re.findall(r'^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(', src, re.M))
 defined |= set(re.findall(r'(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=', src))
-called=set(re.findall(r'\b([A-Za-z_$][\w$]*)\s*\(', src))
+# `.` 뒤의 이름은 **멤버 호출**이라 최상위 함수일 수 없다 -- 빼지 않으면 브라우저 API 가
+# 오탐이 된다(2026-09-16: localStorage.getItem/setItem 이 'Item' 접미사에 걸렸다).
+called=set(re.findall(r'(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(', src))
 # 내장·DOM·라이브러리는 제외: 정의부가 우리 파일에 있는 이름만 본다
 suspects=sorted(n for n in called if n.endswith(('IndicatorItem','SubText','Tone','Html','Item'))
                 and n not in defined)

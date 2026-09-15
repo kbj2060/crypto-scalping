@@ -128,6 +128,11 @@ def recommended_action(component: str) -> str:
         return ("ps -eo pid,args | grep -v handoff_jobs | grep live_eth_extreme_detector_worker; "
                 "nohup setsid bash scripts/ops/supervisor_extreme_detector_worker.sh "
                 ">> logs/supervisor/extreme_detector_worker_manual.log 2>&1 < /dev/null &")
+    if component == "duckdb_trade_tape_eth":
+        # supervisor 가 중복 실행 가드를 갖고 있어 그냥 다시 켜도 안전하다(이미 돌면 스스로 exit 1).
+        return ("ps -eo pid,args | grep -v handoff_jobs | grep live_trade_tape_collector; "
+                "nohup setsid bash scripts/ops/supervisor_trade_tape.sh "
+                ">> logs/supervisor/trade_tape_manual.log 2>&1 < /dev/null &")
     if component.startswith("duckdb_"):
         return "scripts/ops/botctl.sh status; journalctl -u trading-bot.service -n 100 --no-pager"
     return "scripts/ops/triage.sh"
@@ -596,6 +601,7 @@ def run_once(dry_run: bool) -> list[Check]:
     state_path, db_path = OUT / "state.json", OUT / "incidents.sqlite"
     init_db(db_path)
     micro_db = LIVE / "microstructure.duckdb"
+    tape_db = LIVE / "trade_tape.duckdb"
     tail_db = LIVE / "tail_risk.duckdb"
     tail_btc_sol_db = LIVE / "tail_risk_btc_sol.duckdb"
     gex_db = LIVE / "deribit_gex.duckdb"
@@ -625,6 +631,12 @@ def run_once(dry_run: bool) -> list[Check]:
         # daily cron (0 1 * * *); warn/critical give ~1 and ~2 missed days of slack.
         check_duckdb_table_freshness("duckdb_altdata_fear_greed", altdata_db, "fear_greed_index", "recorded_at_utc", 1800, 2880),
         check_duckdb_table_freshness("duckdb_altdata_funding_spread", altdata_db, "cross_exchange_funding_spread", "recorded_at_utc", 1800, 2880),
+        # 2026-09-16: 체결 테이프 수집기. 5초마다 완결된 초를 쓰므로 1분이면 이미 늦은 것이지만,
+        # 조용한 새벽에도 ETH 는 초당 100건 넘게 체결되므로 «행이 없다 = 수집기가 죽었다»가
+        # 성립한다. warn 5분·critical 10분은 다른 1분 수집기들과 같은 값이다.
+        # ⚠️ts_sec 는 epoch 정수라 그대로 cast 하면 안 된다 -- to_timestamp 로 감싸 넘긴다.
+        check_duckdb_table_freshness("duckdb_trade_tape_eth", tape_db, "trade_tape_1s",
+                                     "to_timestamp(ts_sec)", 5, 10),
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
         *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
         # 2026-09-10: 극점 탐지기 워커(섀도우 원장 모양이 아니라 별도 체크).
