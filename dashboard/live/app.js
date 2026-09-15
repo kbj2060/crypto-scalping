@@ -5522,8 +5522,9 @@ async function manualEntryRefreshSize() {
     line.innerHTML = plan.blocked
       ? `<b class="entry-val bad">주문 불가</b> <span class="entry-was">${escapeHtml(plan.blocked)}</span>`
       : `<b class="entry-val">${q.toFixed(3)} ETH</b>`
-        + `<span class="entry-was"> · ${Math.round(Number(plan.notional_usdt) || 0).toLocaleString()} USDT`
-        + ` · 권고 ${rec.toFixed(3)} · ${capNote}</span>`;
+        + `<span class="entry-was"> · ${Math.round(Number(plan.notional_usdt) || 0).toLocaleString()} USDT</span>`;
+    // 사이징 권고 → 상한 → 주문. 세 값이 왜 다른지가 이 사슬 하나로 읽혀야 한다.
+    renderEntryChain(rec, avail, q, cap, plan);
     setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
@@ -5544,6 +5545,33 @@ async function manualEntryRefreshSize() {
     line.textContent = "크기 확인 실패 — 서버 응답 없음";
     setMode("확인 실패");
   }
+}
+
+// 2026-09-15 «사이징 권고가 어디 있어?»(사용자). 세 숫자는 각각 뜻이 다르다:
+//   권고 = 순자산 × 허용배수(100/MAE) ÷ 가격   -- 위험모델이 말하는 «이만큼까지»
+//   가능 = 권고를 상한 3종(원장·순자산·모델)의 최소로 자른 값
+//   주문 = 가능 × 슬라이더 비율               -- 실제로 나가는 양(헤드라인과 같다)
+// 상한이 안 걸리면 가능 칸을 지운다 -- 같은 숫자를 두 번 쓰면 사슬이 안 읽힌다.
+function renderEntryChain(rec, avail, qty, cap, plan) {
+  const box = el("snapEntryChain");
+  if (!box) return;
+  if (!(rec > 0)) { box.hidden = true; return; }
+  const parts = [`<span class="entry-cap">사이징 권고</span><b>${rec.toFixed(3)}</b>`];
+  const arrow = `<span class="entry-arrow">→</span>`;
+  if (!cap.available) {
+    parts.push(arrow, `<b class="dim">상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)</b>`);
+  } else if (Math.abs(avail - rec) > 5e-4) {
+    // 🔴상한이 0 으로 자른 경우도 **보여준다**. 숨기면 «권고 6.764 인데 왜 못 넣나»가 안 읽힌다.
+    parts.push(arrow, `<span class="entry-cap">상한까지</span><b>${avail.toFixed(3)}</b>`);
+  }
+  // 주문 다리는 실제로 나갈 때만. 막혔으면 헤드라인이 이미 «주문 불가»를 말한다.
+  const from = cap.available ? avail : rec;
+  const pct = Math.round(100 * (avail > 0 ? qty / avail : 0));
+  if (!plan.blocked && (Math.abs(qty - from) > 5e-4 || pct < 100)) {
+    parts.push(arrow, `<span class="entry-cap">주문 ${pct}%</span><b>${qty.toFixed(3)} ETH</b>`);
+  }
+  box.innerHTML = parts.join("");
+  box.hidden = false;
 }
 
 // ── 2026-09-12 2단계: 실주문 (2단 확인) ────────────────────────────────────────

@@ -1995,6 +1995,10 @@ svg {
   background: var(--glass); border: 1px solid var(--soft-line); color: var(--muted); }
 .entry-note.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
 .entry-note.live { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, transparent); }
+/* 2026-09-15 사이징 권고 → 상한 → 주문 사슬. .entry-note 는 본문이 muted 라 숫자만 되살린다. */
+#snapEntryChain { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 7px; }
+#snapEntryChain b { font: 700 13px/1.35 var(--font-mono); color: var(--text); }
+#snapEntryChain b.dim { color: var(--muted); font-weight: 600; }
 
 /* 2026-09-13 레버리지 게이지의 «자동» 체크박스. 게이지와 같은 줄에 두되 폭을 안 먹게. */
 .lev-auto { display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
