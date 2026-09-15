@@ -126,7 +126,7 @@ def evr_size_multiplier(state_path: str | None = None, max_lag_min: float = 30.0
     # ⭐**전용 워커를 따로 띄우지 않는다.** 2026-09-15 에 다른 세션이 이미 20자산 E|r| 게이트
     #   워커를 배포했다(`live_evr_gate_worker_20260915.py` → `evr_gate_state.json`). 같은 모델을
     #   한 번 더 도는 건 요청경로 인라인 금지(2026-09-10 실장애)와 서버 부하 양쪽에 걸린다.
-    #   🔴그 워커는 아직 **백분위(`evr_q`)를 안 싣는다** — 없으면 이 층은 **무효과(1.0)** 다.
+    #   `evr_q`(백분위)는 2026-09-15 에 그 워커에 실었다(a75cb85). 없으면 이 층은 **무효과(1.0)** 다.
     path = pathlib.Path(state_path) if state_path else (
         pathlib.Path(__file__).resolve().parents[1] / "data/live/evr_gate_state.json")
     try:

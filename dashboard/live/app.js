@@ -1604,10 +1604,13 @@ function toggleEntryDetail(btn) {
 // indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
-  // 2026-09-14 변동성 예측(사이징 모델). ⚠️키는 subText 문자열이다(규약 §5-1).
+  // 2026-09-14 변동성 예측. ⚠️키는 subText 문자열이다(규약 §5-1).
+  // 🔴2026-09-15 정정: 이 칩은 **표시 전용**이다. 권고 수량을 실제로 정하는 건 MAE 분위 모델
+  //   (`live_eth_mae_quantile_model_20260913`, 09-13 교체)이고 이 모델(`pred_vol`)은 그 모델이
+  //   없을 때의 폴백(`vol_equivalent_qty`)으로 밀렸다. 칩 문구가 «수량을 정한다»고 읽히면 안 된다.
   vol_level: {
-    "안정": "앞으로 4시간 예상 변동폭이 **최근 30일 평소 이하**입니다(그 분포의 하위 80%, 평소의 1.39배 미만). 조용할수록 같은 위험에서 수량을 **키울 수 있습니다** — 정확한 배수는 이 줄에 마우스를 올리면 나옵니다.",
-    "주의": "앞으로 4시간 예상 변동폭이 **최근 30일 평소보다 뚜렷이 큽니다**(평소의 1.39~1.88배, 상위 20~5%). 같은 위험을 지려면 수량을 **줄여야** 합니다.",
+    "안정": "앞으로 4시간 예상 변동폭이 **최근 30일 평소 이하**입니다(그 분포의 하위 80%, 평소의 1.39배 미만). 조용하다는 **눈금**이지 주문 수량이 아닙니다 — 권고 수량은 MAE 분위 모델이 정합니다(이 칩은 그 모델이 없을 때만 대신 씁니다).",
+    "주의": "앞으로 4시간 예상 변동폭이 **최근 30일 평소보다 뚜렷이 큽니다**(평소의 1.39~1.88배, 상위 20~5%). 같은 위험을 지려면 수량을 줄여야 하는 국면이라는 **눈금**입니다 — 실제 감축은 MAE 분위 모델과 E|r| 배수가 합니다.",
     "위험": "앞으로 4시간 예상 변동폭이 **최근 30일 평소의 1.9배 이상**입니다(상위 5%). 방향 경고가 아닙니다 — 이 모델은 방향을 예측하지 않습니다.",
     "웜업": "사이징 워커가 아직 첫 예측을 내지 않았습니다.",
     "데이터 없음": "사이징 워커 상태파일에서 예측값을 읽지 못했습니다.",
@@ -1712,7 +1715,10 @@ const MODEL_INDICATOR_DETAIL = {
     + "(−51.18bp). 그래서 워커가 그 모델을 **아예 호출하지 않습니다**. "
     + "🔴기존 「변동성 예측」 칩과 다릅니다: 그건 «지금 얼마나 출렁이나»(4시간 수준, 사이징용)이고 "
     + "이건 «앞으로 커지나»입니다 — ETH 488k봉 실측에서 앞으로 24시간 |수익| 적중 IC 가 "
-    + "0.279 vs 현재변동성 0.114 이고, 게이트가 고르는 봉의 **69%는 현재 변동성 상위10%가 아닙니다**.",
+    + "0.279 vs 현재변동성 0.114 입니다. 게이트가 고르는 봉 중 현재 변동성 상위10%가 아닌 비율은 "
+    + "**51.5%** 입니다(2024~2026 시간봉 23,511개 재측정 · 종전 표기 69%는 5분봉·2022~ 기준이라 "
+    + "다른 숫자였습니다). 🔴같은 사이징 축인 「변동성 예측」 칩과 순위상관 +0.71 로 겹칩니다 -- "
+    + "겹치는 건 «지금 얼마나 출렁이나»이고, 이 게이트가 더 얹는 건 지평(24시간)과 20자산 OI·청산입니다.",
   breakout_detector:
     "변동성이 추세로 넘어가는 **시점**만 잡습니다. 2026-09-11 압축 게이트를 제거해 «횡보를 거친» "
     + "전환뿐 아니라 **모든** 전환을 봅니다 -- 실제로 전환의 77%는 압축을 거치지 않고 일어납니다. "
@@ -5513,11 +5519,16 @@ async function manualEntryRefreshSize() {
     const avail = Number(plan.available_qty) || 0;
     const capNote = cap.available ? `가능 ${avail.toFixed(3)}`
       : `상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)`;
+    // 2026-09-15 권고 수량에 E|r| 배수가 곱해진다. **왜 줄었는지 화면에 없으면 규칙이 아니다.**
+    const ev = ((cap.risk || {}).evr) || {};
+    const evNote = ev.evr_ok
+      ? ` ×${Number(ev.evr_mult).toFixed(2)}(E|r| 상위 ${Math.round((1 - ev.evr_q) * 100)}%)`
+      : (ev.evr_why ? ` ×1.00(${escapeHtml(ev.evr_why)})` : "");
     line.innerHTML = plan.blocked
       ? `<b class="entry-val bad">주문 불가</b> <span class="entry-was">${escapeHtml(plan.blocked)}</span>`
       : `<b class="entry-val">${q.toFixed(3)} ETH</b>`
         + `<span class="entry-was"> · ${Math.round(Number(plan.notional_usdt) || 0).toLocaleString()} USDT`
-        + ` · 권고 ${rec.toFixed(3)} · ${capNote}</span>`;
+        + ` · 권고 ${rec.toFixed(3)}${evNote} · ${capNote}</span>`;
     setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");

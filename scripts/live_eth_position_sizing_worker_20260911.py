@@ -202,32 +202,37 @@ def risk_mae_table(kl: pd.DataFrame) -> dict:
     """보유시간 × 방향 별 «각오해야 할 역행폭(%)». 모델이 없으면 빈 dict.
 
     순자산을 모르므로 **명목을 여기서 정하지 않는다** -- 허용 배수(=100/MAE)까지만 낸다.
-    계좌와 곱하는 건 대시보드 몫이다(워커는 계좌를 안 본다)."""
-    if maq.load_model() is None:
+    계좌와 곱하는 건 대시보드 몫이다(워커는 계좌를 안 본다).
+
+    ⭐피쳐는 **한 번만** 만든다(2026-09-15). 칸마다 `maq.safe_mae_now` 를 부르면 같은 22열을
+    **10번**(보유시간 5 × 방향 2) 다시 만들었다 -- `model_equivalent_qty` 와 같은 빌더라
+    한 사이클에 11번이었다. 칸마다 달라지는 건 `log_h`/`side` 두 열뿐이다.
+    칸별 예외격리는 없앴다 -- 10번 다 같은 코드 경로였으므로 격리는 애초에 없던 셈이다."""
+    art = maq.load_model()
+    if art is None:
         return {}
-    c = kl["c"].to_numpy(float)
-    q = pd.to_numeric(kl["q"], errors="coerce").to_numpy(float)
-    n = pd.to_numeric(kl["n"], errors="coerce").to_numpy(float)
+    try:
+        X = svm.build_features(kl["timestamp"], kl["c"].to_numpy(float),
+                               pd.to_numeric(kl["q"], errors="coerce").to_numpy(float),
+                               pd.to_numeric(kl["n"], errors="coerce").to_numpy(float),
+                               kl["h"].to_numpy(float), kl["l"].to_numpy(float))
+        base = X.iloc[[-1]]
+        if not np.isfinite(base.to_numpy(float)).all():
+            log("위험모델 계산 실패 -- 피쳐 비유한")
+            return {}
+        cells = [(h, s) for h in RISK_HOLD_MINUTES for s in ("LONG", "SHORT")]
+        grid = pd.concat([base] * len(cells), ignore_index=True)
+        grid["log_h"] = [np.log(max(1.0, float(h))) for h, _ in cells]
+        grid["side"] = [1 if s == "LONG" else -1 for _, s in cells]
+        mae = maq.safe_mae(art["models"], grid, art["mult"])
+    except Exception as e:  # noqa: BLE001 -- 실패해도 워커는 살아야 한다(화면이 통째로 빈다)
+        log(f"위험모델 계산 실패 -- {type(e).__name__}: {e}")
+        return {}
     out: dict[str, dict] = {}
-    why: str | None = None          # 조용히 비우지 않는다 -- 왜 없는지 한 번은 남긴다
-    for h in RISK_HOLD_MINUTES:
-        cell = {}
-        for side in ("LONG", "SHORT"):
-            try:
-                m = maq.safe_mae_now(c, q, n, kl["h"].to_numpy(float), kl["l"].to_numpy(float),
-                                     kl["timestamp"], float(h), side)
-                if m is None:
-                    why = why or "safe_mae_now=None(피쳐 비유한 또는 모델 부재)"
-            except Exception as e:  # noqa: BLE001 -- 한 칸이 실패해도 나머지는 쓸 수 있다
-                m = None
-                why = why or f"{type(e).__name__}: {e}"
-            if m and m > 0:
-                cell[side] = {"safe_mae_pct": round(float(m), 3),
-                              "max_leverage": round(100.0 / float(m), 2)}
-        if cell:
-            out[str(h)] = cell
-    if not out and why:
-        log(f"위험모델 계산 실패 -- {why}")
+    for (h, side), m in zip(cells, mae):
+        if m > 0:
+            out.setdefault(str(h), {})[side] = {"safe_mae_pct": round(float(m), 3),
+                                                "max_leverage": round(100.0 / float(m), 2)}
     return out
 
 
