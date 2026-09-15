@@ -145,6 +145,13 @@ let latestBreakoutDetector = null;
 let breakoutDetectorLastFetchAt = 0;
 const API_BREAKOUT_DETECTOR_URL = "/api/breakout-detector";
 const BREAKOUT_DETECTOR_POLL_MS = 60000;
+// 2026-09-15 E|r| 게이트 — 「앞으로 24시간 크게 움직일 자리인가」만 말한다(20자산).
+// 🔴방향은 말하지 않는다: 같은 아티팩트의 방향 분류기는 실계좌 72왕복에서 적중 47.2%(§5.36-R).
+// 워커 주기 300초라 폴링도 넉넉히 둔다.
+let latestEvrGate = null;
+let evrGateLastFetchAt = 0;
+const API_EVR_GATE_URL = "/api/evr-gate";
+const EVR_GATE_POLL_MS = 120000;
 let vReboundLastFetchAt = 0;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
@@ -1461,6 +1468,8 @@ const STRIP_BAR_LABEL_BY_TONE = {
   extreme_detector: { good: "바닥 발동", bad: "천장 발동", neutral: "미발동" },
   // 2026-09-11 전환 탐지기. 방향 축이 없고 **단계**가 축이다 -- warn=경보(선행), bad=탐지(즉시).
   breakout_detector: { bad: "전환 발동", neutral: "미발동" },
+  // 2026-09-15 E|r| 게이트. 축이 하나(발동 여부)다 — **방향 축이 없다**.
+  evr_gate: { bad: "발동", neutral: "미발동" },
   // 2026-09-11 경보기(예고 모델). 축이 하나(warn/neutral)라 §5-4 문제 없음.
   breakout_prewarn: { warn: "전환 예고", neutral: "미발동" },
   // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
@@ -1625,6 +1634,13 @@ const MODEL_INDICATOR_MEANING = {
     "데이터 없음": "예고 모델이 값을 내지 못하고 있어요.",
     "오류": "시세를 읽지 못해 이번 봉을 채점하지 못했어요.",
   },
+  evr_gate: {
+    "발동": "앞으로 24시간 평소보다 크게 움직일 자리입니다 — 진입을 «할지 말지»의 근거이고, «어느 쪽»은 말하지 않습니다.",
+    "미발동": "20자산 전부 기대 변동폭이 평소 상위 10% 아래예요.",
+    "웜업": "게이트 워커가 아직 첫 계산을 끝내지 않았어요.",
+    "데이터 없음": "게이트 워커가 값을 내지 못하고 있어요.",
+    "오류": "시세를 읽지 못해 이번 사이클을 채점하지 못했어요.",
+  },
   breakout_detector: {
     "전환 발동": "추세 전환이 방금 시작됐습니다 — 반대 방향 포지션이면 청산을 먼저 보세요. 방향은 말하지 않습니다.",
     "미발동": "체결속도·거래대금이 아직 평소 수준이에요.",
@@ -1687,6 +1703,16 @@ const MODEL_INDICATOR_DETAIL = {
     + "의도라 기준이 움직이면 항상 평균 수량이 되어버립니다. 툴팁의 두 숫자는 기준이 다릅니다.\n\n"
     + "🔴 등급 어휘는 그 전(2026-09-14)에도 한 번 고쳤습니다 — 처음 쓴 40%/80% 분위는 "
     + "**평소(40~80%)를 「주의」라고 부르고** 시간의 40%를 주황으로 칠했습니다.",
+  evr_gate:
+    "앞으로 **24시간** 기대 변동폭(E|r|)을 예측해 **상위 10%** 봉만 켭니다(20자산). "
+    + "쓰임은 «진입을 할지 말지»입니다 — 두 독립 설계에서 짝지은 증분 +8.25 / +7.44bp/일로 "
+    + "**CI 가 둘 다 0 을 배제**했고 MDD 를 −47.4% → −8.4% 로 줄였습니다. **손실 차단기**이지 "
+    + "수익 생성기가 아닙니다. 🔴**방향은 말하지 않습니다** — 같은 아티팩트의 방향 분류기는 "
+    + "실계좌 72왕복에서 적중 47.2%(동전 아래)였고, 게이트가 고른 좋은 자리일수록 더 나빴습니다"
+    + "(−51.18bp). 그래서 워커가 그 모델을 **아예 호출하지 않습니다**. "
+    + "🔴기존 「변동성 예측」 칩과 다릅니다: 그건 «지금 얼마나 출렁이나»(4시간 수준, 사이징용)이고 "
+    + "이건 «앞으로 커지나»입니다 — ETH 488k봉 실측에서 앞으로 24시간 |수익| 적중 IC 가 "
+    + "0.279 vs 현재변동성 0.114 이고, 게이트가 고르는 봉의 **69%는 현재 변동성 상위10%가 아닙니다**.",
   breakout_detector:
     "변동성이 추세로 넘어가는 **시점**만 잡습니다. 2026-09-11 압축 게이트를 제거해 «횡보를 거친» "
     + "전환뿐 아니라 **모든** 전환을 봅니다 -- 실제로 전환의 77%는 압축을 거치지 않고 일어납니다. "
@@ -1783,6 +1809,7 @@ const SIGNAL_HORIZON = {
   taker_delta_z_climax: { text: "2시간", title: "발동 조건 자체는 이번 봉 체결 쏠림이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 2.0xATR 도달 확률'로 평가(2026-08-30 교체)" },
   liquidity_sweep: { text: "2.5시간", title: "발동 조건 자체는 48봉 스윙 저/고점 스윕이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2.5시간 안 4.0xATR 도달 확률'로 평가(2026-08-30 표준방식 재학습)" },
   demarker_extreme: { text: "40분", title: "발동 조건 자체는 DeMarker(14) 오실레이터 극단(≥0.90/≤0.10)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '40분 안 0.70xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀, 이 저장소 분류 AUC 역대 최고)" },
+  evr_gate: { text: "게이트 = 24시간", title: "앞으로 24시간의 기대 변동폭 E|r| 을 HGB 로 예측해 인과 확장창 상위 10% 만 켠다(20자산). 예측이지 인지가 아니다 — 추세 전환 탐지기(즉시 인지)와 반대 축이다. 🔴방향 없음." },
   breakout_detector: { text: "탐지 = 즉시", title: "예측이 아니라 즉시 인지다 -- 거래대금·체결속도 z288 이 **둘 다** 후행 q90 을 넘으면 켜진다. 2026-09-11 압축 게이트를 제거해 전환 사건 포착이 26.7% -> 92.0%(OOS, 176건 중 162건)로 오르고 발동은 33.9 -> 25.1회/일 로 줄었다. 발동 2,085회 중 813회가 사건 창 안이다(정밀도 39.0%)." },
   // 2026-09-11 경보기(예고 모델). 옛 «경보 2시간» 은 자명한 대리 타깃 값이라 교체했다.
   breakout_prewarn: { text: "예고 = 30분", title: "앞으로 30분 이내에 **탐지기가 발동할** 확률이다(HGB 5시드 동결 앙상블, 33피쳐). 커버리지 10%(하루 약 28.8회)에서 표본외 정밀도 78.5%, 기저 22.9% -- lift 3.43x. 임계는 확률의 후행 2016봉 분위 q90 이라 인과적이다. ⚠️«탐지기가 켜진다»이지 «큰 이동이 온다»가 아니다 -- 탐지기 자체 정밀도가 39.0% 라 그 위로 못 간다." },
@@ -2923,6 +2950,42 @@ function extremeDetectorIndicatorItem() {
 }
 
 // 2026-09-11 추세 전환 **탐지기** — 발동 여부 한 축. 확률이 없으므로 게이지 없음(규약 §3).
+// 2026-09-15 **E|r| 게이트** — 「언제」만 말한다. 방향 축이 아예 없는 카드다.
+// 🔴카드에 방향을 넣지 말 것: 같은 아티팩트의 방향 분류기는 실계좌 72왕복에서 적중 47.2%
+//   (동전 아래)이고 게이트가 고른 좋은 자리일수록 더 나빴다(−51.18bp · 호메로스 §5.36-R).
+function evrGateIndicatorItem() {
+  const p = latestEvrGate;
+  const base = { key: "evr_gate", label: "변동폭 게이트 (24시간)",
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "봇 내부 상태가 아니라 전용 워커가 20자산 공개 데이터로 계산합니다. "
+                   + "방향은 예측하지 않습니다 — 「크게 움직일 자리인가」만 말합니다. 매매에 연결돼 있지 않습니다." };
+  if (!p || p.error || !p.available) {
+    const sub = !p ? "웜업"
+      : (p.error === "worker_fetch_failed" || p.error === "fetch_failed" ? "오류" : "데이터 없음");
+    return { ...base, tone: "neutral", subText: sub, history: [], times: [] };
+  }
+  const nA = Number(p.n_assets) || 0;
+  const nF = Number(p.n_fired) || 0;
+  const fired = Array.isArray(p.fired) ? p.fired : [];
+  const stateTitle = [
+    nF ? `${nF}종이 기대 변동폭 상위 10% 를 넘었습니다` : "20자산 전부 임계 아래입니다",
+    ...fired.slice(0, 6).map((x) => `▲ ${x.asset} 기대 ${x.evr_bp}bp / 임계 ${x.thr_bp}bp (${x.ratio}배)`),
+    fired.length > 6 ? `… 외 ${fired.length - 6}종` : "",
+    "쓰임은 «진입을 할지 말지»입니다. 두 독립 설계에서 증분 +8.25 / +7.44bp/일 (CI 둘 다 0 배제) · MDD −47.4% → −8.4%.",
+    "🔴방향은 말하지 않습니다 — 방향 분류기는 실계좌 72왕복에서 적중 47.2% 였습니다(호메로스 §5.36-R).",
+    "🔴손실 차단기이지 수익 생성기가 아닙니다. 매매에 연결돼 있지 않습니다.",
+  ].filter(Boolean).join("\n");
+  return { ...base, probaSlot: true,
+    tone: nF > 0 ? "bad" : "neutral",
+    subText: p.subText || (nF > 0 ? "발동" : "미발동"),
+    // ⚠️이 게이지는 **확률이 아니라 발동 비율**이다 -- 규약 §3 예외라 툴팁에 성격을 밝힌다.
+    proba: nA > 0 ? nF / nA : 0,
+    meterNote: p.meterNote || null,
+    meterNoteTitle: "게이지는 20자산 중 발동 비율입니다 — 확률이 아닙니다. 게이트 자체가 봉의 10% 만 켜도록 맞춰져 있습니다.",
+    stateTitle,
+    history: p.history || [], times: p.times || [] };
+}
+
 // 예고는 별도 카드(breakoutPrewarnIndicatorItem)로 뺐다 — 카드당 축 하나.
 function breakoutDetectorIndicatorItem() {
   const p = latestBreakoutDetector;
@@ -2999,6 +3062,20 @@ function breakoutPrewarnIndicatorItem() {
       : "앞으로 30분 이내에 탐지기가 발동할 확률입니다(HGB 5시드 평균)",
     stateTitle,
     history: w.history || [], times: w.times || [] };
+}
+
+async function refreshEvrGate() {
+  const now = Date.now();
+  if (now - evrGateLastFetchAt < EVR_GATE_POLL_MS) return;
+  evrGateLastFetchAt = now;
+  try {
+    const res = await fetch(API_EVR_GATE_URL, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`evr gate ${res.status}`);
+    latestEvrGate = await res.json();
+  } catch (error) {
+    console.error("E|r| gate fetch error:", error);
+    latestEvrGate = { error: "fetch_failed" };
+  }
 }
 
 async function refreshBreakoutDetector() {
@@ -3291,6 +3368,7 @@ function setupPageTabs() {
       vReboundLastFetchAt = 0; refreshVReboundSignal();
       extremeLastFetchAt = 0; refreshExtremeDetector();
       breakoutDetectorLastFetchAt = 0; refreshBreakoutDetector();
+      evrGateLastFetchAt = 0; refreshEvrGate();
       volForecastLastFetchAt = 0; refreshVolForecast();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
@@ -4590,6 +4668,8 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       ethOnlyIndicator(extremeDetectorIndicatorItem()),  // 2026-09-09 극점 탐지기
       ethOnlyIndicator(breakoutPrewarnIndicatorItem()),   // 2026-09-11 추세 전환 경보기
       ethOnlyIndicator(breakoutDetectorIndicatorItem()),  // 2026-09-11 추세 전환 탐지기
+      // 🔴ethOnlyIndicator 로 감싸지 않는다 — 이 게이트는 **20자산 포트폴리오** 지표다.
+      evrGateIndicatorItem(),                             // 2026-09-15 변동폭 게이트(24시간)
     ], "snapSpecializedSignalList", { forceMeter: true });
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
@@ -4639,6 +4719,7 @@ async function tick() {
       refreshVReboundSignal();
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshBreakoutDetector();     // 2026-09-11 횡보→추세 전환
+      refreshEvrGate();              // 2026-09-15 변동폭 게이트(20자산)
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshVolLevel();             // 2026-09-14 사이징 모델 변동성 예측(4시간 수준)
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)

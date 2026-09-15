@@ -431,6 +431,16 @@ VOL_FORECAST_MAX_AGE_MIN = 30.0            # 워커 주기 300초 x 6
 BREAKOUT_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_breakout_detector_state.json"
 BREAKOUT_DETECTOR_MAX_AGE_MIN = 15.0       # 5분봉 3개 -- 봉 마감 +20초에 도는 워커다
 
+# 2026-09-15 **E|r| 게이트** -- 「지금 큰 움직임이 예상되는가」만 말한다(1일 지평 · 20자산).
+# 워커가 채점한다(scripts/live_evr_gate_worker_20260915.py). 봉의 10%만 발동한다.
+# 🔴🔴**방향은 말하지 않는다.** 같은 아티팩트의 방향 분류기는 **실계좌 72왕복에서 적중 47.2%**
+#   (동전 아래)이고 게이트가 고른 좋은 자리일수록 더 나빴다(−51.18bp) -- 호메로스 §5.36-R.
+#   그래서 워커는 `art["dir"]` 를 **아예 호출하지 않는다**. 이름도 direction_gate 가 아니다.
+# 게이트 자체의 근거: 두 독립 설계에서 짝지은 증분 +8.25 / +7.44bp/일 · **CI 둘 다 0배제** ·
+#   MDD 를 −47.4% -> −8.4% 로 줄인다. **손실 차단기**이지 수익 생성기가 아니다. 표시 전용.
+EVR_GATE_STATE_PATH = REPO_ROOT / "data" / "live" / "evr_gate_state.json"
+EVR_GATE_MAX_AGE_MIN = 30.0          # 워커 주기 300초 x 6
+
 # 2026-09-11 크기 가늠자 -- 역변동성 사이징의 실시간 눈금
 # (scripts/live_eth_position_sizing_worker_20260911.py). 읽기만 한다.
 # 🔴수익을 예측하지 않는다. 검정된 것은 위험 축뿐이다(무작위 진입 82,167건에서 평균 명목 동일
@@ -1033,6 +1043,13 @@ def breakout_detector_payload() -> dict[str, Any]:
     return worker_payload(BREAKOUT_DETECTOR_STATE_PATH, BREAKOUT_DETECTOR_MAX_AGE_MIN,
                           require_ok=True, stamp_available=True,
                           extra_missing={"history": [], "times": []})
+
+
+def evr_gate_payload() -> dict[str, Any]:
+    """E|r| 게이트(1일 · 상위10% · 20자산) 워커 상태. **방향은 담지 않는다.**"""
+    return worker_payload(EVR_GATE_STATE_PATH, EVR_GATE_MAX_AGE_MIN,
+                          require_ok=True, stamp_available=True,
+                          extra_missing={"assets": [], "fired": [], "n_fired": 0, "n_assets": 0})
 
 
 # 2026-09-14 사용자 요청: 사이징 변동성 모델(A)을 «모델 내부 지표»에 신호로 띄운다.
@@ -2085,6 +2102,14 @@ def make_app() -> web.Application:
             max_stale=STALE_GRACE_SECONDS,
         )
 
+    async def load_evr_gate() -> dict[str, Any]:
+        """E|r| 게이트 -- 워커가 쓴 상태 파일을 읽기만 한다(모델 인라인 금지)."""
+        return await swr_cached(
+            "evr_gate", EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(evr_gate_payload),
+            max_stale=STALE_GRACE_SECONDS,
+        )
+
     async def load_breakout_detector() -> dict[str, Any]:
         """횡보→추세 전환 탐지기 -- 워커가 쓴 상태 파일을 읽기만 한다(계산 인라인 금지)."""
         return await swr_cached(
@@ -2505,6 +2530,9 @@ def make_app() -> web.Application:
     async def api_breakout_detector(request: web.Request) -> web.Response:
         return web.json_response(await load_breakout_detector(),
                                  headers=NOCACHE)
+
+    async def api_evr_gate(request: web.Request) -> web.Response:
+        return web.json_response(await load_evr_gate(), headers=NOCACHE)
 
     async def api_chart_markers(request: web.Request) -> web.Response:
         payload = await load_chart_markers(request.query.get("asset", "eth"))
@@ -3299,6 +3327,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/extreme-detector", api_extreme_detector)
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
+    app.router.add_get("/api/evr-gate", api_evr_gate)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
