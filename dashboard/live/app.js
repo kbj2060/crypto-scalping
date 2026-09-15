@@ -812,10 +812,19 @@ async function maybeFetchSnapshotChartHistory() {
 
 // 스로틀된 차트 갱신. render() 경로와 SSE 시세 경로가 **같은 게이트**를 공유한다.
 // 스냅샷 탭이 아닐 때는 그리지 않는다(숨은 패널을 그리는 건 순수 낭비 -- 2026-08-25 규약).
+// 풋프린트 모드는 셀이 체결마다 자란다 -- 더 짧은 간격이 실제로 새 그림을 만든다.
+// 청산맵 모드는 데이터가 5분·1시간 단위라 짧게 해봐야 같은 그림을 다시 그릴 뿐이다.
+// (현재가 선은 전체 렌더와 무관하게 updateLivePriceFast 가 80ms 로 따로 움직인다)
+const FOOTPRINT_RENDER_MIN_INTERVAL_MS = 400;
+function chartRenderGateMs() {
+  return chartMode === "footprint" ? FOOTPRINT_RENDER_MIN_INTERVAL_MS
+    : SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS;
+}
+
 function maybeRenderSnapshotChartNow() {
   if (activePageTab !== "snapshot" || isScrolling) return;
   const now = Date.now();
-  if (now - lastSnapshotChartRenderAt < SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS) return;
+  if (now - lastSnapshotChartRenderAt < chartRenderGateMs()) return;
   lastSnapshotChartRenderAt = now;
   updateSnapshotCandleLive();
   renderSnapshotChart();
@@ -3834,6 +3843,132 @@ function renderLiqDensityLegend(hasDensity) {
   if (host.innerHTML !== html) host.innerHTML = html;
 }
 
+// ── 현재가 빠른 갱신 (2026-09-16) ──────────────────────────────────────────────
+// 왜 브라우저가 직접 WS 를 여는가: 서버 경유 경로의 상한은 SSE 주기(1초)다. 현재가 선은
+// «지금 값»이라 1초도 느리게 보인다. 공개 스트림이라 인증이 없고, 브라우저 -> 바이낸스 직결이
+// 서버를 거치지 않으므로 서버 부하도 0 이다. 실패하면 조용히 SSE 값으로 돌아간다(있던 게
+// 사라지지 않는다) -- 그래서 «실패하면 아무 일도 없음»이 이 코드의 기본 동작이다.
+// ⚠️전체 재렌더를 틱마다 하지 않는다. 한 번이 2~5ms 라 10Hz 면 모바일에서 배터리를 먹는다.
+//   대신 표식이 달린 **세 요소만** 옮긴다(선·배지·숫자). 전체 렌더는 그대로 1초.
+let liveLineCtx = null;
+let priceWs = null, priceWsAsset = null, lastFastPriceAt = 0, priceWsRetryAt = 0;
+const FAST_PRICE_MIN_INTERVAL_MS = 80;   // 12.5Hz. 사람 눈에는 연속이고 DOM 은 세 번만 만진다
+
+// 삼각형 좌표는 여기 한 곳에서만 만든다(그리는 쪽·옮기는 쪽이 같은 모양을 써야 한다).
+// 꼭짓점이 x 에 닿고 몸통이 오른쪽으로 -- 플롯을 침범하지 않고 행만 가리킨다.
+const MARKER_W = 8, MARKER_H = 10;
+function markerPoints(x, y) {
+  return `${x},${y} ${x + MARKER_W},${y - MARKER_H / 2} ${x + MARKER_W},${y + MARKER_H / 2}`;
+}
+
+function updateLivePriceFast(price) {
+  const c = liveLineCtx;
+  if (!c || !(price > 0) || !c.svg.isConnected) return;
+  const now = Date.now();
+  if (now - lastFastPriceAt < FAST_PRICE_MIN_INTERVAL_MS) return;
+  lastFastPriceAt = now;
+  const span = Math.max(c.yMax - c.yMin, 1e-5);
+  const raw = c.mt + ((c.yMax - price) * c.ch) / span;
+  // 축 밖으로 나가면 가장자리에 붙인다 -- 다음 전체 렌더(1초 안)가 축을 다시 잡는다.
+  const y = Math.max(c.mt, Math.min(c.mt + c.ch, raw));
+  const line = c.svg.querySelector('[data-live="line"]');
+  const tri = c.svg.querySelector('[data-live="tri"]');
+  const box = c.svg.querySelector('[data-live="box"]');
+  const txt = c.svg.querySelector('[data-live="text"]');
+  const lab = c.svg.querySelector('[data-live="label"]');
+  if (!box || !txt || !(line || tri)) return;   // 아직 안 그렸거나 현재가 표시가 없는 판
+  if (line) { line.setAttribute("y1", y); line.setAttribute("y2", y); }
+  if (tri) tri.setAttribute("points", markerPoints(c.markerX, y));
+  const labelY = Math.max(c.mt + 9, Math.min(c.mt + c.ch - 9, y));
+  box.setAttribute("y", labelY - 9);
+  txt.setAttribute("y", labelY + 4);
+  if (lab) lab.setAttribute("y", labelY + 4);
+  txt.textContent = fmtNum(price, 1);
+}
+
+// ── 진행 중인 봉의 셀을 브라우저가 직접 쌓는다 (2026-09-16) ───────────────────────
+// 이미 현재가용으로 **모든 체결**을 WS 로 받고 있다. 같은 규칙으로 버킷에 넣으면 진행 중인
+// 봉은 서버 폴링(2초)을 기다릴 필요가 없다 -- 틱 단위로 자란다.
+// ⚠️이중계상을 막는 규약: **WS 가 그 봉이 열리기 전부터 붙어 있었을 때만** 서버 값을 내 값으로
+//   갈아끼운다. 봉 중간에 붙었으면 앞부분이 없으므로 서버 값을 그대로 쓴다(반쪽을 진짜처럼
+//   보여주지 않는다 -- 서버 스냅샷에서 겪은 그 실패다).
+let footprintLive = { barStart: 0, since: Infinity, bucket: 0.5, cells: new Map() };
+
+// ⚠️서버(파이썬)의 round() 는 **은행가 반올림**이다: 4880.5 -> 4880, 4881.5 -> 4882.
+// JS Math.round 는 올림이라 4881, 4882 가 된다. 버킷이 0.5 이고 ETH 틱이 0.01 이라 가격이
+// .25/.75 로 끝나면 정확히 .5 가 되는데, 그게 전체의 약 2% 다 -- 그만큼이 **다른 행**에 들어가
+// 인계 순간 셀이 한 칸 튄다. 같은 격자를 쓰려면 같은 규약을 써야 한다.
+function roundHalfEven(x) {
+  const f = Math.floor(x), d = x - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
+}
+
+function footprintLiveAdd(price, qty, tsMs, sell) {
+  const barSec = Math.floor(tsMs / 1000 / CHART_CANDLE_MIN / 60) * CHART_CANDLE_MIN * 60;
+  if (barSec !== footprintLive.barStart) {
+    footprintLive.barStart = barSec;
+    footprintLive.cells = new Map();
+  }
+  if (footprintLive.since === Infinity) footprintLive.since = tsMs;   // WS 가 붙은 시각
+  const key = roundHalfEven(price / footprintLive.bucket);
+  const cell = footprintLive.cells.get(key) || [0, 0];
+  cell[sell ? 1 : 0] += qty;
+  footprintLive.cells.set(key, cell);
+}
+
+// 서버 payload 의 마지막 봉을 내 실시간 버킷으로 바꾼다(조건을 만족할 때만).
+function footprintMergeLive(byTime, bucket) {
+  footprintLive.bucket = bucket;   // 서버가 정한 격자를 따른다 -- 둘이 다르면 섞이면 안 된다
+  const bar = footprintLive.barStart;
+  if (!bar || !byTime.has(bar)) return;
+  if (footprintLive.since > bar * 1000) return;   // 봉 중간에 붙었다 -> 서버 값 유지
+  byTime.set(bar, [...footprintLive.cells.entries()]
+    .map(([k, c]) => [k * bucket, c[0], c[1]])
+    .sort((a, b) => a[0] - b[0]));
+}
+
+function ensurePriceWs() {
+  const asset = activeSnapshotAsset;
+  const symbol = ((ASSET_CONFIG[asset] || {}).symbol || "").toLowerCase();
+  const want = activePageTab === "snapshot" && symbol && !document.hidden;
+  if (!want || priceWsAsset !== asset) {
+    if (priceWs) { try { priceWs.close(); } catch (e) { /* 이미 닫혔으면 그만이다 */ } priceWs = null; }
+    priceWsAsset = null;
+    if (!want) return;
+  }
+  if (priceWs) return;
+  // 막힌 환경(회사망·차단)에서 tick 마다 다시 열면 초당 한 번씩 실패를 반복한다. 5초 간격으로.
+  if (Date.now() < priceWsRetryAt) return;
+  priceWsRetryAt = Date.now() + 5000;
+  priceWsAsset = asset;
+  try {
+    const ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol}@trade`);
+    priceWs = ws;
+    ws.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        if (d.e !== "trade") return;
+        const price = Number(d.p);
+        if (!(price > 0)) return;   // 바이낸스가 p:"0" 을 섞어 보낸다(실측 0.3%)
+        latestLivePriceByAsset[priceWsAsset] = price;
+        updateLivePriceFast(price);
+        const qty = Number(d.q);
+        if (qty > 0 && priceWsAsset === "eth") {
+          footprintLiveAdd(price, qty, Number(d.T), !!d.m);
+          // 체결이 곧 셀의 변화다. 스로틀은 maybeRenderSnapshotChartNow 안에 있다(모드별).
+          if (chartMode === "footprint") maybeRenderSnapshotChartNow();
+        }
+      } catch (e) { /* 한 메시지가 깨져도 스트림은 계속 간다 */ }
+    };
+    ws.onclose = () => { if (priceWs === ws) { priceWs = null; priceWsAsset = null; } };
+    ws.onerror = () => { try { ws.close(); } catch (e) { /* noop */ } };
+  } catch (e) {
+    priceWs = null; priceWsAsset = null;   // WS 자체가 막힌 환경 -- SSE 값으로 산다
+  }
+}
+
 async function refreshFootprint() {
   if (chartMode !== "footprint") return;       // 청산맵을 보는 동안은 받을 이유가 없다
   if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
@@ -3859,13 +3994,16 @@ function footprintForChart() {
   const bars = Array.isArray(payload && payload.bars)
     ? payload.bars.filter((b) => Array.isArray(b.levels) && b.levels.length) : [];
   if (!bars.length) return null;
+  const bucket = Number(payload.bucket) || 0.5;
+  const byTime = new Map(bars.map((b) => [b.time, b.levels]));
+  footprintMergeLive(byTime, bucket);   // 진행 중인 봉만 실시간 값으로 대체
   return {
-    bucket: Number(payload.bucket) || 0.5,
+    bucket,
     ready: !!payload.ready,
     barsExpected: Number(payload.barsExpected) || bars.length,
     barCount: bars.length,
     firstTime: bars[0].time,
-    byTime: new Map(bars.map((b) => [b.time, b.levels])),
+    byTime,
   };
 }
 
@@ -4208,7 +4346,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // Rendering (the actual lines/boxes) still happens later, after candles/markers, so paint order
   // is unchanged.
   const priceLabels = [];
-  if (includeCurrentPrice && currentPrice > 0) priceLabels.push({ val: currentPrice, color: "var(--accent)", label: "현재", dashed: true, width: 2 });
+  // 2026-09-16 풋프린트에서는 현재가를 **가로선이 아니라 삼각형**으로 찍는다(사용자 요청).
+  // 선은 가격 행을 가로질러 셀 숫자를 덮는데, 하필 현재가 근처가 제일 중요한 행이다.
+  // 삼각형은 플롯 **바깥**(오른쪽 가장자리)에 앉아 어느 행인지만 가리키고 아무것도 안 가린다.
+  // 청산맵 모드는 그대로 선이다 -- 거기선 덮을 셀이 없고, 선이 가격대를 가로로 읽게 해 준다.
+  if (includeCurrentPrice && currentPrice > 0) {
+    priceLabels.push({ val: currentPrice, color: "var(--accent)", label: "현재", dashed: true,
+                       width: 2, marker: !!footprint });
+  }
   if (entryPrice > 0) priceLabels.push({ val: entryPrice, color: "var(--amber)", label: "진입", dashed: false, width: 3 });
   (riskLevels || []).forEach((level) => {
     if (Number(level.val) > 0) priceLabels.push(level);
@@ -4680,14 +4825,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     ["top", "bottom"].forEach(side => {
       const counts = side === "top" ? cm.ev_top : cm.ev_bottom;
       const names = side === "top" ? cm.ev_top_names : cm.ev_bottom_names;
-      // 불투명 트랙 -- 청산 밀도 밴드가 레인 아래로 비치지 않게 끊는다(모바일 신고의 핵심).
+      // 트랙 색은 **레짐·변동성 리본과 같은 값**이다(var(--muted) 0.18). 2026-09-16 사용자
+      // 지적 "천장과 바닥 백그라운드만 검정색". 그전엔 --chart-bg 0.92(불투명)였는데, 그건
+      // 2026-09-09 에 «청산 밀도 밴드가 레인 아래로 비치지 않게 끊으려고» 넣은 것이었다.
+      // 그 전제는 2026-09-11 에 사라졌다 -- 레인이 플롯 **밖 여백**으로 옮겨졌고 히트맵은
+      // 플롯 안(mt~plotBottom)으로 잘리므로 애초에 겹칠 수가 없다. 전제가 사라진 값이
+      // 남아서 혼자 검게 보였던 것이다.
       const track = document.createElementNS(NS, "rect");
       track.setAttribute("x", laneX0); track.setAttribute("y", LANE_Y[side]);
       track.setAttribute("width", Math.max(laneX1 - laneX0, 1));
       track.setAttribute("height", LANE_H);
       track.setAttribute("rx", "1.5");
-      track.setAttribute("fill", "var(--chart-bg)");
-      track.setAttribute("fill-opacity", "0.92");
+      track.setAttribute("fill", "var(--muted)");
+      track.setAttribute("fill-opacity", "0.18");
       track.setAttribute("data-lane-track", side);
       svg.appendChild(track);
       (counts || []).forEach((n, k) => {
@@ -4755,14 +4905,28 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const lineDashed = p.dashed || p.outOfView;
 
     // Line stays at real (clamped) price position
-    const line = document.createElementNS(NS, "line");
-    line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
-    line.setAttribute("y1", p.realY); line.setAttribute("y2", p.realY);
-    line.setAttribute("stroke", p.color);
-    line.setAttribute("stroke-width", String(p.width || 2));
-    if (lineDashed) line.setAttribute("stroke-dasharray", "4,4");
-    if (p.outOfView) line.setAttribute("opacity", "0.72");
-    svg.appendChild(line);
+    let line = null;
+    if (p.marker) {
+      // 플롯 오른쪽 가장자리에서 **왼쪽을 가리키는** 삼각형. 꼭짓점이 곧 그 가격의 행이다.
+      const tri = document.createElementNS(NS, "polygon");
+      tri.setAttribute("points", markerPoints(ml + cw, p.realY));
+      tri.setAttribute("fill", p.color);
+      if (p.outOfView) tri.setAttribute("opacity", "0.72");
+      // ⚠️여기서 append 하지 않는다. 플롯 오른쪽 끝(ml+cw)과 가격 배지(w-mr+4)가 4px 차이라
+      //   먼저 그리면 배지에 **가려진다**(2026-09-16 첫 판이 그래서 안 보였다). 배지 뒤에
+      //   붙여 배지의 «꼬리»처럼 보이게 한다 -- 꼭짓점은 여전히 진짜 가격 행을 가리킨다
+      //   (배지 자체는 겹침 회피로 위아래로 밀릴 수 있어서 행을 정확히 못 가리킨다).
+      line = tri;   // 아래 data-live 표식과 빠른 갱신이 같은 변수를 쓴다
+    } else {
+      line = document.createElementNS(NS, "line");
+      line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
+      line.setAttribute("y1", p.realY); line.setAttribute("y2", p.realY);
+      line.setAttribute("stroke", p.color);
+      line.setAttribute("stroke-width", String(p.width || 2));
+      if (lineDashed) line.setAttribute("stroke-dasharray", "4,4");
+      if (p.outOfView) line.setAttribute("opacity", "0.72");
+      svg.appendChild(line);
+    }
 
     // Left label (follows label position)
     const txt = document.createElementNS(NS, "text");
@@ -4786,7 +4950,22 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     pTxt.setAttribute("fill", "#1a1208");
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
+    if (p.marker) svg.appendChild(line);   // 배지 위에 -- 위 주석 참조
+
+    // 현재가 줄만 표식을 단다 -- 틱마다 **이 세 요소만** 옮기려는 것이다(전체 재렌더는 1초).
+    // 표식이 없으면 빠른 갱신이 어느 줄을 움직여야 하는지 알 수 없다.
+    if (p.label === "현재" && isSnapshotChart) {
+      line.dataset.live = p.marker ? "tri" : "line";
+      rect.dataset.live = "box";
+      pTxt.dataset.live = "text";
+      txt.dataset.live = "label";
+    }
   });
+  // 빠른 갱신이 가격 -> y 를 계산하려면 이번 렌더의 축 규약이 필요하다. 다음 전체 렌더가
+  // 덮어쓴다 -- 즉 이 값은 항상 «지금 화면에 그려진 것»과 같다.
+  if (isSnapshotChart) {
+    liveLineCtx = { svg, yMin, yMax, mt, ch, markerX: ml + cw };
+  }
 
   // 2026-09-09 사용자 요청: 청산 밀도 가이드를 **차트 위(패널 HTML)** 로 옮겼다.
   //   기존에는 SVG 안 오른쪽 위 인셋(backing 이 y=0..34)이라, 같은 자리에 새로 생긴
@@ -5100,7 +5279,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
     // definition for why Snapshot can afford a coarser interval) -- cheap since renderSnapshotChart()
     // only redraws from already-cached data, no network fetch of its own.
     const nowForSnapshotChart = Date.now();
-    if (nowForSnapshotChart - lastSnapshotChartRenderAt >= SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS) {
+    if (nowForSnapshotChart - lastSnapshotChartRenderAt >= chartRenderGateMs()) {
       lastSnapshotChartRenderAt = nowForSnapshotChart;
       updateSnapshotCandleLive();
       renderSnapshotChart();
@@ -5214,6 +5393,7 @@ async function tick() {
       refreshMacroCalendar();
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
+      ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }
   } catch (e) {
@@ -5260,6 +5440,7 @@ setInterval(() => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     disconnectDashboardEvents();
+    ensurePriceWs();   // 숨으면 닫는다 -- 백그라운드 탭이 초당 수백 메시지를 받을 이유가 없다
     return;
   }
   connectDashboardEvents();

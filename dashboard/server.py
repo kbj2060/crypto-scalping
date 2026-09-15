@@ -216,7 +216,13 @@ LIQUIDATION_MAP_FETCH_LIMIT = 48  # 24h window + buffer for occasional dropped/d
                                    # state machine to bootstrap, so no need for a long fetch. Also
                                    # covers compute_heatmap_history()'s own need (lookback+display+
                                    # slack ~= 24+6+3 = 33h) with room to spare, so unchanged.
-LIQUIDATION_MAP_CACHE_SECONDS = 300  # structure moves slowly -- no need to recompute every tick
+# 2026-09-16 300 -> 60. **더 자주 해도 새 값이 나오지 않는다** -- 이 계산의 입력은 1시간봉
+# 하나뿐이고(LIQUIDATION_MAP_INTERVAL="1h"), 진행 중인 봉은 버린다. 즉 입력은 정시에 한 번만
+# 바뀐다. 300초는 그 변화보다 이미 12배 자주 도는 값이었다.
+# 그래도 줄인 이유는 **정시 직후의 지연**이다: 새 시간봉이 닫힌 뒤 화면에 뜨기까지 최대
+# 5분이었던 것이 1분이 된다. 비용은 실측 0.35초/회(대시보드 최고는 evidence_signal 8.22초)라
+# 분당 0.6% 듀티다. 더 줄이는 건 낭비다 -- 입력이 안 바뀐다.
+LIQUIDATION_MAP_CACHE_SECONDS = 60
 # 2026-08-26: a full recompute (15-day fetch + FeatureEngineer + HMM filter) takes ~10-20s, and the
 # HMM itself is sticky (0.90) so regime rarely flips bar-to-bar -- a 5-min cache doesn't meaningfully
 # stale the reading. See live_regime_wide24_signal_20260826.py's module docstring.
