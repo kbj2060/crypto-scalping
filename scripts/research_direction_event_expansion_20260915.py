@@ -2968,7 +2968,11 @@ def stage_confirm(a):
     이 세션의 모든 스윕은 **2024-01 부터만** 채점했고 **2022-07~2023-12 18개월**은 E|r| 모델
     학습에만 쓰였다 — 채점에는 한 번도 안 썼다. 거기 걸면 독립일이 늘고 다중성은 그대로다.
 
-    🔴사전 등록(이 stage 는 **단 하나의 셀**만 본다): `4h × 예측 E|r| 인과 상위 5%` ·
+    🔴사전 등록(이 stage 는 **단 하나의 셀**만 본다). 기본은 13절의 `4h × 상위5%` 이고,
+    `--hz/--gateq` 로 **다른 사전 등록 셀**을 걸 수 있다 — 2026-09-16 에 `--hz 1d --gateq 0.90`
+    으로 **실제 섀도우로 켠 칸**(`data/models/direction_1d_top10_20260915`)을 같은 규율에
+    태웠다. 셀을 바꿔 가며 훑는 용도가 아니다: **미리 정한 칸 하나**를 새 구간에 거는 것이고,
+    그래서 여기서도 max-t 보정은 필요 없다. ·
     방향 = 상위20% 모집단 학습 3씨드 · w/상한 없음(건당 기준) · 비용 메이커 5.52bp ·
     판정 = **날짜블록 CI 0배제 AND 세 해 양수**. 스윕이 아니므로 max-t 보정은 필요 없다.
     🔴정직한 한계: 2022~23 은 **레짐이 다르고**(§5.30 이 「23년 이전 제외」라 적은 구간),
@@ -2983,8 +2987,14 @@ def stage_confirm(a):
     R = pd.read_parquet(f_new)
     R["ts"] = pd.to_datetime(R["ts"]); R["day"] = R.ts.dt.floor("D"); R["year"] = R.ts.dt.year
     R["side"] = np.where(R.prob > 0.5, 1, -1)
-    R = R[(R.H == "4h") & R["q950"]]                       # ⭐사전 등록 셀 하나
-    print(f"사전 등록 셀 = 4h × 예측 E|r| 상위5% · 전체 레코드 {len(R):,}\n")
+    # ⭐사전 등록 셀 하나. q 컬럼은 **round** 로 만든다 -- int() 는 0.90 에서 q899 가 된다
+    #   (2026-09-15 freeze 에서 실제로 난 부동소수 버그와 같은 자리).
+    qcol = f"q{round(a.gateq * 1000)}"
+    if qcol not in R.columns:
+        print(f"없음: {qcol} (있는 것: {[c for c in R.columns if c.startswith('q')]})"); return
+    R = R[(R.H == a.hz) & R[qcol]]
+    print(f"사전 등록 셀 = {a.hz} × 예측 E|r| 상위{(1 - a.gateq) * 100:.1f}% "
+          f"· 전체 레코드 {len(R):,}\n")
 
     def blk(v, d, B=6000):
         days = np.unique(d); by = {x: v[d == x] for x in days}
