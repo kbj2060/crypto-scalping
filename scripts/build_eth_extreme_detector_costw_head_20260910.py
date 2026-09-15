@@ -40,17 +40,14 @@ TQ_HI, TQ_LO, CAP_W = 0.8, 0.2, 4.0
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(ROOT / "data/live/eth_extreme_detector_costw_artifact"))
-    # 2026-09-16: 부모가 모집단·피쳐를 바꾸면 사이드카도 **같은 프레임**으로 학습해야 형상이 맞는다.
-    ap.add_argument("--frame", default=str(EX), help="extreme_frame.parquet 이 있는 디렉터리")
     a = ap.parse_args()
     import joblib
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.metrics import roc_auc_score
     OUT = Path(a.out); OUT.mkdir(parents=True, exist_ok=True)
 
-    FR = Path(a.frame)
-    A = pd.read_parquet(FR / "extreme_frame.parquet")
-    fm = json.load(open(FR / "extreme_frame_meta.json"))
+    A = pd.read_parquet(EX / "extreme_frame.parquet")
+    fm = json.load(open(EX / "extreme_frame_meta.json"))
     feats, VAL0, W = fm["feats"], pd.Timestamp(fm["val0"]), fm["w"]
     A = A[A["_y"] >= 0].sort_values("_ts").reset_index(drop=True)
     X = np.nan_to_num(A[feats].to_numpy(np.float32), nan=0.0, posinf=0.0, neginf=0.0)

@@ -53,13 +53,7 @@ FEATS = (BASE_COLS + ["atr_pctile"]
          + [f"{k}{w}" for w in (12, 48, 144)
             for k in ("ret", "pos_in_range", "dist_lo", "dist_hi")]
          + ["btc_ret12", "btc_ret48", "eth_btc_div", "hour", "weekday"]
-         + ["is_bottom"])
-# 🔴2026-09-16: 증거신호 발동 더미 8개 + n_signals 를 **뺐다**. 절제 실측(같은 라벨·분할·시드,
-#   같은 2.93건/일): 피쳐만 빼면 AUC 0.7086 -> 0.7060(무변화)이고, **모집단 제약까지 빼면**
-#   정밀도 57.5% -> 67.7% (리프트 2.38 -> 3.62x) 로 **좋아진다**. 「증거신호가 발동한 봉만
-#   채점한다」가 후보 풀을 420,870 -> 34,968 로 12배 줄여 더 좋은 봉을 고를 기회를 뺏고 있었다.
-#   근거: docs/experiments/eth_extreme_detector_drop_evidence_signals_20260916.md
-#   ⚠️`dem`/`kalman_dev_z` 등 BASE_COLS 는 여전히 compute_signals 가 준다 -- 그 모듈 자체는 남는다.
+         + [f"f_{s}" for s in B.SIGNALS] + ["n_signals", "is_bottom"])
 
 
 def _feature_frame(sig: pd.DataFrame, btc: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray]:
@@ -83,32 +77,32 @@ def _feature_frame(sig: pd.DataFrame, btc: pd.DataFrame) -> tuple[pd.DataFrame, 
     S["btc_ret48"] = (b_s / b_s.shift(48) - 1).to_numpy() / np.maximum(atr, 1e-9)
     S["eth_btc_div"] = S["ret12"] - S["btc_ret12"]
     S["hour"] = ts.dt.hour.to_numpy(); S["weekday"] = ts.dt.weekday.to_numpy()
+    for s in B.SIGNALS:
+        S[f"f_{s}"] = 0.0
     tq = pd.Series(S["ret144"].to_numpy()).rolling(RANK_W, min_periods=500).rank(pct=True).to_numpy()
     return S, tq
 
 
 def build_rows(sig: pd.DataFrame, btc: pd.DataFrame, with_label: bool = False) -> pd.DataFrame:
-    """**전체 봉**의 피쳐/라벨 프레임. 라벨은 i+1 부터만 본다(사건 라벨 경계 계약)."""
+    """발동 봉만 모아 피쳐/라벨 프레임을 만든다. 라벨은 i+1 부터만 본다(경계 계약)."""
     S, tq = _feature_frame(sig, btc)
     ts = pd.to_datetime(sig["timestamp"]); n = len(sig)
     hi_ = sig.high.to_numpy(float); lo_ = sig.low.to_numpy(float)
     out = []
     for sd, long in (("bottom", True), ("top", False)):
         fires = {s: sig[f"{sd}_{s}"].fillna(False).to_numpy(bool) for s in B.SIGNALS}
-        anyf = np.zeros(n, bool)                      # 표시용 `_names` 에만 쓴다
+        anyf = np.zeros(n, bool); cnt = np.zeros(n, int)
         for s in B.SIGNALS:
-            anyf |= fires[s]
-        # 🔴2026-09-16: 전체 봉을 채점한다(옛날엔 `np.flatnonzero(anyf)` -- 발동 봉만).
-        idx = np.arange(900, n)
+            anyf |= fires[s]; cnt += fires[s].astype(int)
+        idx = np.flatnonzero(anyf); idx = idx[idx >= 900]
         if not len(idx):
             continue
         X = S.iloc[idx].copy()
-        X["is_bottom"] = 1.0 if long else 0.0
+        for s in B.SIGNALS:
+            X[f"f_{s}"] = fires[s][idx].astype(float)
+        X["n_signals"] = cnt[idx].astype(float); X["is_bottom"] = 1.0 if long else 0.0
         X["_i"] = idx; X["_ts"] = ts.iloc[idx].to_numpy(); X["_long"] = long; X["_tq"] = tq[idx]
-        nm = np.full(len(idx), "", dtype=object)          # 표시용. 모델은 안 본다
-        fi = np.flatnonzero(anyf[idx])
-        nm[fi] = [",".join(s for s in B.SIGNALS if fires[s][i]) for i in idx[fi]]
-        X["_names"] = nm
+        X["_names"] = [",".join(s for s in B.SIGNALS if fires[s][i]) for i in idx]
         if with_label:
             y = np.full(len(idx), -1, dtype=int)
             okm = idx + W < n
@@ -141,9 +135,6 @@ def load_artifact() -> dict | None:
     try:
         import joblib, json
         meta = json.loads((ART / "meta.json").read_text())
-        if list(meta.get("features") or []) != FEATS:      # 옛 38피쳐 아티팩트를 조용히 먹지 않는다
-            _CACHE["art"] = None
-            return None
         _CACHE["art"] = {"models": joblib.load(ART / "model.joblib"), "meta": meta}
     except Exception:
         return None
@@ -157,9 +148,6 @@ def load_costw() -> dict | None:
     try:
         import joblib, json
         meta = json.loads((COSTW_ART / "meta.json").read_text())
-        if list(meta.get("features") or []) != FEATS:      # 형상 불일치면 사이드카 없이 간다(v1 동작)
-            _CACHE["costw"] = None
-            return None
         _CACHE["costw"] = {"models": joblib.load(COSTW_ART / "model.joblib"), "meta": meta}
     except Exception:
         _CACHE["costw"] = None
