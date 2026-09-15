@@ -171,7 +171,7 @@ from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
-    HARD_CAP_X, entry_notional, evr_size_multiplier, exit_fraction_required)
+    HARD_CAP_X, entry_notional, exit_fraction_required)
 from scripts.live_eth_trade_plan_20260913 import (  # noqa: E402
     EXCHANGE_MAX_LEVERAGE, LEVERAGE_STEPS, PRESCRIBE_ACC, plan_now, recommend_hold)
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
@@ -3029,15 +3029,14 @@ def make_app() -> web.Application:
             rec_qty = float(sizing.get("vol_equivalent_qty") or 0.0)
             rec_src = "vol_equivalent"
             if risk.get("available") and equity > 0 and price_ref > 0:
-                # ⭐E|r| 배수는 **상한이 아니라 권고 수량**에 건다(2026-09-15). 상한 세 개
-                #   (원장·순자산·모델)는 안전 성질이라 그대로 두고, «그 안에서 얼마나 쓸까」만 줄인다.
-                #   근거 docs/homer §5.36-R: 실계좌 72왕복에서 명목↔E|r|백분위 −0.426(역방향)이라
-                #   ×q 로 바꾸면 명목 42%에 손익 90% · 명목당 2.2배 · 낙폭 1/15.
-                _ev = evr_size_multiplier()
-                rec_qty = (entry_notional(equity, risk["safe_mae_pct"], use_evr=False)
-                           ["total_notional"] * _ev["evr_mult"] / price_ref)
-                rec_src = "risk_model×evr" if _ev["evr_ok"] else "risk_model"
-                risk["evr"] = _ev
+                # 🔴E|r| 배수(`× evr_q`)를 여기 얹었다가 **켜기 전에 철회했다**(2026-09-15 당일).
+                #   5주 원장 순차 검정에서 증분이 앞뒤로 갈렸다 -- 전반 36건 +11.01bp/건,
+                #   후반 36건 **+0.73**(Δ>0 47.2% = 동전). 상위 10건을 빼면 합계 부호가
+                #   뒤집힌다(+422.5 → −89.7bp). 두 CI 가 0 을 배제하지만 그 유의성을 만드는 건
+                #   전반부다. 원장이 ~100왕복 될 때 다시 본다. 상세 docs/homer §5.36-S.
+                rec_qty = (entry_notional(equity, risk["safe_mae_pct"])
+                           ["total_notional"] / price_ref)
+                rec_src = "risk_model"
             plan = build_entry_plan(
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 recommended_qty=rec_qty,

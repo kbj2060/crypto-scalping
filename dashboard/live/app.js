@@ -1618,10 +1618,13 @@ function toggleEntryDetail(btn) {
 // indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
-  // 2026-09-14 변동성 예측(사이징 모델). ⚠️키는 subText 문자열이다(규약 §5-1).
+  // 2026-09-14 변동성 예측. ⚠️키는 subText 문자열이다(규약 §5-1).
+  // 🔴2026-09-15 정정: 이 칩은 **표시 전용**이다. 권고 수량을 실제로 정하는 건 MAE 분위 모델
+  //   (`live_eth_mae_quantile_model_20260913`, 09-13 교체)이고 이 모델(`pred_vol`)은 그 모델이
+  //   없을 때의 폴백(`vol_equivalent_qty`)으로 밀렸다. 칩 문구가 «수량을 정한다»고 읽히면 안 된다.
   vol_level: {
-    "안정": "앞으로 4시간 예상 변동폭이 **최근 30일 평소 이하**입니다(그 분포의 하위 80%, 평소의 1.39배 미만). 조용할수록 같은 위험에서 수량을 **키울 수 있습니다** — 정확한 배수는 이 줄에 마우스를 올리면 나옵니다.",
-    "주의": "앞으로 4시간 예상 변동폭이 **최근 30일 평소보다 뚜렷이 큽니다**(평소의 1.39~1.88배, 상위 20~5%). 같은 위험을 지려면 수량을 **줄여야** 합니다.",
+    "안정": "앞으로 4시간 예상 변동폭이 **최근 30일 평소 이하**입니다(그 분포의 하위 80%, 평소의 1.39배 미만). 조용하다는 **눈금**이지 주문 수량이 아닙니다 — 권고 수량은 MAE 분위 모델이 정합니다(이 칩은 그 모델이 없을 때만 대신 씁니다).",
+    "주의": "앞으로 4시간 예상 변동폭이 **최근 30일 평소보다 뚜렷이 큽니다**(평소의 1.39~1.88배, 상위 20~5%). 같은 위험을 지려면 수량을 줄여야 하는 국면이라는 **눈금**입니다 — 실제 감축은 MAE 분위 모델과 E|r| 배수가 합니다.",
     "위험": "앞으로 4시간 예상 변동폭이 **최근 30일 평소의 1.9배 이상**입니다(상위 5%). 방향 경고가 아닙니다 — 이 모델은 방향을 예측하지 않습니다.",
     "웜업": "사이징 워커가 아직 첫 예측을 내지 않았습니다.",
     "데이터 없음": "사이징 워커 상태파일에서 예측값을 읽지 못했습니다.",
@@ -1726,7 +1729,10 @@ const MODEL_INDICATOR_DETAIL = {
     + "(−51.18bp). 그래서 워커가 그 모델을 **아예 호출하지 않습니다**. "
     + "🔴기존 「변동성 예측」 칩과 다릅니다: 그건 «지금 얼마나 출렁이나»(4시간 수준, 사이징용)이고 "
     + "이건 «앞으로 커지나»입니다 — ETH 488k봉 실측에서 앞으로 24시간 |수익| 적중 IC 가 "
-    + "0.279 vs 현재변동성 0.114 이고, 게이트가 고르는 봉의 **69%는 현재 변동성 상위10%가 아닙니다**.",
+    + "0.279 vs 현재변동성 0.114 입니다. 게이트가 고르는 봉 중 현재 변동성 상위10%가 아닌 비율은 "
+    + "**51.5%** 입니다(2024~2026 시간봉 23,511개 재측정 · 종전 표기 69%는 5분봉·2022~ 기준이라 "
+    + "다른 숫자였습니다). 🔴같은 사이징 축인 「변동성 예측」 칩과 순위상관 +0.71 로 겹칩니다 -- "
+    + "겹치는 건 «지금 얼마나 출렁이나»이고, 이 게이트가 더 얹는 건 지평(24시간)과 20자산 OI·청산입니다.",
   breakout_detector:
     "변동성이 추세로 넘어가는 **시점**만 잡습니다. 2026-09-11 압축 게이트를 제거해 «횡보를 거친» "
     + "전환뿐 아니라 **모든** 전환을 봅니다 -- 실제로 전환의 77%는 압축을 거치지 않고 일어납니다. "
@@ -5526,6 +5532,25 @@ function sliderPct(id) {
 }
 const manualExitPct = () => sliderPct("snapExitFrac");
 const manualEntryPct = () => sliderPct("snapEntryFrac");
+// 2026-09-15 진입 비율 자동. 레버리지와 **같은 규약**: 자동이면 쿼리를 안 보내고
+// 서버가 모델값을 쓴다(단일 진실 원천). 서버 기본은 1.0 이고 모델의 `entry_split.tranches`
+// 도 1(일괄)이라 자동은 늘 100% 다 -- 그 «왜»를 눈금 옆에 쓴다.
+const manualEntryFracAuto = () => el("snapEntryFracAuto")?.checked !== false;
+
+function renderFracGauge(plan) {
+  const g = el("snapEntryFrac");
+  const out = el("snapEntryFracVal");
+  if (!g || !out) return;
+  const model = Math.round(100 * (plan.fraction ?? 1));
+  if (manualEntryFracAuto()) g.value = String(model);
+  g.disabled = manualEntryFracAuto();
+  const v = manualEntryFracAuto() ? model : manualEntryPct();
+  const sp = (plan.trade_plan || {}).entry_split || {};
+  out.textContent = `${v}%` + (manualEntryFracAuto()
+    ? ` (모델 — ${sp.tranches === 1 || sp.tranches == null ? "일괄" : sp.tranches + "분할"})`
+    : ` (수동)` + (v !== model ? ` · 모델 ${model}%` : ""));
+  out.className = "entry-was";
+}
 
 // 🔴보유 예정 지평은 **서버가 정한다**(planning_hold, 2026-09-14). 여기 상수를 두면
 // «화면엔 4시간인데 1440분 셀로 크기가 나가는» 일이 생긴다 -- 실제로 그랬다.
@@ -5575,8 +5600,9 @@ function renderLevGauge(plan) {
 }
 
 async function manualEntryFetch(side, kind = "entry") {
-  const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`
-    + (kind === "exit" ? "" : manualLevQuery());
+  const q = (kind === "exit" ? `&pct=${manualExitPct()}`
+             // 자동이면 안 보낸다 -- 서버가 모델값(일괄 100%)을 쓴다. 레버리지와 같은 규약.
+             : (manualEntryFracAuto() ? "" : `&pct=${manualEntryPct()}`) + manualLevQuery());
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}${q}`, { cache: "no-cache" });
   return res.json();
 }
@@ -5714,14 +5740,16 @@ async function manualEntryRefreshSize() {
     line.innerHTML = plan.blocked
       ? `<b class="entry-val bad">주문 불가</b> <span class="entry-was">${escapeHtml(plan.blocked)}</span>`
       : `<b class="entry-val">${q.toFixed(3)} ETH</b>`
-        + `<span class="entry-was"> · ${Math.round(Number(plan.notional_usdt) || 0).toLocaleString()} USDT`
-        + ` · 권고 ${rec.toFixed(3)} · ${capNote}</span>`;
+        + `<span class="entry-was"> · ${Math.round(Number(plan.notional_usdt) || 0).toLocaleString()} USDT</span>`;
+    // 사이징 권고 → 상한 → 주문. 세 값이 왜 다른지가 이 사슬 하나로 읽혀야 한다.
+    renderEntryChain(rec, avail, q, cap, plan);
     setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
     if (hb) {
       const r = (data.cap || {}).risk;
       renderLevGauge(plan);
+      renderFracGauge(plan);
       // 남은 보유시간을 같이 띄운다 -- 물타기를 해도 시계가 안 늘어난다는 사실이 보여야 한다.
       const left = plan.hold_remaining_min;
       const planned = plan.hold_planned_min;   // 크기를 실제로 정한 그 지평
@@ -5736,6 +5764,33 @@ async function manualEntryRefreshSize() {
     line.textContent = "크기 확인 실패 — 서버 응답 없음";
     setMode("확인 실패");
   }
+}
+
+// 2026-09-15 «사이징 권고가 어디 있어?»(사용자). 세 숫자는 각각 뜻이 다르다:
+//   권고 = 순자산 × 허용배수(100/MAE) ÷ 가격   -- 위험모델이 말하는 «이만큼까지»
+//   가능 = 권고를 상한 3종(원장·순자산·모델)의 최소로 자른 값
+//   주문 = 가능 × 슬라이더 비율               -- 실제로 나가는 양(헤드라인과 같다)
+// 상한이 안 걸리면 가능 칸을 지운다 -- 같은 숫자를 두 번 쓰면 사슬이 안 읽힌다.
+function renderEntryChain(rec, avail, qty, cap, plan) {
+  const box = el("snapEntryChain");
+  if (!box) return;
+  if (!(rec > 0)) { box.hidden = true; return; }
+  const parts = [`<span class="entry-cap">사이징 권고</span><b>${rec.toFixed(3)}</b>`];
+  const arrow = `<span class="entry-arrow">→</span>`;
+  if (!cap.available) {
+    parts.push(arrow, `<b class="dim">상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)</b>`);
+  } else if (Math.abs(avail - rec) > 5e-4) {
+    // 🔴상한이 0 으로 자른 경우도 **보여준다**. 숨기면 «권고 6.764 인데 왜 못 넣나»가 안 읽힌다.
+    parts.push(arrow, `<span class="entry-cap">상한까지</span><b>${avail.toFixed(3)}</b>`);
+  }
+  // 주문 다리는 실제로 나갈 때만. 막혔으면 헤드라인이 이미 «주문 불가»를 말한다.
+  const from = cap.available ? avail : rec;
+  const pct = Math.round(100 * (avail > 0 ? qty / avail : 0));
+  if (!plan.blocked && (Math.abs(qty - from) > 5e-4 || pct < 100)) {
+    parts.push(arrow, `<span class="entry-cap">주문 ${pct}%</span><b>${qty.toFixed(3)} ETH</b>`);
+  }
+  box.innerHTML = parts.join("");
+  box.hidden = false;
 }
 
 // ── 2026-09-12 2단계: 실주문 (2단 확인) ────────────────────────────────────────
@@ -5884,6 +5939,19 @@ async function manualEntrySubmit() {
 }
 
 el("snapLevAuto")?.addEventListener("change", () => manualEntryRefreshSize());
+el("snapEntryFracAuto")?.addEventListener("change", () => {
+  // 🔴미리보기를 **기다리지 않고** 즉시 잠근다. renderFracGauge 에서만 걸면 첫 조회 전에는
+  //   자동인데 슬라이더가 살아 있어, 움직여도 쿼리엔 안 실리는 «먹통 슬라이더»가 된다.
+  syncFracGaugeLock();
+  manualEntryRefreshSize();
+});
+function syncFracGaugeLock() {
+  const g = el("snapEntryFrac");
+  const out = el("snapEntryFracVal");
+  if (g) g.disabled = manualEntryFracAuto();
+  if (out && manualEntryFracAuto()) out.textContent = `${sliderPct("snapEntryFrac")}% (모델)`;
+}
+syncFracGaugeLock();          // 초기값도 체크박스를 따른다
 el("snapLevGauge")?.addEventListener("input", () => {
   const out = el("snapLevVal");
   if (out) out.textContent = `${manualLevValue()}배 (수동)`;
