@@ -288,7 +288,9 @@ const VOL_LEVEL_POLL_MS = 60000;          // 사이징 워커 주기 300초 — 
 // fetch) is the last one in the chain.
 const LIQ_BURST_STATE_POLL_MS = 1000;
 const LIQUIDATION_DIRECTION_POLL_MS = 60000; // same source cadence as liquidation-5m signal above
-const LIQUIDATION_MAP_POLL_MS = 300000; // matches server-side cache -- structure moves slowly
+// 2026-09-16 300초 -> 60초. 서버 캐시를 60초로 줄였으므로(입력이 1시간봉이라 그 아래로는
+// 의미가 없다) 클라가 5분마다 물으면 **새 시간봉이 최대 5분 늦게** 보인다. 캐시와 같은 주기로.
+const LIQUIDATION_MAP_POLL_MS = 60000;
 const REGIME_WIDE24_POLL_MS = 300000; // matches server-side cache (REGIME_WIDE24_CACHE_SECONDS)
 const MACRO_CALENDAR_POLL_MS = 6 * 3600 * 1000; // matches server-side cache (MACRO_CALENDAR_CACHE_SECONDS)
 const SESSION_ALERTS_POLL_MS = 30000; // 2026-08-27: split off evidence-signals' 5min cadence --
@@ -828,6 +830,11 @@ function maybeRenderSnapshotChartNow() {
   lastSnapshotChartRenderAt = now;
   updateSnapshotCandleLive();
   renderSnapshotChart();
+  // 지지/저항 목록도 같이 그린다. 2026-09-16 실측: 30초 동안 차트는 67회 다시 그려지는데 이
+  // 패널은 **0회**였다 -- render() 경로(상태 변경 푸시)에만 걸려 있어서 몇 분씩 묵었다.
+  // 이 패널의 «지금 값»은 거리(%)와 이미 뚫린 레벨 걸러내기(liveRedistanced)이고, 둘 다
+  // 현재가로 계산한다. 레벨 **가격** 자체는 시간봉이 바뀔 때만 움직인다(그건 서버 몫).
+  renderLiquidationMapPanel();
 }
 
 function applyDashboardEvent(payload) {
