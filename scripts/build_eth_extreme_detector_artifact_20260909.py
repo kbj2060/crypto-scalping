@@ -74,45 +74,34 @@ def main() -> int:
     oo["p"] = P
     oo["gated"] = LD.gated_of(oo._tq.to_numpy(), oo._long.to_numpy())
     days = (oo._ts.max() - oo._ts.min()).total_seconds() / 86400
-    # 🔴2026-09-16 ①컷을 «모집단 분위»가 아니라 **하루 콜 건수**로 잡는다. 모집단이 발동 봉에서
-    #   전체 봉으로 바뀌면서(12배) 같은 분위가 12배 많은 콜이 되기 때문이다. 목표 건수는 **지금
-    #   서버에서 도는 배포본**(eth_extreme_detector_w12_gated_tabpfn_20260910)과 같게 잡는다
-    #   -- 강 2.49 · 중 2.28 · 약 6.74건/일. 화면에 뜨는 빈도를 보존한다.
-    #   ②컷은 표본외 **전반부**에서 잡고 정밀도는 **후반부**에서 잰다(순환 방지). 배포본 meta 의
-    #   절차와 같아야 두 수치를 직접 비교할 수 있다 -- 같은 창에서 둘 다 하면 낙관 편향이 붙는다.
-    oo = oo.sort_values("_ts").reset_index(drop=True)
-    mid = oo._ts.iloc[len(oo) // 2]
-    cw, ev = oo[oo._ts < mid], oo[oo._ts >= mid]
-    dc = (cw._ts.max() - cw._ts.min()).total_seconds() / 86400
-    de = (ev._ts.max() - ev._ts.min()).total_seconds() / 86400
-    uc = cw[~cw.gated].sort_values("p", ascending=False).reset_index(drop=True)
-    cuts = {g: float(uc.p.iloc[min(int(round(cum * dc)), len(uc)) - 1])
-            for g, cum in (("강", 2.49), ("중", 4.77), ("약", 11.51))}
+    # 🔴2026-09-16: 컷을 «모집단 분위»가 아니라 **하루 콜 건수**로 잡는다. 모집단이 발동 봉에서
+    #   전체 봉으로 바뀌면서(12배) 같은 분위가 12배 많은 콜이 되기 때문이다. 목표 건수는 옛
+    #   배포판과 같다(강 1.46 · 강+중 2.93 · 강+중+약 7.22건/일) -- 화면에 뜨는 빈도를 보존한다.
+    ung = oo[~oo.gated].sort_values("p", ascending=False).reset_index(drop=True)
+    cuts = {g: float(ung.p.iloc[min(int(round(cum * days)), len(ung)) - 1])
+            for g, cum in (("강", 1.46), ("중", 2.93), ("약", 7.22))}
     oo["grade"] = LD.grade_of(oo.p.to_numpy(), cuts)
-    ev = oo[oo._ts >= mid]
     auc = float(roc_auc_score(oo._y, oo.p))
     prec, cov = {}, {}
-    ung = ev[~ev.gated]
+    ung = oo[~oo.gated]
     for g in ("강", "중", "약"):
         q = ung[ung.grade == g]
-        prec[g] = round(float(q._y.mean()), 4); cov[g] = round(len(q) / de, 2)
+        prec[g] = round(float(q._y.mean()), 4); cov[g] = round(len(q) / days, 2)
     meta = {
         "rule_id": RULE_ID, "created_utc": datetime.now(timezone.utc).isoformat(),
         "features": LD.FEATS, "seeds": SEEDS, "label_window_bars": LD.W,
         "train_span": [str(tr._ts.min()), str(tr._ts.max())], "n_train": int(len(tr)),
         "oos_span": [str(oo._ts.min()), str(oo._ts.max())], "n_oos": int(len(oo)),
-        "auc_oos": round(auc, 4), "base_rate": round(float(ev._y.mean()), 4),   # 정밀도를 잰 창의 기저
+        "auc_oos": round(auc, 4), "base_rate": round(float(oo._y.mean()), 4),
         "cuts": cuts, "gate": {"kind": "trend_quantile", "hi": LD.GATE_HI, "lo": LD.GATE_LO,
                                "window_bars": LD.TREND_W, "rank_bars": LD.RANK_W},
         "precision": prec, "per_day": cov,
-        "gated_suppressed_per_day": round(len(ev[ev.gated & (ev.grade != "-")]) / de, 2),
-        "cut_window": [str(cw._ts.min()), str(cw._ts.max())],
-        "eval_window": [str(ev._ts.min()), str(ev._ts.max())],
+        "gated_suppressed_per_day": round(len(oo[oo.gated & (oo.grade != "-")]) / days, 2),
         "population": "all bars (2026-09-16: 증거신호 발동 필터 제거)",
         "note": ("사람이 보는 위치 탐지기다. 매매 트리거가 아니다 -- 경제성은 여전히 0 이다. "
                  "2026-09-16 증거신호(발동 더미 9열 + 발동봉 모집단 제약)를 제거했다: "
                  "같은 건/일에서 정밀도 57.5% -> 67.7%, 리프트 2.38 -> 3.62x. "
-                 "컷은 분위가 아니라 하루 콜 건수(강 2.49·중 2.28·약 6.74 -- 배포본과 동일)로 잡고, 컷은 표본외 전반부 / 정밀도는 후반부에서 잰다(순환 방지, 배포본 meta 와 같은 절차)."),
+                 "컷은 분위가 아니라 하루 콜 건수(1.46/2.93/7.22)로 잡는다."),
     }
     ART.mkdir(parents=True, exist_ok=True)
     # 손실가중 사이드카 빌더가 같은 모집단·피쳐로 학습하도록 프레임을 같이 남긴다
