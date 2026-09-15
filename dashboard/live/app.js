@@ -4819,14 +4819,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     ["top", "bottom"].forEach(side => {
       const counts = side === "top" ? cm.ev_top : cm.ev_bottom;
       const names = side === "top" ? cm.ev_top_names : cm.ev_bottom_names;
-      // 불투명 트랙 -- 청산 밀도 밴드가 레인 아래로 비치지 않게 끊는다(모바일 신고의 핵심).
+      // 트랙 색은 **레짐·변동성 리본과 같은 값**이다(var(--muted) 0.18). 2026-09-16 사용자
+      // 지적 "천장과 바닥 백그라운드만 검정색". 그전엔 --chart-bg 0.92(불투명)였는데, 그건
+      // 2026-09-09 에 «청산 밀도 밴드가 레인 아래로 비치지 않게 끊으려고» 넣은 것이었다.
+      // 그 전제는 2026-09-11 에 사라졌다 -- 레인이 플롯 **밖 여백**으로 옮겨졌고 히트맵은
+      // 플롯 안(mt~plotBottom)으로 잘리므로 애초에 겹칠 수가 없다. 전제가 사라진 값이
+      // 남아서 혼자 검게 보였던 것이다.
       const track = document.createElementNS(NS, "rect");
       track.setAttribute("x", laneX0); track.setAttribute("y", LANE_Y[side]);
       track.setAttribute("width", Math.max(laneX1 - laneX0, 1));
       track.setAttribute("height", LANE_H);
       track.setAttribute("rx", "1.5");
-      track.setAttribute("fill", "var(--chart-bg)");
-      track.setAttribute("fill-opacity", "0.92");
+      track.setAttribute("fill", "var(--muted)");
+      track.setAttribute("fill-opacity", "0.18");
       track.setAttribute("data-lane-track", side);
       svg.appendChild(track);
       (counts || []).forEach((n, k) => {
