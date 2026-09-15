@@ -354,9 +354,16 @@ function scheduleSnapshotChartRender() {
   });
 }
 
+// 서버가 SSE 로 알려주는 «켜진 코인» 목록. 2026-09-16 사용자 요청으로 기본은 ETH 하나다
+// (서버의 DASHBOARD_ASSETS 가 원본이고 여기는 사본이 아니다 -- 받아서 쓴다).
+// null 이면 아직 못 받았거나 구버전 서버다 -- 그 경우 전부 보인다(있던 걸 없애지 않는다).
+let enabledAssets = null;
+
 function renderSnapshotAssetTabs() {
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.asset === activeSnapshotAsset);
+    const on = !enabledAssets || enabledAssets.includes(btn.dataset.asset);
+    btn.hidden = !on;
+    btn.classList.toggle("active", on && btn.dataset.asset === activeSnapshotAsset);
   });
 }
 
@@ -799,6 +806,15 @@ async function maybeFetchSnapshotChartHistory() {
 }
 
 function applyDashboardEvent(payload) {
+  if (Array.isArray(payload?.assets) && payload.assets.length) {
+    const next = payload.assets.filter((a) => SNAPSHOT_ASSET_KEYS.includes(a));
+    if (next.length && String(next) !== String(enabledAssets || [])) {
+      enabledAssets = next;
+      renderSnapshotAssetTabs();
+      // 보고 있던 코인이 꺼졌으면 켜진 첫 코인으로 옮긴다 -- 안 그러면 영원히 빈 패널을 본다.
+      if (!next.includes(activeSnapshotAsset)) setActiveSnapshotAsset(next[0]);
+    }
+  }
   const tickers = payload?.tickers || {};
   Object.entries(tickers).forEach(([asset, ticker]) => {
     const price = Number(ticker?.price || 0);

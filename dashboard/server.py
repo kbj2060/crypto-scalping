@@ -450,6 +450,16 @@ POSITION_SIZING_MAX_AGE_MIN = 30.0         # 워커 주기 300초 x 6
 
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
+# 대시보드가 **보여줄** 코인 (2026-09-16 사용자 요청 "나머지 코인은 리소스 먹지 않게 비활성").
+# 실측으로 본 실제 절약: 엔드포인트별 코인 계산은 요청이 와야 도는 on-demand(swr_cached, 콜드
+# 0.05초)라 안 쓰면 안 돈다. **무조건 도는 건 SSE 루프의 시세 팬아웃 하나뿐**이었다 --
+# EVENT_POLL_SECONDS(2.5초)마다 5코인 티커를 전부 가져왔다(= 120요청/분). 그걸 이 목록으로 줄인다.
+# 되돌리려면 환경변수 하나: DASHBOARD_ASSETS="eth,btc,sol,xrp,hype"
+# ⚠️계좌 패널(fetch_account)은 이 목록을 **쓰지 않는다** -- 다른 코인에 포지션이 있으면 그건
+#   보여야 한다. 화면에서 코인을 지우는 것과 «내 돈이 어디 있는지»는 다른 문제다.
+DASHBOARD_ASSETS = [a.strip().lower() for a in os.getenv("DASHBOARD_ASSETS", "eth").split(",")
+                    if a.strip().lower() in MARKET_SYMBOLS] or ["eth"]
+DASHBOARD_TICKER_SYMBOLS = {a: MARKET_SYMBOLS[a] for a in DASHBOARD_ASSETS}
 # 볼륨 풋프린트 (2026-09-15) -- ETH 만. 자세한 근거는 collect_footprint() 주석.
 FOOTPRINT_SYMBOL = "ETHUSDT"
 FOOTPRINT_BAR_SECONDS = 300      # 차트 캔들과 같은 5분봉
@@ -2653,7 +2663,8 @@ def make_app() -> web.Application:
                             # 이 태스크까지 취소해 준다(따로 종료 코드를 만들지 않는다).
                             refresh_tasks["account_trips"] = asyncio.create_task(keep_trip_ledger())
                     ticker_rows = await asyncio.gather(
-                        *(fetch_market_ticker(session, asset, symbol) for asset, symbol in MARKET_SYMBOLS.items())
+                        *(fetch_market_ticker(session, asset, symbol)
+                          for asset, symbol in DASHBOARD_TICKER_SYMBOLS.items())
                     )
                     latest_event_tickers = {
                         asset: ticker for asset, ticker in ticker_rows if ticker is not None
@@ -2665,6 +2676,9 @@ def make_app() -> web.Application:
                     payload = {
                         "state": state_payload if state_changed else None,
                         "tickers": latest_event_tickers,
+                        # 켜진 코인 목록을 **서버가 알려준다**. 클라가 같은 목록을 따로 들고
+                        # 있으면 둘이 어긋나는 날이 온다(SUSTAIN_BARS_OVERRIDE 류의 반복 교훈).
+                        "assets": DASHBOARD_ASSETS,
                     }
                     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
                     for queue in tuple(event_clients):
@@ -2751,7 +2765,10 @@ def make_app() -> web.Application:
         await response.prepare(request)
         queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
         event_clients.add(queue)
-        initial_payload = {"state": latest_event_state, "tickers": latest_event_tickers}
+        # 접속 즉시 보내는 스냅샷에도 코인 목록을 넣는다 -- 빠뜨리면 다음 주기(2.5초)까지
+        # 클라가 목록을 모르고 꺼진 코인 탭이 잠깐 보였다가 사라진다(깜빡임).
+        initial_payload = {"state": latest_event_state, "tickers": latest_event_tickers,
+                           "assets": DASHBOARD_ASSETS}
         try:
             await response.write(f"data: {json.dumps(initial_payload, ensure_ascii=False, separators=(',', ':'))}\n\n".encode("utf-8"))
             while True:
