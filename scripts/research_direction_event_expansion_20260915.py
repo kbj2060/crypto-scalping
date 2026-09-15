@@ -2960,6 +2960,156 @@ def stage_freeze(a):
     print(f"  status = {man['status']} · 미통과 관문 {len(man['gates_failed'])}개를 manifest 에 기록")
 
 
+def stage_quiet(a):
+    """⭐**「소음이 없는 구간에는 우리 데이터에 답이 있다」를 벽까지의 거리로 잰다** (2026-09-16, 사용자 가설)
+
+    사용자 관찰: *"방향은 한 순간의 체결·고래흐름과 외부 국채/경제 뉴스에 따라 바뀐다. 하지만
+    이런 것들이 없는 횡보장에는 우리가 갖고 있는 데이터에 정답이 무조건 있다."*
+
+    🔴선행 결과가 이 가설의 **절반을 이미 확인했다**: 09-14 횡보 조건부 검정에서 「횡보에서 더
+    맞는다」가 **통계적으로 참**이었다(DiD +1.6~+3.5pp · 조건 순환이동 귀무 20칸 중 16칸 p<0.05).
+    돈이 안 된 이유는 구조적이다 — 벽 = 0.5 + 비용/(2·E|r|) 인데 **조용한 구간은 정의상 E|r| 이
+    작아 벽이 가장 높다**(배리어 18bp → 손익분기 78.4%). 배리어를 넓혀 벽을 51.9% 까지 내리면
+    **초과가 같이 0 이 됐다**.
+    ⇒ 그러므로 이 판의 질문은 「있나 없나」가 **아니라** 「**정확도 상승이 E|r| 하락을 이기는가**」다.
+
+    ⭐09-14 와 다른 점 — **횡보를 변동성 레짐이 아니라 «소음원 끄기»로 정의한다**:
+      ① 매크로 창 밖   8:30 ET ±30분(하드데이터) · 14:00 ET ±30분(FOMC) · 평일 (09-11 대리변수,
+                       전체 봉의 10.4%이고 그 안에서 롱 −9.2 / 숏 +4.6bp 로 측면이 뒤집힌다)
+      ② 고래 조용      |tf_bigimb|(상위1% 대형체결 불균형) **하위 Q**
+      ③ 큰 움직임 아님  예측 E|r| **하위 Q**
+    교집합 = 「조용한 봉」. 기본 Q=0.30 (사용자 결정 2026-09-16).
+
+    사전 등록:
+      자산 ETH(사용자 결정) · 시험 2024-07~2026-09 · 분기 확장 WF · 비겹침 · 3씨드 · 가중 |fwd|
+      지평 1h/4h/12h 나란히 · 비용 열 10 / 5.52(메이커) / 3.96(양다리 메이커) / **0**
+      팔 셋: quiet(조용) · noisy(거울: 세 조건 모두 반대) · all(전체) — **각 팔은 자기 모집단에서
+      학습하고 자기 모집단에서 평가**한다(같은 모델을 부분집합에 적용하면 팔 간 비교가 오염된다).
+      판정 = **적중률 − 벽** 을 날짜블록 CI 로 본다. 🔴이항 SE 는 쓰지 않는다(사건이 뭉친다).
+    🔴임계는 **그 분기의 학습창 분포**에서만 뽑는다(엠바고 H봉 적용) — 전수 분위는 미래참조다.
+    🔴비용 0 열이 이 판의 핵심이다: 넘으면 「집행 문제」, 못 넘으면 「정보 아님」으로 갈린다."""
+    from sklearn.ensemble import HistGradientBoostingRegressor, HistGradientBoostingClassifier
+    from zoneinfo import ZoneInfo
+    A, Q = a.asset, a.quiet
+    SINCE = "2024-01-01"                       # 틱 피쳐(aggfeat) 커버리지 시작
+    HSQ = {"1h": 12, "4h": 48, "12h": 144}
+    TRAIN_CAP = 30_000                         # 팔마다 같은 상한 (학습량 교란 차단)
+    COSTS = (10.0, 5.52, 3.96, 0.0)
+    rng = np.random.default_rng(SEED)
+
+    p = panel(A, ticks=True, since=SINCE)
+    if "tf_bigimb" not in p.columns:
+        print(f"없음: {A} 틱 피쳐(data/binance_vision/aggfeat) — 고래 컷을 만들 수 없다"); return
+    ts = p["timestamp"]; tsv = ts.to_numpy(); lc = p["__lc__"].to_numpy()
+    cols = featcols(p)
+    X = p[cols].to_numpy(np.float32)
+    finite = np.isfinite(X).any(1)
+
+    ny = ts.dt.tz_localize("UTC").dt.tz_convert(ZoneInfo("America/New_York"))
+    mm = (ny.dt.hour * 60 + ny.dt.minute).to_numpy()
+    macro = ((ny.dt.dayofweek.to_numpy() < 5)
+             & (((mm >= 480) & (mm <= 540)) | ((mm >= 810) & (mm <= 870))))
+    big = np.abs(p["tf_bigimb"].to_numpy(float))
+    print(f"{A} · 봉 {len(p):,} ({ts.iloc[0]:%Y-%m-%d}~{ts.iloc[-1]:%Y-%m-%d}) · 피쳐 {len(cols)} "
+          f"· 매크로창 {macro.mean():.1%} · 조용 분위 {Q:.0%}", flush=True)
+
+    QT = list(pd.date_range("2024-07-01", "2026-10-01", freq="QS"))
+    recs = []
+    for hn, H in HSQ.items():
+        fwd = fwd_of(lc, H)
+        ylg = np.log(np.maximum(np.abs(fwd), 1.0))
+        ok = np.isfinite(fwd) & finite & np.isfinite(big)
+        for q0, q1 in zip(QT[:-1], QT[1:]):
+            emb = np.datetime64(q0 - pd.Timedelta(minutes=5 * H))
+            tr = ok & (tsv < emb)
+            te = ok & (tsv >= np.datetime64(q0)) & (tsv < np.datetime64(q1))
+            if tr.sum() < 5000 or te.sum() < 200:
+                continue
+            itr = np.flatnonzero(tr)[::12]                    # 1시간당 1봉 (E|r| 회귀 표집)
+            ev = HistGradientBoostingRegressor(max_iter=150, random_state=SEED).fit(X[itr], ylg[itr])
+            pr = np.full(len(lc), np.nan)
+            mall = np.flatnonzero(ok)
+            pr[mall] = ev.predict(X[mall])
+            elo, ehi = np.quantile(pr[tr], Q), np.quantile(pr[tr], 1 - Q)
+            blo, bhi = np.quantile(big[tr], Q), np.quantile(big[tr], 1 - Q)
+            qm = (pr <= elo) & (big <= blo)
+            pops = {"quiet": qm & ~macro,          # 세 소음원 모두 꺼짐 (사용자 가설)
+                    "quiet_nomac": qm,             # 매크로 컷만 뺀 판 = 매크로 기여 격리
+                    "noisy": (pr >= ehi) & (big >= bhi) & ~macro,   # 두 연속 컷의 거울
+                    "all": np.ones(len(lc), bool),                  # 전체
+                    "all_sz": np.ones(len(lc), bool)}               # 전체 · 학습 **크기 맞춤**
+            nq = int((tr & pops["quiet"]).sum())
+            for arm, pop in pops.items():
+                itrain = np.flatnonzero(tr & pop)
+                itest = np.flatnonzero(te & pop)
+                # 🔴크기 맞춘 대조군 — 조용한 팔은 9% 표본으로 학습하는데 전체 팔이 100% 로
+                #   학습하면 「레짐」과 「학습량」이 섞인다. all_sz 는 quiet 과 **같은 수**로 자른다.
+                cap = nq if arm == "all_sz" else TRAIN_CAP
+                if len(itrain) > cap:
+                    itrain = itrain[:: len(itrain) // cap + 1]
+                if len(itrain) < 500 or len(itest) < 20:
+                    continue
+                w = np.abs(fwd[itrain]); w = w / max(w.mean(), 1e-9)
+                pb = np.zeros(len(itest))
+                for sd in range(3):
+                    clf = HistGradientBoostingClassifier(max_iter=150, random_state=SEED + sd)
+                    clf.fit(X[itrain], (fwd[itrain] > 0).astype(int), sample_weight=w)
+                    pb += clf.predict_proba(X[itest])[:, 1]
+                recs.append(pd.DataFrame({"i": itest, "ts": tsv[itest], "H": hn, "arm": arm,
+                                          "fwd": fwd[itest], "prob": pb / 3}))
+        print(f"  {hn} 완료", flush=True)
+
+    R = pd.concat(recs, ignore_index=True)
+    R["day"] = pd.to_datetime(R.ts).dt.floor("D")
+    R["side"] = np.where(R.prob > 0.5, 1, -1)
+    R.to_parquet(OUT / f"quiet_records_{A}.parquet", index=False)
+
+    def blk(v, d, B=4000):
+        days = np.unique(d); by = {x: v[d == x] for x in days}
+        bs = np.array([np.concatenate([by[x] for x in rng.choice(days, len(days), replace=True)]
+                                      ).mean() for _ in range(B)])
+        return float(np.quantile(bs, 0.025)), float(np.quantile(bs, 0.975))
+
+    print(f"\n{'지평':>5} {'팔':>12} {'n':>6} {'독립일':>6} {'E|r|':>7} "
+          f"{'적중률':>7} {'날짜블록 CI':>16} | " + " ".join(f"{'벽@'+str(c):>8}" for c in COSTS)
+          + " | " + " ".join(f"{'거리@'+str(c):>9}" for c in COSTS))
+    rows = []
+    for hn, H in HSQ.items():
+        for arm in ("quiet", "quiet_nomac", "noisy", "all", "all_sz"):
+            s = R[(R.H == hn) & (R.arm == arm)].sort_values("i")
+            if not len(s):
+                continue
+            keep = set(nonoverlap(s.i.to_numpy(), H).tolist())
+            s = s[s.i.isin(keep)]
+            hit = ((s.side * s.fwd) > 0).to_numpy(float)
+            d = s.day.values
+            er = float(s.fwd.abs().mean())
+            acc = hit.mean(); alo, ahi = blk(hit, d)
+            walls = [0.5 + c / (2 * er) for c in COSTS]
+            print(f"{hn:>5} {arm:>12} {len(s):>6} {len(np.unique(d)):>6} {er:>7.1f} "
+                  f"{acc:>7.2%} [{alo:>6.2%},{ahi:>6.2%}] | "
+                  + " ".join(f"{w:>8.2%}" for w in walls) + " | "
+                  + " ".join(f"{(acc-w)*100:>+8.2f}pp" for w in walls))
+            g = (s.side * s.fwd).to_numpy()
+            r = {"지평": hn, "팔": arm, "n": len(s), "독립일": len(np.unique(d)), "E|r|": er,
+                 "적중": acc, "적중lo": alo, "적중hi": ahi, "그로스": g.mean()}
+            for c in COSTS:
+                lo, hi = blk(g - c, d)
+                r |= {f"net@{c}": g.mean() - c, f"net_lo@{c}": lo, f"net_hi@{c}": hi,
+                      f"벽@{c}": 0.5 + c / (2 * er)}
+            rows.append(r)
+    print(f"\n{'지평':>5} {'팔':>12} | " + " ".join(f"{'건당net@'+str(c):>26}" for c in COSTS))
+    for r in rows:
+        print(f"{r['지평']:>5} {r['팔']:>12} | " + " ".join(
+            f"{r[f'net@{c}']:>+9.2f} [{r[f'net_lo@{c}']:>+7.2f},{r[f'net_hi@{c}']:>+7.2f}]"
+            f"{'✅' if r[f'net_lo@{c}'] > 0 else '❌'}" for c in COSTS))
+    pd.DataFrame(rows).to_csv(OUT / f"quiet_regime_{A}.csv", index=False)
+    print(f"\n저장: {OUT / f'quiet_regime_{A}.csv'}")
+    print("🔴판정: **비용 0 열에서도 거리가 음수(SE 안)면 「정보가 아니다」**. "
+          "비용 0 은 넘고 5.52 는 못 넘으면 「집행·지평 문제」다.")
+    print("🔴이항 SE 를 쓰지 않았다 — 적중률 CI 는 날짜블록 부트다(사건이 하루에 뭉친다).")
+
+
 def stage_confirm(a):
     """⭐**사전 등록된 단일 셀을 «채점에 한 번도 안 쓴 기간»에 건다.**
 
@@ -3052,7 +3202,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reuse", action="store_true", help="저장된 스크린 CSV 재사용")
     ap.add_argument("--stage", required=True,
-                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit", "wall", "wallcheck", "multi", "freeze", "confirm"])
+                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit", "wall", "wallcheck", "multi", "freeze", "confirm", "quiet"])
     ap.add_argument("--minn", type=int, default=120, help="WF 선택 최소 사건 수")
     ap.add_argument("--tsel", type=float, default=2.0, help="WF 선택 초과 t 임계")
     ap.add_argument("--start", default="2025-01-01", help="WF 거래 시작 월")
@@ -3073,6 +3223,8 @@ def main() -> int:
     ap.add_argument("--w", type=float, default=1.0, help="건당 비중(상한 대비)")
     ap.add_argument("--drop", type=float, default=0.4, help="ML: 예측 E|r| 하위 이 분위는 거래 안 함")
     ap.add_argument("--minpos", type=int, default=6, help="LOAO: 몇 개 자산에서 양수여야 하나(/8)")
+    ap.add_argument("--asset", default="ETH", help="quiet: 대상 자산(단일)")
+    ap.add_argument("--quiet", type=float, default=0.30, help="quiet: 「조용함」 분위(하위/상위 각각)")
     a = ap.parse_args()
     {"screen": stage_screen, "cross": stage_cross, "port": stage_port,
      "fdr": stage_fdr, "oictl": stage_oictl, "conj": stage_conj,
@@ -3082,7 +3234,7 @@ def main() -> int:
      "wfml": stage_wfml, "proof": stage_proof,
      "highvol": stage_highvol, "exit": stage_exit,
      "wall": stage_wall, "wallcheck": stage_wallcheck,
-     "multi": stage_multi, "freeze": stage_freeze,
+     "multi": stage_multi, "freeze": stage_freeze, "quiet": stage_quiet,
      "confirm": stage_confirm}[a.stage](a)
     return 0
 
