@@ -2777,11 +2777,98 @@ def stage_wallcheck(a):
     print(f"\n저장: {OUT/'wall_check.csv'}")
 
 
+def cluster_se(x: np.ndarray, day: np.ndarray) -> float:
+    """**날짜 클러스터 로버스트 SE.** 같은 날 사건들은 독립이 아니다(시장 전체 변동성 급등).
+
+    SE = sqrt( Σ_d ( Σ_{i∈d} (x_i − x̄) )² ) / n — 부트스트랩과 같은 것을 닫힌 형식으로 준다.
+    이항/정규 SE 는 이 합을 **날짜 안에서도 독립**이라고 가정해 과소평가한다."""
+    n = len(x)
+    if n < 3:
+        return float("inf")
+    r = x - x.mean()
+    s = pd.Series(r).groupby(day).sum().to_numpy()
+    v = float((s ** 2).sum())
+    return float(np.sqrt(v)) / n if v > 0 else float("inf")
+
+
+def stage_multi(a):
+    """⭐**다중성을 가격에 반영한다 — 와일드 클러스터 부호뒤집기 max-t 귀무.**
+
+    12절이 남긴 마지막 미방어: `4h×상위5%` 는 **19칸 스윕(지평5×분위5) 중 1칸**이고
+    칸들이 **중첩·상관**이라 단순 본페로니도 BH 도 맞지 않는다. 옳은 방법은
+    **스윕 전체의 max-t 분포를 귀무에서 만드는 것**이다.
+
+    귀무 구성: **날짜 단위 부호뒤집기**(wild cluster bootstrap, Rademacher). 각 «날»의 사건
+    전체에 같은 부호를 곱한다 ⇒ **날 안의 의존구조와 날별 사건 수가 보존**되고 평균만 0 이 된다.
+    같은 뒤집기를 **19칸에 동시에** 적용하므로 칸 간 상관이 자동으로 반영된다.
+    통계량은 칸별 t = 평균/클러스터SE, 스윕 통계량은 **max t**.
+    🔴이 검정은 **그로스**(비용 0) 기준이다 — 12절에서 0 을 배제한 게 그로스였다.
+    비용을 넣으면 귀무 중심이 −비용으로 이동해 부호뒤집기 귀무가 성립하지 않는다."""
+    rng = np.random.default_rng(SEED)
+    R = pd.read_parquet(OUT / "wall_records.parquet")
+    R["ts"] = pd.to_datetime(R["ts"])
+    R["day"] = R.ts.dt.floor("D")
+    R["side"] = np.where(R.prob > 0.5, 1, -1)
+    R["x"] = R.side * R.fwd
+    QCOLS = [c for c in R.columns if c.startswith("q")]
+    cells = []
+    for hn in sorted(R.H.unique()):
+        for qc in QCOLS:
+            s = R[(R.H == hn) & R[qc]]
+            if len(s) < 150:
+                continue
+            cells.append((hn, 1 - int(qc[1:]) / 1000, s.x.to_numpy(),
+                          s.day.values.astype("datetime64[D]").astype(np.int64)))
+    print(f"칸 {len(cells)}개 · 총 사건 {sum(len(c[2]) for c in cells):,}\n")
+    # 클러스터 SE 가 부트스트랩과 맞는지 먼저 확인한다(검정의 전제)
+    print(f"{'지평':>4} {'상위':>6} {'n':>6} {'독립일':>6} {'그로스':>8} {'클러스터SE':>10} "
+          f"{'t':>6} {'이항t(참고)':>11}")
+    ts_obs = []
+    for hn, q, x, d in cells:
+        se = cluster_se(x, d)
+        t = x.mean() / se
+        ts_obs.append(t)
+        naive = x.mean() / (x.std(ddof=1) / np.sqrt(len(x)))
+        print(f"{hn:>4} {q:>6.1%} {len(x):>6} {len(np.unique(d)):>6} {x.mean():>+8.2f} "
+              f"{se:>10.2f} {t:>+6.2f} {naive:>+11.2f}")
+    ts_obs = np.array(ts_obs)
+    best = int(np.argmax(ts_obs))
+    print(f"\n최대 t: **{ts_obs[best]:+.2f}** ({cells[best][0]} 상위{cells[best][1]:.1%})")
+    # ── 와일드 클러스터 부호뒤집기 ──────────────────────────────────────────
+    alldays = np.unique(np.concatenate([c[3] for c in cells]))
+    pos = {d: i for i, d in enumerate(alldays)}
+    IDX = [np.array([pos[v] for v in c[3]]) for c in cells]
+    maxt = np.empty(a.nperm)
+    for b in range(a.nperm):
+        flip = rng.choice([-1.0, 1.0], len(alldays))
+        m = -1e9
+        for (hn, q, x, d), ii in zip(cells, IDX):
+            xf = x * flip[ii]
+            se = cluster_se(xf, d)
+            m = max(m, xf.mean() / se)
+        maxt[b] = m
+    p = float((maxt >= ts_obs[best]).mean())
+    print(f"\n=== ⭐다중성 보정 (와일드 클러스터 부호뒤집기 · B={a.nperm}) ===")
+    print(f"  귀무 max-t: 평균 {maxt.mean():+.2f} · 중앙 {np.median(maxt):+.2f} · "
+          f"95분위 **{np.quantile(maxt,0.95):+.2f}** · 최대 {maxt.max():+.2f}")
+    print(f"  실제 max-t **{ts_obs[best]:+.2f}** ⇒ **스윕 전체 p = {p:.4f}** "
+          f"{'✅ 다중성 보정 후에도 유의' if p < 0.05 else '❌ 다중성 보정에서 탈락'}")
+    # 칸별 보정 p (max-t 귀무 대비)
+    print(f"\n{'지평':>4} {'상위':>6} {'t':>6} {'보정 p':>8}")
+    for (hn, q, x, d), t in sorted(zip(cells, ts_obs), key=lambda z: -z[1])[:8]:
+        print(f"{hn:>4} {q:>6.1%} {t:>+6.2f} {float((maxt >= t).mean()):>8.4f}")
+    pd.DataFrame({"H": [c[0] for c in cells], "상위": [c[1] for c in cells],
+                  "n": [len(c[2]) for c in cells], "그로스": [c[2].mean() for c in cells],
+                  "t": ts_obs, "보정p": [float((maxt >= t).mean()) for t in ts_obs]}
+                 ).to_csv(OUT / "multiplicity.csv", index=False)
+    print(f"\n저장: {OUT/'multiplicity.csv'}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reuse", action="store_true", help="저장된 스크린 CSV 재사용")
     ap.add_argument("--stage", required=True,
-                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit", "wall", "wallcheck"])
+                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit", "wall", "wallcheck", "multi"])
     ap.add_argument("--minn", type=int, default=120, help="WF 선택 최소 사건 수")
     ap.add_argument("--tsel", type=float, default=2.0, help="WF 선택 초과 t 임계")
     ap.add_argument("--start", default="2025-01-01", help="WF 거래 시작 월")
@@ -2806,7 +2893,8 @@ def main() -> int:
      "fixedml": stage_fixedml, "crosswf": stage_crosswf,
      "wfml": stage_wfml, "proof": stage_proof,
      "highvol": stage_highvol, "exit": stage_exit,
-     "wall": stage_wall, "wallcheck": stage_wallcheck}[a.stage](a)
+     "wall": stage_wall, "wallcheck": stage_wallcheck,
+     "multi": stage_multi}[a.stage](a)
     return 0
 
 
@@ -2866,6 +2954,20 @@ def _selfcheck():
     # 숏: 가격이 내리면 이익
     rs, _ = first_touch(hi[[2]], lo[[2]], ent[[2]], tp[[0]], sl[[0]], -1)
     assert abs(rs[0] - 100) < 1e-6, rs[0]
+    # ④ 클러스터 SE — 같은 날 사건이 뭉치면 이항/정규 SE 보다 **커야** 한다
+    rr = np.random.default_rng(7)
+    dayeff = rr.normal(0, 50, 200)                      # 날마다 공통 충격
+    xs, ds = [], []
+    for k, de in enumerate(dayeff):
+        m = 10
+        xs.append(de + rr.normal(0, 5, m)); ds.append(np.full(m, k))
+    xs = np.concatenate(xs); ds = np.concatenate(ds)
+    naive = xs.std(ddof=1) / np.sqrt(len(xs))
+    cse = cluster_se(xs, ds)
+    assert cse > 2.0 * naive, f"클러스터 SE 가 안 커졌다: {cse:.2f} vs {naive:.2f}"
+    indep = rr.normal(0, 5, 2000)
+    di = np.arange(2000)                                 # 날마다 1건 = 독립
+    assert abs(cluster_se(indep, di) - indep.std(ddof=1) / np.sqrt(2000)) < 0.02, "독립일 땐 같아야"
     print("자체점검 통과")
 
 
