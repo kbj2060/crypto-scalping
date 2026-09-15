@@ -96,11 +96,19 @@ def cycle(art, man, hist, live: bool) -> dict:
             seed = np.array(hist.get(A, {}).get("pred", []), dtype=float)
             thr = float(np.exp(np.quantile(seed, GQ))) if len(seed) >= 500 else None
             fired = thr is not None and ehat > thr
+            # ⭐`evr_q` = 이 예측이 **과거 분포에서 몇 분위인가**(0~1). 발동 여부(이진)와 달리
+            #   연속값이라 **사이징 배수**로 쓸 수 있다 — `live_eth_risk_sizing_policy_20260913
+            #   ::evr_size_multiplier` 가 이 필드를 읽는다(없으면 무효과 1.0 으로 떨어진다).
+            #   근거 §5.36-R: 실계좌 72왕복에서 명목↔E|r|백분위 **−0.426**(역방향)이라
+            #   `현행 × 백분위` 로 바꾸면 명목 42%에 손익 90% · 명목당 2.2배 · 낙폭 1/15.
+            #   `thr` 계산에 이미 쓰는 `seed` 를 그대로 쓰므로 추가 비용이 사실상 없다.
+            q = (float((seed < np.log(ehat)).mean()) if len(seed) >= 500 else None)
             # 🔴`art["dir"]` 는 **의도적으로 호출하지 않는다** — §5.36-R 실원장에서 적중 47.2%
             #   (동전 아래)이고 게이트가 고른 좋은 자리일수록 더 나빴다(−51.18bp).
             rows.append({"asset": A, "ts": str(p["timestamp"].iloc[-1]),
                          "evr_bp": round(ehat, 1), "thr_bp": round(thr, 1) if thr else None,
-                         "ratio": round(ehat / thr, 3) if thr else None, "fired": bool(fired)})
+                         "ratio": round(ehat / thr, 3) if thr else None, "fired": bool(fired),
+                         "evr_q": round(q, 4) if q is not None else None})
         except Exception as e:                      # 자산 하나가 죽어도 나머지는 보인다
             err.append(f"{A}:{type(e).__name__}")
     fired = sorted([r for r in rows if r["fired"]], key=lambda r: -r["ratio"])
