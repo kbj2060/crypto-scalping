@@ -3032,9 +3032,12 @@ def stage_quiet(a):
             pr[mall] = ev.predict(X[mall])
             elo, ehi = np.quantile(pr[tr], Q), np.quantile(pr[tr], 1 - Q)
             blo, bhi = np.quantile(big[tr], Q), np.quantile(big[tr], 1 - Q)
-            qm = (pr <= elo) & (big <= blo)
-            pops = {"quiet": qm & ~macro,          # 세 소음원 모두 꺼짐 (사용자 가설)
-                    "quiet_nomac": qm,             # 매크로 컷만 뺀 판 = 매크로 기여 격리
+            # ⭐컷을 **분해**한다 (2026-09-16 사용자 질문: 「변동성 낮은 걸로만 가면?」).
+            #   세 컷을 한 번에 걸면 무엇이 일했는지 알 수 없다. evr_only / big_only 로 가른다.
+            evr_lo, big_lo = pr <= elo, big <= blo
+            pops = {"evr_only": evr_lo,                        # ⭐저변동만 (= 횡보의 정석 정의)
+                    "big_only": big_lo,                        # 고래 조용만
+                    "quiet": evr_lo & big_lo & ~macro,         # 셋 다 (사용자 가설 원형)
                     "noisy": (pr >= ehi) & (big >= bhi) & ~macro,   # 두 연속 컷의 거울
                     "all": np.ones(len(lc), bool),                  # 전체
                     "all_sz": np.ones(len(lc), bool)}               # 전체 · 학습 **크기 맞춤**
@@ -3062,7 +3065,7 @@ def stage_quiet(a):
     R = pd.concat(recs, ignore_index=True)
     R["day"] = pd.to_datetime(R.ts).dt.floor("D")
     R["side"] = np.where(R.prob > 0.5, 1, -1)
-    R.to_parquet(OUT / f"quiet_records_{A}.parquet", index=False)
+    R.to_parquet(OUT / f"quiet_records_{A}_q{round(Q*100)}.parquet", index=False)
 
     def blk(v, d, B=4000):
         days = np.unique(d); by = {x: v[d == x] for x in days}
@@ -3075,7 +3078,7 @@ def stage_quiet(a):
           + " | " + " ".join(f"{'거리@'+str(c):>9}" for c in COSTS))
     rows = []
     for hn, H in HSQ.items():
-        for arm in ("quiet", "quiet_nomac", "noisy", "all", "all_sz"):
+        for arm in ("evr_only", "big_only", "quiet", "noisy", "all", "all_sz"):
             s = R[(R.H == hn) & (R.arm == arm)].sort_values("i")
             if not len(s):
                 continue
@@ -3103,8 +3106,8 @@ def stage_quiet(a):
         print(f"{r['지평']:>5} {r['팔']:>12} | " + " ".join(
             f"{r[f'net@{c}']:>+9.2f} [{r[f'net_lo@{c}']:>+7.2f},{r[f'net_hi@{c}']:>+7.2f}]"
             f"{'✅' if r[f'net_lo@{c}'] > 0 else '❌'}" for c in COSTS))
-    pd.DataFrame(rows).to_csv(OUT / f"quiet_regime_{A}.csv", index=False)
-    print(f"\n저장: {OUT / f'quiet_regime_{A}.csv'}")
+    pd.DataFrame(rows).to_csv(OUT / f"quiet_regime_{A}_q{round(Q*100)}.csv", index=False)
+    print(f"\n저장: {OUT / f'quiet_regime_{A}_q{round(Q*100)}.csv'}")
     print("🔴판정: **비용 0 열에서도 거리가 음수(SE 안)면 「정보가 아니다」**. "
           "비용 0 은 넘고 5.52 는 못 넘으면 「집행·지평 문제」다.")
     print("🔴이항 SE 를 쓰지 않았다 — 적중률 CI 는 날짜블록 부트다(사건이 하루에 뭉친다).")
