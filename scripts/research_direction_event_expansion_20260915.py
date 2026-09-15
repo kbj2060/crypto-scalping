@@ -2284,11 +2284,236 @@ def stage_highvol(a):
     print(f"\n저장: {OUT / f'{tag}.csv'}")
 
 
+def first_touch(hi, lo, ent, tp, sl, side):
+    """봉내 고가/저가로 **먼저 닿은 배리어**를 찾는다. 반환 (수익률bp, 종료봉, 사유).
+
+    🔴규약(CLAUDE.md «배리어/청산 판정은 intrabar 고가/저가»): resting TP/SL 은 종가가 아니라
+    닿는 즉시 체결되고, 이미 **확정된 봉**만 쓰므로 lookahead 가 아니다.
+    🔴동시 터치(한 봉이 TP·SL 을 다 건드림)는 **SL 우선** — 보수적 쪽이다. 반대로 놓으면
+    §5.32 분류학 F(봉내 순서 낙관)가 되어 가짜 엣지를 제조한다.
+    hi/lo 는 (n, H) 행렬(진입 **다음** 봉부터), ent 는 (n,), tp/sl 은 (n,) 가격변동률."""
+    up = hi / ent[:, None] - 1.0
+    dn = lo / ent[:, None] - 1.0
+    if side == 1:
+        win, loss = up >= tp[:, None], dn <= -sl[:, None]
+        wret, lret = tp, -sl
+    else:
+        win, loss = dn <= -tp[:, None], up >= sl[:, None]
+        wret, lret = tp, -sl
+    H = hi.shape[1]
+    iw = np.where(win.any(1), win.argmax(1), H + 1)
+    il = np.where(loss.any(1), loss.argmax(1), H + 1)
+    out = np.full(len(ent), np.nan); end = np.full(len(ent), H, dtype=int)
+    hit_l = il <= iw                                  # 동시 터치면 손절 우선
+    m = hit_l & (il <= H)
+    out[m] = lret[m] * 1e4; end[m] = il[m]
+    m = (~hit_l) & (iw <= H)
+    out[m] = wret[m] * 1e4; end[m] = iw[m]
+    return out, end
+
+
+def stage_exit(a):
+    """⭐**벽 식의 «가정»을 친다 — 고정지평이 아니라 비대칭 페이오프.**
+
+    지금까지 15 stage 가 전부 **고정지평 종가청산**이었고, 그 위에서만 성립하는 식이
+      수익벽 = 0.5 + 비용/(2·E|r|)
+    이다(±E|r| 대칭 페이오프 가정). 페이오프가 비대칭이면 필요 적중률은
+      a > (L + 비용) / (W + L)
+    로 바뀐다 — **H 절에서 잰 50.5% 로도 넘을 수 있는 형태**다.
+
+    §5.30 B-5 가 트레일링을 기각했지만 그건 ①**죽은 규칙 모집단**에 ②**호메로스 ATR 규약**을
+    쓴 것이다. 여기서는 ①**고 E|r| 모집단**에 ②**예측 E|r| 로 배리어를 스케일**한다
+    (인과 예측값이 이미 있다 — 이 조합은 이 저장소에서 처음이다).
+
+    🔴사전 등록: `TP = k_tp·ê`, `SL = k_sl·ê`, k ∈ {0.5,1.0,1.5,2.0} → 4×4 격자 + 고정지평
+    기준선 · **봉내 고가/저가** 판정 · 동시 터치 **SL 우선**(보수적) · 시간상한 = H ·
+    **격자는 2024 에서만 고르고 2025~26 은 딱 한 번** · 방향은 ①모델 ②무조건 롱 둘 다 ·
+    비용 10bp · 대조군 = 순환이동 귀무.
+    🔴다중성: 이 축은 이 세션 **아홉 번째** 설계이고 격자가 16칸이다. 통과해도 함께 읽는다."""
+    from sklearn.ensemble import HistGradientBoostingRegressor, HistGradientBoostingClassifier
+    global SINCE
+    SINCE = "2022-01-01"
+    rng = np.random.default_rng(SEED)
+    assets = [A for A in ASSETS20 if (BV_PANEL / f"{A}USDT.parquet").exists()]
+    QUARTERS = pd.date_range("2024-01-01", "2026-07-01", freq="QS")
+    KS = (0.5, 1.0, 1.5, 2.0)
+    print(f"자산 {len(assets)} · 상위 {1-a.drop:.0%} 봉 · 격자 {len(KS)}×{len(KS)} · 비용 {COST_BP}bp",
+          flush=True)
+    cols, TRAIN, META = None, {}, {}
+    for A in assets:
+        p = panel(A, since=SINCE)
+        if cols is None:
+            cols = [c for c in featcols(p) if c != "hour_f" and not c.startswith("tf_")
+                    and not c.startswith("ztf_")]
+        lc = p["__lc__"].to_numpy(); ts = p["timestamp"]
+        X = p[cols].to_numpy(np.float32)
+        sub = {}
+        for hn, H in HS.items():
+            y = np.log(np.maximum(np.abs(fwd_of(lc, H)), 1.0))
+            idx = np.flatnonzero(np.isfinite(y))[::36]
+            sub[hn] = (idx, y[idx])
+        un = np.unique(np.concatenate([sub[h][0] for h in HS]))
+        TRAIN[A] = (X[un], sub, un)
+        META[A] = (ts, lc, ts.dt.year.to_numpy(), len(lc))
+        del p, X
+    print("  1패스 완료", flush=True)
+    EMOD = {}
+    for hn, H in HS.items():
+        for q0 in QUARTERS:
+            Xs, ys = [], []
+            for A in assets:
+                Xa, sub, un = TRAIN[A]
+                idx, y = sub[hn]
+                m = META[A][0].to_numpy()[idx] < np.datetime64(q0 - pd.Timedelta(minutes=5 * H))
+                if m.sum() < 100:
+                    continue
+                Xs.append(Xa[np.searchsorted(un, idx[m])]); ys.append(y[m])
+            if Xs:
+                EMOD[(hn, q0)] = HistGradientBoostingRegressor(
+                    max_iter=120, learning_rate=0.06, max_depth=4, l2_regularization=3.0,
+                    random_state=11).fit(np.vstack(Xs), np.concatenate(ys))
+        print(f"  [E|r| {hn}] 완료", flush=True)
+    del TRAIN
+    CAND = {}
+    for A in assets:
+        p = panel(A, since=SINCE)
+        ts = p["timestamp"]; lc = p["__lc__"].to_numpy()
+        Xf = p[cols].to_numpy(np.float32)
+        raw = pd.read_parquet(BV_PANEL / f"{A}USDT.parquet")
+        raw["timestamp"] = pd.to_datetime(raw["timestamp"])
+        raw = raw.drop_duplicates("timestamp").sort_values("timestamp")
+        raw = raw[raw.timestamp >= SINCE].reset_index(drop=True)
+        hi = raw["high"].to_numpy(float); lw = raw["low"].to_numpy(float)
+        cl = raw["close"].to_numpy(float)
+        assert len(hi) == len(lc), f"{A} 원시/패널 길이 불일치 {len(hi)} vs {len(lc)}"
+        for hn, H in HS.items():
+            pred = np.full(len(lc), np.nan)
+            for q0 in QUARTERS:
+                mdl = EMOD.get((hn, q0))
+                if mdl is None:
+                    continue
+                te = np.flatnonzero(((ts >= q0) & (ts < q0 + pd.DateOffset(months=3))).to_numpy())
+                if len(te):
+                    pred[te] = mdl.predict(Xf[te])
+            fwd = fwd_of(lc, H)
+            ok = np.isfinite(pred) & np.isfinite(fwd)
+            oi = np.flatnonzero(ok)
+            thr = pd.Series(pred[oi]).expanding(500).quantile(a.drop).shift(1).to_numpy()
+            keep = nonoverlap(oi[np.isfinite(thr) & (pred[oi] > thr)], H)
+            keep = keep[keep + H < len(lc)]
+            if len(keep) < 50:
+                continue
+            W = np.lib.stride_tricks.sliding_window_view(hi, H + 1)[keep + 1 - 1][:, 1:]
+            Wl = np.lib.stride_tricks.sliding_window_view(lw, H + 1)[keep + 1 - 1][:, 1:]
+            CAND[(A, hn)] = dict(i=keep.astype(np.int32), ts=ts.to_numpy()[keep],
+                                 X=Xf[keep], fwd=fwd[keep].astype(np.float32),
+                                 ehat=np.exp(pred[keep]).astype(np.float32) / 1e4,
+                                 ent=cl[keep], hi=W.astype(np.float32), lo=Wl.astype(np.float32))
+        print(f"  [{A}] 후보 " + " · ".join(
+            f"{hn} {len(CAND[(A,hn)]['i']) if (A,hn) in CAND else 0}" for hn in HS), flush=True)
+        del p, Xf, raw
+    del EMOD
+    DIRP = {}
+    for hn, H in HS.items():
+        for q0 in QUARTERS:
+            Xs, ys, ws = [], [], []
+            for A in assets:
+                c = CAND.get((A, hn))
+                if c is None:
+                    continue
+                m = c["ts"] < np.datetime64(q0 - pd.Timedelta(minutes=5 * H))
+                if m.sum() < 50:
+                    continue
+                Xs.append(c["X"][m]); ys.append((c["fwd"][m] > 0).astype(int))
+                ws.append(np.abs(c["fwd"][m]))
+            if not Xs:
+                continue
+            X = np.vstack(Xs); y = np.concatenate(ys); w = np.concatenate(ws)
+            if len(y) < 500 or y.mean() in (0.0, 1.0):
+                continue
+            clfs = [HistGradientBoostingClassifier(
+                max_iter=150, learning_rate=0.05, max_depth=3, l2_regularization=3.0,
+                random_state=sd).fit(X, y, sample_weight=w / w.mean()) for sd in (11, 907, 4231)]
+            for A in assets:
+                c = CAND.get((A, hn))
+                if c is None:
+                    continue
+                te = (c["ts"] >= np.datetime64(q0)) & (c["ts"] < np.datetime64(
+                    q0 + pd.DateOffset(months=3)))
+                if te.sum():
+                    DIRP.setdefault((A, hn), np.full(len(c["i"]), np.nan))[te] = np.mean(
+                        [cf.predict_proba(c["X"][te])[:, 1] for cf in clfs], axis=0)
+        print(f"  [방향 {hn}] 완료", flush=True)
+    # ── 격자 평가: 2024 에서 고르고 2025~26 한 번 ──────────────────────────
+    recs = []
+    for (A, hn), c in CAND.items():
+        pr = DIRP.get((A, hn))
+        if pr is None:
+            continue
+        yr = pd.Series(c["ts"]).dt.year.to_numpy()
+        eh = np.clip(c["ehat"], 20e-4, 800e-4)
+        for dname, side_v in (("모델", np.where(pr > 0.5, 1, -1)),
+                              ("무조건 롱", np.ones(len(pr), int))):
+            fin = np.isfinite(pr)
+            base = side_v * c["fwd"] - COST_BP                    # 고정지평 기준선
+            for s in (1, -1):
+                sm = fin & (side_v == s)
+                if sm.sum() < 30:
+                    continue
+                for ktp in KS:
+                    for ksl in KS:
+                        ret, _ = first_touch(c["hi"][sm], c["lo"][sm], c["ent"][sm],
+                                             (ktp * eh[sm]).astype(float),
+                                             (ksl * eh[sm]).astype(float), s)
+                        fb = s * c["fwd"][sm]
+                        ret = np.where(np.isfinite(ret), ret, fb)   # 무터치 → 시간상한 종가
+                        for j, k in enumerate(np.flatnonzero(sm)):
+                            recs.append((A, hn, dname, ktp, ksl, int(yr[k]),
+                                         float(ret[j] - COST_BP), float(base[k])))
+    R = pd.DataFrame(recs, columns=["asset", "H", "dir", "ktp", "ksl", "year", "pnl", "base"])
+    R.to_parquet(OUT / "exit_grid.parquet")
+    print(f"\n격자 레코드 {len(R):,}", flush=True)
+    sel_yr, test_yr = R.year == 2024, R.year >= 2025
+    print(f"\n=== 격자 선택(2024 만) — 구성별 건당 net bp ===")
+    print(f"{'방향':>8} {'ktp':>5} {'ksl':>5} {'2024 건당':>10} {'n':>8}")
+    best = {}
+    for dname in ("모델", "무조건 롱"):
+        g = R[sel_yr & (R.dir == dname)].groupby(["ktp", "ksl"]).agg(
+            m=("pnl", "mean"), n=("pnl", "size")).reset_index().sort_values("m", ascending=False)
+        for _, x in g.head(4).iterrows():
+            print(f"{dname:>8} {x['ktp']:>5.1f} {x['ksl']:>5.1f} {x['m']:>+10.2f} {int(x['n']):>8}")
+        b = g.iloc[0]
+        best[dname] = (float(b.ktp), float(b.ksl))
+        bm = R[sel_yr & (R.dir == dname)].groupby(["ktp", "ksl"]).size().index
+        print(f"   → 선택 ktp={b.ktp} ksl={b.ksl} (2024 건당 {b.m:+.2f}bp · 격자 {len(bm)}칸 중)")
+        print(f"   [참고] 같은 구성 고정지평 2024 건당 "
+              f"{R[sel_yr & (R.dir==dname)].base.mean() - COST_BP:+.2f}bp")
+    print(f"\n=== ⭐시험(2025~2026, 딱 한 번) ===")
+    print(f"{'방향':>8} {'구성':>16} {'건당net':>9} {'n':>7} {'승률':>7} {'평균이익':>9} "
+          f"{'평균손실':>9} {'필요적중':>9} {'실제적중':>9}")
+    for dname in ("모델", "무조건 롱"):
+        ktp, ksl = best[dname]
+        sub = R[test_yr & (R.dir == dname) & (R.ktp == ktp) & (R.ksl == ksl)]
+        fx = R[test_yr & (R.dir == dname) & (R.ktp == KS[0]) & (R.ksl == KS[0])]
+        for lab, v, col in ((f"배리어 {ktp}/{ksl}", sub, "pnl"),
+                            ("고정지평", fx, "base")):
+            x = v[col].to_numpy() if col == "pnl" else v[col].to_numpy() - COST_BP
+            if not len(x):
+                continue
+            wins = x[x > 0]; loss = x[x <= 0]
+            W = wins.mean() if len(wins) else 0.0
+            L = -loss.mean() if len(loss) else 0.0
+            need = (L + COST_BP) / (W + L) if (W + L) > 0 else np.nan
+            print(f"{dname:>8} {lab:>16} {x.mean():>+9.2f} {len(x):>7} {len(wins)/len(x):>7.1%} "
+                  f"{W:>+9.1f} {-L:>+9.1f} {need:>9.1%} {len(wins)/len(x):>9.1%}")
+    print(f"\n저장: {OUT/'exit_grid.parquet'}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reuse", action="store_true", help="저장된 스크린 CSV 재사용")
     ap.add_argument("--stage", required=True,
-                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol"])
+                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit"])
     ap.add_argument("--minn", type=int, default=120, help="WF 선택 최소 사건 수")
     ap.add_argument("--tsel", type=float, default=2.0, help="WF 선택 초과 t 임계")
     ap.add_argument("--start", default="2025-01-01", help="WF 거래 시작 월")
@@ -2312,7 +2537,7 @@ def main() -> int:
      "loao": stage_loao, "fixed": stage_fixed, "crossfix": stage_crossfix,
      "fixedml": stage_fixedml, "crosswf": stage_crosswf,
      "wfml": stage_wfml, "proof": stage_proof,
-     "highvol": stage_highvol}[a.stage](a)
+     "highvol": stage_highvol, "exit": stage_exit}[a.stage](a)
     return 0
 
 
@@ -2353,6 +2578,25 @@ def _selfcheck():
                       **{f"e{y}": [10.0] for y in YEARS},
                       **{f"net{y}": [-1.0] for y in YEARS}})
     assert not bool(P1(d).iloc[0]), "순손익 음수 셀이 1차 관문을 통과했다"
+    # ③ 배리어 first_touch — 분기·동시터치 규약이 자명하지 않다
+    ent = np.array([100.0, 100.0, 100.0, 100.0])
+    hi = np.array([[100.5, 102.0, 103.0],      # 롱: 2번째 봉에서 TP(+1%)
+                   [100.2, 100.3, 100.4],      # 롱: 아무것도 안 닿음 → NaN
+                   [100.1,  99.0,  98.0],      # 롱: 2번째 봉에서 SL(−1%)
+                   [101.5,  99.0,  99.0]])     # 롱: 1번째 봉이 TP·SL 동시 → **SL 우선**
+    lo = np.array([[99.8, 100.5, 101.0],
+                   [99.9,  99.9,  99.9],
+                   [99.9,  98.5,  97.5],
+                   [98.0,  98.5,  98.5]])
+    tp = np.full(4, 0.01); sl = np.full(4, 0.01)
+    ret, end = first_touch(hi, lo, ent, tp, sl, 1)
+    assert abs(ret[0] - 100) < 1e-6 and end[0] == 1, (ret[0], end[0])
+    assert not np.isfinite(ret[1]), ret[1]
+    assert abs(ret[2] + 100) < 1e-6 and end[2] == 1, (ret[2], end[2])
+    assert abs(ret[3] + 100) < 1e-6 and end[3] == 0, f"동시 터치가 SL 우선이 아니다: {ret[3]}"
+    # 숏: 가격이 내리면 이익
+    rs, _ = first_touch(hi[[2]], lo[[2]], ent[[2]], tp[[0]], sl[[0]], -1)
+    assert abs(rs[0] - 100) < 1e-6, rs[0]
     print("자체점검 통과")
 
 
