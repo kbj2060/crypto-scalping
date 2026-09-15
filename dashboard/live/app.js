@@ -4158,7 +4158,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⚠️`ch` 는 이제 **가격 플롯 높이**다. yAt() 이 이 값을 쓰므로, 「플롯 바닥」을 뜻하던
   //   `h - mb` 는 더 이상 가격 영역의 바닥이 아니다 -- 그 자리들은 전부 plotBottom 으로 바꿨다.
   //   (여백 안의 것들 -- x축 눈금·라벨·레짐/변동성 리본·증거신호 레인 -- 은 그대로 h - mb 기준)
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 100;
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 90;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   const cw = w - ml - mr, ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
@@ -4243,9 +4243,30 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 리본 높이 20. 2026-09-11 바닥 레인이 h-mb+28 로 들어오면서 리본은 +28 -> **+50** 으로 내려갔다.
   // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 baseline +21 · 바닥 레인 +28~+43 · 레짐 리본 +50~+70.
   // h=400/mb=74 기준 리본이 396 에서 끝나 SVG 바닥까지 4px 여유.
-  const REGIME_RIBBON_Y = h - mb + 50, REGIME_RIBBON_H = 20;
+  // ── 네 줄(천장·바닥·레짐·변동성)은 **같은 모양**을 쓴다 ────────────────────────────
+  // 2026-09-16 사용자 "레짐과 변동성 모두 바닥과 천장처럼". 그전까지 레인(15px·트랙 있음)과
+  // 리본(20px·트랙 없음)이 따로 자랐다. 치수를 여기 한 곳에서 정하고 네 줄이 받아쓴다 --
+  // 각자 들고 있으면 한쪽만 고쳐져 또 어긋난다(이 파일에서 반복된 실패다).
+  const LANE_H = 15;
+  // 라운딩은 얇은 막대를 지운다: 모바일 34봉이면 bw≈6.8px 인데 rx=1.5 면 평평한 폭이 3.8px 다.
+  const laneRx = bw >= 9 ? "1.5" : "0";
+  const laneW = Math.max(bw, mobileChart ? 3.5 : 2.5);
+  const laneX0 = xAt(0), laneX1 = xAt(Math.max(candles.length - 1, 0)) + bw;
+  // 배경 트랙 -- 값이 없는 구간도 «줄이 거기 있다»를 보이게 한다(레인이 원래 하던 일).
+  const drawLaneTrack = (y) => {
+    const track = document.createElementNS(NS, "rect");
+    track.setAttribute("x", laneX0); track.setAttribute("y", y);
+    track.setAttribute("width", Math.max(laneX1 - laneX0, 1));
+    track.setAttribute("height", LANE_H);
+    track.setAttribute("rx", "1.5");
+    track.setAttribute("fill", "var(--muted)");
+    track.setAttribute("fill-opacity", "0.18");
+    svg.appendChild(track);
+    return track;
+  };
+  const REGIME_RIBBON_Y = h - mb + 50, REGIME_RIBBON_H = LANE_H;
   // 변동성 전망 리본 -- 레짐 바로 아래, 같은 두께. ETH 전용 모델이라 다른 코인에선 안 그린다.
-  const VOL_RIBBON_Y = h - mb + 76, VOL_RIBBON_H = 20;   // 레짐(+50~+70)과 6px 간격
+  const VOL_RIBBON_Y = h - mb + 71, VOL_RIBBON_H = LANE_H;   // 레짐(+50~+65)과 6px 간격
   const volRibbonOn = isSnapshotChart && activeSnapshotAsset === "eth"
     && latestVolForecast && latestVolForecast.available
     && Array.isArray(latestVolForecast.times) && latestVolForecast.times.length > 0;
@@ -4450,13 +4471,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   });
 
   if (regimeByTsForChart) {
+    drawLaneTrack(REGIME_RIBBON_Y);   // 천장·바닥과 같은 트랙 (2026-09-16)
     candles.forEach((c, i) => {
       const r = regimeByTsForChart.get(c.time);
       if (!r) return;
       const rect = document.createElementNS(NS, "rect");
       rect.setAttribute("x", xAt(i)); rect.setAttribute("y", REGIME_RIBBON_Y);
-      rect.setAttribute("width", bw); rect.setAttribute("height", REGIME_RIBBON_H);
-      rect.setAttribute("rx", "1.5");
+      rect.setAttribute("width", laneW); rect.setAttribute("height", REGIME_RIBBON_H);
+      rect.setAttribute("rx", laneRx);
       rect.setAttribute("fill", REGIME_DOMINANT_COLOR[regimeDominant(r)]);
       rect.setAttribute("fill-opacity", (0.55 + 0.45 * clamp01(r.confidence)).toFixed(2));
       const title = document.createElementNS(NS, "title");
@@ -4549,14 +4571,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       return { color: sp[0], opacity: sp[1] + (sp[2] - sp[1]) * clamp01(f) };
     };
     let drew = 0;
+    drawLaneTrack(VOL_RIBBON_Y);   // 천장·바닥과 같은 트랙 (2026-09-16)
     candles.forEach((c, i) => {
       const v = byHour.get(Math.floor(c.time / 3600) * 3600);
       if (!v) return;
       drew += 1;
       const rect = document.createElementNS(NS, "rect");
       rect.setAttribute("x", xAt(i)); rect.setAttribute("y", VOL_RIBBON_Y);
-      rect.setAttribute("width", Math.max(1, bw)); rect.setAttribute("height", VOL_RIBBON_H);
-      rect.setAttribute("rx", "1.5");
+      rect.setAttribute("width", laneW); rect.setAttribute("height", VOL_RIBBON_H);
+      rect.setAttribute("rx", laneRx);
       const st = styleOf(v);
       rect.setAttribute("fill", st.color);
       rect.setAttribute("fill-opacity", st.opacity.toFixed(2));
@@ -4805,17 +4828,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // ⚠️레인은 플롯 **위에 겹쳐** 그린다(레짐 리본과 달리 하단 여백 밖이 아니다). 그래서
     //   높이가 곧 캔들을 가리는 면적이다 -- 상·하 15px 씩이면 데스크톱 플롯 324 중
     //   30px(9%), 모바일 184 중 16%. 20 일 때는 12%/22% 였다.
-    const LANE_H = 15;
     // 2026-09-11: 플롯 **안**(top: mt+3 / bottom: h-mb-3-LANE_H)에서 여백 **밖**으로 옮겼다.
     //   천장은 플롯 위, 바닥은 x축 라벨 아래 -- 위/아래 공간 은유는 그대로 유지한다.
     const LANE_Y = { top: mt - 3 - LANE_H, bottom: h - mb + 28 };
     const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
-    // 라운딩은 얇은 막대를 지운다. 모바일 기본 줌은 34봉·bw≈6.8px 인데 rx=1.5 면 평평한 폭이
-    // 3.8px 밖에 안 남아 점처럼 보인다(2026-09-09 신고) -- 9px 미만은 각지게 그린다.
-    const laneRx = bw >= 9 ? "1.5" : "0";
-    const laneW = Math.max(bw, mobileChart ? 3.5 : 2.5);
     const opaBase = mobileChart ? 0.55 : 0.35, opaStep = mobileChart ? 0.11 : 0.15;
-    const laneX0 = xAt(0), laneX1 = xAt(candles.length - 1) + bw;
     ["top", "bottom"].forEach(side => {
       const counts = side === "top" ? cm.ev_top : cm.ev_bottom;
       const names = side === "top" ? cm.ev_top_names : cm.ev_bottom_names;
@@ -4825,15 +4842,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       // 그 전제는 2026-09-11 에 사라졌다 -- 레인이 플롯 **밖 여백**으로 옮겨졌고 히트맵은
       // 플롯 안(mt~plotBottom)으로 잘리므로 애초에 겹칠 수가 없다. 전제가 사라진 값이
       // 남아서 혼자 검게 보였던 것이다.
-      const track = document.createElementNS(NS, "rect");
-      track.setAttribute("x", laneX0); track.setAttribute("y", LANE_Y[side]);
-      track.setAttribute("width", Math.max(laneX1 - laneX0, 1));
-      track.setAttribute("height", LANE_H);
-      track.setAttribute("rx", "1.5");
-      track.setAttribute("fill", "var(--muted)");
-      track.setAttribute("fill-opacity", "0.18");
-      track.setAttribute("data-lane-track", side);
-      svg.appendChild(track);
+      drawLaneTrack(LANE_Y[side]).setAttribute("data-lane-track", side);
       (counts || []).forEach((n, k) => {
         if (!n) return;
         const idx = idxByEpoch.get(Date.parse(cm.times[k]) / 1000);
