@@ -1982,6 +1982,12 @@ def make_app() -> web.Application:
                             trade = json.loads(msg.data)
                             if trade.get("e") != "trade":
                                 continue
+                            price, qty = float(trade["p"]), float(trade["q"])
+                            if not (price > 0 and qty > 0):
+                                # 바이낸스가 {"p":"0","q":"0","X":"NA","st":1} 를 섞어 보낸다
+                                # (2026-09-16 실측 0.3%). 수량이 0이라 합계는 안 틀려서
+                                # klines 대조로는 안 잡힌다 -- 대신 **가격 0 레벨**이 생긴다.
+                                continue
                             ts_ms = int(trade["T"])
                             if first_ms is None:
                                 # 백필의 경계를 **로컬 시계가 아니라 첫 체결의 거래소 시각**으로
@@ -1994,8 +2000,7 @@ def make_app() -> web.Application:
                                     footprint_state["ready"] = False
                                     backfill = asyncio.create_task(footprint_backfill(
                                         footprint_state["last_ms"], first_ms))
-                            footprint_add(float(trade["p"]), float(trade["q"]),
-                                          ts_ms, bool(trade["m"]))
+                            footprint_add(price, qty, ts_ms, bool(trade["m"]))
                             footprint_state["last_ms"] = ts_ms   # 다음 재연결이 메울 공백의 시작
                 except asyncio.CancelledError:
                     raise
