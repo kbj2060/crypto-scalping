@@ -147,6 +147,13 @@ const VOL_FORECAST_POLL_MS = 120000;
 // ETH 전용: 코인마다 스트림·백필이 붙어서, 일단 하나만 켠다.
 let latestFootprint = null;
 let footprintLastFetchAt = 0;
+// 차트 종류. 「풋프린트」와 「청산맵」은 한 화면에 못 담는다 -- 풋프린트는 12봉(1시간)이라 가격
+// 폭이 $45 안팎인데 청산밀도는 $620 범위에 깔려 있어 창 안에 9%만 들어온다(2026-09-16 실측).
+// 그래서 겹치지 않고 **바꿔 본다**. 고른 값은 기억한다 -- 매번 다시 고르게 하면 그게 성가심이다.
+let chartMode = (() => {
+  try { return localStorage.getItem("chartMode") === "liqmap" ? "liqmap" : "footprint"; }
+  catch (e) { return "footprint"; }   // 사파리 프라이빗 등 localStorage 가 던지는 환경
+})();
 const API_FOOTPRINT_URL = "/api/footprint";
 const FOOTPRINT_POLL_MS = 10000;        // 차트 자체가 5초마다 다시 그려진다 -- 그보다 잦을 이유가 없다
 const FOOTPRINT_MIN_ROW_PX = 11;        // 셀에 숫자가 들어가는 최소 행 높이
@@ -429,6 +436,27 @@ async function setActiveSnapshotAsset(asset) {
     settleScope("evidence", [refreshEvidenceSignals()]),
   ]);
   if (latestMainState) render(latestMainState, latestCompactState);
+}
+
+function setupChartModeTabs() {
+  document.querySelectorAll("#chartModeTabs .asset-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (chartMode === btn.dataset.chartMode) return;
+      chartMode = btn.dataset.chartMode;
+      try { localStorage.setItem("chartMode", chartMode); } catch (e) { /* 저장 못 해도 동작은 한다 */ }
+      renderChartModeTabs();
+      footprintLastFetchAt = 0;   // 풋프린트로 돌아오면 폴링 간격을 기다리지 않고 바로 받는다
+      refreshFootprint();
+      renderSnapshotChart();      // 기다리지 않고 즉시 바꿔 그린다 -- 누른 티가 나야 한다
+    });
+  });
+  renderChartModeTabs();
+}
+
+function renderChartModeTabs() {
+  document.querySelectorAll("#chartModeTabs .asset-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.chartMode === chartMode);
+  });
 }
 
 function setupSnapshotAssetTabs() {
@@ -2124,13 +2152,15 @@ function liquidationLevelRowHtml(lv, tag, sideClass) {
 function renderLiquidationMapPanel() {
   const map = latestLiquidationMap;
   const badge = el("liqMapBadge");
-  // 2026-09-06 (사용자 신고 "청산 규모 텍스트 위 빈 공간"): 이 패널 헤더에는 제목(h3/설명)이 없고
-  // 배지 하나뿐인데, 정상 상태에서는 그 배지가 hidden 이 된다. 그러면 .ops-health-head 의 18px 상하
-  // 패딩과 하단 경계선만 남아 약 37px 빈 줄이 생긴다. 배지가 없으면 **헤더째 접는다**.
-  const badgeHead = badge ? badge.closest(".ops-health-head") : null;
+  // 2026-09-06 에는 배지가 비면 **헤더째 접었다**(제목도 없이 배지 하나뿐이라 37px 빈 줄이
+  // 남았다). 2026-09-16 그 전제가 사라졌다 -- 같은 헤더에 차트 종류 토글이 상주한다. 접으면
+  // 그 토글이 같이 사라져서 **버튼이 아예 안 눌린다**(브라우저 시험에서 "element is not
+  // visible" 로 잡혔다). 헤더는 이제 항상 내용이 있으므로 접지 않는다.
   const setMapBadge = (tone, text) => {
-    if (badge) { badge.className = `ops-badge ${tone}`; badge.textContent = text; }
-    if (badgeHead) badgeHead.classList.toggle("hidden", !text);
+    if (!badge) return;
+    badge.className = `ops-badge ${tone}`;
+    badge.textContent = text;
+    badge.hidden = !text;   // 빈 배지는 자리만 먹는다(예전엔 헤더째 접어서 가렸다)
   };
   if (!map || map.error === "fetch_failed") {
     setMapBadge("bad", "연결 실패");
@@ -3689,6 +3719,7 @@ function renderLiqDensityLegend(hasDensity) {
 }
 
 async function refreshFootprint() {
+  if (chartMode !== "footprint") return;       // 청산맵을 보는 동안은 받을 이유가 없다
   if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
   const now = Date.now();
   if (now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
@@ -3706,6 +3737,7 @@ async function refreshFootprint() {
 
 // 풋프린트가 없으면(다른 코인 · 서버 웜업 · fetch 실패) null 을 돌려주고, 차트는 캔들로 그린다.
 function footprintForChart() {
+  if (chartMode !== "footprint") return null;  // 청산맵 모드 = 예전 차트 그대로
   if (activeSnapshotAsset !== "eth") return null;
   const payload = latestFootprint;
   const bars = Array.isArray(payload && payload.bars)
@@ -5084,6 +5116,7 @@ document.addEventListener("visibilitychange", () => {
   tick();
 });
 setupSnapshotAssetTabs();
+setupChartModeTabs();
 setupPageTabs();
 setupScrollRendering();
 

@@ -405,6 +405,14 @@
                전용 행에서 여기로 옮겨 그 자리를 채운다(행 하나가 줄어든다). -->
           <div id="liqDensityLegend" class="liq-density-legend" hidden></div>
           <div class="ops-health-head-tools">
+            <!-- 2026-09-16 차트 모드 전환. 풋프린트는 12봉(1시간)이라 가격 폭이 $45 안팎인데
+                 청산밀도 빈은 $620 범위에 깔려 있어 창 안에 9%밖에 안 들어온다 -- 한 화면에
+                 둘을 같이 담을 방법이 없어서 «바꿔 보는» 쪽을 택했다(사용자 결정). -->
+            <div id="chartModeTabs" class="asset-tabs chart-mode-tabs" aria-label="차트 종류"
+                 title="풋프린트: 최근 12봉(1시간)을 가격 행으로 쪼개 매수/매도 체결량·POC·불균형. 청산맵: 72봉(6시간) 캔들 + 배경 청산밀도 히트맵.">
+              <button type="button" class="asset-tab" data-chart-mode="liqmap">청산맵</button>
+              <button type="button" class="asset-tab active" data-chart-mode="footprint">풋프린트</button>
+            </div>
             <span id="liqMapBadge" class="ops-badge neutral">-</span>
           </div>
         </div>
