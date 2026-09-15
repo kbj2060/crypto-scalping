@@ -635,6 +635,8 @@ def run_once(dry_run: bool) -> list[Check]:
         # 조용한 새벽에도 ETH 는 초당 100건 넘게 체결되므로 «행이 없다 = 수집기가 죽었다»가
         # 성립한다. warn 5분·critical 10분은 다른 1분 수집기들과 같은 값이다.
         # ⚠️ts_sec 는 epoch 정수라 그대로 cast 하면 안 된다 -- to_timestamp 로 감싸 넘긴다.
+        # ⚠️수집기를 **은퇴시키면 이 줄도 지운다**. 안 지우면 파일이 안 늘어나(또는 지워져)
+        #   영구 BLOCKED/CRITICAL 이 된다 -- SHADOW_RUNNERS 주석의 사고가 세 번 반복된 자리다.
         check_duckdb_table_freshness("duckdb_trade_tape_eth", tape_db, "trade_tape_1s",
                                      "to_timestamp(ts_sec)", 5, 10),
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
