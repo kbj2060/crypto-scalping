@@ -195,64 +195,6 @@
             </div>
           </div>
         </div>
-        <div class="signal-overview-group" data-asset-scope="evidence">
-          <div class="signal-overview-group-head">
-            <p class="signal-overview-label">증거 신호 (ETH 5분봉)</p>
-            <span id="evidenceStripBadge" class="ops-badge neutral">-</span>
-            <span id="evidenceProvisionalBadge" class="ops-badge neutral" title="진행 중인(아직 안 닫힌) 봉으로 미리 계산한 값 — 봉이 끝날 때까지 계속 바뀔 수 있고, 실측 lift 수치는 이 값이 아니라 확정값 기준입니다">진행중 미리보기 -</span>
-          </div>
-          <div class="signal-chip-row">
-            <div id="eviChipOrthogonal" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">오실레이터+체결·펀딩</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-            <div id="eviChipFibExt" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">확장소진(실험)</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-            <div id="eviChipSmt" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">SMT 다이버전스</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-            <div id="eviChipSweep" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">유동성 스윕</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-            <div id="eviChipReturnZ" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">15분 급변</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-            <div id="eviChipTakerDelta" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">체결 쏠림</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-            <div id="eviChipDemarker" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">DeMarker 극단</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-            <div id="eviChipKalman" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-live-dot" aria-hidden="true" title="진행중 봉 미리보기(미확정, ~10초 갱신)"></span>
-              <span class="signal-chip-label">칼만 추세이탈</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-          </div>
-          <p id="evidenceStripMeaning" class="evidence-strip-meaning hidden">-</p>
-        </div>
         <div class="signal-overview-group">
           <div class="signal-overview-group-head">
             <p class="signal-overview-label">특화 감지기 (이벤트 트리거)</p>
@@ -428,14 +370,6 @@
         <div id="snapModelIndicatorList" class="ops-health-list"></div>
       </section>
 
-      <section class="panel ops-health-panel" data-asset-scope="evidence">
-        <div class="ops-health-head">
-          <div class="ops-health-head-tools">
-            <span id="evidenceNetScoreBadge" class="ops-badge neutral">-</span>
-          </div>
-        </div>
-        <div id="evidenceSignalList" class="ops-health-list"></div>
-      </section>
 
       <section class="panel ops-health-panel">
         <div id="snapSpecializedSignalList" class="ops-health-list"></div>
