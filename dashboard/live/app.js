@@ -3102,6 +3102,8 @@ function extremeDetectorIndicatorItem() {
 // 2026-09-15 **E|r| 게이트** — 「언제」만 말한다. 방향 축이 아예 없는 카드다.
 // 🔴카드에 방향을 넣지 말 것: 같은 아티팩트의 방향 분류기는 실계좌 72왕복에서 적중 47.2%
 //   (동전 아래)이고 게이트가 고른 좋은 자리일수록 더 나빴다(−51.18bp · 호메로스 §5.36-R).
+const GATE_GAUGE_NOTE = "게이지는 20자산 중 발동 비율입니다 — 확률이 아닙니다."
+  + " 게이트 자체가 봉의 10% 만 켜도록 맞춰져 있습니다.";
 function evrGateIndicatorItem() {
   const p = latestEvrGate;
   const base = { key: "evr_gate", label: "변동폭 게이트 (24시간)",
@@ -3123,14 +3125,20 @@ function evrGateIndicatorItem() {
     "쓰임은 «진입을 할지 말지»입니다. 두 독립 설계에서 증분 +8.25 / +7.44bp/일 (CI 둘 다 0 배제) · MDD −47.4% → −8.4%.",
     "🔴방향은 말하지 않습니다 — 방향 분류기는 실계좌 72왕복에서 적중 47.2% 였습니다(호메로스 §5.36-R).",
     "🔴손실 차단기이지 수익 생성기가 아닙니다. 매매에 연결돼 있지 않습니다.",
+    GATE_GAUGE_NOTE,
   ].filter(Boolean).join("\n");
   return { ...base, probaSlot: true,
     tone: nF > 0 ? "bad" : "neutral",
     subText: p.subText || (nF > 0 ? "발동" : "미발동"),
     // ⚠️이 게이지는 **확률이 아니라 발동 비율**이다 -- 규약 §3 예외라 툴팁에 성격을 밝힌다.
     proba: nA > 0 ? nF / nA : 0,
-    meterNote: p.meterNote || null,
-    meterNoteTitle: "게이지는 20자산 중 발동 비율입니다 — 확률이 아닙니다. 게이트 자체가 봉의 10% 만 켜도록 맞춰져 있습니다.",
+    // 2026-09-16 사용자 신고 "너비가 다 깨졌어": «20자산 중 1종 · 최대 ARB 1.26배» 가
+    //   meterNote 로 **미터 칸**에 들어가 오른쪽 열을 밀어냈다. 그 칸은 상태·게이지 두 줄만
+    //   담는 자리다(다른 칩의 meterNote 는 「탐지 2/3」처럼 짧다). 숫자 나열은 왼쪽 설명
+    //   줄(liveText)로 옮긴다 -- 거기가 본문 폭을 그대로 쓰는 자리다.
+    meterNote: null,
+    liveText: p.meterNote || null,
+    liveTitle: GATE_GAUGE_NOTE,
     stateTitle,
     history: p.history || [], times: p.times || [] };
 }
