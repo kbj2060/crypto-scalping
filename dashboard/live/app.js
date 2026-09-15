@@ -3686,6 +3686,7 @@ function footprintForChart() {
     bucket: Number(payload.bucket) || 0.5,
     ready: !!payload.ready,
     barsExpected: Number(payload.barsExpected) || bars.length,
+    barCount: bars.length,
     firstTime: bars[0].time,
     byTime: new Map(bars.map((b) => [b.time, b.levels])),
   };
@@ -4374,11 +4375,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     });
 
     // 백필 중에는 왼쪽 봉들이 아직 비어 있다 -- 그걸 «거래가 없었다»로 읽지 않게 말해 둔다.
-    if (!footprint.ready || candles.length < footprint.barsExpected) {
+    // 판정은 **수집기 상태(ready)** 만 본다. 캔들 개수로 재면, 봉이 바뀌는 순간 캔들 이력이
+    // 아직 그 봉을 모를 때 다 찼는데도 「수집 중」이 남는다(2026-09-15 화면에서 실제로 봤다).
+    if (!footprint.ready) {
       const warm = document.createElementNS(NS, "text");
       warm.setAttribute("x", ml + 4); warm.setAttribute("y", mt + ch - 4);
       warm.setAttribute("font-size", "9"); warm.setAttribute("fill", "var(--muted)");
-      warm.textContent = "체결 테이프 수집 중 " + candles.length + "/" + footprint.barsExpected + "봉";
+      warm.textContent = "체결 테이프 수집 중 " + footprint.barCount + "/" + footprint.barsExpected + "봉";
       svg.appendChild(warm);
     }
   } else {
