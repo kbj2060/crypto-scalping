@@ -3413,7 +3413,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⚠️`ch` 는 이제 **가격 플롯 높이**다. yAt() 이 이 값을 쓰므로, 「플롯 바닥」을 뜻하던
   //   `h - mb` 는 더 이상 가격 영역의 바닥이 아니다 -- 그 자리들은 전부 plotBottom 으로 바꿨다.
   //   (여백 안의 것들 -- x축 눈금·라벨·레짐/변동성 리본·증거신호 레인 -- 은 그대로 h - mb 기준)
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 90;
+  // 2026-09-16 줄 배치: 천장 레인이 위 여백에서 빠져 mt 를 22 -> 12 로 줄이고(플롯이 그만큼
+  // 커진다), 아래는 바닥 레인 자리를 회수한 뒤 구간 2줄(추세 전환·변동폭 게이트)을 붙였다.
+  // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 레짐 +28~+43 · 변동성 +49~+64 ·
+  //                 추세 전환 +70~+85 · 변동폭 게이트 +91~+106
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 112;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   const cw = w - ml - mr, ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
@@ -3519,9 +3523,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(track);
     return track;
   };
-  const REGIME_RIBBON_Y = h - mb + 50, REGIME_RIBBON_H = LANE_H;
+  const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = LANE_H;
   // 변동성 전망 리본 -- 레짐 바로 아래, 같은 두께. ETH 전용 모델이라 다른 코인에선 안 그린다.
-  const VOL_RIBBON_Y = h - mb + 71, VOL_RIBBON_H = LANE_H;   // 레짐(+50~+65)과 6px 간격
+  const VOL_RIBBON_Y = h - mb + 49, VOL_RIBBON_H = LANE_H;   // 레짐(+28~+43)과 6px 간격
+  // 방향 없는 두 신호의 구간 줄. 이름을 왼쪽 여백에 적는 것까지 레짐·변동성과 같은 규약이다.
+  const TREND_ROW_Y = h - mb + 70, GATE_ROW_Y = h - mb + 91;
   const volRibbonOn = isSnapshotChart && activeSnapshotAsset === "eth"
     && latestVolForecast && latestVolForecast.available
     && Array.isArray(latestVolForecast.times) && latestVolForecast.times.length > 0;
@@ -4101,46 +4107,83 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   30px(9%), 모바일 184 중 16%. 20 일 때는 12%/22% 였다.
     // 2026-09-11: 플롯 **안**(top: mt+3 / bottom: h-mb-3-LANE_H)에서 여백 **밖**으로 옮겼다.
     //   천장은 플롯 위, 바닥은 x축 라벨 아래 -- 위/아래 공간 은유는 그대로 유지한다.
-    const LANE_Y = { top: mt - 3 - LANE_H, bottom: h - mb + 28 };
     const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
-    const opaBase = mobileChart ? 0.55 : 0.35, opaStep = mobileChart ? 0.11 : 0.15;
-    ["top", "bottom"].forEach(side => {
-      const counts = side === "top" ? cm.ev_top : cm.ev_bottom;
-      const names = side === "top" ? cm.ev_top_names : cm.ev_bottom_names;
-      // 트랙 색은 **레짐·변동성 리본과 같은 값**이다(var(--muted) 0.18). 2026-09-16 사용자
-      // 지적 "천장과 바닥 백그라운드만 검정색". 그전엔 --chart-bg 0.92(불투명)였는데, 그건
-      // 2026-09-09 에 «청산 밀도 밴드가 레인 아래로 비치지 않게 끊으려고» 넣은 것이었다.
-      // 그 전제는 2026-09-11 에 사라졌다 -- 레인이 플롯 **밖 여백**으로 옮겨졌고 히트맵은
-      // 플롯 안(mt~plotBottom)으로 잘리므로 애초에 겹칠 수가 없다. 전제가 사라진 값이
-      // 남아서 혼자 검게 보였던 것이다.
-      drawLaneTrack(LANE_Y[side]).setAttribute("data-lane-track", side);
-      (counts || []).forEach((n, k) => {
-        if (!n) return;
-        const idx = idxByEpoch.get(Date.parse(cm.times[k]) / 1000);
-        if (idx === undefined) return;
-        const rect = document.createElementNS(NS, "rect");
-        rect.setAttribute("x", xAt(idx)); rect.setAttribute("y", LANE_Y[side]);
-        rect.setAttribute("width", laneW); rect.setAttribute("height", LANE_H);
-        rect.setAttribute("rx", laneRx);
-        rect.setAttribute("fill", laneFill[side]);
-        // 진하기 = 동시발동 종수. 색을 새로 만들지 않는다(표시 규약 §2).
-        // 데스크톱 1종 0.50 → 4종+ 0.95 · 모바일 1종 0.66 → 4종+ 0.99(대비 확보).
-        rect.setAttribute("fill-opacity", Math.min(opaBase + opaStep * Math.min(n, 4), 1).toFixed(2));
-        const ti = document.createElementNS(NS, "title");
-        ti.textContent = `${side === "top" ? "천장" : "바닥"} 증거신호 ${n}종`
-          + `${(names && names[k]) ? ` · ${names[k]}` : ""}`;
-        rect.appendChild(ti);
-        svg.appendChild(rect);
+    // 2026-09-16 사용자 지시로 **천장·바닥 레인을 제거**했다. 그 레인은 증거신호 종수를
+    // 진하기로 보여주던 것인데(2026-09-09 C안), 증거신호가 화면에서 빠지면서 빈 줄만 남았다.
+    // 방향 이벤트는 아래 **봉 밀착 삼각형** 하나로 말한다 -- 같은 것을 두 문법으로 말하지 않는다.
+
+    // ── 방향 없는 신호는 구간으로 (2026-09-16) ──────────────────────────────────
+    // 추세 전환·변동폭 게이트는 **천장/바닥을 말하지 않는다**. 그래서 방향 색(초록/빨강)을
+    // 쓰지 않고 앰버/주황 계열만 쓰며, 삼각형(순간)이 아니라 **막대 길이**(구간)로 그린다 --
+    // 지속 시간이 이 둘의 정보 대부분이라 점으로 찍으면 그게 사라진다.
+    // 예고는 **현재 상태만** 아는 값이라(워커가 이력을 안 남긴다) 서버가 spans_partial 로
+    // 알려주고, 여기서는 점선 테두리로 «과거는 모른다»를 표시한다.
+    const spans = cm.spans || {};
+    const partial = new Set(cm.spans_partial || []);
+    const spanRows = [
+      // 왼쪽 여백은 45px 뿐이다 -- 이름은 기존 규약(레짐·변동성·청산)처럼 두 글자로 줄인다.
+      // 긴 이름을 넣었더니 "변동폭 게이트"가 "폭 게이트"로 잘렸다(2026-09-16 렌더 확인).
+      { y: TREND_ROW_Y, label: "전환", items: [
+        { key: "trend_prewarn", name: "전환 예고", color: "var(--warn)", opacity: 0.30 },
+        { key: "trend_detect", name: "전환 탐지", color: "var(--warn)", opacity: 0.95 }] },
+      { y: GATE_ROW_Y, label: "게이트", items: [
+        { key: "evr_gate", name: "게이트 발동", color: "var(--amber)", opacity: 0.72 }] },
+    ];
+    spanRows.forEach((row) => {
+      drawLaneTrack(row.y);
+      const lbl = document.createElementNS(NS, "text");
+      lbl.setAttribute("x", ml - 6); lbl.setAttribute("y", row.y + LANE_H / 2 + 3);
+      lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "9");
+      lbl.setAttribute("fill", "var(--muted)");
+      lbl.textContent = row.label;
+      svg.appendChild(lbl);
+      row.items.forEach((item) => {
+        const raw = Array.isArray(spans[item.key]) ? spans[item.key] : [];
+        // 🔴인덱스로 맞추면 안 된다. 서버 격자는 72봉인데 **풋프린트는 12봉**이라 길이가 다르다
+        //   -- 첫 판은 길이 검사에 걸려 풋프린트에서 구간이 영영 안 보였다. 시각으로 맞춘다
+        //   (삼각형이 idxByEpoch 로 하는 것과 같은 방법이고, 한 칸 밀기도 같이 막힌다).
+        const onByTs = new Map();
+        (cm.times || []).forEach((t, k) => {
+          const sec = Math.floor(Date.parse(t) / 1000);
+          if (Number.isFinite(sec)) onByTs.set(sec, raw[k] ? 1 : 0);
+        });
+        const arr = candles.map((c) => onByTs.get(c.time) || 0);
+        let i = 0;
+        while (i < arr.length) {
+          if (!arr[i]) { i += 1; continue; }
+          let j = i;
+          while (j + 1 < arr.length && arr[j + 1]) j += 1;   // 이어진 봉을 한 구간으로
+          const x0 = xAt(i), x1 = xAt(j) + bw;
+          const rect = document.createElementNS(NS, "rect");
+          rect.setAttribute("x", x0); rect.setAttribute("y", row.y);
+          rect.setAttribute("width", Math.max(x1 - x0, 2));
+          rect.setAttribute("height", LANE_H); rect.setAttribute("rx", laneRx);
+          rect.setAttribute("fill", item.color);
+          rect.setAttribute("fill-opacity", String(item.opacity));
+          if (partial.has(item.key)) {
+            rect.setAttribute("stroke", item.color);
+            rect.setAttribute("stroke-dasharray", "3,2");
+            rect.setAttribute("stroke-opacity", "0.9");
+          }
+          const ti = document.createElementNS(NS, "title");
+          const span = (j - i + 1) * CHART_CANDLE_MIN;
+          ti.textContent = item.name + " · " + fmtDateTick(candles[i].time * 1000)
+            + "부터 " + span + "분"
+            + (partial.has(item.key) ? " (현재 상태만 압니다 — 과거 이력이 없습니다)" : "");
+          rect.appendChild(ti);
+          svg.appendChild(rect);
+          // 구간이 충분히 넓을 때만 이름을 넣는다 -- 좁은 칸의 글자는 읽히지 않고 더럽기만 하다.
+          if (x1 - x0 >= 64) {
+            const t = document.createElementNS(NS, "text");
+            t.setAttribute("x", x0 + 6); t.setAttribute("y", row.y + LANE_H / 2 + 3.5);
+            t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "bold");
+            t.setAttribute("fill", "#12161d");
+            t.textContent = item.name;
+            svg.appendChild(t);
+          }
+          i = j + 1;
+        }
       });
-      const lab = document.createElementNS(NS, "text");
-      lab.setAttribute("x", ml - 6);
-      // 레인이 두꺼워졌으니 바닥 정렬(H-1) 대신 세로 중앙 (font-size 9 -> baseline +3)
-      lab.setAttribute("y", LANE_Y[side] + LANE_H / 2 + 3);
-      lab.setAttribute("text-anchor", "end");
-      lab.setAttribute("font-size", "9");
-      lab.setAttribute("fill", "var(--muted)");
-      lab.textContent = side === "top" ? "천장" : "바닥";
-      svg.appendChild(lab);
     });
 
     // 이벤트 트리거 -- 매매 저널과 **같은 삼각형 문법**을 쓰고 `markerCounts` 를 공유해

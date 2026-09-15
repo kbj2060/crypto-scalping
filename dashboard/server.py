@@ -2186,9 +2186,20 @@ def make_app() -> web.Application:
             return compute_chart_markers(asset)
         vr = await load_v_rebound_signal()
         ex = await load_extreme_detector()
+        # 2026-09-16: 방향 없는 두 신호(추세 전환·변동폭 게이트)를 **구간**으로 같이 넘긴다.
+        # 여기서도 이미 계산된 페이로드를 재사용한다 -- 추가 모델 실행 없음(위 ⚠️와 같은 이유).
+        # 하나가 실패해도 마커 전체를 죽이지 않는다: 그 줄만 비고 나머지는 그려진다.
+        try:
+            bo = await load_breakout_detector()
+        except Exception:  # noqa: BLE001
+            bo = None
+        try:
+            ev = await load_evr_gate()
+        except Exception:  # noqa: BLE001
+            ev = None
         return await swr_cached(
             "chart_markers", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, ex),
+            lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, ex, bo, ev),
             max_stale=STALE_GRACE_SECONDS,
         )
 
