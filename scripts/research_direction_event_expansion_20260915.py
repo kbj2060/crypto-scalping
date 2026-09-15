@@ -2864,11 +2864,108 @@ def stage_multi(a):
     print(f"\n저장: {OUT/'multiplicity.csv'}")
 
 
+def stage_freeze(a):
+    """⭐**후보를 동결된 아티팩트로 만든다** — `4h × 예측 E|r| 상위5%`.
+
+    13절 결론: 다중성 보정 p **0.0610**(임계 0.05). **더 파면 p 가 나빠진다**(max-t 귀무가
+    칸 수에 따라 오른다). 남은 길은 **독립 관측 증가**뿐이고 그건 오늘 시계를 시작해야 는다.
+    이 stage 는 그 시계를 위한 **서빙 가능한 아티팩트**를 만든다 — 연구 숫자가 아니라 물건이다.
+
+    담는 것: ①E|r| 회귀(4h) ②방향 분류(상위20% 모집단·3씨드) ③피쳐 목록(74, 순서 고정)
+    ④**예측 E|r| 이력**(자산별) — 섀도우가 인과 확장창 분위를 **웜스타트**하는 데 필요하다
+    (없으면 처음 500건은 판정 불가) ⑤manifest(sha256·학습창·파라미터).
+    🔴학습은 **가진 전 구간**(2022-01~데이터 끝)이다. 이건 백테스트가 아니라 **배포용 최종 적합**
+    이므로 워크포워드가 아니다 — 그리고 **이 아티팩트로 과거를 다시 채점하면 표본내**다."""
+    import hashlib
+    import json
+    import joblib
+    from sklearn.ensemble import HistGradientBoostingRegressor, HistGradientBoostingClassifier
+    global SINCE
+    SINCE = "2022-01-01"
+    H, HN, TOPQ = 48, "4h", 0.95
+    assets = [A for A in ASSETS20 if (BV_PANEL / f"{A}USDT.parquet").exists()]
+    dst = ROOT / "data/models/direction_4h_top5_20260915"
+    dst.mkdir(parents=True, exist_ok=True)
+    cols = None
+    Xs, ys, hist, last = [], [], {}, {}
+    for A in assets:
+        p = panel(A, since=SINCE)
+        if cols is None:
+            cols = [c for c in featcols(p) if c != "hour_f" and not c.startswith("tf_")
+                    and not c.startswith("ztf_")]
+        lc = p["__lc__"].to_numpy()
+        y = np.log(np.maximum(np.abs(fwd_of(lc, H)), 1.0))
+        idx = np.flatnonzero(np.isfinite(y))[::36]
+        Xs.append(p[cols].to_numpy(np.float32)[idx]); ys.append(y[idx])
+        last[A] = str(p["timestamp"].iloc[-1])
+        print(f"  [{A}] 학습표본 {len(idx):,}", flush=True)
+        del p
+    emod = HistGradientBoostingRegressor(max_iter=120, learning_rate=0.06, max_depth=4,
+                                         l2_regularization=3.0, random_state=11)
+    emod.fit(np.vstack(Xs), np.concatenate(ys))
+    del Xs, ys
+    print("  E|r| 모델 적합 완료", flush=True)
+    # 상위20% 모집단에서 방향 학습 + 예측 이력 저장
+    DX, DY, DW = [], [], []
+    for A in assets:
+        p = panel(A, since=SINCE)
+        lc = p["__lc__"].to_numpy(); ts = p["timestamp"]
+        Xf = p[cols].to_numpy(np.float32)
+        pred = emod.predict(Xf)
+        fwd = fwd_of(lc, H)
+        ok = np.isfinite(fwd)
+        hist[A] = {"ts": [str(x) for x in ts.iloc[::12]],
+                   "pred": [round(float(v), 6) for v in pred[::12]]}
+        thr20 = np.quantile(pred[ok], 0.80)
+        m = ok & (pred > thr20)
+        keep = nonoverlap(np.flatnonzero(m), H)
+        DX.append(Xf[keep]); DY.append((fwd[keep] > 0).astype(int)); DW.append(np.abs(fwd[keep]))
+        del p, Xf
+    X = np.vstack(DX); Y = np.concatenate(DY); W = np.concatenate(DW)
+    dmods = [HistGradientBoostingClassifier(max_iter=150, learning_rate=0.05, max_depth=3,
+                                            l2_regularization=3.0, random_state=sd
+                                            ).fit(X, Y, sample_weight=W / W.mean())
+             for sd in (11, 907, 4231)]
+    print(f"  방향 모델 적합 완료 (표본 {len(Y):,} · 롱비율 {Y.mean():.1%})", flush=True)
+    joblib.dump({"evr": emod, "dir": dmods, "cols": cols}, dst / "models.joblib", compress=3)
+    (dst / "evr_history.json").write_text(json.dumps(hist))
+    sha = hashlib.sha256((dst / "models.joblib").read_bytes()).hexdigest()
+    man = {
+        "name": "direction_4h_top5_20260915",
+        "created_utc": pd.Timestamp.utcnow().isoformat(),
+        "horizon_bars": H, "horizon": HN, "gate_quantile": TOPQ,
+        "dir_train_population_quantile": 0.80,
+        "assets": assets, "n_features": len(cols), "features": cols,
+        "train_since": SINCE, "train_until": last,
+        "models_sha256": sha,
+        "evidence": {
+            "gross_bp_per_trade": 23.10, "gross_dateblock_ci": [3.46, 39.09],
+            "net_bp_at_maker_552": 17.58, "net_dateblock_ci_at_552": [-1.37, 33.95],
+            "years_2024_2025_2026_at_552": [35.1, 6.7, 4.7],
+            "assets_positive": "17/20", "asset_sign_test_p": 0.0013,
+            "multiplicity_maxt_p": 0.0610, "n_cells_swept": 19,
+            "independent_days": 580, "n_events": 4664,
+            "model_minus_long": 5.46, "model_minus_long_ci": [-13.1, 24.3],
+        },
+        "status": "SHADOW_CANDIDATE_NOT_PROVEN",
+        "gates_failed": ["net_dateblock_ci_includes_zero",
+                         "multiplicity_p_0.061_above_0.05",
+                         "model_minus_long_ci_includes_zero"],
+        "why_shadow": ("탐색으로는 못 넘는다 — 칸을 늘리면 max-t 귀무가 올라 p 가 나빠진다. "
+                       "독립 관측(시간)과 모델팔/롱팔 병행 기록만이 남은 경로다."),
+        "doc": "docs/experiments/direction_event_trigger_expansion_and_oos_audit_20260915.md",
+    }
+    (dst / "manifest.json").write_text(json.dumps(man, ensure_ascii=False, indent=2))
+    print(f"\n⭐아티팩트 저장: {dst}")
+    print(f"  models.joblib sha256 {sha[:16]}… · evr_history.json (웜스타트) · manifest.json")
+    print(f"  🔴status = SHADOW_CANDIDATE_NOT_PROVEN · 미통과 관문 3개를 manifest 에 박았다")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reuse", action="store_true", help="저장된 스크린 CSV 재사용")
     ap.add_argument("--stage", required=True,
-                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit", "wall", "wallcheck", "multi"])
+                    choices=["screen", "cross", "conj", "fdr", "oictl", "port", "size", "wf", "wfmulti", "loao", "fixed", "crossfix", "fixedml", "crosswf", "wfml", "proof", "highvol", "exit", "wall", "wallcheck", "multi", "freeze"])
     ap.add_argument("--minn", type=int, default=120, help="WF 선택 최소 사건 수")
     ap.add_argument("--tsel", type=float, default=2.0, help="WF 선택 초과 t 임계")
     ap.add_argument("--start", default="2025-01-01", help="WF 거래 시작 월")
@@ -2894,7 +2991,7 @@ def main() -> int:
      "wfml": stage_wfml, "proof": stage_proof,
      "highvol": stage_highvol, "exit": stage_exit,
      "wall": stage_wall, "wallcheck": stage_wallcheck,
-     "multi": stage_multi}[a.stage](a)
+     "multi": stage_multi, "freeze": stage_freeze}[a.stage](a)
     return 0
 
 
