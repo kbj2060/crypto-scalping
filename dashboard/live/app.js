@@ -32,17 +32,16 @@ const API_SESSION_ALERTS_URL = "/api/session-alerts";
 const POLL_MS = 2500;
 // 코인별 실시간 지표 폴링(2026-09-03). 서버 캐시가 20초이므로 그보다 자주 때릴 이유가 없다.
 const MODEL_INDICATOR_POLL_MS = 20000;
-// 2026-08-25 perf pass: split from the Live tab's own chart-render throttle (removed with the Live
-// tab) -- the Snapshot chart's own data
-// (latestLiquidationMap) only changes once per LIQUIDATION_MAP_POLL_MS (5min), so redrawing its
-// ~250-400 SVG nodes every 5s (60x more often than the data changes) was pure waste. Coarser than
-// the Live chart's interval on purpose: this chart is read-only reference, not something a user
-// pans/zooms live (see renderSnapshotChart()'s own comment). Kept as ONE throttle interval (not
-// split further into "redraw candles at 5s, density at 5min") because the density band's sweep-
-// darkening depends on live candle highs/lows, not just latestLiquidationMap -- decoupling those
-// two redraw cadences would let a real price sweep sit un-darkened for up to 5min, undermining why
-// sweep-darkening exists. Slower-but-synchronized beats faster-but-inconsistent here.
-const SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS = 20000;
+// 2026-08-25 에 20초로 잡았던 근거는 «이 차트의 데이터(청산맵)가 5분에 한 번만 바뀌니 자주
+// 그리는 건 순수 낭비»였다. 2026-09-16 그 **전제가 바뀌었다** -- 풋프린트 셀은 체결마다 바뀌고
+// 현재가 선도 SSE(2.5초)마다 움직인다. 20초 묶음 때문에 화면이 최대 20초 뒤처졌다(사용자 신고
+// "래깅이 있어"). SSE 주기와 맞춘다.
+// 비용은 실측했다: renderSnapshotChart 한 번이 **2~5ms**(모바일 뷰 기준, DOM 1,164 노드).
+// 2.5초마다면 0.1~0.2% 다. 20초 -> 2.5초는 그 비용을 8배 쓰는 대신 지연을 8배 줄인다.
+// ⚠️여전히 **하나의 주기**로 묶어 둔다(캔들 2.5초 / 밀도 5분 식으로 쪼개지 않는다) -- 밀도
+// 띠의 sweep-darkening 이 라이브 고가/저가에 달려 있어서, 쪼개면 실제 스윕이 최대 5분간
+// 반영되지 않는다. 같이 그리는 쪽이 맞다.
+const SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS = 2500;
 const CANDLE_HISTORY_POLL_MS = 300000;
 const MICRO_HISTORY_MAX = 48; // matches MODEL_INDICATOR_HISTORY_MAX in server.py (4h @ 5min samples)
 // Kept post-Live-tab-removal solely as the SSE ticker payload's asset allowlist (see
@@ -155,7 +154,10 @@ let chartMode = (() => {
   catch (e) { return "footprint"; }   // 사파리 프라이빗 등 localStorage 가 던지는 환경
 })();
 const API_FOOTPRINT_URL = "/api/footprint";
-const FOOTPRINT_POLL_MS = 10000;        // 차트 자체가 5초마다 다시 그려진다 -- 그보다 잦을 이유가 없다
+// 🔴여기 있던 "차트 자체가 5초마다 다시 그려진다"는 **틀린 주석**이었다(실제는 20초였다).
+// 서버는 WS 로 계속 누적하므로 이 폴링 간격이 곧 셀의 지연이다. 5초면 사람이 못 느끼고,
+// 모바일 데이터는 gzip 후 ~4KB/회 = 2.9MB/시간이다(2.5초면 두 배).
+const FOOTPRINT_POLL_MS = 5000;
 const FOOTPRINT_MIN_ROW_PX = 11;        // 셀에 숫자가 들어가는 최소 행 높이
 const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 셀 배경 4단계(TradingView: 최소~최대의 0~25/25~50/50~75/75%~). 매수·매도는 각자 최대로 나눈다.
@@ -805,6 +807,17 @@ async function maybeFetchSnapshotChartHistory() {
   scheduleSnapshotChartRender();
 }
 
+// 스로틀된 차트 갱신. render() 경로와 SSE 시세 경로가 **같은 게이트**를 공유한다.
+// 스냅샷 탭이 아닐 때는 그리지 않는다(숨은 패널을 그리는 건 순수 낭비 -- 2026-08-25 규약).
+function maybeRenderSnapshotChartNow() {
+  if (activePageTab !== "snapshot" || isScrolling) return;
+  const now = Date.now();
+  if (now - lastSnapshotChartRenderAt < SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS) return;
+  lastSnapshotChartRenderAt = now;
+  updateSnapshotCandleLive();
+  renderSnapshotChart();
+}
+
 function applyDashboardEvent(payload) {
   if (Array.isArray(payload?.assets) && payload.assets.length) {
     const next = payload.assets.filter((a) => SNAPSHOT_ASSET_KEYS.includes(a));
@@ -826,6 +839,11 @@ function applyDashboardEvent(payload) {
     latestMainState = payload.state.state;
     latestCompactState = payload.state.compactState || null;
   }
+  // 🔴차트는 **상태(state)가 바뀐 푸시**에서만 다시 그려졌다. 시세만 오는 푸시(대부분)에서는
+  //   아무것도 안 그려서, 현재가 선과 진행 중인 봉이 상태 변경 주기(실측 5초)에 묶여 멈춰
+  //   보였다(2026-09-16 사용자 "래깅이 있어"). 시세가 곧 그 선의 값이므로 여기서도 그린다.
+  //   스로틀은 같은 상수를 쓰므로 아래 render() 경로와 겹쳐도 두 번 그리지 않는다.
+  maybeRenderSnapshotChartNow();
   if (!latestMainState || isScrolling || !payload?.state?.state) return;
   render(latestMainState, latestCompactState, { stateChanged: true });
 }
@@ -3862,7 +3880,15 @@ function fmtFootprintQty(v) {
 // Live chart's gestures write to -- shares the same window index, not independently interactive.
 // Not wired up to setupMobileCandleGestures() (that's hardcoded to #candleSvg); acceptable since
 // this chart is read-only reference, not something a user pinches/pans on its own.
+// 차트 위에 커서가 있는 동안은 다시 그리지 않는다. 다시 그리기는 svg 를 통째로 비우므로
+// (renderCandleSvg 의 innerHTML = "") **읽고 있던 툴팁·십자선이 사라진다**. 20초 주기일 땐
+// 드물어서 안 보였지만 2.5초로 당긴 순간 «호버할 때마다 깜빡임»이 된다.
+// 커서가 나가면 밀린 갱신을 즉시 한 번 그린다 -- 멈춘 채로 남겨두지 않는다.
+let chartHoverActive = false;
+let chartRenderDeferred = false;
+
 function renderSnapshotChart() {
+  if (chartHoverActive) { chartRenderDeferred = true; return; }
   const svg = el("candleSvgSnapshot");
   const fullCandles = candleHistoryByAsset[activeSnapshotAsset] || [];
   if (!svg || !fullCandles.length) return;
@@ -4810,7 +4836,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   // Candlestick Tooltip Support. regimeByTsForChart/isSnapshotChart computed once near the top of
   // this function (shared with the ribbon drawn above) -- same ETH-only guard applies here.
+  if (isSnapshotChart) svg.onmouseenter = () => { chartHoverActive = true; };
   svg.onmousemove = (evt) => {
+    if (isSnapshotChart) chartHoverActive = true;   // enter 를 놓친 경우(재렌더 직후)도 잡는다
     const rect = svg.getBoundingClientRect();
     // 2026-08-28 user report: crosshair drifts from the real cursor position increasingly toward
     // the top/bottom edges. Root cause: viewBox="0 0 1200 400" (3:1) with preserveAspectRatio=
@@ -4867,6 +4895,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     `);
   };
   svg.onmouseleave = () => {
+    if (isSnapshotChart) {
+      chartHoverActive = false;
+      if (chartRenderDeferred) { chartRenderDeferred = false; renderSnapshotChart(); return; }
+    }
     hideTooltip();
     if (typeof hoverDot !== 'undefined') hoverDot.style.display = "none";
     if (typeof vLine !== 'undefined') vLine.style.display = "none";
@@ -5061,6 +5093,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       lastSnapshotChartRenderAt = nowForSnapshotChart;
       updateSnapshotCandleLive();
       renderSnapshotChart();
+      /* (아래 목록 갱신은 이 경로에만 있다 -- 시세 푸시용 경로는 maybeRenderSnapshotChartNow) */
       // 2026-08-27: same bug/fix as renderSnapshotChart() above, one component down -- the
       // liq-level-list panel (renderLiquidationMapPanel()) has its own live-price re-filter
       // (liveRedistanced()) that's supposed to drop an already-crossed level immediately, but the
