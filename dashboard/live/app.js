@@ -5552,6 +5552,27 @@ async function manualEntryPreview(side, kind = "entry") {
   }
 }
 
+// 2026-09-15 접힌 «추가 진입» 줄에 **대가**를 적는다(사용자 요청). 포지션이 있으면 이 블록은
+// 접히는데(09-14, 물타기를 한 번 더 확인시키려고) 그 바람에 청산·노출 변화가 같이 사라졌다.
+// ⭐접기를 없애지 않는다 -- 오히려 «대가가 접힘 밖에 보이는 것»이 그 확인의 목적에 더 맞다.
+// 새 요청을 만들지 않는다: 크기 갱신이 이미 받아온 `plan.projection` 을 그대로 쓴다.
+function renderEntryFoldNote(plan) {
+  const note = el("snapEntryFoldNote");
+  if (!note) return;
+  const box = el("snapEntryBox");
+  const pr = plan.projection;
+  const a = pr && pr.after, b = pr && pr.before;
+  // 펼쳐져 있으면 아래에 카드가 그대로 보인다 -- 같은 숫자를 두 번 쓰지 않는다.
+  if (!a || !b || a.liq_pct == null || (box && box.open) || plan.blocked) {
+    note.textContent = ""; note.className = "entry-was"; return;
+  }
+  note.textContent = ` · 지금 추가하면 청산까지 ${Number(b.liq_pct).toFixed(1)}% → `
+    + `${Number(a.liq_pct).toFixed(1)}%`
+    + (a.exposure_x != null && b.exposure_x != null
+       ? ` · 노출 ${Number(b.exposure_x).toFixed(1)} → ${Number(a.exposure_x).toFixed(1)}배` : "");
+  note.className = `entry-was ${acctRiskTone(a.liq_pct)}`;
+}
+
 async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
   const mode = el("snapEntryMode");
@@ -5588,6 +5609,7 @@ async function manualEntryRefreshSize() {
         + `<span class="entry-was"> · ${Math.round(Number(plan.notional_usdt) || 0).toLocaleString()} USDT</span>`;
     // 사이징 권고 → 상한 → 주문. 세 값이 왜 다른지가 이 사슬 하나로 읽혀야 한다.
     renderEntryChain(rec, avail, q, cap, plan);
+    renderEntryFoldNote(plan);
     setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
@@ -5850,6 +5872,7 @@ for (const [slider, label, kind] of [["snapExitFrac", "snapExitFracVal", "exit"]
 // 포지션이 열린 측면의 청산 버튼만 띄운다. latestBinanceAccount 는 계좌 패널이 이미
 // 주기적으로 받아 두는 값이라 여기서 따로 요청하지 않는다(없으면 그냥 숨긴 채 둔다).
 let entryFoldHadPos = null;
+let entryFoldToggleBound = false;
 // 슬라이더를 움직일 때마다 계좌를 다시 받지 않으려고 마지막 포지션을 들고 있는다.
 let lastExitPositions = new Map();
 let lastExitStaleMin = 0;
@@ -5940,9 +5963,22 @@ function manualExitSyncButtons() {
   // 진입 블록은 포지션이 있으면 접는다. 포지션 유무가 **바뀔 때만** 건드린다 -- 매 갱신마다
   // 쓰면 사람이 물타기를 보려고 펼쳐 둔 걸 30초마다 도로 닫는다.
   const box = el("snapEntryBox");
+  // 🔴리스너를 **open 을 건드리기 전에** 건다. `toggle` 은 비동기로 발화하지만 프로그램이
+  //   접는 것도 발화시키므로, 뒤에 걸면 첫 접힘 한 번을 놓쳐 대가 줄이 30초 늦게 뜬다.
+  if (box && !entryFoldToggleBound) {
+    entryFoldToggleBound = true;
+    box.addEventListener("toggle", () => {
+      const n = el("snapEntryFoldNote");
+      // 펼치면 아래에 카드가 그대로 보인다 -- 같은 숫자를 두 번 쓰지 않는다.
+      if (box.open) { if (n) { n.textContent = ""; n.className = "entry-was"; } }
+      else manualEntryRefreshSize();
+    });
+  }
   if (box && entryFoldHadPos !== hasPos) { box.open = !hasPos; entryFoldHadPos = hasPos; }
   const sum = el("snapEntrySummary");
-  if (sum) sum.textContent = hasPos ? "추가 진입 (물타기)" : "진입";
+  // 🔴`sum.textContent` 로 쓰면 안 된다 -- 요약 줄 안의 대가 칸(span)까지 지운다.
+  const lab = el("snapEntryFoldLabel");
+  if (lab) lab.textContent = hasPos ? "추가 진입 (물타기)" : "진입";
 }
 if (el("snapEntryPlan")) {
   manualEntryRefreshSize();

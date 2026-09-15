@@ -328,7 +328,11 @@
                열고 닫는 코드는 <details> 가 대신한다. 여는 초기값만 JS 가 정한다
                (app.js manualExitSyncButtons: 포지션 유무가 **바뀔 때만** 건드린다). -->
           <details id="snapEntryBox" class="entry-fold" open>
-            <summary id="snapEntrySummary">진입</summary>
+            <!-- 2026-09-15 접혀 있어도 **대가는 보인다**(사용자 요청). 포지션을 들고
+                 있으면 이 블록은 접히는데(09-14, 물타기를 한 번 더 확인시키려고),
+                 그 바람에 «지금 추가하면 청산이 어디까지 오나»가 같이 사라졌다.
+                 접기는 그대로 두고 대가만 요약 줄로 끌어올린다. -->
+            <summary id="snapEntrySummary"><span id="snapEntryFoldLabel">진입</span><span id="snapEntryFoldNote" class="entry-was"></span></summary>
           <div class="manual-entry-row">
             <span id="snapEntrySize" class="muted">크기 확인 중…</span>
             <span id="snapEntryMode" class="ops-readonly">미리보기 전용</span>
