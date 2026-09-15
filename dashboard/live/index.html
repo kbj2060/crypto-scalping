@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260915-straddleshadow">
+  <link rel="stylesheet" href="styles.css?v=20260916-entrypreview">
 </head>
 <body>
     <main class="app">
@@ -333,14 +333,14 @@
                  그 바람에 «지금 추가하면 청산이 어디까지 오나»가 같이 사라졌다.
                  접기는 그대로 두고 대가만 요약 줄로 끌어올린다. -->
             <summary id="snapEntrySummary"><span id="snapEntryFoldLabel">진입</span><span id="snapEntryFoldNote" class="entry-was"></span></summary>
+          <!-- 2026-09-16 크기 줄·모드 배지·권고 사슬을 뺐다(사용자 지시). 같은 내용이 위
+               계좌 카드에 **미리보기로 이미 움직인다**(수량·평단·청산가·세 게이지).
+               🔴실패만은 남긴다 -- 조회가 깨졌는데 화면이 조용하면 옛 숫자가 거짓말을 한다
+               (2026-09-13 실장애). 정상일 때는 이 칸이 비어 있다. 「실주문 활성」 경고는
+               확인 단계 문구가 대신한다(「확인 버튼을 누르면 실제 주문이 나갑니다」). -->
           <div class="manual-entry-row">
-            <span id="snapEntrySize" class="muted">크기 확인 중…</span>
-            <span id="snapEntryMode" class="ops-readonly">미리보기 전용</span>
+            <span id="snapEntrySize" class="entry-note bad" hidden></span>
           </div>
-          <!-- 2026-09-15 «사이징 권고가 어디 있냐»(사용자). 옛 판은 권고를 11px 회색 보조
-               텍스트 안에 묻어놔 찾을 수 없었다. 헤드라인은 여전히 **실제로 나가는 수량**이고
-               (09-14 규약), 권고→상한→주문 사슬을 여기 라벨 붙여 편다. -->
-          <div id="snapEntryChain" class="entry-note" hidden></div>
           <!-- 2026-09-13 분할 진입. 한 번에 다 넣으면 반대로 갈 때 손쓸 게 없다 --
                09-06 물타기 감사에서 살아남은 유일한 부품이 «부분 투입»이었다. -->
           <!-- 2026-09-13 보유시간이 크기를 정한다. 학습된 MAE 분위 모델이 «이 시장에서 이만큼
@@ -467,7 +467,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260915-straddleshadow"></script>
+  <script src="./app.js?v=20260916-entrypreview"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
