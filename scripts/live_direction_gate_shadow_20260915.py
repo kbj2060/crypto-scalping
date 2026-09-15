@@ -20,8 +20,9 @@
 라이브 메트릭 API 는 **최근 41.7시간**만 준다([[reference_binance_futures_metrics_history_sources]]).
 그래서 **일별 `data.binance.vision` 파일(D−1 까지)** 로 과거를 채우고 **REST 로 오늘 분**을
 이어 붙인다. 두 구간이 겹치므로 연속성이 보장된다.
-⇒ 실행 전 `build_binance_vision_panel_20260915.py` 로 패널을 D−1 까지 갱신해야 한다
-   (`--refresh` 가 그 호출을 대신 해준다).
+⇒ 패널 갱신은 **E|r| 게이트 워커**(`live_evr_gate_worker_20260915.py`, 같은 20자산·같은
+   `data/binance_vision/panel`)가 UTC 하루 한 번 한다. 이 러너에는 갱신 플래그가 없다 —
+   그 워커가 멈추면 여기 정산도 같이 멈춘다.
 
 🔴이 스크립트는 **주문을 내지 않는다.** 기록만 한다.
 """
