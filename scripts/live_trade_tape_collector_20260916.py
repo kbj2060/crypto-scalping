@@ -90,82 +90,115 @@ class TapeBuffer:
 
 
 class TapeStore:
+    """duckdb 는 **프로세스 하나만** 파일을 연다. 그래서 연결을 붙들지 않고 **쓸 때만** 열었다
+    닫는다 -- 붙들면 ops_watchdog 의 신선도 검사(읽기 전용 연결)가 매 사이클 BLOCKED 가 되어
+    거짓 CRITICAL 을 쏜다(2026-09-16 서버에서 실제로 확인했다. maker_fill_shadow.duckdb 가
+    같은 이유로 읽히지 않는다). 저장소의 다른 writer 들(microstructure_scanner)도 같은 규약이다.
+
+    반대 방향도 막아야 한다: 검사기가 읽는 동안 우리 쓰기가 잠깐 막힐 수 있다. 그때 행을
+    버리면 조용한 유실이므로, 못 쓴 행은 보류했다가 다음 주기에 다시 쓴다."""
+
+    PENDING_CAP = 50_000   # ~3분치. 이보다 밀리면 락이 풀릴 가망이 없다고 보고 버리며 **말한다**
+
     def __init__(self, db_path: Path, symbol: str, bucket: float) -> None:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = db_path
+        self.symbol = symbol
+        self.pending: list[tuple] = []
+        with self._connect() as con:
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS trade_tape_1s(
+                  symbol VARCHAR, ts_sec BIGINT, price_bin INTEGER,
+                  buy_qty DOUBLE, sell_qty DOUBLE, buy_n INTEGER, sell_n INTEGER,
+                  buy_max DOUBLE, sell_max DOUBLE)""")
+            # 끊긴 구간. 연구 쿼리는 이 표를 봐야 «0» 과 «모름» 을 구분할 수 있다.
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS gaps(
+                  symbol VARCHAR, from_ms BIGINT, to_ms BIGINT, reason VARCHAR)""")
+            # 분별 완전성. kline volume 과 맞는지 -- 체결 유실은 이 표에서만 드러난다.
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS verify_1m(
+                  symbol VARCHAR, ts_min BIGINT, tape_qty DOUBLE, kline_qty DOUBLE,
+                  rel_err DOUBLE, checked_at TIMESTAMP)""")
+            con.execute("CREATE TABLE IF NOT EXISTS meta(key VARCHAR, value VARCHAR)")
+            for key, value in (("schema_version", str(SCHEMA_VERSION)),
+                               (f"bucket:{symbol}", repr(bucket))):
+                con.execute("DELETE FROM meta WHERE key = ?", [key])
+                con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
+
+    def _connect(self):
         import duckdb
 
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.symbol = symbol
-        self.con = duckdb.connect(str(db_path))
-        self.con.execute("""
-            CREATE TABLE IF NOT EXISTS trade_tape_1s(
-              symbol VARCHAR, ts_sec BIGINT, price_bin INTEGER,
-              buy_qty DOUBLE, sell_qty DOUBLE, buy_n INTEGER, sell_n INTEGER,
-              buy_max DOUBLE, sell_max DOUBLE)""")
-        # 끊긴 구간. 연구 쿼리는 이 표를 봐야 «0» 과 «모름» 을 구분할 수 있다.
-        self.con.execute("""
-            CREATE TABLE IF NOT EXISTS gaps(
-              symbol VARCHAR, from_ms BIGINT, to_ms BIGINT, reason VARCHAR)""")
-        # 분별 완전성. kline volume 과 맞는지 -- 체결 유실은 이 표에서만 드러난다.
-        self.con.execute("""
-            CREATE TABLE IF NOT EXISTS verify_1m(
-              symbol VARCHAR, ts_min BIGINT, tape_qty DOUBLE, kline_qty DOUBLE,
-              rel_err DOUBLE, checked_at TIMESTAMP)""")
-        self.con.execute("CREATE TABLE IF NOT EXISTS meta(key VARCHAR, value VARCHAR)")
-        for key, value in (("schema_version", str(SCHEMA_VERSION)),
-                           (f"bucket:{symbol}", repr(bucket))):
-            self.con.execute("DELETE FROM meta WHERE key = ?", [key])
-            self.con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
+        return duckdb.connect(str(self.db_path))
 
     def last_ts_ms(self) -> int:
-        row = self.con.execute(
-            "SELECT max(ts_sec) FROM trade_tape_1s WHERE symbol = ?", [self.symbol]).fetchone()
+        with self._connect() as con:
+            row = con.execute("SELECT max(ts_sec) FROM trade_tape_1s WHERE symbol = ?",
+                              [self.symbol]).fetchone()
         return int(row[0] + 1) * 1000 if row and row[0] else 0
 
     def write(self, rows: list[tuple]) -> None:
-        if rows:
-            self.con.executemany(
-                "INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?)",
-                [(self.symbol, *r) for r in rows])
+        self.pending.extend(rows)
+        if not self.pending:
+            return
+        try:
+            with self._connect() as con:
+                con.executemany("INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?)",
+                                [(self.symbol, *r) for r in self.pending])
+            self.pending.clear()
+        except Exception as exc:  # noqa: BLE001 -- 락 충돌(읽는 쪽이 잡고 있음)이 대부분이다
+            if len(self.pending) > self.PENDING_CAP:
+                dropped = len(self.pending) - self.PENDING_CAP // 2
+                self.pending = self.pending[dropped:]
+                log(f"⚠️쓰기가 계속 막혀 {dropped}행 버림 -- 그 구간은 벌크 zip 으로 메워야 한다")
+            else:
+                log(f"쓰기 보류 {len(self.pending)}행, 다음 주기 재시도: {type(exc).__name__}")
 
     def record_gap(self, from_ms: int, to_ms: int, reason: str) -> None:
         if to_ms - from_ms < 1500:   # 재연결 한 번에 1초 미만이면 기록할 값이 없다
             return
-        self.con.execute("INSERT INTO gaps VALUES (?,?,?,?)",
-                         [self.symbol, from_ms, to_ms, reason])
+        try:
+            with self._connect() as con:
+                con.execute("INSERT INTO gaps VALUES (?,?,?,?)",
+                            [self.symbol, from_ms, to_ms, reason])
+        except Exception as exc:  # noqa: BLE001
+            log(f"gap 기록 실패(수집은 계속): {type(exc).__name__}")
+            return
         log(f"gap {(to_ms - from_ms) / 1000:.1f}s 기록 ({reason})")
 
-    def minute_has_gap(self, ts_min: int) -> bool:
-        """그 분이 기록된 공백과 겹치는가. 겹치면 그 분이 부족한 건 «유실»이 아니라 «안 받은 것»
-        이다 -- 둘을 같은 말로 경고하면 매번 켤 때마다 울려서 아무도 안 본다."""
-        # 밀리초 환산을 SQL 안에서 하면 안 된다 -- duckdb 가 바인드 파라미터를 INT32 로 보고
-        # `1789485840 * 1000` 에서 오버플로를 낸다(2026-09-16 시험에서 실제로 터졌다. 검증이
-        # 매번 예외로 죽어 «조용히 검증 안 함» 이 될 뻔했고, 로그에만 재연결로 보였다).
-        row = self.con.execute(
-            "SELECT count(*) FROM gaps WHERE symbol = ? AND from_ms < ? AND to_ms > ?",
-            [self.symbol, (ts_min + 60) * 1000, ts_min * 1000]).fetchone()
-        return bool(row[0])
+    def verify(self, kvol: dict[int, float], minutes: list[int]) -> list[tuple[int, float]]:
+        """분별 테이프 합계를 kline 과 대조해 기록하고, (분, 상대오차) 목록을 돌려준다.
+        연결 한 번 안에서 읽기·쓰기를 끝낸다 -- 검사마다 파일을 여러 번 여는 건 낭비다."""
+        out: list[tuple[int, float]] = []
+        with self._connect() as con:
+            for ts_min in minutes:
+                if ts_min not in kvol:
+                    continue
+                tape_qty = float(con.execute("""
+                    SELECT coalesce(sum(buy_qty + sell_qty), 0) FROM trade_tape_1s
+                    WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? + 60""",
+                    [self.symbol, ts_min, ts_min]).fetchone()[0])
+                kline_qty = kvol[ts_min]
+                rel = (tape_qty - kline_qty) / kline_qty if kline_qty else 0.0
+                con.execute("INSERT INTO verify_1m VALUES (?,?,?,?,?,now())",
+                            [self.symbol, ts_min, tape_qty, kline_qty, rel])
+                # 밀리초 환산을 SQL 안에서 하면 안 된다 -- duckdb 가 바인드 파라미터를 INT32 로
+                # 보고 `1789485840 * 1000` 에서 오버플로를 낸다(2026-09-16 시험에서 터졌다).
+                gapped = con.execute(
+                    "SELECT count(*) FROM gaps WHERE symbol = ? AND from_ms < ? AND to_ms > ?",
+                    [self.symbol, (ts_min + 60) * 1000, ts_min * 1000]).fetchone()[0]
+                out.append((ts_min, rel, bool(gapped)))
+        return out
 
     def unverified_minutes(self, limit: int = 5) -> list[int]:
-        rows = self.con.execute("""
-            SELECT DISTINCT ts_sec // 60 * 60 AS m FROM trade_tape_1s
-            WHERE symbol = ? AND ts_sec < ? - 60
-              AND NOT EXISTS (SELECT 1 FROM verify_1m v
-                              WHERE v.symbol = trade_tape_1s.symbol AND v.ts_min = m)
-            ORDER BY m DESC LIMIT ?""", [self.symbol, int(time.time()), limit]).fetchall()
+        with self._connect() as con:
+            rows = con.execute("""
+                SELECT DISTINCT ts_sec // 60 * 60 AS m FROM trade_tape_1s
+                WHERE symbol = ? AND ts_sec < ? - 60
+                  AND NOT EXISTS (SELECT 1 FROM verify_1m v
+                                  WHERE v.symbol = trade_tape_1s.symbol AND v.ts_min = m)
+                ORDER BY m DESC LIMIT ?""", [self.symbol, int(time.time()), limit]).fetchall()
         return [int(r[0]) for r in rows]
-
-    def minute_qty(self, ts_min: int) -> float:
-        row = self.con.execute("""
-            SELECT coalesce(sum(buy_qty + sell_qty), 0) FROM trade_tape_1s
-            WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? + 60""",
-            [self.symbol, ts_min, ts_min]).fetchone()
-        return float(row[0])
-
-    def record_verify(self, ts_min: int, tape_qty: float, kline_qty: float) -> float:
-        rel = (tape_qty - kline_qty) / kline_qty if kline_qty else 0.0
-        self.con.execute("INSERT INTO verify_1m VALUES (?,?,?,?,?,now())",
-                         [self.symbol, ts_min, tape_qty, kline_qty, rel])
-        return rel
 
 
 async def verify_recent(store: TapeStore, session) -> None:
@@ -180,14 +213,17 @@ async def verify_recent(store: TapeStore, session) -> None:
             return
         klines = await response.json()
     kvol = {int(k[0]) // 1000: float(k[5]) for k in klines}
-    for ts_min in minutes:
-        if ts_min not in kvol:
-            continue
-        rel = store.record_verify(ts_min, store.minute_qty(ts_min), kvol[ts_min])
+    results = store.verify(kvol, minutes)
+    ok = [r for r in results if abs(r[1]) <= VERIFY_TOLERANCE]
+    # 성공도 한 줄 남긴다 -- 아무 말이 없으면 «검사가 도는지» 자체를 알 수 없다(그 상태로
+    # 조용히 꺼져 있던 게 2026-09-16 의 INT32 오버플로였다).
+    if ok:
+        log(f"완전성 OK {len(ok)}분 (최근 {time.strftime('%H:%M', time.localtime(max(r[0] for r in ok)))})")
+    for ts_min, rel, gapped in results:
         if abs(rel) <= VERIFY_TOLERANCE:
             continue
         stamp = time.strftime('%H:%M', time.localtime(ts_min))
-        if store.minute_has_gap(ts_min):
+        if gapped:
             log(f"완전성 {stamp} rel_err {rel:+.4%} -- 기록된 공백과 겹친다(예상된 부족)")
         else:
             log(f"⚠️완전성 {stamp} rel_err {rel:+.4%}"
