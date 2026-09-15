@@ -5334,6 +5334,25 @@ function sliderPct(id) {
 }
 const manualExitPct = () => sliderPct("snapExitFrac");
 const manualEntryPct = () => sliderPct("snapEntryFrac");
+// 2026-09-15 진입 비율 자동. 레버리지와 **같은 규약**: 자동이면 쿼리를 안 보내고
+// 서버가 모델값을 쓴다(단일 진실 원천). 서버 기본은 1.0 이고 모델의 `entry_split.tranches`
+// 도 1(일괄)이라 자동은 늘 100% 다 -- 그 «왜»를 눈금 옆에 쓴다.
+const manualEntryFracAuto = () => el("snapEntryFracAuto")?.checked !== false;
+
+function renderFracGauge(plan) {
+  const g = el("snapEntryFrac");
+  const out = el("snapEntryFracVal");
+  if (!g || !out) return;
+  const model = Math.round(100 * (plan.fraction ?? 1));
+  if (manualEntryFracAuto()) g.value = String(model);
+  g.disabled = manualEntryFracAuto();
+  const v = manualEntryFracAuto() ? model : manualEntryPct();
+  const sp = (plan.trade_plan || {}).entry_split || {};
+  out.textContent = `${v}%` + (manualEntryFracAuto()
+    ? ` (모델 — ${sp.tranches === 1 || sp.tranches == null ? "일괄" : sp.tranches + "분할"})`
+    : ` (수동)` + (v !== model ? ` · 모델 ${model}%` : ""));
+  out.className = "entry-was";
+}
 
 // 🔴보유 예정 지평은 **서버가 정한다**(planning_hold, 2026-09-14). 여기 상수를 두면
 // «화면엔 4시간인데 1440분 셀로 크기가 나가는» 일이 생긴다 -- 실제로 그랬다.
@@ -5383,8 +5402,9 @@ function renderLevGauge(plan) {
 }
 
 async function manualEntryFetch(side, kind = "entry") {
-  const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`
-    + (kind === "exit" ? "" : manualLevQuery());
+  const q = (kind === "exit" ? `&pct=${manualExitPct()}`
+             // 자동이면 안 보낸다 -- 서버가 모델값(일괄 100%)을 쓴다. 레버리지와 같은 규약.
+             : (manualEntryFracAuto() ? "" : `&pct=${manualEntryPct()}`) + manualLevQuery());
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}${q}`, { cache: "no-cache" });
   return res.json();
 }
@@ -5531,6 +5551,7 @@ async function manualEntryRefreshSize() {
     if (hb) {
       const r = (data.cap || {}).risk;
       renderLevGauge(plan);
+      renderFracGauge(plan);
       // 남은 보유시간을 같이 띄운다 -- 물타기를 해도 시계가 안 늘어난다는 사실이 보여야 한다.
       const left = plan.hold_remaining_min;
       const planned = plan.hold_planned_min;   // 크기를 실제로 정한 그 지평
@@ -5720,6 +5741,19 @@ async function manualEntrySubmit() {
 }
 
 el("snapLevAuto")?.addEventListener("change", () => manualEntryRefreshSize());
+el("snapEntryFracAuto")?.addEventListener("change", () => {
+  // 🔴미리보기를 **기다리지 않고** 즉시 잠근다. renderFracGauge 에서만 걸면 첫 조회 전에는
+  //   자동인데 슬라이더가 살아 있어, 움직여도 쿼리엔 안 실리는 «먹통 슬라이더»가 된다.
+  syncFracGaugeLock();
+  manualEntryRefreshSize();
+});
+function syncFracGaugeLock() {
+  const g = el("snapEntryFrac");
+  const out = el("snapEntryFracVal");
+  if (g) g.disabled = manualEntryFracAuto();
+  if (out && manualEntryFracAuto()) out.textContent = `${sliderPct("snapEntryFrac")}% (모델)`;
+}
+syncFracGaugeLock();          // 초기값도 체크박스를 따른다
 el("snapLevGauge")?.addEventListener("input", () => {
   const out = el("snapLevVal");
   if (out) out.textContent = `${manualLevValue()}배 (수동)`;

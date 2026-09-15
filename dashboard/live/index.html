@@ -374,6 +374,14 @@
                      aria-label="진입 비율">
               <b id="snapEntryFracVal">100%</b>
             </label>
+            <!-- 2026-09-15 레버리지와 같은 «자동»(사용자 요청). 자동이면 서버에 pct 를 안 보내고
+                 서버가 모델값을 쓴다(단일 진실 원천). 🔴모델의 답은 **항상 100%(일괄)** 이다 --
+                 `entry_split.tranches = 1`, 근거는 «분할은 같은 평균 노출의 작은 단일 진입에
+                 869일 6/6 칸 전패». 그래서 자동은 «모델이 나누지 말라고 한다»는 표시다. -->
+            <label class="lev-auto" for="snapEntryFracAuto">
+              <input type="checkbox" id="snapEntryFracAuto" checked>
+              <span>자동</span>
+            </label>
           </div>
           <div class="manual-entry-row actions">
             <button type="button" id="snapEntryLong" class="notify-btn long">롱 진입</button>
