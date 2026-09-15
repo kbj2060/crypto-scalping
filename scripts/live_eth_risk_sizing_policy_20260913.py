@@ -35,6 +35,8 @@
 """
 from __future__ import annotations
 
+import pathlib
+
 import math
 
 # 68왕복 단위당 수익(2026-09-13 실측). 원장이 갱신되면 다시 재야 한다.
@@ -110,13 +112,56 @@ def policy_leverage(safe_mae_pct: float, *, hard_cap: float = HARD_CAP_X,
             "max_drawdown": MAX_DRAWDOWN if max_drawdown is None else max_drawdown}
 
 
+def evr_size_multiplier(state_path: str | None = None, max_lag_min: float = 30.0) -> dict:
+    """E|r| 조건부 사이징 배수 ∈ [0,1]. 상태 파일이 없거나 낡으면 **1.0**(무효과)로 되돌린다.
+
+    ⭐**줄이기만 한다.** 근거(실계좌 72왕복 · 09-15 · docs/homer §5.36-R): 현행 명목 ↔ E|r|백분위
+    스피어만 **−0.426**(큰 E|r| 에 작게 걸고 있었다)인데 단위당 순손익은 정반대로 단조다
+    (하위50% +10.34 / 50~80% +14.32 / **상위20% +53.18bp**). `현행 × E|r|백분위` 로 바꾸면
+    명목 **42%** 로 손익 **90%**, 명목당 **+10.84→+23.54bp**, t **1.03→4.06**, 낙폭 **$444→$30**.
+    ⚠️하한을 두면 나빠진다(×max(q,0.3) $376) — 하한이 나쁜 큰 거래를 살려둔다. **하한 없음.**
+    🔴n=72 · 5주 · 단일자산이다. 배수는 **진입에만** 걸고 청산 하한에는 안 건다.
+    🔴낡음 판정이 중요하다 — 워커가 죽으면 옛 배수로 계속 줄이는 게 아니라 **효과를 끈다.**"""
+    import json as _json, time as _time
+    # ⭐**전용 워커를 따로 띄우지 않는다.** 2026-09-15 에 다른 세션이 이미 20자산 E|r| 게이트
+    #   워커를 배포했다(`live_evr_gate_worker_20260915.py` → `evr_gate_state.json`). 같은 모델을
+    #   한 번 더 도는 건 요청경로 인라인 금지(2026-09-10 실장애)와 서버 부하 양쪽에 걸린다.
+    #   🔴그 워커는 아직 **백분위(`evr_q`)를 안 싣는다** — 없으면 이 층은 **무효과(1.0)** 다.
+    path = pathlib.Path(state_path) if state_path else (
+        pathlib.Path(__file__).resolve().parents[1] / "data/live/evr_gate_state.json")
+    try:
+        d = _json.loads(path.read_text())
+        age = (_time.time() - pathlib.Path(path).stat().st_mtime) / 60.0
+        if age > max_lag_min:
+            return {"evr_mult": 1.0, "evr_ok": False, "evr_why": f"상태 {age:.0f}분 낡음"}
+        eth = next((a for a in d.get("assets", []) if a.get("asset") == "ETH"), None)
+        if eth is None:
+            return {"evr_mult": 1.0, "evr_ok": False, "evr_why": "ETH 항목 없음"}
+        q = eth.get("evr_q", d.get("evr_q"))
+        if q is None:
+            return {"evr_mult": 1.0, "evr_ok": False, "evr_why": "백분위 미제공(워커 갱신 대기)"}
+        m = float(q)
+        if not (0.0 <= m <= 1.0):
+            return {"evr_mult": 1.0, "evr_ok": False, "evr_why": f"배수 범위밖 {m}"}
+        return {"evr_mult": round(m, 4), "evr_ok": True, "evr_q": m,
+                "evr_bar": eth.get("ts"), "evr_age_min": round(age, 1)}
+    except Exception as exc:
+        return {"evr_mult": 1.0, "evr_ok": False, "evr_why": f"{type(exc).__name__}"}
+
+
 def entry_notional(equity: float, safe_mae_pct: float, existing_notional: float = 0.0,
-                   **kw) -> dict[str, float]:
-    """지금 **추가로** 넣어도 되는 명목. 기존 포지션을 뺀 값이라 분할해도 상한을 안 넘는다."""
+                   *, use_evr: bool = True, **kw) -> dict[str, float]:
+    """지금 **추가로** 넣어도 되는 명목. 기존 포지션을 뺀 값이라 분할해도 상한을 안 넘는다.
+
+    ⭐E|r| 배수는 **맨 뒤에** 곱한다 — 생존·성장·정책 상한을 먼저 통과시킨 뒤 «그 안에서 얼마나
+    쓸까」를 정하는 층이다. 상한을 올리지 않으므로 기존 안전 성질이 그대로 보존된다."""
     p = policy_leverage(safe_mae_pct, **kw)
     total = equity * p["leverage"]
-    return {**p, "total_notional": total,
-            "room_notional": max(0.0, total - max(0.0, existing_notional))}
+    room = max(0.0, total - max(0.0, existing_notional))
+    e = evr_size_multiplier() if use_evr else {"evr_mult": 1.0, "evr_ok": False, "evr_why": "off"}
+    return {**p, **e, "total_notional": total,
+            "room_notional_precap": room,
+            "room_notional": room * e["evr_mult"]}
 
 
 def exit_fraction_required(equity: float, safe_mae_pct: float, current_notional: float,
@@ -151,10 +196,20 @@ def _self_check() -> None:
     assert policy_leverage(7.67)["binding"] == "survival"
 
     # 진입: 기존 포지션이 있으면 여유가 그만큼 줄고 절대 음수가 되지 않는다
-    e = entry_notional(1089.45, 7.67)
+    # ⚠️E|r| 배수는 «상한 뒤에」 곱하므로 상한 성질 검사는 use_evr=False 로 한다.
+    e = entry_notional(1089.45, 7.67, use_evr=False)
     assert abs(e["room_notional"] - e["total_notional"]) < 1e-9
-    e2 = entry_notional(1089.45, 7.67, existing_notional=e["total_notional"] * 2)
+    e2 = entry_notional(1089.45, 7.67, existing_notional=e["total_notional"] * 2, use_evr=False)
     assert e2["room_notional"] == 0.0
+
+    # ⭐E|r| 배수: [0,1] 이라 **절대 상한을 넘기지 않는다** + 낡거나 없으면 1.0(무효과)
+    ev = entry_notional(1089.45, 7.67, use_evr=True)
+    assert ev["room_notional"] <= ev["room_notional_precap"] + 1e-9, "배수가 상한을 키웠다"
+    assert 0.0 <= ev["evr_mult"] <= 1.0, "배수가 [0,1] 밖"
+    miss = evr_size_multiplier(state_path="/nonexistent/evr.json")
+    assert miss["evr_mult"] == 1.0 and not miss["evr_ok"], "상태 없으면 무효과여야 한다"
+    stale = evr_size_multiplier(max_lag_min=-1.0)
+    assert stale["evr_mult"] == 1.0 and not stale["evr_ok"], "낡으면 무효과여야 한다"
 
     # 청산: 한도 안이면 0, 두 배면 절반을 닫아야 한다
     x = exit_fraction_required(1089.45, 7.67, current_notional=1.0)
