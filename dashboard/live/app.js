@@ -3962,8 +3962,18 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   대가: 캔들 영역 ch 가 266 -> 238(데스크톱), 126 -> 98(모바일 최소높이)로 줄어든다.
   // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 바닥 레인 +28~+43 · 레짐 +50~+70 ·
   //   변동성 +76~+96 · 청산 레인 +100~+138.
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 140;
-  const cw = w - ml - mr, ch = h - mt - mb;
+  // 2026-09-16 청산 레인을 **차트 안 하단 패널**로 옮겼다(사용자 요청). 그전까지는 하단 여백에
+  //   떠 있어서(+100~+138) 차트 밖 부속처럼 보였다. 패널은 가격 플롯 바로 아래·x축 바로 위에
+  //   앉고, 여백은 그 레인이 쓰던 40px 를 돌려받는다(mb 140 -> 100).
+  //   결과: 가격 플롯 238 -> 226(데스크톱), 98 -> 98(모바일 최소높이, 패널을 34 로 줄여 상쇄).
+  // ⚠️`ch` 는 이제 **가격 플롯 높이**다. yAt() 이 이 값을 쓰므로, 「플롯 바닥」을 뜻하던
+  //   `h - mb` 는 더 이상 가격 영역의 바닥이 아니다 -- 그 자리들은 전부 plotBottom 으로 바꿨다.
+  //   (여백 안의 것들 -- x축 눈금·라벨·레짐/변동성 리본·증거신호 레인 -- 은 그대로 h - mb 기준)
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 100;
+  const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
+  const cw = w - ml - mr, ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP;
+  const plotBottom = mt + ch;                      // 가격 플롯의 바닥
+  const liqPanelY = plotBottom + LIQ_PANEL_GAP;    // == h - mb - LIQ_PANEL_H
   const NS = "http://www.w3.org/2000/svg";
   // 풋프린트는 서버가 주는 12봉이 곧 창이다 -- 모바일 핀치줌(visibleCandleWindow)으로 더
   // 잘라내면 셀만 커지고 볼 구간이 사라진다.
@@ -4128,7 +4138,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     densityPriceUnion.forEach((price) => {
       const half = densityBinWidth / 2;
       const top = Math.max(mt, yAt(price + half));
-      const bottom = Math.min(h - mb, yAt(price - half));
+      const bottom = Math.min(plotBottom, yAt(price - half));
       if (bottom <= top) return;
       const pct = clamp01(weightByPrice.get(price) || 0);
       const t = densityClip > 0 ? Math.min(1, pct / densityClip) : 0;
@@ -4155,9 +4165,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   priceLabels.forEach(p => {
     const rawY = yAt(p.val);
     p.offTop = rawY < mt;
-    p.offBottom = rawY > h - mb;
+    p.offBottom = rawY > plotBottom;
     p.outOfView = p.offTop || p.offBottom;
-    p.realY = p.outOfView ? (p.offTop ? mt + 2 : h - mb - 2) : rawY;
+    p.realY = p.outOfView ? (p.offTop ? mt + 2 : plotBottom - 2) : rawY;
   });
 
   // Sort by Y position (Price descending = Y ascending). Off-view levels on the same edge tie on
@@ -4174,7 +4184,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // minGap must exceed the price-tag box height (18px, drawn below) or cascaded boxes touch
   // edge-to-edge with no visible gap between them -- 22 leaves a small visible seam.
   const minGap = 22;
-  let topStack = mt + 2, bottomStack = h - mb - 2;
+  let topStack = mt + 2, bottomStack = plotBottom - 2;
   priceLabels.forEach((p, i) => {
     if (p.offTop) {
       p.adjustedY = topStack;
@@ -4684,7 +4694,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   priceLabels.forEach(p => {
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
-    const labelY = Math.max(mt + 9, Math.min(h - mb - 9, labelYRaw));
+    const labelY = Math.max(mt + 9, Math.min(plotBottom - 9, labelYRaw));
     const lineDashed = p.dashed || p.outOfView;
 
     // Line stays at real (clamped) price position
@@ -4796,11 +4806,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const mx = (evt.clientX - rect.left - svgOffsetX) / svgScale;
     const my = (evt.clientY - rect.top - svgOffsetY) / svgScale;
 
-    if (my >= mt && my <= h - mb) {
+    if (my >= mt && my <= plotBottom) {
       hLine.setAttribute("y1", my); hLine.setAttribute("y2", my);
       hLine.style.display = "block";
       const priceAtCursor = yMax - ((my - mt) * ySpan) / ch;
-      const badgeY = Math.max(mt, Math.min(h - mb - priceBadgeH, my - priceBadgeH / 2));
+      const badgeY = Math.max(mt, Math.min(plotBottom - priceBadgeH, my - priceBadgeH / 2));
       priceBadgeRect.setAttribute("y", badgeY);
       priceBadgeText.setAttribute("y", badgeY + 13);
       priceBadgeText.textContent = fmtNum(priceAtCursor, 1);
@@ -4850,12 +4860,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 데이터: /api/liquidation-5m-history -- tail_risk_1m 의 실제 @forceOrder 체결을 5분으로 접은 것.
   // 🔴게이지(/api/liquidation-5m-signal)는 BAR_MINUTES=30 이다. 여기는 캔들과 같은 **5분**이라야
   //   봉이 안 어긋난다 -- compute_liquidation_5m_history() 가 CHART_BAR_MINUTES=5 로 따로 접는다.
-  // 레인은 플롯 **밖**(하단 여백)에 둔다 -- 09-11 "증거신호 레인을 청산맵 밖으로"와 같은 원칙.
+  // 2026-09-16 사용자 요청으로 **차트 안 하단 패널**이 됐다(그전엔 하단 여백에 떠 있었다).
+  //   여백의 레인은 차트 밖 부속처럼 읽혔는데, 청산은 같은 봉의 가격 움직임과 **같이** 봐야 하는
+  //   값이라 한 프레임 안에 두는 게 맞다. 09-11 "증거신호 레인을 청산맵 밖으로"와 어긋나 보이지만
+  //   대상이 다르다 -- 그때 밖으로 뺀 건 캔들을 **덮던** 오버레이였고, 이건 자기 자리를 가진
+  //   서브플롯이다(가격 플롯은 그만큼 줄어들 뿐 가려지지 않는다).
   // 색은 표시 규약 그대로 롱=good / 숏=bad. 위로 롱청산, 아래로 숏청산인 발산형.
   // ⚠️로그 스케일이다. 최근 7일 5분봉 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 거의 전부가
   //   1픽셀 미만으로 사라진다.
   if (Array.isArray(liqBars) && liqBars.length && candles.length) {
-    const LIQ_Y = h - mb + 100, LIQ_H = 38, LIQ_MID = LIQ_Y + LIQ_H / 2;
+    const LIQ_Y = liqPanelY, LIQ_H = LIQ_PANEL_H, LIQ_MID = LIQ_Y + LIQ_H / 2;
     // 🔴캔들의 `time` 은 **초** 단위다(server.py: int(row["timestamp"].timestamp())).
     //   Date.parse 는 밀리초라 그대로 키로 쓰면 절대 안 맞는다 -- 2026-09-11 에 이걸로
     //   레인이 통째로 안 그려졌다. 차트의 다른 코드가 전부 `c.time * 1000` 을 쓰는 이유다.
@@ -4869,6 +4883,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const b = liqByTs.get(c.time);
       if (b) liqPeak = Math.max(liqPeak, Number(b.long_usd) || 0, Number(b.short_usd) || 0);
     });
+    const liqTopLine = document.createElementNS(NS, "line");
+    liqTopLine.setAttribute("x1", ml); liqTopLine.setAttribute("x2", ml + cw);
+    liqTopLine.setAttribute("y1", LIQ_Y); liqTopLine.setAttribute("y2", LIQ_Y);
+    liqTopLine.setAttribute("stroke", "var(--soft-line)");
+    svg.appendChild(liqTopLine);
     if (liqPeak > 0) {
       const liqHalf = LIQ_H / 2 - 1;
       const liqScale = (v) => (v > 0 ? Math.max(1, liqHalf * Math.log1p(v) / Math.log1p(liqPeak)) : 0);
