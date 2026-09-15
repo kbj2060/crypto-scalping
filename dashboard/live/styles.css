@@ -1992,6 +1992,17 @@ svg {
    점선으로 바꿔 한눈에 가른다 -- 위의 라벨 한 줄과 함께 두 겹으로 표시한다. */
 .acct-tiles.preview .acct-tile { border-style: dashed;
   border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+/* 2026-09-15 진입 비율을 움직이면 **눈으로 따라갈 수 있게** 한다. 노드를 갈아치우지 않고
+   제자리에서 고치므로(applyAcctPreview) transition 이 실제로 걸린다.
+   ⚠️줄인 모션을 요청한 사용자에게는 끈다 -- 접근성 규약. */
+.acct-rail i, .acct-rail u, .acct-gauge-knob {
+  transition: width .32s cubic-bezier(.4, 0, .2, 1), left .32s cubic-bezier(.4, 0, .2, 1); }
+.acct-tile-val, .acct-gauge-legend span, .acct-pos-qty, .acct-tag {
+  transition: color .32s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .acct-rail i, .acct-rail u, .acct-gauge-knob,
+  .acct-tile-val, .acct-gauge-legend span, .acct-pos-qty, .acct-tag { transition: none; }
+}
 .acct-rail.entry-rail i { position: absolute; left: 0; top: 0; }
 .acct-rail.entry-rail u { position: absolute; top: -2px; bottom: -2px; width: 2px;
   background: var(--muted); opacity: .85; text-decoration: none; }

@@ -991,7 +991,70 @@ function bindAcctChartTip() {
 // 2026-09-15 «추가 진입을 누르면 진입 비율에 따라 계좌 카드 게이지도 같이 움직이게»(사용자).
 // 크기 갱신이 슬라이더 값대로 이미 받아오는 `plan.projection` 을 여기 담아 카드가 읽는다.
 // null 이면 카드는 **실제 계좌**를 그린다 -- 미리보기가 꺼지면 반드시 여기로 돌아온다.
+// 2026-09-15 진입 미리보기를 계좌 카드에 **제자리에서** 입힌다(사용자: 「카드까지 똑같이,
+// 애니메이션으로 진입비율에 따라 바뀌게」). 노드를 갈아치우지 않으므로 CSS transition 이 걸린다.
+//
+// 🔴여기가 미리보기를 입히는 **유일한 곳**이다. 렌더는 항상 실제 계좌만 그린다 -- 두 곳에서
+//    값을 만들면 «카드와 타일이 서로 다른 순간을 말하는» 상태가 생긴다.
+// 🔴끄는 것도 여기다: `entryProjPreview` 가 null 이면 렌더가 그린 실제 값이 그대로 남는다
+//    (아무것도 안 만지므로). 그래서 «옛 미리보기가 굳는» 경로가 구조적으로 없다.
+function applyAcctPreview(pos, mark, equity) {
+  const root = el("snapAcctPosition");
+  const pv = entryProjPreview;
+  if (!root) return;
+  const q = (k) => root.querySelector(`[data-pv="${k}"]`);
+  root.querySelectorAll(".acct-tiles").forEach((n) => n.classList.toggle("preview", !!pv));
+  const cap = root.querySelector(".acct-pv-cap");
+  if (cap) cap.hidden = !pv;
+  if (!pv) { root.querySelectorAll(".acct-rail u").forEach((u) => u.remove()); return; }
+
+  const a = pv.after, plan = pv.__plan || {};
+  const LIQ_FULL = 10, EXPO_CAP = 30;
+  const long = pos.side === "LONG";
+  // 타일 셋: 값·색·막대·유령눈금(지금 자리)
+  const setTile = (k, txt, tone, fill, ghost) => {
+    const t = q(k); if (!t) return;
+    const v = t.querySelector(".acct-tile-val"), rail = t.querySelector(".acct-rail");
+    const bar = rail && rail.querySelector("i");
+    if (v) { v.textContent = txt; v.className = `acct-tile-val ${tone}`; }
+    if (bar) { bar.className = tone; bar.style.width = `${clamp01(fill) * 100}%`; }
+    if (rail) {
+      rail.classList.add("entry-rail");
+      let u = rail.querySelector("u");
+      if (!u) { u = document.createElement("u"); rail.appendChild(u); }
+      u.style.left = `${clamp01(ghost) * 100}%`;
+      u.title = "지금 자리";
+    }
+  };
+  setTile("liq", `${Number(a.liq_pct).toFixed(2)}%`, acctRiskTone(a.liq_pct),
+          a.liq_pct / LIQ_FULL, pv.before.liq_pct / LIQ_FULL);
+  setTile("used", `${Number(a.margin_used_pct).toFixed(0)}%`,
+          a.margin_used_pct > 80 ? "bad" : a.margin_used_pct > 60 ? "warn" : "good",
+          a.margin_used_pct / 100, pv.before.margin_used_pct / 100);
+  setTile("expo", `${Number(a.exposure_x).toFixed(1)}배`, a.exposure_x > 15 ? "bad" : "warn",
+          a.exposure_x / EXPO_CAP, pv.before.exposure_x / EXPO_CAP);
+
+  // 포지션 카드: 수량·레버리지·평단·청산가·손잡이. 평단은 **체결가 가중평균**이다.
+  const addQty = Number(plan.quantity) || 0, addPx = Number(plan.price) || 0;
+  const haveQty = Number(pos.qty) || 0, havePx = Number(pos.entry_price) || 0;
+  const newQty = haveQty + addQty;
+  const newEntry = newQty > 0 ? (haveQty * havePx + addQty * addPx) / newQty : havePx;
+  // 청산가는 거래소가 준 **거리(%)** 에서 되돌린다 -- 근사식보다 실측에 앵커된 값이다.
+  const newLiq = mark > 0 ? mark * (1 + (long ? -1 : 1) * Number(a.liq_pct) / 100) : 0;
+  const qn = q("qty"); if (qn) qn.textContent = newQty.toFixed(3);
+  const tg = q("tag");
+  if (tg && plan.target_leverage) tg.textContent = `${long ? "롱" : "숏"} ×${plan.target_leverage}`;
+  const lp = q("liqpx"); if (lp) lp.textContent = `청산 ${fmtUsd(newLiq)}`;
+  const ep = q("entrypx"); if (ep) ep.textContent = `진입 ${fmtUsd(newEntry)}`;
+  const kn = q("knob");
+  if (kn) {
+    const span = Math.abs(newEntry - newLiq) * 2;
+    kn.style.left = `${(clamp01(span > 0 ? Math.abs(mark - newLiq) / span : 0) * 100).toFixed(1)}%`;
+  }
+}
+
 let entryProjPreview = null;
+let lastAcctPos = null;   // 패처가 쓰는 마지막 렌더 문맥(포지션·마크가·순자산)
 let entryProjKey = "";
 
 function renderSnapshotAccount() {
@@ -1126,44 +1189,25 @@ function renderSnapshotAccount() {
   const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
   const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
   // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
-  // ⭐진입 미리보기가 켜져 있으면 **그 값으로** 그린다. 지금 값은 레일 위 유령 눈금(u)으로
-  //   남겨 «어디서 어디로»가 한 눈에 보이게 한다 -- 진입 결과 카드와 같은 규약(.entry-rail u).
-  //   🔴실제 계좌인 척하면 안 된다: 컨테이너에 preview 를 달고 라벨 위에 한 줄 적는다.
-  const pv = entryProjPreview && entryProjPreview.after ? entryProjPreview : null;
-  const tile = (lab, val, tone, fill, title, ghost) => `<div class="acct-tile"${
+  // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
+  // ⭐여기서는 **항상 실제 계좌**를 그린다(2026-09-15 재구조화). 진입 미리보기는 렌더가 아니라
+  //   `applyAcctPreview()` 가 **같은 노드를 제자리에서** 고친다 -- 노드를 갈아치우면 CSS
+  //   transition 이 안 걸려서 애니메이션이 불가능하다. `data-pv` 가 그 손잡이다.
+  const tile = (key, lab, val, tone, fill, title) => `<div class="acct-tile" data-pv="${key}"${
       title ? ` title="${escapeHtml(title)}"` : ""}>
       <span class="acct-tile-lab">${lab}</span>
       <b class="acct-tile-val ${tone}">${val}</b>
-      <span class="acct-rail${ghost != null ? " entry-rail" : ""}"><i class="${tone}" style="width:${
-        clamp01(fill) * 100}%"></i>${ghost != null
-          ? `<u style="left:${clamp01(ghost) * 100}%" title="지금 ${lab}"></u>` : ""}</span>
+      <span class="acct-rail"><i class="${tone}" style="width:${clamp01(fill) * 100}%"></i></span>
     </div>`;
-  const P_liq = pv ? Number(pv.after.liq_pct) : null;
-  const P_used = pv ? Number(pv.after.margin_used_pct) : null;
-  const P_expo = pv ? Number(pv.after.exposure_x) : null;
-  const tiles = (pv ? `<div class="entry-cap">진입 미리보기 — 지금 넣으면 (실제 계좌 아님)</div>` : "")
-    + `<div class="acct-tiles${pv ? " preview" : ""}">
-      ${P_liq != null && Number.isFinite(P_liq)
-        ? tile("청산까지", `${P_liq.toFixed(2)}%`, acctRiskTone(P_liq), P_liq / LIQ_FULL,
-               `진입 미리보기 -- 지금 ${liqPct.toFixed(2)}% → 넣으면 ${P_liq.toFixed(2)}%`,
-               liqPct / LIQ_FULL)
-        : tile("청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
+  const tiles = `<div class="acct-pv-cap entry-cap" hidden>진입 미리보기 — 지금 넣으면 (실제 계좌 아님)</div><div class="acct-tiles">
+      ${tile("liq", "청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
              `마크 ${fmtUsd(mark)} → 청산 ${fmtUsd(liq)}\n교차증거금이라 1/레버리지(${
                (100 / (Number(pos.leverage) || 1)).toFixed(2)}%)가 아니라 지갑 전체가 버팁니다.`)}
-      ${P_used != null && Number.isFinite(P_used)
-        ? tile("증거금 사용", `${P_used.toFixed(0)}%`,
-               P_used > 80 ? "bad" : P_used > 60 ? "warn" : "good", P_used / 100,
-               `진입 미리보기 -- 지금 ${usedPct.toFixed(0)}% → 넣으면 ${P_used.toFixed(0)}%`,
-               usedPct / 100)
-        : tile("증거금 사용", `${usedPct.toFixed(0)}%`,
+      ${tile("used", "증거금 사용", `${usedPct.toFixed(0)}%`,
              usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100,
              `사용 ${fmtUsd(usedMargin)} ÷ 순자산 ${fmtUsd(equity)}\n= 명목 ${
                fmtUsd(pos.notional)} ÷ 레버리지 ${pos.leverage}배`)}
-      ${P_expo != null && Number.isFinite(P_expo)
-        ? tile("계좌 노출", `${P_expo.toFixed(1)}배`, P_expo > 15 ? "bad" : "warn", P_expo / EXPO_CAP,
-               `진입 미리보기 -- 지금 ${expo.toFixed(1)}배 → 넣으면 ${P_expo.toFixed(1)}배`,
-               expo / EXPO_CAP)
-        : tile("계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
+      ${tile("expo", "계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
              `명목 ${fmtUsd(pos.notional)} ÷ 순자산 ${fmtUsd(equity)}\n포지션 레버리지(${
                pos.leverage}배)와 다른 값입니다 — 증거금을 계좌의 일부만 썼기 때문입니다.`)}
     </div>`;
@@ -1177,17 +1221,17 @@ function renderSnapshotAccount() {
   const position = `<div class="acct-pos" data-side="${pos.side === "LONG" ? "long" : "short"}">
       <div class="acct-pos-head">
         <b>${escapeHtml(pos.symbol)}</b>
-        <span class="acct-tag ${sideTone}">${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</span>
-        <span class="acct-pos-qty">${escapeHtml(pos.qty)}</span>
+        <span class="acct-tag ${sideTone}" data-pv="tag">${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</span>
+        <span class="acct-pos-qty" data-pv="qty">${escapeHtml(pos.qty)}</span>
       </div>
       <div class="acct-gauge" title="왼쪽 끝이 청산가, 가운데 눈금이 진입가입니다. 손잡이가 왼쪽에 붙을수록 위험합니다.">
         <span class="acct-gauge-track"></span>
         <span class="acct-gauge-entry"></span>
-        <span class="acct-gauge-knob" style="left:${(safe * 100).toFixed(1)}%"></span>
+        <span class="acct-gauge-knob" data-pv="knob" style="left:${(safe * 100).toFixed(1)}%"></span>
       </div>
       <div class="acct-gauge-legend">
-        <span class="bad">청산 ${fmtUsd(liq)}</span>
-        <span>진입 ${fmtUsd(entry)}</span>
+        <span class="bad" data-pv="liqpx">청산 ${fmtUsd(liq)}</span>
+        <span data-pv="entrypx">진입 ${fmtUsd(entry)}</span>
         <span class="acct-gauge-now">현재 ${fmtUsd(mark)}</span>
       </div>
     </div>`;
@@ -1197,6 +1241,10 @@ function renderSnapshotAccount() {
       ${perf}
     </div>${otherNote}`);
   bindAcctChartTip();
+  // 🔴계좌 폴링이 카드를 다시 그리면 미리보기가 지워진다 -- 렌더 직후 곧바로 다시 입힌다.
+  //   (이 경로는 노드가 새로 생겨서 애니메이션은 안 걸린다. 값이 맞는 게 먼저다.)
+  lastAcctPos = { pos, mark, equity };
+  applyAcctPreview(pos, mark, equity);
 }
 
 
@@ -5811,11 +5859,20 @@ function setEntryProjPreview(plan) {
   const box = el("snapEntryBox");
   const pr = plan && !plan.blocked && Number(plan.quantity) > 0 ? plan.projection : null;
   const on = pr && pr.after && box && box.open ? pr : null;
-  const key = on ? `${on.after.liq_pct}|${on.after.margin_used_pct}|${on.after.exposure_x}` : "";
+  const key = on ? `${on.after.liq_pct}|${on.after.margin_used_pct}|${on.after.exposure_x}|${plan.quantity}` : "";
   if (key === entryProjKey) return;
   entryProjKey = key;
-  entryProjPreview = on;
-  renderSnapshotAccount();
+  entryProjPreview = on ? { ...on, __plan: plan } : null;
+  // ⭐켜거나 값이 바뀌면 **제자리에서** 고친다 -- 그래야 CSS transition 이 걸린다.
+  // 🔴끌 때는 **통째로 다시 그린다**. 제자리 수정은 실제 값을 덮어쓴 뒤라 «지우기»만으로는
+  //    복구가 안 된다(2026-09-15 테스트에서 실제로 미리보기 값이 굳었다). 렌더는 항상
+  //    실제 계좌를 그리므로 재그리기가 곧 복구다.
+  const ctx = lastAcctPos;
+  if (on && ctx && el("snapAcctPosition")?.querySelector(".acct-tiles")) {
+    applyAcctPreview(ctx.pos, ctx.mark, ctx.equity);
+  } else {
+    renderSnapshotAccount();
+  }
 }
 
 async function manualEntryRefreshSize() {
