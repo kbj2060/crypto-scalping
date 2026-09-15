@@ -1999,9 +1999,13 @@ svg {
   transition: width .32s cubic-bezier(.4, 0, .2, 1), left .32s cubic-bezier(.4, 0, .2, 1); }
 .acct-tile-val, .acct-gauge-legend span, .acct-pos-qty, .acct-tag {
   transition: color .32s ease; }
+/* 글자는 즉시 바뀌어 눈이 놓친다 -- 바뀐 값만 짧게 밝힌다(막대는 transition 이 맡는다). */
+@keyframes pvBump { 0% { opacity: .35; } 100% { opacity: 1; } }
+.pv-bump { animation: pvBump .28s ease-out; }
 @media (prefers-reduced-motion: reduce) {
   .acct-rail i, .acct-rail u, .acct-gauge-knob,
   .acct-tile-val, .acct-gauge-legend span, .acct-pos-qty, .acct-tag { transition: none; }
+  .pv-bump { animation: none; }
 }
 .acct-rail.entry-rail i { position: absolute; left: 0; top: 0; }
 .acct-rail.entry-rail u { position: absolute; top: -2px; bottom: -2px; width: 2px;

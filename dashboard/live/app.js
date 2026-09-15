@@ -998,6 +998,16 @@ function bindAcctChartTip() {
 //    값을 만들면 «카드와 타일이 서로 다른 순간을 말하는» 상태가 생긴다.
 // 🔴끄는 것도 여기다: `entryProjPreview` 가 null 이면 렌더가 그린 실제 값이 그대로 남는다
 //    (아무것도 안 만지므로). 그래서 «옛 미리보기가 굳는» 경로가 구조적으로 없다.
+// 값이 바뀐 노드만 짧게 강조한다. 막대·손잡이는 CSS transition 으로 미끄러지지만 글자는
+// 즉시 바뀌므로 눈이 놓친다 -- 그 한 곳만 메운다. 값이 같으면 아무것도 안 한다(폴링 떨림 방지).
+function pvText(node, txt) {
+  if (!node || node.textContent === txt) return;
+  node.textContent = txt;
+  node.classList.remove("pv-bump");
+  void (node.offsetWidth ?? 0);      // 리플로우 -- 같은 클래스를 다시 붙여도 애니메이션이 재시작된다
+  node.classList.add("pv-bump");
+}
+
 function applyAcctPreview(pos, mark, equity) {
   const root = el("snapAcctPosition");
   const pv = entryProjPreview;
@@ -1016,7 +1026,7 @@ function applyAcctPreview(pos, mark, equity) {
     const t = q(k); if (!t) return;
     const v = t.querySelector(".acct-tile-val"), rail = t.querySelector(".acct-rail");
     const bar = rail && rail.querySelector("i");
-    if (v) { v.textContent = txt; v.className = `acct-tile-val ${tone}`; }
+    if (v) { v.className = `acct-tile-val ${tone}`; pvText(v, txt); }
     if (bar) { bar.className = tone; bar.style.width = `${clamp01(fill) * 100}%`; }
     if (rail) {
       rail.classList.add("entry-rail");
@@ -1041,11 +1051,20 @@ function applyAcctPreview(pos, mark, equity) {
   const newEntry = newQty > 0 ? (haveQty * havePx + addQty * addPx) / newQty : havePx;
   // 청산가는 거래소가 준 **거리(%)** 에서 되돌린다 -- 근사식보다 실측에 앵커된 값이다.
   const newLiq = mark > 0 ? mark * (1 + (long ? -1 : 1) * Number(a.liq_pct) / 100) : 0;
-  const qn = q("qty"); if (qn) qn.textContent = newQty.toFixed(3);
+  pvText(q("qty"), `~${newQty.toFixed(3)}`);
   const tg = q("tag");
-  if (tg && plan.target_leverage) tg.textContent = `${long ? "롱" : "숏"} ×${plan.target_leverage}`;
-  const lp = q("liqpx"); if (lp) lp.textContent = `청산 ${fmtUsd(newLiq)}`;
-  const ep = q("entrypx"); if (ep) ep.textContent = `진입 ${fmtUsd(newEntry)}`;
+  if (tg && plan.target_leverage) pvText(tg, `${long ? "롱" : "숏"} ×${plan.target_leverage}`);
+  pvText(q("liqpx"), `청산 ~${fmtUsd(newLiq)}`);
+  // 🔴평단은 **추측치**다. 체결가를 peg 호가로 가정한 가중평균이라 실제 체결(부분체결·
+  //   테이커 폴백·슬리피지)에 따라 달라진다. `~` 와 툴팁으로 그 사실을 남긴다 --
+  //   이 자리에 확정값처럼 적으면 「미리보기에서 본 숫자와 다르다」가 된다.
+  const ep = q("entrypx");
+  if (ep) {
+    pvText(ep, `진입 ~${fmtUsd(newEntry)}`);
+    ep.title = `추측치 — 지금 ${fmtUsd(havePx)} (${haveQty.toFixed(3)} ETH)에`
+      + ` ${addQty.toFixed(3)} ETH 를 ${fmtUsd(addPx)}(peg 호가)에 더한 가중평균입니다.`
+      + `\n실제 체결가가 다르면(부분체결·테이커 폴백) 평단도 달라집니다.`;
+  }
   const kn = q("knob");
   if (kn) {
     const span = Math.abs(newEntry - newLiq) * 2;
@@ -5877,21 +5896,19 @@ function setEntryProjPreview(plan) {
 
 async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
-  const mode = el("snapEntryMode");
   if (!line) return;
   // 🔴2026-09-13: 실패하면 배지를 **반드시 바꾼다**. 예전엔 조기 return 해서 배지가 HTML
   //   초기값("미리보기 전용")이나 마지막 성공값에 굳었다 -- 화면이 "게이트가 꺼져 있다"고
   //   말했지만 실제로는 "사이징 워커가 죽어 미리보기가 503"이었다(재부팅 후 실장애).
   //   **실패 시 이전 값을 남기는 UI 는 조용히 거짓말한다.**
-  const setMode = (text) => { if (mode) mode.textContent = text; };
   try {
     const data = await manualEntryFetch("LONG");
     if (!data.ok) {
       const why = data.detail === "worker_stale" ? "크기 워커 정지"
         : data.error === "sizing_unavailable" ? "크기 데이터 없음"
         : (data.error || "알 수 없음");
+      line.hidden = false;
       line.textContent = `크기 확인 실패 — ${why}`;
-      setMode("확인 실패");
       setEntryProjPreview(null);   // 🔴옛 투영을 남기지 않는다
       return;
     }
@@ -5901,20 +5918,13 @@ async function manualEntryRefreshSize() {
     //   처럼 둘을 나란히 놨는데, 나가는 건 둘 다 아니라 비율까지 먹인 plan.quantity 였다 --
     //   큰 숫자가 왼쪽에 먼저 오니 그게 주문량으로 읽혔다. 권고·가능치는 뒤로 내린다.
     //   (서버가 이 요청에 슬라이더 pct 를 이미 실어 보내므로 plan.quantity 가 그 비율의 값이다.)
-    const q = Number(plan.quantity) || 0;
-    const rec = Number(data.recommended_qty) || 0;
-    const avail = Number(plan.available_qty) || 0;
-    const capNote = cap.available ? `가능 ${avail.toFixed(3)}`
-      : `상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)`;
-    line.innerHTML = plan.blocked
-      ? `<b class="entry-val bad">주문 불가</b> <span class="entry-was">${escapeHtml(plan.blocked)}</span>`
-      : `<b class="entry-val">${q.toFixed(3)} ETH</b>`
-        + `<span class="entry-was"> · ${Math.round(Number(plan.notional_usdt) || 0).toLocaleString()} USDT</span>`;
-    // 사이징 권고 → 상한 → 주문. 세 값이 왜 다른지가 이 사슬 하나로 읽혀야 한다.
-    renderEntryChain(rec, avail, q, cap, plan);
+    // 2026-09-16 정상일 때 이 줄은 **비어 있다**(사용자 지시). 수량·명목·권고 사슬은
+    //   위 계좌 카드가 미리보기로 이미 보여준다. 주문 불가만 여기 남는다 -- 왜 못 넣는지는
+    //   카드가 말해주지 않는다.
+    line.hidden = !plan.blocked;
+    line.textContent = plan.blocked ? `주문 불가 — ${plan.blocked}` : "";
     renderEntryFoldNote(plan);
     setEntryProjPreview(plan);
-    setMode(plan.dry_run ? "미리보기 전용" : "실주문 활성");
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
     if (hb) {
@@ -5931,38 +5941,12 @@ async function manualEntryRefreshSize() {
         : (r ? "모델 없음" : "—");
     }
   } catch (err) {
+    line.hidden = false;
     line.textContent = "크기 확인 실패 — 서버 응답 없음";
-    setMode("확인 실패");
     setEntryProjPreview(null);
   }
 }
 
-// 2026-09-15 «사이징 권고가 어디 있어?»(사용자). 세 숫자는 각각 뜻이 다르다:
-//   권고 = 순자산 × 허용배수(100/MAE) ÷ 가격   -- 위험모델이 말하는 «이만큼까지»
-//   가능 = 권고를 상한 3종(원장·순자산·모델)의 최소로 자른 값
-//   주문 = 가능 × 슬라이더 비율               -- 실제로 나가는 양(헤드라인과 같다)
-// 상한이 안 걸리면 가능 칸을 지운다 -- 같은 숫자를 두 번 쓰면 사슬이 안 읽힌다.
-function renderEntryChain(rec, avail, qty, cap, plan) {
-  const box = el("snapEntryChain");
-  if (!box) return;
-  if (!(rec > 0)) { box.hidden = true; return; }
-  const parts = [`<span class="entry-cap">사이징 권고</span><b>${rec.toFixed(3)}</b>`];
-  const arrow = `<span class="entry-arrow">→</span>`;
-  if (!cap.available) {
-    parts.push(arrow, `<b class="dim">상한 없음(왕복 ${cap.trips || 0}/${cap.need || 10}건)</b>`);
-  } else if (Math.abs(avail - rec) > 5e-4) {
-    // 🔴상한이 0 으로 자른 경우도 **보여준다**. 숨기면 «권고 6.764 인데 왜 못 넣나»가 안 읽힌다.
-    parts.push(arrow, `<span class="entry-cap">상한까지</span><b>${avail.toFixed(3)}</b>`);
-  }
-  // 주문 다리는 실제로 나갈 때만. 막혔으면 헤드라인이 이미 «주문 불가»를 말한다.
-  const from = cap.available ? avail : rec;
-  const pct = Math.round(100 * (avail > 0 ? qty / avail : 0));
-  if (!plan.blocked && (Math.abs(qty - from) > 5e-4 || pct < 100)) {
-    parts.push(arrow, `<span class="entry-cap">주문 ${pct}%</span><b>${qty.toFixed(3)} ETH</b>`);
-  }
-  box.innerHTML = parts.join("");
-  box.hidden = false;
-}
 
 // ── 2026-09-12 2단계: 실주문 (2단 확인) ────────────────────────────────────────
 // 진입 버튼은 계획을 **보여주기만** 하고, 주문은 확인 버튼에서만 나간다. 오클릭 한 번이
