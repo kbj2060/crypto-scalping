@@ -212,6 +212,21 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     prewarn["subText"] = ("전환 예고" if (prewarn.get("on") or prewarn.get("active"))
                           else ("미발동" if prewarn.get("available") else "웜업"))
     prewarn["history"], prewarn["times"] = pw, times
+    # 2026-09-16: 봉별 점수·임계도 같이 내보낸다. 차트 툴팁이 «왜 예고가 떴나»를 그 봉의
+    # 숫자로 답할 수 있어야 한다 -- 지금까지는 현재 값 하나만 나가서 과거 봉은 설명이 없었다.
+    # ⚠️임계도 봉별이다(후행 분위). 지금 임계로 과거를 설명하면 틀린 이유를 말하게 된다.
+    lo_ = max(i - HIST_BARS + 1, 0)
+    # ⚠️sc/pth 는 `if models:` 안에서만 만들어진다(모델이 없으면 예고 자체가 없다).
+    #   locals() 로 확인하지 않고 쓰면 아티팩트가 빠진 환경에서 NameError 로 워커가 죽는다.
+    _sc = locals().get("sc"); _pth = locals().get("pth")
+    if _sc is not None and _pth is not None:
+        prewarn["probas"] = [None if not np.isfinite(_sc[j]) else round(float(_sc[j]), 4)
+                             for j in range(lo_, i + 1)]
+        prewarn["thresholds"] = [None if not np.isfinite(_pth[j]) else round(float(_pth[j]), 4)
+                                 for j in range(lo_, i + 1)]
+    else:
+        prewarn["probas"] = [None] * (i + 1 - lo_)
+        prewarn["thresholds"] = [None] * (i + 1 - lo_)
     out["history"], out["times"] = hist, times
     return out
 

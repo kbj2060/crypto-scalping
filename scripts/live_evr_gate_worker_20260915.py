@@ -127,9 +127,37 @@ def cycle(art, man, hist, live: bool) -> dict:
                          else f"{len(rows)}자산 전부 임계 아래"}
 
 
+# 차트가 «언제부터 언제까지 발동이었나»를 그리려면 봉별 이력이 필요하다. 2026-09-16 까지
+# 이 워커는 **현재 스냅샷만** 남겼고(state 파일에 history 키가 없었다), 그래서 대시보드의
+# 게이트 칩 띠도 비어 있었다. 매 실행마다 한 점씩 append 한다 -- 소급은 안 되지만 이때부터는
+# 구간이 생긴다. 24시간(5분 간격 288점)만 들고 있는다: 차트는 6시간만 쓰고, 파일이 커지면
+# 대시보드가 매번 그걸 다 읽는다.
+HISTORY_MAX = 288
+
+
+def _append_history(prev: dict, payload: dict) -> list[dict]:
+    hist = [h for h in (prev.get("history") or []) if isinstance(h, dict)]
+    # 🔴ETH 차트에 칠할 것은 «20자산 중 아무거나»가 아니라 **ETH 자신의 발동**이다.
+    #   n_fired 로 칠하면 FIL 이 터진 구간이 ETH 차트에 색으로 남는다 -- 다른 자산 얘기다.
+    #   (칩은 20자산 요약이라 n_fired 가 맞다. 차트는 한 자산의 시간축이라 다르다.)
+    fired = payload.get("fired") or []
+    eth = next((f for f in fired if str(f.get("asset", "")).upper() == "ETH"), None)
+    hist.append({"ts": datetime.now(timezone.utc).isoformat(),
+                 "n_fired": int(payload.get("n_fired") or 0),
+                 "eth_fired": bool(eth),
+                 "eth_ratio": (float(eth["ratio"]) if eth and eth.get("ratio") is not None else None),
+                 "tone": payload.get("tone") or "neutral"})
+    return hist[-HISTORY_MAX:]
+
+
 def write_state(payload: dict) -> None:
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    out = {**payload, "updated_utc": datetime.now(timezone.utc).isoformat()}
+    try:
+        prev = json.loads(STATE.read_text()) if STATE.exists() else {}
+    except (OSError, ValueError):
+        prev = {}   # 깨진 파일 하나가 수집을 멈추면 안 된다 -- 이력만 새로 시작한다
+    out = {**payload, "history": _append_history(prev, payload),
+           "updated_utc": datetime.now(timezone.utc).isoformat()}
     tmp = STATE.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(out, ensure_ascii=False, default=str))
     os.replace(tmp, STATE)          # 원자적 교체 — 대시보드가 반쪽 파일을 읽지 않게

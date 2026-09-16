@@ -60,15 +60,93 @@ def _merge_history(out: dict[str, dict], payload: dict | None, kind: str, label:
             t1 = t1.tz_localize("UTC")
         times = [(t1 - pd.Timedelta(minutes=5 * (len(tones) - 1 - i))).isoformat()
                  for i in range(len(tones))]
-    for tone, t in zip(tones, times):
+    # 봉별 등급이 있으면 같이 싣는다(극점). 화면이 강/중/약을 다르게 그릴 수 있어야 한다 --
+    # 없으면 None 이고, 그때는 화면이 전부 같은 무게로 그린다(옛 동작).
+    grades = payload.get("grades") or []
+    if len(grades) != len(tones):
+        grades = [None] * len(tones)
+    probas = payload.get("probas") or []
+    if len(probas) != len(tones):
+        probas = [None] * len(tones)
+    demoted = payload.get("demoted") or []
+    if len(demoted) != len(tones):
+        demoted = [False] * len(tones)
+    for tone, t, grade, proba, dem in zip(tones, times, grades, probas, demoted):
         if tone not in ("good", "bad"):
             continue
         ts_ = pd.Timestamp(str(t).replace("Z", "+00:00"))
         key = (ts_ if ts_.tzinfo else ts_.tz_localize("UTC")).tz_convert("UTC").isoformat()
         if key not in out:
             continue
-        out[key].setdefault("events", []).append(
-            {"kind": kind, "label": label, "side": "bottom" if tone == "good" else "top"})
+        ev = {"kind": kind, "label": label, "side": "bottom" if tone == "good" else "top"}
+        if grade:
+            ev["grade"] = grade
+        if proba is not None:
+            ev["p"] = proba
+        if dem:
+            ev["demoted"] = True      # 강 -> 약 강등(손실가중 헤드가 컷을 못 넘음)
+        out[key].setdefault("events", []).append(ev)
+
+
+def _span_from_points(times: list[str], points: list[tuple[str, bool]]) -> list[int]:
+    """(시각, 활성) 점들을 차트 격자의 봉별 0/1 로 접는다. 한 봉에 여러 점이 들어오면 OR.
+
+    왜 점이 아니라 구간인가: 추세 전환(지속 N분)과 변동폭 게이트(24시간 창)는 **상태**다.
+    삼각형으로 찍으면 «언제부터 언제까지»가 사라지는데 그게 이 둘의 정보 대부분이다."""
+    out = [0] * len(times)
+    if not times:
+        return out
+    step = pd.Timedelta(minutes=5)
+    t0 = pd.Timestamp(times[0])
+    for ts_, on in points:
+        if not on:
+            continue
+        try:
+            t = pd.Timestamp(str(ts_).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        t = (t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC"))
+        # 봉 격자에 내림 정렬한다 -- 워커 주기가 5분 격자와 안 맞기 때문이다(게이트는 60초).
+        k = int((t - t0) // step)
+        if 0 <= k < len(times):
+            out[k] = 1
+    return out
+
+
+def _value_grid(times: list[str], points: list[tuple[str, Any]]) -> list[Any]:
+    """(시각, 값) 을 차트 격자에 얹는다. 값이 없는 봉은 None -- «0» 과 «모름» 을 구분한다."""
+    out: list[Any] = [None] * len(times)
+    if not times:
+        return out
+    step = pd.Timedelta(minutes=5)
+    t0 = pd.Timestamp(times[0])
+    for ts_, v in points:
+        if v is None:
+            continue
+        try:
+            t = pd.Timestamp(str(ts_).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        t = (t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC"))
+        k = int((t - t0) // step)
+        if 0 <= k < len(times):
+            out[k] = v
+    return out
+
+
+def _history_points(payload: dict | None, active_tones=("bad", "warn")) -> list[tuple[str, bool]]:
+    """(history, times) 를 가진 페이로드를 점 목록으로. 모양이 다르면 조용히 빈 목록."""
+    if not isinstance(payload, dict):
+        return []
+    hist, times = payload.get("history") or [], payload.get("times") or []
+    if hist and isinstance(hist[0], dict):          # 게이트 이력: [{ts, eth_fired, ...}, ...]
+        # 🔴**ETH 자신의 발동만** 센다. n_fired(20자산 합계)로 칠하면 다른 자산이 터진 구간이
+        #   ETH 차트에 색으로 남는다. eth_fired 가 없는 옛 이력은 건너뛴다(모르면 안 칠한다).
+        return [(h.get("ts"), bool(h.get("eth_fired")))
+                for h in hist if isinstance(h, dict) and "eth_fired" in h]
+    if not times or len(times) != len(hist):
+        return []
+    return [(t, str(v) in active_tones) for v, t in zip(hist, times)]
 
 
 def _onset_only(grid: dict[str, dict], times: list[str]) -> list[dict]:
@@ -96,7 +174,8 @@ def _onset_only(grid: dict[str, dict], times: list[str]) -> list[dict]:
 
 
 def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
-                          extreme: dict | None = None) -> dict[str, Any]:
+                          extreme: dict | None = None, breakout: dict | None = None,
+                          evr_gate: dict | None = None) -> dict[str, Any]:
     """청산맵 72봉에 정렬된 마커. 절대 예외를 올리지 않는다."""
     asset = (asset or "eth").lower()
     if asset not in SUPPORTED:
@@ -141,7 +220,39 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         #     측면은 그대로다. 등급을 되살리려면 워커가 등급 이력을 내보내야 한다(다른 세션 파일).
         _merge_history(grid, extreme, "extreme", "극점")
         _merge_history(grid, v_rebound, "v_rebound", "V자반등")
+
+        # ── 방향 없는 신호는 **구간**이다 (2026-09-16) ────────────────────────────────
+        # 추세 전환·변동폭 게이트는 천장/바닥을 말하지 않는다(각 스크립트에 명시). 방향 레인에
+        # 넣지 않고 0/1 구간으로 따로 내보낸다 -- 화면에서 초록/빨강을 쓰지 않으려는 것이다.
+        # 탐지기 이력은 이미 **지속 구간**이다(_sustain 으로 만든다) -- 발동 봉 하나가 아니라
+        # 그 신호가 살아 있는 창 전체가 bad 다. 구간 그림과 의미가 정확히 맞는다.
+        # 예고도 자기 이력을 갖고 있다(prewarn.history, warn/neutral · 같은 times 격자).
+        pre = (breakout or {}).get("prewarn") or {}
+        spans = {"trend_detect": _span_from_points(times, _history_points(breakout)),
+                 "trend_prewarn": _span_from_points(times, _history_points(pre, ("warn",))),
+                 "evr_gate": _span_from_points(times, _history_points(evr_gate))}
+        # 게이트만 이력이 이제 막 쌓이기 시작한다(2026-09-16 워커에 추가). 그 전 구간은 «발동
+        # 안 함»이 아니라 **모름**이라, 이력이 아직 없으면 지금 상태만 마지막 봉에 찍고 그
+        # 사실을 spans_partial 로 밝힌다.
+        # 툴팁이 그 봉의 **숫자**로 답할 수 있게 값 격자도 같이 보낸다(0/1 만으로는 «왜»를
+        # 말할 수 없다). 값이 없는 봉은 None 이다 -- 0 으로 채우면 «발동 0배»처럼 읽힌다.
+        pre_times = pre.get("times") or []
+        span_meta = {
+            "trend_prewarn_p": _value_grid(times, list(zip(pre_times, pre.get("probas") or []))),
+            "trend_prewarn_thr": _value_grid(times, list(zip(pre_times, pre.get("thresholds") or []))),
+            "evr_gate_ratio": _value_grid(times, [
+                (h.get("ts"), h.get("eth_ratio")) for h in ((evr_gate or {}).get("history") or [])
+                if isinstance(h, dict) and h.get("eth_fired")]),
+        }
+        gate_hist = _history_points(evr_gate)
+        if times and not gate_hist:
+            eth_now = any(str(f.get("asset", "")).upper() == "ETH"
+                          for f in ((evr_gate or {}).get("fired") or []))
+            if eth_now:
+                spans["evr_gate"][-1] = 1
         return {
+            "spans": spans, "span_meta": span_meta,
+            "spans_partial": [] if gate_hist else ["evr_gate"],
             "available": True, "asset": asset, "bars": CHART_BARS,
             "latest_ts_utc": times[-1] if times else None,
             "times": times,

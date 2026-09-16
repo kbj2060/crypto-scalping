@@ -27,6 +27,149 @@
   --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
   --font-display: "Space Grotesk", "Pretendard Variable", Pretendard, "Noto Sans KR", sans-serif;
   --font-mono: "JetBrains Mono", "Pretendard Variable", Pretendard, ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+  /* ── 테마 축 (2026-09-16) ──────────────────────────────────────────────────
+     다크는 **한 값도 안 바뀐다**. 예전 리터럴의 알파를 그대로 두고 삼원색만 변수로
+     올렸다: `rgba(255,255,255,.035)` → `rgb(var(--lift) / .035)`.
+       --lift    표면을 «띄우는» 색. 다크는 흰빛을 더하고, 라이트는 그늘을 더한다
+                 (흰 유리 위의 흰 오버레이는 안 보인다 -- 라이트에서 부호가 뒤집혀야 한다).
+       --specular 유리 윗면 1px 광택선. 어느 테마에서나 **흰색**이고 세기만 다르다.
+       --shadow   그림자의 색. 애플 라이트 머티리얼은 순검정이 아니라 **푸른 회색**이다. */
+  --lift: 255 255 255;
+  --specular: rgba(255, 255, 255, 0.055);
+  --shadow: 0 0 0;
+  --glass-blur: none;          /* 다크는 현행 유지 -- 블러를 켜면 지금 화면이 바뀐다 */
+  --glass-edge: var(--soft-line);
+}
+
+/* ══ 화이트 = 애플 «Liquid Glass» (2026-09-16) ═══════════════════════════════
+   참고한 성질 넷:
+   1. **재질은 색이 아니라 렌즈다.** 유리는 뒤를 «가리지」 않고 흐리면서 채도를 올린다
+      → backdrop-filter: blur() saturate(). 그래서 패널 알파를 60% 대로 둔다.
+   2. **가장자리에 광택이 산다.** 윗면 1px 흰 하이라이트 + 아랫면 옅은 그늘로 두께를 만든다.
+   3. **그림자는 검정이 아니라 색이 있다.** 순검정은 라이트에서 때가 탄 것처럼 보인다.
+   4. **글자는 유리가 아니라 그 위에 놓인다.** 대비를 재질과 분리해 진하게 유지한다. */
+[data-theme="light"] {
+  /* 🔴첫 판은 «유리가 아니라 종이」였다: 실측 패널 rgb(251,252,254) vs 지면 rgb(232,238,244)
+     로 카드 안팎이 같은 흰색이었다. 지면을 내리고 패널 알파를 낮춰 blur 가 일하게 만든다. */
+  --bg: #dfe4ee;
+  --panel: rgba(255, 255, 255, 0.55);
+  --panel-strong: rgba(255, 255, 255, 0.72);
+  --chart-bg: rgba(255, 255, 255, 0.42);
+  --glass: rgba(255, 255, 255, 0.38);
+  --glass-strong: rgba(255, 255, 255, 0.40);
+  --text: #16181d;
+  --muted: #555c6c;   /* 4.06:1 이던 보조문구 여럿을 한 번에 올린다 */
+  --ink: #0a0c10;
+  /* 채도 낮은 파스텔은 흰 유리 위에서 무너진다 -- 다크판보다 한 단 **진하게** 잡는다.
+     값은 눈대중이 아니라 WCAG 대비로 골랐다. 🔴기준은 «흰 유리 위»가 아니라 **패널 내부에서
+     가장 어두운 바탕**이다(실측 rgb(208,213,224) -- 뒤 색 덩어리가 비쳐 보이는 자리).
+     유리를 진짜 유리로 만들면 바탕이 균일하지 않으므로 최악점으로 잡아야 한다.
+     손익 «숫자»가 작은 글씨라 큰글자 기준 3.0 으로는 모자란다. */
+  --good: #136436;   /* 최악 유리바탕 5.79:1 */
+  --bad: #9c3227;    /* 최악 유리바탕 5.80:1 */
+  --warn: #7a4809;   /* 최악 유리바탕 5.01:1 */
+  --amber: #6e4d06;  /* 최악 유리바탕 5.03:1 -- 노랑은 같은 밝기에서 대비가 가장 안 나온다 */
+  --accent: #095d79; /* 최악 유리바탕 5.89:1 */
+  --liq-support: #2551a8;      /* 최악 유리바탕 5.03:1 */
+  --liq-resistance: #83480a;   /* 최악 유리바탕 4.98:1 */
+  --line: rgba(20, 26, 40, 0.14);
+  --soft-line: rgba(20, 26, 40, 0.075);
+  --hover-line: rgba(20, 26, 40, 0.30);
+
+  --lift: 20 26 40;                      /* 띄우기가 «그늘 더하기»로 뒤집힌다 */
+  --specular: rgba(255, 255, 255, 0.85);  /* 광택선은 더 밝아야 유리처럼 보인다 */
+  --shadow: 74 85 104;                    /* 푸른 회색 -- 순검정은 때처럼 보인다 */
+  --glass-blur: blur(34px) saturate(200%) brightness(1.08);   /* 투과 이미지의 «바닥」을 들어올린다 */
+  --glass-edge: rgba(255, 255, 255, 0.72);
+}
+
+/* 유리는 «뒤에 뭔가 있어야» 유리로 보인다. 단색 흰 바탕 위의 blur 는 아무 일도 하지 않으므로,
+   굴절시킬 색 덩어리를 깔아 준다(애플이 배경에 쓰는 소프트 메시). */
+[data-theme="light"] body {
+  background:
+    radial-gradient(circle 260px at 72% 22%, rgba(12, 160, 200, 0.30), transparent 62%),
+    radial-gradient(circle 230px at 92% 66%, rgba(255, 138, 92, 0.24), transparent 64%),
+    radial-gradient(circle 260px at 10% 70%, rgba(24, 160, 96, 0.24), transparent 62%),
+    radial-gradient(ellipse 1000px 700px at 4% -6%, rgba(10, 109, 142, 0.42), transparent 64%),
+    radial-gradient(ellipse 880px 660px at 98% 6%, rgba(116, 84, 214, 0.40), transparent 66%),
+    radial-gradient(ellipse 900px 700px at 76% 62%, rgba(24, 132, 76, 0.26), transparent 68%),
+    radial-gradient(ellipse 820px 620px at 16% 96%, rgba(198, 116, 52, 0.24), transparent 66%),
+    linear-gradient(180deg, #e3e8f2 0%, var(--bg) 46%, #ccd5e4 100%);
+  background-attachment: fixed;
+}
+[data-theme="light"] html { background: var(--bg); }
+
+/* 애플 글래스는 모서리가 «더 크고 연속적»이다. 다크는 안 건드린다(현행 18px 유지). */
+[data-theme="light"] {
+  --radius: 22px;
+  --radius-sm: 14px;
+}
+
+/* 두께감: 윗면은 빛을 받고(=--specular), 아랫면은 옅은 그늘이 진다.
+   이 한 줄이 «납작한 반투명 사각형»과 «유리판»을 가른다. */
+[data-theme="light"] .panel {
+  /* 🔴«그냥 하얀 판»이던 것을 고친다(사용자 지적). 원인 셋을 다 손봐야 유리가 된다:
+     ①불투명도 -- 흰 0.55 + 그라디언트 0.40 ≈ 0.73 이면 뒤가 안 비친다. 0.26 까지 내린다.
+     ②림 -- iOS 글래스의 정체는 블러가 아니라 **가장자리를 감싸고 도는 광택**이다.
+        윗면만 밝히던 것을 사방 1px 링 + 아랫면 반사광으로 바꾼다.
+     ③대각 시트 -- 유리판은 빛을 비스듬히 받는다. 좌상 밝음 → 중앙 가장 투명 → 우하 반사. */
+  background:
+    linear-gradient(135deg,
+      rgba(255, 255, 255, 0.34) 0%,
+      rgba(255, 255, 255, 0.06) 40%,
+      rgba(255, 255, 255, 0.05) 64%,
+      rgba(255, 255, 255, 0.22) 100%),
+    rgba(255, 255, 255, 0.46);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.42),
+    inset 0 -18px 28px -22px rgba(255, 255, 255, 0.75),
+    0 0 0 1px rgb(var(--shadow) / 0.07),
+    0 2px 6px rgb(var(--shadow) / 0.10),
+    0 16px 40px rgb(var(--shadow) / 0.18);
+}
+[data-theme="light"] .panel:hover {
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.58),
+    inset 0 -18px 28px -22px rgba(255, 255, 255, 0.85),
+    0 0 0 1px rgba(10, 109, 142, 0.22),
+    0 3px 8px rgb(var(--shadow) / 0.13),
+    0 24px 56px rgb(var(--shadow) / 0.22);
+}
+
+/* 유리 위에 또 유리를 얹으면 탁해진다 -- 격자로 쪼갠 칸들은 블러를 부모(.panel)에 맡기고
+   자기는 «옅은 흰 판»으로만 남는다. */
+[data-theme="light"] .ops-shadow-stat,
+[data-theme="light"] .shadow-slot-card,
+[data-theme="light"] .shadow-chart-cell {
+  background: rgba(255, 255, 255, 0.44);
+}
+
+/* 차트 바닥. 다크에서는 불투명 판이지만 라이트에서는 유리라 뒤가 비쳐야 한다. */
+[data-theme="light"] .chart-ai-ribbon {
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.55), rgb(255 255 255 / 0.28)),
+    rgba(255, 255, 255, 0.34);
+  border-color: var(--glass-edge);
+}
+
+/* 알약 버튼들도 같은 재질로. 흰 유리 위에서 «흰 4%»는 보이지 않는다. */
+[data-theme="light"] .page-tab,
+[data-theme="light"] .push-toggle,
+[data-theme="light"] .shadow-slot-tab {
+  background: rgba(255, 255, 255, 0.55);
+  border-color: var(--glass-edge);
+  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.08), inset 0 1px 0 var(--specular);
+}
+[data-theme="light"] .page-tab.active,
+[data-theme="light"] .shadow-slot-tab.active,
+[data-theme="light"] .push-toggle[data-state="on"] {
+  background: rgba(10, 109, 142, 0.14);
+  border-color: rgba(10, 109, 142, 0.48);
+  color: var(--ink);
 }
 
 @keyframes fadeInUp {
@@ -48,6 +191,7 @@ body {
   background:
     radial-gradient(ellipse 900px 520px at 12% -8%, rgba(34, 211, 238, 0.1), transparent 55%),
     linear-gradient(180deg, #1d222b 0%, var(--bg) 46%, #13171f 100%);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
   margin: 0;
@@ -73,7 +217,7 @@ body {
   border: 1px solid color-mix(in srgb, var(--bad) 62%, transparent);
   border-radius: var(--radius-sm);
   background: linear-gradient(90deg, rgba(212, 120, 108, 0.22), rgba(46, 52, 62, 0.96));
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 14px 34px rgb(var(--shadow) / 0.28);
 }
 
 .execution-alert-banner.hidden { display: none; }
@@ -167,7 +311,7 @@ body {
 }
 
 .page-tabs { display: flex; gap: 7px; align-items: center; }
-.page-tab { border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.035); color: var(--muted); padding: 8px 12px; font: 700 11px/1 var(--font-sans); cursor: pointer; }
+.page-tab { border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--lift) / .035); color: var(--muted); padding: 8px 12px; font: 700 11px/1 var(--font-sans); cursor: pointer; }
 .page-tab.active { border-color: rgba(34,211,238,.7); background: rgba(34,211,238,.16); color: var(--ink); }
 .hidden { display: none !important; }
 .ops-tab-panel { display: grid; gap: 16px; }
@@ -204,7 +348,7 @@ body {
   transition: background 0.2s ease;
 }
 .ops-health-row:nth-child(odd) { border-right: 1px solid var(--soft-line); }
-.ops-health-row:hover { background: rgba(255, 255, 255, 0.025); }
+.ops-health-row:hover { background: rgb(var(--lift) / 0.025); }
 
 /* Macro calendar (2026-08-26) -- single-column chronological list, reuses .ops-health-row/-dot/
    -info/-status-badge as-is (see scripts/live_macro_calendar_20260826.py for the event data). */
@@ -300,7 +444,7 @@ body {
 .meter-state.warn { color: var(--amber); }
 .meter-state.neutral { color: var(--muted); }
 .meter-gauge { display: flex; align-items: center; gap: 5px; }
-.meter-track { width: 36px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.meter-track { width: 36px; height: 4px; border-radius: 2px; background: rgb(var(--lift) / 0.08); overflow: hidden; }
 .meter-fill { display: block; height: 100%; border-radius: 2px; }
 .meter-fill.good { background: var(--good); }
 .meter-fill.bad { background: var(--bad); }
@@ -316,7 +460,7 @@ body {
   margin: 4px 0 0;
   padding: 8px 10px;
   border-left: 2px solid var(--line);
-  background: rgba(255, 255, 255, 0.025);
+  background: rgb(var(--lift) / 0.025);
   border-radius: 0 6px 6px 0;
   color: var(--text);
   font: 11px/1.55 var(--font-sans);
@@ -356,7 +500,7 @@ body {
   margin-top: 6px;
   padding: 10px 12px;
   border-left: 2px solid var(--accent);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--lift) / 0.03);
   border-radius: 0 6px 6px 0;
   color: var(--muted);
   font: 11px/1.65 var(--font-mono);
@@ -451,7 +595,7 @@ body {
   padding: 9px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgb(var(--lift) / 0.02);
 }
 
 .signal-chip-dot {
@@ -515,7 +659,7 @@ body {
   margin: 10px 0 0;
   padding: 8px 10px;
   border-left: 2px solid var(--line);
-  background: rgba(255, 255, 255, 0.025);
+  background: rgb(var(--lift) / 0.025);
   border-radius: 0 6px 6px 0;
   color: var(--text);
   font: 11px/1.55 var(--font-sans);
@@ -626,7 +770,7 @@ body {
 .liq-level-row.liq-resistance .liq-level-price { color: var(--liq-resistance); }
 .liq-level-row.liq-support .liq-level-bar-fill { background: var(--liq-support); }
 .liq-level-row.liq-support .liq-level-price { color: var(--liq-support); }
-.liq-level-row.liq-current { background: rgba(255, 255, 255, 0.03); font-weight: 800; }
+.liq-level-row.liq-current { background: rgb(var(--lift) / 0.03); font-weight: 800; }
 .liq-level-row.liq-current .liq-level-price { color: var(--accent); }
 @media (max-width: 720px) {
   .liq-level-row { grid-template-columns: 48px 72px 1fr 52px; padding: 6px 12px; font-size: 11px; }
@@ -692,8 +836,8 @@ body {
 }
 
 .shadow-slot-tabs { display: flex; gap: 8px; flex-wrap: wrap; padding: 20px 16px 16px; }
-.shadow-slot-tab { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255, 255, 255, 0.035); color: var(--muted); padding: 7px 12px; font: 700 11.5px/1 var(--font-sans); cursor: pointer; transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
-.shadow-slot-tab:hover:not(.active) { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.shadow-slot-tab { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--lift) / 0.035); color: var(--muted); padding: 7px 12px; font: 700 11.5px/1 var(--font-sans); cursor: pointer; transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
+.shadow-slot-tab:hover:not(.active) { color: var(--text); background: rgb(var(--lift) / 0.06); }
 .shadow-slot-tab.active { border-color: rgba(34, 211, 238, 0.7); background: rgba(34, 211, 238, 0.16); color: var(--ink); }
 .shadow-slot-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
 .shadow-slot-tab-dot.long { background: var(--good); }
@@ -715,7 +859,7 @@ body {
   border: 1px solid rgba(203, 209, 227, 0.12);
   border-radius: var(--radius);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
+    linear-gradient(135deg, rgb(var(--lift) / 0.075), rgb(var(--lift) / 0.025)),
     rgba(39, 44, 54, 0.66);
   backdrop-filter: blur(18px) saturate(1.18);
 }
@@ -727,8 +871,8 @@ body {
   overflow: visible;
   background:
     linear-gradient(90deg, rgba(207, 106, 92, 0.14), rgba(203, 209, 227, 0.05) 46%, rgba(203, 209, 227, 0.05) 54%, rgba(107, 171, 132, 0.14)),
-    rgba(255, 255, 255, 0.03);
-  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.4), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+    rgb(var(--lift) / 0.03);
+  box-shadow: inset 0 1px 4px rgb(var(--shadow) / 0.4), inset 0 -1px 0 var(--specular);
 }
 .shadow-slot-range-zero { position: absolute; top: -3px; bottom: -3px; width: 1px; background: rgba(203, 209, 227, 0.28); transform: translateX(-0.5px); }
 .shadow-slot-range-fill { position: absolute; top: 1px; bottom: 1px; border-radius: 5px; transition: left 0.45s cubic-bezier(.22,.68,0,1.01), width 0.45s cubic-bezier(.22,.68,0,1.01); }
@@ -743,7 +887,7 @@ body {
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.9), var(--panel-strong) 65%);
+  background: radial-gradient(circle at 35% 30%, rgb(255 255 255 / 0.9), var(--panel-strong) 65%);
   border: 2.5px solid var(--accent);
   transform: translate(-50%, -50%);
   transition: left 0.45s cubic-bezier(.22,.68,0,1.01);
@@ -804,7 +948,7 @@ body {
   border-radius: 50%;
   display: inline-block;
   margin-right: 6px;
-  box-shadow: 0 0 8px rgba(0,0,0,0.4);
+  box-shadow: 0 0 8px rgb(var(--shadow) / 0.4);
 }
 .session-led.on { background-color: var(--good); box-shadow: 0 0 10px var(--good); }
 .session-led.off { background-color: var(--bad); }
@@ -825,10 +969,13 @@ body {
     linear-gradient(180deg, var(--glass-strong), transparent),
     var(--panel);
   border-radius: var(--radius);
-  border: 1px solid var(--soft-line);
+  border: 1px solid var(--glass-edge);
+  /* 유리의 정체는 «뒤를 흐리면서 채도를 올리는 렌즈」다. 다크는 none 이라 무효과 -- 현행 그대로. */
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   box-shadow:
-    0 20px 54px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+    0 20px 54px rgb(var(--shadow) / 0.28),
+    inset 0 1px 0 var(--specular);
   padding: 16px;
   position: relative;
   overflow: hidden;
@@ -840,8 +987,8 @@ body {
   border-color: rgba(34, 211, 238, 0.34);
   transform: translateY(-2px);
   box-shadow:
-    0 26px 60px rgba(0, 0, 0, 0.32),
-    inset 0 1px 0 rgba(255, 255, 255, 0.065);
+    0 26px 60px rgb(var(--shadow) / 0.32),
+    inset 0 1px 0 var(--specular);
 }
 
 .panel h3 {
@@ -1010,7 +1157,7 @@ body {
   padding: 4px;
   border: 1px solid rgba(203, 209, 227, 0.11);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.035);
+  background: rgb(var(--lift) / 0.035);
 }
 
 .asset-tab {
@@ -1029,13 +1176,13 @@ body {
 
 .asset-tab:hover:not(.active) {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--lift) / 0.05);
 }
 
 .asset-tab.active {
   background: linear-gradient(135deg, rgba(34, 211, 238, 0.3), rgba(34, 211, 238, 0.13));
   color: var(--ink);
-  box-shadow: 0 4px 14px rgba(34, 211, 238, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 14px rgba(34, 211, 238, 0.18), inset 0 1px 0 var(--specular);
 }
 
 /* 차트 종류 전환(2026-09-16). .asset-tabs 를 그대로 재사용하고 크기만 줄인다 --
@@ -1065,12 +1212,12 @@ body {
   border: 1px solid rgba(203, 209, 227, 0.12);
   border-radius: var(--radius);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
+    linear-gradient(135deg, rgb(var(--lift) / 0.075), rgb(var(--lift) / 0.025)),
     rgba(39, 44, 54, 0.66);
   backdrop-filter: blur(18px) saturate(1.18);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.055),
-    0 18px 44px rgba(0, 0, 0, 0.22);
+    inset 0 1px 0 var(--specular),
+    0 18px 44px rgb(var(--shadow) / 0.22);
 }
 
 .ribbon-item {
@@ -1079,13 +1226,13 @@ body {
   min-height: 44px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.045);
+  background: rgb(var(--lift) / 0.045);
   border: 1px solid rgba(203, 209, 227, 0.07);
   transition: background 0.2s ease, border-color 0.2s ease;
 }
 
 .ribbon-item:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgb(var(--lift) / 0.07);
   border-color: rgba(203, 209, 227, 0.14);
 }
 
@@ -1122,12 +1269,12 @@ body {
 
 .chart-ai-ribbon.good {
   border-color: rgba(107, 171, 132, 0.38);
-  box-shadow: 0 16px 36px rgba(107, 171, 132, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  box-shadow: 0 16px 36px rgba(107, 171, 132, 0.04), inset 0 1px 0 var(--specular);
 }
 
 .chart-ai-ribbon.bad {
   border-color: rgba(207, 106, 92, 0.38);
-  box-shadow: 0 16px 36px rgba(207, 106, 92, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  box-shadow: 0 16px 36px rgba(207, 106, 92, 0.045), inset 0 1px 0 var(--specular);
 }
 
 .chart-ai-ribbon.warn,
@@ -1184,7 +1331,7 @@ body {
   border-radius: var(--radius);
   box-shadow:
     inset 0 0 0 1px rgba(203, 209, 227, 0.075),
-    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    inset 0 1px 0 var(--specular);
 }
 
 svg {
@@ -1259,8 +1406,8 @@ svg {
   .panel {
     padding: 12px;
     box-shadow:
-      0 10px 28px rgba(0, 0, 0, 0.28),
-      inset 0 1px 0 rgba(255, 255, 255, 0.03);
+      0 10px 28px rgb(var(--shadow) / 0.28),
+      inset 0 1px 0 var(--specular);
   }
 
   .panel h3 {
@@ -1441,8 +1588,8 @@ svg {
   opacity: 0;
   transition: opacity 0.15s ease;
   z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 4px 12px rgb(var(--shadow) / 0.2);
+  border: 1px solid rgb(var(--lift) / 0.1);
   white-space: nowrap;
 }
 
@@ -1523,9 +1670,9 @@ svg {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.055) 45%,
-    rgba(255, 255, 255, 0.085) 50%,
-    rgba(255, 255, 255, 0.055) 55%,
+    rgb(var(--lift) / 0.055) 45%,
+    rgb(var(--lift) / 0.085) 50%,
+    rgb(var(--lift) / 0.055) 55%,
     transparent 100%
   );
   background-size: 220% 100%;
@@ -1534,7 +1681,7 @@ svg {
 
 /* 움직임을 줄이도록 설정한 사용자에겐 쓸어가는 애니메이션 대신 정적인 음영만 남긴다. */
 @media (prefers-reduced-motion: reduce) {
-  [data-asset-scope].asset-loading::after { animation: none; background: rgba(255,255,255,.05); }
+  [data-asset-scope].asset-loading::after { animation: none; background: rgb(var(--lift) / .05); }
 }
 
 /* 알림 토글 + PWA 설치 버튼 (2026-09-04) ------------------------------------------------
@@ -1555,7 +1702,7 @@ svg {
   flex: 0 0 auto;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, .035);
+  background: rgb(var(--lift) / .035);
   color: var(--muted);
   padding: 7px 11px;
   font: 700 11px/1 var(--font-sans);
@@ -1608,7 +1755,7 @@ svg {
 .notify-btn {
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgba(255, 255, 255, .04);
+  background: rgb(var(--lift) / .04);
   color: var(--text);
   padding: 9px 14px;
   font: 700 12px/1.3 var(--font-sans);
@@ -1636,7 +1783,7 @@ svg {
   gap: 10px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, .025);
+  background: rgb(var(--lift) / .025);
 }
 .notify-check-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .notify-check.good .notify-check-dot { background: var(--good); }
@@ -1664,7 +1811,7 @@ svg {
   padding: 7px 10px;
   border-left: 2px solid var(--line);
   border-radius: 0 6px 6px 0;
-  background: rgba(255, 255, 255, .02);
+  background: rgb(var(--lift) / .02);
 }
 .notify-tier strong { font: 700 11px/1.3 var(--font-sans); }
 .notify-tier span { font: 500 11px/1.45 var(--font-sans); color: var(--muted); }
@@ -1680,7 +1827,7 @@ svg {
   gap: 12px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, .025);
+  background: rgb(var(--lift) / .025);
 }
 .notify-device.mine { border: 1px solid rgba(34, 211, 238, .35); }
 .notify-device-main { display: grid; gap: 2px; min-width: 0; }
@@ -1754,7 +1901,7 @@ svg {
   color: var(--text);
   font: 500 12px/1.5 var(--font-sans);
   white-space: pre-wrap;          /* title에 줄바꿈이 들어있는 곳이 많다 */
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 10px 28px rgb(var(--shadow) / 0.55);
   max-height: 60vh;
   overflow-y: auto;
 }
@@ -1801,7 +1948,7 @@ svg {
   background: var(--glass); border: 1px solid var(--soft-line); }
 .acct-tile-lab { font: 600 10.5px/1 var(--font-sans); color: var(--muted); white-space: nowrap; }
 .acct-tile-val { font: 700 21px/1 var(--font-sans); letter-spacing: -0.015em; }
-.acct-rail { display: block; height: 3px; border-radius: 3px; background: rgba(255,255,255,0.09);
+.acct-rail { display: block; height: 3px; border-radius: 3px; background: rgb(var(--lift) / 0.09);
   overflow: hidden; }
 .acct-rail i { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
 .acct-tile-val.good { color: var(--good); }
@@ -1831,7 +1978,7 @@ svg {
 .acct-gauge { position: relative; height: 8px; }
 .acct-gauge-track { display: block; height: 100%; border-radius: 999px; overflow: hidden;
   background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 42%, transparent),
-    color-mix(in srgb, var(--amber) 24%, transparent) 48%, rgba(255,255,255,0.06)); }
+    color-mix(in srgb, var(--amber) 24%, transparent) 48%, rgb(var(--lift) / 0.06)); }
 .acct-gauge-entry { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1.5px;
   background: var(--line); transform: translateX(-50%); }
 .acct-gauge-knob { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
@@ -1863,13 +2010,13 @@ svg {
 /* 커서를 대면 바로 뜨는 상세 -- 네이티브 title(1초 지연)로는 "세부 정보"가 안 읽힌다 */
 .acct-tip { position: absolute; top: 18px; z-index: 3; pointer-events: none;
   padding: 7px 9px; border-radius: 8px; background: var(--panel-strong);
-  border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  border: 1px solid var(--line); box-shadow: 0 6px 18px rgb(var(--shadow) / 0.35);
   font: 600 10.5px/1.55 var(--font-mono); color: var(--text); white-space: nowrap; }
 .acct-tip .good { color: var(--good); }
 .acct-tip .bad { color: var(--bad); }
 /* 키보드로 막대를 훑을 때 어디인지 보이게 -- 툴팁이 값의 유일한 통로가 되지 않는다 */
-.acct-perf-svg rect[tabindex]:focus { outline: none; fill: rgba(255,255,255,0.06); }
-.acct-perf-svg rect[tabindex]:focus-visible { fill: rgba(255,255,255,0.10); }
+.acct-perf-svg rect[tabindex]:focus { outline: none; fill: rgb(var(--lift) / 0.06); }
+.acct-perf-svg rect[tabindex]:focus-visible { fill: rgb(var(--lift) / 0.10); }
 /* 🔴칸을 꽉 채우면 비균일 확대다. 늘어나면 안 되는 것(선 두께·끝점)은 SVG 쪽에서
    vector-effect / 둥근 캡으로 확대를 껐다 -- acctPerfSvg() 주석 참고. */
 .acct-perf-svg { display: block; width: 100%; height: 100%; min-height: 96px; }
@@ -2032,3 +2179,226 @@ svg {
 .lev-auto { display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
             color: var(--muted); white-space: nowrap; }
 .lev-auto input { accent-color: var(--accent); }
+
+/* 라이트에서 깨지는 하드코딩 색 네 군데. 다크는 그대로 둔다. */
+[data-theme="light"] .chart-tooltip {
+  background: rgba(28, 32, 40, 0.94);
+  color: #fff;                                  /* 툴팁만은 어두운 유리 -- 차트 위 대비 */
+  border-color: rgba(255, 255, 255, 0.14);
+}
+[data-theme="light"] .horizon-badge.tp-done-badge {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  border-color: rgba(37, 99, 235, 0.38);
+}
+[data-theme="light"] .notify-btn.short { color: var(--bad); }
+
+/* 라이트에서 어둡게 남는 면 넷. 각각 재질이 달라 한 규칙으로 못 묶는다. */
+[data-theme="light"] .execution-alert-banner {
+  background: linear-gradient(90deg, rgba(192, 70, 58, 0.16), rgba(255, 255, 255, 0.72));
+}
+[data-theme="light"] .execution-alert-banner.blocked {
+  background: linear-gradient(90deg, rgba(156, 92, 13, 0.16), rgba(255, 255, 255, 0.72));
+}
+[data-theme="light"] .execution-alert-banner.disabled {
+  background: linear-gradient(90deg, rgba(102, 109, 126, 0.12), rgba(255, 255, 255, 0.72));
+}
+[data-theme="light"] .shadow-ribbon {
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.55), rgb(255 255 255 / 0.28)),
+    rgba(255, 255, 255, 0.34);
+  border-color: var(--glass-edge);
+}
+[data-theme="light"] [data-asset-scope].asset-loading::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .62), rgba(240, 242, 247, .62));
+}
+
+/* 🔴채도 배지 위의 «어두운 글자»가 라이트에서 뒤집힌다. 다크 팔레트는 --good/--bad/--warn 이
+   밝은 파스텔이라 그 위에 어두운 글자가 맞았는데, 라이트에서 그 토큰을 진하게 바꿨기 때문이다.
+   실측 «롱 보유» 2.94:1, «위험» 3.58:1. 배지는 채운 색이므로 글자를 흰색으로 뒤집는다. */
+[data-theme="light"] .ops-badge.good,
+[data-theme="light"] .ops-badge.warn,
+[data-theme="light"] .ops-badge.bad,
+[data-theme="light"] .ops-health-summary.good,
+[data-theme="light"] .ops-health-summary.warn,
+[data-theme="light"] .ops-health-summary.bad,
+[data-theme="light"] .ops-health-row.good .ops-health-status-badge,
+[data-theme="light"] .ops-health-row.warn .ops-health-status-badge,
+[data-theme="light"] .ops-health-row.bad .ops-health-status-badge,
+[data-theme="light"] .shadow-slot-side.long,
+[data-theme="light"] .shadow-slot-side.short,
+[data-theme="light"] .pnl-badge.good,
+[data-theme="light"] .pnl-badge.bad,
+[data-theme="light"] .execution-alert-icon {
+  color: #fff;
+}
+
+/* 계좌 손익은 이 화면에서 가장 많이 읽는 숫자다 -- 옅은 색 칩 위라 토큰 그대로는 4.0 에 걸린다.
+   («|» 구분자는 장식이라 제외한다. 다크도 1.55 로 같다.) */
+[data-theme="light"] .acct-delta.bad { color: #96281c; }
+[data-theme="light"] .acct-tag.good { color: #0f5c32; }
+
+/* 조작 요소는 «조작 요소로 보여야» 한다. 라이트에서 흰 유리 위의 흰 4% 버튼은 글자만 떠 있다
+   -- 대비 검사는 통과하지만(글자색 기준) 버튼으로 읽히지 않는다. 면과 테두리를 준다. */
+[data-theme="light"] .notify-btn {
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(20, 26, 40, 0.16);
+  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.10), inset 0 1px 0 var(--specular);
+}
+[data-theme="light"] .notify-btn:hover:not(:disabled) {
+  border-color: rgba(10, 109, 142, 0.55);
+  background: #fff;
+}
+[data-theme="light"] .notify-btn.long { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+[data-theme="light"] .notify-btn.primary {
+  background: rgba(10, 109, 142, 0.14);
+  border-color: rgba(10, 109, 142, 0.50);
+}
+/* 계기 트랙도 같은 이유 -- 흰 위의 흰 8% 는 «채워진 양」을 못 읽는다. */
+[data-theme="light"] .meter-track { background: rgb(var(--lift) / 0.14); }
+
+/* ── 모바일 (2026-09-16) ─────────────────────────────────────────────────────
+   폭 390 에서 실측한 결함만 고친다. 데스크톱은 안 건드린다. */
+@media (max-width: 720px) {
+  /* 🔴경보 배지가 ETH 탭 위에 **151x14px 겹쳤다**. .session-alert-center 는 데스크톱에서
+     «3번째 항목을 진짜 중앙에» 두려고 absolute 인데, 모바일에서는 .asset-tabs 가 width:100%
+     가 되면서 그 위에 얹힌다. 좁은 화면에서는 중앙 정렬이 필요 없으므로 흐름으로 되돌린다. */
+  .ops-panel-head { flex-wrap: wrap; }
+  .session-alert-center {
+    position: static;
+    transform: none;
+    width: 100%;
+    justify-content: center;
+    order: 3;
+  }
+  #snapshotEvidenceBadge { order: 2; }
+
+  /* 손가락 목표는 44px 가 하한이다(애플 HIG). 알약 버튼들이 30~34px 였다. */
+  .asset-tab { height: 38px; }
+  .page-tab, .push-toggle { min-height: 38px; }
+
+  /* 360px 에서 내부 가로 넘침 3곳 -- 줄바꿈을 허용해 잘림 대신 두 줄로 간다. */
+  .manual-entry-row.fields { flex-wrap: wrap; }
+  .exit-frac { flex-wrap: wrap; }
+  .entry-was { white-space: normal; word-break: keep-all; }
+}
+
+/* iOS 는 재질을 한 종류로 쓰지 않는다 -- 글자가 빽빽한 시트는 두껍고(.panel 0.46),
+   툴바·탭·배지 같은 «크롬»은 얇다. 얇은 쪽에서 유리가 가장 잘 드러난다. */
+[data-theme="light"] .page-tab,
+[data-theme="light"] .push-toggle,
+[data-theme="light"] .shadow-slot-tab,
+[data-theme="light"] .asset-tabs,
+[data-theme="light"] .ops-badge.neutral,
+[data-theme="light"] .ops-readonly {
+  background: rgba(255, 255, 255, 0.30);
+  backdrop-filter: blur(20px) saturate(190%);
+  -webkit-backdrop-filter: blur(20px) saturate(190%);
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 1px 3px rgb(var(--shadow) / 0.12);
+}
+
+/* ══ 알약 프리미티브 — 여섯 계열을 하나로 (2026-09-16) ═══════════════════════
+   사용자 지적: "모든 버튼들이 다 각각 달라 ... 글래스/다크 토글 스타일로 통일해줘".
+
+   🔴왜 갈렸나 — 공유 프리미티브가 없었다. 기능이 붙을 때마다 그 날 자기 알약을 새로 그렸고,
+   주석의 날짜가 그대로 증거다(.ops-badge 08-26 · .asset-tab · .page-tab · .push-toggle 09-04 ·
+   .shadow-slot-tab · .notify-btn). 결과:
+     폰트   3 종  mono 800 / sans 700 / inherit 900
+     크기   4 종  11 · 11.5 · 12 · 12px
+     패딩   4 종  9/11 · 8/12 · 7/11 · 7/12 · 9/14
+     radius 2 종  999px · 10px
+     활성   3 종  단색 배경 / 그라디언트+글로우 / 채운 상태색
+   기준은 사용자가 고른 **글래스/다크 토글**(.push-toggle)이다. 새 버튼은 이 목록에 넣는다. */
+.page-tab,
+.push-toggle,
+.shadow-slot-tab,
+.ops-badge,
+.ops-readonly,
+.ops-health-summary,
+.notify-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgb(var(--lift) / 0.035);
+  color: var(--muted);
+  font: 700 11px/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, color .16s ease;
+}
+
+/* 배지는 «읽는 것»이라 누를 수 없다는 걸 커서로 말한다(모양은 같다). */
+.ops-badge, .ops-readonly, .ops-health-summary { cursor: default; }
+
+/* 실행 버튼은 한 치수 크다 -- 같은 언어, 다른 크기. 같아 보이면 «누르는 것»이 안 보인다. */
+.notify-btn { min-height: 38px; padding: 10px 16px; font-size: 12px; }
+/* 설명줄이 달린 둘(알림 탭 테스트 버튼)만 두 줄이라 알약이 어색하다 -- 모서리만 눕힌다. */
+.notify-btn:has(em) {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  border-radius: 14px;
+  text-align: left;
+  white-space: normal;
+}
+
+/* 세그먼티드 컨트롤(ETH… / 청산맵·풋프린트)은 «서로 배타적인 선택»이라 묶음이 정보다.
+   컨테이너가 알약을 맡고 칸은 테두리 없이 그 안에 앉는다 -- iOS 도 같은 구조다.
+   통일하는 것은 **타입·높이·활성 표시**이고, 묶음 자체는 유지한다. */
+.asset-tabs { padding: 3px; border-color: var(--line); background: rgb(var(--lift) / 0.035); }
+.asset-tab {
+  /* 🔴같은 클래스인데 높이가 둘이었다: .asset-tab 30px vs .chart-mode-tabs .asset-tab 24px.
+     세그먼트는 한 치수여야 «같은 컨트롤»로 읽힌다. */
+  height: 28px;
+  min-width: 46px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  font: 700 11px/1 var(--font-sans);
+  color: var(--muted);
+}
+.chart-mode-tabs .asset-tab { height: 28px; font-size: 11px; }
+
+/* 활성 표시도 하나로. .asset-tab 만 그라디언트+글로우라 혼자 튀었다. */
+.page-tab.active,
+.shadow-slot-tab.active,
+.asset-tab.active,
+.push-toggle[data-state="on"],
+.notify-btn.primary {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--ink);
+  box-shadow: none;
+}
+.page-tab:hover:not(.active),
+.shadow-slot-tab:hover:not(.active),
+.asset-tab:hover:not(.active),
+.push-toggle:hover:not(:disabled),
+.notify-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--text);
+}
+.asset-tab:hover:not(.active) { border-color: transparent; }
+
+/* 상태를 «색으로 채우는» 배지는 채움이 곧 의미다 -- 위 프리미티브의 배경만 덮는다. */
+.ops-badge.good, .ops-badge.warn, .ops-badge.bad,
+.ops-health-summary.good, .ops-health-summary.warn, .ops-health-summary.bad {
+  border-color: transparent;
+}
+
+/* ⛔프리미티브의 `display: inline-flex` 가 UA 의 `[hidden] { display: none }` 을 **이긴다**.
+   실제로 숨어 있어야 할 #snapEntryConfirm(진입 확인)·#snapExitShort 가 빈 알약으로 떴다 --
+   실주문 버튼이라 오클릭이 곧 사고다. 저장소 전체에 거는 한 줄로 막는다. */
+[hidden] { display: none !important; }
+
+/* 내용이 비면 배지는 «없는 것»이다. 프리미티브가 min-height 를 줘서 빈 알약이 남았다. */
+.ops-badge:empty, .ops-readonly:empty, .ops-health-summary:empty { display: none !important; }

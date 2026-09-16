@@ -1,17 +1,6 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
-const API_EVIDENCE_SIGNALS_URL = "/api/evidence-signals";
-const API_EVIDENCE_SIGNALS_PROVISIONAL_URL = "/api/evidence-signals-provisional";
-// BTC 코인 페이지 전용 증거신호 패널(2026-09-02) -- 이전엔 코인탭과 무관하게 항상 ETH
-// 엔드포인트를 썼다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가 나온다"). SOL/XRP/HYPE는
-// 증거신호 파이프라인이 있는 자산만 EVIDENCE_SIGNAL_SUPPORTED_ASSETS로 게이팅한다.
-// ⚠️2026-09-03: XRP 파이프라인을 만들고 URL 라우팅까지 했는데 **이 목록에 넣는 걸 빠뜨려서**
-// XRP 탭이 계속 "미지원"으로 나왔다(사용자 신고). 새 자산을 붙일 땐 라우팅과 이 목록을 함께 본다.
-const EVIDENCE_SIGNAL_SUPPORTED_ASSETS = ["eth"];   // 2026-09-14 사용자 결정: 우선 ETH 만.
-// BTC/XRP 증거신호 계산을 내렸다(TabPFN 7개씩 상주 -- 이 서버는 3070 Ti 8GB 한 장인데
-// VRAM 여유가 420MiB 였고 실효 성능이 이론치의 10% 였다). 되살리려면 이 배열에 다시 넣고
-// 서버의 btc/xrp evidence 엔드포인트와 워커를 복구하면 된다.
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_POSITION_SIZING_URL = "/api/position-sizing";
@@ -102,28 +91,6 @@ let latestLivePriceTsByAsset = {};
 let candleHistoryByAsset = {};
 let opsStatusEtag = "";
 let opsLastFetchAt = 0;
-let evidenceLastFetchAt = 0;
-let evidenceProvisionalLastFetchAt = 0;
-// Confirmed signals poll every 5min (EVIDENCE_POLL_MS) but the provisional preview polls every 10s
-// and already knows bar_open_utc -- so it's the first to find out when the bar it was tracking has
-// closed. Tracked here so refreshEvidenceSignalsProvisional() can detect that transition and force
-// an immediate confirmed refresh instead of leaving the user looking at a stale confirmed count for
-// up to 5 more minutes (2026-08-27, user report: had to manually reload to see a just-closed bar's
-// signals show up in the confirmed view).
-let lastSeenProvisionalBarOpenUtc = null;
-// Per-signal confirmed history (bottom_history/top_history/latest_bar_utc), captured each time
-// renderEvidenceSignals() runs -- lets refreshEvidenceSignalsProvisional() redraw each signal's
-// strip with one extra live bar every ~10s without waiting on (or duplicating) the 5-min confirmed
-// fetch. Keyed by signal name (same keys as EVIDENCE_STRIP_CHIP_IDS).
-let evidenceHistoryBySignal = {};
-// 2026-09-01 (user request): V자반등도 증거신호처럼 진행중인(아직 안 닫힌) 봉에서 신호가 뜨게 해달라는
-// 요청 -- 새 fetch/새 TabPFN 호출을 추가하는 대신, 이미 10초마다 도는 evidence-signals-provisional
-// 응답(9트리거 중 8개와 완전히 동일한 이름/정의)을 여기 저장해뒀다가 render()에서 재사용. TabPFN은
-// 여전히 CONFIRMED(닫힌 봉) 경로에서만 돔 -- 진행중 미리보기는 "트리거가 지금 형성중"만 알려줄 뿐
-// rebound/continuation 판정은 하지 않음(그 판정엔 닫힌 봉 기준 23피쳐가 필요, 증거신호 진행중
-// 미리보기가 확률 없이 발동여부만 보여주는 것과 같은 이유). local_extreme(9번째 트리거)은 구조상
-// 미래 봉이 있어야 확정 가능해 진행중 판정 자체가 불가능 -- 8개만 씀, 의도적 누락.
-let latestEvidenceSignalsProvisional = null;
 let latestVRebound = null;
 // 2026-09-09 청산맵 신호 마커(C안 하이브리드): 증거신호는 고정 레인, 이벤트 트리거는 봉 밀착.
 let latestChartMarkers = null;
@@ -164,7 +131,18 @@ const FOOTPRINT_POLL_MS = 2000;
 const FOOTPRINT_MIN_ROW_PX = 11;        // 셀에 숫자가 들어가는 최소 행 높이
 const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 셀 배경 4단계(TradingView: 최소~최대의 0~25/25~50/50~75/75%~). 매수·매도는 각자 최대로 나눈다.
-const FOOTPRINT_SHADE = [0.10, 0.22, 0.36, 0.54];
+// 4단계 농담. 라이트에서는 «흰 유리 위」라 같은 알파가 훨씬 옅게 보여 한 단씩 올린다
+// (다크 배열은 현행 그대로다). 숫자를 덮지 않는 선이 상한이라 0.66 에서 멈춘다.
+// 색을 «채운» 면 위의 글자색. 다크 팔레트는 --good/--bad/--accent 가 밝은 파스텔이라
+// 어두운 글자가 맞지만, 라이트에서는 같은 토큰이 진해져 어두운 위 어두운이 된다 -> 흰색으로 뒤집는다.
+// (사용자 규칙 2026-09-16: "색깔 있는 라벨에는 하얀색으로 텍스트 칼라")
+const inkOnFill = (darkInk) =>
+  document.documentElement.getAttribute("data-theme") === "light" ? "#fff" : darkInk;
+const FOOTPRINT_SHADE_DARK = [0.10, 0.22, 0.36, 0.54];
+const FOOTPRINT_SHADE_LIGHT = [0.16, 0.32, 0.48, 0.66];
+const footprintShades = () =>
+  (document.documentElement.getAttribute("data-theme") === "light"
+    ? FOOTPRINT_SHADE_LIGHT : FOOTPRINT_SHADE_DARK);
 const API_EXTREME_URL = "/api/extreme-detector";
 // 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
 // 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
@@ -218,10 +196,6 @@ let latestRegimeXrp = null;
 // 코인별 실시간 지표(수급흐름/리테일수급/청산캐스케이드). ETH는 봇 state를 그대로 쓰고,
 // 다른 코인은 그 코인 자신의 duckdb에서 온다 -- 자산별 슬롯(공유 금지, 2026-08-31 교훈).
 let latestCoinIndicators = {};
-// Confirmed evidence-signals payload (2026-08-31, feeds evidenceSignalTpLevels() below) -- stashed
-// globally like latestLiquidationMap/latestRegimeWide24 so the Snapshot chart's own render cycle
-// can read it without renderEvidenceSignals() needing to know about the chart.
-let latestEvidenceSignals = null;
 let liquidationMapLastFetchAt = 0;
 // Snapshot tab's own coin selector (2026-08-31, BTC then XRP then SOL then HYPE added) -- deliberately separate from
 // activeChartAsset (the Live tab's chart asset, which the Snapshot tab has never followed -- see
@@ -256,16 +230,6 @@ let isScrolling = false;
 let scrollIdleTimer = 0;
 let dashboardEvents = null;
 const OPS_POLL_MS = 30000;
-// Matches CANDLE_HISTORY_POLL_MS's reasoning: the underlying data is 5m bars, so a new reading
-// only ever exists once every 5 minutes -- polling more often than that just re-fetches the same
-// latest-closed-bar result (server-side cache would absorb it, but there's no reason to ask).
-const EVIDENCE_POLL_MS = 300000;
-// Live PREVIEW of the currently-forming bar (2026-08-26, user request) -- deliberately much
-// faster than EVIDENCE_POLL_MS above, which stays 5min because the CONFIRMED signal genuinely
-// only changes on bar close. This one changes every ~10s because it's reading the in-progress
-// bar's still-changing high/low/volume -- see renderEvidenceSignalsProvisional()'s "미확정"
-// labeling, never merged into the confirmed reading.
-const EVIDENCE_PROVISIONAL_POLL_MS = 10000;
 const V_REBOUND_POLL_MS = 60000; // matches server's own 60s cache (EVIDENCE_SIGNAL_CACHE_SECONDS) --
                                   // event-triggered, so a fresher poll matters more than for OI 급변's old 5m-poller data
 const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-row-per-minute source
@@ -288,7 +252,9 @@ const VOL_LEVEL_POLL_MS = 60000;          // 사이징 워커 주기 300초 — 
 // fetch) is the last one in the chain.
 const LIQ_BURST_STATE_POLL_MS = 1000;
 const LIQUIDATION_DIRECTION_POLL_MS = 60000; // same source cadence as liquidation-5m signal above
-const LIQUIDATION_MAP_POLL_MS = 300000; // matches server-side cache -- structure moves slowly
+// 2026-09-16 300초 -> 60초. 서버 캐시를 60초로 줄였으므로(입력이 1시간봉이라 그 아래로는
+// 의미가 없다) 클라가 5분마다 물으면 **새 시간봉이 최대 5분 늦게** 보인다. 캐시와 같은 주기로.
+const LIQUIDATION_MAP_POLL_MS = 60000;
 const REGIME_WIDE24_POLL_MS = 300000; // matches server-side cache (REGIME_WIDE24_CACHE_SECONDS)
 const MACRO_CALENDAR_POLL_MS = 6 * 3600 * 1000; // matches server-side cache (MACRO_CALENDAR_CACHE_SECONDS)
 const SESSION_ALERTS_POLL_MS = 30000; // 2026-08-27: split off evidence-signals' 5min cadence --
@@ -322,7 +288,7 @@ const mobileChartView = {
 // 해결: (1) 전환 즉시(await 이전에) asset-scoped 영역 전부를 스켈레톤으로 덮고, (2) 각 영역은
 // **자기 데이터가 도착하는 순간** 개별적으로 스켈레톤을 벗는다 -- 가장 느린 fetch가 나머지를
 // 붙잡지 않는다. 영역 지정은 index.html의 data-asset-scope 속성이 단일 소스다.
-const ASSET_SCOPES = ["indicators", "evidence", "liqmap"];
+const ASSET_SCOPES = ["indicators", "liqmap"];
 // 전환 세대 번호. 스켈레톤을 벗기 전에 이 값을 대조해서, 느리게 도착한 **이전** 전환의 응답이
 // 새 전환의 스켈레톤을 걷어내는 경쟁 상태를 막는다(코인을 빠르게 연타할 때 실제로 발생).
 let assetSwitchGeneration = 0;
@@ -397,19 +363,6 @@ async function setActiveSnapshotAsset(asset) {
   // INDICATOR_POLL_MS) 안에 코인을 두 번 바꿨을 때 두 번째 코인은 자기 값을 못 받아온 채
   // 스켈레톤만 벗겨진다.
   coinIndicatorsLastFetchAt = 0;
-  // 2026-09-02: 증거신호도 코인탭에 따라 갈리므로(EVIDENCE_SIGNAL_SUPPORTED_ASSETS, 2026-09-03 XRP 추가) 위 4개와 같은 이유로
-  // 즉시 초기화+재조회한다. resetEvidenceStripChips()는 재조회 전에 먼저 불러 이전 자산의 칩이
-  // 잠깐이라도 남아있지 않게 한다(특히 smt_divergence처럼 상대 자산엔 없는 신호의 칩).
-  latestEvidenceSignals = null;
-  evidenceLastFetchAt = 0;
-  resetEvidenceStripChips();
-  // ETH 전용 진행중(미확정) 미리보기 배지 -- renderEvidenceSignalsProvisional()가 ETH가 아닌
-  // 탭에선 더 이상 이 배지를 건드리지 않으므로(그 함수의 early-return 참고), 스위치 직후엔
-  // 여기서 직접 중립 문구로 비워 마지막으로 봤던 ETH 값이 새 탭에 남아있지 않게 한다.
-  if (asset !== "eth") {
-    const provisionalBadge = el("evidenceProvisionalBadge");
-    if (provisionalBadge) { provisionalBadge.className = "ops-badge neutral"; provisionalBadge.textContent = "진행중 미리보기 (ETH 전용)"; }
-  }
   // 레짐 리본도 코인별 모델이다. tick()이 이제 **활성 코인 것만** 가져오므로(refreshActiveRegime),
   // 전환 시엔 새 코인의 게이트를 열어 즉시 한 번 받아온다.
   regimeWide24LastFetchAt = 0;
@@ -445,9 +398,45 @@ async function setActiveSnapshotAsset(asset) {
       maybeFetchSnapshotChartHistory(),
       refreshActiveRegime(),
     ]),
-    settleScope("evidence", [refreshEvidenceSignals()]),
   ]);
   if (latestMainState) render(latestMainState, latestCompactState);
+}
+
+/* 테마 토글 (2026-09-16). 다크 = 현행 화면, 라이트 = 애플 «Liquid Glass».
+   첫 페인트는 index.html 의 인라인 스크립트가 이미 입혔다 -- 여기서는 «바꾸기」만 한다.
+   ⭐색을 하드코딩한 사본을 만들지 않는다: 차트는 SVG 속성에 `var(--good)` 를 그대로 넣고
+   브라우저가 실시간으로 푼다. 다만 `cssVar()` 게터로 읽는 곳(레짐 색)은 다시 그려야 반영된다. */
+const THEME_KEY = "dashTheme";
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+}
+function applyTheme(theme) {
+  const light = theme === "light";
+  if (light) document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
+  // 모바일 브라우저 크롬(주소창) 색까지 같이 간다 -- 안 맞추면 유리 화면 위에 검은 띠가 남는다.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", light ? "#eef0f5" : "#0b0d13");
+  const btn = document.getElementById("themeToggle");
+  const label = document.getElementById("themeToggleLabel");
+  if (btn) {
+    btn.setAttribute("aria-pressed", light ? "true" : "false");
+    btn.dataset.state = light ? "on" : "off";
+  }
+  if (label) label.textContent = light ? "글래스" : "다크";
+}
+function setupThemeToggle() {
+  const btn = document.getElementById("themeToggle");
+  applyTheme(currentTheme());                 // 버튼 라벨을 저장된 상태에 맞춘다
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const next = currentTheme() === "light" ? "dark" : "light";
+    applyTheme(next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* 저장 못 해도 동작은 한다 */ }
+    // 게터로 토큰을 읽는 곳(레짐 색 등)은 다시 그려야 새 팔레트가 들어간다.
+    renderSnapshotChart();
+    if (latestMainState) render(latestMainState, latestCompactState);
+  });
 }
 
 function setupChartModeTabs() {
@@ -828,6 +817,11 @@ function maybeRenderSnapshotChartNow() {
   lastSnapshotChartRenderAt = now;
   updateSnapshotCandleLive();
   renderSnapshotChart();
+  // 지지/저항 목록도 같이 그린다. 2026-09-16 실측: 30초 동안 차트는 67회 다시 그려지는데 이
+  // 패널은 **0회**였다 -- render() 경로(상태 변경 푸시)에만 걸려 있어서 몇 분씩 묵었다.
+  // 이 패널의 «지금 값»은 거리(%)와 이미 뚫린 레벨 걸러내기(liveRedistanced)이고, 둘 다
+  // 현재가로 계산한다. 레벨 **가격** 자체는 시간봉이 바뀔 때만 움직인다(그건 서버 몫).
+  renderLiquidationMapPanel();
 }
 
 function applyDashboardEvent(payload) {
@@ -1564,28 +1558,6 @@ function toneStripSvg(tones, times, provisionalLast, liveFiring, key, calls) {
   return `<svg class="evidence-strip${liveFiring ? " evidence-strip-live" : ""}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"${keyAttr}>${bars.join("")}</svg>`;
 }
 
-// 한 봉의 톤. 스트립(evidenceStripSvg)과 축·캡션(renderEvidenceSignals 의 eviTones)이 반드시 같은
-// 값을 써야 해서 함수로 묶었다 -- 예전엔 같은 삼항식이 두 곳에 복붙돼 있었다.
-function evidenceBarTone(bottomLit, topLit) {
-  return bottomLit && topLit ? "warn" : bottomLit ? "good" : topLit ? "bad" : "neutral";
-}
-
-// liveTone/liveIso (2026-08-26, optional) append one extra bar for the still-forming (unconfirmed)
-// bar after latestIso, sourced from the provisional preview -- see refreshEvidenceSignalsProvisional,
-// which re-calls this every ~10s reusing the SAME confirmed bottomHist/topHist/latestIso (cached in
-// evidenceHistoryBySignal) so the 47 confirmed bars don't flicker, only the new live one changes.
-// 2026-09-10 (user choice "완전 병합 + 혼재 주황"): both-sides-lit is its own warn tone. It used to
-// fall through to "good" (bottom wins), which hid 혼재 on the strip even while the row's own badge
-// and meaning line said 혼재 -- evidenceSideTone() has returned "warn" for the live/provisional bar
-// all along, so the confirmed bars were the odd ones out. Colors stay inside 표시 규약 §2's four
-// (롱=good / 숏=bad / 혼재=warn / 없음=neutral); no 5th color.
-function evidenceStripSvg(bottomHist, topHist, latestIso, stepMinutes, liveTone, liveIso, key) {
-  const n = Math.max(bottomHist.length, topHist.length, 1);
-  const tones = Array.from({ length: n }, (_, i) => evidenceBarTone(bottomHist[i], topHist[i]));
-  const times = evenlySpacedBarTimes(latestIso, n, stepMinutes);
-  if (liveTone) { tones.push(liveTone); times.push(liveIso || ""); }
-  return toneStripSvg(tones, times, !!liveTone, !!liveTone && liveTone !== "neutral", key);
-}
 
 // 2026-08-31 user request: a persistent time axis under each history strip, instead of only
 // revealing a bar's time on hover -- 5 evenly spaced ticks (first/quarter/half/three-quarter/last,
@@ -1797,7 +1769,7 @@ const MODEL_INDICATOR_MEANING = {
   //   없을 때의 폴백(`vol_equivalent_qty`)으로 밀렸다. 칩 문구가 «수량을 정한다»고 읽히면 안 된다.
   vol_level: {
     "안정": "앞으로 4시간 예상 변동폭이 **최근 30일 평소 이하**입니다(그 분포의 하위 80%, 평소의 1.39배 미만). 조용하다는 **눈금**이지 주문 수량이 아닙니다 — 권고 수량은 MAE 분위 모델이 정합니다(이 칩은 그 모델이 없을 때만 대신 씁니다).",
-    "주의": "앞으로 4시간 예상 변동폭이 **최근 30일 평소보다 뚜렷이 큽니다**(평소의 1.39~1.88배, 상위 20~5%). 같은 위험을 지려면 수량을 줄여야 하는 국면이라는 **눈금**입니다 — 실제 감축은 MAE 분위 모델과 E|r| 배수가 합니다.",
+    "주의": "앞으로 4시간 예상 변동폭이 **최근 30일 평소보다 뚜렷이 큽니다**(평소의 1.39~1.88배, 상위 20~5%). 같은 위험을 지려면 수량을 줄여야 하는 국면이라는 **눈금**입니다 — 실제 감축은 **MAE 분위 모델**이 합니다(E|r| 배수는 2026-09-15 켜기 전에 철회됐습니다 — 순차 검정 후반 36건 +0.73bp·Δ>0 47.2%로 동전이고, 상위 10건을 빼면 부호가 뒤집혔습니다).",
     "위험": "앞으로 4시간 예상 변동폭이 **최근 30일 평소의 1.9배 이상**입니다(상위 5%). 방향 경고가 아닙니다 — 이 모델은 방향을 예측하지 않습니다.",
     "웜업": "사이징 워커가 아직 첫 예측을 내지 않았습니다.",
     "데이터 없음": "사이징 워커 상태파일에서 예측값을 읽지 못했습니다.",
@@ -1994,19 +1966,10 @@ const SIGNAL_HORIZON = {
   liq_cascade: { text: "상태", title: "예측이 아니라 '지금 캐스케이드가 진행 중인가'를 보여주는 현재 상태값(반감기 약 2~3분으로 감쇠)" },
   whale: { text: "상태", title: "최근 5분간 큰손 체결 순유입 방향 -- 고정 예측 시간창 없는 현재 흐름 지표(방향-IC 검정 4개 지평 전부 무정보)" },
   retail_flow: { text: "상태", title: "최근 5분간 리테일 체결 순유입 방향 -- 1~15분 지평 방향-IC는 유의했으나 수수료 반영 손익은 전부 순손실, 고정 예측 시간창은 없음" },
-  // -- evidence signals (모두 이 저장소 표준 스코어카드: 1시간/4시간/8시간 중 1시간이 대표 지평) --
-  orthogonal_combo: { text: "2시간", title: "발동 조건 자체는 오실레이터(p_fast/p_slow) 이중극단+delta_z/funding_z 확인이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 3.57xATR 이상 강하게 도달할 확률'로 평가(2026-08-31 교체, 이 저장소 분류·경제성 둘 다 역대 최고 성적)" },
-  fib_extension_exhaustion: { text: "100분", title: "발동 조건 자체는 48봉 스윙 반대극값 기준 27.2~61.8% 확장(소진)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '100분 안 2.35xATR 도달(같은 구간 대형역행 없이) 확률'로 평가(2026-08-31 교체, 이 저장소 최초로 라벨에 최대역행폭(MAE) 상한 적용)" },
-  smt_divergence: { text: "6시간", title: "발동 조건 자체는 ETH-BTC 48봉 스윙 교차자산 비확인이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '6시간 안 4.2xATR 도달 확률'로 평가(2026-08-31 교체, 이 저장소 분류 AUC 역대 최고)" },
-  short_term_return_z: { text: "1시간", title: "발동 조건 자체는 15분(3봉) 수익률 급변이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 1.75xATR 도달 확률'로 평가" },
-  taker_delta_z_climax: { text: "2시간", title: "발동 조건 자체는 이번 봉 체결 쏠림이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2시간 안 2.0xATR 도달 확률'로 평가(2026-08-30 교체)" },
-  liquidity_sweep: { text: "2.5시간", title: "발동 조건 자체는 48봉 스윙 저/고점 스윕이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '2.5시간 안 4.0xATR 도달 확률'로 평가(2026-08-30 표준방식 재학습)" },
-  demarker_extreme: { text: "40분", title: "발동 조건 자체는 DeMarker(14) 오실레이터 극단(≥0.90/≤0.10)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '40분 안 0.70xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀, 이 저장소 분류 AUC 역대 최고)" },
   evr_gate: { text: "게이트 = 24시간", title: "앞으로 24시간의 기대 변동폭 E|r| 을 HGB 로 예측해 인과 확장창 상위 10% 만 켠다(20자산). 예측이지 인지가 아니다 — 추세 전환 탐지기(즉시 인지)와 반대 축이다. 🔴방향 없음." },
   breakout_detector: { text: "탐지 = 즉시", title: "예측이 아니라 즉시 인지다 -- 거래대금·체결속도 z288 이 **둘 다** 후행 q90 을 넘으면 켜진다. 2026-09-11 압축 게이트를 제거해 전환 사건 포착이 26.7% -> 92.0%(OOS, 176건 중 162건)로 오르고 발동은 33.9 -> 25.1회/일 로 줄었다. 발동 2,085회 중 813회가 사건 창 안이다(정밀도 39.0%)." },
   // 2026-09-11 경보기(예고 모델). 옛 «경보 2시간» 은 자명한 대리 타깃 값이라 교체했다.
   breakout_prewarn: { text: "예고 = 30분", title: "앞으로 30분 이내에 **탐지기가 발동할** 확률이다(HGB 5시드 동결 앙상블, 33피쳐). 커버리지 10%(하루 약 28.8회)에서 표본외 정밀도 78.5%, 기저 22.9% -- lift 3.43x. 임계는 확률의 후행 2016봉 분위 q90 이라 인과적이다. ⚠️«탐지기가 켜진다»이지 «큰 이동이 온다»가 아니다 -- 탐지기 자체 정밀도가 39.0% 라 그 위로 못 간다." },
-  kalman_deviation_meanrev: { text: "1시간", title: "발동 조건 자체는 칼만필터 추세선 대비 이탈도(rolling 288봉 z-score) 극단(≥2.0/≤-2.0)이지만, 신뢰도는 발동 시점 피쳐를 TabPFN에 넣어 '1시간 안 2.5xATR 도달 확률'로 평가(2026-08-31 신규, 호메로스 후보풀)" },
 };
 
 // 2026-09-06: `progress`(예 "26/30봉")를 주면 배지 문구에 덧붙인다. 새 배지를 만들지 않는 이유는
@@ -2143,7 +2106,10 @@ function toneClass(tone) { return tone === "flat" ? "neutral" : (tone || "neutra
 // 2026-09-14: 등급(안정/주의/위험)만으로는 «얼마나»를 못 본다. 실시간 배수를 툴팁에 싣는다 --
 // 상태 열은 92px nowrap 이라 문장을 못 넣는다(규약 §3).
 function volLevelTitle(v) {
-  const base = "봇 내부 상태가 아니라 배포된 사이징 변동성 모델의 예측 -- 이미 수량 공식에 쓰이고 있다(수량 = 기준수량 x 기준예측/현재예측).";
+  // 🔴2026-09-16 정정: "이미 수량 공식에 쓰이고 있다"는 **틀린 문장**이었다. 요청 경로는 MAE
+  //   위험 모델로 수량을 내고(rec_src="risk_model"), 이 변동성 공식은 그게 없을 때의 폴백이다
+  //   (rec_src="vol_equivalent"). 화면이 코드보다 강하게 말하고 있었다.
+  const base = "봇 내부 상태가 아니라 배포된 사이징 변동성 모델의 예측 -- 권고 수량은 MAE 위험 모델이 내고, 이 변동성 공식(수량 = 기준수량 x 기준예측/현재예측)은 그 모델이 없을 때의 폴백이다.";
   if (!v || !v.available || !Number.isFinite(v.ratio)) return base;
   // 2026-09-15: 등급의 「평소」는 **최근 30일**이고 수량 배수의 기준은 **학습창 고정**이다.
   // 두 숫자가 다른 기준을 쓰므로 말도 다르게 한다(고정으로 떨어졌으면 그대로 말한다).
@@ -2311,13 +2277,6 @@ function renderLiquidationMapPanel() {
   setH("liquidationMapList", rows.length ? rows.join("") : `<p class="muted" style="padding:16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
 }
 
-// Display-only Korean name/description for the 6 evidence signals -- the underlying signal key
-// (s.name from the server, matching scripts/live_evidence_signal_dashboard_20260823.py's
-// SIGNAL_ORDER) is left untouched for traceability to the research docs; only the rendered text
-// is translated here.
-// 4가지 독립 시도(강제청산 베토/exit_head 피쳐/사이징 피쳐/투표식 진입 공식) 전부 always_long/
-// always_short 벤치마크에 패배 -- docs/experiments/eth_evidence_signal_top6_confluence_standalone_backtest_20260814.md
-const EVIDENCE_SIGNAL_DISCLAIMER = "이 신호를 자동매매 트리거로 직접 연결하는 시도가 4가지(강제청산 베토 · exit_head 피쳐 · 사이징 피쳐 · 투표식 진입 공식) 전부 실패했습니다(always_long/always_short 벤치마크에 짐). 실제 반전이 맞아도 역사적으로 0.5~0.85% 더 불리한 방향으로 움직인 뒤에야 진짜 전환점이 왔습니다 — 정확한 바닥/천장을 찍어주는 신호가 아니라, 사람이 재량 판단할 때 참고하는 확률적 맥락으로만 쓰세요.";
 // 2026-08-25 실측(VAL+OOS 48,853봉): 같은 쪽 신호가 동시에 몇 개 뜨는지(bottom_votes/top_votes)
 // 자체가 검증된 신뢰도 축 -- votes>=N lift가 N에 대해 단조증가함을 확인(N>4는 미검증, 4로 캡).
 // scripts/research_eth_evidence_signal_indicator_cooking_research_20260825.md 참고.
@@ -2348,236 +2307,7 @@ function voteLiftNote(side, votes) {
     + `(H=1시간), ${e4 >= 0 ? "+" : ""}${e4.toFixed(2)}bp(H=4시간)이고 왕복비용은 10bp입니다. `
     + `겹칠수록 좋아지지도 않습니다 — 3종 이상 동시발동이 두 측면 모두에서 가장 나쁩니다.`;
 }
-// 2026-09-10 실측 -- 17개 칩을 **하나의 잣대**로 읽기 위한 공통 스케일.
-// 각 칩이 켜졌을 때 그 방향으로 1시간 들고 갔을 때의 **귀무 대비 초과** bp/건.
-// 귀무는 순환이동(발동 간격·군집·개수를 그대로 보존한 채 가격 정렬만 파괴) B=600, ETH 815일.
-// ⭐16셀 중 왕복비용(테이커 10bp·메이커 7.8bp)을 넘는 셀은 **0개**다. 최대가 +3.53bp.
-const EVIDENCE_EXCESS_BP = {
-  demarker_extreme: { bottom: 3.53, top: -1.15 },
-  fib_extension_exhaustion: { bottom: 3.48, top: -3.22 },
-  kalman_deviation_meanrev: { bottom: -0.07, top: -1.18 },
-  liquidity_sweep: { bottom: -1.21, top: -0.24 },
-  orthogonal_combo: { bottom: 3.13, top: 2.26 },
-  short_term_return_z: { bottom: 2.54, top: -3.50 },
-  smt_divergence: { bottom: -0.46, top: -0.16 },
-  taker_delta_z_climax: { bottom: 2.05, top: -1.11 },
-};
-function evidenceExcessNote(name) {
-  const e = EVIDENCE_EXCESS_BP[name];
-  if (!e) return "";
-  const f = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}bp`;
-  return `[공통잣대] 이 칩이 켜졌을 때 그 방향으로 1시간 들고 가면 귀무 대비 `
-    + `바닥 ${f(e.bottom)} / 천장 ${f(e.top)} per 건입니다(ETH 815일, 순환이동 귀무 B=600). `
-    + `왕복비용은 테이커 10bp·메이커 7.8bp — 증거신호 8종 16셀 중 비용선을 넘는 셀은 0개, `
-    + `최대가 +3.53bp입니다. 지금 화면에서 비용선에 닿는 신호는 특화감지기의 '극점 탐지기' 하나뿐 `
-    + `(상위10% 기준 H=4시간 +9.78bp)입니다. 이 칩들은 매매 근거가 아니라 맥락으로 쓰세요.`;
-}
-// 2026-08-31 user request: "증거신호 제목 바로 아래에 있는 신호 설명은 모두 제거해줘. 증거신호에
-// 있는 나머지 텍스트들 모두 정리 요약해서 줄여줘" -- desc 필드 삭제(제목 바로 아래 렌더링 자체를
-// 없앰, renderEvidenceSignals 쪽도 같이 수정) + detail을 조건/신뢰도/검증/경제성 4줄 안팎으로
-// 압축(원래 여러 문단이던 배경 설명·역사적 경위는 뺐고, 숫자·결론은 원문과 동일하게 보존 -- 전체
-// 이력은 docs/homer/README.md와 각 신호의 memory 파일에 남아있음).
-const EVIDENCE_SIGNAL_KO = {
-  orthogonal_combo: {
-    name: "복합 오실레이터 신호",
-    detail: "[조건] p_fast·p_slow(스토캐스틱 백분위) 극단 + delta_z(체결쏠림) 또는 funding_z(펀딩비율, 바닥만) 극단 동시충족 — 서로 독립적인 두 정보축의 교차확인.\n" +
-      "[신뢰도] 발동 시점 23피쳐(Tier0)를 TabPFN에 넣어 '2시간 안 3.57×ATR 도달확률' 산출 — 09-04 인과 컨텍스트 교체 때 세션 피쳐 3개 복귀(라이브 모집단에서 20피쳐가 더 나빴음).\n" +
-      "[검증] 라이브 발동 모집단(raw 발동, 앵커 없음) VAL 0.619 / OOS 0.667 — 인과 재학습 컨텍스트(F0live, 09-04 교체), 확률 과소(기울기 1.74). ⚠️이전 표기(앵커 모집단 AUC)는 실제 라이브 호출 품질보다 높게 나온 값이라 09-04 정정.\n" +
-      "[경제성] 발동 봉에서 신호 방향(페이드) 진입은 VAL+OOS n=467 평균 -2.3bp, 반대 방향(지속)은 +8.9bp(바닥 발동 페이드 -9.1/지속 +17.9 · 천장 발동 페이드 +4.6/지속 -0.3; 5.0/1.5/0.1 ATR 트레일, 10bp 차감). ⛔이전 트레일링스톱 수익 표기는 발동 앵커 미래참조로 무효(호메로스 5.16·5.20절). 첫 발동 봉은 지속 구간이고 되돌림은 그 뒤(5.23절) — 자동매매 근거 아님.",
-  },
-  liquidity_sweep: {
-    name: "유동성 스윕(저점·고점 사냥)",
-    detail: "[조건] 직전 4시간 저점/고점을 살짝 뚫었다가 종가는 그 안으로 복귀(stop hunt 패턴).\n" +
-      "[신뢰도] 발동 시점 23피쳐(Tier0+rsi)를 TabPFN에 넣어 '150분 안 4.0×ATR 도달확률' 산출('특화 감지기'의 'V자 급등락'과는 별개 모델).\n" +
-      "[검증] 라이브 발동 모집단(raw 발동, 앵커 없음) VAL 0.638 / OOS 0.624 — 현재 컨텍스트, 확률 대체로 정직. ⚠️이전 표기(앵커 모집단 AUC)는 실제 라이브 호출 품질보다 높게 나온 값이라 09-04 정정.\n" +
-      "[경제성] 발동 봉에서 신호 방향(페이드) 진입은 VAL+OOS n=1,343 평균 -1.4bp, 반대 방향(지속)은 +0.8bp(바닥 발동 페이드 -3.8/지속 +4.7 · 천장 발동 페이드 +0.9/지속 -3.0; 5.0/1.5/0.1 ATR 트레일, 10bp 차감). ⛔이전 트레일링스톱 수익 표기는 발동 앵커 미래참조로 무효(호메로스 5.16·5.20절). 첫 발동 봉은 지속 구간이고 되돌림은 그 뒤(5.23절) — 자동매매 근거 아님.",
-  },
-  short_term_return_z: {
-    name: "단기(15분) 수익률 급변",
-    detail: "[조건] 최근 15분 수익률이 하루평균 대비 ±2.5표준편차 이상.\n" +
-      "[신뢰도] 발동 시점 23피쳐를 TabPFN에 넣어 '1시간 안 1.75×ATR 도달확률' 산출.\n" +
-      "[검증] 라이브 발동 모집단(raw 발동, 앵커 없음) VAL 0.637 / OOS 0.624 — 인과 재학습 컨텍스트(F0live, 09-04 교체), 확률 대체로 정직. ⚠️이전 표기(앵커 모집단 AUC)는 실제 라이브 호출 품질보다 높게 나온 값이라 09-04 정정.\n" +
-      "[경제성] 발동 봉에서 신호 방향(페이드) 진입은 VAL+OOS n=784 평균 +2.5bp, 반대 방향(지속)은 +6.8bp(바닥 발동 페이드 +5.0/지속 +6.1 · 천장 발동 페이드 +0.1/지속 +7.6; 5.0/1.5/0.1 ATR 트레일, 10bp 차감). ⛔이전 트레일링스톱 수익 표기는 발동 앵커 미래참조로 무효(호메로스 5.16·5.20절). 첫 발동 봉은 지속 구간이고 되돌림은 그 뒤(5.23절) — 자동매매 근거 아님.",
-  },
-  taker_delta_z_climax: {
-    name: "체결 매수매도 쏠림 극단",
-    detail: "[조건] 이번 봉 순매수 체결량이 하루평균 대비 ±2표준편차 이상.\n" +
-      "[신뢰도] 발동 시점 23피쳐를 TabPFN에 넣어 '2시간 안 2.0×ATR 도달확률' 산출(v5: 연속발동 병합기준 15분→60분 확대).\n" +
-      "[검증] 라이브 발동 모집단(raw 발동, 앵커 없음) VAL 0.608 / OOS 0.598 — 현재 컨텍스트, 확률 과신(기울기 0.66 — 표시 확률이 실제보다 높음). ⚠️이전 표기(앵커 모집단 AUC)는 실제 라이브 호출 품질보다 높게 나온 값이라 09-04 정정.\n" +
-      "[경제성] 발동 봉에서 신호 방향(페이드) 진입은 VAL+OOS n=1,541 평균 +1.1bp, 반대 방향(지속)은 +4.0bp(바닥 발동 페이드 -1.2/지속 +6.9 · 천장 발동 페이드 +3.4/지속 +1.0; 5.0/1.5/0.1 ATR 트레일, 10bp 차감). ⛔이전 트레일링스톱 수익 표기는 발동 앵커 미래참조로 무효(호메로스 5.16·5.20절). 첫 발동 봉은 지속 구간이고 되돌림은 그 뒤(5.23절) — 자동매매 근거 아님.",
-  },
-  smt_divergence: {
-    name: "SMT 다이버전스(ETH·BTC 엇갈림)",
-    detail: "[조건] ETH는 직전 48봉(4시간) 저점(고점) 갱신, BTC는 자기 48봉 스윙을 미갱신 — 상관자산 비확인(ICT SMT 다이버전스, 유동성 스윕과 형제신호).\n" +
-      "[신뢰도] 발동 시점 23피쳐(Tier0 그대로 — ablation 결과 변동성레짐·세션타이밍 전부 진짜 기여로 확인돼 축소 안 함)를 TabPFN에 넣어 '6시간 안 4.2×ATR 도달확률' 산출.\n" +
-      "[검증] 라이브 발동 모집단(raw 발동, 앵커 없음) VAL 0.662 / OOS 0.590 — 현재 컨텍스트, 확률 대체로 정직. ⚠️이전 표기(앵커 모집단 AUC)는 실제 라이브 호출 품질보다 높게 나온 값이라 09-04 정정.\n" +
-      "[경제성] 발동 봉에서 신호 방향(페이드) 진입은 VAL+OOS n=1,136 평균 -4.1bp, 반대 방향(지속)은 +5.1bp(바닥 발동 페이드 -7.8/지속 +10.7 · 천장 발동 페이드 -0.5/지속 -0.4; 5.0/1.5/0.1 ATR 트레일, 10bp 차감). ⛔이전 트레일링스톱 수익 표기는 발동 앵커 미래참조로 무효(호메로스 5.16·5.20절). 첫 발동 봉은 지속 구간이고 되돌림은 그 뒤(5.23절) — 자동매매 근거 아님.",
-  },
-  // 2026-08-31: 호메로스 8번(마지막) 신호, TabPFN 메타라벨 교체. 기존 "실험적/표본n~190" 등급은
-  // 5.5개월 좁은 창 기준 오기로 정정됨(전체이력 재측정시 bottom1078/top1072).
-  fib_extension_exhaustion: {
-    name: "피보나치 확장 소진",
-    detail: "[조건] 직전 48봉 레그의 반대 극값 기준 27.2~61.8% 확장(소진) — 레그반대방향 되돌림에 베팅(liquidity_sweep·smt_divergence와 같은 스윙계열, 겹침은 가장 낮은 6.0~9.5%).\n" +
-      "[신뢰도] 발동 시점 23피쳐(Tier0 그대로)를 TabPFN에 넣어 '100분 안 2.35×ATR 도달(같은 구간 최대역행 4.70×ATR 미만)' 확률 산출 — 이 신호부터 라벨에 최대역행폭(MAE) 상한을 처음 적용.\n" +
-      "[검증] 라이브 발동 모집단(raw 발동, 앵커 없음) VAL 0.619 / OOS 0.572 — 현재 컨텍스트, 확률 과소(기울기 2.02). ⚠️이전 표기(앵커 모집단 AUC)는 실제 라이브 호출 품질보다 높게 나온 값이라 09-04 정정.\n" +
-      "[경제성] 발동 봉에서 신호 방향(페이드) 진입은 VAL+OOS n=379 평균 -0.7bp, 반대 방향(지속)은 +16.0bp(바닥 발동 페이드 -1.7/지속 +16.5 · 천장 발동 페이드 +0.3/지속 +15.4; 5.0/1.5/0.1 ATR 트레일, 10bp 차감). ⛔이전 트레일링스톱 수익 표기는 발동 앵커 미래참조로 무효(호메로스 5.16·5.20절). 첫 발동 봉은 지속 구간이고 되돌림은 그 뒤(5.23절) — 자동매매 근거 아님.",
-  },
-  // 2026-08-31: 호메로스 '후보 풀' 트랙 신규 2종(기존 8개와 별개, docs/homer/README.md "후보 풀"
-  // 절 참조) — 사전점검→HORIZON/GAP/K그리드→TabPFN확인→순열중요도→경제성게이트→룩어헤드감사→
-  // 홀드아웃까지 전체 파이프라인 완료 후 배포.
-  demarker_extreme: {
-    name: "DeMarker 오실레이터 극단",
-    detail: "[조건] DeMarker(14, 고/저가 기반 오실레이터) ≥0.90(과매수)/≤0.10(과매도).\n" +
-      "[신뢰도] 발동 시점 24피쳐(Tier0 23개+dem)를 TabPFN에 넣어 '40분 안 0.70×ATR 도달확률' 산출.\n" +
-      "[검증] 라이브 발동 모집단(raw 발동, 앵커 없음) VAL 0.582 / OOS 0.594 — 현재 컨텍스트, 확률 과신(기울기 0.32 — 표시 확률이 실제보다 높음). ⚠️이전 표기(앵커 모집단 AUC)는 실제 라이브 호출 품질보다 높게 나온 값이라 09-04 정정.\n" +
-      "[경제성] 발동 봉에서 신호 방향(페이드) 진입은 VAL+OOS n=574 평균 +0.2bp, 반대 방향(지속)은 +5.1bp(바닥 발동 페이드 +0.7/지속 +12.7 · 천장 발동 페이드 -0.4/지속 -2.7; 5.0/1.5/0.1 ATR 트레일, 10bp 차감). ⛔이전 트레일링스톱 수익 표기는 발동 앵커 미래참조로 무효(호메로스 5.16·5.20절). 첫 발동 봉은 지속 구간이고 되돌림은 그 뒤(5.23절) — 자동매매 근거 아님.",
-  },
-  kalman_deviation_meanrev: {
-    name: "칼만필터 추세이탈 평균회귀",
-    detail: "[조건] (종가-칼만필터 추세선)/추세선을 288봉 롤링 z-score, ≥2.0(과열)/≤-2.0(과냉).\n" +
-      "[신뢰도] 발동 시점 24피쳐(Tier0 23개+kalman_dev_z)를 TabPFN에 넣어 '1시간 안 2.5×ATR 도달확률' 산출.\n" +
-      "[검증] 라이브 발동 모집단(raw 발동, 앵커 없음) VAL 0.650 / OOS 0.613 — 인과 재학습 컨텍스트(F0live, 09-04 교체), 확률 대체로 정직. ⚠️이전 표기(앵커 모집단 AUC)는 실제 라이브 호출 품질보다 높게 나온 값이라 09-04 정정.\n" +
-      "[경제성] 발동 봉에서 신호 방향(페이드) 진입은 VAL+OOS n=1,566 평균 +2.2bp, 반대 방향(지속)은 +7.1bp(바닥 발동 페이드 +2.4/지속 +9.6 · 천장 발동 페이드 +2.0/지속 +4.8; 5.0/1.5/0.1 ATR 트레일, 10bp 차감). ⛔이전 트레일링스톱 수익 표기는 발동 앵커 미래참조로 무효(호메로스 5.16·5.20절). 첫 발동 봉은 지속 구간이고 되돌림은 그 뒤(5.23절) — 자동매매 근거 아님.",
-  },
-};
 
-// BTC 코인 페이지 전용 라벨(2026-09-02) -- ETH와 신호 정의(원시 트리거)는 같아도 그리드스크린이
-// K/HORIZON/GAP을 BTC 전용으로 재선정했고(live_btc_evidence_signal_metalabel_20260902.py 참고)
-// 검증·경제성 수치도 전부 다르므로, EVIDENCE_SIGNAL_KO의 ETH 수치를 그대로 보여주면 안 된다.
-// 근거: docs/experiments/btc_evidence_signal_economics_gate_20260902.md(§3/§6/§7),
-// scripts/live_btc_evidence_signal_shadow_runner_20260902.py(HOLDOUT_AUC).
-// ⚠️⚠️2026-09-03 정정: BTC 경제성 게이트 수치는 **전부 승격근거로 무효**다. 발동 앵커를 고르는
-// cluster_dedup이 "클러스터가 끝나야 최극단 봉을 안다" = 미래참조이고, 지연확정 대조군에서
-// 5종 전부 붕괴했다(demarker +6.46/+8.91 → −4.25/−2.02). ETH가 2026-09-02에 받은 것과 같은
-// 감사이며, BTC는 그때 누락됐다가 이번에 받았다. 방향뒤집기·무작위진입 귀무는 이 함정을 못 잡는다.
-// 근거: docs/homer/README.md 5.16절, data/research/delayed_anchor_control_20260903/report.json,
-//       data/research/btc_evidence_signals_costgate_20260902/holdout_per_trade_dispersion.json
-// ⇒ 노출하는 건 이 대시보드의 증거신호 티어가 손익 주장이 아니라 정보성(IC) 표시이기 때문이다.
-const BTC_EVIDENCE_SIGNAL_KO = {
-  orthogonal_combo: {
-    name: "복합 오실레이터 신호",
-    detail: "[조건] 스토캐스틱 백분위 극단 + 체결쏠림(delta_z) 극단 동시충족 (BTC 그리드스크린 H=8/K=2.0/GAP=6).\n" +
-      "[신뢰도] TRAIN hit률 42.71%(8봉 안 2.0×ATR 도달) · HOLDOUT AUC 0.5933.\n" +
-      "[경제성] ⛔무효. VAL +1.15 / OOS +10.95 / HOLDOUT +1.47bp였으나 (a)트레이드별 95%CI [−1.41, +4.32]로 0을 포함하고 (b)지연확정 대조군에서 −7.56/−3.73으로 붕괴 — 앵커 선택이 만든 성과다.",
-  },
-  liquidity_sweep: {
-    name: "유동성 스윕(저점·고점 사냥)",
-    detail: "[조건] 직전 100분 저점/고점을 살짝 뚫었다가 되돌림 (BTC 그리드스크린 H=20/K=2.0/GAP=6).\n" +
-      "[신뢰도] TRAIN hit률 10.22% · HOLDOUT AUC 0.5214(사실상 무작위).\n" +
-      "[경제성] 트레일링스톱 게이트 0/96 전패, HOLDOUT 미도달 — 7종 중 유일하게 (오염된 발동집합에서조차) 방향 정보가 거의 없다.",
-  },
-  short_term_return_z: {
-    name: "3봉 수익률 급변(z-score)",
-    detail: "[조건] 3봉 수익률의 z-score 극단 (BTC 그리드스크린 H=6/K=2.0/GAP=12).\n" +
-      "[신뢰도] TRAIN hit률 31.63% · HOLDOUT AUC 0.6443.\n" +
-      "[경제성] ⛔무효. HOLDOUT +0.06bp는 트레이드별 95%CI [−2.43, +2.50]로 0과 구분 불가였고, 지연확정 대조군에서 −4.57/−4.16으로 붕괴했다.",
-  },
-  taker_delta_climax: {
-    name: "체결 쏠림 극단(taker delta)",
-    detail: "[조건] 순공격적 매수/매도 체결량 z-score ≥2.0/≤-2.0 (BTC 그리드스크린 H=6/K=2.0/GAP=3, ETH는 K=2.5로 별개).\n" +
-      "[신뢰도] TRAIN hit률 13.88% · HOLDOUT AUC 0.6276.\n" +
-      "[경제성] ⛔무효. HOLDOUT −0.94bp(CI [−2.48, +0.58])로 이미 미통과였고, 지연확정 대조군에서도 −5.23/−5.73으로 붕괴했다.",
-  },
-  fib_extension_exhaustion: {
-    name: "피보나치 확장 소진",
-    detail: "[조건] 48봉 추세 방향 대비 127.2~161.8% 확장구간 터치 (BTC 그리드스크린 H=10/K=2.75/GAP=6).\n" +
-      "[신뢰도] TRAIN hit률 19.28% · HOLDOUT AUC 0.5657.\n" +
-      "[경제성] VAL +0.56 / OOS +0.35로 게이트는 겨우 통과했으나 무작위진입 대조에서 탈락(롱 OOS 갭 −3.19) — HOLDOUT 미도달, 사실상 미검증.",
-  },
-  demarker_extreme: {
-    name: "DeMarker 오실레이터 극단",
-    detail: "[조건] DeMarker(14) 극단 (BTC 그리드스크린 H=8/K=0.70/GAP=6 — K가 낮아 발동은 잦으나 변별력은 낮음, TRAIN hit률 90.03%).\n" +
-      "[신뢰도] HOLDOUT AUC 0.7286 — 7종 중 최고.\n" +
-      "[경제성] ⛔무효. HOLDOUT +3.25bp는 7종 중 유일하게 CI가 0을 제외했으나(t=+3.37, CI [+1.33, +5.16]), 지연확정 대조군에서 −4.25/−2.02로 붕괴 — 성과의 출처가 신호가 아니라 앵커 선택이었다.",
-  },
-  kalman_deviation_meanrev: {
-    name: "칼만필터 추세이탈 평균회귀",
-    detail: "[조건] (종가-칼만필터 추세선)/추세선 z-score ≥3.5/≤-3.5 (BTC 그리드스크린 H=10/K=3.5/GAP=6, ETH는 K=2.5로 별개).\n" +
-      "[신뢰도] TRAIN hit률 14.25% · HOLDOUT AUC 0.6709.\n" +
-      "[경제성] ⛔무효. HOLDOUT −1.27bp(CI [−3.37, +0.78])로 이미 미통과였고, 지연확정 대조군에서도 −5.41/−8.45로 붕괴했다.",
-  },
-};
-
-// 2026-09-03: XRP는 자체 그리드스크린(HIT_TYPE/H/K가 ETH·BTC와 전부 다름)과 자체 HOLDOUT
-// 수치를 쓰므로 별도 사전이 필요하다. 근거: docs/experiments/xrp_evidence_signal_and_regime_20260903.md
-// ⚠️⚠️경제성 문구를 주의해서 읽을 것 -- 2026-09-03 지연확정 대조군에서 5종 전부 붕괴했다.
-// 트레일링스톱 게이트 자체는 통과했으나(96셀 중 15~96셀), 발동 앵커를 고르는 cluster_dedup이
-// "클러스터가 끝나야 최극단 봉을 안다" = 미래참조라 그 위의 모든 게이트 수치가 승격근거로 무효다.
-// 근거: docs/homer/README.md 5.16절, data/research/delayed_anchor_control_20260903/report.json
-// ⇒ 이 칩들은 ETH와 마찬가지로 **정보성(분류 확률) 표시 전용**이며 손익 주장이 아니다.
-const XRP_EVIDENCE_SIGNAL_KO = {
-  demarker_extreme: {
-    name: "DeMarker 오실레이터 극단",
-    detail: "[조건] DeMarker(14) 극단 (XRP 그리드스크린 H=2/K=1.5/GAP=6 — 격자 경계 3회 확장 끝에 H=2가 구조적 하한으로 확정).\n" +
-      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.7018/0.6859/0.6759 — XRP 5종 중 최고. 발동봉 hit률 24.6%.\n" +
-      "[경제성] ⛔미검증. 게이트는 96/96 통과(VAL +10.69 / OOS +12.32bp)로 나왔으나 지연확정 대조군에서 −2.94/−9.18로 붕괴 — 앵커 선택이 만든 성과다.",
-  },
-  kalman_deviation_meanrev: {
-    name: "칼만필터 추세이탈 평균회귀",
-    detail: "[조건] (종가-칼만필터 추세선)/추세선 z-score ≥2.0/≤-2.0 (XRP 그리드스크린 H=5/K=2.0/GAP=6 — ETH는 K=2.5, BTC는 K=3.5로 전부 별개).\n" +
-      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.6894/0.6103/0.6223.\n" +
-      "[경제성] ⛔미검증. 게이트 95/96 통과(VAL +8.80 / OOS +11.24bp)였으나 지연확정에서 −3.44/−4.15로 붕괴.",
-  },
-  short_term_return_z: {
-    name: "3봉 수익률 급변(z-score)",
-    detail: "[조건] 3봉 수익률의 z-score 극단 (XRP 그리드스크린 H=12/K=1.5/GAP=12, 해상판정 touch_mae_capped).\n" +
-      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.6466/0.5753/0.6132 · TRAIN hit률 60.16%(n=2,314).\n" +
-      "[경제성] ⛔미검증. 게이트 84/96 통과(VAL +14.25 / OOS +25.93bp — XRP 최고 수치)였으나 지연확정에서 −2.75/+0.56으로 붕괴.",
-  },
-  taker_delta_climax: {
-    name: "체결 쏠림 극단(taker delta)",
-    detail: "[조건] 순공격적 매수/매도 체결량 z-score 극단 (XRP 그리드스크린 H=9/K=1.5/GAP=3, 해상판정 giveback — 확정에 18봉(2×H) 필요).\n" +
-      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.6142/0.5556/0.6091 · TRAIN hit률 8.99%(n=6,742).\n" +
-      "[경제성] ⛔미검증. 게이트 18/96 통과(VAL +1.09 / OOS +1.83bp)로 원래 얇았고, 지연확정에서 −1.96/−1.03으로 붕괴.",
-  },
-  orthogonal_combo: {
-    name: "복합 오실레이터 신호",
-    detail: "[조건] 스토캐스틱 백분위 극단 + 체결쏠림(delta_z) 극단 동시충족 (XRP 그리드스크린 H=8/K=2.0/GAP=6, 해상판정 touch_mfe).\n" +
-      "[신뢰도] VAL/OOS/HOLDOUT AUC 0.5979/0.5847/0.5599 — XRP 5종 중 최약. TRAIN hit률 41.98%(n=1,446).\n" +
-      "[경제성] ⛔미검증. 게이트 15/96 통과(VAL +3.59 / OOS +12.33bp)였으나 지연확정에서 −3.68/−2.29로 붕괴.",
-  },
-};
-
-// Snapshot tab "13신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
-// index.html) can be updated from the exact same fetch/loop as the full evidenceSignalList below
-// -- one source of truth per tick, no separate poll or duplicated tone logic.
-const EVIDENCE_STRIP_CHIP_IDS = {
-  orthogonal_combo: "eviChipOrthogonal",
-  liquidity_sweep: "eviChipSweep",
-  short_term_return_z: "eviChipReturnZ",
-  taker_delta_z_climax: "eviChipTakerDelta",
-  // BTC 페이지(2026-09-02)는 같은 칩을 재사용하되 이름이 다르다(BTC 그리드스크린/frozen-context
-  // 리포트가 "z" 없는 축약명을 씀 -- live_btc_evidence_signal_metalabel_20260902.py::
-  // RAW_COLUMN_ALIAS 참고). smt_divergence는 BTC에 대응 신호가 없어 별칭 없음(그 칩은 BTC
-  // 탭에서 계속 "-" 중립으로 남는다 -- resetEvidenceStripChips()가 탭 전환시 정리).
-  taker_delta_climax: "eviChipTakerDelta",
-  smt_divergence: "eviChipSmt",
-  fib_extension_exhaustion: "eviChipFibExt",
-  demarker_extreme: "eviChipDemarker",
-  kalman_deviation_meanrev: "eviChipKalman",
-};
-
-function resetEvidenceStripChips() {
-  Object.values(EVIDENCE_STRIP_CHIP_IDS).forEach((id) => {
-    const chip = el(id);
-    if (!chip) return;
-    chip.className = "signal-chip neutral";
-    const stateEl = chip.querySelector(".signal-chip-state");
-    if (stateEl) stateEl.textContent = "-";
-    // 2026-09-02: also clear the live-preview dot's own class (renderEvidenceSignalsProvisional
-    // sets it separately from the chip's own className) -- without this, switching FROM the eth
-    // tab (where a signal was live-firing) TO another coin leaves that dot stuck on "live-bottom"/
-    // "live-top" since this asset's tab no longer runs the ETH-only provisional preview at all
-    // (see that function's early-return guard) to ever clear it back.
-    const dot = chip.querySelector(".signal-chip-live-dot");
-    if (dot) dot.className = "signal-chip-live-dot";
-  });
-  const meaningEl = el("evidenceStripMeaning");
-  if (meaningEl) { meaningEl.className = "evidence-strip-meaning hidden"; meaningEl.textContent = "-"; }
-  // sessionVolAlertBadge/macroEventAlertBadge intentionally NOT touched here (2026-08-27) -- they
-  // moved to their own independent poll (refreshSessionAlerts()), unrelated to evidence-signal
-  // health, so an evidence-signal fetch failure must not blank out an otherwise-valid calendar alert.
-}
 
 // 2026-08-27: split off /api/evidence-signals (see api_session_alerts() docstring in server.py) --
 // user reported the badges only updated on a manual page reload, root cause was inheriting
@@ -2636,403 +2366,6 @@ function renderMacroEventAlert(alertPayload) {
   badge.title = `${names} ${when} — 경제지표/FOMC/연준 의장 발언 전후 ±30분 참고용 안내(검증된 시장개장 알림과 달리 개별 검증은 안 됨)`;
 }
 
-// Informational only -- NOT a trading signal. See the disclaimer text baked into the Snapshot
-// tab's markup and docs/experiments/eth_evidence_signal_top6_confluence_standalone_backtest_20260814.md:
-// 4/4 independent attempts to wire these into automated decisions lost to simple benchmarks.
-// A signal's bottom_fired/top_fired are independent sustain-window flags (see
-// eth_dashboard_sustain_window_decay_correction_20260824), not mutually exclusive -- a signal can
-// have both true at once if its bottom trigger and top trigger each fired within the last few bars
-// (2026-08-27 real example: taker_delta_z_climax bottom_last=15:00, top_last=15:05, both still
-// within their sustain windows at latest_bar=15:15). Every render site below used to do
-// `bottom_fired ? ... : top_fired ? ... : ...`, which always picked bottom and silently dropped a
-// simultaneous top -- the top vote a signal contributed to payload.top_votes then had no visible
-// row anywhere ("천장↓ 1 배지에는 잡히는데 목록에는 안 보임"). This centralizes the 3-way (bottom /
-// top / both) resolution so every call site agrees, with a distinct "혼재" state instead of one
-// side winning silently.
-function evidenceSideTone(s) {
-  return s.bottom_fired && s.top_fired ? "warn" : s.bottom_fired ? "good" : s.top_fired ? "bad" : "neutral";
-}
-function evidenceSideLabel(s, { bottom, top, both, none }) {
-  return s.bottom_fired && s.top_fired ? both : s.bottom_fired ? bottom : s.top_fired ? top : none;
-}
-
-function renderEvidenceSignals(payload) {
-  const badge = el("snapshotEvidenceBadge");
-  const stripBadge = el("evidenceStripBadge");
-  // 2026-09-02: 증거신호 파이프라인이 없는 자산(2026-09-03 기준 SOL/HYPE)이 있다 -- 예전엔 코인탭과
-  // 무관하게 항상 ETH 데이터를 보여줬다(사용자 신고: "비트코인 페이지에 이더리움 증거신호가
-  // 나온다"). 다른 자산 탭에선 이전 자산의 값이 남아있지 않도록 명시적으로 "지원 안 함" 상태로 비운다.
-  if (payload && payload.unsupported) {
-    latestEvidenceSignals = null;
-    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "미지원"; }
-    if (stripBadge) { stripBadge.className = "ops-badge neutral"; stripBadge.textContent = "미지원"; }
-    // ⚠️지원 자산 목록을 **하드코딩하지 않는다** -- 예전엔 "(ETH·BTC만 지원)"이 박혀 있어
-    // XRP를 붙인 뒤에도 낡은 문구가 그대로 나왔다. 항상 실제 목록에서 만든다.
-    const supported = EVIDENCE_SIGNAL_SUPPORTED_ASSETS.map((a) => a.toUpperCase()).join("·");
-    setH("evidenceSignalList", `<div class="macro-calendar-empty">이 자산은 증거신호를 아직 지원하지 않습니다(${escapeHtml(supported)}만 지원).</div>`);
-    resetEvidenceStripChips();
-    return;
-  }
-  if (!payload || payload.error) {
-    latestEvidenceSignals = null;
-    if (badge) { badge.className = "ops-badge bad"; badge.textContent = "EVIDENCE UNREACHABLE"; }
-    if (stripBadge) { stripBadge.className = "ops-badge bad"; stripBadge.textContent = "UNREACHABLE"; }
-    resetEvidenceStripChips();
-    return;
-  }
-  if (!payload.warmed_up) {
-    latestEvidenceSignals = null;
-    if (badge) { badge.className = "ops-badge warn"; badge.textContent = "WARMING UP"; }
-    if (stripBadge) { stripBadge.className = "ops-badge warn"; stripBadge.textContent = "WARMING UP"; }
-    setH("evidenceSignalList", "");
-    resetEvidenceStripChips();
-    return;
-  }
-  if (badge) { badge.className = "ops-badge good"; badge.textContent = "EVIDENCE LIVE"; }
-  const net = Number(payload.net_score || 0);
-  const scoreBadge = el("evidenceNetScoreBadge");
-  if (scoreBadge) {
-    scoreBadge.className = `ops-badge ${net > 0 ? "good" : net < 0 ? "bad" : "neutral"}`;
-    scoreBadge.textContent = `NET_SCORE ${net > 0 ? "+" : ""}${net} (바닥=↑힌트 ${payload.bottom_votes}표 · 천장=↓힌트 ${payload.top_votes}표)`;
-  }
-  if (stripBadge) {
-    stripBadge.className = `ops-badge ${net > 0 ? "good" : net < 0 ? "bad" : "neutral"}`;
-    stripBadge.textContent = `바닥↑ ${payload.bottom_votes || 0} · 천장↓ ${payload.top_votes || 0}`;
-  }
-  latestEvidenceSignals = payload;
-  const signals = Array.isArray(payload.signals) ? payload.signals : [];
-  const firedMeanings = [];
-  setH("evidenceSignalList", signals.map((s) => {
-    const tone = evidenceSideTone(s);
-    // "바닥"/"천장" (not "BOTTOM"/"TOP") to match both the compact chip row's own state text
-    // (EVIDENCE_STRIP_CHIP_IDS block below: s.bottom_fired ? "바닥" : ...) and this badge's new
-    // fixed width (2026-08-27 user request) -- keeps text length closer to the other badge values
-    // (안정/주의/미발동/상승압력 etc.) instead of the one outlier using an English word.
-    // ⚠️2026-09-03: 목표 도달로 **라벨이 확정돼 꺼진** 상태와 "애초에 안 뜬" 상태를 구분한다.
-    // 그 전엔 둘 다 "미발동"으로 나가면서 확률/익절 텍스트는 남아 있어
-    // "미발동 82% 익절 2391.71 도달"처럼 서로 모순되는 줄이 떴다(사용자 신고).
-    const isResolvedByTp = !s.bottom_fired && !s.top_fired && s.model_tp_touched === true;
-    const state = isResolvedByTp
-      ? "목표 도달 · 종료"
-      : evidenceSideLabel(s, { bottom: "바닥 발동", top: "천장 발동", both: "혼재 발동", none: "미발동" });
-    // taker_delta_z_climax/short_term_return_z만 갖는 필드(2026-08-30, 규칙기반 칩을 TabPFN
-    // 메타라벨 모델로 교체) -- 발동 시 그 순간의 실시간 확률을 상태뱃지에 덧붙임. 발동 조건
-    // 자체(bottom_fired/top_fired)는 기존 규칙 그대로(모델이 학습된 조건과 동일해야 하므로) -- 이
-    // 확률은 그 발동을 "얼마나 신뢰할지"만 대체하는 것이지 "발동 여부"를 바꾸는 게 아님.
-    // ⚠️종료된 신호의 확률은 "지금"이 아니라 **발동 당시** 값이다. 그대로 "82%"라고만 쓰면
-    // 아직 유효한 예측처럼 읽힌다 -- 종료 상태에선 괄호로 과거값임을 표시한다.
-    const modelPctText = s.model_proba != null ? `${Math.round(s.model_proba * 100)}%` : null;
-    // 2026-09-06 (부록 22): 확률은 **발동 봉에서 한 번** 계산되고 호라이즌 끝까지 재사용된다.
-    // 실측상 순위 AUC 0.70 -> 0.60~0.64로 낡고, 표시 확률이 실제 조건부 도달률보다 9~12봉 뒤엔
-    // +0.12(약 1.5배) 과대해진다. 모델은 그대로 두고 **언제 값인지 · 얼마나 남았는지**만 명시한다.
-    const ageBars = s.model_bars_since_fire;
-    const horizonBars = s.model_horizon_bars;
-    const leftBars = (horizonBars != null && ageBars != null) ? Math.max(horizonBars - ageBars, 0) : null;
-    const isStaleProba = ageBars != null && ageBars > 0;          // 발동 봉이 아니면 그 확률은 과거값이다
-    // 2026-09-06 (조치 B): `model_proba_now`는 **지금 봉 피쳐 + 나이**로 재계산한 조건부 확률이다
-    // ("남은 (H-a)봉 안에 목표에 닿는가"). 있으면 그것이 주 숫자다 -- 지금 값이므로 괄호를 치지 않는다.
-    // 없으면(아티팩트 미배포·목표 이미 도달·잔여 0) 조치 A의 규약대로 발동 봉 값을 괄호로 보여준다.
-    const nowProba = s.model_proba_now;
-    const shownProba = nowProba != null ? nowProba : s.model_proba;
-    const shownPctText = shownProba != null ? `${Math.round(shownProba * 100)}%` : null;
-    const pctDisplay = shownPctText
-      ? ((nowProba == null && (isResolvedByTp || isStaleProba)) ? `(${shownPctText})` : shownPctText)
-      : "0%";
-    const progressText = (horizonBars != null && ageBars != null && !isResolvedByTp)
-      ? `${ageBars}/${horizonBars}봉` : null;
-    const probaNote = nowProba != null
-      ? `이 확률은 **지금 봉에서 재계산한 값**입니다 -- "남은 ${leftBars}봉 안에 목표에 닿는가". 발동 봉에서 계산된 원래 값은 ${modelPctText || "-"}였습니다. 시간이 갈수록 남은 창이 짧아지므로 같은 발동이라도 숫자는 내려갑니다.`
-      : (isStaleProba || isResolvedByTp
-          ? `옆의 확률은 **발동 봉에서 계산된 값**이고 이후 갱신되지 않습니다 -- 시간이 지날수록 과대평가입니다(실측: 9~12봉 뒤 실제의 약 1.5배).`
-          : null);
-    // 2026-08-31 user request: the price level implied by this signal's own trained K*ATR% target
-    // (server-computed from the fire bar's own entry/ATR, see _tp_price in
-    // live_evidence_signal_metalabel_20260829.py) -- NOT this repo's separate trailing-stop
-    // economics config, just the label's own touch target, shown next to the state/probability.
-    // 2026-09-03: 익절가에 이미 닿았으면 그 사실을 먼저 알린다. 그 전까지는 발동 후
-    // horizon_bars 동안(smt_divergence는 6시간) 목표 달성 여부와 무관하게 "익절 XXXX"만
-    // 띄웠다 -- 이미 끝난 움직임을 보고 뒤늦게 진입하면 손해다.
-    // 2026-09-06 (호메로스 §5.30): 이 익절가는 **이 신호 자신의 학습 라벨(K×ATR 터치)** 목표선이고
-    // 손절선이 없다. 그 규약대로 25,784건을 따라간 실측이 칩 −10.5 / 반대 −9.5 / **같은 측면 무작위
-    // −10.1bp**다 -- 세 방향 다 비용을 되더하면 gross ≈ 0이고 손실의 100%가 왕복 수수료다. 검증된
-    // 엣지는 방향이 아니라 **트레일링 브래킷**에서 나온다(최종 결정 카드의 손절/무장/트레일 3선).
-    // 화면이 익절가만 보여주고 손절선을 안 보여주는 것 자체가 그 손실 규약이라, 여기에 명시한다.
-    const tpDone = s.model_tp_touched === true;
-    // 종료 상태에선 state가 이미 "목표 도달"을 말하므로 여기선 가격과 방향만 남긴다
-    // (안 그러면 "목표 도달 · 종료 / 익절 2391.71 도달"로 같은 말이 두 번 나온다).
-    const sideKo = s.model_side === "bottom" ? "바닥" : s.model_side === "top" ? "천장" : null;
-    const tpTitle = [
-      "이 신호 자신의 학습 라벨(K×ATR 터치) 목표가입니다 — 손절선이 없는 규약입니다.",
-      "· 이 규약대로 익절까지 들고 간 실측(25,784건): 칩 방향 −10.5 / 반대 방향 −9.5 / 같은 측면 무작위 −10.1bp.",
-      "  세 방향 모두 비용을 되더하면 gross ≈ 0이고, 손실의 100%가 왕복 수수료입니다.",
-      "· 왕복 수수료 단위: 테이커 0.05%/편 = 10bp · peg 메이커 진입+테이커 청산 = 7.8bp(실측) · 양편 지정가 메이커 0.02%/편 = 4bp.",
-      "  같은 값을 증거금 기준으로 읽으면 배율만큼 커집니다(30배면 10bp = 3.00%) — 단위를 섞지 마세요.",
-      "· 거래소 'Realized PNL'은 청산 쪽 수수료만 반영합니다. 진입 수수료는 진입 시점에 이미 빠져 청산 화면에 안 보이므로,",
-      "  작은 익절을 시장가로 닫으면 화면은 초록인데 계좌는 늘지 않을 수 있습니다(실측 영수증: 화면 +3.29 USDT → 실 ROE −0.04~+0.86%).",
-      "· 검증된 엣지는 이 목표선이 아니라 트레일링 브래킷(손절 5×ATR · 무장 1.5× · 트레일 0.1×)에서 나옵니다 — 최종 결정 카드를 보세요.",
-    ].join("\n");
-    const modelTpText = s.model_tp_price != null
-      ? (isResolvedByTp
-          ? `${sideKo ? sideKo + " " : ""}${fmtNum(s.model_tp_price, 2)}`
-          : `익절 ${fmtNum(s.model_tp_price, 2)}`)
-      : null;
-    const tpDoneBadgeHtml = tpDone
-      ? ` <span class="horizon-badge tp-done-badge" title="이 신호 자신의 학습 라벨이 확정된 시점입니다(목표가 도달). 라벨이 확정되면 그 사건은 종료되므로 칩도 함께 꺼집니다 -- 노린 움직임은 이미 끝났고, 지금 진입하면 늦습니다.&#10;&#10;옆의 확률은 그 발동 봉의 값이며 이후 갱신되지 않습니다. 잔여 표기는 이 표시가 앞으로 몇 봉 더 남아있는지입니다(호라이즌 만료 시 사라짐).">🎯 ${ageBars != null ? `${ageBars}봉 전 발동` : "목표 도달"}${leftBars ? ` · 잔여 ${leftBars}봉` : ""}</span>`
-      : "";
-    // 2026-09-01 저ATR 경고. 발동봉 ATR이 이 신호 자신의 발동시 ATR 중앙값보다 낮을 때만 표시.
-    // 왜: 저변동 구간에선 SL/ARM/Trail이 전부 ATR 배수로 줄어드는데 왕복비용 10bp는 고정이라,
-    // 방향이 맞아도 수수료를 못 넘기는 비율이 커진다(실측 '방향정확도-수익승률' 격차 fib 23.0pp
-    // /kalman 5.3pp/demarker 5.1pp). 표시 전용 -- 모델 확률도 발동 여부도 바꾸지 않는다.
-    // 근거: docs/homer/evidence_signal_economics_tuning_protocol.md
-    const lowAtrText = (s.model_low_atr === true && s.model_atr_bp != null)
-      ? `저변동 ATR ${fmtNum(s.model_atr_bp, 1)}bp < 평소 ${fmtNum(s.model_atr_median_bp, 1)}bp`
-      : null;
-    // 2026-09-01 (user request): moved next to the horizon-badge on the title line (was stacked in
-    // .meter-col on the right, see eth_dashboard_low_atr_warning_overflow_fix_20260901 memory for
-    // that version's overflow saga) -- same pill shape as horizon-badge (.horizon-badge base class,
-    // low-atr-badge modifier just recolors it warn/amber). ⚠️first cut showed only the current bp
-    // value with the "평소"(median) baseline hidden in the tooltip -- user pointed out that drops
-    // the actual context (is 22bp low for THIS signal or not depends entirely on its own median, and
-    // that varies per signal). Visible text now carries the full comparison, same as the original
-    // .meter-col text; only the plain-language explanation sentence stays in the tooltip.
-    const lowAtrBadgeHtml = lowAtrText
-      ? ` <span class="horizon-badge low-atr-badge" title="이 신호가 평소 발동하던 변동성보다 낮은 구간입니다. 방향이 맞아도 왕복 수수료(10bp)를 넘기지 못할 확률이 평소보다 큽니다.">⚠ ${escapeHtml(lowAtrText)}</span>`
-      : "";
-    // Evolution of this meta column, all 2026-08-31 (see eth_dashboard_evidence_signal_tp_price_
-    // display_20260831 memory for the full history): joined into the status badge itself (broke its
-    // fixed 64px pill sizing) -> split into badge + <small> below it (user: "not clean") -> a
-    // probability ring ("옵션 B" of a 4-way mockup), unconditional (no model_proba = empty "0%"
-    // reading, not a different fallback element, so fired/not-fired rows' columns still line up) ->
-    // user decided the ring itself "생각보다 별로" -> an inline meter bar instead, first as a
-    // horizontal row (gauge left, state+price stacked right) -> user asked for the gauge to sit
-    // BETWEEN the state text and price instead, matching the original mockup's own "옵션 A" layout
-    // exactly (see the vertical .meter-col template below: state, then gauge, then price). Class
-    // names generalized from evidence-meter-* to meter-* in this same pass -- renderModelIndicatorList
-    // now reuses this same component for "V자 급등락" (see its own it.proba handling), so it's no
-    // longer evidence-signal-specific. metaTone priority (below) carries over unchanged.
-    // metaTone: follows model_side (the side the probability was computed for) EXCEPT when the
-    // row's raw tone is "warn" (혼재 -- bottom_fired AND top_fired at once), which always shows
-    // amber/주의 color regardless of which single side model_side picked (model_side is otherwise
-    // "bottom"/"top" whenever model_proba is present, even for a raw-혼재 row, since the backend's
-    // side field is singular -- see compute_evidence_signal_metalabels()'s bottom-priority
-    // tie-break -- so without this warn check first, 혼재 rows would silently render as plain
-    // good/bad and never show as the mixed-signal warning they actually are).
-    const metaTone = isResolvedByTp ? "neutral"
-      : tone === "warn" ? "warn" : s.model_side === "bottom" ? "good" : s.model_side === "top" ? "bad" : tone;
-    // 2026-09-02: BTC는 신호 정의는 ETH와 같아도 그리드스크린 K/HORIZON과 검증·경제성 수치가
-    // 전부 다르므로 별도 라벨 사전을 쓴다 (BTC_EVIDENCE_SIGNAL_KO 선언부 주석 참고).
-    // XRP는 자체 그리드스크린 K/HORIZON과 HOLDOUT 수치를 쓰므로 별도 라벨 사전이 필요하다.
-    // 아직 사전이 없으면 이름만 나오도록 폴백한다(잘못된 ETH 설명을 보여주는 것보다 낫다).
-    const koDict = activeSnapshotAsset === "btc" ? BTC_EVIDENCE_SIGNAL_KO
-      : activeSnapshotAsset === "xrp" ? XRP_EVIDENCE_SIGNAL_KO
-      : EVIDENCE_SIGNAL_KO;
-    const ko = koDict[s.name] || { name: s.name };
-    const detailKey = `evidence:${s.name}`;
-    const isOpen = detailOpenKeys.has(detailKey);
-    // 공통 잣대(귀무 대비 초과 bp)는 ETH 815일에서만 쟀다 -- BTC/XRP 사전에는 붙이지 않는다.
-    const excessNote = koDict === EVIDENCE_SIGNAL_KO ? evidenceExcessNote(s.name) : "";
-    const detailText = ko.detail
-      ? `${ko.detail}${excessNote ? `\n${excessNote}` : ""}\n\n[주의] ${EVIDENCE_SIGNAL_DISCLAIMER}`
-      : "";
-    // 발동 중일 때 바로 보이는 의미(클릭 불필요) -- 2026-08-24 사용자 요청, 2026-08-31 축약(제목
-    // 아래 desc 줄 제거에 맞춰 이 문구도 desc 인용 없이 짧게 -- 상세 설명은 "자세히"에 있음).
-    const meaningText = evidenceSideLabel(s, {
-      bottom: "바닥 신호 발동 — 반등 확률↑(단, 반전 전 0.5~0.85% 불리한 움직임 흔함).",
-      top: "천장 신호 발동 — 하락반전 확률↑(단, 반전 전 0.5~0.85% 불리한 움직임 흔함).",
-      both: "바닥·천장 동시 발동(혼재) — 방향이 엇갈려 해석에 더 주의가 필요해요.",
-      none: "",
-    });
-    if (meaningText) firedMeanings.push({ tone, text: meaningText });
-    const stripChip = EVIDENCE_STRIP_CHIP_IDS[s.name] ? el(EVIDENCE_STRIP_CHIP_IDS[s.name]) : null;
-    if (stripChip) {
-      stripChip.className = `signal-chip ${tone}`;
-      const stripStateEl = stripChip.querySelector(".signal-chip-state");
-      if (stripStateEl) {
-        const stripBase = evidenceSideLabel(s, { bottom: "바닥", top: "천장", both: "혼재", none: "-" });
-        stripStateEl.textContent = modelPctText && stripBase !== "-" ? `${stripBase} ${pctDisplay}` : stripBase;
-      }
-    }
-    evidenceHistoryBySignal[s.name] = { bottom_history: s.bottom_history || [], top_history: s.top_history || [], latest_bar_utc: payload.latest_bar_utc };
-    // eviTones/eviTimes mirror evidenceStripSvg's own internal tone derivation (bottom_history[i] ->
-    // good, top_history[i] -> bad, else neutral) -- recomputed here (not returned by that function,
-    // which keeps its plain-string contract for the provisional-refresh outerHTML-replace call site)
-    // so the axis/default-caption below can share the exact same tone/time arrays it draws from.
-    const eviN = Math.max((s.bottom_history || []).length, (s.top_history || []).length, 1);
-    const eviTones = Array.from({ length: eviN }, (_, i) => evidenceBarTone(s.bottom_history?.[i], s.top_history?.[i]));
-    const eviTimes = evenlySpacedBarTimes(payload.latest_bar_utc, eviN, 5);
-    // 2026-08-31 user request: drop the old "바닥 {ts} · 천장 {ts}" last-fired caption -- this
-    // range+label already tells you when the CURRENT segment started, which is what that text was
-    // approximating anyway.
-    const defaultRangeText = lastSegmentRangeLabel(eviTones, eviTimes, "evidence", "hm");
-    return `<article class="ops-health-row evidence-row ${tone}" data-signal="${s.name}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(ko.name)}${horizonBadgeHtml(s.name, progressText, probaNote)}${tpDoneBadgeHtml}${lowAtrBadgeHtml}</strong>
-        ${meaningText ? `<p class="signal-meaning">${escapeHtml(meaningText)}</p>` : ""}
-        <div class="evidence-strip-wrap">
-          ${evidenceStripSvg(s.bottom_history || [], s.top_history || [], payload.latest_bar_utc, 5, undefined, undefined, "evidence")}
-          ${stripAxisHtml(eviTimes, "hm")}
-          <small class="evidence-strip-caption">
-            <span class="strip-time-now" data-fmt="hm" data-default="${escapeHtml(defaultRangeText)}">${escapeHtml(defaultRangeText)}</span>
-          </small>
-        </div>
-        <button type="button" class="detail-toggle" aria-expanded="${isOpen}" onclick="toggleSignalDetail(this, '${detailKey}')">${isOpen ? "접기 ▴" : "자세히 ▾"}</button>
-        <div class="signal-detail${isOpen ? " open" : ""}">${escapeHtml(detailText)}</div>
-      </div>
-      <div class="ops-health-meta">
-        <div class="meter-col">
-          <span class="meter-state ${metaTone}">${escapeHtml(state)}</span>
-          <div class="meter-gauge">
-            <span class="meter-track"><span class="meter-fill ${metaTone}" style="width:${clamp01((shownProba != null ? shownProba * 100 : 0) / 100) * 100}%"></span></span>
-            <span class="meter-pct">${pctDisplay}</span>
-          </div>
-          ${modelTpText ? `<span class="meter-price" title="${escapeHtml(tpTitle)}">${escapeHtml(modelTpText)}</span>` : ""}
-        </div>
-      </div>
-    </article>`;
-  }).join(""));
-  const meaningEl = el("evidenceStripMeaning");
-  if (meaningEl) {
-    if (!firedMeanings.length) {
-      meaningEl.className = "evidence-strip-meaning hidden";
-      meaningEl.textContent = "-";
-    } else {
-      const mixedTone = firedMeanings.some((f) => f.tone === "bad") && firedMeanings.some((f) => f.tone === "good");
-      meaningEl.className = `evidence-strip-meaning ${mixedTone ? "warn" : firedMeanings[0].tone}`;
-      // 혼재(바닥+천장 동시발동)가 아닐 때만 votes 기반 lift 근거를 붙임 -- bottom_votes/top_votes는
-      // 이 side 전용 카운트라 firedMeanings.length(양쪽 합산)와는 다른 수치이므로 그걸 그대로 씀.
-      const dominantSide = !mixedTone && firedMeanings[0].tone === "good" ? "bottom" : !mixedTone ? "top" : null;
-      const dominantVotes = dominantSide === "bottom" ? payload.bottom_votes : dominantSide === "top" ? payload.top_votes : 0;
-      const liftNote = dominantSide && dominantVotes >= 2 ? ` (${voteLiftNote(dominantSide, dominantVotes)})` : "";
-      meaningEl.textContent = firedMeanings.length > 1
-        ? `${firedMeanings.length}개 신호 동시 발동 — ${firedMeanings[0].text}${liftNote}`
-        : firedMeanings[0].text;
-    }
-  }
-}
-
-async function refreshEvidenceSignals() {
-  const now = Date.now();
-  if (now - evidenceLastFetchAt < EVIDENCE_POLL_MS) return;
-  evidenceLastFetchAt = now;
-  if (!EVIDENCE_SIGNAL_SUPPORTED_ASSETS.includes(activeSnapshotAsset)) {
-    renderEvidenceSignals({ unsupported: true, asset: activeSnapshotAsset });
-    return;
-  }
-  // 2026-09-03: XRP 추가. 그 전엔 XRP 페이지가 ETH 신호를 그대로 보여줬다
-  // (BTC에서 사용자가 신고했던 것과 같은 버그의 XRP판).
-  const url = API_EVIDENCE_SIGNALS_URL;   // 2026-09-14 ETH 전용 (위 게이트가 나머지를 막는다)
-  try {
-    const res = await fetch(url, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`evidence signals ${res.status}`);
-    renderEvidenceSignals(await res.json());
-  } catch (error) {
-    console.error("Evidence signal fetch error:", error);
-    renderEvidenceSignals({ error: true });
-  }
-  // 2026-08-31: redraw the Snapshot chart's evidenceSignalTpLevels() lines right away (same idiom
-  // as refreshLiquidationMap()/refreshRegimeWide24() below) instead of waiting up to ~5s for the
-  // next render() tick to pick up the updated latestEvidenceSignals.
-  scheduleSnapshotChartRender();
-}
-
-// Live PREVIEW of the currently-forming bar (2026-08-26) -- small live-dot overlay on the strip
-// chips + a standalone badge, deliberately kept separate from renderEvidenceSignals()/the confirmed
-// dot/state text above so a provisional reading can never be mistaken for (or silently overwrite)
-// the validated confirmed one. "미확정" in the badge text is load-bearing, not decoration -- see
-// load_evidence_signals_provisional()'s docstring in dashboard/server.py for why this reading has
-// no lift track record of its own and can flicker before the bar closes.
-function renderEvidenceSignalsProvisional(payload) {
-  // 2026-09-02: 이 진행중(미확정) 미리보기는 ETH 전용 엔드포인트 데이터다(BTC 라이브 미리보기는
-  // 이번에 만들지 않음, 확정봉 패널만 코인탭을 따라가도록 함). BTC 탭에서 이 함수가 그대로
-  // 돌면 ETH의 실시간 발동으로 BTC 신호행/칩을 덮어써 버린다(evidence-row는 data-signal 이름으로만
-  // 찾으므로 지금 BTC 데이터가 들어있는 바로 그 행을 잘못 골라 씀) -- 그래서 탭이 ETH가 아니면
-  // DOM은 건드리지 않고 조용히 빠진다. latestEvidenceSignalsProvisional 자체(V자반등 폴백이
-  // 재사용, 위 refreshEvidenceSignalsProvisional 참고)는 이 함수 밖에서 이미 갱신되므로 영향 없음.
-  if (activeSnapshotAsset !== "eth") return;
-  const badge = el("evidenceProvisionalBadge");
-  const clearDots = () => {
-    Object.values(EVIDENCE_STRIP_CHIP_IDS).forEach((id) => {
-      const chip = el(id);
-      const dot = chip?.querySelector(".signal-chip-live-dot");
-      if (dot) dot.className = "signal-chip-live-dot";
-      chip?.classList.remove("signal-chip-live-firing");
-    });
-  };
-  if (!payload || payload.error || !payload.available) {
-    clearDots();
-    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "진행중 미리보기 -"; }
-    return;
-  }
-  if (!payload.warmed_up) {
-    clearDots();
-    if (badge) { badge.className = "ops-badge warn"; badge.textContent = "진행중 미리보기 워밍업중"; }
-    return;
-  }
-  const signals = Array.isArray(payload.signals) ? payload.signals : [];
-  signals.forEach((s) => {
-    const chip = EVIDENCE_STRIP_CHIP_IDS[s.name] ? el(EVIDENCE_STRIP_CHIP_IDS[s.name]) : null;
-    if (!chip) return;
-    const dot = chip.querySelector(".signal-chip-live-dot");
-    if (dot) dot.className = `signal-chip-live-dot ${evidenceSideLabel(s, { bottom: "live-bottom", top: "live-top", both: "live-mixed", none: "" })}`;
-    // 2026-08-27 (user request): border + dot + text all blink together (not just the small live
-    // dot) specifically while this signal is firing in the still-forming bar -- same condition as
-    // the dot's own color above, just also driving one animation on the chip root so its border/
-    // background/label/state fade with it (see .signal-chip-live-firing, an opacity pulse).
-    chip.classList.toggle("signal-chip-live-firing", evidenceSideTone(s) !== "neutral");
-  });
-  // 2026-08-26 user request: the compact chip dots above aren't enough -- also extend each
-  // signal's own strip (in the "자세히" detail list) with a live bar for the still-forming bar,
-  // every ~10s. Reuses the confirmed history captured by renderEvidenceSignals() (evidenceHistoryBySignal)
-  // so this never re-fetches or re-derives the 47 confirmed bars -- only the appended live bar changes.
-  signals.forEach((s) => {
-    const hist = evidenceHistoryBySignal[s.name];
-    if (!hist) return; // confirmed history not loaded yet -- nothing to append a live bar onto
-    const row = document.querySelector(`.evidence-row[data-signal="${s.name}"]`);
-    const svgEl = row?.querySelector(".evidence-strip-wrap > svg.evidence-strip");
-    if (svgEl) {
-      const liveTone = evidenceSideTone(s);
-      svgEl.outerHTML = evidenceStripSvg(hist.bottom_history, hist.top_history, hist.latest_bar_utc, 5, liveTone, payload.bar_open_utc, "evidence");
-    }
-    const timeLabel = row?.querySelector(".strip-time-now");
-    if (timeLabel) {
-      const liveTimeText = fmtShortTs(payload.bar_open_utc);
-      timeLabel.setAttribute("data-default", liveTimeText);
-      timeLabel.textContent = liveTimeText;
-    }
-  });
-  if (badge) {
-    const net = Number(payload.net_score || 0);
-    badge.className = `ops-badge ${net > 0 ? "good" : net < 0 ? "bad" : "neutral"}`;
-    badge.textContent = `진행중(미확정) ${payload.bar_elapsed_seconds}s경과 · 바닥${payload.bottom_votes || 0}·천장${payload.top_votes || 0}`;
-  }
-}
-
-async function refreshEvidenceSignalsProvisional() {
-  const now = Date.now();
-  if (now - evidenceProvisionalLastFetchAt < EVIDENCE_PROVISIONAL_POLL_MS) return;
-  evidenceProvisionalLastFetchAt = now;
-  try {
-    const res = await fetch(API_EVIDENCE_SIGNALS_PROVISIONAL_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`evidence signals provisional ${res.status}`);
-    const payload = await res.json();
-    latestEvidenceSignalsProvisional = payload; // see its declaration above -- V자반등 진행중 미리보기가 재사용
-    if (payload && payload.available && payload.bar_open_utc) {
-      if (lastSeenProvisionalBarOpenUtc && payload.bar_open_utc !== lastSeenProvisionalBarOpenUtc) {
-        // The bar we were just previewing closed and a new one started forming -- the confirmed
-        // signal for that just-closed bar should be available server-side within its own 60s cache,
-        // so pull it now instead of waiting out the rest of the 5-min confirmed poll interval.
-        evidenceLastFetchAt = 0;
-        refreshEvidenceSignals();
-      }
-      lastSeenProvisionalBarOpenUtc = payload.bar_open_utc;
-    }
-    renderEvidenceSignalsProvisional(payload);
-  } catch (error) {
-    console.error("Evidence signal (provisional) fetch error:", error);
-    renderEvidenceSignalsProvisional({ error: true });
-  }
-}
 
 async function refreshChartMarkers() {
   const now = Date.now();
@@ -3080,6 +2413,34 @@ async function refreshVolForecast() {
 // 규약: 색 §2 위험/주의=warn(주황) · 안정도 같은 주황을 옅게 -- **5번째 색을 만들지 않는다**.
 // ⭐방향 신호가 아니다. 리본은 renderCandleSvg() 안에서 레짐 리본 바로 아래에 그린다.
 // 칩이 갖고 있던 숫자는 전부 이 툴팁으로 옮겼다 -- 칩을 지워도 근거가 사라지지 않게.
+// ── 변동성 전망 카드 (2026-09-16, 차트 리본에서 옮김) ──────────────────────────────
+// 왜 카드인가: 이 값은 **1시간 격자·24시간 지평**이라 5분봉 시간축 위에서는 12봉이 한 색이고
+// 풋프린트(1시간 창)에서는 값이 하나다 -- 그림으로 얻는 게 없다. 숫자 한 줄이 정보량이 같다.
+// 🔴버리지 않는 이유: 09-14 정면비교에서 셋 중 **유일하게 «확장»을 본다**(현재변동성과 ρ
+//   −0.817). 게이트와도 겹치지 않는다(상관 −0.389 · 상위10% 겹침 0.7%).
+function volForecastIndicatorItem() {
+  const p = latestVolForecast;
+  const base = { key: "vol_forecast", label: "변동성 확장 (24시간)",
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "봇 내부 상태가 아니라 전용 워커가 HAR-RV + Deribit DVOL 로 계산합니다. "
+                   + "«오늘 성격이 바뀌나»만 말합니다 — 방향도 수익도 예측하지 않습니다." };
+  if (!p || p.error || !p.available) {
+    return { ...base, tone: "neutral",
+             subText: !p ? "웜업" : (p.error ? "오류" : "데이터 없음"), history: [], times: [] };
+  }
+  return { ...base, probaSlot: true,
+    tone: p.grade === "위험" ? "bad" : p.grade === "주의" ? "warn" : "neutral",
+    subText: p.grade || "안정",
+    proba: p.proba != null ? Number(p.proba) : null,
+    // 지평이 24시간이라는 걸 미터 옆에 상시로 적는다 -- 5분 결정에 그대로 쓰면 안 되는 값이다.
+    meterNote: "24시간 지평",
+    meterNoteTitle: "1시간 격자·24시간 지평입니다. 5분 결정에 직접 쓰지 마세요 — 09-14 정면비교에서 "
+      + "1시간 지평 AUC 는 «현재 변동성이 낮은가»(0.611)와 동률(0.612)이고 4시간은 더 나빴습니다(0.593 vs 0.720). "
+      + "우위는 24시간에서만 실재합니다(0.812 vs 0.625).",
+    stateTitle: volForecastRibbonTitle(0),
+    history: p.history || [], times: p.times || [] };
+}
+
 function volForecastRibbonTitle(nBars) {
   const p = latestVolForecast;
   if (!p || p.error || !p.available) return "변동성 전망: 웜업 중이거나 갱신 실패";
@@ -3093,7 +2454,7 @@ function volForecastRibbonTitle(nBars) {
     `예측 실현변동성 ${p.rv_fwd_pred}`,
     prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (기저 ${(Number(p.base_rate_holdout) * 100).toFixed(1)}%)` : "",
     `AUC 학습 ${auc.TRAIN} · 표본외 ${auc.OOS} · 봉인 홀드아웃 ${auc.HOLDOUT}`,
-    `시간봉 신호입니다 — 한 시간이 5분봉 12개에 같은 색으로 깔립니다 (${nBars}봉 채색)`,
+    "시간봉 신호입니다 — 값 하나가 5분봉 12개를 덮습니다. 그래서 차트 줄이 아니라 카드입니다",
     plain,
     "⚠️변동성만 예측합니다 — 방향도 수익도 예측하지 않습니다. 크기·손절폭·관망 판단용입니다",
   ].filter(Boolean).join("\n");
@@ -3629,8 +2990,6 @@ function setupPageTabs() {
     } else if (target === "ops") {
       opsLastFetchAt = 0; refreshOpsStatus();
     } else if (target === "snapshot") {
-      evidenceLastFetchAt = 0; refreshEvidenceSignals();
-      evidenceProvisionalLastFetchAt = 0; refreshEvidenceSignalsProvisional();
       vReboundLastFetchAt = 0; refreshVReboundSignal();
       extremeLastFetchAt = 0; refreshExtremeDetector();
       breakoutDetectorLastFetchAt = 0; refreshBreakoutDetector();
@@ -3768,37 +3127,6 @@ function nearestLiquidationLevel() {
   }];
 }
 
-// Evidence-signal take-profit lines (2026-08-31 user request, follow-up to the label-chip TP-price
-// text) -- one AVERAGED line per side (long/short), not one per fired signal. First shipped as one
-// line per signal, but with several signals often firing at once (see
-// eth_dashboard_evidence_signal_tp_price_display_20260831 memory) that cluttered the chart with a
-// pile of near-identical dashed lines; user asked to collapse each side down to a single average
-// instead ("롱과 숏 각각 익절가들 모아서 평균을 낸 익절가를 보여줘"). Same generic
-// {val,color,label,dashed,width} shape nearestLiquidationLevel() above already feeds into
-// riskLevels. Reads latestEvidenceSignals (set by renderEvidenceSignals()), not a parameter, so
-// this chart's other callers don't need to know how to fetch evidence signals themselves.
-//
-// ETH-only: /api/evidence-signals is a single, non-per-asset endpoint (every K/ATR% value it was
-// trained on is ETH's own), so it must not draw on a BTC/SOL/XRP/HYPE chart just because that's the
-// active Snapshot coin.
-//
-// Label is "롱익절"/"숏익절" (bottom-side signals bet long, top-side bet short), not each signal's
-// own EVIDENCE_SIGNAL_KO name -- those are full phrases ("칼만필터 추세이탈 평균회귀") far too long
-// for the chart's left-margin tag column, which every existing tag ("지지1"/"저항1"/"진입"/"현재")
-// keeps to <=3 characters.
-function evidenceSignalTpLevels() {
-  if (activeSnapshotAsset !== "eth") return [];
-  const signals = latestEvidenceSignals?.signals;
-  if (!Array.isArray(signals)) return [];
-  const withTp = signals.filter((s) => s.model_tp_price != null);
-  const avg = (arr) => arr.reduce((sum, v) => sum + v, 0) / arr.length;
-  const longTp = withTp.filter((s) => s.model_side === "bottom").map((s) => s.model_tp_price);
-  const shortTp = withTp.filter((s) => s.model_side === "top").map((s) => s.model_tp_price);
-  const levels = [];
-  if (longTp.length) levels.push({ val: avg(longTp), color: "var(--good)", label: "롱익절", dashed: true, width: 2 });
-  if (shortTp.length) levels.push({ val: avg(shortTp), color: "var(--bad)", label: "숏익절", dashed: true, width: 2 });
-  return levels;
-}
 
 // Keeps candleHistoryByAsset[activeSnapshotAsset]'s rightmost candle live between the 5-min
 // maybeFetchSnapshotChartHistory() fetches, mirroring updateChart()'s in-place extend/roll logic
@@ -4052,7 +3380,7 @@ function renderSnapshotChart() {
     ? fullCandles.filter((c) => c.time >= footprint.firstTime)
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
-  const riskLevels = [...nearestLiquidationLevel(), ...evidenceSignalTpLevels()];
+  const riskLevels = [...nearestLiquidationLevel()];
   const densityHistory = liquidationDensityHistory();
   // 2026-09-10: 이 차트는 줄곧 entryPrice=0 을 넘겨 「진입」 선을 안 그렸다. renderCandleSvg 에
   // 그리는 코드는 이미 있으므로(priceLabels 의 amber "진입"), 거래소 실계좌 진입가만 넘긴다.
@@ -4164,7 +3492,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⚠️`ch` 는 이제 **가격 플롯 높이**다. yAt() 이 이 값을 쓰므로, 「플롯 바닥」을 뜻하던
   //   `h - mb` 는 더 이상 가격 영역의 바닥이 아니다 -- 그 자리들은 전부 plotBottom 으로 바꿨다.
   //   (여백 안의 것들 -- x축 눈금·라벨·레짐/변동성 리본·증거신호 레인 -- 은 그대로 h - mb 기준)
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 22, mb = 90;
+  // 2026-09-16 줄 배치: 천장 레인이 위 여백에서 빠져 mt 를 22 -> 12 로 줄이고(플롯이 그만큼
+  // 커진다), 아래는 바닥 레인 자리를 회수한 뒤 구간 2줄(추세 전환·변동폭 게이트)을 붙였다.
+  // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 레짐 +28~+43 · 변동성 +49~+64 ·
+  //                 추세 전환 +49~+64 · 변동폭 게이트 +70~+85
+  // (2026-09-16 변동성 리본이 카드로 빠지면서 한 줄 21px 를 가격 플롯에 돌려줬다)
+  // 2026-09-16 모바일 ml 34 -> 44: 좌측 가격선 라벨이 `ml - 5` 에서 **왼쪽으로** 뻗는데
+  //   «저항1↑»(5글자 ~31px)가 x=-2 까지 나가 잘렸다. 차트 폭은 288 -> 278 로 10px 준다.
+  const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 91;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   const cw = w - ml - mr, ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
@@ -4270,10 +3605,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(track);
     return track;
   };
-  const REGIME_RIBBON_Y = h - mb + 50, REGIME_RIBBON_H = LANE_H;
+  const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = LANE_H;
   // 변동성 전망 리본 -- 레짐 바로 아래, 같은 두께. ETH 전용 모델이라 다른 코인에선 안 그린다.
-  const VOL_RIBBON_Y = h - mb + 71, VOL_RIBBON_H = LANE_H;   // 레짐(+50~+65)과 6px 간격
-  const volRibbonOn = isSnapshotChart && activeSnapshotAsset === "eth"
+  // 방향 없는 두 신호의 구간 줄. 이름을 왼쪽 여백에 적는 것까지 레짐 리본과 같은 규약이다.
+  const TREND_ROW_Y = h - mb + 49, GATE_ROW_Y = h - mb + 70;
+  // 변동성 값은 이제 카드가 보여준다. 차트에는 **툴팁용 지도**만 남긴다(리본은 내렸다).
+  const volMapOn = isSnapshotChart && activeSnapshotAsset === "eth"
     && latestVolForecast && latestVolForecast.available
     && Array.isArray(latestVolForecast.times) && latestVolForecast.times.length > 0;
 
@@ -4481,6 +3818,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     candles.forEach((c, i) => {
       const r = regimeByTsForChart.get(c.time);
       if (!r) return;
+      // 2026-09-16 사용자 "회색칸을 제거해야해. chop 은 그냥 백그라운드로": 횡보는 **안 그린다**.
+      // 회색 칸을 채우면 «신호가 있다»처럼 읽히는데 횡보는 오히려 «아무것도 아니다»다.
+      // 빈 트랙이 그 뜻을 그대로 말한다 -- 칸이 없는 구간 = 횡보. (값은 툴팁으로 계속 읽힌다)
+      if (regimeDominant(r) === "chop") return;
       const rect = document.createElementNS(NS, "rect");
       rect.setAttribute("x", xAt(i)); rect.setAttribute("y", REGIME_RIBBON_Y);
       rect.setAttribute("width", laneW); rect.setAttribute("height", REGIME_RIBBON_H);
@@ -4538,78 +3879,27 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   한 시간이 12개 봉에 같은 색으로 깔린다. 청산 레인의 5분 키와 혼동하면 안 된다.
   // ⭐등급을 색 하나로 뭉개지 않는다: 「위험」 홀드아웃 정밀도 0.793 vs 「주의」 0.161 이라
   //   같은 주황으로 칠하면 16% 짜리가 79% 처럼 보인다. 진하기로 셋을 가른다.
-  if (volRibbonOn && candles.length) {
+  // 변동성 시각->값 매핑. 리본과 **툴팁이 같은 지도를 쓴다** -- 따로 만들면 화면의 두 곳이
+  // 다른 값을 말하는 날이 온다(이 파일에서 반복된 실패).
+  const volByHour = new Map();
+  if (volMapOn) {
     const vf = latestVolForecast;
     const grades = Array.isArray(vf.grades) ? vf.grades : [];
     const probas = Array.isArray(vf.probas) ? vf.probas : [];
-    const byHour = new Map();
-    vf.times.forEach((iso, i) => {
+    (vf.times || []).forEach((iso, i) => {
       const t = Date.parse(iso);
       if (!Number.isFinite(t)) return;
-      byHour.set(Math.floor(t / 1000), { grade: grades[i] || null, p: probas[i], tone: (vf.history || [])[i] });
+      volByHour.set(Math.floor(t / 1000), { grade: grades[i] || null, p: probas[i], tone: (vf.history || [])[i] });
     });
-    // 2026-09-11 사용자: "평소엔 회색, 경고면 중간 주황, 위험이면 강한 주황".
-    // ⭐색은 등급이 정하고, **진하기만** 등급 안에서 확률로 미세하게 움직인다 -- 등급만
-    //   쓰면 조용한 구간이 통째로 같은 색이라 칩이 "안 움직인다"던 문제가 그대로 옮겨온다.
-    // grades/cuts 가 아직 없는 낡은 워커 상태파일이면 tone 두 단계로 물러선다(빈 리본 금지).
-    const cuts = latestVolForecast.cuts || {};
-    const c1 = Number(cuts["주의"]), c2 = Number(cuts["위험"]);
-    const rampOk = Number.isFinite(c1) && Number.isFinite(c2) && c2 > c1 && c1 > 0;
-    // [색, 최소 진하기, 최대 진하기]
-    // 🔴회색은 **레짐 chop 과 같은 값**을 쓴다(사용자 요청). 색상은 원래도 같은 #8b91a6
-    //   이었고 달라 보인 건 투명도였다 -- 레짐은 0.55~1.00, 여기는 0.14~0.26 이었다.
-    //   REGIME_DOMINANT_COLOR.chop 을 직접 참조해 둘이 영영 어긋나지 않게 한다.
-    // 회색이 진해진 만큼 주황도 같은 대역으로 올리고, 주의/위험은 **농도로** 가른다
-    //   (같은 대역에서 투명도만으로는 둘이 안 구분된다).
-    const STYLE = { "안정": [REGIME_DOMINANT_COLOR.chop, 0.55, 1.00],
-                    "주의": ["#dc8f4a", 0.62, 0.86],
-                    "위험": ["#b8541a", 0.88, 1.00] };
-    const styleOf = (v) => {
-      const g = v.grade || (v.tone === "warn" ? "주의" : "안정");
-      const sp = STYLE[g] || STYLE["안정"];
-      const q = Number(v.p);
-      let f = 0.5;                                     // 확률을 모르면 등급의 중간값
-      if (rampOk && Number.isFinite(q)) {
-        f = g === "안정" ? q / c1
-          : g === "주의" ? (q - c1) / (c2 - c1)
-          : (q - c2) / (1 - c2);
-      }
-      return { color: sp[0], opacity: sp[1] + (sp[2] - sp[1]) * clamp01(f) };
-    };
-    let drew = 0;
-    drawLaneTrack(VOL_RIBBON_Y);   // 천장·바닥과 같은 트랙 (2026-09-16)
-    candles.forEach((c, i) => {
-      const v = byHour.get(Math.floor(c.time / 3600) * 3600);
-      if (!v) return;
-      drew += 1;
-      const rect = document.createElementNS(NS, "rect");
-      rect.setAttribute("x", xAt(i)); rect.setAttribute("y", VOL_RIBBON_Y);
-      rect.setAttribute("width", laneW); rect.setAttribute("height", VOL_RIBBON_H);
-      rect.setAttribute("rx", laneRx);
-      const st = styleOf(v);
-      rect.setAttribute("fill", st.color);
-      rect.setAttribute("fill-opacity", st.opacity.toFixed(2));
-      const title = document.createElementNS(NS, "title");
-      title.textContent = fmtDateTick(c.time * 1000) + " 변동성 전망 "
-        + (v.grade || (v.tone === "warn" ? "주의 이상" : "안정"))
-        + (v.p === undefined || v.p === null ? ""
-          : " · 확장 확률 " + (v.p * 100).toFixed(1) + "%");
-      rect.appendChild(title);
-      svg.appendChild(rect);
-    });
-    const volLabel = document.createElementNS(NS, "text");
-    volLabel.setAttribute("x", ml - 6);
-    volLabel.setAttribute("y", VOL_RIBBON_Y + VOL_RIBBON_H / 2 + 3);
-    volLabel.setAttribute("text-anchor", "end");
-    volLabel.setAttribute("font-size", "9");
-    volLabel.setAttribute("fill", "var(--muted)");
-    volLabel.textContent = "변동성";
-    const labelTitle = document.createElementNS(NS, "title");
-    // 칩이 툴팁에 갖고 있던 숫자를 여기로 옮긴다 -- 칩을 지워도 정보가 사라지지 않게.
-    labelTitle.textContent = volForecastRibbonTitle(drew);
-    volLabel.appendChild(labelTitle);
-    svg.appendChild(volLabel);
   }
+  // 2026-09-16 **변동성 리본을 차트에서 내렸다**(카드로 옮김). 중복이어서가 아니라 **해상도**
+  // 때문이다 -- 리본은 1시간 격자·24시간 지평인데 차트는 5분봉이라 12봉이 한 색이고, 풋프린트
+  // (1시간 창)에서는 값이 **하나**다. 실측: 최근 48시간 중 29시간이 연속 '안정'.
+  // ⚠️버리는 게 아니다. 09-14 정면비교에서 셋 중 **유일하게 «확장»을 보는** 지표이고
+  //   (현재변동성과 ρ −0.817) 게이트와도 중복이 아니다(상관 −0.389 · 상위10% 겹침 0.7%).
+  //   다만 그 우위는 **24시간에서만** 실재한다(1h AUC .612 vs 공짜 대조군 .611 동률,
+  //   4h .593 vs .720 더 나쁨, 24h .812 vs .625 진짜). 24시간 판단은 카드 한 줄이 맞는 자리다.
+
 
   // Candles -- 풋프린트 모드(ETH)면 몸통 대신 «가격 행별 공격적 매수/매도 체결량» 셀을 그리고,
   // 캔들은 얇은 테두리로만 남긴다(2026-09-15, TradingView 볼륨 풋프린트 '매수 및 매도' 유형).
@@ -4642,12 +3932,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     barRows.forEach((rows) => rows.forEach((cell) => {
       maxBuy = Math.max(maxBuy, cell[0]); maxSell = Math.max(maxSell, cell[1]);
     }));
-    const shade = (v, max) => FOOTPRINT_SHADE[Math.min(3, Math.floor((max > 0 ? v / max : 0) * 4))];
+    const SHADES = footprintShades();
+    const shade = (v, max) => SHADES[Math.min(3, Math.floor((max > 0 ? v / max : 0) * 4))];
     const fontPx = Math.min(9, Math.max(6, rowPx - 3));
     const half = Math.max(2, bw / 2 - 0.5);
     // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
     // 숫자를 욱여넣으면 옆 칸을 침범해서 둘 다 못 읽는다. 값은 눌러서 툴팁으로 본다.
     const showQty = half >= 18;
+    // 라이트는 셀 배경이 밝아 글자를 거의 불투명하게 올려야 읽힌다(다크는 현행 0.82).
+    const INK_OPACITY =
+      document.documentElement.getAttribute("data-theme") === "light" ? "0.95" : "0.82";
 
     // 한 칸: 배경(거래량 비율 4단계) + 숫자 + 불균형 표시(반대편의 300% 초과면 바깥쪽 세로선).
     const drawCell = (cx, yTop, v, other, max, color, edgeX, price) => {
@@ -4667,7 +3961,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const txt = document.createElementNS(NS, "text");
         txt.setAttribute("x", cx + half / 2); txt.setAttribute("y", yTop + rowPx / 2 + fontPx * 0.36);
         txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", fontPx);
-        txt.setAttribute("fill", "var(--text)"); txt.setAttribute("fill-opacity", "0.82");
+        txt.setAttribute("fill", "var(--ink)"); txt.setAttribute("fill-opacity", INK_OPACITY);
         txt.textContent = fmtFootprintQty(v);
         svg.appendChild(txt);
       }
@@ -4680,11 +3974,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
     };
 
+    // 봉 델타 라벨의 충돌 회피용. 모바일(봉 폭 ~25px)에서는 글자(~38px)가 봉보다 넓어
+    // 이웃끼리 겹친다 -- 라벨을 버리지 않고 **겹치면 한 줄씩 내린다**(값은 다 보여야 한다).
+    const deltaBoxes = [];
+    const deltaFont = bw >= 34 ? 11 : 9;
     barRows.forEach((rows, i) => {
       const c = candles[i], x = xAt(i);
-      let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0;
+      let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0, lowKey = Infinity;
       rows.forEach((cell, key) => {
         buyTot += cell[0]; sellTot += cell[1];
+        if (key < lowKey) lowKey = key;
         if (cell[0] + cell[1] > pocVol) { pocVol = cell[0] + cell[1]; pocKey = key; }
       });
       rows.forEach((cell, key) => {
@@ -4721,14 +4020,34 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       body.setAttribute("stroke-opacity", "0.6");
       svg.appendChild(body);
 
-      // 봉 델타(매수-매도) -- 플롯 맨 위. 셀 숫자를 다 더하지 않아도 그 봉의 승부가 보이게.
+      // 봉 델타(매수-매도). 2026-09-16 사용자 요청으로 **플롯 맨 위 -> 그 봉 바로 아래**로
+      // 옮기고 굵게 했다. 맨 위에 있을 때는 어느 봉의 숫자인지 눈이 세로로 훑어야 했다 --
+      // 봉 밑에 붙으면 그 봉의 것임이 위치로 자명하다. y 는 그 봉의 **저가** 기준이라
+      // 봉마다 높이가 다르다(고정 행이 아니다).
       const delta = buyTot - sellTot;
       if (buyTot + sellTot > 0) {
         const dTxt = document.createElementNS(NS, "text");
-        dTxt.setAttribute("x", x + bw / 2); dTxt.setAttribute("y", mt + 9);
-        dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", "9");
+        // 기준은 캔들 저가가 아니라 **가장 아래 셀 행의 바닥**이다. 저가로 잡았더니 그 아래로
+        // 더 내려오는 마지막 행과 글씨가 겹쳤다(2026-09-16 첫 판에서 실제로 겹쳤다) --
+        // 행은 rowSize 격자라 저가보다 최대 한 행만큼 더 내려간다.
+        const cellsBottom = Number.isFinite(lowKey) ? yAt(lowKey * rowSize) : yAt(c.low);
+        let dY = Math.min(plotBottom - 3, Math.max(cellsBottom, yAt(c.low)) + 13);
+        // 글자 폭 근사(굵은 숫자 ~0.62em) 로 상자를 만들고, 겹치면 아래로 한 줄씩 민다.
+        const label = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
+        const halfW = label.length * deltaFont * 0.34 + 2;
+        const cxD = x + bw / 2;
+        for (let guard = 0; guard < 6; guard++) {
+          const hit = deltaBoxes.some((b) =>
+            Math.abs(b.y - dY) < deltaFont + 1 && cxD + halfW > b.x1 && cxD - halfW < b.x2);
+          if (!hit || dY + deltaFont + 2 > plotBottom - 3) break;
+          dY += deltaFont + 2;
+        }
+        deltaBoxes.push({ x1: cxD - halfW, x2: cxD + halfW, y: dY });
+        dTxt.setAttribute("x", cxD); dTxt.setAttribute("y", dY);
+        dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", String(deltaFont));
+        dTxt.setAttribute("font-weight", "bold");
         dTxt.setAttribute("fill", delta >= 0 ? "var(--good)" : "var(--bad)");
-        dTxt.textContent = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
+        dTxt.textContent = label;
         const dTitle = document.createElementNS(NS, "title");
         dTitle.textContent = fmtDateTick(c.time * 1000) + " 델타 " + delta.toFixed(1)
           + " · 매수 " + buyTot.toFixed(1) + " / 매도 " + sellTot.toFixed(1);
@@ -4836,46 +4155,83 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   30px(9%), 모바일 184 중 16%. 20 일 때는 12%/22% 였다.
     // 2026-09-11: 플롯 **안**(top: mt+3 / bottom: h-mb-3-LANE_H)에서 여백 **밖**으로 옮겼다.
     //   천장은 플롯 위, 바닥은 x축 라벨 아래 -- 위/아래 공간 은유는 그대로 유지한다.
-    const LANE_Y = { top: mt - 3 - LANE_H, bottom: h - mb + 28 };
     const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
-    const opaBase = mobileChart ? 0.55 : 0.35, opaStep = mobileChart ? 0.11 : 0.15;
-    ["top", "bottom"].forEach(side => {
-      const counts = side === "top" ? cm.ev_top : cm.ev_bottom;
-      const names = side === "top" ? cm.ev_top_names : cm.ev_bottom_names;
-      // 트랙 색은 **레짐·변동성 리본과 같은 값**이다(var(--muted) 0.18). 2026-09-16 사용자
-      // 지적 "천장과 바닥 백그라운드만 검정색". 그전엔 --chart-bg 0.92(불투명)였는데, 그건
-      // 2026-09-09 에 «청산 밀도 밴드가 레인 아래로 비치지 않게 끊으려고» 넣은 것이었다.
-      // 그 전제는 2026-09-11 에 사라졌다 -- 레인이 플롯 **밖 여백**으로 옮겨졌고 히트맵은
-      // 플롯 안(mt~plotBottom)으로 잘리므로 애초에 겹칠 수가 없다. 전제가 사라진 값이
-      // 남아서 혼자 검게 보였던 것이다.
-      drawLaneTrack(LANE_Y[side]).setAttribute("data-lane-track", side);
-      (counts || []).forEach((n, k) => {
-        if (!n) return;
-        const idx = idxByEpoch.get(Date.parse(cm.times[k]) / 1000);
-        if (idx === undefined) return;
-        const rect = document.createElementNS(NS, "rect");
-        rect.setAttribute("x", xAt(idx)); rect.setAttribute("y", LANE_Y[side]);
-        rect.setAttribute("width", laneW); rect.setAttribute("height", LANE_H);
-        rect.setAttribute("rx", laneRx);
-        rect.setAttribute("fill", laneFill[side]);
-        // 진하기 = 동시발동 종수. 색을 새로 만들지 않는다(표시 규약 §2).
-        // 데스크톱 1종 0.50 → 4종+ 0.95 · 모바일 1종 0.66 → 4종+ 0.99(대비 확보).
-        rect.setAttribute("fill-opacity", Math.min(opaBase + opaStep * Math.min(n, 4), 1).toFixed(2));
-        const ti = document.createElementNS(NS, "title");
-        ti.textContent = `${side === "top" ? "천장" : "바닥"} 증거신호 ${n}종`
-          + `${(names && names[k]) ? ` · ${names[k]}` : ""}`;
-        rect.appendChild(ti);
-        svg.appendChild(rect);
+    // 2026-09-16 사용자 지시로 **천장·바닥 레인을 제거**했다. 그 레인은 증거신호 종수를
+    // 진하기로 보여주던 것인데(2026-09-09 C안), 증거신호가 화면에서 빠지면서 빈 줄만 남았다.
+    // 방향 이벤트는 아래 **봉 밀착 삼각형** 하나로 말한다 -- 같은 것을 두 문법으로 말하지 않는다.
+
+    // ── 방향 없는 신호는 구간으로 (2026-09-16) ──────────────────────────────────
+    // 추세 전환·변동폭 게이트는 **천장/바닥을 말하지 않는다**. 그래서 방향 색(초록/빨강)을
+    // 쓰지 않고 앰버/주황 계열만 쓰며, 삼각형(순간)이 아니라 **막대 길이**(구간)로 그린다 --
+    // 지속 시간이 이 둘의 정보 대부분이라 점으로 찍으면 그게 사라진다.
+    // 예고는 **현재 상태만** 아는 값이라(워커가 이력을 안 남긴다) 서버가 spans_partial 로
+    // 알려주고, 여기서는 점선 테두리로 «과거는 모른다»를 표시한다.
+    const spans = cm.spans || {};
+    const partial = new Set(cm.spans_partial || []);
+    const spanRows = [
+      // 왼쪽 여백은 45px 뿐이다 -- 이름은 기존 규약(레짐·변동성·청산)처럼 두 글자로 줄인다.
+      // 긴 이름을 넣었더니 "변동폭 게이트"가 "폭 게이트"로 잘렸다(2026-09-16 렌더 확인).
+      { y: TREND_ROW_Y, label: "전환", items: [
+        { key: "trend_prewarn", name: "전환 예고", color: "var(--warn)", opacity: 0.30 },
+        { key: "trend_detect", name: "전환 탐지", color: "var(--warn)", opacity: 0.95 }] },
+      { y: GATE_ROW_Y, label: "게이트", items: [
+        { key: "evr_gate", name: "게이트 발동", color: "var(--amber)", opacity: 0.72 }] },
+    ];
+    spanRows.forEach((row) => {
+      drawLaneTrack(row.y);
+      const lbl = document.createElementNS(NS, "text");
+      lbl.setAttribute("x", ml - 6); lbl.setAttribute("y", row.y + LANE_H / 2 + 3);
+      lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "9");
+      lbl.setAttribute("fill", "var(--muted)");
+      lbl.textContent = row.label;
+      svg.appendChild(lbl);
+      row.items.forEach((item) => {
+        const raw = Array.isArray(spans[item.key]) ? spans[item.key] : [];
+        // 🔴인덱스로 맞추면 안 된다. 서버 격자는 72봉인데 **풋프린트는 12봉**이라 길이가 다르다
+        //   -- 첫 판은 길이 검사에 걸려 풋프린트에서 구간이 영영 안 보였다. 시각으로 맞춘다
+        //   (삼각형이 idxByEpoch 로 하는 것과 같은 방법이고, 한 칸 밀기도 같이 막힌다).
+        const onByTs = new Map();
+        (cm.times || []).forEach((t, k) => {
+          const sec = Math.floor(Date.parse(t) / 1000);
+          if (Number.isFinite(sec)) onByTs.set(sec, raw[k] ? 1 : 0);
+        });
+        const arr = candles.map((c) => onByTs.get(c.time) || 0);
+        let i = 0;
+        while (i < arr.length) {
+          if (!arr[i]) { i += 1; continue; }
+          let j = i;
+          while (j + 1 < arr.length && arr[j + 1]) j += 1;   // 이어진 봉을 한 구간으로
+          const x0 = xAt(i), x1 = xAt(j) + bw;
+          const rect = document.createElementNS(NS, "rect");
+          rect.setAttribute("x", x0); rect.setAttribute("y", row.y);
+          rect.setAttribute("width", Math.max(x1 - x0, 2));
+          rect.setAttribute("height", LANE_H); rect.setAttribute("rx", laneRx);
+          rect.setAttribute("fill", item.color);
+          rect.setAttribute("fill-opacity", String(item.opacity));
+          if (partial.has(item.key)) {
+            rect.setAttribute("stroke", item.color);
+            rect.setAttribute("stroke-dasharray", "3,2");
+            rect.setAttribute("stroke-opacity", "0.9");
+          }
+          const ti = document.createElementNS(NS, "title");
+          const span = (j - i + 1) * CHART_CANDLE_MIN;
+          ti.textContent = item.name + " · " + fmtDateTick(candles[i].time * 1000)
+            + "부터 " + span + "분"
+            + (partial.has(item.key) ? " (현재 상태만 압니다 — 과거 이력이 없습니다)" : "");
+          rect.appendChild(ti);
+          svg.appendChild(rect);
+          // 구간이 충분히 넓을 때만 이름을 넣는다 -- 좁은 칸의 글자는 읽히지 않고 더럽기만 하다.
+          if (x1 - x0 >= 64) {
+            const t = document.createElementNS(NS, "text");
+            t.setAttribute("x", x0 + 6); t.setAttribute("y", row.y + LANE_H / 2 + 3.5);
+            t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "bold");
+            t.setAttribute("fill", inkOnFill("#12161d"));
+            t.textContent = item.name;
+            svg.appendChild(t);
+          }
+          i = j + 1;
+        }
       });
-      const lab = document.createElementNS(NS, "text");
-      lab.setAttribute("x", ml - 6);
-      // 레인이 두꺼워졌으니 바닥 정렬(H-1) 대신 세로 중앙 (font-size 9 -> baseline +3)
-      lab.setAttribute("y", LANE_Y[side] + LANE_H / 2 + 3);
-      lab.setAttribute("text-anchor", "end");
-      lab.setAttribute("font-size", "9");
-      lab.setAttribute("fill", "var(--muted)");
-      lab.textContent = side === "top" ? "천장" : "바닥";
-      svg.appendChild(lab);
     });
 
     // 이벤트 트리거 -- 매매 저널과 **같은 삼각형 문법**을 쓰고 `markerCounts` 를 공유해
@@ -4956,7 +4312,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const pTxt = document.createElementNS(NS, "text");
     pTxt.setAttribute("x", w - mr + 8); pTxt.setAttribute("y", labelY + 4);
     pTxt.setAttribute("font-size", mobileChart ? "11" : "12"); pTxt.setAttribute("font-weight", "bold");
-    pTxt.setAttribute("fill", "#1a1208");
+    pTxt.setAttribute("fill", inkOnFill("#1a1208"));
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
     if (p.marker) svg.appendChild(line);   // 배지 위에 -- 위 주석 참조
@@ -4992,8 +4348,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const vLine = document.createElementNS(NS, "line");
   vLine.setAttribute("x1", 0); vLine.setAttribute("x2", 0);
   vLine.setAttribute("y1", mt);
-  vLine.setAttribute("y2", volRibbonOn ? VOL_RIBBON_Y + VOL_RIBBON_H
-    : regimeByTsForChart ? REGIME_RIBBON_Y + REGIME_RIBBON_H : h - mb);
+  // 십자선은 아래 줄들까지 걸친다 -- 호버한 봉이 어느 구간에 속하는지 눈으로 잇게.
+  vLine.setAttribute("y2", GATE_ROW_Y + LANE_H);
   vLine.setAttribute("stroke", "var(--hover-line)");
   vLine.setAttribute("stroke-dasharray", "4,4");
   vLine.style.display = "none";
@@ -5028,7 +4384,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   priceBadgeText.setAttribute("x", w - mr + 8);
   priceBadgeText.setAttribute("font-size", mobileChart ? "11" : "12");
   priceBadgeText.setAttribute("font-weight", "bold");
-  priceBadgeText.setAttribute("fill", "#0b1220");
+  priceBadgeText.setAttribute("fill", inkOnFill("#0b1220"));
   priceBadgeText.style.display = "none";
   priceBadgeText.style.pointerEvents = "none";
   hoverGroup.appendChild(priceBadgeText);
@@ -5085,12 +4441,49 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const regimeLine = r
       ? `<br>레짐: ${regimeDominant(r) === "bull" ? "강세" : regimeDominant(r) === "bear" ? "약세" : "횡보"} ${Math.round(Math.max(r.bull_prob, r.bear_prob, r.chop_prob) * 100)}%`
       : "";
+    // 2026-09-16: 툴팁이 **그 봉에 표시된 모든 것**을 말한다. 그전에는 시각·OHLC·레짐뿐이라
+    // 변동성 리본도, 새로 붙인 트리거 표시도 «왜 떴는지»를 화면에서 물어볼 데가 없었다.
+    // 원칙: 값이 없는 항목은 줄 자체를 안 만든다(빈 줄은 «0» 으로 오독된다).
+    const vv = volByHour.get(Math.floor(c.time / 3600) * 3600);
+    const volLine = vv
+      ? `<br>변동성: ${vv.grade || (vv.tone === "warn" ? "주의" : "안정")}`
+        + (vv.p == null ? "" : ` · 확장 확률 ${(Number(vv.p) * 100).toFixed(1)}%`)
+      : "";
+    const cmNow = latestChartMarkers;
+    let trigLines = "";
+    if (isSnapshotChart && cmNow && cmNow.available) {
+      const k = (cmNow.times || []).findIndex((t) => Math.floor(Date.parse(t) / 1000) === c.time);
+      (cmNow.events || []).forEach((ev) => {
+        if (Math.floor(Date.parse(ev.t) / 1000) !== c.time) return;
+        trigLines += `<br>${ev.side === "bottom" ? "▲" : "▼"} ${ev.label}`
+          + (ev.grade ? ` ${ev.grade}등급` : "")
+          + (ev.p != null ? ` · 확률 ${(Number(ev.p) * 100).toFixed(0)}%` : "")
+          + (ev.demoted ? " · 손실가중 헤드가 컷 미달로 강등" : "");
+      });
+      if (k >= 0) {
+        const sp = cmNow.spans || {}, meta = cmNow.span_meta || {};
+        const at = (arr) => (Array.isArray(arr) ? arr[k] : undefined);
+        if (at(sp.trend_prewarn)) {
+          const pp = at(meta.trend_prewarn_p), th = at(meta.trend_prewarn_thr);
+          trigLines += "<br>전환 예고 (앞으로 30분 내 발동 확률)"
+            + (pp == null ? "" : ` ${(pp * 100).toFixed(1)}%`)
+            + (th == null ? "" : ` / 임계 ${(th * 100).toFixed(1)}%`);
+        }
+        if (at(sp.trend_detect)) trigLines += "<br>전환 탐지 지속 중 (거래대금·체결속도 둘 다 q90 초과)";
+        if (at(sp.evr_gate)) {
+          const ra = at(meta.evr_gate_ratio);
+          trigLines += "<br>변동폭 게이트 발동 (24시간 기대변동 상위 10%)"
+            + (ra == null ? "" : ` · 임계의 ${Number(ra).toFixed(2)}배`)
+            + ((cmNow.spans_partial || []).includes("evr_gate") ? " · 과거 이력 없음(현재만)" : "");
+        }
+      }
+    }
     showTooltip(evt.pageX, evt.pageY, `
       <b>${fmtDateTick(c.time * 1000)}</b><br>
       시가: ${fmtNum(c.open, 2)}<br>
       고가: ${fmtNum(c.high, 2)}<br>
       저가: ${fmtNum(c.low, 2)}<br>
-      종가: ${fmtNum(c.close, 2)}${regimeLine}
+      종가: ${fmtNum(c.close, 2)}${regimeLine}${volLine}${trigLines}
     `);
   };
   svg.onmouseleave = () => {
@@ -5336,6 +4729,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       ethOnlyIndicator(breakoutPrewarnIndicatorItem()),   // 2026-09-11 추세 전환 경보기
       ethOnlyIndicator(breakoutDetectorIndicatorItem()),  // 2026-09-11 추세 전환 탐지기
       // 🔴ethOnlyIndicator 로 감싸지 않는다 — 이 게이트는 **20자산 포트폴리오** 지표다.
+      ethOnlyIndicator(volForecastIndicatorItem()),       // 2026-09-16 변동성 전망(24h 확장)
       evrGateIndicatorItem(),                             // 2026-09-15 변동폭 게이트(24시간)
     ], "snapSpecializedSignalList", { forceMeter: true });
 
@@ -5350,7 +4744,11 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 spot/perp klines를 직접 fetch해 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 청산크라우딩 상관은 ~1개월 탐색적 표본(3-split 재현 전). 자세히 보기 참고.",
       },
       {
-        key: "vol_level", label: "변동성 예측",
+        // 2026-09-16 «변동성 예측» -> «변동성 수준». 셋이 같은 단어를 쓰면서 다른 질문을
+        // 답하고 있었다: 이건 **수준**(지금 얼마나 출렁이나 · 4시간), 카드 하나 아래는
+        // **확장**(오늘 성격이 바뀌나 · 24시간), 게이트는 **진입 여부**다.
+        // 🔴이 값은 «곧 커진다»를 못 맞힌다(확장 AUC .46~.52 = 동전) -- 이름이 그걸 말해야 한다.
+        key: "vol_level", label: "변동성 수준 (4시간)",
         tone: (latestVolLevel && latestVolLevel.tone) || "neutral",
         subText: (latestVolLevel && latestVolLevel.grade) || "웜업",
         history: toneHistory.vol_level, times: toneHistoryTimes.vol_level,
@@ -5381,8 +4779,6 @@ async function tick() {
     if (activePageTab === "ops") {
       refreshOpsStatus();
     } else if (activePageTab === "snapshot") {
-      refreshEvidenceSignals();
-      refreshEvidenceSignalsProvisional();
       refreshVReboundSignal();
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshBreakoutDetector();     // 2026-09-11 횡보→추세 전환
@@ -5456,6 +4852,7 @@ document.addEventListener("visibilitychange", () => {
   tick();
 });
 setupSnapshotAssetTabs();
+setupThemeToggle();
 setupChartModeTabs();
 setupPageTabs();
 setupScrollRendering();

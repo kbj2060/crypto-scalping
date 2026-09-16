@@ -36,15 +36,12 @@ load_dotenv(REPO_ROOT / ".env")
 # asyncio.to_thread (see load_evidence_signals()) so its pandas rolling-window work doesn't block
 # the event loop for its duration, matching the pattern load_liquidation_5m_signal()/
 # load_liquidation_direction_signal() already used.
+# 2026-09-16 증거신호 칩 제거 후 남은 것: klines 창 길이 상수와 «마지막 발동 이후 봉 수» 헬퍼.
+# compute_signals/SIGNAL_ORDER/PCTRANK/FUNDING_* 는 8종 계산 전용이라 같이 내렸다.
+# (모듈 자체는 남긴다 -- 극점 탐지기가 compute_signals 를 직접 import 한다.)
 from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
     FETCH_LIMIT as EVIDENCE_FETCH_LIMIT,
-    FUNDING_HISTORY_LIMIT as EVIDENCE_FUNDING_HISTORY_LIMIT,
-    FUNDING_Z_MIN_PERIODS as EVIDENCE_FUNDING_Z_MIN_PERIODS,
-    FUNDING_Z_WINDOW as EVIDENCE_FUNDING_Z_WINDOW,
-    PCTRANK_WINDOW as EVIDENCE_PCTRANK_WINDOW,
-    SIGNAL_ORDER as EVIDENCE_SIGNAL_ORDER,
     bars_since_last_true,
-    compute_signals,
 )
 # 유동성스윕 반등예측 event-triggered signal (2026-08-29, TabPFN Tier0+rsi model -- see
 # docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md). Own klines fetch +
@@ -177,7 +174,7 @@ from scripts.live_eth_trade_plan_20260913 import (  # noqa: E402
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
-# 계산하므로(load_evidence_signals()의 60초 캐시) 아무도 안 보고 있으면 트리거 자체가 돌지 않는다.
+# 계산하므로(load_chart_klines_frames()의 60초 캐시) 아무도 안 보고 있으면 트리거 자체가 돌지 않는다.
 from scripts.push_webpush_20260904 import (  # noqa: E402
     add_subscription,
     broadcast,
@@ -414,8 +411,6 @@ BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_sig
 # 2026-09-10 극점 탐지기 -- 채점은 워커가 하고 대시보드는 읽기만 한다
 # (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
 V_REBOUND_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_v_rebound_state.json"
-EVIDENCE_METALABEL_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_evidence_metalabel_state.json"
-EVIDENCE_METALABEL_MAX_AGE_MIN = 20.0      # 실제 게이트는 호출부의 봉 일치 비교다
 REGIME_WIDE24_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_wide24_state.json"
 REGIME_BTC_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_btc_state.json"
 REGIME_XRP_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_xrp_state.json"
@@ -1029,26 +1024,6 @@ def macro_calendar_payload() -> dict[str, Any]:
                           ts_field="generated_at", extra_missing={"events": []})
 
 
-def _same_bar(a: str, b: str) -> bool:
-    """두 ISO 타임스탬프가 같은 순간인가. 문자열 비교로는 안 된다 --
-    한쪽은 '+00:00', 다른 쪽은 'Z' 로 끝나고 마이크로초 표기도 다를 수 있다."""
-    try:
-        from datetime import datetime as _dt
-        return _dt.fromisoformat(a.replace("Z", "+00:00")) == _dt.fromisoformat(b.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
-        return False
-
-
-def evidence_metalabel_payload() -> dict[str, Any]:
-    """ETH 증거신호 metalabel 워커 상태(2026-09-14).
-
-    max_age 를 넉넉히(20분) 두는 대신 **호출부가 봉 일치를 직접 본다** -- 나이가 아니라
-    «같은 봉인가»가 정확한 조건이다. 나이만 보면 봉 경계 직후 옛 봉 값을 새 봉에 붙일 수 있다.
-    """
-    return worker_payload(EVIDENCE_METALABEL_STATE_PATH, EVIDENCE_METALABEL_MAX_AGE_MIN,
-                          extra_missing={"bar_utc": None, "metalabels": {}})
-
-
 def v_rebound_payload() -> dict[str, Any]:
     """V자 급등락 워커 상태. 극점 탐지기와 같은 구조.
 
@@ -1588,8 +1563,6 @@ def make_app() -> web.Application:
     # 진행 중인 수동 주문 하나. 동시에 둘을 두지 않는다 -- 겹치면 단건 상한의 뜻이 흐려진다.
     manual_entry_state: dict[str, Any] = {"phase": "idle"}
     evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None, "frames": None}
-    evidence_signal_provisional_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
-    evidence_signal_provisional_lock = asyncio.Lock()
     # 2026-08-31: 자산별로 키를 나눈다(원래는 공유 슬롯 하나였다) -- ETH 요청과 BTC 요청이
     # 서로의 캐시를 밀어내지 않게. 2026-09-12 부터 그 dict/Lock 은 swr_cached 가 f"...:{asset}"
     # 키로 직접 소유하므로 여기서 선언하지 않는다.
@@ -1806,8 +1779,11 @@ def make_app() -> web.Application:
         (60s, 5x more often than the old MARKET_HISTORY_CACHE_SECONDS=300s cache as a side effect).
         No separate cache of its own needed -- slicing 100 rows out of an already-in-memory frame is
         cheap enough to just redo on every call."""
-        if evidence_signal_cache["frames"] is None:
-            await load_evidence_signals()  # first call this process -- warm up the shared history
+        # 🔴2026-09-16: 예전엔 «frames 가 None 일 때만» 데웠다. 그때는 증거신호 엔드포인트가
+        # 프런트 폴링에 맞춰 60초마다 load_evidence_signals() 를 불러 캐시를 갱신했기 때문이다.
+        # 그 엔드포인트를 내리면서 **갱신 주체가 사라져** 차트가 첫 캔들에서 멈추게 됐다.
+        # 이제 매번 부른다 -- swr_cached 가 60초 TTL 로 스스로 throttle 하므로 비용은 같다.
+        await load_chart_klines_frames()
         frames = evidence_signal_cache["frames"]
         if frames is None:
             raise web.HTTPBadGateway(reason="market_history_upstream_error")
@@ -2073,13 +2049,15 @@ def make_app() -> web.Application:
         except asyncio.CancelledError:
             pass
 
-    async def load_evidence_signals() -> dict[str, Any]:
-        """Informational-only reversal-evidence-signal readout for the Snapshot tab -- NOT a
-        trading signal (see docstring in the imported module). Mirrors load_market_history()'s
-        cache/lock pattern but needs a much longer klines window (EVIDENCE_FETCH_LIMIT bars, to
-        warm up orthogonal_combo's EVIDENCE_PCTRANK_WINDOW-bar percentile-rank window) than the
-        chart's own /api/market-history (limit=100), so it gets its own cache rather than sharing
-        market_history_cache."""
+    async def load_chart_klines_frames() -> dict[str, Any]:
+        """차트 캔들용 ETH/BTC 5분봉 프레임 캐시 (1500봉, 닫힌 봉만).
+
+        🔴2026-09-16: 원래 이름은 load_evidence_signals() 였고 세 일을 겸했다 -- klines 수집 +
+        증거신호 8종 compute_signals()(실측 8.22초/회, 대시보드 최고 비용 항목) + TabPFN
+        메타라벨 병합. 증거신호 칩을 내리면서 **계산만 걷어내고 수집은 남겼다**:
+        load_market_history_from_evidence_cache() 가 이 frames 에서 차트 캔들을 슬라이스한다.
+        복원 안내: docs/experiments/eth_evidence_signal_chips_removed_20260916.md
+        """
         async def produce() -> dict[str, Any]:
             raw = await fetch_binance_json(
                 "https://fapi.binance.com/fapi/v1/klines",
@@ -2102,9 +2080,8 @@ def make_app() -> web.Application:
             if len(df) and int(df.iloc[-1]["close_time"]) >= now_ms:
                 df = df.iloc[:-1].reset_index(drop=True)  # drop the still-forming bar
 
-            # BTC leg for smt_divergence (2026-08-24) -- failure here must never take down the
-            # ETH-only signals, so it's caught and logged, not raised; compute_signals() degrades
-            # smt_divergence to not-fired when btc_df is None.
+            # BTC 레그 -- 차트의 BTC 캔들용. 실패해도 ETH 캔들은 떠야 하므로 잡아서 로그만 남긴다
+            # (2026-09-16 이전엔 smt_divergence 의 교차자산 레그를 겸했다).
             btc_df = None
             try:
                 braw = await fetch_binance_json(
@@ -2133,276 +2110,27 @@ def make_app() -> web.Application:
                 print(f"evidence-signal BTC leg failed (smt_divergence family will read as "
                       f"not-fired this cycle): {btc_exc}", flush=True)
 
-            # Funding leg for orthogonal_combo's bottom leg (2026-08-25, merged 2026-08-27 --
-            # formerly a separate funding_oscillator_combo signal) -- same fail-soft pattern as
-            # the BTC leg above; compute_signals() degrades orthogonal_combo's bottom to its
-            # delta_z-only pre-2026-08-27 formula when funding_df is None. funding_z is
-            # rolling-z-scored here (not in compute_signals) to match scripts/live_evidence_signal_
-            # dashboard_20260823.py::fetch_funding_history verbatim (EVIDENCE_FUNDING_Z_WINDOW/
-            # EVIDENCE_FUNDING_Z_MIN_PERIODS imported from there).
-            funding_df = None
-            try:
-                fraw = await fetch_binance_json(
-                    EVIDENCE_SIGNAL_FUNDING_URL,
-                    {"symbol": EVIDENCE_SIGNAL_SYMBOL, "limit": EVIDENCE_FUNDING_HISTORY_LIMIT},
-                )
-                if fraw is not None:
-                    fdf = pd.DataFrame(fraw)
-                    fdf["calc_time"] = pd.to_datetime(fdf["fundingTime"].astype("int64"), unit="ms", utc=True)
-                    fdf["fundingRate"] = fdf["fundingRate"].astype("float64")
-                    fdf = fdf.sort_values("calc_time").drop_duplicates("calc_time", keep="last").reset_index(drop=True)
-                    fmean = fdf["fundingRate"].rolling(EVIDENCE_FUNDING_Z_WINDOW, min_periods=EVIDENCE_FUNDING_Z_MIN_PERIODS).mean()
-                    fstd = fdf["fundingRate"].rolling(EVIDENCE_FUNDING_Z_WINDOW, min_periods=EVIDENCE_FUNDING_Z_MIN_PERIODS).std()
-                    fdf["funding_z"] = (fdf["fundingRate"] - fmean) / fstd.replace(0.0, float("nan"))
-                    funding_df = fdf[["calc_time", "funding_z"]]
-            except Exception as funding_exc:  # noqa: BLE001 -- ETH signals must still render this cycle
-                print(f"evidence-signal funding leg failed (orthogonal_combo's bottom leg will "
-                      f"degrade to delta_z-only this cycle): {funding_exc}", flush=True)
-
-            sig = await asyncio.to_thread(compute_signals, df, btc_df=btc_df, funding_df=funding_df)
-            latest = sig.iloc[-1] if len(sig) else None
-            warmed_up = latest is not None and pd.notna(latest.get("p_fast")) and pd.notna(latest.get("p_slow"))
-            # taker_delta_z_climax / short_term_return_z / liquidity_sweep / orthogonal_combo /
-            # smt_divergence / fib_extension_exhaustion REPLACED with their TabPFN meta-label
-            # models' live probability (2026-08-30/31; dalton_rule2_balance_edge removed 2026-08-31,
-            # see METALABEL_SIGNALS' own module docstring) -- reuses this cycle's already-fetched
-            # `df` and already-computed `latest` fire state, no separate fetch/compute_signals()
-            # call. Fail-soft: a GPU/TabPFN hiccup must not block the other signals from rendering.
-            # 2026-09-14: metalabel(TabPFN) 레그는 **워커가 계산한다**(요청 경로 콜드 160초였다).
-            # 나머지 레그(klines fetch + compute_signals)는 여기 남는다 -- 캔들 차트와
-            # provisional 이 evidence_signal_cache["frames"] 에 의존하기 때문이다.
-            # 🔴**봉이 같을 때만 병합한다.** 워커가 뒤처졌으면 그 칩들은 «미발동»으로 읽히는데,
-            # 그건 TabPFN 이 실패했을 때의 기존 fail-soft 와 정확히 같은 상태다. 봉을 안 맞추고
-            # 붙이면 옛 확률이 새 봉의 값인 척한다.
-            metalabels: dict[str, dict] = {}
-            if warmed_up:
-                snap = await asyncio.to_thread(evidence_metalabel_payload)
-                want = utc_iso(latest["timestamp"])
-                got = snap.get("bar_utc")
-                if snap.get("warmed_up") and got and want and _same_bar(got, want):
-                    metalabels = snap.get("metalabels") or {}
-                else:
-                    print(f"evidence-signal metalabel leg unusable (칩은 미발동으로 읽힘): "
-                          f"worker_bar={got} dashboard_bar={want} err={snap.get('error')}", flush=True)
-            signals_payload = []
-            for name, description in EVIDENCE_SIGNAL_ORDER:
-                bcol, tcol = f"bottom_{name}", f"top_{name}"
-                # _active = per-signal sustain window (2026-08-24 default 20min/4 bars; 2026-08-30:
-                # taker_delta_z_climax/short_term_return_z instead use their own trained HORIZON,
-                # 2h/1h) -- rolling-max of the raw bcol/tcol firing column, not a new/looser firing
-                # condition (see compute_signals() docstring, SUSTAIN_BARS_OVERRIDE). last_fired_ts
-                # always reads the RAW column so it keeps reporting the true original firing bar
-                # even while _active keeps the chip lit.
-                bacol, tacol = f"{bcol}_active", f"{tcol}_active"
-                entry = {
-                    "name": name,
-                    "description": description,
-                    "bottom_fired": bool(latest[bacol]) if warmed_up else None,
-                    "bottom_last_fired_ts": _evidence_last_fired_ts(sig[bcol], latest) if warmed_up else None,
-                    "top_fired": bool(latest[tacol]) if warmed_up else None,
-                    "top_last_fired_ts": _evidence_last_fired_ts(sig[tcol], latest) if warmed_up else None,
-                    # Oldest-to-newest, for the Snapshot tab's activity-strip graph (one cell/bar).
-                    # 2026-08-31 fix: switched from the _active (sustain-window) column to the RAW
-                    # bcol/tcol -- using _active here made smt_divergence's 72-bar/6h sustain (which
-                    # exceeds this 48-bar/4h strip) look permanently stuck on (user report). See
-                    # eth_dashboard_evidence_signal_history_strip_sustain_window_bug_20260831.
-                    # 2026-09-01 (user follow-up): a single raw-fire bar was too subtle to read at a
-                    # glance, so this now sends the "fill" column instead (active from the fire bar
-                    # through whichever comes first, this signal's own K*ATR take-profit price or
-                    # its trained HORIZON -- see compute_signals()'s _fill_until_tp_or_horizon).
-                    # User explicitly confirmed this may fill the ENTIRE visible strip when the
-                    # horizon runs that long (no cap at EVIDENCE_SIGNAL_HISTORY_BARS this time). The
-                    # true raw column rides along separately in bottom_raw_fire/top_raw_fire purely
-                    # so the frontend can force a visible segment boundary at each actual re-fire
-                    # even mid-fill (app.js::toneStripSvg) -- otherwise a second real trigger inside
-                    # an already-active fill window would silently disappear into one block again.
-                    "bottom_history": sig[f"{bcol}_fill"].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
-                    "top_history": sig[f"{tcol}_fill"].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
-                    "bottom_raw_fire": sig[bcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
-                    "top_raw_fire": sig[tcol].tail(EVIDENCE_SIGNAL_HISTORY_BARS).fillna(False).astype(bool).tolist() if warmed_up else [],
-                }
-                if name in metalabels:
-                    entry["model_proba"] = metalabels[name]["proba"]
-                    entry["model_side"] = metalabels[name]["side"]
-                    entry["model_tp_price"] = metalabels[name].get("tp_price")
-                    # 2026-09-01: 저ATR 경고 (표시 전용, 모델/발동 로직과 무관) -- 발동봉 ATR이
-                    # 이 신호 자신의 발동시 ATR 중앙값보다 낮으면 low_atr=True. 저변동 구간에선
-                    # SL/ARM/Trail이 ATR 배수로 줄어드는데 왕복비용은 고정이라 방향이 맞아도
-                    # 수수료를 못 넘기는 비율이 커진다. 근거/실측:
-                    # docs/homer/evidence_signal_economics_tuning_protocol.md
-                    # 2026-09-03: 익절가 도달 여부. 그 전까지 칩은 발동 후 horizon_bars 동안
-                    # (smt_divergence는 6시간) 무조건 유지되며 목표 달성을 보지 않았다 --
-                    # 이미 끝난 움직임을 "활성"으로 띄워 늦은 진입을 유도할 수 있었다.
-                    entry["model_tp_touched"] = metalabels[name].get("tp_touched")
-                    entry["model_bars_since_fire"] = metalabels[name].get("bars_since_fire")
-                    # 2026-09-06: 이 신호 자신의 학습 호라이즌(봉). 화면이 "26/30봉 · 잔여 4봉"을 말하려면
-                    # 경과(bars_since)만으론 부족하다. 표시 전용 -- 발동/확률/투표 로직과 무관.
-                    entry["model_horizon_bars"] = metalabels[name].get("horizon_bars")
-                    # 2026-09-06 (조치 B): **지금 시점** 조건부 도달 확률(나이 인지 모델). 켜져 있고 아직
-                    # 목표 미달성인 칩에만 채워진다. 위 model_proba(발동 봉 값)는 그대로 둔다 -- 가산적.
-                    entry["model_proba_now"] = metalabels[name].get("proba_now")
-                    entry["model_atr_bp"] = metalabels[name].get("atr_bp")
-                    entry["model_atr_median_bp"] = metalabels[name].get("atr_median_bp")
-                    entry["model_low_atr"] = metalabels[name].get("low_atr")
-                signals_payload.append(entry)
-            # session_volatility_alert/macro_event_alert moved to /api/session-alerts (2026-08-27)
-            # -- they need much faster polling than this endpoint's 5min client-side cadence, see
-            # api_session_alerts()'s docstring.
-            payload = {
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "latest_bar_utc": utc_iso(latest["timestamp"]) if latest is not None else None,
-                "price": float(latest["close"]) if latest is not None else None,
-                "bars_loaded": int(len(sig)),
-                "warmed_up": bool(warmed_up),
-                "net_score": int(latest["net_score"]) if warmed_up else None,
-                "bottom_votes": int(latest["bottom_votes"]) if warmed_up else None,
-                "top_votes": int(latest["top_votes"]) if warmed_up else None,
-                "signals": signals_payload,
-            }
-            # Closed-bar frames only (forming bar already dropped above) -- reused by
-            # load_evidence_signals_provisional() so its ~10s poll doesn't re-pull the full
-            # EVIDENCE_FETCH_LIMIT-bar history, just the one new forming-bar row.
+            # 세 번째 칸(옛 funding_df)은 orthogonal_combo 전용이었다 -- 신호를 내렸으므로 None.
             evidence_signal_cache["frames"] = (
                 df[["timestamp", "open", "high", "low", "close", "volume", "taker_buy_base"]],
                 btc_df,
-                funding_df,
+                None,
             )
-            return payload
+            return {"available": True, "bars": int(len(df)),
+                    "btc_bars": int(len(btc_df)) if btc_df is not None else 0}
 
         return await swr_cached(
             "evidence_signal", EVIDENCE_SIGNAL_CACHE_SECONDS, produce,
             cache=evidence_signal_cache,
             max_stale=STALE_GRACE_SECONDS,
         )
-
-    async def load_evidence_signals_provisional() -> dict[str, Any]:
-        """Live PREVIEW of the CURRENTLY-FORMING 5m bar's evidence-signal state (2026-08-26, user
-        request: "값이 아직 채워지지 않았다면 진행 중인 값으로 대체"). load_evidence_signals()
-        above is UNCHANGED and remains the only signal with a real validated lift track record
-        (3.51x etc., measured on closed bars only) -- this function is a methodologically DIFFERENT
-        reading: it appends the in-progress bar's current (partial) O/H/L/C/volume onto the last
-        confirmed closed-bar history and reruns compute_signals(), so the result can flicker
-        (high/low/volume keep changing until the bar closes) and has no lift validation of its own.
-        The frontend MUST render this with an explicit "미확정(진행중)" marker, never merged into
-        or replacing the confirmed reading -- see scripts/live_evidence_signal_dashboard_20260823.py
-        module docstring for why the 9 formulas fundamentally need closed-bar aggregates (a bar's
-        FULL volume, a bar's FINAL high/low), not "current price".
-        Cheap by design: reuses evidence_signal_cache["frames"] (closed-bar history, refreshed at
-        its own 60s cadence) instead of re-fetching EVIDENCE_FETCH_LIMIT bars every ~10s -- only
-        fetches the 1-2 most recent bars to read the forming bar's live state."""
-        now = time.monotonic()
-        cached = evidence_signal_provisional_cache["payload"]
-        if cached is not None and now - evidence_signal_provisional_cache["ts"] < EVIDENCE_SIGNAL_PROVISIONAL_CACHE_SECONDS:
-            return cached
-        async with evidence_signal_provisional_lock:
-            cached = evidence_signal_provisional_cache["payload"]
-            if cached is not None and time.monotonic() - evidence_signal_provisional_cache["ts"] < EVIDENCE_SIGNAL_PROVISIONAL_CACHE_SECONDS:
-                return cached
-
-            def _store(payload: dict[str, Any]) -> dict[str, Any]:
-                evidence_signal_provisional_cache["ts"] = time.monotonic()
-                evidence_signal_provisional_cache["payload"] = payload
-                return payload
-
-            if evidence_signal_cache["frames"] is None:
-                await load_evidence_signals()  # first call this process -- warm up closed-bar history
-            frames = evidence_signal_cache["frames"]
-            if frames is None:
-                return _store({"available": False, "reason": "confirmed_history_not_ready"})
-            closed_df, btc_df, funding_df = frames
-
-            async def _fetch_forming_bar(symbol: str) -> pd.DataFrame | None:
-                """1-row frame for `symbol`'s currently-forming bar, or None on any failure/bar-
-                boundary -- fail-soft by design (never raises) so a BTC-leg hiccup degrades
-                smt_divergence's BTC side back to closed-only data this cycle instead of taking
-                down the whole provisional preview, mirroring load_evidence_signals()'s own
-                BTC-leg fail-soft handling above."""
-                try:
-                    raw = await fetch_binance_json(
-                        "https://fapi.binance.com/fapi/v1/klines",
-                        {"symbol": symbol, "interval": EVIDENCE_SIGNAL_INTERVAL, "limit": 2},
-                    )
-                    if raw is None:
-                        return None
-                except Exception as exc:  # noqa: BLE001 -- forming-bar preview must never 500
-                    print(f"evidence-signal provisional forming-bar fetch failed ({symbol}): {exc}", flush=True)
-                    return None
-                cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
-                        "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
-                recent = pd.DataFrame(raw, columns=cols)
-                for c in ("open", "high", "low", "close", "volume", "taker_buy_base"):
-                    recent[c] = recent[c].astype("float64")
-                recent["close_time"] = recent["close_time"].astype("int64")
-                recent["timestamp"] = pd.to_datetime(recent["open_time"].astype("int64"), unit="ms", utc=True)
-                now_ms = int(time.time() * 1000)
-                forming = recent[recent["close_time"] >= now_ms]
-                if forming.empty:
-                    return None
-                return forming.iloc[[-1]][["timestamp", "open", "high", "low", "close", "volume", "taker_buy_base"]]
-
-            eth_forming = await _fetch_forming_bar(EVIDENCE_SIGNAL_SYMBOL)
-            if (
-                eth_forming is None
-                or closed_df.empty
-                or eth_forming.iloc[-1]["timestamp"] <= closed_df.iloc[-1]["timestamp"]
-            ):
-                # Fetch failed, or right at a bar boundary -- no bar currently forming, nothing to preview.
-                return _store({"available": False, "reason": "no_forming_bar"})
-            combined = pd.concat([closed_df, eth_forming], ignore_index=True)
-
-            # BTC leg (2026-08-26, user request "BTC도 진행값으로") -- same forming-bar substitution
-            # as ETH, kept in its own fail-soft branch: if this fetch fails or lands right on a bar
-            # boundary, smt_divergence's BTC side just falls back to the last CONFIRMED BTC bar
-            # (still correct, just one bar less "live" than its ETH side that cycle) rather than
-            # failing the whole preview.
-            btc_combined = btc_df
-            if btc_df is not None and len(btc_df):
-                btc_forming = await _fetch_forming_bar(EVIDENCE_SIGNAL_BTC_SYMBOL)
-                if btc_forming is not None and btc_forming.iloc[-1]["timestamp"] > btc_df.iloc[-1]["timestamp"]:
-                    btc_combined = pd.concat(
-                        [btc_df, btc_forming[["timestamp", "high", "low"]]], ignore_index=True,
-                    )
-
-            sig = await asyncio.to_thread(compute_signals, combined, btc_df=btc_combined, funding_df=funding_df)
-            latest = sig.iloc[-1]
-            warmed_up = bool(pd.notna(latest.get("p_fast")) and pd.notna(latest.get("p_slow")))
-            signals_payload = [
-                {
-                    "name": name,
-                    # Deliberately the RAW (non-sustained) columns, not the confirmed path's
-                    # *_active rolling-max -- this is meant to read "is it true on the forming bar
-                    # right now", not a smoothed multi-bar window.
-                    "bottom_fired": bool(latest[f"bottom_{name}"]) if warmed_up else None,
-                    "top_fired": bool(latest[f"top_{name}"]) if warmed_up else None,
-                }
-                for name, _description in EVIDENCE_SIGNAL_ORDER
-            ]
-            bar_open = eth_forming.iloc[0]["timestamp"]
-            elapsed_s = max(0, int((datetime.now(timezone.utc) - bar_open.to_pydatetime()).total_seconds()))
-            return _store({
-                "available": True,
-                "bar_open_utc": utc_iso(bar_open),
-                "bar_elapsed_seconds": elapsed_s,
-                "price": float(latest["close"]),
-                "warmed_up": warmed_up,
-                # 2026-08-26: whether the BTC leg (smt_divergence's cross-asset check) got a live
-                # forming bar this cycle, or fell back to the last CONFIRMED BTC bar -- exposed so
-                # the frontend/anyone reading the raw payload can tell, same transparency principle
-                # as the "미확정" labeling itself (never silently claim more liveness than delivered).
-                "btc_leg_live": bool(btc_combined is not btc_df),
-                "net_score": int(latest["net_score"]) if warmed_up else None,
-                "bottom_votes": int(latest["bottom_votes"]) if warmed_up else None,
-                "top_votes": int(latest["top_votes"]) if warmed_up else None,
-                "signals": signals_payload,
-            })
-
     async def load_v_rebound_signal() -> dict[str, Any]:
         """유동성스윕 반등예측 event-triggered signal -- see
         scripts/live_eth_sweep_v_rebound_signal_20260829.py docstring for the VAL/OOS/holdout-
         validated TabPFN model and why this is computed HERE (dashboard-side) rather than by
         trading_bot.py. Each call re-fits TabPFN on its frozen historical context (~3s measured
         on this server's GPU, 2026-08-29) -- asyncio.to_thread so that never stalls the event loop,
-        same reasoning as load_evidence_signals() above."""
+        same reasoning as load_chart_klines_frames() above."""
         return await swr_cached(
             "v_rebound", EVIDENCE_SIGNAL_CACHE_SECONDS,
             lambda: asyncio.to_thread(v_rebound_payload),
@@ -2458,9 +2186,20 @@ def make_app() -> web.Application:
             return compute_chart_markers(asset)
         vr = await load_v_rebound_signal()
         ex = await load_extreme_detector()
+        # 2026-09-16: 방향 없는 두 신호(추세 전환·변동폭 게이트)를 **구간**으로 같이 넘긴다.
+        # 여기서도 이미 계산된 페이로드를 재사용한다 -- 추가 모델 실행 없음(위 ⚠️와 같은 이유).
+        # 하나가 실패해도 마커 전체를 죽이지 않는다: 그 줄만 비고 나머지는 그려진다.
+        try:
+            bo = await load_breakout_detector()
+        except Exception:  # noqa: BLE001
+            bo = None
+        try:
+            ev = await load_evr_gate()
+        except Exception:  # noqa: BLE001
+            ev = None
         return await swr_cached(
             "chart_markers", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, ex),
+            lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, ex, bo, ev),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -2470,7 +2209,7 @@ def make_app() -> web.Application:
         computed HERE (dashboard-side, own live spot+perp klines fetch) rather than by
         trading_bot.py. asyncio.to_thread so the two blocking HTTP calls inside
         compute_basis_liquidation_signal() never stall this process's event loop, same reasoning
-        as load_evidence_signals() above.
+        as load_chart_klines_frames() above.
 
         asset: 2026-08-31, BTC added -- the underlying validation (basis_z48 extreme ->
         forward liquidation-volume tilt) was only ever measured on ETH; BTC's reading is exposed
@@ -2489,7 +2228,7 @@ def make_app() -> web.Application:
         bar so far -- a genuine incremental accumulator, not a bar-close-only reading -- so
         LIQUIDATION_5M_SIGNAL_CACHE_SECONDS (10s, 2026-08-26 user request, own dedicated constant)
         gives real reduced staleness rather than just re-serving an unchanged value. Same
-        asyncio.to_thread reasoning as load_evidence_signals() above.
+        asyncio.to_thread reasoning as load_chart_klines_frames() above.
 
         asset: 2026-08-31, BTC added -- see coin_config.py for BTC's separate tail-risk file."""
         return await swr_cached(
@@ -2512,7 +2251,7 @@ def make_app() -> web.Application:
     async def load_liquidation_map(asset: str = "eth") -> dict[str, Any]:
         """Snapshot-tab liquidation map (estimated support/resistance) -- see
         scripts/live_liquidation_map_20260824.py docstring for the estimation methodology and its
-        caveats. Mirrors load_evidence_signals()'s klines-fetch/cache pattern (own cache, since
+        caveats. Mirrors load_chart_klines_frames()'s klines-fetch/cache pattern (own cache, since
         this needs a much longer 1h lookback than the chart's own /api/market-history).
 
         asset: 2026-08-31, BTC added. compute_spliced_levels()/compute_spliced_heatmap_history()
@@ -2829,28 +2568,6 @@ def make_app() -> web.Application:
             {"samples": list(model_indicator_history), "sample_interval_seconds": MODEL_INDICATOR_SAMPLE_SECONDS},
             headers=NOCACHE,
         )
-
-    async def api_evidence_signals(request: web.Request) -> web.Response:
-        try:
-            payload = await load_evidence_signals()
-        except web.HTTPBadGateway:
-            return web.json_response(
-                {"error": "evidence_signal_upstream_error", "detail": "Binance klines fetch failed."},
-                status=web.HTTPBadGateway.status_code,
-                headers=NOCACHE,
-            )
-        return web.json_response(payload, headers=NOCACHE)
-
-    async def api_evidence_signals_provisional(request: web.Request) -> web.Response:
-        try:
-            payload = await load_evidence_signals_provisional()
-        except web.HTTPBadGateway:
-            return web.json_response(
-                {"available": False, "error": "evidence_signal_provisional_upstream_error"},
-                status=web.HTTPBadGateway.status_code,
-                headers=NOCACHE,
-            )
-        return web.json_response(payload, headers=NOCACHE)
 
     async def api_v_rebound_signal(request: web.Request) -> web.Response:
         payload = await load_v_rebound_signal()
@@ -3687,8 +3404,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/events", api_events)
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/footprint", api_footprint)
-    app.router.add_get("/api/evidence-signals", api_evidence_signals)
-    app.router.add_get("/api/evidence-signals-provisional", api_evidence_signals_provisional)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/extreme-detector", api_extreme_detector)
     app.router.add_get("/api/breakout-detector", api_breakout_detector)

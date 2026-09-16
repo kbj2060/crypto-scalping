@@ -256,7 +256,10 @@ def compute_eth_extreme_detector() -> dict:
                             "names": r.names_,
                             "p2": (float(r.p2) if r.p2 == r.p2 else None),
                             "dual_demoted": bool(r.dual_demoted)}
-        history, times = [], []
+        # 2026-09-16: 봉별 **등급**도 같이 내보낸다. 그전엔 tone(good/bad)만 나가서 차트가
+        # 강(표본외 정밀도 68.9%·1.12건/일)과 약(34.7%·4.93건/일)을 **같은 삼각형**으로 그렸다.
+        # 약이 4배 자주 뜨는데 같은 무게로 보이면 화면이 약에 끌려간다.
+        history, times, grades, probas, demoted = [], [], [], [], []
         for t in ts_all.iloc[-HISTORY_BARS:]:
             # 🔴반드시 tz 를 붙여 내보낸다. 자바스크립트 `new Date("...T06:10:00")` 는 오프셋이
             #   없으면 **로컬 시간**으로 파싱해서 KST 브라우저에서 9시간 어긋난다(2026-09-09
@@ -264,6 +267,9 @@ def compute_eth_extreme_detector() -> dict:
             times.append(pd.Timestamp(t).tz_localize("UTC").isoformat())
             b = by_ts.get(t)
             history.append(("good" if b["long"] else "bad") if b else "neutral")
+            grades.append(b["grade"] if b else None)
+            probas.append(round(b["p"], 4) if b else None)
+            demoted.append(bool(b.get("dual_demoted")) if b else False)
         cur = by_ts.get(last_ts)
         gated_now = bool(A[A._ts == last_ts].gated.any()) if (A._ts == last_ts).any() else False
         if cur:
@@ -280,6 +286,7 @@ def compute_eth_extreme_detector() -> dict:
             "costw_cut": ((cw["meta"].get("cuts") or {}).get("강") if cw else None),
             "dual_demoted": bool(cur.get("dual_demoted")) if cur else False,
             "costw_rule_id": (cw["meta"].get("rule_id") if cw else None),
+            "grades": grades, "probas": probas, "demoted": demoted,
             "gated_now": gated_now, "trend_q": round(float(A[A._ts == last_ts]._tq.iloc[0]), 3)
                           if (A._ts == last_ts).any() else None,
             "latest_ts_utc": pd.Timestamp(last_ts).tz_localize("UTC").isoformat(),
