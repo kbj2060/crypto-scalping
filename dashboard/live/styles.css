@@ -491,7 +491,9 @@ body {
 .meter-pct { font: 700 10px/1 var(--font-mono); color: var(--muted); min-width: 26px; text-align: right; }
 .meter-price { font: 700 11px/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
 
-/* **강조** 가 실제 굵기로 나온다(2026-09-16). 본문이 muted 라 굵기만으로는 약해서 색도 올린다. */
+/* **강조** 가 실제 굵기로 나온다(2026-09-16). color 는 «자세히» 블록을 위한 것이다 --
+   .signal-detail 본문만 muted(라이트 85,92,108 · 다크 139,145,166)라 색이 실제로 올라가고,
+   .signal-meaning 은 이미 --text 라 굵기 400->700 만 걸린다. 실측으로 확인. */
 .signal-meaning b, .signal-detail b { font-weight: 700; color: var(--text); }
 /* Always-visible "지금 이게 무슨 뜻인지" line -- unlike .signal-detail below, this never needs a
    click; it only renders when there's something actionable to say (elevated/firing state). Border
