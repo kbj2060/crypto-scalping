@@ -329,5 +329,95 @@ def robust() -> int:
     return 0
 
 
+# 배포 부모의 TRAIN/VAL/OOS 를 덮는 구간. 이 안과 겹치는 TEST 창은 배포본에겐 표본내다.
+DEPLOYED_SEEN = ("2025-01-01", "2026-02-28")
+
+
+def deployed() -> int:
+    """--deployed: **배포 부모에 같은 분해를 건다.** 고정 아티팩트라 추론만 — 학습 없음.
+
+    지금까지 배포본은 창 하나(VAL 2026-03~06)로만 봤고 내 후보만 742일로 쟀다.
+    같은 자로 재지 않으면 「배포본이 이겼다」가 아니라 「배포본만 시험을 덜 봤다」가 된다.
+    게이트는 **배포본의 실제 임계값 q=0.75 단일**(내 대칭게이트는 내 변경분이라 안 씌운다).
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log(f"지평={HZ} · device={device} · 배포본 단일 q={E.Q_THRESH} · 추론만(학습 없음)")
+    df, base_cols = E.load()
+    b = torch.load(E.BUNDLE, map_location="cpu", weights_only=False)
+    experts = {}
+    for ename in ("bull", "bear", "chop"):
+        pay = dict(b["models"][ename])
+        m = tabm.ThreeHeadTabM(int(pay["n_features"]),
+                               cfg=tabm.ThreeHeadConfig(**dict(pay["config"]))).to(device)
+        m.load_state_dict(pay["state_dict"]); m.eval()
+        experts[ename] = (m, dict(pay["scaler"]))
+
+    rows, pooled = [], []
+    for name, _t0, _t1, v0, v1 in FOLDS:
+        if not (v1 < DEPLOYED_SEEN[0] or v0 > DEPLOYED_SEEN[1]):
+            log(f"\n{name} {v0}~{v1} 건너뜀 — 배포본의 학습/검증 구간과 겹친다(표본내)")
+            continue
+        te = df[(df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")].reset_index(drop=True)
+        yv = pd.to_numeric(te["zigzag_action"]).to_numpy(np.int64)
+        xr = tabm._base_input(te, base_cols)
+        ev = tabm._route_probs(te).argmax(1)
+        days = te.timestamp.dt.floor("D").to_numpy()
+        fwd = te[f"fwd_{HZ}_bp"].to_numpy(np.float64)
+        D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
+        for ei, ename in enumerate(("bull", "bear", "chop")):
+            m, sc = experts[ename]
+            sel = ev == ei
+            if sel.any():
+                D[sel], Q[sel] = E.heads(m, tabm._standardize_apply(xr[sel], sc), device)
+        _, side = F.gate(D, Q, E.Q_THRESH)
+
+        dec, ok = decompose(side, fwd)
+        ci, nd = block_boot(side[ok], fwd[ok], days[ok])
+        s_, r_, d_ = side[ok], fwd[ok], days[ok]
+        dsum = {u: (s_[d_ == u] * r_[d_ == u]).sum() for u in np.unique(d_)}
+        order = sorted(dsum, key=lambda u: -dsum[u])
+        tim = lambda ss, rr: float((ss * rr).mean() - ss.mean() * rr.mean())
+        keep3 = ~np.isin(d_, order[:3])
+        fin = np.isfinite(fwd)
+        r = {"fold": name, "test": [v0, v1], "indep_days": nd, **dec, "ci95": ci,
+             "pass_rate": dec["n"] / len(te),
+             "all_bar_drift_bp": float(fwd[fin].mean()),
+             "timing_drop_top3d": tim(s_[keep3], r_[keep3]) if keep3.sum() > 50 else float("nan"),
+             **{k: v for k, v in F.bias_report(name, side, fwd, yv, days).items()
+                if k in ("long_share", "excess_vs_long", "excess_vs_short")},
+             **{k: v for k, v in G.day_stats(side, fwd, days).items()
+                if k in ("median_bp", "pos_day_share")}}
+        rows.append(r); pooled.append((s_, r_, d_))
+        log(f"  {name} {v0}~{v1}: 통과율 {r['pass_rate']:.3f}({dec['n']:,}건/{nd}일) · 롱 {r['long_share']*100:.1f}%")
+        log(f"    총 {dec['gross_bp']:+7.3f} = 기울기 {dec['tilt_bp']:+7.3f} + 타이밍 {dec['timing_bp']:+7.3f}"
+            f"  CI[{ci['timing'][0]:+.3f},{ci['timing'][1]:+.3f}]{' 🟢' if ci['timing'][0] > 0 else ' 0포함'}"
+            f" · 최고3일제거 {r['timing_drop_top3d']:+.3f}")
+        log(f"    모델−롱 {r['excess_vs_long']['bp']:+.2f} · 모델−숏 {r['excess_vs_short']['bp']:+.2f} · "
+            f"중앙 {r['median_bp']:+.2f} · 양수일 {r['pos_day_share']*100:.1f}%")
+
+    s_ = np.concatenate([x[0] for x in pooled]); r_ = np.concatenate([x[1] for x in pooled])
+    d_ = np.concatenate([x[2] for x in pooled])
+    pdec, _ = decompose(s_, r_); pci, pnd = block_boot(s_, r_, d_)
+    dsum = {u: (s_[d_ == u] * r_[d_ == u]).sum() for u in np.unique(d_)}
+    order = sorted(dsum, key=lambda u: -dsum[u])
+    tim = lambda ss, rr: float((ss * rr).mean() - ss.mean() * rr.mean())
+    k3 = ~np.isin(d_, order[:3]); k10 = ~np.isin(d_, order[:10])
+    log(f"\n=== 배포본 풀링 ({pnd}일 · n {pdec['n']:,} · 지평 {HZ}) ===")
+    log(f"총 {pdec['gross_bp']:+.3f} = 기울기 {pdec['tilt_bp']:+.3f} + 타이밍 {pdec['timing_bp']:+.3f} "
+        f"CI[{pci['timing'][0]:+.3f},{pci['timing'][1]:+.3f}]")
+    log(f"최고3일제거 {tim(s_[k3], r_[k3]):+.3f} · 최고10일제거 {tim(s_[k10], r_[k10]):+.3f} · "
+        f"윈저 {tim(s_, np.clip(r_, -100.0, 100.0)):+.3f}")
+    out = {"horizon": HZ, "gate": "single q=0.75 (배포본 실제)", "folds": rows,
+           "pooled": {**pdec, "ci95": pci, "indep_days": pnd,
+                      "timing_drop_top3d": tim(s_[k3], r_[k3]),
+                      "timing_drop_top10d": tim(s_[k10], r_[k10]),
+                      "timing_winsor": tim(s_, np.clip(r_, -100.0, 100.0))}}
+    (E.OUT / f"stageK_deployed{SUF}.json").write_text(json.dumps(out, indent=2, default=float))
+    log(f"저장: {E.OUT}/stageK_deployed{SUF}.json")
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(robust() if "--robust" in sys.argv else main())
+    raise SystemExit(
+        deployed() if "--deployed" in sys.argv else
+        robust() if "--robust" in sys.argv else main())
