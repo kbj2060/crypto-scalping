@@ -381,6 +381,17 @@ body {
    -info/-status-badge as-is (see scripts/live_macro_calendar_20260826.py for the event data). */
 .macro-calendar-list { grid-template-columns: 1fr; }
 .macro-calendar-list .ops-health-row:nth-child(odd) { border-right: none; }
+/* 🔴이 배지는 **언제나 시각**이다("내일 03:00 AM"). 좁은 칸에서 «내일 / 03:00 / AM» 로
+   세 줄이 되어 배지가 72x54 였다(사용자 지적). 시각은 쪼개면 못 읽는다.
+   nowrap 만으로는 부족했다 -- 트랙이 72px 에 머물러 이번엔 «내일 03:0» 로 **잘렸다**.
+   `min-width: max-content` 가 트랙에게 «이만큼은 필요하다»를 알려주는 유일한 한 줄이다
+   (실측: 트랙 72 → 108, 잘림 해소). 3열을 max-content 로 바꾸는 것으로는 안 됐다.
+   ⚠️다른 배지에는 걸지 않는다 -- 헬스 체크의 긴 진단 문자열("0/100쌍 (0%) · 표본 없음 …",
+   실측 190px)에 걸면 제목을 다시 밀어 2026-08 사고가 재발한다. 거긴 줄바꿈이 **맞다**. */
+.macro-calendar-list .ops-health-status-badge {
+  white-space: nowrap;
+  min-width: max-content;
+}
 .macro-calendar-empty { padding: 16px 18px; color: var(--muted); font-size: 12.5px; }
 
 .ops-health-dot {
@@ -402,6 +413,9 @@ body {
 .ops-health-meta small { color: var(--muted); font: 11px/1 var(--font-mono); }
 .ops-health-status-badge {
   display: inline-block;
+  /* 등폭 폰트라 ch 가 곧 «글자 수»다. 이 상한이 좁은 화면에서 긴 배지가 제목을 미는 것을
+     막는다(2026-08 «제목이 한 글자씩 줄바꿈」 사고의 진짜 방지선). */
+  max-width: 17ch;
   padding: 3px 9px;
   border-radius: 999px;
   font: 800 10px/1.4 var(--font-mono);
@@ -850,9 +864,11 @@ body {
      minmax(0, …) 로 두 트랙의 최소를 0 으로 풀고, meta 는 40% 를 못 넘게 상한을 준다.
      그러면 긴 meta 는 자기 칸 안에서 줄바꿈하지 info 를 밀지 않는다. */
   .ops-health-row {
-    /* fit-content(40%) = «내용만큼 쓰되 40% 는 못 넘는다». minmax(0,40%) 로 하면
-       배지만 있어도 항상 40% 를 차지해 info 가 쓸데없이 좁아진다. */
-    grid-template-columns: auto minmax(0, 1fr) fit-content(40%);
+    /* 🔴fit-content(40%) 로 했더니 트랙이 72px 만 잡혀 시각 배지(필요 108px)가 잘렸다(실측).
+       트랙을 auto 로 두고 **배지 자신에게 ch 상한**을 준다 -- 배지는 등폭 폰트라 ch 가
+       글자 수와 정확히 대응한다. 시각은 «내일 03:00 AM» 12 자라 다 들어가고,
+       긴 진단 문자열은 상한에 걸려 자기 칸 안에서 줄바꿈한다(info 를 안 민다). */
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 12px;
     padding: 14px 16px;
