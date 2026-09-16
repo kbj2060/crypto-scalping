@@ -21,6 +21,9 @@
      --chart-bg(2.8)가 --bg 보다 어두워 차트가 페이지 아래로 가라앉았다. */
   --bg: #161a22;
   --panel: rgba(35, 41, 50, 0.82);
+  /* 2026-09-16 다크 모달은 «유리 말고 그냥 같은 검정»(사용자). --panel 을 --bg 위에
+     합성한 불투명 값이라 패널과 같은 색으로 보이면서 뒤가 비치지 않는다. */
+  --modal-solid: #21262f;
   --panel-strong: rgba(46, 52, 62, 0.92);
   --chart-bg: #171b23;
   --glass: rgba(255, 255, 255, 0.05);
@@ -2579,28 +2582,23 @@ svg {
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100dvh - 48px);
   padding: 0;
-  /* 🔴«흰색 말고 글래스»(사용자). 원인은 두 겹이었다 -- ①패널 알파가 높고
-     ②::backdrop 스크림이 진해 **blur 가 굴절할 뒤가 없었다**(단색 위의 blur 는 무효과,
-     지면에서 배운 것과 같은 함정). 알파를 낮추고 스크림을 옅게 해 뒤가 비치게 한다. */
-  border: 1px solid var(--glass-edge);
+  /* 2026-09-16 **다크는 유리를 쓰지 않는다**(사용자 요청: 「다크모드 모달은 글래스 말고
+     그냥 같은 검정색으로」). 유리 버전은 아래 [data-theme="light"] 블록에만 있다.
+     단색이라 blur 도 필요 없다 -- backdrop-filter 를 걸지 않는 편이 더 정확하고 싸다. */
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  background:
-    linear-gradient(135deg,
-      rgba(255, 255, 255, 0.34) 0%,
-      rgba(255, 255, 255, 0.08) 42%,
-      rgba(255, 255, 255, 0.22) 100%),
-    color-mix(in srgb, var(--panel) 62%, transparent);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  background: var(--modal-solid);
   color: var(--text);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 24px 64px rgb(var(--shadow) / 0.30);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
   overflow: auto;
   overscroll-behavior: contain;
 }
 .trade-modal::backdrop {
   /* 스크림이 진하면 모달 유리가 굴절할 «뒤」가 사라진다 -- 화면을 가리는 대신 살짝 눕힌다. */
+  background: rgba(0, 0, 0, 0.45);
+}
+/* 라이트는 반대다 -- 스크림이 진하면 모달 유리가 굴절할 «뒤»가 사라진다. */
+[data-theme="light"] .trade-modal::backdrop {
   background: rgb(var(--shadow) / 0.18);
   backdrop-filter: blur(2px) saturate(140%);
   -webkit-backdrop-filter: blur(2px) saturate(140%);
@@ -2615,20 +2613,40 @@ svg {
   border-bottom: 1px solid var(--soft-line);
   position: sticky;
   top: 0;
-  /* 🔴`background: inherit` 은 부모의 **계산된 배경 이미지**를 안 물려받는다 -- 그래서
-     헤더만 흰 판으로 남았다(사용자 지적). 몸통과 같은 유리를 직접 칠한다.
-     🔴2026-09-16 (2차) 「아직도 흰색(회색)」. 칠을 «어떤 색으로 할까»를 계속 고른 게
-     문제였다 -- 흰 wash 는 흰 띠가 되고, --lift wash 는 라이트에서 회색 띠가 된다.
-     ⭐답은 **아무 색도 칠하지 않는 것**이다. 몸통의 유리가 그대로 비치면 헤더는
-     정의상 «몸통과 같은 유리»가 된다. backdrop-filter 만 남겨 두면 내용이 밑으로
-     스크롤할 때 그 글자를 흐려 주므로 sticky 도 그대로 성립한다. */
+  /* 다크는 몸통과 **같은 단색**이어야 한다(스크롤이 밑으로 지나가도 가려야 하므로 불투명).
+     라이트 유리판은 아래 [data-theme="light"] 블록이 덮어쓴다. */
+  background: var(--modal-solid);
+  z-index: 1;
+}
+.trade-modal-head h3 { margin: 0; font: 600 15px/1.2 var(--font-display); }
+
+/* ── 라이트에서만 유리 ──────────────────────────────────────────────────────
+   🔴«헤더가 아직도 흰색»이 세 번 나왔다. 헤더를 아무리 투명하게 해도 흰 채로 남은 이유는
+   헤더 자신이 아니라 **몸통 그라디언트**였다: 135deg 의 0% 정지점(흰 34%)이 정확히
+   왼쪽 위, 즉 헤더 자리에 앉아 있었다. 광택을 대각선 **아래쪽**으로 옮기고 윗머리의
+   흰 기를 8% 로 낮춘다 -- 그래야 헤더가 몸통과 같은 유리로 읽힌다. */
+[data-theme="light"] .trade-modal {
+  border-color: var(--glass-edge);
+  background:
+    linear-gradient(150deg,
+      rgba(255, 255, 255, 0.08) 0%,
+      rgba(255, 255, 255, 0.10) 38%,
+      rgba(255, 255, 255, 0.30) 100%),
+    color-mix(in srgb, var(--panel) 62%, transparent);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    0 24px 64px rgb(var(--shadow) / 0.30);
+}
+/* 헤더는 칠하지 않는다 -- 몸통 유리가 그대로 비쳐야 «같은 유리»가 된다.
+   backdrop-filter 만 남겨 스크롤이 밑으로 지나갈 때 글자를 흐린다. */
+[data-theme="light"] .trade-modal-head {
   background: transparent;
   backdrop-filter: blur(22px) saturate(180%);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
   box-shadow: inset 0 1px 0 var(--specular);
-  z-index: 1;
 }
-.trade-modal-head h3 { margin: 0; font: 600 15px/1.2 var(--font-display); }
 .trade-modal .manual-entry { padding: 22px 20px 26px; }
 
 @media (max-width: 720px) {

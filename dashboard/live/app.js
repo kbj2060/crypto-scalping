@@ -5567,6 +5567,10 @@ function renderEntryProj(plan) {
         + (plan.fallback ? `\n${plan.fallback_after_sec || "?"}초 안에 안 채워지면 시장가로 넘어가므로 실제 체결가는 달라질 수 있습니다.` : "")
       : "";
   }
+  // 평단 행: 다른 셋과 달리 projection 에 없다 -- 보유분과 이번 주문의 **체결가 가중평균**이다.
+  // 레일 눈금은 **현재가 ±5%**, 가운데(50%)가 현재가다. 절대 가격은 스케일이 없으므로
+  // «현재가에서 얼마나 떨어져 있나»를 재는 게 유일하게 뜻이 통하는 눈금이다.
+  renderEntryProjAvg(px, qty);
   Object.entries(PROJ_SPEC).forEach(([key, [field, full, fmt]]) => {
     const row = host.querySelector(`[data-proj="${key}"]`);
     if (!row) return;
@@ -5594,6 +5598,41 @@ function renderEntryProj(plan) {
 // 내에서 처리하고 있어」). 같은 값을 모달의 「지금 넣으면」 블록이 이미 보여준다.
 // ⭐이로써 «카드가 실제 계좌인가 미리보기인가»라는 상태 자체가 사라졌다 -- 계좌 카드는
 //   언제나 실제 계좌다(그 구분을 유지하느라 있던 켜기/끄기/복구 경로가 전부 없어진다).
+
+const AVG_BAND = 0.05;   // 레일 눈금 폭. 현재가 ±5% 를 다 쓰고 그 밖은 끝에 붙인다
+function renderEntryProjAvg(addPx, addQty) {
+  const row = el("entryProj")?.querySelector('[data-proj="px"]');
+  if (!row) return;
+  const pos = snapshotAccountPosition();
+  const mark = Number(pos?.mark_price) || addPx;
+  // 포지션이 없으면 «원래»가 없다 -- 이번 주문가 하나뿐이라 화살표도 레일도 뜻이 없다.
+  const haveQty = Number(pos?.qty) || 0, havePx = Number(pos?.entry_price) || 0;
+  if (!(addPx > 0) || !(mark > 0)) { row.hidden = true; return; }
+  row.hidden = false;
+  const newQty = haveQty + addQty;
+  const after = newQty > 0 ? (haveQty * havePx + addQty * addPx) / newQty : addPx;
+  const before = haveQty > 0 ? havePx : null;
+  const usd = (v) => `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  pvText(row.querySelector(".entry-proj-from"), before == null ? "신규" : usd(before));
+  pvText(row.querySelector(".entry-proj-to"), usd(after));
+  // 0 = 현재가−5% · 0.5 = 현재가 · 1 = 현재가+5%
+  const pct = (v) => Math.max(0, Math.min(100, ((v - mark) / (mark * AVG_BAND) + 1) * 50));
+  const gap = Math.abs(after - mark) / mark;
+  const tone = gap < 0.01 ? "good" : gap < 0.03 ? "warn" : "bad";
+  const bar = row.querySelector(".entry-proj-rail i");
+  const ghost = row.querySelector(".entry-proj-rail u");
+  if (bar) { bar.style.width = pct(after) + "%"; bar.className = tone; }
+  if (ghost) {
+    ghost.hidden = before == null;
+    if (before != null) ghost.style.left = pct(before) + "%";
+  }
+  row.dataset.tone = tone;
+  row.dataset.capped = "";
+  row.title = `레일 가운데(50%)가 현재가 ${usd(mark)} 입니다 — 눈금 폭은 ±5%.`
+    + (before == null ? "\n보유분이 없어 이번 주문가가 곧 평단입니다."
+       : `\n보유 ${haveQty.toFixed(3)} × ${usd(before)} 에 ${addQty.toFixed(3)} × ${usd(addPx)} 를 더한 가중평균입니다.`)
+    + "\n🔴추정치입니다 — 부분체결·테이커 폴백이면 실제 평단은 달라집니다.";
+}
 
 async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
