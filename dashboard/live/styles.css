@@ -1399,6 +1399,11 @@ body {
   height: 400px;
   position: relative;
   overflow: hidden;
+  /* 🔴2026-09-16 «현재가가 움직일 때마다 진입/청산 버튼 아래가 깜빡인다»(사용자).
+     이 안의 SVG 는 초당 ~1.7회 통째로 다시 그려지는데(실측 40초에 29,170 노드 변경),
+     그 무효화가 컨테이너 밖으로 새면 바로 위·아래의 backdrop-filter 유리가 매번
+     다시 블러된다. 그림이 이미 overflow:hidden 으로 잘리므로 paint 격리는 공짜다. */
+  contain: paint;
   margin-top: 12px;
   /* 2026-09-10 사용자 요청 "청산맵 차트 뒤에 검정색 백그라운드를 없애줘": --chart-bg(#090a10)
      제거 -> 패널 자체 배경이 비친다. 이 클래스를 쓰는 요소는 청산맵 차트 하나뿐이므로
@@ -2224,15 +2229,11 @@ svg {
 @media (max-width: 700px) { .entry-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .entry-was { font: 600 11px/1 var(--font-sans); color: var(--muted); }
 .entry-arrow { font: 600 11px/1 var(--font-sans); color: var(--muted); margin: 0 3px; }
-.acct-rail.entry-rail { position: relative; overflow: visible; }
-/* 2026-09-15 계좌 카드가 «진입 미리보기»를 그릴 때. 🔴실제 계좌인 척하면 안 되므로 테두리를
-   점선으로 바꿔 한눈에 가른다 -- 위의 라벨 한 줄과 함께 두 겹으로 표시한다. */
-.acct-tiles.preview .acct-tile { border-style: dashed;
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-/* 2026-09-15 진입 비율을 움직이면 **눈으로 따라갈 수 있게** 한다. 노드를 갈아치우지 않고
-   제자리에서 고치므로(applyAcctPreview) transition 이 실제로 걸린다.
+/* 2026-09-16 계좌 카드의 «진입 미리보기» 스타일은 기능과 함께 삭제했다(사용자 요청) --
+   점선 테두리·미리보기 라벨·유령 눈금은 전부 그 기능 전용이었다.
+   transition 은 남긴다: 실제 계좌 값도 폴링마다 바뀌고, 그때 미끄러지는 편이 읽기 쉽다.
    ⚠️줄인 모션을 요청한 사용자에게는 끈다 -- 접근성 규약. */
-.acct-rail i, .acct-rail u, .acct-gauge-knob {
+.acct-rail i, .acct-gauge-knob {
   transition: width .32s cubic-bezier(.4, 0, .2, 1), left .32s cubic-bezier(.4, 0, .2, 1); }
 .acct-tile-val, .acct-gauge-legend span, .acct-pos-qty, .acct-tag {
   transition: color .32s ease; }
@@ -2240,13 +2241,10 @@ svg {
 @keyframes pvBump { 0% { opacity: .35; } 100% { opacity: 1; } }
 .pv-bump { animation: pvBump .28s ease-out; }
 @media (prefers-reduced-motion: reduce) {
-  .acct-rail i, .acct-rail u, .acct-gauge-knob,
+  .acct-rail i, .acct-gauge-knob,
   .acct-tile-val, .acct-gauge-legend span, .acct-pos-qty, .acct-tag { transition: none; }
   .pv-bump { animation: none; }
 }
-.acct-rail.entry-rail i { position: absolute; left: 0; top: 0; }
-.acct-rail.entry-rail u { position: absolute; top: -2px; bottom: -2px; width: 2px;
-  background: var(--muted); opacity: .85; text-decoration: none; }
 .entry-note { font: 600 11px/1.55 var(--font-sans); padding: 8px 10px; border-radius: 8px;
   background: var(--glass); border: 1px solid var(--soft-line); color: var(--muted); }
 .entry-note.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
@@ -2619,12 +2617,12 @@ svg {
   top: 0;
   /* 🔴`background: inherit` 은 부모의 **계산된 배경 이미지**를 안 물려받는다 -- 그래서
      헤더만 흰 판으로 남았다(사용자 지적). 몸통과 같은 유리를 직접 칠한다.
-     🔴2026-09-16 그래도 흰 띠로 보였다. 원인은 «흰 칠을 두 번»이다 -- 몸통이 이미
-     흰 그라디언트 + brightness(1.08) 유리인데 헤더가 그 위에 또 흰 wash 를 얹고
-     --glass-blur 의 brightness 를 한 번 더 곱했다. wash 를 --lift 로 돌려
-     (밝기는 다크에서만 더하고 라이트에서는 «그늘」이 된다) 밝기 부스트를 뺀다. */
-  background: linear-gradient(180deg,
-    rgb(var(--lift) / 0.10), rgb(var(--lift) / 0.02));
+     🔴2026-09-16 (2차) 「아직도 흰색(회색)」. 칠을 «어떤 색으로 할까»를 계속 고른 게
+     문제였다 -- 흰 wash 는 흰 띠가 되고, --lift wash 는 라이트에서 회색 띠가 된다.
+     ⭐답은 **아무 색도 칠하지 않는 것**이다. 몸통의 유리가 그대로 비치면 헤더는
+     정의상 «몸통과 같은 유리»가 된다. backdrop-filter 만 남겨 두면 내용이 밑으로
+     스크롤할 때 그 글자를 흐려 주므로 sticky 도 그대로 성립한다. */
+  background: transparent;
   backdrop-filter: blur(22px) saturate(180%);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
   box-shadow: inset 0 1px 0 var(--specular);
@@ -2685,6 +2683,11 @@ svg {
   align-items: center;
   gap: 10px 10px;
 }
+/* 예상 진입가 -- 다른 행과 달리 전/후가 없다(주문가는 하나뿐). 라벨 열만 맞춰 세운다. */
+.entry-proj-px { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.entry-proj-px .entry-proj-lab { grid-area: auto; }
+.entry-proj-pxv { font: 700 15px/1.2 var(--font-mono); color: var(--text); cursor: help; }
+.entry-proj-pxnote { font: 600 11.5px/1.4 var(--font-mono); color: var(--muted); }
 .entry-proj-lab { grid-area: lab; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .entry-proj-from {
   grid-area: from; justify-self: end;

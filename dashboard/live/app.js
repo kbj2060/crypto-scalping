@@ -57,7 +57,10 @@ const setB = (id, cls) => {
   target.classList.remove("good-border", "bad-border", "warn-border", "neutral-border");
   if (cls) target.classList.add(`${cls}-border`);
 };
-const setH = (id, html) => { const target = el(id); if (target) target.innerHTML = html; };
+// 🔴같은 html 을 다시 넣지 않는다(2026-09-16). 현재가 틱마다 청산맵 목록·배지가 통째로
+//   다시 쓰였고, 그 줄은 진입/청산 버튼 바로 아래 **유리 헤더**라 재래스터가 눈에 띈다.
+//   innerHTML 재대입은 같은 문자열이어도 자식을 전부 버리고 다시 파싱한다.
+const setH = (id, html) => { const target = el(id); if (target && target.innerHTML !== html) target.innerHTML = html; };
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
 // Snapshot tab: same 5 model indicators (bot-state ones only -- see the "own fetch cycle" model
@@ -1060,18 +1063,8 @@ function bindAcctChartTip() {
   host.addEventListener("focusout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
 }
 
-// 2026-09-15 «추가 진입을 누르면 진입 비율에 따라 계좌 카드 게이지도 같이 움직이게»(사용자).
-// 크기 갱신이 슬라이더 값대로 이미 받아오는 `plan.projection` 을 여기 담아 카드가 읽는다.
-// null 이면 카드는 **실제 계좌**를 그린다 -- 미리보기가 꺼지면 반드시 여기로 돌아온다.
-// 2026-09-15 진입 미리보기를 계좌 카드에 **제자리에서** 입힌다(사용자: 「카드까지 똑같이,
-// 애니메이션으로 진입비율에 따라 바뀌게」). 노드를 갈아치우지 않으므로 CSS transition 이 걸린다.
-//
-// 🔴여기가 미리보기를 입히는 **유일한 곳**이다. 렌더는 항상 실제 계좌만 그린다 -- 두 곳에서
-//    값을 만들면 «카드와 타일이 서로 다른 순간을 말하는» 상태가 생긴다.
-// 🔴끄는 것도 여기다: `entryProjPreview` 가 null 이면 렌더가 그린 실제 값이 그대로 남는다
-//    (아무것도 안 만지므로). 그래서 «옛 미리보기가 굳는» 경로가 구조적으로 없다.
-// 값이 바뀐 노드만 짧게 강조한다. 막대·손잡이는 CSS transition 으로 미끄러지지만 글자는
-// 즉시 바뀌므로 눈이 놓친다 -- 그 한 곳만 메운다. 값이 같으면 아무것도 안 한다(폴링 떨림 방지).
+// 값이 바뀐 노드만 짧게 강조한다. 막대는 CSS transition 으로 미끄러지지만 글자는 즉시
+// 바뀌므로 눈이 놓친다 -- 그 한 곳만 메운다. 값이 같으면 아무것도 안 한다(폴링 떨림 방지).
 function pvText(node, txt) {
   if (!node || node.textContent === txt) return;
   node.textContent = txt;
@@ -1079,74 +1072,6 @@ function pvText(node, txt) {
   void (node.offsetWidth ?? 0);      // 리플로우 -- 같은 클래스를 다시 붙여도 애니메이션이 재시작된다
   node.classList.add("pv-bump");
 }
-
-function applyAcctPreview(pos, mark, equity) {
-  const root = el("snapAcctPosition");
-  const pv = entryProjPreview;
-  if (!root) return;
-  const q = (k) => root.querySelector(`[data-pv="${k}"]`);
-  root.querySelectorAll(".acct-tiles").forEach((n) => n.classList.toggle("preview", !!pv));
-  const cap = root.querySelector(".acct-pv-cap");
-  if (cap) cap.hidden = !pv;
-  if (!pv) { root.querySelectorAll(".acct-rail u").forEach((u) => u.remove()); return; }
-
-  const a = pv.after, plan = pv.__plan || {};
-  const LIQ_FULL = 10, EXPO_CAP = 30;
-  const long = pos.side === "LONG";
-  // 타일 셋: 값·색·막대·유령눈금(지금 자리)
-  const setTile = (k, txt, tone, fill, ghost) => {
-    const t = q(k); if (!t) return;
-    const v = t.querySelector(".acct-tile-val"), rail = t.querySelector(".acct-rail");
-    const bar = rail && rail.querySelector("i");
-    if (v) { v.className = `acct-tile-val ${tone}`; pvText(v, txt); }
-    if (bar) { bar.className = tone; bar.style.width = `${clamp01(fill) * 100}%`; }
-    if (rail) {
-      rail.classList.add("entry-rail");
-      let u = rail.querySelector("u");
-      if (!u) { u = document.createElement("u"); rail.appendChild(u); }
-      u.style.left = `${clamp01(ghost) * 100}%`;
-      u.title = "지금 자리";
-    }
-  };
-  setTile("liq", `${Number(a.liq_pct).toFixed(2)}%`, acctRiskTone(a.liq_pct),
-          a.liq_pct / LIQ_FULL, pv.before.liq_pct / LIQ_FULL);
-  setTile("used", `${Number(a.margin_used_pct).toFixed(0)}%`,
-          a.margin_used_pct > 80 ? "bad" : a.margin_used_pct > 60 ? "warn" : "good",
-          a.margin_used_pct / 100, pv.before.margin_used_pct / 100);
-  setTile("expo", `${Number(a.exposure_x).toFixed(1)}배`, a.exposure_x > 15 ? "bad" : "warn",
-          a.exposure_x / EXPO_CAP, pv.before.exposure_x / EXPO_CAP);
-
-  // 포지션 카드: 수량·레버리지·평단·청산가·손잡이. 평단은 **체결가 가중평균**이다.
-  const addQty = Number(plan.quantity) || 0, addPx = Number(plan.price) || 0;
-  const haveQty = Number(pos.qty) || 0, havePx = Number(pos.entry_price) || 0;
-  const newQty = haveQty + addQty;
-  const newEntry = newQty > 0 ? (haveQty * havePx + addQty * addPx) / newQty : havePx;
-  // 청산가는 거래소가 준 **거리(%)** 에서 되돌린다 -- 근사식보다 실측에 앵커된 값이다.
-  const newLiq = mark > 0 ? mark * (1 + (long ? -1 : 1) * Number(a.liq_pct) / 100) : 0;
-  pvText(q("qty"), `~${newQty.toFixed(3)}`);
-  const tg = q("tag");
-  if (tg && plan.target_leverage) pvText(tg, `${long ? "롱" : "숏"} ×${plan.target_leverage}`);
-  pvText(q("liqpx"), `청산 ~${fmtUsd(newLiq)}`);
-  // 🔴평단은 **추측치**다. 체결가를 peg 호가로 가정한 가중평균이라 실제 체결(부분체결·
-  //   테이커 폴백·슬리피지)에 따라 달라진다. `~` 와 툴팁으로 그 사실을 남긴다 --
-  //   이 자리에 확정값처럼 적으면 「미리보기에서 본 숫자와 다르다」가 된다.
-  const ep = q("entrypx");
-  if (ep) {
-    pvText(ep, `진입 ~${fmtUsd(newEntry)}`);
-    ep.title = `추측치 — 지금 ${fmtUsd(havePx)} (${haveQty.toFixed(3)} ETH)에`
-      + ` ${addQty.toFixed(3)} ETH 를 ${fmtUsd(addPx)}(peg 호가)에 더한 가중평균입니다.`
-      + `\n실제 체결가가 다르면(부분체결·테이커 폴백) 평단도 달라집니다.`;
-  }
-  const kn = q("knob");
-  if (kn) {
-    const span = Math.abs(newEntry - newLiq) * 2;
-    kn.style.left = `${(clamp01(span > 0 ? Math.abs(mark - newLiq) / span : 0) * 100).toFixed(1)}%`;
-  }
-}
-
-let entryProjPreview = null;
-let lastAcctPos = null;   // 패처가 쓰는 마지막 렌더 문맥(포지션·마크가·순자산)
-let entryProjKey = "";
 
 function renderSnapshotAccount() {
   const summary = el("snapAcctSummary");
@@ -1280,25 +1205,23 @@ function renderSnapshotAccount() {
   const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
   const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
   // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
-  // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
-  // ⭐여기서는 **항상 실제 계좌**를 그린다(2026-09-15 재구조화). 진입 미리보기는 렌더가 아니라
-  //   `applyAcctPreview()` 가 **같은 노드를 제자리에서** 고친다 -- 노드를 갈아치우면 CSS
-  //   transition 이 안 걸려서 애니메이션이 불가능하다. `data-pv` 가 그 손잡이다.
-  const tile = (key, lab, val, tone, fill, title) => `<div class="acct-tile" data-pv="${key}"${
+  // ⭐여기는 **항상 실제 계좌**다(2026-09-16). 진입 미리보기를 계좌 카드에 입히던 경로는
+  //   모달의 「지금 넣으면」 블록으로 옮기면서 통째로 없앴다.
+  const tile = (lab, val, tone, fill, title) => `<div class="acct-tile"${
       title ? ` title="${escapeHtml(title)}"` : ""}>
       <span class="acct-tile-lab">${lab}</span>
       <b class="acct-tile-val ${tone}">${val}</b>
       <span class="acct-rail"><i class="${tone}" style="width:${clamp01(fill) * 100}%"></i></span>
     </div>`;
-  const tiles = `<div class="acct-pv-cap entry-cap" hidden>진입 미리보기 — 지금 넣으면 (실제 계좌 아님)</div><div class="acct-tiles">
-      ${tile("liq", "청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
+  const tiles = `<div class="acct-tiles">
+      ${tile("청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
              `마크 ${fmtUsd(mark)} → 청산 ${fmtUsd(liq)}\n교차증거금이라 1/레버리지(${
                (100 / (Number(pos.leverage) || 1)).toFixed(2)}%)가 아니라 지갑 전체가 버팁니다.`)}
-      ${tile("used", "증거금 사용", `${usedPct.toFixed(0)}%`,
+      ${tile("증거금 사용", `${usedPct.toFixed(0)}%`,
              usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100,
              `사용 ${fmtUsd(usedMargin)} ÷ 순자산 ${fmtUsd(equity)}\n= 명목 ${
                fmtUsd(pos.notional)} ÷ 레버리지 ${pos.leverage}배`)}
-      ${tile("expo", "계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
+      ${tile("계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
              `명목 ${fmtUsd(pos.notional)} ÷ 순자산 ${fmtUsd(equity)}\n포지션 레버리지(${
                pos.leverage}배)와 다른 값입니다 — 증거금을 계좌의 일부만 썼기 때문입니다.`)}
     </div>`;
@@ -1312,17 +1235,17 @@ function renderSnapshotAccount() {
   const position = `<div class="acct-pos" data-side="${pos.side === "LONG" ? "long" : "short"}">
       <div class="acct-pos-head">
         <b>${escapeHtml(pos.symbol)}</b>
-        <span class="acct-tag ${sideTone}" data-pv="tag">${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</span>
-        <span class="acct-pos-qty" data-pv="qty">${escapeHtml(pos.qty)}</span>
+        <span class="acct-tag ${sideTone}">${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</span>
+        <span class="acct-pos-qty">${escapeHtml(pos.qty)}</span>
       </div>
       <div class="acct-gauge" title="왼쪽 끝이 청산가, 가운데 눈금이 진입가입니다. 손잡이가 왼쪽에 붙을수록 위험합니다.">
         <span class="acct-gauge-track"></span>
         <span class="acct-gauge-entry"></span>
-        <span class="acct-gauge-knob" data-pv="knob" style="left:${(safe * 100).toFixed(1)}%"></span>
+        <span class="acct-gauge-knob" style="left:${(safe * 100).toFixed(1)}%"></span>
       </div>
       <div class="acct-gauge-legend">
-        <span class="bad" data-pv="liqpx">청산 ${fmtUsd(liq)}</span>
-        <span data-pv="entrypx">진입 ${fmtUsd(entry)}</span>
+        <span class="bad">청산 ${fmtUsd(liq)}</span>
+        <span>진입 ${fmtUsd(entry)}</span>
         <span class="acct-gauge-now">현재 ${fmtUsd(mark)}</span>
       </div>
     </div>`;
@@ -1332,10 +1255,6 @@ function renderSnapshotAccount() {
       ${perf}
     </div>${otherNote}`);
   bindAcctChartTip();
-  // 🔴계좌 폴링이 카드를 다시 그리면 미리보기가 지워진다 -- 렌더 직후 곧바로 다시 입힌다.
-  //   (이 경로는 노드가 새로 생겨서 애니메이션은 안 걸린다. 값이 맞는 게 먼저다.)
-  lastAcctPos = { pos, mark, equity };
-  applyAcctPreview(pos, mark, equity);
 }
 
 
@@ -2260,9 +2179,12 @@ function renderLiquidationMapPanel() {
   // visible" 로 잡혔다). 헤더는 이제 항상 내용이 있으므로 접지 않는다.
   const setMapBadge = (tone, text) => {
     if (!badge) return;
-    badge.className = `ops-badge ${tone}`;
-    badge.textContent = text;
-    badge.hidden = !text;   // 빈 배지는 자리만 먹는다(예전엔 헤더째 접어서 가렸다)
+    // 🔴바뀐 것만 쓴다. 이 함수는 현재가 틱마다(≈1.7Hz) 불리는데 정상 구간에서는 늘 같은
+    //   값이라, 예전엔 40초에 51번을 **아무 변화 없이** 다시 썼다(브라우저 실측).
+    const cls = `ops-badge ${tone}`;
+    if (badge.className !== cls) badge.className = cls;
+    if (badge.textContent !== text) badge.textContent = text;
+    if (badge.hidden !== !text) badge.hidden = !text;   // 빈 배지는 자리만 먹는다
   };
   if (!map || map.error === "fetch_failed") {
     setMapBadge("bad", "연결 실패");
@@ -3197,8 +3119,8 @@ const densityLegendGradient = () => "linear-gradient(90deg, "
 function renderLiqDensityLegend(hasDensity) {
   const host = el("liqDensityLegend");
   if (!host) return;
-  host.hidden = !hasDensity;
-  if (!hasDensity) { host.innerHTML = ""; return; }
+  if (host.hidden !== !hasDensity) host.hidden = !hasDensity;   // 같은 값은 쓰지 않는다
+  if (!hasDensity) { if (host.innerHTML) host.innerHTML = ""; return; }
   const html = `<span class="liq-density-legend-title">청산 밀도</span>`
     + `<span class="liq-density-legend-scale"><span class="liq-density-legend-end">낮음</span>`
     + `<span class="liq-density-legend-bar" style="background:${densityLegendGradient()}"></span>`
@@ -5629,6 +5551,20 @@ function renderEntryProj(plan) {
   const a = pr && pr.after, b = pr && pr.before;
   if (!a || !b) { host.hidden = true; return; }
   host.hidden = false;
+  // 예상 진입가 = 서버가 주문에 싣는 지정가(peg 호가). 수량·명목을 옆에 붙여 «얼마짜리를
+  // 어디에 거는가»가 한 줄에서 끝나게 한다.
+  const px = Number(plan.price) || 0, qty = Number(plan.quantity) || 0;
+  const base = String(plan.symbol || "").replace(/USDT$/, "") || "";
+  pvText(el("entryProjPx"), px > 0 ? `~${fmtUsd(px)}` : "—");
+  pvText(el("entryProjPxNote"), px > 0 && qty > 0
+    ? `${qty.toFixed(3)} ${base} · ${fmtUsd(px * qty)}` : "");
+  const pxNode = el("entryProjPx");
+  if (pxNode) {
+    pxNode.title = px > 0
+      ? `지정가(${plan.type || "LIMIT"}) ${fmtUsd(px)} 로 겁니다 — 호가에 붙여 메이커로 넣는 값입니다.`
+        + (plan.fallback ? `\n${plan.fallback_after_sec || "?"}초 안에 안 채워지면 시장가로 넘어가므로 실제 체결가는 달라질 수 있습니다.` : "")
+      : "";
+  }
   Object.entries(PROJ_SPEC).forEach(([key, [field, full, fmt]]) => {
     const row = host.querySelector(`[data-proj="${key}"]`);
     if (!row) return;
@@ -5651,29 +5587,11 @@ function renderEntryProj(plan) {
   });
 }
 
-// 2026-09-15 계좌 카드 게이지를 진입 미리보기로 움직인다(사용자 요청). 값이 실제로 바뀔 때만
-// 카드를 다시 그린다 -- 30초마다 같은 값으로 재그리면 툴팁이 닫히고 스크롤이 튄다.
-// 🔴켜는 조건은 «진입 블록이 펼쳐져 있다» 다. 접혀 있으면 사용자는 진입을 보고 있지 않으므로
-//    계좌 카드는 **실제 계좌**여야 한다. 실패·차단·투영 없음도 전부 끄는 쪽이다.
-function setEntryProjPreview(plan) {
-  const box = el("snapEntryBox");
-  const pr = plan && !plan.blocked && Number(plan.quantity) > 0 ? plan.projection : null;
-  const on = pr && pr.after && box && box.open ? pr : null;
-  const key = on ? `${on.after.liq_pct}|${on.after.margin_used_pct}|${on.after.exposure_x}|${plan.quantity}` : "";
-  if (key === entryProjKey) return;
-  entryProjKey = key;
-  entryProjPreview = on ? { ...on, __plan: plan } : null;
-  // ⭐켜거나 값이 바뀌면 **제자리에서** 고친다 -- 그래야 CSS transition 이 걸린다.
-  // 🔴끌 때는 **통째로 다시 그린다**. 제자리 수정은 실제 값을 덮어쓴 뒤라 «지우기»만으로는
-  //    복구가 안 된다(2026-09-15 테스트에서 실제로 미리보기 값이 굳었다). 렌더는 항상
-  //    실제 계좌를 그리므로 재그리기가 곧 복구다.
-  const ctx = lastAcctPos;
-  if (on && ctx && el("snapAcctPosition")?.querySelector(".acct-tiles")) {
-    applyAcctPreview(ctx.pos, ctx.mark, ctx.equity);
-  } else {
-    renderSnapshotAccount();
-  }
-}
+// 2026-09-16 계좌 카드 미리보기를 **없앴다**(사용자 요청: 「진입 비율을 움직일 때마다
+// 대시보드의 청산까지·증거금 사용·계좌 노출 게이지가 움직이는 건 이제 없애줘 -- 모달
+// 내에서 처리하고 있어」). 같은 값을 모달의 「지금 넣으면」 블록이 이미 보여준다.
+// ⭐이로써 «카드가 실제 계좌인가 미리보기인가»라는 상태 자체가 사라졌다 -- 계좌 카드는
+//   언제나 실제 계좌다(그 구분을 유지하느라 있던 켜기/끄기/복구 경로가 전부 없어진다).
 
 async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
@@ -5690,7 +5608,7 @@ async function manualEntryRefreshSize() {
         : (data.error || "알 수 없음");
       line.hidden = false;
       line.textContent = `크기 확인 실패 — ${why}`;
-      setEntryProjPreview(null);   // 🔴옛 투영을 남기지 않는다
+      renderEntryProj(null);   // 🔴옛 투영을 남기지 않는다
       return;
     }
     const plan = data.plan || {};
@@ -5706,7 +5624,6 @@ async function manualEntryRefreshSize() {
     line.textContent = plan.blocked ? `주문 불가 — ${plan.blocked}` : "";
     renderEntryFoldNote(plan);
     renderEntryProj(plan);
-    setEntryProjPreview(plan);
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
     if (hb) {
@@ -5725,7 +5642,7 @@ async function manualEntryRefreshSize() {
   } catch (err) {
     line.hidden = false;
     line.textContent = "크기 확인 실패 — 서버 응답 없음";
-    setEntryProjPreview(null);
+    renderEntryProj(null);
   }
 }
 
@@ -6029,7 +5946,6 @@ function setupTradeModal() {
     if (!dlg) return;
     dlg.addEventListener("close", () => {
       manualEntryClearConfirm();      // 확인 상태를 들고 다시 열리지 않게
-      setEntryProjPreview(null);      // 계좌 카드를 실제 값으로 되돌린다
     });
     // backdrop(모달 바깥) 클릭으로도 닫는다 -- dialog 자신이 클릭 대상이면 바깥이다.
     dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close("backdrop"); });
@@ -6077,7 +5993,6 @@ function manualExitSyncButtons() {
       const n = el("snapEntryFoldNote");
       // 펼치면 아래에 카드가 그대로 보인다 -- 같은 숫자를 두 번 쓰지 않는다.
       if (box.open) { if (n) { n.textContent = ""; n.className = "entry-was"; } }
-      else { setEntryProjPreview(null); }   // 접으면 계좌 카드는 실제 값으로 돌아온다
       manualEntryRefreshSize();
     });
   }
