@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import statistics
 import sys
 import time
@@ -2485,8 +2486,27 @@ def make_app() -> web.Application:
     async def index(_: web.Request) -> web.Response:
         raise web.HTTPFound("/dashboard/live/")
 
-    async def dashboard_index(_: web.Request) -> web.FileResponse:
-        response = web.FileResponse(DASHBOARD_DIR / "index.html")
+    def _asset_buster() -> str:
+        """app.js / styles.css 의 **내용**에서 뽑은 캐시 버스터.
+
+        🔴손으로 적는 날짜 슬러그는 두 번 터졌다(2026-09-13, 2026-09-16). 앞단에 cloudflared
+        터널이 있어 no-cache 만으로는 부족한데, 같은 날 두 번째 배포는 슬러그가 그대로라
+        엣지 캐시를 못 뚫는다. 사람이 안 잊는 방법은 «안 적는 것»이다 -- 파일이 바뀌면
+        버스터가 저절로 바뀐다. mtime 이 아니라 내용 해시라 재배포로 mtime 만 변해도 안 흔들린다.
+        """
+        h = hashlib.sha256()
+        for name in ("app.js", "styles.css"):
+            try:
+                h.update((DASHBOARD_DIR / name).read_bytes())
+            except OSError:
+                h.update(name.encode())          # 파일이 없어도 페이지는 떠야 한다
+        return h.hexdigest()[:12]
+
+    async def dashboard_index(_: web.Request) -> web.Response:
+        html = (DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
+        html = re.sub(r'(app\.js|styles\.css)\?v=[A-Za-z0-9._-]+',
+                      lambda m: f"{m.group(1)}?v={_asset_buster()}", html)
+        response = web.Response(text=html, content_type="text/html")
         response.enable_compression()
         return no_cache(response)
 
@@ -3397,6 +3417,9 @@ def make_app() -> web.Application:
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
+    # 🔴`/index.html` 로 직접 열면 add_static 이 원본을 그대로 줘서 **버스터 치환을 우회한다**
+    #   (같은 비대칭을 2026-09-13 에 Cache-Control 로 한 번 겪었다). 같은 핸들러로 묶는다.
+    app.router.add_get("/dashboard/live/index.html", dashboard_index)
     # add_static("/dashboard/live/") 보다 먼저 등록 -- aiohttp는 등록 순서대로 매칭하므로
     # 이 둘만 no-cache 경로로 빠지고 나머지 정적 파일은 그대로 static 핸들러가 처리한다.
     app.router.add_get("/dashboard/live/{name:sw\\.js|manifest\\.webmanifest}", pwa_asset)
