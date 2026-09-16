@@ -62,15 +62,17 @@
   --muted: #555c6c;   /* 4.06:1 이던 보조문구 여럿을 한 번에 올린다 */
   --ink: #0a0c10;
   /* 채도 낮은 파스텔은 흰 유리 위에서 무너진다 -- 다크판보다 한 단 **진하게** 잡는다.
-     값은 눈대중이 아니라 WCAG 대비로 골랐다: 흰 62% 유리(합성 rgb(249,249,251)) 위에서
-     **전부 4.5:1 이상**이다. 손익 «숫자»가 작은 글씨라 큰글자 기준 3.0 으로는 모자란다. */
-  --good: #177541;   /* 5.46:1 */
-  --bad: #b03a2e;    /* 흰 유리 5.52:1 · 옅은 빨강 칩 위 3.36 -> 개선 */
-  --warn: #9c5c0d;   /* 5.06:1 */
-  --amber: #8f6408;  /* 5.00:1 */
-  --accent: #0a6d8e; /* 5.56:1 */
-  --liq-support: #2c62c9;      /* 5.41:1 */
-  --liq-resistance: #995509;   /* 5.46:1 */
+     값은 눈대중이 아니라 WCAG 대비로 골랐다. 🔴기준은 «흰 유리 위»가 아니라 **패널 내부에서
+     가장 어두운 바탕**이다(실측 rgb(208,213,224) -- 뒤 색 덩어리가 비쳐 보이는 자리).
+     유리를 진짜 유리로 만들면 바탕이 균일하지 않으므로 최악점으로 잡아야 한다.
+     손익 «숫자»가 작은 글씨라 큰글자 기준 3.0 으로는 모자란다. */
+  --good: #136436;   /* 최악 유리바탕 5.79:1 */
+  --bad: #9c3227;    /* 최악 유리바탕 5.80:1 */
+  --warn: #7a4809;   /* 최악 유리바탕 5.01:1 */
+  --amber: #6e4d06;  /* 최악 유리바탕 5.03:1 -- 노랑은 같은 밝기에서 대비가 가장 안 나온다 */
+  --accent: #095d79; /* 최악 유리바탕 5.89:1 */
+  --liq-support: #2551a8;      /* 최악 유리바탕 5.03:1 */
+  --liq-resistance: #83480a;   /* 최악 유리바탕 4.98:1 */
   --line: rgba(20, 26, 40, 0.14);
   --soft-line: rgba(20, 26, 40, 0.075);
   --hover-line: rgba(20, 26, 40, 0.30);
@@ -78,7 +80,7 @@
   --lift: 20 26 40;                      /* 띄우기가 «그늘 더하기»로 뒤집힌다 */
   --specular: rgba(255, 255, 255, 0.85);  /* 광택선은 더 밝아야 유리처럼 보인다 */
   --shadow: 74 85 104;                    /* 푸른 회색 -- 순검정은 때처럼 보인다 */
-  --glass-blur: blur(22px) saturate(180%);
+  --glass-blur: blur(34px) saturate(200%) brightness(1.08);   /* 투과 이미지의 «바닥」을 들어올린다 */
   --glass-edge: rgba(255, 255, 255, 0.72);
 }
 
@@ -86,10 +88,13 @@
    굴절시킬 색 덩어리를 깔아 준다(애플이 배경에 쓰는 소프트 메시). */
 [data-theme="light"] body {
   background:
+    radial-gradient(circle 260px at 72% 22%, rgba(12, 160, 200, 0.30), transparent 62%),
+    radial-gradient(circle 230px at 92% 66%, rgba(255, 138, 92, 0.24), transparent 64%),
+    radial-gradient(circle 260px at 10% 70%, rgba(24, 160, 96, 0.24), transparent 62%),
     radial-gradient(ellipse 1000px 700px at 4% -6%, rgba(10, 109, 142, 0.42), transparent 64%),
-    radial-gradient(ellipse 880px 660px at 98% 6%, rgba(116, 84, 214, 0.36), transparent 66%),
+    radial-gradient(ellipse 880px 660px at 98% 6%, rgba(116, 84, 214, 0.40), transparent 66%),
     radial-gradient(ellipse 900px 700px at 76% 62%, rgba(24, 132, 76, 0.26), transparent 68%),
-    radial-gradient(ellipse 820px 620px at 16% 96%, rgba(198, 116, 52, 0.22), transparent 66%),
+    radial-gradient(ellipse 820px 620px at 16% 96%, rgba(198, 116, 52, 0.24), transparent 66%),
     linear-gradient(180deg, #e3e8f2 0%, var(--bg) 46%, #ccd5e4 100%);
   background-attachment: fixed;
 }
@@ -104,22 +109,35 @@
 /* 두께감: 윗면은 빛을 받고(=--specular), 아랫면은 옅은 그늘이 진다.
    이 한 줄이 «납작한 반투명 사각형»과 «유리판»을 가른다. */
 [data-theme="light"] .panel {
-  /* 네 겹: ①바깥 실선(흰 테두리가 흰 지면에서 사라지므로 «경계」를 따로 준다)
-     ②접지 그림자 ③떠 있는 그림자 ④윗면 광택 + 아랫면 그늘(=판의 두께) */
+  /* 🔴«그냥 하얀 판»이던 것을 고친다(사용자 지적). 원인 셋을 다 손봐야 유리가 된다:
+     ①불투명도 -- 흰 0.55 + 그라디언트 0.40 ≈ 0.73 이면 뒤가 안 비친다. 0.26 까지 내린다.
+     ②림 -- iOS 글래스의 정체는 블러가 아니라 **가장자리를 감싸고 도는 광택**이다.
+        윗면만 밝히던 것을 사방 1px 링 + 아랫면 반사광으로 바꾼다.
+     ③대각 시트 -- 유리판은 빛을 비스듬히 받는다. 좌상 밝음 → 중앙 가장 투명 → 우하 반사. */
+  background:
+    linear-gradient(135deg,
+      rgba(255, 255, 255, 0.34) 0%,
+      rgba(255, 255, 255, 0.06) 40%,
+      rgba(255, 255, 255, 0.05) 64%,
+      rgba(255, 255, 255, 0.22) 100%),
+    rgba(255, 255, 255, 0.46);
   box-shadow:
-    0 0 0 1px rgb(var(--shadow) / 0.10),
-    0 1px 2px rgb(var(--shadow) / 0.12),
-    0 18px 44px rgb(var(--shadow) / 0.20),
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 rgb(var(--shadow) / 0.08);
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.42),
+    inset 0 -18px 28px -22px rgba(255, 255, 255, 0.75),
+    0 0 0 1px rgb(var(--shadow) / 0.07),
+    0 2px 6px rgb(var(--shadow) / 0.10),
+    0 16px 40px rgb(var(--shadow) / 0.18);
 }
 [data-theme="light"] .panel:hover {
-  border-color: rgba(10, 109, 142, 0.42);
+  border-color: rgba(255, 255, 255, 0.95);
   box-shadow:
-    0 2px 4px rgb(var(--shadow) / 0.10),
-    0 20px 48px rgb(var(--shadow) / 0.18),
-    inset 0 1px 0 var(--specular),
-    inset 0 -1px 0 rgb(var(--shadow) / 0.06);
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.58),
+    inset 0 -18px 28px -22px rgba(255, 255, 255, 0.85),
+    0 0 0 1px rgba(10, 109, 142, 0.22),
+    0 3px 8px rgb(var(--shadow) / 0.13),
+    0 24px 56px rgb(var(--shadow) / 0.22);
 }
 
 /* 유리 위에 또 유리를 얹으면 탁해진다 -- 격자로 쪼갠 칸들은 블러를 부모(.panel)에 맡기고
@@ -2263,4 +2281,22 @@ svg {
   .manual-entry-row.fields { flex-wrap: wrap; }
   .exit-frac { flex-wrap: wrap; }
   .entry-was { white-space: normal; word-break: keep-all; }
+}
+
+/* iOS 는 재질을 한 종류로 쓰지 않는다 -- 글자가 빽빽한 시트는 두껍고(.panel 0.46),
+   툴바·탭·배지 같은 «크롬»은 얇다. 얇은 쪽에서 유리가 가장 잘 드러난다. */
+[data-theme="light"] .page-tab,
+[data-theme="light"] .push-toggle,
+[data-theme="light"] .shadow-slot-tab,
+[data-theme="light"] .asset-tabs,
+[data-theme="light"] .ops-badge.neutral,
+[data-theme="light"] .ops-readonly {
+  background: rgba(255, 255, 255, 0.30);
+  backdrop-filter: blur(20px) saturate(190%);
+  -webkit-backdrop-filter: blur(20px) saturate(190%);
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 1px 3px rgb(var(--shadow) / 0.12);
 }
