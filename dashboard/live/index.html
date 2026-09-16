@@ -41,11 +41,6 @@
         </nav>
         <div id="topClock" class="top-clock">-</div>
         <div class="top-right">
-          <button type="button" id="themeToggle" class="push-toggle theme-toggle"
-                  aria-pressed="false" title="화면 테마 전환 (애플 글래스 / 다크)">
-            <span class="push-toggle-icon" aria-hidden="true">◐</span>
-            <span id="themeToggleLabel">다크</span>
-          </button>
           <div id="topSession" class="ops-session top-session">-</div>
         </div>
       </div>
@@ -165,7 +160,14 @@
           <span id="sessionVolAlertBadge" class="ops-badge warn" style="display:none">⚠️ 시장 오픈 변동성 주의</span>
           <span id="macroEventAlertBadge" class="ops-badge warn" style="display:none">⚠️ 발표 변동성 주의</span>
         </div>
-        <span id="snapshotEvidenceBadge" class="ops-badge neutral">EVIDENCE -</span>
+        <!-- 2026-09-16 사용자 요청: EVIDENCE 배지를 빼고 그 자리에 테마 토글.
+             배지는 증거신호 8칩 은퇴(09-16) 때 남은 죽은 마크업이었다 -- app.js 참조 0 건,
+             정적 "EVIDENCE -" 만 띄우고 있었다. -->
+        <button type="button" id="themeToggle" class="push-toggle theme-toggle"
+                aria-pressed="false" title="화면 테마 전환 (애플 글래스 / 다크)">
+          <span class="push-toggle-icon" aria-hidden="true">◐</span>
+          <span id="themeToggleLabel">다크</span>
+        </button>
       </div>
 
       <section class="panel ops-health-panel signal-overview-panel">
