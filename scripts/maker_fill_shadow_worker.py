@@ -46,8 +46,12 @@ DB_PATH = Path(os.environ.get("MAKER_SHADOW_DB_PATH", str(ROOT / "data/live/make
 SPACING_S = int(os.environ.get("MAKER_SHADOW_SPACING_S", "300"))
 TIMEOUT_S = int(os.environ.get("MAKER_SHADOW_TIMEOUT_S", "120"))
 POLICIES = [p.strip() for p in os.environ.get("MAKER_SHADOW_POLICIES", "peg,static").split(",") if p.strip()]
-MAKER_FEE_BP = 2.0
-TAKER_FEE_BP = 5.0
+# 2026-09-16: 심볼에서 유도한다. **USDC 마진 페어는 maker 0%** -- 계정 실요율을
+# /fapi/v1/commissionRate 로 직접 확인했다: ETHUSDT 2.0/5.0 · ETHUSDC 0.0/4.0
+# (BTCUSDC·SOLUSDC 동일). 하드코딩 2.0/5.0 을 USDC 심볼에 그대로 쓰면 cost_bp 가 틀린다.
+_USDC = SYMBOL.endswith("USDC")
+MAKER_FEE_BP = float(os.environ.get("MAKER_SHADOW_MAKER_FEE_BP", "0.0" if _USDC else "2.0"))
+TAKER_FEE_BP = float(os.environ.get("MAKER_SHADOW_TAKER_FEE_BP", "4.0" if _USDC else "5.0"))
 LATENCY_MS = 200
 STALE_S = 30.0
 HEARTBEAT_S = 300
