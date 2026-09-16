@@ -895,6 +895,17 @@ function opsLabel(value) {
   return ({ trading_bot: "트레이딩 봇", ops_watchdog: "Ops Watchdog", trading_bot_process: "트레이딩 봇 프로세스", decision_snapshot: "의사결정 스냅샷", trading_bot_heartbeat: "봇 heartbeat", data_pipeline: "데이터 파이프라인", pipeline_contract: "파이프라인 계약", market_data_sources: "시장 데이터 소스", dashboard_state: "대시보드 상태", execution_contract: "실행 안전 계약", runtime_resources: "시스템 자원", watchdog_storage: "watchdog 저장소" })[value] || String(value || "알 수 없음");
 }
 
+// 칩 설명문은 처음부터 **강조** 문법으로 쓰여 있었는데 그대로 찍혀 별표가 보였다(사용자 지적).
+// 🔴이스케이프를 **먼저** 하고 그 결과에서만 별표를 태그로 바꾼다 -- 순서를 뒤집으면 본문의
+//   < & 가 태그가 되어 그대로 주입된다. 별표는 이스케이프 대상이 아니라 순서만 지키면 안전하다.
+function emphasizeHtml(value) {
+  return escapeHtml(value).replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "<b>$1</b>");
+}
+// title= 같은 속성에는 태그를 넣을 수 없다 -- 거기서는 별표만 걷어낸다.
+function plainEmphasis(value) {
+  return String(value ?? "").replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "$1");
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch]);
 }
@@ -2112,7 +2123,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
       : "";
     const metaHtml = (forceMeter || it.proba != null)
       ? `<div class="meter-col">
-          <span class="meter-state ${tone}"${it.stateTitle ? ` title="${escapeHtml(it.stateTitle)}"` : ""}>${escapeHtml(it.subText || "-")}</span>
+          <span class="meter-state ${tone}"${it.stateTitle ? ` title="${escapeHtml(plainEmphasis(it.stateTitle))}"` : ""}>${escapeHtml(it.subText || "-")}</span>
           ${gaugeHtml}
           ${it.meterNote ? `<span class="meter-price" title="${escapeHtml(it.meterNoteTitle || "")}">${escapeHtml(it.meterNote)}</span>` : ""}
         </div>`
@@ -2121,7 +2132,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
       <span class="ops-health-dot" aria-hidden="true"></span>
       <div class="ops-health-info">
         <strong>${escapeHtml(it.label)}${horizonBadgeHtml(it.key)}${derivedTag}</strong>
-        ${meaningLine ? `<p class="signal-meaning"${it.liveTitle ? ` title="${escapeHtml(it.liveTitle)}"` : ""}>${escapeHtml(meaningLine)}</p>` : ""}
+        ${meaningLine ? `<p class="signal-meaning"${it.liveTitle ? ` title="${escapeHtml(plainEmphasis(it.liveTitle))}"` : ""}>${emphasizeHtml(meaningLine)}</p>` : ""}
         <div class="evidence-strip-wrap">
           ${toneStripSvg(it.history, times, false, false, it.key, it.callHistory)}
           ${stripAxisHtml(times, "time")}
@@ -2130,7 +2141,7 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
           <button type="button" class="detail-toggle" aria-expanded="${isOpen}" onclick="toggleSignalDetail(this, '${detailKey}')">${isOpen ? "접기 ▴" : "자세히 ▾"}</button>
           <span class="strip-time-now" data-fmt="time" data-default="${escapeHtml(defaultRangeText)}">${escapeHtml(defaultRangeText)}</span>
         </div>
-        <div class="signal-detail${isOpen ? " open" : ""}">${escapeHtml(detailText)}</div>
+        <div class="signal-detail${isOpen ? " open" : ""}">${emphasizeHtml(detailText)}</div>
       </div>
       <div class="ops-health-meta">
         ${metaHtml}

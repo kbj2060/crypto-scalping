@@ -159,15 +159,10 @@
     0 2px 6px rgb(var(--shadow) / 0.10),
     0 16px 40px rgb(var(--shadow) / 0.18);
 }
+/* 라이트도 마찬가지 -- 그림자를 키우면 «떠오른다»로 읽혀서 결국 같은 들썩임이 된다.
+   유리 가장자리만 또렷해진다. */
 [data-theme="light"] .panel:hover {
   border-color: rgba(255, 255, 255, 0.95);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 1),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.58),
-    inset 0 -18px 28px -22px rgba(255, 255, 255, 0.85),
-    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
-    0 3px 8px rgb(var(--shadow) / 0.13),
-    0 24px 56px rgb(var(--shadow) / 0.22);
 }
 
 /* 유리 위에 또 유리를 얹으면 탁해진다 -- 격자로 쪼갠 칸들은 블러를 부모(.panel)에 맡기고
@@ -496,6 +491,8 @@ body {
 .meter-pct { font: 700 10px/1 var(--font-mono); color: var(--muted); min-width: 26px; text-align: right; }
 .meter-price { font: 700 11px/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
 
+/* **강조** 가 실제 굵기로 나온다(2026-09-16). 본문이 muted 라 굵기만으로는 약해서 색도 올린다. */
+.signal-meaning b, .signal-detail b { font-weight: 700; color: var(--text); }
 /* Always-visible "지금 이게 무슨 뜻인지" line -- unlike .signal-detail below, this never needs a
    click; it only renders when there's something actionable to say (elevated/firing state). Border
    color follows the row's tone (good/warn/bad) so danger reads as danger without extra text. */
@@ -1060,15 +1057,14 @@ body {
   position: relative;
   overflow: hidden;
   animation: fadeInUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
-  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  /* 2026-09-16 호버로 카드를 **움직이지 않는다**(사용자 요청). 뜨는 카드는 마우스가 지나가는
+     자리마다 화면 전체를 들썩이게 만든다 -- 이 대시보드는 카드가 20장 가까이 붙어 있다.
+     표시는 테두리 한 겹으로 충분하다(transform·그림자 변화 없음). */
+  transition: border-color 0.2s ease;
 }
 
 .panel:hover {
   border-color: color-mix(in srgb, var(--accent) 34%, transparent);
-  transform: translateY(-2px);
-  box-shadow:
-    0 26px 60px rgb(var(--shadow) / 0.32),
-    inset 0 1px 0 var(--specular);
 }
 
 .panel h3 {
