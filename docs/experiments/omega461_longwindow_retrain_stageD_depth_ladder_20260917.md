@@ -1,5 +1,14 @@
 # D단계 — 학습창 깊이 사다리: **깊이는 이득이 아니다** (2026-09-17)
 
+> 🔴**2026-09-17 정정**: 아래 §1 의 「라벨이 2024 부터만 있다」는 **내가 생성기를 못 찾은
+> 것**이었다. `scripts/build_wave3_action_labels_20260531.py` 가 그 생성기다(파일명이 wave3
+> 라 「zigzag」 검색에 안 걸렸고, 내부 `DEFAULT_OUT` 이 `zigzag_action_labels_20260531`).
+> 손대지 않고 돌리니 2024·2025 가 **행 단위로 완전 재현**된다. 라벨은 2021-12~2026-08 로
+> 확장됐고 VAL 도 원안(2026-03~06)대로 갈 수 있다 —
+> [omega461_parent_zig075_longwindow_rebuilt_and_tested_20260917](omega461_parent_zig075_longwindow_rebuilt_and_tested_20260917.md).
+> **깊이가 중립이라는 이 문서의 결론 자체는 바뀌지 않았다**(펀딩 복구 후 5.6배 창에서도 재확인,
+> 오히려 경제적으로는 −3.38bp 로 해로웠다).
+
 A~C 기록: [omega461_longwindow_retrain_stages_abc_20260917](omega461_longwindow_retrain_stages_abc_20260917.md)
 
 ## 0. 한 줄

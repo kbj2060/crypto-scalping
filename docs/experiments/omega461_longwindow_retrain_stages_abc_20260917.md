@@ -3,6 +3,10 @@
 > **D 결과**: 깊이는 이득이 아니다 —
 > [omega461_longwindow_retrain_stageD_depth_ladder_20260917](omega461_longwindow_retrain_stageD_depth_ladder_20260917.md).
 > 그 과정에서 이 문서 **§3 의 중앙값 채움 기술이 과소기술이었음이 드러나 정정**했다.
+> **후속**: 펀딩(5,343건)과 zigzag 라벨(2021-12~2026-08)을 **둘 다 복구**해 부모를 다시
+> 학습하고 배포본과 맞붙였다 —
+> [omega461_parent_zig075_longwindow_rebuilt_and_tested_20260917](omega461_parent_zig075_longwindow_rebuilt_and_tested_20260917.md).
+> §6 의 「2021~2023 라벨 0건」도 그 문서에서 해소됐다(생성기가 커밋돼 있었다).
 
 사용자 제안: *"Omega4.6.1 부모 모델을 차용해서 입력 피쳐를 이번에 우리가 새로 가져온 것들로
 재학습해보는건 어때?"* → 조사 결과 **새 피쳐는 증분이 없고(§1), 대신 학습창 깊이가 실재하는
