@@ -70,7 +70,9 @@ HZ = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--hz=")),
 assert HZ in BARS, f"모르는 지평: {HZ}"
 E.HORIZONS.setdefault(HZ, BARS[HZ])        # E.load() 가 fwd_{HZ}_bp 를 만들게 한다
 SUF = "" if HZ == "1h" else f"_{HZ}"
-OUTJ = E.OUT / f"stageK_side_skill{SUF}.json"
+_FA = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--folds=")), "")
+FSUF = "_" + _FA.replace(",", "") if _FA else ""
+OUTJ = E.OUT / f"stageK_side_skill{SUF}{FSUF}.json"
 CACHE = E.OUT / "stageK_probs.npz"
 
 
@@ -128,8 +130,11 @@ def main() -> int:
     if cache:
         log(f"⚡확률 캐시 재사용: {CACHE} ({len(cache)}개 폴드)")
 
+    only = next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--folds=")), None)
     rows, pooled = [], []
     for name, t0, t1, v0, v1 in FOLDS:
+        if only and name not in only:      # 배포본과 같은 폴드로 맞춰 견줄 때 쓴다
+            continue
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
         vm = (df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")
         tr, te = df[tm].reset_index(drop=True), df[vm].reset_index(drop=True)
