@@ -2356,7 +2356,7 @@ svg {
     justify-content: center;
     order: 3;
   }
-  #snapshotEvidenceBadge { order: 2; }
+  #themeToggle { order: 2; }
 
   /* 손가락 목표는 44px 가 하한이다(애플 HIG). 알약 버튼들이 30~34px 였다. */
   .asset-tab { height: 38px; }
