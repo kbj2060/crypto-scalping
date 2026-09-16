@@ -185,7 +185,10 @@
 [data-theme="light"] .push-toggle,
 [data-theme="light"] .shadow-slot-tab {
   background: rgba(255, 255, 255, 0.55);
-  border-color: var(--glass-edge);
+  /* 🔴테두리는 --glass-edge(흰 0.72) 였다. 흰 유리 위의 흰 테두리는 «유리의 림»이 아니라
+     둥둥 뜬 **윤곽선**으로 보인다(사용자 지적). 림은 box-shadow 의 inset 이 맡고,
+     테두리는 중립에서 옅게 뽑는다 -- 활성일 때만 색이 들어간다. */
+  border-color: color-mix(in srgb, var(--neutral) 16%, transparent);
   box-shadow: 0 1px 2px rgb(var(--shadow) / 0.08), inset 0 1px 0 var(--specular);
 }
 [data-theme="light"] .page-tab.active,
@@ -837,12 +840,27 @@ body {
 @media (max-width: 720px) {
   .ops-health-list { grid-template-columns: 1fr; }
   .ops-health-row:nth-child(odd) { border-right: 0; }
-  /* base is `auto 1fr auto` (dot | info | meta) -- on narrow viewports a long meta <small>
-     (e.g. "bottom 169bar / 14.1h ago · top not in lookback") sizes its auto column to its full
-     unwrapped width and crushes the 1fr info column down to a sliver, wrapping the title
-     character-by-character. Drop the 3rd column and let meta wrap onto its own full-width row. */
-  .ops-health-row { grid-template-columns: auto 1fr; row-gap: 8px; }
-  .ops-health-meta { grid-column: 1 / -1; }
+  /* base is `auto 1fr auto` (dot | info | meta). 여기엔 제약이 **둘** 있고 둘 다 만족해야 한다.
+     ① (2026-08) 긴 meta <small>("bottom 169bar / 14.1h ago · top not in lookback")가 auto 열을
+        제 폭까지 밀어 1fr info 를 실오라기로 만들고 제목이 한 글자씩 줄바꿈됐다.
+        → 그때 해법은 «3열을 버리고 meta 를 통째 다음 줄로»(grid-column: 1 / -1) 였다.
+     ② (2026-09-16 사용자 지적) 그러면 배지가 제목에서 뚝 떨어져 가운데가 비고, 행 높이가
+        시각 유무에 따라 113/128 로 갈린다(경제 캘린더 158/143/143).
+     둘 다 푸는 건 «열을 버리는 것»이 아니라 **두 열 다 줄어들 수 있게 만드는 것**이다:
+     minmax(0, …) 로 두 트랙의 최소를 0 으로 풀고, meta 는 40% 를 못 넘게 상한을 준다.
+     그러면 긴 meta 는 자기 칸 안에서 줄바꿈하지 info 를 밀지 않는다. */
+  .ops-health-row {
+    /* fit-content(40%) = «내용만큼 쓰되 40% 는 못 넘는다». minmax(0,40%) 로 하면
+       배지만 있어도 항상 40% 를 차지해 info 가 쓸데없이 좁아진다. */
+    grid-template-columns: auto minmax(0, 1fr) fit-content(40%);
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+  .ops-health-info { min-width: 0; }
+  .ops-health-info > * { overflow-wrap: anywhere; }
+  .ops-health-meta { min-width: 0; align-content: center; }
+  .ops-health-meta small { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
   .ops-health-head { flex-direction: column; align-items: flex-start; }
   .ops-health-head-tools { width: 100%; justify-content: space-between; }
 }
@@ -2320,7 +2338,7 @@ svg {
   background: rgba(255, 255, 255, 0.30);
   backdrop-filter: blur(20px) saturate(190%);
   -webkit-backdrop-filter: blur(20px) saturate(190%);
-  border-color: rgba(255, 255, 255, 0.55);
+  border-color: color-mix(in srgb, var(--neutral) 16%, transparent);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
     inset 0 0 0 1px rgba(255, 255, 255, 0.35),
@@ -2428,3 +2446,4 @@ svg {
 
 /* 내용이 비면 배지는 «없는 것»이다. 프리미티브가 min-height 를 줘서 빈 알약이 남았다. */
 .ops-badge:empty, .ops-readonly:empty, .ops-health-summary:empty { display: none !important; }
+
