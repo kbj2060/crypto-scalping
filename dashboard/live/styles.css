@@ -2321,9 +2321,15 @@ svg {
 /* 조작 요소는 «조작 요소로 보여야» 한다. 라이트에서 흰 유리 위의 흰 4% 버튼은 글자만 떠 있다
    -- 대비 검사는 통과하지만(글자색 기준) 버튼으로 읽히지 않는다. 면과 테두리를 준다. */
 [data-theme="light"] .notify-btn {
-  background: rgba(255, 255, 255, 0.78);
-  border-color: rgba(20, 26, 40, 0.16);
-  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.10), inset 0 1px 0 var(--specular);
+  /* 🔴흰 0.78 + 블러 없음이라 실행 버튼만 «종이»였다(실측). 다른 알약과 같은 얇은 유리로. */
+  background: rgba(255, 255, 255, 0.34);
+  backdrop-filter: blur(20px) saturate(190%);
+  -webkit-backdrop-filter: blur(20px) saturate(190%);
+  border-color: color-mix(in srgb, var(--neutral) 16%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 1px 3px rgb(var(--shadow) / 0.12);
 }
 [data-theme="light"] .notify-btn:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
@@ -2449,15 +2455,21 @@ svg {
 .chart-mode-tabs .asset-tab { height: 28px; font-size: 11px; }
 
 /* 활성 표시도 하나로. .asset-tab 만 그라디언트+글로우라 혼자 튀었다. */
+/* 🔴활성 표시를 통일하며 넣은 `box-shadow: none` 이 **림(윗면 광택)을 지웠다** --
+   "색을 넣다보니까 버튼에 애플 글래스가 다 사라졌어"(사용자). 유리는 블러가 아니라
+   가장자리 광택으로 읽힌다. 색은 유리를 **덮는 게 아니라 얹는다**: 틴트는 반투명으로 두고
+   backdrop-filter 는 살려 둔 채, 림을 비활성과 같은 규격으로 돌려준다. */
 .page-tab.active,
 .shadow-slot-tab.active,
 .asset-tab.active,
 .push-toggle[data-state="on"],
 .notify-btn.primary {
   border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--ink);
-  box-shadow: none;
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    0 1px 3px rgb(var(--shadow) / 0.14);
 }
 .page-tab:hover:not(.active),
 .shadow-slot-tab:hover:not(.active),
@@ -2508,4 +2520,16 @@ svg {
   /* 좁으면 이름이 길어 배지와 한 줄에 못 선다 -- 배지를 게이지 옆(오른쪽)으로 내린다. */
   .shadow-row { grid-template-columns: minmax(0, 1fr); }
   .shadow-row .ops-health-status-badge { justify-self: start; }
+}
+
+/* 세그먼트의 활성 칸은 컨테이너(.asset-tabs) 유리 **위에 뜬 조각**이다. blur 를 겹치면
+   탁해지므로 얹지 않고, 대신 림과 옅은 그림자로 «한 겹 위»임을 만든다. */
+[data-theme="light"] .asset-tab.active {
+  /* 🔴반투명 흰색과 color-mix 하면 프리멀티플라이 때문에 예상보다 어두워진다 -- 실측 2.65:1.
+     iOS 세그먼티드의 정석대로 **활성 칸은 흰 유리 조각**이고 색은 글자가 맡는다. */
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 1px 3px rgb(var(--shadow) / 0.18);
 }
