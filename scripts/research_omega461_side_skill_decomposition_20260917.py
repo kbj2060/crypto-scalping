@@ -430,7 +430,123 @@ def deployed() -> int:
     return 0
 
 
+# 청산 격자. None = 그 배리어 없음(현행 측정 = TP·SL 둘 다 None + 시간청산만).
+TP_GRID = [None, 0.005, 0.010, 0.020, 0.040]
+SL_GRID = [None, 0.005, 0.010, 0.020, 0.040]
+
+
+def _gain_matrices(entry_i, side, hi, lo, cl, horizon):
+    """진입봉 **다음** 봉부터 horizon 봉까지의 (최선, 최악) 가격변동 행렬을 한 번만 만든다.
+
+    라이브 컨벤션(`omega4_6_1_live.py::evaluate_exit`)이 intrabar 고가/저가다 — resting TP/SL 은
+    종가가 아니라 닿는 즉시 체결되고, 이미 확정된 봉만 쓰므로 lookahead 가 아니다.
+    반환 gh/gl 은 **side 를 이미 적용한** 유리/불리 변동(소수), gc 는 시간청산 수익.
+    """
+    j = entry_i[:, None] + np.arange(1, horizon + 1)[None, :]
+    e = cl[entry_i][:, None]
+    up, dn = (hi[j] - e) / e, (lo[j] - e) / e
+    sd = side[entry_i][:, None]
+    gh = np.where(sd > 0, up, -dn)          # 그 봉에서 갈 수 있었던 최선
+    gl = np.where(sd > 0, dn, -up)          # 최악
+    gc = (side[entry_i] * (cl[entry_i + horizon] - cl[entry_i]) / cl[entry_i])
+    return gh, gl, gc
+
+
+def _apply_barriers(gh, gl, gc, tp, sl):
+    """TP/SL 을 걸어 건당 수익(bp). 같은 봉에서 둘 다 닿으면 **SL 우선**(보수적)."""
+    big = gh.shape[1] + 1
+    t_sl = np.where((gl <= -sl).any(1), (gl <= -sl).argmax(1), big) if sl is not None else np.full(len(gh), big)
+    t_tp = np.where((gh >= tp).any(1), (gh >= tp).argmax(1), big) if tp is not None else np.full(len(gh), big)
+    r = gc.copy()
+    hit_sl = t_sl <= t_tp
+    r = np.where(t_sl < big, np.where(hit_sl, -sl if sl is not None else r, r), r)
+    r = np.where((t_tp < big) & ~hit_sl, tp if tp is not None else r, r)
+    return r * 1e4
+
+
+def exitgrid() -> int:
+    """--exitgrid: **청산을 붙이면 그 숫자가 살아남는가.**
+
+    지금까지의 모든 측정은 «H시간 뒤 무조건 청산» 이다 — 손절도 익절도 exit 머리도 없다.
+    이 엣지는 꼬리에 살기 때문에(최고10일 제거 시 반토막, 윈저 시 감소) **익절이 그 꼬리를
+    자를 위험**이 크다. TP·SL 격자를 intrabar 로 실제 시뮬해 전부 보고한다(한 칸만 고르면 선택이다).
+    대상은 배포 부모(고정 아티팩트, 추론만) · 그 학습구간과 안 겹치는 폴드.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    horizon = BARS[HZ]
+    log(f"지평={HZ}({horizon}봉) · 배포본 q={E.Q_THRESH} · intrabar 고가/저가 · SL 우선")
+    df, base_cols = E.load()
+    b = torch.load(E.BUNDLE, map_location="cpu", weights_only=False)
+    experts = {}
+    for ename in ("bull", "bear", "chop"):
+        pay = dict(b["models"][ename])
+        m = tabm.ThreeHeadTabM(int(pay["n_features"]),
+                               cfg=tabm.ThreeHeadConfig(**dict(pay["config"]))).to(device)
+        m.load_state_dict(pay["state_dict"]); m.eval()
+        experts[ename] = (m, dict(pay["scaler"]))
+
+    seg = []
+    for name, _t0, _t1, v0, v1 in FOLDS:
+        if not (v1 < DEPLOYED_SEEN[0] or v0 > DEPLOYED_SEEN[1]):
+            continue
+        te = df[(df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")].reset_index(drop=True)
+        xr = tabm._base_input(te, base_cols); ev = tabm._route_probs(te).argmax(1)
+        D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
+        for ei, ename in enumerate(("bull", "bear", "chop")):
+            m, sc = experts[ename]
+            sel = ev == ei
+            if sel.any():
+                D[sel], Q[sel] = E.heads(m, tabm._standardize_apply(xr[sel], sc), device)
+        _, side = F.gate(D, Q, E.Q_THRESH)
+        idx = np.where(side != 0)[0]
+        idx = idx[idx + horizon < len(te)]
+        seg.append((name, te, side, idx))
+        log(f"  {name} {v0}~{v1}: 후보 {len(idx):,}건")
+
+    mats = []
+    for name, te, side, idx in seg:          # 격자 밖에서 한 번만 만든다
+        hi = pd.to_numeric(te["high"]).to_numpy(np.float64)
+        lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
+        cl = pd.to_numeric(te["close"]).to_numpy(np.float64)
+        gh, gl, gc = _gain_matrices(idx, side, hi, lo, cl, horizon)
+        mats.append((gh, gl, gc, te.timestamp.dt.floor("D").to_numpy()[idx]))
+    assert all(np.isfinite(m[2]).all() for m in mats), "시간청산 수익에 NaN"
+
+    rows = []
+    for tp in TP_GRID:
+        for sl in SL_GRID:
+            pnl = np.concatenate([_apply_barriers(gh, gl, gc, tp, sl) for gh, gl, gc, _ in mats])
+            days = np.concatenate([d for *_, d in mats])
+            lo_, hi_, nd = E.block_ci(pnl, days)
+            dsum = {u: pnl[days == u].sum() for u in np.unique(days)}
+            order = sorted(dsum, key=lambda u: -dsum[u])
+            k10 = ~np.isin(days, order[:10])
+            rows.append({"tp": tp, "sl": sl, "n": int(len(pnl)), "indep_days": nd,
+                         "gross_bp": float(pnl.mean()), "ci95": [lo_, hi_],
+                         "median_bp": float(np.median(pnl)),
+                         "win_rate": float((pnl > 0).mean()),
+                         "drop_top10d_bp": float(pnl[k10].mean()),
+                         "p05_bp": float(np.percentile(pnl, 5)),
+                         "worst_bp": float(pnl.min())})
+            r = rows[-1]
+            log(f"  TP {str(tp):>6} SL {str(sl):>6} | 총 {r['gross_bp']:+8.2f} "
+                f"CI[{lo_:+7.2f},{hi_:+7.2f}]{'🟢' if lo_ > 0 else '  '} · 중앙 {r['median_bp']:+7.2f} "
+                f"· 승률 {r['win_rate']*100:4.1f}% · top10제거 {r['drop_top10d_bp']:+7.2f} "
+                f"· 5%분위 {r['p05_bp']:+8.1f} · 최악 {r['worst_bp']:+9.1f}")
+    base = next(r for r in rows if r["tp"] is None and r["sl"] is None)
+    log(f"\n기준(청산 없음·시간청산만): {base['gross_bp']:+.2f}bp · "
+        f"CI[{base['ci95'][0]:+.2f},{base['ci95'][1]:+.2f}] · n {base['n']:,} · {base['indep_days']}일")
+    better = [r for r in rows if r["gross_bp"] > base["gross_bp"]]
+    log(f"기준을 넘는 칸: {len(better)}/{len(rows)}  "
+        f"(넘는다면 청산이 «더한다»는 뜻, 없으면 청산이 이 엣지를 «깎는다»)")
+    (E.OUT / f"stageK_exitgrid{SUF}.json").write_text(
+        json.dumps({"horizon": HZ, "bars": horizon, "rows": rows}, indent=2, default=float))
+    log(f"저장: {E.OUT}/stageK_exitgrid{SUF}.json")
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(
+        exitgrid() if "--exitgrid" in sys.argv else
         deployed() if "--deployed" in sys.argv else
         robust() if "--robust" in sys.argv else main())
