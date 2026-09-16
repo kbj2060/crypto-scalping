@@ -33,7 +33,10 @@
   --good: #5abc80;            /* 초록 -- 상승·정상·지지 */
   --bad: #d4786c;             /* 빨강 -- 하락·위험·저항 */
   --warn: #dc8f4a;            /* 주황 -- 주의·경보 */
-  --accent: #f2b84b;          /* 주황(조작) -- 활성·현재가·슬라이더 */
+  /* 🔴«주황을 빼줘»(2026-09-16 사용자). --accent 는 «UI 강조」이지 의미색이 아니다 --
+     초록/빨강은 방향이 이미 가져갔고, 주황을 여기 두면 화면 어디나 주황이 된다.
+     중립 강조로 돌린다: 색 없이 «밝기」로만 튄다. 경보는 --warn 이 계속 주황이다. */
+  --accent: #dfe4ee;          /* 중립 강조 -- 활성·현재가·슬라이더 */
   --amber: var(--warn);
   --liq-support: var(--good);
   --liq-resistance: var(--bad);
@@ -91,7 +94,7 @@
   --good: #136436;            /* 초록 · 최악 유리바탕 5.79:1 */
   --bad: #9c3227;             /* 빨강 · 5.80:1 */
   --warn: #7a4809;            /* 주황 · 5.01:1 */
-  --accent: #8a4c08;          /* 주황(조작) · 최악 유리바탕 4.55:1 -- warn 과 한 톤 차이 */
+  --accent: #2b3444;          /* 중립 강조 · 최악 유리바탕 8.5:1 */
   --amber: var(--warn);
   --liq-support: var(--good);
   --liq-resistance: var(--bad);
@@ -2467,12 +2470,16 @@ svg {
      그 상태다. 그래서 **선택은 틴트가 아니라 «밝은 유리 조각»**으로 말한다 -- 한 겹 위로
      떠오르고(더 밝은 면 + 강한 림), 색은 글자만 가져간다.
      틴트는 아래 .notify-btn.long/.short/.primary(진짜 실행 버튼)에만 남긴다. */
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--specular) 55%, transparent);
-  color: var(--accent);
+  /* 색을 뺐으니 «떠오름」이 유일한 선택 신호다 -- 면·림·그림자·글자를 한 단씩 올린다.
+     비활성은 흰 0.30 + --muted 글자라, 밝기와 글자 진하기로 갈린다. */
+  border-color: color-mix(in srgb, var(--neutral) 34%, transparent);
+  background: color-mix(in srgb, var(--specular) 92%, transparent);
+  color: var(--ink);
+  font-weight: 800;
   box-shadow:
     inset 0 1px 0 var(--specular),
-    0 1px 3px rgb(var(--shadow) / 0.16);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.45),
+    0 2px 6px rgb(var(--shadow) / 0.22);
 }
 .page-tab:hover:not(.active),
 .shadow-slot-tab:hover:not(.active),
