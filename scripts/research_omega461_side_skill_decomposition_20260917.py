@@ -453,15 +453,38 @@ def _gain_matrices(entry_i, side, hi, lo, cl, horizon):
 
 
 def _apply_barriers(gh, gl, gc, tp, sl):
-    """TP/SL 을 걸어 건당 수익(bp). 같은 봉에서 둘 다 닿으면 **SL 우선**(보수적)."""
+    """TP/SL 을 걸어 건당 수익(bp). 같은 봉에서 둘 다 닿으면 **SL 우선**(보수적).
+
+    tp/sl 은 스칼라(정적 배리어) 또는 **건당 배열**(변동성 적응 배리어) 둘 다 받는다.
+    """
     big = gh.shape[1] + 1
-    t_sl = np.where((gl <= -sl).any(1), (gl <= -sl).argmax(1), big) if sl is not None else np.full(len(gh), big)
-    t_tp = np.where((gh >= tp).any(1), (gh >= tp).argmax(1), big) if tp is not None else np.full(len(gh), big)
+    col = lambda v: None if v is None else np.broadcast_to(np.asarray(v, float).reshape(-1, 1), gh.shape)
+    tpc, slc = col(tp), col(sl)
+    t_sl = np.where((gl <= -slc).any(1), (gl <= -slc).argmax(1), big) if sl is not None else np.full(len(gh), big)
+    t_tp = np.where((gh >= tpc).any(1), (gh >= tpc).argmax(1), big) if tp is not None else np.full(len(gh), big)
     r = gc.copy()
     hit_sl = t_sl <= t_tp
-    r = np.where(t_sl < big, np.where(hit_sl, -sl if sl is not None else r, r), r)
-    r = np.where((t_tp < big) & ~hit_sl, tp if tp is not None else r, r)
+    r = np.where(t_sl < big, np.where(hit_sl, -np.asarray(sl, float) if sl is not None else r, r), r)
+    r = np.where((t_tp < big) & ~hit_sl, np.asarray(tp, float) if tp is not None else r, r)
     return r * 1e4
+
+
+def _h48_barriers(te, idx):
+    """`build_omega1_2_triple_barrier_labels` 의 h48_conservative 공식을 그대로 재현한다.
+
+    atr = (TrueRange/close).rolling(96, min_periods=24).mean().shift(1)  -- 인과적(과거만)
+    tp = max(0.006, 1.2·atr) · sl = max(0.004, 0.8·atr) · horizon 48봉(=4h)
+    """
+    hi = pd.to_numeric(te["high"]).astype(float)
+    lo = pd.to_numeric(te["low"]).astype(float)
+    cl = pd.to_numeric(te["close"]).astype(float)
+    pc = cl.shift(1)
+    tr = pd.concat([(hi - lo).abs(), (hi - pc).abs(), (lo - pc).abs()], axis=1).max(axis=1)
+    atr = (tr / cl.replace(0.0, np.nan)).rolling(96, min_periods=24).mean().shift(1).to_numpy()
+    v = atr[idx]
+    tp = np.maximum(0.006, 1.2 * v)
+    sl = np.maximum(0.004, 0.8 * v)
+    return tp, sl, v
 
 
 def exitgrid() -> int:
@@ -509,19 +532,31 @@ def exitgrid() -> int:
         lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
         cl = pd.to_numeric(te["close"]).to_numpy(np.float64)
         gh, gl, gc = _gain_matrices(idx, side, hi, lo, cl, horizon)
-        mats.append((gh, gl, gc, te.timestamp.dt.floor("D").to_numpy()[idx]))
+        h48tp, h48sl, v = _h48_barriers(te, idx)
+        assert np.isfinite(v).all(), f"{name} ATR 에 NaN -- 웜업 96봉 확인"
+        mats.append((gh, gl, gc, te.timestamp.dt.floor("D").to_numpy()[idx], h48tp, h48sl))
     assert all(np.isfinite(m[2]).all() for m in mats), "시간청산 수익에 NaN"
+    av = np.concatenate([m[4] for m in mats])
+    log(f"h48 배리어 실측: TP 중앙 {np.median(av)*100:.3f}% · 바닥(0.6%) 비율 "
+        f"{float((av <= 0.006).mean())*100:.1f}% · SL 중앙 "
+        f"{np.median(np.concatenate([m[5] for m in mats]))*100:.3f}%")
+
+    # 격자 + **사전 지정된 h48 행들**(격자에서 고른 게 아니라 라벨 정의를 그대로 옮긴 것)
+    specs = [(f"TP {str(tp):>6} SL {str(sl):>6}", tp, sl) for tp in TP_GRID for sl in SL_GRID]
+    specs += [("⭐h48 실제(TP&SL)", "h48", "h48"), ("⭐h48 SL 만", None, "h48"),
+              ("⭐h48 TP 만", "h48", None)]
 
     rows = []
-    for tp in TP_GRID:
-        for sl in SL_GRID:
-            pnl = np.concatenate([_apply_barriers(gh, gl, gc, tp, sl) for gh, gl, gc, _ in mats])
-            days = np.concatenate([d for *_, d in mats])
+    for label, tp, sl in specs:
+            pick = lambda spec, i, j: (mats[i][j] if spec == "h48" else spec)
+            pnl = np.concatenate([_apply_barriers(m[0], m[1], m[2], pick(tp, i, 4), pick(sl, i, 5))
+                                  for i, m in enumerate(mats)])
+            days = np.concatenate([m[3] for m in mats])
             lo_, hi_, nd = E.block_ci(pnl, days)
             dsum = {u: pnl[days == u].sum() for u in np.unique(days)}
             order = sorted(dsum, key=lambda u: -dsum[u])
             k10 = ~np.isin(days, order[:10])
-            rows.append({"tp": tp, "sl": sl, "n": int(len(pnl)), "indep_days": nd,
+            rows.append({"label": label, "tp": tp, "sl": sl, "n": int(len(pnl)), "indep_days": nd,
                          "gross_bp": float(pnl.mean()), "ci95": [lo_, hi_],
                          "median_bp": float(np.median(pnl)),
                          "win_rate": float((pnl > 0).mean()),
@@ -529,11 +564,14 @@ def exitgrid() -> int:
                          "p05_bp": float(np.percentile(pnl, 5)),
                          "worst_bp": float(pnl.min())})
             r = rows[-1]
-            log(f"  TP {str(tp):>6} SL {str(sl):>6} | 총 {r['gross_bp']:+8.2f} "
+            log(f"  {label:<20} | 총 {r['gross_bp']:+8.2f} "
                 f"CI[{lo_:+7.2f},{hi_:+7.2f}]{'🟢' if lo_ > 0 else '  '} · 중앙 {r['median_bp']:+7.2f} "
                 f"· 승률 {r['win_rate']*100:4.1f}% · top10제거 {r['drop_top10d_bp']:+7.2f} "
                 f"· 5%분위 {r['p05_bp']:+8.1f} · 최악 {r['worst_bp']:+9.1f}")
     base = next(r for r in rows if r["tp"] is None and r["sl"] is None)
+    for r in rows:
+        if str(r["label"]).startswith("⭐"):
+            log(f"  {r['label']:<20} Δ기준 {r['gross_bp'] - base['gross_bp']:+.2f}bp")
     log(f"\n기준(청산 없음·시간청산만): {base['gross_bp']:+.2f}bp · "
         f"CI[{base['ci95'][0]:+.2f},{base['ci95'][1]:+.2f}] · n {base['n']:,} · {base['indep_days']}일")
     better = [r for r in rows if r["gross_bp"] > base["gross_bp"]]
