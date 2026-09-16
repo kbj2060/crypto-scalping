@@ -70,9 +70,14 @@ HZ = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--hz=")),
 assert HZ in BARS, f"모르는 지평: {HZ}"
 E.HORIZONS.setdefault(HZ, BARS[HZ])        # E.load() 가 fwd_{HZ}_bp 를 만들게 한다
 SUF = "" if HZ == "1h" else f"_{HZ}"
+# 학습창 팔. deep = 2022-01 부터 확장(기본, 캐시 있음) · base = 테스트 직전 14개월 후행.
+# 같은 테스트 창에서 깊이만 바꿔 짝지어 비교하기 위한 것이다.
+ARM = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--arm=")), "deep")
+assert ARM in ("deep", "base"), f"모르는 팔: {ARM}"
+ASUF = "" if ARM == "deep" else f"_{ARM}"
 _FA = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--folds=")), "")
 FSUF = "_" + _FA.replace(",", "") if _FA else ""
-OUTJ = E.OUT / f"stageK_side_skill{SUF}{FSUF}.json"
+OUTJ = E.OUT / f"stageK_side_skill{SUF}{FSUF}{ASUF}.json"
 CACHE = E.OUT / "stageK_probs.npz"
 
 
@@ -135,6 +140,9 @@ def main() -> int:
     for name, t0, t1, v0, v1 in FOLDS:
         if only and name not in only:      # 배포본과 같은 폴드로 맞춰 견줄 때 쓴다
             continue
+        if ARM == "base":                  # 후행 14개월 -- 배포 부모의 학습 깊이와 같은 눈금
+            t0 = str((pd.Timestamp(v0) - pd.DateOffset(months=14)).date())
+        ck = name if ARM == "deep" else f"{name}|{ARM}"
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
         vm = (df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")
         tr, te = df[tm].reset_index(drop=True), df[vm].reset_index(drop=True)
@@ -150,8 +158,8 @@ def main() -> int:
         log(f"\n{'='*92}\n=== {name}  TRAIN {t0}~{t1} {n:,}행 · TEST {v0}~{v1} {len(te):,}행 "
             f"· 독립일 {len(np.unique(tdays))}\n{'='*92}")
 
-        if name in cache:
-            z = dict(cache[name].item())
+        if ck in cache:
+            z = dict(cache[ck].item())
             Ds, Qs, tDm, tQm = list(z["Ds"]), list(z["Qs"]), z["tDm"], z["tQm"]
         else:
             xs, scaler = tabm._standardize_fit(tabm._base_input(tr, base_cols))
@@ -176,7 +184,7 @@ def main() -> int:
                 ls = (D.argmax(1) == 1).sum() / max((D.argmax(1) != 0).sum(), 1)
                 log(f"  seed {seed}: 방향 롱비중(게이트 전) {ls:.3f}")
             tDm, tQm = np.mean(tDs, 0), np.mean(tQs, 0)
-            cache[name] = np.array({"Ds": Ds, "Qs": Qs, "tDm": tDm, "tQm": tQm}, dtype=object)
+            cache[ck] = np.array({"Ds": Ds, "Qs": Qs, "tDm": tDm, "tQm": tQm}, dtype=object)
             np.savez(CACHE, **cache)
 
         Dm, Qm = np.mean(Ds, 0), np.mean(Qs, 0)
