@@ -5555,13 +5555,13 @@ function renderEntryProj(plan) {
   // 어디에 거는가»가 한 줄에서 끝나게 한다.
   const px = Number(plan.price) || 0, qty = Number(plan.quantity) || 0;
   const base = String(plan.symbol || "").replace(/USDT$/, "") || "";
-  pvText(el("entryProjPx"), px > 0 ? `~${fmtUsd(px)}` : "—");
+  pvText(el("entryProjPx"), px > 0 ? `~$${fmtNum(px, 2)}` : "—");   // 틱이 0.01 이라 센트까지
   pvText(el("entryProjPxNote"), px > 0 && qty > 0
     ? `${qty.toFixed(3)} ${base} · ${fmtUsd(px * qty)}` : "");
   const pxNode = el("entryProjPx");
   if (pxNode) {
     pxNode.title = px > 0
-      ? `지정가(${plan.type || "LIMIT"}) ${fmtUsd(px)} 로 겁니다 — 호가에 붙여 메이커로 넣는 값입니다.`
+      ? `지정가(${plan.type || "LIMIT"}) $${fmtNum(px, 2)} 로 겁니다 — 호가에 붙여 메이커로 넣는 값입니다.`
         + (plan.fallback ? `\n${plan.fallback_after_sec || "?"}초 안에 안 채워지면 시장가로 넘어가므로 실제 체결가는 달라질 수 있습니다.` : "")
       : "";
   }
