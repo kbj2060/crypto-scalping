@@ -5551,22 +5551,7 @@ function renderEntryProj(plan) {
   const a = pr && pr.after, b = pr && pr.before;
   if (!a || !b) { host.hidden = true; return; }
   host.hidden = false;
-  // 예상 진입가 = 서버가 주문에 싣는 지정가(peg 호가). 수량·명목을 옆에 붙여 «얼마짜리를
-  // 어디에 거는가»가 한 줄에서 끝나게 한다.
   const px = Number(plan.price) || 0, qty = Number(plan.quantity) || 0;
-  // 틱이 0.01 이라 센트까지, 천단위는 끊어서 -- 바로 옆 명목($1,464.86)과 표기를 맞춘다.
-  const pxStr = `$${px.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const base = String(plan.symbol || "").replace(/USDT$/, "") || "";
-  pvText(el("entryProjPx"), px > 0 ? `~${pxStr}` : "—");
-  pvText(el("entryProjPxNote"), px > 0 && qty > 0
-    ? `${qty.toFixed(3)} ${base} · ${fmtUsd(px * qty)}` : "");
-  const pxNode = el("entryProjPx");
-  if (pxNode) {
-    pxNode.title = px > 0
-      ? `지정가(${plan.type || "LIMIT"}) ${pxStr} 로 겁니다 — 호가에 붙여 메이커로 넣는 값입니다.`
-        + (plan.fallback ? `\n${plan.fallback_after_sec || "?"}초 안에 안 채워지면 시장가로 넘어가므로 실제 체결가는 달라질 수 있습니다.` : "")
-      : "";
-  }
   // 평단 행: 다른 셋과 달리 projection 에 없다 -- 보유분과 이번 주문의 **체결가 가중평균**이다.
   // 레일 눈금은 **현재가 ±5%**, 가운데(50%)가 현재가다. 절대 가격은 스케일이 없으므로
   // «현재가에서 얼마나 떨어져 있나»를 재는 게 유일하게 뜻이 통하는 눈금이다.

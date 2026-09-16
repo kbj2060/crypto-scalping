@@ -2639,12 +2639,20 @@ svg {
     inset 0 1px 0 var(--specular),
     0 24px 64px rgb(var(--shadow) / 0.30);
 }
-/* 헤더는 칠하지 않는다 -- 몸통 유리가 그대로 비쳐야 «같은 유리»가 된다.
-   backdrop-filter 만 남겨 스크롤이 밑으로 지나갈 때 글자를 흐린다. */
+/* 🔴«아직도 헤더가 흰색»(4번째). 이번엔 픽셀로 쟀고, 범인은 **헤더 자신의
+   backdrop-filter** 였다. 두 가지가 겹친다:
+     ① 모달이 이미 --glass-blur(blur34 saturate200 brightness1.08)로 뒤를 걸렀는데,
+        그 결과 위에 헤더가 saturate(1.8)·blur(22)를 **한 번 더** 얹는다.
+     ② backdrop 표본은 요소 경계에서 잘리지 않는다 -- 모달 맨 위에 붙은 헤더의
+        22px 블러가 **모달 밖 밝은 지면**을 끌어와 섞는다(가장자리 번짐).
+   실측(라이트, 모달 중앙 열): 헤더 rgb(239,247,251) vs 바로 아래 본문 (232,240,249).
+   backdrop-filter 를 끄면 헤더 (227,240,248) -- 본문과 5 이내로 이어진다.
+   ⇒ **필터를 걸지 않는 것**이 답이다. 배경도 칠하지 않으므로 헤더 자리에는 몸통 유리가
+   그대로 비친다 = 정의상 같은 재질.
+   ⚠️대신 sticky 헤더 밑으로 내용이 지나가면 비친다. 이 모달은 스크롤이 생기지 않는
+   높이라 실제로는 겹치지 않는다(390×850 실측 포함). 스크롤이 생기면 그때 다시 본다. */
 [data-theme="light"] .trade-modal-head {
   background: transparent;
-  backdrop-filter: blur(22px) saturate(180%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
   box-shadow: inset 0 1px 0 var(--specular);
 }
 .trade-modal .manual-entry { padding: 22px 20px 26px; }
@@ -2701,11 +2709,6 @@ svg {
   align-items: center;
   gap: 10px 10px;
 }
-/* 예상 진입가 -- 다른 행과 달리 전/후가 없다(주문가는 하나뿐). 라벨 열만 맞춰 세운다. */
-.entry-proj-px { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
-.entry-proj-px .entry-proj-lab { grid-area: auto; }
-.entry-proj-pxv { font: 700 15px/1.2 var(--font-mono); color: var(--text); cursor: help; }
-.entry-proj-pxnote { font: 600 11.5px/1.4 var(--font-mono); color: var(--muted); }
 .entry-proj-lab { grid-area: lab; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .entry-proj-from {
   grid-area: from; justify-self: end;

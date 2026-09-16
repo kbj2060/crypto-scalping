@@ -373,21 +373,15 @@
                막대는 CSS transition 으로 미끄러지고 숫자는 .pv-bump 로 한 번 튄다. -->
           <div id="entryProj" class="entry-proj" hidden>
             <div class="entry-proj-cap">지금 넣으면</div>
-            <!-- 2026-09-16 사용자 요청: 「예상 진입가도 계산해서 넣어줘」. 새 계산은 없다 --
-                 서버가 이미 주문에 실어 보내는 지정가(plan.price, peg 호가)가 그 값이다.
-                 🔴«예상»인 이유를 title 이 말한다: 미체결이면 테이커로 폴백하므로 실제
-                 체결가는 달라질 수 있다. 확정값처럼 적으면 「본 숫자와 다르다」가 된다. -->
+            <!-- 2026-09-16 진입가는 «평단» 행이 전→후로 말한다(사용자 요청). 주문가·수량을
+                 따로 적던 줄은 지웠다 -- 같은 사실을 두 번 쓰면 어느 쪽이 결정인지 흐려진다.
+                 주문가 자체는 평단 행 툴팁에 남는다. -->
             <div class="entry-proj-row" data-proj="px">
               <span class="entry-proj-lab">평단</span>
               <span class="entry-proj-from"></span>
               <span class="entry-proj-arrow" aria-hidden="true">→</span>
               <span class="entry-proj-to"></span>
               <span class="entry-proj-rail"><i></i><u></u></span>
-            </div>
-            <div class="entry-proj-px">
-              <span class="entry-proj-lab">예상 진입가</span>
-              <b id="entryProjPx" class="entry-proj-pxv">—</b>
-              <span id="entryProjPxNote" class="entry-proj-pxnote"></span>
             </div>
             <div class="entry-proj-row" data-proj="liq">
               <span class="entry-proj-lab">청산까지</span>
