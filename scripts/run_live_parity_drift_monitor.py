@@ -25,11 +25,9 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 LIVE_DBS = {
     "microstructure": "data/live/microstructure.duckdb",
     "tail_risk": "data/live/tail_risk.duckdb",
-    "btc_shadow": "data/live/btc_micro_scalp_shadow.duckdb",
-    "sol_shadow": "data/live/sol_micro_scalp_shadow.duckdb",
-    "eth_v4_shadow": "data/live/eth_micro_scalp_v4_shadow.duckdb",
-    "eth_lifecycle_shadow": "data/live/eth_micro_scalp_lifecycle_shadow.duckdb",
-    "sol_entry_shadow": "data/live/sol_micro_scalp_entry_shadow.duckdb",
+    # micro_scalp shadow 5종은 2026-07-21 에 멈췄고 2026-09-16 에 파일을 지웠다
+    # (백업 드라이브에만 보존). 없는 경로를 남겨두면 connect_retry 가 DB 당 56초씩
+    # D3/D4 두 번 재시도해 6시간 cron 이 매번 ~9분을 헛되이 잠든다.
 }
 
 PSI_ALERT_THRESHOLD = 0.2
