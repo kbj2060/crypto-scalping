@@ -239,5 +239,88 @@ def main() -> int:
     return 0
 
 
+def robust() -> int:
+    """--robust: 캐시 재사용(재학습 없음). 타이밍 항이 «꼬리 몇 건»인지 «폭»인지 가른다.
+
+    셋을 같이 낸다:
+      · 최고1일/최고3일 **제거 후** 타이밍 항
+      · 수익을 ±1% 로 **윈저라이즈** 한 뒤의 타이밍 항 (꼬리 의존 제거)
+      · ⭐**측면 적중률** = mean(s == sign(r)) -- 크기와 무관한 꼬리 없는 측면 실력 지표.
+        귀무는 0.5 가 아니라 **그 창에서 s 를 섞었을 때의 기대 적중률**이다
+        (드리프트가 있으면 상수 편향만으로도 0.5 를 넘는다). 그래서 같은 측면비중을 유지한
+        채 s 를 날짜블록 안에서 순열해 귀무 분포를 만든다.
+    """
+    cache = dict(np.load(CACHE, allow_pickle=True))
+    df, base_cols = E.load()
+    rows, pooled = [], []
+    for name, t0, t1, v0, v1 in FOLDS:
+        z = dict(cache[name].item())
+        tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
+        vm = (df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")
+        te = df[vm].reset_index(drop=True)
+        fwd = te["fwd_1h_bp"].to_numpy(np.float64)
+        days = te.timestamp.dt.floor("D").to_numpy()
+        ql, qsh = H.thresholds(z["tDm"], z["tQm"], symmetric=True)
+        side = H.side_from(np.mean(list(z["Ds"]), 0), np.mean(list(z["Qs"]), 0), ql, qsh)
+        ok = (side != 0) & np.isfinite(fwd)
+        s, r, d = side[ok], fwd[ok], days[ok]
+        timing = lambda ss, rr: float((ss * rr).mean() - ss.mean() * rr.mean())
+
+        dsum = {u: (s[d == u] * r[d == u]).sum() for u in np.unique(d)}
+        order = sorted(dsum, key=lambda u: -dsum[u])
+        drops = {}
+        for k in (1, 3):
+            keep = ~np.isin(d, order[:k])
+            drops[f"timing_drop_top{k}d"] = timing(s[keep], r[keep]) if keep.sum() > 50 else float("nan")
+        w = np.clip(r, -100.0, 100.0)                      # ±1% 윈저라이즈
+
+        hit = float((s == np.sign(r)).mean())
+        rng = np.random.default_rng(11)                    # 날짜블록 안 순열 = 측면비중 보존
+        null = np.empty(2000)
+        for i in range(2000):
+            sp = s.copy()
+            for u in np.unique(d):
+                m = d == u
+                sp[m] = rng.permutation(s[m])
+            null[i] = float((sp == np.sign(r)).mean())
+        pv = float((null >= hit).mean())
+        rows.append({"fold": name, "n": int(ok.sum()), "timing": timing(s, r), **drops,
+                     "timing_winsor": timing(s, w), "hit": hit,
+                     "hit_null": float(null.mean()), "hit_p": pv})
+        pooled.append((s, r, d))
+        log(f"{name:<6} 타이밍 {rows[-1]['timing']:+7.3f} → 최고1일제거 {drops['timing_drop_top1d']:+7.3f} "
+            f"· 최고3일제거 {drops['timing_drop_top3d']:+7.3f} · 윈저 {rows[-1]['timing_winsor']:+7.3f} "
+            f"· 측면적중 {hit:.4f} (귀무 {null.mean():.4f}, p {pv:.4f})")
+
+    s = np.concatenate([p[0] for p in pooled]); r = np.concatenate([p[1] for p in pooled])
+    d = np.concatenate([p[2] for p in pooled])
+    timing = lambda ss, rr: float((ss * rr).mean() - ss.mean() * rr.mean())
+    dsum = {u: (s[d == u] * r[d == u]).sum() for u in np.unique(d)}
+    order = sorted(dsum, key=lambda u: -dsum[u])
+    hit = float((s == np.sign(r)).mean())
+    rng = np.random.default_rng(11); null = np.empty(2000)
+    for i in range(2000):
+        sp = s.copy()
+        for u in np.unique(d):
+            m = d == u
+            sp[m] = rng.permutation(s[m])
+        null[i] = float((sp == np.sign(r)).mean())
+    out = {"pooled_timing": timing(s, r),
+           "pooled_timing_drop_top1d": timing(s[~np.isin(d, order[:1])], r[~np.isin(d, order[:1])]),
+           "pooled_timing_drop_top3d": timing(s[~np.isin(d, order[:3])], r[~np.isin(d, order[:3])]),
+           "pooled_timing_drop_top10d": timing(s[~np.isin(d, order[:10])], r[~np.isin(d, order[:10])]),
+           "pooled_timing_winsor": timing(s, np.clip(r, -100.0, 100.0)),
+           "pooled_hit": hit, "pooled_hit_null": float(null.mean()),
+           "pooled_hit_p": float((null >= hit).mean()),
+           "pooled_days": int(len(np.unique(d))), "pooled_n": int(len(s)), "folds": rows}
+    log(f"\n풀링 {out['pooled_n']:,}건/{out['pooled_days']}일: 타이밍 {out['pooled_timing']:+.3f} → "
+        f"최고1일제거 {out['pooled_timing_drop_top1d']:+.3f} · 최고3일제거 {out['pooled_timing_drop_top3d']:+.3f} "
+        f"· 최고10일제거 {out['pooled_timing_drop_top10d']:+.3f} · 윈저 {out['pooled_timing_winsor']:+.3f}")
+    log(f"⭐측면 적중률 {hit:.4f} vs 귀무 {null.mean():.4f} (측면비중 보존 날짜블록 순열) · p {out['pooled_hit_p']:.4f}")
+    (E.OUT / "stageK_robust.json").write_text(json.dumps(out, indent=2, default=float))
+    log(f"저장: {E.OUT}/stageK_robust.json")
+    return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(robust() if "--robust" in sys.argv else main())
