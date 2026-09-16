@@ -2612,19 +2612,22 @@ svg {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 18px 20px;
   margin: 0;
   border-bottom: 1px solid var(--soft-line);
   position: sticky;
   top: 0;
-  /* 스크롤해도 닫기 버튼이 남아야 한다 -- 모달은 «나갈 길이 늘 보여야» 한다. */
-  background: inherit;
+  /* 🔴`background: inherit` 은 부모의 **계산된 배경 이미지**를 안 물려받는다 -- 그래서
+     헤더만 흰 판으로 남았다(사용자 지적). 몸통과 같은 유리를 직접 칠한다. */
+  background: linear-gradient(180deg,
+    rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.10));
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 0 var(--specular);
   z-index: 1;
 }
 .trade-modal-head h3 { margin: 0; font: 600 15px/1.2 var(--font-display); }
-.trade-modal .manual-entry { padding: 14px 16px 18px; }
+.trade-modal .manual-entry { padding: 22px 20px 26px; }
 
 @media (max-width: 720px) {
   /* 2026-09-16 사용자 요청으로 바텀시트를 버리고 **가운데**로 통일했다 -- 데스크톱과 다른
@@ -2638,17 +2641,81 @@ svg {
    요약 줄을 지우고 항상 펼친 상태로 둔다(DOM 은 그대로 -- app.js 가 box.open 을 쓴다). */
 #entryModal .entry-fold > summary { display: none; }
 #entryModal .entry-fold { margin: 0; }
-#entryModal .manual-entry { padding-top: 4px; }
+#entryModal .manual-entry { padding-top: 20px; }
 /* 모달 안의 빈 행은 자리만 먹는다(오류 표시 전용 칸 등). */
 #entryModal .manual-entry-row:empty,
 #exitModal .manual-entry-row:empty { display: none; }
 
 /* 모달 안은 가운데로 모은다 -- 폭이 좁아 왼쪽 정렬이면 오른쪽이 통째로 빈다. */
-.trade-modal .manual-entry { display: grid; justify-items: center; gap: 10px; }
+.trade-modal .manual-entry { display: grid; justify-items: center; gap: 18px; }
 .trade-modal .manual-entry-row,
 .trade-modal .manual-entry-row.fields { justify-content: center; width: 100%; }
-.trade-modal .entry-fold { width: 100%; display: grid; justify-items: center; gap: 8px; }
+.trade-modal .entry-fold { width: 100%; display: grid; justify-items: center; gap: 14px; }
 .trade-modal .exit-frac { justify-content: center; }
 .trade-modal .exit-now,
 .trade-modal .entry-note { text-align: center; }
 .trade-modal .manual-entry-result { width: 100%; }
+
+/* ── 「지금 넣으면」 변화 블록 (2026-09-16) ──────────────────────────────────
+   막대는 transition 으로 미끄러지고 유령 눈금(u)이 «지금 자리»에 남는다 --
+   계좌 카드의 .acct-rail 과 같은 문법이라 두 곳이 같은 말을 한다. */
+.entry-proj {
+  width: 100%;
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-edge);
+  background: rgb(var(--lift) / 0.035);
+  box-shadow: inset 0 1px 0 var(--specular);
+}
+.entry-proj-cap {
+  font: 700 10.5px/1 var(--font-mono);
+  letter-spacing: .08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.entry-proj-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  grid-template-areas: "lab from arrow to" "rail rail rail rail";
+  align-items: center;
+  gap: 4px 8px;
+}
+.entry-proj-lab { grid-area: lab; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.entry-proj-from {
+  grid-area: from; justify-self: end;
+  font: 500 12px/1 var(--font-mono); color: var(--muted);
+}
+.entry-proj-arrow { grid-area: arrow; color: var(--muted); font-size: 11px; }
+.entry-proj-to {
+  grid-area: to; justify-self: start;
+  font: 800 13px/1 var(--font-mono); font-variant-numeric: tabular-nums;
+}
+.entry-proj-row[data-tone="good"] .entry-proj-to { color: var(--good); }
+.entry-proj-row[data-tone="warn"] .entry-proj-to { color: var(--warn); }
+.entry-proj-row[data-tone="bad"] .entry-proj-to { color: var(--bad); }
+.entry-proj-rail {
+  grid-area: rail; position: relative; display: block;
+  height: 4px; border-radius: 2px; background: rgb(var(--lift) / 0.10); overflow: visible;
+}
+.entry-proj-rail i {
+  display: block; height: 100%; border-radius: 2px; width: 0;
+  background: var(--muted);
+  transition: width .45s cubic-bezier(.22,.68,0,1.01), background .25s ease;
+}
+.entry-proj-rail i.good { background: var(--good); }
+.entry-proj-rail i.warn { background: var(--warn); }
+.entry-proj-rail i.bad { background: var(--bad); }
+/* 유령 눈금 = 지금 자리. 막대가 여기서 저기로 미끄러지는 걸 눈이 따라갈 수 있게 한다. */
+.entry-proj-rail u {
+  position: absolute; top: -3px; width: 2px; height: 10px;
+  background: var(--ink); opacity: .45; border-radius: 1px;
+  transition: left .45s cubic-bezier(.22,.68,0,1.01);
+}
+@media (prefers-reduced-motion: reduce) {
+  .entry-proj-rail i, .entry-proj-rail u { transition: none; }
+}
+/* 둘 다 만재라 막대가 안 움직이는 행 -- 막대를 흐리게 해 «이 막대는 지금 할 말이 없다»를
+   보이게 한다. 숫자는 그대로 바뀐다. */
+.entry-proj-row[data-capped="1"] .entry-proj-rail { opacity: .35; }

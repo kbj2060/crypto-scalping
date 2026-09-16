@@ -367,6 +367,34 @@
               <b id="snapEntryFracVal">100%</b>
             </label>
           </div>
+          <!-- 2026-09-16 사용자 요청: 「진입하면 청산·증거금이 어떻게 바뀌는지 애니메이션」.
+               새 데이터를 만들지 않는다 -- 크기 갱신이 이미 받아오는 plan.projection 의
+               before/after 를 그대로 쓴다(계좌 카드가 쓰는 그 값이다).
+               막대는 CSS transition 으로 미끄러지고 숫자는 .pv-bump 로 한 번 튄다. -->
+          <div id="entryProj" class="entry-proj" hidden>
+            <div class="entry-proj-cap">지금 넣으면</div>
+            <div class="entry-proj-row" data-proj="liq">
+              <span class="entry-proj-lab">청산까지</span>
+              <span class="entry-proj-from"></span>
+              <span class="entry-proj-arrow" aria-hidden="true">→</span>
+              <span class="entry-proj-to"></span>
+              <span class="entry-proj-rail"><i></i><u></u></span>
+            </div>
+            <div class="entry-proj-row" data-proj="margin">
+              <span class="entry-proj-lab">증거금 사용</span>
+              <span class="entry-proj-from"></span>
+              <span class="entry-proj-arrow" aria-hidden="true">→</span>
+              <span class="entry-proj-to"></span>
+              <span class="entry-proj-rail"><i></i><u></u></span>
+            </div>
+            <div class="entry-proj-row" data-proj="expo">
+              <span class="entry-proj-lab">계좌 노출</span>
+              <span class="entry-proj-from"></span>
+              <span class="entry-proj-arrow" aria-hidden="true">→</span>
+              <span class="entry-proj-to"></span>
+              <span class="entry-proj-rail"><i></i><u></u></span>
+            </div>
+          </div>
           <div class="manual-entry-row actions">
             <button type="button" id="snapEntryLong" class="notify-btn long">롱 진입</button>
             <button type="button" id="snapEntryShort" class="notify-btn short">숏 진입</button>

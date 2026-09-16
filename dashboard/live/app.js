@@ -5608,6 +5608,49 @@ function renderEntryFoldNote(plan) {
   note.className = `entry-was ${acctRiskTone(a.liq_pct)}`;
 }
 
+// 2026-09-16 모달 안 «지금 넣으면» 블록(사용자 요청: 「진입하면 청산·증거금이 어떻게
+// 바뀌는지 애니메이션」). 계좌 카드는 모달 뒤로 흐려지므로 같은 값을 모달 안에서 보여준다.
+// ⭐새 요청도, 새 계산도 없다 -- plan.projection(before/after)을 그대로 읽는다.
+// 막대 폭은 CSS transition 이 미끄러뜨리고, 숫자는 pvText 가 한 번 튀게 한다.
+// key -> [projection 필드, 막대 만재 기준, 포맷]
+// 🔴만재 기준은 **계좌 카드와 같은 값**이다(LIQ_FULL 10 · EXPO_CAP 30) -- 두 곳이 다른
+//   눈금을 쓰면 같은 숫자가 서로 다른 길이로 보인다.
+//   청산까지는 «10% 이상은 사실상 안전»이라 그 위는 전부 만재다. 둘 다 만재라 막대가 안
+//   움직이는 구간이 생기는데, 그때는 막대 대신 **숫자**가 말한다(33.7% → 16.5%).
+const PROJ_SPEC = {
+  liq:    ["liq_pct", 10, (v) => `${Number(v).toFixed(1)}%`],
+  margin: ["margin_used_pct", 100, (v) => `${Math.round(Number(v))}%`],
+  expo:   ["exposure_x", 30, (v) => `${Number(v).toFixed(1)}배`],
+};
+function renderEntryProj(plan) {
+  const host = el("entryProj");
+  if (!host) return;
+  const pr = plan && !plan.blocked && Number(plan.quantity) > 0 ? plan.projection : null;
+  const a = pr && pr.after, b = pr && pr.before;
+  if (!a || !b) { host.hidden = true; return; }
+  host.hidden = false;
+  Object.entries(PROJ_SPEC).forEach(([key, [field, full, fmt]]) => {
+    const row = host.querySelector(`[data-proj="${key}"]`);
+    if (!row) return;
+    const bv = b[field], av = a[field];
+    if (bv == null || av == null) { row.hidden = true; return; }
+    row.hidden = false;
+    pvText(row.querySelector(".entry-proj-from"), fmt(bv));
+    pvText(row.querySelector(".entry-proj-to"), fmt(av));
+    // 🔴청산까지는 **작을수록 위험**이라 다른 둘과 색 방향이 반대다.
+    const tone = key === "liq" ? acctRiskTone(av)
+      : (av >= full * 0.9 ? "bad" : av >= full * 0.6 ? "warn" : "good");
+    const pct = (v) => Math.max(0, Math.min(100, (Number(v) / full) * 100));
+    const bar = row.querySelector(".entry-proj-rail i");
+    const ghost = row.querySelector(".entry-proj-rail u");
+    if (bar) { bar.style.width = pct(av) + "%"; bar.className = tone; }
+    if (ghost) ghost.style.left = pct(bv) + "%";   // 유령 눈금 = «지금 자리»
+    row.dataset.tone = tone;
+    // 둘 다 만재면 막대가 안 움직인다 -- «왜 안 움직이나»를 화면이 말하게 한다.
+    row.dataset.capped = (Number(bv) >= full && Number(av) >= full) ? "1" : "";
+  });
+}
+
 // 2026-09-15 계좌 카드 게이지를 진입 미리보기로 움직인다(사용자 요청). 값이 실제로 바뀔 때만
 // 카드를 다시 그린다 -- 30초마다 같은 값으로 재그리면 툴팁이 닫히고 스크롤이 튄다.
 // 🔴켜는 조건은 «진입 블록이 펼쳐져 있다» 다. 접혀 있으면 사용자는 진입을 보고 있지 않으므로
@@ -5662,6 +5705,7 @@ async function manualEntryRefreshSize() {
     line.hidden = !plan.blocked;
     line.textContent = plan.blocked ? `주문 불가 — ${plan.blocked}` : "";
     renderEntryFoldNote(plan);
+    renderEntryProj(plan);
     setEntryProjPreview(plan);
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
