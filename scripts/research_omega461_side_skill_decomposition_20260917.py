@@ -469,22 +469,24 @@ def _apply_barriers(gh, gl, gc, tp, sl):
     return r * 1e4
 
 
-def _h48_barriers(te, idx):
-    """`build_omega1_2_triple_barrier_labels` 의 h48_conservative 공식을 그대로 재현한다.
+def _atr_price_move(frame):
+    """`build_omega1_2_triple_barrier_labels._atr_price_move` 를 그대로 옮긴다 -- 인과적(과거만).
 
-    atr = (TrueRange/close).rolling(96, min_periods=24).mean().shift(1)  -- 인과적(과거만)
-    tp = max(0.006, 1.2·atr) · sl = max(0.004, 0.8·atr) · horizon 48봉(=4h)
+    ⚠️**전체 프레임에서 한 번** 계산해야 한다. 폴드 조각마다 계산하면 앞 24봉이 NaN 이고
+    경계마다 웜업 불연속이 생긴다(라벨 빌더는 전체에서 한 번 낸다).
     """
-    hi = pd.to_numeric(te["high"]).astype(float)
-    lo = pd.to_numeric(te["low"]).astype(float)
-    cl = pd.to_numeric(te["close"]).astype(float)
+    hi = pd.to_numeric(frame["high"]).astype(float)
+    lo = pd.to_numeric(frame["low"]).astype(float)
+    cl = pd.to_numeric(frame["close"]).astype(float)
     pc = cl.shift(1)
     tr = pd.concat([(hi - lo).abs(), (hi - pc).abs(), (lo - pc).abs()], axis=1).max(axis=1)
-    atr = (tr / cl.replace(0.0, np.nan)).rolling(96, min_periods=24).mean().shift(1).to_numpy()
-    v = atr[idx]
-    tp = np.maximum(0.006, 1.2 * v)
-    sl = np.maximum(0.004, 0.8 * v)
-    return tp, sl, v
+    return (tr / cl.replace(0.0, np.nan)).rolling(96, min_periods=24).mean().shift(1).to_numpy()
+
+
+def _h48_barriers(atr_te, idx):
+    """h48_conservative: tp = max(0.6%, 1.2·atr) · sl = max(0.4%, 0.8·atr) · horizon 48봉(4h)."""
+    v = atr_te[idx]
+    return np.maximum(0.006, 1.2 * v), np.maximum(0.004, 0.8 * v), v
 
 
 def exitgrid() -> int:
@@ -508,11 +510,14 @@ def exitgrid() -> int:
         m.load_state_dict(pay["state_dict"]); m.eval()
         experts[ename] = (m, dict(pay["scaler"]))
 
+    atr_full = _atr_price_move(df)          # ⭐전체 프레임에서 한 번
     seg = []
     for name, _t0, _t1, v0, v1 in FOLDS:
         if not (v1 < DEPLOYED_SEEN[0] or v0 > DEPLOYED_SEEN[1]):
             continue
-        te = df[(df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")].reset_index(drop=True)
+        mask = ((df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")).to_numpy()
+        te = df[mask].reset_index(drop=True)
+        atr_te = atr_full[mask]
         xr = tabm._base_input(te, base_cols); ev = tabm._route_probs(te).argmax(1)
         D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
         for ei, ename in enumerate(("bull", "bear", "chop")):
@@ -523,16 +528,16 @@ def exitgrid() -> int:
         _, side = F.gate(D, Q, E.Q_THRESH)
         idx = np.where(side != 0)[0]
         idx = idx[idx + horizon < len(te)]
-        seg.append((name, te, side, idx))
+        seg.append((name, te, side, idx, atr_te))
         log(f"  {name} {v0}~{v1}: 후보 {len(idx):,}건")
 
     mats = []
-    for name, te, side, idx in seg:          # 격자 밖에서 한 번만 만든다
+    for name, te, side, idx, atr_te in seg:  # 격자 밖에서 한 번만 만든다
         hi = pd.to_numeric(te["high"]).to_numpy(np.float64)
         lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
         cl = pd.to_numeric(te["close"]).to_numpy(np.float64)
         gh, gl, gc = _gain_matrices(idx, side, hi, lo, cl, horizon)
-        h48tp, h48sl, v = _h48_barriers(te, idx)
+        h48tp, h48sl, v = _h48_barriers(atr_te, idx)
         assert np.isfinite(v).all(), f"{name} ATR 에 NaN -- 웜업 96봉 확인"
         mats.append((gh, gl, gc, te.timestamp.dt.floor("D").to_numpy()[idx], h48tp, h48sl))
     assert all(np.isfinite(m[2]).all() for m in mats), "시간청산 수익에 NaN"
