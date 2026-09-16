@@ -2348,7 +2348,19 @@ svg {
   /* 🔴경보 배지가 ETH 탭 위에 **151x14px 겹쳤다**. .session-alert-center 는 데스크톱에서
      «3번째 항목을 진짜 중앙에» 두려고 absolute 인데, 모바일에서는 .asset-tabs 가 width:100%
      가 되면서 그 위에 얹힌다. 좁은 화면에서는 중앙 정렬이 필요 없으므로 흐름으로 되돌린다. */
-  .ops-panel-head { flex-wrap: wrap; }
+  /* 🔴2026-09-16 사용자 요청: "모바일에서는 eth 버튼을 왼쪽, 글래스 버튼을 오른쪽 양 끝에".
+     08-31 에 세로 스택(flex-direction: column)으로 바꾼 이유는 «코인탭 5개(5x48=240px) +
+     배지들이 375px 를 넘쳤다»였다. 지금은 서버가 꺼진 코인을 hidden 으로 보내 ETH 하나뿐이라
+     그 이유가 사라졌다. 다만 코인을 다시 켜면 그 문제가 돌아오므로 **줄로 되돌리되
+     flex-wrap 으로 보호를 유지한다** -- 넘치면 코인탭이 제 줄을 차지하고 토글이 아래로 내려간다. */
+  .ops-panel-head {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .asset-tabs { width: auto; max-width: 100%; }
+  .asset-tab { flex: 0 0 auto; }
   .session-alert-center {
     position: static;
     transform: none;
