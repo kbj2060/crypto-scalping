@@ -4,7 +4,6 @@ const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_POSITION_SIZING_URL = "/api/position-sizing";
-const API_SHADOWS_URL = "/api/shadows";
 const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
@@ -172,8 +171,6 @@ let liquidation5mLastFetchAt = 0;
 let latestBasisLiquidation = null;
 let latestVolLevel = null;
 let volLevelLastFetchAt = 0;
-let latestShadows = null;
-let shadowsLastFetchAt = 0;
 let basisLiquidationLastFetchAt = 0;
 // Sudden-liquidation alert (2026-08-27) -- backed by tail_risk_interceptor.py's event-triggered
 // liq_burst_state.json (own file, own writer, updated the instant a new @forceOrder event lands),
@@ -2685,72 +2682,6 @@ async function refreshVolLevel() {
   pushToneHistory("vol_level", (latestVolLevel && latestVolLevel.tone) || "neutral");
 }
 
-// 2026-09-16 섀도우 진행. 파일만 읽는 엔드포인트라 5분 폴링으로 충분하다(워커 주기가 300초).
-async function refreshShadows() {
-  const now = Date.now();
-  if (now - shadowsLastFetchAt < 300000) return;
-  shadowsLastFetchAt = now;
-  try {
-    const res = await fetch(API_SHADOWS_URL, { cache: "no-store" });
-    if (!res.ok) throw new Error(`shadows ${res.status}`);
-    latestShadows = await res.json();
-  } catch (error) {
-    console.error("Shadows fetch error:", error);
-    latestShadows = { available: false, error: "fetch_failed" };
-  }
-  renderShadows();
-}
-
-// 🔴규율: |t| 가 1 을 넘기 전에는 「번다/안 번다」로 읽지 않는다. 그래서 표본 진척과 판정이
-// 수익보다 앞에 온다. 색은 전부 중립(회색)이다 -- 방향 신호가 아니고 아직 성과 주장도 아니다
-// (표시 규약 §2: 방향 없음 = neutral).
-function renderShadows() {
-  const v = latestShadows;
-  const sub = el("shadowsSub");
-  if (!v || v.available === false || !Array.isArray(v.rows)) {
-    if (sub) sub.textContent = v ? "데이터 없음" : "웜업";
-    setH("shadowsList", `<p class="muted" style="padding:16px;">섀도우 원장을 불러오지 못했습니다.</p>`);
-    return;
-  }
-  if (sub) sub.textContent = `${v.rows.length}개 · 표본 진척 · 판정 · 수익 · 승률`;
-  const rows = v.rows.map((r) => {
-    let cells, bar = "";
-    if (r.error) {
-      cells = "원장 읽기 실패";
-    } else {
-      const n = r.n || 0;
-      const target = r.target_n || 0;
-      const pct = target ? Math.min(100, Math.round((n / target) * 100)) : 0;
-      const progress = `${n}/${target}${r.unit || ""} (${pct}%)`;
-      const profit = n
-        ? `${r.mean_bp >= 0 ? "+" : ""}${r.mean_bp.toFixed(1)}bp`
-          + (Number.isFinite(r.t) ? ` t${r.t >= 0 ? "+" : ""}${r.t.toFixed(2)}` : "")
-        : "—";
-      const win = n ? `${(r.win_rate * 100).toFixed(0)}%` : "—";
-      cells = `${escapeHtml(r.verdict || "-")} · ${profit} · ${win}`;
-      bar = `<div class="shadow-bar">`
-        + `<span class="meter-track shadow-bar-track" role="progressbar" aria-valuemin="0"`
-        + ` aria-valuemax="100" aria-valuenow="${pct}" aria-label="표본 진척">`
-        + `<span class="meter-fill neutral" style="width:${pct}%"></span></span>`
-        + `<span class="meter-pct shadow-bar-pct">${escapeHtml(progress)}</span></div>`;
-    }
-    // 2026-09-16 사용자 요청: 「제목 아래에 너비 100% 진척도 게이지」.
-    // 진척(0/100쌍 (0%))은 글자 대신 막대가 말한다 -- 배지에는 판정·수익·승률만 남긴다.
-    // 막대는 기존 .meter-track/.meter-fill 을 그대로 쓴다(새 부품을 만들지 않는다).
-    return `<div class="ops-health-row shadow-row" title="${escapeHtml(r.note || "")}">`
-      + `<span class="ops-health-label">${escapeHtml(r.name)}</span>`
-      + `<span class="ops-health-status-badge neutral">${cells}</span>`
-      + bar + `</div>`;
-  });
-  rows.push(`<p class="muted" style="padding:8px 16px 4px;">`
-    + `|t| 가 1 을 넘기 전에는 성과로 읽지 않습니다. 분모는 진척 눈금입니다`
-    + ` — 스트래들 100쌍(t≈1.8 이 되는 수), 방향 게이트 2,214건(연구가 쓴 사건 수, 하루 ~2.6건).`
-    + ` <b>[관측]</b> 은 후보가 아니라 관측 수집이라는 뜻입니다: 방향 게이트는 2026-09-16 웜업 섭동에서`
-    + ` 건당 +20.48→+4.80, 모델−롱이 부호를 뒤집어 1순위에서 내렸습니다. 그래도 돌리는 건 주문이 없어`
-    + ` 비용이 0이고, 앞으로 쌓이는 관측 말고는 답이 없기 때문입니다 — 두 줄은 짝이라 나란히 봅니다.</p>`);
-  setH("shadowsList", rows.join(""));
-}
-
 async function refreshBasisLiquiditySignal() {
   const now = Date.now();
   if (now - basisLiquidationLastFetchAt < BASIS_LIQUIDATION_POLL_MS) return;
@@ -4766,7 +4697,6 @@ async function tick() {
       refreshEvrGate();              // 2026-09-15 변동폭 게이트(20자산)
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshVolLevel();             // 2026-09-14 사이징 모델 변동성 예측(4시간 수준)
-      refreshShadows();              // 2026-09-16 섀도우 진행 (한 줄씩)
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();

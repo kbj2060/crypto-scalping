@@ -1122,82 +1122,6 @@ def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
             "cuts": {"calm": VOL_LEVEL_RATIO_CALM, "hot": VOL_LEVEL_RATIO_HOT}}
 
 
-# 2026-09-15 저변동 스트래들 섀도우 요약 (사용자 요청).
-# 섀도우 진행 카드 (2026-09-16). **한 섀도우 = 한 줄**: 표본 진척 · 판정 · 수익 · 승률.
-# 🔴판정 규율: |t| < 1 이면 「판정 불가」다. 스트래들 연구에서 5창 전부 양수인데 블록 t 가 0.86
-#   이었던 게(창당 독립 쌍 12~76개) 이 규율이 생긴 이유다. 수익보다 표본과 t 가 먼저다.
-# 🔴목표 표본(분모)은 섀도우마다 출처가 다르고, **유도할 수 없으면 만들지 않는다**:
-#   · 스트래들 100쌍   — t≈1.8 이 되는 수(연 60~130쌍이므로 ~1년)
-#   · 방향 게이트 2,214건 — 연구가 쓴 사건 수 그 자체(하루 ~2.6건이라 ~2.3년).
-# ⛔2026-09-16 이름을 낮췄다(`[관측]`): 「독립 재현이 되는 표본 수」라는 원래 설명은 과했다.
-#   같은 셀·같은 시험창인데 인과 확장창 **웜업 시작일만** 바꾸면 사건 집합이 9% 달라지고
-#   건당 +20.48 → +4.80, 모델−롱 +21.72 → −11.19 로 **부호가 뒤집힌다**. 분모는 이제
-#   「연구가 쓴 표본만큼」이라는 **진척 눈금**일 뿐이고, 이 줄은 후보 성과가 아니라 관측 수집이다.
-# 🔴방향 게이트는 **모델 팔과 무조건 롱 팔을 각각 한 줄**로 낸다. 미달 관문 「모델−롱 증분 CI 가
-#   0 을 포함한다」는 두 팔을 나란히 놓아야만 갈린다(09-15 18:13 동결 커밋).
-# 원장은 파일 하나씩만 읽는다(요청 경로 계산 금지 — 모델도 duckdb 도 없다, 2026-09-10 실장애).
-STRADDLE_SHADOW_LEDGER = REPO_ROOT / "data" / "live" / "lowvol_straddle_shadow.jsonl"
-DIRECTION_SHADOW_LEDGER = REPO_ROOT / "data" / "live" / "shadow_1d_top10_20260915" / "decisions.csv"
-
-
-def _shadow_stats(bps: list[float]) -> dict[str, Any]:
-    """평균/표준오차/t/승률. 이게 이 카드의 계산 전부다."""
-    n = len(bps)
-    if not n:
-        return {"n": 0, "verdict": "표본 없음"}
-    mean = sum(bps) / n
-    se = (statistics.variance(bps) / n) ** 0.5 if n > 1 else float("nan")
-    t = (mean / se) if se == se and se > 0 else None
-    return {"n": n, "mean_bp": mean, "total_bp": sum(bps),
-            "se_bp": se if se == se else None, "t": t,
-            "win_rate": sum(1 for b in bps if b > 0) / n,
-            "verdict": ("판정 불가" if t is None or abs(t) < 1.0 else
-                        ("양수 신호" if t > 0 else "음수 신호"))}
-
-
-def _straddle_bps() -> list[float]:
-    if not STRADDLE_SHADOW_LEDGER.exists():
-        return []
-    out = []
-    for line in STRADDLE_SHADOW_LEDGER.read_text().splitlines():
-        if line.strip():
-            v = json.loads(line).get("pair_bp")
-            if isinstance(v, (int, float)):
-                out.append(float(v))
-    return out
-
-
-def _direction_bps(field: str) -> list[float]:
-    """정산된 행만. 만기(288봉=24시간) 전 결정은 빈 칸이라 그대로 건너뛴다."""
-    if not DIRECTION_SHADOW_LEDGER.exists():
-        return []
-    with DIRECTION_SHADOW_LEDGER.open(newline="") as fh:
-        return [float(r[field]) for r in csv.DictReader(fh) if (r.get(field) or "").strip()]
-
-
-def shadows_payload() -> dict[str, Any]:
-    """진행 중인 섀도우 한 줄씩. 🔴전부 주문을 내지 않는 기록 장치다."""
-    specs = (
-        ("저변동 스트래들", "익절 +10% / 손절 −3% · 예측변동성 하위 20%", "쌍", 100,
-         _straddle_bps),
-        ("[관측] 방향 게이트 · 모델",
-         "1d × E|r| 상위10% × 20자산 · ⛔후보가 아니라 관측 수집이다 — 09-16 웜업 섭동에서 "
-         "건당 +20.48→+4.80, 모델−롱 +21.72→−11.19(부호 반전)", "건", 2214,
-         lambda: _direction_bps("net_model_bp")),
-        ("[관측] 방향 게이트 · 무조건 롱", "같은 사건, 방향만 롱 고정 (모델−롱 대조군)", "건", 2214,
-         lambda: _direction_bps("net_long_bp")),
-    )
-    rows = []
-    for name, note, unit, target, reader in specs:
-        try:
-            stats = _shadow_stats(reader())
-        except (OSError, ValueError, KeyError) as exc:
-            rows.append({"name": name, "note": note, "error": type(exc).__name__})
-            continue
-        rows.append({"name": name, "note": note, "unit": unit, "target_n": target, **stats})
-    return {"available": True, "rows": rows}
-
-
 def position_sizing_payload() -> dict[str, Any]:
     """크기 가늠자 상태. **계좌 포지션과의 결합은 프런트가 한다** -- 프런트는 이미
     `/api/binance-account` 를 들고 있어(app.js latestBinanceAccount) 서버에 비동기 의존을
@@ -2626,9 +2550,6 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers=NOCACHE)
 
-    async def api_shadows(request: web.Request) -> web.Response:
-        return web.json_response(await asyncio.to_thread(shadows_payload))
-
     async def api_position_sizing(request: web.Request) -> web.Response:
         payload = await swr_cached(
             "position_sizing", 30.0, lambda: asyncio.to_thread(position_sizing_payload),
@@ -3475,7 +3396,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
     app.router.add_get("/api/position-sizing", api_position_sizing)
-    app.router.add_get("/api/shadows", api_shadows)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
