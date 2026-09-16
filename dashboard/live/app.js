@@ -2741,7 +2741,7 @@ function renderShadows() {
   }
   if (sub) sub.textContent = `${v.rows.length}개 · 표본 진척 · 판정 · 수익 · 승률`;
   const rows = v.rows.map((r) => {
-    let cells;
+    let cells, bar = "";
     if (r.error) {
       cells = "원장 읽기 실패";
     } else {
@@ -2754,11 +2754,20 @@ function renderShadows() {
           + (Number.isFinite(r.t) ? ` t${r.t >= 0 ? "+" : ""}${r.t.toFixed(2)}` : "")
         : "—";
       const win = n ? `${(r.win_rate * 100).toFixed(0)}%` : "—";
-      cells = `${progress} · ${escapeHtml(r.verdict || "-")} · ${profit} · ${win}`;
+      cells = `${escapeHtml(r.verdict || "-")} · ${profit} · ${win}`;
+      bar = `<div class="shadow-bar">`
+        + `<span class="meter-track shadow-bar-track" role="progressbar" aria-valuemin="0"`
+        + ` aria-valuemax="100" aria-valuenow="${pct}" aria-label="표본 진척">`
+        + `<span class="meter-fill neutral" style="width:${pct}%"></span></span>`
+        + `<span class="meter-pct shadow-bar-pct">${escapeHtml(progress)}</span></div>`;
     }
-    return `<div class="ops-health-row" title="${escapeHtml(r.note || "")}">`
+    // 2026-09-16 사용자 요청: 「제목 아래에 너비 100% 진척도 게이지」.
+    // 진척(0/100쌍 (0%))은 글자 대신 막대가 말한다 -- 배지에는 판정·수익·승률만 남긴다.
+    // 막대는 기존 .meter-track/.meter-fill 을 그대로 쓴다(새 부품을 만들지 않는다).
+    return `<div class="ops-health-row shadow-row" title="${escapeHtml(r.note || "")}">`
       + `<span class="ops-health-label">${escapeHtml(r.name)}</span>`
-      + `<span class="ops-health-status-badge neutral">${cells}</span></div>`;
+      + `<span class="ops-health-status-badge neutral">${cells}</span>`
+      + bar + `</div>`;
   });
   rows.push(`<p class="muted" style="padding:8px 16px 4px;">`
     + `|t| 가 1 을 넘기 전에는 성과로 읽지 않습니다. 분모는 진척 눈금입니다`
