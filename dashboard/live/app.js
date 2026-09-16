@@ -332,7 +332,12 @@ let enabledAssets = null;
 function renderSnapshotAssetTabs() {
   document.querySelectorAll("#snapshotAssetTabs .asset-tab").forEach((btn) => {
     const on = !enabledAssets || enabledAssets.includes(btn.dataset.asset);
-    btn.hidden = !on;
+    // 🔴목록을 받기 전(enabledAssets === null)에는 **되살리지 않는다**.
+    //   서버가 index 를 내보낼 때 꺼진 코인에 hidden 을 붙여 주는데(dashboard_index::
+    //   _hide_off_assets), 여기서 무조건 `btn.hidden = !on` 을 쓰면 app.js 가 뜨자마자
+    //   그걸 전부 되돌려 «5개 번쩍 → ETH 만» 이 된다(실측: 350ms 에 5개, 800ms 에 ETH).
+    //   fail-open 은 그대로다 -- 구버전 서버는 hidden 을 안 붙이므로 계속 전부 보인다.
+    if (enabledAssets) btn.hidden = !on;
     btn.classList.toggle("active", on && btn.dataset.asset === activeSnapshotAsset);
   });
 }
