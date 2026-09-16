@@ -2300,3 +2300,105 @@ svg {
     inset 0 0 0 1px rgba(255, 255, 255, 0.35),
     0 1px 3px rgb(var(--shadow) / 0.12);
 }
+
+/* ══ 알약 프리미티브 — 여섯 계열을 하나로 (2026-09-16) ═══════════════════════
+   사용자 지적: "모든 버튼들이 다 각각 달라 ... 글래스/다크 토글 스타일로 통일해줘".
+
+   🔴왜 갈렸나 — 공유 프리미티브가 없었다. 기능이 붙을 때마다 그 날 자기 알약을 새로 그렸고,
+   주석의 날짜가 그대로 증거다(.ops-badge 08-26 · .asset-tab · .page-tab · .push-toggle 09-04 ·
+   .shadow-slot-tab · .notify-btn). 결과:
+     폰트   3 종  mono 800 / sans 700 / inherit 900
+     크기   4 종  11 · 11.5 · 12 · 12px
+     패딩   4 종  9/11 · 8/12 · 7/11 · 7/12 · 9/14
+     radius 2 종  999px · 10px
+     활성   3 종  단색 배경 / 그라디언트+글로우 / 채운 상태색
+   기준은 사용자가 고른 **글래스/다크 토글**(.push-toggle)이다. 새 버튼은 이 목록에 넣는다. */
+.page-tab,
+.push-toggle,
+.shadow-slot-tab,
+.ops-badge,
+.ops-readonly,
+.ops-health-summary,
+.notify-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgb(var(--lift) / 0.035);
+  color: var(--muted);
+  font: 700 11px/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, color .16s ease;
+}
+
+/* 배지는 «읽는 것»이라 누를 수 없다는 걸 커서로 말한다(모양은 같다). */
+.ops-badge, .ops-readonly, .ops-health-summary { cursor: default; }
+
+/* 실행 버튼은 한 치수 크다 -- 같은 언어, 다른 크기. 같아 보이면 «누르는 것»이 안 보인다. */
+.notify-btn { min-height: 38px; padding: 10px 16px; font-size: 12px; }
+/* 설명줄이 달린 둘(알림 탭 테스트 버튼)만 두 줄이라 알약이 어색하다 -- 모서리만 눕힌다. */
+.notify-btn:has(em) {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  border-radius: 14px;
+  text-align: left;
+  white-space: normal;
+}
+
+/* 세그먼티드 컨트롤(ETH… / 청산맵·풋프린트)은 «서로 배타적인 선택»이라 묶음이 정보다.
+   컨테이너가 알약을 맡고 칸은 테두리 없이 그 안에 앉는다 -- iOS 도 같은 구조다.
+   통일하는 것은 **타입·높이·활성 표시**이고, 묶음 자체는 유지한다. */
+.asset-tabs { padding: 3px; border-color: var(--line); background: rgb(var(--lift) / 0.035); }
+.asset-tab {
+  /* 🔴같은 클래스인데 높이가 둘이었다: .asset-tab 30px vs .chart-mode-tabs .asset-tab 24px.
+     세그먼트는 한 치수여야 «같은 컨트롤»로 읽힌다. */
+  height: 28px;
+  min-width: 46px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  font: 700 11px/1 var(--font-sans);
+  color: var(--muted);
+}
+.chart-mode-tabs .asset-tab { height: 28px; font-size: 11px; }
+
+/* 활성 표시도 하나로. .asset-tab 만 그라디언트+글로우라 혼자 튀었다. */
+.page-tab.active,
+.shadow-slot-tab.active,
+.asset-tab.active,
+.push-toggle[data-state="on"],
+.notify-btn.primary {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--ink);
+  box-shadow: none;
+}
+.page-tab:hover:not(.active),
+.shadow-slot-tab:hover:not(.active),
+.asset-tab:hover:not(.active),
+.push-toggle:hover:not(:disabled),
+.notify-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--text);
+}
+.asset-tab:hover:not(.active) { border-color: transparent; }
+
+/* 상태를 «색으로 채우는» 배지는 채움이 곧 의미다 -- 위 프리미티브의 배경만 덮는다. */
+.ops-badge.good, .ops-badge.warn, .ops-badge.bad,
+.ops-health-summary.good, .ops-health-summary.warn, .ops-health-summary.bad {
+  border-color: transparent;
+}
+
+/* ⛔프리미티브의 `display: inline-flex` 가 UA 의 `[hidden] { display: none }` 을 **이긴다**.
+   실제로 숨어 있어야 할 #snapEntryConfirm(진입 확인)·#snapExitShort 가 빈 알약으로 떴다 --
+   실주문 버튼이라 오클릭이 곧 사고다. 저장소 전체에 거는 한 줄로 막는다. */
+[hidden] { display: none !important; }
+
+/* 내용이 비면 배지는 «없는 것»이다. 프리미티브가 min-height 를 줘서 빈 알약이 남았다. */
+.ops-badge:empty, .ops-readonly:empty, .ops-health-summary:empty { display: none !important; }
