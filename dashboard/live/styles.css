@@ -2210,7 +2210,8 @@ svg {
 [data-theme="light"] .shadow-slot-side.long,
 [data-theme="light"] .shadow-slot-side.short,
 [data-theme="light"] .pnl-badge.good,
-[data-theme="light"] .pnl-badge.bad {
+[data-theme="light"] .pnl-badge.bad,
+[data-theme="light"] .execution-alert-icon {
   color: #fff;
 }
 
@@ -2237,3 +2238,29 @@ svg {
 }
 /* 계기 트랙도 같은 이유 -- 흰 위의 흰 8% 는 «채워진 양」을 못 읽는다. */
 [data-theme="light"] .meter-track { background: rgb(var(--lift) / 0.14); }
+
+/* ── 모바일 (2026-09-16) ─────────────────────────────────────────────────────
+   폭 390 에서 실측한 결함만 고친다. 데스크톱은 안 건드린다. */
+@media (max-width: 720px) {
+  /* 🔴경보 배지가 ETH 탭 위에 **151x14px 겹쳤다**. .session-alert-center 는 데스크톱에서
+     «3번째 항목을 진짜 중앙에» 두려고 absolute 인데, 모바일에서는 .asset-tabs 가 width:100%
+     가 되면서 그 위에 얹힌다. 좁은 화면에서는 중앙 정렬이 필요 없으므로 흐름으로 되돌린다. */
+  .ops-panel-head { flex-wrap: wrap; }
+  .session-alert-center {
+    position: static;
+    transform: none;
+    width: 100%;
+    justify-content: center;
+    order: 3;
+  }
+  #snapshotEvidenceBadge { order: 2; }
+
+  /* 손가락 목표는 44px 가 하한이다(애플 HIG). 알약 버튼들이 30~34px 였다. */
+  .asset-tab { height: 38px; }
+  .page-tab, .push-toggle { min-height: 38px; }
+
+  /* 360px 에서 내부 가로 넘침 3곳 -- 줄바꿈을 허용해 잘림 대신 두 줄로 간다. */
+  .manual-entry-row.fields { flex-wrap: wrap; }
+  .exit-frac { flex-wrap: wrap; }
+  .entry-was { white-space: normal; word-break: keep-all; }
+}

@@ -133,6 +133,11 @@ const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 셀 배경 4단계(TradingView: 최소~최대의 0~25/25~50/50~75/75%~). 매수·매도는 각자 최대로 나눈다.
 // 4단계 농담. 라이트에서는 «흰 유리 위」라 같은 알파가 훨씬 옅게 보여 한 단씩 올린다
 // (다크 배열은 현행 그대로다). 숫자를 덮지 않는 선이 상한이라 0.66 에서 멈춘다.
+// 색을 «채운» 면 위의 글자색. 다크 팔레트는 --good/--bad/--accent 가 밝은 파스텔이라
+// 어두운 글자가 맞지만, 라이트에서는 같은 토큰이 진해져 어두운 위 어두운이 된다 -> 흰색으로 뒤집는다.
+// (사용자 규칙 2026-09-16: "색깔 있는 라벨에는 하얀색으로 텍스트 칼라")
+const inkOnFill = (darkInk) =>
+  document.documentElement.getAttribute("data-theme") === "light" ? "#fff" : darkInk;
 const FOOTPRINT_SHADE_DARK = [0.10, 0.22, 0.36, 0.54];
 const FOOTPRINT_SHADE_LIGHT = [0.16, 0.32, 0.48, 0.66];
 const footprintShades = () =>
@@ -3492,7 +3497,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 레짐 +28~+43 · 변동성 +49~+64 ·
   //                 추세 전환 +49~+64 · 변동폭 게이트 +70~+85
   // (2026-09-16 변동성 리본이 카드로 빠지면서 한 줄 21px 를 가격 플롯에 돌려줬다)
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 91;
+  // 2026-09-16 모바일 ml 34 -> 44: 좌측 가격선 라벨이 `ml - 5` 에서 **왼쪽으로** 뻗는데
+  //   «저항1↑»(5글자 ~31px)가 x=-2 까지 나가 잘렸다. 차트 폭은 288 -> 278 로 10px 준다.
+  const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 91;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   const cw = w - ml - mr, ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
@@ -3967,6 +3974,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
     };
 
+    // 봉 델타 라벨의 충돌 회피용. 모바일(봉 폭 ~25px)에서는 글자(~38px)가 봉보다 넓어
+    // 이웃끼리 겹친다 -- 라벨을 버리지 않고 **겹치면 한 줄씩 내린다**(값은 다 보여야 한다).
+    const deltaBoxes = [];
+    const deltaFont = bw >= 34 ? 11 : 9;
     barRows.forEach((rows, i) => {
       const c = candles[i], x = xAt(i);
       let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0, lowKey = Infinity;
@@ -4020,12 +4031,23 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         // 더 내려오는 마지막 행과 글씨가 겹쳤다(2026-09-16 첫 판에서 실제로 겹쳤다) --
         // 행은 rowSize 격자라 저가보다 최대 한 행만큼 더 내려간다.
         const cellsBottom = Number.isFinite(lowKey) ? yAt(lowKey * rowSize) : yAt(c.low);
-        const dY = Math.min(plotBottom - 3, Math.max(cellsBottom, yAt(c.low)) + 13);
-        dTxt.setAttribute("x", x + bw / 2); dTxt.setAttribute("y", dY);
-        dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", "11");
+        let dY = Math.min(plotBottom - 3, Math.max(cellsBottom, yAt(c.low)) + 13);
+        // 글자 폭 근사(굵은 숫자 ~0.62em) 로 상자를 만들고, 겹치면 아래로 한 줄씩 민다.
+        const label = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
+        const halfW = label.length * deltaFont * 0.34 + 2;
+        const cxD = x + bw / 2;
+        for (let guard = 0; guard < 6; guard++) {
+          const hit = deltaBoxes.some((b) =>
+            Math.abs(b.y - dY) < deltaFont + 1 && cxD + halfW > b.x1 && cxD - halfW < b.x2);
+          if (!hit || dY + deltaFont + 2 > plotBottom - 3) break;
+          dY += deltaFont + 2;
+        }
+        deltaBoxes.push({ x1: cxD - halfW, x2: cxD + halfW, y: dY });
+        dTxt.setAttribute("x", cxD); dTxt.setAttribute("y", dY);
+        dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", String(deltaFont));
         dTxt.setAttribute("font-weight", "bold");
         dTxt.setAttribute("fill", delta >= 0 ? "var(--good)" : "var(--bad)");
-        dTxt.textContent = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
+        dTxt.textContent = label;
         const dTitle = document.createElementNS(NS, "title");
         dTitle.textContent = fmtDateTick(c.time * 1000) + " 델타 " + delta.toFixed(1)
           + " · 매수 " + buyTot.toFixed(1) + " / 매도 " + sellTot.toFixed(1);
@@ -4203,7 +4225,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             const t = document.createElementNS(NS, "text");
             t.setAttribute("x", x0 + 6); t.setAttribute("y", row.y + LANE_H / 2 + 3.5);
             t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "bold");
-            t.setAttribute("fill", "#12161d");
+            t.setAttribute("fill", inkOnFill("#12161d"));
             t.textContent = item.name;
             svg.appendChild(t);
           }
@@ -4290,7 +4312,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const pTxt = document.createElementNS(NS, "text");
     pTxt.setAttribute("x", w - mr + 8); pTxt.setAttribute("y", labelY + 4);
     pTxt.setAttribute("font-size", mobileChart ? "11" : "12"); pTxt.setAttribute("font-weight", "bold");
-    pTxt.setAttribute("fill", "#1a1208");
+    pTxt.setAttribute("fill", inkOnFill("#1a1208"));
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
     if (p.marker) svg.appendChild(line);   // 배지 위에 -- 위 주석 참조
@@ -4362,7 +4384,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   priceBadgeText.setAttribute("x", w - mr + 8);
   priceBadgeText.setAttribute("font-size", mobileChart ? "11" : "12");
   priceBadgeText.setAttribute("font-weight", "bold");
-  priceBadgeText.setAttribute("fill", "#0b1220");
+  priceBadgeText.setAttribute("fill", inkOnFill("#0b1220"));
   priceBadgeText.style.display = "none";
   priceBadgeText.style.pointerEvents = "none";
   hoverGroup.appendChild(priceBadgeText);
