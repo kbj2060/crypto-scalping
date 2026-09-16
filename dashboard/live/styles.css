@@ -2618,11 +2618,15 @@ svg {
   position: sticky;
   top: 0;
   /* 🔴`background: inherit` 은 부모의 **계산된 배경 이미지**를 안 물려받는다 -- 그래서
-     헤더만 흰 판으로 남았다(사용자 지적). 몸통과 같은 유리를 직접 칠한다. */
+     헤더만 흰 판으로 남았다(사용자 지적). 몸통과 같은 유리를 직접 칠한다.
+     🔴2026-09-16 그래도 흰 띠로 보였다. 원인은 «흰 칠을 두 번»이다 -- 몸통이 이미
+     흰 그라디언트 + brightness(1.08) 유리인데 헤더가 그 위에 또 흰 wash 를 얹고
+     --glass-blur 의 brightness 를 한 번 더 곱했다. wash 를 --lift 로 돌려
+     (밝기는 다크에서만 더하고 라이트에서는 «그늘」이 된다) 밝기 부스트를 뺀다. */
   background: linear-gradient(180deg,
-    rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.10));
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+    rgb(var(--lift) / 0.10), rgb(var(--lift) / 0.02));
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
   box-shadow: inset 0 1px 0 var(--specular);
   z-index: 1;
 }
@@ -2727,4 +2731,12 @@ svg {
 .trade-modal .exit-frac { gap: 12px; padding: 4px 0; line-height: 1.6; }
 .trade-modal .exit-now,
 .trade-modal .entry-note { line-height: 1.7; padding: 4px 0; }
-.trade-modal .manual-entry-row.actions { gap: 14px; padding-top: 4px; }
+.trade-modal .manual-entry-row.actions { gap: 14px; padding-top: 22px; }
+
+/* 슬라이더 줄은 왼쪽 정렬(사용자 요청). 가운데로 밀면 값 글자 폭(「3배」/「100%」)에 따라
+   두 게이지의 시작점이 매번 어긋나 눈금이 서로 안 맞는다. .entry-cap 의 54px 고정폭이
+   이미 라벨 열을 만들어 두었으니 왼쪽에 붙이면 세 줄이 한 열로 선다.
+   ponytail: `.fields` 세 줄(보유 예정 포함)을 통째로 옮긴다 -- 두 줄만 옮기면
+   남은 한 줄이 가운데 떠서 정렬이 두 종류가 된다. */
+.trade-modal .manual-entry-row.fields { justify-content: flex-start; }
+.trade-modal .manual-entry-row.fields .exit-frac { justify-content: flex-start; }
