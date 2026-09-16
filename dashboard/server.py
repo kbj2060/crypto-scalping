@@ -2502,10 +2502,27 @@ def make_app() -> web.Application:
                 h.update(name.encode())          # 파일이 없어도 페이지는 떠야 한다
         return h.hexdigest()[:12]
 
+    def _hide_off_assets(html: str) -> str:
+        """꺼진 코인 탭을 **처음부터** hidden 으로 내보낸다.
+
+        🔴전에는 HTML 이 5 개를 다 보이게 싣고 SSE 가 도착한 뒤에야 JS 가 숨겼다 --
+        새로고침할 때마다 «ETH BTC SOL XRP HYPE» 가 번쩍였다가 ETH 만 남았다(사용자 리포트).
+        서버는 DASHBOARD_ASSETS 를 이미 알고 이 함수에서 index 를 고쳐 쓰고 있으므로
+        여기서 붙이면 깜빡임이 원천 소멸한다. 클라이언트의 fail-open(목록을 못 받으면 전부
+        보인다)은 그대로 둔다 -- 이건 «처음 그림»만 맞추는 것이다.
+        """
+        def mark(m: "re.Match[str]") -> str:
+            tag, asset = m.group(0), m.group(1)
+            if asset in DASHBOARD_ASSETS or " hidden" in tag:
+                return tag
+            return tag[:-1] + " hidden>"
+        return re.sub(r'<button[^>]*\bdata-asset="([a-z]+)"[^>]*>', mark, html)
+
     async def dashboard_index(_: web.Request) -> web.Response:
         html = (DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
         html = re.sub(r'(app\.js|styles\.css)\?v=[A-Za-z0-9._-]+',
                       lambda m: f"{m.group(1)}?v={_asset_buster()}", html)
+        html = _hide_off_assets(html)
         response = web.Response(text=html, content_type="text/html")
         response.enable_compression()
         return no_cache(response)

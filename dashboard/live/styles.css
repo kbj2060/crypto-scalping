@@ -191,13 +191,9 @@
   border-color: color-mix(in srgb, var(--neutral) 16%, transparent);
   box-shadow: 0 1px 2px rgb(var(--shadow) / 0.08), inset 0 1px 0 var(--specular);
 }
-[data-theme="light"] .page-tab.active,
-[data-theme="light"] .shadow-slot-tab.active,
-[data-theme="light"] .push-toggle[data-state="on"] {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 48%, transparent);
-  color: var(--ink);
-}
+/* 🔴활성 표시를 여기서도 정하고 있었다 -- 프리미티브의 활성 규칙과 **두 곳**이라
+   내가 뒤에서 고쳐도 이쪽이 이겼다(실측: 픽셀이 안 바뀜). 한 곳으로 모은다.
+   활성은 프리미티브의 «밝은 유리 조각»이 맡는다(Apple: 틴트는 primary action 에만). */
 
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(12px); }
@@ -2464,15 +2460,19 @@ svg {
 .asset-tab.active,
 .push-toggle[data-state="on"],
 .notify-btn.primary {
-  /* 🔴틴트 22% 는 유리를 덮어 «주황 칠한 알약»이 됐다(사용자 지적). 활성은 **면이 아니라
-     테두리와 글자**가 말한다 -- 면은 얇게 남겨 뒤가 비치게 둔다. 세그먼트 활성칸에 이미
-     쓴 방식과 같은 문법이다. */
-  border-color: color-mix(in srgb, var(--accent) 75%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  /* ⭐근거: Apple «Meet Liquid Glass»(WWDC25) --
+       "Tinting should only be used to bring emphasis to **primary elements and actions**...
+        Avoid tinting all your elements. When every element is tinted, nothing stands out."
+     이 화면엔 활성 알약이 넷(탭·테마 토글·코인·차트모드)이다. 넷 다 틴트면 Apple 이 경고한
+     그 상태다. 그래서 **선택은 틴트가 아니라 «밝은 유리 조각»**으로 말한다 -- 한 겹 위로
+     떠오르고(더 밝은 면 + 강한 림), 색은 글자만 가져간다.
+     틴트는 아래 .notify-btn.long/.short/.primary(진짜 실행 버튼)에만 남긴다. */
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--specular) 55%, transparent);
   color: var(--accent);
   box-shadow:
     inset 0 1px 0 var(--specular),
-    0 1px 3px rgb(var(--shadow) / 0.14);
+    0 1px 3px rgb(var(--shadow) / 0.16);
 }
 .page-tab:hover:not(.active),
 .shadow-slot-tab:hover:not(.active),
@@ -2536,3 +2536,11 @@ svg {
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
     0 1px 3px rgb(var(--shadow) / 0.18);
 }
+
+/* ⭐Apple 의 «틴트는 primary action 에만» 을 그대로 적용한다 -- 이 화면에서 그건
+   실행 버튼(롱/숏 청산·진입·확인)뿐이다. 틴트는 **면을 덮지 않고 얹는다**:
+   반투명이라 아래 밝기가 그대로 통과한다("a range of tones mapped to content brightness"). */
+.notify-btn.long { background: color-mix(in srgb, var(--good) 11%, transparent); color: var(--good); }
+.notify-btn.short { background: color-mix(in srgb, var(--bad) 11%, transparent); color: var(--bad); }
+.notify-btn.long { border-color: color-mix(in srgb, var(--good) 55%, transparent); }
+.notify-btn.short { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
