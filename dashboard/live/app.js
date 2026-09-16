@@ -5960,6 +5960,38 @@ function renderExitNow() {
   box.innerHTML = [warn, ...rows].filter(Boolean).join("<br>");
 }
 
+// ── 주문 모달 (2026-09-16 사용자 요청) ────────────────────────────────────────
+// 네이티브 <dialog> 라 포커스 트랩·ESC·backdrop 이 공짜다. 여기서 하는 일은 셋뿐이다:
+// 열기 / 닫힐 때 2단 확인 초기화 / 바깥 클릭으로 닫기.
+// ⭐진입과 청산은 **각각 제 모달**이다(사용자 요청). 한 모달에 둘을 담으면 «청산하러
+//   열었는데 진입 버튼이 같이 보이는» 상태가 되고, 그게 이 화면에서 가장 비싼 오클릭이다.
+// 🔴닫는 것으로는 아무 주문도 안 나간다 -- 닫기 버튼은 form method="dialog" 이고 ESC·backdrop
+//   도 같은 경로다. 열려 있던 «확인» 상태는 닫을 때 반드시 지운다(안 지우면 다시 열었을 때
+//   확인 버튼이 남아 한 번의 클릭이 주문이 된다).
+function openTradeModal(mode) {
+  const dlg = el(mode === "exit" ? "exitModal" : "entryModal");
+  if (!dlg) return;
+  // 진입 모달은 접힌 블록을 펴 준다 -- 모달 자체가 «한 번 더 확인」이라 접어 둘 이유가 없다.
+  if (mode === "entry") { const box = el("snapEntryBox"); if (box) box.open = true; }
+  if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "");
+  manualEntryRefreshSize();
+  manualExitSyncButtons();
+}
+function setupTradeModal() {
+  el("tradeOpenExit")?.addEventListener("click", () => openTradeModal("exit"));
+  el("tradeOpenEntry")?.addEventListener("click", () => openTradeModal("entry"));
+  ["exitModal", "entryModal"].forEach((id) => {
+    const dlg = el(id);
+    if (!dlg) return;
+    dlg.addEventListener("close", () => {
+      manualEntryClearConfirm();      // 확인 상태를 들고 다시 열리지 않게
+      setEntryProjPreview(null);      // 계좌 카드를 실제 값으로 되돌린다
+    });
+    // backdrop(모달 바깥) 클릭으로도 닫는다 -- dialog 자신이 클릭 대상이면 바깥이다.
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close("backdrop"); });
+  });
+}
+
 function manualExitSyncButtons() {
   const row = el("snapExitRow");
   if (!row) return;
@@ -5986,6 +6018,9 @@ function manualExitSyncButtons() {
   if (bs) bs.hidden = !lastExitPositions.has("SHORT");
   const hasPos = lastExitPositions.size > 0;
   row.hidden = !hasPos;
+  // 카드의 «청산» 트리거도 같은 조건으로 -- 포지션이 없으면 열 이유가 없다.
+  const openExit = el("tradeOpenExit");
+  if (openExit) openExit.hidden = !hasPos;
   renderExitNow();
   // 진입 블록은 포지션이 있으면 접는다. 포지션 유무가 **바뀔 때만** 건드린다 -- 매 갱신마다
   // 쓰면 사람이 물타기를 보려고 펼쳐 둔 걸 30초마다 도로 닫는다.
@@ -6009,6 +6044,7 @@ function manualExitSyncButtons() {
   if (lab) lab.textContent = hasPos ? "추가 진입 (물타기)" : "진입";
 }
 if (el("snapEntryPlan")) {
+  setupTradeModal();
   manualEntryRefreshSize();
   manualExitSyncButtons();
   setInterval(() => { manualEntryRefreshSize(); manualExitSyncButtons(); },

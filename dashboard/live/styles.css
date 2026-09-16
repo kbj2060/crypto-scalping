@@ -2570,3 +2570,63 @@ svg {
 
 /* 라이트에서도 툴팁은 어두운 판이므로 같은 값이다 -- 토큰을 타지 않게 명시해 둔다. */
 [data-theme="light"] .chart-tooltip b { color: rgba(255, 255, 255, 0.72); }
+
+/* ── 주문 모달 (2026-09-16) ──────────────────────────────────────────────────
+   네이티브 <dialog> 는 top layer 라 패널의 backdrop-filter 기준블록 밖에 선다 --
+   위치가 틀어지지 않는다(차트 툴팁에서 한 번 의심했던 그 함정). */
+.trade-actions { display: flex; gap: 10px; margin-top: 12px; }
+.trade-actions .notify-btn { flex: 1 1 auto; }
+
+.trade-modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, var(--glass-strong), transparent),
+    var(--panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  color: var(--text);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    0 24px 64px rgb(var(--shadow) / 0.30);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.trade-modal::backdrop {
+  background: rgb(var(--shadow) / 0.42);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.trade-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  margin: 0;
+  border-bottom: 1px solid var(--soft-line);
+  position: sticky;
+  top: 0;
+  /* 스크롤해도 닫기 버튼이 남아야 한다 -- 모달은 «나갈 길이 늘 보여야» 한다. */
+  background: inherit;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  z-index: 1;
+}
+.trade-modal-head h3 { margin: 0; font: 600 15px/1.2 var(--font-display); }
+.trade-modal .manual-entry { padding: 14px 16px 18px; }
+
+@media (max-width: 720px) {
+  /* 좁은 화면에서는 아래에서 올라오는 시트로 -- 엄지에서 가장 가까운 자리다. */
+  .trade-modal {
+    width: 100vw;
+    max-width: none;
+    max-height: 88dvh;
+    margin: auto auto 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+  .trade-actions .notify-btn { justify-content: center; }
+}
