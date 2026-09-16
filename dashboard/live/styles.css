@@ -879,6 +879,26 @@ body {
   .ops-health-meta small { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
   .ops-health-head { flex-direction: column; align-items: flex-start; }
   .ops-health-head-tools { width: 100%; justify-content: space-between; }
+
+  /* 🔴경제 일정은 시각 배지(108px)가 설명 칸을 175px 로 눌러 «잘려서 내려간다»(사용자 지적).
+     배지를 없앨 수도, 설명을 줄일 수도 없다 -- 배치를 바꾼다:
+         [점] 제목 ................... 내일 03:00 AM
+              설명은 여기서부터 **전체 폭**을 쓴다
+     마크업이 [점][info(제목+설명)][배지] 라 제목과 설명을 따로 칸에 놓을 수 없는데,
+     `display: contents` 가 info 를 «투명하게» 만들어 자식을 행의 직접 칸으로 올린다.
+     (자식 스타일은 `.ops-health-info strong/span` 후손 선택자라 그대로 살아 있다.) */
+  .macro-calendar-list .ops-health-row {
+    grid-template-columns: auto 1fr auto;
+    align-items: start;
+    row-gap: 4px;
+  }
+  .macro-calendar-list .ops-health-info { display: contents; }
+  .macro-calendar-list .ops-health-dot { grid-column: 1; grid-row: 1; align-self: center; }
+  .macro-calendar-list .ops-health-info strong { grid-column: 2; grid-row: 1; align-self: center; }
+  .macro-calendar-list .ops-health-info span { grid-column: 2 / -1; grid-row: 2; }
+  .macro-calendar-list .ops-health-status-badge {
+    grid-column: 3; grid-row: 1; justify-self: end; align-self: center;
+  }
 }
 
 .ops-shadow-panel { padding: 0; overflow: hidden; margin-top: 16px; }
