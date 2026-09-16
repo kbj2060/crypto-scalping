@@ -2464,9 +2464,12 @@ svg {
 .asset-tab.active,
 .push-toggle[data-state="on"],
 .notify-btn.primary {
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--ink);
+  /* 🔴틴트 22% 는 유리를 덮어 «주황 칠한 알약»이 됐다(사용자 지적). 활성은 **면이 아니라
+     테두리와 글자**가 말한다 -- 면은 얇게 남겨 뒤가 비치게 둔다. 세그먼트 활성칸에 이미
+     쓴 방식과 같은 문법이다. */
+  border-color: color-mix(in srgb, var(--accent) 75%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
   box-shadow:
     inset 0 1px 0 var(--specular),
     0 1px 3px rgb(var(--shadow) / 0.14);
