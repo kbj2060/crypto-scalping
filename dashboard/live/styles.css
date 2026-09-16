@@ -1,3 +1,20 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   디자인 토큰 — **여기 한 곳만 고치면 화면 전체가 따라온다** (2026-09-16 정리)
+
+   왜 이 계약이 필요했나: 정리 전 이 파일에는 정의 블록 **밖에** 색 리터럴이 134 회 · 47 종
+   있었고, 상위 넷이 전부 의미 토큰의 **하드코딩 사본**이었다(옛 --good 16 · 옛 --bad 16 ·
+   --accent 17 · 중립 17). 그래서 --good 을 고쳐도 16 곳이 안 따라왔고, 그게 「글래스 버전
+   색이 통일이 안 된」 이유였다. 104 회를 토큰으로 올렸다.
+
+   규칙 셋:
+     1. **색은 초록·빨강·주황 셋뿐이다.** 무채색은 --neutral 하나에서 나온다.
+        --amber / --liq-support / --liq-resistance 는 이름만 남기고 셋 중 하나를 가리킨다.
+     2. **투명도는 color-mix 로 만든다.** `color-mix(in srgb, var(--bad) 22%, transparent)`.
+        `rgba(207,106,92,.22)` 처럼 숫자를 박으면 토큰을 고쳐도 안 따라온다.
+     3. **명암은 --lift / --shadow / --specular 로.** 흰색·검정을 직접 쓰지 않는다
+        (라이트에서 «띄우기»의 부호가 뒤집혀야 하기 때문 -- 아래 테마 축 설명 참조).
+   새 색이 필요하면 «셋 중 무엇인가»를 먼저 답한다. 답이 없으면 그건 무채색이다.
+   ══════════════════════════════════════════════════════════════════════════════ */
 :root {
   /* 2026-09-12 명도 계단: 배경 L*9.2 -> 패널 15.0 -> panel-strong 20.6 (층당 ~6).
      이전엔 bg 3.7 / 패널 6.9 로 계단이 3.2 뿐이라 전부 한 평면으로 눌렸고,
@@ -10,13 +27,21 @@
   --glass-strong: rgba(255, 255, 255, 0.08);
   --text: #eef0f6;
   --muted: #8b91a6;
-  --good: #5abc80;
-  --bad: #d4786c;
-  --warn: #dc8f4a;
-  --amber: #f2b84b;
-  --accent: #22d3ee;
-  --liq-support: #5b8def;
-  --liq-resistance: #e0913f;
+  /* ⭐색은 **초록·빨강·주황 셋**이다(2026-09-16 사용자 결정). 그 밖의 색은 중립뿐이다.
+     --amber / --liq-* 는 이름을 유지하되 셋 중 하나를 가리킨다 -- 부르는 이름은 남기고
+     «색은 하나»로 모아야 한 곳만 고쳐도 전부 따라온다. */
+  --good: #5abc80;            /* 초록 -- 상승·정상·지지 */
+  --bad: #d4786c;             /* 빨강 -- 하락·위험·저항 */
+  --warn: #dc8f4a;            /* 주황 -- 주의·경보 */
+  /* 🔴«주황을 빼줘»(2026-09-16 사용자). --accent 는 «UI 강조」이지 의미색이 아니다 --
+     초록/빨강은 방향이 이미 가져갔고, 주황을 여기 두면 화면 어디나 주황이 된다.
+     중립 강조로 돌린다: 색 없이 «밝기」로만 튄다. 경보는 --warn 이 계속 주황이다. */
+  --accent: #dfe4ee;          /* 중립 강조 -- 활성·현재가·슬라이더 */
+  --amber: var(--warn);
+  --liq-support: var(--good);
+  --liq-resistance: var(--bad);
+  --neutral: #cbd1e3;         /* 유일한 무채색 재료 -- 선·틴트가 여기서 나온다 */
+  --on-fill: #12161d;         /* 색을 «채운» 면 위의 글자 */
   --ink: #f5f6fb;
   --line: rgba(203, 209, 227, 0.18);
   --soft-line: rgba(203, 209, 227, 0.095);
@@ -66,13 +91,15 @@
      가장 어두운 바탕**이다(실측 rgb(208,213,224) -- 뒤 색 덩어리가 비쳐 보이는 자리).
      유리를 진짜 유리로 만들면 바탕이 균일하지 않으므로 최악점으로 잡아야 한다.
      손익 «숫자»가 작은 글씨라 큰글자 기준 3.0 으로는 모자란다. */
-  --good: #136436;   /* 최악 유리바탕 5.79:1 */
-  --bad: #9c3227;    /* 최악 유리바탕 5.80:1 */
-  --warn: #7a4809;   /* 최악 유리바탕 5.01:1 */
-  --amber: #6e4d06;  /* 최악 유리바탕 5.03:1 -- 노랑은 같은 밝기에서 대비가 가장 안 나온다 */
-  --accent: #095d79; /* 최악 유리바탕 5.89:1 */
-  --liq-support: #2551a8;      /* 최악 유리바탕 5.03:1 */
-  --liq-resistance: #83480a;   /* 최악 유리바탕 4.98:1 */
+  --good: #136436;            /* 초록 · 최악 유리바탕 5.79:1 */
+  --bad: #9c3227;             /* 빨강 · 5.80:1 */
+  --warn: #7a4809;            /* 주황 · 5.01:1 */
+  --accent: #2b3444;          /* 중립 강조 · 최악 유리바탕 8.5:1 */
+  --amber: var(--warn);
+  --liq-support: var(--good);
+  --liq-resistance: var(--bad);
+  --neutral: #141a28;         /* 라이트에서는 «선」이 어두워야 한다 */
+  --on-fill: #ffffff;         /* 라이트 토큰은 진해서 채운 면 위 글자는 흰색이다 */
   --line: rgba(20, 26, 40, 0.14);
   --soft-line: rgba(20, 26, 40, 0.075);
   --hover-line: rgba(20, 26, 40, 0.30);
@@ -88,13 +115,13 @@
    굴절시킬 색 덩어리를 깔아 준다(애플이 배경에 쓰는 소프트 메시). */
 [data-theme="light"] body {
   background:
-    radial-gradient(circle 260px at 72% 22%, rgba(12, 160, 200, 0.30), transparent 62%),
-    radial-gradient(circle 230px at 92% 66%, rgba(255, 138, 92, 0.24), transparent 64%),
-    radial-gradient(circle 260px at 10% 70%, rgba(24, 160, 96, 0.24), transparent 62%),
-    radial-gradient(ellipse 1000px 700px at 4% -6%, rgba(10, 109, 142, 0.42), transparent 64%),
-    radial-gradient(ellipse 880px 660px at 98% 6%, rgba(116, 84, 214, 0.40), transparent 66%),
-    radial-gradient(ellipse 900px 700px at 76% 62%, rgba(24, 132, 76, 0.26), transparent 68%),
-    radial-gradient(ellipse 820px 620px at 16% 96%, rgba(198, 116, 52, 0.24), transparent 66%),
+    radial-gradient(circle 260px at 72% 22%, color-mix(in srgb, var(--good) 34%, transparent), transparent 62%),
+    radial-gradient(circle 230px at 92% 66%, color-mix(in srgb, var(--warn) 30%, transparent), transparent 64%),
+    radial-gradient(circle 260px at 10% 70%, color-mix(in srgb, var(--bad) 24%, transparent), transparent 62%),
+    radial-gradient(ellipse 1000px 700px at 4% -6%, color-mix(in srgb, var(--good) 34%, transparent), transparent 64%),
+    radial-gradient(ellipse 880px 660px at 98% 6%, color-mix(in srgb, var(--warn) 34%, transparent), transparent 66%),
+    radial-gradient(ellipse 900px 700px at 76% 62%, color-mix(in srgb, var(--bad) 22%, transparent), transparent 68%),
+    radial-gradient(ellipse 820px 620px at 16% 96%, color-mix(in srgb, var(--warn) 24%, transparent), transparent 66%),
     linear-gradient(180deg, #e3e8f2 0%, var(--bg) 46%, #ccd5e4 100%);
   background-attachment: fixed;
 }
@@ -135,7 +162,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 1),
     inset 0 0 0 1px rgba(255, 255, 255, 0.58),
     inset 0 -18px 28px -22px rgba(255, 255, 255, 0.85),
-    0 0 0 1px rgba(10, 109, 142, 0.22),
+    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
     0 3px 8px rgb(var(--shadow) / 0.13),
     0 24px 56px rgb(var(--shadow) / 0.22);
 }
@@ -161,16 +188,15 @@
 [data-theme="light"] .push-toggle,
 [data-theme="light"] .shadow-slot-tab {
   background: rgba(255, 255, 255, 0.55);
-  border-color: var(--glass-edge);
+  /* 🔴테두리는 --glass-edge(흰 0.72) 였다. 흰 유리 위의 흰 테두리는 «유리의 림»이 아니라
+     둥둥 뜬 **윤곽선**으로 보인다(사용자 지적). 림은 box-shadow 의 inset 이 맡고,
+     테두리는 중립에서 옅게 뽑는다 -- 활성일 때만 색이 들어간다. */
+  border-color: color-mix(in srgb, var(--neutral) 16%, transparent);
   box-shadow: 0 1px 2px rgb(var(--shadow) / 0.08), inset 0 1px 0 var(--specular);
 }
-[data-theme="light"] .page-tab.active,
-[data-theme="light"] .shadow-slot-tab.active,
-[data-theme="light"] .push-toggle[data-state="on"] {
-  background: rgba(10, 109, 142, 0.14);
-  border-color: rgba(10, 109, 142, 0.48);
-  color: var(--ink);
-}
+/* 🔴활성 표시를 여기서도 정하고 있었다 -- 프리미티브의 활성 규칙과 **두 곳**이라
+   내가 뒤에서 고쳐도 이쪽이 이겼다(실측: 픽셀이 안 바뀜). 한 곳으로 모은다.
+   활성은 프리미티브의 «밝은 유리 조각»이 맡는다(Apple: 틴트는 primary action 에만). */
 
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(12px); }
@@ -189,7 +215,7 @@ html {
 }
 body {
   background:
-    radial-gradient(ellipse 900px 520px at 12% -8%, rgba(34, 211, 238, 0.1), transparent 55%),
+    radial-gradient(ellipse 900px 520px at 12% -8%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 55%),
     linear-gradient(180deg, #1d222b 0%, var(--bg) 46%, #13171f 100%);
   background-attachment: fixed;
   color: var(--text);
@@ -216,12 +242,12 @@ body {
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--bad) 62%, transparent);
   border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, rgba(212, 120, 108, 0.22), rgba(46, 52, 62, 0.96));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 22%, transparent), rgba(46, 52, 62, 0.96));
   box-shadow: 0 14px 34px rgb(var(--shadow) / 0.28);
 }
 
 .execution-alert-banner.hidden { display: none; }
-.execution-alert-banner.blocked { border-color: color-mix(in srgb, var(--warn) 70%, transparent); background: linear-gradient(90deg, rgba(220, 143, 74, 0.22), rgba(46, 52, 62, 0.96)); }
+.execution-alert-banner.blocked { border-color: color-mix(in srgb, var(--warn) 70%, transparent); background: linear-gradient(90deg, color-mix(in srgb, var(--warn) 22%, transparent), rgba(46, 52, 62, 0.96)); }
 .execution-alert-banner.disabled { border-color: var(--line); background: linear-gradient(90deg, rgba(148, 154, 173, 0.14), rgba(46, 52, 62, 0.94)); }
 .execution-alert-icon {
   display: grid;
@@ -230,7 +256,7 @@ body {
   height: 32px;
   border-radius: 50%;
   background: var(--bad);
-  color: #12131b;
+  color: var(--on-fill);
   font: 900 18px/1 var(--font-mono);
 }
 .execution-alert-banner.blocked .execution-alert-icon { background: var(--warn); }
@@ -312,7 +338,7 @@ body {
 
 .page-tabs { display: flex; gap: 7px; align-items: center; }
 .page-tab { border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--lift) / .035); color: var(--muted); padding: 8px 12px; font: 700 11px/1 var(--font-sans); cursor: pointer; }
-.page-tab.active { border-color: rgba(34,211,238,.7); background: rgba(34,211,238,.16); color: var(--ink); }
+.page-tab.active { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--ink); }
 .hidden { display: none !important; }
 .ops-tab-panel { display: grid; gap: 16px; }
 .ops-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 10px 2px; position: relative; }
@@ -326,9 +352,9 @@ body {
 .ops-panel-head h2 { margin: 2px 0 6px; font: 500 28px/1.1 var(--font-display); }
 .eyebrow { margin: 0; color: var(--accent); font: 800 10px/1 var(--font-mono); letter-spacing: .12em; }
 .ops-badge, .ops-readonly, .ops-health-summary { border-radius: 999px; font: 800 11px/1 var(--font-mono); padding: 9px 11px; white-space: nowrap; }
-.ops-badge.good, .ops-health-summary.good { color: #122016; background: var(--good); }
-.ops-badge.warn, .ops-health-summary.warn { color: #2c1c09; background: var(--warn); }
-.ops-badge.bad, .ops-health-summary.bad { color: #2a0e0a; background: var(--bad); }
+.ops-badge.good, .ops-health-summary.good { color: var(--on-fill); background: var(--good); }
+.ops-badge.warn, .ops-health-summary.warn { color: var(--on-fill); background: var(--warn); }
+.ops-badge.bad, .ops-health-summary.bad { color: var(--on-fill); background: var(--bad); }
 .ops-badge.neutral, .ops-readonly, .ops-health-summary.neutral { color: var(--muted); background: var(--glass); border: 1px solid var(--line); }
 .ops-badge.good { animation: statusPulse 2.4s ease-in-out infinite; }
 
@@ -354,6 +380,17 @@ body {
    -info/-status-badge as-is (see scripts/live_macro_calendar_20260826.py for the event data). */
 .macro-calendar-list { grid-template-columns: 1fr; }
 .macro-calendar-list .ops-health-row:nth-child(odd) { border-right: none; }
+/* 🔴이 배지는 **언제나 시각**이다("내일 03:00 AM"). 좁은 칸에서 «내일 / 03:00 / AM» 로
+   세 줄이 되어 배지가 72x54 였다(사용자 지적). 시각은 쪼개면 못 읽는다.
+   nowrap 만으로는 부족했다 -- 트랙이 72px 에 머물러 이번엔 «내일 03:0» 로 **잘렸다**.
+   `min-width: max-content` 가 트랙에게 «이만큼은 필요하다»를 알려주는 유일한 한 줄이다
+   (실측: 트랙 72 → 108, 잘림 해소). 3열을 max-content 로 바꾸는 것으로는 안 됐다.
+   ⚠️다른 배지에는 걸지 않는다 -- 헬스 체크의 긴 진단 문자열("0/100쌍 (0%) · 표본 없음 …",
+   실측 190px)에 걸면 제목을 다시 밀어 2026-08 사고가 재발한다. 거긴 줄바꿈이 **맞다**. */
+.macro-calendar-list .ops-health-status-badge {
+  white-space: nowrap;
+  min-width: max-content;
+}
 .macro-calendar-empty { padding: 16px 18px; color: var(--muted); font-size: 12.5px; }
 
 .ops-health-dot {
@@ -361,7 +398,7 @@ body {
   height: 9px;
   border-radius: 50%;
   background: var(--line);
-  box-shadow: 0 0 0 3px rgba(203, 209, 227, 0.06);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--neutral) 6%, transparent);
 }
 .ops-health-row.good .ops-health-dot { background: var(--good); box-shadow: 0 0 10px var(--good); animation: statusPulse 2.4s ease-in-out infinite; }
 .ops-health-row.warn .ops-health-dot { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
@@ -375,6 +412,9 @@ body {
 .ops-health-meta small { color: var(--muted); font: 11px/1 var(--font-mono); }
 .ops-health-status-badge {
   display: inline-block;
+  /* 등폭 폰트라 ch 가 곧 «글자 수»다. 이 상한이 좁은 화면에서 긴 배지가 제목을 미는 것을
+     막는다(2026-08 «제목이 한 글자씩 줄바꿈」 사고의 진짜 방지선). */
+  max-width: 17ch;
   padding: 3px 9px;
   border-radius: 999px;
   font: 800 10px/1.4 var(--font-mono);
@@ -383,9 +423,9 @@ body {
   border: 1px solid var(--line);
   color: var(--muted);
 }
-.ops-health-row.good .ops-health-status-badge { color: #122016; background: var(--good); border-color: transparent; }
-.ops-health-row.warn .ops-health-status-badge { color: #2c1c09; background: var(--amber); border-color: transparent; }
-.ops-health-row.bad .ops-health-status-badge { color: #2a0e0a; background: var(--bad); border-color: transparent; }
+.ops-health-row.good .ops-health-status-badge { color: var(--on-fill); background: var(--good); border-color: transparent; }
+.ops-health-row.warn .ops-health-status-badge { color: var(--on-fill); background: var(--amber); border-color: transparent; }
+.ops-health-row.bad .ops-health-status-badge { color: var(--on-fill); background: var(--bad); border-color: transparent; }
 /* 2026-08-27 (user request): fixed absolute size for the model-indicator badges specifically
    (미발동/상승압력/주의/안정/... -- see the badge-text values app.js's classifyIndicators() feeds
    into this span) -- was sized purely by content/padding before, so "안정" and "BOTTOM 발동" made
@@ -643,15 +683,15 @@ body {
   color: var(--muted);
 }
 
-.signal-chip.good { border-color: rgba(107, 171, 132, 0.45); background: rgba(107, 171, 132, 0.08); }
+.signal-chip.good { border-color: color-mix(in srgb, var(--good) 45%, transparent); background: color-mix(in srgb, var(--good) 8%, transparent); }
 .signal-chip.good .signal-chip-dot { background: var(--good); box-shadow: 0 0 8px var(--good); animation: statusPulse 2.4s ease-in-out infinite; }
 .signal-chip.good .signal-chip-label, .signal-chip.good .signal-chip-state { color: var(--good); }
 
-.signal-chip.bad { border-color: rgba(207, 106, 92, 0.45); background: rgba(207, 106, 92, 0.08); }
+.signal-chip.bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent); }
 .signal-chip.bad .signal-chip-dot { background: var(--bad); box-shadow: 0 0 8px var(--bad); animation: statusPulse 2.4s ease-in-out infinite; }
 .signal-chip.bad .signal-chip-label, .signal-chip.bad .signal-chip-state { color: var(--bad); }
 
-.signal-chip.warn { border-color: rgba(220, 143, 74, 0.5); background: rgba(220, 143, 74, 0.08); }
+.signal-chip.warn { border-color: color-mix(in srgb, var(--warn) 50%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .signal-chip.warn .signal-chip-dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
 .signal-chip.warn .signal-chip-label, .signal-chip.warn .signal-chip-state { color: var(--warn); }
 
@@ -763,7 +803,7 @@ body {
 }
 .liq-level-tag { color: var(--muted); }
 .liq-level-price { font-weight: 800; }
-.liq-level-bar-track { height: 8px; border-radius: 4px; background: rgba(203, 209, 227, 0.1); overflow: hidden; }
+.liq-level-bar-track { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--neutral) 10%, transparent); overflow: hidden; }
 .liq-level-bar-fill { height: 100%; border-radius: 4px; }
 .liq-level-dist { text-align: right; color: var(--muted); }
 .liq-level-row.liq-resistance .liq-level-bar-fill { background: var(--liq-resistance); }
@@ -795,7 +835,7 @@ body {
   height: 10px;
   border-radius: 5px;
   overflow: hidden;
-  background: rgba(203, 209, 227, 0.1);
+  background: color-mix(in srgb, var(--neutral) 10%, transparent);
 }
 /* 2026-09-06: 새로고침 직후 0%로 그려둔 막대가 데이터 도착 시 실제 비율로 **움직이도록** 전이를 준다
    (renderLiquidationVolumeGauge 는 innerHTML 을 갈아끼우지 않고 width 만 바꾼다). */
@@ -813,14 +853,51 @@ body {
 @media (max-width: 720px) {
   .ops-health-list { grid-template-columns: 1fr; }
   .ops-health-row:nth-child(odd) { border-right: 0; }
-  /* base is `auto 1fr auto` (dot | info | meta) -- on narrow viewports a long meta <small>
-     (e.g. "bottom 169bar / 14.1h ago · top not in lookback") sizes its auto column to its full
-     unwrapped width and crushes the 1fr info column down to a sliver, wrapping the title
-     character-by-character. Drop the 3rd column and let meta wrap onto its own full-width row. */
-  .ops-health-row { grid-template-columns: auto 1fr; row-gap: 8px; }
-  .ops-health-meta { grid-column: 1 / -1; }
+  /* base is `auto 1fr auto` (dot | info | meta). 여기엔 제약이 **둘** 있고 둘 다 만족해야 한다.
+     ① (2026-08) 긴 meta <small>("bottom 169bar / 14.1h ago · top not in lookback")가 auto 열을
+        제 폭까지 밀어 1fr info 를 실오라기로 만들고 제목이 한 글자씩 줄바꿈됐다.
+        → 그때 해법은 «3열을 버리고 meta 를 통째 다음 줄로»(grid-column: 1 / -1) 였다.
+     ② (2026-09-16 사용자 지적) 그러면 배지가 제목에서 뚝 떨어져 가운데가 비고, 행 높이가
+        시각 유무에 따라 113/128 로 갈린다(경제 캘린더 158/143/143).
+     둘 다 푸는 건 «열을 버리는 것»이 아니라 **두 열 다 줄어들 수 있게 만드는 것**이다:
+     minmax(0, …) 로 두 트랙의 최소를 0 으로 풀고, meta 는 40% 를 못 넘게 상한을 준다.
+     그러면 긴 meta 는 자기 칸 안에서 줄바꿈하지 info 를 밀지 않는다. */
+  .ops-health-row {
+    /* 🔴fit-content(40%) 로 했더니 트랙이 72px 만 잡혀 시각 배지(필요 108px)가 잘렸다(실측).
+       트랙을 auto 로 두고 **배지 자신에게 ch 상한**을 준다 -- 배지는 등폭 폰트라 ch 가
+       글자 수와 정확히 대응한다. 시각은 «내일 03:00 AM» 12 자라 다 들어가고,
+       긴 진단 문자열은 상한에 걸려 자기 칸 안에서 줄바꿈한다(info 를 안 민다). */
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+  .ops-health-info { min-width: 0; }
+  .ops-health-info > * { overflow-wrap: anywhere; }
+  .ops-health-meta { min-width: 0; align-content: center; }
+  .ops-health-meta small { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
   .ops-health-head { flex-direction: column; align-items: flex-start; }
   .ops-health-head-tools { width: 100%; justify-content: space-between; }
+
+  /* 🔴경제 일정은 시각 배지(108px)가 설명 칸을 175px 로 눌러 «잘려서 내려간다»(사용자 지적).
+     배지를 없앨 수도, 설명을 줄일 수도 없다 -- 배치를 바꾼다:
+         [점] 제목 ................... 내일 03:00 AM
+              설명은 여기서부터 **전체 폭**을 쓴다
+     마크업이 [점][info(제목+설명)][배지] 라 제목과 설명을 따로 칸에 놓을 수 없는데,
+     `display: contents` 가 info 를 «투명하게» 만들어 자식을 행의 직접 칸으로 올린다.
+     (자식 스타일은 `.ops-health-info strong/span` 후손 선택자라 그대로 살아 있다.) */
+  .macro-calendar-list .ops-health-row {
+    grid-template-columns: auto 1fr auto;
+    align-items: start;
+    row-gap: 4px;
+  }
+  .macro-calendar-list .ops-health-info { display: contents; }
+  .macro-calendar-list .ops-health-dot { grid-column: 1; grid-row: 1; align-self: center; }
+  .macro-calendar-list .ops-health-info strong { grid-column: 2; grid-row: 1; align-self: center; }
+  .macro-calendar-list .ops-health-info span { grid-column: 2 / -1; grid-row: 2; }
+  .macro-calendar-list .ops-health-status-badge {
+    grid-column: 3; grid-row: 1; justify-self: end; align-self: center;
+  }
 }
 
 .ops-shadow-panel { padding: 0; overflow: hidden; margin-top: 16px; }
@@ -838,7 +915,7 @@ body {
 .shadow-slot-tabs { display: flex; gap: 8px; flex-wrap: wrap; padding: 20px 16px 16px; }
 .shadow-slot-tab { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--lift) / 0.035); color: var(--muted); padding: 7px 12px; font: 700 11.5px/1 var(--font-sans); cursor: pointer; transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
 .shadow-slot-tab:hover:not(.active) { color: var(--text); background: rgb(var(--lift) / 0.06); }
-.shadow-slot-tab.active { border-color: rgba(34, 211, 238, 0.7); background: rgba(34, 211, 238, 0.16); color: var(--ink); }
+.shadow-slot-tab.active { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--ink); }
 .shadow-slot-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
 .shadow-slot-tab-dot.long { background: var(--good); }
 .shadow-slot-tab-dot.short { background: var(--bad); }
@@ -848,15 +925,15 @@ body {
 .shadow-slot-card.empty { display: flex; align-items: center; justify-content: center; min-height: 64px; }
 .shadow-slot-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .shadow-slot-side { font: 800 12px/1 var(--font-sans); padding: 4px 8px; border-radius: 999px; }
-.shadow-slot-side.long { color: #122016; background: var(--good); }
-.shadow-slot-side.short { color: #2a0e0a; background: var(--bad); }
+.shadow-slot-side.long { color: var(--on-fill); background: var(--good); }
+.shadow-slot-side.short { color: var(--on-fill); background: var(--bad); }
 .shadow-slot-src { font: 600 10.5px/1 var(--font-mono); }
 .shadow-ribbon {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
   gap: 10px;
   padding: 12px;
-  border: 1px solid rgba(203, 209, 227, 0.12);
+  border: 1px solid color-mix(in srgb, var(--neutral) 12%, transparent);
   border-radius: var(--radius);
   background:
     linear-gradient(135deg, rgb(var(--lift) / 0.075), rgb(var(--lift) / 0.025)),
@@ -870,17 +947,17 @@ body {
   border-radius: 999px;
   overflow: visible;
   background:
-    linear-gradient(90deg, rgba(207, 106, 92, 0.14), rgba(203, 209, 227, 0.05) 46%, rgba(203, 209, 227, 0.05) 54%, rgba(107, 171, 132, 0.14)),
+    linear-gradient(90deg, color-mix(in srgb, var(--bad) 14%, transparent), color-mix(in srgb, var(--neutral) 5%, transparent) 46%, color-mix(in srgb, var(--neutral) 5%, transparent) 54%, color-mix(in srgb, var(--good) 14%, transparent)),
     rgb(var(--lift) / 0.03);
   box-shadow: inset 0 1px 4px rgb(var(--shadow) / 0.4), inset 0 -1px 0 var(--specular);
 }
-.shadow-slot-range-zero { position: absolute; top: -3px; bottom: -3px; width: 1px; background: rgba(203, 209, 227, 0.28); transform: translateX(-0.5px); }
+.shadow-slot-range-zero { position: absolute; top: -3px; bottom: -3px; width: 1px; background: color-mix(in srgb, var(--neutral) 28%, transparent); transform: translateX(-0.5px); }
 .shadow-slot-range-fill { position: absolute; top: 1px; bottom: 1px; border-radius: 5px; transition: left 0.45s cubic-bezier(.22,.68,0,1.01), width 0.45s cubic-bezier(.22,.68,0,1.01); }
-.shadow-slot-range-fill.good { background: linear-gradient(90deg, rgba(107, 171, 132, 0.18), var(--good)); box-shadow: 0 0 10px rgba(107, 171, 132, 0.4); }
-.shadow-slot-range-fill.bad { background: linear-gradient(90deg, var(--bad), rgba(207, 106, 92, 0.18)); box-shadow: 0 0 10px rgba(207, 106, 92, 0.4); }
+.shadow-slot-range-fill.good { background: linear-gradient(90deg, color-mix(in srgb, var(--good) 18%, transparent), var(--good)); box-shadow: 0 0 10px color-mix(in srgb, var(--good) 40%, transparent); }
+.shadow-slot-range-fill.bad { background: linear-gradient(90deg, var(--bad), color-mix(in srgb, var(--bad) 18%, transparent)); box-shadow: 0 0 10px color-mix(in srgb, var(--bad) 40%, transparent); }
 .shadow-slot-range-mark { position: absolute; top: -4px; bottom: -4px; width: 3px; border-radius: 3px; transform: translateX(-1.5px); transition: left 0.45s cubic-bezier(.22,.68,0,1.01); }
-.shadow-slot-range-mark.sl { background: linear-gradient(180deg, rgba(207, 106, 92, 0.35), var(--bad)); box-shadow: 0 0 7px rgba(207, 106, 92, 0.55); }
-.shadow-slot-range-mark.tp { background: linear-gradient(180deg, var(--good), rgba(107, 171, 132, 0.35)); box-shadow: 0 0 7px rgba(107, 171, 132, 0.55); }
+.shadow-slot-range-mark.sl { background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 35%, transparent), var(--bad)); box-shadow: 0 0 7px color-mix(in srgb, var(--bad) 55%, transparent); }
+.shadow-slot-range-mark.tp { background: linear-gradient(180deg, var(--good), color-mix(in srgb, var(--good) 35%, transparent)); box-shadow: 0 0 7px color-mix(in srgb, var(--good) 55%, transparent); }
 .shadow-slot-range-current {
   position: absolute;
   top: 50%;
@@ -897,18 +974,18 @@ body {
 .shadow-slot-range-current.bad { border-color: var(--bad); animation: rangePulseBad 2.4s ease-in-out infinite; }
 .shadow-slot-range-current.muted { border-color: var(--muted); box-shadow: 0 0 0 4px rgba(139, 145, 166, 0.14); }
 @keyframes rangePulseGood {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(107, 171, 132, 0.2), 0 0 10px rgba(107, 171, 132, 0.55); }
-  50% { box-shadow: 0 0 0 7px rgba(107, 171, 132, 0.08), 0 0 18px rgba(107, 171, 132, 0.8); }
+  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 20%, transparent), 0 0 10px color-mix(in srgb, var(--good) 55%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--good) 8%, transparent), 0 0 18px color-mix(in srgb, var(--good) 80%, transparent); }
 }
 @keyframes rangePulseBad {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(207, 106, 92, 0.2), 0 0 10px rgba(207, 106, 92, 0.55); }
-  50% { box-shadow: 0 0 0 7px rgba(207, 106, 92, 0.08), 0 0 18px rgba(207, 106, 92, 0.8); }
+  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 20%, transparent), 0 0 10px color-mix(in srgb, var(--bad) 55%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--bad) 8%, transparent), 0 0 18px color-mix(in srgb, var(--bad) 80%, transparent); }
 }
 .shadow-slot-range-labels { display: flex; justify-content: space-between; align-items: center; }
 .shadow-slot-range-labels .tag { font: 800 10px/1 var(--font-mono); padding: 4px 8px; border-radius: 999px; letter-spacing: 0.02em; }
-.shadow-slot-range-labels .tag.sl { color: var(--bad); background: rgba(207, 106, 92, 0.12); border: 1px solid rgba(207, 106, 92, 0.22); }
-.shadow-slot-range-labels .tag.tp { color: var(--good); background: rgba(107, 171, 132, 0.12); border: 1px solid rgba(107, 171, 132, 0.22); }
-.shadow-slot-range-labels .tag.zero { color: var(--muted); background: rgba(203, 209, 227, 0.07); border: 1px solid var(--line); }
+.shadow-slot-range-labels .tag.sl { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 22%, transparent); }
+.shadow-slot-range-labels .tag.tp { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); border: 1px solid color-mix(in srgb, var(--good) 22%, transparent); }
+.shadow-slot-range-labels .tag.zero { color: var(--muted); background: color-mix(in srgb, var(--neutral) 7%, transparent); border: 1px solid var(--line); }
 .chart-risk-gauge { margin: 6px 4px 20px; }
 .chart-risk-gauge:empty { display: none; }
 .shadow-chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--soft-line); border-top: 1px solid var(--soft-line); }
@@ -927,7 +1004,7 @@ body {
   font-size: clamp(30px, 4.5vw, 40px); /* 다시 크게 조정 */
   font-weight: 500;
   color: var(--text);
-  text-shadow: 0 0 26px rgba(34, 211, 238, 0.22);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 22%, transparent);
   letter-spacing: 0.02em;
   line-height: 1;
   margin: 0;
@@ -984,7 +1061,7 @@ body {
 }
 
 .panel:hover {
-  border-color: rgba(34, 211, 238, 0.34);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
   transform: translateY(-2px);
   box-shadow:
     0 26px 60px rgb(var(--shadow) / 0.32),
@@ -1009,8 +1086,8 @@ body {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
-.pnl-badge.good { background: var(--good); color: #17130c; }
-.pnl-badge.bad { background: var(--bad); color: #1c0f0a; }
+.pnl-badge.good { background: var(--good); color: var(--on-fill); }
+.pnl-badge.bad { background: var(--bad); color: var(--on-fill); }
 
 .trade-journal-summary {
   display: flex;
@@ -1027,7 +1104,7 @@ body {
   font-weight: 800;
   letter-spacing: 0.02em;
   color: var(--text);
-  background: rgba(203, 209, 227, 0.08);
+  background: color-mix(in srgb, var(--neutral) 8%, transparent);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 1px 6px;
@@ -1051,7 +1128,7 @@ body {
   border-bottom: 1px solid var(--line);
   transition: background 0.2s ease;
 }
-.trade-journal-row:hover { background: rgba(203, 209, 227, 0.035); }
+.trade-journal-row:hover { background: color-mix(in srgb, var(--neutral) 3.5%, transparent); }
 
 .trade-journal-left { display: flex; flex-direction: row; align-items: center; gap: 12px; }
 .trade-journal-ts { font-size: 11.5px; color: var(--muted); font-family: monospace; white-space: nowrap; }
@@ -1066,7 +1143,7 @@ body {
   display: inline-block;
   margin-left: 3px;
   padding: 1px 5px;
-  border: 1px solid rgba(203, 209, 227, 0.16);
+  border: 1px solid color-mix(in srgb, var(--neutral) 16%, transparent);
   border-radius: 5px;
   color: var(--muted);
   font-size: 10px;
@@ -1082,9 +1159,9 @@ body {
 .trade-journal-pnl.bad { color: var(--bad); }
 .trade-journal-pnl.muted { color: var(--muted); }
 
-.good, .long { color: var(--good); text-shadow: 0 0 18px rgba(107, 171, 132, 0.22); }
-.bad, .short { color: var(--bad); text-shadow: 0 0 18px rgba(207, 106, 92, 0.22); }
-.warn, .hold { color: var(--amber); text-shadow: 0 0 18px rgba(242, 184, 75, 0.2); }
+.good, .long { color: var(--good); text-shadow: 0 0 18px color-mix(in srgb, var(--good) 22%, transparent); }
+.bad, .short { color: var(--bad); text-shadow: 0 0 18px color-mix(in srgb, var(--bad) 22%, transparent); }
+.warn, .hold { color: var(--amber); text-shadow: 0 0 18px color-mix(in srgb, var(--warn) 20%, transparent); }
 .muted { color: var(--muted); }
 
 /* "고래 포지션" is a bounded transform of "수급 흐름" (whale_position_score is reconstructable
@@ -1096,7 +1173,7 @@ body {
   letter-spacing: 0.01em;
   font: 700 8.5px/1.6 var(--font-mono);
   color: var(--muted);
-  background: rgba(203, 209, 227, 0.08);
+  background: color-mix(in srgb, var(--neutral) 8%, transparent);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 1px 7px;
@@ -1115,8 +1192,8 @@ body {
   letter-spacing: 0.01em;
   font: 700 8.5px/1.6 var(--font-mono);
   color: var(--accent);
-  background: rgba(122, 162, 247, 0.1);
-  border: 1px solid rgba(122, 162, 247, 0.35);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 999px;
   padding: 1px 7px;
   vertical-align: middle;
@@ -1126,9 +1203,9 @@ body {
    (사용자 요청 -- 이전엔 우측에 쌓여있어 오버플로우 소동이 있었음, eth_dashboard_low_atr_warning_
    overflow_fix_20260901 메모리 참고). 같은 pill 모양/크기를 그대로 쓰고 색만 warn 계열로. */
 .horizon-badge.low-atr-badge {
-  color: var(--warn, #d98a2b);
-  background: rgba(217, 138, 43, 0.12);
-  border-color: rgba(217, 138, 43, 0.4);
+  color: var(--warn, var(--warn));
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
 }
 
 .chart-note {
@@ -1155,7 +1232,7 @@ body {
   align-items: center;
   gap: 4px;
   padding: 4px;
-  border: 1px solid rgba(203, 209, 227, 0.11);
+  border: 1px solid color-mix(in srgb, var(--neutral) 11%, transparent);
   border-radius: 999px;
   background: rgb(var(--lift) / 0.035);
 }
@@ -1180,9 +1257,9 @@ body {
 }
 
 .asset-tab.active {
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.3), rgba(34, 211, 238, 0.13));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 30%, transparent), color-mix(in srgb, var(--accent) 13%, transparent));
   color: var(--ink);
-  box-shadow: 0 4px 14px rgba(34, 211, 238, 0.18), inset 0 1px 0 var(--specular);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 18%, transparent), inset 0 1px 0 var(--specular);
 }
 
 /* 차트 종류 전환(2026-09-16). .asset-tabs 를 그대로 재사용하고 크기만 줄인다 --
@@ -1209,7 +1286,7 @@ body {
   gap: 8px;
   margin: 4px 0 12px;
   padding: 8px;
-  border: 1px solid rgba(203, 209, 227, 0.12);
+  border: 1px solid color-mix(in srgb, var(--neutral) 12%, transparent);
   border-radius: var(--radius);
   background:
     linear-gradient(135deg, rgb(var(--lift) / 0.075), rgb(var(--lift) / 0.025)),
@@ -1227,13 +1304,13 @@ body {
   padding: 8px 12px;
   border-radius: var(--radius-sm);
   background: rgb(var(--lift) / 0.045);
-  border: 1px solid rgba(203, 209, 227, 0.07);
+  border: 1px solid color-mix(in srgb, var(--neutral) 7%, transparent);
   transition: background 0.2s ease, border-color 0.2s ease;
 }
 
 .ribbon-item:hover {
   background: rgb(var(--lift) / 0.07);
-  border-color: rgba(203, 209, 227, 0.14);
+  border-color: color-mix(in srgb, var(--neutral) 14%, transparent);
 }
 
 .ribbon-item span {
@@ -1268,18 +1345,18 @@ body {
 }
 
 .chart-ai-ribbon.good {
-  border-color: rgba(107, 171, 132, 0.38);
-  box-shadow: 0 16px 36px rgba(107, 171, 132, 0.04), inset 0 1px 0 var(--specular);
+  border-color: color-mix(in srgb, var(--good) 38%, transparent);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--good) 4%, transparent), inset 0 1px 0 var(--specular);
 }
 
 .chart-ai-ribbon.bad {
-  border-color: rgba(207, 106, 92, 0.38);
-  box-shadow: 0 16px 36px rgba(207, 106, 92, 0.045), inset 0 1px 0 var(--specular);
+  border-color: color-mix(in srgb, var(--bad) 38%, transparent);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--bad) 4.5%, transparent), inset 0 1px 0 var(--specular);
 }
 
 .chart-ai-ribbon.warn,
 .chart-ai-ribbon.hold {
-  border-color: rgba(242, 184, 75, 0.34);
+  border-color: color-mix(in srgb, var(--warn) 34%, transparent);
 }
 
 .chart-ai-ribbon.good .ribbon-primary strong { color: var(--good); }
@@ -1330,7 +1407,7 @@ body {
      경계를 그리는 1px 테두리이고 "검정 배경"과 별개다. */
   border-radius: var(--radius);
   box-shadow:
-    inset 0 0 0 1px rgba(203, 209, 227, 0.075),
+    inset 0 0 0 1px color-mix(in srgb, var(--neutral) 7.5%, transparent),
     inset 0 1px 0 var(--specular);
 }
 
@@ -1619,9 +1696,9 @@ svg {
 /* 익절가 도달 배지 (2026-09-03) -- horizon-badge 기본형에 색만 바꾼 modifier.
    ⚠️저ATR 경고(.low-atr-badge)와 나란히 설 수 있으므로 같은 pill 규격을 유지한다. */
 .horizon-badge.tp-done-badge {
-  background: rgba(79, 143, 247, 0.18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: #7fb0fb;
-  border-color: rgba(79, 143, 247, 0.42);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
 }
 
 /* ── 코인 전환 스켈레톤 (2026-09-03) ─────────────────────────────────────────
@@ -1711,11 +1788,11 @@ svg {
   transition: border-color .16s ease, background .16s ease, color .16s ease;
 }
 
-.push-toggle:hover:not(:disabled) { border-color: rgba(34, 211, 238, .5); color: var(--text); }
+.push-toggle:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--text); }
 
 .push-toggle[data-state="on"] {
-  border-color: rgba(34, 211, 238, .7);
-  background: rgba(34, 211, 238, .16);
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--ink);
 }
 
@@ -1763,9 +1840,9 @@ svg {
   text-align: left;
   transition: border-color .16s ease, background .16s ease;
 }
-.notify-btn:hover:not(:disabled) { border-color: rgba(34, 211, 238, .55); }
+.notify-btn:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .notify-btn:disabled { opacity: .45; cursor: default; }
-.notify-btn.primary { border-color: rgba(34, 211, 238, .7); background: rgba(34, 211, 238, .16); }
+.notify-btn.primary { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .notify-btn.small { padding: 6px 10px; font-size: 11px; flex: 0 0 auto; }
 .notify-btn em {
   display: block;
@@ -1829,7 +1906,7 @@ svg {
   border-radius: 8px;
   background: rgb(var(--lift) / .025);
 }
-.notify-device.mine { border: 1px solid rgba(34, 211, 238, .35); }
+.notify-device.mine { border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
 .notify-device-main { display: grid; gap: 2px; min-width: 0; }
 .notify-device-main strong { font: 700 12px/1.3 var(--font-sans); color: var(--text); }
 .notify-device-main strong em {
@@ -2053,7 +2130,7 @@ svg {
 /* 2026-09-13 롱/숏 버튼을 화면 전역 규약(롱=--good, 숏=--bad)에 맞추고 가운데로 모은다.
    중앙정렬은 .actions 행에만 건다 -- 같은 .manual-entry-row 를 쓰는 크기/배지 행은
    space-between 이 맞다.
-   숏 글자만 --bad(#d4786c) 가 아니라 #dd8b80 이다: 버튼 배경이 흰 4% 라 패널보다 밝아
+   숏 글자만 --bad(var(--bad)) 가 아니라 var(--bad) 이다: 버튼 배경이 흰 4% 라 패널보다 밝아
    --bad 는 대비 4.15 로 AA 미달이고 이 값이 5.00 이다(롱 --good 은 5.53 로 그대로 통과).
    hover 에 배경 틴트를 주지 않는 것도 대비 때문이다 -- 12% 만 줘도 롱 4.48/숏 4.26 으로
    둘 다 미달로 떨어진다. 그래서 기존 .notify-btn:hover 처럼 테두리만 바꾼다. */
@@ -2120,7 +2197,7 @@ svg {
 .exit-now .exit-net.bad, .entry-note .exit-net.bad { color: var(--bad); }
 .entry-note .exit-net { margin-left: 2px; }
 .notify-btn.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
-.notify-btn.short { color: #dd8b80; border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.notify-btn.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }
 .notify-btn.short:hover:not(:disabled) { border-color: var(--bad); }
 
@@ -2187,18 +2264,18 @@ svg {
   border-color: rgba(255, 255, 255, 0.14);
 }
 [data-theme="light"] .horizon-badge.tp-done-badge {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
-  border-color: rgba(37, 99, 235, 0.38);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
 }
 [data-theme="light"] .notify-btn.short { color: var(--bad); }
 
 /* 라이트에서 어둡게 남는 면 넷. 각각 재질이 달라 한 규칙으로 못 묶는다. */
 [data-theme="light"] .execution-alert-banner {
-  background: linear-gradient(90deg, rgba(192, 70, 58, 0.16), rgba(255, 255, 255, 0.72));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 16%, transparent), rgba(255, 255, 255, 0.72));
 }
 [data-theme="light"] .execution-alert-banner.blocked {
-  background: linear-gradient(90deg, rgba(156, 92, 13, 0.16), rgba(255, 255, 255, 0.72));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--warn) 16%, transparent), rgba(255, 255, 255, 0.72));
 }
 [data-theme="light"] .execution-alert-banner.disabled {
   background: linear-gradient(90deg, rgba(102, 109, 126, 0.12), rgba(255, 255, 255, 0.72));
@@ -2235,24 +2312,32 @@ svg {
 
 /* 계좌 손익은 이 화면에서 가장 많이 읽는 숫자다 -- 옅은 색 칩 위라 토큰 그대로는 4.0 에 걸린다.
    («|» 구분자는 장식이라 제외한다. 다크도 1.55 로 같다.) */
-[data-theme="light"] .acct-delta.bad { color: #96281c; }
-[data-theme="light"] .acct-tag.good { color: #0f5c32; }
+/* 옅은 색 칩 위라 토큰 그대로는 4.0 에 걸린다 -- 리터럴을 박지 않고 **토큰에서 파생**한다.
+   이래야 --bad/--good 만 고쳐도 여기까지 따라온다. */
+[data-theme="light"] .acct-delta.bad { color: color-mix(in srgb, var(--bad) 82%, #000); }
+[data-theme="light"] .acct-tag.good { color: color-mix(in srgb, var(--good) 84%, #000); }
 
 /* 조작 요소는 «조작 요소로 보여야» 한다. 라이트에서 흰 유리 위의 흰 4% 버튼은 글자만 떠 있다
    -- 대비 검사는 통과하지만(글자색 기준) 버튼으로 읽히지 않는다. 면과 테두리를 준다. */
 [data-theme="light"] .notify-btn {
-  background: rgba(255, 255, 255, 0.78);
-  border-color: rgba(20, 26, 40, 0.16);
-  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.10), inset 0 1px 0 var(--specular);
+  /* 🔴흰 0.78 + 블러 없음이라 실행 버튼만 «종이»였다(실측). 다른 알약과 같은 얇은 유리로. */
+  background: rgba(255, 255, 255, 0.34);
+  backdrop-filter: blur(20px) saturate(190%);
+  -webkit-backdrop-filter: blur(20px) saturate(190%);
+  border-color: color-mix(in srgb, var(--neutral) 16%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 1px 3px rgb(var(--shadow) / 0.12);
 }
 [data-theme="light"] .notify-btn:hover:not(:disabled) {
-  border-color: rgba(10, 109, 142, 0.55);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   background: #fff;
 }
 [data-theme="light"] .notify-btn.long { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 [data-theme="light"] .notify-btn.primary {
-  background: rgba(10, 109, 142, 0.14);
-  border-color: rgba(10, 109, 142, 0.50);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 /* 계기 트랙도 같은 이유 -- 흰 위의 흰 8% 는 «채워진 양」을 못 읽는다. */
 [data-theme="light"] .meter-track { background: rgb(var(--lift) / 0.14); }
@@ -2294,7 +2379,7 @@ svg {
   background: rgba(255, 255, 255, 0.30);
   backdrop-filter: blur(20px) saturate(190%);
   -webkit-backdrop-filter: blur(20px) saturate(190%);
-  border-color: rgba(255, 255, 255, 0.55);
+  border-color: color-mix(in srgb, var(--neutral) 16%, transparent);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
     inset 0 0 0 1px rgba(255, 255, 255, 0.35),
@@ -2369,15 +2454,32 @@ svg {
 .chart-mode-tabs .asset-tab { height: 28px; font-size: 11px; }
 
 /* 활성 표시도 하나로. .asset-tab 만 그라디언트+글로우라 혼자 튀었다. */
+/* 🔴활성 표시를 통일하며 넣은 `box-shadow: none` 이 **림(윗면 광택)을 지웠다** --
+   "색을 넣다보니까 버튼에 애플 글래스가 다 사라졌어"(사용자). 유리는 블러가 아니라
+   가장자리 광택으로 읽힌다. 색은 유리를 **덮는 게 아니라 얹는다**: 틴트는 반투명으로 두고
+   backdrop-filter 는 살려 둔 채, 림을 비활성과 같은 규격으로 돌려준다. */
 .page-tab.active,
 .shadow-slot-tab.active,
 .asset-tab.active,
 .push-toggle[data-state="on"],
 .notify-btn.primary {
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  /* ⭐근거: Apple «Meet Liquid Glass»(WWDC25) --
+       "Tinting should only be used to bring emphasis to **primary elements and actions**...
+        Avoid tinting all your elements. When every element is tinted, nothing stands out."
+     이 화면엔 활성 알약이 넷(탭·테마 토글·코인·차트모드)이다. 넷 다 틴트면 Apple 이 경고한
+     그 상태다. 그래서 **선택은 틴트가 아니라 «밝은 유리 조각»**으로 말한다 -- 한 겹 위로
+     떠오르고(더 밝은 면 + 강한 림), 색은 글자만 가져간다.
+     틴트는 아래 .notify-btn.long/.short/.primary(진짜 실행 버튼)에만 남긴다. */
+  /* 색을 뺐으니 «떠오름」이 유일한 선택 신호다 -- 면·림·그림자·글자를 한 단씩 올린다.
+     비활성은 흰 0.30 + --muted 글자라, 밝기와 글자 진하기로 갈린다. */
+  border-color: color-mix(in srgb, var(--neutral) 34%, transparent);
+  background: color-mix(in srgb, var(--specular) 92%, transparent);
   color: var(--ink);
-  box-shadow: none;
+  font-weight: 800;
+  box-shadow:
+    inset 0 1px 0 var(--specular),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.45),
+    0 2px 6px rgb(var(--shadow) / 0.22);
 }
 .page-tab:hover:not(.active),
 .shadow-slot-tab:hover:not(.active),
@@ -2402,3 +2504,50 @@ svg {
 
 /* 내용이 비면 배지는 «없는 것»이다. 프리미티브가 min-height 를 줘서 빈 알약이 남았다. */
 .ops-badge:empty, .ops-readonly:empty, .ops-health-summary:empty { display: none !important; }
+
+/* ── 섀도우 진행 (2026-09-16) ────────────────────────────────────────────────
+   🔴배지 상한(17ch)이 여기선 해로웠다 -- "0/100쌍 (0%) · 표본 없음 · — · —" 가
+   119x54(3줄)로 접혔다(사용자 지적 "수정 전이 더 나은거 같아"). 진척을 **막대로** 옮겨
+   배지를 짧게 만들고(판정·수익·승률만), 상한은 이 행에서 푼다.
+   배치: 제목 ─ 배지 가 1행, **너비 100% 게이지**가 2행(사용자 요청). */
+.shadow-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  row-gap: 8px;
+}
+.shadow-row .ops-health-status-badge { max-width: none; white-space: nowrap; }
+.shadow-bar {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.shadow-bar-track { width: 100%; height: 6px; border-radius: 3px; }
+.shadow-bar-pct { min-width: 0; white-space: nowrap; }
+
+@media (max-width: 720px) {
+  /* 좁으면 이름이 길어 배지와 한 줄에 못 선다 -- 배지를 게이지 옆(오른쪽)으로 내린다. */
+  .shadow-row { grid-template-columns: minmax(0, 1fr); }
+  .shadow-row .ops-health-status-badge { justify-self: start; }
+}
+
+/* 세그먼트의 활성 칸은 컨테이너(.asset-tabs) 유리 **위에 뜬 조각**이다. blur 를 겹치면
+   탁해지므로 얹지 않고, 대신 림과 옅은 그림자로 «한 겹 위»임을 만든다. */
+[data-theme="light"] .asset-tab.active {
+  /* 🔴반투명 흰색과 color-mix 하면 프리멀티플라이 때문에 예상보다 어두워진다 -- 실측 2.65:1.
+     iOS 세그먼티드의 정석대로 **활성 칸은 흰 유리 조각**이고 색은 글자가 맡는다. */
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 1px 3px rgb(var(--shadow) / 0.18);
+}
+
+/* ⭐Apple 의 «틴트는 primary action 에만» 을 그대로 적용한다 -- 이 화면에서 그건
+   실행 버튼(롱/숏 청산·진입·확인)뿐이다. 틴트는 **면을 덮지 않고 얹는다**:
+   반투명이라 아래 밝기가 그대로 통과한다("a range of tones mapped to content brightness"). */
+.notify-btn.long { background: color-mix(in srgb, var(--good) 11%, transparent); color: var(--good); }
+.notify-btn.short { background: color-mix(in srgb, var(--bad) 11%, transparent); color: var(--bad); }
+.notify-btn.long { border-color: color-mix(in srgb, var(--good) 55%, transparent); }
+.notify-btn.short { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }

@@ -134,10 +134,9 @@ const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 4단계 농담. 라이트에서는 «흰 유리 위」라 같은 알파가 훨씬 옅게 보여 한 단씩 올린다
 // (다크 배열은 현행 그대로다). 숫자를 덮지 않는 선이 상한이라 0.66 에서 멈춘다.
 // 색을 «채운» 면 위의 글자색. 다크 팔레트는 --good/--bad/--accent 가 밝은 파스텔이라
-// 어두운 글자가 맞지만, 라이트에서는 같은 토큰이 진해져 어두운 위 어두운이 된다 -> 흰색으로 뒤집는다.
-// (사용자 규칙 2026-09-16: "색깔 있는 라벨에는 하얀색으로 텍스트 칼라")
-const inkOnFill = (darkInk) =>
-  document.documentElement.getAttribute("data-theme") === "light" ? "#fff" : darkInk;
+// 어두운 글자가 맞고, 라이트에서는 같은 토큰이 진해져 흰 글자가 맞다.
+// ⭐그 분기는 CSS 의 --on-fill 한 곳에 있다 -- 여기서 색을 정하지 않는다(2026-09-16).
+const inkOnFill = () => "var(--on-fill)";
 const FOOTPRINT_SHADE_DARK = [0.10, 0.22, 0.36, 0.54];
 const FOOTPRINT_SHADE_LIGHT = [0.16, 0.32, 0.48, 0.66];
 const footprintShades = () =>
@@ -2742,7 +2741,7 @@ function renderShadows() {
   }
   if (sub) sub.textContent = `${v.rows.length}개 · 표본 진척 · 판정 · 수익 · 승률`;
   const rows = v.rows.map((r) => {
-    let cells;
+    let cells, bar = "";
     if (r.error) {
       cells = "원장 읽기 실패";
     } else {
@@ -2755,11 +2754,20 @@ function renderShadows() {
           + (Number.isFinite(r.t) ? ` t${r.t >= 0 ? "+" : ""}${r.t.toFixed(2)}` : "")
         : "—";
       const win = n ? `${(r.win_rate * 100).toFixed(0)}%` : "—";
-      cells = `${progress} · ${escapeHtml(r.verdict || "-")} · ${profit} · ${win}`;
+      cells = `${escapeHtml(r.verdict || "-")} · ${profit} · ${win}`;
+      bar = `<div class="shadow-bar">`
+        + `<span class="meter-track shadow-bar-track" role="progressbar" aria-valuemin="0"`
+        + ` aria-valuemax="100" aria-valuenow="${pct}" aria-label="표본 진척">`
+        + `<span class="meter-fill neutral" style="width:${pct}%"></span></span>`
+        + `<span class="meter-pct shadow-bar-pct">${escapeHtml(progress)}</span></div>`;
     }
-    return `<div class="ops-health-row" title="${escapeHtml(r.note || "")}">`
+    // 2026-09-16 사용자 요청: 「제목 아래에 너비 100% 진척도 게이지」.
+    // 진척(0/100쌍 (0%))은 글자 대신 막대가 말한다 -- 배지에는 판정·수익·승률만 남긴다.
+    // 막대는 기존 .meter-track/.meter-fill 을 그대로 쓴다(새 부품을 만들지 않는다).
+    return `<div class="ops-health-row shadow-row" title="${escapeHtml(r.note || "")}">`
       + `<span class="ops-health-label">${escapeHtml(r.name)}</span>`
-      + `<span class="ops-health-status-badge neutral">${cells}</span></div>`;
+      + `<span class="ops-health-status-badge neutral">${cells}</span>`
+      + bar + `</div>`;
   });
   rows.push(`<p class="muted" style="padding:8px 16px 4px;">`
     + `|t| 가 1 을 넘기 전에는 성과로 읽지 않습니다. 분모는 진척 눈금입니다`
@@ -4225,7 +4233,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             const t = document.createElementNS(NS, "text");
             t.setAttribute("x", x0 + 6); t.setAttribute("y", row.y + LANE_H / 2 + 3.5);
             t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "bold");
-            t.setAttribute("fill", inkOnFill("#12161d"));
+            t.setAttribute("fill", inkOnFill());
             t.textContent = item.name;
             svg.appendChild(t);
           }
@@ -4312,7 +4320,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const pTxt = document.createElementNS(NS, "text");
     pTxt.setAttribute("x", w - mr + 8); pTxt.setAttribute("y", labelY + 4);
     pTxt.setAttribute("font-size", mobileChart ? "11" : "12"); pTxt.setAttribute("font-weight", "bold");
-    pTxt.setAttribute("fill", inkOnFill("#1a1208"));
+    pTxt.setAttribute("fill", inkOnFill());
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
     if (p.marker) svg.appendChild(line);   // 배지 위에 -- 위 주석 참조
@@ -4384,7 +4392,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   priceBadgeText.setAttribute("x", w - mr + 8);
   priceBadgeText.setAttribute("font-size", mobileChart ? "11" : "12");
   priceBadgeText.setAttribute("font-weight", "bold");
-  priceBadgeText.setAttribute("fill", inkOnFill("#0b1220"));
+  priceBadgeText.setAttribute("fill", inkOnFill());
   priceBadgeText.style.display = "none";
   priceBadgeText.style.pointerEvents = "none";
   hoverGroup.appendChild(priceBadgeText);
