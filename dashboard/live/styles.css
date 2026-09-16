@@ -2166,10 +2166,65 @@ svg {
    라벨도 그 오른쪽의 슬라이더·값도 같은 x 에서 시작한다(가장 긴 «보유 예정» 기준 54px). */
 .manual-entry-row.fields { justify-content: flex-start; }
 .manual-entry-row.fields .entry-cap { flex: 0 0 54px; }
-/* 2026-09-14 accent 를 --good(녹색)에서 --accent(중립 시안)로. 녹색은 «롱/이익»이라는
-   뜻을 이미 가진 색이라 **숏 진입 비율**과 **청산 비율**에 붙으면 거짓말을 한다. */
-.exit-frac input[type="range"] { width: 110px; accent-color: var(--accent); cursor: pointer;
-  margin: 0; }   /* 브라우저 기본 좌우 2px 마진 -- 슬라이더 행만 밀려 왼쪽 정렬이 깨진다 */
+/* ── 슬라이더 (2026-09-16 사용자 요청: 「투박한 게이지를 애플 디자인으로」) ──────────
+   iOS 슬라이더의 문법은 셋뿐이다: ①얇은 알약 트랙(4px) ②지나온 구간만 색 ③흰 원형 손잡이
+   + 부드러운 그림자. 기본 렌더러는 트랙이 두껍고 손잡이가 납작해서 «투박»하게 보였다.
+   🔴트랙을 직접 칠하면 accent-color 의 자동 채움이 사라진다 -- 채움 지점은 JS 가 --fill 로
+   넘긴다(app.js syncRangeFill). 색은 --accent 를 쓴다: 녹색은 «롱/이익」이라는 뜻을 이미
+   가진 색이라 **숏 진입 비율**과 **청산 비율**에 붙으면 거짓말을 한다(2026-09-14).
+   손잡이는 두 테마 모두 흰색이다 -- 애플도 다크에서 흰 손잡이를 쓴다. */
+.exit-frac input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 132px;
+  height: 22px;          /* 손잡이(20px)가 잘리지 않을 만큼만 */
+  margin: 0;             /* 브라우저 기본 좌우 2px -- 슬라이더 행만 밀려 왼쪽 정렬이 깨진다 */
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.exit-frac input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right,
+    var(--accent) 0 var(--fill, 50%), rgb(var(--lift) / 0.16) var(--fill, 50%) 100%);
+}
+.exit-frac input[type="range"]::-moz-range-track {
+  height: 4px; border-radius: 999px; background: rgb(var(--lift) / 0.16);
+}
+.exit-frac input[type="range"]::-moz-range-progress {
+  height: 4px; border-radius: 999px; background: var(--accent);
+}
+.exit-frac input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -8px;      /* (트랙 4 - 손잡이 20) / 2 */
+  border-radius: 50%;
+  border: 0.5px solid rgb(var(--shadow) / 0.22);
+  background: #fff;
+  box-shadow: 0 1px 1px rgb(var(--shadow) / 0.18), 0 3px 8px rgb(var(--shadow) / 0.24);
+  transition: transform .14s cubic-bezier(.22,.68,0,1.01), box-shadow .14s ease;
+}
+.exit-frac input[type="range"]::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 0.5px solid rgb(var(--shadow) / 0.22);
+  background: #fff;
+  box-shadow: 0 1px 1px rgb(var(--shadow) / 0.18), 0 3px 8px rgb(var(--shadow) / 0.24);
+}
+/* 누르면 살짝 커진다 -- iOS 의 «잡았다» 피드백. */
+.exit-frac input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.14); }
+.exit-frac input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.exit-frac input[type="range"]:focus { outline: none; }
+/* 자동(모델) 일 때 레버리지 슬라이더는 disabled 다 -- 만질 수 없다는 걸 보이게 한다. */
+.exit-frac input[type="range"]:disabled { cursor: default; opacity: .55; }
+.exit-frac input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
+@media (prefers-reduced-motion: reduce) {
+  .exit-frac input[type="range"]::-webkit-slider-thumb { transition: none; }
+}
 .exit-frac b { font: 700 12px/1 var(--font-mono); color: var(--text); min-width: 38px;
   text-align: right; font-variant-numeric: tabular-nums; }
 .exit-frac select { padding: 5px 8px; font: 700 11px/1.2 var(--font-sans); }

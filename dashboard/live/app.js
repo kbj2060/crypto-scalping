@@ -2501,7 +2501,20 @@ function evrGateIndicatorItem() {
     liveText: p.meterNote || null,
     liveTitle: GATE_GAUGE_NOTE,
     stateTitle,
-    history: p.history || [], times: p.times || [] };
+    // 🔴2026-09-16 «발동인데 게이지가 회색 칸으로 칸칸이»(사용자). /api/evr-gate 의 history 는
+    //   톤 문자열이 아니라 **객체 배열**({ts, n_fired, eth_fired, eth_ratio, tone})이다.
+    //   toneStripSvg 는 문자열을 기대하므로 (a) `tone === "bad"` 비교가 전부 빗나가 기본
+    //   회색으로 칠해지고 (b) 이어붙이기 판정이 객체 동일성이라 **한 칸도 안 합쳐진다**.
+    //   둘이 겹쳐 「회색 칸이 칸칸이」가 됐다. 여기서 풀어서 넘긴다.
+    //   ⭐덤으로 times 가 생긴다 -- API 에 `times` 키는 없고 시각은 각 항목의 ts 에 있었다.
+    ...toneStripFromHistory(p.history) };
+}
+
+// /api/evr-gate 처럼 «톤이 박힌 객체»로 오는 이력을 스트립이 먹는 모양으로 바꾼다.
+function toneStripFromHistory(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  return { history: list.map((h) => (h && h.tone) || "neutral"),
+           times: list.map((h) => (h && h.ts) || null) };
 }
 
 // 예고는 별도 카드(breakoutPrewarnIndicatorItem)로 뺐다 — 카드당 축 하나.
@@ -5400,6 +5413,7 @@ function renderLevGauge(plan) {
        : low ? ` · ⚠상한만큼 못 엽니다(최소 ${Math.ceil(min)}배)` : "");
   out.className = (rejected || low) ? "entry-was bad" : "entry-was";
   out.className = low ? "entry-was bad" : "entry-was";
+  syncRangeFill(g);
 }
 
 async function manualEntryFetch(side, kind = "entry") {
@@ -5818,11 +5832,29 @@ async function manualEntrySubmit() {
   }
 }
 
+// 2026-09-16 애플식 슬라이더(사용자 요청). 트랙을 직접 칠하면 브라우저의 accent-color
+// 자동 채움이 사라지므로, 채움 지점을 --fill 로 넘겨 트랙 그라디언트가 읽게 한다.
+// ⭐위임 한 줄이면 슬라이더가 몇 개든 따라온다 -- 핸들러를 슬라이더마다 늘리지 않는다.
+function syncRangeFill(input) {
+  if (!input) return;
+  const min = Number(input.min) || 0, max = Number(input.max);
+  const v = Number(input.value);
+  input.style.setProperty("--fill", `${max > min ? ((v - min) / (max - min)) * 100 : 0}%`);
+}
+document.addEventListener("input", (e) => {
+  const t = e.target;
+  if (t && t.tagName === "INPUT" && t.type === "range") syncRangeFill(t);
+});
+
 el("snapLevAuto")?.addEventListener("change", () => manualEntryRefreshSize());
 el("snapLevGauge")?.addEventListener("input", () => {
   const out = el("snapLevVal");
   if (out) out.textContent = `${manualLevValue()}배 (수동)`;
 });
+// input 이벤트 없이 value 가 바뀌는 경로(렌더·모달 열기)를 위한 동기화.
+function syncAllRangeFills(root) {
+  (root || document).querySelectorAll('input[type="range"]').forEach(syncRangeFill);
+}
 el("snapEntryLong")?.addEventListener("click", () => manualEntryPreview("LONG", "entry"));
 el("snapEntryShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "entry"));
 // 2026-09-14 사용자 요청: **청산은 강제 조회부터**. 화면 숫자가 30초(조회가 끊겼으면 그
@@ -5961,6 +5993,7 @@ function openTradeModal(mode) {
   // 진입 모달은 접힌 블록을 펴 준다 -- 모달 자체가 «한 번 더 확인」이라 접어 둘 이유가 없다.
   if (mode === "entry") { const box = el("snapEntryBox"); if (box) box.open = true; }
   if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "");
+  syncAllRangeFills(dlg);   // 트랙 채움은 CSS 변수라 값이 바뀐 만큼 따로 맞춰 준다
   manualEntryRefreshSize();
   manualExitSyncButtons();
 }
