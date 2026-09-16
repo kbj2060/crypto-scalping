@@ -118,7 +118,7 @@
    굴절시킬 색 덩어리를 깔아 준다(애플이 배경에 쓰는 소프트 메시). */
 [data-theme="light"] body {
   background:
-    radial-gradient(circle 260px at 72% 22%, color-mix(in srgb, var(--good) 34%, transparent), transparent 62%),
+    /* 2026-09-16 오른쪽 초록 덩어리 제거(사용자). 남은 메시로도 blur 가 굴절할 색은 충분하다. */
     radial-gradient(circle 230px at 92% 66%, color-mix(in srgb, var(--warn) 30%, transparent), transparent 64%),
     radial-gradient(circle 260px at 10% 70%, color-mix(in srgb, var(--bad) 24%, transparent), transparent 62%),
     radial-gradient(ellipse 1000px 700px at 4% -6%, color-mix(in srgb, var(--good) 34%, transparent), transparent 64%),
@@ -1407,6 +1407,15 @@ body {
      그 무효화가 컨테이너 밖으로 새면 바로 위·아래의 backdrop-filter 유리가 매번
      다시 블러된다. 그림이 이미 overflow:hidden 으로 잘리므로 paint 격리는 공짜다. */
   contain: paint;
+}
+/* 🔴«현재가가 움직일 때마다 진입/청산 버튼 아래가 깜빡인다»(2차 보고). DOM 은 그 자리에서
+   아무것도 안 바뀌므로(브라우저 실측 30초 0건) 남은 원인은 합성이다. 기하가 맞아떨어진다:
+   차트 패널의 그림자(0 20px 54px)가 위로 34px 번져 **버튼 바닥(y519)과 패널 상단(y552)
+   사이**를 덮는데, 그 그림자는 패널 레이어가 칠한다. 초당 1.7회 SVG 전면 재작성이 그
+   레이어를 더럽히면 그림자도 매번 다시 칠해진다.
+   SVG 를 제 레이어로 올려 패널 레이어와 갈라놓는다. */
+#candleSvgSnapshot {
+  will-change: transform;
   margin-top: 12px;
   /* 2026-09-10 사용자 요청 "청산맵 차트 뒤에 검정색 백그라운드를 없애줘": --chart-bg(#090a10)
      제거 -> 패널 자체 배경이 비친다. 이 클래스를 쓰는 요소는 청산맵 차트 하나뿐이므로
@@ -2340,6 +2349,15 @@ svg {
   background: #fff;
 }
 [data-theme="light"] .notify-btn.long { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+/* 🔴같은 깜빡임의 둘째 후보: backdrop-filter 요소는 같은 backdrop root 안에서 무엇이든
+   다시 칠해지면 렌즈를 다시 돌린다. 이 두 버튼은 **이미 유리인 패널 위**에 있어서 제
+   렌즈가 없어도 재질이 그대로 읽힌다(실측 (220,231,232) -> (212,224,231), 차이 8).
+   틱마다 재래스터되는 요소 수를 줄이는 쪽이 이득이 크다. */
+[data-theme="light"] .trade-actions .notify-btn {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(255, 255, 255, 0.46);
+}
 [data-theme="light"] .notify-btn.primary {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
