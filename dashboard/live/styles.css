@@ -2290,10 +2290,8 @@ svg {
 .entry-head b { font: 700 17px/1 var(--font-display); letter-spacing: 0.01em; }
 .entry-head span { font: 600 11.5px/1 var(--font-mono); color: var(--muted); }
 .entry-cap { font: 600 10.5px/1.5 var(--font-sans); color: var(--muted); }
-.entry-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-@media (max-width: 700px) { .entry-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* .entry-tiles / .entry-arrow 는 진입 미리보기 타일과 함께 나갔다(2026-09-16) -- 참조 0. */
 .entry-was { font: 600 11px/1 var(--font-sans); color: var(--muted); }
-.entry-arrow { font: 600 11px/1 var(--font-sans); color: var(--muted); margin: 0 3px; }
 /* 2026-09-16 계좌 카드의 «진입 미리보기» 스타일은 기능과 함께 삭제했다(사용자 요청) --
    점선 테두리·미리보기 라벨·유령 눈금은 전부 그 기능 전용이었다.
    transition 은 남긴다: 실제 계좌 값도 폴링마다 바뀌고, 그때 미끄러지는 편이 읽기 쉽다.

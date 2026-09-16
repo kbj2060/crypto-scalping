@@ -5092,30 +5092,8 @@ const MANUAL_ENTRY_REFRESH_MS = 60000;
 // 교차 마진이라 청산 거리는 순자산/총명목으로 정해진다 -- 설정 레버리지는 거기 안 들어간다.
 const won = (x) => Number(x).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
-// ⭐계좌 카드의 .acct-tile 을 **그대로** 쓴다(사용자 요청). 미리보기가 다른 모양·다른 지표를
-// 쓰면 진입 후 카드를 봤을 때 "아까 본 게 뭐였지"가 된다. 같은 정의·같은 디자인이면
-// 미리보기가 말 그대로 «진입 후의 그 카드»가 된다.
-// 눈금(u)이 이전 값의 자리다 -- 값이 늘든(증거금) 줄든(청산까지) 읽는 규칙이 하나다.
-const ENTRY_EXPO_CAP = 30;   // 계좌 카드와 같은 만재 기준
-const ENTRY_LIQ_FULL = 10;
-
-function entryTile(lab, valHtml, tone, fillAfter, fillBefore, title) {
-  const tick = fillBefore == null ? ""
-    : `<u style="left:${(clamp01(fillBefore) * 100).toFixed(1)}%"></u>`;
-  return `<div class="acct-tile"${title ? ` title="${escapeHtml(title)}"` : ""}>
-      <span class="acct-tile-lab">${escapeHtml(lab)}</span>
-      <b class="acct-tile-val ${tone}">${valHtml}</b>
-      <span class="acct-rail entry-rail"><i class="${tone}" style="width:${
-        (clamp01(fillAfter) * 100).toFixed(1)}%"></i>${tick}</span>
-    </div>`;
-}
-
-function entryVal(before, after, fmt) {
-  const now = escapeHtml(fmt(after));
-  if (before == null) return now;
-  return `<span class="entry-was">${escapeHtml(fmt(before))}</span>` +
-         `<span class="entry-arrow">→</span>${now}`;
-}
+// 2026-09-16 진입 미리보기의 타일 넷을 없애면서 entryTile/entryVal/ENTRY_* 도 함께 나갔다
+// -- 그 블록 전용 헬퍼였다. 같은 숫자는 모달의 「지금 넣으면」이 그린다(renderEntryProj).
 
 function manualEntryPlanHtml(data) {
   const plan = data.plan || {};
@@ -5127,50 +5105,11 @@ function manualEntryPlanHtml(data) {
         plan.leverage ? ` = 명목 ${escapeHtml(won(plan.notional_usdt))} ÷ ${plan.leverage}배` : ""}</span>
     </div>`];
 
-  const pr = plan.projection;
-  if (pr && pr.before && pr.after) {
-    const b = pr.before;
-    const a = pr.after;
-    const tiles = [];
-    if (a.liq_pct != null) {
-      tiles.push(entryTile("청산까지", entryVal(b.liq_pct, a.liq_pct, (x) => `${Number(x).toFixed(2)}%`),
-        acctRiskTone(a.liq_pct), a.liq_pct / ENTRY_LIQ_FULL,
-        b.liq_pct == null ? null : b.liq_pct / ENTRY_LIQ_FULL,
-        "이만큼 반대로 가면 전부 잃습니다.\n교차증거금이라 지갑 전체가 버팁니다."));
-    }
-    if (a.margin_used_pct != null) {
-      tiles.push(entryTile("증거금 사용", entryVal(b.margin_used_pct, a.margin_used_pct, (x) => `${Number(x).toFixed(0)}%`),
-        a.margin_used_pct > 80 ? "bad" : a.margin_used_pct > 60 ? "warn" : "good",
-        a.margin_used_pct / 100, b.margin_used_pct == null ? null : b.margin_used_pct / 100,
-        `사용 ${won(a.margin_usdt)} ÷ 순자산 ${won(pr.equity_usdt)} USDT`));
-    }
-    if (a.exposure_x != null) {
-      tiles.push(entryTile("계좌 노출", entryVal(b.exposure_x, a.exposure_x, (x) => `${Number(x).toFixed(1)}배`),
-        a.exposure_x > 15 ? "bad" : "warn", a.exposure_x / ENTRY_EXPO_CAP,
-        b.exposure_x == null ? null : b.exposure_x / ENTRY_EXPO_CAP,
-        `명목 ${won(a.notional_usdt)} ÷ 순자산 ${won(pr.equity_usdt)} USDT\n설정 레버리지와 다른 값입니다.`));
-    }
-    if (cap.available && plan.cap_used_pct != null) {
-      const beforeCap = 100 * (b.notional_usdt || 0) / cap.cap_notional_usdt;
-      // 어느 상한이 묶었는지 **말해준다** -- 오늘 겪은 혼란이 정확히 "왜 막혔는지 모른다"였다.
-      // 순자산 연동이 묶으면 그 자체가 위험 문구가 된다(상한 = 청산 거리 하한).
-      const why = cap.binding === "equity"
-        ? `순자산 ${won(cap.equity_x ? cap.cap_equity_usdt / cap.equity_x : 0)} × ${cap.equity_x}배`
-          + `\n= 청산까지 최소 ${cap.liq_floor_pct}% 를 남기는 선`
-        : `왕복 ${cap.trips}건 중앙 명목의 ${cap.mult}배`;
-      const other = cap.binding === "equity" && cap.cap_ledger_usdt
-        ? `\n(원장 기준은 ${won(cap.cap_ledger_usdt)} USDT — 더 큰 쪽이라 안 묶음)`
-        : cap.binding === "ledger" && cap.cap_equity_usdt
-          ? `\n(순자산 기준은 ${won(cap.cap_equity_usdt)} USDT — 더 큰 쪽이라 안 묶음)` : "";
-      tiles.push(entryTile("상한 사용", entryVal(beforeCap, plan.cap_used_pct, (x) => `${Number(x).toFixed(0)}%`),
-        plan.cap_used_pct >= 100 ? "warn" : "good", plan.cap_used_pct / 100, beforeCap / 100,
-        `상한 ${won(cap.cap_notional_usdt)} USDT = ${why}${other}`));
-    }
-    if (tiles.length) {
-      parts.push(`<div class="entry-cap">진입 후 계좌 — 순자산 ${escapeHtml(won(pr.equity_usdt))} USDT 는 그대로 (진입 자체는 손익 0)</div>`);
-      parts.push(`<div class="entry-tiles">${tiles.join("")}</div>`);
-    }
-  }
+  // 2026-09-16 사용자 요청: 「롱 진입을 누르면 드롭다운으로 나오던 내용 제거 -- 이미 모달 안에
+  //   내용이 있어」. 여기 있던 「진입 후 계좌」 타일 넷(청산까지·증거금 사용·계좌 노출·상한
+  //   사용) 중 앞 셋은 바로 위 「지금 넣으면」 블록과 **같은 숫자**였다. 같은 사실을 두 번
+  //   쓰면 어느 쪽이 결정인지 흐려진다. 남는 것은 위가 말하지 않는 것뿐이다 --
+  //   수량·체결가(머리줄) · 막힘 · 손절 · 실주문 경고.
 
   // 막는 것만 항상 보인다. 나머지 설명은 «자세히» 뒤로 접는다(사용자 요청 2026-09-13) --
   // 진입 화면은 «얼마를 넣나»와 «왜 못 넣나»만 보이면 되고, 근거는 펼쳐서 읽는 것이다.
@@ -5197,13 +5136,10 @@ function manualEntryPlanHtml(data) {
               : "")
          : "")));
   }
-  const er = (data.cap || {}).risk;
-  const detail = [
-    ...(plan.notes || []).map((n) => `⚠ ${escapeHtml(n)}`),
-    ...(er ? [escapeHtml(riskLine(er))] : []),
-    ...tradePlanLines(plan.trade_plan).map(escapeHtml),
-  ];
-  parts.push(entryDetailHtml(detail));
+  // «자세히» 드롭다운도 같은 요청으로 뺐다. 여기 접혀 있던 위험모델 한 줄·처방 줄은
+  // 모달 위쪽(보유 예정·레버리지·「지금 넣으면」)이 이미 같은 말을 한다.
+  // 🔴plan.notes 만은 버리지 않는다 -- «수량을 왜 깎았나»라서 위가 말해주지 않는다.
+  (plan.notes || []).forEach((n) => parts.push(entryNote(`⚠ ${n}`)));
   parts.push(`<div class="entry-note${plan.dry_run ? "" : " live"}">${
     plan.dry_run ? "미리보기 전용 — 주문은 나가지 않습니다."
                  : "확인 버튼을 누르면 실제 주문이 나갑니다."} · peg 지정가(메이커), 미체결 ${
