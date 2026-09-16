@@ -63,7 +63,12 @@ FOLDS = [
     ("F5", "2022-01-01", "2025-06-30", "2025-07-01", "2025-12-31"),
     ("CAND", "2025-01-01", "2026-02-28", "2026-03-01", "2026-06-30"),   # 현행 후보 창 그대로
 ]
-HZ = "4h" if "--h4" in sys.argv else "1h"   # 지평. 캐시는 공유 -- 재학습 없이 바뀐다
+# 지평. 캐시는 공유라 재학습 없이 바뀐다. `--hz=12h` 또는 `--h4`(구 표기).
+BARS = {"1h": 12, "4h": 48, "8h": 96, "12h": 144}
+HZ = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--hz=")),
+          "4h" if "--h4" in sys.argv else "1h")
+assert HZ in BARS, f"모르는 지평: {HZ}"
+E.HORIZONS.setdefault(HZ, BARS[HZ])        # E.load() 가 fwd_{HZ}_bp 를 만들게 한다
 SUF = "" if HZ == "1h" else f"_{HZ}"
 OUTJ = E.OUT / f"stageK_side_skill{SUF}.json"
 CACHE = E.OUT / "stageK_probs.npz"
