@@ -2581,11 +2581,17 @@ svg {
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100dvh - 48px);
   padding: 0;
+  /* 🔴«흰색 말고 글래스»(사용자). 원인은 두 겹이었다 -- ①패널 알파가 높고
+     ②::backdrop 스크림이 진해 **blur 가 굴절할 뒤가 없었다**(단색 위의 blur 는 무효과,
+     지면에서 배운 것과 같은 함정). 알파를 낮추고 스크림을 옅게 해 뒤가 비치게 한다. */
   border: 1px solid var(--glass-edge);
   border-radius: var(--radius);
   background:
-    linear-gradient(180deg, var(--glass-strong), transparent),
-    var(--panel);
+    linear-gradient(135deg,
+      rgba(255, 255, 255, 0.34) 0%,
+      rgba(255, 255, 255, 0.08) 42%,
+      rgba(255, 255, 255, 0.22) 100%),
+    color-mix(in srgb, var(--panel) 62%, transparent);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text);
@@ -2596,9 +2602,10 @@ svg {
   overscroll-behavior: contain;
 }
 .trade-modal::backdrop {
-  background: rgb(var(--shadow) / 0.42);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+  /* 스크림이 진하면 모달 유리가 굴절할 «뒤」가 사라진다 -- 화면을 가리는 대신 살짝 눕힌다. */
+  background: rgb(var(--shadow) / 0.18);
+  backdrop-filter: blur(2px) saturate(140%);
+  -webkit-backdrop-filter: blur(2px) saturate(140%);
 }
 .trade-modal-head {
   display: flex;
@@ -2620,13 +2627,28 @@ svg {
 .trade-modal .manual-entry { padding: 14px 16px 18px; }
 
 @media (max-width: 720px) {
-  /* 좁은 화면에서는 아래에서 올라오는 시트로 -- 엄지에서 가장 가까운 자리다. */
-  .trade-modal {
-    width: 100vw;
-    max-width: none;
-    max-height: 88dvh;
-    margin: auto auto 0;
-    border-radius: var(--radius) var(--radius) 0 0;
-  }
+  /* 2026-09-16 사용자 요청으로 바텀시트를 버리고 **가운데**로 통일했다 -- 데스크톱과 다른
+     자리에 뜨면 같은 동작인데 두 번 배우게 된다. */
+  .trade-modal { width: calc(100vw - 24px); max-height: 86dvh; }
   .trade-actions .notify-btn { justify-content: center; }
 }
+
+/* 진입 모달 안에서는 «접기»가 중복이다 -- 모달을 연 것 자체가 «한 번 더 확인」이고,
+   09-14 에 접기를 넣은 이유(물타기를 한 번 더 확인시킨다)는 모달이 이미 하고 있다.
+   요약 줄을 지우고 항상 펼친 상태로 둔다(DOM 은 그대로 -- app.js 가 box.open 을 쓴다). */
+#entryModal .entry-fold > summary { display: none; }
+#entryModal .entry-fold { margin: 0; }
+#entryModal .manual-entry { padding-top: 4px; }
+/* 모달 안의 빈 행은 자리만 먹는다(오류 표시 전용 칸 등). */
+#entryModal .manual-entry-row:empty,
+#exitModal .manual-entry-row:empty { display: none; }
+
+/* 모달 안은 가운데로 모은다 -- 폭이 좁아 왼쪽 정렬이면 오른쪽이 통째로 빈다. */
+.trade-modal .manual-entry { display: grid; justify-items: center; gap: 10px; }
+.trade-modal .manual-entry-row,
+.trade-modal .manual-entry-row.fields { justify-content: center; width: 100%; }
+.trade-modal .entry-fold { width: 100%; display: grid; justify-items: center; gap: 8px; }
+.trade-modal .exit-frac { justify-content: center; }
+.trade-modal .exit-now,
+.trade-modal .entry-note { text-align: center; }
+.trade-modal .manual-entry-result { width: 100%; }
