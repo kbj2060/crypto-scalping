@@ -63,7 +63,9 @@ FOLDS = [
     ("F5", "2022-01-01", "2025-06-30", "2025-07-01", "2025-12-31"),
     ("CAND", "2025-01-01", "2026-02-28", "2026-03-01", "2026-06-30"),   # 현행 후보 창 그대로
 ]
-OUTJ = E.OUT / "stageK_side_skill.json"
+HZ = "4h" if "--h4" in sys.argv else "1h"   # 지평. 캐시는 공유 -- 재학습 없이 바뀐다
+SUF = "" if HZ == "1h" else f"_{HZ}"
+OUTJ = E.OUT / f"stageK_side_skill{SUF}.json"
 CACHE = E.OUT / "stageK_probs.npz"
 
 
@@ -115,7 +117,7 @@ def seed_side_agreement(Ds):
 
 def main() -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    log(f"device={device} · seeds={SEEDS5} · 레시피=base/old가중/대칭게이트/5시드앙상블")
+    log(f"지평={HZ} · device={device} · seeds={SEEDS5} · 레시피=base/old가중/대칭게이트/5시드앙상블")
     df, base_cols = E.load()
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
     if cache:
@@ -133,7 +135,7 @@ def main() -> int:
         rt = tabm._route_probs(tr)
         ev_expert = tabm._route_probs(te).argmax(1)
         tdays = te.timestamp.dt.floor("D").to_numpy()
-        fwd = te["fwd_1h_bp"].to_numpy(np.float64)
+        fwd = te[f"fwd_{HZ}_bp"].to_numpy(np.float64)
         n = len(tr); split = max(int(n * 0.85), min(n - 1, 512))
         log(f"\n{'='*92}\n=== {name}  TRAIN {t0}~{t1} {n:,}행 · TEST {v0}~{v1} {len(te):,}행 "
             f"· 독립일 {len(np.unique(tdays))}\n{'='*92}")
@@ -258,7 +260,7 @@ def robust() -> int:
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
         vm = (df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")
         te = df[vm].reset_index(drop=True)
-        fwd = te["fwd_1h_bp"].to_numpy(np.float64)
+        fwd = te[f"fwd_{HZ}_bp"].to_numpy(np.float64)
         days = te.timestamp.dt.floor("D").to_numpy()
         ql, qsh = H.thresholds(z["tDm"], z["tQm"], symmetric=True)
         side = H.side_from(np.mean(list(z["Ds"]), 0), np.mean(list(z["Qs"]), 0), ql, qsh)
@@ -317,8 +319,8 @@ def robust() -> int:
         f"최고1일제거 {out['pooled_timing_drop_top1d']:+.3f} · 최고3일제거 {out['pooled_timing_drop_top3d']:+.3f} "
         f"· 최고10일제거 {out['pooled_timing_drop_top10d']:+.3f} · 윈저 {out['pooled_timing_winsor']:+.3f}")
     log(f"⭐측면 적중률 {hit:.4f} vs 귀무 {null.mean():.4f} (측면비중 보존 날짜블록 순열) · p {out['pooled_hit_p']:.4f}")
-    (E.OUT / "stageK_robust.json").write_text(json.dumps(out, indent=2, default=float))
-    log(f"저장: {E.OUT}/stageK_robust.json")
+    (E.OUT / f"stageK_robust{SUF}.json").write_text(json.dumps(out, indent=2, default=float))
+    log(f"저장: {E.OUT}/stageK_robust{SUF}.json")
     return 0
 
 
