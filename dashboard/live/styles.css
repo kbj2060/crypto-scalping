@@ -1675,9 +1675,13 @@ svg {
 }
 
 .chart-tooltip b {
-  color: var(--accent);
+  /* 🔴툴팁은 **두 테마 모두 어두운 판**이다(차트 위 대비 때문). 그래서 여기 글자색만은
+     테마 토큰을 따라가면 안 된다 -- 주황을 빼며 --accent 를 진한 중립(#2b3444)으로 바꾼 순간
+     이 줄(봉 시각)이 어두운 배경에 묻혀 «시간이 안 보인다»가 됐다(실측 rgb(43,52,68) on
+     rgba(28,32,40)). 툴팁 안은 고정 밝은색으로 못 박는다. */
+  color: rgba(255, 255, 255, 0.72);
   display: block;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   font-size: 12px;
 }
 
@@ -2563,3 +2567,6 @@ svg {
 .notify-btn.short { background: color-mix(in srgb, var(--bad) 11%, transparent); color: var(--bad); }
 .notify-btn.long { border-color: color-mix(in srgb, var(--good) 55%, transparent); }
 .notify-btn.short { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+
+/* 라이트에서도 툴팁은 어두운 판이므로 같은 값이다 -- 토큰을 타지 않게 명시해 둔다. */
+[data-theme="light"] .chart-tooltip b { color: rgba(255, 255, 255, 0.72); }
