@@ -40,8 +40,15 @@ FOLDS = [f for f in K.FOLDS if f[0] in ("F1", "F2", "F3", "CAND")]
 TARGET_N = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--match=")), 3700))
 ARMS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--arms=")), None)
         or ["N0", "N1", "N2"])
-OUTJ = E.OUT / "stageP_routing_side_experts.json"
-CACHE = E.OUT / "stageP_probs.npz"
+# --frame=HMM : 레짐 6열을 HMM 판으로 바꾼다(열 이름은 같으므로 학습 코드는 그대로).
+# ⚠️두 프레임을 섞지 않도록 캐시/산출물 이름을 분리한다.
+FRAME = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--frame=")), "balnobb")
+if FRAME == "HMM":
+    E.PARQUET = E.PARQUET.parent / "features_with_regime_2022_2026_HMM.parquet"
+    assert E.PARQUET.exists(), f"HMM 프레임 없음: {E.PARQUET}"
+FSUF = "" if FRAME == "balnobb" else f"_{FRAME}"
+OUTJ = E.OUT / f"stageP_routing_side_experts{FSUF}.json"
+CACHE = E.OUT / f"stageP_probs{FSUF}.npz"
 TPB, SLB, COST = K.BASE_TP * 1e4, K.BASE_SL * 1e4, 1.02
 
 
