@@ -958,7 +958,10 @@ def volatr() -> int:
 
 
 # ── Zeus Baseline v1 라벨 ────────────────────────────────────────────────────
-BASE_TP, BASE_SL = 0.015, 0.010          # 사용자 결정(2026-09-17): 더블 배리어, 시간청산 없음
+# 사용자 결정(2026-09-17): 더블 배리어, 시간청산 없음. `--tp=`/`--sl=` 로 기하학을 연다
+# (라벨 파일명이 tp/sl 을 담으므로 기하학마다 별 파일이 된다 -- 덮어쓰기 없음).
+BASE_TP = float(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--tp=")), 0.015))
+BASE_SL = float(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--sl=")), 0.010))
 LABEL_OUT = E.OUT.parent / "zeus_double_barrier_labels_20260917"
 
 

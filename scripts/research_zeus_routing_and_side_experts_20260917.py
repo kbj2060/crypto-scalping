@@ -73,6 +73,12 @@ def _qpath(name):
 
 QPATH = _qpath(QLABEL) if any(a.startswith("--arms=") and
                               any(x in a for x in ("N4", "N5", "N7")) for a in sys.argv) else None
+# 🔴캐시 키에 라벨이 없으면 «다른 라벨로 재학습»해도 옛 캐시가 조용히 재사용된다
+# (2026-09-17: N3 가 N2 와 같은 숫자를 낸 사고와 같은 부류). 키에 라벨 이름을 붙인다.
+QTAG = f"@{QPATH.stem}" if QPATH is not None else ""
+# 🔴N4/N5/N7 은 QPATH «하나»를 공유한다 -- N5 와 N7 을 한 프로세스에 같이 넣으면 둘이
+# 같은 라벨로 학습돼 「h48 양두」와 「더블배리어 양두」가 동일 모델이 된다. 갈라서 돌린다.
+assert not ({"N5", "N7"} <= set(ARMS)), "N5 와 N7 은 라벨 인자를 공유한다 -- 따로 실행할 것"
 
 
 def log(*a): print(*a, flush=True)
@@ -97,6 +103,7 @@ def main() -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"device={device} · seeds={SEEDS} · arms={ARMS} · 건수맞춤 {TARGET_N:,} · "
         f"더블배리어 TP{K.BASE_TP*100:g}%/SL{K.BASE_SL*100:g}%")
+    log(f"라벨(N4/N5/N7) = {QPATH}")
     df, base_cols = E.load()
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
     store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4", "N5", "N6", "N0x2", "N7", "N8")}
@@ -179,7 +186,7 @@ def main() -> int:
             for sd in SEEDS:
                 D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
                 for ei in range(3):
-                    ck = f"{name}|N4{ei}s{sd}"
+                    ck = f"{name}|N4{ei}s{sd}{QTAG}"
                     if ck in cache:
                         z = dict(cache[ck].item()); Dd, Qq = z["D"], z["Q"]
                     else:
@@ -207,7 +214,7 @@ def main() -> int:
             for sd in SEEDS:
                 D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
                 for ei in range(3):
-                    ck = f"{name}|N5{ei}s{sd}"
+                    ck = f"{name}|N5{ei}s{sd}{QTAG}"
                     if ck in cache:
                         z = dict(cache[ck].item()); Dd, Qq = z["D"], z["Q"]
                     else:
@@ -232,7 +239,7 @@ def main() -> int:
             for sd in SEEDS:
                 D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
                 for ei in range(3):
-                    ck = f"{name}|N7{ei}s{sd}"
+                    ck = f"{name}|N7{ei}s{sd}{QTAG}"
                     if ck in cache:
                         z = dict(cache[ck].item()); Dd, Qq = z["D"], z["Q"]
                     else:

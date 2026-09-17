@@ -38,8 +38,11 @@ TARGET, COST, PEG = 3700, 1.02, 5.52
 EN = ("bull", "bear", "chop")
 ARMS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--arms=")), None)
         or ["N0", "N5", "N7", "N0x2"])
+# 팔 이름은 `N7@<라벨태그>` 형태를 받는다 -- 같은 구조를 «다른 라벨»로 재학습한 캐시를
+# 가리키기 위해서다(캐시 키에 라벨 태그가 붙는다, 2026-09-17 수정).
 _KNOWN = {"N0", "N5", "N7", "N0x2"}
-assert set(ARMS) <= _KNOWN, f"모르는 팔: {sorted(set(ARMS) - _KNOWN)}"
+_base = lambda a: a.split("@", 1)[0]
+assert {_base(a) for a in ARMS} <= _KNOWN, f"모르는 팔: {sorted({_base(a) for a in ARMS} - _KNOWN)}"
 TPS = [0.010, 0.015, 0.020, 0.025, 0.030]
 SLS = [0.005, 0.007, 0.010, 0.013]
 
@@ -48,8 +51,12 @@ def log(*a): print(*a, flush=True)
 
 
 def ckey(arm, fold, ei, sd):
-    """캐시 키 규약이 팔마다 다르다 -- N0 는 전문가 «이름», N5/N7 은 «정수» 인덱스."""
-    return f"{fold}|N0{EN[ei]}s{sd}" if arm in ("N0", "N0x2") else f"{fold}|{arm}{ei}s{sd}"
+    """캐시 키 규약이 팔마다 다르다 -- N0 는 전문가 «이름», N5/N7 은 «정수» 인덱스.
+    `N7@tag` 면 키 끝에 `@tag` 가 붙는다(라벨별로 갈린 캐시)."""
+    b, _, tag = arm.partition("@")
+    if b in ("N0", "N0x2"):
+        return f"{fold}|N0{EN[ei]}s{sd}"
+    return f"{fold}|{b}{ei}s{sd}" + (f"@{tag}" if tag else "")
 
 
 def main() -> int:
@@ -72,7 +79,7 @@ def main() -> int:
                     c = dict(z[ckey(arm, name, ei, sd)].item()); m = ev == ei
                     D[m], Q[m] = c["D"][m], c["Q"][m]
                 per_seed.append((D, Q))
-            if arm == "N0x2":                   # 같은 폴드의 시드 i, i+1 앙상블
+            if _base(arm) == "N0x2":                   # 같은 폴드의 시드 i, i+1 앙상블
                 slots = [((per_seed[i][0] + per_seed[(i + 1) % len(SEEDS)][0]) / 2.0,
                           (per_seed[i][1] + per_seed[(i + 1) % len(SEEDS)][1]) / 2.0)
                          for i in range(len(SEEDS))]
@@ -134,6 +141,7 @@ def main() -> int:
 
     LBL = {"N0": "zigzag 양두 ×3", "N5": "h48 양두 ×3", "N7": "더블배리어 양두 ×3",
            "N0x2": "zigzag 양두 ×6(Baseline v2)"}
+    LBL = {a: LBL[_base(a)] + (f" [{a.split('@')[1]}]" if "@" in a else "") for a in ARMS}
     rows, bests = [], {}
     for arm in ARMS:
         entries = pick(arm)
