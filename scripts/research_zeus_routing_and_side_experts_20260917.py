@@ -48,7 +48,7 @@ ARMS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("-
         or ["N0", "N1", "N2"])
 # 🔴모르는 팔 이름을 «조용히 무시»하면 빈 결과가 표에서 그냥 빠진다(2026-09-17 실제 발생:
 # 서버에 N5 블록이 없는 옛 판이 있었는데 에러 없이 N5 행만 사라졌다).
-_KNOWN = {"N0", "N1", "N1b", "N2", "N3", "N4", "N5", "N6", "N0x2"}
+_KNOWN = {"N0", "N1", "N1b", "N2", "N3", "N4", "N5", "N6", "N0x2", "N7", "N8"}
 assert set(ARMS) <= _KNOWN, f"모르는 팔: {sorted(set(ARMS) - _KNOWN)} (스크립트 판이 오래됐을 수 있다)"
 # --frame=HMM : 레짐 6열을 HMM 판으로 바꾼다(열 이름은 같으므로 학습 코드는 그대로).
 # ⚠️두 프레임을 섞지 않도록 캐시/산출물 이름을 분리한다.
@@ -62,7 +62,17 @@ CACHE = E.OUT / f"stageP_probs{FSUF}.npz"
 TPB, SLB, COST = K.BASE_TP * 1e4, K.BASE_SL * 1e4, 1.02
 
 
-QPATH = (E.OUT.parent / "zeus_h48_quality_labels_20260917" / f"{QLABEL}.parquet")
+def _qpath(name):
+    """라벨을 h48 · 더블배리어 두 디렉터리에서 찾는다."""
+    for d in ("zeus_h48_quality_labels_20260917", "zeus_double_barrier_labels_20260917"):
+        c = E.OUT.parent / d / f"{name}.parquet"
+        if c.exists():
+            return c
+    raise FileNotFoundError(f"라벨 없음: {name}")
+
+
+QPATH = _qpath(QLABEL) if any(a.startswith("--arms=") and
+                              any(x in a for x in ("N4", "N5", "N7")) for a in sys.argv) else None
 
 
 def log(*a): print(*a, flush=True)
@@ -89,7 +99,7 @@ def main() -> int:
         f"더블배리어 TP{K.BASE_TP*100:g}%/SL{K.BASE_SL*100:g}%")
     df, base_cols = E.load()
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
-    store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4", "N5", "N6", "N0x2")}
+    store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4", "N5", "N6", "N0x2", "N7", "N8")}
 
     for name, t0, t1, v0, v1 in FOLDS:
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
@@ -211,6 +221,31 @@ def main() -> int:
                     D[m_], Q[m_] = Dd[m_], Qq[m_]
                 store["N5"].append((name, te, D, Q)); log(f"  N5/seed {sd} 완료")
 
+        # ── N7: 방향·품질 **둘 다 더블배리어 라벨** (N5 의 형제 -- 라벨만 다르다) ──
+        if "N7" in ARMS:
+            ql7 = pd.read_parquet(QPATH, columns=["timestamp", "tb_action"])
+            ql7["timestamp"] = pd.to_datetime(ql7["timestamp"])
+            y7 = (tr[["timestamp"]].merge(ql7, on="timestamp", how="left")
+                  .tb_action.fillna(0).to_numpy(np.int64))
+            assert len(y7) == n and np.bincount(y7, minlength=3).min() > 100, "더블배리어 방향 라벨 퇴화"
+            bal7 = compute_sample_weight("balanced", y=y7).astype(np.float32)
+            for sd in SEEDS:
+                D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
+                for ei in range(3):
+                    ck = f"{name}|N7{ei}s{sd}"
+                    if ck in cache:
+                        z = dict(cache[ck].item()); Dd, Qq = z["D"], z["Q"]
+                    else:
+                        w = bal7 * rt[:, ei].astype(np.float32)
+                        mm, _ = E.fit_expert(xs[:split], y7[:split], w[:split],
+                                             xs[split:], y7[split:], w[split:],
+                                             seed=sd, ei=ei, device=device)
+                        Dd, Qq = E.heads(mm, xv, device)
+                        cache[ck] = np.array({"D": Dd, "Q": Qq}, dtype=object); np.savez(CACHE, **cache)
+                    m_ = ev == ei
+                    D[m_], Q[m_] = Dd[m_], Qq[m_]
+                store["N7"].append((name, te, D, Q)); log(f"  N7/seed {sd} 완료")
+
         # ── N3: **레짐 × 측면** (3 레짐 × 2 측면 = 6 모델) ──
         # 레짐 가중 학습(라우팅 유지) + 측면별 부분집합. 추론은 레짐 하드 라우팅으로 전문가
         # 쌍을 고르고, 그 안에서 롱/숏 확률을 비교한다(측면은 예측 대상이라 라우팅 키가 못 된다).
@@ -252,6 +287,12 @@ def main() -> int:
             assert n0 == n5, f"폴드 정렬 어긋남 {n0} vs {n5}"
             store["N6"].append((n0, te0, (D0 + D5) / 2.0, (Q0 + Q5) / 2.0))
         log(f"  N6 재조합 완료 ({len(store['N6'])}개 = 폴드×시드)")
+    if store["N0"] and store["N7"]:
+        assert len(store["N0"]) == len(store["N7"]), "N0/N7 길이 불일치"
+        for (n0, te0, D0, Q0), (n7, _t7, D7, Q7) in zip(store["N0"], store["N7"]):
+            assert n0 == n7, f"폴드 정렬 어긋남 {n0} vs {n7}"
+            store["N8"].append((n0, te0, (D0 + D7) / 2.0, (Q0 + Q7) / 2.0))
+        log(f"  N8(zigzag + 더블배리어 앙상블) 재조합 완료 ({len(store['N8'])}개)")
     if store["N0"]:
         S = len(SEEDS)
         for i, (n0, te0, D0, Q0) in enumerate(store["N0"]):
@@ -288,7 +329,7 @@ def main() -> int:
     D_ = pd.DataFrame(rows)
     log(f"\n{'='*104}\n■ 라우팅 유무 · 측면 분리 (건수맞춤 {TARGET_N:,} · 더블배리어 · 4폴드)")
     log(f"{'팔':<6}{'모델수':>7}{'건수':>8}{'건당bp':>9}{'함축p':>8}{'CI':>20}{'건/일':>7}{'순/일':>8}")
-    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2, "N3": 6, "N4": 3, "N5": 3, "N6": 6, "N0x2": 6}
+    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2, "N3": 6, "N4": 3, "N5": 3, "N6": 6, "N0x2": 6, "N7": 3, "N8": 6}
     for arm, g in D_.groupby("arm", sort=False):
         log(f"{arm:<6}{NM[arm]:>7}{int(g.n.mean()):>8,}{g.gross_bp.mean():>+9.2f}{g.p.mean()*100:>7.2f}%"
             f"  [{g.ci95.apply(lambda x: x[0]).mean():+7.2f},{g.ci95.apply(lambda x: x[1]).mean():+7.2f}]"
