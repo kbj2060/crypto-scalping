@@ -1120,8 +1120,112 @@ def baserate() -> int:
     return 0
 
 
+def qcalib() -> int:
+    """--qcalib: **L4 의 전제 확인 — 부모의 품질점수 q 가 이미 p 를 아는가.**
+
+    더블 배리어에서 페이오프가 고정(+TP/−SL)이라 건당 분산이 **오직 p 의 함수**다
+    (`Var = p(1−p)·(TP+SL)²`). 그러니 L4 가 예측해야 할 것은 변동성이 아니라 **건별 p** 이고
+    켈리는 `f* = (p·TP − (1−p)·SL) / (TP·SL) · ...` 대신 고정배당 형태로
+    `f* = (p(1+b) − 1)/b`, b = TP/SL 로 쓴다.
+
+    ⭐**새 모델을 만들기 전에**: 배포 부모의 q 가 실현 p 와 단조 관계면 L4 는 **보정**으로
+    끝난다(사다리 1단 「안 해도 되는가」). 그래서 q 분위별 실현 p 를 먼저 잰다.
+    대조: 방향 확신도(direction softmax max)도 같이 낸다 -- 어느 쪽이 p 를 아는지 가른다.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    b_ = TP_BP, SL_BP = BASE_TP * 1e4, BASE_SL * 1e4
+    cost = 1.02
+    be = (SL_BP + cost) / (TP_BP + SL_BP)
+    # ⭐켈리에 **비용을 넣는다** — 이기면 TP−비용, 지면 SL+비용. 실효 배당
+    # b = (TP−비용)/(SL+비용) 를 써야 f* 가 손익분기 p* 에서 정확히 0 이 된다.
+    # TP/SL 을 그대로 쓰면 무비용 손익분기(40.00%)에서 0 이 되어 p* 와 어긋난다.
+    ratio = (TP_BP - cost) / (SL_BP + cost)
+    assert abs((be * (1 + ratio) - 1) / ratio) < 1e-12, "손익분기에서 f* 가 0 이 아니다"
+    log(f"더블 배리어 TP{BASE_TP*100:g}%/SL{BASE_SL*100:g}% · 손익분기 p* = {be*100:.2f}% "
+        f"(비용 {cost}bp) · 실효배당 b = {ratio:.4f} · 켈리 f* = (p·{1+ratio:.4f} − 1)/{ratio:.4f}")
+    df, base_cols = E.load()
+    bun = torch.load(E.BUNDLE, map_location="cpu", weights_only=False)
+    experts = {}
+    for ename in ("bull", "bear", "chop"):
+        pay = dict(bun["models"][ename])
+        m = tabm.ThreeHeadTabM(int(pay["n_features"]),
+                               cfg=tabm.ThreeHeadConfig(**dict(pay["config"]))).to(device)
+        m.load_state_dict(pay["state_dict"]); m.eval()
+        experts[ename] = (m, dict(pay["scaler"]))
+
+    S, R, Q, DC, DAY, HOLD = [], [], [], [], [], []
+    for name, _t0, _t1, v0, v1 in FOLDS:
+        if not (v1 < DEPLOYED_SEEN[0] or v0 > DEPLOYED_SEEN[1]):
+            continue
+        te = df[(df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")].reset_index(drop=True)
+        xr = tabm._base_input(te, base_cols); ev = tabm._route_probs(te).argmax(1)
+        D = np.zeros((len(te), 3)); Qm = np.zeros((len(te), 3))
+        for ei, ename in enumerate(("bull", "bear", "chop")):
+            m, sc = experts[ename]
+            sel = ev == ei
+            if sel.any():
+                D[sel], Qm[sel] = E.heads(m, tabm._standardize_apply(xr[sel], sc), device)
+        da = D.argmax(1)
+        qf = np.where(da > 0, Qm[np.arange(len(Qm)), da], Qm[:, 0])
+        side = np.where(da == 1, 1.0, np.where(da == 2, -1.0, 0.0))   # ⭐게이트 «전» 전부
+        idx = np.where(side != 0)[0]
+        hi = pd.to_numeric(te["high"]).to_numpy(np.float64)
+        lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
+        cl = pd.to_numeric(te["close"]).to_numpy(np.float64)
+        r, h, _res, rn, _m = _first_touch_open(idx, side, hi, lo, cl, BASE_TP, BASE_SL, MAXBARS)
+        S.append(np.full(len(idx), name)); R.append(rn); Q.append(qf[idx])
+        DC.append(D.max(1)[idx]); HOLD.append(h.astype(float))
+        DAY.append(te.timestamp.dt.floor("D").to_numpy()[idx])
+        log(f"  {name}: 방향 비CASH {len(idx):,}건(게이트 전)")
+    R = np.concatenate(R); Q = np.concatenate(Q); DC = np.concatenate(DC)
+    DAY = np.concatenate(DAY); HOLD = np.concatenate(HOLD)
+    hit = (R == 1).astype(float)          # TP 를 SL 보다 먼저
+
+    out = {"breakeven_p": be, "tp_bp": TP_BP, "sl_bp": SL_BP, "cost_bp": cost, "bins": {}}
+    for nm, v in (("품질점수 q", Q), ("방향 확신도", DC)):
+        log(f"\n■ {nm} 10분위별 실현 p (게이트 전 전체 {len(hit):,}건 · 손익분기 {be*100:.2f}%)")
+        log(f"{'분위':<6}{'구간':>16}{'건수':>8}{'실현p':>8}{'−손익분기':>10}"
+            f"{'켈리f*':>8}{'중앙보유':>9}{'건/일':>7}{'건당bp':>9}")
+        qs = pd.qcut(pd.Series(v), 10, labels=False, duplicates="drop")
+        rows = []
+        for k in sorted(pd.unique(qs)):
+            m = (qs == k).to_numpy()
+            p = float(hit[m].mean())
+            f = (p * (1 + ratio) - 1) / ratio
+            mh = float(hold_mean := HOLD[m].mean())
+            bp = p * TP_BP - (1 - p) * SL_BP - cost
+            rows.append({"bin": int(k), "lo": float(v[m].min()), "hi": float(v[m].max()),
+                         "n": int(m.sum()), "p": p, "kelly": f,
+                         "median_hold": float(np.median(HOLD[m])), "mean_hold": mh,
+                         "per_day": 288.0 / max(mh, 1e-9), "bp": bp})
+            log(f"D{k+1:<5}{f'{v[m].min():.3f}~{v[m].max():.3f}':>16}{m.sum():>8,}{p*100:>7.2f}%"
+                f"{(p-be)*100:>+9.2f}pp{f:>8.3f}{np.median(HOLD[m]):>9.0f}"
+                f"{288.0/max(mh,1e-9):>7.2f}{bp:>+9.2f}")
+        out["bins"][nm] = rows
+        # 최상 − 최하 분위 차, 날짜블록 CI
+        top, bot = (qs == qs.max()).to_numpy(), (qs == qs.min()).to_numpy()
+        a = pd.Series(hit[top]).groupby(DAY[top]).mean()
+        c = pd.Series(hit[bot]).groupby(DAY[bot]).mean()
+        obs = a.mean() - c.mean()
+        u = np.unique(DAY); rg = np.random.default_rng(5); bs = []
+        for _ in range(2000):
+            sm = rg.choice(u, len(u), replace=True)
+            bs.append(a.reindex(sm).dropna().mean() - c.reindex(sm).dropna().mean())
+        bs = np.array(bs); ci = [float(np.percentile(bs, 2.5)), float(np.percentile(bs, 97.5))]
+        mono = float(np.corrcoef(np.arange(len(rows)), [r["p"] for r in rows])[0, 1])
+        log(f"  ⭐최상−최하 분위 Δp = {obs*100:+.2f}pp  날짜블록 CI95 "
+            f"[{ci[0]*100:+.2f},{ci[1]*100:+.2f}]{'  🟢0배제' if ci[0] > 0 else '  0포함'}"
+            f" · 분위-p 상관 {mono:+.3f}")
+        out["bins"][nm + "_summary"] = {"top_minus_bottom_pp": obs * 100, "ci95_pp": [c_ * 100 for c_ in ci],
+                                        "monotonicity": mono}
+    (E.OUT / "stageN_q_calibration.json").write_text(json.dumps(out, indent=2, default=float))
+    log(f"\n저장: {E.OUT}/stageN_q_calibration.json")
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(
+        qcalib() if "--qcalib" in sys.argv else
         baserate() if "--baserate" in sys.argv else
         buildlabel() if "--buildlabel" in sys.argv else
         volatr() if "--volatr" in sys.argv else
