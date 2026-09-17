@@ -680,8 +680,134 @@ def labelrate() -> int:
     return 0
 
 
+MAXBARS = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--maxbars=")), 2016))
+
+
+def _first_touch_open(entry_i, side, hi, lo, cl, tp, sl, maxbars, block=288):
+    """**시간 배리어 없는 이중 배리어.** TP/SL 중 먼저 닿는 쪽까지 들고 간다.
+
+    전체 창을 한 행렬로 만들면 메모리가 터지므로 288봉(=1일) 블록으로 전진하며
+    아직 안 닫힌 거래만 계속 본다. 같은 봉 동시터치는 **SL 우선**(보수적).
+    반환: ret(소수·side 적용) · hold(봉) · resolved(bool) · reason(0=SL,1=TP,2=미해소)
+    """
+    n = len(cl)
+    m = len(entry_i)
+    e = cl[entry_i]
+    sd = side[entry_i]
+    ret = np.full(m, np.nan)
+    hold = np.full(m, maxbars, np.int64)
+    reason = np.full(m, 2, np.int8)
+    alive = np.ones(m, bool)
+    for st in range(0, maxbars, block):
+        if not alive.any():
+            break
+        a = np.where(alive)[0]
+        j = entry_i[a][:, None] + np.arange(st + 1, min(st + block, maxbars) + 1)[None, :]
+        okj = j < n
+        j = np.clip(j, 0, n - 1)
+        up = (hi[j] - e[a][:, None]) / e[a][:, None]
+        dn = (lo[j] - e[a][:, None]) / e[a][:, None]
+        gh = np.where(sd[a][:, None] > 0, up, -dn)
+        gl = np.where(sd[a][:, None] > 0, dn, -up)
+        gh = np.where(okj, gh, -np.inf); gl = np.where(okj, gl, np.inf)
+        big = gh.shape[1] + 1
+        t_sl = np.where((gl <= -sl).any(1), (gl <= -sl).argmax(1), big) if sl is not None else np.full(len(a), big)
+        t_tp = np.where((gh >= tp).any(1), (gh >= tp).argmax(1), big) if tp is not None else np.full(len(a), big)
+        hs = (t_sl < big) & (t_sl <= t_tp)
+        ht = (t_tp < big) & ~hs
+        done = hs | ht
+        if done.any():
+            k = a[done]
+            ret[k] = np.where(hs[done], -(sl or 0.0), (tp or 0.0))
+            hold[k] = st + 1 + np.where(hs[done], t_sl[done], t_tp[done])
+            reason[k] = np.where(hs[done], 0, 1)
+            alive[k] = False
+        # 데이터 끝에 닿은 건 미해소로 확정한다
+        ran_out = a[~done & ~okj[:, -1]]
+        alive[ran_out] = False
+    un = np.isnan(ret)
+    if un.any():                                   # 미해소는 maxbars(또는 데이터 끝) 종가로 청산
+        k = np.where(un)[0]
+        jend = np.minimum(entry_i[k] + maxbars, n - 1)
+        ret[k] = sd[k] * (cl[jend] - e[k]) / e[k]
+        hold[k] = jend - entry_i[k]
+    return ret, hold, ~un, reason
+
+
+def nocap() -> int:
+    """--nocap: **시간 배리어를 뺀 이중 배리어.** 보유시간이 결과가 되므로 빈도도 결과가 된다.
+
+    핵심 산출: 해소까지 보유봉 분위 · 미해소율 · 건당 수익 · **한 슬롯 기준 하루 거래수**.
+    하루 거래수 = 288봉 / 평균보유봉 (슬롯이 비는 시간은 무시한 **상한**이다 --
+    실제로는 후보가 그때 없을 수 있어 이보다 적다).
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log(f"이중 배리어(시간청산 없음) · 최대 {MAXBARS}봉({MAXBARS/288:.1f}일) · 배포본 q={E.Q_THRESH}")
+    df, base_cols = E.load()
+    b = torch.load(E.BUNDLE, map_location="cpu", weights_only=False)
+    experts = {}
+    for ename in ("bull", "bear", "chop"):
+        pay = dict(b["models"][ename])
+        m = tabm.ThreeHeadTabM(int(pay["n_features"]),
+                               cfg=tabm.ThreeHeadConfig(**dict(pay["config"]))).to(device)
+        m.load_state_dict(pay["state_dict"]); m.eval()
+        experts[ename] = (m, dict(pay["scaler"]))
+    seg = []
+    for name, _t0, _t1, v0, v1 in FOLDS:
+        if not (v1 < DEPLOYED_SEEN[0] or v0 > DEPLOYED_SEEN[1]):
+            continue
+        te = df[(df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")].reset_index(drop=True)
+        xr = tabm._base_input(te, base_cols); ev = tabm._route_probs(te).argmax(1)
+        D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
+        for ei, ename in enumerate(("bull", "bear", "chop")):
+            m, sc = experts[ename]
+            sel = ev == ei
+            if sel.any():
+                D[sel], Q[sel] = E.heads(m, tabm._standardize_apply(xr[sel], sc), device)
+        _, side = F.gate(D, Q, E.Q_THRESH)
+        idx = np.where(side != 0)[0]
+        seg.append((name, te, side, idx))
+        log(f"  {name} {v0}~{v1}: 후보 {len(idx):,}건")
+
+    log(f"\n{'배리어':<16}{'건수':>8}{'중앙보유':>9}{'평균보유':>9}{'p90':>7}{'미해소':>8}"
+        f"{'SL%':>7}{'TP%':>7}{'총bp':>9}{'CI':>20}{'건/일상한':>10}")
+    rows = []
+    for lab, tp, sl in LABEL_SPECS:
+        pnl, hold, res, rsn, days = [], [], [], [], []
+        for name, te, side, idx in seg:
+            hi = pd.to_numeric(te["high"]).to_numpy(np.float64)
+            lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
+            cl = pd.to_numeric(te["close"]).to_numpy(np.float64)
+            r, h, rs, rn = _first_touch_open(idx, side, hi, lo, cl, tp, sl, MAXBARS)
+            pnl.append(r * 1e4); hold.append(h); res.append(rs); rsn.append(rn)
+            days.append(te.timestamp.dt.floor("D").to_numpy()[idx])
+        pnl = np.concatenate(pnl); hold = np.concatenate(hold).astype(float)
+        res = np.concatenate(res); rsn = np.concatenate(rsn); days = np.concatenate(days)
+        lo_, hi_, nd = E.block_ci(pnl, days)
+        per_day = 288.0 / max(hold.mean(), 1e-9)
+        rows.append({"barrier": lab, "tp": tp, "sl": sl, "n": int(len(pnl)),
+                     "median_hold_bars": float(np.median(hold)), "mean_hold_bars": float(hold.mean()),
+                     "p90_hold_bars": float(np.percentile(hold, 90)),
+                     "unresolved": float((~res).mean()),
+                     "sl_share": float((rsn == 0).mean()), "tp_share": float((rsn == 1).mean()),
+                     "gross_bp": float(pnl.mean()), "ci95": [lo_, hi_], "indep_days": nd,
+                     "median_bp": float(np.median(pnl)), "win_rate": float((pnl > 0).mean()),
+                     "trades_per_day_cap": float(per_day)})
+        r = rows[-1]
+        log(f"{lab:<16}{r['n']:>8,}{r['median_hold_bars']:>9.0f}{r['mean_hold_bars']:>9.0f}"
+            f"{r['p90_hold_bars']:>7.0f}{r['unresolved']*100:>7.1f}%{r['sl_share']*100:>6.1f}%"
+            f"{r['tp_share']*100:>6.1f}%{r['gross_bp']:>+9.2f}  [{lo_:+7.2f},{hi_:+7.2f}]"
+            f"{per_day:>10.2f}")
+    log(f"\n※ 보유봉 1봉=5분 · 288봉=1일. 「건/일상한」은 슬롯이 한 번도 안 비는 가정의 **상한**이다.")
+    (E.OUT / f"stageK_nocap{SUF}.json").write_text(
+        json.dumps({"horizon_cap_bars": MAXBARS, "rows": rows}, indent=2, default=float))
+    log(f"저장: {E.OUT}/stageK_nocap{SUF}.json")
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(
+        nocap() if "--nocap" in sys.argv else
         labelrate() if "--labelrate" in sys.argv else
         exitgrid() if "--exitgrid" in sys.argv else
         deployed() if "--deployed" in sys.argv else
