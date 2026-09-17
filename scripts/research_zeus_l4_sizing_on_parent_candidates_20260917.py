@@ -41,8 +41,14 @@ BE = (SLB + COST) / (TPB + SLB)
 LIQ_X = 50.0
 
 
+HERE = Path(__file__).resolve().parents[1]   # 워크트리. 일부 스크립트는 여기에만 있다.
+
+
 def _mod(rel, name):
-    sp = importlib.util.spec_from_file_location(name, ROOT / rel)
+    path = HERE / rel
+    if not path.exists():
+        path = ROOT / rel
+    sp = importlib.util.spec_from_file_location(name, path)
     m = importlib.util.module_from_spec(sp); argv, sys.argv = sys.argv, ["x"]
     try: sp.loader.exec_module(m)
     finally: sys.argv = argv
