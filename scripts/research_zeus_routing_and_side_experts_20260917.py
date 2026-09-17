@@ -33,7 +33,9 @@ import train_eval_omega1_2_tabm_3head_20260603 as tabm  # noqa: E402
 import train_eval_omega461_parent_zig075_longwindow_20260917 as E  # noqa: E402
 import research_omega461_side_skill_decomposition_20260917 as K  # noqa: E402
 
-SEEDS = [613042, 27851, 904377]
+SEEDS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--seeds=")), None)
+         or ["613042", "27851", "904377"])
+SEEDS = [int(x) for x in SEEDS]
 FOLDS = [f for f in K.FOLDS if f[0] in ("F1", "F2", "F3", "CAND")]
 TARGET_N = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--match=")), 3700))
 ARMS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--arms=")), None)
@@ -67,7 +69,7 @@ def main() -> int:
         f"더블배리어 TP{K.BASE_TP*100:g}%/SL{K.BASE_SL*100:g}%")
     df, base_cols = E.load()
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
-    store = {a: [] for a in ("N0", "N1", "N1b", "N2")}
+    store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3")}
 
     for name, t0, t1, v0, v1 in FOLDS:
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
@@ -131,6 +133,24 @@ def main() -> int:
                 store["N1"].append((name, te, D, Q)); log(f"  N1/seed {sd} 완료")
             store["N1b"].append((name, te, np.mean(Ds, 0), np.mean(Qs, 0)))   # 용량 대조(공짜)
 
+        # ── N3: **레짐 × 측면** (3 레짐 × 2 측면 = 6 모델) ──
+        # 레짐 가중 학습(라우팅 유지) + 측면별 부분집합. 추론은 레짐 하드 라우팅으로 전문가
+        # 쌍을 고르고, 그 안에서 롱/숏 확률을 비교한다(측면은 예측 대상이라 라우팅 키가 못 된다).
+        if "N3" in ARMS:
+            for sd in SEEDS:
+                D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
+                for ei in range(3):
+                    w = bal * rt[:, ei].astype(np.float32)
+                    DL, QL = fit_get(f"N3L{ei}s{sd}", yt, w, rows=(yt != 2))
+                    DS, QS = fit_get(f"N3S{ei}s{sd}", yt, w, rows=(yt != 1))
+                    d = np.stack([np.minimum(DL[:, 0], DS[:, 0]), DL[:, 1], DS[:, 2]], 1)
+                    q = np.stack([np.minimum(QL[:, 0], QS[:, 0]), QL[:, 1], QS[:, 2]], 1)
+                    d /= np.maximum(d.sum(1, keepdims=True), 1e-12)
+                    q /= np.maximum(q.sum(1, keepdims=True), 1e-12)
+                    m_ = ev == ei
+                    D[m_], Q[m_] = d[m_], q[m_]
+                store["N3"].append((name, te, D, Q)); log(f"  N3/seed {sd} 완료")
+
         # ── N2: 측면 분리 (LONG+CASH 행 / SHORT+CASH 행) ──
         if "N2" in ARMS:
             for sd in SEEDS:
@@ -171,7 +191,7 @@ def main() -> int:
     D_ = pd.DataFrame(rows)
     log(f"\n{'='*104}\n■ 라우팅 유무 · 측면 분리 (건수맞춤 {TARGET_N:,} · 더블배리어 · 4폴드)")
     log(f"{'팔':<6}{'모델수':>7}{'건수':>8}{'건당bp':>9}{'함축p':>8}{'CI':>20}{'건/일':>7}{'순/일':>8}")
-    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2}
+    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2, "N3": 6}
     for arm, g in D_.groupby("arm", sort=False):
         log(f"{arm:<6}{NM[arm]:>7}{int(g.n.mean()):>8,}{g.gross_bp.mean():>+9.2f}{g.p.mean()*100:>7.2f}%"
             f"  [{g.ci95.apply(lambda x: x[0]).mean():+7.2f},{g.ci95.apply(lambda x: x[1]).mean():+7.2f}]"
