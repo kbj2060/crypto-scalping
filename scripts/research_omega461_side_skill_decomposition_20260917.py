@@ -588,8 +588,103 @@ def exitgrid() -> int:
     return 0
 
 
+# 라벨 활성률을 볼 배리어 후보. (tp, sl) -- None 은 그 배리어 없음.
+LABEL_SPECS = [("h48 현행 0.6/0.4", 0.006, 0.004),
+               ("TP1%/SL1%", 0.010, 0.010), ("TP1.5%/SL1%", 0.015, 0.010),
+               ("TP2%/SL1%", 0.020, 0.010), ("TP3%/SL1%", 0.030, 0.010),
+               ("TP4%/SL1%", 0.040, 0.010), ("TP없음/SL1%", None, 0.010),
+               ("TP2%/SL0.7%", 0.020, 0.007), ("TP4%/SL2%", 0.040, 0.020)]
+FEE_LEVELS = {"taker3x_42bp": 0.0042, "usdc3x_3.06bp": 0.000306}
+MAE_PEN, SL_PEN = 0.20, 0.003
+
+
+def _side_outcome(gh, gl, gc, tp, sl):
+    """배리어 결과와 «이유»·MAE 를 같이 낸다. 같은 봉 동시터치는 SL 우선."""
+    big = gh.shape[1] + 1
+    col = lambda v: None if v is None else np.full(gh.shape, float(v))
+    t_sl = np.where((gl <= -col(sl)).any(1), (gl <= -col(sl)).argmax(1), big) if sl is not None else np.full(len(gh), big)
+    t_tp = np.where((gh >= col(tp)).any(1), (gh >= col(tp)).argmax(1), big) if tp is not None else np.full(len(gh), big)
+    hit_sl = (t_sl < big) & (t_sl <= t_tp)
+    hit_tp = (t_tp < big) & ~hit_sl
+    ret = np.where(hit_sl, -(sl or 0.0), np.where(hit_tp, (tp or 0.0), gc))
+    end = np.where(hit_sl, t_sl, np.where(hit_tp, t_tp, gh.shape[1] - 1))
+    # 청산 시점까지의 MAE(불리 최대). 청산 후는 보지 않는다.
+    j = np.arange(gh.shape[1])[None, :]
+    mae = np.where(j <= end[:, None], gl, np.nan)
+    mae = np.nanmin(np.where(np.isfinite(mae), mae, 0.0), axis=1)
+    return ret, hit_sl, hit_tp, np.minimum(mae, 0.0)
+
+
+def labelrate() -> int:
+    """--labelrate: **이 배리어로 라벨을 만들면 하루 몇 건이 나오나.**
+
+    라벨 빌더(`build_omega1_2_triple_barrier_labels`)와 같은 품질식을 쓴다:
+        quality = ret - fee - 0.20·max(-mae,0) - 0.003·(reason=="sl")
+        action  = LONG if lq>0 and lq>=sq · SHORT if sq>0 · else CASH
+    전 봉(2022-01~2026-08)에서 양쪽 다 계산해 **활성률**과 **후보/일**을 낸다.
+    ⚠️이건 라벨 활성률이지 «게이트 통과 후 거래수»가 아니다 -- 품질 머리가 다시 거른다.
+    """
+    horizon = BARS[HZ]
+    df, _ = E.load()
+    hi = pd.to_numeric(df["high"]).to_numpy(np.float64)
+    lo = pd.to_numeric(df["low"]).to_numpy(np.float64)
+    cl = pd.to_numeric(df["close"]).to_numpy(np.float64)
+    days = df.timestamp.dt.floor("D").to_numpy()
+    n_days = len(np.unique(days))
+    n = len(cl) - horizon - 1
+    log(f"지평={HZ}({horizon}봉) · 전 봉 {n:,} · 달력일 {n_days}")
+
+    acc = {(lab, fee): np.zeros(3, np.int64) for lab, _, _ in LABEL_SPECS for fee in FEE_LEVELS}
+    reason = {lab: np.zeros(3, np.int64) for lab, _, _ in LABEL_SPECS}   # sl · tp · timeout
+    for st in range(0, n, 50_000):                       # 청크 -- 490k×48 행렬을 한 번에 안 만든다
+        idx = np.arange(st, min(st + 50_000, n))
+        out = {}
+        for sd in (1.0, -1.0):
+            gh, gl, gc = _gain_matrices(idx, np.full(len(cl), sd), hi, lo, cl, horizon)
+            out[sd] = (gh, gl, gc)
+        for lab, tp, sl in LABEL_SPECS:
+            res = {}
+            for sd in (1.0, -1.0):
+                gh, gl, gc = out[sd]
+                res[sd] = _side_outcome(gh, gl, gc, tp, sl)
+            reason[lab] += np.array([res[1.0][1].sum(), res[1.0][2].sum(),
+                                     len(idx) - res[1.0][1].sum() - res[1.0][2].sum()])
+            for fname, fee in FEE_LEVELS.items():
+                q = {}
+                for sd in (1.0, -1.0):
+                    ret, hsl, _htp, mae = res[sd]
+                    q[sd] = ret - fee - MAE_PEN * np.maximum(-mae, 0.0) - SL_PEN * hsl
+                a = np.where((q[1.0] > 0) & (q[1.0] >= q[-1.0]), 1, np.where(q[-1.0] > 0, 2, 0))
+                acc[(lab, fname)] += np.bincount(a, minlength=3)
+
+    log(f"\n=== 청산 이유 분포 (롱 기준, 전 봉) ===")
+    log(f"{'배리어':<18}{'SL':>9}{'TP':>9}{'시간청산':>10}")
+    for lab, _, _ in LABEL_SPECS:
+        c = reason[lab]; t = c.sum()
+        log(f"{lab:<18}{c[0]/t*100:>8.1f}%{c[1]/t*100:>8.1f}%{c[2]/t*100:>9.1f}%")
+
+    log(f"\n=== 라벨 활성률 & 하루 후보수 ===")
+    log(f"{'배리어':<18}{'비용':<16}{'CASH':>8}{'LONG':>8}{'SHORT':>8}{'활성률':>8}{'후보/일':>9}")
+    rows = []
+    for lab, tp, sl in LABEL_SPECS:
+        for fname in FEE_LEVELS:
+            c = acc[(lab, fname)]; t = c.sum()
+            act = 1.0 - c[0] / t
+            rows.append({"barrier": lab, "tp": tp, "sl": sl, "fee": fname,
+                         "cash": float(c[0]/t), "long": float(c[1]/t), "short": float(c[2]/t),
+                         "active_rate": float(act), "cand_per_day": float(act * t / n_days)})
+            log(f"{lab:<18}{fname:<16}{c[0]/t*100:>7.1f}%{c[1]/t*100:>7.1f}%{c[2]/t*100:>7.1f}%"
+                f"{act*100:>7.1f}%{act*t/n_days:>9.1f}")
+    (E.OUT / f"stageK_labelrate{SUF}.json").write_text(
+        json.dumps({"horizon": HZ, "bars": horizon, "rows": rows,
+                    "reason": {k: v.tolist() for k, v in reason.items()}}, indent=2, default=float))
+    log(f"저장: {E.OUT}/stageK_labelrate{SUF}.json")
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(
+        labelrate() if "--labelrate" in sys.argv else
         exitgrid() if "--exitgrid" in sys.argv else
         deployed() if "--deployed" in sys.argv else
         robust() if "--robust" in sys.argv else main())
