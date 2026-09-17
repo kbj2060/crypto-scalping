@@ -36,7 +36,14 @@ SEEDS = [int(x) for x in (next((a.split("=", 1)[1].split(",") for a in sys.argv
 FOLDS = [f for f in K.FOLDS if f[0] in ("F1", "F2", "F3", "CAND")]
 CACHE = Path(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--cache=")),
                   str(E.OUT / "stageP_probs.npz")))
-TARGET, COST, PEG = 3700, 1.02, 5.52
+# 🔴비용 규약(2026-09-18 사용자 지적으로 정정): 기본 1.02bp 는 USDC 수수료만이고,
+# 호메로스/라이브의 실제 왕복은 **peg+peg 5.52bp**(taker 는 10bp)다. Zeus 는 메이커 전제이므로
+# 판정은 5.52 로 한다. `--cost=` 로 바꾼다.
+# --target= : 총 «신호» 수. 기본 3,700 은 팔 간 비교용이지 집행용이 아니다 --
+# 1슬롯 용량이 ~500건인데 3,700 을 발화시키면 86%가 버려지고 «먼저 온 것»이 남는다.
+TARGET = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--target=")), 3700))
+PEG = 5.52
+COST = float(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--cost=")), 1.02))
 EN = ("bull", "bear", "chop")
 ARMS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--arms=")), None)
         or ["N0", "N5", "N7", "N0x2"])
@@ -87,6 +94,62 @@ def _ratio_day(p, h):
 
 def _lbl(a):
     return LBLS.get(_base(a), f"라우팅 없음 ×{_n1k(a)}" if _n1k(a) else a)
+
+
+def seq(pick, LBLS):
+    """--seq: **슬롯 1개 순차 시뮬레이션**. 지금까지의 「건/일」은 288/평균보유 = «상한»이었다.
+
+    🔴신호가 용량보다 많으면 슬롯이 차 있는 동안 온 신호는 버려지고, 버려지는 게 무작위가
+    아니다 -- **먼저 온 것을 잡고 더 좋은 것을 놓친다**. 09-15 에 이 저장소가 같은 함정에서
+    이론값 +26.95 vs 측정 +3.14bp/일(8.6배)을 겪었다.
+    ⭐배리어 결과는 «이전 거래를 잡았는지»와 무관하므로 전 후보를 일괄 계산해두고
+    순차 선택만 하면 정확하다. 재진입은 청산 다음 봉부터(+1봉).
+    """
+    tp, sl = K.BASE_TP, K.BASE_SL
+    days = {nm: (pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for nm, _a, _b, v0, v1 in FOLDS}
+    for arm in ARMS:
+        acc = {}
+        for _thr, per_fold in pick(arm):
+            for f, (te, h, l, c, side, idx) in enumerate(per_fold):
+                if len(idx) < 20:
+                    continue
+                r, hh, _a, _b, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
+                pnl_all = r * 1e4 - COST
+                take, cur = [], -1
+                for i in range(len(idx)):                 # 시간순 -- idx 는 오름차순
+                    if idx[i] > cur:
+                        take.append(i); cur = idx[i] + int(hh[i])   # 청산 봉까지 점유
+                take = np.array(take, int)
+                dd = te.timestamp.dt.floor("D").to_numpy()[idx[take]]
+                lo_, hi_, nd = E.block_ci(pnl_all[take], dd)
+                acc.setdefault(f, []).append(
+                    (len(idx), len(take), pnl_all.mean(), pnl_all[take].mean(),
+                     lo_, hi_, nd, float(np.median(hh[take])),
+                     288.0 / max(hh.mean(), 1e-9)))
+        nm_ = [x[0] for x in FOLDS]
+        log(f"\n{'='*112}\n■ {arm} — {_lbl(arm)} · **슬롯 1개 순차** "
+            f"(TP{tp*100:g}%/SL{sl*100:g}% · 5슬롯 평균)\n{'='*112}")
+        log(f"{'폴드':<6}{'신호':>7}{'체결':>7}{'거절%':>7}{'신호/일':>8}{'체결/일':>8}"
+            f"{'건당bp':>9}{'(전체후보)':>10}{'CI95':>20}{'순/일':>8}{'상한건/일':>9}")
+        T = np.zeros(4)
+        for f, nm in enumerate(nm_):
+            a = np.array(acc[f], float)
+            sig, ex = a[:, 0].mean(), a[:, 1].mean()
+            bp, bp_all = a[:, 3].mean(), a[:, 2].mean()
+            pd_ = ex / days[nm]
+            T += [sig, ex, bp * ex, days[nm] * 0 + ex]     # 가중합용
+            log(f"{nm:<6}{int(sig):>7,}{int(ex):>7,}{(1-ex/sig)*100:>6.1f}%"
+                f"{sig/days[nm]:>8.2f}{pd_:>8.2f}{bp:>+9.2f}{bp_all:>+10.2f}"
+                f"  [{a[:, 4].mean():+7.2f},{a[:, 5].mean():+7.2f}]{bp*pd_:>8.1f}"
+                f"{a[:, 8].mean():>9.2f}{'  ✅' if a[:, 4].mean() > 0 else ''}")
+        tot_d = sum(days[nm] for nm in nm_)
+        bp_w = T[2] / max(T[1], 1e-9)
+        log(f"{'합계':<6}{int(T[0]):>7,}{int(T[1]):>7,}{(1-T[1]/T[0])*100:>6.1f}%"
+            f"{T[0]/tot_d:>8.2f}{T[1]/tot_d:>8.2f}{bp_w:>+9.2f}{'':>10}{'':>20}"
+            f"{bp_w*T[1]/tot_d:>8.1f}")
+    log("\n⭐«체결/일»이 진짜 값이다. «상한건/일»(288/평균보유)은 슬롯이 안 빈다는 가정이다.")
+    log("🔴«건당bp» 와 «(전체후보)» 가 크게 다르면, 경합이 «좋은 신호를 골라내는 능력»을 깎은 것이다.")
+    return 0
 
 
 def byregime(pick, LBLS):
@@ -470,6 +533,8 @@ def main() -> int:
                 "sl_rate": A.sl_r.mean(), "tp_rate": A.tp_r.mean(), "un_rate": A.un_r.mean(),
                 "seed_spread": A.g.max() - A.g.min()}
 
+    if "--seq" in sys.argv:
+        return seq(pick, LBLS)
     if "--byregime" in sys.argv:
         return byregime(pick, LBLS)
     if "--byfold" in sys.argv:
