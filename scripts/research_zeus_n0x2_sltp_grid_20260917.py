@@ -93,6 +93,11 @@ def byfold(pick, LBLS):
         acc = {}
         for _thr, per_fold in pick(arm):
             for f, (te, h, l, c, side, idx) in enumerate(per_fold):
+                # ⭐한 폴드의 진입이 0~몇 건일 수 있다(발화 쏠림). 그 자체가 결과이므로
+                # 건수는 살리고 통계만 NaN 으로 둔다 -- 조용히 빼면 쏠림이 표에서 사라진다.
+                if len(idx) < 20:
+                    acc.setdefault(f, []).append((len(idx),) + (np.nan,) * 6)
+                    continue
                 r, hh, _res, _rn, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
                 pnl = r * 1e4 - COST
                 lo_, hi_, nd = E.block_ci(pnl, te.timestamp.dt.floor("D").to_numpy()[idx])
@@ -106,12 +111,13 @@ def byfold(pick, LBLS):
             f"{'CI95':>20}{'중앙보유':>9}{'건/일':>7}{'순/일':>8}")
         for f, (nm, _t0, _t1, v0, v1) in enumerate(FOLDS):
             a = np.array(acc[f], float)
-            n_, g = a[:, 0].mean(), a[:, 1].mean()
+            n_, g = a[:, 0].mean(), np.nanmean(a[:, 1]) if np.isfinite(a[:, 1]).any() else np.nan
             log(f"{nm:<6}{v0 + '~' + v1:<26}{int(n_):>7,}{n_/tot*100:>6.1f}%{g:>+9.2f}"
-                f"{a[:, 4].mean():>7.0f}  [{a[:, 2].mean():+7.2f},{a[:, 3].mean():+7.2f}]"
-                f"{a[:, 5].mean():>9.0f}{a[:, 6].mean():>7.2f}{g * a[:, 6].mean():>8.1f}"
-                f"{'  ✅' if a[:, 2].mean() > 0 else '   '}")
-        sign = [np.array(acc[f], float)[:, 1].mean() > 0 for f in acc]
+                f"{np.nanmean(a[:, 4]):>7.0f}  [{np.nanmean(a[:, 2]):+7.2f},{np.nanmean(a[:, 3]):+7.2f}]"
+                f"{np.nanmean(a[:, 5]):>9.0f}{np.nanmean(a[:, 6]):>7.2f}"
+                f"{g * np.nanmean(a[:, 6]):>8.1f}"
+                f"{'  ✅' if np.nanmean(a[:, 2]) > 0 else ('  ⚠️표본부족' if not np.isfinite(g) else '   ')}")
+        sign = [np.nanmean(np.array(acc[f], float)[:, 1]) > 0 for f in acc]
         log(f"  ⭐부호 양수 폴드 {sum(sign)}/{len(sign)} · "
             f"앞 2폴드 건수 비중 {(np.mean([x[0] for x in acc[0]]) + np.mean([x[0] for x in acc[1]]))/tot*100:.1f}%")
     log("\n🔴읽는 법: 엣지가 앞 폴드에 몰려 있고 최근 폴드가 0 근처면, 4폴드 평균은")
