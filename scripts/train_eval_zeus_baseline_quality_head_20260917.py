@@ -35,10 +35,14 @@ import research_omega461_side_skill_decomposition_20260917 as K  # noqa: E402
 
 SEEDS = H.SEEDS5
 TARGET = H.TARGET                      # 통과율 3.5% (TRAIN 꼬리에서 맞춘다)
-LABEL = (ROOT / "tmp/omega461_longwindow_20260917/zeus_double_barrier_labels_20260917"
-         / "zeus_db_tp15_sl10_usdc3x_3.06bp.parquet")
-OUTJ = E.OUT / "stageM_zeus_quality_head.json"
-CACHE = E.OUT / "stageM_probs.npz"
+LABEL_DIR = ROOT / "tmp/omega461_longwindow_20260917/zeus_double_barrier_labels_20260917"
+# --label=<파일명 조각>. 기본은 v1(어느 배리어가 먼저 닿는가) -- 이미 실패로 기록됐다.
+# v2 는 «봉당 수익률» 라벨: zeus_rate_tp15_sl10_cash40 등. 사전등록 주 실험은 cash40.
+_LN = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--label=")),
+           "zeus_db_tp15_sl10_usdc3x_3.06bp")
+LABEL = LABEL_DIR / f"{_LN}.parquet"
+OUTJ = E.OUT / f"stageM_zeus_quality_head_{_LN}.json"
+CACHE = E.OUT / f"stageM_probs_{_LN}.npz"
 COST = {"usdc": 1.02, "peg": 5.52}
 
 
