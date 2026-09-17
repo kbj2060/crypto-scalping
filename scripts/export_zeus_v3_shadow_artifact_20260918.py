@@ -24,12 +24,20 @@ import train_eval_omega461_parent_zig075_longwindow_20260917 as E  # noqa: E402
 from sklearn.utils.class_weight import compute_sample_weight      # noqa: E402
 from omega4_6_2_source_parent_live import CURRENT_PREFIX          # noqa: E402
 
+# --feats=all : v4 후보(157열). 빈 값이면 v3(96열) 그대로다.
+# --score=edge : v4 게이트 랭킹(D[방향]-D[cash]). v3 는 q.
+# 🔴아티팩트 이름·파리티 참조 캐시가 이 둘에 따라 갈린다 -- 섞이면 섀도우가 딴 모델을 잰다.
+FEATS = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--feats=")), "")
+SCORE = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--score=")), "q")
+TAG = "v4" if FEATS else "v3"
 SEEDS = [613042, 27851, 904377, 155690, 488213, 178618]
 TRAIN0, TRAIN1 = "2022-01-01", "2026-05-31"      # purge 30일 적용 후 실효 끝
 TEST0, TEST1 = "2026-07-01", "2026-09-30"
-OUT = ROOT / "data/live/zeus_v3_shadow_20260918"
-SPEC = {"tp": 0.015, "sl": 0.007, "rollq_window": 1000, "rollq_q": 0.983,
+OUT = ROOT / f"data/live/zeus_{TAG}_shadow_20260918"
+SPEC = {"tp": 0.015, "sl": 0.007, "rollq_window": 1000,
+        "rollq_q": 0.983 if TAG == "v3" else 0.85, "gate_score": SCORE,
         "slots": 1, "mingap": 0, "sizing": "fixed_live__half_kelly_logged",
+        "feats": FEATS or "none",
         "cost_bp_assumed": {"maker0": 0.0, "realistic": 1.02, "stress_peg": 5.52}}
 
 
@@ -42,6 +50,12 @@ def main() -> int:
     drop = [c for c in base_cols if c.startswith(CURRENT_PREFIX)]
     assert len(drop) == 6, f"레짐 6열이 아니라 {len(drop)}열"
     base_cols = [c for c in base_cols if c not in drop]
+    if FEATS:
+        import research_zeus_routing_and_side_experts_20260917 as RS
+        add = ([c for g in RS.FEATGROUPS for c in RS.FEATGROUPS[g]] if FEATS == "all"
+               else [c for g in FEATS.split(",") for c in RS.FEATGROUPS[g]])
+        assert not [c for c in add if c in base_cols], "중복 추가"
+        base_cols = base_cols + add
     log(f"입력 base {len(base_cols)}열 + POS {len(tabm.POS_COLS)}열 = {len(base_cols)+len(tabm.POS_COLS)}열")
 
     tr = df[(df.timestamp >= TRAIN0) & (df.timestamp <= TRAIN1 + " 23:59:59")].reset_index(drop=True)
@@ -57,7 +71,9 @@ def main() -> int:
     n = len(tr); split = max(int(n * 0.85), min(n - 1, 512))
     bal = compute_sample_weight("balanced", y=yt).astype(np.float32)
 
-    cache = dict(np.load(E.OUT / "stageP_probs_noreg_purge30.npz", allow_pickle=True))
+    cpath = E.OUT / ("stageP_probs_noreg_purge30"
+                     + (f"_ft{FEATS.replace(',', '')}" if FEATS else "") + ".npz")
+    cache = dict(np.load(cpath, allow_pickle=True))
     states, worst = [], 0.0
     for sd in SEEDS:
         m, meta = E.fit_expert(xs[:split], yt[:split], bal[:split],
@@ -79,12 +95,12 @@ def main() -> int:
     torch.save({"state_dicts": states, "seeds": SEEDS, "cfg": vars(tabm.CFG),
                 "scaler": scaler, "base_cols": base_cols, "pos_cols": list(tabm.POS_COLS),
                 "input_dim": len(base_cols) + len(tabm.POS_COLS)}, OUT / "model.pt")
-    meta = {"model_id": "zeus_v3_shadow_20260918", "spec": SPEC, "seeds": SEEDS,
+    meta = {"model_id": f"zeus_{TAG}_shadow_20260918", "spec": SPEC, "seeds": SEEDS,
             "train_range": f"{TRAIN0}~{TRAIN1}", "purge_days": 30,
             "frame": str(E.PARQUET), "frame_sha256": hashlib.sha256(
                 E.PARQUET.read_bytes()).hexdigest() if E.PARQUET.stat().st_size < 3e9 else "skipped",
             "base_cols": base_cols, "n_base": len(base_cols),
-            "parity_max_abs_dev": worst, "parity_ref": "stageP_probs_noreg_purge30.npz SHADOW|N1s*",
+            "parity_max_abs_dev": worst, "parity_ref": f"{cpath.name} SHADOW|N1s*",
             "frozen_doc": "docs/zeus/README.md §2", "prereg": "docs/zeus/shadow_prereg_v3_20260918.md",
             "orders": "NONE -- 기록만 한다"}
     (OUT / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))

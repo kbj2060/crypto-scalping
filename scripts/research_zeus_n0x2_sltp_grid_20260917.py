@@ -33,7 +33,10 @@ import research_omega461_side_skill_decomposition_20260917 as K    # noqa: E402
 SEEDS = [int(x) for x in (next((a.split("=", 1)[1].split(",") for a in sys.argv
                                 if a.startswith("--seeds=")), None)
                           or "613042,27851,904377,155690,488213".split(","))]
-FOLDS = [f for f in K.FOLDS if f[0] in ("F1", "F2", "F3", "CAND")]
+_FN = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--folds=")), None)
+       or ["F1", "F2", "F3", "CAND"])
+FOLDS = [f for f in K.FOLDS if f[0] in _FN]
+assert len(FOLDS) == len(_FN), f"모르는 폴드: {set(_FN) - {f[0] for f in K.FOLDS}}"
 # --shadow : 홀드아웃/섀도우 전방 폴드 하나만 채점한다(학습 쪽 --shadow 와 동일 정의).
 if "--shadow" in sys.argv:
     FOLDS = [("SHADOW", "2022-01-01", "2026-06-30", "2026-07-01", "2026-09-30")]
@@ -64,6 +67,41 @@ SLS = [0.005, 0.007, 0.010, 0.013]
 
 LBLS = {"N0": "zigzag 양두 ×3", "N5": "h48 양두 ×3", "N7": "더블배리어 양두 ×3",
         "N0x2": "zigzag 양두 ×6(Baseline v2)"}
+
+
+# --score=q|d|dq|margin|edge : **게이트 랭킹 함수**(2026-09-18). 지금까지 q 하나뿐이었다.
+#   q      Q[고른 방향]                     (현행)
+#   d      D[고른 방향]                     방향 머리 자신의 확신도
+#   dq     D[방향]·Q[방향]                  두 머리가 «동의»할 때만 높다
+#   margin D[방향] − D[반대 측면]           CASH 를 무시하고 측면 대비만 본다
+#   edge   D[방향] − D[cash]                «거래할 만한가»를 직접 읽는다
+# 🔴학습이 없으므로 이 축의 탐색은 전부 같은 창 위의 선택이다 -- 확인창에서 다시 잰다.
+#   edgev  edge × 변동성      ⭐1슬롯 목적함수는 Σp/Σh 다 -- 같은 승률이면 «빨리 끝나는»
+#                              후보가 두 배 가치다. 기록상 부모는 조용한 봉에서 발화한다
+#                              (후보 ATR 이 전체의 64.8%)이라 체계적으로 느린 거래를 고른다.
+SCORE = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--score=")), "q")
+assert SCORE in ("q", "d", "dq", "margin", "edge", "edgev"), f"모르는 점수: {SCORE}"
+
+
+def gscore(D, Q, atr=None):
+    da = D.argmax(1); ar = np.arange(len(D))
+    if SCORE == "q":
+        return da, np.where(da > 0, Q[ar, da], Q[:, 0])
+    if SCORE == "d":
+        return da, D[ar, da]
+    if SCORE == "dq":
+        return da, D[ar, da] * np.where(da > 0, Q[ar, da], Q[:, 0])
+    if SCORE == "margin":
+        opp = np.where(da == 1, 2, np.where(da == 2, 1, 0))
+        return da, D[ar, da] - D[ar, opp]
+    e = D[ar, da] - D[:, 0]
+    if SCORE == "edge":
+        return da, e
+    assert atr is not None, "edgev 는 ATR 이 필요하다"
+    # 변동성을 롤링 중앙값으로 정규화한다(수준 자체가 몇 해에 걸쳐 이동하므로).
+    # 🔴인과: shift(1) 로 «자기 봉»을 빼고 직전 2,016봉(1주)만 본다.
+    m = pd.Series(atr).shift(1).rolling(2016, min_periods=288).median().bfill().to_numpy()
+    return da, e * np.clip(atr / np.maximum(m, 1e-12), 0.25, 4.0)
 
 
 def log(*a): print(*a, flush=True)
@@ -480,8 +518,9 @@ def seq(pick, LBLS):
     MINGAP = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--mingap=")), 0))
     days = {nm: (pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for nm, _a, _b, v0, v1 in FOLDS}
     for arm in ARMS:
-        acc = {}
+        acc = {}; SLOTPOOL = []
         for _thr, per_fold in pick(arm):
+            POOL = {}
             for f, (te, h, l, c, side, idx) in enumerate(per_fold):
                 if len(idx) < 20:
                     continue
@@ -495,10 +534,14 @@ def seq(pick, LBLS):
                 take = np.array(take, int)
                 dd = te.timestamp.dt.floor("D").to_numpy()[idx[take]]
                 lo_, hi_, nd = E.block_ci(pnl_all[take], dd)
+                POOL.setdefault(len(POOL) % 1, []).append((pnl_all[take], dd))
                 acc.setdefault(f, []).append(
                     (len(idx), len(take), pnl_all.mean(), pnl_all[take].mean(),
                      lo_, hi_, nd, float(np.median(hh[take])),
                      288.0 / max(hh.mean(), 1e-9)))
+            if POOL.get(0):
+                SLOTPOOL.append((np.concatenate([x[0] for x in POOL[0]]),
+                                 np.concatenate([x[1] for x in POOL[0]])))
         nm_ = [x[0] for x in FOLDS]
         log(f"\n{'='*112}\n■ {arm} — {_lbl(arm)} · **슬롯 1개 순차** "
             f"(TP{tp*100:g}%/SL{sl*100:g}% · mingap {MINGAP}봉 · 비용 {COST}bp)\n{'='*112}")
@@ -517,9 +560,14 @@ def seq(pick, LBLS):
                 f"{a[:, 8].mean():>9.2f}{'  ✅' if a[:, 4].mean() > 0 else ''}")
         tot_d = sum(days[nm] for nm in nm_)
         bp_w = T[2] / max(T[1], 1e-9)
+        pc = np.array([E.block_ci(p_, d_) for p_, d_ in SLOTPOOL], float)
         log(f"{'합계':<6}{int(T[0]):>7,}{int(T[1]):>7,}{(1-T[1]/T[0])*100:>6.1f}%"
-            f"{T[0]/tot_d:>8.2f}{T[1]/tot_d:>8.2f}{bp_w:>+9.2f}{'':>10}{'':>20}"
-            f"{bp_w*T[1]/tot_d:>8.1f}")
+            f"{T[0]/tot_d:>8.2f}{T[1]/tot_d:>8.2f}{bp_w:>+9.2f}{'':>10}"
+            f"  [{pc[:, 0].mean():+7.2f},{pc[:, 1].mean():+7.2f}]"
+            f"{bp_w*T[1]/tot_d:>8.1f}{'  ✅0배제' if pc[:, 0].mean() > 0 else ''}"
+            f"{'  ✅peg배제' if pc[:, 0].mean() > PEG - COST else ''}")
+        log(f"  통합 독립일 {pc[:, 2].mean():.0f} · 시드폭 "
+            f"{max(np.mean(p_) for p_, _ in SLOTPOOL) - min(np.mean(p_) for p_, _ in SLOTPOOL):.2f}")
     log("\n⭐«체결/일»이 진짜 값이다. «상한건/일»(288/평균보유)은 슬롯이 안 빈다는 가정이다.")
     log("🔴«건당bp» 와 «(전체후보)» 가 크게 다르면, 경합이 «좋은 신호를 골라내는 능력»을 깎은 것이다.")
     return 0
@@ -765,6 +813,55 @@ def oracle(pick, LBLS):
 
 
 
+
+def occ(pick, LBLS):
+    """--occ: **왜 0.8건/일인가**. 용량(288/평균보유)은 2.75 인데 실제가 0.80 이다.
+
+    ⭐빈도 = 점유율 × 용량. 점유율이 낮으면 원인은 배리어가 아니라 «신호가 시간축에 몰려서
+    슬롯이 빈 동안 아무것도 안 온다»는 것이다. 에피소드(연속 신호 덩어리)를 세어 가른다.
+    """
+    tp, sl = K.BASE_TP, K.BASE_SL
+    GAPB = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--episode=")), 12))
+    days = sum((pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for _n, _a, _b, v0, v1 in FOLDS)
+    for arm in ARMS:
+        acc = []
+        for _thr, per_fold in pick(arm):
+            nsig = nep = nfill = occb = totb = 0; eplen = []; idle = []; epbp = []
+            for te, h, l, c, side, idx in per_fold:
+                if len(idx) < 20:
+                    continue
+                r, hh, _a, _b, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
+                p_ = r * 1e4 - COST
+                nsig += len(idx); totb += len(te)
+                # 에피소드 = 신호 사이 간격이 GAPB 봉 이하면 같은 덩어리
+                brk = np.where(np.diff(idx) > GAPB)[0]
+                st = np.concatenate([[0], brk + 1]); en = np.concatenate([brk, [len(idx) - 1]])
+                nep += len(st); eplen.append((idx[en] - idx[st]).astype(float) + 1)
+                epbp.append(np.array([p_[a:b + 1].mean() for a, b in zip(st, en)]))
+                cur = -1; prev_free = 0
+                for i in range(len(idx)):
+                    if idx[i] <= cur:
+                        continue
+                    idle.append(float(idx[i] - prev_free)); nfill += 1
+                    occb += int(hh[i]); cur = idx[i] + int(hh[i]); prev_free = cur
+            acc.append((nsig, nep, nfill, occb / max(totb, 1), float(np.mean(np.concatenate(eplen))),
+                        float(np.median(idle)), float(np.mean(idle)),
+                        float(np.mean(np.concatenate(epbp)))))
+        a = np.array(acc, float)
+        log(f"\n{'='*100}\n■ {arm} — {_lbl(arm)} · **점유율 분해** (TP{tp*100:g}%/SL{sl*100:g}% · "
+            f"에피소드 경계 {GAPB}봉 · {days}일)\n{'='*100}")
+        sig, ep, fl = a[:, 0].mean(), a[:, 1].mean(), a[:, 2].mean()
+        log(f"  신호 {sig:,.0f} ({sig/days:.2f}/일) · **에피소드 {ep:,.0f} ({ep/days:.2f}/일)** · "
+            f"체결 {fl:,.0f} ({fl/days:.2f}/일)")
+        log(f"  에피소드당 신호 {sig/ep:.1f}개 · 평균 길이 {a[:, 4].mean():.1f}봉")
+        log(f"  **슬롯 점유율 {a[:, 3].mean()*100:.1f}%** · 유휴(직전 청산→다음 진입) "
+            f"중앙 {a[:, 5].mean():.0f}봉 · 평균 {a[:, 6].mean():.0f}봉")
+        log(f"  에피소드 평균 건당bp {a[:, 7].mean():+.2f}")
+        log(f"  ⭐에피소드/일 {ep/days:.2f} 가 체결/일 {fl/days:.2f} 과 비슷하면 «군집»이 아니라")
+        log(f"    **독립 사건 자체가 부족**한 것이다 -- 그러면 고칠 곳은 집행이 아니라 신호 생성이다.")
+    return 0
+
+
 def ckey(arm, fold, ei, sd):
     """캐시 키 규약이 팔마다 다르다 -- N0 는 전문가 «이름», N5/N7 은 «정수» 인덱스.
     `N7@tag` 면 키 끝에 `@tag` 가 붙는다(라벨별로 갈린 캐시)."""
@@ -774,8 +871,22 @@ def ckey(arm, fold, ei, sd):
     return f"{fold}|{b}{ei}s{sd}" + (f"@{tag}" if tag else "")
 
 
+# --cache2=<경로> : 두 번째 캐시의 확률을 **평균**한다(2026-09-18). 같은 라벨·같은 폴드를
+# 다른 «모델 계열»(TabM ↔ LightGBM)로 학습한 것을 섞기 위한 것이다. 시드 앙상블이 같은
+# 편향을 반복하는 데 반해 이건 편향이 다른 둘을 섞는다.
+CACHE2 = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--cache2=")), "")
+
+
 def main() -> int:
     z = np.load(CACHE, allow_pickle=True)
+    if CACHE2:
+        z2 = np.load(CACHE2, allow_pickle=True)
+        miss = [k for k in z.files if k not in z2.files]
+        assert not miss, f"--cache2 에 없는 키: {miss[:4]}"
+        z = {k: np.array({"D": (dict(z[k].item())["D"] + dict(z2[k].item())["D"]) / 2.0,
+                          "Q": (dict(z[k].item())["Q"] + dict(z2[k].item())["Q"]) / 2.0},
+                         dtype=object) for k in z.files}
+        log(f"⭐--cache2 평균: {len(z)}키")
     df, _ = E.load()
     log(f"캐시 {CACHE} · 시드 {SEEDS} · 폴드 {[f[0] for f in FOLDS]} · 격자 {len(TPS)}×{len(SLS)}")
 
@@ -837,9 +948,7 @@ def main() -> int:
         for si in range(len(SEEDS)):
             sc = []
             for _n, te, _h, _l, _c, slots in SEGS[arm]:
-                D, Q = slots[si]; da = D.argmax(1)
-                qf = np.where(da > 0, Q[np.arange(len(Q)), da], Q[:, 0])
-                sc.append((da, qf))
+                sc.append(gscore(*slots[si], atr=_atr_pct(te) if SCORE == "edgev" else None))
             if ROLLQ and ROLLQQ > 0:               # ⭐q 를 «고정»한다 -- 배포 가능한 형태.
                 # 🔴건수맞춤(TARGET)은 팔 간 비교용이다. 창 길이가 다른 폴드에 그대로 쓰면
                 #   임계값이 창 길이에 따라 달라진다(2026-09-18: 50일 폴드에서 40건/일이 나왔다).
@@ -923,6 +1032,69 @@ def main() -> int:
                 "sl_rate": A.sl_r.mean(), "tp_rate": A.tp_r.mean(), "un_rate": A.un_r.mean(),
                 "seed_spread": A.g.max() - A.g.min()}
 
+    # ── --idle=U,qmin : **유휴 조건부 게이트**(2026-09-18). 정지시각 문제의 구조 그대로다.
+    # 슬롯이 비어 있던 시간 u 가 길수록 기다림의 기회비용이 커지므로 문턱을 낮춘다:
+    #   q(u) = q0 - (q0 - qmin) · min(u/U, 1)
+    # 🔴인과성: q(u) 는 «이미 지난 시간»만 보고, 분위 자체는 shift(1) 롤링창이다. 미래 없음.
+    # ⭐전역 완화와의 차이: 전역은 바쁜 구간(=이미 포지션이 있어 버려질 곳)에도 문턱을 낮춰
+    #   신호 6.8배에 체결 2.9배만 얻는다. 유휴 조건부는 «실제로 쓰이는 곳»에서만 낮춘다.
+    if "--idle" in " ".join(sys.argv):
+        IU, IQMIN = (next((a.split("=", 1)[1] for a in sys.argv
+                           if a.startswith("--idle=")), "288,0.70").split(","))
+        IU, IQMIN = int(IU), float(IQMIN)
+        assert ROLLQ and ROLLQQ > 0, "--idle 은 --rollq 와 --rollqq(고정 q0) 를 함께 요구한다"
+        QL = sorted({round(ROLLQQ - (ROLLQQ - IQMIN) * i / 8, 4) for i in range(9)}, reverse=True)
+        days = {nm: (pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for nm, _a, _b, v0, v1 in FOLDS}
+        tp, sl = K.BASE_TP, K.BASE_SL
+        for arm in ARMS:
+            acc, slotpool = {}, []
+            for si in range(len(SEEDS)):
+                pool = []
+                for fi, (nm, te, h, l, c, slots) in enumerate(SEGS[arm]):
+                    da, qf = gscore(*slots[si], atr=_atr_pct(te) if SCORE == "edgev" else None)
+                    m_ = da != 0; wi = np.where(m_)[0]
+                    # 후보 계열 위에서 q 수준마다 롤링 임계값을 한 번씩 구해 봉 격자로 되돌린다
+                    TH = np.full((len(QL), len(da)), np.inf)
+                    for k_, q_ in enumerate(QL):
+                        TH[k_, wi] = _thr_seq(qf[m_], q_)
+                    side = np.where(da == 1, 1.0, np.where(da == 2, -1.0, 0.0))
+                    r, hh, _a, _b, _m = K._first_touch_open(wi, side, h, l, c, tp, sl, K.MAXBARS)
+                    pnl_all = r * 1e4 - COST
+                    take, cur, freed = [], -1, 0
+                    for j, i_ in enumerate(wi):
+                        if i_ <= cur:
+                            continue
+                        u = i_ - freed
+                        k_ = min(int(len(QL) - 1), int(len(QL) * min(u / IU, 1.0)))
+                        t_ = TH[k_, i_]
+                        if not np.isfinite(t_) or qf[i_] < t_:
+                            continue
+                        take.append(j); cur = i_ + int(hh[j]); freed = cur
+                    t_ = np.array(take, int)
+                    dd = te.timestamp.dt.floor("D").to_numpy()[wi[t_]]
+                    acc.setdefault(fi, []).append((len(t_), float(pnl_all[t_].mean()),
+                                                   float(np.median(hh[t_]))))
+                    pool.append((pnl_all[t_], dd))
+                slotpool.append((np.concatenate([x[0] for x in pool]),
+                                 np.concatenate([x[1] for x in pool])))
+            log(f"\n{'='*104}\n■ {arm} — {_lbl(arm)} · **유휴 조건부 게이트** "
+                f"(q0={ROLLQQ} → qmin={IQMIN} · 감쇠 {IU}봉 · TP{tp*100:g}%/SL{sl*100:g}% · "
+                f"비용 {COST}bp)\n{'='*104}")
+            log(f"{'폴드':<6}{'체결':>7}{'체결/일':>8}{'건당bp':>9}{'중앙보유':>9}")
+            T = np.zeros(2)
+            for fi, (nm, *_r) in enumerate(FOLDS):
+                a = np.array(acc[fi], float)
+                log(f"{nm:<6}{a[:, 0].mean():>7.0f}{a[:, 0].mean()/days[nm]:>8.2f}"
+                    f"{a[:, 1].mean():>+9.2f}{a[:, 2].mean():>9.0f}")
+                T += [a[:, 0].mean(), a[:, 0].mean() * a[:, 1].mean()]
+            td = sum(days.values()); bw = T[1] / max(T[0], 1e-9)
+            pc = np.array([E.block_ci(p_, d_) for p_, d_ in slotpool], float)
+            log(f"{'합계':<6}{T[0]:>7.0f}{T[0]/td:>8.2f}{bw:>+9.2f}"
+                f"   CI [{pc[:, 0].mean():+7.2f},{pc[:, 1].mean():+7.2f}] · "
+                f"순/일 {bw*T[0]/td:.1f} · peg순/일 {(bw-PEG+COST)*T[0]/td:.1f}"
+                f"{'  ✅peg배제' if pc[:, 0].mean() > PEG - COST else ''}")
+        return 0
+
     ROLLQ_G[0] = ROLLQ
     if "--gap1m" in sys.argv:
         return gap1m(pick, LBLS)
@@ -934,6 +1106,8 @@ def main() -> int:
         return seqgrid(pick, LBLS)
     if "--wait" in " ".join(sys.argv):
         return waitrule(pick, LBLS)
+    if "--occ" in sys.argv:
+        return occ(pick, LBLS)
     if "--seq" in sys.argv:
         return seq(pick, LBLS)
     if "--byregime" in sys.argv:

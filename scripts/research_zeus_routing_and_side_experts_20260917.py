@@ -42,7 +42,14 @@ QLABEL = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--qlabel=")
 SEEDS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--seeds=")), None)
          or ["613042", "27851", "904377"])
 SEEDS = [int(x) for x in SEEDS]
-FOLDS = [f for f in K.FOLDS if f[0] in ("F1", "F2", "F3", "CAND")]
+# --folds=F1,F2,F3,CAND : 어느 폴드를 학습·채점할지. 기본은 v3 개발 4폴드.
+# ⭐F4(2025H1)·F5(2025H2)는 v3 선택에 한 번도 쓰이지 않았다 -- 확인창으로 남아 있다.
+FOLDNAMES = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--folds=")), None)
+             or ["F1", "F2", "F3", "CAND"])
+# SHADOW 는 K.FOLDS 에 없다 -- 그리드 쪽 `--shadow` 와 «같은 정의»로 여기에 둔다.
+_ALL = list(K.FOLDS) + [("SHADOW", "2022-01-01", "2026-06-30", "2026-07-01", "2026-09-30")]
+FOLDS = [f for f in _ALL if f[0] in FOLDNAMES]
+assert len(FOLDS) == len(FOLDNAMES), f"모르는 폴드: {set(FOLDNAMES) - {f[0] for f in _ALL}}"
 TARGET_N = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--match=")), 3700))
 ARMS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--arms=")), None)
         or ["N0", "N1", "N2"])
@@ -60,6 +67,48 @@ if FRAME == "HMM":
 # 🔴그 6열은 구간별 레짐 분류기가 만든 것인데 F1(2023H2)·F2·F3 의 TEST 창이 각 분류기의
 #   **학습창 안에** 있다(refit2022 는 2022-01~2023-12, 배포본은 2024-01~2025-09).
 #   표본 외인 폴드는 CAND 하나뿐이다. 이 절제가 「F1 우위 = 누수」인지 가른다.
+# --feats=<그룹,...> : 배포 번들의 102열 계약에 없지만 **같은 FeatureEngineer 가 이미 만들어
+# 프레임에 들어 있는** 열을 입력에 더한다(2026-09-18). 새 데이터 수집도 새 피쳐 코드도 없다.
+# ⭐전부 결정적 인과 변환이다 -- state7_*/state12_* 는 `_with_raw_state12` 의 tanh 변환이고
+#   (적합 없음 = 누수 없음), 나머지는 FeatureEngineer.process 산출물이다.
+# 🔴캐시 키에 태그를 붙인다. 안 붙이면 «다른 피쳐로 재학습»해도 옛 캐시가 조용히 재사용된다.
+FEATGROUPS = {
+    "cvd": ["cvd_12", "cvd_48", "cvd_288", "cvd_slope_12", "cvd_slope_48",
+            "price_cvd_divergence", "cvd_breakout_z"],
+    "btc": ["btc_ret_1", "btc_ret_3", "btc_ret_6", "btc_ret_12", "btc_ret_z_48",
+            "eth_btc_ret_spread_12", "eth_btc_ret_spread_48", "eth_btc_beta_residual_z",
+            "btc_lead_eth_follow_gap_3", "btc_breakout_eth_lag_dir", "btc_volume_impulse_z",
+            "btc_eth_volume_rank_spread", "btc_impulse_x_eth_beta"],
+    "comp": ["bb_width_pct_rank_288", "atr_pct_rank_288", "compression_score",
+             "compression_release_up", "compression_release_down",
+             "range_contraction_breakout_dir"],
+    "vwap": ["vwap_dist_24", "vwap_dist_96", "vwap_dist_288", "anchored_vwap_session_dist",
+             "vwap_reclaim_flag", "vwap_reject_flag", "distance_to_day_high_low_pct"],
+    "foi": ["funding_oi_divergence", "funding_flip_signal", "oi_up_price_down", "oi_up_price_up",
+            "crowded_long_unwind_risk", "crowded_short_squeeze_risk"],
+    "wick": ["upper_wick_z", "lower_wick_z", "sweep_prev_high_reclaim", "sweep_prev_low_reclaim",
+             "failed_breakout_up", "failed_breakout_down"],
+    # ⭐«클린한 레짐» -- 적합된 분류기가 아니라 결정적 변환이므로 폴드 경계를 넘지 않는다.
+    "state": ["state7_trend_score", "state7_trend_efficiency_48", "state7_directional_return_48",
+              "state7_volatility_state", "state7_sign_flip_rate_24", "state7_range_compression",
+              "state7_flow_alignment", "state12_log_return", "state12_garman_klass_vol",
+              "state12_net_taker_ratio", "state12_oi_change_rate", "state12_chop_index"],
+    "sess": ["session_europe_open", "session_us_open", "session_japan", "session_japan_open"],
+}
+FEATS = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--feats=")), "")
+FEATCOLS = ([c for g in FEATGROUPS for c in FEATGROUPS[g]] if FEATS == "all"
+            else [c for g in FEATS.split(",") if g for c in FEATGROUPS[g]])
+
+# --cfg=k16,h256,l4,dr0.15,e12,q0.5 : TabM 하이퍼파라미터 축(2026-09-18).
+# 배포 기본은 k8·hidden192·layers3·dropout0.08·epochs6·quality_loss_weight0.8 이다.
+# 🔴여기서 고른 값은 «개발 4폴드의 생존자»이므로 확인창(F4·F5)에서 다시 재야 한다.
+CFGARG = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--cfg=")), "")
+# --model=tabm|lgbm : 부모를 통째로 갈아끼운다. lgbm 은 «다른 귀납 편향»의 대조군이다
+# (트리는 축정렬 분할·단조 응답, TabM 은 매끄러운 앙상블). 두 머리는 같은 타깃이므로
+# Q=D 로 둔다 -- 게이트 점수는 그대로 «고른 방향의 확률»이다.
+MODEL = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--model=")), "tabm")
+assert MODEL in ("tabm", "lgbm"), f"모르는 모델: {MODEL}"
+
 NOREG = "--noregime" in sys.argv
 # --purge=<일> : TRAIN 끝을 그만큼 잘라낸다(라벨 경계 누수 절제, 2026-09-17).
 # 🔴zigzag 피벗은 **사후 확정**이라 TRAIN 끝 근처 라벨이 TEST 창의 가격으로 정해진다.
@@ -70,7 +119,10 @@ PURGE = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--purge=
 # 계기: 라벨 서열을 누수된 레짐 6열이 있는 구성에서 세웠으므로, 깨끗한 구성에서 다시 잰다.
 DIRLABEL = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--dirlabel=")), None)
 FSUF = (("" if FRAME == "balnobb" else f"_{FRAME}") + ("_noreg" if NOREG else "")
-        + (f"_purge{PURGE}" if PURGE else "") + (f"_dl{DIRLABEL}" if DIRLABEL else ""))
+        + (f"_purge{PURGE}" if PURGE else "") + (f"_dl{DIRLABEL}" if DIRLABEL else "")
+        + (f"_ft{FEATS.replace(',', '')}" if FEATS else "")
+        + (f"_{MODEL}" if MODEL != "tabm" else "")
+        + (f"_cfg{CFGARG.replace(',', '')}" if CFGARG else ""))
 OUTJ = E.OUT / f"stageP_routing_side_experts{FSUF}.json"
 CACHE = E.OUT / f"stageP_probs{FSUF}.npz"
 TPB, SLB, COST = K.BASE_TP * 1e4, K.BASE_SL * 1e4, 1.02
@@ -94,6 +146,46 @@ QTAG = f"@{QPATH.stem}" if QPATH is not None else ""
 # 🔴N4/N5/N7 은 QPATH «하나»를 공유한다 -- N5 와 N7 을 한 프로세스에 같이 넣으면 둘이
 # 같은 라벨로 학습돼 「h48 양두」와 「더블배리어 양두」가 동일 모델이 된다. 갈라서 돌린다.
 assert not ({"N5", "N7"} <= set(ARMS)), "N5 와 N7 은 라벨 인자를 공유한다 -- 따로 실행할 것"
+
+
+
+_CFGMAP = {"k": "k", "h": "hidden", "l": "layers", "dr": "dropout", "lr": "lr",
+           "q": "quality_loss_weight", "wd": "weight_decay", "bs": "batch_size"}
+
+
+def _apply_cfg():
+    """--cfg 를 tabm.CFG 에 반영한다. `e<N>` 은 에폭이라 E 쪽에 따로 넣는다."""
+    if not CFGARG:
+        return
+    import dataclasses
+    kv = {}
+    for tok in CFGARG.split(","):
+        pre = next((p for p in sorted(_CFGMAP, key=len, reverse=True) if tok.startswith(p)), None)
+        if tok.startswith("e") and pre is None:
+            E.EPOCHS = int(tok[1:]); continue
+        if tok.startswith("p") and pre is None:
+            E.PATIENCE = int(tok[1:]); continue
+        assert pre, f"모르는 cfg 토큰: {tok}"
+        v = float(tok[len(pre):])
+        kv[_CFGMAP[pre]] = int(v) if _CFGMAP[pre] in ("k", "hidden", "layers", "batch_size") else v
+    tabm.CFG = dataclasses.replace(tabm.CFG, **kv)
+    log(f"⭐--cfg={CFGARG} → {kv} · epochs={E.EPOCHS} · patience={E.PATIENCE}")
+
+
+def _fit_heads(xtr, ytr, wtr, xiv, yiv, wiv, xval, *, seed, ei, device):
+    """부모 하나를 학습하고 (D, Q) 를 돌려준다. MODEL 로 구현만 갈아끼운다."""
+    if MODEL == "tabm":
+        m, _ = E.fit_expert(xtr, ytr, wtr, xiv, yiv, wiv, seed=seed, ei=ei, device=device)
+        return E.heads(m, xval, device)
+    import lightgbm as lgb
+    g = lgb.LGBMClassifier(objective="multiclass", num_class=3, n_estimators=2000,
+                           learning_rate=0.05, num_leaves=63, min_child_samples=200,
+                           subsample=0.8, subsample_freq=1, colsample_bytree=0.7,
+                           reg_lambda=1.0, random_state=seed + ei, n_jobs=6, verbose=-1)
+    g.fit(xtr, ytr, sample_weight=wtr, eval_set=[(xiv, yiv)], eval_sample_weight=[wiv],
+          callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(0)])
+    D = g.predict_proba(xval)
+    return D, D                      # 같은 타깃이므로 품질 머리를 따로 두지 않는다
 
 
 def log(*a): print(*a, flush=True)
@@ -120,6 +212,7 @@ def main() -> int:
         f"더블배리어 TP{K.BASE_TP*100:g}%/SL{K.BASE_SL*100:g}%")
     log(f"라벨(N4/N5/N7) = {QPATH}")
     log(f"방향·품질 타깃 = {DPATH or 'zigzag_action (기본)'}")
+    _apply_cfg()
     df, base_cols = E.load()
     if NOREG:
         from omega4_6_2_source_parent_live import CURRENT_PREFIX
@@ -127,6 +220,13 @@ def main() -> int:
         assert len(drop) == 6, f"레짐 6열이 아니라 {len(drop)}열: {drop}"
         base_cols = [c for c in base_cols if c not in drop]
         log(f"⭐--noregime: 레짐 6열 제거 → 입력 {len(base_cols)}열 ({drop})")
+    if FEATCOLS:
+        miss = [c for c in FEATCOLS if c not in df.columns]
+        assert not miss, f"--feats 열이 프레임에 없다: {miss}"
+        dup = [c for c in FEATCOLS if c in base_cols]
+        assert not dup, f"--feats 가 이미 있는 열을 중복 추가한다: {dup}"
+        base_cols = base_cols + FEATCOLS
+        log(f"⭐--feats={FEATS}: {len(FEATCOLS)}열 추가 → 입력 {len(base_cols)}열")
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
     store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4", "N5", "N6", "N0x2", "N7", "N8")}
 
@@ -174,10 +274,9 @@ def main() -> int:
                 wi, wv = w_[:len(si)], w_[len(si):]
                 assert w_.sum() > 0, "부분집합 가중치 합이 0"
             assert len(wi) == len(si) and len(wv) == len(sv), "부분집합 가중치 길이 불일치"
-            m, _ = E.fit_expert(xs[:split][si], ytr[:split][si], wi,
-                                xs[split:][sv], ytr[split:][sv], wv,
-                                seed=int(key.split("s")[-1]), ei=0, device=device)
-            D, Q = E.heads(m, xv, device)
+            D, Q = _fit_heads(xs[:split][si], ytr[:split][si], wi,
+                              xs[split:][sv], ytr[split:][sv], wv, xv,
+                              seed=int(key.split("s")[-1]), ei=0, device=device)
             cache[ck] = np.array({"D": D, "Q": Q}, dtype=object); np.savez(CACHE, **cache)
             return D, Q
 
@@ -191,10 +290,9 @@ def main() -> int:
                         z = dict(cache[ck].item()); Dd, Qq = z["D"], z["Q"]
                     else:
                         w = bal * rt[:, ei].astype(np.float32)
-                        m, _ = E.fit_expert(xs[:split], yt[:split], w[:split],
-                                            xs[split:], yt[split:], w[split:],
+                        Dd, Qq = _fit_heads(xs[:split], yt[:split], w[:split],
+                                            xs[split:], yt[split:], w[split:], xv,
                                             seed=sd, ei=ei, device=device)
-                        Dd, Qq = E.heads(m, xv, device)
                         cache[ck] = np.array({"D": Dd, "Q": Qq}, dtype=object); np.savez(CACHE, **cache)
                     s_ = ev == ei
                     D[s_], Q[s_] = Dd[s_], Qq[s_]
