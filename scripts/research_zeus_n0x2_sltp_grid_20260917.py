@@ -19,7 +19,7 @@ TP1.5%/SL1% 는 **배포 부모(zig075) 추론** 위에서 고른 값이다 —
 ⭐용량이 섞이지 않게 서열 판정은 **N0 · N5 · N7 (전부 3모델)** 로 한다.
 """
 from __future__ import annotations
-import json, re, sys
+import ctypes, gc, json, re, sys
 from pathlib import Path
 import numpy as np, pandas as pd
 
@@ -93,6 +93,16 @@ def _ratio_day(p, h):
 
 
 ROLLQ_G = [0]
+try:                                    # 🔴2026-09-18 서버 24GB OOM 의 직접 원인 대응.
+    _LIBC = ctypes.CDLL("libc.so.6")    # 중간 크기 numpy 임시배열을 타이트 루프로 할당/해제하면
+except OSError:                         # glibc arena 가 OS 로 반환되지 않아 RSS 만 단조 증가한다.
+    _LIBC = None
+
+
+def _trim():
+    gc.collect()
+    if _LIBC is not None:
+        _LIBC.malloc_trim(0)
 QF_STORE = {}
 
 
@@ -342,11 +352,13 @@ def seqgrid(pick, LBLS):
     비워 더 많은 신호를 잡는다. 그래서 최적 기하학이 이동할 수 있다(사용자 지적 2026-09-18).
     """
     days = sum((pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for _n, _a, _b, v0, v1 in FOLDS)
+    MINGAP = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--mingap=")), 0))
     for arm in ARMS:
         ent = pick(arm)
         rows = []
         for tp in TPS:
             for sl in SLS:
+                _trim()                          # 셀마다 arena 반환
                 acc = []
                 for _thr, per_fold in ent:
                     pl, hl, dl, nsig = [], [], [], 0
@@ -355,10 +367,11 @@ def seqgrid(pick, LBLS):
                             continue
                         r, hh, _a, _b, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
                         p_ = r * 1e4 - COST; nsig += len(idx)
-                        take, cur = [], -1
+                        take, cur, last = [], -1, -10**9
                         for i in range(len(idx)):
-                            if idx[i] > cur:
-                                take.append(i); cur = idx[i] + int(hh[i])
+                            if idx[i] - last < MINGAP or idx[i] <= cur:
+                                continue
+                            take.append(i); cur = idx[i] + int(hh[i]); last = idx[i]
                         t_ = np.array(take, int)
                         pl.append(p_[t_]); hl.append(hh[t_].astype(float))
                         dl.append(te.timestamp.dt.floor("D").to_numpy()[idx[t_]])
@@ -373,7 +386,7 @@ def seqgrid(pick, LBLS):
                              "spread": a[:, 2].max() - a[:, 2].min()})
         R = pd.DataFrame(rows).sort_values("day", ascending=False)
         log(f"\n{'='*104}\n■ {arm} — {_lbl(arm)} · **순차 1슬롯 배리어 격자** "
-            f"(비용 {COST}bp · 롤링 {'예' if ROLLQ_G[0] else '아니오'} · 순/일 내림차순)\n{'='*104}")
+            f"(비용 {COST}bp · mingap {MINGAP}봉 · 순/일 내림차순)\n{'='*104}")
         log(f"{'TP':>5}{'SL':>5}{'신호':>7}{'체결':>7}{'거절%':>7}{'체결/일':>8}{'중앙보유':>9}"
             f"{'건당bp':>9}{'CI95':>20}{'순/일':>8}{'시드폭':>8}")
         for _, r in R.iterrows():
@@ -395,6 +408,8 @@ def seq(pick, LBLS):
     순차 선택만 하면 정확하다. 재진입은 청산 다음 봉부터(+1봉).
     """
     tp, sl = K.BASE_TP, K.BASE_SL
+    # 🔴2026-09-18: 여기에만 mingap 이 빠져 있어 격자(mingap 적용)와 조건이 어긋났다.
+    MINGAP = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--mingap=")), 0))
     days = {nm: (pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for nm, _a, _b, v0, v1 in FOLDS}
     for arm in ARMS:
         acc = {}
@@ -404,10 +419,11 @@ def seq(pick, LBLS):
                     continue
                 r, hh, _a, _b, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
                 pnl_all = r * 1e4 - COST
-                take, cur = [], -1
+                take, cur, last = [], -1, -10**9
                 for i in range(len(idx)):                 # 시간순 -- idx 는 오름차순
-                    if idx[i] > cur:
-                        take.append(i); cur = idx[i] + int(hh[i])   # 청산 봉까지 점유
+                    if idx[i] - last < MINGAP or idx[i] <= cur:
+                        continue
+                    take.append(i); cur = idx[i] + int(hh[i]); last = idx[i]   # 청산 봉까지 점유
                 take = np.array(take, int)
                 dd = te.timestamp.dt.floor("D").to_numpy()[idx[take]]
                 lo_, hi_, nd = E.block_ci(pnl_all[take], dd)
@@ -417,7 +433,7 @@ def seq(pick, LBLS):
                      288.0 / max(hh.mean(), 1e-9)))
         nm_ = [x[0] for x in FOLDS]
         log(f"\n{'='*112}\n■ {arm} — {_lbl(arm)} · **슬롯 1개 순차** "
-            f"(TP{tp*100:g}%/SL{sl*100:g}% · 5슬롯 평균)\n{'='*112}")
+            f"(TP{tp*100:g}%/SL{sl*100:g}% · mingap {MINGAP}봉 · 비용 {COST}bp)\n{'='*112}")
         log(f"{'폴드':<6}{'신호':>7}{'체결':>7}{'거절%':>7}{'신호/일':>8}{'체결/일':>8}"
             f"{'건당bp':>9}{'(전체후보)':>10}{'CI95':>20}{'순/일':>8}{'상한건/일':>9}")
         T = np.zeros(4)
