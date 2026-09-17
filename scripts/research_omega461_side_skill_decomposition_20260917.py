@@ -711,14 +711,18 @@ def _first_touch_open(entry_i, side, hi, lo, cl, tp, sl, maxbars, block=288):
         gl = np.where(sd[a][:, None] > 0, dn, -up)
         gh = np.where(okj, gh, -np.inf); gl = np.where(okj, gl, np.inf)
         big = gh.shape[1] + 1
-        t_sl = np.where((gl <= -sl).any(1), (gl <= -sl).argmax(1), big) if sl is not None else np.full(len(a), big)
-        t_tp = np.where((gh >= tp).any(1), (gh >= tp).argmax(1), big) if tp is not None else np.full(len(a), big)
+        tpa = None if tp is None else np.asarray(tp, float)[a][:, None] if np.ndim(tp) else float(tp)
+        sla = None if sl is None else np.asarray(sl, float)[a][:, None] if np.ndim(sl) else float(sl)
+        t_sl = np.where((gl <= -sla).any(1), (gl <= -sla).argmax(1), big) if sl is not None else np.full(len(a), big)
+        t_tp = np.where((gh >= tpa).any(1), (gh >= tpa).argmax(1), big) if tp is not None else np.full(len(a), big)
         hs = (t_sl < big) & (t_sl <= t_tp)
         ht = (t_tp < big) & ~hs
         done = hs | ht
         if done.any():
             k = a[done]
-            ret[k] = np.where(hs[done], -(sl or 0.0), (tp or 0.0))
+            sk = (np.asarray(sl, float)[k] if (sl is not None and np.ndim(sl)) else (sl or 0.0))
+            tk = (np.asarray(tp, float)[k] if (tp is not None and np.ndim(tp)) else (tp or 0.0))
+            ret[k] = np.where(hs[done], -np.asarray(sk, float), np.asarray(tk, float))
             hold[k] = st + 1 + np.where(hs[done], t_sl[done], t_tp[done])
             reason[k] = np.where(hs[done], 0, 1)
             alive[k] = False
@@ -805,8 +809,128 @@ def nocap() -> int:
     return 0
 
 
+# ATR 주입 실험. 각 (tp 중앙폭, sl 중앙폭) 목표마다 «정적» 과 «ATR 비례» 를 짝지어 낸다.
+# 배수는 mult = 목표폭 / median(atr) 로 잡아 **중앙 폭을 맞춘다** -- 그래야 「수준」이 아니라
+# 「적응」의 효과만 남는다. 라이브 공식(tp=12·atr, sl=6·atr)의 비율 2:1 도 사다리에 들어있다.
+VOL_TARGETS = [(0.010, 0.010), (0.015, 0.010), (0.020, 0.010), (0.020, 0.007), (0.030, 0.010)]
+ATR_WINDOWS = [96, 192]          # 96 = 라벨 빌더 · 192 = 라이브(omega4_6_1_live)
+
+
+def _atr_win(frame, win):
+    hi = pd.to_numeric(frame["high"]).astype(float)
+    lo = pd.to_numeric(frame["low"]).astype(float)
+    cl = pd.to_numeric(frame["close"]).astype(float)
+    pc = cl.shift(1)
+    tr = pd.concat([(hi - lo).abs(), (hi - pc).abs(), (lo - pc).abs()], axis=1).max(axis=1)
+    return (tr / cl.replace(0.0, np.nan)).rolling(win, min_periods=max(win // 4, 2)).mean().shift(1).to_numpy()
+
+
+def volatr() -> int:
+    """--volatr: **SL/TP 에 ATR 변동성을 주입하면 나아지는가.**
+
+    ⭐설계의 핵심: 같은 **중앙 폭**을 갖는 정적 배리어를 대조군으로 붙인다. 안 그러면
+    「ATR 이 좋다」가 아니라 「폭이 달랐다」를 재게 된다.
+    시간 배리어는 없다(이중 배리어). 건당이 아니라 **하루 기준 순bp** 로 판정한다 --
+    폭이 넓어지면 건당은 오르지만 거래수가 줄어 상쇄되기 때문이다.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log(f"이중 배리어 · 최대 {MAXBARS}봉 · 배포본 q={E.Q_THRESH} · ATR 창 {ATR_WINDOWS}")
+    df, base_cols = E.load()
+    b = torch.load(E.BUNDLE, map_location="cpu", weights_only=False)
+    experts = {}
+    for ename in ("bull", "bear", "chop"):
+        pay = dict(b["models"][ename])
+        m = tabm.ThreeHeadTabM(int(pay["n_features"]),
+                               cfg=tabm.ThreeHeadConfig(**dict(pay["config"]))).to(device)
+        m.load_state_dict(pay["state_dict"]); m.eval()
+        experts[ename] = (m, dict(pay["scaler"]))
+    atrs = {w: _atr_win(df, w) for w in ATR_WINDOWS}
+    med = {w: float(np.nanmedian(atrs[w])) for w in ATR_WINDOWS}
+    log("ATR 중앙값: " + " · ".join(f"창{w} {med[w]*100:.4f}%" for w in ATR_WINDOWS))
+    log("  (라이브 배수 12/6 을 쓰면 tp/sl = "
+        + " · ".join(f"{12*med[w]*100:.2f}%/{6*med[w]*100:.2f}%(창{w})" for w in ATR_WINDOWS) + ")")
+
+    seg = []
+    for name, _t0, _t1, v0, v1 in FOLDS:
+        if not (v1 < DEPLOYED_SEEN[0] or v0 > DEPLOYED_SEEN[1]):
+            continue
+        mask = ((df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")).to_numpy()
+        te = df[mask].reset_index(drop=True)
+        xr = tabm._base_input(te, base_cols); ev = tabm._route_probs(te).argmax(1)
+        D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
+        for ei, ename in enumerate(("bull", "bear", "chop")):
+            m, sc = experts[ename]
+            sel = ev == ei
+            if sel.any():
+                D[sel], Q[sel] = E.heads(m, tabm._standardize_apply(xr[sel], sc), device)
+        _, side = F.gate(D, Q, E.Q_THRESH)
+        idx = np.where(side != 0)[0]
+        seg.append((name, te, side, idx, {w: atrs[w][mask] for w in ATR_WINDOWS}))
+        log(f"  {name}: 후보 {len(idx):,}건")
+
+    def run(tp, sl):
+        """tp/sl 은 스칼라(정적) 또는 {폴드명: **건당** 배열}(ATR 비례).
+
+        ⚠️`_first_touch_open` 의 배열 배리어는 **건당** 색인이다(봉당 아님).
+        """
+        pnl, hold, res, days = [], [], [], []
+        for name, te, side, idx, _a in seg:
+            hi = pd.to_numeric(te["high"]).to_numpy(np.float64)
+            lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
+            cl = pd.to_numeric(te["close"]).to_numpy(np.float64)
+            t = tp[name] if isinstance(tp, dict) else tp
+            l = sl[name] if isinstance(sl, dict) else sl
+            assert not isinstance(t, np.ndarray) or len(t) == len(idx), "배리어 배열은 건당 길이여야 한다"
+            r, h, rs, _rn = _first_touch_open(idx, side, hi, lo, cl, t, l, MAXBARS)
+            pnl.append(r * 1e4); hold.append(h); res.append(rs)
+            days.append(te.timestamp.dt.floor("D").to_numpy()[idx])
+        pnl = np.concatenate(pnl); hold = np.concatenate(hold).astype(float)
+        res = np.concatenate(res); days = np.concatenate(days)
+        lo_, hi_, nd = E.block_ci(pnl, days)
+        per_day = 288.0 / max(hold.mean(), 1e-9)
+        return {"n": int(len(pnl)), "gross_bp": float(pnl.mean()), "ci95": [lo_, hi_],
+                "indep_days": nd, "median_hold": float(np.median(hold)),
+                "mean_hold": float(hold.mean()), "unresolved": float((~res).mean()),
+                "win_rate": float((pnl > 0).mean()), "trades_per_day": per_day,
+                "net_day_usdc": (float(pnl.mean()) - 1.02) * per_day,
+                "net_day_peg": (float(pnl.mean()) - 5.52) * per_day}
+
+    log(f"\n{'배리어':<30}{'건수':>7}{'중앙보유':>9}{'건당bp':>9}{'CI':>20}"
+        f"{'건/일':>7}{'순bp/일(USDC)':>14}{'순bp/일(peg)':>13}")
+    rows = []
+    for tpm, slm in VOL_TARGETS:
+        lab = f"정적 TP{tpm*100:g}%/SL{slm*100:g}%"
+        r = run(tpm, slm); r.update({"kind": "static", "tp_med": tpm, "sl_med": slm, "atr_win": None})
+        rows.append({"label": lab, **r})
+        log(f"{lab:<30}{r['n']:>7,}{r['median_hold']:>9.0f}{r['gross_bp']:>+9.2f}"
+            f"  [{r['ci95'][0]:+7.2f},{r['ci95'][1]:+7.2f}]{r['trades_per_day']:>7.2f}"
+            f"{r['net_day_usdc']:>14.1f}{r['net_day_peg']:>13.1f}")
+        for w in ATR_WINDOWS:
+            mt, ms = tpm / med[w], slm / med[w]
+            # 건당 배열: 그 후보 «진입봉»의 ATR × 배수. 웜업 NaN 은 중앙값으로 채운다.
+            per = {nm: np.nan_to_num(a[w][ix], nan=med[w]) for nm, _te, _sd, ix, a in seg}
+            r2 = run({k: v * mt for k, v in per.items()}, {k: v * ms for k, v in per.items()})
+            r2.update({"kind": "atr", "tp_med": tpm, "sl_med": slm, "atr_win": w,
+                       "tp_mult": mt, "sl_mult": ms})
+            lab2 = f"  ATR창{w} ×{mt:.1f}/×{ms:.1f}"
+            rows.append({"label": lab2, **r2})
+            log(f"{lab2:<30}{r2['n']:>7,}{r2['median_hold']:>9.0f}{r2['gross_bp']:>+9.2f}"
+                f"  [{r2['ci95'][0]:+7.2f},{r2['ci95'][1]:+7.2f}]{r2['trades_per_day']:>7.2f}"
+                f"{r2['net_day_usdc']:>14.1f}{r2['net_day_peg']:>13.1f}"
+                f"   Δ순일(USDC) {r2['net_day_usdc'] - r['net_day_usdc']:+.1f}")
+    wins = sum(1 for i, x in enumerate(rows) if x["kind"] == "atr" and
+               x["net_day_usdc"] > next(y for y in rows[:i][::-1] if y["kind"] == "static")["net_day_usdc"])
+    tot = sum(1 for x in rows if x["kind"] == "atr")
+    log(f"\n⭐ATR 주입이 같은 중앙폭 정적 대조군을 이긴 칸: {wins}/{tot} (USDC 순bp/일 기준)")
+    (E.OUT / f"stageK_volatr{SUF}.json").write_text(
+        json.dumps({"atr_median": med, "max_bars": MAXBARS, "rows": rows}, indent=2, default=float))
+    log(f"저장: {E.OUT}/stageK_volatr{SUF}.json")
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(
+        volatr() if "--volatr" in sys.argv else
         nocap() if "--nocap" in sys.argv else
         labelrate() if "--labelrate" in sys.argv else
         exitgrid() if "--exitgrid" in sys.argv else
