@@ -132,7 +132,7 @@ class Omega462SourceParentConfig:
     current_regime_path: str | Path = DEFAULT_CURRENT_REGIME_PATH
     cmamba_path: str | Path = DEFAULT_CMAMBA_PATH
     risk_path: str | Path = DEFAULT_RISK_PATH
-    device: Any = "cuda"
+    device: Any = "cpu"      # 2026-09-17: CUDA -> CPU. 근거는 __init__ 의 파리티 주석.
 
 
 @dataclass
@@ -291,13 +291,21 @@ class Omega462SourceParentLiveAdapter:
         self.cap220_contract = _read_json(self.config.cap220_runtime_contract_path)
         self.reference_policy_report = _read_json(self.config.reference_policy_report_path)
         self._validate_contracts()
-        if not torch.cuda.is_available() and str(self.config.device) == "cuda":
-            raise RuntimeError("Omega4.6.2 source parent live adapter requires CUDA")
+        # 2026-09-17: CUDA 하드 요구("must run on CUDA")를 해제하고 기본값을 CPU 로 내렸다.
+        # 근거 -- 배포 번들 2개 × 전문가 3 × VAL 20,000행에서 CUDA vs CPU 를 직접 대조했다
+        # (scripts/parity_cuda_vs_cpu_20260917.py):
+        #   확률 최대 절대차 2.384e-07 (float32 eps 수준) · 방향 argmax 불일치 0
+        #   **게이트 최종결정 불일치 0/20,000** (진입 h48qual 42 vs 42 · zig075 564 vs 564)
+        # 비트 단위로는 달라도 **결정은 한 건도 바뀌지 않는다**. T2 수치 계약 통과.
+        # 왜 내리는가 -- 부모는 파라미터 103,992개이고 5분에 한 행을 추론한다. GPU 이득이 없고
+        # (dev CPU 벤치 60.5초 < 서버 GPU 67초/fit), 반대로 봇이 CUDA 컨텍스트를 상주로 잡으면
+        # **연구 학습이 VRAM 8GB 를 채울 때 트레이딩 봇이 피해자가 된다** --
+        # 2026-09-13·09-17 DPC_WATCHDOG_VIOLATION(0x133) 두 번, 증상은 GPU 팬 풀가동 + 먹통.
+        # CUDA 로 되돌리려면 config.device="cuda" 를 명시한다(코드 수정 불필요).
         self.device = torch.device(
-            self.config.device if str(self.config.device) != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
+            self.config.device if str(self.config.device) != "auto"
+            else ("cuda" if torch.cuda.is_available() else "cpu")
         )
-        if self.device.type != "cuda":
-            raise RuntimeError("Omega4.6.2 source parent live path must run on CUDA")
         self.regime3 = Regime3CurrentLiveFeatures(current_path=self.config.current_regime_path)
         self.components = self._load_components()
         self._validate_current_only_runtime()
