@@ -34,6 +34,9 @@ SEEDS = [int(x) for x in (next((a.split("=", 1)[1].split(",") for a in sys.argv
                                 if a.startswith("--seeds=")), None)
                           or "613042,27851,904377,155690,488213".split(","))]
 FOLDS = [f for f in K.FOLDS if f[0] in ("F1", "F2", "F3", "CAND")]
+# --shadow : 홀드아웃/섀도우 전방 폴드 하나만 채점한다(학습 쪽 --shadow 와 동일 정의).
+if "--shadow" in sys.argv:
+    FOLDS = [("SHADOW", "2022-01-01", "2026-06-30", "2026-07-01", "2026-09-30")]
 CACHE = Path(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--cache=")),
                   str(E.OUT / "stageP_probs.npz")))
 # 🔴비용 규약(2026-09-18 사용자 지적으로 정정): 기본 1.02bp 는 USDC 수수료만이고,
@@ -378,6 +381,7 @@ def seqgrid(pick, LBLS):
                     pl = np.concatenate(pl); hl = np.concatenate(hl); dl = np.concatenate(dl)
                     lo_, hi_, _nd = E.block_ci(pl, dl)
                     acc.append((nsig, len(pl), pl.mean(), lo_, hi_, float(np.median(hl))))
+                    _trim()                          # 🔴슬롯마다 반환 -- 셀 단위는 너무 성기다
                 a = np.array(acc, float)
                 ex, bp = a[:, 1].mean(), a[:, 2].mean()
                 rows.append({"tp": tp, "sl": sl, "sig": a[:, 0].mean(), "ex": ex,
@@ -395,6 +399,70 @@ def seqgrid(pick, LBLS):
                 f"  [{r.lo:+7.2f},{r.hi:+7.2f}]{r.day:>8.1f}{r.spread:>8.2f}"
                 f"{'  ✅' if r.lo > 0 else ''}{'  🔴<1건/일' if r.pd < 1.0 else ''}")
     log("\n⭐순진한 격자와 최적 칸이 다르면, 그건 «보유시간이 희소 자원»이라는 뜻이다.")
+    return 0
+
+
+def waitrule(pick, LBLS):
+    """--wait=W : 신호가 뜨면 **즉시 진입하지 않고 W봉 기다렸다가** 그 창의 최고 확신도
+    신호의 «방향»으로 진입한다.
+
+    발단: 홀드아웃에서 신호 풀은 +6.23bp 인데 순차 1슬롯이 고른 39건은 −13.59bp 였다.
+    89%를 버리고 «먼저 온 것»을 잡은 게 엣지를 통째로 먹었다(집행 손실 −19.8bp).
+    🔴**인과성**: 창 안 최고 확신 봉의 «가격»에 진입하면 미래참조다. 창이 끝난 봉(i+W)의
+    가격에 진입하고 W봉 지연 비용을 그대로 문다. W=0 이 현행(즉시 진입) 대조군.
+    """
+    tp, sl = K.BASE_TP, K.BASE_SL
+    WS = [int(x) for x in (next((a.split("=", 1)[1].split(",") for a in sys.argv
+                                 if a.startswith("--wait=")), None) or "0,3,6,12".split(","))]
+    days = sum((pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for _n, _a, _b, v0, v1 in FOLDS)
+    for arm in ARMS:
+        ent = pick(arm)
+        log(f"\n{'='*100}\n■ {arm} — {_lbl(arm)} · **대기 규칙** "
+            f"(TP{tp*100:g}%/SL{sl*100:g}% · 비용 {COST}bp · 1슬롯)\n{'='*100}")
+        log(f"{'대기':>5}{'신호':>8}{'체결':>7}{'거절%':>7}{'체결/일':>8}{'건당bp':>9}"
+            f"{'(전체후보)':>11}{'CI95':>20}{'순/일':>8}{'시드폭':>8}")
+        for W in WS:
+            acc = []
+            for si_, (_thr, per_fold) in enumerate(ent):
+                pl, dl, nsig = [], [], 0
+                for fi_, (te, h, l, c, side, idx) in enumerate(per_fold):
+                    if len(idx) < 20:
+                        continue
+                    qf = QF_STORE[(arm, si_, fi_)]; nsig += len(idx)
+                    ebars = np.clip(idx + W, 0, len(c) - 2)      # 가능한 진입 봉 전부
+                    RL, RS = {}, {}
+                    for sgn, D in ((1.0, RL), (-1.0, RS)):        # 측면별로 한 번씩만 시뮬
+                        sv = np.full(len(c), sgn)
+                        r_, h_, _a, _b, _m = K._first_touch_open(ebars, sv, h, l, c, tp, sl, K.MAXBARS)
+                        D["r"], D["h"] = r_, h_
+                    take, cur, i = [], -1, 0
+                    while i < len(idx):
+                        if idx[i] <= cur:
+                            i += 1; continue
+                        j = i                                     # 창 [idx[i], idx[i]+W]
+                        while j + 1 < len(idx) and idx[j + 1] <= idx[i] + W:
+                            j += 1
+                        best = i + int(np.argmax(qf[i:j + 1]))    # 창 안 최고 확신 «방향»만 쓴다
+                        D = RL if side[idx[best]] > 0 else RS
+                        take.append((i, D["r"][i], D["h"][i]))    # 진입은 ebars[i] = idx[i]+W
+                        cur = ebars[i] + int(D["h"][i]); i = j + 1
+                    if not take:
+                        continue
+                    ii = np.array([t[0] for t in take], int)
+                    pl.append(np.array([t[1] for t in take]) * 1e4 - COST)
+                    dl.append(te.timestamp.dt.floor("D").to_numpy()[ebars[ii]])
+                pl = np.concatenate(pl); dl = np.concatenate(dl)
+                lo_, hi_, _n = E.block_ci(pl, dl)
+                acc.append((nsig, len(pl), pl.mean(), lo_, hi_))
+                _trim()
+            a = np.array(acc, float)
+            sig, ex, bp = a[:, 0].mean(), a[:, 1].mean(), a[:, 2].mean()
+            log(f"{W:>5}{int(sig):>8,}{int(ex):>7,}{(1-ex/sig)*100:>6.1f}%{ex/days:>8.2f}"
+                f"{bp:>+9.2f}{'':>11}  [{a[:, 3].mean():+7.2f},{a[:, 4].mean():+7.2f}]"
+                f"{bp*ex/days:>8.1f}{a[:, 2].max()-a[:, 2].min():>8.2f}"
+                f"{'  ✅' if a[:, 3].mean() > 0 else ''}")
+    log("\n⭐W>0 이 W=0 을 이기면 «먼저 온 것을 잡는» 손실이 실재하고 고칠 수 있다는 뜻이다.")
+    log("🔴W 가 커지면 지연 비용도 커진다 -- 최적점이 있으면 그게 답이고, 단조 감소면 대기는 무효다.")
     return 0
 
 
@@ -755,6 +823,8 @@ def main() -> int:
     #   (2026-09-18 실측: 레짐 없는 판이 F3=잃는 창에 64.7% 를 쏟아부어 +25.39 -> +16.54).
     # shift(1) 로 «그 후보 자신»을 빼고, 워밍업 구간은 확장창 분위로 메운다.
     ROLLQ = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--rollq=")), 0))
+    # --rollqq=<분위> : q 를 고정한다(동결·배포용). 0 이면 건수맞춤으로 이분탐색(비교용).
+    ROLLQQ = float(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--rollqq=")), 0.0))
 
     def _thr_seq(qf_c, q):
         """후보 계열에 대한 인과적 롤링 분위. 반환: 같은 길이의 임계값 배열."""
@@ -770,7 +840,20 @@ def main() -> int:
                 D, Q = slots[si]; da = D.argmax(1)
                 qf = np.where(da > 0, Q[np.arange(len(Q)), da], Q[:, 0])
                 sc.append((da, qf))
-            if ROLLQ:                              # 분위 q 를 이분탐색해 총 건수를 맞춘다
+            if ROLLQ and ROLLQQ > 0:               # ⭐q 를 «고정»한다 -- 배포 가능한 형태.
+                # 🔴건수맞춤(TARGET)은 팔 간 비교용이다. 창 길이가 다른 폴드에 그대로 쓰면
+                #   임계값이 창 길이에 따라 달라진다(2026-09-18: 50일 폴드에서 40건/일이 나왔다).
+                def _sides_q(q):
+                    out_ = []
+                    for da, qf in sc:
+                        m_ = da != 0
+                        t_ = _thr_seq(qf[m_], q)
+                        ok = np.zeros(len(da), bool)
+                        ok[np.where(m_)[0]] = np.isfinite(t_) & (qf[m_] >= t_)
+                        out_.append(np.where((da == 1) & ok, 1.0, np.where((da == 2) & ok, -1.0, 0.0)))
+                    return out_
+                sides, thrs = _sides_q(ROLLQQ), [ROLLQQ]
+            elif ROLLQ:                            # 분위 q 를 이분탐색해 총 건수를 맞춘다
                 def _sides(q):
                     out_ = []
                     for da, qf in sc:
@@ -849,6 +932,8 @@ def main() -> int:
         return slotsweep(pick, LBLS)
     if "--seqgrid" in sys.argv:
         return seqgrid(pick, LBLS)
+    if "--wait" in " ".join(sys.argv):
+        return waitrule(pick, LBLS)
     if "--seq" in sys.argv:
         return seq(pick, LBLS)
     if "--byregime" in sys.argv:
