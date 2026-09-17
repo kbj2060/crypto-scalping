@@ -431,8 +431,8 @@ def deployed() -> int:
 
 
 # 청산 격자. None = 그 배리어 없음(현행 측정 = TP·SL 둘 다 None + 시간청산만).
-TP_GRID = [None, 0.005, 0.010, 0.020, 0.040]
-SL_GRID = [None, 0.005, 0.010, 0.020, 0.040]
+TP_GRID = [None, 0.005, 0.010, 0.015, 0.020, 0.030, 0.040]
+SL_GRID = [None, 0.004, 0.007, 0.010, 0.015, 0.020, 0.040]
 
 
 def _gain_matrices(entry_i, side, hi, lo, cl, horizon):
@@ -607,12 +607,10 @@ def _side_outcome(gh, gl, gc, tp, sl):
     hit_sl = (t_sl < big) & (t_sl <= t_tp)
     hit_tp = (t_tp < big) & ~hit_sl
     ret = np.where(hit_sl, -(sl or 0.0), np.where(hit_tp, (tp or 0.0), gc))
-    end = np.where(hit_sl, t_sl, np.where(hit_tp, t_tp, gh.shape[1] - 1))
-    # 청산 시점까지의 MAE(불리 최대). 청산 후는 보지 않는다.
-    j = np.arange(gh.shape[1])[None, :]
-    mae = np.where(j <= end[:, None], gl, np.nan)
-    mae = np.nanmin(np.where(np.isfinite(mae), mae, 0.0), axis=1)
-    return ret, hit_sl, hit_tp, np.minimum(mae, 0.0)
+    # ⚠️MAE 는 **전체 창**에서 낸다 -- 라벨 빌더(`_reason_and_return`)가 청산 전에
+    # future_high/low 전체로 mae/mfe 를 먼저 계산하기 때문이다. 청산 시점까지로 자르면
+    # 벌칙이 작아져 활성률이 부풀려진다.
+    return ret, hit_sl, hit_tp, np.minimum(gl.min(axis=1), 0.0)
 
 
 def labelrate() -> int:
