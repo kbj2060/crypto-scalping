@@ -153,8 +153,13 @@ def main() -> int:
     log(f"h48qual 번들 {'로드' if dep48 else '없음 -- A2 건너뜀'}")
 
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
+    # --folds=F1,F2,F3,CAND : 배포 부모(A)를 채점할 수 있는 폴드로 맞춘다. A 가 없는 폴드를
+    # 섞으면 풀링 순위가 뒤집힌다(서버판에서 두 번 겪었다).
+    only = next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--folds=")), None)
     rows, pooled = [], {k: [] for k in ("A", "A2", "B", "C", "D")}
     for name, t0, t1, v0, v1 in K.FOLDS:
+        if only and name not in only:
+            continue
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
         vm = (df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")
         tr, te = df[tm].reset_index(drop=True), df[vm].reset_index(drop=True)
