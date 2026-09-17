@@ -688,7 +688,9 @@ def _first_touch_open(entry_i, side, hi, lo, cl, tp, sl, maxbars, block=288):
 
     전체 창을 한 행렬로 만들면 메모리가 터지므로 288봉(=1일) 블록으로 전진하며
     아직 안 닫힌 거래만 계속 본다. 같은 봉 동시터치는 **SL 우선**(보수적).
-    반환: ret(소수·side 적용) · hold(봉) · resolved(bool) · reason(0=SL,1=TP,2=미해소)
+    반환: ret(소수·side 적용) · hold(봉) · resolved(bool) · reason(0=SL,1=TP,2=미해소) ·
+          mae(진입~해소 시점까지의 최대 불리 변동, ≤0). MAE 는 블록마다 누적한다 --
+          2차 패스로 (건수 × MAXBARS) 행렬을 다시 만들면 메모리가 터진다.
     """
     n = len(cl)
     m = len(entry_i)
@@ -697,6 +699,7 @@ def _first_touch_open(entry_i, side, hi, lo, cl, tp, sl, maxbars, block=288):
     ret = np.full(m, np.nan)
     hold = np.full(m, maxbars, np.int64)
     reason = np.full(m, 2, np.int8)
+    mae = np.zeros(m)
     alive = np.ones(m, bool)
     for st in range(0, maxbars, block):
         if not alive.any():
@@ -718,6 +721,10 @@ def _first_touch_open(entry_i, side, hi, lo, cl, tp, sl, maxbars, block=288):
         hs = (t_sl < big) & (t_sl <= t_tp)
         ht = (t_tp < big) & ~hs
         done = hs | ht
+        # 이 블록에서 «해소 시점까지만» 본 불리 변동을 기존 누적값과 합친다
+        lim = np.where(done, np.where(hs, t_sl, t_tp), gh.shape[1] - 1)
+        jj = np.arange(gh.shape[1])[None, :]
+        mae[a] = np.minimum(mae[a], np.where(jj <= lim[:, None], gl, 0.0).min(axis=1))
         if done.any():
             k = a[done]
             sk = (np.asarray(sl, float)[k] if (sl is not None and np.ndim(sl)) else (sl or 0.0))
@@ -735,7 +742,7 @@ def _first_touch_open(entry_i, side, hi, lo, cl, tp, sl, maxbars, block=288):
         jend = np.minimum(entry_i[k] + maxbars, n - 1)
         ret[k] = sd[k] * (cl[jend] - e[k]) / e[k]
         hold[k] = jend - entry_i[k]
-    return ret, hold, ~un, reason
+    return ret, hold, ~un, reason, np.minimum(mae, 0.0)
 
 
 def nocap() -> int:
@@ -782,7 +789,7 @@ def nocap() -> int:
             hi = pd.to_numeric(te["high"]).to_numpy(np.float64)
             lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
             cl = pd.to_numeric(te["close"]).to_numpy(np.float64)
-            r, h, rs, rn = _first_touch_open(idx, side, hi, lo, cl, tp, sl, MAXBARS)
+            r, h, rs, rn, _mae = _first_touch_open(idx, side, hi, lo, cl, tp, sl, MAXBARS)
             pnl.append(r * 1e4); hold.append(h); res.append(rs); rsn.append(rn)
             days.append(te.timestamp.dt.floor("D").to_numpy()[idx])
         pnl = np.concatenate(pnl); hold = np.concatenate(hold).astype(float)
@@ -889,7 +896,7 @@ def volatr() -> int:
             t = tp[name] if isinstance(tp, dict) else tp
             l = sl[name] if isinstance(sl, dict) else sl
             assert not isinstance(t, np.ndarray) or len(t) == len(idx), "배리어 배열은 건당 길이여야 한다"
-            r, h, rs, _rn = _first_touch_open(idx, side, hi, lo, cl, t, l, MAXBARS)
+            r, h, rs, _rn, _mae = _first_touch_open(idx, side, hi, lo, cl, t, l, MAXBARS)
             pnl.append(r * 1e4); hold.append(h); res.append(rs)
             days.append(te.timestamp.dt.floor("D").to_numpy()[idx])
             widths.append(np.full(len(idx), t) if np.isscalar(t) else np.asarray(t, float))
@@ -945,8 +952,86 @@ def volatr() -> int:
     return 0
 
 
+# ── Zeus Baseline v1 라벨 ────────────────────────────────────────────────────
+BASE_TP, BASE_SL = 0.015, 0.010          # 사용자 결정(2026-09-17): 더블 배리어, 시간청산 없음
+LABEL_OUT = E.OUT.parent / "zeus_double_barrier_labels_20260917"
+
+
+def buildlabel() -> int:
+    """--buildlabel: **Zeus Baseline v1 의 더블 배리어 라벨**을 전 봉에 만든다.
+
+    TP 1.5% / SL 1% · **시간 배리어 없음**(최대 MAXBARS 까지 추적, 그 뒤는 미해소로 표시).
+    품질식은 라벨 빌더(`build_omega1_2_triple_barrier_labels`)와 동일하게 간다:
+        quality = ret - fee - 0.20·max(-mae,0) - 0.003·(reason=="sl")
+        action  = LONG if lq>0 and lq>=sq · SHORT if sq>0 · else CASH
+    MAE 는 **해소 시점까지**가 아니라 빌더 규약대로 잡되, 더블 배리어에서는 해소 시점이 곧
+    창의 끝이므로 그 시점까지로 본다(시간 배리어가 없어 「청산 후」가 존재하지 않는다).
+
+    ⚠️미해소 건은 `tb_resolved=False` 로 표시하고 action 계산에서 **CASH 로 둔다** --
+    14일 안에 어느 배리어도 못 닿은 봉을 「좋은 진입」이라 가르치지 않는다.
+    """
+    df, _ = E.load()
+    hi = pd.to_numeric(df["high"]).to_numpy(np.float64)
+    lo = pd.to_numeric(df["low"]).to_numpy(np.float64)
+    cl = pd.to_numeric(df["close"]).to_numpy(np.float64)
+    ts = df["timestamp"].to_numpy()
+    n = len(cl)
+    log(f"더블 배리어 라벨: TP {BASE_TP*100:g}% / SL {BASE_SL*100:g}% · 시간청산 없음 · "
+        f"최대 {MAXBARS}봉({MAXBARS/288:.1f}일) · 전 봉 {n:,}")
+
+    out = {}
+    for sd, nm in ((1.0, "long"), (-1.0, "short")):
+        ret = np.full(n, np.nan); hold = np.full(n, -1, np.int64)
+        res = np.zeros(n, bool); rsn = np.full(n, 2, np.int8); mae = np.full(n, np.nan)
+        side = np.full(n, sd)
+        for st in range(0, n, 40_000):
+            idx = np.arange(st, min(st + 40_000, n))
+            idx = idx[idx + 1 < n]
+            if not len(idx):
+                continue
+            r, h, rs, rn, mm = _first_touch_open(idx, side, hi, lo, cl, BASE_TP, BASE_SL, MAXBARS)
+            ret[idx], hold[idx], res[idx], rsn[idx], mae[idx] = r, h, rs, rn, mm
+            log(f"  {nm} {st:,}~{idx[-1]:,} 완료 (해소 {rs.mean()*100:.1f}%)")
+        out[nm] = {"ret": ret, "hold": hold, "resolved": res, "reason": rsn, "mae": mae}
+
+    LABEL_OUT.mkdir(parents=True, exist_ok=True)
+    for fname, fee in FEE_LEVELS.items():
+        q = {}
+        for nm in ("long", "short"):
+            o = out[nm]
+            q[nm] = (o["ret"] - fee - MAE_PEN * np.maximum(-o["mae"], 0.0)
+                     - SL_PEN * (o["reason"] == 0))
+            q[nm] = np.where(o["resolved"], q[nm], -np.inf)     # 미해소는 후보에서 뺀다
+        a = np.where((q["long"] > 0) & (q["long"] >= q["short"]), 1,
+                     np.where(q["short"] > 0, 2, 0))
+        sh = np.bincount(a, minlength=3) / len(a)
+        frame = pd.DataFrame({
+            "timestamp": ts, "tb_action": a.astype(np.int64),
+            "tb_quality": np.maximum(np.where(np.isfinite(q["long"]), q["long"], -9.99),
+                                     np.where(np.isfinite(q["short"]), q["short"], -9.99)),
+            "tb_long_ret": out["long"]["ret"], "tb_short_ret": out["short"]["ret"],
+            "tb_long_mae": out["long"]["mae"], "tb_short_mae": out["short"]["mae"],
+            "tb_long_bars": out["long"]["hold"], "tb_short_bars": out["short"]["hold"],
+            "tb_long_reason": out["long"]["reason"], "tb_short_reason": out["short"]["reason"],
+            "tb_long_resolved": out["long"]["resolved"], "tb_short_resolved": out["short"]["resolved"],
+        })
+        path = LABEL_OUT / f"zeus_db_tp{int(BASE_TP*1000)}_sl{int(BASE_SL*1000)}_{fname}.parquet"
+        frame.to_parquet(path, index=False)
+        log(f"{fname:<16} CASH/LONG/SHORT = {sh.round(4)} · 활성률 {(1-sh[0])*100:.1f}% · 저장 {path.name}")
+    meta = {"tp": BASE_TP, "sl": BASE_SL, "max_bars": MAXBARS, "time_barrier": False,
+            "fees": FEE_LEVELS, "mae_pen": MAE_PEN, "sl_pen": SL_PEN,
+            "unresolved_to_cash": True, "rows": int(n),
+            "long_unresolved": float((~out["long"]["resolved"]).mean()),
+            "short_unresolved": float((~out["short"]["resolved"]).mean())}
+    (LABEL_OUT / "meta.json").write_text(json.dumps(meta, indent=2, default=float))
+    log(f"미해소율 long {meta['long_unresolved']*100:.2f}% · short {meta['short_unresolved']*100:.2f}%")
+    log(f"저장: {LABEL_OUT}")
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(
+        buildlabel() if "--buildlabel" in sys.argv else
         volatr() if "--volatr" in sys.argv else
         nocap() if "--nocap" in sys.argv else
         labelrate() if "--labelrate" in sys.argv else
