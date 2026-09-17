@@ -1275,7 +1275,26 @@ def routing() -> int:
         log(f"  {name}: {len(te):,}봉 · 전문가 3종 전수 추론 완료 · "
             f"라우팅 비율 {np.bincount(rp.argmax(1), minlength=3) / len(te)}")
 
+    TARGET_N = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--match=")), 0))
+
+    def _q_for_target(assign_fn, seed):
+        """⭐건수를 맞추는 q 를 찾는다. 평균을 내면 확신도 최대값이 낮아져 q=0.75 통과가 줄고,
+        확신도가 높을수록 p 가 높으므로(stageN) **선별성과 서열이 뒤섞인다.**"""
+        qf_all = []
+        for name, te, rp, Dall, Qall in segs:
+            a = assign_fn(rp, seed)
+            D = (Dall[a, np.arange(len(te))] if a.ndim == 1
+                 else np.einsum("en f,n e->n f", Dall, a))
+            Q = (Qall[a, np.arange(len(te))] if a.ndim == 1
+                 else np.einsum("en f,n e->n f", Qall, a))
+            da = D.argmax(1)
+            qf = np.where(da > 0, Q[np.arange(len(Q)), da], Q[:, 0])
+            qf_all.append(qf[da != 0])
+        v = np.sort(np.concatenate(qf_all))[::-1]
+        return float(v[min(TARGET_N, len(v)) - 1]) if len(v) else E.Q_THRESH
+
     def econ(assign_fn, tag, seed=None):
+        qthr = _q_for_target(assign_fn, seed) if TARGET_N else E.Q_THRESH
         pnl, hold, days = [], [], []
         for name, te, rp, Dall, Qall in segs:
             a = assign_fn(rp, seed)
@@ -1283,7 +1302,7 @@ def routing() -> int:
                 D = Dall[a, np.arange(len(te))]; Q = Qall[a, np.arange(len(te))]
             else:                                 # 가중 혼합 (a: (n,3))
                 D = np.einsum("en f,n e->n f", Dall, a); Q = np.einsum("en f,n e->n f", Qall, a)
-            _, side = F.gate(D, Q, E.Q_THRESH)
+            _, side = F.gate(D, Q, qthr)
             idx = np.where(side != 0)[0]
             if len(idx) < 50:
                 continue
@@ -1296,7 +1315,7 @@ def routing() -> int:
         pnl = np.concatenate(pnl); hold = np.concatenate(hold); days = np.concatenate(days)
         lo_, hi_, nd = E.block_ci(pnl, days)
         pdy = 288.0 / max(hold.mean(), 1e-9)
-        return {"arm": tag, "n": int(len(pnl)), "indep_days": nd, "gross_bp": float(pnl.mean()),
+        return {"arm": tag, "q": qthr, "n": int(len(pnl)), "indep_days": nd, "gross_bp": float(pnl.mean()),
                 "ci95": [lo_, hi_], "p": imp(float(pnl.mean()) + cost), "trades_per_day": pdy,
                 "median_hold": float(np.median(hold)),
                 "net_day_usdc": (float(pnl.mean()) - 0.0) * pdy}
@@ -1313,9 +1332,10 @@ def routing() -> int:
         rows.append(econ(shuf, f"R4 무작위 라우팅(시드{sd})", seed=sd))
 
     log(f"\n{'='*106}\n■ 레짐 라우터 기여 (더블배리어 · q=0.75 · 4폴드)")
-    log(f"{'팔':<24}{'건수':>8}{'독립일':>7}{'건당bp':>9}{'함축p':>8}{'CI':>20}{'중앙보유':>9}{'건/일':>7}{'순/일':>8}")
+    log(f"  (건수맞춤 목표 {TARGET_N:,})" if TARGET_N else "  (q=0.75 고정 -- 건수가 팔마다 다르다)")
+    log(f"{'팔':<24}{'q':>6}{'건수':>8}{'독립일':>7}{'건당bp':>9}{'함축p':>8}{'CI':>20}{'중앙보유':>9}{'건/일':>7}{'순/일':>8}")
     for r in rows:
-        log(f"{r['arm']:<24}{r['n']:>8,}{r['indep_days']:>7}{r['gross_bp']:>+9.2f}{r['p']*100:>7.2f}%"
+        log(f"{r['arm']:<24}{r['q']:>6.3f}{r['n']:>8,}{r['indep_days']:>7}{r['gross_bp']:>+9.2f}{r['p']*100:>7.2f}%"
             f"  [{r['ci95'][0]:+7.2f},{r['ci95'][1]:+7.2f}]{r['median_hold']:>9.0f}"
             f"{r['trades_per_day']:>7.2f}{r['net_day_usdc']:>8.1f}")
     r0 = rows[0]; r4 = [r for r in rows if r["arm"].startswith("R4")]
@@ -1324,7 +1344,7 @@ def routing() -> int:
         f"· R4 범위 [{min(r['gross_bp'] for r in r4):+.2f},{max(r['gross_bp'] for r in r4):+.2f}]")
     log("  (차이가 R4 시드 범위 안이면 **라우터는 장식**이다 -- 전문가가 서로 교환 가능하다는 뜻)")
     OUTD = E.OUT; OUTD.mkdir(parents=True, exist_ok=True)
-    (OUTD / "stageO_routing.json").write_text(json.dumps(rows, indent=2, default=float))
+    (OUTD / f"stageO_routing{'_m' + str(TARGET_N) if TARGET_N else ''}.json").write_text(json.dumps(rows, indent=2, default=float))
     log(f"저장: {OUTD}/stageO_routing.json")
     return 0
 
