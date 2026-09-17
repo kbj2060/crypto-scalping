@@ -322,8 +322,36 @@ def check_data_sources() -> Check:
     })
 
 
+_DUCKDB_CHECK_CACHE: dict[str, tuple[float, Check]] = {}
+
+
+def _duckdb_check_ttl(warn_minutes: float) -> float:
+    """실제 DB 를 여는 주기. **자기 임계값의 1/5**(최소 60초·최대 600초).
+
+    30초 간격으로 도는 루프가 임계 5분짜리를 찌르는 건 **10배 과표집**이다. duckdb 는 단일
+    writer 라 read_only 연결조차 writer 를 막으므로, 그 과표집이 그대로 **봇의 쓰기 실패**가
+    된다(2026-09-17 `MS duckdb insert failed ... PID 308` 8회). 임계의 1/5 면 판정이 늦어질
+    여지는 최대 임계의 20% 이고, 그 대신 DB 접촉이 컴포넌트별로 2~20배 줄어든다.
+    """
+    return min(600.0, max(60.0, warn_minutes * 60.0 / 5.0))
+
+
 def check_duckdb_table_freshness(component: str, db_path: Path, table: str, ts_column: str,
                                   warn_minutes: float, critical_minutes: float) -> Check:
+    """TTL 캐시 껍데기 -- 실제 판정은 아래 `_uncached` 가 한다. 캐시가 살아 있으면 **DB 를 아예
+    열지 않는다**(락 경합의 근원을 줄이는 게 목적이므로 «열지 않는 것» 자체가 핵심이다)."""
+    ttl = _duckdb_check_ttl(warn_minutes)
+    hit = _DUCKDB_CHECK_CACHE.get(component)
+    if hit is not None and (time.monotonic() - hit[0]) < ttl:
+        return hit[1]
+    check = _check_duckdb_table_freshness_uncached(
+        component, db_path, table, ts_column, warn_minutes, critical_minutes)
+    _DUCKDB_CHECK_CACHE[component] = (time.monotonic(), check)
+    return check
+
+
+def _check_duckdb_table_freshness_uncached(component: str, db_path: Path, table: str, ts_column: str,
+                                            warn_minutes: float, critical_minutes: float) -> Check:
     """Freshness of a specific DuckDB table's latest row -- catches a live-but-silently-not-writing
     collector that a process-liveness check (check_process) cannot see. Read-only, so this can
     never corrupt whatever process is writing the same file -- but DuckDB briefly refuses a new
@@ -333,7 +361,11 @@ def check_duckdb_table_freshness(component: str, db_path: Path, table: str, ts_c
     if not db_path.is_file():
         return Check(component, "BLOCKED", "duckdb file is missing", {"path": str(db_path)})
     last_error: duckdb.Error | None = None
-    for attempt, delay in enumerate((0.0, 0.4, 0.8, 1.6)):
+    # 2026-09-17: 재시도 사다리를 (0, 0.4, 0.8, 1.6)=최대 2.8초에서 (0, 0.5)=최대 0.5초로 줄였다.
+    # 긴 사다리는 «거짓 BLOCKED 를 피하려고» 있었는데, 이제 락 충돌은 아래에서 WARN(120초
+    # 디바운스)으로 내려가므로 그 역할이 사라졌다. 반면 사다리가 길수록 **writer 와 더 오래
+    # 싸운다** -- 그게 봇의 `MS duckdb insert failed` 였다. 짧게 포기하고 다음 TTL 을 기다린다.
+    for attempt, delay in enumerate((0.0, 0.5)):
         if delay:
             time.sleep(delay)
         try:
