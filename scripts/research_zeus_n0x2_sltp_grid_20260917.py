@@ -19,7 +19,7 @@ TP1.5%/SL1% 는 **배포 부모(zig075) 추론** 위에서 고른 값이다 —
 ⭐용량이 섞이지 않게 서열 판정은 **N0 · N5 · N7 (전부 3모델)** 로 한다.
 """
 from __future__ import annotations
-import json, sys
+import json, re, sys
 from pathlib import Path
 import numpy as np, pandas as pd
 
@@ -30,7 +30,9 @@ import train_eval_omega1_2_tabm_3head_20260603 as tabm            # noqa: E402
 import train_eval_omega461_parent_zig075_longwindow_20260917 as E  # noqa: E402
 import research_omega461_side_skill_decomposition_20260917 as K    # noqa: E402
 
-SEEDS = [613042, 27851, 904377, 155690, 488213]
+SEEDS = [int(x) for x in (next((a.split("=", 1)[1].split(",") for a in sys.argv
+                                if a.startswith("--seeds=")), None)
+                          or "613042,27851,904377,155690,488213".split(","))]
 FOLDS = [f for f in K.FOLDS if f[0] in ("F1", "F2", "F3", "CAND")]
 CACHE = Path(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--cache=")),
                   str(E.OUT / "stageP_probs.npz")))
@@ -40,9 +42,12 @@ ARMS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("-
         or ["N0", "N5", "N7", "N0x2"])
 # 팔 이름은 `N7@<라벨태그>` 형태를 받는다 -- 같은 구조를 «다른 라벨»로 재학습한 캐시를
 # 가리키기 위해서다(캐시 키에 라벨 태그가 붙는다, 2026-09-17 수정).
+# `N1xK` = 라우팅 없는 단일 TabM 을 **K 시드 앙상블**한 팔(사용자 요청, 2026-09-17).
+# ⭐N0(3모델)·N0x2(6모델)와 «모델 수를 맞춰» 비교해야 라우팅의 값어치가 나온다.
 _KNOWN = {"N0", "N5", "N7", "N0x2"}
+_n1k = lambda a: int(m.group(1)) if (m := re.fullmatch(r"N1x(\d+)", _base(a))) else 0
 _base = lambda a: a.split("@", 1)[0]
-assert {_base(a) for a in ARMS} <= _KNOWN, f"모르는 팔: {sorted({_base(a) for a in ARMS} - _KNOWN)}"
+assert {_base(a) for a in ARMS if not _n1k(a)} <= _KNOWN, f"모르는 팔: {sorted({_base(a) for a in ARMS} - _KNOWN)}"
 TPS = [0.010, 0.015, 0.020, 0.025, 0.030]
 SLS = [0.005, 0.007, 0.010, 0.013]
 
@@ -78,6 +83,10 @@ def _atr_pct(te, win=96):
 def _ratio_day(p, h):
     """슬롯 하나의 하루 순bp = 288 · Σp/Σh. «비율의 평균»이 아니다."""
     return float(p.mean()) * 288.0 / max(float(h.mean()), 1e-9)
+
+
+def _lbl(a):
+    return LBLS.get(_base(a), f"라우팅 없음 ×{_n1k(a)}" if _n1k(a) else a)
 
 
 def byregime(pick, LBLS):
@@ -118,7 +127,7 @@ def byregime(pick, LBLS):
                 row[g] = (len(dd), ph[0].mean(), lo_, hi_, nd, np.median(ph[1]),
                           288.0 / max(ph[1].mean(), 1e-9))
             per_slot.append(row)
-        log(f"\n{'='*104}\n■ {arm} — {LBLS.get(_base(arm), arm)} · **레짐별 분해** "
+        log(f"\n{'='*104}\n■ {arm} — {_lbl(arm)} · **레짐별 분해** "
             f"(TP{tp*100:g}%/SL{sl*100:g}% · 5슬롯 평균)\n{'='*104}")
         log(f"{'레짐':<7}{'건수':>8}{'비중':>7}{'건당bp':>9}{'독립일':>7}{'CI95':>20}"
             f"{'중앙보유':>9}{'건/일':>7}{'순/일':>8}")
@@ -172,7 +181,7 @@ def byfold(pick, LBLS):
                     (len(idx), float(pnl.mean()), lo_, hi_, nd,
                      float(np.median(hh)), 288.0 / max(hh.mean(), 1e-9)))
         tot = sum(np.mean([x[0] for x in v]) for v in acc.values())
-        log(f"\n{'='*104}\n■ {arm} — {LBLS.get(_base(arm), arm)} · 폴드별 분해 "
+        log(f"\n{'='*104}\n■ {arm} — {_lbl(arm)} · 폴드별 분해 "
             f"(TP{tp*100:g}%/SL{sl*100:g}% · 5슬롯 평균)\n{'='*104}")
         log(f"{'폴드':<6}{'기간':<26}{'건수':>7}{'비중':>7}{'건당bp':>9}{'독립일':>7}"
             f"{'CI95':>20}{'중앙보유':>9}{'건/일':>7}{'순/일':>8}")
@@ -184,6 +193,12 @@ def byfold(pick, LBLS):
                 f"{np.nanmean(a[:, 5]):>9.0f}{np.nanmean(a[:, 6]):>7.2f}"
                 f"{g * np.nanmean(a[:, 6]):>8.1f}"
                 f"{'  ✅' if np.nanmean(a[:, 2]) > 0 else ('  ⚠️표본부족' if not np.isfinite(g) else '   ')}")
+        tb = np.array([[np.mean([x[0] for x in acc[f]]), np.nanmean(np.array(acc[f], float)[:, 1]),
+                        np.nanmean(np.array(acc[f], float)[:, 6])] for f in acc], float)
+        w = tb[:, 0] / tb[:, 0].sum()
+        log(f"{'합계':<6}{'(건수가중)':<26}{int(tb[:, 0].sum()):>7,}{100.0:>6.1f}%"
+            f"{np.nansum(w * tb[:, 1]):>+9.2f}{'':>7}{'':>20}{'':>9}"
+            f"{np.nansum(w * tb[:, 2]):>7.2f}{np.nansum(w * tb[:, 1]) * np.nansum(w * tb[:, 2]):>8.1f}")
         sign = [np.nanmean(np.array(acc[f], float)[:, 1]) > 0 for f in acc]
         log(f"  ⭐부호 양수 폴드 {sum(sign)}/{len(sign)} · "
             f"앞 2폴드 건수 비중 {(np.mean([x[0] for x in acc[0]]) + np.mean([x[0] for x in acc[1]]))/tot*100:.1f}%")
@@ -230,7 +245,7 @@ def wf(pick, LBLS, CELLS):
                 "ci_fix": E.block_ci(P[fix][te_], days[te_])[:2],
                 "ci_dec": E.block_ci(P[kd, ar], days[te_])[:2]})
         A = pd.DataFrame(rows)
-        log(f"\n{'='*104}\n■ {arm} — {LBLS.get(_base(arm), arm)} · **워크포워드** "
+        log(f"\n{'='*104}\n■ {arm} — {_lbl(arm)} · **워크포워드** "
             f"(지도는 F1·F2, 평가는 F3·CAND {A.n_te.iloc[0]:,}건 · 5슬롯)\n{'='*104}")
         log(f"{'방식':<28}{'건당bp':>9}{'건/일':>8}{'순/일':>9}{'Δ':>8}   CI95(건당)")
         log(f"{'①고정(TRAIN 선택) ' + str(A.fix_cell.mode().iloc[0]):<28}{A.fix_bp.mean():>+9.2f}"
@@ -293,7 +308,7 @@ def oracle(pick, LBLS):
                 "dec_pd": 288.0 / max(H[kd, ar].mean(), 1e-9),
                 "ci_fix": E.block_ci(P[fix], days)[:2], "ci_dec": E.block_ci(P[kd, ar], days)[:2]})
         A = pd.DataFrame(rows)
-        log(f"\n{'='*104}\n■ {arm} — {LBLS.get(_base(arm), arm)} · 배리어 선택의 천장 "
+        log(f"\n{'='*104}\n■ {arm} — {_lbl(arm)} · 배리어 선택의 천장 "
             f"({len(CELLS)}칸 · {A.n.iloc[0]:,}건 · 5슬롯 평균)\n{'='*104}")
         log(f"{'방식':<26}{'건당bp':>9}{'건/일':>8}{'순/일':>9}{'Δ고정':>9}   CI95(건당)")
         log(f"{'①고정 ' + str(A.fix_cell.mode().iloc[0]):<26}{A.fix_bp.mean():>+9.2f}"
@@ -336,17 +351,26 @@ def main() -> int:
                       pd.to_numeric(te["low"]).to_numpy(np.float64),
                       pd.to_numeric(te["close"]).to_numpy(np.float64))
         for arm in ARMS:
+            K_ = _n1k(arm)
             per_seed = []
             for sd in SEEDS:
+                if K_:                          # 라우팅 없음 -- 전문가 인덱스가 없다
+                    c = dict(z[f"{name}|N1s{sd}"].item()); per_seed.append((c["D"], c["Q"]))
+                    continue
                 D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
                 for ei in range(3):             # balnobb 하드 라우팅(argmax)
                     c = dict(z[ckey(arm, name, ei, sd)].item()); m = ev == ei
                     D[m], Q[m] = c["D"][m], c["Q"][m]
                 per_seed.append((D, Q))
-            if _base(arm) == "N0x2":                   # 같은 폴드의 시드 i, i+1 앙상블
-                slots = [((per_seed[i][0] + per_seed[(i + 1) % len(SEEDS)][0]) / 2.0,
-                          (per_seed[i][1] + per_seed[(i + 1) % len(SEEDS)][1]) / 2.0)
-                         for i in range(len(SEEDS))]
+            S_ = len(SEEDS)
+            if K_:                              # 시드 i..i+K-1 평균
+                slots = [(np.mean([per_seed[(i + j) % S_][0] for j in range(K_)], 0),
+                          np.mean([per_seed[(i + j) % S_][1] for j in range(K_)], 0))
+                         for i in range(S_)]
+            elif _base(arm) == "N0x2":          # 같은 폴드의 시드 i, i+1 앙상블
+                slots = [((per_seed[i][0] + per_seed[(i + 1) % S_][0]) / 2.0,
+                          (per_seed[i][1] + per_seed[(i + 1) % S_][1]) / 2.0)
+                         for i in range(S_)]
             else:
                 slots = per_seed
             SEGS[arm].append((name, *bars[name], slots))
@@ -358,6 +382,17 @@ def main() -> int:
     # 🔴그 폴드 자신의 확률분포를 보고 정하므로 **배포 가능한 규칙이 아니라 진단용 대조군**이다.
     PERFOLD = "--permatch" in sys.argv
     PER_N = TARGET // len(FOLDS)
+    # --rollq=<후보수> : 단일 q 대신 **직전 N개 후보의 분위**를 임계값으로 쓴다(인과).
+    # 🔴발단: 단일 q 는 확률분포가 시간에 따라 이동하면 특정 창에 발화를 몰아준다
+    #   (2026-09-18 실측: 레짐 없는 판이 F3=잃는 창에 64.7% 를 쏟아부어 +25.39 -> +16.54).
+    # shift(1) 로 «그 후보 자신»을 빼고, 워밍업 구간은 확장창 분위로 메운다.
+    ROLLQ = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--rollq=")), 0))
+
+    def _thr_seq(qf_c, q):
+        """후보 계열에 대한 인과적 롤링 분위. 반환: 같은 길이의 임계값 배열."""
+        s_ = pd.Series(qf_c).shift(1)
+        t_ = s_.rolling(ROLLQ, min_periods=200).quantile(q)
+        return t_.fillna(s_.expanding(min_periods=50).quantile(q)).to_numpy()
 
     def pick(arm):
         out = []
@@ -367,20 +402,43 @@ def main() -> int:
                 D, Q = slots[si]; da = D.argmax(1)
                 qf = np.where(da > 0, Q[np.arange(len(Q)), da], Q[:, 0])
                 sc.append((da, qf))
-            if PERFOLD:
+            if ROLLQ:                              # 분위 q 를 이분탐색해 총 건수를 맞춘다
+                def _sides(q):
+                    out_ = []
+                    for da, qf in sc:
+                        m_ = da != 0
+                        t_ = _thr_seq(qf[m_], q)
+                        ok = np.zeros(len(da), bool)
+                        ok[np.where(m_)[0]] = np.isfinite(t_) & (qf[m_] >= t_)
+                        out_.append(np.where((da == 1) & ok, 1.0, np.where((da == 2) & ok, -1.0, 0.0)))
+                    return out_
+                lo_q, hi_q = 0.50, 0.9995
+                for _ in range(26):
+                    mid = (lo_q + hi_q) / 2
+                    if sum(int((x != 0).sum()) for x in _sides(mid)) > TARGET: lo_q = mid
+                    else: hi_q = mid
+                qq = (lo_q + hi_q) / 2
+                sides, thrs = _sides(qq), [qq]
+            elif PERFOLD:
                 thrs = [float(np.sort(qf[da != 0])[::-1][min(PER_N, int((da != 0).sum())) - 1])
                         for da, qf in sc]
+                sides = None
             else:
                 allq = np.concatenate([qf[da != 0] for da, qf in sc])
                 thrs = [float(np.sort(allq)[::-1][min(TARGET, len(allq)) - 1])] * len(sc)
+                sides = None
             per_fold = []
-            for (name, te, h, l, c, _s), (da, qf), thr in zip(SEGS[arm], sc, thrs):
-                side = np.where((da == 1) & (qf >= thr), 1.0,
-                                np.where((da == 2) & (qf >= thr), -1.0, 0.0))
+            for i_, ((name, te, h, l, c, _s), (da, qf)) in enumerate(zip(SEGS[arm], sc)):
+                if sides is not None:
+                    side = sides[i_]
+                else:
+                    thr = thrs[i_] if PERFOLD else thrs[0]
+                    side = np.where((da == 1) & (qf >= thr), 1.0,
+                                    np.where((da == 2) & (qf >= thr), -1.0, 0.0))
                 per_fold.append((te, h, l, c, side, np.where(side != 0)[0]))
             out.append((float(np.mean(thrs)), per_fold))
-            log(f"  {arm} 슬롯{si}: q={'폴드별 ' + str([round(t, 3) for t in thrs]) if PERFOLD else round(thrs[0], 4)}"
-                f" · 진입 {sum(len(f[5]) for f in per_fold):,}건")
+            log(f"  {arm} 슬롯{si}: {'롤링분위 q=' + format(thrs[0], '.4f') + f' (창 {ROLLQ} 후보)' if ROLLQ else ('폴드별 ' + str([round(t, 3) for t in thrs]) if PERFOLD else 'q=' + format(thrs[0], '.4f'))}"
+                f" · 진입 {sum(len(f[5]) for f in per_fold):,}건 {[len(f[5]) for f in per_fold]}")
         return out
 
     def cell(entries, tp, sl):
@@ -419,6 +477,7 @@ def main() -> int:
     if "--oracle" in sys.argv:
         return oracle(pick, LBLS)
 
+    LBLS.update({a: f"라우팅 없음 ×{_n1k(a)}" for a in ARMS if _n1k(a)})
     LBL = dict(LBLS)
     LBL = {a: LBL[_base(a)] + (f" [{a.split('@')[1]}]" if "@" in a else "") for a in ARMS}
     rows, bests = [], {}

@@ -27,7 +27,7 @@ import numpy as np, pandas as pd, torch
 from sklearn.utils.class_weight import compute_sample_weight
 
 ROOT = Path.home() / "crypto-scalping"
-sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "scripts")); sys.path.insert(0, str(ROOT / "trading_bot_modules"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import train_eval_omega1_2_tabm_3head_20260603 as tabm  # noqa: E402
 import train_eval_omega461_parent_zig075_longwindow_20260917 as E  # noqa: E402
@@ -56,7 +56,21 @@ FRAME = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--frame=")),
 if FRAME == "HMM":
     E.PARQUET = E.PARQUET.parent / "features_with_regime_2022_2026_HMM.parquet"
     assert E.PARQUET.exists(), f"HMM 프레임 없음: {E.PARQUET}"
-FSUF = "" if FRAME == "balnobb" else f"_{FRAME}"
+# --noregime : balnobb 레짐 6열을 **입력에서 뺀다**(누수 절제, 2026-09-17).
+# 🔴그 6열은 구간별 레짐 분류기가 만든 것인데 F1(2023H2)·F2·F3 의 TEST 창이 각 분류기의
+#   **학습창 안에** 있다(refit2022 는 2022-01~2023-12, 배포본은 2024-01~2025-09).
+#   표본 외인 폴드는 CAND 하나뿐이다. 이 절제가 「F1 우위 = 누수」인지 가른다.
+NOREG = "--noregime" in sys.argv
+# --purge=<일> : TRAIN 끝을 그만큼 잘라낸다(라벨 경계 누수 절제, 2026-09-17).
+# 🔴zigzag 피벗은 **사후 확정**이라 TRAIN 끝 근처 라벨이 TEST 창의 가격으로 정해진다.
+#   기록상 「지그재그 라벨은 시장을 한 달 뒤따른다」이므로 침범 폭이 한 달 규모일 수 있다.
+PURGE = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--purge=")), 0))
+# --dirlabel=<파일명 조각> : **방향·품질 두 머리의 타깃**을 zigzag 대신 그 라벨로 바꾼다.
+# ⭐--qlabel(품질만) 과 다르다 -- 이건 두 머리를 «같이» 바꾼다(same_as_direction 유지).
+# 계기: 라벨 서열을 누수된 레짐 6열이 있는 구성에서 세웠으므로, 깨끗한 구성에서 다시 잰다.
+DIRLABEL = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--dirlabel=")), None)
+FSUF = (("" if FRAME == "balnobb" else f"_{FRAME}") + ("_noreg" if NOREG else "")
+        + (f"_purge{PURGE}" if PURGE else "") + (f"_dl{DIRLABEL}" if DIRLABEL else ""))
 OUTJ = E.OUT / f"stageP_routing_side_experts{FSUF}.json"
 CACHE = E.OUT / f"stageP_probs{FSUF}.npz"
 TPB, SLB, COST = K.BASE_TP * 1e4, K.BASE_SL * 1e4, 1.02
@@ -71,6 +85,7 @@ def _qpath(name):
     raise FileNotFoundError(f"라벨 없음: {name}")
 
 
+DPATH = _qpath(DIRLABEL) if DIRLABEL else None
 QPATH = _qpath(QLABEL) if any(a.startswith("--arms=") and
                               any(x in a for x in ("N4", "N5", "N7")) for a in sys.argv) else None
 # 🔴캐시 키에 라벨이 없으면 «다른 라벨로 재학습»해도 옛 캐시가 조용히 재사용된다
@@ -104,23 +119,41 @@ def main() -> int:
     log(f"device={device} · seeds={SEEDS} · arms={ARMS} · 건수맞춤 {TARGET_N:,} · "
         f"더블배리어 TP{K.BASE_TP*100:g}%/SL{K.BASE_SL*100:g}%")
     log(f"라벨(N4/N5/N7) = {QPATH}")
+    log(f"방향·품질 타깃 = {DPATH or 'zigzag_action (기본)'}")
     df, base_cols = E.load()
+    if NOREG:
+        from omega4_6_2_source_parent_live import CURRENT_PREFIX
+        drop = [c for c in base_cols if c.startswith(CURRENT_PREFIX)]
+        assert len(drop) == 6, f"레짐 6열이 아니라 {len(drop)}열: {drop}"
+        base_cols = [c for c in base_cols if c not in drop]
+        log(f"⭐--noregime: 레짐 6열 제거 → 입력 {len(base_cols)}열 ({drop})")
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
     store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4", "N5", "N6", "N0x2", "N7", "N8")}
 
     for name, t0, t1, v0, v1 in FOLDS:
-        tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
+        t1e = (pd.Timestamp(t1) - pd.Timedelta(days=PURGE)).strftime("%Y-%m-%d") if PURGE else t1
+        tm = (df.timestamp >= t0) & (df.timestamp <= t1e + " 23:59:59")
         vm = (df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")
         tr, te = df[tm].reset_index(drop=True), df[vm].reset_index(drop=True)
         assert tr.timestamp.max() < te.timestamp.min(), f"{name} TRAIN 이 TEST 를 침범"
+        if PURGE:
+            gap = (te.timestamp.min() - tr.timestamp.max()).days
+            assert gap >= PURGE, f"{name} purge 간격 {gap}일 < {PURGE}일"
         yt = pd.to_numeric(tr["zigzag_action"]).to_numpy(np.int64)
+        if DPATH is not None:                      # 두 머리의 타깃을 통째로 교체
+            _dl = pd.read_parquet(DPATH, columns=["timestamp", "tb_action"])
+            _dl["timestamp"] = pd.to_datetime(_dl["timestamp"])
+            yt = (tr[["timestamp"]].merge(_dl, on="timestamp", how="left")
+                  .tb_action.fillna(0).to_numpy(np.int64))
+            assert len(yt) == len(tr) and np.bincount(yt, minlength=3).min() > 100, "방향 라벨 퇴화"
         rt = tabm._route_probs(tr)
         ev = tabm._route_probs(te).argmax(1)
         xs, scaler = tabm._standardize_fit(tabm._base_input(tr, base_cols))
         xv = tabm._standardize_apply(tabm._base_input(te, base_cols), scaler)
         n = len(tr); split = max(int(n * 0.85), min(n - 1, 512))
         bal = compute_sample_weight("balanced", y=yt).astype(np.float32)
-        log(f"\n{'='*92}\n=== {name} TRAIN {t0}~{t1} {n:,} · TEST {v0}~{v1} {len(te):,}\n{'='*92}")
+        log(f"\n{'='*92}\n=== {name} TRAIN {t0}~{t1e}{f' (purge {PURGE}일)' if PURGE else ''} {n:,}"
+            f" · TEST {v0}~{v1} {len(te):,}\n{'='*92}")
 
         def fit_get(key, ytr, wtr, rows=None):
             """캐시된 (D,Q) 를 주거나 학습한다. rows 가 있으면 그 부분집합만 학습한다."""
