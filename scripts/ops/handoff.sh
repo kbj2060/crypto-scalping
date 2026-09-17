@@ -15,7 +15,23 @@ fi
 declare -A HOSTS
 source "$HOSTS_FILE"
 JOBS_DIR="tmp/handoff_jobs"
-SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+# 🔴2026-09-17: SSH 연결 다중화(ControlMaster). 아래 rate_guard 는 **호출 빈도**만 막고
+# **연결당 비용**은 못 줄인다 -- 09-13 사고의 실제 비용이 그거였다: 세션마다 TCP 핸드셰이크 +
+# sshd 포크 + PAM + systemd-logind 스코프 생성·삭제. "세션은 명령을 실행하지 않는다.
+# 접속·인증·즉시 종료다"(그 사고 기록). 게다가 `launch` 한 번이 rsync+ssh 여러 개라
+# 상한 30회/분이 실제로는 분당 100~150 연결을 허용한다.
+# ControlMaster=auto 면 첫 연결이 마스터 소켓을 만들고 이후 ssh/rsync 가 **그 하나를 재사용**한다
+# -- 새 TCP 도, 인증도, logind 스코프도 없다. 마스터가 죽으면 auto 가 알아서 새로 연다.
+# %C 는 (로컬·원격호스트·포트·사용자) 해시라 ControlPath 길이 제한(~100자)에 안 걸린다.
+# 끄려면 HANDOFF_SSH_MUX=0.
+if [[ "${HANDOFF_SSH_MUX:-1}" == "1" ]]; then
+  _CM_DIR="${HOME}/.ssh/cm"
+  mkdir -p "$_CM_DIR" 2>/dev/null && chmod 700 "$_CM_DIR" 2>/dev/null || true
+  _MUX="-o ControlMaster=auto -o ControlPath=${_CM_DIR}/%C -o ControlPersist=300"
+else
+  _MUX=""
+fi
+SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=accept-new $_MUX"
 
 usage() {
   cat >&2 <<EOF
