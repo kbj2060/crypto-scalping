@@ -80,6 +80,73 @@ def _ratio_day(p, h):
     return float(p.mean()) * 288.0 / max(float(h.mean()), 1e-9)
 
 
+def byregime(pick, LBLS):
+    """--byregime: **balnobb 레짐별**로 쪼갠다(진입 봉의 argmax 레짐).
+
+    발단: 폴드별 분해에서 엣지가 F1(2023H2)에 몰렸는데 단조 감쇠가 아니었다(2026H1 은 다시
+    양수). 「오래된 데이터」가 아니라 **레짐**이라는 뜻이다.
+    ⭐하드 라우팅이므로 «레짐 = 그 봉을 예측한 전문가»다 -- 이 표는 전문가 절제이기도 하다.
+    🔴엣지가 특정 레짐에만 살면 필요한 건 새 라벨도 새 배리어도 아니라 **거래하지 않는 게이트**다.
+    지금 balnobb 는 «누가 예측할지»만 정하고 «거래할지»는 정하지 않는다 -- 그 자리가 비어 있다.
+    """
+    tp, sl, RN = K.BASE_TP, K.BASE_SL, ("bull", "bear", "chop")
+    for arm in ARMS:
+        evc, per_slot, cellbp, celln = {}, [], {}, {}
+        for _thr, per_fold in pick(arm):
+            got = {g: [[], []] for g in range(3)}
+            for f, (te, h, l, c, side, idx) in enumerate(per_fold):
+                if len(idx) == 0:
+                    continue
+                if id(te) not in evc:
+                    evc[id(te)] = tabm._route_probs(te).argmax(1)
+                ev = evc[id(te)][idx]
+                r, hh, _a, _b, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
+                pnl = r * 1e4 - COST; dd = te.timestamp.dt.floor("D").to_numpy()[idx]
+                for g in range(3):
+                    m = ev == g
+                    if m.sum():
+                        got[g][0].append(np.stack([pnl[m], hh[m].astype(float)]))
+                        got[g][1].append(dd[m])
+                    cellbp.setdefault((g, f), []).append(pnl[m].mean() if m.sum() >= 20 else np.nan)
+                    celln.setdefault((g, f), []).append(int(m.sum()))
+            row = {}
+            for g in range(3):
+                if not got[g][0]:
+                    row[g] = None; continue
+                ph = np.concatenate(got[g][0], 1); dd = np.concatenate(got[g][1])
+                lo_, hi_, nd = E.block_ci(ph[0], dd)
+                row[g] = (len(dd), ph[0].mean(), lo_, hi_, nd, np.median(ph[1]),
+                          288.0 / max(ph[1].mean(), 1e-9))
+            per_slot.append(row)
+        log(f"\n{'='*104}\n■ {arm} — {LBLS.get(_base(arm), arm)} · **레짐별 분해** "
+            f"(TP{tp*100:g}%/SL{sl*100:g}% · 5슬롯 평균)\n{'='*104}")
+        log(f"{'레짐':<7}{'건수':>8}{'비중':>7}{'건당bp':>9}{'독립일':>7}{'CI95':>20}"
+            f"{'중앙보유':>9}{'건/일':>7}{'순/일':>8}")
+        tot = sum(np.mean([r[g][0] for r in per_slot if r[g]]) for g in range(3)
+                  if any(r[g] for r in per_slot))
+        for g in range(3):
+            v = [r[g] for r in per_slot if r[g]]
+            if not v:
+                log(f"{RN[g]:<7}{'0':>8}   진입 없음"); continue
+            a = np.array(v, float); n_, bp = a[:, 0].mean(), a[:, 1].mean()
+            log(f"{RN[g]:<7}{int(n_):>8,}{n_/tot*100:>6.1f}%{bp:>+9.2f}{a[:, 4].mean():>7.0f}"
+                f"  [{a[:, 2].mean():+7.2f},{a[:, 3].mean():+7.2f}]{a[:, 5].mean():>9.0f}"
+                f"{a[:, 6].mean():>7.2f}{bp * a[:, 6].mean():>8.1f}"
+                f"{'  ✅' if a[:, 2].mean() > 0 else ''}")
+        log(f"\n  레짐 × 폴드 건당bp (괄호는 건수, 20건 미만은 -)")
+        log(f"  {'':<7}" + "".join(f"{nm:>18}" for nm, *_ in FOLDS))
+        for g in range(3):
+            cells = []
+            for f in range(len(FOLDS)):
+                b = np.nanmean(cellbp[(g, f)]) if np.isfinite(cellbp[(g, f)]).any() else np.nan
+                n_ = int(np.mean(celln[(g, f)]))
+                cells.append(f"{'     -' if not np.isfinite(b) else f'{b:+6.1f}'}({n_:>5,})")
+            log(f"  {RN[g]:<7}" + "".join(f"{c:>18}" for c in cells))
+    log("\n⭐판정: 한 레짐만 양수이고 나머지가 0 근처면 **그 레짐 밖에서 거래하지 않는 게이트**가")
+    log("  빠진 층이다. 세 레짐 모두 F1 에서만 양수면 레짐이 아니라 여전히 «창»이 원인이다.")
+    return 0
+
+
 def byfold(pick, LBLS):
     """--byfold: 동결 배리어(TP1.5%/SL1%)에서 **폴드별로 분해**한다.
 
@@ -286,25 +353,34 @@ def main() -> int:
         log(f"  {name}: {len(te):,}봉 · {len(ARMS)}팔")
 
     # ── 진입 집합은 TP/SL 과 무관하므로 팔·슬롯당 «한 번»만 정한다 ──
+    # --permatch: 임계값을 통합이 아니라 **폴드마다** 잡아 건수를 고르게 만든다.
+    # ⭐이게 「그 창에서 더 «자주» 발화한다」와 「더 «잘» 맞춘다」를 가른다.
+    # 🔴그 폴드 자신의 확률분포를 보고 정하므로 **배포 가능한 규칙이 아니라 진단용 대조군**이다.
+    PERFOLD = "--permatch" in sys.argv
+    PER_N = TARGET // len(FOLDS)
+
     def pick(arm):
         out = []
         for si in range(len(SEEDS)):
-            allq = []
-            for _n, _te, _h, _l, _c, slots in SEGS[arm]:
+            sc = []
+            for _n, te, _h, _l, _c, slots in SEGS[arm]:
                 D, Q = slots[si]; da = D.argmax(1)
                 qf = np.where(da > 0, Q[np.arange(len(Q)), da], Q[:, 0])
-                allq.append(qf[da != 0])
-            allq = np.concatenate(allq)
-            thr = float(np.sort(allq)[::-1][min(TARGET, len(allq)) - 1])
+                sc.append((da, qf))
+            if PERFOLD:
+                thrs = [float(np.sort(qf[da != 0])[::-1][min(PER_N, int((da != 0).sum())) - 1])
+                        for da, qf in sc]
+            else:
+                allq = np.concatenate([qf[da != 0] for da, qf in sc])
+                thrs = [float(np.sort(allq)[::-1][min(TARGET, len(allq)) - 1])] * len(sc)
             per_fold = []
-            for name, te, h, l, c, slots in SEGS[arm]:
-                D, Q = slots[si]; da = D.argmax(1)
-                qf = np.where(da > 0, Q[np.arange(len(Q)), da], Q[:, 0])
+            for (name, te, h, l, c, _s), (da, qf), thr in zip(SEGS[arm], sc, thrs):
                 side = np.where((da == 1) & (qf >= thr), 1.0,
                                 np.where((da == 2) & (qf >= thr), -1.0, 0.0))
                 per_fold.append((te, h, l, c, side, np.where(side != 0)[0]))
-            out.append((thr, per_fold))
-            log(f"  {arm} 슬롯{si}: q={thr:.4f} · 진입 {sum(len(f[5]) for f in per_fold):,}건")
+            out.append((float(np.mean(thrs)), per_fold))
+            log(f"  {arm} 슬롯{si}: q={'폴드별 ' + str([round(t, 3) for t in thrs]) if PERFOLD else round(thrs[0], 4)}"
+                f" · 진입 {sum(len(f[5]) for f in per_fold):,}건")
         return out
 
     def cell(entries, tp, sl):
@@ -336,6 +412,8 @@ def main() -> int:
                 "sl_rate": A.sl_r.mean(), "tp_rate": A.tp_r.mean(), "un_rate": A.un_r.mean(),
                 "seed_spread": A.g.max() - A.g.min()}
 
+    if "--byregime" in sys.argv:
+        return byregime(pick, LBLS)
     if "--byfold" in sys.argv:
         return byfold(pick, LBLS)
     if "--oracle" in sys.argv:
