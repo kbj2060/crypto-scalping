@@ -47,7 +47,100 @@ TPS = [0.010, 0.015, 0.020, 0.025, 0.030]
 SLS = [0.005, 0.007, 0.010, 0.013]
 
 
+LBLS = {"N0": "zigzag 양두 ×3", "N5": "h48 양두 ×3", "N7": "더블배리어 양두 ×3",
+        "N0x2": "zigzag 양두 ×6(Baseline v2)"}
+
+
 def log(*a): print(*a, flush=True)
+
+
+def _raw(per_fold, tp, sl):
+    """한 슬롯·한 칸의 «건별» 손익/보유/날짜. 진입 집합이 칸마다 같으므로 칸끼리 «행이 정렬»된다."""
+    pnl, hold, days = [], [], []
+    for te, h, l, c, side, idx in per_fold:
+        r, hh, _res, _rn, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
+        pnl.append(r * 1e4 - COST); hold.append(hh.astype(float))
+        days.append(te.timestamp.dt.floor("D").to_numpy()[idx])
+    return np.concatenate(pnl), np.concatenate(hold), np.concatenate(days)
+
+
+def _atr_pct(te, win=96):
+    """진입 시점에 «이미 알 수 있는» 변동성. 봉 τ 는 자기 종가까지 포함한다(이 저장소 규약)."""
+    h = pd.to_numeric(te["high"]).to_numpy(float); l = pd.to_numeric(te["low"]).to_numpy(float)
+    c = pd.to_numeric(te["close"]).to_numpy(float)
+    pc = np.concatenate([[c[0]], c[:-1]])
+    tr = np.maximum(h - l, np.maximum(np.abs(h - pc), np.abs(l - pc)))
+    return pd.Series(tr).rolling(win, min_periods=1).mean().to_numpy() / np.maximum(c, 1e-12)
+
+
+def _ratio_day(p, h):
+    """슬롯 하나의 하루 순bp = 288 · Σp/Σh. «비율의 평균»이 아니다."""
+    return float(p.mean()) * 288.0 / max(float(h.mean()), 1e-9)
+
+
+def oracle(pick, LBLS):
+    """--oracle: **봉별 배리어 선택의 상한과 현실적 하한**.
+
+    사용자 제안(2026-09-17)인 「sltp 버킷 헤드」의 천장을 «만들기 전에» 잰다.
+    🔴목적함수는 Σp/Σh 비율이므로 봉별 최적화는 argmax(p/h) 가 아니라 **Dinkelbach**
+    (argmax(p − λh) 를 λ 수렴까지)다. 비율의 평균으로 고르면 짧은 거래에 지배돼 상한이 부푼다.
+
+      ①고정      -- 20칸 중 순/일 최선 (지금 하는 것)
+      ②변동성분위 -- ATR 십분위마다 «그 분위 안에서» 최선 고정칸 (사후선택 10번)
+                     ⭐이게 변동성 피쳐만 쓰는 버킷 헤드가 **실제로 도달 가능한 수준**이다
+      ③오라클     -- 건별 20칸 사후선택 (도달 불가 상한)
+    """
+    CELLS = [(tp, sl) for tp in TPS for sl in SLS]
+    for arm in ARMS:
+        rows = []
+        for _si, (_thr, per_fold) in enumerate(pick(arm)):
+            R = [_raw(per_fold, tp, sl) for tp, sl in CELLS]
+            P = np.stack([r[0] for r in R]); H = np.stack([r[1] for r in R]); days = R[0][2]
+            atr = np.concatenate([_atr_pct(te)[idx] for te, _h, _l, _c, _s, idx in per_fold])
+            n = P.shape[1]; ar = np.arange(n)
+
+            fix = int(np.argmax([_ratio_day(P[k], H[k]) for k in range(len(CELLS))]))
+            dec = pd.qcut(atr, 10, labels=False, duplicates="drop")
+            kd = np.empty(n, int)
+            for d in np.unique(dec):                      # ②분위 안에서만 고른다
+                m = dec == d
+                kd[m] = int(np.argmax([_ratio_day(P[k][m], H[k][m]) for k in range(len(CELLS))]))
+            lam = _ratio_day(P[fix], H[fix]) / 288.0      # ③Dinkelbach
+            for _ in range(30):
+                ko = (P - lam * H).argmax(0)
+                new = float(P[ko, ar].sum()) / max(float(H[ko, ar].sum()), 1e-9)
+                if abs(new - lam) < 1e-12:
+                    break
+                lam = new
+            rows.append({
+                "fix_cell": CELLS[fix], "n": n,
+                "fix_day": _ratio_day(P[fix], H[fix]), "fix_bp": P[fix].mean(),
+                "dec_day": _ratio_day(P[kd, ar], H[kd, ar]), "dec_bp": P[kd, ar].mean(),
+                "orc_day": _ratio_day(P[ko, ar], H[ko, ar]), "orc_bp": P[ko, ar].mean(),
+                "dec_cells": len(set(kd.tolist())), "orc_top": float(np.bincount(ko, minlength=len(CELLS)).max() / n),
+                "fix_pd": 288.0 / max(H[fix].mean(), 1e-9), "orc_pd": 288.0 / max(H[ko, ar].mean(), 1e-9),
+                "dec_pd": 288.0 / max(H[kd, ar].mean(), 1e-9),
+                "ci_fix": E.block_ci(P[fix], days)[:2], "ci_dec": E.block_ci(P[kd, ar], days)[:2]})
+        A = pd.DataFrame(rows)
+        log(f"\n{'='*104}\n■ {arm} — {LBLS.get(_base(arm), arm)} · 배리어 선택의 천장 "
+            f"({len(CELLS)}칸 · {A.n.iloc[0]:,}건 · 5슬롯 평균)\n{'='*104}")
+        log(f"{'방식':<26}{'건당bp':>9}{'건/일':>8}{'순/일':>9}{'Δ고정':>9}   CI95(건당)")
+        log(f"{'①고정 ' + str(A.fix_cell.mode().iloc[0]):<26}{A.fix_bp.mean():>+9.2f}"
+            f"{A.fix_pd.mean():>8.2f}{A.fix_day.mean():>9.1f}{0.0:>9.1f}"
+            f"   [{np.mean([c[0] for c in A.ci_fix]):+7.2f},{np.mean([c[1] for c in A.ci_fix]):+7.2f}]")
+        log(f"{'②ATR 십분위 조건부':<24}{A.dec_bp.mean():>+9.2f}{A.dec_pd.mean():>8.2f}"
+            f"{A.dec_day.mean():>9.1f}{A.dec_day.mean()-A.fix_day.mean():>+9.1f}"
+            f"   [{np.mean([c[0] for c in A.ci_dec]):+7.2f},{np.mean([c[1] for c in A.ci_dec]):+7.2f}]"
+            f"  ← 도달 가능")
+        log(f"{'③건별 오라클(도달 불가)':<23}{A.orc_bp.mean():>+9.2f}{A.orc_pd.mean():>8.2f}"
+            f"{A.orc_day.mean():>9.1f}{A.orc_day.mean()-A.fix_day.mean():>+9.1f}")
+        log(f"  ②가 쓴 서로 다른 칸 {A.dec_cells.mean():.1f}/10분위 · "
+            f"③최빈칸 점유 {A.orc_top.mean()*100:.1f}%")
+    log("\n⭐판정: ②−① 이 시드폭보다 작으면 **변동성 기반 sltp 버킷 헤드는 만들 이유가 없다**.")
+    log("  ②는 사후선택 10번이라 그 자체로 위로 편향돼 있다 -- 진짜 헤드는 이보다 낮다.")
+    log("  ③−② 는 «변동성으로 설명 안 되는 나머지»다. 크면 다른 피쳐 축이 남아 있다는 뜻.")
+    return 0
+
 
 
 def ckey(arm, fold, ei, sd):
@@ -139,8 +232,10 @@ def main() -> int:
                 "sl_rate": A.sl_r.mean(), "tp_rate": A.tp_r.mean(), "un_rate": A.un_r.mean(),
                 "seed_spread": A.g.max() - A.g.min()}
 
-    LBL = {"N0": "zigzag 양두 ×3", "N5": "h48 양두 ×3", "N7": "더블배리어 양두 ×3",
-           "N0x2": "zigzag 양두 ×6(Baseline v2)"}
+    if "--oracle" in sys.argv:
+        return oracle(pick, LBLS)
+
+    LBL = dict(LBLS)
     LBL = {a: LBL[_base(a)] + (f" [{a.split('@')[1]}]" if "@" in a else "") for a in ARMS}
     rows, bests = [], {}
     for arm in ARMS:
