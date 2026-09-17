@@ -347,9 +347,23 @@ def check_duckdb_table_freshness(component: str, db_path: Path, table: str, ts_c
         except duckdb.Error as exc:
             last_error = exc
     if last_error is not None:
-        return Check(component, "BLOCKED", "duckdb table cannot be read", {
+        # 🔴2026-09-17: **락 충돌은 «고장»이 아니라 «지금 누가 쓰는 중»이다.**
+        # duckdb 는 단일 writer 라 read_only 연결조차 writer 를 막고 그 반대도 마찬가지다.
+        # 체결 테이프는 초당 ~3행을 쓰므로 30초 폴링이 쓰기 순간과 자주 겹친다. 실제로
+        # `[alert] BLOCKED -> [recovered] OK` 가 09-16 이후 **59회** 반복됐는데 그동안
+        # 테이블은 내내 멀쩡했다(trade_tape_1s 265,962행, 수집기 정상 가동).
+        # BLOCKED 는 debounce_seconds()가 **0**(즉시 호출)이라 순간 충돌이 곧 텔레그램이 된다.
+        # => 락 충돌만 WARN 으로 낮춰 **기존 120초 디바운스**를 타게 한다. 2분 넘게 지속되면
+        #    그때 울리므로 진짜 교착은 여전히 잡히고, 스쳐가는 충돌은 조용히 지나간다.
+        #    파일 없음 / 행 없음 / 그 밖의 오류는 지금처럼 **즉시 BLOCKED** 다.
+        # ⚠️이건 알림 소음만 고친다. 봇의 `MS duckdb insert failed`(실제 쓰기 실패)는 별건이고
+        #    감시자가 라이브 DB 락을 아예 안 건드리게 해야 없어진다.
+        busy = "conflicting lock" in str(last_error).lower()
+        return Check(component, "WARN" if busy else "BLOCKED",
+                     "duckdb table busy: writer holds the lock" if busy
+                     else "duckdb table cannot be read", {
             "path": str(db_path), "table": table, "error": f"{type(last_error).__name__}: {last_error}",
-            "attempts": attempt + 1,
+            "attempts": attempt + 1, "lock_conflict": busy,
         })
     if max_ts is None:
         return Check(component, "BLOCKED", "duckdb table has no rows", {"path": str(db_path), "table": table})
