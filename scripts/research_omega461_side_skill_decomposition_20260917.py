@@ -873,7 +873,7 @@ def volatr() -> int:
 
         ⚠️`_first_touch_open` 의 배열 배리어는 **건당** 색인이다(봉당 아님).
         """
-        pnl, hold, res, days = [], [], [], []
+        pnl, hold, res, days, widths, widths_sl = [], [], [], [], [], []
         for name, te, side, idx, _a in seg:
             hi = pd.to_numeric(te["high"]).to_numpy(np.float64)
             lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
@@ -884,27 +884,34 @@ def volatr() -> int:
             r, h, rs, _rn = _first_touch_open(idx, side, hi, lo, cl, t, l, MAXBARS)
             pnl.append(r * 1e4); hold.append(h); res.append(rs)
             days.append(te.timestamp.dt.floor("D").to_numpy()[idx])
+            widths.append(np.full(len(idx), t) if np.isscalar(t) else np.asarray(t, float))
+            widths_sl.append(np.full(len(idx), l) if np.isscalar(l) else np.asarray(l, float))
         pnl = np.concatenate(pnl); hold = np.concatenate(hold).astype(float)
         res = np.concatenate(res); days = np.concatenate(days)
         lo_, hi_, nd = E.block_ci(pnl, days)
         per_day = 288.0 / max(hold.mean(), 1e-9)
+        wid = np.concatenate(widths) if widths else np.array([np.nan])
+        wsl = np.concatenate(widths_sl) if widths_sl else np.array([np.nan])
         return {"n": int(len(pnl)), "gross_bp": float(pnl.mean()), "ci95": [lo_, hi_],
+                "tp_width_med": float(np.median(wid)), "tp_width_mean": float(np.mean(wid)),
+                "sl_width_med": float(np.median(wsl)),
                 "indep_days": nd, "median_hold": float(np.median(hold)),
                 "mean_hold": float(hold.mean()), "unresolved": float((~res).mean()),
                 "win_rate": float((pnl > 0).mean()), "trades_per_day": per_day,
                 "net_day_usdc": (float(pnl.mean()) - 1.02) * per_day,
                 "net_day_peg": (float(pnl.mean()) - 5.52) * per_day}
 
-    log(f"\n{'배리어':<30}{'건수':>7}{'중앙보유':>9}{'건당bp':>9}{'CI':>20}"
-        f"{'건/일':>7}{'순bp/일(USDC)':>14}{'순bp/일(peg)':>13}")
+    log(f"\n{'배리어':<30}{'실현TP폭':>9}{'실현SL폭':>9}{'중앙보유':>9}{'평균보유':>9}{'건당bp':>9}"
+        f"{'CI':>20}{'건/일':>7}{'순/일USDC':>10}{'순/일peg':>9}")
     rows = []
     for tpm, slm in VOL_TARGETS:
         lab = f"정적 TP{tpm*100:g}%/SL{slm*100:g}%"
         r = run(tpm, slm); r.update({"kind": "static", "tp_med": tpm, "sl_med": slm, "atr_win": None})
         rows.append({"label": lab, **r})
-        log(f"{lab:<30}{r['n']:>7,}{r['median_hold']:>9.0f}{r['gross_bp']:>+9.2f}"
+        log(f"{lab:<30}{r['tp_width_med']*100:>8.3f}%{r['sl_width_med']*100:>8.3f}%"
+            f"{r['median_hold']:>9.0f}{r['mean_hold']:>9.0f}{r['gross_bp']:>+9.2f}"
             f"  [{r['ci95'][0]:+7.2f},{r['ci95'][1]:+7.2f}]{r['trades_per_day']:>7.2f}"
-            f"{r['net_day_usdc']:>14.1f}{r['net_day_peg']:>13.1f}")
+            f"{r['net_day_usdc']:>10.1f}{r['net_day_peg']:>9.1f}")
         for w in ATR_WINDOWS:
             mt, ms = tpm / med[w], slm / med[w]
             # 건당 배열: 그 후보 «진입봉»의 ATR × 배수. 웜업 NaN 은 중앙값으로 채운다.
@@ -914,10 +921,12 @@ def volatr() -> int:
                        "tp_mult": mt, "sl_mult": ms})
             lab2 = f"  ATR창{w} ×{mt:.1f}/×{ms:.1f}"
             rows.append({"label": lab2, **r2})
-            log(f"{lab2:<30}{r2['n']:>7,}{r2['median_hold']:>9.0f}{r2['gross_bp']:>+9.2f}"
+            log(f"{lab2:<30}{r2['tp_width_med']*100:>8.3f}%{r2['sl_width_med']*100:>8.3f}%"
+                f"{r2['median_hold']:>9.0f}{r2['mean_hold']:>9.0f}{r2['gross_bp']:>+9.2f}"
                 f"  [{r2['ci95'][0]:+7.2f},{r2['ci95'][1]:+7.2f}]{r2['trades_per_day']:>7.2f}"
-                f"{r2['net_day_usdc']:>14.1f}{r2['net_day_peg']:>13.1f}"
-                f"   Δ순일(USDC) {r2['net_day_usdc'] - r['net_day_usdc']:+.1f}")
+                f"{r2['net_day_usdc']:>10.1f}{r2['net_day_peg']:>9.1f}"
+                f"   Δ {r2['net_day_usdc'] - r['net_day_usdc']:+.1f}"
+                f"{'  🔴폭 불일치' if abs(r2['tp_width_med']/max(r['tp_width_med'],1e-12) - 1) > 0.05 else ''}")
     wins = sum(1 for i, x in enumerate(rows) if x["kind"] == "atr" and
                x["net_day_usdc"] > next(y for y in rows[:i][::-1] if y["kind"] == "static")["net_day_usdc"])
     tot = sum(1 for x in rows if x["kind"] == "atr")
