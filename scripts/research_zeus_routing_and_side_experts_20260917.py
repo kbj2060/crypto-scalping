@@ -110,9 +110,15 @@ def main() -> int:
             si = np.where(sel[:split])[0]; sv = np.where(sel[split:])[0]
             # ⭐부분집합 학습이면 클래스 가중치를 «그 부분집합에서» 다시 계산한다.
             # 전체 3클래스 기준 가중치를 쓰면 롱 전문가(SHORT 를 안 봄)의 균형이 어긋난다.
-            w_ = wtr if rows is None else compute_sample_weight("balanced", y=ytr[sel]).astype(np.float32)
-            wi = w_[:len(si)] if rows is not None else w_[:split][si]
-            wv = w_[len(si):] if rows is not None else w_[split:][sv]
+            # 🔴그리고 **전달받은 가중(라우팅)을 버리면 안 된다** -- 버리면 N3 의 레짐 가중이
+            # 사라져 세 레짐 모델이 동일해지고 N3 가 N2 로 붕괴한다(2026-09-17 실제 발생).
+            if rows is None:
+                wi, wv = wtr[:split][si], wtr[split:][sv]
+            else:
+                cw = compute_sample_weight("balanced", y=ytr[sel]).astype(np.float32)
+                w_ = cw * wtr[sel]                      # 부분집합 클래스균형 × 전달 가중(라우팅)
+                wi, wv = w_[:len(si)], w_[len(si):]
+                assert w_.sum() > 0, "부분집합 가중치 합이 0"
             assert len(wi) == len(si) and len(wv) == len(sv), "부분집합 가중치 길이 불일치"
             m, _ = E.fit_expert(xs[:split][si], ytr[:split][si], wi,
                                 xs[split:][sv], ytr[split:][sv], wv,
