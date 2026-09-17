@@ -994,7 +994,40 @@ def buildlabel() -> int:
             log(f"  {nm} {st:,}~{idx[-1]:,} 완료 (해소 {rs.mean()*100:.1f}%)")
         out[nm] = {"ret": ret, "hold": hold, "resolved": res, "reason": rsn, "mae": mae}
 
+    # ── v2: **봉당 수익률** 라벨 ──────────────────────────────────────────────
+    # v1(어느 배리어가 먼저 닿는가)은 실패했다: 이기면 항상 +TP, 지면 항상 −SL 이라
+    # **등급이 없고** CASH 가 19.45% 뿐이라 품질 머리가 걸러낼 게 없었다(stageM: 게이트를
+    # 켜면 오히려 나빠짐). 빠진 등급은 «얼마나 빨리»다 -- 슬롯이 하나면 목적함수는
+    # 건당 bp 가 아니라 **시간당 bp** 이고, 그게 평가에 쓰는 「하루 순bp」와 같은 것이다.
     LABEL_OUT.mkdir(parents=True, exist_ok=True)
+    fee_r = FEE_LEVELS["usdc3x_3.06bp"]
+    rate = {}
+    for nm in ("long", "short"):
+        o_ = out[nm]
+        q = (o_["ret"] - fee_r - MAE_PEN * np.maximum(-o_["mae"], 0.0)
+             - SL_PEN * (o_["reason"] == 0))
+        rate[nm] = np.where(o_["resolved"], q / np.maximum(o_["hold"], 1), -np.inf)
+    best = np.maximum(rate["long"], rate["short"])
+    fin = np.isfinite(best)
+    for cash_target in (0.40, 0.50, 0.60):
+        tau = float(np.quantile(best[fin], cash_target))
+        a = np.where((rate["long"] > tau) & (rate["long"] >= rate["short"]), 1,
+                     np.where(rate["short"] > tau, 2, 0))
+        sh = np.bincount(a, minlength=3) / len(a)
+        hb = np.where(a == 1, out["long"]["hold"], np.where(a == 2, out["short"]["hold"], np.nan))
+        frame = pd.DataFrame({
+            "timestamp": ts, "tb_action": a.astype(np.int64),
+            "tb_rate": best, "tb_tau": tau,
+            "tb_long_rate": rate["long"], "tb_short_rate": rate["short"],
+            "tb_long_ret": out["long"]["ret"], "tb_short_ret": out["short"]["ret"],
+            "tb_long_bars": out["long"]["hold"], "tb_short_bars": out["short"]["hold"],
+            "tb_long_reason": out["long"]["reason"], "tb_short_reason": out["short"]["reason"],
+        })
+        path = LABEL_OUT / f"zeus_rate_tp{int(BASE_TP*1000)}_sl{int(BASE_SL*1000)}_cash{int(cash_target*100)}.parquet"
+        frame.to_parquet(path, index=False)
+        log(f"v2 봉당수익 τ={tau*1e4:.4f}bp/봉 · CASH/LONG/SHORT {sh.round(4)} · "
+            f"선택건 중앙보유 {np.nanmedian(hb):.0f}봉 · 저장 {path.name}")
+
     for fname, fee in FEE_LEVELS.items():
         q = {}
         for nm in ("long", "short"):
