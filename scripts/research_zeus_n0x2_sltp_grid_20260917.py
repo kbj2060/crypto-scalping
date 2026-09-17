@@ -56,12 +56,14 @@ def log(*a): print(*a, flush=True)
 
 def _raw(per_fold, tp, sl):
     """한 슬롯·한 칸의 «건별» 손익/보유/날짜. 진입 집합이 칸마다 같으므로 칸끼리 «행이 정렬»된다."""
-    pnl, hold, days = [], [], []
-    for te, h, l, c, side, idx in per_fold:
+    pnl, hold, days, fid = [], [], [], []
+    for f, (te, h, l, c, side, idx) in enumerate(per_fold):
         r, hh, _res, _rn, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
         pnl.append(r * 1e4 - COST); hold.append(hh.astype(float))
         days.append(te.timestamp.dt.floor("D").to_numpy()[idx])
-    return np.concatenate(pnl), np.concatenate(hold), np.concatenate(days)
+        fid.append(np.full(len(idx), f))
+    return (np.concatenate(pnl), np.concatenate(hold),
+            np.concatenate(days), np.concatenate(fid))
 
 
 def _atr_pct(te, win=96):
@@ -78,6 +80,99 @@ def _ratio_day(p, h):
     return float(p.mean()) * 288.0 / max(float(h.mean()), 1e-9)
 
 
+def byfold(pick, LBLS):
+    """--byfold: 동결 배리어(TP1.5%/SL1%)에서 **폴드별로 분해**한다.
+
+    발단: 워크포워드에서 F3·CAND 만 보니 N0x2 가 건당 +40.67 -> **+5.11** 이었다.
+    4폴드 평균이 앞 두 폴드에 끌려온 것인지 직접 확인한다. 임계값 q 는 베이스라인과
+    똑같이 «4폴드 통합 3,700건»으로 잡고(그래야 같은 모델이다) 집계만 폴드로 쪼갠다.
+    🔴엣지가 앞 폴드에 몰려 있으면 미접촉 OOS(2026-07~09)를 열 자격이 없다.
+    """
+    tp, sl = K.BASE_TP, K.BASE_SL
+    for arm in ARMS:
+        acc = {}
+        for _thr, per_fold in pick(arm):
+            for f, (te, h, l, c, side, idx) in enumerate(per_fold):
+                r, hh, _res, _rn, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
+                pnl = r * 1e4 - COST
+                lo_, hi_, nd = E.block_ci(pnl, te.timestamp.dt.floor("D").to_numpy()[idx])
+                acc.setdefault(f, []).append(
+                    (len(idx), float(pnl.mean()), lo_, hi_, nd,
+                     float(np.median(hh)), 288.0 / max(hh.mean(), 1e-9)))
+        tot = sum(np.mean([x[0] for x in v]) for v in acc.values())
+        log(f"\n{'='*104}\n■ {arm} — {LBLS.get(_base(arm), arm)} · 폴드별 분해 "
+            f"(TP{tp*100:g}%/SL{sl*100:g}% · 5슬롯 평균)\n{'='*104}")
+        log(f"{'폴드':<6}{'기간':<26}{'건수':>7}{'비중':>7}{'건당bp':>9}{'독립일':>7}"
+            f"{'CI95':>20}{'중앙보유':>9}{'건/일':>7}{'순/일':>8}")
+        for f, (nm, _t0, _t1, v0, v1) in enumerate(FOLDS):
+            a = np.array(acc[f], float)
+            n_, g = a[:, 0].mean(), a[:, 1].mean()
+            log(f"{nm:<6}{v0 + '~' + v1:<26}{int(n_):>7,}{n_/tot*100:>6.1f}%{g:>+9.2f}"
+                f"{a[:, 4].mean():>7.0f}  [{a[:, 2].mean():+7.2f},{a[:, 3].mean():+7.2f}]"
+                f"{a[:, 5].mean():>9.0f}{a[:, 6].mean():>7.2f}{g * a[:, 6].mean():>8.1f}"
+                f"{'  ✅' if a[:, 2].mean() > 0 else '   '}")
+        sign = [np.array(acc[f], float)[:, 1].mean() > 0 for f in acc]
+        log(f"  ⭐부호 양수 폴드 {sum(sign)}/{len(sign)} · "
+            f"앞 2폴드 건수 비중 {(np.mean([x[0] for x in acc[0]]) + np.mean([x[0] for x in acc[1]]))/tot*100:.1f}%")
+    log("\n🔴읽는 법: 엣지가 앞 폴드에 몰려 있고 최근 폴드가 0 근처면, 4폴드 평균은")
+    log("  「실력」이 아니라 「2023~24 장세」다. 그 상태로 미접촉 OOS 를 열면 안 된다.")
+    return 0
+
+
+def wf(pick, LBLS, CELLS):
+    """--oracle --wf: ②를 **워크포워드**로 다시 -- 유일한 결함(사후선택)을 없앤다.
+
+    앞 폴드(F1·F2)에서 «ATR 십분위 → 배리어» 지도와 «최선 고정칸»을 **둘 다** 정하고,
+    뒤 폴드(F3·CAND)에 그대로 적용한다. 분위 경계도 TRAIN 에서 잡아 TEST 에 적용한다(인과).
+    ⭐①도 TRAIN 에서 골라야 공정하다 -- 한쪽만 사후선택이면 그 차이를 실력으로 읽는다.
+    🔴여기서 ②−①이 시드폭 안으로 들어오면 변동성 기반 sltp 버킷 헤드는 만들 이유가 없다.
+    """
+    TR, TE = {0, 1}, {2, 3}                      # F1·F2 로 정하고 F3·CAND 에서 잰다
+    for arm in ARMS:
+        rows = []
+        for _thr, per_fold in pick(arm):
+            R = [_raw(per_fold, tp, sl) for tp, sl in CELLS]
+            P = np.stack([r[0] for r in R]); H = np.stack([r[1] for r in R])
+            days, fid = R[0][2], R[0][3]
+            atr = np.concatenate([_atr_pct(te)[idx] for te, _h, _l, _c, _s, idx in per_fold])
+            tr = np.isin(fid, list(TR)); te_ = np.isin(fid, list(TE))
+
+            fix = int(np.argmax([_ratio_day(P[k][tr], H[k][tr]) for k in range(len(CELLS))]))
+            edges = np.quantile(atr[tr], np.linspace(0, 1, 11)[1:-1])   # TRAIN 경계
+            dtr, dte = np.digitize(atr[tr], edges), np.digitize(atr[te_], edges)
+            kmap = np.full(10, fix, int)
+            for d in range(10):
+                m = dtr == d
+                if m.sum() >= 30:              # 표본이 적은 분위는 고정칸으로 둔다
+                    kmap[d] = int(np.argmax([_ratio_day(P[k][tr][m], H[k][tr][m])
+                                             for k in range(len(CELLS))]))
+            kd = kmap[dte]; ar = np.where(te_)[0]
+            rows.append({
+                "fix_cell": CELLS[fix], "n_te": int(te_.sum()),
+                "fix_day": _ratio_day(P[fix][te_], H[fix][te_]), "fix_bp": P[fix][te_].mean(),
+                "dec_day": _ratio_day(P[kd, ar], H[kd, ar]), "dec_bp": P[kd, ar].mean(),
+                "fix_pd": 288.0 / max(H[fix][te_].mean(), 1e-9),
+                "dec_pd": 288.0 / max(H[kd, ar].mean(), 1e-9),
+                "n_cells": len(set(kmap.tolist())),
+                "ci_fix": E.block_ci(P[fix][te_], days[te_])[:2],
+                "ci_dec": E.block_ci(P[kd, ar], days[te_])[:2]})
+        A = pd.DataFrame(rows)
+        log(f"\n{'='*104}\n■ {arm} — {LBLS.get(_base(arm), arm)} · **워크포워드** "
+            f"(지도는 F1·F2, 평가는 F3·CAND {A.n_te.iloc[0]:,}건 · 5슬롯)\n{'='*104}")
+        log(f"{'방식':<28}{'건당bp':>9}{'건/일':>8}{'순/일':>9}{'Δ':>8}   CI95(건당)")
+        log(f"{'①고정(TRAIN 선택) ' + str(A.fix_cell.mode().iloc[0]):<28}{A.fix_bp.mean():>+9.2f}"
+            f"{A.fix_pd.mean():>8.2f}{A.fix_day.mean():>9.1f}{0.0:>8.1f}"
+            f"   [{np.mean([c[0] for c in A.ci_fix]):+7.2f},{np.mean([c[1] for c in A.ci_fix]):+7.2f}]")
+        log(f"{'②ATR 십분위(TRAIN 지도)':<26}{A.dec_bp.mean():>+9.2f}{A.dec_pd.mean():>8.2f}"
+            f"{A.dec_day.mean():>9.1f}{A.dec_day.mean()-A.fix_day.mean():>+8.1f}"
+            f"   [{np.mean([c[0] for c in A.ci_dec]):+7.2f},{np.mean([c[1] for c in A.ci_dec]):+7.2f}]")
+        d = A.dec_bp - A.fix_bp
+        log(f"  슬롯별 ②−① : {[round(x, 2) for x in d]}  ⇒ 부호 일치 {int((d > 0).sum())}/5")
+        log(f"  지도가 쓴 서로 다른 칸 {A.n_cells.mean():.1f}/10분위")
+    log("\n⭐판정: ②−①이 양수이고 5슬롯 부호가 일치하며 시드폭을 넘어야 헤드를 만들 값어치가 있다.")
+    return 0
+
+
 def oracle(pick, LBLS):
     """--oracle: **봉별 배리어 선택의 상한과 현실적 하한**.
 
@@ -91,11 +186,14 @@ def oracle(pick, LBLS):
       ③오라클     -- 건별 20칸 사후선택 (도달 불가 상한)
     """
     CELLS = [(tp, sl) for tp in TPS for sl in SLS]
+    if "--wf" in sys.argv:
+        return wf(pick, LBLS, CELLS)
     for arm in ARMS:
         rows = []
         for _si, (_thr, per_fold) in enumerate(pick(arm)):
             R = [_raw(per_fold, tp, sl) for tp, sl in CELLS]
-            P = np.stack([r[0] for r in R]); H = np.stack([r[1] for r in R]); days = R[0][2]
+            P = np.stack([r[0] for r in R]); H = np.stack([r[1] for r in R])
+            days, fid = R[0][2], R[0][3]
             atr = np.concatenate([_atr_pct(te)[idx] for te, _h, _l, _c, _s, idx in per_fold])
             n = P.shape[1]; ar = np.arange(n)
 
@@ -232,6 +330,8 @@ def main() -> int:
                 "sl_rate": A.sl_r.mean(), "tp_rate": A.tp_r.mean(), "un_rate": A.un_r.mean(),
                 "seed_spread": A.g.max() - A.g.min()}
 
+    if "--byfold" in sys.argv:
+        return byfold(pick, LBLS)
     if "--oracle" in sys.argv:
         return oracle(pick, LBLS)
 
