@@ -287,6 +287,34 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("LiveBot")
 
 
+class _BtcCmambaGateUnavailable:
+    """`BtcCmambaEntryGate` 생성 실패 시 자리를 지키는 대역.
+
+    이 게이트는 **CUDA 전용**이다(mamba_ssm 에 CPU 구현이 없다). 그래서 GPU 가 포화이거나
+    드라이버가 아플 때 생성이 던지는데, 그 상태는 정확히 **블루스크린 직후**다 -- 감싸지 않으면
+    봇이 못 뜨고 복구가 막힌다(2026-09-17).
+    ⚠️실패를 `None` 으로 바꾸면 안 된다: 호출부가 `ctx.get("btc_cmamba_gate") is not None` 로만
+    보기 때문에 **필터 없이 BTC 진입이 나간다**. 대신 `direction_signal` 이 항상 던지게 해서
+    호출부의 기존 `except` 가 `UNAVAILABLE -> decision=None`(진입 건너뜀)으로 처리하도록 한다
+    -- 런타임 실패와 **같은 보수적 동작**이다.
+    """
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def direction_signal(self, *_args, **_kwargs):
+        raise RuntimeError(f"BtcCmambaEntryGate unavailable (construction failed): {self._exc}")
+
+
+def _build_btc_cmamba_gate_or_stub():
+    try:
+        return BtcCmambaEntryGate(model_path=FINAL_GOVERNOR_OMEGA4_6_1_BTC_CMAMBA_MODEL_PATH, device="cuda")
+    except Exception as exc:  # noqa: BLE001 -- CUDA 부재·VRAM 부족·아티팩트 손상 전부 같은 대응
+        logger.error("SYSTEM btc_cmamba_entry_gate=CONSTRUCT_FAILED err=%s "
+                     "-- BTC 진입은 건너뛴다(봇은 계속 돈다)", exc, exc_info=True)
+        return _BtcCmambaGateUnavailable(exc)
+
+
 def _disabled_playbook_eval(action: int = 0, kelly: float = 0.0) -> dict:
     winner = {
         "matched": False,
@@ -8920,8 +8948,16 @@ async def main(use_local=False):
                     ),
                     # None unless FINAL_GOVERNOR_OMEGA4_6_1_BTC_CMAMBA_ENTRY_GATE_ENABLE is set (BTC
                     # only -- SOL's own backtest of this filter made both VAL and OOS worse).
+                    # 2026-09-17: 생성을 try 로 감쌌다. 이 게이트는 **CUDA 전용**이고
+                    # (mamba_ssm 2.3.2 에 CPU 구현이 없다 -- 오늘 재확인: `Expected x.is_cuda()`),
+                    # 생성이 던지면 **봇 자체가 안 뜬다**. 하필 그 조건이 «GPU 포화» 인데,
+                    # 그건 2026-09-13·09-17 블루스크린 직후의 상태다 -- **복구가 막히는 경로**였다.
+                    # 실패 시 `None` 을 넣으면 안 된다: 호출부가 `is not None` 로만 보므로
+                    # **필터 없이 BTC 진입**이 나간다. 대신 항상 던지는 대역을 넣어, 호출부의
+                    # 기존 except 가 UNAVAILABLE -> decision=None(진입 건너뜀)으로 처리하게 한다
+                    # = 런타임 실패와 **같은 보수적 동작**.
                     "btc_cmamba_gate": (
-                        BtcCmambaEntryGate(model_path=FINAL_GOVERNOR_OMEGA4_6_1_BTC_CMAMBA_MODEL_PATH, device="cuda")
+                        _build_btc_cmamba_gate_or_stub()
                         if (_asset_key == "btc" and bool(FINAL_GOVERNOR_OMEGA4_6_1_BTC_CMAMBA_ENTRY_GATE_ENABLE))
                         else None
                     ),
