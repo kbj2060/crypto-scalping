@@ -1029,8 +1029,67 @@ def buildlabel() -> int:
     return 0
 
 
+# 비율 사다리. 더블 배리어에서 손익분기 p = (SL+비용)/(TP+SL) 이므로 비율이 바뀌면
+# 요구 확률도 같이 움직인다. 「어느 비율이 구조적으로 쉬운가」를 직접 잰다.
+RATIO_SPECS = [(0.010, 0.010), (0.0125, 0.010), (0.015, 0.010), (0.020, 0.010),
+               (0.030, 0.010), (0.015, 0.0075), (0.020, 0.0075), (0.020, 0.015),
+               (0.006, 0.004)]
+SUB = 8                                  # 기저확률 추정용 부표집(매 8봉). 비율 추정엔 충분하다.
+
+
+def baserate() -> int:
+    """--baserate: **더블 배리어를 「진입 내기」로 보고 기저확률 대 손익분기를 잰다.**
+
+    EV = p·TP − (1−p)·SL − 비용  ⇒  손익분기 p* = (SL + 비용)/(TP + SL)
+    라벨의 무조건부 적중률 p0(= 그 측면이 SL 보다 TP 를 먼저 맞을 확률)와 p* 의 차이가
+    **품질 머리가 메워야 할 간격**이다. p0 가 p* 에 가까울수록 「선택」에만 전부를 거는 내기다.
+    """
+    df, _ = E.load()
+    hi = pd.to_numeric(df["high"]).to_numpy(np.float64)
+    lo = pd.to_numeric(df["low"]).to_numpy(np.float64)
+    cl = pd.to_numeric(df["close"]).to_numpy(np.float64)
+    n = len(cl)
+    idx0 = np.arange(0, n - 1, SUB)
+    log(f"이중 배리어 기저확률 · 부표집 매 {SUB}봉 = {len(idx0):,}건/측면 · 최대 {MAXBARS}봉")
+    log(f"\n{'TP/SL':<14}{'비율':>6}{'p0롱':>8}{'p0숏':>8}{'둘다실패':>9}"
+        f"{'p*(0)':>8}{'p*(USDC)':>10}{'p*(peg)':>9}{'여유(USDC)':>11}{'중앙보유':>9}")
+    rows = []
+    for tp, sl in RATIO_SPECS:
+        out = {}
+        for sd, nm in ((1.0, "long"), (-1.0, "short")):
+            side = np.full(n, sd)
+            rr, hh, res = [], [], []
+            for st in range(0, len(idx0), 40_000):
+                ix = idx0[st:st + 40_000]
+                r, h, rs, rn, _m = _first_touch_open(ix, side, hi, lo, cl, tp, sl, MAXBARS)
+                rr.append(rn); hh.append(h); res.append(rs)
+            out[nm] = (np.concatenate(rr), np.concatenate(hh), np.concatenate(res))
+        p_long = float((out["long"][0] == 1).mean())
+        p_short = float((out["short"][0] == 1).mean())
+        both_fail = 1.0 - p_long - p_short
+        hold = np.median(np.concatenate([out["long"][1], out["short"][1]]))
+        be = lambda c: (sl * 1e4 + c) / ((tp + sl) * 1e4)
+        blend = (p_long + p_short) / 2.0
+        r = {"tp": tp, "sl": sl, "ratio": tp / sl, "p0_long": p_long, "p0_short": p_short,
+             "p0_blend": blend, "both_fail": both_fail,
+             "be_zero": be(0.0), "be_usdc": be(1.02), "be_peg": be(5.52),
+             "slack_usdc": blend - be(1.02), "median_hold": float(hold),
+             "unresolved": float((~np.concatenate([out["long"][2], out["short"][2]])).mean())}
+        rows.append(r)
+        log(f"{f'{tp*100:g}%/{sl*100:g}%':<14}{tp/sl:>6.2f}{p_long*100:>7.2f}%{p_short*100:>7.2f}%"
+            f"{both_fail*100:>8.2f}%{be(0.0)*100:>7.2f}%{be(1.02)*100:>9.2f}%{be(5.52)*100:>8.2f}%"
+            f"{(blend - be(1.02))*100:>+10.2f}pp{hold:>9.0f}")
+    log("\n※ p0 = 그 측면이 SL 보다 TP 를 먼저 맞을 무조건부 확률(= 아무 봉에서나 진입)")
+    log("※ 여유 = p0(양측면 평균) − 손익분기. **음수면 「선택」이 그만큼을 메워야 한다.**")
+    log("※ 롱+숏+둘다실패 = 1 (배타적). 둘다실패 = ±SL 을 오가되 ±TP 를 못 넘은 구간.")
+    (E.OUT / "stageK_baserate.json").write_text(json.dumps(rows, indent=2, default=float))
+    log(f"저장: {E.OUT}/stageK_baserate.json")
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(
+        baserate() if "--baserate" in sys.argv else
         buildlabel() if "--buildlabel" in sys.argv else
         volatr() if "--volatr" in sys.argv else
         nocap() if "--nocap" in sys.argv else
