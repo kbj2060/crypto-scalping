@@ -92,8 +92,297 @@ def _ratio_day(p, h):
     return float(p.mean()) * 288.0 / max(float(h.mean()), 1e-9)
 
 
+ROLLQ_G = [0]
+QF_STORE = {}
+
+
 def _lbl(a):
     return LBLS.get(_base(a), f"라우팅 없음 ×{_n1k(a)}" if _n1k(a) else a)
+
+
+def _kelly_w(conf, win, tp, sl, cost, nb=5, prior=40, norm=True):
+    """인과적 p-켈리 가중. 각 거래 시점까지 **이미 해소된** 거래만으로 분위별 적중률을 추정한다.
+
+    🔴켈리를 그대로 켜면 명목이 7~13배로 뛴다 -- 그건 전략이 아니라 레버리지다
+    (기록: 「켈리는 분할이 아니라 «배수»고 경로를 안 본다」, 하한 켈리 35.5배는 1왕복에 청산).
+    그래서 **평균 1 로 정규화**해서 「p 에 따라 크기를 바꾸는 «모양»이 도움이 되는가」만 잰다.
+    b 는 비용 반영 유효배당 (TP−c)/(SL+c), f* = (p(1+b)−1)/b, 음수는 0.
+    """
+    b = (tp * 1e4 - cost) / (sl * 1e4 + cost)
+    q = pd.qcut(pd.Series(conf).rank(method="first"), nb, labels=False).to_numpy()
+    p0 = float(win.mean())                                  # 사전값(전역) -- 워밍업용
+    w = np.zeros(len(conf)); wins = np.zeros(nb); tot = np.zeros(nb)
+    for i in range(len(conf)):
+        g = q[i]
+        ph = (wins[g] + prior * p0) / (tot[g] + prior)       # 수축 추정
+        f = (ph * (1 + b) - 1) / b
+        w[i] = max(f, 0.0)
+        wins[g] += win[i]; tot[g] += 1                       # ⭐자기 결과는 «쓴 뒤에» 반영
+    if not norm:
+        return w
+    m = w.mean()
+    return w / m if m > 1e-9 else np.ones(len(conf))
+
+
+def _equity(pnl_bp, f, sl):
+    """자본 경로. **켈리는 «한 베팅에 자본의 몇 %»** 이므로 명목 = f/SL, 자본수익 = r·f/SL.
+    손절 적중이면 정확히 −f, 익절이면 +f·b 가 된다(고전 켈리와 동일한 구조).
+    반환: 최종배수 · MDD · 최악 1건(자본 %) · 파산여부."""
+    rc = pnl_bp / 1e4 * (f / sl)            # 건당 «자본» 수익률
+    eq = np.cumprod(1.0 + rc)
+    peak = np.maximum.accumulate(np.concatenate([[1.0], eq]))[1:]
+    return float(eq[-1]), float((1 - eq / peak).max()), float(rc.min() * 100), bool((eq <= 0).any())
+
+
+def gap1m(pick, LBLS):
+    """--gap1m: 갭 측정을 **1분봉 해상도**로. 5분봉은 봉 «안»의 경로를 못 본다.
+
+    손절이 걸린 5분봉을 1분봉 5개로 쪼개 **처음 손절선을 뚫는 1분봉**을 찾고,
+    그 1분봉의 «시가»가 이미 손절선 너머인지(=진짜 갭), 저/고가가 얼마나 뚫었는지를 잰다.
+    ⭐1분봉은 2024-01~ 만 있어 F1(2023H2)은 빠진다 -- 커버 폴드를 같이 찍는다.
+    """
+    tp, sl = K.BASE_TP, K.BASE_SL
+    MINGAP = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--mingap=")), 0))
+    M = pd.read_csv(ROOT / "data/training_features_1m.csv",
+                    usecols=["timestamp", "open", "high", "low", "close"])
+    M["timestamp"] = pd.to_datetime(M["timestamp"])
+    mt = M.timestamp.values.astype("datetime64[m]").astype(np.int64)
+    mo, mh, ml = (M[c].to_numpy(float) for c in ("open", "high", "low"))
+    log(f"  1분봉 {len(M):,}행 {M.timestamp.min()} ~ {M.timestamp.max()}")
+    for arm in ARMS:
+        go, gb, miss, n_sl = [], [], 0, 0
+        for _t, per_fold in pick(arm):
+            for te, h, l, c, side, idx in per_fold:
+                if len(idx) < 20:
+                    continue
+                ts = te.timestamp.values.astype("datetime64[m]").astype(np.int64)
+                r, hh, _a, rn, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
+                free, take, last = -1, [], -10**9
+                for i in range(len(idx)):
+                    if idx[i] - last < MINGAP or idx[i] <= free:
+                        continue
+                    take.append(i); free = idx[i] + int(hh[i]); last = idx[i]
+                t_ = np.array(take, int); k_ = t_[rn[t_] == 0]
+                if not len(k_):
+                    continue
+                n_sl += len(k_)
+                e = c[idx[k_]]; sd = side[idx[k_]]
+                bar = np.clip(idx[k_] + hh[k_], 0, len(c) - 1)
+                stop = np.where(sd > 0, e * (1 - sl), e * (1 + sl))
+                for q in range(len(k_)):
+                    a0 = np.searchsorted(mt, ts[bar[q]])          # 그 5분봉의 1분봉 5개
+                    if a0 >= len(mt) or mt[a0] != ts[bar[q]]:
+                        miss += 1; continue
+                    hit = -1
+                    for u in range(a0, min(a0 + 5, len(mt))):
+                        if (sd[q] > 0 and ml[u] <= stop[q]) or (sd[q] < 0 and mh[u] >= stop[q]):
+                            hit = u; break
+                    if hit < 0:
+                        miss += 1; continue
+                    op_, lo_, hi_ = mo[hit], ml[hit], mh[hit]
+                    go.append(max((stop[q] - op_) if sd[q] > 0 else (op_ - stop[q]), 0) / e[q])
+                    gb.append(max((stop[q] - lo_) if sd[q] > 0 else (hi_ - stop[q]), 0) / e[q])
+        go, gb = np.array(go), np.array(gb)
+        log(f"\n{'='*92}\n■ {arm} — **1분봉 해상도** 손절 미끄러짐 (TP{tp*100:g}%/SL{sl*100:g}% · "
+            f"mingap {MINGAP}봉)\n{'='*92}")
+        log(f"  손절 {n_sl:,}건 중 1분봉 매칭 {len(go):,}건 · 미매칭 {miss:,}건(대부분 F1=2023, 1분봉 없음)")
+        for nm, v in (("진짜 갭(1분 시가)", go), ("1분봉내 초과", gb)):
+            if not len(v):
+                continue
+            log(f"  {nm:<18} 발생 {(v>1e-9).mean()*100:5.1f}% · 중앙 {np.median(v)*100:6.3f}% · "
+                f"p95 {np.quantile(v,.95)*100:6.3f}% · p99 {np.quantile(v,.99)*100:6.3f}% · "
+                f"최대 {v.max()*100:6.3f}%")
+        if len(gb):
+            for q, lab in ((1.0, "최대"), (0.999, "p99.9"), (0.99, "p99")):
+                w = sl + (gb.max() if q == 1.0 else np.quantile(gb, q))
+                log(f"    1분봉내 {lab:>6}: 총손실 {w*100:5.2f}% → 안전 명목 상한 **{1/w/2:.1f}배**")
+    log("\n⭐5분봉 판과 비교해 «1분봉내 초과»가 크게 줄면, 실제 체결은 손절선에 가깝다는 뜻이다.")
+    return 0
+
+
+def gapscan(pick, LBLS):
+    """--gap: **손절 체결이 얼마나 미끄러지는가.** 켈리 배수의 상한을 정하는 단 하나의 숫자.
+
+    시뮬은 손절이 «정확히» SL 에 체결된다고 본다. 명목 N배에서 청산선은 역행 약 1/N 이므로,
+    손절선을 크게 뚫는 사건이 있으면 그 배수는 죽는다.
+      ⭐**진짜 갭** = 손절 봉의 «시가»가 이미 손절선 너머 -> 회피 불가, 시가 체결
+      ⭐**봉내 초과** = 손절 봉의 저가(롱)/고가(숏)가 손절선을 얼마나 뚫었나 -> 최악 체결 상한
+    """
+    tp, sl = K.BASE_TP, K.BASE_SL
+    MINGAP = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--mingap=")), 0))
+    for arm in ARMS:
+        go, gb, n_sl, n_all = [], [], 0, 0
+        for _t, per_fold in pick(arm):
+            for te, h, l, c, side, idx in per_fold:
+                if len(idx) < 20:
+                    continue
+                op = pd.to_numeric(te["open"]).to_numpy(float)
+                r, hh, _a, rn, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
+                free, take, last = -1, [], -10**9          # 1슬롯 순차 + mingap
+                for i in range(len(idx)):
+                    if idx[i] - last < MINGAP or idx[i] <= free:
+                        continue
+                    take.append(i); free = idx[i] + int(hh[i]); last = idx[i]
+                t_ = np.array(take, int); n_all += len(t_)
+                m_ = rn[t_] == 0                            # 손절로 끝난 건만
+                if not m_.any():
+                    continue
+                k_ = t_[m_]; n_sl += len(k_)
+                e = c[idx[k_]]; sd = side[idx[k_]]
+                bar = np.clip(idx[k_] + hh[k_], 0, len(c) - 1)
+                stop = np.where(sd > 0, e * (1 - sl), e * (1 + sl))
+                # 시가가 손절선 너머면 그만큼이 «진짜 갭»(롱: 시가<스톱, 숏: 시가>스톱)
+                go.append(np.maximum(np.where(sd > 0, stop - op[bar], op[bar] - stop), 0) / e)
+                # 봉내 최악 지점이 손절선을 얼마나 뚫었나
+                go_b = np.where(sd > 0, stop - l[bar], h[bar] - stop)
+                gb.append(np.maximum(go_b, 0) / e)
+        go = np.concatenate(go); gb = np.concatenate(gb)
+        log(f"\n{'='*92}\n■ {arm} — 손절 체결 미끄러짐 (TP{tp*100:g}%/SL{sl*100:g}% · mingap {MINGAP}봉 · "
+            f"1슬롯)\n{'='*92}")
+        log(f"  체결 {n_all:,}건 중 손절 {n_sl:,}건 ({n_sl/max(n_all,1)*100:.1f}%)")
+        for nm, v in (("진짜 갭(시가 초과)", go), ("봉내 초과(저·고가)", gb)):
+            nz = (v > 1e-9).mean() * 100
+            log(f"  {nm:<20} 발생 {nz:5.1f}% · 중앙 {np.median(v)*100:6.3f}% · "
+                f"p95 {np.quantile(v,.95)*100:6.3f}% · p99 {np.quantile(v,.99)*100:6.3f}% · "
+                f"최대 {v.max()*100:6.3f}%")
+        log(f"\n  ⭐명목 N배의 청산선 ≈ 역행 1/N. 총 손실 = SL + 초과분이므로:")
+        for nm, v in (("진짜 갭", go), ("봉내 초과", gb)):
+            for q, lab in ((1.0, "최대"), (0.999, "p99.9"), (0.99, "p99")):
+                worst = sl + (v.max() if q == 1.0 else np.quantile(v, q))
+                log(f"    {nm} {lab:>6}: 총손실 {worst*100:5.2f}% → **안전 명목 상한 {1/worst/2:.1f}배**"
+                    f" (청산선의 2배 여유)")
+        log("\n  🔴「봉내 초과」는 최악 가정이다 -- 실제 스톱마켓은 그 사이 어딘가에 체결된다.")
+        log("  ⭐「진짜 갭」이 0에 가까우면 높은 배수가 가능하고, 꼬리가 두꺼우면 켈리는 못 쓴다.")
+    return 0
+
+
+def slotsweep(pick, LBLS):
+    """--slotsweep: 슬롯 수 K 를 훑는다. **총 노출을 고정**(건당 크기 1/K)해서 재는 게 핵심 --
+    같은 크기로 K개를 걸면 그건 전략 개선이 아니라 **레버리지 K배**다(사용자 지적 2026-09-18).
+
+    🔴함께 봐야 할 것: ①**평균 슬롯 점유율** -- 슬롯이 놀면 유효 노출이 1 미만이라 「고정명목」
+    수치가 불리하게 나온다 ②**중앙 진입 간격** -- 같은 묶음에서 K개를 잡으면 사실상 한 건을
+    K배로 건 것이라 분산 이득이 없다.
+    """
+    tp, sl = K.BASE_TP, K.BASE_SL
+    days = sum((pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for _n, _a, _b, v0, v1 in FOLDS)
+    KELLY = "--kelly" in sys.argv
+    # --mingap=<봉> : 직전 «진입»으로부터 이만큼 지나야 새 진입. 0 이면 제약 없음.
+    # 🔴다중 슬롯이 «같은 묶음을 K번 사는 것»과 «진짜 기회 포착»을 가르는 유일한 장치다
+    #   (스모크: K=3 에서 중앙 진입간격이 260 -> 14봉으로 붕괴, 보유기간은 ~100봉).
+    MINGAP = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--mingap=")), 0))
+    # --kellyf=none|half|full : **실제 켈리 배수**로 자본의 몇 %를 걸지 정한다(정규화 없음).
+    # none = 현행 고정(명목 0.9배 = 자본의 0.45% 위험). f 는 25%에서 자른다(추정오차 방어).
+    KF = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--kellyf=")), "none")
+    FIX_F = 0.9 * sl                        # 명목 0.9배 × 손절폭
+    KS = [int(x) for x in (next((a.split("=", 1)[1].split(",") for a in sys.argv
+                                 if a.startswith("--slots=")), None) or "1,2,3,5,7,10".split(","))]
+    for arm in ARMS:
+        ent = pick(arm)
+        log(f"\n{'='*104}\n■ {arm} — {_lbl(arm)} · **슬롯 수 스윕** "
+            f"(TP{tp*100:g}%/SL{sl*100:g}% · 비용 {COST}bp · 총 노출 고정 · "
+            f"mingap {MINGAP}봉 · {'p-켈리' if KELLY else '고정크기'})\n{'='*104}")
+        log(f"{'슬롯':>5}{'체결':>8}{'거절%':>7}{'체결/일':>8}{'건당bp':>9}{'CI95':>20}"
+            f"{'순/일':>8}{'연율%':>8}{'점유율':>8}{'간격':>6}{'자본배수':>9}{'MDD%':>7}{'최악건%':>8}")
+        for Ks in KS:
+            acc = []
+            for si_, (_thr, per_fold) in enumerate(ent):
+                pl, dl, nsig, occ, bars, gaps, eqs = [], [], 0, 0, 0, [], []
+                for fi_, (te, h, l, c, side, idx) in enumerate(per_fold):
+                    if len(idx) < 20:
+                        continue
+                    r, hh, _a, _b, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
+                    p_ = r * 1e4 - COST; nsig += len(idx); bars += len(te)
+                    free = np.full(Ks, -1, np.int64); take = []; last = -10**9
+                    for i in range(len(idx)):
+                        if idx[i] - last < MINGAP:
+                            continue
+                        j = int(free.argmin())
+                        if free[j] < idx[i]:
+                            take.append(i); free[j] = idx[i] + int(hh[i])
+                            occ += int(hh[i]); last = idx[i]
+                    t_ = np.array(take, int)
+                    pp = p_[t_]
+                    cf = QF_STORE[(arm, si_, fi_)][t_]
+                    if KELLY:                               # 평균 1 정규화 -- 배수가 아니라 «모양»
+                        pp = pp * _kelly_w(cf, (r[t_] > 0).astype(float), tp, sl, COST)
+                    if KF != "none":                        # ⭐실제 켈리 배수로 자본 경로를 낸다
+                        wk = _kelly_w(cf, (r[t_] > 0).astype(float), tp, sl, COST, norm=False)
+                        fv = np.clip(wk * (0.5 if KF == "half" else 1.0), 0, 0.25) / Ks
+                        eqs.append(_equity(p_[t_], fv, sl))
+                    else:
+                        eqs.append(_equity(p_[t_], FIX_F / Ks, sl))
+                    pl.append(pp); dl.append(te.timestamp.dt.floor("D").to_numpy()[idx[t_]])
+                    if len(t_) > 1:
+                        gaps.append(np.diff(idx[t_]))
+                pl = np.concatenate(pl); dl = np.concatenate(dl)
+                lo_, hi_, _nd = E.block_ci(pl, dl)
+                eq = np.array(eqs, float)
+                acc.append((nsig, len(pl), pl.mean(), lo_, hi_,
+                            occ / max(bars * Ks, 1), float(np.median(np.concatenate(gaps))),
+                            float(np.prod(eq[:, 0])), float(eq[:, 1].max()), float(eq[:, 2].min())))
+            a = np.array(acc, float)
+            sig, ex, bp = a[:, 0].mean(), a[:, 1].mean(), a[:, 2].mean()
+            day = bp * ex / Ks / days          # ⭐총 노출 고정 -- 건당 1/K 크기
+            log(f"{Ks:>5}{int(ex):>8,}{(1-ex/sig)*100:>6.1f}%{ex/days:>8.2f}{bp:>+9.2f}"
+                f"  [{a[:, 3].mean():+7.2f},{a[:, 4].mean():+7.2f}]{day:>8.1f}{day*365/100:>8.1f}"
+                f"{a[:, 5].mean()*100:>7.1f}%{a[:, 6].mean():>6.0f}"
+                f"{a[:, 7].mean():>9.2f}{a[:, 8].mean()*100:>6.1f}%{a[:, 9].mean():>8.2f}"
+                f"{'  ✅' if a[:, 3].mean() > 0 else ''}")
+    log("\n⭐«순/일»은 총 노출을 1 로 고정한 값이다 -- 같은 크기로 K개 걸면 레버리지 K배라 비교가 안 된다.")
+    log("🔴«중앙간격»이 보유기간보다 훨씬 짧으면 같은 묶음을 K번 산 것이다(분산 이득 없음).")
+    return 0
+
+
+def seqgrid(pick, LBLS):
+    """--seqgrid: 20칸 배리어 격자를 **순차 1슬롯 목적함수**로 다시 훑는다.
+
+    🔴순진한 격자는 「모든 후보를 독립 체결」 가정이라 보유시간을 `288/평균보유`(상한)로만
+    반영했다. 1슬롯에서는 **보유시간이 희소 자원**이다 -- 빨리 해소되는 배리어가 슬롯을
+    비워 더 많은 신호를 잡는다. 그래서 최적 기하학이 이동할 수 있다(사용자 지적 2026-09-18).
+    """
+    days = sum((pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for _n, _a, _b, v0, v1 in FOLDS)
+    for arm in ARMS:
+        ent = pick(arm)
+        rows = []
+        for tp in TPS:
+            for sl in SLS:
+                acc = []
+                for _thr, per_fold in ent:
+                    pl, hl, dl, nsig = [], [], [], 0
+                    for te, h, l, c, side, idx in per_fold:
+                        if len(idx) < 20:
+                            continue
+                        r, hh, _a, _b, _m = K._first_touch_open(idx, side, h, l, c, tp, sl, K.MAXBARS)
+                        p_ = r * 1e4 - COST; nsig += len(idx)
+                        take, cur = [], -1
+                        for i in range(len(idx)):
+                            if idx[i] > cur:
+                                take.append(i); cur = idx[i] + int(hh[i])
+                        t_ = np.array(take, int)
+                        pl.append(p_[t_]); hl.append(hh[t_].astype(float))
+                        dl.append(te.timestamp.dt.floor("D").to_numpy()[idx[t_]])
+                    pl = np.concatenate(pl); hl = np.concatenate(hl); dl = np.concatenate(dl)
+                    lo_, hi_, _nd = E.block_ci(pl, dl)
+                    acc.append((nsig, len(pl), pl.mean(), lo_, hi_, float(np.median(hl))))
+                a = np.array(acc, float)
+                ex, bp = a[:, 1].mean(), a[:, 2].mean()
+                rows.append({"tp": tp, "sl": sl, "sig": a[:, 0].mean(), "ex": ex,
+                             "bp": bp, "lo": a[:, 3].mean(), "hi": a[:, 4].mean(),
+                             "med": a[:, 5].mean(), "pd": ex / days, "day": bp * ex / days,
+                             "spread": a[:, 2].max() - a[:, 2].min()})
+        R = pd.DataFrame(rows).sort_values("day", ascending=False)
+        log(f"\n{'='*104}\n■ {arm} — {_lbl(arm)} · **순차 1슬롯 배리어 격자** "
+            f"(비용 {COST}bp · 롤링 {'예' if ROLLQ_G[0] else '아니오'} · 순/일 내림차순)\n{'='*104}")
+        log(f"{'TP':>5}{'SL':>5}{'신호':>7}{'체결':>7}{'거절%':>7}{'체결/일':>8}{'중앙보유':>9}"
+            f"{'건당bp':>9}{'CI95':>20}{'순/일':>8}{'시드폭':>8}")
+        for _, r in R.iterrows():
+            log(f"{r.tp*100:>4.1f}%{r.sl*100:>4.1f}%{int(r.sig):>7,}{int(r.ex):>7,}"
+                f"{(1-r.ex/r.sig)*100:>6.1f}%{r.pd:>8.2f}{r.med:>9.0f}{r.bp:>+9.2f}"
+                f"  [{r.lo:+7.2f},{r.hi:+7.2f}]{r.day:>8.1f}{r.spread:>8.2f}"
+                f"{'  ✅' if r.lo > 0 else ''}{'  🔴<1건/일' if r.pd < 1.0 else ''}")
+    log("\n⭐순진한 격자와 최적 칸이 다르면, 그건 «보유시간이 희소 자원»이라는 뜻이다.")
+    return 0
 
 
 def seq(pick, LBLS):
@@ -498,7 +787,9 @@ def main() -> int:
                     thr = thrs[i_] if PERFOLD else thrs[0]
                     side = np.where((da == 1) & (qf >= thr), 1.0,
                                     np.where((da == 2) & (qf >= thr), -1.0, 0.0))
-                per_fold.append((te, h, l, c, side, np.where(side != 0)[0]))
+                ix = np.where(side != 0)[0]
+                QF_STORE[(arm, si, i_)] = qf[ix]      # 켈리용 -- 튜플 규약은 그대로 둔다
+                per_fold.append((te, h, l, c, side, ix))
             out.append((float(np.mean(thrs)), per_fold))
             log(f"  {arm} 슬롯{si}: {'롤링분위 q=' + format(thrs[0], '.4f') + f' (창 {ROLLQ} 후보)' if ROLLQ else ('폴드별 ' + str([round(t, 3) for t in thrs]) if PERFOLD else 'q=' + format(thrs[0], '.4f'))}"
                 f" · 진입 {sum(len(f[5]) for f in per_fold):,}건 {[len(f[5]) for f in per_fold]}")
@@ -533,6 +824,15 @@ def main() -> int:
                 "sl_rate": A.sl_r.mean(), "tp_rate": A.tp_r.mean(), "un_rate": A.un_r.mean(),
                 "seed_spread": A.g.max() - A.g.min()}
 
+    ROLLQ_G[0] = ROLLQ
+    if "--gap1m" in sys.argv:
+        return gap1m(pick, LBLS)
+    if "--gap" in sys.argv:
+        return gapscan(pick, LBLS)
+    if "--slotsweep" in sys.argv:
+        return slotsweep(pick, LBLS)
+    if "--seqgrid" in sys.argv:
+        return seqgrid(pick, LBLS)
     if "--seq" in sys.argv:
         return seq(pick, LBLS)
     if "--byregime" in sys.argv:
