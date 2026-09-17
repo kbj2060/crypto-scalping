@@ -3057,6 +3057,13 @@ function updateSnapshotCandleLive() {
   const candleTs = Math.floor(ts / (CHART_CANDLE_MIN * 60)) * (CHART_CANDLE_MIN * 60);
   const last = candles[candles.length - 1];
   if (last.time < candleTs) {
+    // 두 봉 이상 벌어졌으면 그 사이 봉은 틱으로 만들어낼 수 없다 -- 그냥 밀어 넣으면 사이가
+    // **구멍으로 다음 폴링(5분)까지 굳는다**(2026-09-17 사용자 신고의 정체). 서버 쪽 낡은
+    // 프레임 경로는 max_stale=0 으로 막았지만, 탭이 잠들었다 깨거나 fetch 가 한 번 실패하거나
+    // 폴링이 봉 경계 직전에 걸리면 여전히 벌어질 수 있다. 폴링 게이트를 열어 다음 렌더가 바로
+    // 다시 받게 한다 -- 아래 push 로 last.time == candleTs 가 되므로 이 조건은 한 번만 참이고
+    // (요청 폭주 없음), 재요청이 실패해도 예전과 같은 상태로 남을 뿐이다.
+    if (candleTs - last.time > CHART_CANDLE_MIN * 60) lastSnapshotHistoryFetchAt = 0;
     candles.push({ time: candleTs, open: price, high: price, low: price, close: price });
     if (candles.length > CHART_MAX_CANDLES) candles.shift();
   } else {
