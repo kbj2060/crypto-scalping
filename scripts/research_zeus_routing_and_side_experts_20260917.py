@@ -85,7 +85,7 @@ def main() -> int:
         f"더블배리어 TP{K.BASE_TP*100:g}%/SL{K.BASE_SL*100:g}%")
     df, base_cols = E.load()
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
-    store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4")}
+    store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4", "N5")}
 
     for name, t0, t1, v0, v1 in FOLDS:
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
@@ -179,6 +179,34 @@ def main() -> int:
                     D[m_], Q[m_] = Dd[m_], Qq[m_]
                 store["N4"].append((name, te, D, Q)); log(f"  N4/seed {sd} 완료")
 
+        # ── N5: 방향·품질 **둘 다 h48** (N0 구조 · same_as_direction 을 h48 라벨로) ──
+        # N4(품질만 h48)가 −1.63 으로 실패했다. 이 세션의 반복 패턴은 «두 머리가 같아야
+        # 확신도가 서열이 된다»이므로, h48 라벨을 **방향 타깃으로도** 줘서 가른다.
+        # 이게 「h48 라벨 자체가 쓸 만한가」와 「타깃을 가른 게 문제였나」를 분리한다.
+        if "N5" in ARMS:
+            ql5 = pd.read_parquet(QPATH, columns=["timestamp", "tb_action"])
+            ql5["timestamp"] = pd.to_datetime(ql5["timestamp"])
+            y5 = (tr[["timestamp"]].merge(ql5, on="timestamp", how="left")
+                  .tb_action.fillna(0).to_numpy(np.int64))
+            assert len(y5) == n and np.bincount(y5, minlength=3).min() > 100, "h48 방향 라벨 퇴화"
+            bal5 = compute_sample_weight("balanced", y=y5).astype(np.float32)
+            for sd in SEEDS:
+                D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
+                for ei in range(3):
+                    ck = f"{name}|N5{ei}s{sd}"
+                    if ck in cache:
+                        z = dict(cache[ck].item()); Dd, Qq = z["D"], z["Q"]
+                    else:
+                        w = bal5 * rt[:, ei].astype(np.float32)
+                        mm, _ = E.fit_expert(xs[:split], y5[:split], w[:split],
+                                             xs[split:], y5[split:], w[split:],
+                                             seed=sd, ei=ei, device=device)
+                        Dd, Qq = E.heads(mm, xv, device)
+                        cache[ck] = np.array({"D": Dd, "Q": Qq}, dtype=object); np.savez(CACHE, **cache)
+                    m_ = ev == ei
+                    D[m_], Q[m_] = Dd[m_], Qq[m_]
+                store["N5"].append((name, te, D, Q)); log(f"  N5/seed {sd} 완료")
+
         # ── N3: **레짐 × 측면** (3 레짐 × 2 측면 = 6 모델) ──
         # 레짐 가중 학습(라우팅 유지) + 측면별 부분집합. 추론은 레짐 하드 라우팅으로 전문가
         # 쌍을 고르고, 그 안에서 롱/숏 확률을 비교한다(측면은 예측 대상이라 라우팅 키가 못 된다).
@@ -237,7 +265,7 @@ def main() -> int:
     D_ = pd.DataFrame(rows)
     log(f"\n{'='*104}\n■ 라우팅 유무 · 측면 분리 (건수맞춤 {TARGET_N:,} · 더블배리어 · 4폴드)")
     log(f"{'팔':<6}{'모델수':>7}{'건수':>8}{'건당bp':>9}{'함축p':>8}{'CI':>20}{'건/일':>7}{'순/일':>8}")
-    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2, "N3": 6, "N4": 3}
+    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2, "N3": 6, "N4": 3, "N5": 3}
     for arm, g in D_.groupby("arm", sort=False):
         log(f"{arm:<6}{NM[arm]:>7}{int(g.n.mean()):>8,}{g.gross_bp.mean():>+9.2f}{g.p.mean()*100:>7.2f}%"
             f"  [{g.ci95.apply(lambda x: x[0]).mean():+7.2f},{g.ci95.apply(lambda x: x[1]).mean():+7.2f}]"
