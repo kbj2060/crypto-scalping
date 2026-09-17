@@ -46,6 +46,10 @@ FOLDS = [f for f in K.FOLDS if f[0] in ("F1", "F2", "F3", "CAND")]
 TARGET_N = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--match=")), 3700))
 ARMS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--arms=")), None)
         or ["N0", "N1", "N2"])
+# 🔴모르는 팔 이름을 «조용히 무시»하면 빈 결과가 표에서 그냥 빠진다(2026-09-17 실제 발생:
+# 서버에 N5 블록이 없는 옛 판이 있었는데 에러 없이 N5 행만 사라졌다).
+_KNOWN = {"N0", "N1", "N1b", "N2", "N3", "N4", "N5"}
+assert set(ARMS) <= _KNOWN, f"모르는 팔: {sorted(set(ARMS) - _KNOWN)} (스크립트 판이 오래됐을 수 있다)"
 # --frame=HMM : 레짐 6열을 HMM 판으로 바꾼다(열 이름은 같으므로 학습 코드는 그대로).
 # ⚠️두 프레임을 섞지 않도록 캐시/산출물 이름을 분리한다.
 FRAME = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--frame=")), "balnobb")
