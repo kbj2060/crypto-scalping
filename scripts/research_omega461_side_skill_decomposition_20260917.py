@@ -1349,8 +1349,100 @@ def routing() -> int:
     return 0
 
 
+H48_BUNDLE = (E.BUNDLE.parent.parent
+              / "omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06"
+                "_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630"
+              / "true_3head_tabm_bundle.pt")
+
+
+def qsweep() -> int:
+    """--qsweep: **h48qual 이 왜 q=0.50 인데 더 적게 쏘나 + 임계값을 쓸면 달라지나.** 추론만.
+
+    배포 h48qual 은 q=0.50(zig075 의 0.75 보다 관대)인데 폴드당 후보가 171~200건뿐이다.
+    품질 확률 분포가 우리 게이트와 안 맞는다는 뜻이라, **분포 자체를 먼저 보고** 임계값을 쓴다.
+    비교를 위해 zig075 도 같은 격자로 낸다. 청산은 Zeus 더블 배리어.
+    """
+    E.OUT.mkdir(parents=True, exist_ok=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    TPB, SLB, cost = BASE_TP * 1e4, BASE_SL * 1e4, 1.02
+    imp = lambda g: (g + cost + SLB) / (TPB + SLB)
+    df, base_cols = E.load()
+
+    def load(path):
+        b = torch.load(path, map_location="cpu", weights_only=False)
+        out = {}
+        for en in ("bull", "bear", "chop"):
+            pay = dict(b["models"][en])
+            m = tabm.ThreeHeadTabM(int(pay["n_features"]),
+                                   cfg=tabm.ThreeHeadConfig(**dict(pay["config"]))).to(device)
+            m.load_state_dict(pay["state_dict"]); m.eval()
+            out[en] = (m, dict(pay["scaler"]))
+        return out
+
+    bundles = {"zig075": load(E.BUNDLE)}
+    if H48_BUNDLE.exists():
+        bundles["h48qual"] = load(H48_BUNDLE)
+    else:
+        log(f"⚠️h48qual 번들 없음: {H48_BUNDLE}")
+
+    segs = []
+    for name, _t0, _t1, v0, v1 in FOLDS:
+        if not (v1 < DEPLOYED_SEEN[0] or v0 > DEPLOYED_SEEN[1]):
+            continue
+        te = df[(df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")].reset_index(drop=True)
+        segs.append((name, te, tabm._base_input(te, base_cols), tabm._route_probs(te).argmax(1)))
+
+    rows = []
+    for bn, bun in bundles.items():
+        DQ = []
+        for name, te, xr, ev in segs:
+            D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
+            for ei, en in enumerate(("bull", "bear", "chop")):
+                m, sc = bun[en]
+                sel = ev == ei
+                if sel.any():
+                    D[sel], Q[sel] = E.heads(m, tabm._standardize_apply(xr[sel], sc), device)
+            DQ.append((name, te, D, Q))
+        da_all = np.concatenate([D.argmax(1) for _n, _t, D, _q in DQ])
+        qf_all = np.concatenate([np.where(D.argmax(1) > 0,
+                                          Q[np.arange(len(Q)), D.argmax(1)], Q[:, 0])
+                                 for _n, _t, D, Q in DQ])
+        nz = da_all != 0
+        log(f"\n■ {bn} — 방향 비CASH {nz.mean()*100:.1f}% · "
+            f"품질확률 분위(비CASH 봉): " + " ".join(
+                f"p{int(q*100)}={np.quantile(qf_all[nz], q):.3f}" for q in (.1, .25, .5, .75, .9, .99)))
+        log(f"{'q':>6}{'통과':>9}{'통과율':>8}{'건당bp':>9}{'함축p':>8}{'CI':>20}{'중앙보유':>9}{'건/일':>7}{'순/일':>8}")
+        for q in (0.34, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90):
+            pnl, hold, days = [], [], []
+            for _n, te, D, Q in DQ:
+                _, side = F.gate(D, Q, q)
+                idx = np.where(side != 0)[0]
+                if len(idx) < 20:
+                    continue
+                hi = pd.to_numeric(te["high"]).to_numpy(np.float64)
+                lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
+                cl = pd.to_numeric(te["close"]).to_numpy(np.float64)
+                r, h, _rs, _rn, _m = _first_touch_open(idx, side, hi, lo, cl, BASE_TP, BASE_SL, MAXBARS)
+                pnl.append(r * 1e4 - cost); hold.append(h.astype(float))
+                days.append(te.timestamp.dt.floor("D").to_numpy()[idx])
+            if not pnl:
+                log(f"{q:>6.2f}{'-':>9}  (통과 없음)"); continue
+            pnl = np.concatenate(pnl); hold = np.concatenate(hold); days = np.concatenate(days)
+            lo_, hi_, nd = E.block_ci(pnl, days)
+            g = float(pnl.mean()); pdy = 288.0 / max(hold.mean(), 1e-9)
+            rows.append({"bundle": bn, "q": q, "n": int(len(pnl)), "gross_bp": g, "p": imp(g),
+                         "ci95": [lo_, hi_], "indep_days": nd, "per_day": pdy, "net_day": g * pdy})
+            log(f"{q:>6.2f}{len(pnl):>9,}{len(pnl)/len(da_all)*100:>7.2f}%{g:>+9.2f}{imp(g)*100:>7.2f}%"
+                f"  [{lo_:+7.2f},{hi_:+7.2f}]{np.median(hold):>9.0f}{pdy:>7.2f}{g*pdy:>8.1f}")
+    (E.OUT / "stageQ_qsweep.json").write_text(json.dumps(rows, indent=2, default=float))
+    log(f"\n저장: {E.OUT}/stageQ_qsweep.json")
+    log("⚠️격자에서 최고 칸을 고르면 그게 선택이다 -- 곡선 «모양»으로 읽는다.")
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(
+        qsweep() if "--qsweep" in sys.argv else
         routing() if "--routing" in sys.argv else
         qcalib() if "--qcalib" in sys.argv else
         baserate() if "--baserate" in sys.argv else
