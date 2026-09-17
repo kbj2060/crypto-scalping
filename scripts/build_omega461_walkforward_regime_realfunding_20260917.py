@@ -12,9 +12,9 @@ C2 판 (2026-09-17 재실행): 입력이 **펀딩 복구본** 프레임으로 �
 옛 프레임은 2022~2024 펀딩이 전량 중앙값이라 파생 9열이 같이 상수였다(D단계 §3).
 모델 config·라벨식·검증 절차는 한 글자도 바꾸지 않았다 -- 바뀐 건 입력뿐이다.
 """
-import sys, numpy as np, pandas as pd, joblib
+import os, sys, numpy as np, pandas as pd, joblib
 from pathlib import Path
-ROOT = Path("/home/llewyn/crypto-scalping"); sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT/"trading_bot_modules"))
+ROOT = Path(os.environ.get("ZEUS_ROOT") or ("/home/llewyn/crypto-scalping" if Path("/home/llewyn/crypto-scalping").exists() else Path.home()/"crypto-scalping")); sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT/"trading_bot_modules"))
 from omega4_6_2_source_parent_live import CURRENT_PREFIX
 
 OUT = ROOT/"tmp/omega461_longwindow_20260917"
