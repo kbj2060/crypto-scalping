@@ -14,10 +14,10 @@ B2 판 (2026-09-17 재실행): 입력이 **펀딩 복구본** 프레임으로 �
 옛 프레임은 2022~2024 펀딩이 전량 중앙값이라 파생 9열이 같이 상수였다(D단계 §3).
 모델 config·라벨식·검증 절차는 한 글자도 바꾸지 않았다 -- 바뀐 건 입력뿐이다.
 """
-import sys, json, numpy as np, pandas as pd, joblib
+import os, sys, json, numpy as np, pandas as pd, joblib
 from pathlib import Path
 from sklearn.ensemble import HistGradientBoostingClassifier
-ROOT = Path("/home/llewyn/crypto-scalping"); sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT/"scripts"))
+ROOT = Path(os.environ.get("ZEUS_ROOT") or ("/home/llewyn/crypto-scalping" if Path("/home/llewyn/crypto-scalping").exists() else Path.home()/"crypto-scalping")); sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT/"scripts"))
 # 🔴원본 라벨 함수의 ADX 폴백을 그대로 쓴다. 첫 실행에서 이걸 빼고 fillna(0) 로 때웠더니
 #   adx 가 전부 0 -> `adx < weak_adx_max(12)` 가 항상 참 -> **라벨이 100% chop** 이 됐다.
 from train_regime3_hmm_mamba_20260529 import _adx  # noqa: E402

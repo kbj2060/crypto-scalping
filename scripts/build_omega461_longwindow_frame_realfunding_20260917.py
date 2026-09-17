@@ -16,9 +16,9 @@ A단계의 결함을 고친 판이다. 옛 판은 펀딩 원천이 `TOTAL_ETHUSD
 원천: eth_5m_2021_2023_archive.csv(2021-12~2023-12 완전 OHLCV) + BV 패널 · OI/LSR·BTC 는
 BV 패널 · 펀딩은 위 복구본. 2021-12 는 **웜업**으로 쓰고 산출은 2022-01-01 부터다.
 """
-import sys, numpy as np, pandas as pd, joblib
+import os, sys, numpy as np, pandas as pd, joblib
 from pathlib import Path
-ROOT = Path("/home/llewyn/crypto-scalping"); sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT/"scripts"))
+ROOT = Path(os.environ.get("ZEUS_ROOT") or ("/home/llewyn/crypto-scalping" if Path("/home/llewyn/crypto-scalping").exists() else Path.home()/"crypto-scalping")); sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT/"scripts"))
 from features.engineering import FeatureEngineer
 from retrain_clean_regime_hmm_raw_state12_20260517 import _with_raw_state12
 
