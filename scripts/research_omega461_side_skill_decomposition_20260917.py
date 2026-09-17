@@ -353,6 +353,7 @@ def deployed() -> int:
     같은 자로 재지 않으면 「배포본이 이겼다」가 아니라 「배포본만 시험을 덜 봤다」가 된다.
     게이트는 **배포본의 실제 임계값 q=0.75 단일**(내 대칭게이트는 내 변경분이라 안 씌운다).
     """
+    E.OUT.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"지평={HZ} · device={device} · 배포본 단일 q={E.Q_THRESH} · 추론만(학습 없음)")
     df, base_cols = E.load()
@@ -497,6 +498,7 @@ def exitgrid() -> int:
     자를 위험**이 크다. TP·SL 격자를 intrabar 로 실제 시뮬해 전부 보고한다(한 칸만 고르면 선택이다).
     대상은 배포 부모(고정 아티팩트, 추론만) · 그 학습구간과 안 겹치는 폴드.
     """
+    E.OUT.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     horizon = BARS[HZ]
     log(f"지평={HZ}({horizon}봉) · 배포본 q={E.Q_THRESH} · intrabar 고가/저가 · SL 우선")
@@ -622,6 +624,7 @@ def labelrate() -> int:
     전 봉(2022-01~2026-08)에서 양쪽 다 계산해 **활성률**과 **후보/일**을 낸다.
     ⚠️이건 라벨 활성률이지 «게이트 통과 후 거래수»가 아니다 -- 품질 머리가 다시 거른다.
     """
+    E.OUT.mkdir(parents=True, exist_ok=True)
     horizon = BARS[HZ]
     df, _ = E.load()
     hi = pd.to_numeric(df["high"]).to_numpy(np.float64)
@@ -752,6 +755,7 @@ def nocap() -> int:
     하루 거래수 = 288봉 / 평균보유봉 (슬롯이 비는 시간은 무시한 **상한**이다 --
     실제로는 후보가 그때 없을 수 있어 이보다 적다).
     """
+    E.OUT.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"이중 배리어(시간청산 없음) · 최대 {MAXBARS}봉({MAXBARS/288:.1f}일) · 배포본 q={E.Q_THRESH}")
     df, base_cols = E.load()
@@ -840,6 +844,7 @@ def volatr() -> int:
     시간 배리어는 없다(이중 배리어). 건당이 아니라 **하루 기준 순bp** 로 판정한다 --
     폭이 넓어지면 건당은 오르지만 거래수가 줄어 상쇄되기 때문이다.
     """
+    E.OUT.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"이중 배리어 · 최대 {MAXBARS}봉 · 배포본 q={E.Q_THRESH} · ATR 창 {ATR_WINDOWS}")
     df, base_cols = E.load()
@@ -970,6 +975,7 @@ def buildlabel() -> int:
     ⚠️미해소 건은 `tb_resolved=False` 로 표시하고 action 계산에서 **CASH 로 둔다** --
     14일 안에 어느 배리어도 못 닿은 봉을 「좋은 진입」이라 가르치지 않는다.
     """
+    E.OUT.mkdir(parents=True, exist_ok=True)
     df, _ = E.load()
     hi = pd.to_numeric(df["high"]).to_numpy(np.float64)
     lo = pd.to_numeric(df["low"]).to_numpy(np.float64)
@@ -1077,6 +1083,7 @@ def baserate() -> int:
     라벨의 무조건부 적중률 p0(= 그 측면이 SL 보다 TP 를 먼저 맞을 확률)와 p* 의 차이가
     **품질 머리가 메워야 할 간격**이다. p0 가 p* 에 가까울수록 「선택」에만 전부를 거는 내기다.
     """
+    E.OUT.mkdir(parents=True, exist_ok=True)
     df, _ = E.load()
     hi = pd.to_numeric(df["high"]).to_numpy(np.float64)
     lo = pd.to_numeric(df["low"]).to_numpy(np.float64)
@@ -1132,6 +1139,7 @@ def qcalib() -> int:
     끝난다(사다리 1단 「안 해도 되는가」). 그래서 q 분위별 실현 p 를 먼저 잰다.
     대조: 방향 확신도(direction softmax max)도 같이 낸다 -- 어느 쪽이 p 를 아는지 가른다.
     """
+    E.OUT.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     b_ = TP_BP, SL_BP = BASE_TP * 1e4, BASE_SL * 1e4
     cost = 1.02
@@ -1223,8 +1231,107 @@ def qcalib() -> int:
     return 0
 
 
+def routing() -> int:
+    """--routing: **레짐 라우터가 실제로 기여하는가.** 추론만(학습 없음).
+
+    배포 번들의 세 전문가(bull/bear/chop)를 **다르게 배정**해 비교한다. 핵심 귀무는
+    ⭐**무작위 라우팅** -- 같은 전문가, 같은 배정 «비율», 틀린 배정. 현행과 차이가 없으면
+    전문가들이 서로 교환 가능하다는 뜻이고 라우터는 장식이다.
+
+    사전 지정 팔:
+      R0 하드 라우팅(현행, argmax)     R1 확률가중 평균(soft)     R2 균등 평균
+      R3 항상 bull / bear / chop       R4 무작위 라우팅(비율 보존, 시드 5개)
+    평가는 Zeus 규약: 더블 배리어 TP1.5%/SL1% · 게이트 q=0.75 · 하루 순bp 로 읽는다.
+    """
+    E.OUT.mkdir(parents=True, exist_ok=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    TPB, SLB, cost = BASE_TP * 1e4, BASE_SL * 1e4, 1.02
+    imp = lambda g: (g + SLB) / (TPB + SLB)
+    log(f"더블 배리어 TP{BASE_TP*100:g}%/SL{BASE_SL*100:g}% · q={E.Q_THRESH} · 비용 {cost}bp · 추론만")
+    df, base_cols = E.load()
+    bun = torch.load(E.BUNDLE, map_location="cpu", weights_only=False)
+    EN = ("bull", "bear", "chop")
+    experts = {}
+    for ename in EN:
+        pay = dict(bun["models"][ename])
+        m = tabm.ThreeHeadTabM(int(pay["n_features"]),
+                               cfg=tabm.ThreeHeadConfig(**dict(pay["config"]))).to(device)
+        m.load_state_dict(pay["state_dict"]); m.eval()
+        experts[ename] = (m, dict(pay["scaler"]))
+
+    segs = []
+    for name, _t0, _t1, v0, v1 in FOLDS:
+        if not (v1 < DEPLOYED_SEEN[0] or v0 > DEPLOYED_SEEN[1]):
+            continue
+        te = df[(df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")].reset_index(drop=True)
+        xr = tabm._base_input(te, base_cols)
+        rp = tabm._route_probs(te)
+        # ⭐전문가 «셋 다» 모든 봉에 돌려놓는다 -- 이후 배정만 바꿔 재조합한다(추론 1회로 끝)
+        Dall = np.zeros((3, len(te), 3)); Qall = np.zeros((3, len(te), 3))
+        for ei, ename in enumerate(EN):
+            m, sc = experts[ename]
+            Dall[ei], Qall[ei] = E.heads(m, tabm._standardize_apply(xr, sc), device)
+        segs.append((name, te, rp, Dall, Qall))
+        log(f"  {name}: {len(te):,}봉 · 전문가 3종 전수 추론 완료 · "
+            f"라우팅 비율 {np.bincount(rp.argmax(1), minlength=3) / len(te)}")
+
+    def econ(assign_fn, tag, seed=None):
+        pnl, hold, days = [], [], []
+        for name, te, rp, Dall, Qall in segs:
+            a = assign_fn(rp, seed)
+            if a.ndim == 1:                       # 봉별 전문가 선택
+                D = Dall[a, np.arange(len(te))]; Q = Qall[a, np.arange(len(te))]
+            else:                                 # 가중 혼합 (a: (n,3))
+                D = np.einsum("en f,n e->n f", Dall, a); Q = np.einsum("en f,n e->n f", Qall, a)
+            _, side = F.gate(D, Q, E.Q_THRESH)
+            idx = np.where(side != 0)[0]
+            if len(idx) < 50:
+                continue
+            hi = pd.to_numeric(te["high"]).to_numpy(np.float64)
+            lo = pd.to_numeric(te["low"]).to_numpy(np.float64)
+            cl = pd.to_numeric(te["close"]).to_numpy(np.float64)
+            r, h, _rs, _rn, _m = _first_touch_open(idx, side, hi, lo, cl, BASE_TP, BASE_SL, MAXBARS)
+            pnl.append(r * 1e4 - cost); hold.append(h.astype(float))
+            days.append(te.timestamp.dt.floor("D").to_numpy()[idx])
+        pnl = np.concatenate(pnl); hold = np.concatenate(hold); days = np.concatenate(days)
+        lo_, hi_, nd = E.block_ci(pnl, days)
+        pdy = 288.0 / max(hold.mean(), 1e-9)
+        return {"arm": tag, "n": int(len(pnl)), "indep_days": nd, "gross_bp": float(pnl.mean()),
+                "ci95": [lo_, hi_], "p": imp(float(pnl.mean()) + cost), "trades_per_day": pdy,
+                "median_hold": float(np.median(hold)),
+                "net_day_usdc": (float(pnl.mean()) - 0.0) * pdy}
+
+    rows = [econ(lambda rp, s: rp.argmax(1), "R0 하드 라우팅(현행)"),
+            econ(lambda rp, s: rp, "R1 확률가중 평균"),
+            econ(lambda rp, s: np.full_like(rp, 1 / 3), "R2 균등 평균")]
+    for ei, ename in enumerate(EN):
+        rows.append(econ(lambda rp, s, _e=ei: np.full(len(rp), _e), f"R3 항상 {ename}"))
+    for sd in (11, 22, 33, 44, 55):
+        def shuf(rp, s):
+            rg = np.random.default_rng(s)
+            return rg.permutation(rp.argmax(1))    # ⭐비율 보존 · 배정만 무작위
+        rows.append(econ(shuf, f"R4 무작위 라우팅(시드{sd})", seed=sd))
+
+    log(f"\n{'='*106}\n■ 레짐 라우터 기여 (더블배리어 · q=0.75 · 4폴드)")
+    log(f"{'팔':<24}{'건수':>8}{'독립일':>7}{'건당bp':>9}{'함축p':>8}{'CI':>20}{'중앙보유':>9}{'건/일':>7}{'순/일':>8}")
+    for r in rows:
+        log(f"{r['arm']:<24}{r['n']:>8,}{r['indep_days']:>7}{r['gross_bp']:>+9.2f}{r['p']*100:>7.2f}%"
+            f"  [{r['ci95'][0]:+7.2f},{r['ci95'][1]:+7.2f}]{r['median_hold']:>9.0f}"
+            f"{r['trades_per_day']:>7.2f}{r['net_day_usdc']:>8.1f}")
+    r0 = rows[0]; r4 = [r for r in rows if r["arm"].startswith("R4")]
+    m4 = float(np.mean([r["gross_bp"] for r in r4]))
+    log(f"\n⭐R0(현행) − R4(무작위 라우팅 5시드 평균) = {r0['gross_bp'] - m4:+.2f}bp "
+        f"· R4 범위 [{min(r['gross_bp'] for r in r4):+.2f},{max(r['gross_bp'] for r in r4):+.2f}]")
+    log("  (차이가 R4 시드 범위 안이면 **라우터는 장식**이다 -- 전문가가 서로 교환 가능하다는 뜻)")
+    OUTD = E.OUT; OUTD.mkdir(parents=True, exist_ok=True)
+    (OUTD / "stageO_routing.json").write_text(json.dumps(rows, indent=2, default=float))
+    log(f"저장: {OUTD}/stageO_routing.json")
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(
+        routing() if "--routing" in sys.argv else
         qcalib() if "--qcalib" in sys.argv else
         baserate() if "--baserate" in sys.argv else
         buildlabel() if "--buildlabel" in sys.argv else

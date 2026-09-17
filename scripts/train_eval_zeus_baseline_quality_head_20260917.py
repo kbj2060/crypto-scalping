@@ -125,6 +125,7 @@ def econ(pnl, hold, days, tag):
 
 
 def main() -> int:
+    E.OUT.mkdir(parents=True, exist_ok=True)   # 서버엔 있었지만 dev 엔 없다
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"device={device} · seeds={SEEDS} · 배리어 TP{K.BASE_TP*100:g}%/SL{K.BASE_SL*100:g}% 더블")
     df, base_cols = E.load()
