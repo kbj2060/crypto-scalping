@@ -48,7 +48,7 @@ ARMS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("-
         or ["N0", "N1", "N2"])
 # 🔴모르는 팔 이름을 «조용히 무시»하면 빈 결과가 표에서 그냥 빠진다(2026-09-17 실제 발생:
 # 서버에 N5 블록이 없는 옛 판이 있었는데 에러 없이 N5 행만 사라졌다).
-_KNOWN = {"N0", "N1", "N1b", "N2", "N3", "N4", "N5"}
+_KNOWN = {"N0", "N1", "N1b", "N2", "N3", "N4", "N5", "N6", "N0x2"}
 assert set(ARMS) <= _KNOWN, f"모르는 팔: {sorted(set(ARMS) - _KNOWN)} (스크립트 판이 오래됐을 수 있다)"
 # --frame=HMM : 레짐 6열을 HMM 판으로 바꾼다(열 이름은 같으므로 학습 코드는 그대로).
 # ⚠️두 프레임을 섞지 않도록 캐시/산출물 이름을 분리한다.
@@ -89,7 +89,7 @@ def main() -> int:
         f"더블배리어 TP{K.BASE_TP*100:g}%/SL{K.BASE_SL*100:g}%")
     df, base_cols = E.load()
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
-    store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4", "N5")}
+    store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4", "N5", "N6", "N0x2")}
 
     for name, t0, t1, v0, v1 in FOLDS:
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
@@ -241,6 +241,25 @@ def main() -> int:
                 Q = Q / np.maximum(Q.sum(1, keepdims=True), 1e-12)
                 store["N2"].append((name, te, D, Q)); log(f"  N2/seed {sd} 완료")
 
+    # ── 파생 팔 (추가 학습 0, 캐시된 확률을 재조합만) ──
+    # N6: 사용자 구상 -- balnobb 레짐 라우팅 후 **두 부모(zigzag · h48) 앙상블**.
+    #     store 는 폴드-major, 시드-minor 로 쌓이므로 같은 인덱스끼리 짝지으면 된다.
+    # N0x2: ⭐용량 대조 -- 같은 zigzag 라벨 부모 «2개»(시드 i, i+1) 앙상블. 모델 수가 N6 와
+    #     같다(6개). 이게 「두 라벨을 섞어서」와 「모델을 2배 써서」를 가른다.
+    if store["N0"] and store["N5"]:
+        assert len(store["N0"]) == len(store["N5"]), "N0/N5 폴드×시드 길이 불일치"
+        for (n0, te0, D0, Q0), (n5, _te5, D5, Q5) in zip(store["N0"], store["N5"]):
+            assert n0 == n5, f"폴드 정렬 어긋남 {n0} vs {n5}"
+            store["N6"].append((n0, te0, (D0 + D5) / 2.0, (Q0 + Q5) / 2.0))
+        log(f"  N6 재조합 완료 ({len(store['N6'])}개 = 폴드×시드)")
+    if store["N0"]:
+        S = len(SEEDS)
+        for i, (n0, te0, D0, Q0) in enumerate(store["N0"]):
+            j = (i // S) * S + ((i % S) + 1) % S          # 같은 폴드의 다음 시드
+            _n, _t, D1, Q1 = store["N0"][j]
+            store["N0x2"].append((n0, te0, (D0 + D1) / 2.0, (Q0 + Q1) / 2.0))
+        log(f"  N0x2(용량 대조) 재조합 완료 ({len(store['N0x2'])}개)")
+
     # ── 건수 맞춘 평가 ──
     rows = []
     for arm, segs in store.items():
@@ -269,7 +288,7 @@ def main() -> int:
     D_ = pd.DataFrame(rows)
     log(f"\n{'='*104}\n■ 라우팅 유무 · 측면 분리 (건수맞춤 {TARGET_N:,} · 더블배리어 · 4폴드)")
     log(f"{'팔':<6}{'모델수':>7}{'건수':>8}{'건당bp':>9}{'함축p':>8}{'CI':>20}{'건/일':>7}{'순/일':>8}")
-    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2, "N3": 6, "N4": 3, "N5": 3}
+    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2, "N3": 6, "N4": 3, "N5": 3, "N6": 6, "N0x2": 6}
     for arm, g in D_.groupby("arm", sort=False):
         log(f"{arm:<6}{NM[arm]:>7}{int(g.n.mean()):>8,}{g.gross_bp.mean():>+9.2f}{g.p.mean()*100:>7.2f}%"
             f"  [{g.ci95.apply(lambda x: x[0]).mean():+7.2f},{g.ci95.apply(lambda x: x[1]).mean():+7.2f}]"
