@@ -14,9 +14,14 @@
  · 판정은 **하루 순bp**(건당 × 건/일 − 비용) -- 건당만 보면 「폭 넓히기」가 항상 이긴다.
 
 ## 대조군 (사전 지정)
- A. 배포 품질머리 (고정 아티팩트, 재학습 없음)         <- 현재 baseline
- B. 새 라벨 품질머리 (이 스크립트)
- C. 품질머리 없음(방향만, q 게이트 해제)                <- 품질 머리가 «일을 하는가»
+ A. 배포 zig075 (고정, 재학습 없음)   <- 현재 baseline. 계약상 `quality_mode=same_as_direction`,
+    `quality_label_dir=None` -- **두 머리에 같은 zigzag 라벨**을 먹인다. 그래서 q≥0.75 게이트는
+    사실상 **방향 확신도 임계값**이고, 그것만으로 p 를 40.3%→47.2% 로 올린다.
+ B. 방향=zigzag · 품질=새 라벨        <- A 의 «두 머리 정렬»을 깨뜨린 판
+ C. 품질머리 없음(방향만, 게이트 해제) <- 게이트가 «일을 하는가»
+ D. **방향·품질 둘 다 새 라벨**        <- A 의 구조를 새 라벨로 복제. ⚠️진입 신호 자체가 바뀐다
+    (모델이 zigzag 방향이 아니라 「어느 배리어가 먼저 닿는가」를 예측하게 된다)
+ A2. 배포 h48qual (고정, q=0.50)      <- 부모 선택을 같은 자로 한 번 확인
 """
 from __future__ import annotations
 import json, sys
@@ -44,6 +49,11 @@ LABEL = LABEL_DIR / f"{_LN}.parquet"
 OUTJ = E.OUT / f"stageM_zeus_quality_head_{_LN}.json"
 CACHE = E.OUT / f"stageM_probs_{_LN}.npz"
 COST = {"usdc": 1.02, "peg": 5.52}
+H48_BUNDLE = (ROOT / "tmp/causal_regen_20260516"
+              / "omega4_3head_parent72_loose_entry_quality_20260620_zigzagfix_06"
+                "_h48_quality_noctx_padded_e2_fulltrain_exit30k_20260630"
+              / "true_3head_tabm_bundle.pt")
+H48_Q = 0.50
 
 
 def log(*a, **k): print(*a, flush=True)
@@ -128,17 +138,22 @@ def main() -> int:
     agree = float((df.y_qual.to_numpy() == pd.to_numeric(df.zigzag_action).to_numpy()).mean())
     log(f"⭐방향(zigzag) vs 품질(더블배리어) 타깃 일치율 {agree:.4f}")
 
-    b = torch.load(E.BUNDLE, map_location="cpu", weights_only=False)
-    dep = {}
-    for ename in ("bull", "bear", "chop"):
-        pay = dict(b["models"][ename])
-        m = tabm.ThreeHeadTabM(int(pay["n_features"]),
-                               cfg=tabm.ThreeHeadConfig(**dict(pay["config"]))).to(device)
-        m.load_state_dict(pay["state_dict"]); m.eval()
-        dep[ename] = (m, dict(pay["scaler"]))
+    def load_bundle(path):
+        b = torch.load(path, map_location="cpu", weights_only=False)
+        out = {}
+        for ename in ("bull", "bear", "chop"):
+            pay = dict(b["models"][ename])
+            m = tabm.ThreeHeadTabM(int(pay["n_features"]),
+                                   cfg=tabm.ThreeHeadConfig(**dict(pay["config"]))).to(device)
+            m.load_state_dict(pay["state_dict"]); m.eval()
+            out[ename] = (m, dict(pay["scaler"]))
+        return out
+    dep = load_bundle(E.BUNDLE)
+    dep48 = load_bundle(H48_BUNDLE) if H48_BUNDLE.exists() else None
+    log(f"h48qual 번들 {'로드' if dep48 else '없음 -- A2 건너뜀'}")
 
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
-    rows, pooled = [], {"A": [], "B": [], "C": []}
+    rows, pooled = [], {k: [] for k in ("A", "A2", "B", "C", "D")}
     for name, t0, t1, v0, v1 in K.FOLDS:
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
         vm = (df.timestamp >= v0) & (df.timestamp <= v1 + " 23:59:59")
@@ -152,13 +167,16 @@ def main() -> int:
         n = len(tr); split = max(int(n * 0.85), min(n - 1, 512))
         log(f"\n{'='*92}\n=== {name} TRAIN {t0}~{t1} {n:,} · TEST {v0}~{v1} {len(te):,}\n{'='*92}")
 
-        # ── A. 배포 품질머리 ──
-        D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
-        for ei, ename in enumerate(("bull", "bear", "chop")):
-            m, sc = dep[ename]
-            sel = ev == ei
-            if sel.any():
-                D[sel], Q[sel] = E.heads(m, tabm._standardize_apply(xv_raw[sel], sc), device)
+        # ── A / A2. 배포 부모 둘 (고정 아티팩트) ──
+        def infer(bundle):
+            Dd = np.zeros((len(te), 3)); Qq = np.zeros((len(te), 3))
+            for ei, ename in enumerate(("bull", "bear", "chop")):
+                m, sc = bundle[ename]
+                sel = ev == ei
+                if sel.any():
+                    Dd[sel], Qq[sel] = E.heads(m, tabm._standardize_apply(xv_raw[sel], sc), device)
+            return Dd, Qq
+        D, Q = infer(dep)
         seen = not (v1 < K.DEPLOYED_SEEN[0] or v0 > K.DEPLOYED_SEEN[1])
 
         # ── B. 새 라벨 품질머리 ──
@@ -192,10 +210,45 @@ def main() -> int:
         Dm, Qm = np.mean(Ds, 0), np.mean(Qs, 0)
         ql, qsh = H.thresholds(tDm, tQm, symmetric=True)
 
+        # ── D. 방향·품질 둘 다 새 라벨 (A 의 구조를 새 라벨로 복제) ──
+        ckd = f"{name}|D"
+        if ckd in cache:
+            z = dict(cache[ckd].item()); Dsd, Qsd, tDd, tQd = list(z["Ds"]), list(z["Qs"]), z["tDm"], z["tQm"]
+        else:
+            xs, scaler = tabm._standardize_fit(tabm._base_input(tr, base_cols))
+            xv_std = tabm._standardize_apply(xv_raw, scaler)
+            tail_expert = rt[split:].argmax(1)
+            Dsd, Qsd, tDs, tQs = [], [], [], []
+            for seed in SEEDS:
+                Db = np.zeros((len(te), 3)); Qb = np.zeros((len(te), 3))
+                tD = np.zeros((n - split, 3)); tQ = np.zeros((n - split, 3))
+                for ei in range(3):
+                    w = H.w_old(yq_t, rt[:, ei].astype(np.float32))   # 클래스균형도 새 라벨 기준
+                    mm, _ = fit(xs[:split], yq_t[:split], yq_t[:split], w[:split],
+                                xs[split:], yq_t[split:], yq_t[split:], w[split:],
+                                seed=seed, ei=ei, device=device)
+                    sel = ev == ei
+                    if sel.any():
+                        Db[sel], Qb[sel] = E.heads(mm, xv_std[sel], device)
+                    ts_ = tail_expert == ei
+                    if ts_.any():
+                        tD[ts_], tQ[ts_] = E.heads(mm, xs[split:][ts_], device)
+                Dsd.append(Db); Qsd.append(Qb); tDs.append(tD); tQs.append(tQ)
+                log(f"  D/seed {seed} 완료")
+            tDd, tQd = np.mean(tDs, 0), np.mean(tQs, 0)
+            cache[ckd] = np.array({"Ds": Dsd, "Qs": Qsd, "tDm": tDd, "tQm": tQd}, dtype=object)
+            np.savez(CACHE, **cache)
+        Dmd, Qmd = np.mean(Dsd, 0), np.mean(Qsd, 0)
+        qld, qshd = H.thresholds(tDd, tQd, symmetric=True)
+
         arms = {"B": H.side_from(Dm, Qm, ql, qsh),
-                "C": np.where(Dm.argmax(1) == 1, 1.0, np.where(Dm.argmax(1) == 2, -1.0, 0.0))}
+                "C": np.where(Dm.argmax(1) == 1, 1.0, np.where(Dm.argmax(1) == 2, -1.0, 0.0)),
+                "D": H.side_from(Dmd, Qmd, qld, qshd)}
         if not seen:
             arms["A"] = F.gate(D, Q, E.Q_THRESH)[1]
+            if dep48 is not None:
+                D2, Q2 = infer(dep48)
+                arms["A2"] = F.gate(D2, Q2, H48_Q)[1]
         for tag, side in arms.items():
             idx = np.where(side != 0)[0]
             if len(idx) < 100:
@@ -212,8 +265,9 @@ def main() -> int:
     log(f"{'팔':<4}{'폴드':>5}{'건수':>8}{'건당bp':>9}{'CI':>20}{'중앙보유':>9}{'건/일':>7}"
         f"{'순/일USDC':>10}{'순/일peg':>9}")
     summ = {}
-    names = {"A": "배포 품질머리", "B": "새 라벨 품질머리", "C": "품질머리 없음"}
-    for tag in ("A", "B", "C"):
+    names = {"A": "배포 zig075", "A2": "배포 h48qual", "B": "방향zz·품질새",
+             "C": "게이트 없음", "D": "방향·품질 둘다 새"}
+    for tag in ("A", "A2", "B", "C", "D"):
         if not pooled[tag]:
             continue
         pnl = np.concatenate([x[0] for x in pooled[tag]])
@@ -227,9 +281,10 @@ def main() -> int:
     if "A" in summ and "B" in summ:
         log(f"\n⭐B − A (순bp/일 USDC) = {summ['B']['net_day_usdc'] - summ['A']['net_day_usdc']:+.1f}"
             f"   ⚠️A 는 배포 학습구간 밖 폴드만이라 폴드 집합이 다르다 -- 폴드별 표를 같이 본다")
-    if "C" in summ and "B" in summ:
-        log(f"⭐B − C (순bp/일 USDC) = {summ['B']['net_day_usdc'] - summ['C']['net_day_usdc']:+.1f}"
-            f"   (품질 머리가 실제로 일을 하는가)")
+    for t in ("B", "C", "D", "A2"):
+        if t in summ and "A" in summ:
+            log(f"⭐{t} − A (순bp/일 USDC) = {summ[t]['net_day_usdc'] - summ['A']['net_day_usdc']:+.1f}"
+                f"   {names[t]}")
     json.dump({"folds": rows, "pooled": summ, "label": str(LABEL),
                "tp": K.BASE_TP, "sl": K.BASE_SL, "seeds": SEEDS}, open(OUTJ, "w"), indent=2, default=float)
     log(f"저장: {OUTJ}")
