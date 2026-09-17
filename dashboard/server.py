@@ -2044,10 +2044,20 @@ def make_app() -> web.Application:
             return {"available": True, "bars": int(len(df)),
                     "btc_bars": int(len(btc_df)) if btc_df is not None else 0}
 
+        # 🔴max_stale=0 이어야 한다. 이 캐시를 데우는 곳은 /api/market-history 하나뿐인데
+        # (위 load_market_history_from_evidence_cache 의 유일한 호출부), 프런트 폴링 주기는
+        # CANDLE_HISTORY_POLL_MS=300초로 TTL 60초의 5배다 -- 그래서 «매 요청이» age>ttl 로
+        # 낡은 가지를 타고 **5분 묵은 프레임**을 받아갔다. 거기에 위의 형성봉 버리기가 겹쳐
+        # 마지막 봉이 «현재봉-2」가 되는데, 클라이언트(updateSnapshotCandleLive)는 현재 버킷
+        # 한 봉만 밀어 넣으므로 그 사이가 **상시 한 봉짜리 구멍**으로 남았다. 풋프린트·청산맵이
+        # 같은 캔들 배열을 그리므로 둘 다 같이 빈다. 2026-09-17 실측: 14:06:02 첫 호출 13:55,
+        # 19초 뒤 재호출 14:00 -- 낡은 값을 주고 뒤에서 갱신하던 게 그대로 보였다.
+        # 0 으로 두면 매 폴링이 klines 왕복을 기다려 「현재봉-1」을 주고 클라가 한 봉 메워
+        # 정확히 맞는다. 5분에 한 번 왕복이라 SWR 도입 이전과 같은 비용이다.
         return await swr_cached(
             "evidence_signal", EVIDENCE_SIGNAL_CACHE_SECONDS, produce,
             cache=evidence_signal_cache,
-            max_stale=STALE_GRACE_SECONDS,
+            max_stale=0.0,
         )
     async def load_v_rebound_signal() -> dict[str, Any]:
         """유동성스윕 반등예측 event-triggered signal -- see
