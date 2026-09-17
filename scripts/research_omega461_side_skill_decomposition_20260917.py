@@ -845,10 +845,10 @@ def volatr() -> int:
         m.load_state_dict(pay["state_dict"]); m.eval()
         experts[ename] = (m, dict(pay["scaler"]))
     atrs = {w: _atr_win(df, w) for w in ATR_WINDOWS}
-    med = {w: float(np.nanmedian(atrs[w])) for w in ATR_WINDOWS}
-    log("ATR 중앙값: " + " · ".join(f"창{w} {med[w]*100:.4f}%" for w in ATR_WINDOWS))
+    allmed = {w: float(np.nanmedian(atrs[w])) for w in ATR_WINDOWS}
+    log("전체 봉 ATR 중앙값: " + " · ".join(f"창{w} {allmed[w]*100:.4f}%" for w in ATR_WINDOWS))
     log("  (라이브 배수 12/6 을 쓰면 tp/sl = "
-        + " · ".join(f"{12*med[w]*100:.2f}%/{6*med[w]*100:.2f}%(창{w})" for w in ATR_WINDOWS) + ")")
+        + " · ".join(f"{12*allmed[w]*100:.2f}%/{6*allmed[w]*100:.2f}%(창{w})" for w in ATR_WINDOWS) + ")")
 
     seg = []
     for name, _t0, _t1, v0, v1 in FOLDS:
@@ -867,6 +867,14 @@ def volatr() -> int:
         idx = np.where(side != 0)[0]
         seg.append((name, te, side, idx, {w: atrs[w][mask] for w in ATR_WINDOWS}))
         log(f"  {name}: 후보 {len(idx):,}건")
+
+    # ⭐배수는 **후보 봉**의 ATR 중앙값으로 잡는다. 전체 봉으로 잡으면 실현 폭이 대조군과
+    # 어긋나 「적응」이 아니라 「폭」을 재게 된다(1차 측정에서 실제로 10/10 이 그렇게 어긋났다).
+    med = {w: float(np.nanmedian(np.concatenate([a[w][ix] for _n, _t, _s, ix, a in seg])))
+           for w in ATR_WINDOWS}
+    for w in ATR_WINDOWS:
+        log(f"후보 봉 ATR 중앙값 창{w}: {med[w]*100:.4f}% "
+            f"(전체 봉 대비 {med[w]/allmed[w]*100:.1f}% -- 부모가 조용한 봉에서 발화한다)")
 
     def run(tp, sl):
         """tp/sl 은 스칼라(정적) 또는 {폴드명: **건당** 배열}(ATR 비례).
