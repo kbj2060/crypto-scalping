@@ -2791,7 +2791,17 @@ class FinalGovernorRuntime:
     )
 
     def __init__(self) -> None:
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # 2026-09-17: "cuda" -> "cpu". 이 값이 쓰이는 곳은 아래 둘뿐이다 --
+        # Omega462SourceParentConfig(device=self.device) 와 Omega461LiveAdapter(device=self.device).
+        # 즉 **Omega 부모/라이브 어댑터의 디바이스만** 정한다.
+        # 근거: scripts/parity_cuda_vs_cpu_20260917.py -- 배포 번들 2개 × 전문가 3 × VAL 20,000행
+        #   확률 최대 절대차 2.384e-07 · 방향 argmax 불일치 0 · **게이트 최종결정 불일치 0/20,000**
+        # 부모는 파라미터 103,992개를 5분에 한 행 추론한다. GPU 이득이 없는데, 봇이 CUDA 컨텍스트를
+        # 상주로 잡으면 **연구 학습이 VRAM 8GB 를 채울 때 실거래 봇이 피해자가 된다**
+        # (2026-09-13·09-17 DPC_WATCHDOG 0x133 두 번, GPU 팬 풀가동 + 먹통).
+        # ⚠️파리티는 direction/quality 머리에서 쟀다. exit 머리는 같은 번들·같은 크기라 같은
+        # 자릿수로 보지만 직접 재지는 않았다. 되돌리려면 이 한 줄만 "cuda" 로 바꾸면 된다.
+        self.device = "cpu"
         self.notional = float(FINAL_GOVERNOR_NOTIONAL)
         self.leverage = float(FINAL_GOVERNOR_LEVERAGE)
         self.window_bars = int(max(100, FINAL_GOVERNOR_WINDOW_BARS))
