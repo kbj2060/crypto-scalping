@@ -32,6 +32,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import train_eval_omega1_2_tabm_3head_20260603 as tabm  # noqa: E402
 import train_eval_omega461_parent_zig075_longwindow_20260917 as E  # noqa: E402
 import research_omega461_side_skill_decomposition_20260917 as K  # noqa: E402
+import train_eval_zeus_baseline_quality_head_20260917 as Z  # noqa: E402  (두-타깃 fit)
+
+# --qlabel=<파일명 조각> : 품질 머리에만 «다른» 타깃을 준다(N4 용). 방향은 zigzag 유지.
+# 배포 h48qual 의 구조(quality_mode=quality_label_action)를 balnobb 일관 라인에 옮기는 것이다.
+QLABEL = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--qlabel=")),
+              "h48cons_deployed_42bp")
 
 SEEDS = (next((a.split("=", 1)[1].split(",") for a in sys.argv if a.startswith("--seeds=")), None)
          or ["613042", "27851", "904377"])
@@ -50,6 +56,9 @@ FSUF = "" if FRAME == "balnobb" else f"_{FRAME}"
 OUTJ = E.OUT / f"stageP_routing_side_experts{FSUF}.json"
 CACHE = E.OUT / f"stageP_probs{FSUF}.npz"
 TPB, SLB, COST = K.BASE_TP * 1e4, K.BASE_SL * 1e4, 1.02
+
+
+QPATH = (E.OUT.parent / "zeus_h48_quality_labels_20260917" / f"{QLABEL}.parquet")
 
 
 def log(*a): print(*a, flush=True)
@@ -76,7 +85,7 @@ def main() -> int:
         f"더블배리어 TP{K.BASE_TP*100:g}%/SL{K.BASE_SL*100:g}%")
     df, base_cols = E.load()
     cache = dict(np.load(CACHE, allow_pickle=True)) if CACHE.exists() else {}
-    store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3")}
+    store = {a: [] for a in ("N0", "N1", "N1b", "N2", "N3", "N4")}
 
     for name, t0, t1, v0, v1 in FOLDS:
         tm = (df.timestamp >= t0) & (df.timestamp <= t1 + " 23:59:59")
@@ -140,6 +149,30 @@ def main() -> int:
                 store["N1"].append((name, te, D, Q)); log(f"  N1/seed {sd} 완료")
             store["N1b"].append((name, te, np.mean(Ds, 0), np.mean(Qs, 0)))   # 용량 대조(공짜)
 
+        # ── N4: N0 구조 + 품질 타깃만 h48 (배포 h48qual 을 balnobb 라인에 옮긴 것) ──
+        if "N4" in ARMS:
+            ql = pd.read_parquet(QPATH, columns=["timestamp", "tb_action"])
+            ql["timestamp"] = pd.to_datetime(ql["timestamp"])
+            yq_t = (tr[["timestamp"]].merge(ql, on="timestamp", how="left")
+                    .tb_action.fillna(0).to_numpy(np.int64))
+            assert len(yq_t) == n, "품질 라벨 조인 길이 불일치"
+            for sd in SEEDS:
+                D = np.zeros((len(te), 3)); Q = np.zeros((len(te), 3))
+                for ei in range(3):
+                    ck = f"{name}|N4{ei}s{sd}"
+                    if ck in cache:
+                        z = dict(cache[ck].item()); Dd, Qq = z["D"], z["Q"]
+                    else:
+                        w = bal * rt[:, ei].astype(np.float32)
+                        mm, _ = Z.fit(xs[:split], yt[:split], yq_t[:split], w[:split],
+                                      xs[split:], yt[split:], yq_t[split:], w[split:],
+                                      seed=sd, ei=ei, device=device)
+                        Dd, Qq = E.heads(mm, xv, device)
+                        cache[ck] = np.array({"D": Dd, "Q": Qq}, dtype=object); np.savez(CACHE, **cache)
+                    m_ = ev == ei
+                    D[m_], Q[m_] = Dd[m_], Qq[m_]
+                store["N4"].append((name, te, D, Q)); log(f"  N4/seed {sd} 완료")
+
         # ── N3: **레짐 × 측면** (3 레짐 × 2 측면 = 6 모델) ──
         # 레짐 가중 학습(라우팅 유지) + 측면별 부분집합. 추론은 레짐 하드 라우팅으로 전문가
         # 쌍을 고르고, 그 안에서 롱/숏 확률을 비교한다(측면은 예측 대상이라 라우팅 키가 못 된다).
@@ -198,7 +231,7 @@ def main() -> int:
     D_ = pd.DataFrame(rows)
     log(f"\n{'='*104}\n■ 라우팅 유무 · 측면 분리 (건수맞춤 {TARGET_N:,} · 더블배리어 · 4폴드)")
     log(f"{'팔':<6}{'모델수':>7}{'건수':>8}{'건당bp':>9}{'함축p':>8}{'CI':>20}{'건/일':>7}{'순/일':>8}")
-    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2, "N3": 6}
+    NM = {"N0": 3, "N1": 1, "N1b": 3, "N2": 2, "N3": 6, "N4": 3}
     for arm, g in D_.groupby("arm", sort=False):
         log(f"{arm:<6}{NM[arm]:>7}{int(g.n.mean()):>8,}{g.gross_bp.mean():>+9.2f}{g.p.mean()*100:>7.2f}%"
             f"  [{g.ci95.apply(lambda x: x[0]).mean():+7.2f},{g.ci95.apply(lambda x: x[1]).mean():+7.2f}]"
