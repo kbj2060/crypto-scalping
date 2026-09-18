@@ -1143,6 +1143,14 @@ def _zeus_one(tag: str, dirname: str) -> dict[str, Any]:
     cand = [r for r in rows if r.get("ev") == "cand" and not r.get("bf")]
     out: dict[str, Any] = {"tag": tag, "n": len(bps), "target_n": ZEUS_TARGET_FILLS,
                            "n_backfill": sum(1 for r in rows if r.get("ev") == "exit" and r.get("bf"))}
+    # 승격 관문 상태 -- 「왜 주문이 안 나가는가」가 화면에서 바로 읽혀야 한다.
+    man = load_json(base / "execution_promotion_manifest.json")
+    if isinstance(man, dict):
+        out["promotion_eligible"] = bool(man.get("promotion_eligible"))
+        out["promotion_blockers"] = list(man.get("promotion_blockers") or [])
+        ss = man.get("selection_statistics") or {}
+        out["dsr"] = ss.get("deflated_sharpe_ratio")
+        out["pbo"] = ss.get("probability_backtest_overfit")
     if isinstance(st, dict):
         out["last_bar_utc"] = st.get("last_ts")
         out["age_min"] = utc_age_minutes(st.get("last_ts"))

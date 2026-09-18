@@ -2631,6 +2631,13 @@ function zeusShadowIndicatorItem() {
     if (r.in_position) bits.push("보유 중");
     if (r.age_min != null) bits.push(`${r.age_min.toFixed(0)}분 전`);
     if (r.n_backfill) bits.push(`백필 ${r.n_backfill}건 제외`);
+    if (r.promotion_eligible === false) {
+      bits.push(`🔴승격 차단(${(r.promotion_blockers || []).length}건)`);
+      if (r.dsr != null) bits.push(`DSR ${Number(r.dsr).toFixed(3)}`);
+      if (r.pbo != null) bits.push(`PBO ${Number(r.pbo).toFixed(3)}`);
+    } else if (r.promotion_eligible === true) {
+      bits.push("승격 자격 충족");
+    }
     return bits.join(" · ");
   };
   const maxAge = Number(p.max_age_min) || 20;
@@ -2642,6 +2649,9 @@ function zeusShadowIndicatorItem() {
     ...p.rows.map(fmt),
     "",
     "🔴주문을 내지 않습니다. 원장만 씁니다.",
+    "🔴«승격 차단»은 저장소의 집행 관문(promotion manifest)이 거부했다는 뜻입니다 -- "
+      + "어댑터가 이 상태에서 주문 경로를 스스로 끕니다. DSR 은 «탐색 400회를 감안한» "
+      + "샤프이고, 벌점 없는 PSR 은 0.995 입니다(전략이 약한 게 아니라 탐색이 넓었습니다).",
     `🔴체결 ${p.rows[0] && p.rows[0].target_n || 436}건 전까지 손익을 판정하지 않습니다 -- `
       + "이 빈도에서는 최소검출효과가 기대 엣지보다 커서 «판정할 수 없습니다».",
     "⭐백필(과거 따라잡기) 거래는 표본에서 뺍니다 -- 게이트 버퍼를 채우려면 필요하지만 "
