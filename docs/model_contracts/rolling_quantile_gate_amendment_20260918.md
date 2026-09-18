@@ -3,7 +3,19 @@
 **상태: 제안. 승인 전에는 이 규약을 쓰는 모델을 «승격(실주문)»할 수 없다.**
 섀도우(기록 전용)는 이 조문에 걸리지 않으므로 승인 없이 시작할 수 있다.
 
-## 1. 무엇이 막혀 있나
+## 0. 🔴초판 정정 (2026-09-18, 같은 날)
+**초판은 「`qXXX` 파일명 규약이 롤링 분위를 못 담는다」고 적었다. 틀렸다.**
+감사 스크립트 70행이 `f"q{int(round(value*100)):03d}"` 이므로 분위 `0.85` 는 그대로 `q085`,
+`0.983` 은 `q098` 이 된다. 파일명은 처음부터 맞았고, 실제로 만들어 넣었다:
+`{train,validation,oos}_predictions_q085.csv`(v4) · `_q098.csv`(v3).
+`dataset_lineage` 5개 체크도 **전부 pass** 한다(아래 §6).
+
+**진짜로 막는 것은 «모양»이다** — 이 게이트는 `risk_sidecar.pkl` · `baseline_bundle` ·
+`risk_selection_contract` 를 요구하는 **리스크 사이드카 승격용**이다. Zeus v3·v4 는 크기가
+고정이라 사이드카가 없으므로 그 체크들이 **구조적으로** 통과할 수 없다. 개정이 필요한 지점은
+파일명이 아니라 **「사이드카 없는 부모」를 승격 대상으로 인정하는가**다.
+
+## 1. 무엇이 막혀 있나(초판 서술 -- 사실 부분만 남긴다)
 `Omega Artifact Integrity Promotion Gate` 는 parent artifact 가
 `train/validation/oos_predictions_qXXX.csv` 를 포함하고 `qXXX = round(quality_threshold*100)`
 이기를 요구한다. 이 규약은 **임계값이 하나의 절대 확률값**이라고 전제한다.
@@ -24,7 +36,7 @@ Zeus v4 의 게이트는 절대값이 아니다:
   (2026-09-18 실측: 레짐 없는 판이 F3=잃는 창에 발화의 64.7%를 쏟아 +25.39 → +16.54).
   롤링 분위는 그 쏠림을 구조적으로 없앤다.
 
-## 3. 개정 문안 (추가)
+## 3. 개정 문안 (추가) -- 🔴§0 에 따라 (b) 는 «있으면 좋은 것»이고 핵심은 (c) 다
 > `quality_threshold` 는 다음 둘 중 하나로 선언할 수 있다.
 > **(a) 절대형** — 현행 그대로. 파일명 `..._qXXX.csv`, `qXXX = round(threshold*100)`.
 > **(b) 분위형** — `{"kind": "rolling_quantile", "q": <0~1>, "window": <후보 수>,
@@ -49,3 +61,27 @@ Zeus v4 의 게이트는 절대값이 아니다:
 
 ## 5. 적용 대상
 `docs/zeus/README.md §3` 의 Zeus Baseline v4. 승인 전까지 v4 는 **섀도우까지만** 진행한다.
+
+
+## 6. 실측 — 개정 없이 «이미» 충족된 부분 (2026-09-18)
+```
+dataset_lineage_present                      pass
+dataset_lineage_fields_complete              pass
+dataset_lineage_registered_in_manifest       pass
+dataset_lineage_report_matches_manifest      pass
+dataset_lineage_matches_current_file         pass
+정확 임계 예측  v4 q085 · v3 q098  train/validation/oos 3종씩 생성
+```
+🔴**남은 구멍은 「사이드카 없는 부모」 하나뿐이다.** 그래서 필요한 개정 문안은 §3 (b)가 아니라:
+
+> **(c) 사이드카 없는 부모** — `risk_model: null` 이고 `risk_sizing_source` 가 고정 크기임을
+> 명시한 report 는 사이드카 관련 체크(`risk_sidecar.pkl` · `baseline_bundle` ·
+> `risk_selection_contract` · `risk_sidecar_uses_precomputed_parent_predictions`)를 면제하되,
+> **`dataset_lineage` 와 정확 임계 예측 3종은 그대로 요구한다.** 크기를 예측하지 않는 모델에
+> 사이드카를 만들어 붙이는 것은 계약 충족이 아니라 계약 우회다.
+
+## 7. 데이터 스냅샷에 대한 부수 결정
+라벨이 끝나는 2026-08-19 «뒤» 구간은 연구 parquet 에 없고 BV 패널에만 있는데 **패널은 매일
+갱신되므로** 해시를 등재하면 즉시 어긋난다(이 게이트가 잡으려는 실패 그 자체).
+⇒ 그 구간을 **불변 스냅샷**(`<아티팩트>/oos_frame_20260918.parquet`)으로 떠서 매니페스트에
+따로 등재하고, report 의 `dataset_lineage_by_split` 에 적었다.

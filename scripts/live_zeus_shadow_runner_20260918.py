@@ -266,6 +266,21 @@ def scores(F: pd.DataFrame, models, scaler, base_cols, device, i0: int = 0, scor
     return da, D[ar, da] - D[:, 0]        # v4 동결본: D[방향] − D[cash]
 
 
+def threshold_series(sc: np.ndarray, da: np.ndarray, q: float, window: int) -> np.ndarray:
+    """오프라인 일괄판 임계값. 순차 `threshold()` 와 **같은 정의**다(연구 `_thr_seq` 와도 같다):
+    후보(방향≠0)만 모아 `shift(1)` 롤링 분위, 워밍업은 확장창 분위. 봉 격자로 되돌려 준다.
+    ⭐순차판은 «버퍼에 넣기 전에» 문턱을 읽어 같은 인과성을 갖는다 -- 두 경로가 일치한다."""
+    out = np.full(len(sc), np.inf)
+    m = da != 0
+    if not m.any():
+        return out
+    s_ = pd.Series(sc[m]).shift(1)
+    t_ = s_.rolling(window, min_periods=200).quantile(q)
+    t_ = t_.fillna(s_.expanding(min_periods=50).quantile(q))
+    out[np.where(m)[0]] = t_.to_numpy()
+    return out
+
+
 def threshold(buf: list[float], q: float, window: int) -> float:
     """직전 후보들만 본다 -- 현재 점수는 «호출 뒤에» 넣는다(인과)."""
     if len(buf) < 50:
