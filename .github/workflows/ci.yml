@@ -70,6 +70,12 @@ jobs:
           done < changed_files.txt
           exit $fail
 
+      - name: JS syntax check (changed files only)
+        run: |
+          pip install --quiet esprima
+          mapfile -t js < <(grep -E '\.js$' changed_files.txt || true)
+          if [ ${#js[@]} -gt 0 ]; then python scripts/ci_js_syntax_check.py "${js[@]}"; fi
+
       - name: Install pyyaml
         run: pip install --quiet pyyaml
 

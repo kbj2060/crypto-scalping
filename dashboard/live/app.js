@@ -158,6 +158,11 @@ let latestEvrGate = null;
 let evrGateLastFetchAt = 0;
 const API_EVR_GATE_URL = "/api/evr-gate";
 const EVR_GATE_POLL_MS = 120000;
+// Zeus 섀도우(2026-09-18). 🔴주문을 내지 않는 기록 장치다.
+let latestZeusShadow = null;
+let zeusShadowLastFetchAt = 0;
+const API_ZEUS_SHADOW_URL = "/api/zeus-shadow";
+const ZEUS_SHADOW_POLL_MS = 120000;
 let vReboundLastFetchAt = 0;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
@@ -2603,6 +2608,65 @@ function breakoutPrewarnIndicatorItem() {
     history: w.history || [], times: w.times || [] };
 }
 
+// 🔴사전등록(docs/zeus/shadow_prereg_v4_20260918.md): **체결 436건 전까지 수익 판정을 하지
+// 않는다.** 0.8~2.2건/일에서는 MDE 가 기대 엣지보다 커서 «할 수 없다». 그래서 이 카드의 톤은
+// 손익이 아니라 **건전성**(신선도·빈도·진행률)으로 정한다 -- 색으로 승패를 말하지 않는다.
+function zeusShadowIndicatorItem() {
+  const p = latestZeusShadow;
+  const base = { key: "zeus_shadow", label: "Zeus 섀도우 (주문 없음)",
+                 derivedTag: "= 대시보드 자체계산",
+                 derivedTitle: "트레이딩 봇과 완전히 분리된 기록 장치입니다. 주문을 내지 않고, "
+                   + "5분봉마다 결정을 원장에 적기만 합니다. 사전 등록상 체결 436건 전까지 "
+                   + "손익을 판정하지 않습니다." };
+  if (!p || p.error || !p.available || !Array.isArray(p.rows)) {
+    return { ...base, tone: "neutral", subText: !p ? "웜업" : "데이터 없음", history: [], times: [] };
+  }
+  const fmt = (r) => {
+    if (r.error) return `${r.tag}: 오류(${r.error})`;
+    const bits = [`${r.tag}: ${r.n || 0}/${r.target_n}건`];
+    if (r.fills_per_day != null) bits.push(`${r.fills_per_day.toFixed(2)}건/일`);
+    if (r.mean_bp != null) bits.push(`건당 ${r.mean_bp >= 0 ? "+" : ""}${r.mean_bp.toFixed(2)}bp`);
+    if (r.win_rate != null) bits.push(`승률 ${(r.win_rate * 100).toFixed(0)}%`);
+    if (r.reject_rate != null) bits.push(`거절 ${(r.reject_rate * 100).toFixed(0)}%`);
+    if (r.in_position) bits.push("보유 중");
+    if (r.age_min != null) bits.push(`${r.age_min.toFixed(0)}분 전`);
+    if (r.n_backfill) bits.push(`백필 ${r.n_backfill}건 제외`);
+    return bits.join(" · ");
+  };
+  const maxAge = Number(p.max_age_min) || 20;
+  const ages = p.rows.map((r) => (r.age_min == null ? Infinity : r.age_min));
+  const stale = ages.length ? Math.max(...ages) > maxAge : true;
+  const done = p.rows.reduce((a, r) => a + (Number(r.n) || 0), 0);
+  const tone = stale ? "warn" : "neutral";
+  const stateTitle = [
+    ...p.rows.map(fmt),
+    "",
+    "🔴주문을 내지 않습니다. 원장만 씁니다.",
+    `🔴체결 ${p.rows[0] && p.rows[0].target_n || 436}건 전까지 손익을 판정하지 않습니다 -- `
+      + "이 빈도에서는 최소검출효과가 기대 엣지보다 커서 «판정할 수 없습니다».",
+    "⭐백필(과거 따라잡기) 거래는 표본에서 뺍니다 -- 게이트 버퍼를 채우려면 필요하지만 "
+      + "사전등록 표본은 «켠 시점부터»입니다.",
+    stale ? `🔴원장이 ${maxAge}분 넘게 갱신되지 않았습니다 -- 러너를 확인하세요.` : "",
+  ].filter(Boolean).join("\n");
+  return { ...base, tone, subText: `${done}건 누적${stale ? " · 정체" : ""}`,
+           stateTitle, history: [], times: [] };
+}
+
+async function refreshZeusShadow() {
+  const now = Date.now();
+  if (now - zeusShadowLastFetchAt < ZEUS_SHADOW_POLL_MS) return;
+  zeusShadowLastFetchAt = now;
+  try {
+    const res = await fetch(API_ZEUS_SHADOW_URL, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`zeus shadow ${res.status}`);
+    latestZeusShadow = await res.json();
+  } catch (error) {
+    console.error("Zeus shadow fetch error:", error);
+    latestZeusShadow = { error: "fetch_failed" };
+  }
+}
+
+
 async function refreshEvrGate() {
   const now = Date.now();
   if (now - evrGateLastFetchAt < EVR_GATE_POLL_MS) return;
@@ -2906,6 +2970,7 @@ function setupPageTabs() {
       extremeLastFetchAt = 0; refreshExtremeDetector();
       breakoutDetectorLastFetchAt = 0; refreshBreakoutDetector();
       evrGateLastFetchAt = 0; refreshEvrGate();
+      zeusShadowLastFetchAt = 0; refreshZeusShadow();
       volForecastLastFetchAt = 0; refreshVolForecast();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
@@ -4650,6 +4715,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       // 🔴ethOnlyIndicator 로 감싸지 않는다 — 이 게이트는 **20자산 포트폴리오** 지표다.
       ethOnlyIndicator(volForecastIndicatorItem()),       // 2026-09-16 변동성 전망(24h 확장)
       evrGateIndicatorItem(),                             // 2026-09-15 변동폭 게이트(24시간)
+      zeusShadowIndicatorItem(),                          // 2026-09-18 Zeus 섀도우(주문 없음)
     ], "snapSpecializedSignalList", { forceMeter: true });
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
@@ -4702,6 +4768,7 @@ async function tick() {
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshBreakoutDetector();     // 2026-09-11 횡보→추세 전환
       refreshEvrGate();              // 2026-09-15 변동폭 게이트(20자산)
+      refreshZeusShadow();           // 2026-09-18 Zeus 섀도우(주문 없음)
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshVolLevel();             // 2026-09-14 사이징 모델 변동성 예측(4시간 수준)
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
