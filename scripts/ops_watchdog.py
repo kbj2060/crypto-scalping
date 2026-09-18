@@ -431,7 +431,13 @@ def _check_duckdb_table_freshness_uncached(component: str, db_path: Path, table:
 # 09-08에 폐기된 legacy sim_exit 상수이니 기준선으로 쓰지 말 것.
 # 한 건짜리 사고가 아니다: 최악 10건을 빼도 -2.68bp, 전·후반·양 측면·일별 6/8일 모두 음수.
 # 러너 정지 + crontab @reboot 제거와 한 쌍.
-SHADOW_RUNNERS: tuple[tuple[str, str], ...] = ()
+# 2026-09-18 등재: Zeus Baseline v3 섀도우(주문 없음). 동결 docs/zeus/README.md §2 ·
+# 사전등록 docs/zeus/shadow_prereg_v3_20260918.md. 수익은 체결 436건까지 «판정하지 않는다»
+# -- 0.8건/일에서 MDE 가 기대 엣지(+12.56bp)보다 커서 중간 판정이 불가능하기 때문이다.
+# 은퇴할 때는 러너 정지 + @reboot 제거 + 이 줄 삭제가 **한 쌍**이다(위 경고 참조).
+SHADOW_RUNNERS: tuple[tuple[str, str], ...] = (
+    ("zeus_v3_shadow", "zeus_v3_shadow_20260918/state.json"),
+)
 
 
 def check_shadow_runner(component: str, filename: str, warn_minutes: float = 15,

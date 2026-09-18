@@ -168,11 +168,22 @@ def load_state(spec):
         s["buf"] = deque(s["buf"], maxlen=spec["rollq_window"])
         return s
     return {"buf": deque(maxlen=spec["rollq_window"]), "pos": None, "last_ts": None,
-            "n_fill": 0, "n_reject": 0}
+            "n_fill": 0, "n_reject": 0, "closed": [],
+            "started_utc": str(pd.Timestamp.utcnow().tz_localize(None))}
 
 
 def save_state(s):
-    STATE.write_text(json.dumps({**s, "buf": list(s["buf"])}, default=str))
+    """⭐`ops_watchdog.check_shadow_runner` 스키마를 함께 쓴다 -- 감시기 로직을 고치는 대신
+    러너가 규약을 따른다. 감시기는 last_decided_bar_utc·ledger·positions·pending 을 본다."""
+    STATE.write_text(json.dumps({
+        **s, "buf": list(s["buf"]),
+        "last_decided_bar_utc": s.get("last_ts"),
+        "ledger": s.get("closed", []),          # 감시기는 len() 만 본다
+        "positions": [s["pos"]] if s.get("pos") else [],
+        "pending": [],
+        "started_utc": s.get("started_utc"),
+        "rule": "zeus_v3_shadow_20260918 TP1.5/SL0.7 q0.983 1slot noorders",
+    }, default=str))
 
 
 def main() -> int:
@@ -221,6 +232,7 @@ def main() -> int:
                     rec |= {"event": "exit", "reason": hit, "ret_bp": r * 1e4,
                             "hold_bars": p["bars"] + 1, "entry": e, "entry_ts": p["ts"]}
                     st["pos"] = None; st["n_fill"] += 1
+                    st.setdefault("closed", []).append({"ts": ts, "ret_bp": r * 1e4, "reason": hit})
                 else:
                     p["bars"] += 1; rec |= {"event": "hold", "hold_bars": p["bars"]}
             elif side:
