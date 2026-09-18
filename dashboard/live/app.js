@@ -2621,6 +2621,20 @@ function zeusShadowIndicatorItem() {
   if (!p || p.error || !p.available || !Array.isArray(p.rows)) {
     return { ...base, tone: "neutral", subText: !p ? "웜업" : "데이터 없음", history: [], times: [] };
   }
+  const bp = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}bp`;
+  // ⭐평균만 쓰지 않는다 -- 중앙·승률·양수일·«최고 1일 제거»를 같이 보여준다(저장소 규약).
+  //   승률 38%·중앙 −70bp 인 배리어 전략은 평균이 소수 TP 에 실린다.
+  const perf = (p, label) => {
+    if (!p || !p.n) return `${label} 표본 없음`;
+    const b = [`${label} ${p.n}건`];
+    if (p.fills_per_day != null) b.push(`${p.fills_per_day.toFixed(2)}건/일`);
+    b.push(`건당 ${bp(p.mean_bp)}`);
+    if (p.median_bp != null) b.push(`중앙 ${bp(p.median_bp)}`);
+    if (p.win_rate != null) b.push(`승률 ${(p.win_rate * 100).toFixed(0)}%`);
+    if (p.positive_day_rate != null) b.push(`양수일 ${(p.positive_day_rate * 100).toFixed(0)}%`);
+    if (p.mean_bp_drop_top_day != null) b.push(`최고1일 제거 ${bp(p.mean_bp_drop_top_day)}`);
+    return b.join(" · ");
+  };
   const fmt = (r) => {
     if (r.error) return `${r.tag}: 오류(${r.error})`;
     const bits = [`${r.tag}: ${r.n || 0}/${r.target_n}건`];
@@ -2648,6 +2662,17 @@ function zeusShadowIndicatorItem() {
   const stateTitle = [
     ...p.rows.map(fmt),
     "",
+    "── 성과 ──────────────",
+    ...p.rows.flatMap((r) => [
+      `${r.tag} · ${perf(r.live, "사전등록 표본")}`,
+      `${r.tag} · ${perf(r.reference_backfill, "🔸참고(백필)")}`
+        + (r.reference_backfill && r.reference_backfill.span_days
+           ? ` · ${r.reference_backfill.span_days.toFixed(0)}일` : ""),
+    ]),
+    "🔸«참고(백필)»은 러너가 과거를 따라잡으며 만든 것이라 **사전등록 표본이 아닙니다.** "
+      + "지금 가진 유일한 성과 정보라 보여줄 뿐이고, 성과 근거로 인용하면 안 됩니다.",
+    "🔴«최고1일 제거»가 평균과 크게 다르면 그 이익은 하루에 실려 있다는 뜻입니다.",
+    "",
     "🔴주문을 내지 않습니다. 원장만 씁니다.",
     "🔴«승격 차단»은 저장소의 집행 관문(promotion manifest)이 거부했다는 뜻입니다 -- "
       + "어댑터가 이 상태에서 주문 경로를 스스로 끕니다. DSR 은 «탐색 400회를 감안한» "
@@ -2658,7 +2683,10 @@ function zeusShadowIndicatorItem() {
       + "사전등록 표본은 «켠 시점부터»입니다.",
     stale ? `🔴원장이 ${maxAge}분 넘게 갱신되지 않았습니다 -- 러너를 확인하세요.` : "",
   ].filter(Boolean).join("\n");
-  return { ...base, tone, subText: `${done}건 누적${stale ? " · 정체" : ""}`,
+  const ref = p.rows.map((r) => (r.reference_backfill && r.reference_backfill.n
+    ? `${r.tag} 참고 ${bp(r.reference_backfill.mean_bp)}` : null)).filter(Boolean).join(" · ");
+  return { ...base, tone,
+           subText: `표본 ${done}건${ref ? " · " + ref : ""}${stale ? " · 정체" : ""}`,
            stateTitle, history: [], times: [] };
 }
 
