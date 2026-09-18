@@ -164,7 +164,7 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, STOP_LOSS_PCT, build_entry_plan, build_exit_plan, build_stop_plan,
-    exec_enabled, load_filters, realized_vol_bpm)
+    exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position)
 from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa: E402
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
@@ -452,6 +452,14 @@ POSITION_SIZING_MAX_AGE_MIN = 30.0         # 워커 주기 300초 x 6
 
 BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
+# 2026-09-19 수동 진입이 나갈 심볼. **차트·시세·청산맵과 분리한다** -- MARKET_SYMBOLS 는
+# 화면 전체가 공유하므로 그걸 뒤집으면 데이터 출처까지 통째로 바뀐다.
+# ⭐왜 USDC 인가: 계정 실요율(/fapi/v1/commissionRate) ETHUSDT 메이커 2.0bp vs **ETHUSDC 0bp**.
+#   peg-maker 섀도우 실측 전량 왕복 ETHUSDC 1.36bp vs ETHUSDT 5.77bp (2,056 leg, 09-16~).
+# 🔴켜기 전 필수: 계정이 단일자산 담보(multiAssetsMargin=False)면 **USDC 잔고가 있어야** 한다.
+#   2026-09-19 실측 USDT 1,355 / USDC 0 -- 이 상태로 ETHUSDC 주문은 증거금 부족으로 거절된다.
+MANUAL_EXEC_SYMBOL = (os.getenv("DASHBOARD_MANUAL_EXEC_SYMBOL", "").strip().upper()
+                      or MARKET_SYMBOLS["eth"])
 # 대시보드가 **보여줄** 코인 (2026-09-16 사용자 요청 "나머지 코인은 리소스 먹지 않게 비활성").
 # 실측으로 본 실제 절약: 엔드포인트별 코인 계산은 요청이 와야 도는 on-demand(swr_cached, 콜드
 # 0.05초)라 안 쓰면 안 돈다. **무조건 도는 건 SSE 루프의 시세 팬아웃 하나뿐**이었다 --
@@ -2921,7 +2929,7 @@ def make_app() -> web.Application:
         반환: (plan, cap, sizing, error). error 는 (본문, HTTP상태) 또는 None.
         계좌를 같이 읽는 이유 둘: (1) 상한을 **합산 포지션**에 걸어야 하고
         (2) 화면이 «현금 얼마·레버리지 몇 배·청산까지 몇 %»를 말할 수 있어야 한다."""
-        symbol = MARKET_SYMBOLS["eth"]
+        symbol = MANUAL_EXEC_SYMBOL        # 2026-09-19 차트 심볼과 분리(위 상수 주석)
         try:
             sizing = await asyncio.to_thread(position_sizing_payload)
             if not sizing.get("available"):
@@ -3232,20 +3240,24 @@ def make_app() -> web.Application:
 
         수량은 반드시 **방금 읽은 포지션**에서 온다 -- 헤지 모드라 reduceOnly 를 못 써서
         (-1106) 과청산을 막는 게 수량밖에 없다. 캐시된 값을 쓰면 이미 닫힌 포지션을
-        다시 닫으려다 반대 방향으로 열릴 수 있다."""
-        symbol = MARKET_SYMBOLS["eth"]
+        다시 닫으려다 반대 방향으로 열릴 수 있다.
+
+        🔴2026-09-19 심볼도 **설정이 아니라 실제 포지션**에서 온다. 진입 심볼을 USDC 로
+        바꿔도 그 전에 연 ETHUSDT 포지션은 계속 닫을 수 있어야 하고, 반대로 설정값을 믿고
+        보내면 «없는 포지션을 닫는» 주문이 헤지 모드에서 **반대 방향 신규 진입**이 된다."""
+        candidates = list(dict.fromkeys([MANUAL_EXEC_SYMBOL, MARKET_SYMBOLS["eth"]]))
         try:
             # 🔴실주문(fresh=True)은 30초 캐시를 **우회**한다. 헤지 모드라 reduceOnly 가 없어
             # 과청산 방어가 수량뿐인데, 그 수량이 30초 묵으면 방어가 30초 묵는다.
             account = (await produce_account() if fresh else
                        await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
                                         produce_account, max_stale=STALE_GRACE_SECONDS))
-            match = [p for p in (account.get("positions") or [])
-                     if p.get("symbol") == symbol and p.get("side") == position_side]
-            if not match:
+            # 결정 규칙과 자체점검은 live_manual_peg_entry 모듈에 있다(85/85).
+            position, symbol, leftover = resolve_exit_position(
+                account.get("positions") or [], position_side, candidates)
+            if position is None:
                 return None, ({"error": "no_position",
                                "detail": f"{position_side} 포지션이 없습니다"}, 400)
-            position = match[0]
             book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
                                             {"symbol": symbol}, error_reason="book_ticker_failed")
             filters = await load_filters(binance_session(), symbol)
@@ -3258,6 +3270,8 @@ def make_app() -> web.Application:
                 mark_price=float(position.get("mark_price") or 0.0),
                 vol_bpm=vol_bpm, fraction=fraction)
             plan["unrealized_pnl"] = position.get("unrealized_pnl")
+            if leftover:                      # 같은 방향이 다른 심볼에도 열려 있다
+                plan["other_symbol_open"] = leftover
             # 남은 보유시간 기준 위험 한도. 넘었으면 «최소 이만큼은 닫아야 한다»를 준다.
             # 🔴위에서 읽은 **그 계좌**를 쓴다(2026-09-13 병합). 같은 함수 안에서 캐시를 또
             # 조회하면 fresh=True(실주문)일 때 수량은 새 값인데 순자산·명목은 30초 묵은 값이

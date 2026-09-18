@@ -374,6 +374,30 @@ def build_exit_plan(*, position_side: str, position_qty: float, best_bid: float,
     }
 
 
+def resolve_exit_position(positions, position_side: str, candidates: list[str]):
+    """청산할 포지션을 «설정» 이 아니라 **실제 열려 있는 곳**에서 고른다 (2026-09-19).
+
+    왜 필요한가: 헤지 모드라 reduceOnly 를 못 쓴다(-1106). 과청산을 막는 건 수량뿐이고,
+    **심볼이 틀리면 청산이 신규 진입이 된다** -- 「ETHUSDT LONG 을 닫아라」를 ETHUSDC 로
+    보내면 없는 포지션을 닫는 대신 ETHUSDC SHORT 가 새로 열린다. 그래서 수동 진입 심볼을
+    USDC 로 바꿔도 청산은 계좌가 말하는 심볼을 따른다.
+
+    둘 다 열려 있으면 `candidates` 순서를 따르고(진입 심볼 우선), 못 닫은 나머지는 화면이
+    띄울 수 있게 함께 돌려준다 -- 버튼 한 번이 한 심볼만 닫으므로 사람이 모르면 안 된다.
+
+    반환: (position, symbol, leftover) · 없으면 (None, None, []).
+    """
+    match = [p for p in positions
+             if str(p.get("symbol")) in candidates and p.get("side") == position_side]
+    if not match:
+        return None, None, []
+    match.sort(key=lambda p: candidates.index(str(p.get("symbol"))))
+    first = match[0]
+    leftover = [{"symbol": str(p.get("symbol")), "qty": float(p.get("qty") or 0.0)}
+                for p in match[1:]]
+    return first, str(first.get("symbol")), leftover
+
+
 def _self_check() -> None:
     f = {"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 20.0}
 
@@ -624,7 +648,22 @@ def _self_check() -> None:
         else:
             raise AssertionError(f"막았어야 한다: fraction={bad}")
 
-    print("통과 80/80 — 진입(분할 포함) + 손절(슬리피지 표기) + 합산 상한 + 화면 설명값 + 청산 + 변동성 마감 + 부분 청산")
+    # ── 청산 심볼 결정(2026-09-19) — 심볼이 틀리면 청산이 신규 진입이 된다 ──
+    POS = [{"symbol": "ETHUSDT", "side": "LONG", "qty": 0.946},
+           {"symbol": "ETHUSDT", "side": "SHORT", "qty": 1.5},
+           {"symbol": "ETHUSDC", "side": "LONG", "qty": 2.0}]
+    CAND = ["ETHUSDC", "ETHUSDT"]                       # 진입 심볼을 USDC 로 바꾼 상태
+    pos, sym, left = resolve_exit_position(POS, "LONG", CAND)
+    assert sym == "ETHUSDC" and pos["qty"] == 2.0, (sym, pos)     # 진입 심볼 우선
+    assert left == [{"symbol": "ETHUSDT", "qty": 0.946}], left    # 나머지를 숨기지 않는다
+    pos, sym, left = resolve_exit_position(POS, "SHORT", CAND)
+    assert sym == "ETHUSDT" and not left, (sym, left)   # USDC 에 없으면 USDT 를 닫는다
+    pos, sym, left = resolve_exit_position(
+        [p for p in POS if p["symbol"] == "ETHUSDT"], "LONG", CAND)
+    assert sym == "ETHUSDT" and pos["qty"] == 0.946, (sym, pos)   # 전환 전 포지션도 닫힌다
+    assert resolve_exit_position(POS, "LONG", ["SOLUSDT"]) == (None, None, [])
+    assert resolve_exit_position([], "LONG", CAND) == (None, None, [])
+    print("통과 85/85 — 진입(분할 포함) + 손절(슬리피지 표기) + 합산 상한 + 화면 설명값 + 청산 + 변동성 마감 + 부분 청산 + 청산심볼 결정")
 
 
 if __name__ == "__main__":
