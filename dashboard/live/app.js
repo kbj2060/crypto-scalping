@@ -3527,10 +3527,17 @@ function renderSupply1s() {
   const svg = el("supply1sSvg");
   if (!svg) return;
   const NS = "http://www.w3.org/2000/svg";
-  const w = 1200, h = 240, ml = 10, mr = 74, mt = 16, mb = 14;
+  // 🔴폭을 1200 으로 고정했더니 컨테이너(1318)를 못 채워 **이 차트만 좁게** 그려졌다
+  //   (2026-09-19 실측: 캔들·프로파일 1318 vs 여기 1240). viewBox 를 부모에서 받아야
+  //   세 차트의 그려지는 폭이 같아진다. 여백도 캔들 차트와 같은 값(45/112)을 쓴다.
+  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
+  const w = Math.max(parentW, 1200), h = 240, ml = 45, mr = 112, mt = 16, mb = 14;
   const cw = w - ml - mr;
   const priceTop = mt, priceH = 86;
   const flowTop = mt + priceH + 16, flowH = h - mb - flowTop;
+  // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
+  //   바꾸는 순간 그림이 viewBox 밖으로 나간다 -- 좌표계와 뷰박스는 같이 움직여야 한다.
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   svg.innerHTML = "";
 
   const now = supply1sMeta.now || 0;
@@ -3702,10 +3709,11 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     return;
   }
 
-  // 좌우 여백은 **벽 이름표 자리**다. 막대 끝에 붙이면 막대가 긴 행에서 화면 밖으로 나간다.
-  // mt 는 머리글 **두 줄**(창 길이 · 지지/저항 요약) 자리다.
-  const ml = 104, mr = 104, mt = 46, mb = 22;
-  const centerW = mobileChart ? 46 : 56;
+  // 여백은 캔들 차트와 **같은 값**이다(2026-09-19 사용자 요청: 풋프린트와 같은 너비).
+  // 그 대가로 좌우에 이름표를 놓을 자리가 없어졌다 -- 벽 이름표는 머리글로 옮기고
+  // 차트에는 눈금만 남긴다. 머리글은 세 줄: 창 길이 · 지지/저항 구간 · 벽.
+  const ml = 45, mr = 112, mt = 58, mb = 22;
+  const centerW = mobileChart ? 54 : 68;   // 굵고 커진 가격 라벨 자리(사용자 요청)
   const sideW = (w - ml - mr - centerW) / 2;
   const avail = h - mt - mb;
   const bucket = Number(profile.bucket) || 0.5;
@@ -3836,12 +3844,16 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     // 🔴행이 $1 보다 촘촘한데 toFixed(0) 로 찍으면 «2608, 2608» 처럼 같은 값이 두 줄 나온다
     //   (2026-09-19 첫 렌더에서 실제로 그랬다). 자릿수는 행 크기가 정한다.
     //   그래도 촘촘하면(9px 미만) 한 줄 걸러 찍는다 -- 글자가 겹치면 둘 다 못 읽는다.
-    if (rowPx >= 9 || j % 2 === 0) {
+    // 🔴글자를 키우면(사용자 요청) 행 간격보다 글자가 커져 붙는다 -- 한 줄 걸러 찍는
+    //   기준을 9px 에서 폰트 크기에 맞춰 올린다. POC 행은 언제나 보인다.
+    if (rowPx >= 13 || j % 2 === 0 || key === pocKey) {
       const lbl = document.createElementNS(NS, "text");
       lbl.setAttribute("x", centerX); lbl.setAttribute("y", y + rowPx / 2 + 3);
       lbl.setAttribute("text-anchor", "middle");
-      lbl.setAttribute("font-size", Math.min(10, Math.max(7, rowPx - 1)));
-      lbl.setAttribute("fill", key === pocKey ? "var(--text)" : "var(--muted)");
+      // 2026-09-19 사용자 요청: 가운데 가격을 굵게 + 조금 더 크게.
+      lbl.setAttribute("font-size", Math.min(13, Math.max(9, rowPx)));
+      lbl.setAttribute("font-weight", key === pocKey ? "700" : "600");
+      lbl.setAttribute("fill", key === pocKey ? "var(--text)" : "var(--neutral)");
       lbl.textContent = price.toFixed(rowSize >= 1 ? 0 : 1);
       svg.appendChild(lbl);
     }
@@ -3905,16 +3917,10 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     { w: wallOf(4), side: "buy", group: "리테일", op: 0.5 },
   ].filter((x) => x.w);
 
-  const placed = { sell: [], buy: [] };
   walls.forEach((x) => {
     const j = keys.indexOf(x.w.key);
     if (j < 0) return;
     const color = x.side === "sell" ? "var(--bad)" : "var(--good)";
-    let y = mt + j * rowPx + rowPx / 2;
-    // 두 벽이 같은/이웃 행이면 이름표가 포개진다 -- 밀어낸다(고래를 제자리에 두고 리테일을).
-    while (placed[x.side].some((py) => Math.abs(py - y) < 12)) y += 12;
-    placed[x.side].push(y);
-
     const tick = document.createElementNS(NS, "rect");
     // 굵기가 곧 세기다 -- 이름표를 못 읽는 거리에서도 «어느 벽이 센가»는 보여야 한다.
     const tw = Math.min(5, Math.max(2, Math.round(x.w.mult)));
@@ -3924,14 +3930,6 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     tick.setAttribute("fill", color);
     svg.appendChild(tick);
 
-    const t = document.createElementNS(NS, "text");
-    t.setAttribute("x", x.side === "sell" ? ml - 6 : w - mr + 6);
-    t.setAttribute("y", y + 3);
-    t.setAttribute("text-anchor", x.side === "sell" ? "end" : "start");
-    t.setAttribute("font-size", "9.5");
-    t.setAttribute("fill", color); t.setAttribute("fill-opacity", x.op);
-    t.textContent = x.group + " " + (x.w.key * rowSize).toFixed(rowSize >= 1 ? 0 : 1)
-      + " ×" + x.w.mult.toFixed(1);
     const tip = document.createElementNS(NS, "title");
     tip.textContent = x.group + " " + (x.side === "sell" ? "공격적 매도" : "공격적 매수")
       + "가 몰린 가격 — 그 구간 물량의 " + Math.round(x.w.share * 100) + "%("
@@ -3942,9 +3940,20 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
       + "  같은 값을 두 규약으로 읽을 수 있어서다: 공격적 매도가 몰린 값은 «누군가 받아냈다»로\n"
       + "  보면 지지지만, «고래가 팔았다»로 보면 저항이다. 한 화면에 둘을 섞지 않는다.\n"
       + "⚠️체결이 몰린 자리이지 호가창에 걸린 대기 물량이 아니다.";
-    t.appendChild(tip);
-    svg.appendChild(t);
+    tick.appendChild(tip);
   });
+
+  // 벽 이름표는 **머리글 셋째 줄**로. 여백을 캔들 차트와 맞추느라 좌우 자리가 사라졌다.
+  const wallLine = document.createElementNS(NS, "text");
+  wallLine.setAttribute("x", ml); wallLine.setAttribute("y", 44);
+  wallLine.setAttribute("font-size", "9.5"); wallLine.setAttribute("fill", "var(--muted)");
+  wallLine.textContent = walls.length
+    ? "벽(체결 쏠림) — " + walls.map((x) => x.group + " "
+        + (x.side === "sell" ? "매도" : "매수") + " "
+        + (x.w.key * rowSize).toFixed(rowSize >= 1 ? 0 : 1)
+        + " ×" + x.w.mult.toFixed(1)).join("   ·   ")
+    : "벽 없음 — 어느 구간도 고르게 퍼진 것의 1.5배를 못 넘는다";
+  svg.appendChild(wallLine);
 
   // 범례. 농담 세 단계는 설명 없이는 안 읽힌다 -- 견본을 같이 놓는다.
   const kUsd = (v) => "$" + Math.round(v / 1000) + "k";

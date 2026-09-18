@@ -425,6 +425,28 @@
       <!-- 2026-09-11 청산 위험 패널 제거 -- 같은 숫자가 지표 행의 「청산 위험」 칩에도
            있어 중복이었다(사용자 지시). 칩이 등급·게이지·툴팁을 모두 담는다. -->
 
+      <!-- 2026-09-19 최근 5분을 **1초 해상도**로 보는 수급 패널(사용자 지시).
+           그전에 캔들 아래 5분봉 «수급 리본»을 넣었다가 걷어냈다 -- 보고 싶은 것은 봉이
+           아니라 초였다. 차트 종류 탭이 아니라 전용 패널인 이유도 같다: 탭이면 볼 때만
+           보이는데, 이 값은 «늘 보이면서 매초 움직이는» 것이 요점이다. -->
+      <section class="panel ops-health-panel" data-asset-scope="supply1s">
+        <div class="ops-health-head">
+          <div><h3>수급</h3><p id="supply1sSub" class="muted">불러오는 중…</p></div>
+        </div>
+        <!-- 2026-09-19 한 화면에 두 축을 위아래로 둔다(사용자 지시). 위는 «어느 값에서
+             샀나»(가격축, 창 전체), 아래는 «지금 누가 사나»(시간축, 최근 5분 x 1초).
+             잠깐 탭으로 갈랐다가 합쳤다 -- 아래 차트가 두 탭 모두에 들어가야 하는 순간
+             나머지 탭은 «같은 것의 못한 사본»이 된다. 갈라 둘 이유가 사라졌다.
+             가격축 프로파일은 그전까지 캔들 차트의 «수급» 모드였고, 같은 그림이 두 곳에
+             있으면 언젠가 한쪽만 고쳐지므로 그쪽은 뺐다. -->
+        <div class="chart-container supply-profile-container">
+          <svg id="supplyProfileSvg" viewBox="0 0 1200 420" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+        <div class="chart-container supply-1s-container">
+          <svg id="supply1sSvg" viewBox="0 0 1200 240" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+      </section>
+
       <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
         <div class="ops-health-head">
           <!-- 2026-09-11 사용자 요청 "맵 위에 빈 공간도 줄여주고 그 빈 공간에 청산 밀도 표를
@@ -451,27 +473,6 @@
         <div id="liquidationMapList" class="liq-level-list"></div>
       </section>
 
-      <!-- 2026-09-19 최근 5분을 **1초 해상도**로 보는 수급 패널(사용자 지시).
-           그전에 캔들 아래 5분봉 «수급 리본»을 넣었다가 걷어냈다 -- 보고 싶은 것은 봉이
-           아니라 초였다. 차트 종류 탭이 아니라 전용 패널인 이유도 같다: 탭이면 볼 때만
-           보이는데, 이 값은 «늘 보이면서 매초 움직이는» 것이 요점이다. -->
-      <section class="panel ops-health-panel" data-asset-scope="supply1s">
-        <div class="ops-health-head">
-          <div><h3>수급</h3><p id="supply1sSub" class="muted">불러오는 중…</p></div>
-        </div>
-        <!-- 2026-09-19 한 화면에 두 축을 위아래로 둔다(사용자 지시). 위는 «어느 값에서
-             샀나»(가격축, 창 전체), 아래는 «지금 누가 사나»(시간축, 최근 5분 x 1초).
-             잠깐 탭으로 갈랐다가 합쳤다 -- 아래 차트가 두 탭 모두에 들어가야 하는 순간
-             나머지 탭은 «같은 것의 못한 사본»이 된다. 갈라 둘 이유가 사라졌다.
-             가격축 프로파일은 그전까지 캔들 차트의 «수급» 모드였고, 같은 그림이 두 곳에
-             있으면 언젠가 한쪽만 고쳐지므로 그쪽은 뺐다. -->
-        <div class="chart-container supply-profile-container">
-          <svg id="supplyProfileSvg" viewBox="0 0 1200 420" preserveAspectRatio="xMidYMid meet"></svg>
-        </div>
-        <div class="chart-container supply-1s-container">
-          <svg id="supply1sSvg" viewBox="0 0 1200 240" preserveAspectRatio="xMidYMid meet"></svg>
-        </div>
-      </section>
 
       <section class="panel ops-health-panel" data-asset-scope="indicators">
         <div id="snapModelIndicatorList" class="ops-health-list"></div>
