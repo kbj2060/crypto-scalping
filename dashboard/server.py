@@ -40,6 +40,11 @@ load_dotenv(REPO_ROOT / ".env")
 # 2026-09-16 증거신호 칩 제거 후 남은 것: klines 창 길이 상수와 «마지막 발동 이후 봉 수» 헬퍼.
 # compute_signals/SIGNAL_ORDER/PCTRANK/FUNDING_* 는 8종 계산 전용이라 같이 내렸다.
 # (모듈 자체는 남긴다 -- 극점 탐지기가 compute_signals 를 직접 import 한다.)
+from scripts.live_trade_tape_collector_20260916 import (  # noqa: E402
+    RETAIL_MAX_USD,
+    WHALE_MIN_USD,
+    TakerOrderAggregator,
+)
 from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
     FETCH_LIMIT as EVIDENCE_FETCH_LIMIT,
     bars_since_last_true,
@@ -486,36 +491,14 @@ FOOTPRINT_CATCHUP_SECONDS = 2.5
 FOOTPRINT_SNAPSHOT_PATH = LIVE_DIR / "footprint_eth.json"
 FOOTPRINT_SNAPSHOT_SECONDS = 30.0
 # ── 리테일/고래 수급 (2026-09-19) ───────────────────────────────────────────
-# 셀은 [매수, 매도, 고래매수, 고래매도] 4칸이다. **고래는 «나머지»가 아니라 부분집합**이다 --
-# 리테일 = 매수 - 고래매수. 칸을 세 벌(리테일/중간/고래)로 나누지 않은 이유: 화면이 묻는 것은
-# 「큰손이 어느 쪽인가」 하나뿐이고, 칸을 늘리면 스냅샷과 응답이 그만큼 커진다.
+# 셀은 [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도] 6칸이다.
+# **중형($10k~$100k)은 칸이 없다** -- 매수 - 고래매수 - 리테일매수로 정확히 나온다.
 #
-# ⭐임계값은 «달러 고정」이 아니라 **분위**다. 「고래 = 10 ETH」를 박으면 가격이 2배 오를 때
-#   기준이 조용히 절반이 된다. 최근 체결 명목의 p99 를 쓰고, 그 값을 응답에 같이 싣는다
-#   (화면이 「지금 기준 ≥ $44k」를 적지 않으면 어제 화면과 오늘 화면이 다른 뜻이 된다).
-# ⚠️분류는 **체결 시점의 임계값**으로 굳는다. 과거 봉은 재분류하지 않는다(원시 체결을 안
-#   들고 있다). 임계값은 분 단위로 거의 안 움직이므로 창(24시간) 안에서는 무시할 수 있다.
-FOOTPRINT_WHALE_PCTL = 0.99
-FOOTPRINT_WHALE_SAMPLE = 50000    # 링버퍼. ETH 는 초당 ~130체결이라 약 6분치다
-FOOTPRINT_WHALE_MIN_SAMPLE = 2000 # 이보다 적으면 분위가 표본잡음이라 분류를 미룬다
-FOOTPRINT_WHALE_REFRESH_SECONDS = 60.0
-# 차트는 FOOTPRINT_BARS(12봉=1시간)만 본다. 프로파일 탭은 «가격대별 누구의 물량인가»라
-# 1시간으로는 아무 말도 못 한다 -- 봉 링만 24시간으로 늘린다. 스냅샷에는 여전히 최근 12봉만
-# 쓴다(288봉을 30초마다 쓰면 하루 수백 MB 다). 재시작하면 프로파일은 다시 찬다.
+# ⭐경계는 체결 테이프 수집기에서 **가져다 쓴다**. 화면과 저장이 같은 숫자를 써야 나중에
+#   「그날 화면의 고래」와 「DB 의 고래」가 같은 것이 된다. 여기 상수를 새로 만들면 두 개가
+#   조용히 갈라진다 -- 이 저장소가 레짐 분류기에서 한 번 겪은 일이다(2026-09-17).
+# ⭐왜 분위가 아니라 달러 고정인지, 왜 경계가 둘인지는 그 파일의 상수 주석에 실측과 함께 있다.
 FOOTPRINT_KEEP_BARS = 288
-
-
-def footprint_whale_percentile(sample, pctl: float) -> float:
-    """체결 명목 표본의 분위. 표본이 모자라면 0 = 「아직 기준 없음」.
-
-    0 을 돌려주는 것이 «고래 없음»과 구별되는 이유: 호출부가 `thr > 0` 일 때만 분류한다.
-    기준을 모르는 동안 아무 체결도 고래로 찍지 않는 편이, 잘못된 기준으로 찍는 것보다 낫다."""
-    if len(sample) < FOOTPRINT_WHALE_MIN_SAMPLE:
-        return 0.0
-    ordered = sorted(sample)
-    return float(ordered[min(len(ordered) - 1, int(len(ordered) * pctl))])
-
-
 
 # 2026-09-16 2.5 -> 1.0 (사용자 "최대한 빠르게"). 이 값이 곧 **현재가 선의 지연**이다 --
 # 차트는 SSE 푸시마다 다시 그린다. 코인을 ETH 하나로 줄이면서(DASHBOARD_ASSETS) 티커 요청이
@@ -1925,29 +1908,30 @@ def make_app() -> web.Application:
     FOOTPRINT_WS_URL = f"wss://fstream.binance.com/ws/{FOOTPRINT_SYMBOL.lower()}@trade"
     footprint_state: dict[str, Any] = {"bars": {}, "ready": False, "updated": 0.0,
                                    "last_ms": 0, "saved_at": 0.0,
-                                   # 고래 임계값 추정용 링버퍼와 그 결과
-                                   "notional": deque(maxlen=FOOTPRINT_WHALE_SAMPLE),
-                                   "whale_usd": 0.0, "whale_at": 0.0,
-                                   # aggTrades 로 메운 봉. **묶인 체결**이라 고래가 과장된다 --
-                                   # 고치지 않고 표시한다(화면이 그 봉의 리본을 흐리게 그린다).
+                                   # aggTrades 로 메운 봉. 출처 표시일 뿐 «덜 정확하다»는 뜻이
+                                   # 아니다 -- 크기 구간은 주문 단위라 aggTrades 쪽이 오히려
+                                   # 정확하다(footprint_add 도크스트링의 2026-09-19 정정).
                                    "agg_bars": set()}
 
     def footprint_bar_start(ts_ms: float) -> int:
         return (int(ts_ms) // 1000) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
 
-    def footprint_whale_threshold(now: float) -> float:
-        """최근 체결 명목의 p99. 60초마다 한 번만 다시 센다(5만 건 정렬은 ~5ms)."""
-        st = footprint_state
-        if now - st["whale_at"] < FOOTPRINT_WHALE_REFRESH_SECONDS:
-            return st["whale_usd"]
-        st["whale_at"] = now
-        fresh = footprint_whale_percentile(st["notional"], FOOTPRINT_WHALE_PCTL)
-        if fresh > 0:
-            st["whale_usd"] = fresh
-        return st["whale_usd"]
-
     def footprint_add(price: float, qty: float, ts_ms: int, sell: bool,
-                      agg: bool = False) -> None:
+                      agg: bool = False, order: bool = False) -> None:
+        """order=False 는 **개별 체결**(셀 총량만), True 는 **테이커 주문**(크기 구간만).
+
+        백필의 aggTrades 한 줄은 그 자체가 주문이라 둘 다다. 실시간 `@trade` 는 총량을 바로
+        넣고, 주문이 닫힐 때 구간을 따로 넣는다 -- 한 번에 못 하는 이유는 주문이 닫히기
+        전에는 그 주문이 어느 통에 속하는지 알 수 없기 때문이다(쓸어담는 중에는 계속 자란다).
+
+        🔴여기서 한 번 틀렸다(2026-09-19). 처음엔 개별 체결(`@trade`)로 갈랐는데, 큰 주문이
+          호가를 쓸면 그게 작은 체결 수십 건으로 쪼개져 **고래가 사라진다**(같은 11.3초 구간
+          실측: aggTrade 기준 37.4% vs @trade 기준 9.6%, 총 명목은 동일). 그다음엔 반대로
+          백필 덩어리를 개별 수로 나눠봤는데 그건 **과교정**이라 고래가 0.0% 가 됐다 --
+          덩어리는 이미 «주문 하나»라 나눌 것이 아니었다.
+          답은 둘 다 **주문 단위로 맞추는 것**이다: 백필은 덩어리를 그대로 쓰고, 실시간은
+          같은 규칙(가격·방향·ms)으로 되묶는다. 기존 `nif_whale` 도 @aggTrade 기준이라
+          이래야 이 저장소에서 「고래」가 한 뜻이 된다."""
         bars = footprint_state["bars"]
         bar = footprint_bar_start(ts_ms)
         cells = bars.get(bar)
@@ -1960,21 +1944,19 @@ def make_app() -> web.Application:
             for old_bar in [b for b in bars if b < cutoff]:
                 del bars[old_bar]   # 새 봉이 생길 때만 정리한다 -- 체결마다 돌 일이 아니다(266/s)
                 footprint_state["agg_bars"].discard(old_bar)
-        cell = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)), [0.0, 0.0, 0.0, 0.0])
+        cell = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)), [0.0] * 6)
         side = 1 if sell else 0
-        cell[side] += qty
-        now = time.time()
-        # 고래 분류. 임계값 표본은 **WS 개별 체결만** 먹인다 -- aggTrades 는 묶인 덩어리라
-        # 섞으면 임계값 자체가 위로 끌려간다(백필이 도는 동안만 기준이 달라진다).
-        notional = price * qty
-        if not agg:
-            footprint_state["notional"].append(notional)
-        else:
+        if not order:
+            cell[side] += qty
+        if order or agg:
+            notional = price * qty
+            if notional >= WHALE_MIN_USD:
+                cell[2 + side] += qty
+            elif notional < RETAIL_MAX_USD:
+                cell[4 + side] += qty
+        if agg:
             footprint_state["agg_bars"].add(bar)
-        thr = footprint_whale_threshold(now)
-        if thr > 0 and notional >= thr:
-            cell[2 + side] += qty
-        footprint_state["updated"] = now
+        footprint_state["updated"] = time.time()
         # ⚠️ready 일 때만 저장한다. 백필이 **진행 중인 봉**을 저장하면, 다음 판이 그걸 «이미 있는
         # 봉»으로 보고 건너뛰어 반쪽짜리로 굳는다(2026-09-15 시험에서 한 봉이 -83.7% 로 남았다).
         # 저장된 스냅샷의 계약은 «last_ms 까지 공백이 없다» 이고, 그 보증이 곧 ready 다.
@@ -1991,7 +1973,7 @@ def make_app() -> web.Application:
                 "symbol": FOOTPRINT_SYMBOL, "last_ms": footprint_state["last_ms"],
                 # 셀 칸수 표식. 2칸 시절 스냅샷을 4칸 코드가 읽으면 IndexError 가 아니라
                 # **조용히 고래 0** 이 된다 -- 그래서 버전을 적고 다르면 통째로 버린다.
-                "cells_v": 2,
+                "cells_v": 3,
                 # 봉 링은 24시간이지만 저장은 **차트가 쓰는 창**만 한다(위 FOOTPRINT_KEEP_BARS
                 # 주석). 프로파일은 재시작 뒤 다시 찬다 -- 화면이 그 길이를 적는다.
                 "bars": {str(bar): {str(k): v for k, v in cells.items()}
@@ -2013,13 +1995,12 @@ def make_app() -> web.Application:
         if (saved.get("bar_seconds") != FOOTPRINT_BAR_SECONDS
                 or saved.get("bucket") != FOOTPRINT_BUCKET
                 or saved.get("symbol") != FOOTPRINT_SYMBOL
-                or saved.get("cells_v") != 2):
+                or saved.get("cells_v") != 3):
             print("footprint snapshot: 설정이 달라 무시한다", flush=True)
             return
         cutoff = (footprint_bar_start(time.time() * 1000)
                   - (FOOTPRINT_BARS - 1) * FOOTPRINT_BAR_SECONDS)
-        bars = {int(bar): {int(k): [float(v[0]), float(v[1]), float(v[2]), float(v[3])]
-                           for k, v in cells.items()}
+        bars = {int(bar): {int(k): [float(x) for x in v] for k, v in cells.items()}
                 for bar, cells in (saved.get("bars") or {}).items() if int(bar) >= cutoff}
         if not bars:
             return
@@ -2081,6 +2062,7 @@ def make_app() -> web.Application:
                     for row in rows:
                         ts_ms = int(row["T"])
                         if lo <= ts_ms < hi:   # 창 밖은 그 창의 차례에 받는다(또는 이미 있다)
+                            # aggTrades 한 줄이 곧 주문 하나다 -- 나누지 않는다.
                             footprint_add(float(row["p"]), float(row["q"]), ts_ms,
                                           bool(row["m"]), agg=True)
                     next_id = int(rows[-1]["a"]) + 1
@@ -2096,6 +2078,10 @@ def make_app() -> web.Application:
         except Exception as exc:  # noqa: BLE001 -- 실패하면 ready 가 False 로 남아 화면이
             # 계속 「수집 중」이라고 말한다. 다음 재연결이 다시 시도한다.
             print(f"footprint backfill failed: {exc}", flush=True)
+
+    # 진행 중인 테이커 주문(같은 가격·방향·ms). 수집기와 **같은 클래스**를 쓴다 -- 되묶기
+    # 규칙이 두 벌이 되면 화면과 DB 의 「고래」가 또 갈라진다.
+    fp_orders = TakerOrderAggregator()
 
     async def collect_footprint(app: web.Application) -> None:
         backfill: asyncio.Task | None = None
@@ -2137,7 +2123,11 @@ def make_app() -> web.Application:
                                     footprint_state["ready"] = False
                                     backfill = asyncio.create_task(footprint_backfill(
                                         footprint_state["last_ms"], first_ms))
-                            footprint_add(price, qty, ts_ms, bool(trade["m"]))
+                            sell = bool(trade["m"])
+                            footprint_add(price, qty, ts_ms, sell)      # 총량
+                            done = fp_orders.add(price, qty, ts_ms, sell)
+                            if done is not None:                        # 닫힌 주문의 크기 구간
+                                footprint_add(done[0], done[1], done[2], done[3], order=True)
                             footprint_state["last_ms"] = ts_ms   # 다음 재연결이 메울 공백의 시작
                 except asyncio.CancelledError:
                     raise
@@ -2708,9 +2698,10 @@ def make_app() -> web.Application:
         return web.json_response({"asset": asset, "candles": candles}, headers=NOCACHE)
 
     async def api_footprint(request: web.Request) -> web.Response:
-        """가격레벨별 매수/매도 체결량. 레벨은 [가격, 매수, 매도, 고래매수, 고래매도] 5칸
-        배열 -- 키 이름을 반복해 싣지 않으려는 것(12봉 x 수십 레벨을 2초마다 보낸다).
-        고래는 매수/매도의 **부분집합**이다(리테일 = 매수 - 고래매수)."""
+        """가격레벨별 매수/매도 체결량. 레벨은
+        [가격, 매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도] 7칸 배열이다
+        -- 키 이름을 반복해 싣지 않으려는 것(12봉 x 수십 레벨을 2초마다 보낸다).
+        고래·리테일은 매수/매도의 **부분집합**이고, 중형은 셋을 빼서 얻는다."""
         recent = sorted(footprint_state["bars"].items())[-FOOTPRINT_BARS:]
         agg_bars = footprint_state["agg_bars"]
         return web.json_response({
@@ -2720,16 +2711,15 @@ def make_app() -> web.Application:
             "barsExpected": FOOTPRINT_BARS,
             "ready": bool(footprint_state["ready"]),
             "updated": footprint_state["updated"],
-            # 화면이 「지금 기준 ≥ $44k」를 적는 데 쓴다. 0 이면 아직 웜업 중이라 고래 칸이
-            # 전부 0 이다 -- 화면은 그걸 「고래 없음」이 아니라 「집계 중」으로 말해야 한다.
-            "whaleUsd": round(footprint_state["whale_usd"], 1),
-            "whalePctl": FOOTPRINT_WHALE_PCTL,
+            # 화면이 「고래 ≥$100k」를 적는 데 쓴다. 경계를 화면에 안 적으면 「고래」가
+            # 무슨 뜻인지 보는 사람이 알 방법이 없다.
+            "retailMaxUsd": RETAIL_MAX_USD,
+            "whaleMinUsd": WHALE_MIN_USD,
             "bars": [
                 {"time": bar,
                  # aggTrades 로 메운 봉은 체결이 **묶여** 있어 고래가 과장된다.
                  "agg": bar in agg_bars,
-                 "levels": [[round(k * FOOTPRINT_BUCKET, 2), round(v[0], 3), round(v[1], 3),
-                             round(v[2], 3), round(v[3], 3)]
+                 "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
                             for k, v in sorted(cells.items())]}
                 for bar, cells in recent
             ],
@@ -2744,8 +2734,8 @@ def make_app() -> web.Application:
         merged: dict[int, list[float]] = {}
         for cells in bars.values():
             for k, v in cells.items():
-                row = merged.setdefault(k, [0.0, 0.0, 0.0, 0.0])
-                for i in range(4):
+                row = merged.setdefault(k, [0.0] * 6)
+                for i in range(6):
                     row[i] += v[i]
         span = len(bars) * FOOTPRINT_BAR_SECONDS
         return web.json_response({
@@ -2754,11 +2744,10 @@ def make_app() -> web.Application:
             "barCount": len(bars),
             "spanSeconds": span,
             "spanMaxSeconds": FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS,
-            "whaleUsd": round(footprint_state["whale_usd"], 1),
-            "whalePctl": FOOTPRINT_WHALE_PCTL,
+            "retailMaxUsd": RETAIL_MAX_USD,
+            "whaleMinUsd": WHALE_MIN_USD,
             "aggBars": len(footprint_state["agg_bars"]),
-            "levels": [[round(k * FOOTPRINT_BUCKET, 2), round(v[0], 3), round(v[1], 3),
-                        round(v[2], 3), round(v[3], 3)]
+            "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
                        for k, v in sorted(merged.items())],
         }, headers=NOCACHE)
 

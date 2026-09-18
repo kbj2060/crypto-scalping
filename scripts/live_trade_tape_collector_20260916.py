@@ -52,7 +52,95 @@ KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 FLUSH_SECONDS = 5.0      # 완결된 초만 쓴다 -- 한 초는 정확히 한 번 기록된다
 VERIFY_SECONDS = 300.0
 VERIFY_TOLERANCE = 1e-4  # 이보다 어긋나면 로그로 떠든다(행은 어차피 남긴다)
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+# ── 체결 크기 구간 (2026-09-19) ─────────────────────────────────────────────
+# 「리테일이 사고 고래가 판다」를 나중에 물어보려면 **크기별로 갈라서** 쌓아야 한다.
+# 총량만 쌓으면 소급 복원이 불가능하다(일별 zip 을 다시 받는 것 말고는 길이 없다).
+#
+# ⭐경계는 **달러 고정**이고 **분위가 아니다**. 분위(p99)로 쌓으면 「이 행의 기준이 얼마였나」를
+#   행마다 따로 적어야 하고, 안 적으면 몇 달 뒤 그 숫자를 해석할 방법이 사라진다. 달러 고정은
+#   ETH 가격이 올라도 뜻이 안 변한다(고정 «수량» 10 ETH 를 박는 것과는 정반대다).
+#
+# ⭐두 경계인 이유 — 2026-09-19 ETHUSDT 39,712건(5분) 실측:
+#     ≥$10k    건수  4.10%   물량 73.1%
+#     ≥$25k    건수  1.53%   물량 48.4%
+#     ≥$100k   건수  0.17%   물량 14.6%   (분당 13.4건 = 5분봉당 67건)
+#   경계 하나로는 못 가른다. $10k 를 고래라 하면 **물량의 3/4이 고래**라 리테일이 사라지고,
+#   $100k 위만 고래라 하고 나머지를 리테일이라 부르면 **물량의 58.5%($10k~$100k)를 리테일로
+#   거짓말**하게 된다. 그 중간은 개인도 고래도 아니다 -- 자기 칸을 줘야 한다.
+#
+# ⭐고래 경계 $100k 는 **이 저장소에 이미 있던 값과 같다** -- `microstructure_scanner.py` 의
+#   `MS_WHALE_USD_TH` 기본값(= `nif_whale`/`nif_retail` 칩과 그 2026-08-25 IC 검증이 선 경계)이
+#   정확히 100000 이다. 실측으로 따로 고른 값이 같은 자리에 떨어졌다. 그래서 새 화면의 「고래」와
+#   기존 「수급 흐름」 칩의 「큰손」은 **같은 것을 가리킨다**.
+# 🔴다만 **리테일은 다르다**: `nif_retail` 은 「고래가 아닌 전부」(<$100k)라 위 실측대로 그 안의
+#   대부분이 실은 중형이다. 여기서 쓰는 리테일(<$10k)과 같은 말이 아니다 -- 두 화면을 나란히
+#   볼 때 이 차이를 잊으면 안 된다. 그래서 화면은 경계를 늘 숫자로 적는다.
+#
+# 경계를 **하드코딩**한 이유: 쌓인 행의 뜻이 영원히 고정돼야 하기 때문이다. 환경변수로 읽으면
+# 누가 값을 바꾼 날 이후의 행이 조용히 다른 뜻이 된다(meta 표는 마지막 값만 남는다).
+# 대신 아래 `warn_if_whale_threshold_diverged()` 가 «갈라진 순간»을 시끄럽게 만든다.
+RETAIL_MAX_USD = 10_000.0     # 미만 = 리테일
+WHALE_MIN_USD = 100_000.0     # 이상 = 고래 (그 사이는 중형)
+
+
+class TakerOrderAggregator:
+    """`@trade` 개별 체결을 **테이커 주문** 단위로 되묶는다 -- 바이낸스 aggTrade 와 같은 규칙
+    (같은 가격 · 같은 방향 · 같은 밀리초).
+
+    🔴왜 필요한가: 큰 주문 하나가 호가 30개를 쓸어담으면 `@trade` 는 그걸 **작은 체결 30건**
+      으로 보고한다. 개별 체결로 「고래」를 세면 같은 시장에서 고래 물량이 통째로 사라진다 --
+      2026-09-19 같은 11.3초 구간 실측: **aggTrade 기준 37.4% vs @trade 기준 9.6%**,
+      그런데 총 명목은 $1,086,005 vs $1,085,736 으로 **같다**. 같은 체결을 다르게 셀 뿐이다.
+    ⭐기존 `nif_whale`(microstructure_scanner)도 `@aggTrade` 를 쓴다. 거기 맞춰야 이 저장소
+      에서 「고래」가 한 뜻이 된다.
+    ⚠️총량 · 건수 · 최대체결은 **개별 체결 그대로** 센다(기존 컬럼 뜻을 바꾸지 않는다).
+      되묶기는 **크기 구간 분류에만** 쓴다.
+
+    마지막 묶음은 다음 체결이 와야 닫힌다. ETH 는 초당 100건 넘게 체결되므로 그 지연은
+    밀리초 수준이고, 묶음은 자기 ts_ms 를 들고 있어 늦게 닫혀도 제 초에 들어간다."""
+
+    def __init__(self) -> None:
+        self.key: tuple | None = None
+        self.qty = 0.0
+
+    def add(self, price: float, qty: float, ts_ms: int, sell: bool) -> tuple | None:
+        """묶음이 닫히면 (price, qty, ts_ms, sell) 을 돌려준다. 아니면 None."""
+        key = (price, sell, ts_ms)
+        done = None
+        if key != self.key:
+            done = self.take()
+            self.key = key
+            self.qty = 0.0
+        self.qty += qty
+        return done
+
+    def take(self) -> tuple | None:
+        if self.key is None or self.qty <= 0:
+            return None
+        price, sell, ts_ms = self.key
+        out = (price, self.qty, ts_ms, sell)
+        self.key, self.qty = None, 0.0
+        return out
+
+
+def warn_if_whale_threshold_diverged() -> None:
+    """`MS_WHALE_USD_TH` 가 우리 경계와 달라지면 말한다.
+
+    두 정의가 갈라지는 건 «언젠가» 가 아니라 «누가 환경변수를 바꾼 그 순간» 이다. 그때
+    아무 말도 안 하면, 몇 주 뒤 두 화면이 다른 숫자를 보일 때 원인을 찾느라 하루를 쓴다."""
+    raw = os.getenv("MS_WHALE_USD_TH")
+    if raw is None:
+        return
+    try:
+        other = float(raw)
+    except ValueError:
+        log(f"⚠️MS_WHALE_USD_TH={raw!r} 를 숫자로 못 읽는다 -- 경계 대조를 건너뛴다")
+        return
+    if other != WHALE_MIN_USD:
+        log(f"🔴고래 경계가 갈라졌다: 이 표는 ${WHALE_MIN_USD:,.0f}, "
+            f"microstructure(nif_whale)는 ${other:,.0f}. "
+            "두 화면의 「고래」가 다른 것을 뜻하게 된다 -- 한쪽을 맞추거나 이름을 갈라야 한다.")
 
 
 def log(msg: str) -> None:
@@ -60,25 +148,55 @@ def log(msg: str) -> None:
 
 
 class TapeBuffer:
-    """(초, 가격빈) -> [매수량, 매도량, 매수건수, 매도건수, 매수최대, 매도최대].
+    """(초, 가격빈) -> 12칸.
+
+      0~1   매수량 · 매도량              (총량 -- 아래 세 구간의 합이다)
+      2~3   매수건수 · 매도건수
+      4~5   매수최대 · 매도최대          (그 초의 가장 큰 체결 하나)
+      6~7   리테일 매수량 · 매도량       (< RETAIL_MAX_USD)
+      8~9   고래 매수량 · 매도량         (>= WHALE_MIN_USD)
+      10~11 고래 매수건수 · 매도건수     (「한 건이 만든 봉인가」를 뒤에서 물어보려고)
+
+    중형($10k~$100k)은 칸을 따로 두지 않는다 -- **총량 - 리테일 - 고래**로 정확히 나온다.
+    안 쌓아도 되는 것을 안 쌓는 게 이 표의 규칙이다(그래서 건수도 고래 것만 남긴다).
 
     DB 도 네트워크도 모른다 -- 그래서 --selftest 가 이 클래스만 찔러 볼 수 있다."""
+
+    WIDTH = 12
 
     def __init__(self, bucket: float) -> None:
         self.bucket = bucket
         self.rows: dict[tuple[int, int], list[float]] = {}
         self.max_sec = 0
 
-    def add(self, ts_ms: int, price: float, qty: float, sell: bool) -> None:
+    def _cell(self, ts_ms: int, price: float) -> list[float]:
         sec = ts_ms // 1000
         self.max_sec = max(self.max_sec, sec)
-        cell = self.rows.get((sec, round(price / self.bucket)))
+        key = (sec, round(price / self.bucket))
+        cell = self.rows.get(key)
         if cell is None:
-            cell = self.rows[(sec, round(price / self.bucket))] = [0.0, 0.0, 0, 0, 0.0, 0.0]
+            cell = self.rows[key] = [0.0] * self.WIDTH
+        return cell
+
+    def add(self, ts_ms: int, price: float, qty: float, sell: bool) -> None:
+        """개별 체결 하나. 총량 · 건수 · 최대체결만 센다(2026-09-16 이래 뜻이 그대로다)."""
+        cell = self._cell(ts_ms, price)
         i = 1 if sell else 0
         cell[i] += qty
         cell[2 + i] += 1
         cell[4 + i] = max(cell[4 + i], qty)
+
+    def add_order(self, ts_ms: int, price: float, qty: float, sell: bool) -> None:
+        """되묶은 **테이커 주문** 하나. 크기 구간은 여기서만 갈린다 -- 이유는
+        TakerOrderAggregator 도크스트링."""
+        cell = self._cell(ts_ms, price)
+        i = 1 if sell else 0
+        notional = price * qty
+        if notional < RETAIL_MAX_USD:
+            cell[6 + i] += qty
+        elif notional >= WHALE_MIN_USD:
+            cell[8 + i] += qty
+            cell[10 + i] += 1
 
     def take_closed(self) -> list[tuple]:
         """진행 중인 초(max_sec)를 빼고 꺼낸다. 그 초는 아직 체결이 더 올 수 있다."""
@@ -86,7 +204,8 @@ class TapeBuffer:
         for sec, b, _ in done:
             del self.rows[(sec, b)]
         return sorted(
-            (sec, b, c[0], c[1], int(c[2]), int(c[3]), c[4], c[5]) for sec, b, c in done)
+            (sec, b, c[0], c[1], int(c[2]), int(c[3]), c[4], c[5],
+             c[6], c[7], c[8], c[9], int(c[10]), int(c[11])) for sec, b, c in done)
 
 
 class TapeStore:
@@ -111,6 +230,16 @@ class TapeStore:
                   symbol VARCHAR, ts_sec BIGINT, price_bin INTEGER,
                   buy_qty DOUBLE, sell_qty DOUBLE, buy_n INTEGER, sell_n INTEGER,
                   buy_max DOUBLE, sell_max DOUBLE)""")
+            # 크기 구간(2026-09-19 추가). 이미 있는 DB 에는 ALTER 로 붙인다 -- **기존 행은
+            # NULL 로 남는다**. 0 이 아니라 NULL 인 것이 중요하다: 「그 구간엔 고래가 없었다」와
+            # 「그때는 안 갈랐다」는 다른 말이고, 연구 쿼리가 그 둘을 구별할 수 있어야 한다.
+            for col, typ in (("retail_buy_qty", "DOUBLE"), ("retail_sell_qty", "DOUBLE"),
+                             ("whale_buy_qty", "DOUBLE"), ("whale_sell_qty", "DOUBLE"),
+                             ("whale_buy_n", "INTEGER"), ("whale_sell_n", "INTEGER")):
+                try:
+                    con.execute(f"ALTER TABLE trade_tape_1s ADD COLUMN {col} {typ}")
+                except Exception:  # noqa: BLE001 -- 이미 있으면 그게 정상이다
+                    pass
             # 끊긴 구간. 연구 쿼리는 이 표를 봐야 «0» 과 «모름» 을 구분할 수 있다.
             con.execute("""
                 CREATE TABLE IF NOT EXISTS gaps(
@@ -121,8 +250,11 @@ class TapeStore:
                   symbol VARCHAR, ts_min BIGINT, tape_qty DOUBLE, kline_qty DOUBLE,
                   rel_err DOUBLE, checked_at TIMESTAMP)""")
             con.execute("CREATE TABLE IF NOT EXISTS meta(key VARCHAR, value VARCHAR)")
+            # 경계는 **데이터와 함께** 남는다. 코드가 바뀌어도 이 표를 보면 그때 기준을 안다.
             for key, value in (("schema_version", str(SCHEMA_VERSION)),
-                               (f"bucket:{symbol}", repr(bucket))):
+                               (f"bucket:{symbol}", repr(bucket)),
+                               ("retail_max_usd", repr(RETAIL_MAX_USD)),
+                               ("whale_min_usd", repr(WHALE_MIN_USD))):
                 con.execute("DELETE FROM meta WHERE key = ?", [key])
                 con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
 
@@ -143,7 +275,8 @@ class TapeStore:
             return
         try:
             with self._connect() as con:
-                con.executemany("INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?)",
+                con.executemany(
+                    "INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                                 [(self.symbol, *r) for r in self.pending])
             self.pending.clear()
         except Exception as exc:  # noqa: BLE001 -- 락 충돌(읽는 쪽이 잡고 있음)이 대부분이다
@@ -233,9 +366,11 @@ async def verify_recent(store: TapeStore, session) -> None:
 async def collect(symbol: str, db_path: Path) -> None:
     from aiohttp import ClientSession, ClientTimeout, WSMsgType
 
+    warn_if_whale_threshold_diverged()
     bucket = BUCKETS.get(symbol, 0.01)
     store = TapeStore(db_path, symbol, bucket)
     buffer = TapeBuffer(bucket)
+    orders = TakerOrderAggregator()
     last_ms = store.last_ts_ms()      # 지난 판이 남긴 끝 -- 재시작 공백을 gaps 에 적으려고
     log(f"{symbol} 수집 시작 (빈 {bucket}, db {db_path})")
     # total=None 을 **명시**한다: aiohttp 기본 5분이라 그냥 두면 5분마다 끊긴다.
@@ -265,7 +400,11 @@ async def collect(symbol: str, db_path: Path) -> None:
                             store.record_gap(last_ms or (ts_ms // 60_000) * 60_000, ts_ms,
                                              "ws_reconnect" if last_ms else "startup")
                             log("스트림 연결됨")
-                        buffer.add(ts_ms, price, qty, bool(trade["m"]))
+                        sell = bool(trade["m"])
+                        buffer.add(ts_ms, price, qty, sell)
+                        order = orders.add(price, qty, ts_ms, sell)
+                        if order is not None:
+                            buffer.add_order(order[2], order[0], order[1], order[3])
                         last_ms = ts_ms
                         now = time.monotonic()
                         if now - flushed_at >= FLUSH_SECONDS:
@@ -292,8 +431,43 @@ def selftest() -> None:
     buf.add(1_001_000, 2440.04, 9.0, sell=False)   # 다음 초 -> 진행 중이라 안 나온다
     rows = buf.take_closed()
     assert [r[:2] for r in rows] == [(1000, 24400), (1000, 24404)], rows
-    sec, _bin, buy, sell, buy_n, sell_n, buy_max, sell_max = rows[0]
+    (sec, _bin, buy, sell, buy_n, sell_n, buy_max, sell_max,
+     r_buy, r_sell, w_buy, w_sell, w_buy_n, w_sell_n) = rows[0]
     assert (buy, sell, buy_n, sell_n, buy_max, sell_max) == (1.5, 0.5, 1, 1, 1.5, 0.5), rows[0]
+    # add() 는 총량/건수/최대만 센다 -- 크기 구간은 add_order() 몫이라 여기선 전부 0이다.
+    assert (r_buy, r_sell, w_buy, w_sell, w_buy_n, w_sell_n) == (0.0, 0.0, 0.0, 0.0, 0, 0), rows[0]
+
+    # 크기 구간: 경계 **양쪽**을 찌른다. 부등호를 뒤집는 실수는 테스트가 아니면 안 보인다.
+    sizes = TapeBuffer(0.1)
+    sizes.add_order(2_000_000, 2500.0, 3.9, sell=False)    # $9,750  -> 리테일(< $10k)
+    sizes.add_order(2_000_100, 2500.0, 4.0, sell=False)    # $10,000 -> 중형(경계는 리테일이 아니다)
+    sizes.add_order(2_000_200, 2500.0, 39.9, sell=False)   # $99,750 -> 중형
+    sizes.add_order(2_000_300, 2500.0, 40.0, sell=True)    # $100,000 -> 고래(경계 포함)
+    for ts, q, s in ((2_000_000, 3.9, False), (2_000_100, 4.0, False),
+                     (2_000_200, 39.9, False), (2_000_300, 40.0, True)):
+        sizes.add(ts, 2500.0, q, sell=s)                   # 총량은 개별 체결에서 온다
+    sizes.add(2_001_000, 2500.0, 1.0, sell=False)          # 다음 초 -- 위 초를 닫는다
+    row = sizes.take_closed()[0]
+    total_buy, total_sell = row[2], row[3]
+    assert (total_buy, total_sell) == (47.8, 40.0), row
+    assert (row[8], row[9]) == (3.9, 0.0), ("리테일", row)
+    assert (row[10], row[11], row[12], row[13]) == (0.0, 40.0, 0, 1), ("고래", row)
+    # 중형은 칸이 없다 -- 뺄셈으로 정확히 나와야 한다.
+    assert round(total_buy - row[8] - row[10], 6) == 43.9, ("중형 매수", row)
+    assert round(total_sell - row[9] - row[11], 6) == 0.0, ("중형 매도", row)
+
+    # 되묶기: 같은 (가격·방향·ms) 만 한 주문이다. 이게 «고래 9.6% vs 37.4%» 를 가른다.
+    agg = TakerOrderAggregator()
+    assert agg.add(2500.0, 10.0, 1_000, sell=False) is None        # 첫 묶음 -- 아직 안 닫힘
+    assert agg.add(2500.0, 12.0, 1_000, sell=False) is None        # 같은 주문에 이어 붙는다
+    done = agg.add(2500.5, 1.0, 1_000, sell=False)                 # 가격이 달라지면 앞이 닫힌다
+    assert done == (2500.0, 22.0, 1_000, False), done
+    done = agg.add(2500.5, 1.0, 1_000, sell=True)                  # 방향이 달라져도 닫힌다
+    assert done == (2500.5, 1.0, 1_000, False), done
+    done = agg.add(2500.5, 1.0, 1_001, sell=True)                  # ms 가 달라져도 닫힌다
+    assert done == (2500.5, 1.0, 1_000, True), done
+    assert agg.take() == (2500.5, 1.0, 1_001, True), "마지막 묶음은 take() 로 꺼낸다"
+    assert agg.take() is None, "두 번 꺼내면 안 된다"
     assert buf.rows and buf.max_sec == 1001, "진행 중인 초는 남아 있어야 한다"
     assert buf.take_closed() == [], "같은 초를 두 번 쓰면 안 된다"
     buf.add(1_002_000, 2440.04, 2.0, sell=True)    # 1001 초가 완결됨

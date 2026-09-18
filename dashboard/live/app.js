@@ -148,10 +148,13 @@ const footprintShades = () =>
   (document.documentElement.getAttribute("data-theme") === "light"
     ? FOOTPRINT_SHADE_LIGHT : FOOTPRINT_SHADE_DARK);
 // ── 리테일/고래 수급 (2026-09-19) ──────────────────────────────────────────
-// 서버가 셀을 [매수, 매도, 고래매수, 고래매도] 4칸으로 준다. **고래는 부분집합**이므로
-// 리테일 = 매수 - 고래매수 다. 고래 기준은 서버가 최근 체결 명목의 p99 로 정하고 값을 같이
-// 실어 보낸다(whaleUsd) -- 화면은 그 숫자를 반드시 적는다. 고정 수량이 아니라 분위라서,
-// 적지 않으면 어제 화면과 오늘 화면이 다른 뜻이 된다.
+// 서버가 셀을 [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도] 6칸으로 준다.
+// 고래·리테일은 총량의 **부분집합**이고 **중형($10k~$100k)은 칸이 없다** -- 셋을 빼서 얻는다.
+//
+// ⭐경계가 왜 둘인지(2026-09-19 ETHUSDT 39,712건 실측): ≥$10k 는 건수 4.1%인데 **물량 73.1%**,
+//   ≥$100k 는 건수 0.17%에 물량 14.6%다. 하나로 가르면 둘 중 하나가 거짓말이 된다 --
+//   $10k 를 고래라 하면 물량의 3/4이 고래고, $100k 위만 고래라 하고 나머지를 리테일이라
+//   부르면 그 «리테일»의 대부분이 실은 중형이다. 화면은 경계를 숫자로 적어야 한다.
 const API_SUPPLY_PROFILE_URL = "/api/supply-profile";
 const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
 let latestSupplyProfile = null;
@@ -3259,7 +3262,8 @@ function updateLivePriceFast(price) {
 // ⚠️이중계상을 막는 규약: **WS 가 그 봉이 열리기 전부터 붙어 있었을 때만** 서버 값을 내 값으로
 //   갈아끼운다. 봉 중간에 붙었으면 앞부분이 없으므로 서버 값을 그대로 쓴다(반쪽을 진짜처럼
 //   보여주지 않는다 -- 서버 스냅샷에서 겪은 그 실패다).
-let footprintLive = { barStart: 0, since: Infinity, bucket: 0.5, cells: new Map() };
+let footprintLive = { barStart: 0, since: Infinity, bucket: 0.5, cells: new Map(),
+                      orderKey: null, orderQty: 0, orderAt: null };
 
 // ⚠️서버(파이썬)의 round() 는 **은행가 반올림**이다: 4880.5 -> 4880, 4881.5 -> 4882.
 // JS Math.round 는 올림이라 4881, 4882 가 된다. 버킷이 0.5 이고 ETH 틱이 0.01 이라 가격이
@@ -3275,19 +3279,47 @@ function roundHalfEven(x) {
 function footprintLiveAdd(price, qty, tsMs, sell) {
   const barSec = Math.floor(tsMs / 1000 / CHART_CANDLE_MIN / 60) * CHART_CANDLE_MIN * 60;
   if (barSec !== footprintLive.barStart) {
+    footprintLiveCloseOrder();     // 이전 봉의 마지막 주문을 흘리지 않는다
     footprintLive.barStart = barSec;
     footprintLive.cells = new Map();
   }
   if (footprintLive.since === Infinity) footprintLive.since = tsMs;   // WS 가 붙은 시각
   const key = roundHalfEven(price / footprintLive.bucket);
-  const cell = footprintLive.cells.get(key) || [0, 0, 0, 0];
-  const side = sell ? 1 : 0;
-  cell[side] += qty;
-  // 고래 기준은 **서버가 정한 값을 빌려 쓴다**. 여기서 따로 추정하면 진행 중인 봉만 다른
-  // 기준으로 분류돼, 봉이 끝나는 순간 셀이 튄다. 서버 값이 아직 0(웜업)이면 분류하지 않는다.
-  const thr = Number((latestFootprint || {}).whaleUsd) || 0;
-  if (thr > 0 && price * qty >= thr) cell[2 + side] += qty;
+  const cell = footprintLive.cells.get(key) || [0, 0, 0, 0, 0, 0];
+  cell[sell ? 1 : 0] += qty;      // 총량은 체결마다
   footprintLive.cells.set(key, cell);
+  // 크기 구간은 **테이커 주문**이 닫힐 때. 파이썬 TakerOrderAggregator 의 거울이다
+  // (같은 가격·방향·ms = 한 주문). 규칙이 갈리면 진행 중인 봉만 다르게 갈려, 봉이 끝나고
+  // 서버 값으로 바뀌는 순간 셀이 튄다.
+  const ok = price + "|" + (sell ? 1 : 0) + "|" + tsMs;
+  if (ok !== footprintLive.orderKey) {
+    footprintLiveCloseOrder();
+    footprintLive.orderKey = ok;
+    footprintLive.orderQty = 0;
+    footprintLive.orderAt = { price, sell, tsMs };
+  }
+  footprintLive.orderQty += qty;
+}
+
+// 열려 있던 주문을 닫아 크기 구간에 넣는다. 다음 체결이 와야 닫히지만 ETH 는 초당 100건이
+// 넘게 체결되므로 그 지연은 밀리초다.
+function footprintLiveCloseOrder() {
+  const at = footprintLive.orderAt, q = footprintLive.orderQty;
+  footprintLive.orderKey = null; footprintLive.orderQty = 0; footprintLive.orderAt = null;
+  if (!at || !(q > 0)) return;
+  const fp = latestFootprint || {};
+  const whaleMin = Number(fp.whaleMinUsd) || 0, retailMax = Number(fp.retailMaxUsd) || 0;
+  const notional = at.price * q;
+  let slot = -1;
+  if (whaleMin > 0 && notional >= whaleMin) slot = 2;
+  else if (retailMax > 0 && notional < retailMax) slot = 4;
+  if (slot < 0) return;                                  // 중형 -- 칸이 없다(뺄셈으로 나온다)
+  const barSec = Math.floor(at.tsMs / 1000 / CHART_CANDLE_MIN / 60) * CHART_CANDLE_MIN * 60;
+  if (barSec !== footprintLive.barStart) return;         // 봉이 넘어갔다 -> 서버 값이 맡는다
+  const key = roundHalfEven(at.price / footprintLive.bucket);
+  const cell = footprintLive.cells.get(key);
+  if (!cell) return;
+  cell[slot + (at.sell ? 1 : 0)] += q;
 }
 
 // 서버 payload 의 마지막 봉을 내 실시간 버킷으로 바꾼다(조건을 만족할 때만).
@@ -3297,7 +3329,7 @@ function footprintMergeLive(byTime, bucket) {
   if (!bar || !byTime.has(bar)) return;
   if (footprintLive.since > bar * 1000) return;   // 봉 중간에 붙었다 -> 서버 값 유지
   byTime.set(bar, [...footprintLive.cells.entries()]
-    .map(([k, c]) => [k * bucket, c[0], c[1], c[2], c[3]])
+    .map(([k, c]) => [k * bucket, c[0], c[1], c[2], c[3], c[4], c[5]])
     .sort((a, b) => a[0] - b[0]));
 }
 
@@ -3389,7 +3421,8 @@ function footprintForChart() {
   footprintMergeLive(byTime, bucket);   // 진행 중인 봉만 실시간 값으로 대체
   return {
     bucket,
-    whaleUsd: Number(payload.whaleUsd) || 0,
+    whaleMinUsd: Number(payload.whaleMinUsd) || 0,
+    retailMaxUsd: Number(payload.retailMaxUsd) || 0,
     aggTimes,
     ready: !!payload.ready,
     barsExpected: Number(payload.barsExpected) || bars.length,
@@ -3416,28 +3449,37 @@ function fmtFootprintQty(v) {
 //   한 자로 그리면 둘 중 하나가 통째로 사라진다 --
 //   리테일 합계는 고래 합계보다 보통 몇 배 크다(고래는 상위 1% 체결뿐이다). 여기서 읽는 것은
 //   «어느 쪽이 큰가»가 아니라 «부호가 같은가»이고, 절대량은 패널 오른쪽 숫자가 말한다.
-// ⚠️aggTrades 로 메운 봉(footprint.aggByTime)은 체결이 묶여 있어 고래가 과장된다. 지우지 않고
-//   **흐리게** 그린다 -- 지우면 「그 시간엔 고래가 없었다」로 읽힌다.
+// ⚠️2026-09-19 **정정**: 처음엔 「백필(aggTrades) 봉은 고래가 과장된다」고 적고 흐리게 그렸다.
+//   틀렸다. 크기 구간을 **테이커 주문** 단위로 맞추고 나니 방향이 반대다 -- aggTrades 한 줄이
+//   곧 주문 하나라 백필이 오히려 **정확**하고, 실시간은 `@trade` 를 (가격·방향·ms)로 되묶은
+//   **근사**다(같은 ms 에 같은 값을 친 서로 다른 테이커는 하나로 합쳐진다). 차이가 작고
+//   방향이 반대라 흐리게 그리는 것 자체를 그만뒀다 -- 잘못된 쪽을 흐리게 하고 있었다.
 function supplyFlowOfBar(levels) {
-  let buy = 0, sell = 0, wBuy = 0, wSell = 0;
+  let buy = 0, sell = 0, wBuy = 0, wSell = 0, rBuy = 0, rSell = 0;
   (levels || []).forEach((l) => {
     buy += Number(l[1]) || 0; sell += Number(l[2]) || 0;
     wBuy += Number(l[3]) || 0; wSell += Number(l[4]) || 0;
+    rBuy += Number(l[5]) || 0; rSell += Number(l[6]) || 0;
   });
-  // 고래는 매수/매도의 **부분집합**이다 -- 리테일은 빼서 얻는다.
-  return { whale: wBuy - wSell, retail: (buy - wBuy) - (sell - wSell),
-           whaleAbs: wBuy + wSell, retailAbs: (buy - wBuy) + (sell - wSell) };
+  // 고래·리테일은 제 칸에서 읽는다. **중형만** 뺄셈이다 -- 셋을 더하면 전체 델타가 된다.
+  return { whale: wBuy - wSell, retail: rBuy - rSell,
+           mid: (buy - wBuy - rBuy) - (sell - wSell - rSell) };
 }
 
 function drawSupplyRibbon(svg, NS, footprint, candles, xAt, bw, ml, cw, panelY, panelH) {
   const flows = candles.map((c) => Object.assign(
     supplyFlowOfBar(footprint.byTime.get(c.time)), { agg: footprint.aggTimes.has(c.time) }));
+  // 줄 이름 옆에 경계를 붙인다. 「고래」라는 말만으로는 무슨 뜻인지 아무도 모른다.
+  const whaleTag = footprint.whaleMinUsd > 0
+    ? "≥$" + Math.round(footprint.whaleMinUsd / 1000) + "k" : "";
+  const retailTag = footprint.retailMaxUsd > 0
+    ? "<$" + Math.round(footprint.retailMaxUsd / 1000) + "k" : "";
   const rowH = (panelH - FLOW_ROW_GAP) / 2;
   const half = Math.max(3, rowH / 2 - 1);
   const rows = [
-    { mid: panelY + rowH / 2, label: "고래",
+    { mid: panelY + rowH / 2, label: "고래", sub: whaleTag,
       max: Math.max(...flows.map((f) => Math.abs(f.whale)), 1e-9), pick: (f) => f.whale, op: 0.95 },
-    { mid: panelY + rowH + FLOW_ROW_GAP + rowH / 2, label: "리테일",
+    { mid: panelY + rowH + FLOW_ROW_GAP + rowH / 2, label: "리테일", sub: retailTag,
       max: Math.max(...flows.map((f) => Math.abs(f.retail)), 1e-9), pick: (f) => f.retail, op: 0.45 },
   ];
 
@@ -3483,11 +3525,19 @@ function drawSupplyRibbon(svg, NS, footprint, candles, xAt, bw, ml, cw, panelY, 
     svg.appendChild(zero);
 
     const tag = document.createElementNS(NS, "text");
-    tag.setAttribute("x", ml - 5); tag.setAttribute("y", row.mid + 3);
+    tag.setAttribute("x", ml - 5); tag.setAttribute("y", row.mid + 1);
     tag.setAttribute("text-anchor", "end"); tag.setAttribute("font-size", "8");
     tag.setAttribute("fill", "var(--muted)");
     tag.textContent = row.label;
     svg.appendChild(tag);
+    if (row.sub) {
+      const sub = document.createElementNS(NS, "text");
+      sub.setAttribute("x", ml - 5); sub.setAttribute("y", row.mid + 9);
+      sub.setAttribute("text-anchor", "end"); sub.setAttribute("font-size", "7");
+      sub.setAttribute("fill", "var(--muted)"); sub.setAttribute("fill-opacity", "0.7");
+      sub.textContent = row.sub;
+      svg.appendChild(sub);
+    }
 
     flows.forEach((f, i) => {
       const v = row.pick(f);
@@ -3501,10 +3551,10 @@ function drawSupplyRibbon(svg, NS, footprint, candles, xAt, bw, ml, cw, panelY, 
       bar.setAttribute("y", v > 0 ? row.mid - hgt : row.mid);
       bar.setAttribute("height", hgt);
       bar.setAttribute("fill", v > 0 ? "var(--good)" : "var(--bad)");
-      bar.setAttribute("fill-opacity", f.agg ? row.op * 0.45 : row.op);
+      bar.setAttribute("fill-opacity", row.op);
       const title = document.createElementNS(NS, "title");
       title.textContent = row.label + " 순수급 " + (v > 0 ? "+" : "") + v.toFixed(1) + " ETH"
-        + (f.agg ? " · 집계 체결로 메운 봉(고래 과장)" : "");
+        + (f.agg ? " · 집계 체결(aggTrades)로 메운 봉 -- 주문 단위가 정확한 쪽이다" : "");
       bar.appendChild(title);
       svg.appendChild(bar);
     });
@@ -3531,21 +3581,27 @@ function drawSupplyRibbon(svg, NS, footprint, candles, xAt, bw, ml, cw, panelY, 
     rightText(rows[0].mid + 3, signed(last.whale), "이번 봉 고래 순수급(ETH)");
     rightText(rows[1].mid + 3, signed(last.retail), "이번 봉 리테일 순수급(ETH)");
   }
-  // 고래 기준은 분위라 **매일 다르다**. 적지 않으면 어제 화면과 오늘 화면이 다른 뜻이 된다.
-  rightText(panelY + panelH + 9,
-    footprint.whaleUsd > 0 ? "고래 ≥$" + Math.round(footprint.whaleUsd / 1000) + "k" : "기준 집계 중",
-    footprint.whaleUsd > 0
-      ? "고래 = 최근 체결 명목의 상위 1% ($" + Math.round(footprint.whaleUsd).toLocaleString() + " 이상). "
-        + "고정 수량이 아니라 분위라 매일 달라진다."
-      : "체결 표본이 모자라 아직 분류하지 않는다(고래 칸이 0이다).");
+  // 🔴두 줄의 합은 전체가 **아니다**. 중형($10k~$100k)이 물량의 절반 이상이라(실측 58.5%)
+  //   그 사실을 숨기면 리본이 조용히 거짓말을 한다. 줄로 그리지 않는 대신 숫자로 적는다.
+  if (last) {
+    const signed = (v) => (v > 0 ? "+" : v < 0 ? "-" : "") + fmtFootprintQty(Math.abs(v));
+    rightText(panelY + panelH + 9, "중형 " + signed(last.mid),
+      "중형($" + Math.round(footprint.retailMaxUsd / 1000) + "k~$"
+        + Math.round(footprint.whaleMinUsd / 1000) + "k) 순수급. 리본 두 줄에는 안 그린다 -- "
+        + "그려도 셋 다 얇아지기만 한다. 셋을 더하면 봉 전체 델타다.");
+  }
 }
 
 
 // ── 가격축 수급 프로파일 (2026-09-19) ───────────────────────────────────────
 // 시간을 버리고 가격만 남긴다. 창 전체(최대 24시간)를 가격빈으로 접어 «어느 값에서 누가
 // 공격했는가»를 본다. 리본이 «지금»을 말한다면 이 화면은 «자리»를 말한다.
-// 왼쪽이 공격적 매도, 오른쪽이 공격적 매수, 가운데가 가격이다. 진한 부분이 고래 몫으로,
-// 전체 막대 **안에** 겹쳐 그린다(고래는 부분집합이지 옆에 붙는 다른 물량이 아니다).
+// 왼쪽이 공격적 매도, 오른쪽이 공격적 매수, 가운데가 가격이다. 한 막대는 가운데부터
+// **고래 → 중형 → 리테일** 순으로 이어 붙인 세 토막이다(쌓기이지 겹치기가 아니다 --
+// 겹쳐 그리면 가려진 토막의 길이를 눈으로 잴 수 없다). 큰 것부터 안쪽에 두는 이유는
+// 가운데 선이 기준이라 거기서 출발하는 토막만 길이를 바로 읽을 수 있기 때문이다.
+// 색은 셋 다 방향색(초록/빨강) 하나이고, 구분은 **농담**이다 -- 이 저장소의 색 계약이
+// 초록·빨강·주황 셋뿐이라 「고래색」을 새로 만들 수 없다(styles.css 디자인 토큰 주석).
 // ⚠️창은 프로세스가 살아 있는 동안만 찬다 -- 스냅샷에는 최근 12봉만 남긴다(server.py의
 //   FOOTPRINT_KEEP_BARS 주석). 그래서 실제 창 길이를 머리글에 **항상** 적는다.
 function renderSupplyProfileSvg(svg, profile, currentPrice) {
@@ -3585,8 +3641,8 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   const rows = new Map();
   levels.forEach((l) => {
     const key = Math.floor(Number(l[0]) / rowSize);
-    const row = rows.get(key) || [0, 0, 0, 0];
-    for (let i = 0; i < 4; i++) row[i] += Number(l[i + 1]) || 0;
+    const row = rows.get(key) || [0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < 6; i++) row[i] += Number(l[i + 1]) || 0;
     rows.set(key, row);
   });
   const keys = [...rows.keys()].sort((a, b) => b - a);   // 위가 높은 가격
@@ -3597,6 +3653,9 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   let pocKey = null, pocVol = -1;
   rows.forEach((r, k) => { if (r[0] + r[1] > pocVol) { pocVol = r[0] + r[1]; pocKey = k; } });
 
+  // 안쪽부터 고래 · 중형 · 리테일. 농담이 곧 크기 계단이다.
+  const SEG_OPACITY = [0.95, 0.55, 0.28];
+  const SEG_NAME = ["고래", "중형", "리테일"];
   const bar = (x, y, wid, color, opacity, tip) => {
     if (!(wid > 0)) return;
     const rect = document.createElementNS(NS, "rect");
@@ -3608,19 +3667,27 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     rect.appendChild(title);
     svg.appendChild(rect);
   };
+  // 한 쪽(매수 또는 매도)을 세 토막으로 쌓는다. dir = +1 이면 오른쪽, -1 이면 왼쪽.
+  const stack = (edge, dir, y, segs, total, color, side, price) => {
+    let cursor = 0;
+    segs.forEach((v, s) => {
+      const wid = sideW * v / max;
+      const x = dir > 0 ? edge + cursor : edge - cursor - wid;
+      bar(x, y, wid, color, SEG_OPACITY[s],
+        price.toFixed(1) + " · " + side + " " + SEG_NAME[s] + " " + v.toFixed(1) + " ETH ("
+          + (total > 0 ? Math.round(v / total * 100) : 0) + "% · 합계 " + total.toFixed(1) + ")");
+      cursor += wid;
+    });
+  };
 
   keys.forEach((key, j) => {
-    const [buy, sell, wBuy, wSell] = rows.get(key);
+    const [buy, sell, wBuy, wSell, rBuy, rSell] = rows.get(key);
     const y = mt + j * rowPx;
     const price = key * rowSize;
-    const sw = sideW * sell / max, swW = sideW * wSell / max;
-    const bwd = sideW * buy / max, bwW = sideW * wBuy / max;
-    const tip = (side, tot, whale) => price.toFixed(1) + " · " + side + " " + tot.toFixed(1)
-      + " ETH (고래 " + whale.toFixed(1) + " · " + (tot > 0 ? Math.round(whale / tot * 100) : 0) + "%)";
-    bar(leftEdge - sw, y, sw, "var(--bad)", 0.4, tip("매도", sell, wSell));
-    bar(leftEdge - swW, y, swW, "var(--bad)", 0.95, tip("매도", sell, wSell));
-    bar(rightEdge, y, bwd, "var(--good)", 0.4, tip("매수", buy, wBuy));
-    bar(rightEdge, y, bwW, "var(--good)", 0.95, tip("매수", buy, wBuy));
+    stack(leftEdge, -1, y, [wSell, Math.max(0, sell - wSell - rSell), rSell], sell,
+          "var(--bad)", "매도", price);
+    stack(rightEdge, 1, y, [wBuy, Math.max(0, buy - wBuy - rBuy), rBuy], buy,
+          "var(--good)", "매수", price);
 
     // 🔴행이 $1 보다 촘촘한데 toFixed(0) 로 찍으면 «2608, 2608» 처럼 같은 값이 두 줄 나온다
     //   (2026-09-19 첫 렌더에서 실제로 그랬다). 자릿수는 행 크기가 정한다.
@@ -3654,18 +3721,36 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   head.setAttribute("font-size", "10"); head.setAttribute("fill", "var(--muted)");
   const span = Number(profile.spanSeconds) || 0;
   const hours = Math.floor(span / 3600), mins = Math.round((span % 3600) / 60);
-  head.textContent = "최근 " + (hours ? hours + "시간 " : "") + mins + "분 · "
-    + (profile.whaleUsd > 0
-      ? "고래 = 체결 ≥ $" + Math.round(profile.whaleUsd).toLocaleString() + " (상위 1%)"
-      : "고래 기준 집계 중")
-    + (profile.aggBars > 0
-       ? " · 집계 체결로 메운 봉 " + profile.aggBars + "개 포함(그만큼 고래가 과장된다)" : "");
+  head.textContent = "최근 " + (hours ? hours + "시간 " : "") + mins + "분"
+    + (profile.aggBars > 0 ? " · 그중 " + profile.aggBars + "봉은 집계 체결(aggTrades)로 메움" : "");
   svg.appendChild(head);
 
+  // 범례. 농담 세 단계는 설명 없이는 안 읽힌다 -- 견본을 같이 놓는다.
+  const kUsd = (v) => "$" + Math.round(v / 1000) + "k";
+  const legend = [
+    ["고래", "≥" + kUsd(profile.whaleMinUsd || 0)],
+    ["중형", kUsd(profile.retailMaxUsd || 0) + "~" + kUsd(profile.whaleMinUsd || 0)],
+    ["리테일", "<" + kUsd(profile.retailMaxUsd || 0)],
+  ];
+  let lx = ml;
+  legend.forEach(([name, range], s) => {
+    const sw = document.createElementNS(NS, "rect");
+    sw.setAttribute("x", lx); sw.setAttribute("y", h - 14);
+    sw.setAttribute("width", 9); sw.setAttribute("height", 9);
+    sw.setAttribute("fill", "var(--good)"); sw.setAttribute("fill-opacity", SEG_OPACITY[s]);
+    svg.appendChild(sw);
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", lx + 13); t.setAttribute("y", h - 6);
+    t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)");
+    t.textContent = name + " " + range;
+    svg.appendChild(t);
+    lx += 13 + (name.length + range.length) * 6.2 + 16;
+  });
   const foot = document.createElementNS(NS, "text");
-  foot.setAttribute("x", ml); foot.setAttribute("y", h - 6);
+  foot.setAttribute("x", w - mr); foot.setAttribute("y", h - 6);
+  foot.setAttribute("text-anchor", "end");
   foot.setAttribute("font-size", "9"); foot.setAttribute("fill", "var(--muted)");
-  foot.textContent = "← 공격적 매도  ·  진한 부분이 고래 몫  ·  공격적 매수 →";
+  foot.textContent = "← 공격적 매도  ·  가운데부터 큰 체결 순  ·  공격적 매수 →";
   svg.appendChild(foot);
 }
 
