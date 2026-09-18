@@ -683,8 +683,12 @@ def run_once(dry_run: bool) -> list[Check]:
         # 2026-08-17: BTC/SOL liquidation tracking, dev-to-server migration -- deliberately its
         # own duckdb file, not data/live/tail_risk.duckdb (see supervisor_tail_risk_btc_sol_worker.sh
         # for why: a shared-file writer caused two real trading_bot.py write failures on first try).
-        check_duckdb_table_freshness("duckdb_tail_risk_1m_btc", tail_btc_sol_db, "tail_risk_1m_btc", "ts", 5, 10),
-        check_duckdb_table_freshness("duckdb_tail_risk_1m_sol", tail_btc_sol_db, "tail_risk_1m_sol", "ts", 5, 10),
+        # 2026-09-19 은퇴: duckdb_tail_risk_1m_{btc,sol} (2줄) 제거. 사용자 지시로 trading_bot 의
+        # BTC/SOL 결정 루프를 껐고(.env FINAL_GOVERNOR_OMEGA4_6_1_SHADOW_ASSETS_ENABLE=False),
+        # 그래서 이 표를 읽던 hexa-pulse 인터셉터(진입차단·강제청산)가 더는 호출되지 않는다.
+        # 쓰던 워커(supervisor_tail_risk_btc_sol_worker.sh)도 같은 날 정지 + @reboot 제거했다.
+        # 러너 정지 + @reboot 제거 + 이 줄 삭제가 **한 쌍**이다(SHADOW_RUNNERS 주석의 사고).
+        # 되살리려면: .env 플래그 True -> 워커 재기동 -> 이 두 줄 복원, 순서로.
         # hourly cron; one missed run is normal, two in a row is not.
         check_duckdb_table_freshness("duckdb_deribit_gex", gex_db, "gex_summary", "recorded_at_utc", 90, 150),
         # daily cron (0 1 * * *); warn/critical give ~1 and ~2 missed days of slack.
