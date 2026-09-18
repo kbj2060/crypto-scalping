@@ -95,20 +95,35 @@ python scripts/live_zeus_v4_shadow_runner_20260918.py --once     # 새 봉만 �
 python scripts/live_zeus_v4_shadow_runner_20260918.py --selfcheck # 배리어·게이트 자체점검
 ```
 
-## 10. 가동 상태 (2026-09-18 10:2x KST 시작)
+## 10. 가동 상태 — **서버** (2026-09-18 10:54 KST)
 ```
-호스트   dev (서버는 실거래 기기 -- CPU 작업은 dev 라는 상시 지시를 따른다)
-감시     data/live/zeus_v4_shadow_20260918/supervise.sh  (크래시 시 60초 뒤 재시작)
-러너     scripts/live_zeus_v4_shadow_runner_20260918.py --live --bars=20000 --sleep=120
-자원     ulimit -v 8GB · OMP 3스레드 · 실측 RSS ~1.16GB 안정
-산출     ledger.jsonl(cand/entry/exit) · state.json(게이트 버퍼·포지션) · rest_tail.parquet
+호스트   서버(실거래 기기). 사용자 지시로 dev 에서 이관했다 -- 대시보드가 서버의
+         data/live/ 를 읽으므로 dev 에 쌓으면 구조적으로 안 보인다.
+등록     crontab @reboot ×2 (supervisor_zeus_shadow.sh <아티팩트>)
+감시     scripts/ops/_supervise.sh (저장소 표준) · OMP_NUM_THREADS=2 · MALLOC_ARENA_MAX=2
+러너     scripts/live_zeus_shadow_runner_20260918.py --live --art=<v3|v4> --bars=20000 --sleep=120
+         ⭐v3·v4 가 **같은 러너**다. 사양 차이는 전부 아티팩트(model.pt/meta.json)에 있다.
+감시기   ops_watchdog SHADOW_RUNNERS 에 2줄 등재(원장 신선도 warn 15분·critical 30분)
+대시보드 /api/zeus-shadow + 카드 1개. 🔴톤이 손익이 아니라 «건전성»이다(436건 전까지 판정 없음)
+산출     data/live/zeus_v{3,4}_shadow_20260918/{ledger.jsonl,state.json,rest_tail.parquet}
 ```
-🔴**주문을 내지 않는다.** 🔴`pkill -f` 로 죽이지 말 것 — 패턴이 감시 셸 자신도 잡는다.
+🔴**주문을 내지 않는다.** 🔴`pkill -f` 로 죽이지 말 것 — 패턴이 감시기와 호출 셸까지 잡는다
+(2026-09-18 이 세션에서 두 번 실제로 당했다). PID 로 죽이고, 감시기를 먼저 죽인 뒤 자식을 죽인다.
+
+### 기동 직후 실측 (2026-09-18 10:56 KST)
+| | 게이트 버퍼 | 백필(표본 제외) | 표본 n | 마지막 봉 | 포지션 |
+|---|---|---|---|---|---|
+| v4 | 2,000 | 112건 | **0** | 2026-09-18 01:45Z | 보유 |
+| v3 | 2,000 | 51건 | **0** | 2026-09-18 01:45Z | 보유 |
+
+⭐백필은 **게이트 버퍼(1,000 후보 ≈ 4일)를 채우기 위해 필요**하지만 원장에 `bf` 로 표시돼
+표본에서 빠진다. 사전등록 표본은 «켠 시점부터»이고 지금 **n=0 에서 시작한다**.
 
 ### 🔴가동 중 알려진 한계
-- **재부팅 생존 없음.** `@reboot`/systemd 등록은 하지 않았다(ops 변경이라 별도 승인 사항).
 - **러너는 데이터 구멍에서 «거부»한다**(중앙값으로 조용히 채우지 않는다). REST 메트릭이
-  41.7h 만 주므로 그 앞 구간의 vision 일별 파일이 늦게 올라오면 잠시 죽을 수 있고,
-  파일이 올라오면 감시가 재시작해 자가회복한다. `runner.log` 의 「러너 종료」 줄로 확인한다.
-- **바이낸스 가중치는 트레이딩 봇과 공유**(한도 2400/분). 러너는 헤더를 읽고 1,500 초과면
-  그 주기를 건너뛴다.
+  41.7h 만 주므로 그 앞의 vision 일별 파일이 늦으면 잠시 죽고, 파일이 올라오면 감시기가
+  재시작해 자가회복한다. `logs/supervisor/zeus_v*_shadow_*.log` 로 확인한다.
+- **바이낸스 가중치는 트레이딩 봇과 공유**(한도 2400/분). 헤더를 읽고 1,500 초과면 건너뛴다.
+- **코드/아티팩트를 바꾸면 사람이 먼저 파리티를 확인한다**(부팅마다 돌리면 연구 parquet
+  480MB 를 실거래 기기에서 매번 읽는다):
+  `--parity --art=<디렉터리>` 와 `--verify-rest`.
