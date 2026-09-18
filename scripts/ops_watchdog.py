@@ -438,10 +438,13 @@ def _check_duckdb_table_freshness_uncached(component: str, db_path: Path, table:
 # 2026-09-18 추가 등재: Zeus Baseline v4(157열·edge 게이트). v3 과 **같은 러너**가 돌린다
 # (판본별 러너를 두면 한쪽만 고쳐진다 -- v3 전용 러너에 원천 병합 버그가 있어 최근 4일
 #  OI 결측 43.4% 였다). v4 는 2.17건/일이라 436건 판정 지평이 1.5년 -> 200일로 내려온다.
-SHADOW_RUNNERS: tuple[tuple[str, str], ...] = (
-    ("zeus_v3_shadow", "zeus_v3_shadow_20260918/state.json"),
-    ("zeus_v4_shadow", "zeus_v4_shadow_20260918/state.json"),
-)
+# 2026-09-19 은퇴: zeus_v3_shadow · zeus_v4_shadow (2줄) 제거 -> 표가 **비었다**.
+# 사용자 지시로 러너를 정지시켰다(실시간 스캘핑으로 무게가 옮겨가 수요가 줄었다). 라이브 표본은
+# v3 0건 · v4 2건뿐이었다(나머지는 백필) -- 사전등록 판정선 436건 대비 사실상 0이라 잃은 누적은
+# 없고, 포기한 것은 앞으로의 누적(현 속도로 ~267일)이다. 원장은 보존했다.
+# 러너 정지 + crontab @reboot 제거 + 이 줄 삭제가 **한 쌍**이다(위 09-14 사고 참조).
+# 표가 비어도 안전하다 -- 아래 소비처가 제너레이터 언패킹이라 0줄이면 검사를 안 만든다.
+SHADOW_RUNNERS: tuple[tuple[str, str], ...] = ()
 
 
 def check_shadow_runner(component: str, filename: str, warn_minutes: float = 15,
