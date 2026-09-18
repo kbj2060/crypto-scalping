@@ -3464,7 +3464,6 @@ function renderSupply1s() {
   const first = now - SUPPLY_1S_WINDOW;
   const secs = [...supply1s.keys()].filter((s) => s > first && s <= now).sort((a, b) => a - b);
   if (secs.length < 2) {
-    setT("supply1sSub", "체결 테이프 집계 중…");
     const txt = document.createElementNS(NS, "text");
     txt.setAttribute("x", w / 2); txt.setAttribute("y", h / 2);
     txt.setAttribute("text-anchor", "middle"); txt.setAttribute("fill", "var(--muted)");
@@ -3568,12 +3567,6 @@ function renderSupply1s() {
 
   label(ml, h - 3, "5분 전", "var(--muted)");
   label(ml + cw, h - 3, "지금", "var(--muted)", "end");
-  const kUsd = (v) => "$" + Math.round(v / 1000) + "k";
-  // 부제는 **패널 전체**를 설명한다 -- 이 줄은 제목 바로 아래에 있고 패널에는 차트가 둘이다.
-  setT("supply1sSub", "고래 ≥" + kUsd(supply1sMeta.whaleMinUsd)
-    + " · 리테일 <" + kUsd(supply1sMeta.retailMaxUsd)
-    + "  |  위: 가격대별 물량과 «벽»  ·  아래: 최근 5분 누적 순수급(1초)"
-    + " · 눈금은 고래 주문이 있던 초 " + ticks.length + "건");
 }
 
 // ── 가격축 수급 프로파일 (2026-09-19) ───────────────────────────────────────
@@ -3610,9 +3603,10 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   }
 
   // 여백은 캔들 차트와 **같은 값**이다(2026-09-19 사용자 요청: 풋프린트와 같은 너비).
-  // 그 대가로 좌우에 이름표를 놓을 자리가 없어졌다 -- 벽 이름표는 머리글로 옮기고
-  // 차트에는 눈금만 남긴다. 머리글은 세 줄: 창 길이 · 지지/저항 구간 · 벽.
-  const ml = 45, mr = 112, mt = 58, mb = 22;
+  // 머리글 세 줄(창 길이 · 지지/저항 · 벽)은 같은 날 사용자 지시로 걷어냈다 -- 그 세로
+  // 공간을 행에 돌려줬다. 값은 전부 **툴팁**에 남아 있고, 경계($100k/<$10k)는 아래 범례가
+  // 계속 적는다.
+  const ml = 45, mr = 112, mt = 14, mb = 22;
   const centerW = mobileChart ? 54 : 68;   // 굵고 커진 가격 라벨 자리(사용자 요청)
   const sideW = (w - ml - mr - centerW) / 2;
   const avail = h - mt - mb;
@@ -3772,16 +3766,6 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     }
   }
 
-  const head = document.createElementNS(NS, "text");
-  head.setAttribute("x", ml); head.setAttribute("y", 14);
-  head.setAttribute("font-size", "10"); head.setAttribute("fill", "var(--muted)");
-  const span = Number(profile.spanSeconds) || 0;
-  const hours = Math.floor(span / 3600), mins = Math.round((span % 3600) / 60);
-  head.textContent = "최근 " + (hours ? hours + "시간 " : "") + mins + "분"
-    + (profile.aggBars > 0 ? " · 그중 " + profile.aggBars + "봉은 집계 체결(aggTrades)로 메움" : "");
-  svg.appendChild(head);
-
-
   // ── 벽 (2026-09-19 사용자 요청) ─────────────────────────────────────────
   // ⚠️여기서 「벽」은 **체결이 몰린 가격**이지 호가창에 걸린 대기 물량이 아니다. 이 화면의
   //   원천은 체결 테이프뿐이라 «걸려 있는 것»은 볼 수 없다. 그래서 이름표에 «체결»을 적고
@@ -3843,18 +3827,6 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     tick.appendChild(tip);
   });
 
-  // 벽 이름표는 **머리글 셋째 줄**로. 여백을 캔들 차트와 맞추느라 좌우 자리가 사라졌다.
-  const wallLine = document.createElementNS(NS, "text");
-  wallLine.setAttribute("x", ml); wallLine.setAttribute("y", 44);
-  wallLine.setAttribute("font-size", "9.5"); wallLine.setAttribute("fill", "var(--muted)");
-  wallLine.textContent = walls.length
-    ? "벽(체결 쏠림) — " + walls.map((x) => x.group + " "
-        + (x.side === "sell" ? "매도" : "매수") + " "
-        + (x.w.key * rowSize).toFixed(rowSize >= 1 ? 0 : 1)
-        + " ×" + x.w.mult.toFixed(1)).join("   ·   ")
-    : "벽 없음 — 어느 구간도 고르게 퍼진 것의 1.5배를 못 넘는다";
-  svg.appendChild(wallLine);
-
   // 범례. 농담 세 단계는 설명 없이는 안 읽힌다 -- 견본을 같이 놓는다.
   const kUsd = (v) => "$" + Math.round(v / 1000) + "k";
   const legend = [
@@ -3876,15 +3848,6 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     svg.appendChild(t);
     lx += 13 + (name.length + range.length) * 6.2 + 16;
   });
-  const sr2 = document.createElementNS(NS, "text");
-  sr2.setAttribute("x", ml); sr2.setAttribute("y", 30);
-  sr2.setAttribute("font-size", "9.5"); sr2.setAttribute("fill", "var(--muted)");
-  sr2.textContent = srs.length
-    ? srs.map((x) => x.name + " " + (keys[x.b.at + srW - 1] * rowSize).toFixed(1) + "~"
-        + (keys[x.b.at] * rowSize).toFixed(1) + " (" + Math.round(x.b.share * 100) + "%)").join("   ·   ")
-    : "지지/저항 구간 계산 중";
-  svg.appendChild(sr2);
-
   const foot = document.createElementNS(NS, "text");
   foot.setAttribute("x", w - mr); foot.setAttribute("y", h - 6);
   foot.setAttribute("text-anchor", "end");
