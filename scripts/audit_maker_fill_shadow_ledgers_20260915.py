@@ -33,7 +33,11 @@ import tempfile
 import duckdb
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-LEDGERS = {"ETH": "", "BTC": "_btc", "SOL": "_sol", "XRP": "_xrp", "HYPE": "_hype"}
+# 2026-09-18: ETHUSDC 추가. 섀도우는 09-16 부터 돌고 있었는데 이 표에 없어 **아무도 읽지
+# 않고 있었다**. Zeus 는 ETH/USDC 메이커를 전제하므로 이 원장이 그 전제의 유일한 실측이다
+# (USDT 원장의 peg 왕복 5.78bp 가 문서의 «peg 5.52» 이고, USDC 는 1.41bp 다).
+LEDGERS = {"ETH": "", "ETHUSDC": "_ethusdc", "BTC": "_btc", "SOL": "_sol",
+           "XRP": "_xrp", "HYPE": "_hype"}
 
 
 def load(suffix: str, workdir: pathlib.Path):
