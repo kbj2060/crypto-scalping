@@ -392,6 +392,68 @@ def audit_component(alias: str, component_dir: Path, *, require_train: bool) -> 
     }
 
 
+
+def audit_parent_only(report_path: Path, *, require_train: bool) -> dict[str, Any]:
+    """[2026-09-18] **사이드카 없는 부모**를 위한 감사 경로 -- 면제가 아니라 «검사»다.
+
+    계약 원문은 의무를 둘로 나눠 건다:
+      · **Parent artifact** 는 정확 임계값의 train/validation/oos 예측 CSV 를 포함해야 한다
+      · **Risk sidecar** 는 precomputed_prediction_dir/tag 를 기록하고 그것만 써야 한다
+    그런데 스크립트는 첫 의무를 **사이드카 컴포넌트 루프 «안에서만»** 검사했다. 그래서 크기를
+    예측하지 않는(사이드카가 없는) 부모는 승격 대상이 될 길이 없었다 -- 계약이 막은 게 아니라
+    구현이 그 모양을 예상하지 못한 것이다.
+
+    🔴**우회 방지가 이 함수의 핵심이다**: `risk_model` 이 null 이 아니면 **즉시 실패**한다.
+    사이드카를 가진 보고서가 컴포넌트를 빼먹는 방식으로 사이드카 검사를 건너뛸 수 없다.
+    🔴크기를 예측하는 모델에 «빈 사이드카»를 붙여 통과시키는 것은 충족이 아니라 우회다.
+    """
+    report = read_json(report_path)
+    checks: list[Check] = []
+    rm = report.get("risk_model", "__missing__")
+    checks.append(check("parent_only_declares_risk_model_null", rm is None,
+                        f"risk_model={rm!r} -- 사이드카가 있으면 이 경로를 쓸 수 없다"))
+    checks.append(check("parent_only_declares_risk_sizing_source",
+                        bool(report.get("risk_sizing_source")),
+                        f"risk_sizing_source={report.get('risk_sizing_source')!r}"))
+    checks.extend(dataset_lineage_checks(report, prefix="parent"))
+
+    contract = report.get("contract") or {}
+    threshold = contract.get("quality_threshold")
+    ok_thr = isinstance(threshold, (int, float))
+    checks.append(check("parent_only_quality_threshold_declared", ok_thr, f"quality_threshold={threshold!r}"))
+    tag = qtag(threshold) if ok_thr else None
+    pre_dir = resolve_path(report.get("precomputed_prediction_dir")) or report_path.parent
+    splits = ["validation", "oos"] + (["train"] if require_train else [])
+    files = {sp: pre_dir / f"{sp}_predictions_{tag}.csv" for sp in splits} if tag else {}
+    missing = [sp for sp, f in files.items() if not f.exists()]
+    checks.append(check("exact_threshold_parent_prediction_files_present", bool(files) and not missing,
+                        json.dumps({sp: str(f) for sp, f in files.items()}, ensure_ascii=False)))
+
+    declared = report.get("splits") or {}
+    for sp, f in files.items():
+        if not f.exists():
+            continue
+        try:
+            ts = pd.to_datetime(pd.read_csv(f, usecols=["timestamp"])["timestamp"], errors="raise")
+        except Exception as exc:  # noqa: BLE001 -- 감사는 계약 실패를 보고해야 한다
+            checks.append(check(f"{sp}_prediction_timestamps_readable", False, repr(exc))); continue
+        checks.append(check(f"{sp}_prediction_timestamps_sorted_unique",
+                            bool(ts.is_monotonic_increasing and not ts.duplicated().any()),
+                            f"rows={len(ts)} first={ts.iloc[0]} last={ts.iloc[-1]}"))
+        rng = declared.get(sp)
+        if isinstance(rng, (list, tuple)) and len(rng) == 2:
+            inside = bool(ts.min() >= pd.Timestamp(rng[0]) and ts.max() <= pd.Timestamp(rng[1]) + pd.Timedelta(days=1))
+            checks.append(check(f"{sp}_prediction_within_declared_split", inside,
+                                f"declared={rng} got=[{ts.min()}, {ts.max()}]"))
+    failures = [c for c in checks if c.status == "fail"]
+    return {"alias": report_path.parent.name, "component_dir": str(report_path.parent),
+            "required_quality_threshold": threshold, "required_prediction_tag": tag,
+            "checks": [c.__dict__ for c in checks], "pass": not failures,
+            "failures": [c.__dict__ for c in failures], "timestamp_checks": {},
+            "artifacts": {"component_report": file_fingerprint(report_path),
+                          "prediction_files": {sp: file_fingerprint(f) for sp, f in files.items()}}}
+
+
 def write_markdown(path: Path, audit: dict[str, Any]) -> None:
     lines = [
         f"# Omega Artifact Integrity Audit - {audit['created_at']}",
@@ -425,12 +487,14 @@ def main() -> int:
     ap.add_argument("--report", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, default=None)
     ap.add_argument("--no-require-train", action="store_true")
+    # [2026-09-18] 사이드카 없는 부모 경로. 면제가 아니라 «부모 의무»를 검사한다(위 함수 참조).
+    ap.add_argument("--parent-only", action="store_true")
     args = ap.parse_args()
 
     report_path = resolve_path(args.report)
     if report_path is None:
         raise RuntimeError("--report resolved to None")
-    components = discover_component_dirs(report_path)
+    components = [] if args.parent_only else discover_component_dirs(report_path)
     out_dir = resolve_path(args.out_dir) if args.out_dir is not None else report_path.parent
     if out_dir is None:
         raise RuntimeError("--out-dir resolved to None")
@@ -440,7 +504,12 @@ def main() -> int:
         audit_component(alias, component_dir, require_train=not bool(args.no_require_train))
         for alias, component_dir in components
     ]
-    promotion_pass = all(bool(item["pass"]) for item in component_results)
+    if args.parent_only:
+        component_results.append(
+            audit_parent_only(report_path, require_train=not bool(args.no_require_train)))
+    # 🔴[2026-09-18] `all([])` 은 True 다 -- 컴포넌트가 0개인 보고서가 **아무것도 검사하지 않고**
+    #   통과하던 구멍을 막는다. 검사 대상이 하나도 없으면 통과가 아니라 실패다.
+    promotion_pass = bool(component_results) and all(bool(item["pass"]) for item in component_results)
     audit = {
         "audit_id": "omega_artifact_integrity_audit_20260630",
         "created_at": datetime.now(timezone.utc).isoformat(),
