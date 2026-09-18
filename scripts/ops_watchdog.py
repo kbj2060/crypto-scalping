@@ -675,8 +675,12 @@ def run_once(dry_run: bool) -> list[Check]:
         # alive but silently stops persisting rows -- exactly the failure mode found in this
         # session's dev-collector audit. These read the tables directly instead.
         check_duckdb_table_freshness("duckdb_orderbook_l2_eth", micro_db, "orderbook_decision_snapshots", "timestamp_kst", 15, 30),
-        check_duckdb_table_freshness("duckdb_orderbook_l2_btc", micro_db, "orderbook_decision_snapshots_btc", "timestamp_kst", 15, 30),
-        check_duckdb_table_freshness("duckdb_orderbook_l2_sol", micro_db, "orderbook_decision_snapshots_sol", "timestamp_kst", 15, 30),
+        # 2026-09-19 은퇴: duckdb_orderbook_l2_{btc,sol} (2줄). BTC/SOL 결정 루프를 껐더니
+        # (.env SHADOW_ASSETS_ENABLE=False) 이 두 테이블에 쓰던 orderbook recorder 도 함께
+        # 멈췄다 -- 실측: 봇이 05:18 에 OFF 로 기동한 뒤 최신 행이 05:10 에서 안 늘어난다.
+        # ⚠️`microstructure_1m_{btc,sol}` 은 **안 지웠다** -- 같은 플래그에 안 묶여 있고 실제로
+        #   계속 쓰이고 있다(05:20 확인). 둘을 한 덩어리로 보면 살아있는 검사를 죽인다.
+        # 러너 정지 + @reboot 제거 + 이 줄 삭제가 **한 쌍**이다.
         check_duckdb_table_freshness("duckdb_microstructure_1m_btc", micro_db, "microstructure_1m_btc", "ts", 5, 10),
         check_duckdb_table_freshness("duckdb_microstructure_1m_sol", micro_db, "microstructure_1m_sol", "ts", 5, 10),
         check_duckdb_table_freshness("duckdb_tail_risk_1m_eth", tail_db, "tail_risk_1m", "ts", 5, 10),
