@@ -5,7 +5,7 @@
 #
 # 이 저장소에는 배포 경로가 둘 있고 서로를 모른다:
 #   (1) scripts/ops/handoff.sh push  -- rsync로 서버 파일을 직접 덮어씀. git을 안 거침.
-#   (2) scripts/ops/deploy_watcher.sh -- 10분 cron. origin/main을 폴링해
+#   (2) scripts/ops/deploy_watcher.sh -- 5분 cron(2026-09-19 10분에서 줄였다). origin/main을 폴링해
 #       `git stash push -u` -> `git merge --ff-only` -> `git stash pop` 사이클을 돈다.
 #
 # (1)로 배포하고 커밋하지 않으면 서버 워킹트리에 "git이 모르는 서빙 코드"가 남는다.

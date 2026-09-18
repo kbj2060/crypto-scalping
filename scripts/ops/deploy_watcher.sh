@@ -31,8 +31,12 @@
 # $STATE_DIR/last_deployed_sha: the last SHA this script itself confirmed
 # pulled + restarted + healthy.
 #
-# Usage: run periodically from cron, e.g. every 10 minutes:
-#   */10 * * * * cd /home/llewyn/crypto-scalping && /bin/bash scripts/ops/deploy_watcher.sh >> logs/deploy_watcher_cron.log 2>&1
+# Usage: run periodically from cron. 2026-09-19 10분 -> **5분**(사용자 지시):
+#   */5 * * * * cd /home/llewyn/crypto-scalping && /bin/bash scripts/ops/deploy_watcher.sh >> logs/deploy_watcher_cron.log 2>&1
+# 겹쳐도 안전하다 -- 아래 flock -n 이 «이전 실행이 아직 돌면 건너뛴다». 한 사이클은 헬스체크
+# 대기 60초를 포함해 보통 ~90초라 5분 안에 끝난다.
+# 🔴crontab 은 저장소에 없다(서버에만 있다). 여기 숫자를 고쳐도 서버가 안 바뀌고, 서버를
+#   고쳐도 여기가 안 바뀐다 -- **둘은 손으로 같이** 맞춰야 한다.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
