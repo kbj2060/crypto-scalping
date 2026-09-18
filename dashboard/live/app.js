@@ -5686,7 +5686,11 @@ async function manualEntryRefreshSize() {
 // 진입 버튼은 계획을 **보여주기만** 하고, 주문은 확인 버튼에서만 나간다. 오클릭 한 번이
 // 주문이 되지 않게 하는 것이 목적이라 확인 버튼은 기본 숨김이고 창이 지나면 사라진다.
 // 서버도 confirm=1 을 따로 요구하므로 이 화면 로직이 깨져도 실수로 주문이 나가지 않는다.
-const CONFIRM_WINDOW_MS = 15000;
+// 🔴2026-09-19 15초 -> 30초. 사용자 보고 «청산 버튼을 눌러도 청산이 안 들어간다» 의 정체는
+// 서버가 아니라 이 창이었다(진단 당시 서버는 전부 정상: exec_enabled=true · phase=idle ·
+// 어느 비율에서도 blocked=null). 청산은 2단계라 미리보기를 읽고 «확인»을 눌러야 나가는데,
+// 계획 카드(수량·가격·미실현·위험한도)를 읽는 데 15초가 쉽게 지나간다.
+const CONFIRM_WINDOW_MS = 30000;
 const STATUS_POLL_MS = 3000;
 let manualEntryPending = null;
 let manualEntryTimer = null;
@@ -5735,7 +5739,18 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   const paint = () => { btn.textContent = `${base} · ${left}초`; };
   paint();
   manualEntryTick = setInterval(() => { left -= 1; if (left > 0) paint(); }, 1000);
-  manualEntryTimer = setTimeout(manualEntryClearConfirm, CONFIRM_WINDOW_MS);
+  // 🔴만료를 **말한다**. 예전엔 조용히 사라져서 「눌렀는데 안 나갔다」로 보였다 --
+  // 화면에 아무 흔적이 없으니 사람이 고장으로 읽는 게 당연했다.
+  // clearConfirm 자체는 방향 전환·비율 변경에서도 불리므로 메시지는 여기(만료)에만 붙인다.
+  manualEntryTimer = setTimeout(() => {
+    manualEntryClearConfirm();
+    const box = el("snapEntryResult");
+    if (box && !box.hidden) {
+      box.insertAdjacentHTML("beforeend", entryNote(
+        `확인 시간 ${Math.round(CONFIRM_WINDOW_MS / 1000)}초가 지나 확인 버튼이 사라졌습니다 `
+        + `— 주문은 나가지 않았습니다. 다시 누르세요.`, "bad"));
+    }
+  }, CONFIRM_WINDOW_MS);
   // 미리보기가 길면 확인 버튼이 접힌 화면 밖에 남는다(모바일). 눈앞으로 데려온다 --
   // 순서를 바꿔 결과 위에 두면 «계획을 읽기 전에» 확인이 먼저 보여서 더 나쁘다.
   btn.scrollIntoView({ block: "nearest", behavior: "smooth" });
