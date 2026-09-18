@@ -1153,6 +1153,62 @@ def main() -> int:
                 f"{'  ✅peg배제' if pc[:, 0].mean() > PEG - COST else ''}")
         return 0
 
+    # ── --daymatrix=<out.npz> : DSR/PBO 용 **일별 순bp 행렬**(일 × 구성) ────────────
+    # ⭐구성 = 게이트점수 5 × 고정분위 4 × 배리어 20 = 400. 전부 캐시에서 «재학습 0»으로 나오므로
+    #   「실제로 해 본 탐색」의 지배적 부분을 정직하게 센다. 적게 세면 노이즈 바닥이 낮아져
+    #   DSR 이 부풀고, 그건 승격 매니페스트가 막으려는 바로 그것이다.
+    if "--daymatrix" in " ".join(sys.argv):
+        outp = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--daymatrix="))
+        QS = [0.70, 0.80, 0.85, 0.92]
+        arm = ARMS[0]
+        cols, names = {}, []
+        for sc_name in ("q", "d", "dq", "margin", "edge"):
+            globals()["SCORE"] = sc_name
+            per_seg = []
+            for _n, te, h, l, c, slots in SEGS[arm]:
+                da, qf = gscore(*slots[0], atr=None)
+                per_seg.append((te, h, l, c, da, qf))
+            for q_ in QS:
+                sides = []
+                for (_te, _h, _l, _c, da, qf) in per_seg:
+                    m_ = da != 0
+                    t_ = _thr_seq(qf[m_], q_)
+                    ok = np.zeros(len(da), bool)
+                    ok[np.where(m_)[0]] = np.isfinite(t_) & (qf[m_] >= t_)
+                    sides.append(np.where((da == 1) & ok, 1.0,
+                                          np.where((da == 2) & ok, -1.0, 0.0)))
+                for tp in TPS:
+                    for sl in SLS:
+                        acc = {}
+                        for (te, h, l, c, _da, _qf), side in zip(per_seg, sides):
+                            ix = np.where(side != 0)[0]
+                            if len(ix) < 20:
+                                continue
+                            r, hh, _a, _b, _m = K._first_touch_open(ix, side, h, l, c, tp, sl, K.MAXBARS)
+                            pn = r * 1e4 - COST
+                            take, cur = [], -1
+                            for i in range(len(ix)):
+                                if ix[i] <= cur:
+                                    continue
+                                take.append(i); cur = ix[i] + int(hh[i])
+                            t_ = np.array(take, int)
+                            dd = te.timestamp.dt.floor("D").to_numpy()[ix[t_]]
+                            for d_, v_ in zip(dd, pn[t_]):
+                                acc[d_] = acc.get(d_, 0.0) + float(v_)
+                        nm = f"{sc_name}|q{q_}|{tp}|{sl}"
+                        cols[nm] = acc; names.append(nm)
+                _trim()
+            log(f"  점수 {sc_name} 완료 · 누적 구성 {len(names)}")
+        alld = sorted({d for a in cols.values() for d in a})
+        M = np.zeros((len(alld), len(names)))
+        idx = {d: i for i, d in enumerate(alld)}
+        for j, nm in enumerate(names):
+            for d_, v_ in cols[nm].items():
+                M[idx[d_], j] = v_
+        np.savez(outp, matrix=M, names=np.array(names), days=np.array([str(d) for d in alld]))
+        log(f"\n저장 {outp} · {M.shape[0]}일 × {M.shape[1]}구성 (비용 {COST}bp)")
+        return 0
+
     ROLLQ_G[0] = ROLLQ
     if "--gap1m" in sys.argv:
         return gap1m(pick, LBLS)
