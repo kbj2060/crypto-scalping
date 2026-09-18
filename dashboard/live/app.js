@@ -3275,7 +3275,7 @@ function updateLivePriceFast(price) {
 //   갈아끼운다. 봉 중간에 붙었으면 앞부분이 없으므로 서버 값을 그대로 쓴다(반쪽을 진짜처럼
 //   보여주지 않는다 -- 서버 스냅샷에서 겪은 그 실패다).
 let footprintLive = { barStart: 0, since: Infinity, bucket: 0.5, cells: new Map(),
-                      orderKey: null, orderQty: 0, orderAt: null };
+                      orderQty: 0, orderAt: null, orderLastMs: 0, orderLastTid: -1 };
 
 // ⚠️서버(파이썬)의 round() 는 **은행가 반올림**이다: 4880.5 -> 4880, 4881.5 -> 4882.
 // JS Math.round 는 올림이라 4881, 4882 가 된다. 버킷이 0.5 이고 ETH 틱이 0.01 이라 가격이
@@ -3288,7 +3288,7 @@ function roundHalfEven(x) {
   return f % 2 === 0 ? f : f + 1;
 }
 
-function footprintLiveAdd(price, qty, tsMs, sell) {
+function footprintLiveAdd(price, qty, tsMs, sell, tid) {
   const barSec = Math.floor(tsMs / 1000 / CHART_CANDLE_MIN / 60) * CHART_CANDLE_MIN * 60;
   if (barSec !== footprintLive.barStart) {
     footprintLiveCloseOrder();     // 이전 봉의 마지막 주문을 흘리지 않는다
@@ -3300,24 +3300,31 @@ function footprintLiveAdd(price, qty, tsMs, sell) {
   const cell = footprintLive.cells.get(key) || [0, 0, 0, 0, 0, 0];
   cell[sell ? 1 : 0] += qty;      // 총량은 체결마다
   footprintLive.cells.set(key, cell);
-  // 크기 구간은 **테이커 주문**이 닫힐 때. 파이썬 TakerOrderAggregator 의 거울이다
-  // (같은 가격·방향·ms = 한 주문). 규칙이 갈리면 진행 중인 봉만 다르게 갈려, 봉이 끝나고
-  // 서버 값으로 바뀌는 순간 셀이 튄다.
-  const ok = price + "|" + (sell ? 1 : 0) + "|" + tsMs;
-  if (ok !== footprintLive.orderKey) {
+  // 크기 구간은 **테이커 주문**이 닫힐 때. 파이썬 TakerOrderAggregator 의 거울이다:
+  // 같은 가격·방향 + 연속 체결ID + 100ms 이내가 한 주문이다. 규칙이 갈리면 진행 중인 봉만
+  // 다르게 갈려, 봉이 끝나고 서버 값으로 바뀌는 순간 셀이 튄다.
+  // (「같은 ms」로 묶었다가 고래 물량을 10% 놓쳤다 -- 그 실측은 파이썬 쪽 도크스트링에.)
+  const L = footprintLive;
+  const same = L.orderAt
+    && L.orderAt.price === price && L.orderAt.sell === sell
+    && tsMs - L.orderLastMs <= 100
+    && Math.floor(tsMs / 1000) === Math.floor(L.orderLastMs / 1000)   // 초에서 자른다
+    && (tid == null || L.orderLastTid < 0 || tid === L.orderLastTid + 1);
+  if (!same) {
     footprintLiveCloseOrder();
-    footprintLive.orderKey = ok;
-    footprintLive.orderQty = 0;
-    footprintLive.orderAt = { price, sell, tsMs };
+    L.orderQty = 0;
+    L.orderAt = { price, sell, tsMs };   // 시각은 **첫** 체결
   }
-  footprintLive.orderQty += qty;
+  L.orderQty += qty;
+  L.orderLastMs = tsMs;
+  L.orderLastTid = (tid == null ? -1 : tid);
 }
 
 // 열려 있던 주문을 닫아 크기 구간에 넣는다. 다음 체결이 와야 닫히지만 ETH 는 초당 100건이
 // 넘게 체결되므로 그 지연은 밀리초다.
 function footprintLiveCloseOrder() {
   const at = footprintLive.orderAt, q = footprintLive.orderQty;
-  footprintLive.orderKey = null; footprintLive.orderQty = 0; footprintLive.orderAt = null;
+  footprintLive.orderQty = 0; footprintLive.orderAt = null; footprintLive.orderLastTid = -1;
   if (!at || !(q > 0)) return;
   const fp = latestFootprint || {};
   const whaleMin = Number(fp.whaleMinUsd) || 0, retailMax = Number(fp.retailMaxUsd) || 0;
@@ -3372,7 +3379,8 @@ function ensurePriceWs() {
         updateLivePriceFast(price);
         const qty = Number(d.q);
         if (qty > 0 && priceWsAsset === "eth") {
-          footprintLiveAdd(price, qty, Number(d.T), !!d.m);
+          footprintLiveAdd(price, qty, Number(d.T), !!d.m,
+                           d.t == null ? null : Number(d.t));
           // 체결이 곧 셀의 변화다. 스로틀은 maybeRenderSnapshotChartNow 안에 있다(모드별).
           if (chartMode === "footprint") maybeRenderSnapshotChartNow();
         }

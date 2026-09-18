@@ -85,43 +85,92 @@ WHALE_MIN_USD = 100_000.0     # 이상 = 고래 (그 사이는 중형)
 
 
 class TakerOrderAggregator:
-    """`@trade` 개별 체결을 **테이커 주문** 단위로 되묶는다 -- 바이낸스 aggTrade 와 같은 규칙
-    (같은 가격 · 같은 방향 · 같은 밀리초).
+    """`@trade` 개별 체결을 **테이커 주문** 단위로 되묶는다(바이낸스 aggTrade 재구성).
 
     🔴왜 필요한가: 큰 주문 하나가 호가 30개를 쓸어담으면 `@trade` 는 그걸 **작은 체결 30건**
       으로 보고한다. 개별 체결로 「고래」를 세면 같은 시장에서 고래 물량이 통째로 사라진다 --
       2026-09-19 같은 11.3초 구간 실측: **aggTrade 기준 37.4% vs @trade 기준 9.6%**,
       그런데 총 명목은 $1,086,005 vs $1,085,736 으로 **같다**. 같은 체결을 다르게 셀 뿐이다.
     ⭐기존 `nif_whale`(microstructure_scanner)도 `@aggTrade` 를 쓴다. 거기 맞춰야 이 저장소
-      에서 「고래」가 한 뜻이 된다.
-    ⚠️총량 · 건수 · 최대체결은 **개별 체결 그대로** 센다(기존 컬럼 뜻을 바꾸지 않는다).
+      에서 「고래」가 한 뜻이 된다. (@aggTrade 스트림 자체는 2026-09-02 부터 배달이 멈춰서
+      재구성 말고는 길이 없다 -- 이 파일 맨 위 도크스트링 참고.)
+
+    묶는 규칙: **같은 가격 · 같은 방향 · 연속된 체결ID · 직전 체결과 ORDER_GAP_MS 이내 ·
+    같은 초**.
+    🔴처음엔 «같은 밀리초»로 묶었다가 **고래 물량을 10% 놓쳤다**. 한 주문의 체결이 ms 를
+      걸치면 거기서 잘렸기 때문이다. 2026-09-19 두 구간(각 78초) 실측, 바이낸스 aggTrades 를
+      정답으로 둔 대조:
+          규칙            주문수차      고래물량차   고래비중차
+          ms 정확(구)     +29~34%      -9.8~-10.5%  -5.4~-8.3pp
+          ms 20           +9.7%        +0.8~+1.3%   -1.1~+0.4pp
+          연속ID 단독     -4~-6.8%     +3.7~+4.2%   +0.4~+2.1pp
+          연속ID + ms100  -0.7~+0.5%   +1.0~+3.2%   +0.1~+0.5pp   ← 채택
+    ⚠️완벽하지 않다. 남는 오차는 «과대» 쪽이다 -- 같은 값을 연달아 친 서로 다른 테이커가
+      하나로 합쳐진다. 2026-09-19 분 단위 실측(3분 연속): **+0.00 / +0.02 / +0.00%**.
+      같은 날 다른 표본(수집기 DB 5분)에서는 네 분이 -0.00~+0.60% 인데 **한 분만 +11.12%**
+      였다. 그 한 분은 재현되지 않았다 -- 바이낸스 주문 목록에 이 규칙을 그대로 먹여도
+      한 건도 합쳐지지 않았고(1263->1263), 오프라인 재현에서도 그 크기가 안 나온다.
+      🔴**원인 미상으로 남긴다.** 분 단위로 이 값을 쓰는 연구는 그 꼬리를 감안해야 한다
+      (총량은 kline 과 소수점까지 일치하므로 «어느 체결이 빠졌나»의 문제는 아니다).
+    ⚠️문턱을 20ms 로 좁히면 더 나빠진다 -- 같은 실측에서 분 단위 -0.84 / **-7.96** / -0.12%.
+      주문 수도 20ms 는 +9.7%, 100ms 는 ±1% 다.
+    ⚠️총량·건수·최대체결은 **개별 체결 그대로** 센다(기존 컬럼 뜻을 바꾸지 않는다).
       되묶기는 **크기 구간 분류에만** 쓴다.
+    🔴«같은 초»가 규칙에 있는 이유: 총량은 체결이 일어난 초에 쌓이는데 구간은 주문을 통째로
+      한 초에 넣으므로, 주문이 초 경계를 걸치면 그 초에서 **구간 합 > 총량**이 된다(실제로
+      251초 수집에서 12행이 이 상태였다). 초에서 자르면 정확히 사라진다.
+      비용은 잰 뒤에 받아들였다 -- 2026-09-19 실측(90초·체결 10,010·주문 2,020):
+      경계를 걸치는 주문 **0.50%**(물량 0.33%), **고래 물량 차이 0.000%**(고래 주문은 한
+      건도 안 걸렸다), 주문 수 +0.50%. 쓸어담기는 대개 20ms 안에 끝나서 초를 잘 안 넘는다.
 
     마지막 묶음은 다음 체결이 와야 닫힌다. ETH 는 초당 100건 넘게 체결되므로 그 지연은
-    밀리초 수준이고, 묶음은 자기 ts_ms 를 들고 있어 늦게 닫혀도 제 초에 들어간다."""
+    밀리초 수준이고, 묶음은 자기 ts_ms 를 들고 있어 늦게 닫혀도 제 초에 들어간다.
+    스트림이 끊기면 `take()` 로 직접 꺼낸다 -- 안 꺼내면 그 주문이 조용히 사라진다."""
+
+    ORDER_GAP_MS = 100
 
     def __init__(self) -> None:
         self.key: tuple | None = None
         self.qty = 0.0
+        self.last_ms = 0
+        self.last_tid = -1
 
-    def add(self, price: float, qty: float, ts_ms: int, sell: bool) -> tuple | None:
-        """묶음이 닫히면 (price, qty, ts_ms, sell) 을 돌려준다. 아니면 None."""
-        key = (price, sell, ts_ms)
+    def add(self, price: float, qty: float, ts_ms: int, sell: bool,
+            tid: int | None = None) -> tuple | None:
+        """묶음이 닫히면 (price, qty, ts_ms, sell) 을 돌려준다. 아니면 None.
+
+        tid(체결ID)가 없으면 연속성 조건만 빠지고 시간·가격·방향 조건은 그대로다."""
+        same = (self.key is not None
+                and self.key == (price, sell)
+                and ts_ms - self.last_ms <= self.ORDER_GAP_MS
+                and ts_ms // 1000 == self.last_ms // 1000
+                and (tid is None or self.last_tid < 0 or tid == self.last_tid + 1))
         done = None
-        if key != self.key:
+        if not same:
             done = self.take()
-            self.key = key
+            self.key = (price, sell)
             self.qty = 0.0
+            self.first_ms = ts_ms
         self.qty += qty
+        self.last_ms = ts_ms
+        self.last_tid = -1 if tid is None else tid
         return done
 
     def take(self) -> tuple | None:
         if self.key is None or self.qty <= 0:
+            self.key = None
             return None
-        price, sell, ts_ms = self.key
-        out = (price, self.qty, ts_ms, sell)
-        self.key, self.qty = None, 0.0
+        price, sell = self.key
+        # 주문의 시각은 **첫 체결**로 잡는다 -- 마지막으로 잡으면 100ms 뒤의 초로 넘어가
+        # 드물게 이웃 초에 실린다.
+        out = (price, self.qty, self.first_ms, sell)
+        self.key, self.qty, self.last_tid = None, 0.0, -1
         return out
+
+    def reset(self) -> None:
+        """스트림이 끊겼다 -- 열려 있던 묶음을 **버린다**. 끊김 뒤 첫 체결에 이어 붙이면
+        그 사이가 통째로 빠진 주문을 «한 주문»이라 부르게 된다(그 구간은 gaps 에 적힌다)."""
+        self.key, self.qty, self.last_tid = None, 0.0, -1
 
 
 def warn_if_whale_threshold_diverged() -> None:
@@ -175,9 +224,18 @@ class TapeBuffer:
         self.bucket = bucket
         self.rows: dict[tuple[int, int], list[float]] = {}
         self.max_sec = 0
+        self.closed_before = 0   # 이 초보다 앞은 이미 꺼내 갔다
+        self.dropped_late = 0
 
-    def _cell(self, ts_ms: int, price: float) -> list[float]:
+    def _cell(self, ts_ms: int, price: float) -> list[float] | None:
+        """🔴이미 DB 로 나간 초는 **되살리지 않는다**. 되묶기가 도입되면서 «늦게 닫히는 주문»이
+        생겼는데, 스트림이 몇 초 멎은 뒤 그 주문이 닫히면 이미 기록된 초에 행이 새로 생겨
+        같은 (ts_sec, price_bin) 이 **두 줄**이 된다(하나는 총량만, 하나는 구간만).
+        그 경우는 버린다 -- 잃는 건 주문 하나이고, 얻는 건 표의 유일성이다."""
         sec = ts_ms // 1000
+        if sec < self.closed_before:
+            self.dropped_late += 1
+            return None
         self.max_sec = max(self.max_sec, sec)
         key = (sec, round(price / self.bucket))
         cell = self.rows.get(key)
@@ -188,6 +246,8 @@ class TapeBuffer:
     def add(self, ts_ms: int, price: float, qty: float, sell: bool) -> None:
         """개별 체결 하나. 총량 · 건수 · 최대체결만 센다(2026-09-16 이래 뜻이 그대로다)."""
         cell = self._cell(ts_ms, price)
+        if cell is None:
+            return
         i = 1 if sell else 0
         cell[i] += qty
         cell[2 + i] += 1
@@ -197,6 +257,8 @@ class TapeBuffer:
         """되묶은 **테이커 주문** 하나. 크기 구간은 여기서만 갈린다 -- 이유는
         TakerOrderAggregator 도크스트링."""
         cell = self._cell(ts_ms, price)
+        if cell is None:
+            return
         i = 1 if sell else 0
         cell[14 + i] += 1          # 구간과 무관하게 «주문 하나»
         notional = price * qty
@@ -212,6 +274,7 @@ class TapeBuffer:
         done = [(sec, b, c) for (sec, b), c in self.rows.items() if sec < self.max_sec]
         for sec, b, _ in done:
             del self.rows[(sec, b)]
+        self.closed_before = max(self.closed_before, self.max_sec)
         return sorted(
             (sec, b, c[0], c[1], int(c[2]), int(c[3]), c[4], c[5],
              c[6], c[7], c[8], c[9], int(c[10]), int(c[11]),
@@ -409,12 +472,15 @@ async def collect(symbol: str, db_path: Path) -> None:
                             first = False
                             # 처음 켠 판이면 그 «분의 시작부터 여기까지»가 안 받은 구간이다.
                             # 적어두지 않으면 아래 완전성 검사가 그걸 유실로 오해한다.
+                            orders.reset()   # 끊김 전에 열려 있던 묶음은 버린다
                             store.record_gap(last_ms or (ts_ms // 60_000) * 60_000, ts_ms,
                                              "ws_reconnect" if last_ms else "startup")
                             log("스트림 연결됨")
                         sell = bool(trade["m"])
                         buffer.add(ts_ms, price, qty, sell)
-                        order = orders.add(price, qty, ts_ms, sell)
+                        tid = trade.get("t")
+                        order = orders.add(price, qty, ts_ms, sell,
+                                           None if tid is None else int(tid))
                         if order is not None:
                             buffer.add_order(order[2], order[0], order[1], order[3])
                         last_ms = ts_ms
@@ -474,18 +540,36 @@ def selftest() -> None:
     assert row[16] - row[14] - row[12] == 2, ("중형 매수 주문수", row)
     assert row[17] - row[15] - row[13] == 0, ("중형 매도 주문수", row)
 
-    # 되묶기: 같은 (가격·방향·ms) 만 한 주문이다. 이게 «고래 9.6% vs 37.4%» 를 가른다.
+    # 되묶기: 같은 가격·방향 + 연속 체결ID + 100ms 이내가 한 주문이다.
     agg = TakerOrderAggregator()
-    assert agg.add(2500.0, 10.0, 1_000, sell=False) is None        # 첫 묶음 -- 아직 안 닫힘
-    assert agg.add(2500.0, 12.0, 1_000, sell=False) is None        # 같은 주문에 이어 붙는다
-    done = agg.add(2500.5, 1.0, 1_000, sell=False)                 # 가격이 달라지면 앞이 닫힌다
-    assert done == (2500.0, 22.0, 1_000, False), done
-    done = agg.add(2500.5, 1.0, 1_000, sell=True)                  # 방향이 달라져도 닫힌다
-    assert done == (2500.5, 1.0, 1_000, False), done
-    done = agg.add(2500.5, 1.0, 1_001, sell=True)                  # ms 가 달라져도 닫힌다
-    assert done == (2500.5, 1.0, 1_000, True), done
-    assert agg.take() == (2500.5, 1.0, 1_001, True), "마지막 묶음은 take() 로 꺼낸다"
+    assert agg.add(2500.0, 10.0, 1_000, False, tid=1) is None       # 첫 묶음
+    assert agg.add(2500.0, 12.0, 1_003, False, tid=2) is None       # ms 가 달라도 이어 붙는다
+    done = agg.add(2500.5, 1.0, 1_004, False, tid=3)                # 가격이 달라지면 닫힌다
+    assert done == (2500.0, 22.0, 1_000, False), done               # 시각은 **첫** 체결
+    done = agg.add(2500.5, 1.0, 1_005, True, tid=4)                 # 방향이 달라져도 닫힌다
+    assert done == (2500.5, 1.0, 1_004, False), done
+    done = agg.add(2500.5, 1.0, 1_006, True, tid=99)                # 체결ID 가 끊기면 닫힌다
+    assert done == (2500.5, 1.0, 1_005, True), done
+    done = agg.add(2500.5, 1.0, 1_200, True, tid=100)               # 100ms 를 넘으면 닫힌다
+    assert done == (2500.5, 1.0, 1_006, True), done
+    done = agg.add(2500.5, 1.0, 1_999, True, tid=101)               # 같은 초, 100ms 초과 -> 닫힘
+    assert done == (2500.5, 1.0, 1_200, True), done
+    done = agg.add(2500.5, 1.0, 2_001, True, tid=102)               # 초가 넘어가면 닫힌다
+    assert done == (2500.5, 1.0, 1_999, True), ("초 경계에서 안 잘렸다", done)
+    assert agg.take() == (2500.5, 1.0, 2_001, True), "마지막 묶음은 take() 로 꺼낸다"
     assert agg.take() is None, "두 번 꺼내면 안 된다"
+    agg.add(2500.0, 5.0, 2_000, False, tid=1)
+    agg.reset()
+    assert agg.take() is None, "reset 하면 열려 있던 묶음이 버려진다"
+
+    # 닫힌 초는 되살아나지 않는다 -- 늦게 닫힌 주문이 중복 행을 만들면 안 된다.
+    late = TapeBuffer(0.1)
+    late.add(5_000_000, 2500.0, 1.0, sell=False)
+    late.add(5_002_000, 2500.0, 1.0, sell=False)     # max_sec 를 5002 로
+    assert len(late.take_closed()) == 1, "5000 초가 나갔다"
+    late.add_order(5_000_000, 2500.0, 40.0, sell=False)   # 이미 나간 초 -> 버려야 한다
+    assert late.take_closed() == [], "닫힌 초가 되살아났다"
+    assert late.dropped_late == 1, late.dropped_late
     assert buf.rows and buf.max_sec == 1001, "진행 중인 초는 남아 있어야 한다"
     assert buf.take_closed() == [], "같은 초를 두 번 쓰면 안 된다"
     buf.add(1_002_000, 2440.04, 2.0, sell=True)    # 1001 초가 완결됨

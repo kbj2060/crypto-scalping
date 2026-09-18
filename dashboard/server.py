@@ -2145,12 +2145,15 @@ def make_app() -> web.Application:
                                 # 돌고 있는 백필이 있으면 새로 띄우지 않는다(REST 가중치가 두 배).
                                 # 대가: 첫 백필 도중 WS 가 끊기면 그 공백은 다음 재연결 때 메워진다.
                                 if backfill is None or backfill.done():
+                                    fp_orders.reset()   # 끊김 전 묶음은 버린다
                                     footprint_state["ready"] = False
                                     backfill = asyncio.create_task(footprint_backfill(
                                         footprint_state["last_ms"], first_ms))
                             sell = bool(trade["m"])
                             footprint_add(price, qty, ts_ms, sell)      # 총량
-                            done = fp_orders.add(price, qty, ts_ms, sell)
+                            tid = trade.get("t")
+                            done = fp_orders.add(price, qty, ts_ms, sell,
+                                                 None if tid is None else int(tid))
                             if done is not None:                        # 닫힌 주문의 크기 구간
                                 footprint_add(done[0], done[1], done[2], done[3], order=True)
                             footprint_state["last_ms"] = ts_ms   # 다음 재연결이 메울 공백의 시작
