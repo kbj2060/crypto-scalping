@@ -50,7 +50,7 @@ eth_v_rebound_held_up_circularity_proof_and_model_skill_check_20260901.
 ⚠️ **게이트만 제거하면 안 된다 -- 전체 재학습이 필수다.** 후보풀로 학습한 모델을 그대로 전체 봉에
 적용하면 AUC 0.5287로 붕괴한다(이 저장소에서 "kept-only 착시"의 3번째 반복). 재학습 후 실측
 (research_eth_v_rebound_every_bar_tabpfn_confirm_20260901.py, TabPFN 3시드, VAL 전체봉 15,000행):
-    TabPFN random_18000   VAL AUC 0.6942±0.0023   라이브 사이클 6.56s
+    TabPFN random_18000   VAL AUC 0.6942±0.0023   라이브 사이클 6.56s   <- 2026-09-19 까지 배포본
     GBM 프록시(전체 TRAIN 182,969행)      0.6953   <- 재현 확인(−0.0011)
     후보풀 학습을 전체봉에 적용            0.5287   <- 붕괴 기준선(+0.1655 개선)
 0.6942는 옛 헤드라인 0.8465보다 낮지만, 그 0.8465가 held_up 크레딧을 포함한 값이었고 층화 추정치
@@ -62,7 +62,10 @@ difficulty_20260901).
 (chop이 배경상태라 156k봉->154사건, base 96.8%, AUC 0.5260), 절대 bp 하한 20/30bp, 층화추출
 (무작위와 유의차 없음), event-first 컨텍스트 샘플링(GBM −0.097).
 
-**임계값 0.60** (2026-09-01 0.50에서 상향, 사용자 승인). 실제 서빙 확률(TabPFN + 동결 컨텍스트)로
+**임계값** (2026-09-01 0.50 -> 0.60 상향, 사용자 승인). ⚠️2026-09-19 모델이 HGB 로 바뀌면서 이
+아래의 0.60 은 **더 이상 리터럴이 아니다** -- 아티팩트 meta 의 `proba_threshold`(현재 0.3820,
+분위 0.9540)가 그 0.60 의 **발동률**(하루 13.25 발동봉)을 재현한다. 아래 표는 TabPFN 확률 기준의
+역사 기록이고, 경제성 게이트는 HGB 확률로 **아직 재실행하지 않았다**. 실제 서빙 확률(TabPFN + 동결 컨텍스트)로
 경제성을 재실행한 결과 0.50이 게이트를 통과하지 못했다 -- 방향뒤집기 대조군이 저ARM 노이즈수확
 아티팩트가 닿지 않는 ARM=1.5 구간(40셀)에서도 정방향을 이겼다(VAL 정4/뒤6, OOS 정10/뒤13).
 0.55부터 역전되고 0.60이 가장 깨끗하다:
@@ -100,14 +103,24 @@ data/research/eth_v_rebound_label_grid_stage1_20260901/{stage3_oos,deployed_oos_
   0.8292/0.8127/0.8465 + 트레일링 경제성 VAL+11.97/OOS+20.96/HOLDOUT+9.28bp(진입시점 보정 후
   +4.75bp). 전부 held_up 크레딧을 포함한 수치다.
 
-TabPFN is in-context inference, not a saved/trained model file: every call re-fits on the SAME
-FROZEN TRAIN context (data/labels/eth_5m_v_rebound_every_bar_20260901/tabpfn_train_context_frozen_
-every_bar_20260901.csv -- 전체 봉 TRAIN 182,969행에서 무작위 18,000행, 자연 라벨률 ~14.6%,
-재균형 안 함; freeze_eth_v_rebound_every_bar_train_context_20260901.py가 생성). 18,000행은 TabPFN
-권장 상한 1만행을 넘으므로 `ignore_pretraining_limits=True`가 필요하고, 검증 파이프라인도 처음부터
-같은 플래그로 측정했다. 라이브 사이클 6.56s는 이 엔드포인트 캐시 주기(60s)의 11%.
-Single-seed inference (random_state=20260829, matching this script's own convention -- the
-multi-seed ensembles were for validation robustness, not live serving).
+**2026-09-19: TabPFN -> 5시드 HGB 앙상블 (사용자 지시).** 아티팩트
+`data/live/eth_v_rebound_hgb_artifact/{model.joblib,meta.json}`, 빌더
+`scripts/build_eth_v_rebound_hgb_artifact_20260919.py`.
+이전 판은 in-context inference라 **매 사이클** 동결 컨텍스트 18,000행에 다시 fit 했다(실측
+6.37~8.14초 · RSS 1.45GB + swap 753MB · CUDA 컨텍스트 상주 -- 서버 VRAM 의 상시 소비처였다).
+같은 45,000행 맞대결(scripts/research_eth_v_rebound_hgb_vs_tabpfn_20260919.py):
+    창    TabPFN(18k ctx)   HGB(184k TRAIN)   HGB(같은 18k ctx)   단일피쳐
+    VAL       0.7025            0.7027            0.6791          0.6534
+    OOS       0.7102            0.7125            0.6987          0.6714
+    FWD       0.7029            0.7036            0.6807          0.6707
+    사이클     6.62s             12.7ms            4.3ms             --
+⭐**우위의 정체는 모델이 아니라 TRAIN 크기다.** 컨텍스트를 18,000행으로 맞추면 HGB 가 −0.02 로
+  **진다** -- TabPFN 의 소표본 in-context 강점은 실재한다. HGB 가 따라잡는 건 1회 학습이라 그
+  상한이 없어 184,207행을 다 쓰기 때문이고, 그 상한이 곧 6.6초의 원인이었다.
+🔴+0.0002~+0.0023 을 「이겼다」로 읽지 말 것 -- **앙상블 분산감소**다(시드폭 VAL 0.6976~0.7018).
+  근거는 「AUC 우위」가 아니라 「동률인데 575배 싸다」이다.
+모집단/라벨은 그대로다: 매 봉 x 양측면, 3상태(v_rebound / chop / ambiguous 제외). 동결 컨텍스트
+18,000행 라벨 파리티 **1.000000** 으로 확인했다.
 
 *** DISCRETIONARY READING AID -- NOT WIRED INTO trading_bot.py, NOT AUTOMATED ENTRY/EXIT. ***
 Feature/BTC-fetch/RSI-Wilder machinery below is unchanged from the pre-redesign version (Tier0 22
@@ -138,6 +151,7 @@ script's own pre-existing _build_features()/_rsi_wilder().
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import time
 from pathlib import Path
@@ -156,7 +170,15 @@ from analyze_eth_creative_reversal_evidence_signals_20260814 import add_creative
 from backtest_eth_slowk_williamsr_persistence_confluence_20260814 import compute_indicators  # noqa: E402
 from live_evidence_signal_dashboard_20260823 import compute_signals  # noqa: E402
 
-TRAIN_CONTEXT_CSV = ROOT / "data/labels/eth_5m_v_rebound_every_bar_20260901/tabpfn_train_context_frozen_every_bar_20260901.csv"
+HGB_ART = ROOT / "data/live/eth_v_rebound_hgb_artifact"   # 2026-09-19 TabPFN 대체(빌더: scripts/build_eth_v_rebound_hgb_artifact_20260919.py)
+
+
+def _art_meta() -> dict:
+    try:
+        return json.loads((HGB_ART / "meta.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
 SWEEP_IMPL_SCRIPT = ROOT / "scripts/build_eth_5m_sweep_followthrough_v2_labels_20260829.py"
 
 FUTURES_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
@@ -174,7 +196,11 @@ LOCAL_EXTREME_W = 6         # +-30min, matches build_eth_5m_v_rebound_multitrigg
 # (0.713/0.683). 빈도 손실도 없다 -- 화면 기준 하루 11~12건, 신호 간격 중앙값 ~1시간,
 # 신호 없는 날 0%(0.50은 하루 18건으로 오히려 과했다). 근거:
 # data/research/eth_v_rebound_every_bar_tabpfn_costgate_20260901/{report,signal_frequency}.json
-PROBA_THRESHOLD = 0.60
+# 2026-09-19: 값을 **아티팩트가 들고 온다**. 모델이 바뀌면 같은 0.60 이 전혀 다른 발동률이 되기
+# 때문이다. 빌더가 배포 TabPFN 의 실측 발동률(하루 13.25 발동봉)을 재현하는 확률을 찾아
+# meta.json 에 적는다 -- 현재 0.3820(분위 0.9540, 재현 13.25/일). 아래 0.60 은 아티팩트를 못 읽을
+# 때만 쓰이는데, 그 경우 `_load_art()` 가 None 이라 신호 자체가 안 난다.
+PROBA_THRESHOLD = float(_art_meta().get("proba_threshold", 0.60))
 
 # 2026-09-01 배지 지속성. 매 봉 스코어링에서 배지가 현재 봉만 반영하면 사건당 평균 1.2봉,
 # 즉 대부분 5분만 떴다 사라진다(0.60 기준 하루 13.25 발동봉 / 11.01 사건 실측; 사용자가
@@ -203,7 +229,7 @@ NAMED_TRIGGERS = ["liquidity_sweep", "taker_delta_z_climax", "short_term_return_
                   "orthogonal_combo", "smt_divergence", "fib_extension_exhaustion",
                   "demarker_extreme", "kalman_deviation_meanrev"]
 
-_TRAIN_CACHE: pd.DataFrame | None = None
+_ART_CACHE: dict | None = None
 _SWEEP_IMPL = None
 
 
@@ -217,13 +243,22 @@ def _load_sweep_impl():
     return _SWEEP_IMPL
 
 
-def _load_train_context() -> pd.DataFrame:
-    global _TRAIN_CACHE
-    if _TRAIN_CACHE is None:
-        df = pd.read_csv(TRAIN_CONTEXT_CSV)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-        _TRAIN_CACHE = df
-    return _TRAIN_CACHE
+def _load_art() -> dict | None:
+    """5시드 HGB 앙상블. 극점 탐지기 `load_art()` 와 **같은 가드**를 쓴다 -- meta 의 피쳐 목록이
+    이 스크립트의 FEATURES 와 다르면 **먹지 않는다**(옛 형상을 조용히 삼키면 조용히 틀린다)."""
+    global _ART_CACHE
+    if _ART_CACHE is None:
+        try:
+            import joblib
+            meta = _art_meta()
+            if list(meta.get("features") or []) != FEATURES:
+                _ART_CACHE = {}
+                return None
+            _ART_CACHE = {"models": joblib.load(HGB_ART / "model.joblib"), "meta": meta}
+        except Exception:      # noqa: BLE001 -- 없거나 깨졌으면 신호를 끄고 화면이 그렇게 말한다
+            _ART_CACHE = {}
+            return None
+    return _ART_CACHE or None
 
 
 def _empty(error: str) -> dict:
@@ -464,15 +499,16 @@ def compute_eth_sweep_v_rebound_signal() -> dict:
 
         price = float(frame["close"].iloc[-1])
 
-        train = _load_train_context()
-        from tabpfn import TabPFNClassifier
-        # ignore_pretraining_limits: TabPFN 권장 상한은 1만행인데 이 컨텍스트는 18,000행이다
-        # (전체 봉 TRAIN 182,969행에서 무작위 추출 -- 층화/event-first보다 나음이 실측됨).
-        # 검증 파이프라인도 처음부터 이 플래그를 썼다.
-        clf = TabPFNClassifier(device="cuda", random_state=20260829,
-                                ignore_pretraining_limits=True)
-        clf.fit(train[FEATURES], train["label"].to_numpy())
-        proba = clf.predict_proba(candidates[FEATURES])[:, 1]
+        art = _load_art()
+        if art is None:
+            return _empty("hgb_artifact_missing_or_shape_mismatch")
+        # 2026-09-19: TabPFN(매 사이클 18,000행 재fit, 실측 6.62초·CUDA 상주) -> 5시드 HGB
+        # 앙상블(12.7ms). 같은 45,000행 맞대결에서 AUC 는 동률이고(VAL .7027 vs .7025 ·
+        # OOS .7125 vs .7102 · FWD .7036 vs .7029) 차이는 앙상블 분산감소 범위다.
+        # ⭐바뀐 건 «어떤 모델이냐»가 아니라 «TRAIN 을 얼마나 쓰냐»다 -- 같은 18,000행만 주면
+        #   HGB 가 −0.02 로 진다. TabPFN 의 컨텍스트 상한이 곧 6.6초의 원인이었다.
+        X = candidates[FEATURES].to_numpy(float)   # 빌더가 numpy 로 fit 했다(열이름 경고 방지)
+        proba = np.mean([m.predict_proba(X)[:, 1] for m in art["models"]], axis=0)
         candidates = candidates.assign(proba=proba)
 
         def call_of(p: float) -> str:
