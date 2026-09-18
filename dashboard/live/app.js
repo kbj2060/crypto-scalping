@@ -3448,7 +3448,11 @@ function densityColor(t) {
 
 function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = [], footprint = null) {
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
-  const parentH = svg.parentElement ? svg.parentElement.clientHeight : 0;
+  // 2026-09-18 부모가 아니라 **SVG 자신의** 높이를 본다. 부모는 마진 12px 를 포함하므로
+  // (styles.css .chart-container 412px) 그 값으로 viewBox 를 잡으면 모바일에서 meet 축소 +
+  // 레터박스가 생긴다. viewBox 높이는 SVG 가 실제로 차지하는 상자와 같아야 한다.
+  const parentH = svg.getBoundingClientRect().height
+    || (svg.parentElement ? svg.parentElement.clientHeight : 0);
   const mobileChart = isMobileChartMode();
   const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
   const h = mobileChart ? Math.max(parentH, 260) : 400;

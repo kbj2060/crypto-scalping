@@ -1397,7 +1397,11 @@ body {
 
 .chart-container {
   width: 100%;
-  height: 400px;
+  /* 🔴2026-09-18 «청산맵 아래 변동폭 게이트 게이지가 잘려 보인다»(사용자). 컨테이너 400px 인데
+     안의 SVG 가 height:100%(=400) + margin-top:12px 라 합계 412px -> overflow:hidden 이 아래
+     12px 를 먹었다. 게이트 리본은 y379~394 에 그려지므로 정확히 6px(15px 중 40%)이 사라진다.
+     height:100% 는 마진만큼 «항상» 넘치므로, 컨테이너를 마진만큼 키우고 SVG 높이를 고정한다. */
+  height: 412px;                /* 400(SVG) + 12(#candleSvgSnapshot margin-top) */
   position: relative;
   overflow: hidden;
   /* 🔴2026-09-16 «현재가가 움직일 때마다 진입/청산 버튼 아래가 깜빡인다»(사용자).
@@ -1415,6 +1419,7 @@ body {
 #candleSvgSnapshot {
   will-change: transform;
   margin-top: 12px;
+  height: 400px;                /* svg{height:100%} 를 덮는다 -- 위 .chart-container 주석 참고 */
   /* 2026-09-10 사용자 요청 "청산맵 차트 뒤에 검정색 백그라운드를 없애줘": --chart-bg(#090a10)
      제거 -> 패널 자체 배경이 비친다. 이 클래스를 쓰는 요소는 청산맵 차트 하나뿐이므로
      (index.html 에 .chart-container 는 1개, .market-chart-wrap 은 DOM/JS 에 0회 = 죽은 셀렉터)
