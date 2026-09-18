@@ -120,9 +120,12 @@ let footprintLastFetchAt = 0;
 // 차트 종류. 「풋프린트」와 「청산맵」은 한 화면에 못 담는다 -- 풋프린트는 12봉(1시간)이라 가격
 // 폭이 $45 안팎인데 청산밀도는 $620 범위에 깔려 있어 창 안에 9%만 들어온다(2026-09-16 실측).
 // 그래서 겹치지 않고 **바꿔 본다**. 고른 값은 기억한다 -- 매번 다시 고르게 하면 그게 성가심이다.
+const CHART_MODES = ["footprint", "liqmap", "supply"];
 let chartMode = (() => {
-  try { return localStorage.getItem("chartMode") === "liqmap" ? "liqmap" : "footprint"; }
-  catch (e) { return "footprint"; }   // 사파리 프라이빗 등 localStorage 가 던지는 환경
+  try {
+    const saved = localStorage.getItem("chartMode");
+    return CHART_MODES.includes(saved) ? saved : "footprint";
+  } catch (e) { return "footprint"; }   // 사파리 프라이빗 등 localStorage 가 던지는 환경
 })();
 const API_FOOTPRINT_URL = "/api/footprint";
 // 🔴여기 있던 "차트 자체가 5초마다 다시 그려진다"는 **틀린 주석**이었다(실제는 20초였다).
@@ -144,6 +147,21 @@ const FOOTPRINT_SHADE_LIGHT = [0.16, 0.32, 0.48, 0.66];
 const footprintShades = () =>
   (document.documentElement.getAttribute("data-theme") === "light"
     ? FOOTPRINT_SHADE_LIGHT : FOOTPRINT_SHADE_DARK);
+// ── 리테일/고래 수급 (2026-09-19) ──────────────────────────────────────────
+// 서버가 셀을 [매수, 매도, 고래매수, 고래매도] 4칸으로 준다. **고래는 부분집합**이므로
+// 리테일 = 매수 - 고래매수 다. 고래 기준은 서버가 최근 체결 명목의 p99 로 정하고 값을 같이
+// 실어 보낸다(whaleUsd) -- 화면은 그 숫자를 반드시 적는다. 고정 수량이 아니라 분위라서,
+// 적지 않으면 어제 화면과 오늘 화면이 다른 뜻이 된다.
+const API_SUPPLY_PROFILE_URL = "/api/supply-profile";
+const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
+let latestSupplyProfile = null;
+let supplyProfileLastFetchAt = 0;
+// 리본 한 줄이 차지하는 높이(위 고래 / 아래 리테일). 풋프린트 모드에서 청산 레인 자리를
+// 그대로 쓴다 -- 그 모드에서는 이미 청산밀도 히트맵을 끄고 있다(2026-09-15 «완전 교체»).
+const FLOW_ROW_GAP = 3;
+// 부호가 갈린 봉에만 주황 띠. 「둘 다 작은데 부호만 다른」 봉까지 칠하면 화면이 온통 주황이
+// 된다 -- 고래 쪽이 그 창 최대의 이만큼은 돼야 «괴리»라고 부른다.
+const FLOW_DIVERGENCE_MIN = 0.3;
 const API_EXTREME_URL = "/api/extreme-detector";
 // 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
 // 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
@@ -456,7 +474,9 @@ function setupChartModeTabs() {
       try { localStorage.setItem("chartMode", chartMode); } catch (e) { /* 저장 못 해도 동작은 한다 */ }
       renderChartModeTabs();
       footprintLastFetchAt = 0;   // 풋프린트로 돌아오면 폴링 간격을 기다리지 않고 바로 받는다
+      supplyProfileLastFetchAt = 0;
       refreshFootprint();
+      refreshSupplyProfile();
       renderSnapshotChart();      // 기다리지 않고 즉시 바꿔 그린다 -- 누른 티가 나야 한다
     });
   });
@@ -3260,8 +3280,13 @@ function footprintLiveAdd(price, qty, tsMs, sell) {
   }
   if (footprintLive.since === Infinity) footprintLive.since = tsMs;   // WS 가 붙은 시각
   const key = roundHalfEven(price / footprintLive.bucket);
-  const cell = footprintLive.cells.get(key) || [0, 0];
-  cell[sell ? 1 : 0] += qty;
+  const cell = footprintLive.cells.get(key) || [0, 0, 0, 0];
+  const side = sell ? 1 : 0;
+  cell[side] += qty;
+  // 고래 기준은 **서버가 정한 값을 빌려 쓴다**. 여기서 따로 추정하면 진행 중인 봉만 다른
+  // 기준으로 분류돼, 봉이 끝나는 순간 셀이 튄다. 서버 값이 아직 0(웜업)이면 분류하지 않는다.
+  const thr = Number((latestFootprint || {}).whaleUsd) || 0;
+  if (thr > 0 && price * qty >= thr) cell[2 + side] += qty;
   footprintLive.cells.set(key, cell);
 }
 
@@ -3272,7 +3297,7 @@ function footprintMergeLive(byTime, bucket) {
   if (!bar || !byTime.has(bar)) return;
   if (footprintLive.since > bar * 1000) return;   // 봉 중간에 붙었다 -> 서버 값 유지
   byTime.set(bar, [...footprintLive.cells.entries()]
-    .map(([k, c]) => [k * bucket, c[0], c[1]])
+    .map(([k, c]) => [k * bucket, c[0], c[1], c[2], c[3]])
     .sort((a, b) => a[0] - b[0]));
 }
 
@@ -3316,6 +3341,23 @@ function ensurePriceWs() {
   }
 }
 
+async function refreshSupplyProfile() {
+  if (chartMode !== "supply") return;          // 다른 모드를 보는 동안은 받을 이유가 없다
+  if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
+  const now = Date.now();
+  if (now - supplyProfileLastFetchAt < SUPPLY_PROFILE_POLL_MS) return;
+  supplyProfileLastFetchAt = now;
+  try {
+    const res = await fetch(API_SUPPLY_PROFILE_URL, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`supply-profile ${res.status}`);
+    latestSupplyProfile = await res.json();
+  } catch (error) {
+    console.error("Supply profile fetch error:", error);
+    latestSupplyProfile = null;
+  }
+  scheduleSnapshotChartRender();
+}
+
 async function refreshFootprint() {
   if (chartMode !== "footprint") return;       // 청산맵을 보는 동안은 받을 이유가 없다
   if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
@@ -3343,9 +3385,12 @@ function footprintForChart() {
   if (!bars.length) return null;
   const bucket = Number(payload.bucket) || 0.5;
   const byTime = new Map(bars.map((b) => [b.time, b.levels]));
+  const aggTimes = new Set(bars.filter((b) => b.agg).map((b) => b.time));
   footprintMergeLive(byTime, bucket);   // 진행 중인 봉만 실시간 값으로 대체
   return {
     bucket,
+    whaleUsd: Number(payload.whaleUsd) || 0,
+    aggTimes,
     ready: !!payload.ready,
     barsExpected: Number(payload.barsExpected) || bars.length,
     barCount: bars.length,
@@ -3360,6 +3405,268 @@ function fmtFootprintQty(v) {
   if (v >= 1000) return (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "k";
   if (v >= 100) return v.toFixed(0);
   return v.toFixed(1);
+}
+
+
+// ── 수급 리본 (2026-09-19) ──────────────────────────────────────────────────
+// 캔들 바로 아래 두 줄. **위가 고래, 아래가 리테일**, 각자 0선에서 위(순매수)·아래(순매도)로
+// 뻗는다. 부호가 갈리는 봉에만 주황 띠를 깐다 -- 그게 이 화면이 존재하는 이유다(흡수/분산).
+//
+// ⚠️높이는 **로그**다(청산 레인과 같은 이유). 그리고 두 줄은 **각자의 최대로 정규화**한다.
+//   한 자로 그리면 둘 중 하나가 통째로 사라진다 --
+//   리테일 합계는 고래 합계보다 보통 몇 배 크다(고래는 상위 1% 체결뿐이다). 여기서 읽는 것은
+//   «어느 쪽이 큰가»가 아니라 «부호가 같은가»이고, 절대량은 패널 오른쪽 숫자가 말한다.
+// ⚠️aggTrades 로 메운 봉(footprint.aggByTime)은 체결이 묶여 있어 고래가 과장된다. 지우지 않고
+//   **흐리게** 그린다 -- 지우면 「그 시간엔 고래가 없었다」로 읽힌다.
+function supplyFlowOfBar(levels) {
+  let buy = 0, sell = 0, wBuy = 0, wSell = 0;
+  (levels || []).forEach((l) => {
+    buy += Number(l[1]) || 0; sell += Number(l[2]) || 0;
+    wBuy += Number(l[3]) || 0; wSell += Number(l[4]) || 0;
+  });
+  // 고래는 매수/매도의 **부분집합**이다 -- 리테일은 빼서 얻는다.
+  return { whale: wBuy - wSell, retail: (buy - wBuy) - (sell - wSell),
+           whaleAbs: wBuy + wSell, retailAbs: (buy - wBuy) + (sell - wSell) };
+}
+
+function drawSupplyRibbon(svg, NS, footprint, candles, xAt, bw, ml, cw, panelY, panelH) {
+  const flows = candles.map((c) => Object.assign(
+    supplyFlowOfBar(footprint.byTime.get(c.time)), { agg: footprint.aggTimes.has(c.time) }));
+  const rowH = (panelH - FLOW_ROW_GAP) / 2;
+  const half = Math.max(3, rowH / 2 - 1);
+  const rows = [
+    { mid: panelY + rowH / 2, label: "고래",
+      max: Math.max(...flows.map((f) => Math.abs(f.whale)), 1e-9), pick: (f) => f.whale, op: 0.95 },
+    { mid: panelY + rowH + FLOW_ROW_GAP + rowH / 2, label: "리테일",
+      max: Math.max(...flows.map((f) => Math.abs(f.retail)), 1e-9), pick: (f) => f.retail, op: 0.45 },
+  ];
+
+  const top = document.createElementNS(NS, "line");
+  top.setAttribute("x1", ml); top.setAttribute("x2", ml + cw);
+  top.setAttribute("y1", panelY); top.setAttribute("y2", panelY);
+  top.setAttribute("stroke", "var(--soft-line)");
+  svg.appendChild(top);
+
+  // 괴리 띠를 **먼저** 깐다(막대가 그 위에 올라온다).
+  const whaleMax = rows[0].max;
+  flows.forEach((f, i) => {
+    if (f.whale === 0 || f.retail === 0) return;
+    if ((f.whale > 0) === (f.retail > 0)) return;
+    if (Math.abs(f.whale) < FLOW_DIVERGENCE_MIN * whaleMax) return;
+    // 🔴틴트만 깔았더니(2026-09-19 합성 입력 확인) 빨간 고래 막대와 섞여 «붉은 기» 로만
+    //   읽혔다. 주황 **표식**을 박는다 -- 틴트는 배경이고, 판정은 이 2px 선이 한다.
+    // 🔴그 표식을 패널 «위» 모서리에 뒀더니 이번엔 지지/저항 가격선이 정확히 그 자리를 지나
+    //   가려버렸다(같은 날 두 번째 렌더). 두 줄 **사이의 틈**은 구조적으로 늘 비어 있다 --
+    //   막대는 각자 0선에서 바깥으로만 자라기 때문이다. 표식의 자리는 거기다.
+    const band = document.createElementNS(NS, "rect");
+    band.setAttribute("x", xAt(i) - 1); band.setAttribute("y", panelY + 1);
+    band.setAttribute("width", bw + 2); band.setAttribute("height", panelH - 2);
+    band.setAttribute("fill", "var(--warn)"); band.setAttribute("fill-opacity", "0.1");
+    svg.appendChild(band);
+    const cap = document.createElementNS(NS, "rect");
+    cap.setAttribute("x", xAt(i) - 1); cap.setAttribute("y", panelY + rowH + 0.5);
+    cap.setAttribute("width", bw + 2); cap.setAttribute("height", 2);
+    cap.setAttribute("fill", "var(--warn)");
+    const capTip = document.createElementNS(NS, "title");
+    capTip.textContent = f.whale > 0
+      ? "괴리 — 고래 매수 × 리테일 매도(흡수)"
+      : "괴리 — 고래 매도 × 리테일 매수(분산)";
+    cap.appendChild(capTip);
+    svg.appendChild(cap);
+  });
+
+  rows.forEach((row) => {
+    const zero = document.createElementNS(NS, "line");
+    zero.setAttribute("x1", ml); zero.setAttribute("x2", ml + cw);
+    zero.setAttribute("y1", row.mid); zero.setAttribute("y2", row.mid);
+    zero.setAttribute("stroke", "var(--line)");
+    svg.appendChild(zero);
+
+    const tag = document.createElementNS(NS, "text");
+    tag.setAttribute("x", ml - 5); tag.setAttribute("y", row.mid + 3);
+    tag.setAttribute("text-anchor", "end"); tag.setAttribute("font-size", "8");
+    tag.setAttribute("fill", "var(--muted)");
+    tag.textContent = row.label;
+    svg.appendChild(tag);
+
+    flows.forEach((f, i) => {
+      const v = row.pick(f);
+      if (!v) return;
+      // 🔴로그 스케일이다. 선형으로 그렸더니(2026-09-19 첫 렌더) 창 안에 큰 봉이 하나만 있으면
+      //   **나머지 네 봉이 전부 1px** 로 뭉갰다. 봉별 순수급은 꼬리가 두꺼워서(고래 한 건이
+      //   그 봉을 혼자 만든다) 청산 레인과 같은 문제이고, 그래서 같은 해법을 쓴다.
+      const hgt = Math.max(1, half * Math.log1p(Math.abs(v)) / Math.log1p(row.max));
+      const bar = document.createElementNS(NS, "rect");
+      bar.setAttribute("x", xAt(i)); bar.setAttribute("width", bw);
+      bar.setAttribute("y", v > 0 ? row.mid - hgt : row.mid);
+      bar.setAttribute("height", hgt);
+      bar.setAttribute("fill", v > 0 ? "var(--good)" : "var(--bad)");
+      bar.setAttribute("fill-opacity", f.agg ? row.op * 0.45 : row.op);
+      const title = document.createElementNS(NS, "title");
+      title.textContent = row.label + " 순수급 " + (v > 0 ? "+" : "") + v.toFixed(1) + " ETH"
+        + (f.agg ? " · 집계 체결로 메운 봉(고래 과장)" : "");
+      bar.appendChild(title);
+      svg.appendChild(bar);
+    });
+  });
+
+  // «지금» 숫자와 기준을 **오른쪽 여백 한 곳**에 모은다. 2026-09-19 첫 렌더에서 기준 줄을
+  // 패널 왼쪽 위에 뒀다가 「체결 테이프 수집 중 N/12봉」 경고와 글자가 겹쳤다 -- 그 자리는
+  // 이미 임자가 있다. 리본은 모양을, 이 숫자들은 크기를 말한다.
+  const last = flows[flows.length - 1];
+  const rightText = (y, text, tip) => {
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", ml + cw + 4); txt.setAttribute("y", y);
+    txt.setAttribute("font-size", "9"); txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = text;
+    if (tip) {
+      const title = document.createElementNS(NS, "title");
+      title.textContent = tip;
+      txt.appendChild(title);
+    }
+    svg.appendChild(txt);
+  };
+  if (last) {
+    const signed = (v) => (v > 0 ? "+" : v < 0 ? "-" : "") + fmtFootprintQty(Math.abs(v));
+    rightText(rows[0].mid + 3, signed(last.whale), "이번 봉 고래 순수급(ETH)");
+    rightText(rows[1].mid + 3, signed(last.retail), "이번 봉 리테일 순수급(ETH)");
+  }
+  // 고래 기준은 분위라 **매일 다르다**. 적지 않으면 어제 화면과 오늘 화면이 다른 뜻이 된다.
+  rightText(panelY + panelH + 9,
+    footprint.whaleUsd > 0 ? "고래 ≥$" + Math.round(footprint.whaleUsd / 1000) + "k" : "기준 집계 중",
+    footprint.whaleUsd > 0
+      ? "고래 = 최근 체결 명목의 상위 1% ($" + Math.round(footprint.whaleUsd).toLocaleString() + " 이상). "
+        + "고정 수량이 아니라 분위라 매일 달라진다."
+      : "체결 표본이 모자라 아직 분류하지 않는다(고래 칸이 0이다).");
+}
+
+
+// ── 가격축 수급 프로파일 (2026-09-19) ───────────────────────────────────────
+// 시간을 버리고 가격만 남긴다. 창 전체(최대 24시간)를 가격빈으로 접어 «어느 값에서 누가
+// 공격했는가»를 본다. 리본이 «지금»을 말한다면 이 화면은 «자리»를 말한다.
+// 왼쪽이 공격적 매도, 오른쪽이 공격적 매수, 가운데가 가격이다. 진한 부분이 고래 몫으로,
+// 전체 막대 **안에** 겹쳐 그린다(고래는 부분집합이지 옆에 붙는 다른 물량이 아니다).
+// ⚠️창은 프로세스가 살아 있는 동안만 찬다 -- 스냅샷에는 최근 12봉만 남긴다(server.py의
+//   FOOTPRINT_KEEP_BARS 주석). 그래서 실제 창 길이를 머리글에 **항상** 적는다.
+function renderSupplyProfileSvg(svg, profile, currentPrice) {
+  const NS = "http://www.w3.org/2000/svg";
+  const mobileChart = isMobileChartMode();
+  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
+  const parentH = svg.getBoundingClientRect().height
+    || (svg.parentElement ? svg.parentElement.clientHeight : 0);
+  const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
+  const h = mobileChart ? Math.max(parentH, 260) : 400;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.innerHTML = "";
+
+  const levels = (profile && Array.isArray(profile.levels) ? profile.levels : [])
+    .filter((l) => (Number(l[1]) || 0) + (Number(l[2]) || 0) > 0);
+  if (!levels.length) {
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", w / 2); txt.setAttribute("y", h / 2);
+    txt.setAttribute("text-anchor", "middle"); txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = "체결 테이프 집계 중...";
+    svg.appendChild(txt);
+    return;
+  }
+
+  const ml = 10, mr = 10, mt = 30, mb = 20;
+  const centerW = mobileChart ? 46 : 56;
+  const sideW = (w - ml - mr - centerW) / 2;
+  const avail = h - mt - mb;
+  const bucket = Number(profile.bucket) || 0.5;
+  const prices = levels.map((l) => Number(l[0]));
+  const minP = Math.min(...prices), maxP = Math.max(...prices);
+  // 행은 «읽히는 높이»가 정한다 -- 가격 폭이 아니라. 창이 24시간까지 자라면 빈이 수천 개라
+  // 격자 그대로 그리면 한 행이 0.1px 가 된다.
+  const maxRows = Math.max(8, Math.floor(avail / (mobileChart ? 6 : 7)));
+  const rowSize = Math.max(bucket, Math.ceil(((maxP - minP + bucket) / maxRows) / bucket) * bucket);
+
+  const rows = new Map();
+  levels.forEach((l) => {
+    const key = Math.floor(Number(l[0]) / rowSize);
+    const row = rows.get(key) || [0, 0, 0, 0];
+    for (let i = 0; i < 4; i++) row[i] += Number(l[i + 1]) || 0;
+    rows.set(key, row);
+  });
+  const keys = [...rows.keys()].sort((a, b) => b - a);   // 위가 높은 가격
+  const rowPx = avail / keys.length;
+  const max = Math.max(...[...rows.values()].map((r) => Math.max(r[0], r[1])), 1e-9);
+  const centerX = ml + sideW + centerW / 2;
+  const leftEdge = ml + sideW, rightEdge = ml + sideW + centerW;
+  let pocKey = null, pocVol = -1;
+  rows.forEach((r, k) => { if (r[0] + r[1] > pocVol) { pocVol = r[0] + r[1]; pocKey = k; } });
+
+  const bar = (x, y, wid, color, opacity, tip) => {
+    if (!(wid > 0)) return;
+    const rect = document.createElementNS(NS, "rect");
+    rect.setAttribute("x", x); rect.setAttribute("y", y);
+    rect.setAttribute("width", Math.max(1, wid)); rect.setAttribute("height", Math.max(1, rowPx - 1));
+    rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", opacity);
+    const title = document.createElementNS(NS, "title");
+    title.textContent = tip;
+    rect.appendChild(title);
+    svg.appendChild(rect);
+  };
+
+  keys.forEach((key, j) => {
+    const [buy, sell, wBuy, wSell] = rows.get(key);
+    const y = mt + j * rowPx;
+    const price = key * rowSize;
+    const sw = sideW * sell / max, swW = sideW * wSell / max;
+    const bwd = sideW * buy / max, bwW = sideW * wBuy / max;
+    const tip = (side, tot, whale) => price.toFixed(1) + " · " + side + " " + tot.toFixed(1)
+      + " ETH (고래 " + whale.toFixed(1) + " · " + (tot > 0 ? Math.round(whale / tot * 100) : 0) + "%)";
+    bar(leftEdge - sw, y, sw, "var(--bad)", 0.4, tip("매도", sell, wSell));
+    bar(leftEdge - swW, y, swW, "var(--bad)", 0.95, tip("매도", sell, wSell));
+    bar(rightEdge, y, bwd, "var(--good)", 0.4, tip("매수", buy, wBuy));
+    bar(rightEdge, y, bwW, "var(--good)", 0.95, tip("매수", buy, wBuy));
+
+    // 🔴행이 $1 보다 촘촘한데 toFixed(0) 로 찍으면 «2608, 2608» 처럼 같은 값이 두 줄 나온다
+    //   (2026-09-19 첫 렌더에서 실제로 그랬다). 자릿수는 행 크기가 정한다.
+    //   그래도 촘촘하면(9px 미만) 한 줄 걸러 찍는다 -- 글자가 겹치면 둘 다 못 읽는다.
+    if (rowPx >= 9 || j % 2 === 0) {
+      const lbl = document.createElementNS(NS, "text");
+      lbl.setAttribute("x", centerX); lbl.setAttribute("y", y + rowPx / 2 + 3);
+      lbl.setAttribute("text-anchor", "middle");
+      lbl.setAttribute("font-size", Math.min(10, Math.max(7, rowPx - 1)));
+      lbl.setAttribute("fill", key === pocKey ? "var(--text)" : "var(--muted)");
+      lbl.textContent = price.toFixed(rowSize >= 1 ? 0 : 1);
+      svg.appendChild(lbl);
+    }
+  });
+
+  // 현재가. 프로파일에서 «내가 지금 어디에 서 있나»가 없으면 아무 판단도 못 한다.
+  if (currentPrice > 0) {
+    const j = keys.indexOf(Math.floor(currentPrice / rowSize));
+    if (j >= 0) {
+      const line = document.createElementNS(NS, "line");
+      line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
+      line.setAttribute("y1", mt + j * rowPx + rowPx / 2);
+      line.setAttribute("y2", mt + j * rowPx + rowPx / 2);
+      line.setAttribute("stroke", "var(--accent)"); line.setAttribute("stroke-dasharray", "4 3");
+      svg.appendChild(line);
+    }
+  }
+
+  const head = document.createElementNS(NS, "text");
+  head.setAttribute("x", ml); head.setAttribute("y", 14);
+  head.setAttribute("font-size", "10"); head.setAttribute("fill", "var(--muted)");
+  const span = Number(profile.spanSeconds) || 0;
+  const hours = Math.floor(span / 3600), mins = Math.round((span % 3600) / 60);
+  head.textContent = "최근 " + (hours ? hours + "시간 " : "") + mins + "분 · "
+    + (profile.whaleUsd > 0
+      ? "고래 = 체결 ≥ $" + Math.round(profile.whaleUsd).toLocaleString() + " (상위 1%)"
+      : "고래 기준 집계 중")
+    + (profile.aggBars > 0
+       ? " · 집계 체결로 메운 봉 " + profile.aggBars + "개 포함(그만큼 고래가 과장된다)" : "");
+  svg.appendChild(head);
+
+  const foot = document.createElementNS(NS, "text");
+  foot.setAttribute("x", ml); foot.setAttribute("y", h - 6);
+  foot.setAttribute("font-size", "9"); foot.setAttribute("fill", "var(--muted)");
+  foot.textContent = "← 공격적 매도  ·  진한 부분이 고래 몫  ·  공격적 매수 →";
+  svg.appendChild(foot);
 }
 
 // Snapshot tab's own candlestick chart -- same renderCandleSvg() the Live tab uses, always ETH, no
@@ -3386,8 +3693,17 @@ let chartRenderDeferred = false;
 function renderSnapshotChart() {
   if (chartHoverActive) { chartRenderDeferred = true; return; }
   const svg = el("candleSvgSnapshot");
+  if (!svg) return;
   const fullCandles = candleHistoryByAsset[activeSnapshotAsset] || [];
-  if (!svg || !fullCandles.length) return;
+  // 수급 프로파일은 캔들을 쓰지 않는다(가격축 히스토그램이다) -- 캔들이 없어도 그린다.
+  if (chartMode === "supply") {
+    renderSupplyProfileSvg(svg, latestSupplyProfile,
+      Number(latestLivePriceByAsset[activeSnapshotAsset]
+             || (fullCandles.length ? fullCandles[fullCandles.length - 1].close : 0)) || 0);
+    renderLiqDensityLegend(false);
+    return;
+  }
+  if (!fullCandles.length) return;
   // Sliced to SNAPSHOT_CHART_MAX_CANDLES (6h) -- narrower than the shared candleHistoryByAsset
   // cache (still 8h, CHART_MAX_CANDLES) so the density-history overlay always has a real snapshot
   // behind every visible column (see that constant's comment).
@@ -4535,7 +4851,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 색은 표시 규약 그대로 롱=good / 숏=bad. 위로 롱청산, 아래로 숏청산인 발산형.
   // ⚠️로그 스케일이다. 최근 7일 5분봉 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 거의 전부가
   //   1픽셀 미만으로 사라진다.
-  if (Array.isArray(liqBars) && liqBars.length && candles.length) {
+  // 2026-09-19 풋프린트 모드에서는 이 패널이 **수급 리본** 자리다. 같은 모드에서 이미 청산밀도
+  // 히트맵을 끄고 있고(2026-09-15 «완전 교체»), 둘 다 넣으면 가격 플롯이 또 줄어든다.
+  // 청산 레인은 청산맵 모드에서 그대로 본다.
+  if (footprint && candles.length) {
+    drawSupplyRibbon(svg, NS, footprint, candles, xAt, bw, ml, cw, liqPanelY, LIQ_PANEL_H);
+  } else if (Array.isArray(liqBars) && liqBars.length && candles.length) {
     const LIQ_Y = liqPanelY, LIQ_H = LIQ_PANEL_H, LIQ_MID = LIQ_Y + LIQ_H / 2;
     // 🔴캔들의 `time` 은 **초** 단위다(server.py: int(row["timestamp"].timestamp())).
     //   Date.parse 는 밀리초라 그대로 키로 쓰면 절대 안 맞는다 -- 2026-09-11 에 이걸로
@@ -4827,6 +5148,7 @@ async function tick() {
       refreshMacroCalendar();
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
+      refreshSupplyProfile();        // 2026-09-19 가격축 수급 프로파일
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }
