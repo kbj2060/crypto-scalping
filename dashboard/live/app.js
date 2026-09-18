@@ -2611,46 +2611,81 @@ function breakoutPrewarnIndicatorItem() {
 // 🔴사전등록(docs/zeus/shadow_prereg_v4_20260918.md): **체결 436건 전까지 수익 판정을 하지
 // 않는다.** 0.8~2.2건/일에서는 MDE 가 기대 엣지보다 커서 «할 수 없다». 그래서 이 카드의 톤은
 // 손익이 아니라 **건전성**(신선도·빈도·진행률)으로 정한다 -- 색으로 승패를 말하지 않는다.
-function zeusShadowIndicatorItem() {
+function zeusShadowItems() {
   const p = latestZeusShadow;
-  const base = { key: "zeus_shadow", label: "Zeus 섀도우 (주문 없음)",
+  const rows = (p && Array.isArray(p.rows)) ? p.rows : [];
+  if (!rows.length) return [zeusShadowRow(null, "v4"), zeusShadowRow(null, "v3")];
+  return rows.map((r) => zeusShadowRow(r, r.tag));
+}
+
+
+function zeusShadowRow(r, tag) {
+  const p = latestZeusShadow;
+  const LABEL = { v4: "Zeus v4 (157열 · edge 게이트)", v3: "Zeus v3 (96열 · q 게이트 · 대조군)" };
+  const base = { key: `zeus_shadow_${tag}`, label: LABEL[tag] || `Zeus ${tag}`,
                  derivedTag: "= 대시보드 자체계산",
                  derivedTitle: "트레이딩 봇과 완전히 분리된 기록 장치입니다. 주문을 내지 않고, "
                    + "5분봉마다 결정을 원장에 적기만 합니다. 사전 등록상 체결 436건 전까지 "
                    + "손익을 판정하지 않습니다." };
-  if (!p || p.error || !p.available || !Array.isArray(p.rows)) {
-    return { ...base, tone: "neutral", subText: !p ? "웜업" : "데이터 없음", history: [], times: [] };
+  if (!r || r.error || !p || p.error) {
+    return { ...base, tone: "neutral", subText: !p ? "웜업" : (r && r.error) || "데이터 없음",
+             history: [], times: [] };
   }
-  const fmt = (r) => {
-    if (r.error) return `${r.tag}: 오류(${r.error})`;
-    const bits = [`${r.tag}: ${r.n || 0}/${r.target_n}건`];
-    if (r.fills_per_day != null) bits.push(`${r.fills_per_day.toFixed(2)}건/일`);
-    if (r.mean_bp != null) bits.push(`건당 ${r.mean_bp >= 0 ? "+" : ""}${r.mean_bp.toFixed(2)}bp`);
-    if (r.win_rate != null) bits.push(`승률 ${(r.win_rate * 100).toFixed(0)}%`);
-    if (r.reject_rate != null) bits.push(`거절 ${(r.reject_rate * 100).toFixed(0)}%`);
-    if (r.in_position) bits.push("보유 중");
-    if (r.age_min != null) bits.push(`${r.age_min.toFixed(0)}분 전`);
-    if (r.n_backfill) bits.push(`백필 ${r.n_backfill}건 제외`);
-    return bits.join(" · ");
+  const bp = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}bp`;
+  // ⭐평균만 쓰지 않는다 -- 중앙·승률·양수일·«최고 1일 제거»를 같이 낸다(저장소 규약).
+  //   승률 39%·중앙 −70bp 인 배리어 전략은 평균이 소수 TP 에 실린다.
+  const perf = (q, label) => {
+    if (!q || !q.n) return `${label}: 표본 없음`;
+    const b = [`${label}: ${q.n}건`];
+    if (q.fills_per_day != null) b.push(`${q.fills_per_day.toFixed(2)}건/일`);
+    b.push(`건당 ${bp(q.mean_bp)}`);
+    if (q.median_bp != null) b.push(`중앙 ${bp(q.median_bp)}`);
+    if (q.win_rate != null) b.push(`승률 ${(q.win_rate * 100).toFixed(0)}%`);
+    if (q.positive_day_rate != null) b.push(`양수일 ${(q.positive_day_rate * 100).toFixed(0)}%`);
+    if (q.mean_bp_drop_top_day != null) b.push(`최고1일 제거 ${bp(q.mean_bp_drop_top_day)}`);
+    if (q.span_days != null) b.push(`${q.span_days.toFixed(0)}일`);
+    return b.join(" · ");
   };
   const maxAge = Number(p.max_age_min) || 20;
-  const ages = p.rows.map((r) => (r.age_min == null ? Infinity : r.age_min));
-  const stale = ages.length ? Math.max(...ages) > maxAge : true;
-  const done = p.rows.reduce((a, r) => a + (Number(r.n) || 0), 0);
-  const tone = stale ? "warn" : "neutral";
+  const stale = r.age_min == null || r.age_min > maxAge;
+  const live = r.live || {};
+  const ref = r.reference_backfill || {};
+  const sub = [`표본 ${live.n || 0}/${r.target_n}`];
+  if (ref.n) sub.push(`참고 ${bp(ref.mean_bp)}`);
+  if (r.in_position) sub.push("보유");
+  if (stale) sub.push("정체");
   const stateTitle = [
-    ...p.rows.map(fmt),
+    perf(live, "사전등록 표본"),
+    perf(ref, "🔸참고(백필)"),
+    r.reject_rate != null ? `거절률 ${(r.reject_rate * 100).toFixed(0)}% · 게이트 버퍼 ${r.gate_buffer || 0}` : "",
+    `마지막 봉 ${r.last_bar_utc || "-"}Z (${r.age_min == null ? "?" : r.age_min.toFixed(0)}분 전)`
+      + (r.in_position ? " · 포지션 보유 중" : " · 포지션 없음"),
+    r.promotion_eligible === false
+      ? `🔴승격 차단: ${(r.promotion_blockers || []).join(", ")}`
+        + (r.dsr != null ? ` (DSR ${Number(r.dsr).toFixed(3)} · PBO ${Number(r.pbo).toFixed(3)})` : "")
+      : (r.promotion_eligible === true ? "승격 자격 충족(임계값 재선언 이력은 매니페스트 참조)" : ""),
     "",
     "🔴주문을 내지 않습니다. 원장만 씁니다.",
-    `🔴체결 ${p.rows[0] && p.rows[0].target_n || 436}건 전까지 손익을 판정하지 않습니다 -- `
-      + "이 빈도에서는 최소검출효과가 기대 엣지보다 커서 «판정할 수 없습니다».",
-    "⭐백필(과거 따라잡기) 거래는 표본에서 뺍니다 -- 게이트 버퍼를 채우려면 필요하지만 "
-      + "사전등록 표본은 «켠 시점부터»입니다.",
+    `🔴체결 ${r.target_n}건 전까지 손익을 판정하지 않습니다 -- 이 빈도에서는 최소검출효과가 `
+      + "기대 엣지보다 커서 «판정할 수 없습니다».",
+    "🔸«참고(백필)»은 러너가 과거를 따라잡으며 만든 것이라 **사전등록 표본이 아닙니다.** "
+      + "지금 가진 유일한 성과 정보라 보여줄 뿐, 성과 근거로 인용하면 안 됩니다.",
+    "🔴«최고1일 제거»가 평균과 크게 다르면 그 이익은 하루에 실려 있다는 뜻입니다.",
     stale ? `🔴원장이 ${maxAge}분 넘게 갱신되지 않았습니다 -- 러너를 확인하세요.` : "",
   ].filter(Boolean).join("\n");
-  return { ...base, tone, subText: `${done}건 누적${stale ? " · 정체" : ""}`,
+  return { ...base, tone: stale ? "warn" : "neutral", subText: sub.join(" · "),
            stateTitle, history: [], times: [] };
 }
+
+
+function zeusShadowSubtitle() {
+  const p = latestZeusShadow;
+  if (!p || p.error || !Array.isArray(p.rows) || !p.rows.length) return "불러오는 중…";
+  const n = p.rows.reduce((a, r) => a + ((r.live && r.live.n) || 0), 0);
+  const tgt = p.rows[0] && p.rows[0].target_n;
+  return `사전등록 표본 ${n}건${tgt ? ` / ${tgt}` : ""} · 주문 없음 · 436건 전까지 판정 없음`;
+}
+
 
 async function refreshZeusShadow() {
   const now = Date.now();
@@ -4719,8 +4754,13 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       // 🔴ethOnlyIndicator 로 감싸지 않는다 — 이 게이트는 **20자산 포트폴리오** 지표다.
       ethOnlyIndicator(volForecastIndicatorItem()),       // 2026-09-16 변동성 전망(24h 확장)
       evrGateIndicatorItem(),                             // 2026-09-15 변동폭 게이트(24시간)
-      zeusShadowIndicatorItem(),                          // 2026-09-18 Zeus 섀도우(주문 없음)
     ], "snapSpecializedSignalList", { forceMeter: true });
+
+    // 2026-09-18 Zeus 섀도우는 «지금 무슨 일이 일어나는가»가 아니라 «가상 매매 원장»이라
+    // 이벤트 트리거 목록에서 떼어 전용 패널에 둔다(사용자 지시).
+    renderModelIndicatorList(zeusShadowItems(), "snapZeusShadowList");
+    const zsub = el("zeusShadowSub");
+    if (zsub) zsub.textContent = zeusShadowSubtitle();
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
     renderModelIndicatorList([

@@ -1132,10 +1132,59 @@ ZEUS_TARGET_FILLS = 436
 ZEUS_MAX_AGE_MIN = 20.0        # 5분봉 4주기. 러너는 2분 주기로 돈다.
 
 
+_ZEUS_CACHE: dict[str, tuple[tuple[int, int], list[dict]]] = {}
+
+
+def _zeus_rows(path: Path) -> list[dict]:
+    """원장을 mtime/크기 키로 캐시한다. 🔴요청 경로에서 매번 2MB 를 다시 파싱하지 않는다
+    (2026-09-10 요청 경로 계산이 실장애를 냈던 전례)."""
+    try:
+        sig = (int(path.stat().st_mtime_ns), int(path.stat().st_size))
+    except OSError:
+        return []
+    hit = _ZEUS_CACHE.get(str(path))
+    if hit and hit[0] == sig:
+        return hit[1]
+    rows = parse_jsonl(path)
+    _ZEUS_CACHE[str(path)] = (sig, rows)
+    return rows
+
+
+def _zeus_perf(ex: list[dict]) -> dict[str, Any]:
+    """⭐평균만 내지 않는다 -- 중앙·승률·양수일·«최고 1일 제거»를 같이 낸다(저장소 규약).
+    승률 38%·중앙 −70bp 인 배리어 전략은 평균이 소수 TP 에 실리기 때문이다."""
+    bps = [float(r["bp"]) for r in ex if isinstance(r.get("bp"), (int, float))]
+    if not bps:
+        return {"n": 0}
+    days: dict[str, float] = {}
+    for r in ex:
+        d = str(r.get("t") or "")[:10]
+        days[d] = days.get(d, 0.0) + float(r.get("bp") or 0.0)
+    worst_keep = list(bps)
+    if days:
+        top = max(days, key=lambda k: days[k])
+        worst_keep = [float(r["bp"]) for r in ex if str(r.get("t") or "")[:10] != top]
+    span = 0.0
+    if len(ex) > 1:
+        try:
+            span = (pd.Timestamp(ex[-1]["t"]) - pd.Timestamp(ex[0]["t"])).total_seconds() / 86400.0 + 1
+        except Exception:  # noqa: BLE001
+            span = 0.0
+    return {
+        "n": len(bps), "mean_bp": sum(bps) / len(bps),
+        "median_bp": float(statistics.median(bps)),
+        "win_rate": sum(1 for b in bps if b > 0) / len(bps),
+        "positive_day_rate": (sum(1 for v in days.values() if v > 0) / len(days)) if days else None,
+        "mean_bp_drop_top_day": (sum(worst_keep) / len(worst_keep)) if worst_keep else None,
+        "fills_per_day": (len(bps) / span) if span > 0 else None,
+        "span_days": span or None,
+    }
+
+
 def _zeus_one(tag: str, dirname: str) -> dict[str, Any]:
     base = LIVE_DIR / dirname
     st = load_json(base / "state.json")
-    rows = parse_jsonl(base / "ledger.jsonl")
+    rows = _zeus_rows(base / "ledger.jsonl")
     # ⭐백필(`bf`)은 «뺀다» -- 게이트 버퍼(1,000 후보 ≈ 4일)를 채우려면 과거를 따라잡아야
     #   하지만 사전등록 표본은 «켠 시점부터»다. 섞으면 표본이 무효다.
     ex = [r for r in rows if r.get("ev") == "exit" and not r.get("bf")]
@@ -1143,6 +1192,14 @@ def _zeus_one(tag: str, dirname: str) -> dict[str, Any]:
     cand = [r for r in rows if r.get("ev") == "cand" and not r.get("bf")]
     out: dict[str, Any] = {"tag": tag, "n": len(bps), "target_n": ZEUS_TARGET_FILLS,
                            "n_backfill": sum(1 for r in rows if r.get("ev") == "exit" and r.get("bf"))}
+    # 승격 관문 상태 -- 「왜 주문이 안 나가는가」가 화면에서 바로 읽혀야 한다.
+    man = load_json(base / "execution_promotion_manifest.json")
+    if isinstance(man, dict):
+        out["promotion_eligible"] = bool(man.get("promotion_eligible"))
+        out["promotion_blockers"] = list(man.get("promotion_blockers") or [])
+        ss = man.get("selection_statistics") or {}
+        out["dsr"] = ss.get("deflated_sharpe_ratio")
+        out["pbo"] = ss.get("probability_backtest_overfit")
     if isinstance(st, dict):
         out["last_bar_utc"] = st.get("last_ts")
         out["age_min"] = utc_age_minutes(st.get("last_ts"))
@@ -1159,6 +1216,11 @@ def _zeus_one(tag: str, dirname: str) -> dict[str, Any]:
         span = utc_age_minutes(ex[0].get("t"))
         if span and span > 0:
             out["fills_per_day"] = len(bps) / (span / 1440.0)
+    out["live"] = _zeus_perf(ex)
+    # 🔴«참고»다. 백필은 과거를 따라잡으며 만든 것이라 **사전등록 표본이 아니다.**
+    #   그래도 지금 가진 유일한 성과 정보이므로 «참고»라고 못박아 보여준다.
+    out["reference_backfill"] = _zeus_perf(
+        [r for r in rows if r.get("ev") == "exit" and r.get("bf")])
     return out
 
 

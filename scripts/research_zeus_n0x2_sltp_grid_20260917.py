@@ -862,6 +862,64 @@ def occ(pick, LBLS):
     return 0
 
 
+
+def rotnull(pick, LBLS):
+    """--rotnull=<반복> : **통째 회전 귀무**. 게이트가 «무작위보다 나은 봉»을 고르는가?
+
+    CI 는 「건당 bp 가 0과 다른가」만 말한다. 그건 «이 배리어·이 측면비중으로 아무 봉에나
+    들어가도» 양수일 수 있다(더블배리어는 TP1.5/SL0.7 이라 무조건부 기대가 0이 아니다).
+    ⭐**측면 계열을 원형 회전**시키면 신호 수·군집 구조·롱숏 비중이 **그대로 보존**되고
+    가격과의 정렬만 깨진다. 1슬롯 순차 집행도 똑같이 돌린다.
+    🔴i.i.d. 무작위 진입을 쓰면 군집이 풀려 체결 수가 달라지고 귀무가 내려앉는다
+    (2026-09-15 기록: 「노출 상한이 있으면 귀무도 체결 수를 보존해야」). 그래서 회전이다.
+    """
+    tp, sl = K.BASE_TP, K.BASE_SL
+    NR = int(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--rotnull=")), 200))
+    rng = np.random.default_rng(17)
+    days = sum((pd.Timestamp(v1) - pd.Timestamp(v0)).days + 1 for _n, _a, _b, v0, v1 in FOLDS)
+
+    def _run(per_fold, shifts):
+        pnl, n = [], 0
+        for k_, (te, h, l, c, side, _idx) in enumerate(per_fold):
+            sd = np.roll(side, shifts[k_]) if shifts is not None else side
+            ix = np.where(sd != 0)[0]
+            if len(ix) < 20:
+                continue
+            r, hh, _a, _b, _m = K._first_touch_open(ix, sd, h, l, c, tp, sl, K.MAXBARS)
+            p_ = r * 1e4 - COST
+            take, cur = [], -1
+            for i in range(len(ix)):
+                if ix[i] <= cur:
+                    continue
+                take.append(i); cur = ix[i] + int(hh[i])
+            t_ = np.array(take, int); pnl.append(p_[t_]); n += len(t_)
+        return (float(np.concatenate(pnl).mean()) if pnl else np.nan), n
+
+    for arm in ARMS:
+        ent = pick(arm)
+        obs, nulls, nobs = [], [], []
+        for _thr, per_fold in ent:
+            o, n = _run(per_fold, None)
+            obs.append(o); nobs.append(n)
+            for _ in range(NR):
+                sh = [int(rng.integers(288 * 7, len(f[0]) - 288 * 7)) for f in per_fold]
+                nulls.append(_run(per_fold, sh)[0])
+        obs_m = float(np.nanmean(obs)); nl = np.array(nulls, float); nl = nl[np.isfinite(nl)]
+        pct = float((nl < obs_m).mean() * 100)
+        pval = float((nl >= obs_m).mean())
+        log(f"\n{'='*100}\n■ {arm} — {_lbl(arm)} · **통째 회전 귀무** "
+            f"(TP{tp*100:g}%/SL{sl*100:g}% · 비용 {COST}bp · 슬롯당 {NR}회 · {days}일)\n{'='*100}")
+        log(f"  관측 건당 {obs_m:+.2f}bp · 체결 {np.mean(nobs):.0f}건")
+        log(f"  귀무 {len(nl):,}표본: 평균 {nl.mean():+.2f} · SD {nl.std():.2f} · "
+            f"5%/50%/95% {np.percentile(nl,5):+.2f}/{np.percentile(nl,50):+.2f}/{np.percentile(nl,95):+.2f}")
+        log(f"  ⭐**백분위 {pct:.1f}% · p = {pval:.4f}** "
+            f"{'✅귀무 배제(p<0.05)' if pval < 0.05 else '🔴귀무 배제 못 함'}")
+        log(f"  ⇒ 초과분(관측 − 귀무중앙) {obs_m - float(np.percentile(nl, 50)):+.2f}bp")
+    log("\n⭐회전은 신호 수·군집·측면비중을 보존한다 -- 차이는 «가격과의 정렬»뿐이다.")
+    log("🔴귀무 중앙이 0 보다 크면, 그만큼은 «배리어 기하학»이지 «고르는 능력»이 아니다.")
+    return 0
+
+
 def ckey(arm, fold, ei, sd):
     """캐시 키 규약이 팔마다 다르다 -- N0 는 전문가 «이름», N5/N7 은 «정수» 인덱스.
     `N7@tag` 면 키 끝에 `@tag` 가 붙는다(라벨별로 갈린 캐시)."""
@@ -1095,6 +1153,62 @@ def main() -> int:
                 f"{'  ✅peg배제' if pc[:, 0].mean() > PEG - COST else ''}")
         return 0
 
+    # ── --daymatrix=<out.npz> : DSR/PBO 용 **일별 순bp 행렬**(일 × 구성) ────────────
+    # ⭐구성 = 게이트점수 5 × 고정분위 4 × 배리어 20 = 400. 전부 캐시에서 «재학습 0»으로 나오므로
+    #   「실제로 해 본 탐색」의 지배적 부분을 정직하게 센다. 적게 세면 노이즈 바닥이 낮아져
+    #   DSR 이 부풀고, 그건 승격 매니페스트가 막으려는 바로 그것이다.
+    if "--daymatrix" in " ".join(sys.argv):
+        outp = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--daymatrix="))
+        QS = [0.70, 0.80, 0.85, 0.92]
+        arm = ARMS[0]
+        cols, names = {}, []
+        for sc_name in ("q", "d", "dq", "margin", "edge"):
+            globals()["SCORE"] = sc_name
+            per_seg = []
+            for _n, te, h, l, c, slots in SEGS[arm]:
+                da, qf = gscore(*slots[0], atr=None)
+                per_seg.append((te, h, l, c, da, qf))
+            for q_ in QS:
+                sides = []
+                for (_te, _h, _l, _c, da, qf) in per_seg:
+                    m_ = da != 0
+                    t_ = _thr_seq(qf[m_], q_)
+                    ok = np.zeros(len(da), bool)
+                    ok[np.where(m_)[0]] = np.isfinite(t_) & (qf[m_] >= t_)
+                    sides.append(np.where((da == 1) & ok, 1.0,
+                                          np.where((da == 2) & ok, -1.0, 0.0)))
+                for tp in TPS:
+                    for sl in SLS:
+                        acc = {}
+                        for (te, h, l, c, _da, _qf), side in zip(per_seg, sides):
+                            ix = np.where(side != 0)[0]
+                            if len(ix) < 20:
+                                continue
+                            r, hh, _a, _b, _m = K._first_touch_open(ix, side, h, l, c, tp, sl, K.MAXBARS)
+                            pn = r * 1e4 - COST
+                            take, cur = [], -1
+                            for i in range(len(ix)):
+                                if ix[i] <= cur:
+                                    continue
+                                take.append(i); cur = ix[i] + int(hh[i])
+                            t_ = np.array(take, int)
+                            dd = te.timestamp.dt.floor("D").to_numpy()[ix[t_]]
+                            for d_, v_ in zip(dd, pn[t_]):
+                                acc[d_] = acc.get(d_, 0.0) + float(v_)
+                        nm = f"{sc_name}|q{q_}|{tp}|{sl}"
+                        cols[nm] = acc; names.append(nm)
+                _trim()
+            log(f"  점수 {sc_name} 완료 · 누적 구성 {len(names)}")
+        alld = sorted({d for a in cols.values() for d in a})
+        M = np.zeros((len(alld), len(names)))
+        idx = {d: i for i, d in enumerate(alld)}
+        for j, nm in enumerate(names):
+            for d_, v_ in cols[nm].items():
+                M[idx[d_], j] = v_
+        np.savez(outp, matrix=M, names=np.array(names), days=np.array([str(d) for d in alld]))
+        log(f"\n저장 {outp} · {M.shape[0]}일 × {M.shape[1]}구성 (비용 {COST}bp)")
+        return 0
+
     ROLLQ_G[0] = ROLLQ
     if "--gap1m" in sys.argv:
         return gap1m(pick, LBLS)
@@ -1106,6 +1220,8 @@ def main() -> int:
         return seqgrid(pick, LBLS)
     if "--wait" in " ".join(sys.argv):
         return waitrule(pick, LBLS)
+    if "--rotnull" in " ".join(sys.argv):
+        return rotnull(pick, LBLS)
     if "--occ" in sys.argv:
         return occ(pick, LBLS)
     if "--seq" in sys.argv:
