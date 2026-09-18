@@ -315,6 +315,33 @@ class TapeStore:
                     con.execute(f"ALTER TABLE trade_tape_1s ADD COLUMN {col} {typ}")
                 except Exception:  # noqa: BLE001 -- 이미 있으면 그게 정상이다
                     pass
+            # 풋프린트(5분봉 x 0.5달러빈)는 **이 표를 접으면 나온다** -- 따로 쌓지 않는다.
+            # 대시보드 화면이 그리는 것과 같은 모양을 뷰로 낸다(2026-09-19 사용자 요청
+            # "풋프린트도 duckdb 에"). 표를 하나 더 만들면 같은 사실이 두 벌이 되고, 언젠가
+            # 한쪽만 고쳐진다 -- 이 저장소가 레짐 분류기에서 이미 겪은 일이다.
+            # ⚠️뷰가 덮지 못하는 것 하나: 대시보드는 WS 공백을 aggTrades 로 메우지만 이 표는
+            #   메우지 않고 `gaps` 에 적기만 한다. 연구 쿼리는 gaps 를 조인해 그 구간을 뺀다.
+            # ⚠️격자 사상은 근사다: 이 표의 빈은 0.1달러라 5로 나눠 0.5 격자로 올리는데,
+            #   가격이 정확히 .25 로 끝나는 드문 경우 화면의 은행가 반올림과 한 칸 다를 수 있다.
+            #   원본(0.1빈)이 언제나 진실이고 뷰는 «보기 좋은 모양»이다.
+            con.execute("""
+                CREATE OR REPLACE VIEW footprint_5m AS
+                SELECT symbol,
+                       ts_sec - (ts_sec % 300)                     AS bar_start,
+                       CAST(round(price_bin / 5.0) AS INTEGER)     AS price_bin_5,
+                       round(price_bin / 5.0) * 0.5                AS price,
+                       sum(buy_qty)          AS buy_qty,
+                       sum(sell_qty)         AS sell_qty,
+                       sum(whale_buy_qty)    AS whale_buy_qty,
+                       sum(whale_sell_qty)   AS whale_sell_qty,
+                       sum(retail_buy_qty)   AS retail_buy_qty,
+                       sum(retail_sell_qty)  AS retail_sell_qty,
+                       sum(buy_n)            AS fill_buy_n,
+                       sum(sell_n)           AS fill_sell_n,
+                       sum(order_buy_n)      AS order_buy_n,
+                       sum(order_sell_n)     AS order_sell_n
+                FROM trade_tape_1s
+                GROUP BY 1, 2, 3, 4""")
             # 끊긴 구간. 연구 쿼리는 이 표를 봐야 «0» 과 «모름» 을 구분할 수 있다.
             con.execute("""
                 CREATE TABLE IF NOT EXISTS gaps(
