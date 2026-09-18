@@ -34,8 +34,17 @@ from core.selection_stats import deflated_sharpe_ratio, pbo_cscv   # noqa: E402
 ART_NAME = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--art=")),
                 "zeus_v4_shadow_20260918")
 ART = ROOT / "data/live" / ART_NAME
+# 🔴임계값은 «저자가 선언하고 계약이 그 선언을 검사하는» 값이다(저장소가 박은 상수가 아니다).
+# 기본값 0.95/0.35 는 2026-09-18 내가 선언한 값 -- Bailey–López de Prado 관례(DSR≥0.95)와
+# «동전(0.5)보다 엄격»(PBO≤0.35). 바꾸려면 --min-dsr/--max-pbo 와 함께 **근거를 남겨야 한다**.
 MIN_DSR = float(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--min-dsr=")), 0.95))
 MAX_PBO = float(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--max-pbo=")), 0.35))
+AUTHORITY = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--authority=")), "")
+REASON = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--reason=")), "")
+if (MIN_DSR, MAX_PBO) != (0.95, 0.35):
+    assert AUTHORITY and REASON, (
+        "임계값을 바꾸려면 --authority 와 --reason 이 필수다. 근거 없는 완화는 계약 충족이 "
+        "아니라 계약의 목적을 없애는 것이고, 그 사실이 매니페스트에 남아야 한다.")
 TPS = [0.010, 0.015, 0.020, 0.025, 0.030]
 SLS = [0.005, 0.007, 0.010, 0.013]
 SCORES = ["q", "d", "dq", "margin", "edge"]
@@ -108,6 +117,17 @@ def main() -> int:
             "pbo_combinations": int(pbo["n_combinations"]),
             "search_space": {"barriers": len(TPS) * len(SLS), "gate_scores": len(SCORES),
                              "signal_rates": 4, "total": len(names)},
+            "threshold_provenance": {
+                "default_declared_20260918": {"min_dsr": 0.95, "max_pbo": 0.35,
+                                              "declared_by": "assistant", "basis":
+                                              "Bailey-Lopez de Prado 관례 · 동전(0.5)보다 엄격"},
+                "in_effect": {"min_dsr": MIN_DSR, "max_pbo": MAX_PBO,
+                              "authority": AUTHORITY or "assistant_default",
+                              "reason": REASON or "기본값",
+                              "changed_at": pd.Timestamp.utcnow().isoformat()},
+                "statistics_unchanged": ("임계값만 바뀌었고 DSR/PBO 는 그대로다. "
+                                         "기대값에는 400회 탐색의 선택편향이 반영돼 있지 않다."),
+            },
             "cost_bp_applied": 1.41,
             "cost_basis": "ETHUSDC 메이커 섀도우 732 leg 실측 왕복(체결률 100%)",
         },
