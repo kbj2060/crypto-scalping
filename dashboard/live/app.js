@@ -120,7 +120,9 @@ let footprintLastFetchAt = 0;
 // 차트 종류. 「풋프린트」와 「청산맵」은 한 화면에 못 담는다 -- 풋프린트는 12봉(1시간)이라 가격
 // 폭이 $45 안팎인데 청산밀도는 $620 범위에 깔려 있어 창 안에 9%만 들어온다(2026-09-16 실측).
 // 그래서 겹치지 않고 **바꿔 본다**. 고른 값은 기억한다 -- 매번 다시 고르게 하면 그게 성가심이다.
-const CHART_MODES = ["footprint", "liqmap", "supply"];
+// 2026-09-19 «supply» 모드를 뺐다 -- 가격축 프로파일은 전용 수급 패널의 탭으로 옮겼다.
+// 옛 localStorage 값이 남아 있으면 CHART_MODES.includes 가 걸러 footprint 로 떨어진다.
+const CHART_MODES = ["footprint", "liqmap"];
 let chartMode = (() => {
   try {
     const saved = localStorage.getItem("chartMode");
@@ -3412,7 +3414,7 @@ async function refreshSupply1s() {
 }
 
 async function refreshSupplyProfile() {
-  if (chartMode !== "supply") return;          // 다른 모드를 보는 동안은 받을 이유가 없다
+  if (activePageTab !== "snapshot" || document.hidden) return;
   if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
   const now = Date.now();
   if (now - supplyProfileLastFetchAt < SUPPLY_PROFILE_POLL_MS) return;
@@ -3425,7 +3427,14 @@ async function refreshSupplyProfile() {
     console.error("Supply profile fetch error:", error);
     latestSupplyProfile = null;
   }
-  scheduleSnapshotChartRender();
+  renderSupplyProfile();
+}
+
+function renderSupplyProfile() {
+  const svg = el("supplyProfileSvg");
+  if (!svg) return;
+  renderSupplyProfileSvg(svg, latestSupplyProfile,
+    Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0);
 }
 
 async function refreshFootprint() {
@@ -3645,9 +3654,11 @@ function renderSupply1s() {
   label(ml, h - 3, "5분 전", "var(--muted)");
   label(ml + cw, h - 3, "지금", "var(--muted)", "end");
   const kUsd = (v) => "$" + Math.round(v / 1000) + "k";
-  setT("supply1sSub", "누적 순수급 · 고래 ≥" + kUsd(supply1sMeta.whaleMinUsd)
+  // 부제는 **패널 전체**를 설명한다 -- 이 줄은 제목 바로 아래에 있고 패널에는 차트가 둘이다.
+  setT("supply1sSub", "고래 ≥" + kUsd(supply1sMeta.whaleMinUsd)
     + " · 리테일 <" + kUsd(supply1sMeta.retailMaxUsd)
-    + " · 아래 눈금은 고래 주문이 있던 초 (" + ticks.length + "건/5분)");
+    + "  |  위: 가격대별 물량과 «벽»  ·  아래: 최근 5분 누적 순수급(1초)"
+    + " · 눈금은 고래 주문이 있던 초 " + ticks.length + "건");
 }
 
 // ── 가격축 수급 프로파일 (2026-09-19) ───────────────────────────────────────
@@ -3683,7 +3694,8 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     return;
   }
 
-  const ml = 10, mr = 10, mt = 30, mb = 20;
+  // 좌우 여백은 **벽 이름표 자리**다. 막대 끝에 붙이면 막대가 긴 행에서 화면 밖으로 나간다.
+  const ml = 104, mr = 104, mt = 30, mb = 22;
   const centerW = mobileChart ? 46 : 56;
   const sideW = (w - ml - mr - centerW) / 2;
   const avail = h - mt - mb;
@@ -3782,6 +3794,83 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     + (profile.aggBars > 0 ? " · 그중 " + profile.aggBars + "봉은 집계 체결(aggTrades)로 메움" : "");
   svg.appendChild(head);
 
+
+  // ── 벽 (2026-09-19 사용자 요청) ─────────────────────────────────────────
+  // ⚠️여기서 「벽」은 **체결이 몰린 가격**이지 호가창에 걸린 대기 물량이 아니다. 이 화면의
+  //   원천은 체결 테이프뿐이라 «걸려 있는 것»은 볼 수 없다. 그래서 이름표에 «체결»을 적고
+  //   툴팁에 뜻을 풀어 둔다 -- 「벽」이라는 말이 오해를 부르기 가장 쉬운 자리다.
+  // ⭐부호가 직관과 반대다: **공격적 매도가 몰린 가격**은 거기서 누군가 받아냈다는 뜻이라
+  //   지지 후보이고, 공격적 매수가 몰린 가격은 거기서 누군가 넘겼다는 뜻이라 저항 후보다.
+  //   툴팁에 그대로 적는다.
+  // 세기는 **«균등하게 퍼졌을 때의 몇 배»**로 잰다. 비율(%)로 두면 행 수에 따라 뜻이
+  // 달라진다 -- 35행에서 8%는 2.8배지만 15행에서 8%는 1.2배다.
+  // 🔴문턱을 데이터 보기 전에 정했다가 두 번 틀렸다(12% -> 3배). 2026-09-19 실측(ETH 55분,
+  //   35행): 고래매도 2.7배 · 고래매수 2.0배 · 리테일 양쪽 1.9배, 전체 물량조차 1.8배다.
+  //   가격이 머문 자리에 물량이 몰리는 건 기본값이라 «3배»는 실제로 거의 안 나온다.
+  //   그래서 문턱은 **1.5배**로 낮게 두고, 대신 **배수를 이름표에 그대로 적어** 세기를
+  //   사람이 판단하게 한다. 문턱은 「이름표를 붙일 가치」 선이지 「진짜 벽」 선이 아니다.
+  const WALL_MIN_MULT = 1.5;
+  const wallOf = (idx) => {
+    let total = 0, bestKey = null, best = 0;
+    rows.forEach((r, k) => {
+      total += r[idx];
+      if (r[idx] > best) { best = r[idx]; bestKey = k; }
+    });
+    if (!total || bestKey === null) return null;
+    const mult = (best / total) * keys.length;
+    if (mult < WALL_MIN_MULT) return null;
+    return { key: bestKey, qty: best, share: best / total, mult };
+  };
+  // 🔴인덱스를 한 번 틀렸다: 리테일 자리에 **전체 물량**(0·1)을 넣어 리테일 벽이 사실은
+  //   전체 벽이었다. 셀은 [총매수, 총매도, 고래매수, 고래매도, 리테일매수, 리테일매도] 다.
+  const walls = [
+    { w: wallOf(3), side: "sell", group: "고래", op: 0.95 },
+    { w: wallOf(5), side: "sell", group: "리테일", op: 0.5 },
+    { w: wallOf(2), side: "buy", group: "고래", op: 0.95 },
+    { w: wallOf(4), side: "buy", group: "리테일", op: 0.5 },
+  ].filter((x) => x.w);
+
+  const placed = { sell: [], buy: [] };
+  walls.forEach((x) => {
+    const j = keys.indexOf(x.w.key);
+    if (j < 0) return;
+    const color = x.side === "sell" ? "var(--bad)" : "var(--good)";
+    let y = mt + j * rowPx + rowPx / 2;
+    // 두 벽이 같은/이웃 행이면 이름표가 포개진다 -- 밀어낸다(고래를 제자리에 두고 리테일을).
+    while (placed[x.side].some((py) => Math.abs(py - y) < 12)) y += 12;
+    placed[x.side].push(y);
+
+    const tick = document.createElementNS(NS, "rect");
+    // 굵기가 곧 세기다 -- 이름표를 못 읽는 거리에서도 «어느 벽이 센가»는 보여야 한다.
+    const tw = Math.min(5, Math.max(2, Math.round(x.w.mult)));
+    const inner = x.side === "sell" ? leftEdge - 1 - tw : rightEdge + 1;
+    tick.setAttribute("x", inner); tick.setAttribute("y", mt + j * rowPx);
+    tick.setAttribute("width", tw); tick.setAttribute("height", Math.max(2, rowPx - 1));
+    tick.setAttribute("fill", color);
+    svg.appendChild(tick);
+
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", x.side === "sell" ? ml - 6 : w - mr + 6);
+    t.setAttribute("y", y + 3);
+    t.setAttribute("text-anchor", x.side === "sell" ? "end" : "start");
+    t.setAttribute("font-size", "9.5");
+    t.setAttribute("fill", color); t.setAttribute("fill-opacity", x.op);
+    t.textContent = x.group + " " + (x.w.key * rowSize).toFixed(rowSize >= 1 ? 0 : 1)
+      + " ×" + x.w.mult.toFixed(1);
+    const tip = document.createElementNS(NS, "title");
+    tip.textContent = x.group + " " + (x.side === "sell" ? "공격적 매도" : "공격적 매수")
+      + "가 몰린 가격 — 그 구간 물량의 " + Math.round(x.w.share * 100) + "%("
+      + x.w.qty.toFixed(1) + " ETH)가 이 한 행에 있다. "
+      + "고르게 퍼졌을 때(" + (100 / keys.length).toFixed(1) + "%)의 "
+      + x.w.mult.toFixed(1) + "배다.\n"
+      + (x.side === "sell"
+         ? "여기서 누군가 그 물량을 받아냈다는 뜻이라 지지 후보다."
+         : "여기서 누군가 그 물량을 넘겼다는 뜻이라 저항 후보다.") + "\n"
+      + "⚠️체결이 몰린 자리이지 호가창에 걸린 대기 물량이 아니다.";
+    t.appendChild(tip);
+    svg.appendChild(t);
+  });
+
   // 범례. 농담 세 단계는 설명 없이는 안 읽힌다 -- 견본을 같이 놓는다.
   const kUsd = (v) => "$" + Math.round(v / 1000) + "k";
   const legend = [
@@ -3807,7 +3896,9 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   foot.setAttribute("x", w - mr); foot.setAttribute("y", h - 6);
   foot.setAttribute("text-anchor", "end");
   foot.setAttribute("font-size", "9"); foot.setAttribute("fill", "var(--muted)");
-  foot.textContent = "← 공격적 매도  ·  가운데부터 큰 체결 순  ·  공격적 매수 →";
+  foot.textContent = walls.length
+    ? "← 공격적 매도  ·  양끝 이름표 = 체결이 몰린 «벽»  ·  공격적 매수 →"
+    : "← 공격적 매도  ·  가운데부터 큰 체결 순  ·  공격적 매수 →";
   svg.appendChild(foot);
 }
 
@@ -3837,14 +3928,6 @@ function renderSnapshotChart() {
   const svg = el("candleSvgSnapshot");
   if (!svg) return;
   const fullCandles = candleHistoryByAsset[activeSnapshotAsset] || [];
-  // 수급 프로파일은 캔들을 쓰지 않는다(가격축 히스토그램이다) -- 캔들이 없어도 그린다.
-  if (chartMode === "supply") {
-    renderSupplyProfileSvg(svg, latestSupplyProfile,
-      Number(latestLivePriceByAsset[activeSnapshotAsset]
-             || (fullCandles.length ? fullCandles[fullCandles.length - 1].close : 0)) || 0);
-    renderLiqDensityLegend(false);
-    return;
-  }
   if (!fullCandles.length) return;
   // Sliced to SNAPSHOT_CHART_MAX_CANDLES (6h) -- narrower than the shared candleHistoryByAsset
   // cache (still 8h, CHART_MAX_CANDLES) so the density-history overlay always has a real snapshot

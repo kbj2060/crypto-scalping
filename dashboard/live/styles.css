@@ -2814,6 +2814,8 @@ svg {
 .trade-modal .manual-entry-row.fields { justify-content: flex-start; }
 .trade-modal .manual-entry-row.fields .exit-frac { justify-content: flex-start; }
 
-/* 수급 1초 패널 (2026-09-19). .chart-container 의 높이(412px)는 캔들 차트용이라 여기선
-   과하다 -- 이 차트는 240px 뷰박스이고 세로로 더 줘봐야 선만 늘어난다. */
+/* 수급 패널 (2026-09-19). .chart-container 의 높이(412px)는 캔들 차트용이다.
+   1초 차트는 240px 뷰박스라 더 줘봐야 선만 늘어나고, 가격축 프로파일은 행이 촘촘해
+   오히려 더 필요하다 -- 탭마다 제 높이를 준다. */
 .supply-1s-container { height: 248px; }
+.supply-profile-container { height: 428px; }
