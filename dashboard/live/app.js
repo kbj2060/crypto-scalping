@@ -3703,7 +3703,8 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   }
 
   // 좌우 여백은 **벽 이름표 자리**다. 막대 끝에 붙이면 막대가 긴 행에서 화면 밖으로 나간다.
-  const ml = 104, mr = 104, mt = 30, mb = 22;
+  // mt 는 머리글 **두 줄**(창 길이 · 지지/저항 요약) 자리다.
+  const ml = 104, mr = 104, mt = 46, mb = 22;
   const centerW = mobileChart ? 46 : 56;
   const sideW = (w - ml - mr - centerW) / 2;
   const avail = h - mt - mb;
@@ -3729,6 +3730,72 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   const leftEdge = ml + sideW, rightEdge = ml + sideW + centerW;
   let pocKey = null, pocVol = -1;
   rows.forEach((r, k) => { if (r[0] + r[1] > pocVol) { pocVol = r[0] + r[1]; pocKey = k; } });
+
+
+  // ── 지지/저항 구간 (2026-09-19 사용자 요청) ────────────────────────────
+  // ⭐부호 규약은 **능동 측**이다: 그 값에서 **순매수**한 쪽이 지지, **순매도**한 쪽이 저항.
+  //   「고래가 지지한다 = 고래가 거기서 샀다」는 사용자 표현을 그대로 따른다.
+  //   🔴수동 측 해석은 정반대라는 걸 알아 둘 것 -- 공격적 매도가 몰린 값은 «누군가 받아냈다»
+  //   는 뜻이라 그 관점에선 지지다. 한 화면에 두 규약을 섞지 않으려고 벽 쪽 툴팁에서
+  //   지지/저항 단정을 뺐다(벽은 «몰렸다»는 사실만 말한다).
+  //
+  // 구간 정의: **고정폭 띠를 미끄러뜨려 순수급이 가장 큰 자리**. 처음엔 최대합 연속구간
+  // (Kadane)으로 잡았다가 버렸다 -- 2026-09-19 실측에서 36행 중 **18행**(화면 절반)을
+  // 먹었다. 합을 최대화하면 양수인 행을 전부 삼킨다. 고정폭이면 «레벨»이 된다.
+  // 폭은 행의 10% -- 실측에서 $2~3(가격의 0.1%)로, ETH 에서 레벨 하나 크기다.
+  const srW = Math.max(2, Math.round(keys.length * 0.1));
+  const srBand = (bi, si, sign) => {
+    let best = 0, at = -1;
+    for (let i = 0; i + srW <= keys.length; i++) {
+      let s = 0;
+      for (let j = i; j < i + srW; j++) {
+        const r = rows.get(keys[j]);
+        s += sign * (r[bi] - r[si]);
+      }
+      if (s > best) { best = s; at = i; }
+    }
+    if (at < 0) return null;
+    let vol = 0;
+    for (let j = at; j < at + srW; j++) {
+      const r = rows.get(keys[j]);
+      vol += r[bi] + r[si];
+    }
+    return { at, net: best, vol, share: vol > 0 ? best / vol : 0 };
+  };
+  // 🔴문턱을 두지 않는다. 벽에서 두 번 틀린 뒤 배운 것 -- 세기는 **숫자로 적고** 판단은
+  //   사람이 한다. 2026-09-19 실측 쏠림: 고래 지지 52% · 저항 20% · 리테일 지지 16% ·
+  //   저항 17%(각 그룹 전체 띠의 중앙값은 17% / 11%). 그룹마다 절대 수준이 달라서 한 값으로
+  //   자르면 리테일은 늘 숨고 고래만 남는다.
+  const srs = [
+    { b: srBand(2, 3, +1), name: "고래 지지", color: "var(--good)", dash: null, op: 0.9 },
+    { b: srBand(2, 3, -1), name: "고래 저항", color: "var(--bad)", dash: null, op: 0.9 },
+    { b: srBand(4, 5, +1), name: "리테일 지지", color: "var(--good)", dash: "5 3", op: 0.55 },
+    { b: srBand(4, 5, -1), name: "리테일 저항", color: "var(--bad)", dash: "5 3", op: 0.55 },
+  ].filter((x) => x.b && x.b.net > 0);
+
+  srs.forEach((x) => {
+    const y0 = mt + x.b.at * rowPx, hgt = srW * rowPx;
+    const band = document.createElementNS(NS, "rect");
+    band.setAttribute("x", ml); band.setAttribute("y", y0);
+    band.setAttribute("width", w - ml - mr); band.setAttribute("height", hgt);
+    band.setAttribute("fill", x.color);
+    band.setAttribute("fill-opacity", x.dash ? "0.05" : "0.09");
+    svg.appendChild(band);
+    const mid = document.createElementNS(NS, "line");
+    mid.setAttribute("x1", ml); mid.setAttribute("x2", w - mr);
+    mid.setAttribute("y1", y0 + hgt / 2); mid.setAttribute("y2", y0 + hgt / 2);
+    mid.setAttribute("stroke", x.color); mid.setAttribute("stroke-width", x.dash ? 1.2 : 1.8);
+    mid.setAttribute("stroke-opacity", x.op);
+    if (x.dash) mid.setAttribute("stroke-dasharray", x.dash);
+    const tip = document.createElementNS(NS, "title");
+    tip.textContent = x.name + " " + (keys[x.b.at + srW - 1] * rowSize).toFixed(1) + "~"
+      + (keys[x.b.at] * rowSize).toFixed(1) + " · 순"
+      + (x.name.includes("지지") ? "매수" : "매도") + " " + x.b.net.toFixed(1) + " ETH"
+      + " (이 띠 거래량의 " + Math.round(x.b.share * 100) + "%)\n"
+      + "그 값에서 이 쪽이 «사는» 힘이 더 셌다는 뜻이다 -- 호가에 걸린 물량이 아니라 체결이다.";
+    mid.appendChild(tip);
+    svg.appendChild(mid);
+  });
 
   // 안쪽부터 고래 · 중형 · 리테일. 농담이 곧 크기 계단이다.
   const SEG_OPACITY = [0.95, 0.55, 0.28];
@@ -3871,9 +3938,9 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
       + x.w.qty.toFixed(1) + " ETH)가 이 한 행에 있다. "
       + "고르게 퍼졌을 때(" + (100 / keys.length).toFixed(1) + "%)의 "
       + x.w.mult.toFixed(1) + "배다.\n"
-      + (x.side === "sell"
-         ? "여기서 누군가 그 물량을 받아냈다는 뜻이라 지지 후보다."
-         : "여기서 누군가 그 물량을 넘겼다는 뜻이라 저항 후보다.") + "\n"
+      + "⚠️«몰렸다»는 사실만 말한다 -- 지지/저항 판정은 머리글의 구간(순수급 기준)이 한다.\n"
+      + "  같은 값을 두 규약으로 읽을 수 있어서다: 공격적 매도가 몰린 값은 «누군가 받아냈다»로\n"
+      + "  보면 지지지만, «고래가 팔았다»로 보면 저항이다. 한 화면에 둘을 섞지 않는다.\n"
       + "⚠️체결이 몰린 자리이지 호가창에 걸린 대기 물량이 아니다.";
     t.appendChild(tip);
     svg.appendChild(t);
@@ -3900,13 +3967,21 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     svg.appendChild(t);
     lx += 13 + (name.length + range.length) * 6.2 + 16;
   });
+  const sr2 = document.createElementNS(NS, "text");
+  sr2.setAttribute("x", ml); sr2.setAttribute("y", 30);
+  sr2.setAttribute("font-size", "9.5"); sr2.setAttribute("fill", "var(--muted)");
+  sr2.textContent = srs.length
+    ? srs.map((x) => x.name + " " + (keys[x.b.at + srW - 1] * rowSize).toFixed(1) + "~"
+        + (keys[x.b.at] * rowSize).toFixed(1) + " (" + Math.round(x.b.share * 100) + "%)").join("   ·   ")
+    : "지지/저항 구간 계산 중";
+  svg.appendChild(sr2);
+
   const foot = document.createElementNS(NS, "text");
   foot.setAttribute("x", w - mr); foot.setAttribute("y", h - 6);
   foot.setAttribute("text-anchor", "end");
   foot.setAttribute("font-size", "9"); foot.setAttribute("fill", "var(--muted)");
-  foot.textContent = walls.length
-    ? "← 공격적 매도  ·  양끝 이름표 = 체결이 몰린 «벽»  ·  공격적 매수 →"
-    : "← 공격적 매도  ·  가운데부터 큰 체결 순  ·  공격적 매수 →";
+  foot.textContent = "← 공격적 매도  ·  양끝 = 체결이 몰린 «벽»  ·  가로 띠 = 순수급 지지/저항"
+    + "  ·  공격적 매수 →";
   svg.appendChild(foot);
 }
 
