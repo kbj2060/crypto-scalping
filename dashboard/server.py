@@ -1981,7 +1981,13 @@ def make_app() -> web.Application:
                 sec_cell[side] += qty
         if agg:
             footprint_state["agg_bars"].add(bar)
-        footprint_state["updated"] = time.time()
+        # 🔴`now` 는 아래 스냅샷 저장 조건이 쓴다. 2026-09-19 리팩터에서 이 줄을 지웠다가
+        #   **ready 가 되는 순간 모든 체결이 NameError** 로 터졌다(단락평가 때문에 ready
+        #   이전에는 조용했다). 결과: WS 루프가 크래시->재연결->백필을 무한 반복해 실시간
+        #   누적이 아예 안 됐고 REST 를 계속 때렸다. 한 줄이 지워진 걸 테스트가 못 잡은 건
+        #   이 경로에 «ready 이후 체결» 을 태우는 시험이 없었기 때문이다.
+        now = time.time()
+        footprint_state["updated"] = now
         # ⚠️ready 일 때만 저장한다. 백필이 **진행 중인 봉**을 저장하면, 다음 판이 그걸 «이미 있는
         # 봉»으로 보고 건너뛰어 반쪽짜리로 굳는다(2026-09-15 시험에서 한 봉이 -83.7% 로 남았다).
         # 저장된 스냅샷의 계약은 «last_ms 까지 공백이 없다» 이고, 그 보증이 곧 ready 다.
