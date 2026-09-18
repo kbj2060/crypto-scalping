@@ -116,10 +116,38 @@ def test_sweep_is_one_whale_not_many_minnows() -> None:
     assert a_row[12] == 1, ("고래 «건수»는 25가 아니라 1이다", a_row)
 
 
+def test_counts_close_under_subtraction() -> None:
+    """건수 뺄셈이 «주문 단위 안에서» 닫히는가 — 2026-09-19 에 세 번 걸려 닫은 자리.
+
+    `buy_n`(개별 체결)과 `*_n`(테이커 주문)은 단위가 달라 **서로 빼면 안 된다**. 대신
+    주문 단위 안에서는 중형이 정확히 뺄셈으로 나와야 한다.
+    """
+    price = 2500.0
+    buf = TapeBuffer(0.1)
+    plan = [(1_000, "retail"), (50_000, "mid"), (60_000, "mid"), (200_000, "whale")]
+    for notional, _want in plan:
+        buf.add_order(1_000_000, price, notional / price, sell=False)
+        # 같은 주문이 체결 3건으로 쪼개져 들어왔다고 치자 -- 체결 건수는 주문 수와 달라진다.
+        for _ in range(3):
+            buf.add(1_000_000, price, notional / price / 3, sell=False)
+    buf.add(1_001_000, price, 0.001, sell=False)
+    row = buf.take_closed()[0]
+
+    fills_n, orders_n = row[4], row[16]
+    retail_n, whale_n = row[14], row[12]
+    assert orders_n == 4, ("주문 4건", row)
+    assert fills_n == 12, ("체결 12건 -- 주문 수와 다르다", row)
+    assert retail_n == 1 and whale_n == 1, (retail_n, whale_n)
+    assert orders_n - retail_n - whale_n == 2, ("중형 주문 2건이 뺄셈으로 나와야 한다", row)
+    # 쓸어담기 깊이: 주문 하나가 평균 몇 체결로 갈렸나.
+    assert fills_n / orders_n == 3.0
+
+
 if __name__ == "__main__":
     test_one_definition_of_whale()
     test_boundaries_belong_to_the_right_side()
     test_buffer_matches_that_classification()
     test_cell_algebra_and_signs()
     test_sweep_is_one_whale_not_many_minnows()
-    print("ok — 단일 경계 · 부등호 방향 · 버퍼 대조 · 셀 대수 · 쓸어담기 되묶기 5건 통과")
+    test_counts_close_under_subtraction()
+    print("ok — 단일 경계 · 부등호 · 버퍼 대조 · 셀 대수 · 되묶기 · 건수 뺄셈 6건 통과")
