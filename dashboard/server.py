@@ -1151,119 +1151,9 @@ def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
 
 
 
-# ── Zeus 섀도우 (2026-09-18) — 🔴주문을 내지 않는 기록 장치다 ────────────────────────
-# 사양 docs/zeus/README.md §2(v3)·§3(v4) · 판정 docs/zeus/shadow_prereg_v4_20260918.md
-# 🔴사전등록: **체결 436건 전까지 수익 중간 판정을 하지 않는다**(0.8~2.2건/일에서 MDE 가
-#   기대 엣지보다 크다). 이 카드는 «진행률과 건전성»을 보여줄 뿐 승패를 말하지 않는다.
-ZEUS_SHADOWS = (("v4", "zeus_v4_shadow_20260918"), ("v3", "zeus_v3_shadow_20260918"))
-ZEUS_TARGET_FILLS = 436
-ZEUS_MAX_AGE_MIN = 20.0        # 5분봉 4주기. 러너는 2분 주기로 돈다.
-
-
-_ZEUS_CACHE: dict[str, tuple[tuple[int, int], list[dict]]] = {}
-
-
-def _zeus_rows(path: Path) -> list[dict]:
-    """원장을 mtime/크기 키로 캐시한다. 🔴요청 경로에서 매번 2MB 를 다시 파싱하지 않는다
-    (2026-09-10 요청 경로 계산이 실장애를 냈던 전례)."""
-    try:
-        sig = (int(path.stat().st_mtime_ns), int(path.stat().st_size))
-    except OSError:
-        return []
-    hit = _ZEUS_CACHE.get(str(path))
-    if hit and hit[0] == sig:
-        return hit[1]
-    rows = parse_jsonl(path)
-    _ZEUS_CACHE[str(path)] = (sig, rows)
-    return rows
-
-
-def _zeus_perf(ex: list[dict]) -> dict[str, Any]:
-    """⭐평균만 내지 않는다 -- 중앙·승률·양수일·«최고 1일 제거»를 같이 낸다(저장소 규약).
-    승률 38%·중앙 −70bp 인 배리어 전략은 평균이 소수 TP 에 실리기 때문이다."""
-    bps = [float(r["bp"]) for r in ex if isinstance(r.get("bp"), (int, float))]
-    if not bps:
-        return {"n": 0}
-    days: dict[str, float] = {}
-    for r in ex:
-        d = str(r.get("t") or "")[:10]
-        days[d] = days.get(d, 0.0) + float(r.get("bp") or 0.0)
-    worst_keep = list(bps)
-    if days:
-        top = max(days, key=lambda k: days[k])
-        worst_keep = [float(r["bp"]) for r in ex if str(r.get("t") or "")[:10] != top]
-    span = 0.0
-    if len(ex) > 1:
-        try:
-            span = (pd.Timestamp(ex[-1]["t"]) - pd.Timestamp(ex[0]["t"])).total_seconds() / 86400.0 + 1
-        except Exception:  # noqa: BLE001
-            span = 0.0
-    return {
-        "n": len(bps), "mean_bp": sum(bps) / len(bps),
-        "median_bp": float(statistics.median(bps)),
-        "win_rate": sum(1 for b in bps if b > 0) / len(bps),
-        "positive_day_rate": (sum(1 for v in days.values() if v > 0) / len(days)) if days else None,
-        "mean_bp_drop_top_day": (sum(worst_keep) / len(worst_keep)) if worst_keep else None,
-        "fills_per_day": (len(bps) / span) if span > 0 else None,
-        "span_days": span or None,
-    }
-
-
-def _zeus_one(tag: str, dirname: str) -> dict[str, Any]:
-    base = LIVE_DIR / dirname
-    st = load_json(base / "state.json")
-    rows = _zeus_rows(base / "ledger.jsonl")
-    # ⭐백필(`bf`)은 «뺀다» -- 게이트 버퍼(1,000 후보 ≈ 4일)를 채우려면 과거를 따라잡아야
-    #   하지만 사전등록 표본은 «켠 시점부터»다. 섞으면 표본이 무효다.
-    ex = [r for r in rows if r.get("ev") == "exit" and not r.get("bf")]
-    bps = [float(r["bp"]) for r in ex if isinstance(r.get("bp"), (int, float))]
-    cand = [r for r in rows if r.get("ev") == "cand" and not r.get("bf")]
-    out: dict[str, Any] = {"tag": tag, "n": len(bps), "target_n": ZEUS_TARGET_FILLS,
-                           "n_backfill": sum(1 for r in rows if r.get("ev") == "exit" and r.get("bf"))}
-    # 승격 관문 상태 -- 「왜 주문이 안 나가는가」가 화면에서 바로 읽혀야 한다.
-    man = load_json(base / "execution_promotion_manifest.json")
-    if isinstance(man, dict):
-        out["promotion_eligible"] = bool(man.get("promotion_eligible"))
-        out["promotion_blockers"] = list(man.get("promotion_blockers") or [])
-        ss = man.get("selection_statistics") or {}
-        out["dsr"] = ss.get("deflated_sharpe_ratio")
-        out["pbo"] = ss.get("probability_backtest_overfit")
-    if isinstance(st, dict):
-        out["last_bar_utc"] = st.get("last_ts")
-        out["age_min"] = utc_age_minutes(st.get("last_ts"))
-        out["in_position"] = bool(st.get("pos"))
-        out["gate_buffer"] = len(st.get("buf") or [])
-    if cand:
-        out["reject_rate"] = 1.0 - (sum(1 for r in cand if r.get("fired")) / len(cand))
-    if bps:
-        mean = sum(bps) / len(bps)
-        se = (statistics.variance(bps) / len(bps)) ** 0.5 if len(bps) > 1 else float("nan")
-        out.update({"mean_bp": mean, "total_bp": sum(bps),
-                    "se_bp": se if se == se else None,
-                    "win_rate": sum(1 for b in bps if b > 0) / len(bps)})
-        span = utc_age_minutes(ex[0].get("t"))
-        if span and span > 0:
-            out["fills_per_day"] = len(bps) / (span / 1440.0)
-    out["live"] = _zeus_perf(ex)
-    # 🔴«참고»다. 백필은 과거를 따라잡으며 만든 것이라 **사전등록 표본이 아니다.**
-    #   그래도 지금 가진 유일한 성과 정보이므로 «참고»라고 못박아 보여준다.
-    out["reference_backfill"] = _zeus_perf(
-        [r for r in rows if r.get("ev") == "exit" and r.get("bf")])
-    return out
-
-
-def zeus_shadow_payload() -> dict[str, Any]:
-    """파일 두 개를 읽는 것이 전부다(요청 경로 계산 금지, 2026-09-10 실장애)."""
-    rows = []
-    for tag, dirname in ZEUS_SHADOWS:
-        try:
-            rows.append(_zeus_one(tag, dirname))
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            rows.append({"tag": tag, "error": type(exc).__name__})
-    return {"available": any(r.get("n") is not None for r in rows), "rows": rows,
-            "max_age_min": ZEUS_MAX_AGE_MIN, "orders": "NONE"}
-
-
+# 2026-09-19 Zeus 섀도우 페이로드·엔드포인트 제거(사용자 지시로 대시보드 카드 삭제).
+# 러너 v3/v4 는 같은 날 다른 세션이 정지시켰고 감시표 줄도 함께 뺐다 -- 카드를 지우면 이
+# API 는 소비자가 없다. 원장 파일(data/live/zeus_v*_shadow_*)과 연구 문서는 그대로 둔다.
 def position_sizing_payload() -> dict[str, Any]:
     """크기 가늠자 상태. **계좌 포지션과의 결합은 프런트가 한다** -- 프런트는 이미
     `/api/binance-account` 를 들고 있어(app.js latestBinanceAccount) 서버에 비동기 의존을
@@ -2850,9 +2740,6 @@ def make_app() -> web.Application:
     async def api_vol_forecast(request: web.Request) -> web.Response:
         return web.json_response(await load_vol_forecast())
 
-    async def api_zeus_shadow(request: web.Request) -> web.Response:
-        return web.json_response(await asyncio.to_thread(zeus_shadow_payload), headers=NOCACHE)
-
     async def api_breakout_detector(request: web.Request) -> web.Response:
         return web.json_response(await load_breakout_detector(),
                                  headers=NOCACHE)
@@ -3671,7 +3558,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
     app.router.add_get("/api/evr-gate", api_evr_gate)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
-    app.router.add_get("/api/zeus-shadow", api_zeus_shadow)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)

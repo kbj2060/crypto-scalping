@@ -192,11 +192,6 @@ let latestEvrGate = null;
 let evrGateLastFetchAt = 0;
 const API_EVR_GATE_URL = "/api/evr-gate";
 const EVR_GATE_POLL_MS = 120000;
-// Zeus 섀도우(2026-09-18). 🔴주문을 내지 않는 기록 장치다.
-let latestZeusShadow = null;
-let zeusShadowLastFetchAt = 0;
-const API_ZEUS_SHADOW_URL = "/api/zeus-shadow";
-const ZEUS_SHADOW_POLL_MS = 120000;
 let vReboundLastFetchAt = 0;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
@@ -2644,100 +2639,6 @@ function breakoutPrewarnIndicatorItem() {
     history: w.history || [], times: w.times || [] };
 }
 
-// 🔴사전등록(docs/zeus/shadow_prereg_v4_20260918.md): **체결 436건 전까지 수익 판정을 하지
-// 않는다.** 0.8~2.2건/일에서는 MDE 가 기대 엣지보다 커서 «할 수 없다». 그래서 이 카드의 톤은
-// 손익이 아니라 **건전성**(신선도·빈도·진행률)으로 정한다 -- 색으로 승패를 말하지 않는다.
-function zeusShadowItems() {
-  const p = latestZeusShadow;
-  const rows = (p && Array.isArray(p.rows)) ? p.rows : [];
-  if (!rows.length) return [zeusShadowRow(null, "v4"), zeusShadowRow(null, "v3")];
-  return rows.map((r) => zeusShadowRow(r, r.tag));
-}
-
-
-function zeusShadowRow(r, tag) {
-  const p = latestZeusShadow;
-  const LABEL = { v4: "Zeus v4 (157열 · edge 게이트)", v3: "Zeus v3 (96열 · q 게이트 · 대조군)" };
-  const base = { key: `zeus_shadow_${tag}`, label: LABEL[tag] || `Zeus ${tag}`,
-                 derivedTag: "= 대시보드 자체계산",
-                 derivedTitle: "트레이딩 봇과 완전히 분리된 기록 장치입니다. 주문을 내지 않고, "
-                   + "5분봉마다 결정을 원장에 적기만 합니다. 사전 등록상 체결 436건 전까지 "
-                   + "손익을 판정하지 않습니다." };
-  if (!r || r.error || !p || p.error) {
-    return { ...base, tone: "neutral", subText: !p ? "웜업" : (r && r.error) || "데이터 없음",
-             history: [], times: [] };
-  }
-  const bp = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}bp`;
-  // ⭐평균만 쓰지 않는다 -- 중앙·승률·양수일·«최고 1일 제거»를 같이 낸다(저장소 규약).
-  //   승률 39%·중앙 −70bp 인 배리어 전략은 평균이 소수 TP 에 실린다.
-  const perf = (q, label) => {
-    if (!q || !q.n) return `${label}: 표본 없음`;
-    const b = [`${label}: ${q.n}건`];
-    if (q.fills_per_day != null) b.push(`${q.fills_per_day.toFixed(2)}건/일`);
-    b.push(`건당 ${bp(q.mean_bp)}`);
-    if (q.median_bp != null) b.push(`중앙 ${bp(q.median_bp)}`);
-    if (q.win_rate != null) b.push(`승률 ${(q.win_rate * 100).toFixed(0)}%`);
-    if (q.positive_day_rate != null) b.push(`양수일 ${(q.positive_day_rate * 100).toFixed(0)}%`);
-    if (q.mean_bp_drop_top_day != null) b.push(`최고1일 제거 ${bp(q.mean_bp_drop_top_day)}`);
-    if (q.span_days != null) b.push(`${q.span_days.toFixed(0)}일`);
-    return b.join(" · ");
-  };
-  const maxAge = Number(p.max_age_min) || 20;
-  const stale = r.age_min == null || r.age_min > maxAge;
-  const live = r.live || {};
-  const ref = r.reference_backfill || {};
-  const sub = [`표본 ${live.n || 0}/${r.target_n}`];
-  if (ref.n) sub.push(`참고 ${bp(ref.mean_bp)}`);
-  if (r.in_position) sub.push("보유");
-  if (stale) sub.push("정체");
-  const stateTitle = [
-    perf(live, "사전등록 표본"),
-    perf(ref, "🔸참고(백필)"),
-    r.reject_rate != null ? `거절률 ${(r.reject_rate * 100).toFixed(0)}% · 게이트 버퍼 ${r.gate_buffer || 0}` : "",
-    `마지막 봉 ${r.last_bar_utc || "-"}Z (${r.age_min == null ? "?" : r.age_min.toFixed(0)}분 전)`
-      + (r.in_position ? " · 포지션 보유 중" : " · 포지션 없음"),
-    r.promotion_eligible === false
-      ? `🔴승격 차단: ${(r.promotion_blockers || []).join(", ")}`
-        + (r.dsr != null ? ` (DSR ${Number(r.dsr).toFixed(3)} · PBO ${Number(r.pbo).toFixed(3)})` : "")
-      : (r.promotion_eligible === true ? "승격 자격 충족(임계값 재선언 이력은 매니페스트 참조)" : ""),
-    "",
-    "🔴주문을 내지 않습니다. 원장만 씁니다.",
-    `🔴체결 ${r.target_n}건 전까지 손익을 판정하지 않습니다 -- 이 빈도에서는 최소검출효과가 `
-      + "기대 엣지보다 커서 «판정할 수 없습니다».",
-    "🔸«참고(백필)»은 러너가 과거를 따라잡으며 만든 것이라 **사전등록 표본이 아닙니다.** "
-      + "지금 가진 유일한 성과 정보라 보여줄 뿐, 성과 근거로 인용하면 안 됩니다.",
-    "🔴«최고1일 제거»가 평균과 크게 다르면 그 이익은 하루에 실려 있다는 뜻입니다.",
-    stale ? `🔴원장이 ${maxAge}분 넘게 갱신되지 않았습니다 -- 러너를 확인하세요.` : "",
-  ].filter(Boolean).join("\n");
-  return { ...base, tone: stale ? "warn" : "neutral", subText: sub.join(" · "),
-           stateTitle, history: [], times: [] };
-}
-
-
-function zeusShadowSubtitle() {
-  const p = latestZeusShadow;
-  if (!p || p.error || !Array.isArray(p.rows) || !p.rows.length) return "불러오는 중…";
-  const n = p.rows.reduce((a, r) => a + ((r.live && r.live.n) || 0), 0);
-  const tgt = p.rows[0] && p.rows[0].target_n;
-  return `사전등록 표본 ${n}건${tgt ? ` / ${tgt}` : ""} · 주문 없음 · 436건 전까지 판정 없음`;
-}
-
-
-async function refreshZeusShadow() {
-  const now = Date.now();
-  if (now - zeusShadowLastFetchAt < ZEUS_SHADOW_POLL_MS) return;
-  zeusShadowLastFetchAt = now;
-  try {
-    const res = await fetch(API_ZEUS_SHADOW_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`zeus shadow ${res.status}`);
-    latestZeusShadow = await res.json();
-  } catch (error) {
-    console.error("Zeus shadow fetch error:", error);
-    latestZeusShadow = { error: "fetch_failed" };
-  }
-}
-
-
 async function refreshEvrGate() {
   const now = Date.now();
   if (now - evrGateLastFetchAt < EVR_GATE_POLL_MS) return;
@@ -3041,7 +2942,6 @@ function setupPageTabs() {
       extremeLastFetchAt = 0; refreshExtremeDetector();
       breakoutDetectorLastFetchAt = 0; refreshBreakoutDetector();
       evrGateLastFetchAt = 0; refreshEvrGate();
-      zeusShadowLastFetchAt = 0; refreshZeusShadow();
       volForecastLastFetchAt = 0; refreshVolForecast();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
@@ -3532,10 +3432,11 @@ function renderSupply1s() {
   //   (2026-09-19 실측: 캔들·프로파일 1318 vs 여기 1240). viewBox 를 부모에서 받아야
   //   세 차트의 그려지는 폭이 같아진다. 여백도 캔들 차트와 같은 값(45/112)을 쓴다.
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
-  const w = Math.max(parentW, 1200), h = 240, ml = 45, mr = 112, mt = 16, mb = 14;
+  // 2026-09-19 가격선 띠를 뺐다(사용자 지시) -- 바로 아래 풋프린트 캔들이 같은 가격을
+  // 이미 보여준다. 그만큼 높이를 돌려줘서 패널이 짧아지고 누적선이 커진다(240 -> 150).
+  const w = Math.max(parentW, 1200), h = 150, ml = 45, mr = 112, mt = 16, mb = 14;
   const cw = w - ml - mr;
-  const priceTop = mt, priceH = 86;
-  const flowTop = mt + priceH + 16, flowH = h - mb - flowTop;
+  const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
   //   바꾸는 순간 그림이 viewBox 밖으로 나간다 -- 좌표계와 뷰박스는 같이 움직여야 한다.
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
@@ -3586,26 +3487,6 @@ function renderSupply1s() {
     svg.appendChild(t);
   };
 
-  // 가격선. 체결이 없던 초는 직전 값을 잇는다(선을 끊으면 «가격이 사라진» 것처럼 보인다).
-  let last = 0;
-  const prices = secs.map((s) => {
-    const v = supply1s.get(s)[6];
-    if (v > 0) last = v;
-    return { s, p: last };
-  }).filter((r) => r.p > 0);
-  if (prices.length >= 2) {
-    const lo = Math.min(...prices.map((r) => r.p)), hi = Math.max(...prices.map((r) => r.p));
-    const span = Math.max(hi - lo, 1e-9);
-    const yP = (v) => priceTop + (1 - (v - lo) / span) * priceH;
-    line(pathOf(prices, (r) => yP(r.p)), "var(--accent)", 1.4, 0.9);
-    const lastY = yP(prices[prices.length - 1].p);
-    label(ml + cw + 5, lastY + 3, prices[prices.length - 1].p.toFixed(1), "var(--accent)");
-    // 고가/저가 라벨은 현재가 라벨과 겹칠 때 생략한다 -- 가격이 고가 근처면 두 글자가
-    // 그대로 포개져 둘 다 못 읽는다(2026-09-19 첫 렌더에서 실제로 그랬다).
-    if (Math.abs(lastY - (priceTop + 8)) > 12) label(ml + cw + 5, priceTop + 8, hi.toFixed(1), "var(--muted)");
-    if (Math.abs(lastY - (priceTop + priceH)) > 12) label(ml + cw + 5, priceTop + priceH, lo.toFixed(1), "var(--muted)");
-  }
-
   // 누적 순수급.
   let cw_ = 0, cr = 0;
   const whale = [], retail = [], ticks = [];
@@ -3625,9 +3506,9 @@ function renderSupply1s() {
   secs.forEach((s) => {
     if (prevSec !== null && s - prevSec > SUPPLY_1S_GAP_SEC) {
       const g = document.createElementNS(NS, "rect");
-      g.setAttribute("x", xAt(prevSec)); g.setAttribute("y", priceTop);
+      g.setAttribute("x", xAt(prevSec)); g.setAttribute("y", flowTop);
       g.setAttribute("width", Math.max(1, xAt(s) - xAt(prevSec)));
-      g.setAttribute("height", flowTop + flowH - priceTop);
+      g.setAttribute("height", flowH);
       g.setAttribute("fill", "var(--neutral)"); g.setAttribute("fill-opacity", "0.07");
       const t = document.createElementNS(NS, "title");
       t.textContent = "체결 기록 없음 " + (s - prevSec) + "초 -- 0이 아니라 «모름»이다";
@@ -5416,12 +5297,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       evrGateIndicatorItem(),                             // 2026-09-15 변동폭 게이트(24시간)
     ], "snapSpecializedSignalList", { forceMeter: true });
 
-    // 2026-09-18 Zeus 섀도우는 «지금 무슨 일이 일어나는가»가 아니라 «가상 매매 원장»이라
-    // 이벤트 트리거 목록에서 떼어 전용 패널에 둔다(사용자 지시).
-    renderModelIndicatorList(zeusShadowItems(), "snapZeusShadowList");
-    const zsub = el("zeusShadowSub");
-    if (zsub) zsub.textContent = zeusShadowSubtitle();
-
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
     renderModelIndicatorList([
       {
@@ -5472,7 +5347,6 @@ async function tick() {
       refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshBreakoutDetector();     // 2026-09-11 횡보→추세 전환
       refreshEvrGate();              // 2026-09-15 변동폭 게이트(20자산)
-      refreshZeusShadow();           // 2026-09-18 Zeus 섀도우(주문 없음)
       refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshVolLevel();             // 2026-09-14 사이징 모델 변동성 예측(4시간 수준)
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
