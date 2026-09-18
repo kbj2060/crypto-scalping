@@ -78,7 +78,7 @@ data/live/zeus_v4_shadow_20260918/{model.pt, meta.json}
 | 2 | **157열 계약** | ✅**증명됨.** 원천은 연구 프레임과 같은 경로(BV 패널 ETH·BTC + OI/LSR + 복구 펀딩 → `FeatureEngineer.process` → `_with_raw_state12` → balnobb 중앙값 채움). `--parity` 실측: 12,512봉 **표준화 평균차 0.0062 · 방향 일치율 100.00% · 점수 상관 1.0000**. 🔴봇의 `decision_feature_snapshot.jsonl` 은 **형성 중인 봉**이라 쓸 수 없다(실험 원문 §10) |
 | 3 | **롤링 임계값 상태** | ✅ `state.json` 에 버퍼·포지션·마지막 봉을 영속. 재시작 시 이어붙는다 |
 | 4 | **주문** | ✅ 없음. 원장 `ledger.jsonl` 에 `cand/entry/exit` 만 기록 |
-| 5 | 🔴**실시간성** | ⚠️**미해결.** BV 패널이 **하루 한 번**(UTC) 갱신되므로 러너는 최대 ~24h 지연이다. 사전등록 **C(집행 비용)** 는 이 상태로 못 잰다. 두 길: **(a)** 봇이 «완결봉» 피쳐 프레임을 파일로 쓰게 한다(라이브 경로 변경 — 승인 필요) **(b)** 러너가 REST 로 당일 klines·OI/LSR·펀딩을 직접 이어붙인다(바이낸스 가중치가 트레이딩 봇과 공유라 주의) |
+| 5 | **실시간성** | ✅**해결(사용자 결정: (b)).** 세 원천을 같은 스키마로 잇는다 — ①BV 패널(과거) ②`data.binance.vision` 일별(패널 끝~어제, 패널 빌더의 `day()` 를 **그대로 임포트**) ③REST(오늘). `--verify-rest` 실측: vision 288봉·REST 121봉에서 high/low/close/volume/trades/taker_buy_base/sum_open_interest **전부 완전일치 100.00%**. 실측 지연 **1~6분**(2분 주기) |
 
 ### 연기 시험 (성과 측정 아님 · 인용 금지)
 배리어 판정에는 라벨이 필요 없으므로 라벨이 끝나는 2026-08-19 «이후»도 채점된다.
@@ -94,3 +94,21 @@ python scripts/live_zeus_v4_shadow_runner_20260918.py --parity   # 프레임 동
 python scripts/live_zeus_v4_shadow_runner_20260918.py --once     # 새 봉만 채점(cron)
 python scripts/live_zeus_v4_shadow_runner_20260918.py --selfcheck # 배리어·게이트 자체점검
 ```
+
+## 10. 가동 상태 (2026-09-18 10:2x KST 시작)
+```
+호스트   dev (서버는 실거래 기기 -- CPU 작업은 dev 라는 상시 지시를 따른다)
+감시     data/live/zeus_v4_shadow_20260918/supervise.sh  (크래시 시 60초 뒤 재시작)
+러너     scripts/live_zeus_v4_shadow_runner_20260918.py --live --bars=20000 --sleep=120
+자원     ulimit -v 8GB · OMP 3스레드 · 실측 RSS ~1.16GB 안정
+산출     ledger.jsonl(cand/entry/exit) · state.json(게이트 버퍼·포지션) · rest_tail.parquet
+```
+🔴**주문을 내지 않는다.** 🔴`pkill -f` 로 죽이지 말 것 — 패턴이 감시 셸 자신도 잡는다.
+
+### 🔴가동 중 알려진 한계
+- **재부팅 생존 없음.** `@reboot`/systemd 등록은 하지 않았다(ops 변경이라 별도 승인 사항).
+- **러너는 데이터 구멍에서 «거부»한다**(중앙값으로 조용히 채우지 않는다). REST 메트릭이
+  41.7h 만 주므로 그 앞 구간의 vision 일별 파일이 늦게 올라오면 잠시 죽을 수 있고,
+  파일이 올라오면 감시가 재시작해 자가회복한다. `runner.log` 의 「러너 종료」 줄로 확인한다.
+- **바이낸스 가중치는 트레이딩 봇과 공유**(한도 2400/분). 러너는 헤더를 읽고 1,500 초과면
+  그 주기를 건너뛴다.
