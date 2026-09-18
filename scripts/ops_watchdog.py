@@ -435,8 +435,12 @@ def _check_duckdb_table_freshness_uncached(component: str, db_path: Path, table:
 # 사전등록 docs/zeus/shadow_prereg_v3_20260918.md. 수익은 체결 436건까지 «판정하지 않는다»
 # -- 0.8건/일에서 MDE 가 기대 엣지(+12.56bp)보다 커서 중간 판정이 불가능하기 때문이다.
 # 은퇴할 때는 러너 정지 + @reboot 제거 + 이 줄 삭제가 **한 쌍**이다(위 경고 참조).
+# 2026-09-18 추가 등재: Zeus Baseline v4(157열·edge 게이트). v3 과 **같은 러너**가 돌린다
+# (판본별 러너를 두면 한쪽만 고쳐진다 -- v3 전용 러너에 원천 병합 버그가 있어 최근 4일
+#  OI 결측 43.4% 였다). v4 는 2.17건/일이라 436건 판정 지평이 1.5년 -> 200일로 내려온다.
 SHADOW_RUNNERS: tuple[tuple[str, str], ...] = (
     ("zeus_v3_shadow", "zeus_v3_shadow_20260918/state.json"),
+    ("zeus_v4_shadow", "zeus_v4_shadow_20260918/state.json"),
 )
 
 

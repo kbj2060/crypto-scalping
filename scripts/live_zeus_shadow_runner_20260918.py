@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zeus Baseline v4 **섀도우 러너** — 주문을 내지 않는다. 원장만 쓴다. (2026-09-18)
+"""Zeus Baseline **섀도우 러너** (v3·v4 공용) — 주문을 내지 않는다. 원장만 쓴다. (2026-09-18)
 
 사양: `docs/zeus/README.md §3` · 판정 기준: `docs/zeus/shadow_prereg_v4_20260918.md`
 아티팩트: `data/live/zeus_v4_shadow_20260918/{model.pt,meta.json}` (파리티 최대편차 0.000e+00)
@@ -41,7 +41,13 @@ from retrain_clean_regime_hmm_raw_state12_20260517 import _with_raw_state12  # n
 from features.engineering import FeatureEngineer                            # noqa: E402
 from build_binance_vision_panel_20260915 import day as _vision_day          # noqa: E402
 
-ART = ROOT / "data/live/zeus_v4_shadow_20260918"
+# --art=<디렉터리명> : 어느 동결본을 돌릴지. v3·v4 가 **같은 코드**를 쓴다 --
+# 사양 차이(입력 열수·게이트 점수·q)는 전부 아티팩트의 model.pt/meta.json 이 들고 있다.
+# 🔴러너를 둘로 나누면 한쪽만 고쳐지는 사고가 난다(2026-09-18: 서버 v3 러너에 원천 병합
+#   버그가 있어 최근 4일 OI 결측 43.4% 였다). 한 파일로 유지한다.
+_ARTNAME = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--art=")),
+                "zeus_v4_shadow_20260918")
+ART = ROOT / "data/live" / _ARTNAME
 PANEL = ROOT / "data/binance_vision/panel"
 FUNDING = ROOT / "tmp/omega461_longwindow_20260917/funding_2021_2026.csv"
 BALNOBB = ROOT / "tmp/eth_regime_balnobb_20260910/model.joblib"
@@ -236,7 +242,7 @@ def _trim():
         _LIBC.malloc_trim(0)
 
 
-def scores(F: pd.DataFrame, models, scaler, base_cols, device, i0: int = 0):
+def scores(F: pd.DataFrame, models, scaler, base_cols, device, i0: int = 0, score: str = "edge"):
     """프레임 전체의 (방향, 점수)를 **한 번에** 낸다.
 
     ⭐봉마다 전체 프레임을 다시 변환하면 O(n²)이고, 배치로 내도 **행별 결과는 동일**하다 --
@@ -252,9 +258,12 @@ def scores(F: pd.DataFrame, models, scaler, base_cols, device, i0: int = 0):
     # 🔴피쳐는 프레임 «전체»로 만들어야 롤링이 맞지만, 추론은 필요한 행만 하면 된다.
     #   주기 루프에서 2만봉을 매번 6모델로 다시 미는 건 순수 낭비다(행별 결과는 동일).
     x = tabm._standardize_apply(tabm._base_input(f, base_cols), scaler)[i0:]
-    D, _Q = heads(models, x, device)
-    da = D.argmax(1)
-    return da, D[np.arange(len(D)), da] - D[:, 0]
+    D, Q = heads(models, x, device)
+    da = D.argmax(1); ar = np.arange(len(D))
+    if score == "q":                      # v3 동결본: 품질 머리의 «고른 방향» 확률
+        return da, np.where(da > 0, Q[ar, da], Q[:, 0])
+    assert score == "edge", f"모르는 게이트 점수: {score}"
+    return da, D[ar, da] - D[:, 0]        # v4 동결본: D[방향] − D[cash]
 
 
 def threshold(buf: list[float], q: float, window: int) -> float:
@@ -265,8 +274,12 @@ def threshold(buf: list[float], q: float, window: int) -> float:
     return float(np.quantile(v, q))
 
 
-def step(st: dict, row: dict, da: int, score: float, spec: dict, thr: float) -> list[dict]:
+def step(st: dict, row: dict, da: int, score: float, spec: dict, thr: float,
+         bf: bool = False) -> list[dict]:
     """한 봉 처리. 반환: 원장에 쓸 사건들. 배리어는 intrabar · SL 우선."""
+    # ⭐`bf`(backfill) = 실시간이 아니라 과거를 따라잡으며 만든 사건.
+    # 게이트 버퍼(1,000 후보 ≈ 4일)를 채우려면 백필이 필요하지만, **그 거래를 섀도우 표본으로
+    # 세면 안 된다** -- 사전등록 표본은 «켠 시점부터»다. 대시보드는 bf 를 빼고 센다.
     ev, ts = [], str(row["timestamp"])
     hi, lo, cl = float(row["high"]), float(row["low"]), float(row["close"])
     pos = st.get("pos")
@@ -278,18 +291,20 @@ def step(st: dict, row: dict, da: int, score: float, spec: dict, thr: float) -> 
         if hit_sl or hit_tp:                       # 🔴동시 접촉이면 SL 우선(연구와 동일)
             px, why = (sl, "SL") if hit_sl else (tp, "TP")
             ev.append({"t": ts, "ev": "exit", "why": why, "px": px, "side": sgn,
-                       "entry": e, "bars": int(pos["bars"]) + 1,
+                       "entry": e, "bars": int(pos["bars"]) + 1, "bf": bool(pos.get("bf")),
                        "bp": float(sgn * (px - e) / e * 1e4)})
             st["pos"] = None
+            st["n_closed"] = int(st.get("n_closed", 0)) + 1
             return ev                              # 청산 봉은 점유 -- 재진입은 다음 봉부터
         pos["bars"] = int(pos["bars"]) + 1
         return ev
     if da != 0:
         fired = bool(np.isfinite(thr) and score >= thr)
-        ev.append({"t": ts, "ev": "cand", "da": da, "score": score, "thr": thr, "fired": fired})
+        ev.append({"t": ts, "ev": "cand", "da": da, "score": score, "thr": thr,
+                   "fired": fired, "bf": bf})
         if fired:
-            st["pos"] = {"entry": cl, "side": 1 if da == 1 else -1, "bars": 0, "t": ts}
-            ev.append({"t": ts, "ev": "entry", "px": cl, "side": st["pos"]["side"]})
+            st["pos"] = {"entry": cl, "side": 1 if da == 1 else -1, "bars": 0, "t": ts, "bf": bf}
+            ev.append({"t": ts, "ev": "entry", "px": cl, "side": st["pos"]["side"], "bf": bf})
     return ev
 
 
@@ -336,6 +351,24 @@ def parity(models, scaler, base_cols, device, bars: int) -> int:
         "🔴파리티 실패 -- 섀도우를 켜면 «평가하지 않은 모델»을 재게 된다.")
     return 0 if ok else 1
 
+
+
+
+def _save_state(path: Path, st: dict, art: str, spec: dict) -> None:
+    """⭐`ops_watchdog.check_shadow_runner` 규약을 **러너가 따른다**(감시기를 고치지 않는다).
+    감시기는 `last_decided_bar_utc`(봉 결정이 멈춘 상태까지 잡는다)·`ledger`·`positions`·
+    `pending` 을 본다. 내부 키(`buf`/`pos`/`last_ts`)는 그대로 두고 규약 키를 «덧붙인다»."""
+    st.setdefault("started_utc", str(pd.Timestamp.utcnow().tz_localize(None)))
+    st["n_closed"] = int(st.get("n_closed", 0))
+    path.write_text(json.dumps({
+        **st,
+        "last_decided_bar_utc": st.get("last_ts"),
+        "ledger": [None] * st["n_closed"],        # 감시기는 len() 만 본다
+        "positions": [st["pos"]] if st.get("pos") else [],
+        "pending": [],
+        "rule": f"{art} TP{spec['tp']*100:g}/SL{spec['sl']*100:g} "
+                f"{spec.get('gate_score','q')} q{spec['rollq_q']} 1slot noorders",
+    }))
 
 
 def verify_rest(bars: int) -> int:
@@ -388,13 +421,14 @@ def run(argv=None) -> int:
     ap.add_argument("--verify-rest", action="store_true", help="라이브 원천이 패널과 같은 봉인지 증명")
     ap.add_argument("--live", action="store_true", help="패널 뒤에 vision 일별 + REST 오늘치를 잇는다")
     ap.add_argument("--bars", type=int, default=WARMUP_BARS)
+    ap.add_argument("--art", default=_ARTNAME, help="data/live 아래 동결본 디렉터리(모듈 로드 시 이미 반영)")
     a = ap.parse_args(argv)
     if a.verify_rest:
         return verify_rest(a.bars)
     dev = torch.device("cpu")
     models, scaler, base_cols, spec = load_art(dev)
-    log(f"v4 섀도우 · 입력 {len(base_cols)}+{len(tabm.POS_COLS)}열 · 모델 {len(models)}개 · "
-        f"q={spec['rollq_q']} 창 {spec['rollq_window']} · "
+    log(f"{_ARTNAME} · 입력 {len(base_cols)}+{len(tabm.POS_COLS)}열 · 모델 {len(models)}개 · "
+        f"점수 {spec.get('gate_score', 'q')} · q={spec['rollq_q']} 창 {spec['rollq_window']} · "
         f"TP{spec['tp']*100:g}%/SL{spec['sl']*100:g}% · 🔴주문 없음")
     if a.parity:
         return parity(models, scaler, base_cols, dev, a.bars)
@@ -405,16 +439,17 @@ def run(argv=None) -> int:
         F = build_frame(a.bars, live=a.live)
         last = pd.Timestamp(st["last_ts"]) if st.get("last_ts") else None
         i0 = max(300, int((F.timestamp <= last).sum())) if last is not None else 300
-        DA, SC = scores(F, models, scaler, base_cols, dev, i0)
+        DA, SC = scores(F, models, scaler, base_cols, dev, i0, spec.get("gate_score", "q"))
         for i in range(i0, len(F)):
             ts = F.timestamp.iloc[i]
             if last is not None and ts <= last:
                 continue
             da, score = int(DA[i - i0]), float(SC[i - i0])
             thr = threshold(st["buf"], float(spec["rollq_q"]), int(spec["rollq_window"]))
+            bf = (pd.Timestamp.utcnow().tz_localize(None) - ts) > pd.Timedelta("30min")
             ev = step(st, {"timestamp": str(ts), "high": float(F.high.iloc[i]),
                            "low": float(F.low.iloc[i]), "close": float(F.close.iloc[i])},
-                      da, score, spec, thr)
+                      da, score, spec, thr, bf)
             if da != 0:                            # ⭐임계값을 «쓴 뒤에» 넣는다(인과)
                 st["buf"].append(score)
                 st["buf"] = st["buf"][-int(spec["rollq_window"]) * 2:]
@@ -423,7 +458,7 @@ def run(argv=None) -> int:
                 with led.open("a") as f:
                     for e in ev:
                         f.write(json.dumps(e, ensure_ascii=False) + "\n")
-        sp.write_text(json.dumps(st))
+        _save_state(sp, st, _ARTNAME, spec)
         log(f"[{pd.Timestamp.utcnow():%Y-%m-%d %H:%M}Z] 마지막 봉 {st['last_ts']} · "
             f"버퍼 {len(st['buf'])} · 포지션 {'있음' if st['pos'] else '없음'}")
         _trim()
