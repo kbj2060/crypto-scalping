@@ -155,14 +155,18 @@ class TapeBuffer:
       4~5   매수최대 · 매도최대          (그 초의 가장 큰 체결 하나)
       6~7   리테일 매수량 · 매도량       (< RETAIL_MAX_USD)
       8~9   고래 매수량 · 매도량         (>= WHALE_MIN_USD)
-      10~11 고래 매수건수 · 매도건수     (「한 건이 만든 봉인가」를 뒤에서 물어보려고)
+      10~11 고래 매수건수 · 매도건수     ← **주문** 건수다
+      12~13 리테일 매수건수 · 매도건수   ← 같은 단위
 
-    중형($10k~$100k)은 칸을 따로 두지 않는다 -- **총량 - 리테일 - 고래**로 정확히 나온다.
-    안 쌓아도 되는 것을 안 쌓는 게 이 표의 규칙이다(그래서 건수도 고래 것만 남긴다).
+    ⚠️2~3 의 건수는 **개별 체결** 수이고, 10~13 의 건수는 **테이커 주문** 수다. 단위가 달라
+      서로 빼면 안 된다 -- 그래서 리테일 건수도 제 칸을 가진다(2026-09-19 추가. 처음엔 고래
+      것만 뒀는데, 그러면 「리테일 주문이 몇 건이었나」를 구할 방법이 아예 없었다).
+    중형($10k~$100k)은 **물량만** 뺄셈으로 나온다(총량 - 리테일 - 고래). **건수는 못 구한다**
+      -- 총 주문 건수를 안 쌓기 때문이다. 필요해지면 그때 칸을 하나 더 붙인다.
 
     DB 도 네트워크도 모른다 -- 그래서 --selftest 가 이 클래스만 찔러 볼 수 있다."""
 
-    WIDTH = 12
+    WIDTH = 14
 
     def __init__(self, bucket: float) -> None:
         self.bucket = bucket
@@ -194,6 +198,7 @@ class TapeBuffer:
         notional = price * qty
         if notional < RETAIL_MAX_USD:
             cell[6 + i] += qty
+            cell[12 + i] += 1
         elif notional >= WHALE_MIN_USD:
             cell[8 + i] += qty
             cell[10 + i] += 1
@@ -205,7 +210,8 @@ class TapeBuffer:
             del self.rows[(sec, b)]
         return sorted(
             (sec, b, c[0], c[1], int(c[2]), int(c[3]), c[4], c[5],
-             c[6], c[7], c[8], c[9], int(c[10]), int(c[11])) for sec, b, c in done)
+             c[6], c[7], c[8], c[9], int(c[10]), int(c[11]),
+             int(c[12]), int(c[13])) for sec, b, c in done)
 
 
 class TapeStore:
@@ -235,7 +241,8 @@ class TapeStore:
             # 「그때는 안 갈랐다」는 다른 말이고, 연구 쿼리가 그 둘을 구별할 수 있어야 한다.
             for col, typ in (("retail_buy_qty", "DOUBLE"), ("retail_sell_qty", "DOUBLE"),
                              ("whale_buy_qty", "DOUBLE"), ("whale_sell_qty", "DOUBLE"),
-                             ("whale_buy_n", "INTEGER"), ("whale_sell_n", "INTEGER")):
+                             ("whale_buy_n", "INTEGER"), ("whale_sell_n", "INTEGER"),
+                             ("retail_buy_n", "INTEGER"), ("retail_sell_n", "INTEGER")):
                 try:
                     con.execute(f"ALTER TABLE trade_tape_1s ADD COLUMN {col} {typ}")
                 except Exception:  # noqa: BLE001 -- 이미 있으면 그게 정상이다
@@ -276,7 +283,7 @@ class TapeStore:
         try:
             with self._connect() as con:
                 con.executemany(
-                    "INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                                 [(self.symbol, *r) for r in self.pending])
             self.pending.clear()
         except Exception as exc:  # noqa: BLE001 -- 락 충돌(읽는 쪽이 잡고 있음)이 대부분이다
@@ -432,10 +439,11 @@ def selftest() -> None:
     rows = buf.take_closed()
     assert [r[:2] for r in rows] == [(1000, 24400), (1000, 24404)], rows
     (sec, _bin, buy, sell, buy_n, sell_n, buy_max, sell_max,
-     r_buy, r_sell, w_buy, w_sell, w_buy_n, w_sell_n) = rows[0]
+     r_buy, r_sell, w_buy, w_sell, w_buy_n, w_sell_n, r_buy_n, r_sell_n) = rows[0]
     assert (buy, sell, buy_n, sell_n, buy_max, sell_max) == (1.5, 0.5, 1, 1, 1.5, 0.5), rows[0]
     # add() 는 총량/건수/최대만 센다 -- 크기 구간은 add_order() 몫이라 여기선 전부 0이다.
-    assert (r_buy, r_sell, w_buy, w_sell, w_buy_n, w_sell_n) == (0.0, 0.0, 0.0, 0.0, 0, 0), rows[0]
+    assert (r_buy, r_sell, w_buy, w_sell) == (0.0, 0.0, 0.0, 0.0), rows[0]
+    assert (w_buy_n, w_sell_n, r_buy_n, r_sell_n) == (0, 0, 0, 0), rows[0]
 
     # 크기 구간: 경계 **양쪽**을 찌른다. 부등호를 뒤집는 실수는 테스트가 아니면 안 보인다.
     sizes = TapeBuffer(0.1)
@@ -450,7 +458,8 @@ def selftest() -> None:
     row = sizes.take_closed()[0]
     total_buy, total_sell = row[2], row[3]
     assert (total_buy, total_sell) == (47.8, 40.0), row
-    assert (row[8], row[9]) == (3.9, 0.0), ("리테일", row)
+    assert (row[8], row[9]) == (3.9, 0.0), ("리테일 물량", row)
+    assert (row[14], row[15]) == (1, 0), ("리테일 건수", row)
     assert (row[10], row[11], row[12], row[13]) == (0.0, 40.0, 0, 1), ("고래", row)
     # 중형은 칸이 없다 -- 뺄셈으로 정확히 나와야 한다.
     assert round(total_buy - row[8] - row[10], 6) == 43.9, ("중형 매수", row)

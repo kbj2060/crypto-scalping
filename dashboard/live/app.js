@@ -156,15 +156,25 @@ const footprintShades = () =>
 //   $10k 를 고래라 하면 물량의 3/4이 고래고, $100k 위만 고래라 하고 나머지를 리테일이라
 //   부르면 그 «리테일»의 대부분이 실은 중형이다. 화면은 경계를 숫자로 적어야 한다.
 const API_SUPPLY_PROFILE_URL = "/api/supply-profile";
+// ── 수급 · 최근 5분 × 1초 (2026-09-19) ────────────────────────────────────
+// 서버가 초 단위 칸을 들고 있고, 여기선 **증분만** 받는다(?since=). 300초를 매초 전부 받으면
+// 시간당 60MB 가 넘는다 -- 증분이면 보통 한두 줄이다.
+// ⚠️서버는 **진행 중인 초를 안 보낸다**(반쪽이 굳는 걸 막으려고). 그래서 맨 오른쪽 막대는
+//   최대 2초 묵은 값이다. 그보다 더 당기려면 폴링이 아니라 SSE 여야 한다 -- 지금 필요 없다.
+const API_SUPPLY_1S_URL = "/api/supply-1s";
+const SUPPLY_1S_POLL_MS = 1000;
+const SUPPLY_1S_WINDOW = 300;           // 화면에 그리는 초 수(5분)
+let supply1s = new Map();               // 초 -> [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
+let supply1sMeta = { retailMaxUsd: 0, whaleMinUsd: 0, now: 0 };
+// 🔴`since` 는 «내가 **받은** 마지막 초»여야 한다. 서버가 보낸 `now`(진행 중인 초)를 그대로
+//   돌려주면 그 초는 영영 안 온다 -- 1차엔 「진행 중」이라 빠지고, 2차엔 「since 이하」라
+//   빠진다. 그러면 첫 응답 뒤 매 폴링이 빈 응답이 되어 **차트가 멈춘다**(2026-09-19 첫
+//   렌더에서 오른쪽에 공백 띠가 계속 자라는 걸로 드러났다).
+let supply1sSince = 0;
+let supply1sLastFetchAt = 0;
 const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
 let latestSupplyProfile = null;
 let supplyProfileLastFetchAt = 0;
-// 리본 한 줄이 차지하는 높이(위 고래 / 아래 리테일). 풋프린트 모드에서 청산 레인 자리를
-// 그대로 쓴다 -- 그 모드에서는 이미 청산밀도 히트맵을 끄고 있다(2026-09-15 «완전 교체»).
-const FLOW_ROW_GAP = 3;
-// 부호가 갈린 봉에만 주황 띠. 「둘 다 작은데 부호만 다른」 봉까지 칠하면 화면이 온통 주황이
-// 된다 -- 고래 쪽이 그 창 최대의 이만큼은 돼야 «괴리»라고 부른다.
-const FLOW_DIVERGENCE_MIN = 0.3;
 const API_EXTREME_URL = "/api/extreme-detector";
 // 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
 // 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
@@ -3373,6 +3383,34 @@ function ensurePriceWs() {
   }
 }
 
+async function refreshSupply1s() {
+  if (activePageTab !== "snapshot" || document.hidden) return;   // 안 보이는 걸 매초 받지 않는다
+  if (activeSnapshotAsset !== "eth") return;                     // 테이프는 ETH 만 수집한다
+  const now = Date.now();
+  if (now - supply1sLastFetchAt < SUPPLY_1S_POLL_MS) return;
+  supply1sLastFetchAt = now;
+  try {
+    const res = await fetch(`${API_SUPPLY_1S_URL}?since=${supply1sSince}`, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`supply-1s ${res.status}`);
+    const payload = await res.json();
+    (payload.seconds || []).forEach((r) => {
+      supply1s.set(r[0], r.slice(1));
+      if (r[0] > supply1sSince) supply1sSince = r[0];
+    });
+    supply1sMeta = {
+      retailMaxUsd: Number(payload.retailMaxUsd) || 0,
+      whaleMinUsd: Number(payload.whaleMinUsd) || 0,
+      now: Number(payload.now) || supply1sMeta.now,
+    };
+    // 창 밖은 버린다. 안 버리면 탭을 켜둔 채로 며칠이면 Map 이 수십만 칸이 된다.
+    const floor = supply1sMeta.now - SUPPLY_1S_WINDOW;
+    supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
+  } catch (error) {
+    console.error("Supply 1s fetch error:", error);
+  }
+  renderSupply1s();
+}
+
 async function refreshSupplyProfile() {
   if (chartMode !== "supply") return;          // 다른 모드를 보는 동안은 받을 이유가 없다
   if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
@@ -3441,19 +3479,9 @@ function fmtFootprintQty(v) {
 }
 
 
-// ── 수급 리본 (2026-09-19) ──────────────────────────────────────────────────
-// 캔들 바로 아래 두 줄. **위가 고래, 아래가 리테일**, 각자 0선에서 위(순매수)·아래(순매도)로
-// 뻗는다. 부호가 갈리는 봉에만 주황 띠를 깐다 -- 그게 이 화면이 존재하는 이유다(흡수/분산).
-//
-// ⚠️높이는 **로그**다(청산 레인과 같은 이유). 그리고 두 줄은 **각자의 최대로 정규화**한다.
-//   한 자로 그리면 둘 중 하나가 통째로 사라진다 --
-//   리테일 합계는 고래 합계보다 보통 몇 배 크다(고래는 상위 1% 체결뿐이다). 여기서 읽는 것은
-//   «어느 쪽이 큰가»가 아니라 «부호가 같은가»이고, 절대량은 패널 오른쪽 숫자가 말한다.
-// ⚠️2026-09-19 **정정**: 처음엔 「백필(aggTrades) 봉은 고래가 과장된다」고 적고 흐리게 그렸다.
-//   틀렸다. 크기 구간을 **테이커 주문** 단위로 맞추고 나니 방향이 반대다 -- aggTrades 한 줄이
-//   곧 주문 하나라 백필이 오히려 **정확**하고, 실시간은 `@trade` 를 (가격·방향·ms)로 되묶은
-//   **근사**다(같은 ms 에 같은 값을 친 서로 다른 테이커는 하나로 합쳐진다). 차이가 작고
-//   방향이 반대라 흐리게 그리는 것 자체를 그만뒀다 -- 잘못된 쪽을 흐리게 하고 있었다.
+// 한 봉(또는 한 초)의 수급을 셋으로 가른다. 2026-09-19 「수급 리본」(캔들 아래 두 줄)이
+// 여기 있었으나 사용자 지시로 걷어냈다 -- 보고 싶은 것은 5분봉이 아니라 **최근 5분을 1초
+// 해상도로** 보는 화면이다. 가르는 규칙 자체는 그대로 쓰이므로 이 함수만 남긴다.
 function supplyFlowOfBar(levels) {
   let buy = 0, sell = 0, wBuy = 0, wSell = 0, rBuy = 0, rSell = 0;
   (levels || []).forEach((l) => {
@@ -3466,132 +3494,161 @@ function supplyFlowOfBar(levels) {
            mid: (buy - wBuy - rBuy) - (sell - wSell - rSell) };
 }
 
-function drawSupplyRibbon(svg, NS, footprint, candles, xAt, bw, ml, cw, panelY, panelH) {
-  const flows = candles.map((c) => Object.assign(
-    supplyFlowOfBar(footprint.byTime.get(c.time)), { agg: footprint.aggTimes.has(c.time) }));
-  // 줄 이름 옆에 경계를 붙인다. 「고래」라는 말만으로는 무슨 뜻인지 아무도 모른다.
-  const whaleTag = footprint.whaleMinUsd > 0
-    ? "≥$" + Math.round(footprint.whaleMinUsd / 1000) + "k" : "";
-  const retailTag = footprint.retailMaxUsd > 0
-    ? "<$" + Math.round(footprint.retailMaxUsd / 1000) + "k" : "";
-  const rowH = (panelH - FLOW_ROW_GAP) / 2;
-  const half = Math.max(3, rowH / 2 - 1);
-  const rows = [
-    { mid: panelY + rowH / 2, label: "고래", sub: whaleTag,
-      max: Math.max(...flows.map((f) => Math.abs(f.whale)), 1e-9), pick: (f) => f.whale, op: 0.95 },
-    { mid: panelY + rowH + FLOW_ROW_GAP + rowH / 2, label: "리테일", sub: retailTag,
-      max: Math.max(...flows.map((f) => Math.abs(f.retail)), 1e-9), pick: (f) => f.retail, op: 0.45 },
-  ];
 
-  const top = document.createElementNS(NS, "line");
-  top.setAttribute("x1", ml); top.setAttribute("x2", ml + cw);
-  top.setAttribute("y1", panelY); top.setAttribute("y2", panelY);
-  top.setAttribute("stroke", "var(--soft-line)");
-  svg.appendChild(top);
+// ── 수급 · 최근 5분 x 1초 (2026-09-19) ─────────────────────────────────────
+// 위는 가격선, 아래는 **누적 순수급** 두 선(고래 · 리테일). 창 시작을 0으로 두고 매초 더한다.
+//
+// 왜 «초별 막대»가 아니라 «누적 선»인가: 1초 순수급은 거의 스파이크라(고래는 분당 13건)
+// 300칸 막대로 그리면 잡음만 보이고 «누가 사고 있나»가 안 읽힌다. 누적은 기울기가 곧
+// 방향이고, 두 선이 벌어지는 순간이 그대로 눈에 띈다(고래 내려가고 리테일 올라가면 분산).
+// 대신 «언제 고래가 왔나»를 잃으므로 고래 주문이 있던 초에만 아래쪽에 눈금을 찍는다.
+//
+// 두 선은 **같은 자로 그린다**. 단위가 같은 ETH 순수급이고, 여기서 읽는 것은 부호만이 아니라
+// «누가 더 많이 샀나»이기도 하다(5분봉 리본에서 줄마다 정규화했던 것과 반대 선택이다 --
+// 그건 봉마다 최대가 달라 비교 자체가 성립하지 않았다).
+function renderSupply1s() {
+  const svg = el("supply1sSvg");
+  if (!svg) return;
+  const NS = "http://www.w3.org/2000/svg";
+  const w = 1200, h = 240, ml = 10, mr = 74, mt = 16, mb = 14;
+  const cw = w - ml - mr;
+  const priceTop = mt, priceH = 86;
+  const flowTop = mt + priceH + 16, flowH = h - mb - flowTop;
+  svg.innerHTML = "";
 
-  // 괴리 띠를 **먼저** 깐다(막대가 그 위에 올라온다).
-  const whaleMax = rows[0].max;
-  flows.forEach((f, i) => {
-    if (f.whale === 0 || f.retail === 0) return;
-    if ((f.whale > 0) === (f.retail > 0)) return;
-    if (Math.abs(f.whale) < FLOW_DIVERGENCE_MIN * whaleMax) return;
-    // 🔴틴트만 깔았더니(2026-09-19 합성 입력 확인) 빨간 고래 막대와 섞여 «붉은 기» 로만
-    //   읽혔다. 주황 **표식**을 박는다 -- 틴트는 배경이고, 판정은 이 2px 선이 한다.
-    // 🔴그 표식을 패널 «위» 모서리에 뒀더니 이번엔 지지/저항 가격선이 정확히 그 자리를 지나
-    //   가려버렸다(같은 날 두 번째 렌더). 두 줄 **사이의 틈**은 구조적으로 늘 비어 있다 --
-    //   막대는 각자 0선에서 바깥으로만 자라기 때문이다. 표식의 자리는 거기다.
-    const band = document.createElementNS(NS, "rect");
-    band.setAttribute("x", xAt(i) - 1); band.setAttribute("y", panelY + 1);
-    band.setAttribute("width", bw + 2); band.setAttribute("height", panelH - 2);
-    band.setAttribute("fill", "var(--warn)"); band.setAttribute("fill-opacity", "0.1");
-    svg.appendChild(band);
-    const cap = document.createElementNS(NS, "rect");
-    cap.setAttribute("x", xAt(i) - 1); cap.setAttribute("y", panelY + rowH + 0.5);
-    cap.setAttribute("width", bw + 2); cap.setAttribute("height", 2);
-    cap.setAttribute("fill", "var(--warn)");
-    const capTip = document.createElementNS(NS, "title");
-    capTip.textContent = f.whale > 0
-      ? "괴리 — 고래 매수 × 리테일 매도(흡수)"
-      : "괴리 — 고래 매도 × 리테일 매수(분산)";
-    cap.appendChild(capTip);
-    svg.appendChild(cap);
-  });
-
-  rows.forEach((row) => {
-    const zero = document.createElementNS(NS, "line");
-    zero.setAttribute("x1", ml); zero.setAttribute("x2", ml + cw);
-    zero.setAttribute("y1", row.mid); zero.setAttribute("y2", row.mid);
-    zero.setAttribute("stroke", "var(--line)");
-    svg.appendChild(zero);
-
-    const tag = document.createElementNS(NS, "text");
-    tag.setAttribute("x", ml - 5); tag.setAttribute("y", row.mid + 1);
-    tag.setAttribute("text-anchor", "end"); tag.setAttribute("font-size", "8");
-    tag.setAttribute("fill", "var(--muted)");
-    tag.textContent = row.label;
-    svg.appendChild(tag);
-    if (row.sub) {
-      const sub = document.createElementNS(NS, "text");
-      sub.setAttribute("x", ml - 5); sub.setAttribute("y", row.mid + 9);
-      sub.setAttribute("text-anchor", "end"); sub.setAttribute("font-size", "7");
-      sub.setAttribute("fill", "var(--muted)"); sub.setAttribute("fill-opacity", "0.7");
-      sub.textContent = row.sub;
-      svg.appendChild(sub);
-    }
-
-    flows.forEach((f, i) => {
-      const v = row.pick(f);
-      if (!v) return;
-      // 🔴로그 스케일이다. 선형으로 그렸더니(2026-09-19 첫 렌더) 창 안에 큰 봉이 하나만 있으면
-      //   **나머지 네 봉이 전부 1px** 로 뭉갰다. 봉별 순수급은 꼬리가 두꺼워서(고래 한 건이
-      //   그 봉을 혼자 만든다) 청산 레인과 같은 문제이고, 그래서 같은 해법을 쓴다.
-      const hgt = Math.max(1, half * Math.log1p(Math.abs(v)) / Math.log1p(row.max));
-      const bar = document.createElementNS(NS, "rect");
-      bar.setAttribute("x", xAt(i)); bar.setAttribute("width", bw);
-      bar.setAttribute("y", v > 0 ? row.mid - hgt : row.mid);
-      bar.setAttribute("height", hgt);
-      bar.setAttribute("fill", v > 0 ? "var(--good)" : "var(--bad)");
-      bar.setAttribute("fill-opacity", row.op);
-      const title = document.createElementNS(NS, "title");
-      title.textContent = row.label + " 순수급 " + (v > 0 ? "+" : "") + v.toFixed(1) + " ETH"
-        + (f.agg ? " · 집계 체결(aggTrades)로 메운 봉 -- 주문 단위가 정확한 쪽이다" : "");
-      bar.appendChild(title);
-      svg.appendChild(bar);
-    });
-  });
-
-  // «지금» 숫자와 기준을 **오른쪽 여백 한 곳**에 모은다. 2026-09-19 첫 렌더에서 기준 줄을
-  // 패널 왼쪽 위에 뒀다가 「체결 테이프 수집 중 N/12봉」 경고와 글자가 겹쳤다 -- 그 자리는
-  // 이미 임자가 있다. 리본은 모양을, 이 숫자들은 크기를 말한다.
-  const last = flows[flows.length - 1];
-  const rightText = (y, text, tip) => {
+  const now = supply1sMeta.now || 0;
+  const first = now - SUPPLY_1S_WINDOW;
+  const secs = [...supply1s.keys()].filter((s) => s > first && s <= now).sort((a, b) => a - b);
+  if (secs.length < 2) {
+    setT("supply1sSub", "체결 테이프 집계 중…");
     const txt = document.createElementNS(NS, "text");
-    txt.setAttribute("x", ml + cw + 4); txt.setAttribute("y", y);
-    txt.setAttribute("font-size", "9"); txt.setAttribute("fill", "var(--muted)");
-    txt.textContent = text;
-    if (tip) {
-      const title = document.createElementNS(NS, "title");
-      title.textContent = tip;
-      txt.appendChild(title);
-    }
+    txt.setAttribute("x", w / 2); txt.setAttribute("y", h / 2);
+    txt.setAttribute("text-anchor", "middle"); txt.setAttribute("fill", "var(--muted)");
+    txt.textContent = "체결 테이프 집계 중...";
     svg.appendChild(txt);
-  };
-  if (last) {
-    const signed = (v) => (v > 0 ? "+" : v < 0 ? "-" : "") + fmtFootprintQty(Math.abs(v));
-    rightText(rows[0].mid + 3, signed(last.whale), "이번 봉 고래 순수급(ETH)");
-    rightText(rows[1].mid + 3, signed(last.retail), "이번 봉 리테일 순수급(ETH)");
+    return;
   }
-  // 🔴두 줄의 합은 전체가 **아니다**. 중형($10k~$100k)이 물량의 절반 이상이라(실측 58.5%)
-  //   그 사실을 숨기면 리본이 조용히 거짓말을 한다. 줄로 그리지 않는 대신 숫자로 적는다.
-  if (last) {
-    const signed = (v) => (v > 0 ? "+" : v < 0 ? "-" : "") + fmtFootprintQty(Math.abs(v));
-    rightText(panelY + panelH + 9, "중형 " + signed(last.mid),
-      "중형($" + Math.round(footprint.retailMaxUsd / 1000) + "k~$"
-        + Math.round(footprint.whaleMinUsd / 1000) + "k) 순수급. 리본 두 줄에는 안 그린다 -- "
-        + "그려도 셋 다 얇아지기만 한다. 셋을 더하면 봉 전체 델타다.");
-  }
-}
 
+  const xAt = (s) => ml + ((s - first) / SUPPLY_1S_WINDOW) * cw;
+  // 🔴빈 구간을 직선으로 이으면 «그동안 아무 일도 없었다»로 읽힌다 -- 실제로는 «모른다»다
+  //   (수집기 재기동·WS 끊김·백필이 아직 안 닿은 구간). 2026-09-19 첫 렌더에서 실제로 긴
+  //   사선이 그어졌다. 초가 SUPPLY_1S_GAP_SEC 넘게 비면 선을 **끊는다**.
+  // 5초로 둔 이유: 폴링이 1초라 한두 번 늦는 건 일상이고, 그때마다 띠를 그리면 잡음이 된다.
+  // 5초가 비면 그건 폴링 지각이 아니라 실제 공백이다.
+  const SUPPLY_1S_GAP_SEC = 5;
+  const pathOf = (rows, yOf) => {
+    let d = "", prev = null;
+    rows.forEach((r) => {
+      const cmd = (prev === null || r.s - prev > SUPPLY_1S_GAP_SEC) ? "M" : "L";
+      d += (d ? " " : "") + cmd + xAt(r.s).toFixed(1) + " " + yOf(r).toFixed(1);
+      prev = r.s;
+    });
+    return d;
+  };
+  const line = (d, color, width, opacity) => {
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("d", d); path.setAttribute("fill", "none");
+    path.setAttribute("stroke", color); path.setAttribute("stroke-width", width);
+    path.setAttribute("stroke-opacity", opacity);
+    path.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(path);
+  };
+  const label = (x, y, text, color, anchor) => {
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("font-size", "10");
+    t.setAttribute("fill", color); if (anchor) t.setAttribute("text-anchor", anchor);
+    t.textContent = text;
+    svg.appendChild(t);
+  };
+
+  // 가격선. 체결이 없던 초는 직전 값을 잇는다(선을 끊으면 «가격이 사라진» 것처럼 보인다).
+  let last = 0;
+  const prices = secs.map((s) => {
+    const v = supply1s.get(s)[6];
+    if (v > 0) last = v;
+    return { s, p: last };
+  }).filter((r) => r.p > 0);
+  if (prices.length >= 2) {
+    const lo = Math.min(...prices.map((r) => r.p)), hi = Math.max(...prices.map((r) => r.p));
+    const span = Math.max(hi - lo, 1e-9);
+    const yP = (v) => priceTop + (1 - (v - lo) / span) * priceH;
+    line(pathOf(prices, (r) => yP(r.p)), "var(--accent)", 1.4, 0.9);
+    const lastY = yP(prices[prices.length - 1].p);
+    label(ml + cw + 5, lastY + 3, prices[prices.length - 1].p.toFixed(1), "var(--accent)");
+    // 고가/저가 라벨은 현재가 라벨과 겹칠 때 생략한다 -- 가격이 고가 근처면 두 글자가
+    // 그대로 포개져 둘 다 못 읽는다(2026-09-19 첫 렌더에서 실제로 그랬다).
+    if (Math.abs(lastY - (priceTop + 8)) > 12) label(ml + cw + 5, priceTop + 8, hi.toFixed(1), "var(--muted)");
+    if (Math.abs(lastY - (priceTop + priceH)) > 12) label(ml + cw + 5, priceTop + priceH, lo.toFixed(1), "var(--muted)");
+  }
+
+  // 누적 순수급.
+  let cw_ = 0, cr = 0;
+  const whale = [], retail = [], ticks = [];
+  secs.forEach((s) => {
+    const c = supply1s.get(s);
+    cw_ += c[2] - c[3];
+    cr += c[0] - c[1];
+    whale.push({ s, v: cw_ });
+    retail.push({ s, v: cr });
+    if (c[2] + c[3] > 0) ticks.push({ s, up: c[2] >= c[3] });
+  });
+  const span = Math.max(...whale.map((r) => Math.abs(r.v)), ...retail.map((r) => Math.abs(r.v)), 1e-9);
+  const mid = flowTop + flowH / 2;
+  const yF = (v) => mid - (v / span) * (flowH / 2 - 10);
+
+  let prevSec = null;
+  secs.forEach((s) => {
+    if (prevSec !== null && s - prevSec > SUPPLY_1S_GAP_SEC) {
+      const g = document.createElementNS(NS, "rect");
+      g.setAttribute("x", xAt(prevSec)); g.setAttribute("y", priceTop);
+      g.setAttribute("width", Math.max(1, xAt(s) - xAt(prevSec)));
+      g.setAttribute("height", flowTop + flowH - priceTop);
+      g.setAttribute("fill", "var(--neutral)"); g.setAttribute("fill-opacity", "0.07");
+      const t = document.createElementNS(NS, "title");
+      t.textContent = "체결 기록 없음 " + (s - prevSec) + "초 -- 0이 아니라 «모름»이다";
+      g.appendChild(t);
+      svg.appendChild(g);
+    }
+    prevSec = s;
+  });
+
+  const zero = document.createElementNS(NS, "line");
+  zero.setAttribute("x1", ml); zero.setAttribute("x2", ml + cw);
+  zero.setAttribute("y1", mid); zero.setAttribute("y2", mid);
+  zero.setAttribute("stroke", "var(--line)");
+  svg.appendChild(zero);
+
+  const draw = (rows, width, opacity, name) => {
+    const end = rows[rows.length - 1].v;
+    const color = end >= 0 ? "var(--good)" : "var(--bad)";
+    line(pathOf(rows, (r) => yF(r.v)), color, width, opacity);
+    return { y: yF(end), color,
+             text: name + " " + (end >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(end)) };
+  };
+  const tagR = draw(retail, 1.4, 0.5, "리테일");
+  const tagW = draw(whale, 2, 0.95, "고래");
+  // 두 누적값이 가까우면 라벨이 그대로 포개진다(가격 라벨과 같은 문제). 고래를 제자리에 두고
+  // 리테일만 밀어낸다 -- 고래가 이 화면의 주인공이라 그쪽 위치가 정확해야 한다.
+  if (Math.abs(tagR.y - tagW.y) < 12) tagR.y = tagW.y + (tagR.y >= tagW.y ? 12 : -12);
+  [tagW, tagR].forEach((t) => label(ml + cw + 5, t.y + 3, t.text, t.color));
+
+  // 고래 주문이 있던 초에만 눈금. 누적선이 잃어버리는 «언제»를 여기서 돌려준다.
+  ticks.forEach((t) => {
+    const r = document.createElementNS(NS, "rect");
+    r.setAttribute("x", xAt(t.s) - 0.5); r.setAttribute("y", flowTop + flowH - 5);
+    r.setAttribute("width", 1.6); r.setAttribute("height", 5);
+    r.setAttribute("fill", t.up ? "var(--good)" : "var(--bad)");
+    r.setAttribute("fill-opacity", "0.75");
+    svg.appendChild(r);
+  });
+
+  label(ml, h - 3, "5분 전", "var(--muted)");
+  label(ml + cw, h - 3, "지금", "var(--muted)", "end");
+  const kUsd = (v) => "$" + Math.round(v / 1000) + "k";
+  setT("supply1sSub", "누적 순수급 · 고래 ≥" + kUsd(supply1sMeta.whaleMinUsd)
+    + " · 리테일 <" + kUsd(supply1sMeta.retailMaxUsd)
+    + " · 아래 눈금은 고래 주문이 있던 초 (" + ticks.length + "건/5분)");
+}
 
 // ── 가격축 수급 프로파일 (2026-09-19) ───────────────────────────────────────
 // 시간을 버리고 가격만 남긴다. 창 전체(최대 24시간)를 가격빈으로 접어 «어느 값에서 누가
@@ -4936,12 +4993,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 색은 표시 규약 그대로 롱=good / 숏=bad. 위로 롱청산, 아래로 숏청산인 발산형.
   // ⚠️로그 스케일이다. 최근 7일 5분봉 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 거의 전부가
   //   1픽셀 미만으로 사라진다.
-  // 2026-09-19 풋프린트 모드에서는 이 패널이 **수급 리본** 자리다. 같은 모드에서 이미 청산밀도
-  // 히트맵을 끄고 있고(2026-09-15 «완전 교체»), 둘 다 넣으면 가격 플롯이 또 줄어든다.
-  // 청산 레인은 청산맵 모드에서 그대로 본다.
-  if (footprint && candles.length) {
-    drawSupplyRibbon(svg, NS, footprint, candles, xAt, bw, ml, cw, liqPanelY, LIQ_PANEL_H);
-  } else if (Array.isArray(liqBars) && liqBars.length && candles.length) {
+  if (Array.isArray(liqBars) && liqBars.length && candles.length) {
     const LIQ_Y = liqPanelY, LIQ_H = LIQ_PANEL_H, LIQ_MID = LIQ_Y + LIQ_H / 2;
     // 🔴캔들의 `time` 은 **초** 단위다(server.py: int(row["timestamp"].timestamp())).
     //   Date.parse 는 밀리초라 그대로 키로 쓰면 절대 안 맞는다 -- 2026-09-11 에 이걸로
@@ -5234,6 +5286,7 @@ async function tick() {
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       refreshSupplyProfile();        // 2026-09-19 가격축 수급 프로파일
+      refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }

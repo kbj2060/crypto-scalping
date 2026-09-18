@@ -2813,3 +2813,7 @@ svg {
    남은 한 줄이 가운데 떠서 정렬이 두 종류가 된다. */
 .trade-modal .manual-entry-row.fields { justify-content: flex-start; }
 .trade-modal .manual-entry-row.fields .exit-frac { justify-content: flex-start; }
+
+/* 수급 1초 패널 (2026-09-19). .chart-container 의 높이(412px)는 캔들 차트용이라 여기선
+   과하다 -- 이 차트는 240px 뷰박스이고 세로로 더 줘봐야 선만 늘어난다. */
+.supply-1s-container { height: 248px; }

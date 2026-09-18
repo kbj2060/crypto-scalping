@@ -499,6 +499,11 @@ FOOTPRINT_SNAPSHOT_SECONDS = 30.0
 #   조용히 갈라진다 -- 이 저장소가 레짐 분류기에서 한 번 겪은 일이다(2026-09-17).
 # ⭐왜 분위가 아니라 달러 고정인지, 왜 경계가 둘인지는 그 파일의 상수 주석에 실측과 함께 있다.
 FOOTPRINT_KEEP_BARS = 288
+# 최근 5분을 **1초 해상도**로 보는 화면용 링(2026-09-19 사용자 지시). 5분봉 리본을 걷어내고
+# 이걸로 갈음했다 -- 「바로바로」가 뜻하는 건 5분봉이 아니라 초 단위였다.
+# 가격빈을 버리고 초마다 한 칸만 남긴다(가격축은 수급 프로파일이 따로 본다). 360초를 두는 건
+# 화면이 300초를 그리는데 경계에서 모자라지 않게 하려는 여유다.
+SUPPLY_1S_SECONDS = 360
 
 # 2026-09-16 2.5 -> 1.0 (사용자 "최대한 빠르게"). 이 값이 곧 **현재가 선의 지연**이다 --
 # 차트는 SSE 푸시마다 다시 그린다. 코인을 ETH 하나로 줄이면서(DASHBOARD_ASSETS) 티커 요청이
@@ -1911,7 +1916,22 @@ def make_app() -> web.Application:
                                    # aggTrades 로 메운 봉. 출처 표시일 뿐 «덜 정확하다»는 뜻이
                                    # 아니다 -- 크기 구간은 주문 단위라 aggTrades 쪽이 오히려
                                    # 정확하다(footprint_add 도크스트링의 2026-09-19 정정).
-                                   "agg_bars": set()}
+                                   "agg_bars": set(),
+                                   # 초 -> [리테일매수, 리테일매도, 고래매수, 고래매도,
+                                   #        총매수, 총매도, 마지막가격]. 아래 supply_1s_cell 참고.
+                                   "sec": {}}
+
+    def supply_1s_cell(ts_ms: int) -> list[float]:
+        """그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(체결마다 돌 일이 아니다)."""
+        sec = int(ts_ms) // 1000
+        by_sec = footprint_state["sec"]
+        cell = by_sec.get(sec)
+        if cell is None:
+            cell = by_sec[sec] = [0.0] * 7
+            cutoff = sec - SUPPLY_1S_SECONDS
+            for old in [s for s in by_sec if s < cutoff]:
+                del by_sec[old]
+        return cell
 
     def footprint_bar_start(ts_ms: float) -> int:
         return (int(ts_ms) // 1000) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
@@ -1945,15 +1965,20 @@ def make_app() -> web.Application:
                 del bars[old_bar]   # 새 봉이 생길 때만 정리한다 -- 체결마다 돌 일이 아니다(266/s)
                 footprint_state["agg_bars"].discard(old_bar)
         cell = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)), [0.0] * 6)
+        sec_cell = supply_1s_cell(ts_ms)
         side = 1 if sell else 0
         if not order:
             cell[side] += qty
+            sec_cell[4 + side] += qty
+            sec_cell[6] = price          # 그 초의 마지막 체결가 = 1초 가격선
         if order or agg:
             notional = price * qty
             if notional >= WHALE_MIN_USD:
                 cell[2 + side] += qty
+                sec_cell[2 + side] += qty
             elif notional < RETAIL_MAX_USD:
                 cell[4 + side] += qty
+                sec_cell[side] += qty
         if agg:
             footprint_state["agg_bars"].add(bar)
         footprint_state["updated"] = time.time()
@@ -2723,6 +2748,35 @@ def make_app() -> web.Application:
                             for k, v in sorted(cells.items())]}
                 for bar, cells in recent
             ],
+        }, headers=NOCACHE)
+
+    async def api_supply_1s(request: web.Request) -> web.Response:
+        """최근 5분을 1초 해상도로. `?since=<초>` 면 그 뒤에 **새로 생긴 초만** 보낸다.
+
+        매초 폴링이라 전량을 매번 보내면 안 된다 -- 300초 x 7숫자면 회당 ~18KB 이고, 1초
+        주기면 시간당 60MB 가 넘는다. 증분이면 보통 한두 줄(~100B)이다. 첫 요청만 전량이다.
+        ⚠️**진행 중인 초는 안 보낸다**. 보내면 그 초가 자라는 동안 클라가 이미 «받은 초»로
+          알고 건너뛰어, 반쪽짜리로 굳는다(풋프린트 스냅샷에서 겪은 그 실패와 같은 모양).
+        """
+        by_sec = footprint_state["sec"]
+        if not by_sec:
+            return web.json_response({"symbol": FOOTPRINT_SYMBOL, "seconds": [], "now": 0,
+                                      "retailMaxUsd": RETAIL_MAX_USD,
+                                      "whaleMinUsd": WHALE_MIN_USD}, headers=NOCACHE)
+        newest = max(by_sec)
+        try:
+            since = int(request.query.get("since", "0"))
+        except ValueError:
+            since = 0
+        floor = max(since, newest - SUPPLY_1S_SECONDS)
+        return web.json_response({
+            "symbol": FOOTPRINT_SYMBOL,
+            "now": newest,
+            "retailMaxUsd": RETAIL_MAX_USD,
+            "whaleMinUsd": WHALE_MIN_USD,
+            # [초, 리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
+            "seconds": [[s] + [round(x, 3) for x in by_sec[s]]
+                        for s in sorted(by_sec) if floor < s < newest],
         }, headers=NOCACHE)
 
     async def api_supply_profile(request: web.Request) -> web.Response:
@@ -3602,6 +3656,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/footprint", api_footprint)
     app.router.add_get("/api/supply-profile", api_supply_profile)
+    app.router.add_get("/api/supply-1s", api_supply_1s)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/extreme-detector", api_extreme_detector)
     app.router.add_get("/api/breakout-detector", api_breakout_detector)

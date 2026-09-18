@@ -452,6 +452,19 @@
         <div id="liquidationMapList" class="liq-level-list"></div>
       </section>
 
+      <!-- 2026-09-19 최근 5분을 **1초 해상도**로 보는 수급 패널(사용자 지시).
+           그전에 캔들 아래 5분봉 «수급 리본»을 넣었다가 걷어냈다 -- 보고 싶은 것은 봉이
+           아니라 초였다. 차트 종류 탭이 아니라 전용 패널인 이유도 같다: 탭이면 볼 때만
+           보이는데, 이 값은 «늘 보이면서 매초 움직이는» 것이 요점이다. -->
+      <section class="panel ops-health-panel" data-asset-scope="supply1s">
+        <div class="ops-health-head">
+          <div><h3>수급 · 최근 5분</h3><p id="supply1sSub" class="muted">불러오는 중…</p></div>
+        </div>
+        <div class="chart-container supply-1s-container">
+          <svg id="supply1sSvg" viewBox="0 0 1200 240" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+      </section>
+
       <section class="panel ops-health-panel" data-asset-scope="indicators">
         <div id="snapModelIndicatorList" class="ops-health-list"></div>
       </section>
