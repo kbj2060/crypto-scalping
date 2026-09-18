@@ -122,6 +122,19 @@ data/research/eth_v_rebound_label_grid_stage1_20260901/{stage3_oos,deployed_oos_
 모집단/라벨은 그대로다: 매 봉 x 양측면, 3상태(v_rebound / chop / ambiguous 제외). 동결 컨텍스트
 18,000행 라벨 파리티 **1.000000** 으로 확인했다.
 
+🔴🔴**경제성 게이트는 통과하지 못했다 -- 알고도 배포했다(사용자 결정, 부하 우선).**
+`scripts/backtest_eth_v_rebound_hgb_costgate_20260919.py`, 배포판이 고른 **같은 설정**
+(SL4.0/ARM1.5/TR0.1)에서 **같은 호출 건수**로 재보면:
+    VAL  HGB +3.95bp  vs  TabPFN +16.22bp   (n 487 vs 488)
+    OOS  HGB +1.87bp  vs  TabPFN +11.44bp   (n 346 vs 385)
+분류는 멀쩡하다(정밀도 VAL .7064/.7131 · OOS .6994/.6831 -- OOS 는 HGB 가 높다). 방향 뒤집기
+대조군도 깨끗하다(VAL 정방향 +4.26 vs 뒤집기 -38.62, 수익격자 정23/뒤0). **같은 AUC·같은
+정밀도인데 고르는 봉이 달라서** bp 가 4배 작다 -- 2026-09-01 원본이 예고한 그 실패 양식이다.
+⚠️이 칩은 trading_bot.py 에 배선돼 있지 않다(주문 없음). 그래서 이 손실은 «화면 신호의 질»이지
+  금전이 아니다. 그래도 **이 칩의 bp 를 근거로 재량 진입하지 말 것.**
+⚠️비교 기준(labeled)은 커밋 aac1805c 에서 이미 철회된 숫자다. all_bars 기준에서는 HGB 가
+  전 임계값 음수이고(수익격자 정0/뒤0), 배포 TabPFN 의 all_bars 숫자는 존재하지 않는다.
+
 *** DISCRETIONARY READING AID -- NOT WIRED INTO trading_bot.py, NOT AUTOMATED ENTRY/EXIT. ***
 Feature/BTC-fetch/RSI-Wilder machinery below is unchanged from the pre-redesign version (Tier0 22
 + rsi = 23 features, exact same formulas) -- only which bars get scored changed. Values are reused,
@@ -201,6 +214,10 @@ LOCAL_EXTREME_W = 6         # +-30min, matches build_eth_5m_v_rebound_multitrigg
 # meta.json 에 적는다 -- 현재 0.3820(분위 0.9540, 재현 13.25/일). 아래 0.60 은 아티팩트를 못 읽을
 # 때만 쓰이는데, 그 경우 `_load_art()` 가 None 이라 신호 자체가 안 난다.
 PROBA_THRESHOLD = float(_art_meta().get("proba_threshold", 0.60))
+# 앙상블 시드 수. `live_eth_v_rebound_econ_shadow_runner_20260902.py:304` 의 설정 스탬프가
+# `_SIG.ENSEMBLE_SEEDS` 로 읽는데, TabPFN(단일 시드) 시절에 이 이름이 사라져 **깨져 있었다**.
+# 이제 실제로 앙상블이므로 아티팩트가 들고 온 값을 그대로 노출한다.
+ENSEMBLE_SEEDS = len(_art_meta().get("seeds") or [])
 
 # 2026-09-01 배지 지속성. 매 봉 스코어링에서 배지가 현재 봉만 반영하면 사건당 평균 1.2봉,
 # 즉 대부분 5분만 떴다 사라진다(0.60 기준 하루 13.25 발동봉 / 11.01 사건 실측; 사용자가
