@@ -540,6 +540,56 @@ def check_runtime_resources() -> Check:
     })
 
 
+def check_raster_archive() -> Check:
+    """만료 래스터가 parquet 으로 **실제로 보관되는가**. (2026-09-20)
+
+    왜 필요한가: 래스터는 보존 14일이고 만료분을 `_archive_then_unlink` 가 parquet 으로
+    떠낸다. 그게 조용히 실패하면 **원본이 그대로 쌓이거나**(디스크) 최악엔 보관 없이
+    사라진다. 아카이버는 실패해도 수집을 안 멈추므로(그게 설계다) 로그를 안 보면 모른다 --
+    위 duckdb 신선도 검사들과 같은 부류의 실패 모드다.
+
+    판정:
+      · 살아있는 .f32 의 가장 오래된 것이 보존일+2 보다 오래됐다 -> 아카이버가 안 돈다
+      · 보관본에 .gz 가 섞여 있다 -> parquet 변환이 실패해 폴백으로 떨어졌다
+    🔴첫 보관 예정일(가장 오래된 파일 + 14일) **전에는 «대기»** 다. 파일이 없다고 경보를
+      울리면 09-28 까지 열흘간 거짓 경보가 된다.
+    """
+    live = LIVE / "orderflow" / "raster"
+    arc = LIVE / "orderflow" / "raster_archive"
+    retention = int(os.getenv("OF_RETENTION_DAYS", "14"))
+    f32 = sorted(live.glob("*/*.f32"))
+    if not f32:
+        return Check("raster_archive", "OK", "raster collector idle (no live files)",
+                     {"live_files": 0})
+    def _stamp(path: Path) -> datetime | None:
+        try:
+            return datetime.strptime(path.stem, "%Y-%m-%dT%H").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    stamps = [t for t in (_stamp(x) for x in f32) if t]
+    oldest = min(stamps) if stamps else None
+    age_days = (datetime.now(timezone.utc) - oldest).total_seconds() / 86400 if oldest else 0.0
+    pq = list(arc.glob("*/*/*.parquet")) if arc.is_dir() else []
+    gz = list(arc.glob("*/*/*.gz")) if arc.is_dir() else []
+    due = oldest + timedelta(days=retention) if oldest else None
+
+    if gz:
+        status, summary = "WARN", "parquet conversion fell back to gzip (unreadable by duckdb)"
+    elif age_days > retention + 2:
+        status, summary = "WARN", "expired rasters are not being archived"
+    elif not pq and due and datetime.now(timezone.utc) < due:
+        status, summary = "OK", "archive pending first run"
+    else:
+        status, summary = "OK", "raster archive healthy"
+    return Check("raster_archive", status, summary, {
+        "live_files": len(f32), "oldest_live_age_days": round(age_days, 2),
+        "retention_days": retention,
+        "first_archive_due": due.date().isoformat() if due else None,
+        "parquet_files": len(pq), "gzip_fallback_files": len(gz),
+        "archive_db": str(arc / "orderbook.duckdb"),
+    })
+
+
 def check_watchdog_storage() -> Check:
     required = [OUT / "state.json", OUT / "incidents.sqlite", OUT / "watchdog_heartbeat.json"]
     missing = [str(path) for path in required if not path.is_file()]
@@ -669,7 +719,7 @@ def run_once(dry_run: bool) -> list[Check]:
         check_process("trading_bot_process", "trading_bot.py"),
         check_snapshot(), check_heartbeat(), check_pipeline(), check_pipeline_contract(),
         check_data_sources(), check_dashboard(), check_execution_contract(), check_runtime_resources(),
-        check_watchdog_storage(),
+        check_watchdog_storage(), check_raster_archive(),
         # DuckDB write-freshness (2026-08-17): the checks above watch process liveness and
         # dashboard-reported connectivity flags, neither of which catches a process that stays
         # alive but silently stops persisting rows -- exactly the failure mode found in this
