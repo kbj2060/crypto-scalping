@@ -1335,6 +1335,19 @@ SIZING_CAP_WINDOW = 30      # 최근 N 왕복만 본다(2026-09-13). 아래 sizi
 SIZING_CAP_EQUITY_X = 6.0
 
 
+def notional_sum(positions: list[dict[str, Any]] | None, symbol: str | None = None) -> float:
+    """|명목| 합. `symbol` 을 주면 그 심볼만, 없으면 **계좌 전체**.
+
+    헤지 모드라 롱·숏이 동시에 열리므로 상쇄를 가정하지 않고 절대값을 더한다 -- 두 다리 다
+    증거금을 먹고 둘 다 청산될 수 있다.
+    🔴범위를 틀리면 조용히 위험해진다: 상한(교차 마진의 청산거리 = 순자산/총명목)은 계좌
+    전체여야 하고, 청산거리 투영은 심볼 안에서만 성립한다. 2026-09-19 에 상한이 심볼 하나만
+    세고 있었다(봇 ETHUSDT + 수동 ETHUSDC). 자체점검 test/test_notional_sum_scope_20260919.py.
+    """
+    return sum(abs(float(p.get("notional") or 0.0)) for p in (positions or [])
+               if symbol is None or p.get("symbol") == symbol)
+
+
 def entry_projection(plan: dict, account: dict, positions: list, existing: float,
                      equity: float) -> dict[str, Any]:
     """«이 주문을 넣으면 계좌 카드가 어떻게 바뀌나» -- 사용자 요청(2026-09-12).
@@ -2566,7 +2579,17 @@ def make_app() -> web.Application:
     async def produce_account() -> dict[str, Any]:
         """계좌 조회는 여기 한 곳뿐이다 -- 화면 요청이든 원장 주기든 같은 캐시를 통과하므로
         조회가 두 벌로 갈라지지 않는다. 원장 기록을 이 안에 둔 이유도 같다."""
-        payload = await fetch_account(binance_session(), list(MARKET_SYMBOLS.values()))
+        # 🔴수동 주문 심볼(ETHUSDC)을 같이 넣는다. 이게 빠져 있어서 그 심볼의 **최근 거래**가
+        #   통째로 안 보였다(2026-09-19 사용자 보고). 포지션 자체는 /fapi/v2/positionRisk 를
+        #   심볼 필터 없이 부르므로 원래 다 들어온다 -- 빠지는 건 userTrades(왕복) 쪽뿐이다.
+        payload = await fetch_account(
+            binance_session(),
+            list(dict.fromkeys([*MARKET_SYMBOLS.values(), MANUAL_EXEC_SYMBOL])))
+        # 화면이 «이 코인의 포지션»을 찾을 때 USDT 심볼 하나만 보면 USDC 포지션을 못 본다.
+        # 서버가 실제로 쓰는 심볼을 payload 에 실어 보내 화면이 하드코딩하지 않게 한다 --
+        # 환경변수(DASHBOARD_MANUAL_EXEC_SYMBOL)로 바뀌는 값이다.
+        if isinstance(payload, dict):
+            payload["exec_symbol"] = MANUAL_EXEC_SYMBOL
         added = record_account_trips(payload, account_trip_state["seen"])
         if added:
             print(f"account_round_trips: +{added}건 (누적 {len(account_trip_state['seen'])}건)", flush=True)
@@ -3170,7 +3193,13 @@ def make_app() -> web.Application:
             positions = [p for p in (account.get("positions") or []) if p.get("symbol") == symbol]
             # 헤지 모드라 롱·숏이 동시에 열린다. 위험 상쇄를 가정하지 않고 **절대값 합**으로 본다
             # -- 두 다리 다 증거금을 먹고, 둘 다 청산될 수 있다.
-            existing = sum(abs(float(p.get("notional") or 0.0)) for p in positions)
+            existing = notional_sum(positions)
+            # 🔴상한은 **계좌 전체**에 걸린다. 교차 마진이라 청산거리 = 순자산 / **총명목**이고,
+            #   그 총명목에는 다른 심볼도 들어간다 -- 봇은 ETHUSDT 로, 수동 주문은 ETHUSDC 로
+            #   나가므로(2026-09-19 MANUAL_EXEC_SYMBOL) 심볼 하나만 세면 봇 포지션이 열려 있는
+            #   동안 상한이 그만큼 헐거워진다. 위 `existing`(이 심볼)은 아래 청산거리 투영에만
+            #   쓴다 -- 그 계산은 심볼 안에서만 성립한다(liq_after = liq_before × existing/total).
+            exposure = notional_sum(account.get("positions"))
             # 추가 진입 맥락은 **같은 방향**만 본다 -- 헤지 모드에서 반대 다리는 다른 결정이다.
             same = [p for p in positions if p.get("side") == side]
             same_unrealized = sum(float(p.get("unrealized_pnl") or 0.0) for p in same)
@@ -3206,7 +3235,7 @@ def make_app() -> web.Application:
             risk = risk_sizing(sizing, hold_min, side)
             cap_model = None
             if risk.get("available") and equity > 0:
-                e = entry_notional(equity, risk["safe_mae_pct"], existing_notional=existing)
+                e = entry_notional(equity, risk["safe_mae_pct"], existing_notional=exposure)
                 cap_model = e["total_notional"]
                 risk.update(leverage=round(e["leverage"], 2), binding=e["binding"],
                             survival_x=round(e["survival_x"], 2),
@@ -3248,14 +3277,14 @@ def make_app() -> web.Application:
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 recommended_qty=rec_qty,
                 cap_notional=cap_notional,
-                filters=filters, symbol=symbol, existing_notional=existing,
+                filters=filters, symbol=symbol, existing_notional=exposure,
                 equity=equity, leverage=leverage, fraction=fraction)
             plan["recommended_source"] = rec_src
             plan["recommended_qty"] = round(rec_qty, 8)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)
             # 2026-09-13 «지금 상황» 플랜: 보유시간 권고·집행·분할·예산 사다리. 상한은 적용된 실효 배수.
             plan["trade_plan"] = plan_now(
-                side=side, equity=equity, existing_notional=existing,
+                side=side, equity=equity, existing_notional=exposure,
                 unrealized_pnl=same_unrealized,
                 risk_table=sizing.get("risk_mae") or {},
                 vol_bpm=await realized_vol_now(symbol),
