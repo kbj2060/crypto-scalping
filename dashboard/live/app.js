@@ -6438,6 +6438,7 @@ function renderLevGauge(plan) {
   // 자동이면 모델값으로 스냅한다(5단위라 가장 가까운 눈금으로). 손으로 만지는 중이면 안 건드린다.
   if (manualLevAuto() && plan.leverage_model) {
     g.value = String(Math.max(5, Math.round(plan.leverage_model / 5) * 5));
+    syncRangeFill(g);       // 프로그램이 바꾼 값은 input 이벤트가 없다
   }
   g.disabled = manualLevAuto();
   const v = manualLevValue();
@@ -6927,21 +6928,29 @@ function manualHoldPaint(btn, ratio) {
   const fill = btn?.querySelector(".hold-fill");
   if (fill) fill.style.width = `${Math.round(100 * ratio)}%`;
 }
-function manualHoldCancel(btn) {
+// 힌트는 **그 줄 안에서** 찾는다 -- 진입과 청산이 각자 제 줄을 갖는다(id 를 둘로 늘리면
+// 둘 중 하나만 고치고 다른 하나를 잊는다).
+const manualHoldHint = (btn) => btn?.closest(".manual-entry-row")?.querySelector(".hold-hint");
+const manualHoldIdle = (kind) => (kind === "exit"
+  ? "0.4초 누르고 있으면 청산됩니다" : "0.4초 누르고 있으면 주문이 나갑니다");
+
+function manualHoldCancel(btn, kind) {
   if (manualHoldTimer) { clearTimeout(manualHoldTimer); manualHoldTimer = null; }
   if (manualHoldRaf) { cancelAnimationFrame(manualHoldRaf); manualHoldRaf = null; }
   manualHoldPaint(btn, 0);
   if (manualHoldFire) { manualHoldFire = false; manualEntryClearConfirm(); }
-  const hint = el("snapEntryHoldHint");
-  if (hint) hint.textContent = "0.4초 누르고 있으면 주문이 나갑니다";
+  const hint = manualHoldHint(btn);
+  if (hint) hint.textContent = manualHoldIdle(kind);
 }
-function manualHoldStart(btn, side) {
+function manualHoldStart(btn, side, kind) {
   if (manualOrderBusy || btn.disabled) return;
-  manualHoldCancel(btn);
+  manualHoldCancel(btn, kind);
   manualHoldFire = true;
-  const hint = el("snapEntryHoldHint");
-  if (hint) hint.textContent = "누르고 있는 중 — 떼면 주문은 안 나갑니다";
-  manualEntryPreview(side, "entry");     // 기다리지 않는다: 링이 차는 동안 상자가 채워진다
+  const hint = manualHoldHint(btn);
+  if (hint) hint.textContent = kind === "exit"
+    ? "누르고 있는 중 — 떼면 청산은 안 나갑니다" : "누르고 있는 중 — 떼면 주문은 안 나갑니다";
+  // 청산은 **계좌부터 새로 읽는다**(manualExitPreview) -- 닫으려는 수량이 낡으면 안 된다.
+  if (kind === "exit") manualExitPreview(side); else manualEntryPreview(side, "entry");
   const t0 = performance.now();
   const step = () => {
     const r = Math.min(1, (performance.now() - t0) / HOLD_FIRE_MS);
@@ -6953,7 +6962,7 @@ function manualHoldStart(btn, side) {
     manualHoldTimer = null;
     manualHoldPaint(btn, 0);
     manualHoldFire = false;
-    if (hint) hint.textContent = "0.4초 누르고 있으면 주문이 나갑니다";
+    if (hint) hint.textContent = manualHoldIdle(kind);
     // 미리보기가 막혔거나(blocked) 아직 안 왔으면 pending 이 없다 -- 그때는 안 나간다.
     if (manualEntryPending) manualEntrySubmit();
     else {
@@ -6962,12 +6971,13 @@ function manualHoldStart(btn, side) {
     }
   }, HOLD_FIRE_MS);
 }
-[["snapEntryLong", "LONG"], ["snapEntryShort", "SHORT"]].forEach(([id, side]) => {
+[["snapEntryLong", "LONG", "entry"], ["snapEntryShort", "SHORT", "entry"],
+ ["snapExitLong", "LONG", "exit"], ["snapExitShort", "SHORT", "exit"]].forEach(([id, side, kind]) => {
   const btn = el(id);
   if (!btn) return;
-  btn.addEventListener("pointerdown", (e) => { e.preventDefault(); manualHoldStart(btn, side); });
+  btn.addEventListener("pointerdown", (e) => { e.preventDefault(); manualHoldStart(btn, side, kind); });
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
-    btn.addEventListener(ev, () => manualHoldCancel(btn)));
+    btn.addEventListener(ev, () => manualHoldCancel(btn, kind)));
 });
 // 2026-09-14 사용자 요청: **청산은 강제 조회부터**. 화면 숫자가 30초(조회가 끊겼으면 그
 // 이상) 묵어 있을 수 있어서, 미리보기를 그리기 전에 계좌를 다시 받아 카드·아래 줄을 맞춘다.
@@ -6984,8 +6994,6 @@ async function manualExitPreview(side) {
   }
   return manualEntryPreview(side, "exit");
 }
-el("snapExitLong")?.addEventListener("click", () => manualExitPreview("LONG"));
-el("snapExitShort")?.addEventListener("click", () => manualExitPreview("SHORT"));
 el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
 // 비율을 바꾸면 화면에 떠 있던 확인 버튼은 **다른 계획**의 것이다. 지운다.
 // 계좌 강제 조회. refreshBinanceAccount 의 30초 자체 게이트를 넘겨야 하므로 시각을 지운다.
@@ -7091,38 +7099,11 @@ function renderExitNow() {
   box.innerHTML = [warn, ...rows].filter(Boolean).join("<br>");
 }
 
-// ── 주문 모달 (2026-09-16 사용자 요청) ────────────────────────────────────────
-// 네이티브 <dialog> 라 포커스 트랩·ESC·backdrop 이 공짜다. 여기서 하는 일은 셋뿐이다:
-// 열기 / 닫힐 때 2단 확인 초기화 / 바깥 클릭으로 닫기.
-// ⭐진입과 청산은 **각각 제 모달**이다(사용자 요청). 한 모달에 둘을 담으면 «청산하러
-//   열었는데 진입 버튼이 같이 보이는» 상태가 되고, 그게 이 화면에서 가장 비싼 오클릭이다.
-// 🔴닫는 것으로는 아무 주문도 안 나간다 -- 닫기 버튼은 form method="dialog" 이고 ESC·backdrop
-//   도 같은 경로다. 열려 있던 «확인» 상태는 닫을 때 반드시 지운다(안 지우면 다시 열었을 때
-//   확인 버튼이 남아 한 번의 클릭이 주문이 된다).
-function openTradeModal(mode) {
-  const dlg = el(mode === "exit" ? "exitModal" : "entryModal");
-  if (!dlg) return;
-  // 진입 모달은 접힌 블록을 펴 준다 -- 모달 자체가 «한 번 더 확인」이라 접어 둘 이유가 없다.
-  if (mode === "entry") { const box = el("snapEntryBox"); if (box) box.open = true; }
-  if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "");
-  syncAllRangeFills(dlg);   // 트랙 채움은 CSS 변수라 값이 바뀐 만큼 따로 맞춰 준다
-  manualEntryRefreshSize();
-  manualExitSyncButtons();
-}
-function setupTradeModal() {
-  el("tradeOpenExit")?.addEventListener("click", () => openTradeModal("exit"));
-  el("tradeOpenEntry")?.addEventListener("click", () => openTradeModal("entry"));
-  ["exitModal", "entryModal"].forEach((id) => {
-    const dlg = el(id);
-    if (!dlg) return;
-    dlg.addEventListener("close", () => {
-      manualEntryClearConfirm();      // 확인 상태를 들고 다시 열리지 않게
-    });
-    // backdrop(모달 바깥) 클릭으로도 닫는다 -- dialog 자신이 클릭 대상이면 바깥이다.
-    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close("backdrop"); });
-  });
-}
-
+// 2026-09-20 주문 모달을 없앴다(여는 함수 둘 포함). 진입·청산이 둘 다 카드 안으로 나오면서
+// 열 모달도, 여는 버튼(#tradeOpenEntry / #tradeOpenExit)도 사라졌다. 닫을 때 «확인» 상태를
+// 지우던 dialog close 리스너의 역할은 manualHoldCancel 이 대신한다(손을 떼면 지운다).
+// 🔴styles.css 의 .trade-modal* / .trade-actions 규칙(약 20개)은 이제 아무 데도 안 붙는다 --
+//   흩어져 있어 실주문 변경과 같은 커밋에 섞지 않았다. 따로 걷어낸다.
 function manualExitSyncButtons() {
   const row = el("snapExitRow");
   if (!row) return;
@@ -7187,7 +7168,9 @@ function manualExitSyncButtons() {
   if (lab) lab.textContent = hasPos ? "추가 진입 (물타기)" : "진입";
 }
 if (el("snapEntryPlan")) {
-  setupTradeModal();
+  // 트랙 채움은 input 이벤트에서만 갱신된다. 게이지가 이제 **항상 보이므로** 시작할 때
+  // 한 번 칠해 준다(옛 판은 모달을 열 때 했고, 그 모달이 없어졌다).
+  syncAllRangeFills();
   manualEntryRefreshSize();
   manualExitSyncButtons();
   setInterval(() => { manualEntryRefreshSize(); manualExitSyncButtons(); },

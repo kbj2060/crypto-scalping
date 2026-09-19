@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260920-hold-entry">
+  <link rel="stylesheet" href="styles.css?v=20260920-hold-exit">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -271,38 +271,30 @@
              2026-09-16 사용자 요청으로 **진입과 청산을 각각 제 모달**로 갈랐다 -- 한 모달에
              둘을 담으면 «청산하러 열었는데 진입 버튼이 같이 보이는» 상태가 되고, 그건 이
              화면에서 가장 비싼 오클릭이다. -->
-        <div class="trade-actions">
-          <button type="button" id="tradeOpenExit" class="notify-btn short" hidden>청산</button>
-        </div>
-
-        <dialog id="exitModal" class="trade-modal" aria-labelledby="exitModalTitle">
-          <form method="dialog" class="trade-modal-head">
-            <h3 id="exitModalTitle">청산</h3>
-            <button class="push-toggle" value="close" aria-label="닫기">✕ 닫기</button>
-          </form>
-          <div class="manual-entry">
-          <!-- 2026-09-14 청산 행을 카드 **맨 위**로 올렸다. 포지션을 들고 있을 때 제일 급한
-               동작인데 진입 UI 6줄 아래라 모바일에서 스크롤 밖이었다. 버튼 모양도 진입과
-               가른다 -- 진입은 아웃라인, 청산은 채움(styles.css .exit-row). 색만으로 가르면
-               롱 진입과 롱 청산이 둘 다 녹색이라 오클릭이 실돈 사고가 된다.
-               포지션이 있는 측면의 버튼만 뜬다 -- 없는 측면은 서버가 no_position 으로 막는다. -->
-          <div class="manual-entry-row actions exit-row" id="snapExitRow" hidden>
+        <!-- 2026-09-20 청산도 진입과 같은 모양으로(사용자 지시): 모달을 없애고 카드 안에
+             띄운 뒤, 버튼은 «길게 누르기»다. 포지션이 있을 때만 이 행이 보인다.
+             🔴진입 위에 둔다 -- 들고 있을 때 제일 급한 동작이고, 09-14 에 같은 이유로 모달
+               안에서도 맨 위로 올렸던 행이다.
+             🔴버튼 모양은 진입과 계속 가른다(.exit-row 는 채움, 진입은 아웃라인). 색만으로
+               가르면 롱 진입과 롱 청산이 둘 다 녹색이라 오클릭이 실돈 사고가 된다. -->
+        <div class="manual-entry">
+          <div class="manual-entry-row actions exit-row entry-hold" id="snapExitRow" hidden>
             <label class="exit-frac" for="snapExitFrac">
               <span class="entry-cap">포지션 닫기</span>
               <input type="range" id="snapExitFrac" min="5" max="100" step="5" value="100"
                      aria-label="청산 비율">
               <b id="snapExitFracVal">100%</b>
             </label>
-            <button type="button" id="snapExitLong" class="notify-btn long" hidden>롱 청산</button>
-            <button type="button" id="snapExitShort" class="notify-btn short" hidden>숏 청산</button>
-            <!-- 2026-09-14 «지금 닫으면 얼마인가»를 미리보기 **전에** 보여준다. 옛 판은 이 값이
-                 미리보기 응답(exit_move_pct) 안에만 있어서, 닫을지 말지를 정하려면 먼저
-                 버튼을 눌러야 했다. 계좌 payload 의 진입가·마크가로 화면이 바로 계산한다
-                 (≈ 표시: 체결가·수수료는 빠진 근사다). 조회가 낡으면 그 사실도 여기 쓴다. -->
+            <button type="button" id="snapExitLong" class="notify-btn long hold-fire" hidden>
+              <i class="hold-fill" aria-hidden="true"></i><span>롱 청산</span></button>
+            <button type="button" id="snapExitShort" class="notify-btn short hold-fire" hidden>
+              <i class="hold-fill" aria-hidden="true"></i><span>숏 청산</span></button>
+            <span class="entry-cap hold-hint">0.4초 누르고 있으면 청산됩니다</span>
+            <!-- 2026-09-14 «지금 닫으면 얼마인가»를 누르기 **전에** 보여준다. 계좌 payload 의
+                 진입가·마크가로 화면이 바로 계산한다(≈ 표시: 체결가·수수료는 빠진 근사다). -->
             <span id="snapExitNow" class="exit-now"></span>
           </div>
-          </div>
-        </dialog>
+        </div>
 
         <!-- 2026-09-20 진입을 모달에서 **카드 안으로** 꺼냈다(사용자 지시, 스캘핑).
              진입 → 모달 → 미리보기 → 확인 5동작이 «길게 누르기» 1동작이 된다. 청산은 모달을
@@ -419,7 +411,7 @@
               <i class="hold-fill" aria-hidden="true"></i><span>롱 진입</span></button>
             <button type="button" id="snapEntryShort" class="notify-btn short hold-fire">
               <i class="hold-fill" aria-hidden="true"></i><span>숏 진입</span></button>
-            <span id="snapEntryHoldHint" class="entry-cap">0.4초 누르고 있으면 주문이 나갑니다</span>
+            <span class="entry-cap hold-hint">0.4초 누르고 있으면 주문이 나갑니다</span>
           </div>
           </details>
           <!-- 2026-09-12 계좌 카드와 **같은 타일**로 그린다(사용자 요청) -- 미리보기가 말 그대로
@@ -511,7 +503,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260920-exit-symbol"></script>
+  <script src="./app.js?v=20260920-hold-exit"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
