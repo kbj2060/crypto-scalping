@@ -167,6 +167,10 @@ const API_FOOTPRINT_URL = "/api/footprint";
 const FOOTPRINT_POLL_MS = 400;
 const FOOTPRINT_MIN_ROW_PX = 11;        // 셀에 숫자가 들어가는 최소 행 높이
 const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
+// 막대 안에 숫자를 넣는 최소 길이(2026-09-19). 고정 칸일 때는 «칸 폭»이 기준이었지만
+// 길이가 변하는 지금은 **그 막대의 길이**가 기준이어야 한다. "1.2k" 가 13px 이고 양끝
+// 여백 6px 를 더해 넉넉히 잡았다 -- 못 들어가는 값은 툴팁으로 본다.
+const FOOTPRINT_QTY_MIN_PX = 26;
 // 셀 배경 4단계(TradingView: 최소~최대의 0~25/25~50/50~75/75%~). 매수·매도는 각자 최대로 나눈다.
 // 4단계 농담. 라이트에서는 «흰 유리 위」라 같은 알파가 훨씬 옅게 보여 한 단씩 올린다
 // (다크 배열은 현행 그대로다). 숫자를 덮지 않는 선이 상한이라 0.66 에서 멈춘다.
@@ -174,11 +178,8 @@ const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 어두운 글자가 맞고, 라이트에서는 같은 토큰이 진해져 흰 글자가 맞다.
 // ⭐그 분기는 CSS 의 --on-fill 한 곳에 있다 -- 여기서 색을 정하지 않는다(2026-09-16).
 const inkOnFill = () => "var(--on-fill)";
-const FOOTPRINT_SHADE_DARK = [0.10, 0.22, 0.36, 0.54];
-const FOOTPRINT_SHADE_LIGHT = [0.16, 0.32, 0.48, 0.66];
-const footprintShades = () =>
-  (document.documentElement.getAttribute("data-theme") === "light"
-    ? FOOTPRINT_SHADE_LIGHT : FOOTPRINT_SHADE_DARK);
+// 2026-09-19 색 농담 4단계(FOOTPRINT_SHADE_*)를 걷어냈다 -- 체결량은 이제 «막대 길이»가
+// 말한다(사용자 결정 A안: 창 전체 최대 기준). 색은 이제 방향만 뜻한다.
 // ── 리테일/고래 수급 (2026-09-19) ──────────────────────────────────────────
 // 서버가 셀을 [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도] 6칸으로 준다.
 // 고래·리테일은 총량의 **부분집합**이고 **중형($10k~$100k)은 칸이 없다** -- 셋을 빼서 얻는다.
@@ -211,32 +212,6 @@ let oi1s = new Map();
 let oi1sSince = 0;
 // 5분 누적 패널(청산맵 아래). 같은 1초 스냅샷을 duckdb 로 남긴 것을 서버가 5분으로 접어 준다 --
 // 링은 6분뿐이라 몇 시간을 보려면 저장을 거쳐야 한다. 5분 봉이라 15초 폴링으로 충분하다.
-// 캔들 SVG 안의 두 하위 패널(중첩 svg)과 그 상자. 각 fetch 가 **그 패널만** 다시 그릴 수
-// 있게 들고 있는다. 없으면 두 그림의 갱신이 캔들 SVG 전체 렌더에 묶이는데, 그 렌더에는
-// 게이트가 셋이다 -- ①커서가 SVG 위에 있으면 아예 안 그린다(chartHoverActive, 툴팁이
-// 지워지지 않게 하려는 장치) ②스크롤 중 정지 ③400~1000ms 스로틀. 패널이 그 SVG 안으로
-// 들어오면서(2026-09-19) 「보려고 커서를 올리면 1초 차트가 멈춘다」가 됐다.
-// 노드는 캔들 렌더가 매번 새로 만드므로 isConnected 로 옛 노드를 거른다.
-let supply1sSubBox = null;
-let supplyProfileSubBox = null;
-let flowHeatmapSubBox = null;
-
-function repaintSupply1sPanel() {
-  if (supply1sSubBox && supply1sSubBox.svg.isConnected) renderSupply1s(supply1sSubBox);
-}
-function repaintFlowHeatmapPanel() {
-  const b = flowHeatmapSubBox;
-  if (!b || !b.svg.isConnected) return;
-  renderFlowHeatmapSvg(b.svg, { w: b.w, h: b.h });
-}
-function repaintSupplyProfilePanel() {
-  const b = supplyProfileSubBox;
-  if (!b || !b.svg.isConnected) return;
-  renderSupplyProfileSvg(b.svg, latestSupplyProfile,
-    Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0,
-    Number(snapshotAccountPosition()?.entry_price || 0), { w: b.w, h: b.h });
-}
-
 const API_OI_5M_URL = "/api/oi-5m";
 const OI_5M_POLL_MS = 15000;
 let latestOi5m = null;
@@ -3475,9 +3450,8 @@ async function refreshSupply1s() {
   } catch (error) {
     console.error("Supply 1s fetch error:", error);
   }
-  // 받은 즉시 **이 패널만** 다시 그린다. 캔들 SVG 전체를 다시 그리지 않으므로 비싼 패스
-  // (캔들·청산밀도·프로파일)는 안 탄다 -- 호버/스크롤 게이트에도 안 걸린다.
-  repaintSupply1sPanel();
+  // 그리는 건 캔들 SVG 가 자기 주기에 한다(이 안의 패널이 됐다) -- 여기서 부르면 같은 SVG 를
+  // 한 번 더 통째로 다시 그린다. 청산 5분 이력·OI 5분과 같은 방식이다.
 }
 
 function gexIndicatorItem() {
@@ -3559,7 +3533,6 @@ async function refreshFlowHeatmap() {
     const mu = raw(j.mid_b64);
     latestFlowHeatmap = { ...j, qty: new Int8Array(raw(j.qty_i8).buffer),
                           mid: new Float32Array(mu.buffer) };
-    repaintFlowHeatmapPanel();
   } catch (error) {
     console.error("Flow heatmap fetch error:", error);
     latestFlowHeatmap = null;
@@ -3580,7 +3553,6 @@ async function refreshSupplyProfile() {
     console.error("Supply profile fetch error:", error);
     latestSupplyProfile = null;
   }
-  repaintSupplyProfilePanel();
 }
 
 async function refreshOi5m() {
@@ -3860,19 +3832,17 @@ function renderFlowHeatmapSvg(svg, box) {
     svg.appendChild(t); return;
   }
 
-  // 가격 -> y. 프로파일이 **먼저** 그려져 기하를 남겨 두면 그 행에 정확히 포갠다
-  // (같은 y 에서 «체결된 양»과 «걸려 있는 양»을 읽는 게 이 배치의 이유다).
-  // ponytail: 프로파일이 없으면 제 범위로 그린다 -- 그때는 두 그림의 축이 다르다.
-  const g = supplyProfileNow;
+  // 가격 -> y. **제 범위를 쓴다.**
+  // 🔴2026-09-19: 처음엔 프로파일의 행 기하(supplyProfileNow)에 포개 «같은 가격축»을 만들려
+  //   했는데 실측에서 틀렸다. 두 패널의 자연 범위가 15배 다르다 --
+  //     히트맵  2578.5~2701.0 (폭 $122.5, 호가 +-2.4%)
+  //     프로파일 2636.5~2645.0 (폭   $8.5, 1시간 체결 가격대)
+  //   포개면 빈의 93%가 상자 밖으로 잘리고 남는 7%에는 **잔량의 6%** 밖에 없다(현물 주변은
+  //   호가가 제일 얇다). 같은 실측에서 최대 잔량 5개 빈이 -1.99/-1.80/-1.16/+0.77/+0.96% 로
+  //   전부 프로파일 창 바깥이었다 -- 즉 포개면 **벽이란 벽은 다 사라진다**.
   const binPrice = (i) => (d.bin_lo + i) * d.bin_size;
-  let yOf;
-  if (g && g.keys && g.keys.length && g.rowSize > 0) {
-    const top = g.keys[0] + g.rowSize;      // 첫 행의 위 경계
-    yOf = (p) => g.mt + ((top - p) / g.rowSize) * g.rowPx;
-  } else {
-    const p0 = binPrice(d.n_bins - 1), p1 = binPrice(0);
-    yOf = (p) => (p0 === p1) ? h / 2 : ((p0 - p) / (p0 - p1)) * h;
-  }
+  const pLo = binPrice(0), pHi = binPrice(d.n_bins);
+  const yOf = (p) => (pHi === pLo) ? h / 2 : ((pHi - p) / (pHi - pLo)) * h;
 
   const cols = d.cols, nb = d.n_bins;
   const H = Math.max(1, Math.round(h));
@@ -3922,6 +3892,27 @@ function renderFlowHeatmapSvg(svg, box) {
   im.setAttribute("preserveAspectRatio", "none");
   im.setAttribute("href", cv.toDataURL("image/png"));
   svg.appendChild(im);
+
+  // 제 축이므로 눈금을 화면이 말한다(프로파일과 다른 범위라는 걸 숨기지 않는다).
+  const spot = Number(d.mid[cols - 1]);
+  if (Number.isFinite(spot)) {
+    const ys = yOf(spot);
+    const ln = document.createElementNS(NS, "line");
+    ln.setAttribute("x1", "0"); ln.setAttribute("x2", w);
+    ln.setAttribute("y1", ys); ln.setAttribute("y2", ys);
+    ln.setAttribute("stroke", "var(--fg, #e8eaf0)"); ln.setAttribute("stroke-width", "1");
+    ln.setAttribute("stroke-dasharray", "3 3"); ln.setAttribute("opacity", "0.55");
+    svg.appendChild(ln);
+  }
+  for (const [px, ty, anc] of [[pHi, 10, "start"], [pLo, h - 3, "start"]]) {
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", w - 4); t.setAttribute("y", ty);
+    t.setAttribute("text-anchor", "end");
+    t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)");
+    t.textContent = px.toFixed(0);
+    svg.appendChild(t);
+    void anc;
+  }
 
   const cap = document.createElementNS(NS, "text");
   cap.setAttribute("x", "4"); cap.setAttribute("y", "11");
@@ -5025,16 +5016,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       });
       return rows;
     });
-    // 배경 4단계는 매수·매도 각각의 최대로 나눈다(TradingView: "매수/매도 측은 별도로 계산").
+    // 막대 길이는 매수·매도 **각각의 최대**로 나눈다(TradingView: "매수/매도 측은 별도로
+    // 계산"). 2026-09-19 이전에는 이 값이 «색 농담 4단계»를 정했고, 지금은 길이를 정한다 --
+    // 기준이 같으므로 화면의 뜻은 그대로다.
     let maxBuy = 0, maxSell = 0;
     barRows.forEach((rows) => rows.forEach((cell) => {
       maxBuy = Math.max(maxBuy, cell[0]); maxSell = Math.max(maxSell, cell[1]);
     }));
-    const SHADES = footprintShades();
-    const shade = (v, max) => SHADES[Math.min(3, Math.floor((max > 0 ? v / max : 0) * 4))];
     const fontPx = Math.min(9, Math.max(6, rowPx - 3));
     const half = Math.max(2, bw / 2 - 0.5);
-    // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
+    // 모바일에선 반쪽 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **막대만** 남긴다.
     // 숫자를 욱여넣으면 옆 칸을 침범해서 둘 다 못 읽는다. 값은 눌러서 툴팁으로 본다.
     const showQty = half >= 18;
     // 라이트는 셀 배경이 밝아 글자를 거의 불투명하게 올려야 읽힌다(다크는 현행 0.82).
@@ -5042,14 +5033,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       document.documentElement.getAttribute("data-theme") === "light" ? "0.95" : "0.82";
 
     // 한 칸: 배경(거래량 비율 4단계) + 숫자 + 불균형 표시(반대편의 300% 초과면 바깥쪽 세로선).
-    // 2026-09-19 «막대 길이» 인코딩(A안)을 되돌렸다 -- 사용자 지시. 길이는 비율을 보여주는
-    // 대신 짧은 막대의 숫자를 지웠고, 여기서 읽는 건 그 숫자다. 칸을 다시 고정하고 체결량은
-    // 사각형 안에 적는다. 색 농담은 원래대로 «크다/작다»를 말한다.
-    const drawCell = (cx, yTop, v, other, max, color, edgeX, price) => {
+    // ── 막대 프로파일 (2026-09-19 사용자 결정: A안) ─────────────────────────
+    // 칸 크기를 고정하고 **색 농담**으로 체결량을 말하던 것을, **막대 길이**로 바꿨다.
+    // 농담 4단계는 «크다/작다»만 말한다 -- 길이는 비율을 그대로 보여줘서 봉 안에서 어느
+    // 가격이 주인공인지가 한눈에 잡힌다.
+    // ⭐견주는 기준은 **창 전체의 매수/매도 각 최대**다. 농담이 쓰던 기준과 **같다** --
+    //   인코딩만 색에서 길이로 바뀌고 뜻은 그대로라 읽던 방식이 안 깨진다. 봉마다 자기
+    //   최대로 정규화하는 안(B)은 모든 봉이 꽉 차서 «이 봉이 큰 봉인가»를 지우고, 봉 아래
+    //   델타 숫자와 어긋나 보인다(사용자와 그림으로 비교 후 A 선택).
+    // ⚠️대가: 짧은 막대에는 숫자가 안 들어간다. 고정 칸일 때는 모든 값을 찍을 수 있었다 --
+    //   작은 값은 툴팁으로 밀린다.
+    // side: -1 이면 가운데에서 왼쪽으로(매도), +1 이면 오른쪽으로(매수) 자란다.
+    const drawCell = (side, yTop, v, other, max, color, edgeX, price, center) => {
+      const len = v > 0 ? Math.max(1, half * v / max) : 0;
       const rect = document.createElementNS(NS, "rect");
-      rect.setAttribute("x", cx); rect.setAttribute("y", yTop);
-      rect.setAttribute("width", half); rect.setAttribute("height", rowPx);
-      rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", shade(v, max));
+      rect.setAttribute("x", side < 0 ? center - len : center);
+      rect.setAttribute("y", yTop + 0.5);
+      rect.setAttribute("width", len); rect.setAttribute("height", Math.max(1, rowPx - 1));
+      rect.setAttribute("fill", color);
       const title = document.createElementNS(NS, "title");
       const ratio = other > 0 ? v / other : Infinity;
       title.textContent = price.toFixed(1) + " · " + (color === "var(--good)" ? "매수 " : "매도 ")
@@ -5058,11 +5059,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           ? " · 불균형 " + (Number.isFinite(ratio) ? ratio.toFixed(1) + "배" : "일방") : "");
       rect.appendChild(title);
       svg.appendChild(rect);
-      if (v > 0 && rowPx >= 7 && showQty) {
+      // 숫자는 **막대 안에 들어갈 때만**. 고정 칸이 아니라 길이가 변하므로 기준도 길이다.
+      if (v > 0 && rowPx >= 7 && showQty && len >= FOOTPRINT_QTY_MIN_PX) {
         const txt = document.createElementNS(NS, "text");
-        txt.setAttribute("x", cx + half / 2); txt.setAttribute("y", yTop + rowPx / 2 + fontPx * 0.36);
-        txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", fontPx);
-        txt.setAttribute("fill", "var(--ink)"); txt.setAttribute("fill-opacity", INK_OPACITY);
+        txt.setAttribute("x", side < 0 ? center - len + 3 : center + len - 3);
+        txt.setAttribute("y", yTop + rowPx / 2 + fontPx * 0.36);
+        txt.setAttribute("text-anchor", side < 0 ? "start" : "end");
+        txt.setAttribute("font-size", fontPx);
+        txt.setAttribute("fill", "var(--on-fill)"); txt.setAttribute("fill-opacity", INK_OPACITY);
         txt.textContent = fmtFootprintQty(v);
         svg.appendChild(txt);
       }
@@ -5081,6 +5085,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const deltaFont = bw >= 34 ? 11 : 9;
     barRows.forEach((rows, i) => {
       const c = candles[i], x = xAt(i);
+      // 막대가 짧아지면 «어디서 출발했는지»가 안 보인다 -- 봉마다 기준선을 한 줄 긋는다.
+      // (고정 칸일 때는 두 칸이 맞닿아 있어서 경계가 곧 기준선이었다.)
+      if (rows.size) {
+        const axis = document.createElementNS(NS, "line");
+        axis.setAttribute("x1", x + bw / 2); axis.setAttribute("x2", x + bw / 2);
+        axis.setAttribute("y1", mt); axis.setAttribute("y2", plotBottom);
+        axis.setAttribute("stroke", "var(--soft-line)");
+        svg.appendChild(axis);
+      }
       let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0, lowKey = Infinity;
       rows.forEach((cell, key) => {
         buyTot += cell[0]; sellTot += cell[1];
@@ -5091,8 +5104,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const yTop = yAt((key + 1) * rowSize);
         if (yTop + rowPx < mt || yTop > mt + ch) return;   // 창 밖 행은 건너뛴다
         const price = key * rowSize + rowSize / 2;
-        drawCell(x, yTop, cell[1], cell[0], maxSell, "var(--bad)", x - 2, price);          // 왼쪽 = 매도
-        drawCell(x + bw / 2 + 0.5, yTop, cell[0], cell[1], maxBuy, "var(--good)", x + bw, price); // 오른쪽 = 매수
+        const center = x + bw / 2;
+        drawCell(-1, yTop, cell[1], cell[0], maxSell, "var(--bad)", x - 2, price, center);   // 왼쪽 = 매도
+        drawCell(+1, yTop, cell[0], cell[1], maxBuy, "var(--good)", x + bw, price, center);  // 오른쪽 = 매수
         if (key === pocKey) {   // POC -- 그 봉에서 가장 많이 거래된 가격 행
           const poc = document.createElementNS(NS, "rect");
           poc.setAttribute("x", x); poc.setAttribute("y", yTop);
@@ -5762,21 +5776,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       svg.appendChild(g);
       return g;
     };
-    // 히트맵이 왼쪽, 프로파일이 오른쪽(사용자 지시). 히트맵의 오른쪽 끝 = 지금 호가라
-    // 그 옆에 프로파일 가격행이 바로 이어진다 -- 두 그림이 같은 가격축에서 만난다.
-    // 🔴프로파일을 **먼저** 그린다 -- supplyProfileNow 에 행 기하를 남겨야 히트맵이
-    //   같은 y 에 포갠다(x 위치는 호출 순서와 무관하다. 각자 제 <svg> 상자를 받는다).
-    supplyProfileSubBox = { svg: subSvg(SUB_HEAT_W + SUB_GAP, subProfileY, SUB_PROFILE_W, SUB_PROFILE_H),
-                            w: SUB_PROFILE_W, h: SUB_PROFILE_H };
-    renderSupplyProfileSvg(supplyProfileSubBox.svg, latestSupplyProfile,
-                           currentPrice, entryPrice, { w: SUB_PROFILE_W, h: SUB_PROFILE_H });
-    // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
-    // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
-    flowHeatmapSubBox = { svg: subSvg(0, subProfileY, SUB_HEAT_W, SUB_PROFILE_H),
-                          w: SUB_HEAT_W, h: SUB_PROFILE_H };
-    renderFlowHeatmapSvg(flowHeatmapSubBox.svg, { w: SUB_HEAT_W, h: SUB_PROFILE_H });
-    supply1sSubBox = { svg: subSvg(0, sub1sY, w, SUB_1S_H), w, h: SUB_1S_H };
-    renderSupply1s(supply1sSubBox);
+    // 히트맵이 왼쪽, 프로파일이 오른쪽(사용자 지시). 나란히 두되 **축은 각자**다 --
+    // 두 패널의 자연 가격범위가 15배 달라(호가 +-2.4% vs 체결 +-0.16%) 포개면 벽이
+    // 전부 잘린다(renderFlowHeatmapSvg 의 2026-09-19 주석에 실측). 그래서 히트맵은
+    // 제 눈금(위/아래 가격 + 현물 점선)을 직접 그린다.
+    renderSupplyProfileSvg(subSvg(SUB_HEAT_W + SUB_GAP, subProfileY, SUB_PROFILE_W, SUB_PROFILE_H),
+                           latestSupplyProfile, currentPrice, entryPrice,
+                           { w: SUB_PROFILE_W, h: SUB_PROFILE_H });
+    renderFlowHeatmapSvg(subSvg(0, subProfileY, SUB_HEAT_W, SUB_PROFILE_H),
+                         { w: SUB_HEAT_W, h: SUB_PROFILE_H });
+    renderSupply1s({ svg: subSvg(0, sub1sY, w, SUB_1S_H), w, h: SUB_1S_H });
   }
 }
 
