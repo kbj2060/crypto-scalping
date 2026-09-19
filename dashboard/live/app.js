@@ -211,6 +211,26 @@ let oi1s = new Map();
 let oi1sSince = 0;
 // 5분 누적 패널(청산맵 아래). 같은 1초 스냅샷을 duckdb 로 남긴 것을 서버가 5분으로 접어 준다 --
 // 링은 6분뿐이라 몇 시간을 보려면 저장을 거쳐야 한다. 5분 봉이라 15초 폴링으로 충분하다.
+// 캔들 SVG 안의 두 하위 패널(중첩 svg)과 그 상자. 각 fetch 가 **그 패널만** 다시 그릴 수
+// 있게 들고 있는다. 없으면 두 그림의 갱신이 캔들 SVG 전체 렌더에 묶이는데, 그 렌더에는
+// 게이트가 셋이다 -- ①커서가 SVG 위에 있으면 아예 안 그린다(chartHoverActive, 툴팁이
+// 지워지지 않게 하려는 장치) ②스크롤 중 정지 ③400~1000ms 스로틀. 패널이 그 SVG 안으로
+// 들어오면서(2026-09-19) 「보려고 커서를 올리면 1초 차트가 멈춘다」가 됐다.
+// 노드는 캔들 렌더가 매번 새로 만드므로 isConnected 로 옛 노드를 거른다.
+let supply1sSubBox = null;
+let supplyProfileSubBox = null;
+
+function repaintSupply1sPanel() {
+  if (supply1sSubBox && supply1sSubBox.svg.isConnected) renderSupply1s(supply1sSubBox);
+}
+function repaintSupplyProfilePanel() {
+  const b = supplyProfileSubBox;
+  if (!b || !b.svg.isConnected) return;
+  renderSupplyProfileSvg(b.svg, latestSupplyProfile,
+    Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0,
+    Number(snapshotAccountPosition()?.entry_price || 0), { w: b.w, h: b.h });
+}
+
 const API_OI_5M_URL = "/api/oi-5m";
 const OI_5M_POLL_MS = 15000;
 let latestOi5m = null;
@@ -3434,8 +3454,9 @@ async function refreshSupply1s() {
   } catch (error) {
     console.error("Supply 1s fetch error:", error);
   }
-  // 그리는 건 캔들 SVG 가 자기 주기에 한다(이 안의 패널이 됐다) -- 여기서 부르면 같은 SVG 를
-  // 한 번 더 통째로 다시 그린다. 청산 5분 이력·OI 5분과 같은 방식이다.
+  // 받은 즉시 **이 패널만** 다시 그린다. 캔들 SVG 전체를 다시 그리지 않으므로 비싼 패스
+  // (캔들·청산밀도·프로파일)는 안 탄다 -- 호버/스크롤 게이트에도 안 걸린다.
+  repaintSupply1sPanel();
 }
 
 async function refreshSupplyProfile() {
@@ -3452,6 +3473,7 @@ async function refreshSupplyProfile() {
     console.error("Supply profile fetch error:", error);
     latestSupplyProfile = null;
   }
+  repaintSupplyProfilePanel();
 }
 
 async function refreshOi5m() {
@@ -5531,9 +5553,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       svg.appendChild(g);
       return g;
     };
-    renderSupplyProfileSvg(subSvg(subProfileY, SUB_PROFILE_H), latestSupplyProfile,
+    supplyProfileSubBox = { svg: subSvg(subProfileY, SUB_PROFILE_H), w, h: SUB_PROFILE_H };
+    renderSupplyProfileSvg(supplyProfileSubBox.svg, latestSupplyProfile,
                            currentPrice, entryPrice, { w, h: SUB_PROFILE_H });
-    renderSupply1s({ svg: subSvg(sub1sY, SUB_1S_H), w, h: SUB_1S_H });
+    supply1sSubBox = { svg: subSvg(sub1sY, SUB_1S_H), w, h: SUB_1S_H };
+    renderSupply1s(supply1sSubBox);
   }
 }
 
