@@ -3850,6 +3850,11 @@ function renderSupply1s(box = null) {
     path.setAttribute("stroke-linejoin", "round");
     svg.appendChild(path);
   };
+  // 🔴fmtFootprintQty 는 0 에서 **빈 문자열**을 준다(풋프린트 셀에서 «이 칸은 안 그림»이라는
+  //   뜻이라 거기서는 그게 맞다). 여기선 꼬리표라 그대로 쓰면 「고래 +」처럼 숫자가 사라진다
+  //   -- 30초 창은 정확히 0 이 흔하다(고래 주문이 분당 13건이라 30초에 0건인 구간이 있다).
+  //   2026-09-20 배포본 스크린샷에서 실제로 「고래 +」로 떠 있었다.
+  const qty = (v) => fmtFootprintQty(Math.abs(v)) || "0";
   const label = (x, y, text, color, anchor) => {
     const t = document.createElementNS(NS, "text");
     t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("font-size", "10");
@@ -3915,7 +3920,7 @@ function renderSupply1s(box = null) {
     g.setAttribute("stroke", "var(--line)"); g.setAttribute("stroke-opacity", "0.4");
     g.setAttribute("stroke-dasharray", "3 3");
     svg.appendChild(g);
-    label(ml - 3, yF(v) + 3, (v > 0 ? "+" : "-") + fmtFootprintQty(span), "var(--muted)", "end");
+    label(ml - 3, yF(v) + 3, (v > 0 ? "+" : "-") + qty(span), "var(--muted)", "end");
   });
 
   // 0선 기준 면적. 선 하나보다 «위냐 아래냐»가 훨씬 빨리 읽힌다. 고래만 칠한다 -- 셋 다
@@ -3956,7 +3961,7 @@ function renderSupply1s(box = null) {
     const color = end >= 0 ? "var(--good)" : "var(--bad)";
     line(pathOf(rows, (r) => yF(r.v)), color, width, opacity);
     return { y: yF(end), color,
-             text: name + " " + (end >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(end)) };
+             text: name + " " + (end >= 0 ? "+" : "-") + qty(end) };
   };
   const tagR = draw(retail, 1.4, 0.5, "리테일");
   const tagW = draw(whale, 2, 0.95, "고래");
@@ -3972,7 +3977,7 @@ function renderSupply1s(box = null) {
     const tagO = { y: yF(end), color: "var(--warn)",
                    // 좁으면 «신규계약»(73px)이 꼬리표 자리(67px)를 넘는다 -- OI 로 줄인다.
                    text: (narrow ? "OI " : "신규계약 ")
-                         + (end >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(end)) };
+                         + (end >= 0 ? "+" : "-") + qty(end) };
     tags.forEach((t) => { if (Math.abs(tagO.y - t.y) < 12) tagO.y = t.y + (tagO.y >= t.y ? 12 : -12); });
     tags.push(tagO);
   }
@@ -3982,7 +3987,7 @@ function renderSupply1s(box = null) {
   const cumW = secs.reduce((a, s) => { const c = supply1s.get(s); return a + c[2] - c[3]; }, 0);
   label(ml + 2, mt - 5, SUPPLY_1S_ROLL + "초 순수급 ETH"
         + (narrow ? "" : "  ·  5분 누적 고래 " + (cumW >= 0 ? "+" : "-")
-                         + fmtFootprintQty(Math.abs(cumW))), "var(--muted)");
+                         + qty(cumW)), "var(--muted)");
 
   label(ml, h - 3, "5분 전", "var(--muted)");
   label(ml + cw, h - 3, "지금", "var(--muted)", "end");
