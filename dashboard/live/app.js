@@ -7127,7 +7127,17 @@ function manualExitSyncButtons() {
   const row = el("snapExitRow");
   if (!row) return;
   // 서버의 청산 경로는 ETH 전용이다(assemble_exit_plan 이 MARKET_SYMBOLS["eth"] 고정).
-  const sym = ASSET_CONFIG.eth?.symbol || "ETHUSDT";
+  // 🔴2026-09-20 «청산 버튼이 사라졌다»(사용자). 이 줄이 ETHUSDT 만 봤는데 수동 주문은
+  //   2026-09-19 부터 **ETHUSDC** 로 나간다 -- 그래서 ETHUSDC SHORT 1.659 를 들고 있는데도
+  //   hasPos 가 false 였다. 포지션을 **들고 있을 때** 못 닫는 게 이 버튼의 최악이다.
+  //   서버(live_manual_peg_entry resolve_exit_position)와 같은 규칙을 쓴다: 수동 심볼에
+  //   포지션이 있으면 그것, 없으면 시장 심볼. 심볼은 payload 의 exec_symbol 이 말한다
+  //   (환경변수라 하드코딩하면 또 갈라진다). snapshotAccountPosition 은 이미 이 규칙이다.
+  const market = ASSET_CONFIG.eth?.symbol || "ETHUSDT";
+  const execSym = (latestBinanceAccount || lastGoodAccount)?.exec_symbol || "";
+  const base = market.replace(/USDT$/, "");
+  const cand = execSym && execSym !== market && execSym.startsWith(base)
+    ? [execSym, market] : [market];
   // 🔴낡았다고 **버튼을 치우지 않는다**(2026-09-14). 옛 판은 5분이 지나면 행을 통째로 숨겼다 --
   //   급히 닫으려고 연 사람에게서 버튼이 사라지는 건 이 버튼의 존재 이유와 정면으로 어긋난다.
   //   이미 닫힌 포지션을 눌러도 서버가 no_position 으로 막으므로 대가는 헛클릭 한 번이고,
@@ -7140,6 +7150,9 @@ function manualExitSyncButtons() {
   // 2026-09-14 버튼 라벨은 「롱 청산 / 숏 청산」 고정이다(사용자 결정). 한때 수량을 박았는데
   // (「롱 2.754 닫기」) 수량은 바로 아래 줄에 이미 있고, 라벨이 안 변하면 여기서 textContent 를
   // 쓸 이유도 없다 -- index.html 의 글자가 그대로 남는다.
+  // 한 심볼만 고른다 -- 둘을 섞으면 같은 side 가 겹쳐 아래 줄이 «어느 쪽 수량»인지 흐려진다.
+  const sym = cand.find((c) => (src?.positions || [])
+    .some((p) => p.symbol === c && Number(p.qty) > 0)) || cand[0];
   lastExitPositions = new Map((src?.positions || [])
     .filter((p) => p.symbol === sym && Number(p.qty) > 0)
     .map((p) => [p.side, p]));
