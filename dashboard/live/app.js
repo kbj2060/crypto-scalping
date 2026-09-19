@@ -236,9 +236,15 @@ const OI_5M_POLL_MS = 15000;
 let latestOi5m = null;
 let oi5mLastFetchAt = 0;
 const GEX_POLL_MS = 120000;          // 매시 cron -- 2분 폴링이면 충분히 앞선다
-const FLOW_HEATMAP_POLL_MS = 3000;   // agg=3 -- 이보다 자주 받아야 같은 열이다
-const FLOW_HEATMAP_COLS = 300;       // 절반 폭(≈600px)에 2px/열
-const FLOW_HEATMAP_AGG = 3;          // 300열 x 3초 = 15분
+// 2026-09-20 호가 창을 **차트 창 탭에 맞춘다**(사용자 지시).
+// 🔴전에는 15분 고정이라 1h 탭에서 왼쪽(호가 15분)과 오른쪽(체결 60분)이 4배, 4h 탭에서는
+//   16배 다른 구간을 말하고 있었다. index.html 의 창 토글 주석이 경계한 바로 그 상황이다 --
+//   «한 카드 안의 두 그림이 다른 구간을 말하면 읽는 사람이 속는다».
+const FLOW_HEATMAP_COLS = 300;       // 열 수는 고정 -- 전송량(≈3KB)과 해상도를 함께 묶는다
+const flowHeatmapAgg = () =>         // 창 전체를 300열에 담는 초/열
+  Math.max(1, Math.min(60, Math.round(chartWindowBars * 300 / FLOW_HEATMAP_COLS)));
+// 새 열이 agg 초마다 하나 생긴다 -- 그보다 자주 받아봐야 같은 그림이다. 3~15초로 묶는다.
+const flowHeatmapPollMs = () => Math.max(3000, Math.min(15000, flowHeatmapAgg() * 1000));
 const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
 let latestSupplyProfile = null;
 let supplyProfileLastFetchAt = 0;
@@ -3535,11 +3541,12 @@ async function refreshFlowHeatmap() {
   if (activePageTab !== "snapshot" || document.hidden) return;
   if (activeSnapshotAsset !== "eth") return;   // 래스터 수집은 ETH 만 한다
   const now = Date.now();
-  if (now - flowHeatmapLastFetchAt < FLOW_HEATMAP_POLL_MS) return;
+  if (now - flowHeatmapLastFetchAt < flowHeatmapPollMs()) return;
   flowHeatmapLastFetchAt = now;
   try {
     const res = await fetch(
-      `/api/flow/heatmap?symbol=ethusdt&cols=${FLOW_HEATMAP_COLS}&agg=${FLOW_HEATMAP_AGG}&mode=rows`,
+      `/api/flow/heatmap?symbol=ethusdt&cols=${FLOW_HEATMAP_COLS}`
+      + `&agg=${flowHeatmapAgg()}&mode=rows`,
       { cache: "no-cache" });
     if (!res.ok) throw new Error(`flow-heatmap ${res.status}`);
     const j = await res.json();
@@ -4143,8 +4150,11 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
         r.setAttribute("fill", "#7dd3fc");
         r.setAttribute("opacity", (0.25 + 0.75 * Math.min(1, pers / Math.max(inst, 1e-9))).toFixed(2));
         const t = document.createElementNS(NS, "title");
+        const winMin = latestFlowHeatmap && latestFlowHeatmap.summary
+          ? Math.round(latestFlowHeatmap.summary.window_s / 60) : 0;
         t.textContent = "호가 " + (k * rowSize).toFixed(rowSize >= 1 ? 0 : 1)
-          + " — 걸려 있는 양 " + Math.round(inst) + " ETH · 그중 창 내내 남은 것 "
+          + " — 걸려 있는 양 " + Math.round(inst) + " ETH · 그중 "
+          + (winMin ? winMin + "분 " : "") + "창 내내 남은 것 "
           + Math.round(pers) + " (" + Math.round(100 * pers / Math.max(inst, 1e-9)) + "%)\n"
           + "⚠️체결이 아니라 **지금 걸려 있는** 지정가다 -- 언제든 취소될 수 있다.\n"
           + "⚠️지지·저항 판정은 하지 않는다(버팀 능력 미측정).";
