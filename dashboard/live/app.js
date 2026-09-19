@@ -246,8 +246,13 @@ const GEX_POLL_MS = 120000;          // 매시 cron -- 2분 폴링이면 충분�
 const FLOW_HEATMAP_COLS = 300;       // 열 수는 고정 -- 전송량(≈3KB)과 해상도를 함께 묶는다
 const flowHeatmapAgg = () =>         // 창 전체를 300열에 담는 초/열
   Math.max(1, Math.min(60, Math.round(chartWindowBars * 300 / FLOW_HEATMAP_COLS)));
-// 새 열이 agg 초마다 하나 생긴다 -- 그보다 자주 받아봐야 같은 그림이다. 3~15초로 묶는다.
-const flowHeatmapPollMs = () => Math.max(3000, Math.min(15000, flowHeatmapAgg() * 1000));
+// 2026-09-20 1초(사용자 요청). 「새 열이 agg 초마다 하나니 그보다 자주 받아야 같은 그림」
+// 이라 3~15초로 묶고 있었는데, **틀렸다** -- 맨 끝 열은 진행 중이라 매초 바뀌고, 창 전체를
+// 접어 내는 행 통계도 같이 움직인다. 실측(1h 탭, 1초 간격 두 번): inst 46/272행 2.52% ·
+// d60 217/272행 7.37% · refill 246/272행이 바뀐다(peak 만 0). 빈 그림에 돈을 쓰는 게 아니다.
+// 🔴비용은 **서버가 1초 SWR 로 묶는다**(server.py api_flow_heatmap) -- 안 그러면 탭 수만큼
+//   곱해진다. 한 번 11~32ms(탭별 창 길이), 1Hz 면 코어 1.1~3.2%.
+const flowHeatmapPollMs = () => 1000;
 const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
 let latestSupplyProfile = null;
 let supplyProfileLastFetchAt = 0;
@@ -4322,23 +4327,38 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
         }
       }
       if (v.inst > maxI) maxI = v.inst;
+      v.rw = v.refill / Math.max(v.peak, 1e-9);
       return v;
     });
+    // 🔴2026-09-20 농도를 **창 안 순위**로 칠한다. 절대 곡선(log2(rw)/2.6)으로 칠했더니
+    //   탭마다 죽었다 -- 실측 포화율 15m 11% · 1h 67% · 2h 90% · **4h 97%**(sd 0.037).
+    //   refill 은 창에 비례해 쌓이는데 나는 15분 창에서 보정했다. 창 길이로 나누는 것도
+    //   답이 아니다 -- peak 도 같이 커져 단순 비례가 아니고, 그렇게 하면 4h 에서 rw 중앙이
+    //   0.79 라 전부 최저 농도가 된다(sd 0.015). 양쪽 다 «축이 없는» 상태다.
+    //   순위는 탭과 무관하게 잉크 범위를 다 쓴다. 대신 농도는 **이 창 안에서의 상대값**이고
+    //   절대 배수는 툴팁이 숫자로 말한다(조용한 시간과 시끄러운 시간이 같아 보이는 것이
+    //   이 선택의 대가다).
+    const liveRw = per.filter((v) => v.inst > 0).map((v) => v.rw).sort((a, b) => a - b);
+    const rwPct = (x) => {            // 0~1 분위. 같은 값이 여럿이면 가운데를 준다.
+      if (liveRw.length < 2) return 0.5;
+      let lo = 0, hi = liveRw.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (liveRw[m] < x) lo = m + 1; else hi = m; }
+      let hi2 = lo;
+      while (hi2 < liveRw.length && liveRw[hi2] === x) hi2++;
+      return ((lo + hi2) / 2) / liveRw.length;
+    };
     if (maxI > 0) {
       keys.forEach((k, j) => {
         const { inst, pers, peak, refill, d60 } = per[j];
         if (inst <= 0) return;
         const bl = (inst / maxI) * (sideW - 2);
-        // 재깔림 = refill/peak. 1배(한 번 깔고 앉음) ~ 6배 이상(계속 다시 깖)을 농도로.
-        // 🔴선형이 아니라 log2 다 -- 실측 분포가 거리 밴드별 1.05~10.5 로 한 자릿수를
-        //   넘나들어서, 선형이면 먼 벽 전부가 같은 옅은 색으로 뭉갠다.
+        // 재깔림 = refill/peak. 농도는 그 값의 **창 안 분위**다(위 주석).
         const rw = refill / Math.max(peak, 1e-9);
         const r = document.createElementNS(NS, "rect");
         r.setAttribute("x", leftEdge - 1 - bl); r.setAttribute("y", mt + j * rowPx + 0.5);
         r.setAttribute("width", Math.max(1, bl)); r.setAttribute("height", Math.max(1, rowPx - 1));
         r.setAttribute("fill", "#7dd3fc");
-        r.setAttribute("opacity",
-          (0.22 + 0.78 * Math.min(1, Math.log2(Math.max(1, rw)) / 2.6)).toFixed(2));
+        r.setAttribute("opacity", (0.22 + 0.78 * rwPct(rw)).toFixed(2));
         // ── 접근행동(사용자 요청 2026-09-20) ────────────────────────────
         // 「가격이 다가왔을 때 이 가격대가 얇아졌나」. 자격 빈이 전체의 28%뿐이라
         // 막대 색·길이 같은 **행 채널로는 못 쓴다**(72%가 빈칸이면 «얇다»와 «모른다»가
@@ -4373,8 +4393,9 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
           + " (" + Math.round(100 * pers / Math.max(inst, 1e-9)) + "%)\n"
           + "재깔림 " + rw.toFixed(1) + "배 — " + win + " 안에서 최대치의 "
           + rw.toFixed(1) + "배(" + Math.round(refill) + " ETH)가 다시 깔렸습니다. "
-          + (rw >= 3 ? "같은 자리를 계속 다시 까는 중입니다(막대가 진합니다)."
-                     : "한 번 깔고 거의 그대로입니다(막대가 옅습니다).") + "\n"
+          + "이 창의 상위 " + Math.round(100 * (1 - rwPct(rw))) + "% 입니다"
+          + " — 🔴농도는 **이 창 안의 상대 순위**라, 조용한 시간과 시끄러운 시간이 같은 "
+          + "진하기로 보입니다. 절대값은 이 숫자로 보세요.\n"
           + "최근 60초 " + (d60 >= 0 ? "+" : "") + Math.round(d60) + " ETH — "
           + (Math.abs(d60) < 1 ? "변화 없음" : d60 > 0 ? "쌓는 중" : "빼는 중") + "\n"
           + (apr === null ? ""
@@ -4635,15 +4656,18 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   5초·1초 주기였다 -- 이제 그 주기로 같이 다시 그려진다. 사용자 결정으로 감수한다.
   const subOn = svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth";
   // 🔴이 세 값의 합(SUB_TOTAL)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야
-  //   한다(666 = 400 + 266 -> 706 = 400 + 306). 상자가 작으면 그만큼 가격 플롯이 눌린다.
+  //   한다(666 = 400 + 266 -> 706 = 400 + 306 -> 756 = 400 + 356). 상자가 작으면
+  //   그만큼 가격 플롯이 눌린다.
   // 2026-09-19 프로파일 150 -> 190 (아티팩트 댓글 "조금만 더 키워줘"). 행 수는 높이가 정하므로
   //   (renderSupplyProfileSvg 의 maxRows) 16행 -> 22행이 된다.
-  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 100 : 0;
+  // 2026-09-20 1초 수급 100 -> 150 (사용자 요청 "좀 더 키워줘"). 상자도 706 -> 756 으로
+//   같이 키운다 -- 안 그러면 가격 플롯이 그만큼 눌린다(아래 경고 블록).
+  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 150 : 0;
   // 2026-09-19 히트맵은 프로파일 **아래 제 줄**이다(사용자 지시). 좌우 반씩 나누던 판을
   // 되돌렸다 -- 프로파일 막대 해상도가 절반이 됐고, 두 패널의 자연 가격범위가 15배 달라
   // (호가 ±2.4% vs 체결 ±0.16%) 나란히 둘 이유였던 «같은 축»도 성립하지 않았다.
   // ⭐데스크톱·모바일이 같은 모양이 되므로 subStack 분기가 통째로 사라진다.
-  //   SUB_TOTAL 306 = 8 + 190(프로파일) + 8 + 100(1초 수급)
+  //   SUB_TOTAL 356 = 8 + 150(1초 수급) + 8 + 190(프로파일)   ← 2026-09-20 위아래 뒤집힘
   const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_GAP + SUB_1S_H : 0;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
@@ -4657,7 +4681,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       + `${412 + SUB_TOTAL}px 로 맞추세요(그만큼 가격 플롯이 눌립니다).`);
   }
 
-  const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 91;
+  // 2026-09-20 아티팩트 댓글: 수급(1초)을 1h/2h/4h 버튼 **바로 아래**로 올리고 그 아래에
+  // 프로파일을 둔다. 위에서부터 [1초 수급][프로파일][가격 플롯][OI][청산] 이다.
+  // ⭐두 패널을 옮기는 대신 **mt(가격 플롯의 윗변)를 그만큼 내린다**. mt 는 이 함수에서
+  //   18곳이 쓰는 «플롯 top» 이라, 그 뜻을 유지하면 yAt·클램프·커서 매핑·세로선을 한 줄도
+  //   안 건드린다. 상자 총높이는 SUB_TOTAL 과 함께 움직인다(756 = 400 + 356).
+  const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112,
+        mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 91;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   // OI 신규계약 레인 -- 청산 레인 **바로 위**(사용자 지시). 별도 패널이 아니라 이 SVG 안의
   // 서브플롯이라야 캔들과 x축(봉)이 구성상 같아진다(레짐 리본이 같은 이유로 여기 있다).
@@ -4672,14 +4702,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const OI_PANEL_H = oiBars.length ? (mobileChart ? 26 : 34) : 0;
   const OI_PANEL_GAP = oiBars.length ? 6 : 0;
   const cw = w - ml - mr;
-  const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP - SUB_TOTAL;
+  const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
-  // 가격 플롯 바로 아래 = 수급 두 패널, 그다음이 OI · 청산 레인이다.
-  // 상하일 때 히트맵이 위, 프로파일이 아래다 -- 프로파일을 1초 수급 바로 위에 붙여
-  // «체결 계열» 둘이 이웃하게 한다(히트맵은 호가라 계열이 다르다).
-  const subProfileY = plotBottom + SUB_GAP;
-  const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
-  const oiPanelY = plotBottom + SUB_TOTAL + OI_PANEL_GAP;
+  // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). 1초 수급이 먼저, 프로파일이 그 아래 --
+  // 「체결 계열」 둘은 여전히 이웃한다. OI·청산 레인은 플롯 바로 아래 그대로다.
+  const sub1sY = mtTop;
+  const subProfileY = sub1sY + SUB_1S_H + SUB_GAP;
+  const oiPanelY = plotBottom + OI_PANEL_GAP;
   const liqPanelY = oiPanelY + OI_PANEL_H + LIQ_PANEL_GAP;
   const NS = "http://www.w3.org/2000/svg";
   // 풋프린트는 서버가 주는 12봉이 곧 창이다 -- 모바일 핀치줌(visibleCandleWindow)으로 더

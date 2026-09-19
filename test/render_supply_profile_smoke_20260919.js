@@ -30,6 +30,20 @@ const HJ = JSON.parse(fs.readFileSync("/home/kbj20/crypto-scalping/tmp/sp_probe/
 const ROW_STATS = ["inst", "pers", "peak", "refill", "d60"];
 const HM = HJ.rows ? { ...HJ, rows: Object.assign({ ...HJ.rows },
   ...ROW_STATS.map((k) => ({ [k]: b64(HJ.rows[`${k}_f4`] || HJ.rows.inst_f4) }))) } : null;
+// 접근행동은 **제 격자**(4시간 창)로 온다. 픽스처엔 없으므로 히트맵 격자에 합성해 넣어
+// 표식 경로를 실제로 그려 본다 -- 값 자체는 무의미하고, 보는 건 «고리가 상자를 넘는가»다.
+if (HM && HM.rows) {
+  const n = HM.rows.inst.length;
+  // 하네스가 없는 축을 inst 로 대체하는 바람에 refill==peak 라 rw 가 전 행 1.0 이 된다
+  // (= 농도 분위가 하나). 실데이터는 그렇지 않으므로 여기서 분산을 준다 -- 안 그러면
+  // 아래 «농도가 축 노릇을 하는가» 검사가 픽스처 때문에 항상 실패한다.
+  HM.rows.refill = Float32Array.from(
+    { length: n }, (_, i) => HM.rows.peak[i] * (0.3 + 4.7 * ((i * 37) % 100) / 100));
+  HM.rows.approach_bin_lo = HM.rows.bin_lo;
+  HM.rows.approach_bin_size = HM.rows.bin_size;
+  HM.rows.approach = Float32Array.from(
+    { length: n }, (_, i) => (i % 5 === 0 ? 0.6 : i % 5 === 1 ? NaN : 1.3));
+}
 
 function run(label, profile, hm, w, h, narrow) {
   const rects = [];
@@ -67,6 +81,22 @@ function run(label, profile, hm, w, h, narrow) {
     else if (x < -0.5 || x + rw > w + 0.5) bad.push(["가로 넘침", r._a]);
     else if (y < -0.5 || y + rh > h + 0.5) bad.push(["세로 넘침", r._a]);
   }
+  // 농도 검사 -- 2026-09-20 회귀. 재깔림 농도를 절대 곡선(log2(rw)/2.6)으로 칠했는데
+  // 그 보정을 15분 창에서 했다. 화면은 탭에 따라 1h/2h/4h 를 쓰고 refill 은 창에 비례해
+  // 쌓이므로 **4h 에서 97%가 최대 농도**가 됐다(sd 0.037 = 축이 없음). 순위 방식으로
+  // 고쳤고, 여기서 «농도가 실제로 갈리는가»를 본다 -- 눈으로는 「다 비슷하네」로 넘어간다.
+  const op = rects.filter((r) => r._a.fill === "#7dd3fc").map((r) => +r._a.opacity);
+  if (op.length >= 8) {
+    const mean = op.reduce((a, b) => a + b, 0) / op.length;
+    const sd = Math.sqrt(op.reduce((a, b) => a + (b - mean) ** 2, 0) / op.length);
+    const sat = op.filter((v) => v >= 0.99).length / op.length;
+    if (sd < 0.05 || sat > 0.5) {
+      console.log(`🔴 ${label}: 호가 농도가 축 노릇을 못 한다 — sd ${sd.toFixed(3)} · `
+                  + `포화 ${Math.round(100 * sat)}% (n=${op.length})`);
+      return false;
+    }
+  }
+
   if (bad.length) {
     console.log(`🔴 ${label}: 경계 위반 ${bad.length}건 — 예: ${bad[0][0]} ${JSON.stringify(bad[0][1])}`);
     return false;

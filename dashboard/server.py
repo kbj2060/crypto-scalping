@@ -3228,8 +3228,13 @@ def make_app() -> web.Application:
             raise web.HTTPBadRequest(reason="bad_cols_or_agg") from None
         loop = asyncio.get_running_loop()
         rows_only = request.query.get("mode") == "rows"
-        payload = await loop.run_in_executor(
-            HEATMAP_EXECUTOR, functools.partial(_heatmap_read, symbol, cols, agg, rows_only))
+        # 2026-09-20 화면이 1초 주기로 받는다(사용자 요청). 실측 한 번 11~32ms(탭별)이라
+        # 1Hz 면 코어 1.1~3.2% 인데, **탭 수만큼 곱해진다**. 1초 SWR 로 묶어 몇 명이 보든
+        # 비용을 한 번으로 고정한다 -- 래스터가 1초에 한 행이라 그보다 촘촘한 캐시는 뜻이 없다.
+        payload = await swr_cached(
+            f"heatmap_{symbol}_{cols}_{agg}_{int(rows_only)}", 1.0,
+            lambda: loop.run_in_executor(
+                HEATMAP_EXECUTOR, functools.partial(_heatmap_read, symbol, cols, agg, rows_only)))
         # 접근행동은 창이 4시간이라 폴링마다 못 읽는다. 120초 캐시 + 낡은 값 먼저 준다.
         if rows_only and payload.get("rows"):
             try:
