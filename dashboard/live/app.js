@@ -6478,7 +6478,7 @@ function entryNote(text, tone) {
 }
 
 // 2026-09-13 «지금 상황» 플랜 한 줄: 보유시간 권고 · 기대 체결 · 예산 사다리. 서버 plan.trade_plan.
-function tradePlanLines(tp) {
+function tradePlanLines(tp, targetLev) {
   if (!tp) return [];
   const out = [];
   // ⭐처방: 세 값을 한 줄로. 이게 «이번 진입을 어떻게 하라»의 전부다.
@@ -6519,11 +6519,19 @@ function tradePlanLines(tp) {
     // 거래소 레버리지 설정. 위험이 아니라 «상한을 거래소에 새기는 값»이라 문구도 그렇게 쓴다.
     const lv = rx.exchange_leverage;
     if (lv && lv.available) {
-      out.push(`거래소 레버리지 ${lv.setting}배로 설정 — ${lv.note}`
-        + ` · 증거금 ${lv.margin_pct_of_equity}% 잠김`
-        + (lv.forced_by_position ? "" :
-           lv.enforces_cap ? " · 화면을 우회해도 상한이 걸립니다"
-                           : " · ⚠거래소 천장이 상한보다 큽니다(눈금이 성깁니다)"));
+      // 🔴실제로 거래소에 걸리는 값은 **plan.target_leverage** 다. 2026-09-20 부터 화면이
+      //   물타기에서는 «기존 포지션과 같은 값», 신규에서는 20배로 고정해 보내므로 모델의
+      //   lv.setting 과 다를 수 있다 -- 여기에 모델값을 적으면 «본 숫자»와 «걸리는 숫자»가
+      //   갈린다. 다를 때는 뒤따르는 파생 문구도 떼어낸다: margin_pct_of_equity 와
+      //   enforces_cap 은 둘 다 lv.setting 으로 계산된 값이라 그대로 붙이면 거짓말이 된다.
+      const set = Number(targetLev) || lv.setting;
+      const same = set === lv.setting;
+      out.push(`거래소 레버리지 ${set}배로 설정`
+        + (same ? "" : ` (모델 추천 ${lv.setting}배)`) + ` — ${lv.note}`
+        + (!same ? "" : ` · 증거금 ${lv.margin_pct_of_equity}% 잠김`
+           + (lv.forced_by_position ? "" :
+              lv.enforces_cap ? " · 화면을 우회해도 상한이 걸립니다"
+                              : " · ⚠거래소 천장이 상한보다 큽니다(눈금이 성깁니다)")));
     }
   }
   const h = tp.hold || {};
@@ -6578,7 +6586,30 @@ function manualLevValue() {
   return Math.max(5, Math.round((Number(g.value) || 5) / 5) * 5);
 }
 // 자동이면 서버에 아무것도 안 보낸다 -- 서버가 모델 추천을 쓴다(단일 진실 원천).
-const manualLevQuery = () => (manualLevAuto() ? "" : `&lev=${manualLevValue()}`);
+// 2026-09-20 사용자 지시 둘.
+// ① **물타기는 레버리지를 고를 수 없다.** 열린 포지션이 있으면 내리는 쪽은 거래소가 막고
+//    (-2028 MIN_LEVERAGE_RATIO -- 내리면 기존 포지션 초기증거금이 올라가 순자산을 넘는다,
+//    live_eth_trade_plan_20260913.py 의 position_floor), 남는 건 «올리기»뿐이다. 올릴 이유가
+//    없으면 기존 값 그대로가 맞다 -- 같은 값이면 설정 자체가 안 바뀌어 거부될 수도 없다.
+//    (position_floor = 명목/순자산 과는 다른 값이다. 여기서 고정하는 건 «거래소에 걸린
+//     설정»이고, 포지션이 그 설정으로 이미 열려 있으므로 언제나 바닥 위에 있다.)
+// ② **신규 진입의 «자동»은 모델 추천이 아니라 20배 고정**이다.
+// 🔴세 경로 -- 미리보기 쿼리 · 실주문 pending · 게이지 표시 -- 가 **이 한 함수**를 본다.
+//   따로 두면 «미리보기는 20배인데 주문은 모델값»이 된다.
+const MANUAL_LEV_AUTO = 20;
+const manualLevLocked = () => {
+  const v = Number(snapshotAccountPosition()?.leverage) || 0;
+  return v > 0 ? v : null;
+};
+function manualLevEffective() {
+  const locked = manualLevLocked();
+  if (locked) return locked;
+  return manualLevAuto() ? MANUAL_LEV_AUTO : manualLevValue();
+}
+const manualLevQuery = () => {
+  const v = manualLevEffective();
+  return v ? `&lev=${v}` : "";
+};
 
 function renderLevGauge(plan) {
   const g = el("snapLevGauge");
@@ -6590,24 +6621,35 @@ function renderLevGauge(plan) {
     const top = Math.max(5, Math.floor(Math.max(...LEV_STEPS) / 5) * 5);
     g.max = String(top);
   }
-  // 자동이면 모델값으로 스냅한다(5단위라 가장 가까운 눈금으로). 손으로 만지는 중이면 안 건드린다.
-  if (manualLevAuto() && plan.leverage_model) {
-    g.value = String(Math.max(5, Math.round(plan.leverage_model / 5) * 5));
+  const locked = manualLevLocked();
+  // 물타기면 게이지도 «자동» 체크박스도 **감춘다** -- 고를 수 없는 것을 고를 수 있는 것처럼
+  // 보여주면 안 된다. 기존 레버리지가 5의 배수가 아닐 수도 있어(예 ×3) 5단위 게이지로는
+  // 그 값을 정확히 나타내지도 못한다. 값은 아래 꼬리표가 숫자로 말한다.
+  g.hidden = !!locked;
+  el("snapLevAuto")?.closest(".lev-auto")?.toggleAttribute("hidden", !!locked);
+  // 자동이면 20배로 스냅한다. 손으로 만지는 중이면 안 건드린다.
+  if (!locked && manualLevAuto()) {
+    g.value = String(MANUAL_LEV_AUTO);
     syncRangeFill(g);       // 프로그램이 바꾼 값은 input 이벤트가 없다
   }
-  g.disabled = manualLevAuto();
-  const v = manualLevValue();
+  g.disabled = !!locked || manualLevAuto();
+  const v = manualLevEffective();
+  if (v == null) return;
   const min = plan.leverage_min_feasible;
   const floor = plan.leverage_position_floor;
   // 포지션 바닥 아래는 **거래소가 거부한다**(-2028). 상한 경고보다 이게 먼저다.
+  // 고정된 값은 정의상 바닥 위지만(그 설정으로 이미 열려 있다) 검사는 남긴다 -- 서버가
+  // 주는 값이라 내 가정이 틀리면 조용히 넘어가는 대신 화면이 말하게 한다.
   const rejected = floor != null && v < floor;
   const low = !rejected && min != null && v < min;
-  out.textContent = `${v}배` + (manualLevAuto() ? " (모델)" : " (수동)")
+  out.textContent = `${v}배`
+    + (locked ? " (기존 포지션과 동일)" : manualLevAuto() ? " (자동)" : " (수동)")
     + (plan.leverage_model && v !== plan.leverage_model ? ` · 모델 ${plan.leverage_model}배` : "")
     + (rejected ? ` · 🔴거래소가 거부합니다(포지션 때문에 최소 ${Math.ceil(floor)}배)`
        : low ? ` · ⚠상한만큼 못 엽니다(최소 ${Math.ceil(min)}배)` : "");
+  // 🔴같은 줄을 두 번 쓰고 있었다 -- 뒤 줄이 앞 줄을 덮어 **rejected(거래소 거부)가 색을
+  //   잃었다**. 둘 중 경고가 더 급한 쪽이 지워지던 셈이라 고친다.
   out.className = (rejected || low) ? "entry-was bad" : "entry-was";
-  out.className = low ? "entry-was bad" : "entry-was";
   syncRangeFill(g);
 }
 
@@ -6685,7 +6727,7 @@ function manualExitPlanHtml(plan) {
   // 대상이고, «최소 N% 는 닫아야 합니다»는 행동을 바꾸는 값이라 위에서 이미 항상 보인다.
   parts.push(entryDetailHtml([
     ...(r && !(r.required_fraction > 0) ? [escapeHtml(riskLine(r))] : []),
-    ...tradePlanLines(plan.trade_plan).map(escapeHtml),
+    ...tradePlanLines(plan.trade_plan, plan.target_leverage).map(escapeHtml),
   ]));
   parts.push(`<div class="entry-cap">${plan.dry_run
     ? "미리보기 전용 — 주문은 나가지 않습니다."
@@ -6860,7 +6902,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   if (plan.blocked) return;
   const pct = Math.round(100 * (plan.fraction ?? 1));
   manualEntryPending = { side, quantity: plan.quantity, kind, pct,
-                         lev: manualLevAuto() ? null : manualLevValue() };
+                         lev: manualLevEffective() };
   // 🔴진입은 «길게 누르기»가 곧 확인이다 -- 확인 버튼을 띄우면 같은 주문이 두 번 나갈 길이
   //   생긴다(누르고 있는 동안 pending 이 잡히므로). 청산은 그대로 버튼으로 확인한다.
   const btn = el("snapEntryConfirm");
