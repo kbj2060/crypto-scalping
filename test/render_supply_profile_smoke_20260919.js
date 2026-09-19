@@ -4,8 +4,18 @@
 //   node test/render_supply_profile_smoke_20260919.js
 const fs = require("fs");
 const src = fs.readFileSync("dashboard/live/app.js", "utf8");
-const m = src.match(/function renderSupplyProfileSvg\(svg, profile, currentPrice, entryPrice = 0, box = null\) \{[\s\S]*?\n\}\n/);
-if (!m) { console.log("🔴 함수 추출 실패"); process.exit(1); }
+// 🔴렌더 함수 혼자 뽑으면 **형제 헬퍼를 부르는 순간 ReferenceError** 가 난다(브라우저에선
+//   둘 다 전역이라 안 나는데 여기서만 난다). 2026-09-20 에 approachAt 이 추가되면서 실제로
+//   그랬다 -- 라이브 버그가 아니라 하네스 구멍이다. 헬퍼가 늘면 이 목록에 이름만 더한다
+//   (오류 메시지가 «X is not defined» 로 어느 이름인지 바로 알려준다).
+const NEEDS = ["renderSupplyProfileSvg", "approachAt"];
+const grab = (name) => {
+  const re = new RegExp("function " + name + "\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n");
+  const hit = src.match(re);
+  if (!hit) { console.log(`🔴 함수 추출 실패: ${name}`); process.exit(1); }
+  return hit[0];
+};
+const m = [NEEDS.map(grab).join("\n")];
 
 const b64 = (s) => { const b = Buffer.from(s, "base64");
                      return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
