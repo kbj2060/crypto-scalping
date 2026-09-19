@@ -3649,6 +3649,9 @@ async function refreshFlowHeatmap() {
     const f4 = (b64) => new Float32Array(raw(b64).buffer);
     // 2026-09-20 행 통계가 둘 -> 다섯. 247빈 x 4B x 5 = 5KB(걷어낸 이미지가 102KB 였다).
     const ROW_STATS = ["inst", "pers", "peak", "refill", "d60"];
+    // 2026-09-20 접근행동은 **4시간 창**이라 bin_lo/n_bins 가 위 다섯과 다르다
+    // (그 사이 mid 가 움직여 격자가 넓다). 절대가격으로 따로 찾는다.
+    if (j.rows && j.rows.approach_f4) j.rows.approach = f4(j.rows.approach_f4);
     latestFlowHeatmap = { ...j, rows: j.rows
       ? Object.assign({ ...j.rows }, ...ROW_STATS.map((k) => ({ [k]: f4(j.rows[k + "_f4"]) })))
       : null };
@@ -4336,6 +4339,30 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
         r.setAttribute("fill", "#7dd3fc");
         r.setAttribute("opacity",
           (0.22 + 0.78 * Math.min(1, Math.log2(Math.max(1, rw)) / 2.6)).toFixed(2));
+        // ── 접근행동(사용자 요청 2026-09-20) ────────────────────────────
+        // 「가격이 다가왔을 때 이 가격대가 얇아졌나」. 자격 빈이 전체의 28%뿐이라
+        // 막대 색·길이 같은 **행 채널로는 못 쓴다**(72%가 빈칸이면 «얇다»와 «모른다»가
+        // 같은 그림이 된다). 그래서 얇아진 행에만 작은 고리를 얹는다.
+        // 🔴0.8 은 임의값이 아니라 **실측 분포에서 잡은 선**이다(정규화 후 p10 0.66 ·
+        //   p50 1.22 · shrink<0.8 이 16%). 아무것도 안 걸리는 날은 표식이 0개여도
+        //   맞다 -- 분위로 고정하면 «언제나 몇 개»가 나와 거짓 존재감을 만든다.
+        // ⭐2026-09-20 검증함(ETH 5.2일·4시간 창 31개): 얇아진 가격대 비율이 창마다
+        //   9~20%로 안정적이고, 인접 창 지속성 rho +0.262±0.026(양수 28/30)이 회전
+        //   대조군 +0.067±0.032 를 4.7 SE 로 앞선다. 표식 지속률 25% vs 기저 15%.
+        //   ⇒ 표식은 잡음이 아니라 그 가격대의 성질이다.
+        // 🔴그래도 스푸핑 «판정»이 아니다. 반대 방향(다가오면 두꺼워짐)이 46%로 더 흔하고,
+        //   표식의 75%는 4시간 뒤 사라지며, **가격 예측력은 재지 않았다**. 툴팁도 그렇게 적는다.
+        const apr = approachAt(hm, k * rowSize, rowSize);
+        if (apr !== null && apr < 0.8) {
+          const mk = document.createElementNS(NS, "circle");
+          mk.setAttribute("cx", Math.max(ml + 4, leftEdge - 1 - bl - 4));
+          mk.setAttribute("cy", mt + j * rowPx + rowPx / 2);
+          mk.setAttribute("r", Math.min(3, Math.max(1.8, rowPx / 4)));
+          mk.setAttribute("fill", "none");
+          mk.setAttribute("stroke", "#7dd3fc");
+          mk.setAttribute("stroke-width", "1.2");
+          svg.appendChild(mk);
+        }
         const t = document.createElementNS(NS, "title");
         const winMin = latestFlowHeatmap && latestFlowHeatmap.summary
           ? Math.round(latestFlowHeatmap.summary.window_s / 60) : 0;
@@ -4350,6 +4377,17 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
                      : "한 번 깔고 거의 그대로입니다(막대가 옅습니다).") + "\n"
           + "최근 60초 " + (d60 >= 0 ? "+" : "") + Math.round(d60) + " ETH — "
           + (Math.abs(d60) < 1 ? "변화 없음" : d60 > 0 ? "쌓는 중" : "빼는 중") + "\n"
+          + (apr === null ? ""
+             : "접근행동 " + apr.toFixed(2) + "배 — 가격이 이 근처(0.35% 안)에 왔을 때 "
+               + "같은 거리 평균 두께의 " + apr.toFixed(2) + "배였습니다(최근 4시간). "
+               + (apr < 0.8 ? "◌ 표식: 다가오면 얇아진 쪽입니다."
+                            : apr > 1.25 ? "다가오면 두꺼워진 쪽입니다." : "거의 그대로입니다.")
+               + "\n검증(ETH 5.2일·4시간 창 31개): 이 성질은 창마다 안정적이고"
+               + "(얇아진 가격대 9~20%), 지금 표식이 붙은 가격대는 4시간 뒤에도 표식일 확률이 "
+               + "25%로 평균 15%의 1.7배입니다. 지속성 rho +0.26 vs 회전 대조군 +0.07.\n"
+               + "🔴그래도 «스푸핑» 판정이 아닙니다 — 같은 창에서 반대 방향(다가오면 두꺼워짐)이 "
+               + "46%로 더 흔하고, 표식의 75%는 4시간 뒤 사라지며, **가격이 어디로 갈지는 "
+               + "재지 않았습니다**.\n")
           + "⚠️체결이 아니라 **지금 걸려 있는** 지정가다 -- 언제든 취소될 수 있다.\n"
           + "⚠️지지·저항도 «스푸핑»도 판정하지 않는다. 「다가오면 빠지는가」는 이 창에서\n"
           + "   측정 자체가 안 된다(자격 빈 9개 · near/far 중앙 0.875, 2026-09-20 실측).";
@@ -4383,6 +4421,21 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   });
   svg.appendChild(nowG);
   updateSupplyProfileNow(currentPrice);
+}
+
+// 접근행동 값을 **절대 가격**으로 찾는다. 4시간 창이라 격자가 위 다섯 배열과 다르다.
+// 한 행이 여러 빈을 덮으면 **가장 얇아진 값**을 쓴다 -- 비를 평균내면 «한 빈만 빠졌다»가
+// 이웃에 묻힌다. 값이 없는 빈(NaN)은 건너뛴다(0 으로 읽으면 «완전히 빠졌다»가 된다).
+function approachAt(hm, price, rowSize) {
+  if (!hm || !hm.approach || !(hm.approach_bin_size > 0)) return null;
+  let best = null;
+  for (let q = 0; q < rowSize; q += hm.approach_bin_size) {
+    const i = Math.round((price + q) / hm.approach_bin_size) - hm.approach_bin_lo;
+    if (i < 0 || i >= hm.approach.length) continue;
+    const v = hm.approach[i];
+    if (Number.isFinite(v) && (best === null || v < best)) best = v;
+  }
+  return best;
 }
 
 // 현재가 박스를 제 행으로 옮긴다. 프로파일을 통째로 다시 그리지 않는 **유일한** 경로다.
