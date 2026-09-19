@@ -2902,22 +2902,19 @@ svg {
   padding: 3px;
   border: 0;
   border-radius: 999px;
-  /* 유리는 «면 하나»가 아니라 겹이다(참조 자료의 4층 구성).
-     ③ 흐르는 빛 -- 왼쪽 위에서 들어오는 광원.
-     ② 프레넬 -- 실제 유리는 위에서 볼 때 위쪽이 밝다.
-     ① 바닥 -- 4% 흰색. 더 올리면 «서리 낀 플라스틱»이 된다. */
-  background:
-    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, .10) 0%, transparent 50%),
-    linear-gradient(to bottom, rgba(255, 255, 255, .08), rgba(255, 255, 255, 0) 62%),
-    var(--seg-fill);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  /* ④ 림: 위 1px 은 빛, 아래 1px 은 그늘, 전체는 실낱. 선이 아니라 «두께»를 만든다. */
-  box-shadow:
-    inset 0 1px 1px var(--seg-rim-top),
-    inset 0 -1px 1px rgb(var(--shadow) / .10),
-    inset 0 0 0 1px var(--seg-rim);
+  /* 🔴다크는 **유리를 쓰지 않는다**(2026-09-19 사용자 지시: "구성은 이렇게 하되 유리 효과만
+     제거"). 구성(트랙 + 미끄러지는 조각)은 그대로 두고 투과·광택·겹만 걷어낸다.
+     저장소 토큰도 원래 그쪽이다 -- 다크의 --glass-blur 는 none 인데(":root" 주석: "블러를
+     켜면 지금 화면이 바뀐다") 앞 판이 그걸 무시하고 blur 를 하드코딩했다. 유리는 그게
+     기본값인 **라이트 테마에만** 남긴다(아래 [data-theme="light"] 블록). */
+  background: rgb(var(--lift) / .035);
+  border: 1px solid var(--line);
 }
+/* ── 라이트(애플 글래스) 테마에서만 유리 ────────────────────────────────────────────
+   층 구성은 참조 자료 그대로다: ③ 흐르는 빛(왼쪽 위 광원) · ② 프레넬(위가 밝다) ·
+   ① 바닥 면 · ④ 림(위 1px 빛 · 아래 1px 그늘 · 전체는 실낱).
+   ⚠️blur 는 **안 움직이는 트랙에만** 건다 -- 매 프레임 배경 픽셀 전체를 훑는 연산이라
+     움직이는 조각에 걸면 그 비용을 프레임마다 낸다(실시간 대시보드). */
 [data-theme="light"] .chart-mode-tabs {
   --seg-rim: rgba(255, 255, 255, .55);
   --seg-rim-top: rgba(255, 255, 255, .92);
@@ -2925,6 +2922,24 @@ svg {
   --seg-thumb: rgba(255, 255, 255, .66);
   --seg-ink: rgb(22 24 29 / .62);
   --seg-ink-on: #16181d;
+  border: 0;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, .10) 0%, transparent 50%),
+    linear-gradient(to bottom, rgba(255, 255, 255, .08), rgba(255, 255, 255, 0) 62%),
+    var(--seg-fill);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow:
+    inset 0 1px 1px var(--seg-rim-top),
+    inset 0 -1px 1px rgb(var(--shadow) / .10),
+    inset 0 0 0 1px var(--seg-rim);
+}
+[data-theme="light"] .chart-mode-tabs::before {
+  border: 0;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--seg-thumb) 160%, transparent),
+    var(--seg-thumb) 55%,
+    color-mix(in srgb, var(--seg-thumb) 120%, transparent));
 }
 #chartWindowTabs { --seg-n: 3; }   /* 1h · 2h · 4h */
 #chartModeTabs { --seg-n: 2; }     /* 청산맵 · 풋프린트 */
@@ -2942,10 +2957,9 @@ svg {
      transform 만 쓴다(GPU 합성으로 끝난다). 실시간 대시보드라 이 구분이 특히 중요하다.
      같은 이유로 will-change 도 안 건다 -- 상시 선언은 인스턴스마다 GPU 메모리를 잡는데
      (참조 자료: 500×300 에 약 600KB) 이 조각은 그 비용을 낼 만큼 크지도, 자주 움직이지도 않는다. */
-  background: linear-gradient(135deg,
-    color-mix(in srgb, var(--seg-thumb) 160%, transparent),
-    var(--seg-thumb) 55%,
-    color-mix(in srgb, var(--seg-thumb) 120%, transparent));
+  /* 다크의 조각도 평면이다 -- 면 한 겹과 테두리 한 줄. 라이트에서만 유리로 바뀐다. */
+  background: rgb(var(--lift) / .10);
+  border: 1px solid var(--line);
   transform: translateX(calc(var(--i, 0) * 100%));
   /* 스프링 -- 1.56 이 1.0 을 넘어 살짝 지나쳤다 돌아온다(참조 자료의 이징). */
   transition: transform .34s cubic-bezier(.34, 1.56, .64, 1);
