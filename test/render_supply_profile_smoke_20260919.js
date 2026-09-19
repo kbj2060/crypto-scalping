@@ -6,6 +6,11 @@ const fs = require("fs");
 const src = fs.readFileSync("dashboard/live/app.js", "utf8");
 const m = src.match(/function renderSupplyProfileSvg\(svg, profile, currentPrice, entryPrice = 0, box = null\) \{[\s\S]*?\n\}\n/);
 if (!m) { console.log("🔴 함수 추출 실패"); process.exit(1); }
+// 2026-09-20 렌더러가 헬퍼 하나를 더 쓴다(«접근행동» 표식, 8721c4f3). 이 하네스는 함수를
+// 정규식으로 하나만 뽑아 eval 하므로, 최상위 헬퍼가 늘면 여기도 같이 뽑아야 한다 --
+// 브라우저에서는 호이스팅으로 그냥 보이지만 여기서는 ReferenceError 로 죽는다.
+const ma = src.match(/function approachAt\(hm, price, rowSize\) \{[\s\S]*?\n\}\n/);
+if (!ma) { console.log("🔴 approachAt 추출 실패"); process.exit(1); }
 
 const b64 = (s) => { const b = Buffer.from(s, "base64");
                      return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
@@ -20,6 +25,15 @@ const HJ = JSON.parse(fs.readFileSync("/home/kbj20/crypto-scalping/tmp/sp_probe/
 const ROW_STATS = ["inst", "pers", "peak", "refill", "d60"];
 const HM = HJ.rows ? { ...HJ, rows: Object.assign({ ...HJ.rows },
   ...ROW_STATS.map((k) => ({ [k]: b64(HJ.rows[`${k}_f4`] || HJ.rows.inst_f4) }))) } : null;
+// 접근행동은 **제 격자**(4시간 창)로 온다. 픽스처엔 없으므로 히트맵 격자에 합성해 넣어
+// 표식 경로를 실제로 그려 본다 -- 값 자체는 무의미하고, 보는 건 «고리가 상자를 넘는가»다.
+if (HM && HM.rows) {
+  const n = HM.rows.inst.length;
+  HM.rows.approach_bin_lo = HM.rows.bin_lo;
+  HM.rows.approach_bin_size = HM.rows.bin_size;
+  HM.rows.approach = Float32Array.from(
+    { length: n }, (_, i) => (i % 5 === 0 ? 0.6 : i % 5 === 1 ? NaN : 1.3));
+}
 
 function run(label, profile, hm, w, h, narrow) {
   const rects = [];
@@ -44,7 +58,7 @@ function run(label, profile, hm, w, h, narrow) {
                 parentElement: { clientWidth: w, clientHeight: h },
                 getBoundingClientRect() { return { height: h }; } };
   try {
-    eval(m[0] + "\nrenderSupplyProfileSvg(svg, profile, 2641, 0, {w: W, h: H});"
+    eval(ma[0] + m[0] + "\nrenderSupplyProfileSvg(svg, profile, 2641, 0, {w: W, h: H});"
          .replace("W", w).replace("H", h));
   } catch (e) { console.log(`🔴 ${label}: ${e.constructor.name} — ${e.message}`); return false; }
 

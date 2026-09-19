@@ -4649,7 +4649,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       + `${412 + SUB_TOTAL}px 로 맞추세요(그만큼 가격 플롯이 눌립니다).`);
   }
 
-  const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 91;
+  // 2026-09-20 아티팩트 댓글: 수급(1초)을 1h/2h/4h 버튼 **바로 아래**로 올리고 그 아래에
+  // 프로파일을 둔다. 위에서부터 [1초 수급][프로파일][가격 플롯][OI][청산] 이다.
+  // ⭐두 패널을 옮기는 대신 **mt(가격 플롯의 윗변)를 그만큼 내린다**. mt 는 이 함수에서
+  //   18곳이 쓰는 «플롯 top» 이라, 그 뜻을 유지하면 yAt·클램프·커서 매핑·세로선을 한 줄도
+  //   안 건드린다. 상자 총높이도 그대로다(706 = 400 + 306) -- styles.css 는 손댈 게 없다.
+  const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112,
+        mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 91;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   // OI 신규계약 레인 -- 청산 레인 **바로 위**(사용자 지시). 별도 패널이 아니라 이 SVG 안의
   // 서브플롯이라야 캔들과 x축(봉)이 구성상 같아진다(레짐 리본이 같은 이유로 여기 있다).
@@ -4664,14 +4670,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const OI_PANEL_H = oiBars.length ? (mobileChart ? 26 : 34) : 0;
   const OI_PANEL_GAP = oiBars.length ? 6 : 0;
   const cw = w - ml - mr;
-  const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP - SUB_TOTAL;
+  const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
-  // 가격 플롯 바로 아래 = 수급 두 패널, 그다음이 OI · 청산 레인이다.
-  // 상하일 때 히트맵이 위, 프로파일이 아래다 -- 프로파일을 1초 수급 바로 위에 붙여
-  // «체결 계열» 둘이 이웃하게 한다(히트맵은 호가라 계열이 다르다).
-  const subProfileY = plotBottom + SUB_GAP;
-  const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
-  const oiPanelY = plotBottom + SUB_TOTAL + OI_PANEL_GAP;
+  // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). 1초 수급이 먼저, 프로파일이 그 아래 --
+  // 「체결 계열」 둘은 여전히 이웃한다. OI·청산 레인은 플롯 바로 아래 그대로다.
+  const sub1sY = mtTop;
+  const subProfileY = sub1sY + SUB_1S_H + SUB_GAP;
+  const oiPanelY = plotBottom + OI_PANEL_GAP;
   const liqPanelY = oiPanelY + OI_PANEL_H + LIQ_PANEL_GAP;
   const NS = "http://www.w3.org/2000/svg";
   // 풋프린트는 서버가 주는 12봉이 곧 창이다 -- 모바일 핀치줌(visibleCandleWindow)으로 더
