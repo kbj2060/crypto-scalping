@@ -72,6 +72,12 @@ RETENTION_DAYS = int(os.getenv("OF_RETENTION_DAYS", "14"))
 OF_ARCHIVE_ROOT = Path(os.getenv("OF_ARCHIVE_ROOT",
                                  str(ROOT / "data" / "live" / "orderflow" / "raster_archive")))
 OF_ARCHIVE = os.getenv("OF_ARCHIVE", "1") != "0"
+# 2026-09-20 보관 포맷을 gzip -> **parquet** 으로(사용자 지시). gzip 이 더 작지만(1.04 vs
+# 1.87MB/시간) **읽을 코드가 없다** -- read_window 는 비압축 .f32 만 seek 한다. 10-13 호가벽
+# 재측정 때 «파일은 있는데 못 읽는» 상태가 된다. parquet 은 duckdb 가 바로 질의한다.
+# ⭐화면 경로는 그대로 .f32 다(seek 0ms vs parquet+duckdb 329ms 실측). 역할을 나눈 것이지
+#   바꾼 게 아니다 -- 체결이 «메모리+스냅샷(화면) / trade_tape.duckdb(연구)» 로 갈린 것과 같다.
+OF_ARCHIVE_DB = OF_ARCHIVE_ROOT / "orderbook.duckdb"
 
 _DEPTH_WS_URL = "wss://fstream.binance.com/ws/{symbol}@depth@500ms"
 _SNAPSHOT_URL = "https://fapi.binance.com/fapi/v1/depth?symbol={SYMBOL}&limit=1000"
@@ -251,37 +257,109 @@ def read_window(symbol: str, to_ms: int, cols: int, agg: int = 1,
             "qty": out, "mid": mid, "valid_ratio": float(valid.mean())}
 
 
+def _f32_to_parquet(src: Path, dst: Path) -> None:
+    """고정폭 .f32 한 시간치를 parquet 으로. 0 인 빈은 버린다(롱 포맷) -- 실측 864k행/1.6MB.
+
+    🔴지연 임포트다. 이 수집기는 도크스트링대로 라이브 루프에서 websockets/aiohttp/numpy 만
+      쓴다(RSS 67MB). pyarrow 를 모듈 상단에 두면 매 재시작마다 그 비용을 문다.
+    """
+    import pyarrow as pa            # noqa: PLC0415
+    import pyarrow.parquet as pq    # noqa: PLC0415
+
+    raw = src.read_bytes()
+    if len(raw) < HEADER.size:
+        raise OSError("헤더보다 짧다")
+    magic, ver, nb, binsz, _flags, _hour, _dt, _rsv = HEADER.unpack(raw[:HEADER.size])
+    if magic != MAGIC:
+        raise OSError("magic 불일치")
+    rb = row_bytes(nb)
+    n = (len(raw) - HEADER.size) // rb
+    if n <= 0:
+        raise OSError("행이 없다")
+    blk = np.frombuffer(raw[HEADER.size:HEADER.size + n * rb], dtype=np.uint8).reshape(n, rb)
+    ts = blk[:, :8].copy().view(np.int64).ravel()
+    lo = blk[:, 8:12].copy().view(np.int32).ravel()
+    mid = blk[:, 12:16].copy().view(np.float32).ravel()
+    qty = blk[:, 16:].copy().view(np.float32)
+    # mid=NaN 인 초는 그 초의 북이 무효다 -- 보관에서도 **빼지 않고** 남긴다(결측을 0 으로
+    # 바꾸면 «없는 유동성»이 되고, 그건 화면 규약과 같은 이유로 금지다). qty 만 0 이라 행이
+    # 안 생기고, mid 테이블로 무효 초를 따로 알 수 있다.
+    r, c = np.nonzero(qty)
+    tbl = pa.table({
+        "ts_ms": pa.array(ts[r], pa.int64()),
+        "bin": pa.array((lo[r] + c).astype(np.int32), pa.int32()),
+        "qty": pa.array(qty[r, c], pa.float32()),        # 부호가 방향: + 비드 / - 아스크
+    })
+    meta = pa.table({"ts_ms": pa.array(ts, pa.int64()), "mid": pa.array(mid, pa.float32())})
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(dst.suffix + ".part")
+    pq.write_table(tbl, tmp, compression="zstd")
+    tmp.replace(dst)
+    mtmp = dst.with_name(dst.stem + "_mid.parquet.part")
+    mdst = dst.with_name(dst.stem + "_mid.parquet")
+    pq.write_table(meta, mtmp, compression="zstd")
+    mtmp.replace(mdst)
+
+
+def _ensure_archive_db() -> None:
+    """연구용 duckdb. **데이터를 복사하지 않고** parquet 글롭 위에 뷰만 얹는다 --
+    `SELECT * FROM book` 이 바로 된다. 복사하면 디스크가 두 배가 되고 둘이 갈릴 수 있다.
+    🔴단일 writer 문제도 이 방식이면 없다: 이 파일에는 뷰 정의뿐이고 실제 바이트는
+      불변 parquet 이다(체결 쪽 trade_tape.duckdb 가 «쓸 때만 연다»로 푸는 그 문제)."""
+    import duckdb  # noqa: PLC0415
+    con = duckdb.connect(str(OF_ARCHIVE_DB))
+    try:
+        g = str(OF_ARCHIVE_ROOT / "*" / "*" / "*T[0-9][0-9].f32.parquet")
+        m = str(OF_ARCHIVE_ROOT / "*" / "*" / "*_mid.parquet")
+        con.execute(f"CREATE OR REPLACE VIEW book AS SELECT * FROM read_parquet('{g}')")
+        con.execute(f"CREATE OR REPLACE VIEW book_mid AS SELECT * FROM read_parquet('{m}')")
+    finally:
+        con.close()
+
+
 def _archive_then_unlink(p: Path, symbol: str) -> None:
-    """만료 래스터를 gzip 으로 떠내고 **압축이 성공한 뒤에만** 원본을 지운다.
+    """만료 래스터를 parquet 으로 떠내고 **성공한 뒤에만** 원본을 지운다.
 
     형제 수집기(`live_book_ticker_collector_20260914._gzip_done`)와 같은 규약이다. 임포트하지
     않고 복제한 이유는 이 수집기의 독립 규약 때문이다(도크스트링: 저장소의 다른 어떤 파일도
     쓰지 않는다 -- 죽어도 봇에 영향 없다).
 
     데이터 유실 경로라 세 가지를 지킨다:
-      1. 임시명 -> os.replace. 직접 <dst>.gz 로 쓰다 죽으면 **잘린 gz** 가 남고, 다음 실행이
-         그걸 «이미 보관됨»으로 읽어 원본을 지운다(영원히 못 되돌린다).
-      2. 이미 온전한 .gz 가 있으면 다시 압축하지 않고 원본만 지운다(멱등 -- 압축 뒤 unlink
-         직전에 죽은 경우).
+      1. 임시명 -> os.replace. 직접 쓰다 죽으면 **잘린 파일**이 남고, 다음 실행이 그걸
+         «이미 보관됨»으로 읽어 원본을 지운다(영원히 못 되돌린다).
+      2. 이미 온전한 보관본이 있으면 다시 쓰지 않고 원본만 지운다(멱등).
       3. 실패하면 **원본을 유지**하고 경고만 남긴다. 다음 시간에 다시 시도된다.
+    🔴parquet 변환이 실패하면(pyarrow 부재 등) gzip 으로 떨어진다 -- 읽기는 불편해도
+      **원본을 잃는 것보다 낫다**. 그 경우 로그에 남는다.
     """
     day = p.stem.split("T")[0]                 # 2026-09-14T12 -> 2026-09-14 (일별 보관)
     dst_dir = OF_ARCHIVE_ROOT / symbol.upper() / day
-    dst = dst_dir / (p.name + ".gz")
+    dst = dst_dir / (p.name + ".parquet")
+    gz = dst_dir / (p.name + ".gz")
     try:
-        if dst.exists() and dst.stat().st_size > 0:
+        if (dst.exists() and dst.stat().st_size > 0) or (gz.exists() and gz.stat().st_size > 0):
             p.unlink(missing_ok=True)          # 2
             return
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_suffix(dst.suffix + ".part")
-        with open(p, "rb") as fi, gzip.open(tmp, "wb", compresslevel=6) as fo:
-            shutil.copyfileobj(fi, fo, length=1 << 20)
-        if tmp.stat().st_size <= 0:
-            raise OSError("빈 압축본")
-        tmp.replace(dst)                       # 1
-        before, after = p.stat().st_size, dst.stat().st_size
+        before = p.stat().st_size
+        try:
+            _f32_to_parquet(p, dst)            # 1 (내부에서 .part -> replace)
+            after, how = dst.stat().st_size, "parquet"
+            try:
+                _ensure_archive_db()
+            except Exception as exc:  # noqa: BLE001 -- 뷰는 언제든 다시 만들 수 있다
+                logger.warning("보관 뷰 갱신 실패: %s (parquet 은 정상)", exc)
+        except Exception as exc:  # noqa: BLE001 -- 3 의 폴백
+            logger.warning("parquet 변환 실패 %s: %s — gzip 으로 보관한다", p.name, exc)
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            tmp = gz.with_suffix(gz.suffix + ".part")
+            with open(p, "rb") as fi, gzip.open(tmp, "wb", compresslevel=6) as fo:
+                shutil.copyfileobj(fi, fo, length=1 << 20)
+            if tmp.stat().st_size <= 0:
+                raise OSError("빈 압축본") from exc
+            tmp.replace(gz)
+            after, how = gz.stat().st_size, "gzip"
         p.unlink()
-        logger.info("보관 %s → %s · %.1fMB → %.1fMB (%.1f배)", p.name, day,
+        logger.info("보관 %s → %s/%s · %.1fMB → %.1fMB (%.1f배)", p.name, day, how,
                     before / 1e6, after / 1e6, before / max(after, 1))
     except Exception as exc:  # noqa: BLE001 -- 보관 실패가 수집을 멈추면 안 된다
         logger.warning("보관 실패 %s: %s — 원본 유지(다음 시간 재시도)", p.name, exc)
