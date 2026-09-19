@@ -3892,6 +3892,12 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   // 🔴합산으로 바뀌었으니 정규화도 «행 총량»이어야 한다. max(buy,sell) 로 두면 막대가
   //   상자를 넘어간다(합계가 그 두 배까지 된다).
   const max = Math.max(...[...rows.values()].map((r) => r[0] + r[1]), 1e-9);
+  // 2026-09-19 델타 띠(사용자 지시 B안): 합산 막대 **바깥**에 얇은 띠로 «테이커가 어느
+  // 쪽이었나»를 되살린다. 라벨은 안 붙인다 -- 값은 툴팁에 있다.
+  // ⭐합산이 «얼마나 거래됐나»(길이), 띠가 «누가 급했나»(색)로 축이 갈린다.
+  // 🔴이건 지지·저항이 아니다. 저장소 실측: 3봉 연속 델타 편중 0.44x(**반예측적**),
+  //   단일봉 테이커 서지만 2.75x 로 살아남았다 -- «쌓인 급함»은 신호가 아니다.
+  const maxDelta = Math.max(...[...rows.values()].map((r) => Math.abs(r[0] - r[1])), 1e-9);
   const centerX = ml + sideW + centerW / 2;
   const leftEdge = ml + sideW, rightEdge = ml + sideW + centerW;
   let pocKey = null, pocVol = -1;
@@ -3943,6 +3949,27 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     stack(rightEdge, 1, y,
           [wBuy + wSell, Math.max(0, vol - (wBuy + wSell) - (rBuy + rSell)), rBuy + rSell],
           vol, "var(--amber)", "거래량", price);
+
+    // 델타 띠 -- 합산 막대 바깥(오른쪽 여백 안쪽). 폭은 고정, **진하기가 크기**다.
+    // 폭으로 크기를 말하면 옆의 거래량 막대와 같은 문법이 되어 둘이 헷갈린다.
+    const delta = buy - sell;
+    if (delta !== 0) {
+      const dRect = document.createElementNS(NS, "rect");
+      dRect.setAttribute("x", rightEdge + sideW + 2);
+      dRect.setAttribute("y", y + 0.5);
+      dRect.setAttribute("width", 5);
+      dRect.setAttribute("height", Math.max(1, rowPx - 1));
+      dRect.setAttribute("fill", delta > 0 ? "var(--good)" : "var(--bad)");
+      dRect.setAttribute("opacity", (0.2 + 0.8 * Math.min(1, Math.abs(delta) / maxDelta)).toFixed(2));
+      const dTip = document.createElementNS(NS, "title");
+      dTip.textContent = price.toFixed(rowSize >= 1 ? 0 : 1) + " · 순델타 "
+        + (delta > 0 ? "+" : "") + delta.toFixed(1) + " ETH"
+        + " (공격적 매수 " + buy.toFixed(1) + " / 매도 " + sell.toFixed(1) + ")\n"
+        + "⚠️테이커가 어느 쪽이었나일 뿐이다 -- 수동 쪽은 정확히 거울상이다.\n"
+        + "⚠️같은 값을 반대로도 읽는다: 매수 델타가 큰데 가격이 안 오르면 흡수(수동 대량매도)다.";
+      dRect.appendChild(dTip);
+      svg.appendChild(dRect);
+    }
 
     // 🔴행이 $1 보다 촘촘한데 toFixed(0) 로 찍으면 «2608, 2608» 처럼 같은 값이 두 줄 나온다
     //   (2026-09-19 첫 렌더에서 실제로 그랬다). 자릿수는 행 크기가 정한다.
@@ -4009,7 +4036,8 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   //   물음이라, 그걸로 나누면 768px 같은 폭에서 긴 문장이 범례를 덮는다(계산으로 확인).
   //   긴 것 -> 짧은 것 -> 생략 순으로 내려간다. 내용은 전부 툴팁에도 있다.
   // 2026-09-19 방향을 말하던 문구를 버렸다 -- 합산이라 좌우가 방향이 아니라 **원천**이다.
-  const footLong = "← 걸려 있는 호가(진할수록 오래 남은 것)  ·  체결 거래량(매수+매도) →";
+  const footLong = "← 걸려 있는 호가(진할수록 오래 남은 것)  ·  체결 거래량(매수+매도)"
+    + "  ·  바깥 띠 = 순델타(초록 매수 · 빨강 매도) →";
   const footFits = (t) => (w - mr) - t.length * 6.2 > lx + 6;
   const footText = footFits(footLong) ? footLong
     : (footFits("← 호가  ·  거래량 →") ? "← 호가  ·  거래량 →" : null);
