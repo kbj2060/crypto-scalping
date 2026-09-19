@@ -10,7 +10,7 @@ const PRE = grab(/function fmtFootprintQty\(v\) \{[\s\S]*?\n\}\n/, "fmtFootprint
           + "\n" + grab(/const SUPPLY_1S_ROLL = \d+;/, "ROLL")
           + "\n" + grab(/const SUPPLY_1S_STEPS = \[[^\]]*\];/, "STEPS") + "\n";
 
-const NOW = 1_700_000_000;
+const NOW = 1700000000;   // CI 의 esprima 4 는 숫자 구분자(1_700_000_000)를 모른다
 const W = 1318, H = 150;
 
 function draw(label, { qty = 10, hole = null, oi = null } = {}) {
