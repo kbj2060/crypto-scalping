@@ -2842,6 +2842,15 @@ svg {
      renderCandleSvg 의 가드가 콘솔에 한 번 알린다. */
 #candleSvgSnapshot { height: 706px; }
 .candle-container { height: 718px; }
+/* 2026-09-19 모바일은 히트맵과 프로파일을 **상하**로 둔다(사용자 지시) -- 720px 에서 절반
+   폭이면 300열이 1px 미만씩이라 그림이 뭉갠다. 히트맵이 제 줄(130px + gap 8)을 먹으므로
+   SUB_TOTAL 이 306 -> 444 가 되고 상자도 그만큼 커야 한다.
+   🔴경계 720px 는 app.js 의 isMobileChartMode() 와 **같은 값**이다. 한쪽만 고치면
+     가격 플롯이 조용히 눌린다(renderCandleSvg 의 가드가 콘솔에 한 번 알린다). */
+@media (max-width: 720px) {
+  #candleSvgSnapshot { height: 844px; }   /* 400 + 444 */
+  .candle-container { height: 856px; }    /* 412 + 444 */
+}
 
 
 
