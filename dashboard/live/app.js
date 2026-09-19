@@ -7102,8 +7102,7 @@ function renderExitNow() {
 // 2026-09-20 주문 모달을 없앴다(여는 함수 둘 포함). 진입·청산이 둘 다 카드 안으로 나오면서
 // 열 모달도, 여는 버튼(#tradeOpenEntry / #tradeOpenExit)도 사라졌다. 닫을 때 «확인» 상태를
 // 지우던 dialog close 리스너의 역할은 manualHoldCancel 이 대신한다(손을 떼면 지운다).
-// 🔴styles.css 의 .trade-modal* / .trade-actions 규칙(약 20개)은 이제 아무 데도 안 붙는다 --
-//   흩어져 있어 실주문 변경과 같은 커밋에 섞지 않았다. 따로 걷어낸다.
+// styles.css 의 .trade-modal* / .trade-actions 규칙도 2026-09-20 에 함께 걷어냈다.
 function manualExitSyncButtons() {
   const row = el("snapExitRow");
   if (!row) return;
@@ -7143,9 +7142,6 @@ function manualExitSyncButtons() {
   if (bs) bs.hidden = !lastExitPositions.has("SHORT");
   const hasPos = lastExitPositions.size > 0;
   row.hidden = !hasPos;
-  // 카드의 «청산» 트리거도 같은 조건으로 -- 포지션이 없으면 열 이유가 없다.
-  const openExit = el("tradeOpenExit");
-  if (openExit) openExit.hidden = !hasPos;
   renderExitNow();
   // 진입 블록은 포지션이 있으면 접는다. 포지션 유무가 **바뀔 때만** 건드린다 -- 매 갱신마다
   // 쓰면 사람이 물타기를 보려고 펼쳐 둔 걸 30초마다 도로 닫는다.

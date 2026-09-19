@@ -21,9 +21,6 @@
      --chart-bg(2.8)가 --bg 보다 어두워 차트가 페이지 아래로 가라앉았다. */
   --bg: #161a22;
   --panel: rgba(35, 41, 50, 0.82);
-  /* 2026-09-16 다크 모달은 «유리 말고 그냥 같은 검정»(사용자). --panel 을 --bg 위에
-     합성한 불투명 값이라 패널과 같은 색으로 보이면서 뒤가 비치지 않는다. */
-  --modal-solid: #21262f;
   --panel-strong: rgba(46, 52, 62, 0.92);
   --chart-bg: #171b23;
   --glass: rgba(255, 255, 255, 0.05);
@@ -2452,16 +2449,6 @@ svg {
   background: #fff;
 }
 [data-theme="light"] .notify-btn.long { border-color: color-mix(in srgb, var(--good) 45%, transparent); }
-/* 🔴같은 깜빡임의 둘째 후보: backdrop-filter 요소는 같은 backdrop root 안에서 무엇이든
-   다시 칠해지면 렌즈를 다시 돌린다. 이 두 버튼은 **이미 유리인 패널 위**에 있어서 제
-   렌즈가 없어도 재질이 그대로 읽힌다(실측 (220,231,232) -> (212,224,231), 차이 8).
-   틱마다 재래스터되는 요소 수를 줄이는 쪽이 이득이 크다. */
-[data-theme="light"] .trade-actions .notify-btn {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  /* 흰 면은 그대로 0.34 -- 렌즈만 뺐을 때 실측이 (212,224,231)로 원래 (220,231,232)와
-     8 밖에 차이 나지 않았다. 0.46 으로 올렸더니 (245,246,254)로 «종이»가 됐다. */
-}
 [data-theme="light"] .notify-btn.primary {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
@@ -2668,118 +2655,6 @@ svg {
 /* 라이트에서도 툴팁은 어두운 판이므로 같은 값이다 -- 토큰을 타지 않게 명시해 둔다. */
 [data-theme="light"] .chart-tooltip b { color: rgba(255, 255, 255, 0.72); }
 
-/* ── 주문 모달 (2026-09-16) ──────────────────────────────────────────────────
-   네이티브 <dialog> 는 top layer 라 패널의 backdrop-filter 기준블록 밖에 선다 --
-   위치가 틀어지지 않는다(차트 툴팁에서 한 번 의심했던 그 함정). */
-.trade-actions { display: flex; gap: 10px; margin-top: 12px; }
-.trade-actions .notify-btn { flex: 1 1 auto; }
-
-.trade-modal {
-  width: min(560px, calc(100vw - 32px));
-  max-height: calc(100dvh - 48px);
-  padding: 0;
-  /* 2026-09-16 **다크는 유리를 쓰지 않는다**(사용자 요청: 「다크모드 모달은 글래스 말고
-     그냥 같은 검정색으로」). 유리 버전은 아래 [data-theme="light"] 블록에만 있다.
-     단색이라 blur 도 필요 없다 -- backdrop-filter 를 걸지 않는 편이 더 정확하고 싸다. */
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--modal-solid);
-  color: var(--text);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-.trade-modal::backdrop {
-  /* 스크림이 진하면 모달 유리가 굴절할 «뒤」가 사라진다 -- 화면을 가리는 대신 살짝 눕힌다. */
-  background: rgba(0, 0, 0, 0.45);
-}
-/* 라이트는 반대다 -- 스크림이 진하면 모달 유리가 굴절할 «뒤»가 사라진다. */
-[data-theme="light"] .trade-modal::backdrop {
-  background: rgb(var(--shadow) / 0.18);
-  backdrop-filter: blur(2px) saturate(140%);
-  -webkit-backdrop-filter: blur(2px) saturate(140%);
-}
-.trade-modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 20px;
-  margin: 0;
-  border-bottom: 1px solid var(--soft-line);
-  position: sticky;
-  top: 0;
-  /* 다크는 몸통과 **같은 단색**이어야 한다(스크롤이 밑으로 지나가도 가려야 하므로 불투명).
-     라이트 유리판은 아래 [data-theme="light"] 블록이 덮어쓴다. */
-  background: var(--modal-solid);
-  z-index: 1;
-}
-.trade-modal-head h3 { margin: 0; font: 600 15px/1.2 var(--font-display); }
-
-/* ── 라이트에서만 유리 ──────────────────────────────────────────────────────
-   🔴«헤더가 아직도 흰색»이 세 번 나왔다. 헤더를 아무리 투명하게 해도 흰 채로 남은 이유는
-   헤더 자신이 아니라 **몸통 그라디언트**였다: 135deg 의 0% 정지점(흰 34%)이 정확히
-   왼쪽 위, 즉 헤더 자리에 앉아 있었다. 광택을 대각선 **아래쪽**으로 옮기고 윗머리의
-   흰 기를 8% 로 낮춘다 -- 그래야 헤더가 몸통과 같은 유리로 읽힌다. */
-[data-theme="light"] .trade-modal {
-  border-color: var(--glass-edge);
-  background:
-    linear-gradient(150deg,
-      rgba(255, 255, 255, 0.08) 0%,
-      rgba(255, 255, 255, 0.10) 38%,
-      rgba(255, 255, 255, 0.30) 100%),
-    color-mix(in srgb, var(--panel) 62%, transparent);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow:
-    inset 0 1px 0 var(--specular),
-    0 24px 64px rgb(var(--shadow) / 0.30);
-}
-/* 🔴«아직도 헤더가 흰색»(4번째). 이번엔 픽셀로 쟀고, 범인은 **헤더 자신의
-   backdrop-filter** 였다. 두 가지가 겹친다:
-     ① 모달이 이미 --glass-blur(blur34 saturate200 brightness1.08)로 뒤를 걸렀는데,
-        그 결과 위에 헤더가 saturate(1.8)·blur(22)를 **한 번 더** 얹는다.
-     ② backdrop 표본은 요소 경계에서 잘리지 않는다 -- 모달 맨 위에 붙은 헤더의
-        22px 블러가 **모달 밖 밝은 지면**을 끌어와 섞는다(가장자리 번짐).
-   실측(라이트, 모달 중앙 열): 헤더 rgb(239,247,251) vs 바로 아래 본문 (232,240,249).
-   backdrop-filter 를 끄면 헤더 (227,240,248) -- 본문과 5 이내로 이어진다.
-   ⇒ **필터를 걸지 않는 것**이 답이다. 배경도 칠하지 않으므로 헤더 자리에는 몸통 유리가
-   그대로 비친다 = 정의상 같은 재질.
-   ⚠️대신 sticky 헤더 밑으로 내용이 지나가면 비친다. 이 모달은 스크롤이 생기지 않는
-   높이라 실제로는 겹치지 않는다(390×850 실측 포함). 스크롤이 생기면 그때 다시 본다. */
-[data-theme="light"] .trade-modal-head {
-  background: transparent;
-  box-shadow: inset 0 1px 0 var(--specular);
-}
-.trade-modal .manual-entry { padding: 22px 20px 26px; }
-
-@media (max-width: 720px) {
-  /* 2026-09-16 사용자 요청으로 바텀시트를 버리고 **가운데**로 통일했다 -- 데스크톱과 다른
-     자리에 뜨면 같은 동작인데 두 번 배우게 된다. */
-  .trade-modal { width: calc(100vw - 24px); max-height: 86dvh; }
-  .trade-actions .notify-btn { justify-content: center; }
-}
-
-/* 진입 모달 안에서는 «접기»가 중복이다 -- 모달을 연 것 자체가 «한 번 더 확인」이고,
-   09-14 에 접기를 넣은 이유(물타기를 한 번 더 확인시킨다)는 모달이 이미 하고 있다.
-   요약 줄을 지우고 항상 펼친 상태로 둔다(DOM 은 그대로 -- app.js 가 box.open 을 쓴다). */
-#entryModal .entry-fold > summary { display: none; }
-#entryModal .entry-fold { margin: 0; }
-#entryModal .manual-entry { padding-top: 20px; }
-/* 모달 안의 빈 행은 자리만 먹는다(오류 표시 전용 칸 등). */
-#entryModal .manual-entry-row:empty,
-#exitModal .manual-entry-row:empty { display: none; }
-
-/* 모달 안은 가운데로 모은다 -- 폭이 좁아 왼쪽 정렬이면 오른쪽이 통째로 빈다. */
-.trade-modal .manual-entry { display: grid; justify-items: center; gap: 18px; }
-.trade-modal .manual-entry-row,
-.trade-modal .manual-entry-row.fields { justify-content: center; width: 100%; }
-.trade-modal .entry-fold { width: 100%; display: grid; justify-items: center; gap: 14px; }
-.trade-modal .exit-frac { justify-content: center; }
-.trade-modal .exit-now,
-.trade-modal .entry-note { text-align: center; }
-.trade-modal .manual-entry-result { width: 100%; }
-
 /* ── 「지금 넣으면」 변화 블록 (2026-09-16) ──────────────────────────────────
    막대는 transition 으로 미끄러지고 유령 눈금(u)이 «지금 자리»에 남는다 --
    계좌 카드의 .acct-rail 과 같은 문법이라 두 곳이 같은 말을 한다. */
@@ -2842,24 +2717,6 @@ svg {
 /* 둘 다 만재라 막대가 안 움직이는 행 -- 막대를 흐리게 해 «이 막대는 지금 할 말이 없다»를
    보이게 한다. 숫자는 그대로 바뀐다. */
 .entry-proj-row[data-capped="1"] .entry-proj-rail { opacity: .35; }
-
-/* 모달 안의 모든 줄에 숨 쉴 자리를 준다(사용자 요청) -- 한 줄짜리 label/row 들이
-   붙어 있으면 숫자가 서로를 가린다. */
-.trade-modal .manual-entry { gap: 22px; }
-.trade-modal .manual-entry-row { padding: 2px 0; }
-.trade-modal .manual-entry-row.fields { gap: 12px; }
-.trade-modal .exit-frac { gap: 12px; padding: 4px 0; line-height: 1.6; }
-.trade-modal .exit-now,
-.trade-modal .entry-note { line-height: 1.7; padding: 4px 0; }
-.trade-modal .manual-entry-row.actions { gap: 14px; padding-top: 22px; }
-
-/* 슬라이더 줄은 왼쪽 정렬(사용자 요청). 가운데로 밀면 값 글자 폭(「3배」/「100%」)에 따라
-   두 게이지의 시작점이 매번 어긋나 눈금이 서로 안 맞는다. .entry-cap 의 54px 고정폭이
-   이미 라벨 열을 만들어 두었으니 왼쪽에 붙이면 세 줄이 한 열로 선다.
-   ponytail: `.fields` 세 줄(보유 예정 포함)을 통째로 옮긴다 -- 두 줄만 옮기면
-   남은 한 줄이 가운데 떠서 정렬이 두 종류가 된다. */
-.trade-modal .manual-entry-row.fields { justify-content: flex-start; }
-.trade-modal .manual-entry-row.fields .exit-frac { justify-content: flex-start; }
 
 /* 2026-09-19 수급 두 그림이 캔들 SVG 안으로 들어갔다(아티팩트 댓글 "svg 안으로는 못 들어가?").
    컨테이너 둘(.supply-profile-container/.supply-1s-container)은 사라졌고, 그만큼 캔들 상자가
