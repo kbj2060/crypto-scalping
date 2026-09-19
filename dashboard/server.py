@@ -3197,6 +3197,26 @@ def make_app() -> web.Application:
             },
         }
 
+    def _approach_read(symbol: str) -> dict[str, Any]:
+        """4시간 창으로 «가격이 다가왔을 때 이 가격대가 두꺼워졌나»를 낸다.
+
+        🔴화면 창(15분)으로는 못 잰다 -- 같은 빈이 near 와 far 를 둘 다 겪어야 비교가
+          성립하는데 자격 빈이 22개뿐이다(4시간이면 82개, 2026-09-20 실측).
+        ⭐그래서 **따로 읽고 따로 캐시한다**. 5초 폴링마다 4시간을 읽을 수는 없다
+          (실측 읽기 0.27초). agg=5 로 접어 받아 계산량을 5분의 1로 줄인다 -- 이 값은
+          구간 평균의 비라 초 해상도가 필요 없다.
+        🔴«스푸핑 판정»이 아니다. 지배적 방향이 오히려 «다가오면 커진다»(46%)이고
+          «얇아진다»는 16% 꼬리다. 화면은 관측치로만 적는다.
+        """
+        from scripts.live_orderflow_raster_collector_20260914 import (  # noqa: PLC0415
+            approach_ratio, read_window)
+        w = read_window(symbol, int(time.time() * 1000), 2880, 5)
+        a = approach_ratio(w)
+        return {"approach_bin_lo": a["bin_lo"], "approach_bin_size": a["bin_size"],
+                "approach_qualifying": a["qualifying"], "approach_window_s": 4 * 3600,
+                "approach_f4": base64.b64encode(
+                    np.ascontiguousarray(a["ratio"], "<f4")).decode()}
+
     async def api_flow_heatmap(request: web.Request) -> web.Response:
         symbol = (request.query.get("symbol") or "ethusdt").lower()
         if symbol not in HEATMAP_SYMBOLS:
@@ -3210,6 +3230,17 @@ def make_app() -> web.Application:
         rows_only = request.query.get("mode") == "rows"
         payload = await loop.run_in_executor(
             HEATMAP_EXECUTOR, functools.partial(_heatmap_read, symbol, cols, agg, rows_only))
+        # 접근행동은 창이 4시간이라 폴링마다 못 읽는다. 120초 캐시 + 낡은 값 먼저 준다.
+        if rows_only and payload.get("rows"):
+            try:
+                payload["rows"].update(await swr_cached(
+                    f"approach_{symbol}", 120.0,
+                    lambda: loop.run_in_executor(HEATMAP_EXECUTOR, _approach_read, symbol),
+                    max_stale=STALE_GRACE_SECONDS))
+            except Exception:  # noqa: BLE001, S110
+                # 삼킨다 -- 이 값이 없으면 화면은 표식만 안 그리고 나머지는 그대로다.
+                # 여기서 던지면 «장식 하나» 때문에 프로파일 전체가 빈다.
+                pass
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_gex(request: web.Request) -> web.Response:
