@@ -77,5 +77,18 @@ else {
 // ⑤ 폭발해도 상자를 안 넘는다(마지막 계단 초과) + OI 차분선이 붙는다.
 if (!draw("폭발 5000 ETH/s + OI", { qty: 5000, oi: 0.5 })) ok = false;
 
+// ⑥ 순수급이 정확히 0 인 창. fmtFootprintQty(0) 이 ""를 주므로 그대로 쓰면 꼬리표가
+//    「고래 +」로 숫자 없이 뜬다 -- 2026-09-20 배포본 스크린샷에서 실제로 그랬다.
+//    30초 창에서 0 은 드물지 않다(고래 주문이 분당 13건).
+const z = draw("순수급 0", { qty: 0 });
+if (!z) ok = false;
+else {
+  const bad = z.els.filter((e) => e._kind === "text")
+    .map((e) => String(e.textContent || "")).filter((t) => /[+-]$/.test(t));
+  if (bad.length) fail(`꼬리표가 부호로 끝난다(숫자 없음): ${JSON.stringify(bad)}`);
+  const texts = z.els.filter((e) => e._kind === "text").map((e) => e.textContent);
+  if (!texts.includes("고래 +0")) fail(`0 일 때 「고래 +0」이 아니다: ${JSON.stringify(texts)}`);
+}
+
 console.log(ok ? "✅ 1초 수급 패널 OK" : "");
 process.exit(ok ? 0 : 1);
