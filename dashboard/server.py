@@ -2208,7 +2208,13 @@ def make_app() -> web.Application:
     oi_1s: dict[int, float] = {}
 
     async def collect_oi_1s(app: web.Application) -> None:
-        last_ms = 0
+        # 🔴«본 stamp 의 집합»이지 최고수위(last_ms)가 아니다. 바이낸스는 stamp 를 도착 순서대로
+        #   주지 않는다 -- 2026-09-19 실측: stamp 가 응답에 나타나기까지 중앙 2.65초·p90 5.08초가
+        #   걸리고, 그 편차 때문에 115개 중 4개(3.5%)는 «더 새 stamp 가 먼저» 도착했다. 최고수위로
+        #   비교하면 그 4개를 «이미 본 것»으로 오인해 버린다(짝비교에서 실측 손실 4/243 과 일치).
+        #   순서가 뒤바뀌어 들어와도 문제없다: 봉 집계는 ts_sec 로 arg_min/arg_max 를 잡고
+        #   저장은 PK(ts_sec, symbol) 가 중복을 막는다.
+        seen_ms: set[int] = set()
         pending: list[tuple[int, float]] = []      # 아직 duckdb 에 못 넣은 스냅샷
         flushed_at = time.time()
         while True:
@@ -2217,8 +2223,10 @@ def make_app() -> web.Application:
                         OI_1S_URL, params={"symbol": FOOTPRINT_SYMBOL}) as resp:
                     data = await resp.json()
                 ts_ms = int(data["time"])
-                if ts_ms > last_ms:          # 같은 스냅샷을 다른 초에 복제하지 않는다
-                    last_ms = ts_ms
+                if ts_ms not in seen_ms:     # 같은 스냅샷을 다른 초에 복제하지 않는다
+                    seen_ms.add(ts_ms)
+                    if len(seen_ms) > 8192:  # 메모리 상한만 건다. 10분이면 재도착이 끝난다(최대 6.4초).
+                        seen_ms = {m for m in seen_ms if m >= ts_ms - 600_000}
                     sec = ts_ms // 1000
                     value = float(data["openInterest"])
                     oi_1s[sec] = value
