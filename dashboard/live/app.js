@@ -3898,6 +3898,33 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   rows.forEach((r, k) => { if (r[0] + r[1] > pocVol) { pocVol = r[0] + r[1]; pocKey = k; } });
 
 
+  // 안쪽부터 고래 · 중형 · 리테일. 농담이 곧 크기 계단이다.
+  const SEG_OPACITY = [0.95, 0.55, 0.28];
+  const SEG_NAME = ["고래", "중형", "리테일"];
+  const bar = (x, y, wid, color, opacity, tip) => {
+    if (!(wid > 0)) return;
+    const rect = document.createElementNS(NS, "rect");
+    rect.setAttribute("x", x); rect.setAttribute("y", y);
+    rect.setAttribute("width", Math.max(1, wid)); rect.setAttribute("height", Math.max(1, rowPx - 1));
+    rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", opacity);
+    const title = document.createElementNS(NS, "title");
+    title.textContent = tip;
+    rect.appendChild(title);
+    svg.appendChild(rect);
+  };
+  // 한 쪽(매수 또는 매도)을 세 토막으로 쌓는다. dir = +1 이면 오른쪽, -1 이면 왼쪽.
+  const stack = (edge, dir, y, segs, total, color, side, price) => {
+    let cursor = 0;
+    segs.forEach((v, s) => {
+      const wid = sideW * v / max;
+      const x = dir > 0 ? edge + cursor : edge - cursor - wid;
+      bar(x, y, wid, color, SEG_OPACITY[s],
+        price.toFixed(1) + " · " + side + " " + SEG_NAME[s] + " " + v.toFixed(1) + " ETH ("
+          + (total > 0 ? Math.round(v / total * 100) : 0) + "% · 합계 " + total.toFixed(1) + ")");
+      cursor += wid;
+    });
+  };
+
   // 2026-09-19 «매수/매도 압력 구간»과 오른쪽 이름표·벽 틱을 걷어냈다(사용자 지시).
   // 프로파일이 VPVR 식 **합산**으로 바뀌면서 sign*(buy-sell) 기반 구간은 정의 자체가
   // 사라졌다 -- 방향은 봉별 델타가 말한다. 오른쪽 여백은 이제 비어 있다.
