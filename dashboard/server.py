@@ -536,7 +536,11 @@ SUPPLY_1S_SECONDS = 360
 #   **값이 바뀐 초에만** 점을 남긴다. 매초 같은 값을 복붙하면 없는 해상도를 있는 척하게 된다.
 #   1초 폴링은 그 3~7초 갱신을 가장 빨리 잡기 위한 것이다(가중치 1 x 60/분, IP 한도 2400/분).
 OI_1S_URL = "https://fapi.binance.com/fapi/v1/openInterest"
-OI_1S_POLL_SECONDS = 1.0
+# 2026-09-19 1.0 -> 0.25. 1초로는 갱신의 약 5%를 놓쳤다: 0.2초로 훑으면 3.66초당 1회인데
+# 1초 폴링으로 쌓인 건 3.86초당 1회였다(실측 간격 최소 0.63초 · 1초 미만이 40건 중 2건).
+# 놓친 갱신은 되살릴 방법이 없다 -- 바이낸스는 1초 OI 이력을 안 준다(openInterestHist 는 5분).
+# weight 1 x 240/분, IP 한도 2400/분이라 여유가 10배다.
+OI_1S_POLL_SECONDS = 0.25
 # 화면 링(6분)은 재기동하면 비고, 5분 누적 패널은 몇 시간을 봐야 한다 -- 그래서 남긴다.
 # 🔴체결 테이프 duckdb(TAPE_DB_PATH)에 끼워 넣지 않는다: 저쪽 writer 는 별도 프로세스가
 #   **연결을 붙들고** 있어 외부에서는 read_only 조차 거부된다(2026-09-19 실측). 여기서는
@@ -2228,6 +2232,14 @@ def make_app() -> web.Application:
                     pending = []
                     flushed_at = now
             except asyncio.CancelledError:
+                # 정상 종료(배포 재기동)에서 미저장분을 버리지 않는다 -- 이 경로가 유일하게
+                # 자주 도는 손실이었다(재기동마다 최대 OI_1S_FLUSH_SECONDS 만큼). 취소된
+                # 태스크에서는 await 가 즉시 다시 취소되므로 to_thread 없이 그 자리에서 쓴다.
+                if pending:
+                    try:
+                        oi_1s_persist(pending)
+                    except Exception as exc:  # noqa: BLE001 -- 종료 중엔 알리고 넘어간다
+                        print(f"oi-1s final flush failed: {exc}", flush=True)
                 raise
             except Exception as exc:  # noqa: BLE001 -- 한 번의 실패로 수집을 영구히 멈추지 않는다
                 print(f"oi-1s poll/flush failed (will retry): {exc}", flush=True)
