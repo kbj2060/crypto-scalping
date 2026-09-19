@@ -246,8 +246,13 @@ const GEX_POLL_MS = 120000;          // 매시 cron -- 2분 폴링이면 충분�
 const FLOW_HEATMAP_COLS = 300;       // 열 수는 고정 -- 전송량(≈3KB)과 해상도를 함께 묶는다
 const flowHeatmapAgg = () =>         // 창 전체를 300열에 담는 초/열
   Math.max(1, Math.min(60, Math.round(chartWindowBars * 300 / FLOW_HEATMAP_COLS)));
-// 새 열이 agg 초마다 하나 생긴다 -- 그보다 자주 받아봐야 같은 그림이다. 3~15초로 묶는다.
-const flowHeatmapPollMs = () => Math.max(3000, Math.min(15000, flowHeatmapAgg() * 1000));
+// 2026-09-20 1초(사용자 요청). 「새 열이 agg 초마다 하나니 그보다 자주 받아야 같은 그림」
+// 이라 3~15초로 묶고 있었는데, **틀렸다** -- 맨 끝 열은 진행 중이라 매초 바뀌고, 창 전체를
+// 접어 내는 행 통계도 같이 움직인다. 실측(1h 탭, 1초 간격 두 번): inst 46/272행 2.52% ·
+// d60 217/272행 7.37% · refill 246/272행이 바뀐다(peak 만 0). 빈 그림에 돈을 쓰는 게 아니다.
+// 🔴비용은 **서버가 1초 SWR 로 묶는다**(server.py api_flow_heatmap) -- 안 그러면 탭 수만큼
+//   곱해진다. 한 번 11~32ms(탭별 창 길이), 1Hz 면 코어 1.1~3.2%.
+const flowHeatmapPollMs = () => 1000;
 const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
 let latestSupplyProfile = null;
 let supplyProfileLastFetchAt = 0;
