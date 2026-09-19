@@ -1065,9 +1065,26 @@ function renderOpsStatus(payload) {
 
 // 스냅샷 탭이 보고 있는 코인의 포지션 하나. 없으면 null.
 // ASSET_CONFIG 는 eth/sol/btc 만 담고 있어 xrp/hype 는 관례대로 <TICKER>USDT 로 만든다.
+// 🔴같은 코인이라도 **심볼이 둘**일 수 있다: 화면·봇은 ETHUSDT 인데 수동 주문은 ETHUSDC 로
+//   나간다(2026-09-19). 시장 심볼만 보면 수동으로 연 포지션이 이 카드에 영영 안 뜬다
+//   (사용자 보고) -- 카드가 안 뜨면 그 아래 청산 버튼도, 차트의 진입선도 같이 사라진다.
+// ⭐우선순위는 서버 청산 경로와 **같다**(server.py 의 resolve_exit_position candidates:
+//   수동 심볼 먼저, 그다음 시장 심볼). 카드와 청산 버튼이 다른 포지션을 가리키면 헤지 모드에서
+//   «청산하려다 신규 진입»이 된다.
+// ⭐심볼은 하드코딩하지 않고 서버가 payload 에 실어 보낸 exec_symbol 을 쓴다 -- 환경변수라
+//   바뀔 수 있고, 두 벌로 적어 두면 언젠가 한쪽만 고쳐진다.
 function snapshotAccountPosition() {
-  const symbol = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
-  return (latestBinanceAccount?.positions || []).find((p) => p.symbol === symbol) || null;
+  const positions = latestBinanceAccount?.positions || [];
+  const market = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
+  const exec = latestBinanceAccount?.exec_symbol || "";
+  const base = market.replace(/USDT$/, "");
+  // 수동 심볼이 **이 코인의 것일 때만** 본다(ETH 탭에서 ETHUSDC, BTC 탭에서는 무시).
+  const order = exec && exec !== market && exec.startsWith(base) ? [exec, market] : [market];
+  for (const symbol of order) {
+    const hit = positions.find((p) => p.symbol === symbol);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 // 스냅샷 탭 청산맵 바로 위 요약. ops 탭 패널의 축약판이라 payload 를 공유한다(추가 요청 없음).
@@ -3535,8 +3552,10 @@ function renderSupply1s(box = null) {
   const w = box ? box.w : (parentW > 0 ? Math.max(parentW, 320) : 1200);
   const h = box ? box.h : 150;
   const mt = 16, mb = 14;
-  const narrow = w < 760;   // 모바일이든 2열의 좁은 열이든 여백 규칙은 같다
-  const ml = narrow ? 34 : 45, mr = narrow ? 64 : 112;
+  const narrow = w < 760;   // 모바일이든 좁은 상자든 여백 규칙은 같다
+  // mr 은 오른쪽 꼬리표(고래/리테일/신규계약 + 값)가 앉는 자리다. 64 면 «신규계약 +0.4k»
+  // 가 약 4px 넘친다(2026-09-19 계산) -- 72 로 두면 셋 다 들어가고 선은 8px 만 짧아진다.
+  const ml = narrow ? 34 : 45, mr = narrow ? 72 : 112;
   const cw = w - ml - mr;
   const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
@@ -3649,7 +3668,9 @@ function renderSupply1s(box = null) {
     // 비면 그건 폴링 지각이 아니라 실제 공백이다.
     line(pathOf(oiRows, (r) => yF(r.v), 20), "var(--warn)", 1.6, 0.9);
     const tagO = { y: yF(end), color: "var(--warn)",
-                   text: "신규계약 " + (end >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(end)) };
+                   // 좁으면 «신규계약»(73px)이 꼬리표 자리(67px)를 넘는다 -- OI 로 줄인다.
+                   text: (narrow ? "OI " : "신규계약 ")
+                         + (end >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(end)) };
     tags.forEach((t) => { if (Math.abs(tagO.y - t.y) < 12) tagO.y = t.y + (tagO.y >= t.y ? 12 : -12); });
     tags.push(tagO);
   }
@@ -3703,8 +3724,10 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   // 계속 적는다.
   // 여백도 상자 폭을 따른다 -- 2열의 오른쪽 열(≈400px)에서 45/112 는 폭의 40% 를 먹는다.
   const narrow = w < 760;
-  const ml = narrow ? 34 : 45, mr = narrow ? 64 : 112, mt = 14, mb = 22;
-  const centerW = mobileChart ? 54 : 68;   // 굵고 커진 가격 라벨 자리(사용자 요청)
+  // mr 은 띠 이름표가 앉는 자리다 -- 좁을 때 64 면 «리테일 매수»가 밖으로 나간다(2026-09-19
+  // 모바일 실측). 78 로 늘려도 막대는 한쪽당 7px 만 잃는다.
+  const ml = narrow ? 34 : 45, mr = narrow ? 78 : 112, mt = 14, mb = 22;
+  const centerW = narrow ? 54 : 68;   // 굵고 커진 가격 라벨 자리(사용자 요청)
   const sideW = (w - ml - mr - centerW) / 2;
   const avail = h - mt - mb;
   const bucket = Number(profile.bucket) || 0.5;
@@ -3731,12 +3754,17 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   rows.forEach((r, k) => { if (r[0] + r[1] > pocVol) { pocVol = r[0] + r[1]; pocKey = k; } });
 
 
-  // ── 지지/저항 구간 (2026-09-19 사용자 요청) ────────────────────────────
-  // ⭐부호 규약은 **능동 측**이다: 그 값에서 **순매수**한 쪽이 지지, **순매도**한 쪽이 저항.
-  //   「고래가 지지한다 = 고래가 거기서 샀다」는 사용자 표현을 그대로 따른다.
-  //   🔴수동 측 해석은 정반대라는 걸 알아 둘 것 -- 공격적 매도가 몰린 값은 «누군가 받아냈다»
-  //   는 뜻이라 그 관점에선 지지다. 한 화면에 두 규약을 섞지 않으려고 벽 쪽 툴팁에서
-  //   지지/저항 단정을 뺐다(벽은 «몰렸다»는 사실만 말한다).
+  // ── 매수/매도 압력 구간 (2026-09-19 사용자 요청, 같은 날 이름 정정) ──────
+  // ⭐처음엔 «지지/저항»이라고 불렀다가 바꿨다. 이 원천으로는 그 이름을 댈 수 없다:
+  //   지지·저항은 **미체결 지정가**(호가에 걸려 기다리는 물량)의 개념인데, 체결 테이프에
+  //   있는 건 **이미 체결돼 사라진** 유동성이다. 그 값에서 순매수가 컸다는 건 테이커가
+  //   그 값을 «지불했다»는 뜻이고, 그건 가격을 거기서 위로 **밀어낸** 힘이다 -- 받쳐주는
+  //   힘과 방향이 반대다.
+  //   🔴게다가 같은 수치가 정반대 이름을 동시에 지지한다: 체결엔 짝이 있어서 공격적 매수
+  //   N ETH 는 «누군가 그 값에 팔아줬다»(매도벽=저항)이기도 하다. 한 수치가 규약에 따라
+  //   지지도 저항도 된다면 그건 데이터가 아니라 해석이다. 그래서 부호는 **압력의 방향**
+  //   까지만 말한다(테이커가 어느 쪽이었나). 지지/저항을 말하려면 부호가 아니라 «총량 +
+  //   현재가 기준 위/아래»여야 하고, 그건 이 띠가 아니라 POC 계열의 일이다.
   //
   // 구간 정의: **고정폭 띠를 미끄러뜨려 순수급이 가장 큰 자리**. 처음엔 최대합 연속구간
   // (Kadane)으로 잡았다가 버렸다 -- 2026-09-19 실측에서 36행 중 **18행**(화면 절반)을
@@ -3762,14 +3790,16 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     return { at, net: best, vol, share: vol > 0 ? best / vol : 0 };
   };
   // 🔴문턱을 두지 않는다. 벽에서 두 번 틀린 뒤 배운 것 -- 세기는 **숫자로 적고** 판단은
-  //   사람이 한다. 2026-09-19 실측 쏠림: 고래 지지 52% · 저항 20% · 리테일 지지 16% ·
-  //   저항 17%(각 그룹 전체 띠의 중앙값은 17% / 11%). 그룹마다 절대 수준이 달라서 한 값으로
+  //   사람이 한다. 2026-09-19 실측 쏠림: 고래 매수 52% · 매도 20% · 리테일 매수 16% ·
+  //   매도 17%(각 그룹 전체 띠의 중앙값은 17% / 11%). 그룹마다 절대 수준이 달라서 한 값으로
   //   자르면 리테일은 늘 숨고 고래만 남는다.
   const srs = [
-    { b: srBand(2, 3, +1), name: "고래 지지", color: "var(--good)", dash: null, op: 0.9 },
-    { b: srBand(2, 3, -1), name: "고래 저항", color: "var(--bad)", dash: null, op: 0.9 },
-    { b: srBand(4, 5, +1), name: "리테일 지지", color: "var(--good)", dash: "5 3", op: 0.55 },
-    { b: srBand(4, 5, -1), name: "리테일 저항", color: "var(--bad)", dash: "5 3", op: 0.55 },
+    // short = 좁은 상자에서 쓰는 이름. «압력»을 떼도 색(초록/빨강)이 방향을 말하고
+    // 툴팁에 전체 이름이 그대로 있다.
+    { b: srBand(2, 3, +1), name: "고래 매수압력", short: "고래 매수", color: "var(--good)", dash: null, op: 0.9 },
+    { b: srBand(2, 3, -1), name: "고래 매도압력", short: "고래 매도", color: "var(--bad)", dash: null, op: 0.9 },
+    { b: srBand(4, 5, +1), name: "리테일 매수압력", short: "리테일 매수", color: "var(--good)", dash: "5 3", op: 0.55 },
+    { b: srBand(4, 5, -1), name: "리테일 매도압력", short: "리테일 매도", color: "var(--bad)", dash: "5 3", op: 0.55 },
   ].filter((x) => x.b && x.b.net > 0);
   // 자릿수는 아래 행 라벨과 같은 규칙이다 -- 한 화면에서 «2608» 과 «2608.0» 이 섞이면 안 된다.
   const srDigits = rowSize >= 1 ? 0 : 1;
@@ -3791,9 +3821,11 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     if (x.dash) mid.setAttribute("stroke-dasharray", x.dash);
     const tip = document.createElementNS(NS, "title");
     x.tip = x.name + " " + x.lo + "~" + x.hi + " · 순"
-      + (x.name.includes("지지") ? "매수" : "매도") + " " + x.b.net.toFixed(1) + " ETH"
+      + (x.name.includes("매수") ? "매수" : "매도") + " " + x.b.net.toFixed(1) + " ETH"
       + " (이 띠 거래량의 " + Math.round(x.b.share * 100) + "%)\n"
-      + "그 값에서 이 쪽이 «사는» 힘이 더 셌다는 뜻이다 -- 호가에 걸린 물량이 아니라 체결이다.";
+      + "그 값 구간에서 테이커가 이쪽으로 기울었다는 뜻이다 -- **이미 체결된** 물량이고\n"
+      + "호가에 걸려 기다리는 물량이 아니다.\n"
+      + "⚠️지지·저항이 아니다. 그건 미체결 지정가의 개념인데 여기 있는 건 소진된 유동성이다.";
     tip.textContent = x.tip;
     mid.appendChild(tip);
     svg.appendChild(mid);
@@ -3802,9 +3834,11 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
 
   // 띠 이름표 (2026-09-19 사용자 요청: 프로파일 **오른쪽**에). 여백 mr 이 통째로 비어
   // 있어서 새 공간을 내지 않아도 된다 -- 왼쪽은 가격축이고, 띠 위에 얹으면 막대와 겹친다.
-  // 🔴네 띠가 서로 붙거나 겹칠 수 있다(고래 지지와 리테일 지지가 같은 자리인 건 흔하다).
+  // 🔴네 띠가 서로 붙거나 겹칠 수 있다(고래 매수압력과 리테일 매수압력이 같은 자리인 건 흔하다).
   //   위에서부터 훑으며 최소 간격만큼 아래로 밀고, 밀린 것은 지시선으로 제 띠에 잇는다.
-  const LBL_H = 23, lblX = w - mr + 8;
+  // 좁은 상자에서는 범위 줄(2631.0~2632.0 = 13글자)이 자리에 못 들어간다 -- 툴팁에 있으므로
+  // 뺀다. 한 줄이 되니 최소 간격도 23 -> 14 로 줄어 네 개가 여유 있게 선다.
+  const LBL_H = narrow ? 14 : 23, lblX = w - mr + 8;
   let lastLblY = -Infinity;
   [...srs].sort((a, b) => a.mid - b.mid).forEach((x) => {
     const y = Math.min(h - mb - 12, Math.max(mt + 9, Math.max(x.mid, lastLblY + LBL_H)));
@@ -3820,16 +3854,18 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     name.setAttribute("x", lblX); name.setAttribute("y", y);
     name.setAttribute("font-size", "10"); name.setAttribute("font-weight", "700");
     name.setAttribute("fill", x.color); name.setAttribute("fill-opacity", x.op);
-    name.textContent = x.name;
+    name.textContent = narrow ? x.short : x.name;
     const nTip = document.createElementNS(NS, "title");
     nTip.textContent = x.tip;
     name.appendChild(nTip);
     svg.appendChild(name);
-    const rng = document.createElementNS(NS, "text");
-    rng.setAttribute("x", lblX); rng.setAttribute("y", y + 10);
-    rng.setAttribute("font-size", "9"); rng.setAttribute("fill", "var(--muted)");
-    rng.textContent = x.lo + "~" + x.hi;
-    svg.appendChild(rng);
+    if (!narrow) {
+      const rng = document.createElementNS(NS, "text");
+      rng.setAttribute("x", lblX); rng.setAttribute("y", y + 10);
+      rng.setAttribute("font-size", "9"); rng.setAttribute("fill", "var(--muted)");
+      rng.textContent = x.lo + "~" + x.hi;
+      svg.appendChild(rng);
+    }
   });
 
   // 안쪽부터 고래 · 중형 · 리테일. 농담이 곧 크기 계단이다.
@@ -3890,9 +3926,9 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   // ⚠️여기서 「벽」은 **체결이 몰린 가격**이지 호가창에 걸린 대기 물량이 아니다. 이 화면의
   //   원천은 체결 테이프뿐이라 «걸려 있는 것»은 볼 수 없다. 그래서 이름표에 «체결»을 적고
   //   툴팁에 뜻을 풀어 둔다 -- 「벽」이라는 말이 오해를 부르기 가장 쉬운 자리다.
-  // ⭐부호가 직관과 반대다: **공격적 매도가 몰린 가격**은 거기서 누군가 받아냈다는 뜻이라
-  //   지지 후보이고, 공격적 매수가 몰린 가격은 거기서 누군가 넘겼다는 뜻이라 저항 후보다.
-  //   툴팁에 그대로 적는다.
+  // ⭐여기서도 «지지/저항» 단정은 하지 않는다(위 띠 주석과 같은 이유). 공격적 매도가 몰린
+  //   가격은 누군가 받아냈다는 뜻이고 공격적 매수가 몰린 가격은 누군가 넘겼다는 뜻인데,
+  //   둘 다 이미 체결된 사실이라 «지금 거기 뭐가 걸려 있나»를 말하지 않는다. 툴팁도 그대로.
   // 세기는 **«균등하게 퍼졌을 때의 몇 배»**로 잰다. 비율(%)로 두면 행 수에 따라 뜻이
   // 달라진다 -- 35행에서 8%는 2.8배지만 15행에서 8%는 1.2배다.
   // 🔴문턱을 데이터 보기 전에 정했다가 두 번 틀렸다(12% -> 3배). 2026-09-19 실측(ETH 55분,
@@ -3940,20 +3976,25 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
       + x.w.qty.toFixed(1) + " ETH)가 이 한 행에 있다. "
       + "고르게 퍼졌을 때(" + (100 / keys.length).toFixed(1) + "%)의 "
       + x.w.mult.toFixed(1) + "배다.\n"
-      + "⚠️«몰렸다»는 사실만 말한다 -- 지지/저항 판정은 머리글의 구간(순수급 기준)이 한다.\n"
+      + "⚠️«몰렸다»는 사실만 말한다 -- 지지/저항 판정은 하지 않는다.\n"
       + "  같은 값을 두 규약으로 읽을 수 있어서다: 공격적 매도가 몰린 값은 «누군가 받아냈다»로\n"
-      + "  보면 지지지만, «고래가 팔았다»로 보면 저항이다. 한 화면에 둘을 섞지 않는다.\n"
+      + "  보면 지지지만, «고래가 팔았다»로 보면 저항이다. 어느 쪽도 데이터가 정해주지 않는다.\n"
       + "⚠️체결이 몰린 자리이지 호가창에 걸린 대기 물량이 아니다.";
     tick.appendChild(tip);
   });
 
   // 범례. 농담 세 단계는 설명 없이는 안 읽힌다 -- 견본을 같이 놓는다.
   const kUsd = (v) => "$" + Math.round(v / 1000) + "k";
-  const legend = [
-    ["고래", "≥" + kUsd(profile.whaleMinUsd || 0)],
-    ["중형", kUsd(profile.retailMaxUsd || 0) + "~" + kUsd(profile.whaleMinUsd || 0)],
-    ["리테일", "<" + kUsd(profile.retailMaxUsd || 0)],
-  ];
+  // 🔴범례와 아래 바닥 설명은 **같은 줄**(h - 6)에 왼쪽·오른쪽으로 앉는다. 상자가 좁으면
+  //   둘이 겹쳐 글자가 서로를 덮는다(2026-09-19 모바일 실측 -- 사용자 보고). 좁을 때는
+  //   범례에서 달러 경계를 떼고(막대 툴팁에 그대로 있다) 바닥 설명도 줄인다.
+  const legend = narrow
+    ? [["고래", ""], ["중형", ""], ["리테일", ""]]
+    : [
+      ["고래", "≥" + kUsd(profile.whaleMinUsd || 0)],
+      ["중형", kUsd(profile.retailMaxUsd || 0) + "~" + kUsd(profile.whaleMinUsd || 0)],
+      ["리테일", "<" + kUsd(profile.retailMaxUsd || 0)],
+    ];
   let lx = ml;
   legend.forEach(([name, range], s) => {
     const sw = document.createElementNS(NS, "rect");
@@ -3964,17 +4005,26 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     const t = document.createElementNS(NS, "text");
     t.setAttribute("x", lx + 13); t.setAttribute("y", h - 6);
     t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)");
-    t.textContent = name + " " + range;
+    t.textContent = range ? name + " " + range : name;
     svg.appendChild(t);
     lx += 13 + (name.length + range.length) * 6.2 + 16;
   });
-  const foot = document.createElementNS(NS, "text");
-  foot.setAttribute("x", w - mr); foot.setAttribute("y", h - 6);
-  foot.setAttribute("text-anchor", "end");
-  foot.setAttribute("font-size", "9"); foot.setAttribute("fill", "var(--muted)");
-  foot.textContent = "← 공격적 매도  ·  양끝 = 체결이 몰린 «벽»  ·  가로 띠 = 순수급 지지/저항"
+  // 🔴길이로 고른다, `narrow` 로 고르지 않는다 -- 임계값(760)과 «실제로 들어가느냐»는 다른
+  //   물음이라, 그걸로 나누면 768px 같은 폭에서 긴 문장이 범례를 덮는다(계산으로 확인).
+  //   긴 것 -> 짧은 것 -> 생략 순으로 내려간다. 내용은 전부 툴팁에도 있다.
+  const footLong = "← 공격적 매도  ·  양끝 = 체결이 몰린 «벽»  ·  가로 띠 = 순수급 매수/매도 압력"
     + "  ·  공격적 매수 →";
-  svg.appendChild(foot);
+  const footFits = (t) => (w - mr) - t.length * 6.2 > lx + 6;
+  const footText = footFits(footLong) ? footLong
+    : (footFits("← 매도 · 매수 →") ? "← 매도 · 매수 →" : null);
+  if (footText) {
+    const foot = document.createElementNS(NS, "text");
+    foot.setAttribute("x", w - mr); foot.setAttribute("y", h - 6);
+    foot.setAttribute("text-anchor", "end");
+    foot.setAttribute("font-size", "9"); foot.setAttribute("fill", "var(--muted)");
+    foot.textContent = footText;
+    svg.appendChild(foot);
+  }
 
   // ── 현재가 (2026-09-19 사용자 요청) ────────────────────────────────────
   // 점선 한 줄이었다. 바꾼 이유: 프로파일에서 제일 자주 보는 건 «내가 지금 어느 행에
@@ -4023,8 +4073,13 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
         svg.appendChild(ln);
       });
       eLbl(ml - 5, ey + 3, "진입", "end");
-      eLbl(w - mr + 6, ey + 3, fmtNum(entryPrice, 1));
-    } else {
+      // 🔴좁은 상자에서는 값을 안 적는다 -- 오른쪽 여백은 띠 이름표 넷이 이미 쓰고 있어서
+      //   진입 행이 그중 하나와 같은 높이면 글자가 겹친다. 값은 바로 위 가격 플롯의 진입
+      //   배지에 그대로 있다(같은 SVG 안이다).
+      if (!narrow) eLbl(w - mr + 6, ey + 3, fmtNum(entryPrice, 1));
+    } else if (!narrow) {
+      // 창 밖. 좁을 때는 아예 안 적는다 -- 위 가격 플롯이 ↑/↓ 배지로 이미 말하고 있고,
+      // 여기 top/bottom 자리는 띠 이름표의 첫·마지막 줄과 겹친다.
       const above = entryPrice > (keys[0] + 1) * rowSize;
       eLbl(w - mr + 6, above ? mt + 8 : h - mb - 2,
            `진입 ${above ? "↑" : "↓"} ${fmtNum(entryPrice, 1)}`);
