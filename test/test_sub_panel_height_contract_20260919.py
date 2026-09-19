@@ -25,28 +25,24 @@ def test_heights_match_between_js_and_css():
     gap = _num(r"const SUB_GAP = (\d+)", JS, "SUB_GAP")
     prof = _num(r"SUB_PROFILE_H = subOn \? (\d+)", JS, "SUB_PROFILE_H")
     one_s = _num(r"SUB_1S_H = subOn \? (\d+)", JS, "SUB_1S_H")
-    heat = _num(r"SUB_HEAT_H = subOn \? \(subStack \? (\d+)", JS, "SUB_HEAT_H")
+    heat = _num(r"SUB_HEAT_H = subOn \? (\d+)", JS, "SUB_HEAT_H")
 
-    desktop = gap + prof + gap + one_s
-    mobile = gap + heat + gap + prof + gap + one_s
+    # 2026-09-19 히트맵이 프로파일 아래 제 줄 -- 데스크톱·모바일 한 가지 배치다.
+    total = gap + prof + gap + heat + gap + one_s
 
-    css_desktop = _num(r"#candleSvgSnapshot \{ height: (\d+)px; \}", CSS, "데스크톱 SVG 높이")
-    css_desk_box = _num(r"\.candle-container \{ height: (\d+)px; \}", CSS, "데스크톱 컨테이너")
-    mq = re.search(r"@media \(max-width: 720px\) \{\s*"
-                   r"#candleSvgSnapshot \{ height: (\d+)px; \}[^}]*\s*"
-                   r"\.candle-container \{ height: (\d+)px; \}", CSS)
-    assert mq, "모바일 @media 블록을 못 찾음 -- 상하 배치인데 높이를 안 올렸다"
-    css_mob, css_mob_box = int(mq.group(1)), int(mq.group(2))
-
-    assert css_desktop == 400 + desktop, f"데스크톱 SVG {css_desktop} != {400 + desktop}"
-    assert css_desk_box == 412 + desktop, f"데스크톱 상자 {css_desk_box} != {412 + desktop}"
-    assert css_mob == 400 + mobile, f"모바일 SVG {css_mob} != {400 + mobile}"
-    assert css_mob_box == 412 + mobile, f"모바일 상자 {css_mob_box} != {412 + mobile}"
+    css_svg = _num(r"#candleSvgSnapshot \{ height: (\d+)px; \}", CSS, "SVG 높이")
+    css_box = _num(r"\.candle-container \{ height: (\d+)px; \}", CSS, "컨테이너 높이")
+    assert css_svg == 400 + total, f"SVG {css_svg} != {400 + total}"
+    assert css_box == 412 + total, f"상자 {css_box} != {412 + total}"
 
 
-def test_mobile_breakpoint_is_the_same_in_both_files():
-    js_bp = _num(r"matchMedia\(\"\(max-width: (\d+)px\)\"\)", JS, "isMobileChartMode 경계")
-    assert f"@media (max-width: {js_bp}px)" in CSS, f"CSS 에 {js_bp}px 미디어쿼리가 없다"
+def test_layout_is_single_not_split():
+    """좌우 분할(SUB_HEAT_W/SUB_PROFILE_W)과 모바일 분기(subStack)는 걷어냈다 --
+    주석 말고 **코드**에 남아 있으면 배치가 두 가지라는 뜻이다."""
+    for dead in ("SUB_HEAT_W", "SUB_PROFILE_W"):
+        assert dead not in JS, f"죽은 상수가 남아 있다: {dead}"
+    code = "\n".join(l for l in JS.splitlines() if not l.lstrip().startswith("//"))
+    assert "subStack" not in code, "subStack 분기가 코드에 남아 있다"
 
 
 def test_other_sessions_panel_repaint_survives():

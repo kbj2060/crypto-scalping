@@ -3061,7 +3061,62 @@ def make_app() -> web.Application:
         q8 = np.rint(np.clip(qty / scale, -1.0, 1.0) * 127.0)   # rint: 절단하면 오차가 2배다
         return {**w, "scale": scale,
                 "qty_i8": base64.b64encode(np.ascontiguousarray(q8, dtype=np.int8)).decode(),
-                "mid_b64": base64.b64encode(np.ascontiguousarray(mid, dtype="<f4")).decode()}
+                "mid_b64": base64.b64encode(np.ascontiguousarray(mid, dtype="<f4")).decode(),
+                **_heatmap_rows(w, qty, mid)}
+
+    def _heatmap_rows(w: dict, qty: "np.ndarray", mid: "np.ndarray") -> dict[str, Any]:
+        """그림에서 **뽑은 수치**. 히트맵 이미지로는 구별 안 되는 것을 숫자로 가른다.
+
+        ⭐`pers`(창 내내 한 번도 안 빠진 양)가 핵심이다. 실측(600초): 순간 잔량의 **36%가
+          창을 못 버틴다**. 겉보기 크기가 비슷한 두 벽이 지속률 100%(-0.75%, 8073->8056) 대
+          0%(+2.24%, 5461->0) 로 갈리는데 이미지에서는 둘 다 같은 진한 띠다.
+        🔴`cancel_share` 는 **추정**이다. 가격이 안 닿은 빈에서 준 양을 «체결 아님»으로 본다 --
+          취소·리프라이싱·창(±2.4%) 밖 이탈이 섞여 있고 이 피드로는 못 가른다. 바이낸스 선물
+          WS 는 레벨별 총량만 주고 **주문 ID 가 없어** 개별 «건»은 원리적으로 복원 불가다.
+        🔴`obi` 는 **밴드가 값을 정한다**(실측 ±0.1% +0.504 / ±2% +0.071, 7배). 밴드를 같이 낸다.
+        🔴이 수치들은 «지지·저항»이 아니다 -- 호가벽의 버팀 능력은 아직 **못 쟀다**
+          (판정가능 2셀 · TRAIN↔OOS 부호반전, docs/experiments/eth_gex_strike_walls_vs_liqmap_20260919).
+        """
+        ok = np.isfinite(mid)
+        if not ok.any():
+            return {"rows": None, "summary": None}
+        a = np.abs(qty[ok])
+        inst, pers = a[-1], a.min(axis=0)
+        spot = float(np.nanmedian(mid[ok]))
+        price = (w["bin_lo"] + np.arange(w["n_bins"])) * w["bin_size"]
+        dist = (price - spot) / spot * 100.0 if spot else np.zeros_like(price)
+
+        # 가장 가까운 «지속» 벽 -- 지속률 60% 넘는 것 중 잔량 상위에서 최근접
+        keep = (inst > 0) & (pers / np.maximum(inst, 1e-9) >= 0.6)
+        wall = None
+        if keep.any():
+            cand = np.flatnonzero(keep & (pers >= np.percentile(pers[keep], 90)))
+            if cand.size:
+                i = int(cand[np.argmin(np.abs(dist[cand]))])
+                wall = {"dist_pct": round(float(dist[i]), 2), "qty": round(float(pers[i]), 1),
+                        "persist": round(float(pers[i] / max(inst[i], 1e-9)), 3)}
+
+        lo, hi = float(np.nanmin(mid[ok])), float(np.nanmax(mid[ok]))
+        drop = np.clip(a[0] - a[-1], 0, None)
+        touched = (price >= lo) & (price <= hi)
+        tot_drop = float(drop.sum())
+        band = np.abs(dist) <= 0.5
+        b = float(np.clip(qty[ok][-1], 0, None)[band].sum())
+        k = float(np.clip(-qty[ok][-1], 0, None)[band].sum())
+        return {
+            "rows": {"bin_lo": int(w["bin_lo"]), "bin_size": float(w["bin_size"]),
+                     "inst_f4": base64.b64encode(np.ascontiguousarray(inst, "<f4")).decode(),
+                     "pers_f4": base64.b64encode(np.ascontiguousarray(pers, "<f4")).decode()},
+            "summary": {
+                "spot": round(spot, 2),
+                "wall": wall,
+                "persist_share": round(float(pers.sum() / max(inst.sum(), 1e-9)), 3),
+                "cancel_share": (round(float(drop[~touched].sum() / tot_drop), 3)
+                                 if tot_drop > 0 else None),
+                "obi": round((b - k) / max(b + k, 1e-9), 3), "obi_band_pct": 0.5,
+                "window_s": int(w["cols"] * w["dt_s"]),
+            },
+        }
 
     async def api_flow_heatmap(request: web.Request) -> web.Response:
         symbol = (request.query.get("symbol") or "ethusdt").lower()
