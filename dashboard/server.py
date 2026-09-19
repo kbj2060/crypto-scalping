@@ -1395,6 +1395,22 @@ SIZING_CAP_WINDOW = 30      # 최근 N 왕복만 본다(2026-09-13). 아래 sizi
 #   줄어드는 건 짧은 보유(8->6, −25%)뿐이고 1년 중앙 계좌배수는 226 -> 230 으로 오히려 올랐다.
 #   근거: scratchpad kelly_cap / tradeoff 계산, research_sizing_growth_optimal_leverage_20260913.
 SIZING_CAP_EQUITY_X = 6.0
+# 🔴상한 무시 스위치 (2026-09-20 사용자 지시 «우리 사이징 코드는 잠깐 꺼줘»).
+# 세 상한(원장·순자산·위험모델)을 **전부 건너뛰고** 「순자산 × 이 배수」 하나만 기준으로 쓴다.
+# 🔴상한을 «없애는» 게 아니다. 진입 비율 슬라이더의 100% 가 **상한 명목에 대한 비율**이라
+#   기준이 없으면 수량 자체를 만들 수 없다 -- 끄기는 실제로 «기준을 하나로 바꾸기»다.
+# 기본값 0 = 꺼짐. 커밋된 코드의 동작은 그대로이고, 서버 환경변수로만 열리며 재기동으로
+# 되돌아온다(사용자 선택: 환경변수 스위치).
+#   DASHBOARD_SIZING_CAP_EQUITY_X=20 python dashboard/server.py
+# ⚠️이 배수를 거래소 레버리지와 **같게** 두면(둘 다 20) 슬라이더 100% 에서 필요 증거금이
+#   순자산의 100% 가 되어 수수료 몫이 없다 -- 거래소가 거부한다(leverage_setting 의
+#   ENFORCE_SLACK 주석이 같은 실패를 기록한다). 끝까지 쓸 생각이면 배수를 조금 낮춰라.
+# ⚠️이 값이 0 보다 크면 크기를 막는 것이 **아무것도 남지 않는다** -- 이 화면이 존재하는
+#   이유(재량 사이징이 실계좌 손실의 출처, 크기-수익 상관 -0.494)가 잠시 꺼진 상태다.
+try:
+    SIZING_CAP_OVERRIDE_X = max(0.0, float(os.getenv("DASHBOARD_SIZING_CAP_EQUITY_X", "0") or 0))
+except ValueError:                 # 오타를 «무제한»으로 읽지 않는다 -- 꺼진 쪽으로 떨어뜨린다
+    SIZING_CAP_OVERRIDE_X = 0.0
 
 
 def notional_sum(positions: list[dict[str, Any]] | None, symbol: str | None = None) -> float:
@@ -3385,6 +3401,10 @@ def make_app() -> web.Application:
         청산의 «최소 청산 비율»은 정책상한 25배를 기준으로 계산해서, 20배 포지션에서 같은
         카드가 «최소 청산 0%»와 «예산 사다리 60%»를 나란히 띄웠다."""
         cap = dict(sizing.get("cap") or {})
+        # 🔴상한 무시 스위치 -- assemble_entry_plan 의 인라인 블록과 **같은 규칙**이어야 한다.
+        #   두 곳이 갈리면 «추천 지평은 옛 상한, 실제 주문은 새 상한»이 된다.
+        if SIZING_CAP_OVERRIDE_X > 0 and equity > 0:
+            return equity * SIZING_CAP_OVERRIDE_X, "override", cap
         cands = []
         if cap.get("available") and cap.get("cap_notional_usdt"):
             cands.append((float(cap["cap_notional_usdt"]), "ledger"))
@@ -3482,13 +3502,20 @@ def make_app() -> web.Application:
             binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity"),
                                            (cap_model, "model")) if v]
             cap_notional = min(v for v, _ in binding) if binding else None
+            # 🔴상한 무시 스위치. 위 SIZING_CAP_OVERRIDE_X 주석이 계약이다.
+            overridden = SIZING_CAP_OVERRIDE_X > 0 and equity > 0
+            if overridden:
+                cap_notional = equity * SIZING_CAP_OVERRIDE_X
+            # 화면이 «무엇이 묶었나»를 말할 때 쓰는 값. policy_leverage 의 binding 은
+            # 순자산·원장 상한을 **모르므로** 그대로 보여주면 «정책상한 25배»라고 거짓말한다.
+            # 🔴키로 **값만** 비교한다 -- 튜플 min 은 값이 같을 때 이름 알파벳순으로 갈린다.
+            #   (아래 cap.update 도 같은 값을 쓴다. 옛 판은 여기만 고치고 그쪽은 `min(binding)`
+            #    이라 동점에서 두 줄이 서로 다른 이름을 말할 수 있었다.)
+            who = ("override" if overridden
+                   else min(binding, key=lambda t: t[0])[1] if binding else None)
             if risk.get("available") and equity > 0 and cap_notional:
-                eff = cap_notional / equity
-                risk["effective_x"] = round(eff, 2)
-                # 화면이 «무엇이 묶었나»를 말할 때 쓰는 값. policy_leverage 의 binding 은
-                # 순자산·원장 상한을 **모르므로** 그대로 보여주면 «정책상한 25배»라고 거짓말한다.
-                # 🔴키로 **값만** 비교한다 -- 튜플 min 은 값이 같을 때 이름 알파벳순으로 갈린다.
-                risk["applied_binding"] = min(binding, key=lambda t: t[0])[1]
+                risk["effective_x"] = round(cap_notional / equity, 2)
+                risk["applied_binding"] = who
             if cap_notional is not None:
                 cap.update(available=True, cap_notional_usdt=round(cap_notional, 2),
                            cap_equity_usdt=round(cap_equity, 2) if cap_equity else None,
@@ -3497,7 +3524,10 @@ def make_app() -> web.Application:
                            risk=risk,
                            equity_x=SIZING_CAP_EQUITY_X,
                            liq_floor_pct=round(100.0 / SIZING_CAP_EQUITY_X, 1),
-                           binding=min(binding)[1])
+                           # 🔴꺼져 있다는 사실을 payload 에 **명시**한다. 조용히 흘려보내면
+                           #   화면이 «원장 상한이 묶었다»고 거짓말한다.
+                           override_x=SIZING_CAP_OVERRIDE_X if overridden else None,
+                           binding=who)
             # ⭐권고 수량의 기준점이 «습관 중앙값»에서 «위험»으로 바뀌었다(2026-09-13).
             # 모델이 있으면 순자산 × 허용배수 ÷ 가격, 없으면 옛 1/변동성 경로.
             price_ref = float(book["askPrice"]) if side == "LONG" else float(book["bidPrice"])

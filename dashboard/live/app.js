@@ -6671,6 +6671,11 @@ function riskLine(r) {
                   ledger: "원장 상한", equity: "순자산 상한", model: "위험 모델" };
   const who = NAMES[r.applied_binding || r.binding] || r.applied_binding || r.binding;
   const lev = r.effective_x != null ? r.effective_x : r.leverage;
+  // 🔴상한이 꺼져 있으면 «무엇이 묶었나»가 아니라 «아무것도 안 묶었다»가 사실이다.
+  if (r.applied_binding === "override") {
+    return `${r.hold_min}분 보유 기준 각오할 역행 ${r.safe_mae_pct}%`
+      + ` · 🔴사이징 상한 꺼짐 — 최대 ${lev}배 (순자산 × ${lev})`;
+  }
   // 위험 정책이 허용한 값과 실제로 적용된 값이 다르면 둘 다 보여 준다.
   const head = r.effective_x != null && r.leverage != null && r.effective_x < r.leverage
     ? `최대 ${lev}배 (위험 모델은 ${r.leverage}배까지 허용)`
@@ -6835,8 +6840,14 @@ async function manualEntryRefreshSize() {
     // 2026-09-16 정상일 때 이 줄은 **비어 있다**(사용자 지시). 수량·명목·권고 사슬은
     //   위 계좌 카드가 미리보기로 이미 보여준다. 주문 불가만 여기 남는다 -- 왜 못 넣는지는
     //   카드가 말해주지 않는다.
-    line.hidden = !plan.blocked;
-    line.textContent = plan.blocked ? `주문 불가 — ${plan.blocked}` : "";
+    // 🔴사이징 상한이 꺼져 있으면(server.py SIZING_CAP_OVERRIDE_X) **정상일 때도** 이 줄이
+    //   말한다. 크기를 막는 게 아무것도 없는 상태를 화면이 조용히 넘기면 안 된다.
+    //   riskLine 에도 같은 사실을 적지만 그쪽은 위험모델이 살아 있을 때만 그려진다 --
+    //   워커가 죽으면 경고까지 같이 사라지므로 여기 한 곳은 무조건이어야 한다.
+    const ovX = cap.override_x;
+    line.hidden = !plan.blocked && !ovX;
+    line.textContent = plan.blocked ? `주문 불가 — ${plan.blocked}`
+      : ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "";
     renderEntryFoldNote(plan);
     setEntryProjPreview(plan);
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
