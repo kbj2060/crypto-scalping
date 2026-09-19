@@ -1,39 +1,76 @@
-// 수급 프로파일 렌더 스모크. 🔴node --check 는 **문법만** 본다 -- 2026-09-19 에 헬퍼
-// (stack/bar/SEG_*)를 통째로 지운 채 문법검사·CI 를 통과해 **깨진 화면을 배포했다**.
-// 미정의 참조는 실행해야 잡힌다. 실 API 응답(tmp/sp_probe/)으로 한 번 그려 본다.
+// 수급 프로파일 렌더 검증. 🔴node --check 는 **문법만** 본다 -- 2026-09-19 에 헬퍼
+// (stack/bar/SEG_*)를 지운 채 문법검사·CI 를 통과해 깨진 화면을 배포했다.
+// 여기서는 실제로 그려 보고 ①예외 ②요소 수 ③**상자 경계**를 검사한다.
 //   node test/render_supply_profile_smoke_20260919.js
 const fs = require("fs");
 const src = fs.readFileSync("dashboard/live/app.js", "utf8");
 const m = src.match(/function renderSupplyProfileSvg\(svg, profile, currentPrice, entryPrice = 0, box = null\) \{[\s\S]*?\n\}\n/);
 if (!m) { console.log("🔴 함수 추출 실패"); process.exit(1); }
-const mk = () => ({ _a:{}, kids:[], setAttribute(k,v){this._a[k]=v;}, appendChild(c){this.kids.push(c);},
-                    set textContent(v){this._t=v;}, get textContent(){return this._t;},
-                    querySelector(){return null;}, getBoundingClientRect(){return {height:190};} });
-global.document = { createElementNS: () => mk(), createElement: () => mk(),
-                    documentElement: { getAttribute: () => "dark" } };
-global.window = { matchMedia: () => ({ matches: false }) };
-const sp = JSON.parse(fs.readFileSync("/home/kbj20/crypto-scalping/tmp/sp_probe/sp.json","utf8"));
-const hj = JSON.parse(fs.readFileSync("/home/kbj20/crypto-scalping/tmp/sp_probe/hm.json","utf8"));
-const b64 = (s)=>{const b=Buffer.from(s,"base64");return new Float32Array(b.buffer,b.byteOffset,b.length/4);};
-global.latestFlowHeatmap = hj.rows ? {...hj, rows:{...hj.rows, inst:b64(hj.rows.inst_f4), pers:b64(hj.rows.pers_f4)}} : null;
-global.supplyProfileNow = null;
-global.isMobileChartMode = () => false;
-global.fmtNum = (v,d)=>String(v.toFixed(d));
-// 모듈 다른 함수는 하네스에 없다 -- 스텁. 호출되면 세어만 둔다(진짜 미정의와 구분하려고).
-global.__stubbed = [];
-for (const n of ["updateSupplyProfileNow","footprintShades","supplyProfileTip","fmtUsdCompact",
-                 "escapeHtml","snapshotAccountPosition","isMobileChartMode"]) {
-  if (!global[n]) global[n] = (...a) => { global.__stubbed.push(n); return n==="footprintShades"?["a","b","c","d"]:null; };
+
+const b64 = (s) => { const b = Buffer.from(s, "base64");
+                     return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
+const SP = JSON.parse(fs.readFileSync("/home/kbj20/crypto-scalping/tmp/sp_probe/sp.json", "utf8"));
+const HJ = JSON.parse(fs.readFileSync("/home/kbj20/crypto-scalping/tmp/sp_probe/hm.json", "utf8"));
+const HM = HJ.rows ? { ...HJ, rows: { ...HJ.rows, inst: b64(HJ.rows.inst_f4), pers: b64(HJ.rows.pers_f4) } } : null;
+
+function run(label, profile, hm, w, h, narrow) {
+  const rects = [];
+  const mk = (kind) => ({ _a: {}, kids: [], _kind: kind,
+    setAttribute(k, v) { this._a[k] = v; },
+    appendChild(c) { this.kids.push(c); },
+    set textContent(v) { this._t = v; }, get textContent() { return this._t; },
+    querySelector() { return null; }, getBoundingClientRect() { return { height: h }; } });
+  global.document = { createElementNS: (ns, kind) => { const e = mk(kind); if (kind === "rect") rects.push(e); return e; },
+                      createElement: () => mk("div"), documentElement: { getAttribute: () => "dark" } };
+  global.window = { matchMedia: () => ({ matches: narrow }) };
+  global.latestFlowHeatmap = hm;
+  global.supplyProfileNow = null;
+  global.isMobileChartMode = () => narrow;
+  global.fmtNum = (v, d) => String(Number(v).toFixed(d));
+  for (const n of ["updateSupplyProfileNow", "footprintShades", "fmtUsdCompact", "escapeHtml",
+                   "snapshotAccountPosition"]) {
+    if (!global[n]) global[n] = () => (n === "footprintShades" ? ["a", "b", "c", "d"] : null);
+  }
+  const svg = { _a: {}, innerHTML: "", kids: [], setAttribute(k, v) { this._a[k] = v; },
+                appendChild(c) { this.kids.push(c); },
+                parentElement: { clientWidth: w, clientHeight: h },
+                getBoundingClientRect() { return { height: h }; } };
+  try {
+    eval(m[0] + "\nrenderSupplyProfileSvg(svg, profile, 2641, 0, {w: W, h: H});"
+         .replace("W", w).replace("H", h));
+  } catch (e) { console.log(`🔴 ${label}: ${e.constructor.name} — ${e.message}`); return false; }
+
+  // 경계 검사 -- 막대가 상자를 넘으면 잘려 보이거나 옆 패널을 침범한다.
+  const bad = [];
+  for (const r of rects) {
+    const x = +r._a.x, y = +r._a.y, rw = +r._a.width, rh = +r._a.height;
+    if (![x, y, rw, rh].every(Number.isFinite)) { bad.push(["NaN", r._a]); continue; }
+    if (rw < 0 || rh < 0) bad.push(["음수 크기", r._a]);
+    else if (x < -0.5 || x + rw > w + 0.5) bad.push(["가로 넘침", r._a]);
+    else if (y < -0.5 || y + rh > h + 0.5) bad.push(["세로 넘침", r._a]);
+  }
+  if (bad.length) {
+    console.log(`🔴 ${label}: 경계 위반 ${bad.length}건 — 예: ${bad[0][0]} ${JSON.stringify(bad[0][1])}`);
+    return false;
+  }
+  const n = svg.kids.length;
+  if (profile && (profile.levels || []).length && n < 10) {
+    console.log(`🔴 ${label}: 그린 게 너무 적다 (${n})`); return false;
+  }
+  console.log(`✅ ${label}: 요소 ${n} · rect ${rects.length} · 경계 OK`);
+  return true;
 }
-const svg = { _a:{}, innerHTML:"", kids:[], setAttribute(k,v){this._a[k]=v;}, appendChild(c){this.kids.push(c);},
-              parentElement:{clientWidth:1200, clientHeight:190}, getBoundingClientRect(){return {height:190};} };
-try {
-  eval(m[0] + "\nrenderSupplyProfileSvg(svg, sp, 2641, 0, {w:1200, h:190});");
-} catch (e) { console.log("🔴 런타임 오류:", e.constructor.name, "—", e.message); process.exit(1); }
-const tags = {};
-svg.kids.forEach(k => { const t = k._a.fill || k._a.stroke || "?"; tags[t] = (tags[t]||0)+1; });
-if (svg.kids.length < 20) { console.log("🔴 그린 게 너무 적다:", svg.kids.length); process.exit(1); }
-console.log(`✅ 예외 없음 · SVG 자식 ${svg.kids.length}개`);
-console.log("   색별:", JSON.stringify(tags));
-console.log("   스텁 호출:", [...new Set(global.__stubbed)].join(",") || "없음");
-console.log("   supplyProfileNow:", global.supplyProfileNow ? "설정됨(행 " + global.supplyProfileNow.keys.length + ")" : "null");
+
+const empty = { ...SP, levels: [] };
+const one = { ...SP, levels: [SP.levels[0]] };
+const flat = { ...SP, levels: SP.levels.map((l) => [l[0], 5, 5, 0, 0, 5, 5]) };  // 델타 0
+let ok = true;
+ok = run("데스크톱 1200x190", SP, HM, 1200, 190, false) && ok;
+ok = run("모바일 390x190", SP, HM, 390, 190, true) && ok;
+ok = run("좁은상자 320x120", SP, HM, 320, 120, true) && ok;
+ok = run("호가 없음", SP, null, 1200, 190, false) && ok;
+ok = run("레벨 0개", empty, HM, 1200, 190, false) && ok;
+ok = run("레벨 1개", one, HM, 1200, 190, false) && ok;
+ok = run("델타 전부 0", flat, HM, 1200, 190, false) && ok;
+console.log(ok ? "\nall ok" : "\n🔴 실패 있음");
+process.exit(ok ? 0 : 1);
