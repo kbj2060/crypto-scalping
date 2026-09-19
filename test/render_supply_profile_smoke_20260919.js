@@ -30,6 +30,15 @@ const HJ = JSON.parse(fs.readFileSync("/home/kbj20/crypto-scalping/tmp/sp_probe/
 const ROW_STATS = ["inst", "pers", "peak", "refill", "d60"];
 const HM = HJ.rows ? { ...HJ, rows: Object.assign({ ...HJ.rows },
   ...ROW_STATS.map((k) => ({ [k]: b64(HJ.rows[`${k}_f4`] || HJ.rows.inst_f4) }))) } : null;
+// 접근행동은 **제 격자**(4시간 창)로 온다. 픽스처엔 없으므로 히트맵 격자에 합성해 넣어
+// 표식 경로를 실제로 그려 본다 -- 값 자체는 무의미하고, 보는 건 «고리가 상자를 넘는가»다.
+if (HM && HM.rows) {
+  const n = HM.rows.inst.length;
+  HM.rows.approach_bin_lo = HM.rows.bin_lo;
+  HM.rows.approach_bin_size = HM.rows.bin_size;
+  HM.rows.approach = Float32Array.from(
+    { length: n }, (_, i) => (i % 5 === 0 ? 0.6 : i % 5 === 1 ? NaN : 1.3));
+}
 
 function run(label, profile, hm, w, h, narrow) {
   const rects = [];
