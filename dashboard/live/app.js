@@ -205,6 +205,17 @@ let supply1sMeta = { retailMaxUsd: 0, whaleMinUsd: 0, now: 0 };
 //   렌더에서 오른쪽에 공백 띠가 계속 자라는 걸로 드러났다).
 let supply1sSince = 0;
 let supply1sLastFetchAt = 0;
+// 초 -> 그 초의 미결제약정(ETH). 같은 응답에 얹혀 온다(별도 폴링을 하나 더 두지 않는다).
+// ⚠️바이낸스가 OI 를 3~7초에 한 번만 갱신한다(서버 OI_1S_URL 주석의 실측) -- 점이 초마다
+//   있지 않은 게 정상이다. 창 시작을 0으로 두고 «그 뒤로 몇 계약이 새로 생겼나»를 그린다.
+let oi1s = new Map();
+let oi1sSince = 0;
+// 5분 누적 패널(청산맵 아래). 같은 1초 스냅샷을 duckdb 로 남긴 것을 서버가 5분으로 접어 준다 --
+// 링은 6분뿐이라 몇 시간을 보려면 저장을 거쳐야 한다. 5분 봉이라 15초 폴링으로 충분하다.
+const API_OI_5M_URL = "/api/oi-5m";
+const OI_5M_POLL_MS = 15000;
+let latestOi5m = null;
+let oi5mLastFetchAt = 0;
 const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
 let latestSupplyProfile = null;
 let supplyProfileLastFetchAt = 0;
@@ -422,6 +433,7 @@ async function setActiveSnapshotAsset(asset) {
   latestLiquidationDirection = null;
   latestLiquidation5m = null;
   latestLiquidation5mHist = [];
+  latestOi5m = null; oi5mLastFetchAt = 0;
   latestLiquidationMap = null;
   basisLiquidationLastFetchAt = 0;
   liquidationDirectionLastFetchAt = 0;
@@ -3365,12 +3377,17 @@ async function refreshSupply1s() {
   if (now - supply1sLastFetchAt < SUPPLY_1S_POLL_MS) return;
   supply1sLastFetchAt = now;
   try {
-    const res = await fetch(`${API_SUPPLY_1S_URL}?since=${supply1sSince}`, { cache: "no-cache" });
+    const res = await fetch(`${API_SUPPLY_1S_URL}?since=${supply1sSince}&sinceOi=${oi1sSince}`,
+                            { cache: "no-cache" });
     if (!res.ok) throw new Error(`supply-1s ${res.status}`);
     const payload = await res.json();
     (payload.seconds || []).forEach((r) => {
       supply1s.set(r[0], r.slice(1));
       if (r[0] > supply1sSince) supply1sSince = r[0];
+    });
+    (payload.oi || []).forEach((r) => {
+      oi1s.set(r[0], r[1]);
+      if (r[0] > oi1sSince) oi1sSince = r[0];
     });
     supply1sMeta = {
       retailMaxUsd: Number(payload.retailMaxUsd) || 0,
@@ -3380,6 +3397,7 @@ async function refreshSupply1s() {
     // 창 밖은 버린다. 안 버리면 탭을 켜둔 채로 며칠이면 Map 이 수십만 칸이 된다.
     const floor = supply1sMeta.now - SUPPLY_1S_WINDOW;
     supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
+    oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
   } catch (error) {
     console.error("Supply 1s fetch error:", error);
   }
@@ -3408,6 +3426,25 @@ function renderSupplyProfile() {
   if (!svg) return;
   renderSupplyProfileSvg(svg, latestSupplyProfile,
     Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0);
+}
+
+async function refreshOi5m() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  if (activeSnapshotAsset !== "eth") return;   // OI 수집은 ETH 만 한다
+  const now = Date.now();
+  if (now - oi5mLastFetchAt < OI_5M_POLL_MS) return;
+  oi5mLastFetchAt = now;
+  try {
+    // 캔들 차트가 최대 72봉(6시간)을 그린다 -- 그보다 넓게 받아 두면 창을 늘려도 레인이 안 끊긴다.
+    const res = await fetch(`${API_OI_5M_URL}?bars=96`, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`oi-5m ${res.status}`);
+    latestOi5m = await res.json();
+  } catch (error) {
+    console.error("OI 5m fetch error:", error);
+    latestOi5m = null;
+  }
+  // 그리는 건 캔들 차트가 자기 주기에 한다(청산 5분 이력과 같은 방식) -- 여기서 또 부르면
+  // 같은 SVG 를 한 번 더 통째로 다시 그린다.
 }
 
 async function refreshFootprint() {
@@ -3498,7 +3535,13 @@ function renderSupply1s() {
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
   // 2026-09-19 가격선 띠를 뺐다(사용자 지시) -- 바로 아래 풋프린트 캔들이 같은 가격을
   // 이미 보여준다. 그만큼 높이를 돌려줘서 패널이 짧아지고 누적선이 커진다(240 -> 150).
-  const w = Math.max(parentW, 1200), h = 150, ml = 45, mr = 112, mt = 16, mb = 14;
+  // 🔴모바일에서 폭을 1200 으로 잡으면 뷰박스가 8:1 이 되어 158px 상자 안에서 **42px 로**
+  //   줄어든다(meet). 10px 글자가 3px 가 된다 -- 캔들 차트가 쓰는 규약(모바일은 실제 폭)을
+  //   여기서도 쓴다. 여백도 좁은 화면에 맞춰 줄인다(45/112 는 336px 폭의 47% 다).
+  const mobileChart = isMobileChartMode();
+  const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
+  const h = 150, mt = 16, mb = 14;
+  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 64 : 112;
   const cw = w - ml - mr;
   const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
@@ -3525,10 +3568,10 @@ function renderSupply1s() {
   // 5초로 둔 이유: 폴링이 1초라 한두 번 늦는 건 일상이고, 그때마다 띠를 그리면 잡음이 된다.
   // 5초가 비면 그건 폴링 지각이 아니라 실제 공백이다.
   const SUPPLY_1S_GAP_SEC = 5;
-  const pathOf = (rows, yOf) => {
+  const pathOf = (rows, yOf, gap = SUPPLY_1S_GAP_SEC) => {
     let d = "", prev = null;
     rows.forEach((r) => {
-      const cmd = (prev === null || r.s - prev > SUPPLY_1S_GAP_SEC) ? "M" : "L";
+      const cmd = (prev === null || r.s - prev > gap) ? "M" : "L";
       d += (d ? " " : "") + cmd + xAt(r.s).toFixed(1) + " " + yOf(r).toFixed(1);
       prev = r.s;
     });
@@ -3561,7 +3604,13 @@ function renderSupply1s() {
     retail.push({ s, v: cr });
     if (c[2] + c[3] > 0) ticks.push({ s, up: c[2] >= c[3] });
   });
-  const span = Math.max(...whale.map((r) => Math.abs(r.v)), ...retail.map((r) => Math.abs(r.v)), 1e-9);
+  // 신규계약(OI 증분). 같은 자로 그린다 -- 단위가 같은 ETH 라서, 「들어온 순수급 중 얼마가
+  // 실제로 **새 포지션**이었나」가 세 선의 간격으로 바로 읽힌다(나머지는 손바뀜이다).
+  const oiSecs = [...oi1s.keys()].filter((s) => s > first && s <= now).sort((a, b) => a - b);
+  const oiBase = oiSecs.length ? oi1s.get(oiSecs[0]) : 0;
+  const oiRows = oiSecs.map((s) => ({ s, v: oi1s.get(s) - oiBase }));
+  const span = Math.max(...whale.map((r) => Math.abs(r.v)), ...retail.map((r) => Math.abs(r.v)),
+                        ...oiRows.map((r) => Math.abs(r.v)), 1e-9);
   const mid = flowTop + flowH / 2;
   const yF = (v) => mid - (v / span) * (flowH / 2 - 10);
 
@@ -3599,7 +3648,18 @@ function renderSupply1s() {
   // 두 누적값이 가까우면 라벨이 그대로 포개진다(가격 라벨과 같은 문제). 고래를 제자리에 두고
   // 리테일만 밀어낸다 -- 고래가 이 화면의 주인공이라 그쪽 위치가 정확해야 한다.
   if (Math.abs(tagR.y - tagW.y) < 12) tagR.y = tagW.y + (tagR.y >= tagW.y ? 12 : -12);
-  [tagW, tagR].forEach((t) => label(ml + cw + 5, t.y + 3, t.text, t.color));
+  const tags = [tagW, tagR];
+  if (oiRows.length >= 2) {
+    const end = oiRows[oiRows.length - 1].v;
+    // 갱신 간격이 3~7초라 수급선의 5초 절단 기준을 그대로 쓰면 선이 조각난다. 20초를 넘게
+    // 비면 그건 폴링 지각이 아니라 실제 공백이다.
+    line(pathOf(oiRows, (r) => yF(r.v), 20), "var(--warn)", 1.6, 0.9);
+    const tagO = { y: yF(end), color: "var(--warn)",
+                   text: "신규계약 " + (end >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(end)) };
+    tags.forEach((t) => { if (Math.abs(tagO.y - t.y) < 12) tagO.y = t.y + (tagO.y >= t.y ? 12 : -12); });
+    tags.push(tagO);
+  }
+  tags.forEach((t) => label(ml + cw + 5, t.y + 3, t.text, t.color));
 
   // 고래 주문이 있던 초에만 눈금. 누적선이 잃어버리는 «언제»를 여기서 돌려준다.
   ticks.forEach((t) => {
@@ -4147,9 +4207,23 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   «저항1↑»(5글자 ~31px)가 x=-2 까지 나가 잘렸다. 차트 폭은 288 -> 278 로 10px 준다.
   const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 91;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
-  const cw = w - ml - mr, ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP;
+  // OI 신규계약 레인 -- 청산 레인 **바로 위**(사용자 지시). 별도 패널이 아니라 이 SVG 안의
+  // 서브플롯이라야 캔들과 x축(봉)이 구성상 같아진다(레짐 리본이 같은 이유로 여기 있다).
+  // 🔴ETH 전용이다. 다른 코인을 보는 동안 ETH 값을 얹으면 2026-08-31 레짐 리본 사고와 같은
+  //   모양이 된다 -- 자산 전환에서 latestOi5m 을 비우는 것과 이 조건, 둘 다 필요하다.
+  // 데이터가 없으면 자리를 아예 안 잡는다(웜업·다른 코인에서 가격 플롯만 40px 손해다).
+  const oiBars = (svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth"
+                  && latestOi5m && Array.isArray(latestOi5m.bars)) ? latestOi5m.bars : [];
+  // 모바일 26 / 데스크톱 34. h 는 모바일에서도 실제로 400 이다(styles.css 가 #candleSvgSnapshot
+  // 높이를 400px 로 고정 -- `Math.max(parentH, 260)` 의 260 은 SVG 가 안 그려질 때의 바닥값이다).
+  // 400 기준 가격 플롯은 모바일 233, 데스크톱 205 로 남는다.
+  const OI_PANEL_H = oiBars.length ? (mobileChart ? 26 : 34) : 0;
+  const OI_PANEL_GAP = oiBars.length ? 6 : 0;
+  const cw = w - ml - mr;
+  const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
-  const liqPanelY = plotBottom + LIQ_PANEL_GAP;    // == h - mb - LIQ_PANEL_H
+  const oiPanelY = plotBottom + OI_PANEL_GAP;
+  const liqPanelY = oiPanelY + OI_PANEL_H + LIQ_PANEL_GAP;
   const NS = "http://www.w3.org/2000/svg";
   // 풋프린트는 서버가 주는 12봉이 곧 창이다 -- 모바일 핀치줌(visibleCandleWindow)으로 더
   // 잘라내면 셀만 커지고 볼 구간이 사라진다.
@@ -5172,6 +5246,76 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     priceBadgeText.style.display = "none";
   };
 
+  // ── 봉별 OI 신규계약 레인 (2026-09-19 사용자 지시) ──────────────────────────────
+  // 그 5분에 **새로 생긴 계약 수**(미결제약정 증분). 바로 아래 청산 레인과 붙여 읽는다 --
+  // 한쪽은 «새 포지션이 들어왔다», 다른 쪽은 «강제로 닫혔다»로 같은 사건의 양면이다.
+  // ⚠️청산 레인과 달리 **선형 스케일**이다. OI 증분은 봉마다 자릿수가 비슷해서(청산의
+  //   23,000배 같은 폭이 없다) 로그로 누르면 오히려 차이가 사라진다.
+  // 회색 막대 = 수집 공백 뒤라 직전 봉과 이을 수 없어 봉 안에서만 잰 값(0이 아니라 «모름»).
+  if (oiBars.length && candles.length) {
+    const OI_Y = oiPanelY, OI_H = OI_PANEL_H, OI_MID = OI_Y + OI_H / 2;
+    // 봉시각은 서버가 5분으로 바닥내림한 **초**다. 캔들 c.time 과 같은 단위·같은 격자다.
+    const oiByTs = new Map(oiBars.map((b) => [Number(b[0]), b]));
+    let oiPeak = 0;
+    candles.forEach((c) => {
+      const b = oiByTs.get(c.time);
+      if (b) oiPeak = Math.max(oiPeak, Math.abs(Number(b[1]) || 0));
+    });
+    const oiTopLine = document.createElementNS(NS, "line");
+    oiTopLine.setAttribute("x1", ml); oiTopLine.setAttribute("x2", ml + cw);
+    oiTopLine.setAttribute("y1", OI_Y); oiTopLine.setAttribute("y2", OI_Y);
+    oiTopLine.setAttribute("stroke", "var(--soft-line)");
+    svg.appendChild(oiTopLine);
+    if (oiPeak > 0) {
+      const oiHalf = OI_H / 2 - 1;
+      const nowBar = Math.floor(Date.now() / 1000 / 300) * 300;
+      candles.forEach((c, i) => {
+        const b = oiByTs.get(c.time);
+        if (!b) return;
+        const d = Number(b[1]) || 0, gap = b[4];
+        if (!d) return;
+        const hgt = Math.max(1, oiHalf * Math.abs(d) / oiPeak);
+        const rect = document.createElementNS(NS, "rect");
+        rect.setAttribute("x", xAt(i));
+        rect.setAttribute("y", d >= 0 ? OI_MID - hgt : OI_MID);
+        rect.setAttribute("width", Math.max(1, bw));
+        rect.setAttribute("height", hgt);
+        rect.setAttribute("fill", gap ? "var(--neutral)" : (d >= 0 ? "var(--good)" : "var(--bad)"));
+        rect.setAttribute("fill-opacity", c.time >= nowBar ? "0.42" : (gap ? "0.35" : "0.85"));
+        const title = document.createElementNS(NS, "title");
+        title.textContent = fmtDateTick(c.time * 1000) + " 신규계약 "
+          + (d >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(d)) + " ETH"
+          + " · OI " + Math.round(Number(b[2]) || 0).toLocaleString() + " · 스냅샷 " + b[3] + "개"
+          + (gap ? " (앞 봉이 비어 봉 안에서만 쟀다 -- 0이 아니라 «모름»)" : "")
+          + (c.time >= nowBar ? " (진행 중)" : "");
+        rect.appendChild(title);
+        svg.appendChild(rect);
+      });
+      const oiMidLine = document.createElementNS(NS, "line");
+      oiMidLine.setAttribute("x1", ml); oiMidLine.setAttribute("x2", ml + cw);
+      oiMidLine.setAttribute("y1", OI_MID); oiMidLine.setAttribute("y2", OI_MID);
+      oiMidLine.setAttribute("stroke", "var(--line)"); oiMidLine.setAttribute("stroke-width", "1");
+      svg.appendChild(oiMidLine);
+      const oiLbl = document.createElementNS(NS, "text");
+      oiLbl.setAttribute("x", ml - 6); oiLbl.setAttribute("y", OI_MID + 3);
+      oiLbl.setAttribute("text-anchor", "end"); oiLbl.setAttribute("font-size", "9");
+      oiLbl.setAttribute("fill", "var(--muted)");
+      oiLbl.textContent = "OI";
+      const oiLblTip = document.createElementNS(NS, "title");
+      oiLblTip.textContent = "미결제약정(OI)의 5분 증분 -- 그 5분에 새로 생긴 계약 수입니다."
+        + " 위(초록)는 새 포지션 유입, 아래(빨강)는 청산·정리, 회색은 수집 공백 뒤라"
+        + " 직전 봉과 이을 수 없는 구간입니다. 바이낸스가 OI 를 3~7초에 한 번만 갱신하므로"
+        + " 한 봉은 40~90개 스냅샷의 양 끝으로 잽니다.";
+      oiLbl.appendChild(oiLblTip);
+      svg.appendChild(oiLbl);
+      const oiPeakLbl = document.createElementNS(NS, "text");
+      oiPeakLbl.setAttribute("x", ml + cw + 6); oiPeakLbl.setAttribute("y", OI_MID + 3);
+      oiPeakLbl.setAttribute("font-size", "9"); oiPeakLbl.setAttribute("fill", "var(--muted)");
+      oiPeakLbl.textContent = "최대 ±" + fmtFootprintQty(oiPeak);
+      svg.appendChild(oiPeakLbl);
+    }
+  }
+
   // ── 봉별 청산 레인 (2026-09-11 사용자 "청산맵 차트에 매 5분봉 청산 데이터를 추가") ──
   // 데이터: /api/liquidation-5m-history -- tail_risk_1m 의 실제 @forceOrder 체결을 5분으로 접은 것.
   // 🔴게이지(/api/liquidation-5m-signal)는 BAR_MINUTES=30 이다. 여기는 캔들과 같은 **5분**이라야
@@ -5471,6 +5615,7 @@ async function tick() {
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       refreshSupplyProfile();        // 2026-09-19 가격축 수급 프로파일
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
+      refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }

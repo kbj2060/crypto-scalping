@@ -471,6 +471,10 @@
         </div>
         <!-- 2026-09-11 청산 규모 게이지는 모델 지표 칩(청산 규모)으로 옮겼다(사용자 지시).
              같은 원천(latestLiquidation5m, 30분 누적)이라 두 곳에 두면 중복이다. -->
+        <!-- 2026-09-19 OI 신규계약(5분) 레인은 이 SVG **안**, 청산 레인 바로 위에 그린다
+             (사용자 지시). 별도 패널로 두지 않는 이유는 캔들과 x축이 구성상 같아야 해서다 --
+             레짐 리본이 같은 이유로 여기 들어와 있다. app.js renderCandleSvg 의 「봉별 OI
+             신규계약 레인」 블록. -->
         <div class="chart-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
@@ -503,7 +507,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260916-shadow-observe"></script>
+  <script src="./app.js?v=20260919-oi-1s"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

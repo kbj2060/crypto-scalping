@@ -23,6 +23,8 @@ from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
+
+from trading_bot_modules.duckdb_access import duckdb_path_lock  # noqa: E402 -- sys.path 먼저
 # Macro calendar (2026-08-26) needs FRED/EIA/Finnhub API keys from .env -- no other endpoint in
 # this file has needed a real secret before, so .env was never loaded here until now.
 load_dotenv(REPO_ROOT / ".env")
@@ -525,6 +527,83 @@ FOOTPRINT_KEEP_BARS = 288
 # 가격빈을 버리고 초마다 한 칸만 남긴다(가격축은 수급 프로파일이 따로 본다). 360초를 두는 건
 # 화면이 300초를 그리는데 경계에서 모자라지 않게 하려는 여유다.
 SUPPLY_1S_SECONDS = 360
+# 같은 5분 창의 **미결제약정(OI)**. 「신규 계약이 몇 개 생겼나」는 OI 의 증분이다.
+# 🔴바이낸스는 OI 를 매 초 갱신하지 않는다 -- /fapi/v1/openInterest 를 1초 간격 20회 때려보니
+#   서로 다른 스냅샷은 6개, 간격 0.6~6.7초(중앙 ~3.5초)였다(2026-09-19 실측). 그래서 이 링은
+#   **값이 바뀐 초에만** 점을 남긴다. 매초 같은 값을 복붙하면 없는 해상도를 있는 척하게 된다.
+#   1초 폴링은 그 3~7초 갱신을 가장 빨리 잡기 위한 것이다(가중치 1 x 60/분, IP 한도 2400/분).
+OI_1S_URL = "https://fapi.binance.com/fapi/v1/openInterest"
+OI_1S_POLL_SECONDS = 1.0
+# 화면 링(6분)은 재기동하면 비고, 5분 누적 패널은 몇 시간을 봐야 한다 -- 그래서 남긴다.
+# 🔴체결 테이프 duckdb(TAPE_DB_PATH)에 끼워 넣지 않는다: 저쪽 writer 는 별도 프로세스가
+#   **연결을 붙들고** 있어 외부에서는 read_only 조차 거부된다(2026-09-19 실측). 여기서는
+#   대시보드가 유일한 writer 이고, 매 flush 마다 연결-작업-닫기라 연구/감시 쪽 읽기를 막지 않는다.
+OI_1S_DB_PATH = LIVE_DIR / "oi_1s.duckdb"
+OI_1S_TABLE = "oi_1s"
+OI_1S_FLUSH_SECONDS = 10.0   # 크래시 시 잃는 최대치(스냅샷 ~3개). 파일 락 잡는 횟수와의 맞교환.
+OI_5M_BAR_SECONDS = 300
+OI_5M_WINDOW_BARS = 48       # 4시간
+
+
+def oi_1s_persist(rows: list[tuple[int, float]]) -> None:
+    """1초 OI 스냅샷을 duckdb 에 남긴다(연결-작업-닫기).
+
+    (ts_sec, symbol) 이 PK 라 재기동 직후 겹치는 초를 다시 써도 조용히 무시된다 -- 호출부가
+    «어디까지 저장했나»를 따로 들고 있지 않아도 된다."""
+    if not rows:
+        return
+    with duckdb_path_lock(OI_1S_DB_PATH):
+        con = duckdb.connect(str(OI_1S_DB_PATH))
+        try:
+            con.execute(f"""CREATE TABLE IF NOT EXISTS {OI_1S_TABLE} (
+                ts_sec BIGINT, symbol VARCHAR, open_interest DOUBLE,
+                PRIMARY KEY (ts_sec, symbol))""")
+            con.executemany(f"INSERT OR IGNORE INTO {OI_1S_TABLE} VALUES (?, ?, ?)",
+                            [(int(s), FOOTPRINT_SYMBOL.lower(), float(v)) for s, v in rows])
+        finally:
+            con.close()
+
+
+def oi_5m_buckets(bars: int) -> list[list[float]]:
+    """5분 봉별 [봉시각, 신규계약(Δ), 봉 끝 OI, 스냅샷 수, 공백여부].
+
+    Δ 는 «직전 봉 끝 -> 이 봉 끝»이다. 봉 안(열림->닫힘)만 재면 봉 사이 3~7초에 일어난 변화가
+    통째로 사라진다. 다만 **앞 봉이 비어 있으면**(수집기 정지) 그 공백 동안의 변화를 이 봉에
+    몰아주지 않고 봉 안에서만 재고 gap=1 로 알린다 -- 0이 아니라 «모름»이다.
+    """
+    if not OI_1S_DB_PATH.exists():
+        return []
+    floor = (int(time.time()) // OI_5M_BAR_SECONDS - (bars - 1)) * OI_5M_BAR_SECONDS
+    try:
+        with duckdb_path_lock(OI_1S_DB_PATH):
+            con = duckdb.connect(str(OI_1S_DB_PATH))
+            try:
+                rows = con.execute(f"""
+                    SELECT ts_sec - (ts_sec % ?)              AS bar,
+                           arg_min(open_interest, ts_sec)     AS oi_open,
+                           arg_max(open_interest, ts_sec)     AS oi_close,
+                           count(*)                           AS n
+                    FROM {OI_1S_TABLE}
+                    WHERE symbol = ? AND ts_sec >= ?
+                    GROUP BY 1 ORDER BY 1
+                """, [OI_5M_BAR_SECONDS, FOOTPRINT_SYMBOL.lower(),
+                      floor - OI_5M_BAR_SECONDS]).fetchall()   # 한 봉 더: 첫 봉의 기준점
+            finally:
+                con.close()
+    except Exception as exc:  # noqa: BLE001 -- 아직 테이블이 없거나(첫 가동) 잠깐 잠겼다
+        print(f"oi-5m read failed: {exc}", flush=True)
+        return []
+    out: list[list[float]] = []
+    prev_bar: int | None = None
+    prev_close = 0.0
+    for bar, oi_open, oi_close, n in rows:
+        bar = int(bar)
+        gap = prev_bar is None or bar - prev_bar > OI_5M_BAR_SECONDS
+        delta = (oi_close - oi_open) if gap else (oi_close - prev_close)
+        prev_bar, prev_close = bar, oi_close
+        if bar >= floor:
+            out.append([bar, round(delta, 3), round(oi_close, 3), int(n), 1 if gap else 0])
+    return out
 
 # 2026-09-16 2.5 -> 1.0 (사용자 "최대한 빠르게"). 이 값이 곧 **현재가 선의 지연**이다 --
 # 차트는 SSE 푸시마다 다시 그린다. 코인을 ETH 하나로 줄이면서(DASHBOARD_ASSETS) 티커 요청이
@@ -2169,6 +2248,53 @@ def make_app() -> web.Application:
         except asyncio.CancelledError:
             pass
 
+    # 초 -> 그 초의 미결제약정(ETH). 값이 **바뀐** 초만 들어간다(OI_1S_URL 주석 참고).
+    oi_1s: dict[int, float] = {}
+
+    async def collect_oi_1s(app: web.Application) -> None:
+        last_ms = 0
+        pending: list[tuple[int, float]] = []      # 아직 duckdb 에 못 넣은 스냅샷
+        flushed_at = time.time()
+        while True:
+            try:
+                async with http_session["session"].get(
+                        OI_1S_URL, params={"symbol": FOOTPRINT_SYMBOL}) as resp:
+                    data = await resp.json()
+                ts_ms = int(data["time"])
+                if ts_ms > last_ms:          # 같은 스냅샷을 다른 초에 복제하지 않는다
+                    last_ms = ts_ms
+                    sec = ts_ms // 1000
+                    value = float(data["openInterest"])
+                    oi_1s[sec] = value
+                    pending.append((sec, value))
+                    for old in [s for s in oi_1s if s < sec - SUPPLY_1S_SECONDS]:
+                        del oi_1s[old]
+                now = time.time()
+                if pending and now - flushed_at >= OI_1S_FLUSH_SECONDS:
+                    # 성공했을 때만 비운다 -- 파일이 잠깐 잠겨 있으면 다음 flush 로 미룬다.
+                    await asyncio.to_thread(oi_1s_persist, pending)
+                    pending = []
+                    flushed_at = now
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- 한 번의 실패로 수집을 영구히 멈추지 않는다
+                print(f"oi-1s poll/flush failed (will retry): {exc}", flush=True)
+                # 보류분이 끝없이 자라지는 않게 한다(디스크가 통째로 나간 경우). 1시간치면
+                # 그건 일시적 잠금이 아니라 사람이 봐야 하는 고장이다.
+                del pending[:-1200]
+                flushed_at = time.time()
+            await asyncio.sleep(OI_1S_POLL_SECONDS)
+
+    async def start_oi_1s_collector(app: web.Application) -> None:
+        app["oi_1s_task"] = asyncio.create_task(collect_oi_1s(app))
+
+    async def stop_oi_1s_collector(app: web.Application) -> None:
+        app["oi_1s_task"].cancel()
+        try:
+            await app["oi_1s_task"]
+        except asyncio.CancelledError:
+            pass
+
     async def load_chart_klines_frames() -> dict[str, Any]:
         """차트 캔들용 ETH/BTC 5분봉 프레임 캐시 (1500봉, 닫힌 봉만).
 
@@ -2748,24 +2874,52 @@ def make_app() -> web.Application:
           알고 건너뛰어, 반쪽짜리로 굳는다(풋프린트 스냅샷에서 겪은 그 실패와 같은 모양).
         """
         by_sec = footprint_state["sec"]
-        if not by_sec:
-            return web.json_response({"symbol": FOOTPRINT_SYMBOL, "seconds": [], "now": 0,
-                                      "retailMaxUsd": RETAIL_MAX_USD,
-                                      "whaleMinUsd": WHALE_MIN_USD}, headers=NOCACHE)
-        newest = max(by_sec)
         try:
             since = int(request.query.get("since", "0"))
         except ValueError:
             since = 0
+        # OI 는 별도 `sinceOi` 로 증분한다 -- 체결 초와 갱신 시점이 다르므로(3~7초) 같은 커서를
+        # 공유하면 체결 초가 앞서갈 때 그 사이의 OI 점이 통째로 건너뛰어진다.
+        try:
+            since_oi = int(request.query.get("sinceOi", "0"))
+        except ValueError:
+            since_oi = 0
+        oi_floor = max(since_oi, (max(oi_1s) if oi_1s else 0) - SUPPLY_1S_SECONDS)
+        # [초, 미결제약정]. 증분은 클라가 뺀다(창 시작을 0으로 두는 누적선이라 절대값이 필요).
+        oi_rows = [[s, oi_1s[s]] for s in sorted(oi_1s) if s > oi_floor]
+        if not by_sec:
+            return web.json_response({"symbol": FOOTPRINT_SYMBOL, "seconds": [], "now": 0,
+                                      "oi": oi_rows,
+                                      "retailMaxUsd": RETAIL_MAX_USD,
+                                      "whaleMinUsd": WHALE_MIN_USD}, headers=NOCACHE)
+        newest = max(by_sec)
         floor = max(since, newest - SUPPLY_1S_SECONDS)
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
             "now": newest,
             "retailMaxUsd": RETAIL_MAX_USD,
             "whaleMinUsd": WHALE_MIN_USD,
+            "oi": oi_rows,
             # [초, 리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
             "seconds": [[s] + [round(x, 3) for x in by_sec[s]]
                         for s in sorted(by_sec) if floor < s < newest],
+        }, headers=NOCACHE)
+
+    async def api_oi_5m(request: web.Request) -> web.Response:
+        """OI 5분 누적(신규 계약). duckdb 를 읽으므로 to_thread 로 뺀다(이벤트 루프 블로킹 방지)."""
+        try:
+            bars = max(1, min(288, int(request.query.get("bars", OI_5M_WINDOW_BARS))))
+        except ValueError:
+            bars = OI_5M_WINDOW_BARS
+        buckets = await asyncio.to_thread(oi_5m_buckets, bars)
+        # 현재 OI 는 링에서 바로 준다 -- duckdb 는 최대 OI_1S_FLUSH_SECONDS 만큼 뒤처져 있다.
+        now_oi = oi_1s[max(oi_1s)] if oi_1s else (buckets[-1][2] if buckets else 0.0)
+        return web.json_response({
+            "symbol": FOOTPRINT_SYMBOL,
+            "barSeconds": OI_5M_BAR_SECONDS,
+            "openInterest": round(float(now_oi), 3),
+            # [봉시각, 신규계약, 봉 끝 OI, 스냅샷 수, 공백여부]
+            "bars": buckets,
         }, headers=NOCACHE)
 
     async def api_supply_profile(request: web.Request) -> web.Response:
@@ -3648,6 +3802,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/footprint", api_footprint)
     app.router.add_get("/api/supply-profile", api_supply_profile)
     app.router.add_get("/api/supply-1s", api_supply_1s)
+    app.router.add_get("/api/oi-5m", api_oi_5m)
     app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
     app.router.add_get("/api/extreme-detector", api_extreme_detector)
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
@@ -3696,6 +3851,8 @@ def make_app() -> web.Application:
     app.on_startup.append(start_http_session)
     app.on_startup.append(start_dashboard_events)
     app.on_startup.append(start_footprint_collector)
+    app.on_startup.append(start_oi_1s_collector)
+    app.on_cleanup.append(stop_oi_1s_collector)
     app.on_cleanup.append(stop_footprint_collector)
     app.on_cleanup.append(stop_dashboard_events)
     app.on_cleanup.append(stop_http_session)
