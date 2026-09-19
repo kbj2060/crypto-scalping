@@ -3647,8 +3647,11 @@ async function refreshFlowHeatmap() {
     };
     // mode=rows 라 이미지 배열(qty_i8/mid_b64 · 102KB)은 안 온다 -- 행 집계와 요약만.
     const f4 = (b64) => new Float32Array(raw(b64).buffer);
-    latestFlowHeatmap = { ...j, rows: j.rows ? { ...j.rows, inst: f4(j.rows.inst_f4),
-                                                 pers: f4(j.rows.pers_f4) } : null };
+    // 2026-09-20 행 통계가 둘 -> 다섯. 247빈 x 4B x 5 = 5KB(걷어낸 이미지가 102KB 였다).
+    const ROW_STATS = ["inst", "pers", "peak", "refill", "d60"];
+    latestFlowHeatmap = { ...j, rows: j.rows
+      ? Object.assign({ ...j.rows }, ...ROW_STATS.map((k) => ({ [k]: f4(j.rows[k + "_f4"]) })))
+      : null };
     repaintSupplyProfilePanel();   // 행별 지속 잔량이 같이 갱신된다
   } catch (error) {
     console.error("Flow heatmap fetch error:", error);
@@ -4198,7 +4201,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   //   물음이라, 그걸로 나누면 768px 같은 폭에서 긴 문장이 범례를 덮는다(계산으로 확인).
   //   긴 것 -> 짧은 것 -> 생략 순으로 내려간다. 내용은 전부 툴팁에도 있다.
   // 2026-09-19 방향을 말하던 문구를 버렸다 -- 합산이라 좌우가 방향이 아니라 **원천**이다.
-  const footLong = "← 걸려 있는 호가(진할수록 오래 남은 것)  ·  체결 거래량(매수+매도)"
+  const footLong = "← 걸려 있는 호가(진할수록 자꾸 다시 깔리는 것)  ·  체결 거래량(매수+매도)"
     + "  ·  바깥 띠 = 순델타(초록 매수 · 빨강 매도) →";
   const footFits = (t) => (w - mr) - t.length * 6.2 > lx + 6;
   const footText = footFits(footLong) ? footLong
@@ -4277,42 +4280,66 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   // ── 왼쪽 = 호가(걸려 있는 양) ─────────────────────────────────────────
   // 2026-09-19 사용자 지시. 오른쪽이 «체결»(과거·취소 불가)이고 여기는 «호가»(현재·언제든
   // 취소)다 -- 다른 물건이라 색을 가른다(파랑). 같은 행에서 둘을 나란히 읽는 게 목적이다.
-  // ⭐길이는 **지속 잔량**(창 내내 안 빠진 양), 투명도는 **지속률**이다. 실측 600초에서
-  //   순간 잔량의 36%가 창을 못 버티고, 겉보기 크기가 같은 두 벽이 100% 대 0% 로 갈린다 --
-  //   크기만 그리면 그 차이가 안 보인다.
-  // 🔴«지지·저항»이 아니다. 호가벽의 버팀 능력은 아직 못 쟀다(판정가능 2셀·부호반전).
+  // ⭐2026-09-20 축을 둘로 갈랐다: **길이 = 지금 걸린 양**, **농도 = 재깔림**(창 안에서
+  //   제 크기의 몇 배가 다시 깔렸나). 그전에는 길이가 «창 내내 안 빠진 양»(min) 하나였다.
+  // 🔴min 을 그린다는 건 넷 중 가장 작은 걸 그린다는 뜻이었다. 실측 600초(ETH 247빈):
+  //   sum(min) 103,531 < sum(now) 170,775 < sum(max) 310,024 << **sum(refill) 1,029,281**.
+  //   걸린 양의 6배가 창 안에서 회전하는데(refill/drain = 1.00) 화면에 그 축이 없었다.
+  //   더 나쁜 건 **순위가 뒤집힌다**는 것이다: -2.05% 빈은 1,780 ETH 블록을 10분에 18번
+  //   재호가하는데(증분 p90 1,750 = 지터가 아니라 덩어리) min 이 675 라 짧은 막대였고,
+  //   한 번 깔고 앉은 +1.94% 빈(refill 641)이 2,610 으로 더 길었다.
+  // 🔴min 은 터치 근처를 구조적으로 지운다 -- pers/peak 중앙값이 0~0.1% 에서 **0.03**,
+  //   0.5~1% 에서 0.42 다. 길이를 inst 로 바꾸면 그 눈멂이 같이 없어진다.
+  // 🔴«지지·저항»도 «스푸핑»도 아니다. 「다가오면 빠지는가」는 10분 창에서 자격 빈 9개·
+  //   near/far 중앙 0.875 로 **검정력이 없다**(2026-09-20 실측). 농도는 서술일 뿐이다.
   const hm = latestFlowHeatmap && latestFlowHeatmap.rows;
   if (hm && hm.bin_size > 0 && keys.length) {
     const at = (px) => Math.round(px / hm.bin_size) - hm.bin_lo;
-    let maxP = 0;
+    let maxI = 0;
     const per = keys.map((k) => {
-      let inst = 0, pers = 0;
+      const v = { inst: 0, pers: 0, peak: 0, refill: 0, d60: 0 };
       for (let q = 0; q < rowSize; q += hm.bin_size) {
         const i = at(k * rowSize + q);
-        if (i >= 0 && i < hm.inst.length) { inst += hm.inst[i]; pers += hm.pers[i]; }
+        if (i >= 0 && i < hm.inst.length) {
+          v.inst += hm.inst[i]; v.pers += hm.pers[i]; v.peak += hm.peak[i];
+          v.refill += hm.refill[i]; v.d60 += hm.d60[i];
+        }
       }
-      if (pers > maxP) maxP = pers;
-      return { inst, pers };
+      if (v.inst > maxI) maxI = v.inst;
+      return v;
     });
-    if (maxP > 0) {
+    if (maxI > 0) {
       keys.forEach((k, j) => {
-        const { inst, pers } = per[j];
-        if (pers <= 0) return;
-        const bl = (pers / maxP) * (sideW - 2);
+        const { inst, pers, peak, refill, d60 } = per[j];
+        if (inst <= 0) return;
+        const bl = (inst / maxI) * (sideW - 2);
+        // 재깔림 = refill/peak. 1배(한 번 깔고 앉음) ~ 6배 이상(계속 다시 깖)을 농도로.
+        // 🔴선형이 아니라 log2 다 -- 실측 분포가 거리 밴드별 1.05~10.5 로 한 자릿수를
+        //   넘나들어서, 선형이면 먼 벽 전부가 같은 옅은 색으로 뭉갠다.
+        const rw = refill / Math.max(peak, 1e-9);
         const r = document.createElementNS(NS, "rect");
         r.setAttribute("x", leftEdge - 1 - bl); r.setAttribute("y", mt + j * rowPx + 0.5);
         r.setAttribute("width", Math.max(1, bl)); r.setAttribute("height", Math.max(1, rowPx - 1));
         r.setAttribute("fill", "#7dd3fc");
-        r.setAttribute("opacity", (0.25 + 0.75 * Math.min(1, pers / Math.max(inst, 1e-9))).toFixed(2));
+        r.setAttribute("opacity",
+          (0.22 + 0.78 * Math.min(1, Math.log2(Math.max(1, rw)) / 2.6)).toFixed(2));
         const t = document.createElementNS(NS, "title");
         const winMin = latestFlowHeatmap && latestFlowHeatmap.summary
           ? Math.round(latestFlowHeatmap.summary.window_s / 60) : 0;
+        const win = winMin ? winMin + "분 창" : "창";
         t.textContent = "호가 " + (k * rowSize).toFixed(rowSize >= 1 ? 0 : 1)
-          + " — 걸려 있는 양 " + Math.round(inst) + " ETH · 그중 "
-          + (winMin ? winMin + "분 " : "") + "창 내내 남은 것 "
-          + Math.round(pers) + " (" + Math.round(100 * pers / Math.max(inst, 1e-9)) + "%)\n"
+          + " — 지금 걸린 양 " + Math.round(inst) + " ETH"
+          + " · " + win + " 최대 " + Math.round(peak) + " · 내내 남은 것 " + Math.round(pers)
+          + " (" + Math.round(100 * pers / Math.max(inst, 1e-9)) + "%)\n"
+          + "재깔림 " + rw.toFixed(1) + "배 — " + win + " 안에서 최대치의 "
+          + rw.toFixed(1) + "배(" + Math.round(refill) + " ETH)가 다시 깔렸습니다. "
+          + (rw >= 3 ? "같은 자리를 계속 다시 까는 중입니다(막대가 진합니다)."
+                     : "한 번 깔고 거의 그대로입니다(막대가 옅습니다).") + "\n"
+          + "최근 60초 " + (d60 >= 0 ? "+" : "") + Math.round(d60) + " ETH — "
+          + (Math.abs(d60) < 1 ? "변화 없음" : d60 > 0 ? "쌓는 중" : "빼는 중") + "\n"
           + "⚠️체결이 아니라 **지금 걸려 있는** 지정가다 -- 언제든 취소될 수 있다.\n"
-          + "⚠️지지·저항 판정은 하지 않는다(버팀 능력 미측정).";
+          + "⚠️지지·저항도 «스푸핑»도 판정하지 않는다. 「다가오면 빠지는가」는 이 창에서\n"
+          + "   측정 자체가 안 된다(자격 빈 9개 · near/far 중앙 0.875, 2026-09-20 실측).";
         r.appendChild(t);
         svg.appendChild(r);
       });

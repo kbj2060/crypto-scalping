@@ -181,6 +181,31 @@ class _RasterWriter:
             self._fh = None
 
 
+def row_stats(a: "np.ndarray", dt_s: int = 1) -> dict:
+    """행(가격빈)마다 시간축을 접어 «지금·바닥·최대·재깔림·최근변화»를 낸다.
+
+    `a` 는 유효 열만 남긴 **절대값** 잔량 (축: 시간 x 가격빈).
+
+    ⭐min 하나만 쓰면 「한 번도 안 빠진 양」밖에 못 본다. 실측 600초 창(ETH, 247빈):
+      sum(min) 103,531 < sum(now) 170,775 < sum(max) 310,024 << **sum(refill) 1,029,281**
+      -- 걸린 양의 **6배**가 창 안에서 다시 깔린다(refill/drain = 1.00, 순수 회전).
+      화면은 그 넷 중 가장 작은 걸 그리고 있었다.
+    ⭐재깔림은 지터가 아니라 **덩어리**다: -2.05% 빈은 증분 p90 이 1,750 ETH(= 블록 크기)
+      이고 10분에 82번 올라간다. 같은 창의 +1.94% 빈은 refill 641 로 사실상 정적인데,
+      pers 로 줄 세우면 **재깔리는 쪽이 더 짧은 막대**였다.
+    🔴`refill` 은 **하한**이다 -- agg>1 로 접힌 열을 받으면 dt_s 보다 짧은 왕복은 사라진다.
+    🔴«지지·저항»도 «스푸핑»도 아니다. 「가격이 다가오면 빠지는가」는 10분 창에서 자격
+      빈이 9개뿐(near/far 중앙 0.875)이라 **검정력이 없다**. 여기 값은 전부 서술이다.
+    """
+    if a.ndim != 2 or a.shape[0] == 0:
+        raise ValueError("a must be (time, bins) with time > 0")
+    n60 = max(1, int(round(60.0 / max(dt_s, 1))))
+    d60 = (a[-n60:].mean(axis=0) - a[-6 * n60:-n60].mean(axis=0)
+           if a.shape[0] >= 6 * n60 else np.zeros(a.shape[1], np.float32))
+    return {"inst": a[-1], "pers": a.min(axis=0), "peak": a.max(axis=0),
+            "refill": np.clip(np.diff(a, axis=0), 0, None).sum(axis=0), "d60": d60}
+
+
 def read_window(symbol: str, to_ms: int, cols: int, agg: int = 1,
                 root: Path | None = None) -> dict:
     """[to_ms − cols*agg 초, to_ms] 를 **절대 가격축**으로 정렬해 돌려준다.
@@ -570,6 +595,20 @@ def _selftest() -> None:
     assert next_tick(100, 101.5) == 101      # 1초 이내 지각 -- 지금 속한 초를 즉시 쓴다
     assert next_tick(100, 105.2) == 105      # 심한 지각 -- 따라잡고 101~104 는 무효행
     assert next_tick(100, 101.0) == 101
+
+    # 행 통계: «한 번 깔고 앉은 벽»과 «같은 블록을 다시 까는 벽»이 갈려야 한다 -- 화면이
+    # 막대 농도로 말하는 게 정확히 이 차이라, 여기서 안 짚으면 어디서도 안 짚는다.
+    t = np.zeros((400, 3), np.float32)
+    t[:, 0] = 100.0                        # 정적: 내내 100, 한 번도 안 바뀜
+    t[::2, 1] = 80.0                       # 재깔림: 80 블록을 깔았다 뺐다 199번
+    t[:340, 2] = 10.0; t[340:, 2] = 50.0   # 최근 60초에 쌓는 중
+    st = row_stats(t, dt_s=1)
+    assert st["inst"].tolist() == [100.0, 0.0, 50.0]
+    assert st["pers"].tolist() == [100.0, 0.0, 10.0]
+    assert st["peak"].tolist() == [100.0, 80.0, 50.0]
+    assert st["refill"][0] == 0.0 and abs(float(st["refill"][1]) - 80.0 * 199) < 1e-3
+    assert st["d60"].tolist() == [0.0, 0.0, 40.0]        # 정적 0 · 회전 0 · 신축 +40
+    assert row_stats(t, dt_s=3)["refill"][1] == st["refill"][1]  # dt_s 는 d60 만 바꾼다
 
     tmp = Path(tempfile.mkdtemp())
     try:
