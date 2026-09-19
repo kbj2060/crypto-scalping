@@ -579,7 +579,10 @@ def oi_5m_buckets(bars: int) -> list[list[float]]:
     floor = (int(time.time()) // OI_5M_BAR_SECONDS - (bars - 1)) * OI_5M_BAR_SECONDS
     try:
         with duckdb_path_lock(OI_1S_DB_PATH):
-            con = duckdb.connect(str(OI_1S_DB_PATH))
+            # 🔴read_only 여야 한다. 쓰기로 열면 이 조회가 도는 동안(클라마다 15초 주기)
+            #   연구/감시 쪽 외부 read_only 연결이 거부된다 -- 2026-09-19 실측 30회 중 2회.
+            #   쓰기는 oi_1s_persist(10초 flush)뿐이고 같은 in-process 락이 둘을 갈라 준다.
+            con = duckdb.connect(str(OI_1S_DB_PATH), read_only=True)
             try:
                 rows = con.execute(f"""
                     SELECT ts_sec - (ts_sec % ?)              AS bar,
