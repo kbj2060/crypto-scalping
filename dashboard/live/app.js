@@ -3674,8 +3674,11 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     { b: srBand(4, 5, +1), name: "리테일 지지", color: "var(--good)", dash: "5 3", op: 0.55 },
     { b: srBand(4, 5, -1), name: "리테일 저항", color: "var(--bad)", dash: "5 3", op: 0.55 },
   ].filter((x) => x.b && x.b.net > 0);
-
+  // 자릿수는 아래 행 라벨과 같은 규칙이다 -- 한 화면에서 «2608» 과 «2608.0» 이 섞이면 안 된다.
+  const srDigits = rowSize >= 1 ? 0 : 1;
   srs.forEach((x) => {
+    x.lo = (keys[x.b.at + srW - 1] * rowSize).toFixed(srDigits);
+    x.hi = (keys[x.b.at] * rowSize).toFixed(srDigits);
     const y0 = mt + x.b.at * rowPx, hgt = srW * rowPx;
     const band = document.createElementNS(NS, "rect");
     band.setAttribute("x", ml); band.setAttribute("y", y0);
@@ -3690,13 +3693,46 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     mid.setAttribute("stroke-opacity", x.op);
     if (x.dash) mid.setAttribute("stroke-dasharray", x.dash);
     const tip = document.createElementNS(NS, "title");
-    tip.textContent = x.name + " " + (keys[x.b.at + srW - 1] * rowSize).toFixed(1) + "~"
-      + (keys[x.b.at] * rowSize).toFixed(1) + " · 순"
+    x.tip = x.name + " " + x.lo + "~" + x.hi + " · 순"
       + (x.name.includes("지지") ? "매수" : "매도") + " " + x.b.net.toFixed(1) + " ETH"
       + " (이 띠 거래량의 " + Math.round(x.b.share * 100) + "%)\n"
       + "그 값에서 이 쪽이 «사는» 힘이 더 셌다는 뜻이다 -- 호가에 걸린 물량이 아니라 체결이다.";
+    tip.textContent = x.tip;
     mid.appendChild(tip);
     svg.appendChild(mid);
+    x.mid = y0 + hgt / 2;
+  });
+
+  // 띠 이름표 (2026-09-19 사용자 요청: 프로파일 **오른쪽**에). 여백 mr 이 통째로 비어
+  // 있어서 새 공간을 내지 않아도 된다 -- 왼쪽은 가격축이고, 띠 위에 얹으면 막대와 겹친다.
+  // 🔴네 띠가 서로 붙거나 겹칠 수 있다(고래 지지와 리테일 지지가 같은 자리인 건 흔하다).
+  //   위에서부터 훑으며 최소 간격만큼 아래로 밀고, 밀린 것은 지시선으로 제 띠에 잇는다.
+  const LBL_H = 23, lblX = w - mr + 8;
+  let lastLblY = -Infinity;
+  [...srs].sort((a, b) => a.mid - b.mid).forEach((x) => {
+    const y = Math.min(h - mb - 12, Math.max(mt + 9, Math.max(x.mid, lastLblY + LBL_H)));
+    lastLblY = y;
+    if (Math.abs(y - x.mid) > 1) {
+      const lead = document.createElementNS(NS, "line");
+      lead.setAttribute("x1", w - mr); lead.setAttribute("x2", lblX - 3);
+      lead.setAttribute("y1", x.mid); lead.setAttribute("y2", y - 3);
+      lead.setAttribute("stroke", x.color); lead.setAttribute("stroke-opacity", "0.3");
+      svg.appendChild(lead);
+    }
+    const name = document.createElementNS(NS, "text");
+    name.setAttribute("x", lblX); name.setAttribute("y", y);
+    name.setAttribute("font-size", "10"); name.setAttribute("font-weight", "700");
+    name.setAttribute("fill", x.color); name.setAttribute("fill-opacity", x.op);
+    name.textContent = x.name;
+    const nTip = document.createElementNS(NS, "title");
+    nTip.textContent = x.tip;
+    name.appendChild(nTip);
+    svg.appendChild(name);
+    const rng = document.createElementNS(NS, "text");
+    rng.setAttribute("x", lblX); rng.setAttribute("y", y + 10);
+    rng.setAttribute("font-size", "9"); rng.setAttribute("fill", "var(--muted)");
+    rng.textContent = x.lo + "~" + x.hi;
+    svg.appendChild(rng);
   });
 
   // 안쪽부터 고래 · 중형 · 리테일. 농담이 곧 크기 계단이다.
