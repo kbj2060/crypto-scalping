@@ -2907,8 +2907,9 @@ svg {
      저장소 토큰도 원래 그쪽이다 -- 다크의 --glass-blur 는 none 인데(":root" 주석: "블러를
      켜면 지금 화면이 바뀐다") 앞 판이 그걸 무시하고 blur 를 하드코딩했다. 유리는 그게
      기본값인 **라이트 테마에만** 남긴다(아래 [data-theme="light"] 블록). */
+  /* 테두리 없이 면만(사용자 지시). 묶음은 이 옅은 면 하나로 읽힌다. */
   background: rgb(var(--lift) / .035);
-  border: 1px solid var(--line);
+  border: 0;
 }
 /* ── 라이트(애플 글래스) 테마에서만 유리 ────────────────────────────────────────────
    층 구성은 참조 자료 그대로다: ③ 흐르는 빛(왼쪽 위 광원) · ② 프레넬(위가 밝다) ·
@@ -2957,9 +2958,10 @@ svg {
      transform 만 쓴다(GPU 합성으로 끝난다). 실시간 대시보드라 이 구분이 특히 중요하다.
      같은 이유로 will-change 도 안 건다 -- 상시 선언은 인스턴스마다 GPU 메모리를 잡는데
      (참조 자료: 500×300 에 약 600KB) 이 조각은 그 비용을 낼 만큼 크지도, 자주 움직이지도 않는다. */
-  /* 다크의 조각도 평면이다 -- 면 한 겹과 테두리 한 줄. 라이트에서만 유리로 바뀐다. */
-  background: rgb(var(--lift) / .10);
-  border: 1px solid var(--line);
+  /* 다크의 조각도 평면이고 **테두리가 없다**. 선을 뺀 만큼 면을 한 단 올려야 보인다
+     (.10 -> .14). 선택 신호는 이 면과 글자 굵기 둘이다. */
+  background: rgb(var(--lift) / .14);
+  border: 0;
   transform: translateX(calc(var(--i, 0) * 100%));
   /* 스프링 -- 1.56 이 1.0 을 넘어 살짝 지나쳤다 돌아온다(참조 자료의 이징). */
   transition: transform .34s cubic-bezier(.34, 1.56, .64, 1);
@@ -2979,16 +2981,19 @@ svg {
   -webkit-backdrop-filter: none;
   padding: 6px 13px;
   color: var(--seg-ink);
-  font-weight: 700;
+  font-weight: 600;
   transition: color .2s ease;
 }
-/* 굵기는 그대로 두고 밝기만 올린다 -- 참조 이미지의 두 글자는 같은 굵기다. */
+/* 선택은 **글자**가 말한다(사용자 지시): 600 -> 800 + 밝기. 면·테두리는 조각이 맡는다.
+   ⚠️굵어지면 글자 폭이 ~2px 늘어 grid 1fr 열이 그만큼 커진다 -- 두 묶음 다 오른쪽/왼쪽
+     끝이 고정이라(margin-left:auto · 헤드 왼쪽) 반대편 가장자리가 그만큼 움직인다.
+     고스트 요소로 볼드 폭을 미리 잡아 둘 수도 있지만, 2px 때문에 마크업을 늘리지 않는다. */
 .chart-mode-tabs .asset-tab.active {
   border: 0;
   background: none;
   box-shadow: none;
   color: var(--seg-ink-on);
-  font-weight: 700;
+  font-weight: 800;
 }
 .chart-mode-tabs .asset-tab:hover:not(.active) { border-color: transparent; color: var(--seg-ink-on); }
 @media (prefers-reduced-motion: reduce) {
