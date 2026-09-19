@@ -1269,6 +1269,28 @@ body {
    **왼쪽으로 튄다**(브라우저 시험에서 확인). 모드에 따라 버튼이 좌우로 움직이면 그 자체가
    깜빡임이므로 오른쪽에 못 박는다. */
 .liq-map-panel .ops-health-head-tools { margin-left: auto; }
+/* 모바일에서도 «창 토글과 **같은 줄**, 그 줄의 오른쪽 맨 끝»에 둔다(아티팩트 댓글 2차).
+   720px 아래에서는 공용 규칙이 헤드를 세로로 세우고(.ops-health-head { flex-direction:
+   column }) 도구 묶음에 width:100% 를 줘서, 모드 탭이 **아랫줄 왼쪽**으로 내려간다.
+   1차 수정은 그 아랫줄 안에서만 오른쪽으로 보냈다 -- 줄 자체가 달랐으니 반쪽이었다.
+   이 카드만 줄을 가로로 되돌리고, 넘칠 때를 대비해 wrap 을 켠다(그래도 margin-left:auto
+   덕에 오른쪽 끝에 붙는다). 밀도 범례는 셋이 한 줄에 들어가면 자리를 못 잡으므로 다음
+   줄로 내린다 -- 풋프린트 모드에서는 hidden 이라 애초에 자리를 안 먹는다. */
+@media (max-width: 720px) {
+  .liq-map-panel .ops-health-head {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .liq-map-panel .ops-health-head-tools {
+    width: auto;
+    margin-left: auto;
+    align-self: center;
+    justify-content: flex-end;
+  }
+  .liq-map-panel .ops-health-head .liq-density-legend { order: 3; flex-basis: 100%; }
+}
 .chart-mode-tabs { padding: 3px; }
 .chart-mode-tabs .asset-tab { min-width: 56px; height: 24px; font-size: 11px; }
 
@@ -2844,6 +2866,144 @@ svg {
 .chart-mode-tabs { padding: 0; }
 .chart-mode-tabs .asset-tab { min-width: 0; height: auto; padding: 7px 11px; font-size: 11px; }
 .page-tab { padding: 7px 11px; }
+
+/* ── 2026-09-19 리퀴드 글래스 세그먼트 (사용자가 보낸 참조 이미지 기준) ────────────────
+   앞선 세 판이 다 빗나갔다. 참조 이미지가 말하는 건 «버튼 여러 개»도, «칠한 알약»도 아니다:
+     · 바깥은 **하나의 캡슐**이고 그 안에 칸이 둘이다(묶음이 곧 «배타적 선택»이라는 정보).
+     · 유리가 **아주 투명하다** -- 뒤 배경과 그 위를 지나는 빛줄기가 그대로 비친다. 면을
+       칠하는 게 아니라 **뒤를 통과시키고 굴절**시킨다(blur + saturate 가 그 역할).
+     · 테두리는 선이 아니라 **림**이다 -- 위가 밝고 나머지는 실낱같다.
+     · 선택 칸은 **테두리도 그림자도 없다**. 조금 더 밝은 면 하나뿐이다.
+     · 글자는 둘 다 흰색이고, 선택 쪽이 조금 더 밝다. 굵기는 안 바뀐다.
+   ⭐그래서 «떠 있는 조각 + 진한 그림자»(앞 판)는 틀렸다. Apple «Meet Liquid Glass»(WWDC25)의
+     "concentrates light" 는 **가장자리로 빛이 몰린다**는 뜻이지 그림자를 키우라는 게 아니다.
+   🔴다크 테마의 --glass-blur 는 none 이다(":root" 주석: "블러를 켜면 지금 화면이 바뀐다").
+     그 결정은 그대로 두고, **이 컨트롤만** 제 blur 를 갖는다 -- 참조 이미지의 정체가 곧
+     투과라서, 블러 없이는 무엇을 해도 그 그림이 안 나온다.
+   색 리터럴은 아래 네 토큰에만 둔다(테마별로 한 번씩) -- 규칙 안에 흰색을 흩뿌리지 않는다. */
+.chart-mode-tabs {
+  --seg-rim: rgba(255, 255, 255, .16);
+  --seg-rim-top: rgba(255, 255, 255, .38);
+  --seg-fill: rgba(255, 255, 255, .06);
+  --seg-thumb: rgba(255, 255, 255, .14);
+  --seg-ink: rgba(255, 255, 255, .72);
+  --seg-ink-on: #fff;
+  position: relative;
+  /* 🔴flex 가 아니라 **grid** 다. 칸을 등폭으로 두려면(미끄러지는 조각이 제 폭의 100% 씩
+     움직이므로 등폭이어야 한다) flex 로는 `flex: 1 1 0` 뿐인데, 그러면 칸이 «전체의 1/N»을
+     받는다 -- 「청산맵」(3글자)과 「풋프린트」(4글자)처럼 길이가 다르면 넓은 쪽이 제 글자보다
+     좁은 칸을 받아 **두 줄로 접힌다**(사용자 지적). grid 의 `1fr` 은 «가장 넓은 칸에 맞춘
+     등폭»이라 두 조건을 동시에 만족한다. */
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-items: center;
+  gap: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  /* 유리는 «면 하나»가 아니라 겹이다(참조 자료의 4층 구성).
+     ③ 흐르는 빛 -- 왼쪽 위에서 들어오는 광원.
+     ② 프레넬 -- 실제 유리는 위에서 볼 때 위쪽이 밝다.
+     ① 바닥 -- 4% 흰색. 더 올리면 «서리 낀 플라스틱»이 된다. */
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, .10) 0%, transparent 50%),
+    linear-gradient(to bottom, rgba(255, 255, 255, .08), rgba(255, 255, 255, 0) 62%),
+    var(--seg-fill);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  /* ④ 림: 위 1px 은 빛, 아래 1px 은 그늘, 전체는 실낱. 선이 아니라 «두께»를 만든다. */
+  box-shadow:
+    inset 0 1px 1px var(--seg-rim-top),
+    inset 0 -1px 1px rgb(var(--shadow) / .10),
+    inset 0 0 0 1px var(--seg-rim);
+}
+[data-theme="light"] .chart-mode-tabs {
+  --seg-rim: rgba(255, 255, 255, .55);
+  --seg-rim-top: rgba(255, 255, 255, .92);
+  --seg-fill: rgba(255, 255, 255, .34);
+  --seg-thumb: rgba(255, 255, 255, .66);
+  --seg-ink: rgb(22 24 29 / .62);
+  --seg-ink-on: #16181d;
+}
+#chartWindowTabs { --seg-n: 3; }   /* 1h · 2h · 4h */
+#chartModeTabs { --seg-n: 2; }     /* 청산맵 · 풋프린트 */
+/* 선택 칸. 테두리도 그림자도 없다 -- 참조 이미지처럼 «조금 더 밝은 면» 하나다.
+   이동은 transform 뿐이라 리플로우가 없고, 칸이 등폭이라 제 폭의 100% 씩 옮기면 맞는다. */
+.chart-mode-tabs::before {
+  content: "";
+  position: absolute;
+  top: 3px; bottom: 3px; left: 3px;
+  width: calc((100% - 6px) / var(--seg-n, 2));
+  border-radius: 999px;
+  /* 선택 칸에는 **blur 를 얹지 않는다**. 참조 자료의 성능 항목이 그대로 이유다:
+     "backdrop-blur captures all background pixels, applies Gaussian blur per frame -- n²".
+     그래서 blur 는 **움직이지 않는 트랙 하나**에만 걸고, 매 프레임 움직이는 이 조각은
+     transform 만 쓴다(GPU 합성으로 끝난다). 실시간 대시보드라 이 구분이 특히 중요하다.
+     같은 이유로 will-change 도 안 건다 -- 상시 선언은 인스턴스마다 GPU 메모리를 잡는데
+     (참조 자료: 500×300 에 약 600KB) 이 조각은 그 비용을 낼 만큼 크지도, 자주 움직이지도 않는다. */
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--seg-thumb) 160%, transparent),
+    var(--seg-thumb) 55%,
+    color-mix(in srgb, var(--seg-thumb) 120%, transparent));
+  transform: translateX(calc(var(--i, 0) * 100%));
+  /* 스프링 -- 1.56 이 1.0 을 넘어 살짝 지나쳤다 돌아온다(참조 자료의 이징). */
+  transition: transform .34s cubic-bezier(.34, 1.56, .64, 1);
+  z-index: 0;
+}
+.chart-mode-tabs:has(.asset-tab:nth-child(2).active)::before { --i: 1; }
+.chart-mode-tabs:has(.asset-tab:nth-child(3).active)::before { --i: 2; }
+/* 칸은 글자만. 알약 프리미티브의 면·테두리·그림자를 여기서 전부 걷어낸다. */
+.chart-mode-tabs .asset-tab {
+  position: relative;
+  white-space: nowrap;
+  z-index: 1;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding: 6px 13px;
+  color: var(--seg-ink);
+  font-weight: 700;
+  transition: color .2s ease;
+}
+/* 굵기는 그대로 두고 밝기만 올린다 -- 참조 이미지의 두 글자는 같은 굵기다. */
+.chart-mode-tabs .asset-tab.active {
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--seg-ink-on);
+  font-weight: 700;
+}
+.chart-mode-tabs .asset-tab:hover:not(.active) { border-color: transparent; color: var(--seg-ink-on); }
+@media (prefers-reduced-motion: reduce) {
+  .chart-mode-tabs::before { transition: none; }
+}
+
+/* ── 2026-09-19 아티팩트 댓글 2건: «버튼 높이를 글래스/다크에 맞춰라»(코인·페이지 탭) ·
+   «버튼의 높이 똑같이 맞춰줘»(1h/2h/4h · 청산맵/풋프린트 줄) ────────────────────────
+   기준은 사용자가 고른 **글래스/다크 토글(.push-toggle)** 이다 -- 데스크톱 32px, 모바일 38px.
+   어긋나 있던 둘(계산값):
+     · 코인 탭(.asset-tab) = 글자 11 + 패딩 14 + 테두리 2 = **27px**. 09-19 에 «테마 토글과
+       같은 알약»으로 바꾸면서 height:auto 가 됐는데, 높이를 주는 프리미티브 목록
+       (.page-tab/.push-toggle/.notify-btn/…)에는 .asset-tab 이 빠져 있었다. 그래서 모양만
+       같아지고 높이는 5px 낮게 남았다.
+     · 세그먼트 트랙(.chart-mode-tabs) = 칸(11+12) + 트랙 패딩 6 = **29px**. 바로 옆 배지는
+       프리미티브라 32px 라서, 한 줄 안에서 세 덩어리 높이가 27·29·32 로 다 달랐다.
+   트랙은 «32 = 26(칸) + 3+3(패딩)» 으로 역산한다.
+   🔴미디어쿼리로 가른다. 같은 특이도(0,1,0)에서는 **뒤에 오는 규칙**이 이기므로, 파일 뒤쪽인
+     여기서 미디어 없이 32px 를 쓰면 위쪽 모바일 블록의 `height: 38px`(터치 타깃 하한, 애플
+     HIG 44 근처로 올려 둔 값)을 덮어써 버린다. */
+@media (min-width: 721px) {
+  .asset-tab { height: auto; min-height: 32px; }
+  .chart-mode-tabs { min-height: 32px; }
+  .chart-mode-tabs .asset-tab { min-height: 26px; padding: 0 13px; }
+}
+@media (max-width: 720px) {
+  .chart-mode-tabs { min-height: 38px; }
+  .chart-mode-tabs .asset-tab { height: auto; min-height: 32px; padding: 0 13px; }
+}
 
 /* 새로고침 버튼: 글리프(⟳) 대신 아이콘 + 원형. «누를 수 있는 것»으로 읽히게 알약 계열에
    맞추고, 누르는 동안 한 바퀴 돌려 피드백을 준다. */
