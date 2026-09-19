@@ -3952,7 +3952,10 @@ function renderFlowHeatmapSvg(svg, box) {
   const bits = [`호가 ${mins}분 · 걸려 있는 양`];
   if (sm) {
     if (sm.wall) bits.push(`지속벽 ${sm.wall.dist_pct > 0 ? "+" : ""}${sm.wall.dist_pct}%`);
-    if (sm.cancel_share != null) bits.push(`취소 ${Math.round(sm.cancel_share * 100)}%`);
+    // 🔴«취소»가 아니라 «터치 밖 이탈»이다 -- 서버 도크스트링 참조. 라벨이 곧 정의다.
+    if (sm.offtouch_leave_share != null) {
+      bits.push(`먼 호가 이탈 ${Math.round(sm.offtouch_leave_share * 100)}%`);
+    }
     bits.push(`OBI(±${sm.obi_band_pct}%) ${sm.obi > 0 ? "+" : ""}${sm.obi.toFixed(2)}`);
   }
   if (d.valid_ratio < 0.95) bits.push(`결측 ${Math.round((1 - d.valid_ratio) * 100)}%`);

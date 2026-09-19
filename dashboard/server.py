@@ -3070,9 +3070,11 @@ def make_app() -> web.Application:
         ⭐`pers`(창 내내 한 번도 안 빠진 양)가 핵심이다. 실측(600초): 순간 잔량의 **36%가
           창을 못 버틴다**. 겉보기 크기가 비슷한 두 벽이 지속률 100%(-0.75%, 8073->8056) 대
           0%(+2.24%, 5461->0) 로 갈리는데 이미지에서는 둘 다 같은 진한 띠다.
-        🔴`cancel_share` 는 **추정**이다. 가격이 안 닿은 빈에서 준 양을 «체결 아님»으로 본다 --
-          취소·리프라이싱·창(±2.4%) 밖 이탈이 섞여 있고 이 피드로는 못 가른다. 바이낸스 선물
-          WS 는 레벨별 총량만 주고 **주문 ID 가 없어** 개별 «건»은 원리적으로 복원 불가다.
+        🔴`offtouch_leave_share` 는 «취소율»이 **아니다**. 「터치에서 떨어진 호가가 체결 없이
+          빠지는 비율」이다 -- 아래 조인의 두 통제(창 커버·사이드 유지)가 터치 구간을 구조적으로
+          제외하기 때문이다. 그 안에는 취소·리프라이싱이 섞여 있고 이 피드로는 못 가른다.
+          바이낸스 선물 WS 는 레벨별 총량만 주고 **주문 ID 가 없어**(depthUpdate 가
+          [가격, 새 총량]) 개별 «건»은 원리적으로 복원 불가다.
         🔴`obi` 는 **밴드가 값을 정한다**(실측 ±0.1% +0.504 / ±2% +0.071, 7배). 밴드를 같이 낸다.
         🔴이 수치들은 «지지·저항»이 아니다 -- 호가벽의 버팀 능력은 아직 **못 쟀다**
           (판정가능 2셀 · TRAIN↔OOS 부호반전, docs/experiments/eth_gex_strike_walls_vs_liqmap_20260919).
@@ -3096,10 +3098,60 @@ def make_app() -> web.Application:
                 wall = {"dist_pct": round(float(dist[i]), 2), "qty": round(float(pers[i]), 1),
                         "persist": round(float(pers[i] / max(inst[i], 1e-9)), 3)}
 
-        lo, hi = float(np.nanmin(mid[ok])), float(np.nanmax(mid[ok]))
-        drop = np.clip(a[0] - a[-1], 0, None)
-        touched = (price >= lo) & (price <= hi)
-        tot_drop = float(drop.sum())
+        # ── 체결 vs 이탈: 풋프린트로 가른다 ──────────────────────────────────
+        # 잔량 감소 = 체결 + 이탈(취소·리프라이싱·창 밖). 풋프린트가 **같은 $0.5 버킷**으로
+        # 가격행별 체결량을 주므로 조인이 공짜다(같은 프로세스 메모리, HTTP 왕복 0).
+        # 🔴방향: **테이커 매도가 비드를, 테이커 매수가 아스크를** 먹는다.
+        #   풋프린트 셀은 [buy, sell, ...] (footprint_add 의 side = 1 if sell else 0).
+        #
+        # 🔴통제 둘을 안 걸면 숫자가 통째로 틀린다(2026-09-19 실측으로 잡았다):
+        #   ① **창이 mid 를 따라 움직인다.** 한 행이 덮는 건 N_BINS x bin_size(±$60)뿐이라,
+        #      mid 가 움직이면 가장자리 빈이 «커버 밖»이 되어 0 으로 보인다 -- 취소가 아니다.
+        #   ② **가격이 빈을 통과하면 사이드가 뒤집힌다.** 비드였던 빈이 아스크가 되면
+        #      비드 잔량이 0 이 되는데 그것도 취소가 아니다.
+        #   통제 전 «취소 89.4%» 였고, 방향 대조군이 5,087 vs 4,909 로 **구분이 안 됐다**.
+        #   통제 후 방향이 선다(비드 14.9% 체결설명 vs 아스크 0.4% -- mid 가 내려간 창이라 맞다).
+        #
+        # ⭐그래서 이 값은 «사라진 유동성의 N%가 취소»가 **아니다**. 「내내 한쪽」 필터가
+        #   터치 구간을 구조적으로 뺀다 -- **터치에서 떨어진 호가가 체결 없이 빠지는 비율**이다.
+        #   먼 벽을 장벽으로 믿지 말라는 뜻이고, 그게 화면이 말해야 하는 것이다.
+        # 🔴봉 단위(300초) 조인이라 창 가장자리가 최대 한 봉 어긋난다. 현재 봉이 부분이라
+        #   체결이 과대계상되고 그만큼 **이탈이 과소**로 나온다 -- 안전한 쪽이다.
+        from scripts.live_orderflow_raster_collector_20260914 import N_BINS  # noqa: PLC0415
+        m0, m1 = float(mid[ok][0]), float(mid[ok][-1])
+        cov_half = 0.4 * N_BINS * w["bin_size"]          # 한 행 커버(±$60)의 보수적 안쪽
+        cov = (np.abs(price - m0) < cov_half) & (np.abs(price - m1) < cov_half)
+        same_bid = cov & (price < m0) & (price < m1)
+        same_ask = cov & (price > m0) & (price > m1)
+
+        bid_now, ask_now = np.clip(qty[ok], 0, None), np.clip(-qty[ok], 0, None)
+        bid_drop = np.clip(bid_now[0] - bid_now[-1], 0, None)
+        ask_drop = np.clip(ask_now[0] - ask_now[-1], 0, None)
+        fill_bid = np.zeros(w["n_bins"])   # 비드를 먹은 양 = 테이커 매도
+        fill_ask = np.zeros(w["n_bins"])
+        fill_source = "footprint"
+        try:
+            t_start = w["t0_ms"] / 1000.0
+            t_end = t_start + w["cols"] * w["dt_s"]
+            for bar, cells in footprint_state["bars"].items():
+                if bar + FOOTPRINT_BAR_SECONDS < t_start or bar > t_end:
+                    continue
+                for key, v in cells.items():
+                    i = int(round(key * FOOTPRINT_BUCKET / w["bin_size"])) - w["bin_lo"]
+                    if 0 <= i < w["n_bins"]:
+                        fill_ask[i] += float(v[0])
+                        fill_bid[i] += float(v[1])
+        except Exception:  # noqa: BLE001 -- 풋프린트 웜업이면 못 가른다
+            fill_source = None
+
+        drop = float(bid_drop[same_bid].sum() + ask_drop[same_ask].sum())
+        filled = float(np.minimum(bid_drop, fill_bid)[same_bid].sum()
+                       + np.minimum(ask_drop, fill_ask)[same_ask].sum())
+        # 이름이 곧 정의다 -- 「취소」가 아니라 「터치 밖 이탈」이다.
+        offtouch_leave_share = (round(1.0 - filled / drop, 3)
+                                if (fill_source and drop > 0) else None)
+        tot_drop = float(np.clip(bid_now[0] - bid_now[-1], 0, None).sum()
+                         + np.clip(ask_now[0] - ask_now[-1], 0, None).sum())
         band = np.abs(dist) <= 0.5
         b = float(np.clip(qty[ok][-1], 0, None)[band].sum())
         k = float(np.clip(-qty[ok][-1], 0, None)[band].sum())
@@ -3111,8 +3163,8 @@ def make_app() -> web.Application:
                 "spot": round(spot, 2),
                 "wall": wall,
                 "persist_share": round(float(pers.sum() / max(inst.sum(), 1e-9)), 3),
-                "cancel_share": (round(float(drop[~touched].sum() / tot_drop), 3)
-                                 if tot_drop > 0 else None),
+                "offtouch_leave_share": offtouch_leave_share, "fill_source": fill_source,
+                "offtouch_bins": int(same_bid.sum() + same_ask.sum()),
                 "obi": round((b - k) / max(b + k, 1e-9), 3), "obi_band_pct": 0.5,
                 "window_s": int(w["cols"] * w["dt_s"]),
             },
