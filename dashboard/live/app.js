@@ -4000,29 +4000,34 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   // 띠는 **칩만큼**은 높아야 한다. 행이 11px 인데 칩이 22px 이면 칩이 이웃 행의 가격
   // 라벨을 반만 덮어 «글자가 잘린» 것처럼 보인다 -- 띠가 그만큼 크면 덮인 자리가
   // «강조 구간 안»으로 읽힌다.
-  const bh = Math.max(rowPx, 22);
-  supplyProfileNow = { svg, mt, rowPx, rowSize, keys, digits: rowSize >= 1 ? 1 : 2 };
+  // 🔴2026-09-19 3차. 처음엔 점선, 다음엔 «띠 + 테두리 칩 + 15px 숫자»였는데 사용자가
+  //   "너무 정신이 없다". 셋이 동시에 움직이니 시선이 거기 묶인다. 게다가 **값은 중복**이다
+  //   -- 가운데 열이 모든 행의 가격을 이미 적고 있다. 필요한 건 «어느 줄인가» 하나다.
+  //   그래서 그 줄의 가격 글자 좌우에 화살표만 둔다(사용자 제안). 차트 위에 덮는 것도,
+  //   가리는 글자도, 새로 읽을 숫자도 없다.
+  supplyProfileNow = { svg, mt, rowPx, rowSize, keys, pocKey, digits: rowSize >= 1 ? 0 : 1 };
   const nowG = document.createElementNS(NS, "g");
   nowG.setAttribute("class", "supply-now");
-  const wing = document.createElementNS(NS, "rect");
-  wing.setAttribute("x", ml); wing.setAttribute("y", -bh / 2);
-  wing.setAttribute("width", w - ml - mr); wing.setAttribute("height", bh);
-  wing.setAttribute("rx", "2");
-  wing.setAttribute("fill", "var(--accent)"); wing.setAttribute("fill-opacity", "0.13");
-  nowG.appendChild(wing);
-  const chip = document.createElementNS(NS, "rect");
-  chip.setAttribute("x", centerX - centerW / 2 - 5); chip.setAttribute("y", -11);
-  chip.setAttribute("width", centerW + 10); chip.setAttribute("height", 22);
-  chip.setAttribute("rx", "4");
-  chip.setAttribute("fill", "var(--panel)"); chip.setAttribute("fill-opacity", "0.96");
-  chip.setAttribute("stroke", "var(--accent)"); chip.setAttribute("stroke-opacity", "0.75");
-  nowG.appendChild(chip);
+  // 🔴화살표만 두면 **라벨이 없는 행**을 가리킬 수 있다. 행이 13px 보다 촘촘하면 위에서
+  //   한 줄 걸러 찍기 때문이다(그러지 않으면 글자가 겹친다). 그래서 그룹이 그 줄의 가격을
+  //   **직접** 들고 다닌다 -- 위 라벨과 좌표·크기·내용이 같아 있으면 정확히 포개지고,
+  //   없으면 이것이 그 줄의 라벨이 된다.
+  // 🔴굵기까지 **똑같아야** 한다. 700 으로 올렸더니 글자 폭이 달라져(가운데 정렬이라 각
+  //   자리가 어긋난다) 겹친 두 글자가 고스팅으로 번졌다. 구별은 **색**으로만 한다.
   const nowTxt = document.createElementNS(NS, "text");
-  nowTxt.setAttribute("x", centerX); nowTxt.setAttribute("y", 5);
+  nowTxt.setAttribute("x", centerX); nowTxt.setAttribute("y", 3);
   nowTxt.setAttribute("text-anchor", "middle");
-  nowTxt.setAttribute("font-size", "15"); nowTxt.setAttribute("font-weight", "800");
-  nowTxt.setAttribute("fill", "var(--accent)");
+  nowTxt.setAttribute("font-size", Math.min(13, Math.max(9, rowPx)));
+  nowTxt.setAttribute("fill", "var(--text)");
   nowG.appendChild(nowTxt);
+  // 가운데 열 [leftEdge, rightEdge] 안쪽에 둔다 -- 막대 위로 넘어가지 않는다.
+  [`${leftEdge + 1},-4 ${leftEdge + 7},0.5 ${leftEdge + 1},5`,
+   `${rightEdge - 1},-4 ${rightEdge - 7},0.5 ${rightEdge - 1},5`].forEach((pts) => {
+    const a = document.createElementNS(NS, "polygon");
+    a.setAttribute("points", pts);
+    a.setAttribute("fill", "var(--accent)");
+    nowG.appendChild(a);
+  });
   svg.appendChild(nowG);
   updateSupplyProfileNow(currentPrice);
 }
@@ -4040,8 +4045,13 @@ function updateSupplyProfileNow(price) {
   if (j < 0) { el.setAttribute("opacity", "0"); return; }
   el.setAttribute("opacity", "1");
   el.setAttribute("transform", `translate(0 ${g.mt + j * g.rowPx + g.rowPx / 2})`);
+  // 🔴적는 건 «틱 가격»이 아니라 **그 행의 가격**이다. 위아래 이웃과 같은 자에서 읽혀야
+  //   한 열로 보인다 -- 2631.36 이 2631.5 · 2630.5 사이에 끼면 그것만 다른 물건이 된다.
   const t = el.querySelector("text");
-  if (t) t.textContent = price.toFixed(g.digits);
+  if (t) {
+    t.textContent = (g.keys[j] * g.rowSize).toFixed(g.digits);
+    t.setAttribute("font-weight", g.keys[j] === g.pocKey ? "700" : "600");   // 위 라벨과 동일
+  }
 }
 
 // Snapshot tab's own candlestick chart -- same renderCandleSvg() the Live tab uses, always ETH, no

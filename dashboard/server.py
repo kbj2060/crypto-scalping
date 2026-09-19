@@ -493,13 +493,16 @@ FOOTPRINT_CATCHUP_SECONDS = 2.5
 FOOTPRINT_SNAPSHOT_PATH = LIVE_DIR / "footprint_eth.json"
 FOOTPRINT_SNAPSHOT_SECONDS = 30.0
 # 화면 토글이 고를 수 있는 **가장 긴 창**(4h). 저장·복원은 여기에 맞춘다 -- 12봉만 저장하면
-# 재시작(배포마다 하루 여러 번) 직후 4h 를 골라도 1h 밖에 안 보인다. 실측 16KB/12봉이라
-# 48봉은 ~65KB, 30초마다 덮어써도 하루 190MB 쓰기다(288봉이면 1GB 라 링 전체는 여전히 안 쓴다).
-# 🔴백필(REST)은 **넓히지 않는다**. 1시간이 ~200요청인데 4시간이면 예산 400을 넘고, 그 IP 를
-#   트레이딩 봇이 같이 쓴다. 못 메운 구간은 WS 가 돌면서 자연히 찬다.
+# 재시작(배포마다 하루 여러 번) 직후 4h 를 골라도 1h 밖에 안 보인다. 실측 51KB/48봉이고
+# 30초마다 덮어써도 하루 150MB 쓰기다(288봉이면 1GB 라 링 전체는 여전히 안 쓴다).
+#
+# ⭐**복원 경로는 이 스냅샷 하나다**(2026-09-19 사용자 결정). 체결 테이프 duckdb 에서 읽어
+#   오는 길도 만들어 봤다 -- 셀 단위 오차 0.0 ETH 로 정확하긴 했는데, 실측 **250ms vs
+#   0.8ms** 로 300배 느리고 20.7MB 파일을 여는 대가였다. 같은 4시간이 이 json 안에 이미
+#   있으므로 두 벌을 둘 이유가 없다. duckdb 는 수집기가 계속 쌓는 연구용 아카이브로 남는다.
+# 🔴백필(REST)도 **넓히지 않는다**. 1시간이 ~200요청인데 4시간이면 예산 400을 넘고, 그 IP 를
+#   트레이딩 봇이 같이 쓴다. 스냅샷이 못 덮는 구간은 WS 가 돌면서 자연히 찬다.
 FOOTPRINT_MAX_WINDOW_BARS = 48
-# 체결 테이프 수집기가 쓰는 DB. 대시보드는 **읽기만** 한다(read_only, 열고 바로 닫기).
-TAPE_DB_PATH = LIVE_DIR / "trade_tape.duckdb"
 
 
 def footprint_window_bars(request) -> int:
@@ -2030,70 +2033,6 @@ def make_app() -> web.Application:
         footprint_state["last_ms"] = int(saved.get("last_ms") or 0)
         print(f"footprint snapshot: {len(bars)}봉 복원", flush=True)
 
-    def footprint_load_from_tape() -> None:
-        """체결 테이프 duckdb 에서 **링에 없는 옛 봉**을 메운다. 재시작 직후 1회, 스레드에서.
-
-        왜 필요한가(2026-09-19 사용자 "4h 로 바꿔도 아무것도 안 바뀐다"): 창 토글은 인메모리
-        링이 그만큼 차 있어야 뜻이 있는데, 배포가 하루 여러 번이라 링은 늘 짧다. REST 로
-        4시간을 긁으면 ~800요청이고 그 IP 를 트레이딩 봇이 같이 쓴다 -- 그런데 **같은 데이터가
-        이미 디스크에 있다**. 체결 테이프 수집기가 2026-09-16부터 1초 x $0.1 로 쌓고 있다.
-
-        🔴REST 백필이 도는 구간(최근 FOOTPRINT_BARS 봉)은 **건드리지 않는다**. 둘이 겹치면
-          이중계상이다 -- 백필은 「봉이 이미 있으면 gap_from_ms 부터 다시 받는다」라서, 내가
-          그 봉을 채워 두면 백필이 그 위에 또 더한다. 테이프는 [4시간전, 1시간전), REST 는
-          [1시간전, 지금] 을 맡는다.
-        ⚠️수집기가 **쓰고 있는** 파일이다. read_only 로 열고 바로 닫는다. 락이 잡혀 있거나
-          duckdb 가 없으면 조용히 포기한다 -- 대시보드가 이것 때문에 안 뜨면 본말전도다.
-        ⚠️키 규약: 테이프는 `round(price/0.1)`, 화면은 `round(price/0.5)`. price_bin 이 정수라
-          price_bin/5 의 소수부는 {0,.2,.4,.6,.8} 뿐이고 반올림 경계(.5)에 닿지 않는다 --
-          SQL 의 round 와 파이썬 banker's 가 갈릴 자리가 없다. 실측으로도 확인했다: 완결된
-          3개 봉을 셀 단위로 대조해 **최대 절대오차 0.0 ETH**.
-        ⚠️분류(고래/리테일)는 2026-09-19 03:33 부터다. 그 앞 행은 NULL 이라 0 으로 접힌다 --
-          「고래가 없었다」로 보이지만 실제는 「안 갈랐다」이다. 창이 최대 4시간이라 지금은
-          닿지 않지만, 창을 늘릴 때 다시 볼 것.
-        """
-        bars = footprint_state["bars"]
-        now_bar = footprint_bar_start(time.time() * 1000)
-        floor = now_bar - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS
-        ceil_ = now_bar - (FOOTPRINT_BARS - 1) * FOOTPRINT_BAR_SECONDS   # REST 가 맡는 경계
-        if floor >= ceil_:
-            return
-        try:
-            import duckdb
-            con = duckdb.connect(str(TAPE_DB_PATH), read_only=True)
-        except Exception as exc:   # noqa: BLE001 -- 없어도 대시보드는 돈다
-            print(f"footprint tape backfill: 열지 못했다({type(exc).__name__}) -- 건너뛴다",
-                  flush=True)
-            return
-        try:
-            rows = con.execute("""
-                SELECT ts_sec - (ts_sec % ?)                   AS bar,
-                       CAST(round(price_bin / 5.0) AS BIGINT)  AS k,
-                       sum(buy_qty), sum(sell_qty),
-                       sum(coalesce(whale_buy_qty, 0)),  sum(coalesce(whale_sell_qty, 0)),
-                       sum(coalesce(retail_buy_qty, 0)), sum(coalesce(retail_sell_qty, 0))
-                FROM trade_tape_1s
-                WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ?
-                GROUP BY 1, 2
-            """, [FOOTPRINT_BAR_SECONDS, FOOTPRINT_SYMBOL.lower(), floor, ceil_]).fetchall()
-        except Exception as exc:   # noqa: BLE001
-            print(f"footprint tape backfill: 쿼리 실패({exc}) -- 건너뛴다", flush=True)
-            return
-        finally:
-            con.close()
-        staged: dict[int, dict[int, list[float]]] = {}
-        for bar, k, buy, sell, wb, wsq, rb, rs in rows:
-            bar = int(bar)
-            if bar in bars:
-                continue           # 스냅샷이 이미 가진 봉은 그대로 둔다(그쪽이 더 최신이다)
-            staged.setdefault(bar, {})[int(k)] = [float(buy or 0), float(sell or 0),
-                                                  float(wb or 0), float(wsq or 0),
-                                                  float(rb or 0), float(rs or 0)]
-        bars.update(staged)
-        if staged:
-            print(f"footprint tape backfill: {len(staged)}봉 복원 "
-                  f"(테이프 {floor}~{ceil_})", flush=True)
-
     async def footprint_backfill(gap_from_ms: int, until_ms: int) -> None:
         """WS 가 못 준 구간을 aggTrades 로 메운다. 최신 봉부터, 봉마다 «받을 창»을 따로 잡는다.
 
@@ -2172,9 +2111,6 @@ def make_app() -> web.Application:
     async def collect_footprint(app: web.Application) -> None:
         backfill: asyncio.Task | None = None
         footprint_load()   # 지난 판이 남긴 봉들 -- 이게 있으면 아래 백필은 공백만 메운다
-        # 스냅샷이 못 덮는 옛 구간(1~4시간 전)은 체결 테이프 duckdb 에서 메운다. 블로킹
-        # I/O 라 스레드로 빼고, 실패해도 그냥 지나간다(이 함수는 예외를 안 던진다).
-        await asyncio.to_thread(footprint_load_from_tape)
         # 공용 세션(binance_session)은 total=10초라 WS 에 못 쓴다 -- aiohttp 버전에 따라 그
         # 타임아웃이 WS 에도 걸려 10초마다 끊긴다(끊길 때마다 백필이 다시 뜬다). 전용 세션을
         # 쓰되 total=None 을 **명시**한다: aiohttp 기본값은 5분이라 그냥 두면 5분마다 끊긴다.
