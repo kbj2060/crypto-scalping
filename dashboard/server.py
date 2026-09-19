@@ -553,20 +553,41 @@ OI_5M_WINDOW_BARS = 48       # 4시간
 
 
 def oi_1s_persist(rows: list[tuple[int, float]]) -> None:
-    """1초 OI 스냅샷을 duckdb 에 남긴다(연결-작업-닫기).
+    """OI 스냅샷을 duckdb 에 남긴다(연결-작업-닫기). rows 는 (ts_ms, open_interest).
 
-    (ts_sec, symbol) 이 PK 라 재기동 직후 겹치는 초를 다시 써도 조용히 무시된다 -- 호출부가
-    «어디까지 저장했나»를 따로 들고 있지 않아도 된다."""
+    PK 는 **밀리초**다. 초로 잡으면 같은 초에 온 둘째 스냅샷이 조용히 사라진다 -- 2026-09-19
+    실측으로 10분간 갱신 163개 중 8개(4.91%)가 그렇게 버려지고 있었다(간격 최소 0.14초).
+    재기동 직후 겹치는 구간을 다시 써도 PK 가 무시하므로 호출부는 «어디까지 저장했나»를
+    따로 들고 있지 않아도 된다."""
     if not rows:
         return
     with duckdb_path_lock(OI_1S_DB_PATH):
         con = duckdb.connect(str(OI_1S_DB_PATH))
         try:
+            # 2026-09-19 이전 스키마(ts_sec PK)를 한 번만 밀리초로 옮긴다. 옛 행은 그 초의
+            # 대표값이므로 .000ms 에 놓는다 -- 봉 집계는 초로 접으므로 결과가 안 변한다.
+            legacy = con.execute(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_name = ? AND column_name = 'ts_sec'", [OI_1S_TABLE]).fetchone()[0]
+            if legacy:
+                # 한 트랜잭션. 중간에 죽으면 통째로 없던 일이 된다 -- 네 문장이 따로 커밋되면
+                # RENAME 만 성공한 상태로 남아 옛 행이 서빙 테이블에서 끊긴다.
+                con.execute("BEGIN TRANSACTION")
+                con.execute(f"ALTER TABLE {OI_1S_TABLE} RENAME TO {OI_1S_TABLE}_sec_legacy")
+                con.execute(f"""CREATE TABLE {OI_1S_TABLE} (
+                    ts_ms BIGINT, symbol VARCHAR, open_interest DOUBLE,
+                    PRIMARY KEY (ts_ms, symbol))""")
+                con.execute(f"INSERT INTO {OI_1S_TABLE} "
+                            f"SELECT ts_sec * 1000, symbol, open_interest "
+                            f"FROM {OI_1S_TABLE}_sec_legacy")
+                con.execute(f"DROP TABLE {OI_1S_TABLE}_sec_legacy")
+                con.execute("COMMIT")
+                print("oi-1s: ts_sec -> ts_ms 스키마 이관 완료", flush=True)
             con.execute(f"""CREATE TABLE IF NOT EXISTS {OI_1S_TABLE} (
-                ts_sec BIGINT, symbol VARCHAR, open_interest DOUBLE,
-                PRIMARY KEY (ts_sec, symbol))""")
+                ts_ms BIGINT, symbol VARCHAR, open_interest DOUBLE,
+                PRIMARY KEY (ts_ms, symbol))""")
             con.executemany(f"INSERT OR IGNORE INTO {OI_1S_TABLE} VALUES (?, ?, ?)",
-                            [(int(s), FOOTPRINT_SYMBOL.lower(), float(v)) for s, v in rows])
+                            [(int(ms), FOOTPRINT_SYMBOL.lower(), float(v)) for ms, v in rows])
         finally:
             con.close()
 
@@ -589,15 +610,15 @@ def oi_5m_buckets(bars: int) -> list[list[float]]:
             con = duckdb.connect(str(OI_1S_DB_PATH), read_only=True)
             try:
                 rows = con.execute(f"""
-                    SELECT ts_sec - (ts_sec % ?)              AS bar,
-                           arg_min(open_interest, ts_sec)     AS oi_open,
-                           arg_max(open_interest, ts_sec)     AS oi_close,
+                    SELECT (ts_ms // (? * 1000)) * ?          AS bar,
+                           arg_min(open_interest, ts_ms)      AS oi_open,
+                           arg_max(open_interest, ts_ms)      AS oi_close,
                            count(*)                           AS n
                     FROM {OI_1S_TABLE}
-                    WHERE symbol = ? AND ts_sec >= ?
+                    WHERE symbol = ? AND ts_ms >= ?
                     GROUP BY 1 ORDER BY 1
-                """, [OI_5M_BAR_SECONDS, FOOTPRINT_SYMBOL.lower(),
-                      floor - OI_5M_BAR_SECONDS]).fetchall()   # 한 봉 더: 첫 봉의 기준점
+                """, [OI_5M_BAR_SECONDS, OI_5M_BAR_SECONDS, FOOTPRINT_SYMBOL.lower(),
+                      (floor - OI_5M_BAR_SECONDS) * 1000]).fetchall()  # 한 봉 더: 첫 봉의 기준점
             finally:
                 con.close()
     except Exception as exc:  # noqa: BLE001 -- 아직 테이블이 없거나(첫 가동) 잠깐 잠겼다
@@ -2212,8 +2233,8 @@ def make_app() -> web.Application:
         #   주지 않는다 -- 2026-09-19 실측: stamp 가 응답에 나타나기까지 중앙 2.65초·p90 5.08초가
         #   걸리고, 그 편차 때문에 115개 중 4개(3.5%)는 «더 새 stamp 가 먼저» 도착했다. 최고수위로
         #   비교하면 그 4개를 «이미 본 것»으로 오인해 버린다(짝비교에서 실측 손실 4/243 과 일치).
-        #   순서가 뒤바뀌어 들어와도 문제없다: 봉 집계는 ts_sec 로 arg_min/arg_max 를 잡고
-        #   저장은 PK(ts_sec, symbol) 가 중복을 막는다.
+        #   순서가 뒤바뀌어 들어와도 문제없다: 봉 집계는 ts_ms 로 arg_min/arg_max 를 잡고
+        #   저장은 PK(ts_ms, symbol) 가 중복을 막는다.
         seen_ms: set[int] = set()
         pending: list[tuple[int, float]] = []      # 아직 duckdb 에 못 넣은 스냅샷
         flushed_at = time.time()
@@ -2229,8 +2250,8 @@ def make_app() -> web.Application:
                         seen_ms = {m for m in seen_ms if m >= ts_ms - 600_000}
                     sec = ts_ms // 1000
                     value = float(data["openInterest"])
-                    oi_1s[sec] = value
-                    pending.append((sec, value))
+                    oi_1s[sec] = value          # 화면 링은 1초 해상도 그대로
+                    pending.append((ts_ms, value))
                     for old in [s for s in oi_1s if s < sec - SUPPLY_1S_SECONDS]:
                         del oi_1s[old]
                 now = time.time()
