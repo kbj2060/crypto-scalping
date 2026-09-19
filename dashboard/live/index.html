@@ -252,8 +252,7 @@
             <span class="ops-readonly">거래소 실계좌 · 읽기 전용 · 30초 갱신</span>
             <!-- 2026-09-13 강제 새로고침. 30초 폴링을 기다리지 않고 지금 받는다 --
                  조회가 끊겨 청산 버튼이 «정보 낡음»일 때 사람이 직접 되살릴 수단이다. -->
-            <button type="button" id="snapAcctRefresh" class="acct-refresh"
-                    title="계좌 강제 조회" aria-label="계좌 강제 조회">⟳</button>
+            <button type="button" id="snapAcctRefresh" class="acct-refresh" title="계좌 강제 조회" aria-label="계좌 강제 조회"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"></path><path d="M20.5 4.5V10h-5.5"></path></svg></button>
           </div>
         </div>
         <div id="snapAcctPosition" class="ops-health-list"></div>
@@ -429,9 +428,6 @@
         <!-- 2026-09-19 수급을 **이 카드 안**, 차트 모드 탭 바로 위에 둔다(사용자 지시).
              독립 패널이었다가 옮겼다 -- 같은 ETH 의 같은 질문이고, 한 카드 안에 있으면
              차트 컨테이너 폭을 공유해 풋프린트와 너비가 저절로 맞는다. -->
-        <div class="ops-health-head">
-          <div><h3>수급</h3></div>
-        </div>
         <!-- 2026-09-19 한 화면에 두 축을 위아래로 둔다(사용자 지시). 위는 «어느 값에서
              샀나»(가격축, 창 전체), 아래는 «지금 누가 사나»(시간축, 최근 5분 x 1초).
              잠깐 탭으로 갈랐다가 합쳤다 -- 아래 차트가 두 탭 모두에 들어가야 하는 순간

@@ -1423,12 +1423,10 @@ body {
   /* 2026-09-10 사용자 요청 "청산맵 차트 뒤에 검정색 백그라운드를 없애줘": --chart-bg(#090a10)
      제거 -> 패널 자체 배경이 비친다. 이 클래스를 쓰는 요소는 청산맵 차트 하나뿐이므로
      (index.html 에 .chart-container 는 1개, .market-chart-wrap 은 DOM/JS 에 0회 = 죽은 셀렉터)
-     선택자를 새로 만들지 않고 선언만 지웠다. 아래 inset box-shadow 는 남긴다 -- 차트 영역
-     경계를 그리는 1px 테두리이고 "검정 배경"과 별개다. */
+     선택자를 새로 만들지 않고 선언만 지웠다.
+     2026-09-19 "청산맵을 튀어나오게 만들기 위한 테두리" 제거(사용자 지시) -- 1px inset 윤곽과
+     상단 specular 하이라이트가 그 입체감의 정체였다. 패널이 이미 테두리를 가지므로 중복이다. */
   border-radius: var(--radius);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--neutral) 7.5%, transparent),
-    inset 0 1px 0 var(--specular);
 }
 
 svg {
@@ -2819,3 +2817,42 @@ svg {
    오히려 더 필요하다 -- 탭마다 제 높이를 준다. */
 .supply-1s-container { height: 158px; }   /* 2026-09-19 가격선 띠 제거로 240 -> 150 뷰박스 */
 .supply-profile-container { height: 428px; }
+
+
+/* ── 2026-09-19 사용자 요청(아티팩트 댓글): 코인 탭·페이지 탭을 «테마 토글과 똑같이» ──────
+   활성 상태는 이미 한 블록에서 통일돼 있었다(.page-tab.active / .asset-tab.active /
+   .push-toggle[data-state="on"]). 갈리던 건 **비활성**이다 -- 테마 토글은 테두리를 가진
+   독립 알약인데, 코인 탭은 테두리 없는 칸이 하나의 알약 «안»에 든 세그먼트였다.
+   여기서 그 껍데기를 걷어내고 각 칸을 같은 알약으로 만든다. 이제 세 무리가 한 프리미티브다. */
+.asset-tabs { padding: 0; border: 0; background: none; gap: 7px; }
+.asset-tab {
+  border: 1px solid var(--line);
+  background: rgb(var(--lift) / .035);
+  height: auto;
+  min-width: 0;
+  padding: 7px 11px;
+  font: 700 11px/1 var(--font-sans);
+}
+/* 세그먼트 시절엔 테두리가 없어 hover 가 `border-color: transparent` 였다 -- 이제 알약이라
+   토글과 같은 hover 를 쓴다. */
+.asset-tab:hover:not(.active) { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+/* 차트 모드 탭(청산맵/풋프린트)도 같은 클래스라 함께 따라온다 -- 치수만 맞춘다. */
+.chart-mode-tabs { padding: 0; }
+.chart-mode-tabs .asset-tab { min-width: 0; height: auto; padding: 7px 11px; font-size: 11px; }
+.page-tab { padding: 7px 11px; }
+
+/* 새로고침 버튼: 글리프(⟳) 대신 아이콘 + 원형. «누를 수 있는 것»으로 읽히게 알약 계열에
+   맞추고, 누르는 동안 한 바퀴 돌려 피드백을 준다. */
+.acct-refresh {
+  border-radius: 999px;
+  background: rgb(var(--lift) / .035);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .16s ease, border-color .16s ease, background .16s ease, transform .16s ease;
+}
+.acct-refresh svg { width: 16px; height: 16px; display: block; }
+.acct-refresh:hover:not(:disabled) { background: rgb(var(--lift) / .07); transform: rotate(-30deg); }
+.acct-refresh:active:not(:disabled) { transform: rotate(-180deg); }
+.acct-refresh:disabled svg { animation: acctSpin 1s linear infinite; }
+@keyframes acctSpin { to { transform: rotate(360deg); } }
