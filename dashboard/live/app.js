@@ -219,9 +219,15 @@ let oi1sSince = 0;
 // 노드는 캔들 렌더가 매번 새로 만드므로 isConnected 로 옛 노드를 거른다.
 let supply1sSubBox = null;
 let supplyProfileSubBox = null;
+let flowHeatmapSubBox = null;
 
 function repaintSupply1sPanel() {
   if (supply1sSubBox && supply1sSubBox.svg.isConnected) renderSupply1s(supply1sSubBox);
+}
+function repaintFlowHeatmapPanel() {
+  const b = flowHeatmapSubBox;
+  if (!b || !b.svg.isConnected) return;
+  renderFlowHeatmapSvg(b.svg, { w: b.w, h: b.h });
 }
 function repaintSupplyProfilePanel() {
   const b = supplyProfileSubBox;
@@ -235,9 +241,18 @@ const API_OI_5M_URL = "/api/oi-5m";
 const OI_5M_POLL_MS = 15000;
 let latestOi5m = null;
 let oi5mLastFetchAt = 0;
+const GEX_POLL_MS = 120000;          // 매시 cron -- 2분 폴링이면 충분히 앞선다
+const FLOW_HEATMAP_POLL_MS = 3000;   // agg=3 -- 이보다 자주 받아야 같은 열이다
+const FLOW_HEATMAP_COLS = 300;       // 절반 폭(≈600px)에 2px/열
+const FLOW_HEATMAP_AGG = 3;          // 300열 x 3초 = 15분
 const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
 let latestSupplyProfile = null;
 let supplyProfileLastFetchAt = 0;
+// 2026-09-19 호가 히트맵. 래스터는 1초/열인데 agg=3 으로 접어 받으므로 3초면 새 열이 하나다.
+let latestGex = null;
+let gexLastFetchAt = 0;
+let latestFlowHeatmap = null;
+let flowHeatmapLastFetchAt = 0;
 // 현재가 박스가 스스로 움직이는 데 필요한 기하(행 높이·행 키). 렌더가 적고 체결 WS 가 읽는다.
 let supplyProfileNow = null;
 const API_EXTREME_URL = "/api/extreme-detector";
@@ -549,8 +564,11 @@ function setupChartModeTabs() {
       renderChartModeTabs();
       footprintLastFetchAt = 0;   // 풋프린트로 돌아오면 폴링 간격을 기다리지 않고 바로 받는다
       supplyProfileLastFetchAt = 0;
+      flowHeatmapLastFetchAt = 0;
       refreshFootprint();
       refreshSupplyProfile();
+      refreshFlowHeatmap();
+      refreshGex();
       renderSnapshotChart();      // 기다리지 않고 즉시 바꿔 그린다 -- 누른 티가 나야 한다
     });
   });
@@ -575,8 +593,11 @@ function setupChartWindowTabs() {
       // 폴링 간격(0.4초/5초)을 기다리지 않고 바로 받는다 -- 누른 티가 나야 한다.
       footprintLastFetchAt = 0;
       supplyProfileLastFetchAt = 0;
+      flowHeatmapLastFetchAt = 0;
       refreshFootprint();
       refreshSupplyProfile();
+      refreshFlowHeatmap();
+      refreshGex();
     });
   });
   renderChartWindowTabs();
@@ -3459,6 +3480,92 @@ async function refreshSupply1s() {
   repaintSupply1sPanel();
 }
 
+function gexIndicatorItem() {
+  /* 옵션 감마 노출(GEX) -- **참고 표시 전용이고 신호가 아니다.**
+
+     🔴라벨을 이론대로 붙이면 안 된다. 실측 rho(GEX, 전방RV) = **+0.44~+0.51** 로 부호가
+       반대다(후행RV 통제 후에도 +0.25~+0.34). GEX 는 명목 달러라 «옵션시장 활동 수준 =
+       변동성»의 결과 대리변수로 작동한다. 그래서 두 축으로 나눠 적는다:
+         수준(total)        -> 변동성 대리. 높다고 «눌린다»가 아니다
+         구조(front/total)  -> total 을 통제하면 front 가 이론 부호를 회복한다(t -6.22)
+     ⏰판정일 1h 2026-09-28 / 4h 10-17. 그 전까지 CI 는 전부 0 을 포함한다.
+     출처: docs/experiments/eth_gamma_zomma_graphic_research_20260916.md */
+  const g = latestGex && latestGex.available
+    ? (latestGex.currencies || {})[activeSnapshotAsset === "btc" ? "BTC" : "ETH"] : null;
+  if (!g) {
+    return { key: "gex", label: "옵션 감마 노출 (GEX)", tone: "neutral",
+             subText: latestGex && latestGex.error ? "수집 지연" : "대기",
+             derivedTag: "= 참고 · 신호 아님", derivedTitle: GEX_TITLE };
+  }
+  const bn = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "-"}$${Math.abs(v / 1e9).toFixed(2)}B`);
+  const ratio = g.front_ratio;
+  return {
+    key: "gex", label: "옵션 감마 노출 (GEX)",
+    // 🔴톤은 **위험도도 방향도 아니다**. 음감마일 때만 주의(31일 중 1일로 드물다), 그 외 중립.
+    tone: g.negative_gamma ? "warn" : "neutral",
+    subText: g.negative_gamma ? "음감마" : "양감마",
+    liveText: `수준 ${bn(g.total_gex_usd)} · 구조 ${ratio == null ? "-" : ratio.toFixed(2)}`
+      + " (front÷total)",
+    derivedTag: "= 참고 · 신호 아님",
+    derivedTitle: GEX_TITLE,
+  };
+}
+
+const GEX_TITLE = "딜러 감마 노출. Deribit 옵션 체인을 매시 수집해 계산합니다(2026-08-15~, 750+ 스냅샷).\n\n"
+  + "🔴이론과 부호가 반대입니다. 실측 상관 rho(GEX, 앞으로의 실현변동성) = +0.44~+0.51 로, "
+  + "GEX 가 높을수록 변동성이 «눌린다»가 아니라 «옵션시장 활동이 많다»는 뜻으로 작동합니다 "
+  + "(명목 달러라 활동 수준의 결과 대리변수입니다).\n\n"
+  + "그래서 두 축으로 나눠 읽습니다 — 수준(total)은 변동성 대리, 구조(front÷total)는 딜러 감마입니다. "
+  + "total 을 통제하면 front 가 이론 부호를 회복합니다(t −6.22).\n\n"
+  + "⏰아직 판정 전입니다. HAR-RV 대비 증분 R² 는 세 지평 모두 양수·단조지만(+0.011/+0.026/+0.041) "
+  + "CI 가 전부 0 을 포함합니다(독립일 31). 판정 예정일은 1시간 지평 2026-09-28, 4시간 10-17 입니다. "
+  + "그때까지 이 값은 매매 판단의 근거가 아니라 맥락입니다.";
+
+
+async function refreshGex() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  const now = Date.now();
+  if (now - gexLastFetchAt < GEX_POLL_MS) return;
+  gexLastFetchAt = now;
+  try {
+    const res = await fetch("/api/gex", { cache: "no-cache" });
+    if (!res.ok) throw new Error(`gex ${res.status}`);
+    latestGex = await res.json();
+  } catch (error) {
+    console.error("GEX fetch error:", error);
+    latestGex = null;
+  }
+}
+
+async function refreshFlowHeatmap() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  if (activeSnapshotAsset !== "eth") return;   // 래스터 수집은 ETH 만 한다
+  const now = Date.now();
+  if (now - flowHeatmapLastFetchAt < FLOW_HEATMAP_POLL_MS) return;
+  flowHeatmapLastFetchAt = now;
+  try {
+    const res = await fetch(
+      `/api/flow/heatmap?symbol=ethusdt&cols=${FLOW_HEATMAP_COLS}&agg=${FLOW_HEATMAP_AGG}`,
+      { cache: "no-cache" });
+    if (!res.ok) throw new Error(`flow-heatmap ${res.status}`);
+    const j = await res.json();
+    // 서버가 qty 를 **int8 로 양자화**해 보낸다(±127 = ±p97). 화면은 농도만 쓰므로
+    // 원값이 필요 없고 페이로드가 f32 대비 1/4 이다. mid 는 가격이라 f32 그대로다.
+    const raw = (b64) => {
+      const bin = atob(b64); const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      return u8;
+    };
+    const mu = raw(j.mid_b64);
+    latestFlowHeatmap = { ...j, qty: new Int8Array(raw(j.qty_i8).buffer),
+                          mid: new Float32Array(mu.buffer) };
+    repaintFlowHeatmapPanel();
+  } catch (error) {
+    console.error("Flow heatmap fetch error:", error);
+    latestFlowHeatmap = null;
+  }
+}
+
 async function refreshSupplyProfile() {
   if (activePageTab !== "snapshot" || document.hidden) return;
   if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
@@ -3729,6 +3836,103 @@ function renderSupply1s(box = null) {
 // 초록·빨강·주황 셋뿐이라 「고래색」을 새로 만들 수 없다(styles.css 디자인 토큰 주석).
 // ⚠️창은 프로세스가 살아 있는 동안만 찬다 -- 스냅샷에는 최근 12봉만 남긴다(server.py의
 //   FOOTPRINT_KEEP_BARS 주석). 그래서 실제 창 길이를 머리글에 **항상** 적는다.
+function renderFlowHeatmapSvg(svg, box) {
+  /* 호가 히트맵(bookmap 류). 원천은 `live_orderflow_raster_collector_20260914` 의 .f32 --
+     1초 x 240빈 x $0.5, 서버가 `read_window()` 로 절대 가격축 정렬까지 끝내 보낸다.
+
+     🔴qty 의 **부호가 방향**이다: + 매수호가(bid), - 매도호가(ask).
+     🔴mid=NaN 인 열은 그 초의 북이 무효다(재동기중/수집중단) -- 회색으로 그리고
+       **절대 보간하지 않는다**. 보간하면 없는 유동성을 그리는 것이다.
+     🔴SVG rect 로 그리지 않는다 -- 300열 x 수백빈이면 DOM 이 죽는다. 오프스크린 캔버스에
+       픽셀로 찍고 `<image>` **하나**로 넣는다. foreignObject 는 모바일 사파리에서 깨진다. */
+  const NS = "http://www.w3.org/2000/svg";
+  const w = box.w, h = box.h;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.innerHTML = "";
+
+  const d = latestFlowHeatmap;
+  if (!d || !d.n_bins || !d.cols) {
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", w / 2); t.setAttribute("y", h / 2);
+    t.setAttribute("text-anchor", "middle"); t.setAttribute("fill", "var(--muted)");
+    t.setAttribute("font-size", "11");
+    t.textContent = d ? "호가 래스터 웜업..." : "호가 히트맵 대기";
+    svg.appendChild(t); return;
+  }
+
+  // 가격 -> y. 프로파일이 **먼저** 그려져 기하를 남겨 두면 그 행에 정확히 포갠다
+  // (같은 y 에서 «체결된 양»과 «걸려 있는 양»을 읽는 게 이 배치의 이유다).
+  // ponytail: 프로파일이 없으면 제 범위로 그린다 -- 그때는 두 그림의 축이 다르다.
+  const g = supplyProfileNow;
+  const binPrice = (i) => (d.bin_lo + i) * d.bin_size;
+  let yOf;
+  if (g && g.keys && g.keys.length && g.rowSize > 0) {
+    const top = g.keys[0] + g.rowSize;      // 첫 행의 위 경계
+    yOf = (p) => g.mt + ((top - p) / g.rowSize) * g.rowPx;
+  } else {
+    const p0 = binPrice(d.n_bins - 1), p1 = binPrice(0);
+    yOf = (p) => (p0 === p1) ? h / 2 : ((p0 - p) / (p0 - p1)) * h;
+  }
+
+  const cols = d.cols, nb = d.n_bins;
+  const H = Math.max(1, Math.round(h));
+  const cv = document.createElement("canvas");
+  cv.width = cols; cv.height = H;
+  const ctx = cv.getContext("2d");
+  const img = ctx.createImageData(cols, H);
+  const px = img.data;
+
+  // 색 스케일은 **서버가** 분위로 정해 int8 로 접어 보냈다(±127 = ±p97). 여기선 안 잰다.
+  // 빈 -> 픽셀행을 한 번만 계산한다(열마다 다시 재면 300배 비싸다).
+  const span = [];
+  for (let i = 0; i < nb; i++) {
+    const p = binPrice(i);
+    let a = yOf(p + d.bin_size), b = yOf(p);
+    if (a > b) { const t = a; a = b; b = t; }
+    span.push([Math.max(0, Math.floor(a)), Math.min(H, Math.ceil(b))]);
+  }
+
+  for (let c = 0; c < cols; c++) {
+    if (!Number.isFinite(d.mid[c])) {                 // 무효 열 -- 회색 기둥, 보간 없음
+      for (let y = 0; y < H; y++) {
+        const o = (y * cols + c) * 4;
+        px[o] = 139; px[o + 1] = 145; px[o + 2] = 166; px[o + 3] = 46;
+      }
+      continue;
+    }
+    for (let i = 0; i < nb; i++) {
+      const q = d.qty[c * nb + i];
+      if (!q) continue;
+      const a = Math.min(255, Math.round((Math.abs(q) / 127) * 235));
+      if (a < 6) continue;
+      const [y0, y1] = span[i];
+      const r = q > 0 ? 52 : 248, gg = q > 0 ? 211 : 113, bb = q > 0 ? 153 : 113;
+      for (let y = y0; y < y1; y++) {
+        const o = (y * cols + c) * 4;
+        if (px[o + 3] >= a) continue;                 // 겹치면 진한 쪽을 남긴다
+        px[o] = r; px[o + 1] = gg; px[o + 2] = bb; px[o + 3] = a;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  const im = document.createElementNS(NS, "image");
+  im.setAttribute("x", "0"); im.setAttribute("y", "0");
+  im.setAttribute("width", w); im.setAttribute("height", h);
+  im.setAttribute("preserveAspectRatio", "none");
+  im.setAttribute("href", cv.toDataURL("image/png"));
+  svg.appendChild(im);
+
+  const cap = document.createElementNS(NS, "text");
+  cap.setAttribute("x", "4"); cap.setAttribute("y", "11");
+  cap.setAttribute("font-size", "9"); cap.setAttribute("fill", "var(--muted)");
+  const mins = Math.round(cols * d.dt_s / 60);
+  cap.textContent = `호가 ${mins}분 · 걸려 있는 양`
+    + (d.valid_ratio < 0.95 ? ` · 결측 ${Math.round((1 - d.valid_ratio) * 100)}%` : "");
+  svg.appendChild(cap);
+}
+
+
 function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box = null) {
   const NS = "http://www.w3.org/2000/svg";
   const mobileChart = isMobileChartMode();
@@ -4353,6 +4557,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   (renderSupplyProfileSvg 의 maxRows) 16행 -> 22행이 된다.
   const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 100 : 0;
   const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_GAP + SUB_1S_H : 0;   // 306
+  // 2026-09-19 프로파일 줄에 호가 히트맵을 나란히 둔다(사용자 지시: 히트맵 좌 · 프로파일 우).
+  // ⭐**폭만** 나눈다 -- SUB_TOTAL 이 안 변해야 styles.css 를 안 건드린다(위 경고 참조).
+  // ⭐둘은 같은 y축(가격)을 쓴다: 프로파일은 «체결된 양», 히트맵은 «걸려 있는 양».
+  const SUB_HEAT_W = subOn ? Math.round(w * 0.5) : 0;
+  const SUB_PROFILE_W = subOn ? w - SUB_HEAT_W - SUB_GAP : 0;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
   //   빼기 때문). 인라인 height 로 JS 가 상자를 정하는 방법은 쓰지 않는다 -- 2열에서는 상자가
@@ -5544,19 +5753,29 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 중첩 <svg> 를 쓴다 -- 자식 svg 는 제 viewBox 를 갖는 독립 좌표계라 두 렌더러의 좌표
   // 계산을 한 줄도 안 고쳐도 된다. 상자만 넘기면 그 안에서 평소처럼 그린다.
   if (SUB_TOTAL > 0) {
-    const subSvg = (y, hgt) => {
+    const subSvg = (x, y, wid, hgt) => {
       const g = document.createElementNS(NS, "svg");
-      g.setAttribute("x", "0"); g.setAttribute("y", y);
-      g.setAttribute("width", w); g.setAttribute("height", hgt);
+      g.setAttribute("x", x); g.setAttribute("y", y);
+      g.setAttribute("width", wid); g.setAttribute("height", hgt);
       // 캔들 툴팁이 이 위에서도 뜨면 «이 봉»이 아닌 값을 말한다 -- 버블링을 여기서 끊는다.
       g.addEventListener("mousemove", (e) => e.stopPropagation());
       svg.appendChild(g);
       return g;
     };
-    supplyProfileSubBox = { svg: subSvg(subProfileY, SUB_PROFILE_H), w, h: SUB_PROFILE_H };
+    // 히트맵이 왼쪽, 프로파일이 오른쪽(사용자 지시). 히트맵의 오른쪽 끝 = 지금 호가라
+    // 그 옆에 프로파일 가격행이 바로 이어진다 -- 두 그림이 같은 가격축에서 만난다.
+    // 🔴프로파일을 **먼저** 그린다 -- supplyProfileNow 에 행 기하를 남겨야 히트맵이
+    //   같은 y 에 포갠다(x 위치는 호출 순서와 무관하다. 각자 제 <svg> 상자를 받는다).
+    supplyProfileSubBox = { svg: subSvg(SUB_HEAT_W + SUB_GAP, subProfileY, SUB_PROFILE_W, SUB_PROFILE_H),
+                            w: SUB_PROFILE_W, h: SUB_PROFILE_H };
     renderSupplyProfileSvg(supplyProfileSubBox.svg, latestSupplyProfile,
-                           currentPrice, entryPrice, { w, h: SUB_PROFILE_H });
-    supply1sSubBox = { svg: subSvg(sub1sY, SUB_1S_H), w, h: SUB_1S_H };
+                           currentPrice, entryPrice, { w: SUB_PROFILE_W, h: SUB_PROFILE_H });
+    // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
+    // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
+    flowHeatmapSubBox = { svg: subSvg(0, subProfileY, SUB_HEAT_W, SUB_PROFILE_H),
+                          w: SUB_HEAT_W, h: SUB_PROFILE_H };
+    renderFlowHeatmapSvg(flowHeatmapSubBox.svg, { w: SUB_HEAT_W, h: SUB_PROFILE_H });
+    supply1sSubBox = { svg: subSvg(0, sub1sY, w, SUB_1S_H), w, h: SUB_1S_H };
     renderSupply1s(supply1sSubBox);
   }
 }
@@ -5737,6 +5956,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
         derivedTag: "= 사이징 모델",
         derivedTitle: volLevelTitle(latestVolLevel),
       },
+      gexIndicatorItem(),                     // 2026-09-19 옵션 감마 노출(참고 표시)
       coinIndicator({
         key: "liq_cascade", label: "청산 캐스케이드", tone: ci.liq_cascade.tone,
         subText: ci.liq_cascade.subText, history: toneHistory.liq_cascade, times: toneHistoryTimes.liq_cascade,
@@ -5780,6 +6000,8 @@ async function tick() {
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       refreshSupplyProfile();        // 2026-09-19 가격축 수급 프로파일
+      refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)
+      refreshGex();                  // 2026-09-19 옵션 감마 노출(참고 표시 · 신호 아님)
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)

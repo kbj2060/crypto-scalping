@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import concurrent.futures
 import csv
+import functools
 import hashlib
 import json
 import os
@@ -16,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+import numpy as np
 import pandas as pd
 from aiohttp import ClientSession, ClientTimeout, TCPConnector, WSMsgType, web
 from dotenv import load_dotenv
@@ -448,6 +452,19 @@ BREAKOUT_DETECTOR_MAX_AGE_MIN = 15.0       # 5분봉 3개 -- 봉 마감 +20초�
 # 게이트 자체의 근거: 두 독립 설계에서 짝지은 증분 +8.25 / +7.44bp/일 · **CI 둘 다 0배제** ·
 #   MDD 를 −47.4% -> −8.4% 로 줄인다. **손실 차단기**이지 수익 생성기가 아니다. 표시 전용.
 EVR_GATE_STATE_PATH = REPO_ROOT / "data" / "live" / "evr_gate_state.json"
+# 2026-09-19 GEX. 🔴duckdb(`deribit_gex.duckdb`)는 **열지 않는다** -- 단일 writer 라
+#   매시 cron 과 부딪히면 `Could not set lock` 이다. 수집기가 떨구는 JSON 만 읽는다.
+GEX_STATE_PATH = REPO_ROOT / "data" / "live" / "deribit_gex_state.json"
+GEX_MAX_AGE_MIN = 150.0   # 매시 cron -- 두 사이클 놓치면 죽은 것으로 본다
+
+# 2026-09-19 호가 히트맵. 🔴**전용 스레드풀**을 쓴다 -- 디스크에서 수 MB 를 읽는 동안
+#   기본 executor 를 물면 같은 풀을 쓰는 다른 핸들러가 같이 막히고, 이벤트루프에서 읽으면
+#   SSE 가 멈춘다(설계서 dashboard_orderflow_footprint_heatmap_design_20260914 P2).
+# 🔴symbol 은 **파일 경로로 들어간다**. 화이트리스트로만 받는다(`../` 탈출 차단).
+HEATMAP_SYMBOLS = {"ethusdt", "btcusdt"}
+HEATMAP_MAX_COLS = 900          # 캔버스 폭 상한 -- 이보다 넓게 그릴 화면이 없다
+HEATMAP_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2,
+                                                         thread_name_prefix="heatmap")
 EVR_GATE_MAX_AGE_MIN = 30.0          # 워커 주기 300초 x 6
 
 # 2026-09-11 크기 가늠자 -- 역변동성 사이징의 실시간 눈금
@@ -1213,6 +1230,23 @@ def breakout_detector_payload() -> dict[str, Any]:
     return worker_payload(BREAKOUT_DETECTOR_STATE_PATH, BREAKOUT_DETECTOR_MAX_AGE_MIN,
                           require_ok=True, stamp_available=True,
                           extra_missing={"history": [], "times": []})
+
+
+def gex_payload() -> dict[str, Any]:
+    """옵션 감마 노출(GEX). **참고 표시 전용이고 신호가 아니다.**
+
+    🔴라벨을 이론대로 붙이면 안 된다 -- 실측 rho(GEX, 전방RV) = **+0.44~+0.51** 로 부호가
+      반대다(후행RV 통제 후에도 +0.25~+0.34). GEX 는 명목 달러라 «옵션시장 활동 수준 =
+      변동성»의 **결과 대리변수**로 작동한다. 그래서 두 축으로 가른다:
+        level  = total            -- 변동성 대리(이론 부호 아님)
+        struct = front / total    -- total 을 통제하면 front 가 이론 부호를 회복한다(t -6.22)
+    판정일: 1h 2026-09-28 / 4h 10-17 (독립일이 그때 44/63 이 된다). 그 전까지 CI 는 전부
+    0 을 포함하므로 화면은 «참고»라고 말해야 한다.
+    출처: docs/experiments/eth_gamma_zomma_graphic_research_20260916.md
+    """
+    return worker_payload(GEX_STATE_PATH, GEX_MAX_AGE_MIN, ts_field="generated_at",
+                          stamp_available=True, bare_missing=True,
+                          extra_missing={"currencies": {}})
 
 
 def evr_gate_payload() -> dict[str, Any]:
@@ -3005,6 +3039,49 @@ def make_app() -> web.Application:
     async def api_evr_gate(request: web.Request) -> web.Response:
         return web.json_response(await load_evr_gate(), headers=NOCACHE)
 
+    def _heatmap_read(symbol: str, cols: int, agg: int) -> dict[str, Any]:
+        """래스터 창을 읽어 화면이 바로 그릴 수 있는 모양으로 낸다.
+
+        🔴포맷을 여기서 다시 파싱하지 않는다 -- 수집기의 `read_window()` 가 seek·절대
+          가격축 정렬·부호보존 다운샘플(|값| 최대. 평균은 큰 벽 하나를 뭉갠다)까지 한다.
+          헤더가 ver=2 로 오르면 그쪽만 고치면 된다.
+        qty 부호가 방향이다: + 매수호가(bid), - 매도호가(ask).
+        mid=NaN 인 열은 그 초의 북이 무효다 -- 렌더러가 회색으로 그린다. **보간 금지**
+          (없는 유동성을 그리는 것이다)."""
+        from scripts.live_orderflow_raster_collector_20260914 import read_window  # noqa: PLC0415
+        w = read_window(symbol, int(time.time() * 1000), cols, agg)
+        qty, mid = w.pop("qty"), w.pop("mid")
+        # ⭐int8 로 양자화해 보낸다. 화면은 |q|/scale 만 쓰므로(색 농도) 원값이 필요없고,
+        #   f32 면 300x259 에 base64 405KB 인데 int8 은 104KB 다(풋프린트가 12KB).
+        #   scale 은 **분위**다 -- 최대값으로 나누면 큰 벽 하나가 나머지를 다 씻어낸다.
+        nz = np.abs(qty[qty != 0])
+        scale = float(np.percentile(nz, 97)) if nz.size else 1.0
+        if not (scale > 0):
+            scale = 1.0
+        q8 = np.rint(np.clip(qty / scale, -1.0, 1.0) * 127.0)   # rint: 절단하면 오차가 2배다
+        return {**w, "scale": scale,
+                "qty_i8": base64.b64encode(np.ascontiguousarray(q8, dtype=np.int8)).decode(),
+                "mid_b64": base64.b64encode(np.ascontiguousarray(mid, dtype="<f4")).decode()}
+
+    async def api_flow_heatmap(request: web.Request) -> web.Response:
+        symbol = (request.query.get("symbol") or "ethusdt").lower()
+        if symbol not in HEATMAP_SYMBOLS:
+            raise web.HTTPBadRequest(reason="unsupported_symbol")
+        try:
+            cols = max(10, min(HEATMAP_MAX_COLS, int(request.query.get("cols", "300"))))
+            agg = max(1, min(60, int(request.query.get("agg", "3"))))
+        except ValueError:
+            raise web.HTTPBadRequest(reason="bad_cols_or_agg") from None
+        loop = asyncio.get_running_loop()
+        payload = await loop.run_in_executor(
+            HEATMAP_EXECUTOR, functools.partial(_heatmap_read, symbol, cols, agg))
+        return web.json_response(payload, headers=NOCACHE)
+
+    async def api_gex(request: web.Request) -> web.Response:
+        payload = await swr_cached(
+            "gex", 60.0, lambda: asyncio.to_thread(gex_payload), max_stale=STALE_GRACE_SECONDS)
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_chart_markers(request: web.Request) -> web.Response:
         payload = await load_chart_markers(request.query.get("asset", "eth"))
         return web.json_response(payload, headers=NOCACHE)
@@ -3822,6 +3899,8 @@ def make_app() -> web.Application:
     app.router.add_get("/api/extreme-detector", api_extreme_detector)
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
     app.router.add_get("/api/evr-gate", api_evr_gate)
+    app.router.add_get("/api/gex", api_gex)
+    app.router.add_get("/api/flow/heatmap", api_flow_heatmap)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)

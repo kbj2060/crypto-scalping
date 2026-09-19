@@ -55,6 +55,7 @@ Run standalone (single poll) or loop with --interval-sec. No live trading file t
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import re
 import time
@@ -67,6 +68,11 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "data/live/deribit_gex.duckdb"
+# 🔴대시보드는 이 JSON 만 읽는다. duckdb 는 **단일 writer** 라 매시 cron 이 쓰는 파일을
+# 대시보드가 직접 열면 `Could not set lock` 이 난다 -- 이 저장소 수집기 관례대로
+# 끝에 작은 상태파일을 떨군다(tmp -> os.replace, 부분 읽기 없음).
+STATE_PATH = ROOT / "data/live/deribit_gex_state.json"
+STATE_HISTORY = 48        # 48시간 스트립. 매시 1행이라 그대로 48개다
 BASE_URL = "https://www.deribit.com/api/v2/public/get_book_summary_by_currency"
 CURRENCIES = ("ETH", "BTC")
 FRONT_MONTH_DAYS = 30.0
@@ -188,6 +194,44 @@ def poll_once(con) -> None:
         log(f"{currency}: spot={summary['spot_price']:.1f} total_gex=${summary['total_gex_usd']:,.0f} "
             f"front_month_gex=${summary['front_month_gex_usd']:,.0f} n={summary['n_instruments']} "
             f"n_front={summary['n_front_month']}")
+    write_state(con)
+
+
+def write_state(con) -> None:
+    """화면용 상태파일. 🔴여기서 쓰는 이유는 **이 프로세스가 이미 연결을 쥐고 있어서**다 --
+    대시보드가 제 연결을 열면 락에 걸린다.
+
+    두 축을 따로 낸다(eth_gamma_zomma_graphic_pinning_gex_20260916):
+      level  = total_gex_usd      -- 이론과 부호가 **반대**다(rho(GEX, 전방RV) +0.44~+0.51).
+                                     명목 달러라 «옵션시장 활동 = 변동성»의 결과 대리변수다.
+      struct = front / total      -- total 을 통제하면 front 가 이론 부호를 회복한다(t -6.22).
+    판정일(1h 2026-09-28 / 4h 10-17)까지는 **참고 표시 전용**이고 신호가 아니다.
+    """
+    out = {"generated_at": datetime.now(timezone.utc).isoformat(), "currencies": {}}
+    for currency in CURRENCIES:
+        rows = con.execute(
+            "SELECT recorded_at_utc, spot_price, total_gex_usd, front_month_gex_usd "
+            "FROM gex_summary WHERE currency = ? ORDER BY recorded_at_utc DESC LIMIT ?",
+            [currency, STATE_HISTORY],
+        ).fetchall()
+        if not rows:
+            continue
+        rows = rows[::-1]                      # 오래된 것부터 -- 스트립이 왼쪽에서 오른쪽으로 흐른다
+        ts, spot, total, front = rows[-1]
+        # 0 나눗셈과 부호를 같이 막는다. total 이 0 이면 비율에 뜻이 없다(구조를 못 읽는다).
+        ratio = (front / total) if total else None
+        out["currencies"][currency] = {
+            "recorded_at_utc": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            "spot_price": spot, "total_gex_usd": total, "front_month_gex_usd": front,
+            "front_ratio": ratio,
+            "negative_gamma": bool(total is not None and total < 0),
+            "history": [{"t": (r[0].isoformat() if hasattr(r[0], "isoformat") else str(r[0])),
+                         "total": r[2], "front": r[3]} for r in rows],
+        }
+    tmp = STATE_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(STATE_PATH)
+    log(f"state -> {STATE_PATH.name} ({len(out['currencies'])} currencies)")
 
 
 def main() -> int:
