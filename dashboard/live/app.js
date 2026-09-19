@@ -4327,23 +4327,38 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
         }
       }
       if (v.inst > maxI) maxI = v.inst;
+      v.rw = v.refill / Math.max(v.peak, 1e-9);
       return v;
     });
+    // 🔴2026-09-20 농도를 **창 안 순위**로 칠한다. 절대 곡선(log2(rw)/2.6)으로 칠했더니
+    //   탭마다 죽었다 -- 실측 포화율 15m 11% · 1h 67% · 2h 90% · **4h 97%**(sd 0.037).
+    //   refill 은 창에 비례해 쌓이는데 나는 15분 창에서 보정했다. 창 길이로 나누는 것도
+    //   답이 아니다 -- peak 도 같이 커져 단순 비례가 아니고, 그렇게 하면 4h 에서 rw 중앙이
+    //   0.79 라 전부 최저 농도가 된다(sd 0.015). 양쪽 다 «축이 없는» 상태다.
+    //   순위는 탭과 무관하게 잉크 범위를 다 쓴다. 대신 농도는 **이 창 안에서의 상대값**이고
+    //   절대 배수는 툴팁이 숫자로 말한다(조용한 시간과 시끄러운 시간이 같아 보이는 것이
+    //   이 선택의 대가다).
+    const liveRw = per.filter((v) => v.inst > 0).map((v) => v.rw).sort((a, b) => a - b);
+    const rwPct = (x) => {            // 0~1 분위. 같은 값이 여럿이면 가운데를 준다.
+      if (liveRw.length < 2) return 0.5;
+      let lo = 0, hi = liveRw.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (liveRw[m] < x) lo = m + 1; else hi = m; }
+      let hi2 = lo;
+      while (hi2 < liveRw.length && liveRw[hi2] === x) hi2++;
+      return ((lo + hi2) / 2) / liveRw.length;
+    };
     if (maxI > 0) {
       keys.forEach((k, j) => {
         const { inst, pers, peak, refill, d60 } = per[j];
         if (inst <= 0) return;
         const bl = (inst / maxI) * (sideW - 2);
-        // 재깔림 = refill/peak. 1배(한 번 깔고 앉음) ~ 6배 이상(계속 다시 깖)을 농도로.
-        // 🔴선형이 아니라 log2 다 -- 실측 분포가 거리 밴드별 1.05~10.5 로 한 자릿수를
-        //   넘나들어서, 선형이면 먼 벽 전부가 같은 옅은 색으로 뭉갠다.
+        // 재깔림 = refill/peak. 농도는 그 값의 **창 안 분위**다(위 주석).
         const rw = refill / Math.max(peak, 1e-9);
         const r = document.createElementNS(NS, "rect");
         r.setAttribute("x", leftEdge - 1 - bl); r.setAttribute("y", mt + j * rowPx + 0.5);
         r.setAttribute("width", Math.max(1, bl)); r.setAttribute("height", Math.max(1, rowPx - 1));
         r.setAttribute("fill", "#7dd3fc");
-        r.setAttribute("opacity",
-          (0.22 + 0.78 * Math.min(1, Math.log2(Math.max(1, rw)) / 2.6)).toFixed(2));
+        r.setAttribute("opacity", (0.22 + 0.78 * rwPct(rw)).toFixed(2));
         // ── 접근행동(사용자 요청 2026-09-20) ────────────────────────────
         // 「가격이 다가왔을 때 이 가격대가 얇아졌나」. 자격 빈이 전체의 28%뿐이라
         // 막대 색·길이 같은 **행 채널로는 못 쓴다**(72%가 빈칸이면 «얇다»와 «모른다»가
@@ -4378,8 +4393,9 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
           + " (" + Math.round(100 * pers / Math.max(inst, 1e-9)) + "%)\n"
           + "재깔림 " + rw.toFixed(1) + "배 — " + win + " 안에서 최대치의 "
           + rw.toFixed(1) + "배(" + Math.round(refill) + " ETH)가 다시 깔렸습니다. "
-          + (rw >= 3 ? "같은 자리를 계속 다시 까는 중입니다(막대가 진합니다)."
-                     : "한 번 깔고 거의 그대로입니다(막대가 옅습니다).") + "\n"
+          + "이 창의 상위 " + Math.round(100 * (1 - rwPct(rw))) + "% 입니다"
+          + " — 🔴농도는 **이 창 안의 상대 순위**라, 조용한 시간과 시끄러운 시간이 같은 "
+          + "진하기로 보입니다. 절대값은 이 숫자로 보세요.\n"
           + "최근 60초 " + (d60 >= 0 ? "+" : "") + Math.round(d60) + " ETH — "
           + (Math.abs(d60) < 1 ? "변화 없음" : d60 > 0 ? "쌓는 중" : "빼는 중") + "\n"
           + (apr === null ? ""
