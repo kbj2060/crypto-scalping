@@ -4635,15 +4635,18 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   5초·1초 주기였다 -- 이제 그 주기로 같이 다시 그려진다. 사용자 결정으로 감수한다.
   const subOn = svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth";
   // 🔴이 세 값의 합(SUB_TOTAL)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야
-  //   한다(666 = 400 + 266 -> 706 = 400 + 306). 상자가 작으면 그만큼 가격 플롯이 눌린다.
+  //   한다(666 = 400 + 266 -> 706 = 400 + 306 -> 756 = 400 + 356). 상자가 작으면
+  //   그만큼 가격 플롯이 눌린다.
   // 2026-09-19 프로파일 150 -> 190 (아티팩트 댓글 "조금만 더 키워줘"). 행 수는 높이가 정하므로
   //   (renderSupplyProfileSvg 의 maxRows) 16행 -> 22행이 된다.
-  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 100 : 0;
+  // 2026-09-20 1초 수급 100 -> 150 (사용자 요청 "좀 더 키워줘"). 상자도 706 -> 756 으로
+//   같이 키운다 -- 안 그러면 가격 플롯이 그만큼 눌린다(아래 경고 블록).
+  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 150 : 0;
   // 2026-09-19 히트맵은 프로파일 **아래 제 줄**이다(사용자 지시). 좌우 반씩 나누던 판을
   // 되돌렸다 -- 프로파일 막대 해상도가 절반이 됐고, 두 패널의 자연 가격범위가 15배 달라
   // (호가 ±2.4% vs 체결 ±0.16%) 나란히 둘 이유였던 «같은 축»도 성립하지 않았다.
   // ⭐데스크톱·모바일이 같은 모양이 되므로 subStack 분기가 통째로 사라진다.
-  //   SUB_TOTAL 306 = 8 + 190(프로파일) + 8 + 100(1초 수급)
+  //   SUB_TOTAL 356 = 8 + 150(1초 수급) + 8 + 190(프로파일)   ← 2026-09-20 위아래 뒤집힘
   const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_GAP + SUB_1S_H : 0;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
@@ -4661,7 +4664,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 프로파일을 둔다. 위에서부터 [1초 수급][프로파일][가격 플롯][OI][청산] 이다.
   // ⭐두 패널을 옮기는 대신 **mt(가격 플롯의 윗변)를 그만큼 내린다**. mt 는 이 함수에서
   //   18곳이 쓰는 «플롯 top» 이라, 그 뜻을 유지하면 yAt·클램프·커서 매핑·세로선을 한 줄도
-  //   안 건드린다. 상자 총높이도 그대로다(706 = 400 + 306) -- styles.css 는 손댈 게 없다.
+  //   안 건드린다. 상자 총높이는 SUB_TOTAL 과 함께 움직인다(756 = 400 + 356).
   const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112,
         mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 91;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
