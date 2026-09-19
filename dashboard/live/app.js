@@ -3965,9 +3965,6 @@ function renderSupply1s(box = null) {
   };
   const tagR = draw(retail, 1.4, 0.5, "리테일");
   const tagW = draw(whale, 2, 0.95, "고래");
-  // 두 값이 가까우면 라벨이 그대로 포개진다(가격 라벨과 같은 문제). 고래를 제자리에 두고
-  // 리테일만 밀어낸다 -- 고래가 이 화면의 주인공이라 그쪽 위치가 정확해야 한다.
-  if (Math.abs(tagR.y - tagW.y) < 12) tagR.y = tagW.y + (tagR.y >= tagW.y ? 12 : -12);
   const tags = [tagW, tagR];
   if (oiRows.length >= 2) {
     const end = oiRows[oiRows.length - 1].v;
@@ -3978,9 +3975,20 @@ function renderSupply1s(box = null) {
                    // 좁으면 «신규계약»(73px)이 꼬리표 자리(67px)를 넘는다 -- OI 로 줄인다.
                    text: (narrow ? "OI " : "신규계약 ")
                          + (end >= 0 ? "+" : "-") + qty(end) };
-    tags.forEach((t) => { if (Math.abs(tagO.y - t.y) < 12) tagO.y = t.y + (tagO.y >= t.y ? 12 : -12); });
     tags.push(tagO);
   }
+  // 값이 가까우면 꼬리표가 그대로 포개진다(가격 라벨과 같은 문제).
+  // 🔴짝지어 밀어내는 방식은 **셋에서 깨진다** -- 둘을 벌려도 셋째가 도로 그 자리에 앉는다.
+  //   누적선 시절엔 셋이 5분 동안 벌어져서 안 보였는데, 30초 롤링은 셋이 동시에 0 근처인
+  //   구간이 흔하다(2026-09-20 배포본 스크린샷에서 실제로 셋이 겹쳐 글자가 읽히지 않았다).
+  //   y 로 정렬해 **차례로** 최소 간격을 주고, 아래로 넘치면 묶음째 위로 민다.
+  const TAG_GAP = 12;
+  tags.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < tags.length; i++) {
+    if (tags[i].y - tags[i - 1].y < TAG_GAP) tags[i].y = tags[i - 1].y + TAG_GAP;
+  }
+  const over = tags[tags.length - 1].y - (h - 4);
+  if (over > 0) tags.forEach((t) => { t.y -= over; });
   tags.forEach((t) => label(ml + cw + 5, t.y + 3, t.text, t.color));
 
   // 무엇을 보고 있는지 한 줄. 창 누적은 선을 지우고 여기 숫자로만 남긴다.

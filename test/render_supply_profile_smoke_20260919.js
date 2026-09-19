@@ -4,13 +4,18 @@
 //   node test/render_supply_profile_smoke_20260919.js
 const fs = require("fs");
 const src = fs.readFileSync("dashboard/live/app.js", "utf8");
-const m = src.match(/function renderSupplyProfileSvg\(svg, profile, currentPrice, entryPrice = 0, box = null\) \{[\s\S]*?\n\}\n/);
-if (!m) { console.log("🔴 함수 추출 실패"); process.exit(1); }
-// 2026-09-20 렌더러가 헬퍼 하나를 더 쓴다(«접근행동» 표식, 8721c4f3). 이 하네스는 함수를
-// 정규식으로 하나만 뽑아 eval 하므로, 최상위 헬퍼가 늘면 여기도 같이 뽑아야 한다 --
-// 브라우저에서는 호이스팅으로 그냥 보이지만 여기서는 ReferenceError 로 죽는다.
-const ma = src.match(/function approachAt\(hm, price, rowSize\) \{[\s\S]*?\n\}\n/);
-if (!ma) { console.log("🔴 approachAt 추출 실패"); process.exit(1); }
+// 🔴렌더 함수 혼자 뽑으면 **형제 헬퍼를 부르는 순간 ReferenceError** 가 난다(브라우저에선
+//   둘 다 전역이라 안 나는데 여기서만 난다). 2026-09-20 에 approachAt 이 추가되면서 실제로
+//   그랬다 -- 라이브 버그가 아니라 하네스 구멍이다. 헬퍼가 늘면 이 목록에 이름만 더한다
+//   (오류 메시지가 «X is not defined» 로 어느 이름인지 바로 알려준다).
+const NEEDS = ["renderSupplyProfileSvg", "approachAt"];
+const grab = (name) => {
+  const re = new RegExp("function " + name + "\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n");
+  const hit = src.match(re);
+  if (!hit) { console.log(`🔴 함수 추출 실패: ${name}`); process.exit(1); }
+  return hit[0];
+};
+const m = [NEEDS.map(grab).join("\n")];
 
 const b64 = (s) => { const b = Buffer.from(s, "base64");
                      return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
@@ -58,7 +63,7 @@ function run(label, profile, hm, w, h, narrow) {
                 parentElement: { clientWidth: w, clientHeight: h },
                 getBoundingClientRect() { return { height: h }; } };
   try {
-    eval(ma[0] + m[0] + "\nrenderSupplyProfileSvg(svg, profile, 2641, 0, {w: W, h: H});"
+    eval(m[0] + "\nrenderSupplyProfileSvg(svg, profile, 2641, 0, {w: W, h: H});"
          .replace("W", w).replace("H", h));
   } catch (e) { console.log(`🔴 ${label}: ${e.constructor.name} — ${e.message}`); return false; }
 

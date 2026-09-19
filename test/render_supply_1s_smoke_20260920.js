@@ -90,5 +90,18 @@ else {
   if (!texts.includes("고래 +0")) fail(`0 일 때 「고래 +0」이 아니다: ${JSON.stringify(texts)}`);
 }
 
+// ⑦ 셋이 동시에 0 근처여도 꼬리표가 안 겹친다. 30초 롤링에서는 흔한 배치인데,
+//    짝지어 밀어내던 옛 방식은 셋째가 도로 겹쳤다(배포본에서 글자가 안 읽혔다).
+const t3 = draw("꼬리표 겹침(셋 다 0 근처)", { qty: 0, oi: 0.0001 });
+if (!t3) ok = false;
+else {
+  const ys = t3.els.filter((e) => e._kind === "text" && /^(고래|리테일|신규계약|OI) /.test(String(e.textContent || "")))
+    .map((e) => Number(e._a.y)).sort((a, b) => a - b);
+  if (ys.length < 3) fail(`꼬리표가 셋이 아니다 (${ys.length})`);
+  for (let i = 1; i < ys.length; i++) {
+    if (ys[i] - ys[i - 1] < 11.5) { fail(`꼬리표가 겹친다: ${JSON.stringify(ys)}`); break; }
+  }
+}
+
 console.log(ok ? "✅ 1초 수급 패널 OK" : "");
 process.exit(ok ? 0 : 1);
