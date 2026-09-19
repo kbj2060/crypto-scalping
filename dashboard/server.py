@@ -3087,7 +3087,12 @@ def make_app() -> web.Application:
     def _heatmap_rows(w: dict, qty: "np.ndarray", mid: "np.ndarray") -> dict[str, Any]:
         """그림에서 **뽑은 수치**. 히트맵 이미지로는 구별 안 되는 것을 숫자로 가른다.
 
-        ⭐`pers`(창 내내 한 번도 안 빠진 양)가 핵심이다. 실측(600초): 순간 잔량의 **36%가
+        ⭐2026-09-20 행마다 다섯 값을 낸다(`row_stats`, 수집기에 있다 -- 래스터 축소는
+          거기가 집이고 `--selftest` 가 붙어 있다). 그전에는 `pers` 하나로 막대를 그렸는데,
+          min 은 가능한 추정량 중 **가장 보수적**이라 「한 번도 안 빠진 양」밖에 대답하지
+          않는다. 실측 600초 창에서 그 값(103,531)은 `refill`(1,029,281)의 **1/10** 이다.
+          화면은 이제 길이=`inst`, 농도=`refill/peak`(재깔림)로 갈라 그린다.
+        🔴`pers`(창 내내 한 번도 안 빠진 양)도 그대로 낸다. 실측(600초): 순간 잔량의 **36%가
           창을 못 버틴다**. 겉보기 크기가 비슷한 두 벽이 지속률 100%(-0.75%, 8073->8056) 대
           0%(+2.24%, 5461->0) 로 갈리는데 이미지에서는 둘 다 같은 진한 띠다.
         🔴`offtouch_leave_share` 는 «취소율»이 **아니다**. 「터치에서 떨어진 호가가 체결 없이
@@ -3102,8 +3107,10 @@ def make_app() -> web.Application:
         ok = np.isfinite(mid)
         if not ok.any():
             return {"rows": None, "summary": None}
+        from scripts.live_orderflow_raster_collector_20260914 import row_stats  # noqa: PLC0415
         a = np.abs(qty[ok])
-        inst, pers = a[-1], a.min(axis=0)
+        st = row_stats(a, int(w["dt_s"]))
+        inst, pers = st["inst"], st["pers"]
         spot = float(np.nanmedian(mid[ok]))
         price = (w["bin_lo"] + np.arange(w["n_bins"])) * w["bin_size"]
         dist = (price - spot) / spot * 100.0 if spot else np.zeros_like(price)
@@ -3177,8 +3184,8 @@ def make_app() -> web.Application:
         k = float(np.clip(-qty[ok][-1], 0, None)[band].sum())
         return {
             "rows": {"bin_lo": int(w["bin_lo"]), "bin_size": float(w["bin_size"]),
-                     "inst_f4": base64.b64encode(np.ascontiguousarray(inst, "<f4")).decode(),
-                     "pers_f4": base64.b64encode(np.ascontiguousarray(pers, "<f4")).decode()},
+                     **{f"{k}_f4": base64.b64encode(
+                         np.ascontiguousarray(v, "<f4")).decode() for k, v in st.items()}},
             "summary": {
                 "spot": round(spot, 2),
                 "wall": wall,
