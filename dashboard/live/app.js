@@ -134,6 +134,18 @@ let chartMode = (() => {
     return CHART_MODES.includes(saved) ? saved : "footprint";
   } catch (e) { return "footprint"; }   // 사파리 프라이빗 등 localStorage 가 던지는 환경
 })();
+// ── 창 토글 (2026-09-19 사용자 요청: 1h/2h/4h) ─────────────────────────────
+// 풋프린트와 수급 프로파일이 **같은 창**을 쓴다. 한 카드 안의 위아래 두 그림이 서로 다른
+// 구간을 말하면 읽는 사람이 속는다 -- 그래서 토글도 하나다.
+// 서버 링은 24시간(288봉)이라 4h 도 이미 쌓여 있는 데이터다. 더 긴 창을 안 주는 건 값이
+// 없어서가 아니라, 48봉이면 풋프린트 셀이 25px 라 숫자가 이미 안 들어가서다.
+const CHART_WINDOW_BARS = [12, 24, 48];   // 5분봉 기준 1h · 2h · 4h
+let chartWindowBars = (() => {
+  try {
+    const saved = Number(localStorage.getItem("chartWindowBars"));
+    return CHART_WINDOW_BARS.includes(saved) ? saved : CHART_WINDOW_BARS[0];
+  } catch (e) { return CHART_WINDOW_BARS[0]; }
+})();
 const API_FOOTPRINT_URL = "/api/footprint";
 // 🔴여기 있던 "차트 자체가 5초마다 다시 그려진다"는 **틀린 주석**이었다(실제는 20초였다).
 // 서버는 WS 로 계속 누적하므로 **이 폴링 간격이 곧 셀의 지연**이다.
@@ -196,6 +208,8 @@ let supply1sLastFetchAt = 0;
 const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
 let latestSupplyProfile = null;
 let supplyProfileLastFetchAt = 0;
+// 현재가 박스가 스스로 움직이는 데 필요한 기하(행 높이·행 키). 렌더가 적고 체결 WS 가 읽는다.
+let supplyProfileNow = null;
 const API_EXTREME_URL = "/api/extreme-detector";
 // 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
 // 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
@@ -510,11 +524,36 @@ function setupChartModeTabs() {
     });
   });
   renderChartModeTabs();
+  setupChartWindowTabs();
 }
 
 function renderChartModeTabs() {
   document.querySelectorAll("#chartModeTabs .asset-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.chartMode === chartMode);
+  });
+}
+
+function setupChartWindowTabs() {
+  document.querySelectorAll("#chartWindowTabs .asset-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const bars = Number(btn.dataset.bars);
+      if (!CHART_WINDOW_BARS.includes(bars) || bars === chartWindowBars) return;
+      chartWindowBars = bars;
+      try { localStorage.setItem("chartWindowBars", String(bars)); } catch (e) { /* 저장 못 해도 동작은 한다 */ }
+      renderChartWindowTabs();
+      // 폴링 간격(0.4초/5초)을 기다리지 않고 바로 받는다 -- 누른 티가 나야 한다.
+      footprintLastFetchAt = 0;
+      supplyProfileLastFetchAt = 0;
+      refreshFootprint();
+      refreshSupplyProfile();
+    });
+  });
+  renderChartWindowTabs();
+}
+
+function renderChartWindowTabs() {
+  document.querySelectorAll("#chartWindowTabs .asset-tab").forEach((btn) => {
+    btn.classList.toggle("active", Number(btn.dataset.bars) === chartWindowBars);
   });
 }
 
@@ -899,6 +938,9 @@ function applyDashboardEvent(payload) {
     latestLivePriceByAsset[asset] = price;
     latestLivePriceTsByAsset[asset] = String(ticker.ts || "");
   });
+  // 바이낸스 직결 WS 가 막힌 환경에서는 이 푸시가 유일한 시세다 -- 없으면 현재가 박스가
+  // 프로파일 폴링(5초)에 묶여 멈춘 것처럼 보인다.
+  updateSupplyProfileNow(Number(latestLivePriceByAsset[activeSnapshotAsset] || 0));
   if (payload?.state?.state) {
     latestMainState = payload.state.state;
     latestCompactState = payload.state.compactState || null;
@@ -3164,10 +3206,14 @@ function markerPoints(x, y) {
 
 function updateLivePriceFast(price) {
   const c = liveLineCtx;
-  if (!c || !(price > 0) || !c.svg.isConnected) return;
+  if (!(price > 0)) return;
   const now = Date.now();
   if (now - lastFastPriceAt < FAST_PRICE_MIN_INTERVAL_MS) return;
   lastFastPriceAt = now;
+  // 수급 프로파일의 현재가 박스는 캔들 차트와 무관하게 움직인다 -- 청산맵을 보고 있어도
+  // 프로파일은 늘 화면에 있으므로 아래 liveLineCtx 가드보다 **앞에** 둔다.
+  updateSupplyProfileNow(price);
+  if (!c || !c.svg.isConnected) return;
   const span = Math.max(c.yMax - c.yMin, 1e-5);
   const raw = c.mt + ((c.yMax - price) * c.ch) / span;
   // 축 밖으로 나가면 가장자리에 붙인다 -- 다음 전체 렌더(1초 안)가 축을 다시 잡는다.
@@ -3347,7 +3393,7 @@ async function refreshSupplyProfile() {
   if (now - supplyProfileLastFetchAt < SUPPLY_PROFILE_POLL_MS) return;
   supplyProfileLastFetchAt = now;
   try {
-    const res = await fetch(API_SUPPLY_PROFILE_URL, { cache: "no-cache" });
+    const res = await fetch(`${API_SUPPLY_PROFILE_URL}?bars=${chartWindowBars}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`supply-profile ${res.status}`);
     latestSupplyProfile = await res.json();
   } catch (error) {
@@ -3371,7 +3417,7 @@ async function refreshFootprint() {
   if (now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
   footprintLastFetchAt = now;
   try {
-    const res = await fetch(API_FOOTPRINT_URL, { cache: "no-cache" });
+    const res = await fetch(`${API_FOOTPRINT_URL}?bars=${chartWindowBars}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`footprint ${res.status}`);
     latestFootprint = await res.json();
   } catch (error) {
@@ -3594,6 +3640,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   const levels = (profile && Array.isArray(profile.levels) ? profile.levels : [])
     .filter((l) => (Number(l[1]) || 0) + (Number(l[2]) || 0) > 0);
   if (!levels.length) {
+    supplyProfileNow = null;   // 그릴 행이 없다 -- 옛 기하를 남기면 박스가 유령 행을 가리킨다
     const txt = document.createElementNS(NS, "text");
     txt.setAttribute("x", w / 2); txt.setAttribute("y", h / 2);
     txt.setAttribute("text-anchor", "middle"); txt.setAttribute("fill", "var(--muted)");
@@ -3789,19 +3836,6 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
     }
   });
 
-  // 현재가. 프로파일에서 «내가 지금 어디에 서 있나»가 없으면 아무 판단도 못 한다.
-  if (currentPrice > 0) {
-    const j = keys.indexOf(Math.floor(currentPrice / rowSize));
-    if (j >= 0) {
-      const line = document.createElementNS(NS, "line");
-      line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
-      line.setAttribute("y1", mt + j * rowPx + rowPx / 2);
-      line.setAttribute("y2", mt + j * rowPx + rowPx / 2);
-      line.setAttribute("stroke", "var(--accent)"); line.setAttribute("stroke-dasharray", "4 3");
-      svg.appendChild(line);
-    }
-  }
-
   // ── 벽 (2026-09-19 사용자 요청) ─────────────────────────────────────────
   // ⚠️여기서 「벽」은 **체결이 몰린 가격**이지 호가창에 걸린 대기 물량이 아니다. 이 화면의
   //   원천은 체결 테이프뿐이라 «걸려 있는 것»은 볼 수 없다. 그래서 이름표에 «체결»을 적고
@@ -3891,6 +3925,63 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   foot.textContent = "← 공격적 매도  ·  양끝 = 체결이 몰린 «벽»  ·  가로 띠 = 순수급 지지/저항"
     + "  ·  공격적 매수 →";
   svg.appendChild(foot);
+
+  // ── 현재가 (2026-09-19 사용자 요청) ────────────────────────────────────
+  // 점선 한 줄이었다. 바꾼 이유: 프로파일에서 제일 자주 보는 건 «내가 지금 어느 행에
+  // 서 있나»인데, 점선은 행을 **가리키기만** 하고 그 행의 가격은 다른 글자들과 같은
+  // 크기라 눈으로 찾아야 했다. 이제 띠가 그 행을 덮고 값을 크게 적는다.
+  //
+  // 🔴맨 마지막에 붙인다 -- 칩이 그 행의 작은 가격 라벨을 **가려야** 같은 값이 두 번
+  //   겹쳐 보이지 않는다. SVG 는 뒤에 붙은 것이 위에 칠해진다.
+  // 🔴프로파일 전체는 5초마다 다시 그려지는데 현재가는 초당 수십 번 바뀐다. 전체를 다시
+  //   그리면 비싸고 움직임도 끊긴다. 그래서 **기하만 적어 두고**(supplyProfileNow) 체결
+  //   WS 가 아래 updateSupplyProfileNow 로 직접 와서 transform 만 바꾼다. 행에서 행으로
+  //   미끄러지는 건 CSS transition(.supply-now)이 잇는다.
+  // 띠는 **칩만큼**은 높아야 한다. 행이 11px 인데 칩이 22px 이면 칩이 이웃 행의 가격
+  // 라벨을 반만 덮어 «글자가 잘린» 것처럼 보인다 -- 띠가 그만큼 크면 덮인 자리가
+  // «강조 구간 안»으로 읽힌다.
+  const bh = Math.max(rowPx, 22);
+  supplyProfileNow = { svg, mt, rowPx, rowSize, keys, digits: rowSize >= 1 ? 1 : 2 };
+  const nowG = document.createElementNS(NS, "g");
+  nowG.setAttribute("class", "supply-now");
+  const wing = document.createElementNS(NS, "rect");
+  wing.setAttribute("x", ml); wing.setAttribute("y", -bh / 2);
+  wing.setAttribute("width", w - ml - mr); wing.setAttribute("height", bh);
+  wing.setAttribute("rx", "2");
+  wing.setAttribute("fill", "var(--accent)"); wing.setAttribute("fill-opacity", "0.13");
+  nowG.appendChild(wing);
+  const chip = document.createElementNS(NS, "rect");
+  chip.setAttribute("x", centerX - centerW / 2 - 5); chip.setAttribute("y", -11);
+  chip.setAttribute("width", centerW + 10); chip.setAttribute("height", 22);
+  chip.setAttribute("rx", "4");
+  chip.setAttribute("fill", "var(--panel)"); chip.setAttribute("fill-opacity", "0.96");
+  chip.setAttribute("stroke", "var(--accent)"); chip.setAttribute("stroke-opacity", "0.75");
+  nowG.appendChild(chip);
+  const nowTxt = document.createElementNS(NS, "text");
+  nowTxt.setAttribute("x", centerX); nowTxt.setAttribute("y", 5);
+  nowTxt.setAttribute("text-anchor", "middle");
+  nowTxt.setAttribute("font-size", "15"); nowTxt.setAttribute("font-weight", "800");
+  nowTxt.setAttribute("fill", "var(--accent)");
+  nowG.appendChild(nowTxt);
+  svg.appendChild(nowG);
+  updateSupplyProfileNow(currentPrice);
+}
+
+// 현재가 박스를 제 행으로 옮긴다. 프로파일을 통째로 다시 그리지 않는 **유일한** 경로다.
+// (그려 둔 기하는 renderSupplyProfileSvg 가 supplyProfileNow 에 적어 둔다.)
+function updateSupplyProfileNow(price) {
+  const g = supplyProfileNow;
+  if (!g || !g.svg.isConnected) return;
+  const el = g.svg.querySelector(".supply-now");
+  if (!el) return;
+  // 🔴창 밖이면 **숨긴다**. 가장자리에 붙여 두면 «현재가가 저기 있다»는 거짓말이 된다
+  //   (캔들 차트는 축을 다시 잡으니 붙여도 되지만, 여기 축은 체결이 있었던 값뿐이다).
+  const j = price > 0 ? g.keys.indexOf(Math.floor(price / g.rowSize)) : -1;
+  if (j < 0) { el.setAttribute("opacity", "0"); return; }
+  el.setAttribute("opacity", "1");
+  el.setAttribute("transform", `translate(0 ${g.mt + j * g.rowPx + g.rowPx / 2})`);
+  const t = el.querySelector("text");
+  if (t) t.textContent = price.toFixed(g.digits);
 }
 
 // Snapshot tab's own candlestick chart -- same renderCandleSvg() the Live tab uses, always ETH, no

@@ -2856,3 +2856,16 @@ svg {
 .acct-refresh:active:not(:disabled) { transform: rotate(-180deg); }
 .acct-refresh:disabled svg { animation: acctSpin 1s linear infinite; }
 @keyframes acctSpin { to { transform: rotate(360deg); } }
+
+/* ── 2026-09-19 사용자 요청: 수급 프로파일의 현재가는 «점선»이 아니라 «따라 움직이는 박스» ──
+   체결 WS 가 초당 수십 번 transform 만 바꾸고, 행에서 행으로 잇는 건 여기다. 박스 자체가
+   값을 크게 적으므로 그 아래 작은 가격 라벨은 칩이 가린다(그리는 순서로 처리).
+   🔴pointer-events 를 끈다 -- 박스가 덮은 행의 막대에도 툴팁이 달려 있는데, 안 끄면 하필
+     «지금 보고 있는 행»의 툴팁만 안 뜬다. */
+.supply-now {
+  transition: transform .22s cubic-bezier(.22, .7, .28, 1), opacity .18s ease;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .supply-now { transition: none; }
+}

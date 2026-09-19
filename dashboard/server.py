@@ -490,6 +490,25 @@ FOOTPRINT_CATCHUP_SECONDS = 2.5
 # «꺼져 있던 시간»으로 줄어든다 -- 보통 몇 초다.
 FOOTPRINT_SNAPSHOT_PATH = LIVE_DIR / "footprint_eth.json"
 FOOTPRINT_SNAPSHOT_SECONDS = 30.0
+# 화면 토글이 고를 수 있는 **가장 긴 창**(4h). 저장·복원은 여기에 맞춘다 -- 12봉만 저장하면
+# 재시작(배포마다 하루 여러 번) 직후 4h 를 골라도 1h 밖에 안 보인다. 실측 16KB/12봉이라
+# 48봉은 ~65KB, 30초마다 덮어써도 하루 190MB 쓰기다(288봉이면 1GB 라 링 전체는 여전히 안 쓴다).
+# 🔴백필(REST)은 **넓히지 않는다**. 1시간이 ~200요청인데 4시간이면 예산 400을 넘고, 그 IP 를
+#   트레이딩 봇이 같이 쓴다. 못 메운 구간은 WS 가 돌면서 자연히 찬다.
+FOOTPRINT_MAX_WINDOW_BARS = 48
+
+
+def footprint_window_bars(request) -> int:
+    """`?bars=N` -- 화면의 창 토글(1h/2h/4h = 12/24/48봉, 2026-09-19 사용자 요청).
+
+    봉 링(FOOTPRINT_KEEP_BARS)보다 길게는 줄 수 없다. 신뢰경계 입력이므로 파싱 실패와
+    범위를 여기 한 곳에서 닫는다 -- 두 엔드포인트가 같은 함수를 쓰게 두는 이유다.
+    있는 봉보다 크게 달라고 해도 문제가 없다: 슬라이스가 알아서 있는 만큼만 준다."""
+    try:
+        n = int(request.query.get("bars", FOOTPRINT_BARS))
+    except (TypeError, ValueError):
+        return FOOTPRINT_BARS
+    return max(1, min(n, FOOTPRINT_KEEP_BARS))
 # ── 리테일/고래 수급 (2026-09-19) ───────────────────────────────────────────
 # 셀은 [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도] 6칸이다.
 # **중형($10k~$100k)은 칸이 없다** -- 매수 - 고래매수 - 리테일매수로 정확히 나온다.
@@ -1895,10 +1914,11 @@ def make_app() -> web.Application:
                 # 셀 칸수 표식. 2칸 시절 스냅샷을 4칸 코드가 읽으면 IndexError 가 아니라
                 # **조용히 고래 0** 이 된다 -- 그래서 버전을 적고 다르면 통째로 버린다.
                 "cells_v": 3,
-                # 봉 링은 24시간이지만 저장은 **차트가 쓰는 창**만 한다(위 FOOTPRINT_KEEP_BARS
-                # 주석). 프로파일은 재시작 뒤 다시 찬다 -- 화면이 그 길이를 적는다.
+                # 봉 링은 24시간이지만 저장은 **화면이 고를 수 있는 가장 긴 창**만 한다
+                # (위 FOOTPRINT_MAX_WINDOW_BARS). 그 밖은 재시작 뒤 다시 찬다 -- 화면이
+                # 실제 봉 수를 적으므로 짧아진 걸 숨기지 않는다.
                 "bars": {str(bar): {str(k): v for k, v in cells.items()}
-                         for bar, cells in sorted(footprint_state["bars"].items())[-FOOTPRINT_BARS:]},
+                         for bar, cells in sorted(footprint_state["bars"].items())[-FOOTPRINT_MAX_WINDOW_BARS:]},
             }))
             tmp.replace(FOOTPRINT_SNAPSHOT_PATH)
             footprint_state["saved_at"] = time.time()
@@ -1920,7 +1940,7 @@ def make_app() -> web.Application:
             print("footprint snapshot: 설정이 달라 무시한다", flush=True)
             return
         cutoff = (footprint_bar_start(time.time() * 1000)
-                  - (FOOTPRINT_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+                  - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS)
         bars = {int(bar): {int(k): [float(x) for x in v] for k, v in cells.items()}
                 for bar, cells in (saved.get("bars") or {}).items() if int(bar) >= cutoff}
         if not bars:
@@ -2626,13 +2646,14 @@ def make_app() -> web.Application:
         [가격, 매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도] 7칸 배열이다
         -- 키 이름을 반복해 싣지 않으려는 것(12봉 x 수십 레벨을 2초마다 보낸다).
         고래·리테일은 매수/매도의 **부분집합**이고, 중형은 셋을 빼서 얻는다."""
-        recent = sorted(footprint_state["bars"].items())[-FOOTPRINT_BARS:]
+        want = footprint_window_bars(request)
+        recent = sorted(footprint_state["bars"].items())[-want:]
         agg_bars = footprint_state["agg_bars"]
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
             "bucket": FOOTPRINT_BUCKET,
             "barSeconds": FOOTPRINT_BAR_SECONDS,
-            "barsExpected": FOOTPRINT_BARS,
+            "barsExpected": want,
             "ready": bool(footprint_state["ready"]),
             "updated": footprint_state["updated"],
             # 화면이 「고래 ≥$100k」를 적는 데 쓴다. 경계를 화면에 안 적으면 「고래」가
@@ -2683,23 +2704,28 @@ def make_app() -> web.Application:
 
         같은 봉 링(최대 24시간)에서 만든다. 별도 수집기를 두지 않는 이유는 원천이 같아서다 --
         하나를 더 두면 둘이 어긋날 때 어느 쪽이 맞는지 알 방법이 없다."""
-        bars = footprint_state["bars"]
+        # 2026-09-19 창을 풋프린트와 **같은 토글**이 정한다(사용자 요청). 그전에는 링에
+        # 쌓인 것을 전부(최대 24시간) 접었는데, 아래 풋프린트는 1시간이라 위아래 두 그림이
+        # 다른 구간을 말하고 있었다 -- 한 카드 안에서 그건 읽는 사람을 속이는 것이다.
+        want = footprint_window_bars(request)
+        recent = sorted(footprint_state["bars"].items())[-want:]
         merged: dict[int, list[float]] = {}
-        for cells in bars.values():
+        for _, cells in recent:
             for k, v in cells.items():
                 row = merged.setdefault(k, [0.0] * 6)
                 for i in range(6):
                     row[i] += v[i]
-        span = len(bars) * FOOTPRINT_BAR_SECONDS
+        span = len(recent) * FOOTPRINT_BAR_SECONDS
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
             "bucket": FOOTPRINT_BUCKET,
-            "barCount": len(bars),
+            "barCount": len(recent),
             "spanSeconds": span,
-            "spanMaxSeconds": FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS,
+            "spanMaxSeconds": want * FOOTPRINT_BAR_SECONDS,
             "retailMaxUsd": RETAIL_MAX_USD,
             "whaleMinUsd": WHALE_MIN_USD,
-            "aggBars": len(footprint_state["agg_bars"]),
+            # 창 안의 봉만 센다 -- 링 전체를 세면 1h 를 보는데 24h 치 경고가 뜬다.
+            "aggBars": sum(1 for bar, _ in recent if bar in footprint_state["agg_bars"]),
             "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
                        for k, v in sorted(merged.items())],
         }, headers=NOCACHE)
