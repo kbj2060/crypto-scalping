@@ -223,7 +223,7 @@ def approach_ratio(w: dict, *, near_pct: float = 0.35, far_lo: float = 0.35,
       안 된다**(«얇다»와 «모른다»가 같은 그림이 된다).
     """
     mid = w["mid"]
-    ok = np.isfinite(mid)
+    ok = np.isfinite(mid) & (mid > 0)   # mid 로 나눈다 -- 0 이 섞이면 거리가 inf 다
     n_bins = int(w["n_bins"])
     out = np.full(n_bins, np.nan, dtype=np.float32)
     if int(ok.sum()) < 10 or n_bins == 0:
@@ -309,6 +309,13 @@ def read_window(symbol: str, to_ms: int, cols: int, agg: int = 1,
         raw = np.zeros((total, n_bins), dtype=np.float32)
 
     valid = np.isfinite(mid) & (ts > 0)
+    # 🔴2026-09-20 구멍(sparse hole)은 **0 으로 읽힌다** -- 수집기가 시각 중간에 시작하면
+    #   그 앞 초들은 파일에 안 쓰이고, 그 자리를 읽으면 ts=0·mid=0.0·qty=0 이 나온다.
+    #   mid=0.0 은 «유한값»이라 소비자의 isfinite() 를 그냥 통과한다(그래서 여기 ts>0
+    #   가드가 원래 있었다). 무효행을 NaN 으로 바꿔 이 포맷의 계약과 맞춘다 --
+    #   "mid=NaN 인 행 = 그 초의 북이 무효"(위 도크스트링). 안 고치면 소비자마다
+    #   0 을 «유동성 0» 으로 세서 pers 가 0 이 되고 refill 이 부풀고 1/mid 가 터진다.
+    mid = np.where(valid, mid, np.nan).astype(np.float32)
     if not valid.any():
         return {"symbol": symbol, "t0_ms": int(t0), "dt_s": agg, "cols": cols,
                 "bin_size": float(bin_size), "bin_lo": 0, "n_bins": 0,
@@ -722,6 +729,20 @@ def _selftest() -> None:
         assert math.isnan(float(r3["mid"][1])) and math.isnan(float(r3["mid"][2]))
         assert abs(float(r3["mid"][3]) - 2502.0) < 1e-3
         assert r3["qty"][3, 20 + 1] == 11.0                    # bin_lo 1001 → 1칸 밀린 자리
+        # 구멍 읽기: 파일 앞부분을 안 쓰고 늘리면 그 자리는 0 으로 읽힌다.
+        # mid=0.0 은 isfinite 를 통과하므로 read_window 가 NaN 으로 바꿔줘야 한다.
+        hole = _hour_path("holeusdt", t0, tmp)
+        hole.parent.mkdir(parents=True, exist_ok=True)
+        with open(hole, "wb") as fh:
+            fh.write(HEADER.pack(MAGIC, VERSION, N_BINS, BIN_SIZE, 0, t0, 1000, 0))
+            fh.truncate(HEADER.size + 3 * row_bytes())      # 0,1,2초가 구멍
+            fh.seek(HEADER.size + 3 * row_bytes())
+            fh.write(ROW_HEAD.pack(t0 + 3000, 1000, 2500.0))
+            fh.write(np.zeros(N_BINS, np.float32).tobytes())
+        rh = read_window("holeusdt", t0 + 3000, cols=4, root=tmp)
+        assert np.isnan(rh["mid"][:3]).all(), rh["mid"][:3]   # 0.0 이 아니라 NaN 이어야
+        assert abs(float(rh["mid"][3]) - 2500.0) < 1e-3
+
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print("selftest OK")
