@@ -206,6 +206,58 @@ def row_stats(a: "np.ndarray", dt_s: int = 1) -> dict:
             "refill": np.clip(np.diff(a, axis=0), 0, None).sum(axis=0), "d60": d60}
 
 
+def approach_ratio(w: dict, *, near_pct: float = 0.35, far_lo: float = 0.35,
+                   far_hi: float = 1.2, min_obs_s: float = 60.0) -> dict:
+    """가격대마다 «가격이 다가왔을 때 두꺼워졌나 얇아졌나»를 잰다.
+
+    같은 빈이 **가까웠던 때와 멀었던 때를 둘 다 겪어야** 비교가 성립하므로, 창이 짧으면
+    아무것도 안 나온다(2026-09-20 실측 자격 빈: 15분 22 · 1시간 54 · **4시간 82**).
+
+    🔴날값(near평균/far평균)은 「호가는 원래 mid 근처가 두껍다」에 업혀 있다. 같은 빈이
+      near 일 때는 책의 두꺼운 부분에, far 일 때는 얇은 꼬리에 있을 뿐이다. 그래서 **같은
+      시각·같은 거리대의 평균 잔량으로 나눈 뒤** 비교한다. 정규화가 실제로 상당 부분을
+      걷어낸다(실측 중앙 1.44 -> 1.22 · grow>1.25 가 65% -> 46%).
+    🔴남은 잔차도 **판정이 아니라 관측치**다. 지배적 방향이 «다가오면 커진다»(46%)이고
+      «얇아진다»는 16% 꼬리다 -- 스푸핑 통설과 반대다. 창 하나·자산 하나·홀드아웃 없음.
+    🔴자격 빈은 전체의 28%뿐이다. 나머지는 NaN 이다 -- 화면은 **없는 값을 0으로 그리면
+      안 된다**(«얇다»와 «모른다»가 같은 그림이 된다).
+    """
+    mid = w["mid"]
+    ok = np.isfinite(mid)
+    n_bins = int(w["n_bins"])
+    out = np.full(n_bins, np.nan, dtype=np.float32)
+    if int(ok.sum()) < 10 or n_bins == 0:
+        return {"bin_lo": int(w["bin_lo"]), "n_bins": n_bins,
+                "bin_size": float(w["bin_size"]), "ratio": out, "qualifying": 0}
+    a = np.abs(w["qty"][ok]).astype(np.float32)
+    md = mid[ok].astype(np.float32)
+    price = ((w["bin_lo"] + np.arange(n_bins)) * w["bin_size"]).astype(np.float32)
+    dm = np.abs(price[None, :] - md[:, None]) / md[:, None] * 100.0
+
+    # 거리대별 평균으로 정규화. bincount 한 번이면 끝난다 -- 밴드마다 마스크를 돌리면
+    # (14400 x 293) x 50 이라 폴링 경로에 못 쓴다.
+    edges = np.arange(0.0, 2.5001, 0.05, dtype=np.float32)
+    k = len(edges) - 1
+    bkt = np.clip(np.digitize(dm, edges) - 1, 0, k - 1).astype(np.int64)
+    t = a.shape[0]
+    idx = (np.arange(t, dtype=np.int64)[:, None] * k + bkt).ravel()
+    sums = np.bincount(idx, weights=a.ravel(), minlength=t * k).reshape(t, k)
+    cnts = np.bincount(idx, minlength=t * k).reshape(t, k)
+    norm = np.take_along_axis(sums / np.maximum(cnts, 1), bkt, axis=1)
+    rel = a / np.maximum(norm, 1e-9)
+
+    near = dm < near_pct
+    far = (dm >= far_lo) & (dm < far_hi)
+    n_near, n_far = near.sum(axis=0), far.sum(axis=0)
+    need = max(1, int(round(min_obs_s / max(float(w["dt_s"]), 1.0))))
+    num = (rel * near).sum(axis=0) / np.maximum(n_near, 1)
+    den = (rel * far).sum(axis=0) / np.maximum(n_far, 1)
+    qual = (n_near >= need) & (n_far >= need) & (a.max(axis=0) > 0) & (den > 0)
+    out[qual] = (num[qual] / den[qual]).astype(np.float32)
+    return {"bin_lo": int(w["bin_lo"]), "n_bins": n_bins, "bin_size": float(w["bin_size"]),
+            "ratio": out, "qualifying": int(qual.sum())}
+
+
 def read_window(symbol: str, to_ms: int, cols: int, agg: int = 1,
                 root: Path | None = None) -> dict:
     """[to_ms − cols*agg 초, to_ms] 를 **절대 가격축**으로 정렬해 돌려준다.
@@ -609,6 +661,26 @@ def _selftest() -> None:
     assert st["refill"][0] == 0.0 and abs(float(st["refill"][1]) - 80.0 * 199) < 1e-3
     assert st["d60"].tolist() == [0.0, 0.0, 40.0]        # 정적 0 · 회전 0 · 신축 +40
     assert row_stats(t, dt_s=3)["refill"][1] == st["refill"][1]  # dt_s 는 d60 만 바꾼다
+
+    # 접근행동: 가격이 다가올 때 «얇아지는 빈»과 «두꺼워지는 빈»을 갈라야 한다.
+    # mid 를 위아래로 흔들어 같은 빈이 near/far 를 둘 다 겪게 만든다.
+    T, NB = 400, 6
+    q = np.zeros((T, NB), np.float32)
+    # 🔴흔들 폭이 좁으면 far 구간(0.35~1.2%)을 아무 빈도 못 겪어 전부 NaN 이다.
+    #   ±25달러(±1%)면 모든 빈이 near 와 far 를 둘 다 지난다.
+    mv = 2500.0 + 25.0 * np.sin(np.arange(T) / 40.0)
+    px = 2500.0 + np.arange(NB) * 0.5
+    for j in range(T):
+        d = np.abs(px - mv[j]) / mv[j] * 100.0
+        q[j] = np.maximum(100.0 - 60.0 * d, 5.0)            # 거리가 멀수록 얇다(공통 성질)
+        q[j, 1] *= 0.2 if d[1] < 0.2 else 1.0               # 1번 빈만 다가오면 빠진다
+        q[j, 4] *= 3.0 if d[4] < 0.2 else 1.0               # 4번 빈만 다가오면 쌓는다
+    ww = {"qty": q, "mid": mv.astype(np.float32), "n_bins": NB, "bin_lo": 5000,
+          "bin_size": 0.5, "dt_s": 1}
+    ar = approach_ratio(ww, min_obs_s=20.0)["ratio"]
+    fin = np.isfinite(ar)
+    assert fin.any(), "자격 빈이 하나도 안 나오면 창/임계가 잘못된 것이다"
+    assert ar[1] < 1.0 < ar[4], (ar[1], ar[4])              # 빠지는 빈 < 1 < 쌓는 빈
 
     tmp = Path(tempfile.mkdtemp())
     try:
