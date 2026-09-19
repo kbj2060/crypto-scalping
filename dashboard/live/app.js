@@ -3520,7 +3520,7 @@ function supplyFlowOfBar(levels) {
 // 왜 «초별 막대»가 아니라 «누적 선»인가: 1초 순수급은 거의 스파이크라(고래는 분당 13건)
 // 300칸 막대로 그리면 잡음만 보이고 «누가 사고 있나»가 안 읽힌다. 누적은 기울기가 곧
 // 방향이고, 두 선이 벌어지는 순간이 그대로 눈에 띈다(고래 내려가고 리테일 올라가면 분산).
-// 대신 «언제 고래가 왔나»를 잃으므로 고래 주문이 있던 초에만 아래쪽에 눈금을 찍는다.
+// 바닥에 찍던 «고래 눈금 띠»는 2026-09-19 사용자 지시로 걷어냈다 -- 선 셋만 남는다.
 //
 // 두 선은 **같은 자로 그린다**. 단위가 같은 ETH 순수급이고, 여기서 읽는 것은 부호만이 아니라
 // «누가 더 많이 샀나»이기도 하다(5분봉 리본에서 줄마다 정규화했던 것과 반대 선택이다 --
@@ -3595,14 +3595,13 @@ function renderSupply1s() {
 
   // 누적 순수급.
   let cw_ = 0, cr = 0;
-  const whale = [], retail = [], ticks = [];
+  const whale = [], retail = [];
   secs.forEach((s) => {
     const c = supply1s.get(s);
     cw_ += c[2] - c[3];
     cr += c[0] - c[1];
     whale.push({ s, v: cw_ });
     retail.push({ s, v: cr });
-    if (c[2] + c[3] > 0) ticks.push({ s, up: c[2] >= c[3] });
   });
   // 신규계약(OI 증분). 같은 자로 그린다 -- 단위가 같은 ETH 라서, 「들어온 순수급 중 얼마가
   // 실제로 **새 포지션**이었나」가 세 선의 간격으로 바로 읽힌다(나머지는 손바뀜이다).
@@ -3660,16 +3659,6 @@ function renderSupply1s() {
     tags.push(tagO);
   }
   tags.forEach((t) => label(ml + cw + 5, t.y + 3, t.text, t.color));
-
-  // 고래 주문이 있던 초에만 눈금. 누적선이 잃어버리는 «언제»를 여기서 돌려준다.
-  ticks.forEach((t) => {
-    const r = document.createElementNS(NS, "rect");
-    r.setAttribute("x", xAt(t.s) - 0.5); r.setAttribute("y", flowTop + flowH - 5);
-    r.setAttribute("width", 1.6); r.setAttribute("height", 5);
-    r.setAttribute("fill", t.up ? "var(--good)" : "var(--bad)");
-    r.setAttribute("fill-opacity", "0.75");
-    svg.appendChild(r);
-  });
 
   label(ml, h - 3, "5분 전", "var(--muted)");
   label(ml + cw, h - 3, "지금", "var(--muted)", "end");
