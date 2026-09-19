@@ -45,8 +45,10 @@ import argparse
 import asyncio
 import json
 import logging
+import gzip
 import math
 import os
+import shutil
 import struct
 import time
 from datetime import datetime, timedelta, timezone
@@ -63,6 +65,13 @@ BIN_SIZE = float(os.getenv("OF_BIN_SIZE", "0.5"))
 N_BINS = int(os.getenv("OF_N_BINS", "240"))
 OF_ROOT = Path(os.getenv("OF_ROOT", str(ROOT / "data" / "live" / "orderflow" / "raster")))
 RETENTION_DAYS = int(os.getenv("OF_RETENTION_DAYS", "14"))
+# 2026-09-19 만료 파일을 지우기 전에 **떠낸다**(사용자 결정). 화면은 14일이면 되지만
+# 연구는 아니다 -- 호가벽 축 판정이 ~2026-11-14 인데 그때 래스터는 직전 14일뿐이었다.
+# 실측 3.5MB -> 1.1MB(3.2배, 0.05s/파일) = 26MB/일. 60일 1.6GB.
+# 🔴압축본은 seek 이 안 된다 -- 화면 경로(read_window)는 **비압축 14일만** 본다. 연구 전용이다.
+OF_ARCHIVE_ROOT = Path(os.getenv("OF_ARCHIVE_ROOT",
+                                 str(ROOT / "data" / "live" / "orderflow" / "raster_archive")))
+OF_ARCHIVE = os.getenv("OF_ARCHIVE", "1") != "0"
 
 _DEPTH_WS_URL = "wss://fstream.binance.com/ws/{symbol}@depth@500ms"
 _SNAPSHOT_URL = "https://fapi.binance.com/fapi/v1/depth?symbol={SYMBOL}&limit=1000"
@@ -242,6 +251,42 @@ def read_window(symbol: str, to_ms: int, cols: int, agg: int = 1,
             "qty": out, "mid": mid, "valid_ratio": float(valid.mean())}
 
 
+def _archive_then_unlink(p: Path, symbol: str) -> None:
+    """만료 래스터를 gzip 으로 떠내고 **압축이 성공한 뒤에만** 원본을 지운다.
+
+    형제 수집기(`live_book_ticker_collector_20260914._gzip_done`)와 같은 규약이다. 임포트하지
+    않고 복제한 이유는 이 수집기의 독립 규약 때문이다(도크스트링: 저장소의 다른 어떤 파일도
+    쓰지 않는다 -- 죽어도 봇에 영향 없다).
+
+    데이터 유실 경로라 세 가지를 지킨다:
+      1. 임시명 -> os.replace. 직접 <dst>.gz 로 쓰다 죽으면 **잘린 gz** 가 남고, 다음 실행이
+         그걸 «이미 보관됨»으로 읽어 원본을 지운다(영원히 못 되돌린다).
+      2. 이미 온전한 .gz 가 있으면 다시 압축하지 않고 원본만 지운다(멱등 -- 압축 뒤 unlink
+         직전에 죽은 경우).
+      3. 실패하면 **원본을 유지**하고 경고만 남긴다. 다음 시간에 다시 시도된다.
+    """
+    day = p.stem.split("T")[0]                 # 2026-09-14T12 -> 2026-09-14 (일별 보관)
+    dst_dir = OF_ARCHIVE_ROOT / symbol.upper() / day
+    dst = dst_dir / (p.name + ".gz")
+    try:
+        if dst.exists() and dst.stat().st_size > 0:
+            p.unlink(missing_ok=True)          # 2
+            return
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_suffix(dst.suffix + ".part")
+        with open(p, "rb") as fi, gzip.open(tmp, "wb", compresslevel=6) as fo:
+            shutil.copyfileobj(fi, fo, length=1 << 20)
+        if tmp.stat().st_size <= 0:
+            raise OSError("빈 압축본")
+        tmp.replace(dst)                       # 1
+        before, after = p.stat().st_size, dst.stat().st_size
+        p.unlink()
+        logger.info("보관 %s → %s · %.1fMB → %.1fMB (%.1f배)", p.name, day,
+                    before / 1e6, after / 1e6, before / max(after, 1))
+    except Exception as exc:  # noqa: BLE001 -- 보관 실패가 수집을 멈추면 안 된다
+        logger.warning("보관 실패 %s: %s — 원본 유지(다음 시간 재시도)", p.name, exc)
+
+
 class OrderflowRasterCollector:
     def __init__(self, symbol: str = SYMBOL) -> None:
         self.symbol = symbol.lower()
@@ -406,6 +451,8 @@ class OrderflowRasterCollector:
             if tick % 3600 == 0:
                 self._purge_old()
 
+
+
     def _purge_old(self) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)
         base = OF_ROOT / self.symbol.upper()
@@ -415,7 +462,7 @@ class OrderflowRasterCollector:
             except ValueError:
                 continue
             if stamp < cutoff:
-                p.unlink(missing_ok=True)
+                _archive_then_unlink(p, self.symbol) if OF_ARCHIVE else p.unlink(missing_ok=True)
 
     async def run(self) -> None:
         self._running = True
