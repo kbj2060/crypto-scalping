@@ -219,15 +219,9 @@ let oi1sSince = 0;
 // 노드는 캔들 렌더가 매번 새로 만드므로 isConnected 로 옛 노드를 거른다.
 let supply1sSubBox = null;
 let supplyProfileSubBox = null;
-let flowHeatmapSubBox = null;
 
 function repaintSupply1sPanel() {
   if (supply1sSubBox && supply1sSubBox.svg.isConnected) renderSupply1s(supply1sSubBox);
-}
-function repaintFlowHeatmapPanel() {
-  const b = flowHeatmapSubBox;
-  if (!b || !b.svg.isConnected) return;
-  renderFlowHeatmapSvg(b.svg, { w: b.w, h: b.h });
 }
 function repaintSupplyProfilePanel() {
   const b = supplyProfileSubBox;
@@ -3545,7 +3539,7 @@ async function refreshFlowHeatmap() {
   flowHeatmapLastFetchAt = now;
   try {
     const res = await fetch(
-      `/api/flow/heatmap?symbol=ethusdt&cols=${FLOW_HEATMAP_COLS}&agg=${FLOW_HEATMAP_AGG}`,
+      `/api/flow/heatmap?symbol=ethusdt&cols=${FLOW_HEATMAP_COLS}&agg=${FLOW_HEATMAP_AGG}&mode=rows`,
       { cache: "no-cache" });
     if (!res.ok) throw new Error(`flow-heatmap ${res.status}`);
     const j = await res.json();
@@ -3556,14 +3550,11 @@ async function refreshFlowHeatmap() {
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
       return u8;
     };
-    const mu = raw(j.mid_b64);
+    // mode=rows 라 이미지 배열(qty_i8/mid_b64 · 102KB)은 안 온다 -- 행 집계와 요약만.
     const f4 = (b64) => new Float32Array(raw(b64).buffer);
-    latestFlowHeatmap = { ...j, qty: new Int8Array(raw(j.qty_i8).buffer),
-                          mid: new Float32Array(mu.buffer),
-                          rows: j.rows ? { ...j.rows, inst: f4(j.rows.inst_f4),
-                                           pers: f4(j.rows.pers_f4) } : null };
+    latestFlowHeatmap = { ...j, rows: j.rows ? { ...j.rows, inst: f4(j.rows.inst_f4),
+                                                 pers: f4(j.rows.pers_f4) } : null };
     repaintSupplyProfilePanel();   // 행별 지속 잔량이 같이 갱신된다
-    repaintFlowHeatmapPanel();
   } catch (error) {
     console.error("Flow heatmap fetch error:", error);
     latestFlowHeatmap = null;
@@ -3840,128 +3831,6 @@ function renderSupply1s(box = null) {
 // 초록·빨강·주황 셋뿐이라 「고래색」을 새로 만들 수 없다(styles.css 디자인 토큰 주석).
 // ⚠️창은 프로세스가 살아 있는 동안만 찬다 -- 스냅샷에는 최근 12봉만 남긴다(server.py의
 //   FOOTPRINT_KEEP_BARS 주석). 그래서 실제 창 길이를 머리글에 **항상** 적는다.
-function renderFlowHeatmapSvg(svg, box) {
-  /* 호가 히트맵(bookmap 류). 원천은 `live_orderflow_raster_collector_20260914` 의 .f32 --
-     1초 x 240빈 x $0.5, 서버가 `read_window()` 로 절대 가격축 정렬까지 끝내 보낸다.
-
-     🔴qty 의 **부호가 방향**이다: + 매수호가(bid), - 매도호가(ask).
-     🔴mid=NaN 인 열은 그 초의 북이 무효다(재동기중/수집중단) -- 회색으로 그리고
-       **절대 보간하지 않는다**. 보간하면 없는 유동성을 그리는 것이다.
-     🔴SVG rect 로 그리지 않는다 -- 300열 x 수백빈이면 DOM 이 죽는다. 오프스크린 캔버스에
-       픽셀로 찍고 `<image>` **하나**로 넣는다. foreignObject 는 모바일 사파리에서 깨진다. */
-  const NS = "http://www.w3.org/2000/svg";
-  const w = box.w, h = box.h;
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = "";
-
-  const d = latestFlowHeatmap;
-  if (!d || !d.n_bins || !d.cols) {
-    const t = document.createElementNS(NS, "text");
-    t.setAttribute("x", w / 2); t.setAttribute("y", h / 2);
-    t.setAttribute("text-anchor", "middle"); t.setAttribute("fill", "var(--muted)");
-    t.setAttribute("font-size", "11");
-    t.textContent = d ? "호가 래스터 웜업..." : "호가 히트맵 대기";
-    svg.appendChild(t); return;
-  }
-
-  // 가격 -> y. **제 범위를 쓴다.**
-  // 🔴2026-09-19: 처음엔 프로파일의 행 기하(supplyProfileNow)에 포개 «같은 가격축»을 만들려
-  //   했는데 실측에서 틀렸다. 두 패널의 자연 범위가 15배 다르다 --
-  //     히트맵  2578.5~2701.0 (폭 $122.5, 호가 +-2.4%)
-  //     프로파일 2636.5~2645.0 (폭   $8.5, 1시간 체결 가격대)
-  //   포개면 +-$5 를 상자 높이로 확대한 단색 덩어리가 되고, 같은 실측에서 최대 잔량 5개 빈이
-  //   -1.99/-1.80/-1.16/+0.77/+0.96% 로 전부 프로파일 창 바깥이었다 -- **벽이 하나도 안 보인다**.
-  const binPrice = (i) => (d.bin_lo + i) * d.bin_size;
-  const pLo = binPrice(0), pHi = binPrice(d.n_bins);
-  const yOf = (p) => (pHi === pLo) ? h / 2 : ((pHi - p) / (pHi - pLo)) * h;
-
-  const cols = d.cols, nb = d.n_bins;
-  const H = Math.max(1, Math.round(h));
-  const cv = document.createElement("canvas");
-  cv.width = cols; cv.height = H;
-  const ctx = cv.getContext("2d");
-  const img = ctx.createImageData(cols, H);
-  const px = img.data;
-
-  // 색 스케일은 **서버가** 분위로 정해 int8 로 접어 보냈다(±127 = ±p97). 여기선 안 잰다.
-  // 빈 -> 픽셀행을 한 번만 계산한다(열마다 다시 재면 300배 비싸다).
-  const span = [];
-  for (let i = 0; i < nb; i++) {
-    const p = binPrice(i);
-    let a = yOf(p + d.bin_size), b = yOf(p);
-    if (a > b) { const t = a; a = b; b = t; }
-    span.push([Math.max(0, Math.floor(a)), Math.min(H, Math.ceil(b))]);
-  }
-
-  for (let c = 0; c < cols; c++) {
-    if (!Number.isFinite(d.mid[c])) {                 // 무효 열 -- 회색 기둥, 보간 없음
-      for (let y = 0; y < H; y++) {
-        const o = (y * cols + c) * 4;
-        px[o] = 139; px[o + 1] = 145; px[o + 2] = 166; px[o + 3] = 46;
-      }
-      continue;
-    }
-    for (let i = 0; i < nb; i++) {
-      const q = d.qty[c * nb + i];
-      if (!q) continue;
-      const a = Math.min(255, Math.round((Math.abs(q) / 127) * 235));
-      if (a < 6) continue;
-      const [y0, y1] = span[i];
-      const r = q > 0 ? 52 : 248, gg = q > 0 ? 211 : 113, bb = q > 0 ? 153 : 113;
-      for (let y = y0; y < y1; y++) {
-        const o = (y * cols + c) * 4;
-        if (px[o + 3] >= a) continue;                 // 겹치면 진한 쪽을 남긴다
-        px[o] = r; px[o + 1] = gg; px[o + 2] = bb; px[o + 3] = a;
-      }
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-
-  const im = document.createElementNS(NS, "image");
-  im.setAttribute("x", "0"); im.setAttribute("y", "0");
-  im.setAttribute("width", w); im.setAttribute("height", h);
-  im.setAttribute("preserveAspectRatio", "none");
-  im.setAttribute("href", cv.toDataURL("image/png"));
-  svg.appendChild(im);
-
-  // 제 축이므로 눈금을 화면이 말한다(프로파일과 다른 범위라는 걸 숨기지 않는다).
-  const spot = Number(d.mid[cols - 1]);
-  if (Number.isFinite(spot)) {
-    const ys = yOf(spot);
-    const ln = document.createElementNS(NS, "line");
-    ln.setAttribute("x1", "0"); ln.setAttribute("x2", w);
-    ln.setAttribute("y1", ys); ln.setAttribute("y2", ys);
-    ln.setAttribute("stroke", "var(--fg, #e8eaf0)"); ln.setAttribute("stroke-width", "1");
-    ln.setAttribute("stroke-dasharray", "3 3"); ln.setAttribute("opacity", "0.55");
-    svg.appendChild(ln);
-  }
-  for (const [px, ty] of [[pHi, 10], [pLo, h - 3]]) {
-    const t = document.createElementNS(NS, "text");
-    t.setAttribute("x", w - 4); t.setAttribute("y", ty);
-    t.setAttribute("text-anchor", "end");
-    t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)");
-    t.textContent = px.toFixed(0);
-    svg.appendChild(t);
-  }
-
-  const cap = document.createElementNS(NS, "text");
-  cap.setAttribute("x", "4"); cap.setAttribute("y", "11");
-  cap.setAttribute("font-size", "9"); cap.setAttribute("fill", "var(--muted)");
-  const mins = Math.round(cols * d.dt_s / 60);
-  const sm = d.summary;
-  const bits = [`호가 ${mins}분 · 걸려 있는 양`];
-  if (sm) {
-    if (sm.wall) bits.push(`지속벽 ${sm.wall.dist_pct > 0 ? "+" : ""}${sm.wall.dist_pct}%`);
-    // 🔴«취소»가 아니라 «터치 밖 이탈»이다 -- 서버 도크스트링 참조. 라벨이 곧 정의다.
-    if (sm.offtouch_leave_share != null) {
-      bits.push(`먼 호가 이탈 ${Math.round(sm.offtouch_leave_share * 100)}%`);
-    }
-    bits.push(`OBI(±${sm.obi_band_pct}%) ${sm.obi > 0 ? "+" : ""}${sm.obi.toFixed(2)}`);
-  }
-  if (d.valid_ratio < 0.95) bits.push(`결측 ${Math.round((1 - d.valid_ratio) * 100)}%`);
-  cap.textContent = bits.join(" · ");
-  svg.appendChild(cap);
-}
 
 
 function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box = null) {
@@ -4172,10 +4041,16 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     const [buy, sell, wBuy, wSell, rBuy, rSell] = rows.get(key);
     const y = mt + j * rowPx;
     const price = key * rowSize;
-    stack(leftEdge, -1, y, [wSell, Math.max(0, sell - wSell - rSell), rSell], sell,
-          "var(--bad)", "매도", price);
-    stack(rightEdge, 1, y, [wBuy, Math.max(0, buy - wBuy - rBuy), rBuy], buy,
-          "var(--good)", "매수", price);
+    // 2026-09-19 사용자 지시로 좌우를 갈랐다: **오른쪽=체결(매수·매도 겹침) · 왼쪽=호가**.
+    // 겹치는 순서는 «긴 것 먼저» -- 짧은 쪽이 가려지면 그 행에서 뭐가 우세한지 안 보인다.
+    // 색은 그대로(매수 초록 / 매도 빨강). 호가는 파랑이라 계열이 섞이지 않는다.
+    const bigFirst = sell >= buy
+      ? [[sell, [wSell, Math.max(0, sell - wSell - rSell), rSell], "var(--bad)", "매도"],
+         [buy, [wBuy, Math.max(0, buy - wBuy - rBuy), rBuy], "var(--good)", "매수"]]
+      : [[buy, [wBuy, Math.max(0, buy - wBuy - rBuy), rBuy], "var(--good)", "매수"],
+         [sell, [wSell, Math.max(0, sell - wSell - rSell), rSell], "var(--bad)", "매도"]];
+    bigFirst.forEach(([tot, parts, color, label]) =>
+      stack(rightEdge, 1, y, parts, tot, color, label, price));
 
     // 🔴행이 $1 보다 촘촘한데 toFixed(0) 로 찍으면 «2608, 2608» 처럼 같은 값이 두 줄 나온다
     //   (2026-09-19 첫 렌더에서 실제로 그랬다). 자릿수는 행 크기가 정한다.
@@ -4361,47 +4236,48 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
 
   supplyProfileNow = { svg, mt, rowPx, rowSize, keys, pocKey, digits: rowSize >= 1 ? 0 : 1 };
 
-  // 2026-09-19 «걸려 있는 양»을 같은 행에 얹는다(사용자 지시). 체결 막대와 **다른 색**이다 --
-  // 초록/빨강은 체결, 파랑은 호가. 같은 색이면 두 물건이 하나로 읽힌다.
-  // ⭐투명도는 **지속률**이다(창 내내 안 빠진 비율). 실측 순간 잔량의 36%가 창을 못 버티고,
-  //   겉보기 크기가 같은 두 벽이 100% 대 0% 로 갈린다 -- 크기만 그리면 그게 안 보인다.
+  // ── 왼쪽 = 호가(걸려 있는 양) ─────────────────────────────────────────
+  // 2026-09-19 사용자 지시. 오른쪽이 «체결»(과거·취소 불가)이고 여기는 «호가»(현재·언제든
+  // 취소)다 -- 다른 물건이라 색을 가른다(파랑). 같은 행에서 둘을 나란히 읽는 게 목적이다.
+  // ⭐길이는 **지속 잔량**(창 내내 안 빠진 양), 투명도는 **지속률**이다. 실측 600초에서
+  //   순간 잔량의 36%가 창을 못 버티고, 겉보기 크기가 같은 두 벽이 100% 대 0% 로 갈린다 --
+  //   크기만 그리면 그 차이가 안 보인다.
   // 🔴«지지·저항»이 아니다. 호가벽의 버팀 능력은 아직 못 쟀다(판정가능 2셀·부호반전).
   const hm = latestFlowHeatmap && latestFlowHeatmap.rows;
   if (hm && hm.bin_size > 0 && keys.length) {
-    const bw = Math.max(10, Math.round((w - ml - mr) * 0.16));   // 오른쪽 여백 안쪽 좁은 열
-    const at = (p) => Math.round((p - hm.bin_lo * hm.bin_size) / hm.bin_size);
+    const at = (px) => Math.round(px / hm.bin_size) - hm.bin_lo;
     let maxP = 0;
     const per = keys.map((k) => {
       let inst = 0, pers = 0;
       for (let q = 0; q < rowSize; q += hm.bin_size) {
-        const i = at(k + q);
+        const i = at(k * rowSize + q);
         if (i >= 0 && i < hm.inst.length) { inst += hm.inst[i]; pers += hm.pers[i]; }
       }
       if (pers > maxP) maxP = pers;
       return { inst, pers };
     });
     if (maxP > 0) {
-      const g = document.createElementNS(NS, "g");
-      g.setAttribute("class", "supply-book");
-      keys.forEach((k, i) => {
-        const { inst, pers } = per[i];
+      keys.forEach((k, j) => {
+        const { inst, pers } = per[j];
         if (pers <= 0) return;
+        const bl = (pers / maxP) * (sideW - 2);
         const r = document.createElementNS(NS, "rect");
-        r.setAttribute("x", w - mr + 2);
-        r.setAttribute("y", mt + i * rowPx + rowPx * 0.25);
-        r.setAttribute("width", Math.max(1, (pers / maxP) * bw));
-        r.setAttribute("height", Math.max(1, rowPx * 0.5));
+        r.setAttribute("x", leftEdge - 1 - bl); r.setAttribute("y", mt + j * rowPx + 0.5);
+        r.setAttribute("width", Math.max(1, bl)); r.setAttribute("height", Math.max(1, rowPx - 1));
         r.setAttribute("fill", "#7dd3fc");
-        r.setAttribute("opacity", 0.22 + 0.78 * Math.min(1, pers / Math.max(inst, 1e-9)));
+        r.setAttribute("opacity", (0.25 + 0.75 * Math.min(1, pers / Math.max(inst, 1e-9))).toFixed(2));
         const t = document.createElementNS(NS, "title");
-        t.textContent = `걸려 있는 양 ${Math.round(inst)} · 지속 ${Math.round(pers)}`
-          + ` (${Math.round(100 * pers / Math.max(inst, 1e-9))}%)`;
+        t.textContent = "호가 " + (k * rowSize).toFixed(rowSize >= 1 ? 0 : 1)
+          + " — 걸려 있는 양 " + Math.round(inst) + " ETH · 그중 창 내내 남은 것 "
+          + Math.round(pers) + " (" + Math.round(100 * pers / Math.max(inst, 1e-9)) + "%)\n"
+          + "⚠️체결이 아니라 **지금 걸려 있는** 지정가다 -- 언제든 취소될 수 있다.\n"
+          + "⚠️지지·저항 판정은 하지 않는다(버팀 능력 미측정).";
         r.appendChild(t);
-        g.appendChild(r);
+        svg.appendChild(r);
       });
-      svg.appendChild(g);
     }
   }
+
   const nowG = document.createElementNS(NS, "g");
   nowG.setAttribute("class", "supply-now");
   // 🔴화살표만 두면 **라벨이 없는 행**을 가리킬 수 있다. 행이 13px 보다 촘촘하면 위에서
@@ -4633,10 +4509,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 되돌렸다 -- 프로파일 막대 해상도가 절반이 됐고, 두 패널의 자연 가격범위가 15배 달라
   // (호가 ±2.4% vs 체결 ±0.16%) 나란히 둘 이유였던 «같은 축»도 성립하지 않았다.
   // ⭐데스크톱·모바일이 같은 모양이 되므로 subStack 분기가 통째로 사라진다.
-  const SUB_HEAT_H = subOn ? 130 : 0;
-  //   SUB_TOTAL 444 = 8 + 190(프로파일) + 8 + 130(히트맵) + 8 + 100(1초 수급)
-  const SUB_TOTAL = subOn
-    ? SUB_GAP + SUB_PROFILE_H + SUB_GAP + SUB_HEAT_H + SUB_GAP + SUB_1S_H : 0;
+  //   SUB_TOTAL 306 = 8 + 190(프로파일) + 8 + 100(1초 수급)
+  const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_GAP + SUB_1S_H : 0;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
   //   빼기 때문). 인라인 height 로 JS 가 상자를 정하는 방법은 쓰지 않는다 -- 2열에서는 상자가
@@ -4670,8 +4544,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 상하일 때 히트맵이 위, 프로파일이 아래다 -- 프로파일을 1초 수급 바로 위에 붙여
   // «체결 계열» 둘이 이웃하게 한다(히트맵은 호가라 계열이 다르다).
   const subProfileY = plotBottom + SUB_GAP;
-  const subHeatY = subProfileY + SUB_PROFILE_H + SUB_GAP;
-  const sub1sY = subHeatY + SUB_HEAT_H + SUB_GAP;
+  const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
   const oiPanelY = plotBottom + SUB_TOTAL + OI_PANEL_GAP;
   const liqPanelY = oiPanelY + OI_PANEL_H + LIQ_PANEL_GAP;
   const NS = "http://www.w3.org/2000/svg";
@@ -5157,6 +5030,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 이웃끼리 겹친다 -- 라벨을 버리지 않고 **겹치면 한 줄씩 내린다**(값은 다 보여야 한다).
     const deltaBoxes = [];
     const deltaFont = bw >= 34 ? 11 : 9;
+    const pocPts = [];    // 2026-09-19 사용자 요청: 봉별 POC 를 선으로 잇는다.
     barRows.forEach((rows, i) => {
       const c = candles[i], x = xAt(i);
       let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0, lowKey = Infinity;
@@ -5181,10 +5055,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           pocTitle.textContent = "POC " + price.toFixed(1) + " · 총 " + pocVol.toFixed(1);
           poc.appendChild(pocTitle);
           svg.appendChild(poc);
+          pocPts.push([x + bw / 2, yTop + rowPx / 2]);
         }
       });
 
       // 캔들은 테두리로만 남긴다 -- 셀을 덮지 않으면서 시가/종가/꼬리를 잃지 않으려는 것.
+    // (POC 선은 이 forEach 가 끝난 뒤 한 번에 긋는다 -- 아래 pocPts 블록)
       const isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
       const wick = document.createElementNS(NS, "line");
       wick.setAttribute("x1", x + bw / 2); wick.setAttribute("x2", x + bw / 2);
@@ -5234,6 +5110,35 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         svg.appendChild(dTxt);
       }
     });
+
+    // ── 봉별 POC 선 (2026-09-19 사용자 요청) ────────────────────────────
+    // 봉마다 사각 테두리는 이미 있었지만 **봉끼리 독립**이라 «거래가 몰린 값이 어디로
+    // 옮겨가는가»가 안 보였다. 그게 이 선이 유일하게 더 주는 정보다.
+    // 🔴창 밖 행은 위 루프가 건너뛰므로 점이 빠진다 -- 선이 그 구간을 건너뛰고 이어지면
+    //   없는 이동을 그리는 셈이다. 그래서 x 가 한 봉(bw) 넘게 벌어지면 **끊는다**.
+    // 🔴«지지·저항»이 아니다. Dalton 밸런스엣지(비용게이트 0/6)·Yush LAF(무근거)로 닫혔다.
+    if (pocPts.length > 1) {
+      let seg = [pocPts[0]];
+      const flush = () => {
+        if (seg.length > 1) {
+          const ln = document.createElementNS(NS, "polyline");
+          ln.setAttribute("points", seg.map((q) => q[0] + "," + q[1]).join(" "));
+          ln.setAttribute("fill", "none"); ln.setAttribute("stroke", "var(--amber)");
+          ln.setAttribute("stroke-width", "1.5"); ln.setAttribute("stroke-opacity", "0.75");
+          ln.setAttribute("stroke-linejoin", "round");
+          const t = document.createElementNS(NS, "title");
+          t.textContent = "봉별 POC(최대 체결 가격)의 이동. 체결이 몰린 값이지 지지·저항이 아니다.";
+          ln.appendChild(t);
+          svg.appendChild(ln);
+        }
+        seg = [];
+      };
+      for (let i = 1; i < pocPts.length; i++) {
+        if (pocPts[i][0] - pocPts[i - 1][0] > bw * 1.8) { flush(); }
+        seg.push(pocPts[i]);
+      }
+      flush();
+    }
 
     // 백필 중에는 왼쪽 봉들이 아직 비어 있다 -- 그걸 «거래가 없었다»로 읽지 않게 말해 둔다.
     // 판정은 **수집기 상태(ready)** 만 본다. 캔들 개수로 재면, 봉이 바뀌는 순간 캔들 이력이
@@ -5849,8 +5754,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
                            currentPrice, entryPrice, { w, h: SUB_PROFILE_H });
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
-    flowHeatmapSubBox = { svg: subSvg(0, subHeatY, w, SUB_HEAT_H), w, h: SUB_HEAT_H };
-    renderFlowHeatmapSvg(flowHeatmapSubBox.svg, { w, h: SUB_HEAT_H });
     supply1sSubBox = { svg: subSvg(0, sub1sY, w, SUB_1S_H), w, h: SUB_1S_H };
     renderSupply1s(supply1sSubBox);
   }

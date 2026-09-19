@@ -3039,7 +3039,7 @@ def make_app() -> web.Application:
     async def api_evr_gate(request: web.Request) -> web.Response:
         return web.json_response(await load_evr_gate(), headers=NOCACHE)
 
-    def _heatmap_read(symbol: str, cols: int, agg: int) -> dict[str, Any]:
+    def _heatmap_read(symbol: str, cols: int, agg: int, rows_only: bool = False) -> dict[str, Any]:
         """래스터 창을 읽어 화면이 바로 그릴 수 있는 모양으로 낸다.
 
         🔴포맷을 여기서 다시 파싱하지 않는다 -- 수집기의 `read_window()` 가 seek·절대
@@ -3058,11 +3058,15 @@ def make_app() -> web.Application:
         scale = float(np.percentile(nz, 97)) if nz.size else 1.0
         if not (scale > 0):
             scale = 1.0
+        out = {**w, "scale": scale, **_heatmap_rows(w, qty, mid)}
+        if rows_only:
+            # 2026-09-19 히트맵 «그림»을 걷어낸 뒤로 화면은 행 집계와 요약만 쓴다.
+            # 이미지 배열을 계속 보내면 서버 실측 **102KB** 가 매 폴링 그냥 버려진다.
+            return out
         q8 = np.rint(np.clip(qty / scale, -1.0, 1.0) * 127.0)   # rint: 절단하면 오차가 2배다
-        return {**w, "scale": scale,
+        return {**out,
                 "qty_i8": base64.b64encode(np.ascontiguousarray(q8, dtype=np.int8)).decode(),
-                "mid_b64": base64.b64encode(np.ascontiguousarray(mid, dtype="<f4")).decode(),
-                **_heatmap_rows(w, qty, mid)}
+                "mid_b64": base64.b64encode(np.ascontiguousarray(mid, dtype="<f4")).decode()}
 
     def _heatmap_rows(w: dict, qty: "np.ndarray", mid: "np.ndarray") -> dict[str, Any]:
         """그림에서 **뽑은 수치**. 히트맵 이미지로는 구별 안 되는 것을 숫자로 가른다.
@@ -3180,8 +3184,9 @@ def make_app() -> web.Application:
         except ValueError:
             raise web.HTTPBadRequest(reason="bad_cols_or_agg") from None
         loop = asyncio.get_running_loop()
+        rows_only = request.query.get("mode") == "rows"
         payload = await loop.run_in_executor(
-            HEATMAP_EXECUTOR, functools.partial(_heatmap_read, symbol, cols, agg))
+            HEATMAP_EXECUTOR, functools.partial(_heatmap_read, symbol, cols, agg, rows_only))
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_gex(request: web.Request) -> web.Response:

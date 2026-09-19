@@ -2840,13 +2840,12 @@ svg {
    🔴이 두 수는 app.js 의 SUB_GAP/SUB_PROFILE_H/SUB_1S_H 와 **같이** 움직여야 한다. 상자가
      더 작으면 가격 플롯(ch = h - mt - mb - 레인 - SUB_TOTAL)이 그만큼 눌린다 -- 어긋나면
      renderCandleSvg 의 가드가 콘솔에 한 번 알린다. */
-#candleSvgSnapshot { height: 844px; }
-.candle-container { height: 856px; }
-/* 2026-09-19 히트맵이 프로파일 **아래 제 줄**로 내려갔다(사용자 지시) -- 좌우 반씩 나누던
-   판을 되돌렸다. SUB_TOTAL 444 = 8 + 190(프로파일) + 8 + 130(히트맵) + 8 + 100(1초 수급).
-   ⭐데스크톱·모바일이 같은 모양이라 모바일 @media 블록은 없앴다(앞 판에는 있었다).
-   🔴이 두 수는 app.js 의 SUB_* 상수와 **같이** 움직여야 한다 -- 어긋나면 가격 플롯이
-     조용히 눌리고, renderCandleSvg 의 가드가 콘솔에 한 번 알린다.
+#candleSvgSnapshot { height: 706px; }
+.candle-container { height: 718px; }
+/* 2026-09-19 히트맵 그림을 걷어내고(사용자 지시) 프로파일이 그 수치를 직접 그린다 --
+   상자가 844 -> 706 으로 돌아왔다. SUB_TOTAL 306 = 8 + 190(프로파일) + 8 + 100(1초 수급).
+   🔴이 두 수는 app.js 의 SUB_* 상수와 **같이** 움직여야 한다. 어긋나면 가격 플롯이 조용히
+     눌리고, renderCandleSvg 의 가드가 콘솔에 한 번 알린다.
      test_sub_panel_height_contract_20260919.py 가 기계로도 검사한다. */    /* 412 + 444 */
 }
 
