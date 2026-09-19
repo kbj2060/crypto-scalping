@@ -56,10 +56,28 @@ def test_snapshot_covers_the_longest_window() -> None:
     assert dash.FOOTPRINT_MAX_WINDOW_BARS <= dash.FOOTPRINT_KEEP_BARS
 
 
+def test_tape_and_rest_windows_do_not_overlap() -> None:
+    """🔴테이프(duckdb)와 REST 백필이 **같은 봉**을 채우면 이중계상이다.
+
+    REST 백필은 「봉이 이미 있으면 gap_from_ms 부터 다시 받는다」라서, 테이프가 먼저 그 봉을
+    채워 두면 그 위에 또 더한다. 그래서 경계를 나눈다: 테이프는 `ts_sec < ceil_`,
+    REST 는 `bar >= ceil_`. 둘이 만나는 봉이 없어야 한다."""
+    bar_s = dash.FOOTPRINT_BAR_SECONDS
+    now_bar = 1_789_800_000 // bar_s * bar_s
+    tape_lo = now_bar - (dash.FOOTPRINT_MAX_WINDOW_BARS - 1) * bar_s
+    ceil_ = now_bar - (dash.FOOTPRINT_BARS - 1) * bar_s      # 테이프는 여기 «미만»
+    tape_bars = set(range(tape_lo, ceil_, bar_s))
+    rest_bars = {now_bar - i * bar_s for i in range(dash.FOOTPRINT_BARS)}
+    assert not (tape_bars & rest_bars), sorted(tape_bars & rest_bars)[:3]
+    assert len(tape_bars) + len(rest_bars) == dash.FOOTPRINT_MAX_WINDOW_BARS
+    assert dash.FOOTPRINT_BARS < dash.FOOTPRINT_MAX_WINDOW_BARS, "겹치지 않으려면 REST 창이 더 짧아야"
+
+
 if __name__ == "__main__":
     test_toggle_values_pass_through()
     test_default_is_one_hour()
     test_garbage_falls_back_instead_of_raising()
     test_clamped_to_the_ring()
     test_snapshot_covers_the_longest_window()
-    print("ok — 토글값 · 기본값 · 잘못된 입력 · 범위 · 저장창 5건 통과")
+    test_tape_and_rest_windows_do_not_overlap()
+    print("ok — 토글값 · 기본값 · 잘못된 입력 · 범위 · 저장창 · 창 분할 6건 통과")
