@@ -2344,11 +2344,15 @@ svg {
 .entry-cap { font: 600 10.5px/1.5 var(--font-sans); color: var(--muted); }
 /* .entry-tiles / .entry-arrow 는 진입 미리보기 타일과 함께 나갔다(2026-09-16) -- 참조 0. */
 .entry-was { font: 600 11px/1 var(--font-sans); color: var(--muted); }
-/* 2026-09-16 계좌 카드의 «진입 미리보기» 스타일은 기능과 함께 삭제했다(사용자 요청) --
-   점선 테두리·미리보기 라벨·유령 눈금은 전부 그 기능 전용이었다.
-   transition 은 남긴다: 실제 계좌 값도 폴링마다 바뀌고, 그때 미끄러지는 편이 읽기 쉽다.
+.acct-rail.entry-rail { position: relative; overflow: visible; }
+/* 2026-09-20 계좌 카드가 «진입 미리보기»를 그릴 때(09-16 에 지웠다가 되살림). 🔴실제 계좌인
+   척하면 안 되므로 테두리를 점선으로 바꿔 한눈에 가른다 -- 위의 라벨 한 줄과 두 겹이다. */
+.acct-tiles.preview .acct-tile { border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+/* 진입 비율·레버리지를 움직이면 **눈으로 따라갈 수 있게** 한다. 노드를 갈아치우지 않고
+   제자리에서 고치므로(applyAcctPreview) transition 이 실제로 걸린다.
    ⚠️줄인 모션을 요청한 사용자에게는 끈다 -- 접근성 규약. */
-.acct-rail i, .acct-gauge-knob {
+.acct-rail i, .acct-rail u, .acct-gauge-knob {
   transition: width .32s cubic-bezier(.4, 0, .2, 1), left .32s cubic-bezier(.4, 0, .2, 1); }
 .acct-tile-val, .acct-gauge-legend span, .acct-pos-qty, .acct-tag {
   transition: color .32s ease; }
@@ -2356,10 +2360,14 @@ svg {
 @keyframes pvBump { 0% { opacity: .35; } 100% { opacity: 1; } }
 .pv-bump { animation: pvBump .28s ease-out; }
 @media (prefers-reduced-motion: reduce) {
-  .acct-rail i, .acct-gauge-knob,
+  .acct-rail i, .acct-rail u, .acct-gauge-knob,
   .acct-tile-val, .acct-gauge-legend span, .acct-pos-qty, .acct-tag { transition: none; }
   .pv-bump { animation: none; }
 }
+/* 유령 눈금 = «지금 자리». 막대가 여기서 저기로 미끄러지는 걸 눈이 따라갈 수 있게 한다. */
+.acct-rail.entry-rail i { position: absolute; left: 0; top: 0; }
+.acct-rail.entry-rail u { position: absolute; top: -2px; bottom: -2px; width: 2px;
+  background: var(--muted); opacity: .85; text-decoration: none; }
 .entry-note { font: 600 11px/1.55 var(--font-sans); padding: 8px 10px; border-radius: 8px;
   background: var(--glass); border: 1px solid var(--soft-line); color: var(--muted); }
 .entry-note.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
@@ -2779,69 +2787,6 @@ svg {
 .trade-modal .exit-now,
 .trade-modal .entry-note { text-align: center; }
 .trade-modal .manual-entry-result { width: 100%; }
-
-/* ── 「지금 넣으면」 변화 블록 (2026-09-16) ──────────────────────────────────
-   막대는 transition 으로 미끄러지고 유령 눈금(u)이 «지금 자리»에 남는다 --
-   계좌 카드의 .acct-rail 과 같은 문법이라 두 곳이 같은 말을 한다. */
-.entry-proj {
-  /* 2026-09-16 사용자 요청으로 테두리·면을 뺐다 -- 모달 자체가 이미 유리 카드라
-     그 안에 카드를 또 두면 «카드 속 카드»가 된다. 구분은 간격이 맡는다. */
-  width: 100%;
-  display: grid;
-  gap: 20px;
-  padding: 6px 4px 2px;
-}
-.entry-proj-cap {
-  font: 700 10.5px/1 var(--font-mono);
-  letter-spacing: .08em;
-  color: var(--muted);
-  text-transform: uppercase;
-  margin-bottom: 2px;
-}
-.entry-proj-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto 1fr;
-  grid-template-areas: "lab from arrow to" "rail rail rail rail";
-  align-items: center;
-  gap: 10px 10px;
-}
-.entry-proj-lab { grid-area: lab; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.entry-proj-from {
-  grid-area: from; justify-self: end;
-  font: 500 12px/1 var(--font-mono); color: var(--muted);
-}
-.entry-proj-arrow { grid-area: arrow; color: var(--muted); font-size: 11px; }
-.entry-proj-to {
-  grid-area: to; justify-self: start;
-  font: 800 13px/1 var(--font-mono); font-variant-numeric: tabular-nums;
-}
-.entry-proj-row[data-tone="good"] .entry-proj-to { color: var(--good); }
-.entry-proj-row[data-tone="warn"] .entry-proj-to { color: var(--warn); }
-.entry-proj-row[data-tone="bad"] .entry-proj-to { color: var(--bad); }
-.entry-proj-rail {
-  grid-area: rail; position: relative; display: block;
-  height: 4px; border-radius: 2px; background: rgb(var(--lift) / 0.10); overflow: visible;
-}
-.entry-proj-rail i {
-  display: block; height: 100%; border-radius: 2px; width: 0;
-  background: var(--muted);
-  transition: width .45s cubic-bezier(.22,.68,0,1.01), background .25s ease;
-}
-.entry-proj-rail i.good { background: var(--good); }
-.entry-proj-rail i.warn { background: var(--warn); }
-.entry-proj-rail i.bad { background: var(--bad); }
-/* 유령 눈금 = 지금 자리. 막대가 여기서 저기로 미끄러지는 걸 눈이 따라갈 수 있게 한다. */
-.entry-proj-rail u {
-  position: absolute; top: -3px; width: 2px; height: 10px;
-  background: var(--ink); opacity: .45; border-radius: 1px;
-  transition: left .45s cubic-bezier(.22,.68,0,1.01);
-}
-@media (prefers-reduced-motion: reduce) {
-  .entry-proj-rail i, .entry-proj-rail u { transition: none; }
-}
-/* 둘 다 만재라 막대가 안 움직이는 행 -- 막대를 흐리게 해 «이 막대는 지금 할 말이 없다»를
-   보이게 한다. 숫자는 그대로 바뀐다. */
-.entry-proj-row[data-capped="1"] .entry-proj-rail { opacity: .35; }
 
 /* 모달 안의 모든 줄에 숨 쉴 자리를 준다(사용자 요청) -- 한 줄짜리 label/row 들이
    붙어 있으면 숫자가 서로를 가린다. */
