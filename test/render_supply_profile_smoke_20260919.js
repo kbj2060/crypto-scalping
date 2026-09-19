@@ -11,7 +11,15 @@ const b64 = (s) => { const b = Buffer.from(s, "base64");
                      return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
 const SP = JSON.parse(fs.readFileSync("/home/kbj20/crypto-scalping/tmp/sp_probe/sp.json", "utf8"));
 const HJ = JSON.parse(fs.readFileSync("/home/kbj20/crypto-scalping/tmp/sp_probe/hm.json", "utf8"));
-const HM = HJ.rows ? { ...HJ, rows: { ...HJ.rows, inst: b64(HJ.rows.inst_f4), pers: b64(HJ.rows.pers_f4) } } : null;
+// 2026-09-20 서버 payload 의 행통계가 2개 -> 5개가 됐다(fe6ab637 «재깔림» 축). 이 픽스처는
+// 그 이전에 뜬 것이라 inst/pers 만 있다 -- 없는 축은 **있는 것으로 대체**해 기하·경계 검사를
+// 계속 돌린다. 이 테스트가 보는 건 값의 정확성이 아니라 «던지는가 · 상자를 넘는가»다.
+// 🔴라이브는 이 모양을 만들 수 없다: refreshFlowHeatmap 의 f4() 가 없는 키에서 던지고
+//   try/catch 가 히트맵을 null 로 만든다(그 경로는 아래 «호가 없음» 분기가 덮는다).
+//   그래서 이건 픽스처 문제지 버그가 아니다 -- 새 픽스처를 뜨면 이 대체는 저절로 사라진다.
+const ROW_STATS = ["inst", "pers", "peak", "refill", "d60"];
+const HM = HJ.rows ? { ...HJ, rows: Object.assign({ ...HJ.rows },
+  ...ROW_STATS.map((k) => ({ [k]: b64(HJ.rows[`${k}_f4`] || HJ.rows.inst_f4) }))) } : null;
 
 function run(label, profile, hm, w, h, narrow) {
   const rects = [];
