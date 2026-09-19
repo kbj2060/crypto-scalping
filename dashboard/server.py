@@ -2582,9 +2582,15 @@ def make_app() -> web.Application:
         # 🔴수동 주문 심볼(ETHUSDC)을 같이 넣는다. 이게 빠져 있어서 그 심볼의 **최근 거래**가
         #   통째로 안 보였다(2026-09-19 사용자 보고). 포지션 자체는 /fapi/v2/positionRisk 를
         #   심볼 필터 없이 부르므로 원래 다 들어온다 -- 빠지는 건 userTrades(왕복) 쪽뿐이다.
+        # 🔴잔고를 어느 «자산 지갑»에서 읽을지 정한다. 단일자산 담보 모드에서 최상위 total*
+        #   합계는 **USDT 전용**이라, 현금이 USDC 에만 있으면 전부 0 으로 내려온다(2026-09-19
+        #   실측: USDC 1,472 인데 잔고 0). 수동 주문이 나가는 심볼의 담보 자산을 따른다 --
+        #   증거금을 실제로 먹는 지갑이 거기다.
+        quote = "USDC" if MANUAL_EXEC_SYMBOL.endswith("USDC") else "USDT"
         payload = await fetch_account(
             binance_session(),
-            list(dict.fromkeys([*MARKET_SYMBOLS.values(), MANUAL_EXEC_SYMBOL])))
+            list(dict.fromkeys([*MARKET_SYMBOLS.values(), MANUAL_EXEC_SYMBOL])),
+            quote_asset=quote)
         # 화면이 «이 코인의 포지션»을 찾을 때 USDT 심볼 하나만 보면 USDC 포지션을 못 본다.
         # 서버가 실제로 쓰는 심볼을 payload 에 실어 보내 화면이 하드코딩하지 않게 한다 --
         # 환경변수(DASHBOARD_MANUAL_EXEC_SYMBOL)로 바뀌는 값이다.

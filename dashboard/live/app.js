@@ -1063,6 +1063,22 @@ function renderOpsStatus(payload) {
   }).join(""));
 }
 
+// 잔고가 «어느 자산 지갑»의 것인지, 그리고 화면이 안 쓰는 지갑에 돈이 남아 있는지.
+// 🔴단일자산 담보 모드에서 최상위 합계는 USDT 전용이라, 서버가 수동 주문 심볼의 담보 자산
+//   지갑을 골라 보낸다(server.py quote / live_binance_account pick_balance). 어느 지갑을
+//   보고 있는지 화면이 말하지 않으면 «USDC 1,472 가 있는데 0 으로 보인다»가 반대로
+//   «0 인데 1,472 로 보인다»가 될 수 있다 -- 숫자 옆에 자산 이름을 붙인다.
+function balanceAssetNote() {
+  const acct = latestBinanceAccount || {};
+  const used = acct.balance_asset || "";
+  if (!used) return "";                       // 멀티에셋 모드 = 합계가 곧 계좌 전체
+  const idle = (acct.assets || []).filter((a) => a.asset !== used && Number(a.wallet) > 0);
+  const tail = idle.length
+    ? ` · ${idle.map((a) => `${a.asset} ${fmtUsd(a.wallet)}`).join(" · ")} 은 다른 지갑`
+    : "";
+  return ` (${used})${tail}`;
+}
+
 // 스냅샷 탭이 보고 있는 코인의 포지션 하나. 없으면 null.
 // ASSET_CONFIG 는 eth/sol/btc 만 담고 있어 xrp/hype 는 관례대로 <TICKER>USDT 로 만든다.
 // 🔴같은 코인이라도 **심볼이 둘**일 수 있다: 화면·봇은 ETHUSDT 인데 수동 주문은 ETHUSDC 로
@@ -1219,7 +1235,7 @@ function renderSnapshotAccount() {
   const wallet = Number(b.wallet) || 0;
   const upnl = Number(b.unrealized) || 0;
   const equity = wallet + upnl;
-  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 가용 ${fmtUsd(b.available)}`);
+  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 가용 ${fmtUsd(b.available)}${balanceAssetNote()}`);
   const pos = snapshotAccountPosition();
   const others = (latestBinanceAccount.positions || []).length - (pos ? 1 : 0);
   if (summary) {
@@ -1412,7 +1428,8 @@ function renderBinanceAccount(payload) {
     return;
   }
   const b = payload.balance || {};
-  setT("acctBalanceText", `지갑 ${fmtUsd(b.wallet)} · 평가 ${fmtUsd(b.margin)} · 가용 ${fmtUsd(b.available)} · 미실현 ${fmtUsd(b.unrealized)}`);
+  setT("acctBalanceText", `지갑 ${fmtUsd(b.wallet)} · 평가 ${fmtUsd(b.margin)} · 가용 ${fmtUsd(b.available)}`
+    + ` · 미실현 ${fmtUsd(b.unrealized)}${balanceAssetNote()}`);
   const positions = payload.positions || [];
   const trades = payload.trades || [];
   if (summary) {

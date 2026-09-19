@@ -177,7 +177,56 @@ def _iso(ms: Any) -> str | None:
     return datetime.fromtimestamp(int(ms) / 1000, timezone.utc).isoformat() if ms else None
 
 
-async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = DEFAULT_TRADE_LIMIT) -> dict[str, Any]:
+def pick_balance(account: dict[str, Any], quote_asset: str = "USDT") -> tuple[dict[str, float], list[dict[str, Any]]]:
+    """(쓸 잔고, 잔액이 있는 자산 목록). 🔴최상위 total* 합계는 **단일자산 담보 모드에서
+    USDT 전용**이다 -- 현금이 USDC 에만 있으면 그 필드들이 전부 0 으로 내려온다.
+
+    2026-09-19 실측: multiAssetsMargin=False · totalWalletBalance 0.00 인데 assets 의
+    USDC 가 1,472.07 이었다. 대시보드는 «잔고 0»으로 보였고, 거기서 파생되는 순자산(equity)이
+    0 이라 진입 상한·증거금 표시까지 전부 0 이 됐다.
+    멀티에셋 모드면 최상위 합계가 계좌 전체를 말하므로 그대로 쓴다. 아니면 **그 심볼의 담보
+    자산 지갑 하나**를 쓴다 -- 단일자산 모드에서는 자산마다 증거금 풀이 따로라 합치면 안 된다.
+    """
+    assets = [a for a in (account.get("assets") or [])
+              if float(a.get("walletBalance") or 0.0) or float(a.get("availableBalance") or 0.0)]
+    listed = [{"asset": a.get("asset"),
+               "wallet": float(a.get("walletBalance") or 0.0),
+               "available": float(a.get("availableBalance") or 0.0),
+               "margin": float(a.get("marginBalance") or 0.0),
+               "unrealized": float(a.get("unrealizedProfit") or 0.0)} for a in assets]
+    if account.get("multiAssetsMargin"):
+        return {
+            "wallet": float(account["totalWalletBalance"]),
+            "margin": float(account["totalMarginBalance"]),
+            "initial_margin": float(account["totalInitialMargin"]),
+            "maint_margin": float(account["totalMaintMargin"]),
+            "available": float(account["availableBalance"]),
+            "unrealized": float(account["totalUnrealizedProfit"]),
+        }, listed
+    pool = next((a for a in (account.get("assets") or []) if a.get("asset") == quote_asset), None)
+    if pool is None:
+        # 그 자산 항목 자체가 없다. 최상위(=USDT)로 떨어뜨리되 목록은 그대로 실어 보낸다 --
+        # 화면이 «돈은 다른 자산에 있다»를 말할 수 있어야 한다.
+        return {
+            "wallet": float(account["totalWalletBalance"]),
+            "margin": float(account["totalMarginBalance"]),
+            "initial_margin": float(account["totalInitialMargin"]),
+            "maint_margin": float(account["totalMaintMargin"]),
+            "available": float(account["availableBalance"]),
+            "unrealized": float(account["totalUnrealizedProfit"]),
+        }, listed
+    return {
+        "wallet": float(pool.get("walletBalance") or 0.0),
+        "margin": float(pool.get("marginBalance") or 0.0),
+        "initial_margin": float(pool.get("initialMargin") or 0.0),
+        "maint_margin": float(pool.get("maintMargin") or 0.0),
+        "available": float(pool.get("availableBalance") or 0.0),
+        "unrealized": float(pool.get("unrealizedProfit") or 0.0),
+    }, listed
+
+
+async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = DEFAULT_TRADE_LIMIT,
+                        quote_asset: str = "USDT") -> dict[str, Any]:
     key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
     if not (key and secret):
         return {"ok": False, "error": "BINANCE_API_KEY/BINANCE_SECRET_KEY가 .env에 없습니다."}
@@ -238,20 +287,17 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
     for position in positions:
         position["entry_at"] = open_entry.get((position["symbol"], position["side"])) or position["updated_at"]
 
+    chosen, listed = pick_balance(balance, quote_asset)
     return {
         "ok": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "balance": {
-            "wallet": float(balance["totalWalletBalance"]),
-            # 🔴`margin` 은 **순자산**(지갑+미실현)이지 사용 증거금이 아니다. 2026-09-11 에
-            # 대시보드가 이걸 "증거금 사용"으로 읽어 98.6%(실제 39.6%)를 띄웠다.
-            # 사용/유지 증거금은 별도 필드라 아래에 이름 그대로 싣는다.
-            "margin": float(balance["totalMarginBalance"]),
-            "initial_margin": float(balance["totalInitialMargin"]),
-            "maint_margin": float(balance["totalMaintMargin"]),
-            "available": float(balance["availableBalance"]),
-            "unrealized": float(balance["totalUnrealizedProfit"]),
-        },
+        # 🔴`margin` 은 **순자산**(지갑+미실현)이지 사용 증거금이 아니다. 2026-09-11 에
+        # 대시보드가 이걸 "증거금 사용"으로 읽어 98.6%(실제 39.6%)를 띄웠다.
+        # 사용/유지 증거금은 별도 필드라 이름 그대로 싣는다(pick_balance 참조).
+        "balance": chosen,
+        "balance_asset": quote_asset if not balance.get("multiAssetsMargin") else None,
+        "multi_assets_margin": bool(balance.get("multiAssetsMargin")),
+        "assets": listed,
         "positions": positions,
         "leverage_by_symbol": leverage_by_symbol,
         "trades": trips,
