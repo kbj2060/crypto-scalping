@@ -3425,7 +3425,8 @@ function renderSupplyProfile() {
   const svg = el("supplyProfileSvg");
   if (!svg) return;
   renderSupplyProfileSvg(svg, latestSupplyProfile,
-    Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0);
+    Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0,
+    Number(snapshotAccountPosition()?.entry_price || 0));
 }
 
 async function refreshOi5m() {
@@ -3675,7 +3676,7 @@ function renderSupply1s() {
 // 초록·빨강·주황 셋뿐이라 「고래색」을 새로 만들 수 없다(styles.css 디자인 토큰 주석).
 // ⚠️창은 프로세스가 살아 있는 동안만 찬다 -- 스냅샷에는 최근 12봉만 남긴다(server.py의
 //   FOOTPRINT_KEEP_BARS 주석). 그래서 실제 창 길이를 머리글에 **항상** 적는다.
-function renderSupplyProfileSvg(svg, profile, currentPrice) {
+function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0) {
   const NS = "http://www.w3.org/2000/svg";
   const mobileChart = isMobileChartMode();
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
@@ -3994,6 +3995,42 @@ function renderSupplyProfileSvg(svg, profile, currentPrice) {
   //   -- 가운데 열이 모든 행의 가격을 이미 적고 있다. 필요한 건 «어느 줄인가» 하나다.
   //   그래서 그 줄의 가격 글자 좌우에 화살표만 둔다(사용자 제안). 차트 위에 덮는 것도,
   //   가리는 글자도, 새로 읽을 숫자도 없다.
+  // ── 진입가 (2026-09-19 사용자 요청) ────────────────────────────────────
+  // 현재가는 «어느 줄인가»만 화살표로 가리킨다(바로 위 주석의 3차 결론). 진입가는 체결
+  // 전까지 안 움직이고 읽는 목적도 달라서(«내 값이 이 분포의 어디인가») 얇은 가로선으로
+  // 긋는다. 가운데 가격 열은 비우고 좌우 막대 구간만 -- 그 열의 숫자를 덮으면 현재가에서
+  // 겪은 문제를 되풀이한다.
+  // 🔴창 밖이면 가장자리에 **붙이지 않는다**(현재가와 같은 규약). 이 축은 체결이 있었던
+  //   값만 있어서 붙이는 순간 «진입가가 저기 있다»는 거짓말이 된다 -- 대신 위/아래 어느
+  //   쪽인지와 값만 여백에 적는다.
+  if (entryPrice > 0) {
+    const ej = keys.indexOf(Math.floor(entryPrice / rowSize));
+    const eLbl = (x, y, text, anchor) => {
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("font-size", "10");
+      t.setAttribute("font-weight", "bold"); t.setAttribute("fill", "var(--amber)");
+      if (anchor) t.setAttribute("text-anchor", anchor);
+      t.textContent = text;
+      svg.appendChild(t);
+    };
+    if (ej >= 0) {
+      const ey = mt + ej * rowPx + rowPx / 2;
+      [[ml, leftEdge - 2], [rightEdge + 2, w - mr]].forEach((seg) => {
+        const ln = document.createElementNS(NS, "line");
+        ln.setAttribute("x1", seg[0]); ln.setAttribute("x2", seg[1]);
+        ln.setAttribute("y1", ey); ln.setAttribute("y2", ey);
+        ln.setAttribute("stroke", "var(--amber)"); ln.setAttribute("stroke-width", "1.5");
+        svg.appendChild(ln);
+      });
+      eLbl(ml - 5, ey + 3, "진입", "end");
+      eLbl(w - mr + 6, ey + 3, fmtNum(entryPrice, 1));
+    } else {
+      const above = entryPrice > (keys[0] + 1) * rowSize;
+      eLbl(w - mr + 6, above ? mt + 8 : h - mb - 2,
+           `진입 ${above ? "↑" : "↓"} ${fmtNum(entryPrice, 1)}`);
+    }
+  }
+
   supplyProfileNow = { svg, mt, rowPx, rowSize, keys, pocKey, digits: rowSize >= 1 ? 0 : 1 };
   const nowG = document.createElementNS(NS, "g");
   nowG.setAttribute("class", "supply-now");
@@ -4431,7 +4468,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     priceLabels.push({ val: currentPrice, color: "var(--accent)", label: "현재", dashed: true,
                        width: 2, marker: !!footprint });
   }
-  if (entryPrice > 0) priceLabels.push({ val: entryPrice, color: "var(--amber)", label: "진입", dashed: false, width: 3 });
+  // 2026-09-19 풋프린트에서는 진입선도 **삼각형**이다. 선이 가격 행을 가로질러 셀 숫자를
+  // 덮는 문제는 현재가에서 이미 겪었고(바로 위 주석), 진입선은 굵기 3이라 더 넓게 덮는다.
+  // 청산맵 모드는 그대로 선 -- 거기선 덮을 셀이 없다.
+  if (entryPrice > 0) {
+    priceLabels.push({ val: entryPrice, color: "var(--amber)", label: "진입", dashed: false,
+                       width: 3, marker: !!footprint });
+  }
   (riskLevels || []).forEach((level) => {
     if (Number(level.val) > 0) priceLabels.push(level);
   });
