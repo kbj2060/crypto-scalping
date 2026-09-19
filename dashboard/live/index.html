@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="styles.css?v=20260919-book-left">
+  <link rel="stylesheet" href="styles.css?v=20260920-hold-entry">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -273,7 +273,6 @@
              화면에서 가장 비싼 오클릭이다. -->
         <div class="trade-actions">
           <button type="button" id="tradeOpenExit" class="notify-btn short" hidden>청산</button>
-          <button type="button" id="tradeOpenEntry" class="notify-btn long">진입</button>
         </div>
 
         <dialog id="exitModal" class="trade-modal" aria-labelledby="exitModalTitle">
@@ -305,12 +304,13 @@
           </div>
         </dialog>
 
-        <dialog id="entryModal" class="trade-modal" aria-labelledby="entryModalTitle">
-          <form method="dialog" class="trade-modal-head">
-            <h3 id="entryModalTitle">진입</h3>
-            <button class="push-toggle" value="close" aria-label="닫기">✕ 닫기</button>
-          </form>
-          <div id="snapEntryPlan" class="manual-entry">
+        <!-- 2026-09-20 진입을 모달에서 **카드 안으로** 꺼냈다(사용자 지시, 스캘핑).
+             진입 → 모달 → 미리보기 → 확인 5동작이 «길게 누르기» 1동작이 된다. 청산은 모달을
+             그대로 둔다 -- 급할 때 여는 것이고, 오클릭 비용이 진입과 방향이 반대다.
+             🔴결과 상자(#snapEntryResult)와 확인 버튼(#snapEntryConfirm)이 모달 밖으로
+               나오면서 **청산 흐름도 같이 고쳐진다** -- 둘 다 진입 모달 안에 있어서, 청산
+               모달에서 누른 확인 버튼이 «보이지 않는 곳»에 떠 있었다. -->
+        <div id="snapEntryPlan" class="manual-entry">
           <!-- 2026-09-14 진입 블록 접기. 포지션을 들고 있으면 여기 있는 건 «신규 진입»이
                아니라 «물타기»다 -- 예외적 행동이니 한 번 더 펼치게 한다(09-06 물타기 감사).
                열고 닫는 코드는 <details> 가 대신한다. 여는 초기값만 JS 가 정한다
@@ -350,7 +350,11 @@
           <div class="manual-entry-row fields">
             <label class="exit-frac" for="snapLevGauge">
               <span class="entry-cap">레버리지</span>
-              <input type="range" id="snapLevGauge" min="0" max="14" step="1" value="5"
+              <!-- 2026-09-20 5단위(사용자 지시). 옛 판은 값이 아니라 LEV_STEPS 의 **인덱스**
+                   였다(1·2·3·5·8·10·15…). 서버는 1~EXCHANGE_MAX 사이 정수면 다 받으므로
+                   (server.py query_leverage) 값 자체를 5단위로 긋는다. 상한은 서버가 준
+                   leverage_steps 의 최대값으로 렌더에서 맞춘다. -->
+              <input type="range" id="snapLevGauge" min="5" max="50" step="5" value="5"
                      aria-label="거래소 레버리지">
               <b id="snapLevVal">-</b>
             </label>
@@ -362,9 +366,10 @@
           <div class="manual-entry-row fields">
             <label class="exit-frac" for="snapEntryFrac">
               <span class="entry-cap">진입 비율</span>
-              <input type="range" id="snapEntryFrac" min="10" max="100" step="10" value="100"
+              <!-- 2026-09-20 10 -> 5단위(사용자 지시). 스캘핑이라 잘게 나눠 넣는다. -->
+              <input type="range" id="snapEntryFrac" min="5" max="100" step="5" value="25"
                      aria-label="진입 비율">
-              <b id="snapEntryFracVal">100%</b>
+              <b id="snapEntryFracVal">25%</b>
             </label>
           </div>
           <!-- 2026-09-16 사용자 요청: 「진입하면 청산·증거금이 어떻게 바뀌는지 애니메이션」.
@@ -405,9 +410,16 @@
               <span class="entry-proj-rail"><i></i><u></u></span>
             </div>
           </div>
-          <div class="manual-entry-row actions">
-            <button type="button" id="snapEntryLong" class="notify-btn long">롱 진입</button>
-            <button type="button" id="snapEntryShort" class="notify-btn short">숏 진입</button>
+          <!-- 2026-09-20 «길게 누르기»(시안 B). 확인 버튼을 없애는 대신 **의도적 지속**을
+               받는다 -- 오클릭 한 번으로는 주문이 안 나가고, 누르고 있는 동안 미리보기가
+               아래 상자에 채워져 «이만큼 나갑니다»를 보고 손을 뗄 수 있다.
+               채움 막대는 JS 가 style.width 로 긋는다(app.js manualHold*). -->
+          <div class="manual-entry-row actions entry-hold">
+            <button type="button" id="snapEntryLong" class="notify-btn long hold-fire">
+              <i class="hold-fill" aria-hidden="true"></i><span>롱 진입</span></button>
+            <button type="button" id="snapEntryShort" class="notify-btn short hold-fire">
+              <i class="hold-fill" aria-hidden="true"></i><span>숏 진입</span></button>
+            <span id="snapEntryHoldHint" class="entry-cap">0.4초 누르고 있으면 주문이 나갑니다</span>
           </div>
           </details>
           <!-- 2026-09-12 계좌 카드와 **같은 타일**로 그린다(사용자 요청) -- 미리보기가 말 그대로
@@ -419,8 +431,7 @@
           <div class="manual-entry-row actions">
             <button type="button" id="snapEntryConfirm" class="notify-btn primary" hidden></button>
           </div>
-          </div>
-        </dialog>
+        </div>
       </section>
       <!-- 2026-09-11 청산 위험 패널 제거 -- 같은 숫자가 지표 행의 「청산 위험」 칩에도
            있어 중복이었다(사용자 지시). 칩이 등급·게이지·툴팁을 모두 담는다. -->
@@ -500,7 +511,7 @@
     </section>
 
   </main>
-  <script src="./app.js?v=20260920-book-window"></script>
+  <script src="./app.js?v=20260920-hold-entry"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

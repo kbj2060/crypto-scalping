@@ -6415,11 +6415,12 @@ const manualEntryPct = () => sliderPct("snapEntryFrac");
 // 화면과 실제가 어긋난다. 서버가 plan.leverage_steps 로 같은 배열을 내려준다.
 let LEV_STEPS = [1, 2, 3, 5, 8, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150];
 const manualLevAuto = () => el("snapLevAuto")?.checked !== false;
+// 2026-09-20 게이지가 **값 자체**다(5단위, 사용자 지시). 옛 판은 LEV_STEPS 의 인덱스라
+// 1·2·3·5·8·10·15… 처럼 간격이 들쭉날쭉했다. 서버는 1~EXCHANGE_MAX 정수면 받는다.
 function manualLevValue() {
   const g = el("snapLevGauge");
   if (!g) return null;
-  const i = Math.min(LEV_STEPS.length - 1, Math.max(0, Number(g.value) || 0));
-  return LEV_STEPS[i];
+  return Math.max(5, Math.round((Number(g.value) || 5) / 5) * 5);
 }
 // 자동이면 서버에 아무것도 안 보낸다 -- 서버가 모델 추천을 쓴다(단일 진실 원천).
 const manualLevQuery = () => (manualLevAuto() ? "" : `&lev=${manualLevValue()}`);
@@ -6428,14 +6429,15 @@ function renderLevGauge(plan) {
   const g = el("snapLevGauge");
   const out = el("snapLevVal");
   if (!g || !out) return;
+  // 상한은 여전히 서버가 정한다 -- 정책 목록의 최대값을 5단위로 내림해서 게이지 끝에 둔다.
   if (Array.isArray(plan.leverage_steps) && plan.leverage_steps.length) {
     LEV_STEPS = plan.leverage_steps;
-    g.max = String(LEV_STEPS.length - 1);
+    const top = Math.max(5, Math.floor(Math.max(...LEV_STEPS) / 5) * 5);
+    g.max = String(top);
   }
-  // 자동이면 모델값으로 스냅한다. 손으로 만지는 중이면 건드리지 않는다.
+  // 자동이면 모델값으로 스냅한다(5단위라 가장 가까운 눈금으로). 손으로 만지는 중이면 안 건드린다.
   if (manualLevAuto() && plan.leverage_model) {
-    const i = LEV_STEPS.indexOf(plan.leverage_model);
-    if (i >= 0) g.value = String(i);
+    g.value = String(Math.max(5, Math.round(plan.leverage_model / 5) * 5));
   }
   g.disabled = manualLevAuto();
   const v = manualLevValue();
@@ -6761,11 +6763,14 @@ function manualEntryClearConfirm() {
 }
 
 function manualEntryArmConfirm(side, plan, kind = "entry") {
-  const btn = el("snapEntryConfirm");
-  if (!btn || plan.blocked) return;
+  if (plan.blocked) return;
   const pct = Math.round(100 * (plan.fraction ?? 1));
   manualEntryPending = { side, quantity: plan.quantity, kind, pct,
                          lev: manualLevAuto() ? null : manualLevValue() };
+  // 🔴진입은 «길게 누르기»가 곧 확인이다 -- 확인 버튼을 띄우면 같은 주문이 두 번 나갈 길이
+  //   생긴다(누르고 있는 동안 pending 이 잡히므로). 청산은 그대로 버튼으로 확인한다.
+  const btn = el("snapEntryConfirm");
+  if (manualHoldFire || !btn) return;
   // 모델이 요구하는 최소 청산 비율보다 적게 닫으려 하면 **확인 버튼에** 적는다.
   // 미리보기에만 띄우면 슬라이더를 다시 내린 뒤에는 안 보인다.
   const need = Math.round(100 * ((plan.risk || {}).required_fraction || 0));
@@ -6907,8 +6912,63 @@ el("snapLevGauge")?.addEventListener("input", () => {
 function syncAllRangeFills(root) {
   (root || document).querySelectorAll('input[type="range"]').forEach(syncRangeFill);
 }
-el("snapEntryLong")?.addEventListener("click", () => manualEntryPreview("LONG", "entry"));
-el("snapEntryShort")?.addEventListener("click", () => manualEntryPreview("SHORT", "entry"));
+// ── 길게 누르기로 진입 (2026-09-20 사용자 선택: 시안 B) ─────────────────────────────
+// 누른 순간 **미리보기부터 보낸다** -- 0.4초 동안 아래 상자가 «이만큼 나갑니다»로 채워지고,
+// 그걸 보고 손을 떼면 주문은 안 나간다. 링이 다 차면 그 미리보기로 바로 발주한다.
+// 🔴확인 클릭을 없앤 대신 «의도적 지속»을 받는다. 오클릭 한 번으로는 아무 일도 없다.
+// pointer 이벤트라 마우스·터치가 한 경로다. touch-action: none 은 styles.css 에서 준다
+// (없으면 모바일에서 누른 채 스크롤하다 발주된다).
+const HOLD_FIRE_MS = 400;
+let manualHoldFire = false;
+let manualHoldTimer = null;
+let manualHoldRaf = null;
+
+function manualHoldPaint(btn, ratio) {
+  const fill = btn?.querySelector(".hold-fill");
+  if (fill) fill.style.width = `${Math.round(100 * ratio)}%`;
+}
+function manualHoldCancel(btn) {
+  if (manualHoldTimer) { clearTimeout(manualHoldTimer); manualHoldTimer = null; }
+  if (manualHoldRaf) { cancelAnimationFrame(manualHoldRaf); manualHoldRaf = null; }
+  manualHoldPaint(btn, 0);
+  if (manualHoldFire) { manualHoldFire = false; manualEntryClearConfirm(); }
+  const hint = el("snapEntryHoldHint");
+  if (hint) hint.textContent = "0.4초 누르고 있으면 주문이 나갑니다";
+}
+function manualHoldStart(btn, side) {
+  if (manualOrderBusy || btn.disabled) return;
+  manualHoldCancel(btn);
+  manualHoldFire = true;
+  const hint = el("snapEntryHoldHint");
+  if (hint) hint.textContent = "누르고 있는 중 — 떼면 주문은 안 나갑니다";
+  manualEntryPreview(side, "entry");     // 기다리지 않는다: 링이 차는 동안 상자가 채워진다
+  const t0 = performance.now();
+  const step = () => {
+    const r = Math.min(1, (performance.now() - t0) / HOLD_FIRE_MS);
+    manualHoldPaint(btn, r);
+    if (r < 1) manualHoldRaf = requestAnimationFrame(step);
+  };
+  manualHoldRaf = requestAnimationFrame(step);
+  manualHoldTimer = setTimeout(() => {
+    manualHoldTimer = null;
+    manualHoldPaint(btn, 0);
+    manualHoldFire = false;
+    if (hint) hint.textContent = "0.4초 누르고 있으면 주문이 나갑니다";
+    // 미리보기가 막혔거나(blocked) 아직 안 왔으면 pending 이 없다 -- 그때는 안 나간다.
+    if (manualEntryPending) manualEntrySubmit();
+    else {
+      const box = el("snapEntryResult");
+      if (box) { box.hidden = false; box.innerHTML = entryNote("미리보기가 아직 안 왔습니다 — 다시 누르세요.", "bad"); }
+    }
+  }, HOLD_FIRE_MS);
+}
+[["snapEntryLong", "LONG"], ["snapEntryShort", "SHORT"]].forEach(([id, side]) => {
+  const btn = el(id);
+  if (!btn) return;
+  btn.addEventListener("pointerdown", (e) => { e.preventDefault(); manualHoldStart(btn, side); });
+  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
+    btn.addEventListener(ev, () => manualHoldCancel(btn)));
+});
 // 2026-09-14 사용자 요청: **청산은 강제 조회부터**. 화면 숫자가 30초(조회가 끊겼으면 그
 // 이상) 묵어 있을 수 있어서, 미리보기를 그리기 전에 계좌를 다시 받아 카드·아래 줄을 맞춘다.
 // 서버의 청산 미리보기도 같은 이유로 fresh 다(server.py api_manual_exit_preview).

@@ -2183,6 +2183,33 @@ svg {
 /* 2026-09-14 청산 행이 카드 맨 위로 올라갔다 -- 구분선도 아래쪽이다. */
 .manual-entry-row.exit-row { gap: 10px; border-bottom: 1px solid var(--soft-line); padding-bottom: 10px; }
 .manual-entry-row[hidden] { display: none; }
+
+/* ── 길게 누르기 진입 (2026-09-20 사용자 선택: 시안 B) ──────────────────────────────
+   확인 클릭을 «의도적 지속»으로 바꾼 버튼. 채움 막대는 JS 가 width 를 긋고(app.js
+   manualHoldPaint) 여기서는 자리와 모양만 준다.
+   🔴touch-action: none 이 핵심이다 -- 없으면 모바일에서 버튼을 누른 채 스크롤하다 0.4초가
+     지나 **주문이 나간다**. 이 한 줄이 시안 B 의 유일한 실전 위험을 막는다.
+   🔴user-select: none -- 길게 누르면 글자가 잡혀 드래그가 되고, 그 상태로 손을 떼면
+     pointerup 이 버튼 밖에서 끝나 취소가 안 걸린다. */
+.entry-hold { gap: 10px; }
+.notify-btn.hold-fire {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.notify-btn.hold-fire > span { position: relative; z-index: 1; }
+.notify-btn.hold-fire .hold-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0;
+  background: currentColor;
+  opacity: 0.30;
+  border-radius: inherit;
+  pointer-events: none;
+}
+#snapEntryHoldHint { align-self: center; }
 .exit-frac { display: flex; align-items: center; gap: 8px; }
 /* 2026-09-14 보유 예정 / 레버리지 / 진입 비율 세 행의 **왼쪽 끝을 맞춘다**. .actions 의
    가운데정렬 아래에서는 라벨 길이가 제각각이라 시작점이 들쑥날쑥했다. 라벨 열 폭을 고정하면
