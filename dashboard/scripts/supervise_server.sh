@@ -61,6 +61,21 @@ trap 'stop_child; exit 0' INT TERM
 cd "$ROOT"
 mkdir -p "$ROOT/data/live"
 
+# 🔴supervisor 는 **하나만** 돌아야 한다. 2026-09-20 실측에서 두 개가 돌고 있었고, 그 중
+# 하나(pid 759)는 «포트 사용 중» 대기 루프를 **이틀 동안** 돌고 있었다. 그 유령이 위험한
+# 이유는 조용해서가 아니라, 진짜 supervisor 가 포트를 놓는 3초 사이에 끼어들어 **제 환경으로**
+# 자식을 띄우기 때문이다 -- 그러면 .env 로 켠 설정이 없는 대시보드가 올라온다.
+# 늘어난 경로는 start_external.sh 다: pid 파일이 낡았고(이 스크립트가 지운다) 재기동 3초 창에
+# curl 도 실패하면, 두 «이미 도는가» 검사가 **둘 다 통과**해 두 번째를 띄웠다.
+# pid 파일로는 못 막는다(낡을 수 있다). flock 은 **프로세스가 죽으면 저절로 풀려서** 유령
+# 상태가 구조적으로 안 생긴다 -- scripts/ops/_supervise.sh 가 같은 이유로 같은 방식을 쓴다.
+LOCK="$ROOT/data/live/dashboard_external.lock"
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  printf '[%s] supervisor already running (lock held) -- exiting\n' "$(date -Is)" >>"$ERR"
+  exit 0            # 사고가 아니다. 이미 도는 쪽이 서빙 중이라 호출자는 성공으로 봐도 된다.
+fi
+
 while true; do
   owner="$(port_owner_pid || true)"
   if [[ -n "$owner" ]]; then
@@ -75,7 +90,9 @@ while true; do
     printf '[%s] dashboard server starting host=%s port=%s\n' "$(date -Is)" "$HOST" "$PORT"
   } >>"$LOG"
 
-  "$PY" dashboard/server.py --host "$HOST" --port "$PORT" >>"$LOG" 2>>"$ERR" &
+  # 🔴잠금 FD 는 **이 프로세스만** 갖는다(9>&-). 자식이 물고 가면 supervisor 가 죽은 뒤에도
+  #   잠금이 살아 있어 후임 supervisor 가 영영 못 뜬다(_supervise.sh 의 같은 주석 참고).
+  "$PY" dashboard/server.py --host "$HOST" --port "$PORT" 9>&- >>"$LOG" 2>>"$ERR" &
   child="$!"
   echo "$child" > "$CHILD_PID"
 
