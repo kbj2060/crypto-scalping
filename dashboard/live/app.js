@@ -3401,7 +3401,8 @@ async function refreshSupply1s() {
   } catch (error) {
     console.error("Supply 1s fetch error:", error);
   }
-  renderSupply1s();
+  // 그리는 건 캔들 SVG 가 자기 주기에 한다(이 안의 패널이 됐다) -- 여기서 부르면 같은 SVG 를
+  // 한 번 더 통째로 다시 그린다. 청산 5분 이력·OI 5분과 같은 방식이다.
 }
 
 async function refreshSupplyProfile() {
@@ -3418,15 +3419,6 @@ async function refreshSupplyProfile() {
     console.error("Supply profile fetch error:", error);
     latestSupplyProfile = null;
   }
-  renderSupplyProfile();
-}
-
-function renderSupplyProfile() {
-  const svg = el("supplyProfileSvg");
-  if (!svg) return;
-  renderSupplyProfileSvg(svg, latestSupplyProfile,
-    Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0,
-    Number(snapshotAccountPosition()?.entry_price || 0));
 }
 
 async function refreshOi5m() {
@@ -3526,8 +3518,9 @@ function supplyFlowOfBar(levels) {
 // 두 선은 **같은 자로 그린다**. 단위가 같은 ETH 순수급이고, 여기서 읽는 것은 부호만이 아니라
 // «누가 더 많이 샀나»이기도 하다(5분봉 리본에서 줄마다 정규화했던 것과 반대 선택이다 --
 // 그건 봉마다 최대가 달라 비교 자체가 성립하지 않았다).
-function renderSupply1s() {
-  const svg = el("supply1sSvg");
+function renderSupply1s(box = null) {
+  // box 가 오면 그 중첩 <svg> 에 그린다(캔들 SVG 안). 없으면 옛 독립 컨테이너를 찾는다.
+  const svg = box ? box.svg : el("supply1sSvg");
   if (!svg) return;
   const NS = "http://www.w3.org/2000/svg";
   // 🔴폭을 1200 으로 고정했더니 컨테이너(1318)를 못 채워 **이 차트만 좁게** 그려졌다
@@ -3539,10 +3532,11 @@ function renderSupply1s() {
   // 🔴모바일에서 폭을 1200 으로 잡으면 뷰박스가 8:1 이 되어 158px 상자 안에서 **42px 로**
   //   줄어든다(meet). 10px 글자가 3px 가 된다 -- 캔들 차트가 쓰는 규약(모바일은 실제 폭)을
   //   여기서도 쓴다. 여백도 좁은 화면에 맞춰 줄인다(45/112 는 336px 폭의 47% 다).
-  const mobileChart = isMobileChartMode();
-  const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
-  const h = 150, mt = 16, mb = 14;
-  const ml = mobileChart ? 34 : 45, mr = mobileChart ? 64 : 112;
+  const w = box ? box.w : (parentW > 0 ? Math.max(parentW, 320) : 1200);
+  const h = box ? box.h : 150;
+  const mt = 16, mb = 14;
+  const narrow = w < 760;   // 모바일이든 2열의 좁은 열이든 여백 규칙은 같다
+  const ml = narrow ? 34 : 45, mr = narrow ? 64 : 112;
   const cw = w - ml - mr;
   const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
@@ -3676,14 +3670,18 @@ function renderSupply1s() {
 // 초록·빨강·주황 셋뿐이라 「고래색」을 새로 만들 수 없다(styles.css 디자인 토큰 주석).
 // ⚠️창은 프로세스가 살아 있는 동안만 찬다 -- 스냅샷에는 최근 12봉만 남긴다(server.py의
 //   FOOTPRINT_KEEP_BARS 주석). 그래서 실제 창 길이를 머리글에 **항상** 적는다.
-function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0) {
+function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box = null) {
   const NS = "http://www.w3.org/2000/svg";
   const mobileChart = isMobileChartMode();
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
   const parentH = svg.getBoundingClientRect().height
     || (svg.parentElement ? svg.parentElement.clientHeight : 0);
-  const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
-  const h = mobileChart ? Math.max(parentH, 260) : 400;
+  // 2026-09-19 2열 배치(사용자 지시)로 상자가 카드 폭의 68%/32% 가 됐다. 1200/400 을 고정으로
+  // 두면 viewBox 가 상자보다 커서 meet 축소가 걸리고 글자가 그만큼 작아진다 -- 상자에서 받는다.
+  // 하한은 «아직 레이아웃 전»(parentW/H = 0)일 때의 폴백이다.
+  // box 가 오면 재지 않는다 -- 캔들 SVG 안의 중첩 <svg> 로 그릴 때 그 상자가 곧 좌표계다.
+  const w = box ? box.w : (parentW > 0 ? Math.max(parentW, 320) : 1200);
+  const h = box ? box.h : (parentH > 0 ? Math.max(parentH, 260) : 400);
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   svg.innerHTML = "";
 
@@ -3703,7 +3701,9 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0) {
   // 머리글 세 줄(창 길이 · 지지/저항 · 벽)은 같은 날 사용자 지시로 걷어냈다 -- 그 세로
   // 공간을 행에 돌려줬다. 값은 전부 **툴팁**에 남아 있고, 경계($100k/<$10k)는 아래 범례가
   // 계속 적는다.
-  const ml = 45, mr = 112, mt = 14, mb = 22;
+  // 여백도 상자 폭을 따른다 -- 2열의 오른쪽 열(≈400px)에서 45/112 는 폭의 40% 를 먹는다.
+  const narrow = w < 760;
+  const ml = narrow ? 34 : 45, mr = narrow ? 64 : 112, mt = 14, mb = 22;
   const centerW = mobileChart ? 54 : 68;   // 굵고 커진 가격 라벨 자리(사용자 요청)
   const sideW = (w - ml - mr - centerW) / 2;
   const avail = h - mt - mb;
@@ -4208,8 +4208,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const parentH = svg.getBoundingClientRect().height
     || (svg.parentElement ? svg.parentElement.clientHeight : 0);
   const mobileChart = isMobileChartMode();
-  const w = mobileChart ? Math.max(parentW, 320) : Math.max(parentW, 1200);
-  const h = mobileChart ? Math.max(parentH, 260) : 400;
+  // 2026-09-19 2열 배치(사용자 지시)로 상자가 카드 폭의 68%/32% 가 됐다. 1200/400 을 고정으로
+  // 두면 viewBox 가 상자보다 커서 meet 축소가 걸리고 글자가 그만큼 작아진다 -- 상자에서 받는다.
+  // 하한은 «아직 레이아웃 전»(parentW/H = 0)일 때의 폴백이다.
+  const w = parentW > 0 ? Math.max(parentW, 320) : 1200;
+  const h = parentH > 0 ? Math.max(parentH, 260) : 400;
   // 하단/상단 여백 안의 것들(x축 눈금·라벨·레짐 리본·증거신호 레인)은 전부 `mt` / `h - mb`
   // 상대 오프셋이다 -- 여백을 늘리면 통째로 따라 움직인다.
   // 2026-09-10 mb 40 -> 56 (레짐 리본 20px 확보).
@@ -4241,6 +4244,34 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // (2026-09-16 변동성 리본이 카드로 빠지면서 한 줄 21px 를 가격 플롯에 돌려줬다)
   // 2026-09-16 모바일 ml 34 -> 44: 좌측 가격선 라벨이 `ml - 5` 에서 **왼쪽으로** 뻗는데
   //   «저항1↑»(5글자 ~31px)가 x=-2 까지 나가 잘렸다. 차트 폭은 288 -> 278 로 10px 준다.
+  // ── 수급 두 패널을 이 SVG 안에 담는다 (2026-09-19 사용자 지시 "svg 안으로") ──────
+  // 독립 컨테이너 둘(.supply-profile-container/.supply-1s-container)을 없애고 캔들 SVG
+  // 안, **OI 레인 바로 위**에 붙인다(2026-09-19 2차 지시). 가격 플롯 바로 아래 자리다 --
+  // 레인 스택의 맨 위가 되고, 아래로 OI · 청산 · x축/리본이 그대로 따라온다.
+  // 상자 높이(666)는 그대로이고 이 266 을 여백이 아니라 ch 에서 뺀다 -- 가격 플롯은 205 로
+  // 같다(앞 판은 mb 에 더했다. 자리만 위로 옮겼을 뿐 총량은 같은 수다).
+  // 🔴ETH 전용 -- OI 레인과 같은 이유다(다른 코인 캔들에 ETH 수급을 얹지 않는다).
+  // ⚠️대가: 이 SVG 는 가격 틱마다 통째로 다시 그려진다(초당 ~1.7회). 밖에 있을 때 두 그림은
+  //   5초·1초 주기였다 -- 이제 그 주기로 같이 다시 그려진다. 사용자 결정으로 감수한다.
+  const subOn = svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth";
+  // 🔴이 세 값의 합(SUB_TOTAL)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야
+  //   한다(666 = 400 + 266 -> 706 = 400 + 306). 상자가 작으면 그만큼 가격 플롯이 눌린다.
+  // 2026-09-19 프로파일 150 -> 190 (아티팩트 댓글 "조금만 더 키워줘"). 행 수는 높이가 정하므로
+  //   (renderSupplyProfileSvg 의 maxRows) 16행 -> 22행이 된다.
+  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 100 : 0;
+  const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_GAP + SUB_1S_H : 0;   // 306
+  // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
+  //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
+  //   빼기 때문). 인라인 height 로 JS 가 상자를 정하는 방법은 쓰지 않는다 -- 2열에서는 상자가
+  //   열 높이를 따라 늘어나는 게 의도된 동작인데 인라인 height 가 그 auto 를 이기고, h 자체를
+  //   getBoundingClientRect 로 읽으므로 자기참조가 된다. 대신 어긋나면 **한 번 알린다**.
+  if (SUB_TOTAL > 0 && h < 400 + SUB_TOTAL - 2 && !renderCandleSvg._subBoxWarned) {
+    renderCandleSvg._subBoxWarned = true;
+    console.warn(`캔들 상자가 ${Math.round(h)}px 인데 수급 패널이 ${SUB_TOTAL}px 를 쓴다 -- `
+      + `styles.css 의 #candleSvgSnapshot ${400 + SUB_TOTAL}px / .candle-container `
+      + `${412 + SUB_TOTAL}px 로 맞추세요(그만큼 가격 플롯이 눌립니다).`);
+  }
+
   const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112, mt = 12, mb = 91;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   // OI 신규계약 레인 -- 청산 레인 **바로 위**(사용자 지시). 별도 패널이 아니라 이 SVG 안의
@@ -4256,9 +4287,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const OI_PANEL_H = oiBars.length ? (mobileChart ? 26 : 34) : 0;
   const OI_PANEL_GAP = oiBars.length ? 6 : 0;
   const cw = w - ml - mr;
-  const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP;
+  const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP - SUB_TOTAL;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
-  const oiPanelY = plotBottom + OI_PANEL_GAP;
+  // 가격 플롯 바로 아래 = 수급 두 패널, 그다음이 OI · 청산 레인이다.
+  const subProfileY = plotBottom + SUB_GAP;
+  const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
+  const oiPanelY = plotBottom + SUB_TOTAL + OI_PANEL_GAP;
   const liqPanelY = oiPanelY + OI_PANEL_H + LIQ_PANEL_GAP;
   const NS = "http://www.w3.org/2000/svg";
   // 풋프린트는 서버가 주는 12봉이 곧 창이다 -- 모바일 핀치줌(visibleCandleWindow)으로 더
@@ -5434,6 +5468,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       liqPeakLbl.textContent = "최대 " + fmtUsdCompact(liqPeak);
       svg.appendChild(liqPeakLbl);
     }
+  }
+
+  // ── SVG 안의 수급 두 패널 -- OI 레인 바로 위 (2026-09-19 사용자 지시) ──────────
+  // 중첩 <svg> 를 쓴다 -- 자식 svg 는 제 viewBox 를 갖는 독립 좌표계라 두 렌더러의 좌표
+  // 계산을 한 줄도 안 고쳐도 된다. 상자만 넘기면 그 안에서 평소처럼 그린다.
+  if (SUB_TOTAL > 0) {
+    const subSvg = (y, hgt) => {
+      const g = document.createElementNS(NS, "svg");
+      g.setAttribute("x", "0"); g.setAttribute("y", y);
+      g.setAttribute("width", w); g.setAttribute("height", hgt);
+      // 캔들 툴팁이 이 위에서도 뜨면 «이 봉»이 아닌 값을 말한다 -- 버블링을 여기서 끊는다.
+      g.addEventListener("mousemove", (e) => e.stopPropagation());
+      svg.appendChild(g);
+      return g;
+    };
+    renderSupplyProfileSvg(subSvg(subProfileY, SUB_PROFILE_H), latestSupplyProfile,
+                           currentPrice, entryPrice, { w, h: SUB_PROFILE_H });
+    renderSupply1s({ svg: subSvg(sub1sY, SUB_1S_H), w, h: SUB_1S_H });
   }
 }
 

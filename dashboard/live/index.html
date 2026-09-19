@@ -1,3 +1,4 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -425,60 +426,56 @@
            있어 중복이었다(사용자 지시). 칩이 등급·게이지·툴팁을 모두 담는다. -->
 
       <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
-        <!-- 2026-09-19 수급을 **이 카드 안**, 차트 모드 탭 바로 위에 둔다(사용자 지시).
-             독립 패널이었다가 옮겼다 -- 같은 ETH 의 같은 질문이고, 한 카드 안에 있으면
-             차트 컨테이너 폭을 공유해 풋프린트와 너비가 저절로 맞는다. -->
-        <!-- 2026-09-19 한 화면에 두 축을 위아래로 둔다(사용자 지시). 위는 «어느 값에서
-             샀나»(가격축, 창 전체), 아래는 «지금 누가 사나»(시간축, 최근 5분 x 1초).
-             잠깐 탭으로 갈랐다가 합쳤다 -- 아래 차트가 두 탭 모두에 들어가야 하는 순간
-             나머지 탭은 «같은 것의 못한 사본»이 된다. 갈라 둘 이유가 사라졌다.
-             가격축 프로파일은 그전까지 캔들 차트의 «수급» 모드였고, 같은 그림이 두 곳에
-             있으면 언젠가 한쪽만 고쳐지므로 그쪽은 뺐다. -->
-        <div class="chart-container supply-profile-container">
-          <svg id="supplyProfileSvg" viewBox="0 0 1200 420" preserveAspectRatio="xMidYMid meet"></svg>
-        </div>
-        <div class="chart-container supply-1s-container">
-          <svg id="supply1sSvg" viewBox="0 0 1200 240" preserveAspectRatio="xMidYMid meet"></svg>
-        </div>
-
-        <div class="ops-health-head">
-          <!-- 2026-09-11 사용자 요청 "맵 위에 빈 공간도 줄여주고 그 빈 공간에 청산 밀도 표를
-               중앙에": 이 행에는 배지 하나만 오른쪽에 있어 좌측 대부분이 비어 있었다. 범례를
-               전용 행에서 여기로 옮겨 그 자리를 채운다(행 하나가 줄어든다). -->
-          <!-- 2026-09-19 창 토글(사용자 요청). 풋프린트와 **그 위 수급 프로파일**이 같은
-               창을 쓴다 -- 한 카드 안의 두 그림이 다른 구간을 말하면 읽는 사람이 속는다.
-               청산맵은 제 창(72봉)을 따로 쓰므로 이 토글이 건드리지 않는다.
-               🔴행의 **왼쪽 끝**에 둔다. 모드 탭 옆에 붙였더니 다섯 알약이 한 줄로 이어져
-                 «세그먼트 하나»처럼 읽혔다(사용자 "따로따로 배치해줘"). -->
-          <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
-               title="풋프린트와 수급 프로파일이 보는 구간. 서버는 24시간까지 쌓아 두므로 바꾸면 즉시 반영된다.">
-            <button type="button" class="asset-tab active" data-bars="12">1h</button>
-            <button type="button" class="asset-tab" data-bars="24">2h</button>
-            <button type="button" class="asset-tab" data-bars="48">4h</button>
-          </div>
-          <div id="liqDensityLegend" class="liq-density-legend" hidden></div>
-          <div class="ops-health-head-tools">
-            <!-- 2026-09-16 차트 모드 전환. 풋프린트는 12봉(1시간)이라 가격 폭이 $45 안팎인데
-                 청산밀도 빈은 $620 범위에 깔려 있어 창 안에 9%밖에 안 들어온다 -- 한 화면에
-                 둘을 같이 담을 방법이 없어서 «바꿔 보는» 쪽을 택했다(사용자 결정). -->
-            <div id="chartModeTabs" class="asset-tabs chart-mode-tabs" aria-label="차트 종류"
-                 title="풋프린트: 최근 12봉(1시간)을 가격 행으로 쪼개 매수/매도 체결량·POC·불균형 + 캔들 아래 리테일/고래 수급 리본. 청산맵: 72봉(6시간) 캔들 + 배경 청산밀도 히트맵. 수급 프로파일은 아래 «수급» 패널의 프로파일 탭으로 옮겼다.">
-              <button type="button" class="asset-tab" data-chart-mode="liqmap">청산맵</button>
-              <button type="button" class="asset-tab active" data-chart-mode="footprint">풋프린트</button>
+        <!-- 2026-09-19 2열 배치(사용자 지시: "데이터 표시는 그대로, 배치와 크기만").
+             세로로 쌓인 다섯 블록이 1,290px 라 노트북 한 화면(≈900px)을 넘었다. 왼쪽에
+             **시간축**(모드 탭·캔들), 오른쪽에 **가격축**(수급 프로파일·청산 레벨)과 1초
+             수급을 세운다. 그리는 코드는 안 바꾼다 -- 폭/높이를 컨테이너에서 받을 뿐이다.
+             좁은 화면(<1100px)은 flex-direction 이 column 으로 돌아가 지금과 같은 1열이다. -->
+        <div class="liq-col-main">
+          <div class="ops-health-head">
+            <!-- 2026-09-11 사용자 요청 "맵 위에 빈 공간도 줄여주고 그 빈 공간에 청산 밀도 표를
+                 중앙에": 이 행에는 배지 하나만 오른쪽에 있어 좌측 대부분이 비어 있었다. 범례를
+                 전용 행에서 여기로 옮겨 그 자리를 채운다(행 하나가 줄어든다). -->
+            <!-- 2026-09-19 창 토글(사용자 요청). 풋프린트와 **그 위 수급 프로파일**이 같은
+                 창을 쓴다 -- 한 카드 안의 두 그림이 다른 구간을 말하면 읽는 사람이 속는다.
+                 청산맵은 제 창(72봉)을 따로 쓰므로 이 토글이 건드리지 않는다.
+                 🔴행의 **왼쪽 끝**에 둔다. 모드 탭 옆에 붙였더니 다섯 알약이 한 줄로 이어져
+                   «세그먼트 하나»처럼 읽혔다(사용자 "따로따로 배치해줘"). -->
+            <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
+                 title="풋프린트와 수급 프로파일이 보는 구간. 서버는 24시간까지 쌓아 두므로 바꾸면 즉시 반영된다.">
+              <button type="button" class="asset-tab active" data-bars="12">1h</button>
+              <button type="button" class="asset-tab" data-bars="24">2h</button>
+              <button type="button" class="asset-tab" data-bars="48">4h</button>
             </div>
-            <span id="liqMapBadge" class="ops-badge neutral">-</span>
+            <div id="liqDensityLegend" class="liq-density-legend" hidden></div>
+            <div class="ops-health-head-tools">
+              <!-- 2026-09-16 차트 모드 전환. 풋프린트는 12봉(1시간)이라 가격 폭이 $45 안팎인데
+                   청산밀도 빈은 $620 범위에 깔려 있어 창 안에 9%밖에 안 들어온다 -- 한 화면에
+                   둘을 같이 담을 방법이 없어서 «바꿔 보는» 쪽을 택했다(사용자 결정). -->
+              <div id="chartModeTabs" class="asset-tabs chart-mode-tabs" aria-label="차트 종류"
+                   title="풋프린트: 최근 12봉(1시간)을 가격 행으로 쪼개 매수/매도 체결량·POC·불균형 + 캔들 아래 리테일/고래 수급 리본. 청산맵: 72봉(6시간) 캔들 + 배경 청산밀도 히트맵. 수급 프로파일은 아래 «수급» 패널의 프로파일 탭으로 옮겼다.">
+                <button type="button" class="asset-tab" data-chart-mode="liqmap">청산맵</button>
+                <button type="button" class="asset-tab active" data-chart-mode="footprint">풋프린트</button>
+              </div>
+              <span id="liqMapBadge" class="ops-badge neutral">-</span>
+            </div>
+          </div>
+          <!-- 2026-09-11 청산 규모 게이지는 모델 지표 칩(청산 규모)으로 옮겼다(사용자 지시).
+               같은 원천(latestLiquidation5m, 30분 누적)이라 두 곳에 두면 중복이다. -->
+          <!-- 2026-09-19 수급 프로파일과 1초 수급도 이 SVG **안**(바닥 두 패널)으로 들어갔다
+               -- 아티팩트 댓글 "svg 안으로는 못 들어가?". 독립 컨테이너 둘은 없앴고, 그리는
+               코드는 그대로 중첩 <svg> 에 그린다(app.js renderCandleSvg 의 SUB_* 블록). -->
+          <!-- 2026-09-19 OI 신규계약(5분) 레인은 이 SVG **안**, 청산 레인 바로 위에 그린다
+               (사용자 지시). 별도 패널로 두지 않는 이유는 캔들과 x축이 구성상 같아야 해서다 --
+               레짐 리본이 같은 이유로 여기 들어와 있다. app.js renderCandleSvg 의 「봉별 OI
+               신규계약 레인」 블록. -->
+          <div class="chart-container candle-container">
+            <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
           </div>
         </div>
-        <!-- 2026-09-11 청산 규모 게이지는 모델 지표 칩(청산 규모)으로 옮겼다(사용자 지시).
-             같은 원천(latestLiquidation5m, 30분 누적)이라 두 곳에 두면 중복이다. -->
-        <!-- 2026-09-19 OI 신규계약(5분) 레인은 이 SVG **안**, 청산 레인 바로 위에 그린다
-             (사용자 지시). 별도 패널로 두지 않는 이유는 캔들과 x축이 구성상 같아야 해서다 --
-             레짐 리본이 같은 이유로 여기 들어와 있다. app.js renderCandleSvg 의 「봉별 OI
-             신규계약 레인」 블록. -->
-        <div class="chart-container">
-          <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="liq-col-side">
+          <div id="liquidationMapList" class="liq-level-list"></div>
         </div>
-        <div id="liquidationMapList" class="liq-level-list"></div>
       </section>
 
 
@@ -511,3 +508,5 @@
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
+
+</body></html>
