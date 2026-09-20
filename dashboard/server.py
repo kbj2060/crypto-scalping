@@ -127,6 +127,8 @@ from scripts.live_liquidation_direction_signal_20260825 import compute_liquidati
 # importable (other research scripts still use them as the close-only reference) -- only this
 # dashboard entry point moved.
 from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history  # noqa: E402
+# 2026-09-20 «미시 참고» 카드의 계산부(순수 함수 + 자체점검). 서버는 값을 모아 넣기만 한다.
+from dashboard import micro_ref as mref  # noqa: E402
 # Regime overlay (bull/bear/chop probability per 5-min bar) for the Snapshot tab's liquidation-map
 # chart. 2026-08-26: swapped from the wide24 HMM+linear-calibration model to an independently
 # trained HistGradientBoostingClassifier (OOS balanced_accuracy 0.9189 vs wide24's 0.7691) -- see
@@ -570,6 +572,18 @@ OI_1S_TABLE = "oi_1s"
 OI_1S_FLUSH_SECONDS = 10.0   # 크래시 시 잃는 최대치(스냅샷 ~3개). 파일 락 잡는 횟수와의 맞교환.
 OI_5M_BAR_SECONDS = 300
 OI_5M_WINDOW_BARS = 48       # 4시간
+
+# ── 미시 참고 (2026-09-20, 사용자 지시 "있는 것들 모두 붙여줘") ─────────────────
+# docs/experiments/eth_realtime_five_stream_1s_joint_analysis_20260920.md §4·가이드가 가리킨 다섯 표시:
+# ①QI×OFI 동조 색 ②같은 시간대 분위 게이지 ③S/R 근접 경보 ④거래량 폭발→OI 급감 ⑤@forceOrder 이벤트 로그.
+# 원천은 전부 이 프로세스가 이미 갖고 있거나(체결 초 링·OI 링·청산맵 캐시·래스터 read_window)
+# 가벼운 것 하나를 더 받는다(REST bookTicker 1/s · @forceOrder WS -- 조용한 스트림).
+MICRO_REF_POLL_SECONDS = 1.0
+MICRO_BOOK_URL = "https://fapi.binance.com/fapi/v1/ticker/bookTicker"   # weight 1 · 1/s
+FORCE_ORDER_WS_URL = "wss://fstream.binance.com/ws/ethusdt@forceOrder"
+LIQ_EVENTS_PATH = LIVE_DIR / "liq_events.jsonl"      # ⑤ 원시 이벤트. 봇의 tail_risk 는 1분 합만 남긴다
+MICRO_TAPE_DB_PATH = LIVE_DIR / "trade_tape.duckdb"  # ② 기준선(시간대별 분위). 읽기 전용, 1시간마다
+MICRO_BASELINE_SECONDS = 3600
 
 
 def oi_1s_persist(rows: list[tuple[int, float]]) -> None:
@@ -2348,6 +2362,109 @@ def make_app() -> web.Application:
             await app["oi_1s_task"]
         except asyncio.CancelledError:
             pass
+
+    # ── 미시 참고 (2026-09-20) ──────────────────────────────────────────────
+    micro_state: dict[str, Any] = {"payload": {"available": False}, "baseline": None, "baseline_at": 0.0,
+                                   "liq_prev": None, "liq_prev_at": 0.0}
+    liq_events: deque = deque(maxlen=5000)      # (ts_ms, side, qty, price, usd) -- side "long" = 롱 포지션 청산(SELL)
+    ofi_hist: deque = deque(maxlen=600)         # |OFI10| 최근 10분 -- 임계는 상수가 아니라 분위(p50)
+
+    async def collect_force_orders(app: web.Application) -> None:
+        """⑤ @forceOrder 원시 이벤트를 jsonl 로 남기고 60초 링을 든다. 이벤트가 없으면 조용하다."""
+        ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
+        try:
+            while True:
+                try:
+                    async with ws_session.ws_connect(FORCE_ORDER_WS_URL, heartbeat=30) as ws:
+                        async for msg in ws:
+                            if msg.type is not WSMsgType.TEXT:
+                                break
+                            o = (json.loads(msg.data) or {}).get("o") or {}
+                            if not o:
+                                continue
+                            qty, price = float(o.get("z") or o.get("q") or 0.0), float(o.get("ap") or o.get("p") or 0.0)
+                            ev = {"ts_ms": int(o.get("T") or time.time() * 1000),
+                                  "side": "long" if o.get("S") == "SELL" else "short",   # 롱 청산 = 시장에 SELL
+                                  "qty": qty, "price": price, "usd": qty * price, "symbol": o.get("s")}
+                            liq_events.append(ev)
+                            with open(LIQ_EVENTS_PATH, "a", encoding="utf-8") as fh:   # 분당 몇 줄 -- 블로킹 무시 가능
+                                fh.write(json.dumps(ev, separators=(",", ":")) + "\n")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- 끊기면 3초 뒤 다시. 봇에 영향 없음
+                    print(f"force-order ws: {exc!r}", flush=True)
+                    await asyncio.sleep(3.0)
+        finally:
+            await ws_session.close()
+
+    async def collect_micro_ref(app: web.Application) -> None:
+        from scripts.live_orderflow_raster_collector_20260914 import read_window  # noqa: PLC0415
+        loop = asyncio.get_running_loop()
+        while True:
+            try:
+                now = time.time(); now_sec = int(now)
+                if now - micro_state["baseline_at"] >= MICRO_BASELINE_SECONDS:
+                    micro_state["baseline_at"] = now
+                    micro_state["baseline"] = await asyncio.to_thread(mref.baseline_from_tape, MICRO_TAPE_DB_PATH)
+                if now - micro_state["liq_prev_at"] >= 10.0:
+                    micro_state["liq_prev_at"] = now
+                    micro_state["liq_prev"] = await asyncio.to_thread(mref.liq_prev_minute, LIVE_DIR / "tail_risk.duckdb")
+                book = await fetch_binance_json(MICRO_BOOK_URL, {"symbol": FOOTPRINT_SYMBOL})
+                qi_val = mref.qi(float(book["bidQty"]), float(book["askQty"]))
+                mid = (float(book["bidPrice"]) + float(book["askPrice"])) / 2.0
+                w = await loop.run_in_executor(
+                    HEATMAP_EXECUTOR, functools.partial(read_window, FOOTPRINT_SYMBOL.lower(), int(now * 1000), 12, 1))
+                flow = mref.raster_flow(w)
+                if flow.get("ok"):
+                    ofi_hist.append(abs(flow["ofi10"]))
+                ofi_thr = float(np.median(ofi_hist)) if len(ofi_hist) >= 30 else None
+                agree = mref.agree_state(qi_val, flow.get("ofi10", 0.0), ofi_thr) if (flow.get("ok") and ofi_thr) else "기준없음"
+                by_sec = footprint_state["sec"]
+                vol1s = [(sec, cell[4] + cell[5]) for sec, cell in by_sec.items() if sec >= now_sec - 90]
+                vol60 = sum(v for sec, v in vol1s if now_sec - 61 < sec < now_sec)   # 진행 중인 초는 뺀다
+                hour = int((now_sec % 86400) // 3600)
+                base = micro_state["baseline"]
+                vol60_pct = mref.pct_rank(vol60, base["minute_vol_sorted"][hour]) if base else None
+                med = base["minute_vol_sorted"][hour] if base else None
+                vol60_x = (vol60 / med[len(med) // 2]) if med and med[len(med) // 2] > 0 else None
+                levels = await load_liquidation_map("eth")
+                sr = mref.sr_context(levels if levels.get("warmed_up") else None, mid, flow.get("imb40") if flow.get("ok") else None)
+                burst = mref.burst_state(vol1s, oi_1s, (base or {}).get("sec_vol_p99", {}).get(hour), now_sec)
+                cut = now * 1000 - 60_000
+                ev60 = [e for e in liq_events if e["ts_ms"] >= cut]
+                liq60 = {"long": sum(e["usd"] for e in ev60 if e["side"] == "long"),
+                         "short": sum(e["usd"] for e in ev60 if e["side"] == "short"), "n": len(ev60)}
+                micro_state["payload"] = {
+                    "available": True, "ts": now_sec, "mid": mid,
+                    "qi": qi_val, "qi_side": mref.side_of(qi_val, mref.QI_SIDE_ABS),
+                    "ofi10": flow.get("ofi10") if flow.get("ok") else None, "ofi_thr": ofi_thr,
+                    "ofi_side": (mref.side_of(flow["ofi10"], ofi_thr) if (flow.get("ok") and ofi_thr) else "기준없음"),
+                    "agree": agree,
+                    "imb10": flow.get("imb10") if flow.get("ok") else None, "imb40": flow.get("imb40") if flow.get("ok") else None,
+                    "vol60": vol60, "vol60_pct": vol60_pct, "vol60_x_p50": vol60_x, "act": mref.act_label(vol60_pct),
+                    "baseline_days": (base or {}).get("days"), "hour_utc": hour,
+                    "sr": sr, "burst": burst, "liq60": liq60, "liq_prev": micro_state["liq_prev"],
+                }
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- 참고 카드 하나가 죽어도 나머지 화면은 그대로
+                micro_state["payload"] = {"available": False, "error": repr(exc)[:160]}
+            await asyncio.sleep(MICRO_REF_POLL_SECONDS)
+
+    async def start_micro_ref(app: web.Application) -> None:
+        app["micro_ref_task"] = asyncio.create_task(collect_micro_ref(app))
+        app["force_order_task"] = asyncio.create_task(collect_force_orders(app))
+
+    async def stop_micro_ref(app: web.Application) -> None:
+        for key in ("micro_ref_task", "force_order_task"):
+            app[key].cancel()
+            try:
+                await app[key]
+            except asyncio.CancelledError:
+                pass
+
+    async def api_micro_ref(request: web.Request) -> web.Response:
+        return web.json_response(micro_state["payload"], headers=NOCACHE)
 
     async def load_chart_klines_frames() -> dict[str, Any]:
         """차트 캔들용 ETH/BTC 5분봉 프레임 캐시 (1500봉, 닫힌 봉만).
@@ -4203,6 +4320,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/coin-indicators", api_coin_indicators)
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
     app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
+    app.router.add_get("/api/micro-ref", api_micro_ref)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)
     app.router.add_post("/api/push/subscribe", api_push_subscribe)
@@ -4236,6 +4354,8 @@ def make_app() -> web.Application:
     app.on_startup.append(start_dashboard_events)
     app.on_startup.append(start_footprint_collector)
     app.on_startup.append(start_oi_1s_collector)
+    app.on_startup.append(start_micro_ref)
+    app.on_cleanup.append(stop_micro_ref)
     app.on_cleanup.append(stop_oi_1s_collector)
     app.on_cleanup.append(stop_footprint_collector)
     app.on_cleanup.append(stop_dashboard_events)
