@@ -6794,6 +6794,9 @@ function renderLevGauge(plan) {
   const g = el("snapLevGauge");
   const out = el("snapLevVal");
   if (!g || !out) return;
+  // 🔴이 함수는 값을 **코드로** 바꾼다(자동 추천). input 이벤트가 안 나므로 칩이 안 따라온다
+  //   -- 끝에서 직접 맞춘다. 이벤트를 쏘면 크기 재조회가 돌아 되먹임이 된다.
+  setTimeout(syncChipsets, 0);
   // 상한은 여전히 서버가 정한다 -- 정책 목록의 최대값을 5단위로 내림해서 게이지 끝에 둔다.
   if (Array.isArray(plan.leverage_steps) && plan.leverage_steps.length) {
     LEV_STEPS = plan.leverage_steps;
@@ -7337,6 +7340,46 @@ el("snapAcctRefresh")?.addEventListener("click", async () => {
 el("snapHold")?.addEventListener("change", () => {
   manualEntryClearConfirm();          // 보유시간이 바뀌면 크기가 바뀐다 -- 다른 계획이다
   manualEntryRefreshSize();
+});
+
+// 2026-09-20 시안 B: 슬라이더를 칩으로 갈았다(사용자 선택). 🔴입력 자체는 **지우지 않고
+//   숨겨 둔다** -- 칩은 그 값을 써 넣고 input 이벤트를 쏘기만 한다. 그래서 값을 읽는 쪽
+//   (sliderPct·manualLevValue)과 아래 input 리스너들을 한 줄도 안 고쳤고, 범위 클램프도
+//   브라우저가 계속 해준다(레버 상한이 서버 정책으로 20 밑이면 20x 칩은 그 상한으로 눌린다 --
+//   그때는 어느 칩도 안 켜지고 옆 숫자가 진짜 값을 말한다).
+function syncChipset(box) {
+  const inp = el(box.dataset.for);
+  if (!inp) return;
+  // 🔴칩은 입력의 **상태까지** 따라가야 한다. renderLevGauge 는 물타기면 게이지를 숨기고
+  //   (기존 레버리지가 ×3 처럼 5의 배수가 아닐 수 있어 5단위로는 나타낼 수도 없다) 자동이면
+  //   비활성화한다 -- 「고를 수 없는 것을 고를 수 있는 것처럼 보여주면 안 된다」는 그 함수의
+  //   주석 그대로다. 이걸 안 따라가면 칩이 «5x 로 나간다»고 적극적으로 거짓말한다
+  //   (2026-09-20 미리보기에서 실제로 그랬다: 칩 5x · 꼬리표 「20배 (기존 포지션과 동일)」).
+  box.hidden = !!inp.hidden;
+  box.classList.toggle("off", !!inp.disabled);
+  let hit = false;
+  box.querySelectorAll(".chip").forEach((c) => {
+    const on = Number(c.dataset.v) === Number(inp.value);
+    hit = hit || on;
+    c.classList.toggle("on", on);
+  });
+  // 칩이 맞으면 옆 숫자를 숨긴다(같은 값을 두 번 말하지 않는다). 칩에 없는 값 -- 서버가
+  // 추천한 레버리지 15x 같은 -- 일 때만 숫자가 나타나 진짜 값을 말한다.
+  box.dataset.matched = hit ? "1" : "0";
+}
+function syncChipsets() { document.querySelectorAll(".chipset").forEach(syncChipset); }
+document.querySelectorAll(".chipset").forEach((box) => {
+  const inp = el(box.dataset.for);
+  if (!inp) return;
+  box.addEventListener("click", (e) => {
+    const c = e.target.closest(".chip");
+    if (!c) return;
+    inp.value = c.dataset.v;
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    syncChipset(box);
+  });
+  inp.addEventListener("input", () => syncChipset(box));
+  syncChipset(box);
 });
 
 let entrySizeDebounce = null;
