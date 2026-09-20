@@ -3174,16 +3174,6 @@ def make_app() -> web.Application:
         price = (w["bin_lo"] + np.arange(w["n_bins"])) * w["bin_size"]
         dist = (price - spot) / spot * 100.0 if spot else np.zeros_like(price)
 
-        # 가장 가까운 «지속» 벽 -- 지속률 60% 넘는 것 중 잔량 상위에서 최근접
-        keep = (inst > 0) & (pers / np.maximum(inst, 1e-9) >= 0.6)
-        wall = None
-        if keep.any():
-            cand = np.flatnonzero(keep & (pers >= np.percentile(pers[keep], 90)))
-            if cand.size:
-                i = int(cand[np.argmin(np.abs(dist[cand]))])
-                wall = {"dist_pct": round(float(dist[i]), 2), "qty": round(float(pers[i]), 1),
-                        "persist": round(float(pers[i] / max(inst[i], 1e-9)), 3)}
-
         # ── 체결 vs 이탈: 풋프린트로 가른다 ──────────────────────────────────
         # 잔량 감소 = 체결 + 이탈(취소·리프라이싱·창 밖). 풋프린트가 **같은 $0.5 버킷**으로
         # 가격행별 체결량을 주므로 조인이 공짜다(같은 프로세스 메모리, HTTP 왕복 0).
@@ -3247,7 +3237,6 @@ def make_app() -> web.Application:
                          np.ascontiguousarray(v, "<f4")).decode() for k, v in st.items()}},
             "summary": {
                 "spot": round(spot, 2),
-                "wall": wall,
                 "persist_share": round(float(pers.sum() / max(inst.sum(), 1e-9)), 3),
                 "offtouch_leave_share": offtouch_leave_share, "fill_source": fill_source,
                 "offtouch_bins": int(same_bid.sum() + same_ask.sum()),
