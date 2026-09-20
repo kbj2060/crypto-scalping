@@ -36,6 +36,8 @@ SCORES: dict[str, dict[str, int]] = {
     "가치영역_밖": {"A": 5}, "저항근접": {"A": 5, "B": -5}, "쿠션없음": {"C": 5}, "활발": {"B": 5, "C": 5},
     # 2026-09-21 마크가격 스트림: 펀딩 = «어느 쪽이 갇혔나», 베이시스 = «누가 주도하나»(선물 프리미엄 확장 = 취약)
     "펀딩_반대쏠림": {"A": 10}, "선물주도": {"A": 8}, "현물주도": {"B": 8},
+    # BTC 같은 창 이동: 시장 전체가 같이 갔으면 지속, ETH 만 갔으면 되돌림 쪽
+    "BTC_동행": {"B": 8}, "BTC_단독": {"A": 8},
 }
 BASE = {"A": 34, "B": 33, "C": 33}
 
@@ -53,6 +55,7 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
       book   {obi, persist_share}   act_pct   sr {res, sup, res_bp, sup_bp}
       breakout {detect_on, prewarn_on}   mid
       deriv  {funding, basis_bp, basis_d_bp, basis_thr_bp} (마크가격 링, 없으면 생략)
+      btc    {move_bp, range_bp} 같은 창의 BTC (없으면 생략). 추세 판정은 ETH 와 같은 창 상대 규칙
       sr.sup_levels / sr.res_levels  청산맵 [{price, weight_pct}] 가까운 순 (플러시 목표용, 없으면 베이스)
     반환: 라벨·근거·시나리오(확률+목표)·뒤집기 신호(현재 판정 포함)."""
     bars = [b for b in inp.get("bars", []) if b.get("close")]
@@ -175,6 +178,16 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
                       + (f" (창 {bd:+.1f} · " + {1: "선물 주도", -1: "현물 주도", 0: "중립"}[lead] + ")" if bd is not None else ""))
     ev.update(funding=fr, crowd=crowd, trapped=trapped, basis_bp=bas, basis_d_bp=bd, lead=lead)
 
+    # ── BTC 같은 창 이동 ──
+    btc = inp.get("btc") or {}
+    bm, brg = btc.get("move_bp"), btc.get("range_bp")
+    d_btc = None if bm is None or brg is None else (1 if bm > MOVE_THR_FRAC * brg else -1 if bm < -MOVE_THR_FRAC * brg else 0)
+    btc_rel = None
+    if d != 0 and d_btc is not None:
+        btc_rel = "동행" if d_btc == d else "단독"
+        labels.append(f"BTC 동행 {bm:+.0f}bp (시장 전체)" if btc_rel == "동행" else f"ETH 단독 이동 (BTC {bm:+.0f}bp)")
+    ev.update(btc_move_bp=None if bm is None else round(bm, 1), btc_dir=d_btc, btc_rel=btc_rel)
+
     # ── 시나리오 점수 ──
     sc = dict(BASE)
     why: list[tuple[str, dict[str, int]]] = []
@@ -203,6 +216,8 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     if trapped: add("펀딩_반대쏠림")
     if lead > 0: add("선물주도")
     if lead < 0: add("현물주도")
+    if btc_rel == "동행": add("BTC_동행")
+    if btc_rel == "단독": add("BTC_단독")
     tot = sum(max(v, 1) for v in sc.values())
     prob = {k: round(max(v, 1) / tot * 100) for k, v in sc.items()}
 
@@ -341,6 +356,12 @@ if __name__ == "__main__":
     r5 = classify(inp5)
     assert not r5["evidence"]["trapped"] and r5["evidence"]["lead"] == -1 and r5["prob"]["B"] > r["prob"]["B"]
     assert classify(dict(inp, deriv=dict(funding=-0.0002, basis_bp=3.0, basis_d_bp=2.0, basis_thr_bp=None)))["evidence"]["lead"] == 0   # 임계 없으면 보류
+    # BTC 같은 창: 같이 올랐으면 «동행» B↑ · 창 폭 안에서 못 움직였으면 «ETH 단독» A↑ · 없으면 라벨 없음
+    r6 = classify(dict(inp, btc=dict(move_bp=40.0, range_bp=60.0)))
+    assert r6["evidence"]["btc_rel"] == "동행" and r6["prob"]["B"] > r["prob"]["B"] and any("시장 전체" in x for x in r6["labels"])
+    r7 = classify(dict(inp, btc=dict(move_bp=5.0, range_bp=60.0)))
+    assert r7["evidence"]["btc_rel"] == "단독" and r7["prob"]["A"] > r["prob"]["A"] and any("단독" in x for x in r7["labels"])
+    assert r["evidence"]["btc_rel"] is None
     # 뒤집기: 마지막 봉 OI↑ 로 바꾸면 «신규 롱» 신호가 켜지고 B 가 오른다
     inp2 = dict(inp); inp2["bars"] = bars[:-1] + [bar(2400, 2616, 2500, 11000, 0, 0, 700, ls=30e3)]
     r2 = classify(inp2)
