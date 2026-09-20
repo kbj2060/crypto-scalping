@@ -3692,12 +3692,20 @@ async function refreshFlowHeatmap() {
     // mode=rows 라 이미지 배열(qty_i8/mid_b64 · 102KB)은 안 온다 -- 행 집계와 요약만.
     const f4 = (b64) => new Float32Array(raw(b64).buffer);
     // 2026-09-20 행 통계가 둘 -> 다섯. 247빈 x 4B x 5 = 5KB(걷어낸 이미지가 102KB 였다).
-    const ROW_STATS = ["inst", "pers", "peak", "refill", "d60"];
+    const ROW_STATS = ["inst", "pers", "peak", "refill", "d60", "blk", "n_up"];
     // 2026-09-20 접근행동은 **4시간 창**이라 bin_lo/n_bins 가 위 다섯과 다르다
     // (그 사이 mid 가 움직여 격자가 넓다). 절대가격으로 따로 찾는다.
     if (j.rows && j.rows.approach_f4) j.rows.approach = f4(j.rows.approach_f4);
+    // 🔴**없는 키는 건너뛴다.** 예전엔 ROW_STATS 를 그대로 돌려 f4(undefined) 가 던졌고,
+    //   그 예외를 아래 catch 가 잡아 latestFlowHeatmap 을 통째로 null 로 만들었다 --
+    //   화면에서 호가 막대가 조용히 사라진다. 서버보다 app.js 가 **먼저** 배포되면
+    //   (화면 파일은 재기동 없이 즉시 서빙되므로 실제로 그 순서가 된다) 새 필드가 아직
+    //   없어서 매번 그 경로를 탄다. 2026-09-20 blk/n_up 추가 때 실제로 재현했다.
     latestFlowHeatmap = { ...j, rows: j.rows
-      ? Object.assign({ ...j.rows }, ...ROW_STATS.map((k) => ({ [k]: f4(j.rows[k + "_f4"]) })))
+      ? ROW_STATS.reduce((acc, k) => {
+          if (j.rows[k + "_f4"]) acc[k] = f4(j.rows[k + "_f4"]);
+          return acc;
+        }, { ...j.rows })
       : null };
     flowHeatmapVer += 1;
     repaintSupplyProfilePanel();   // 행별 지속 잔량이 같이 갱신된다
@@ -4443,12 +4451,16 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     const at = (px) => Math.round(px / hm.bin_size) - hm.bin_lo;
     let maxI = 0;
     const per = keys.map((k) => {
-      const v = { inst: 0, pers: 0, peak: 0, refill: 0, d60: 0 };
+      const v = { inst: 0, pers: 0, peak: 0, refill: 0, d60: 0, blk: 0, n_up: 0 };
       for (let q = 0; q < rowSize; q += hm.bin_size) {
         const i = at(k * rowSize + q);
         if (i >= 0 && i < hm.inst.length) {
           v.inst += hm.inst[i]; v.pers += hm.pers[i]; v.peak += hm.peak[i];
           v.refill += hm.refill[i]; v.d60 += hm.d60[i];
+          // 🔴blk 은 **더하지 않는다** -- 크기이지 양이 아니다. 한 행이 여러 빈을 덮으면
+          //   그중 가장 큰 덩어리를 그 행의 «단위»로 본다. 횟수는 더한다.
+          if (hm.blk && hm.blk[i] > v.blk) v.blk = hm.blk[i];
+          if (hm.n_up) v.n_up += hm.n_up[i];
         }
       }
       if (v.inst > maxI) maxI = v.inst;
@@ -4474,7 +4486,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     };
     if (maxI > 0) {
       keys.forEach((k, j) => {
-        const { inst, pers, peak, refill, d60 } = per[j];
+        const { inst, pers, peak, refill, d60, blk, n_up } = per[j];
         if (inst <= 0) return;
         const bl = (inst / maxI) * (sideW - 2);
         // 재깔림 = refill/peak. 농도는 그 값의 **창 안 분위**다(위 주석).
@@ -4519,6 +4531,17 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
           + "재깔림 " + rw.toFixed(1) + "배 — " + win + " 안에서 최대치의 "
           + rw.toFixed(1) + "배(" + Math.round(refill) + " ETH)가 다시 깔렸습니다. "
           + "이 창의 상위 " + Math.round(100 * (1 - rwPct(rw))) + "% 입니다"
+          + (blk > 0
+             // 2026-09-20 «단위». 같은 배수라도 「1,780 ETH 를 18번」과 「15 ETH 를 2,000번」은
+             // 전혀 다른 행동인데 농도로는 구별이 안 된다. 실측(1,960행) rho(배수, 블록/peak)
+             // = 0.333 이고 같은 배수 구간 안에서 40배까지 갈린다 = 별개 축이다.
+             // 🔴blk 은 «물량 가중 중앙값»이다 -- 개수 기준 분위는 잔물결에 묻힌다.
+             ? "\n단위: " + fmtNum(blk, blk >= 100 ? 0 : 1) + " ETH 씩 "
+               + Math.round(n_up) + "번"
+               + (blk / Math.max(peak, 1e-9) >= 0.35
+                  ? " — 한 덩어리를 같은 자리에 계속 다시 까는 중입니다(작업자 한 명일 수 있습니다)."
+                  : " — 잘게 나눠 계속 깔립니다(알고리즘 잔물결).")
+             : "")
           + " — 🔴농도는 **이 창 안의 상대 순위**라, 조용한 시간과 시끄러운 시간이 같은 "
           + "진하기로 보입니다. 절대값은 이 숫자로 보세요.\n"
           + "최근 60초 " + (d60 >= 0 ? "+" : "") + Math.round(d60) + " ETH — "
