@@ -8,7 +8,17 @@
   <!-- 2026-09-04 PWA: Chrome/Edge에서 "앱으로 설치"가 뜨게 하고, 설치 후에는 자체 창을 가진
        데스크톱 앱이 된다. iOS는 apple-mobile-web-app-capable + 홈화면 추가를 해야만 웹푸시가
        동작한다(사파리 제약, 브라우저 탭 상태로는 알림 권한 자체를 못 받는다). -->
-  <link rel="manifest" href="manifest.webmanifest">
+  <!-- 🔴crossorigin="use-credentials" 는 장식이 아니다. 브라우저는 매니페스트를 **같은
+       오리진이어도 자격증명 없이** 가져오는데(HTML 표준의 기본값), 이 사이트는 Cloudflare
+       Access 뒤에 있어서 쿠키 없는 요청을 미인증으로 보고 kbj2060.cloudflareaccess.com 으로
+       302 를 보낸다. 그 리다이렉트가 **다른 오리진**이라 브라우저가 CORS 로 막는다
+       (2026-09-21 콘솔: "redirected from .../manifest.webmanifest ... blocked by CORS policy").
+       페이지 본문은 최상위 내비게이션이라 같은 302 를 타고 로그인한 뒤 돌아오므로 멀쩡하고,
+       매니페스트만 조용히 실패해 «앱으로 설치»와 아이콘/이름이 안 먹는다.
+       이 속성을 붙이면 CF_Authorization 쿠키가 실려 Access 가 200 을 준다 -- 리다이렉트
+       자체가 없어지므로 서버에 CORS 헤더를 더할 필요도 없다(같은 오리진이다).
+       sw.js 는 해당 없다: navigator.serviceWorker.register() 는 같은 오리진에 쿠키를 싣는다. -->
+  <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
   <meta name="theme-color" content="#0b0d13">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
