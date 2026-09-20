@@ -220,10 +220,25 @@ def write_state(con) -> None:
         ts, spot, total, front = rows[-1]
         # 0 나눗셈과 부호를 같이 막는다. total 이 0 이면 비율에 뜻이 없다(구조를 못 읽는다).
         ratio = (front / total) if total else None
+        # 2026-09-20 분위와 «실제로 변하는 축»을 같이 낸다.
+        # 🔴`negative_gamma`(= total<0)는 **854 스냅샷 37일 내내 한 번도 참이 아니었다**(0.0%).
+        #   화면의 경고 톤이 켜진 적이 없다는 뜻이라 그 칩은 상수였다. 변하는 축은 front(6.7%)이고,
+        #   연구가 이론 부호를 회복한다고 말한 축도 front 다(total 통제 후 t -6.22).
+        # 🔴달러 절대값은 아무도 보정 못 한다 -- 이 저장소 규약대로 **분위**를 같이 보낸다
+        #   (임계값은 달러가 아니라 분위로 선언한다, 2026-09-19).
+        pct = con.execute(
+            "SELECT avg(CASE WHEN total_gex_usd <= ? THEN 1.0 ELSE 0.0 END), "
+            "       avg(CASE WHEN front_month_gex_usd <= ? THEN 1.0 ELSE 0.0 END), "
+            "       count(*), count(DISTINCT date_trunc('day', recorded_at_utc)) "
+            "FROM gex_summary WHERE currency = ?", [total, front, currency]).fetchone()
         out["currencies"][currency] = {
             "recorded_at_utc": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
             "spot_price": spot, "total_gex_usd": total, "front_month_gex_usd": front,
             "front_ratio": ratio,
+            "total_pct": (float(pct[0]) if pct and pct[0] is not None else None),
+            "front_pct": (float(pct[1]) if pct and pct[1] is not None else None),
+            "history_n": (int(pct[2]) if pct else 0), "history_days": (int(pct[3]) if pct else 0),
+            "front_negative": bool(front is not None and front < 0),
             "negative_gamma": bool(total is not None and total < 0),
             "history": [{"t": (r[0].isoformat() if hasattr(r[0], "isoformat") else str(r[0])),
                          "total": r[2], "front": r[3]} for r in rows],

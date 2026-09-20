@@ -3636,13 +3636,20 @@ function gexIndicatorItem() {
   }
   const bn = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "-"}$${Math.abs(v / 1e9).toFixed(2)}B`);
   const ratio = g.front_ratio;
+  // 2026-09-20 두 가지를 고쳤다(연구: docs/experiments/eth_realtime_five_stream_1s_joint_analysis_20260920.md §11).
+  // 🔴①톤이 상수였다 -- `negative_gamma`(= total<0)가 854 스냅샷 37일 내내 0.0% 로 한 번도 참이 아니었다.
+  //    실제로 변하는 축은 front 월물(6.7%)이고, 연구가 이론 부호를 회복한다고 한 축도 그쪽이다.
+  // 🔴②달러 절대값($xx.xB)은 보정이 안 된다 -- 이 저장소 규약대로 **분위**를 같이 적는다.
+  const pct = g.total_pct == null ? null : Math.round(g.total_pct * 100);
+  const negFront = g.front_negative ?? false;      // 새 필드가 오기 전(cron 한 주기)에는 false
   return {
     key: "gex", label: "옵션 감마 노출 (GEX)",
-    // 🔴톤은 **위험도도 방향도 아니다**. 음감마일 때만 주의(31일 중 1일로 드물다), 그 외 중립.
-    tone: g.negative_gamma ? "warn" : "neutral",
-    subText: g.negative_gamma ? "음감마" : "양감마",
-    liveText: `수준 ${bn(g.total_gex_usd)} · 구조 ${ratio == null ? "-" : ratio.toFixed(2)}`
-      + " (front÷total)",
+    // 🔴톤은 위험도도 방향도 아니다. front 월물이 음수일 때만 주의(6.7%), 그 외 중립.
+    tone: negFront ? "warn" : "neutral",
+    subText: negFront ? "front 음감마" : (pct == null ? "양감마" : `수준 상위 ${100 - pct}%`),
+    liveText: `수준 ${bn(g.total_gex_usd)}${pct == null ? "" : ` (분위 ${pct}%)`}`
+      + ` · 구조 ${ratio == null ? "-" : ratio.toFixed(2)} (front÷total)`
+      + (g.history_days ? ` · 기준 ${g.history_days}일` : ""),
     derivedTag: "= 참고 · 신호 아님",
     derivedTitle: GEX_TITLE,
   };
@@ -3656,7 +3663,15 @@ const GEX_TITLE = "딜러 감마 노출. Deribit 옵션 체인을 매시 수집�
   + "total 을 통제하면 front 가 이론 부호를 회복합니다(t −6.22).\n\n"
   + "⏰아직 판정 전입니다. HAR-RV 대비 증분 R² 는 세 지평 모두 양수·단조지만(+0.011/+0.026/+0.041) "
   + "CI 가 전부 0 을 포함합니다(독립일 31). 판정 예정일은 1시간 지평 2026-09-28, 4시간 10-17 입니다. "
-  + "그때까지 이 값은 매매 판단의 근거가 아니라 맥락입니다.";
+  + "그때까지 이 값은 매매 판단의 근거가 아니라 맥락입니다.\n\n"
+  + "🔴방향으로 읽지 마세요. 2026-09-20 재측정(854스냅샷·37일)에서 GEX 와 앞 1~4시간 수익의 상관이 "
+  + "−0.25~−0.34 로 크게 나왔지만, GEX 공식에 스팟²이 들어 있어 전부 가격수준의 사본이었습니다 "
+  + "— 스팟을 통제하면 −0.05/−0.09(오차 안)로 사라지고, 스팟 단독이 GEX 보다 강합니다.\n\n"
+  + "느린 지표입니다. 매시 갱신이라 화면 값은 최대 1시간 묵었고, 24시간 뒤 자기상관이 +0.40 "
+  + "(높음/낮음 상태가 중앙 3시간 이어집니다). 초 단위 칩과 시간축이 다릅니다.\n\n"
+  + "«미시 참고» 카드에는 넣지 않았습니다. 60초 거래량 분위를 고정하면 GEX 높음/낮음 행이 "
+  + "갈리지 않고(앞 5분 고저폭 교차), 호가 방아쇠의 값도 GEX 레짐에 따라 달라지지 않았습니다"
+  + "(+1.06 vs +1.17, 겹침 6일).";
 
 
 async function refreshGex() {
