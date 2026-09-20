@@ -7288,27 +7288,20 @@ function manualHoldPaint(btn, ratio) {
   const fill = btn?.querySelector(".hold-fill");
   if (fill) fill.style.width = `${Math.round(100 * ratio)}%`;
 }
-// 힌트는 **그 줄 안에서** 찾는다 -- 진입과 청산이 각자 제 줄을 갖는다(id 를 둘로 늘리면
-// 둘 중 하나만 고치고 다른 하나를 잊는다).
-const manualHoldHint = (btn) => btn?.closest(".manual-entry-row")?.querySelector(".hold-hint");
-const manualHoldIdle = (kind) => (kind === "exit"
-  ? "0.4초 누르고 있으면 청산됩니다" : "0.4초 누르고 있으면 주문이 나갑니다");
+// 2026-09-20 «0.4초 누르고 있으면…» 안내문을 뺐다(아티팩트 댓글). 동작은 그대로다 --
+// 누르는 동안 차오르는 채움 막대(.hold-fill)가 진행을 계속 보여준다. 문구를 지우면서
+// 그것만 쓰던 헬퍼 둘(manualHoldHint/manualHoldIdle)도 같이 지웠다.
 
-function manualHoldCancel(btn, kind) {
+function manualHoldCancel(btn) {
   if (manualHoldTimer) { clearTimeout(manualHoldTimer); manualHoldTimer = null; }
   if (manualHoldRaf) { cancelAnimationFrame(manualHoldRaf); manualHoldRaf = null; }
   manualHoldPaint(btn, 0);
   if (manualHoldFire) { manualHoldFire = false; manualEntryClearConfirm(); }
-  const hint = manualHoldHint(btn);
-  if (hint) hint.textContent = manualHoldIdle(kind);
 }
 function manualHoldStart(btn, side, kind) {
   if (manualOrderBusy || btn.disabled) return;
-  manualHoldCancel(btn, kind);
+  manualHoldCancel(btn);
   manualHoldFire = true;
-  const hint = manualHoldHint(btn);
-  if (hint) hint.textContent = kind === "exit"
-    ? "누르고 있는 중 — 떼면 청산은 안 나갑니다" : "누르고 있는 중 — 떼면 주문은 안 나갑니다";
   // 청산은 **계좌부터 새로 읽는다**(manualExitPreview) -- 닫으려는 수량이 낡으면 안 된다.
   if (kind === "exit") manualExitPreview(side); else manualEntryPreview(side, "entry");
   const t0 = performance.now();
@@ -7322,7 +7315,6 @@ function manualHoldStart(btn, side, kind) {
     manualHoldTimer = null;
     manualHoldPaint(btn, 0);
     manualHoldFire = false;
-    if (hint) hint.textContent = manualHoldIdle(kind);
     // 미리보기가 막혔거나(blocked) 아직 안 왔으면 pending 이 없다 -- 그때는 안 나간다.
     if (manualEntryPending) manualEntrySubmit();
     else {
@@ -7337,7 +7329,7 @@ function manualHoldStart(btn, side, kind) {
   if (!btn) return;
   btn.addEventListener("pointerdown", (e) => { e.preventDefault(); manualHoldStart(btn, side, kind); });
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
-    btn.addEventListener(ev, () => manualHoldCancel(btn, kind)));
+    btn.addEventListener(ev, () => manualHoldCancel(btn)));
 });
 // 2026-09-14 사용자 요청: **청산은 강제 조회부터**. 화면 숫자가 30초(조회가 끊겼으면 그
 // 이상) 묵어 있을 수 있어서, 미리보기를 그리기 전에 계좌를 다시 받아 카드·아래 줄을 맞춘다.
