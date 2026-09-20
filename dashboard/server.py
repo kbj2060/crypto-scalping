@@ -2549,10 +2549,27 @@ def make_app() -> web.Application:
     situation_state: dict[str, Any] = {"now": {"ok": False, "reason": "계산 전"}, "computed_at": 0.0,
                                        "log": [], "last_logged": 0.0, "last_key": None, "last_resolve": 0.0}
 
-    def _situation_load_log() -> None:
+    def _situation_append(rec: dict[str, Any]) -> None:
         try:
-            lines = SITUATION_LOG_PATH.read_text(encoding="utf-8").splitlines()[-300:]
-            situation_state["log"] = [json.loads(x) for x in lines if x.strip()]
+            with open(SITUATION_LOG_PATH, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False, separators=(",", ":")) + "\n")
+        except Exception as exc:  # noqa: BLE001
+            print(f"situation log write: {exc!r}", flush=True)
+
+    def _situation_load_log() -> None:
+        """예측 줄({ts, labels, ...})과 해결 줄({ts, outcome})이 한 파일에 섞여 있다. 해결을 영속하지 않으면
+        재기동(배포)마다 outcome 이 None 으로 돌아가 캔들 캐시(8시간) 밖의 예측은 영영 못 푼다."""
+        try:
+            entries: dict[int, dict[str, Any]] = {}
+            for x in SITUATION_LOG_PATH.read_text(encoding="utf-8").splitlines():
+                if not x.strip():
+                    continue
+                rec = json.loads(x)
+                if "labels" in rec:
+                    entries[int(rec["ts"])] = rec
+                elif int(rec.get("ts", -1)) in entries:
+                    entries[int(rec["ts"])]["outcome"] = rec.get("outcome")
+            situation_state["log"] = list(entries.values())[-300:]
         except FileNotFoundError:
             situation_state["log"] = []
         except Exception as exc:  # noqa: BLE001
@@ -2645,23 +2662,21 @@ def make_app() -> web.Application:
         situation_state["computed_at"] = now
         if not res.get("ok"):
             return
-        key = (tuple(res["labels"]), max(res["prob"], key=res["prob"].get))
+        key = sit.log_key(res)   # 라벨의 숫자를 뺀 종류 서명 -- 숫자를 두면 5초마다 새 항목(09-21 1,742건 사고)
         if key != situation_state["last_key"] or now - situation_state["last_logged"] >= SITUATION_LOG_MIN_GAP_S:
             entry = {"ts": int(now), "mid": inp.get("mid"), "dir": res["dir"], "prob": res["prob"], "targets": res["targets"],
                      "labels": res["labels"], "flips_on": [f["signal"] for f in res["flips"] if f["on"]], "outcome": None}
             situation_state["log"].append(entry); situation_state["log"] = situation_state["log"][-300:]
             situation_state["last_key"], situation_state["last_logged"] = key, now
-            try:
-                with open(SITUATION_LOG_PATH, "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
-            except Exception as exc:  # noqa: BLE001
-                print(f"situation log write: {exc!r}", flush=True)
+            _situation_append(entry)
         if now - situation_state["last_resolve"] >= 60:
             situation_state["last_resolve"] = now
             cs = situation_state["candles"] or []
             for e in situation_state["log"]:
                 if e.get("outcome") is None and e["ts"] + SITUATION_HORIZON_S <= now:
                     e["outcome"] = sit.resolve(e, cs, SITUATION_HORIZON_S)
+                    if e["outcome"] is not None:
+                        _situation_append({"ts": e["ts"], "outcome": e["outcome"]})   # 해결 줄 -- 재기동 뒤에도 남는다
 
     async def api_situation(request: web.Request) -> web.Response:
         log = situation_state["log"]

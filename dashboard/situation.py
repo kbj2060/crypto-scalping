@@ -12,6 +12,7 @@
 ponytail: 부호 규약 -- 매수·매수벽·상승이 양수. 이동 방향(상승/하락)에 대해 대칭으로 뒤집는다.
 """
 from __future__ import annotations
+import re
 from typing import Any
 
 WINDOW = 6                 # «이동»을 재는 완결 봉 수 (30분)
@@ -286,6 +287,16 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
             "flips": [{"signal": s, "on": bool(o), "toward": t} for s, o, t in flips]}
 
 
+_NUM = re.compile(r"[-+]?\d[\d.,]*%?")
+
+
+def log_key(res: dict[str, Any]) -> tuple:
+    """장부에 «새 예측»으로 기록할지 가르는 상태 서명 = 라벨의 **종류** + 1순위 시나리오.
+    🔴라벨의 숫자(고래 −33 · 펀딩 +0.004%)를 지운다 -- 숫자를 두면 5초마다 다른 키가 되어 3시간에 1,742건이
+    쌓였고(09-21 실측), 메모리 상한 300건이 30분 안에 밀려나 해결 시점에 남는 예측이 0건이었다."""
+    return (tuple(_NUM.sub("#", x) for x in res["labels"]), max(res["prob"], key=res["prob"].get))
+
+
 def resolve(pred: dict[str, Any], candles: list[dict[str, float]], horizon_s: int = 1800) -> str | None:
     """예측 뒤 horizon 안에 어느 목표가 **먼저** 닿았나. A=가치영역 밴드, B=지속 목표, C=플러시 목표.
     아직 horizon 이 안 지났으면 None. 아무것도 안 닿으면 'none'."""
@@ -387,4 +398,8 @@ if __name__ == "__main__":
     assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, cs_up) == "B"
     cal = calibration([{"prob": r["prob"], "outcome": "A"}, {"prob": r["prob"], "outcome": "B"}])
     assert cal["n"] == 2 and cal["top_hit"] == 50 and cal["A"]["happened"] == 50
+    # 장부 키: 숫자만 다른 같은 상태는 같은 키, 라벨 종류가 늘면 다른 키
+    same = classify(dict(inp, cur=dict(inp["cur"], whale_net=-500, retail_net=90)))
+    assert log_key(same) == log_key(r) and same["labels"] != r["labels"], (log_key(same), log_key(r))
+    assert log_key(r8) != log_key(r)
     print("situation selftest ok", r["prob"], r["labels"][:3])
