@@ -5180,20 +5180,33 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   보여 거짓이 된다). 이 리본의 값이 바로 그 엇갈림이다 -- 실측 12봉 중 4봉에서 부호가
   //   반대였다. 자 자체는 log1p 다(아래 hgt 주석).
   // 데이터가 없으면 자리를 아예 안 잡는다(OI 레인과 같은 규약).
-  const supBars = (svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth"
+  const fpBars = (svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth"
                    && latestFootprint && Array.isArray(latestFootprint.bars))
                   ? latestFootprint.bars : [];
-  const SUP_PANEL_H = supBars.length ? 15 : 0;      // = LANE_H. 아래에서 상수를 못 쓴다(선언 전)
-  const SUP_PANEL_GAP = supBars.length ? 6 : 0;
+  const SUP_PANEL_H = fpBars.length ? 15 : 0;      // = LANE_H. 아래에서 상수를 못 쓴다(선언 전)
+  const SUP_PANEL_GAP = fpBars.length ? 6 : 0;
+  // ── 거래대금 · 델타·CVD -- 풋프린트 바로 아래 (2026-09-21 사용자 지시) ────────────
+  // 같은 풋프린트 봉에서 나온다: 거래대금 = Σ가격x(매수+매도) · 델타 = Σ(매수-매도) ·
+  // CVD = 그 창 안에서의 델타 누적.
+  // 🔴CVD 의 기준점은 **창 시작**이고, 창은 1h/2h/4h 선택기를 그대로 따른다(사용자 결정).
+  //   `CHART_WINDOW_BARS` 12/24/48 이 곧 그 셋이고 서버 상한(FOOTPRINT_MAX_WINDOW_BARS)도
+  //   48 이라 셋 다 덮인다. 창을 바꾸면 기준점도 같이 옮겨간다 -- 절대 누적이 아니다.
+  // 🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이다(dashboard/situation.py 의 WINDOW=6).
+  //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
+  const TURN_H = fpBars.length ? 15 : 0;
+  const DCVD_H = fpBars.length ? 28 : 0;      // 15 면 작은 델타 막대가 0.7px 다(실측)
+  const FLOW_GAP = fpBars.length ? 6 : 0;
   const cw = w - ml - mr;
   const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP
-             - SUP_PANEL_H - SUP_PANEL_GAP;
+             - SUP_PANEL_H - SUP_PANEL_GAP - TURN_H - DCVD_H - 2 * FLOW_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
   // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). 1초 수급이 먼저, 프로파일이 그 아래 --
   // 「체결 계열」 둘은 여전히 이웃한다. OI·청산 레인은 플롯 바로 아래 그대로다.
   const sub1sY = mtTop;
   const subProfileY = sub1sY + SUB_1S_H + SUB_GAP;
-  const oiPanelY = plotBottom + OI_PANEL_GAP;
+  const turnPanelY = plotBottom + FLOW_GAP;
+  const dcvdPanelY = turnPanelY + TURN_H + FLOW_GAP;
+  const oiPanelY = dcvdPanelY + DCVD_H + OI_PANEL_GAP;
   const supPanelY = oiPanelY + OI_PANEL_H + SUP_PANEL_GAP;
   const liqPanelY = supPanelY + SUP_PANEL_H + LIQ_PANEL_GAP;
   const NS = "http://www.w3.org/2000/svg";
@@ -5249,7 +5262,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   그래서 OHLC 에 의존하는 것(가격 라벨·이벤트 삼각형)은 **캐시하지 않고** 매번 그린다.
   const baseGeomSig = [w, h, mt, ch, ml, mr, cw, bw, yMin, yMax, plotBottom,
                        mobileChart, oiPanelY, liqPanelY, OI_PANEL_H, LIQ_PANEL_H,
-                       supPanelY, SUP_PANEL_H].join("|");
+                       supPanelY, SUP_PANEL_H, turnPanelY, dcvdPanelY, TURN_H, DCVD_H].join("|");
   // 봉 시각만. 진행 중인 봉의 OHLC 는 여기 없다(위 주석).
   const timesSig = candles.length + ":" + (candles[0] ? candles[0].time : 0)
                    + ":" + (candles[candles.length - 1] ? candles[candles.length - 1].time : 0);
@@ -6412,6 +6425,150 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   });
 
+  // ── 거래대금 · 델타·CVD (2026-09-21 사용자 지시, 시안 D) ──────────────────────
+  // 풋프린트 봉에서 바로 나온다 -- 새 엔드포인트도 새 폴링도 없다.
+  //   거래대금 = Σ 가격 x (매수+매도) [USD]   · 선형 자
+  //   델타     = Σ (매수 - 매도)      [ETH]   ┐ 한 자 · 한 0선
+  //   CVD      = 창 안에서 델타의 누적 [ETH]  ┘
+  // 🔴거래대금은 **선형**이다. 실측 최대/중앙 3.5배라 완만하다(수급은 11배라 log 를 썼다) --
+  //   같은 화면의 두 줄이 다른 자를 쓰는 이유가 이것이고, 둘 다 오른쪽에 최대치를 적는다.
+  // 🔴델타와 CVD 는 **한 자 · 한 0선**을 나눠 쓴다. 같은 단위(ETH)이고 CVD 가 델타의 누적이라,
+  //   자를 따로 주면 «선이 막대들의 달리는 합»이라는 사실이 화면에서 끊긴다. 대가: 창 최대
+  //   델타가 자를 지배해 작은 막대는 1~1.5px 다(실측 12봉). 1px 바닥으로 **부호는 항상** 보인다.
+  cachedLayer("flowLanes", objToken(fpBars) + "|" + chartWindowBars, (g) => {
+  if (fpBars.length && candles.length && TURN_H) {
+    const byTs = new Map();
+    fpBars.forEach((b) => {
+      const t = Number(b && b.time);
+      if (!Number.isFinite(t)) return;
+      let buy = 0, sell = 0, turn = 0;
+      (b.levels || []).forEach((l) => {
+        const q = (Number(l[1]) || 0), k = (Number(l[2]) || 0);
+        buy += q; sell += k; turn += (Number(l[0]) || 0) * (q + k);
+      });
+      byTs.set(t, { turn, delta: buy - sell });
+    });
+    // CVD 는 **화면에 보이는 봉 순서대로** 누적한다 -- 창 시작이 0 이다.
+    let run = 0;
+    const rows = candles.map((c) => {
+      const v = byTs.get(c.time);
+      if (!v) return null;
+      run += v.delta;
+      return { t: c.time, turn: v.turn, delta: v.delta, cvd: run };
+    });
+    const have = rows.filter(Boolean);
+    const nowBar = Math.floor(Date.now() / 1000 / 300) * 300;
+    const hours = Math.round(chartWindowBars * 5 / 60);
+    const fmtUsd = (v) => (v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
+                                    : Math.round(v / 1e3) + "k");
+    const line = (y, x1, x2, col) => {
+      const el = document.createElementNS(NS, "line");
+      el.setAttribute("x1", x1); el.setAttribute("x2", x2);
+      el.setAttribute("y1", y); el.setAttribute("y2", y);
+      el.setAttribute("stroke", col); g.appendChild(el);
+    };
+    const sideLabel = (y, txt, tip) => {
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", ml - 6); t.setAttribute("y", y);
+      t.setAttribute("text-anchor", "end"); t.setAttribute("font-size", "9");
+      t.setAttribute("fill", "var(--muted)"); t.textContent = txt;
+      if (tip) {
+        const ti = document.createElementNS(NS, "title");
+        ti.textContent = tip; t.appendChild(ti);
+      }
+      g.appendChild(t);
+      return t;
+    };
+    const rightLabel = (y, txt) => {
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", ml + cw + 6); t.setAttribute("y", y);
+      t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)");
+      t.textContent = txt; g.appendChild(t);
+    };
+
+    // ── 거래대금 (바닥 기준 · 선형) ──────────────────────────────────────────
+    if (have.length) {
+      const peak = Math.max(...have.map((r) => r.turn));
+      line(turnPanelY, ml, ml + cw, "var(--soft-line)");
+      if (peak > 0) {
+        rows.forEach((r, i) => {
+          if (!r || !r.turn) return;
+          const hgt = Math.max(1, (TURN_H - 1) * r.turn / peak);
+          const rect = document.createElementNS(NS, "rect");
+          rect.setAttribute("x", xAt(i));
+          rect.setAttribute("y", turnPanelY + TURN_H - hgt);
+          rect.setAttribute("width", Math.max(1, bw));
+          rect.setAttribute("height", hgt);
+          rect.setAttribute("fill", "var(--neutral)");   // 방향 없는 값 -- 초록/빨강 금지
+          rect.setAttribute("fill-opacity", r.t >= nowBar ? "0.38" : "0.70");
+          const ti = document.createElementNS(NS, "title");
+          ti.textContent = fmtDateTick(r.t * 1000) + " 거래대금 $" + fmtUsd(r.turn)
+            + (r.t >= nowBar ? " (진행 중)" : "");
+          rect.appendChild(ti);
+          g.appendChild(rect);
+        });
+        rightLabel(turnPanelY + TURN_H / 2 + 3, "최대 $" + fmtUsd(peak));
+      }
+      sideLabel(turnPanelY + TURN_H / 2 + 3, "거래대금",
+        "봉마다 그 5분에 오간 금액입니다(Σ 가격 x 체결량, 매수+매도 둘 다).\n"
+        + "🔴자는 **선형**입니다 -- 실측 최대/중앙 3.5배라 로그로 누르면 오히려 차이가"
+        + " 사라집니다(바로 아래 수급 줄은 11배라 로그를 씁니다).");
+
+      // ── 델타 막대 + CVD 선 (한 자 · 한 0선) ───────────────────────────────
+      const lo = Math.min(0, ...have.map((r) => Math.min(r.delta, r.cvd)));
+      const hi = Math.max(0, ...have.map((r) => Math.max(r.delta, r.cvd)));
+      const rng = Math.max(hi - lo, 1e-9);
+      const yAtV = (v) => dcvdPanelY + (hi - v) / rng * DCVD_H;
+      const y0 = yAtV(0);
+      rows.forEach((r, i) => {
+        if (!r || !r.delta) return;
+        const hgt = Math.max(1, Math.abs(yAtV(r.delta) - y0));
+        const rect = document.createElementNS(NS, "rect");
+        rect.setAttribute("x", xAt(i));
+        rect.setAttribute("y", r.delta >= 0 ? y0 - hgt : y0);
+        rect.setAttribute("width", Math.max(1, bw));
+        rect.setAttribute("height", hgt);
+        rect.setAttribute("fill", r.delta >= 0 ? "var(--good)" : "var(--bad)");
+        rect.setAttribute("fill-opacity", r.t >= nowBar ? "0.30" : "0.55");
+        const ti = document.createElementNS(NS, "title");
+        ti.textContent = fmtDateTick(r.t * 1000) + " 델타 "
+          + (r.delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.delta)) + " ETH"
+          + " · 여기까지 CVD " + (r.cvd >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.cvd))
+          + (r.t >= nowBar ? " (진행 중)" : "");
+        rect.appendChild(ti);
+        g.appendChild(rect);
+      });
+      line(y0, ml, ml + cw, "var(--line)");
+      const pts = rows.map((r, i) => (r ? (xAt(i) + bw / 2) + "," + yAtV(r.cvd) : null))
+                      .filter(Boolean).join(" ");
+      if (pts) {
+        const pl = document.createElementNS(NS, "polyline");
+        pl.setAttribute("points", pts); pl.setAttribute("fill", "none");
+        pl.setAttribute("stroke", "var(--text)"); pl.setAttribute("stroke-width", "2");
+        pl.setAttribute("stroke-linejoin", "round");
+        g.appendChild(pl);
+        const last = have[have.length - 1];
+        const dot = document.createElementNS(NS, "circle");
+        dot.setAttribute("cx", xAt(rows.lastIndexOf(last)) + bw / 2);
+        dot.setAttribute("cy", yAtV(last.cvd)); dot.setAttribute("r", "2.6");
+        dot.setAttribute("fill", "var(--text)");
+        g.appendChild(dot);
+        rightLabel(dcvdPanelY + DCVD_H / 2 + 3,
+                   "CVD " + (last.cvd >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(last.cvd)));
+      }
+      sideLabel(dcvdPanelY + DCVD_H / 2 + 3, "델타·CVD",
+        "막대 = 봉마다의 순델타(매수-매도, ETH) · 흰 선 = 그 막대들의 **달리는 합**(CVD).\n"
+        + "🔴둘은 한 자 · 한 0선을 나눠 씁니다. 자를 따로 주면 선이 막대의 합이라는 사실이"
+        + " 화면에서 끊깁니다. 대가로 창 최대 델타가 자를 지배해 작은 막대는 1~1.5px 입니다"
+        + " -- 부호는 항상 보이고 크기는 커서에 나옵니다.\n"
+        + "🔴**CVD 의 0 은 이 창의 시작**입니다(지금 " + hours + "시간). 창을 1h/2h/4h 로"
+        + " 바꾸면 기준점도 같이 옮겨갑니다 -- 절대 누적이 아닙니다.\n"
+        + "🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이라 이 값과 다릅니다. 이름이 같아도"
+        + " 같은 값이 아닙니다.");
+    }
+  }
+  });
+
   // ── 고래·리테일 수급 리본 (2026-09-20 사용자 지시) ─────────────────────────────
   // 봉마다 순수급(매수-매도)을 **고래(≥$100k)**와 **리테일(<$10k)** 둘로 갈라 0선 기준
   // 좌/우 반폭 막대로 그린다. 값은 supplyFlowOfBar() 가 낸다 -- 5분봉 하나가 곧 5분 누적이다.
@@ -6420,11 +6577,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   엇갈림이라(실측 12봉 중 4봉) 크기를 거짓말하면 화면이 뒤집힌다. 대신 최소 1px 을
   //   보장해 **부호는 항상 보이게** 한다.
   // 풋프린트 폴링(2초)에만 달려 있다.
-  cachedLayer("supplyLane", objToken(supBars), (g) => {
-  if (supBars.length && candles.length && SUP_PANEL_H) {
+  cachedLayer("supplyLane", objToken(fpBars), (g) => {
+  if (fpBars.length && candles.length && SUP_PANEL_H) {
     const SY = supPanelY, SH = SUP_PANEL_H, SMID = SY + SH / 2;
     const flowByTs = new Map();
-    supBars.forEach((b) => {
+    fpBars.forEach((b) => {
       const t = Number(b && b.time);
       if (Number.isFinite(t)) flowByTs.set(t, supplyFlowOfBar(b.levels));
     });
