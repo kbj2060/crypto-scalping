@@ -167,7 +167,11 @@ async def _get(session, path: str, params: dict[str, Any], key: str, secret: str
         async with session.get(url, headers={"X-MBX-APIKEY": key}) as response:
             payload = await response.json()
             if response.status != 200:
-                return {"__error__": f"{response.status} {payload.get('msg', payload)}"}
+                # 🔴코드를 버리면 안 된다. 2026-09-20 에 이것 때문에 리페그가 죽었다 --
+                #   호출부가 "5022" 를 찾는데 문자열은 "400 Due to ..." 였다.
+                code = payload.get("code")
+                tag = f"[{code}] " if code is not None else ""
+                return {"__error__": f"{response.status} {tag}{payload.get('msg', payload)}"}
             return payload
     except Exception as exc:  # network/TLS/JSON -- same degradation as an API error
         return {"__error__": f"{type(exc).__name__}: {exc}"}
