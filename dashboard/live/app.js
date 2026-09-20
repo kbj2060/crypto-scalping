@@ -178,6 +178,9 @@ const API_FOOTPRINT_URL = "/api/footprint";
 //   틱보다 낮춰 두면 틱이 곧 페이서가 되어 간격이 500ms 로 고정된다. 이 게이트는 이제
 //   «틱이 더 빨라져도 두 번 쏘지 않게» 막는 안전장치 역할만 한다.
 const FOOTPRINT_POLL_MS = 400;
+// 최신 봉이 이 봉 수를 넘게 묵으면 증분을 포기하고 전량을 다시 받는다(자가복구).
+// 2 봉 = 10 분. 정상 상태에서는 최신 봉 나이가 최대 1 봉(5 분)이라 안 걸린다.
+const FOOTPRINT_STALE_BARS = 2;
 const FOOTPRINT_MIN_ROW_PX = 11;        // 셀에 숫자가 들어가는 최소 행 높이
 const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 셀 배경 4단계(TradingView: 최소~최대의 0~25/25~50/50~75/75%~). 매수·매도는 각자 최대로 나눈다.
@@ -3440,7 +3443,17 @@ async function refreshFootprint() {
   const key = `${activeSnapshotAsset}|${chartWindowBars}`;
   if (key !== footprintCacheKey) { footprintBars = new Map(); footprintCacheKey = key; }
   const barSec = Number(latestFootprint && latestFootprint.barSeconds) || 300;
-  const newest = footprintBars.size ? Math.max(...footprintBars.keys()) : 0;
+  let newest = footprintBars.size ? Math.max(...footprintBars.keys()) : 0;
+  // 🔴2026-09-21 **자가복구**. 502 한 번(배포 재시작은 실측 5~6초)에 화면이 굳어 12분을
+  // 옛 봉에 머문 신고가 있었다. 어느 게이트에 걸렸는지 원격으로 특정할 수 없었으므로,
+  // «원인»이 아니라 «증상»을 잡는다: 캐시의 최신 봉이 두 봉 넘게 묵었는데 탭이 보이는
+  // 중이면 증분을 포기하고 **전량을 다시 받는다**(12.5KB, 드물게 일어난다).
+  // 증분(since=)만 믿으면 캐시가 한 번 어긋났을 때 스스로 빠져나올 길이 없다.
+  if (newest && !document.hidden && (now / 1000 - newest) > barSec * FOOTPRINT_STALE_BARS) {
+    console.warn(`footprint 정체 ${Math.round(now / 1000 - newest)}s -- 전량 재수신`);
+    footprintBars = new Map();
+    newest = 0;
+  }
   const since = newest ? newest - barSec : 0;   // 0 = 전량
   try {
     const res = await fetch(`${API_FOOTPRINT_URL}?bars=${chartWindowBars}&since=${since}`,
