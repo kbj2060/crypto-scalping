@@ -24,6 +24,9 @@ PERSIST_THIN, PERSIST_THICK = 0.30, 0.40
 NEAR_RES_BP = 60.0         # 저항이 이 안이면 «가깝다»
 FAR_SUP_RATIO = 3.0        # 지지 거리 > 저항 거리 × 이 배수면 «아래 쿠션 없음»
 ACT_HOT = 0.80             # 활동 분위
+FUNDING_NEUTRAL = 0.0001   # 바이낸스 펀딩의 이자 성분(0.01%/8h). 이만큼 더 벗어나야 «쏠림»(음수 = 숏 과밀)
+BASIS_PCT = 0.75           # |Δ베이시스(창 동안)| 이 링 분포의 이 분위 이상이면 «선물 주도/현물 주도»
+C_DEPTH = 1.0              # 플러시 목표 후보 = 베이스에서 창 고저폭 × 이 배수 안의 청산 군집(가장 두꺼운 것)
 
 # 점수표 -- (근거 라벨 → {시나리오: 점수}). A=되돌림 B=지속 C=플러시(이동 반대쪽 과잉)
 SCORES: dict[str, dict[str, int]] = {
@@ -31,6 +34,8 @@ SCORES: dict[str, dict[str, int]] = {
     "전환탐지": {"A": 5, "C": 5}, "분배": {"A": 10, "C": 10}, "축적": {"B": 10}, "거부봉": {"A": 5, "C": 10},
     "벽_동방향_두꺼움": {"B": 10}, "벽_동방향_얇음": {"B": 3}, "벽_역방향": {"A": 5},
     "가치영역_밖": {"A": 5}, "저항근접": {"A": 5, "B": -5}, "쿠션없음": {"C": 5}, "활발": {"B": 5, "C": 5},
+    # 2026-09-21 마크가격 스트림: 펀딩 = «어느 쪽이 갇혔나», 베이시스 = «누가 주도하나»(선물 프리미엄 확장 = 취약)
+    "펀딩_반대쏠림": {"A": 10}, "선물주도": {"A": 8}, "현물주도": {"B": 8},
 }
 BASE = {"A": 34, "B": 33, "C": 33}
 
@@ -47,6 +52,8 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
       cur    {elapsed_s, whale_net, retail_net, oi_delta, delta}
       book   {obi, persist_share}   act_pct   sr {res, sup, res_bp, sup_bp}
       breakout {detect_on, prewarn_on}   mid
+      deriv  {funding, basis_bp, basis_d_bp, basis_thr_bp} (마크가격 링, 없으면 생략)
+      sr.sup_levels / sr.res_levels  청산맵 [{price, weight_pct}] 가까운 순 (플러시 목표용, 없으면 베이스)
     반환: 라벨·근거·시나리오(확률+목표)·뒤집기 신호(현재 판정 포함)."""
     bars = [b for b in inp.get("bars", []) if b.get("close")]
     if len(bars) < WINDOW + 1:
@@ -156,6 +163,18 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
         labels.append(f"활발 (시간대 상위 {100 - int(act * 100)}%) · 큰 움직임 임박")
     ev.update(near_res=near_res, near_sup=near_sup, no_cushion=bool(no_cushion), hot=hot)
 
+    # ── 펀딩 · 베이시스 (마크가격 스트림) ──
+    dv = inp.get("deriv") or {}
+    fr, bas, bd, bthr = dv.get("funding"), dv.get("basis_bp"), dv.get("basis_d_bp"), dv.get("basis_thr_bp")
+    crowd = 0 if fr is None or abs(fr - FUNDING_NEUTRAL) < FUNDING_NEUTRAL else _sign(fr - FUNDING_NEUTRAL)
+    trapped = d != 0 and crowd == -d                       # 이동 반대편이 과밀 = 갇힌 쪽이 연료
+    lead = 0 if (d == 0 or bd is None or bthr is None or abs(bd) < bthr) else (1 if _sign(bd) == d else -1)
+    if fr is not None:
+        labels.append(f"펀딩 {fr * 100:+.4f}%" + {1: " (롱 쏠림)", -1: " (숏 쏠림)", 0: ""}[crowd] + (" · 갇힘" if trapped else "")
+                      + (f" · 베이시스 {bas:+.1f}bp" if bas is not None else "")
+                      + (f" (창 {bd:+.1f} · " + {1: "선물 주도", -1: "현물 주도", 0: "중립"}[lead] + ")" if bd is not None else ""))
+    ev.update(funding=fr, crowd=crowd, trapped=trapped, basis_bp=bas, basis_d_bp=bd, lead=lead)
+
     # ── 시나리오 점수 ──
     sc = dict(BASE)
     why: list[tuple[str, dict[str, int]]] = []
@@ -181,6 +200,9 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     if near_res or near_sup: add("저항근접")
     if no_cushion: add("쿠션없음")
     if hot: add("활발")
+    if trapped: add("펀딩_반대쏠림")
+    if lead > 0: add("선물주도")
+    if lead < 0: add("현물주도")
     tot = sum(max(v, 1) for v in sc.values())
     prob = {k: round(max(v, 1) / tot * 100) for k, v in sc.items()}
 
@@ -199,6 +221,16 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     if d == 0:
         names = {"A": "레인지 유지", "B": "상단 이탈", "C": "하단 이탈"}
         cont = max(b["high"] for b in w); base_px = min(b["low"] for b in w)   # 횡보는 창 자체가 레인지
+    else:
+        # 청산맵은 «위치 예보»(레벨 ±15bp 청산 확률 0.52 vs 0.28, 09-20 실측)라 확률이 아니라 목표에 쓴다:
+        # 베이스에서 창 고저폭 안에 있는 반대편 청산 군집 중 가장 두꺼운 것이 플러시가 «실제로 멈추는 자리».
+        opp = (sr.get("sup_levels") if d > 0 else sr.get("res_levels")) or []
+        depth = rng_bp / 1e4 * mid * C_DEPTH
+        cands = [lv for lv in opp if lv.get("price") and (base_px - depth <= lv["price"] <= base_px if d > 0 else base_px <= lv["price"] <= base_px + depth)]
+        if cands:
+            base_px = float(max(cands, key=lambda lv: lv.get("weight_pct") or 0)["price"])
+            names["C"] = "플러시 · 청산 군집" if d > 0 else "역스퀴즈 · 청산 군집"
+    ev["c_target_src"] = "청산군집" if "청산 군집" in names["C"] else "베이스"
     targets = {"A": [va_lo, va_hi] if va_lo is not None else None, "B": round(float(cont), 2), "C": round(float(base_px), 2)}
 
     # ── 생각을 바꾸는 신호 (실시간 판정) ──
@@ -295,6 +327,20 @@ if __name__ == "__main__":
     assert r["prob"]["A"] > r["prob"]["B"] and r["prob"]["A"] > r["prob"]["C"], r["prob"]      # 되돌림이 1순위
     assert r["targets"]["A"] == [2606, 2609] and r["targets"]["B"] == 2624.74 and r["targets"]["C"] == 2594 - 3
     assert [f["on"] for f in r["flips"]] == [False, False, False, False, False]                # 그 시점엔 다 꺼져 있었다
+    assert r["evidence"]["c_target_src"] == "베이스" and "펀딩" not in " ".join(r["labels"])
+    # 청산 군집 목표: 베이스(2591) 아래 창 고저폭 안의 가장 두꺼운 지지 레벨로 바뀐다. 너무 먼 2562 는 안 고른다
+    inp3 = dict(inp); inp3["sr"] = dict(inp["sr"], sup_levels=[{"price": 2589.5, "weight_pct": 30}, {"price": 2587.0, "weight_pct": 45}, {"price": 2562.06, "weight_pct": 60}])
+    r3 = classify(inp3)
+    assert r3["targets"]["C"] == 2587.0 and r3["names"]["C"] == "플러시 · 청산 군집" and r3["prob"] == r["prob"], (r3["targets"], r3["prob"])
+    # 펀딩 음수(숏 쏠림) + 상승 = 갇힘 → A 가 오른다 · 프리미엄이 창 동안 임계 이상 벌어지면 «선물 주도»
+    inp4 = dict(inp); inp4["deriv"] = dict(funding=-0.0002, basis_bp=3.0, basis_d_bp=2.0, basis_thr_bp=1.0)
+    r4 = classify(inp4)
+    assert r4["evidence"]["trapped"] and r4["evidence"]["lead"] == 1 and r4["prob"]["A"] > r["prob"]["A"], (r4["evidence"], r4["prob"])
+    assert any("갇힘" in x and "선물 주도" in x for x in r4["labels"]), r4["labels"]
+    inp5 = dict(inp); inp5["deriv"] = dict(funding=0.00005, basis_bp=0.5, basis_d_bp=-2.0, basis_thr_bp=1.0)   # 중립 펀딩 · 현물 주도
+    r5 = classify(inp5)
+    assert not r5["evidence"]["trapped"] and r5["evidence"]["lead"] == -1 and r5["prob"]["B"] > r["prob"]["B"]
+    assert classify(dict(inp, deriv=dict(funding=-0.0002, basis_bp=3.0, basis_d_bp=2.0, basis_thr_bp=None)))["evidence"]["lead"] == 0   # 임계 없으면 보류
     # 뒤집기: 마지막 봉 OI↑ 로 바꾸면 «신규 롱» 신호가 켜지고 B 가 오른다
     inp2 = dict(inp); inp2["bars"] = bars[:-1] + [bar(2400, 2616, 2500, 11000, 0, 0, 700, ls=30e3)]
     r2 = classify(inp2)

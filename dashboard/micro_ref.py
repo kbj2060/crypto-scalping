@@ -228,6 +228,25 @@ def liq_prev_minute(db_path: Path) -> dict[str, Any] | None:
     return {"ts": int(row[0]), "long": float(row[1] or 0.0), "short": float(row[2] or 0.0)}
 
 
+def deriv_from_ring(ring: dict[int, tuple[float, float, float]], horizon_s: int, pct: float,
+                    step_s: int = 30, min_samples: int = 60) -> dict[str, Any]:
+    """markPrice@1s 링 {sec: (mark, index, funding)} → 펀딩·베이시스(bp)·지평 전 대비 Δ베이시스·그 임계.
+    임계는 상수가 아니라 링 안 |Δ베이시스| 의 분위(pct) -- 표본이 min_samples 미만이면 None(판정 보류)."""
+    out: dict[str, Any] = {"funding": None, "basis_bp": None, "basis_d_bp": None, "basis_thr_bp": None}
+    if not ring:
+        return out
+    bas = lambda s: (ring[s][0] - ring[s][1]) / ring[s][1] * 1e4   # noqa: E731
+    last = max(ring)
+    out["funding"], out["basis_bp"] = ring[last][2], bas(last)
+    prev = max((s for s in ring if s <= last - horizon_s), default=None)
+    if prev is not None:
+        out["basis_d_bp"] = bas(last) - bas(prev)
+    ds = sorted(abs(bas(s) - bas(s - horizon_s)) for s in sorted(ring)[::step_s] if s - horizon_s in ring)
+    if len(ds) >= min_samples:
+        out["basis_thr_bp"] = ds[min(len(ds) - 1, int(len(ds) * pct))]
+    return out
+
+
 if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근접 판정, 버스트 판정
     assert qi(3, 1) == 0.5 and qi(0, 0) == 0.0 and side_of(0.6, QI_SIDE_ABS) == "매수" and side_of(-0.2, QI_SIDE_ABS) == "중립"
     # 격자: bin_size 0.5, bin_lo 5200 → 가격 2600.0 부터. mid 2600.5. +매수 −매도.
@@ -260,4 +279,11 @@ if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근�
     b = burst_state([(now - 24, 900.0)], ring, vol1s_p99=500.0, now_sec=now)
     assert b["state"] == "청산 덩어리 통과" and b["doi"] == -300.0, b
     assert burst_state([(now - 24, 100.0)], ring, 500.0, now)["state"] == "—"
+    # 베이시스 파생 -- 프리미엄이 지평 동안 1bp→3bp 로 벌어지면 Δ=+2, 임계는 링 분위
+    ring = {i: (2600.0 * (1 + (1.0 + 2.0 * (i / 7200)) / 1e4), 2600.0, -0.0002) for i in range(0, 7201)}
+    dv = deriv_from_ring(ring, horizon_s=1800, pct=0.75)
+    assert dv["funding"] == -0.0002 and abs(dv["basis_bp"] - 3.0) < 1e-6 and abs(dv["basis_d_bp"] - 0.5) < 1e-6, dv
+    assert dv["basis_thr_bp"] is not None and abs(dv["basis_thr_bp"] - 0.5) < 1e-6, dv
+    assert deriv_from_ring({0: (2601.0, 2600.0, 0.0)}, 1800, 0.75)["basis_d_bp"] is None
+    assert deriv_from_ring({}, 1800, 0.75)["funding"] is None
     print("micro_ref selftest ok")

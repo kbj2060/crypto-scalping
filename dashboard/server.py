@@ -589,6 +589,12 @@ MICRO_BOOK_URL = "https://fapi.binance.com/fapi/v1/ticker/bookTicker"   # weight
 FORCE_ORDER_WS_URL = "wss://fstream.binance.com/market/ws/ethusdt@forceOrder"
 LIQ_EVENTS_PATH = LIVE_DIR / "liq_events.jsonl"      # ⑤ 원시 이벤트. 봇의 tail_risk 는 1분 합만 남긴다
 MICRO_TAPE_DB_PATH = LIVE_DIR / "trade_tape.duckdb"  # ② 기준선(시간대별 분위). 읽기 전용, 1시간마다
+# ⑥ 마크가격 스트림(2026-09-21): 예상 펀딩(«어느 쪽이 갇혔나») + 마크−인덱스 베이시스(«누가 주도하나»).
+#    🔴forceOrder 와 같은 함정 -- `/ws/` 는 연결되는데 이벤트 0, `/market/ws/` 만 온다(09-21 dev 실측 0 vs 8건/6초).
+MARK_PRICE_WS_URL = "wss://fstream.binance.com/market/ws/ethusdt@markPrice@1s"
+MARK_PRICE_DB_PATH = LIVE_DIR / "mark_price_1s.duckdb"
+MARK_PRICE_TABLE = "mark_price_1s"
+MARK_PRICE_RING_S = 7200          # 메모리 링(초). 베이시스 임계 분위를 «창 Δ» 표본 60개 이상에서 잡으려면 1시간 넘게 필요
 MICRO_BASELINE_SECONDS = 3600
 SITUATION_EVERY_TICKS = 5                              # micro-ref 1초 루프의 5틱마다
 SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30분 뒤 결과와 맞춰 적중률을 낸다
@@ -633,6 +639,23 @@ def oi_1s_persist(rows: list[tuple[int, float]]) -> None:
                 PRIMARY KEY (ts_ms, symbol))""")
             con.executemany(f"INSERT OR IGNORE INTO {OI_1S_TABLE} VALUES (?, ?, ?)",
                             [(int(ms), FOOTPRINT_SYMBOL.lower(), float(v)) for ms, v in rows])
+        finally:
+            con.close()
+
+
+def mark_price_persist(rows: list[tuple[int, float, float, float, int]]) -> None:
+    """markPrice@1s 를 duckdb 에 남긴다. rows = (ts_ms, mark, index, funding_rate, next_funding_ms). PK ts_ms(밀리초).
+    재기동 직후 겹치는 구간을 다시 써도 PK 가 무시한다(oi_1s_persist 와 같은 계약)."""
+    if not rows:
+        return
+    with duckdb_path_lock(MARK_PRICE_DB_PATH):
+        con = duckdb.connect(str(MARK_PRICE_DB_PATH))
+        try:
+            con.execute(f"""CREATE TABLE IF NOT EXISTS {MARK_PRICE_TABLE} (
+                ts_ms BIGINT, symbol VARCHAR, mark DOUBLE, index_px DOUBLE, funding_rate DOUBLE, next_funding_ms BIGINT,
+                PRIMARY KEY (ts_ms, symbol))""")
+            con.executemany(f"INSERT OR IGNORE INTO {MARK_PRICE_TABLE} VALUES (?, ?, ?, ?, ?, ?)",
+                            [(int(ms), FOOTPRINT_SYMBOL.lower(), float(mk), float(ix), float(fr), int(nf)) for ms, mk, ix, fr, nf in rows])
         finally:
             con.close()
 
@@ -2388,6 +2411,8 @@ def make_app() -> web.Application:
     # (tail_risk_interceptor 가 2026-07-30 에 77일간 잘못 connected=True 로 있던 그 함정).
     fo_state: dict[str, Any] = {"connected": False, "since": None, "last_event_ms": None, "events": 0, "errors": 0, "last_error": None}
     ofi_hist: deque = deque(maxlen=600)         # |OFI10| 최근 10분 -- 임계는 상수가 아니라 분위(p50)
+    mp_state: dict[str, Any] = {"connected": False, "since": None, "last_ms": None, "events": 0, "errors": 0, "last_error": None}
+    mark_ring: dict[int, tuple[float, float, float]] = {}   # sec → (mark, index, funding). 상황 읽기의 펀딩·베이시스 입력
 
     async def collect_force_orders(app: web.Application) -> None:
         """⑤ @forceOrder 원시 이벤트를 jsonl 로 남기고 60초 링을 든다. 이벤트가 없으면 조용하다."""
@@ -2422,6 +2447,55 @@ def make_app() -> web.Application:
                     await asyncio.sleep(3.0)
                 finally:
                     fo_state["connected"] = False
+        finally:
+            await ws_session.close()
+
+    async def collect_mark_price(app: web.Application) -> None:
+        """⑥ @markPrice@1s → 메모리 링 + duckdb(10초마다 flush). 끊기면 3초 뒤 다시."""
+        ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
+        pending: list[tuple[int, float, float, float, int]] = []
+        flushed_at = time.time()
+        try:
+            while True:
+                try:
+                    async with ws_session.ws_connect(MARK_PRICE_WS_URL, heartbeat=30) as ws:
+                        mp_state.update(connected=True, since=time.time())
+                        print("mark-price ws: connected", flush=True)
+                        async for msg in ws:
+                            if msg.type is not WSMsgType.TEXT:
+                                print(f"mark-price ws: non-text {msg.type!r} -> reconnect", flush=True)
+                                break
+                            o = json.loads(msg.data) or {}
+                            if o.get("e") != "markPriceUpdate":
+                                continue
+                            ts_ms = int(o["E"]); mark, idx, fr = float(o["p"]), float(o["i"]), float(o["r"])
+                            mp_state["events"] += 1; mp_state["last_ms"] = ts_ms
+                            mark_ring[ts_ms // 1000] = (mark, idx, fr)
+                            pending.append((ts_ms, mark, idx, fr, int(o.get("T") or 0)))
+                            now = time.time()
+                            if now - flushed_at >= OI_1S_FLUSH_SECONDS:
+                                for old in [sc for sc in mark_ring if sc < now - MARK_PRICE_RING_S]:
+                                    del mark_ring[old]
+                                try:
+                                    await asyncio.to_thread(mark_price_persist, pending)
+                                    pending = []
+                                except Exception as exc:  # noqa: BLE001 -- 잠깐 잠기면 다음 flush 로. WS 는 유지
+                                    print(f"mark-price flush failed (will retry): {exc}", flush=True)
+                                    del pending[:-1200]
+                                flushed_at = now
+                except asyncio.CancelledError:
+                    if pending:
+                        try:
+                            mark_price_persist(pending)
+                        except Exception as exc:  # noqa: BLE001
+                            print(f"mark-price final flush failed: {exc}", flush=True)
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- 끊기면 3초 뒤 다시. 봇에 영향 없음
+                    mp_state.update(errors=mp_state["errors"] + 1, last_error=repr(exc)[:120])
+                    print(f"mark-price ws: {exc!r}", flush=True)
+                    await asyncio.sleep(3.0)
+                finally:
+                    mp_state["connected"] = False
         finally:
             await ws_session.close()
 
@@ -2476,6 +2550,9 @@ def make_app() -> web.Application:
                 vol60_x = (vol60 / med[len(med) // 2]) if med and med[len(med) // 2] > 0 else None
                 levels = await load_liquidation_map("eth")
                 sr = mref.sr_context(levels if levels.get("warmed_up") else None, mid, flow.get("imb40") if flow.get("ok") else None)
+                if levels.get("warmed_up"):   # 상황 읽기의 플러시 목표(청산 군집)용 -- 가까운 순 [{price, weight_pct}]
+                    sr["sup_levels"] = [{"price": lv["price"], "weight_pct": lv.get("weight_pct")} for lv in levels.get("support_levels") or []]
+                    sr["res_levels"] = [{"price": lv["price"], "weight_pct": lv.get("weight_pct")} for lv in levels.get("resistance_levels") or []]
                 burst = mref.burst_state(vol1s, oi_1s, (base or {}).get("sec_vol_p99", {}).get(hour), now_sec)
                 cut = now * 1000 - 60_000
                 ev60 = [e for e in liq_events if e["ts_ms"] >= cut]
@@ -2497,7 +2574,7 @@ def make_app() -> web.Application:
                     "vol60": vol60, "vol60_pct": vol60_pct, "vol60_x_p50": vol60_x, "act": mref.act_label(vol60_pct),
                     "baseline_days": (base or {}).get("days"), "hour_utc": hour,
                     "sr": sr, "burst": burst, "liq60": liq60, "liq_prev": micro_state["liq_prev"],
-                    "fo": dict(fo_state),
+                    "fo": dict(fo_state), "mp": dict(mp_state),
                 }
             except asyncio.CancelledError:
                 raise
@@ -2517,9 +2594,10 @@ def make_app() -> web.Application:
         _situation_load_log()
         app["micro_ref_task"] = asyncio.create_task(collect_micro_ref(app))
         app["force_order_task"] = asyncio.create_task(collect_force_orders(app))
+        app["mark_price_task"] = asyncio.create_task(collect_mark_price(app))
 
     async def stop_micro_ref(app: web.Application) -> None:
-        for key in ("micro_ref_task", "force_order_task"):
+        for key in ("micro_ref_task", "force_order_task", "mark_price_task"):
             app[key].cancel()
             try:
                 await app[key]
@@ -2596,6 +2674,7 @@ def make_app() -> web.Application:
         bo = situation_state.get("breakout") or {}
         return {"bars": bars, "levels": levels, "cur": cur, "mid": mp.get("mid"),
                 "book": situation_state.get("book") or {}, "act_pct": mp.get("vol60_pct"), "sr": mp.get("sr") or {},
+                "deriv": mref.deriv_from_ring(mark_ring, sit.WINDOW * FOOTPRINT_BAR_SECONDS, sit.BASIS_PCT),
                 "breakout": {"detect_on": bool((bo.get("detect") or {}).get("on")), "prewarn_on": bool((bo.get("prewarn") or {}).get("on"))}}
 
     async def compute_situation(now: float) -> None:
