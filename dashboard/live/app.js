@@ -3737,19 +3737,49 @@ async function refreshOi5m() {
   // 같은 SVG 를 한 번 더 통째로 다시 그린다.
 }
 
+// ── 풋프린트 증분 (2026-09-20) ────────────────────────────────────────────
+// 400ms 폴링인데 48봉을 통째로 받고 있었다. 서버 실측: 400ms 간격 19번 중 내용이 실제로
+// 바뀐 건 12번이고 바뀌는 건 **맨 오른쪽 봉 하나**다(닫힌 봉은 5분에 한 번). 그래서 봉을
+// 여기 Map 에 쌓아 두고 **꼬리 두 봉만** 물어본다. 폴링 주기도 렌더 주기도 안 건드린다 --
+// 줄어드는 건 «안 바뀐 47봉을 다시 받는» 바이트뿐이라 지연은 1ms 도 안 늘어난다.
+// 🔴꼬리가 **두 봉**인 이유: 봉 경계에서 늦게 도착한 체결이 직전 봉에 들어간다.
+// 🔴전량으로 되돌리는 판단은 **서버의 `full`** 을 따른다 -- 백필 중(ready=False)에는 과거 봉도
+//   바뀌므로 서버가 전량을 주고, 그때 캐시를 통째로 갈아끼운다.
+let footprintBars = new Map();          // 봉시각 -> 서버가 준 봉 객체(그대로)
+let footprintCacheKey = "";             // 코인|창 -- 달라지면 캐시를 버리고 전량부터
+
 async function refreshFootprint() {
   if (chartMode !== "footprint") return;       // 청산맵을 보는 동안은 받을 이유가 없다
   if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
   const now = Date.now();
   if (now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
   footprintLastFetchAt = now;
+  const key = `${activeSnapshotAsset}|${chartWindowBars}`;
+  if (key !== footprintCacheKey) { footprintBars = new Map(); footprintCacheKey = key; }
+  const barSec = Number(latestFootprint && latestFootprint.barSeconds) || 300;
+  const newest = footprintBars.size ? Math.max(...footprintBars.keys()) : 0;
+  const since = newest ? newest - barSec : 0;   // 0 = 전량
   try {
-    const res = await fetch(`${API_FOOTPRINT_URL}?bars=${chartWindowBars}`, { cache: "no-cache" });
+    const res = await fetch(`${API_FOOTPRINT_URL}?bars=${chartWindowBars}&since=${since}`,
+                            { cache: "no-cache" });
     if (!res.ok) throw new Error(`footprint ${res.status}`);
-    latestFootprint = await res.json();
+    const payload = await res.json();
+    if (payload.full) footprintBars = new Map();
+    (payload.bars || []).forEach((b) => footprintBars.set(b.time, b));
+    // 창 밖으로 밀려난 봉은 버린다 -- 증분이라 서버가 «빠졌다»를 말해 주지 않는다.
+    if (footprintBars.size > chartWindowBars) {
+      [...footprintBars.keys()].sort((a, b) => a - b)
+        .slice(0, footprintBars.size - chartWindowBars)
+        .forEach((t) => footprintBars.delete(t));
+    }
+    // 아래 소비자(footprintForChart)는 예전과 **같은 모양**을 본다 -- 시각순 전체 배열.
+    latestFootprint = { ...payload,
+                        bars: [...footprintBars.values()].sort((a, b) => a.time - b.time) };
   } catch (error) {
     console.error("Footprint fetch error:", error);
     latestFootprint = null;   // null 이면 차트가 그냥 예전 캔들로 되돌아간다
+    // 🔴캐시는 **안 버린다**. 한 번의 네트워크 실패로 12.5KB 를 다시 받을 이유가 없다 --
+    //   다음 성공 폴링이 꼬리 두 봉만 얹으면 그대로 이어진다.
   }
   scheduleSnapshotChartRender();
 }

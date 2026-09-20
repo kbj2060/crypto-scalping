@@ -2911,13 +2911,35 @@ def make_app() -> web.Application:
         want = footprint_window_bars(request)
         recent = sorted(footprint_state["bars"].items())[-want:]
         agg_bars = footprint_state["agg_bars"]
+        # ── `?since=<봉시각>` 증분 (2026-09-20) ──────────────────────────────
+        # 400ms 폴링인데 48봉을 통째로 보내고 있었다. 실측: 400ms 간격 19번 중 내용이 실제로
+        # 바뀐 건 12번이고, 바뀌는 건 **거의 언제나 맨 오른쪽 봉 하나**다(닫힌 봉은 5분에 한 번).
+        # 화면 실사용 9.8KB/s 중 대부분이 안 바뀐 47봉을 다시 보내는 값이었다.
+        # 🔴«현재 봉 하나»로는 부족하다. 봉 경계에서 늦게 도착한 체결이 **직전 봉**에 들어가므로
+        #   클라가 since = 최신봉 - 1봉 으로 물어 둘을 받는다. 그래서 여기 비교는 `>=` 다.
+        # 🔴백필 중에는 **과거 봉도 바뀐다**(REST 가 몇 분에 걸쳐 메운다). 그 구간의 계약이
+        #   바로 `ready`(= 공백 없음)이므로, ready 가 아니면 증분을 주지 않고 전량을 준다.
+        #   재연결로 ready 가 다시 False 가 되면 자동으로 전량 재동기화된다.
+        try:
+            since = int(request.query.get("since", "0"))
+        except (TypeError, ValueError):
+            since = 0
+        full = since <= 0 or not footprint_state["ready"]
+        sent = recent if full else [(b, c) for b, c in recent if b >= since]
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
             "bucket": FOOTPRINT_BUCKET,
             "barSeconds": FOOTPRINT_BAR_SECONDS,
             "barsExpected": want,
             "ready": bool(footprint_state["ready"]),
-            "updated": footprint_state["updated"],
+            # 🔴클라가 «이게 전량인가 조각인가»를 payload 에서 알아야 한다. 요청 쿼리로
+            #   추측하면 서버가 ready=False 라 전량으로 되돌린 경우를 놓친다.
+            "full": full,
+            # 🔴`updated`(마지막 체결 시각)를 **뺐다**. 읽는 곳이 없는데(화면·시험 전수 확인)
+            #   체결마다 바뀌어서 **ETag 를 매번 깨뜨리고 있었다** -- 봉 내용이 그대로여도
+            #   304 가 안 나갔다. 빼고 나면 조용한 구간의 폴링이 본문 0B 로 끝난다
+            #   (실측: 조건부 요청 20회 중 이미 11회가 304 였고, 그 비율이 더 올라간다).
+            #   서버 내부의 footprint_state["updated"]는 스냅샷 저장 주기에 계속 쓴다.
             # 화면이 「고래 ≥$100k」를 적는 데 쓴다. 경계를 화면에 안 적으면 「고래」가
             # 무슨 뜻인지 보는 사람이 알 방법이 없다.
             "retailMaxUsd": RETAIL_MAX_USD,
@@ -2928,7 +2950,7 @@ def make_app() -> web.Application:
                  "agg": bar in agg_bars,
                  "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
                             for k, v in sorted(cells.items())]}
-                for bar, cells in recent
+                for bar, cells in sent
             ],
         }, headers=NOCACHE)
 
