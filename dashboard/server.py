@@ -1134,16 +1134,6 @@ def btc_evidence_shadow_payload() -> dict[str, Any]:
     }
 
 
-def _locked_bp(p: dict[str, Any]) -> float | None:
-    """섀도우 포지션의 손절선이 이미 확정한 손익(bp, 왕복비용 10bp 차감). 현재가 불필요."""
-    try:
-        entry, stop = float(p["entry"]), float(p["stop"])
-        sgn = 1.0 if p.get("side") == "long" else -1.0
-        return round(sgn * (stop - entry) / entry * 1e4 - 10.0, 2)
-    except (KeyError, TypeError, ValueError, ZeroDivisionError):
-        return None
-
-
 COIN_INDICATOR_CACHE_SECONDS = 20
 # nif_whale은 간헐적이라 최신 1행만 보면 절반이 빈 값이다 -- 이 창 안의 마지막 값을 쓴다.
 MICRO_LOOKBACK_MIN = 15
@@ -1626,6 +1616,24 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
     except Exception as e:                                     # noqa: BLE001 -- 절대 raise 안 함
         out["error"] = f"coin_indicators_error: {e}"
     return out
+
+
+# 🔴SSE 로 나가는 상태는 **화면이 실제로 읽는 세 블록**뿐이다.
+# app.js 의 render() 가 보는 것은 state.session / state.microstructure / state.tail_risk 이고
+# compactState 는 인자로 넘어가기만 하고 **본문에서 한 번도 안 읽힌다**(2026-09-20 확인).
+# 그런데 이 루프는 dashboard_state.json 전체(실측 30,109B)를 상태가 바뀔 때마다 그대로 밀고
+# 있었다 -- 세 블록만 추리면 3,498B 로 **8.6배** 줄어든다. SSE 는 gzip 도 안 걸린다
+# (json_compress_etag 미들웨어는 StreamResponse 를 건드리지 않는다).
+# ⭐옛 app.js 와도 호환된다: 지우는 키는 클라가 애초에 안 읽던 것들이다.
+# ⚠️`/api/state` 는 **그대로 전체**를 준다 -- 계약이 다르고 테스트가 그걸 검사한다.
+SSE_STATE_KEYS = ("session", "microstructure", "tail_risk")
+
+
+def sse_state_view(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    state = (payload or {}).get("state")
+    if not state:
+        return payload      # 없음/빈 상태는 원래 모양 그대로 -- 클라 가드가 그걸 본다
+    return {"state": {k: state.get(k) for k in SSE_STATE_KEYS}}
 
 
 def no_cache(resp: web.StreamResponse) -> web.StreamResponse:
@@ -2745,10 +2753,10 @@ def make_app() -> web.Application:
                     }
                     state_changed = state_etag != last_state_etag
                     if state_changed:
-                        latest_event_state = state_payload
+                        latest_event_state = sse_state_view(state_payload)
                         last_state_etag = state_etag
                     payload = {
-                        "state": state_payload if state_changed else None,
+                        "state": latest_event_state if state_changed else None,
                         "tickers": latest_event_tickers,
                         # 켜진 코인 목록을 **서버가 알려준다**. 클라가 같은 목록을 따로 들고
                         # 있으면 둘이 어긋나는 날이 온다(SUSTAIN_BARS_OVERRIDE 류의 반복 교훈).
@@ -2908,13 +2916,35 @@ def make_app() -> web.Application:
         want = footprint_window_bars(request)
         recent = sorted(footprint_state["bars"].items())[-want:]
         agg_bars = footprint_state["agg_bars"]
+        # ── `?since=<봉시각>` 증분 (2026-09-20) ──────────────────────────────
+        # 400ms 폴링인데 48봉을 통째로 보내고 있었다. 실측: 400ms 간격 19번 중 내용이 실제로
+        # 바뀐 건 12번이고, 바뀌는 건 **거의 언제나 맨 오른쪽 봉 하나**다(닫힌 봉은 5분에 한 번).
+        # 화면 실사용 9.8KB/s 중 대부분이 안 바뀐 47봉을 다시 보내는 값이었다.
+        # 🔴«현재 봉 하나»로는 부족하다. 봉 경계에서 늦게 도착한 체결이 **직전 봉**에 들어가므로
+        #   클라가 since = 최신봉 - 1봉 으로 물어 둘을 받는다. 그래서 여기 비교는 `>=` 다.
+        # 🔴백필 중에는 **과거 봉도 바뀐다**(REST 가 몇 분에 걸쳐 메운다). 그 구간의 계약이
+        #   바로 `ready`(= 공백 없음)이므로, ready 가 아니면 증분을 주지 않고 전량을 준다.
+        #   재연결로 ready 가 다시 False 가 되면 자동으로 전량 재동기화된다.
+        try:
+            since = int(request.query.get("since", "0"))
+        except (TypeError, ValueError):
+            since = 0
+        full = since <= 0 or not footprint_state["ready"]
+        sent = recent if full else [(b, c) for b, c in recent if b >= since]
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
             "bucket": FOOTPRINT_BUCKET,
             "barSeconds": FOOTPRINT_BAR_SECONDS,
             "barsExpected": want,
             "ready": bool(footprint_state["ready"]),
-            "updated": footprint_state["updated"],
+            # 🔴클라가 «이게 전량인가 조각인가»를 payload 에서 알아야 한다. 요청 쿼리로
+            #   추측하면 서버가 ready=False 라 전량으로 되돌린 경우를 놓친다.
+            "full": full,
+            # 🔴`updated`(마지막 체결 시각)를 **뺐다**. 읽는 곳이 없는데(화면·시험 전수 확인)
+            #   체결마다 바뀌어서 **ETag 를 매번 깨뜨리고 있었다** -- 봉 내용이 그대로여도
+            #   304 가 안 나갔다. 빼고 나면 조용한 구간의 폴링이 본문 0B 로 끝난다
+            #   (실측: 조건부 요청 20회 중 이미 11회가 304 였고, 그 비율이 더 올라간다).
+            #   서버 내부의 footprint_state["updated"]는 스냅샷 저장 주기에 계속 쓴다.
             # 화면이 「고래 ≥$100k」를 적는 데 쓴다. 경계를 화면에 안 적으면 「고래」가
             # 무슨 뜻인지 보는 사람이 알 방법이 없다.
             "retailMaxUsd": RETAIL_MAX_USD,
@@ -2925,7 +2955,7 @@ def make_app() -> web.Application:
                  "agg": bar in agg_bars,
                  "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
                             for k, v in sorted(cells.items())]}
-                for bar, cells in recent
+                for bar, cells in sent
             ],
         }, headers=NOCACHE)
 
@@ -2975,7 +3005,13 @@ def make_app() -> web.Application:
             bars = max(1, min(288, int(request.query.get("bars", OI_5M_WINDOW_BARS))))
         except ValueError:
             bars = OI_5M_WINDOW_BARS
-        buckets = await asyncio.to_thread(oi_5m_buckets, bars)
+        # 🔴이 저장소에서 **매 요청 duckdb 를 여는 유일한 엔드포인트**였다(실측 12~15ms,
+        #   따뜻한 다른 엔드포인트가 0.5~4ms). 파일 락을 잡으므로 10초마다 도는 쓰기
+        #   (oi_1s_persist)와 탭 수만큼 부딪힌다. TTL 은 클라 폴링(OI_5M_POLL_MS=15초)의
+        #   3분의 1이라 **단일 탭에서는 늘 미스**다 -- 신선도는 그대로고 탭이 늘어도 duckdb
+        #   열기 횟수만 5초당 한 번으로 묶인다. 값 자체도 5분봉이라 5초는 해상도 아래다.
+        buckets = await swr_cached(f"oi_5m:{bars}", 5.0,
+                                   lambda: asyncio.to_thread(oi_5m_buckets, bars))
         # 현재 OI 는 링에서 바로 준다 -- duckdb 는 최대 OI_1S_FLUSH_SECONDS 만큼 뒤처져 있다.
         now_oi = oi_1s[max(oi_1s)] if oi_1s else (buckets[-1][2] if buckets else 0.0)
         return web.json_response({
@@ -3017,9 +3053,27 @@ def make_app() -> web.Application:
                        for k, v in sorted(merged.items())],
         }, headers=NOCACHE)
 
+    # 🔴이 응답은 **페이지 로드를 막는다** -- app.js 가 seedModelIndicatorHistory() 를 await
+    #   한 뒤에야 SSE 를 연다. 그런데 48샘플의 microstructure/tail_risk 를 통째로 실어 보내
+    #   194KB(gzip 27KB)였다: 이 저장소에서 **가장 큰 응답**이고, 그 중 클라이언트가 읽는 것은
+    #   classifyIndicators() 가 쓰는 **다섯 필드뿐**이다(나머지는 파싱되고 버려진다).
+    #   버퍼/파일은 그대로 두고(나중에 다른 필드를 쓸 수 있게) **나갈 때만** 자른다.
+    MIH_MICRO_KEYS = ("nif_whale", "nif_retail")
+    MIH_TAIL_KEYS = ("hawkes_active", "z_long", "z_short")
+
+    def _mih_slim(sample: dict) -> dict:
+        micro = sample.get("microstructure") or {}
+        tail = sample.get("tail_risk") or {}
+        return {
+            "sampled_at": sample.get("sampled_at"),
+            "microstructure": {k: micro[k] for k in MIH_MICRO_KEYS if k in micro},
+            "tail_risk": {k: tail[k] for k in MIH_TAIL_KEYS if k in tail},
+        }
+
     async def api_model_indicator_history(request: web.Request) -> web.Response:
         return web.json_response(
-            {"samples": list(model_indicator_history), "sample_interval_seconds": MODEL_INDICATOR_SAMPLE_SECONDS},
+            {"samples": [_mih_slim(s) for s in model_indicator_history],
+             "sample_interval_seconds": MODEL_INDICATOR_SAMPLE_SECONDS},
             headers=NOCACHE,
         )
 
@@ -3106,8 +3160,13 @@ def make_app() -> web.Application:
           바이낸스 선물 WS 는 레벨별 총량만 주고 **주문 ID 가 없어**(depthUpdate 가
           [가격, 새 총량]) 개별 «건»은 원리적으로 복원 불가다.
         🔴`obi` 는 **밴드가 값을 정한다**(실측 ±0.1% +0.504 / ±2% +0.071, 7배). 밴드를 같이 낸다.
-        🔴이 수치들은 «지지·저항»이 아니다 -- 호가벽의 버팀 능력은 아직 **못 쟀다**
-          (판정가능 2셀 · TRAIN↔OOS 부호반전, docs/experiments/eth_gex_strike_walls_vs_liqmap_20260919).
+        🔴이 수치들은 «지지·저항»이 아니다 -- 2026-09-20 에 **실제로 쟀고 없었다**.
+          5.8일 래스터 71,293건: 벽에 닿은 뒤 반등률 0.509(동전) · 크기 사분위
+          0.502/0.510/0.520/0.503 로 순서조차 없음 · 같은 크기 안에서 지속률 상위−하위
+          +0.001(섞기 귀무 z=0.22). 판정폭 $1.5→$5 · 지평 5→15분에서도 같다(z=−0.45).
+          기록: docs/experiments/eth_orderbook_wall_support_resistance_20260920.md
+          (앞선 «판정가능 2셀·부호반전» 메모는 GEX 스트라이크 벽 건이라 별개다 --
+           docs/experiments/eth_gex_strike_walls_vs_liqmap_20260919).
         """
         ok = np.isfinite(mid)
         if not ok.any():

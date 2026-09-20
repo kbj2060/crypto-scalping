@@ -278,18 +278,25 @@
              🔴버튼 모양은 진입과 계속 가른다(.exit-row 는 채움, 진입은 아웃라인). 색만으로
                가르면 롱 진입과 롱 청산이 둘 다 녹색이라 오클릭이 실돈 사고가 된다. -->
         <div class="manual-entry">
+          <!-- 2026-09-20 시안 B(사용자 선택): 슬라이더를 칩으로 갈고 포지션 타일에 붙였다.
+               «내 상태»와 «할 행동»이 한 줄에 있어야 스캘핑에서 시선이 안 흩어진다.
+               🔴range 입력은 **지우지 않고 숨긴다** -- 값을 읽는 쪽(sliderPct)과 input
+                 리스너를 한 줄도 안 고치고, 클램프·이벤트를 브라우저가 계속 해준다.
+                 칩은 그 위에 씌운 껍데기다(app.js 의 .chipset 블록). -->
           <div class="manual-entry-row actions exit-row entry-hold" id="snapExitRow" hidden>
-            <label class="exit-frac" for="snapExitFrac">
-              <span class="entry-cap">포지션 닫기</span>
-              <input type="range" id="snapExitFrac" min="5" max="100" step="5" value="100"
-                     aria-label="청산 비율">
-              <b id="snapExitFracVal">100%</b>
-            </label>
+            <span class="entry-cap">닫기</span>
+            <input type="range" id="snapExitFrac" min="5" max="100" step="5" value="100"
+                   aria-label="청산 비율" class="chip-input" tabindex="-1">
+            <div class="chipset" data-for="snapExitFrac" role="group" aria-label="청산 비율">
+              <button type="button" class="chip" data-v="25">25%</button>
+              <button type="button" class="chip" data-v="50">50%</button>
+              <button type="button" class="chip" data-v="100">100%</button>
+            </div>
+            <b id="snapExitFracVal" class="chip-val">100%</b>
             <button type="button" id="snapExitLong" class="notify-btn long hold-fire" hidden>
               <i class="hold-fill" aria-hidden="true"></i><span>롱 청산</span></button>
             <button type="button" id="snapExitShort" class="notify-btn short hold-fire" hidden>
               <i class="hold-fill" aria-hidden="true"></i><span>숏 청산</span></button>
-            <span class="entry-cap hold-hint">0.4초 누르고 있으면 청산됩니다</span>
             <!-- 2026-09-14 «지금 닫으면 얼마인가»를 누르기 **전에** 보여준다. 계좌 payload 의
                  진입가·마크가로 화면이 바로 계산한다(≈ 표시: 체결가·수수료는 빠진 근사다). -->
             <span id="snapExitNow" class="exit-now"></span>
@@ -326,59 +333,40 @@
           <!-- 2026-09-13 보유시간이 크기를 정한다. 학습된 MAE 분위 모델이 «이 시장에서 이만큼
                들고 있으면 이 정도 역행을 각오해야 한다»를 주고, 그 역수가 허용 레버리지다.
                세 상한(원장·순자산·모델)의 **작은 쪽**을 쓰므로 이 선택이 크기를 키우지는 않는다. -->
-          <div class="manual-entry-row fields">
-            <!-- 2026-09-13 보유시간 **4시간 고정**(사용자 결정). 선택지를 없앴다 --
-                 고를 수 있으면 «크기를 키우려고 짧게 고르는» 길이 열리는데, 그건 약속이
-                 아니라 핑계가 된다. 물타기를 해도 시계는 안 늘어난다(첫 체결 기준). -->
-            <label class="exit-frac">
-              <span class="entry-cap">보유 예정</span>
-              <b id="snapHoldPlanned" class="entry-val">—</b>
-              <b id="snapHoldRisk" class="entry-was">—</b>
-            </label>
-          </div>
-          <!-- 2026-09-13 거래소 레버리지 게이지. 위험이 아니라 «총 명목의 천장»을 정하는 값이다
-               (교차 마진이라 청산거리 = 순자산/총명목, 설정값은 안 들어간다). 자동이면 모델
-               추천대로 따라가고, 끄면 손으로 고른다. 주문 직전에 API 로 실제 설정한다. -->
-          <div class="manual-entry-row fields">
-            <label class="exit-frac" for="snapLevGauge">
-              <span class="entry-cap">레버리지</span>
-              <!-- 2026-09-20 5단위(사용자 지시). 옛 판은 값이 아니라 LEV_STEPS 의 **인덱스**
-                   였다(1·2·3·5·8·10·15…). 서버는 1~EXCHANGE_MAX 사이 정수면 다 받으므로
-                   (server.py query_leverage) 값 자체를 5단위로 긋는다. 상한은 서버가 준
-                   leverage_steps 의 최대값으로 렌더에서 맞춘다. -->
-              <input type="range" id="snapLevGauge" min="5" max="50" step="5" value="5"
-                     aria-label="거래소 레버리지">
-              <b id="snapLevVal">-</b>
-            </label>
+          <!-- 2026-09-20 시안 B: 보유예정·레버리지·진입비율 3행을 **한 줄**로 접었다.
+               보유 예정은 값이 고정(서버가 정한 planning_hold)이라 행을 먹을 이유가 없어
+               같은 줄 끝의 작은 글씨로 내렸다. 슬라이더 둘도 위와 같은 방식으로 칩이 된다. -->
+          <div class="manual-entry-row fields entry-line">
+            <span class="entry-cap">레버</span>
+            <input type="range" id="snapLevGauge" min="5" max="50" step="5" value="5"
+                   aria-label="거래소 레버리지" class="chip-input" tabindex="-1">
+            <div class="chipset" data-for="snapLevGauge" role="group" aria-label="레버리지">
+              <button type="button" class="chip" data-v="5">5x</button>
+              <button type="button" class="chip" data-v="10">10x</button>
+              <button type="button" class="chip" data-v="20">20x</button>
+            </div>
+            <b id="snapLevVal" class="chip-val">-</b>
             <label class="lev-auto" for="snapLevAuto">
               <input type="checkbox" id="snapLevAuto" checked>
               <span>자동</span>
             </label>
+            <span class="entry-cap">비율</span>
+            <input type="range" id="snapEntryFrac" min="5" max="100" step="5" value="25"
+                   aria-label="진입 비율" class="chip-input" tabindex="-1">
+            <div class="chipset" data-for="snapEntryFrac" role="group" aria-label="진입 비율">
+              <button type="button" class="chip" data-v="10">10%</button>
+              <button type="button" class="chip" data-v="25">25%</button>
+              <button type="button" class="chip" data-v="50">50%</button>
+            </div>
+            <b id="snapEntryFracVal" class="chip-val">25%</b>
+            <span class="entry-cap hold-line">보유 <b id="snapHoldPlanned" class="entry-val">—</b>
+              · <b id="snapHoldRisk" class="entry-was">—</b></span>
           </div>
-          <div class="manual-entry-row fields">
-            <label class="exit-frac" for="snapEntryFrac">
-              <span class="entry-cap">진입 비율</span>
-              <!-- 2026-09-20 10 -> 5단위(사용자 지시). 스캘핑이라 잘게 나눠 넣는다. -->
-              <input type="range" id="snapEntryFrac" min="5" max="100" step="5" value="25"
-                     aria-label="진입 비율">
-              <b id="snapEntryFracVal">25%</b>
-            </label>
-          </div>
-          <!-- 2026-09-20 «지금 넣으면» 4행을 걷어냈다(사용자: 「4가지를 굳이 또 게이지를
-               만들어서 보여줄 필요가 없어」). 진입이 모달에서 이 카드 안으로 나온 뒤로는
-               **바로 위 계좌 카드**가 같은 네 값(평단·청산까지·증거금·노출)을 같은 눈금으로
-               이미 그린다 -- 이제 게이지를 움직이면 그 카드가 제자리에서 애니메이션된다
-               (app.js applyAcctPreview). 유령 눈금(u)이 «지금 자리»를 남긴다. -->
-          <!-- 2026-09-20 «길게 누르기»(시안 B). 확인 버튼을 없애는 대신 **의도적 지속**을
-               받는다 -- 오클릭 한 번으로는 주문이 안 나가고, 누르고 있는 동안 미리보기가
-               아래 상자에 채워져 «이만큼 나갑니다»를 보고 손을 뗄 수 있다.
-               채움 막대는 JS 가 style.width 로 긋는다(app.js manualHold*). -->
           <div class="manual-entry-row actions entry-hold">
             <button type="button" id="snapEntryLong" class="notify-btn long hold-fire">
               <i class="hold-fill" aria-hidden="true"></i><span>롱 진입</span></button>
             <button type="button" id="snapEntryShort" class="notify-btn short hold-fire">
               <i class="hold-fill" aria-hidden="true"></i><span>숏 진입</span></button>
-            <span class="entry-cap hold-hint">0.4초 누르고 있으면 주문이 나갑니다</span>
           </div>
           </details>
           <!-- 2026-09-12 계좌 카드와 **같은 타일**로 그린다(사용자 요청) -- 미리보기가 말 그대로

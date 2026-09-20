@@ -53,7 +53,11 @@ async def signed(session, method: str, path: str, params: dict, key: str, secret
         async with session.request(method, url, headers={"X-MBX-APIKEY": key}) as response:
             payload = await response.json()
             if response.status != 200:
-                return {"__error__": f"{response.status} {payload.get('msg', payload)}"}
+                # 🔴코드를 버리면 안 된다. 2026-09-20 에 이것 때문에 리페그가 죽었다 --
+                #   호출부가 "5022" 를 찾는데 문자열은 "400 Due to ..." 였다.
+                code = payload.get("code")
+                tag = f"[{code}] " if code is not None else ""
+                return {"__error__": f"{response.status} {tag}{payload.get('msg', payload)}"}
             return payload
     except Exception as exc:  # noqa: BLE001 -- 네트워크/TLS/JSON 전부 같은 취급
         return {"__error__": f"{type(exc).__name__}: {exc}"}
@@ -233,14 +237,21 @@ async def ensure_closed(session, common: dict, oid, key: str, secret: str, offse
 REPEG_MAX = 40          # 3초 폴링 × 120초면 40회가 물리적 상한. 폭주 방지용 이중 안전장치.
 
 
-async def maker_price(session, order_side: str) -> tuple[float, float, float]:
+async def maker_price(session, order_side: str, symbol: str) -> tuple[float, float, float]:
     """지금 **메이커로 남는** 가격. 매수는 최우선 매수호가, 매도는 최우선 매도호가.
     공개 엔드포인트라 서명하지 않는다.
 
     ⚠️키는 **주문 측면(BUY/SELL)** 이지 포지션 방향이 아니다 -- 진입 롱과 청산 숏은 둘 다
-    BUY 라 역학이 같다. 포지션 방향으로 키를 잡으면 같은 것을 둘로 다루게 된다."""
+    BUY 라 역학이 같다. 포지션 방향으로 키를 잡으면 같은 것을 둘로 다루게 된다.
+
+    🔴호가는 **주문이 나가는 그 심볼**에서 읽는다. 여기 "ETHUSDT" 가 박혀 있었고 수동 주문은
+      2026-09-19 에 ETHUSDC 로 옮겨갔다. 두 심볼은 같은 이더가 아니다 -- 실측 ETHUSDT 가
+      $0.54~0.79 비싸다(5회 연속). 그래서 BUY 지정가를 «USDT 최우선 매수호가»에 걸면 그
+      값이 USDC 매도호가보다 위라 즉시 체결될 주문이 되고, post-only 라 거래소가 -5022 로
+      거부한다(실측 5/5). 게다가 drifted() 도 같은 값을 받아 **항상 참**이 되어, 옳게 걸린
+      첫 주문마저 3초 만에 취소했다. 증상은 「체결 0 · rejected」였다."""
     async with session.get(f"{FAPI}/fapi/v1/ticker/bookTicker",
-                           params={"symbol": "ETHUSDT"}) as response:
+                           params={"symbol": symbol}) as response:
         book = await response.json()
     bid, ask = float(book["bidPrice"]), float(book["askPrice"])
     return (bid if order_side == "BUY" else ask), bid, ask
@@ -250,6 +261,20 @@ def drifted(order_side: str, price: float, bid: float, ask: float) -> bool:
     """내 지정가가 시장에서 떨어졌나. 매수는 최우선 매수호가가 **내 위로** 올라가면
     (=누가 나를 앞질렀으면) 그 뒤에 서게 되어 체결이 안 된다. 매도는 거울상."""
     return bid > price if order_side == "BUY" else ask < price
+
+
+def is_post_only_reject(err) -> bool:
+    """«지금 걸면 테이커가 된다»(-5022) 인가. 실패가 아니라 호가가 움직였다는 뜻이라
+    호출부는 새 호가로 다시 건다.
+
+    🔴코드 숫자만 보면 안 된다. signed() 가 오류 문자열을 만들 때 바이낸스의 code 를
+      버리고 HTTP 상태와 msg 만 남겼던 탓에, 실제 문자열이
+      "400 Due to the order could not be executed as maker, ..." 라 "5022" 가 **없었다**.
+      그래서 이 분기가 통째로 죽어 있었고(2026-09-20 실사고, repegs=0 · 119ms 만에 포기),
+      급락장에서 첫 주문이 크로스되자 리페그 없이 바로 rejected 로 끝났다.
+      code 는 위에서 복원했지만, 여기서는 **문구도 같이** 본다 -- 실주문 경로다."""
+    e = str(err)
+    return "5022" in e or "could not be executed as maker" in e
 
 
 async def fill_maker(session, *, common: dict, price: float, total: float, deadline: float,
@@ -275,8 +300,8 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
         if "__error__" in order:
             # -5022 = «지금 걸면 테이커가 된다». 실패가 아니라 호가가 움직였다는 뜻이라
             # 새 호가로 다시 건다. 그 외 오류는 그대로 멈춘다 -- 몰래 테이커로 바꾸지 않는다.
-            if "5022" in str(order["__error__"]) and repegs < REPEG_MAX:
-                price, _, _ = await maker_price(session, side)
+            if is_post_only_reject(order["__error__"]) and repegs < REPEG_MAX:
+                price, _, _ = await maker_price(session, side, common["symbol"])
                 repegs += 1
                 state.update(repegs=repegs, limit_price=price)
                 continue
@@ -296,7 +321,7 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
             state["filled"] = round(done + this_filled, 8)
             if status in TERMINAL:
                 break
-            price_now, bid, ask = await maker_price(session, side)
+            price_now, bid, ask = await maker_price(session, side, common["symbol"])
             if drifted(side, price, bid, ask):
                 need_repeg, price = True, price_now
                 break
@@ -440,6 +465,35 @@ def _self_check() -> None:
     assert drifted("BUY", 100.0, 100.00, 100.01) is False
     assert drifted("SELL", 100.0, 99.98, 99.99) is True, "매도는 최우선 매도호가가 밑으로 가면 밀린다"
     assert drifted("SELL", 100.0, 99.99, 100.00) is False
+
+    # ── 호가를 «주문 심볼»에서 읽는가 (2026-09-20 사고) ──────────────────────
+    # maker_price 가 "ETHUSDT" 를 박아 읽는데 수동 주문은 ETHUSDC 로 나갔다. 두 심볼은
+    # 실측 $0.54~0.79 벌어져 있어 BUY 지정가가 매번 상대 호가를 넘었고(5/5) post-only 가
+    # 전부 -5022 로 거부됐다. drifted() 도 같은 값을 받아 항상 참이 되어 옳게 걸린 첫 주문
+    # 마저 3초 만에 취소했다. 심볼 리터럴이 다시 기어들어오는 것을 여기서 막는다.
+    # ── post-only 거부를 «리페그 신호»로 알아보는가 (2026-09-20 실사고) ────────
+    # 이 판정이 죽어 있었다: signed() 가 오류에서 바이낸스 code 를 버려 문자열이
+    # "400 Due to the order could not be executed as maker, ..." 였는데 코드는
+    # "5022" 를 찾았다. 그래서 급락장 첫 크로스에서 리페그 0회로 바로 포기했다.
+    # **사용자가 실제로 본 그 문자열**을 그대로 넣어 둔다 -- 이게 이 검사의 전부다.
+    assert is_post_only_reject(
+        "400 Due to the order could not be executed as maker, the Post Only order will be"
+        " rejected. The order will not be recorded in the order history"), "실사고 문자열을 놓친다"
+    assert is_post_only_reject("400 [-5022] Due to the order could not be executed as maker")
+    assert not is_post_only_reject("400 [-2019] Margin is insufficient.")
+    assert not is_post_only_reject("400 [-1111] Precision is over the maximum")
+    # 오류 문자열이 코드를 달고 오는가 -- 위 판정의 뿌리다.
+    import inspect as _i2
+    _sg = _i2.getsource(signed)
+    assert 'payload.get("code")' in _sg, "signed() 가 바이낸스 code 를 버린다"
+
+    assert "symbol" in _i.signature(maker_price).parameters, "maker_price 가 심볼을 안 받는다"
+    _mp = _i.getsource(maker_price)
+    _code = _mp[_mp.index('async with'):]
+    assert "ETHUSD" not in _code, "maker_price 가 호가 심볼을 하드코딩했다 -- 주문 심볼을 써야 한다"
+    for _fn in (run_entry, run_exit):
+        _fs = _i.getsource(_fn)
+        assert "maker_price(session, side)" not in _fs, f"{_fn.__name__} 이 심볼 없이 호출한다"
 
     # ── 레버리지 설정 (2026-09-13) ───────────────────────────────────────────
     # 네트워크를 안 타는 계약만 본다: 목표가 없으면 아무것도 안 보낸다.
