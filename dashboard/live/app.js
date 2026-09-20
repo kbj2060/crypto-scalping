@@ -4767,7 +4767,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴getBBox() 로 재면 안 된다 -- 조상 transform 을 무시해서 translate 된 마커가 x=-5 로
   //   잡히고, 그 허수 때문에 「왼쪽은 ml 을 안 따라간다」는 틀린 결론이 나왔다.
   //   getBoundingClientRect() 로 잰다.
-  const CENTER_NUDGE = mobileChart ? 0 : 16;
+  // 2026-09-20 2차(사용자 「오른쪽으로 조금 더」): 16 -> 26. 수치상 가운데는 16 이었지만
+  //   보기에는 왼쪽 라벨이 짧아(진입↑·저항1·현재) 왼쪽이 더 비어 보인다. 취향값이다.
+  // 🔴더 올리면 오른쪽 라벨이 잘린다 -- mr 이 112−n 이라 n=26 이면 86 이 남고 실측 여유가
+  //   18px 이다. 그 아래로는 「최대 $210.5k」 같은 긴 꼬리표가 상자를 넘을 수 있다.
+  const CENTER_NUDGE = mobileChart ? 0 : 26;
   const ml = (mobileChart ? 44 : 45) + CENTER_NUDGE,
         mr = (mobileChart ? 68 : 112) - CENTER_NUDGE,
         mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 91;
