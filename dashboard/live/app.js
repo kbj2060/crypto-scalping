@@ -268,6 +268,11 @@ function repaintSupplyProfilePanel() {
 
 const API_OI_5M_URL = "/api/oi-5m";
 const OI_5M_POLL_MS = 15000;
+// 2026-09-20 미시 참고 카드 (index.html .micro-ref-panel). 서버가 1초마다 계산해 둔 것을 받기만 한다.
+const API_MICRO_REF_URL = "/api/micro-ref";
+const MICRO_REF_POLL_MS = 1000;
+let latestMicroRef = null;
+let microRefLastFetchAt = 0;
 let latestOi5m = null;
 let oi5mLastFetchAt = 0;
 const GEX_POLL_MS = 120000;          // 매시 cron -- 2분 폴링이면 충분히 앞선다
@@ -3753,6 +3758,117 @@ async function refreshOi5m() {
   // 같은 SVG 를 한 번 더 통째로 다시 그린다.
 }
 
+// ── 미시 참고 (2026-09-20) ────────────────────────────────────────────────
+// 근거는 docs/experiments/eth_realtime_five_stream_1s_joint_analysis_20260920.md. 각 칩의 «풀이» 줄이
+// 그 수치를 든다. 🔴방향은 첫 칩 하나(1~15초). 나머지는 «얼마나»와 «무슨 상황»이다.
+async function refreshMicroRef() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  if (activeSnapshotAsset !== "eth") return;   // 원천(체결 링·OI·래스터)이 ETH 만 있다
+  const now = Date.now();
+  if (now - microRefLastFetchAt < MICRO_REF_POLL_MS) return;
+  microRefLastFetchAt = now;
+  try {
+    const res = await fetch(API_MICRO_REF_URL, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`micro-ref ${res.status}`);
+    latestMicroRef = await res.json();
+  } catch (error) {
+    console.error("Micro ref fetch error:", error);
+    latestMicroRef = { available: false, error: "fetch_failed" };
+  }
+  renderMicroRef();
+}
+
+const MR_FMT = {
+  eth: (v) => (v == null || !Number.isFinite(v)) ? "-" : (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(Math.abs(v) < 10 ? 2 : 0)),
+  usd: (v) => (v == null || !Number.isFinite(v)) ? "-" : (Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : Math.abs(v) >= 1e3 ? `$${(v / 1e3).toFixed(0)}k` : `$${v.toFixed(0)}`),
+  bp: (v) => (v == null || !Number.isFinite(v)) ? "-" : `${v >= 0 ? "+" : ""}${v.toFixed(0)}bp`,
+  sgn: (v, d = 2) => (v == null || !Number.isFinite(v)) ? "-" : `${v >= 0 ? "+" : ""}${v.toFixed(d)}`,
+};
+
+function renderMicroRef() {
+  const grid = el("microRefGrid"); const badge = el("microRefBadge");
+  if (!grid) return;
+  const m = latestMicroRef;
+  if (!m || !m.available) {
+    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = m && m.error ? "수집 대기" : "-"; }
+    grid.innerHTML = `<div class="mr-chip"><div class="mr-chip-meaning">${escapeHtml((m && m.error) || "서버가 첫 값을 계산하는 중")}</div></div>`;
+    return;
+  }
+  const chips = [];
+  // ① 호가 동조 -- 유일한 방향 칩 (1~15초)
+  const agreeTone = m.agree === "동조매수" ? "good" : m.agree === "동조매도" ? "bad" : m.agree === "갈림" ? "warn" : "";
+  chips.push({
+    label: "호가 방아쇠 · 1~15초", state: m.agree, tone: agreeTone,
+    value: `QI ${MR_FMT.sgn(m.qi)} (${m.qi_side}) · OFI10 ${MR_FMT.sgn(m.ofi10, 0)} ETH (${m.ofi_side})`,
+    meaning: m.agree === "동조매수" || m.agree === "동조매도"
+      ? "최우선 큐와 전체북 흐름이 같은 쪽. 15초 +0.4bp · 60초 +0.5bp 기대 — 방향 «힌트»이지 왕복비용(1.4bp)을 넘는 엣지가 아니다. 반감기 1초."
+      : m.agree === "갈림" ? "최우선 큐와 전체북 흐름이 반대. 뒤 15초 기대 0 — 대기." : "한쪽이 중립(|QI|<0.56 또는 |OFI10|<최근 10분 중앙값). 방향 없음.",
+    title: "QI = (최우선 매수수량−매도수량)/(합). OFI10 = 최근 10초 ±40bp 호가 총량 변화(매수−매도). 둘이 같은 쪽일 때만 1~15초 방향이 있었다(4.6일·6/6일 부호 일치). 10초 평균으로 평활하면 정보가 1/3 로 준다.",
+  });
+  // ② 활동 -- 같은 시간대 분위
+  const pct = m.vol60_pct; const actTone = m.act === "활발" ? "warn" : "";
+  chips.push({
+    label: `활동 · 60초 거래량 (UTC ${m.hour_utc}시 기준)`, state: m.act, tone: actTone,
+    value: `${MR_FMT.eth(m.vol60)} ETH · ${pct == null ? "기준 없음" : `이 시간대 상위 ${Math.max(0, 100 - Math.round(pct * 100))}%`}${m.vol60_x_p50 ? ` · p50의 ${m.vol60_x_p50.toFixed(1)}×` : ""}`,
+    meaning: m.act === "활발" ? "앞 5분 고저폭이 평소보다 크다(거래량→고저폭 IC 0.26). 손절폭·크기를 여기에 맞춘다. 방향은 아니다."
+      : m.act === "조용" ? "움직임 예약 없음. 얇은 호가라 적은 양으로 크게 움직일 수 있다(«효율적» 상태)." : "평소 수준.",
+    title: `«많다/적다»는 같은 UTC 시간대 최근 ${m.baseline_days || "?"}일 1분 거래량 분포에서의 분위. 미국장 13~15 UTC 는 평소의 2~8배가 정상이라 절대값으로 보면 하루 두 번 틀린다.`,
+  });
+  // ③ 호가 벽 (얕은/깊은)
+  const wallWord = (v, band) => v == null ? "-" : `${band} ${v > 0.15 ? "매수벽" : v < -0.15 ? "매도벽" : "중립"} ${MR_FMT.sgn(v)}`;
+  chips.push({
+    label: "호가 벽 · ±10bp / ±40bp", state: m.imb40 == null ? "-" : (m.imb40 > 0.15 ? "깊은 매수벽" : m.imb40 < -0.15 ? "깊은 매도벽" : "깊은 중립"),
+    tone: m.imb40 == null ? "" : (m.imb40 > 0.15 ? "good" : m.imb40 < -0.15 ? "bad" : ""),
+    value: `${wallWord(m.imb10, "얕은")} · ${wallWord(m.imb40, "깊은")}`,
+    meaning: "얕은 벽은 1~15초, 깊은 벽은 1~5분 지표. 내린 뒤 깊은 매수벽 + 거래량 많은데 안 밀림 = 5분 되돌림 가설(통제 후 +2.5~5bp, 창 4.6일·가설). 한 초에 생긴 벽은 다음 초 60% 사라진다.",
+    title: "불균형 = (밴드 안 매수호가 합 − 매도호가 합)/(합). ±0.15 를 넘어야 «벽»으로 적는다(|값| p50 이 0.09~0.14).",
+  });
+  // ④ 청산맵 근접
+  const sr = m.sr || {};
+  const nearTone = sr.near === "없음" ? "" : "warn";
+  chips.push({
+    label: "청산맵 레벨 · 근접 경보", state: sr.near || "-", tone: nearTone,
+    value: `지지 ${sr.sup ? sr.sup.toFixed(1) : "-"} (${MR_FMT.bp(sr.sup_bp)}) · 저항 ${sr.res ? sr.res.toFixed(1) : "-"} (${MR_FMT.bp(sr.res_bp)})${sr.deep_wall ? ` · 깊은 벽 ${sr.deep_wall}` : ""}`,
+    meaning: sr.near && sr.near !== "없음"
+      ? `레벨 ±15bp 안. 이 분에 청산이 있을 확률 0.52(먼 곳 0.28)·앞 5분 고저폭 2배. ${sr.deep_wall === "레벨쪽" ? "깊은 벽이 레벨 쪽 → 버팀 후보(돌파 0.22)." : sr.deep_wall === "반대쪽" ? "깊은 벽이 반대쪽 → 돌파 후보(0.47)." : ""} 직전 분 청산이 크면 돌파(0.41 vs 0.23). 방향 예보가 아니라 위치 예보.`
+      : "레벨 사이. 거리로 방향을 읽지 말 것 — 거리는 24h 레인지 위치의 사본(통제 후 IC −0.02). 강도(굵기)는 아무것과도 상관 0.",
+    title: "청산맵 최근접 지지·저항(24h 룩백)까지 거리. 실제 @forceOrder 청산이 레벨 ±15bp 에 5배 몰린다(플라시보 통과, 활동 매칭 후 +14pp).",
+  });
+  // ⑤ 거래량 폭발 → OI
+  const b = m.burst || {};
+  const bTone = b.state === "청산 덩어리 통과" ? "bad" : b.state === "신규 포지션 유입" ? "good" : "";
+  chips.push({
+    label: "거래량 폭발 → 5~8초 뒤 OI", state: b.state || "—", tone: bTone,
+    value: b.at ? `${Math.max(0, (m.ts || 0) - b.at)}초 전 · 1초 ${MR_FMT.eth(b.vol1s)} ETH (≥p99 ${MR_FMT.eth(b.p99)}) · ΔOI ${MR_FMT.sgn(b.doi, 0)} ETH${b.thr ? ` (임계 ±${b.thr.toFixed(0)})` : ""}` : `최근 90초 폭발 없음${b.p99 ? ` · 기준 p99 ${MR_FMT.eth(b.p99)} ETH/s` : " · 기준 없음"}`,
+    meaning: b.state === "청산 덩어리 통과" ? "거래량이 터진 뒤 OI 가 줄었다 = 그 덩어리는 신규 진입이 아니라 청산(닫힘). 추격 금지 — 남는 건 변동성뿐."
+      : b.state === "신규 포지션 유입" ? "거래량이 터지며 OI 가 늘었다 = 새 포지션이 들어왔다. 방향 정보는 없다(OI 60초 IC 0)." : "거래량→ΔOI 상관이 +5초에서 −0.23. 큰 체결 덩어리는 대개 청산이다.",
+    title: "1초 거래량이 같은 시간대 p99 를 넘은 초를 찾아, 그 뒤 8초 OI 변화를 본다. 임계는 최근 10분 8초 ΔOI 절대값의 p90(자기 보정).",
+  });
+  // ⑥ 청산 이벤트 (원시)
+  const l = m.liq60 || {}; const lp = m.liq_prev || null;
+  const lTot = (l.long || 0) + (l.short || 0);
+  const lTone = lTot > 0 && l.long > 0 && l.short > 0 ? "warn" : lTot > 0 ? "warn" : "";
+  const lState = lTot === 0 ? "60초 청산 없음" : (l.long > 0 && l.short > 0 ? "양쪽 청산" : l.long >= l.short ? "롱 청산 중" : "숏 청산 중");
+  chips.push({
+    label: "청산 이벤트 · 최근 60초 (원시)", state: lState, tone: lTone,
+    value: `롱 ${MR_FMT.usd(l.long)} · 숏 ${MR_FMT.usd(l.short)} · ${l.n || 0}건${lp ? ` · 직전 분 롱 ${MR_FMT.usd(lp.long)} / 숏 ${MR_FMT.usd(lp.short)}` : ""}`,
+    meaning: lTot === 0 ? "청산은 가격 움직임의 «결과»다(분 수익률→다음 분 순청산 −0.335, 반대 +0.01)."
+      : lState === "양쪽 청산" ? "한 창 안에 양방향 청산 = 휩쏘. 변동성 경보 — 크기 절반." : "지금 청산이 붙고 있다 = 방금 움직였다는 확인. 군집한다 — 다음 분 청산 5배·앞 5분 고저폭 2배. «롱 청산 = 바닥»은 아니다(통제 후 0).",
+    title: "@forceOrder 원시 이벤트(이 카드가 처음 저장한다: data/live/liq_events.jsonl). 봇의 청산 게이지는 1분 합·15분 누적이라 «캐스케이드 진행 중»을 1분 늦게 안다.",
+  });
+  grid.innerHTML = chips.map((c) => `
+    <div class="mr-chip" title="${escapeHtml(c.title || "")}">
+      <div class="mr-chip-head"><span class="mr-chip-label">${escapeHtml(c.label)}</span><span class="mr-chip-state ${c.tone || ""}">${escapeHtml(c.state || "-")}</span></div>
+      <div class="mr-chip-value">${escapeHtml(c.value || "-")}</div>
+      <div class="mr-chip-meaning">${escapeHtml(c.meaning || "")}</div>
+    </div>`).join("");
+  if (badge) {
+    const age = m.ts ? Math.round(Date.now() / 1000 - m.ts) : null;
+    badge.className = `ops-badge ${age != null && age <= 5 ? "good" : "neutral"}`;
+    badge.textContent = age == null ? "-" : `${age}초 전 · mid ${m.mid ? m.mid.toFixed(2) : "-"}`;
+  }
+}
+
 // ── 풋프린트 증분 (2026-09-20) ────────────────────────────────────────────
 // 400ms 폴링인데 48봉을 통째로 받고 있었다. 서버 실측: 400ms 간격 19번 중 내용이 실제로
 // 바뀐 건 12번이고 바뀌는 건 **맨 오른쪽 봉 하나**다(닫힌 봉은 5분에 한 번). 그래서 봉을
@@ -6523,6 +6639,7 @@ async function tick() {
       refreshGex();                  // 2026-09-19 옵션 감마 노출(참고 표시 · 신호 아님)
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
+      refreshMicroRef();             // 2026-09-20 미시 참고 (1초, ETH 만)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }
