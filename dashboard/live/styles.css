@@ -2141,6 +2141,10 @@ svg {
 .manual-entry-row.actions .notify-btn { text-align: center; min-width: 128px; }
 /* 2026-09-14 청산 행이 카드 맨 위로 올라갔다 -- 구분선도 아래쪽이다. */
 .manual-entry-row.exit-row { gap: 10px; border-bottom: 1px solid var(--soft-line); padding-bottom: 10px; }
+/* 2026-09-20 사용자 요청: 버튼 줄에 위아래 숨 쉴 자리. 누르는 줄이 제일 빽빽하면 안 된다.
+   .entry-hold 는 청산 줄과 진입 버튼 줄 **둘 다** 가지고 있어 한 규칙으로 덮는다.
+   행 간격(.manual-entry 의 gap 8px) 위에 10px 을 더해 위아래 18px 이 된다. */
+.manual-entry-row.entry-hold { margin: 10px 0; }
 .manual-entry-row[hidden] { display: none; }
 
 /* ── 시안 B: 슬라이더 -> 칩 (2026-09-20 사용자 선택) ───────────────────────────
