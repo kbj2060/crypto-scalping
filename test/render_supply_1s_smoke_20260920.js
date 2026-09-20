@@ -1,16 +1,16 @@
 // 1초 수급 패널 렌더 검증 (2026-09-20, 5분 리셋 누적판).
-// 🔴여기 라벨은 세 번 바뀌었다: 창시작 누적 -> 30초 롤링 -> **5분 벽시계 리셋 누적**.
-//   30초 롤링은 사용자가 실제로 속아서 버렸다(고래 매수가 30초 뒤 «가짜 매도»로 보였다).
-//   그래서 이 검사의 핵심은 ①구간 안에서 쌓이고 ②경계에서 0으로 되돌아가며 ③선이 거기서
-//   끊기는가다 -- 이어 그리면 없는 낙차를 그린다.
+// 🔴이 패널은 네 번 바뀌었다: 창시작 누적 -> 30초 롤링 -> 5분 리셋 누적(창은 최근 5분)
+//   -> **창 자체가 현재 5분봉**(시안 H). 30초 롤링은 사용자가 실제로 속아서 버렸다
+//   (고래 매수가 30초 뒤 «가짜 매도»로 보였다).
+//   H 의 핵심은 ①x축 왼쪽 끝 = 봉이 열린 시각 ②누적이 그 경계에서 0부터 쌓임
+//   ③아직 안 온 시간이 오른쪽에 남고 그게 «없음»이 아니라 «아직»으로 보이는가.
 //   node test/render_supply_1s_smoke_20260920.js
 const fs = require("fs");
 const src = fs.readFileSync("dashboard/live/app.js", "utf8");
 const grab = (re, what) => { const m = src.match(re); if (!m) { console.log(`🔴 못 찾음: ${what}`); process.exit(1); } return m[0]; };
 const FN = grab(/function renderSupply1s\(box = null\) \{[\s\S]*?\n\}\n/, "renderSupply1s");
 const PRE = grab(/function fmtFootprintQty\(v\) \{[\s\S]*?\n\}\n/, "fmtFootprintQty")
-          + grab(/const SUPPLY_1S_WINDOW = \d+;/, "WINDOW")
-          + "\n" + grab(/const SUPPLY_1S_SEGMENT = \d+;/, "SEGMENT")
+          + grab(/const SUPPLY_1S_SEGMENT = \d+;/, "SEGMENT")
           + "\n" + grab(/const SUPPLY_1S_STEPS = \[[^\]]*\];/, "STEPS") + "\n";
 
 const SEG = Number(PRE.match(/const SUPPLY_1S_SEGMENT = (\d+);/)[1]);
@@ -53,22 +53,32 @@ const fail = (m) => { console.log("🔴 " + m); ok = false; };
 const subpaths = (d) => String(d).split(/(?=M)/).filter((x) => x.trim());
 const ysOf = (sp) => [...sp.matchAll(/[ML][\d.]+ (-?[\d.]+)/g)].map((m) => Number(m[1]));
 
-// ① 매초 10 ETH 가 줄곧 들어오면 구간 안에서는 **단조 상승**(y 는 단조 감소)이어야 한다.
+// ① 매초 10 ETH 가 줄곧 들어오면 봉 안에서 **단조 상승**(y 는 단조 감소)이어야 한다.
 //    롤링 시절엔 평평했다 -- 평평하면 누적이 아니라는 뜻이다.
 const a = draw("정상 10 ETH/s", {});
 if (!a) ok = false;
 else {
   const sp = subpaths(a.line._a.d);
-  if (sp.length < 2) fail(`구간 경계에서 선이 안 끊겼다 (subpath ${sp.length}개) -- 이으면 없는 낙차를 그린다`);
+  // H 는 봉 하나만 그리므로 공백이 없으면 subpath 도 하나다(경계는 화면 왼쪽 끝이다).
+  if (sp.length !== 1) fail(`봉 하나인데 선이 ${sp.length}조각이다 -- 경계가 화면 안에 들어왔나?`);
   const lastYs = ysOf(sp[sp.length - 1]);
   if (lastYs.length < 30) fail(`마지막 구간의 점이 적다 (${lastYs.length})`);
   if (!lastYs.every((y, i) => i === 0 || y < lastYs[i - 1] + 1e-9)) fail("구간 안에서 단조 상승이 아니다 -- 누적이 아니다");
   // 경계 직후 값은 0 근처(한 초분)여야 하고, 끝값은 구간 길이만큼 쌓여야 한다.
   const span = NOW - BOUND + 1;
   if (!a.texts.some((t) => t === "고래 +" + (span * 10 >= 1000 ? (span * 10 / 1000).toFixed(1) + "k" : String(span * 10))))
-    fail(`끝 꼬리표가 구간 누적과 다르다 (기대 ${span * 10}): ${JSON.stringify(a.texts.filter((t) => t.startsWith("고래")))}`);
-  if (!a.texts.some((t) => t.includes("5분 경계"))) fail("경계선 라벨이 없다");
-  if (!a.texts.some((t) => t.includes("5분 누적 순수급"))) fail("머리글이 없다");
+    fail(`끝 꼬리표가 봉 누적과 다르다 (기대 ${span * 10}): ${JSON.stringify(a.texts.filter((t) => t.startsWith("고래")))}`);
+  if (!a.texts.some((t) => t.includes("봉 시작"))) fail("왼쪽 축 라벨(봉 시작)이 없다");
+  if (!a.texts.some((t) => /지금 \(\d+초 경과\)/.test(t))) fail("진행 표시(N초 경과)가 없다");
+  if (!a.texts.some((t) => t.includes("이번 5분봉 누적 순수급"))) fail("머리글이 없다");
+  // ⭐x축은 **봉 전체**다: 아직 안 온 시간이 오른쪽에 남아야 하고, 그 자리가 음영으로 표시돼야 한다.
+  const xs = [...String(a.line._a.d).matchAll(/[ML]([\d.]+) /g)].map((m) => Number(m[1]));
+  const rects = a.els.filter((e) => e._kind === "rect");
+  const rightEdge = Math.max(...rects.map((r) => Number(r._a.x) + Number(r._a.width)), 0);
+  if (!(Math.max(...xs) < rightEdge - 5))
+    fail(`선이 오른쪽 끝까지 갔다 -- x축이 봉 전체가 아니다 (선끝 ${Math.max(...xs).toFixed(1)} vs ${rightEdge.toFixed(1)})`);
+  if (!rects.some((r) => Number(r._a["fill-opacity"]) === 0.05))
+    fail("남은 시간 음영이 없다 -- 빈 오른쪽이 «데이터 없음»으로 읽힌다");
   if (!a.paths.some((p) => p._a.fill === "var(--good)") || !a.paths.some((p) => p._a.fill === "var(--bad)"))
     fail("0선 면적이 없다");
 }

@@ -211,7 +211,6 @@ const API_SUPPLY_PROFILE_URL = "/api/supply-profile";
 //   최대 2초 묵은 값이다. 그보다 더 당기려면 폴링이 아니라 SSE 여야 한다 -- 지금 필요 없다.
 const API_SUPPLY_1S_URL = "/api/supply-1s";
 const SUPPLY_1S_POLL_MS = 1000;
-const SUPPLY_1S_WINDOW = 300;           // 화면에 그리는 초 수(5분)
 const SUPPLY_1S_SEGMENT = 300;          // 누적을 0으로 되돌리는 **벽시계** 경계(초). 5분봉과 같은 자리.
 // 계단 눈금(ETH). 자동정규화를 안 쓰는 이유는 renderSupply1s 주석에 있다.
 const SUPPLY_1S_STEPS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000];
@@ -3598,10 +3597,10 @@ async function refreshSupply1s() {
       now: Number(payload.now) || supply1sMeta.now,
     };
     // 창 밖은 버린다. 안 버리면 탭을 켜둔 채로 며칠이면 Map 이 수십만 칸이 된다.
-    // 🔴창 시작 **이전 한 구간**까지 남긴다. 화면 왼쪽 끝은 이전 5분 구간에 속하는데, 그
-    //   구간의 누적은 **그 구간의 경계**부터 세야 맞다(최악 now-600). 안 남기면 왼쪽 구간이
-    //   «있는 데이터부터» 세어져 조용히 낮게 나온다. OI 는 갱신이 3~7초라 20초를 더 준다.
-    const floor = supply1sMeta.now - SUPPLY_1S_WINDOW - SUPPLY_1S_SEGMENT - 20;
+    // 그리는 구간이 **현재 5분봉 하나**라 그 경계까지만 있으면 된다(최악 now-300).
+    // OI 는 갱신이 3~7초라 20초를 더 준다. 넉넉히 두 봉치를 남겨 봉이 바뀌는 순간에도
+    // 새 봉의 앞부분이 비지 않게 한다.
+    const floor = supply1sMeta.now - 2 * SUPPLY_1S_SEGMENT - 20;
     supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
     oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
     supply1sVer += 1;
@@ -3905,12 +3904,18 @@ function renderSupply1s(box = null) {
   svg.innerHTML = "";
 
   const now = supply1sMeta.now || 0;
-  const first = now - SUPPLY_1S_WINDOW;
-  // 누적은 화면 왼쪽 끝에서도 온전해야 한다 -- 그래서 first 이전 한 구간까지 읽는다
-  // (refreshSupply1s 가 그만큼 더 붙들고 있다). 그리는 건 first 이후뿐이다.
-  const allSecs = [...supply1s.keys()].filter((s) => s > first - SUPPLY_1S_SEGMENT && s <= now)
+  // 🔴창이 «최근 5분»(미끄러짐)이 아니라 **지금 만들어지고 있는 5분봉 그 자체**다
+  //   (2026-09-20 사용자 선택: 시안 H). x축 왼쪽 끝 = 봉이 열린 시각, 오른쪽 끝 = 봉이
+  //   닫힐 시각. 선은 봉이 진행되는 만큼 왼쪽에서 오른쪽으로 자라고, 다음 봉에서 리셋된다.
+  //   ⭐이 패널이 말하는 수급 = **바로 아래 풋프린트 봉을 만들고 있는 그 체결들**이다
+  //     (server.py footprint_bar_start 와 같은 식으로 자른 같은 경계).
+  //   ⚠️캔들 «차트»와 x축이 겹치는 건 아니다 -- 그쪽은 12~48봉(1~4시간)을 같은 폭에 그린다.
+  //     겹치는 것은 **데이터 구간**이지 가로 좌표가 아니다.
+  const first = Math.floor(now / SUPPLY_1S_SEGMENT) * SUPPLY_1S_SEGMENT;
+  // 이제 한 구간만 그리므로 이전 구간을 읽을 이유가 없다(누산기가 이 봉의 경계에서 시작한다).
+  const allSecs = [...supply1s.keys()].filter((s) => s >= first && s <= now)
                                       .sort((a, b) => a - b);
-  const secs = allSecs.filter((s) => s > first);
+  const secs = allSecs;
   if (secs.length < 2) {
     const txt = document.createElementNS(NS, "text");
     txt.setAttribute("x", w / 2); txt.setAttribute("y", h / 2);
@@ -3920,7 +3925,7 @@ function renderSupply1s(box = null) {
     return;
   }
 
-  const xAt = (s) => ml + ((s - first) / SUPPLY_1S_WINDOW) * cw;
+  const xAt = (s) => ml + ((s - first) / SUPPLY_1S_SEGMENT) * cw;
   // 🔴빈 구간을 직선으로 이으면 «그동안 아무 일도 없었다»로 읽힌다 -- 실제로는 «모른다»다
   //   (수집기 재기동·WS 끊김·백필이 아직 안 닿은 구간). 2026-09-19 첫 렌더에서 실제로 긴
   //   사선이 그어졌다. 초가 SUPPLY_1S_GAP_SEC 넘게 비면 선을 **끊는다**.
@@ -4049,17 +4054,23 @@ function renderSupply1s(box = null) {
   area(whale, (v) => Math.min(yF(v), mid), "var(--good)");
   area(whale, (v) => Math.max(yF(v), mid), "var(--bad)");
 
-  // 구간 경계. 여기서 셋 다 0으로 돌아가므로 «왜 끊겼나»를 화면이 말해야 한다.
-  // 아래 캔들의 5분 경계와 같은 자리다.
-  for (let b = Math.floor(first / SUPPLY_1S_SEGMENT) + 1;
-       b * SUPPLY_1S_SEGMENT <= now; b++) {
-    const bx = xAt(b * SUPPLY_1S_SEGMENT);
+  // 봉 진행선. x축이 **봉 전체**라 아직 안 온 시간이 오른쪽에 비어 있는데, 그게 «데이터가
+  // 없다»가 아니라 «아직 안 왔다»라는 걸 화면이 말해야 한다. 봉이 막 바뀐 직후엔 거의
+  // 전부가 빈 상태라 이 선이 없으면 고장난 것처럼 보인다.
+  {
+    const nx = xAt(now);
     const g = document.createElementNS(NS, "line");
-    g.setAttribute("x1", bx); g.setAttribute("x2", bx);
+    g.setAttribute("x1", nx); g.setAttribute("x2", nx);
     g.setAttribute("y1", flowTop); g.setAttribute("y2", flowTop + flowH);
-    g.setAttribute("stroke", "var(--ink)"); g.setAttribute("stroke-opacity", "0.45");
+    g.setAttribute("stroke", "var(--ink)"); g.setAttribute("stroke-opacity", "0.35");
+    g.setAttribute("stroke-dasharray", "2 3");
     svg.appendChild(g);
-    if (!narrow) label(bx + 4, flowTop + 10, "5분 경계 · 여기서 0", "var(--muted)");
+    const rest = document.createElementNS(NS, "rect");
+    rest.setAttribute("x", nx); rest.setAttribute("y", flowTop);
+    rest.setAttribute("width", Math.max(0, ml + cw - nx));
+    rest.setAttribute("height", flowH);
+    rest.setAttribute("fill", "var(--lift-solid, #8b949e)"); rest.setAttribute("fill-opacity", "0.05");
+    svg.appendChild(rest);
   }
 
   const zero = document.createElementNS(NS, "line");
@@ -4104,11 +4115,16 @@ function renderSupply1s(box = null) {
   tags.forEach((t) => label(ml + cw + 5, t.y + 3, t.text, t.color));
 
   // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
-  label(ml + 2, mt - 5, "5분 누적 순수급 ETH"
-        + (narrow ? "" : "  ·  경계에서 0으로"), "var(--muted)");
+  label(ml + 2, mt - 5, "이번 5분봉 누적 순수급 ETH"
+        + (narrow ? "" : "  ·  아래 풋프린트 봉과 같은 구간 · 다음 봉에서 0"), "var(--muted)");
 
-  label(ml, h - 3, "5분 전", "var(--muted)");
-  label(ml + cw, h - 3, "지금", "var(--muted)", "end");
+  // 왼쪽은 이 봉이 열린 시각, 오른쪽은 닫힐 시각. 가운데에 진행 상황을 적는다 --
+  // 「지금」이 오른쪽 끝이 아니라는 걸 분명히 해야 빈 오른쪽이 오해되지 않는다.
+  const hhmm = (t) => { const d = new Date(t * 1000);
+    return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+  label(ml, h - 3, hhmm(first) + " 봉 시작", "var(--muted)");
+  label(ml + cw, h - 3, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
+  if (!narrow) label(xAt(now) + 4, h - 3, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
 }
 
 // ── 가격축 수급 프로파일 (2026-09-19) ───────────────────────────────────────
