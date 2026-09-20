@@ -3297,14 +3297,22 @@ function visibleCandleWindow(candles) {
 // staleness class discussed for nearestLiquidationLevel() -- but that function still exists and
 // still gets its own live-price refilter for the one number a glance actually leans on; this
 // background band is now an explicit history view, not a claimed-current one).
+// 🔴결과를 **원본 payload 신원으로 memoize** 한다. 이 함수는 렌더마다 불리는데(청산맵
+//   모드 1Hz · 풋프린트 모드에서는 아예 안 쓰임) 스냅샷 9개 x ~115빈 = 1,000여 개 객체를
+//   매번 새로 만들고 있었다. 입력은 /api/liquidation-map 이 갱신될 때(60초)만 바뀐다.
+//   ⭐배열 신원이 안정되면 아래 계층 캐시의 키로도 쓸 수 있다.
+let _densityMemo = { src: null, out: [] };
 function liquidationDensityHistory() {
   const map = latestLiquidationMap;
-  if (!map || !map.warmed_up || !map.bin_width) return [];
-  return (map.heatmap_history || []).map((snap) => ({
-    tsMs: Date.parse(snap.ts_utc),
-    binWidth: map.bin_width,
-    bins: (snap.bins || []).map((b) => ({ price: b.price, weightPct: b.weight_pct || 0 })),
-  }));
+  if (_densityMemo.src === map) return _densityMemo.out;
+  const out = (!map || !map.warmed_up || !map.bin_width) ? [] :
+    (map.heatmap_history || []).map((snap) => ({
+      tsMs: Date.parse(snap.ts_utc),
+      binWidth: map.bin_width,
+      bins: (snap.bins || []).map((b) => ({ price: b.price, weightPct: b.weight_pct || 0 })),
+    }));
+  _densityMemo = { src: map, out };
+  return out;
 }
 
 // Single closest level (either side) to current price, as renderCandleSvg()'s riskLevels shape --
@@ -4618,6 +4626,19 @@ function updateSupplyProfileNow(price) {
 // 커서가 나가면 밀린 갱신을 즉시 한 번 그린다 -- 멈춘 채로 남겨두지 않는다.
 let chartHoverActive = false;
 let chartRenderDeferred = false;
+// 객체 신원을 문자열 키로 바꾼다. 층 캐시가 «이 배열이 그대로인가»를 물을 때 쓴다 --
+// 내용 해시를 뜨지 않아도 되는 이유는 이 화면의 payload 가 폴링마다 **통째로 교체**되기
+// 때문이다(같은 내용이면 같은 객체, 새 응답이면 새 객체). WeakMap 이라 누수가 없다.
+const objToken = (() => {
+  const seen = new WeakMap();
+  let n = 0;
+  return (o) => {
+    if (!o || typeof o !== "object") return "-";
+    let t = seen.get(o);
+    if (!t) seen.set(o, (t = "#" + (++n)));
+    return t;
+  };
+})();
 
 function renderSnapshotChart() {
   if (chartHoverActive) { chartRenderDeferred = true; return; }
@@ -4884,6 +4905,37 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
   const bw = (cw / candles.length) * 0.8;
 
+  // ── 계층 캐시 (2026-09-20) ────────────────────────────────────────────────
+  // 봉 셀은 이미 봉별로 캐시한다. 남은 것은 **가격 플롯 바깥의 층들**이다 -- 격자·x눈금·
+  // 레짐 리본·구간 줄·OI 레인·청산 레인·청산밀도 히트맵. 이들도 매 렌더 새로 만들고 있었다.
+  // 실측(틱 스트림, 셀 캐시가 다 맞은 정상 상태에서 만들어지는 노드):
+  //     풋프린트 4h  372개/렌더 (rect 114 · title 160 · text 70)
+  //     청산맵  1h  574개/렌더 (rect 301 -- 밀도 히트맵이 압도적)
+  // 그런데 이 층들의 **입력은 15~300초마다** 바뀐다(레짐 300s · 청산맵 60s · OI 15s).
+  //
+  // 🔴키는 «기하 + 봉 시각 + 그 층의 데이터 신원» 셋이다. 기하를 빼면 축이 움직여도 낡은
+  //   픽셀이 남고, 봉 시각을 빼면 봉이 한 칸 밀려도 그대로 남는다.
+  // 🔴현재가·진행봉 OHLC 는 **일부러 안 넣는다**. 넣으면 틱마다 전부 깨져 캐시가 무의미해진다.
+  //   그래서 OHLC 에 의존하는 것(가격 라벨·이벤트 삼각형)은 **캐시하지 않고** 매번 그린다.
+  const baseGeomSig = [w, h, mt, ch, ml, mr, cw, bw, yMin, yMax, plotBottom,
+                       mobileChart, oiPanelY, liqPanelY, OI_PANEL_H, LIQ_PANEL_H].join("|");
+  // 봉 시각만. 진행 중인 봉의 OHLC 는 여기 없다(위 주석).
+  const timesSig = candles.length + ":" + (candles[0] ? candles[0].time : 0)
+                   + ":" + (candles[candles.length - 1] ? candles[candles.length - 1].time : 0);
+  const layerCache = renderCandleSvg._layers || (renderCandleSvg._layers = new Map());
+  /** 층 하나를 <g> 로 묶어 캐시한다. sig 가 같으면 만들어 둔 노드를 그대로 다시 붙인다.
+   *  draw(g) 는 그 <g> 안에만 그려야 한다 -- svg 에 직접 붙이면 캐시를 우회한다. */
+  const cachedLayer = (name, sig, draw) => {
+    const full = baseGeomSig + "|" + timesSig + "|" + sig;
+    const prev = layerCache.get(name);
+    if (prev && prev.sig === full) { svg.appendChild(prev.g); return prev.g; }
+    const g = document.createElementNS(NS, "g");
+    draw(g);
+    svg.appendChild(g);
+    layerCache.set(name, { sig: full, g });
+    return g;
+  };
+
   // Regime ribbon (2026-08-26, moved in from the old standalone regimeWide24Strip row below the
   // chart per user request: "레짐 그래프를 청산맵 안에 넣을 순 없어?") -- drawn in this same svg/loop
   // so alignment with the candle columns above it is guaranteed by construction (same xAt/bw, no
@@ -4935,7 +4987,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const laneW = Math.max(bw, mobileChart ? 3.5 : 2.5);
   const laneX0 = xAt(0), laneX1 = xAt(Math.max(candles.length - 1, 0)) + bw;
   // 배경 트랙 -- 값이 없는 구간도 «줄이 거기 있다»를 보이게 한다(레인이 원래 하던 일).
-  const drawLaneTrack = (y) => {
+  const drawLaneTrack = (y, into) => {
     const track = document.createElementNS(NS, "rect");
     track.setAttribute("x", laneX0); track.setAttribute("y", y);
     track.setAttribute("width", Math.max(laneX1 - laneX0, 1));
@@ -4943,7 +4995,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     track.setAttribute("rx", "1.5");
     track.setAttribute("fill", "var(--muted)");
     track.setAttribute("fill-opacity", "0.18");
-    svg.appendChild(track);
+    (into || svg).appendChild(track);   // 층 캐시가 목적지를 넘긴다
     return track;
   };
   const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = LANE_H;
@@ -4995,7 +5047,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const densityClip = densityValues.length
     ? densityValues[Math.min(densityValues.length - 1, Math.floor(densityValues.length * DENSITY_PERCENTILE_CLIP))]
     : 1;
-  const drawDensitySeg = (x0, x1, top, bottom, t) => {
+  const drawDensitySeg = (into, x0, x1, top, bottom, t) => {
     if (x1 <= x0) return;
     // 밀도 0 인 칸은 **그리지 않는다**. 칠하면 패널 위에 띠로 남고(2026-09-12 b5a4790 으로
     // 패널이 밝아진 뒤 «어두운 구멍» 으로 드러났다), 안 그리면 배경이 그대로 비쳐 패널의
@@ -5007,7 +5059,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     rect.setAttribute("width", x1 - x0); rect.setAttribute("height", bottom - top);
     rect.setAttribute("fill", densityColor(t));
     rect.setAttribute("fill-opacity", "0.85");
-    svg.appendChild(rect);
+    into.appendChild(rect);
   };
   const sortedDensityHistory = (densityHistory || []).slice().sort((a, b) => a.tsMs - b.tsMs);
   const densityBoundaryIdx = sortedDensityHistory.map((snap) => {
@@ -5022,6 +5074,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // near-zero bin would, instead of leaving a transparent gap that'd read as a different (background)
   // color -- matches Coinglass's continuous-shading look (every price row painted at every column).
   const densityBinWidth = sortedDensityHistory.length ? (sortedDensityHistory[0].binWidth || 0) : 0;
+  // 🔴밀도 층은 이 화면에서 **가장 큰 덩어리**다(청산맵 1h 실측 rect 301/렌더). 입력은
+  //   /api/liquidation-map 이 갱신될 때(60초)만 바뀌는데 매 렌더 다시 만들고 있었다.
+  //   신원은 스냅샷의 개수와 양 끝 시각으로 충분하다(같은 payload 면 같은 값).
+  if (sortedDensityHistory.length) cachedLayer("density", objToken(densityHistory) + ":" + densityClip, (g) => {
   const densityPriceUnion = Array.from(new Set(sortedDensityHistory.flatMap(snap => (snap.bins || []).map(b => b.price))));
   sortedDensityHistory.forEach((snap, si) => {
     const xStartIdx = densityBoundaryIdx[si];
@@ -5036,8 +5092,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (bottom <= top) return;
       const pct = clamp01(weightByPrice.get(price) || 0);
       const t = densityClip > 0 ? Math.min(1, pct / densityClip) : 0;
-      drawDensitySeg(x0, x1, top, bottom, t);
+      drawDensitySeg(g, x0, x1, top, bottom, t);
     });
+  });
   });
 
   // Resistance/support/current/entry price tags -- computed here (before the axis ticks below) so
@@ -5106,6 +5163,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
   });
 
+  // 격자·x눈금은 기하와 봉 시각만 보므로 한 층으로 묶어 캐시한다(cachedLayer 주석).
+  cachedLayer("grid", "", (g) => {
   // Grid & Y-Axis Ticks
   axisTicks(yMin, yMax, 6).forEach(t => {
     const y = yAt(t);
@@ -5113,7 +5172,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
     line.setAttribute("y1", y); line.setAttribute("y2", y);
     line.setAttribute("class", "chart-grid");
-    svg.appendChild(line);
+    g.appendChild(line);
 
     // 2026-09-09 사용자 요청: **y축 가격 눈금 라벨을 없앤다**(격자선은 유지).
     //   현재/롱익절/지지선 같은 **라인 태그**는 priceLabels 로 계속 그린다 -- 그쪽이 실제로
@@ -5147,7 +5206,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     line.setAttribute("y1", h - mb);
     line.setAttribute("y2", h - mb + 5);
     line.setAttribute("stroke", "var(--line)");
-    svg.appendChild(line);
+    g.appendChild(line);
 
     const txt = document.createElementNS(NS, "text");
     txt.setAttribute("x", x);
@@ -5157,11 +5216,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     txt.setAttribute("font-weight", "700");
     txt.setAttribute("fill", "var(--muted)");
     txt.textContent = fmtDateTick(c.time * 1000);
-    svg.appendChild(txt);
+    g.appendChild(txt);
   });
 
+  });
+  // 레짐 리본은 워커 주기(300초)에만 바뀐다 -- 봉당 rect+title 이라 48봉이면 96 노드다.
+  cachedLayer("regime", objToken(latestRegimeForChart) + ":"
+    + regimeRibbonWaiting + ":" + regimeRibbonUnsupported, (g) => {
   if (regimeByTsForChart) {
-    drawLaneTrack(REGIME_RIBBON_Y);   // 천장·바닥과 같은 트랙 (2026-09-16)
+    drawLaneTrack(REGIME_RIBBON_Y, g);   // 천장·바닥과 같은 트랙 (2026-09-16)
     candles.forEach((c, i) => {
       const r = regimeByTsForChart.get(c.time);
       if (!r) return;
@@ -5179,7 +5242,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const pct = (v) => Math.round(v * 100);
       title.textContent = `레짐: 강세${pct(r.bull_prob)}% 약세${pct(r.bear_prob)}% 횡보${pct(r.chop_prob)}% (신뢰도${pct(r.confidence)}%)`;
       rect.appendChild(title);
-      svg.appendChild(rect);
+      g.appendChild(rect);
     });
     const ribbonLabel = document.createElementNS(NS, "text");
     ribbonLabel.setAttribute("x", ml - 6);
@@ -5189,7 +5252,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     ribbonLabel.setAttribute("font-size", "9");
     ribbonLabel.setAttribute("fill", "var(--muted)");
     ribbonLabel.textContent = "레짐";
-    svg.appendChild(ribbonLabel);
+    g.appendChild(ribbonLabel);
   } else if ((regimeRibbonWaiting || regimeRibbonUnsupported) && candles.length) {
     // Flat gray placeholder instead of silently drawing nothing, so the row still reads as
     // intentional -- but the two causes get different wording (regimeRibbonWaiting: transient,
@@ -5209,7 +5272,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       ? `레짐: 이 코인용 레짐분류기가 아직 없음 (${Object.keys(REGIME_SOURCE_BY_ASSET).map((a) => a.toUpperCase()).join("·")} 지원) -- 추후 학습 예정`
       : "레짐: 웜업 중이거나 일시적으로 갱신 실패 -- 다음 5분 주기에 자동 재시도됩니다";
     waitRect.appendChild(waitTitle);
-    svg.appendChild(waitRect);
+    g.appendChild(waitRect);
     const waitLabel = document.createElementNS(NS, "text");
     waitLabel.setAttribute("x", ml - 6);
     waitLabel.setAttribute("y", REGIME_RIBBON_Y + REGIME_RIBBON_H - 1);
@@ -5217,8 +5280,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     waitLabel.setAttribute("font-size", "9");
     waitLabel.setAttribute("fill", "var(--muted)");
     waitLabel.textContent = regimeRibbonUnsupported ? "레짐 (미지원)" : "레짐";
-    svg.appendChild(waitLabel);
+    g.appendChild(waitLabel);
   }
+
+  });
 
   // ── 변동성 전망 리본 (2026-09-11, 칩을 대체) ────────────────────────────────────
   // 사용자: "변동성 전망도 청산맵 아래 레짐과 같은 스타일로 주황색으로 칠하고 칩은 제거".
@@ -5308,6 +5373,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const geomSig = [w, h, mt, ch, ml, cw, bw, yMin, yMax, candles.length, rowSize, rowPx,
                      maxBuy, maxSell, half, fontPx, showQty, INK_OPACITY].join("|");
     const barCache = renderCandleSvg._barCache || (renderCandleSvg._barCache = new Map());
+    // 델타 라벨은 봉 그룹 **밖**이라 따로 둔다(위 🔴주석: 충돌회피 사슬 때문).
+    const deltaCache = renderCandleSvg._deltaCache || (renderCandleSvg._deltaCache = new Map());
     const seenBars = new Set();
     let barG = svg;            // drawCell 이하가 붙을 자리. 봉마다 아래 루프가 갈아끼운다.
 
@@ -5416,7 +5483,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       // 봉마다 높이가 다르다(고정 행이 아니다).
       const delta = buyTot - sellTot;
       if (buyTot + sellTot > 0) {
-        const dTxt = document.createElementNS(NS, "text");
         // 기준은 캔들 저가가 아니라 **가장 아래 셀 행의 바닥**이다. 저가로 잡았더니 그 아래로
         // 더 내려오는 마지막 행과 글씨가 겹쳤다(2026-09-16 첫 판에서 실제로 겹쳤다) --
         // 행은 rowSize 격자라 저가보다 최대 한 행만큼 더 내려간다.
@@ -5433,6 +5499,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           dY += deltaFont + 2;
         }
         deltaBoxes.push({ x1: cxD - halfW, x2: cxD + halfW, y: dY });
+        // 🔴여기까지의 **산수는 늘 돈다** -- dY 는 앞선 봉들의 충돌회피 결과에 달려 있어서
+        //   건너뛰면 사슬이 끊긴다. 캐시하는 것은 «만들어진 노드»뿐이다.
+        // ⭐그래서 키가 사슬 해시를 들 필요가 없다: dY 가 **이미 그 사슬의 결과**다.
+        //   아래 다섯이 이 노드의 입력 전부이므로, 같으면 노드도 같다.
+        const dSig = deltaFont + "|" + cxD + "|" + dY + "|" + label + "|" + c.time
+                     + "|" + buyTot.toFixed(1) + "|" + sellTot.toFixed(1);
+        const dPrev = deltaCache.get(c.time);
+        if (dPrev && dPrev.sig === dSig) { svg.appendChild(dPrev.n); }
+        else {
+        const dTxt = document.createElementNS(NS, "text");
         dTxt.setAttribute("x", cxD); dTxt.setAttribute("y", dY);
         dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", String(deltaFont));
         dTxt.setAttribute("font-weight", "bold");
@@ -5443,6 +5519,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           + " · 매수 " + buyTot.toFixed(1) + " / 매도 " + sellTot.toFixed(1);
         dTxt.appendChild(dTitle);
         svg.appendChild(dTxt);
+        deltaCache.set(c.time, { sig: dSig, n: dTxt });
+        }
       }
     });
 
@@ -5452,6 +5530,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   나중에 붙인 쪽으로 **옮겨간다**(appendChild 는 이동이다).
     if (barCache.size > seenBars.size) {
       [...barCache.keys()].forEach((t) => { if (!seenBars.has(t)) barCache.delete(t); });
+    }
+    if (deltaCache.size > seenBars.size) {
+      [...deltaCache.keys()].forEach((t) => { if (!seenBars.has(t)) deltaCache.delete(t); });
     }
 
     // ── 봉별 POC 선 (2026-09-19 사용자 요청) ────────────────────────────
@@ -5604,14 +5685,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       { y: GATE_ROW_Y, label: "게이트", items: [
         { key: "evr_gate", name: "게이트 발동", color: "var(--amber)", opacity: 0.72 }] },
     ];
+    // 구간 줄은 cm(60초 폴링)에만 달려 있다. 🔴아래 **이벤트 삼각형은 캐시하지 않는다** --
+    // y 가 그 봉의 고가/저가에서 나오므로 진행 중인 봉에서 틱마다 움직인다.
+    cachedLayer("spans", objToken(cm), (lg) => {
     spanRows.forEach((row) => {
-      drawLaneTrack(row.y);
+      drawLaneTrack(row.y, lg);
       const lbl = document.createElementNS(NS, "text");
       lbl.setAttribute("x", ml - 6); lbl.setAttribute("y", row.y + LANE_H / 2 + 3);
       lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "9");
       lbl.setAttribute("fill", "var(--muted)");
       lbl.textContent = row.label;
-      svg.appendChild(lbl);
+      lg.appendChild(lbl);
       row.items.forEach((item) => {
         const raw = Array.isArray(spans[item.key]) ? spans[item.key] : [];
         // 🔴인덱스로 맞추면 안 된다. 서버 격자는 72봉인데 **풋프린트는 12봉**이라 길이가 다르다
@@ -5646,7 +5730,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             + "부터 " + span + "분"
             + (partial.has(item.key) ? " (현재 상태만 압니다 — 과거 이력이 없습니다)" : "");
           rect.appendChild(ti);
-          svg.appendChild(rect);
+          lg.appendChild(rect);
           // 구간이 충분히 넓을 때만 이름을 넣는다 -- 좁은 칸의 글자는 읽히지 않고 더럽기만 하다.
           if (x1 - x0 >= 64) {
             const t = document.createElementNS(NS, "text");
@@ -5654,11 +5738,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "bold");
             t.setAttribute("fill", inkOnFill());
             t.textContent = item.name;
-            svg.appendChild(t);
+            lg.appendChild(t);
           }
           i = j + 1;
         }
       });
+    });
+
     });
 
     // 이벤트 트리거 -- 매매 저널과 **같은 삼각형 문법**을 쓰고 `markerCounts` 를 공유해
@@ -5933,6 +6019,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⚠️청산 레인과 달리 **선형 스케일**이다. OI 증분은 봉마다 자릿수가 비슷해서(청산의
   //   23,000배 같은 폭이 없다) 로그로 누르면 오히려 차이가 사라진다.
   // 회색 막대 = 수집 공백 뒤라 직전 봉과 이을 수 없어 봉 안에서만 잰 값(0이 아니라 «모름»).
+  // OI 레인은 15초 폴링에만 달려 있다(봉당 rect+title).
+  cachedLayer("oiLane", objToken(oiBars), (g) => {
   if (oiBars.length && candles.length) {
     const OI_Y = oiPanelY, OI_H = OI_PANEL_H, OI_MID = OI_Y + OI_H / 2;
     // 봉시각은 서버가 5분으로 바닥내림한 **초**다. 캔들 c.time 과 같은 단위·같은 격자다.
@@ -5946,7 +6034,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     oiTopLine.setAttribute("x1", ml); oiTopLine.setAttribute("x2", ml + cw);
     oiTopLine.setAttribute("y1", OI_Y); oiTopLine.setAttribute("y2", OI_Y);
     oiTopLine.setAttribute("stroke", "var(--soft-line)");
-    svg.appendChild(oiTopLine);
+    g.appendChild(oiTopLine);
     if (oiPeak > 0) {
       const oiHalf = OI_H / 2 - 1;
       const nowBar = Math.floor(Date.now() / 1000 / 300) * 300;
@@ -5970,13 +6058,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           + (gap ? " (앞 봉이 비어 봉 안에서만 쟀다 -- 0이 아니라 «모름»)" : "")
           + (c.time >= nowBar ? " (진행 중)" : "");
         rect.appendChild(title);
-        svg.appendChild(rect);
+        g.appendChild(rect);
       });
       const oiMidLine = document.createElementNS(NS, "line");
       oiMidLine.setAttribute("x1", ml); oiMidLine.setAttribute("x2", ml + cw);
       oiMidLine.setAttribute("y1", OI_MID); oiMidLine.setAttribute("y2", OI_MID);
       oiMidLine.setAttribute("stroke", "var(--line)"); oiMidLine.setAttribute("stroke-width", "1");
-      svg.appendChild(oiMidLine);
+      g.appendChild(oiMidLine);
       const oiLbl = document.createElementNS(NS, "text");
       oiLbl.setAttribute("x", ml - 6); oiLbl.setAttribute("y", OI_MID + 3);
       oiLbl.setAttribute("text-anchor", "end"); oiLbl.setAttribute("font-size", "9");
@@ -5988,14 +6076,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         + " 직전 봉과 이을 수 없는 구간입니다. 바이낸스가 OI 를 3~7초에 한 번만 갱신하므로"
         + " 한 봉은 40~90개 스냅샷의 양 끝으로 잽니다.";
       oiLbl.appendChild(oiLblTip);
-      svg.appendChild(oiLbl);
+      g.appendChild(oiLbl);
       const oiPeakLbl = document.createElementNS(NS, "text");
       oiPeakLbl.setAttribute("x", ml + cw + 6); oiPeakLbl.setAttribute("y", OI_MID + 3);
       oiPeakLbl.setAttribute("font-size", "9"); oiPeakLbl.setAttribute("fill", "var(--muted)");
       oiPeakLbl.textContent = "최대 ±" + fmtFootprintQty(oiPeak);
-      svg.appendChild(oiPeakLbl);
+      g.appendChild(oiPeakLbl);
     }
   }
+
+  });
 
   // ── 봉별 청산 레인 (2026-09-11 사용자 "청산맵 차트에 매 5분봉 청산 데이터를 추가") ──
   // 데이터: /api/liquidation-5m-history -- tail_risk_1m 의 실제 @forceOrder 체결을 5분으로 접은 것.
@@ -6009,6 +6099,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 색은 표시 규약 그대로 롱=good / 숏=bad. 위로 롱청산, 아래로 숏청산인 발산형.
   // ⚠️로그 스케일이다. 최근 7일 5분봉 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 거의 전부가
   //   1픽셀 미만으로 사라진다.
+  // 청산 레인은 60초 폴링에만 달려 있다(봉당 최대 rect+title 두 벌).
+  cachedLayer("liqLane", objToken(liqBars), (g) => {
   if (Array.isArray(liqBars) && liqBars.length && candles.length) {
     const LIQ_Y = liqPanelY, LIQ_H = LIQ_PANEL_H, LIQ_MID = LIQ_Y + LIQ_H / 2;
     // 🔴캔들의 `time` 은 **초** 단위다(server.py: int(row["timestamp"].timestamp())).
@@ -6028,7 +6120,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     liqTopLine.setAttribute("x1", ml); liqTopLine.setAttribute("x2", ml + cw);
     liqTopLine.setAttribute("y1", LIQ_Y); liqTopLine.setAttribute("y2", LIQ_Y);
     liqTopLine.setAttribute("stroke", "var(--soft-line)");
-    svg.appendChild(liqTopLine);
+    g.appendChild(liqTopLine);
     if (liqPeak > 0) {
       const liqHalf = LIQ_H / 2 - 1;
       const liqScale = (v) => (v > 0 ? Math.max(1, liqHalf * Math.log1p(v) / Math.log1p(liqPeak)) : 0);
@@ -6053,27 +6145,29 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             + " · 숏청산 " + fmtUsdCompact(su) + " · " + b.events + "건"
             + (b.partial ? " (진행 중)" : "");
           rect.appendChild(title);
-          svg.appendChild(rect);
+          g.appendChild(rect);
         });
       });
       const liqMidLine = document.createElementNS(NS, "line");
       liqMidLine.setAttribute("x1", ml); liqMidLine.setAttribute("x2", ml + cw);
       liqMidLine.setAttribute("y1", LIQ_MID); liqMidLine.setAttribute("y2", LIQ_MID);
       liqMidLine.setAttribute("stroke", "var(--line)"); liqMidLine.setAttribute("stroke-width", "1");
-      svg.appendChild(liqMidLine);
+      g.appendChild(liqMidLine);
       const liqLbl = document.createElementNS(NS, "text");
       liqLbl.setAttribute("x", ml - 6); liqLbl.setAttribute("y", LIQ_MID + 3);
       liqLbl.setAttribute("text-anchor", "end"); liqLbl.setAttribute("font-size", "9");
       liqLbl.setAttribute("fill", "var(--muted)");
       liqLbl.textContent = "청산";
-      svg.appendChild(liqLbl);
+      g.appendChild(liqLbl);
       const liqPeakLbl = document.createElementNS(NS, "text");
       liqPeakLbl.setAttribute("x", ml + cw + 6); liqPeakLbl.setAttribute("y", LIQ_MID + 3);
       liqPeakLbl.setAttribute("font-size", "9"); liqPeakLbl.setAttribute("fill", "var(--muted)");
       liqPeakLbl.textContent = "최대 " + fmtUsdCompact(liqPeak);
-      svg.appendChild(liqPeakLbl);
+      g.appendChild(liqPeakLbl);
     }
   }
+
+  });
 
   // ── SVG 안의 수급 두 패널 -- OI 레인 바로 위 (2026-09-19 사용자 지시) ──────────
   // 중첩 <svg> 를 쓴다 -- 자식 svg 는 제 viewBox 를 갖는 독립 좌표계라 두 렌더러의 좌표
