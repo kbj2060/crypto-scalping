@@ -233,14 +233,21 @@ async def ensure_closed(session, common: dict, oid, key: str, secret: str, offse
 REPEG_MAX = 40          # 3초 폴링 × 120초면 40회가 물리적 상한. 폭주 방지용 이중 안전장치.
 
 
-async def maker_price(session, order_side: str) -> tuple[float, float, float]:
+async def maker_price(session, order_side: str, symbol: str) -> tuple[float, float, float]:
     """지금 **메이커로 남는** 가격. 매수는 최우선 매수호가, 매도는 최우선 매도호가.
     공개 엔드포인트라 서명하지 않는다.
 
     ⚠️키는 **주문 측면(BUY/SELL)** 이지 포지션 방향이 아니다 -- 진입 롱과 청산 숏은 둘 다
-    BUY 라 역학이 같다. 포지션 방향으로 키를 잡으면 같은 것을 둘로 다루게 된다."""
+    BUY 라 역학이 같다. 포지션 방향으로 키를 잡으면 같은 것을 둘로 다루게 된다.
+
+    🔴호가는 **주문이 나가는 그 심볼**에서 읽는다. 여기 "ETHUSDT" 가 박혀 있었고 수동 주문은
+      2026-09-19 에 ETHUSDC 로 옮겨갔다. 두 심볼은 같은 이더가 아니다 -- 실측 ETHUSDT 가
+      $0.54~0.79 비싸다(5회 연속). 그래서 BUY 지정가를 «USDT 최우선 매수호가»에 걸면 그
+      값이 USDC 매도호가보다 위라 즉시 체결될 주문이 되고, post-only 라 거래소가 -5022 로
+      거부한다(실측 5/5). 게다가 drifted() 도 같은 값을 받아 **항상 참**이 되어, 옳게 걸린
+      첫 주문마저 3초 만에 취소했다. 증상은 「체결 0 · rejected」였다."""
     async with session.get(f"{FAPI}/fapi/v1/ticker/bookTicker",
-                           params={"symbol": "ETHUSDT"}) as response:
+                           params={"symbol": symbol}) as response:
         book = await response.json()
     bid, ask = float(book["bidPrice"]), float(book["askPrice"])
     return (bid if order_side == "BUY" else ask), bid, ask
@@ -276,7 +283,7 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
             # -5022 = «지금 걸면 테이커가 된다». 실패가 아니라 호가가 움직였다는 뜻이라
             # 새 호가로 다시 건다. 그 외 오류는 그대로 멈춘다 -- 몰래 테이커로 바꾸지 않는다.
             if "5022" in str(order["__error__"]) and repegs < REPEG_MAX:
-                price, _, _ = await maker_price(session, side)
+                price, _, _ = await maker_price(session, side, common["symbol"])
                 repegs += 1
                 state.update(repegs=repegs, limit_price=price)
                 continue
@@ -296,7 +303,7 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
             state["filled"] = round(done + this_filled, 8)
             if status in TERMINAL:
                 break
-            price_now, bid, ask = await maker_price(session, side)
+            price_now, bid, ask = await maker_price(session, side, common["symbol"])
             if drifted(side, price, bid, ask):
                 need_repeg, price = True, price_now
                 break
@@ -440,6 +447,19 @@ def _self_check() -> None:
     assert drifted("BUY", 100.0, 100.00, 100.01) is False
     assert drifted("SELL", 100.0, 99.98, 99.99) is True, "매도는 최우선 매도호가가 밑으로 가면 밀린다"
     assert drifted("SELL", 100.0, 99.99, 100.00) is False
+
+    # ── 호가를 «주문 심볼»에서 읽는가 (2026-09-20 사고) ──────────────────────
+    # maker_price 가 "ETHUSDT" 를 박아 읽는데 수동 주문은 ETHUSDC 로 나갔다. 두 심볼은
+    # 실측 $0.54~0.79 벌어져 있어 BUY 지정가가 매번 상대 호가를 넘었고(5/5) post-only 가
+    # 전부 -5022 로 거부됐다. drifted() 도 같은 값을 받아 항상 참이 되어 옳게 걸린 첫 주문
+    # 마저 3초 만에 취소했다. 심볼 리터럴이 다시 기어들어오는 것을 여기서 막는다.
+    assert "symbol" in _i.signature(maker_price).parameters, "maker_price 가 심볼을 안 받는다"
+    _mp = _i.getsource(maker_price)
+    _code = _mp[_mp.index('async with'):]
+    assert "ETHUSD" not in _code, "maker_price 가 호가 심볼을 하드코딩했다 -- 주문 심볼을 써야 한다"
+    for _fn in (run_entry, run_exit):
+        _fs = _i.getsource(_fn)
+        assert "maker_price(session, side)" not in _fs, f"{_fn.__name__} 이 심볼 없이 호출한다"
 
     # ── 레버리지 설정 (2026-09-13) ───────────────────────────────────────────
     # 네트워크를 안 타는 계약만 본다: 목표가 없으면 아무것도 안 보낸다.
