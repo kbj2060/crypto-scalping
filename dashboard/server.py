@@ -580,7 +580,11 @@ OI_5M_WINDOW_BARS = 48       # 4시간
 # 가벼운 것 하나를 더 받는다(REST bookTicker 1/s · @forceOrder WS -- 조용한 스트림).
 MICRO_REF_POLL_SECONDS = 1.0
 MICRO_BOOK_URL = "https://fapi.binance.com/fapi/v1/ticker/bookTicker"   # weight 1 · 1/s
-FORCE_ORDER_WS_URL = "wss://fstream.binance.com/ws/ethusdt@forceOrder"
+# 🔴경로가 «/market/ws/» 여야 한다(봇 tail_risk_interceptor 와 같은 것). 2026-09-20 서버 실측: 같은 프로세스에서
+#   /ws/ethusdt@forceOrder · /market/ws/ethusdt@forceOrder · /ws/!forceOrder@arr 셋을 동시에 열어 두니 22:40:48 의
+#   실제 ETH 청산(SELL 1.000 @2575.83)이 **/market/ws/ 에만** 왔다. /ws/ 는 연결은 되는데(핸드셰이크 OK, 오류 0)
+#   이벤트를 안 준다 -- 첫 배포에서 tail_risk 가 4건을 적는 동안 이 카드가 0건이었던 원인.
+FORCE_ORDER_WS_URL = "wss://fstream.binance.com/market/ws/ethusdt@forceOrder"
 LIQ_EVENTS_PATH = LIVE_DIR / "liq_events.jsonl"      # ⑤ 원시 이벤트. 봇의 tail_risk 는 1분 합만 남긴다
 MICRO_TAPE_DB_PATH = LIVE_DIR / "trade_tape.duckdb"  # ② 기준선(시간대별 분위). 읽기 전용, 1시간마다
 MICRO_BASELINE_SECONDS = 3600
