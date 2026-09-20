@@ -196,7 +196,7 @@ const API_SUPPLY_PROFILE_URL = "/api/supply-profile";
 const API_SUPPLY_1S_URL = "/api/supply-1s";
 const SUPPLY_1S_POLL_MS = 1000;
 const SUPPLY_1S_WINDOW = 300;           // 화면에 그리는 초 수(5분)
-const SUPPLY_1S_ROLL = 30;              // 순수급을 재는 롤링 창(초). renderSupply1s 주석 참고.
+const SUPPLY_1S_SEGMENT = 300;          // 누적을 0으로 되돌리는 **벽시계** 경계(초). 5분봉과 같은 자리.
 // 계단 눈금(ETH). 자동정규화를 안 쓰는 이유는 renderSupply1s 주석에 있다.
 const SUPPLY_1S_STEPS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000];
 let supply1s = new Map();               // 초 -> [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
@@ -3560,9 +3560,10 @@ async function refreshSupply1s() {
       now: Number(payload.now) || supply1sMeta.now,
     };
     // 창 밖은 버린다. 안 버리면 탭을 켜둔 채로 며칠이면 Map 이 수십만 칸이 된다.
-    // 🔴창 시작 **이전** SUPPLY_1S_ROLL 초까지 남긴다 -- 안 그러면 롤링 합이 화면 왼쪽
-    //   30초 동안 0에서 차오르는 가짜 램프를 그린다. OI 는 갱신이 3~7초라 20초를 더 준다.
-    const floor = supply1sMeta.now - SUPPLY_1S_WINDOW - SUPPLY_1S_ROLL - 20;
+    // 🔴창 시작 **이전 한 구간**까지 남긴다. 화면 왼쪽 끝은 이전 5분 구간에 속하는데, 그
+    //   구간의 누적은 **그 구간의 경계**부터 세야 맞다(최악 now-600). 안 남기면 왼쪽 구간이
+    //   «있는 데이터부터» 세어져 조용히 낮게 나온다. OI 는 갱신이 3~7초라 20초를 더 준다.
+    const floor = supply1sMeta.now - SUPPLY_1S_WINDOW - SUPPLY_1S_SEGMENT - 20;
     supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
     oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
   } catch (error) {
@@ -3771,17 +3772,25 @@ function supplyFlowOfBar(levels) {
 
 
 // ── 수급 · 최근 5분 x 1초 (2026-09-19, 2026-09-20 절대값으로 개편) ─────────
-// y 는 **최근 30초 순수급**(매수-매도, ETH). 0선 위면 들어오는 중, 아래면 나가는 중이고,
-// 높이가 곧 크기다. 고래는 0선 기준 면적으로 칠한다.
+// y 는 **5분 벽시계 경계에서 0으로 다시 쌓는 누적 순수급**(매수-매도, ETH). 끝점이 곧
+// 「이번 5분에 순 몇 ETH」이고, 선이 올라가는 중이면 지금 들어오는 중이다.
+// 고래는 0선 기준 면적으로 칠한다. 경계는 **아래 캔들과 같은 자리**라 두 그림이 같은 구간을
+// 말한다. 기준점이 벽시계라 새로고침·재기동과 무관하다.
 //
 // 🔴여기 원래 «창 시작을 0으로 둔 누적선»이 있었다. 두 겹으로 상대값이었다: ①기준점이
 //   매초 미끄러지고 ②눈금이 창 최대(max|v|)로 자동정규화돼 **조용한 5분과 터진 5분이
 //   화면상 같은 크기**였다. 더 근본적으로 누적선은 «지금 들어오나»를 **기울기**에 담는데,
 //   사람은 선차트에서 높이를 읽지 기울기를 못 읽는다 -- 절대값으로만 바꿔도 안 풀린다.
 //   (2026-09-20 사용자: "상대값이라 눈에 딱 들어오지 않는다")
-// 초별 막대가 아니라 롤링 합인 이유: 1초 순수급은 거의 스파이크라(고래는 분당 13건)
-// 300칸으로 그리면 잡음만 보인다. 30초면 고래 6~7건이 들어와 한 건에 안 흔들리면서
-// 1초 반응성은 남는다.
+// 🔴그 다음엔 «30초 롤링 창»이었다. 그것도 틀렸다(2026-09-20, 사용자가 실제로 속았다):
+//   고래 매수 +305 가 들어오면 30초 뒤 창에서 빠지면서 **아래로 뚝 떨어지는 획**이 생긴다.
+//   그 시각엔 아무 일도 없었는데 «갑작스러운 매도»로 읽힌다 -- 잡음이 아니라 거짓말이다.
+// 왜 누적인가: 초별 원값은 꼬리가 무겁다(실측 330초 중앙 1.5 / 최대 401, **260배**).
+//   선형 절대 눈금에 얹으면 데이터의 절반이 **0.2픽셀**이라 사실상 안 그려진다 -- 막대로
+//   그리든 선으로 그리든 마찬가지였다. 누적은 그 꼬리를 접는다: 같은 실측에서 5분 누적이
+//   리테일 80 / 고래 180 / 신규계약 889 로 **11배 안**에 들어와 셋 다 한 눈금에서 보인다.
+//   비선형 축(symlog)을 쓰지 않아도 되므로 「높이 2배 = 수량 2배」가 지켜진다.
+// 누적이 매초 한 번만 움직이므로 가짜 사건도 안 생긴다.
 // 눈금은 **계단 고정**(SUPPLY_1S_STEPS)이다. 완전 고정은 잘리고 자동은 크기를 지운다 --
 // 계단이면 «같은 높이 = 같은 수량»이 대체로 성립하고 스케일이 초마다 튀지 않는다.
 // 세 선(고래·리테일·신규계약)은 같은 자로 그린다. 단위가 같은 ETH 라서, 들어온 순수급 중
@@ -3817,9 +3826,9 @@ function renderSupply1s(box = null) {
 
   const now = supply1sMeta.now || 0;
   const first = now - SUPPLY_1S_WINDOW;
-  // 롤링 합은 화면 왼쪽 끝에서도 온전해야 한다 -- 그래서 first 이전 ROLL 초까지 읽는다
+  // 누적은 화면 왼쪽 끝에서도 온전해야 한다 -- 그래서 first 이전 한 구간까지 읽는다
   // (refreshSupply1s 가 그만큼 더 붙들고 있다). 그리는 건 first 이후뿐이다.
-  const allSecs = [...supply1s.keys()].filter((s) => s > first - SUPPLY_1S_ROLL && s <= now)
+  const allSecs = [...supply1s.keys()].filter((s) => s > first - SUPPLY_1S_SEGMENT && s <= now)
                                       .sort((a, b) => a - b);
   const secs = allSecs.filter((s) => s > first);
   if (secs.length < 2) {
@@ -3838,10 +3847,14 @@ function renderSupply1s(box = null) {
   // 5초로 둔 이유: 폴링이 1초라 한두 번 늦는 건 일상이고, 그때마다 띠를 그리면 잡음이 된다.
   // 5초가 비면 그건 폴링 지각이 아니라 실제 공백이다.
   const SUPPLY_1S_GAP_SEC = 5;
+  // 선을 끊는 두 이유: ①실제 공백 ②**구간 경계**(거기서 누적이 0으로 돌아가므로 이으면
+  //   없는 낙차를 그린다). 두 판정을 한 곳에 둬서 선과 면적이 같은 자리에서 끊긴다.
+  const segOf = (s) => Math.floor(s / SUPPLY_1S_SEGMENT);
+  const brk = (s, prev, gap) => prev === null || s - prev > gap || segOf(s) !== segOf(prev);
   const pathOf = (rows, yOf, gap = SUPPLY_1S_GAP_SEC) => {
     let d = "", prev = null;
     rows.forEach((r) => {
-      const cmd = (prev === null || r.s - prev > gap) ? "M" : "L";
+      const cmd = brk(r.s, prev, gap) ? "M" : "L";
       d += (d ? " " : "") + cmd + xAt(r.s).toFixed(1) + " " + yOf(r).toFixed(1);
       prev = r.s;
     });
@@ -3868,30 +3881,31 @@ function renderSupply1s(box = null) {
     svg.appendChild(t);
   };
 
-  // 최근 SUPPLY_1S_ROLL 초의 순수급(두 포인터).
-  const rollOf = (at) => {
+  // 구간 경계에서 0으로 되돌리며 쌓는다. 경계 이전 초도 **계산에는** 들어간다(누산기를
+  // 그때 0으로 되돌리는 게 전부이고, 그리는 건 first 이후뿐이다).
+  const cumOf = (at) => {
     const rows = [];
-    let head = 0, sum = 0;
+    let acc = 0, seg = null;
     allSecs.forEach((s) => {
-      sum += at(s);
-      while (allSecs[head] <= s - SUPPLY_1S_ROLL) { sum -= at(allSecs[head]); head++; }
-      if (s > first) rows.push({ s, v: sum });
+      if (segOf(s) !== seg) { seg = segOf(s); acc = 0; }
+      acc += at(s);
+      if (s > first) rows.push({ s, v: acc });
     });
     return rows;
   };
-  const whale = rollOf((s) => { const c = supply1s.get(s); return c[2] - c[3]; });
-  const retail = rollOf((s) => { const c = supply1s.get(s); return c[0] - c[1]; });
-  // 신규계약(OI)은 **레벨**이라 합이 아니라 차분이다: 지금 - ROLL 초 전. 갱신이 3~7초라
-  // 그 시점 값이 정확히 없을 수 있어 «그 이전 마지막 값»을 쓴다.
-  const oiKeys = [...oi1s.keys()].filter((s) => s > first - SUPPLY_1S_ROLL - 20 && s <= now)
+  const whale = cumOf((s) => { const c = supply1s.get(s); return c[2] - c[3]; });
+  const retail = cumOf((s) => { const c = supply1s.get(s); return c[0] - c[1]; });
+  // 신규계약(OI)은 **레벨**이라 더하지 않는다: 그 구간 첫 관측 대비 증분이다.
+  // 🔴갱신이 3~7초라 구간의 «첫 관측»이 경계보다 조금 뒤다 -- 그만큼 증분이 과소평가된다.
+  //   서버가 초 단위 OI 를 안 들고 있어 더 정확히는 못 한다. 체결(고래·리테일)은 초 단위라
+  //   이 근사가 없다.
+  const oiKeys = [...oi1s.keys()].filter((s) => s > first - SUPPLY_1S_SEGMENT - 20 && s <= now)
                                  .sort((a, b) => a - b);
   const oiRows = [];
-  let oiBack = 0;
+  let oiSeg = null, oiBase = 0;
   oiKeys.forEach((s) => {
-    while (oiBack + 1 < oiKeys.length && oiKeys[oiBack + 1] <= s - SUPPLY_1S_ROLL) oiBack++;
-    if (s > first && oiKeys[oiBack] <= s - SUPPLY_1S_ROLL) {
-      oiRows.push({ s, v: oi1s.get(s) - oi1s.get(oiKeys[oiBack]) });
-    }
+    if (segOf(s) !== oiSeg) { oiSeg = segOf(s); oiBase = oi1s.get(s); }
+    if (s > first) oiRows.push({ s, v: oi1s.get(s) - oiBase });
   });
   const peak = Math.max(0, ...whale.map((r) => Math.abs(r.v)), ...retail.map((r) => Math.abs(r.v)),
                         ...oiRows.map((r) => Math.abs(r.v)));
@@ -3939,7 +3953,7 @@ function renderSupply1s(box = null) {
       run = null;
     };
     rows.forEach((r) => {
-      if (run === null || r.s - run > SUPPLY_1S_GAP_SEC) {
+      if (brk(r.s, run, SUPPLY_1S_GAP_SEC)) {
         close();
         d += (d ? " " : "") + "M" + xAt(r.s).toFixed(1) + " " + mid.toFixed(1);
       }
@@ -3954,6 +3968,19 @@ function renderSupply1s(box = null) {
   };
   area(whale, (v) => Math.min(yF(v), mid), "var(--good)");
   area(whale, (v) => Math.max(yF(v), mid), "var(--bad)");
+
+  // 구간 경계. 여기서 셋 다 0으로 돌아가므로 «왜 끊겼나»를 화면이 말해야 한다.
+  // 아래 캔들의 5분 경계와 같은 자리다.
+  for (let b = Math.floor(first / SUPPLY_1S_SEGMENT) + 1;
+       b * SUPPLY_1S_SEGMENT <= now; b++) {
+    const bx = xAt(b * SUPPLY_1S_SEGMENT);
+    const g = document.createElementNS(NS, "line");
+    g.setAttribute("x1", bx); g.setAttribute("x2", bx);
+    g.setAttribute("y1", flowTop); g.setAttribute("y2", flowTop + flowH);
+    g.setAttribute("stroke", "var(--ink)"); g.setAttribute("stroke-opacity", "0.45");
+    svg.appendChild(g);
+    if (!narrow) label(bx + 4, flowTop + 10, "5분 경계 · 여기서 0", "var(--muted)");
+  }
 
   const zero = document.createElementNS(NS, "line");
   zero.setAttribute("x1", ml); zero.setAttribute("x2", ml + cw);
@@ -3996,11 +4023,9 @@ function renderSupply1s(box = null) {
   if (over > 0) tags.forEach((t) => { t.y -= over; });
   tags.forEach((t) => label(ml + cw + 5, t.y + 3, t.text, t.color));
 
-  // 무엇을 보고 있는지 한 줄. 창 누적은 선을 지우고 여기 숫자로만 남긴다.
-  const cumW = secs.reduce((a, s) => { const c = supply1s.get(s); return a + c[2] - c[3]; }, 0);
-  label(ml + 2, mt - 5, SUPPLY_1S_ROLL + "초 순수급 ETH"
-        + (narrow ? "" : "  ·  5분 누적 고래 " + (cumW >= 0 ? "+" : "-")
-                         + qty(cumW)), "var(--muted)");
+  // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
+  label(ml + 2, mt - 5, "5분 누적 순수급 ETH"
+        + (narrow ? "" : "  ·  경계에서 0으로"), "var(--muted)");
 
   label(ml, h - 3, "5분 전", "var(--muted)");
   label(ml + cw, h - 3, "지금", "var(--muted)", "end");
