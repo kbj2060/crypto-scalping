@@ -5226,6 +5226,27 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const INK_OPACITY =
       document.documentElement.getAttribute("data-theme") === "light" ? "0.95" : "0.82";
 
+    // ── 봉별 캐시 (2026-09-20) ─────────────────────────────────────────────
+    // 풋프린트 모드는 체결이 올 때마다 다시 그리는데(400ms 게이트) **바뀌는 건 맨 오른쪽 봉
+    // 하나**다. 그런데 48봉의 셀을 매번 새로 만들고 있었다.
+    // 🔴«마지막 봉만 그리면 된다»는 **그냥은 틀리다**. 창의 고저가 바뀌면 yMin/yMax 가 움직여
+    //   모든 셀이 자리를 옮겨야 하고, 음영은 maxBuy/maxSell 로 정규화되며, 행 크기는 ATR 로
+    //   정해진다. 그래서 캐시 키에 그 기하 전체를 넣는다 -- 하나라도 바뀌면 전부 무효다(맞다).
+    // ⭐실측(틱 스트림 30초 · 12봉/48봉): 이 geomSig 는 렌더 124회 중 **0회** 바뀌었다.
+    //   가격이 창의 고저 밴드 안에 머무는 동안은 축도 음영 기준도 고정이기 때문이다.
+    //   돌파해서 새 고점을 만들면 그때 한 번 전부 다시 그린다.
+    // ⭐봉 데이터의 신원은 `levels` **배열 객체 자체**다. ?since= 증분(refreshFootprint) 덕에
+    //   안 바뀐 봉은 폴링 사이에 같은 배열을 그대로 들고 있어서 해시를 만들 필요가 없다.
+    //   진행 중인 봉은 footprintMergeLive 가 매번 새 배열로 갈아끼우므로 늘 미스다(맞다).
+    // 🔴델타 라벨과 POC 점은 **캐시하지 않는다**. 델타 y 는 앞선 봉들의 충돌회피 결과에
+    //   의존해서(deltaBoxes) 중간 봉 하나만 바뀌어도 뒤쪽이 전부 틀어진다 -- 그 사슬을
+    //   캐시에 들이면 조용히 어긋난다. 둘 다 노드 하나뿐이라 매번 만들어도 싸다.
+    const geomSig = [w, h, mt, ch, ml, cw, bw, yMin, yMax, candles.length, rowSize, rowPx,
+                     maxBuy, maxSell, half, fontPx, showQty, INK_OPACITY].join("|");
+    const barCache = renderCandleSvg._barCache || (renderCandleSvg._barCache = new Map());
+    const seenBars = new Set();
+    let barG = svg;            // drawCell 이하가 붙을 자리. 봉마다 아래 루프가 갈아끼운다.
+
     // 한 칸: 배경(거래량 비율 4단계) + 숫자 + 불균형 표시(반대편의 300% 초과면 바깥쪽 세로선).
     // 2026-09-19 «막대 길이» 인코딩(A안)을 되돌렸다 -- 사용자 지시. 길이는 비율을 보여주는
     // 대신 짧은 막대의 숫자를 지웠고, 여기서 읽는 건 그 숫자다. 칸을 다시 고정하고 체결량은
@@ -5242,21 +5263,21 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         + (v > 0 && v > other * FOOTPRINT_IMBALANCE_RATIO
           ? " · 불균형 " + (Number.isFinite(ratio) ? ratio.toFixed(1) + "배" : "일방") : "");
       rect.appendChild(title);
-      svg.appendChild(rect);
+      barG.appendChild(rect);
       if (v > 0 && rowPx >= 7 && showQty) {
         const txt = document.createElementNS(NS, "text");
         txt.setAttribute("x", cx + half / 2); txt.setAttribute("y", yTop + rowPx / 2 + fontPx * 0.36);
         txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", fontPx);
         txt.setAttribute("fill", "var(--ink)"); txt.setAttribute("fill-opacity", INK_OPACITY);
         txt.textContent = fmtFootprintQty(v);
-        svg.appendChild(txt);
+        barG.appendChild(txt);
       }
       if (v > 0 && v > other * FOOTPRINT_IMBALANCE_RATIO) {
         const mark = document.createElementNS(NS, "rect");
         mark.setAttribute("x", edgeX); mark.setAttribute("y", yTop + 0.5);
         mark.setAttribute("width", 2); mark.setAttribute("height", Math.max(1, rowPx - 1));
         mark.setAttribute("fill", color);
-        svg.appendChild(mark);
+        barG.appendChild(mark);
       }
     };
 
@@ -5273,6 +5294,22 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (key < lowKey) lowKey = key;
         if (cell[0] + cell[1] > pocVol) { pocVol = cell[0] + cell[1]; pocKey = key; }
       });
+      // POC «점»은 캐시 밖에서 매번 구한다(아래 폴리라인이 봉을 가로질러 잇기 때문).
+      // 창 밖 행은 아래 그리기 루프가 건너뛰므로 여기서도 **같은 조건**으로 건너뛴다.
+      if (pocKey !== null) {
+        const pocY = yAt((pocKey + 1) * rowSize);
+        if (!(pocY + rowPx < mt || pocY > mt + ch)) pocPts.push([x + bw / 2, pocY + rowPx / 2]);
+      }
+      seenBars.add(c.time);
+      const levelsRef = footprint.byTime.get(c.time);
+      const prev = barCache.get(c.time);
+      const reuse = !!prev && prev.geom === geomSig && prev.levels === levelsRef && prev.i === i
+        && prev.o === c.open && prev.h === c.high && prev.l === c.low && prev.c === c.close;
+      barG = reuse ? prev.g : document.createElementNS(NS, "g");
+      svg.appendChild(barG);
+      if (!reuse) {
+        barCache.set(c.time, { geom: geomSig, levels: levelsRef, i,
+                               o: c.open, h: c.high, l: c.low, c: c.close, g: barG });
       rows.forEach((cell, key) => {
         const yTop = yAt((key + 1) * rowSize);
         if (yTop + rowPx < mt || yTop > mt + ch) return;   // 창 밖 행은 건너뛴다
@@ -5288,8 +5325,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           const pocTitle = document.createElementNS(NS, "title");
           pocTitle.textContent = "POC " + price.toFixed(1) + " · 총 " + pocVol.toFixed(1);
           poc.appendChild(pocTitle);
-          svg.appendChild(poc);
-          pocPts.push([x + bw / 2, yTop + rowPx / 2]);
+          barG.appendChild(poc);
         }
       });
 
@@ -5300,14 +5336,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       wick.setAttribute("x1", x + bw / 2); wick.setAttribute("x2", x + bw / 2);
       wick.setAttribute("y1", yAt(c.high)); wick.setAttribute("y2", yAt(c.low));
       wick.setAttribute("stroke", color); wick.setAttribute("stroke-opacity", "0.5");
-      svg.appendChild(wick);
+      barG.appendChild(wick);
       const body = document.createElementNS(NS, "rect");
       const yTop = yAt(Math.max(c.open, c.close)), yBot = yAt(Math.min(c.open, c.close));
       body.setAttribute("x", x); body.setAttribute("y", yTop);
       body.setAttribute("width", bw); body.setAttribute("height", Math.max(yBot - yTop, 1));
       body.setAttribute("fill", "none"); body.setAttribute("stroke", color);
       body.setAttribute("stroke-opacity", "0.6");
-      svg.appendChild(body);
+      barG.appendChild(body);
+      }   // ← if (!reuse)
 
       // 봉 델타(매수-매도). 2026-09-16 사용자 요청으로 **플롯 맨 위 -> 그 봉 바로 아래**로
       // 옮기고 굵게 했다. 맨 위에 있을 때는 어느 봉의 숫자인지 눈이 세로로 훑어야 했다 --
@@ -5344,6 +5381,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         svg.appendChild(dTxt);
       }
     });
+
+    // 창 밖으로 나간 봉의 캐시는 버린다 -- 안 그러면 탭을 켜둔 채로 며칠이면 노드가 쌓인다.
+    // 🔴호출부가 하나뿐이라(renderSnapshotChart) 캐시를 함수에 달아도 안전하다. 두 번째
+    //   차트가 풋프린트를 쓰게 되면 svg 별로 갈라야 한다 -- 같은 <g> 를 두 svg 에 붙이면
+    //   나중에 붙인 쪽으로 **옮겨간다**(appendChild 는 이동이다).
+    if (barCache.size > seenBars.size) {
+      [...barCache.keys()].forEach((t) => { if (!seenBars.has(t)) barCache.delete(t); });
+    }
 
     // ── 봉별 POC 선 (2026-09-19 사용자 요청) ────────────────────────────
     // 봉마다 사각 테두리는 이미 있었지만 **봉끼리 독립**이라 «거래가 몰린 값이 어디로
