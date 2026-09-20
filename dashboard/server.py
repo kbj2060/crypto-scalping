@@ -2729,7 +2729,8 @@ def make_app() -> web.Application:
         log = situation_state["log"]
         return web.json_response({"now": situation_state["now"], "computed_at": situation_state["computed_at"],
                                   "recent": [{k: e.get(k) for k in ("ts", "mid", "dir", "prob", "outcome", "flips_on")} for e in log[-12:]],
-                                  "calibration": sit.calibration(log)}, headers=NOCACHE)
+                                  "calibration": sit.calibration(log),
+                                  "streams": {"fo": dict(fo_state), "mp": dict(mp_state)}}, headers=NOCACHE)
 
     async def load_chart_klines_frames() -> dict[str, Any]:
         """차트 캔들용 ETH/BTC 5분봉 프레임 캐시 (1500봉, 닫힌 봉만).
