@@ -38,6 +38,9 @@ SCORES: dict[str, dict[str, int]] = {
     "펀딩_반대쏠림": {"A": 10}, "선물주도": {"A": 8}, "현물주도": {"B": 8},
     # BTC 같은 창 이동: 시장 전체가 같이 갔으면 지속, ETH 만 갔으면 되돌림 쪽
     "BTC_동행": {"B": 8}, "BTC_단독": {"A": 8},
+    # CVD 역행(흡수): 가격은 이동 방향으로 갔는데 창 누적 델타는 반대 = 공격 체결이 아니라 수동 흡수가 만든 이동.
+    # 테이프는 «같은 초» 정보라(09-20 실측) 작게만 준다
+    "CVD_역행": {"A": 5},
 }
 BASE = {"A": 34, "B": 33, "C": 33}
 
@@ -102,6 +105,10 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     climax = (d != 0 and imax >= len(w) - CLIMAX_RECENT and _sign(deltas[imax]) == d and vols[imax] >= max(vols) * 0.999)
     if climax:
         labels.append(f"클라이맥스 (델타 {deltas[imax]:+.0f}, 창 최대 거래량)")
+    cvd = sum(deltas)
+    cvd_div = d != 0 and _sign(cvd) == -d
+    if cvd_div:
+        labels.append(f"CVD 역행 (창 델타 {cvd:+.0f} vs {'상승' if d > 0 else '하락'}) · 흡수")
     last = w[-1]
     reject = (d != 0 and _sign(last.get("delta") or 0) == -d and abs(last.get("delta") or 0) >= REJECT_FRAC * abs(deltas[imax]))
     if reject:
@@ -111,7 +118,7 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
         labels.append("전환 탐지 켜짐")
     elif bo.get("prewarn_on"):
         labels.append("전환 예고")
-    ev.update(climax=climax, reject=reject, breakout_detect=bool(bo.get("detect_on")), breakout_prewarn=bool(bo.get("prewarn_on")))
+    ev.update(cvd=round(cvd), cvd_div=cvd_div, climax=climax, reject=reject, breakout_detect=bool(bo.get("detect_on")), breakout_prewarn=bool(bo.get("prewarn_on")))
 
     # ── 현재 봉 시그니처 ──
     cur = inp.get("cur") or {}
@@ -206,6 +213,7 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     if sig == "분배" and d > 0 or sig == "축적" and d < 0: add("분배")     # 이동 반대편이 받는 중
     if sig == "축적" and d > 0 or sig == "분배" and d < 0: add("축적")     # 이동 편이 더 사는 중
     if reject: add("거부봉")
+    if cvd_div: add("CVD_역행")
     if wall and d != 0:
         if wall == d: add("벽_동방향_두꺼움" if thick else "벽_동방향_얇음")
         else: add("벽_역방향")
@@ -362,6 +370,11 @@ if __name__ == "__main__":
     r7 = classify(dict(inp, btc=dict(move_bp=5.0, range_bp=60.0)))
     assert r7["evidence"]["btc_rel"] == "단독" and r7["prob"]["A"] > r["prob"]["A"] and any("단독" in x for x in r7["labels"])
     assert r["evidence"]["btc_rel"] is None
+    # CVD 역행: 상승인데 창 델타 합이 음수면 «흡수» A↑. 원 화면은 창 델타 양수라 꺼져 있다
+    assert not r["evidence"]["cvd_div"] and r["evidence"]["cvd"] > 0
+    bars8 = bars[:3] + [dict(b, delta=-abs(b["delta"]) if i != 4 else b["delta"]) for i, b in enumerate(bars[3:])]   # 클라이맥스 봉만 양수
+    r8 = classify(dict(inp, bars=bars8))
+    assert r8["dir"] == 1 and r8["evidence"]["cvd_div"] and r8["prob"]["A"] > r["prob"]["A"] and any("흡수" in x for x in r8["labels"]), (r8["evidence"], r8["labels"])
     # 뒤집기: 마지막 봉 OI↑ 로 바꾸면 «신규 롱» 신호가 켜지고 B 가 오른다
     inp2 = dict(inp); inp2["bars"] = bars[:-1] + [bar(2400, 2616, 2500, 11000, 0, 0, 700, ls=30e3)]
     r2 = classify(inp2)
