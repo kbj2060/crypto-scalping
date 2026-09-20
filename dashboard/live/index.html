@@ -395,18 +395,6 @@
         <div id="liquidationMapList" class="liq-level-list"></div>
       </section>
 
-      <!-- 2026-09-20 «미시 참고» (사용자 지시 "있는 것들 모두 붙여줘" -- 쓰면서 필요 없으면 뺀다).
-           docs/experiments/eth_realtime_five_stream_1s_joint_analysis_20260920.md 의 가이드가 가리킨
-           다섯 표시. 🔴방향 신호는 첫 칩(호가 동조) 하나뿐이고 1~15초짜리다. 나머지는 «얼마나
-           움직일까»와 «지금 무슨 상황인가»다. 각 칩의 «풀이» 줄이 그 근거 수치를 든다. -->
-      <section class="panel ops-health-panel micro-ref-panel" data-asset-scope="microref">
-        <div class="ops-health-head">
-          <div><h3>미시 참고</h3><p class="muted">1초 갱신 · 호가(1~15초 방향) · 활동(같은 시간대 분위) · 청산맵 근접 · 거래량→OI · 청산 이벤트</p></div>
-          <div class="ops-health-head-tools"><span id="microRefBadge" class="ops-badge neutral">-</span></div>
-        </div>
-        <div id="microRefGrid" class="micro-ref-grid"></div>
-      </section>
-
       <!-- 2026-09-21 «상황 읽기 · 30분» -- 사용자가 고른 트레이더 읽기(스퀴즈·클라이맥스·분배·얇은 벽·가치영역·
            S/R 비대칭 → 시나리오 셋 → 생각을 바꾸는 신호)를 규칙으로 옮긴 카드. dashboard/situation.py.
            🔴확률은 휴리스틱(점수표)이다. 그래서 예측을 전부 장부에 남기고 30분 뒤 결과와 맞춘 적중률을 같이 그린다. -->
