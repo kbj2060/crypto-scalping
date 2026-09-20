@@ -4288,7 +4288,13 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
       ["중형", kUsd(profile.retailMaxUsd || 0) + "~" + kUsd(profile.whaleMinUsd || 0)],
       ["리테일", "<" + kUsd(profile.retailMaxUsd || 0)],
     ];
-  let lx = ml;
+  // 2026-09-20 사용자 지시: 범례와 요약 숫자의 **자리를 맞바꾼다**(범례 오른쪽 · 숫자 왼쪽).
+  // 🔴범례를 오른쪽 끝에 붙이려면 폭을 **먼저** 알아야 한다 -- 아래 루프가 쓰는 증가폭과
+  //   같은 식으로 미리 합산한다(식이 둘로 갈리면 한쪽만 고치고 어긋난다).
+  const legW = (item) => 13 + (item[0].length + item[1].length) * 6.2 + 16;
+  const legendTotal = legend.reduce((acc, it) => acc + legW(it), 0) - 16;  // 마지막 여백 제외
+  const legendStart = Math.max(ml, w - mr - legendTotal);
+  let lx = legendStart;
   legend.forEach(([name, range], s) => {
     const sw = document.createElementNS(NS, "rect");
     sw.setAttribute("x", lx); sw.setAttribute("y", h - 14);
@@ -4327,7 +4333,8 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
                  + `${Math.round(sm.wall.qty)}(${pct1(sm.wall.persist)})` : "벽 —",
       ]
     : ["← 호가  ·  거래량 →"];
-  const footFits = (t) => (w - mr) - t.length * 6.2 > lx + 6;
+  // 숫자는 왼쪽(ml)에서 시작해 **범례 시작점 앞까지**만 쓴다. 넘치면 뒤에서부터 덜어낸다.
+  const footFits = (t) => ml + t.length * 6.2 < legendStart - 8;
   let footText = footParts.join("  ·  ");
   while (footParts.length > 1 && !footFits(footText)) {
     footParts.pop();
@@ -4336,8 +4343,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   if (!footFits(footText)) footText = "";
   {
     const foot = document.createElementNS(NS, "text");
-    foot.setAttribute("x", w - mr); foot.setAttribute("y", h - 6);
-    foot.setAttribute("text-anchor", "end");
+    foot.setAttribute("x", ml); foot.setAttribute("y", h - 6);
     foot.setAttribute("font-size", "9"); foot.setAttribute("fill", "var(--muted)");
     foot.textContent = footText;
     const ft = document.createElementNS(NS, "title");
@@ -4354,7 +4360,12 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
         + "  🔴«취소율»이 아닙니다 — 터치 구간은 구조적으로 빠져 있고, 취소와 리프라이싱을\n"
         + "  가를 수 없습니다(선물 WS 는 레벨별 총량만 주고 주문 ID 가 없습니다).\n"
         + (sm.wall ? `벽 — 가장 가까운 «지속» 벽: ${sm.wall.dist_pct}% 거리에 ${sm.wall.qty} ETH,`
-                     + ` 지속률 ${pct1(sm.wall.persist)}.\n  🔴지지·저항 판정이 아닙니다(버팀 능력 미측정).\n`
+                     + ` 지속률 ${pct1(sm.wall.persist)}.\n`
+                     + "  🔴지지·저항이 **아닙니다** — 2026-09-20 에 실제로 쟀고 없었습니다.\n"
+                     + "  5.8일 71,293건: 벽에 닿은 뒤 반등률 0.509(동전). 크기 사분위별\n"
+                     + "  0.502/0.510/0.520/0.503 으로 순서조차 없고, 같은 크기 안에서 지속률\n"
+                     + "  상위−하위는 +0.001(섞기 귀무 대비 z=0.22). 판정폭을 $1.5→$5,\n"
+                     + "  지평을 5→15분으로 넓혀도 같습니다(z=−0.45).\n"
                    : "벽 — 지속률 60% 넘는 큰 호가가 지금은 없습니다.\n")
         + `기준가 ${sm.spot} · 창 ${Math.round(sm.window_s / 60)}분`
         + (() => {                       // 🔴hm 은 아래에서 선언된다(TDZ) -- 여기선 원본을 직접 본다
@@ -4444,8 +4455,10 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   //   한 번 깔고 앉은 +1.94% 빈(refill 641)이 2,610 으로 더 길었다.
   // 🔴min 은 터치 근처를 구조적으로 지운다 -- pers/peak 중앙값이 0~0.1% 에서 **0.03**,
   //   0.5~1% 에서 0.42 다. 길이를 inst 로 바꾸면 그 눈멂이 같이 없어진다.
-  // 🔴«지지·저항»도 «스푸핑»도 아니다. 「다가오면 빠지는가」는 10분 창에서 자격 빈 9개·
-  //   near/far 중앙 0.875 로 **검정력이 없다**(2026-09-20 실측). 농도는 서술일 뿐이다.
+  // 🔴«지지·저항»이 아니다 -- 2026-09-20 에 **실제로 쟀고 없었다**. 5.8일 71,293건에서
+  //   벽에 닿은 뒤 반등률 0.509(동전), 크기 사분위 0.502/0.510/0.520/0.503 로 순서조차 없고,
+  //   같은 크기 안에서 지속률 상위−하위 +0.001(섞기 귀무 z=0.22). 판정폭 $1.5→$5 ·
+  //   지평 5→15분에서도 같다(z=−0.45). 그래서 이 화면은 **서술만** 한다.
   const hm = latestFlowHeatmap && latestFlowHeatmap.rows;
   if (hm && hm.bin_size > 0 && keys.length) {
     const at = (px) => Math.round(px / hm.bin_size) - hm.bin_lo;
@@ -4558,8 +4571,8 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
                + "46%로 더 흔하고, 표식의 75%는 4시간 뒤 사라지며, **가격이 어디로 갈지는 "
                + "재지 않았습니다**.\n")
           + "⚠️체결이 아니라 **지금 걸려 있는** 지정가다 -- 언제든 취소될 수 있다.\n"
-          + "⚠️지지·저항도 «스푸핑»도 판정하지 않는다. 「다가오면 빠지는가」는 이 창에서\n"
-          + "   측정 자체가 안 된다(자격 빈 9개 · near/far 중앙 0.875, 2026-09-20 실측).";
+          + "⚠️지지·저항이 아닙니다 — 5.8일 71,293건에서 벽에 닿은 뒤 반등률이 0.509 로\n"
+          + "   동전이고, 크기·지속 어느 쪽도 예측하지 못했습니다(2026-09-20 실측).";
         r.appendChild(t);
         svg.appendChild(r);
       });

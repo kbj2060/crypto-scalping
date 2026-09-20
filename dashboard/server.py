@@ -3155,8 +3155,13 @@ def make_app() -> web.Application:
           바이낸스 선물 WS 는 레벨별 총량만 주고 **주문 ID 가 없어**(depthUpdate 가
           [가격, 새 총량]) 개별 «건»은 원리적으로 복원 불가다.
         🔴`obi` 는 **밴드가 값을 정한다**(실측 ±0.1% +0.504 / ±2% +0.071, 7배). 밴드를 같이 낸다.
-        🔴이 수치들은 «지지·저항»이 아니다 -- 호가벽의 버팀 능력은 아직 **못 쟀다**
-          (판정가능 2셀 · TRAIN↔OOS 부호반전, docs/experiments/eth_gex_strike_walls_vs_liqmap_20260919).
+        🔴이 수치들은 «지지·저항»이 아니다 -- 2026-09-20 에 **실제로 쟀고 없었다**.
+          5.8일 래스터 71,293건: 벽에 닿은 뒤 반등률 0.509(동전) · 크기 사분위
+          0.502/0.510/0.520/0.503 로 순서조차 없음 · 같은 크기 안에서 지속률 상위−하위
+          +0.001(섞기 귀무 z=0.22). 판정폭 $1.5→$5 · 지평 5→15분에서도 같다(z=−0.45).
+          기록: docs/experiments/eth_orderbook_wall_support_resistance_20260920.md
+          (앞선 «판정가능 2셀·부호반전» 메모는 GEX 스트라이크 벽 건이라 별개다 --
+           docs/experiments/eth_gex_strike_walls_vs_liqmap_20260919).
         """
         ok = np.isfinite(mid)
         if not ok.any():
