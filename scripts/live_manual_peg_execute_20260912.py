@@ -53,7 +53,11 @@ async def signed(session, method: str, path: str, params: dict, key: str, secret
         async with session.request(method, url, headers={"X-MBX-APIKEY": key}) as response:
             payload = await response.json()
             if response.status != 200:
-                return {"__error__": f"{response.status} {payload.get('msg', payload)}"}
+                # 🔴코드를 버리면 안 된다. 2026-09-20 에 이것 때문에 리페그가 죽었다 --
+                #   호출부가 "5022" 를 찾는데 문자열은 "400 Due to ..." 였다.
+                code = payload.get("code")
+                tag = f"[{code}] " if code is not None else ""
+                return {"__error__": f"{response.status} {tag}{payload.get('msg', payload)}"}
             return payload
     except Exception as exc:  # noqa: BLE001 -- 네트워크/TLS/JSON 전부 같은 취급
         return {"__error__": f"{type(exc).__name__}: {exc}"}
@@ -259,6 +263,20 @@ def drifted(order_side: str, price: float, bid: float, ask: float) -> bool:
     return bid > price if order_side == "BUY" else ask < price
 
 
+def is_post_only_reject(err) -> bool:
+    """«지금 걸면 테이커가 된다»(-5022) 인가. 실패가 아니라 호가가 움직였다는 뜻이라
+    호출부는 새 호가로 다시 건다.
+
+    🔴코드 숫자만 보면 안 된다. signed() 가 오류 문자열을 만들 때 바이낸스의 code 를
+      버리고 HTTP 상태와 msg 만 남겼던 탓에, 실제 문자열이
+      "400 Due to the order could not be executed as maker, ..." 라 "5022" 가 **없었다**.
+      그래서 이 분기가 통째로 죽어 있었고(2026-09-20 실사고, repegs=0 · 119ms 만에 포기),
+      급락장에서 첫 주문이 크로스되자 리페그 없이 바로 rejected 로 끝났다.
+      code 는 위에서 복원했지만, 여기서는 **문구도 같이** 본다 -- 실주문 경로다."""
+    e = str(err)
+    return "5022" in e or "could not be executed as maker" in e
+
+
 async def fill_maker(session, *, common: dict, price: float, total: float, deadline: float,
                      state: dict, key: str, secret: str,
                      offset: int) -> tuple[float, float, int, dict | None]:
@@ -282,7 +300,7 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
         if "__error__" in order:
             # -5022 = «지금 걸면 테이커가 된다». 실패가 아니라 호가가 움직였다는 뜻이라
             # 새 호가로 다시 건다. 그 외 오류는 그대로 멈춘다 -- 몰래 테이커로 바꾸지 않는다.
-            if "5022" in str(order["__error__"]) and repegs < REPEG_MAX:
+            if is_post_only_reject(order["__error__"]) and repegs < REPEG_MAX:
                 price, _, _ = await maker_price(session, side, common["symbol"])
                 repegs += 1
                 state.update(repegs=repegs, limit_price=price)
@@ -453,6 +471,22 @@ def _self_check() -> None:
     # 실측 $0.54~0.79 벌어져 있어 BUY 지정가가 매번 상대 호가를 넘었고(5/5) post-only 가
     # 전부 -5022 로 거부됐다. drifted() 도 같은 값을 받아 항상 참이 되어 옳게 걸린 첫 주문
     # 마저 3초 만에 취소했다. 심볼 리터럴이 다시 기어들어오는 것을 여기서 막는다.
+    # ── post-only 거부를 «리페그 신호»로 알아보는가 (2026-09-20 실사고) ────────
+    # 이 판정이 죽어 있었다: signed() 가 오류에서 바이낸스 code 를 버려 문자열이
+    # "400 Due to the order could not be executed as maker, ..." 였는데 코드는
+    # "5022" 를 찾았다. 그래서 급락장 첫 크로스에서 리페그 0회로 바로 포기했다.
+    # **사용자가 실제로 본 그 문자열**을 그대로 넣어 둔다 -- 이게 이 검사의 전부다.
+    assert is_post_only_reject(
+        "400 Due to the order could not be executed as maker, the Post Only order will be"
+        " rejected. The order will not be recorded in the order history"), "실사고 문자열을 놓친다"
+    assert is_post_only_reject("400 [-5022] Due to the order could not be executed as maker")
+    assert not is_post_only_reject("400 [-2019] Margin is insufficient.")
+    assert not is_post_only_reject("400 [-1111] Precision is over the maximum")
+    # 오류 문자열이 코드를 달고 오는가 -- 위 판정의 뿌리다.
+    import inspect as _i2
+    _sg = _i2.getsource(signed)
+    assert 'payload.get("code")' in _sg, "signed() 가 바이낸스 code 를 버린다"
+
     assert "symbol" in _i.signature(maker_price).parameters, "maker_price 가 심볼을 안 받는다"
     _mp = _i.getsource(maker_price)
     _code = _mp[_mp.index('async with'):]
