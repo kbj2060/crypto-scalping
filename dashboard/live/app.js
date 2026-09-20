@@ -4757,7 +4757,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⭐두 패널을 옮기는 대신 **mt(가격 플롯의 윗변)를 그만큼 내린다**. mt 는 이 함수에서
   //   18곳이 쓰는 «플롯 top» 이라, 그 뜻을 유지하면 yAt·클램프·커서 매핑·세로선을 한 줄도
   //   안 건드린다. 상자 총높이는 SUB_TOTAL 과 함께 움직인다(756 = 400 + 356).
-  const ml = mobileChart ? 44 : 45, mr = mobileChart ? 68 : 112,
+  // 2026-09-20 아티팩트 댓글: 「살짝 왼쪽으로 치우쳐 보인다」. 실측(화면 좌표 기준,
+  //   데스크톱 1198폭): 왼쪽 여백 13 · 오른쪽 44 -- 오른쪽(112)에 가격 라벨 자리를 넓게
+  //   뒀는데 라벨이 그걸 다 안 쓴다. 차 31 의 절반인 16px 을 오른쪽으로 옮긴다.
+  // ⭐플롯 «폭»은 그대로다(ml+n, mr−n 이라 cw 불변) -- 봉 너비·x 스케일·열 수가 한 픽셀도
+  //   안 움직인다. 순수 이동이다.
+  // 🔴모바일은 건드리지 않는다: 실측 왼쪽 12 · 오른쪽 7 로 이미 가운데다(차 −5).
+  //   같은 값을 양쪽에 주면 모바일이 반대로 25 밀린다(첫 시도에서 실제로 그랬다).
+  // 🔴getBBox() 로 재면 안 된다 -- 조상 transform 을 무시해서 translate 된 마커가 x=-5 로
+  //   잡히고, 그 허수 때문에 「왼쪽은 ml 을 안 따라간다」는 틀린 결론이 나왔다.
+  //   getBoundingClientRect() 로 잰다.
+  const CENTER_NUDGE = mobileChart ? 0 : 16;
+  const ml = (mobileChart ? 44 : 45) + CENTER_NUDGE,
+        mr = (mobileChart ? 68 : 112) - CENTER_NUDGE,
         mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 91;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   // OI 신규계약 레인 -- 청산 레인 **바로 위**(사용자 지시). 별도 패널이 아니라 이 SVG 안의
