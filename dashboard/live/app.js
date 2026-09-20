@@ -190,6 +190,11 @@ const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 어두운 글자가 맞고, 라이트에서는 같은 토큰이 진해져 흰 글자가 맞다.
 // ⭐그 분기는 CSS 의 --on-fill 한 곳에 있다 -- 여기서 색을 정하지 않는다(2026-09-16).
 const inkOnFill = () => "var(--on-fill)";
+// 🔴풋프린트 셀 배경은 **불투명도**다(색이 아니라 알파). 그래서 뒤에 무엇을 깔든 비친다 --
+//   청산 밀도 배경을 청산맵과 같은 0.85 로 깔면 가장 옅은 셀(0.10)에서 밀도색이 9할을
+//   차지해 숫자를 못 읽는다. 풋프린트에서만 낮춘다. **눈으로 맞출 손잡이다** --
+//   화면에서 너무 흐리면 올리고, 셀 숫자가 묻히면 내린다(청산맵은 0.85 그대로).
+const FOOTPRINT_DENSITY_OPACITY = 0.25;
 const FOOTPRINT_SHADE_DARK = [0.10, 0.22, 0.36, 0.54];
 const FOOTPRINT_SHADE_LIGHT = [0.16, 0.32, 0.48, 0.66];
 const footprintShades = () =>
@@ -4435,9 +4440,10 @@ function renderSnapshotChart() {
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel()];
-  // 풋프린트 모드에서는 아래로 `[]` 가 넘어간다 -- 그런데도 매 렌더(초당 2.5회) 9개 스냅샷 x
-  // ~115빈을 통째로 새 객체로 만들어 버리고 있었다. 쓸 때만 만든다.
-  const densityHistory = footprint ? [] : liquidationDensityHistory();
+  // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
+  // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
+  // /api/liquidation-map 이 갱신될 때(60초)만 다시 만든다.
+  const densityHistory = liquidationDensityHistory();
   // 2026-09-10: 이 차트는 줄곧 entryPrice=0 을 넘겨 「진입」 선을 안 그렸다. renderCandleSvg 에
   // 그리는 코드는 이미 있으므로(priceLabels 의 amber "진입"), 거래소 실계좌 진입가만 넘긴다.
   const entryPrice = Number(snapshotAccountPosition()?.entry_price || 0);
@@ -4445,8 +4451,8 @@ function renderSnapshotChart() {
   //   (liqBars 기본값 [] -> peak 0 -> 블록 전체 skip, 오류도 안 남). 치환 대상 문자열을
   //   확인 없이 바꾸려다 조용히 실패했던 자리다.
   renderCandleSvg(svg, candles, [], entryPrice, currentPrice, riskLevels,
-    footprint ? [] : densityHistory, latestLiquidation5mHist, footprint);
-  renderLiqDensityLegend(!footprint && (densityHistory || []).length > 0);
+    densityHistory, latestLiquidation5mHist, footprint);
+  renderLiqDensityLegend((densityHistory || []).length > 0);
 }
 
 // wide24/GBM3 regime overlay -- drawn as a ribbon INSIDE renderCandleSvg() itself (2026-08-26,
@@ -4865,7 +4871,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     rect.setAttribute("x", x0); rect.setAttribute("y", top);
     rect.setAttribute("width", x1 - x0); rect.setAttribute("height", bottom - top);
     rect.setAttribute("fill", densityColor(t));
-    rect.setAttribute("fill-opacity", "0.85");
+    rect.setAttribute("fill-opacity", footprint ? String(FOOTPRINT_DENSITY_OPACITY) : "0.85");
     into.appendChild(rect);
   };
   const sortedDensityHistory = (densityHistory || []).slice().sort((a, b) => a.tsMs - b.tsMs);
@@ -4884,7 +4890,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴밀도 층은 이 화면에서 **가장 큰 덩어리**다(청산맵 1h 실측 rect 301/렌더). 입력은
   //   /api/liquidation-map 이 갱신될 때(60초)만 바뀌는데 매 렌더 다시 만들고 있었다.
   //   신원은 스냅샷의 개수와 양 끝 시각으로 충분하다(같은 payload 면 같은 값).
-  if (sortedDensityHistory.length) cachedLayer("density", objToken(densityHistory) + ":" + densityClip, (g) => {
+    // 🔴키에 **모드**를 넣는다. 불투명도가 모드마다 다른데(풋프린트 0.25 / 청산맵 0.85)
+  //   baseGeomSig 에는 모드가 없어서, 기하가 우연히 같으면 옛 불투명도 층을 그대로
+  //   재사용한다. 캐시가 «맞는 그림»을 돌려주는지는 키가 정한다.
+  if (sortedDensityHistory.length) cachedLayer("density",
+      objToken(densityHistory) + ":" + densityClip + ":" + (footprint ? "fp" : "liq"), (g) => {
   const densityPriceUnion = Array.from(new Set(sortedDensityHistory.flatMap(snap => (snap.bins || []).map(b => b.price))));
   sortedDensityHistory.forEach((snap, si) => {
     const xStartIdx = densityBoundaryIdx[si];
