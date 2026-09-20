@@ -177,8 +177,8 @@ def baseline_from_tape(db_path: Path, days: int = 7) -> dict[str, Any] | None:
                 "GROUP BY 1", [since]).fetchall()
         finally:
             con.close()
-    except Exception:  # noqa: BLE001 -- 기준선은 장식이다. 못 읽으면 없이 간다.
-        return None
+    except Exception as exc:  # noqa: BLE001 -- 기준선은 장식이다. 못 읽으면 없이 가되, 왜인지는 올린다.
+        raise RuntimeError(f"baseline_from_tape({db_path.name}): {exc!r}") from exc
     if len(rows) < 600:
         return None
     by_hour: dict[int, list[float]] = {h: [] for h in range(24)}

@@ -2403,9 +2403,18 @@ def make_app() -> web.Application:
         while True:
             try:
                 now = time.time(); now_sec = int(now)
-                if now - micro_state["baseline_at"] >= MICRO_BASELINE_SECONDS:
+                # 기준선이 없으면 60초마다 다시 시도한다 -- 수집기가 같은 파일에 쓰는 순간 read_only
+                # 연결이 거부될 수 있고(2026-09-19 실측 30회 중 2회), 그때 1시간을 «기준없음»으로 두면
+                # 카드 절반이 하루 종일 빈다. 실패 사유는 로그에 남긴다(조용히 None 이면 원인을 못 찾는다).
+                if now - micro_state["baseline_at"] >= (MICRO_BASELINE_SECONDS if micro_state["baseline"] else 60.0):
                     micro_state["baseline_at"] = now
-                    micro_state["baseline"] = await asyncio.to_thread(mref.baseline_from_tape, MICRO_TAPE_DB_PATH)
+                    try:
+                        micro_state["baseline"] = await asyncio.to_thread(mref.baseline_from_tape, MICRO_TAPE_DB_PATH)
+                    except Exception as exc:  # noqa: BLE001
+                        micro_state["baseline"] = None
+                        print(f"micro-ref baseline: {exc!r}", flush=True)
+                    if micro_state["baseline"] is None:
+                        print("micro-ref baseline: none (재시도 60초 뒤)", flush=True)
                 if now - micro_state["liq_prev_at"] >= 10.0:
                     micro_state["liq_prev_at"] = now
                     micro_state["liq_prev"] = await asyncio.to_thread(mref.liq_prev_minute, LIVE_DIR / "tail_risk.duckdb")
