@@ -2143,6 +2143,43 @@ svg {
 .manual-entry-row.exit-row { gap: 10px; border-bottom: 1px solid var(--soft-line); padding-bottom: 10px; }
 .manual-entry-row[hidden] { display: none; }
 
+/* ── 시안 B: 슬라이더 -> 칩 (2026-09-20 사용자 선택) ───────────────────────────
+   슬라이더는 «값을 눈으로 확인»해야 해서 스캘핑에서 조준이 느리다. 칩은 선택 자체가
+   값 표시라 읽지 않아도 보인다. 🔴range 입력은 hidden 으로 남아 있고(값·클램프·이벤트를
+   그대로 쓴다) 이 칩들은 그 위 껍데기다 -- app.js 의 syncChipset 참조. */
+/* 🔴range 를 hidden **속성**으로 숨기면 안 된다 -- renderLevGauge 가 그 속성을
+   «물타기라 못 고름» 신호로 쓰기 때문에, 칩이 그걸 따라가면 자기 자신 때문에 항상 숨는다
+   (2026-09-20 미리보기에서 칩이 전부 사라졌다). 눈에서만 치운다. */
+.chip-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.chipset { display: flex; gap: 4px; }
+.chipset[hidden] { display: none; }
+/* 입력이 disabled 면 칩도 못 누른다(자동 레버리지 등) -- 상태를 그대로 비춘다. */
+.chipset.off { opacity: .45; pointer-events: none; }
+.chipset .chip {
+  padding: 4px 9px; border: 1px solid transparent; border-radius: 7px;
+  background: var(--glass); color: var(--muted);
+  font: 600 11.5px/1 var(--font-mono, inherit); cursor: pointer;
+}
+.chipset .chip:hover { color: var(--text); }
+.chipset .chip.on {
+  background: color-mix(in srgb, var(--amber) 22%, transparent);
+  color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent);
+}
+.chip-val { font-size: 11px; color: var(--muted); min-width: 34px; }
+/* 진입 한 줄: 레버·비율·버튼·보유가 한 행에 들어간다. 좁으면 감싸되 왼쪽 정렬을 지킨다. */
+.manual-entry-row.entry-line { justify-content: flex-start; row-gap: 6px; }
+.manual-entry-row.entry-line .entry-cap { flex: 0 0 auto; }
+/* 🔴오른쪽 끝으로 밀되 **줄바꿈은 막는다** -- 안 그러면 남은 폭이 좁을 때 네 줄로
+   찌그러진다(2026-09-20 미리보기에서 확인). 한 줄에 안 들어가면 flex-wrap 이
+   통째로 다음 줄로 내리고, 거기서도 오른쪽에 붙는다. */
+.manual-entry-row.entry-line .hold-line { margin-left: auto; white-space: nowrap; }
+/* 청산 줄은 포지션 타일에 **붙어** 보여야 한 덩어리로 읽힌다(시안 B 의 핵심).
+   🔴.actions 가 justify-content:center 라 가운데로 떠 있었다 -- 포지션 타일은 왼쪽 열에
+     있으므로 왼쪽에 붙여야 «같은 줄»로 읽힌다(2026-09-20 미리보기에서 확인). */
+.manual-entry-row.exit-row { margin-top: 6px; justify-content: flex-start; }
+/* 칩이 값을 이미 말하고 있으면 옆 숫자는 같은 말을 두 번 한다 -- 칩에 없는 값일 때만 보인다. */
+.chipset[data-matched="1"] + .chip-val { display: none; }
+
 /* ── 길게 누르기 진입 (2026-09-20 사용자 선택: 시안 B) ──────────────────────────────
    확인 클릭을 «의도적 지속»으로 바꾼 버튼. 채움 막대는 JS 가 width 를 긋고(app.js
    manualHoldPaint) 여기서는 자리와 모양만 준다.
