@@ -54,6 +54,33 @@ def test_fast_price_path_stays_unguarded() -> None:
     assert "isScrolling" not in m.group(1), "빠른 가격 경로에 스크롤 게이트가 붙었다"
 
 
+def test_density_opacity_is_mode_independent() -> None:
+    """같은 밀도값은 두 모드에서 **같은 색**이어야 한다.
+
+    알파를 모드마다 다르게 주면 색이 흐려지는 게 아니라 척도가 배경 쪽으로 눌린다 --
+    실측(다크): 풋프린트 0.25 의 t=1.0 이 청산맵 0.85 의 t=0.0 과 거의 같은 밝기였다.
+    겹치기를 없애고(게이트) 알파는 하나로 되돌린 것이 2026-09-21 의 수정이다.
+    """
+    # 🔴파일 전체에서 첫 fill-opacity 를 집으면 안 된다(다른 rect 가 여럿이다) --
+    #   drawDensitySeg 본문으로 범위를 좁힌다. 2026-09-21 이 검사기 자신의 첫 판이
+    #   그 실수로 주입한 회귀를 놓쳤다.
+    body = re.search(r"const drawDensitySeg = \(.*?\n  \};", src, re.S)
+    assert body, "drawDensitySeg 를 못 찾았다"
+    m = re.search(r'setAttribute\("fill-opacity", ([^)]+)\)', body.group(0))
+    assert m, "밀도 rect 의 fill-opacity 를 못 찾았다"
+    assert "footprint" not in m.group(1), \
+        f"밀도 알파가 모드에 의존한다 -- 같은 값이 두 색으로 보인다: {m.group(1)}"
+
+
+def test_footprint_density_draws_in_its_own_gutter() -> None:
+    """풋프린트에서는 셀과 겹치지 않는 전용 게이트에만 그린다."""
+    assert "FOOTPRINT_DENSITY_STRIP_PX" in src, "게이트 폭 상수가 없다"
+    assert re.search(r"drawDensitySeg\(g, ml, ml \+ densStrip,", src), \
+        "풋프린트 밀도가 게이트가 아닌 곳에 그려진다"
+    # 캔들 영역은 게이트만큼 안쪽으로 밀려야 한다(안 그러면 첫 봉이 게이트를 덮는다)
+    assert re.search(r"const plotX0 = ml \+ densStrip", src), "캔들 시작이 게이트를 비켜가지 않는다"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):
