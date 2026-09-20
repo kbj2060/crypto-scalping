@@ -271,6 +271,11 @@ const OI_5M_POLL_MS = 15000;
 // 2026-09-20 미시 참고 카드 (index.html .micro-ref-panel). 서버가 1초마다 계산해 둔 것을 받기만 한다.
 const API_MICRO_REF_URL = "/api/micro-ref";
 const MICRO_REF_POLL_MS = 1000;
+// 2026-09-21 상황 읽기 · 30분 (index.html .situation-panel). 서버가 5초마다 계산해 둔 것을 받는다.
+const API_SITUATION_URL = "/api/situation";
+const SITUATION_POLL_MS = 5000;
+let latestSituation = null;
+let situationLastFetchAt = 0;
 let latestMicroRef = null;
 let microRefLastFetchAt = 0;
 let latestOi5m = null;
@@ -3900,7 +3905,70 @@ function renderMicroRef() {
   }
 }
 
-// ── 풋프린트 증분 (2026-09-20) ────────────────────────────────────────────
+// ── 상황 읽기 · 30분 (2026-09-21) ─────────────────────────────────────────
+// dashboard/situation.py 가 낸 것을 그대로 그린다. 라벨 = «지금 무슨 상황인가», 시나리오 = 휴리스틱 확률과
+// 목표가, 뒤집기 신호 = «이게 켜지면 생각을 바꾼다»의 실시간 판정, 맨 아래 = 장부의 적중률.
+async function refreshSituation() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  if (activeSnapshotAsset !== "eth") return;
+  const now = Date.now();
+  if (now - situationLastFetchAt < SITUATION_POLL_MS) return;
+  situationLastFetchAt = now;
+  try {
+    const res = await fetch(API_SITUATION_URL, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`situation ${res.status}`);
+    latestSituation = await res.json();
+  } catch (error) {
+    console.error("Situation fetch error:", error);
+    latestSituation = { now: { ok: false, reason: "fetch_failed" } };
+  }
+  renderSituation();
+}
+
+function renderSituation() {
+  const body = el("situationBody"); const badge = el("situationBadge");
+  if (!body) return;
+  const s = latestSituation || {}; const n = s.now || {};
+  if (!n.ok) {
+    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "대기"; }
+    body.innerHTML = `<div class="sit-cal">${escapeHtml(n.reason || "서버가 첫 값을 계산하는 중")}</div>`;
+    return;
+  }
+  const fmtPx = (v) => (v == null ? "-" : Number(v).toFixed(1));
+  const order = ["A", "B", "C"].sort((a, b) => n.prob[b] - n.prob[a]);
+  const top = order[0];
+  const labels = n.labels.map((t) => {
+    const hot = /스퀴즈|클라이맥스|분배|거부|전환 탐지|활발|쿠션 없음/.test(t);
+    return `<span class="sit-label${hot ? " hot" : ""}">${escapeHtml(t)}</span>`;
+  }).join("");
+  const scn = order.map((k) => {
+    const t = n.targets[k];
+    const tgt = Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t);
+    return `<div class="sit-row${k === top ? " top" : ""}"><span class="p">${n.prob[k]}%</span>
+      <div><div class="name">${escapeHtml(n.names[k])}</div><div class="bar"><i style="width:${n.prob[k]}%"></i></div></div>
+      <span class="tgt">목표 ${escapeHtml(tgt)}</span></div>`;
+  }).join("");
+  const flips = (n.flips || []).map((f) => `<div class="sit-flip${f.on ? " on" : ""}"><span class="dot"></span>
+      <span>${escapeHtml(f.signal)}</span><span class="to">→ ${escapeHtml(n.names[f.toward] || f.toward)}</span></div>`).join("");
+  const why = (n.why || []).map((w) => `${w["근거"]}: ${Object.entries(w).filter(([k]) => k !== "근거").map(([k, v]) => `${k}${v >= 0 ? "+" : ""}${v}`).join(" ")}`).join(" · ");
+  const c = s.calibration || {};
+  const cal = c.n
+    ? `장부 <b>${c.n}</b>건 해결 · 1순위 적중 <b>${c.top_hit}%</b> · 아무 목표도 안 닿음 ${c.none}% · 말한/실제 되돌림 ${c.A.said}/${c.A.happened} · 지속 ${c.B.said}/${c.B.happened} · 플러시 ${c.C.said}/${c.C.happened}`
+    : "장부: 아직 해결된 예측이 없다(첫 결과는 30분 뒤)";
+  body.innerHTML = `
+    <div><div class="sit-h">지금</div><div class="sit-labels">${labels}</div></div>
+    <div><div class="sit-h">30분 시나리오 (휴리스틱 확률)</div><div class="sit-scn">${scn}</div>
+      <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details></div>
+    <div><div class="sit-h">생각을 바꾸는 신호</div><div class="sit-flips">${flips}</div></div>
+    <div class="sit-cal">${cal}</div>`;
+  if (badge) {
+    const age = s.computed_at ? Math.round(Date.now() / 1000 - s.computed_at) : null;
+    badge.className = `ops-badge ${age != null && age <= 15 ? "good" : "neutral"}`;
+    badge.textContent = `${escapeHtml(n.names[top])} ${n.prob[top]}%${age != null ? ` · ${age}초 전` : ""}`;
+  }
+}
+
+// ── 풋프린트 증분 (2026-09-20) ──────────────────────────────────────────
 // 400ms 폴링인데 48봉을 통째로 받고 있었다. 서버 실측: 400ms 간격 19번 중 내용이 실제로
 // 바뀐 건 12번이고 바뀌는 건 **맨 오른쪽 봉 하나**다(닫힌 봉은 5분에 한 번). 그래서 봉을
 // 여기 Map 에 쌓아 두고 **꼬리 두 봉만** 물어본다. 폴링 주기도 렌더 주기도 안 건드린다 --
@@ -6671,6 +6739,7 @@ async function tick() {
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
       refreshMicroRef();             // 2026-09-20 미시 참고 (1초, ETH 만)
+      refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }

@@ -129,6 +129,8 @@ from scripts.live_liquidation_direction_signal_20260825 import compute_liquidati
 from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history  # noqa: E402
 # 2026-09-20 «미시 참고» 카드의 계산부(순수 함수 + 자체점검). 서버는 값을 모아 넣기만 한다.
 from dashboard import micro_ref as mref  # noqa: E402
+# 2026-09-21 «상황 읽기 · 30분» -- 사용자가 고른 트레이더 읽기를 규칙으로. 순수 함수 + 자체점검.
+from dashboard import situation as sit  # noqa: E402
 # Regime overlay (bull/bear/chop probability per 5-min bar) for the Snapshot tab's liquidation-map
 # chart. 2026-08-26: swapped from the wide24 HMM+linear-calibration model to an independently
 # trained HistGradientBoostingClassifier (OOS balanced_accuracy 0.9189 vs wide24's 0.7691) -- see
@@ -588,6 +590,11 @@ FORCE_ORDER_WS_URL = "wss://fstream.binance.com/market/ws/ethusdt@forceOrder"
 LIQ_EVENTS_PATH = LIVE_DIR / "liq_events.jsonl"      # ⑤ 원시 이벤트. 봇의 tail_risk 는 1분 합만 남긴다
 MICRO_TAPE_DB_PATH = LIVE_DIR / "trade_tape.duckdb"  # ② 기준선(시간대별 분위). 읽기 전용, 1시간마다
 MICRO_BASELINE_SECONDS = 3600
+SITUATION_EVERY_TICKS = 5                              # micro-ref 1초 루프의 5틱마다
+SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30분 뒤 결과와 맞춰 적중률을 낸다
+SITUATION_LOG_MIN_GAP_S = 300                          # 상태가 안 바뀌어도 이 간격으로 한 줄
+SITUATION_VA_ROW_USD = 3.0                             # 가치영역 행 폭(차트의 행과 같다)
+SITUATION_HORIZON_S = 1800
 
 
 def oi_1s_persist(rows: list[tuple[int, float]]) -> None:
@@ -2474,6 +2481,7 @@ def make_app() -> web.Application:
                 ev60 = [e for e in liq_events if e["ts_ms"] >= cut]
                 liq60 = {"long": sum(e["usd"] for e in ev60 if e["side"] == "long"),
                          "short": sum(e["usd"] for e in ev60 if e["side"] == "short"), "n": len(ev60)}
+                micro_state["tick"] = micro_state.get("tick", 0) + 1
                 micro_state["payload"] = {
                     "available": True, "ts": now_sec, "mid": mid,
                     "qi": qi_val, "qi_side": mref.side_of(qi_val, mref.QI_SIDE_ABS),
@@ -2495,9 +2503,18 @@ def make_app() -> web.Application:
                 raise
             except Exception as exc:  # noqa: BLE001 -- 참고 카드 하나가 죽어도 나머지 화면은 그대로
                 micro_state["payload"] = {"available": False, "error": repr(exc)[:160]}
+            # 상황 읽기는 5틱마다, 그리고 자기 예외는 자기가 삼킨다(미시 참고를 못 죽인다)
+            if micro_state.get("tick", 0) % SITUATION_EVERY_TICKS == 0:
+                try:
+                    await compute_situation(time.time())
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    situation_state["now"] = {"ok": False, "reason": repr(exc)[:160]}
             await asyncio.sleep(MICRO_REF_POLL_SECONDS)
 
     async def start_micro_ref(app: web.Application) -> None:
+        _situation_load_log()
         app["micro_ref_task"] = asyncio.create_task(collect_micro_ref(app))
         app["force_order_task"] = asyncio.create_task(collect_force_orders(app))
 
@@ -2511,6 +2528,117 @@ def make_app() -> web.Application:
 
     async def api_micro_ref(request: web.Request) -> web.Response:
         return web.json_response(micro_state["payload"], headers=NOCACHE)
+
+    # ── 상황 읽기 · 30분 (2026-09-21) ──────────────────────────────────────────
+    situation_state: dict[str, Any] = {"now": {"ok": False, "reason": "계산 전"}, "computed_at": 0.0,
+                                       "log": [], "last_logged": 0.0, "last_key": None, "last_resolve": 0.0}
+
+    def _situation_load_log() -> None:
+        try:
+            lines = SITUATION_LOG_PATH.read_text(encoding="utf-8").splitlines()[-300:]
+            situation_state["log"] = [json.loads(x) for x in lines if x.strip()]
+        except FileNotFoundError:
+            situation_state["log"] = []
+        except Exception as exc:  # noqa: BLE001
+            print(f"situation log load: {exc!r}", flush=True)
+            situation_state["log"] = []
+
+    def _situation_inputs(now: float) -> dict[str, Any]:
+        """기존 서버 상태를 situation.classify 의 입력 모양으로 접는다. 새 원천은 없다."""
+        bar_start = int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
+        fbars = footprint_state["bars"]
+        oi_map = {int(b): (None if gap else float(dl)) for b, dl, _c, _n, gap in oi_5m_buckets(2 * sit.WINDOW + 3)}
+        liq_map: dict[int, tuple[float, float]] = {}
+        try:
+            for r in (compute_liquidation_5m_history("eth", 2 * sit.WINDOW + 3).get("bars") or []):
+                ts = int(datetime.fromisoformat(r["ts"]).timestamp())
+                liq_map[ts // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS] = (float(r.get("long_usd") or 0), float(r.get("short_usd") or 0))
+        except Exception:  # noqa: BLE001 -- 청산 이력이 없으면 «모름»으로 간다
+            pass
+        candles = {int(c["time"]): c for c in (situation_state.get("candles") or [])}
+        bars = []
+        levels: dict[float, float] = {}
+        want = [b for b in sorted(fbars) if b < bar_start][-(2 * sit.WINDOW + 1):]
+        for b in want:
+            cells = fbars[b]
+            buy = sum(v[0] for v in cells.values()); sell = sum(v[1] for v in cells.values())
+            c = candles.get(b)
+            prices = [k * FOOTPRINT_BUCKET for k in cells]
+            bars.append({"time": b,
+                         "high": float(c["high"]) if c else (max(prices) if prices else None),
+                         "low": float(c["low"]) if c else (min(prices) if prices else None),
+                         "close": float(c["close"]) if c else None,
+                         "delta": buy - sell, "vol": buy + sell,
+                         "whale_net": sum(v[2] - v[3] for v in cells.values()),
+                         "retail_net": sum(v[4] - v[5] for v in cells.values()),
+                         "oi_delta": oi_map.get(b), "liq_long": liq_map.get(b, (0, 0))[0], "liq_short": liq_map.get(b, (0, 0))[1]})
+            if b >= (want[-sit.WINDOW] if len(want) >= sit.WINDOW else want[0]):
+                for k, v in cells.items():
+                    row = round(k * FOOTPRINT_BUCKET / SITUATION_VA_ROW_USD) * SITUATION_VA_ROW_USD
+                    levels[row] = levels.get(row, 0.0) + v[0] + v[1]
+        # 종가가 캔들 캐시에 없으면(60초 캐시 지연, 또는 캐시 자체가 없는 dev) 초 링의 마지막 체결가로,
+        # 그것도 없으면 그 봉 풋프린트의 **VWAP** 으로 메운다 -- 되돌림/지속 판정에 종가 근사는 충분하고,
+        # 봉이 비어서 엔진이 통째로 «완결 봉 부족»으로 멈추는 것보다 낫다.
+        by_sec = footprint_state["sec"]
+        for bar, b in zip(bars, want):
+            if bar["close"] is None:
+                secs = [sc for sc in by_sec if b <= sc < b + FOOTPRINT_BAR_SECONDS and by_sec[sc][6]]
+                if secs:
+                    bar["close"] = by_sec[max(secs)][6]
+                else:
+                    cells = fbars[b]; tot = sum(v[0] + v[1] for v in cells.values())
+                    bar["close"] = (sum(k * FOOTPRINT_BUCKET * (v[0] + v[1]) for k, v in cells.items()) / tot) if tot > 0 else None
+        cur_cells = [by_sec[sc] for sc in by_sec if sc >= bar_start]
+        cur = {"elapsed_s": int(now) - bar_start,
+               "whale_net": sum(c[2] - c[3] for c in cur_cells), "retail_net": sum(c[0] - c[1] for c in cur_cells),
+               "delta": sum(c[4] - c[5] for c in cur_cells), "oi_delta": oi_map.get(bar_start)}
+        mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
+        bo = situation_state.get("breakout") or {}
+        return {"bars": bars, "levels": levels, "cur": cur, "mid": mp.get("mid"),
+                "book": situation_state.get("book") or {}, "act_pct": mp.get("vol60_pct"), "sr": mp.get("sr") or {},
+                "breakout": {"detect_on": bool((bo.get("detect") or {}).get("on")), "prewarn_on": bool((bo.get("prewarn") or {}).get("on"))}}
+
+    async def compute_situation(now: float) -> None:
+        loop = asyncio.get_running_loop()
+        # 느린 입력 셋은 캐시로 (캔들 60초 · 전환탐지기 60초 · 호가 요약 5초)
+        situation_state["candles"] = await load_market_history("eth")
+        situation_state["breakout"] = await load_breakout_detector()
+        try:
+            hm = await swr_cached("situation_book", 5.0, lambda: loop.run_in_executor(
+                HEATMAP_EXECUTOR, functools.partial(_heatmap_read, "ethusdt", 300, 3, True)))
+            situation_state["book"] = (hm or {}).get("summary") or {}
+        except Exception:  # noqa: BLE001
+            situation_state["book"] = {}
+        inp = await asyncio.to_thread(_situation_inputs, now)
+        res = sit.classify(inp)
+        res["computed_at"] = now
+        situation_state["now"] = res
+        situation_state["computed_at"] = now
+        if not res.get("ok"):
+            return
+        key = (tuple(res["labels"]), max(res["prob"], key=res["prob"].get))
+        if key != situation_state["last_key"] or now - situation_state["last_logged"] >= SITUATION_LOG_MIN_GAP_S:
+            entry = {"ts": int(now), "mid": inp.get("mid"), "dir": res["dir"], "prob": res["prob"], "targets": res["targets"],
+                     "labels": res["labels"], "flips_on": [f["signal"] for f in res["flips"] if f["on"]], "outcome": None}
+            situation_state["log"].append(entry); situation_state["log"] = situation_state["log"][-300:]
+            situation_state["last_key"], situation_state["last_logged"] = key, now
+            try:
+                with open(SITUATION_LOG_PATH, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
+            except Exception as exc:  # noqa: BLE001
+                print(f"situation log write: {exc!r}", flush=True)
+        if now - situation_state["last_resolve"] >= 60:
+            situation_state["last_resolve"] = now
+            cs = situation_state["candles"] or []
+            for e in situation_state["log"]:
+                if e.get("outcome") is None and e["ts"] + SITUATION_HORIZON_S <= now:
+                    e["outcome"] = sit.resolve(e, cs, SITUATION_HORIZON_S)
+
+    async def api_situation(request: web.Request) -> web.Response:
+        log = situation_state["log"]
+        return web.json_response({"now": situation_state["now"], "computed_at": situation_state["computed_at"],
+                                  "recent": [{k: e.get(k) for k in ("ts", "mid", "dir", "prob", "outcome", "flips_on")} for e in log[-12:]],
+                                  "calibration": sit.calibration(log)}, headers=NOCACHE)
 
     async def load_chart_klines_frames() -> dict[str, Any]:
         """차트 캔들용 ETH/BTC 5분봉 프레임 캐시 (1500봉, 닫힌 봉만).
@@ -4324,6 +4452,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
     app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
     app.router.add_get("/api/micro-ref", api_micro_ref)
+    app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)
     app.router.add_post("/api/push/subscribe", api_push_subscribe)
