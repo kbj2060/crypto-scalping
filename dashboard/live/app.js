@@ -4,7 +4,6 @@ const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
 const API_V_REBOUND_URL = "/api/v-rebound-signal";
 const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_POSITION_SIZING_URL = "/api/position-sizing";
-const API_LIQUIDATION_DIRECTION_URL = "/api/liquidation-direction-signal";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
 const API_REGIME_BTC_URL = "/api/regime-btc";
@@ -80,13 +79,30 @@ const toneHistory = { whale: [], liq_cascade: [], retail_flow: [], vol_level: []
 // timestamp per reading (client-accumulated tally, see comment above), so the only honest per-bar
 // time is "when this browser tab actually pushed the reading", recorded here at push time.
 const toneHistoryTimes = { whale: [], liq_cascade: [], retail_flow: [], vol_level: [] };
-function pushToneHistory(key, tone) {
+// 🔴이 띠는 «48칸 x 5분 = 4시간»이라고 적혀 있는데(MICRO_HISTORY_MAX 주석, 서버의
+//   MODEL_INDICATOR_SAMPLE_SECONDS=300), 라이브 경로는 **상태 푸시마다** 한 칸을 밀어 넣고
+//   있었다. SSE 는 dashboard_state.json 이 바뀔 때마다 오므로(실측 수 초) 48칸이 몇 분 만에
+//   다 차고, 그 과정에서 seedModelIndicatorHistory() 가 서버에서 받아 온 4시간치가 통째로
+//   밀려난다 -- 서버가 그 이력을 디스크에 남기는 이유(재기동해도 띠가 안 사라지게)가 매번
+//   무효가 됐다. 라이브 푸시도 같은 5분 주기로 맞춘다.
+// `at`(ISO)은 **서버 이력 씨앗** 전용이다: 그 샘플이 실제로 찍힌 시각을 그대로 적고(안 그러면
+//   48칸이 전부 «지금»이 되어 축이 거짓말을 한다) 주기 제한도 걸지 않는다.
+const TONE_PUSH_MIN_MS = 300000;   // = server.py MODEL_INDICATOR_SAMPLE_SECONDS
+const toneHistoryLastAt = {};
+function pushToneHistory(key, tone, at) {
   const arr = toneHistory[key];
   if (!arr) return;
+  const now = Date.now();
+  if (at) {
+    toneHistoryLastAt[key] = Date.parse(at) || now;   // 다음 라이브 칸이 씨앗과 같은 격자에 온다
+  } else {
+    if (now - (toneHistoryLastAt[key] || 0) < TONE_PUSH_MIN_MS) return;
+    toneHistoryLastAt[key] = now;
+  }
   arr.push(tone || "neutral");
   if (arr.length > MICRO_HISTORY_MAX) arr.shift();
   const times = toneHistoryTimes[key];
-  times.push(new Date().toISOString());
+  times.push(at || new Date(now).toISOString());
   if (times.length > MICRO_HISTORY_MAX) times.shift();
 }
 
@@ -219,19 +235,36 @@ let oi1sSince = 0;
 // 게이트가 셋이다 -- ①커서가 SVG 위에 있으면 아예 안 그린다(chartHoverActive, 툴팁이
 // 지워지지 않게 하려는 장치) ②스크롤 중 정지 ③400~1000ms 스로틀. 패널이 그 SVG 안으로
 // 들어오면서(2026-09-19) 「보려고 커서를 올리면 1초 차트가 멈춘다」가 됐다.
-// 노드는 캔들 렌더가 매번 새로 만드므로 isConnected 로 옛 노드를 거른다.
+// 노드는 캔들 렌더가 다시 붙여 주므로(subPanelCache) isConnected 로 옛 노드를 거른다.
 let supply1sSubBox = null;
 let supplyProfileSubBox = null;
+// ⭐두 패널을 캔들 렌더와 **분리**한다(2026-09-20). 캔들 SVG 는 풋프린트 모드에서 초당 2.5번
+//   통째로 다시 그려지는데, 이 두 그림의 입력은 0.2~1Hz 로만 바뀐다. 실측(헤드리스 크로미움,
+//   실제 페이로드): renderSnapshotChart 6.1ms 중 **3.9ms(64%)가 이 두 패널**이었고, 그 위에
+//   자기 폴링(1초 히트맵 · 1초 수급 · 5초 프로파일)이 또 겹쳐 프로파일은 초당 3.7번 그려졌다.
+//   그래서 «판번호»가 바뀌었을 때만 다시 그리고, 아니면 만들어 둔 <svg> 노드를 그대로 다시
+//   붙인다(innerHTML="" 은 DOM 에서 떼어낼 뿐 JS 참조가 쥔 서브트리는 살아 있다).
+// 🔴현재가는 판번호에 넣지 않는다 -- 그 한 줄만 updateSupplyProfileNow 가 transform 으로
+//   따로 옮긴다(원래 설계). 넣으면 틱마다 캐시가 깨져 이 최적화가 통째로 무효가 된다.
+let supplyProfileVer = 0, supply1sVer = 0, flowHeatmapVer = 0;
+const subPanelCache = { prof: { node: null, key: "" }, s1: { node: null, key: "" } };
+const subProfileKey = (entry, w, h) => `${supplyProfileVer}|${flowHeatmapVer}|${entry}|${w}|${h}`;
+const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}`;
 
 function repaintSupply1sPanel() {
-  if (supply1sSubBox && supply1sSubBox.svg.isConnected) renderSupply1s(supply1sSubBox);
+  const b = supply1sSubBox;
+  if (!b || !b.svg.isConnected) return;
+  renderSupply1s(b);
+  subPanelCache.s1.key = sub1sKey(b.w, b.h);
 }
 function repaintSupplyProfilePanel() {
   const b = supplyProfileSubBox;
   if (!b || !b.svg.isConnected) return;
+  const entry = Number(snapshotAccountPosition()?.entry_price || 0);
   renderSupplyProfileSvg(b.svg, latestSupplyProfile,
     Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0,
-    Number(snapshotAccountPosition()?.entry_price || 0), { w: b.w, h: b.h });
+    entry, { w: b.w, h: b.h });
+  subPanelCache.prof.key = subProfileKey(entry, b.w, b.h);
 }
 
 const API_OI_5M_URL = "/api/oi-5m";
@@ -297,12 +330,6 @@ let basisLiquidationLastFetchAt = 0;
 // the source can change sub-second during a real cascade -- see API_LIQ_BURST_STATE_URL below.
 let latestLiqBurstState = null;
 let liqBurstStateLastFetchAt = 0;
-// Directional-only liquidation tilt (liq_net_z_12, 2026-08-25) -- own fetch cycle, same
-// dashboard-side-computed category as latestVRebound above. Model-indicator tier (like 수급
-// 흐름), explicitly NOT an evidence-signal-tier chip -- see
-// scripts/live_liquidation_direction_signal_20260825.py docstring for why (no PnL/economic claim).
-let latestLiquidationDirection = null;
-let liquidationDirectionLastFetchAt = 0;
 // Liquidation map (Snapshot tab, 2026-08-24) -- estimated support/resistance, own fetch/render
 // cycle same as latestVRebound above (computed dashboard-side, not part of trading_bot.py state).
 // lastSnapshotHistoryFetchAt tracks the candle history this panel's chart needs (activeSnapshotAsset,
@@ -369,7 +396,6 @@ const VOL_LEVEL_POLL_MS = 60000;          // 사이징 워커 주기 300초 — 
 // wouldn't surface anything sooner than the file itself changes, given the remaining hop (this
 // fetch) is the last one in the chain.
 const LIQ_BURST_STATE_POLL_MS = 1000;
-const LIQUIDATION_DIRECTION_POLL_MS = 60000; // same source cadence as liquidation-5m signal above
 // 2026-09-16 300초 -> 60초. 서버 캐시를 60초로 줄였으므로(입력이 1시간봉이라 그 아래로는
 // 의미가 없다) 클라가 5분마다 물으면 **새 시간봉이 최대 5분 늦게** 보인다. 캐시와 같은 주기로.
 const LIQUIDATION_MAP_POLL_MS = 60000;
@@ -472,13 +498,11 @@ async function setActiveSnapshotAsset(asset) {
   // until each signal's own poll interval next elapses (up to 5min for the slowest).
   latestBasisLiquidation = null;
   latestVolLevel = null; volLevelLastFetchAt = 0;
-  latestLiquidationDirection = null;
   latestLiquidation5m = null;
   latestLiquidation5mHist = [];
   latestOi5m = null; oi5mLastFetchAt = 0;
   latestLiquidationMap = null;
   basisLiquidationLastFetchAt = 0;
-  liquidationDirectionLastFetchAt = 0;
   liquidation5mLastFetchAt = 0;
   liquidationMapLastFetchAt = 0;
   lastSnapshotHistoryFetchAt = 0;
@@ -513,7 +537,6 @@ async function setActiveSnapshotAsset(asset) {
     settleScope("indicators", [
       refreshBasisLiquiditySignal(),
       refreshVolLevel(),
-      refreshLiquidationDirectionSignal(),
       refreshCoinIndicators(),
     ]),
     settleScope("liqmap", [
@@ -2922,18 +2945,25 @@ async function refreshLiquidation5mSignal() {
   const now = Date.now();
   if (now - liquidation5mLastFetchAt < LIQUIDATION_5M_POLL_MS) return;
   liquidation5mLastFetchAt = now;
+  // 🔴요청을 **건 시점의** 코인을 들고 간다. 응답이 돌아왔을 때 화면이 다른 코인으로
+  //   넘어가 있으면 버린다 -- 안 그러면 늦게 온 ETH 값이 BTC 라벨 아래 앉는다
+  //   (2026-08-31 레짐 리본 사고와 같은 부류. 그때는 변수를 갈라 고쳤고 여기는 시점이 문제다).
+  const asset = activeSnapshotAsset;
   try {
-    const res = await fetch(`${API_LIQUIDATION_5M_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
+    const res = await fetch(`${API_LIQUIDATION_5M_URL}?asset=${asset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`liquidation 5m signal ${res.status}`);
-    latestLiquidation5m = await res.json();
+    const j = await res.json();
+    if (asset !== activeSnapshotAsset) return;
+    latestLiquidation5m = j;
     try {
-      const rh = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
+      const rh = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${asset}`, { cache: "no-cache" });
       const jh = await rh.json();
+      if (asset !== activeSnapshotAsset) return;
       latestLiquidation5mHist = (jh && jh.warmed_up && Array.isArray(jh.bars)) ? jh.bars : [];
-    } catch (e) { latestLiquidation5mHist = []; }
+    } catch (e) { if (asset === activeSnapshotAsset) latestLiquidation5mHist = []; }
   } catch (error) {
     console.error("Liquidation 5m signal fetch error:", error);
-    latestLiquidation5m = { warmed_up: false, error: "fetch_failed" };
+    if (asset === activeSnapshotAsset) latestLiquidation5m = { warmed_up: false, error: "fetch_failed" };
   }
 }
 
@@ -2959,13 +2989,16 @@ async function refreshBasisLiquiditySignal() {
   const now = Date.now();
   if (now - basisLiquidationLastFetchAt < BASIS_LIQUIDATION_POLL_MS) return;
   basisLiquidationLastFetchAt = now;
+  const asset = activeSnapshotAsset;          // 늦게 온 응답 버리기 -- 위 5m 신호와 같은 이유
   try {
-    const res = await fetch(`${API_BASIS_LIQUIDATION_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
+    const res = await fetch(`${API_BASIS_LIQUIDATION_URL}?asset=${asset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`basis liquidation signal ${res.status}`);
-    latestBasisLiquidation = await res.json();
+    const j = await res.json();
+    if (asset !== activeSnapshotAsset) return;
+    latestBasisLiquidation = j;
   } catch (error) {
     console.error("Basis liquidation signal fetch error:", error);
-    latestBasisLiquidation = { warmed_up: false, error: "fetch_failed" };
+    if (asset === activeSnapshotAsset) latestBasisLiquidation = { warmed_up: false, error: "fetch_failed" };
   }
 }
 
@@ -2983,13 +3016,6 @@ async function refreshLiqBurstState() {
   }
 }
 
-async function refreshLiquidationDirectionSignal() {
-  const now = Date.now();
-  if (now - liquidationDirectionLastFetchAt < LIQUIDATION_DIRECTION_POLL_MS) return;
-  liquidationDirectionLastFetchAt = now;
-  // 2026-09-11 청산 방향압력 제거 -- 더는 화면에서 쓰지 않으므로 폴링도 멈춘다.
-}
-
 // Unlike latestVRebound (picked up by the next state-driven render() pass), the liquidation map
 // has no such host -- it self-triggers both the panel list and the snapshot chart right after a
 // fetch resolves, same pattern as refreshEvidenceSignals().
@@ -2997,12 +3023,16 @@ async function refreshLiquidationMap() {
   const now = Date.now();
   if (now - liquidationMapLastFetchAt < LIQUIDATION_MAP_POLL_MS) return;
   liquidationMapLastFetchAt = now;
+  const asset = activeSnapshotAsset;          // 늦게 온 응답 버리기 -- 위 5m 신호와 같은 이유
   try {
-    const res = await fetch(`${API_LIQUIDATION_MAP_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
+    const res = await fetch(`${API_LIQUIDATION_MAP_URL}?asset=${asset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`liquidation map ${res.status}`);
-    latestLiquidationMap = await res.json();
+    const j = await res.json();
+    if (asset !== activeSnapshotAsset) return;
+    latestLiquidationMap = j;
   } catch (error) {
     console.error("Liquidation map fetch error:", error);
+    if (asset !== activeSnapshotAsset) return;
     latestLiquidationMap = { warmed_up: false, error: "fetch_failed" };
   }
   renderLiquidationMapPanel();
@@ -3184,7 +3214,6 @@ function setupPageTabs() {
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
       basisLiquidationLastFetchAt = 0; refreshBasisLiquiditySignal();
       liqBurstStateLastFetchAt = 0; refreshLiqBurstState();
-      liquidationDirectionLastFetchAt = 0; refreshLiquidationDirectionSignal();
       liquidationMapLastFetchAt = 0; refreshLiquidationMap();
       regimeWide24LastFetchAt = 0; refreshRegimeWide24();
       regimeBtcLastFetchAt = 0; refreshRegimeBtc();
@@ -3565,6 +3594,7 @@ async function refreshSupply1s() {
     const floor = supply1sMeta.now - SUPPLY_1S_WINDOW - SUPPLY_1S_ROLL - 20;
     supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
     oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
+    supply1sVer += 1;
   } catch (error) {
     console.error("Supply 1s fetch error:", error);
   }
@@ -3660,10 +3690,12 @@ async function refreshFlowHeatmap() {
     latestFlowHeatmap = { ...j, rows: j.rows
       ? Object.assign({ ...j.rows }, ...ROW_STATS.map((k) => ({ [k]: f4(j.rows[k + "_f4"]) })))
       : null };
+    flowHeatmapVer += 1;
     repaintSupplyProfilePanel();   // 행별 지속 잔량이 같이 갱신된다
   } catch (error) {
     console.error("Flow heatmap fetch error:", error);
     latestFlowHeatmap = null;
+    flowHeatmapVer += 1;
   }
 }
 
@@ -3681,6 +3713,7 @@ async function refreshSupplyProfile() {
     console.error("Supply profile fetch error:", error);
     latestSupplyProfile = null;
   }
+  supplyProfileVer += 1;
   repaintSupplyProfilePanel();
 }
 
@@ -3795,7 +3828,7 @@ function renderSupply1s(box = null) {
   // 🔴폭을 1200 으로 고정했더니 컨테이너(1318)를 못 채워 **이 차트만 좁게** 그려졌다
   //   (2026-09-19 실측: 캔들·프로파일 1318 vs 여기 1240). viewBox 를 부모에서 받아야
   //   세 차트의 그려지는 폭이 같아진다. 여백도 캔들 차트와 같은 값(45/112)을 쓴다.
-  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
+  const parentW = box ? 0 : (svg.parentElement ? svg.parentElement.clientWidth : 0);
   // 2026-09-19 가격선 띠를 뺐다(사용자 지시) -- 바로 아래 풋프린트 캔들이 같은 가격을
   // 이미 보여준다. 그만큼 높이를 돌려줘서 패널이 짧아지고 누적선이 커진다(240 -> 150).
   // 🔴모바일에서 폭을 1200 으로 잡으면 뷰박스가 8:1 이 되어 158px 상자 안에서 **42px 로**
@@ -4022,15 +4055,20 @@ function renderSupply1s(box = null) {
 function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box = null) {
   const NS = "http://www.w3.org/2000/svg";
   const mobileChart = isMobileChartMode();
-  const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
-  const parentH = svg.getBoundingClientRect().height
-    || (svg.parentElement ? svg.parentElement.clientHeight : 0);
   // 2026-09-19 2열 배치(사용자 지시)로 상자가 카드 폭의 68%/32% 가 됐다. 1200/400 을 고정으로
   // 두면 viewBox 가 상자보다 커서 meet 축소가 걸리고 글자가 그만큼 작아진다 -- 상자에서 받는다.
   // 하한은 «아직 레이아웃 전»(parentW/H = 0)일 때의 폴백이다.
   // box 가 오면 재지 않는다 -- 캔들 SVG 안의 중첩 <svg> 로 그릴 때 그 상자가 곧 좌표계다.
-  const w = box ? box.w : (parentW > 0 ? Math.max(parentW, 320) : 1200);
-  const h = box ? box.h : (parentH > 0 ? Math.max(parentH, 260) : 400);
+  // 🔴«재지 않는다»가 **측정을 건너뛴다**는 뜻이어야 한다. 값만 버리고 호출은 그대로 두면
+  //   getBoundingClientRect 가 방금 만든 수천 노드의 레이아웃을 강제로 확정시킨다 -- 이 함수는
+  //   캔들 렌더 한가운데서 불린다.
+  const measured = box ? null : {
+    w: svg.parentElement ? svg.parentElement.clientWidth : 0,
+    h: svg.getBoundingClientRect().height
+       || (svg.parentElement ? svg.parentElement.clientHeight : 0),
+  };
+  const w = box ? box.w : (measured.w > 0 ? Math.max(measured.w, 320) : 1200);
+  const h = box ? box.h : (measured.h > 0 ? Math.max(measured.h, 260) : 400);
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   svg.innerHTML = "";
 
@@ -4520,7 +4558,9 @@ function renderSnapshotChart() {
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel()];
-  const densityHistory = liquidationDensityHistory();
+  // 풋프린트 모드에서는 아래로 `[]` 가 넘어간다 -- 그런데도 매 렌더(초당 2.5회) 9개 스냅샷 x
+  // ~115빈을 통째로 새 객체로 만들어 버리고 있었다. 쓸 때만 만든다.
+  const densityHistory = footprint ? [] : liquidationDensityHistory();
   // 2026-09-10: 이 차트는 줄곧 entryPrice=0 을 넘겨 「진입」 선을 안 그렸다. renderCandleSvg 에
   // 그리는 코드는 이미 있으므로(priceLabels 의 amber "진입"), 거래소 실계좌 진입가만 넘긴다.
   const entryPrice = Number(snapshotAccountPosition()?.entry_price || 0);
@@ -5899,26 +5939,46 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 중첩 <svg> 를 쓴다 -- 자식 svg 는 제 viewBox 를 갖는 독립 좌표계라 두 렌더러의 좌표
   // 계산을 한 줄도 안 고쳐도 된다. 상자만 넘기면 그 안에서 평소처럼 그린다.
   if (SUB_TOTAL > 0) {
-    const subSvg = (x, y, wid, hgt) => {
-      const g = document.createElementNS(NS, "svg");
+    // 상자는 매번 다시 앉히되 **내용은 판번호가 바뀌었을 때만** 다시 그린다(subPanelCache
+    // 주석의 실측 참고). 노드를 재사용하므로 mousemove 리스너도 한 번만 붙는다.
+    const subSvg = (slot, x, y, wid, hgt, key, draw) => {
+      const slotState = subPanelCache[slot];
+      let g = slotState.node;
+      const hit = !!g && slotState.key === key;
+      if (!g) {
+        g = slotState.node = document.createElementNS(NS, "svg");
+        // 캔들 툴팁이 이 위에서도 뜨면 «이 봉»이 아닌 값을 말한다 -- 버블링을 여기서 끊는다.
+        g.addEventListener("mousemove", (e) => e.stopPropagation());
+      }
       g.setAttribute("x", x); g.setAttribute("y", y);
       g.setAttribute("width", wid); g.setAttribute("height", hgt);
-      // 캔들 툴팁이 이 위에서도 뜨면 «이 봉»이 아닌 값을 말한다 -- 버블링을 여기서 끊는다.
-      g.addEventListener("mousemove", (e) => e.stopPropagation());
       svg.appendChild(g);
+      if (!hit) { draw(g); slotState.key = key; }
       return g;
     };
     // 히트맵이 왼쪽, 프로파일이 오른쪽(사용자 지시). 히트맵의 오른쪽 끝 = 지금 호가라
     // 그 옆에 프로파일 가격행이 바로 이어진다 -- 두 그림이 같은 가격축에서 만난다.
     // 🔴프로파일을 **먼저** 그린다 -- supplyProfileNow 에 행 기하를 남겨야 히트맵이
     //   같은 y 에 포갠다(x 위치는 호출 순서와 무관하다. 각자 제 <svg> 상자를 받는다).
-    supplyProfileSubBox = { svg: subSvg(0, subProfileY, w, SUB_PROFILE_H), w, h: SUB_PROFILE_H };
-    renderSupplyProfileSvg(supplyProfileSubBox.svg, latestSupplyProfile,
-                           currentPrice, entryPrice, { w, h: SUB_PROFILE_H });
+    supplyProfileSubBox = {
+      svg: subSvg("prof", 0, subProfileY, w, SUB_PROFILE_H,
+                  subProfileKey(entryPrice, w, SUB_PROFILE_H),
+                  (g) => renderSupplyProfileSvg(g, latestSupplyProfile, currentPrice,
+                                                entryPrice, { w, h: SUB_PROFILE_H })),
+      w, h: SUB_PROFILE_H };
+    // 재사용했으면 renderSupplyProfileSvg 가 안 돌았으므로 현재가 줄을 여기서 맞춘다.
+    updateSupplyProfileNow(currentPrice);
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
-    supply1sSubBox = { svg: subSvg(0, sub1sY, w, SUB_1S_H), w, h: SUB_1S_H };
-    renderSupply1s(supply1sSubBox);
+    supply1sSubBox = {
+      svg: subSvg("s1", 0, sub1sY, w, SUB_1S_H, sub1sKey(w, SUB_1S_H),
+                  (g) => renderSupply1s({ svg: g, w, h: SUB_1S_H })),
+      w, h: SUB_1S_H };
+  } else {
+    // 다른 코인·웜업이면 자리를 안 잡는다. 캐시 키를 비워 두지 않으면 ETH 로 돌아왔을 때
+    // 낡은 그림이 «맞는 판»으로 다시 붙는다.
+    supplyProfileSubBox = supply1sSubBox = null;
+    subPanelCache.prof.key = subPanelCache.s1.key = "";
   }
 }
 
@@ -5997,11 +6057,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // 20260827.py's _direction()/_tone() for the short_pressure/long_pressure -> good/bad mapping.
   const basisLiqWarmedUp = !!(latestBasisLiquidation && latestBasisLiquidation.warmed_up);
   const basisLiqTone = basisLiqWarmedUp ? latestBasisLiquidation.tone : "neutral";
-
-  // 청산 방향압력 (2026-08-25) -- fetched separately by refreshLiquidationDirectionSignal(), same
-  // external-fetch category as latestVRebound above. Directional model-indicator, NOT evidence-
-  // signal tier -- see scripts/live_liquidation_direction_signal_20260825.py docstring.
-  // 2026-09-11 청산 방향압력 칩 제거(예측·손익 8지평 전패). 대체 칩 없이 자리를 비운다.
 
   // 2026-08-25: perf pass -- this whole block (gauge + chart + model-indicator list) only paints
   // anything the user can see while the Snapshot tab is active (snapshotTabPanel is display:none
@@ -6134,7 +6189,6 @@ async function tick() {
       refreshLiquidation5mSignal();
       refreshBasisLiquiditySignal();
       refreshLiqBurstState();
-      refreshLiquidationDirectionSignal();
       refreshLiquidationMap();
       refreshActiveRegime();
       refreshCoinIndicators();
@@ -6172,9 +6226,11 @@ async function seedModelIndicatorHistory() {
     if (Object.values(toneHistory).some((arr) => arr.length)) return; // live tick already won the race
     for (const sample of samples) {
       const c = classifyIndicators(sample.microstructure, sample.tail_risk);
-      pushToneHistory("liq_cascade", c.liq_cascade.tone);
-      pushToneHistory("whale", c.whale.tone);
-      pushToneHistory("retail_flow", c.retail_flow.tone);
+      // 🔴시각은 **그 샘플이 찍힌 때**다. new Date() 로 찍으면 48칸이 전부 «지금»이 되어
+      //   축(stripAxisHtml)이 4시간을 0초로 압축해 보여준다.
+      pushToneHistory("liq_cascade", c.liq_cascade.tone, sample.sampled_at);
+      pushToneHistory("whale", c.whale.tone, sample.sampled_at);
+      pushToneHistory("retail_flow", c.retail_flow.tone, sample.sampled_at);
     }
   } catch (error) {
     console.error("Model indicator history seed error (non-fatal, strip just starts empty):", error);
