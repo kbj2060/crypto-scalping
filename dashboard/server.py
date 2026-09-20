@@ -1623,6 +1623,24 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
     return out
 
 
+# 🔴SSE 로 나가는 상태는 **화면이 실제로 읽는 세 블록**뿐이다.
+# app.js 의 render() 가 보는 것은 state.session / state.microstructure / state.tail_risk 이고
+# compactState 는 인자로 넘어가기만 하고 **본문에서 한 번도 안 읽힌다**(2026-09-20 확인).
+# 그런데 이 루프는 dashboard_state.json 전체(실측 30,109B)를 상태가 바뀔 때마다 그대로 밀고
+# 있었다 -- 세 블록만 추리면 3,498B 로 **8.6배** 줄어든다. SSE 는 gzip 도 안 걸린다
+# (json_compress_etag 미들웨어는 StreamResponse 를 건드리지 않는다).
+# ⭐옛 app.js 와도 호환된다: 지우는 키는 클라가 애초에 안 읽던 것들이다.
+# ⚠️`/api/state` 는 **그대로 전체**를 준다 -- 계약이 다르고 테스트가 그걸 검사한다.
+SSE_STATE_KEYS = ("session", "microstructure", "tail_risk")
+
+
+def sse_state_view(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    state = (payload or {}).get("state")
+    if not state:
+        return payload      # 없음/빈 상태는 원래 모양 그대로 -- 클라 가드가 그걸 본다
+    return {"state": {k: state.get(k) for k in SSE_STATE_KEYS}}
+
+
 def no_cache(resp: web.StreamResponse) -> web.StreamResponse:
     resp.headers["Cache-Control"] = "no-cache"
     return resp
@@ -2740,10 +2758,10 @@ def make_app() -> web.Application:
                     }
                     state_changed = state_etag != last_state_etag
                     if state_changed:
-                        latest_event_state = state_payload
+                        latest_event_state = sse_state_view(state_payload)
                         last_state_etag = state_etag
                     payload = {
-                        "state": state_payload if state_changed else None,
+                        "state": latest_event_state if state_changed else None,
                         "tickers": latest_event_tickers,
                         # 켜진 코인 목록을 **서버가 알려준다**. 클라가 같은 목록을 따로 들고
                         # 있으면 둘이 어긋나는 날이 온다(SUSTAIN_BARS_OVERRIDE 류의 반복 교훈).
@@ -2970,7 +2988,13 @@ def make_app() -> web.Application:
             bars = max(1, min(288, int(request.query.get("bars", OI_5M_WINDOW_BARS))))
         except ValueError:
             bars = OI_5M_WINDOW_BARS
-        buckets = await asyncio.to_thread(oi_5m_buckets, bars)
+        # 🔴이 저장소에서 **매 요청 duckdb 를 여는 유일한 엔드포인트**였다(실측 12~15ms,
+        #   따뜻한 다른 엔드포인트가 0.5~4ms). 파일 락을 잡으므로 10초마다 도는 쓰기
+        #   (oi_1s_persist)와 탭 수만큼 부딪힌다. TTL 은 클라 폴링(OI_5M_POLL_MS=15초)의
+        #   3분의 1이라 **단일 탭에서는 늘 미스**다 -- 신선도는 그대로고 탭이 늘어도 duckdb
+        #   열기 횟수만 5초당 한 번으로 묶인다. 값 자체도 5분봉이라 5초는 해상도 아래다.
+        buckets = await swr_cached(f"oi_5m:{bars}", 5.0,
+                                   lambda: asyncio.to_thread(oi_5m_buckets, bars))
         # 현재 OI 는 링에서 바로 준다 -- duckdb 는 최대 OI_1S_FLUSH_SECONDS 만큼 뒤처져 있다.
         now_oi = oi_1s[max(oi_1s)] if oi_1s else (buckets[-1][2] if buckets else 0.0)
         return web.json_response({
@@ -3012,9 +3036,27 @@ def make_app() -> web.Application:
                        for k, v in sorted(merged.items())],
         }, headers=NOCACHE)
 
+    # 🔴이 응답은 **페이지 로드를 막는다** -- app.js 가 seedModelIndicatorHistory() 를 await
+    #   한 뒤에야 SSE 를 연다. 그런데 48샘플의 microstructure/tail_risk 를 통째로 실어 보내
+    #   194KB(gzip 27KB)였다: 이 저장소에서 **가장 큰 응답**이고, 그 중 클라이언트가 읽는 것은
+    #   classifyIndicators() 가 쓰는 **다섯 필드뿐**이다(나머지는 파싱되고 버려진다).
+    #   버퍼/파일은 그대로 두고(나중에 다른 필드를 쓸 수 있게) **나갈 때만** 자른다.
+    MIH_MICRO_KEYS = ("nif_whale", "nif_retail")
+    MIH_TAIL_KEYS = ("hawkes_active", "z_long", "z_short")
+
+    def _mih_slim(sample: dict) -> dict:
+        micro = sample.get("microstructure") or {}
+        tail = sample.get("tail_risk") or {}
+        return {
+            "sampled_at": sample.get("sampled_at"),
+            "microstructure": {k: micro[k] for k in MIH_MICRO_KEYS if k in micro},
+            "tail_risk": {k: tail[k] for k in MIH_TAIL_KEYS if k in tail},
+        }
+
     async def api_model_indicator_history(request: web.Request) -> web.Response:
         return web.json_response(
-            {"samples": list(model_indicator_history), "sample_interval_seconds": MODEL_INDICATOR_SAMPLE_SECONDS},
+            {"samples": [_mih_slim(s) for s in model_indicator_history],
+             "sample_interval_seconds": MODEL_INDICATOR_SAMPLE_SECONDS},
             headers=NOCACHE,
         )
 
