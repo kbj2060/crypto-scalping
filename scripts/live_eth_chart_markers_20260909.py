@@ -176,6 +176,10 @@ def _onset_only(grid: dict[str, dict], times: list[str]) -> list[dict]:
 def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
                           extreme: dict | None = None, breakout: dict | None = None,
                           evr_gate: dict | None = None) -> dict[str, Any]:
+    # 2026-09-21 V자·극점·E|r| 게이트가 대시보드에서 내려갔다 -- 인자는 호출 파리티를 위해
+    # 남기지만 **항상 None 이다**(server.py 가 그렇게 부른다). 되살리려면 그 워커를 켜고
+    # server.py 의 load_* 를 복원하면 된다: docs/experiments/
+    # eth_dashboard_signal_cull_and_vol_expansion_rescore_20260921.md
     """청산맵 72봉에 정렬된 마커. 절대 예외를 올리지 않는다."""
     asset = (asset or "eth").lower()
     if asset not in SUPPORTED:
@@ -218,8 +222,7 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         #     전부 무죄였다.
         #   ⚠️봉별 등급(강/중/약)과 확률은 워커 이력에 없어서 여기서 사라진다 -- 삼각형의 위치와
         #     측면은 그대로다. 등급을 되살리려면 워커가 등급 이력을 내보내야 한다(다른 세션 파일).
-        _merge_history(grid, extreme, "extreme", "극점")
-        _merge_history(grid, v_rebound, "v_rebound", "V자반등")
+        # 2026-09-21: 극점·V자 레인 제거(신호 자체가 내려갔다).
 
         # ── 방향 없는 신호는 **구간**이다 (2026-09-16) ────────────────────────────────
         # 추세 전환·변동폭 게이트는 천장/바닥을 말하지 않는다(각 스크립트에 명시). 방향 레인에
@@ -229,8 +232,7 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         # 예고도 자기 이력을 갖고 있다(prewarn.history, warn/neutral · 같은 times 격자).
         pre = (breakout or {}).get("prewarn") or {}
         spans = {"trend_detect": _span_from_points(times, _history_points(breakout)),
-                 "trend_prewarn": _span_from_points(times, _history_points(pre, ("warn",))),
-                 "evr_gate": _span_from_points(times, _history_points(evr_gate))}
+                 "trend_prewarn": _span_from_points(times, _history_points(pre, ("warn",)))}
         # 게이트만 이력이 이제 막 쌓이기 시작한다(2026-09-16 워커에 추가). 그 전 구간은 «발동
         # 안 함»이 아니라 **모름**이라, 이력이 아직 없으면 지금 상태만 마지막 봉에 찍고 그
         # 사실을 spans_partial 로 밝힌다.
@@ -240,19 +242,10 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         span_meta = {
             "trend_prewarn_p": _value_grid(times, list(zip(pre_times, pre.get("probas") or []))),
             "trend_prewarn_thr": _value_grid(times, list(zip(pre_times, pre.get("thresholds") or []))),
-            "evr_gate_ratio": _value_grid(times, [
-                (h.get("ts"), h.get("eth_ratio")) for h in ((evr_gate or {}).get("history") or [])
-                if isinstance(h, dict) and h.get("eth_fired")]),
         }
-        gate_hist = _history_points(evr_gate)
-        if times and not gate_hist:
-            eth_now = any(str(f.get("asset", "")).upper() == "ETH"
-                          for f in ((evr_gate or {}).get("fired") or []))
-            if eth_now:
-                spans["evr_gate"][-1] = 1
         return {
             "spans": spans, "span_meta": span_meta,
-            "spans_partial": [] if gate_hist else ["evr_gate"],
+            "spans_partial": [],
             "available": True, "asset": asset, "bars": CHART_BARS,
             "latest_ts_utc": times[-1] if times else None,
             "times": times,

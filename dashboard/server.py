@@ -8,6 +8,7 @@ import csv
 import functools
 import hashlib
 import json
+import math
 import os
 import re
 import statistics
@@ -86,7 +87,6 @@ from scripts.live_eth_chart_markers_20260909 import compute_chart_markers  # noq
 # 베이시스 청산압박 model indicator (replaces 독성/toxicity, 2026-08-27) -- own live spot+perp
 # klines fetch each cache cycle (no persistent collector), same "computed here, not bot state"
 # category as OI 급변 above. See that module's docstring for the liquidation-crowding validation.
-from scripts.live_spot_perp_basis_signal_20260827 import compute_basis_liquidation_signal  # noqa: E402
 # 5-minute liquidation $ aggregate for the Snapshot tab's liquidation gauge (2026-08-25) -- reads
 # tail_risk.duckdb's own per-minute persisted history read-only, same "computed here, not from
 # trading_bot.py's dashboard_state.json" category as OI 급변 above. See that module's docstring for
@@ -272,8 +272,6 @@ LIQUIDATION_MAP_DISPLAY_HOURS = 6  # 2026-08-25 user request: density-history sn
 # on every page load like the old client-only accumulation did. Raw values only -- the tone/hint
 # thresholds stay in app.js (single source of truth), applied to this history same as to the
 # live reading, so there is no second copy of that classification logic to drift out of sync.
-MODEL_INDICATOR_SAMPLE_SECONDS = 300  # 5 min, matching the evidence-signal strip's bar cadence
-MODEL_INDICATOR_HISTORY_MAX = 48  # 4h at the sample interval above -- same window as evidence signals
 LIVE_DIR = REPO_ROOT / "data" / "live"
 DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 
@@ -281,38 +279,6 @@ DASHBOARD_DIR = REPO_ROOT / "dashboard" / "live"
 # 재기동하는데(실측 2026-09-11 하루 12회) 48칸 × 5분 = 4시간을 다시 채워야 해서, 사용자가
 # 새로고침할 때마다 «브라우저에 쌓여 있던 과거가 갑자기 사라지는» 증상이 났다. 브라우저는
 # 라이브 틱으로 40칸까지 누적하는데 새로고침 후 씨앗(서버 deque)은 10칸뿐이었기 때문이다.
-MODEL_INDICATOR_HISTORY_PATH = LIVE_DIR / "model_indicator_history.json"
-
-
-def load_model_indicator_history() -> list[dict]:
-    """재기동 때 띠를 복원한다. **창(4h)을 벗어난 샘플은 버린다** —
-    이틀 전 값을 '최근 4시간'이라고 그리면 화면이 거짓말을 한다."""
-    try:
-        rows = json.loads(MODEL_INDICATOR_HISTORY_PATH.read_text())
-    except Exception:
-        return []
-    if not isinstance(rows, list):
-        return []
-    cutoff = datetime.now(timezone.utc) - timedelta(
-        seconds=MODEL_INDICATOR_SAMPLE_SECONDS * MODEL_INDICATOR_HISTORY_MAX)
-    fresh = []
-    for r in rows:
-        try:
-            if datetime.fromisoformat(r["sampled_at"]) >= cutoff:
-                fresh.append(r)
-        except Exception:
-            continue
-    return fresh[-MODEL_INDICATOR_HISTORY_MAX:]
-
-
-def save_model_indicator_history(rows: list[dict]) -> None:
-    """원자적 교체 — 쓰는 도중 죽어도 반쪽 파일이 남지 않는다(그러면 복원이 통째로 실패한다)."""
-    try:
-        tmp = MODEL_INDICATOR_HISTORY_PATH.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(rows))
-        tmp.replace(MODEL_INDICATOR_HISTORY_PATH)
-    except Exception as exc:  # 띠 하나 때문에 이벤트 발행 루프를 죽이지 않는다
-        print(f"model_indicator_history save failed: {exc}", flush=True)
 
 
 # 2026-09-12: 바이낸스 userTrades 는 **7일 롤링**이라 그 앞의 왕복은 API 에서 그냥 사라진다
@@ -426,22 +392,16 @@ LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
 # 2026-09-10 극점 탐지기 -- 채점은 워커가 하고 대시보드는 읽기만 한다
 # (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
-V_REBOUND_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_v_rebound_state.json"
 REGIME_WIDE24_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_wide24_state.json"
 REGIME_BTC_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_btc_state.json"
 REGIME_XRP_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_xrp_state.json"
 REGIME_MAX_AGE_MIN = 20.0                  # 레짐 워커 주기 300초 + 사이클 13초 여유
 MACRO_CALENDAR_STATE_PATH = REPO_ROOT / "data" / "live" / "macro_calendar_state.json"
 MACRO_CALENDAR_MAX_AGE_MIN = 90.0          # 달력이라 분 단위 신선도가 의미 없다
-V_REBOUND_MAX_AGE_MIN = 15.0               # 5분봉 3개
-EXTREME_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_extreme_detector_state.json"
-EXTREME_DETECTOR_MAX_AGE_MIN = 15.0        # 5분봉 3개
 
 # 2026-09-10 24시간 변동성 전망 -- 새 정보원(Deribit DVOL)을 쓰는 첫 지표. 워커가 채점한다
 # (scripts/live_eth_vol_forecast_worker_20260910.py · supervisor_vol_forecast_worker.sh).
 # ⚠️시간봉 신호라 워커 주기가 300초다 -- 5분봉 카드보다 신선도 기준을 넉넉히 둔다.
-VOL_FORECAST_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_vol_forecast_state.json"
-VOL_FORECAST_MAX_AGE_MIN = 30.0            # 워커 주기 300초 x 6
 
 # 2026-09-11 횡보→추세 전환 탐지기 -- 방향은 예측하지 않는다(그 축은 닫혔다). 워커가 채점한다
 # (scripts/live_eth_breakout_detector_worker_20260911.py · supervisor_breakout_detector.sh).
@@ -455,7 +415,6 @@ BREAKOUT_DETECTOR_MAX_AGE_MIN = 15.0       # 5분봉 3개 -- 봉 마감 +20초�
 #   그래서 워커는 `art["dir"]` 를 **아예 호출하지 않는다**. 이름도 direction_gate 가 아니다.
 # 게이트 자체의 근거: 두 독립 설계에서 짝지은 증분 +8.25 / +7.44bp/일 · **CI 둘 다 0배제** ·
 #   MDD 를 −47.4% -> −8.4% 로 줄인다. **손실 차단기**이지 수익 생성기가 아니다. 표시 전용.
-EVR_GATE_STATE_PATH = REPO_ROOT / "data" / "live" / "evr_gate_state.json"
 # 2026-09-19 GEX. 🔴duckdb(`deribit_gex.duckdb`)는 **열지 않는다** -- 단일 writer 라
 #   매시 cron 과 부딪히면 `Could not set lock` 이다. 수집기가 떨구는 JSON 만 읽는다.
 GEX_STATE_PATH = REPO_ROOT / "data" / "live" / "deribit_gex_state.json"
@@ -1242,30 +1201,6 @@ def macro_calendar_payload() -> dict[str, Any]:
                           ts_field="generated_at", extra_missing={"events": []})
 
 
-def v_rebound_payload() -> dict[str, Any]:
-    """V자 급등락 워커 상태. 극점 탐지기와 같은 구조.
-
-    2026-09-13 에 요청 경로에서 뺐다 -- 대시보드 재시작 직후 첫 요청이 **137초**를 기다렸고
-    (서버 실측), 그 사이 화면은 "웜업"을 띄웠다. 배포 워처가 하루 12회쯤 재시작하므로
-    사용자가 자주 만나는 구간이었다. 함수 주석의 "GPU 에서 3초"는 이 서버에 GPU 가 없어 무효.
-    """
-    return worker_payload(V_REBOUND_STATE_PATH, V_REBOUND_MAX_AGE_MIN,
-                          extra_missing={"event_active": False, "call": None, "direction": None,
-                                         "proba_rebound": None, "tp_price": None,
-                                         "history": [], "times": []})
-
-
-def extreme_detector_payload() -> dict[str, Any]:
-    return worker_payload(EXTREME_DETECTOR_STATE_PATH, EXTREME_DETECTOR_MAX_AGE_MIN,
-                          extra_missing={"grade": None, "proba": None, "history": [], "times": []})
-
-
-def vol_forecast_payload() -> dict[str, Any]:
-    """24시간 변동성 전망 워커 상태. 극점 탐지기와 같은 구조."""
-    return worker_payload(VOL_FORECAST_STATE_PATH, VOL_FORECAST_MAX_AGE_MIN,
-                          extra_missing={"grade": None, "proba": None, "history": [], "times": []})
-
-
 def breakout_detector_payload() -> dict[str, Any]:
     """횡보->추세 전환 탐지기 워커 상태."""
     return worker_payload(BREAKOUT_DETECTOR_STATE_PATH, BREAKOUT_DETECTOR_MAX_AGE_MIN,
@@ -1288,13 +1223,6 @@ def gex_payload() -> dict[str, Any]:
     return worker_payload(GEX_STATE_PATH, GEX_MAX_AGE_MIN, ts_field="generated_at",
                           stamp_available=True, bare_missing=True,
                           extra_missing={"currencies": {}})
-
-
-def evr_gate_payload() -> dict[str, Any]:
-    """E|r| 게이트(1일 · 상위10% · 20자산) 워커 상태. **방향은 담지 않는다.**"""
-    return worker_payload(EVR_GATE_STATE_PATH, EVR_GATE_MAX_AGE_MIN,
-                          require_ok=True, stamp_available=True,
-                          extra_missing={"assets": [], "fired": [], "n_fired": 0, "n_assets": 0})
 
 
 # 2026-09-14 사용자 요청: 사이징 변동성 모델(A)을 «모델 내부 지표»에 신호로 띄운다.
@@ -1326,6 +1254,22 @@ VOL_LEVEL_RATIO_CALM = 1.39        # 이 아래 = 안정(평소 이하) — 상�
 VOL_LEVEL_RATIO_HOT = 1.88         # 이 위 = 위험 — 상위 5% 경계
 VOL_LEVEL_REF_FALLBACK = 0.00160   # 워커가 ref_pred 를 안 줄 때만 (서버 아티팩트 기준)
 
+# 2026-09-21 ⭐**확장 배수 + 확률**. 위 `ratio`(평소 대비)와 **다른 축**이다 --
+# 이건 `pred / rv48` = «앞으로 4시간이 직전 4시간 대비 몇 배».
+# 🔴카드가 오래 「곧 커진다는 못 맞힌다(AUC .46~.52)」라고 적어 왔는데 **채점을 잘못한 것**이었다:
+#   확장은 «비율» 질문인데 모델의 «수준»으로 채점했다(수준은 스케일을 갖고 비율은 안 갖는다).
+#   올바른 점수인 pred/rv48 로 재면 OOS 109,267행 AUC **0.8237**, rv48 십분위 통제 후 **0.7865**
+#   (10/10 셀 0.69 이상 · 분기 5/5 0.729~0.791 · 일블록 부트 CI [0.754, 0.822] 로 0.5 배제).
+#   보정도 편향 없다: log(실제배수) = -0.0091 + **1.0365**·log(예측배수).
+# 아래 두 상수는 TRAIN(<=2025-08-31, 385,453행)에서 적합한 로지스틱이다.
+#   OOS Brier 0.1388(상수예측 0.1961) · 십분위 보정오차 <=4pp.
+# ⚠️점으로 읽으면 안 된다 -- 예측 1.5배일 때 실제 68% 구간이 [1.07, 2.12]배다(잔차 SD 0.34).
+#   그래서 화면은 배수와 **확률을 같이** 띄운다.
+#   근거: docs/experiments/eth_dashboard_signal_cull_and_vol_expansion_rescore_20260921.md
+VOL_EXPAND_K = 1.3                 # «확장» 정의: 앞 4시간 RV >= 1.3 x 직전 4시간 RV
+VOL_EXPAND_LOGIT_A = -1.6560       # sigmoid(A + B*ln(pred/rv48))
+VOL_EXPAND_LOGIT_B = 6.1834
+
 
 def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
     """예측 변동성 등급(기준 = 최근 30일) + **수량 배수**(배포 공식 = 고정 ref_pred / pred)."""
@@ -1347,7 +1291,16 @@ def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
         grade, tone = "위험", "bad"
     else:
         grade, tone = "주의", "warn"
+    # ⭐확장 축(«직전 4시간 대비»). rv48 을 워커가 안 주는 옛 상태파일이면 조용히 생략한다.
+    rv48 = sm.get("rv48")
+    expand: dict[str, Any] = {}
+    if isinstance(rv48, (int, float)) and float(rv48) > 0:
+        _m = pred / float(rv48)
+        expand = {"mult": _m, "expand_k": VOL_EXPAND_K, "rv48": float(rv48),
+                  "p_expand": 1.0 / (1.0 + math.exp(
+                      -(VOL_EXPAND_LOGIT_A + VOL_EXPAND_LOGIT_B * math.log(_m))))}
     return {"available": True, "grade": grade, "tone": tone, "pred_vol": pred, "ref_pred": ref,
+            **expand,
             "ratio": ratio, "qty_mult": ref_fixed / pred,
             # 어느 기준으로 잘랐는지 숨기지 않는다(고정으로 떨어졌으면 화면도 그렇게 말한다).
             "ref_source": "recent" if use_recent else "train",
@@ -1776,21 +1729,6 @@ def make_app() -> web.Application:
     # 2026-08-31: 자산별로 키를 나눈다(원래는 공유 슬롯 하나였다) -- ETH 요청과 BTC 요청이
     # 서로의 캐시를 밀어내지 않게. 2026-09-12 부터 그 dict/Lock 은 swr_cached 가 f"...:{asset}"
     # 키로 직접 소유하므로 여기서 선언하지 않는다.
-    _mih_restored = load_model_indicator_history()
-    model_indicator_history: deque = deque(_mih_restored, maxlen=MODEL_INDICATOR_HISTORY_MAX)
-    # 복원분의 나이만큼 시계를 되돌려 둔다 → 다음 샘플이 «원래 찍혔어야 할 때» 찍힌다.
-    # 0.0 으로 두면 기동 즉시 한 칸이 더 찍혀, 재기동이 잦을수록 칸 간격이 들쭉날쭉해진다.
-    _mih_age = MODEL_INDICATOR_SAMPLE_SECONDS
-    if _mih_restored:
-        try:
-            _mih_age = min(MODEL_INDICATOR_SAMPLE_SECONDS, max(0.0, (
-                datetime.now(timezone.utc)
-                - datetime.fromisoformat(_mih_restored[-1]["sampled_at"])).total_seconds()))
-        except Exception:
-            pass
-    model_indicator_sample_state: dict[str, float] = {
-        "last_sample_at": time.monotonic() - _mih_age
-    }
 
     # ---------------------------------------------------------------------------------
     # 2026-09-03 perf pass -- stale-while-revalidate.
@@ -2816,49 +2754,6 @@ def make_app() -> web.Application:
             cache=evidence_signal_cache,
             max_stale=0.0,
         )
-    async def load_v_rebound_signal() -> dict[str, Any]:
-        """유동성스윕 반등예측 event-triggered signal -- see
-        scripts/live_eth_sweep_v_rebound_signal_20260829.py docstring for the VAL/OOS/holdout-
-        validated TabPFN model and why this is computed HERE (dashboard-side) rather than by
-        trading_bot.py. Each call re-fits TabPFN on its frozen historical context (~3s measured
-        on this server's GPU, 2026-08-29) -- asyncio.to_thread so that never stalls the event loop,
-        same reasoning as load_chart_klines_frames() above."""
-        return await swr_cached(
-            "v_rebound", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(v_rebound_payload),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
-    async def load_extreme_detector() -> dict[str, Any]:
-        """극점 탐지기 -- **워커가 쓴 상태 파일을 읽기만 한다**(2026-09-10).
-
-        전에는 이 자리에서 모델을 인라인으로 돌렸다. 모델을 TabPFN v3 로 올리면 0.49초가
-        5.14초가 되고(10.6배, 서버 실측) 그 GPU 를 V자 TabPFN·증거신호가 공유한다.
-        이 모델은 5분봉마다 한 번만 새 점수가 필요하므로 채점을 워커로 뺐다 --
-        scripts/live_eth_extreme_detector_worker_20260910.py. 다른 모델 카드와 같은 구조다.
-        """
-        return await swr_cached(
-            "extreme_detector", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(extreme_detector_payload),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
-    async def load_vol_forecast() -> dict[str, Any]:
-        """24시간 변동성 전망 -- 워커가 쓴 상태 파일을 읽기만 한다(모델 인라인 금지)."""
-        return await swr_cached(
-            "vol_forecast", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(vol_forecast_payload),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
-    async def load_evr_gate() -> dict[str, Any]:
-        """E|r| 게이트 -- 워커가 쓴 상태 파일을 읽기만 한다(모델 인라인 금지)."""
-        return await swr_cached(
-            "evr_gate", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(evr_gate_payload),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
     async def load_breakout_detector() -> dict[str, Any]:
         """횡보→추세 전환 탐지기 -- 워커가 쓴 상태 파일을 읽기만 한다(계산 인라인 금지)."""
         return await swr_cached(
@@ -2870,45 +2765,20 @@ def make_app() -> web.Application:
     async def load_chart_markers(asset: str = "eth") -> dict[str, Any]:
         """청산맵 차트 마커 -- scripts/live_eth_chart_markers_20260909.py 참고.
         ETH 전용이다(다른 코인은 unsupported 로 비운다 -- 빈 레인은 "신호 없음"으로 오독된다).
-        V자반등·**극점**은 이미 계산된 페이로드를 재사용한다(추가 모델 실행 없음).
+        2026-09-21: V자·극점·E|r| 게이트를 내려 **돌파 한 줄만** 남았다.
         ⚠️극점을 여기서 인라인으로 채점하면 안 된다 -- 2026-09-10 그 인라인 호출이 TabPFN
           아티팩트(1.08GB)를 60초마다 로드해 to_thread 풀을 고갈시켰고 증거신호를 포함한 모든
           계산 엔드포인트가 멈췄다. 자세한 실측은 live_eth_chart_markers_20260909.py 주석."""
         if (asset or "eth").lower() != "eth":
             return compute_chart_markers(asset)
-        vr = await load_v_rebound_signal()
-        ex = await load_extreme_detector()
-        # 2026-09-16: 방향 없는 두 신호(추세 전환·변동폭 게이트)를 **구간**으로 같이 넘긴다.
-        # 여기서도 이미 계산된 페이로드를 재사용한다 -- 추가 모델 실행 없음(위 ⚠️와 같은 이유).
-        # 하나가 실패해도 마커 전체를 죽이지 않는다: 그 줄만 비고 나머지는 그려진다.
+        # 실패해도 마커 전체를 죽이지 않는다: 그 줄만 비고 나머지는 그려진다.
         try:
             bo = await load_breakout_detector()
         except Exception:  # noqa: BLE001
             bo = None
-        try:
-            ev = await load_evr_gate()
-        except Exception:  # noqa: BLE001
-            ev = None
         return await swr_cached(
             "chart_markers", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_chart_markers, "eth", vr, ex, bo, ev),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
-    async def load_basis_liquidation_signal(asset: str = "eth") -> dict[str, Any]:
-        """베이시스 청산압박 model indicator -- see scripts/live_spot_perp_basis_signal_20260827.py
-        docstring for the liquidation-crowding validation (exploratory, ~1 month) and why this is
-        computed HERE (dashboard-side, own live spot+perp klines fetch) rather than by
-        trading_bot.py. asyncio.to_thread so the two blocking HTTP calls inside
-        compute_basis_liquidation_signal() never stall this process's event loop, same reasoning
-        as load_chart_klines_frames() above.
-
-        asset: 2026-08-31, BTC added -- the underlying validation (basis_z48 extreme ->
-        forward liquidation-volume tilt) was only ever measured on ETH; BTC's reading is exposed
-        with the same exploratory caveat, not a re-validated one (see design doc section 6.5)."""
-        return await swr_cached(
-            f"basis_liquidation:{asset}", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_basis_liquidation_signal, symbol=COIN_CONFIG[asset]["binance_symbol"]),
+            lambda: asyncio.to_thread(compute_chart_markers, "eth", None, None, bo, None),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -3108,15 +2978,8 @@ def make_app() -> web.Application:
                 started = time.monotonic()
                 try:
                     state_payload, state_etag = dashboard_state_payload()
-                    if started - model_indicator_sample_state["last_sample_at"] >= MODEL_INDICATOR_SAMPLE_SECONDS:
-                        model_indicator_sample_state["last_sample_at"] = started
-                        raw_state = (state_payload or {}).get("state") or {}
-                        model_indicator_history.append({
-                            "sampled_at": datetime.now(timezone.utc).isoformat(),
-                            "microstructure": raw_state.get("microstructure") or {},
-                            "tail_risk": raw_state.get("tail_risk") or {},
-                        })
-                        save_model_indicator_history(list(model_indicator_history))
+                    # 2026-09-21 모델지표 이력 샘플러 제거 -- 수급 흐름/리테일/청산
+                    # 캐스케이드 칩 전용이었고 세 칩이 다 내려갔다(소비자 0).
                     if started - account_trip_state["last_at"] >= ACCOUNT_TRIP_RECORD_SECONDS:
                         account_trip_state["last_at"] = started
                         running = refresh_tasks.get("account_trips")
@@ -3450,21 +3313,6 @@ def make_app() -> web.Application:
             "tail_risk": {k: tail[k] for k in MIH_TAIL_KEYS if k in tail},
         }
 
-    async def api_model_indicator_history(request: web.Request) -> web.Response:
-        return web.json_response(
-            {"samples": [_mih_slim(s) for s in model_indicator_history],
-             "sample_interval_seconds": MODEL_INDICATOR_SAMPLE_SECONDS},
-            headers=NOCACHE,
-        )
-
-    async def api_v_rebound_signal(request: web.Request) -> web.Response:
-        payload = await load_v_rebound_signal()
-        return web.json_response(payload, headers=NOCACHE)
-
-    async def api_extreme_detector(request: web.Request) -> web.Response:
-        payload = await load_extreme_detector()
-        return web.json_response(payload, headers=NOCACHE)
-
     async def api_liquidation_5m_history(request: web.Request) -> web.Response:
         """봉별 청산 금액 시계열 -- 청산맵 캔들 위에 얹는다(2026-09-11 사용자 요청).
         게이지(/api/liquidation-5m-signal)는 현재 봉 하나만 주므로 지나간 봉은 여기서 온다.
@@ -3484,15 +3332,9 @@ def make_app() -> web.Application:
         )
         return web.json_response(payload, headers=NOCACHE)
 
-    async def api_vol_forecast(request: web.Request) -> web.Response:
-        return web.json_response(await load_vol_forecast())
-
     async def api_breakout_detector(request: web.Request) -> web.Response:
         return web.json_response(await load_breakout_detector(),
                                  headers=NOCACHE)
-
-    async def api_evr_gate(request: web.Request) -> web.Response:
-        return web.json_response(await load_evr_gate(), headers=NOCACHE)
 
     def _heatmap_read(symbol: str, cols: int, agg: int, rows_only: bool = False) -> dict[str, Any]:
         """래스터 창을 읽어 화면이 바로 그릴 수 있는 모양으로 낸다.
@@ -3752,10 +3594,6 @@ def make_app() -> web.Application:
         if asset not in COIN_CONFIG:
             raise web.HTTPBadRequest(reason="unsupported_asset")
         return asset
-
-    async def api_basis_liquidation_signal(request: web.Request) -> web.Response:
-        payload = await load_basis_liquidation_signal(_query_coin_asset(request))
-        return web.json_response(payload, headers=NOCACHE)
 
     async def api_liquidation_5m_signal(request: web.Request) -> web.Response:
         payload = await load_liquidation_5m_signal(_query_coin_asset(request))
@@ -4567,15 +4405,10 @@ def make_app() -> web.Application:
     app.router.add_get("/api/supply-profile", api_supply_profile)
     app.router.add_get("/api/supply-1s", api_supply_1s)
     app.router.add_get("/api/oi-5m", api_oi_5m)
-    app.router.add_get("/api/v-rebound-signal", api_v_rebound_signal)
-    app.router.add_get("/api/extreme-detector", api_extreme_detector)
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
-    app.router.add_get("/api/evr-gate", api_evr_gate)
     app.router.add_get("/api/gex", api_gex)
     app.router.add_get("/api/flow/heatmap", api_flow_heatmap)
-    app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/chart-markers", api_chart_markers)
-    app.router.add_get("/api/basis-liquidation-signal", api_basis_liquidation_signal)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
     app.router.add_get("/api/liquidation-direction-signal", api_liquidation_direction_signal)
     app.router.add_get("/api/liquidation-map", api_liquidation_map)
@@ -4593,7 +4426,6 @@ def make_app() -> web.Application:
     app.router.add_post("/api/push/unsubscribe", api_push_unsubscribe)
     app.router.add_get("/api/push/devices", api_push_devices)
     app.router.add_post("/api/push/test", api_push_test)
-    app.router.add_get("/api/model-indicator-history", api_model_indicator_history)
     app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/binance-account", api_binance_account)
     app.router.add_get("/api/manual-entry/preview", api_manual_entry_preview)

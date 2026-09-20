@@ -114,7 +114,6 @@ let latestLivePriceTsByAsset = {};
 let candleHistoryByAsset = {};
 let opsStatusEtag = "";
 let opsLastFetchAt = 0;
-let latestVRebound = null;
 // 2026-09-09 청산맵 신호 마커(C안 하이브리드): 증거신호는 고정 레인, 이벤트 트리거는 봉 밀착.
 let latestChartMarkers = null;
 let chartMarkersLastFetchAt = 0;
@@ -123,11 +122,8 @@ const API_CHART_MARKERS_URL = "/api/chart-markers";
 
 // 2026-09-09 극점 탐지기(표시 전용). 증거신호 8종을 피쳐로 쓴 "±60분 국소 극점일 확률" 모델.
 let latestExtreme = null;
-let extremeLastFetchAt = 0;
 const EXTREME_POLL_MS = 60000;
 // 2026-09-10 24시간 변동성 전망 -- **시간봉** 신호라 자주 받을 이유가 없다(워커 주기 300초).
-let latestVolForecast = null;
-let volForecastLastFetchAt = 0;
 const API_VOL_FORECAST_URL = "/api/vol-forecast";
 const VOL_FORECAST_POLL_MS = 120000;
 
@@ -315,11 +311,8 @@ const BREAKOUT_DETECTOR_POLL_MS = 60000;
 // 2026-09-15 E|r| 게이트 — 「앞으로 24시간 크게 움직일 자리인가」만 말한다(20자산).
 // 🔴방향은 말하지 않는다: 같은 아티팩트의 방향 분류기는 실계좌 72왕복에서 적중 47.2%(§5.36-R).
 // 워커 주기 300초라 폴링도 넉넉히 둔다.
-let latestEvrGate = null;
-let evrGateLastFetchAt = 0;
 const API_EVR_GATE_URL = "/api/evr-gate";
 const EVR_GATE_POLL_MS = 120000;
-let vReboundLastFetchAt = 0;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
 // frontend consumer had been removed.
@@ -329,10 +322,8 @@ let liquidation5mLastFetchAt = 0;
 // 베이시스 청산압박 model indicator (replaces 독성/toxicity, 2026-08-27) -- own fetch cycle, same
 // dashboard-side-computed category as latestVRebound above (scripts/live_spot_perp_basis_signal_
 // 20260827.py). RISK GAUGE, not a price-direction claim -- see MODEL_INDICATOR_DETAIL.liq_pressure.
-let latestBasisLiquidation = null;
 let latestVolLevel = null;
 let volLevelLastFetchAt = 0;
-let basisLiquidationLastFetchAt = 0;
 // Sudden-liquidation alert (2026-08-27) -- backed by tail_risk_interceptor.py's event-triggered
 // liq_burst_state.json (own file, own writer, updated the instant a new @forceOrder event lands),
 // not the once-a-minute tail_risk.duckdb path the gauge above reads. Own short poll interval since
@@ -505,13 +496,11 @@ async function setActiveSnapshotAsset(asset) {
   // Clear the 4 wired signals' cached readings + their poll-interval gates immediately -- without
   // this, the panels would keep showing the PREVIOUS coin's numbers (mislabeled as the new one)
   // until each signal's own poll interval next elapses (up to 5min for the slowest).
-  latestBasisLiquidation = null;
   latestVolLevel = null; volLevelLastFetchAt = 0;
   latestLiquidation5m = null;
   latestLiquidation5mHist = [];
   latestOi5m = null; oi5mLastFetchAt = 0;
   latestLiquidationMap = null;
-  basisLiquidationLastFetchAt = 0;
   liquidation5mLastFetchAt = 0;
   liquidationMapLastFetchAt = 0;
   lastSnapshotHistoryFetchAt = 0;
@@ -544,7 +533,6 @@ async function setActiveSnapshotAsset(asset) {
 
   await Promise.all([
     settleScope("indicators", [
-      refreshBasisLiquiditySignal(),
       refreshVolLevel(),
       refreshCoinIndicators(),
     ]),
@@ -748,33 +736,11 @@ function buildSessionHtml(sess) {
   ].join("");
 }
 
-function directionalCaution(score, th = 0.1) {
-  const x = Number(score || 0);
-  if (x >= th) return "롱 진입";
-  if (x <= -th) return "숏 진입";
-  return "중립";
-}
 
-function flowRead(micro) {
-  const x = Number(micro.nif_whale || 0);
-  if (x >= 0.2) return "큰손 매수가 강하게 들어옴";
-  if (x >= 0.05) return "큰손 매수 유입";
-  if (x <= -0.2) return "큰손 매도가 강하게 나옴";
-  if (x <= -0.05) return "큰손 매도 유입";
-  return "큰손 수급은 뚜렷하지 않음";
-}
 
 // nif_retail: same _compute_nif_and_taker() split as nif_whale above, retail (small-size) leg
 // instead of whale leg. Added 2026-08-25 after a same-day IC screen found real (non-noise) short-
 // horizon direction information here -- see MODEL_INDICATOR_DETAIL.retail_flow for the numbers.
-function retailFlowRead(micro) {
-  const x = Number(micro.nif_retail || 0);
-  if (x >= 0.2) return "리테일 매수가 강하게 들어옴";
-  if (x >= 0.05) return "리테일 매수 유입";
-  if (x <= -0.2) return "리테일 매도가 강하게 나옴";
-  if (x <= -0.05) return "리테일 매도 유입";
-  return "리테일 수급은 뚜렷하지 않음";
-}
 
 // 2026-09-11 청산 규모 칩 제거(중복 지표). 대체 칩 없이 자리를 비운다 -- 헬퍼도 함께 제거됨.
 
@@ -784,12 +750,6 @@ function retailFlowRead(micro) {
 // eth_model_indicator_volatility_framing_screen_20260825 memory). sig here is the raw
 // latestBasisLiquidation payload (server-computed, not part of classifyIndicators' micro/tail
 // inputs -- same "own fetch cycle" category as latestVRebound, see that variable's own comment).
-function basisLiquiditySubText(sig) {
-  if (!sig || !sig.warmed_up) return "웜업";
-  if (sig.direction === "short_pressure") return "숏압박↑";
-  if (sig.direction === "long_pressure") return "롱압박↑";
-  return "안정";
-}
 
 // Sudden-liquidation alert banner (2026-08-27) -- reads liq_burst_state.json (event-triggered, see
 // tail_risk_interceptor.py::_write_liq_burst_state()), a faster/more prominent sibling to the
@@ -895,23 +855,7 @@ function renderLiquidationVolumeGauge() {
 // tail_risk_interceptor.py's own 3-stage design (detector/discriminator/decay-timer) -- which side,
 // and how much of the initial energy is left. z>=2.0 threshold for the 주의 tier reuses the exact
 // value tail_risk_interceptor.py's own status_line() already uses for "급증⚠️", not a new number.
-function liqCascadeHint(tail) {
-  if (tail.hawkes_active) return "위험";
-  const zPeak = Math.max(Number(tail.z_long || 0), Number(tail.z_short || 0));
-  if (zPeak >= 2.0) return "주의";
-  return "안정";
-}
 
-function liqCascadeLiveDetail(tail) {
-  // 2026-08-25: both the active (진행중 · 에너지 잔량 ...%) and calm (평온 (Z:...)) detail lines
-  // were removed at the user's request -- the row's own badge (위험/안정) already says enough for
-  // those two states. Only the watch tier keeps a detail line, since "주의" alone doesn't explain
-  // why (a live Z number does).
-  if (tail.hawkes_active) return "";
-  const zPeak = Math.max(Number(tail.z_long || 0), Number(tail.z_short || 0));
-  if (zPeak >= 2.0) return `청산 급증 감지(Z:${zPeak.toFixed(1)}) · 캐스케이드 전환 전`;
-  return "";
-}
 
 // 안정=문제없음(녹색), 주의=경계(호박색), 위험=경계강함(적색) -- liq_cascade(리스크게이지)
 // 지표 전용. 방향성 매매신호(롱 진입/숏 진입)는 whale/retail_flow가 directionalCaution()로
@@ -937,20 +881,6 @@ function signalTone(signal) {
 // TRAIN -- eth_whale_position_vs_retail_flow_direction_ic_20260825). liq_cascade's own underlying
 // hawkes state stays wired up regardless (still gates the separate liq-burst-state alert banner)
 // -- only removing risk/whale_intent's own chip surfaces here.
-function classifyIndicators(micro, tail) {
-  micro = micro || {};
-  tail = tail || {};
-  const cascadeSignal = liqCascadeHint(tail);
-  const whaleTone = Number(micro.nif_whale || 0) > 0.05 ? "good" : (Number(micro.nif_whale || 0) < -0.05 ? "bad" : "neutral");
-  const retailFlowTone = Number(micro.nif_retail || 0) > 0.05 ? "good" : (Number(micro.nif_retail || 0) < -0.05 ? "bad" : "neutral");
-  const cascadeTone = signalTone(cascadeSignal);
-  return {
-    liq_cascade: { tone: cascadeTone, valueText: liqCascadeLiveDetail(tail), subText: cascadeSignal },
-    whale: { tone: whaleTone, valueText: flowRead(micro), subText: directionalCaution(micro.nif_whale, 0.05) },
-    retail_flow: { tone: retailFlowTone, valueText: retailFlowRead(micro), subText: directionalCaution(micro.nif_retail, 0.05) },
-    cascadeSignal, whaleTone, cascadeTone,
-  };
-}
 
 
 function niceStep(span, targetTicks = 4) {
@@ -1832,18 +1762,9 @@ function stripAxisHtml(times, timeFmtKind) {
 //   버려서, 앞으로 갈 자리처럼 보이던 숫자가 실제로는 뒤에 있다. 실측: 발동봉 레인지가 ATR 의
 //   2~3배면 38.6%, 6배 이상이면 **86.6%** 가 발동봉 종가에서 이미 도달해 있다(전체 7.65%).
 //   숫자를 숨기지 않고 **이미 지났다고 말한다** -- 라벨 목표 자체는 그 값이 맞기 때문이다.
-function tpPriceText(px, reached) {
-  return px == null ? null : `익절 ${fmtNum(px, 2)}${reached ? " (도달)" : ""}`;
-}
 
 // 익절가가 콜 방향 기준으로 이미 지났는가. direction="up" 은 반등=하락이라 현재가가 목표
 // 이하이면 도달, "down" 은 그 반대다.
-function tpAlreadyReached(vr) {
-  if (!vr || vr.tp_price == null) return false;
-  const px = Number(vr.price), tp = Number(vr.tp_price);
-  if (!Number.isFinite(px) || !Number.isFinite(tp)) return false;
-  return vr.direction === "up" ? px <= tp : px >= tp;
-}
 
 const V_REBOUND_TP_TITLE = [
   "이 신호 자신의 학습 라벨(1.5×ATR 빠른 다리) 목표가입니다 — 손절선이 없는 규약입니다.",
@@ -2091,45 +2012,25 @@ const MODEL_INDICATOR_MEANING = {
 
 const MODEL_INDICATOR_DETAIL = {
   vol_level:
-    "**앞으로 4시간(48봉) 실현변동성의 수준**을 예측합니다. 방향도 수익도 예측하지 않습니다 — "
-    + "이 값이 정하는 것은 **수량**입니다(배포 공식: 수량 = 기준수량 × 기준예측 ÷ 현재예측).\n\n"
-    + "모델은 HGB 8시드 앙상블이고 입력은 공개 kline 22열(ATR·실현변동성 3종·변동성확장비·시간대·"
-    + "거래대금·체결건수·가격기하 12열)입니다. 학습은 2025-08-31 까지이고, 그 뒤 구간은 전부 표본외입니다.\n\n"
-    + "성적(2026-09-14 재측정): 앞으로 1시간 변동성과 스피어만 **0.642**, 4시간 **0.712** — 같은 자리에서 "
-    + "단순 rv48 은 0.553 / 0.486 입니다. 2022~23 을 학습에서 도려낸 홀드아웃 판도 그 시기를 0.81 로 맞힙니다.\n\n"
-    + "🔴 **「곧 커진다」는 못 맞힙니다**(확장 AUC 0.46~0.52 = 동전). 그 질문은 청산맵 아래 변동성 전망 "
-    + "리본(24시간 지평, HAR+DVOL)이 답하고, 다만 그 리본의 우위도 24시간에서만 실재합니다.\n\n"
-    + "등급 경계는 **평소 대비 배수**입니다 — 1.39배 미만이면 안정, 1.88배 이상이면 위험. "
-    + "이 아티팩트는 기계마다 다르게 학습되므로(학습 CSV 길이가 다름) 절대값이 아니라 비율로 "
-    + "자릅니다. 상위 20%와 상위 5%가 경계입니다.\n\n"
-    + "🔴 2026-09-15 **「평소」의 기준을 최근 30일로 바꿨습니다.** 그 전에는 학습창"
-    + "(2021-12~2025-08) 예측 중앙값에 고정돼 있었는데, 2026-04 이후 ETH 가 그 「평소」보다 "
-    + "25% 조용해서(비율 중앙값 0.78) 최근 7일의 98.3%가 「안정」이었습니다. 실현변동성 비율도 "
-    + "같은 방향(0.73)이라 모델이 틀린 게 아니라 **레짐이 내려앉은 것**이고, 「지금 위험한가」는 "
-    + "본래 상대적인 질문입니다. 기준만 롤링으로 바꾼 점유율은 전구간(2022-06~) 81.2/13.5/5.3%, "
-    + "최근 30일 80.3/14.6/5.1% 입니다(창 길이 90일은 최근 구간이 다시 86.6% 안정으로 치우쳐 "
-    + "30일을 골랐습니다).\n\n"
-    + "⚠️ **수량 배수의 기준은 여전히 학습창 고정**입니다. 사이징은 «평소보다 조용하면 크게»가 "
-    + "의도라 기준이 움직이면 항상 평균 수량이 되어버립니다. 툴팁의 두 숫자는 기준이 다릅니다.\n\n"
-    + "🔴 등급 어휘는 그 전(2026-09-14)에도 한 번 고쳤습니다 — 처음 쓴 40%/80% 분위는 "
-    + "**평소(40~80%)를 「주의」라고 부르고** 시간의 40%를 주황으로 칠했습니다.",
-  evr_gate:
-    "앞으로 **24시간** 기대 변동폭(E|r|)을 예측해 **상위 10%** 봉만 켭니다(20자산). "
-    + "🔴**쓰임이 2026-09-16 에 바뀌었습니다**: 예전에는 «진입을 할지 말지»라고 적었는데, 실계좌 72왕복에서 "
-    + "**하드 차단은 전 구간에서 집니다** — 게이트가 거절하는 57건이 순양수라 $327.99 → 상위30% $203.74 / "
-    + "상위20% $144.63 / 상위10% $80.24 입니다(워커 발동선 q≥0.90 은 4건 $57.50). 원인은 명목↔백분위 상관 "
-    + "−0.40 으로 **큰 E|r| 에 이미 작게 걸고 있기** 때문입니다. 살아있는 것은 **단위당 기울기**뿐이고 그건 "
-    + "«차단»이 아니라 **«크기»** 축의 질문입니다. 그 기울기의 방향(고변동에 크게 vs 작게)은 아직 "
-    + "표본이 갈립니다 — 실원장 22일은 «크게», 무작위 진입 1,717일은 «작게»라 말합니다. 그래서 "
-    + "**아직 매매에 연결돼 있지 않습니다**. 🔴**방향은 말하지 않습니다** — 같은 아티팩트의 방향 분류기는 "
-    + "실계좌 72왕복에서 적중 47.2%(동전 아래)였고, 게이트가 고른 좋은 자리일수록 더 나빴습니다"
-    + "(−51.18bp). 그래서 워커가 그 모델을 **아예 호출하지 않습니다**. "
-    + "🔴기존 「변동성 예측」 칩과 다릅니다: 그건 «지금 얼마나 출렁이나»(4시간 수준, 사이징용)이고 "
-    + "이건 «앞으로 커지나»입니다 — ETH 488k봉 실측에서 앞으로 24시간 |수익| 적중 IC 가 "
-    + "0.279 vs 현재변동성 0.114 입니다. 게이트가 고르는 봉 중 현재 변동성 상위10%가 아닌 비율은 "
-    + "**51.5%** 입니다(2024~2026 시간봉 23,511개 재측정 · 종전 표기 69%는 5분봉·2022~ 기준이라 "
-    + "다른 숫자였습니다). 🔴같은 사이징 축인 「변동성 예측」 칩과 순위상관 +0.71 로 겹칩니다 -- "
-    + "겹치는 건 «지금 얼마나 출렁이나»이고, 이 게이트가 더 얹는 건 지평(24시간)과 20자산 OI·청산입니다.",
+    "**앞으로 4시간(48봉) 실현변동성**을 예측합니다. 방향도 수익도 예측하지 않습니다.\n\n"
+    + "화면은 두 숫자를 같이 냅니다 — **배수**(예측 ÷ 직전 4시간)와 **확대 확률**(앞 4시간이 "
+    + "직전 4시간의 1.3배 이상일 확률). 그 아래 «평소 대비 N배(등급)»는 다른 축입니다"
+    + "(최근 30일 중앙값 대비). 수량 배수는 또 다른 기준(학습창 고정)입니다 — 셋 다 분모가 다릅니다.\n\n"
+    + "모델은 HGB 8시드 앙상블, 입력은 공개 kline 22열입니다. 학습은 2025-08-31 까지이고 그 뒤는 표본외입니다.\n\n"
+    + "⭐**2026-09-21 정정 — 이 카드는 그전까지 「곧 커진다는 못 맞힙니다(AUC .46~.52 = 동전)」라고 "
+    + "적고 있었는데 그건 채점 오류였습니다.** 확장은 «비율» 질문인데 모델의 «수준»으로 채점했습니다"
+    + "(수준은 스케일을 갖고 비율은 안 갖습니다). 올바른 점수인 예측÷직전으로 재면 표본외 109,267행에서 "
+    + "**AUC 0.8237**, rv48 십분위를 통제해도 **0.7865**(10/10 셀 0.69 이상 · 분기 5/5 0.729~0.791 · "
+    + "일블록 부트스트랩 CI [0.754, 0.822]로 0.5 배제). 축소 쪽도 대칭입니다(0.8015).\n\n"
+    + "크기도 편향이 없습니다: log(실제배수) = −0.0091 + **1.0365**×log(예측배수). 예측 십분위별 "
+    + "실제 중앙값이 0.55 → 1.78 로 단조이고, P(1.3배 이상)이 2.3% → 82.5% 로 갈립니다(기저 26.8%).\n\n"
+    + "🔴**점으로 읽지 마세요.** 잔차 SD 0.34라 예측 1.5배일 때 실제는 68% 확률로 1.07~2.12배입니다. "
+    + "불확실성은 27%만 줄어듭니다.\n\n"
+    + "변동성은 4시간 안에 실제로 많이 움직입니다 — 1.3배 이상 변하는 경우가 56.5%(확대 26.8% + "
+    + "축소 29.7%), 2배 이상이 13.5%입니다. 평평한 대상이 아닙니다.\n\n"
+    + "쓰는 자리는 **수량**(배포 공식 = 기준수량 × 기준예측 ÷ 현재예측)과 **손절폭**입니다. "
+    + "«진입할지 말지»의 하드 차단은 이 저장소에서 이미 졌습니다(E|r| 게이트, 실계좌 72왕복).\n\n"
+    + "등급 경계는 평소 대비 배수입니다 — 1.39배 미만 안정, 1.88배 이상 위험(기준 = 최근 30일 중앙값).",
   breakout_detector:
     "변동성이 추세로 넘어가는 **시점**만 잡습니다. 2026-09-11 압축 게이트를 제거해 «횡보를 거친» "
     + "전환뿐 아니라 **모든** 전환을 봅니다 -- 실제로 전환의 77%는 압축을 거치지 않고 일어납니다. "
@@ -2157,47 +2058,6 @@ const MODEL_INDICATOR_DETAIL = {
     + "⚠️매매 트리거가 아닙니다. **탐지** 임계는 전 봉 후행 2016봉 분위, **경보** 임계는 압축 봉만 "
     + "모아 낸 분위입니다(둘이 다릅니다). 전역 분위를 쓰면 미래참조입니다. "
     + "표본은 ETH 5분봉 493,650개(2021-12~2026-09)이고 전환은 창별 201/176/295건입니다.",
-  extreme_detector:
-    "증거신호 8종의 발동 여부·동시발동 수에 오실레이터·체결·ATR분위·레인지 내 위치·BTC 상대 등 "
-    + "38개 피쳐를 더해, '이 봉이 ±60분 국소 극점일 확률'을 HGB 5시드로 예측합니다. "
-    + "학습은 2026-03-31 까지이고 그 뒤 161일이 표본외입니다(AUC 0.7099).\n\n"
-    + "[등급별 실측 정밀도] 강 66.0%(하루 1.46건) · 중 53.2%(1.46건) · 약 32.1%(4.29건). "
-    + "증거신호 발동봉 기저가 24.2%, 무작위 봉은 2.9%입니다. 약 등급은 기저 대비 +7.9pp 뿐이라 "
-    + "참고용으로만 보세요.\n\n"
-    + "[추세 게이트] 강한 추세 구간(12시간 수익률의 7일 롤링 분위 상하 20%)에서는 콜을 억제합니다. "
-    + "억제되는 양이 하루 4.39건입니다. 근거: 강한 상승에서의 천장 콜은 정확도 51.6%로 반반인데 "
-    + "적중하면 +10.8bp, 빗나가면 -60.7bp로 완전히 비대칭이었습니다(순 -23.8bp). 추세를 피쳐로 "
-    + "넣고 재학습해도 안 고쳐져(역추세 비중 30.8→30.2%) 하드 게이트로 막습니다.\n\n"
-    + "⚠️매매 트리거가 아닙니다. 이 등급대로 매매하면 표본외 순 +2.27bp(강+중, 2.93건/일)로 "
-    + "거래비용 여유가 없습니다. 게이트 없이는 -3.36bp 였습니다. '여기가 국소 극단일 확률'을 "
-    + "주는 것이지 '사거나 팔라'가 아닙니다.",
-  v_rebound: "[계산] **매 5분봉마다** 22개 캔들/오더플로우/모멘텀 피쳐(Tier0)+RSI를 계산해 바닥쪽·천장쪽 양방향으로 TabPFN(사전학습된 트랜스포머가 in-context로 추론하는 표형 파운데이션 모델 — 데이터셋별 재학습이 없음)에 입력하고, 둘 중 확률이 높은 쪽을 그 봉의 판정으로 씁니다. 학습 컨텍스트는 전체 봉 TRAIN 182,969건 중 무작위 18,000건에 고정(자연 라벨비율 14.6% 그대로 보존·재균형 안 함, 라이브에서도 매번 이 컨텍스트를 그대로 재사용, 최신 데이터로 자동 갱신되지 않음).\n" +
-    "[배지 유지 규칙] 롱/숏 발동 배지는 **목표(1.5×ATR 도달) 또는 60분 경과 중 먼저 오는 쪽까지 유지**됩니다 — 다른 증거신호 칩들과 같은 방식입니다. 매 봉 채점으로 바꾼 직후에는 배지가 현재 봉만 반영해 대부분 5분만 떴다 사라졌는데(사건당 평균 1.2봉), 놓치기 쉬워서 2026-09-01 지속성을 넣었습니다. **아래 막대 게이지(히스토리)도 같은 규칙으로 칠해집니다** — 신호가 뜬 봉부터 목표 도달 또는 60분 경과까지가 한 덩어리로 이어집니다(다른 증거신호 칩들과 동일). 구간이 겹치면 나중 신호가 덮어씁니다.\n" +
-    "[2026-09-01 재설계: 트리거 게이트 제거] 그전에는 9개 트리거(liquidity_sweep/taker_delta_z_climax/short_term_return_z/orthogonal_combo/smt_divergence/fib_extension_exhaustion/demarker_extreme/kalman_deviation_meanrev/local_extreme) 중 하나라도 발동한 봉만 채점했습니다. 그런데 그중 호출량의 73~76%를 공급하던 local_extreme은 정의상 '앞뒤 30분 안에서 이 봉이 최저/최고'라, 라벨이 요구하는 선행조건(반등 전까지 더 내려가지 않았을 것)을 **100% 만족하는 봉만** 골라 올리고 있었습니다 — 트리거·자산과 무관하게 라벨 발생률을 4.2~4.8배 부풀리는 기계적 얽힘이고, 모델은 그 공짜 크레딧을 성능으로 계상해왔습니다. 라이브에서 미래를 훔쳐본 건 아니지만(인과성은 정상) 성능 수치는 과대평가였습니다. 게다가 local_extreme은 30분이 지나야 확정되므로 '신호가 갑자기 과거 기록과 함께 나타나는' 표시 문제와 경제성 백테스트의 비현실적 진입시점(+9.28bp→실제로는 +4.75bp)의 원인이기도 했습니다. 그래서 게이트를 없애고 매 봉을 채점하도록 **전면 재학습**했습니다(게이트만 없애고 기존 모델을 쓰면 AUC 0.53으로 붕괴 — 실측 확인).\n" +
-    "[기준] **확률≥60%**면 '반등 콜'(이후 30분 내 종가로 ATR(직전 기준) 1.5배 이상 반등 AND 60분 전체에서 정점 대비 20% 이하만 반납), 미만이면 '미반등 콜'(반등 근거 없음 — 반대방향으로 뚜렷하게 움직인다는 뜻은 아닙니다). 이 둘 사이(애매한 경우)는 라벨 자체가 없어 **학습에서 통째로 제외** — 라벨 정의(giveback 방식) 자체는 재설계 이후에도 안 바뀌었습니다. 매 봉이 채점되므로 대부분의 봉은 '미반등'입니다(60% 기준에서 급등/급락은 봉의 약 4.6~5.0%).\n" +
-    "[배지 표시: 반등 콜만 급등/급락, 미반등 콜은 별도 '미반등'] 2026-08-31 두 차례 정정했습니다. 처음엔 '반등'/'반락'을 콜 이름 그대로 노출해서 상승 트리거 후 반등 콜처럼 실제로는 하락이 예상되는데도 '반등'이라고 표시되며 빨간색이 뜨는 경우가 있었습니다(사용자 지적) — 그래서 반등/미반등 콜을 트리거 방향과 조합해 항상 급등(초록)/급락(빨강) 중 하나로 바꿨습니다. 그런데 미반등 콜은 '반등 시도 자체가 없었다'는 뜻일 뿐 반대방향으로 결정적으로 움직였다는 근거가 아닌데도 급등/급락이라는 강한 단어를 그대로 썼던 게 다시 지적받아(사용자 지적), 지금은 **진짜 반등(V자반등) 콜만** 트리거 방향과 조합해 급등(하락 트리거 후 반등, 초록)/급락(상승 트리거 후 반등, 빨강)으로 표시하고, **미반등 콜은 트리거 방향과 무관하게 항상 '미반등'**(회색, 중립 취급)으로 따로 표시합니다 — 활동-스트립을 마우스오버했을 때 나오는 막대별 라벨도 동일한 기준(백엔드 tone: good/bad/flat/neutral)으로 구분됩니다. '반락 콜'이라는 예전 이름 자체도 마치 반대방향으로 결정적으로 움직였다는 뜻처럼 들려 실제 정의와 어긋나 '미반등 콜'로 정정했습니다.\n" +
-    "[의미] 매 봉 채점판의 VAL AUC는 **0.6942**(TabPFN 3시드, std 0.0023)입니다. 게이트가 있던 시절의 헤드라인(VAL 0.829 / OOS 0.813 / HOLDOUT 0.847)보다 낮아 보이지만, **그 수치들이 위에서 설명한 공짜 크레딧을 포함한 값**이었습니다 — 같은 모델을 얽힘 조건으로 층화해 다시 재면 내부 AUC가 0.66~0.69로 내려앉고, 매 봉 재학습판이 독립적으로 그 대역에 수렴합니다. 라벨 정의가 달라졌으므로 두 숫자의 직접 비교는 성립하지 않습니다(다른 난이도의 문제를 푼 두 모델의 AUC를 나란히 놓고 우열을 판정하면 안 된다는 이 저장소의 규칙). **0.6942는 같은 문제를 정직하게 푼 점수**로 읽으세요. 전체 방법론: docs/homer/README.md + docs/homer/v_rebound_open_issues_20260901.md.\n" +
-    "[기준선을 50%→60%로 올린 이유, 2026-09-01] 결과 라벨이 붙은 봉을 대상으로 트레일링 스톱 경제성을 재면 50% 기준은 통과하지 못했고(방향 뒤집기 대조군이 정방향을 이김), 55%부터 역전돼 60%가 가장 깨끗했습니다. precision도 60%가 가장 높습니다(0.713/0.683). 빈도 손실도 없습니다 — 화면 기준 하루 11~12건, 신호 간격 중앙값 약 1시간, 신호 없는 날 0%(50%일 때는 하루 18건으로 오히려 과했습니다). **그래서 60%는 '분류 운영점'으로는 근거가 있습니다.**\n" +
-    "[⚠️매매 신호로 쓰지 마세요 — 2026-09-01 확인] 이 칩의 경제성 수치는 전부 **결과 라벨이 붙은 봉(전체의 약 53%) 기준**입니다. 그런데 화면은 라벨 유무와 무관하게 **모든 봉**을 채점하므로, 뜨는 신호의 상당수는 결과가 '급반등'도 '횡보'도 아니었던 애매한 봉에 앉습니다. 그 전체 모집단에서 방향뒤집기 대조군을 돌려보니(ARM≥1.0 80셀 전수): VAL은 정방향 28 / 뒤집기 0으로 방향이 맞았지만, **OOS에서는 정방향 21 / 뒤집기 31로 역전**됩니다(아티팩트 무영향 구간만 보면 4 대 16). 즉 **화면에 뜨는 콜을 그대로 매매로 옮기면 최근 구간에서는 오히려 반대가 나았습니다.**\n" +
-    "[유의] 위 결과가 분류 성능을 부정하는 건 아닙니다 — OOS AUC 0.7051로 '여기가 바닥/천장이다'를 가려내는 능력 자체는 유지됩니다. 무너진 건 그 판정을 트레일링 스톱 매매로 옮겼을 때의 방향성입니다. 봇 내부 상태가 아니라 대시보드 서버가 별도로 계산하며, 실제 매매 결정(trading_bot.py)에는 연결되어 있지 않습니다. **재량 판단의 참고 재료로만 쓰세요.**",
-  liq_pressure: "[계산] basis_raw = (선물 종가 − 현물 종가) / 현물 종가 (ETHUSDT, fapi.binance.com 선물 vs api.binance.com 현물). basis_z48 = basis_raw를 직전 48봉(4시간) 평균·표준편차로 정규화한 z값.\n" +
-    "[기준] |z| 2.0 이상 위험 · 1.0~2.0 주의 · 1.0 미만 안정. 양수 극단=콘탱고(숏압박↑ 힌트), 음수 극단=백워데이션(롱압박↑ 힌트).\n" +
-    "[의미] 2026-08-20에 '베이시스가 방향(다음 봉이 오를지 내릴지)을 예측하는가'로 먼저 테스트했으나 REJECTED(구간마다 부호가 뒤집힘) — 문헌(Schmeling/Schrimpf/Todorov 'Crypto Carry' BIS WP1087; He/Manela/Ross/von Wachter arXiv:2212.06888)이 원래 예측한 축은 방향이 아니라 '미래 변동성'과 '청산 크라우딩'이었습니다. 2026-08-27 그 방향으로 재검정: 변동성 예측은 이것도 부호가 안정적이지 않아 REJECTED급이었지만, 청산 크라우딩(어느 쪽이 강제청산 더 받는가)은 실제 청산 데이터(tail_risk.duckdb)로 확인한 결과 문헌과 부호까지 정확히 일치했습니다 — 베이시스 극단(양수) 이후 1h/4h 숏청산액이 유의하게 늘고(z=+3.9~+4.4) 롱청산액은 유의하게 줄었습니다(z=-4.3~-5.7), 음수 극단은 반대.\n" +
-    "[유의] 이 청산크라우딩 검증은 **약 1개월치 탐색적 표본**입니다(청산 데이터의 신뢰 가능 구간이 2026-07-18부터 시작) — 이 저장소가 다른 모든 신호에 쓰는 VAL/OOS 3-split 재현성 검증은 아직 못 거쳤습니다. 표본이 더 쌓이면 정식 재검증 예정. 가격이 오르내린다는 뜻이 아니라 '어느 쪽 포지션이 청산 압박을 더 받을 가능성'만 알려주는 리스크 정보입니다. 봇 내부 상태가 아니라 대시보드 서버가 매 사이클 spot/perp klines를 직접 fetch해 계산합니다 — 아직 실제 매매 결정에는 연결되지 않았습니다.",
-  liq_cascade: "[계산] 최근 1분 롱/숏 청산 금액을 각각 30분 과거 평균·표준편차로 정규화한 Z값 중 큰 쪽(z_peak). z_peak이 임계값(3.5)을 넘으면 그 순간부터 '캐스케이드 진행중'으로 전환되고, 이후 시간이 지나며 지수적으로 감쇠합니다(현재 파라미터 기준 반감기 약 2~3분). 감쇠된 에너지가 임계값의 35% 아래로 내려가면 캐스케이드가 종료된 것으로 판정합니다. 2026-08-27부터(ETH만) Z값 조건에 더해 그 쪽 청산 금액이 최소 $10,000 이상이어야 전환됩니다 — 청산이 성긴(대부분 분(分)이 $0) 데이터라 조용한 구간이 이어지면 평균·표준편차 자체가 거의 0으로 붕괴해, 그 직후엔 평범한 청산 하나에도 Z값만으로는 오검출되던 문제를 막기 위함입니다.\n" +
-    "[기준] 캐스케이드 진행중이면 위험 · 아직 진행중은 아니지만 Z≥2.0(청산 급증)이면 주의 · 그 외 안정.\n" +
-    "[의미] 예측이 아니라 '지금 이 순간 실제로 캐스케이드가 벌어지고 있는가'를 가공 없이 그대로 보여주는 원시 상태값입니다. 방향(롱/숏)이나 에너지 잔량(감쇠율) 같은 세부 숫자는 화면에 안 나옵니다 — 안정/주의/위험 배지만으로 충분하다는 판단(사용자 요청으로 정리)이라, 이 지표는 '지금 캐스케이드가 있는가/없는가'만 한눈에 보는 용도입니다.",
-  liq_direction: "[계산] liq_net_z_12 = (최근 12분 롱청산 합 − 숏청산 합) / (최근 2일 총청산 롤링평균 + 1% 여유값). 양수면 롱청산 우세, 음수면 숏청산 우세.\n" +
-    "[갱신 주기] 원천 데이터(tail_risk_1m)가 1분마다 1행씩 쌓이고 서버도 60초 캐시를 걸어서, 이 값은 최소 1분에 한 번만 바뀝니다 — 수급 흐름처럼 몇 초 단위로 바뀌는 지표가 아닙니다. 그래프도 1분×48칸, 즉 최근 48분을 보여줍니다.\n" +
-    "[기준] 부호로 방향(상승압력/하락압력), 최근 이력 대비 백분위(상하위 10% 안이면 '강한', 25~75% 사이면 '약한')로 세기를 표시.\n" +
-    "[의미] 컨트래리언 해석입니다 — 롱청산이 몰리면(강제매도 소진) 상승압력, 숏청산이 몰리면(숏스퀴즈 소진) 하락압력으로 읽습니다. **2026-08-25 정식 IC 검증(37일, n>10,200)**: 5분·15분 지평은 forward-return과의 상관이 통계적으로 유의(순열검정 z=+2.96/+2.50, 전반·후반 구간 모두 같은 부호), 1시간 지평은 근소 미달(z=+1.91)이지만 상관 크기 자체는 문턱을 넘고 전반/후반 부호·크기도 일관돼(+0.041/+0.035) 표본부족(정식 문턱 56일의 66%) 때문으로 보입니다 — 방향 정보 자체는 탄탄합니다. 다만 **같은 원천 데이터로 스윕과 결합해 실제 손익을 검정한 결과(§14, 08-25)는 8개 지평 전부 비용 차감 후 순손실**이었습니다(15분 -9.19bp~2시간 -5.00bp, taker 10bp 기준) — 통계적으로 진짜인 정보와 수수료를 넘기고 이익이 나는지는 별개 질문입니다. 방향 부호는 참고할 만하지만 이 신호 하나만으로 매매를 결정할 만큼 이익을 낸다는 근거는 없습니다 — 수급 흐름과 마찬가지로 재량 판단의 한 재료로만 쓰세요.\n" +
-    "[유의] 09-15 정식 게이트(56일치 데이터, §13/§14 포함)가 이 조기 IC 결과를 대체합니다 — 지금 수치는 37일치 조기 계산입니다.",
-  whale: "[계산] 최근 5분간 체결을 건당 금액 기준으로 큰손/소액으로 나눠, 큰손 거래만 (매수금액−매도금액)/(매수금액+매도금액)으로 계산 (-1~+1).\n" +
-    "[기준] +0.2 이상 강하게 매수유입 · +0.05~0.2 매수유입 · -0.05~-0.2 매도유입 · -0.2 이하 강하게 매도.\n" +
-    "[의미] 큰 금액 단위 거래(개인 소액 매매와 구분)가 최근 5분간 실제로 어느 방향으로 체결됐는지를 보여줍니다. '포지션'이 아니라 '최근 흐름'이라는 점에 유의하세요.",
-  retail_flow: "[계산] 위 '수급 흐름'과 같은 함수·같은 5분창에서 나온 리테일(소액) 쪽 짝 — (매수금액−매도금액)/(매수금액+매도금액), 소액 체결만 (-1~+1).\n" +
-    "[기준] +0.2 이상 강하게 매수유입 · +0.05~0.2 매수유입 · -0.05~-0.2 매도유입 · -0.2 이하 강하게 매도.\n" +
-    "[의미] **2026-08-25 검증**: 1~15분 초단기 지평에서 통계적으로 유의한 방향 정보가 있습니다(5개 지평 전부 유의, 노이즈로 설명되는 수준을 훨씬 넘음). 다만 시장가로 그대로 매매하면 비용(10bp)이 총이익보다 커서 45개 지평×조합 전부 순손실이었습니다(4차례 재검증 포함, min_periods 계산결함까지 잡아낸 뒤 재확인) — 방향 정보 자체는 진짜지만 수수료를 넘길 만큼 크지는 않다는 뜻으로, 재량 판단 참고용입니다. 수급 흐름(고래)과는 상관 0.36 정도로 상당히 다른 정보라 같이 보면 유용합니다 — 둘이 같은 방향을 가리키면 좀 더 무게를 둘 근거, 엇갈리면 큰손/리테일이 다르게 움직이고 있다는 뜻입니다.",
 };
 
 // 2026-08-30 (user request): "학습 horizon을 배지로" -- each signal's own validated forward-
@@ -2214,12 +2074,6 @@ const MODEL_INDICATOR_DETAIL = {
 // its INPUT lookback, not its evaluation horizon, which is 1시간 like its 6 scorecard siblings).
 const SIGNAL_HORIZON = {
   // -- model indicators --
-  v_rebound: { text: "60분", title: "매 5분봉을 채점해 이후 60분(12봉) 안 실제 가격방향(급등/급락)을 예측 -- 확률>=60%인 '반등 콜'은 30분 내 종가로 1.5xATR 반등 후 60분 전체에서 정점 대비 20% 이하만 반납을 요구, 바닥쪽/천장쪽 중 확률 높은 방향과 조합해 급등/급락으로 표시(2026-09-01 트리거 게이트 제거 + 기준선 50%->60% 상향)" },
-  liq_pressure: { text: "1시간·4시간", title: "베이시스 극단 이후 1시간·4시간 시점의 강제청산 물량(방향)을 예측 -- 약 1개월 탐색적 표본, 이 저장소 표준 VAL/OOS 3-split 재현 전" },
-  liq_cascade: { text: "상태", title: "예측이 아니라 '지금 캐스케이드가 진행 중인가'를 보여주는 현재 상태값(반감기 약 2~3분으로 감쇠)" },
-  whale: { text: "상태", title: "최근 5분간 큰손 체결 순유입 방향 -- 고정 예측 시간창 없는 현재 흐름 지표(방향-IC 검정 4개 지평 전부 무정보)" },
-  retail_flow: { text: "상태", title: "최근 5분간 리테일 체결 순유입 방향 -- 1~15분 지평 방향-IC는 유의했으나 수수료 반영 손익은 전부 순손실, 고정 예측 시간창은 없음" },
-  evr_gate: { text: "게이트 = 24시간", title: "앞으로 24시간의 기대 변동폭 E|r| 을 HGB 로 예측해 인과 확장창 상위 10% 만 켠다(20자산). 예측이지 인지가 아니다 — 추세 전환 탐지기(즉시 인지)와 반대 축이다. 🔴방향 없음." },
   breakout_detector: { text: "탐지 = 즉시", title: "예측이 아니라 즉시 인지다 -- 거래대금·체결속도 z288 이 **둘 다** 후행 q90 을 넘으면 켜진다. 2026-09-11 압축 게이트를 제거해 전환 사건 포착이 26.7% -> 92.0%(OOS, 176건 중 162건)로 오르고 발동은 33.9 -> 25.1회/일 로 줄었다. 발동 2,085회 중 813회가 사건 창 안이다(정밀도 39.0%)." },
   // 2026-09-11 경보기(예고 모델). 옛 «경보 2시간» 은 자명한 대리 타깃 값이라 교체했다.
   breakout_prewarn: { text: "예고 = 30분", title: "앞으로 30분 이내에 **탐지기가 발동할** 확률이다(HGB 5시드 동결 앙상블, 33피쳐). 커버리지 10%(하루 약 28.8회)에서 표본외 정밀도 78.5%, 기저 22.9% -- lift 3.43x. 임계는 확률의 후행 2016봉 분위 q90 이라 인과적이다. ⚠️«탐지기가 켜진다»이지 «큰 이동이 온다»가 아니다 -- 탐지기 자체 정밀도가 39.0% 라 그 위로 못 간다." },
@@ -2240,17 +2094,13 @@ function horizonBadgeHtml(key, progress, extraTitle) {
 // Snapshot tab "12신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
 // index.html) can be updated from the same per-tick data as the full snapModelIndicatorList below.
 const MODEL_CHIP_IDS = {
-  v_rebound: "modelChipVRebound",
-  extreme_detector: "modelChipExtreme",   // 2026-09-09 극점 탐지기
-  // 🔴칩은 index.html 의 고정 요소다. 목록(snapSpecializedSignalList)에 항목을 넣어도
-  // 여기에 id 를 등록하고 index.html 에 칩 div 를 만들지 않으면 상단 요약엔 안 나온다.
-  breakout_prewarn: "modelChipBreakoutPrewarn",     // 2026-09-11 추세 전환 경보기
-  breakout_detector: "modelChipBreakoutDetector",   // 2026-09-11 추세 전환 탐지기
-  liq_pressure: "modelChipBasisLiq",
-  liq_cascade: "modelChipLiqCascade",
+  // 🔴칩은 index.html 의 고정 요소다. 목록에 항목을 넣어도 여기에 id 를 등록하고
+  // index.html 에 칩 div 를 만들지 않으면 상단 요약엔 안 나온다.
+  // 2026-09-21 정리: 통제 검정을 통과한 것만 남겼다 -- docs/experiments/
+  // eth_dashboard_signal_cull_and_vol_expansion_rescore_20260921.md
   vol_level: "modelChipVolLevel",
-  whale: "modelChipWhale",
-  retail_flow: "modelChipRetailFlow",
+  breakout_prewarn: "modelChipBreakoutPrewarn",
+  breakout_detector: "modelChipBreakoutDetector",
 };
 // whale/retail_flow/liq_pressure/v_rebound are directional (tone:
 // good=롱 쪽/bad=숏 쪽/neutral=무신호); liq_cascade is risk-level (tone: good=안정/warn=주의/
@@ -2269,9 +2119,8 @@ const MODEL_CHIP_IDS = {
 // 2026-08-30 user request: risk(꼬리 리스크)/whale_intent(고래 포지션) removed from MODEL_CHIP_IDS
 // entirely (tested null / flagged non-independent, see classifyIndicators()'s own comment) -- no
 // longer members of either family here.
-const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([
-  "whale", "retail_flow", "liq_pressure", "v_rebound",
-]);
+// 2026-09-21 정리 후 남은 칩(vol_level · breakout_*)은 전부 **무방향**이다 -- 비워 둔다.
+const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([]);
 
 // ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
 //   · whale / retail_flow / liq_cascade -- trading_bot.py의 dashboard_state(봇은 ETH만 돌린다)
@@ -2297,57 +2146,6 @@ function ethOnlyIndicator(item) {
 // 넣으면 (a) 칩 문구가 ETH와 달라 보이고 (b) 의미 설명이 사전에 안 걸려 사라진다.
 // 그래서 subText/valueText/톤스트립을 전부 ETH와 같은 함수·같은 모양으로 만든다.
 // 숫자와 경과시간은 `liveText`(ETH의 청산캐스케이드가 쓰는 자리)와 툴팁으로 뺀다.
-function coinIndicator(item, kind) {
-  if (activeSnapshotAsset === "eth") return item;
-  const d = latestCoinIndicators[activeSnapshotAsset];
-  if (!d || !d.warmed_up) return ethOnlyIndicator(item);
-  const COIN = activeSnapshotAsset.toUpperCase();
-  const coinTag = `= ${COIN} 실시간`;
-  const ageText = (age) => (age == null ? "" : age < 1 ? "방금" : `${Math.round(age)}분 전`);
-
-  if (kind === "whale" || kind === "retail_flow") {
-    const mi = d.micro || {};
-    const isWhale = kind === "whale";
-    const v = isWhale ? mi.nif_whale : mi.nif_retail;
-    const age = isWhale ? mi.nif_whale_age_min : mi.nif_retail_age_min;
-    const look = mi.lookback_min || 15;
-    const hist = (isWhale ? mi.whale_history : mi.retail_history) || [];
-    const times = (mi.history_ts || []).map((t) => new Date(t).getTime());
-    if (v == null) {
-      return { ...item, tone: "neutral", history: hist, times, proba: null,
-               subText: "중립", liveText: `최근 ${look}분 내 값 없음`, derivedTag: coinTag,
-               derivedTitle: `${COIN} 전용 실시간 수집기(microstructure_1m)에서 직접 읽습니다`
-                 + (isWhale ? " -- 고래 흐름은 대형 체결이 있는 분에만 계산됩니다." : ".") };
-    }
-    // ⭐ETH와 **같은 함수**로 문구를 만든다(어휘 일치 -> 칩·의미사전이 ETH와 동일하게 동작).
-    const fake = isWhale ? { nif_whale: v } : { nif_retail: v };
-    return { ...item, tone: v > 0.05 ? "good" : v < -0.05 ? "bad" : "neutral",
-             history: hist, times, proba: null,
-             subText: directionalCaution(v, 0.05),
-             liveText: `${isWhale ? flowRead(fake) : retailFlowRead(fake)} (${v.toFixed(3)} · ${ageText(age)})`,
-             derivedTag: coinTag,
-             derivedTitle: `${COIN} 전용 실시간 수집기(microstructure_1m)에서 직접 읽은 값입니다`
-               + `(ETH처럼 봇 내부 상태가 아닙니다). 최근 ${look}분 안의 마지막 값을 쓰고 몇 분 전인지 함께 표시합니다.` };
-  }
-
-  if (kind === "liq_cascade") {
-    const t = d.tail;
-    if (!t) return ethOnlyIndicator(item);
-    const z = Math.max(Number(t.z_long || 0), Number(t.z_short || 0));
-    // ⭐ETH의 liqCascadeHint와 **같은 어휘**("위험"/"주의"/"안정"). 단 hawkes가 없으므로
-    //   "위험"은 나올 수 없다 -- 그 사실은 툴팁에 적는다(숨기지 않는다).
-    const state = z >= 2.0 ? "주의" : "안정";
-    return { ...item, tone: z >= 2.0 ? "warn" : "good",
-             history: t.cascade_history || [],
-             times: (t.history_ts || []).map((x) => new Date(x).getTime()),
-             proba: null, subText: state,
-             liveText: z >= 2.0 ? `청산 급증 감지(Z:${z.toFixed(1)}) · 캐스케이드 전환 전` : "",
-             derivedTag: coinTag,
-             derivedTitle: `${COIN} 전용 tail-risk 수집기의 Z값입니다. `
-               + `⚠️봇 내부의 hawkes 판정은 이 코인에 없어 "위험" 단계는 뜨지 않고 Z 기반 "주의"까지만 판정됩니다.` };
-  }
-  return ethOnlyIndicator(item);
-}
 
 // 2026-09-06 (사용자 신고 "V자 급등락의 미발동만 흰색"): 서버가 주는 V자 톤 **"flat"**(방향 없음)은
 // CSS에 대응 규칙이 없다(.meter-state / .signal-chip / .ops-health-row 전부 good·bad·warn·neutral 뿐).
@@ -2368,6 +2166,37 @@ function volLevelTitle(v) {
   // 두 숫자가 다른 기준을 쓰므로 말도 다르게 한다(고정으로 떨어졌으면 그대로 말한다).
   const norm = v.ref_source === "recent" ? `최근 ${v.ref_days || 30}일` : "학습창(기준 갱신 실패)";
   return `${base} 지금 예상 변동폭은 ${norm} 평소의 ${v.ratio.toFixed(2)}배, 같은 위험 기준 수량 배수는 ${v.qty_mult.toFixed(2)}배(이쪽 기준은 학습창 고정).`;
+}
+
+// 2026-09-21 ⭐**배수 + 확률**. 화면이 오래 «수준»만 띄우면서 이 모델의 가장 좋은 출력을 버리고
+// 있었다 -- 「확장은 못 맞힌다(AUC .46~.52)」는 **채점 오류**였다(비율 질문을 수준으로 채점).
+// pred/rv48 로 재면 OOS AUC 0.8237, rv48 십분위 통제 후 0.7865(10/10 셀 · 분기 5/5 ·
+// 일블록 CI [0.754,0.822]). 보정 기울기 1.0365 라 크기도 편향이 없다.
+// 🔴점으로 읽히면 안 되므로 **배수와 확률을 항상 같이** 낸다(예측 1.5배의 실제 68% 구간이
+// [1.07,2.12]배다). 그래서 subText 가 "1.36배 · 확대 56%" 형태다.
+function volLevelIndicatorItem() {
+  const v = latestVolLevel;
+  const base = {
+    key: "vol_level", label: "변동성 수준 (4시간)",
+    history: toneHistory.vol_level, times: toneHistoryTimes.vol_level,
+    derivedTag: "= 사이징 모델", derivedTitle: volLevelTitle(v),
+  };
+  if (!v || !v.available) return { ...base, tone: "neutral", subText: (v && v.grade) || "웜업" };
+  const hasExp = Number.isFinite(v.mult) && Number.isFinite(v.p_expand);
+  if (!hasExp) return { ...base, tone: v.tone || "neutral", subText: v.grade || "웜업" };
+  return {
+    ...base,
+    tone: v.tone || "neutral",
+    // 등급(평소 대비)보다 **확장 읽기**를 앞에 둔다 -- 그쪽이 통제 검정을 통과한 축이다.
+    subText: `${v.mult.toFixed(2)}배 · 확대 ${Math.round(v.p_expand * 100)}%`,
+    liveText: `평소 대비 ${v.ratio.toFixed(2)}배 (${v.grade}) · 수량 배수 ${v.qty_mult.toFixed(2)}배`,
+    probaSlot: true, proba: v.p_expand, meterNote: "확대 확률",
+    meterNoteTitle: `«앞으로 4시간 실현변동성이 직전 4시간의 ${v.expand_k || 1.3}배 이상일 확률».`
+      + ` 배수(예측÷직전) ${v.mult.toFixed(2)} 를 TRAIN 적합 로지스틱으로 옮긴 값이다`
+      + ` -- OOS 109,267행 AUC 0.8237 · Brier 0.1388(상수 0.1961) · 십분위 보정오차 ≤4pp.`
+      + ` 🔴점이 아니라 중심값이다: 예측 1.5배일 때 실제는 68% 확률로 1.07~2.12배다.`
+      + ` rv48 십분위를 통제해도 AUC 0.7865(10/10 셀 0.69+ · 분기 5/5 · 일블록 CI [0.754,0.822]).`,
+  };
 }
 
 function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { forceMeter = false } = {}) {
@@ -2640,33 +2469,7 @@ async function refreshChartMarkers() {
   }
 }
 
-async function refreshExtremeDetector() {
-  const now = Date.now();
-  if (now - extremeLastFetchAt < EXTREME_POLL_MS) return;
-  extremeLastFetchAt = now;
-  try {
-    const res = await fetch(API_EXTREME_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`extreme detector ${res.status}`);
-    latestExtreme = await res.json();
-  } catch (error) {
-    console.error("Extreme detector fetch error:", error);
-    latestExtreme = { error: "fetch_failed" };
-  }
-}
 
-async function refreshVolForecast() {
-  const now = Date.now();
-  if (now - volForecastLastFetchAt < VOL_FORECAST_POLL_MS) return;
-  volForecastLastFetchAt = now;
-  try {
-    const res = await fetch(API_VOL_FORECAST_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`vol forecast ${res.status}`);
-    latestVolForecast = await res.json();
-  } catch (error) {
-    console.error("Vol forecast fetch error:", error);
-    latestVolForecast = { error: "fetch_failed" };
-  }
-}
 
 // ── 24시간 변동성 전망 (2026-09-10, 2026-09-11 칩 -> 차트 리본) ────────────────────
 // 규약: 색 §2 위험/주의=warn(주황) · 안정도 같은 주황을 옅게 -- **5번째 색을 만들지 않는다**.
@@ -2677,98 +2480,11 @@ async function refreshVolForecast() {
 // 풋프린트(1시간 창)에서는 값이 하나다 -- 그림으로 얻는 게 없다. 숫자 한 줄이 정보량이 같다.
 // 🔴버리지 않는 이유: 09-14 정면비교에서 셋 중 **유일하게 «확장»을 본다**(현재변동성과 ρ
 //   −0.817). 게이트와도 겹치지 않는다(상관 −0.389 · 상위10% 겹침 0.7%).
-function volForecastIndicatorItem() {
-  const p = latestVolForecast;
-  const base = { key: "vol_forecast", label: "변동성 확장 (24시간)",
-                 derivedTag: "= 대시보드 자체계산",
-                 derivedTitle: "봇 내부 상태가 아니라 전용 워커가 HAR-RV + Deribit DVOL 로 계산합니다. "
-                   + "«오늘 성격이 바뀌나»만 말합니다 — 방향도 수익도 예측하지 않습니다." };
-  if (!p || p.error || !p.available) {
-    return { ...base, tone: "neutral",
-             subText: !p ? "웜업" : (p.error ? "오류" : "데이터 없음"), history: [], times: [] };
-  }
-  return { ...base, probaSlot: true,
-    tone: p.grade === "위험" ? "bad" : p.grade === "주의" ? "warn" : "neutral",
-    subText: p.grade || "안정",
-    proba: p.proba != null ? Number(p.proba) : null,
-    // 지평이 24시간이라는 걸 미터 옆에 상시로 적는다 -- 5분 결정에 그대로 쓰면 안 되는 값이다.
-    meterNote: "24시간 지평",
-    meterNoteTitle: "1시간 격자·24시간 지평입니다. 5분 결정에 직접 쓰지 마세요 — 09-14 정면비교에서 "
-      + "1시간 지평 AUC 는 «현재 변동성이 낮은가»(0.611)와 동률(0.612)이고 4시간은 더 나빴습니다(0.593 vs 0.720). "
-      + "우위는 24시간에서만 실재합니다(0.812 vs 0.625).",
-    stateTitle: volForecastRibbonTitle(0),
-    history: p.history || [], times: p.times || [] };
-}
 
-function volForecastRibbonTitle(nBars) {
-  const p = latestVolForecast;
-  if (!p || p.error || !p.available) return "변동성 전망: 웜업 중이거나 갱신 실패";
-  const prec = (p.precision_holdout || {})[p.grade];
-  const auc = p.auc || {};
-  // 칩이 없어졌어도 쉬운 말 설명은 남긴다 -- MODEL_INDICATOR_MEANING 은 그대로 쓴다(키=등급).
-  const plain = (MODEL_INDICATOR_MEANING.vol_forecast || {})[p.grade] || "";
-  return [
-    `변동성 전망 ${p.grade} · 다음 ${p.horizon_hours}시간 변동성이 ${p.expand_k}배 이상 확장될 확률 ${(Number(p.proba) * 100).toFixed(1)}%`,
-    `내재변동성(DVOL) ${p.dvol} · 실현변동성 24h ${p.rv24} · 격차(VRP) ${p.vrp > 0 ? "+" : ""}${p.vrp}`,
-    `예측 실현변동성 ${p.rv_fwd_pred}`,
-    prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (기저 ${(Number(p.base_rate_holdout) * 100).toFixed(1)}%)` : "",
-    `AUC 학습 ${auc.TRAIN} · 표본외 ${auc.OOS} · 봉인 홀드아웃 ${auc.HOLDOUT}`,
-    "시간봉 신호입니다 — 값 하나가 5분봉 12개를 덮습니다. 그래서 차트 줄이 아니라 카드입니다",
-    plain,
-    "⚠️변동성만 예측합니다 — 방향도 수익도 예측하지 않습니다. 크기·손절폭·관망 판단용입니다",
-  ].filter(Boolean).join("\n");
-}
 
 // ── 극점 탐지기 (2026-09-09) ────────────────────────────────────────────────────────
 // 규약: 라벨 §1(측면 어휘) · 색 §2(바닥=good/천장=bad/그 외 neutral) · 제목 밑 데이터 줄 없음 §4
 // ⭐5번째 색을 만들지 않는다 -- 억제/미발동은 전부 neutral 이다.
-function extremeDetectorIndicatorItem() {
-  const p = latestExtreme;
-  const base = { key: "extreme_detector", label: "극점 탐지기", probaSlot: true,
-                 derivedTag: "= 대시보드 자체계산",
-                 derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 동결 모델로 매 봉 계산합니다(워커). "
-                   + "⭐2026-09-16: 증거신호 의존을 제거했습니다 — 피쳐 9열과 «증거신호가 발동한 봉만 "
-                   + "채점한다»는 모집단 제약을 둘 다 뺐습니다. 콜 빈도를 고정한 채 정밀도가 "
-                   + "강 66.0→69.4% · 중 53.2→66.1% · 약 32.1→54.3% 로 올랐습니다(워크포워드 "
-                   + "2창×시드 2셋 4/4 재현). 제약이 후보 봉을 12배 줄여 더 좋은 자리를 고를 기회를 "
-                   + "뺏고 있었습니다. "
-                   + "2026-09-10 v2 의 손실가중 이중조건은 이 모집단에서 강등이 235건 중 3건(정밀도 "
-                   + "69.4%→69.4%)으로 무력해져 **내렸습니다** — 부모가 이미 그 일을 합니다. "
-                   + "매매에는 연결돼 있지 않습니다." };
-  if (!p || p.error || !p.available) {
-    return { ...base, tone: "neutral", subText: p && p.error ? "오류" : "웜업",
-             proba: null, history: [], times: [] };
-  }
-  const gradeText = p.grade ? `${p.grade} 등급` : (p.gated_now ? "추세구간 억제" : null);
-  const prec = (p.precision || {})[p.grade];
-  const stateTitle = [
-    p.grade ? `${p.grade} 등급 · 확률 ${(Number(p.proba) * 100).toFixed(1)}%` : "등급 없음",
-    prec != null ? `이 등급의 표본외 실측 정밀도 ${(prec * 100).toFixed(1)}% (하루 ${(p.per_day || {})[p.grade]}건)` : "",
-    p.signals ? `발동 신호: ${p.signals}` : "",
-    p.gated_now ? `강한 추세 구간이라 억제 중 (추세분위 ${p.trend_q})` : "",
-    // 2026-09-16: 모집단이 «발동 봉»에서 «전체 봉»으로 바뀌어 기저가 곧 무작위 봉 값이다.
-    `기저(무작위 봉) ${(Number(p.base_rate) * 100).toFixed(1)}% · AUC ${p.auc_oos}`,
-    // 2026-09-10 v2 이중조건 -- 켜져 있다는 사실과 강등 이유를 화면이 말해야 한다.
-    p.costw_rule_id
-      ? (p.proba_costw != null
-          ? `이중조건: 극점 ${(Number(p.proba) * 100).toFixed(1)}% · 손실가중 ${(Number(p.proba_costw) * 100).toFixed(1)}%`
-            + (p.costw_cut != null ? ` (강 기준 ${(Number(p.costw_cut) * 100).toFixed(1)}%)` : "")
-          : "이중조건 적용 중 — `강`은 두 헤드가 모두 동의할 때만 줍니다")
-      : "",
-    p.dual_demoted
-      ? "↓ 극점 확률은 `강`이지만 손실가중 헤드가 «빗나가면 비싼 자리»로 봐서 `약`으로 내렸습니다"
-      : "",
-    "⚠️매매 신호가 아니라 위치 정보입니다 — 이 등급으로 매매하면 비용 여유가 없습니다",
-  ].filter(Boolean).join("\n");
-  return { ...base,
-    tone: p.tone === "good" || p.tone === "bad" ? p.tone : "neutral",
-    subText: p.subText || "미발동",
-    proba: p.proba != null ? Number(p.proba) : null,
-    meterNote: gradeText, meterNoteTitle: prec != null
-      ? `표본외 실측 정밀도 ${(prec * 100).toFixed(1)}%` : "강한 추세 구간에서는 콜을 내지 않습니다",
-    stateTitle,
-    history: p.history || [], times: p.times || [] };
-}
 
 // 2026-09-11 추세 전환 **탐지기** — 발동 여부 한 축. 확률이 없으므로 게이지 없음(규약 §3).
 // 2026-09-15 **E|r| 게이트** — 「언제」만 말한다. 방향 축이 아예 없는 카드다.
@@ -2776,53 +2492,6 @@ function extremeDetectorIndicatorItem() {
 //   (동전 아래)이고 게이트가 고른 좋은 자리일수록 더 나빴다(−51.18bp · 호메로스 §5.36-R).
 const GATE_GAUGE_NOTE = "게이지는 20자산 중 발동 비율입니다 — 확률이 아닙니다."
   + " 게이트 자체가 봉의 10% 만 켜도록 맞춰져 있습니다.";
-function evrGateIndicatorItem() {
-  const p = latestEvrGate;
-  const base = { key: "evr_gate", label: "변동폭 게이트 (24시간)",
-                 derivedTag: "= 대시보드 자체계산",
-                 derivedTitle: "봇 내부 상태가 아니라 전용 워커가 20자산 공개 데이터로 계산합니다. "
-                   + "방향은 예측하지 않습니다 — 「크게 움직일 자리인가」만 말합니다. 매매에 연결돼 있지 않습니다." };
-  if (!p || p.error || !p.available) {
-    const sub = !p ? "웜업"
-      : (p.error === "worker_fetch_failed" || p.error === "fetch_failed" ? "오류" : "데이터 없음");
-    return { ...base, tone: "neutral", subText: sub, history: [], times: [] };
-  }
-  const nA = Number(p.n_assets) || 0;
-  const nF = Number(p.n_fired) || 0;
-  const fired = Array.isArray(p.fired) ? p.fired : [];
-  const stateTitle = [
-    nF ? `${nF}종이 기대 변동폭 상위 10% 를 넘었습니다` : "20자산 전부 임계 아래입니다",
-    ...fired.slice(0, 6).map((x) => `▲ ${x.asset} 기대 ${x.evr_bp}bp / 임계 ${x.thr_bp}bp (${x.ratio}배)`),
-    fired.length > 6 ? `… 외 ${fired.length - 6}종` : "",
-    // 🔴2026-09-16: 여기도 「진입을 할지 말지」로 적혀 있었다 -- MEANING/DETAIL 만 고치고 이 툴팁을
-    //   빠뜨려 배포 후 서빙 바이트 확인에서 잡혔다. 같은 주장이 세 군데에 있었다.
-    "쓰는 자리는 «크기»입니다 — 같은 노출 안에서 이쪽에 조금 더 실으라는 뜻입니다.",
-    "🔴«미발동이면 진입 금지»로 쓰지 마세요 — 실계좌 72왕복에서 하드 차단은 집니다($327.99 → 상위10% $80.24).",
-    "🔴방향은 말하지 않습니다 — 방향 분류기는 실계좌 72왕복에서 적중 47.2% 였습니다(호메로스 §5.36-R).",
-    "🔴아직 매매에 연결돼 있지 않습니다. 기울기 방향은 표본이 갈립니다(실원장 22일 vs 무작위 1,717일).",
-    GATE_GAUGE_NOTE,
-  ].filter(Boolean).join("\n");
-  return { ...base, probaSlot: true,
-    tone: nF > 0 ? "bad" : "neutral",
-    subText: p.subText || (nF > 0 ? "발동" : "미발동"),
-    // ⚠️이 게이지는 **확률이 아니라 발동 비율**이다 -- 규약 §3 예외라 툴팁에 성격을 밝힌다.
-    proba: nA > 0 ? nF / nA : 0,
-    // 2026-09-16 사용자 신고 "너비가 다 깨졌어": «20자산 중 1종 · 최대 ARB 1.26배» 가
-    //   meterNote 로 **미터 칸**에 들어가 오른쪽 열을 밀어냈다. 그 칸은 상태·게이지 두 줄만
-    //   담는 자리다(다른 칩의 meterNote 는 「탐지 2/3」처럼 짧다). 숫자 나열은 왼쪽 설명
-    //   줄(liveText)로 옮긴다 -- 거기가 본문 폭을 그대로 쓰는 자리다.
-    meterNote: null,
-    liveText: p.meterNote || null,
-    liveTitle: GATE_GAUGE_NOTE,
-    stateTitle,
-    // 🔴2026-09-16 «발동인데 게이지가 회색 칸으로 칸칸이»(사용자). /api/evr-gate 의 history 는
-    //   톤 문자열이 아니라 **객체 배열**({ts, n_fired, eth_fired, eth_ratio, tone})이다.
-    //   toneStripSvg 는 문자열을 기대하므로 (a) `tone === "bad"` 비교가 전부 빗나가 기본
-    //   회색으로 칠해지고 (b) 이어붙이기 판정이 객체 동일성이라 **한 칸도 안 합쳐진다**.
-    //   둘이 겹쳐 「회색 칸이 칸칸이」가 됐다. 여기서 풀어서 넘긴다.
-    //   ⭐덤으로 times 가 생긴다 -- API 에 `times` 키는 없고 시각은 각 항목의 ts 에 있었다.
-    ...toneStripFromHistory(p.history) };
-}
 
 // /api/evr-gate 처럼 «톤이 박힌 객체»로 오는 이력을 스트립이 먹는 모양으로 바꾼다.
 function toneStripFromHistory(rows) {
@@ -2909,19 +2578,6 @@ function breakoutPrewarnIndicatorItem() {
     history: w.history || [], times: w.times || [] };
 }
 
-async function refreshEvrGate() {
-  const now = Date.now();
-  if (now - evrGateLastFetchAt < EVR_GATE_POLL_MS) return;
-  evrGateLastFetchAt = now;
-  try {
-    const res = await fetch(API_EVR_GATE_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`evr gate ${res.status}`);
-    latestEvrGate = await res.json();
-  } catch (error) {
-    console.error("E|r| gate fetch error:", error);
-    latestEvrGate = { error: "fetch_failed" };
-  }
-}
 
 async function refreshBreakoutDetector() {
   const now = Date.now();
@@ -2937,19 +2593,6 @@ async function refreshBreakoutDetector() {
   }
 }
 
-async function refreshVReboundSignal() {
-  const now = Date.now();
-  if (now - vReboundLastFetchAt < V_REBOUND_POLL_MS) return;
-  vReboundLastFetchAt = now;
-  try {
-    const res = await fetch(API_V_REBOUND_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`v-rebound signal ${res.status}`);
-    latestVRebound = await res.json();
-  } catch (error) {
-    console.error("V-rebound signal fetch error:", error);
-    latestVRebound = { warmed_up: false, error: "fetch_failed" };
-  }
-}
 
 async function refreshLiquidation5mSignal() {
   const now = Date.now();
@@ -2995,22 +2638,6 @@ async function refreshVolLevel() {
   pushToneHistory("vol_level", (latestVolLevel && latestVolLevel.tone) || "neutral");
 }
 
-async function refreshBasisLiquiditySignal() {
-  const now = Date.now();
-  if (now - basisLiquidationLastFetchAt < BASIS_LIQUIDATION_POLL_MS) return;
-  basisLiquidationLastFetchAt = now;
-  const asset = activeSnapshotAsset;          // 늦게 온 응답 버리기 -- 위 5m 신호와 같은 이유
-  try {
-    const res = await fetch(`${API_BASIS_LIQUIDATION_URL}?asset=${asset}`, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`basis liquidation signal ${res.status}`);
-    const j = await res.json();
-    if (asset !== activeSnapshotAsset) return;
-    latestBasisLiquidation = j;
-  } catch (error) {
-    console.error("Basis liquidation signal fetch error:", error);
-    if (asset === activeSnapshotAsset) latestBasisLiquidation = { warmed_up: false, error: "fetch_failed" };
-  }
-}
 
 async function refreshLiqBurstState() {
   const now = Date.now();
@@ -3215,14 +2842,9 @@ function setupPageTabs() {
     } else if (target === "ops") {
       opsLastFetchAt = 0; refreshOpsStatus();
     } else if (target === "snapshot") {
-      vReboundLastFetchAt = 0; refreshVReboundSignal();
-      extremeLastFetchAt = 0; refreshExtremeDetector();
       breakoutDetectorLastFetchAt = 0; refreshBreakoutDetector();
-      evrGateLastFetchAt = 0; refreshEvrGate();
-      volForecastLastFetchAt = 0; refreshVolForecast();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
-      basisLiquidationLastFetchAt = 0; refreshBasisLiquiditySignal();
       liqBurstStateLastFetchAt = 0; refreshLiqBurstState();
       liquidationMapLastFetchAt = 0; refreshLiquidationMap();
       regimeWide24LastFetchAt = 0; refreshRegimeWide24();
@@ -5347,9 +4969,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 방향 없는 두 신호의 구간 줄. 이름을 왼쪽 여백에 적는 것까지 레짐 리본과 같은 규약이다.
   const TREND_ROW_Y = h - mb + 49;
   // 변동성 값은 이제 카드가 보여준다. 차트에는 **툴팁용 지도**만 남긴다(리본은 내렸다).
-  const volMapOn = isSnapshotChart && activeSnapshotAsset === "eth"
-    && latestVolForecast && latestVolForecast.available
-    && Array.isArray(latestVolForecast.times) && latestVolForecast.times.length > 0;
+  // 2026-09-21 변동성 전망(24h) 제거 -- 워커 중지로 데이터가 끊긴다. 그리기 분기는 그대로
+  // 두고 지도만 비운다(diff 를 좁힌다).
+  const volMapOn = false;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
@@ -5639,7 +5261,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 다른 값을 말하는 날이 온다(이 파일에서 반복된 실패).
   const volByHour = new Map();
   if (volMapOn) {
-    const vf = latestVolForecast;
+    const vf = null;   // 2026-09-21 제거 (volMapOn=false 라 이 분기는 안 돈다)
     const grades = Array.isArray(vf.grades) ? vf.grades : [];
     const probas = Array.isArray(vf.probas) ? vf.probas : [];
     (vf.times || []).forEach((iso, i) => {
@@ -6802,71 +6424,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   setH("topSession", sessionHtml);
   setT("topClock", fmtNowClock());
   
-  // classifyIndicators() is the single source of truth for these thresholds (also reused by
-  // seedModelIndicatorHistory() against server-provided history, so there is only one copy of
-  // this logic to keep correct, not a live copy and a history copy). The 3 model indicators only
-  // render on the Snapshot tab now (renderModelIndicatorList below) -- no Live-tab cards consume
-  // ci/toneHistory anymore.
-  const ci = classifyIndicators(micro, tail);
-  const { whaleTone, cascadeTone } = ci;
-  // toneHistory feeds the Snapshot tab's activity-strip rows (renderModelIndicatorList below).
-  pushToneHistory("whale", whaleTone);
-  pushToneHistory("retail_flow", ci.retail_flow.tone);
-  pushToneHistory("liq_cascade", cascadeTone);
-
-  // V자 급등락 (2026-08-29, TabPFN Tier0+rsi 모델, 2026-08-30 "유동성스윕 반등예측"에서 개명,
-  // 2026-08-31 "V자 반등락"에서 다시 "V자 급등락"으로 개명 -- 사용자 요청) -- fetched
-  // separately by refreshVReboundSignal(), "own fetch cycle, dashboard-side compute" category (own
-  // klines fetch + frozen TabPFN context, not part of ci/toneHistory). Fires on EVERY liquidity_sweep
-  // (14,259건, 2024-01~) -- frequent, large validated sample. tone is neutral (no recent sweep) or,
-  // once one fires, good/bad -- 2026-08-29 user request: the backend now resolves the swept side +
-  // rebound-vs-continuation call into a real predicted price direction (_predicted_tone()
-  // server-side), replacing the old always-"warn" reading.
-  // 2026-08-31 user request: "반등"/"반락"이 스윕 방향 대비 반전 여부(call)를 가리키는 말이라 실제
-  // 예상 가격방향(tone/색깔)과 어긋나는 경우가 있었음(예: 상승스윕 후 반등=call은 "반등"이지만
-  // 실제 방향은 하락이라 빨간색 -- 사용자가 "반등인데 왜 빨간색?" 지적). call 대신 tone에서 직접
-  // 파생시켜 "급등"/"급락"으로 교체 -- 이 단어는 스윕 방향과 무관하게 항상 실제 예상 가격방향과
-  // 일치하도록 설계(더는 call 값을 그대로 노출하지 않음). proba_rebound도 원래 call="rebound"의
-  // 확률이라 direction에 따라 반전해서 "지금 실제 표시되는 방향(급등/급락)"의 확률로 재계산해야
-  // 같은 어긋남이 확률 문구에서 재발하지 않음.
-  const vReboundWarmedUp = !!(latestVRebound && latestVRebound.warmed_up);
-  const vReboundActive = vReboundWarmedUp && !!latestVRebound.event_active;
-  // 2026-09-01 (user request): CONFIRMED 콜이 없을 때("신호 없음")만, 증거신호 진행중 미리보기가
-  // 이미 계산해둔 8개 트리거(latestEvidenceSignalsProvisional, 위 선언부 참고)를 재사용해 지금
-  // 2026-09-01 매 봉 스코어링: 트리거 게이트가 없어져 웜업만 끝나면 항상 현재 봉 점수가 있다.
-  // 그래서 "진행중(미확정) 바닥/천장/양쪽"(형성중 봉에서 트리거가 떴는지 미리 보여주던 예비 힌트)은
-  // 도달 불가능해져 제거했다 -- 이제 형성중 봉을 기다릴 것 없이 확정 봉마다 실제 점수가 나온다.
-  // "신호 없음"은 마지막 봉 피쳐가 NaN이라 채점에서 빠지는 드문 경우에만 남는 폴백.
-  const vReboundTone = vReboundActive ? (latestVRebound.tone || "warn") : "neutral";
-  // 2026-08-31 user request: 미반등 콜(반등 시도 자체가 없었다는 판정)을 더는 급등/급락으로 억지로
-  // 묶지 않고 방향 무관 "미반등"으로 따로 표시 -- tone="flat"(백엔드 _predicted_tone, 2026-08-31
-  // 개정)일 때 전용 단어. good/bad(진짜 반등 콜)만 급등/급락을 씁니다.
-  // 2026-09-06 공통 어휘로 교체(급등→롱 발동 / 급락→숏 발동 / 미반등→미발동 / 신호 없음→데이터 없음).
-  // 색 법칙은 그대로다 -- 급등=롱 방향이라 이미 good, 급락=숏이라 bad였다. 바뀌는 건 말뿐이다.
-  const vReboundSubText = !vReboundWarmedUp ? "웜업"
-    : vReboundActive ? (vReboundTone === "good" ? "급등" : vReboundTone === "bad" ? "급락" : "미발동")
-    : "데이터 없음";
-  // P(급등) -- proba_rebound는 call="rebound"의 확률이라, direction="up"(상승스윕)일 때는 call=
-  // "continuation"이 급등에 해당하므로 1-proba_rebound로 뒤집어야 함(direction="down"일 때는
-  // call="rebound" 그대로가 급등이므로 안 뒤집음). 그다음 실제 표시되는 쪽의 확률만 골라 보여줌 --
-  // good/bad는 항상 50% 이상(taker/short_term_return_z가 "발동방향이 맞을 확률"을 보여주는 것과
-  // 같은 틀), flat(미반등)은 방향이 없으므로 P(continuation)=1-proba_rebound를 그대로 보여줌.
-  const vReboundProbaGood = vReboundActive && Number.isFinite(latestVRebound.proba_rebound)
-    ? (latestVRebound.direction === "down" ? latestVRebound.proba_rebound : 1 - latestVRebound.proba_rebound)
-    : null;
-  const vReboundProbaShown = vReboundProbaGood == null ? null
-    : vReboundTone === "good" ? vReboundProbaGood
-    : vReboundTone === "bad" ? 1 - vReboundProbaGood
-    : 1 - latestVRebound.proba_rebound;
-
-  // 베이시스 청산압박 (replaces 독성/toxicity, 2026-08-27) -- fetched separately by
-  // refreshBasisLiquiditySignal(), same external-fetch category as latestVRebound above.
-  // Directional (good=롱압박↑/bad=숏압박↑/neutral) as of 2026-08-29 user request -- was previously
-  // a good/warn/bad calm/caution/danger risk gauge; see scripts/live_spot_perp_basis_signal_
-  // 20260827.py's _direction()/_tone() for the short_pressure/long_pressure -> good/bad mapping.
-  const basisLiqWarmedUp = !!(latestBasisLiquidation && latestBasisLiquidation.warmed_up);
-  const basisLiqTone = basisLiqWarmedUp ? latestBasisLiquidation.tone : "neutral";
-
   // 2026-08-25: perf pass -- this whole block (gauge + chart + model-indicator list) only paints
   // anything the user can see while the Snapshot tab is active (snapshotTabPanel is display:none
   // otherwise), so it's gated the same way as tick()'s Snapshot-only fetches above. Data
@@ -6917,59 +6474,14 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
     // evidence-signal list uses (user: "인라인 미터로 바꿔줘"), in the meta column next to the state,
     // instead of duplicating the same number as a plain sentence.
     renderModelIndicatorList([
-      ethOnlyIndicator({
-        key: "v_rebound", label: "V자 급등락", tone: vReboundTone, subText: vReboundSubText,
-        history: (latestVRebound && latestVRebound.history) || [],
-        times: (latestVRebound && latestVRebound.times) || [],
-        proba: vReboundProbaShown, probaSlot: true,   // 확률 개념이 있는 유일한 특화감지기 -- 미발동이어도 자리를 지킨다
-        // 익절가(2026-09-10): 서버가 반등 콜일 때만 tp_price 를 준다 -- continuation 은 이 목표에
-        // 안 닿는다는 판정이라 값이 없다. 증거신호와 같은 자리·같은 포맷.
-        // 2026-09-11 "진행중 N종" 제거(사용자 지시). 미확정 트리거는 봉이 닫힐 때까지 바뀌는
-        // 값이라, 확정 판정 옆에 붙어 있으면 같은 칩이 두 신뢰도의 숫자를 같이 말하게 된다.
-        meterNote: tpPriceText(latestVRebound && latestVRebound.tp_price,
-                              tpAlreadyReached(latestVRebound)),
-        meterNoteTitle: V_REBOUND_TP_TITLE,
-        derivedTag: "= 대시보드 자체계산",
-        derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 별도로(TabPFN 모델, 고정된 과거 학습 컨텍스트) 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 자세히 보기 참고.",
-      }),
-      ethOnlyIndicator(extremeDetectorIndicatorItem()),  // 2026-09-09 극점 탐지기
       ethOnlyIndicator(breakoutPrewarnIndicatorItem()),   // 2026-09-11 추세 전환 경보기
       ethOnlyIndicator(breakoutDetectorIndicatorItem()),  // 2026-09-11 추세 전환 탐지기
-      // 🔴ethOnlyIndicator 로 감싸지 않는다 — 이 게이트는 **20자산 포트폴리오** 지표다.
-      ethOnlyIndicator(volForecastIndicatorItem()),       // 2026-09-16 변동성 전망(24h 확장)
-      evrGateIndicatorItem(),                             // 2026-09-15 변동폭 게이트(24시간)
     ], "snapSpecializedSignalList", { forceMeter: true });
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
     renderModelIndicatorList([
-      {
-        key: "liq_pressure", label: "베이시스 청산압박", tone: basisLiqTone,
-        subText: basisLiquiditySubText(latestBasisLiquidation),
-        history: (latestBasisLiquidation && latestBasisLiquidation.tone_history) || [],
-        times: evenlySpacedBarTimes(latestBasisLiquidation && latestBasisLiquidation.latest_ts_utc, (latestBasisLiquidation && latestBasisLiquidation.tone_history || []).length, 5),
-        derivedTag: "= 대시보드 자체계산·탐색적",
-        derivedTitle: "봇 내부 상태가 아니라 대시보드 서버가 spot/perp klines를 직접 fetch해 계산 -- 아직 실제 매매 결정에는 연결되지 않음. 청산크라우딩 상관은 ~1개월 탐색적 표본(3-split 재현 전). 자세히 보기 참고.",
-      },
-      {
-        // 2026-09-16 «변동성 예측» -> «변동성 수준». 셋이 같은 단어를 쓰면서 다른 질문을
-        // 답하고 있었다: 이건 **수준**(지금 얼마나 출렁이나 · 4시간), 카드 하나 아래는
-        // **확장**(오늘 성격이 바뀌나 · 24시간), 게이트는 **진입 여부**다.
-        // 🔴이 값은 «곧 커진다»를 못 맞힌다(확장 AUC .46~.52 = 동전) -- 이름이 그걸 말해야 한다.
-        key: "vol_level", label: "변동성 수준 (4시간)",
-        tone: (latestVolLevel && latestVolLevel.tone) || "neutral",
-        subText: (latestVolLevel && latestVolLevel.grade) || "웜업",
-        history: toneHistory.vol_level, times: toneHistoryTimes.vol_level,
-        derivedTag: "= 사이징 모델",
-        derivedTitle: volLevelTitle(latestVolLevel),
-      },
-      gexIndicatorItem(),                     // 2026-09-19 옵션 감마 노출(참고 표시)
-      coinIndicator({
-        key: "liq_cascade", label: "청산 캐스케이드", tone: ci.liq_cascade.tone,
-        subText: ci.liq_cascade.subText, history: toneHistory.liq_cascade, times: toneHistoryTimes.liq_cascade,
-        liveText: liqCascadeLiveDetail(tail),
-      }, "liq_cascade"),
-      coinIndicator({ key: "whale", label: "수급 흐름", tone: ci.whale.tone, subText: ci.whale.subText, history: toneHistory.whale, times: toneHistoryTimes.whale }, "whale"),
-      coinIndicator({ key: "retail_flow", label: "리테일 수급", tone: ci.retail_flow.tone, subText: ci.retail_flow.subText, history: toneHistory.retail_flow, times: toneHistoryTimes.retail_flow }, "retail_flow"),
+      volLevelIndicatorItem(),                // 2026-09-21 배수 + 확장 확률
+      gexIndicatorItem(),                     // 2026-09-19 옵션 감마 노출 (09-28 판정일까지 한시)
     ]);
   }
 }
@@ -6987,16 +6499,11 @@ async function tick() {
     if (activePageTab === "ops") {
       refreshOpsStatus();
     } else if (activePageTab === "snapshot") {
-      refreshVReboundSignal();
-      refreshExtremeDetector();      // 2026-09-09 극점 탐지기
       refreshBreakoutDetector();     // 2026-09-11 횡보→추세 전환
-      refreshEvrGate();              // 2026-09-15 변동폭 게이트(20자산)
-      refreshVolForecast();          // 2026-09-10 24시간 변동성 전망
       refreshVolLevel();             // 2026-09-14 사이징 모델 변동성 예측(4시간 수준)
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
-      refreshBasisLiquiditySignal();
       refreshLiqBurstState();
       refreshLiquidationMap();
       refreshActiveRegime();
@@ -7027,29 +6534,8 @@ async function tick() {
 // connection starts so no live tick can race ahead and populate toneHistory first: if that raced,
 // the "already has data" guard below would (correctly, but uselessly) skip seeding, leaving the
 // strip looking exactly as un-warmed-up as before this feature existed.
-async function seedModelIndicatorHistory() {
-  try {
-    const res = await fetch("/api/model-indicator-history", { cache: "no-cache", signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return;
-    const payload = await res.json();
-    const samples = Array.isArray(payload.samples) ? payload.samples : [];
-    if (!samples.length) return;
-    if (Object.values(toneHistory).some((arr) => arr.length)) return; // live tick already won the race
-    for (const sample of samples) {
-      const c = classifyIndicators(sample.microstructure, sample.tail_risk);
-      // 🔴시각은 **그 샘플이 찍힌 때**다. new Date() 로 찍으면 48칸이 전부 «지금»이 되어
-      //   축(stripAxisHtml)이 4시간을 0초로 압축해 보여준다.
-      pushToneHistory("liq_cascade", c.liq_cascade.tone, sample.sampled_at);
-      pushToneHistory("whale", c.whale.tone, sample.sampled_at);
-      pushToneHistory("retail_flow", c.retail_flow.tone, sample.sampled_at);
-    }
-  } catch (error) {
-    console.error("Model indicator history seed error (non-fatal, strip just starts empty):", error);
-  }
-}
 
 (async () => {
-  await seedModelIndicatorHistory();
   connectDashboardEvents();
   tick();
   setInterval(tick, POLL_MS);

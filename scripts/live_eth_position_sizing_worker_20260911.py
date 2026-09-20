@@ -154,6 +154,10 @@ def model_equivalent_qty(kl: pd.DataFrame, base_qty: float, art) -> tuple[float,
             return float("nan"), {"used": False, "reason": "bad_prediction"}
         return base_qty * (art["ref_pred"] / pred), {
             "used": True, "pred_vol": pred, "ref_pred": float(art["ref_pred"]),
+            # 2026-09-21 «직전 4시간 대비 몇 배»(= pred/rv48) 표시용. build_features 가 이미
+            # 낸 값을 그대로 내보낸다 -- 재계산 없음. 등급용 ref_pred_recent(«평소 대비»)와
+            # 다른 축이다: 이건 «지금 대비 커지나», 저건 «평소 대비 높나».
+            "rv48": float(np.exp(row["rv48"].iloc[0])),
             "seeds": len(art["seeds"]), "train_end": art["train_end"]}
     except Exception as e:  # noqa: BLE001
         return float("nan"), {"used": False, "reason": f"{type(e).__name__}: {e}"}

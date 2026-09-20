@@ -173,42 +173,14 @@
       <section class="panel ops-health-panel signal-overview-panel">
         <div class="signal-overview-group" data-asset-scope="indicators">
           <p class="signal-overview-label">모델 내부 지표</p>
-          <div class="signal-chip-subgroup">
-            <p class="signal-chip-subgroup-label">방향 (롱/숏)</p>
-            <div class="signal-chip-row">
-              <div id="modelChipWhale" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">수급 흐름</span>
-                <span class="signal-chip-state">-</span>
-              </div>
-              <div id="modelChipRetailFlow" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">리테일 수급</span>
-                <span class="signal-chip-state">-</span>
-              </div>
-              <div id="modelChipBasisLiq" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">베이시스 청산압박</span>
-                <span class="signal-chip-state">-</span>
-              </div>
-            </div>
-          </div>
-          <div class="signal-chip-subgroup">
-            <p class="signal-chip-subgroup-label">위험도 (안정/주의/위험)</p>
-            <div class="signal-chip-row">
-              <div id="modelChipLiqCascade" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">청산 캐스케이드</span>
-                <span class="signal-chip-state">-</span>
-              </div>
-              <!-- 2026-09-14 사용자 요청: 사이징 변동성 모델(앞으로 4시간 실현변동성 수준)을
-                   지표로 띄운다. 방향 신호가 아니라 위험도 3등급이다 — 이 모델은 「수준」은
-                   맞히지만(1h ρ .642) 「확장」은 못 맞힌다(AUC .46~.52). -->
-              <div id="modelChipVolLevel" class="signal-chip neutral">
-                <span class="signal-chip-dot" aria-hidden="true"></span>
-                <span class="signal-chip-label">변동성 예측</span>
-                <span class="signal-chip-state">-</span>
-              </div>
+          <div class="signal-chip-row">
+            <!-- 2026-09-21 정리: 통제 검정을 통과한 것만 남겼다. 수급 흐름·리테일 수급·
+                 청산 캐스케이드·베이시스 청산압박 칩은 제거(아래 풋프린트/청산 패널은 유지).
+                 근거: docs/experiments/eth_dashboard_signal_cull_and_vol_expansion_rescore_20260921.md -->
+            <div id="modelChipVolLevel" class="signal-chip neutral">
+              <span class="signal-chip-dot" aria-hidden="true"></span>
+              <span class="signal-chip-label">변동성 수준</span>
+              <span class="signal-chip-state">-</span>
             </div>
           </div>
         </div>
@@ -217,16 +189,8 @@
             <p class="signal-overview-label">특화 감지기 (이벤트 트리거)</p>
           </div>
           <div class="signal-chip-row">
-            <div id="modelChipVRebound" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-label">V자 급등락</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-            <div id="modelChipExtreme" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-label">극점 탐지기</span>
-              <span class="signal-chip-state">-</span>
-            </div>
+            <!-- 2026-09-21 V자 급등락·극점 탐지기 제거. 거리(스톱까지의 ATR)를 통제하면
+                 리프트가 3.80x -> 1.10x(극점) / 1.05x·p=0.34(V자)로 무너진다. -->
             <div id="modelChipBreakoutPrewarn" class="signal-chip neutral">
               <span class="signal-chip-dot" aria-hidden="true"></span>
               <span class="signal-chip-label">추세 전환 경보기</span>
