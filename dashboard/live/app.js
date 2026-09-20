@@ -786,7 +786,7 @@ function basisLiquiditySubText(sig) {
 // tail_risk_interceptor.py::_write_liq_burst_state()), a faster/more prominent sibling to the
 // liq_cascade model-indicator tile below (which reads the same hawkes/z-score concept but via the
 // 10s-cadence dashboard_state.json path). Shown only while hawkes_active -- an alert that's always
-// visible isn't an alert, see execution-alert-banner's own hidden-by-default precedent above.
+// visible isn't an alert. (선례로 들던 실행경보 배너는 2026-09-20 은퇴했다 -- 규칙만 남는다.)
 // Liquidation long/short volume gauge -- recreated 2026-08-27 at user request. This is the bar
 // chart half of the original renderLiquidationCascadeGauge() (2026-08-25): proportional split bar,
 // long=red(--bad)/short=green(--good), with real $ labels alongside so a "$5 vs $2" split doesn't
@@ -2194,8 +2194,9 @@ const MODEL_INDICATOR_DETAIL = {
 // 2026-08-30 (user request): "학습 horizon을 배지로" -- each signal's own validated forward-
 // looking prediction/detection window, shown as a small badge next to its name (see
 // horizonBadgeHtml() below, used by both renderModelIndicatorList and renderEvidenceSignals).
-// Covers both model-indicator keys (MODEL_CHIP_IDS below) and evidence-signal keys
-// (EVIDENCE_STRIP_CHIP_IDS further down) in one lookup since neither namespace collides.
+// Covers the model-indicator keys (MODEL_CHIP_IDS below) in one lookup.
+// (2026-09-16 증거신호 칩이 내려가면서 EVIDENCE_STRIP_CHIP_IDS 는 사라졌다 -- 이 주석이
+//  없는 상수를 계속 가리키고 있었다. 2026-09-20 정정.)
 // "상태" (not a number) marks signals whose live formula is a continuous current-state gauge with
 // no fixed forward horizon baked in -- forcing a number onto those would overstate what they
 // actually claim; each entry's title cites the specific research this is grounded in (verified

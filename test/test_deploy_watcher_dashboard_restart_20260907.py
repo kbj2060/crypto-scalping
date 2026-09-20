@@ -55,9 +55,11 @@ class DashboardRestartDecisionTests(unittest.TestCase):
                              capture_output=True, text=True, check=True)
         return int(out.stdout.strip())
 
-    def test_imported_live_module_restarts(self) -> None:
-        self.assertEqual(1, self._restart_decision("scripts/live_evidence_signal_metalabel_20260829.py"))
-
+    # 🔴2026-09-20 `test_imported_live_module_restarts` 를 지웠다. 예시 모듈명을
+    #   (`scripts/live_evidence_signal_metalabel_20260829.py`) 하드코딩해 뒀는데, 그 import 가
+    #   2026-09-16 증거신호 칩 제거와 함께 server.py 에서 사라지면서 **워처가 맞고 시험이 틀린**
+    #   상태로 계속 빨갰다. 아래 시험이 같은 계약을 server.py 의 import 에서 **직접 뽑아** 검사하므로
+    #   예시는 없어도 되고, 없어야 안 썩는다 -- 다시 하드코딩하지 말 것.
     def test_every_scripts_import_of_server_py_is_covered(self) -> None:
         """server.py가 import하는 scripts/ 모듈은 **전부** 재시작을 걸어야 한다 (목록 낡음 방지)."""
         mods = sorted(set(re.findall(r"^(?:from|import) scripts\.([A-Za-z0-9_]+)", SERVER.read_text(), re.M)))

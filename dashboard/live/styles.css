@@ -228,44 +228,6 @@ body {
   padding: 20px 24px 28px;
 }
 
-.execution-alert-banner {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 14px;
-  margin: 0 0 16px;
-  padding: 14px 16px;
-  border: 1px solid color-mix(in srgb, var(--bad) 62%, transparent);
-  border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 22%, transparent), rgba(46, 52, 62, 0.96));
-  box-shadow: 0 14px 34px rgb(var(--shadow) / 0.28);
-}
-
-.execution-alert-banner.hidden { display: none; }
-.execution-alert-banner.blocked { border-color: color-mix(in srgb, var(--warn) 70%, transparent); background: linear-gradient(90deg, color-mix(in srgb, var(--warn) 22%, transparent), rgba(46, 52, 62, 0.96)); }
-.execution-alert-banner.disabled { border-color: var(--line); background: linear-gradient(90deg, rgba(148, 154, 173, 0.14), rgba(46, 52, 62, 0.94)); }
-.execution-alert-icon {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--bad);
-  color: var(--on-fill);
-  font: 900 18px/1 var(--font-mono);
-}
-.execution-alert-banner.blocked .execution-alert-icon { background: var(--warn); }
-.execution-alert-banner.disabled .execution-alert-icon { background: var(--muted); }
-.execution-alert-copy { display: grid; gap: 3px; min-width: 0; }
-.execution-alert-copy strong { color: var(--text); font-size: 14px; }
-.execution-alert-copy span { color: var(--ink); font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
-.execution-alert-banner time { color: var(--muted); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
-
-@media (max-width: 720px) {
-  .execution-alert-banner { grid-template-columns: auto 1fr; }
-  .execution-alert-banner time { grid-column: 2; white-space: normal; }
-}
-
 .hero-metrics {
   display: grid;
   grid-template-columns: 2fr 1fr 1fr;
@@ -2392,16 +2354,8 @@ svg {
 }
 [data-theme="light"] .notify-btn.short { color: var(--bad); }
 
-/* 라이트에서 어둡게 남는 면 넷. 각각 재질이 달라 한 규칙으로 못 묶는다. */
-[data-theme="light"] .execution-alert-banner {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 16%, transparent), rgba(255, 255, 255, 0.72));
-}
-[data-theme="light"] .execution-alert-banner.blocked {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--warn) 16%, transparent), rgba(255, 255, 255, 0.72));
-}
-[data-theme="light"] .execution-alert-banner.disabled {
-  background: linear-gradient(90deg, rgba(102, 109, 126, 0.12), rgba(255, 255, 255, 0.72));
-}
+/* 라이트에서 어둡게 남는 면 둘. 재질이 달라 한 규칙으로 못 묶는다.
+   (2026-09-20 실행경보 배너 은퇴로 넷 -> 둘) */
 [data-theme="light"] .shadow-ribbon {
   background:
     linear-gradient(135deg, rgb(255 255 255 / 0.55), rgb(255 255 255 / 0.28)),
@@ -2427,8 +2381,7 @@ svg {
 [data-theme="light"] .shadow-slot-side.long,
 [data-theme="light"] .shadow-slot-side.short,
 [data-theme="light"] .pnl-badge.good,
-[data-theme="light"] .pnl-badge.bad,
-[data-theme="light"] .execution-alert-icon {
+[data-theme="light"] .pnl-badge.bad {
   color: #fff;
 }
 
@@ -2677,11 +2630,18 @@ svg {
    🔴이 두 수는 app.js 의 SUB_* 상수와 **같이** 움직여야 한다. 어긋나면 가격 플롯이 조용히
      눌리고, renderCandleSvg 의 가드가 콘솔에 한 번 알린다.
      test_sub_panel_height_contract_20260919.py 가 기계로도 검사한다. */    /* 412 + 444 */
-}
 
 
 
-/* ── 2026-09-19 사용자 요청(아티팩트 댓글): 코인 탭·페이지 탭을 «테마 토글과 똑같이» ──────
+/* 🔴2026-09-20: 바로 위에 **짝 없는 `}`** 가 떠 있었고, 그게 아래 첫 규칙(.asset-tabs)을
+   통째로 삼키고 있었다 -- 최상위의 `}` 는 «버려지는» 게 아니다. CSS 파서는 그 자리에서
+   qualified rule 을 시작하고 **다음 `{` 까지**를 prelude 로 먹으므로, 선택자가 `} .asset-tabs`
+   가 되어 규칙 하나가 통째로 무효가 된다. 그래서 09-19 «껍데기를 걷어내라» 요청이 안쪽
+   버튼(.asset-tab)에만 적용되고 컨테이너는 옛 세그먼트 껍데기를 유지한 반쪽 상태였다.
+   괄호를 지워 규칙을 되살렸다(페이지가 8px 짧아진다).
+   ⚠️CSS 는 문법 오류로 죽지 않고 **조용히 한 규칙만 버린다** -- test_styles_css_braces_
+   balanced_20260920.py 가 이제 기계로 막는다.
+   ── 2026-09-19 사용자 요청(아티팩트 댓글): 코인 탭·페이지 탭을 «테마 토글과 똑같이» ──────
    활성 상태는 이미 한 블록에서 통일돼 있었다(.page-tab.active / .asset-tab.active /
    .push-toggle[data-state="on"]). 갈리던 건 **비활성**이다 -- 테마 토글은 테두리를 가진
    독립 알약인데, 코인 탭은 테두리 없는 칸이 하나의 알약 «안»에 든 세그먼트였다.

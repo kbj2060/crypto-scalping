@@ -234,12 +234,7 @@ warm 12~15ms 로 다른 엔드포인트(0.5~4ms)의 4~20배였고, 파일 락을
   48봉을 다 다시 만든다. 증분 렌더가 정답이지만 이 함수는 1,300줄이고 좌표 규약이 18곳에
   얽혀 있다 — 지금 손대면 «가장 작은 변경이 잘못된 자리»가 된다. 남은 4.5~6.4ms 는
   2.5Hz 기준 데스크톱 1.1~1.6% 다.
-- **낡은 테스트 7건.** `test_dashboard_chip_ids_20260907.py`(4) ·
-  `test_dashboard_execution_alert.py`(2) 는 **의도적으로 제거된 기능**(masht_anchor 칩 ·
-  EVIDENCE_STRIP_CHIP_IDS · 실행 경보 표면)을 아직 요구한다. HEAD 에서도 똑같이 실패한다
-  (확인함) — 코드 버그가 아니라 테스트 부패다. 어느 것을 은퇴시킬지는 사람이 정할 일이라
-  손대지 않았다. `test_dashboard_server.py::StaticAssetCacheHeaderTest` 의 실패는
-  이 워크트리에 `data/live` 가 없어서다(환경 문제, 서버에서는 통과).
+- *(2026-09-20 후속으로 전부 정리했다 — 아래 §7 참조.)*
 
 ---
 
@@ -261,3 +256,51 @@ python3 -m pytest test/test_dashboard_sse_state_view_20260920.py -q
 브라우저 소크/DOM 대조 하네스(목 서버 + playwright)는 스크래치패드에만 두었다 —
 라이브 페이로드 픽스처가 필요해서 커밋하지 않는다. 다시 만들려면 위 §2 방식대로
 30개 엔드포인트를 떠서 정적으로 되먹이면 된다.
+
+---
+
+## 7. 후속 — 낡은 테스트 정리 (2026-09-20, 같은 날)
+
+빨간 스위트는 다음 회귀를 가린다. 9건을 **한 건씩 진단해서** 정리했다 — «실패하니 지운다»가
+아니라 **테스트가 틀렸는지 코드가 틀렸는지**를 먼저 갈랐다. 결과가 셋으로 나뉘었다.
+
+### 테스트가 틀렸다 (5건)
+| 대상 | 왜 썩었나 |
+|---|---|
+| `chip_ids::test_model_chip_ids_all_exist_in_html` | `masht_anchor` 단정만 제거. **나머지 가드는 그대로** |
+| `chip_ids::test_directional_keys_are_a_subset_of_chip_keys` | 〃 |
+| `chip_ids::test_evidence_chip_ids_all_exist_in_html` | `EVIDENCE_STRIP_CHIP_IDS` 상수 자체가 없다(09-16) → 삭제 |
+| `chip_ids::test_specialized_list_items_all_have_chips` | 「특화 목록 = 칩 필수」가 더는 설계가 아니다. `vol_forecast` 는 `be1ad097` 로 칩을 **일부러 뺐고** `evr_gate` 는 애초에 카드 전용 → 삭제 |
+| `deploy_watcher::test_imported_live_module_restarts` | 예시 모듈명을 하드코딩. 같은 계약을 **import 에서 직접 뽑는** 형제 시험이 이미 있다 → 삭제 |
+
+덤으로 `SpecializedDetectorChipsExistTest` 의 중복 시험 하나(값 정규식이 주석 속 따옴표까지
+집던 엉성한 판)도 접었다.
+
+### 환경이 틀렸다 (1건)
+`test_dashboard_server.py::StaticAssetCacheHeaderTest` — `make_app()` 의 `add_static` 이
+`data/live` 없이 죽는데 그 디렉터리는 gitignore 라 서버 말고는 없다. **개발 체크아웃에서 늘
+실패**했다. 같은 파일의 다른 시험들이 이미 쓰는 방식(임시 디렉터리 패치)을 적용. 아무 데서도
+못 도는 시험은 회귀를 못 잡는다.
+
+### 코드가 틀렸다 (3건) — 지우면 안 되는 것들이었다
+- **실행 경보 배너**: 봇은 여전히 `execution_alert` 를 쓰고 텔레그램도 보내는데, 화면 배너는
+  `liveTabPanel` 안에 있던 탓에 2026-08-31 라이브 탭 제거(`60ab72b7`)의 **부수 결과**로
+  사라졌다(커밋 메시지에 언급 없음). 사용자 결정으로 **공식 은퇴** — 고아 CSS 47줄을 지우고,
+  생산자 계약(텔레그램)만 남기고, «반쯤 남은 표면»을 막는 시험으로 바꿨다.
+  🔴그 시험이 바로 남은 흔적 하나(app.js 의 선례 인용 주석)를 잡아냈다.
+  ⚠️배너를 되살릴 거면 `SSE_STATE_KEYS` 에 `execution_alert` 를 넣어야 한다.
+- **`_unrealized_bp`**: 2026-09-07 에 넣고 **다음 날** `15992a40` 이 되돌렸는데 시험만 남았다.
+  짝이던 `_locked_bp` 는 `server.py` 에서 **호출부가 0**이라 같이 제거(시험만 붙들고 있었다).
+- 🔴**짝 없는 `}` 가 CSS 규칙 하나를 3주째 먹고 있었다.** 고아 CSS 를 지우다 발견했다.
+  최상위의 `}` 는 «무시»되지 않는다 — CSS Syntax L3 은 그 자리에서 qualified rule 을 시작하고
+  **다음 `{` 까지**를 prelude 로 먹으므로 선택자가 `} .asset-tabs` 가 되어 규칙이 통째로
+  무효가 된다. 그래서 09-19 «코인 탭 껍데기를 걷어내라» 요청이 안쪽 버튼에만 적용된
+  **반쪽 상태**였다. 괄호를 지워 규칙을 되살렸다(페이지 8px 단축, 사용자 승인).
+  CSS 는 문법 오류로 죽지 않고 조용히 한 규칙만 버리므로 눈으로는 못 잡는다 →
+  `test/test_styles_css_braces_balanced_20260920.py` 가 기계로 막는다(배포본에서 실패하는 것
+  확인 = 공허한 시험 아님).
+
+### 결과
+대시보드 관련 파이썬 39건 + node 스모크 4건 **전부 통과**. 회귀는 같은 하네스로 확인 —
+데이터 패널 네 곳의 `outerHTML` 이 배포본과 **바이트 단위 일치**, 유일한 픽셀 변화는 위
+`.asset-tabs` 8px 하나다.
