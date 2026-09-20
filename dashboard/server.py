@@ -2367,6 +2367,9 @@ def make_app() -> web.Application:
     micro_state: dict[str, Any] = {"payload": {"available": False}, "baseline": None, "baseline_at": 0.0,
                                    "liq_prev": None, "liq_prev_at": 0.0}
     liq_events: deque = deque(maxlen=5000)      # (ts_ms, side, qty, price, usd) -- side "long" = 롱 포지션 청산(SELL)
+    # WS 자체의 상태. 청산은 조용한 스트림이라 «이벤트 없음»과 «연결 없음»을 화면이 구별해야 한다
+    # (tail_risk_interceptor 가 2026-07-30 에 77일간 잘못 connected=True 로 있던 그 함정).
+    fo_state: dict[str, Any] = {"connected": False, "since": None, "last_event_ms": None, "events": 0, "errors": 0, "last_error": None}
     ofi_hist: deque = deque(maxlen=600)         # |OFI10| 최근 10분 -- 임계는 상수가 아니라 분위(p50)
 
     async def collect_force_orders(app: web.Application) -> None:
@@ -2376,12 +2379,17 @@ def make_app() -> web.Application:
             while True:
                 try:
                     async with ws_session.ws_connect(FORCE_ORDER_WS_URL, heartbeat=30) as ws:
+                        fo_state.update(connected=True, since=time.time())
+                        print("force-order ws: connected", flush=True)
                         async for msg in ws:
                             if msg.type is not WSMsgType.TEXT:
+                                print(f"force-order ws: non-text {msg.type!r} -> reconnect", flush=True)
                                 break
                             o = (json.loads(msg.data) or {}).get("o") or {}
                             if not o:
                                 continue
+                            fo_state["events"] += 1
+                            fo_state["last_event_ms"] = int(o.get("T") or time.time() * 1000)
                             qty, price = float(o.get("z") or o.get("q") or 0.0), float(o.get("ap") or o.get("p") or 0.0)
                             ev = {"ts_ms": int(o.get("T") or time.time() * 1000),
                                   "side": "long" if o.get("S") == "SELL" else "short",   # 롱 청산 = 시장에 SELL
@@ -2392,8 +2400,11 @@ def make_app() -> web.Application:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001 -- 끊기면 3초 뒤 다시. 봇에 영향 없음
+                    fo_state.update(errors=fo_state["errors"] + 1, last_error=repr(exc)[:120])
                     print(f"force-order ws: {exc!r}", flush=True)
                     await asyncio.sleep(3.0)
+                finally:
+                    fo_state["connected"] = False
         finally:
             await ws_session.close()
 
@@ -2403,9 +2414,18 @@ def make_app() -> web.Application:
         while True:
             try:
                 now = time.time(); now_sec = int(now)
-                if now - micro_state["baseline_at"] >= MICRO_BASELINE_SECONDS:
+                # 기준선이 없으면 60초마다 다시 시도한다 -- 수집기가 같은 파일에 쓰는 순간 read_only
+                # 연결이 거부될 수 있고(2026-09-19 실측 30회 중 2회), 그때 1시간을 «기준없음»으로 두면
+                # 카드 절반이 하루 종일 빈다. 실패 사유는 로그에 남긴다(조용히 None 이면 원인을 못 찾는다).
+                if now - micro_state["baseline_at"] >= (MICRO_BASELINE_SECONDS if micro_state["baseline"] else 60.0):
                     micro_state["baseline_at"] = now
-                    micro_state["baseline"] = await asyncio.to_thread(mref.baseline_from_tape, MICRO_TAPE_DB_PATH)
+                    try:
+                        micro_state["baseline"] = await asyncio.to_thread(mref.baseline_from_tape, MICRO_TAPE_DB_PATH)
+                    except Exception as exc:  # noqa: BLE001
+                        micro_state["baseline"] = None
+                        print(f"micro-ref baseline: {exc!r}", flush=True)
+                    if micro_state["baseline"] is None:
+                        print("micro-ref baseline: none (재시도 60초 뒤)", flush=True)
                 if now - micro_state["liq_prev_at"] >= 10.0:
                     micro_state["liq_prev_at"] = now
                     micro_state["liq_prev"] = await asyncio.to_thread(mref.liq_prev_minute, LIVE_DIR / "tail_risk.duckdb")
@@ -2444,6 +2464,7 @@ def make_app() -> web.Application:
                     "vol60": vol60, "vol60_pct": vol60_pct, "vol60_x_p50": vol60_x, "act": mref.act_label(vol60_pct),
                     "baseline_days": (base or {}).get("days"), "hour_utc": hour,
                     "sr": sr, "burst": burst, "liq60": liq60, "liq_prev": micro_state["liq_prev"],
+                    "fo": dict(fo_state),
                 }
             except asyncio.CancelledError:
                 raise

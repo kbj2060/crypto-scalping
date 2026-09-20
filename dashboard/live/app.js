@@ -3848,10 +3848,14 @@ function renderMicroRef() {
   const l = m.liq60 || {}; const lp = m.liq_prev || null;
   const lTot = (l.long || 0) + (l.short || 0);
   const lTone = lTot > 0 && l.long > 0 && l.short > 0 ? "warn" : lTot > 0 ? "warn" : "";
-  const lState = lTot === 0 ? "60초 청산 없음" : (l.long > 0 && l.short > 0 ? "양쪽 청산" : l.long >= l.short ? "롱 청산 중" : "숏 청산 중");
+  const fo = m.fo || {};
+  const lState = !fo.connected ? "WS 끊김" : lTot === 0 ? "60초 청산 없음" : (l.long > 0 && l.short > 0 ? "양쪽 청산" : l.long >= l.short ? "롱 청산 중" : "숏 청산 중");
+  const foLine = fo.connected
+    ? `WS 연결 ${fo.since ? Math.round((Date.now() / 1000 - fo.since) / 60) + "분" : ""} · 누적 ${fo.events || 0}건${fo.last_event_ms ? ` · 마지막 ${Math.round((Date.now() - fo.last_event_ms) / 1000)}초 전` : ""}`
+    : `WS 미연결 (오류 ${fo.errors || 0}회${fo.last_error ? `: ${fo.last_error}` : ""})`;
   chips.push({
-    label: "청산 이벤트 · 최근 60초 (원시)", state: lState, tone: lTone,
-    value: `롱 ${MR_FMT.usd(l.long)} · 숏 ${MR_FMT.usd(l.short)} · ${l.n || 0}건${lp ? ` · 직전 분 롱 ${MR_FMT.usd(lp.long)} / 숏 ${MR_FMT.usd(lp.short)}` : ""}`,
+    label: "청산 이벤트 · 최근 60초 (원시)", state: lState, tone: !fo.connected ? "bad" : lTone,
+    value: `롱 ${MR_FMT.usd(l.long)} · 숏 ${MR_FMT.usd(l.short)} · ${l.n || 0}건${lp ? ` · 직전 분 롱 ${MR_FMT.usd(lp.long)} / 숏 ${MR_FMT.usd(lp.short)}` : ""} · ${foLine}`,
     meaning: lTot === 0 ? "청산은 가격 움직임의 «결과»다(분 수익률→다음 분 순청산 −0.335, 반대 +0.01)."
       : lState === "양쪽 청산" ? "한 창 안에 양방향 청산 = 휩쏘. 변동성 경보 — 크기 절반." : "지금 청산이 붙고 있다 = 방금 움직였다는 확인. 군집한다 — 다음 분 청산 5배·앞 5분 고저폭 2배. «롱 청산 = 바닥»은 아니다(통제 후 0).",
     title: "@forceOrder 원시 이벤트(이 카드가 처음 저장한다: data/live/liq_events.jsonl). 봇의 청산 게이지는 1분 합·15분 누적이라 «캐스케이드 진행 중»을 1분 늦게 안다.",
