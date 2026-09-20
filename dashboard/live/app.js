@@ -4291,17 +4291,65 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   //   물음이라, 그걸로 나누면 768px 같은 폭에서 긴 문장이 범례를 덮는다(계산으로 확인).
   //   긴 것 -> 짧은 것 -> 생략 순으로 내려간다. 내용은 전부 툴팁에도 있다.
   // 2026-09-19 방향을 말하던 문구를 버렸다 -- 합산이라 좌우가 방향이 아니라 **원천**이다.
-  const footLong = "← 걸려 있는 호가(진할수록 자꾸 다시 깔리는 것)  ·  체결 거래량(매수+매도)"
-    + "  ·  바깥 띠 = 순델타(초록 매수 · 빨강 매도) →";
+  // 2026-09-20 사용자 요청: 서버가 매 폴링 계산해 보내는 요약 스칼라 8개가 **전부 버려지고
+  //   있었다**(app.js 가 window_s 하나만 썼다). 그 자리에 숫자를 넣고, 안내 문구는 툴팁으로
+  //   내린다 -- 문구는 한 번 읽으면 끝이고 숫자는 매초 바뀐다.
+  // 🔴obi 는 막대가 못 담는 유일한 축이다. 프로파일은 abs(qty) 로 그려 **매수/매도를 버린다**.
+  //   「위=매도·아래=매수」로 눈대중할 수는 있지만(실측 지금 이 순간 100%/99.5%), 창이
+  //   1~4시간이라 그동안 가격이 지나간 가격대는 창 안에서 측면이 뒤집힌다 -- 실측 1h 8% ·
+  //   2h 13% · **4h 33%**. 그 행들의 peak/refill 은 두 측면이 섞여 있어 위치로 복원이 안 된다.
+  const sm = latestFlowHeatmap && latestFlowHeatmap.summary;
+  const pct1 = (v) => (v == null ? "—" : Math.round(100 * v) + "%");
+  // 🔴좁으면 **뒤에서부터 덜어낸다**. 예전에 여기 안내문이 범례를 덮어 글자가 겹쳤다
+  //   (2026-09-19 모바일, 사용자 보고). 폭 판정은 `narrow` 임계값이 아니라 «실제로
+  //   들어가는가»로 한다 -- 768px 같은 폭에서 임계값만 보면 또 겹친다.
+  const footParts = sm
+    ? ["불균형 " + (sm.obi == null ? "—" : (sm.obi > 0 ? "+" : "") + sm.obi.toFixed(2)),
+       "지속 " + pct1(sm.persist_share),
+       "이탈 " + pct1(sm.offtouch_leave_share),
+       sm.wall ? `벽 ${sm.wall.dist_pct > 0 ? "+" : ""}${sm.wall.dist_pct}% `
+                 + `${Math.round(sm.wall.qty)}(${pct1(sm.wall.persist)})` : "벽 —",
+      ]
+    : ["← 호가  ·  거래량 →"];
   const footFits = (t) => (w - mr) - t.length * 6.2 > lx + 6;
-  const footText = footFits(footLong) ? footLong
-    : (footFits("← 호가  ·  거래량 →") ? "← 호가  ·  거래량 →" : null);
-  if (footText) {
+  let footText = footParts.join("  ·  ");
+  while (footParts.length > 1 && !footFits(footText)) {
+    footParts.pop();
+    footText = footParts.join("  ·  ");
+  }
+  if (!footFits(footText)) footText = "";
+  {
     const foot = document.createElementNS(NS, "text");
     foot.setAttribute("x", w - mr); foot.setAttribute("y", h - 6);
     foot.setAttribute("text-anchor", "end");
     foot.setAttribute("font-size", "9"); foot.setAttribute("fill", "var(--muted)");
     foot.textContent = footText;
+    const ft = document.createElementNS(NS, "title");
+    ft.textContent = sm
+      ? "왼쪽 = 걸려 있는 호가(길이 = 지금 걸린 양 · 진할수록 이 창에서 자꾸 다시 깔린 것)\n"
+        + "오른쪽 = 체결 거래량(매수+매도) · 바깥 띠 = 순델타(초록 매수 · 빨강 매도)\n\n"
+        + `불균형(OBI) ${sm.obi} — 현재가 ±${sm.obi_band_pct}% 안에서 (매수−매도)/(매수+매도).\n`
+        + "  +면 매수호가가 두껍다. 🔴밴드가 값을 정한다(실측 ±0.1% +0.504 vs ±2% +0.071, 7배).\n"
+        + "  🔴막대는 매수·매도를 합쳐 그리므로 이 축은 숫자로만 있습니다. 「위=매도·아래=매수」로\n"
+        + "  눈대중할 수 있지만, 이 창 안에서 측면이 뒤집힌 가격대가 있습니다(4h 탭 실측 33%).\n"
+        + `지속 ${pct1(sm.persist_share)} — 창 내내 한 번도 안 빠진 양이 지금 걸린 양의 몇 %인가.\n`
+        + `이탈 ${pct1(sm.offtouch_leave_share)} — 사라진 호가 중 **체결 없이** 빠진 비율`
+        + ` (${sm.fill_source ? "풋프린트 대조" : "대조 불가"} · 판정 가능 ${sm.offtouch_bins}칸).\n`
+        + "  🔴«취소율»이 아닙니다 — 터치 구간은 구조적으로 빠져 있고, 취소와 리프라이싱을\n"
+        + "  가를 수 없습니다(선물 WS 는 레벨별 총량만 주고 주문 ID 가 없습니다).\n"
+        + (sm.wall ? `벽 — 가장 가까운 «지속» 벽: ${sm.wall.dist_pct}% 거리에 ${sm.wall.qty} ETH,`
+                     + ` 지속률 ${pct1(sm.wall.persist)}.\n  🔴지지·저항 판정이 아닙니다(버팀 능력 미측정).\n`
+                   : "벽 — 지속률 60% 넘는 큰 호가가 지금은 없습니다.\n")
+        + `기준가 ${sm.spot} · 창 ${Math.round(sm.window_s / 60)}분`
+        + (() => {                       // 🔴hm 은 아래에서 선언된다(TDZ) -- 여기선 원본을 직접 본다
+             const ap = latestFlowHeatmap && latestFlowHeatmap.rows
+                        && latestFlowHeatmap.rows.approach;
+             if (!ap) return "";
+             const fin = [...ap].filter(Number.isFinite);
+             return ` · 접근행동 자격 ${fin.length}행 (◌ 표식 ${fin.filter((v) => v < 0.8).length}개)`;
+           })()
+      : "← 걸려 있는 호가  ·  체결 거래량 →";
+    foot.appendChild(ft);
     svg.appendChild(foot);
   }
 
