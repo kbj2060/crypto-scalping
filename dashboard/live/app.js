@@ -367,7 +367,15 @@ let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
 let lastModelIndicatorHtmlByTarget = {};
 let activePageTab = "snapshot"; // "ops" | "snapshot" (라이브 탭 제거, 2026-08-31) -- must match index.html's default active tab (data-page-tab="snapshot" carries the initial "active" class)
-let isScrolling = false;
+// 2026-09-21 🔴**불리언 래치를 시각으로 바꿨다.** `isScrolling = true` 를 걸고 150ms
+// setTimeout 으로만 풀면, 배경 탭·가려진 창에서 그 타이머가 안 와 **영구히 true** 로 남는다.
+// 그러면 maybeRenderSnapshotChartNow()/render() 가 계속 조기 반환해 차트가 그 시점에 굳는데
+// updateLivePriceFast() 에는 이 가드가 없어 **현재가 라벨만 움직인다** -- 사용자가 신고한
+// 정확히 그 그림이다(풋프린트가 04:40 에 멈췄는데 04:52 까지 가격만 갱신).
+// 시각 비교는 타이머 도착에 의존하지 않는다. 타이머는 «따라잡기 tick» 용으로만 남긴다.
+const SCROLL_IDLE_MS = 150;
+let lastScrollAt = 0;
+const isScrolling = () => Date.now() - lastScrollAt < SCROLL_IDLE_MS;
 let scrollIdleTimer = 0;
 let dashboardEvents = null;
 const OPS_POLL_MS = 30000;
@@ -457,8 +465,17 @@ function endAssetScopeLoading(scope, generation) {
 // 각자 부르기 때문에 같은 SVG를 한 프레임에 여러 번 그리곤 했다. rAF로 합쳐 프레임당 1회만
 // 실제로 그린다(그리는 내용은 동일 -- 항상 최신 캐시에서 다시 읽으므로 마지막 1회면 충분).
 let snapshotChartRafId = 0;
+let snapshotChartRafAt = 0;
+// rAF 는 창이 가려지거나 탭이 얼면 «호출되지 않은 채» 남는다. 그 id 를 잠금으로 쓰면
+// 위 isScrolling 과 같은 방식으로 영구 조기반환이 된다. 예약이 이보다 오래 묵으면 버린다.
+const RAF_STALL_MS = 2000;
 function scheduleSnapshotChartRender() {
-  if (snapshotChartRafId) return;
+  const now = Date.now();
+  if (snapshotChartRafId) {
+    if (now - snapshotChartRafAt < RAF_STALL_MS) return;   // 정상 대기
+    try { cancelAnimationFrame(snapshotChartRafId); } catch (e) { /* 이미 소멸 */ }
+  }
+  snapshotChartRafAt = now;
   snapshotChartRafId = requestAnimationFrame(() => {
     snapshotChartRafId = 0;
     renderSnapshotChart();
@@ -926,7 +943,7 @@ function chartRenderGateMs() {
 }
 
 function maybeRenderSnapshotChartNow() {
-  if (activePageTab !== "snapshot" || isScrolling) return;
+  if (activePageTab !== "snapshot" || isScrolling()) return;
   const now = Date.now();
   if (now - lastSnapshotChartRenderAt < chartRenderGateMs()) return;
   lastSnapshotChartRenderAt = now;
@@ -968,7 +985,7 @@ function applyDashboardEvent(payload) {
   //   보였다(2026-09-16 사용자 "래깅이 있어"). 시세가 곧 그 선의 값이므로 여기서도 그린다.
   //   스로틀은 같은 상수를 쓰므로 아래 render() 경로와 겹쳐도 두 번 그리지 않는다.
   maybeRenderSnapshotChartNow();
-  if (!latestMainState || isScrolling || !payload?.state?.state) return;
+  if (!latestMainState || isScrolling() || !payload?.state?.state) return;
   render(latestMainState, latestCompactState, { stateChanged: true });
 }
 
@@ -2795,12 +2812,12 @@ function setupPageTabs() {
 
 function setupScrollRendering() {
   document.addEventListener("scroll", () => {
-    isScrolling = true;
+    lastScrollAt = Date.now();
     window.clearTimeout(scrollIdleTimer);
+    // 이 타이머는 **따라잡기 전용**이다 -- 안 와도 isScrolling() 은 시간으로 풀린다.
     scrollIdleTimer = window.setTimeout(() => {
-      isScrolling = false;
       if (!document.hidden) tick();
-    }, 150);
+    }, SCROLL_IDLE_MS);
   }, { passive: true });
 }
 
@@ -6351,7 +6368,7 @@ async function tick() {
   setInterval(tick, POLL_MS);
 })();
 setInterval(() => {
-  if (!isScrolling) { setT("topClock", fmtNowClock()); }
+  if (!isScrolling()) { setT("topClock", fmtNowClock()); }
 }, 1000);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
