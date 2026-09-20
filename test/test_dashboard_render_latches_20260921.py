@@ -72,13 +72,44 @@ def test_density_opacity_is_mode_independent() -> None:
         f"밀도 알파가 모드에 의존한다 -- 같은 값이 두 색으로 보인다: {m.group(1)}"
 
 
-def test_footprint_density_draws_in_its_own_gutter() -> None:
-    """풋프린트에서는 셀과 겹치지 않는 전용 게이트에만 그린다."""
-    assert "FOOTPRINT_DENSITY_STRIP_PX" in src, "게이트 폭 상수가 없다"
-    assert re.search(r"drawDensitySeg\(g, ml, ml \+ densStrip,", src), \
-        "풋프린트 밀도가 게이트가 아닌 곳에 그려진다"
-    # 캔들 영역은 게이트만큼 안쪽으로 밀려야 한다(안 그러면 첫 봉이 게이트를 덮는다)
-    assert re.search(r"const plotX0 = ml \+ densStrip", src), "캔들 시작이 게이트를 비켜가지 않는다"
+def test_density_drawing_is_one_path_for_both_modes() -> None:
+    """두 모드가 **같은 경로**로 그려야 한다.
+
+    2026-09-21 에 풋프린트만 왼쪽 게이트로 빼 본 적이 있는데(알파를 낮춰 겹치던 것을
+    피하려던 우회), 사용자 요청으로 전체폭으로 되돌렸다. 모드별 분기가 다시 생기면
+    «같은 값 다른 색» 이 재발하기 쉬우므로 분기 자체를 막는다.
+    """
+    block = re.search(r'cachedLayer\("density".*?\n  \}\);', src, re.S)
+    assert block, "밀도 층 블록을 못 찾았다"
+    assert "if (footprint)" not in block.group(0), \
+        "밀도 그리기에 모드 분기가 생겼다 -- 두 화면 색이 갈릴 수 있다"
+
+
+def test_density_colormap_is_theme_aware() -> None:
+    """밀도가 높을수록 배경 대비가 강해야 한다 -- 배경이 둘이므로 색표도 둘이다.
+
+    2026-09-21 실측: 색표가 하나였을 때 라이트에서 t=0 대비 6.79 / t=1 대비 2.19 로
+    척도가 뒤집혀 있었다(사용자 스크린샷의 진한 블록 = 밀도 최저 구간).
+    """
+    def stops(name):
+        m = re.search(r"const " + name + r" = \[(.*?)\n\];", src, re.S)
+        assert m, f"{name} 를 못 찾았다"
+        rows = re.findall(r"\[([\d.]+), \[(\d+), (\d+), (\d+)\]\]", m.group(1))
+        assert len(rows) >= 2, f"{name} 정지점이 부족하다"
+        lum = lambda r: 0.2126 * int(r[1]) + 0.7152 * int(r[2]) + 0.0722 * int(r[3])
+        return [lum(r) for r in rows]
+
+    # 🔴이름이 아니라 **값**을 본다. 이름만 검사하면 선언을 지워도 참조가 남아 통과한다
+    #   (2026-09-21 이 검사기 자신의 첫 판이 그 주입을 놓쳤다).
+    dark, light = stops("DENSITY_STOPS_DARK"), stops("DENSITY_STOPS_LIGHT")
+    assert all(dark[i] < dark[i + 1] for i in range(len(dark) - 1)), \
+        "다크: 밀도가 높을수록 밝아져야 한다(어두운 배경 위)"
+    assert all(light[i] > light[i + 1] for i in range(len(light) - 1)), \
+        "라이트: 밀도가 높을수록 **어두워져야** 한다 -- 뒤집히면 척도가 거꾸로 읽힌다"
+    assert re.search(r"const densityStops = \(\) =>", src), "densityStops 접근자가 없다"
+    assert "densityStops()" in src.split("densityLegendGradient")[1][:200], \
+        "범례가 테마를 안 따라간다 -- 색 사본이 갈린다"
+    assert re.search(r"const baseGeomSig = \[themeSig,", src), "캐시 서명에 테마가 없다"
 
 
 if __name__ == "__main__":

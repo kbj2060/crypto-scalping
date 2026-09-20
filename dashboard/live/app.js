@@ -190,10 +190,6 @@ const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 // 어두운 글자가 맞고, 라이트에서는 같은 토큰이 진해져 흰 글자가 맞다.
 // ⭐그 분기는 CSS 의 --on-fill 한 곳에 있다 -- 여기서 색을 정하지 않는다(2026-09-16).
 const inkOnFill = () => "var(--on-fill)";
-// 풋프린트에서 청산 밀도를 그릴 **전용 게이트 폭**(px). 셀과 겹치지 않으므로 색은
-// 청산맵과 **똑같은 0.85** 를 쓴다 -- 알파를 낮춰 겹치는 방식은 척도를 눌러 버렸다
-// (2026-09-21, renderCandleSvg 의 densStrip 주석에 실측치). 눈으로 맞출 손잡이다.
-const FOOTPRINT_DENSITY_STRIP_PX = 22;   // 2026-09-21 14 -> 22 (사용자: "제대로 확인이 안돼")
 // 가격축 위아래 여백(캔들 고저 폭 대비). 청산맵은 레벨·라벨이 가장자리에 걸려 더 넓게 준다.
 // 풋프린트를 같이 넓히면 안 된다 -- ySpan 이 커져 행 높이가 줄고 셀 숫자가 먼저 깨진다.
 const CHART_Y_PAD_LIQMAP = 0.26;      // 2026-09-21 0.15 -> 0.26 (사용자 요청)
@@ -4742,21 +4738,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const yMin = minP - pad, yMax = maxP + pad;
   const ySpan = Math.max(yMax - yMin, 1e-5); // Prevent division by zero
 
-  // 2026-09-21 ⭐풋프린트의 **청산 밀도 전용 게이트**. 전에는 밀도를 전체폭에 깔고 알파를
-  //   0.85 -> 0.25 로 낮췄는데, 알파를 낮추면 색이 흐려지는 게 아니라 **척도가 배경 쪽으로
-  //   눌린다** -- 실측(다크, 실효 배경 rgb(33,38,47)): t=1.0 이 rgb(49,68,87) 로 청산맵의
-  //   t=0.0(rgb(34,53,78))과 거의 같은 밝기가 되고, 그 위에 셀(알파 0.10~0.66)이 올라가면
-  //   색상까지 초록/빨강으로 갈린다(t=1.0 최종 rgb(44,114,90)). 같은 범례를 달고 다른 눈금을
-  //   쓰는 셈이었다.
-  //   그래서 겹치기 자체를 없앤다: 왼쪽에 게이트를 비우고 거기만 **청산맵과 같은 0.85** 로
-  //   칠한다. 색이 정확히 일치하고 셀은 손대지 않는다.
-  // 🔴`cw` 는 그대로 둔다 -- 패널 구분선·가격 라벨이 전부 `ml + cw` 기준이라 여기서 줄이면
-  //   차트 전체가 따라 움직인다. 좁히는 것은 **캔들 영역뿐**이다(plotX0/plotW).
-  const densStrip = (footprint && (densityHistory || []).length) ? FOOTPRINT_DENSITY_STRIP_PX : 0;
-  const plotX0 = ml + densStrip, plotW = cw - densStrip;
-  const xAt = (i) => plotX0 + (i * plotW) / candles.length;
+  // 2026-09-21 청산 밀도는 **전체폭**이다 -- 체결 봉 뒤로 지나간다(사용자 요청).
+  //   한때 풋프린트만 왼쪽 게이트로 뺐는데, 그건 «알파를 낮춰 겹치기»가 척도를 눌러 버린
+  //   것을 피하려던 우회였다. 알파는 두 모드 같은 0.85 로 두고 겹치기를 허용한다.
+  // 🔴셀 가독성 실측(라이트, 밴드 뒤에 깔 때 셀 숫자 배경대비):
+  //     밴드없음 5.30 · t<=0.2 4.59 · t=0.5 3.93 · t=1.0 2.56  (전부 진한 셀 0.66 기준)
+  //   densityClip 이 90분위라 t>=1.0 은 빈의 10% 뿐이다 -- 대부분은 옅어서 거의 안 건드리고
+  //   강한 군집에서만 흐려진다(그 자리는 어차피 눈에 띄어야 한다).
+  //   더 거슬리면 «t 하한을 둬 약한 밴드는 안 그리기»가 다음 손잡이다.
+  const xAt = (i) => ml + (i * cw) / candles.length;
   const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
-  const bw = (plotW / candles.length) * 0.8;
+  const bw = (cw / candles.length) * 0.8;
 
   // ── 계층 캐시 (2026-09-20) ────────────────────────────────────────────────
   // 봉 셀은 이미 봉별로 캐시한다. 남은 것은 **가격 플롯 바깥의 층들**이다 -- 격자·x눈금·
@@ -4773,7 +4765,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴테마를 서명에 넣는다 -- 밀도 색표·풋프린트 셰이드·잉크 불투명도가 전부 테마 파생이라,
   //   빠뜨리면 테마를 바꿔도 캐시된 층이 옛 색 그대로 남는다(모드 키와 같은 함정).
   const themeSig = document.documentElement.getAttribute("data-theme") || "dark";
-  const baseGeomSig = [themeSig, w, h, mt, ch, ml, mr, cw, densStrip, bw, yMin, yMax, plotBottom,
+  const baseGeomSig = [themeSig, w, h, mt, ch, ml, mr, cw, bw, yMin, yMax, plotBottom,
                        mobileChart, oiPanelY, liqPanelY, OI_PANEL_H, LIQ_PANEL_H,
                        supPanelY, SUP_PANEL_H, turnPanelY, dcvdPanelY, TURN_H, DCVD_H].join("|");
   // 봉 시각만. 진행 중인 봉의 OHLC 는 여기 없다(위 주석).
@@ -4916,7 +4908,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     rect.setAttribute("width", x1 - x0); rect.setAttribute("height", bottom - top);
     rect.setAttribute("fill", densityColor(t));
     // 두 모드가 **같은 알파**를 쓴다 -- 풋프린트는 셀과 겹치지 않는 게이트에 그리므로
-    // 낮출 이유가 없고, 낮추면 같은 값이 두 색으로 보인다(위 densStrip 주석의 실측).
+    // 낮출 이유가 없고, 낮추면 같은 값이 두 색으로 보인다(위 전체폭 주석의 실측).
     rect.setAttribute("fill-opacity", "0.85");
     into.appendChild(rect);
   };
@@ -4940,26 +4932,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   baseGeomSig 에는 모드가 없어서, 기하가 우연히 같으면 옛 불투명도 층을 그대로
   //   재사용한다. 캐시가 «맞는 그림»을 돌려주는지는 키가 정한다.
   if (sortedDensityHistory.length) cachedLayer("density",
-      objToken(densityHistory) + ":" + densityClip + ":" + (footprint ? "fp" : "liq"), (g) => {
+      objToken(densityHistory) + ":" + densityClip, (g) => {
   const densityPriceUnion = Array.from(new Set(sortedDensityHistory.flatMap(snap => (snap.bins || []).map(b => b.price))));
-  // ── 풋프린트: 전용 게이트에 **최신 스냅샷 하나**만 (2026-09-21) ──────────────
-  // 게이트는 폭이 14px 라 시간축이 없다. 시계열을 욱여넣으면 한 시간이 2px 가 되어
-  // 아무것도 안 읽힌다. 세로 띠가 뜻하는 것은 «지금 이 가격에 밀도가 얼마나»이고,
-  // 그건 최신 스냅샷이다 -- 청산맵의 맨 오른쪽 열과 같은 값이다(그래서 두 화면이 일치한다).
-  if (footprint) {
-    const snap = sortedDensityHistory[sortedDensityHistory.length - 1];
-    const weightByPrice = new Map((snap.bins || []).map(b => [b.price, b.weightPct || 0]));
-    densityPriceUnion.forEach((price) => {
-      const half = densityBinWidth / 2;
-      const top = Math.max(mt, yAt(price + half));
-      const bottom = Math.min(plotBottom, yAt(price - half));
-      if (bottom <= top) return;
-      const pct = clamp01(weightByPrice.get(price) || 0);
-      drawDensitySeg(g, ml, ml + densStrip, top, bottom,
-                     densityClip > 0 ? Math.min(1, pct / densityClip) : 0);
-    });
-    return;
-  }
   sortedDensityHistory.forEach((snap, si) => {
     const xStartIdx = densityBoundaryIdx[si];
     const xEndIdx = si + 1 < densityBoundaryIdx.length ? densityBoundaryIdx[si + 1] : candles.length;
@@ -5251,7 +5225,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴델타 라벨과 POC 점은 **캐시하지 않는다**. 델타 y 는 앞선 봉들의 충돌회피 결과에
     //   의존해서(deltaBoxes) 중간 봉 하나만 바뀌어도 뒤쪽이 전부 틀어진다 -- 그 사슬을
     //   캐시에 들이면 조용히 어긋난다. 둘 다 노드 하나뿐이라 매번 만들어도 싸다.
-    const geomSig = [w, h, mt, ch, ml, cw, densStrip, bw, yMin, yMax, candles.length, rowSize, rowPx,
+    const geomSig = [w, h, mt, ch, ml, cw, bw, yMin, yMax, candles.length, rowSize, rowPx,
                      maxBuy, maxSell, half, fontPx, showQty, INK_OPACITY].join("|");
     const barCache = renderCandleSvg._barCache || (renderCandleSvg._barCache = new Map());
     // 델타 라벨은 봉 그룹 **밖**이라 따로 둔다(위 🔴주석: 충돌회피 사슬 때문).
@@ -5821,7 +5795,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
     if (mx < ml || mx > w - mr) { hideTooltip(); return; }
 
-    const idx = Math.min(candles.length - 1, Math.max(0, Math.floor(((mx - plotX0) / plotW) * candles.length)));
+    const idx = Math.min(candles.length - 1, Math.max(0, Math.floor(((mx - ml) / cw) * candles.length)));
     const c = candles[idx];
     if (!c) return;
 
