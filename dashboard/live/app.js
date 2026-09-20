@@ -5025,7 +5025,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-16 줄 배치: 천장 레인이 위 여백에서 빠져 mt 를 22 -> 12 로 줄이고(플롯이 그만큼
   // 커진다), 아래는 바닥 레인 자리를 회수한 뒤 구간 2줄(추세 전환·변동폭 게이트)을 붙였다.
   // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 레짐 +28~+43 · 변동성 +49~+64 ·
-  //                 추세 전환 +49~+64 · 변동폭 게이트 +70~+85
+  //                 추세 전환 +49~+64
+  // 2026-09-20 «게이트» 줄 제거(사용자 지시) -> mb 91 -> 70. 그 21px 는 바로 아래 새로
+  //   들어온 수급 리본(15 + 간격 6)이 그대로 받는다 -- 가격 플롯 높이는 변하지 않는다.
   // (2026-09-16 변동성 리본이 카드로 빠지면서 한 줄 21px 를 가격 플롯에 돌려줬다)
   // 2026-09-16 모바일 ml 34 -> 44: 좌측 가격선 라벨이 `ml - 5` 에서 **왼쪽으로** 뻗는데
   //   «저항1↑»(5글자 ~31px)가 x=-2 까지 나가 잘렸다. 차트 폭은 288 -> 278 로 10px 준다.
@@ -5087,7 +5089,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const CENTER_NUDGE = mobileChart ? 0 : 26;
   const ml = (mobileChart ? 44 : 45) + CENTER_NUDGE,
         mr = (mobileChart ? 68 : 112) - CENTER_NUDGE,
-        mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 91;
+        mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 70;
   const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
   // OI 신규계약 레인 -- 청산 레인 **바로 위**(사용자 지시). 별도 패널이 아니라 이 SVG 안의
   // 서브플롯이라야 캔들과 x축(봉)이 구성상 같아진다(레짐 리본이 같은 이유로 여기 있다).
@@ -5101,15 +5103,29 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 400 기준 가격 플롯은 모바일 233, 데스크톱 205 로 남는다.
   const OI_PANEL_H = oiBars.length ? (mobileChart ? 26 : 34) : 0;
   const OI_PANEL_GAP = oiBars.length ? 6 : 0;
+  // ── 고래·리테일 수급 리본 -- OI 레인 바로 아래 (2026-09-20 사용자 지시) ──────────
+  // 봉마다 «그 5분에 순 몇 ETH 가 들어왔나»를 두 계층으로 가른다. 풋프린트가 이미 봉별
+  // 가격대 셀을 주고 supplyFlowOfBar() 가 그걸 셋으로 가르므로 여기서는 **자리만** 잡는다.
+  // 🔴둘은 **한 자**를 나눠 쓴다(각자 정규화하면 「고래 매도 · 리테일 매수」가 같은 크기로
+  //   보여 거짓이 된다). 이 리본의 값이 바로 그 엇갈림이다 -- 실측 12봉 중 4봉에서 부호가
+  //   반대였다. 자 자체는 log1p 다(아래 hgt 주석).
+  // 데이터가 없으면 자리를 아예 안 잡는다(OI 레인과 같은 규약).
+  const supBars = (svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth"
+                   && latestFootprint && Array.isArray(latestFootprint.bars))
+                  ? latestFootprint.bars : [];
+  const SUP_PANEL_H = supBars.length ? 15 : 0;      // = LANE_H. 아래에서 상수를 못 쓴다(선언 전)
+  const SUP_PANEL_GAP = supBars.length ? 6 : 0;
   const cw = w - ml - mr;
-  const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP;
+  const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP
+             - SUP_PANEL_H - SUP_PANEL_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
   // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). 1초 수급이 먼저, 프로파일이 그 아래 --
   // 「체결 계열」 둘은 여전히 이웃한다. OI·청산 레인은 플롯 바로 아래 그대로다.
   const sub1sY = mtTop;
   const subProfileY = sub1sY + SUB_1S_H + SUB_GAP;
   const oiPanelY = plotBottom + OI_PANEL_GAP;
-  const liqPanelY = oiPanelY + OI_PANEL_H + LIQ_PANEL_GAP;
+  const supPanelY = oiPanelY + OI_PANEL_H + SUP_PANEL_GAP;
+  const liqPanelY = supPanelY + SUP_PANEL_H + LIQ_PANEL_GAP;
   const NS = "http://www.w3.org/2000/svg";
   // 풋프린트는 서버가 주는 12봉이 곧 창이다 -- 모바일 핀치줌(visibleCandleWindow)으로 더
   // 잘라내면 셀만 커지고 볼 구간이 사라진다.
@@ -5162,7 +5178,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴현재가·진행봉 OHLC 는 **일부러 안 넣는다**. 넣으면 틱마다 전부 깨져 캐시가 무의미해진다.
   //   그래서 OHLC 에 의존하는 것(가격 라벨·이벤트 삼각형)은 **캐시하지 않고** 매번 그린다.
   const baseGeomSig = [w, h, mt, ch, ml, mr, cw, bw, yMin, yMax, plotBottom,
-                       mobileChart, oiPanelY, liqPanelY, OI_PANEL_H, LIQ_PANEL_H].join("|");
+                       mobileChart, oiPanelY, liqPanelY, OI_PANEL_H, LIQ_PANEL_H,
+                       supPanelY, SUP_PANEL_H].join("|");
   // 봉 시각만. 진행 중인 봉의 OHLC 는 여기 없다(위 주석).
   const timesSig = candles.length + ":" + (candles[0] ? candles[0].time : 0)
                    + ":" + (candles[candles.length - 1] ? candles[candles.length - 1].time : 0);
@@ -5245,7 +5262,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = LANE_H;
   // 변동성 전망 리본 -- 레짐 바로 아래, 같은 두께. ETH 전용 모델이라 다른 코인에선 안 그린다.
   // 방향 없는 두 신호의 구간 줄. 이름을 왼쪽 여백에 적는 것까지 레짐 리본과 같은 규약이다.
-  const TREND_ROW_Y = h - mb + 49, GATE_ROW_Y = h - mb + 70;
+  const TREND_ROW_Y = h - mb + 49;
   // 변동성 값은 이제 카드가 보여준다. 차트에는 **툴팁용 지도**만 남긴다(리본은 내렸다).
   const volMapOn = isSnapshotChart && activeSnapshotAsset === "eth"
     && latestVolForecast && latestVolForecast.available
@@ -5926,8 +5943,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       { y: TREND_ROW_Y, label: "전환", items: [
         { key: "trend_prewarn", name: "전환 예고", color: "var(--warn)", opacity: 0.30 },
         { key: "trend_detect", name: "전환 탐지", color: "var(--warn)", opacity: 0.95 }] },
-      { y: GATE_ROW_Y, label: "게이트", items: [
-        { key: "evr_gate", name: "게이트 발동", color: "var(--amber)", opacity: 0.72 }] },
+      // 2026-09-20 «게이트» 줄을 걷어냈다(사용자 지시). 값 자체는 카드
+      //   (evrGateIndicatorItem)에 남아 있다 -- 지운 건 차트 줄 하나다.
     ];
     // 구간 줄은 cm(60초 폴링)에만 달려 있다. 🔴아래 **이벤트 삼각형은 캐시하지 않는다** --
     // y 가 그 봉의 고가/저가에서 나오므로 진행 중인 봉에서 틱마다 움직인다.
@@ -6106,7 +6123,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   vLine.setAttribute("x1", 0); vLine.setAttribute("x2", 0);
   vLine.setAttribute("y1", mt);
   // 십자선은 아래 줄들까지 걸친다 -- 호버한 봉이 어느 구간에 속하는지 눈으로 잇게.
-  vLine.setAttribute("y2", GATE_ROW_Y + LANE_H);
+  vLine.setAttribute("y2", TREND_ROW_Y + LANE_H);   // 마지막 줄까지 (게이트 제거 후)
   vLine.setAttribute("stroke", "var(--hover-line)");
   vLine.setAttribute("stroke-dasharray", "4,4");
   vLine.style.display = "none";
@@ -6227,12 +6244,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             + (th == null ? "" : ` / 임계 ${(th * 100).toFixed(1)}%`);
         }
         if (at(sp.trend_detect)) trigLines += "<br>전환 탐지 지속 중 (거래대금·체결속도 둘 다 q90 초과)";
-        if (at(sp.evr_gate)) {
-          const ra = at(meta.evr_gate_ratio);
-          trigLines += "<br>변동폭 게이트 발동 (24시간 기대변동 상위 10%)"
-            + (ra == null ? "" : ` · 임계의 ${Number(ra).toFixed(2)}배`)
-            + ((cmNow.spans_partial || []).includes("evr_gate") ? " · 과거 이력 없음(현재만)" : "");
-        }
       }
     }
     showTooltip(evt.pageX, evt.pageY, `
@@ -6329,6 +6340,99 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
   }
 
+  });
+
+  // ── 고래·리테일 수급 리본 (2026-09-20 사용자 지시) ─────────────────────────────
+  // 봉마다 순수급(매수-매도)을 **고래(≥$100k)**와 **리테일(<$10k)** 둘로 갈라 0선 기준
+  // 좌/우 반폭 막대로 그린다. 값은 supplyFlowOfBar() 가 낸다 -- 5분봉 하나가 곧 5분 누적이다.
+  // 🔴같은 자를 쓴다. 실측 |고래|/|리테일| 중앙 4.7배라 리테일이 작게 나오지만, 자를 따로
+  //   주면 「고래 −319 · 리테일 +53」이 같은 크기로 보인다. 이 리본이 말하려는 게 바로 그
+  //   엇갈림이라(실측 12봉 중 4봉) 크기를 거짓말하면 화면이 뒤집힌다. 대신 최소 1px 을
+  //   보장해 **부호는 항상 보이게** 한다.
+  // 풋프린트 폴링(2초)에만 달려 있다.
+  cachedLayer("supplyLane", objToken(supBars), (g) => {
+  if (supBars.length && candles.length && SUP_PANEL_H) {
+    const SY = supPanelY, SH = SUP_PANEL_H, SMID = SY + SH / 2;
+    const flowByTs = new Map();
+    supBars.forEach((b) => {
+      const t = Number(b && b.time);
+      if (Number.isFinite(t)) flowByTs.set(t, supplyFlowOfBar(b.levels));
+    });
+    let peak = 0;
+    candles.forEach((c) => {
+      const f = flowByTs.get(c.time);
+      if (f) peak = Math.max(peak, Math.abs(f.whale), Math.abs(f.retail));
+    });
+    const topLine = document.createElementNS(NS, "line");
+    topLine.setAttribute("x1", ml); topLine.setAttribute("x2", ml + cw);
+    topLine.setAttribute("y1", SY); topLine.setAttribute("y2", SY);
+    topLine.setAttribute("stroke", "var(--soft-line)");
+    g.appendChild(topLine);
+    if (peak > 0) {
+      const half = SH / 2 - 1;
+      const nowBar = Math.floor(Date.now() / 1000 / 300) * 300;
+      const series = [{ k: "whale", name: "고래", op: 0.9 },
+                      { k: "retail", name: "리테일", op: 0.55 }];
+      candles.forEach((c, i) => {
+        const f = flowByTs.get(c.time);
+        if (!f) return;
+        // 반폭 둘. 봉이 좁으면(모바일 34봉 bw≈6.8) 각 1px 까지 줄지만 자리는 유지된다.
+        const bw2 = Math.max(1, bw / 2 - 0.5);
+        series.forEach((sr, si) => {
+          const v = f[sr.k];
+          if (!v) return;
+          // 🔴선형은 못 쓴다 -- 실측 12봉에서 최대 2,964 / 중앙 202 라 **중앙 봉이 0.4px**
+          //   가 된다(한 봉이 나머지를 씻어낸다). 청산 레인과 같은 log1p 자를 쓴다.
+          const hgt = Math.max(1, half * Math.log1p(Math.abs(v)) / Math.log1p(peak));
+          const rect = document.createElementNS(NS, "rect");
+          rect.setAttribute("x", xAt(i) + si * (bw / 2));
+          rect.setAttribute("y", v >= 0 ? SMID - hgt : SMID);
+          rect.setAttribute("width", bw2);
+          rect.setAttribute("height", hgt);
+          rect.setAttribute("fill", v >= 0 ? "var(--good)" : "var(--bad)");
+          rect.setAttribute("fill-opacity",
+                            String(c.time >= nowBar ? sr.op * 0.5 : sr.op));
+          const ti = document.createElementNS(NS, "title");
+          ti.textContent = fmtDateTick(c.time * 1000) + " " + sr.name + " 순수급 "
+            + (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v)) + " ETH"
+            + " · 고래 " + (f.whale >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(f.whale))
+            + " · 중형 " + (f.mid >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(f.mid))
+            + " · 리테일 " + (f.retail >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(f.retail))
+            + (c.time >= nowBar ? " (진행 중)" : "");
+          rect.appendChild(ti);
+          g.appendChild(rect);
+        });
+      });
+      const midLine = document.createElementNS(NS, "line");
+      midLine.setAttribute("x1", ml); midLine.setAttribute("x2", ml + cw);
+      midLine.setAttribute("y1", SMID); midLine.setAttribute("y2", SMID);
+      midLine.setAttribute("stroke", "var(--line)"); midLine.setAttribute("stroke-width", "1");
+      g.appendChild(midLine);
+      const lbl = document.createElementNS(NS, "text");
+      lbl.setAttribute("x", ml - 6); lbl.setAttribute("y", SMID + 3);
+      lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "9");
+      lbl.setAttribute("fill", "var(--muted)");
+      lbl.textContent = "수급";
+      const lblTip = document.createElementNS(NS, "title");
+      lblTip.textContent = "봉마다 그 5분의 순수급(매수-매도)입니다. 왼쪽 반이 고래(≥$100k),"
+        + " 오른쪽 반이 리테일(<$10k) -- 옅은 쪽이 리테일입니다. 위(초록)가 순매수입니다.\n"
+        + "이 줄이 보여주려는 건 **둘의 엇갈림**입니다 -- 실측 12봉 중 4봉에서 고래와 리테일의"
+        + " 부호가 반대였습니다(예: 고래 -319 · 리테일 +53).\n"
+        + "🔴높이는 log 자입니다(청산 레인과 같은 규약). 선형으로 그리면 한 봉(실측 2,964)이"
+        + " 나머지를 씻어내 중앙 봉이 0.4px 가 됩니다. 대가로 **크기 비는 눌립니다** --"
+        + " 고래가 리테일의 4.7배(중앙)여도 막대는 1.5배쯤으로 보입니다. 정확한 값은 막대에"
+        + " 커서를 올리면 셋(고래·중형·리테일) 다 나옵니다.\n"
+        + "🔴«고래»의 단위는 개별 체결이 아니라 테이커 주문(aggTrade)입니다. 쓸어담기 한 건이"
+        + " 작은 체결 수십 건으로 쪼개지므로 체결 단위로 세면 고래가 4배 작게 나옵니다.";
+      lbl.appendChild(lblTip);
+      g.appendChild(lbl);
+      const peakLbl = document.createElementNS(NS, "text");
+      peakLbl.setAttribute("x", ml + cw + 6); peakLbl.setAttribute("y", SMID + 3);
+      peakLbl.setAttribute("font-size", "9"); peakLbl.setAttribute("fill", "var(--muted)");
+      peakLbl.textContent = "최대 ±" + fmtFootprintQty(peak);
+      g.appendChild(peakLbl);
+    }
+  }
   });
 
   // ── 봉별 청산 레인 (2026-09-11 사용자 "청산맵 차트에 매 5분봉 청산 데이터를 추가") ──
