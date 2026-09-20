@@ -3177,16 +3177,6 @@ def make_app() -> web.Application:
         price = (w["bin_lo"] + np.arange(w["n_bins"])) * w["bin_size"]
         dist = (price - spot) / spot * 100.0 if spot else np.zeros_like(price)
 
-        # 가장 가까운 «지속» 벽 -- 지속률 60% 넘는 것 중 잔량 상위에서 최근접
-        keep = (inst > 0) & (pers / np.maximum(inst, 1e-9) >= 0.6)
-        wall = None
-        if keep.any():
-            cand = np.flatnonzero(keep & (pers >= np.percentile(pers[keep], 90)))
-            if cand.size:
-                i = int(cand[np.argmin(np.abs(dist[cand]))])
-                wall = {"dist_pct": round(float(dist[i]), 2), "qty": round(float(pers[i]), 1),
-                        "persist": round(float(pers[i] / max(inst[i], 1e-9)), 3)}
-
         # ── 체결 vs 이탈: 풋프린트로 가른다 ──────────────────────────────────
         # 잔량 감소 = 체결 + 이탈(취소·리프라이싱·창 밖). 풋프린트가 **같은 $0.5 버킷**으로
         # 가격행별 체결량을 주므로 조인이 공짜다(같은 프로세스 메모리, HTTP 왕복 0).
@@ -3250,7 +3240,6 @@ def make_app() -> web.Application:
                          np.ascontiguousarray(v, "<f4")).decode() for k, v in st.items()}},
             "summary": {
                 "spot": round(spot, 2),
-                "wall": wall,
                 "persist_share": round(float(pers.sum() / max(inst.sum(), 1e-9)), 3),
                 "offtouch_leave_share": offtouch_leave_share, "fill_source": fill_source,
                 "offtouch_bins": int(same_bid.sum() + same_ask.sum()),
@@ -3258,6 +3247,49 @@ def make_app() -> web.Application:
                 "window_s": int(w["cols"] * w["dt_s"]),
             },
         }
+
+    def _volsig_ref(symbol: str) -> dict[str, Any]:
+        """«분위 자» -- 4시간을 60초마다 표집해 정렬해 둔다.
+
+        🔴문턱을 절대값으로 박으면 안 된다(저장소 규칙: 확률 임계값은 분위로 선언한다).
+          재깔림도 실현변동도 시간대·레짐에 따라 자릿수가 통째로 움직인다. 「지금이
+          최근 4시간 중 몇 분위인가」만 화면이 읽을 수 있는 말이다.
+        🔴두 분위의 «합»은 균등분포가 아니다. 그래서 합 자체의 분포도 같이 정렬해 둔다
+          -- 이게 없으면 「70%」가 실제로는 상위 15% 같은 값이 된다.
+        """
+        from scripts.live_orderflow_raster_collector_20260914 import (  # noqa: PLC0415
+            read_window, vol_scores)
+        w = read_window(symbol, int(time.time() * 1000), 4 * 3600, 1)
+        past, refill = vol_scores(w, range(600, 4 * 3600, 60))
+        if past.size < 60:          # 워밍업 중이면 자가 없다 -- 없다고 말한다
+            return {}
+        sp, sr = np.sort(past), np.sort(refill)
+        sc = np.sort(np.searchsorted(sp, past) / sp.size
+                     + np.searchsorted(sr, refill) / sr.size)
+        return {"past": sp, "refill": sr, "score": sc}
+
+    def _volsig_read(symbol: str, ref: dict[str, Any]) -> dict[str, Any]:
+        """지금 이 초의 «얼마나 흔들릴까» 분위. 재료도 같이 낸다.
+
+        2026-09-20 에 후보를 전부 재고 **떨어뜨린 뒤** 남은 조합이다(`vol_scores` 의 표).
+        🔴이름값 주의: 주역은 «직전 300초 실현변동»이고 호가(재깔림)는 증분이다. 그리고
+          그 증분(상위20%/하위33% 1.63 -> 1.77배)은 CI [-0.014, +0.301] 로 0 을 포함한다.
+          화면이 둘을 따로 보여야 사용자가 어느 쪽이 켜졌는지 안다.
+        🔴mid 도 호가 데이터다(최우선 호가의 중간). 「가격 지표를 섞었다」가 아니다.
+        """
+        from scripts.live_orderflow_raster_collector_20260914 import (  # noqa: PLC0415
+            read_window, vol_scores)
+        if not ref:
+            return {}
+        w = read_window(symbol, int(time.time() * 1000), 660, 1)
+        past, refill = vol_scores(w)
+        if past.size == 0:
+            return {}
+        pp = float(np.searchsorted(ref["past"], past[0]) / ref["past"].size)
+        rp = float(np.searchsorted(ref["refill"], refill[0]) / ref["refill"].size)
+        sc = float(np.searchsorted(ref["score"], pp + rp) / ref["score"].size)
+        return {"vol_pct": round(100 * sc), "vol_past_pct": round(100 * pp),
+                "vol_refill_pct": round(100 * rp), "vol_ref_n": int(ref["score"].size)}
 
     def _approach_read(symbol: str) -> dict[str, Any]:
         """4시간 창으로 «가격이 다가왔을 때 이 가격대가 두꺼워졌나»를 낸다.
@@ -3304,6 +3336,17 @@ def make_app() -> web.Application:
                     f"approach_{symbol}", 120.0,
                     lambda: loop.run_in_executor(HEATMAP_EXECUTOR, _approach_read, symbol),
                     max_stale=STALE_GRACE_SECONDS))
+                # 변동 신호: 자(4시간)는 300초마다, 지금 값(660초)은 매 초. 실측 읽기
+                # 0.028초 / 0.002초라 폴링에 얹어도 된다.
+                ref = await swr_cached(
+                    f"volsig_ref_{symbol}", 300.0,
+                    lambda: loop.run_in_executor(HEATMAP_EXECUTOR, _volsig_ref, symbol),
+                    max_stale=STALE_GRACE_SECONDS)
+                if payload.get("summary"):
+                    payload["summary"].update(await swr_cached(
+                        f"volsig_{symbol}", 1.0,
+                        lambda: loop.run_in_executor(
+                            HEATMAP_EXECUTOR, _volsig_read, symbol, ref)))
             except Exception:  # noqa: BLE001, S110
                 # 삼킨다 -- 이 값이 없으면 화면은 표식만 안 그리고 나머지는 그대로다.
                 # 여기서 던지면 «장식 하나» 때문에 프로파일 전체가 빈다.

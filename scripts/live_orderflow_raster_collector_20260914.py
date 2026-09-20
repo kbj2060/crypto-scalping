@@ -275,6 +275,54 @@ def approach_ratio(w: dict, *, near_pct: float = 0.35, far_lo: float = 0.35,
             "ratio": out, "qualifying": int(qual.sum())}
 
 
+def vol_scores(w: dict, idx=None, *, lookback_s: int = 600, past_s: int = 300,
+               band_pct: float = 0.5, min_bins: int = 5) -> tuple:
+    """«앞으로 얼마나 흔들릴까»의 두 재료를 낸다 -- (직전 실현변동 bp, 재깔림).
+
+    2026-09-20 에 실제로 재서 고른 조합이다. 후보를 전부 같은 자로 재고 **떨어뜨린** 결과:
+
+      5분위별 실제 |수익률|(300초 뒤) 중앙 · 표본 7,864 · 독립 일수 7
+        합성(재깔림+블록−지속)  6.1 7.3 9.8 11.0 **7.7**  비단조 · 1.19배
+        재깔림 단독             6.2 7.1 8.3 12.0 **8.4**  비단조 · 1.31배
+        직전 실현변동 단독      6.7 7.1 7.4  8.3  11.4    단조   · 1.63배
+        **직전변동 + 재깔림**   6.0 7.2 8.2  8.7  11.5    단조   · 1.77배
+
+    🔴호가 축만으로 만든 신호는 전부 **최상위 분위에서 꺾인다**. 상관계수만 보면(재깔림
+      +0.166) 쓸 만해 보이는데 분위로 쪼개면 Q5 가 Q4 보다 조용하다 -- 화면에 문턱을
+      띄우려면 상관이 아니라 이 표를 봐야 한다.
+    🔴그래서 호가는 **주역이 아니라 증분**이다. 그리고 그 증분(1.63 -> 1.77배, +0.140)은
+      일블록 부트스트랩 CI [-0.014, +0.301] 로 **0 을 포함한다**. 부분 상관에서는 섰지만
+      (+0.139, CI 0 배제) 배수에서는 못 섰다. 독립 일수 7 이 한계다.
+    🔴블록·지속은 뺐다. 넣으면 오히려 나빠진다(1.77 -> 1.19배).
+
+    반환: (past_bp, refill) 두 1차원 배열. idx=None 이면 마지막 초 하나.
+    자격 미달(mid 결측 · 밴드 안 유효 빈 부족)인 인덱스는 **빠진다** -- 0 으로 채우면
+    「조용하다」로 읽힌다.
+    """
+    mid, dt = w["mid"], max(int(w["dt_s"]), 1)
+    lb, pb = lookback_s // dt, past_s // dt
+    n_bins = int(w["n_bins"])
+    if n_bins == 0 or len(mid) <= lb:
+        return np.zeros(0, np.float32), np.zeros(0, np.float32)
+    a = np.abs(w["qty"])
+    price = (w["bin_lo"] + np.arange(n_bins)) * w["bin_size"]
+    ok = np.isfinite(mid) & (mid > 0)
+    past, refill = [], []
+    for i in (range(len(mid) - 1, len(mid)) if idx is None else idx):
+        if i < lb or i >= len(mid) or not ok[i] or not ok[i - pb]:
+            continue
+        m = float(mid[i])
+        win = a[i - lb:i + 1]
+        peak = win.max(axis=0)
+        sel = (np.abs((price - m) / m * 100.0) <= band_pct) & (peak > 0)
+        if int(sel.sum()) < min_bins:
+            continue
+        up = np.clip(np.diff(win[:, sel], axis=0), 0, None)
+        past.append(abs(m - float(mid[i - pb])) / m * 1e4)
+        refill.append(float(up.sum() / max(float(peak[sel].sum()), 1e-9)))
+    return np.asarray(past, np.float32), np.asarray(refill, np.float32)
+
+
 def read_window(symbol: str, to_ms: int, cols: int, agg: int = 1,
                 root: Path | None = None) -> dict:
     """[to_ms − cols*agg 초, to_ms] 를 **절대 가격축**으로 정렬해 돌려준다.
@@ -773,6 +821,36 @@ def _selftest() -> None:
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+    # ── vol_scores: 두 재료가 «각각» 반응하는가 ──────────────────────────────
+    #   섞어서 하나로 내면 어느 쪽이 움직였는지 못 본다. 한 축씩 흔들어 본다.
+    T, NB = 700, 40
+    base = np.full((T, NB), 100.0, np.float32)
+    flat = {"mid": np.full(T, 2500.0, np.float32), "qty": base.copy(), "dt_s": 1,
+            "n_bins": NB, "bin_lo": int(2500.0 / BIN_SIZE) - NB // 2, "bin_size": BIN_SIZE}
+    pa, rf = vol_scores(flat)
+    assert pa.shape == (1,) and abs(float(pa[0])) < 1e-6, pa      # 안 움직였다
+    assert float(rf[0]) < 1e-6, rf                                # 다시 깔린 것도 없다
+
+    # 🔴가격 격자는 20칸($0.5 x 40)뿐이라 mid 를 크게 움직이면 밴드가 격자 밖으로 나가
+    #   자격 미달로 «빠진다». 계단 하나로 «300초 전 대비»만 본다.
+    step = {**flat, "mid": flat["mid"].copy()}
+    step["mid"][400:] = 2502.0
+    pa2, _ = vol_scores(step)
+    assert 7.5 < float(pa2[0]) < 8.5, pa2         # |2502-2500|/2502 = 7.99bp
+
+    churn = {**flat, "qty": base.copy()}
+    churn["qty"][1::2] = 40.0                     # 매초 60 빠졌다 다시 깔린다
+    _, rf2 = vol_scores(churn)
+    assert float(rf2[0]) > 1.0, rf2               # 재깔림이 peak 합을 넘는다
+    assert float(rf2[0]) > 100 * float(rf[0]) + 1.0
+
+    # 자격 미달은 **빠진다** -- 0 으로 채우면 「조용하다」로 읽힌다
+    gap = {**flat, "mid": flat["mid"].copy()}
+    gap["mid"][-1] = np.nan
+    assert vol_scores(gap)[0].size == 0
+    assert vol_scores(flat, range(0, T, 100))[0].size == 1        # i<600 은 창이 모자란다
+
     print("selftest OK")
 
 
