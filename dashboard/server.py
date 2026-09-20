@@ -2670,17 +2670,29 @@ def make_app() -> web.Application:
         cur = {"elapsed_s": int(now) - bar_start,
                "whale_net": sum(c[2] - c[3] for c in cur_cells), "retail_net": sum(c[0] - c[1] for c in cur_cells),
                "delta": sum(c[4] - c[5] for c in cur_cells), "oi_delta": oi_map.get(bar_start)}
+        # BTC 같은 창: ETH 봉과 같은 시각 구간의 이동·고저폭(bp). 캔들이 없거나 구간이 안 맞으면 생략
+        btc: dict[str, float] = {}
+        bc = {int(c["time"]): c for c in (situation_state.get("btc_candles") or [])}
+        if len(want) >= sit.WINDOW + 1 and want[-sit.WINDOW - 1] in bc and want[-1] in bc:
+            c0, c1 = bc[want[-sit.WINDOW - 1]], bc[want[-1]]
+            span = [bc[t] for t in want[-sit.WINDOW:] if t in bc]
+            btc = {"move_bp": (c1["close"] - c0["close"]) / c0["close"] * 1e4,
+                   "range_bp": (max(c["high"] for c in span) - min(c["low"] for c in span)) / c1["close"] * 1e4}
         mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
         bo = situation_state.get("breakout") or {}
         return {"bars": bars, "levels": levels, "cur": cur, "mid": mp.get("mid"),
                 "book": situation_state.get("book") or {}, "act_pct": mp.get("vol60_pct"), "sr": mp.get("sr") or {},
-                "deriv": mref.deriv_from_ring(mark_ring, sit.WINDOW * FOOTPRINT_BAR_SECONDS, sit.BASIS_PCT),
+                "deriv": mref.deriv_from_ring(mark_ring, sit.WINDOW * FOOTPRINT_BAR_SECONDS, sit.BASIS_PCT), "btc": btc,
                 "breakout": {"detect_on": bool((bo.get("detect") or {}).get("on")), "prewarn_on": bool((bo.get("prewarn") or {}).get("on"))}}
 
     async def compute_situation(now: float) -> None:
         loop = asyncio.get_running_loop()
         # 느린 입력 셋은 캐시로 (캔들 60초 · 전환탐지기 60초 · 호가 요약 5초)
         situation_state["candles"] = await load_market_history("eth")
+        try:
+            situation_state["btc_candles"] = await load_market_history("btc")   # 같은 캐시 프레임에서 자른다
+        except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
+            situation_state["btc_candles"] = None
         situation_state["breakout"] = await load_breakout_detector()
         try:
             hm = await swr_cached("situation_book", 5.0, lambda: loop.run_in_executor(
