@@ -193,7 +193,7 @@ const inkOnFill = () => "var(--on-fill)";
 // 풋프린트에서 청산 밀도를 그릴 **전용 게이트 폭**(px). 셀과 겹치지 않으므로 색은
 // 청산맵과 **똑같은 0.85** 를 쓴다 -- 알파를 낮춰 겹치는 방식은 척도를 눌러 버렸다
 // (2026-09-21, renderCandleSvg 의 densStrip 주석에 실측치). 눈으로 맞출 손잡이다.
-const FOOTPRINT_DENSITY_STRIP_PX = 14;
+const FOOTPRINT_DENSITY_STRIP_PX = 22;   // 2026-09-21 14 -> 22 (사용자: "제대로 확인이 안돼")
 // 가격축 위아래 여백(캔들 고저 폭 대비). 청산맵은 레벨·라벨이 가장자리에 걸려 더 넓게 준다.
 // 풋프린트를 같이 넓히면 안 된다 -- ySpan 이 커져 행 높이가 줄고 셀 숫자가 먼저 깨진다.
 const CHART_Y_PAD_LIQMAP = 0.26;      // 2026-09-21 0.15 -> 0.26 (사용자 요청)
@@ -2981,7 +2981,7 @@ function updateSnapshotCandleLive() {
 // 청산 밀도 가이드 (2026-09-09: SVG 인셋 -> 차트 위 HTML). 그라디언트는 DENSITY_STOPS 에서
 // 바로 만든다 -- CSS 에 사본을 두면 둘이 어긋나도 아무도 모른다(2026-09-12 에 실제로 겪음).
 const densityLegendGradient = () => "linear-gradient(90deg, "
-  + DENSITY_STOPS.map(([t, c], i) => `rgb(${c[0]},${c[1]},${c[2]}) ${t * 100}%`).join(", ") + ")";
+  + densityStops().map(([t, c]) => `rgb(${c[0]},${c[1]},${c[2]}) ${t * 100}%`).join(", ") + ")";
 
 function renderLiqDensityLegend(hasDensity) {
   const host = el("liqDensityLegend");
@@ -4507,14 +4507,34 @@ function fmtDateTick(ts) {
 // 합성 후 배경거리 49.3 · 휘도 단조 3.3 -> 6.4 -> 12.9 -> 23.1
 // 캔들색 이격(합성 후 RGB 유클리드, 전 구간 60 이상): 초록 #5abc80 최소 75 · 빨강 #d4786c 최소 148
 // 범례는 densityLegendGradient() 가 이 배열에서 만든다 -- 색 사본을 다른 곳에 두지 않는다.
-const DENSITY_STOPS = [
+// 🔴2026-09-21 **테마별로 갈랐다 -- 라이트에서 척도가 뒤집혀 있었다.**
+// 색표가 하나뿐이라 «어두운 남색 -> 밝은 파랑» 을 두 배경에 같이 썼는데, 그러면
+// 라이트(실효 배경 rgb(236,240,246))에서 **밀도가 낮을수록 진하게** 보인다.
+// 실측 배경대비(합성 후, WCAG):
+//     다크   t=0 1.22 -> t=1 4.15   단조 증가 ✅ (3.40x)
+//     라이트 t=0 6.79 -> t=1 2.19   **역전** 🔴 (0.32x)  ← 사용자 스크린샷의 진한 블록이 이것
+// 규칙은 하나다: **밀도가 높을수록 배경 대비가 강하다.** 그걸 배경마다 다른 색으로 구현한다.
+//     라이트 신규 t=0 1.13 -> t=1 6.56 단조 증가 ✅ (5.79x)
+// 범례(densityLegendGradient)도 같은 배열에서 만들므로 자동으로 따라간다 -- 색 사본을
+// 다른 곳에 두지 않는다는 기존 규약 그대로다.
+const DENSITY_STOPS_DARK = [
   [0.0, [34, 56, 84]],
   [0.35, [44, 82, 120]],
   [0.7, [62, 118, 166]],
   [1.0, [96, 156, 208]],
 ];
+const DENSITY_STOPS_LIGHT = [
+  [0.0, [214, 225, 240]],
+  [0.35, [158, 186, 221]],
+  [0.7, [86, 132, 190]],
+  [1.0, [21, 58, 115]],
+];
+const densityStops = () =>
+  (document.documentElement.getAttribute("data-theme") === "light"
+    ? DENSITY_STOPS_LIGHT : DENSITY_STOPS_DARK);
 function densityColor(t) {
   t = clamp01(t);
+  const DENSITY_STOPS = densityStops();
   for (let i = 0; i < DENSITY_STOPS.length - 1; i++) {
     const [t0, c0] = DENSITY_STOPS[i], [t1, c1] = DENSITY_STOPS[i + 1];
     if (t <= t1) {
@@ -4750,7 +4770,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   픽셀이 남고, 봉 시각을 빼면 봉이 한 칸 밀려도 그대로 남는다.
   // 🔴현재가·진행봉 OHLC 는 **일부러 안 넣는다**. 넣으면 틱마다 전부 깨져 캐시가 무의미해진다.
   //   그래서 OHLC 에 의존하는 것(가격 라벨·이벤트 삼각형)은 **캐시하지 않고** 매번 그린다.
-  const baseGeomSig = [w, h, mt, ch, ml, mr, cw, densStrip, bw, yMin, yMax, plotBottom,
+  // 🔴테마를 서명에 넣는다 -- 밀도 색표·풋프린트 셰이드·잉크 불투명도가 전부 테마 파생이라,
+  //   빠뜨리면 테마를 바꿔도 캐시된 층이 옛 색 그대로 남는다(모드 키와 같은 함정).
+  const themeSig = document.documentElement.getAttribute("data-theme") || "dark";
+  const baseGeomSig = [themeSig, w, h, mt, ch, ml, mr, cw, densStrip, bw, yMin, yMax, plotBottom,
                        mobileChart, oiPanelY, liqPanelY, OI_PANEL_H, LIQ_PANEL_H,
                        supPanelY, SUP_PANEL_H, turnPanelY, dcvdPanelY, TURN_H, DCVD_H].join("|");
   // 봉 시각만. 진행 중인 봉의 OHLC 는 여기 없다(위 주석).
