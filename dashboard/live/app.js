@@ -211,8 +211,7 @@ const API_SUPPLY_PROFILE_URL = "/api/supply-profile";
 //   최대 2초 묵은 값이다. 그보다 더 당기려면 폴링이 아니라 SSE 여야 한다 -- 지금 필요 없다.
 const API_SUPPLY_1S_URL = "/api/supply-1s";
 const SUPPLY_1S_POLL_MS = 1000;
-const SUPPLY_1S_WINDOW = 300;           // 화면에 그리는 초 수(5분)
-const SUPPLY_1S_ROLL = 30;              // 순수급을 재는 롤링 창(초). renderSupply1s 주석 참고.
+const SUPPLY_1S_SEGMENT = 300;          // 누적을 0으로 되돌리는 **벽시계** 경계(초). 5분봉과 같은 자리.
 // 계단 눈금(ETH). 자동정규화를 안 쓰는 이유는 renderSupply1s 주석에 있다.
 const SUPPLY_1S_STEPS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000];
 let supply1s = new Map();               // 초 -> [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
@@ -269,6 +268,11 @@ function repaintSupplyProfilePanel() {
 
 const API_OI_5M_URL = "/api/oi-5m";
 const OI_5M_POLL_MS = 15000;
+// 2026-09-20 미시 참고 카드 (index.html .micro-ref-panel). 서버가 1초마다 계산해 둔 것을 받기만 한다.
+const API_MICRO_REF_URL = "/api/micro-ref";
+const MICRO_REF_POLL_MS = 1000;
+let latestMicroRef = null;
+let microRefLastFetchAt = 0;
 let latestOi5m = null;
 let oi5mLastFetchAt = 0;
 const GEX_POLL_MS = 120000;          // 매시 cron -- 2분 폴링이면 충분히 앞선다
@@ -3598,9 +3602,10 @@ async function refreshSupply1s() {
       now: Number(payload.now) || supply1sMeta.now,
     };
     // 창 밖은 버린다. 안 버리면 탭을 켜둔 채로 며칠이면 Map 이 수십만 칸이 된다.
-    // 🔴창 시작 **이전** SUPPLY_1S_ROLL 초까지 남긴다 -- 안 그러면 롤링 합이 화면 왼쪽
-    //   30초 동안 0에서 차오르는 가짜 램프를 그린다. OI 는 갱신이 3~7초라 20초를 더 준다.
-    const floor = supply1sMeta.now - SUPPLY_1S_WINDOW - SUPPLY_1S_ROLL - 20;
+    // 그리는 구간이 **현재 5분봉 하나**라 그 경계까지만 있으면 된다(최악 now-300).
+    // OI 는 갱신이 3~7초라 20초를 더 준다. 넉넉히 두 봉치를 남겨 봉이 바뀌는 순간에도
+    // 새 봉의 앞부분이 비지 않게 한다.
+    const floor = supply1sMeta.now - 2 * SUPPLY_1S_SEGMENT - 20;
     supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
     oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
     supply1sVer += 1;
@@ -3631,13 +3636,20 @@ function gexIndicatorItem() {
   }
   const bn = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "-"}$${Math.abs(v / 1e9).toFixed(2)}B`);
   const ratio = g.front_ratio;
+  // 2026-09-20 두 가지를 고쳤다(연구: docs/experiments/eth_realtime_five_stream_1s_joint_analysis_20260920.md §11).
+  // 🔴①톤이 상수였다 -- `negative_gamma`(= total<0)가 854 스냅샷 37일 내내 0.0% 로 한 번도 참이 아니었다.
+  //    실제로 변하는 축은 front 월물(6.7%)이고, 연구가 이론 부호를 회복한다고 한 축도 그쪽이다.
+  // 🔴②달러 절대값($xx.xB)은 보정이 안 된다 -- 이 저장소 규약대로 **분위**를 같이 적는다.
+  const pct = g.total_pct == null ? null : Math.round(g.total_pct * 100);
+  const negFront = g.front_negative ?? false;      // 새 필드가 오기 전(cron 한 주기)에는 false
   return {
     key: "gex", label: "옵션 감마 노출 (GEX)",
-    // 🔴톤은 **위험도도 방향도 아니다**. 음감마일 때만 주의(31일 중 1일로 드물다), 그 외 중립.
-    tone: g.negative_gamma ? "warn" : "neutral",
-    subText: g.negative_gamma ? "음감마" : "양감마",
-    liveText: `수준 ${bn(g.total_gex_usd)} · 구조 ${ratio == null ? "-" : ratio.toFixed(2)}`
-      + " (front÷total)",
+    // 🔴톤은 위험도도 방향도 아니다. front 월물이 음수일 때만 주의(6.7%), 그 외 중립.
+    tone: negFront ? "warn" : "neutral",
+    subText: negFront ? "front 음감마" : (pct == null ? "양감마" : `수준 상위 ${100 - pct}%`),
+    liveText: `수준 ${bn(g.total_gex_usd)}${pct == null ? "" : ` (분위 ${pct}%)`}`
+      + ` · 구조 ${ratio == null ? "-" : ratio.toFixed(2)} (front÷total)`
+      + (g.history_days ? ` · 기준 ${g.history_days}일` : ""),
     derivedTag: "= 참고 · 신호 아님",
     derivedTitle: GEX_TITLE,
   };
@@ -3651,7 +3663,15 @@ const GEX_TITLE = "딜러 감마 노출. Deribit 옵션 체인을 매시 수집�
   + "total 을 통제하면 front 가 이론 부호를 회복합니다(t −6.22).\n\n"
   + "⏰아직 판정 전입니다. HAR-RV 대비 증분 R² 는 세 지평 모두 양수·단조지만(+0.011/+0.026/+0.041) "
   + "CI 가 전부 0 을 포함합니다(독립일 31). 판정 예정일은 1시간 지평 2026-09-28, 4시간 10-17 입니다. "
-  + "그때까지 이 값은 매매 판단의 근거가 아니라 맥락입니다.";
+  + "그때까지 이 값은 매매 판단의 근거가 아니라 맥락입니다.\n\n"
+  + "🔴방향으로 읽지 마세요. 2026-09-20 재측정(854스냅샷·37일)에서 GEX 와 앞 1~4시간 수익의 상관이 "
+  + "−0.25~−0.34 로 크게 나왔지만, GEX 공식에 스팟²이 들어 있어 전부 가격수준의 사본이었습니다 "
+  + "— 스팟을 통제하면 −0.05/−0.09(오차 안)로 사라지고, 스팟 단독이 GEX 보다 강합니다.\n\n"
+  + "느린 지표입니다. 매시 갱신이라 화면 값은 최대 1시간 묵었고, 24시간 뒤 자기상관이 +0.40 "
+  + "(높음/낮음 상태가 중앙 3시간 이어집니다). 초 단위 칩과 시간축이 다릅니다.\n\n"
+  + "«미시 참고» 카드에는 넣지 않았습니다. 60초 거래량 분위를 고정하면 GEX 높음/낮음 행이 "
+  + "갈리지 않고(앞 5분 고저폭 교차), 호가 방아쇠의 값도 GEX 레짐에 따라 달라지지 않았습니다"
+  + "(+1.06 vs +1.17, 겹침 6일).";
 
 
 async function refreshGex() {
@@ -3753,6 +3773,133 @@ async function refreshOi5m() {
   // 같은 SVG 를 한 번 더 통째로 다시 그린다.
 }
 
+// ── 미시 참고 (2026-09-20) ────────────────────────────────────────────────
+// 근거는 docs/experiments/eth_realtime_five_stream_1s_joint_analysis_20260920.md. 각 칩의 «풀이» 줄이
+// 그 수치를 든다. 🔴방향은 첫 칩 하나(1~15초). 나머지는 «얼마나»와 «무슨 상황»이다.
+async function refreshMicroRef() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  if (activeSnapshotAsset !== "eth") return;   // 원천(체결 링·OI·래스터)이 ETH 만 있다
+  const now = Date.now();
+  if (now - microRefLastFetchAt < MICRO_REF_POLL_MS) return;
+  microRefLastFetchAt = now;
+  try {
+    const res = await fetch(API_MICRO_REF_URL, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`micro-ref ${res.status}`);
+    latestMicroRef = await res.json();
+  } catch (error) {
+    console.error("Micro ref fetch error:", error);
+    latestMicroRef = { available: false, error: "fetch_failed" };
+  }
+  renderMicroRef();
+}
+
+const MR_FMT = {
+  eth: (v) => (v == null || !Number.isFinite(v)) ? "-" : (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(Math.abs(v) < 10 ? 2 : 0)),
+  usd: (v) => (v == null || !Number.isFinite(v)) ? "-" : (Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : Math.abs(v) >= 1e3 ? `$${(v / 1e3).toFixed(0)}k` : `$${v.toFixed(0)}`),
+  bp: (v) => (v == null || !Number.isFinite(v)) ? "-" : `${v >= 0 ? "+" : ""}${v.toFixed(0)}bp`,
+  sgn: (v, d = 2) => (v == null || !Number.isFinite(v)) ? "-" : `${v >= 0 ? "+" : ""}${v.toFixed(d)}`,
+};
+
+function renderMicroRef() {
+  const grid = el("microRefGrid"); const badge = el("microRefBadge");
+  if (!grid) return;
+  const m = latestMicroRef;
+  if (!m || !m.available) {
+    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = m && m.error ? "수집 대기" : "-"; }
+    grid.innerHTML = `<div class="mr-chip"><div class="mr-chip-meaning">${escapeHtml((m && m.error) || "서버가 첫 값을 계산하는 중")}</div></div>`;
+    return;
+  }
+  const chips = [];
+  // ① 호가 방아쇠 -- 유일한 방향 칩. 🔴«지금 상태»가 아니라 «마지막 방아쇠 + 나이»를 그린다.
+  //    2026-09-20 사용자 "계속 바뀐다": 값의 전부가 발동한 그 초에 있어서(나이 0초 +0.55bp · 1~2초 +0.07 ·
+  //    3초 이후 0) 늦추는 장치는 늦춘 만큼 정확히 잃는다. 라벨은 새 방아쇠에서만 바뀌고 나이만 올라간다.
+  const tg = m.trigger || {};
+  const tal = m.tally60 || {};
+  const trigTone = tg.live ? (tg.side === "동조매수" ? "good" : "bad") : "";
+  const trigState = tg.side
+    ? (tg.live ? `${tg.side} · 지금` : `${tg.side} · ${tg.age}초 전`)
+    : "방아쇠 없음";
+  chips.push({
+    label: "호가 방아쇠 · 마지막 발동", state: trigState, tone: trigTone,
+    value: `QI ${MR_FMT.sgn(m.qi)} (${m.qi_side}) · OFI10 ${MR_FMT.sgn(m.ofi10, 0)} ETH (${m.ofi_side}) · 지금 ${m.agree}`
+      + (tal.n ? ` · 최근 ${tal.n}초 매수 ${tal.buy} / 매도 ${tal.sell}초` : ""),
+    meaning: tg.live
+      ? "지금 발동 중. 최우선 큐와 전체북 흐름이 같은 쪽이고, 값은 이 초에 몰려 있다 — 방향 «힌트»이지 왕복비용(1.4bp)을 넘는 엣지가 아니다."
+      : tg.side
+        ? `${tg.age}초 전에 지나갔다. 나이 1~2초면 +0.07bp, 3초 이후는 0 — 지나간 방아쇠를 따라 들어가지 말 것.`
+        : `최근에 동조 발동이 없었다. 지금 ${m.agree}.`,
+    title: "QI = (최우선 매수수량−매도수량)/(합), OFI10 = 최근 10초 ±40bp 호가 총량 변화(매수−매도). 둘이 같은 쪽일 때만 값이 있다."
+      + ` 깜빡임을 줄이려고 슈미트 트리거를 넣었다(|QI|≥${m.qi_enter ?? 0.75} 에서 들어가고 ${m.qi_exit ?? 0.45} 밑으로 내려가야 나온다): 경계 채터만 없애고 정보는 안 버린다(시간당 변경 713→568, 직접 반전 −42%, edge 불변).`
+      + " 더 늦추는 장치(연속 확인·최소 체류·평활)는 늦춘 만큼 정확히 잃어서 안 넣었다 — 특히 «최소 체류»는 edge −81% 에 직접 반전이 4배로 늘어난다.",
+  });
+  // ② 활동 -- 같은 시간대 분위
+  const pct = m.vol60_pct; const actTone = m.act === "활발" ? "warn" : "";
+  chips.push({
+    label: `활동 · 60초 거래량 (UTC ${m.hour_utc}시 기준)`, state: m.act, tone: actTone,
+    value: `${MR_FMT.eth(m.vol60)} ETH · ${pct == null ? "기준 없음" : `이 시간대 상위 ${Math.max(0, 100 - Math.round(pct * 100))}%`}${m.vol60_x_p50 ? ` · p50의 ${m.vol60_x_p50.toFixed(1)}×` : ""}`,
+    meaning: m.act === "활발" ? "앞 5분 고저폭이 평소보다 크다(거래량→고저폭 IC 0.26). 손절폭·크기를 여기에 맞춘다. 방향은 아니다."
+      : m.act === "조용" ? "움직임 예약 없음. 얇은 호가라 적은 양으로 크게 움직일 수 있다(«효율적» 상태)." : "평소 수준.",
+    title: `«많다/적다»는 같은 UTC 시간대 최근 ${m.baseline_days || "?"}일 1분 거래량 분포에서의 분위. 미국장 13~15 UTC 는 평소의 2~8배가 정상이라 절대값으로 보면 하루 두 번 틀린다.`,
+  });
+  // ③ 호가 벽 (얕은/깊은)
+  const wallWord = (v, band) => v == null ? "-" : `${band} ${v > 0.15 ? "매수벽" : v < -0.15 ? "매도벽" : "중립"} ${MR_FMT.sgn(v)}`;
+  chips.push({
+    label: "호가 벽 · ±10bp / ±40bp", state: m.imb40 == null ? "-" : (m.imb40 > 0.15 ? "깊은 매수벽" : m.imb40 < -0.15 ? "깊은 매도벽" : "깊은 중립"),
+    tone: m.imb40 == null ? "" : (m.imb40 > 0.15 ? "good" : m.imb40 < -0.15 ? "bad" : ""),
+    value: `${wallWord(m.imb10, "얕은")} · ${wallWord(m.imb40, "깊은")}`,
+    meaning: "얕은 벽은 1~15초, 깊은 벽은 1~5분 지표. 내린 뒤 깊은 매수벽 + 거래량 많은데 안 밀림 = 5분 되돌림 가설(통제 후 +2.5~5bp, 창 4.6일·가설). 한 초에 생긴 벽은 다음 초 60% 사라진다.",
+    title: "불균형 = (밴드 안 매수호가 합 − 매도호가 합)/(합). ±0.15 를 넘어야 «벽»으로 적는다(|값| p50 이 0.09~0.14).",
+  });
+  // ④ 청산맵 근접
+  const sr = m.sr || {};
+  const nearTone = sr.near === "없음" ? "" : "warn";
+  chips.push({
+    label: "청산맵 레벨 · 근접 경보", state: sr.near || "-", tone: nearTone,
+    value: `지지 ${sr.sup ? sr.sup.toFixed(1) : "-"} (${MR_FMT.bp(sr.sup_bp)}) · 저항 ${sr.res ? sr.res.toFixed(1) : "-"} (${MR_FMT.bp(sr.res_bp)})${sr.deep_wall ? ` · 깊은 벽 ${sr.deep_wall}` : ""}`,
+    meaning: sr.near && sr.near !== "없음"
+      ? `레벨 ±15bp 안. 이 분에 청산이 있을 확률 0.52(먼 곳 0.28)·앞 5분 고저폭 2배. ${sr.deep_wall === "레벨쪽" ? "깊은 벽이 레벨 쪽 → 버팀 후보(돌파 0.22)." : sr.deep_wall === "반대쪽" ? "깊은 벽이 반대쪽 → 돌파 후보(0.47)." : ""} 직전 분 청산이 크면 돌파(0.41 vs 0.23). 방향 예보가 아니라 위치 예보.`
+      : "레벨 사이. 거리로 방향을 읽지 말 것 — 거리는 24h 레인지 위치의 사본(통제 후 IC −0.02). 강도(굵기)는 아무것과도 상관 0.",
+    title: "청산맵 최근접 지지·저항(24h 룩백)까지 거리. 실제 @forceOrder 청산이 레벨 ±15bp 에 5배 몰린다(플라시보 통과, 활동 매칭 후 +14pp).",
+  });
+  // ⑤ 거래량 폭발 → OI
+  const b = m.burst || {};
+  const bTone = b.state === "청산 덩어리 통과" ? "bad" : b.state === "신규 포지션 유입" ? "good" : "";
+  chips.push({
+    label: "거래량 폭발 → 5~8초 뒤 OI", state: b.state || "—", tone: bTone,
+    value: b.at ? `${Math.max(0, (m.ts || 0) - b.at)}초 전 · 1초 ${MR_FMT.eth(b.vol1s)} ETH (≥p99 ${MR_FMT.eth(b.p99)}) · ΔOI ${MR_FMT.sgn(b.doi, 0)} ETH${b.thr ? ` (임계 ±${b.thr.toFixed(0)})` : ""}` : `최근 90초 폭발 없음${b.p99 ? ` · 기준 p99 ${MR_FMT.eth(b.p99)} ETH/s` : " · 기준 없음"}`,
+    meaning: b.state === "청산 덩어리 통과" ? "거래량이 터진 뒤 OI 가 줄었다 = 그 덩어리는 신규 진입이 아니라 청산(닫힘). 추격 금지 — 남는 건 변동성뿐."
+      : b.state === "신규 포지션 유입" ? "거래량이 터지며 OI 가 늘었다 = 새 포지션이 들어왔다. 방향 정보는 없다(OI 60초 IC 0)." : "거래량→ΔOI 상관이 +5초에서 −0.23. 큰 체결 덩어리는 대개 청산이다.",
+    title: "1초 거래량이 같은 시간대 p99 를 넘은 초를 찾아, 그 뒤 8초 OI 변화를 본다. 임계는 최근 10분 8초 ΔOI 절대값의 p90(자기 보정).",
+  });
+  // ⑥ 청산 이벤트 (원시)
+  const l = m.liq60 || {}; const lp = m.liq_prev || null;
+  const lTot = (l.long || 0) + (l.short || 0);
+  const lTone = lTot > 0 && l.long > 0 && l.short > 0 ? "warn" : lTot > 0 ? "warn" : "";
+  const fo = m.fo || {};
+  const lState = !fo.connected ? "WS 끊김" : lTot === 0 ? "60초 청산 없음" : (l.long > 0 && l.short > 0 ? "양쪽 청산" : l.long >= l.short ? "롱 청산 중" : "숏 청산 중");
+  const foLine = fo.connected
+    ? `WS 연결 ${fo.since ? Math.round((Date.now() / 1000 - fo.since) / 60) + "분" : ""} · 누적 ${fo.events || 0}건${fo.last_event_ms ? ` · 마지막 ${Math.round((Date.now() - fo.last_event_ms) / 1000)}초 전` : ""}`
+    : `WS 미연결 (오류 ${fo.errors || 0}회${fo.last_error ? `: ${fo.last_error}` : ""})`;
+  chips.push({
+    label: "청산 이벤트 · 최근 60초 (원시)", state: lState, tone: !fo.connected ? "bad" : lTone,
+    value: `롱 ${MR_FMT.usd(l.long)} · 숏 ${MR_FMT.usd(l.short)} · ${l.n || 0}건${lp ? ` · 직전 분 롱 ${MR_FMT.usd(lp.long)} / 숏 ${MR_FMT.usd(lp.short)}` : ""} · ${foLine}`,
+    meaning: lTot === 0 ? "청산은 가격 움직임의 «결과»다(분 수익률→다음 분 순청산 −0.335, 반대 +0.01)."
+      : lState === "양쪽 청산" ? "한 창 안에 양방향 청산 = 휩쏘. 변동성 경보 — 크기 절반." : "지금 청산이 붙고 있다 = 방금 움직였다는 확인. 군집한다 — 다음 분 청산 5배·앞 5분 고저폭 2배. «롱 청산 = 바닥»은 아니다(통제 후 0).",
+    title: "@forceOrder 원시 이벤트(이 카드가 처음 저장한다: data/live/liq_events.jsonl). 봇의 청산 게이지는 1분 합·15분 누적이라 «캐스케이드 진행 중»을 1분 늦게 안다.",
+  });
+  grid.innerHTML = chips.map((c) => `
+    <div class="mr-chip" title="${escapeHtml(c.title || "")}">
+      <div class="mr-chip-head"><span class="mr-chip-label">${escapeHtml(c.label)}</span><span class="mr-chip-state ${c.tone || ""}">${escapeHtml(c.state || "-")}</span></div>
+      <div class="mr-chip-value">${escapeHtml(c.value || "-")}</div>
+      <div class="mr-chip-meaning">${escapeHtml(c.meaning || "")}</div>
+    </div>`).join("");
+  if (badge) {
+    const age = m.ts ? Math.round(Date.now() / 1000 - m.ts) : null;
+    badge.className = `ops-badge ${age != null && age <= 5 ? "good" : "neutral"}`;
+    badge.textContent = age == null ? "-" : `${age}초 전 · mid ${m.mid ? m.mid.toFixed(2) : "-"}`;
+  }
+}
+
 // ── 풋프린트 증분 (2026-09-20) ────────────────────────────────────────────
 // 400ms 폴링인데 48봉을 통째로 받고 있었다. 서버 실측: 400ms 간격 19번 중 내용이 실제로
 // 바뀐 건 12번이고 바뀌는 건 **맨 오른쪽 봉 하나**다(닫힌 봉은 5분에 한 번). 그래서 봉을
@@ -3851,17 +3998,25 @@ function supplyFlowOfBar(levels) {
 
 
 // ── 수급 · 최근 5분 x 1초 (2026-09-19, 2026-09-20 절대값으로 개편) ─────────
-// y 는 **최근 30초 순수급**(매수-매도, ETH). 0선 위면 들어오는 중, 아래면 나가는 중이고,
-// 높이가 곧 크기다. 고래는 0선 기준 면적으로 칠한다.
+// y 는 **5분 벽시계 경계에서 0으로 다시 쌓는 누적 순수급**(매수-매도, ETH). 끝점이 곧
+// 「이번 5분에 순 몇 ETH」이고, 선이 올라가는 중이면 지금 들어오는 중이다.
+// 고래는 0선 기준 면적으로 칠한다. 경계는 **아래 캔들과 같은 자리**라 두 그림이 같은 구간을
+// 말한다. 기준점이 벽시계라 새로고침·재기동과 무관하다.
 //
 // 🔴여기 원래 «창 시작을 0으로 둔 누적선»이 있었다. 두 겹으로 상대값이었다: ①기준점이
 //   매초 미끄러지고 ②눈금이 창 최대(max|v|)로 자동정규화돼 **조용한 5분과 터진 5분이
 //   화면상 같은 크기**였다. 더 근본적으로 누적선은 «지금 들어오나»를 **기울기**에 담는데,
 //   사람은 선차트에서 높이를 읽지 기울기를 못 읽는다 -- 절대값으로만 바꿔도 안 풀린다.
 //   (2026-09-20 사용자: "상대값이라 눈에 딱 들어오지 않는다")
-// 초별 막대가 아니라 롤링 합인 이유: 1초 순수급은 거의 스파이크라(고래는 분당 13건)
-// 300칸으로 그리면 잡음만 보인다. 30초면 고래 6~7건이 들어와 한 건에 안 흔들리면서
-// 1초 반응성은 남는다.
+// 🔴그 다음엔 «30초 롤링 창»이었다. 그것도 틀렸다(2026-09-20, 사용자가 실제로 속았다):
+//   고래 매수 +305 가 들어오면 30초 뒤 창에서 빠지면서 **아래로 뚝 떨어지는 획**이 생긴다.
+//   그 시각엔 아무 일도 없었는데 «갑작스러운 매도»로 읽힌다 -- 잡음이 아니라 거짓말이다.
+// 왜 누적인가: 초별 원값은 꼬리가 무겁다(실측 330초 중앙 1.5 / 최대 401, **260배**).
+//   선형 절대 눈금에 얹으면 데이터의 절반이 **0.2픽셀**이라 사실상 안 그려진다 -- 막대로
+//   그리든 선으로 그리든 마찬가지였다. 누적은 그 꼬리를 접는다: 같은 실측에서 5분 누적이
+//   리테일 80 / 고래 180 / 신규계약 889 로 **11배 안**에 들어와 셋 다 한 눈금에서 보인다.
+//   비선형 축(symlog)을 쓰지 않아도 되므로 「높이 2배 = 수량 2배」가 지켜진다.
+// 누적이 매초 한 번만 움직이므로 가짜 사건도 안 생긴다.
 // 눈금은 **계단 고정**(SUPPLY_1S_STEPS)이다. 완전 고정은 잘리고 자동은 크기를 지운다 --
 // 계단이면 «같은 높이 = 같은 수량»이 대체로 성립하고 스케일이 초마다 튀지 않는다.
 // 세 선(고래·리테일·신규계약)은 같은 자로 그린다. 단위가 같은 ETH 라서, 들어온 순수급 중
@@ -3896,12 +4051,18 @@ function renderSupply1s(box = null) {
   svg.innerHTML = "";
 
   const now = supply1sMeta.now || 0;
-  const first = now - SUPPLY_1S_WINDOW;
-  // 롤링 합은 화면 왼쪽 끝에서도 온전해야 한다 -- 그래서 first 이전 ROLL 초까지 읽는다
-  // (refreshSupply1s 가 그만큼 더 붙들고 있다). 그리는 건 first 이후뿐이다.
-  const allSecs = [...supply1s.keys()].filter((s) => s > first - SUPPLY_1S_ROLL && s <= now)
+  // 🔴창이 «최근 5분»(미끄러짐)이 아니라 **지금 만들어지고 있는 5분봉 그 자체**다
+  //   (2026-09-20 사용자 선택: 시안 H). x축 왼쪽 끝 = 봉이 열린 시각, 오른쪽 끝 = 봉이
+  //   닫힐 시각. 선은 봉이 진행되는 만큼 왼쪽에서 오른쪽으로 자라고, 다음 봉에서 리셋된다.
+  //   ⭐이 패널이 말하는 수급 = **바로 아래 풋프린트 봉을 만들고 있는 그 체결들**이다
+  //     (server.py footprint_bar_start 와 같은 식으로 자른 같은 경계).
+  //   ⚠️캔들 «차트»와 x축이 겹치는 건 아니다 -- 그쪽은 12~48봉(1~4시간)을 같은 폭에 그린다.
+  //     겹치는 것은 **데이터 구간**이지 가로 좌표가 아니다.
+  const first = Math.floor(now / SUPPLY_1S_SEGMENT) * SUPPLY_1S_SEGMENT;
+  // 이제 한 구간만 그리므로 이전 구간을 읽을 이유가 없다(누산기가 이 봉의 경계에서 시작한다).
+  const allSecs = [...supply1s.keys()].filter((s) => s >= first && s <= now)
                                       .sort((a, b) => a - b);
-  const secs = allSecs.filter((s) => s > first);
+  const secs = allSecs;
   if (secs.length < 2) {
     const txt = document.createElementNS(NS, "text");
     txt.setAttribute("x", w / 2); txt.setAttribute("y", h / 2);
@@ -3911,17 +4072,21 @@ function renderSupply1s(box = null) {
     return;
   }
 
-  const xAt = (s) => ml + ((s - first) / SUPPLY_1S_WINDOW) * cw;
+  const xAt = (s) => ml + ((s - first) / SUPPLY_1S_SEGMENT) * cw;
   // 🔴빈 구간을 직선으로 이으면 «그동안 아무 일도 없었다»로 읽힌다 -- 실제로는 «모른다»다
   //   (수집기 재기동·WS 끊김·백필이 아직 안 닿은 구간). 2026-09-19 첫 렌더에서 실제로 긴
   //   사선이 그어졌다. 초가 SUPPLY_1S_GAP_SEC 넘게 비면 선을 **끊는다**.
   // 5초로 둔 이유: 폴링이 1초라 한두 번 늦는 건 일상이고, 그때마다 띠를 그리면 잡음이 된다.
   // 5초가 비면 그건 폴링 지각이 아니라 실제 공백이다.
   const SUPPLY_1S_GAP_SEC = 5;
+  // 선을 끊는 두 이유: ①실제 공백 ②**구간 경계**(거기서 누적이 0으로 돌아가므로 이으면
+  //   없는 낙차를 그린다). 두 판정을 한 곳에 둬서 선과 면적이 같은 자리에서 끊긴다.
+  const segOf = (s) => Math.floor(s / SUPPLY_1S_SEGMENT);
+  const brk = (s, prev, gap) => prev === null || s - prev > gap || segOf(s) !== segOf(prev);
   const pathOf = (rows, yOf, gap = SUPPLY_1S_GAP_SEC) => {
     let d = "", prev = null;
     rows.forEach((r) => {
-      const cmd = (prev === null || r.s - prev > gap) ? "M" : "L";
+      const cmd = brk(r.s, prev, gap) ? "M" : "L";
       d += (d ? " " : "") + cmd + xAt(r.s).toFixed(1) + " " + yOf(r).toFixed(1);
       prev = r.s;
     });
@@ -3948,30 +4113,31 @@ function renderSupply1s(box = null) {
     svg.appendChild(t);
   };
 
-  // 최근 SUPPLY_1S_ROLL 초의 순수급(두 포인터).
-  const rollOf = (at) => {
+  // 구간 경계에서 0으로 되돌리며 쌓는다. 경계 이전 초도 **계산에는** 들어간다(누산기를
+  // 그때 0으로 되돌리는 게 전부이고, 그리는 건 first 이후뿐이다).
+  const cumOf = (at) => {
     const rows = [];
-    let head = 0, sum = 0;
+    let acc = 0, seg = null;
     allSecs.forEach((s) => {
-      sum += at(s);
-      while (allSecs[head] <= s - SUPPLY_1S_ROLL) { sum -= at(allSecs[head]); head++; }
-      if (s > first) rows.push({ s, v: sum });
+      if (segOf(s) !== seg) { seg = segOf(s); acc = 0; }
+      acc += at(s);
+      if (s > first) rows.push({ s, v: acc });
     });
     return rows;
   };
-  const whale = rollOf((s) => { const c = supply1s.get(s); return c[2] - c[3]; });
-  const retail = rollOf((s) => { const c = supply1s.get(s); return c[0] - c[1]; });
-  // 신규계약(OI)은 **레벨**이라 합이 아니라 차분이다: 지금 - ROLL 초 전. 갱신이 3~7초라
-  // 그 시점 값이 정확히 없을 수 있어 «그 이전 마지막 값»을 쓴다.
-  const oiKeys = [...oi1s.keys()].filter((s) => s > first - SUPPLY_1S_ROLL - 20 && s <= now)
+  const whale = cumOf((s) => { const c = supply1s.get(s); return c[2] - c[3]; });
+  const retail = cumOf((s) => { const c = supply1s.get(s); return c[0] - c[1]; });
+  // 신규계약(OI)은 **레벨**이라 더하지 않는다: 그 구간 첫 관측 대비 증분이다.
+  // 🔴갱신이 3~7초라 구간의 «첫 관측»이 경계보다 조금 뒤다 -- 그만큼 증분이 과소평가된다.
+  //   서버가 초 단위 OI 를 안 들고 있어 더 정확히는 못 한다. 체결(고래·리테일)은 초 단위라
+  //   이 근사가 없다.
+  const oiKeys = [...oi1s.keys()].filter((s) => s > first - SUPPLY_1S_SEGMENT - 20 && s <= now)
                                  .sort((a, b) => a - b);
   const oiRows = [];
-  let oiBack = 0;
+  let oiSeg = null, oiBase = 0;
   oiKeys.forEach((s) => {
-    while (oiBack + 1 < oiKeys.length && oiKeys[oiBack + 1] <= s - SUPPLY_1S_ROLL) oiBack++;
-    if (s > first && oiKeys[oiBack] <= s - SUPPLY_1S_ROLL) {
-      oiRows.push({ s, v: oi1s.get(s) - oi1s.get(oiKeys[oiBack]) });
-    }
+    if (segOf(s) !== oiSeg) { oiSeg = segOf(s); oiBase = oi1s.get(s); }
+    if (s > first) oiRows.push({ s, v: oi1s.get(s) - oiBase });
   });
   const peak = Math.max(0, ...whale.map((r) => Math.abs(r.v)), ...retail.map((r) => Math.abs(r.v)),
                         ...oiRows.map((r) => Math.abs(r.v)));
@@ -4019,7 +4185,7 @@ function renderSupply1s(box = null) {
       run = null;
     };
     rows.forEach((r) => {
-      if (run === null || r.s - run > SUPPLY_1S_GAP_SEC) {
+      if (brk(r.s, run, SUPPLY_1S_GAP_SEC)) {
         close();
         d += (d ? " " : "") + "M" + xAt(r.s).toFixed(1) + " " + mid.toFixed(1);
       }
@@ -4034,6 +4200,25 @@ function renderSupply1s(box = null) {
   };
   area(whale, (v) => Math.min(yF(v), mid), "var(--good)");
   area(whale, (v) => Math.max(yF(v), mid), "var(--bad)");
+
+  // 봉 진행선. x축이 **봉 전체**라 아직 안 온 시간이 오른쪽에 비어 있는데, 그게 «데이터가
+  // 없다»가 아니라 «아직 안 왔다»라는 걸 화면이 말해야 한다. 봉이 막 바뀐 직후엔 거의
+  // 전부가 빈 상태라 이 선이 없으면 고장난 것처럼 보인다.
+  {
+    const nx = xAt(now);
+    const g = document.createElementNS(NS, "line");
+    g.setAttribute("x1", nx); g.setAttribute("x2", nx);
+    g.setAttribute("y1", flowTop); g.setAttribute("y2", flowTop + flowH);
+    g.setAttribute("stroke", "var(--ink)"); g.setAttribute("stroke-opacity", "0.35");
+    g.setAttribute("stroke-dasharray", "2 3");
+    svg.appendChild(g);
+    const rest = document.createElementNS(NS, "rect");
+    rest.setAttribute("x", nx); rest.setAttribute("y", flowTop);
+    rest.setAttribute("width", Math.max(0, ml + cw - nx));
+    rest.setAttribute("height", flowH);
+    rest.setAttribute("fill", "var(--lift-solid, #8b949e)"); rest.setAttribute("fill-opacity", "0.05");
+    svg.appendChild(rest);
+  }
 
   const zero = document.createElementNS(NS, "line");
   zero.setAttribute("x1", ml); zero.setAttribute("x2", ml + cw);
@@ -4076,14 +4261,17 @@ function renderSupply1s(box = null) {
   if (over > 0) tags.forEach((t) => { t.y -= over; });
   tags.forEach((t) => label(ml + cw + 5, t.y + 3, t.text, t.color));
 
-  // 무엇을 보고 있는지 한 줄. 창 누적은 선을 지우고 여기 숫자로만 남긴다.
-  const cumW = secs.reduce((a, s) => { const c = supply1s.get(s); return a + c[2] - c[3]; }, 0);
-  label(ml + 2, mt - 5, SUPPLY_1S_ROLL + "초 순수급 ETH"
-        + (narrow ? "" : "  ·  5분 누적 고래 " + (cumW >= 0 ? "+" : "-")
-                         + qty(cumW)), "var(--muted)");
+  // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
+  label(ml + 2, mt - 5, "이번 5분봉 누적 순수급 ETH"
+        + (narrow ? "" : "  ·  아래 풋프린트 봉과 같은 구간 · 다음 봉에서 0"), "var(--muted)");
 
-  label(ml, h - 3, "5분 전", "var(--muted)");
-  label(ml + cw, h - 3, "지금", "var(--muted)", "end");
+  // 왼쪽은 이 봉이 열린 시각, 오른쪽은 닫힐 시각. 가운데에 진행 상황을 적는다 --
+  // 「지금」이 오른쪽 끝이 아니라는 걸 분명히 해야 빈 오른쪽이 오해되지 않는다.
+  const hhmm = (t) => { const d = new Date(t * 1000);
+    return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+  label(ml, h - 3, hhmm(first) + " 봉 시작", "var(--muted)");
+  label(ml + cw, h - 3, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
+  if (!narrow) label(xAt(now) + 4, h - 3, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
 }
 
 // ── 가격축 수급 프로파일 (2026-09-19) ───────────────────────────────────────
@@ -6594,6 +6782,7 @@ async function tick() {
       refreshGex();                  // 2026-09-19 옵션 감마 노출(참고 표시 · 신호 아님)
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
+      refreshMicroRef();             // 2026-09-20 미시 참고 (1초, ETH 만)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }

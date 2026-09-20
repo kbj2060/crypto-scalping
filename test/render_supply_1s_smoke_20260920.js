@@ -1,16 +1,21 @@
-// 1초 수급 패널 렌더 검증(2026-09-20 절대값 개편). node --check 는 문법만 본다 --
-// 여기서는 실제로 그려 보고 ①롤링 합 ②계단 눈금 ③상자 경계 ④공백 절단을 검사한다.
+// 1초 수급 패널 렌더 검증 (2026-09-20, 5분 리셋 누적판).
+// 🔴이 패널은 네 번 바뀌었다: 창시작 누적 -> 30초 롤링 -> 5분 리셋 누적(창은 최근 5분)
+//   -> **창 자체가 현재 5분봉**(시안 H). 30초 롤링은 사용자가 실제로 속아서 버렸다
+//   (고래 매수가 30초 뒤 «가짜 매도»로 보였다).
+//   H 의 핵심은 ①x축 왼쪽 끝 = 봉이 열린 시각 ②누적이 그 경계에서 0부터 쌓임
+//   ③아직 안 온 시간이 오른쪽에 남고 그게 «없음»이 아니라 «아직»으로 보이는가.
 //   node test/render_supply_1s_smoke_20260920.js
 const fs = require("fs");
 const src = fs.readFileSync("dashboard/live/app.js", "utf8");
 const grab = (re, what) => { const m = src.match(re); if (!m) { console.log(`🔴 못 찾음: ${what}`); process.exit(1); } return m[0]; };
 const FN = grab(/function renderSupply1s\(box = null\) \{[\s\S]*?\n\}\n/, "renderSupply1s");
 const PRE = grab(/function fmtFootprintQty\(v\) \{[\s\S]*?\n\}\n/, "fmtFootprintQty")
-          + grab(/const SUPPLY_1S_WINDOW = \d+;/, "WINDOW")
-          + "\n" + grab(/const SUPPLY_1S_ROLL = \d+;/, "ROLL")
+          + grab(/const SUPPLY_1S_SEGMENT = \d+;/, "SEGMENT")
           + "\n" + grab(/const SUPPLY_1S_STEPS = \[[^\]]*\];/, "STEPS") + "\n";
 
+const SEG = Number(PRE.match(/const SUPPLY_1S_SEGMENT = (\d+);/)[1]);
 const NOW = 1700000000;   // CI 의 esprima 4 는 숫자 구분자(1_700_000_000)를 모른다
+const BOUND = Math.floor(NOW / SEG) * SEG;      // 창 안의 5분 경계
 const W = 1318, H = 150;
 
 function draw(label, { qty = 10, hole = null, oi = null } = {}) {
@@ -20,11 +25,11 @@ function draw(label, { qty = 10, hole = null, oi = null } = {}) {
     set textContent(v) { this._t = v; }, get textContent() { return this._t; } });
   global.document = { createElementNS: (ns, kind) => { const e = mk(kind); els.push(e); return e; } };
   const sup = new Map(), oiMap = new Map();
-  for (let s = NOW - 350; s <= NOW; s++) {
+  for (let s = NOW - 650; s <= NOW; s++) {
     if (hole && s > hole[0] && s < hole[1]) continue;
     sup.set(s, [0, 0, qty, 0, qty, 0, 3000]);      // 고래 매수만 qty ETH/초
   }
-  if (oi) for (let s = NOW - 350; s <= NOW; s += 5) oiMap.set(s, oi * s);
+  if (oi) for (let s = NOW - 650; s <= NOW; s += 5) oiMap.set(s, oi * s);
   global.supply1s = sup;
   global.oi1s = oiMap;
   global.supply1sMeta = { now: NOW, retailMaxUsd: 10000, whaleMinUsd: 100000 };
@@ -36,72 +41,77 @@ function draw(label, { qty = 10, hole = null, oi = null } = {}) {
   const nums = els.flatMap((e) => ["x", "y", "x1", "x2", "y1", "y2", "width", "height"]
     .filter((k) => k in e._a).map((k) => Number(e._a[k])));
   if (!nums.every(Number.isFinite)) { console.log(`🔴 ${label}: NaN 좌표`); return null; }
-  const ys = els.filter((e) => e._kind === "path").flatMap((e) =>
-    [...String(e._a.d).matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => Number(m[2])));
+  const paths = els.filter((e) => e._kind === "path");
+  const ys = paths.flatMap((e) => [...String(e._a.d).matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map((m) => Number(m[2])));
   if (ys.some((y) => y < -0.5 || y > H + 0.5)) { console.log(`🔴 ${label}: 세로 넘침`); return null; }
-  return { els, svg, paths: els.filter((e) => e._kind === "path") };
+  const texts = els.filter((e) => e._kind === "text").map((e) => String(e.textContent || ""));
+  return { els, paths, texts, line: paths[paths.length - 1] };
 }
 
 let ok = true;
 const fail = (m) => { console.log("🔴 " + m); ok = false; };
+const subpaths = (d) => String(d).split(/(?=M)/).filter((x) => x.trim());
+const ysOf = (sp) => [...sp.matchAll(/[ML][\d.]+ (-?[\d.]+)/g)].map((m) => Number(m[1]));
 
-// ① 매초 10 ETH 가 **줄곧** 들어오면 30초 롤링은 화면 왼쪽 끝부터 끝까지 300 으로 평평해야
-//    한다. 여기가 기울어지면 창 시작 전 ROLL 초를 안 읽은 것(가짜 램프)이다.
+// ① 매초 10 ETH 가 줄곧 들어오면 봉 안에서 **단조 상승**(y 는 단조 감소)이어야 한다.
+//    롤링 시절엔 평평했다 -- 평평하면 누적이 아니라는 뜻이다.
 const a = draw("정상 10 ETH/s", {});
 if (!a) ok = false;
 else {
-  const lineYs = [...String(a.paths[a.paths.length - 1]._a.d).matchAll(/[ML][\d.]+ (-?[\d.]+)/g)]
-    .map((m) => Number(m[1]));
-  if (lineYs.length < 290) fail(`그린 점이 적다 (${lineYs.length})`);
-  if (new Set(lineYs.map((y) => y.toFixed(1))).size !== 1) fail(`고래선이 평평하지 않다 — 왼쪽 램프? ${lineYs[0]} .. ${lineYs[lineYs.length - 1]}`);
-  // ② 계단 눈금: 봉우리 300 -> 500 칸. 축 라벨에 그 값이 있어야 한다.
-  const texts = a.els.filter((e) => e._kind === "text").map((e) => e.textContent);
-  if (!texts.includes("+500")) fail(`계단 눈금이 500 이 아니다: ${JSON.stringify(texts)}`);
-  if (!texts.some((t) => String(t).includes("30초 순수급"))) fail("머리글이 없다");
-  if (!texts.some((t) => String(t).startsWith("고래 +"))) fail("고래 꼬리표가 없다");
-  // ③ 면적이 위(초록)에만 칠해져야 한다 -- 아래 면적은 0선에 눌려 납작하다.
-  const good = a.paths.find((p) => p._a.fill === "var(--good)");
-  const bad = a.paths.find((p) => p._a.fill === "var(--bad)");
-  if (!good || !bad) fail("0선 면적이 없다");
+  const sp = subpaths(a.line._a.d);
+  // H 는 봉 하나만 그리므로 공백이 없으면 subpath 도 하나다(경계는 화면 왼쪽 끝이다).
+  if (sp.length !== 1) fail(`봉 하나인데 선이 ${sp.length}조각이다 -- 경계가 화면 안에 들어왔나?`);
+  const lastYs = ysOf(sp[sp.length - 1]);
+  if (lastYs.length < 30) fail(`마지막 구간의 점이 적다 (${lastYs.length})`);
+  if (!lastYs.every((y, i) => i === 0 || y < lastYs[i - 1] + 1e-9)) fail("구간 안에서 단조 상승이 아니다 -- 누적이 아니다");
+  // 경계 직후 값은 0 근처(한 초분)여야 하고, 끝값은 구간 길이만큼 쌓여야 한다.
+  const span = NOW - BOUND + 1;
+  if (!a.texts.some((t) => t === "고래 +" + (span * 10 >= 1000 ? (span * 10 / 1000).toFixed(1) + "k" : String(span * 10))))
+    fail(`끝 꼬리표가 봉 누적과 다르다 (기대 ${span * 10}): ${JSON.stringify(a.texts.filter((t) => t.startsWith("고래")))}`);
+  if (!a.texts.some((t) => t.includes("봉 시작"))) fail("왼쪽 축 라벨(봉 시작)이 없다");
+  if (!a.texts.some((t) => /지금 \(\d+초 경과\)/.test(t))) fail("진행 표시(N초 경과)가 없다");
+  if (!a.texts.some((t) => t.includes("이번 5분봉 누적 순수급"))) fail("머리글이 없다");
+  // ⭐x축은 **봉 전체**다: 아직 안 온 시간이 오른쪽에 남아야 하고, 그 자리가 음영으로 표시돼야 한다.
+  const xs = [...String(a.line._a.d).matchAll(/[ML]([\d.]+) /g)].map((m) => Number(m[1]));
+  const rects = a.els.filter((e) => e._kind === "rect");
+  const rightEdge = Math.max(...rects.map((r) => Number(r._a.x) + Number(r._a.width)), 0);
+  if (!(Math.max(...xs) < rightEdge - 5))
+    fail(`선이 오른쪽 끝까지 갔다 -- x축이 봉 전체가 아니다 (선끝 ${Math.max(...xs).toFixed(1)} vs ${rightEdge.toFixed(1)})`);
+  if (!rects.some((r) => Number(r._a["fill-opacity"]) === 0.05))
+    fail("남은 시간 음영이 없다 -- 빈 오른쪽이 «데이터 없음»으로 읽힌다");
+  if (!a.paths.some((p) => p._a.fill === "var(--good)") || !a.paths.some((p) => p._a.fill === "var(--bad)"))
+    fail("0선 면적이 없다");
 }
 
-// ④ 공백은 이어 그리지 않는다 -- 선이 끊겨야(M 이 둘 이상) 한다.
-const b = draw("공백 60초", { hole: [NOW - 200, NOW - 140] });
+// ② 공백은 이어 그리지 않는다.
+const b = draw("공백 60초", { hole: [NOW - 120, NOW - 60] });
 if (!b) ok = false;
 else {
-  const d = String(b.paths[b.paths.length - 1]._a.d);
-  if ((d.match(/M/g) || []).length < 2) fail("공백을 가로질러 이었다");
-  if (!b.els.some((e) => e._kind === "rect")) fail("공백 음영이 없다");
+  if (subpaths(b.line._a.d).length < 2) fail("공백을 가로질러 이었다");
+  if (!b.els.some((e) => e._kind === "rect" && e._a.fill === "var(--neutral)")) fail("공백 음영이 없다");
 }
 
-// ⑤ 폭발해도 상자를 안 넘는다(마지막 계단 초과) + OI 차분선이 붙는다.
-if (!draw("폭발 5000 ETH/s + OI", { qty: 5000, oi: 0.5 })) ok = false;
-
-// ⑥ 순수급이 정확히 0 인 창. fmtFootprintQty(0) 이 ""를 주므로 그대로 쓰면 꼬리표가
-//    「고래 +」로 숫자 없이 뜬다 -- 2026-09-20 배포본 스크린샷에서 실제로 그랬다.
-//    30초 창에서 0 은 드물지 않다(고래 주문이 분당 13건).
+// ③ 순수급이 0 이어도 꼬리표가 부호로 끝나면 안 된다(fmtFootprintQty(0) 은 "" 를 준다).
 const z = draw("순수급 0", { qty: 0 });
 if (!z) ok = false;
 else {
-  const bad = z.els.filter((e) => e._kind === "text")
-    .map((e) => String(e.textContent || "")).filter((t) => /[+-]$/.test(t));
-  if (bad.length) fail(`꼬리표가 부호로 끝난다(숫자 없음): ${JSON.stringify(bad)}`);
-  const texts = z.els.filter((e) => e._kind === "text").map((e) => e.textContent);
-  if (!texts.includes("고래 +0")) fail(`0 일 때 「고래 +0」이 아니다: ${JSON.stringify(texts)}`);
+  const bad = z.texts.filter((t) => /[+-]$/.test(t));
+  if (bad.length) fail(`꼬리표가 부호로 끝난다: ${JSON.stringify(bad)}`);
+  if (!z.texts.includes("고래 +0")) fail(`0 일 때 「고래 +0」이 아니다: ${JSON.stringify(z.texts)}`);
 }
 
-// ⑦ 셋이 동시에 0 근처여도 꼬리표가 안 겹친다. 30초 롤링에서는 흔한 배치인데,
-//    짝지어 밀어내던 옛 방식은 셋째가 도로 겹쳤다(배포본에서 글자가 안 읽혔다).
-const t3 = draw("꼬리표 겹침(셋 다 0 근처)", { qty: 0, oi: 0.0001 });
+// ④ 셋이 동시에 0 근처여도 꼬리표가 안 겹친다(짝짓기로는 셋에서 깨진다).
+const t3 = draw("꼬리표 겹침", { qty: 0, oi: 0.0001 });
 if (!t3) ok = false;
 else {
   const ys = t3.els.filter((e) => e._kind === "text" && /^(고래|리테일|신규계약|OI) /.test(String(e.textContent || "")))
-    .map((e) => Number(e._a.y)).sort((a, b) => a - b);
+    .map((e) => Number(e._a.y)).sort((x, y) => x - y);
   if (ys.length < 3) fail(`꼬리표가 셋이 아니다 (${ys.length})`);
-  for (let i = 1; i < ys.length; i++) {
-    if (ys[i] - ys[i - 1] < 11.5) { fail(`꼬리표가 겹친다: ${JSON.stringify(ys)}`); break; }
-  }
+  for (let i = 1; i < ys.length; i++) if (ys[i] - ys[i - 1] < 11.5) { fail(`꼬리표가 겹친다: ${JSON.stringify(ys)}`); break; }
 }
+
+// ⑤ 폭발해도 상자를 안 넘는다.
+if (!draw("폭발 5000 ETH/s + OI", { qty: 5000, oi: 0.5 })) ok = false;
 
 console.log(ok ? "✅ 1초 수급 패널 OK" : "");
 process.exit(ok ? 0 : 1);
