@@ -3795,15 +3795,27 @@ function renderMicroRef() {
     return;
   }
   const chips = [];
-  // ① 호가 동조 -- 유일한 방향 칩 (1~15초)
-  const agreeTone = m.agree === "동조매수" ? "good" : m.agree === "동조매도" ? "bad" : m.agree === "갈림" ? "warn" : "";
+  // ① 호가 방아쇠 -- 유일한 방향 칩. 🔴«지금 상태»가 아니라 «마지막 방아쇠 + 나이»를 그린다.
+  //    2026-09-20 사용자 "계속 바뀐다": 값의 전부가 발동한 그 초에 있어서(나이 0초 +0.55bp · 1~2초 +0.07 ·
+  //    3초 이후 0) 늦추는 장치는 늦춘 만큼 정확히 잃는다. 라벨은 새 방아쇠에서만 바뀌고 나이만 올라간다.
+  const tg = m.trigger || {};
+  const tal = m.tally60 || {};
+  const trigTone = tg.live ? (tg.side === "동조매수" ? "good" : "bad") : "";
+  const trigState = tg.side
+    ? (tg.live ? `${tg.side} · 지금` : `${tg.side} · ${tg.age}초 전`)
+    : "방아쇠 없음";
   chips.push({
-    label: "호가 방아쇠 · 1~15초", state: m.agree, tone: agreeTone,
-    value: `QI ${MR_FMT.sgn(m.qi)} (${m.qi_side}) · OFI10 ${MR_FMT.sgn(m.ofi10, 0)} ETH (${m.ofi_side})`,
-    meaning: m.agree === "동조매수" || m.agree === "동조매도"
-      ? "최우선 큐와 전체북 흐름이 같은 쪽. 15초 +0.4bp · 60초 +0.5bp 기대 — 방향 «힌트»이지 왕복비용(1.4bp)을 넘는 엣지가 아니다. 반감기 1초."
-      : m.agree === "갈림" ? "최우선 큐와 전체북 흐름이 반대. 뒤 15초 기대 0 — 대기." : "한쪽이 중립(|QI|<0.56 또는 |OFI10|<최근 10분 중앙값). 방향 없음.",
-    title: "QI = (최우선 매수수량−매도수량)/(합). OFI10 = 최근 10초 ±40bp 호가 총량 변화(매수−매도). 둘이 같은 쪽일 때만 1~15초 방향이 있었다(4.6일·6/6일 부호 일치). 10초 평균으로 평활하면 정보가 1/3 로 준다.",
+    label: "호가 방아쇠 · 마지막 발동", state: trigState, tone: trigTone,
+    value: `QI ${MR_FMT.sgn(m.qi)} (${m.qi_side}) · OFI10 ${MR_FMT.sgn(m.ofi10, 0)} ETH (${m.ofi_side}) · 지금 ${m.agree}`
+      + (tal.n ? ` · 최근 ${tal.n}초 매수 ${tal.buy} / 매도 ${tal.sell}초` : ""),
+    meaning: tg.live
+      ? "지금 발동 중. 최우선 큐와 전체북 흐름이 같은 쪽이고, 값은 이 초에 몰려 있다 — 방향 «힌트»이지 왕복비용(1.4bp)을 넘는 엣지가 아니다."
+      : tg.side
+        ? `${tg.age}초 전에 지나갔다. 나이 1~2초면 +0.07bp, 3초 이후는 0 — 지나간 방아쇠를 따라 들어가지 말 것.`
+        : `최근에 동조 발동이 없었다. 지금 ${m.agree}.`,
+    title: "QI = (최우선 매수수량−매도수량)/(합), OFI10 = 최근 10초 ±40bp 호가 총량 변화(매수−매도). 둘이 같은 쪽일 때만 값이 있다."
+      + ` 깜빡임을 줄이려고 슈미트 트리거를 넣었다(|QI|≥${m.qi_enter ?? 0.75} 에서 들어가고 ${m.qi_exit ?? 0.45} 밑으로 내려가야 나온다): 경계 채터만 없애고 정보는 안 버린다(시간당 변경 713→568, 직접 반전 −42%, edge 불변).`
+      + " 더 늦추는 장치(연속 확인·최소 체류·평활)는 늦춘 만큼 정확히 잃어서 안 넣었다 — 특히 «최소 체류»는 edge −81% 에 직접 반전이 4배로 늘어난다.",
   });
   // ② 활동 -- 같은 시간대 분위
   const pct = m.vol60_pct; const actTone = m.act === "활발" ? "warn" : "";

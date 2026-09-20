@@ -18,6 +18,17 @@ from typing import Any
 import numpy as np
 
 QI_SIDE_ABS = 0.56        # |QI| p50 (4.6일 실측 0.56) -- 이보다 기울어야 «쪽»을 말한다
+# 2026-09-20 «계속 바뀐다»(사용자). 깜빡임은 두 종류이고 하나만 공짜로 없앨 수 있다:
+#   ①경계 채터 -- 값이 임계선 근처에서 떨어 라벨만 오간다. 슈미트 트리거로 제거(정보 손실 0).
+#     실측: 시간당 변경 713->568(-20%) · 직접 반전 4.75->2.76(-42%) · edge15 +1.10->+1.13(SE 안).
+#   ②신호 자체가 빠름 -- 이건 못 없앤다. 값의 **전부가 발동한 그 초**에 있다:
+#     마지막 동조 이후 나이별 방향맞춘 앞 15초 수익 = 0초 +0.553 · 1~2초 +0.072 · 3초 이후 0(SE 안).
+#     그래서 늦추는 장치는 늦춘 만큼 정확히 잃는다(3초 확인 -42% · 30초 점수 -74%).
+#     🔴«최소 체류»는 쓰면 안 된다 -- edge -81% 인데 **직접 반전이 4배로 늘어난다**(4.75->17.75/시간).
+#       얼려 두는 동안 원 상태가 반대로 가 있어서, 풀리는 순간 중립을 안 거치고 건너뛴다.
+#   ⇒ 화면은 «지금 상태»가 아니라 «마지막 방아쇠 + 나이»를 보여준다(라벨은 새 방아쇠에서만 바뀐다).
+QI_ENTER, QI_EXIT = 0.75, 0.45   # 슈미트 트리거. 들어가는 문턱은 높고 나오는 문턱은 낮다
+TRIGGER_LIVE_S = 2               # 나이 이 이하만 «지금». 그 위는 지나간 것으로 흐리게 그린다
 NEAR_BP = 15.0            # 레벨 «근접» 판정폭 (분석과 같은 값)
 BAND_SHALLOW_BP = 10.0    # 얕은 불균형 밴드
 BAND_DEEP_BP = 40.0       # 깊은 불균형 밴드 -- 래스터가 ±$120(≈46bp) 라 50 대신 40
@@ -71,12 +82,25 @@ def raster_flow(window: dict[str, Any]) -> dict[str, Any]:
             "bid40": b40, "ask40": a40, "ofi10": ofi, "ofi_secs": max(0, len(sums) - 1)}
 
 
-def agree_state(qi_val: float, ofi10: float, ofi_thr: float) -> str:
-    q = side_of(qi_val, QI_SIDE_ABS)
+def qi_side_hyst(qi_val: float, prev: str = "중립") -> str:
+    """|QI| >= QI_ENTER 에서 그 쪽으로 들어가고, |QI| < QI_EXIT 이 되어야 나온다.
+    반대쪽으로 가려면 반대쪽 ENTER 를 넘어야 한다 -- 경계에서 떠는 값이 라벨을 못 흔든다."""
+    if not np.isfinite(qi_val):
+        return prev
+    if prev == "매수":
+        return "매도" if qi_val <= -QI_ENTER else ("매수" if qi_val >= QI_EXIT else "중립")
+    if prev == "매도":
+        return "매수" if qi_val >= QI_ENTER else ("매도" if qi_val <= -QI_EXIT else "중립")
+    return "매수" if qi_val >= QI_ENTER else ("매도" if qi_val <= -QI_ENTER else "중립")
+
+
+def agree_state(qi_val: float, ofi10: float, ofi_thr: float, qi_prev: str = "중립") -> tuple[str, str]:
+    """(동조 상태, 이번 QI 쪽). QI 쪽은 다음 호출에 qi_prev 로 돌려줘야 히스테리시스가 이어진다."""
+    q = qi_side_hyst(qi_val, qi_prev)
     o = side_of(ofi10, ofi_thr)
     if q == "중립" or o == "중립":
-        return "중립"
-    return "동조매수" if q == o == "매수" else ("동조매도" if q == o == "매도" else "갈림")
+        return "중립", q
+    return ("동조매수" if q == o == "매수" else "동조매도" if q == o == "매도" else "갈림"), q
 
 
 def pct_rank(x: float, sorted_vals: list[float] | np.ndarray) -> float | None:
@@ -213,7 +237,19 @@ if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근�
     f = raster_flow(w)
     assert f["ok"] and f["bid40"] == 6.0 and f["ask40"] == 2.0 and math.isclose(f["imb40"], 0.5)
     assert math.isclose(f["ofi10"], ((5 - 4) - (3 - 2)) + ((6 - 5) - (2 - 3))) and f["ofi_secs"] == 2  # 초0→1: 매수+1 매도+1 → 0 · 초1→2: 매수+1 매도−1 → +2
-    assert agree_state(0.7, 50, 10) == "동조매수" and agree_state(-0.7, 50, 10) == "갈림" and agree_state(0.1, 50, 10) == "중립"
+    assert agree_state(0.8, 50, 10)[0] == "동조매수" and agree_state(-0.8, 50, 10)[0] == "갈림" and agree_state(0.1, 50, 10)[0] == "중립"
+    # 히스테리시스: ENTER 를 넘어야 들어가고, EXIT 밑으로 내려가야 나오며, 반대는 반대쪽 ENTER 가 필요하다
+    assert qi_side_hyst(0.70, "중립") == "중립" and qi_side_hyst(0.80, "중립") == "매수"
+    assert qi_side_hyst(0.50, "매수") == "매수" and qi_side_hyst(0.40, "매수") == "중립"
+    assert qi_side_hyst(-0.50, "매수") == "중립" and qi_side_hyst(-0.80, "매수") == "매도"
+    assert qi_side_hyst(float("nan"), "매도") == "매도"      # 값이 없으면 라벨을 흔들지 않는다
+    # 경계에서 떠는 값이 라벨을 못 흔든다 -- 같은 입력열에서 고정 임계는 5번 바뀌고 히스테리시스는 1번
+    seq = [0.80, 0.55, 0.60, 0.50, 0.58, 0.52]
+    fixed = [side_of(v, QI_SIDE_ABS) for v in seq]
+    hyst, prev = [], "중립"
+    for v in seq:
+        prev = qi_side_hyst(v, prev); hyst.append(prev)
+    assert sum(a != b for a, b in zip(fixed, fixed[1:])) == 5 and sum(a != b for a, b in zip(hyst, hyst[1:])) == 0, (fixed, hyst)
     assert pct_rank(5, list(range(100))) == 0.06 and pct_rank(5, [1, 2]) is None and act_label(0.9) == "활발"
     lv = {"support_levels": [{"price": 2598.0}], "resistance_levels": [{"price": 2640.0}]}
     c = sr_context(lv, 2600.0, imb40=0.3)

@@ -2369,7 +2369,13 @@ def make_app() -> web.Application:
 
     # ── 미시 참고 (2026-09-20) ──────────────────────────────────────────────
     micro_state: dict[str, Any] = {"payload": {"available": False}, "baseline": None, "baseline_at": 0.0,
-                                   "liq_prev": None, "liq_prev_at": 0.0}
+                                   "liq_prev": None, "liq_prev_at": 0.0,
+                                   # 히스테리시스는 «직전 QI 쪽»을 들고 있어야 이어진다(micro_ref.qi_side_hyst).
+                                   "qi_prev": "중립",
+                                   # 마지막 동조 방아쇠. 화면은 «지금 상태»가 아니라 이걸 나이와 함께 그린다 --
+                                   # 값의 전부가 발동한 그 초에 있어서(나이 0초 +0.55bp · 3초 이후 0) 늦추면 잃는다.
+                                   "trigger": {"side": None, "ts": None}}
+    agree_ring: deque = deque(maxlen=60)        # 최근 60초 동조 상태(+1/0/-1) -- 표시용 집계
     liq_events: deque = deque(maxlen=5000)      # (ts_ms, side, qty, price, usd) -- side "long" = 롱 포지션 청산(SELL)
     # WS 자체의 상태. 청산은 조용한 스트림이라 «이벤트 없음»과 «연결 없음»을 화면이 구별해야 한다
     # (tail_risk_interceptor 가 2026-07-30 에 77일간 잘못 connected=True 로 있던 그 함정).
@@ -2442,7 +2448,17 @@ def make_app() -> web.Application:
                 if flow.get("ok"):
                     ofi_hist.append(abs(flow["ofi10"]))
                 ofi_thr = float(np.median(ofi_hist)) if len(ofi_hist) >= 30 else None
-                agree = mref.agree_state(qi_val, flow.get("ofi10", 0.0), ofi_thr) if (flow.get("ok") and ofi_thr) else "기준없음"
+                if flow.get("ok") and ofi_thr:
+                    agree, micro_state["qi_prev"] = mref.agree_state(
+                        qi_val, flow["ofi10"], ofi_thr, micro_state["qi_prev"])
+                else:
+                    agree = "기준없음"
+                agree_ring.append(1 if agree == "동조매수" else -1 if agree == "동조매도" else 0)
+                if agree in ("동조매수", "동조매도"):
+                    micro_state["trigger"] = {"side": agree, "ts": now_sec}
+                trig = dict(micro_state["trigger"])
+                trig["age"] = (now_sec - trig["ts"]) if trig["ts"] else None
+                trig["live"] = bool(trig["age"] is not None and trig["age"] <= mref.TRIGGER_LIVE_S)
                 by_sec = footprint_state["sec"]
                 vol1s = [(sec, cell[4] + cell[5]) for sec, cell in by_sec.items() if sec >= now_sec - 90]
                 vol60 = sum(v for sec, v in vol1s if now_sec - 61 < sec < now_sec)   # 진행 중인 초는 뺀다
@@ -2463,7 +2479,12 @@ def make_app() -> web.Application:
                     "qi": qi_val, "qi_side": mref.side_of(qi_val, mref.QI_SIDE_ABS),
                     "ofi10": flow.get("ofi10") if flow.get("ok") else None, "ofi_thr": ofi_thr,
                     "ofi_side": (mref.side_of(flow["ofi10"], ofi_thr) if (flow.get("ok") and ofi_thr) else "기준없음"),
-                    "agree": agree,
+                    "agree": agree, "trigger": trig,
+                    # «최근 60초 중 몇 초가 어느 쪽이었나» -- 안 흔들리는 맥락. 🔴예측을 더 해 주지는 않는다
+                    # (즉시 동조를 이 부호로 걸러도 fwd15 +0.62 vs +0.58 로 SE 안, 실측). 상태 서술이다.
+                    "tally60": {"buy": int(sum(1 for v in agree_ring if v > 0)),
+                                "sell": int(sum(1 for v in agree_ring if v < 0)), "n": len(agree_ring)},
+                    "qi_enter": mref.QI_ENTER, "qi_exit": mref.QI_EXIT,
                     "imb10": flow.get("imb10") if flow.get("ok") else None, "imb40": flow.get("imb40") if flow.get("ok") else None,
                     "vol60": vol60, "vol60_pct": vol60_pct, "vol60_x_p50": vol60_x, "act": mref.act_label(vol60_pct),
                     "baseline_days": (base or {}).get("days"), "hour_utc": hour,
