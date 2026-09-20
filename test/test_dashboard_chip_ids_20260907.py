@@ -8,6 +8,23 @@ renderModelIndicatorList의 `if (chip)` 가드 때문에 예외도, 콘솔 오�
 
 두 방향을 다 본다 -- 없는 요소를 가리키는 것도, 아무도 안 쓰는 요소가 남는 것도 문제다
 (후자는 2026-09-07 지속규칙/B2 제거 때 실제로 정리 대상이었다).
+
+── 2026-09-20 정리: 네 시험이 **제거된 기능**을 요구하며 계속 실패하고 있었다 ────────
+지운 것과 그 근거:
+  · `assertIn("masht_anchor", ...)` 2곳 -- 앵커 방향 칩은 app.js·index.html 양쪽에서
+    사라졌다(현재 등장 0회). 없는 기능을 요구하는 단정은 신호가 아니라 소음이다.
+    두 시험의 **나머지**(배선 ↔ HTML 일치, 방향집합 ⊆ 칩키)는 그대로 살아 있다.
+  · `test_evidence_chip_ids_all_exist_in_html` -- `EVIDENCE_STRIP_CHIP_IDS` 상수 자체가
+    없다(2026-09-16 증거신호 칩 제거). app.js 에 남은 건 그 이름을 언급하는 주석 한 줄뿐.
+  · `test_specialized_list_items_all_have_chips` -- 「특화 목록에 넣은 항목은 상단 칩도
+    있어야 한다」는 규칙이 더는 설계가 아니다. `vol_forecast` 는 be1ad097 «변동성 전망을
+    칩에서 차트 리본으로»로 칩을 **일부러 뺐고**, `evr_gate`(a5c4cf87)는 애초에 카드로만
+    들어왔다. 그 시험이 막으려던 사고(배선만 하고 요소를 안 만듦)는 아래 두 시험이 양방향
+    으로 이미 덮는다 -- 의도적 예외를 구분하려면 예외 목록이라는 새 장부가 필요한데,
+    그 장부가 낡는 것이 지금 고치는 바로 그 문제다.
+  · `SpecializedDetectorChipsExistTest.test_every_chip_id_exists_in_index_html` --
+    `test_model_chip_ids_all_exist_in_html` 과 같은 것을 더 엉성하게(값 정규식이 주석 속
+    따옴표까지 집는다) 검사하던 중복이라 접었다.
 """
 from __future__ import annotations
 
@@ -35,16 +52,11 @@ class ChipIdWiringTests(unittest.TestCase):
 
     def test_model_chip_ids_all_exist_in_html(self) -> None:
         mapping = chip_map("MODEL_CHIP_IDS")
-        self.assertIn("masht_anchor", mapping, "앵커 방향 배선이 사라졌다")
+        self.assertTrue(mapping, "MODEL_CHIP_IDS 가 비었다")
         for key, element_id in sorted(mapping.items()):
             with self.subTest(key=key):
                 self.assertIn(element_id, self.html_ids,
                               f"app.js가 {key} -> #{element_id} 를 쓰는데 index.html에 그 요소가 없다")
-
-    def test_evidence_chip_ids_all_exist_in_html(self) -> None:
-        for key, element_id in sorted(chip_map("EVIDENCE_STRIP_CHIP_IDS").items()):
-            with self.subTest(key=key):
-                self.assertIn(element_id, self.html_ids, f"{key} -> #{element_id} 가 index.html에 없다")
 
     def test_no_orphan_model_chip_elements_in_html(self) -> None:
         """반대 방향 -- index.html에만 남은 칩은 영원히 "-"로 남는다."""
@@ -58,46 +70,10 @@ class ChipIdWiringTests(unittest.TestCase):
         m = re.search(r"const DIRECTIONAL_MODEL_CHIP_KEYS = new Set\(\[(.*?)\]\);", src, re.S)
         self.assertIsNotNone(m, "DIRECTIONAL_MODEL_CHIP_KEYS 를 찾지 못했다")
         directional = set(re.findall(r'"(\w+)"', m.group(1)))
-        self.assertIn("masht_anchor", directional, "앵커 방향은 롱/숏이 있으므로 방향 집합에 있어야 한다")
+        self.assertTrue(directional, "방향 집합이 비었다")
         self.assertTrue(directional <= set(chip_map("MODEL_CHIP_IDS")),
                         f"칩 키에 없는 방향 키: {sorted(directional - set(chip_map('MODEL_CHIP_IDS')))}")
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class SpecializedDetectorChipsExistTest(unittest.TestCase):
-    """특화 감지기 목록에 넣은 항목은 상단 요약 칩도 있어야 한다.
-
-    2026-09-13: 경보기·탐지기를 목록에 넣었는데 상단 요약엔 안 나왔다. 칩은 index.html 의
-    고정 요소라 MODEL_CHIP_IDS 등록 + div 생성이 따로 필요한데 둘 다 빠져 있었다.
-    """
-
-    def test_every_chip_id_exists_in_index_html(self) -> None:
-        app = APP_JS.read_text(encoding="utf-8")
-        index = INDEX.read_text(encoding="utf-8")
-        block = re.search(r"const MODEL_CHIP_IDS = \{(.*?)\n\};", app, re.S)
-        self.assertIsNotNone(block, "MODEL_CHIP_IDS 블록을 못 찾음")
-        ids = re.findall(r'"([A-Za-z0-9_]+)"', block.group(1))
-        self.assertTrue(ids)
-        for chip_id in ids:
-            self.assertIn(f'id="{chip_id}"', index, chip_id)
-
-    def test_specialized_list_items_all_have_chips(self) -> None:
-        app = APP_JS.read_text(encoding="utf-8")
-        block = re.search(
-            r"renderModelIndicatorList\(\[(.*?)\], \"snapSpecializedSignalList\"", app, re.S
-        )
-        self.assertIsNotNone(block, "특화 감지기 목록을 못 찾음")
-        # 인라인 객체의 key, 그리고 *IndicatorItem() 빌더가 쓰는 key 둘 다 모은다.
-        keys = set(re.findall(r'key:\s*"([a-z0-9_]+)"', block.group(1)))
-        for fn in re.findall(r"(\w+IndicatorItem)\(\)", block.group(1)):
-            body = re.search(rf"function {fn}\(\).*?\n\}}", app, re.S)
-            self.assertIsNotNone(body, fn)
-            found = re.search(r'key:\s*"([a-z0-9_]+)"', body.group(0))
-            self.assertIsNotNone(found, fn)
-            keys.add(found.group(1))
-        chip_map = re.search(r"const MODEL_CHIP_IDS = \{(.*?)\n\};", app, re.S).group(1)
-        for key in sorted(keys):
-            self.assertRegex(chip_map, rf"\b{key}:", f"{key} 가 MODEL_CHIP_IDS 에 없음")

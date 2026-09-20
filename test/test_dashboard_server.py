@@ -439,6 +439,12 @@ class StaticAssetCacheHeaderTest(unittest.TestCase):
     """
 
     def test_mutable_assets_revalidate_and_fonts_stay_immutable(self) -> None:
+        # 🔴DASHBOARD_DIR 은 **진짜**여야 한다(실제 app.js/styles.css 의 헤더를 보는 시험이다).
+        #   LIVE_DIR 은 아니다 -- 이 시험은 /data/live/ 를 건드리지 않는데, make_app() 의
+        #   add_static 이 그 디렉터리가 없으면 FileNotFoundError 로 죽는다. data/live 는
+        #   gitignore 라 서버 말고는 어디에도 없어서, 이 시험은 개발 체크아웃에서 **늘 실패**했다
+        #   (2026-09-20 확인). 아무 데서도 못 도는 시험은 회귀를 못 잡는다. 같은 파일의 다른
+        #   시험들이 이미 쓰는 방식(임시 디렉터리로 패치)을 여기에도 쓴다.
         async def exercise() -> None:
             client = TestClient(TestServer(server.make_app()))
             await client.start_server()
@@ -452,7 +458,9 @@ class StaticAssetCacheHeaderTest(unittest.TestCase):
             finally:
                 await client.close()
 
-        asyncio.run(exercise())
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(server, "LIVE_DIR", Path(tmp)):
+                asyncio.run(exercise())
 
     def test_index_buster_points_at_a_file_that_exists(self) -> None:
         index = (server.DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")

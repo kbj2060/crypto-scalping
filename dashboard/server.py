@@ -1129,16 +1129,6 @@ def btc_evidence_shadow_payload() -> dict[str, Any]:
     }
 
 
-def _locked_bp(p: dict[str, Any]) -> float | None:
-    """섀도우 포지션의 손절선이 이미 확정한 손익(bp, 왕복비용 10bp 차감). 현재가 불필요."""
-    try:
-        entry, stop = float(p["entry"]), float(p["stop"])
-        sgn = 1.0 if p.get("side") == "long" else -1.0
-        return round(sgn * (stop - entry) / entry * 1e4 - 10.0, 2)
-    except (KeyError, TypeError, ValueError, ZeroDivisionError):
-        return None
-
-
 COIN_INDICATOR_CACHE_SECONDS = 20
 # nif_whale은 간헐적이라 최신 1행만 보면 절반이 빈 값이다 -- 이 창 안의 마지막 값을 쓴다.
 MICRO_LOOKBACK_MIN = 15
