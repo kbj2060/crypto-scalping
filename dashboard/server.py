@@ -2569,7 +2569,12 @@ def make_app() -> web.Application:
                     entries[int(rec["ts"])] = rec
                 elif int(rec.get("ts", -1)) in entries:
                     entries[int(rec["ts"])]["outcome"] = rec.get("outcome")
-            situation_state["log"] = list(entries.values())[-300:]
+            kept: list[dict[str, Any]] = []
+            for rec in entries.values():   # 같은 상태 서명이 300초 안에 이어지면 중복 -- 09-21 이전 파일의 5초 중복을 소급 정리
+                if kept and rec["ts"] - kept[-1]["ts"] < SITUATION_LOG_MIN_GAP_S and sit.log_key(rec) == sit.log_key(kept[-1]):
+                    continue
+                kept.append(rec)
+            situation_state["log"] = kept[-300:]
         except FileNotFoundError:
             situation_state["log"] = []
         except Exception as exc:  # noqa: BLE001
