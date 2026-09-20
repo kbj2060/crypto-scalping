@@ -199,11 +199,28 @@ def row_stats(a: "np.ndarray", dt_s: int = 1) -> dict:
     """
     if a.ndim != 2 or a.shape[0] == 0:
         raise ValueError("a must be (time, bins) with time > 0")
+    d = np.diff(a, axis=0)
     n60 = max(1, int(round(60.0 / max(dt_s, 1))))
     d60 = (a[-n60:].mean(axis=0) - a[-6 * n60:-n60].mean(axis=0)
            if a.shape[0] >= 6 * n60 else np.zeros(a.shape[1], np.float32))
+    # ⭐재깔림의 «단위». 배수(refill/peak)만으로는 「1,780 ETH 블록을 18번 다시 깐 것」과
+    #   「15 ETH 를 2,000번 깐 것」이 같은 값이 된다 -- 전자는 작업자 한 명이 한 자리를
+    #   지키는 것이고 후자는 알고리즘 잔물결이라 전혀 다른 행동이다.
+    #   실측(1,946행): rho(배수, 블록크기) 0.642 · rho(배수, 증분 중앙값) **0.077** ·
+    #   같은 배수 5분위 안에서 p90/peak 이 0.012~0.947(79배)로 갈린다 = 별개 축이다.
+    # 🔴«개수 기준» 분위는 안 된다. 증분은 «큰 재호가 몇 번 + 작은 지터 수백 번»이라
+    #   중앙값도 p90 도 지터를 잰다 -- selftest 에서 0.5 짜리 199번 + 500 짜리 1번을 주면
+    #   p90 이 0.5 를 답한다. 재깔림은 **큰 덩어리가 물량을 지배**하므로 물량으로 가중한다.
+    #   blk = 증분을 오름차순으로 쌓았을 때 **누적 물량이 절반을 넘는 지점의 증분 크기**.
+    #   위 예에서 500(전체 물량의 83%)을 답한다.
+    up = np.clip(d, 0, None)
+    n_up = (up > 0).sum(axis=0).astype(np.float32)
+    srt = np.sort(up, axis=0)
+    csum = np.cumsum(srt, axis=0)
+    idx = (csum >= csum[-1] * 0.5).argmax(axis=0)
+    blk = srt[idx, np.arange(a.shape[1])].astype(np.float32)
     return {"inst": a[-1], "pers": a.min(axis=0), "peak": a.max(axis=0),
-            "refill": np.clip(np.diff(a, axis=0), 0, None).sum(axis=0), "d60": d60}
+            "refill": up.sum(axis=0), "d60": d60, "blk": blk, "n_up": n_up}
 
 
 def approach_ratio(w: dict, *, near_pct: float = 0.35, far_lo: float = 0.35,
@@ -667,6 +684,17 @@ def _selftest() -> None:
     assert st["peak"].tolist() == [100.0, 80.0, 50.0]
     assert st["refill"][0] == 0.0 and abs(float(st["refill"][1]) - 80.0 * 199) < 1e-3
     assert st["d60"].tolist() == [0.0, 0.0, 40.0]        # 정적 0 · 회전 0 · 신축 +40
+    # 재깔림의 «단위»: 같은 배수라도 한 번에 얼마씩 깔렸는지는 다르다.
+    assert st["n_up"].tolist() == [0.0, 199.0, 1.0]       # 정적 0회 · 블록 199회 · 신축 1회
+    assert abs(float(st["blk"][1]) - 80.0) < 1e-3, st["blk"][1]   # 블록 크기 = 80
+    assert st["blk"][0] == 0.0                            # 안 올라간 행은 0
+    # 🔴개수 기준 분위(중앙값·p90)였다면 잔물결에 묻힌다 -- 물량 가중이어야 블록이 잡힌다.
+    t2 = np.zeros((400, 1), np.float32)
+    t2[:, 0] = 10.0
+    t2[::2, 0] += 0.5                                     # 0.5 짜리 지터 199번
+    t2[100, 0] += 500.0                                   # 500 짜리 블록 한 번
+    b2 = row_stats(t2, dt_s=1)
+    assert b2["blk"][0] > 100.0, b2["blk"][0]             # 지터에 안 묻힌다
     assert row_stats(t, dt_s=3)["refill"][1] == st["refill"][1]  # dt_s 는 d60 만 바꾼다
 
     # 접근행동: 가격이 다가올 때 «얇아지는 빈»과 «두꺼워지는 빈»을 갈라야 한다.
