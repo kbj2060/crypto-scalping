@@ -327,11 +327,15 @@ def log_key(res: dict[str, Any]) -> tuple:
 
 
 def _touched(d: int, c: dict[str, float], tg: dict[str, Any]) -> list[str]:
-    """이 봉에서 닿은 목표들. A 는 이동 **반대** 방향으로 가치영역 먼 변 관통."""
+    """이 봉에서 성립한 시나리오들. 🔴A·C 와 B 의 판정 기준이 **다르고, 그게 의도다**(사용자 결정 09-21):
+      A(되돌림)·C(플러시) = «그 자리에 **닿았나**» → 고가/저가. 레벨 도달은 꼬리로도 성립한다.
+      B(지속)     = «저항을 **뚫었나**» → **종가**. 저항을 꼬리로 스치는 것은 돌파가 아니라 거부다.
+    이 구분이 SCORES["저항근접"]={"A":+5,"B":−5} 와 뜻이 맞는다 -- 가까운 저항은 «닿기»는 쉽고 «뚫기»는 어렵다.
+    (그 전에는 B 도 고가 기준이라 «저항이 가까우면 B 를 깎는다»가 라벨과 정반대였다.)"""
     hit = []
     if tg.get("A") is not None and ((d > 0 and c["low"] <= tg["A"]) or (d < 0 and c["high"] >= tg["A"])):
         hit.append("A")
-    if tg.get("B") is not None and ((d >= 0 and c["high"] >= tg["B"]) or (d < 0 and c["low"] <= tg["B"])):
+    if tg.get("B") is not None and ((d >= 0 and c["close"] > tg["B"]) or (d < 0 and c["close"] < tg["B"])):
         hit.append("B")
     if tg.get("C") is not None and ((d >= 0 and c["low"] <= tg["C"]) or (d < 0 and c["high"] >= tg["C"])):
         hit.append("C")
@@ -545,17 +549,20 @@ if __name__ == "__main__":
     deep = [dict(time=2700 + 300 * i, high=2613 - 2 * i, low=2611 - 5 * i, close=2612 - 3 * i) for i in range(7)]
     assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, deep) == "C", deep[-1]
     # 반대쪽이 먼저 넘겨받으면 거기서 끊는다: B 를 먼저 치면 그 뒤 깊이 빠져도 B
-    bfirst = [dict(time=3000, high=2630, low=2611, close=2612)] + [dict(time=2700 + 300 * i, high=2613, low=2590, close=2600) for i in range(2, 7)]
+    bfirst = [dict(time=3000, high=2630, low=2611, close=2626)] + [dict(time=2700 + 300 * i, high=2613, low=2590, close=2600) for i in range(2, 7)]
     assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, [dict(time=2700, high=2613, low=2611, close=2612)] + bfirst) == "B"
     assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, cs[:3]) is None   # 아직 30분 안 지남
     assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, cs[2:]) is None   # 🔴창 **머리**가 비면 확정하지 않는다
     assert resolve_sym({"ts": 2700, "dir": 1, "sym": {"k": 0.5, "up": 2620.0, "dn": 2605.0}}, cs[2:]) is None
-    cs_up = [dict(time=2700 + 300 * i, high=2612 + 3 * i, low=2611 + 2 * i, close=2612 + 2 * i) for i in range(7)]
-    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, cs_up) == "B"
+    cs_up = [dict(time=2700 + 300 * i, high=2612 + 3 * i, low=2611 + 2 * i, close=2612 + 3 * i) for i in range(7)]
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, cs_up) == "B"   # 종가 2627 > 2624.74
+    # 🔴고가로만 스치고 종가가 못 넘으면 B 가 아니다(거부). 되돌림도 안 갔으면 미도달.
+    wickonly = [dict(time=2700 + 300 * i, high=2630, low=2611, close=2612) for i in range(7)]
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, wickonly) == "none", "꼬리 돌파는 지속이 아니다"
     flat = [dict(time=2700 + 300 * i, high=2613, low=2611, close=2612) for i in range(7)]
     assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, flat) == "none"
     assert resolve({"ts": 2700, "dir": 0, "mid": 2612.5, "targets": dict(r["targets"], A=None)}, flat) == "A"   # 횡보의 A 는 잔여
-    wide = flat[:1] + [dict(time=3000, high=2630, low=2600, close=2612)] + flat[2:]
+    wide = flat[:1] + [dict(time=3000, high=2630, low=2600, close=2626)] + flat[2:]   # 종가가 B 를 넘고 저가가 A 를 찍는다
     assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, wide) == "amb"   # 한 봉에 **양쪽** = 판정 불가
     assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": {"A": [2606, 2609], "B": 2624.74, "C": 2591}}, cs) == "A"   # 옛 장부 호환
     assert resolve({"ts": 2700, "dir": 1, "targets": {"A": 2606, "B": 2624.74, "C": 2591}}, cs) == "A"          # mid 없는 옛 항목 = 선착 규칙
