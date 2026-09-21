@@ -106,16 +106,16 @@ def test_two_panes_fit_the_existing_height_budget():
     mb = int(re.search(r"const mt = (\d+), mb = (\d+);", JS).group(2))
     sub_h = int(re.search(r"SUB_1S_H = subOn \? (\d+)", JS).group(1))
     flow_h = sub_h - mt - mb
-    assert re.search(r"LOW_H = Math\.max\(22, Math\.min\(38, Math\.round\(flowH \* 0\.32\)\)\)", JS), \
+    assert re.search(r"LOW_H = Math\.max\(22, Math\.min\(76, Math\.round\(flowH \* 0\.24\)\)\)", JS), \
         "아래 판 높이 식이 바뀌었다"
-    low = max(22, min(38, round(flow_h * 0.32)))
+    low = max(22, min(76, round(flow_h * 0.24)))
     gap = int(re.search(r"const PANE_GAP = (\d+);", JS).group(1))
     hi = flow_h - low - gap
     assert hi + gap + low == flow_h, "두 판 합이 그리기 영역을 안 채운다"
     assert hi >= 60, f"누적 판이 {hi}px 로 눌렸다 -- 스택 세 층이 안 갈린다"
-    # 2026-09-22 SUB_1S_H 150 -> 190 (사용자 «지금 하나도 안보여»). 아래 판은 상한 38 그대로라
-    # 늘어난 40px 이 전부 누적 판으로 간다: 78 -> 118.
-    assert (hi, gap, low) == (118, 4, 38), f"승인 치수 118/4/38 이 아니다: {(hi, gap, low)}"
+    # 2026-09-22 SUB_1S_H 400 (풋프린트=가격 플롯과 같은 높이, 사용자 요청). 78/4/38 ->
+    # 118/4/38 -> 290/4/76 으로 두 번 올렸다. 아래 판도 같이 커진다(상한 76).
+    assert (hi, gap, low) == (290, 4, 76), f"승인 치수 290/4/76 이 아니다: {(hi, gap, low)}"
 
 
 def test_no_new_colour_was_invented():
