@@ -17,17 +17,19 @@ JS = (ROOT / "dashboard/live/app.js").read_text(encoding="utf-8")
 
 def test_server_emits_long_then_short():
     """서버 칸은 [롱, 숏] 순서다. side == "long" 이 0번 칸."""
-    assert re.search(r'cell\[0 if e\.get\("side"\) == "long" else 1\]', SRV), \
-        "청산 칸의 롱/숏 배치가 바뀌었다 -- 클라의 c[1] - c[0] 가 뒤집힌다"
-    assert re.search(r'liq_rows = \[\[s, round\(v\[0\], 3\), round\(v\[1\], 3\)\]', SRV), \
-        "liq_rows 가 [초, v[0]=롱, v[1]=숏] 순서가 아니다"
+    assert re.search(r"cell\[0 if long_ else 1\] \+= float\(e\.get\(\"qty\"\) or 0\.0\)", SRV), \
+        "청산 수량 칸의 롱/숏 배치가 바뀌었다 -- 클라의 c[1] - c[0] 가 뒤집힌다"
+    assert re.search(r"cell\[2 if long_ else 3\] \+= float\(e\.get\(\"usd\"\) or 0\.0\)", SRV), \
+        "청산 금액 칸의 롱/숏 배치가 수량 칸과 다르다 -- 꼬리표의 롱/숏이 뒤집힌다"
+    assert re.search(r"liq_rows = \[\[s, round\(v\[0\], 3\), round\(v\[1\], 3\), round\(v\[2\]\), round\(v\[3\]\)\]", SRV), \
+        "liq_rows 가 [초, 롱수량, 숏수량, 롱USD, 숏USD] 순서가 아니다"
     assert '"liq": liq_rows' in SRV, "payload 에 liq 가 없다"
 
 
 def test_client_reads_same_order_and_sign():
     """클라는 [롱, 숏] 로 받아 «숏 − 롱» 을 그린다."""
-    assert re.search(r"liq1s\.set\(r\[0\], \[r\[1\], r\[2\]\]\)", JS), \
-        "클라가 liq 행을 [r[1]=롱, r[2]=숏] 로 안 읽는다"
+    assert re.search(r"liq1s\.set\(r\[0\], \[r\[1\], r\[2\], r\[3\], r\[4\]\]\)", JS), \
+        "클라가 liq 행을 [롱수량, 숏수량, 롱USD, 숏USD] 로 안 읽는다"
     assert re.search(r"liqEv\.push\(\{ s: s2, v: c\[1\] - c\[0\] \}\)", JS), \
         "청산 부호가 «숏 − 롱» 이 아니다 -- 점의 색이 통째로 뒤집힌다"
 
@@ -59,10 +61,35 @@ def test_restored_on_restart():
         "복원이 deque 꼬리로 제한되지 않는다 -- 파일이 커지면 통째로 메모리에 올린다"
 
 
-def test_quantity_not_usd():
-    """이 차트의 다른 선(고래·리테일·OI)은 전부 ETH 단위다. USD 를 섞으면 축이 깨진다."""
-    assert re.search(r'\+= float\(e\.get\("qty"\) or 0\.0\)', SRV), \
-        "청산을 수량이 아니라 다른 값(USD 등)으로 집계한다 -- 같은 축에 못 얹는다"
+def test_size_is_quantity_label_is_money():
+    """점 **크기**는 수량(ETH), 꼬리표는 **금액**(USD)이다 -- 둘을 바꾸면 조용히 틀린다.
+
+    크기가 ETH 인 이유: 이 차트의 축이 ETH 이고 다른 선(고래·리테일·OI)도 전부 ETH 다.
+    꼬리표가 USD 인 이유: 같은 카드 아래 5분봉 청산이 USD 라 단위가 섞이면 안 된다
+    (2026-09-22 사용자 «단위나 금액으로 맞춰줘»).
+    """
+    assert re.search(r"Math\.log10\(1 \+ Math\.abs\(e\.v\)\)", JS), \
+        "점 크기가 수량 기반 로그가 아니다"
+    assert "fmtUsdCompact(liqSum[2])" in JS and "fmtUsdCompact(liqSum[3])" in JS, \
+        "청산 꼬리표가 금액(USD)이 아니다 -- 아래 5분봉 청산과 단위가 갈린다"
+
+
+def test_liq_labels_match_the_cumulative_chart():
+    """1초 차트와 5분봉 누적 CVD 행의 범례는 **같은 크기**여야 한다(2026-09-22 사용자 지시).
+
+    같은 카드 안에서 역할이 같은데 19/15 와 12/11 로 갈려 있었다. 5분봉 쪽을 19 로 올릴
+    수는 없다 -- 그 행의 꼬리표 자리가 mr 86px 인데 «CVD +12k» 가 19px 로 약 105px 다.
+    """
+    one = re.search(r"const LBL = narrow \? (\d+) : (\d+);", JS)
+    one_head = re.search(r"const LBL_HEAD = narrow \? (\d+) : (\d+);", JS)
+    five = re.search(r'font-size", mobileChart \? \(k === 0 \? (\d+) : (\d+)\) : \(k === 0 \? (\d+) : (\d+)\)', JS)
+    assert one and one_head and five, "라벨 크기 선언을 못 찾았다"
+    assert (int(one_head.group(2)), int(one.group(2))) == (int(five.group(3)), int(five.group(4))), \
+        (f"데스크톱이 안 맞는다: 1초 {one_head.group(2)}/{one.group(2)} vs "
+         f"5분봉 {five.group(3)}/{five.group(4)}")
+    assert (int(one_head.group(1)), int(one.group(1))) == (int(five.group(1)), int(five.group(2))), \
+        (f"모바일이 안 맞는다: 1초 {one_head.group(1)}/{one.group(1)} vs "
+         f"5분봉 {five.group(1)}/{five.group(2)}")
 
 
 # ── 두 판 배치 (2026-09-22) ──────────────────────────────────────────────────
@@ -91,31 +118,36 @@ def test_liquidation_is_not_on_the_shared_axis():
         "청산 점 크기가 로그가 아니다 -- 건당 0.86~2,556 ETH(2,970배)라 선형이면 큰 것만 남는다"
 
 
-def test_turnover_is_sqrt_scaled():
-    """초당 거래대금은 중앙 $60k / 최대 $3.93M -- 65배다. 선형이면 300초가 바닥에 눕는다."""
-    assert "Math.sqrt(r.v / tMax) * barMax" in JS, "거래대금 막대가 √ 스케일이 아니다"
+def test_liquidation_dots_sit_on_the_oi_line():
+    """청산 원은 **신규계약(OI) 선 위**다(2026-09-22 사용자 지시).
+
+    0선에 일렬로 늘어놓던 때는 시각만 맞고 뜻이 안 붙었다. 청산은 포지션을 강제로 닫는
+    사건이라 미결제약정을 줄인다 -- 그 선 위에 앉혀야 «이 청산이 OI 를 어디서 꺾었나»가
+    같은 자리에서 읽힌다. OI 는 3~7초 갱신이라 그 초 이전의 마지막 관측을 쓴다.
+    """
+    assert re.search(r'c\.setAttribute\("cy", \(oiRows\.length \? yF\(oiAt\(e\.s\)\) : mid\)', JS), \
+        "청산 원이 신규계약(OI) 선 위에 안 앉는다"
+    assert "const LOW_H" not in JS and "const PANE_GAP" not in JS, \
+        "아래 판 껍데기 상수가 남아 있다 -- 지웠으면 같이 지운다"
 
 
-def test_two_panes_fit_the_existing_height_budget():
-    """78 + 4 + 38 = 120 = SUB_1S_H(150) − mt(16) − mb(14).
+def test_one_pane_uses_the_whole_drawing_area():
+    """그리기 영역(flowH) 전부를 누적 스택이 쓴다. SUB_1S_H(400) − mt(16) − mb(14) = 370.
 
-    넘치면 옆 패널을 침범하는데 SVG 는 잘라주지 않는다. 캔들 상자 높이 계약(styles.css)과
-    이 파일이 갈라져 있어 한쪽만 고치면 조용히 깨진다 -- 그래서 여기서 산수를 다시 센다.
+    🔴이 산수가 어긋나면 SVG 는 잘라주지 않는다 -- 넘치면 옆 패널을 침범하고, 모자라면
+      빈 띠가 생긴다. 캔들 상자 높이 계약(styles.css)과 이 파일이 갈라져 있어 한쪽만
+      고치면 조용히 깨지므로 여기서 다시 센다.
     """
     mt = int(re.search(r"const mt = (\d+), mb = (\d+);", JS).group(1))
     mb = int(re.search(r"const mt = (\d+), mb = (\d+);", JS).group(2))
     sub_h = int(re.search(r"SUB_1S_H = subOn \? (\d+)", JS).group(1))
     flow_h = sub_h - mt - mb
-    assert re.search(r"LOW_H = Math\.max\(22, Math\.min\(76, Math\.round\(flowH \* 0\.24\)\)\)", JS), \
-        "아래 판 높이 식이 바뀌었다"
-    low = max(22, min(76, round(flow_h * 0.24)))
-    gap = int(re.search(r"const PANE_GAP = (\d+);", JS).group(1))
-    hi = flow_h - low - gap
-    assert hi + gap + low == flow_h, "두 판 합이 그리기 영역을 안 채운다"
-    assert hi >= 60, f"누적 판이 {hi}px 로 눌렸다 -- 스택 세 층이 안 갈린다"
-    # 2026-09-22 SUB_1S_H 400 (풋프린트=가격 플롯과 같은 높이, 사용자 요청). 78/4/38 ->
-    # 118/4/38 -> 290/4/76 으로 두 번 올렸다. 아래 판도 같이 커진다(상한 76).
-    assert (hi, gap, low) == (290, 4, 76), f"승인 치수 290/4/76 이 아니다: {(hi, gap, low)}"
+    assert flow_h == 370, f"그리기 영역이 {flow_h}px 다(400-16-14=370 이어야)"
+    assert re.search(r"const mid = flowTop \+ flowH / 2;", JS), "0선이 그리기 영역 한가운데가 아니다"
+    assert re.search(r"const half = flowH / 2 - 4;", JS), "반폭이 flowH 기준이 아니다"
+    body = JS[JS.index("function renderSupply1s"):JS.index("function renderSupplyProfileSvg")]
+    assert "tMax" not in body and "barMax" not in body, \
+        "거래대금 막대가 되살아났다 -- 2026-09-22 사용자 지시로 이 차트에서 뺐다"
 
 
 def test_no_new_colour_was_invented():
