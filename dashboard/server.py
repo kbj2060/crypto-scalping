@@ -3293,15 +3293,38 @@ def make_app() -> web.Application:
             since_oi = int(request.query.get("sinceOi", "0"))
         except ValueError:
             since_oi = 0
+        # 2026-09-22 청산도 같은 payload 로 (사용자 요청). **새 스트림을 안 만든다** --
+        # collect_force_orders 가 이미 @forceOrder 를 받아 liq_events(maxlen=5000)에 쌓고
+        # 있고, 분당 몇 건이라 5분 창은 넉넉히 덮인다.
+        # ⭐USD 가 아니라 **수량**을 보낸다. 이 차트의 다른 선(고래·리테일·OI)이 전부
+        #   ETH 단위라 수량이어야 같은 축에 그대로 얹힌다. USD 였으면 축이 하나 더 필요하다.
+        try:
+            since_liq = int(request.query.get("sinceLiq", "0"))
+        except ValueError:
+            since_liq = 0
         oi_floor = max(since_oi, (max(oi_1s) if oi_1s else 0) - SUPPLY_1S_SECONDS)
         # [초, 미결제약정]. 증분은 클라가 뺀다(창 시작을 0으로 두는 누적선이라 절대값이 필요).
         oi_rows = [[s, oi_1s[s]] for s in sorted(oi_1s) if s > oi_floor]
         if not by_sec:
             return web.json_response({"symbol": FOOTPRINT_SYMBOL, "seconds": [], "now": 0,
-                                      "oi": oi_rows,
+                                      "oi": oi_rows, "liq": [],
                                       "retailMaxUsd": RETAIL_MAX_USD,
                                       "whaleMinUsd": WHALE_MIN_USD}, headers=NOCACHE)
         newest = max(by_sec)
+        # 🔴**진행 중인 초는 안 보낸다** -- seconds 와 같은 규칙이다. 보내면 그 초가 자라는
+        #   동안 클라가 «받은 초»로 알고 건너뛰어 반쪽으로 굳는다.
+        # 🔴deque 스냅샷을 뜬다. 같은 이벤트 루프라 순회 중 append 는 안 오지만, 이 함수가
+        #   길어질 때 그 불변식에 기대고 싶지 않다.
+        liq_floor = max(since_liq, newest - SUPPLY_1S_SECONDS)
+        liq_by_sec: dict[int, list[float]] = {}
+        for e in list(liq_events):
+            s = int(e.get("ts_ms") or 0) // 1000
+            if not (liq_floor < s < newest):
+                continue
+            cell = liq_by_sec.setdefault(s, [0.0, 0.0])
+            cell[0 if e.get("side") == "long" else 1] += float(e.get("qty") or 0.0)
+        # [초, 롱청산수량, 숏청산수량]. 롱 청산 = 시장에 강제 SELL, 숏 청산 = 강제 BUY.
+        liq_rows = [[s, round(v[0], 3), round(v[1], 3)] for s, v in sorted(liq_by_sec.items())]
         floor = max(since, newest - SUPPLY_1S_SECONDS)
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
@@ -3309,6 +3332,7 @@ def make_app() -> web.Application:
             "retailMaxUsd": RETAIL_MAX_USD,
             "whaleMinUsd": WHALE_MIN_USD,
             "oi": oi_rows,
+            "liq": liq_rows,
             # [초, 리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
             "seconds": [[s] + [round(x, 3) for x in by_sec[s]]
                         for s in sorted(by_sec) if floor < s < newest],

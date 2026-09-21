@@ -202,6 +202,10 @@ let supply1sLastFetchAt = 0;
 //   있지 않은 게 정상이다. 창 시작을 0으로 두고 «그 뒤로 몇 계약이 새로 생겼나»를 그린다.
 let oi1s = new Map();
 let oi1sSince = 0;
+// 2026-09-22 초 단위 청산 [롱수량, 숏수량]. oi1s 와 같은 증분 규약(커서는 따로 -- 청산은
+// 이벤트가 없는 초가 많아 체결 초 커서를 공유하면 건너뛰어진다).
+let liq1s = new Map();
+let liq1sSince = 0;
 // 5분 누적 패널(청산맵 아래). 같은 1초 스냅샷을 duckdb 로 남긴 것을 서버가 5분으로 접어 준다 --
 // 링은 6분뿐이라 몇 시간을 보려면 저장을 거쳐야 한다. 5분 봉이라 15초 폴링으로 충분하다.
 // 캔들 SVG 안의 두 하위 패널(중첩 svg)과 그 상자. 각 fetch 가 **그 패널만** 다시 그릴 수
@@ -3028,13 +3032,18 @@ async function refreshSupply1s() {
   if (now - supply1sLastFetchAt < SUPPLY_1S_POLL_MS) return;
   supply1sLastFetchAt = now;
   try {
-    const res = await fetch(`${API_SUPPLY_1S_URL}?since=${supply1sSince}&sinceOi=${oi1sSince}`,
+    const res = await fetch(`${API_SUPPLY_1S_URL}?since=${supply1sSince}&sinceOi=${oi1sSince}`
+                            + `&sinceLiq=${liq1sSince}`,
                             { cache: "no-cache" });
     if (!res.ok) throw new Error(`supply-1s ${res.status}`);
     const payload = await res.json();
     (payload.seconds || []).forEach((r) => {
       supply1s.set(r[0], r.slice(1));
       if (r[0] > supply1sSince) supply1sSince = r[0];
+    });
+    (payload.liq || []).forEach((r) => {
+      liq1s.set(r[0], [r[1], r[2]]);          // [롱청산수량, 숏청산수량]
+      if (r[0] > liq1sSince) liq1sSince = r[0];
     });
     (payload.oi || []).forEach((r) => {
       oi1s.set(r[0], r[1]);
@@ -3052,6 +3061,7 @@ async function refreshSupply1s() {
     const floor = supply1sMeta.now - 2 * SUPPLY_1S_SEGMENT - 20;
     supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
     oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
+    liq1s.forEach((_v, k) => { if (k < floor) liq1s.delete(k); });
     supply1sVer += 1;
   } catch (error) {
     console.error("Supply 1s fetch error:", error);
@@ -3537,12 +3547,13 @@ function renderSupply1s(box = null) {
     });
     return d;
   };
-  const line = (d, color, width, opacity) => {
+  const line = (d, color, width, opacity, dash) => {
     const path = document.createElementNS(NS, "path");
     path.setAttribute("d", d); path.setAttribute("fill", "none");
     path.setAttribute("stroke", color); path.setAttribute("stroke-width", width);
     path.setAttribute("stroke-opacity", opacity);
     path.setAttribute("stroke-linejoin", "round");
+    if (dash) path.setAttribute("stroke-dasharray", dash);
     svg.appendChild(path);
   };
   // 🔴fmtFootprintQty 는 0 에서 **빈 문자열**을 준다(풋프린트 셀에서 «이 칸은 안 그림»이라는
@@ -3572,6 +3583,20 @@ function renderSupply1s(box = null) {
   };
   const whale = cumOf((s) => { const c = supply1s.get(s); return c[2] - c[3]; });
   const retail = cumOf((s) => { const c = supply1s.get(s); return c[0] - c[1]; });
+  // 2026-09-22 청산(사용자 요청). 고래·리테일과 **같은 원리**다 -- cumOf 가 봉 경계에서
+  //   0으로 되돌리며 쌓는다. 접근자만 주면 되고 좌표·리셋 로직은 한 줄도 안 건드린다.
+  // ⭐부호: 롱 청산은 시장에 강제 SELL(아래로), 숏 청산은 강제 BUY(위로)다. 그래서
+  //   «숏 − 롱» 이 이 축의 뜻(순유입)과 그대로 맞는다.
+  // 🔴양쪽이 동시에 크게 터지면 상쇄돼 0 근처로 보인다 -- 그건 «조용했다»가 아니라
+  //   «양방향이었다»다. 규모 자체는 아래 꼬리표에 롱/숏을 따로 적어 그 혼동을 막는다.
+  const liqNet = cumOf((s) => { const c = liq1s.get(s); return c ? c[1] - c[0] : 0; });
+  // 꼬리표용 누계(규모). 상쇄 없이 각 방향의 총량이다.
+  const liqSum = [0, 0];
+  allSecs.forEach((s2) => {
+    if (s2 <= first) return;
+    const c = liq1s.get(s2);
+    if (c) { liqSum[0] += c[0]; liqSum[1] += c[1]; }
+  });
   // 신규계약(OI)은 **레벨**이라 더하지 않는다: 그 구간 첫 관측 대비 증분이다.
   // 🔴갱신이 3~7초라 구간의 «첫 관측»이 경계보다 조금 뒤다 -- 그만큼 증분이 과소평가된다.
   //   서버가 초 단위 OI 를 안 들고 있어 더 정확히는 못 한다. 체결(고래·리테일)은 초 단위라
@@ -3585,7 +3610,7 @@ function renderSupply1s(box = null) {
     if (s > first) oiRows.push({ s, v: oi1s.get(s) - oiBase });
   });
   const peak = Math.max(0, ...whale.map((r) => Math.abs(r.v)), ...retail.map((r) => Math.abs(r.v)),
-                        ...oiRows.map((r) => Math.abs(r.v)));
+                        ...oiRows.map((r) => Math.abs(r.v)), ...liqNet.map((r) => Math.abs(r.v)));
   const span = SUPPLY_1S_STEPS.find((a) => a >= peak) || Math.max(peak, 1e-9);
   const mid = flowTop + flowH / 2;
   const half = flowH / 2 - 10;
@@ -3691,6 +3716,20 @@ function renderSupply1s(box = null) {
                    text: (narrow ? "OI " : "신규계약 ")
                          + (end >= 0 ? "+" : "-") + qty(end) };
     tags.push(tagO);
+  }
+  // ── 청산 (2026-09-22 사용자 요청) ─────────────────────────────────────────
+  // 🔴색을 새로 만들지 않는다. 3색 계약(초록·빨강·주황)이 이미 꽉 찼고, DESIGN.md 의 규칙이
+  //   그대로 답이다: 「새 의미가 필요하면 색이 아니라 **형태·위치·라벨**로 가른다」.
+  //   부호색은 다른 선과 같게 쓰고 **점선**으로 가른다.
+  if (liqNet.length >= 2 && (liqSum[0] > 0 || liqSum[1] > 0)) {
+    const end = liqNet[liqNet.length - 1].v;
+    // 청산은 이벤트라 «없는 초»가 정상이다 -- 5초 절단을 쓰면 늘 조각난다. OI 와 같은 20초.
+    line(pathOf(liqNet, (r) => yF(r.v), 20),
+         end >= 0 ? "var(--good)" : "var(--bad)", 1.6, 0.95, "5 3");
+    tags.push({ y: yF(end), color: end >= 0 ? "var(--good)" : "var(--bad)",
+                // 순액만 적으면 «양쪽 다 터졌다»가 0 으로 보인다 -- 롱/숏을 같이 적는다.
+                text: (narrow ? "청산 " : "청산 ")
+                      + "롱" + qty(liqSum[0]) + "/숏" + qty(liqSum[1]) });
   }
   // 값이 가까우면 꼬리표가 그대로 포개진다(가격 라벨과 같은 문제).
   // 🔴짝지어 밀어내는 방식은 **셋에서 깨진다** -- 둘을 벌려도 셋째가 도로 그 자리에 앉는다.
