@@ -4722,7 +4722,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 되돌렸다 -- 프로파일 막대 해상도가 절반이 됐고, 두 패널의 자연 가격범위가 15배 달라
   // (호가 ±2.4% vs 체결 ±0.16%) 나란히 둘 이유였던 «같은 축»도 성립하지 않았다.
   // ⭐데스크톱·모바일이 같은 모양이 되므로 subStack 분기가 통째로 사라진다.
-  //   SUB_TOTAL 356 = 8 + 150(1초 수급) + 8 + 190(프로파일)   ← 2026-09-20 위아래 뒤집힘
+  //   SUB_TOTAL 620 = 190(프로파일) + 8 + 400(1초 수급) + 14(밀도 범례) + 8
+  //   ← 2026-09-20 뒤집었다가 2026-09-22 다시 프로파일이 위로(사용자 지시)
   const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H : 0;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
@@ -4810,11 +4811,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP
              - SUP_PANEL_H - SUP_PANEL_GAP - TURN_H - DCVD_H - 2 * FLOW_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
-  // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). 1초 수급이 먼저, 프로파일이 그 아래 --
-  // 「체결 계열」 둘은 여전히 이웃한다. OI·청산 레인은 플롯 바로 아래 그대로다.
-  const sub1sY = mtTop;
-  const subProfileY = sub1sY + SUB_1S_H + SUB_GAP;
-  const subLegendY = subProfileY + SUB_PROFILE_H;
+  // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). OI·청산 레인은 플롯 바로 아래 그대로다.
+  // 2026-09-22 위아래를 뒤집었다(사용자 지시): **프로파일이 먼저, 1초 수급이 그 아래**.
+  // 🔴청산밀도 범례는 프로파일을 **따라 올라가지 않는다**. 그건 풋프린트(가격 플롯)의 배경을
+  //   설명하는 것이라 그 바로 위에 있어야 한다(SUB_LEGEND_H 주석의 «풋프린트 차트 바로 위»).
+  //   프로파일에 붙여 올리면 설명하는 그림에서 400px 멀어진다.
+  // 소비 합 = SUB_TOTAL: 190(프로파일) + 8 + 400(1초) + 14(범례) + 8 = 620.
+  const subProfileY = mtTop;
+  const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
+  const subLegendY = sub1sY + SUB_1S_H;
   const turnPanelY = plotBottom + FLOW_GAP;
   const dcvdPanelY = turnPanelY + TURN_H + FLOW_GAP;
   const oiPanelY = dcvdPanelY + DCVD_H + OI_PANEL_GAP;
