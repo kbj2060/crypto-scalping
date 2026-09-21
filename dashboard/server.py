@@ -2703,7 +2703,13 @@ def make_app() -> web.Application:
         if not res.get("ok"):
             return
         key = sit.log_key(res)   # 라벨의 숫자를 뺀 종류 서명 -- 숫자를 두면 5초마다 새 항목(09-21 1,742건 사고)
-        if key != situation_state["last_key"] or now - situation_state["last_logged"] >= SITUATION_LOG_MIN_GAP_S:
+        # 🔴그래도 «상태 종류»는 초 단위로 떨린다: 실측 해결 1,867줄이 구별되는 분은 **366분**뿐이고
+        #   한 분에 최대 24줄이었다. 같은 분의 줄들은 라벨도 결과도 같다(해결이 보는 1분봉 집합이 같다).
+        #   깜빡임이 심한 구간이 표본에서 5배 가중되므로 **분당 1줄**로 막는다.
+        minute = int(now) // 60
+        if minute != situation_state.get("last_minute") and (
+                key != situation_state["last_key"] or now - situation_state["last_logged"] >= SITUATION_LOG_MIN_GAP_S):
+            situation_state["last_minute"] = minute
             entry = {"ts": int(now), "mid": inp.get("mid"), "dir": res["dir"], "prob": res["prob"], "targets": res["targets"],
                      "labels": res["labels"], "flips_on": [f["signal"] for f in res["flips"] if f["on"]],
                      # 대칭 라벨(학습 주 타깃)과 목표 거리 -- 거리를 같이 남겨야 «근접 편향»을 나중에 다시 잴 수 있다

@@ -28,7 +28,6 @@ ACT_HOT = 0.80             # 활동 분위
 SYM_K = 0.5                # 대칭 라벨 배리어 = ±k × 창 고저폭. k=1.0 은 30분에 63%가 미도달이라 너무 멀다(09-21 실측)
 FUNDING_NEUTRAL = 0.0001   # 바이낸스 펀딩의 이자 성분(0.01%/8h). 이만큼 더 벗어나야 «쏠림»(음수 = 숏 과밀)
 BASIS_PCT = 0.75           # |Δ베이시스(창 동안)| 이 링 분포의 이 분위 이상이면 «선물 주도/현물 주도»
-C_DEPTH = 1.0              # 플러시 목표 후보 = 베이스에서 창 고저폭 × 이 배수 안의 청산 군집(가장 두꺼운 것)
 
 # 점수표 -- (근거 라벨 → {시나리오: 점수}). A=되돌림 B=지속 C=플러시(이동 반대쪽 과잉)
 SCORES: dict[str, dict[str, int]] = {
@@ -260,16 +259,11 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     if d == 0:
         names = {"A": "레인지 유지", "B": "상단 이탈", "C": "하단 이탈"}
         cont = max(b["high"] for b in w); base_px = min(b["low"] for b in w)   # 횡보는 창 자체가 레인지
-    else:
-        # 청산맵은 «위치 예보»(레벨 ±15bp 청산 확률 0.52 vs 0.28, 09-20 실측)라 확률이 아니라 목표에 쓴다:
-        # 베이스에서 창 고저폭 안에 있는 반대편 청산 군집 중 가장 두꺼운 것이 플러시가 «실제로 멈추는 자리».
-        opp = (sr.get("sup_levels") if d > 0 else sr.get("res_levels")) or []
-        depth = rng_bp / 1e4 * mid * C_DEPTH
-        cands = [lv for lv in opp if lv.get("price") and (base_px - depth <= lv["price"] <= base_px if d > 0 else base_px <= lv["price"] <= base_px + depth)]
-        if cands:
-            base_px = float(max(cands, key=lambda lv: lv.get("weight_pct") or 0)["price"])
-            names["C"] = "플러시 · 청산 군집" if d > 0 else "역스퀴즈 · 청산 군집"
-    ev["c_target_src"] = "청산군집" if "청산 군집" in names["C"] else "베이스"
+    # 🔴청산 군집을 플러시 목표로 쓰던 코드를 제거했다(09-21 아침에 넣고 저녁에 되돌림).
+    #   실측: 군집 목표는 |거리| 중앙 **156.7bp** 에 경로 도달 **0/444**, 베이스 목표는 59.4bp 에 250/646(38.7%).
+    #   청산맵이 «어디서 청산이 터지나»를 맞히는 것은 사실이지만(§9), 그 자리가 **30분 안에 닿는 자리는 아니다**.
+    #   목표는 «닿을 수 있는 곳»이어야 한다 -- 아니면 그 시나리오는 정의상 일어나지 않는다.
+    ev["c_target_src"] = "베이스"
     # 🔴A(되돌림) 목표는 가치영역의 **먼 변**이다. 가까운 변을 쓰면 현재가에서 중앙 1bp 라
     #   시나리오 경주가 아니라 «가장 가까운 목표가 이긴다»가 채점된다 -- 09-21 장부 실측으로
     #   밖에 있을 때도 최근접이 81% 이겼고 A 가 73% 였다. 먼 변은 «띠를 통과했다»로 뜻이 분명하고
@@ -356,15 +350,31 @@ def resolve(pred: dict[str, Any], candles: list[dict[str, float]], horizon_s: in
     d, tg = pred.get("dir", 0), pred.get("targets") or {}
     if isinstance(tg.get("A"), (list, tuple)):    # 09-21 이전 장부(띠)는 먼 변으로 읽는다
         tg = dict(tg, A=(tg["A"][0] if d > 0 else tg["A"][1] if d < 0 else None))
-    for c in candles:
-        if c["time"] <= t0 or c["time"] >= t1:
-            continue
-        hit = _touched(d, c, tg)
-        if len(hit) > 1:
-            return "amb"
-        if hit:
-            return hit[0]
-    return "A" if d == 0 else "none"
+    # 🔴«첫 터치가 이긴다»로 가르면 **C 가 영원히 0** 이다 -- 추세에서 A(가치영역 먼 변)와 C(베이스)는
+    #   둘 다 이동 반대쪽이고 A 가 더 가깝다(실측 1,090건 전부 같은 쪽, 1,071건에서 A 가 더 가까움).
+    #   C 에 닿으려면 A 를 지나야 하므로 선착 규칙이 C 를 구조적으로 불가능하게 만든다(실측 C 0건,
+    #   경로로 세면 22.9% 도달). 시나리오는 «배타적 배리어»가 아니라 **같은 쪽에서 중첩**된다.
+    #   ⇒ 쪽끼리는 선착으로 가르고, **이긴 쪽 안에서는 더 깊이 간 것**이 그 창의 답이다.
+    win = [c for c in candles if t0 < c["time"] < t1]
+    first: dict[str, int] = {}
+    for i, c in enumerate(win):
+        for k in _touched(d, c, tg):
+            first.setdefault(k, i)
+    if not first:
+        return "A" if d == 0 else "none"
+    mid = pred.get("mid")
+    if not mid:
+        return min(first, key=lambda k: (first[k], {"C": 0, "B": 1, "A": 2}[k]))   # 옛 항목: 쪽을 모른다
+    side = lambda k: 1 if tg[k] > mid else -1                                       # noqa: E731
+    earliest = min(first.values())
+    front = [k for k in first if first[k] == earliest]
+    if len({side(k) for k in front}) > 1:
+        return "amb"                       # 같은 봉에 **양쪽** -- 봉 안 순서를 모른다
+    s_win = side(front[0])
+    opp = [first[k] for k in first if side(k) != s_win]
+    cut = min(opp) if opp else len(win)    # 반대쪽이 넘겨받기 전까지만 «더 깊이»를 인정한다
+    same = [k for k in first if side(k) == s_win and first[k] < cut] or front
+    return max(same, key=lambda k: abs(tg[k] - mid))
 
 
 def resolve_sym(pred: dict[str, Any], candles: list[dict[str, float]], horizon_s: int = 1800,
@@ -495,14 +505,15 @@ if __name__ == "__main__":
     # 목표 선점: 상승인데 현재가가 가치영역 **아래**면 A(먼 변)가 위에 있어 첫 봉에서 공짜로 닿는다 → 해당 없음
     rp = classify(dict(inp, mid=2600.0))
     assert rp["targets"]["A"] is None and "A" in rp["passed"] and rp["scorable"] is False, (rp["targets"], rp["passed"])
-    assert resolve({"ts": 2700, "dir": 1, "targets": rp["targets"]}, [dict(time=2700 + 300 * i, high=2601, low=2599, close=2600) for i in range(7)]) == "none"
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2600.0, "targets": rp["targets"]}, [dict(time=2700 + 300 * i, high=2601, low=2599, close=2600) for i in range(7)]) == "none"
     assert r["dist_bp"]["C"] < r["dist_bp"]["A"] < 0 < r["dist_bp"]["B"]   # 상승: A·C 는 아래, B 는 위
     assert [f["on"] for f in r["flips"]] == [False, False, False, False, False]                # 그 시점엔 다 꺼져 있었다
     assert r["evidence"]["c_target_src"] == "베이스" and "펀딩" not in " ".join(r["labels"])
-    # 청산 군집 목표: 베이스(2591) 아래 창 고저폭 안의 가장 두꺼운 지지 레벨로 바뀐다. 너무 먼 2562 는 안 고른다
+    # 🔴청산 군집은 플러시 목표로 쓰지 않는다(09-21 실측 도달 0/444). 레벨이 있어도 C 는 베이스 그대로여야 한다
     inp3 = dict(inp); inp3["sr"] = dict(inp["sr"], sup_levels=[{"price": 2589.5, "weight_pct": 30}, {"price": 2587.0, "weight_pct": 45}, {"price": 2562.06, "weight_pct": 60}])
     r3 = classify(inp3)
-    assert r3["targets"]["C"] == 2587.0 and r3["names"]["C"] == "플러시 · 청산 군집" and r3["prob"] == r["prob"], (r3["targets"], r3["prob"])
+    assert r3["targets"]["C"] == r["targets"]["C"] == 2591 and "청산 군집" not in r3["names"]["C"], (r3["targets"], r3["names"])
+    assert r3["evidence"]["c_target_src"] == "베이스" and r3["prob"] == r["prob"]
     # 펀딩 음수(숏 쏠림) + 상승 = 갇힘 → A 가 오른다 · 프리미엄이 창 동안 임계 이상 벌어지면 «선물 주도»
     inp4 = dict(inp); inp4["deriv"] = dict(funding=-0.0002, basis_bp=3.0, basis_d_bp=2.0, basis_thr_bp=1.0)
     r4 = classify(inp4)
@@ -529,18 +540,25 @@ if __name__ == "__main__":
     assert r2["flips"][0]["on"] and r2["prob"]["B"] > r["prob"]["B"], (r2["flips"][0], r2["prob"])
     # 해결: 되돌림 목표에 먼저 닿는 캔들열 → 'A'
     cs = [dict(time=2700 + 300 * i, high=2613 - i, low=2611 - 2 * i, close=2612 - i) for i in range(7)]
-    assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, cs) == "A"               # 먼 변 2606 관통
-    assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, cs[:3]) is None          # 아직 30분 안 지남
-    assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, cs[2:]) is None          # 🔴창 **머리**가 비면 확정하지 않는다
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, cs) == "A"   # 먼 변 2606 관통, C(2591)까진 못 감
+    # 🔴같은 쪽 중첩: A(2606)를 지나 C(2591)까지 가면 **C** 다(선착이면 영원히 A 만 나온다)
+    deep = [dict(time=2700 + 300 * i, high=2613 - 2 * i, low=2611 - 5 * i, close=2612 - 3 * i) for i in range(7)]
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, deep) == "C", deep[-1]
+    # 반대쪽이 먼저 넘겨받으면 거기서 끊는다: B 를 먼저 치면 그 뒤 깊이 빠져도 B
+    bfirst = [dict(time=3000, high=2630, low=2611, close=2612)] + [dict(time=2700 + 300 * i, high=2613, low=2590, close=2600) for i in range(2, 7)]
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, [dict(time=2700, high=2613, low=2611, close=2612)] + bfirst) == "B"
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, cs[:3]) is None   # 아직 30분 안 지남
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, cs[2:]) is None   # 🔴창 **머리**가 비면 확정하지 않는다
     assert resolve_sym({"ts": 2700, "dir": 1, "sym": {"k": 0.5, "up": 2620.0, "dn": 2605.0}}, cs[2:]) is None
     cs_up = [dict(time=2700 + 300 * i, high=2612 + 3 * i, low=2611 + 2 * i, close=2612 + 2 * i) for i in range(7)]
-    assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, cs_up) == "B"
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, cs_up) == "B"
     flat = [dict(time=2700 + 300 * i, high=2613, low=2611, close=2612) for i in range(7)]
-    assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, flat) == "none"
-    assert resolve({"ts": 2700, "dir": 0, "targets": dict(r["targets"], A=None)}, flat) == "A"   # 횡보의 A 는 잔여
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, flat) == "none"
+    assert resolve({"ts": 2700, "dir": 0, "mid": 2612.5, "targets": dict(r["targets"], A=None)}, flat) == "A"   # 횡보의 A 는 잔여
     wide = flat[:1] + [dict(time=3000, high=2630, low=2600, close=2612)] + flat[2:]
-    assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, wide) == "amb"           # 한 봉에 둘 = 판정 불가
-    assert resolve({"ts": 2700, "dir": 1, "targets": {"A": [2606, 2609], "B": 2624.74, "C": 2591}}, cs) == "A"   # 옛 장부 호환
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, wide) == "amb"   # 한 봉에 **양쪽** = 판정 불가
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": {"A": [2606, 2609], "B": 2624.74, "C": 2591}}, cs) == "A"   # 옛 장부 호환
+    assert resolve({"ts": 2700, "dir": 1, "targets": {"A": 2606, "B": 2624.74, "C": 2591}}, cs) == "A"          # mid 없는 옛 항목 = 선착 규칙
     sp = {"ts": 2700, "dir": 1, "sym": {"k": 0.5, "up": 2620.0, "dn": 2605.0}}
     assert resolve_sym(sp, cs) == "down" and resolve_sym(sp, cs_up) == "up" and resolve_sym(sp, flat) == "none"
     assert resolve_sym({"ts": 2700, "dir": 1}, cs) is None                                   # sym 없는 옛 항목
@@ -566,7 +584,7 @@ if __name__ == "__main__":
         assert k in r["evidence"], f"임계의 원본 {k} 이 표본에 없다"                                # 소급 불가라 자체점검으로 묶는다
     # 경계: 결정 시점이 분 경계면 그 봉을 쓰지 않는다(t 의 체결을 품는다)
     onmin = [dict(time=2700, high=2630, low=2600, close=2612)] + [dict(time=2700 + 60 * i, high=2613, low=2611, close=2612) for i in range(1, 31)]
-    assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, onmin) == "none"                # 첫 봉(2700)을 무시 -> amb 아님
+    assert resolve({"ts": 2700, "dir": 1, "mid": 2612.5, "targets": r["targets"]}, onmin) == "none"   # 첫 봉(2700)을 무시 -> amb 아님
     assert path_targets({"ts": 2700, "mid": 2612.0}, onmin)["up_bp"] < 10
     # 연속 타깃: 창 끝 수익·최대 상승·최대 하락. 커버리지가 모자라면 None
     pt = path_targets({"ts": 2700, "mid": 2612.0}, cs)
