@@ -3047,7 +3047,7 @@ async function refreshSupply1s() {
       if (r[0] > supply1sSince) supply1sSince = r[0];
     });
     (payload.liq || []).forEach((r) => {
-      liq1s.set(r[0], [r[1], r[2]]);          // [롱청산수량, 숏청산수량]
+      liq1s.set(r[0], [r[1], r[2], r[3], r[4]]);   // [롱수량, 숏수량, 롱USD, 숏USD]
       if (r[0] > liq1sSince) liq1sSince = r[0];
     });
     (payload.oi || []).forEach((r) => {
@@ -3656,12 +3656,13 @@ function renderSupply1s(box = null) {
   //   27시간 실측은 봉당 중앙 6.8 / p90 217 / 최대 3,877 -- 계열 하나 안에서 570배다.
   //   그래서 축에서 빼고 아래 판에 «크기를 가진 점»으로 둔다.
   const liqEv = [];
-  const liqSum = [0, 0];
+  const liqSum = [0, 0, 0, 0];   // 롱수량, 숏수량, 롱USD, 숏USD
   allSecs.forEach((s2) => {
     if (s2 <= first) return;
     const c = liq1s.get(s2);
     if (!c) return;
     liqSum[0] += c[0]; liqSum[1] += c[1];
+    liqSum[2] += (c[2] || 0); liqSum[3] += (c[3] || 0);
     if (c[0] > 0 || c[1] > 0) liqEv.push({ s: s2, v: c[1] - c[0] });
   });
   // 신규계약(OI)은 **레벨**이라 더하지 않는다: 그 구간 첫 관측 대비 증분이다.
@@ -3797,40 +3798,59 @@ function renderSupply1s(box = null) {
   // 맨 위 윤곽이 곧 CVD 다. 중립 강조색이라 층의 방향색과 안 싸운다.
   line(pathOf(cvd, (r) => yF(r.v)), "var(--accent)", 2, 1);
 
-  // 2026-09-22 사용자 «많이 키워줘». 10/11px 는 400px 짜리 판 옆에서 너무 작았다.
+  // 2026-09-22 아래 5분봉 «누적 CVD» 행의 범례와 **같은 크기**로 맞춘다(사용자 지시).
+  //   같은 카드 안에서 같은 역할(계열 범례)인데 19/15 와 12/11 로 갈려 있었다.
+  //   🔴두 값의 중간으로 간다. 5분봉 쪽을 19 로 올릴 수는 없다 -- 그 행의 꼬리표 자리는
+  //     mr 86px 인데 «CVD +12k» 가 19px 로 약 105px 라 잘린다. 14/12 는 78/72px 로 들어간다.
   //   ⭐크기를 상수로 박지 않고 **한 곳에서 파생**시킨다 -- 줄 간격·색표·들여쓰기가 전부
   //     글자 크기를 따라가야 키울 때마다 셋을 같이 고치는 일이 안 생긴다.
-  //   🔴선언이 **아래 판 그리기보다 위**여야 한다 -- 거기서도 LBL 을 쓰고 const 는 TDZ 라
-  //     아래에 두면 런타임 ReferenceError 다(node --check 는 못 잡는다).
-  const LBL = narrow ? 12 : 15;                 // 범례 본문
-  const LBL_HEAD = narrow ? 15 : 19;            // CVD (한 단계 위)
+  const LBL = narrow ? 10 : 12;                 // 범례 본문
+  const LBL_HEAD = narrow ? 11 : 14;            // CVD (한 단계 위)
   const STEP = Math.round(LBL * 1.34);          // 줄 간격
   const SW = Math.round(LBL * 0.55);            // 색표 한 변
 
   // 청산: 크기를 가진 점. **로그**다 -- 실측 건당 중앙 0.86 / p99 270 / 최대 2,556 ETH 라
   //   선형이면 큰 것 하나가 나머지를 점으로 만들고, √ 로도 모자란다.
   if (liqEv.length) {
-    // 0선 위. 스택이 0선에서 자라므로 점이 면 위에 얹히지만, 점은 작고 방향색이라
-    // 층(농담 채움)과 안 싸운다. 시각축은 스택과 같아 «언제»가 바로 맞춰진다.
-    const cy = mid;
+    // 2026-09-22 0선에서 **신규계약 선 위**로 옮겼다(사용자 «원이 조금 부자연스러운데»).
+    //   0선 위에 일렬로 늘어서면 시각만 맞고 뜻이 안 붙는다. 청산은 포지션을 **강제로
+    //   닫는** 사건이라 미결제약정을 줄인다 -- 그 선 위에 앉히면 「이 강제청산이 OI 를
+    //   어디서 꺾었나」가 같은 자리에서 읽힌다.
+    // 🔴OI 는 3~7초마다 갱신이라 청산 초에 점이 없을 수 있다. «직전 관측값»(계단)으로
+    //   두면 선은 두 점 사이를 **직선으로 잇는데** 점만 계단에 남아 최대 7px 떠 있다
+    //   (실측). 선과 **같은 방식으로 보간**해야 점이 선 위에 정확히 앉는다.
+    const oiAt = (sec) => {
+      if (!oiRows.length) return 0;
+      if (sec <= oiRows[0].s) return oiRows[0].v;
+      for (let i = 1; i < oiRows.length; i++) {
+        if (oiRows[i].s < sec) continue;
+        const a = oiRows[i - 1], b = oiRows[i];
+        // 선이 끊기는 구간(20초 초과 공백)에서는 잇지 않는다 -- 없는 선 위에 점을 둘 수 없다.
+        if (b.s - a.s > 20) return b.s - sec <= sec - a.s ? b.v : a.v;
+        const t = (sec - a.s) / (b.s - a.s);
+        return a.v + (b.v - a.v) * t;
+      }
+      return oiRows[oiRows.length - 1].v;
+    };
     const rMax = 9;
     liqEv.forEach((e) => {
       const c = document.createElementNS(NS, "circle");
       const r = 2 + Math.log10(1 + Math.abs(e.v)) / Math.log10(3001) * (rMax - 2);
-      c.setAttribute("cx", xAt(e.s).toFixed(1)); c.setAttribute("cy", cy.toFixed(1));
+      c.setAttribute("cx", xAt(e.s).toFixed(1));
+      c.setAttribute("cy", (oiRows.length ? yF(oiAt(e.s)) : mid).toFixed(1));
       c.setAttribute("r", r.toFixed(1));
       c.setAttribute("fill", e.v >= 0 ? "var(--good)" : "var(--bad)");
       c.setAttribute("fill-opacity", "0.92");
-      const lc = liq1s.get(e.s) || [0, 0];
+      // 테두리를 한 올 둔다 -- 주황 선 위에 앉으므로 선과 점의 경계가 필요하다.
+      c.setAttribute("stroke", "var(--chart-bg, #171b23)");
+      c.setAttribute("stroke-width", "1");
+      const lc = liq1s.get(e.s) || [0, 0, 0, 0];
       const t = document.createElementNS(NS, "title");
-      t.textContent = "청산 롱" + qty(lc[0]) + " / 숏" + qty(lc[1]) + " ETH";
+      t.textContent = "청산 롱 " + fmtUsdCompact(lc[2]) + " / 숏 " + fmtUsdCompact(lc[3])
+        + "  (" + qty(lc[0]) + " / " + qty(lc[1]) + " ETH)";
       c.appendChild(t);
       svg.appendChild(c);
     });
-    label(ml + cw + 5, cy + LBL * 1.6,
-          narrow ? "청산 " + qty(liqSum[0] + liqSum[1])
-                 : "청산 롱" + qty(liqSum[0]) + "/숏" + qty(liqSum[1]),
-          liqSum[1] >= liqSum[0] ? "var(--good)" : "var(--bad)", null, LBL);
   }
 
   // ── 범례 (고정 블록) ──────────────────────────────────────────────────────
@@ -3846,6 +3866,13 @@ function renderSupply1s(box = null) {
   if (oiRows.length >= 2) {
     rows.push([narrow ? "OI" : "신규", oiRows[oiRows.length - 1].v, "var(--warn)", 0.95]);
   }
+  // 2026-09-22 청산 꼬리표가 차트 한가운데 떠 있었다. 범례로 들여 같은 열·같은 크기로
+  //   맞춘다(사용자 «통일성»). 값은 **금액**이다 -- 아래 5분봉 청산이 USD 라 단위를 맞췄다.
+  if (liqSum[2] > 0 || liqSum[3] > 0) {
+    rows.push([narrow ? "청산 " + fmtUsdCompact(liqSum[2] + liqSum[3])
+                      : "청산 롱" + fmtUsdCompact(liqSum[2]) + "/숏" + fmtUsdCompact(liqSum[3]),
+               null, liqSum[3] >= liqSum[2] ? "var(--good)" : "var(--bad)", 0.92]);
+  }
   rows.forEach((row, i) => {
     const y = flowTop + LBL_HEAD + 8 + (i + 1) * STEP;
     const sw = document.createElementNS(NS, "rect");
@@ -3853,7 +3880,9 @@ function renderSupply1s(box = null) {
     sw.setAttribute("width", SW); sw.setAttribute("height", SW);
     sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
     svg.appendChild(sw);
-    label(lx + SW + 4, y, row[0] + " " + sgn(row[1]), "var(--muted)", null, LBL);
+    // 청산 행은 값이 null 이다 -- 라벨에 이미 «롱$X/숏$Y» 가 들어 있어 부호가 없다.
+    label(lx + SW + 4, y, row[1] === null ? row[0] : row[0] + " " + sgn(row[1]),
+          "var(--muted)", null, LBL);
   });
 
   // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
@@ -6186,7 +6215,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const t = document.createElementNS(NS, "text");
         t.setAttribute("x", w - 2); t.setAttribute("text-anchor", "end");
         t.setAttribute("y", y);
-        t.setAttribute("font-size", mobileChart ? (k === 0 ? 11 : 10) : (k === 0 ? 12 : 11));
+        // 2026-09-22 위 1초 차트 범례와 **같은 크기**로 맞춘다(사용자 지시).
+        //   두 범례가 같은 카드에서 같은 역할인데 12/11 과 19/15 로 갈려 있었다.
+        t.setAttribute("font-size", mobileChart ? (k === 0 ? 11 : 10) : (k === 0 ? 14 : 12));
         // 2026-09-22 사용자 지시: 라벨은 **부호색**이다. 계열 구분은 왼쪽 색표가 맡는다.
         t.setAttribute("fill", row[1] >= 0 ? "var(--good)" : "var(--bad)");
         if (k === 0) t.setAttribute("font-weight", "700");

@@ -3345,10 +3345,17 @@ def make_app() -> web.Application:
             s = int(e.get("ts_ms") or 0) // 1000
             if not (liq_floor < s < newest):
                 continue
-            cell = liq_by_sec.setdefault(s, [0.0, 0.0])
-            cell[0 if e.get("side") == "long" else 1] += float(e.get("qty") or 0.0)
-        # [초, 롱청산수량, 숏청산수량]. 롱 청산 = 시장에 강제 SELL, 숏 청산 = 강제 BUY.
-        liq_rows = [[s, round(v[0], 3), round(v[1], 3)] for s, v in sorted(liq_by_sec.items())]
+            cell = liq_by_sec.setdefault(s, [0.0, 0.0, 0.0, 0.0])
+            long_ = e.get("side") == "long"
+            cell[0 if long_ else 1] += float(e.get("qty") or 0.0)
+            # 2026-09-22 금액도 같이 보낸다(사용자 «단위나 금액으로 맞춰줘»). 화면의 5분봉
+            #   청산은 USD 라 1초 쪽만 ETH 면 같은 카드에서 두 단위가 섞인다.
+            # ⭐수량 x «그 초의 마지막 체결가» 로 클라가 곱하지 않는다 -- 이벤트마다 제
+            #   체결가(ap)로 이미 계산된 값이 여기 있고, 캐스케이드에서는 그 둘이 벌어진다.
+            cell[2 if long_ else 3] += float(e.get("usd") or 0.0)
+        # [초, 롱수량, 숏수량, 롱USD, 숏USD]. 롱 청산 = 시장에 강제 SELL, 숏 청산 = 강제 BUY.
+        liq_rows = [[s, round(v[0], 3), round(v[1], 3), round(v[2]), round(v[3])]
+                    for s, v in sorted(liq_by_sec.items())]
         floor = max(since, newest - SUPPLY_1S_SECONDS)
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
