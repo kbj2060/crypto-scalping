@@ -3685,7 +3685,10 @@ function renderSupply1s(box = null) {
   // 🔴높이 예산 78 + 4 + 38 = 120 은 지금 SUB_1S_H(150) 의 그리기 영역과 정확히 같다.
   //   styles.css 의 963px 높이 계약도 캔들 상자도 안 건드린다 -- 그 계약은 두 파일에
   //   갈라져 있어 한쪽만 고치면 가격 플롯이 조용히 눌린다(이 파일 위쪽 경고 참고).
-  const LOW_H = Math.max(22, Math.min(38, Math.round(flowH * 0.32)));
+  // 🔴상한을 38 로 두면 패널이 400 이 됐을 때 290:38 이라 순간 판이 실오라기가 된다.
+  //   0.24 로 낮추고 상한을 76 으로 올린다 -- 190 패널에서는 38 로 **지금과 똑같고**
+  //   (round(160*0.24)=38), 400 패널에서만 76 이 된다. 승인된 비율을 그대로 늘린 것이다.
+  const LOW_H = Math.max(22, Math.min(76, Math.round(flowH * 0.24)));
   const PANE_GAP = 4;
   const hiH = flowH - LOW_H - PANE_GAP;
   const peak = Math.max(0, ...cvd.map((r) => Math.abs(r.v)), ...whale.map((r) => Math.abs(r.v)),
@@ -4706,7 +4709,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   (renderSupplyProfileSvg 의 maxRows) 16행 -> 22행이 된다.
   // 2026-09-20 1초 수급 100 -> 150 (사용자 요청 "좀 더 키워줘"). 상자도 706 -> 756 으로
 //   같이 키운다 -- 안 그러면 가격 플롯이 그만큼 눌린다(아래 경고 블록).
-  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 150 : 0;
+  // 2026-09-22 1초 수급을 **풋프린트(가격 플롯)와 같은 높이**로(사용자 «너무 작아서
+  //   안보일 거 같아»). 150 -> 190 -> 400 으로 두 번 올렸다: 150 에서 누적 판이 78px,
+  //   190 에서 118px 이었고, 400 이면 290px 가 된다.
+  //   🔴가격 플롯(400)에서 뺏지 않고 상자를 키운다 -- 캔들이 눌리면 안 된다.
+  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 400 : 0;
   // 2026-09-21 청산 밀도 범례를 헤더 행에서 **여기로** 옮겼다(아티팩트 댓글).
   //   «풋프린트 차트 바로 위와 프로파일 바닥글 사이». 밀도는 이제 풋프린트의 배경이라
   //   범례가 헤더에 있으면 설명하는 그림에서 멀다. 글자 크기도 바닥글과 같은 9 로 맞췄다.
@@ -4725,8 +4732,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   if (SUB_TOTAL > 0 && h < 400 + SUB_TOTAL - 2 && !renderCandleSvg._subBoxWarned) {
     renderCandleSvg._subBoxWarned = true;
     console.warn(`캔들 상자가 ${Math.round(h)}px 인데 수급 패널이 ${SUB_TOTAL}px 를 쓴다 -- `
-      + `styles.css 의 #candleSvgSnapshot ${400 + SUB_TOTAL + 55}px / .candle-container `
-      + `${412 + SUB_TOTAL + 55}px 로 맞추세요(그만큼 가격 플롯이 눌립니다).`
+      // 🔴이 식은 낡아 있었다(55 는 옛 레인 합). 실제 계약은 12 + SUB_TOTAL + 400(가격
+      //   플롯) + 111(레인) + 70(mb) = SUB_TOTAL + 593 이다 -- 높이 계약 테스트와 같은 식.
+      + `styles.css 의 #candleSvgSnapshot ${SUB_TOTAL + 593}px / .candle-container `
+      + `${SUB_TOTAL + 605}px 로 맞추세요(그만큼 가격 플롯이 눌립니다).`
       + " (55 = 거래대금 15 + 델타·CVD 28 + 간격 12)");
   }
 
