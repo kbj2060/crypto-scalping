@@ -34,6 +34,7 @@ BASIS_PCT = 0.75           # |Δ베이시스(창 동안)| 이 링 분포의 이 
 #   옛 이름(되돌림·가치영역 재방문 / 플러시·베이스 재방문)은 A 와 C 가 «같은 방향의 얕은 것과
 #   깊은 것»이라는 사실을 오히려 감췄다. 원문 용어는 names_long 으로 남겨 툴팁에 띄운다.
 SHORT_NAMES = {"A": "조금 되돌림", "B": "더 간다", "C": "출발점까지"}
+RANGE_NAMES = {"A": "유지", "B": "위로 이탈", "C": "아래로 이탈"}
 
 # 점수표 -- (근거 라벨 → {시나리오: 점수}). A=되돌림 B=지속 C=플러시(이동 반대쪽 과잉)
 SCORES: dict[str, dict[str, int]] = {
@@ -287,7 +288,7 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
         names = SHORT_NAMES
         names_long = {"A": "되돌림 · 가치영역 재방문", "B": "지속 · 지지 테스트", "C": "역스퀴즈 · 고점 재방문"}
     if d == 0:
-        names = {"A": "유지", "B": "위로 이탈", "C": "아래로 이탈"}
+        names = RANGE_NAMES
         names_long = {"A": "레인지 유지", "B": "상단 이탈", "C": "하단 이탈"}
         cont = max(b["high"] for b in w); base_px = min(b["low"] for b in w)   # 횡보는 창 자체가 레인지
     # 🔴청산 군집을 플러시 목표로 쓰던 코드를 제거했다(09-21 아침에 넣고 저녁에 되돌림).
@@ -491,11 +492,26 @@ def calibration(entries: list[dict[str, Any]], horizon_s: int = 1800) -> dict[st
     # 🔴엔진은 «none»에 확률을 주지 않는다. 그런데 happened 의 분모에 none 을 넣으면 said 합은 100 인데
     #   happened 합은 85 가 되어, SCORES 를 어떻게 바꿔도 닫히지 않는 가짜 «보정 격차»가 생긴다.
     #   엔진 확률은 «뭔가 닿았다는 조건 아래»의 것이므로 실제 빈도도 같은 조건에서 센다. none 은 따로 낸다.
-    touched = [e for e in done if e["outcome"] in ("A", "B", "C")]
-    for k in ("A", "B", "C"):
-        out[k] = {"said": round(sum(e["prob"][k] for e in done) / len(done)),
-                  "happened": (round(100 * sum(1 for e in touched if e["outcome"] == k) / len(touched))
-                               if touched else 0)}
+    def tally(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+        hit = [e for e in rows if e["outcome"] in ("A", "B", "C")]
+        return {k: {"said": round(sum(e["prob"][k] for e in rows) / len(rows)),
+                    "happened": (round(100 * sum(1 for e in hit if e["outcome"] == k) / len(hit))
+                                 if hit else 0)} for k in ("A", "B", "C")}
+
+    out.update(tally(done))   # 전체(옛 화면 호환 -- 배포 창에서 옛 app.js 가 이 키를 읽는다)
+    # 🔴2026-09-22 **레짐별로 가른다.** A/B/C 는 횡보와 추세에서 «뜻이 다른 라벨»이다
+    #   (추세 A = 조금 되돌림 / 횡보 A = 잔여로서의 유지). 합쳐 놓고 지금 레짐의 이름을 붙이면
+    #   화면이 거짓말을 한다 -- 게다가 둘은 **반대로** 틀린다(09-21 실측: 횡보 A 말한 37 대 실제 2.9%,
+    #   추세 A 말한 35 대 실제 64.6%). 합계가 얌전해 보이는 건 상쇄 때문이다.
+    #   행 이름을 여기서 같이 실어 보낸다 -- 화면이 «지금» 이름으로 옛 집계를 칠하는 게 문제였다.
+    out["by_regime"] = []
+    for kind, labels, rows in (("추세", SHORT_NAMES, [e for e in done if e.get("dir")]),
+                               ("횡보", RANGE_NAMES, [e for e in done if not e.get("dir")])):
+        if not rows:
+            continue
+        t = tally(rows)
+        out["by_regime"].append({"kind": kind, "n": len(rows),
+                                 "rows": [{"k": k, "label": labels[k], **t[k]} for k in ("A", "B", "C")]})
     # 🔴n 은 **독립 사건 수가 아니다** -- 상태가 이어지는 동안 같은 읽기가 여러 번 기록된다.
     # 에피소드(방향·1순위가 같은 연속 구간) 수를 같이 내서 검정력을 오해하지 않게 한다.
     # 🔴«상태 서명이 바뀐 횟수»로 세면 1순위가 떨릴 때마다 늘어 실효 표본이 부풀려진다

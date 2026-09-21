@@ -3313,15 +3313,25 @@ function renderSituation() {
   // ── LEDGER ── «말한 것 vs 실제»를 표로. 문장에 묻혀 있던 게 이 카드의 핵심 숫자다
   //   (실측: 되돌림 39 말하고 2 적중 · 역스퀴즈 33 말하고 83). gap = 실제 − 말한 것.
   const c = s.calibration || {};
-  const led = c.n
-    ? `<table class="sit-led"><thead><tr><th>시나리오</th><th>말한</th><th>실제</th><th>차</th></tr></thead><tbody>`
-      + ["A", "B", "C"].map((k) => {
-          const r = c[k] || {}; const g = (r.happened || 0) - (r.said || 0);
-          return `<tr><td>${escapeHtml(n.names[k] || k)}</td><td>${r.said}</td><td>${r.happened}</td>`
-            + `<td class="gap ${g >= 0 ? "under" : "over"}">${g >= 0 ? "+" : ""}${g}</td></tr>`;
-        }).join("")
-      + `</tbody></table>`
-    : `<div class="sit-cal">${c.samples ? `표본 ${c.samples}건 기록 · 해결대기 ${c.pending}` : "기록 시작 대기"} (첫 해결은 예측 30분 뒤)</div>`;
+  // 🔴2026-09-22 **레짐별로 가른다.** 전에는 세 행에 «지금» 레짐의 이름을 붙였는데, 집계는
+  //   횡보·추세를 합친 것이라 이름이 숫자를 거짓으로 설명했다. 게다가 둘은 **반대로** 틀린다 --
+  //   실측 전체 A 는 +18 로 얌전한데 갈라 보면 추세 +52 · 횡보 −33 이다(상쇄였다).
+  //   행 이름은 서버가 집계와 **함께** 보낸 label 을 쓴다(지금 이름으로 옛 집계를 칠하지 않는다).
+  const ledRows = (rows, nameOf) => rows.map((r) => {
+    const g = (r.happened || 0) - (r.said || 0);
+    return `<tr><td>${escapeHtml(nameOf(r))}</td><td>${r.said}</td><td>${r.happened}</td>`
+      + `<td class="gap ${g >= 0 ? "under" : "over"}">${g >= 0 ? "+" : ""}${g}</td></tr>`;
+  }).join("");
+  const ledTable = (head, body) => `<table class="sit-led"><thead><tr><th>${head}</th>`
+    + `<th>말한</th><th>실제</th><th>차</th></tr></thead><tbody>${body}</tbody></table>`;
+  const led = !c.n
+    ? `<div class="sit-cal">${c.samples ? `표본 ${c.samples}건 기록 · 해결대기 ${c.pending}` : "기록 시작 대기"} (첫 해결은 예측 30분 뒤)</div>`
+    : Array.isArray(c.by_regime) && c.by_regime.length
+      ? c.by_regime.map((b) => ledTable(`${escapeHtml(b.kind)} <span>n ${b.n}</span>`,
+                                        ledRows(b.rows, (r) => r.label || r.k))).join("")
+      // 폴백: 옛 페이로드(by_regime 없음). 배포 창에서만 잠깐 보인다.
+      : ledTable("시나리오", ledRows(["A", "B", "C"].map((k) => ({ ...(c[k] || {}), k })),
+                                     (r) => n.names[r.k] || r.k));
 
   const sy = c.sym || {};
   const st = s.streams || {}; const fo = st.fo || {}; const mp = st.mp || {};

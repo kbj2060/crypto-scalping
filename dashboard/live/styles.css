@@ -2977,6 +2977,9 @@ svg {
 .sit-led th:first-child, .sit-led td:first-child { text-align: left; }
 .sit-led td { text-align: right; padding: 2.5px 0; }
 .sit-led .gap { font-weight: 600; }
+/* 레짐별 표가 둘 붙을 때만 사이를 띄운다(2026-09-22) */
+.sit-led + .sit-led { margin-top: 9px; }
+.sit-led th span { font-weight: 400; }
 .sit-led .gap.over { color: var(--bad); }     /* 말한 것보다 덜 일어났다 */
 .sit-led .gap.under { color: var(--good); }   /* 말한 것보다 더 일어났다 */
 
