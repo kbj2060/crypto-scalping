@@ -473,6 +473,11 @@ async function setActiveSnapshotAsset(asset) {
   // this, the panels would keep showing the PREVIOUS coin's numbers (mislabeled as the new one)
   // until each signal's own poll interval next elapses (up to 5min for the slowest).
   latestVolLevel = null; volLevelLastFetchAt = 0;
+  // 2026-09-22 ETH 전용 카드에 «ETH 전용» 배지를 켠다(styles.css 의 body.not-eth 규칙).
+  document.body.classList.toggle("not-eth", asset !== "eth");
+  // ETH 전용 그림들의 캐시도 비운다 -- 안 비우면 ETH 로 **돌아올 때** 옛 그림이 한 프레임 번쩍인다.
+  latestSupplyProfile = null; supplyProfileLastFetchAt = 0;
+  footprintBars = new Map(); latestFootprint = null;
   latestLiquidation5m = null;
   latestLiquidation5mHist = [];
   latestOi5m = null; oi5mLastFetchAt = 0;
@@ -3232,7 +3237,10 @@ async function refreshOi5m() {
 // 목표가, 뒤집기 신호 = «이게 켜지면 생각을 바꾼다»의 실시간 판정, 맨 아래 = 장부의 적중률.
 async function refreshSituation() {
   if (activePageTab !== "snapshot" || document.hidden) return;
-  if (activeSnapshotAsset !== "eth") return;
+  // 🔴2026-09-22 코인 게이트를 없앴다. 이 카드는 ETH 전용인데(서버 엔드포인트에 asset 이 없다)
+  //   게이트가 있으면 비ETH 에서 **마지막 ETH 값이 얼어붙은 채** 남아, 보는 사람은 그게 지금
+  //   고른 코인의 상황이라고 읽는다. 멈춘 옛 값보다 «살아 있는 ETH 값 + ETH 전용 배지»가 정직하다.
+  //   비용은 1초마다 작은 JSON 하나이고 서버는 어차피 계산하고 있다.
   const now = Date.now();
   if (now - situationLastFetchAt < SITUATION_POLL_MS) return;
   situationLastFetchAt = now;
@@ -3338,9 +3346,17 @@ function renderSituation() {
   const wsDot = (w, label) => `<span class="sit-ws" title="${escapeHtml(label)} ${w.connected
     ? `연결 · ${w.events || 0}건` : `끊김${w.last_error ? ` (${w.last_error})` : ""}`}">`
     + `<i class="${w.connected ? "" : "off"}"></i>${escapeHtml(label)}</span>`;
+  // 🔴표만 가르고 이 두 줄을 합쳐 두면 반쪽이다(2026-09-22). 특히 «미도달»은 횡보에서
+  //   **구조적으로 0%** 다 -- 횡보 A 는 잔여라 아무것도 안 닿으면 그게 A 다. 그 0 이 추세를
+  //   희석한다(실측 전체 17% = 추세 26% + 횡보 0%, 1순위 적중 전체 28% = 추세 40% + 횡보 4%).
+  const reg = Array.isArray(c.by_regime) ? c.by_regime : [];
+  const perReg = (f) => reg.map((b) => `${escapeHtml(b.kind)} <b>${f(b)}%</b>`).join(" · ");
   const foot = [
-    c.n ? `1순위 적중 <b>${c.top_hit}%</b>` : null,
-    c.n ? `아무 목표도 안 닿음 ${c.none}%` : null,
+    c.n ? (reg.length ? `1순위 적중 ${perReg((b) => b.top_hit)}` : `1순위 적중 <b>${c.top_hit}%</b>`) : null,
+    c.n ? (reg.length
+            ? `<span title="횡보의 «유지»는 배리어가 아니라 잔여다 -- 아무것도 안 닿으면 그게 A 라서, 횡보의 이 값은 구조적으로 0% 다.">`
+              + `아무 목표도 안 닿음 ${perReg((b) => b.none)}</span>`
+            : `아무 목표도 안 닿음 ${c.none}%`) : null,
     sy.n ? `방향 적중 <b>${sy.hit}%</b> · 항상 상승이면 ${sy.base_up}% <span title="대칭 ±0.5×창폭 · 추세 구간만">(n ${sy.n})</span>`
          : "방향 적중: 대칭 라벨 해결 대기",
     c.n ? `해결 <b>${c.n}</b> · 대기 ${c.pending} · 에피소드 <b>${c.episodes}</b> · 연속타깃 ${c.with_path} · 판정불가 ${c.amb}% · 최근 ${c.span_h}h` : null,

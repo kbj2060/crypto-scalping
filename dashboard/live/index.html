@@ -162,7 +162,7 @@
 
     <section id="snapshotTabPanel" class="ops-tab-panel" aria-live="polite">
       <div class="ops-panel-head">
-        <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 청산맵·베이시스청산압박·청산방향압력·수급흐름·리테일수급·청산캐스케이드(5코인 전부 그 코인 자신의 실시간 수집기) · 증거신호(ETH/BTC/XRP) · 레짐리본(ETH/BTC/XRP). 아직 ETH 고정: 특화감지기(V자 급등락 -- ETH 학습 모델이라 코인별 재학습 필요). HYPE는 바이낸스 현물 상장이 없어 베이시스청산압박 미지원. 참고: 청산 캐스케이드의 &quot;위험&quot;(hawkes) 단계는 봇 내부 상태라 ETH에서만 뜨고, 다른 코인은 Z 기반 &quot;주의&quot;까지만 판정됩니다.">
+        <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
           <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
           <button type="button" class="asset-tab" data-asset="btc">BTC</button>
           <button type="button" class="asset-tab" data-asset="sol">SOL</button>
@@ -374,7 +374,7 @@
       <!-- 2026-09-21 «상황 읽기 · 30분» -- 사용자가 고른 트레이더 읽기(스퀴즈·클라이맥스·분배·얇은 벽·가치영역·
            S/R 비대칭 → 시나리오 셋 → 생각을 바꾸는 신호)를 규칙으로 옮긴 카드. dashboard/situation.py.
            🔴확률은 휴리스틱(점수표)이다. 그래서 예측을 전부 장부에 남기고 30분 뒤 결과와 맞춘 적중률을 같이 그린다. -->
-      <section class="panel ops-health-panel situation-panel" data-asset-scope="situation">
+      <section class="panel ops-health-panel situation-panel" data-asset-scope="situation" data-eth-only>
         <!-- 2026-09-21 사용자 요청(아티팩트 댓글): 제목·설명 줄을 빼고 배지 칩만 남긴다. -->
         <div class="ops-health-head">
           <div class="ops-health-head-tools"><span id="situationBadge" class="ops-badge neutral">-</span></div>
@@ -383,7 +383,7 @@
       </section>
 
 
-      <section class="panel ops-health-panel" data-asset-scope="indicators">
+      <section class="panel ops-health-panel" data-asset-scope="indicators" data-eth-only>
         <div id="snapModelIndicatorList" class="ops-health-list"></div>
       </section>
 

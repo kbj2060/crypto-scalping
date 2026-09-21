@@ -2977,6 +2977,17 @@ svg {
 .sit-led th:first-child, .sit-led td:first-child { text-align: left; }
 .sit-led td { text-align: right; padding: 2.5px 0; }
 .sit-led .gap { font-weight: 600; }
+/* 2026-09-22 «ETH 전용» 배지. 이 카드들의 서버 엔드포인트에는 asset 파라미터가 없어서
+   코인을 바꿔도 ETH 값이 나온다 -- 표시가 없으면 고른 코인의 숫자로 오독한다.
+   🔴경고색(--warn)이 아니라 --muted 다. 이건 «주의»가 아니라 «출처» 정보이고, 이 저장소에서
+   초록/빨강/주황은 방향·위험도로 예약돼 있다(표시 규약 §2). */
+body.not-eth [data-eth-only] { position: relative; }
+body.not-eth [data-eth-only]::after {
+  content: "ETH 전용"; position: absolute; top: 12px; right: 16px; z-index: 2;
+  font: 600 10px/1 var(--font-mono); letter-spacing: .06em; color: var(--muted);
+  border: 1px solid var(--soft-line); border-radius: 999px; padding: 5px 9px;
+  background: var(--panel); pointer-events: none;
+}
 /* 레짐별 표가 둘 붙을 때만 사이를 띄운다(2026-09-22) */
 .sit-led + .sit-led { margin-top: 9px; }
 .sit-led th span { font-weight: 400; }

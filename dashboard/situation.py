@@ -510,8 +510,15 @@ def calibration(entries: list[dict[str, Any]], horizon_s: int = 1800) -> dict[st
         if not rows:
             continue
         t = tally(rows)
-        out["by_regime"].append({"kind": kind, "n": len(rows),
-                                 "rows": [{"k": k, "label": labels[k], **t[k]} for k in ("A", "B", "C")]})
+        # 🔴«1순위 적중»·«미도달»도 같은 이유로 레짐별이다. 특히 미도달은 **횡보에서 구조적으로 0**
+        #   이다 -- 횡보 A 는 잔여라 아무것도 안 닿으면 그게 A 이고, 그 0 이 추세 값을 희석한다
+        #   (실측 전체 17% = 추세 26% + 횡보 0%). 1순위 적중도 전체 28% = 추세 40% + 횡보 4% 였다.
+        top = sum(1 for e in rows if e["outcome"] == max(e["prob"], key=e["prob"].get))
+        out["by_regime"].append({
+            "kind": kind, "n": len(rows),
+            "top_hit": round(100 * top / len(rows)),
+            "none": round(100 * sum(1 for e in rows if e["outcome"] == "none") / len(rows)),
+            "rows": [{"k": k, "label": labels[k], **t[k]} for k in ("A", "B", "C")]})
     # 🔴n 은 **독립 사건 수가 아니다** -- 상태가 이어지는 동안 같은 읽기가 여러 번 기록된다.
     # 에피소드(방향·1순위가 같은 연속 구간) 수를 같이 내서 검정력을 오해하지 않게 한다.
     # 🔴«상태 서명이 바뀐 횟수»로 세면 1순위가 떨릴 때마다 늘어 실효 표본이 부풀려진다
