@@ -3374,8 +3374,15 @@ function renderSituation() {
   }).join("");
   const scn = order.map((k) => {
     const t = n.targets[k];
-    const tgt = t == null ? "잔여 (둘 다 안 닿음)" : Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t);
-    return `<div class="sit-row${k === top ? " top" : ""}"><span class="p">${n.prob[k]}%</span>
+    // 목표가 없는 경우는 **두 가지**이고 뜻이 정반대다 -- 한 문구로 묶으면 오해한다(09-21 사용자 «왜 잔여가 뜨지»).
+    //  ① 횡보의 «레인지 유지» = 진짜 잔여: 위아래 둘 다 안 닿으면 이게 일어난다.
+    //  ② 목표 선점(이미 지나감)·가치영역 없음 = 해당 없음: 이 시나리오는 이번 창에서 **일어날 수 없다**.
+    const residual = n.dir === 0 && k === "A";
+    const tgt = t == null
+      ? (residual ? "잔여 — 위아래 둘 다 안 닿으면" : "해당 없음 — 목표를 이미 지나감")
+      : Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t);
+    const dead = t == null && !residual;
+    return `<div class="sit-row${k === top ? " top" : ""}${dead ? " dead" : ""}"><span class="p">${n.prob[k]}%</span>
       <div><div class="name">${escapeHtml(n.names[k])}</div><div class="bar"><i style="width:${n.prob[k]}%"></i></div></div>
       <span class="tgt">목표 ${escapeHtml(tgt)}</span></div>`;
   }).join("");
