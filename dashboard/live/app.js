@@ -2801,6 +2801,55 @@ function liquidationDensityHistory() {
 // pre-filtered server-side by _redistance() against the backend's own current_price snapshot,
 // which can trail the live tick price by up to ~1h (hourly klines + 5-min server cache). Without
 // this, a level the live price has already crossed could still be drawn as an un-crossed wall.
+// ── 확률 원뿔 (2026-09-22, 시안 O) ──────────────────────────────────────────
+// 4.7년 5분 패널(494,784봉 · 추세 창 291,596)에서 잰 «앞으로 30분 가격 위치»의 경험적 분위다.
+// σ 가정을 쓰지 않는다 -- 실측 95분위가 75분위의 **3.6배**로 정규분포(2.9배)보다 꼬리가 두껍다.
+// 🔴bp 로 못 박으면 안 된다: 같은 분위가 창폭 십분위 1↔10 에서 **12배** 다른 시장을 하나로 덮는다.
+//   창폭으로 나눠도 비율이 ±1.71(조용) -> ±0.74(격함)로 흐른다 -- 변동성 평균회귀다.
+//   멱법칙이 맞는다: |분위| bp = c × rng^b, 십분위 최대오차 **6% 안**, 지수 여섯 개가 0.69~0.72.
+// 시점별 모양은 √t (30분 값 × √(j/6)). 실측 대비 바깥 밴드 2% 안, 최악 7.6%(5분 25분위).
+// 재현: scripts/research_situation_geometry_base_rates_20260922.py 와 같은 패널·같은 창 정의.
+const CONE_FIT = { q05: [3.402, 0.720], q15: [1.899, 0.707], q25: [1.257, 0.688],
+                   q75: [1.118, 0.720], q85: [1.874, 0.711], q95: [3.616, 0.701] };
+// 안쪽부터. pct = «30분 뒤 이 안에 있을 확률» -- 분위가 아니라 확률로 라벨한다(사용자).
+const CONE_BANDS = [["q25", "q75", 50, 0.22], ["q15", "q85", 70, 0.13], ["q05", "q95", 90, 0.07]];
+const CONE_STEPS = 6;   // 5분 × 6 = 30분, 시나리오 지평과 같다
+
+// 시나리오 목표는 차트의 **가로 위치**다. nearestLiquidationLevel 과 같은 모양을 돌려주면
+// priceLabels 가 클램핑·겹침 회피·오른쪽 배지를 다 해 준다. 원뿔 안의 흰 라벨은 따로 그린다.
+// 🔴선점된 목표(null)는 뺀다 -- 이번 창에 일어날 수 없는 자리라 «아직 갈 곳»으로 읽힌다.
+function situationTargetLevels(footprint) {
+  const n = (latestSituation || {}).now;
+  if (!n || !n.ok || activeSnapshotAsset !== "eth") return [];
+  const out = [];
+  for (const k of ["A", "B", "C"]) {
+    const v = (n.targets || {})[k];
+    if (Array.isArray(v) || !(Number(v) > 0)) continue;
+    out.push({ val: Number(v), color: "var(--muted)", label: `${Number((n.prob || {})[k]) || 0}%`,
+               dashed: true, width: 1, marker: !!footprint, scenario: k });
+  }
+  return out;
+}
+
+function coneModel(footprint) {
+  if (!footprint || activeSnapshotAsset !== "eth") return null;
+  const n = (latestSituation || {}).now;
+  const rng = Number(((n || {}).evidence || {}).range_bp);
+  if (!n || !n.ok || !(rng > 0)) return null;
+  const at = (key, j) => {
+    const [c, b] = CONE_FIT[key];
+    const bp = c * Math.pow(rng, b) * Math.sqrt((j + 1) / CONE_STEPS);
+    return key < "q50" ? -bp : bp;          // q05·q15·q25 는 아래, q75·q85·q95 는 위
+  };
+  return {
+    bands: CONE_BANDS.map(([klo, khi, pct, op]) => ({
+      pct, op,
+      lo: Array.from({ length: CONE_STEPS }, (_, j) => at(klo, j)),
+      hi: Array.from({ length: CONE_STEPS }, (_, j) => at(khi, j)),
+    })),
+  };
+}
+
 function nearestLiquidationLevel() {
   const map = latestLiquidationMap;
   if (!map || !map.warmed_up) return [];
@@ -4547,7 +4596,7 @@ function renderSnapshotChart() {
     ? fullCandles.filter((c) => c.time >= footprint.firstTime)
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
-  const riskLevels = [...nearestLiquidationLevel()];
+  const riskLevels = [...nearestLiquidationLevel(), ...situationTargetLevels(footprint)];
   // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
   // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
   // /api/liquidation-map 이 갱신될 때(60초)만 다시 만든다.
@@ -4879,9 +4928,18 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   densityClip 이 90분위라 t>=1.0 은 빈의 10% 뿐이다 -- 대부분은 옅어서 거의 안 건드리고
   //   강한 군집에서만 흐려진다(그 자리는 어차피 눈에 띄어야 한다).
   //   더 거슬리면 «t 하한을 둬 약한 밴드는 안 그리기»가 다음 손잡이다.
-  const xAt = (i) => ml + (i * cw) / candles.length;
+  // 🔴2026-09-22 «확률 원뿔»(시안 O). 플롯 오른쪽 일부를 **앞으로 30분**에 내준다.
+  //   cw 자체는 줄이지 않는다 -- 아래 레인들(거래대금·OI·청산)의 밑줄과 오른쪽 라벨이 전부
+  //   ml+cw 를 쓰고 있어서 cw 를 줄이면 그 레인들까지 같이 좁아진다. 원뿔은 가격 플롯만의 것이다.
+  //   ⇒ 봉 x 매핑(xAt·bw)과 역매핑(툴팁)만 plotW 로 좁히고, 비운 오른쪽에 원뿔을 그린다.
+  // 🔴모바일에서는 끈다. 좁은 폭(cw ~176)에서 18% 를 더 떼면 셀 숫자가 먼저 깨진다 --
+  //   풋프린트가 주력이고 원뿔은 배경 눈금자다. 넓은 화면에서만 값을 한다.
+  const cone = coneModel(footprint && !mobileChart);
+  const CONE_FRAC = 0.18;                 // 40% 는 풋프린트가 안 보였다(사용자) -> 18%
+  const plotW = cone ? cw * (1 - CONE_FRAC) : cw;
+  const xAt = (i) => ml + (i * plotW) / candles.length;
   const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
-  const bw = (cw / candles.length) * 0.8;
+  const bw = (plotW / candles.length) * 0.8;
 
   // ── 계층 캐시 (2026-09-20) ────────────────────────────────────────────────
   // 봉 셀은 이미 봉별로 캐시한다. 남은 것은 **가격 플롯 바깥의 층들**이다 -- 격자·x눈금·
@@ -5084,6 +5142,69 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     });
   });
   });
+
+  // ── 확률 원뿔을 비운 오른쪽에 그린다 (2026-09-22, 시안 O) ─────────────────
+  // 앞으로 30분의 «가격 위치» 분포를 배경으로 깔고, 그 위에 시나리오를 흰 글자로 얹는다.
+  // 🔴두 확률이 섞이지 않게 **모양으로** 가른다 -- 밴드는 회색·오른쪽 끝·가는 글자(분포),
+  //   시나리오는 흰색·왼쪽·굵은 글자(주장). 같은 «%» 라서 자리와 색으로만 구분된다.
+  if (cone && currentPrice > 0) {
+    const x0 = ml + plotW, x1 = w - mr;
+    const stepX = (j) => x0 + ((x1 - x0) * (j + 1)) / CONE_STEPS;
+    const yBp = (bp) => yAt(currentPrice * (1 + bp / 1e4));
+    const g = document.createElementNS(NS, "g");
+    // 바깥 밴드부터 그려 안쪽이 위에 온다 -- 겹치는 만큼 가운데가 진해진다(확률 «밀도»).
+    for (const b of [...cone.bands].reverse()) {
+      const pts = [`${x0},${yAt(currentPrice)}`];
+      for (let j = 0; j < CONE_STEPS; j++) pts.push(`${stepX(j).toFixed(1)},${yBp(b.hi[j]).toFixed(1)}`);
+      for (let j = CONE_STEPS - 1; j >= 0; j--) pts.push(`${stepX(j).toFixed(1)},${yBp(b.lo[j]).toFixed(1)}`);
+      const poly = document.createElementNS(NS, "polygon");
+      poly.setAttribute("points", pts.join(" "));
+      poly.setAttribute("fill", "var(--muted)");
+      poly.setAttribute("opacity", String(b.op));
+      g.appendChild(poly);
+    }
+    // 밴드 라벨: 오른쪽 끝, 그 밴드의 위쪽 경계 바로 안쪽
+    for (const b of cone.bands) {
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", x1 - 5); t.setAttribute("y", yBp(b.hi[CONE_STEPS - 1]) + 11);
+      t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "700");
+      t.setAttribute("fill", "var(--muted)"); t.setAttribute("text-anchor", "end");
+      t.textContent = `${b.pct}%`;
+      g.appendChild(t);
+    }
+    const cap = document.createElementNS(NS, "text");
+    cap.setAttribute("x", (x0 + x1) / 2); cap.setAttribute("y", mt + 10);
+    cap.setAttribute("font-size", "8.5"); cap.setAttribute("fill", "var(--muted)");
+    cap.setAttribute("text-anchor", "middle"); cap.setAttribute("opacity", ".8");
+    cap.textContent = "앞으로 30분";
+    g.appendChild(cap);
+    // 시나리오: 원뿔을 가로지르는 점선 + 그 위의 흰 글자(배경칠 없이 -- 사용자)
+    const nowSit = (latestSituation || {}).now || {};
+    for (const lv of riskLevels) {
+      if (!lv.scenario) continue;
+      const ly = yAt(lv.val);
+      if (ly < mt || ly > plotBottom) continue;          // 화면 밖이면 오른쪽 배지만 남긴다
+      const ln = document.createElementNS(NS, "line");
+      ln.setAttribute("x1", x0); ln.setAttribute("x2", x1);
+      ln.setAttribute("y1", ly); ln.setAttribute("y2", ly);
+      ln.setAttribute("stroke", "var(--ink, #e8ebf2)"); ln.setAttribute("stroke-width", "1");
+      ln.setAttribute("stroke-dasharray", "3,3"); ln.setAttribute("opacity", ".5");
+      g.appendChild(ln);
+      const pc = document.createElementNS(NS, "text");
+      pc.setAttribute("x", x0 + 7); pc.setAttribute("y", ly - 5);
+      pc.setAttribute("font-size", "12"); pc.setAttribute("font-weight", "800");
+      pc.setAttribute("fill", "var(--ink, #e8ebf2)");
+      pc.textContent = lv.label;
+      g.appendChild(pc);
+      const nm = document.createElementNS(NS, "text");
+      nm.setAttribute("x", x0 + 38); nm.setAttribute("y", ly - 5);
+      nm.setAttribute("font-size", "10"); nm.setAttribute("font-weight", "600");
+      nm.setAttribute("fill", "var(--ink, #e8ebf2)"); nm.setAttribute("opacity", ".82");
+      nm.textContent = (nowSit.names || {})[lv.scenario] || "";
+      g.appendChild(nm);
+    }
+    svg.appendChild(g);
+  }
 
   // Resistance/support/current/entry price tags -- computed here (before the axis ticks below) so
   // the tick loop can tell when a grid label would land on top of one of these and skip it.
@@ -5931,7 +6052,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
     if (mx < ml || mx > w - mr) { hideTooltip(); return; }
 
-    const idx = Math.min(candles.length - 1, Math.max(0, Math.floor(((mx - ml) / cw) * candles.length)));
+    const idx = Math.min(candles.length - 1, Math.max(0, Math.floor(((mx - ml) / plotW) * candles.length)));
     const c = candles[idx];
     if (!c) return;
 
