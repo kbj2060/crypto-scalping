@@ -560,6 +560,7 @@ SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30�
 SITUATION_LOG_MIN_GAP_S = 300                          # 상태가 안 바뀌어도 이 간격으로 한 줄
 SITUATION_VA_ROW_USD = 3.0                             # 가치영역 행 폭(차트의 행과 같다)
 SITUATION_HORIZON_S = 1800
+SITUATION_LOG_KEEP = 2000              # 메모리에 드는 예측 수(≈하루). 카드가 «표본·에피소드»를 하루 단위로 말하려면 필요
 SITUATION_MINUTE_LIMIT = 500            # 해결 전용 1분봉(≈8시간). 5분봉은 창 앞 최대 5분을 버리고 봉 안 순서를 모른다
 
 
@@ -2562,7 +2563,9 @@ def make_app() -> web.Application:
         재기동(배포)마다 outcome 이 None 으로 돌아가 캔들 캐시(8시간) 밖의 예측은 영영 못 푼다."""
         try:
             entries: dict[int, dict[str, Any]] = {}
-            for x in SITUATION_LOG_PATH.read_text(encoding="utf-8").splitlines():
+            # 파일은 계속 자란다(P1 부터 피쳐까지 실린다). 꼬리만 파싱한다 -- 해결 줄은 예측 30분 뒤라
+            # 같은 꼬리 안에 들어온다. 이보다 오래된 항목은 이미 해결돼 화면 창 밖이다.
+            for x in SITUATION_LOG_PATH.read_text(encoding="utf-8").splitlines()[-20 * SITUATION_LOG_KEEP:]:
                 if not x.strip():
                     continue
                 rec = json.loads(x)
@@ -2571,12 +2574,13 @@ def make_app() -> web.Application:
                 elif int(rec.get("ts", -1)) in entries:
                     entries[int(rec["ts"])]["outcome"] = rec.get("outcome")
                     entries[int(rec["ts"])]["outcome_sym"] = rec.get("outcome_sym")
+                    entries[int(rec["ts"])]["path"] = rec.get("path")
             kept: list[dict[str, Any]] = []
             for rec in entries.values():   # 같은 상태 서명이 300초 안에 이어지면 중복 -- 09-21 이전 파일의 5초 중복을 소급 정리
                 if kept and rec["ts"] - kept[-1]["ts"] < SITUATION_LOG_MIN_GAP_S and sit.log_key(rec) == sit.log_key(kept[-1]):
                     continue
                 kept.append(rec)
-            situation_state["log"] = kept[-300:]
+            situation_state["log"] = kept[-SITUATION_LOG_KEEP:]
         except FileNotFoundError:
             situation_state["log"] = []
         except Exception as exc:  # noqa: BLE001
@@ -2697,8 +2701,11 @@ def make_app() -> web.Application:
                      "labels": res["labels"], "flips_on": [f["signal"] for f in res["flips"] if f["on"]],
                      # 대칭 라벨(학습 주 타깃)과 목표 거리 -- 거리를 같이 남겨야 «근접 편향»을 나중에 다시 잴 수 있다
                      "sym": res.get("sym"), "dist_bp": res.get("dist_bp"), "outcome": None, "outcome_sym": None,
-                     "scorable": res.get("scorable", True), "passed": res.get("passed") or []}
-            situation_state["log"].append(entry); situation_state["log"] = situation_state["log"][-300:]
+                     "scorable": res.get("scorable", True), "passed": res.get("passed") or [],
+                     # P1 학습 표본: 규칙의 근거 dict 가 그대로 피쳐다(전부 결정 시점 t 까지의 값).
+                     # 🔴분위 정규화는 여기서 하지 않는다 -- 원시값을 남겨야 나중에 정규화 방식을 바꿀 수 있다.
+                     "feat": res.get("evidence")}
+            situation_state["log"].append(entry); situation_state["log"] = situation_state["log"][-SITUATION_LOG_KEEP:]
             situation_state["last_key"], situation_state["last_logged"] = key, now
             _situation_append(entry)
         if now - situation_state["last_resolve"] >= 60:
@@ -2708,9 +2715,11 @@ def make_app() -> web.Application:
                 if e.get("outcome") is None and e["ts"] + SITUATION_HORIZON_S <= now:
                     e["outcome"] = sit.resolve(e, ms, SITUATION_HORIZON_S)
                     e["outcome_sym"] = sit.resolve_sym(e, ms, SITUATION_HORIZON_S)
+                    e["path"] = sit.path_targets(e, ms, SITUATION_HORIZON_S)      # P1 연속 타깃
                     if e["outcome"] is not None:
                         _situation_append({"ts": e["ts"], "outcome": e["outcome"],
-                                           "outcome_sym": e.get("outcome_sym")})   # 해결 줄 -- 재기동 뒤에도 남는다
+                                           "outcome_sym": e.get("outcome_sym"),
+                                           "path": e.get("path")})   # 해결 줄 -- 재기동 뒤에도 남는다
 
     async def api_situation(request: web.Request) -> web.Response:
         log = situation_state["log"]

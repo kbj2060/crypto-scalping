@@ -385,6 +385,22 @@ def resolve_sym(pred: dict[str, Any], candles: list[dict[str, float]], horizon_s
     return "none"
 
 
+def path_targets(pred: dict[str, Any], candles: list[dict[str, float]], horizon_s: int = 1800,
+                 bar_s: int = 60) -> dict[str, float] | None:
+    """연속 타깃(학습 표본용): 창 끝 수익 · 창 안 최대 상승폭 · 최대 하락폭, 전부 bp.
+    🔴«유리/불리»(MFE/MAE)로 적지 않는다 -- 포지션이 없으므로 방향 규약이 생기는 순간 해석이 갈린다.
+      위/아래로 적어 두면 어느 방향 학습에도 그대로 쓸 수 있다. 부호 유지(위로 못 갔으면 up_bp 는 음수)."""
+    mid, t0, t1 = pred.get("mid"), pred["ts"], pred["ts"] + horizon_s
+    if not mid or not candles or candles[0]["time"] > t0 or candles[-1]["time"] + bar_s < t1:
+        return None                       # resolve 와 같은 커버리지 계약(앞뒤 양쪽)
+    win = [c for c in candles if t0 <= c["time"] < t1]
+    if not win:
+        return None
+    bp = lambda px: round((px - mid) / mid * 1e4, 1)   # noqa: E731
+    return {"ret_bp": bp(win[-1]["close"]), "up_bp": bp(max(c["high"] for c in win)),
+            "dn_bp": bp(min(c["low"] for c in win))}
+
+
 def implied_dir(entry: dict[str, Any]) -> str | None:
     """1순위 시나리오가 함의하는 가격 방향. 되돌림·플러시는 이동 반대, 지속은 이동 쪽."""
     d, prob = entry.get("dir", 0), entry.get("prob") or {}
@@ -402,14 +418,32 @@ def calibration(entries: list[dict[str, Any]]) -> dict[str, Any]:
     """해결된 예측들의 «말한 확률 vs 실제 빈도»와 1순위 적중률."""
     # 'amb'(판정 불가)·목표 선점(scorable=False)·옛 스키마(sym 없음)는 뺀다. 🔴옛 스키마를 섞으면
     # 배포 직후 화면이 «가까운 변·5분봉» 결과와 새 결과를 한 숫자로 합친다(09-21 검토).
-    done = [e for e in entries if e.get("outcome") in ("A", "B", "C", "none")
-            and e.get("scorable") is not False and "sym" in e]
+    # 표본 카운터는 **해결 전에도** 낸다 -- 첫 30분과 조용한 구간에 화면이 «몇 건 쌓였나»를 말해야 한다.
+    new = [e for e in entries if "sym" in e]
+    ts = [e["ts"] for e in new if e.get("ts")]
+    out: dict[str, Any] = {
+        "n": 0, "samples": len(new),
+        "amb": round(100 * sum(1 for e in new if e.get("outcome") == "amb") / max(len(new), 1)),
+        "pending": sum(1 for e in new if e.get("outcome") is None),
+        "with_path": sum(1 for e in new if e.get("path")),
+        "span_h": round((max(ts) - min(ts)) / 3600, 1) if len(ts) > 1 else 0.0,
+    }
+    done = [e for e in new if e.get("outcome") in ("A", "B", "C", "none") and e.get("scorable") is not False]
     if not done:
-        return {"n": 0}
-    out: dict[str, Any] = {"n": len(done)}
+        return out
+    out["n"] = len(done)
     for k in ("A", "B", "C"):
         out[k] = {"said": round(sum(e["prob"][k] for e in done) / len(done)),
                   "happened": round(100 * sum(1 for e in done if e["outcome"] == k) / len(done))}
+    # 🔴n 은 **독립 사건 수가 아니다** -- 상태가 이어지는 동안 같은 읽기가 여러 번 기록된다.
+    # 에피소드(방향·1순위가 같은 연속 구간) 수를 같이 내서 검정력을 오해하지 않게 한다.
+    eps, prev = 0, None
+    for e in done:
+        key = (e.get("dir"), max(e["prob"], key=e["prob"].get))
+        if key != prev:
+            eps += 1
+        prev = key
+    out["episodes"] = eps
     top_hit = sum(1 for e in done if e["outcome"] == max(e["prob"], key=e["prob"].get))
     out["top_hit"] = round(100 * top_hit / len(done))
     out["none"] = round(100 * sum(1 for e in done if e["outcome"] == "none") / len(done))
@@ -511,6 +545,19 @@ if __name__ == "__main__":
                        {**base, "outcome": "A", "outcome_sym": "down", "scorable": False}])  # 목표 선점 → 제외
     assert cal["n"] == 2 and cal["top_hit"] == 50 and cal["A"]["happened"] == 50
     assert cal["sym"] == {"n": 3, "hit": 67, "base_up": 33}   # 선점 항목도 방향 라벨은 유효 → 3건
+    # 에피소드: 방향·1순위가 같은 연속 구간을 하나로 센다(같은 읽기가 여러 번 기록되므로)
+    ep = calibration([{**base, "ts": 10 * i, "outcome": "A", "outcome_sym": "down"} for i in range(5)]
+                     + [{**base, "ts": 100, "dir": -1, "outcome": "A", "outcome_sym": "down"}])
+    assert ep["n"] == 6 and ep["episodes"] == 2, (ep["n"], ep["episodes"])
+    assert ep["pending"] == 0 and ep["amb"] == 0 and ep["span_h"] == round(100 / 3600, 1) and ep["samples"] == 6
+    warm = calibration([{**base, "ts": 1, "outcome": None}, {**base, "ts": 2, "outcome": "amb"}])
+    assert warm["n"] == 0 and warm["samples"] == 2 and warm["pending"] == 1 and warm["amb"] == 50, warm
+    assert calibration([{"ts": 1, "prob": {"A": 1}, "outcome": "A"}])["samples"] == 0        # 옛 스키마는 표본이 아니다
+    # 연속 타깃: 창 끝 수익·최대 상승·최대 하락. 커버리지가 모자라면 None
+    pt = path_targets({"ts": 2700, "mid": 2612.0}, cs)
+    assert pt and pt["dn_bp"] < 0 < pt["up_bp"] and abs(pt["ret_bp"] - (2607 - 2612) / 2612 * 1e4) < 0.2, pt
+    assert path_targets({"ts": 2700, "mid": 2612.0}, cs[2:]) is None      # 창 머리 없음
+    assert path_targets({"ts": 2700, "mid": None}, cs) is None
     # 장부 키: 숫자만 다른 같은 상태는 같은 키, 라벨 종류가 늘면 다른 키
     same = classify(dict(inp, cur=dict(inp["cur"], whale_net=-500, retail_net=90)))
     assert log_key(same) == log_key(r) and same["labels"] != r["labels"], (log_key(same), log_key(r))
