@@ -3417,7 +3417,7 @@ function renderSituation() {
   //   «가장 가까운 목표가 이긴다»가 섞인다(09-21 실측 81%). 동전 = 50%.
   const sy = c.sym || {};
   const symLine = sy.n
-    ? `방향 적중 <b>${sy.hit}%</b> (대칭 ±0.5×창폭 · n ${sy.n} · 동전 50%)`
+    ? `방향 적중 <b>${sy.hit}%</b> · 같은 구간 «항상 상승»이면 ${sy.base_up}% (대칭 ±0.5×창폭 · 추세 구간만 · n ${sy.n})`
     : "방향 적중: 대칭 라벨 해결 대기";
   body.innerHTML = `
     <div><div class="sit-h">지금</div><div class="sit-labels">${labels}</div></div>

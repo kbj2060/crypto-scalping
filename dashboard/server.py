@@ -2659,7 +2659,9 @@ def make_app() -> web.Application:
                 error_reason="situation_minute_upstream_error")
             return [{"time": int(r[0]) // 1000, "high": float(r[2]), "low": float(r[3]), "close": float(r[4])}
                     for r in raw]
-        return await swr_cached("situation_minutes", 20.0, produce)
+        # max_stale: 바이낸스가 느리면 **직전 값을 내주고 뒤에서 갱신**한다. 없으면 1초 루프가
+        # 매초 왕복을 기다려 미시 참고까지 같이 멈춘다(09-21 검토).
+        return await swr_cached("situation_minutes", 20.0, produce, max_stale=STALE_GRACE_SECONDS)
 
     async def compute_situation(now: float) -> None:
         loop = asyncio.get_running_loop()
@@ -2694,7 +2696,8 @@ def make_app() -> web.Application:
             entry = {"ts": int(now), "mid": inp.get("mid"), "dir": res["dir"], "prob": res["prob"], "targets": res["targets"],
                      "labels": res["labels"], "flips_on": [f["signal"] for f in res["flips"] if f["on"]],
                      # 대칭 라벨(학습 주 타깃)과 목표 거리 -- 거리를 같이 남겨야 «근접 편향»을 나중에 다시 잴 수 있다
-                     "sym": res.get("sym"), "dist_bp": res.get("dist_bp"), "outcome": None, "outcome_sym": None}
+                     "sym": res.get("sym"), "dist_bp": res.get("dist_bp"), "outcome": None, "outcome_sym": None,
+                     "scorable": res.get("scorable", True), "passed": res.get("passed") or []}
             situation_state["log"].append(entry); situation_state["log"] = situation_state["log"][-300:]
             situation_state["last_key"], situation_state["last_logged"] = key, now
             _situation_append(entry)
