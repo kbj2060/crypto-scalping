@@ -35,9 +35,12 @@ for h, rows, trades in c.execute(
     print("tt|%s|%d" % (hs, trades))
 PYTT
   fi
-  for f in data/live/orderflow/bookticker/ETHUSDT/*.bt; do
+  # 🔴로테이션되면 .bt.gz 가 된다 -- .bt 만 글롭하면 «지금 열려 있는 시각» 하나만 세고
+  #   지난 시각은 통째로 비교에서 빠진다(2026-09-22 실제로 그렇게 bt 가 표에서 사라졌다).
+  for f in data/live/orderflow/bookticker/ETHUSDT/*.bt data/live/orderflow/bookticker/ETHUSDT/*.bt.gz; do
     [ -e "$f" ] || continue
-    h=$(basename "$f" .bt); s=$(stat -c %s "$f")
+    b=$(basename "$f"); h="${b%%.bt*}"
+    if [[ "$f" == *.gz ]]; then s=$(zcat "$f" 2>/dev/null | wc -c); else s=$(stat -c %s "$f"); fi
     echo "bt|$h|$(( (s - 32) / 32 ))"
   done
   for f in data/live/orderflow/depthdiff/ETHUSDT/*.jsonl data/live/orderflow/depthdiff/ETHUSDT/*.jsonl.gz; do
