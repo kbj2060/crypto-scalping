@@ -91,31 +91,34 @@ def test_liquidation_is_not_on_the_shared_axis():
         "청산 점 크기가 로그가 아니다 -- 건당 0.86~2,556 ETH(2,970배)라 선형이면 큰 것만 남는다"
 
 
-def test_turnover_is_sqrt_scaled():
-    """초당 거래대금은 중앙 $60k / 최대 $3.93M -- 65배다. 선형이면 300초가 바닥에 눕는다."""
-    assert "Math.sqrt(r.v / tMax) * barMax" in JS, "거래대금 막대가 √ 스케일이 아니다"
+def test_liquidation_dots_sit_on_the_zero_line():
+    """청산 원은 0선 위다 -- 아래 판이 사라졌으므로(2026-09-22) 다른 자리에 두면 떠돈다.
+
+    0선인 이유: 청산은 강제 유출입이라 이 축(순수급)의 원점에 앉는 게 맞고, 시각축이
+    스택과 같아 «언제»가 바로 맞춰진다.
+    """
+    assert re.search(r"const cy = mid;", JS), "청산 원이 0선(mid)에 안 앉는다"
+    assert "const LOW_H" not in JS and "const PANE_GAP" not in JS, \
+        "아래 판 껍데기 상수가 남아 있다 -- 지웠으면 같이 지운다"
 
 
-def test_two_panes_fit_the_existing_height_budget():
-    """78 + 4 + 38 = 120 = SUB_1S_H(150) − mt(16) − mb(14).
+def test_one_pane_uses_the_whole_drawing_area():
+    """그리기 영역(flowH) 전부를 누적 스택이 쓴다. SUB_1S_H(400) − mt(16) − mb(14) = 370.
 
-    넘치면 옆 패널을 침범하는데 SVG 는 잘라주지 않는다. 캔들 상자 높이 계약(styles.css)과
-    이 파일이 갈라져 있어 한쪽만 고치면 조용히 깨진다 -- 그래서 여기서 산수를 다시 센다.
+    🔴이 산수가 어긋나면 SVG 는 잘라주지 않는다 -- 넘치면 옆 패널을 침범하고, 모자라면
+      빈 띠가 생긴다. 캔들 상자 높이 계약(styles.css)과 이 파일이 갈라져 있어 한쪽만
+      고치면 조용히 깨지므로 여기서 다시 센다.
     """
     mt = int(re.search(r"const mt = (\d+), mb = (\d+);", JS).group(1))
     mb = int(re.search(r"const mt = (\d+), mb = (\d+);", JS).group(2))
     sub_h = int(re.search(r"SUB_1S_H = subOn \? (\d+)", JS).group(1))
     flow_h = sub_h - mt - mb
-    assert re.search(r"LOW_H = Math\.max\(22, Math\.min\(76, Math\.round\(flowH \* 0\.24\)\)\)", JS), \
-        "아래 판 높이 식이 바뀌었다"
-    low = max(22, min(76, round(flow_h * 0.24)))
-    gap = int(re.search(r"const PANE_GAP = (\d+);", JS).group(1))
-    hi = flow_h - low - gap
-    assert hi + gap + low == flow_h, "두 판 합이 그리기 영역을 안 채운다"
-    assert hi >= 60, f"누적 판이 {hi}px 로 눌렸다 -- 스택 세 층이 안 갈린다"
-    # 2026-09-22 SUB_1S_H 400 (풋프린트=가격 플롯과 같은 높이, 사용자 요청). 78/4/38 ->
-    # 118/4/38 -> 290/4/76 으로 두 번 올렸다. 아래 판도 같이 커진다(상한 76).
-    assert (hi, gap, low) == (290, 4, 76), f"승인 치수 290/4/76 이 아니다: {(hi, gap, low)}"
+    assert flow_h == 370, f"그리기 영역이 {flow_h}px 다(400-16-14=370 이어야)"
+    assert re.search(r"const mid = flowTop \+ flowH / 2;", JS), "0선이 그리기 영역 한가운데가 아니다"
+    assert re.search(r"const half = flowH / 2 - 4;", JS), "반폭이 flowH 기준이 아니다"
+    body = JS[JS.index("function renderSupply1s"):JS.index("function renderSupplyProfileSvg")]
+    assert "tMax" not in body and "barMax" not in body, \
+        "거래대금 막대가 되살아났다 -- 2026-09-22 사용자 지시로 이 차트에서 뺐다"
 
 
 def test_no_new_colour_was_invented():

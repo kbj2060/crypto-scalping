@@ -3651,10 +3651,6 @@ function renderSupply1s(box = null) {
   const cvd = cumOf((s) => { const c = supply1s.get(s); return c[4] - c[5]; });
   // 스택 경계: 0 → 고래 → (CVD-리테일) → CVD. 가운데 층이 곧 중형이라 따로 안 만든다.
   const stackMid = cvd.map((r, i) => ({ s: r.s, v: r.v - retail[i].v }));
-  // 초당 거래대금 USD. 이 차트의 유일한 «부호 없는 크기»라 아래 판으로 내린다.
-  const turn = allSecs.filter((s2) => s2 > first)
-                      .map((s2) => { const c = supply1s.get(s2);
-                                     return { s: s2, v: (c[4] + c[5]) * c[6] }; });
   // 🔴청산은 **선이 아니라 이벤트다**. 269초에 5건이고, 봉당 중앙 6.8 ETH 가 CVD 진폭의
   //   0.09% 라 어떤 선형 ETH 축에서도 0선에 붙는다(2026-09-22 첫 판의 실제 버그).
   //   27시간 실측은 봉당 중앙 6.8 / p90 217 / 최대 3,877 -- 계열 하나 안에서 570배다.
@@ -3680,25 +3676,16 @@ function renderSupply1s(box = null) {
     if (segOf(s) !== oiSeg) { oiSeg = segOf(s); oiBase = oi1s.get(s); }
     if (s > first) oiRows.push({ s, v: oi1s.get(s) - oiBase });
   });
-  // ── 두 판 (2026-09-22 사용자 선택: A 의 누적 × B 의 위·아래) ───────────────
-  // 누적선과 순간값은 **다른 물건**이다. 한 축에 섞으면 둘 중 하나가 반드시 눌린다.
-  // 위: 봉 시작부터 쌓인 것(수급 스택 + CVD 윤곽 + 신규계약).
-  // 아래: 그 초에 **일어난** 것(거래대금, 청산).
-  // 🔴높이 예산 78 + 4 + 38 = 120 은 지금 SUB_1S_H(150) 의 그리기 영역과 정확히 같다.
-  //   styles.css 의 963px 높이 계약도 캔들 상자도 안 건드린다 -- 그 계약은 두 파일에
-  //   갈라져 있어 한쪽만 고치면 가격 플롯이 조용히 눌린다(이 파일 위쪽 경고 참고).
-  // 🔴상한을 38 로 두면 패널이 400 이 됐을 때 290:38 이라 순간 판이 실오라기가 된다.
-  //   0.24 로 낮추고 상한을 76 으로 올린다 -- 190 패널에서는 38 로 **지금과 똑같고**
-  //   (round(160*0.24)=38), 400 패널에서만 76 이 된다. 승인된 비율을 그대로 늘린 것이다.
-  const LOW_H = Math.max(22, Math.min(76, Math.round(flowH * 0.24)));
-  const PANE_GAP = 4;
-  const hiH = flowH - LOW_H - PANE_GAP;
+  // ── 한 판 (2026-09-22 사용자 지시로 아래 판을 걷어냈다) ─────────────────────
+  // 원래 «위=누적 / 아래=순간(거래대금·청산)» 두 판이었다. 거래대금 막대를 빼자 아래
+  // 판에 청산 원만 남았는데, 점 몇 개에 76px 를 쓰는 건 낭비다 -- 판을 없애고 청산은
+  // **0선 위**로 올렸다. 청산은 강제 유출입이라 이 축(순수급)의 원점에 앉는 게 맞다.
+  // 그 76px 는 전부 누적 스택이 가져간다(294 -> 370px).
   const peak = Math.max(0, ...cvd.map((r) => Math.abs(r.v)), ...whale.map((r) => Math.abs(r.v)),
                         ...stackMid.map((r) => Math.abs(r.v)), ...oiRows.map((r) => Math.abs(r.v)));
   const span = SUPPLY_1S_STEPS.find((a) => a >= peak) || Math.max(peak, 1e-9);
-  const mid = flowTop + hiH / 2;
-  const half = hiH / 2 - 4;
-  const divY = flowTop + hiH + PANE_GAP;
+  const mid = flowTop + flowH / 2;
+  const half = flowH / 2 - 4;
   // 마지막 계단을 넘는 폭발은 잘라서 상자 안에 둔다 -- 넘치면 옆 패널을 침범한다.
   const yF = (v) => mid - Math.max(-1, Math.min(1, v / span)) * half;
 
@@ -3799,7 +3786,6 @@ function renderSupply1s(box = null) {
     svg.appendChild(g);
   };
   rule(mid);
-  rule(divY);          // 두 판의 경계
 
   // 신규계약: **같은 ETH 축**이다. 둘 다 ETH 이고 실측 진폭도 같은 자릿수라(7,548 vs
   //   4,734) 축을 나눌 이유가 없다 -- 나누면 세로 위치에 뜻이 없어진다. 합치면
@@ -3821,50 +3807,13 @@ function renderSupply1s(box = null) {
   const STEP = Math.round(LBL * 1.34);          // 줄 간격
   const SW = Math.round(LBL * 0.55);            // 색표 한 변
 
-  // ── 아래 판: 그 초에 일어난 일 ────────────────────────────────────────────
-  // 🔴거래대금은 √ 스케일이다. 실측 초당 중앙 $60k / 최대 $3.93M -- **65배**라
-  //   선형이면 스파이크 하나가 나머지 300초를 바닥에 눕힌다(√ 로 8배가 된다).
-  if (turn.length) {
-    const tMax = Math.max(...turn.map((r) => r.v), 1);
-    const barMax = LOW_H * 0.58;
-    const bw = Math.max(1.2, (cw / SUPPLY_1S_SEGMENT) * 0.7);
-    let d = "";
-    turn.forEach((r) => {
-      const hh = Math.sqrt(r.v / tMax) * barMax;
-      if (hh < 0.4) return;
-      d += "M" + (xAt(r.s) - bw / 2).toFixed(1) + " " + (divY + 1).toFixed(1)
-           + "h" + bw.toFixed(1) + "v" + hh.toFixed(1) + "h" + (-bw).toFixed(1) + "Z";
-    });
-    const path = document.createElementNS(NS, "path");
-    path.setAttribute("d", d); path.setAttribute("fill", "var(--neutral)");
-    path.setAttribute("fill-opacity", "0.45"); path.setAttribute("stroke", "none");
-    svg.appendChild(path);
-    // 기준선이 없으면 «평소의 몇 배인지»를 눈으로 못 잰다.
-    // 🔴중앙값을 썼다가 버렸다: √ 축에서 중앙($60k)/최대($3.9M) 는 2.7px 라 경계선에
-    //   겹쳐 **아예 안 보였다**(실렌더에서 확인). p90 은 7.8px 라 제 몫을 한다.
-    const sorted = turn.map((r) => r.v).sort((a, b) => a - b);
-    const p90 = sorted[Math.floor(sorted.length * 0.9)];
-    // 🔴좁은 폭에서는 기준선을 **안 그린다**. 꼬리표 자리(72px)에 설명이 안 들어가고,
-    //   설명 없는 점선은 정체불명 표시가 된다(414px 실렌더에서 확인).
-    if (!narrow) {
-      const g = document.createElementNS(NS, "line");
-      const my = divY + 1 + Math.sqrt(p90 / tMax) * barMax;
-      g.setAttribute("x1", ml); g.setAttribute("x2", ml + cw);
-      g.setAttribute("y1", my); g.setAttribute("y2", my);
-      g.setAttribute("stroke", "var(--neutral)"); g.setAttribute("stroke-opacity", "0.3");
-      g.setAttribute("stroke-dasharray", "2 4");
-      svg.appendChild(g);
-      label(ml + cw + 5, divY + LBL * 2 + 6, "p90 " + fmtUsdCompact(p90) + "/초", "var(--muted)", null, LBL);
-    }
-    // 「거래대금 $773.1k」는 72px 자리를 넘어 **잘렸다**. 좁으면 숫자만 남긴다.
-    label(ml + cw + 5, divY + LBL, (narrow ? "" : "거래대금 ")
-          + fmtUsdCompact(sorted.reduce((a, b) => a + b, 0)), "var(--muted)", null, LBL);
-  }
   // 청산: 크기를 가진 점. **로그**다 -- 실측 건당 중앙 0.86 / p99 270 / 최대 2,556 ETH 라
   //   선형이면 큰 것 하나가 나머지를 점으로 만들고, √ 로도 모자란다.
   if (liqEv.length) {
-    const cy = divY + LOW_H * 0.76;
-    const rMax = Math.min(8, LOW_H * 0.21);
+    // 0선 위. 스택이 0선에서 자라므로 점이 면 위에 얹히지만, 점은 작고 방향색이라
+    // 층(농담 채움)과 안 싸운다. 시각축은 스택과 같아 «언제»가 바로 맞춰진다.
+    const cy = mid;
+    const rMax = 9;
     liqEv.forEach((e) => {
       const c = document.createElementNS(NS, "circle");
       const r = 2 + Math.log10(1 + Math.abs(e.v)) / Math.log10(3001) * (rMax - 2);
@@ -3878,7 +3827,7 @@ function renderSupply1s(box = null) {
       c.appendChild(t);
       svg.appendChild(c);
     });
-    label(ml + cw + 5, cy + LBL / 2 - 1,
+    label(ml + cw + 5, cy + LBL * 1.6,
           narrow ? "청산 " + qty(liqSum[0] + liqSum[1])
                  : "청산 롱" + qty(liqSum[0]) + "/숏" + qty(liqSum[1]),
           liqSum[1] >= liqSum[0] ? "var(--good)" : "var(--bad)", null, LBL);
@@ -3917,7 +3866,12 @@ function renderSupply1s(box = null) {
     return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
   label(ml, h - 3, hhmm(first) + " 봉 시작", "var(--muted)");
   label(ml + cw, h - 3, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
-  if (!narrow) label(xAt(now) + 4, h - 3, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
+  // 🔴봉 끝으로 갈수록 이 꼬리표가 오른쪽 «닫힐 시각»과 겹친다(280/300초에서 실제로
+  //   포개졌다). 끝 18% 구간에서는 안 그린다 -- 그때는 진행선이 이미 오른쪽 끝에 붙어
+  //   있어 «지금»이 어디인지 말할 필요가 없다.
+  if (!narrow && now - first < SUPPLY_1S_SEGMENT * 0.82) {
+    label(xAt(now) + 4, h - 3, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
+  }
 }
 
 // ── 가격축 수급 프로파일 (2026-09-19) ───────────────────────────────────────
