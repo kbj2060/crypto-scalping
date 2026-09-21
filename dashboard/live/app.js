@@ -4695,7 +4695,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   (renderSupplyProfileSvg 의 maxRows) 16행 -> 22행이 된다.
   // 2026-09-20 1초 수급 100 -> 150 (사용자 요청 "좀 더 키워줘"). 상자도 706 -> 756 으로
 //   같이 키운다 -- 안 그러면 가격 플롯이 그만큼 눌린다(아래 경고 블록).
-  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 150 : 0;
+  // 2026-09-22 1초 수급을 **프로파일과 같은 높이**로(사용자 «지금 하나도 안보여»).
+  //   150 에서는 누적 판이 78px 뿐이라 세 층이 겹쳐 보였다. 190 이면 118px 가 된다
+  //   (아래 판 38px 는 상한이라 안 늘어난다 -- 늘어난 40px 이 전부 스택으로 간다).
+  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 190 : 0;
   // 2026-09-21 청산 밀도 범례를 헤더 행에서 **여기로** 옮겼다(아티팩트 댓글).
   //   «풋프린트 차트 바로 위와 프로파일 바닥글 사이». 밀도는 이제 풋프린트의 배경이라
   //   범례가 헤더에 있으면 설명하는 그림에서 멀다. 글자 크기도 바닥글과 같은 9 로 맞췄다.
@@ -4714,8 +4717,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   if (SUB_TOTAL > 0 && h < 400 + SUB_TOTAL - 2 && !renderCandleSvg._subBoxWarned) {
     renderCandleSvg._subBoxWarned = true;
     console.warn(`캔들 상자가 ${Math.round(h)}px 인데 수급 패널이 ${SUB_TOTAL}px 를 쓴다 -- `
-      + `styles.css 의 #candleSvgSnapshot ${400 + SUB_TOTAL + 55}px / .candle-container `
-      + `${412 + SUB_TOTAL + 55}px 로 맞추세요(그만큼 가격 플롯이 눌립니다).`
+      // 🔴이 식은 낡아 있었다(55 는 옛 레인 합). 실제 계약은 12 + SUB_TOTAL + 400(가격
+      //   플롯) + 111(레인) + 70(mb) = SUB_TOTAL + 593 이다 -- 높이 계약 테스트와 같은 식.
+      + `styles.css 의 #candleSvgSnapshot ${SUB_TOTAL + 593}px / .candle-container `
+      + `${SUB_TOTAL + 605}px 로 맞추세요(그만큼 가격 플롯이 눌립니다).`
       + " (55 = 거래대금 15 + 델타·CVD 28 + 간격 12)");
   }
 

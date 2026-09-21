@@ -113,7 +113,9 @@ def test_two_panes_fit_the_existing_height_budget():
     hi = flow_h - low - gap
     assert hi + gap + low == flow_h, "두 판 합이 그리기 영역을 안 채운다"
     assert hi >= 60, f"누적 판이 {hi}px 로 눌렸다 -- 스택 세 층이 안 갈린다"
-    assert (hi, gap, low) == (78, 4, 38), f"실척에서 승인한 78/4/38 이 아니다: {(hi, gap, low)}"
+    # 2026-09-22 SUB_1S_H 150 -> 190 (사용자 «지금 하나도 안보여»). 아래 판은 상한 38 그대로라
+    # 늘어난 40px 이 전부 누적 판으로 간다: 78 -> 118.
+    assert (hi, gap, low) == (118, 4, 38), f"승인 치수 118/4/38 이 아니다: {(hi, gap, low)}"
 
 
 def test_no_new_colour_was_invented():

@@ -2703,8 +2703,11 @@ svg {
      ch = h - mt(12 + SUB_TOTAL 370) - mb(70) - 레인(111) = 963 - 563 = 400.
    🔴app.js 의 SUB_* / 레인 상수와 **같이** 움직여야 한다.
      test_sub_panel_height_contract_20260919.py 가 기계로 검사한다. */
-#candleSvgSnapshot { height: 963px; }
-.candle-container { height: 975px; }    /* +12 = #candleSvgSnapshot margin-top */
+/* 2026-09-22 963 -> 1003. SUB_1S_H 150 -> 190(프로파일과 같은 높이, 사용자 요청)이라
+   SUB_TOTAL 370 -> 410. 가격 플롯 400px 는 **그대로 지킨다** -- 상자를 그만큼 키운다.
+     ch = 1003 - 12 - SUB_TOTAL(410) - 레인(111) - mb(70) = 400. */
+#candleSvgSnapshot { height: 1003px; }
+.candle-container { height: 1015px; }    /* +12 = #candleSvgSnapshot margin-top */
 /* 2026-09-19 히트맵 그림을 걷어내고(사용자 지시) 프로파일이 그 수치를 직접 그린다 --
    상자가 844 -> 706 으로 돌아왔다. SUB_TOTAL 306 = 8 + 190(프로파일) + 8 + 100(1초 수급).
    🔴이 두 수는 app.js 의 SUB_* 상수와 **같이** 움직여야 한다. 어긋나면 가격 플롯이 조용히
