@@ -5135,27 +5135,41 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   if (cone && currentPrice > 0) {
     const x0 = ml + plotW, x1 = w - mr;
     const stepX = (j) => x0 + ((x1 - x0) * (j + 1)) / CONE_STEPS;
+    // 🔴원뿔은 캔들 고저로 잡힌 y 범위를 **자주 넘는다**(90% 밴드가 ±72bp 인데 1시간 창의
+    //   고저폭이 그보다 좁은 날이 많다). 넘는 채로 두면 폴리곤이 레인 위로 흘러넘친다.
+    //   플롯 안으로 자르고, **잘린 쪽은 지지/저항과 같은 규약**으로 가장자리에 ↑/↓ 라벨을 단다
+    //   (priceLabels 의 offTop/offBottom 처리와 같은 뜻 -- 화면 밖 값은 «방향 + 값»으로 말한다).
     const yBp = (bp) => yAt(currentPrice * (1 + bp / 1e4));
+    const clampY = (v) => Math.max(mt, Math.min(plotBottom, v));
     const g = document.createElementNS(NS, "g");
     // 바깥 밴드부터 그려 안쪽이 위에 온다 -- 겹치는 만큼 가운데가 진해진다(확률 «밀도»).
     for (const b of [...cone.bands].reverse()) {
       const pts = [`${x0},${yAt(currentPrice)}`];
-      for (let j = 0; j < CONE_STEPS; j++) pts.push(`${stepX(j).toFixed(1)},${yBp(b.hi[j]).toFixed(1)}`);
-      for (let j = CONE_STEPS - 1; j >= 0; j--) pts.push(`${stepX(j).toFixed(1)},${yBp(b.lo[j]).toFixed(1)}`);
+      for (let j = 0; j < CONE_STEPS; j++) pts.push(`${stepX(j).toFixed(1)},${clampY(yBp(b.hi[j])).toFixed(1)}`);
+      for (let j = CONE_STEPS - 1; j >= 0; j--) pts.push(`${stepX(j).toFixed(1)},${clampY(yBp(b.lo[j])).toFixed(1)}`);
       const poly = document.createElementNS(NS, "polygon");
       poly.setAttribute("points", pts.join(" "));
       poly.setAttribute("fill", "var(--muted)");
       poly.setAttribute("opacity", String(b.op));
       g.appendChild(poly);
     }
-    // 밴드 라벨: 오른쪽 끝, 그 밴드의 위쪽 경계 바로 안쪽
-    for (const b of cone.bands) {
+    // 밴드 라벨: 오른쪽 끝, 그 밴드 경계 바로 안쪽. 잘렸으면 가장자리에 붙이고 ↑/↓ 와 값을 단다.
+    const bandLabel = (bp, pct, up) => {
+      const raw = yBp(bp), off = up ? raw < mt : raw > plotBottom;
       const t = document.createElementNS(NS, "text");
-      t.setAttribute("x", x1 - 5); t.setAttribute("y", yBp(b.hi[CONE_STEPS - 1]) + 11);
+      t.setAttribute("x", x1 - 5);
+      t.setAttribute("y", off ? (up ? mt + 10 : plotBottom - 3) : raw + (up ? 11 : -4));
       t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "700");
       t.setAttribute("fill", "var(--muted)"); t.setAttribute("text-anchor", "end");
-      t.textContent = `${b.pct}%`;
+      if (off) t.setAttribute("opacity", ".85");
+      t.textContent = off ? `${pct}% ${up ? "↑" : "↓"}${Math.abs(bp).toFixed(0)}bp` : `${pct}%`;
       g.appendChild(t);
+    };
+    for (const b of cone.bands) {
+      const last = CONE_STEPS - 1;
+      bandLabel(b.hi[last], b.pct, true);
+      // 아래쪽은 **잘렸을 때만** 단다 -- 안 잘리면 위 라벨 하나로 밴드가 특정된다(대칭이다).
+      if (yBp(b.lo[last]) > plotBottom) bandLabel(b.lo[last], b.pct, false);
     }
     const cap = document.createElementNS(NS, "text");
     cap.setAttribute("x", (x0 + x1) / 2); cap.setAttribute("y", mt + 10);

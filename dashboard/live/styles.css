@@ -562,147 +562,6 @@ body {
 .ops-health-row.evidence-row.bad .ops-health-dot { animation: statusPulse 2.4s ease-in-out infinite; }
 .evidence-strip-wrap { margin-top: 4px; }
 
-/* Snapshot tab: "12신호 한눈에" compact overview at the top (model indicators + evidence signals
-   share this chip language, see renderModelIndicatorList/renderEvidenceSignals in app.js), so both
-   groups are visible together without scrolling into their full detail sections below. */
-.signal-overview-group {
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--soft-line);
-}
-.signal-overview-group:last-child { border-bottom: 0; }
-
-.signal-overview-group-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.signal-overview-group-head .signal-overview-label { margin-bottom: 0; }
-
-.signal-overview-label {
-  margin: 0 0 8px;
-  font: 700 12px/1.3 var(--font-sans);
-  color: var(--text);
-}
-
-/* 2026-08-27 user request 기원 (원래 증거 신호 그룹 전용): 데스크톱 4열/모바일 2열 고정.
-   2026-08-24 교훈(고정 repeat(N,1fr) 파손)은 "열 개수가 칩 개수에 맞춰 골라 써야 하는 여러
-   모디파이어 클래스" 구조였던 게 원인 -- 이건 그거와 달리 열 개수가 칩 개수와 무관하게 항상
-   고정 4/2이므로 칩이 늘어도(8->11 등) 그냥 다음 줄로 더 넘어갈 뿐 깨지지 않는다(마지막 줄만
-   덜 채워질 수 있음, 레이아웃 파손 아님).
-   2026-08-30: 이전엔 이 그룹(.signal-chip-row-evidence)만 고정열이고 나머지(모델지표/특화감지기
-   등, .signal-chip-row)는 auto-fit+minmax였는데, 그 둘의 실제 렌더링 폭이 갈라짐(칩 1개뿐인
-   위험도/특화감지기 행이 다른 행보다 눈에 띄게 크거나 작게 보임 -- 사용자가 실측 스크린샷으로
-   확인, 증거신호 315px vs 나머지 200px) -- 별도 클래스를 없애고 이 고정열 규칙 하나로 모든
-   signal-chip-row를 통일해, 칩이 몇 개든 어느 그룹이든 트랙 폭이 항상 동일해지도록 함. */
-.signal-chip-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-}
-@media (max-width: 720px) {
-  .signal-chip-row {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-/* 2026-08-31 모바일 최적화 -- 일반 스마트폰 폭(480px 이하)에서는 2열도 칩 하나당 ~170px밖에
-   안 남아 .signal-chip-label(nowrap+ellipsis)이 "리테일 수...", "청산 방..."처럼 잘려서 무슨
-   신호인지 안 보이는 문제 실측 확인 -- 1열로 한 번 더 좁혀 라벨에 전체 칩 폭을 내줌(세로로 길어
-   지는 대신 라벨이 안 잘리는 쪽을 택함, 이 칩들의 목적 자체가 "한눈에 상태 읽기"라 라벨 가독성이
-   더 중요). */
-@media (max-width: 480px) {
-  .signal-chip-row {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* 2026-08-24 사용자 리포트: 방향(롱/숏, 초록/빨강)과 위험도(안정/주의/위험, 초록/호박/빨강)가
-   같은 색을 재사용해 헷갈림 -- 색은 각자 관습이 강해 그대로 두고, 공간을 갈라 라벨을 붙여서
-   "지금 보는 게 방향인지 위험도인지"를 색과 무관하게 먼저 알 수 있게 한다. */
-.signal-chip-subgroup {
-  margin-bottom: 10px;
-}
-.signal-chip-subgroup:last-child {
-  margin-bottom: 0;
-}
-
-.signal-chip-subgroup-label {
-  margin: 0 0 6px;
-  font: 700 11px/1 var(--font-mono);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.signal-chip {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  padding: 9px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: rgb(var(--lift) / 0.02);
-}
-
-.signal-chip-dot {
-  width: 7px;
-  height: 7px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--muted);
-}
-
-/* Live PREVIEW of the currently-forming bar (2026-08-26) -- small, deliberately secondary to
-   .signal-chip-dot above (which stays the confirmed/validated reading). Transparent/invisible
-   until renderEvidenceSignalsProvisional() sets .live-bottom/.live-top; faster pulse than the
-   confirmed dot's 2.4s so it visibly reads as "still updating", not a second confirmed state. */
-.signal-chip-live-dot {
-  width: 5px;
-  height: 5px;
-  flex: none;
-  border-radius: 50%;
-  background: transparent;
-}
-.signal-chip-live-dot.live-bottom { background: var(--good); box-shadow: 0 0 6px var(--good); animation: statusPulse 1s ease-in-out infinite; }
-.signal-chip-live-dot.live-top { background: var(--bad); box-shadow: 0 0 6px var(--bad); animation: statusPulse 1s ease-in-out infinite; }
-.signal-chip-live-dot.live-mixed { background: var(--warn); box-shadow: 0 0 6px var(--warn); animation: statusPulse 1s ease-in-out infinite; }
-/* 2026-08-27 (user request): while this signal is firing in the still-forming bar (same condition
-   as the live dot's own color above), pulse the WHOLE chip's opacity so its border, this dot, and
-   the label/state text all blink together as one unit instead of just the small dot. Toggled on
-   the chip root by renderEvidenceSignalsProvisional -- evidence-signal chips only, model
-   indicators have no provisional feed to key this off of. */
-.signal-chip-live-firing { animation: statusPulse 1s ease-in-out infinite; }
-
-.signal-chip-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: 700 11px/1.25 var(--font-sans);
-  color: var(--muted);
-}
-
-.signal-chip-state {
-  flex: none;
-  font: 800 11px/1 var(--font-mono);
-  color: var(--muted);
-}
-
-.signal-chip.good { border-color: color-mix(in srgb, var(--good) 45%, transparent); background: color-mix(in srgb, var(--good) 8%, transparent); }
-.signal-chip.good .signal-chip-dot { background: var(--good); box-shadow: 0 0 8px var(--good); animation: statusPulse 2.4s ease-in-out infinite; }
-.signal-chip.good .signal-chip-label, .signal-chip.good .signal-chip-state { color: var(--good); }
-
-.signal-chip.bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent); }
-.signal-chip.bad .signal-chip-dot { background: var(--bad); box-shadow: 0 0 8px var(--bad); animation: statusPulse 2.4s ease-in-out infinite; }
-.signal-chip.bad .signal-chip-label, .signal-chip.bad .signal-chip-state { color: var(--bad); }
-
-.signal-chip.warn { border-color: color-mix(in srgb, var(--warn) 50%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); }
-.signal-chip.warn .signal-chip-dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
-.signal-chip.warn .signal-chip-label, .signal-chip.warn .signal-chip-state { color: var(--warn); }
-
 .evidence-strip-meaning {
   margin: 10px 0 0;
   padding: 8px 10px;
@@ -785,8 +644,6 @@ body {
    오른쪽에 있으므로, 범례에 flex:1 을 주면 남은 폭 전체를 차지하며 내용이 가운데 정렬된다.
    패딩 18 -> 10 으로 빈 행 높이도 줄인다. (2026-09-09 의 오른쪽 끝 정렬은 이 지시로 대체됨) */
 .liq-map-panel .ops-health-head { padding: 10px 18px; }
-@media (max-width: 720px) {
-}
 
 .liq-level-list { padding: 4px 0 12px; }
 .liq-level-row {
@@ -1525,17 +1382,6 @@ svg {
     font-size: 15px;
   }
 
-  .signal-overview-group {
-    padding: 12px;
-  }
-
-  /* 2026-08-31 모바일 최적화 -- "증거 신호" 그룹 헤더가 라벨 텍스트 + 배지 2개(evidenceStripBadge/
-     evidenceProvisionalBadge, 둘 다 white-space:nowrap 긴 텍스트)를 한 줄(space-between)에 욱여
-     넣다 오른쪽으로 넘치던 문제 -- wrap만 허용해서 배지가 다음 줄로 자연스럽게 내려가게 함. */
-  .signal-overview-group-head {
-    flex-wrap: wrap;
-  }
-
   .evidence-strip-meaning {
     margin-top: 8px;
   }
@@ -1728,7 +1574,6 @@ svg {
   stroke-dasharray: 4,4;
   pointer-events: none;
 }
-
 
 /* 익절가 도달 배지 (2026-09-03) -- horizon-badge 기본형에 색만 바꾼 modifier.
    ⚠️저ATR 경고(.low-atr-badge)와 나란히 설 수 있으므로 같은 pill 규격을 유지한다. */
@@ -1959,8 +1804,6 @@ svg {
   .notify-tier { grid-template-columns: 1fr; gap: 2px; }
 }
 
-
-
 /* ─────────────────────────────────────────────────────────────────────────────
    모바일 최적화 2차 (2026-09-07). Playwright 375px/360px 실측으로 잡은 것만 고친다
    -- 눈대중이 아니라 (a) 뷰포트 넘침 (b) scrollWidth>clientWidth 잘림 (c) 터치 타깃 크기
@@ -1981,7 +1824,6 @@ svg {
      SVG 차트 안의 라벨(레짐/현재/지지1 …)은 renderCandleSvg()가 좌표와 함께 그리므로
      여기서 건드리지 않는다 -- 크기를 키우면 라벨끼리 겹친다. */
   .eyebrow { font-size: 11px; }
-  .signal-chip-subgroup-label { font-size: 11px; }
   .notify-check-mark,
   .notify-device-main span,
   .meter-pct,
@@ -2368,7 +2210,6 @@ svg {
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }
 .notify-btn.short:hover:not(:disabled) { border-color: var(--bad); }
 
-
 /* 2026-09-14 진입 블록 접기. <details> 가 .manual-entry 의 flex 자식이 되면서 안쪽 행들은
    더 이상 그 gap 을 못 받는다 -- 여기서 같은 간격을 준다. summary 는 display 를 바꾸지
    않는다(바꾸면 브라우저가 그리는 펼침 삼각형이 사라진다). 높이는 패딩으로만 올린다. */
@@ -2674,7 +2515,6 @@ svg {
 /* 내용이 비면 배지는 «없는 것»이다. 프리미티브가 min-height 를 줘서 빈 알약이 남았다. */
 .ops-badge:empty, .ops-readonly:empty, .ops-health-summary:empty { display: none !important; }
 
-
 /* 세그먼트의 활성 칸은 컨테이너(.asset-tabs) 유리 **위에 뜬 조각**이다. blur 를 겹치면
    탁해지므로 얹지 않고, 대신 림과 옅은 그림자로 «한 겹 위»임을 만든다. */
 [data-theme="light"] .asset-tab.active {
@@ -2698,7 +2538,6 @@ svg {
 /* 라이트에서도 툴팁은 어두운 판이므로 같은 값이다 -- 토큰을 타지 않게 명시해 둔다. */
 [data-theme="light"] .chart-tooltip b { color: rgba(255, 255, 255, 0.72); }
 
-
 /* 2026-09-19 수급 두 그림이 캔들 SVG 안으로 들어갔다(아티팩트 댓글 "svg 안으로는 못 들어가?").
    컨테이너 둘(.supply-profile-container/.supply-1s-container)은 사라졌고, 그만큼 캔들 상자가
    커진다 -- SVG 400 -> 706(= 8 + 190 + 8 + 100 을 더한 값), 상자 412 -> 718.
@@ -2721,8 +2560,6 @@ svg {
    🔴이 두 수는 app.js 의 SUB_* 상수와 **같이** 움직여야 한다. 어긋나면 가격 플롯이 조용히
      눌리고, renderCandleSvg 의 가드가 콘솔에 한 번 알린다.
      test_sub_panel_height_contract_20260919.py 가 기계로도 검사한다. */    /* 412 + 444 */
-
-
 
 /* 🔴2026-09-20: 바로 위에 **짝 없는 `}`** 가 떠 있었고, 그게 아래 첫 규칙(.asset-tabs)을
    통째로 삼키고 있었다 -- 최상위의 `}` 는 «버려지는» 게 아니다. CSS 파서는 그 자리에서
