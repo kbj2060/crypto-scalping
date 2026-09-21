@@ -6038,10 +6038,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const QNAME = (d, o) => (d >= 0 ? (o >= 0 ? "신규 롱" : "숏 커버")
                                       : (o >= 0 ? "신규 숏" : "롱 정리"));
       const put = (el) => { g.appendChild(el); return el; };
-      const mkText = (x, y, txt, anchor, weight) => {
+      // 막대 **안**의 해석은 --ink 하나로 통일한다(채운 면 위라 부호색을 쓰면 대비가 깨진다).
+      // 막대 **아래**의 숫자는 어두운 배경이라 부호색을 쓸 수 있다(2026-09-22 사용자 지시).
+      const mkText = (x, y, txt, anchor, weight, color) => {
         const t = document.createElementNS(NS, "text");
         t.setAttribute("x", x); t.setAttribute("y", y);
-        t.setAttribute("font-size", TXT); t.setAttribute("fill", "var(--ink)");
+        t.setAttribute("font-size", TXT); t.setAttribute("fill", color || "var(--ink)");
         if (anchor) t.setAttribute("text-anchor", anchor);
         if (weight) t.setAttribute("font-weight", weight);
         t.textContent = txt;
@@ -6079,13 +6081,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           cap.setAttribute("fill", "var(--warn)"); cap.setAttribute("fill-opacity", "0.95");
           put(cap);
         }
-        if (!QUAD_TEXT_OK) return;
-        const cx = xAt(i) + bw / 2;
-        mkText(cx, QB - hgt / 2 + TXT * 0.36, QNAME(r.delta, r.oi), "middle", "700");
-        mkText(cx, QB + TXT + 2, "Δ" + (r.delta >= 0 ? "+" : "-")
-               + fmtFootprintQty(Math.abs(r.delta)), "middle", "700");
-        mkText(cx, QB + TXT * 2 + 5, "OI" + (r.oi >= 0 ? "+" : "-")
-               + fmtFootprintQty(Math.abs(r.oi)), "middle");
+        r.hgt = hgt;              // 글자는 거래대금 선을 그린 뒤에 얹는다(아래)
       });
       // 거래대금 선 -- 자기 축(0~최대). 막대와 어긋나는 봉이 «흡수»다(r=+0.884 라 보통 붙는다).
       const ty = (v) => QB - 6 - (v / tMax) * (QUAD_H - 12);
@@ -6098,7 +6094,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (d) {
         const path = document.createElementNS(NS, "path");
         path.setAttribute("d", d); path.setAttribute("fill", "none");
-        path.setAttribute("stroke", "var(--accent)"); path.setAttribute("stroke-width", "2.2");
+        path.setAttribute("stroke", "var(--turnover)"); path.setAttribute("stroke-width", "2.2");
         path.setAttribute("stroke-linejoin", "round");
         put(path);
         rows.forEach((r, i) => {
@@ -6106,8 +6102,22 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           const dot = document.createElementNS(NS, "circle");
           dot.setAttribute("cx", (xAt(i) + bw / 2).toFixed(1));
           dot.setAttribute("cy", ty(r.turn).toFixed(1));
-          dot.setAttribute("r", "3"); dot.setAttribute("fill", "var(--accent)");
+          dot.setAttribute("r", "3"); dot.setAttribute("fill", "var(--turnover)");
           put(dot);
+        });
+      }
+      // 🔴글자는 **거래대금 선보다 나중에** 그린다. 반대로 하면 파란 선이 막대 안 해석
+      //   글자를 가로질러 읽히지 않는다(실렌더에서 12봉 중 2봉에서 실제로 겹쳤다).
+      if (QUAD_TEXT_OK) {
+        const sgnCol = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
+        rows.forEach((r, i) => {
+          if (!r) return;
+          const cx = xAt(i) + bw / 2;
+          mkText(cx, QB - r.hgt / 2 + TXT * 0.36, QNAME(r.delta, r.oi), "middle", "700");
+          mkText(cx, QB + TXT + 2, "Δ" + (r.delta >= 0 ? "+" : "-")
+                 + fmtFootprintQty(Math.abs(r.delta)), "middle", "700", sgnCol(r.delta));
+          mkText(cx, QB + TXT * 2 + 5, "OI" + (r.oi >= 0 ? "+" : "-")
+                 + fmtFootprintQty(Math.abs(r.oi)), "middle", null, sgnCol(r.oi));
         });
       }
       // 🔴좁은 폭에서는 오른쪽 꼬리표를 **상자 오른쪽 끝 기준 우측정렬**한다. 왼쪽정렬이면
@@ -6132,7 +6142,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         + "자기 축을 씁니다 -- 막대와 어긋나는 봉이 «거래는 많은데 순델타는 작았다» = 흡수입니다.";
       lbl.appendChild(lblTip);
       if (!mobileChart) { side(quadY + 30, "높이 |Δ|", "end"); side(quadY + 45, "농도 |OI|", "end"); }
-      side(quadY + 14, "─ 거래대금", null, "var(--accent)");
+      side(quadY + 14, "─ 거래대금", null, "var(--turnover)");
       side(quadY + 30, "최대 " + fmtUsdCompact(tMax), null);
       side(quadY + 50, "주황 캡", null, "var(--warn)");
       side(quadY + 65, "= OI 증가", null);
@@ -6223,7 +6233,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         t.setAttribute("x", w - 2); t.setAttribute("text-anchor", "end");
         t.setAttribute("y", y);
         t.setAttribute("font-size", mobileChart ? (k === 0 ? 11 : 10) : (k === 0 ? 12 : 11));
-        t.setAttribute("fill", k === 0 ? "var(--accent)" : row[2]);
+        // 2026-09-22 사용자 지시: 라벨은 **부호색**이다. 계열 구분은 왼쪽 색표가 맡는다.
+        t.setAttribute("fill", row[1] >= 0 ? "var(--good)" : "var(--bad)");
         if (k === 0) t.setAttribute("font-weight", "700");
         t.textContent = row[0] + " " + sgn(row[1]);
         g.appendChild(t);
@@ -6255,8 +6266,20 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 두면 어느 봉의 청산인지 눈이 세로로 훑어야 한다.
   // 🔴크기는 √다. 5분봉 청산은 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 큰 것 하나만
   //   남는다(옛 레인이 로그를 쓴 이유와 같다). 반지름이라 √면 **면적이 금액에 비례**한다.
-  cachedLayer("liqDots", objToken(liqBars) + "|" + timesSig, (g) => {
+  cachedLayer("liqDots", objToken(liqBars) + "|" + objToken(fpBars) + "|" + timesSig, (g) => {
   if (Array.isArray(liqBars) && liqBars.length && candles.length) {
+    // 🔴«봉 위»의 기준은 OHLC 고가가 **아니다**. 풋프린트 셀은 별도 원천이라 고가보다 위
+    //   가격대까지 그려지는 봉이 있고, 고가만 보고 앉히면 큰 원이 셀 숫자를 덮는다
+    //   (실렌더에서 r=13·12.2 짜리 둘이 9px 셀 숫자 «18.6»·«66.1» 을 가렸다).
+    //   그래서 그 봉이 실제로 그린 **가장 높은 가격**을 쓴다.
+    const topByTs = new Map();
+    fpBars.forEach((b) => {
+      const t = Number(b && b.time);
+      if (!Number.isFinite(t)) return;
+      let top = -Infinity;
+      (b.levels || []).forEach((l) => { const pz = Number(l[0]); if (pz > top) top = pz; });
+      if (Number.isFinite(top)) topByTs.set(t, top);
+    });
     const byTs = new Map();
     liqBars.forEach((b) => {
       const t = Date.parse(b.ts);          // ⚠️ms -> 초. 캔들 time 은 초다(옛 레인의 그 함정).
@@ -6276,8 +6299,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const v = lo + sh;
         if (v <= 0) return;
         const r = 3 + Math.sqrt(v / peak) * (rMax - 3);
-        // 그 봉의 고가 바로 위. 플롯 천장을 넘지 않게 막는다.
-        const cy = Math.max(mt + r + 1, yAt(c.high) - r - 5);
+        // 그 봉이 그린 것 중 가장 높은 것 바로 위(셀 숫자 한 줄 9px 만큼 더 띄운다).
+        const top = Math.max(c.high, topByTs.get(c.time) || -Infinity);
+        const cy = Math.max(mt + r + 1, yAt(top) - r - 14);
         const dot = document.createElementNS(NS, "circle");
         dot.setAttribute("cx", (xAt(i) + bw / 2).toFixed(1));
         dot.setAttribute("cy", cy.toFixed(1));
