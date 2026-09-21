@@ -180,41 +180,8 @@
         </button>
       </div>
 
-      <section class="panel ops-health-panel signal-overview-panel">
-        <div class="signal-overview-group" data-asset-scope="indicators">
-          <p class="signal-overview-label">모델 내부 지표</p>
-          <div class="signal-chip-row">
-            <!-- 2026-09-21 정리: 통제 검정을 통과한 것만 남겼다. 수급 흐름·리테일 수급·
-                 청산 캐스케이드·베이시스 청산압박 칩은 제거(아래 풋프린트/청산 패널은 유지).
-                 근거: docs/experiments/eth_dashboard_signal_cull_and_vol_expansion_rescore_20260921.md -->
-            <div id="modelChipVolLevel" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-label">변동성 수준</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-          </div>
-        </div>
-        <div class="signal-overview-group">
-          <div class="signal-overview-group-head">
-            <p class="signal-overview-label">특화 감지기 (이벤트 트리거)</p>
-          </div>
-          <div class="signal-chip-row">
-            <!-- 2026-09-21 V자 급등락·극점 탐지기 제거. 거리(스톱까지의 ATR)를 통제하면
-                 리프트가 3.80x -> 1.10x(극점) / 1.05x·p=0.34(V자)로 무너진다. -->
-            <div id="modelChipBreakoutPrewarn" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-label">추세 전환 경보기</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-            <div id="modelChipBreakoutDetector" class="signal-chip neutral">
-              <span class="signal-chip-dot" aria-hidden="true"></span>
-              <span class="signal-chip-label">추세 전환 탐지기</span>
-              <span class="signal-chip-state">-</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
+      <!-- 2026-09-21 사용자 요청(아티팩트 댓글): 상단 «요약 카드» 제거. 같은 세 지표가
+           아래 «모델 내부 지표» 목록에 값·이력·설명까지 갖춰 그대로 있다. -->
       <!-- 2026-09-10 사용자 요청: 청산맵 바로 위에 현 계좌/포지션 요약. 숫자는 거래소 실계좌
            (/api/binance-account)라 봇 원장과 달리 수동 매매도 보인다. 운영 관리 탭의 "바이낸스 계정"
            패널과 같은 payload 를 쓰며(app.js latestBinanceAccount) 여기선 보고 있는 코인만 접어 보인다. -->
@@ -407,8 +374,8 @@
            S/R 비대칭 → 시나리오 셋 → 생각을 바꾸는 신호)를 규칙으로 옮긴 카드. dashboard/situation.py.
            🔴확률은 휴리스틱(점수표)이다. 그래서 예측을 전부 장부에 남기고 30분 뒤 결과와 맞춘 적중률을 같이 그린다. -->
       <section class="panel ops-health-panel situation-panel" data-asset-scope="situation">
+        <!-- 2026-09-21 사용자 요청(아티팩트 댓글): 제목·설명 줄을 빼고 배지 칩만 남긴다. -->
         <div class="ops-health-head">
-          <div><h3>상황 읽기 · 30분</h3><p class="muted">5초 갱신 · 라벨은 «지금» · 시나리오는 휴리스틱 확률 · 뒤집기 신호는 실시간 판정</p></div>
           <div class="ops-health-head-tools"><span id="situationBadge" class="ops-badge neutral">-</span></div>
         </div>
         <div id="situationBody" class="situation-body"></div>

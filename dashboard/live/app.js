@@ -1,8 +1,6 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
-const API_V_REBOUND_URL = "/api/v-rebound-signal";
-const API_BASIS_LIQUIDATION_URL = "/api/basis-liquidation-signal";
 const API_POSITION_SIZING_URL = "/api/position-sizing";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
@@ -25,17 +23,6 @@ const API_SESSION_ALERTS_URL = "/api/session-alerts";
 const POLL_MS = 500;
 // 코인별 실시간 지표 폴링(2026-09-03). 서버 캐시가 20초이므로 그보다 자주 때릴 이유가 없다.
 const MODEL_INDICATOR_POLL_MS = 20000;
-// 2026-08-25 에 20초로 잡았던 근거는 «이 차트의 데이터(청산맵)가 5분에 한 번만 바뀌니 자주
-// 그리는 건 순수 낭비»였다. 2026-09-16 그 **전제가 바뀌었다** -- 풋프린트 셀은 체결마다 바뀌고
-// 현재가 선도 SSE(2.5초)마다 움직인다. 20초 묶음 때문에 화면이 최대 20초 뒤처졌다(사용자 신고
-// "래깅이 있어"). SSE 주기와 맞춘다.
-// 비용은 실측했다: renderSnapshotChart 한 번이 **2~5ms**(모바일 뷰 기준, DOM 1,164 노드).
-// 1초마다면 0.2~0.5% 다. 20초 -> 1초는 그 비용을 20배 쓰는 대신 지연을 20배 줄인다.
-// 바닥은 여기다 -- 더 당겨도 SSE 푸시(EVENT_POLL_SECONDS=1초)보다 새 값이 오지 않는다.
-// ⚠️여전히 **하나의 주기**로 묶어 둔다(캔들 2.5초 / 밀도 5분 식으로 쪼개지 않는다) -- 밀도
-// 띠의 sweep-darkening 이 라이브 고가/저가에 달려 있어서, 쪼개면 실제 스윕이 최대 5분간
-// 반영되지 않는다. 같이 그리는 쪽이 맞다.
-const SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS = 1000;
 const CANDLE_HISTORY_POLL_MS = 300000;
 const MICRO_HISTORY_MAX = 48; // matches MODEL_INDICATOR_HISTORY_MAX in server.py (4h @ 5min samples)
 // Kept post-Live-tab-removal solely as the SSE ticker payload's asset allowlist (see
@@ -121,12 +108,6 @@ let chartMarkersLastFetchAt = 0;
 const CHART_MARKERS_POLL_MS = 60000;
 const API_CHART_MARKERS_URL = "/api/chart-markers";
 
-// 2026-09-09 극점 탐지기(표시 전용). 증거신호 8종을 피쳐로 쓴 "±60분 국소 극점일 확률" 모델.
-let latestExtreme = null;
-const EXTREME_POLL_MS = 60000;
-// 2026-09-10 24시간 변동성 전망 -- **시간봉** 신호라 자주 받을 이유가 없다(워커 주기 300초).
-const API_VOL_FORECAST_URL = "/api/vol-forecast";
-const VOL_FORECAST_POLL_MS = 120000;
 
 // ── 볼륨 풋프린트 (2026-09-15) ────────────────────────────────────────────────
 // 캔들 하나를 가격 행으로 쪼개 «그 가격에서 누가 공격했는지»(시장가 매수/매도 체결량)를 보인다.
@@ -135,12 +116,6 @@ const VOL_FORECAST_POLL_MS = 120000;
 // ETH 전용: 코인마다 스트림·백필이 붙어서, 일단 하나만 켠다.
 let latestFootprint = null;
 let footprintLastFetchAt = 0;
-// 차트 종류. 「풋프린트」와 「청산맵」은 한 화면에 못 담는다 -- 풋프린트는 12봉(1시간)이라 가격
-// 폭이 $45 안팎인데 청산밀도는 $620 범위에 깔려 있어 창 안에 9%만 들어온다(2026-09-16 실측).
-// 그래서 겹치지 않고 **바꿔 본다**. 고른 값은 기억한다 -- 매번 다시 고르게 하면 그게 성가심이다.
-// 2026-09-19 «supply» 모드를 뺐다 -- 가격축 프로파일은 전용 수급 패널의 탭으로 옮겼다.
-// 옛 localStorage 값이 남아 있으면 CHART_MODES.includes 가 걸러 footprint 로 떨어진다.
-const CHART_MODES = ["footprint", "liqmap"];
 // ── 창 토글 (2026-09-19 사용자 요청: 1h/2h/4h) ─────────────────────────────
 // 풋프린트와 수급 프로파일이 **같은 창**을 쓴다. 한 카드 안의 위아래 두 그림이 서로 다른
 // 구간을 말하면 읽는 사람이 속는다 -- 그래서 토글도 하나다.
@@ -300,18 +275,12 @@ let latestFlowHeatmap = null;
 let flowHeatmapLastFetchAt = 0;
 // 현재가 박스가 스스로 움직이는 데 필요한 기하(행 높이·행 키). 렌더가 적고 체결 WS 가 읽는다.
 let supplyProfileNow = null;
-const API_EXTREME_URL = "/api/extreme-detector";
 // 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
 // 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
 let latestBreakoutDetector = null;
 let breakoutDetectorLastFetchAt = 0;
 const API_BREAKOUT_DETECTOR_URL = "/api/breakout-detector";
 const BREAKOUT_DETECTOR_POLL_MS = 60000;
-// 2026-09-15 E|r| 게이트 — 「앞으로 24시간 크게 움직일 자리인가」만 말한다(20자산).
-// 🔴방향은 말하지 않는다: 같은 아티팩트의 방향 분류기는 실계좌 72왕복에서 적중 47.2%(§5.36-R).
-// 워커 주기 300초라 폴링도 넉넉히 둔다.
-const API_EVR_GATE_URL = "/api/evr-gate";
-const EVR_GATE_POLL_MS = 120000;
 // Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
 // backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
 // frontend consumer had been removed.
@@ -382,21 +351,7 @@ const isScrolling = () => Date.now() - lastScrollAt < SCROLL_IDLE_MS;
 let scrollIdleTimer = 0;
 let dashboardEvents = null;
 const OPS_POLL_MS = 30000;
-const V_REBOUND_POLL_MS = 60000; // matches server's own 60s cache (EVIDENCE_SIGNAL_CACHE_SECONDS) --
-                                  // event-triggered, so a fresher poll matters more than for OI 급변's old 5m-poller data
 const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-row-per-minute source
-// 2026-08-29 (user report + fix): was 300000 ("basis_z48 is a 5m-bar z-score, no faster") -- that
-// reasoning conflated the DATA's own update cadence (every 5m, on bar close, unchanged) with the
-// POLL interval (how often the browser checks for a new value, which is a separate concern).
-// Polling exactly as often as the bar closes is the risky choice, not the safe one: poll phase vs.
-// bar-close phase is unsynchronized, so in the worst case a poll lands just before a bar closes and
-// the next one doesn't fire until nearly a full 5m later -- confirmed live (direct SSH timing showed
-// the backend cache itself refreshes within 20-41s of each bar close; the user-visible multi-minute
-// lag was entirely this poll/bar-close phase misalignment). Matches V_REBOUND_POLL_MS now
-// (60s, comfortably shorter than the 5m bar period they're also built on,
-// and already proven not to have this problem) -- polling faster than the data changes never shows
-// a value sooner than it's true, it only shrinks the worst-case detection lag.
-const BASIS_LIQUIDATION_POLL_MS = 60000;
 const VOL_LEVEL_POLL_MS = 60000;          // 사이징 워커 주기 300초 — 1분 폴링이면 충분하다
 // 2026-08-27: liq_burst_state.json is written the instant a new liquidation event arrives (see
 // tail_risk_interceptor.py::_write_liq_burst_state()), not on a timer -- polling faster than ~1s
@@ -1760,21 +1715,6 @@ function stripAxisHtml(times, timeFmtKind) {
 //   2~3배면 38.6%, 6배 이상이면 **86.6%** 가 발동봉 종가에서 이미 도달해 있다(전체 7.65%).
 //   숫자를 숨기지 않고 **이미 지났다고 말한다** -- 라벨 목표 자체는 그 값이 맞기 때문이다.
 
-// 익절가가 콜 방향 기준으로 이미 지났는가. direction="up" 은 반등=하락이라 현재가가 목표
-// 이하이면 도달, "down" 은 그 반대다.
-
-const V_REBOUND_TP_TITLE = [
-  "이 신호 자신의 학습 라벨(1.5×ATR 빠른 다리) 목표가입니다 — 손절선이 없는 규약입니다.",
-  "· 앵커는 발동봉의 저가(지지쪽)/고가(저항쪽), 폭은 직전 봉 ATR의 1.5배입니다.",
-  "· 판정은 **종가 기준**입니다 — 이 라벨이 종가로 정의돼서이며, 증거신호의 intrabar 터치와 다릅니다.",
-  "· 호라이즌 60분(12봉) 안에 못 닿으면 그대로 만료됩니다.",
-  "· 「(도달)」은 발동봉이 커서 **그 봉 안에서 이미 목표를 지나친** 경우입니다 — 앵커가 봉의",
-  "  고가/저가라 생기는 일이고, 발동봉 레인지가 ATR의 6배를 넘으면 86.6%가 여기 해당합니다.",
-  "· ⚠️검증된 매매 엣지가 아닙니다: 수정회계 라벨 재학습(2026-09-08)에서 AUC는 +0.03~0.07 개선됐지만",
-  "  경제성 랭킹은 0이었고, 선정된 팔이 세 창 모두 무작위 진입 이하였습니다.",
-  "· 왕복 수수료: 테이커 10bp · peg 메이커 진입+테이커 청산 7.8bp(실측) · 양편 지정가 4bp.",
-].join("\n");
-
 const STRIP_BAR_LABEL_BY_TONE = {
   // 2026-09-09 극점 탐지기. 이 칩은 **사건의 측면**을 말하는 자리라 증거신호 어휘를 쓴다
   // (규약 §1: 특화감지기의 롱/숏은 포지션 방향일 때다). 축이 하나뿐이라 §5-4 문제 없음.
@@ -1999,7 +1939,7 @@ const MODEL_INDICATOR_DETAIL = {
 // 2026-08-30 (user request): "학습 horizon을 배지로" -- each signal's own validated forward-
 // looking prediction/detection window, shown as a small badge next to its name (see
 // horizonBadgeHtml() below, used by both renderModelIndicatorList and renderEvidenceSignals).
-// Covers the model-indicator keys (MODEL_CHIP_IDS below) in one lookup.
+// Covers the model-indicator keys in one lookup.
 // (2026-09-16 증거신호 칩이 내려가면서 EVIDENCE_STRIP_CHIP_IDS 는 사라졌다 -- 이 주석이
 //  없는 상수를 계속 가리키고 있었다. 2026-09-20 정정.)
 // "상태" (not a number) marks signals whose live formula is a continuous current-state gauge with
@@ -2026,37 +1966,6 @@ function horizonBadgeHtml(key, progress, extraTitle) {
   if (extraTitle) title += `\n\n${extraTitle}`;
   return ` <span class="horizon-badge" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
 }
-
-// Snapshot tab "12신호 한눈에" overview: id lookup so the compact chip row (.signal-chip-row in
-// index.html) can be updated from the same per-tick data as the full snapModelIndicatorList below.
-const MODEL_CHIP_IDS = {
-  // 🔴칩은 index.html 의 고정 요소다. 목록에 항목을 넣어도 여기에 id 를 등록하고
-  // index.html 에 칩 div 를 만들지 않으면 상단 요약엔 안 나온다.
-  // 2026-09-21 정리: 통제 검정을 통과한 것만 남겼다 -- docs/experiments/
-  // eth_dashboard_signal_cull_and_vol_expansion_rescore_20260921.md
-  vol_level: "modelChipVolLevel",
-  breakout_prewarn: "modelChipBreakoutPrewarn",
-  breakout_detector: "modelChipBreakoutDetector",
-};
-// whale/retail_flow/liq_pressure/v_rebound are directional (tone:
-// good=롱 쪽/bad=숏 쪽/neutral=무신호); liq_cascade is risk-level (tone: good=안정/warn=주의/
-// bad=위험). Both families reuse the same colors, so a bare red chip is ambiguous ("숏" vs
-// "위험") -- 2026-08-24 사용자 리포트. Prefixing an explicit ▲/▼/– arrow on the directional chips
-// only disambiguates by text, not just color.
-//
-// 2026-08-29 user request: liq_pressure/liq_sweep_trend/v_rebound moved INTO the directional
-// family (were previously good=안정/warn=주의/bad=위험 risk-level, or event-triggered warn-only --
-// see live_spot_perp_basis_signal_20260827.py / live_liquidation_cascade_sweep_trend_signal_
-// 20260828.py / live_eth_sweep_v_rebound_signal_20260829.py for the backend tone-mapping change).
-// The server now resolves each one's own direction field + call/pressure read into a single
-// good/bad/neutral tone before this ever reaches app.js, so no client-side remapping needed here --
-// only their DIRECTIONAL_MODEL_CHIP_KEYS membership (for the arrow) changes.
-//
-// 2026-08-30 user request: risk(꼬리 리스크)/whale_intent(고래 포지션) removed from MODEL_CHIP_IDS
-// entirely (tested null / flagged non-independent, see classifyIndicators()'s own comment) -- no
-// longer members of either family here.
-// 2026-09-21 정리 후 남은 칩(vol_level · breakout_*)은 전부 **무방향**이다 -- 비워 둔다.
-const DIRECTIONAL_MODEL_CHIP_KEYS = new Set([]);
 
 // ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
 //   · whale / retail_flow / liq_cascade -- trading_bot.py의 dashboard_state(봇은 ETH만 돌린다)
@@ -2145,18 +2054,6 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
   // rebuild is skipped when nothing actually changed.
   const html = items.map((it) => {
     const tone = toneClass(it.tone);                 // flat -> neutral (위 주석)
-    const chipId = MODEL_CHIP_IDS[it.key];
-    const chip = chipId ? el(chipId) : null;
-    if (chip) {
-      chip.className = `signal-chip ${tone}`;
-      const stateEl = chip.querySelector(".signal-chip-state");
-      if (stateEl) {
-        const arrow = DIRECTIONAL_MODEL_CHIP_KEYS.has(it.key)
-          ? (tone === "good" ? "▲ " : tone === "bad" ? "▼ " : "– ")
-          : "";
-        stateEl.textContent = `${arrow}${it.subText || "-"}`;
-      }
-    }
     const derivedTag = it.derivedTag
       ? ` <span class="derived-tag" title="${escapeHtml(it.derivedTitle || "")}">${escapeHtml(it.derivedTag)}</span>`
       : "";
@@ -3433,11 +3330,10 @@ function renderSituation() {
   ].filter(Boolean).join("</span><span>");
 
   body.innerHTML = `
-    <div class="sit-rule"></div>
     <div class="sit-sec">SCENARIOS · 30m<span>휴리스틱 확률</span></div>
     <table class="sit-tbl"><tbody>${scn}</tbody></table>
     <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details>
-    <div class="sit-sec">STATE</div>
+    <div class="sit-sec">현재 상황</div>
     <div class="sit-state">${state}</div>
     <div class="sit-sec">FLIP TRIGGERS<span>${armed} / ${fl.length} 켜짐</span></div>
     <div class="sit-flips">${flips || '<div class="sit-cal">없음</div>'}</div>

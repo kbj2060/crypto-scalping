@@ -2903,7 +2903,6 @@ svg {
 .sit-sec { font: 700 10px/1.4 var(--font-mono); letter-spacing: .1em; color: var(--muted);
            margin: 14px 0 5px; display: flex; align-items: baseline; justify-content: space-between; }
 .sit-sec span { font-weight: 500; letter-spacing: 0; }
-.sit-rule { height: 2px; background: var(--accent); }
 
 /* SCENARIOS */
 .sit-tbl { width: 100%; border-collapse: collapse; }
