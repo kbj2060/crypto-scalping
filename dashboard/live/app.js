@@ -3841,9 +3841,6 @@ function renderSupply1s(box = null) {
       c.setAttribute("r", r.toFixed(1));
       c.setAttribute("fill", e.v >= 0 ? "var(--good)" : "var(--bad)");
       c.setAttribute("fill-opacity", "0.92");
-      // 테두리를 한 올 둔다 -- 주황 선 위에 앉으므로 선과 점의 경계가 필요하다.
-      c.setAttribute("stroke", "var(--chart-bg, #171b23)");
-      c.setAttribute("stroke-width", "1");
       const lc = liq1s.get(e.s) || [0, 0, 0, 0];
       const t = document.createElementNS(NS, "title");
       t.textContent = "청산 롱 " + fmtUsdCompact(lc[2]) + " / 숏 " + fmtUsdCompact(lc[3])
