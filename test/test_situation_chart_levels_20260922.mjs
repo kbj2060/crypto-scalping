@@ -17,7 +17,9 @@ const TREND = { ok: true, prob: { A: 56, B: 26, C: 18 }, evidence: { range_bp: 4
 // ── 가격선 ──
 let r = run("situationTargetLevels(true);", TREND);
 assert.equal(r.length, 2, "선점된 C 가 그려졌다");
-assert.deepEqual(r.map((x) => x.label), ["56%", "26%"]);
+// 확률은 왼쪽 라벨이 아니라 **오른쪽 배지 안**(sub)에 들어간다 -- 왼쪽은 비운다
+assert.deepEqual(r.map((x) => x.sub), ["56%", "26%"]);
+assert.ok(r.every((x) => x.label === ""), "왼쪽 라벨이 남아 있다");
 assert.deepEqual(r.map((x) => x.scenario), ["A", "B"]);
 assert.ok(r.every((x) => x.marker === true), "풋프린트인데 선으로 그린다");
 assert.ok(r.every((x) => !/accent|amber|good|bad|liq-/.test(x.color)), "예약색을 썼다");

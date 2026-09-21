@@ -2808,7 +2808,8 @@ function liquidationDensityHistory() {
 //   현재가에서 겪고 고쳤다(2026-09-16). 청산맵/폴백 캔들에서는 선이다.
 // 🔴색은 --muted. 초록/빨강은 청산 S/R, --accent 는 현재가, --amber 는 진입가로 예약돼 있다.
 //   위계상으로도 맞다 -- S/R·현재가는 **사실**, 시나리오는 **예측**이라 더 조용해야 한다.
-// 🔴라벨은 확률만. ml 이 45px 뿐이라 4글자를 넘기면 왼쪽으로 잘린다(«저항1↑» 실측 31px).
+// 🔴왼쪽 라벨은 안 쓴다. 확률은 **오른쪽 배지 안**에 가격과 같이 넣는다(2026-09-22 사용자)
+//   -- 왼쪽 여백이 45px 뿐이라 둘을 다 못 담고, 가격과 확률은 어차피 같이 읽는 한 쌍이다.
 //   이름은 바로 아래 카드에 같은 숫자와 함께 있어 짝이 분명하다.
 // 🔴선점된 목표(null)는 뺀다 -- 이번 창에 일어날 수 없는 자리라 «아직 갈 곳»으로 읽힌다.
 function situationTargetLevels(footprint) {
@@ -2818,7 +2819,8 @@ function situationTargetLevels(footprint) {
   for (const k of ["A", "B", "C"]) {
     const v = (n.targets || {})[k];
     if (Array.isArray(v) || !(Number(v) > 0)) continue;
-    out.push({ val: Number(v), color: "var(--muted)", label: `${Number((n.prob || {})[k]) || 0}%`,
+    out.push({ val: Number(v), color: "var(--muted)", label: "",
+               sub: `${Number((n.prob || {})[k]) || 0}%`,
                dashed: true, width: 1, marker: !!footprint, scenario: k });
   }
   return out;
@@ -5806,15 +5808,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
 
     // Left label (follows label position)
-    const txt = document.createElementNS(NS, "text");
-    txt.setAttribute("x", ml - 5); txt.setAttribute("y", labelY + 4);
-    txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10");
-    txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", p.color);
-    txt.textContent = `${p.label}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;
-    svg.appendChild(txt);
+    // 2026-09-22 label 이 비면 안 그린다 -- 시나리오는 확률을 **오른쪽 배지 안**으로 옮겼다
+    // (사용자 «오른쪽 라벨에 가격이랑 확률만»). 왼쪽 여백은 45px 뿐이라 둘을 다 못 넣는다.
+    const txt = p.label ? document.createElementNS(NS, "text") : null;
+    if (txt) {
+      txt.setAttribute("x", ml - 5); txt.setAttribute("y", labelY + 4);
+      txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10");
+      txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", p.color);
+      txt.textContent = `${p.label}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;
+      svg.appendChild(txt);
+    }
 
-    // Right box (follows label position)
-    const boxW = mobileChart ? 56 : 64, boxH = 18;
+    // Right box (follows label position). p.sub 가 있으면 배지 안에 «가격 + 값»을 같이 넣는다.
+    const boxW = (mobileChart ? 56 : 64) + (p.sub ? (mobileChart ? 22 : 26) : 0), boxH = 18;
     const rect = document.createElementNS(NS, "rect");
     rect.setAttribute("x", w - mr + 4); rect.setAttribute("y", labelY - 9);
     rect.setAttribute("width", boxW); rect.setAttribute("height", boxH);
@@ -5827,6 +5833,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     pTxt.setAttribute("fill", inkOnFill());
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
+    if (p.sub) {
+      const sTxt = document.createElementNS(NS, "text");
+      sTxt.setAttribute("x", w - mr + 4 + boxW - 5); sTxt.setAttribute("y", labelY + 4);
+      sTxt.setAttribute("text-anchor", "end"); sTxt.setAttribute("font-size", mobileChart ? "9.5" : "10.5");
+      sTxt.setAttribute("font-weight", "700"); sTxt.setAttribute("fill", inkOnFill());
+      sTxt.setAttribute("opacity", ".72");
+      sTxt.textContent = p.sub;
+      svg.appendChild(sTxt);
+    }
     if (p.marker) svg.appendChild(line);   // 배지 위에 -- 위 주석 참조
 
     // 현재가 줄만 표식을 단다 -- 틱마다 **이 세 요소만** 옮기려는 것이다(전체 재렌더는 1초).
