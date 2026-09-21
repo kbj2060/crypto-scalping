@@ -2354,8 +2354,29 @@ def make_app() -> web.Application:
     mp_state: dict[str, Any] = {"connected": False, "since": None, "last_ms": None, "events": 0, "errors": 0, "last_error": None}
     mark_ring: dict[int, tuple[float, float, float]] = {}   # sec → (mark, index, funding). 상황 읽기의 펀딩·베이시스 입력
 
+    def liq_events_load() -> None:
+        """재시작 직후 1회. 청산은 **11분에 몇 건**이라 빈 deque 로 시작하면 새로고침해도
+        수급 차트의 청산선이 한동안 안 그려진다(체결·OI 는 초당 들어와 1초면 다시 찬다).
+        아래 루프가 이미 쓰고 있는 jsonl 이 그 구간을 들고 있으니 그걸 되읽는다."""
+        cut = time.time() * 1000 - SUPPLY_1S_SECONDS * 1000
+        try:
+            with open(LIQ_EVENTS_PATH, encoding="utf-8") as fh:
+                # ponytail: 파일 전체를 훑는다(지금 200KB·연 65MB, 기동 1회). 커지면 tail 바이트만.
+                tail = deque(fh, maxlen=liq_events.maxlen)
+        except OSError:
+            return
+        for line in tail:
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue    # 마지막 줄이 쓰다 만 상태일 수 있다
+            if int(ev.get("ts_ms") or 0) >= cut:
+                liq_events.append(ev)
+        print(f"force-order: 지난 판 {len(liq_events)}건 복원", flush=True)
+
     async def collect_force_orders(app: web.Application) -> None:
         """⑤ @forceOrder 원시 이벤트를 jsonl 로 남기고 60초 링을 든다. 이벤트가 없으면 조용하다."""
+        liq_events_load()
         ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
         try:
             while True:
