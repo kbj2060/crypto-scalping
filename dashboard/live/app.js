@@ -3595,9 +3595,9 @@ function renderSupply1s(box = null) {
   //   -- 30초 창은 정확히 0 이 흔하다(고래 주문이 분당 13건이라 30초에 0건인 구간이 있다).
   //   2026-09-20 배포본 스크린샷에서 실제로 「고래 +」로 떠 있었다.
   const qty = (v) => fmtFootprintQty(Math.abs(v)) || "0";
-  const label = (x, y, text, color, anchor) => {
+  const label = (x, y, text, color, anchor, size = 10) => {
     const t = document.createElementNS(NS, "text");
-    t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("font-size", "10");
+    t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("font-size", size);
     t.setAttribute("fill", color); if (anchor) t.setAttribute("text-anchor", anchor);
     t.textContent = text;
     svg.appendChild(t);
@@ -3617,19 +3617,30 @@ function renderSupply1s(box = null) {
   };
   const whale = cumOf((s) => { const c = supply1s.get(s); return c[2] - c[3]; });
   const retail = cumOf((s) => { const c = supply1s.get(s); return c[0] - c[1]; });
-  // 2026-09-22 청산(사용자 요청). 고래·리테일과 **같은 원리**다 -- cumOf 가 봉 경계에서
-  //   0으로 되돌리며 쌓는다. 접근자만 주면 되고 좌표·리셋 로직은 한 줄도 안 건드린다.
-  // ⭐부호: 롱 청산은 시장에 강제 SELL(아래로), 숏 청산은 강제 BUY(위로)다. 그래서
-  //   «숏 − 롱» 이 이 축의 뜻(순유입)과 그대로 맞는다.
-  // 🔴양쪽이 동시에 크게 터지면 상쇄돼 0 근처로 보인다 -- 그건 «조용했다»가 아니라
-  //   «양방향이었다»다. 규모 자체는 아래 꼬리표에 롱/숏을 따로 적어 그 혼동을 막는다.
-  const liqNet = cumOf((s) => { const c = liq1s.get(s); return c ? c[1] - c[0] : 0; });
-  // 꼬리표용 누계(규모). 상쇄 없이 각 방향의 총량이다.
+  // 2026-09-22 **CVD = 고래 + 중형 + 리테일 은 항등식이다**(실측 확인: -2,688 + -3,834 +
+  //   -559 = -7,081). 그래서 수급은 CVD 와 별개 계열이 아니라 그 **분해**다. 셋을 따로
+  //   그리는 대신 0선에서 쌓고, 맨 위 윤곽을 CVD 로 둔다 -- 그림이 항등식을 말한다.
+  // ⭐이 배치가 리테일 문제를 푼다: 리테일 진폭(559)이 CVD(7,548)와 **경쟁하지 않고**
+  //   스택의 얇은 맨 윗층이 된다. 예전엔 같은 축에서 12배 눌려 납작했다.
+  const cvd = cumOf((s) => { const c = supply1s.get(s); return c[4] - c[5]; });
+  // 스택 경계: 0 → 고래 → (CVD-리테일) → CVD. 가운데 층이 곧 중형이라 따로 안 만든다.
+  const stackMid = cvd.map((r, i) => ({ s: r.s, v: r.v - retail[i].v }));
+  // 초당 거래대금 USD. 이 차트의 유일한 «부호 없는 크기»라 아래 판으로 내린다.
+  const turn = allSecs.filter((s2) => s2 > first)
+                      .map((s2) => { const c = supply1s.get(s2);
+                                     return { s: s2, v: (c[4] + c[5]) * c[6] }; });
+  // 🔴청산은 **선이 아니라 이벤트다**. 269초에 5건이고, 봉당 중앙 6.8 ETH 가 CVD 진폭의
+  //   0.09% 라 어떤 선형 ETH 축에서도 0선에 붙는다(2026-09-22 첫 판의 실제 버그).
+  //   27시간 실측은 봉당 중앙 6.8 / p90 217 / 최대 3,877 -- 계열 하나 안에서 570배다.
+  //   그래서 축에서 빼고 아래 판에 «크기를 가진 점»으로 둔다.
+  const liqEv = [];
   const liqSum = [0, 0];
   allSecs.forEach((s2) => {
     if (s2 <= first) return;
     const c = liq1s.get(s2);
-    if (c) { liqSum[0] += c[0]; liqSum[1] += c[1]; }
+    if (!c) return;
+    liqSum[0] += c[0]; liqSum[1] += c[1];
+    if (c[0] > 0 || c[1] > 0) liqEv.push({ s: s2, v: c[1] - c[0] });
   });
   // 신규계약(OI)은 **레벨**이라 더하지 않는다: 그 구간 첫 관측 대비 증분이다.
   // 🔴갱신이 3~7초라 구간의 «첫 관측»이 경계보다 조금 뒤다 -- 그만큼 증분이 과소평가된다.
@@ -3643,11 +3654,22 @@ function renderSupply1s(box = null) {
     if (segOf(s) !== oiSeg) { oiSeg = segOf(s); oiBase = oi1s.get(s); }
     if (s > first) oiRows.push({ s, v: oi1s.get(s) - oiBase });
   });
-  const peak = Math.max(0, ...whale.map((r) => Math.abs(r.v)), ...retail.map((r) => Math.abs(r.v)),
-                        ...oiRows.map((r) => Math.abs(r.v)), ...liqNet.map((r) => Math.abs(r.v)));
+  // ── 두 판 (2026-09-22 사용자 선택: A 의 누적 × B 의 위·아래) ───────────────
+  // 누적선과 순간값은 **다른 물건**이다. 한 축에 섞으면 둘 중 하나가 반드시 눌린다.
+  // 위: 봉 시작부터 쌓인 것(수급 스택 + CVD 윤곽 + 신규계약).
+  // 아래: 그 초에 **일어난** 것(거래대금, 청산).
+  // 🔴높이 예산 78 + 4 + 38 = 120 은 지금 SUB_1S_H(150) 의 그리기 영역과 정확히 같다.
+  //   styles.css 의 963px 높이 계약도 캔들 상자도 안 건드린다 -- 그 계약은 두 파일에
+  //   갈라져 있어 한쪽만 고치면 가격 플롯이 조용히 눌린다(이 파일 위쪽 경고 참고).
+  const LOW_H = Math.max(22, Math.min(38, Math.round(flowH * 0.32)));
+  const PANE_GAP = 4;
+  const hiH = flowH - LOW_H - PANE_GAP;
+  const peak = Math.max(0, ...cvd.map((r) => Math.abs(r.v)), ...whale.map((r) => Math.abs(r.v)),
+                        ...stackMid.map((r) => Math.abs(r.v)), ...oiRows.map((r) => Math.abs(r.v)));
   const span = SUPPLY_1S_STEPS.find((a) => a >= peak) || Math.max(peak, 1e-9);
-  const mid = flowTop + flowH / 2;
-  const half = flowH / 2 - 10;
+  const mid = flowTop + hiH / 2;
+  const half = hiH / 2 - 4;
+  const divY = flowTop + hiH + PANE_GAP;
   // 마지막 계단을 넘는 폭발은 잘라서 상자 안에 둔다 -- 넘치면 옆 패널을 침범한다.
   const yF = (v) => mid - Math.max(-1, Math.min(1, v / span)) * half;
 
@@ -3678,32 +3700,47 @@ function renderSupply1s(box = null) {
     label(ml - 3, yF(v) + 3, (v > 0 ? "+" : "-") + qty(span), "var(--muted)", "end");
   });
 
-  // 0선 기준 면적. 선 하나보다 «위냐 아래냐»가 훨씬 빨리 읽힌다. 고래만 칠한다 -- 셋 다
-  // 칠하면 서로 가려서 되레 안 보인다.
-  // ponytail: 0 교차점을 안 구하고 반대쪽을 0선으로 눌러 자른다. 오차는 최대 1초(≈1px)다.
-  //           눈에 띄게 어긋나면 그때 교차점 보간으로 올린다.
-  const area = (rows, yOf, color) => {
-    let d = "", run = null;
-    const close = () => {
-      if (run !== null) d += " L" + xAt(run).toFixed(1) + " " + mid.toFixed(1) + " Z";
-      run = null;
-    };
-    rows.forEach((r) => {
-      if (brk(r.s, run, SUPPLY_1S_GAP_SEC)) {
-        close();
-        d += (d ? " " : "") + "M" + xAt(r.s).toFixed(1) + " " + mid.toFixed(1);
+  // 끊김 없는 초 묶음. 밴드 셋이 같은 경계에서 갈라져야 층이 어긋나지 않는다.
+  const runs = [];
+  cvd.forEach((r, i) => {
+    if (i === 0 || brk(r.s, cvd[i - 1].s, SUPPLY_1S_GAP_SEC)) runs.push([i, i]);
+    else runs[runs.length - 1][1] = i;
+  });
+  // 🔴**쌓기이지 겹치기가 아니다**. 겹쳐 그리면 가려진 층의 두께를 눈으로 잴 수 없다
+  //   (가격축 프로파일에서 같은 결론을 이미 냈다 -- 그 함수 머리글 주석).
+  // 색은 **층의 부호**를 따른다. 3색 계약이라 「고래색」을 새로 만들 수 없으므로
+  //   층 구분은 색이 아니라 **농담**이다.
+  const band = (lo, hi, opacity, title) => {
+    let d = "";
+    runs.forEach(([a, b]) => {
+      if (b <= a) return;
+      for (let i = a; i <= b; i++) {
+        d += (i === a ? "M" : " L") + xAt(lo[i].s).toFixed(1) + " " + yF(lo[i].v).toFixed(1);
       }
-      d += " L" + xAt(r.s).toFixed(1) + " " + yOf(r.v).toFixed(1);
-      run = r.s;
+      for (let i = b; i >= a; i--) {
+        d += " L" + xAt(hi[i].s).toFixed(1) + " " + yF(hi[i].v).toFixed(1);
+      }
+      d += " Z ";
     });
-    close();
+    const end = hi[hi.length - 1].v - lo[lo.length - 1].v;
+    const color = end < 0 ? "var(--bad)" : "var(--good)";
     const path = document.createElementNS(NS, "path");
-    path.setAttribute("d", d); path.setAttribute("fill", color);
-    path.setAttribute("fill-opacity", "0.28"); path.setAttribute("stroke", "none");
+    path.setAttribute("d", d.trim()); path.setAttribute("fill", color);
+    path.setAttribute("fill-opacity", opacity); path.setAttribute("stroke", "none");
+    const t = document.createElementNS(NS, "title");
+    t.textContent = title + " " + (end >= 0 ? "+" : "-") + qty(end) + " ETH";
+    path.appendChild(t);
     svg.appendChild(path);
+    return color;
   };
-  area(whale, (v) => Math.min(yF(v), mid), "var(--good)");
-  area(whale, (v) => Math.max(yF(v), mid), "var(--bad)");
+  const zeroRows = cvd.map((r) => ({ s: r.s, v: 0 }));
+  const cW = band(zeroRows, whale, 0.42, "고래");
+  const cM = band(whale, stackMid, 0.24, "중형");
+  const cR = band(stackMid, cvd, 0.11, "리테일");
+  // 🔴농담만으로는 층이 안 갈린다(실렌더에서 확인). 경계에 실선 한 올을 얹는다 --
+  //   리테일은 −226 일 때 두께가 2px 라 이 선이 없으면 층이 있는지조차 모른다.
+  line(pathOf(whale, (r) => yF(r.v)), cW, 0.8, 0.55);
+  line(pathOf(stackMid, (r) => yF(r.v)), cM, 0.8, 0.55);
 
   // 봉 진행선. x축이 **봉 전체**라 아직 안 온 시간이 오른쪽에 비어 있는데, 그게 «데이터가
   // 없다»가 아니라 «아직 안 왔다»라는 걸 화면이 말해야 한다. 봉이 막 바뀐 직후엔 거의
@@ -3724,60 +3761,119 @@ function renderSupply1s(box = null) {
     svg.appendChild(rest);
   }
 
-  const zero = document.createElementNS(NS, "line");
-  zero.setAttribute("x1", ml); zero.setAttribute("x2", ml + cw);
-  zero.setAttribute("y1", mid); zero.setAttribute("y2", mid);
-  zero.setAttribute("stroke", "var(--line)");
-  svg.appendChild(zero);
-
-  const draw = (rows, width, opacity, name) => {
-    const end = rows[rows.length - 1].v;
-    const color = end >= 0 ? "var(--good)" : "var(--bad)";
-    line(pathOf(rows, (r) => yF(r.v)), color, width, opacity);
-    return { y: yF(end), color,
-             text: name + " " + (end >= 0 ? "+" : "-") + qty(end) };
+  const rule = (y, opacity) => {
+    const g = document.createElementNS(NS, "line");
+    g.setAttribute("x1", ml); g.setAttribute("x2", ml + cw);
+    g.setAttribute("y1", y); g.setAttribute("y2", y);
+    g.setAttribute("stroke", "var(--line)");
+    if (opacity) g.setAttribute("stroke-opacity", opacity);
+    svg.appendChild(g);
   };
-  const tagR = draw(retail, 1.4, 0.5, "리테일");
-  const tagW = draw(whale, 2, 0.95, "고래");
-  const tags = [tagW, tagR];
+  rule(mid);
+  rule(divY);          // 두 판의 경계
+
+  // 신규계약: **같은 ETH 축**이다. 둘 다 ETH 이고 실측 진폭도 같은 자릿수라(7,548 vs
+  //   4,734) 축을 나눌 이유가 없다 -- 나누면 세로 위치에 뜻이 없어진다. 합치면
+  //   「매도 주도인데 미결제약정이 늘었다 = 신규 숏」이 한 눈에 읽힌다.
+  // 갱신 간격이 3~7초라 체결선의 5초 절단을 그대로 쓰면 조각난다. 20초를 쓴다.
+  // 🔴CVD 와 겹치는 구간에서 구별이 안 됐다(실렌더). 굵기·농도·점선 간격을 모두 벌린다:
+  //   CVD 는 «굵은 실선」, 신규계약은 «가는 점선».
+  if (oiRows.length >= 2) line(pathOf(oiRows, (r) => yF(r.v), 20), "var(--neutral)", 1, 0.45, "2 3");
+  // 맨 위 윤곽이 곧 CVD 다. 중립 강조색이라 층의 방향색과 안 싸운다.
+  line(pathOf(cvd, (r) => yF(r.v)), "var(--accent)", 2, 1);
+
+  // ── 아래 판: 그 초에 일어난 일 ────────────────────────────────────────────
+  // 🔴거래대금은 √ 스케일이다. 실측 초당 중앙 $60k / 최대 $3.93M -- **65배**라
+  //   선형이면 스파이크 하나가 나머지 300초를 바닥에 눕힌다(√ 로 8배가 된다).
+  if (turn.length) {
+    const tMax = Math.max(...turn.map((r) => r.v), 1);
+    const barMax = LOW_H * 0.58;
+    const bw = Math.max(1.2, (cw / SUPPLY_1S_SEGMENT) * 0.7);
+    let d = "";
+    turn.forEach((r) => {
+      const hh = Math.sqrt(r.v / tMax) * barMax;
+      if (hh < 0.4) return;
+      d += "M" + (xAt(r.s) - bw / 2).toFixed(1) + " " + (divY + 1).toFixed(1)
+           + "h" + bw.toFixed(1) + "v" + hh.toFixed(1) + "h" + (-bw).toFixed(1) + "Z";
+    });
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("d", d); path.setAttribute("fill", "var(--neutral)");
+    path.setAttribute("fill-opacity", "0.45"); path.setAttribute("stroke", "none");
+    svg.appendChild(path);
+    // 기준선이 없으면 «평소의 몇 배인지»를 눈으로 못 잰다.
+    // 🔴중앙값을 썼다가 버렸다: √ 축에서 중앙($60k)/최대($3.9M) 는 2.7px 라 경계선에
+    //   겹쳐 **아예 안 보였다**(실렌더에서 확인). p90 은 7.8px 라 제 몫을 한다.
+    const sorted = turn.map((r) => r.v).sort((a, b) => a - b);
+    const p90 = sorted[Math.floor(sorted.length * 0.9)];
+    // 🔴좁은 폭에서는 기준선을 **안 그린다**. 꼬리표 자리(72px)에 설명이 안 들어가고,
+    //   설명 없는 점선은 정체불명 표시가 된다(414px 실렌더에서 확인).
+    if (!narrow) {
+      const g = document.createElementNS(NS, "line");
+      const my = divY + 1 + Math.sqrt(p90 / tMax) * barMax;
+      g.setAttribute("x1", ml); g.setAttribute("x2", ml + cw);
+      g.setAttribute("y1", my); g.setAttribute("y2", my);
+      g.setAttribute("stroke", "var(--neutral)"); g.setAttribute("stroke-opacity", "0.3");
+      g.setAttribute("stroke-dasharray", "2 4");
+      svg.appendChild(g);
+      label(ml + cw + 5, divY + 21, "┄ p90 " + fmtUsdCompact(p90) + "/초", "var(--muted)");
+    }
+    // 「거래대금 $773.1k」는 72px 자리를 넘어 **잘렸다**. 좁으면 숫자만 남긴다.
+    label(ml + cw + 5, divY + 10, (narrow ? "" : "거래대금 ")
+          + fmtUsdCompact(sorted.reduce((a, b) => a + b, 0)), "var(--muted)");
+  }
+  // 청산: 크기를 가진 점. **로그**다 -- 실측 건당 중앙 0.86 / p99 270 / 최대 2,556 ETH 라
+  //   선형이면 큰 것 하나가 나머지를 점으로 만들고, √ 로도 모자란다.
+  if (liqEv.length) {
+    const cy = divY + LOW_H * 0.76;
+    const rMax = Math.min(8, LOW_H * 0.21);
+    liqEv.forEach((e) => {
+      const c = document.createElementNS(NS, "circle");
+      const r = 2 + Math.log10(1 + Math.abs(e.v)) / Math.log10(3001) * (rMax - 2);
+      c.setAttribute("cx", xAt(e.s).toFixed(1)); c.setAttribute("cy", cy.toFixed(1));
+      c.setAttribute("r", r.toFixed(1));
+      c.setAttribute("fill", e.v >= 0 ? "var(--good)" : "var(--bad)");
+      c.setAttribute("fill-opacity", "0.92");
+      const lc = liq1s.get(e.s) || [0, 0];
+      const t = document.createElementNS(NS, "title");
+      t.textContent = "청산 롱" + qty(lc[0]) + " / 숏" + qty(lc[1]) + " ETH";
+      c.appendChild(t);
+      svg.appendChild(c);
+    });
+    label(ml + cw + 5, cy + 3,
+          narrow ? "청산 " + qty(liqSum[0] + liqSum[1])
+                 : "청산 롱" + qty(liqSum[0]) + "/숏" + qty(liqSum[1]),
+          liqSum[1] >= liqSum[0] ? "var(--good)" : "var(--bad)");
+  }
+
+  // ── 범례 (고정 블록) ──────────────────────────────────────────────────────
+  // 🔴선마다 끝점 꼬리표를 달던 방식을 버렸다. 스택은 층 두께가 3px 까지 얇아질 수 있어
+  //   (리테일 -559 는 축의 5.6%) 끝점 y 로 놓으면 층끼리 글자가 겹친다. 예전엔 그걸
+  //   정렬·밀어내기로 막았는데, 자리가 고정이면 그 기계 자체가 필요 없다.
+  const lx = ml + cw + 5;
+  label(lx, flowTop + 11, "CVD " + (cvd[cvd.length - 1].v >= 0 ? "+" : "-")
+        + qty(cvd[cvd.length - 1].v), "var(--ink)", null, 11);
+  [["고래", whale[whale.length - 1].v, cW, 0.63],
+   ["중형", cvd[cvd.length - 1].v - whale[whale.length - 1].v - retail[retail.length - 1].v, cM, 0.49],
+   ["리테일", retail[retail.length - 1].v, cR, 0.38]].forEach((row, i) => {
+    const y = flowTop + 25 + i * 12;
+    const sw = document.createElementNS(NS, "rect");
+    sw.setAttribute("x", lx); sw.setAttribute("y", y - 6);
+    sw.setAttribute("width", 6); sw.setAttribute("height", 6);
+    sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
+    svg.appendChild(sw);
+    label(lx + 9, y, row[0] + " " + (row[1] >= 0 ? "+" : "-") + qty(row[1]), "var(--muted)");
+  });
   if (oiRows.length >= 2) {
+    const y = flowTop + 61;
+    const g = document.createElementNS(NS, "line");
+    g.setAttribute("x1", lx); g.setAttribute("x2", lx + 6);
+    g.setAttribute("y1", y - 3); g.setAttribute("y2", y - 3);
+    g.setAttribute("stroke", "var(--neutral)"); g.setAttribute("stroke-width", "1.3");
+    g.setAttribute("stroke-opacity", "0.62"); g.setAttribute("stroke-dasharray", "3 2");
+    svg.appendChild(g);
     const end = oiRows[oiRows.length - 1].v;
-    // 갱신 간격이 3~7초라 수급선의 5초 절단 기준을 그대로 쓰면 선이 조각난다. 20초를 넘게
-    // 비면 그건 폴링 지각이 아니라 실제 공백이다.
-    line(pathOf(oiRows, (r) => yF(r.v), 20), "var(--warn)", 1.6, 0.9);
-    const tagO = { y: yF(end), color: "var(--warn)",
-                   // 좁으면 «신규계약»(73px)이 꼬리표 자리(67px)를 넘는다 -- OI 로 줄인다.
-                   text: (narrow ? "OI " : "신규계약 ")
-                         + (end >= 0 ? "+" : "-") + qty(end) };
-    tags.push(tagO);
+    label(lx + 9, y, (narrow ? "OI " : "신규 ") + (end >= 0 ? "+" : "-") + qty(end), "var(--muted)");
   }
-  // ── 청산 (2026-09-22 사용자 요청) ─────────────────────────────────────────
-  // 🔴색을 새로 만들지 않는다. 3색 계약(초록·빨강·주황)이 이미 꽉 찼고, DESIGN.md 의 규칙이
-  //   그대로 답이다: 「새 의미가 필요하면 색이 아니라 **형태·위치·라벨**로 가른다」.
-  //   부호색은 다른 선과 같게 쓰고 **점선**으로 가른다.
-  if (liqNet.length >= 2 && (liqSum[0] > 0 || liqSum[1] > 0)) {
-    const end = liqNet[liqNet.length - 1].v;
-    // 청산은 이벤트라 «없는 초»가 정상이다 -- 5초 절단을 쓰면 늘 조각난다. OI 와 같은 20초.
-    line(pathOf(liqNet, (r) => yF(r.v), 20),
-         end >= 0 ? "var(--good)" : "var(--bad)", 1.6, 0.95, "5 3");
-    tags.push({ y: yF(end), color: end >= 0 ? "var(--good)" : "var(--bad)",
-                // 순액만 적으면 «양쪽 다 터졌다»가 0 으로 보인다 -- 롱/숏을 같이 적는다.
-                text: (narrow ? "청산 " : "청산 ")
-                      + "롱" + qty(liqSum[0]) + "/숏" + qty(liqSum[1]) });
-  }
-  // 값이 가까우면 꼬리표가 그대로 포개진다(가격 라벨과 같은 문제).
-  // 🔴짝지어 밀어내는 방식은 **셋에서 깨진다** -- 둘을 벌려도 셋째가 도로 그 자리에 앉는다.
-  //   누적선 시절엔 셋이 5분 동안 벌어져서 안 보였는데, 30초 롤링은 셋이 동시에 0 근처인
-  //   구간이 흔하다(2026-09-20 배포본 스크린샷에서 실제로 셋이 겹쳐 글자가 읽히지 않았다).
-  //   y 로 정렬해 **차례로** 최소 간격을 주고, 아래로 넘치면 묶음째 위로 민다.
-  const TAG_GAP = 12;
-  tags.sort((a, b) => a.y - b.y);
-  for (let i = 1; i < tags.length; i++) {
-    if (tags[i].y - tags[i - 1].y < TAG_GAP) tags[i].y = tags[i - 1].y + TAG_GAP;
-  }
-  const over = tags[tags.length - 1].y - (h - 4);
-  if (over > 0) tags.forEach((t) => { t.y -= over; });
-  tags.forEach((t) => label(ml + cw + 5, t.y + 3, t.text, t.color));
 
   // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
   label(ml + 2, mt - 5, "이번 5분봉 누적 순수급 ETH"
