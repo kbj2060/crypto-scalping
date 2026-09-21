@@ -3376,14 +3376,19 @@ function renderSituation() {
     // 목표가 없는 경우는 **두 가지**이고 뜻이 정반대다 -- 한 문구로 묶으면 오해한다(09-21 사용자 «왜 잔여가 뜨지»).
     //  ① 횡보의 «레인지 유지» = 진짜 잔여: 위아래 둘 다 안 닿으면 이게 일어난다.
     //  ② 목표 선점(이미 지나감)·가치영역 없음 = 해당 없음: 이 시나리오는 이번 창에서 **일어날 수 없다**.
+    //     «잔여»의 조건은 분명하다 -- **하단·상단 이탈선 사이에 머무는 것**이고 그 두 선은 이미 C·B 목표다.
+    //     지켜야 할 값을 숨기지 말고 그대로 띄운다(사용자 요청). 한쪽 이탈선이 선점됐으면 레인지는 이미 깨졌다.
     const residual = n.dir === 0 && k === "A";
+    const lo = n.targets.C, hi = n.targets.B;
+    const holds = residual && lo != null && hi != null;
     const tgt = t == null
-      ? (residual ? "잔여" : "해당없음")
+      ? (holds ? `${fmtPx(lo)}~${fmtPx(hi)}` : residual ? "이미이탈" : "해당없음")
       : Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t);
     const title = t == null
-      ? (residual ? "잔여 — 위아래 둘 다 안 닿으면" : "해당 없음 — 목표를 이미 지나감")
+      ? (holds ? "레인지 유지 — 하단·상단 이탈선 사이에 머물면 이것"
+               : residual ? "해당 없음 — 이미 한쪽으로 이탈했다" : "해당 없음 — 목표를 이미 지나감")
       : "";
-    const dead = t == null && !residual;
+    const dead = t == null && !holds;
     return `<tr class="${i === 0 ? "" : "sub"}${dead ? " dead" : ""}"><td class="p">${n.prob[k]}%</td>`
       + `<td class="nm">${escapeHtml(n.names[k])}</td>`
       + `<td><div class="sit-bar"><i class="k-${k}" style="width:${n.prob[k]}%"></i></div></td>`
