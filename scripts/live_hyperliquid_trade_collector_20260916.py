@@ -34,14 +34,44 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gzip
 import json
 import os
+import shutil
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DB = ROOT / "data/live/hyperliquid_trades.duckdb"
+# 🔴UTC 날짜별 파일. 단일 duckdb 로 두면 회수 경로가 없다 -- DELETE 는 파일을 안 줄이고
+#   (2026-09-22 실측: 300만 행 중 절반 삭제 + CHECKPOINT 후에도 41.7MB 그대로),
+#   수집기 노드에서 «차면 옮기고 지운다»가 성립하지 않는다. bookTicker/depthdiff 가 시각별로
+#   쪼개 gzip 하는 것과 같은 규약을, 여기서는 **하루** 단위로 쓴다(~13MB/일이라 시각은 과하다).
+#   orderflow/ 아래 두는 이유: 기존 벌크 전송 스크립트가 그 경로의 *.gz 를 그대로 집어간다.
+DB_ROOT = Path(os.getenv("HL_ROOT", str(ROOT / "data/live/orderflow/hyperliquid")))
+
+
+def db_path(ts: float | None = None) -> Path:
+    """그 UTC 날짜의 파일. write() 가 flush 마다 새로 연결하므로 자정에 자연히 갈린다."""
+    d = datetime.fromtimestamp(ts if ts is not None else time.time(), timezone.utc).strftime("%Y-%m-%d")
+    return DB_ROOT / "_".join(COINS) / f"{d}.duckdb"
+
+
+def _gzip_done(path: Path) -> None:
+    """끝난 날짜 파일을 압축한다. 🔴원본은 **압축 성공 뒤에만** 지운다(depthdiff 와 같은 규약)."""
+    gz = path.with_suffix(path.suffix + ".gz")
+    if gz.exists() or not path.exists():
+        return
+    try:
+        with open(path, "rb") as fi, gzip.open(gz, "wb", compresslevel=6) as fo:
+            shutil.copyfileobj(fi, fo, length=1 << 20)
+        if gz.stat().st_size > 0:
+            before, after = path.stat().st_size, gz.stat().st_size
+            path.unlink()
+            print(f"  압축 {path.name} {before/1e6:.1f}MB -> {after/1e6:.1f}MB", flush=True)
+    except Exception as exc:
+        print(f"  압축 실패 {path.name}: {exc} -- 원본 유지", flush=True)
 WS = "wss://api.hyperliquid.xyz/ws"
 COINS = [c.strip().upper() for c in os.getenv("HL_COINS", "ETH").split(",") if c.strip()]
 FLUSH_N = 500          # 이만큼 모이면 쓴다. duckdb 는 프로세스 하나만 열 수 있어 짧게 잡고 닫는다.
@@ -63,8 +93,16 @@ def parse(msg: dict) -> list[tuple]:
     return out
 
 
+_last_db: Path | None = None
+
+
 def write(rows: list[tuple], gap: tuple | None = None) -> None:
+    global _last_db
     import duckdb
+    DB = db_path()
+    if _last_db is not None and _last_db != DB:
+        _gzip_done(_last_db)      # 날짜가 넘어갔다 -- 어제 파일은 이제 안 바뀐다
+    _last_db = DB
     DB.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(DB))
     try:
@@ -91,7 +129,7 @@ async def run() -> None:
                 for coin in COINS:
                     await ws.send(json.dumps({"method": "subscribe",
                                               "subscription": {"type": "trades", "coin": coin}}))
-                print(f"구독 {COINS} · {DB}", flush=True)
+                print(f"구독 {COINS} · {db_path()}", flush=True)
                 while True:
                     buf += parse(json.loads(await ws.recv()))
                     if len(buf) >= FLUSH_N or (buf and time.time() - last >= FLUSH_SEC):
