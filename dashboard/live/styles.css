@@ -2891,29 +2891,66 @@ svg {
 }
 
 /* 2026-09-21 상황 읽기 · 30분 (app.js renderSituation) */
-.situation-body { display: grid; gap: 12px; padding: 12px 18px 16px; }
-.sit-labels { display: flex; flex-wrap: wrap; gap: 6px; }
-.sit-label { border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font: 600 11px/1.3 var(--font-mono); color: var(--ink2, var(--muted)); background: rgb(var(--lift) / 0.03); }
-.sit-label.hot { border-color: var(--warn); color: var(--warn); }
-.sit-scn { display: grid; grid-template-columns: 1fr; gap: 6px; }
-.sit-row { display: grid; grid-template-columns: 44px 1fr 150px; align-items: center; gap: 10px; font-size: 12px; }
-.sit-row .p { font: 800 14px/1 var(--font-mono); text-align: right; }
-.sit-row .bar { position: relative; height: 10px; border-radius: 5px; background: var(--glass); border: 1px solid var(--line); overflow: hidden; }
-.sit-row .bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; background: var(--muted); opacity: .8; }
-.sit-row.top .bar i { background: var(--warn); opacity: 1; }
-.sit-row.dead { opacity: .45; }
-.sit-row.dead .bar i { background: var(--muted); }
-.sit-row .name { font-size: 12px; } .sit-row .tgt { font: 500 11px/1.3 var(--font-mono); color: var(--muted); }
-.sit-flips { display: grid; gap: 4px; }
-.sit-flip { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; font-size: 12px; }
-.sit-flip .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
-.sit-flip.on .dot { background: var(--good); box-shadow: 0 0 6px var(--good); }
-.sit-flip .to { font: 600 10px/1 var(--font-mono); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; }
-.sit-flip.on .to { color: var(--good); border-color: var(--good); }
+/* 상황 읽기 카드 — 2026-09-21 «시안 C · 터미널 밀도»로 재설계(사용자 선택).
+   밀도를 줄이지 않고 **표**로 정리한다. 내용은 그대로이고 형태만 바뀐다:
+   장부의 «말한/실제»가 문장에 묻혀 있었는데(되돌림 39 말하고 2 적중) 표가 되면 한눈에 보인다.
+   🔴새 색을 만들지 않았다 -- 시나리오 막대는 --accent 한 색의 명도 3단계를 A/B/C 에 **고정**
+   배정한다(순위가 아니라 정체성에 묶어, 순위가 바뀌어도 색이 안 따라 바뀐다). 이름이 늘
+   붙으므로 색만으로 구분하지 않는다. 초록/빨강/주황은 이 저장소에서 방향·위험도로 예약돼
+   있어 시나리오에 쓰지 않는다(표시 규약 §2). 주황은 기존대로 «활발/임박» 라벨에만. */
+.situation-body { display: flex; flex-direction: column; gap: 0; padding: 0 18px 14px;
+                  font-family: var(--font-mono); font-size: 11.5px; }
+.sit-sec { font: 700 10px/1.4 var(--font-mono); letter-spacing: .1em; color: var(--muted);
+           margin: 14px 0 5px; display: flex; align-items: baseline; justify-content: space-between; }
+.sit-sec span { font-weight: 500; letter-spacing: 0; }
+.sit-rule { height: 2px; background: var(--accent); }
+
+/* SCENARIOS */
+.sit-tbl { width: 100%; border-collapse: collapse; }
+.sit-tbl td { padding: 5px 0; vertical-align: middle; }
+.sit-tbl .p { width: 46px; font: 800 16px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.sit-tbl .nm { padding: 5px 8px; width: 42%; }
+.sit-tbl .tg { width: 76px; text-align: right; padding-left: 10px; font-variant-numeric: tabular-nums; }
+.sit-tbl tr.sub .p, .sit-tbl tr.sub .tg { font-weight: 600; font-size: 13px; color: var(--muted); }
+.sit-tbl tr.dead { opacity: .45; }
+.sit-bar { height: 9px; background: rgb(var(--lift) / 0.075); }
+.sit-bar i { display: block; height: 100%; }
+/* A/B/C 고정 -- 순위가 아니라 시나리오에 묶인다 */
+.sit-bar i.k-A { background: var(--accent); }
+.sit-bar i.k-B { background: color-mix(in oklab, var(--accent) 55%, var(--panel)); }
+.sit-bar i.k-C { background: color-mix(in oklab, var(--accent) 28%, var(--panel)); }
+
+/* STATE */
+.sit-state { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 22px; }
+.sit-state div { padding: 3.5px 0; border-bottom: 1px solid var(--soft-line); }
+.sit-state .hot { color: var(--warn); font-weight: 600; }
+
+/* FLIP TRIGGERS */
+.sit-flips { display: grid; gap: 2px; }
+.sit-flip { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: baseline; }
+.sit-flip .dot { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--hover-line); }
+.sit-flip.on .dot { background: var(--good); border-color: var(--good); box-shadow: 0 0 6px var(--good); }
+.sit-flip .to { color: var(--muted); font-size: 10.5px; }
+.sit-flip.on .to { color: var(--good); font-weight: 600; }
+
+/* LEDGER */
+.sit-led { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.sit-led th { text-align: right; font-weight: 500; color: var(--muted); padding: 2px 0; font-size: 10.5px; }
+.sit-led th:first-child, .sit-led td:first-child { text-align: left; }
+.sit-led td { text-align: right; padding: 2.5px 0; }
+.sit-led .gap { font-weight: 600; }
+.sit-led .gap.over { color: var(--bad); }     /* 말한 것보다 덜 일어났다 */
+.sit-led .gap.under { color: var(--good); }   /* 말한 것보다 더 일어났다 */
+
+.sit-foot { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 7px; font-size: 10.5px;
+            color: var(--muted); font-variant-numeric: tabular-nums; }
+.sit-foot b { color: var(--ink, inherit); }
+.sit-ws { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.sit-ws i { width: 6px; height: 6px; border-radius: 50%; background: var(--good); display: inline-block; }
+.sit-ws i.off { background: var(--bad); }
 .sit-cal { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .sit-cal b { color: var(--ink, inherit); }
-.sit-h { font: 700 11px/1 var(--font-mono); letter-spacing: .04em; color: var(--muted); margin: 2px 0 4px; }
-details.sit-why { margin-top: 8px; }
+details.sit-why { margin-top: 7px; }
 details.sit-why summary { cursor: pointer; font-size: 11px; color: var(--muted); }
-details.sit-why div { font: 500 11px/1.5 var(--font-mono); color: var(--muted); padding-left: 8px; }
-@media (max-width: 520px) { .sit-row { grid-template-columns: 40px 1fr; } .sit-row .tgt { grid-column: 2; } }
+details.sit-why div { font: 500 11px/1.5 var(--font-mono); color: var(--muted); padding-left: 8px; margin-top: 4px; }
+@media (max-width: 520px) { .sit-state { grid-template-columns: 1fr; } .sit-tbl .nm { width: auto; } }

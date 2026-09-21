@@ -3368,56 +3368,83 @@ function renderSituation() {
   const fmtPx = (v) => (v == null ? "-" : Number(v).toFixed(1));
   const order = ["A", "B", "C"].sort((a, b) => n.prob[b] - n.prob[a]);
   const top = order[0];
-  const labels = n.labels.map((t) => {
-    const hot = /스퀴즈|클라이맥스|분배|거부|전환 탐지|활발|쿠션 없음/.test(t);
-    return `<span class="sit-label${hot ? " hot" : ""}">${escapeHtml(t)}</span>`;
-  }).join("");
-  const scn = order.map((k) => {
+
+  // ── SCENARIOS ── 막대 색은 **시나리오 키에 고정**한다(k-A/k-B/k-C). 순위로 칠하면
+  //   순위가 바뀔 때마다 같은 시나리오가 다른 색이 되어 «색이 정체성»이라는 규약이 깨진다.
+  const scn = order.map((k, i) => {
     const t = n.targets[k];
     // 목표가 없는 경우는 **두 가지**이고 뜻이 정반대다 -- 한 문구로 묶으면 오해한다(09-21 사용자 «왜 잔여가 뜨지»).
     //  ① 횡보의 «레인지 유지» = 진짜 잔여: 위아래 둘 다 안 닿으면 이게 일어난다.
     //  ② 목표 선점(이미 지나감)·가치영역 없음 = 해당 없음: 이 시나리오는 이번 창에서 **일어날 수 없다**.
     const residual = n.dir === 0 && k === "A";
     const tgt = t == null
-      ? (residual ? "잔여 — 위아래 둘 다 안 닿으면" : "해당 없음 — 목표를 이미 지나감")
+      ? (residual ? "잔여" : "해당없음")
       : Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t);
+    const title = t == null
+      ? (residual ? "잔여 — 위아래 둘 다 안 닿으면" : "해당 없음 — 목표를 이미 지나감")
+      : "";
     const dead = t == null && !residual;
-    return `<div class="sit-row${k === top ? " top" : ""}${dead ? " dead" : ""}"><span class="p">${n.prob[k]}%</span>
-      <div><div class="name">${escapeHtml(n.names[k])}</div><div class="bar"><i style="width:${n.prob[k]}%"></i></div></div>
-      <span class="tgt">목표 ${escapeHtml(tgt)}</span></div>`;
+    return `<tr class="${i === 0 ? "" : "sub"}${dead ? " dead" : ""}"><td class="p">${n.prob[k]}%</td>`
+      + `<td class="nm">${escapeHtml(n.names[k])}</td>`
+      + `<td><div class="sit-bar"><i class="k-${k}" style="width:${n.prob[k]}%"></i></div></td>`
+      + `<td class="tg"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(tgt)}</td></tr>`;
   }).join("");
-  const flips = (n.flips || []).map((f) => `<div class="sit-flip${f.on ? " on" : ""}"><span class="dot"></span>
-      <span>${escapeHtml(f.signal)}</span><span class="to">→ ${escapeHtml(n.names[f.toward] || f.toward)}</span></div>`).join("");
-  const why = (n.why || []).map((w) => `${w["근거"]}: ${Object.entries(w).filter(([k]) => k !== "근거").map(([k, v]) => `${k}${v >= 0 ? "+" : ""}${v}`).join(" ")}`).join(" · ");
+
+  // ── STATE ── 서버가 고른 라벨 문장을 그대로 쓴다. 클라이언트가 문장을 쪼개 «키: 값»으로
+  //   만들려면 한국어 파싱이 필요하고, 그건 서버 문구가 바뀌는 날 조용히 깨진다.
+  const state = (n.labels || []).map((t) => {
+    const hot = /스퀴즈|클라이맥스|분배|거부|전환 탐지|활발|쿠션 없음/.test(t);
+    return `<div${hot ? ' class="hot"' : ""}>${escapeHtml(t)}</div>`;
+  }).join("");
+
+  // ── FLIP TRIGGERS ──
+  const fl = n.flips || [];
+  const armed = fl.filter((f) => f.on).length;
+  const flips = fl.map((f) => `<div class="sit-flip${f.on ? " on" : ""}"><span class="dot"></span>`
+    + `<span>${escapeHtml(f.signal)}</span>`
+    + `<span class="to">${escapeHtml(n.names[f.toward] || f.toward)}</span></div>`).join("");
+  const why = (n.why || []).map((w) => `${w["근거"]}: ${Object.entries(w).filter(([k]) => k !== "근거")
+    .map(([k, v]) => `${k}${v >= 0 ? "+" : ""}${v}`).join(" ")}`).join(" · ");
+
+  // ── LEDGER ── «말한 것 vs 실제»를 표로. 문장에 묻혀 있던 게 이 카드의 핵심 숫자다
+  //   (실측: 되돌림 39 말하고 2 적중 · 역스퀴즈 33 말하고 83). gap = 실제 − 말한 것.
   const c = s.calibration || {};
-  const cal = c.n
-    ? `장부 <b>${c.n}</b>건 해결 · 1순위 적중 <b>${c.top_hit}%</b> · 아무 목표도 안 닿음 ${c.none}% · 말한/실제 되돌림 ${c.A.said}/${c.A.happened} · 지속 ${c.B.said}/${c.B.happened} · 플러시 ${c.C.said}/${c.C.happened}`
-    : "장부: 아직 해결된 예측이 없다(첫 결과는 30분 뒤)";
-  // 입력 스트림 상태(2026-09-21 미시 참고 카드에서 옮김). «청산 동반»·«펀딩» 줄이 이 둘에 기대므로 끊기면 여기서 보여야 한다.
-  const st = s.streams || {}; const fo = st.fo || {}; const mp = st.mp || {};
-  const ws = (w, label, unit) => w.connected ? `${label} 연결 · ${w.events || 0}${unit}` : `${label} <b>끊김</b>${w.last_error ? ` (${escapeHtml(w.last_error)})` : ""}`;
-  const streams = `스트림 · ${ws(fo, "청산 WS", "건")} · ${ws(mp, "마크가격 WS", "건")}`;
-  // ⭐방향 적중은 «대칭 배리어(±0.5×창폭)» 로만 정직하게 잰다 -- 시나리오 목표는 거리가 서로 달라
-  //   «가장 가까운 목표가 이긴다»가 섞인다(09-21 실측 81%). 동전 = 50%.
-  // P1: 학습 표본이 얼마나 쌓였나. 🔴n 은 독립 사건 수가 아니라서 «에피소드»를 같이 보여준다.
-  const sampleLine = c.n
-    ? `표본 <b>${c.samples}</b>건 · 해결 ${c.n} · <b>독립창 ${c.episodes}</b>(겹치지 않는 30분) · 연속타깃 ${c.with_path} · 대기 ${c.pending} · 판정불가 ${c.amb}% · 최근 ${c.span_h}시간`
-    : c.samples
-      ? `표본 ${c.samples}건 기록 · 해결대기 ${c.pending} (첫 해결은 예측 30분 뒤)`
-      : "표본: 기록 시작 대기";
+  const led = c.n
+    ? `<table class="sit-led"><thead><tr><th>시나리오</th><th>말한</th><th>실제</th><th>차</th></tr></thead><tbody>`
+      + ["A", "B", "C"].map((k) => {
+          const r = c[k] || {}; const g = (r.happened || 0) - (r.said || 0);
+          return `<tr><td>${escapeHtml(n.names[k] || k)}</td><td>${r.said}</td><td>${r.happened}</td>`
+            + `<td class="gap ${g >= 0 ? "under" : "over"}">${g >= 0 ? "+" : ""}${g}</td></tr>`;
+        }).join("")
+      + `</tbody></table>`
+    : `<div class="sit-cal">${c.samples ? `표본 ${c.samples}건 기록 · 해결대기 ${c.pending}` : "기록 시작 대기"} (첫 해결은 예측 30분 뒤)</div>`;
+
   const sy = c.sym || {};
-  const symLine = sy.n
-    ? `방향 적중 <b>${sy.hit}%</b> · 같은 구간 «항상 상승»이면 ${sy.base_up}% (대칭 ±0.5×창폭 · 추세 구간만 · n ${sy.n})`
-    : "방향 적중: 대칭 라벨 해결 대기";
+  const st = s.streams || {}; const fo = st.fo || {}; const mp = st.mp || {};
+  const wsDot = (w, label) => `<span class="sit-ws" title="${escapeHtml(label)} ${w.connected
+    ? `연결 · ${w.events || 0}건` : `끊김${w.last_error ? ` (${w.last_error})` : ""}`}">`
+    + `<i class="${w.connected ? "" : "off"}"></i>${escapeHtml(label)}</span>`;
+  const foot = [
+    c.n ? `1순위 적중 <b>${c.top_hit}%</b>` : null,
+    c.n ? `아무 목표도 안 닿음 ${c.none}%` : null,
+    sy.n ? `방향 적중 <b>${sy.hit}%</b> · 항상 상승이면 ${sy.base_up}% <span title="대칭 ±0.5×창폭 · 추세 구간만">(n ${sy.n})</span>`
+         : "방향 적중: 대칭 라벨 해결 대기",
+    c.n ? `해결 <b>${c.n}</b> · 대기 ${c.pending} · 에피소드 <b>${c.episodes}</b> · 연속타깃 ${c.with_path} · 판정불가 ${c.amb}% · 최근 ${c.span_h}h` : null,
+  ].filter(Boolean).join("</span><span>");
+
   body.innerHTML = `
-    <div><div class="sit-h">지금</div><div class="sit-labels">${labels}</div></div>
-    <div><div class="sit-h">30분 시나리오 (휴리스틱 확률)</div><div class="sit-scn">${scn}</div>
-      <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details></div>
-    <div><div class="sit-h">생각을 바꾸는 신호</div><div class="sit-flips">${flips}</div></div>
-    <div class="sit-cal">${cal}</div>
-    <div class="sit-cal">${symLine}</div>
-    <div class="sit-cal">${sampleLine}</div>
-    <div class="sit-cal">${streams}</div>`;
+    <div class="sit-rule"></div>
+    <div class="sit-sec">SCENARIOS · 30m<span>휴리스틱 확률</span></div>
+    <table class="sit-tbl"><tbody>${scn}</tbody></table>
+    <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details>
+    <div class="sit-sec">STATE</div>
+    <div class="sit-state">${state}</div>
+    <div class="sit-sec">FLIP TRIGGERS<span>${armed} / ${fl.length} 켜짐</span></div>
+    <div class="sit-flips">${flips || '<div class="sit-cal">없음</div>'}</div>
+    <div class="sit-sec">LEDGER${c.n ? `<span>n ${c.n} · ${c.span_h}h</span>` : ""}</div>
+    ${led}
+    <div class="sit-foot"><span>${foot}</span>${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`;
+
   if (badge) {
     const age = s.computed_at ? Math.round(Date.now() / 1000 - s.computed_at) : null;
     badge.className = `ops-badge ${age != null && age <= 15 ? "good" : "neutral"}`;
