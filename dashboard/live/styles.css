@@ -733,24 +733,12 @@ body {
    기존 SVG 인셋은 오른쪽 위 y=0..34 를 차지해 같은 자리에 새로 생긴 증거신호 **천장 레인**을
    덮었다. 그라디언트 스톱은 app.js 의 DENSITY_STOPS 와 **같은 값**이어야 범례가 히트맵을
    정직하게 설명한다(app.js 의 densityColor 와 같은 색 계열). */
-.liq-density-legend { display: flex; align-items: center; gap: 10px; }
-.liq-density-legend[hidden] { display: none; }   /* author display:flex 가 UA 의 hidden 을 이기므로 명시 */
 /* 2026-09-11 사용자 요청 "맵 위에 빈 공간도 줄여주고 그 빈 공간에 청산 밀도 표를 중앙에":
    범례가 전용 행에서 `.ops-health-head` 안으로 들어왔다. 헤드는 space-between 이고 배지가
    오른쪽에 있으므로, 범례에 flex:1 을 주면 남은 폭 전체를 차지하며 내용이 가운데 정렬된다.
    패딩 18 -> 10 으로 빈 행 높이도 줄인다. (2026-09-09 의 오른쪽 끝 정렬은 이 지시로 대체됨) */
 .liq-map-panel .ops-health-head { padding: 10px 18px; }
-.liq-map-panel .ops-health-head .liq-density-legend { flex: 1; justify-content: center; }
-.liq-density-legend-title { font-size: 11px; color: var(--muted); white-space: nowrap; }
-.liq-density-legend-scale { display: flex; align-items: center; gap: 6px; width: 200px; max-width: 45%; }
-.liq-density-legend-end { font-size: 10px; color: var(--muted); white-space: nowrap; }
-.liq-density-legend-bar {
-  flex: 1; height: 8px; border-radius: 2px;
-  /* 그라디언트는 app.js 가 DENSITY_STOPS 에서 만들어 인라인으로 넣는다 -- 사본을 두지 않는다. */
-}
 @media (max-width: 720px) {
-  .liq-density-legend { gap: 8px; padding: 0 2px 4px; }
-  .liq-density-legend-scale { width: 140px; max-width: 55%; }
 }
 
 .liq-level-list { padding: 4px 0 12px; }
@@ -1248,7 +1236,6 @@ body {
     align-self: center;
     justify-content: flex-end;
   }
-  .liq-map-panel .ops-health-head .liq-density-legend { order: 3; flex-basis: 100%; }
 }
 .chart-mode-tabs { padding: 3px; }
 .chart-mode-tabs .asset-tab { min-width: 56px; height: 24px; font-size: 11px; }
@@ -2664,8 +2651,8 @@ svg {
    🔴이 두 수는 app.js 의 SUB_GAP/SUB_PROFILE_H/SUB_1S_H 와 **같이** 움직여야 한다. 상자가
      더 작으면 가격 플롯(ch = h - mt - mb - 레인 - SUB_TOTAL)이 그만큼 눌린다 -- 어긋나면
      renderCandleSvg 의 가드가 콘솔에 한 번 알린다. */
-#candleSvgSnapshot { height: 811px; }   /* 400 + SUB_TOTAL 356 + 거래대금·CVD 55 */
-.candle-container { height: 823px; }    /* +12 = #candleSvgSnapshot margin-top */
+#candleSvgSnapshot { height: 825px; }   /* 400 + SUB_TOTAL 370 + 거래대금·CVD 55 */
+.candle-container { height: 837px; }    /* +12 = #candleSvgSnapshot margin-top */
 /* 2026-09-19 히트맵 그림을 걷어내고(사용자 지시) 프로파일이 그 수치를 직접 그린다 --
    상자가 844 -> 706 으로 돌아왔다. SUB_TOTAL 306 = 8 + 190(프로파일) + 8 + 100(1초 수급).
    🔴이 두 수는 app.js 의 SUB_* 상수와 **같이** 움직여야 한다. 어긋나면 가격 플롯이 조용히

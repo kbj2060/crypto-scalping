@@ -107,7 +107,12 @@ def test_density_colormap_is_theme_aware() -> None:
     assert all(light[i] > light[i + 1] for i in range(len(light) - 1)), \
         "라이트: 밀도가 높을수록 **어두워져야** 한다 -- 뒤집히면 척도가 거꾸로 읽힌다"
     assert re.search(r"const densityStops = \(\) =>", src), "densityStops 접근자가 없다"
-    assert "densityStops()" in src.split("densityLegendGradient")[1][:200], \
+    # 2026-09-21 범례가 헤더 HTML -> 캔들 SVG 안(프로파일 바닥글 아래)으로 옮겨가며
+    #   densityLegendGradient() 가 사라졌다. **검사 의도는 그대로다** -- 범례 색이
+    #   densityStops() 에서 나오는가. 지워진 이름 대신 범례를 만드는 자리를 찾아 본다.
+    i = src.find("liqDensLegendGrad")
+    assert i > 0, "범례 그라디언트를 못 찾았다"
+    assert "densityStops()" in src[max(0, i - 500):i + 500], \
         "범례가 테마를 안 따라간다 -- 색 사본이 갈린다"
     assert re.search(r"const baseGeomSig = \[themeSig,", src), "캐시 서명에 테마가 없다"
 
