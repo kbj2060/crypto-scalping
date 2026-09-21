@@ -40,7 +40,14 @@ PYTT
   for f in data/live/orderflow/bookticker/ETHUSDT/*.bt data/live/orderflow/bookticker/ETHUSDT/*.bt.gz; do
     [ -e "$f" ] || continue
     b=$(basename "$f"); h="${b%%.bt*}"
-    if [[ "$f" == *.gz ]]; then s=$(zcat "$f" 2>/dev/null | wc -c); else s=$(stat -c %s "$f"); fi
+    # gzip 트레일러에 원본 크기(ISIZE)가 들어 있다 -- 마지막 4바이트만 읽으면 되므로
+    # zcat|wc -c 처럼 전부 풀 필요가 없다(95개 시각 파일에서 실측으로 느렸다).
+    # 4GB 이상이면 ISIZE 가 mod 2^32 라 틀리지만, 이 파일들은 10~33MB 다.
+    # 🔴probe 는 작은따옴표 문자열이라 안에서 awk '...' 를 쓰면 문자열이 깨진다.
+    #   set -- 로 위치인자를 써서 따옴표를 아예 피한다($1/$2 는 이미 R/PY 로 받아뒀다).
+    if [[ "$f" == *.gz ]]; then set -- $(gzip -l "$f" 2>/dev/null | tail -1); s=$2
+    else s=$(stat -c %s "$f"); fi
+    [[ -n "$s" ]] || continue
     echo "bt|$h|$(( (s - 32) / 32 ))"
   done
   for f in data/live/orderflow/depthdiff/ETHUSDT/*.jsonl data/live/orderflow/depthdiff/ETHUSDT/*.jsonl.gz; do
