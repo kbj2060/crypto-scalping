@@ -26,12 +26,33 @@ def test_heights_match_between_js_and_css():
     prof = _num(r"SUB_PROFILE_H = subOn \? (\d+)", JS, "SUB_PROFILE_H")
     one_s = _num(r"SUB_1S_H = subOn \? (\d+)", JS, "SUB_1S_H")
     # 2026-09-19 히트맵 그림 제거 -- 프로파일과 1초 수급 둘뿐이다.
-    total = gap + prof + gap + one_s
+    # 🔴2026-09-21 이 공식이 낡아 검사가 **계속 실패 중**이었다(배포본에서도). 상자는 두 덩이를
+    #   더 갖는다: 청산밀도 범례(SUB_LEGEND_H)와 가격 플롯 아래 레인 5종.
+    legend = _num(r"const SUB_LEGEND_H = subOn \? (\d+)", JS, "SUB_LEGEND_H")
+    total = gap + prof + legend + gap + one_s          # = app.js 의 SUB_TOTAL
+
+    # 레인 5종(거래대금·델타/CVD·OI·수급·청산)과 그 간격. 데스크톱 값으로 센다.
+    lanes = (_num(r"LIQ_PANEL_H = mobileChart \? \d+ : (\d+)", JS, "LIQ_PANEL_H")
+             + _num(r"LIQ_PANEL_GAP = (\d+)", JS, "LIQ_PANEL_GAP")
+             + _num(r"OI_PANEL_H = oiBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "OI_PANEL_H")
+             + _num(r"OI_PANEL_GAP = oiBars\.length \? (\d+)", JS, "OI_PANEL_GAP")
+             + _num(r"SUP_PANEL_H = fpBars\.length \? (\d+)", JS, "SUP_PANEL_H")
+             + _num(r"SUP_PANEL_GAP = fpBars\.length \? (\d+)", JS, "SUP_PANEL_GAP")
+             + _num(r"TURN_H = fpBars\.length \? (\d+)", JS, "TURN_H")
+             + _num(r"DCVD_H = fpBars\.length \? (\d+)", JS, "DCVD_H")
+             + 2 * _num(r"FLOW_GAP = fpBars\.length \? (\d+)", JS, "FLOW_GAP"))
+
+    # 🔴가격 플롯(ch)은 «나머지»다. 이 계약은 그 나머지가 얼마로 남는지를 고정한다 --
+    #   상자만 줄이거나 레인만 키우면 캔들이 **조용히** 눌린다(그게 이 검사의 이유다).
+    mt_top, mb, price_plot = 12, 70, 400
 
     css_svg = _num(r"#candleSvgSnapshot \{ height: (\d+)px; \}", CSS, "SVG 높이")
     css_box = _num(r"\.candle-container \{ height: (\d+)px; \}", CSS, "컨테이너 높이")
-    assert css_svg == 400 + total, f"SVG {css_svg} != {400 + total}"
-    assert css_box == 412 + total, f"상자 {css_box} != {412 + total}"
+    want = mt_top + total + price_plot + lanes + mb
+    assert css_svg == want, (
+        f"SVG {css_svg} != {want} (여백 {mt_top}+{mb} · SUB {total} · 레인 {lanes} · "
+        f"가격 플롯 {price_plot}) -- 가격 플롯이 {css_svg - want + price_plot}px 로 눌린다")
+    assert css_box == css_svg + 12, f"상자 {css_box} != {css_svg + 12} (SVG + margin-top 12)"
 
 
 def test_layout_is_single_not_split():

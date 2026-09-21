@@ -4560,7 +4560,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const ml = (mobileChart ? 44 : 45) + CENTER_NUDGE,
         mr = (mobileChart ? 68 : 112) - CENTER_NUDGE,
         mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 70;
-  const LIQ_PANEL_H = mobileChart ? 34 : 46, LIQ_PANEL_GAP = 6;
+  // 2026-09-21 사용자 요청: 「차트가 너무 많다 -- 레인을 한 덩어리로」 + 「가격 플롯을 키워라」.
+  //   레인 5종(거래대금·델타/CVD·OI·수급·청산)이 각자 6px 간격으로 떨어져 있어 **다섯 장의
+  //   그림**으로 읽혔다. 간격 6->3, 높이를 서로 가깝게 맞춰 한 블록으로 읽히게 한다:
+  //   데스크톱 168 -> 111px. 그 57px 과 상자 증가분을 전부 가격 플롯이 가져간다(205 -> 400).
+  // ⭐다섯 레인은 전부 «높이=해상도» 노브다 -- OI·청산은 대칭 이분(half = H/2 - 1), 수급은
+  //   SMID 기준, 거래대금은 단극이다. 안에 고정 크기 요소가 없어 높이만 바꾸면 되고 좌표
+  //   계산은 한 줄도 안 건드린다. LANE_H(15)는 **다른 것**이다(레짐 리본·구간 줄, 하단 여백).
+  // 🔴DCVD 는 24 아래로 내리지 말 것 -- 15 에서 작은 델타 막대가 0.7px 였다(기존 주석).
+  const LIQ_PANEL_H = mobileChart ? 20 : 24, LIQ_PANEL_GAP = 3;
   // OI 신규계약 레인 -- 청산 레인 **바로 위**(사용자 지시). 별도 패널이 아니라 이 SVG 안의
   // 서브플롯이라야 캔들과 x축(봉)이 구성상 같아진다(레짐 리본이 같은 이유로 여기 있다).
   // 🔴ETH 전용이다. 다른 코인을 보는 동안 ETH 값을 얹으면 2026-08-31 레짐 리본 사고와 같은
@@ -4571,8 +4579,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 모바일 26 / 데스크톱 34. h 는 모바일에서도 실제로 400 이다(styles.css 가 #candleSvgSnapshot
   // 높이를 400px 로 고정 -- `Math.max(parentH, 260)` 의 260 은 SVG 가 안 그려질 때의 바닥값이다).
   // 400 기준 가격 플롯은 모바일 233, 데스크톱 205 로 남는다.
-  const OI_PANEL_H = oiBars.length ? (mobileChart ? 26 : 34) : 0;
-  const OI_PANEL_GAP = oiBars.length ? 6 : 0;
+  const OI_PANEL_H = oiBars.length ? (mobileChart ? 18 : 20) : 0;
+  const OI_PANEL_GAP = oiBars.length ? 3 : 0;
   // ── 고래·리테일 수급 리본 -- OI 레인 바로 아래 (2026-09-20 사용자 지시) ──────────
   // 봉마다 «그 5분에 순 몇 ETH 가 들어왔나»를 두 계층으로 가른다. 풋프린트가 이미 봉별
   // 가격대 셀을 주고 supplyFlowOfBar() 가 그걸 셋으로 가르므로 여기서는 **자리만** 잡는다.
@@ -4583,8 +4591,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const fpBars = (svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth"
                    && latestFootprint && Array.isArray(latestFootprint.bars))
                   ? latestFootprint.bars : [];
-  const SUP_PANEL_H = fpBars.length ? 15 : 0;      // = LANE_H. 아래에서 상수를 못 쓴다(선언 전)
-  const SUP_PANEL_GAP = fpBars.length ? 6 : 0;
+  const SUP_PANEL_H = fpBars.length ? 14 : 0;
+  const SUP_PANEL_GAP = fpBars.length ? 3 : 0;
   // ── 거래대금 · 델타·CVD -- 풋프린트 바로 아래 (2026-09-21 사용자 지시) ────────────
   // 같은 풋프린트 봉에서 나온다: 거래대금 = Σ가격x(매수+매도) · 델타 = Σ(매수-매도) ·
   // CVD = 그 창 안에서의 델타 누적.
@@ -4593,9 +4601,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   48 이라 셋 다 덮인다. 창을 바꾸면 기준점도 같이 옮겨간다 -- 절대 누적이 아니다.
   // 🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이다(dashboard/situation.py 의 WINDOW=6).
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
-  const TURN_H = fpBars.length ? 15 : 0;
-  const DCVD_H = fpBars.length ? 28 : 0;      // 15 면 작은 델타 막대가 0.7px 다(실측)
-  const FLOW_GAP = fpBars.length ? 6 : 0;
+  const TURN_H = fpBars.length ? 14 : 0;
+  const DCVD_H = fpBars.length ? 24 : 0;      // 15 면 작은 델타 막대가 0.7px 다(실측)
+  const FLOW_GAP = fpBars.length ? 3 : 0;
   const cw = w - ml - mr;
   const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP
              - SUP_PANEL_H - SUP_PANEL_GAP - TURN_H - DCVD_H - 2 * FLOW_GAP;
