@@ -2801,6 +2801,33 @@ function liquidationDensityHistory() {
 // pre-filtered server-side by _redistance() against the backend's own current_price snapshot,
 // which can trail the live tick price by up to ~1h (hourly klines + 5-min server cache). Without
 // this, a level the live price has already crossed could still be drawn as an un-crossed wall.
+// 2026-09-22 사용자 «어차피 방향과 가격이 있으니 풋프린트에 표현할 수 있지 않나». 맞다 --
+// 차트의 y 축이 이미 가격축이라 시나리오 목표는 **그 위의 가로 위치**다. 따로 사다리를 그릴
+// 필요가 없다. nearestLiquidationLevel 과 같은 모양을 돌려주면 priceLabels 가 클램핑·겹침
+// 회피·라벨·배지를 전부 해 준다(새로 그리는 코드 0).
+// 🔴색은 --muted 다. 초록/빨강은 청산 S/R, --accent 는 현재가, --amber 는 진입가로 이미
+//   쓰이고 있다. 그리고 위계상 그게 맞다 -- S/R 과 현재가는 **사실**이고 시나리오는 **예측**이라
+//   예측이 사실보다 조용해야 한다. 셋을 가르는 건 색이 아니라 위치(방향)와 굵기·라벨(확률)이다.
+// 🔴풋프린트에서는 선이 아니라 삼각형이다. 가로선이 가격 행을 가로질러 셀 숫자를 덮는 건
+//   현재가에서 이미 겪고 고친 문제다(2026-09-16). 같은 규약을 그대로 따른다.
+// 라벨은 **4글자 안**이어야 한다 -- ml 이 45px 뿐이라 그 이상은 왼쪽으로 잘린다(2026-09-16
+//   «저항1↑» 실측 31px). 그래서 확률만 쓴다. 이름은 바로 아래 카드에 같은 숫자와 함께 있다.
+function situationTargetLevels(footprint) {
+  const n = (latestSituation || {}).now;
+  if (!n || !n.ok || activeSnapshotAsset !== "eth") return [];
+  const out = [];
+  for (const k of ["A", "B", "C"]) {
+    const v = (n.targets || {})[k];
+    // 배열(09-21 이전 장부의 «띠»)과 null(선점된 목표)은 건너뛴다 -- 선점은 이번 창에서
+    // 일어날 수 없는 자리라 차트에 그리면 «아직 갈 곳»처럼 읽힌다. 카드가 «지남»으로 말한다.
+    if (Array.isArray(v) || !(Number(v) > 0)) continue;
+    const pct = Number((n.prob || {})[k]) || 0;
+    out.push({ val: Number(v), color: "var(--muted)", label: `${pct}%`,
+               dashed: true, width: pct >= 45 ? 2 : 1, marker: !!footprint });
+  }
+  return out;
+}
+
 function nearestLiquidationLevel() {
   const map = latestLiquidationMap;
   if (!map || !map.warmed_up) return [];
@@ -4542,7 +4569,7 @@ function renderSnapshotChart() {
     ? fullCandles.filter((c) => c.time >= footprint.firstTime)
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
-  const riskLevels = [...nearestLiquidationLevel()];
+  const riskLevels = [...nearestLiquidationLevel(), ...situationTargetLevels(footprint)];
   // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
   // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
   // /api/liquidation-map 이 갱신될 때(60초)만 다시 만든다.
