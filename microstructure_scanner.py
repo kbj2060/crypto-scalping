@@ -23,7 +23,7 @@ _ROOT = Path(__file__).resolve().parent
 
 # ── WebSocket / REST URL ───────────────────────────────────────────────────────
 _DEPTH_WS_URL = "wss://fstream.binance.com/ws/{symbol}@depth20@100ms"
-_TRADE_WS_URL = "wss://fstream.binance.com/ws/{symbol}@aggTrade"
+_TRADE_WS_URL = "wss://fstream.binance.com/market/ws/{symbol}@aggTrade"
 _OI_URL       = "https://fapi.binance.com/fapi/v1/openInterest?symbol={SYMBOL}"
 _FUND_URL     = "https://fapi.binance.com/fapi/v1/premiumIndex?symbol={SYMBOL}"
 _AGG_TRADES_URL = "https://fapi.binance.com/fapi/v1/aggTrades?symbol={SYMBOL}&limit={LIMIT}"

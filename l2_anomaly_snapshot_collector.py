@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("L2_ANOMALY_DB_PATH", str(ROOT / "data" / "live" / "l2_anomaly_snapshots.duckdb")))
 
 _DEPTH_WS_URL = "wss://fstream.binance.com/ws/{symbol}@depth20@100ms"
-_TRADE_WS_URL = "wss://fstream.binance.com/ws/{symbol}@aggTrade"
+_TRADE_WS_URL = "wss://fstream.binance.com/market/ws/{symbol}@aggTrade"
 _FORCE_ORDER_WS_URL = "wss://fstream.binance.com/market/ws/{symbol}@forceOrder"
 # REST fallback for the aggTrade WS (2026-08-28) -- l2_anomaly_trades sat at 0 rows for 24h+ despite
 # depth/forceOrder working fine over the identical connect/reconnect pattern. Diffed this file's
