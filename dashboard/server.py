@@ -560,6 +560,7 @@ SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30�
 SITUATION_LOG_MIN_GAP_S = 300                          # 상태가 안 바뀌어도 이 간격으로 한 줄
 SITUATION_VA_ROW_USD = 3.0                             # 가치영역 행 폭(차트의 행과 같다)
 SITUATION_HORIZON_S = 1800
+SITUATION_MINUTE_LIMIT = 500            # 해결 전용 1분봉(≈8시간). 5분봉은 창 앞 최대 5분을 버리고 봉 안 순서를 모른다
 
 
 def oi_1s_persist(rows: list[tuple[int, float]]) -> None:
@@ -2569,6 +2570,7 @@ def make_app() -> web.Application:
                     entries[int(rec["ts"])] = rec
                 elif int(rec.get("ts", -1)) in entries:
                     entries[int(rec["ts"])]["outcome"] = rec.get("outcome")
+                    entries[int(rec["ts"])]["outcome_sym"] = rec.get("outcome_sym")
             kept: list[dict[str, Any]] = []
             for rec in entries.values():   # 같은 상태 서명이 300초 안에 이어지면 중복 -- 09-21 이전 파일의 5초 중복을 소급 정리
                 if kept and rec["ts"] - kept[-1]["ts"] < SITUATION_LOG_MIN_GAP_S and sit.log_key(rec) == sit.log_key(kept[-1]):
@@ -2646,6 +2648,19 @@ def make_app() -> web.Application:
                 "deriv": mref.deriv_from_ring(mark_ring, sit.WINDOW * FOOTPRINT_BAR_SECONDS, sit.BASIS_PCT), "btc": btc,
                 "breakout": {"detect_on": bool((bo.get("detect") or {}).get("on")), "prewarn_on": bool((bo.get("prewarn") or {}).get("on"))}}
 
+    async def load_minute_candles() -> list[dict[str, float]]:
+        """예측 해결 전용 1분봉. 🔴5분봉으로 풀면 ①결정 시점이 든 봉을 통째로 건너뛰어 30분 창의
+        최대 17%가 죽고 ②같은 봉 안 순서를 몰라 오채점된다 -- 09-21 장부를 두 해상도로 풀어보니
+        13.4%가 달라졌다. 20초 캐시라 1초 루프가 매번 부르지 않는다."""
+        async def produce() -> list[dict[str, float]]:
+            raw = await fetch_binance_json(
+                "https://fapi.binance.com/fapi/v1/klines",
+                {"symbol": FOOTPRINT_SYMBOL, "interval": "1m", "limit": SITUATION_MINUTE_LIMIT},
+                error_reason="situation_minute_upstream_error")
+            return [{"time": int(r[0]) // 1000, "high": float(r[2]), "low": float(r[3]), "close": float(r[4])}
+                    for r in raw]
+        return await swr_cached("situation_minutes", 20.0, produce)
+
     async def compute_situation(now: float) -> None:
         loop = asyncio.get_running_loop()
         # 느린 입력 셋은 캐시로 (캔들 60초 · 전환탐지기 60초 · 호가 요약 5초)
@@ -2655,6 +2670,10 @@ def make_app() -> web.Application:
         except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
             situation_state["btc_candles"] = None
         situation_state["breakout"] = await load_breakout_detector()
+        try:
+            situation_state["minutes"] = await load_minute_candles()
+        except Exception as exc:  # noqa: BLE001 -- 실패하면 직전 1분봉으로 푼다(없으면 해결을 미룬다)
+            print(f"situation minutes: {exc!r}", flush=True)
         situation_state["oi_5m"] = await swr_cached("situation_oi5m", 5.0, lambda: asyncio.to_thread(oi_5m_buckets, 2 * sit.WINDOW + 3))
         situation_state["liq_5m"] = await swr_cached("situation_liq5m", 5.0, lambda: asyncio.to_thread(compute_liquidation_5m_history, "eth", 2 * sit.WINDOW + 3))
         try:
@@ -2673,23 +2692,27 @@ def make_app() -> web.Application:
         key = sit.log_key(res)   # 라벨의 숫자를 뺀 종류 서명 -- 숫자를 두면 5초마다 새 항목(09-21 1,742건 사고)
         if key != situation_state["last_key"] or now - situation_state["last_logged"] >= SITUATION_LOG_MIN_GAP_S:
             entry = {"ts": int(now), "mid": inp.get("mid"), "dir": res["dir"], "prob": res["prob"], "targets": res["targets"],
-                     "labels": res["labels"], "flips_on": [f["signal"] for f in res["flips"] if f["on"]], "outcome": None}
+                     "labels": res["labels"], "flips_on": [f["signal"] for f in res["flips"] if f["on"]],
+                     # 대칭 라벨(학습 주 타깃)과 목표 거리 -- 거리를 같이 남겨야 «근접 편향»을 나중에 다시 잴 수 있다
+                     "sym": res.get("sym"), "dist_bp": res.get("dist_bp"), "outcome": None, "outcome_sym": None}
             situation_state["log"].append(entry); situation_state["log"] = situation_state["log"][-300:]
             situation_state["last_key"], situation_state["last_logged"] = key, now
             _situation_append(entry)
         if now - situation_state["last_resolve"] >= 60:
             situation_state["last_resolve"] = now
-            cs = situation_state["candles"] or []
+            ms = situation_state.get("minutes") or []
             for e in situation_state["log"]:
                 if e.get("outcome") is None and e["ts"] + SITUATION_HORIZON_S <= now:
-                    e["outcome"] = sit.resolve(e, cs, SITUATION_HORIZON_S)
+                    e["outcome"] = sit.resolve(e, ms, SITUATION_HORIZON_S)
+                    e["outcome_sym"] = sit.resolve_sym(e, ms, SITUATION_HORIZON_S)
                     if e["outcome"] is not None:
-                        _situation_append({"ts": e["ts"], "outcome": e["outcome"]})   # 해결 줄 -- 재기동 뒤에도 남는다
+                        _situation_append({"ts": e["ts"], "outcome": e["outcome"],
+                                           "outcome_sym": e.get("outcome_sym")})   # 해결 줄 -- 재기동 뒤에도 남는다
 
     async def api_situation(request: web.Request) -> web.Response:
         log = situation_state["log"]
         return web.json_response({"now": situation_state["now"], "computed_at": situation_state["computed_at"],
-                                  "recent": [{k: e.get(k) for k in ("ts", "mid", "dir", "prob", "outcome", "flips_on")} for e in log[-12:]],
+                                  "recent": [{k: e.get(k) for k in ("ts", "mid", "dir", "prob", "outcome", "outcome_sym", "flips_on")} for e in log[-12:]],
                                   "calibration": sit.calibration(log),
                                   "streams": {"fo": dict(fo_state), "mp": dict(mp_state)}}, headers=NOCACHE)
 
