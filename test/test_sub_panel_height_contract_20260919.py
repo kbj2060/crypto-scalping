@@ -31,16 +31,11 @@ def test_heights_match_between_js_and_css():
     legend = _num(r"const SUB_LEGEND_H = subOn \? (\d+)", JS, "SUB_LEGEND_H")
     total = gap + prof + legend + gap + one_s          # = app.js 의 SUB_TOTAL
 
-    # 레인 5종(거래대금·델타/CVD·OI·수급·청산)과 그 간격. 데스크톱 값으로 센다.
-    lanes = (_num(r"LIQ_PANEL_H = mobileChart \? \d+ : (\d+)", JS, "LIQ_PANEL_H")
-             + _num(r"LIQ_PANEL_GAP = (\d+)", JS, "LIQ_PANEL_GAP")
-             + _num(r"OI_PANEL_H = oiBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "OI_PANEL_H")
-             + _num(r"OI_PANEL_GAP = oiBars\.length \? (\d+)", JS, "OI_PANEL_GAP")
-             + _num(r"SUP_PANEL_H = fpBars\.length \? (\d+)", JS, "SUP_PANEL_H")
-             + _num(r"SUP_PANEL_GAP = fpBars\.length \? (\d+)", JS, "SUP_PANEL_GAP")
-             + _num(r"TURN_H = fpBars\.length \? (\d+)", JS, "TURN_H")
-             + _num(r"DCVD_H = fpBars\.length \? (\d+)", JS, "DCVD_H")
-             + 2 * _num(r"FLOW_GAP = fpBars\.length \? (\d+)", JS, "FLOW_GAP"))
+    # 2026-09-22 레인 5종 -> 두 행(사분면 + 누적 CVD). 데스크톱 값으로 센다.
+    lanes = (_num(r"QUAD_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "QUAD_H")
+             + _num(r"QUAD_TXT = \(fpBars\.length && QUAD_TEXT_OK\) \? \(mobileChart \? \d+ : (\d+)\)", JS, "QUAD_TXT")
+             + _num(r"CUM_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "CUM_H")
+             + 2 * _num(r"LANE_GAP = fpBars\.length \? (\d+)", JS, "LANE_GAP"))
 
     # 🔴가격 플롯(ch)은 «나머지»다. 이 계약은 그 나머지가 얼마로 남는지를 고정한다 --
     #   상자만 줄이거나 레인만 키우면 캔들이 **조용히** 눌린다(그게 이 검사의 이유다).
