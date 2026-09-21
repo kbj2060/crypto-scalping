@@ -144,7 +144,9 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
             sig = "동조" if _sign(wn) == _sign(rn) and wn != 0 else "중립"
         labels.append(f"현재 봉 {sig} (고래 {wn:+.0f} · 리테일 {rn:+.0f}"
                       + (f" · OI {oc:+.0f}" if oc is not None else "") + ")")
-    ev["cur_sig"] = sig
+    # 🔴판정 결과(cur_sig)만 남기면 나중에 CUR_MIN_ELAPSED_S·부호 규칙을 바꿔볼 수 없다 -- 원본을 같이 남긴다
+    ev.update(cur_sig=sig, cur_elapsed_s=cur.get("elapsed_s"), cur_whale=cur.get("whale_net"),
+              cur_retail=cur.get("retail_net"), cur_oi=cur.get("oi_delta"))
 
     # ── 호가 질 ──
     book = inp.get("book") or {}
@@ -182,7 +184,9 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     hot = act is not None and act >= ACT_HOT
     if hot:
         labels.append(f"활발 (시간대 상위 {100 - int(act * 100)}%) · 큰 움직임 임박")
-    ev.update(near_res=near_res, near_sup=near_sup, no_cushion=bool(no_cushion), hot=hot)
+    # near_*/no_cushion/hot 은 전부 임계 통과 결과다. 원본(거리·활동분위)이 없으면 임계를 못 바꾼다.
+    ev.update(near_res=near_res, near_sup=near_sup, no_cushion=bool(no_cushion), hot=hot,
+              act_pct=act, res_bp=res_bp, sup_bp=sup_bp)
 
     # ── 펀딩 · 베이시스 (마크가격 스트림) ──
     dv = inp.get("deriv") or {}
@@ -194,7 +198,8 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
         labels.append(f"펀딩 {fr * 100:+.4f}%" + {1: " (롱 쏠림)", -1: " (숏 쏠림)", 0: ""}[crowd] + (" · 갇힘" if trapped else "")
                       + (f" · 베이시스 {bas:+.1f}bp" if bas is not None else "")
                       + (f" (창 {bd:+.1f} · " + {1: "선물 주도", -1: "현물 주도", 0: "중립"}[lead] + ")" if bd is not None else ""))
-    ev.update(funding=fr, crowd=crowd, trapped=trapped, basis_bp=bas, basis_d_bp=bd, lead=lead)
+    ev.update(funding=fr, crowd=crowd, trapped=trapped, basis_bp=bas, basis_d_bp=bd, lead=lead,
+              basis_thr_bp=bthr)   # 임계(링 p75)도 남긴다 -- lead 만으론 분위를 재조정할 수 없다
 
     # ── BTC 같은 창 이동 ──
     btc = inp.get("btc") or {}
@@ -352,7 +357,7 @@ def resolve(pred: dict[str, Any], candles: list[dict[str, float]], horizon_s: in
     if isinstance(tg.get("A"), (list, tuple)):    # 09-21 이전 장부(띠)는 먼 변으로 읽는다
         tg = dict(tg, A=(tg["A"][0] if d > 0 else tg["A"][1] if d < 0 else None))
     for c in candles:
-        if c["time"] < t0 or c["time"] >= t1:
+        if c["time"] <= t0 or c["time"] >= t1:
             continue
         hit = _touched(d, c, tg)
         if len(hit) > 1:
@@ -373,7 +378,7 @@ def resolve_sym(pred: dict[str, Any], candles: list[dict[str, float]], horizon_s
     if not candles or candles[0]["time"] > t0 or candles[-1]["time"] + bar_s < t1:
         return None
     for c in candles:
-        if c["time"] < t0 or c["time"] >= t1:
+        if c["time"] <= t0 or c["time"] >= t1:
             continue
         up, dn = c["high"] >= sym["up"], c["low"] <= sym["dn"]
         if up and dn:
@@ -393,7 +398,7 @@ def path_targets(pred: dict[str, Any], candles: list[dict[str, float]], horizon_
     mid, t0, t1 = pred.get("mid"), pred["ts"], pred["ts"] + horizon_s
     if not mid or not candles or candles[0]["time"] > t0 or candles[-1]["time"] + bar_s < t1:
         return None                       # resolve 와 같은 커버리지 계약(앞뒤 양쪽)
-    win = [c for c in candles if t0 <= c["time"] < t1]
+    win = [c for c in candles if t0 < c["time"] < t1]   # t0 봉은 결정 시점 체결을 품는다(경계 계약)
     if not win:
         return None
     bp = lambda px: round((px - mid) / mid * 1e4, 1)   # noqa: E731
@@ -414,12 +419,12 @@ def implied_dir(entry: dict[str, Any]) -> str | None:
     return "down" if d > 0 else "up"
 
 
-def calibration(entries: list[dict[str, Any]]) -> dict[str, Any]:
+def calibration(entries: list[dict[str, Any]], horizon_s: int = 1800) -> dict[str, Any]:
     """해결된 예측들의 «말한 확률 vs 실제 빈도»와 1순위 적중률."""
     # 'amb'(판정 불가)·목표 선점(scorable=False)·옛 스키마(sym 없음)는 뺀다. 🔴옛 스키마를 섞으면
     # 배포 직후 화면이 «가까운 변·5분봉» 결과와 새 결과를 한 숫자로 합친다(09-21 검토).
     # 표본 카운터는 **해결 전에도** 낸다 -- 첫 30분과 조용한 구간에 화면이 «몇 건 쌓였나»를 말해야 한다.
-    new = [e for e in entries if "sym" in e]
+    new = [e for e in entries if "feat" in e]   # 학습 표본의 정의 = 피쳐가 실린 줄(P1 이후)
     ts = [e["ts"] for e in new if e.get("ts")]
     out: dict[str, Any] = {
         "n": 0, "samples": len(new),
@@ -437,12 +442,15 @@ def calibration(entries: list[dict[str, Any]]) -> dict[str, Any]:
                   "happened": round(100 * sum(1 for e in done if e["outcome"] == k) / len(done))}
     # 🔴n 은 **독립 사건 수가 아니다** -- 상태가 이어지는 동안 같은 읽기가 여러 번 기록된다.
     # 에피소드(방향·1순위가 같은 연속 구간) 수를 같이 내서 검정력을 오해하지 않게 한다.
-    eps, prev = 0, None
-    for e in done:
-        key = (e.get("dir"), max(e["prob"], key=e["prob"].get))
-        if key != prev:
+    # 🔴«상태 서명이 바뀐 횟수»로 세면 1순위가 떨릴 때마다 늘어 실효 표본이 부풀려진다
+    #   (09-21 검토 실측: 7.8시간에 182개인데 겹치지 않는 30분 창은 ≤16개). 지평이 겹치는 두 예측은
+    #   같은 가격 경로를 공유하므로 **겹치지 않는 창의 수**를 센다 -- 이것이 검정력의 분모다.
+    eps, last_ts = 0, None
+    for e in sorted(done, key=lambda x: x.get("ts") or 0):
+        ts = e.get("ts") or 0
+        if last_ts is None or ts - last_ts >= horizon_s:
             eps += 1
-        prev = key
+            last_ts = ts
     out["episodes"] = eps
     top_hit = sum(1 for e in done if e["outcome"] == max(e["prob"], key=e["prob"].get))
     out["top_hit"] = round(100 * top_hit / len(done))
@@ -530,7 +538,7 @@ if __name__ == "__main__":
     flat = [dict(time=2700 + 300 * i, high=2613, low=2611, close=2612) for i in range(7)]
     assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, flat) == "none"
     assert resolve({"ts": 2700, "dir": 0, "targets": dict(r["targets"], A=None)}, flat) == "A"   # 횡보의 A 는 잔여
-    wide = [dict(time=2700, high=2630, low=2600, close=2612)] + flat[1:]
+    wide = flat[:1] + [dict(time=3000, high=2630, low=2600, close=2612)] + flat[2:]
     assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, wide) == "amb"           # 한 봉에 둘 = 판정 불가
     assert resolve({"ts": 2700, "dir": 1, "targets": {"A": [2606, 2609], "B": 2624.74, "C": 2591}}, cs) == "A"   # 옛 장부 호환
     sp = {"ts": 2700, "dir": 1, "sym": {"k": 0.5, "up": 2620.0, "dn": 2605.0}}
@@ -538,7 +546,7 @@ if __name__ == "__main__":
     assert resolve_sym({"ts": 2700, "dir": 1}, cs) is None                                   # sym 없는 옛 항목
     assert implied_dir({"dir": 1, "prob": {"A": 50, "B": 30, "C": 20}}) == "down"            # 되돌림 = 이동 반대
     assert implied_dir({"dir": -1, "prob": {"A": 20, "B": 50, "C": 30}}) == "down"           # 지속 = 이동 쪽
-    base = {"prob": r["prob"], "dir": 1, "sym": r["sym"]}
+    base = {"prob": r["prob"], "dir": 1, "sym": r["sym"], "feat": r["evidence"]}
     cal = calibration([{**base, "outcome": "A", "outcome_sym": "down"},
                        {**base, "outcome": "B", "outcome_sym": "up"},
                        {"prob": r["prob"], "outcome": "A", "dir": 1},                      # 옛 스키마(sym 없음) → 제외
@@ -546,16 +554,24 @@ if __name__ == "__main__":
     assert cal["n"] == 2 and cal["top_hit"] == 50 and cal["A"]["happened"] == 50
     assert cal["sym"] == {"n": 3, "hit": 67, "base_up": 33}   # 선점 항목도 방향 라벨은 유효 → 3건
     # 에피소드: 방향·1순위가 같은 연속 구간을 하나로 센다(같은 읽기가 여러 번 기록되므로)
-    ep = calibration([{**base, "ts": 10 * i, "outcome": "A", "outcome_sym": "down"} for i in range(5)]
-                     + [{**base, "ts": 100, "dir": -1, "outcome": "A", "outcome_sym": "down"}])
-    assert ep["n"] == 6 and ep["episodes"] == 2, (ep["n"], ep["episodes"])
-    assert ep["pending"] == 0 and ep["amb"] == 0 and ep["span_h"] == round(100 / 3600, 1) and ep["samples"] == 6
+    run = [{**base, "ts": 10 * i, "outcome": "A", "outcome_sym": "down"} for i in range(5)]
+    assert calibration(run)["episodes"] == 1, "10초 간격 5건은 한 창을 공유한다"
+    ep = calibration(run + [{**base, "ts": 2000, "dir": -1, "outcome": "A", "outcome_sym": "down"}])
+    assert ep["n"] == 6 and ep["episodes"] == 2, (ep["n"], ep["episodes"])   # 2000초 뒤라야 새 창
+    assert ep["pending"] == 0 and ep["amb"] == 0 and ep["span_h"] == 0.6 and ep["samples"] == 6, ep
     warm = calibration([{**base, "ts": 1, "outcome": None}, {**base, "ts": 2, "outcome": "amb"}])
     assert warm["n"] == 0 and warm["samples"] == 2 and warm["pending"] == 1 and warm["amb"] == 50, warm
-    assert calibration([{"ts": 1, "prob": {"A": 1}, "outcome": "A"}])["samples"] == 0        # 옛 스키마는 표본이 아니다
+    assert calibration([{"ts": 1, "prob": {"A": 1}, "outcome": "A", "sym": {}}])["samples"] == 0   # feat 없으면 표본이 아니다
+    for k in ("act_pct", "res_bp", "sup_bp", "cur_whale", "cur_retail", "cur_oi", "cur_elapsed_s", "basis_thr_bp"):
+        assert k in r["evidence"], f"임계의 원본 {k} 이 표본에 없다"                                # 소급 불가라 자체점검으로 묶는다
+    # 경계: 결정 시점이 분 경계면 그 봉을 쓰지 않는다(t 의 체결을 품는다)
+    onmin = [dict(time=2700, high=2630, low=2600, close=2612)] + [dict(time=2700 + 60 * i, high=2613, low=2611, close=2612) for i in range(1, 31)]
+    assert resolve({"ts": 2700, "dir": 1, "targets": r["targets"]}, onmin) == "none"                # 첫 봉(2700)을 무시 -> amb 아님
+    assert path_targets({"ts": 2700, "mid": 2612.0}, onmin)["up_bp"] < 10
     # 연속 타깃: 창 끝 수익·최대 상승·최대 하락. 커버리지가 모자라면 None
     pt = path_targets({"ts": 2700, "mid": 2612.0}, cs)
-    assert pt and pt["dn_bp"] < 0 < pt["up_bp"] and abs(pt["ret_bp"] - (2607 - 2612) / 2612 * 1e4) < 0.2, pt
+    assert pt and pt["dn_bp"] <= pt["ret_bp"] <= pt["up_bp"], pt
+    assert abs(pt["ret_bp"] - (2607 - 2612) / 2612 * 1e4) < 0.2, pt
     assert path_targets({"ts": 2700, "mid": 2612.0}, cs[2:]) is None      # 창 머리 없음
     assert path_targets({"ts": 2700, "mid": None}, cs) is None
     # 장부 키: 숫자만 다른 같은 상태는 같은 키, 라벨 종류가 늘면 다른 키

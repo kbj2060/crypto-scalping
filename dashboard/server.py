@@ -2565,7 +2565,11 @@ def make_app() -> web.Application:
             entries: dict[int, dict[str, Any]] = {}
             # 파일은 계속 자란다(P1 부터 피쳐까지 실린다). 꼬리만 파싱한다 -- 해결 줄은 예측 30분 뒤라
             # 같은 꼬리 안에 들어온다. 이보다 오래된 항목은 이미 해결돼 화면 창 밖이다.
-            for x in SITUATION_LOG_PATH.read_text(encoding="utf-8").splitlines()[-20 * SITUATION_LOG_KEEP:]:
+            # 🔴read_text 는 슬라이스 전에 파일 전체를 메모리에 올린다. 이 기기는 실거래 봇과 공유하고
+            #   24GB OOM 이력이 있다(2026-09-18). deque 로 **꼬리만** 들고 있는다.
+            with SITUATION_LOG_PATH.open(encoding="utf-8") as fh:
+                tail = deque(fh, maxlen=20 * SITUATION_LOG_KEEP)
+            for x in tail:
                 if not x.strip():
                     continue
                 rec = json.loads(x)
@@ -2661,8 +2665,11 @@ def make_app() -> web.Application:
                 "https://fapi.binance.com/fapi/v1/klines",
                 {"symbol": FOOTPRINT_SYMBOL, "interval": "1m", "limit": SITUATION_MINUTE_LIMIT},
                 error_reason="situation_minute_upstream_error")
+            # 🔴마지막 행은 **형성 중인 봉**이다. 그대로 두면 해결의 일부가 «t+29분+α 의 임의 시점»으로
+            #   확정되고(ret_bp 가 창 끝 종가가 아니게 된다) 마지막 수십 초의 터치를 놓친다.
+            #   해결 줄은 영속되므로 되돌릴 수 없다 -- 닫힌 봉만 쓴다.
             return [{"time": int(r[0]) // 1000, "high": float(r[2]), "low": float(r[3]), "close": float(r[4])}
-                    for r in raw]
+                    for r in raw[:-1]]
         # max_stale: 바이낸스가 느리면 **직전 값을 내주고 뒤에서 갱신**한다. 없으면 1초 루프가
         # 매초 왕복을 기다려 미시 참고까지 같이 멈춘다(09-21 검토).
         return await swr_cached("situation_minutes", 20.0, produce, max_stale=STALE_GRACE_SECONDS)
@@ -2725,7 +2732,7 @@ def make_app() -> web.Application:
         log = situation_state["log"]
         return web.json_response({"now": situation_state["now"], "computed_at": situation_state["computed_at"],
                                   "recent": [{k: e.get(k) for k in ("ts", "mid", "dir", "prob", "outcome", "outcome_sym", "flips_on")} for e in log[-12:]],
-                                  "calibration": sit.calibration(log),
+                                  "calibration": sit.calibration(log, SITUATION_HORIZON_S),
                                   "streams": {"fo": dict(fo_state), "mp": dict(mp_state)}}, headers=NOCACHE)
 
     async def load_chart_klines_frames() -> dict[str, Any]:

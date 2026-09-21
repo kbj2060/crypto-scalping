@@ -3394,7 +3394,7 @@ function renderSituation() {
   //   «가장 가까운 목표가 이긴다»가 섞인다(09-21 실측 81%). 동전 = 50%.
   // P1: 학습 표본이 얼마나 쌓였나. 🔴n 은 독립 사건 수가 아니라서 «에피소드»를 같이 보여준다.
   const sampleLine = c.n
-    ? `표본 <b>${c.n}</b>건 해결 · 에피소드 <b>${c.episodes}</b> · 연속타깃 ${c.with_path} · 해결대기 ${c.pending} · 판정불가 ${c.amb}% · 최근 ${c.span_h}시간`
+    ? `표본 <b>${c.samples}</b>건 · 해결 ${c.n} · <b>독립창 ${c.episodes}</b>(겹치지 않는 30분) · 연속타깃 ${c.with_path} · 대기 ${c.pending} · 판정불가 ${c.amb}% · 최근 ${c.span_h}시간`
     : c.samples
       ? `표본 ${c.samples}건 기록 · 해결대기 ${c.pending} (첫 해결은 예측 30분 뒤)`
       : "표본: 기록 시작 대기";
