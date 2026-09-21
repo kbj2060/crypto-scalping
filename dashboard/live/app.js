@@ -221,7 +221,8 @@ let supplyProfileSubBox = null;
 // 🔴현재가는 판번호에 넣지 않는다 -- 그 한 줄만 updateSupplyProfileNow 가 transform 으로
 //   따로 옮긴다(원래 설계). 넣으면 틱마다 캐시가 깨져 이 최적화가 통째로 무효가 된다.
 let supplyProfileVer = 0, supply1sVer = 0, flowHeatmapVer = 0;
-const subPanelCache = { prof: { node: null, key: "" }, s1: { node: null, key: "" } };
+const subPanelCache = { prof: { node: null, key: "" }, s1: { node: null, key: "" },
+                        dens: { node: null, key: "" } };
 const subProfileKey = (entry, w, h) => `${supplyProfileVer}|${flowHeatmapVer}|${entry}|${w}|${h}`;
 const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}`;
 
@@ -2848,23 +2849,6 @@ function updateSnapshotCandleLive() {
   }
 }
 
-// 청산 밀도 가이드 (2026-09-09: SVG 인셋 -> 차트 위 HTML). 그라디언트는 DENSITY_STOPS 에서
-// 바로 만든다 -- CSS 에 사본을 두면 둘이 어긋나도 아무도 모른다(2026-09-12 에 실제로 겪음).
-const densityLegendGradient = () => "linear-gradient(90deg, "
-  + densityStops().map(([t, c]) => `rgb(${c[0]},${c[1]},${c[2]}) ${t * 100}%`).join(", ") + ")";
-
-function renderLiqDensityLegend(hasDensity) {
-  const host = el("liqDensityLegend");
-  if (!host) return;
-  if (host.hidden !== !hasDensity) host.hidden = !hasDensity;   // 같은 값은 쓰지 않는다
-  if (!hasDensity) { if (host.innerHTML) host.innerHTML = ""; return; }
-  const html = `<span class="liq-density-legend-title">청산 밀도</span>`
-    + `<span class="liq-density-legend-scale"><span class="liq-density-legend-end">낮음</span>`
-    + `<span class="liq-density-legend-bar" style="background:${densityLegendGradient()}"></span>`
-    + `<span class="liq-density-legend-end">높음</span></span>`;
-  if (host.innerHTML !== html) host.innerHTML = html;
-}
-
 // ── 현재가 빠른 갱신 (2026-09-16) ──────────────────────────────────────────────
 // 왜 브라우저가 직접 WS 를 여는가: 서버 경유 경로의 상한은 SSE 주기(1초)다. 현재가 선은
 // «지금 값»이라 1초도 느리게 보인다. 공개 스트림이라 인증이 없고, 브라우저 -> 바이낸스 직결이
@@ -4375,7 +4359,6 @@ function renderSnapshotChart() {
   //   확인 없이 바꾸려다 조용히 실패했던 자리다.
   renderCandleSvg(svg, candles, [], entryPrice, currentPrice, riskLevels,
     densityHistory, latestLiquidation5mHist, footprint);
-  renderLiqDensityLegend((densityHistory || []).length > 0);
 }
 
 // wide24/GBM3 regime overlay -- drawn as a ribbon INSIDE renderCandleSvg() itself (2026-08-26,
@@ -4426,7 +4409,7 @@ function fmtDateTick(ts) {
 // 27.8 뿐이라 파랑이 아니라 검정으로 읽힌다. 그래서 바닥을 올리고 t=0 부터 보간시킨다.
 // 합성 후 배경거리 49.3 · 휘도 단조 3.3 -> 6.4 -> 12.9 -> 23.1
 // 캔들색 이격(합성 후 RGB 유클리드, 전 구간 60 이상): 초록 #5abc80 최소 75 · 빨강 #d4786c 최소 148
-// 범례는 densityLegendGradient() 가 이 배열에서 만든다 -- 색 사본을 다른 곳에 두지 않는다.
+// 범례(캔들 SVG 안, 프로파일 아래 줄)도 이 배열에서 만든다 -- 색 사본을 다른 곳에 두지 않는다.
 // 🔴2026-09-21 **테마별로 갈랐다 -- 라이트에서 척도가 뒤집혀 있었다.**
 // 색표가 하나뿐이라 «어두운 남색 -> 밝은 파랑» 을 두 배경에 같이 썼는데, 그러면
 // 라이트(실효 배경 rgb(236,240,246))에서 **밀도가 낮을수록 진하게** 보인다.
@@ -4435,7 +4418,7 @@ function fmtDateTick(ts) {
 //     라이트 t=0 6.79 -> t=1 2.19   **역전** 🔴 (0.32x)  ← 사용자 스크린샷의 진한 블록이 이것
 // 규칙은 하나다: **밀도가 높을수록 배경 대비가 강하다.** 그걸 배경마다 다른 색으로 구현한다.
 //     라이트 신규 t=0 1.13 -> t=1 6.56 단조 증가 ✅ (5.79x)
-// 범례(densityLegendGradient)도 같은 배열에서 만들므로 자동으로 따라간다 -- 색 사본을
+// 범례도 같은 배열(densityStops)에서 만들므로 자동으로 따라간다 -- 색 사본을
 // 다른 곳에 두지 않는다는 기존 규약 그대로다.
 const DENSITY_STOPS_DARK = [
   [0.0, [34, 56, 84]],
@@ -4531,12 +4514,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-20 1초 수급 100 -> 150 (사용자 요청 "좀 더 키워줘"). 상자도 706 -> 756 으로
 //   같이 키운다 -- 안 그러면 가격 플롯이 그만큼 눌린다(아래 경고 블록).
   const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 150 : 0;
+  // 2026-09-21 청산 밀도 범례를 헤더 행에서 **여기로** 옮겼다(아티팩트 댓글).
+  //   «풋프린트 차트 바로 위와 프로파일 바닥글 사이». 밀도는 이제 풋프린트의 배경이라
+  //   범례가 헤더에 있으면 설명하는 그림에서 멀다. 글자 크기도 바닥글과 같은 9 로 맞췄다.
+  const SUB_LEGEND_H = subOn ? 14 : 0;
   // 2026-09-19 히트맵은 프로파일 **아래 제 줄**이다(사용자 지시). 좌우 반씩 나누던 판을
   // 되돌렸다 -- 프로파일 막대 해상도가 절반이 됐고, 두 패널의 자연 가격범위가 15배 달라
   // (호가 ±2.4% vs 체결 ±0.16%) 나란히 둘 이유였던 «같은 축»도 성립하지 않았다.
   // ⭐데스크톱·모바일이 같은 모양이 되므로 subStack 분기가 통째로 사라진다.
   //   SUB_TOTAL 356 = 8 + 150(1초 수급) + 8 + 190(프로파일)   ← 2026-09-20 위아래 뒤집힘
-  const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_GAP + SUB_1S_H : 0;
+  const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H : 0;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
   //   빼기 때문). 인라인 height 로 JS 가 상자를 정하는 방법은 쓰지 않는다 -- 2열에서는 상자가
@@ -4545,8 +4532,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   if (SUB_TOTAL > 0 && h < 400 + SUB_TOTAL - 2 && !renderCandleSvg._subBoxWarned) {
     renderCandleSvg._subBoxWarned = true;
     console.warn(`캔들 상자가 ${Math.round(h)}px 인데 수급 패널이 ${SUB_TOTAL}px 를 쓴다 -- `
-      + `styles.css 의 #candleSvgSnapshot ${400 + SUB_TOTAL}px / .candle-container `
-      + `${412 + SUB_TOTAL}px 로 맞추세요(그만큼 가격 플롯이 눌립니다).`);
+      + `styles.css 의 #candleSvgSnapshot ${400 + SUB_TOTAL + 55}px / .candle-container `
+      + `${412 + SUB_TOTAL + 55}px 로 맞추세요(그만큼 가격 플롯이 눌립니다).`
+      + " (55 = 거래대금 15 + 델타·CVD 28 + 간격 12)");
   }
 
   // 2026-09-20 아티팩트 댓글: 수급(1초)을 1h/2h/4h 버튼 **바로 아래**로 올리고 그 아래에
@@ -4616,6 +4604,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 「체결 계열」 둘은 여전히 이웃한다. OI·청산 레인은 플롯 바로 아래 그대로다.
   const sub1sY = mtTop;
   const subProfileY = sub1sY + SUB_1S_H + SUB_GAP;
+  const subLegendY = subProfileY + SUB_PROFILE_H;
   const turnPanelY = plotBottom + FLOW_GAP;
   const dcvdPanelY = turnPanelY + TURN_H + FLOW_GAP;
   const oiPanelY = dcvdPanelY + DCVD_H + OI_PANEL_GAP;
@@ -5631,7 +5620,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   기존에는 SVG 안 오른쪽 위 인셋(backing 이 y=0..34)이라, 같은 자리에 새로 생긴
   //   증거신호 **천장 레인**(당시 y=mt+3, 2026-09-11 에 mt-3-LANE_H 로 이동)을 덮었다.
   //   차트 높이를 잃으므로(모바일 -8%) 아예 SVG 밖으로 뺀다.
-  //   렌더는 renderLiqDensityLegend() -- index.html 의 #liqDensityLegend 를 채운다.
+  //   렌더는 캔들 SVG 안, 프로파일 바닥글 바로 아래 줄이다(2026-09-21 아티팩트 댓글).
 
   // Create Hover Layer on Top
   const hoverGroup = document.createElementNS(NS, "g");
@@ -6221,11 +6210,63 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       svg: subSvg("s1", 0, sub1sY, w, SUB_1S_H, sub1sKey(w, SUB_1S_H),
                   (g) => renderSupply1s({ svg: g, w, h: SUB_1S_H })),
       w, h: SUB_1S_H };
+    // ── 청산 밀도 범례 (2026-09-21 아티팩트 댓글) ────────────────────────────
+    // 전에는 헤더 행의 HTML(#liqDensityLegend)이었다. 밀도가 풋프린트의 **배경**이 된
+    // 뒤로는 설명하는 그림에서 멀어졌으므로 프로파일 바닥글과 풋프린트 사이로 내렸다.
+    // 글자 9 = 바닥글과 같은 크기(사용자 지시).
+    // 🔴그라디언트는 densityStops() 에서 바로 만든다 -- 사본을 두면 히트맵과 어긋나도
+    //   아무도 모른다(2026-09-12 에 실제로 겪었다).
+    if (SUB_LEGEND_H && (densityHistory || []).length) {
+      const lg = subSvg("dens", 0, subLegendY, w, SUB_LEGEND_H,
+                        "dens|" + w + "|" + SUB_LEGEND_H, (g) => {
+        const stops = densityStops();
+        const defs = document.createElementNS(NS, "defs");
+        const grad = document.createElementNS(NS, "linearGradient");
+        grad.setAttribute("id", "liqDensLegendGrad");
+        stops.forEach(([t, c]) => {
+          const st = document.createElementNS(NS, "stop");
+          st.setAttribute("offset", (t * 100) + "%");
+          st.setAttribute("stop-color", `rgb(${c[0]},${c[1]},${c[2]})`);
+          grad.appendChild(st);
+        });
+        defs.appendChild(grad); g.appendChild(defs);
+        const yMid = SUB_LEGEND_H / 2;
+        let x = ml;
+        const txt = (tx, str) => {
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", tx); t.setAttribute("y", yMid + 3);
+          t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)");
+          t.textContent = str; g.appendChild(t);
+          return str.length * 6.2;
+        };
+        x += txt(x, "청산 밀도") + 10;
+        x += txt(x, "낮음") + 4;
+        const bar = document.createElementNS(NS, "rect");
+        bar.setAttribute("x", x); bar.setAttribute("y", yMid - 3);
+        bar.setAttribute("width", 160); bar.setAttribute("height", 6);
+        bar.setAttribute("rx", "1");
+        bar.setAttribute("fill", "url(#liqDensLegendGrad)");
+        g.appendChild(bar);
+        x += 164;
+        txt(x, "높음");
+        const tip = document.createElementNS(NS, "title");
+        tip.textContent = "아래 풋프린트 차트의 **배경 띠** 색입니다 -- 그 가격대에 쌓인"
+          + " 청산 예상 물량이 많을수록 진합니다. 색은 히트맵과 같은 densityStops() 에서"
+          + " 바로 만들어 둘이 어긋날 수 없습니다.";
+        g.appendChild(tip);
+      });
+      lg.style.pointerEvents = "none";   // 아래 캔들 툴팁을 가리지 않는다
+    } else {
+      subPanelCache.dens.key = "";
+      if (subPanelCache.dens.node && subPanelCache.dens.node.parentNode) {
+        subPanelCache.dens.node.parentNode.removeChild(subPanelCache.dens.node);
+      }
+    }
   } else {
     // 다른 코인·웜업이면 자리를 안 잡는다. 캐시 키를 비워 두지 않으면 ETH 로 돌아왔을 때
     // 낡은 그림이 «맞는 판»으로 다시 붙는다.
     supplyProfileSubBox = supply1sSubBox = null;
-    subPanelCache.prof.key = subPanelCache.s1.key = "";
+    subPanelCache.prof.key = subPanelCache.s1.key = subPanelCache.dens.key = "";
   }
 }
 
