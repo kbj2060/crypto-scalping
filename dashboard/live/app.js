@@ -3582,7 +3582,9 @@ function renderSupply1s(box = null) {
   const narrow = w < 760;   // 모바일이든 좁은 상자든 여백 규칙은 같다
   // mr 은 오른쪽 꼬리표(고래/리테일/신규계약 + 값)가 앉는 자리다. 64 면 «신규계약 +0.4k»
   // 가 약 4px 넘친다(2026-09-19 계산) -- 72 로 두면 셋 다 들어가고 선은 8px 만 짧아진다.
-  const ml = narrow ? 34 : 45, mr = narrow ? 72 : 112;
+  // 2026-09-22 꼬리표 글자를 키우면서 자리도 넓혔다(사용자 «많이 키워줘»).
+  //   112 -> 150 은 선이 38px(플롯 폭의 3%) 짧아지는 대가다. 글자가 잘리는 것보다 낫다.
+  const ml = narrow ? 34 : 45, mr = narrow ? 88 : 150;
   const cw = w - ml - mr;
   const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
@@ -3830,11 +3832,21 @@ function renderSupply1s(box = null) {
   //   4,734) 축을 나눌 이유가 없다 -- 나누면 세로 위치에 뜻이 없어진다. 합치면
   //   「매도 주도인데 미결제약정이 늘었다 = 신규 숏」이 한 눈에 읽힌다.
   // 갱신 간격이 3~7초라 체결선의 5초 절단을 그대로 쓰면 조각난다. 20초를 쓴다.
-  // 🔴CVD 와 겹치는 구간에서 구별이 안 됐다(실렌더). 굵기·농도·점선 간격을 모두 벌린다:
-  //   CVD 는 «굵은 실선」, 신규계약은 «가는 점선».
-  if (oiRows.length >= 2) line(pathOf(oiRows, (r) => yF(r.v), 20), "var(--neutral)", 1, 0.45, "2 3");
+  // 2026-09-22 사용자 지시로 **굵은 주황 실선**(CVD 와 같은 굵기 2). 가는 점선일 때는
+  //   CVD 와 겹치면 구별이 안 됐는데, 이제 색이 가른다 -- 주황은 이 차트에서 신규계약 하나뿐이다.
+  if (oiRows.length >= 2) line(pathOf(oiRows, (r) => yF(r.v), 20), "var(--warn)", 2, 0.95);
   // 맨 위 윤곽이 곧 CVD 다. 중립 강조색이라 층의 방향색과 안 싸운다.
   line(pathOf(cvd, (r) => yF(r.v)), "var(--accent)", 2, 1);
+
+  // 2026-09-22 사용자 «많이 키워줘». 10/11px 는 400px 짜리 판 옆에서 너무 작았다.
+  //   ⭐크기를 상수로 박지 않고 **한 곳에서 파생**시킨다 -- 줄 간격·색표·들여쓰기가 전부
+  //     글자 크기를 따라가야 키울 때마다 셋을 같이 고치는 일이 안 생긴다.
+  //   🔴선언이 **아래 판 그리기보다 위**여야 한다 -- 거기서도 LBL 을 쓰고 const 는 TDZ 라
+  //     아래에 두면 런타임 ReferenceError 다(node --check 는 못 잡는다).
+  const LBL = narrow ? 12 : 15;                 // 범례 본문
+  const LBL_HEAD = narrow ? 15 : 19;            // CVD (한 단계 위)
+  const STEP = Math.round(LBL * 1.34);          // 줄 간격
+  const SW = Math.round(LBL * 0.55);            // 색표 한 변
 
   // ── 아래 판: 그 초에 일어난 일 ────────────────────────────────────────────
   // 🔴거래대금은 √ 스케일이다. 실측 초당 중앙 $60k / 최대 $3.93M -- **65배**라
@@ -3869,11 +3881,11 @@ function renderSupply1s(box = null) {
       g.setAttribute("stroke", "var(--neutral)"); g.setAttribute("stroke-opacity", "0.3");
       g.setAttribute("stroke-dasharray", "2 4");
       svg.appendChild(g);
-      label(ml + cw + 5, divY + 21, "┄ p90 " + fmtUsdCompact(p90) + "/초", "var(--muted)");
+      label(ml + cw + 5, divY + LBL * 2 + 6, "p90 " + fmtUsdCompact(p90) + "/초", "var(--muted)", null, LBL);
     }
     // 「거래대금 $773.1k」는 72px 자리를 넘어 **잘렸다**. 좁으면 숫자만 남긴다.
-    label(ml + cw + 5, divY + 10, (narrow ? "" : "거래대금 ")
-          + fmtUsdCompact(sorted.reduce((a, b) => a + b, 0)), "var(--muted)");
+    label(ml + cw + 5, divY + LBL, (narrow ? "" : "거래대금 ")
+          + fmtUsdCompact(sorted.reduce((a, b) => a + b, 0)), "var(--muted)", null, LBL);
   }
   // 청산: 크기를 가진 점. **로그**다 -- 실측 건당 중앙 0.86 / p99 270 / 최대 2,556 ETH 라
   //   선형이면 큰 것 하나가 나머지를 점으로 만들고, √ 로도 모자란다.
@@ -3893,10 +3905,10 @@ function renderSupply1s(box = null) {
       c.appendChild(t);
       svg.appendChild(c);
     });
-    label(ml + cw + 5, cy + 3,
+    label(ml + cw + 5, cy + LBL / 2 - 1,
           narrow ? "청산 " + qty(liqSum[0] + liqSum[1])
                  : "청산 롱" + qty(liqSum[0]) + "/숏" + qty(liqSum[1]),
-          liqSum[1] >= liqSum[0] ? "var(--good)" : "var(--bad)");
+          liqSum[1] >= liqSum[0] ? "var(--good)" : "var(--bad)", null, LBL);
   }
 
   // ── 범례 (고정 블록) ──────────────────────────────────────────────────────
@@ -3904,30 +3916,23 @@ function renderSupply1s(box = null) {
   //   (리테일 -559 는 축의 5.6%) 끝점 y 로 놓으면 층끼리 글자가 겹친다. 예전엔 그걸
   //   정렬·밀어내기로 막았는데, 자리가 고정이면 그 기계 자체가 필요 없다.
   const lx = ml + cw + 5;
-  label(lx, flowTop + 11, "CVD " + (cvd[cvd.length - 1].v >= 0 ? "+" : "-")
-        + qty(cvd[cvd.length - 1].v), "var(--ink)", null, 11);
-  [["고래", whale[whale.length - 1].v, cW, 0.63],
-   ["중형", cvd[cvd.length - 1].v - whale[whale.length - 1].v - retail[retail.length - 1].v, cM, 0.49],
-   ["리테일", retail[retail.length - 1].v, cR, 0.38]].forEach((row, i) => {
-    const y = flowTop + 25 + i * 12;
+  const sgn = (v) => (v >= 0 ? "+" : "-") + qty(v);
+  label(lx, flowTop + LBL_HEAD, "CVD " + sgn(cvd[cvd.length - 1].v), "var(--ink)", null, LBL_HEAD);
+  const rows = [["고래", whale[whale.length - 1].v, cW, 0.63],
+                ["중형", cvd[cvd.length - 1].v - whale[whale.length - 1].v - retail[retail.length - 1].v, cM, 0.49],
+                ["리테일", retail[retail.length - 1].v, cR, 0.38]];
+  if (oiRows.length >= 2) {
+    rows.push([narrow ? "OI" : "신규", oiRows[oiRows.length - 1].v, "var(--warn)", 0.95]);
+  }
+  rows.forEach((row, i) => {
+    const y = flowTop + LBL_HEAD + 8 + (i + 1) * STEP;
     const sw = document.createElementNS(NS, "rect");
-    sw.setAttribute("x", lx); sw.setAttribute("y", y - 6);
-    sw.setAttribute("width", 6); sw.setAttribute("height", 6);
+    sw.setAttribute("x", lx); sw.setAttribute("y", y - SW);
+    sw.setAttribute("width", SW); sw.setAttribute("height", SW);
     sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
     svg.appendChild(sw);
-    label(lx + 9, y, row[0] + " " + (row[1] >= 0 ? "+" : "-") + qty(row[1]), "var(--muted)");
+    label(lx + SW + 4, y, row[0] + " " + sgn(row[1]), "var(--muted)", null, LBL);
   });
-  if (oiRows.length >= 2) {
-    const y = flowTop + 61;
-    const g = document.createElementNS(NS, "line");
-    g.setAttribute("x1", lx); g.setAttribute("x2", lx + 6);
-    g.setAttribute("y1", y - 3); g.setAttribute("y2", y - 3);
-    g.setAttribute("stroke", "var(--neutral)"); g.setAttribute("stroke-width", "1.3");
-    g.setAttribute("stroke-opacity", "0.62"); g.setAttribute("stroke-dasharray", "3 2");
-    svg.appendChild(g);
-    const end = oiRows[oiRows.length - 1].v;
-    label(lx + 9, y, (narrow ? "OI " : "신규 ") + (end >= 0 ? "+" : "-") + qty(end), "var(--muted)");
-  }
 
   // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
   label(ml + 2, mt - 5, "이번 5분봉 누적 순수급 ETH"
@@ -4749,7 +4754,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 되돌렸다 -- 프로파일 막대 해상도가 절반이 됐고, 두 패널의 자연 가격범위가 15배 달라
   // (호가 ±2.4% vs 체결 ±0.16%) 나란히 둘 이유였던 «같은 축»도 성립하지 않았다.
   // ⭐데스크톱·모바일이 같은 모양이 되므로 subStack 분기가 통째로 사라진다.
-  //   SUB_TOTAL 356 = 8 + 150(1초 수급) + 8 + 190(프로파일)   ← 2026-09-20 위아래 뒤집힘
+  //   SUB_TOTAL 620 = 190(프로파일) + 8 + 400(1초 수급) + 14(밀도 범례) + 8
+  //   ← 2026-09-20 뒤집었다가 2026-09-22 다시 프로파일이 위로(사용자 지시)
   const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H : 0;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
@@ -4837,11 +4843,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const ch = h - mt - mb - LIQ_PANEL_H - LIQ_PANEL_GAP - OI_PANEL_H - OI_PANEL_GAP
              - SUP_PANEL_H - SUP_PANEL_GAP - TURN_H - DCVD_H - 2 * FLOW_GAP;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
-  // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). 1초 수급이 먼저, 프로파일이 그 아래 --
-  // 「체결 계열」 둘은 여전히 이웃한다. OI·청산 레인은 플롯 바로 아래 그대로다.
-  const sub1sY = mtTop;
-  const subProfileY = sub1sY + SUB_1S_H + SUB_GAP;
-  const subLegendY = subProfileY + SUB_PROFILE_H;
+  // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). OI·청산 레인은 플롯 바로 아래 그대로다.
+  // 2026-09-22 위아래를 뒤집었다(사용자 지시): **프로파일이 먼저, 1초 수급이 그 아래**.
+  // 🔴청산밀도 범례는 프로파일을 **따라 올라가지 않는다**. 그건 풋프린트(가격 플롯)의 배경을
+  //   설명하는 것이라 그 바로 위에 있어야 한다(SUB_LEGEND_H 주석의 «풋프린트 차트 바로 위»).
+  //   프로파일에 붙여 올리면 설명하는 그림에서 400px 멀어진다.
+  // 소비 합 = SUB_TOTAL: 190(프로파일) + 8 + 400(1초) + 14(범례) + 8 = 620.
+  const subProfileY = mtTop;
+  const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
+  const subLegendY = sub1sY + SUB_1S_H;
   const turnPanelY = plotBottom + FLOW_GAP;
   const dcvdPanelY = turnPanelY + TURN_H + FLOW_GAP;
   const oiPanelY = dcvdPanelY + DCVD_H + OI_PANEL_GAP;
