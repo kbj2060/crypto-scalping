@@ -12,20 +12,23 @@ const run = (body, now, { asset = "eth", footprint = true } = {}) => {
   return eval(LV + "\n" + body);
 };
 const TREND = { ok: true, prob: { A: 56, B: 26, C: 18 }, evidence: { range_bp: 47 },
-                targets: { A: 2700, B: 2716.15, C: null } };            // C 는 선점됨
+                targets: { A: 2700, B: 2716.15, C: null },              // C 는 선점됨
+                targets_raw: { A: 2700, B: 2716.15, C: 2634.2 } };
 
 // ── 가격선 ──
 let r = run("situationTargetLevels(true);", TREND);
-assert.equal(r.length, 2, "선점된 C 가 그려졌다");
-// 확률은 왼쪽 라벨이 아니라 **오른쪽 배지 안**(sub)에 들어간다 -- 왼쪽은 비운다
-assert.deepEqual(r.map((x) => x.sub), ["56%", "26%"]);
+// 지나간 목표도 그린다(2026-09-22) -- 다만 흐리게, 확률 자리에 «지남»
+assert.equal(r.length, 3, "지나간 목표가 빠졌다");
+assert.deepEqual(r.map((x) => x.sub), ["56%", "26%", "지남"]);
+assert.deepEqual(r.map((x) => !!x.faded), [false, false, true], "지나간 것만 흐려야 한다");
+assert.equal(r[2].val, 2634.2, "지나간 목표는 targets_raw 의 가격을 쓴다");
 assert.ok(r.every((x) => x.label === ""), "왼쪽 라벨이 남아 있다");
-assert.deepEqual(r.map((x) => x.scenario), ["A", "B"]);
+assert.deepEqual(r.map((x) => x.scenario), ["A", "B", "C"]);
 assert.ok(r.every((x) => x.marker === true), "풋프린트인데 선으로 그린다");
 assert.ok(r.every((x) => !/accent|amber|good|bad|liq-/.test(x.color)), "예약색을 썼다");
 assert.ok(run("situationTargetLevels(false);", TREND).every((x) => !x.marker), "청산맵인데 삼각형");
 assert.equal(run("situationTargetLevels(true);", TREND, { asset: "btc" }).length, 0, "비ETH");
 assert.equal(run("situationTargetLevels(true);", { ok: true, prob: { A: 1, B: 1, C: 1 },
-  targets: { A: [2600, 2610], B: 0, C: 2590 } }).length, 1, "배열/0 목표를 걸러야 한다");
+  targets: { A: [2600, 2610], B: 0, C: 2590 } }).length, 1, "배열/raw 없는 목표를 걸러야 한다");
 
 console.log("모두 통과");

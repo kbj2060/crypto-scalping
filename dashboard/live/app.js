@@ -2811,17 +2811,22 @@ function liquidationDensityHistory() {
 // 🔴왼쪽 라벨은 안 쓴다. 확률은 **오른쪽 배지 안**에 가격과 같이 넣는다(2026-09-22 사용자)
 //   -- 왼쪽 여백이 45px 뿐이라 둘을 다 못 담고, 가격과 확률은 어차피 같이 읽는 한 쌍이다.
 //   이름은 바로 아래 카드에 같은 숫자와 함께 있어 짝이 분명하다.
-// 🔴선점된 목표(null)는 뺀다 -- 이번 창에 일어날 수 없는 자리라 «아직 갈 곳»으로 읽힌다.
+// 🔴선점된 목표도 **그린다**(2026-09-22 사용자 «지났어도 라벨은 표시해줘»). targets 는 null
+//   이지만 targets_raw 에 원래 기하값이 남아 있다. 다만 «아직 갈 곳»으로 읽히면 안 되므로
+//   흐리게(faded) 그린다 -- 삼각형·배지·글자가 다 반투명이 되고, 확률 자리에 «지남»이 온다.
 function situationTargetLevels(footprint) {
   const n = (latestSituation || {}).now;
   if (!n || !n.ok || activeSnapshotAsset !== "eth") return [];
   const out = [];
   for (const k of ["A", "B", "C"]) {
-    const v = (n.targets || {})[k];
-    if (Array.isArray(v) || !(Number(v) > 0)) continue;
+    const live = (n.targets || {})[k], raw = (n.targets_raw || {})[k];
+    if (Array.isArray(live)) continue;                 // 09-21 이전 장부의 «띠»
+    const passed = !(Number(live) > 0);
+    const v = passed ? raw : live;
+    if (!(Number(v) > 0)) continue;
     out.push({ val: Number(v), color: "var(--muted)", label: "",
-               sub: `${Number((n.prob || {})[k]) || 0}%`,
-               dashed: true, width: 1, marker: !!footprint, scenario: k });
+               sub: passed ? "지남" : `${Number((n.prob || {})[k]) || 0}%`,
+               faded: passed, dashed: true, width: 1, marker: !!footprint, scenario: k });
   }
   return out;
 }
@@ -3302,6 +3307,8 @@ function renderSituation() {
   const ARROW = n.dir > 0 ? { A: "↓", B: "↑", C: "↓↓" }
             : n.dir < 0 ? { A: "↑", B: "↓", C: "↑↑" }
             : { A: "↔", B: "↑", C: "↓" };
+  // 🔴2026-09-22 표 -> **3열**(시안 E, 사용자 선택). 셋을 나란히 세우면 확률·방향·목표가를
+  //   세로로 훑지 않고 한 번에 비교한다. 순서는 확률 내림차순(order) 그대로.
   const scn = order.map((k, i) => {
     const t = n.targets[k];
     // 목표가 없는 경우는 **두 가지**이고 뜻이 정반대다 -- 한 문구로 묶으면 오해한다(09-21 사용자 «왜 잔여가 뜨지»).
@@ -3327,11 +3334,20 @@ function renderSituation() {
       : raw != null ? "이 목표를 이미 지나쳤다 — 이번 30분 창에서는 일어날 수 없어 적중률 집계에서 빠진다"
       : "목표를 만들 재료가 없다(가치영역 없음)";
     const dead = t == null && !holds;
-    return `<tr class="${i === 0 ? "" : "sub"}${dead ? " dead" : ""}"><td class="p">${n.prob[k]}%</td>`
-      + `<td class="nm"${n.names_long ? ` title="${escapeHtml(n.names_long[k] || "")}"` : ""}>`
-      + `<i class="sit-ar">${ARROW[k]}</i>${escapeHtml(n.names[k])}</td>`
-      + `<td><div class="sit-bar"><i style="width:${n.prob[k]}%"></i></div></td>`
-      + `<td class="tg"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(tgt)}</td></tr>`;
+    const d = (n.dist_bp || {})[k];
+    const dist = Number.isFinite(d) ? `${d > 0 ? "+" : ""}${Math.round(d)}bp` : "";
+    // 이 시나리오로 미는 신호를 바로 아래에 붙인다 -- 선 없이 연결이 보인다(시안 E).
+    const push = (n.flips || []).filter((f) => f.toward === k);
+    const pushed = push.map((f) => `<div class="sit-push${f.on ? " on" : ""}">`
+      + `<span class="dot"></span><span>${escapeHtml(f.signal)}</span></div>`).join("");
+    return `<div class="sit-col${i === 0 ? " top" : ""}${dead ? " dead" : ""}">`
+      + `<div class="p">${n.prob[k]}%</div>`
+      + `<div class="nm"${n.names_long ? ` title="${escapeHtml(n.names_long[k] || "")}"` : ""}>`
+      + `<i class="sit-ar">${ARROW[k]}</i>${escapeHtml(n.names[k])}</div>`
+      + `<div class="tg"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(tgt)}</div>`
+      + `<div class="ds">${escapeHtml(dist)}</div>`
+      + (pushed ? `<div class="sit-pushes">${pushed}</div>` : "")
+      + `</div>`;
   }).join("");
 
   // ── 레짐 여유 ── «곧 바뀔 수 있나»를 바뀌기 **전에** 보인다(2026-09-22 사용자 «급변한다»).
@@ -3361,7 +3377,10 @@ function renderSituation() {
   // ── FLIP TRIGGERS ──
   const fl = n.flips || [];
   const armed = fl.filter((f) => f.on).length;
-  const flips = fl.map((f) => `<div class="sit-flip${f.on ? " on" : ""}"><span class="dot"></span>`
+  // 3열로 바뀌면서 뒤집기 신호는 **미는 열 아래**로 갔다(시안 E). 여기 남는 건 어느 시나리오에도
+  // 안 묶인 신호뿐이다 -- 보통 없다. 있으면 그때만 줄이 뜬다.
+  const loose = fl.filter((f) => !["A", "B", "C"].includes(f.toward));
+  const flips = loose.map((f) => `<div class="sit-flip${f.on ? " on" : ""}"><span class="dot"></span>`
     + `<span>${escapeHtml(f.signal)}</span>`
     + `<span class="to">${escapeHtml(n.names[f.toward] || f.toward)}</span></div>`).join("");
   const why = (n.why || []).map((w) => `${w["근거"]}: ${Object.entries(w).filter(([k]) => k !== "근거")
@@ -3413,12 +3432,11 @@ function renderSituation() {
 
   body.innerHTML = `
     <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
-    <table class="sit-tbl"><tbody>${scn}</tbody></table>
+    <div class="sit-cols">${scn}</div>
     <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details>
-    <div class="sit-sec">현재 상황</div>
+    <div class="sit-sec">현재 상황<span>뒤집기 ${armed} / ${fl.length} 켜짐</span></div>
     <div class="sit-state">${state}</div>
-    <div class="sit-sec">FLIP TRIGGERS<span>${armed} / ${fl.length} 켜짐</span></div>
-    <div class="sit-flips">${flips || '<div class="sit-cal">없음</div>'}</div>
+    ${flips ? `<div class="sit-flips">${flips}</div>` : ""}
     <div class="sit-sec">LEDGER${c.n ? `<span>n ${c.n} · ${c.span_h}h</span>` : ""}</div>
     ${led}
     <div class="sit-foot"><span>${foot}</span>${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`;
@@ -5790,7 +5808,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const tri = document.createElementNS(NS, "polygon");
       tri.setAttribute("points", markerPoints(ml + cw, p.realY));
       tri.setAttribute("fill", p.color);
-      if (p.outOfView) tri.setAttribute("opacity", "0.72");
+      if (p.faded) tri.setAttribute("opacity", "0.42");        // 지나간 목표
+      else if (p.outOfView) tri.setAttribute("opacity", "0.72");
       // ⚠️여기서 append 하지 않는다. 플롯 오른쪽 끝(ml+cw)과 가격 배지(w-mr+4)가 4px 차이라
       //   먼저 그리면 배지에 **가려진다**(2026-09-16 첫 판이 그래서 안 보였다). 배지 뒤에
       //   붙여 배지의 «꼬리»처럼 보이게 한다 -- 꼭짓점은 여전히 진짜 가격 행을 가리킨다
@@ -5829,6 +5848,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     rect.setAttribute("x", w - mr + 4); rect.setAttribute("y", labelY - 9);
     rect.setAttribute("width", boxW); rect.setAttribute("height", boxH);
     rect.setAttribute("fill", p.color); rect.setAttribute("rx", "2");
+    if (p.faded) rect.setAttribute("opacity", "0.42");
     svg.appendChild(rect);
 
     const pTxt = document.createElementNS(NS, "text");
@@ -5837,6 +5857,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     pTxt.setAttribute("font-size", subOk ? "11" : (mobileChart ? "11" : "12"));
     pTxt.setAttribute("font-weight", "bold");
     pTxt.setAttribute("fill", inkOnFill());
+    if (p.faded) pTxt.setAttribute("opacity", "0.72");
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
     if (subOk) {
