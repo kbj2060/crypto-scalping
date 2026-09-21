@@ -274,7 +274,7 @@ const API_OI_5M_URL = "/api/oi-5m";
 const OI_5M_POLL_MS = 15000;
 // 2026-09-21 상황 읽기 · 30분 (index.html .situation-panel). 서버가 5초마다 계산해 둔 것을 받는다.
 const API_SITUATION_URL = "/api/situation";
-const SITUATION_POLL_MS = 5000;
+const SITUATION_POLL_MS = 1000;   // 09-21 서버 계산도 1초로 -- 응답은 작은 JSON 하나
 let latestSituation = null;
 let situationLastFetchAt = 0;
 let latestOi5m = null;
@@ -3397,7 +3397,7 @@ function renderSituation() {
   }).join("");
   const scn = order.map((k) => {
     const t = n.targets[k];
-    const tgt = Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t);
+    const tgt = t == null ? "잔여 (둘 다 안 닿음)" : Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t);
     return `<div class="sit-row${k === top ? " top" : ""}"><span class="p">${n.prob[k]}%</span>
       <div><div class="name">${escapeHtml(n.names[k])}</div><div class="bar"><i style="width:${n.prob[k]}%"></i></div></div>
       <span class="tgt">목표 ${escapeHtml(tgt)}</span></div>`;
@@ -3413,12 +3413,19 @@ function renderSituation() {
   const st = s.streams || {}; const fo = st.fo || {}; const mp = st.mp || {};
   const ws = (w, label, unit) => w.connected ? `${label} 연결 · ${w.events || 0}${unit}` : `${label} <b>끊김</b>${w.last_error ? ` (${escapeHtml(w.last_error)})` : ""}`;
   const streams = `스트림 · ${ws(fo, "청산 WS", "건")} · ${ws(mp, "마크가격 WS", "건")}`;
+  // ⭐방향 적중은 «대칭 배리어(±0.5×창폭)» 로만 정직하게 잰다 -- 시나리오 목표는 거리가 서로 달라
+  //   «가장 가까운 목표가 이긴다»가 섞인다(09-21 실측 81%). 동전 = 50%.
+  const sy = c.sym || {};
+  const symLine = sy.n
+    ? `방향 적중 <b>${sy.hit}%</b> (대칭 ±0.5×창폭 · n ${sy.n} · 동전 50%)`
+    : "방향 적중: 대칭 라벨 해결 대기";
   body.innerHTML = `
     <div><div class="sit-h">지금</div><div class="sit-labels">${labels}</div></div>
     <div><div class="sit-h">30분 시나리오 (휴리스틱 확률)</div><div class="sit-scn">${scn}</div>
       <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details></div>
     <div><div class="sit-h">생각을 바꾸는 신호</div><div class="sit-flips">${flips}</div></div>
     <div class="sit-cal">${cal}</div>
+    <div class="sit-cal">${symLine}</div>
     <div class="sit-cal">${streams}</div>`;
   if (badge) {
     const age = s.computed_at ? Math.round(Date.now() / 1000 - s.computed_at) : null;
