@@ -555,7 +555,7 @@ MARK_PRICE_DB_PATH = LIVE_DIR / "mark_price_1s.duckdb"
 MARK_PRICE_TABLE = "mark_price_1s"
 MARK_PRICE_RING_S = 7200          # 메모리 링(초). 베이시스 임계 분위를 «창 Δ» 표본 60개 이상에서 잡으려면 1시간 넘게 필요
 MICRO_BASELINE_SECONDS = 3600
-SITUATION_EVERY_TICKS = 5                              # micro-ref 1초 루프의 5틱마다
+SITUATION_EVERY_TICKS = 1                              # micro-ref 1초 루프마다 (09-21 사용자 «급변 때 느리다» -- 실측 비용 30ms, duckdb 둘은 아래서 5초 캐시)
 SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30분 뒤 결과와 맞춰 적중률을 낸다
 SITUATION_LOG_MIN_GAP_S = 300                          # 상태가 안 바뀌어도 이 간격으로 한 줄
 SITUATION_VA_ROW_USD = 3.0                             # 가치영역 행 폭(차트의 행과 같다)
@@ -2585,10 +2585,11 @@ def make_app() -> web.Application:
         """기존 서버 상태를 situation.classify 의 입력 모양으로 접는다. 새 원천은 없다."""
         bar_start = int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
         fbars = footprint_state["bars"]
-        oi_map = {int(b): (None if gap else float(dl)) for b, dl, _c, _n, gap in oi_5m_buckets(2 * sit.WINDOW + 3)}
+        # OI·청산 5분 집계는 compute_situation 이 5초 swr 캐시로 미리 받아 둔다(둘 다 매 호출 duckdb 를 열어 11·18ms).
+        oi_map = {int(b): (None if gap else float(dl)) for b, dl, _c, _n, gap in (situation_state.get("oi_5m") or [])}
         liq_map: dict[int, tuple[float, float]] = {}
         try:
-            for r in (compute_liquidation_5m_history("eth", 2 * sit.WINDOW + 3).get("bars") or []):
+            for r in ((situation_state.get("liq_5m") or {}).get("bars") or []):
                 ts = int(datetime.fromisoformat(r["ts"]).timestamp())
                 liq_map[ts // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS] = (float(r.get("long_usd") or 0), float(r.get("short_usd") or 0))
         except Exception:  # noqa: BLE001 -- 청산 이력이 없으면 «모름»으로 간다
@@ -2654,6 +2655,8 @@ def make_app() -> web.Application:
         except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
             situation_state["btc_candles"] = None
         situation_state["breakout"] = await load_breakout_detector()
+        situation_state["oi_5m"] = await swr_cached("situation_oi5m", 5.0, lambda: asyncio.to_thread(oi_5m_buckets, 2 * sit.WINDOW + 3))
+        situation_state["liq_5m"] = await swr_cached("situation_liq5m", 5.0, lambda: asyncio.to_thread(compute_liquidation_5m_history, "eth", 2 * sit.WINDOW + 3))
         try:
             hm = await swr_cached("situation_book", 5.0, lambda: loop.run_in_executor(
                 HEATMAP_EXECUTOR, functools.partial(_heatmap_read, "ethusdt", 300, 3, True)))

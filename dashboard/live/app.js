@@ -274,7 +274,7 @@ const API_OI_5M_URL = "/api/oi-5m";
 const OI_5M_POLL_MS = 15000;
 // 2026-09-21 상황 읽기 · 30분 (index.html .situation-panel). 서버가 5초마다 계산해 둔 것을 받는다.
 const API_SITUATION_URL = "/api/situation";
-const SITUATION_POLL_MS = 5000;
+const SITUATION_POLL_MS = 1000;   // 09-21 서버 계산도 1초로 -- 응답은 작은 JSON 하나
 let latestSituation = null;
 let situationLastFetchAt = 0;
 let latestOi5m = null;
