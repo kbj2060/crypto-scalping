@@ -141,12 +141,6 @@ let footprintLastFetchAt = 0;
 // 2026-09-19 «supply» 모드를 뺐다 -- 가격축 프로파일은 전용 수급 패널의 탭으로 옮겼다.
 // 옛 localStorage 값이 남아 있으면 CHART_MODES.includes 가 걸러 footprint 로 떨어진다.
 const CHART_MODES = ["footprint", "liqmap"];
-let chartMode = (() => {
-  try {
-    const saved = localStorage.getItem("chartMode");
-    return CHART_MODES.includes(saved) ? saved : "footprint";
-  } catch (e) { return "footprint"; }   // 사파리 프라이빗 등 localStorage 가 던지는 환경
-})();
 // ── 창 토글 (2026-09-19 사용자 요청: 1h/2h/4h) ─────────────────────────────
 // 풋프린트와 수급 프로파일이 **같은 창**을 쓴다. 한 카드 안의 위아래 두 그림이 서로 다른
 // 구간을 말하면 읽는 사람이 속는다 -- 그래서 토글도 하나다.
@@ -192,7 +186,9 @@ const FOOTPRINT_IMBALANCE_RATIO = 3;    // TradingView 기본값 300%
 const inkOnFill = () => "var(--on-fill)";
 // 가격축 위아래 여백(캔들 고저 폭 대비). 청산맵은 레벨·라벨이 가장자리에 걸려 더 넓게 준다.
 // 풋프린트를 같이 넓히면 안 된다 -- ySpan 이 커져 행 높이가 줄고 셀 숫자가 먼저 깨진다.
-const CHART_Y_PAD_LIQMAP = 0.26;      // 2026-09-21 0.15 -> 0.26 (사용자 요청)
+// 2026-09-21 청산맵 «모드» 가 사라진 뒤에도 이 값은 남는다 -- 풋프린트는 ETH 전용이라
+// 다른 코인·테이프 웜업 중에는 **채워진 캔들 폴백**이 그려지고, 그 차트의 여백이 이것이다.
+const CHART_Y_PAD_PLAIN = 0.26;       // 2026-09-21 0.15 -> 0.26 (사용자 요청)
 const CHART_Y_PAD_FOOTPRINT = 0.15;   // 종전 값 유지
 const FOOTPRINT_SHADE_DARK = [0.10, 0.22, 0.36, 0.54];
 const FOOTPRINT_SHADE_LIGHT = [0.16, 0.32, 0.48, 0.66];
@@ -603,32 +599,14 @@ function setupThemeToggle() {
   });
 }
 
+// 2026-09-21 청산맵 모드 제거(사용자 결정). 풋프린트가 유일한 차트다 --
+// 청산 밀도 히트맵·S/R 레벨 목록·최근접 레벨 선은 전부 풋프린트에서도 그대로 나온다.
+// ⚠️«채워진 캔들» 폴백은 renderCandleSvg 에 **남아 있다**: 풋프린트는 ETH 전용이고
+//   테이프가 웜업 중이면 null 이라, 그때 캔들을 그릴 것이 필요하다.
 function setupChartModeTabs() {
-  document.querySelectorAll("#chartModeTabs .asset-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (chartMode === btn.dataset.chartMode) return;
-      chartMode = btn.dataset.chartMode;
-      try { localStorage.setItem("chartMode", chartMode); } catch (e) { /* 저장 못 해도 동작은 한다 */ }
-      renderChartModeTabs();
-      footprintLastFetchAt = 0;   // 풋프린트로 돌아오면 폴링 간격을 기다리지 않고 바로 받는다
-      supplyProfileLastFetchAt = 0;
-      flowHeatmapLastFetchAt = 0;
-      refreshFootprint();
-      refreshSupplyProfile();
-      refreshFlowHeatmap();
-      refreshGex();
-      renderSnapshotChart();      // 기다리지 않고 즉시 바꿔 그린다 -- 누른 티가 나야 한다
-    });
-  });
-  renderChartModeTabs();
   setupChartWindowTabs();
 }
 
-function renderChartModeTabs() {
-  document.querySelectorAll("#chartModeTabs .asset-tab").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.chartMode === chartMode);
-  });
-}
 
 function setupChartWindowTabs() {
   document.querySelectorAll("#chartWindowTabs .asset-tab").forEach((btn) => {
@@ -945,8 +923,7 @@ async function maybeFetchSnapshotChartHistory() {
 // (현재가 선은 전체 렌더와 무관하게 updateLivePriceFast 가 80ms 로 따로 움직인다)
 const FOOTPRINT_RENDER_MIN_INTERVAL_MS = 400;
 function chartRenderGateMs() {
-  return chartMode === "footprint" ? FOOTPRINT_RENDER_MIN_INTERVAL_MS
-    : SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS;
+  return FOOTPRINT_RENDER_MIN_INTERVAL_MS;
 }
 
 function maybeRenderSnapshotChartNow() {
@@ -3152,7 +3129,7 @@ function ensurePriceWs() {
           footprintLiveAdd(price, qty, Number(d.T), !!d.m,
                            d.t == null ? null : Number(d.t));
           // 체결이 곧 셀의 변화다. 스로틀은 maybeRenderSnapshotChartNow 안에 있다(모드별).
-          if (chartMode === "footprint") maybeRenderSnapshotChartNow();
+          maybeRenderSnapshotChartNow();
         }
       } catch (e) { /* 한 메시지가 깨져도 스트림은 계속 간다 */ }
     };
@@ -3446,7 +3423,6 @@ let footprintBars = new Map();          // 봉시각 -> 서버가 준 봉 객체
 let footprintCacheKey = "";             // 코인|창 -- 달라지면 캐시를 버리고 전량부터
 
 async function refreshFootprint() {
-  if (chartMode !== "footprint") return;       // 청산맵을 보는 동안은 받을 이유가 없다
   if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
   const now = Date.now();
   if (now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
@@ -3493,7 +3469,6 @@ async function refreshFootprint() {
 
 // 풋프린트가 없으면(다른 코인 · 서버 웜업 · fetch 실패) null 을 돌려주고, 차트는 캔들로 그린다.
 function footprintForChart() {
-  if (chartMode !== "footprint") return null;  // 청산맵 모드 = 예전 차트 그대로
   if (activeSnapshotAsset !== "eth") return null;
   const payload = latestFootprint;
   const bars = Array.isArray(payload && payload.bars)
@@ -4740,7 +4715,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //    납작해지는 대가는 청산맵에서 작다(셀 숫자를 읽을 일이 없다).
   //  · 풋프린트 -- 넓히면 행 높이(rowPx)가 줄어 셀 숫자가 먼저 깨진다. 여기는 그대로 둔다.
   //    (rowSize 는 ySpan/ch 로 정해진다 -- 여백을 늘리면 ySpan 이 커져 행이 얇아진다.)
-  const padPct = footprint ? CHART_Y_PAD_FOOTPRINT : CHART_Y_PAD_LIQMAP;
+  const padPct = footprint ? CHART_Y_PAD_FOOTPRINT : CHART_Y_PAD_PLAIN;
   const pad = (maxP - minP) * padPct || 1;
   const yMin = minP - pad, yMax = maxP + pad;
   const ySpan = Math.max(yMax - yMin, 1e-5); // Prevent division by zero
@@ -5437,6 +5412,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       svg.appendChild(warm);
     }
   } else {
+  // 풋프린트 **폴백**(2026-09-21 청산맵 모드 제거 후에도 남는 경로): 풋프린트는 ETH 전용이고
+  // 테이프가 웜업 중이면 footprintForChart() 가 null 이라, 그때 그릴 캔들이 필요하다.
+  // 청산 밀도·S/R 레벨·마커는 이 경로에서도 그대로 그려진다(모드 무관).
   candles.forEach((c, i) => {
     const x = xAt(i), isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
     const wick = document.createElementNS(NS, "line");
