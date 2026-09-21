@@ -3269,20 +3269,28 @@ function renderSituation() {
     //  ② 목표 선점(이미 지나감)·가치영역 없음 = 해당 없음: 이 시나리오는 이번 창에서 **일어날 수 없다**.
     //     «잔여»의 조건은 분명하다 -- **하단·상단 이탈선 사이에 머무는 것**이고 그 두 선은 이미 C·B 목표다.
     //     지켜야 할 값을 숨기지 말고 그대로 띄운다(사용자 요청). 한쪽 이탈선이 선점됐으면 레인지는 이미 깨졌다.
+    // 🔴2026-09-22 사용자 «지나가도 이전 가격은 적어놔줘 -- 어떻게 지나갔는지 확인을 해야해».
+    //   선점된 목표는 targets 에서 null 이지만(그게 «채점 안 함»의 뜻이다) targets_raw 에 원래
+    //   기하값이 그대로 실려 온다. 숫자를 지우지 말고 «지남»을 덧붙인다.
+    const raw = (n.targets_raw || {})[k];
     const residual = n.dir === 0 && k === "A";
-    const lo = n.targets.C, hi = n.targets.B;
-    const holds = residual && lo != null && hi != null;
-    const tgt = t == null
-      ? (holds ? `${fmtPx(lo)}~${fmtPx(hi)}` : residual ? "이미이탈" : "해당없음")
-      : Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t);
-    const title = t == null
-      ? (holds ? "레인지 유지 — 하단·상단 이탈선 사이에 머물면 이것"
-               : residual ? "해당 없음 — 이미 한쪽으로 이탈했다" : "해당 없음 — 목표를 이미 지나감")
-      : "";
+    const lo = n.targets.C ?? (n.targets_raw || {}).C, hi = n.targets.B ?? (n.targets_raw || {}).B;
+    const holds = residual && n.targets.C != null && n.targets.B != null;
+    const band = lo != null && hi != null ? `${fmtPx(lo)}~${fmtPx(hi)}` : null;
+    const tgt = t != null
+      ? (Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t))
+      : residual ? (band ? `${band}${holds ? "" : " 깨짐"}` : "—")
+      : raw != null ? `${fmtPx(raw)} 지남` : "—";
+    const title = t != null ? ""
+      : residual ? (holds ? "이 폭 안에 머물면 이것 — 두 선은 아래·위 이탈 목표다"
+                          : "한쪽 선을 이미 넘었다 — 이 폭은 이미 깨졌다")
+      : raw != null ? "이 목표를 이미 지나쳤다 — 이번 30분 창에서는 일어날 수 없어 적중률 집계에서 빠진다"
+      : "목표를 만들 재료가 없다(가치영역 없음)";
     const dead = t == null && !holds;
     return `<tr class="${i === 0 ? "" : "sub"}${dead ? " dead" : ""}"><td class="p">${n.prob[k]}%</td>`
-      + `<td class="nm">${escapeHtml(n.names[k])}</td>`
-      + `<td><div class="sit-bar"><i class="k-${k}" style="width:${n.prob[k]}%"></i></div></td>`
+      + `<td class="nm"${n.names_long ? ` title="${escapeHtml(n.names_long[k] || "")}"` : ""}>`
+      + `${escapeHtml(n.names[k])}</td>`
+      + `<td><div class="sit-bar"><i style="width:${n.prob[k]}%"></i></div></td>`
       + `<td class="tg"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(tgt)}</td></tr>`;
   }).join("");
 

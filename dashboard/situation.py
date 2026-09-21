@@ -29,6 +29,12 @@ SYM_K = 0.5                # 대칭 라벨 배리어 = ±k × 창 고저폭. k=1
 FUNDING_NEUTRAL = 0.0001   # 바이낸스 펀딩의 이자 성분(0.01%/8h). 이만큼 더 벗어나야 «쏠림»(음수 = 숏 과밀)
 BASIS_PCT = 0.75           # |Δ베이시스(창 동안)| 이 링 분포의 이 분위 이상이면 «선물 주도/현물 주도»
 
+# 2026-09-22 사용자 요청 «용어가 복잡하다». 기하로 보면 셋은 서로 다른 현상이 아니라 **한 축**이다:
+#   B = 이동 방향으로 더 · A = 반대로 조금(중앙 18bp) · C = 반대로 많이, 출발점까지(중앙 52bp).
+#   옛 이름(되돌림·가치영역 재방문 / 플러시·베이스 재방문)은 A 와 C 가 «같은 방향의 얕은 것과
+#   깊은 것»이라는 사실을 오히려 감췄다. 원문 용어는 names_long 으로 남겨 툴팁에 띄운다.
+SHORT_NAMES = {"A": "조금 되돌림", "B": "더 간다", "C": "출발점까지"}
+
 # 점수표 -- (근거 라벨 → {시나리오: 점수}). A=되돌림 B=지속 C=플러시(이동 반대쪽 과잉)
 SCORES: dict[str, dict[str, int]] = {
     "스퀴즈": {"A": 20, "C": 5}, "신규유입": {"B": 20}, "클라이맥스": {"A": 15, "C": 5},
@@ -274,12 +280,15 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     res_px, sup_px = sr.get("res"), sr.get("sup")
     if d >= 0:
         cont = res_px if (res_px and res_px > mid) else max(b["high"] for b in w)
-        names = {"A": "되돌림 · 가치영역 재방문", "B": "지속 · 저항 테스트", "C": "플러시 · 베이스 재방문"}
+        names = SHORT_NAMES
+        names_long = {"A": "되돌림 · 가치영역 재방문", "B": "지속 · 저항 테스트", "C": "플러시 · 베이스 재방문"}
     else:
         cont = sup_px if (sup_px and sup_px < mid) else min(b["low"] for b in w)
-        names = {"A": "되돌림 · 가치영역 재방문", "B": "지속 · 지지 테스트", "C": "역스퀴즈 · 고점 재방문"}
+        names = SHORT_NAMES
+        names_long = {"A": "되돌림 · 가치영역 재방문", "B": "지속 · 지지 테스트", "C": "역스퀴즈 · 고점 재방문"}
     if d == 0:
-        names = {"A": "레인지 유지", "B": "상단 이탈", "C": "하단 이탈"}
+        names = {"A": "유지", "B": "위로 이탈", "C": "아래로 이탈"}
+        names_long = {"A": "레인지 유지", "B": "상단 이탈", "C": "하단 이탈"}
         cont = max(b["high"] for b in w); base_px = min(b["low"] for b in w)   # 횡보는 창 자체가 레인지
     # 🔴청산 군집을 플러시 목표로 쓰던 코드를 제거했다(09-21 아침에 넣고 저녁에 되돌림).
     #   실측: 군집 목표는 |거리| 중앙 **156.7bp** 에 경로 도달 **0/444**, 베이스 목표는 59.4bp 에 250/646(38.7%).
@@ -297,6 +306,11 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     b_px = _ahead(round(float(cont), 2), mid, above=(d >= 0))
     c_px = _ahead(round(float(base_px), 2), mid, above=(d < 0))
     targets = {"A": a_px, "B": b_px, "C": c_px}
+    # 🔴표시 전용. targets 의 None 은 «이 목표는 채점하지 않는다»는 뜻이라(P0 수정) 되돌리면 안 된다.
+    #   그런데 숫자를 지우면 «어떻게 지나갔는지»를 화면에서 못 본다(2026-09-22 사용자). 원래 기하값을
+    #   따로 실어 보내고, 화면은 그 값에 «지남»을 붙여 그린다. resolve/_touched 는 targets 만 본다.
+    targets_raw = {"A": (None if a_raw is None else round(float(a_raw), 2)),
+                   "B": round(float(cont), 2), "C": round(float(base_px), 2)}
     # 하나라도 선점됐으면 이 예측은 «배리어 경주»로 답할 수 없다 -- 적중률 집계에서 뺀다(표시는 그대로).
     passed = [k for k, raw in (("A", a_raw), ("B", cont), ("C", base_px))
               if raw is not None and targets[k] is None and not (k == "A" and a_raw is None)]
@@ -332,7 +346,8 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
             ("OI 증가 + 하단 근접", (lastb.get("oi_delta") or 0) > 0 and mid <= min(b["low"] for b in w) * 1.001, "C"),
             ("활발 전환", bool(hot), "B"),
         ]
-    return {"ok": True, "dir": d, "labels": labels, "evidence": ev, "prob": prob, "names": names, "targets": targets,
+    return {"ok": True, "dir": d, "labels": labels, "evidence": ev, "prob": prob, "names": names, "names_long": names_long,
+            "targets": targets, "targets_raw": targets_raw,
             "sym": sym, "dist_bp": dist_bp, "scorable": scorable, "passed": passed,
             "why": [{"근거": k, **v} for k, v in why],
             "flips": [{"signal": s, "on": bool(o), "toward": t} for s, o, t in flips]}
@@ -536,6 +551,9 @@ if __name__ == "__main__":
     # 목표 선점: 상승인데 현재가가 가치영역 **아래**면 A(먼 변)가 위에 있어 첫 봉에서 공짜로 닿는다 → 해당 없음
     rp = classify(dict(inp, mid=2600.0))
     assert rp["targets"]["A"] is None and "A" in rp["passed"] and rp["scorable"] is False, (rp["targets"], rp["passed"])
+    # 선점돼도 **가격은 남는다**(표시용). 지우면 «어떻게 지나갔는지»를 화면에서 못 본다.
+    assert rp["targets_raw"]["A"] == r["targets"]["A"] == 2606, (rp["targets_raw"], r["targets"])
+    assert rp["names"]["C"] == "출발점까지" and rp["names_long"]["C"].startswith("플러시"), rp["names"]
     assert resolve({"ts": 2700, "dir": 1, "mid": 2600.0, "targets": rp["targets"]}, [dict(time=2700 + 300 * i, high=2601, low=2599, close=2600) for i in range(7)]) == "none"
     assert r["dist_bp"]["C"] < r["dist_bp"]["A"] < 0 < r["dist_bp"]["B"]   # 상승: A·C 는 아래, B 는 위
     assert [f["on"] for f in r["flips"]] == [False, False, False, False, False]                # 그 시점엔 다 꺼져 있었다

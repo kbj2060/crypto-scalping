@@ -2952,11 +2952,11 @@ svg {
 .sit-tbl tr.sub .p, .sit-tbl tr.sub .tg { font-weight: 600; font-size: 13px; color: var(--muted); }
 .sit-tbl tr.dead { opacity: .45; }
 .sit-bar { height: 9px; background: rgb(var(--lift) / 0.075); }
-.sit-bar i { display: block; height: 100%; }
-/* A/B/C 고정 -- 순위가 아니라 시나리오에 묶인다 */
-.sit-bar i.k-A { background: var(--accent); }
-.sit-bar i.k-B { background: color-mix(in oklab, var(--accent) 55%, var(--panel)); }
-.sit-bar i.k-C { background: color-mix(in oklab, var(--accent) 28%, var(--panel)); }
+/* 2026-09-22 사용자 요청: 셋 다 같은 색. 명도 3단계는 A/B/C 를 «정체성»으로 고정하려던
+   것이었지만(순위로 칠하면 1·2위가 뒤집힐 때마다 색이 따라 바뀐다 -- 격차 ≤2pp 가 18%),
+   그 사다리가 «A 가 제일 중요하다»는 **없는 위계**를 암시했다. 행은 이미 확률순이고 이름이
+   늘 옆에 있으니 색이 정체성을 혼자 질 이유가 없다. */
+.sit-bar i { display: block; height: 100%; background: var(--accent); }
 
 /* STATE */
 .sit-state { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 22px; }
