@@ -3392,9 +3392,15 @@ function renderSituation() {
   const streams = `스트림 · ${ws(fo, "청산 WS", "건")} · ${ws(mp, "마크가격 WS", "건")}`;
   // ⭐방향 적중은 «대칭 배리어(±0.5×창폭)» 로만 정직하게 잰다 -- 시나리오 목표는 거리가 서로 달라
   //   «가장 가까운 목표가 이긴다»가 섞인다(09-21 실측 81%). 동전 = 50%.
+  // P1: 학습 표본이 얼마나 쌓였나. 🔴n 은 독립 사건 수가 아니라서 «에피소드»를 같이 보여준다.
+  const sampleLine = c.n
+    ? `표본 <b>${c.n}</b>건 해결 · 에피소드 <b>${c.episodes}</b> · 연속타깃 ${c.with_path} · 해결대기 ${c.pending} · 판정불가 ${c.amb}% · 최근 ${c.span_h}시간`
+    : c.samples
+      ? `표본 ${c.samples}건 기록 · 해결대기 ${c.pending} (첫 해결은 예측 30분 뒤)`
+      : "표본: 기록 시작 대기";
   const sy = c.sym || {};
   const symLine = sy.n
-    ? `방향 적중 <b>${sy.hit}%</b> (대칭 ±0.5×창폭 · n ${sy.n} · 동전 50%)`
+    ? `방향 적중 <b>${sy.hit}%</b> · 같은 구간 «항상 상승»이면 ${sy.base_up}% (대칭 ±0.5×창폭 · 추세 구간만 · n ${sy.n})`
     : "방향 적중: 대칭 라벨 해결 대기";
   body.innerHTML = `
     <div><div class="sit-h">지금</div><div class="sit-labels">${labels}</div></div>
@@ -3403,6 +3409,7 @@ function renderSituation() {
     <div><div class="sit-h">생각을 바꾸는 신호</div><div class="sit-flips">${flips}</div></div>
     <div class="sit-cal">${cal}</div>
     <div class="sit-cal">${symLine}</div>
+    <div class="sit-cal">${sampleLine}</div>
     <div class="sit-cal">${streams}</div>`;
   if (badge) {
     const age = s.computed_at ? Math.round(Date.now() / 1000 - s.computed_at) : null;
