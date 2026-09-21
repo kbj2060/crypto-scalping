@@ -5820,7 +5820,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
 
     // Right box (follows label position). p.sub 가 있으면 배지 안에 «가격 + 값»을 같이 넣는다.
-    const boxW = (mobileChart ? 56 : 64) + (p.sub ? (mobileChart ? 22 : 26) : 0), boxH = 18;
+    // 🔴폭에 한계가 있다. 배지는 x = w-mr+4 에서 시작하므로 mr-8 을 넘으면 SVG 밖으로 잘린다
+    //   (데스크톱 mr 86 -> 최대 78, 모바일 mr 68 -> 최대 60 = 기존 56 에서 4px 뿐).
+    //   ⇒ 모바일에서는 값을 넣지 않는다. 카드에 같은 숫자가 있고, 잘린 배지보다 낫다.
+    const subOk = !!p.sub && !mobileChart;
+    const boxW = subOk ? 76 : (mobileChart ? 56 : 64), boxH = 18;
     const rect = document.createElementNS(NS, "rect");
     rect.setAttribute("x", w - mr + 4); rect.setAttribute("y", labelY - 9);
     rect.setAttribute("width", boxW); rect.setAttribute("height", boxH);
@@ -5829,14 +5833,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
     const pTxt = document.createElementNS(NS, "text");
     pTxt.setAttribute("x", w - mr + 8); pTxt.setAttribute("y", labelY + 4);
-    pTxt.setAttribute("font-size", mobileChart ? "11" : "12"); pTxt.setAttribute("font-weight", "bold");
+    // 값이 같이 들어가면 가격을 한 단계 줄인다 -- 76px 안에 «2700.0»(11px, 40) + «56%»(9.5px, 17)
+    pTxt.setAttribute("font-size", subOk ? "11" : (mobileChart ? "11" : "12"));
+    pTxt.setAttribute("font-weight", "bold");
     pTxt.setAttribute("fill", inkOnFill());
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
-    if (p.sub) {
+    if (subOk) {
       const sTxt = document.createElementNS(NS, "text");
       sTxt.setAttribute("x", w - mr + 4 + boxW - 5); sTxt.setAttribute("y", labelY + 4);
-      sTxt.setAttribute("text-anchor", "end"); sTxt.setAttribute("font-size", mobileChart ? "9.5" : "10.5");
+      sTxt.setAttribute("text-anchor", "end"); sTxt.setAttribute("font-size", "9.5");
       sTxt.setAttribute("font-weight", "700"); sTxt.setAttribute("fill", inkOnFill());
       sTxt.setAttribute("opacity", ".72");
       sTxt.textContent = p.sub;
