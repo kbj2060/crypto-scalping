@@ -39,7 +39,7 @@ If you are behind a home/office router, forward external TCP port `8787` to:
 Then the dashboard should be reachable from outside at:
 
 ```text
-http://222.238.86.183:8787/dashboard/live/
+http://<YOUR_PUBLIC_IP>:8787/dashboard/live/
 ```
 
 ## 4. Stop the server

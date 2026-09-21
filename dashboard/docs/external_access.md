@@ -59,8 +59,8 @@ For portless HTTP domain access, also forward external TCP port `80` to:
 Then the dashboard should be reachable from outside at:
 
 ```text
-http://222.238.86.183:8787/dashboard/live/
-http://222.238.86.183/dashboard/live/
+http://<YOUR_PUBLIC_IP>:8787/dashboard/live/
+http://<YOUR_PUBLIC_IP>/dashboard/live/
 ```
 
 ## 4. Domain DNS
@@ -69,8 +69,8 @@ For the `thesan.xyz` domain, add these DNS records at the domain/DNS provider:
 
 ```text
 Type  Name       Value
-A     @          222.238.86.183
-A     dashboard  222.238.86.183
+A     @          <YOUR_PUBLIC_IP>
+A     dashboard  <YOUR_PUBLIC_IP>
 ```
 
 After DNS propagation, use:
