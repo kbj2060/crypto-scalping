@@ -42,6 +42,9 @@
 </head>
 <body>
     <main class="app">
+    <!-- 2026-09-21 감사: 문서에 h1 이 없어 제목이 h2 부터 시작했다. 화면에는 상단바가
+         이미 제목 역할을 하므로 스크린리더에만 준다. -->
+    <h1 class="sr-only">인공지능 트레이딩 대시보드</h1>
     <header class="top">
       <div class="topbar">
         <nav class="page-tabs" aria-label="대시보드 탭">
@@ -202,7 +205,6 @@
              지금은 미리보기 전용: 서버 게이트 DASHBOARD_MANUAL_EXEC_ENABLED 가 닫혀 있어
              버튼을 눌러도 주문이 나가지 않는다. -->
         <!-- 2026-09-16 사용자 요청: 「내 계좌에서 청산/진입을 모달로」.
-             ⭐네이티브 <dialog> 를 쓴다 -- 포커스 트랩·ESC 닫기·backdrop 이 표준이라
              ⭐네이티브 <dialog> 를 쓴다 -- 포커스 트랩·ESC 닫기·backdrop 이 표준이라
              라이브러리도, 직접 만든 포커스 관리도 필요 없다.
              🔴안쪽 마크업은 **한 줄도 안 옮겼다**. 핸들러가 전부 el("id") 기반이라
