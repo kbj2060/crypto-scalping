@@ -33,8 +33,13 @@ BASIS_PCT = 0.75           # |Δ베이시스(창 동안)| 이 링 분포의 이 
 SCORES: dict[str, dict[str, int]] = {
     "스퀴즈": {"A": 20, "C": 5}, "신규유입": {"B": 20}, "클라이맥스": {"A": 15, "C": 5},
     "전환탐지": {"A": 5, "C": 5}, "분배": {"A": 10, "C": 10}, "축적": {"B": 10}, "거부봉": {"A": 5, "C": 10},
-    "벽_동방향_두꺼움": {"B": 10}, "벽_동방향_얇음": {"B": 3}, "벽_역방향": {"A": 5},
+    # 🔴지속률 0.30~0.40 은 라벨에 «얇음»도 «두꺼움»도 안 붙는데 점수는 얇음(B+3)으로 먹고 있었다
+    #   (실측 동방향 벽 47건 중 18건). 두 값의 중간으로 밴드를 명시한다.
+    "벽_동방향_두꺼움": {"B": 10}, "벽_동방향_중간": {"B": 6}, "벽_동방향_얇음": {"B": 3}, "벽_역방향": {"A": 5},
     "가치영역_밖": {"A": 5}, "저항근접": {"A": 5, "B": -5}, "쿠션없음": {"C": 5}, "활발": {"B": 5, "C": 5},
+    # 횡보 전용 거울상. 추세에서는 방향 게이트 때문에 한쪽만 발동하지만 횡보는 둘 다 가능하고,
+    # 그때 «지지 근접»이 상단 이탈(B)을 깎거나 «저항이 멀다»가 아무 효과도 못 내던 비대칭이 있었다.
+    "지지근접": {"A": 5, "C": -5}, "쿠션없음_위": {"B": 5},
     # 2026-09-21 마크가격 스트림: 펀딩 = «어느 쪽이 갇혔나», 베이시스 = «누가 주도하나»(선물 프리미엄 확장 = 취약)
     "펀딩_반대쏠림": {"A": 10}, "선물주도": {"A": 8}, "현물주도": {"B": 8},
     # BTC 같은 창 이동: 시장 전체가 같이 갔으면 지속, ETH 만 갔으면 되돌림 쪽
@@ -44,6 +49,13 @@ SCORES: dict[str, dict[str, int]] = {
     "CVD_역행": {"A": 5},
 }
 BASE = {"A": 34, "B": 33, "C": 33}
+# 🔴횡보는 기저율이 전혀 다르다. «레인지 유지»는 배리어가 아니라 **잔여**(둘 다 안 닿음)이고,
+#   4.7년 5분 패널 **203,577건**에서 실제로 유지되는 비율은 **16.0%**(연도별 15.1~17.3%로 안정).
+#   34 를 주면 카드가 «레인지 유지»를 1순위로 부르고(원장 횡보 147분 중 141건=96%) 실제로는 8% 만 일어난다.
+#   양쪽 다 닿는 11.1% 는 상/하로 반씩 배분했다(37.1+5.5 / 35.8+5.5).
+#   ⭐이건 **라벨 정의의 기하 기저율**이지 이 표본을 맞춘 값이 아니다 -- §14-6 이 금지한
+#   «작은 표본으로 계수 맞추기»와 다른 범주다(독립 창 15개로는 어떤 계수도 판정 못 한다).
+BASE_RANGE = {"A": 16, "B": 43, "C": 41}
 
 
 def _ahead(px: float | None, mid: float, above: bool) -> float | None:
@@ -155,7 +167,7 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     thin = None if pers is None else (pers < PERSIST_THIN)
     if wall:
         labels.append(("매수벽" if wall > 0 else "매도벽") + f" {obi:+.2f}"
-                      + (" · 얇음(믿지 말 것)" if thin else " · 두꺼움" if thick else "")
+                      + (" · 얇음(믿지 말 것)" if thin else " · 두꺼움" if thick else " · 보통")
                       + (f" · 지속 {pers:.0%}" if pers is not None else ""))
     ev.update(wall=wall, obi=obi, persist=pers)
 
@@ -177,14 +189,17 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     no_cushion = (res_bp and sup_bp and (sup_bp > FAR_SUP_RATIO * res_bp if d >= 0 else res_bp > FAR_SUP_RATIO * sup_bp))
     if near_res or near_sup:
         labels.append(("저항" if near_res else "지지") + f" {(res_bp if near_res else sup_bp):.0f}bp 근접")
-    if no_cushion:
-        labels.append("이동 반대쪽 청산 쿠션 없음" if d != 0 else "청산맵 비대칭")
+    # 횡보는 위아래가 따로다 -- 거울상을 따로 잰다(추세에서는 no_cushion 하나로 충분하다)
+    no_cushion_up = bool(d == 0 and res_bp and sup_bp and res_bp > FAR_SUP_RATIO * sup_bp)
+    if no_cushion or no_cushion_up:
+        labels.append("이동 반대쪽 청산 쿠션 없음" if d != 0
+                      else ("위쪽 청산 쿠션 없음" if no_cushion_up else "아래쪽 청산 쿠션 없음"))
     act = inp.get("act_pct")
     hot = act is not None and act >= ACT_HOT
     if hot:
         labels.append(f"활발 (시간대 상위 {100 - int(act * 100)}%) · 큰 움직임 임박")
     # near_*/no_cushion/hot 은 전부 임계 통과 결과다. 원본(거리·활동분위)이 없으면 임계를 못 바꾼다.
-    ev.update(near_res=near_res, near_sup=near_sup, no_cushion=bool(no_cushion), hot=hot,
+    ev.update(near_res=near_res, near_sup=near_sup, no_cushion=bool(no_cushion), no_cushion_up=no_cushion_up, hot=hot,
               act_pct=act, res_bp=res_bp, sup_bp=sup_bp)
 
     # ── 펀딩 · 베이시스 (마크가격 스트림) ──
@@ -211,7 +226,7 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     ev.update(btc_move_bp=None if bm is None else round(bm, 1), btc_dir=d_btc, btc_rel=btc_rel)
 
     # ── 시나리오 점수 ──
-    sc = dict(BASE)
+    sc = dict(BASE_RANGE if d == 0 else BASE)
     why: list[tuple[str, dict[str, int]]] = []
 
     def add(key: str) -> None:
@@ -230,11 +245,18 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     if reject: add("거부봉")
     if cvd_div: add("CVD_역행")
     if wall and d != 0:
-        if wall == d: add("벽_동방향_두꺼움" if thick else "벽_동방향_얇음")
+        if wall == d: add("벽_동방향_두꺼움" if thick else "벽_동방향_얇음" if thin else "벽_동방향_중간")
         else: add("벽_역방향")
     if va_lo is not None and (mid > va_hi or mid < va_lo): add("가치영역_밖")
-    if near_res or near_sup: add("저항근접")
-    if no_cushion: add("쿠션없음")
+    if d == 0:
+        # 횡보에서 B=상단 이탈·C=하단 이탈이므로 근접한 쪽이 **그쪽 이탈**을 깎아야 한다.
+        if near_res: add("저항근접")      # 위가 막혀 있다 → 상단 이탈 −5
+        if near_sup: add("지지근접")      # 아래가 받쳐 있다 → 하단 이탈 −5 (전에는 B 를 깎고 있었다)
+        if no_cushion: add("쿠션없음")    # 아래 쿠션 없음 → 하단 이탈 +5
+        if no_cushion_up: add("쿠션없음_위")   # 위 쿠션 없음 → 상단 이탈 +5 (전에는 영원히 0)
+    else:
+        if near_res or near_sup: add("저항근접")
+        if no_cushion: add("쿠션없음")
     if hot: add("활발")
     if trapped: add("펀딩_반대쏠림")
     if lead > 0: add("선물주도")
@@ -451,9 +473,14 @@ def calibration(entries: list[dict[str, Any]], horizon_s: int = 1800) -> dict[st
     if not done:
         return out
     out["n"] = len(done)
+    # 🔴엔진은 «none»에 확률을 주지 않는다. 그런데 happened 의 분모에 none 을 넣으면 said 합은 100 인데
+    #   happened 합은 85 가 되어, SCORES 를 어떻게 바꿔도 닫히지 않는 가짜 «보정 격차»가 생긴다.
+    #   엔진 확률은 «뭔가 닿았다는 조건 아래»의 것이므로 실제 빈도도 같은 조건에서 센다. none 은 따로 낸다.
+    touched = [e for e in done if e["outcome"] in ("A", "B", "C")]
     for k in ("A", "B", "C"):
         out[k] = {"said": round(sum(e["prob"][k] for e in done) / len(done)),
-                  "happened": round(100 * sum(1 for e in done if e["outcome"] == k) / len(done))}
+                  "happened": (round(100 * sum(1 for e in touched if e["outcome"] == k) / len(touched))
+                               if touched else 0)}
     # 🔴n 은 **독립 사건 수가 아니다** -- 상태가 이어지는 동안 같은 읽기가 여러 번 기록된다.
     # 에피소드(방향·1순위가 같은 연속 구간) 수를 같이 내서 검정력을 오해하지 않게 한다.
     # 🔴«상태 서명이 바뀐 횟수»로 세면 1순위가 떨릴 때마다 늘어 실효 표본이 부풀려진다
@@ -603,4 +630,29 @@ if __name__ == "__main__":
     same = classify(dict(inp, cur=dict(inp["cur"], whale_net=-500, retail_net=90)))
     assert log_key(same) == log_key(r) and same["labels"] != r["labels"], (log_key(same), log_key(r))
     assert log_key(r8) != log_key(r)
+    # ── 횡보(d=0) 경로: 기저율·거울상 ──────────────────────────────────────────
+    fb = [bar(300 * i, 2600 + (i % 2), 50, 8000, 0, 0, 10) for i in range(13)]   # 이동 없음 = 횡보
+    fi = dict(bars=fb, mid=2600.5, levels={2600: 9000, 2601: 8000, 2599: 5000},
+              cur=dict(elapsed_s=120, whale_net=0, retail_net=0, oi_delta=0, delta=0),
+              book={}, act_pct=0.1, sr={}, breakout={})
+    fr = classify(fi)
+    assert fr["dir"] == 0 and fr["targets"]["A"] is None, fr["targets"]
+    # 규칙이 하나도 안 붙으면 확률은 기하 기저율 그대로여야 한다(34/33/33 이 아니다)
+    assert fr["prob"]["A"] == 16 and fr["prob"]["B"] > 40 and fr["prob"]["C"] > 38, fr["prob"]
+    assert max(fr["prob"], key=fr["prob"].get) != "A", "횡보의 1순위가 «레인지 유지»면 안 된다(기저율 16%)"
+    # 지지 근접은 **하단 이탈(C)** 을 깎아야 한다 -- 전에는 상단 이탈(B)을 깎고 있었다
+    near_dn = classify(dict(fi, sr=dict(sup=2599.0, res=2650.0, sup_bp=5.0, res_bp=190.0)))
+    assert near_dn["prob"]["C"] < fr["prob"]["C"] and near_dn["prob"]["B"] >= fr["prob"]["B"], near_dn["prob"]
+    assert near_dn["evidence"]["no_cushion_up"] is True and "위쪽 청산 쿠션 없음" in " ".join(near_dn["labels"])
+    # 거울상: 저항이 가까우면 상단 이탈이 깎이고, 지지가 멀면 하단 이탈이 오른다
+    near_up = classify(dict(fi, sr=dict(sup=2500.0, res=2601.0, sup_bp=390.0, res_bp=2.0)))
+    assert near_up["prob"]["B"] < fr["prob"]["B"] and near_up["evidence"]["no_cushion"] is True
+    # ── 벽 중간 지속률: 라벨과 점수가 같은 밴드를 봐야 한다 ──
+    mid_wall = classify(dict(inp, book=dict(obi=0.60, persist_share=0.35)))
+    assert " · 보통" in " ".join(mid_wall["labels"]) and mid_wall["evidence"]["persist"] == 0.35
+    assert any(w["근거"] == "벽_동방향_중간" for w in mid_wall["why"]), mid_wall["why"]
+    # ── 보정표: happened 는 «닿은 것» 조건부라 세 값의 합이 100 이다 ──
+    cal2 = calibration([{**base, "ts": 3000 * i, "outcome": o, "outcome_sym": "up"}
+                        for i, o in enumerate(["A", "B", "C", "none"])])
+    assert abs(sum(cal2[k]["happened"] for k in "ABC") - 100) <= 1 and cal2["none"] == 25, cal2   # 반올림 1 허용
     print("situation selftest ok", r["prob"], r["labels"][:3])
