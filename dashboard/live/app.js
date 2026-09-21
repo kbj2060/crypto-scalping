@@ -5262,18 +5262,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         txt.setAttribute("x", cx + half / 2); txt.setAttribute("y", yTop + rowPx / 2 + fontPx * 0.36);
         txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", fontPx);
         txt.setAttribute("fill", "var(--ink)"); txt.setAttribute("fill-opacity", INK_OPACITY);
-        // 🔴2026-09-21 **글자 후광**. 청산 밀도 밴드가 체결 봉 뒤로 지나가면서 셀 배경이
-        //   어두워져 숫자가 묻혔다(사용자 신고). z-order 문제가 아니다 -- 밴드는 이미 맨 뒤에
-        //   그려진다(svg.innerHTML="" 후 호출 순서대로 append, 밀도가 셀보다 먼저다).
-        //   문제는 **대비**였다: 진한 셀 위 숫자가 밴드 t=1.0 에서 2.56 까지 떨어졌다.
-        //   후광은 색 척도를 전혀 안 건드리고 어떤 배경 위에서도 글자를 띄운다 --
-        //   실측 라이트 2.56 -> 14.24 · 다크 2.18 -> 9.93.
-        //   paint-order: stroke 라 테두리가 **글자 아래** 깔린다(안 주면 글자를 갉아먹는다).
-        txt.setAttribute("stroke", "var(--panel-ink-halo)");
-        txt.setAttribute("stroke-width", Math.min(2, fontPx * 0.25).toFixed(1));
-        txt.setAttribute("stroke-opacity", "0.85");
-        txt.setAttribute("stroke-linejoin", "round");
-        txt.setAttribute("paint-order", "stroke");
         txt.textContent = fmtFootprintQty(v);
         barG.appendChild(txt);
       }
@@ -5387,12 +5375,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", String(deltaFont));
         dTxt.setAttribute("font-weight", "bold");
         dTxt.setAttribute("fill", delta >= 0 ? "var(--good)" : "var(--bad)");
-        // 델타 숫자도 플롯 안이라 같은 밴드 위에 앉는다 -- 셀 숫자와 같은 후광을 준다.
-        dTxt.setAttribute("stroke", "var(--panel-ink-halo)");
-        dTxt.setAttribute("stroke-width", Math.min(2.4, deltaFont * 0.25).toFixed(1));
-        dTxt.setAttribute("stroke-opacity", "0.85");
-        dTxt.setAttribute("stroke-linejoin", "round");
-        dTxt.setAttribute("paint-order", "stroke");
         dTxt.textContent = label;
         const dTitle = document.createElementNS(NS, "title");
         dTitle.textContent = fmtDateTick(c.time * 1000) + " 델타 " + delta.toFixed(1)
