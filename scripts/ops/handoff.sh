@@ -33,6 +33,13 @@ else
 fi
 SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=accept-new $_MUX"
 
+# rsync 압축(-z). 기본은 켜짐 -- 소스·설정·parquet 같은 평문에는 이득이 크다.
+# **이미 압축된 파일을 보낼 때는 꺼야 한다.** 2026-09-22 실측: 수집기가 시각 로테이션에서
+# 이미 gzip 한 파일을 -z 로 다시 압축하면 bookticker 1.0%, depthdiff **-0.0%**(오히려 커짐)
+# 이고 CPU 만 쓴다. 압축은 원천에서 한 번 하는 게 맞고, 전송 때 또 할 이유가 없다.
+#   HANDOFF_RSYNC_Z=0 bash scripts/ops/handoff.sh push server data/live/orderflow/...
+_Z=$([[ "${HANDOFF_RSYNC_Z:-1}" == "0" ]] && echo "" || echo "z")
+
 usage() {
   cat >&2 <<EOF
 Usage:
@@ -65,7 +72,7 @@ do_push() {
   resolve_host "$host"
   for p in "$@"; do
     remote_ssh "mkdir -p '$REPO/$(dirname "$p")'"
-    rsync -avz --progress -e "ssh -p $PORT $SSH_OPTS" "$LOCAL_REPO/$p" "$USERHOST:$REPO/$(dirname "$p")/"
+    rsync -av$_Z --progress -e "ssh -p $PORT $SSH_OPTS" "$LOCAL_REPO/$p" "$USERHOST:$REPO/$(dirname "$p")/"
   done
 }
 
@@ -74,7 +81,7 @@ do_pull() {
   resolve_host "$host"
   for p in "$@"; do
     mkdir -p "$LOCAL_REPO/$(dirname "$p")"
-    rsync -avz --progress -e "ssh -p $PORT $SSH_OPTS" "$USERHOST:$REPO/$p" "$LOCAL_REPO/$(dirname "$p")/"
+    rsync -av$_Z --progress -e "ssh -p $PORT $SSH_OPTS" "$USERHOST:$REPO/$p" "$LOCAL_REPO/$(dirname "$p")/"
   done
 }
 
