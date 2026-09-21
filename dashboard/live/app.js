@@ -3302,6 +3302,19 @@ function renderSituation() {
       + `<td class="tg"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(tgt)}</td></tr>`;
   }).join("");
 
+  // ── 레짐 여유 ── «곧 바뀔 수 있나»를 바뀌기 **전에** 보인다(2026-09-22 사용자 «급변한다»).
+  //   레짐은 |이동|÷창폭 하나로 갈리는데 분자·분모가 둘 다 매 봉 움직여, 선을 스칠 때 아주 작은
+  //   변화가 이름·목표·사전확률·순위를 한꺼번에 뒤집는다. 슈미트 트리거가 빈도를 28% 줄이지만
+  //   경계 구간 자체는 남으므로, 남는 절반은 «지금 경계에 있다»고 말해 주는 게 맞다.
+  const rg = n.regime || {};
+  const near = Number.isFinite(rg.margin) && rg.margin <= 0.08;
+  const rgTxt = Number.isFinite(rg.ratio)
+    ? ` <span class="${near ? "sit-edge" : ""}" title="레짐 = |30분 이동| ÷ 창 고저폭. 지금 ${rg.ratio}`
+      + ` 이고 다음에 상태를 바꾸는 문턱은 ${rg.thr} (여유 ${rg.margin}).`
+      + ` 들어갈 때 ${rg.enter} · 나올 때 ${rg.exit} 로 문턱을 다르게 둬서(슈미트 트리거) 선을 스칠 때마다`
+      + ` 뒤집히지 않게 한다 -- 4.7년 실측으로 «바꿨다 되돌아오는» 변경이 45%에서 28%로 준다.">`
+      + `${rg.ratio} / ${rg.thr}${near ? " 경계" : ""}</span>`
+    : "";
   // ── STATE ── 서버가 고른 라벨 문장을 그대로 쓴다. 클라이언트가 문장을 쪼개 «키: 값»으로
   //   만들려면 한국어 파싱이 필요하고, 그건 서버 문구가 바뀌는 날 조용히 깨진다.
   const state = (n.labels || []).map((t) => {
@@ -3366,7 +3379,7 @@ function renderSituation() {
     <div class="sit-sec">SCENARIOS · 30m<span>휴리스틱 확률</span></div>
     <table class="sit-tbl"><tbody>${scn}</tbody></table>
     <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details>
-    <div class="sit-sec">현재 상황</div>
+    <div class="sit-sec">현재 상황${rgTxt}</div>
     <div class="sit-state">${state}</div>
     <div class="sit-sec">FLIP TRIGGERS<span>${armed} / ${fl.length} 켜짐</span></div>
     <div class="sit-flips">${flips || '<div class="sit-cal">없음</div>'}</div>

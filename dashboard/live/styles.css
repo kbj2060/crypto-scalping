@@ -2962,6 +2962,8 @@ svg {
 .sit-state { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 22px; }
 .sit-state div { padding: 3.5px 0; border-bottom: 1px solid var(--soft-line); }
 .sit-state .hot { color: var(--warn); font-weight: 600; }
+/* 레짐이 문턱에 가까울 때만(2026-09-22) — «활발/임박»과 같은 뜻이라 같은 색을 쓴다 */
+.sit-sec .sit-edge { color: var(--warn); font-weight: 700; }
 
 /* FLIP TRIGGERS */
 .sit-flips { display: grid; gap: 2px; }

@@ -2717,6 +2717,9 @@ def make_app() -> web.Application:
         except Exception:  # noqa: BLE001
             situation_state["book"] = {}
         inp = await asyncio.to_thread(_situation_inputs, now)
+        # 슈미트 트리거의 «이전 레짐». classify 는 순수 함수라 상태를 여기서 들고 넘긴다.
+        # 재기동 직후엔 0(중립)에서 시작한다 -- 추세로 들어가려면 ENTER 를 넘어야 한다.
+        inp["prev_dir"] = (situation_state.get("now") or {}).get("dir") or 0
         res = sit.classify(inp)
         res["computed_at"] = now
         situation_state["now"] = res

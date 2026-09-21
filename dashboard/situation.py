@@ -17,6 +17,17 @@ from typing import Any
 
 WINDOW = 6                 # «이동»을 재는 완결 봉 수 (30분)
 MOVE_THR_FRAC = 0.35       # |이동| > 이 비율 × 창 고저폭 이면 추세. 절대 bp 가 아니라 창 상대
+# 🔴2026-09-22 레짐에 **슈미트 트리거**. 단일 임계(0.35)면 분자(이동)와 분모(창폭)가 둘 다 매 봉
+#   움직여서 선을 스칠 때마다 d 가 뒤집히고, d 가 뒤집히면 이름·목표·사전확률·순위가 **한꺼번에**
+#   바뀐다(사용자 «추세 하락이라다가 갑자기 횡보 위로 이탈»). 4.7년 494,766 결정봉 실측:
+#     현행 0.35      변경 36.1%(평균 14분마다) · 그중 **45%가 10~15분 안에 원래대로 되돌아옴**
+#     0.45 / 0.25    변경 25.8%(−28%)          · 되돌림 **28%** · 직접반전 1.46→1.57% · 추세비중 59→60%
+#   추세 비중이 안 변하므로 BASE 의 기하 기저율 {54,26,20} 도 그대로다(세 설정 모두 동일 실측).
+#   ⭐방향 전환에도 ENTER 를 요구한다 -- 안 그러면 히스테리시스가 중립을 건너뛰는 직접 반전을
+#     늘린다(첫 구현에서 1.46→2.56% 로 악화됐다).
+#   🔴«최소 체류 시간»은 넣지 않는다 -- 09-20 호가 방아쇠 연구에서 역효과였다(얼린 뒤 중립을
+#     건너뛰어 직접 반전 4.75→17.75/시간). 공짜인 것은 슈미트 트리거뿐이었다.
+TREND_ENTER, TREND_EXIT = 0.45, 0.25
 CLIMAX_RECENT = 2          # 최대 델타 봉이 마지막 몇 봉 안에 있어야 «클라이맥스»
 REJECT_FRAC = 0.5          # 거부 봉: 반대 델타가 창 최대 델타의 이 비율 이상
 CUR_MIN_ELAPSED_S = 60     # 현재 봉 시그니처는 이만큼 지나야 읽는다(반쪽 봉 방지)
@@ -112,9 +123,22 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     # ── 이동 ──
     rng_bp = (max(b["high"] for b in w) - min(b["low"] for b in w)) / mid * 1e4
     move_bp = (w[-1]["close"] - bars[-WINDOW - 1]["close"]) / bars[-WINDOW - 1]["close"] * 1e4
-    thr = MOVE_THR_FRAC * rng_bp
-    d = 1 if move_bp > thr else (-1 if move_bp < -thr else 0)
-    ev.update(move_bp=round(move_bp, 1), range_bp=round(rng_bp, 1), dir=d)
+    # 슈미트 트리거. 이전 레짐은 호출자가 넘긴다(이 함수는 순수하게 둔다).
+    ratio = abs(move_bp) / rng_bp if rng_bp > 0 else 0.0
+    sgn = 1 if move_bp > 0 else (-1 if move_bp < 0 else 0)
+    prev = int(inp.get("prev_dir") or 0)
+    if prev == 0:
+        d = sgn if ratio > TREND_ENTER else 0
+    elif sgn == prev:
+        d = 0 if ratio < TREND_EXIT else prev
+    else:                                   # 부호가 뒤집혔다 -- 반전에도 ENTER 를 요구한다
+        d = sgn if ratio > TREND_ENTER else (0 if ratio < TREND_EXIT else prev)
+    # 다음에 상태를 바꿀 문턱과 거기까지의 여유. 화면이 «곧 바뀔 수 있나»를 보이는 데 쓴다.
+    thr_next = TREND_EXIT if (d != 0 and sgn == d) else TREND_ENTER
+    margin = (ratio - thr_next) if (d != 0 and sgn == d) else (thr_next - ratio)
+    thr = thr_next * rng_bp
+    ev.update(move_bp=round(move_bp, 1), range_bp=round(rng_bp, 1), dir=d,
+              move_ratio=round(ratio, 3), thr_next=thr_next, margin=round(margin, 3))
     up, dn = "상승", "하락"
     labels.append({1: f"{up} {move_bp:+.0f}bp", -1: f"{dn} {move_bp:+.0f}bp", 0: f"횡보 (±{thr:.0f}bp 안)"}[d])
 
@@ -359,6 +383,8 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
             ("활발 전환", bool(hot), "B"),
         ]
     return {"ok": True, "dir": d, "labels": labels, "evidence": ev, "prob": prob, "names": names, "names_long": names_long,
+            "regime": {"ratio": round(ratio, 3), "thr": thr_next, "margin": round(margin, 3),
+                       "enter": TREND_ENTER, "exit": TREND_EXIT},
             "targets": targets, "targets_raw": targets_raw,
             "sym": sym, "dist_bp": dist_bp, "scorable": scorable, "passed": passed,
             "why": [{"근거": k, **v} for k, v in why],
@@ -588,6 +614,15 @@ if __name__ == "__main__":
     # 선점돼도 **가격은 남는다**(표시용). 지우면 «어떻게 지나갔는지»를 화면에서 못 본다.
     assert rp["targets_raw"]["A"] == r["targets"]["A"] == 2606, (rp["targets_raw"], r["targets"])
     assert rp["names"]["C"] == "출발점까지" and rp["names_long"]["C"].startswith("플러시"), rp["names"]
+    # 슈미트 트리거: 같은 입력이라도 «이전 레짐»에 따라 답이 달라야 한다.
+    _r = abs(r["evidence"]["move_bp"]) / r["evidence"]["range_bp"]
+    assert TREND_EXIT < _r, ("자체점검 입력이 EXIT 아래다", _r)
+    if _r < TREND_ENTER:      # 경계 안: 중립에서는 못 들어가고, 추세였으면 유지된다
+        assert classify(dict(inp, prev_dir=0))["dir"] == 0
+        assert classify(dict(inp, prev_dir=1))["dir"] == 1
+    else:                     # ENTER 위: 어느 이전 상태에서도 추세다
+        assert classify(dict(inp, prev_dir=0))["dir"] == classify(dict(inp, prev_dir=-1))["dir"] == 1
+    assert r["regime"]["enter"] == TREND_ENTER and r["regime"]["margin"] is not None
     assert resolve({"ts": 2700, "dir": 1, "mid": 2600.0, "targets": rp["targets"]}, [dict(time=2700 + 300 * i, high=2601, low=2599, close=2600) for i in range(7)]) == "none"
     assert r["dist_bp"]["C"] < r["dist_bp"]["A"] < 0 < r["dist_bp"]["B"]   # 상승: A·C 는 아래, B 는 위
     assert [f["on"] for f in r["flips"]] == [False, False, False, False, False]                # 그 시점엔 다 꺼져 있었다
