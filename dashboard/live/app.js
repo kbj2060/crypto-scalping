@@ -3270,6 +3270,13 @@ function renderSituation() {
 
   // ── SCENARIOS ── 막대 색은 **시나리오 키에 고정**한다(k-A/k-B/k-C). 순위로 칠하면
   //   순위가 바뀔 때마다 같은 시나리오가 다른 색이 되어 «색이 정체성»이라는 규약이 깨진다.
+  // 🔴이름을 짧게 만들면서 **방향을 버렸다**(사용자 «더 간다는 건 어디로 더 간다는 건지»).
+  //   방향은 dir 과 시나리오 키에서 결정적으로 나오므로 화살표는 화면이 붙인다 -- 서버의
+  //   names 는 방향 없는 채로 둔다(장부는 상승·하락 추세를 **합쳐** 세므로 거기에 화살표를
+  //   붙이면 거짓이 된다). A·C 는 이동 반대쪽, C 는 더 깊다.
+  const ARROW = n.dir > 0 ? { A: "↓", B: "↑", C: "↓↓" }
+            : n.dir < 0 ? { A: "↑", B: "↓", C: "↑↑" }
+            : { A: "↔", B: "↑", C: "↓" };
   const scn = order.map((k, i) => {
     const t = n.targets[k];
     // 목표가 없는 경우는 **두 가지**이고 뜻이 정반대다 -- 한 문구로 묶으면 오해한다(09-21 사용자 «왜 잔여가 뜨지»).
@@ -3297,7 +3304,7 @@ function renderSituation() {
     const dead = t == null && !holds;
     return `<tr class="${i === 0 ? "" : "sub"}${dead ? " dead" : ""}"><td class="p">${n.prob[k]}%</td>`
       + `<td class="nm"${n.names_long ? ` title="${escapeHtml(n.names_long[k] || "")}"` : ""}>`
-      + `${escapeHtml(n.names[k])}</td>`
+      + `<i class="sit-ar">${ARROW[k]}</i>${escapeHtml(n.names[k])}</td>`
       + `<td><div class="sit-bar"><i style="width:${n.prob[k]}%"></i></div></td>`
       + `<td class="tg"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(tgt)}</td></tr>`;
   }).join("");
@@ -3308,16 +3315,20 @@ function renderSituation() {
   //   경계 구간 자체는 남으므로, 남는 절반은 «지금 경계에 있다»고 말해 주는 게 맞다.
   const rg = n.regime || {};
   const near = Number.isFinite(rg.margin) && rg.margin <= 0.08;
-  const rgTxt = Number.isFinite(rg.ratio)
+  const rgNum = Number.isFinite(rg.ratio)
     ? ` <span class="${near ? "sit-edge" : ""}" title="레짐 = |30분 이동| ÷ 창 고저폭. 지금 ${rg.ratio}`
       + ` 이고 다음에 상태를 바꾸는 문턱은 ${rg.thr} (여유 ${rg.margin}).`
       + ` 들어갈 때 ${rg.enter} · 나올 때 ${rg.exit} 로 문턱을 다르게 둬서(슈미트 트리거) 선을 스칠 때마다`
       + ` 뒤집히지 않게 한다 -- 4.7년 실측으로 «바꿨다 되돌아오는» 변경이 45%에서 28%로 준다.">`
-      + `${rg.ratio} / ${rg.thr}${near ? " 경계" : ""}</span>`
+      + `${rg.ratio.toFixed(2)} / ${rg.thr.toFixed(2)}${near ? " 경계" : ""}</span>`
     : "";
+  // 「지금 무엇인가」를 시나리오 표 **위**에 둔다. labels[0] 은 서버가 이미 만든 문장이라
+  // 그대로 쓴다(«상승 +124bp» / «횡보 (±15bp 안)») -- 클라이언트가 한국어를 다시 만들지 않는다.
+  const regArrow = n.dir > 0 ? "↑" : n.dir < 0 ? "↓" : "↔";
+  const regHead = `${regArrow} ${escapeHtml((n.labels || [])[0] || "")}${rgNum}`;
   // ── STATE ── 서버가 고른 라벨 문장을 그대로 쓴다. 클라이언트가 문장을 쪼개 «키: 값»으로
   //   만들려면 한국어 파싱이 필요하고, 그건 서버 문구가 바뀌는 날 조용히 깨진다.
-  const state = (n.labels || []).map((t) => {
+  const state = (n.labels || []).slice(1).map((t) => {
     const hot = /스퀴즈|클라이맥스|분배|거부|전환 탐지|활발|쿠션 없음/.test(t);
     return `<div${hot ? ' class="hot"' : ""}>${escapeHtml(t)}</div>`;
   }).join("");
@@ -3376,10 +3387,10 @@ function renderSituation() {
   ].filter(Boolean).join("</span><span>");
 
   body.innerHTML = `
-    <div class="sit-sec">SCENARIOS · 30m<span>휴리스틱 확률</span></div>
+    <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
     <table class="sit-tbl"><tbody>${scn}</tbody></table>
     <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details>
-    <div class="sit-sec">현재 상황${rgTxt}</div>
+    <div class="sit-sec">현재 상황</div>
     <div class="sit-state">${state}</div>
     <div class="sit-sec">FLIP TRIGGERS<span>${armed} / ${fl.length} 켜짐</span></div>
     <div class="sit-flips">${flips || '<div class="sit-cal">없음</div>'}</div>

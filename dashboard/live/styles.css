@@ -2948,6 +2948,13 @@ svg {
 .sit-tbl td { padding: 5px 0; vertical-align: middle; }
 .sit-tbl .p { width: 46px; font: 800 16px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .sit-tbl .nm { padding: 5px 8px; width: 42%; }
+/* 방향 화살표(2026-09-22). 이름 앞 고정폭 칸이라 세 행의 이름 시작점이 안 흔들린다.
+   색은 안 준다 -- 초록/빨강은 이 저장소에서 롱/숏·좋음/나쁨으로 예약돼 있고, 여기 ↑↓ 는
+   «가격이 어디로»이지 «좋다/나쁘다»가 아니다(표시 규약 §2). */
+.sit-tbl .nm .sit-ar { display: inline-block; width: 1.6em; font-style: normal;
+                       color: var(--muted); letter-spacing: -.06em; }
+/* 레짐 머리줄 -- 시나리오를 읽기 «전»에 보이는 자리라 흐리게 두지 않는다 */
+.sit-head span { color: var(--ink, inherit); font-weight: 600; letter-spacing: 0; }
 .sit-tbl .tg { width: 76px; text-align: right; padding-left: 10px; font-variant-numeric: tabular-nums; }
 .sit-tbl tr.sub .p, .sit-tbl tr.sub .tg { font-weight: 600; font-size: 13px; color: var(--muted); }
 .sit-tbl tr.dead { opacity: .45; }
