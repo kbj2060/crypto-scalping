@@ -124,4 +124,76 @@ for (const [sv, lab] of [[0.55, "적음"], [1.02, "보통"], [2.10, "많음"]]) 
   ck(texts(els).some((t) => t.includes("─ RVOL 60분 축")), "모바일 한 줄 범례에 RVOL");
   ck(els.badge.hidden === false, "모바일에서도 상단 배지");
 }
+// ══ RVOL 선 레인 (2026-09-23, 누적 CVD 아래) ═══════════════════════════════════
+// 🔴사분면 행과 **다른 블록**이다 -- 따로 잘라 따로 돈다.
+{
+  const i0 = src.indexOf('cachedLayer("rvolLane"');
+  if (i0 < 0) { console.log("🔴 rvolLane 블록을 못 찾음"); process.exit(1); }
+  const open = src.indexOf("{", src.indexOf("(g) => ", i0));
+  let depth = 0, end = open;
+  for (; end < src.length; end++) {
+    if (src[end] === "{") depth++;
+    else if (src[end] === "}" && --depth === 0) { end++; break; }
+  }
+  const LANE = src.slice(open + 1, end - 1);
+
+  function lane({ a = 1.3, b = 1.1, n = 12, worker = true, spike = false } = {}) {
+    const els = [];
+    const mk = (kind) => ({ _a: {}, _kind: kind, kids: [],
+      setAttribute(k, v) { this._a[k] = v; }, appendChild(c) { this.kids.push(c); },
+      set textContent(v) { this._t = v; }, get textContent() { return this._t; } });
+    const document = { createElementNS: (ns, kind) => { const e = mk(kind); els.push(e); return e; } };
+    const T0 = 1789430000 - (1789430000 % 300);
+    const candles = [], rvolBy = new Map(), rvolBar5By = new Map();
+    for (let i = 0; i < n; i++) {
+      const t = T0 + i * 300;
+      candles.push({ time: t });
+      if (worker) {
+        if (Number.isFinite(a)) rvolBy.set(t, a);
+        if (Number.isFinite(b)) rvolBar5By.set(t, spike && i === n - 1 ? 9.8 : b);
+      }
+    }
+    const g = mk("g");
+    new Function("candles", "rvolBy", "rvolBar5By", "rvolMinutes", "rvolBaseDays", "RVOL_H",
+                 "rvolY", "NS", "document", "xAt", "bw", "ml", "cw", "w", "mobileChart", "g",
+                 "{" + LANE + "}")(
+      candles, rvolBy, rvolBar5By, 60, 14, 90, 500, NS, document,
+      (i) => 40 + i * 20, 16, 40, 240, 320, false, g);
+    return els;
+  }
+  const paths = (els) => els.filter((e) => e._kind === "path");
+  const txts = (els) => els.filter((e) => e._kind === "text").map((e) => String(e.textContent));
+
+  // ⑨ 정상 -- 선 둘 · 평소 점선 · 좌측 라벨 · 우측 값 둘
+  {
+    const els = lane();
+    ck(paths(els).length === 2, `선 2줄 (실제 ${paths(els).length})`);
+    const w5 = paths(els).map((e) => Number(e._a["stroke-width"])).sort((x, y) => x - y);
+    ck(w5[0] === 1 && w5[1] === 2.2, `5분은 얇고(1) 1시간은 굵다(2.2) (실제 ${w5})`);
+    ck(els.some((e) => e._kind === "line" && e._a["stroke-dasharray"] === "3 4"), "«평소»(1.0) 점선");
+    ck(txts(els).includes("RVOL"), "좌측 라벨 «RVOL»");
+    ck(txts(els).some((t) => t.includes("━ 60분 1.30배")), `우측 1시간 값 (실제 ${txts(els)})`);
+    ck(txts(els).some((t) => t.includes("─ 5분 1.10배")), "우측 5분 값");
+  }
+  // ⑩ 워커 부재 -- 레인을 **아예 안 그린다**(빈 판을 남기지 않는다)
+  ck(lane({ worker: false }).length === 0, "워커 부재 -> 레인 미생성");
+  // ⑪ 한쪽만 있어도 그린다
+  {
+    const only1h = lane({ b: NaN });
+    ck(paths(only1h).length === 1 && txts(only1h).some((t) => t.includes("60분")),
+       "1시간만 있어도 그린다");
+    const only5m = lane({ a: NaN });
+    ck(paths(only5m).length === 1 && txts(only5m).some((t) => t.includes("5분")),
+       "5분만 있어도 그린다");
+  }
+  // ⑫ 축 잘림 -- 9.8배 스파이크에도 축은 5배에서 멈추고 «평소» 선이 바닥에 안 깔린다
+  {
+    const els = lane({ spike: true });
+    ck(txts(els).some((t) => /축 5\.0배\+/.test(t)), `축 잘림 표기 (실제 ${txts(els).filter((t) => t.includes("축"))})`);
+    const one = els.find((e) => e._kind === "line" && e._a["stroke-dasharray"] === "3 4");
+    ck(Number(one._a.y1) < 500 + 90 - 10, `«평소» 선이 바닥이 아니다 (y=${one._a.y1}, 바닥 590)`);
+  }
+  // ⑬ 봉이 1개뿐이면 선을 못 그린다 -- 조용히 비운다
+  ck(lane({ n: 1 }).length === 0, "봉 1개 -> 레인 미생성");
+}
 process.exit(fail ? 1 : 0);
