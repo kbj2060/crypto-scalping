@@ -1427,14 +1427,14 @@ function renderSnapshotAccount() {
     const marginAt = tgtLev > 0 ? notional / tgtLev : 0;   // 그 배수로 바꾼 뒤의 증거금
     const avail = Number(b.available) || 0;
     const liqPct = Number(pj && pj.liq_pct) || 0;
+    const capNotional = Number(cp && cp.cap_notional_usdt) || 0;
     const expo = Number(pj && pj.exposure_x) || 0;
     const fracPct = Math.round((Number(pl && pl.fraction) || 0) * 100);
     const BIND = { equity: "순자산", ledger: "원장 중앙", model: "위험 모델", survival: "생존" };
     let body;
     if (pj && notional > 0) {
-      const usedPct = equity > 0 ? marginAt / equity * 100 : 0;
       // ③ 이 배수에서 증거금이 감당하는 명목 vs 정책 천장 -- 작은 쪽이 진짜 상한이다.
-      const capN = Number(cp && cp.cap_notional_usdt) || 0;
+      const capN = capNotional;
       const byMargin = avail * (tgtLev || 1);
       const realCap = capN > 0 ? Math.min(capN, byMargin) : byMargin;
       const marginBinds = capN > 0 && byMargin < capN;
@@ -1443,21 +1443,23 @@ function renderSnapshotAccount() {
         + `${cp && cp.binding ? ` (${BIND[cp.binding] || cp.binding})` : ""}`
         + ` → <b class="${marginBinds ? "warn" : ""}">실제 상한 ${fmtUsd(realCap)}</b>`
         + `${marginBinds ? " — 이 배수에서는 <b>증거금이 먼저 막습니다</b>" : ""}</p>`;
-      // ① 게이지 (2026-09-22 2차 지시: «게이지 안에 데이터를 넣지 말고 그려주기만 해»).
-      //   🔴첫 판은 plan.price 를 «평단(예정)»으로 적었는데, 그건 peg 호가라 현재가와
-      //     사실상 같은 수다(실측 평단 $2,736.94 vs 현재 $2,737.36). 같은 숫자를 두 번
-      //     적고 있었던 셈이라 값을 뺀다. 자리는 남긴다 -- 포지션이 열릴 때 카드가 튀지 않고,
-      //     여기가 «그 게이지의 자리»라는 것만 보이면 된다.
-      const isLong = String(pl.positionSide || "LONG") === "LONG";
-      const gauge = `<div class="acct-pos acct-pos-proj" data-side="${isLong ? "long" : "short"}">
-             <div class="acct-pos-head">
-               <b>${escapeHtml(pl.symbol || "")}</b>
-               <span class="acct-tag ${isLong ? "good" : "bad"}">${isLong ? "롱" : "숏"} ×${tgtLev}</span>
-               <span class="acct-pos-qty">${escapeHtml(pl.quantity ?? "")} ETH (예정)</span>
-             </div>
-             <div class="acct-gauge" title="포지션이 열리면 여기에 청산·평단·현재가가 들어갑니다. 지금은 열린 게 없어 눈금만 그립니다.">
+      // ① 게이지 = **증거금** (2026-09-22 3차 지시: 「머리줄도 빼주고 증거금은 진입할 때
+      //   max 치를 게이지에 보여주고 진입비율에 맞는 증거금을 표시해줘」).
+      //   눈금 전체 = 이 배수에서 **쓸 수 있는 최대 증거금**, 채움 = 지금 비율의 증거금.
+      //   🔴최대 = min(정책천장/배수, 가용) 이다. 둘 중 작은 쪽이 진짜 한계라 -- 레버가
+      //     낮으면 가용이, 높으면 정책 천장이 먼저 막는다(실측 lev5 \$2,015 vs lev20 \$604).
+      //   🔴평단·청산은 뺐다(2차 지시). peg 호가라 현재가와 같은 수였다.
+      const marginMax = tgtLev > 0 ? Math.min(capNotional / tgtLev, avail) : avail;
+      const fill = marginMax > 0 ? clamp01(marginAt / marginMax) : 0;
+      const overTone = marginAt > avail ? "bad" : marginAt / Math.max(marginMax, 1e-9) > 0.8 ? "warn" : "good";
+      const gauge = `<div class="acct-pos acct-pos-proj">
+             <div class="acct-gauge" title="눈금 전체가 이 배수에서 쓸 수 있는 최대 증거금입니다 -- min(정책천장 ÷ 배수, 가용). 채움은 지금 진입 비율의 증거금입니다.">
                <span class="acct-gauge-track"></span>
-               <span class="acct-gauge-entry"></span>
+               <span class="acct-gauge-fill ${overTone}" style="width:${(fill * 100).toFixed(1)}%"></span>
+             </div>
+             <div class="acct-gauge-legend">
+               <span class="${overTone}">증거금 ${fmtUsd(marginAt)}</span>
+               <span class="acct-gauge-now">최대 ${fmtUsd(marginMax)}</span>
              </div>
            </div>`;
       body = `<div class="acct-pv-cap entry-cap">지금 설정으로 넣으면 — 레버 ${tgtLev}배 · 비율 ${fracPct}% (포지션 아님)</div>
@@ -1466,12 +1468,12 @@ function renderSnapshotAccount() {
                  `넣은 뒤의 청산 거리입니다.\n교차증거금이라 **레버리지가 아니라 노출**이 정합니다`
                  + ` -- 지금 노출 ${expo.toFixed(1)}배의 역수(${(100 / Math.max(expo, 1e-9)).toFixed(1)}%)입니다.`
                  + `\n비율을 올리면 노출이 커지고 이 값이 줄어듭니다.`)}
-          ${tile("used", "증거금", `${fmtUsd(marginAt)}`,
-                 usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100,
-                 `명목 ${fmtUsd(notional)} ÷ 레버 ${tgtLev}배 = ${fmtUsd(marginAt)}`
-                 + ` (순자산의 ${usedPct.toFixed(0)}%)\n`
+          ${tile("used", "명목", `${fmtUsd(notional)}`, "warn",
+                 realCap > 0 ? notional / realCap : 0,
+                 `지금 비율(${fracPct}%)로 나가는 명목입니다. 눈금은 실제 상한 ${fmtUsd(realCap)} 기준.\n`
+                 + `증거금은 아래 게이지가 말합니다 -- 명목 ÷ 레버 ${tgtLev}배 = ${fmtUsd(marginAt)}.\n`
                  + `🔴거래소 현재 설정은 ${exLev}배입니다 -- 주문 직전에 ${tgtLev}배로 바꿔서 냅니다`
-                 + `(ensure_leverage). 그래서 여기 증거금은 «바꾼 뒤» 기준입니다.`)}
+                 + `(ensure_leverage). 그래서 증거금은 «바꾼 뒤» 기준입니다.`)}
           ${tile("expo", "노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
                  `명목 ${fmtUsd(notional)} ÷ 순자산 ${fmtUsd(equity)}\n`
                  + `🔴레버리지를 바꿔도 이 값은 안 바뀝니다 -- 명목을 정하는 건 비율과 천장입니다.`)}
