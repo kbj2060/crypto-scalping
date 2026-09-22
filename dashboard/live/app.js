@@ -6108,18 +6108,29 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       // 2026-09-22 사용자 «하단 빨강 · 상단 초록». 뜻과 색이 맞는다: 상단 **위**로 벗어나면
       // veto=+1(롱만 허용 = 상승 추세), 하단 **아래**면 -1(숏만 = 하락). 저장소 규약대로
       // 초록=상승·빨강=하락이다. 선은 밴드 면보다 진해야 «경계»로 읽힌다.
-      const edge = (key, tone) => {
+      const edge = (key, tone, pct, dash) => {
         const pl = document.createElementNS(NS, "polyline");
         pl.setAttribute("points", vp.map((p) => `${cx(p.i).toFixed(1)},${yAt(key(p)).toFixed(1)}`).join(" "));
         pl.setAttribute("fill", "none");
-        pl.setAttribute("stroke", `color-mix(in srgb, var(--${tone}) 62%, transparent)`);
+        pl.setAttribute("stroke", `color-mix(in srgb, var(--${tone}) ${pct || 62}%, transparent)`);
         pl.setAttribute("stroke-width", "1.25");
         pl.setAttribute("stroke-linejoin", "round");
+        if (dash) pl.setAttribute("stroke-dasharray", dash);
         return pl;
       };
       g.appendChild(band);
       g.appendChild(edge((p) => p.sma + p.atr, "good"));   // 상단: 위로 벗어나면 상승(롱만)
       g.appendChild(edge((p) => p.sma - p.atr, "bad"));    // 하단: 아래로 벗어나면 하락(숏만)
+      // ── ±2×ATR (2026-09-23) ─────────────────────────────────────────────────
+      // 편익은 밴드 «가장자리»가 아니라 **2×ATR 밖**에 있다. ETH 5m 4.7년 R1
+      // (허용 측면 − 금지 측면, TP1.5/SL0.7/24h, USDC 1.36bp 차감):
+      //   |z|<0.5 롱 −0.18 / 숏 −1.15   ← 밴드 깊숙한 곳은 편익이 **0 또는 음수**
+      //   1.0~1.5 롱 +0.65 / 숏 +3.90
+      //   2.0~3.0 롱 +5.92 / 숏 +11.76  · 3.0+ 롱 +6.42 / 숏 +9.10
+      // ±1 은 «언제 뒤집는가»(히스테리시스)를 정하고, ±2 는 «지금 믿을 만한가»를 말한다.
+      // 그래서 서로 다른 선이고 둘 다 필요하다. 서버 변경 0 — sma·atr 이 이미 온다.
+      g.appendChild(edge((p) => p.sma + 2 * p.atr, "good", 30, "2 4"));
+      g.appendChild(edge((p) => p.sma - 2 * p.atr, "bad", 30, "2 4"));
       const side = vp[vp.length - 1].v;
       const col = side > 0 ? "var(--good)" : side < 0 ? "var(--bad)" : "var(--muted)";
       const closed = live ? vp.slice(0, -1) : vp;
@@ -6142,7 +6153,20 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       tag.setAttribute("x", cx(last.i) - 4); tag.setAttribute("y", yAt(last.sma) - 5);
       tag.setAttribute("text-anchor", "end"); tag.setAttribute("font-size", "9");
       tag.setAttribute("fill", col);
-      tag.textContent = side > 0 ? "추세 veto: 롱만" : side < 0 ? "추세 veto: 숏만" : "추세 veto: 워밍업";
+      // 세기 = |종가 − SMA| / ATR. 위 R1 표의 세 구간과 같은 경계다(<1 / 1~2 / ≥2).
+      const lastClose = Number(candles[last.i] && candles[last.i].close);
+      const zAbs = last.atr > 0 && Number.isFinite(lastClose)
+        ? Math.abs(lastClose - last.sma) / last.atr : NaN;
+      const grade = !Number.isFinite(zAbs) ? "" : zAbs >= 2 ? " · 강" : zAbs >= 1 ? " · 보통" : " · 약";
+      tag.textContent = (side > 0 ? "추세 veto: 롱만" : side < 0 ? "추세 veto: 숏만" : "추세 veto: 워밍업")
+        + (side === 0 ? "" : grade + (Number.isFinite(zAbs) ? ` (${zAbs.toFixed(1)}×ATR)` : ""));
+      const tagT = document.createElementNS(NS, "title");
+      tagT.textContent = "점선 = ±2×ATR. ETH 5m 4.7년 실측에서 허용 측면의 우위는 여기서부터 나온다 — "
+        + "|거리|<0.5×ATR 롱 −0.2 / 숏 −1.2bp, 1~1.5 롱 +0.7 / 숏 +3.9, 2~3 롱 +5.9 / 숏 +11.8bp.\n"
+        + "🔴 우위는 대칭이 아니다: 롱 쪽 값은 «위에서 롱이 좋다»가 아니라 «SMA 한참 아래에서 롱 금지»다"
+        + "(십분위 실측 — 가장 아래 롱 −7.5bp, 가장 위 롱 −0.1bp).\n"
+        + "🔴 ETH 5m 에서만 검정됐다.";
+      tag.appendChild(tagT);
       g.appendChild(tag);
       svg.appendChild(g);
     }
