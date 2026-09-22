@@ -6166,6 +6166,26 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
     if (vp.length >= 2) {
       const g = document.createElementNS(NS, "g");
+      // 🔴가격 플롯 **밖으로 새지 않게** 자른다(2026-09-23 회귀 수정). `yAt` 은 경계를 모르므로
+      //   SMA144 가 보이는 가격 범위에서 멀어지면 밴드가 플롯 바닥을 넘어 **아래 레인(사분면·
+      //   누적 CVD) 위에 그려진다**. 실측: 플롯 바닥 y=1032 인데 밴드 면이 y=1202 까지 내려와
+      //   사분면 막대(1038~1170)를 통째로 덮었다. 레인 좌표는 정상이었다 -- 새는 건 밴드였다.
+      //   좌표를 손으로 자르지 않고 **SVG 네이티브 clipPath** 를 쓴다(선이 경계에서 끊긴다).
+      const clipId = (svg.id || "chart") + "-plotclip";
+      if (!svg.querySelector("clipPath#" + clipId)) {
+        const defs = document.createElementNS(NS, "defs");
+        const cp = document.createElementNS(NS, "clipPath");
+        cp.setAttribute("id", clipId);
+        const cr = document.createElementNS(NS, "rect");
+        cr.setAttribute("x", ml); cr.setAttribute("y", mt);
+        cr.setAttribute("width", cw); cr.setAttribute("height", ch);
+        cp.appendChild(cr); defs.appendChild(cp); svg.appendChild(defs);
+      }
+      // 🔴그림만 자르고 **꼬리표는 안 자른다** -- 밴드가 화면 밖이어도 «지금 어느 측면인가»는
+      //   계속 읽혀야 한다. 그래서 자르는 하위 그룹을 따로 둔다.
+      const gClip = document.createElementNS(NS, "g");
+      gClip.setAttribute("clip-path", `url(#${clipId})`);
+      g.appendChild(gClip);
       const cx = (i) => xAt(i) + bw / 2;
       const band = document.createElementNS(NS, "polygon");
       band.setAttribute("points",
@@ -6186,9 +6206,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (dash) pl.setAttribute("stroke-dasharray", dash);
         return pl;
       };
-      g.appendChild(band);
-      g.appendChild(edge((p) => p.sma + bandK * p.atr, "good"));  // 상단: 위로 벗어나면 상승(롱만)
-      g.appendChild(edge((p) => p.sma - bandK * p.atr, "bad"));   // 하단: 아래로 벗어나면 하락(숏만)
+      gClip.appendChild(band);
+      gClip.appendChild(edge((p) => p.sma + bandK * p.atr, "good"));  // 상단: 위로 벗어나면 상승(롱만)
+      gClip.appendChild(edge((p) => p.sma - bandK * p.atr, "bad"));   // 하단: 아래로 벗어나면 하락(숏만)
       // ── 참조선: 밴드와 «편익이 시작되는 2xATR» 중 안 겹치는 쪽을 점선으로 ───────────
       // 🔴둘은 다른 물건이다. 밴드(실선)는 «언제 뒤집히나»(히스테리시스)이고, 2xATR 은
       //   «지금 얼마나 믿을 만한가»다. ETH 5m 4.7년 R1(허용−금지):
@@ -6196,8 +6216,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       //   2026-09-23 밴드를 2xATR 로 올려봤다가 되돌렸다 -- 지그재그 채점에서 추세 일치율·
       //   전환 포착률이 **단조로 나빠졌다**(서버 TREND_VETO_K 주석). 두 선은 계속 분리한다.
       const refK = bandK < 1.8 ? 2 : 1;
-      g.appendChild(edge((p) => p.sma + refK * p.atr, "good", 30, "2 4"));
-      g.appendChild(edge((p) => p.sma - refK * p.atr, "bad", 30, "2 4"));
+      gClip.appendChild(edge((p) => p.sma + refK * p.atr, "good", 30, "2 4"));
+      gClip.appendChild(edge((p) => p.sma - refK * p.atr, "bad", 30, "2 4"));
       const side = vp[vp.length - 1].v;
       const col = side > 0 ? "var(--good)" : side < 0 ? "var(--bad)" : "var(--muted)";
       const closed = live ? vp.slice(0, -1) : vp;
@@ -6211,13 +6231,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         t.textContent = "추세 veto -- SMA144 ±1.0×ATR 히스테리시스. " +
           (side > 0 ? "롱만 허용" : side < 0 ? "숏만 허용" : "워밍업") +
           (dashed ? " · 현재 봉은 미확정(종가로 확정된다)" : "") + " (ETH 5m 에서만 검정됨)";
-        el.appendChild(t); g.appendChild(el);
+        el.appendChild(t); gClip.appendChild(el);
       };
       if (closed.length >= 2) mkLine(closed, false);
       if (live) mkLine([closed[closed.length - 1], live], true);
       const last = vp[vp.length - 1];
       const tag = document.createElementNS(NS, "text");
-      tag.setAttribute("x", cx(last.i) - 4); tag.setAttribute("y", yAt(last.sma) - 5);
+      // 꼬리표는 안 자르는 대신 **플롯 안으로 잡아둔다** -- 안 그러면 밴드가 화면 밖일 때
+      // 글자만 아래 레인 위에 떠서 같은 문제가 난다.
+      tag.setAttribute("x", cx(last.i) - 4);
+      tag.setAttribute("y", Math.min(Math.max(yAt(last.sma) - 5, mt + 10), mt + ch - 4));
       tag.setAttribute("text-anchor", "end"); tag.setAttribute("font-size", "9");
       tag.setAttribute("fill", col);
       // 세기 = |종가 − SMA| / ATR. 위 R1 표의 세 구간과 같은 경계다(<1 / 1~2 / ≥2).

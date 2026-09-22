@@ -19,7 +19,8 @@ for (; end < src.length; end++) {
 const BLOCK = src.slice(open, end);
 
 const NS = "http://www.w3.org/2000/svg";
-function run({ n = 8, atr = 2, closeLast = 100, warmup = false, live = false, vk = 1 } = {}) {
+function run({ n = 8, atr = 2, closeLast = 100, warmup = false, live = false, vk = 1,
+               smaOut = null } = {}) {
   const els = [];
   const mk = (kind) => ({ _a: {}, _kind: kind, kids: [],
     setAttribute(k, v) { this._a[k] = v; }, appendChild(c) { this.kids.push(c); },
@@ -30,15 +31,20 @@ function run({ n = 8, atr = 2, closeLast = 100, warmup = false, live = false, vk
     const last = i === n - 1;
     const cl = last ? closeLast : 100;
     const row = { close: cl, high: cl + 1, low: cl - 1, open: cl,
-                  sma: 100, atr, veto: warmup ? 0 : 1, drop: 100, vn: 144, vk };
+                  sma: smaOut === null ? 100 : smaOut, atr,
+                  veto: warmup ? 0 : 1, drop: 100, vn: 144, vk };
     if (live && last) { delete row.sma; delete row.atr; delete row.veto; }  // 형성 중 봉
     candles.push(row);
   }
   const svg = mk("svg");
+  svg.id = "candleSvgSnapshot";
+  svg.querySelector = (sel) => els.find((e) => e._kind === "clipPath" && ("clipPath#" + e._a.id) === sel) || null;
   // y 는 «가격 그대로» 로 두면 좌표에서 값을 되읽을 수 있다(부호만 뒤집힌 화면좌표 대신).
   // els 는 document 스텁의 클로저에 이미 쌓인다 -- 블록 자체는 아무것도 반환하지 않는다.
-  new Function("candles", "svg", "NS", "document", "xAt", "yAt", "bw", "{" + BLOCK + "}")(
-    candles, svg, NS, document, (i) => i * 10, (v) => v, 8);
+  // 기하: 플롯은 y ∈ [mt, mt+ch] = [0, 200]. yAt 은 항등이라 «가격 = y» 다.
+  new Function("candles", "svg", "NS", "document", "xAt", "yAt", "bw", "ml", "mt", "cw", "ch",
+               "{" + BLOCK + "}")(
+    candles, svg, NS, document, (i) => i * 10, (v) => v, 8, 0, 0, 500, 200);
   return { els, svg };
 }
 
@@ -76,6 +82,29 @@ const ck = (cond, what) => { if (!cond) { console.log("🔴 " + what); fail++; }
                                   && Number(e._a["stroke-width"]) === 1.25);
   const sy = solid.map((e) => Number(e._a.points.split(" ")[0].split(",")[1])).sort((a, b) => a - b);
   ck(sy[0] === 98 && sy[1] === 102, `vk 없음 -> 실선이 ±1×ATR (실제 ${sy})`);
+}
+// ①d 🔴회귀 방지: 밴드·선이 **잘리는 그룹** 안에 있어야 한다
+//    (2026-09-23 실사고 — 밴드가 플롯 바닥 y=1032 를 넘어 y=1202 까지 내려와 사분면 막대를 덮었다)
+{
+  const { els } = run({ atr: 2 });
+  const cp = els.find((e) => e._kind === "clipPath");
+  ck(!!cp, "clipPath 가 만들어진다");
+  const clipped = els.find((e) => e._kind === "g" && e._a["clip-path"]);
+  ck(!!clipped && clipped._a["clip-path"] === `url(#${cp._a.id})`,
+     `잘리는 하위 그룹이 그 clipPath 를 쓴다 (실제 ${clipped && clipped._a["clip-path"]})`);
+  // 밴드 면·실선·점선·SMA 선이 전부 그 그룹 안에 있어야 한다
+  const kinds = clipped.kids.map((e) => e._kind);
+  ck(kinds.filter((k) => k === "polygon").length === 1, `밴드 면이 그룹 안 (${kinds})`);
+  ck(kinds.filter((k) => k === "polyline").length >= 4, `실선2+점선2+SMA 가 그룹 안 (${kinds})`);
+  // 🔴꼬리표는 **밖**이어야 한다 -- 밴드가 화면 밖이어도 측면은 읽혀야 하니까
+  ck(!kinds.includes("text"), "꼬리표는 잘리는 그룹 밖");
+}
+// ①e 꼬리표 y 는 플롯 안으로 잡힌다 (SMA 가 플롯 밖이어도)
+{
+  const { els } = run({ atr: 2, smaOut: 9999 });
+  const tag = els.filter((e) => e._kind === "text").pop();
+  const y = Number(tag._a.y);
+  ck(y >= 0 && y <= 200, `SMA 가 플롯 밖(9999)이어도 꼬리표 y=${y} 가 [0,200] 안`);
 }
 // ② 등급 경계 -- |종가−SMA|/ATR 이 <1 / 1~2 / ≥2
 for (const [close, want] of [[101.5, "약"], [103, "보통"], [105, "강"], [95, "강"]]) {
