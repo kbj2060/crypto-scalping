@@ -34,8 +34,10 @@ def main() -> int:
     spec.loader.exec_module(m)
 
     def trip(entry: int, side: str = "LONG", closed: bool = True, **extra) -> dict:
+        # pnl_check_bp 는 항등식 가드(0.5bp)가 보는 값이다 -- 없으면 «체결 스트림이 잘렸다»로
+        # 전부 거부된다. 기본은 완전히 닫힌 왕복의 정상값 0.0 이다.
         return {"symbol": "ETHUSDT", "side": side, "entry_time": entry, "max_qty": 1.0,
-                "net_pnl": -1.0, "closed": closed, **extra}
+                "net_pnl": -1.0, "closed": closed, "pnl_check_bp": 0.0, **extra}
 
     def payload(*trips, ok: bool = True) -> dict:
         return {"ok": ok, "trades": list(trips)}
@@ -47,9 +49,9 @@ def main() -> int:
         m.ACCOUNT_TRIP_LEDGER_PATH = pathlib.Path(td) / "trips.jsonl"
         record, load_keys = m.record_account_trips, m.load_account_trip_keys
 
-        assert load_keys() == set(), "파일이 없으면 빈 집합"
+        assert load_keys() == {}, "파일이 없으면 빈 사전"
 
-        seen: set[str] = set()
+        seen: dict[str, tuple[str, str, int, int]] = {}
         assert record(payload(trip(1000), trip(2000, closed=False)), seen) == 1, "미청산은 적지 않는다"
         assert record(payload(trip(1000), trip(2000, closed=False)), seen) == 0, "같은 왕복 재기록 금지"
         assert [t["entry_time"] for t in lines()] == [1000]

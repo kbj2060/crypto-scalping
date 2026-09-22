@@ -290,6 +290,36 @@ ACCOUNT_TRIP_RECORD_SECONDS = 300.0
 ACCOUNT_TRIP_CHECK_TOL_BP = 0.5   # 올바른 폴딩은 0.0000 이다. 0.5 는 부동소수 여유일 뿐이다
 
 
+ACCOUNT_TRIP_CARD_ROWS = 400      # 카드가 그릴 최대 왕복 수. 하루 ~20건이면 20일치다
+
+
+def load_account_trip_rows() -> list[dict]:
+    """카드가 그릴 원장 꼬리. **화면이 거래소 payload 대신 이걸 그린다**(2026-09-22).
+
+    userTrades 는 7일 롤링이라, 창 앞에서 열린 포지션은 진입 체결이 사라져 폴딩이 포지션
+    한가운데서 시작한다. 그때의 왕복은 수량·진입가가 틀리고 없던 왕복까지 생긴다(실측:
+    ETHUSDT 8건 중 3건이 유령, 6건이 항등식 불일치, 승률 50% vs 실제 80%). 원장은 그날그날
+    항등식·겹침을 통과한 것만 담고 7일이 지나도 남으므로, 화면이 믿을 수 있는 유일한 판이다.
+
+    ponytail: 꼬리만 읽는다(liq_events_load 와 같은 패턴). 매 조회마다 파일을 훑지만 30초
+    캐시 뒤이고 지금 40KB 다. 수 MB 가 되면 바이트 tail 로 바꾼다."""
+    try:
+        with open(ACCOUNT_TRIP_LEDGER_PATH, encoding="utf-8") as fh:
+            tail = deque(fh, maxlen=ACCOUNT_TRIP_CARD_ROWS)
+    except OSError:
+        return []
+    keep = ("symbol", "side", "entry_time", "exit_time", "entry_price", "exit_price",
+            "max_qty", "net_pnl")
+    rows = []
+    for line in tail:
+        try:
+            trip = json.loads(line)
+        except ValueError:
+            continue      # 마지막 줄이 쓰다 만 상태일 수 있다
+        rows.append({k: trip.get(k) for k in keep})
+    return rows
+
+
 def trip_key(trip: dict) -> str:
     """왕복 하나의 신원. **이 계좌는 헤지 모드**라 같은 심볼에 LONG/SHORT 가 동시에 열린다 --
     side 를 빼면 서로 다른 두 왕복이 한 건으로 뭉개진다."""
@@ -3052,6 +3082,10 @@ def make_app() -> web.Application:
         added = record_account_trips(payload, account_trip_state["seen"])
         if added:
             print(f"account_round_trips: +{added}건 (누적 {len(account_trip_state['seen'])}건)", flush=True)
+        # 기록 **뒤에** 싣는다 -- 방금 닫힌 왕복이 같은 응답에 들어간다(원장 주기 300초는
+        # 브라우저가 닫혀 있을 때의 보험일 뿐, 화면 요청도 이 함수를 지난다).
+        if isinstance(payload, dict):
+            payload["ledger"] = load_account_trip_rows()
         return payload
 
     async def keep_trip_ledger() -> None:
