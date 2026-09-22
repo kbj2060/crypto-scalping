@@ -2773,7 +2773,9 @@ svg {
     var(--seg-thumb) 55%,
     color-mix(in srgb, var(--seg-thumb) 120%, transparent));
 }
-#chartWindowTabs { --seg-n: 3; }   /* 1h · 2h · 4h */
+/* 폴백값. 실제 칸 수와 선택 위치는 renderChartWindowTabs() 가 인라인으로 넣는다 --
+   여기 숫자를 버튼 수와 맞춰 두는 걸 잊으면 선택 칸이 어긋난다(2026-09-23 실제로 그랬다). */
+#chartWindowTabs { --seg-n: 4; }   /* 1h · 2h · 4h · 12h */
 #chartModeTabs { --seg-n: 2; }     /* 청산맵 · 풋프린트 */
 /* 선택 칸. 테두리도 그림자도 없다 -- 참조 이미지처럼 «조금 더 밝은 면» 하나다.
    이동은 transform 뿐이라 리플로우가 없고, 칸이 등폭이라 제 폭의 100% 씩 옮기면 맞는다. */

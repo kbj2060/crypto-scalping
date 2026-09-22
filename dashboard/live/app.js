@@ -610,9 +610,23 @@ function setupChartWindowTabs() {
 }
 
 function renderChartWindowTabs() {
-  document.querySelectorAll("#chartWindowTabs .asset-tab").forEach((btn) => {
-    btn.classList.toggle("active", Number(btn.dataset.bars) === chartWindowBars);
+  const host = document.getElementById("chartWindowTabs");
+  const tabs = [...document.querySelectorAll("#chartWindowTabs .asset-tab")];
+  let idx = 0;
+  tabs.forEach((btn, k) => {
+    const on = Number(btn.dataset.bars) === chartWindowBars;
+    btn.classList.toggle("active", on);
+    if (on) idx = k;
   });
+  // 🔴선택 칸(.chart-mode-tabs::before)의 **폭과 위치는 CSS 변수**다. 전에는 둘 다 칸 수를
+  //   3 으로 박아 뒀다: `#chartWindowTabs { --seg-n: 3 }` 와 `:has(nth-child(2|3).active)`
+  //   두 규칙뿐. 그래서 12h(4번째)를 고르면 칸이 **1/3 폭으로 첫 자리에 돌아갔다** --
+  //   데이터는 바뀌는데 하이라이트는 1h 에 남아 «안 눌렸다»로 보였다(사용자 신고).
+  //   버튼 수와 선택 위치를 여기서 읽어 넣는다. 칸이 또 늘어도 CSS 를 안 고쳐도 된다.
+  if (host) {
+    host.style.setProperty("--seg-n", String(tabs.length));
+    host.style.setProperty("--i", String(idx));
+  }
 }
 
 function setupSnapshotAssetTabs() {
