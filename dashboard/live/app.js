@@ -1274,6 +1274,9 @@ let entryProjKey = "";
 //   미리보기(/api/manual-entry/preview)가 이미 받아오는 cap 을 그대로 들고 있는다 --
 //   새 엔드포인트도 새 폴링도 없다. 포지션이 없을 때 이 값으로 타일을 채운다.
 let lastEntryCap = null;
+// 2026-09-22 (2)(3): 타일·게이지가 «지금 칩 설정»을 따라야 하므로 cap 만으로는 모자란다.
+//   cap 은 천장이라 비율·배수에 안 움직인다(실측). 움직이는 건 plan.projection 이다.
+let lastEntryPlan = null;
 
 function renderSnapshotAccount() {
   const summary = el("snapAcctSummary");
@@ -1405,41 +1408,96 @@ function renderSnapshotAccount() {
     ? `<p class="acct-foot">다른 코인에 ${others}종목을 더 보유 중입니다 — 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
     : "";
   if (!pos) {
-    // ── 포지션이 없어도 «최대» 를 띄운다 (2026-09-22 아티팩트 댓글) ──────────────
-    // 빈 카드는 «지금 얼마나 넣을 수 있나»에 답하지 않는다. 사이징 서버가 이미 상한을
-    // 계산해 미리보기에 실어 보내므로(lastEntryCap) 같은 타일 모양으로 그 천장을 그린다.
-    // 🔴«증거금 사용» 자리를 «최대 명목»이 대신한다 -- 포지션이 0 이면 사용률도 0 이라
-    //   아무것도 재고 있지 않다. 여기서 알고 싶은 건 사용률이 아니라 **넣을 수 있는 양**이다.
-    // 🔴이 값은 «지금 진입 비율» 과 무관한 천장이다(실측: pct 25 와 100 에서 동일).
-    //   비율은 이 천장의 몇 %를 쓸지만 정한다.
-    const cp = lastEntryCap;
-    const capN = Number(cp && cp.cap_notional_usdt) || 0;
-    const capX = Number(cp && cp.equity_x) || 0;
-    const capLiq = Number(cp && cp.liq_floor_pct) || 0;
+    // ── 포지션이 없어도 «지금 설정으로 넣으면» 을 그린다 (2026-09-22 아티팩트 댓글) ──
+    // 요청 셋: ①평단가 게이지도 항상 ②레버·비율을 바꾸면 값이 따라 움직이게 ③이 배수에서
+    // 증거금으로 얼마까지 되는지.
+    // 🔴실측이 설계를 갈랐다(lev 5/10/20/50 × pct 25/100 스윕):
+    //   **비율은 전부 움직이고(증거금 151->604 · 노출 1.5->6.0 · 청산 66.7->16.7%),
+    //     레버리지는 서버 응답을 하나도 안 움직인다.** want_lev 는 plan.target_leverage
+    //     표시에만 쓰이고, 증거금은 «거래소 실제 설정»(leverage_by_symbol, 지금 20배)으로
+    //     계산되기 때문이다. 그래서 천장(cap)이 아니라 **projection** 을 읽고, 배수 축은
+    //     여기서 직접 나눈다 -- 주문 직전 ensure_leverage(target_leverage) 가 실제로
+    //     거래소 배수를 바꾸므로(live_manual_peg_execute_20260912.py:168) 거짓이 아니다.
+    //   청산 거리는 교차증거금이라 배수가 아니라 **노출**이 정한다(실측 1/노출).
+    const pl = lastEntryPlan, cp = lastEntryCap;
+    const pj = pl && pl.projection && pl.projection.after;
+    const tgtLev = Number(pl && pl.target_leverage) || 0;
+    const exLev = Number(pl && pl.leverage) || 0;          // 거래소 현재 설정
+    const notional = Number(pj && pj.notional_usdt) || 0;
+    const marginAt = tgtLev > 0 ? notional / tgtLev : 0;   // 그 배수로 바꾼 뒤의 증거금
+    const avail = Number(b.available) || 0;
+    const liqPct = Number(pj && pj.liq_pct) || 0;
+    const expo = Number(pj && pj.exposure_x) || 0;
+    const fracPct = Math.round((Number(pl && pl.fraction) || 0) * 100);
     const BIND = { equity: "순자산", ledger: "원장 중앙", model: "위험 모델", survival: "생존" };
-    const body = capN > 0
-      ? `<div class="acct-pv-cap entry-cap">최대 — 지금 넣을 수 있는 천장 (포지션 아님)</div>
-         <div class="acct-tiles">
-           ${tile("liq", "청산까지", `${capLiq.toFixed(1)}%`, acctRiskTone(capLiq),
-                  capLiq / LIQ_FULL,
-                  `천장까지 넣었을 때의 청산 거리입니다.\n교차증거금이라 지갑 전체가 버팁니다.`)}
-           ${tile("used", "최대 명목", fmtUsd(capN), "warn", capX / EXPO_CAP,
-                  `묶는 조건: ${BIND[cp.binding] || cp.binding || "—"}\n`
-                  + `순자산 ${fmtUsd(cp.cap_equity_usdt)} · 원장 ${fmtUsd(cp.cap_ledger_usdt)}`
-                  + ` · 모델 ${fmtUsd(cp.cap_model_usdt)} 중 **가장 작은 것**입니다.\n`
-                  + `최근 ${cp.trips ?? "—"}왕복 중앙 명목 ${fmtUsd(cp.median_notional_usdt)} × ${cp.mult ?? "—"}`)}
-           ${tile("expo", "최대 노출", `${capX.toFixed(1)}배`, capX > 15 ? "bad" : "warn",
-                  capX / EXPO_CAP,
-                  `명목 ${fmtUsd(capN)} ÷ 순자산 ${fmtUsd(equity)}\n`
-                  + `진입 비율은 이 천장의 몇 %를 쓸지만 정합니다 — 천장 자체는 안 움직입니다.`)}
-         </div>`
-      : `<div class="acct-empty">${ASSET_CONFIG[activeSnapshotAsset]?.label
-          || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.${
-          cp === null ? " (상한은 크기 워커가 값을 내면 표시됩니다)" : ""}</div>`;
+    let body;
+    if (pj && notional > 0) {
+      const usedPct = equity > 0 ? marginAt / equity * 100 : 0;
+      // ③ 이 배수에서 증거금이 감당하는 명목 vs 정책 천장 -- 작은 쪽이 진짜 상한이다.
+      const capN = Number(cp && cp.cap_notional_usdt) || 0;
+      const byMargin = avail * (tgtLev || 1);
+      const realCap = capN > 0 ? Math.min(capN, byMargin) : byMargin;
+      const marginBinds = capN > 0 && byMargin < capN;
+      const room = `<p class="acct-foot">레버 ${tgtLev}배 → 가용 ${fmtUsd(avail)} 로 `
+        + `<b>${fmtUsd(byMargin)}</b> 까지 · 정책 천장 ${fmtUsd(capN)}`
+        + `${cp && cp.binding ? ` (${BIND[cp.binding] || cp.binding})` : ""}`
+        + ` → <b class="${marginBinds ? "warn" : ""}">실제 상한 ${fmtUsd(realCap)}</b>`
+        + `${marginBinds ? " — 이 배수에서는 <b>증거금이 먼저 막습니다</b>" : ""}</p>`;
+      // ① 게이지: 포지션이 없으므로 «넣었다면» 의 진입가·청산가다. 실선이 아니라 점선 테두리
+      //    (.acct-pos-proj)로 «아직 아님»을 표시한다.
+      const entryPx = Number(pl.price) || 0;
+      const isLong = String(pl.positionSide || "LONG") === "LONG";
+      const liqPx = entryPx > 0 ? entryPx * (isLong ? 1 - liqPct / 100 : 1 + liqPct / 100) : 0;
+      const mark = Number(latestLivePriceByAsset[activeSnapshotAsset]) || entryPx;
+      const span = Math.abs(entryPx - liqPx) * 2;
+      const safe = span > 0 ? clamp01(Math.abs(mark - liqPx) / span) : 0;
+      const gauge = entryPx > 0 && liqPx > 0
+        ? `<div class="acct-pos acct-pos-proj" data-side="${isLong ? "long" : "short"}">
+             <div class="acct-pos-head">
+               <b>${escapeHtml(pl.symbol || "")}</b>
+               <span class="acct-tag ${isLong ? "good" : "bad"}">${isLong ? "롱" : "숏"} ×${tgtLev}</span>
+               <span class="acct-pos-qty">${escapeHtml(pl.quantity ?? "")} ETH (예정)</span>
+             </div>
+             <div class="acct-gauge" title="포지션이 없으므로 «지금 넣었다면» 의 자리입니다. 왼쪽 끝이 청산가, 가운데 눈금이 진입가입니다.">
+               <span class="acct-gauge-track"></span>
+               <span class="acct-gauge-entry"></span>
+               <span class="acct-gauge-knob" style="left:${(safe * 100).toFixed(1)}%"></span>
+             </div>
+             <div class="acct-gauge-legend">
+               <span class="bad">청산 ${fmtUsd(liqPx)}</span>
+               <span>평단 ${fmtUsd(entryPx)} (예정)</span>
+               <span class="acct-gauge-now">현재 ${fmtUsd(mark)}</span>
+             </div>
+           </div>`
+        : "";
+      body = `<div class="acct-pv-cap entry-cap">지금 설정으로 넣으면 — 레버 ${tgtLev}배 · 비율 ${fracPct}% (포지션 아님)</div>
+        <div class="acct-tiles">
+          ${tile("liq", "청산까지", `${liqPct.toFixed(1)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
+                 `넣은 뒤의 청산 거리입니다.\n교차증거금이라 **레버리지가 아니라 노출**이 정합니다`
+                 + ` -- 지금 노출 ${expo.toFixed(1)}배의 역수(${(100 / Math.max(expo, 1e-9)).toFixed(1)}%)입니다.`
+                 + `\n비율을 올리면 노출이 커지고 이 값이 줄어듭니다.`)}
+          ${tile("used", "증거금", `${fmtUsd(marginAt)}`,
+                 usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100,
+                 `명목 ${fmtUsd(notional)} ÷ 레버 ${tgtLev}배 = ${fmtUsd(marginAt)}`
+                 + ` (순자산의 ${usedPct.toFixed(0)}%)\n`
+                 + `🔴거래소 현재 설정은 ${exLev}배입니다 -- 주문 직전에 ${tgtLev}배로 바꿔서 냅니다`
+                 + `(ensure_leverage). 그래서 여기 증거금은 «바꾼 뒤» 기준입니다.`)}
+          ${tile("expo", "노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
+                 `명목 ${fmtUsd(notional)} ÷ 순자산 ${fmtUsd(equity)}\n`
+                 + `🔴레버리지를 바꿔도 이 값은 안 바뀝니다 -- 명목을 정하는 건 비율과 천장입니다.`)}
+        </div>${gauge}${room}`;
+    } else {
+      body = `<div class="acct-empty">${ASSET_CONFIG[activeSnapshotAsset]?.label
+        || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.${
+        pl === null ? " (크기 워커가 값을 내면 여기에 «지금 넣으면»이 뜹니다)" : ""}</div>`;
+    }
     setH("snapAcctPosition", `<div class="acct-card">
         <div class="acct-main">${hero}${body}</div>${perf}
       </div>${otherNote}`);
     bindAcctChartTip();
+    // 🔴패처(applyAcctPreview)는 «실제 포지션» 타일을 제자리에서 고치는 물건이다. 포지션이
+    //   없을 때 그게 돌면 방금 그린 투영 값을 덮는다 -- 문맥을 비워 전체 재렌더로 보낸다.
+    lastAcctPos = null;
     return;
   }
 
@@ -7404,7 +7462,11 @@ function setEntryProjPreview(plan) {
   const box = el("snapEntryBox");
   const pr = plan && !plan.blocked && Number(plan.quantity) > 0 ? plan.projection : null;
   const on = pr && pr.after && box && box.open ? pr : null;
-  const key = on ? `${on.after.liq_pct}|${on.after.margin_used_pct}|${on.after.exposure_x}|${plan.quantity}` : "";
+  // 🔴키에는 **카드가 그리는 것 전부**가 들어가야 한다. 2026-09-22 에 `target_leverage` 가
+  //   빠져 있어, 레버리지만 바꾸면(서버 투영은 배수에 안 움직이므로) 키가 같아 조기 반환했고
+  //   카드가 «레버 20배»에 굳었다. 배수는 화면이 직접 나눠 쓰는 값이라 키에 있어야 한다.
+  const key = on ? `${on.after.liq_pct}|${on.after.margin_used_pct}|${on.after.exposure_x}`
+                   + `|${plan.quantity}|${plan.target_leverage}|${plan.price}` : "";
   if (key === entryProjKey) return;
   entryProjKey = key;
   entryProjPreview = on ? { ...on, __plan: plan } : null;
@@ -7457,6 +7519,7 @@ async function manualEntryRefreshSize() {
       : ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "";
     renderEntryFoldNote(plan);
     lastEntryCap = cap && cap.available ? cap : null;
+    lastEntryPlan = plan && !plan.blocked ? plan : null;
     setEntryProjPreview(plan);
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
