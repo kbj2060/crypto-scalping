@@ -102,6 +102,64 @@ def estimators(df: pd.DataFrame) -> dict[str, np.ndarray]:
     return {k: np.asarray(v, float) for k, v in e.items()}
 
 
+DVOL = Path("/home/kbj20/crypto-scalping/data/derivatives/deribit_dvol/ETH_dvol_hourly.csv")
+
+
+def project_estimators(df: pd.DataFrame) -> dict[str, np.ndarray]:
+    """🔴이 저장소가 **실제로 들고 있는** 변동성 지표들. A1 의 9종과 달리 «같은 창을 다르게
+    읽는 것」이 아니라 **종류가 다르다** — 조건부 변동성 모델 · 레짐 상대 랭크 · 내재변동성.
+    산식은 features/engineering.py · features/elite.py 의 배포본을 그대로 옮겼다."""
+    c, h, l = df["close"], df["high"], df["low"]
+    pc = c.shift()
+    tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+    atr14 = tr.ewm(alpha=1 / 14, adjust=False).mean()            # _calc_atr(length=14)
+    atr14p = atr14 / c
+    r = np.log(c / pc).fillna(0.0)
+
+    # GARCH(1,1) a=.10 b=.85 -- features/elite.py::_compute_garch 의 고정 파라미터
+    e2 = (r ** 2).to_numpy()
+    a_, b_ = 0.10, 0.85
+    v0 = max(float(e2[0]), 1e-8)
+    w_ = v0 * (1 - a_ - b_)
+    s2 = np.empty(len(e2)); s2[0] = v0
+    for t in range(1, len(e2)):
+        s2[t] = w_ + a_ * e2[t - 1] + b_ * s2[t - 1]
+    garch = pd.Series(np.sqrt(s2), index=c.index)
+
+    # bb_width (20,2) -- engineering.py:272-278
+    bm = c.rolling(20, min_periods=1).mean()
+    bs = c.rolling(20, min_periods=1).std(ddof=0)
+    bbw = (4 * bs) / (bm + 1e-8)
+
+    # 레짐 상대 랭크 -- _rolling_pct_rank(288). rolling.rank 는 마지막 원소의 순위라 동치
+    # (동점 처리만 average vs <= 로 다르다 -- 연속값이라 실질 차이 없음).
+    rank = lambda x: x.rolling(288, min_periods=2).rank(pct=True)
+    base = float(np.nanmedian(atr14p))
+
+    rv12, rv288 = r.rolling(12).std(), r.rolling(288).std()
+
+    out = {
+        "garch_vol(1,1)":        garch,
+        "bb_width(20,2)":        bbw,
+        # 랭크/비율은 «폭» 단위가 아니다 -- 중앙 ATR 을 base 로 곱해 폭으로 만든다.
+        # K 보정이 중앙값을 다시 맞추므로 base 선택은 결과에 영향이 없고, **동역학만** 남는다.
+        "atr_pct_rank_288":      rank(atr14p) * base,
+        "bb_width_pct_rank_288": rank(bbw) * base,
+        "realized_vol_ratio":    (rv12 / rv288.replace(0, np.nan)) * base,
+        # compression_score = 1 - max(두 랭크). 압축일수록 크다 -> 폭으로 쓰려면 뒤집는다.
+        "1-compression_score":   np.maximum(rank(atr14p), rank(bbw)) * base,
+    }
+    if DVOL.exists():
+        d = pd.read_csv(DVOL, parse_dates=["timestamp"]).set_index("timestamp")["close"]
+        # 시각 T 에 마감된 시간봉은 T 이후에야 안다 -- reindex(ffill) 뒤 한 칸 민다.
+        dv = d.reindex(df["timestamp"], method="ffill").to_numpy() / 100.0
+        dv = pd.Series(dv, index=c.index).shift(1)
+        out["DVOL(내재·미래지향)"] = dv
+        # VRP 축: 내재 / 실현. 둘 다 연율화 불필요 -- 비율이라 상수배가 K 에 흡수된다.
+        out["DVOL/실현 비율"] = (dv / (rv288 * np.sqrt(288 * 365)).replace(0, np.nan)) * base
+    return {k: np.asarray(v, float) for k, v in out.items()}
+
+
 def veto_side(dev: np.ndarray, eps: np.ndarray) -> np.ndarray:
     """히스테리시스: 밴드 밖에서만 바뀌고 안이면 직전 유지. 서버 구현과 같은 규칙."""
     s = np.zeros(len(dev), np.int8)
@@ -220,6 +278,33 @@ def main() -> int:
                   f"[0.7/6h] 롱{b2['롱']:+6.2f} 숏{b2['숏']:+6.2f}"
                   + (f"  CI롱{b1['롱_CI']}" if ci else ""))
 
+    # ── A4. 저장소가 실제로 가진 지표들 (A1 과 달리 «종류»가 다르다) ──────────────
+    print("\n[A4] 저장소 지표 -- 창 겹침이 다르므로 «같은 창의 ATR» 과 짝지어 비교한다")
+    a4 = []
+    for name, v in project_estimators(df).items():
+        # 🔴K 보정은 **그 지표가 살아 있는 구간의 앞 30%**로 한다. DVOL 은 2024-01 부터라
+        # 전역 TRAIN(~2023-04)에 한 점도 없어 nanmedian 이 NaN -> 밴드가 영원히 안 뒤집혔다.
+        fin = np.flatnonzero(np.isfinite(v))
+        own_cut = fin[int(len(fin) * TRAIN_FRAC)] if len(fin) > 10 else cut
+        k = base_w / np.nanmedian(v[fin[fin < own_cut]])
+        side = veto_side(dev144, k * v)
+        common = np.isfinite(v)
+        common[:own_cut] = False                        # 자기 TRAIN 은 평가에서 뺀다
+        pair = veto_side(dev144, 1.0 * est["atr_wilder(현행)"])   # 같은 구간의 ATR
+        r = {"est": name, "K": round(float(k), 4),
+             "겹치는일수": int(len(np.unique(days[common]))),
+             "뒤집힘/일": round(float((np.diff(side[common]) != 0).sum())
+                            / max(len(np.unique(days[common])), 1), 2)}
+        for bname, (L, S) in bars.items():
+            r[bname] = score(side, L, S, days, common, rng)
+            r[bname + "_짝ATR"] = score(pair, L, S, days, common, rng, ci=False)
+        a4.append(r)
+        b = r[list(BARRIERS)[0]]; pb = r[list(BARRIERS)[0] + "_짝ATR"]
+        b2 = r[list(BARRIERS)[1]]; pb2 = r[list(BARRIERS)[1] + "_짝ATR"]
+        print(f"  {name:22s} 일수 {r['겹치는일수']:>5,} 뒤집힘/일 {r['뒤집힘/일']:5.2f}  "
+              f"[1.5/24h] {b['롱']:+6.2f}/{b['숏']:+6.2f} (짝ATR {pb['롱']:+6.2f}/{pb['숏']:+6.2f})  "
+              f"[0.7/6h] {b2['롱']:+6.2f}/{b2['숏']:+6.2f} (짝 {pb2['롱']:+6.2f}/{pb2['숏']:+6.2f})")
+
     # ── A3. 현행 설정의 연도별 부호 (커밋 93c27f6c 의 «5연도 양측 전부 양수» 확인) ──
     side = veto_side(dev144, 1.0 * est["atr_wilder(현행)"])
     a3 = {}
@@ -231,7 +316,7 @@ def main() -> int:
         print(f"  {bname}: " + "  ".join(f"{y} {v['롱']:+5.1f}/{v['숏']:+5.1f}" for y, v in per.items()))
 
     (OUT / "part_a_band.json").write_text(json.dumps(
-        {"estimators": a1, "sweep": a2, "per_year_current": a3,
+        {"estimators": a1, "sweep": a2, "project_estimators": a4, "per_year_current": a3,
          "note": "R1 = mean_bp(측면 s | veto=s) - mean_bp(측면 s | veto=-s), 일블록 부트스트랩"},
         ensure_ascii=False, indent=2), encoding="utf-8")
     return 0

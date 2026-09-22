@@ -62,6 +62,43 @@ def candidates(df: pd.DataFrame) -> dict[str, pd.Series]:
     }
 
 
+def rvol_variants(df: pd.DataFrame) -> dict[str, pd.Series]:
+    """RVOL(relative volume) = 지금 거래량 / «평소 이맘때» 거래량. 사용자 제안(2026-09-23).
+
+    🔴세 가지가 다 RVOL 로 불린다 — 어느 것인지가 결과를 가른다:
+      ① 단순판   qv / SMA(qv, N)              -- 시간대를 무시한다(많은 플랫폼의 기본값)
+      ② 봉 RVOL  qv / median(같은 5분 슬롯, 28일) -- 시간대를 맞춘다
+      ③ 세션 RVOL 누적qv / median(같은 시점 누적, 28일) -- 정식 정의. 크립토는 24h 연속이라
+                 «세션» = UTC 00:00 기준으로 잡는다.
+    거래대금(quote)·거래량(base)·체결건수(trades) 세 축에 각각 걸 수 있다.
+    ⭐RVOL 이 z 점수보다 나을 수 있는 구조적 이유: 확장은 «비율» 질문인데 z 는 «수준»이다
+      (09-21 컬링 §3 에서 같은 채점 오류가 AUC .5157 -> .8237 을 갈랐다).
+    """
+    qv, vb, nt = df["quote_volume"], df["volume"], df["trades"]
+    slot = df["timestamp"].dt.hour * 12 + df["timestamp"].dt.minute // 5
+    day = df["timestamp"].dt.floor("D")
+
+    def tod(x, agg="median"):
+        # 같은 슬롯의 **직전** 28개 값 (shift 로 당일 자신을 뺀다 -- 미래참조 방지)
+        g = x.groupby(slot.to_numpy())
+        return g.transform(lambda z: getattr(z.rolling(28, min_periods=7), agg)().shift())
+
+    def session(x):
+        cum = x.groupby(day.to_numpy()).cumsum()
+        g = cum.groupby(slot.to_numpy())
+        return cum / g.transform(lambda z: z.rolling(28, min_periods=7).median().shift())
+
+    return {
+        "RVOL① 단순 qv/SMA288":  qv / qv.rolling(288).mean().replace(0, np.nan),
+        "RVOL② 봉 qv/시간대중앙": qv / tod(qv).replace(0, np.nan),
+        "RVOL② 봉 qv/시간대평균": qv / tod(qv, "mean").replace(0, np.nan),
+        "RVOL② 봉 base/시간대":   vb / tod(vb).replace(0, np.nan),
+        "RVOL② 봉 trades/시간대": nt / tod(nt).replace(0, np.nan),
+        "RVOL③ 세션누적 qv":      session(qv),
+        "RVOL③ 세션누적 trades":  session(nt),
+    }
+
+
 def controls(df: pd.DataFrame) -> dict[str, pd.Series]:
     c, h, l = df["close"], df["high"], df["low"]
     pc = c.shift()
@@ -103,7 +140,7 @@ def main() -> int:
     c = df["close"]
     fwd = (df["high"].shift(-1).rolling(H).max().shift(-(H - 1))
            - df["low"].shift(-1).rolling(H).min().shift(-(H - 1))) / c * 1e4
-    feats = {**candidates(df), **controls(df)}
+    feats = {**candidates(df), **rvol_variants(df), **controls(df)}
     F = pd.DataFrame({k: pd.Series(np.asarray(v, float)) for k, v in feats.items()})
     F["y_fwd"] = fwd
     F["day"] = df["timestamp"].dt.floor("D").to_numpy()
@@ -143,6 +180,8 @@ def main() -> int:
         "시간대정규화 AND(거래대금 · 체결속도)":   ("거래대금/시간대중앙", "체결속도/시간대중앙"),
         "거래대금 z288 · 평균체결크기":            ("거래대금 z288(현행)", "평균체결크기 z288"),
         "체결속도/시간대 · 테이커불균형":          ("체결속도/시간대중앙", "테이커불균형|·|"),
+        "RVOL② AND(qv · trades)":                 ("RVOL② 봉 qv/시간대중앙", "RVOL② 봉 trades/시간대"),
+        "RVOL③ 세션 AND(qv · trades)":            ("RVOL③ 세션누적 qv", "RVOL③ 세션누적 trades"),
     }
     print("\n[2종 AND 게이트]")
     ands = []
@@ -165,7 +204,7 @@ def main() -> int:
     base = roc_auc_score(y[~tr], fit(CTRL))
     print(f"\n[증분] 통제군(C1+C3+C4) 표본외 AUC = {base:.4f}")
     inc = []
-    for name in candidates(df):
+    for name in list(candidates(df)) + list(rvol_variants(df)):
         a = roc_auc_score(y[~tr], fit(CTRL + [name]))
         inc.append({"지표": name, "통제군+지표": round(a, 4), "증분": round(a - base, 4)})
         print(f"  +{name:22s} {a:.4f}  증분 {a - base:+.4f}")
