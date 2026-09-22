@@ -2074,9 +2074,12 @@ svg {
   margin: 12px -18px 0; }
 .acct-lanes > * { background: var(--panel); padding: 14px 18px 16px; min-width: 0; margin-top: 0;
   align-content: start; }
-/* 포지션이 없으면 닫기 레인이 통째로 비므로 한 칸으로 접는다 -- 빈 칸을 남기지 않는다. */
-.acct-lanes:has(#snapExitRow[hidden]) { grid-template-columns: 1fr; }
-.acct-lanes:has(#snapExitRow[hidden]) > .manual-entry:first-child { display: none; }
+/* 🔴레인은 **항상 둘**이다(2026-09-22 사용자 지시). 포지션 유무로 접으면 진입 레인이
+   왼쪽↔오른쪽을 오가서, 같은 버튼을 매번 다른 자리에서 찾게 된다 -- 스캘핑에서 가장 비싼
+   종류의 흔들림이다. 닫을 게 없을 때는 그 자리에 그 사실을 적는다. */
+.lane-empty { display: none; margin: 0; }
+.acct-lanes > .manual-entry:has(#snapExitRow[hidden]) .lane-empty { display: block; }
+.acct-lanes > .manual-entry:has(#snapExitRow[hidden]) .lane-pact { display: none; }
 /* 숨은 확인 버튼만 든 행이 flex gap 을 두 번 먹어 버튼과 «약속» 사이에 빈 60px 가 남는다.
    확인 버튼은 미리보기 뒤에만 잠깐 뜨므로 이 빈칸이 **평소 모습**이다. */
 .manual-entry-row:has(> [hidden]:only-child) { display: none; }
