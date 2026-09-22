@@ -1939,6 +1939,12 @@ svg {
 .acct-gauge-track { display: block; height: 100%; border-radius: 999px; overflow: hidden;
   background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 42%, transparent),
     color-mix(in srgb, var(--amber) 24%, transparent) 48%, rgb(var(--lift) / 0.06)); }
+/* 2026-09-22 증거금 게이지의 채움. 눈금 전체 = 이 배수의 최대 증거금, 채움 = 지금 비율.
+   트랙 위에 겹쳐 그린다(트랙은 overflow:hidden 이라 안에 넣으면 라운딩에 잘린다). */
+.acct-gauge-fill { position: absolute; left: 0; top: 0; height: 100%; border-radius: 999px;
+  background: var(--good); transition: width .18s ease; }
+.acct-gauge-fill.warn { background: var(--warn); }
+.acct-gauge-fill.bad { background: var(--bad); }
 .acct-gauge-entry { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1.5px;
   background: var(--line); transform: translateX(-50%); }
 .acct-gauge-knob { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
