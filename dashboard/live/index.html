@@ -372,6 +372,11 @@
             <!-- 2026-09-21 청산맵 모드 제거(사용자 결정). 풋프린트가 유일한 차트다 --
                  청산 밀도 히트맵·S/R 레벨 목록·최근접 레벨 선이 전부 풋프린트에서 나온다.
                  아래 liqMapBadge 는 청산맵 «데이터» 상태 배지라 그대로 둔다. -->
+            <!-- 2026-09-23 사용자 「세션 RVOL 은 카드 상단에 오늘 거래량이 많다/적다로」.
+                 🔴톤은 **항상 neutral** 이다. warn/bad 를 쓰면 «맥락»이 «신호»로 읽힌다 --
+                 이 값은 앞 24h 레인지 중앙값을 378/451/516bp 로 가르지만(단조) 그건
+                 «오늘의 온도»이지 방향도 진입 근거도 아니다. 뜻은 글자가 나른다. -->
+            <span id="rvolSessionBadge" class="ops-badge neutral" hidden>-</span>
             <span id="liqMapBadge" class="ops-badge neutral">-</span>
           </div>
         </div>

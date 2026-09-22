@@ -97,6 +97,21 @@ HIST_BARS = 48               # 화면 띠 길이(4시간) — 다른 특화감�
 #   => 5.2일짜리 서버 캐시로는 현행 대비 이득이 거의 없다. 14일이 FETCH_BARS(4200=14.6일) 상한.
 RVOL_BASE_DAYS = 14
 RVOL_BARS = 150              # 차트 캔들 100 + 여유. 띠(HIST_BARS=48)와는 다른 용도라 따로 둔다.
+# 🔴선에 쓰는 창은 **1시간(12봉)**이다(2026-09-23 사용자 「5분봉이라 계산이 너무 튈 것 같다」).
+#   실측으로 직관이 맞았고, 5분은 «튄다»만이 아니라 **변별력도 최하위**였다
+#   (앞 30분 레인지 상위25% AUC / 봉폭 통제 후 / 봉간 |Δ|>0.5 비율):
+#     5분 .6985 / **.4767**(동전 이하) / **41.9%**   15분 .7043 / .5226 / 18.9%
+#     30분 .7055 / .5429 / 8.9%                      **1시간 .7053 / .5598 / 3.2%**
+#     2시간 .7024 / .5698 / 0.8%                      4시간 .6961 / .5758 / 0.1%
+#   창을 넓힐수록 «이 봉이 굵다»의 재진술에서 벗어나 봉폭 통제 후 점수가 오른다.
+#   대가 둘: ①자기 봉 거래대금과의 상관 0.780 -> 0.566(«흡수» 판독이 선에서 흐려진다 --
+#   그래서 봉 단위 값을 `bar5` 로 따로 내보내 봉 툴팁이 계속 답한다) ②세션과의 중복
+#   0.357 -> 0.571. 그래도 양방향 증분은 살아 있다(세션->1시간 +0.0097 · 1시간->세션 +0.0251).
+RVOL_LINE_BARS = 12
+# 세션 «많다/적다» 경계 — 임의 상수가 아니라 **분위**다(ETH 5m 4.7년 세션 RVOL 분포).
+#   q25 0.704 · q50 0.982 · q75 1.373. 이 경계로 가른 날의 앞 24h 레인지 중앙값은
+#   적음 378bp / 보통 451 / 많음 516 으로 단조다 -- 표시에 뜻이 있다(신호는 아니다).
+RVOL_SESSION_LO, RVOL_SESSION_HI = 0.70, 1.37
 _CACHE: dict[str, Any] = {}
 
 
@@ -123,8 +138,8 @@ def _fetch(limit: int = FETCH_BARS) -> pd.DataFrame:
     return d.drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
 
 
-def _rvol(d: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    """RVOL = 지금 거래대금 / «같은 5분 슬롯의 후행 RVOL_BASE_DAYS 일 중앙값».
+def _rvol(d: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """RVOL = 지금 거래대금 / «같은 5분 슬롯의 후행 RVOL_BASE_DAYS 일 중앙값». 셋을 돌려준다.
 
     ⚠️`.shift()` 는 슬롯 그룹 **안에서** 미는 것이라 하루 전으로 민다 — 기준선이 자기 자신을
       포함하지 않는다(미래참조 방지). 중앙값을 쓰는 이유는 한 번의 스파이크가 «평소»를
@@ -138,10 +153,12 @@ def _rvol(d: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     qv = pd.to_numeric(d["qv"], errors="coerce")
     med = lambda x: x.groupby(slot).transform(
         lambda z: z.rolling(RVOL_BASE_DAYS, min_periods=5).median().shift())
-    bar = qv / med(qv).replace(0, np.nan)
+    roll = qv.rolling(RVOL_LINE_BARS).sum()           # 선 = 최근 1시간 누적
+    line = roll / med(roll).replace(0, np.nan)
+    bar5 = qv / med(qv).replace(0, np.nan)            # 봉 하나 -- 툴팁의 «흡수» 판독용
     cum = qv.groupby(ts.dt.floor("D").to_numpy()).cumsum()
     sess = cum / med(cum).replace(0, np.nan)
-    return bar.to_numpy(float), sess.to_numpy(float)
+    return line.to_numpy(float), bar5.to_numpy(float), sess.to_numpy(float)
 
 
 def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
@@ -262,15 +279,23 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     #   전역 q90 기준으로는 적중 .547->.577 였지만 이 모듈의 실제 규약(후행 QWIN 분위)에서는
     #   14일 −0.0059 [−0.0219,+0.0089] · 28일 +0.0039 [−0.0111,+0.0191] 로 CI 가 0 을 포함한다.
     #   후행 분위 임계가 이미 시간대 드리프트를 흡수하고 있었다. RVOL 은 **표시값**으로만 쓴다.
-    rb, rs = _rvol(d)
+    rl, rb5, rs = _rvol(d)
     lo_r = max(i - RVOL_BARS + 1, 0)
     r3 = lambda v: None if not np.isfinite(v) else round(float(v), 3)
+    sv = rs[i]
     out["rvol"] = {
         "base_days": RVOL_BASE_DAYS,
-        "bar": [r3(rb[j]) for j in range(lo_r, i + 1)],
+        "line_minutes": RVOL_LINE_BARS * 5,
+        "bar": [r3(rl[j]) for j in range(lo_r, i + 1)],          # 선 = 1시간 롤링
+        "bar5": [r3(rb5[j]) for j in range(lo_r, i + 1)],        # 봉 하나 = 툴팁용
         "times": [str(pd.Timestamp(d["timestamp"].iloc[j]).tz_localize("UTC").isoformat())
                   for j in range(lo_r, i + 1)],
-        "session": r3(rs[i]),
+        "session": r3(sv),
+        # 라벨은 워커가 붙인다 -- 경계가 바뀌면 화면 두 곳이 아니라 여기 한 곳만 고친다.
+        "session_label": (None if not np.isfinite(sv) else
+                          "적음" if sv < RVOL_SESSION_LO else
+                          "많음" if sv > RVOL_SESSION_HI else "보통"),
+        "session_bounds": [RVOL_SESSION_LO, RVOL_SESSION_HI],
     }
     return out
 

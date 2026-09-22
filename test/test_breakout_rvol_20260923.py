@@ -11,7 +11,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from live_eth_breakout_detector_20260911 import RVOL_BASE_DAYS, _rvol  # noqa: E402
+from live_eth_breakout_detector_20260911 import (  # noqa: E402
+    RVOL_BASE_DAYS, RVOL_LINE_BARS, RVOL_SESSION_HI, RVOL_SESSION_LO, _rvol)
 
 BARS_PER_DAY = 288
 
@@ -36,14 +37,14 @@ def main() -> int:
     qv = np.full(days * BARS_PER_DAY, 100.0)
     spike = (days - 1) * BARS_PER_DAY + 137          # 마지막 날의 슬롯 137
     qv[spike] = 300.0
-    bar, sess = _rvol(frame(days, qv))
+    line, bar, sess = _rvol(frame(days, qv))
     ck(abs(bar[spike] - 3.0) < 1e-9, f"스파이크 봉 RVOL = 3.0 (실제 {bar[spike]})")
     ck(abs(bar[spike - 1] - 1.0) < 1e-9, f"옆 봉 RVOL = 1.0 (실제 {bar[spike - 1]})")
 
     # ② 미래참조 없음 -- 스파이크 **뒤** 값을 바꿔도 스파이크 봉의 RVOL 은 안 변한다
     qv2 = qv.copy()
     qv2[spike + 1:] = 9999.0
-    bar2, _ = _rvol(frame(days, qv2))
+    _, bar2, _ = _rvol(frame(days, qv2))
     ck(abs(bar2[spike] - bar[spike]) < 1e-12, "미래 봉을 바꿔도 과거 RVOL 불변")
     # 같은 슬롯의 **다음 날**을 바꿔도 안 변한다(기준선이 자기 이후를 안 본다)
     ck(np.isfinite(bar[spike]), "스파이크 봉 RVOL 이 유한")
@@ -55,17 +56,28 @@ def main() -> int:
        f"스파이크 후 누적비 > 1 이고 이후 희석 ({sess[spike]:.4f} -> {sess[-1]:.4f})")
 
     # ④ 웜업 -- min_periods=5 라 5일치 같은 슬롯이 모이기 전에는 NaN
-    bar3, _ = _rvol(frame(3, np.full(3 * BARS_PER_DAY, 100.0)))
+    _, bar3, _ = _rvol(frame(3, np.full(3 * BARS_PER_DAY, 100.0)))
     ck(not np.isfinite(bar3).any(), "3일치로는 전부 NaN(웜업)")
-    bar4, _ = _rvol(frame(7, np.full(7 * BARS_PER_DAY, 100.0)))
+    _, bar4, _ = _rvol(frame(7, np.full(7 * BARS_PER_DAY, 100.0)))
     ck(np.isfinite(bar4[-1]), "7일치면 마지막 봉은 유한")
 
     # ⑤ 중앙값이라 한 번의 스파이크가 «평소»를 못 들어올린다
     qv5 = np.full(days * BARS_PER_DAY, 100.0)
     qv5[137] = 1e6                                   # 첫날 같은 슬롯에 거대한 값
-    bar5, _ = _rvol(frame(days, qv5))
+    _, bar5, _ = _rvol(frame(days, qv5))
     last = (days - 1) * BARS_PER_DAY + 137
     ck(abs(bar5[last] - 1.0) < 1e-9, f"과거 스파이크가 기준선을 안 들어올림 (실제 {bar5[last]})")
+
+    # ⑥ 선(1시간 롤링) -- 한 봉 스파이크는 12봉에 퍼져 **덜 튄다**. 이게 창을 넓힌 이유다.
+    ck(abs(line[spike] - (1 + 2 / RVOL_LINE_BARS)) < 1e-9,
+       f"1시간 선: 3배 봉 하나 -> {1 + 2 / RVOL_LINE_BARS:.4f}배 (실제 {line[spike]:.4f})")
+    ck(line[spike] < bar[spike], "선이 봉보다 덜 튄다")
+    #    그리고 스파이크가 **지나간 뒤에도 12봉 동안** 선에 남는다(롤링이므로)
+    ck(abs(line[spike + 11] - line[spike]) < 1e-9 and abs(line[spike + 12] - 1.0) < 1e-9,
+       "스파이크가 정확히 12봉 뒤 선에서 빠진다")
+
+    # ⑦ 세션 라벨 경계가 분위 상수와 일치 (화면이 아니라 워커가 라벨을 붙인다)
+    ck(RVOL_SESSION_LO < 1.0 < RVOL_SESSION_HI, "세션 경계가 1.0 을 사이에 둔다")
 
     return fail
 
