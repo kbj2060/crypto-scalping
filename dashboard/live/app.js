@@ -3808,7 +3808,11 @@ function renderSupply1s(box = null) {
   // 가 약 4px 넘친다(2026-09-19 계산) -- 72 로 두면 셋 다 들어가고 선은 8px 만 짧아진다.
   // 2026-09-22 꼬리표 글자를 키우면서 자리도 넓혔다(사용자 «많이 키워줘»).
   //   112 -> 150 은 선이 38px(플롯 폭의 3%) 짧아지는 대가다. 글자가 잘리는 것보다 낫다.
-  const ml = narrow ? 34 : 45, mr = narrow ? 88 : 150;
+  // 2026-09-22 모바일(사용자 «라벨들을 차트 안으로»): mr 은 «여백»이 아니라 **그림이 끝나는
+  //   자리**다. 88 을 비워 두면 348px 화면에서 선이 260px 로 눌린다(실측). 8 로 줄이면 같은
+  //   화면에서 플롯이 344px = **+32%** 가 되고, 범례는 아래에서 플롯 위로 얹는다.
+  //   🔴데스크톱은 그대로 둔다 -- 폭이 남는 화면에서 글자를 데이터 위에 올릴 이유가 없다.
+  const ml = narrow ? 34 : 45, mr = narrow ? 8 : 150;
   const cw = w - ml - mr;
   const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
@@ -3872,12 +3876,13 @@ function renderSupply1s(box = null) {
   //   -- 30초 창은 정확히 0 이 흔하다(고래 주문이 분당 13건이라 30초에 0건인 구간이 있다).
   //   2026-09-20 배포본 스크린샷에서 실제로 「고래 +」로 떠 있었다.
   const qty = (v) => fmtFootprintQty(Math.abs(v)) || "0";
-  const label = (x, y, text, color, anchor, size = 10) => {
+  const label = (x, y, text, color, anchor, size = 10, parent = svg) => {
     const t = document.createElementNS(NS, "text");
     t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("font-size", size);
     t.setAttribute("fill", color); if (anchor) t.setAttribute("text-anchor", anchor);
     t.textContent = text;
-    svg.appendChild(t);
+    parent.appendChild(t);
+    return t;
   };
 
   // 구간 경계에서 0으로 되돌리며 쌓는다. 경계 이전 초도 **계산에는** 들어간다(누산기를
@@ -4105,7 +4110,23 @@ function renderSupply1s(box = null) {
   // 🔴선마다 끝점 꼬리표를 달던 방식을 버렸다. 스택은 층 두께가 3px 까지 얇아질 수 있어
   //   (리테일 -559 는 축의 5.6%) 끝점 y 로 놓으면 층끼리 글자가 겹친다. 예전엔 그걸
   //   정렬·밀어내기로 막았는데, 자리가 고정이면 그 기계 자체가 필요 없다.
-  const lx = ml + cw + 5;
+  // 2026-09-22 모바일에서는 이 블록이 **플롯 위에 뜬다**(mr 을 8 로 줄였다). 글자가 밴드
+  //   위에 그냥 놓이면 초록 채움 위 --muted 라 대비가 무너지므로, 표면 계단의 다음 칸
+  //   (--bg → --panel → --panel-strong)을 깔고 그 위에 올린다. 유리 장식이 아니라 가독성
+  //   장치다. 높이는 행 수가 정해진 **뒤에** 채운다 -- 먼저 append 해야 글자 뒤로 간다.
+  // 🔴폭을 getBBox 로 재지 않는다. 이 패널은 탭이 숨어 있을 때도 렌더되는데 그때 0 이 나와
+  //   범례가 왼쪽 끝에 붙는다. 상수 폭 + 왼쪽정렬이면 그런 상태가 없다.
+  const LEG_W = 92;
+  const scrim = document.createElementNS(NS, "rect");
+  if (narrow) {
+    scrim.setAttribute("x", (w - 4 - LEG_W).toFixed(1));
+    scrim.setAttribute("y", (flowTop - 3).toFixed(1));
+    scrim.setAttribute("width", LEG_W.toFixed(1));
+    scrim.setAttribute("rx", "5");
+    scrim.setAttribute("fill", "var(--panel-strong)");
+    svg.appendChild(scrim);
+  }
+  const lx = narrow ? w - LEG_W : ml + cw + 5;
   const sgn = (v) => (v >= 0 ? "+" : "-") + qty(v);
   label(lx, flowTop + LBL_HEAD, "CVD " + sgn(cvd[cvd.length - 1].v), "var(--ink)", null, LBL_HEAD);
   const rows = [["고래", whale[whale.length - 1].v, cW, 0.63],
@@ -4132,6 +4153,11 @@ function renderSupply1s(box = null) {
     label(lx + SW + 4, y, row[1] === null ? row[0] : row[0] + " " + sgn(row[1]),
           "var(--muted)", null, LBL);
   });
+  // 행 수를 이제 안다 -- 스크림 높이를 채운다(CVD 머리줄 + rows).
+  if (narrow) {
+    scrim.setAttribute("height",
+      (LBL_HEAD + 8 + rows.length * STEP + 8).toFixed(1));
+  }
 
   // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
   label(ml + 2, mt - 5, "이번 5분봉 누적 순수급 ETH"
@@ -4204,7 +4230,10 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   const narrow = w < 760;
   // mr 은 띠 이름표가 앉는 자리다 -- 좁을 때 64 면 «리테일 매수»가 밖으로 나간다(2026-09-19
   // 모바일 실측). 78 로 늘려도 막대는 한쪽당 7px 만 잃는다.
-  const ml = narrow ? 34 : 45, mr = narrow ? 78 : 112, mt = 14, mb = 22;
+  // 🔴2026-09-22 실측: 좁은 폭에서 그 이름표들은 **이미 안 그려진다**(아래 !narrow 가드 넷).
+  //   남은 것은 델타 띠뿐이고 그건 w-mr+2 에서 5px 다. 78 중 **69px 이 빈칸**이었다 --
+  //   348px 화면에서 막대 한쪽이 그만큼 짧았다. 12 면 띠(2+5)와 5px 여백이 다 들어간다.
+  const ml = narrow ? 34 : 45, mr = narrow ? 12 : 112, mt = 14, mb = 22;
   const centerW = narrow ? 54 : 68;   // 굵고 커진 가격 라벨 자리(사용자 요청)
   const sideW = (w - ml - mr - centerW) / 2;
   const avail = h - mt - mb;
@@ -4996,8 +5025,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴더 올리면 오른쪽 라벨이 잘린다 -- mr 이 112−n 이라 n=26 이면 86 이 남고 실측 여유가
   //   18px 이다. 그 아래로는 「최대 $210.5k」 같은 긴 꼬리표가 상자를 넘을 수 있다.
   const CENTER_NUDGE = mobileChart ? 0 : 26;
+  // 2026-09-22 모바일(사용자 «라벨들을 차트 안으로»): 가격 배지를 플롯 **안**으로 들이고
+  //   mr 은 얇은 여백만 남긴다. 실측 348px 화면에서 플롯 280 -> 338px = **+21%**.
+  //   배지는 아래 boxX 가 오른쪽 끝 기준으로 다시 잡는다(왼쪽정렬 그대로 두면 밖으로 나간다).
   const ml = (mobileChart ? 44 : 45) + CENTER_NUDGE,
-        mr = (mobileChart ? 68 : 112) - CENTER_NUDGE,
+        mr = (mobileChart ? 10 : 112) - CENTER_NUDGE,
         mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 70;
   // 2026-09-21 사용자 요청: 「차트가 너무 많다 -- 레인을 한 덩어리로」 + 「가격 플롯을 키워라」.
   //   레인 5종(거래대금·델타/CVD·OI·수급·청산)이 각자 6px 간격으로 떨어져 있어 **다섯 장의
@@ -6008,13 +6040,20 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
     const labelY = Math.max(mt + 9, Math.min(plotBottom - 9, labelYRaw));
     const lineDashed = p.dashed || p.outOfView;
+    // 배지 기하를 **먼저** 정한다 -- 아래 꺾쇠가 배지의 왼쪽 변에 붙어야 하기 때문이다.
+    const subOk = !!p.sub && !mobileChart;
+    const boxW = subOk ? 76 : (mobileChart ? 56 : 64), boxH = 18;
+    // 모바일은 오른쪽 끝 기준(플롯 안), 데스크톱은 종전대로 여백 왼쪽 끝 기준.
+    const boxX = mobileChart ? w - 4 - boxW : w - mr + 4;
 
     // Line stays at real (clamped) price position
     let line = null;
     if (p.marker) {
       // 플롯 오른쪽 가장자리에서 **왼쪽을 가리키는** 삼각형. 꼭짓점이 곧 그 가격의 행이다.
+      // 🔴모바일은 배지가 플롯 안으로 들어와 ml+cw 가 배지 **오른쪽**이 된다 -- 거기 두면
+      //   꼬리가 아니라 배지 위에 얹힌다. 배지의 왼쪽 변에 붙여 원래 «꼬리» 관계를 지킨다.
       const tri = document.createElementNS(NS, "polygon");
-      tri.setAttribute("points", markerPoints(ml + cw, p.realY));
+      tri.setAttribute("points", markerPoints(mobileChart ? boxX : ml + cw, p.realY));
       if (p.gauge === undefined) {
         tri.setAttribute("fill", p.color);
       } else {                                   // 예측 = 속 빈 꺾쇠
@@ -6057,10 +6096,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴폭에 한계가 있다. 배지는 x = w-mr+4 에서 시작하므로 mr-8 을 넘으면 SVG 밖으로 잘린다
     //   (데스크톱 mr 86 -> 최대 78, 모바일 mr 68 -> 최대 60 = 기존 56 에서 4px 뿐).
     //   ⇒ 모바일에서는 값을 넣지 않는다. 카드에 같은 숫자가 있고, 잘린 배지보다 낫다.
-    const subOk = !!p.sub && !mobileChart;
-    const boxW = subOk ? 76 : (mobileChart ? 56 : 64), boxH = 18;
+    // 모바일 배지는 캔들 위에 뜬다 -- 속 빈 배지(확률 게이지)와 흐린 배지(지나간 목표)는
+    // 뒤가 비쳐 숫자가 안 읽힌다. 표면 한 장을 먼저 깔고 그 위에 그린다.
+    if (mobileChart) {
+      const back = document.createElementNS(NS, "rect");
+      back.setAttribute("x", boxX); back.setAttribute("y", labelY - 9);
+      back.setAttribute("width", boxW); back.setAttribute("height", boxH);
+      back.setAttribute("rx", "2"); back.setAttribute("fill", "var(--panel-strong)");
+      svg.appendChild(back);
+    }
     const rect = document.createElementNS(NS, "rect");
-    rect.setAttribute("x", w - mr + 4); rect.setAttribute("y", labelY - 9);
+    rect.setAttribute("x", boxX); rect.setAttribute("y", labelY - 9);
     rect.setAttribute("width", boxW); rect.setAttribute("height", boxH);
     rect.setAttribute("rx", "2");
     if (p.gauge === undefined) {
@@ -6072,7 +6118,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (p.gauge > 0) {                         // 테두리 «안»을 확률만큼 채운다
         const fillW = Math.max(2, (boxW - 2) * (p.gauge / 100));
         const g = document.createElementNS(NS, "rect");
-        g.setAttribute("x", w - mr + 5); g.setAttribute("y", labelY - 8);
+        g.setAttribute("x", boxX + 1); g.setAttribute("y", labelY - 8);
         g.setAttribute("width", fillW); g.setAttribute("height", boxH - 2);
         g.setAttribute("fill", p.color); g.setAttribute("opacity", "0.32");
         g.setAttribute("rx", "1.5");
@@ -6083,7 +6129,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(rect);
 
     const pTxt = document.createElementNS(NS, "text");
-    pTxt.setAttribute("x", w - mr + 8); pTxt.setAttribute("y", labelY + 4);
+    pTxt.setAttribute("x", boxX + 4); pTxt.setAttribute("y", labelY + 4);
     // 값이 같이 들어가면 가격을 한 단계 줄인다 -- 76px 안에 «2700.0»(11px, 40) + «56%»(9.5px, 17)
     pTxt.setAttribute("font-size", subOk ? "11" : (mobileChart ? "11" : "12"));
     pTxt.setAttribute("font-weight", "bold");
@@ -6093,7 +6139,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(pTxt);
     if (subOk) {
       const sTxt = document.createElementNS(NS, "text");
-      sTxt.setAttribute("x", w - mr + 4 + boxW - 5); sTxt.setAttribute("y", labelY + 4);
+      sTxt.setAttribute("x", boxX + boxW - 5); sTxt.setAttribute("y", labelY + 4);
       sTxt.setAttribute("text-anchor", "end"); sTxt.setAttribute("font-size", "9.5");
       sTxt.setAttribute("font-weight", "700");
       sTxt.setAttribute("fill", p.gauge === undefined ? inkOnFill() : "var(--muted)");
@@ -6156,8 +6202,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   hoverGroup.appendChild(hLine);
 
   const priceBadgeW = mobileChart ? 56 : 64, priceBadgeH = 18;
+  // 위 가격 배지와 **같은 기준**으로 잡는다 -- 둘이 어긋나면 호버 배지만 다른 열에 뜬다.
+  const priceBadgeX = mobileChart ? w - 4 - priceBadgeW : w - mr + 4;
   const priceBadgeRect = document.createElementNS(NS, "rect");
-  priceBadgeRect.setAttribute("x", w - mr + 4);
+  priceBadgeRect.setAttribute("x", priceBadgeX);
   priceBadgeRect.setAttribute("width", priceBadgeW);
   priceBadgeRect.setAttribute("height", priceBadgeH);
   priceBadgeRect.setAttribute("fill", "var(--accent)");
@@ -6167,7 +6215,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   hoverGroup.appendChild(priceBadgeRect);
 
   const priceBadgeText = document.createElementNS(NS, "text");
-  priceBadgeText.setAttribute("x", w - mr + 8);
+  priceBadgeText.setAttribute("x", priceBadgeX + 4);
   priceBadgeText.setAttribute("font-size", mobileChart ? "11" : "12");
   priceBadgeText.setAttribute("font-weight", "bold");
   priceBadgeText.setAttribute("fill", inkOnFill());
@@ -6401,10 +6449,21 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       //   mr(68px)을 넘는 순간 잘리는데, 우측정렬이면 긴 것만 플롯 쪽으로 조금 들어온다.
       //   왼쪽 보조 라벨(«높이 |Δ|»·«농도 |OI|», 11px 로 42~50px)은 ml 44px 를 넘어
       //   x<0 으로 잘렸다 -- 좁은 폭에서는 아예 안 그린다(실렌더 414px 에서 확인).
+      // 2026-09-22 모바일: mr 을 10 으로 줄여 막대가 이 꼬리표 **밑까지** 온다. 표면 한 장을
+      //   먼저 깔지 않으면 --muted 글자가 막대 채움 위에 놓여 대비가 무너진다. 네 줄의
+      //   자리(quadY+14 ~ +65)는 아래에서 고정으로 쓰므로 높이도 상수로 잡는다.
+      if (mobileChart) {
+        const sc = document.createElementNS(NS, "rect");
+        sc.setAttribute("x", (w - 74).toFixed(1)); sc.setAttribute("y", (quadY + 2).toFixed(1));
+        sc.setAttribute("width", "72"); sc.setAttribute("height", "70");
+        sc.setAttribute("rx", "5"); sc.setAttribute("fill", "var(--panel-strong)");
+        put(sc);
+      }
       const side = (y, txt, anchor, color) => {
         const t = document.createElementNS(NS, "text");
         t.setAttribute("text-anchor", "end");
-        t.setAttribute("x", anchor === "end" ? ml - 6 : w - 2);
+        // 모바일은 표면 위라 안쪽 여백이 필요하다 -- w-2 면 글자가 모서리에 붙는다(실측 2px).
+        t.setAttribute("x", anchor === "end" ? ml - 6 : (mobileChart ? w - 7 : w - 2));
         t.setAttribute("y", y); t.setAttribute("font-size", mobileChart ? "10" : "11");
         t.setAttribute("fill", color || "var(--muted)");
         t.textContent = txt;
@@ -6497,6 +6556,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
                       ["OI", last.oi, "var(--warn)", 0.95]];
       // 🔴좁은 폭은 색표를 빼고 오른쪽 끝 기준 우측정렬한다 -- mr 68px 에 색표(14px)까지
       //   넣으면 «리테일 -1.8k»(10px 로 약 66px)가 잘린다(실렌더 414px 에서 확인).
+      // 2026-09-22 모바일: 위와 같은 이유로 표면을 먼저 깐다(막대가 이 밑까지 온다).
+      if (mobileChart) {
+        const sc = document.createElementNS(NS, "rect");
+        sc.setAttribute("x", (w - 74).toFixed(1)); sc.setAttribute("y", (cumY + 2).toFixed(1));
+        sc.setAttribute("width", "72");
+        sc.setAttribute("height", String(14 + legend.length * 15));
+        sc.setAttribute("rx", "5"); sc.setAttribute("fill", "var(--panel-strong)");
+        g.appendChild(sc);
+      }
       legend.forEach((row, k) => {
         const y = cumY + 14 + k * (mobileChart ? 15 : 19);
         if (!mobileChart) {
@@ -6507,7 +6575,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           g.appendChild(sw);
         }
         const t = document.createElementNS(NS, "text");
-        t.setAttribute("x", w - 2); t.setAttribute("text-anchor", "end");
+        t.setAttribute("x", mobileChart ? w - 7 : w - 2); t.setAttribute("text-anchor", "end");
         t.setAttribute("y", y);
         // 2026-09-22 위 1초 차트 범례와 **같은 크기**로 맞춘다(사용자 지시).
         //   두 범례가 같은 카드에서 같은 역할인데 12/11 과 19/15 로 갈려 있었다.
