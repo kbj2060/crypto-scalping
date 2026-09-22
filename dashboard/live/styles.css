@@ -1935,7 +1935,8 @@ svg {
 
 /* ⭐청산 거리 게이지: 0=청산가 · 0.5=진입가 · 1=진입에서 청산 거리만큼 이익.
    롱/숏 둘 다 **왼쪽 끝이 청산**이라 측면마다 읽는 법을 바꾸지 않아도 된다. */
-.acct-gauge { position: relative; height: 8px; }
+/* 2026-09-22 시안 B: 레일이 이 카드의 척추다 -- 청산이 어느 쪽으로 끌려오는지를 여기서 읽는다. */
+.acct-gauge { position: relative; height: 10px; }
 .acct-gauge-track { display: block; height: 100%; border-radius: 999px; overflow: hidden;
   background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 42%, transparent),
     color-mix(in srgb, var(--amber) 24%, transparent) 48%, rgb(var(--lift) / 0.06)); }
@@ -2014,6 +2015,50 @@ svg {
 }
 
 /* 2026-09-12 수동 진입(미리보기). 버튼/배지는 기존 .notify-btn/.ops-readonly 를 그대로 쓴다. */
+/* ── 2026-09-22 시안 B ──────────────────────────────────────────────────────
+   «사실 / 가정 / 조작» 셋이 같은 무게로 섞여 있던 것을 가른다.
+   🔴가정은 **사실을 덮지 않는다**. 전에는 applyAcctPreview 가 타일 값을 통째로 갈아서,
+     포지션을 들고 있어도 큰 숫자가 상시로 «더 넣었다면»이었다. 이제 사실 뒤에 «→ 가정»이
+     붙고, 가정만 점선 밑줄이다 -- 색이 아니라 **형태**로 갈려야 저시력에서도 산다. */
+.pv-after {
+  display: inline-block; margin-left: 7px; text-decoration: none;
+  /* 🔴em 으로 두면 레일 범례(11px)에서 6.8px 가 되어 안 읽힌다. 절대 크기로 못 박는다. */
+  font: 700 11.5px/1 var(--font-mono); color: var(--amber);
+  border-bottom: 1.5px dashed currentColor; padding-bottom: 1px;
+  vertical-align: baseline; white-space: nowrap;
+}
+.acct-tile-val .pv-after { font-size: 13px; margin-left: 8px; vertical-align: 2px; }
+.pv-after.bad { color: var(--bad); }
+.pv-after.good { color: var(--good); }
+.pv-after.warn { color: var(--amber); }
+/* 게이지 위 «넣으면 여기» 유령 손잡이. 실제 손잡이(.acct-gauge-knob)는 안 움직인다 --
+   청산선이 어느 쪽으로 얼마나 끌려오는지를 숫자가 아니라 **거리**로 읽는 게 이 안의 핵심이다. */
+.acct-gauge-pv {
+  position: absolute; top: 50%; width: 15px; height: 15px; border-radius: 50%;
+  transform: translate(-50%, -50%); text-decoration: none; pointer-events: auto;
+  border: 1.5px dashed var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent);
+  transition: left 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* 두 레인. 닫기가 왼쪽 -- 들고 있을 때 제일 급한 동작이다(09-14·09-20 과 같은 이유). */
+.acct-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--soft-line);
+  margin: 12px -18px 0; }
+.acct-lanes > * { background: var(--panel); padding: 14px 18px 16px; min-width: 0; margin-top: 0;
+  align-content: start; }
+/* 포지션이 없으면 닫기 레인이 통째로 비므로 한 칸으로 접는다 -- 빈 칸을 남기지 않는다. */
+.acct-lanes:has(#snapExitRow[hidden]) { grid-template-columns: 1fr; }
+.acct-lanes:has(#snapExitRow[hidden]) > .manual-entry:first-child { display: none; }
+/* 숨은 확인 버튼만 든 행이 flex gap 을 두 번 먹어 버튼과 «약속» 사이에 빈 60px 가 남는다.
+   확인 버튼은 미리보기 뒤에만 잠깐 뜨므로 이 빈칸이 **평소 모습**이다. */
+.manual-entry-row:has(> [hidden]:only-child) { display: none; }
+/* 각 레인의 «약속». 두 행동은 확인 방식이 다르고, 그 차이가 이 화면에서 가장 비싼 오해다. */
+@media (max-width: 720px) {
+  .acct-lanes { grid-template-columns: 1fr; margin-left: -14px; margin-right: -14px; }
+  .acct-lanes > * { padding: 12px 14px 14px; }
+}
+.lane-pact { margin: 10px 0 0; font: 600 10.5px/1.5 var(--font-mono); color: var(--muted); }
+.lane-pact b { color: var(--text); font-weight: 800; }
+.lane-pact.warn b { color: var(--bad); }
+
 .manual-entry { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .manual-entry-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: space-between; }
 /* 2026-09-13 롱/숏 버튼을 화면 전역 규약(롱=--good, 숏=--bad)에 맞추고 가운데로 모은다.
@@ -2026,7 +2071,9 @@ svg {
 .manual-entry-row.actions { justify-content: center; }
 .manual-entry-row.actions .notify-btn { text-align: center; min-width: 128px; }
 /* 2026-09-14 청산 행이 카드 맨 위로 올라갔다 -- 구분선도 아래쪽이다. */
-.manual-entry-row.exit-row { gap: 10px; border-bottom: 1px solid var(--soft-line); padding-bottom: 10px; }
+/* 2026-09-22 구분선을 뺐다 -- 진입 블록 «위»에 쌓여 있을 때의 경계였는데, 시안 B 로
+   둘이 나란해지면서 레인 사이 1px 헤어라인이 그 일을 한다(내 변경이 만든 고아). */
+.manual-entry-row.exit-row { gap: 10px; }
 /* 2026-09-20 사용자 요청: 버튼 줄에 위아래 숨 쉴 자리. 누르는 줄이 제일 빽빽하면 안 된다.
    .entry-hold 는 청산 줄과 진입 버튼 줄 **둘 다** 가지고 있어 한 규칙으로 덮는다.
    행 간격(.manual-entry 의 gap 8px) 위에 10px 을 더해 위아래 18px 이 된다. */
@@ -2211,7 +2258,10 @@ svg {
    부호를 색으로도 준다(+ 초록 / − 빨강). 색만으로는 부족하므로 숫자에 부호를 항상 붙인다. */
 /* 🔴`.exit-now b`(0,1,1)가 `.exit-net`(0,1,0)를 이긴다 -- 부모 클래스를 붙여 특이도를 올린다.
    실측으로 잡았다: 규칙을 넣었는데 fontSize 가 11.5px 그대로였다. */
-.exit-now .exit-net, .entry-note .exit-net { font: 800 13.5px/1.4 var(--font-mono); }
+/* 2026-09-22 «지금 닫으면»은 청산을 누르기 직전 유일하게 중요한 숫자인데 13.5px 였다(시안 B). */
+.exit-now .exit-net { font: 800 21px/1.1 var(--font-display); letter-spacing: -0.015em;
+  display: inline-block; vertical-align: -3px; margin: 0 3px 0 1px; }
+.entry-note .exit-net { font: 800 13.5px/1.4 var(--font-mono); }
 .exit-now .exit-net.good, .entry-note .exit-net.good { color: var(--good); }
 .exit-now .exit-net.bad, .entry-note .exit-net.bad { color: var(--bad); }
 .entry-note .exit-net { margin-left: 2px; }
