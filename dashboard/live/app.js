@@ -6318,7 +6318,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   // ── ① 사분면 행 — 델타 × OI (거래대금은 선) ────────────────────────────────
   // 봉 하나가 «누가 무엇을 했나»를 말한다. 델타 부호 × OI 부호가 네 사분면이다:
-  //     델타+ · OI+ = 신규 롱    델타+ · OI− = 숏 커버
+  //     델타+ · OI+ = 신규 롱    델타+ · OI− = 숏 정리
   //     델타− · OI+ = 신규 숏    델타− · OI− = 롱 정리
   // 🔴농도 상한 0.58 은 **대비 계산에서 나온 수**다. --ink 글자가 채운 면 위에서 4.5:1 을
   //   지키는 한계가 0.60 이고(실측 bad 4.52 · good 4.51), 그 아래라야 글자 색을 하나로
@@ -6348,7 +6348,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const oMax = Math.max(...have.map((r) => Math.abs(r.oi)), 1e-9);
       const tMax = Math.max(...have.map((r) => r.turn), 1);
       const TXT = mobileChart ? 10 : 12;
-      const QNAME = (d, o) => (d >= 0 ? (o >= 0 ? "신규 롱" : "숏 커버")
+      const QNAME = (d, o) => (d >= 0 ? (o >= 0 ? "신규 롱" : "숏 정리")
                                       : (o >= 0 ? "신규 숏" : "롱 정리"));
       const put = (el) => { g.appendChild(el); return el; };
       // 막대 **안**의 해석은 --ink 하나로 통일한다(채운 면 위라 부호색을 쓰면 대비가 깨진다).
