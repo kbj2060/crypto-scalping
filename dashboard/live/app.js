@@ -3029,13 +3029,18 @@ function updateLivePriceFast(price) {
   const box = c.svg.querySelector('[data-live="box"]');
   const txt = c.svg.querySelector('[data-live="text"]');
   const lab = c.svg.querySelector('[data-live="label"]');
-  if (!box || !txt || !(line || tri)) return;   // 아직 안 그렸거나 현재가 표시가 없는 판
+  if (!(line || tri)) return;                  // 아직 안 그렸거나 현재가 표시가 없는 판
   if (line) { line.setAttribute("y1", y); line.setAttribute("y2", y); }
   if (tri) tri.setAttribute("points", markerPoints(c.markerX, y));
   const labelY = Math.max(c.mt + 9, Math.min(c.mt + c.ch - 9, y));
+  if (lab) lab.setAttribute("y", labelY + 4);
+  // 2026-09-22 모바일에는 배지가 없다(값은 플롯 아래 한 줄에 있다). 옛 판은 box/txt 가
+  //   없으면 **여기서 return** 해서 화살표까지 같이 멈췄다 -- 전체 렌더(1초)까지 어긋난다.
+  const row = c.svg.querySelector('[data-live="rowtext"]');
+  if (row) row.textContent = (row.textContent.split(" ")[0] || "현재") + " " + fmtNum(price, 1);
+  if (!box || !txt) return;
   box.setAttribute("y", labelY - 9);
   txt.setAttribute("y", labelY + 4);
-  if (lab) lab.setAttribute("y", labelY + 4);
   txt.textContent = fmtNum(price, 1);
 }
 
@@ -3802,8 +3807,13 @@ function renderSupply1s(box = null) {
   //   여기서도 쓴다. 여백도 좁은 화면에 맞춰 줄인다(45/112 는 336px 폭의 47% 다).
   const w = box ? box.w : (parentW > 0 ? Math.max(parentW, 320) : 1200);
   const h = box ? box.h : 150;
-  const mt = 16, mb = 14;
+  // 2026-09-22 모바일(사용자 «프로파일처럼 라벨을 차트 아래에 일자로»): 범례가 플롯 안에서
+  //   바닥 한 줄로 내려온다. 시각 꼬리표(h-3)와 같은 줄에 둘 수 없으니 그 아래 한 줄을 더 판다.
+  //   400px 패널에서 14px 은 선이 3.5% 짧아지는 대가다.
+  // 🔴narrow 를 **먼저** 선언한다. 아래 mb 가 이걸 읽는데 순서를 바꾸면 TDZ
+  //   ReferenceError 로 app.js 전체가 죽는다 -- node --check 는 못 잡는다(문법은 옳다).
   const narrow = w < 760;   // 모바일이든 좁은 상자든 여백 규칙은 같다
+  const mt = 16, mb = narrow ? 28 : 14;
   // mr 은 오른쪽 꼬리표(고래/리테일/신규계약 + 값)가 앉는 자리다. 64 면 «신규계약 +0.4k»
   // 가 약 4px 넘친다(2026-09-19 계산) -- 72 로 두면 셋 다 들어가고 선은 8px 만 짧아진다.
   // 2026-09-22 꼬리표 글자를 키우면서 자리도 넓혔다(사용자 «많이 키워줘»).
@@ -4110,25 +4120,14 @@ function renderSupply1s(box = null) {
   // 🔴선마다 끝점 꼬리표를 달던 방식을 버렸다. 스택은 층 두께가 3px 까지 얇아질 수 있어
   //   (리테일 -559 는 축의 5.6%) 끝점 y 로 놓으면 층끼리 글자가 겹친다. 예전엔 그걸
   //   정렬·밀어내기로 막았는데, 자리가 고정이면 그 기계 자체가 필요 없다.
-  // 2026-09-22 모바일에서는 이 블록이 **플롯 위에 뜬다**(mr 을 8 로 줄였다). 글자가 밴드
-  //   위에 그냥 놓이면 초록 채움 위 --muted 라 대비가 무너지므로, 표면 계단의 다음 칸
-  //   (--bg → --panel → --panel-strong)을 깔고 그 위에 올린다. 유리 장식이 아니라 가독성
-  //   장치다. 높이는 행 수가 정해진 **뒤에** 채운다 -- 먼저 append 해야 글자 뒤로 간다.
-  // 🔴폭을 getBBox 로 재지 않는다. 이 패널은 탭이 숨어 있을 때도 렌더되는데 그때 0 이 나와
-  //   범례가 왼쪽 끝에 붙는다. 상수 폭 + 왼쪽정렬이면 그런 상태가 없다.
-  const LEG_W = 92;
-  const scrim = document.createElementNS(NS, "rect");
-  if (narrow) {
-    scrim.setAttribute("x", (w - 4 - LEG_W).toFixed(1));
-    scrim.setAttribute("y", (flowTop - 3).toFixed(1));
-    scrim.setAttribute("width", LEG_W.toFixed(1));
-    scrim.setAttribute("rx", "5");
-    scrim.setAttribute("fill", "var(--panel-strong)");
-    svg.appendChild(scrim);
-  }
-  const lx = narrow ? w - LEG_W : ml + cw + 5;
+  // 2026-09-22 모바일(사용자 지시): 이 블록을 플롯 **밖·아래**로 내린다. 차트 안에 띄우면
+  //   어디에 두든 데이터를 가리고, 가리지 않으려고 표면을 깔면 그만큼 또 데이터가 사라진다.
+  //   프로파일 바닥 범례와 같은 문법 -- 색표 + 이름 + 값이 한 줄로 흐른다.
+  const lx = ml + cw + 5;
   const sgn = (v) => (v >= 0 ? "+" : "-") + qty(v);
-  label(lx, flowTop + LBL_HEAD, "CVD " + sgn(cvd[cvd.length - 1].v), "var(--ink)", null, LBL_HEAD);
+  if (!narrow) {
+    label(lx, flowTop + LBL_HEAD, "CVD " + sgn(cvd[cvd.length - 1].v), "var(--ink)", null, LBL_HEAD);
+  }
   const rows = [["고래", whale[whale.length - 1].v, cW, 0.63],
                 ["중형", cvd[cvd.length - 1].v - whale[whale.length - 1].v - retail[retail.length - 1].v, cM, 0.49],
                 ["리테일", retail[retail.length - 1].v, cR, 0.38]];
@@ -4142,21 +4141,37 @@ function renderSupply1s(box = null) {
                       : "청산 롱" + fmtUsdCompact(liqSum[2]) + "/숏" + fmtUsdCompact(liqSum[3]),
                null, liqSum[3] >= liqSum[2] ? "var(--good)" : "var(--bad)", 0.92]);
   }
-  rows.forEach((row, i) => {
-    const y = flowTop + LBL_HEAD + 8 + (i + 1) * STEP;
-    const sw = document.createElementNS(NS, "rect");
-    sw.setAttribute("x", lx); sw.setAttribute("y", y - SW);
-    sw.setAttribute("width", SW); sw.setAttribute("height", SW);
-    sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
-    svg.appendChild(sw);
-    // 청산 행은 값이 null 이다 -- 라벨에 이미 «롱$X/숏$Y» 가 들어 있어 부호가 없다.
-    label(lx + SW + 4, y, row[1] === null ? row[0] : row[0] + " " + sgn(row[1]),
-          "var(--muted)", null, LBL);
-  });
-  // 행 수를 이제 안다 -- 스크림 높이를 채운다(CVD 머리줄 + rows).
   if (narrow) {
-    scrim.setAttribute("height",
-      (LBL_HEAD + 8 + rows.length * STEP + 8).toFixed(1));
+    // 바닥 한 줄. 왼쪽 끝(x=3)부터 흐른다 -- ml 로 들여쓰면 마지막 항목이 밖으로 나간다
+    // (실측 348px 폭에 항목 여섯이 333px 다).
+    const items = [["CVD", cvd[cvd.length - 1].v, "var(--accent)", 1]].concat(rows);
+    let x = 3;
+    items.forEach((row) => {
+      const sw = document.createElementNS(NS, "rect");
+      sw.setAttribute("x", x); sw.setAttribute("y", h - 9 - SW);
+      sw.setAttribute("width", SW); sw.setAttribute("height", SW);
+      sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
+      svg.appendChild(sw);
+      // 청산 행은 값이 null 이다 -- 라벨에 이미 «$X» 가 들어 있어 부호가 없다.
+      const txt = row[1] === null ? row[0] : row[0] + " " + sgn(row[1]);
+      const t = label(x + SW + 3, h - 9, txt, "var(--muted)", null, LBL);
+      // 다음 항목 자리는 **실측 폭**으로 민다 -- 글자 수로 어림하면 자릿수가 늘 때 겹친다.
+      let adv = 0;
+      try { adv = t.getComputedTextLength(); } catch (_) { adv = txt.length * LBL * 0.62; }
+      if (!(adv > 0)) adv = txt.length * LBL * 0.62;
+      x += SW + 3 + adv + 7;
+    });
+  } else {
+    rows.forEach((row, i) => {
+      const y = flowTop + LBL_HEAD + 8 + (i + 1) * STEP;
+      const sw = document.createElementNS(NS, "rect");
+      sw.setAttribute("x", lx); sw.setAttribute("y", y - SW);
+      sw.setAttribute("width", SW); sw.setAttribute("height", SW);
+      sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
+      svg.appendChild(sw);
+      label(lx + SW + 4, y, row[1] === null ? row[0] : row[0] + " " + sgn(row[1]),
+            "var(--muted)", null, LBL);
+    });
   }
 
   // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
@@ -4167,13 +4182,14 @@ function renderSupply1s(box = null) {
   // 「지금」이 오른쪽 끝이 아니라는 걸 분명히 해야 빈 오른쪽이 오해되지 않는다.
   const hhmm = (t) => { const d = new Date(t * 1000);
     return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
-  label(ml, h - 3, hhmm(first) + " 봉 시작", "var(--muted)");
-  label(ml + cw, h - 3, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
+  const axisY = narrow ? h - mb + 8 : h - 3;   // 좁을 땐 그 아래 한 줄을 범례가 쓴다
+  label(ml, axisY, hhmm(first) + " 봉 시작", "var(--muted)");
+  label(ml + cw, axisY, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
   // 🔴봉 끝으로 갈수록 이 꼬리표가 오른쪽 «닫힐 시각»과 겹친다(280/300초에서 실제로
   //   포개졌다). 끝 18% 구간에서는 안 그린다 -- 그때는 진행선이 이미 오른쪽 끝에 붙어
   //   있어 «지금»이 어디인지 말할 필요가 없다.
   if (!narrow && now - first < SUPPLY_1S_SEGMENT * 0.82) {
-    label(xAt(now) + 4, h - 3, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
+    label(xAt(now) + 4, axisY, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
   }
 }
 
@@ -5077,6 +5093,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const QUAD_TXT = (fpBars.length && QUAD_TEXT_OK) ? (mobileChart ? 28 : 34) : 0;
   const CUM_H = fpBars.length ? (mobileChart ? 128 : 190) : 0;
   const LANE_GAP = fpBars.length ? 6 : 0;
+  // 2026-09-22 모바일(사용자 «프로파일처럼 라벨을 차트 아래에 일자로»): 가격 배지와 두 레인
+  //   범례를 각자 그림 **아래 한 줄**로 내린다. 데스크톱은 0 이라 레인 합이 안 변한다 --
+  //   test_sub_panel_height_contract_20260919 가 데스크톱 값만 뽑아 CSS 와 대조하므로
+  //   그 계약이 그대로 유지된다. 값 18/16/16 은 가격 플롯에서 나온다(모바일 540 -> 490px).
+  const ROW_H = (fpBars.length && mobileChart) ? 16 : 0;   // 레인 아래 한 줄
+  const PRICE_ROW_H = mobileChart ? 18 : 0;                // 가격 플롯 아래 한 줄
   // ── 거래대금 · 델타·CVD -- 풋프린트 바로 아래 (2026-09-21 사용자 지시) ────────────
   // 같은 풋프린트 봉에서 나온다: 거래대금 = Σ가격x(매수+매도) · 델타 = Σ(매수-매도) ·
   // CVD = 그 창 안에서의 델타 누적.
@@ -5086,7 +5108,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이다(dashboard/situation.py 의 WINDOW=6).
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
   const cw = w - ml - mr;
-  const ch = h - mt - mb - QUAD_H - QUAD_TXT - CUM_H - 2 * LANE_GAP;
+  const ch = h - mt - mb - QUAD_H - QUAD_TXT - CUM_H - 2 * LANE_GAP
+            - PRICE_ROW_H - 2 * ROW_H;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
   // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). OI·청산 레인은 플롯 바로 아래 그대로다.
   // 2026-09-22 위아래를 뒤집었다(사용자 지시): **프로파일이 먼저, 1초 수급이 그 아래**.
@@ -5097,8 +5120,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const subProfileY = mtTop;
   const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
   const subLegendY = sub1sY + SUB_1S_H;
-  const quadY = plotBottom + LANE_GAP;              // 사분면 막대 바닥 = quadY + QUAD_H
-  const cumY = quadY + QUAD_H + QUAD_TXT + LANE_GAP; // 누적 행 위쪽
+  const quadY = plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
+  const cumY = quadY + QUAD_H + QUAD_TXT + ROW_H + LANE_GAP; // 누적 행 위쪽
+  const cumBottom = cumY + CUM_H;                    // 그 아래 한 줄이 ROW_H 를 쓴다
   const NS = "http://www.w3.org/2000/svg";
   // 풋프린트는 서버가 주는 12봉이 곧 창이다 -- 모바일 핀치줌(visibleCandleWindow)으로 더
   // 잘라내면 셀만 커지고 볼 구간이 사라진다.
@@ -5168,7 +5192,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   빠뜨리면 테마를 바꿔도 캐시된 층이 옛 색 그대로 남는다(모드 키와 같은 함정).
   const themeSig = document.documentElement.getAttribute("data-theme") || "dark";
   const baseGeomSig = [themeSig, w, h, mt, ch, ml, mr, cw, bw, yMin, yMax, plotBottom,
-                       mobileChart, quadY, cumY, QUAD_H, QUAD_TXT, CUM_H, QUAD_TEXT_OK].join("|");
+                       mobileChart, quadY, cumY, QUAD_H, QUAD_TXT, CUM_H, QUAD_TEXT_OK,
+                       ROW_H, PRICE_ROW_H].join("|");
   // 봉 시각만. 진행 중인 봉의 OHLC 는 여기 없다(위 주석).
   const timesSig = candles.length + ":" + (candles[0] ? candles[0].time : 0)
                    + ":" + (candles[candles.length - 1] ? candles[candles.length - 1].time : 0);
@@ -6040,20 +6065,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
     const labelY = Math.max(mt + 9, Math.min(plotBottom - 9, labelYRaw));
     const lineDashed = p.dashed || p.outOfView;
-    // 배지 기하를 **먼저** 정한다 -- 아래 꺾쇠가 배지의 왼쪽 변에 붙어야 하기 때문이다.
+    // 2026-09-22 사용자 지시: **모바일은 배지를 안 그린다.** 값은 플롯 아래 한 줄이 갖고,
+    //   플롯 안에서는 꺾쇠(화살표)가 «어느 행인가»만 가리킨다. 배지를 안에 띄우면 가장 최근
+    //   봉을 덮고, 밖에 두면 그 폭만큼 플롯이 짧아진다 -- 아래로 내리면 둘 다 없다.
     const subOk = !!p.sub && !mobileChart;
-    const boxW = subOk ? 76 : (mobileChart ? 56 : 64), boxH = 18;
-    // 모바일은 오른쪽 끝 기준(플롯 안), 데스크톱은 종전대로 여백 왼쪽 끝 기준.
-    const boxX = mobileChart ? w - 4 - boxW : w - mr + 4;
+    const boxW = subOk ? 76 : 64, boxH = 18;
+    const boxX = w - mr + 4;
 
     // Line stays at real (clamped) price position
     let line = null;
     if (p.marker) {
       // 플롯 오른쪽 가장자리에서 **왼쪽을 가리키는** 삼각형. 꼭짓점이 곧 그 가격의 행이다.
-      // 🔴모바일은 배지가 플롯 안으로 들어와 ml+cw 가 배지 **오른쪽**이 된다 -- 거기 두면
-      //   꼬리가 아니라 배지 위에 얹힌다. 배지의 왼쪽 변에 붙여 원래 «꼬리» 관계를 지킨다.
       const tri = document.createElementNS(NS, "polygon");
-      tri.setAttribute("points", markerPoints(mobileChart ? boxX : ml + cw, p.realY));
+      tri.setAttribute("points", markerPoints(ml + cw, p.realY));
       if (p.gauge === undefined) {
         tri.setAttribute("fill", p.color);
       } else {                                   // 예측 = 속 빈 꺾쇠
@@ -6096,15 +6120,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴폭에 한계가 있다. 배지는 x = w-mr+4 에서 시작하므로 mr-8 을 넘으면 SVG 밖으로 잘린다
     //   (데스크톱 mr 86 -> 최대 78, 모바일 mr 68 -> 최대 60 = 기존 56 에서 4px 뿐).
     //   ⇒ 모바일에서는 값을 넣지 않는다. 카드에 같은 숫자가 있고, 잘린 배지보다 낫다.
-    // 모바일 배지는 캔들 위에 뜬다 -- 속 빈 배지(확률 게이지)와 흐린 배지(지나간 목표)는
-    // 뒤가 비쳐 숫자가 안 읽힌다. 표면 한 장을 먼저 깔고 그 위에 그린다.
-    if (mobileChart) {
-      const back = document.createElementNS(NS, "rect");
-      back.setAttribute("x", boxX); back.setAttribute("y", labelY - 9);
-      back.setAttribute("width", boxW); back.setAttribute("height", boxH);
-      back.setAttribute("rx", "2"); back.setAttribute("fill", "var(--panel-strong)");
-      svg.appendChild(back);
-    }
     const rect = document.createElementNS(NS, "rect");
     rect.setAttribute("x", boxX); rect.setAttribute("y", labelY - 9);
     rect.setAttribute("width", boxW); rect.setAttribute("height", boxH);
@@ -6115,7 +6130,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       rect.setAttribute("fill", "none");
       rect.setAttribute("stroke", p.color);
       rect.setAttribute("stroke-width", "1.2");
-      if (p.gauge > 0) {                         // 테두리 «안»을 확률만큼 채운다
+      if (p.gauge > 0 && !mobileChart) {          // 테두리 «안»을 확률만큼 채운다
         const fillW = Math.max(2, (boxW - 2) * (p.gauge / 100));
         const g = document.createElementNS(NS, "rect");
         g.setAttribute("x", boxX + 1); g.setAttribute("y", labelY - 8);
@@ -6126,7 +6141,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
     }
     if (p.faded) rect.setAttribute("opacity", "0.5");
-    svg.appendChild(rect);
+    if (!mobileChart) svg.appendChild(rect);
 
     const pTxt = document.createElementNS(NS, "text");
     pTxt.setAttribute("x", boxX + 4); pTxt.setAttribute("y", labelY + 4);
@@ -6136,7 +6151,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     pTxt.setAttribute("fill", p.gauge === undefined ? inkOnFill() : "var(--ink)");
     if (p.faded) pTxt.setAttribute("opacity", "0.62");
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
-    svg.appendChild(pTxt);
+    if (!mobileChart) svg.appendChild(pTxt);
     if (subOk) {
       const sTxt = document.createElementNS(NS, "text");
       sTxt.setAttribute("x", boxX + boxW - 5); sTxt.setAttribute("y", labelY + 4);
@@ -6158,6 +6173,27 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       txt.dataset.live = "label";
     }
   });
+  // 2026-09-22 사용자 지시: 모바일은 배지 대신 플롯 **아래 한 줄**이 값을 갖는다.
+  //   순서는 priceLabels 그대로다 -- y 오름차순 = 가격 내림차순이라 줄이 위에서 아래로
+  //   읽히는 순서와 같다. 폭을 넘으면 거기서 멈춘다(잘린 글자를 남기지 않는다).
+  if (mobileChart && PRICE_ROW_H && priceLabels.length) {
+    const rowY = plotBottom + 13;
+    let x = 3;
+    priceLabels.forEach((p) => {
+      if (x > w - 30) return;
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", x); t.setAttribute("y", rowY);
+      t.setAttribute("font-size", "10.5"); t.setAttribute("fill", p.color);
+      if (p.faded) t.setAttribute("opacity", "0.55");
+      const arrow = p.offTop ? "↑" : p.offBottom ? "↓" : "";
+      t.textContent = (p.label || "") + " " + arrow + fmtNum(p.val, 1);
+      if (p.label === "현재" && isSnapshotChart) t.dataset.live = "rowtext";
+      svg.appendChild(t);
+      let adv = 0;
+      try { adv = t.getComputedTextLength(); } catch (_) { adv = t.textContent.length * 6.4; }
+      x += (adv > 0 ? adv : t.textContent.length * 6.4) + 9;
+    });
+  }
   // 빠른 갱신이 가격 -> y 를 계산하려면 이번 렌더의 축 규약이 필요하다. 다음 전체 렌더가
   // 덮어쓴다 -- 즉 이 값은 항상 «지금 화면에 그려진 것»과 같다.
   if (isSnapshotChart) {
@@ -6449,21 +6485,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       //   mr(68px)을 넘는 순간 잘리는데, 우측정렬이면 긴 것만 플롯 쪽으로 조금 들어온다.
       //   왼쪽 보조 라벨(«높이 |Δ|»·«농도 |OI|», 11px 로 42~50px)은 ml 44px 를 넘어
       //   x<0 으로 잘렸다 -- 좁은 폭에서는 아예 안 그린다(실렌더 414px 에서 확인).
-      // 2026-09-22 모바일: mr 을 10 으로 줄여 막대가 이 꼬리표 **밑까지** 온다. 표면 한 장을
-      //   먼저 깔지 않으면 --muted 글자가 막대 채움 위에 놓여 대비가 무너진다. 네 줄의
-      //   자리(quadY+14 ~ +65)는 아래에서 고정으로 쓰므로 높이도 상수로 잡는다.
-      if (mobileChart) {
-        const sc = document.createElementNS(NS, "rect");
-        sc.setAttribute("x", (w - 74).toFixed(1)); sc.setAttribute("y", (quadY + 2).toFixed(1));
-        sc.setAttribute("width", "72"); sc.setAttribute("height", "70");
-        sc.setAttribute("rx", "5"); sc.setAttribute("fill", "var(--panel-strong)");
-        put(sc);
-      }
       const side = (y, txt, anchor, color) => {
         const t = document.createElementNS(NS, "text");
         t.setAttribute("text-anchor", "end");
-        // 모바일은 표면 위라 안쪽 여백이 필요하다 -- w-2 면 글자가 모서리에 붙는다(실측 2px).
-        t.setAttribute("x", anchor === "end" ? ml - 6 : (mobileChart ? w - 7 : w - 2));
+        t.setAttribute("x", anchor === "end" ? ml - 6 : w - 2);
         t.setAttribute("y", y); t.setAttribute("font-size", mobileChart ? "10" : "11");
         t.setAttribute("fill", color || "var(--muted)");
         t.textContent = txt;
@@ -6477,11 +6502,29 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         + "막대 위 주황 캡은 OI 가 늘었다(신규 진입)는 뜻입니다. 밝은 선은 거래대금이며 "
         + "자기 축을 씁니다 -- 막대와 어긋나는 봉이 «거래는 많은데 순델타는 작았다» = 흡수입니다.";
       lbl.appendChild(lblTip);
-      if (!mobileChart) { side(quadY + 30, "높이 |Δ|", "end"); side(quadY + 45, "농도 |OI|", "end"); }
-      side(quadY + 14, "─ 거래대금", null, "var(--turnover)");
-      side(quadY + 30, "최대 " + fmtUsdCompact(tMax), null);
-      side(quadY + 50, "주황 캡", null, "var(--warn)");
-      side(quadY + 65, "= OI 증가", null);
+      if (!mobileChart) {
+        side(quadY + 30, "높이 |Δ|", "end"); side(quadY + 45, "농도 |OI|", "end");
+        side(quadY + 14, "─ 거래대금", null, "var(--turnover)");
+        side(quadY + 30, "최대 " + fmtUsdCompact(tMax), null);
+        side(quadY + 50, "주황 캡", null, "var(--warn)");
+        side(quadY + 65, "= OI 증가", null);
+      } else {
+        // 2026-09-22 사용자 지시: 네 줄을 막대 **아래 한 줄**로. 오른쪽에 세워 두면 그 폭만큼
+        //   막대가 짧아지고, 막대 위에 얹으면 채움 위 글자라 대비가 무너진다.
+        const rowY = quadY + QUAD_H + QUAD_TXT + 11;
+        const seg = (x, txt, color) => {
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", x); t.setAttribute("y", rowY);
+          t.setAttribute("font-size", "10"); t.setAttribute("fill", color || "var(--muted)");
+          t.textContent = txt;
+          put(t);
+          let adv = 0;
+          try { adv = t.getComputedTextLength(); } catch (_) { adv = txt.length * 6.2; }
+          return x + (adv > 0 ? adv : txt.length * 6.2) + 8;
+        };
+        seg(seg(3, "─ 거래대금 최대 " + fmtUsdCompact(tMax), "var(--turnover)"),
+            "▬ 주황 캡 = OI 증가", "var(--warn)");
+      }
     }
   }
   });
@@ -6556,17 +6599,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
                       ["OI", last.oi, "var(--warn)", 0.95]];
       // 🔴좁은 폭은 색표를 빼고 오른쪽 끝 기준 우측정렬한다 -- mr 68px 에 색표(14px)까지
       //   넣으면 «리테일 -1.8k»(10px 로 약 66px)가 잘린다(실렌더 414px 에서 확인).
-      // 2026-09-22 모바일: 위와 같은 이유로 표면을 먼저 깐다(막대가 이 밑까지 온다).
-      if (mobileChart) {
-        const sc = document.createElementNS(NS, "rect");
-        sc.setAttribute("x", (w - 74).toFixed(1)); sc.setAttribute("y", (cumY + 2).toFixed(1));
-        sc.setAttribute("width", "72");
-        sc.setAttribute("height", String(14 + legend.length * 15));
-        sc.setAttribute("rx", "5"); sc.setAttribute("fill", "var(--panel-strong)");
-        g.appendChild(sc);
-      }
+      // 2026-09-22 모바일(사용자 지시): 세로 범례를 누적 행 **아래 한 줄**로 내린다.
+      //   위 사분면 줄과 같은 문법이라 두 레인이 한 덩어리로 읽힌다.
+      let rowX = 3;
+      const rowY = cumBottom + 11;
       legend.forEach((row, k) => {
-        const y = cumY + 14 + k * (mobileChart ? 15 : 19);
+        const y = mobileChart ? rowY : cumY + 14 + k * 19;
         if (!mobileChart) {
           const sw = document.createElementNS(NS, "rect");
           sw.setAttribute("x", ml + cw + 2); sw.setAttribute("y", y - 9);
@@ -6575,7 +6613,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           g.appendChild(sw);
         }
         const t = document.createElementNS(NS, "text");
-        t.setAttribute("x", mobileChart ? w - 7 : w - 2); t.setAttribute("text-anchor", "end");
+        if (mobileChart) t.setAttribute("x", rowX);
+        else { t.setAttribute("x", w - 2); t.setAttribute("text-anchor", "end"); }
         t.setAttribute("y", y);
         // 2026-09-22 위 1초 차트 범례와 **같은 크기**로 맞춘다(사용자 지시).
         //   두 범례가 같은 카드에서 같은 역할인데 12/11 과 19/15 로 갈려 있었다.
@@ -6585,6 +6624,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (k === 0) t.setAttribute("font-weight", "700");
         t.textContent = row[0] + " " + sgn(row[1]);
         g.appendChild(t);
+        if (mobileChart) {
+          let adv = 0;
+          try { adv = t.getComputedTextLength(); } catch (_) { adv = t.textContent.length * 6.2; }
+          rowX += (adv > 0 ? adv : t.textContent.length * 6.2) + 8;
+        }
       });
       const lbl = document.createElementNS(NS, "text");
       lbl.setAttribute("x", ml - 6); lbl.setAttribute("y", mid - 4);

@@ -132,17 +132,28 @@ def test_liquidation_dots_sit_on_the_oi_line():
 
 
 def test_one_pane_uses_the_whole_drawing_area():
-    """그리기 영역(flowH) 전부를 누적 스택이 쓴다. SUB_1S_H(400) − mt(16) − mb(14) = 370.
+    """그리기 영역(flowH) 전부를 누적 스택이 쓴다.
+
+    데스크톱 SUB_1S_H(400) − mt(16) − mb(14) = 370.
+    2026-09-22 모바일은 범례가 플롯 밖 **바닥 한 줄**로 내려가 mb 가 28 이다 → 356.
+    그 14px 이 범례 줄 값이고, 그만큼만 선이 짧아져야 한다.
 
     🔴이 산수가 어긋나면 SVG 는 잘라주지 않는다 -- 넘치면 옆 패널을 침범하고, 모자라면
       빈 띠가 생긴다. 캔들 상자 높이 계약(styles.css)과 이 파일이 갈라져 있어 한쪽만
       고치면 조용히 깨지므로 여기서 다시 센다.
     """
-    mt = int(re.search(r"const mt = (\d+), mb = (\d+);", JS).group(1))
-    mb = int(re.search(r"const mt = (\d+), mb = (\d+);", JS).group(2))
+    m = re.search(r"const mt = (\d+), mb = narrow \? (\d+) : (\d+);", JS)
+    assert m, "mt/mb 선언 모양이 바뀌었다 -- 계약을 다시 세운다"
+    mt, mb_narrow, mb_wide = (int(g) for g in m.groups())
     sub_h = int(re.search(r"SUB_1S_H = subOn \? (\d+)", JS).group(1))
-    flow_h = sub_h - mt - mb
-    assert flow_h == 370, f"그리기 영역이 {flow_h}px 다(400-16-14=370 이어야)"
+    assert sub_h - mt - mb_wide == 370, \
+        f"데스크톱 그리기 영역이 {sub_h - mt - mb_wide}px 다(400-16-14=370 이어야)"
+    assert sub_h - mt - mb_narrow == 356, \
+        f"모바일 그리기 영역이 {sub_h - mt - mb_narrow}px 다(400-16-28=356 이어야)"
+    # 🔴narrow 는 mb 보다 **먼저** 선언돼야 한다. 순서가 뒤집히면 TDZ ReferenceError 로
+    #   app.js 전체가 죽는데 node --check 는 문법이 옳아 못 잡는다(2026-09-22 실제 발생).
+    assert JS.index("const narrow = w < 760;") < m.start(), \
+        "narrow 선언이 mb 보다 뒤다 -- TDZ 로 app.js 가 통째로 죽는다"
     assert re.search(r"const mid = flowTop \+ flowH / 2;", JS), "0선이 그리기 영역 한가운데가 아니다"
     assert re.search(r"const half = flowH / 2 - 4;", JS), "반폭이 flowH 기준이 아니다"
     body = JS[JS.index("function renderSupply1s"):JS.index("function renderSupplyProfileSvg")]
