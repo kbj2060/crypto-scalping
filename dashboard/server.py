@@ -3637,11 +3637,13 @@ def make_app() -> web.Application:
         # 스트림 나이. 조용히 죽으면 «부호 없음»으로 굳는데 화면에서 그걸 알 수가 없다
         # (이 저장소에서 @aggTrade 가 3주간 0건이었던 전례).
         _now_ms = time.time() * 1000
+        # 🔴0 에서 자른다. OKX 의 거래소 시각이 우리 시계보다 앞서면 음수가 나오고
+        #   화면에 「체결 -0.9s 전」이 뜬다(2026-09-23 실서버에서 실제로 나왔다). 시계 차는
+        #   ~1초라 나이 판정에는 영향이 없지만 표시는 거짓말이 된다.
+        _age = lambda ms: round(max(0.0, (_now_ms - ms) / 1000), 1) if ms else None
         okx_meta = {"connected": bool(okx_state["connected"]),
-                    "tradeAge": round((_now_ms - okx_state["last_trade_ms"]) / 1000, 1)
-                                if okx_state["last_trade_ms"] else None,
-                    "oiAge": round((_now_ms - okx_state["last_oi_ms"]) / 1000, 1)
-                             if okx_state["last_oi_ms"] else None,
+                    "tradeAge": _age(okx_state["last_trade_ms"]),
+                    "oiAge": _age(okx_state["last_oi_ms"]),
                     "inst": OKX_INST, "errors": okx_state["errors"]}
         oi_floor = max(since_oi, (max(oi_1s) if oi_1s else 0) - SUPPLY_1S_SECONDS)
         # [초, 미결제약정]. 증분은 클라가 뺀다(창 시작을 0으로 두는 누적선이라 절대값이 필요).
