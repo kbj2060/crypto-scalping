@@ -2714,7 +2714,9 @@ def make_app() -> web.Application:
                          "delta": buy - sell, "vol": buy + sell,
                          "whale_net": sum(v[2] - v[3] for v in cells.values()),
                          "retail_net": sum(v[4] - v[5] for v in cells.values()),
-                         "oi_delta": oi_map.get(b), "liq_long": liq_map.get(b, (0, 0))[0], "liq_short": liq_map.get(b, (0, 0))[1]})
+                         "oi_delta": oi_map.get(b), "liq_long": liq_map.get(b, (0, 0))[0], "liq_short": liq_map.get(b, (0, 0))[1],
+                         # 추세 veto(2026-09-22) -- load_market_history 가 이미 봉마다 붙여 준다.
+                         "veto": (c or {}).get("veto")})
             if b >= (want[-sit.WINDOW] if len(want) >= sit.WINDOW else want[0]):
                 for k, v in cells.items():
                     row = round(k * FOOTPRINT_BUCKET / SITUATION_VA_ROW_USD) * SITUATION_VA_ROW_USD

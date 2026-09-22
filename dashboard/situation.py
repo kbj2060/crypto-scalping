@@ -50,7 +50,15 @@ RANGE_NAMES = {"A": "유지", "B": "위로 이탈", "C": "아래로 이탈"}
 # 점수표 -- (근거 라벨 → {시나리오: 점수}). A=되돌림 B=지속 C=플러시(이동 반대쪽 과잉)
 SCORES: dict[str, dict[str, int]] = {
     "스퀴즈": {"A": 20, "C": 5}, "신규유입": {"B": 20}, "클라이맥스": {"A": 15, "C": 5},
-    "전환탐지": {"A": 5, "C": 5}, "분배": {"A": 10, "C": 10}, "축적": {"B": 10}, "거부봉": {"A": 5, "C": 10},
+    "전환탐지": {"A": 5, "C": 5},
+    # 2026-09-22 추세 veto(SMA144 ±1.0xATR 히스테리시스) 와 30분 이동의 정렬. **추세 구간 전용**.
+    #   실측(4.7년 · 6봉마다 결정 = 지평 비중복 · Y_sym 라벨 · 추세 판정봉 29,508):
+    #     정렬 지속률 52.77% vs 역행 50.54% -- 차이 +2.22pp · 월블록 CI[+1.19,+3.32] · 연도 6/6 양수.
+    #   12시간 맥락은 이 카드가 여태 전혀 안 보던 정보다(다른 근거는 전부 30분 창이거나 현재 봉).
+    #   🔴점수를 최소 단위로 둔다 -- +2.2pp 짜리에 20점을 주면 과대평가다.
+    #   🔴횡보의 «어느 쪽으로 이탈» 에는 **넣지 않았다**: 같은 측정에서 +2.29pp 이지만 2023 이
+    #     부호 반전(5/6)이고, 크기가 「횡보 방향 TRAIN .5144 -> VAL .5007」과 같은 자리다.
+    "추세정렬": {"B": 3}, "추세역행": {"A": 3}, "분배": {"A": 10, "C": 10}, "축적": {"B": 10}, "거부봉": {"A": 5, "C": 10},
     # 🔴지속률 0.30~0.40 은 라벨에 «얇음»도 «두꺼움»도 안 붙는데 점수는 얇음(B+3)으로 먹고 있었다
     #   (실측 동방향 벽 47건 중 18건). 두 값의 중간으로 밴드를 명시한다.
     "벽_동방향_두꺼움": {"B": 10}, "벽_동방향_중간": {"B": 6}, "벽_동방향_얇음": {"B": 3}, "벽_역방향": {"A": 5},
@@ -120,7 +128,7 @@ def _sign(x: float | None) -> int:
 def classify(inp: dict[str, Any]) -> dict[str, Any]:
     """inp:
       bars   완결 5분봉 오래된→최신, 각 {time, high, low, close, delta, vol, whale_net, retail_net,
-             oi_delta(None 허용), liq_long, liq_short}
+             oi_delta(None 허용), liq_long, liq_short, veto(추세 veto ±1/0, 없으면 생략)}
       levels {가격: 거래량} 창 전체(가치영역용)
       cur    {elapsed_s, whale_net, retail_net, oi_delta, delta}
       book   {obi, persist_share}   act_pct   sr {res, sup, res_bp, sup_bp}
@@ -232,6 +240,13 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
                       + (f" · 지속 {pers:.0%}" if pers is not None else ""))
     ev.update(wall=wall, obi=obi, persist=pers)
 
+    # ── 추세 veto (12시간 맥락) ──
+    veto = w[-1].get("veto") or 0
+    if veto:
+        labels.append(f"12시간 추세 {'상승' if veto > 0 else '하락'}"
+                      + ("" if d == 0 else " · 30분 이동과 " + ("정렬" if veto == d else "역행")))
+    ev.update(veto=veto)
+
     # ── 가치영역 ──
     levels = {float(k): float(v) for k, v in (inp.get("levels") or {}).items() if v}
     va_lo = va_hi = None
@@ -318,6 +333,7 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     else:
         if near_res or near_sup: add("저항근접")
         if no_cushion: add("쿠션없음")
+        if veto: add("추세정렬" if veto == d else "추세역행")
     if hot: add("활발")
     if trapped: add("펀딩_반대쏠림")
     if lead > 0: add("선물주도")
@@ -651,6 +667,23 @@ if __name__ == "__main__":
     assert r["dist_bp"]["C"] < r["dist_bp"]["A"] < 0 < r["dist_bp"]["B"]   # 상승: A·C 는 아래, B 는 위
     assert [f["on"] for f in r["flips"]] == [False, False, False, False, False]                # 그 시점엔 다 꺼져 있었다
     assert r["evidence"]["c_target_src"] == "베이스" and "펀딩" not in " ".join(r["labels"])
+    # 추세 veto 정렬(2026-09-22). 봉에 veto 가 없으면 아무 일도 안 일어나야 한다(기존 동작 보존).
+    assert r["evidence"]["veto"] == 0 and not any("12시간 추세" in x for x in r["labels"]), r["labels"]
+    def _with_veto(v):
+        return classify(dict(inp, bars=[dict(b, veto=v) for b in inp["bars"]]))
+    ra, rv = _with_veto(1), _with_veto(-1)          # dir=1 이므로 +1 이 정렬, -1 이 역행
+    assert ra["evidence"]["veto"] == 1 and rv["evidence"]["veto"] == -1
+    assert ra["prob"]["B"] > r["prob"]["B"] > rv["prob"]["B"], (ra["prob"], r["prob"], rv["prob"])
+    # A 는 >= 로 둔다 -- 3점짜리라 100 정규화·반올림에서 동점이 날 수 있다(실제 56/56/55). B 사슬이 엄격.
+    assert rv["prob"]["A"] >= r["prob"]["A"] >= ra["prob"]["A"], (rv["prob"], r["prob"], ra["prob"])
+    assert any("정렬" in x for x in ra["labels"]) and any("역행" in x for x in rv["labels"])
+    # 🔴횡보에서는 점수에 손대지 않는다 -- 라벨만 뜨고 확률은 그대로여야 한다(2023 부호 반전 때문에 뺐다)
+    flat = dict(inp, bars=[dict(b, close=2600.0, high=2601.0, low=2599.0) for b in inp["bars"]], mid=2600.0, prev_dir=0)
+    f0, f1 = classify(flat), classify(dict(flat, bars=[dict(b, close=2600.0, high=2601.0, low=2599.0, veto=1) for b in flat["bars"]]))
+    assert f0["dir"] == 0 and f1["dir"] == 0, (f0["dir"], f1["dir"])
+    assert f1["prob"] == f0["prob"], (f1["prob"], f0["prob"])
+    assert any("12시간 추세" in x for x in f1["labels"])
+
     # 🔴청산 군집은 플러시 목표로 쓰지 않는다(09-21 실측 도달 0/444). 레벨이 있어도 C 는 베이스 그대로여야 한다
     inp3 = dict(inp); inp3["sr"] = dict(inp["sr"], sup_levels=[{"price": 2589.5, "weight_pct": 30}, {"price": 2587.0, "weight_pct": 45}, {"price": 2562.06, "weight_pct": 60}])
     r3 = classify(inp3)
