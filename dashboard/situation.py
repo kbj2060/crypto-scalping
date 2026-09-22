@@ -85,6 +85,23 @@ BASE = {"A": 54, "B": 26, "C": 20}
 #   ⭐이건 **라벨 정의의 기하 기저율**이지 이 표본을 맞춘 값이 아니다 -- §14-6 이 금지한
 #   «작은 표본으로 계수 맞추기»와 다른 범주다(독립 창 15개로는 어떤 계수도 판정 못 한다).
 BASE_RANGE = {"A": 16, "B": 43, "C": 41}
+# 🔴2026-09-22 그 16 은 **상수가 아니다**. 이탈 배리어가 창 고저 그 자체라 창이 넓으면 배리어가 멀고,
+#   같은 패널에서 유지율이 창 폭을 따라 단조로 움직인다(PRE-OOS 179,563건 -> OOS 19,411건 재현):
+#     range_bp   <20   20~30  30~40  40~55  55~75  >=75
+#     유지        5.6    8.0   10.8   13.7   17.4   26.1  %   (OOS 6.4 10.0 11.8 19.0 23.4 30.7)
+#   상수 16 은 좁은 창에서 3배 과대, 넓은 창에서 크게 과소다. garch 분위를 고정해도 5칸 전부에서
+#   +11.6~+22.0pp 로 살아남는다(scripts/research_situation_within_regime_feature_screen_20260922.py ctrl).
+#   B·C 는 BASE_RANGE 의 43:41 비율을 그대로 나눠 갖는다 -- 창 폭은 «이탈하나»를 말하지 «어느 쪽»은 말하지 않는다
+#   (같은 패널에서 횡보의 **방향**을 가르는 피쳐는 152개 중 하나도 없었다).
+HOLD_BY_RANGE = ((20, 6), (30, 8), (40, 11), (55, 14), (75, 17), (float("inf"), 26))
+
+
+def base_range(rng_bp: float) -> dict[str, int]:
+    """횡보 사전확률. «유지»(A)는 창 폭에 따라 6~26%. rng_bp=창 고저폭(bp)."""
+    a = next(v for edge, v in HOLD_BY_RANGE if rng_bp < edge)
+    rest = 100 - a
+    b = round(rest * BASE_RANGE["B"] / (BASE_RANGE["B"] + BASE_RANGE["C"]))
+    return {"A": a, "B": b, "C": rest - b}
 
 
 def _ahead(px: float | None, mid: float, above: bool) -> float | None:
@@ -270,7 +287,7 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     ev.update(btc_move_bp=None if bm is None else round(bm, 1), btc_dir=d_btc, btc_rel=btc_rel)
 
     # ── 시나리오 점수 ──
-    sc = dict(BASE_RANGE if d == 0 else BASE)
+    sc = dict(base_range(rng_bp) if d == 0 else BASE)
     why: list[tuple[str, dict[str, int]]] = []
 
     def add(key: str) -> None:
@@ -648,6 +665,16 @@ if __name__ == "__main__":
     r5 = classify(inp5)
     assert not r5["evidence"]["trapped"] and r5["evidence"]["lead"] == -1 and r5["prob"]["B"] > r["prob"]["B"]
     assert classify(dict(inp, deriv=dict(funding=-0.0002, basis_bp=3.0, basis_d_bp=2.0, basis_thr_bp=None)))["evidence"]["lead"] == 0   # 임계 없으면 보류
+    # 횡보 사전확률은 창 폭의 함수다. 16 에서 BASE_RANGE 를 그대로 재현하고, 단조이며, 합은 100 이다.
+    assert base_range(50.0) == {"A": 14, "B": 44, "C": 42} and sum(base_range(50.0).values()) == 100
+    _h = [base_range(x)["A"] for x in (10, 25, 35, 50, 60, 120)]
+    assert _h == sorted(_h) == [6, 8, 11, 14, 17, 26] and all(sum(base_range(x).values()) == 100 for x in (10, 120))
+    #   같은 입력에서 창 폭만 바꾸면 «유지»가 따라 움직여야 한다(전에는 둘 다 16 이었다).
+    _chop = lambda h, l: classify(dict(inp, mid=2600.0, bars=[                                   # noqa: E731
+        bar(300 * i, 2600 + (1 if i % 2 else -1), 0, 5000, 0, 0, 0, h=h, l=l) for i in range(9)]))
+    _w, _n = _chop(2660, 2540), _chop(2605, 2595)
+    assert _w["dir"] == _n["dir"] == 0, (_w["dir"], _n["dir"])
+    assert _w["prob"]["A"] - _n["prob"]["A"] >= 10, (_w["prob"], _n["prob"])
     # BTC 같은 창: 같이 올랐으면 «동행» B↑ · 창 폭 안에서 못 움직였으면 «ETH 단독» A↑ · 없으면 라벨 없음
     r6 = classify(dict(inp, btc=dict(move_bp=40.0, range_bp=60.0)))
     assert r6["evidence"]["btc_rel"] == "동행" and r6["prob"]["B"] > r["prob"]["B"] and any("시장 전체" in x for x in r6["labels"])
@@ -731,9 +758,11 @@ if __name__ == "__main__":
               book={}, act_pct=0.1, sr={}, breakout={})
     fr = classify(fi)
     assert fr["dir"] == 0 and fr["targets"]["A"] is None, fr["targets"]
-    # 규칙이 하나도 안 붙으면 확률은 기하 기저율 그대로여야 한다(34/33/33 이 아니다)
-    assert fr["prob"]["A"] == 16 and fr["prob"]["B"] > 40 and fr["prob"]["C"] > 38, fr["prob"]
-    assert max(fr["prob"], key=fr["prob"].get) != "A", "횡보의 1순위가 «레인지 유지»면 안 된다(기저율 16%)"
+    # 규칙이 하나도 안 붙으면 확률은 기하 기저율 그대로여야 한다(34/33/33 이 아니다).
+    # 🔴이 창은 고저폭 7px/2600.5 = 27bp 라 «유지»는 평균 16 이 아니라 **8** 이다(HOLD_BY_RANGE).
+    assert fr["evidence"]["range_bp"] < 30 and fr["prob"] == base_range(fr["evidence"]["range_bp"]), fr["prob"]
+    assert fr["prob"]["A"] == 8 and fr["prob"]["B"] > 45 and fr["prob"]["C"] > 43, fr["prob"]
+    assert max(fr["prob"], key=fr["prob"].get) != "A", "횡보의 1순위가 «레인지 유지»면 안 된다(기저율 6~26%)"
     # 지지 근접은 **하단 이탈(C)** 을 깎아야 한다 -- 전에는 상단 이탈(B)을 깎고 있었다
     near_dn = classify(dict(fi, sr=dict(sup=2599.0, res=2650.0, sup_bp=5.0, res_bp=190.0)))
     assert near_dn["prob"]["C"] < fr["prob"]["C"] and near_dn["prob"]["B"] >= fr["prob"]["B"], near_dn["prob"]
