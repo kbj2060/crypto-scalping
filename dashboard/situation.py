@@ -121,6 +121,7 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     ev: dict[str, Any] = {}
 
     # ── 이동 ──
+    ev["mid"] = mid
     rng_bp = (max(b["high"] for b in w) - min(b["low"] for b in w)) / mid * 1e4
     move_bp = (w[-1]["close"] - bars[-WINDOW - 1]["close"]) / bars[-WINDOW - 1]["close"] * 1e4
     # 슈미트 트리거. 이전 레짐은 호출자가 넘긴다(이 함수는 순수하게 둔다).
@@ -182,7 +183,8 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
         labels.append("전환 탐지 켜짐")
     elif bo.get("prewarn_on"):
         labels.append("전환 예고")
-    ev.update(cvd=round(cvd), cvd_div=cvd_div, climax=climax, reject=reject, breakout_detect=bool(bo.get("detect_on")), breakout_prewarn=bool(bo.get("prewarn_on")))
+    ev.update(cvd=round(cvd), cvd_div=cvd_div, climax=climax, reject=reject,
+              last_delta=round(last.get("delta") or 0.0, 1), max_delta=round(deltas[imax], 1), breakout_detect=bool(bo.get("detect_on")), breakout_prewarn=bool(bo.get("prewarn_on")))
 
     # ── 현재 봉 시그니처 ──
     cur = inp.get("cur") or {}
@@ -382,6 +384,11 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
             ("OI 증가 + 하단 근접", (lastb.get("oi_delta") or 0) > 0 and mid <= min(b["low"] for b in w) * 1.001, "C"),
             ("활발 전환", bool(hot), "B"),
         ]
+    # 🔴화면의 «현재 상황» 막대는 이 임계들을 기준선으로 그린다. 클라이언트가 같은 숫자를
+    #   다시 선언하면 여기를 고치는 날 조용히 어긋난다 -- 쓰는 쪽에 보낸다.
+    ev["thr_ui"] = {"obi": OBI_SIDE, "reject": REJECT_FRAC, "act": ACT_HOT, "near_bp": NEAR_RES_BP,
+                    "cushion": FAR_SUP_RATIO, "persist_thin": PERSIST_THIN, "persist_thick": PERSIST_THICK,
+                    "funding": FUNDING_NEUTRAL}
     return {"ok": True, "dir": d, "labels": labels, "evidence": ev, "prob": prob, "names": names, "names_long": names_long,
             "regime": {"ratio": round(ratio, 3), "thr": thr_next, "margin": round(margin, 3),
                        "enter": TREND_ENTER, "exit": TREND_EXIT},
