@@ -37,6 +37,9 @@ function draw(label, { qty = 10, hole = null, oi = null } = {}) {
   // 2026-09-23 렌더러가 기본 출처 객체를 만들 때 세 전역을 **즉시** 읽는다(예전엔 청산 루프
   // 안에서만 읽어서 하네스가 비워둬도 지나갔다). 실제 앱은 셋 다 항상 선언돼 있다.
   global.liq1s = new Map();
+  // 2026-09-23 기본 출처가 OKX 레인(합산선용)도 즉시 읽는다. 비어 있으면 overlay=null 이라
+  // 합산선을 안 그린다 -- 이 하네스는 바이낸스 단독 렌더를 검사한다.
+  global.okxSupply1s = new Map();
   const svg = { _a: {}, innerHTML: "", kids: [], setAttribute(k, v) { this._a[k] = v; },
                 appendChild(c) { this.kids.push(c); }, parentElement: { clientWidth: W } };
   try {

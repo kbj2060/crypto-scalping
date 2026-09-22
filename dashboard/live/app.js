@@ -256,6 +256,7 @@ function okxSupplySrc() {
   const age = okxMeta.tradeAge;
   const stale = !okxMeta.connected || (age != null && age > 10);
   return { key: "okx", supply: okxSupply1s, liq: okxLiq1s, oi: okxOi1s,
+           overlay: supply1s.size ? supply1s : null,
            now: okxMeta.now || 0,
            label: "OKX " + (okxMeta.inst || "ETH-USDT-SWAP"),
            age: age == null ? "체결 대기" : `체결 ${age}s 전`
@@ -4046,7 +4047,8 @@ function renderSupply1s(box = null, src = null) {
   // src 가 오면 그 출처로 그린다(OKX 레인). 없으면 바이낸스 전역이다. 칸 구조가 같으므로
   // **수식은 한 줄도 안 바뀐다** -- 바뀌는 건 어느 Map 을 읽느냐뿐이다.
   const S = src || { key: "bn", supply: supply1s, liq: liq1s, oi: oi1s,
-                     now: supply1sMeta.now || 0, label: "바이낸스 선물" };
+                     now: supply1sMeta.now || 0, label: "바이낸스 선물",
+                     overlay: okxSupply1s.size ? okxSupply1s : null };
   // box 가 오면 그 중첩 <svg> 에 그린다(캔들 SVG 안). 없으면 옛 독립 컨테이너를 찾는다.
   const svg = box ? box.svg : el("supply1sSvg");
   if (!svg) return;
@@ -4170,6 +4172,29 @@ function renderSupply1s(box = null, src = null) {
   // ⭐이 배치가 리테일 문제를 푼다: 리테일 진폭(559)이 CVD(7,548)와 **경쟁하지 않고**
   //   스택의 얇은 맨 윗층이 된다. 예전엔 같은 축에서 12배 눌려 납작했다.
   const cvd = cumOf((s) => { const c = S.supply.get(s); return c[4] - c[5]; });
+  // 합산 CVD (2026-09-23) -- 두 거래소를 더한 **방향**만 점선 하나로 겹친다.
+  // 🔴크기는 합치지 않는다. 스택·ETH 숫자·눈금은 그대로 이 거래소의 것이다 --
+  //   합산 크기는 MM 헤지 이중계상으로 |합산|/|바이낸스| 중앙 **2.1배**로 부푼다(3일 백필).
+  //   이 선이 말하는 건 하나다: «다른 거래소까지 세면 방향이 그대로인가».
+  //   두 패널에 **같은 선**이 그려지므로 각 레인을 같은 기준선에 대고 볼 수 있다.
+  // ⚠️상대 거래소에 없는 초는 0 으로 둔다(누적이라 그 초에 안 자랄 뿐, 값이 튀지 않는다).
+  // 🔴**합집합**으로 훑는다. cumOf 는 «주 출처의 초»만 도는데, 체결이 적은 거래소는 빈 초가
+  //   많아서 그 초의 상대 거래소 기여가 통째로 빠진다 -- 2026-09-23 브라우저 검증에서 실제로
+  //   바이낸스 패널 합산 +824(옳음) vs OKX 패널 +273(틀림)로 갈렸다. 같은 선이어야 한다.
+  const sumCvd = (() => {
+    if (!S.overlay) return null;
+    const unionSecs = [...new Set([...S.supply.keys(), ...S.overlay.keys()])]
+      .filter((x) => x >= first && x <= now).sort((x, y) => x - y);   // 바깥 `secs` 와 다른 것
+    const out = [];
+    let acc = 0, seg = null;
+    unionSecs.forEach((x) => {
+      if (segOf(x) !== seg) { seg = segOf(x); acc = 0; }
+      const a = S.supply.get(x), b = S.overlay.get(x);
+      acc += (a ? a[4] - a[5] : 0) + (b ? b[4] - b[5] : 0);
+      if (x > first) out.push({ s: x, v: acc });
+    });
+    return out;
+  })();
   // 스택 경계: 0 → 고래 → (CVD-리테일) → CVD. 가운데 층이 곧 중형이라 따로 안 만든다.
   const stackMid = cvd.map((r, i) => ({ s: r.s, v: r.v - retail[i].v }));
   // 🔴청산은 **선이 아니라 이벤트다**. 269초에 5건이고, 봉당 중앙 6.8 ETH 가 CVD 진폭의
@@ -4204,7 +4229,10 @@ function renderSupply1s(box = null, src = null) {
   // **0선 위**로 올렸다. 청산은 강제 유출입이라 이 축(순수급)의 원점에 앉는 게 맞다.
   // 그 76px 는 전부 누적 스택이 가져간다(294 -> 370px).
   const peak = Math.max(0, ...cvd.map((r) => Math.abs(r.v)), ...whale.map((r) => Math.abs(r.v)),
-                        ...stackMid.map((r) => Math.abs(r.v)), ...oiRows.map((r) => Math.abs(r.v)));
+                        ...stackMid.map((r) => Math.abs(r.v)), ...oiRows.map((r) => Math.abs(r.v)),
+                        // 합산선도 눈금에 넣는다 -- 빼면 상자 위에 눌려 붙어 «천장에 닿았다»는
+                        // 거짓 인상을 준다(yF 가 ±1 로 자른다).
+                        ...(sumCvd ? sumCvd.map((r) => Math.abs(r.v)) : []));
   // 🔴두 레인이 **같은 계단**을 써야 「어느 쪽이 큰가」가 읽힌다(위 supply1sPeaks 주석).
   supply1sPeaks[S.key] = peak;
   const sharedPeak = Math.max(peak, supply1sPeaks.bn, supply1sPeaks.okx);
@@ -4321,6 +4349,7 @@ function renderSupply1s(box = null, src = null) {
   if (oiRows.length >= 2) line(pathOf(oiRows, (r) => yF(r.v), 20), "var(--warn)", 2, 0.95);
   // 맨 위 윤곽이 곧 CVD 다. 중립 강조색이라 층의 방향색과 안 싸운다.
   line(pathOf(cvd, (r) => yF(r.v)), "var(--accent)", 2, 1);
+  if (sumCvd && sumCvd.length >= 2) line(pathOf(sumCvd, (r) => yF(r.v)), "var(--ink)", 1.5, 0.6, "5 3");
 
   // 2026-09-22 아래 5분봉 «누적 CVD» 행의 범례와 **같은 크기**로 맞춘다(사용자 지시).
   //   같은 카드 안에서 같은 역할(계열 범례)인데 19/15 와 12/11 로 갈려 있었다.
@@ -4386,9 +4415,30 @@ function renderSupply1s(box = null, src = null) {
   if (!narrow) {
     label(lx, flowTop + LBL_HEAD, "CVD " + sgn(cvd[cvd.length - 1].v), "var(--ink)", null, LBL_HEAD);
   }
-  const rows = [["고래", whale[whale.length - 1].v, cW, 0.63],
-                ["중형", cvd[cvd.length - 1].v - whale[whale.length - 1].v - retail[retail.length - 1].v, cM, 0.49],
-                ["리테일", retail[retail.length - 1].v, cR, 0.38]];
+  // 🔴**CVD 절대값을 두 거래소끼리 비교하면 안 된다.** net 은 «큰 두 수의 차»라 한쪽이
+  //   균형에 가까우면 배율이 10배로도 튄다 -- 2026-09-23 실측: 바이낸스 CVD +70.9 vs
+  //   OKX -788 인데 같은 창의 **총량 비율은 0.75**였다(단위 문제가 아니다).
+  //   스케일 무관한 비교는 **불균형 비율**(net / 총량)이다. 같은 실측에서
+  //   바이낸스 +24.0% vs OKX -14.9% -- 「10배」가 아니라 «반대 방향, 비슷한 강도»다.
+  // ⭐분모는 화면의 CVD 와 **같은 구간**(현재 5분 세그먼트)이어야 뜻이 맞는다.
+  const curSeg = allSecs.length ? segOf(allSecs[allSecs.length - 1]) : null;
+  let grossSeg = 0;
+  allSecs.forEach((s) => {
+    if (s > first && segOf(s) === curSeg) { const c = S.supply.get(s); grossSeg += c[4] + c[5]; }
+  });
+  const imb = grossSeg > 0 ? 100 * cvd[cvd.length - 1].v / grossSeg : null;
+  const rows = [];
+  // 합산선의 값. 점선이 무엇인지 글로 한 번 말해 준다 -- 선만 있으면 «저 회색 점선은 뭐지»가 된다.
+  if (sumCvd && sumCvd.length) {
+    rows.push(["합산 " + sgn(sumCvd[sumCvd.length - 1].v), null, "var(--ink)", 0.6]);
+  }
+  if (imb !== null) {
+    rows.push(["불균형 " + (imb >= 0 ? "+" : "") + imb.toFixed(1) + "%", null,
+               imb >= 0 ? "var(--good)" : "var(--bad)", 0.8]);
+  }
+  rows.push(["고래", whale[whale.length - 1].v, cW, 0.63],
+             ["중형", cvd[cvd.length - 1].v - whale[whale.length - 1].v - retail[retail.length - 1].v, cM, 0.49],
+             ["리테일", retail[retail.length - 1].v, cR, 0.38]);
   if (oiRows.length >= 2) {
     rows.push([narrow ? "OI" : "신규", oiRows[oiRows.length - 1].v, "var(--warn)", 0.95]);
   }
