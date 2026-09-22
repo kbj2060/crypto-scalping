@@ -4975,8 +4975,14 @@ function renderSnapshotChart() {
   // 봉당 16px 라 셀이 물리적으로 안 들어간다. 대신 청산밀도 히트맵은 끈다(셀과 같은 자리를
   // 다투고, 정확한 레벨은 차트 아래 목록에 그대로 있다). 2026-09-15 사용자 결정 "완전 교체".
   const footprint = footprintForChart();
+  // 🔴2026-09-23 풋프린트 모드에서 캔들을 **풋프린트 범위로 자르고** 있었다. 그래서 12h 를
+  //   골라도 서버 풋프린트 링이 덮는 만큼(실측 54봉=4.5시간)만 보였다 -- 캔들은 200개
+  //   (16.7시간) 있는데도. 위 주석의 이유(«72봉을 1200px 에 넣으면 셀이 안 들어간다»)는
+  //   drawCells(봉 폭 기준)가 이미 해결했다: 얇아지면 셀을 안 그린다.
+  //   이제 창이 자른다. 풋프린트가 없는 봉은 셀·델타가 그냥 비고(buyTot+sellTot>0 가드),
+  //   사분면·누적 레인은 **캔들을 돌며 fpBars 를 조회**하는 구조라 빠진 봉을 알아서 건너뛴다.
   const candles = footprint
-    ? fullCandles.filter((c) => c.time >= footprint.firstTime)
+    ? fullCandles.slice(-chartWindowBars)
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel(), ...situationTargetLevels(footprint)];
