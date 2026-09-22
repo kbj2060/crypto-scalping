@@ -13,7 +13,7 @@ const PRE = grab(/function fmtFootprintQty\(v\) \{[\s\S]*?\n\}\n/, "fmtFootprint
           + grab(/const SUPPLY_1S_SEGMENT = \d+;/, "SEGMENT")
           + "\n" + grab(/const SUPPLY_1S_STEPS = \[[^\]]*\];/, "STEPS") + "\n";
 
-const SHARED = "const supply1sPeaks = { bn: 0, okx: 0 };\n";
+const MERGED = grab(/function mergedSupplySrc\(\) \{[\s\S]*?\n\}\n/, "mergedSupplySrc");
 const SEG = Number(PRE.match(/const SUPPLY_1S_SEGMENT = (\d+);/)[1]);
 const NOW = 1700000000;   // CI 의 esprima 4 는 숫자 구분자(1_700_000_000)를 모른다
 const BOUND = Math.floor(NOW / SEG) * SEG;      // 창 안의 5분 경계
@@ -40,10 +40,16 @@ function draw(label, { qty = 10, hole = null, oi = null } = {}) {
   // 2026-09-23 기본 출처가 OKX 레인(합산선용)도 즉시 읽는다. 비어 있으면 overlay=null 이라
   // 합산선을 안 그린다 -- 이 하네스는 바이낸스 단독 렌더를 검사한다.
   global.okxSupply1s = new Map();
+  // 2026-09-23 기본 출처가 **합산**이라 mergedSupplySrc 가 읽는 전역이 전부 있어야 한다.
+  global.spotSupply1s = new Map();
+  global.okxLiq1s = new Map();
+  global.okxOi1s = new Map();
+  global.okxMeta = { now: 0, connected: true, tradeAge: 0 };
+  global.spotMeta = { now: 0, connected: true, tradeAge: 0 };
   const svg = { _a: {}, innerHTML: "", kids: [], setAttribute(k, v) { this._a[k] = v; },
                 appendChild(c) { this.kids.push(c); }, parentElement: { clientWidth: W } };
   try {
-    eval(PRE + SHARED + FN + "\nrenderSupply1s({ svg, w: W, h: H });");
+    eval(PRE + MERGED + FN + "\nrenderSupply1s({ svg, w: W, h: H });");
   } catch (e) { console.log(`🔴 ${label}: ${e.constructor.name} — ${e.message}`); return null; }
   const nums = els.flatMap((e) => ["x", "y", "x1", "x2", "y1", "y2", "width", "height"]
     .filter((k) => k in e._a).map((k) => Number(e._a[k])));

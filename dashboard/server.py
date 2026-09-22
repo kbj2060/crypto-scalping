@@ -600,6 +600,13 @@ OKX_HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; crypto-scalping-dash
 #   REST 0.25초 폴링이 본 값 변화 48번). OKX `ts` 는 응답 시각이라 변화 신호가 아니다 -- 값으로 거른다.
 OKX_OI_POLL_SECONDS = OI_1S_POLL_SECONDS
 OKX_RECV_TIMEOUT = 25.0
+# ⑨ 바이낸스 **현물**(2026-09-23). 점유는 4.5%로 작지만 3일 백필에서 OKX 위에 얹었을 때
+#   1분 +1.6pp / 5분 +3.0pp 로 **3일 전부 양수**였고 비용이 스트림 한 줄이다.
+#   🔴`@aggTrade` 는 OKX `trades` 와 같이 **이미 테이커 주문 단위**다(체결 수는 l-f+1).
+#   🔴`m`(매수자가 메이커)은 선물과 **같은 규약**이다 -- OKX 만 `side` 가 직접이라 반대다.
+#   🔴수량은 ETH 직접이다(계약 환산 없음).
+SPOT_WS_URL = "wss://stream.binance.com:9443/ws/ethusdt@aggTrade"
+SPOT_RECV_TIMEOUT = 60.0        # 12 msg/s 지만 한산한 초가 있어 여유를 둔다
 MICRO_BASELINE_SECONDS = 3600
 SITUATION_EVERY_TICKS = 1                              # micro-ref 1초 루프마다 (09-21 사용자 «급변 때 느리다» -- 실측 비용 30ms, duckdb 둘은 아래서 5초 캐시)
 SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30분 뒤 결과와 맞춰 적중률을 낸다
@@ -2783,6 +2790,70 @@ def make_app() -> web.Application:
         finally:
             await ws_session.close()
 
+    # ── 바이낸스 현물 (2026-09-23) ─────────────────────────────────────────
+    # OKX 와 **같은 7칸 모양**. 합산 패널이 셋을 그대로 더한다.
+    # 🔴현물엔 OI·펀딩·마크·강제청산이 **존재하지 않는다** -- 포지션 개념이 없다.
+    spot_sec: dict[int, list[float]] = {}
+    spot_state: dict[str, Any] = {"connected": False, "trades": 0, "errors": 0, "last_trade_ms": 0}
+
+    def spot_sec_cell(ts_ms: int) -> list[float]:
+        sec = int(ts_ms) // 1000
+        cell = spot_sec.get(sec)
+        if cell is None:
+            cell = spot_sec[sec] = [0.0] * 7
+            cutoff = sec - SUPPLY_1S_SECONDS
+            for old in [x for x in spot_sec if x < cutoff]:
+                del spot_sec[old]
+        return cell
+
+    async def collect_spot_flow(app: web.Application) -> None:
+        """⑨ 바이낸스 현물 @aggTrade. 주문 없음. 선물과 **다른 시장**이라 weight 도 별개다.
+
+        ⚠️풋프린트에는 안 쓴다 -- 현물은 선물보다 +4.69bp 높아 $0.1 빈 기준 **12.9빈**
+          어긋난다(2026-09-23 실측). 가격축에 쌓으면 가짜 이중 봉우리가 된다. 수급(CVD)은
+          «수량의 합»이라 가격이 무관해서 문제가 없다."""
+        ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
+        try:
+            while True:
+                try:
+                    async with ws_session.ws_connect(SPOT_WS_URL, heartbeat=30) as ws:
+                        spot_state.update(connected=True)
+                        print("spot ws: connected", flush=True)
+                        while True:
+                            msg = await ws.receive(timeout=SPOT_RECV_TIMEOUT)
+                            if msg.type is not WSMsgType.TEXT:
+                                break
+                            t = json.loads(msg.data)
+                            if t.get("e") != "aggTrade":
+                                continue
+                            price, qty = float(t.get("p") or 0.0), float(t.get("q") or 0.0)
+                            if not (price > 0 and qty > 0):
+                                continue
+                            ts_ms = int(t.get("T") or time.time() * 1000)
+                            i = 1 if t.get("m") else 0          # 매수자가 메이커 -> 공격자는 매도
+                            cell = spot_sec_cell(ts_ms)
+                            cell[4 + i] += qty
+                            cell[6] = price
+                            # 이 7칸에는 체결 수 자리가 없다(총량·구간·가격뿐) -- `f`/`l` 은
+                            # 안 쓴다. 필요해지면 그때 칸을 늘린다.
+                            notional = price * qty
+                            if notional >= WHALE_MIN_USD:
+                                cell[2 + i] += qty
+                            elif notional < RETAIL_MAX_USD:
+                                cell[i] += qty
+                            spot_state["trades"] += 1
+                            spot_state["last_trade_ms"] = ts_ms
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    spot_state.update(errors=spot_state["errors"] + 1)
+                    print(f"spot ws: {exc!r}", flush=True)
+                    await asyncio.sleep(3.0)
+                finally:
+                    spot_state["connected"] = False
+        finally:
+            await ws_session.close()
+
     async def collect_okx_oi(app: web.Application) -> None:
         """⑧ OKX OI 를 REST 로 -- 바이낸스와 **같은 주기**(위 OKX_OI_POLL_SECONDS 주석 참고).
 
@@ -2830,10 +2901,11 @@ def make_app() -> web.Application:
         app["mark_price_task"] = asyncio.create_task(collect_mark_price(app))
         app["okx_flow_task"] = asyncio.create_task(collect_okx_flow(app))
         app["okx_oi_task"] = asyncio.create_task(collect_okx_oi(app))
+        app["spot_flow_task"] = asyncio.create_task(collect_spot_flow(app))
 
     async def stop_micro_ref(app: web.Application) -> None:
         for key in ("micro_ref_task", "force_order_task", "mark_price_task",
-                    "okx_flow_task", "okx_oi_task"):
+                    "okx_flow_task", "okx_oi_task", "spot_flow_task"):
             app[key].cancel()
             try:
                 await app[key]
@@ -3616,6 +3688,11 @@ def make_app() -> web.Application:
             except ValueError:
                 return 0
         since_okx, since_okx_oi, since_okx_liq = _q("sinceOkx"), _q("sinceOkxOi"), _q("sinceOkxLiq")
+        since_spot = _q("sinceSpot")
+        spot_newest = max(spot_sec) if spot_sec else 0
+        spot_floor = max(since_spot, spot_newest - SUPPLY_1S_SECONDS)
+        spot_rows = [[x] + [round(v, 3) for v in spot_sec[x]]
+                     for x in sorted(spot_sec) if spot_floor < x < spot_newest]
         okx_newest = max(okx_sec) if okx_sec else 0
         okx_floor = max(since_okx, okx_newest - SUPPLY_1S_SECONDS)
         okx_rows = [[x] + [round(v, 3) for v in okx_sec[x]]
@@ -3645,6 +3722,9 @@ def make_app() -> web.Application:
                     "tradeAge": _age(okx_state["last_trade_ms"]),
                     "oiAge": _age(okx_state["last_oi_ms"]),
                     "inst": OKX_INST, "errors": okx_state["errors"]}
+        spot_meta = {"connected": bool(spot_state["connected"]),
+                     "tradeAge": _age(spot_state["last_trade_ms"]),
+                     "errors": spot_state["errors"]}
         oi_floor = max(since_oi, (max(oi_1s) if oi_1s else 0) - SUPPLY_1S_SECONDS)
         # [초, 미결제약정]. 증분은 클라가 뺀다(창 시작을 0으로 두는 누적선이라 절대값이 필요).
         oi_rows = [[s, oi_1s[s]] for s in sorted(oi_1s) if s > oi_floor]
@@ -3654,6 +3734,8 @@ def make_app() -> web.Application:
                                       "okx": okx_rows, "okxOi": okx_oi_rows,
                                       "okxLiq": okx_liq_rows, "okxNow": okx_newest,
                                       "okxMeta": okx_meta,
+                                      "spot": spot_rows, "spotNow": spot_newest,
+                                      "spotMeta": spot_meta,
                                       "retailMaxUsd": RETAIL_MAX_USD,
                                       "whaleMinUsd": WHALE_MIN_USD}, headers=NOCACHE)
         newest = max(by_sec)
@@ -3692,6 +3774,10 @@ def make_app() -> web.Application:
             "okxLiq": okx_liq_rows,
             "okxNow": okx_newest,
             "okxMeta": okx_meta,
+            # 바이낸스 **현물**. OI·청산 칸이 없는 게 정상이다(현물엔 존재하지 않는다).
+            "spot": spot_rows,
+            "spotNow": spot_newest,
+            "spotMeta": spot_meta,
             # [초, 리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
             "seconds": [[s] + [round(x, 3) for x in by_sec[s]]
                         for s in sorted(by_sec) if floor < s < newest],
