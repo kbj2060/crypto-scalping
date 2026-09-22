@@ -1212,33 +1212,46 @@ function applyAcctPreview(pos, mark, equity) {
   root.querySelectorAll(".acct-tiles").forEach((n) => n.classList.toggle("preview", !!pv));
   const cap = root.querySelector(".acct-pv-cap");
   if (cap) cap.hidden = !pv;
-  if (!pv) { root.querySelectorAll(".acct-rail u").forEach((u) => u.remove()); return; }
+  if (!pv) {
+    root.querySelectorAll(".acct-rail u, .acct-gauge u").forEach((u) => u.remove());
+    root.querySelectorAll("u.pv-after").forEach((u) => u.remove());
+    return;
+  }
 
   const a = pv.after, plan = pv.__plan || {};
   const LIQ_FULL = 10, EXPO_CAP = 30;
   const long = pos.side === "LONG";
   // 타일 셋: 값·색·막대·유령눈금(지금 자리)
-  const setTile = (k, txt, tone, fill, ghost) => {
+  // 🔴2026-09-22 시안 B. 전에는 이 패처가 **사실을 덮어썼다** -- manualEntryRefreshSize 가
+  //   setInterval 로 계속 돌아 큰 숫자 셋이 상시로 «25% 더 넣었다면»의 값이었고, 실제 계좌는
+  //   유령 눈금으로만 남았다. 포지션을 들고 있는 사람이 화면에서 제일 큰 글씨로 «자기가 하지
+  //   않은 거래»의 결과를 본다. 이제 **사실은 그대로 두고 «→ 가정»을 뒤에 붙인다** --
+  //   막대도 사실 폭을 지키고, 움직이는 건 가정 자리의 유령 눈금뿐이다.
+  const pvAfter = (node, txt, tone) => {
+    if (!node) return;
+    let u = node.querySelector("u.pv-after");
+    if (!u) { u = document.createElement("u"); node.appendChild(u); }
+    u.className = `pv-after${tone ? ` ${tone}` : ""}`;
+    pvText(u, `→ ${txt}`);   // 값이 같으면 안 건드리고(폴링 떨림), 바뀔 때만 반짝인다
+  };
+  const setTile = (k, txt, tone, fill) => {
     const t = q(k); if (!t) return;
-    const v = t.querySelector(".acct-tile-val"), rail = t.querySelector(".acct-rail");
-    const bar = rail && rail.querySelector("i");
-    if (v) { v.className = `acct-tile-val ${tone}`; pvText(v, txt); }
-    if (bar) { bar.className = tone; bar.style.width = `${clamp01(fill) * 100}%`; }
+    pvAfter(t.querySelector(".acct-tile-val"), txt, tone);
+    const rail = t.querySelector(".acct-rail");
     if (rail) {
       rail.classList.add("entry-rail");
       let u = rail.querySelector("u");
       if (!u) { u = document.createElement("u"); rail.appendChild(u); }
-      u.style.left = `${clamp01(ghost) * 100}%`;
-      u.title = "지금 자리";
+      u.style.left = `${clamp01(fill) * 100}%`;
+      u.title = "지금 설정으로 넣으면 여기";
     }
   };
-  setTile("liq", `${Number(a.liq_pct).toFixed(2)}%`, acctRiskTone(a.liq_pct),
-          a.liq_pct / LIQ_FULL, pv.before.liq_pct / LIQ_FULL);
+  setTile("liq", `${Number(a.liq_pct).toFixed(2)}%`, acctRiskTone(a.liq_pct), a.liq_pct / LIQ_FULL);
   setTile("used", `${Number(a.margin_used_pct).toFixed(0)}%`,
           a.margin_used_pct > 80 ? "bad" : a.margin_used_pct > 60 ? "warn" : "good",
-          a.margin_used_pct / 100, pv.before.margin_used_pct / 100);
+          a.margin_used_pct / 100);
   setTile("expo", `${Number(a.exposure_x).toFixed(1)}배`, a.exposure_x > 15 ? "bad" : "warn",
-          a.exposure_x / EXPO_CAP, pv.before.exposure_x / EXPO_CAP);
+          a.exposure_x / EXPO_CAP);
 
   // 포지션 카드: 수량·레버리지·평단·청산가·손잡이. 평단은 **체결가 가중평균**이다.
   const addQty = Number(plan.quantity) || 0, addPx = Number(plan.price) || 0;
@@ -1247,23 +1260,33 @@ function applyAcctPreview(pos, mark, equity) {
   const newEntry = newQty > 0 ? (haveQty * havePx + addQty * addPx) / newQty : havePx;
   // 청산가는 거래소가 준 **거리(%)** 에서 되돌린다 -- 근사식보다 실측에 앵커된 값이다.
   const newLiq = mark > 0 ? mark * (1 + (long ? -1 : 1) * Number(a.liq_pct) / 100) : 0;
-  pvText(q("qty"), `~${newQty.toFixed(3)}`);
+  pvAfter(q("qty"), `~${newQty.toFixed(3)}`);
   const tg = q("tag");
-  if (tg && plan.target_leverage) pvText(tg, `${long ? "롱" : "숏"} ×${plan.target_leverage}`);
-  pvText(q("liqpx"), `청산 ~${fmtUsd(newLiq)}`);
+  if (tg && plan.target_leverage && String(plan.target_leverage) !== String(pos.leverage)) {
+    pvAfter(tg, `×${plan.target_leverage}`);
+  }
+  pvAfter(q("liqpx"), `~${fmtUsd(newLiq)}`, "bad");
   // 🔴평단은 **추측치**다. 체결가를 peg 호가로 가정한 가중평균이라 실제 체결(부분체결·
   //   테이커 폴백·슬리피지)에 따라 달라진다. `~` 와 툴팁으로 그 사실을 남긴다.
   const ep = q("entrypx");
   if (ep) {
-    pvText(ep, `진입 ~${fmtUsd(newEntry)}`);
+    pvAfter(ep, `~${fmtUsd(newEntry)}`);
     ep.title = `추측치 — 지금 ${fmtUsd(havePx)} (${haveQty.toFixed(3)} ETH)에`
       + ` ${addQty.toFixed(3)} ETH 를 ${fmtUsd(addPx)}(peg 호가)에 더한 가중평균입니다.`
       + `\n실제 체결가가 다르면(부분체결·테이커 폴백) 평단도 달라집니다.`;
   }
-  const kn = q("knob");
-  if (kn) {
+  // 🔴손잡이는 **지금 내 자리**다 -- 옮기면 사실이 사라진다. 대신 «넣으면 여기»를 같은 레일에
+  //   유령 눈금으로 하나 더 세운다(시안 B). 청산선이 어느 쪽으로 얼마나 끌려오는지를 숫자가
+  //   아니라 거리로 보여주는 게 이 카드에서 실수가 나는 지점이다.
+  const gauge = root.querySelector(".acct-gauge");
+  if (gauge) {
     const span = Math.abs(newEntry - newLiq) * 2;
-    kn.style.left = `${(clamp01(span > 0 ? Math.abs(mark - newLiq) / span : 0) * 100).toFixed(1)}%`;
+    const at = clamp01(span > 0 ? Math.abs(mark - newLiq) / span : 0) * 100;
+    let g = gauge.querySelector("u");
+    if (!g) { g = document.createElement("u"); gauge.appendChild(g); }
+    g.className = "acct-gauge-pv";
+    g.style.left = `${at.toFixed(1)}%`;
+    g.title = `지금 설정으로 넣으면 손잡이가 여기로 옵니다 (청산 ~${fmtUsd(newLiq)})`;
   }
 }
 
@@ -1510,7 +1533,7 @@ function renderSnapshotAccount() {
   // 노출은 **계좌 전체** 기준이다(명목 ÷ 순자산). 포지션 레버리지(×30)와 다른 값이라
   //   같은 "배"를 써서 혼동이 났다 -- 라벨을 「계좌 노출」로 바꾸고 명목을 툴팁에 적는다.
   const expo = equity > 0 ? (Number(pos.notional) || 0) / equity : 0;
-  const tiles = `<div class="acct-pv-cap entry-cap" hidden>진입 미리보기 — 지금 넣으면 (실제 계좌 아님)</div>
+  const tiles = `<div class="acct-pv-cap entry-cap" hidden>큰 숫자는 <b>지금 내 계좌</b> · 주황 <u class="pv-after">→</u> 와 점선 눈금은 <b>지금 설정으로 넣었을 때</b></div>
     <div class="acct-tiles">
       ${tile("liq", "청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
              `마크 ${fmtUsd(mark)} → 청산 ${fmtUsd(liq)}\n교차증거금이라 1/레버리지(${
