@@ -365,7 +365,11 @@ const VOL_LEVEL_POLL_MS = 60000;          // 사이징 워커 주기 300초 — 
 const LIQ_BURST_STATE_POLL_MS = 1000;
 // 2026-09-16 300초 -> 60초. 서버 캐시를 60초로 줄였으므로(입력이 1시간봉이라 그 아래로는
 // 의미가 없다) 클라가 5분마다 물으면 **새 시간봉이 최대 5분 늦게** 보인다. 캐시와 같은 주기로.
-const LIQUIDATION_MAP_POLL_MS = 60000;
+// 🔴2026-09-22 60초 -> 30초. «캐시와 같은 주기»는 최선이 아니라 **최악**이다 -- 둘이 동기화돼
+//   있지 않아서, 생성 직후에 물으면 다음 갱신을 60초 더 기다린다(실측 서버 생성 간격 68초,
+//   클라 폴링 60초 → 최악 ~120초 묵은 청산선). 절반으로 물으면 최악 지연이 생성주기+30초로
+//   묶인다. 비용은 분당 33ms 요청 하나다(실측 p95 33ms · 50KB).
+const LIQUIDATION_MAP_POLL_MS = 30000;
 const REGIME_WIDE24_POLL_MS = 300000; // matches server-side cache (REGIME_WIDE24_CACHE_SECONDS)
 const MACRO_CALENDAR_POLL_MS = 6 * 3600 * 1000; // matches server-side cache (MACRO_CALENDAR_CACHE_SECONDS)
 const SESSION_ALERTS_POLL_MS = 30000; // 2026-08-27: split off evidence-signals' 5min cadence --
@@ -3232,6 +3236,11 @@ function footprintMergeLive(byTime, bucket) {
   const bar = footprintLive.barStart;
   if (!bar || !byTime.has(bar)) return;
   if (footprintLive.since > bar * 1000) return;   // 봉 중간에 붙었다 -> 서버 값 유지
+  // 🔴빈 셀로 덮으면 봉이 **사라진다**. footprintForChart 가 levels.length 0 인 봉을 걸러내기
+  //   때문이다. 봉이 바뀌는 순간 cells 는 비어 있고(footprintLiveAdd 가 롤오버에서 비운다)
+  //   barStart 는 체결이 와야 넘어가므로, 그 틈에 이 함수가 서버의 멀쩡한 봉을 빈 배열로
+  //   갈아치웠다. 이 함수는 «더 나은 값으로 교체»할 때만 의미가 있다.
+  if (!footprintLive.cells.size) return;
   byTime.set(bar, [...footprintLive.cells.entries()]
     .map(([k, c]) => [k * bucket, c[0], c[1], c[2], c[3], c[4], c[5]])
     .sort((a, b) => a[0] - b[0]));
@@ -3251,6 +3260,12 @@ function ensurePriceWs() {
   if (Date.now() < priceWsRetryAt) return;
   priceWsRetryAt = Date.now() + 5000;
   priceWsAsset = asset;
+  // 🔴2026-09-22 `since` 는 «이 연결이 언제부터 봤나»여야 하는데, 한 번(=== Infinity)만
+  //   설정되고 어디서도 안 돌아갔다. 그래서 끊겼다 붙어도 최초 연결 시각 그대로였고,
+  //   아래 footprintMergeLive 의 «봉 중간에 붙었다» 가드가 **재연결에는 안 먹었다** --
+  //   끊겨 있던 구간이 빠진 셀로 서버 봉을 덮어써서 5분봉이 깜빡였다.
+  //   가격 WS 는 document.hidden 이면 닫히므로(바로 위 want), 다른 탭 갔다 오면 매번 그랬다.
+  footprintLive.since = Infinity;
   try {
     const ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol}@trade`);
     priceWs = ws;
