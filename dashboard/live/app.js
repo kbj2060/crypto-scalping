@@ -4142,24 +4142,25 @@ function renderSupply1s(box = null) {
                null, liqSum[3] >= liqSum[2] ? "var(--good)" : "var(--bad)", 0.92]);
   }
   if (narrow) {
-    // 바닥 한 줄. 왼쪽 끝(x=3)부터 흐른다 -- ml 로 들여쓰면 마지막 항목이 밖으로 나간다
-    // (실측 348px 폭에 항목 여섯이 333px 다).
+    // 바닥 한 줄. 왼쪽 끝(x=3)부터 흐른다 -- ml 로 들여쓰면 마지막 항목이 밖으로 나간다.
+    // 🔴색표를 안 그린다. 2026-09-22 실측에서 여섯 항목 글자가 299px 인데 색표 여섯이
+    //   96px 을 더해 342px 를 넘겨 «청산 $16.2k» 가 잘렸다. 아래 5분봉 «누적 CVD» 줄도
+    //   같은 이유로 색표가 없다 -- 이름이 계열을 이미 말하고, 줄이 그림 바로 아래 붙어 있다.
+    // 🔴그리고 **넘칠 것 같으면 멈춘다**. 자릿수는 데이터가 정하므로 상수로는 못 막는다.
     const items = [["CVD", cvd[cvd.length - 1].v, "var(--accent)", 1]].concat(rows);
+    const RLBL = LBL - 0.5;
     let x = 3;
     items.forEach((row) => {
-      const sw = document.createElementNS(NS, "rect");
-      sw.setAttribute("x", x); sw.setAttribute("y", h - 9 - SW);
-      sw.setAttribute("width", SW); sw.setAttribute("height", SW);
-      sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
-      svg.appendChild(sw);
+      if (x > w - 24) return;
       // 청산 행은 값이 null 이다 -- 라벨에 이미 «$X» 가 들어 있어 부호가 없다.
       const txt = row[1] === null ? row[0] : row[0] + " " + sgn(row[1]);
-      const t = label(x + SW + 3, h - 9, txt, "var(--muted)", null, LBL);
+      const t = label(x, h - 9, txt, "var(--muted)", null, RLBL);
       // 다음 항목 자리는 **실측 폭**으로 민다 -- 글자 수로 어림하면 자릿수가 늘 때 겹친다.
       let adv = 0;
-      try { adv = t.getComputedTextLength(); } catch (_) { adv = txt.length * LBL * 0.62; }
-      if (!(adv > 0)) adv = txt.length * LBL * 0.62;
-      x += SW + 3 + adv + 7;
+      try { adv = t.getComputedTextLength(); } catch (_) { adv = txt.length * RLBL * 0.62; }
+      if (!(adv > 0)) adv = txt.length * RLBL * 0.62;
+      if (x + adv > w - 3) { t.remove(); x = w; return; }   // 잘린 글자를 남기지 않는다
+      x += adv + 8;
     });
   } else {
     rows.forEach((row, i) => {
@@ -6179,7 +6180,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   if (mobileChart && PRICE_ROW_H && priceLabels.length) {
     const rowY = plotBottom + 13;
     let x = 3;
-    priceLabels.forEach((p) => {
+    // 🔴**이름 있는 것만** 싣는다(현재·진입·지지n·저항n). 청산맵이 얹는 익명 레벨까지 넣으면
+    //   줄이 넘쳐 넘침 가드가 뒤쪽을 자르는데, 하필 그 뒤쪽이 «지지1» 처럼 이름 있는 것이었다
+    //   (실측). 익명 레벨은 플롯 안의 선·꺾쇠가 이미 «어느 행인가»를 말한다.
+    priceLabels.filter((p) => p.label).forEach((p) => {
       if (x > w - 30) return;
       const t = document.createElementNS(NS, "text");
       t.setAttribute("x", x); t.setAttribute("y", rowY);
@@ -6191,7 +6195,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       svg.appendChild(t);
       let adv = 0;
       try { adv = t.getComputedTextLength(); } catch (_) { adv = t.textContent.length * 6.4; }
-      x += (adv > 0 ? adv : t.textContent.length * 6.4) + 9;
+      if (!(adv > 0)) adv = t.textContent.length * 6.4;
+      // 자릿수는 데이터가 정한다 -- 상수로 못 막으므로 넘치면 그 항목을 도로 뺀다.
+      if (x + adv > w - 3) { t.remove(); x = w; return; }
+      x += adv + 9;
     });
   }
   // 빠른 갱신이 가격 -> y 를 계산하려면 이번 렌더의 축 규약이 필요하다. 다음 전체 렌더가
