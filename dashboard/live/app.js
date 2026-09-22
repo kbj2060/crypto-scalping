@@ -5986,6 +5986,46 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(lbl);
   });
 
+  // ── 추세 veto (2026-09-22, 사용자 요청 「풋프린트에 그려줘」) ─────────────────────────
+  // SMA144(12h) ± 1.0×ATR144 히스테리시스. 밴드를 벗어날 때만 허용 측면이 바뀌고, 안이면
+  // 직전 상태를 유지한다 -- 원시 부호는 중앙 런이 15분(하루 13.4회 뒤집힘)이라 화면에 못 쓴다.
+  // 값은 서버가 붙여준다(dashboard/server.py::trend_veto_rows) -- 클라는 100봉만 갖고 있어
+  // SMA144 를 스스로 못 만든다. **두 모드 모두에 그린다**(같은 renderCandleSvg 라 분기 없음).
+  // 🔴레짐 리본과 다른 물건이다: 리본은 학습된 3분류(강세/약세/횡보), 이건 규칙 하나다.
+  {
+    const vp = candles.map((c, i) => ({ i, sma: Number(c.sma), atr: Number(c.atr), v: Number(c.veto) }))
+                      .filter((p) => Number.isFinite(p.sma) && Number.isFinite(p.atr));
+    if (vp.length >= 2) {
+      const g = document.createElementNS(NS, "g");
+      const cx = (i) => xAt(i) + bw / 2;
+      const band = document.createElementNS(NS, "polygon");
+      band.setAttribute("points",
+        vp.map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma + p.atr).toFixed(1)}`).join(" ") + " " +
+        vp.slice().reverse().map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma - p.atr).toFixed(1)}`).join(" "));
+      band.setAttribute("fill", "color-mix(in srgb, var(--muted) 14%, transparent)");
+      band.setAttribute("stroke", "none");
+      g.appendChild(band);
+      const side = vp[vp.length - 1].v;
+      const col = side > 0 ? "var(--good)" : side < 0 ? "var(--bad)" : "var(--muted)";
+      const line = document.createElementNS(NS, "polyline");
+      line.setAttribute("points", vp.map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma).toFixed(1)}`).join(" "));
+      line.setAttribute("fill", "none"); line.setAttribute("stroke", col);
+      line.setAttribute("stroke-width", "2"); line.setAttribute("stroke-opacity", "0.85");
+      const t = document.createElementNS(NS, "title");
+      t.textContent = "추세 veto -- SMA144 ±1.0×ATR 히스테리시스. " +
+        (side > 0 ? "롱만 허용" : side < 0 ? "숏만 허용" : "워밍업") + " (ETH 5m 에서만 검정됨)";
+      line.appendChild(t); g.appendChild(line);
+      const last = vp[vp.length - 1];
+      const tag = document.createElementNS(NS, "text");
+      tag.setAttribute("x", cx(last.i) - 4); tag.setAttribute("y", yAt(last.sma) - 5);
+      tag.setAttribute("text-anchor", "end"); tag.setAttribute("font-size", "9");
+      tag.setAttribute("fill", col);
+      tag.textContent = side > 0 ? "추세 veto: 롱만" : side < 0 ? "추세 veto: 숏만" : "추세 veto: 워밍업";
+      g.appendChild(tag);
+      svg.appendChild(g);
+    }
+  }
+
   // ── 청산맵 신호 마커 (2026-09-09, 설계 3안 비교 후 C안 하이브리드 채택) ──────────────
   // 증거신호는 **고정 레인**(종수를 진하기로), 이벤트 트리거만 **봉 밀착 삼각형**.
   // 근거(87일 실측): 이 창은 72봉·6시간이고 컬럼 피치가 14.5px 뿐인데 증거신호는 6시간당

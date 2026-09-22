@@ -1951,6 +1951,40 @@ def make_app() -> web.Application:
             return asset, None
         return asset, {"symbol": symbol, "price": price, "ts": datetime.now(timezone.utc).isoformat()}
 
+    # 추세 veto (2026-09-22) -- `close > SMA144` 를 ±1.0xATR144 히스테리시스로 디바운스한 상태.
+    # 이 캐시가 이미 1500 봉을 들고 있어 별도 fetch/워커가 필요 없다(차트는 tail(100) 만 쓴다).
+    # 🔴근거는 **ETH 5m 전용**이다: 겹치지 않는 24h 창 1,719 개에서 순추세−역추세가 TP1.5/SL0.7
+    #   기준 롱 +16.2bp [+6.6,+25.3] · 숏 +18.3 [+8.0,+28.3] · 5 연도 x 양측 전부 양수.
+    #   같은 산식을 BTC/SOL 프레임에도 그대로 계산하지만 **그 자산에서는 검정한 적이 없다**.
+    # 손실 차단기이지 수익 생성기가 아니다. 순추세 비중이 ~50% 라 기회가 절반으로 준다.
+    TREND_VETO_N = 144          # 5분봉 144 개 = 12 시간. SMA 와 ATR 이 같은 창이다.
+    TREND_VETO_K = 1.0          # 밴드 = K x ATR. 실측 폭 중앙 +-0.238%(p10 0.132 / p90 0.416)
+
+    def trend_veto_rows(df: pd.DataFrame) -> dict[int, dict[str, float | int]]:
+        """{봉시각(초): {sma, atr, veto}}. veto = +1 롱만 / -1 숏만 / 0 워밍업.
+        인과적: 봉 t 의 값은 봉 t 종가까지만 본다."""
+        w = df.tail(TREND_VETO_N * 5)           # ewm 워밍업 여유(720 봉). 1500 봉 전체는 낭비다
+        if len(w) < TREND_VETO_N + 1:
+            return {}
+        c, h, l = w["close"], w["high"], w["low"]
+        sma = c.rolling(TREND_VETO_N).mean()
+        tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+        atr = tr.ewm(alpha=1 / TREND_VETO_N, adjust=False).mean()
+        dev = ((c - sma) / sma).to_numpy()
+        eps = (TREND_VETO_K * atr / c).to_numpy()
+        out: dict[int, dict[str, float | int]] = {}
+        cur = 0
+        for i, ts in enumerate(w["timestamp"]):
+            if not (np.isfinite(dev[i]) and np.isfinite(eps[i])):
+                continue
+            if dev[i] > eps[i]:
+                cur = 1
+            elif dev[i] < -eps[i]:
+                cur = -1                        # 밴드 안이면 직전 유지(히스테리시스)
+            out[int(ts.timestamp())] = {"sma": round(float(sma.iloc[i]), 4),
+                                        "atr": round(float(atr.iloc[i]), 4), "veto": cur}
+        return out
+
     async def load_market_history_from_evidence_cache(asset: str) -> list[dict[str, float | int]]:
         """ETH/BTC candle-chart data (2026-08-26, user request to de-duplicate) sliced straight out
         of evidence_signal_cache["frames"] instead of a separate Binance klines fetch -- that cache
@@ -1971,6 +2005,7 @@ def make_app() -> web.Application:
         src = closed_df if asset == "eth" else btc_df
         if src is None or src.empty:
             raise web.HTTPBadGateway(reason="market_history_upstream_error")
+        veto = trend_veto_rows(src)
         return [
             {
                 "time": int(row["timestamp"].timestamp()),
@@ -1978,6 +2013,7 @@ def make_app() -> web.Application:
                 "high": float(row["high"]),
                 "low": float(row["low"]),
                 "close": float(row["close"]),
+                **veto.get(int(row["timestamp"].timestamp()), {}),
             }
             for _, row in src.tail(100).iterrows()
         ]
