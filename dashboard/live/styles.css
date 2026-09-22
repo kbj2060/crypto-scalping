@@ -1925,7 +1925,6 @@ svg {
   background: var(--glass); border: 1px solid var(--soft-line); overflow: hidden; }
 /* 2026-09-22 포지션이 없을 때의 «넣었다면» 게이지. 점선 = 아직 실제가 아니다
    -- 실선과 같은 모양이면 사용자가 열려 있다고 읽는다. */
-.acct-pos-proj { border-style: dashed; opacity: 0.92; }
 
 .acct-pos::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
 .acct-pos[data-side="long"]::before { background: var(--good); }
@@ -1941,6 +1940,16 @@ svg {
 
 /* ⭐청산 거리 게이지: 0=청산가 · 0.5=진입가 · 1=진입에서 청산 거리만큼 이익.
    롱/숏 둘 다 **왼쪽 끝이 청산**이라 측면마다 읽는 법을 바꾸지 않아도 된다. */
+/* 포지션이 없을 때의 척추 -- 아직 «사실»이 아니므로 점선이다(형태로 가른다, 색 아님).
+   측면이 안 정해져서 청산이 양쪽에 있다: 롱이면 왼쪽, 숏이면 오른쪽. */
+/* 🔴한 규칙으로 쓴다. 갈라 쓰면 .acct-pos.spine.proj .acct-gauge-track(0,4,0) 의
+   background:none 이 .acct-gauge-track.both(0,2,0) 의 그라디언트를 덮어 레일이 통째로
+   사라진다(실제로 사라졌다). 양끝이 청산, 가운데가 진입이다. */
+.acct-pos.spine.proj .acct-gauge-track {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--bad) 60%, transparent) 0%,
+    rgb(var(--lift) / 0.10) 40%, rgb(var(--lift) / 0.10) 60%,
+    color-mix(in srgb, var(--bad) 60%, transparent) 100%); }
 /* 척추 레일. 상자(.acct-pos)의 테두리·패딩을 벗고 카드 전폭을 가로지른다. */
 /* 🔴overflow:hidden 을 반드시 푼다 -- 레일 «위»의 «현재» 라벨이 상자 밖이라 잘린다.
    위쪽 패딩은 그 라벨이 앉을 자리다(라벨 12px + 간격 8px). */
@@ -1956,10 +1965,6 @@ svg {
     color-mix(in srgb, var(--amber) 24%, transparent) 48%, rgb(var(--lift) / 0.06)); }
 /* 2026-09-22 증거금 게이지의 채움. 눈금 전체 = 이 배수의 최대 증거금, 채움 = 지금 비율.
    트랙 위에 겹쳐 그린다(트랙은 overflow:hidden 이라 안에 넣으면 라운딩에 잘린다). */
-.acct-gauge-fill { position: absolute; left: 0; top: 0; height: 100%; border-radius: 999px;
-  background: var(--good); transition: width .18s ease; }
-.acct-gauge-fill.warn { background: var(--warn); }
-.acct-gauge-fill.bad { background: var(--bad); }
 .acct-gauge-entry { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1.5px;
   background: var(--line); transform: translateX(-50%); }
 .acct-gauge-knob { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
@@ -1976,6 +1981,7 @@ svg {
 .acct-pos.spine .acct-gauge-legend { display: block; position: relative; height: 15px; margin-top: 9px; }
 .acct-pos.spine .acct-gauge-legend > span { position: absolute; top: 0; white-space: nowrap; }
 .acct-pos.spine .acct-gauge-legend > span[style*="50%"] { transform: translateX(-50%); }
+.acct-pos.spine .acct-gauge-legend > span[style*="100%"] { transform: translateX(-100%); }
 .acct-gauge-legend .bad { color: var(--bad); }
 .acct-gauge-now { position: absolute; bottom: calc(100% + 8px); transform: translateX(-50%);
   white-space: nowrap; font: 800 12px/1 var(--font-mono); color: var(--ink); z-index: 2; }

@@ -1476,19 +1476,28 @@ function renderSnapshotAccount() {
       //     낮으면 가용이, 높으면 정책 천장이 먼저 막는다(실측 lev5 \$2,015 vs lev20 \$604).
       //   🔴평단·청산은 뺐다(2차 지시). peg 호가라 현재가와 같은 수였다.
       const marginMax = tgtLev > 0 ? Math.min(capNotional / tgtLev, avail) : avail;
-      const fill = marginMax > 0 ? clamp01(marginAt / marginMax) : 0;
       const overTone = marginAt > avail ? "bad" : marginAt / Math.max(marginMax, 1e-9) > 0.8 ? "warn" : "good";
-      const gauge = `<div class="acct-pos acct-pos-proj">
-             <div class="acct-gauge" title="눈금 전체가 이 배수에서 쓸 수 있는 최대 증거금입니다 -- min(정책천장 ÷ 배수, 가용). 채움은 지금 진입 비율의 증거금입니다.">
+      // ── 척추 레일 (2026-09-22 시안 B, 사용자 «B 안이랑 디자인이 너무 다른데») ──
+      //   보유 중과 **같은 문법**을 쓴다. 다만 포지션이 없으면 측면이 안 정해져서 «청산이
+      //   어디»에 답이 **둘**이다 -- 한쪽만 그리면 거짓말이므로 양쪽을 다 그린다:
+      //     롱 청산(아래) ←── 진입(현재가) ──→ 숏 청산(위)
+      //   거리는 양쪽이 같다(liq_pct). 교차증거금이라 배수가 아니라 노출이 정하는 값이고,
+      //   비율을 올리면 양쪽이 동시에 안쪽으로 좁혀 온다 -- 그게 이 레일이 보여주는 것이다.
+      const px = Number(pl && pl.price) || 0;
+      const loLiq = px * (1 - liqPct / 100), hiLiq = px * (1 + liqPct / 100);
+      const spine = px > 0 && liqPct > 0 ? `<div class="acct-pos spine proj">
+             <div class="acct-gauge" title="포지션이 없으면 측면이 안 정해집니다 -- 지금 설정으로 넣었을 때 롱이면 아래, 숏이면 위 이 가격에서 청산됩니다. 거리는 양쪽이 같습니다(노출의 역수).">
                <span class="acct-gauge-track"></span>
-               <span class="acct-gauge-fill ${overTone}" style="width:${(fill * 100).toFixed(1)}%"></span>
+               <span class="acct-gauge-entry"></span>
+               <span class="acct-gauge-now" style="left:50%">진입 ~${fmtUsd(px)}</span>
              </div>
              <div class="acct-gauge-legend">
-               <span class="${overTone}">증거금 ${fmtUsd(marginAt)}</span>
-               <span class="acct-gauge-now">최대 ${fmtUsd(marginMax)}</span>
+               <span class="bad" style="left:0">롱 청산 ~${fmtUsd(loLiq)}</span>
+               <span class="bad" style="left:100%">숏 청산 ~${fmtUsd(hiLiq)}</span>
              </div>
-           </div>`;
+           </div>` : "";
       body = `<div class="acct-pv-cap entry-cap">지금 설정으로 넣으면 — 레버 ${tgtLev}배 · 비율 ${fracPct}% (포지션 아님)</div>
+        ${spine}
         <div class="acct-tiles">
           ${tile("liq", "청산까지", `${liqPct.toFixed(1)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
                  `넣은 뒤의 청산 거리입니다.\n교차증거금이라 **레버리지가 아니라 노출**이 정합니다`
@@ -1497,13 +1506,23 @@ function renderSnapshotAccount() {
           ${tile("used", "명목", `${fmtUsd(notional)}`, "warn",
                  realCap > 0 ? notional / realCap : 0,
                  `지금 비율(${fracPct}%)로 나가는 명목입니다. 눈금은 실제 상한 ${fmtUsd(realCap)} 기준.\n`
-                 + `증거금은 아래 게이지가 말합니다 -- 명목 ÷ 레버 ${tgtLev}배 = ${fmtUsd(marginAt)}.\n`
                  + `🔴거래소 현재 설정은 ${exLev}배입니다 -- 주문 직전에 ${tgtLev}배로 바꿔서 냅니다`
                  + `(ensure_leverage). 그래서 증거금은 «바꾼 뒤» 기준입니다.`)}
           ${tile("expo", "노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
                  `명목 ${fmtUsd(notional)} ÷ 순자산 ${fmtUsd(equity)}\n`
                  + `🔴레버리지를 바꿔도 이 값은 안 바뀝니다 -- 명목을 정하는 건 비율과 천장입니다.`)}
-        </div>${gauge}${room}`;
+          ${/* 증거금 게이지를 **타일로 흡수**했다 -- 라벨+값+막대는 .acct-tile 과 같은 물건이라
+                별도 부품을 둘 이유가 없다. 눈금 전체 = 이 배수에서 쓸 수 있는 최대 증거금. */ ""}
+          ${tile("margin", "증거금", `${fmtUsd(marginAt)}`, overTone,
+                 marginMax > 0 ? marginAt / marginMax : 0,
+                 `지금 비율의 증거금입니다. 눈금 전체는 이 배수에서 쓸 수 있는 최대\n`
+                 + `= min(정책천장 ÷ ${tgtLev}배, 가용 ${fmtUsd(avail)}) = ${fmtUsd(marginMax)}.`)}
+          ${tile("room", "상한 여유", `${fmtUsd(Math.max(0, realCap - notional))}`,
+                 notional / Math.max(realCap, 1e-9) > 0.9 ? "warn" : "good",
+                 realCap > 0 ? 1 - notional / realCap : 0,
+                 `실제 상한 ${fmtUsd(realCap)} 에서 지금 명목 ${fmtUsd(notional)} 을 뺀 값입니다.\n`
+                 + `${marginBinds ? "이 배수에서는 증거금이 먼저 막습니다." : "정책 천장이 먼저 막습니다."}`)}
+        </div>${room}`;
     } else {
       body = `<div class="acct-empty">${ASSET_CONFIG[activeSnapshotAsset]?.label
         || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.${
