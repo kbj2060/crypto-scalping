@@ -876,10 +876,19 @@ async function fetchBinanceHistory(asset) {
   } catch (e) { console.error("History Error:", e); }
 }
 
+// 🔴2026-09-22 «봉이 바뀌면 곧바로». 주기(5분)는 봉 길이와 같은데 **위상이 안 맞는다** --
+//   경계 직후 새로 마감된 봉은 라이브 갱신이 밀어 넣은 OHLC 뿐이라 sma/vn/drop 이 없고,
+//   서버판이 올 때까지 최대 5분 SMA144±ATR 선이 멈춘다(실측: 경계 넘자 뒤처짐 1 -> 2봉,
+//   90초 뒤에도 2봉 그대로). 마감된 봉 시각을 기억해 두고 바뀌면 게이트를 연다.
+let lastHistoryBarSeen = 0;
 async function maybeFetchSnapshotChartHistory() {
   const now = Date.now();
   const cached = candleHistoryByAsset[activeSnapshotAsset] || [];
-  if (cached.length && now - lastSnapshotHistoryFetchAt < CANDLE_HISTORY_POLL_MS) return;
+  // 지금 «마감된» 봉 = 현재 봉의 직전. 이게 바뀌었다는 건 봉이 넘어갔다는 뜻이다.
+  const closedBar = Math.floor(now / 1000 / 300) * 300 - 300;
+  const rolled = closedBar !== lastHistoryBarSeen;
+  if (cached.length && !rolled && now - lastSnapshotHistoryFetchAt < CANDLE_HISTORY_POLL_MS) return;
+  lastHistoryBarSeen = closedBar;
   lastSnapshotHistoryFetchAt = now;
   await fetchBinanceHistory(activeSnapshotAsset);
   scheduleSnapshotChartRender();
@@ -3839,7 +3848,9 @@ async function refreshFootprint() {
                         bars: [...footprintBars.values()].sort((a, b) => a.time - b.time) };
   } catch (error) {
     console.error("Footprint fetch error:", error);
-    latestFootprint = null;   // null 이면 차트가 그냥 예전 캔들로 되돌아간다
+    // 🔴2026-09-22 전에는 여기서 latestFootprint = null 이었다 -- **한 번의 실패로 화면이
+    //   비었다**(400ms 폴링이라 그게 곧 깜빡임이다). 캐시는 이미 안 버리고 있었으므로
+    //   직전 값을 그대로 둔다. 진짜로 정체되면 위 «전량 재수신» 자가복구가 잡는다.
     // 🔴캐시는 **안 버린다**. 한 번의 네트워크 실패로 12.5KB 를 다시 받을 이유가 없다 --
     //   다음 성공 폴링이 꼬리 두 봉만 얹으면 그대로 이어진다.
   }
@@ -6088,7 +6099,21 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         vp.slice().reverse().map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma - p.atr).toFixed(1)}`).join(" "));
       band.setAttribute("fill", "color-mix(in srgb, var(--muted) 14%, transparent)");
       band.setAttribute("stroke", "none");
+      // 2026-09-22 사용자 «하단 빨강 · 상단 초록». 뜻과 색이 맞는다: 상단 **위**로 벗어나면
+      // veto=+1(롱만 허용 = 상승 추세), 하단 **아래**면 -1(숏만 = 하락). 저장소 규약대로
+      // 초록=상승·빨강=하락이다. 선은 밴드 면보다 진해야 «경계»로 읽힌다.
+      const edge = (key, tone) => {
+        const pl = document.createElementNS(NS, "polyline");
+        pl.setAttribute("points", vp.map((p) => `${cx(p.i).toFixed(1)},${yAt(key(p)).toFixed(1)}`).join(" "));
+        pl.setAttribute("fill", "none");
+        pl.setAttribute("stroke", `color-mix(in srgb, var(--${tone}) 62%, transparent)`);
+        pl.setAttribute("stroke-width", "1.25");
+        pl.setAttribute("stroke-linejoin", "round");
+        return pl;
+      };
       g.appendChild(band);
+      g.appendChild(edge((p) => p.sma + p.atr, "good"));   // 상단: 위로 벗어나면 상승(롱만)
+      g.appendChild(edge((p) => p.sma - p.atr, "bad"));    // 하단: 아래로 벗어나면 하락(숏만)
       const side = vp[vp.length - 1].v;
       const col = side > 0 ? "var(--good)" : side < 0 ? "var(--bad)" : "var(--muted)";
       const closed = live ? vp.slice(0, -1) : vp;
