@@ -1972,6 +1972,9 @@ def make_app() -> web.Application:
         atr = tr.ewm(alpha=1 / TREND_VETO_N, adjust=False).mean()
         dev = ((c - sma) / sma).to_numpy()
         eps = (TREND_VETO_K * atr / c).to_numpy()
+        # 형성 중 봉으로 한 칸 전진하려면 창에서 빠질 종가 하나가 필요하다(클라는 100봉만 갖고
+        # 있어 SMA144 를 스스로 못 만든다). 봉 i 에서 봉 i+1 로 갈 때 빠지는 건 close[i-143].
+        drop = c.shift(TREND_VETO_N - 1).to_numpy()
         out: dict[int, dict[str, float | int]] = {}
         cur = 0
         for i, ts in enumerate(w["timestamp"]):
@@ -1981,8 +1984,12 @@ def make_app() -> web.Application:
                 cur = 1
             elif dev[i] < -eps[i]:
                 cur = -1                        # 밴드 안이면 직전 유지(히스테리시스)
-            out[int(ts.timestamp())] = {"sma": round(float(sma.iloc[i]), 4),
-                                        "atr": round(float(atr.iloc[i]), 4), "veto": cur}
+            row: dict[str, float | int] = {"sma": round(float(sma.iloc[i]), 4),
+                                           "atr": round(float(atr.iloc[i]), 4), "veto": cur}
+            if np.isfinite(drop[i]):
+                # n 도 같이 보낸다 -- 클라에 144 를 또 적으면 두 곳을 따로 고쳐야 한다.
+                row["drop"], row["vn"] = round(float(drop[i]), 4), TREND_VETO_N
+            out[int(ts.timestamp())] = row
         return out
 
     async def load_market_history_from_evidence_cache(asset: str) -> list[dict[str, float | int]]:

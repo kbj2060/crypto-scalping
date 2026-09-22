@@ -5995,6 +5995,26 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   {
     const vp = candles.map((c, i) => ({ i, sma: Number(c.sma), atr: Number(c.atr), v: Number(c.veto) }))
                       .filter((p) => Number.isFinite(p.sma) && Number.isFinite(p.atr));
+    // 2026-09-22 사용자 요청 「현재가에 맞게 현재 봉에서 움직이게」. 서버는 **마감된 봉**만 준다
+    // (evidence_signal_cache 의 closed_df) -- 형성 중 봉은 updateSnapshotCandleLive() 가 따로
+    // 밀어 넣으므로 sma 가 없어 위 filter 에서 빠지고, 선이 오른쪽 끝에서 한 봉 모자랐다.
+    // 마감봉에서 한 칸만 전진시킨다: sma += (현재가 - 창에서 빠지는 종가)/n, atr 은 Wilder 한 스텝.
+    // 🔴이 한 점은 **미확정**이다 -- 검정은 종가 기준이었다. 그래서 점선으로 그린다.
+    let live = null;
+    const lastC = candles[candles.length - 1], prevP = vp[vp.length - 1];
+    if (lastC && prevP && prevP.i === candles.length - 2 && !Number.isFinite(Number(lastC.sma))) {
+      const prevC = candles[candles.length - 2], n = Number(prevC?.vn), drop = Number(prevC?.drop);
+      if (n > 0 && Number.isFinite(drop) && Number(lastC.close) > 0) {
+        const sma = prevP.sma + (lastC.close - drop) / n;
+        const tr = Math.max(lastC.high - lastC.low, Math.abs(lastC.high - prevC.close),
+                            Math.abs(lastC.low - prevC.close));
+        const atr = prevP.atr + (tr - prevP.atr) / n;
+        const dev = (lastC.close - sma) / sma, eps = atr / lastC.close;
+        live = { i: candles.length - 1, sma, atr,
+                 v: dev > eps ? 1 : dev < -eps ? -1 : prevP.v };
+        vp.push(live);
+      }
+    }
     if (vp.length >= 2) {
       const g = document.createElementNS(NS, "g");
       const cx = (i) => xAt(i) + bw / 2;
@@ -6007,14 +6027,21 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       g.appendChild(band);
       const side = vp[vp.length - 1].v;
       const col = side > 0 ? "var(--good)" : side < 0 ? "var(--bad)" : "var(--muted)";
-      const line = document.createElementNS(NS, "polyline");
-      line.setAttribute("points", vp.map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma).toFixed(1)}`).join(" "));
-      line.setAttribute("fill", "none"); line.setAttribute("stroke", col);
-      line.setAttribute("stroke-width", "2"); line.setAttribute("stroke-opacity", "0.85");
-      const t = document.createElementNS(NS, "title");
-      t.textContent = "추세 veto -- SMA144 ±1.0×ATR 히스테리시스. " +
-        (side > 0 ? "롱만 허용" : side < 0 ? "숏만 허용" : "워밍업") + " (ETH 5m 에서만 검정됨)";
-      line.appendChild(t); g.appendChild(line);
+      const closed = live ? vp.slice(0, -1) : vp;
+      const mkLine = (pts, dashed) => {
+        const el = document.createElementNS(NS, "polyline");
+        el.setAttribute("points", pts.map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma).toFixed(1)}`).join(" "));
+        el.setAttribute("fill", "none"); el.setAttribute("stroke", col);
+        el.setAttribute("stroke-width", "2"); el.setAttribute("stroke-opacity", dashed ? "0.6" : "0.85");
+        if (dashed) el.setAttribute("stroke-dasharray", "3 3");
+        const t = document.createElementNS(NS, "title");
+        t.textContent = "추세 veto -- SMA144 ±1.0×ATR 히스테리시스. " +
+          (side > 0 ? "롱만 허용" : side < 0 ? "숏만 허용" : "워밍업") +
+          (dashed ? " · 현재 봉은 미확정(종가로 확정된다)" : "") + " (ETH 5m 에서만 검정됨)";
+        el.appendChild(t); g.appendChild(el);
+      };
+      if (closed.length >= 2) mkLine(closed, false);
+      if (live) mkLine([closed[closed.length - 1], live], true);
       const last = vp[vp.length - 1];
       const tag = document.createElementNS(NS, "text");
       tag.setAttribute("x", cx(last.i) - 4); tag.setAttribute("y", yAt(last.sma) - 5);
