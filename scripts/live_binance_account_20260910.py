@@ -80,19 +80,20 @@ def round_trips(fills: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     for fill in sorted(fills, key=lambda f: (int(f["time"]), int(f["id"]))):
         groups.setdefault((fill["symbol"], fill.get("positionSide", "BOTH")), []).append(fill)
     trips: list[dict[str, Any]] = []
-    for group in groups.values():
-        trips.extend(_fold(group))
+    for (_symbol, position_side), group in groups.items():
+        trips.extend(_fold(group, position_side))
     trips.sort(key=lambda t: t["entry_time"])
     return trips
 
 
-def _fold(fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH") -> list[dict[str, Any]]:
     """One (symbol, positionSide) stream, oldest first. BUY=+qty / SELL=-qty throughout: a hedge
     LONG stream stays >=0 and a hedge SHORT stream stays <=0, so the same zero-crossing test ends
     a trip in every mode."""
     trips: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     net = 0.0
+    truncated = False
     for fill in _split_flips(fills):
         qty = float(fill["qty"])
         price = float(fill["price"])
@@ -100,7 +101,13 @@ def _fold(fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if current is None:
             current = {
                 "symbol": fill["symbol"],
-                "side": "LONG" if signed_qty > 0 else "SHORT",
+                # 🔴측면은 **positionSide** 가 정한다. 첫 체결의 방향으로 정하던 옛 판은, 창이
+                # 포지션 한가운데를 자르면 첫 체결이 *청산* 다리라서 헤지 LONG 조각을 "SHORT"
+                # 로 찍었다. 그러면 같은 심볼에 겹치는 SHORT 가 둘 생겨 원장의 겹침 가드가
+                # 멀쩡한 왕복까지 영구히 거부한다(2026-09-22 실계좌). 단방향 모드는 positionSide
+                # 가 "BOTH" 라 한 체결이 포지션을 뒤집을 수 있으므로 그때만 방향으로 정한다.
+                "side": position_side if position_side in ("LONG", "SHORT")
+                        else ("LONG" if signed_qty > 0 else "SHORT"),
                 "entry_time": int(fill["time"]),
                 "max_qty": 0.0,
                 "qty_in": 0.0, "qty_out": 0.0, "_in": 0.0, "_out": 0.0,
@@ -122,6 +129,14 @@ def _fold(fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             current["qty_out"] += qty; current["_out"] += price * qty
         net += signed_qty
+        # 🔴헤지 스트림은 부호를 못 벗어난다(LONG 은 net>=0, SHORT 는 net<=0). 벗어났다면 거래소
+        # userTrades **7일 롤링 창**이 진입 체결을 잘라먹어 폴딩이 포지션 한가운데서 시작한
+        # 것이다. 아래 len(fills)>=trade_limit 로는 절대 안 잡힌다 -- 2026-09-22 실측은 limit
+        # 1000 에 체결 44건인데 ETHUSDT 왕복 8건 중 6건이 항등식 불일치, 3건이 유령이었다.
+        # 한 번 어긋나면 그 스트림의 "flat" 이 실제 포지션과 어긋난 채로 계속 가므로 **스트림
+        # 전체**를 의심한다(같은 실측에서 절단 이후 왕복도 전부 불일치였다).
+        if (position_side == "LONG" and net < -QTY_EPS) or (position_side == "SHORT" and net > QTY_EPS):
+            truncated = True
         current["max_qty"] = max(current["max_qty"], abs(net))
         current["realized_pnl"] += float(fill["realizedPnl"])
         current["commission"] += float(fill["commission"])
@@ -132,6 +147,9 @@ def _fold(fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
             current, net = None, 0.0
     if current is not None:
         trips.append(_finish(current))
+    if truncated:
+        for trip in trips:
+            trip["truncated_open"] = True
     return trips
 
 
@@ -277,9 +295,12 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
             continue
         # 정확히 limit개면 그 앞이 잘렸다는 뜻 -- 창 밖에서 열린 포지션은 중간부터 접히므로
         # 가장 오래된 왕복 하나는 진입가/방향이 틀릴 수 있다. 숨기지 말고 알린다.
-        if len(fills) >= trade_limit:
+        folded = round_trips(fills)
+        # limit 에 닿은 경우와, 7일 창이 진입을 잘라 폴딩이 깨진 경우. 후자가 실제로 일어나는
+        # 쪽이고 limit 검사로는 안 걸린다(_fold 의 truncated_open 주석 참조).
+        if len(fills) >= trade_limit or any(t.get("truncated_open") for t in folded):
             truncated.append(symbol)
-        trips.extend(round_trips(fills))
+        trips.extend(folded)
     for trip in trips:
         trip["entry_at"] = _iso(trip["entry_time"])
         trip["exit_at"] = _iso(trip["exit_time"])
@@ -379,6 +400,18 @@ def _self_check() -> None:
     r = round_trips(residue)
     assert len(r) == 1 and r[0]["closed"] and r[0]["exit_time"] == 3000, r
     assert not any(t["max_qty"] <= QTY_EPS for t in r), r
+    # 7일 창이 진입 체결을 잘라먹은 헤지 LONG: 보이는 건 청산 다리뿐이라 net 이 음수로 내려간다.
+    # (1) 측면은 여전히 LONG 이어야 한다 -- "SHORT" 로 찍히면 원장 겹침 가드가 멀쩡한 숏 왕복을
+    #     같은 자리에 겹친 것으로 보고 영구히 거부한다. (2) 스트림 전체에 truncated_open 이 선다.
+    cut = [
+        {"symbol": "ETHUSDT", "id": 1, "time": 1000, "side": "SELL", "price": "2100", "qty": "2", "realizedPnl": "200", "commission": "0", "positionSide": "LONG"},
+        {"symbol": "ETHUSDT", "id": 2, "time": 2000, "side": "BUY", "price": "2000", "qty": "2", "realizedPnl": "0", "commission": "0", "positionSide": "LONG"},
+    ]
+    c = round_trips(cut)
+    assert all(t["side"] == "LONG" for t in c), c
+    assert all(t.get("truncated_open") for t in c), c
+    # 멀쩡한 스트림에는 안 선다(위 hedge/residue 가 그 대조군이다).
+    assert not any(t.get("truncated_open") for t in h + r), (h, r)
     print("self-check ok:", len(trips), "round trips, flip split into 2, hedge split into", len(h),
           ", residue folds into", len(r))
 

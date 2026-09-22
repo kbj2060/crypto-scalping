@@ -1129,7 +1129,7 @@ function acctPerfSvg(net, meta) {
   const hits = net.map((v, i) => {
     const m = (meta && meta[i]) || {};
     const rows = [
-      `${m.when || `${i + 1}번째 왕복`}${m.side ? " · " + m.side : ""}`,
+      `${m.when || `${i + 1}번째 왕복`}${m.side ? " · " + m.side : ""}${m.venue ? " · " + m.venue : ""}`,
       m.qty ? `수량 ${m.qty} ETH · ${fmtUsd(m.notional)}` : "",
       m.entry && m.exit ? `진입 ${fmtUsd(m.entry)} → 청산 ${fmtUsd(m.exit)}` : "",
       `손익 <b class="${v < 0 ? "bad" : "good"}">${v >= 0 ? "+" : ""}${fmtUsd(v)}</b>`
@@ -1304,10 +1304,21 @@ function renderSnapshotAccount() {
         <i>${upnlPct >= 0 ? "+" : ""}${upnlPct.toFixed(2)}%</i></span>
     </div>`;
 
-  // 오른쪽 성과 -- 보고 있는 코인의 **닫힌** 왕복만 (패널이 코인 단위이므로 심볼로 거른다)
-  const symbol = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
-  // 🔴/api/binance-account 는 **최신순**으로 준다. 그대로 그리면 누적선이 시간을 거꾸로 달린다.
-  const closed = (latestBinanceAccount.trades || []).filter((t) => t.closed && t.symbol === symbol)
+  // 오른쪽 성과 -- 보고 있는 코인의 닫힌 왕복.
+  // 🔴원천은 거래소 payload(trades)가 아니라 **서버 원장(ledger)** 이다. userTrades 는 7일
+  //   롤링이라 창 앞에서 열린 포지션은 진입 체결이 사라지고, 폴딩이 포지션 한가운데서 시작해
+  //   유령 왕복을 만든다(2026-09-22 실측: ETHUSDT 8건 중 3건이 유령·6건이 항등식 불일치,
+  //   승률 50% 로 표시됐지만 실제는 80%). 원장은 항등식·겹침을 통과한 것만 담고 창이 지나도
+  //   남는다. server.py load_account_trip_rows() 참조.
+  // 🔴심볼이 아니라 **코인**으로 거른다. 같은 ETH 를 두 심볼로 거래한다 -- 대시보드 수동 주문은
+  //   ETHUSDC, 급할 때는 바이낸스에서 직접 ETHUSDT. 심볼 하나로 거르면 한쪽이 통째로 사라진다
+  //   (실제로 최근 19왕복 +$577 이 화면에 없었다). 바로 위 snapshotAccountPosition() 은 이미
+  //   exec_symbol 을 보는데 여기만 ASSET_CONFIG 를 하드코딩하고 있었다.
+  const base = (ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`)
+    .replace(/USD[TC]$/, "");
+  // 원장은 오래된 것부터 붙지만 정렬을 믿지 않는다 -- 거꾸로면 누적선이 시간을 거꾸로 달린다.
+  const closed = (latestBinanceAccount.ledger || [])
+    .filter((t) => String(t.symbol || "").replace(/USD[TC]$/, "") === base)
     .slice().sort((x, y) => (Number(x.exit_time) || 0) - (Number(y.exit_time) || 0));
   const net = closed.map((t) => Number(t.net_pnl) || 0);
   // 툴팁이 "날짜와 크기 등"을 보여줘야 하므로(사용자 지시) 라벨 문자열이 아니라 원장을 넘긴다.
@@ -1319,6 +1330,9 @@ function renderSnapshotAccount() {
         + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
       side: t.side === "LONG" ? "롱" : "숏", qty, notional: qty * px,
       entry: Number(t.entry_price) || 0, exit: px,
+      // 한 코인을 두 심볼로 거래하므로(USDC=대시보드 수동, USDT=바이낸스 직접) 어느 쪽이었는지
+      // 툴팁이 말해 준다. 이게 없으면 원장에서 두 경로가 구분 불가능해진다.
+      venue: String(t.symbol || "").replace(/^.*?(USD[TC])$/, "$1"),
     };
   });
   const wins = net.filter((v) => v > 0).length;
@@ -1327,8 +1341,8 @@ function renderSnapshotAccount() {
   net.forEach((v, i) => { if (worstIdx < 0 || v < net[worstIdx]) worstIdx = i; });
   const rest = worstIdx >= 0 ? total - net[worstIdx] : 0;
   const chip = (v, lab) => `<span class="acct-chip"><b>${v}</b><span>${lab}</span></span>`;
-  // 기간을 적는다(사용자 지시). ⚠️"이번 달 전부"라고 단정하지 않는다 -- 거래소는 시간 조건을
-  // 안 주면 최근 구간만 돌려주므로, 여기 있는 건 **조회된 범위**지 계좌의 전체 이력이 아니다.
+  // 기간을 적는다(사용자 지시). 원장이 원천이므로 거래소 7일 창보다 길지만, 원장이 처음
+  // 돌기 시작한 날 이전은 없다 -- 그래서 여기 있는 건 **기록된 범위**지 계좌의 전체 이력이 아니다.
   const spanText = (() => {
     if (!closed.length) return "";
     const a = new Date(Number(closed[0].exit_time) || 0);
@@ -1357,7 +1371,7 @@ function renderSnapshotAccount() {
          </div>
          <figure class="acct-plot">
            <div class="acct-plot-head">${legend}
-             ${spanText ? `<span class="acct-span" title="거래소가 시간 조건 없이 돌려주는 최근 구간의 기록입니다 — 이보다 과거는 조회 조건을 따로 줘야 나옵니다.">${escapeHtml(spanText)}</span>` : ""}
+             ${spanText ? `<span class="acct-span" title="대시보드가 쌓아 둔 원장의 범위입니다 — 거래소 조회는 7일치만 주므로 그 앞은 여기에만 남습니다. 바이낸스에서 직접 낸 주문도 함께 들어 있습니다.">${escapeHtml(spanText)}</span>` : ""}
            </div>
            ${acctPerfSvg(net, netMeta)}
            <div class="acct-tip" hidden></div>
