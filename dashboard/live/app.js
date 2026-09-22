@@ -5788,6 +5788,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
     // 숫자를 욱여넣으면 옆 칸을 침범해서 둘 다 못 읽는다. 값은 눌러서 툴팁으로 본다.
     const showQty = half >= 18;
+    // 🔴2026-09-23 사용자 «12시간은 풋프린트 말고 일반 캔들에 델타만». 봉이 얇아지면 셀은
+    //   정보가 아니라 잡음이다 -- 144봉(12h)이면 bw≈9px 라 매수/매도 칸이 4px 짜리 색 띠가
+    //   되어 캔들을 덮는다. 그 아래 **델타·사분면·누적 CVD 는 그대로 나온다**: 셋 다
+    //   풋프린트 «데이터»에서 나오고(QUAD_H/CUM_H 가 fpBars.length 로 켜진다), 여기서 막는
+    //   것은 «그리기»뿐이다. 캔들(심지·몸통)은 이 블록 뒤에서 어차피 그려진다.
+    //   기준을 창(chartWindowBars)이 아니라 **봉 폭**으로 잡는다 -- 모바일·좁은 창에서도
+    //   같은 규칙이 되고, 창 상수가 늘어도 따라온다. 48봉 bw≈26 ✓ · 144봉 bw≈9 ✗.
+    const drawCells = bw >= 14;
     // 라이트는 셀 배경이 밝아 글자를 거의 불투명하게 올려야 읽힌다(다크는 현행 0.82).
     const INK_OPACITY =
       document.documentElement.getAttribute("data-theme") === "light" ? "0.95" : "0.82";
@@ -5808,7 +5816,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   의존해서(deltaBoxes) 중간 봉 하나만 바뀌어도 뒤쪽이 전부 틀어진다 -- 그 사슬을
     //   캐시에 들이면 조용히 어긋난다. 둘 다 노드 하나뿐이라 매번 만들어도 싸다.
     const geomSig = [w, h, mt, ch, ml, cw, bw, yMin, yMax, candles.length, rowSize, rowPx,
-                     maxBuy, maxSell, half, fontPx, showQty, INK_OPACITY].join("|");
+                     maxBuy, maxSell, half, fontPx, showQty, drawCells, INK_OPACITY].join("|");
     const barCache = renderCandleSvg._barCache || (renderCandleSvg._barCache = new Map());
     // 델타 라벨은 봉 그룹 **밖**이라 따로 둔다(위 🔴주석: 충돌회피 사슬 때문).
     const deltaCache = renderCandleSvg._deltaCache || (renderCandleSvg._deltaCache = new Map());
@@ -5878,7 +5886,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (!reuse) {
         barCache.set(c.time, { geom: geomSig, levels: levelsRef, i,
                                o: c.open, h: c.high, l: c.low, c: c.close, g: barG });
-      rows.forEach((cell, key) => {
+      if (drawCells) rows.forEach((cell, key) => {
         const yTop = yAt((key + 1) * rowSize);
         if (yTop + rowPx < mt || yTop > mt + ch) return;   // 창 밖 행은 건너뛴다
         const price = key * rowSize + rowSize / 2;
