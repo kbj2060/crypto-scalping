@@ -1090,6 +1090,22 @@ function acctRiskTone(liqPct) {
 }
 
 // 닫힌 왕복 손익 막대 + 누적선. 데이터가 없으면 빈 문자열(자리 자체를 안 만든다).
+// ── 계좌 차트 기간 (2026-09-22 사용자 «1주일치만 보여주고 내가 늘려서 더 볼 수 있게») ──
+//   기본 1주. 원장은 계속 쌓이므로 전체를 그리면 최근 며칠이 몇 픽셀로 눌린다.
+//   0 = 전체. 저장은 chartWindowBars 와 같은 방식이다(화이트리스트로 되읽어 쓰레기값 차단).
+const ACCT_SPANS = [[7, "1주"], [30, "1개월"], [0, "전체"]];
+let acctSpanDays = (() => {
+  try {
+    // 🔴저장값이 없으면 getItem 은 null 이고 Number(null) 은 **0** 이다. 0 이 «전체»라
+    //   화이트리스트를 통과해서, 처음 열면 기본이 1주가 아니라 전체가 됐다(실측).
+    //   chartWindowBars 패턴에는 0 이 유효값이 아니라 이 함정이 없었다 -- 그대로 베끼면 안 된다.
+    const raw = localStorage.getItem("acctSpanDays");
+    if (raw === null || raw === "") return 7;
+    const v = Number(raw);
+    return ACCT_SPANS.some(([d]) => d === v) ? v : 7;
+  } catch (e) { return 7; }
+})();
+
 function acctPerfSvg(net, meta) {
   if (!net.length) return "";
   // 2026-09-11 사용자 "높이를 가득 채워줘" -- 칸을 꽉 채우려면 비균일 확대를 피할 수 없다.
@@ -1304,6 +1320,18 @@ let lastEntryCap = null;
 //   cap 은 천장이라 비율·배수에 안 움직인다(실측). 움직이는 건 plan.projection 이다.
 let lastEntryPlan = null;
 
+// 🔴위임으로 한 번만 붙인다. 이 차트는 계좌 폴링마다 통째로 다시 그려지므로 노드에
+//   직접 붙이면 렌더할 때마다 다시 붙여야 하고, 한 번 빠뜨리면 조용히 안 먹는다.
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".acct-span-pick .chip");
+  if (!b) return;
+  const d = Number(b.dataset.days);
+  if (!ACCT_SPANS.some(([x]) => x === d) || d === acctSpanDays) return;
+  acctSpanDays = d;
+  try { localStorage.setItem("acctSpanDays", String(d)); } catch (err) { /* 사파리 프라이빗 */ }
+  renderSnapshotAccount();
+});
+
 function renderSnapshotAccount() {
   const summary = el("snapAcctSummary");
   if (!el("snapAcctPosition")) return;
@@ -1350,9 +1378,14 @@ function renderSnapshotAccount() {
   const base = (ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`)
     .replace(/USD[TC]$/, "");
   // 원장은 오래된 것부터 붙지만 정렬을 믿지 않는다 -- 거꾸로면 누적선이 시간을 거꾸로 달린다.
-  const closed = (latestBinanceAccount.ledger || [])
+  const allClosed = (latestBinanceAccount.ledger || [])
     .filter((t) => String(t.symbol || "").replace(/USD[TC]$/, "") === base)
     .slice().sort((x, y) => (Number(x.exit_time) || 0) - (Number(y.exit_time) || 0));
+  // 🔴자르기 **전** 건수를 들고 있어야 «밖에 더 있다»를 말할 수 있다. 그 숫자가 없으면
+  //   1주 창이 비었을 때 «거래가 없다»인지 «창이 좁다»인지 구분이 안 된다.
+  const cutoff = acctSpanDays > 0 ? Date.now() - acctSpanDays * 86400000 : 0;
+  const closed = cutoff ? allClosed.filter((t) => (Number(t.exit_time) || 0) >= cutoff) : allClosed;
+  const hiddenTrips = allClosed.length - closed.length;
   const net = closed.map((t) => Number(t.net_pnl) || 0);
   // 툴팁이 "날짜와 크기 등"을 보여줘야 하므로(사용자 지시) 라벨 문자열이 아니라 원장을 넘긴다.
   const netMeta = closed.map((t) => {
@@ -1404,7 +1437,15 @@ function renderSnapshotAccount() {
          </div>
          <figure class="acct-plot">
            <div class="acct-plot-head">${legend}
+             <span class="acct-span-wrap">
              ${spanText ? `<span class="acct-span" title="대시보드가 쌓아 둔 원장의 범위입니다 — 거래소 조회는 7일치만 주므로 그 앞은 여기에만 남습니다. 바이낸스에서 직접 낸 주문도 함께 들어 있습니다.">${escapeHtml(spanText)}</span>` : ""}
+             <div class="chipset acct-span-pick" role="group" aria-label="차트 기간">
+               ${ACCT_SPANS.map(([d, lab]) => `<button type="button" class="chip${
+                 d === acctSpanDays ? " on" : ""}" data-days="${d}" aria-pressed="${d === acctSpanDays}"${
+                 d > 0 && hiddenTrips > 0 ? ` title="이 밖에 ${hiddenTrips}건 더 있습니다"` : ""
+               }>${lab}</button>`).join("")}
+             </div>
+           </span>
            </div>
            ${acctPerfSvg(net, netMeta)}
            <div class="acct-tip" hidden></div>
@@ -1414,7 +1455,10 @@ function renderSnapshotAccount() {
                  · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
             : ""}
        </section>`
-    : `<section class="acct-perf"><div class="acct-empty">닫힌 왕복이 아직 없습니다.</div></section>`;
+    : `<section class="acct-perf"><div class="acct-empty">${
+        hiddenTrips > 0
+          ? `최근 ${acctSpanDays}일에 닫힌 왕복이 없습니다 — 이 밖에 <b>${hiddenTrips}건</b> 있습니다.`
+          : "닫힌 왕복이 아직 없습니다."}</div></section>`;
 
   const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
   const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
@@ -3472,20 +3516,25 @@ const SIT_CLAMP = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const SIT_FIN = (x) => (Number.isFinite(x) ? x : null);
 // 두 값의 상대 편중을 -100~100 으로. 둘 다 0 이면 «재료 없음»(null).
 const SIT_TILT = (a, b) => (a || b ? ((a - b) / (Math.abs(a) + Math.abs(b))) * 100 : null);
+// 값 칸은 46px 다. 청산·CVD·델타·OI 는 상한이 없어 그대로 쓰면 넘친다(실측 «961/16691»
+// 이 8px 넘쳤다 -- 렌더 검사기가 잡았다. 픽스처의 «96/412» 로는 안 보였다).
+const SIT_K = (v) => { const n = Math.round(Math.abs(v)), s = v < 0 ? "-" : "";
+  return n >= 1e6 ? `${s}${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${s}${Math.round(n / 1e3)}k`
+       : n >= 1e3 ? `${s}${(n / 1e3).toFixed(1)}k` : `${s}${n}`; };
 
 const SIT_SIGNALS = [
   // ── 방향 압력 8칸 ──
   ["청산 편중", "d", (e) => {
     const v = SIT_TILT(e.liq_short || 0, e.liq_long || 0);          // + = 숏이 더 청산 = 위쪽 압력
-    return v == null ? null : { v, txt: `${Math.round(e.liq_short || 0)}/${Math.round(e.liq_long || 0)}` };
+    return v == null ? null : { v, txt: SIT_K((e.liq_short || 0) - (e.liq_long || 0)) };
   }],
   ["창 CVD", "d", (e) => {
     const c = SIT_FIN(e.cvd), m = Math.abs(SIT_FIN(e.max_delta) || 0);
-    return c == null || !m ? null : { v: SIT_CLAMP((c / m) * 100, -100, 100), txt: Math.round(c) };
+    return c == null || !m ? null : { v: SIT_CLAMP((c / m) * 100, -100, 100), txt: SIT_K(c) };
   }],
   ["마지막 봉 델타", "d", (e, t) => {
     const l = SIT_FIN(e.last_delta), m = Math.abs(SIT_FIN(e.max_delta) || 0);
-    return l == null || !m ? null : { v: SIT_CLAMP((l / m) * 100, -100, 100), txt: Math.round(l),
+    return l == null || !m ? null : { v: SIT_CLAMP((l / m) * 100, -100, 100), txt: SIT_K(l),
                                       mark: (t.reject || 0.5) * 100 };
   }],
   ["고래−리테일", "d", (e) => {
@@ -3511,7 +3560,7 @@ const SIT_SIGNALS = [
   ["BTC 이동", "d", (e) => {
     const b = SIT_FIN(e.btc_move_bp), m = Math.abs(SIT_FIN(e.move_bp) || 0);
     return b == null ? null : { v: m ? SIT_CLAMP((b / m) * 100, -100, 100) : 0,
-                                on: e.btc_rel != null, txt: Math.round(b) };
+                                on: e.btc_rel != null, txt: SIT_K(b) };
   }],
   // ── 강도 · 위치 10칸 ──
   ["레짐 세기", "m", (e) => {
@@ -3521,7 +3570,7 @@ const SIT_SIGNALS = [
   }],
   ["OI 동조율", "m", (e) => {
     if (e.oi_sum == null) return null;                               // OI 스트림이 비었다
-    return { v: SIT_CLAMP((e.oi_agree || 0) * 100, 0, 100), txt: Math.round(e.oi_sum) };
+    return { v: SIT_CLAMP((e.oi_agree || 0) * 100, 0, 100), txt: SIT_K(e.oi_sum) };
   }],
   ["활동 분위", "m", (e, t) => {
     const a = SIT_FIN(e.act_pct);
