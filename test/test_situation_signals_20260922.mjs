@@ -80,4 +80,11 @@ for (const ev of [{ ...FULL, max_delta: 0 }, { ...FULL, va_hi: FULL.va_lo },
   assert.equal(render(ev).length, N);
 }
 
+// ── 계약 7: 1순위 열이 전역 클래스를 쓰면 안 된다 ──
+// styles.css 327행의 전역 .top(페이지 헤더)이 display:flex 를 건다. 시안 E 배포 때부터
+// 1순위 열만 가로로 눕고 게이지가 폭 0 이었다. 이름이 겹치면 증상이 «레이아웃»으로만
+// 나타나 코드만 읽어서는 안 보인다 -- 그래서 여기서 막는다.
+const col = src.slice(src.indexOf('`<div class="sit-col$'), src.indexOf('`<div class="sit-col$') + 120);
+assert.ok(!/\btop"/.test(col.replace(/sit-top"/g, "")), `1순위 열이 전역 .top 을 쓴다: ${col.slice(0, 80)}`);
+
 console.log(`모두 통과 (${N}칸)`);

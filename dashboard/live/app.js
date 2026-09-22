@@ -3572,7 +3572,7 @@ function renderSituation() {
     const push = (n.flips || []).filter((f) => f.toward === k);
     const pushed = push.map((f) => `<div class="sit-push${f.on ? " on" : ""}">`
       + `<span class="dot"></span><span>${escapeHtml(f.signal)}</span></div>`).join("");
-    return `<div class="sit-col${i === 0 ? " top" : ""}${dead ? " dead" : ""}">`
+    return `<div class="sit-col${i === 0 ? " sit-top" : ""}${dead ? " dead" : ""}">`
       + `<div class="p">${n.prob[k]}%</div>`
       // 게이지: 숫자를 안 읽어도 56 vs 26 이 보인다. 채움 세기는 **키 고정**(위 주석과 같은 이유).
       + `<div class="sit-g k-${k}"><i style="width:${dead ? 0 : n.prob[k]}%"></i></div>`
@@ -3627,49 +3627,13 @@ function renderSituation() {
   const why = (n.why || []).map((w) => `${w["근거"]}: ${Object.entries(w).filter(([k]) => k !== "근거")
     .map(([k, v]) => `${k}${v >= 0 ? "+" : ""}${v}`).join(" ")}`).join(" · ");
 
-  // ── LEDGER ── «말한 것 vs 실제»를 표로. 문장에 묻혀 있던 게 이 카드의 핵심 숫자다
-  //   (실측: 되돌림 39 말하고 2 적중 · 역스퀴즈 33 말하고 83). gap = 실제 − 말한 것.
-  const c = s.calibration || {};
-  // 🔴2026-09-22 **레짐별로 가른다.** 전에는 세 행에 «지금» 레짐의 이름을 붙였는데, 집계는
-  //   횡보·추세를 합친 것이라 이름이 숫자를 거짓으로 설명했다. 게다가 둘은 **반대로** 틀린다 --
-  //   실측 전체 A 는 +18 로 얌전한데 갈라 보면 추세 +52 · 횡보 −33 이다(상쇄였다).
-  //   행 이름은 서버가 집계와 **함께** 보낸 label 을 쓴다(지금 이름으로 옛 집계를 칠하지 않는다).
-  const ledRows = (rows, nameOf) => rows.map((r) => {
-    const g = (r.happened || 0) - (r.said || 0);
-    return `<tr><td>${escapeHtml(nameOf(r))}</td><td>${r.said}</td><td>${r.happened}</td>`
-      + `<td class="gap ${g >= 0 ? "under" : "over"}">${g >= 0 ? "+" : ""}${g}</td></tr>`;
-  }).join("");
-  const ledTable = (head, body) => `<table class="sit-led"><thead><tr><th>${head}</th>`
-    + `<th>말한</th><th>실제</th><th>차</th></tr></thead><tbody>${body}</tbody></table>`;
-  const led = !c.n
-    ? `<div class="sit-cal">${c.samples ? `표본 ${c.samples}건 기록 · 해결대기 ${c.pending}` : "기록 시작 대기"} (첫 해결은 예측 30분 뒤)</div>`
-    : Array.isArray(c.by_regime) && c.by_regime.length
-      ? c.by_regime.map((b) => ledTable(`${escapeHtml(b.kind)} <span>n ${b.n}</span>`,
-                                        ledRows(b.rows, (r) => r.label || r.k))).join("")
-      // 폴백: 옛 페이로드(by_regime 없음). 배포 창에서만 잠깐 보인다.
-      : ledTable("시나리오", ledRows(["A", "B", "C"].map((k) => ({ ...(c[k] || {}), k })),
-                                     (r) => n.names[r.k] || r.k));
-
-  const sy = c.sym || {};
+  // ── WS ── 장부(LEDGER)와 각주는 화면에서 뺐다(2026-09-22 사용자 «레져와 아래 텍스트들은
+  //   제거해줘 · ws 상태만 남겨줘»). 🔴서버의 기록·해결은 그대로 돈다 -- calibration 집계도,
+  //   예측 장부 파일도 계속 쌓인다. 지운 건 «표시»뿐이라 적중률 학습 루프는 안 끊긴다.
   const st = s.streams || {}; const fo = st.fo || {}; const mp = st.mp || {};
   const wsDot = (w, label) => `<span class="sit-ws" title="${escapeHtml(label)} ${w.connected
     ? `연결 · ${w.events || 0}건` : `끊김${w.last_error ? ` (${w.last_error})` : ""}`}">`
     + `<i class="${w.connected ? "" : "off"}"></i>${escapeHtml(label)}</span>`;
-  // 🔴표만 가르고 이 두 줄을 합쳐 두면 반쪽이다(2026-09-22). 특히 «미도달»은 횡보에서
-  //   **구조적으로 0%** 다 -- 횡보 A 는 잔여라 아무것도 안 닿으면 그게 A 다. 그 0 이 추세를
-  //   희석한다(실측 전체 17% = 추세 26% + 횡보 0%, 1순위 적중 전체 28% = 추세 40% + 횡보 4%).
-  const reg = Array.isArray(c.by_regime) ? c.by_regime : [];
-  const perReg = (f) => reg.map((b) => `${escapeHtml(b.kind)} <b>${f(b)}%</b>`).join(" · ");
-  const foot = [
-    c.n ? (reg.length ? `1순위 적중 ${perReg((b) => b.top_hit)}` : `1순위 적중 <b>${c.top_hit}%</b>`) : null,
-    c.n ? (reg.length
-            ? `<span title="횡보의 «유지»는 배리어가 아니라 잔여다 -- 아무것도 안 닿으면 그게 A 라서, 횡보의 이 값은 구조적으로 0% 다.">`
-              + `아무 목표도 안 닿음 ${perReg((b) => b.none)}</span>`
-            : `아무 목표도 안 닿음 ${c.none}%`) : null,
-    sy.n ? `방향 적중 <b>${sy.hit}%</b> · 항상 상승이면 ${sy.base_up}% <span title="대칭 ±0.5×창폭 · 추세 구간만">(n ${sy.n})</span>`
-         : "방향 적중: 대칭 라벨 해결 대기",
-    c.n ? `해결 <b>${c.n}</b> · 대기 ${c.pending} · 에피소드 <b>${c.episodes}</b> · 연속타깃 ${c.with_path} · 판정불가 ${c.amb}% · 최근 ${c.span_h}h` : null,
-  ].filter(Boolean).join("</span><span>");
 
   body.innerHTML = `
     <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
@@ -3681,9 +3645,7 @@ function renderSituation() {
       <div><div class="h">강도 · 위치<span>0 → 100</span></div>${sigHtml(sigR)}</div>
     </div>
     ${flips ? `<div class="sit-flips">${flips}</div>` : ""}
-    <div class="sit-sec">LEDGER${c.n ? `<span>n ${c.n} · ${c.span_h}h</span>` : ""}</div>
-    ${led}
-    <div class="sit-foot"><span>${foot}</span>${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`;
+    <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`;
 
   if (badge) {
     const age = s.computed_at ? Math.round(Date.now() / 1000 - s.computed_at) : null;
