@@ -2025,7 +2025,10 @@ def make_app() -> web.Application:
                 "close": float(row["close"]),
                 **veto.get(int(row["timestamp"].timestamp()), {}),
             }
-            for _, row in src.tail(100).iterrows()
+            # 🔴2026-09-23 100 -> 200. 100 봉이면 8.3시간이라 12h 창을 골라도 8.3시간에서
+            #   끊겼다(사용자 «12시간 데이터 추세를 보고 싶다»). closed_df 는 SMA144 를
+            #   계산하느라 이미 그보다 길다 -- 자르는 폭만 넓히면 된다. 200 = 16.6시간.
+            for _, row in src.tail(200).iterrows()
         ]
 
     async def load_market_history(asset: str) -> list[dict[str, float | int]]:

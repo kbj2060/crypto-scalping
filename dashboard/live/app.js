@@ -381,7 +381,10 @@ const SESSION_ALERTS_POLL_MS = 30000; // 2026-08-27: split off evidence-signals'
 
 // --- Chart Global Variables ---
 const CHART_CANDLE_MIN = 5;
-const CHART_MAX_CANDLES = 100;
+// 🔴2026-09-23 100 -> 200. 이 값이 «화면이 보여줄 수 있는 가장 긴 구간»을 정한다.
+//   100 이면 8.3시간이라 12h 창을 골라도 8.3시간에서 끊겼다 -- 서버도 같이 200 으로
+//   (tail(200)). 200 = 16.6시간이라 12h 창에 여유가 있다.
+const CHART_MAX_CANDLES = 200;
 // Snapshot tab's own chart only -- narrower than CHART_MAX_CANDLES (Live tab, unaffected) so every
 // visible column has a real compute_heatmap_history() snapshot behind it (2026-08-25 user request,
 // "차트를 4시간만 보여주는건 어떨까", then same day "4시간은 너무 작다" -> 6h -- see
