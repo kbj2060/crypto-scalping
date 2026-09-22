@@ -8,10 +8,13 @@
   3) **분모는 겹치지 않는 30분 창** — 예측이 5분마다 나오고 지평이 30분이라 그냥 세면
      같은 움직임을 6번 센다(검정력 부풀림).
 """
-import json, math, collections, sys
+import json, math, collections, os, sys
 from pathlib import Path
 
-LOG = Path("data/live/situation_log.jsonl")
+LOG = Path(os.environ.get("SIT_LOG", "data/live/situation_log.jsonl"))
+# 채점/사전확률이 바뀐 시각(ts) 으로 시대를 자른다 — 다른 시대를 섞으면 다른 실험을 합치는 것이다.
+SINCE = int(os.environ.get("SIT_SINCE", "0"))
+UNTIL = int(os.environ.get("SIT_UNTIL", "99999999999"))
 HORIZON_S = 1800
 
 
@@ -29,7 +32,7 @@ def load():
             preds[ts]["outcome"] = o.get("outcome")
             preds[ts]["outcome_sym"] = o.get("outcome_sym")
             preds[ts]["path"] = o.get("path")
-    return [preds[t] for t in sorted(preds)]
+    return [preds[t] for t in sorted(preds) if SINCE <= t <= UNTIL]
 
 
 def disjoint(rows, gap=HORIZON_S):
@@ -257,3 +260,67 @@ for lab, sel in (("횡보 dir=0", lambda r: r["dir"] == 0), ("추세 dir≠0", l
         r0, lo, hi = boot(sub, rate(k))
         said = f"{sum(x['prob'][k] for x in sub)/len(sub):5.1f}%" if k != "none" else "    —"
         print(f"     {k:5} 말한 {said}  실제 {r0*100:5.1f}% [{lo*100:5.1f}, {hi*100:5.1f}]")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 11~13. 무모델 대조군 (2026-09-22 추가).
+#   1~10 은 «말한 것 vs 일어난 것»만 본다. 그것만으로는 실력을 못 잰다 -- 보정이 맞아도
+#   변별이 0 일 수 있다. 저장소 교훈: 리프트를 주장하기 전에 공짜로 맞히는 축을 통제한다.
+#   Y_geo 에서 그 축은 **거리**다(가장 가까운 목표). Y_sym 에서는 **레짐 상수**다(항상 되돌림).
+# ══════════════════════════════════════════════════════════════════════════
+def _top(r):
+    return max(("A", "B", "C"), key=lambda x: r["prob"][x])
+
+
+def _near(r):
+    dd = r.get("dist_bp") or {}
+    c = [k for k in ("A", "B", "C") if dd.get(k) is not None]
+    return min(c, key=lambda k: abs(dd[k])) if c else None
+
+
+def _implied(r):
+    """1순위가 함의한 가격 방향 (situation.implied_dir 와 같은 규약)."""
+    d, t = r.get("dir", 0), _top(r)
+    if d == 0:
+        return {"B": "up", "C": "down"}.get(t)
+    return ("up" if d > 0 else "down") if t == "B" else ("down" if d > 0 else "up")
+
+
+def _show(lab, rows, stat, ref=None):
+    b, lo, hi = boot(rows, stat)
+    if b is None:
+        print(f"  {lab:32} 표본 없음"); return
+    mark = "  ← 기준 배제" if (ref is not None and not (lo <= ref <= hi)) else ""
+    print(f"  {lab:32} {b*100:5.1f}%  [{lo*100:5.1f}, {hi*100:5.1f}]  n={len(rows):4}/{len(blocks_of(rows))}블록{mark}")
+
+
+block("11. Y_sym (등거리 배리어) 방향 — 엔진 vs 레짐 상수. 동전 = 50%")
+sym = [r for r in p1 if r.get("outcome_sym") in ("up", "down")]
+_show("엔진 1순위가 함의한 방향", [r for r in sym if _implied(r)],
+      lambda rs: sum(1 for r in rs if _implied(r) == r["outcome_sym"]) / len(rs) if rs else None, 0.5)
+_show("무모델: 항상 이동 반대(되돌림)", [r for r in sym if r.get("dir")],
+      lambda rs: sum(1 for r in rs if r["outcome_sym"] == ("down" if r["dir"] > 0 else "up")) / len(rs) if rs else None, 0.5)
+_show("무모델: 항상 up", sym,
+      lambda rs: sum(1 for r in rs if r["outcome_sym"] == "up") / len(rs) if rs else None, 0.5)
+
+block("12. Y_geo 1순위 — 엔진 vs 무모델. 무작위 = 33.3%")
+_show("엔진 1순위", ok, lambda rs: sum(1 for r in rs if _top(r) == r["outcome"]) / len(rs) if rs else None, 1/3)
+_show("무모델: 가장 가까운 목표", [r for r in ok if _near(r)],
+      lambda rs: sum(1 for r in rs if _near(r) == r["outcome"]) / len(rs) if rs else None, 1/3)
+for _k in ("A", "B", "C"):
+    _show(f"무모델: 항상 {_k}", ok, rate(_k), 1/3)
+
+block("13. 거리를 통제하면 엔진이 남나 — 최근접과 **다르게** 찍은 줄만")
+_dis = [r for r in ok if _near(r) and _top(r) != _near(r)]
+print(f"  최근접과 일치 {len(ok)-len(_dis)}줄 · 불일치 {len(_dis)}줄 ({100*len(_dis)/max(1,len(ok)):.0f}%)")
+if _dis:
+    _show("불일치에서 엔진 1순위", _dis, lambda rs: sum(1 for r in rs if _top(r) == r["outcome"]) / len(rs) if rs else None)
+    _show("불일치에서 최근접", _dis, lambda rs: sum(1 for r in rs if _near(r) == r["outcome"]) / len(rs) if rs else None)
+print("\n  변별 없음의 지문: 엔진 1순위 분포가 레짐 안에서 거의 상수면 «보정만 맞고 변별은 0»이다.")
+for _lab, _sel in (("횡보 dir=0", lambda r: r["dir"] == 0), ("추세 dir≠0", lambda r: r["dir"] != 0)):
+    _sub = [r for r in ok if _sel(r)]
+    if not _sub:
+        continue
+    _c = collections.Counter(_top(r) for r in _sub)
+    _o = collections.Counter(r["outcome"] for r in _sub)
+    print(f"  {_lab} n={len(_sub):4}  엔진 1순위 {dict(_c)}   실제 {dict(_o)}")
