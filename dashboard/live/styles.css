@@ -2806,7 +2806,10 @@ svg {
    준다(순위 표시는 «색»이 아니라 굵기다 -- 색은 정체성에 묶고 순위엔 안 쓴다는 규약). */
 .sit-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .sit-col { border-top: 2px solid var(--soft-line); padding-top: 9px; min-width: 0; }
-.sit-col.top { border-top-color: var(--accent); }
+.sit-col.sit-top { border-top-color: var(--accent); }
+/* 🔴이름이 «top» 이면 안 된다 -- 327행의 전역 .top(페이지 헤더)이 display:flex 를 걸어
+   1순위 열만 가로로 눕는다(자식 넷이 한 줄이 되고 게이지는 폭 0). 시안 E 배포 때부터
+   깨져 있었고 게이지가 그걸 드러냈다. 2026-09-22 top -> sit-top. */
 .sit-col.dead { opacity: .5; }
 .sit-col .p { font: 800 26px/1 var(--font-mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 /* 2026-09-22 확률 게이지(시안 U2). 채움 세기는 **시나리오 키 고정** -- 순위로 칠하면
@@ -2839,7 +2842,7 @@ svg {
 .sit-sgs .h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
   font: 700 9.5px/1 var(--font-mono); letter-spacing: .12em; color: var(--muted); margin-bottom: 8px; }
 .sit-sgs .h span { letter-spacing: 0; font-weight: 500; }
-.sit-sg { display: grid; grid-template-columns: minmax(0, 88px) 1fr 34px; gap: 8px; align-items: center;
+.sit-sg { display: grid; grid-template-columns: minmax(0, 84px) minmax(40px, 1fr) 46px; gap: 8px; align-items: center;
   padding: 2.5px 0; font: 600 10.5px/1.2 var(--font-mono); }
 .sit-sg .n { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sit-sg .v { text-align: right; font-weight: 800; color: var(--ink);
@@ -2869,12 +2872,6 @@ svg {
 .sit-flip .to { color: var(--muted); font-size: 11px; }
 .sit-flip.on .to { color: var(--good); font-weight: 600; }
 
-/* LEDGER */
-.sit-led { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.sit-led th { text-align: right; font-weight: 500; color: var(--muted); padding: 2px 0; font-size: 11px; }
-.sit-led th:first-child, .sit-led td:first-child { text-align: left; }
-.sit-led td { text-align: right; padding: 2.5px 0; }
-.sit-led .gap { font-weight: 600; }
 /* 2026-09-22 «ETH 전용» 배지. 이 카드들의 서버 엔드포인트에는 asset 파라미터가 없어서
    코인을 바꿔도 ETH 값이 나온다 -- 표시가 없으면 고른 코인의 숫자로 오독한다.
    🔴경고색(--warn)이 아니라 --muted 다. 이건 «주의»가 아니라 «출처» 정보이고, 이 저장소에서
@@ -2886,16 +2883,13 @@ body.not-eth [data-eth-only]::after {
   border: 1px solid var(--soft-line); border-radius: 999px; padding: 5px 9px;
   background: var(--panel); pointer-events: none;
 }
-/* 레짐별 표가 둘 붙을 때만 사이를 띄운다(2026-09-22) */
-.sit-led + .sit-led { margin-top: 9px; }
-.sit-led th span { font-weight: 400; }
-.sit-led .gap.over { color: var(--bad); }     /* 말한 것보다 덜 일어났다 */
-.sit-led .gap.under { color: var(--good); }   /* 말한 것보다 더 일어났다 */
 
 .sit-foot { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 7px; font-size: 11px;
             color: var(--muted); font-variant-numeric: tabular-nums; }
-.sit-foot b { color: var(--ink, inherit); }
 .sit-ws { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+/* 각주 텍스트를 뺀 뒤(2026-09-22) margin-left:auto 가 «둘 다»에 걸려 WS 점 두 개가 양끝으로
+   벌어졌다. 미는 건 첫 번째 하나면 된다 -- 나머지는 gap 으로 붙는다. */
+.sit-ws + .sit-ws { margin-left: 0; }
 .sit-ws i { width: 6px; height: 6px; border-radius: 50%; background: var(--good); display: inline-block; }
 .sit-ws i.off { background: var(--bad); }
 .sit-cal { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
