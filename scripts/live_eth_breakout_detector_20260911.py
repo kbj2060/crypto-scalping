@@ -89,6 +89,14 @@ QWIN = 2016                  # 임계 분위를 재는 후행 창(인과)
 # 것이지 정보가 아니고, 넣으면 진행률이 6.08% → 11.51% 로 느려진다(12봉 롤링이라 구조적 지연).
 DETECT = [("거래대금", "qv", 288, 0.90), ("체결속도", "n", 288, 0.90)]
 HIST_BARS = 48               # 화면 띠 길이(4시간) — 다른 특화감지기와 같은 눈금
+# ── RVOL (2026-09-23, 사용자 「거래대금 대신 rvol 은 어때?」) ─────────────────────────
+# 여기서 계산하는 이유: RVOL 은 «같은 시각의 평소»가 필요해 최소 7일치 5분봉이 있어야 하는데,
+# 대시보드 evidence_signal_cache 는 1500봉(5.2일)뿐이다. 이 워커는 이미 FETCH_BARS 를 받는다.
+# 🔴기준선 길이가 변별력을 지배한다(ETH 5m 4.7년, 앞 30분 레인지 상위25% AUC):
+#   4일 .6678 · 5일 .6732 · 7일 .6807 · 14일 .7055 · 28일 .7251 (거래대금 z288 은 .6535)
+#   => 5.2일짜리 서버 캐시로는 현행 대비 이득이 거의 없다. 14일이 FETCH_BARS(4200=14.6일) 상한.
+RVOL_BASE_DAYS = 14
+RVOL_BARS = 150              # 차트 캔들 100 + 여유. 띠(HIST_BARS=48)와는 다른 용도라 따로 둔다.
 _CACHE: dict[str, Any] = {}
 
 
@@ -113,6 +121,27 @@ def _fetch(limit: int = FETCH_BARS) -> pd.DataFrame:
         d[cc] = d[cc].astype(float)
     d["n"] = d["n"].astype(int)
     return d.drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
+
+
+def _rvol(d: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """RVOL = 지금 거래대금 / «같은 5분 슬롯의 후행 RVOL_BASE_DAYS 일 중앙값».
+
+    ⚠️`.shift()` 는 슬롯 그룹 **안에서** 미는 것이라 하루 전으로 민다 — 기준선이 자기 자신을
+      포함하지 않는다(미래참조 방지). 중앙값을 쓰는 이유는 한 번의 스파이크가 «평소»를
+      들어올리지 않게 하기 위해서다.
+    둘째 값은 **세션 누적** RVOL(오늘 UTC 00:00 부터 지금까지 누적 / 평소 같은 시점 누적).
+      봉 RVOL 과 달리 «현재 봉 폭»을 통제해도 변별력이 남는 유일한 거래량 지표다
+      (봉폭 십분위 안 AUC .5815 vs 봉 RVOL .4935 — 누적이라 현재 봉과 구조적으로 독립).
+    """
+    ts = pd.to_datetime(d["timestamp"])
+    slot = (ts.dt.hour * 12 + ts.dt.minute // 5).to_numpy()
+    qv = pd.to_numeric(d["qv"], errors="coerce")
+    med = lambda x: x.groupby(slot).transform(
+        lambda z: z.rolling(RVOL_BASE_DAYS, min_periods=5).median().shift())
+    bar = qv / med(qv).replace(0, np.nan)
+    cum = qv.groupby(ts.dt.floor("D").to_numpy()).cumsum()
+    sess = cum / med(cum).replace(0, np.nan)
+    return bar.to_numpy(float), sess.to_numpy(float)
 
 
 def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
@@ -228,6 +257,21 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
         prewarn["probas"] = [None] * (i + 1 - lo_)
         prewarn["thresholds"] = [None] * (i + 1 - lo_)
     out["history"], out["times"] = hist, times
+    # ── RVOL — 사분면 행의 «거래대금» 선을 대체할 값 (2026-09-23) ──────────────────
+    # 🔴탐지기 **게이트는 건드리지 않는다**. 시간대 정규화 게이트를 같은 날 재서 철회했다:
+    #   전역 q90 기준으로는 적중 .547->.577 였지만 이 모듈의 실제 규약(후행 QWIN 분위)에서는
+    #   14일 −0.0059 [−0.0219,+0.0089] · 28일 +0.0039 [−0.0111,+0.0191] 로 CI 가 0 을 포함한다.
+    #   후행 분위 임계가 이미 시간대 드리프트를 흡수하고 있었다. RVOL 은 **표시값**으로만 쓴다.
+    rb, rs = _rvol(d)
+    lo_r = max(i - RVOL_BARS + 1, 0)
+    r3 = lambda v: None if not np.isfinite(v) else round(float(v), 3)
+    out["rvol"] = {
+        "base_days": RVOL_BASE_DAYS,
+        "bar": [r3(rb[j]) for j in range(lo_r, i + 1)],
+        "times": [str(pd.Timestamp(d["timestamp"].iloc[j]).tz_localize("UTC").isoformat())
+                  for j in range(lo_r, i + 1)],
+        "session": r3(rs[i]),
+    }
     return out
 
 
