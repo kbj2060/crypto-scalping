@@ -6716,17 +6716,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     if (have.length) {
       const dMax = Math.max(...have.map((r) => Math.abs(r.delta)), 1e-9);
       const oMax = Math.max(...have.map((r) => Math.abs(r.oi)), 1e-9);
-      // 워커가 죽었거나 웜업이거나 ETH 가 아니면 **조용히 거래대금으로 돌아간다** --
-      // 빈 선을 그리면 「거래가 없다」로 읽힌다.
-      const useRvol = have.some((r) => Number.isFinite(r.rvol));
-      const lineOf = (r) => (useRvol ? r.rvol : r.turn);
-      const rawMax = Math.max(...have.map((r) => lineOf(r)).filter(Number.isFinite), 1);
-      // 🔴RVOL 축은 **자른다**. 실측 150봉에서 중앙 1.27 인데 최대가 9.79 까지 튄다 --
-      //   최대로 스케일하면 «평소»(1.0) 선이 바닥에 깔려서 RVOL 을 쓴 이유가 사라진다.
-      //   쓸모 있는 범위는 0~4배 근처이고 그 위는 «엄청 많다» 하나로 충분하다.
-      //   잘린 봉도 점은 천장에 찍고, 정확한 값은 봉 툴팁에 그대로 있다.
-      const tMax = useRvol ? Math.min(Math.max(rawMax, 2.5), 5) : rawMax;
-      const clipped = useRvol && rawMax > tMax;
+      // 2026-09-23 사용자 지시로 이 행의 **선을 뺐다**. RVOL 은 누적 CVD 아래 제 레인으로
+      // 갔고(rvolLane), 여기 남기면 1시간 RVOL 이 한 카드에 두 번 그려진다.
+      // 이 행의 주인공은 막대(델타 x OI)다. 봉별 «평소 대비»는 막대 툴팁이 그대로 답한다.
       const TXT = mobileChart ? 10 : 12;
       const QNAME = (d, o) => (d >= 0 ? (o >= 0 ? "신규 롱" : "숏 정리")
                                       : (o >= 0 ? "신규 숏" : "롱 정리"));
@@ -6765,8 +6757,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           + " · 리테일 " + (r.retail >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.retail)) + ")"
           + " · 신규계약 " + (r.oi >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.oi)) + " ETH"
           + " · 거래대금 " + fmtUsdCompact(r.turn)
-          + (Number.isFinite(r.rvol5) ? " (이 봉은 평소의 " + r.rvol5.toFixed(2) + "배)" : "")
-          + (Number.isFinite(r.rvol) ? " · 선(최근 " + rvolMinutes + "분) " + r.rvol.toFixed(2) + "배" : "");
+          + (Number.isFinite(r.rvol5) ? " (이 봉은 평소의 " + r.rvol5.toFixed(2) + "배)" : "");
         rect.appendChild(tip);
         put(rect);
         if (r.oi >= 0) {                              // OI 증가 = 신규 진입
@@ -6776,47 +6767,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           cap.setAttribute("fill", "var(--warn)"); cap.setAttribute("fill-opacity", "0.95");
           put(cap);
         }
-        r.hgt = hgt;              // 글자는 거래대금 선을 그린 뒤에 얹는다(아래)
+        r.hgt = hgt;              // 글자 y 는 막대 높이에서 나온다(아래)
       });
-      // 활동량 선 -- 자기 축(0~최대). 막대와 어긋나는 봉이 «흡수»다(r=+0.884 라 보통 붙는다).
-      const ty = (v) => QB - 6 - (Math.min(v, tMax) / tMax) * (QUAD_H - 12);
-      if (useRvol) {
-        // «평소»(=1.0) 기준선. RVOL 의 값은 이 선 위냐 아래냐에 있다 -- 없으면 원시 USD 와
-        // 똑같이 「이게 많은 건가」를 눈이 다시 판단해야 한다.
-        const one = document.createElementNS(NS, "line");
-        one.setAttribute("x1", ml); one.setAttribute("x2", ml + cw);
-        one.setAttribute("y1", ty(1)); one.setAttribute("y2", ty(1));
-        one.setAttribute("stroke", "var(--turnover)"); one.setAttribute("stroke-opacity", "0.35");
-        one.setAttribute("stroke-dasharray", "3 4");
-        const oneTip = document.createElementNS(NS, "title");
-        oneTip.textContent = "평소(1.0배) — 같은 시각의 최근 "
-          + (rvolBaseDays || 14) + "일 중앙값";
-        one.appendChild(oneTip);
-        put(one);
-      }
-      let d = "", prev = null;
-      rows.forEach((r, i) => {
-        if (!r || !Number.isFinite(lineOf(r))) { prev = null; return; }
-        d += (prev === null ? "M" : " L") + (xAt(i) + bw / 2).toFixed(1) + " " + ty(lineOf(r)).toFixed(1);
-        prev = i;
-      });
-      if (d) {
-        const path = document.createElementNS(NS, "path");
-        path.setAttribute("d", d); path.setAttribute("fill", "none");
-        path.setAttribute("stroke", "var(--turnover)"); path.setAttribute("stroke-width", "2.2");
-        path.setAttribute("stroke-linejoin", "round");
-        put(path);
-        rows.forEach((r, i) => {
-          if (!r || !Number.isFinite(lineOf(r))) return;
-          const dot = document.createElementNS(NS, "circle");
-          dot.setAttribute("cx", (xAt(i) + bw / 2).toFixed(1));
-          dot.setAttribute("cy", ty(lineOf(r)).toFixed(1));
-          dot.setAttribute("r", "3"); dot.setAttribute("fill", "var(--turnover)");
-          put(dot);
-        });
-      }
-      // 🔴글자는 **거래대금 선보다 나중에** 그린다. 반대로 하면 파란 선이 막대 안 해석
-      //   글자를 가로질러 읽히지 않는다(실렌더에서 12봉 중 2봉에서 실제로 겹쳤다).
       if (QUAD_TEXT_OK) {
         const sgnCol = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
         rows.forEach((r, i) => {
@@ -6847,38 +6799,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const lblTip = document.createElementNS(NS, "title");
       lblTip.textContent = "봉마다 델타(매수-매도)의 부호와 미결제약정(OI) 증분의 부호를 "
         + "짝지은 것입니다. 막대 높이는 |델타|, 농도는 |OI| 크기, 색은 델타 부호이고, "
-        + "막대 위 주황 캡은 OI 가 늘었다(신규 진입)는 뜻입니다. 밝은 선은 "
-        + (useRvol
-            ? "RVOL(최근 " + rvolMinutes + "분 누적 거래대금 ÷ 같은 시각의 최근 "
-              + (rvolBaseDays || 14) + "일 중앙값)이며 점선이 «평소»(1.0배)입니다. "
-              + "축은 최대 5배에서 자릅니다 -- 한 번의 "
-              + "10배 스파이크가 축을 먹으면 «평소» 선이 바닥에 깔려 읽을 수 없게 됩니다. "
-              + "잘린 봉의 정확한 값은 그 봉 툴팁에 있습니다. "
-            : "거래대금이며 ")
-        + "자기 축을 씁니다 -- 막대와 어긋나는 봉이 «거래는 많은데 순델타는 작았다» = 흡수입니다."
-        + (useRvol
-            ? "\n\nRVOL 을 쓰는 이유: 원시 USD 는 «이게 많은 건가»를 눈이 스스로 판단해야 "
-              + "합니다. 실측(ETH 5m 4.7년, 앞 30분 레인지 상위25% 맞히기)으로도 "
-              + "거래대금 z288 .6535 < RVOL .7053 입니다 -- 거래량은 시간대의 "
-              + "함수라 z 점수의 상당 부분이 «지금 미국장인가»를 맞히고 있었습니다.\n"
-              + "창이 5분이 아니라 " + rvolMinutes + "분인 이유: 5분은 41.9%의 봉에서 0.5배 이상 "
-              + "점프하는데 변별력도 최하위였습니다(AUC .6985 · 봉 폭 통제 후 .4767 = 동전 이하). "
-              + "1시간은 점프 3.2% · 통제 후 .5598 입니다.\n"
-              + "🔴대신 선에서는 «막대와 어긋나는 봉 = 흡수»를 못 읽습니다(선이 1시간이라). "
-              + "그 판독은 봉 툴팁의 «이 봉은 평소의 n 배»가 이어받습니다.\n"
-              + "🔴다만 앞 30분 변동성 자체는 «현재 봉 폭 + ATR + HAR-RV»가 거의 다 설명합니다"
-              + "(그 통제군에 RVOL 을 더한 증분 +0.0002). RVOL 은 «거래대금보다 나은 표시값»이지 "
-              + "새 정보가 아닙니다.\n🔴ETH 전용입니다 -- 다른 코인에서는 원시 거래대금으로 돌아갑니다."
-            : "");
+        + "막대 위 주황 캡은 OI 가 늘었다(신규 진입)는 뜻입니다.\n\n"
+        + "거래대금(RVOL) 선은 2026-09-23 아래 제 레인으로 옮겼습니다 -- 한 카드에 두 번 "
+        + "그리지 않기 위해서입니다. 봉별 «평소 대비 몇 배»는 각 막대 툴팁에 그대로 있고, "
+        + "거래대금이 평소보다 한참 큰데 이 막대(순델타)가 낮으면 «흡수»입니다.";
       lbl.appendChild(lblTip);
       if (!mobileChart) {
         side(quadY + 30, "높이 |Δ|", "end"); side(quadY + 45, "농도 |OI|", "end");
-        side(quadY + 14, useRvol ? "─ RVOL " + rvolMinutes + "분" : "─ 거래대금", null, "var(--turnover)");
-        side(quadY + 30, useRvol ? "축 " + tMax.toFixed(1) + "배" + (clipped ? "+" : "")
-                                 : "최대 " + fmtUsdCompact(tMax), null);
-        side(quadY + 50, "주황 캡", null, "var(--warn)");
-        side(quadY + 65, "= OI 증가", null);
-        // 세션 누적 RVOL 은 2026-09-23 **카드 상단 배지**로 옮겼다(rvolSessionBadge).
+        side(quadY + 14, "주황 캡", null, "var(--warn)");
+        side(quadY + 30, "= OI 증가", null);
+        // RVOL 선은 2026-09-23 **아래 제 레인**으로, 세션 누적은 **카드 상단 배지**로 옮겼다.
       } else {
         // 2026-09-22 사용자 지시: 네 줄을 막대 **아래 한 줄**로. 오른쪽에 세워 두면 그 폭만큼
         //   막대가 짧아지고, 막대 위에 얹으면 채움 위 글자라 대비가 무너진다.
@@ -6893,9 +6823,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           try { adv = t.getComputedTextLength(); } catch (_) { adv = txt.length * 6.2; }
           return x + (adv > 0 ? adv : txt.length * 6.2) + 8;
         };
-        let sx = seg(3, useRvol ? "─ RVOL " + rvolMinutes + "분 축 " + tMax.toFixed(1) + "배" + (clipped ? "+" : "")
-                                : "─ 거래대금 최대 " + fmtUsdCompact(tMax), "var(--turnover)");
-        seg(sx, "▬ 주황 캡 = OI 증가", "var(--warn)");
+        seg(3, "▬ 주황 캡 = OI 증가", "var(--warn)");
       }
     }
   }

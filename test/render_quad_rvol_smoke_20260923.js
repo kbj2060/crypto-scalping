@@ -71,38 +71,38 @@ function run({ asset = "eth", worker = true, spike = false, session = 1.02, labe
 const texts = (els) => els.filter((e) => e._kind === "text").map((e) => String(e.textContent));
 const pathD = (els) => (els.find((e) => e._kind === "path") || { _a: {} })._a.d || "";
 
-// ② 워커 정상(ETH) -> RVOL 범례 · 평소 점선 · 선이 그려진다
+// ② 사분면 행에는 **선이 없다**(2026-09-23 사용자 지시로 아래 제 레인으로 옮겼다)
 {
   const els = run();
-  ck(texts(els).some((t) => t.includes("─ RVOL 60분")), "ETH·워커정상 -> 범례 «─ RVOL 60분»");
-  const dash = els.filter((e) => e._kind === "line" && e._a["stroke-dasharray"] === "3 4");
-  ck(dash.length === 1, `«평소»(1.0) 점선 1줄 (실제 ${dash.length})`);
-  ck(pathD(els).split("L").length >= 10, "선이 전 봉에 그려짐");
-  ck(!texts(els).some((t) => t.includes("오늘")), "세션은 범례에 **없다**(상단 배지로 옮김)");
+  ck(pathD(els) === "", "사분면 행에 선 없음");
+  ck(!els.some((e) => e._kind === "circle"), "선 위의 점도 없음");
+  ck(!els.some((e) => e._kind === "line" && e._a["stroke-dasharray"] === "3 4"),
+     "«평소» 점선도 이 행엔 없음");
+  ck(!texts(els).some((t) => t.includes("RVOL") || t.includes("거래대금")),
+     `범례에 선 항목 없음 (실제 ${texts(els).filter((t) => t.startsWith("─") || t.startsWith("축"))})`);
+  ck(texts(els).some((t) => t.includes("주황 캡")), "막대 범례는 남아 있다");
   ck(els.badge.hidden === false && els.badge.textContent === "오늘 거래량 보통 1.02배",
      `상단 배지 (실제 hidden=${els.badge.hidden} "${els.badge.textContent}")`);
   ck(/q25 \/ q75|분위/.test(els.badge.title), "배지 툴팁이 경계를 분위로 밝힌다");
 }
-// ③ 워커 부재 -> 조용히 거래대금 폴백. **빈 선이 되면 안 된다**
-{
-  const els = run({ worker: false });
-  ck(texts(els).some((t) => t.includes("─ 거래대금")), "워커 부재 -> 거래대금 폴백");
-  ck(pathD(els).split("L").length >= 10, "폴백에서도 선이 비지 않음");
-  ck(els.badge.hidden === true, "워커 부재 -> 상단 배지 숨김");
-}
-// ④ 다른 코인 -> 워커가 살아 있어도 ETH 값을 쓰지 않는다
-{
-  const els = run({ asset: "btc" });
-  ck(texts(els).some((t) => t.includes("─ 거래대금")), "BTC -> ETH RVOL 을 쓰지 않음");
-  ck(els.badge.hidden === true, "BTC -> 상단 배지 숨김(ETH 전용 워커)");
-}
-// ⑤ 축 잘림 -- 9.8배 스파이크가 있어도 축은 5배에서 멈추고 «+» 를 붙인다
+// ③ 봉 툴팁은 «이 봉은 평소의 n 배»를 계속 답한다 -- 흡수 판독이 여기로 남는다
 {
   const els = run({ spike: true });
-  ck(texts(els).some((t) => /축 5\.0배\+/.test(t)), `축 잘림 표기 (실제 ${texts(els).filter((t) => t.includes("축"))})`);
-  const dash = els.find((e) => e._kind === "line" && e._a["stroke-dasharray"] === "3 4");
-  const ys = pathD(els).match(/-?\d+\.\d+(?=\s*$|\s+L)/g) || [];
-  ck(Number(dash._a.y1) > 100, `«평소» 선이 바닥에 깔리지 않음 (y=${dash._a.y1})`);
+  const tips = els.filter((e) => e._kind === "title").map((e) => String(e.textContent));
+  ck(tips.some((t) => t.includes("이 봉은 평소의 9.80배") && t.includes("델타")),
+     "막대 툴팁에 «이 봉» 값 + 델타");
+  ck(!tips.some((t) => t.includes("선(최근")), "툴팁에서 «선» 언급 제거(이 행엔 선이 없다)");
+}
+// ④ 워커 부재 / 타코인 -> 배지만 숨고 막대는 그대로
+{
+  const els = run({ worker: false });
+  ck(els.badge.hidden === true, "워커 부재 -> 상단 배지 숨김");
+  ck(els.filter((e) => e._kind === "rect").length > 0, "워커 부재에도 막대는 그린다");
+}
+{
+  const els = run({ asset: "btc" });
+  ck(els.badge.hidden === true, "BTC -> 상단 배지 숨김(ETH 전용 워커)");
+  ck(els.filter((e) => e._kind === "rect").length > 0, "BTC 에서도 막대는 그린다");
 }
 // ⑥ 세 라벨이 그대로 나온다 — 라벨은 워커가 붙이고 화면은 나르기만 한다
 for (const [sv, lab] of [[0.55, "적음"], [1.02, "보통"], [2.10, "많음"]]) {
@@ -111,17 +111,11 @@ for (const [sv, lab] of [[0.55, "적음"], [1.02, "보통"], [2.10, "많음"]]) 
      `배지 «${lab}» (실제 "${els.badge.textContent}")`);
   ck(els.badge.hidden === false, `«${lab}» 상태에서 배지가 보인다`);
 }
-// ⑦ 봉 툴팁이 «이 봉» 값을 따로 말한다 (선이 1시간이라 흡수 판독을 툴팁이 이어받는다)
-{
-  const els = run({ spike: true });
-  const tips = els.filter((e) => e._kind === "title").map((e) => String(e.textContent));
-  ck(tips.some((t) => t.includes("이 봉은 평소의 9.80배") && t.includes("선(최근 60분)")),
-     "봉 툴팁에 «이 봉» 값과 «선» 값이 둘 다");
-}
 // ⑧ 모바일 한 줄 범례
 {
   const els = run({ mobile: true });
-  ck(texts(els).some((t) => t.includes("─ RVOL 60분 축")), "모바일 한 줄 범례에 RVOL");
+  ck(texts(els).some((t) => t.includes("주황 캡")), "모바일 한 줄 범례(막대만)");
+  ck(!texts(els).some((t) => t.includes("RVOL")), "모바일 범례에도 선 항목 없음");
   ck(els.badge.hidden === false, "모바일에서도 상단 배지");
 }
 // ══ RVOL 선 레인 (2026-09-23, 누적 CVD 아래) ═══════════════════════════════════
