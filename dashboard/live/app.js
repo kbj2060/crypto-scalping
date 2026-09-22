@@ -1443,33 +1443,23 @@ function renderSnapshotAccount() {
         + `${cp && cp.binding ? ` (${BIND[cp.binding] || cp.binding})` : ""}`
         + ` → <b class="${marginBinds ? "warn" : ""}">실제 상한 ${fmtUsd(realCap)}</b>`
         + `${marginBinds ? " — 이 배수에서는 <b>증거금이 먼저 막습니다</b>" : ""}</p>`;
-      // ① 게이지: 포지션이 없으므로 «넣었다면» 의 진입가·청산가다. 실선이 아니라 점선 테두리
-      //    (.acct-pos-proj)로 «아직 아님»을 표시한다.
-      const entryPx = Number(pl.price) || 0;
+      // ① 게이지 (2026-09-22 2차 지시: «게이지 안에 데이터를 넣지 말고 그려주기만 해»).
+      //   🔴첫 판은 plan.price 를 «평단(예정)»으로 적었는데, 그건 peg 호가라 현재가와
+      //     사실상 같은 수다(실측 평단 $2,736.94 vs 현재 $2,737.36). 같은 숫자를 두 번
+      //     적고 있었던 셈이라 값을 뺀다. 자리는 남긴다 -- 포지션이 열릴 때 카드가 튀지 않고,
+      //     여기가 «그 게이지의 자리»라는 것만 보이면 된다.
       const isLong = String(pl.positionSide || "LONG") === "LONG";
-      const liqPx = entryPx > 0 ? entryPx * (isLong ? 1 - liqPct / 100 : 1 + liqPct / 100) : 0;
-      const mark = Number(latestLivePriceByAsset[activeSnapshotAsset]) || entryPx;
-      const span = Math.abs(entryPx - liqPx) * 2;
-      const safe = span > 0 ? clamp01(Math.abs(mark - liqPx) / span) : 0;
-      const gauge = entryPx > 0 && liqPx > 0
-        ? `<div class="acct-pos acct-pos-proj" data-side="${isLong ? "long" : "short"}">
+      const gauge = `<div class="acct-pos acct-pos-proj" data-side="${isLong ? "long" : "short"}">
              <div class="acct-pos-head">
                <b>${escapeHtml(pl.symbol || "")}</b>
                <span class="acct-tag ${isLong ? "good" : "bad"}">${isLong ? "롱" : "숏"} ×${tgtLev}</span>
                <span class="acct-pos-qty">${escapeHtml(pl.quantity ?? "")} ETH (예정)</span>
              </div>
-             <div class="acct-gauge" title="포지션이 없으므로 «지금 넣었다면» 의 자리입니다. 왼쪽 끝이 청산가, 가운데 눈금이 진입가입니다.">
+             <div class="acct-gauge" title="포지션이 열리면 여기에 청산·평단·현재가가 들어갑니다. 지금은 열린 게 없어 눈금만 그립니다.">
                <span class="acct-gauge-track"></span>
                <span class="acct-gauge-entry"></span>
-               <span class="acct-gauge-knob" style="left:${(safe * 100).toFixed(1)}%"></span>
              </div>
-             <div class="acct-gauge-legend">
-               <span class="bad">청산 ${fmtUsd(liqPx)}</span>
-               <span>평단 ${fmtUsd(entryPx)} (예정)</span>
-               <span class="acct-gauge-now">현재 ${fmtUsd(mark)}</span>
-             </div>
-           </div>`
-        : "";
+           </div>`;
       body = `<div class="acct-pv-cap entry-cap">지금 설정으로 넣으면 — 레버 ${tgtLev}배 · 비율 ${fracPct}% (포지션 아님)</div>
         <div class="acct-tiles">
           ${tile("liq", "청산까지", `${liqPct.toFixed(1)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
