@@ -1917,6 +1917,10 @@ svg {
 /* 포지션 블록 -- 왼쪽 레일 색이 측면을 말한다(글씨를 안 읽어도 보인다) */
 .acct-pos { position: relative; padding: 12px 14px 13px 16px; border-radius: var(--radius-sm);
   background: var(--glass); border: 1px solid var(--soft-line); overflow: hidden; }
+/* 2026-09-22 포지션이 없을 때의 «넣었다면» 게이지. 점선 = 아직 실제가 아니다
+   -- 실선과 같은 모양이면 사용자가 열려 있다고 읽는다. */
+.acct-pos-proj { border-style: dashed; opacity: 0.92; }
+
 .acct-pos::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
 .acct-pos[data-side="long"]::before { background: var(--good); }
 .acct-pos[data-side="short"]::before { background: var(--bad); }
