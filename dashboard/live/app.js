@@ -208,6 +208,24 @@ let oi1sSince = 0;
 // 이벤트가 없는 초가 많아 체결 초 커서를 공유하면 건너뛰어진다).
 let liq1s = new Map();
 let liq1sSince = 0;
+// ── OKX 레인 (2026-09-23) ─────────────────────────────────────────────────
+// 🔴**합치지 않는다.** 바이낸스 레인 **바로 아래**에 같은 그림을 따로 그려 눈으로 대조한다.
+//   합산 크기는 MM 헤지 이중계상으로 |합산|/|바이낸스| 중앙 **2.1배**로 부푼다(3일 백필 실측)
+//   -- 부호는 합쳐도 되지만 크기는 못 합친다. 나란히 두면 ctVal 같은 체계적 버그가
+//   «한 레인만 10배»로 즉시 보인다는 게 이 배치의 값이다.
+// ⭐칸 구조가 바이낸스와 **정확히 같다**(서버가 같은 모양으로 채운다) -- 같은 렌더러에
+//   출처만 갈아끼운다. 사본을 만들면 언젠가 한쪽만 고쳐진다.
+let okxSupply1s = new Map();
+let okxOi1s = new Map();
+let okxLiq1s = new Map();
+let okxSupply1sSince = 0, okxOi1sSince = 0, okxLiq1sSince = 0;
+let okxMeta = { now: 0, connected: false, tradeAge: null, oiAge: null, inst: "", errors: 0 };
+let okxSupply1sSubBox = null;
+// 🔴두 패널이 **같은 눈금**을 써야 높이 비교가 된다. 각자 제 창 최대에 맞추면 조용한 OKX 와
+//   터진 바이낸스가 화면상 같은 크기가 된다(2026-09-20 자동정규화로 이미 당한 함정).
+//   각 패널이 제 peak 를 여기 남기고 **둘 중 큰 쪽**으로 계단을 고른다. 첫 렌더 한 번은
+//   제 값으로 시작하고 다음 틱(1초)에 맞춰진다 -- 둘이 같은 주기로 다시 그려지기 때문이다.
+const supply1sPeaks = { bn: 0, okx: 0 };
 // 5분 누적 패널(청산맵 아래). 같은 1초 스냅샷을 duckdb 로 남긴 것을 서버가 5분으로 접어 준다 --
 // 링은 6분뿐이라 몇 시간을 보려면 저장을 거쳐야 한다. 5분 봉이라 15초 폴링으로 충분하다.
 // 캔들 SVG 안의 두 하위 패널(중첩 svg)과 그 상자. 각 fetch 가 **그 패널만** 다시 그릴 수
@@ -228,15 +246,34 @@ let supplyProfileSubBox = null;
 //   따로 옮긴다(원래 설계). 넣으면 틱마다 캐시가 깨져 이 최적화가 통째로 무효가 된다.
 let supplyProfileVer = 0, supply1sVer = 0, flowHeatmapVer = 0;
 const subPanelCache = { prof: { node: null, key: "" }, s1: { node: null, key: "" },
-                        dens: { node: null, key: "" } };
+                        okx: { node: null, key: "" }, dens: { node: null, key: "" } };
 const subProfileKey = (entry, w, h) => `${supplyProfileVer}|${flowHeatmapVer}|${entry}|${w}|${h}`;
 const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}`;
+const subOkxKey = (w, h) => `okx|${supply1sVer}|${w}|${h}`;
+
+// 바이낸스 레인과 **같은 렌더러**에 출처만 갈아끼운다. 나이가 오래되면 라벨이 빨개진다.
+function okxSupplySrc() {
+  const age = okxMeta.tradeAge;
+  const stale = !okxMeta.connected || (age != null && age > 10);
+  return { key: "okx", supply: okxSupply1s, liq: okxLiq1s, oi: okxOi1s,
+           now: okxMeta.now || 0,
+           label: "OKX " + (okxMeta.inst || "ETH-USDT-SWAP"),
+           age: age == null ? "체결 대기" : `체결 ${age}s 전`
+                + (okxMeta.oiAge == null ? "" : ` · OI ${okxMeta.oiAge}s 전`),
+           stale };
+}
 
 function repaintSupply1sPanel() {
   const b = supply1sSubBox;
   if (!b || !b.svg.isConnected) return;
   renderSupply1s(b);
   subPanelCache.s1.key = sub1sKey(b.w, b.h);
+}
+function repaintOkxSupplyPanel() {
+  const b = okxSupply1sSubBox;
+  if (!b || !b.svg.isConnected) return;
+  renderSupply1s(b, okxSupplySrc());
+  subPanelCache.okx.key = subOkxKey(b.w, b.h);
 }
 function repaintSupplyProfilePanel() {
   const b = supplyProfileSubBox;
@@ -3362,7 +3399,8 @@ async function refreshSupply1s() {
   supply1sLastFetchAt = now;
   try {
     const res = await fetch(`${API_SUPPLY_1S_URL}?since=${supply1sSince}&sinceOi=${oi1sSince}`
-                            + `&sinceLiq=${liq1sSince}`,
+                            + `&sinceLiq=${liq1sSince}&sinceOkx=${okxSupply1sSince}`
+                            + `&sinceOkxOi=${okxOi1sSince}&sinceOkxLiq=${okxLiq1sSince}`,
                             { cache: "no-cache" });
     if (!res.ok) throw new Error(`supply-1s ${res.status}`);
     const payload = await res.json();
@@ -3378,6 +3416,22 @@ async function refreshSupply1s() {
       oi1s.set(r[0], r[1]);
       if (r[0] > oi1sSince) oi1sSince = r[0];
     });
+    // OKX 레인. 커서가 각자인 이유는 바이낸스 OI/청산이 각자인 것과 같다 -- 거래소마다
+    // 체결 초가 앞서가므로 하나를 공유하면 뒤처진 쪽이 통째로 건너뛰어진다.
+    (payload.okx || []).forEach((r) => {
+      okxSupply1s.set(r[0], r.slice(1));
+      if (r[0] > okxSupply1sSince) okxSupply1sSince = r[0];
+    });
+    (payload.okxLiq || []).forEach((r) => {
+      okxLiq1s.set(r[0], [r[1], r[2], r[3], r[4]]);
+      if (r[0] > okxLiq1sSince) okxLiq1sSince = r[0];
+    });
+    (payload.okxOi || []).forEach((r) => {
+      okxOi1s.set(r[0], r[1]);
+      if (r[0] > okxOi1sSince) okxOi1sSince = r[0];
+    });
+    okxMeta = Object.assign({}, payload.okxMeta || {},
+                            { now: Number(payload.okxNow) || okxMeta.now });
     supply1sMeta = {
       retailMaxUsd: Number(payload.retailMaxUsd) || 0,
       whaleMinUsd: Number(payload.whaleMinUsd) || 0,
@@ -3389,6 +3443,10 @@ async function refreshSupply1s() {
     // 새 봉의 앞부분이 비지 않게 한다.
     const floor = supply1sMeta.now - 2 * SUPPLY_1S_SEGMENT - 20;
     supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
+    const okxFloor = (okxMeta.now || 0) - 2 * SUPPLY_1S_SEGMENT - 20;
+    okxSupply1s.forEach((_v, k) => { if (k < okxFloor) okxSupply1s.delete(k); });
+    okxOi1s.forEach((_v, k) => { if (k < okxFloor) okxOi1s.delete(k); });
+    okxLiq1s.forEach((_v, k) => { if (k < okxFloor) okxLiq1s.delete(k); });
     oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
     liq1s.forEach((_v, k) => { if (k < floor) liq1s.delete(k); });
     supply1sVer += 1;
@@ -3398,6 +3456,7 @@ async function refreshSupply1s() {
   // 받은 즉시 **이 패널만** 다시 그린다. 캔들 SVG 전체를 다시 그리지 않으므로 비싼 패스
   // (캔들·청산밀도·프로파일)는 안 탄다 -- 호버/스크롤 게이트에도 안 걸린다.
   repaintSupply1sPanel();
+  repaintOkxSupplyPanel();   // 같은 응답으로 온 OKX 레인
 }
 
 function gexIndicatorItem() {
@@ -3983,7 +4042,11 @@ function supplyFlowOfBar(levels) {
 // 세 선(고래·리테일·신규계약)은 같은 자로 그린다. 단위가 같은 ETH 라서, 들어온 순수급 중
 // 얼마가 새 포지션이고 얼마가 손바뀜인지가 세 선의 간격으로 바로 읽힌다.
 // 창 누적(옛 화면이 그리던 값)은 선을 지우고 머리글 숫자로만 남겼다.
-function renderSupply1s(box = null) {
+function renderSupply1s(box = null, src = null) {
+  // src 가 오면 그 출처로 그린다(OKX 레인). 없으면 바이낸스 전역이다. 칸 구조가 같으므로
+  // **수식은 한 줄도 안 바뀐다** -- 바뀌는 건 어느 Map 을 읽느냐뿐이다.
+  const S = src || { key: "bn", supply: supply1s, liq: liq1s, oi: oi1s,
+                     now: supply1sMeta.now || 0, label: "바이낸스 선물" };
   // box 가 오면 그 중첩 <svg> 에 그린다(캔들 SVG 안). 없으면 옛 독립 컨테이너를 찾는다.
   const svg = box ? box.svg : el("supply1sSvg");
   if (!svg) return;
@@ -4022,7 +4085,7 @@ function renderSupply1s(box = null) {
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   svg.innerHTML = "";
 
-  const now = supply1sMeta.now || 0;
+  const now = S.now || 0;
   // 🔴창이 «최근 5분»(미끄러짐)이 아니라 **지금 만들어지고 있는 5분봉 그 자체**다
   //   (2026-09-20 사용자 선택: 시안 H). x축 왼쪽 끝 = 봉이 열린 시각, 오른쪽 끝 = 봉이
   //   닫힐 시각. 선은 봉이 진행되는 만큼 왼쪽에서 오른쪽으로 자라고, 다음 봉에서 리셋된다.
@@ -4032,7 +4095,7 @@ function renderSupply1s(box = null) {
   //     겹치는 것은 **데이터 구간**이지 가로 좌표가 아니다.
   const first = Math.floor(now / SUPPLY_1S_SEGMENT) * SUPPLY_1S_SEGMENT;
   // 이제 한 구간만 그리므로 이전 구간을 읽을 이유가 없다(누산기가 이 봉의 경계에서 시작한다).
-  const allSecs = [...supply1s.keys()].filter((s) => s >= first && s <= now)
+  const allSecs = [...S.supply.keys()].filter((s) => s >= first && s <= now)
                                       .sort((a, b) => a - b);
   const secs = allSecs;
   if (secs.length < 2) {
@@ -4099,14 +4162,14 @@ function renderSupply1s(box = null) {
     });
     return rows;
   };
-  const whale = cumOf((s) => { const c = supply1s.get(s); return c[2] - c[3]; });
-  const retail = cumOf((s) => { const c = supply1s.get(s); return c[0] - c[1]; });
+  const whale = cumOf((s) => { const c = S.supply.get(s); return c[2] - c[3]; });
+  const retail = cumOf((s) => { const c = S.supply.get(s); return c[0] - c[1]; });
   // 2026-09-22 **CVD = 고래 + 중형 + 리테일 은 항등식이다**(실측 확인: -2,688 + -3,834 +
   //   -559 = -7,081). 그래서 수급은 CVD 와 별개 계열이 아니라 그 **분해**다. 셋을 따로
   //   그리는 대신 0선에서 쌓고, 맨 위 윤곽을 CVD 로 둔다 -- 그림이 항등식을 말한다.
   // ⭐이 배치가 리테일 문제를 푼다: 리테일 진폭(559)이 CVD(7,548)와 **경쟁하지 않고**
   //   스택의 얇은 맨 윗층이 된다. 예전엔 같은 축에서 12배 눌려 납작했다.
-  const cvd = cumOf((s) => { const c = supply1s.get(s); return c[4] - c[5]; });
+  const cvd = cumOf((s) => { const c = S.supply.get(s); return c[4] - c[5]; });
   // 스택 경계: 0 → 고래 → (CVD-리테일) → CVD. 가운데 층이 곧 중형이라 따로 안 만든다.
   const stackMid = cvd.map((r, i) => ({ s: r.s, v: r.v - retail[i].v }));
   // 🔴청산은 **선이 아니라 이벤트다**. 269초에 5건이고, 봉당 중앙 6.8 ETH 가 CVD 진폭의
@@ -4117,7 +4180,7 @@ function renderSupply1s(box = null) {
   const liqSum = [0, 0, 0, 0];   // 롱수량, 숏수량, 롱USD, 숏USD
   allSecs.forEach((s2) => {
     if (s2 <= first) return;
-    const c = liq1s.get(s2);
+    const c = S.liq.get(s2);
     if (!c) return;
     liqSum[0] += c[0]; liqSum[1] += c[1];
     liqSum[2] += (c[2] || 0); liqSum[3] += (c[3] || 0);
@@ -4127,13 +4190,13 @@ function renderSupply1s(box = null) {
   // 🔴갱신이 3~7초라 구간의 «첫 관측»이 경계보다 조금 뒤다 -- 그만큼 증분이 과소평가된다.
   //   서버가 초 단위 OI 를 안 들고 있어 더 정확히는 못 한다. 체결(고래·리테일)은 초 단위라
   //   이 근사가 없다.
-  const oiKeys = [...oi1s.keys()].filter((s) => s > first - SUPPLY_1S_SEGMENT - 20 && s <= now)
+  const oiKeys = [...S.oi.keys()].filter((s) => s > first - SUPPLY_1S_SEGMENT - 20 && s <= now)
                                  .sort((a, b) => a - b);
   const oiRows = [];
   let oiSeg = null, oiBase = 0;
   oiKeys.forEach((s) => {
-    if (segOf(s) !== oiSeg) { oiSeg = segOf(s); oiBase = oi1s.get(s); }
-    if (s > first) oiRows.push({ s, v: oi1s.get(s) - oiBase });
+    if (segOf(s) !== oiSeg) { oiSeg = segOf(s); oiBase = S.oi.get(s); }
+    if (s > first) oiRows.push({ s, v: S.oi.get(s) - oiBase });
   });
   // ── 한 판 (2026-09-22 사용자 지시로 아래 판을 걷어냈다) ─────────────────────
   // 원래 «위=누적 / 아래=순간(거래대금·청산)» 두 판이었다. 거래대금 막대를 빼자 아래
@@ -4142,7 +4205,10 @@ function renderSupply1s(box = null) {
   // 그 76px 는 전부 누적 스택이 가져간다(294 -> 370px).
   const peak = Math.max(0, ...cvd.map((r) => Math.abs(r.v)), ...whale.map((r) => Math.abs(r.v)),
                         ...stackMid.map((r) => Math.abs(r.v)), ...oiRows.map((r) => Math.abs(r.v)));
-  const span = SUPPLY_1S_STEPS.find((a) => a >= peak) || Math.max(peak, 1e-9);
+  // 🔴두 레인이 **같은 계단**을 써야 「어느 쪽이 큰가」가 읽힌다(위 supply1sPeaks 주석).
+  supply1sPeaks[S.key] = peak;
+  const sharedPeak = Math.max(peak, supply1sPeaks.bn, supply1sPeaks.okx);
+  const span = SUPPLY_1S_STEPS.find((a) => a >= sharedPeak) || Math.max(sharedPeak, 1e-9);
   const mid = flowTop + flowH / 2;
   const half = flowH / 2 - 4;
   // 마지막 계단을 넘는 폭발은 잘라서 상자 안에 둔다 -- 넘치면 옆 패널을 침범한다.
@@ -4299,7 +4365,7 @@ function renderSupply1s(box = null) {
       c.setAttribute("r", r.toFixed(1));
       c.setAttribute("fill", e.v >= 0 ? "var(--good)" : "var(--bad)");
       c.setAttribute("fill-opacity", "0.92");
-      const lc = liq1s.get(e.s) || [0, 0, 0, 0];
+      const lc = S.liq.get(e.s) || [0, 0, 0, 0];
       const t = document.createElementNS(NS, "title");
       t.textContent = "청산 롱 " + fmtUsdCompact(lc[2]) + " / 숏 " + fmtUsdCompact(lc[3])
         + "  (" + qty(lc[0]) + " / " + qty(lc[1]) + " ETH)";
@@ -4368,8 +4434,13 @@ function renderSupply1s(box = null) {
   }
 
   // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
-  label(ml + 2, mt - 5, "이번 5분봉 누적 순수급 ETH"
-        + (narrow ? "" : "  ·  아래 풋프린트 봉과 같은 구간 · 다음 봉에서 0"), "var(--muted)");
+  // 🔴어느 거래소인지와 **스트림 나이**를 같이 적는다. 스트림이 조용히 죽으면 선이 그냥
+  //   멈추는데, 나이가 없으면 그게 「시장이 조용한 것」과 구별되지 않는다(이 저장소에서
+  //   @aggTrade 가 3주간 0건이었는데 아무도 몰랐다).
+  label(ml + 2, mt - 5, S.label + "  ·  이번 5분봉 누적 순수급 ETH"
+        + (S.age ? `  ·  ${S.age}` : "")
+        + (narrow ? "" : "  ·  아래 풋프린트 봉과 같은 구간 · 다음 봉에서 0"),
+        S.stale ? "var(--bad, #e05260)" : "var(--muted)");
 
   // 왼쪽은 이 봉이 열린 시각, 오른쪽은 닫힐 시각. 가운데에 진행 상황을 적는다 --
   // 「지금」이 오른쪽 끝이 아니라는 걸 분명히 해야 빈 오른쪽이 오해되지 않는다.
@@ -5194,6 +5265,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   190 에서 118px 이었고, 400 이면 290px 가 된다.
   //   🔴가격 플롯(400)에서 뺏지 않고 상자를 키운다 -- 캔들이 눌리면 안 된다.
   const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 400 : 0;
+  // OKX 레인(2026-09-23). 바이낸스와 **같은 높이**여야 한다 -- 눈금을 공유해도 높이가 다르면
+  // 비교가 왜곡된다. ponytail: 런타임 토글을 안 만든다. 상자 높이가 styles.css 에 정적으로
+  // 박혀 있어(높이 계약 테스트가 그걸 검사한다) 토글을 넣으면 두 상태 중 하나는 늘 계약을
+  // 어긴다. 끄려면 이 상수를 0 으로 두고 styles.css 를 같이 내리면 된다.
+  const SUB_OKX_H = subOn ? 400 : 0;
   // 2026-09-21 청산 밀도 범례를 헤더 행에서 **여기로** 옮겼다(아티팩트 댓글).
   //   «풋프린트 차트 바로 위와 프로파일 바닥글 사이». 밀도는 이제 풋프린트의 배경이라
   //   범례가 헤더에 있으면 설명하는 그림에서 멀다. 글자 크기도 바닥글과 같은 9 로 맞췄다.
@@ -5204,7 +5280,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⭐데스크톱·모바일이 같은 모양이 되므로 subStack 분기가 통째로 사라진다.
   //   SUB_TOTAL 620 = 190(프로파일) + 8 + 400(1초 수급) + 14(밀도 범례) + 8
   //   ← 2026-09-20 뒤집었다가 2026-09-22 다시 프로파일이 위로(사용자 지시)
-  const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H : 0;
+  const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H
+                            + SUB_GAP + SUB_OKX_H : 0;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
   //   빼기 때문). 인라인 height 로 JS 가 상자를 정하는 방법은 쓰지 않는다 -- 2열에서는 상자가
@@ -5320,7 +5397,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 소비 합 = SUB_TOTAL: 190(프로파일) + 8 + 400(1초) + 14(범례) + 8 = 620.
   const subProfileY = mtTop;
   const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
-  const subLegendY = sub1sY + SUB_1S_H;
+  const subOkxY = sub1sY + SUB_1S_H + SUB_GAP;        // 바이낸스 **바로 아래**
+  const subLegendY = subOkxY + SUB_OKX_H;
   const quadY = plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
   const cumY = quadY + QUAD_H + QUAD_TXT + ROW_H + LANE_GAP; // 누적 행 위쪽
   const cumBottom = cumY + CUM_H;                    // 그 아래 한 줄이 ROW_H 를 쓴다
@@ -7212,6 +7290,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       svg: subSvg("s1", 0, sub1sY, w, SUB_1S_H, sub1sKey(w, SUB_1S_H),
                   (g) => renderSupply1s({ svg: g, w, h: SUB_1S_H })),
       w, h: SUB_1S_H };
+    // OKX 레인 -- 바이낸스와 같은 상자·같은 렌더러·같은 눈금(supply1sPeaks). 출처만 다르다.
+    okxSupply1sSubBox = SUB_OKX_H ? {
+      svg: subSvg("okx", 0, subOkxY, w, SUB_OKX_H, subOkxKey(w, SUB_OKX_H),
+                  (g) => renderSupply1s({ svg: g, w, h: SUB_OKX_H }, okxSupplySrc())),
+      w, h: SUB_OKX_H } : null;
     // ── 청산 밀도 범례 (2026-09-21 아티팩트 댓글) ────────────────────────────
     // 전에는 헤더 행의 HTML(#liqDensityLegend)이었다. 밀도가 풋프린트의 **배경**이 된
     // 뒤로는 설명하는 그림에서 멀어졌으므로 프로파일 바닥글과 풋프린트 사이로 내렸다.

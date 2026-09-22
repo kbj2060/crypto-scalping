@@ -587,6 +587,19 @@ MARK_PRICE_WS_URL = "wss://fstream.binance.com/market/ws/ethusdt@markPrice@1s"
 MARK_PRICE_DB_PATH = LIVE_DIR / "mark_price_1s.duckdb"
 MARK_PRICE_TABLE = "mark_price_1s"
 MARK_PRICE_RING_S = 7200          # 메모리 링(초). 베이시스 임계 분위를 «창 Δ» 표본 60개 이상에서 잡으려면 1시간 넘게 필요
+# ⑦⑧ OKX 실시간(2026-09-23) -- 바이낸스 레인 **바로 아래**에 같은 그림을 그려 눈으로 대조한다.
+#    합산은 하지 않는다: 합산 크기는 MM 헤지 이중계상으로 |합산|/|바이낸스| 중앙 2.1배로 부푼다
+#    (3일 백필 실측). 나란히 두면 ctVal 같은 체계적 버그가 «한 레인만 10배»로 즉시 보인다.
+OKX_INST = os.getenv("DASHBOARD_OKX_INST", "ETH-USDT-SWAP").upper()
+OKX_WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
+OKX_OI_URL = "https://www.okx.com/api/v5/public/open-interest"
+OKX_CT_VAL = 0.1        # 🔴ETH-USDT-SWAP 1계약 = 0.1 ETH. 안 곱하면 이 레인이 10배로 그려진다
+OKX_HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; crypto-scalping-dashboard/1.0)"}  # 🔴없으면 403
+# 🔴바이낸스 OI_1S_POLL_SECONDS 와 **같은 값**이어야 두 OI 선을 나란히 읽을 수 있다.
+#   WS `open-interest` 를 안 쓰는 이유: 2.7배 성기다(180초 실측 -- WS stamp 19개(중앙 9.28초) vs
+#   REST 0.25초 폴링이 본 값 변화 48번). OKX `ts` 는 응답 시각이라 변화 신호가 아니다 -- 값으로 거른다.
+OKX_OI_POLL_SECONDS = OI_1S_POLL_SECONDS
+OKX_RECV_TIMEOUT = 25.0
 MICRO_BASELINE_SECONDS = 3600
 SITUATION_EVERY_TICKS = 1                              # micro-ref 1초 루프마다 (09-21 사용자 «급변 때 느리다» -- 실측 비용 30ms, duckdb 둘은 아래서 5초 캐시)
 SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30분 뒤 결과와 맞춰 적중률을 낸다
@@ -2666,14 +2679,161 @@ def make_app() -> web.Application:
                     situation_state["now"] = {"ok": False, "reason": repr(exc)[:160]}
             await asyncio.sleep(MICRO_REF_POLL_SECONDS)
 
+    # ── OKX 실시간 ─────────────────────────────────────────────────────────
+    # 바이낸스와 **같은 모양**으로 든다. 그래야 클라 렌더러가 데이터 출처만 바꿔 끼우면
+    # 누적·스택·청산점 수식이 그대로 돈다(복사본을 만들면 한쪽만 고쳐진다).
+    #   okx_sec[s] = [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
+    okx_sec: dict[int, list[float]] = {}
+    okx_liq_events: deque = deque(maxlen=5000)
+    okx_oi_1s: dict[int, float] = {}
+    okx_state: dict[str, Any] = {"connected": False, "trades": 0, "errors": 0,
+                                 "last_trade_ms": 0, "last_oi_ms": 0, "last_liq_ms": 0}
+
+    def okx_sec_cell(ts_ms: int) -> list[float]:
+        """그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(체결마다 돌 일이 아니다)."""
+        sec = int(ts_ms) // 1000
+        cell = okx_sec.get(sec)
+        if cell is None:
+            cell = okx_sec[sec] = [0.0] * 7
+            cutoff = sec - SUPPLY_1S_SECONDS
+            for old in [x for x in okx_sec if x < cutoff]:
+                del okx_sec[old]
+        return cell
+
+    async def collect_okx_flow(app: web.Application) -> None:
+        """⑦ OKX 체결 + 청산. 주문 없음, 바이낸스 weight 안 씀.
+
+        🔴세 가지를 바이낸스와 다르게 다뤄야 한다(전부 2026-09-23 실측으로 확정):
+          1. `sz` 는 **계약 수**다 -> OKX_CT_VAL 을 곱해야 ETH 다.
+          2. `side` 는 **테이커 측면 그 자체**다 -> 바이낸스 `m`(매수자가 메이커)처럼 뒤집으면
+             부호가 통째로 반대가 된다.
+          3. `trades` 채널은 **이미 주문 단위**다(`trades-all` 4,810건 vs `trades` 1,780건,
+             sz 합은 1.0000x 동일) -> 되묶기를 이식하면 이중 집계다. 크기 구간을 바로 가른다.
+        ⚠️청산 `bkPx` 는 **파산가격**이라 바이낸스 `ap`(평균체결가)와 같은 것이 아니다.
+          USD 환산에 쓰긴 하지만 두 거래소 청산«가»를 같은 축에 놓으면 안 된다."""
+        ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
+        args = [{"channel": "trades", "instId": OKX_INST},
+                {"channel": "liquidation-orders", "instType": "SWAP"}]
+        try:
+            while True:
+                try:
+                    async with ws_session.ws_connect(OKX_WS_URL, heartbeat=20) as ws:
+                        await ws.send_json({"op": "subscribe", "args": args})
+                        okx_state.update(connected=True)
+                        print("okx ws: connected", flush=True)
+                        while True:
+                            msg = await ws.receive(timeout=OKX_RECV_TIMEOUT)
+                            if msg.type is not WSMsgType.TEXT:
+                                print(f"okx ws: non-text {msg.type!r} -> reconnect", flush=True)
+                                break
+                            if msg.data == "pong":
+                                continue
+                            d = json.loads(msg.data)
+                            if d.get("event") == "error":
+                                print(f"okx ws: 구독 거부 {d.get('msg')}", flush=True)
+                                break
+                            if d.get("event"):
+                                continue
+                            ch = (d.get("arg") or {}).get("channel")
+                            if ch == "trades":
+                                for t in d.get("data") or []:
+                                    price = float(t.get("px") or 0.0)
+                                    qty = float(t.get("sz") or 0.0) * OKX_CT_VAL
+                                    side = str(t.get("side") or "")
+                                    if not (price > 0 and qty > 0 and side in ("buy", "sell")):
+                                        continue
+                                    ts_ms = int(t.get("ts") or time.time() * 1000)
+                                    i = 1 if side == "sell" else 0
+                                    cell = okx_sec_cell(ts_ms)
+                                    cell[4 + i] += qty
+                                    cell[6] = price
+                                    notional = price * qty
+                                    if notional >= WHALE_MIN_USD:
+                                        cell[2 + i] += qty
+                                    elif notional < RETAIL_MAX_USD:
+                                        cell[i] += qty
+                                    okx_state["trades"] += 1
+                                    okx_state["last_trade_ms"] = ts_ms
+                            elif ch == "liquidation-orders":
+                                for r in d.get("data") or []:
+                                    if str(r.get("instId") or "") != OKX_INST:
+                                        continue            # instType:SWAP 은 전 종목이 온다
+                                    for det in r.get("details") or []:
+                                        qty = float(det.get("sz") or 0.0) * OKX_CT_VAL
+                                        px = float(det.get("bkPx") or 0.0)
+                                        if qty <= 0:
+                                            continue
+                                        ts_ms = int(det.get("ts") or time.time() * 1000)
+                                        okx_liq_events.append({
+                                            "ts_ms": ts_ms,
+                                            # posSide 가 **청산된 포지션**의 방향이다(바이낸스는
+                                            # 주문 방향에서 뒤집어 얻는다 -- 결과는 같은 뜻).
+                                            "side": "long" if det.get("posSide") == "long" else "short",
+                                            "qty": qty, "price": px, "usd": qty * px,
+                                            "symbol": OKX_INST})
+                                        okx_state["last_liq_ms"] = ts_ms
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- 끊기면 3초 뒤 다시. 봇에 영향 없음
+                    okx_state.update(errors=okx_state["errors"] + 1)
+                    print(f"okx ws: {exc!r}", flush=True)
+                    await asyncio.sleep(3.0)
+                finally:
+                    okx_state["connected"] = False
+        finally:
+            await ws_session.close()
+
+    async def collect_okx_oi(app: web.Application) -> None:
+        """⑧ OKX OI 를 REST 로 -- 바이낸스와 **같은 주기**(위 OKX_OI_POLL_SECONDS 주석 참고).
+
+        🔴중복 제거를 **값**으로 한다. OKX `ts` 는 응답 시각이라(0.25초 요청 718번에 고유
+          stamp 718개) 바이낸스의 「본 stamp 집합」 방식을 옮기면 안 바뀐 값이 초당 4번 쌓인다."""
+        oi_session = ClientSession(timeout=ClientTimeout(total=10.0),
+                                   connector=TCPConnector(limit=2), headers=OKX_HTTP_HEADERS)
+        last: float | None = None
+        try:
+            while True:
+                t0 = time.monotonic()
+                try:
+                    async with oi_session.get(OKX_OI_URL, params={"instType": "SWAP",
+                                                                  "instId": OKX_INST}) as resp:
+                        body = await resp.json()
+                    row = (body.get("data") or [{}])[0]
+                    oi = float(row.get("oiCcy") or 0.0)
+                    ts_ms = int(row.get("ts") or time.time() * 1000)
+                    # ⚠️인접한 두 초에 **같은 값**이 남을 수 있다(2026-09-23 실측 33%). 버그가
+                    #   아니다 -- 한 초 안에서 A->B->A 로 튀면 그 초 버킷이 덮어써져 앞 초와
+                    #   같아진다. 바이낸스 레인도 `oi_1s[sec] = value` 로 같은 구조이고(게다가
+                    #   값 중복 제거가 없어 stamp 마다 쓴다), 레벨 선이라 화면에 안 보인다.
+                    if oi > 0 and oi != last:
+                        last = oi
+                        sec = ts_ms // 1000
+                        okx_oi_1s[sec] = oi
+                        okx_state["last_oi_ms"] = ts_ms
+                        cutoff = sec - SUPPLY_1S_SECONDS
+                        for old in [x for x in okx_oi_1s if x < cutoff]:
+                            del okx_oi_1s[old]
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- OI 때문에 화면이 멈추면 안 된다
+                    okx_state["errors"] += 1
+                    if okx_state["errors"] in (1, 10, 100) or okx_state["errors"] % 1000 == 0:
+                        print(f"okx oi: {exc!r} ({okx_state['errors']}회째)", flush=True)
+                await asyncio.sleep(max(0.0, OKX_OI_POLL_SECONDS - (time.monotonic() - t0)))
+        finally:
+            await oi_session.close()
+
     async def start_micro_ref(app: web.Application) -> None:
         _situation_load_log()
         app["micro_ref_task"] = asyncio.create_task(collect_micro_ref(app))
         app["force_order_task"] = asyncio.create_task(collect_force_orders(app))
         app["mark_price_task"] = asyncio.create_task(collect_mark_price(app))
+        app["okx_flow_task"] = asyncio.create_task(collect_okx_flow(app))
+        app["okx_oi_task"] = asyncio.create_task(collect_okx_oi(app))
 
     async def stop_micro_ref(app: web.Application) -> None:
-        for key in ("micro_ref_task", "force_order_task", "mark_price_task"):
+        for key in ("micro_ref_task", "force_order_task", "mark_price_task",
+                    "okx_flow_task", "okx_oi_task"):
             app[key].cancel()
             try:
                 await app[key]
@@ -3447,12 +3607,51 @@ def make_app() -> web.Application:
             since_liq = int(request.query.get("sinceLiq", "0"))
         except ValueError:
             since_liq = 0
+        # OKX 레인(2026-09-23). 🔴**합치지 않는다** -- 각자 보낸다. 커서도 각자다(거래소마다
+        #   체결 초가 앞서가므로 하나를 공유하면 뒤처진 쪽이 통째로 건너뛰어진다 -- OI 가
+        #   sinceOi 를 따로 쓰는 것과 같은 이유).
+        def _q(name: str) -> int:
+            try:
+                return int(request.query.get(name, "0"))
+            except ValueError:
+                return 0
+        since_okx, since_okx_oi, since_okx_liq = _q("sinceOkx"), _q("sinceOkxOi"), _q("sinceOkxLiq")
+        okx_newest = max(okx_sec) if okx_sec else 0
+        okx_floor = max(since_okx, okx_newest - SUPPLY_1S_SECONDS)
+        okx_rows = [[x] + [round(v, 3) for v in okx_sec[x]]
+                    for x in sorted(okx_sec) if okx_floor < x < okx_newest]
+        okx_oi_floor = max(since_okx_oi, (max(okx_oi_1s) if okx_oi_1s else 0) - SUPPLY_1S_SECONDS)
+        okx_oi_rows = [[x, okx_oi_1s[x]] for x in sorted(okx_oi_1s) if x > okx_oi_floor]
+        okx_liq_floor = max(since_okx_liq, okx_newest - SUPPLY_1S_SECONDS)
+        okx_liq_by_sec: dict[int, list[float]] = {}
+        for e in list(okx_liq_events):
+            x = int(e.get("ts_ms") or 0) // 1000
+            if not (okx_liq_floor < x < okx_newest):
+                continue
+            c = okx_liq_by_sec.setdefault(x, [0.0, 0.0, 0.0, 0.0])
+            lo = e.get("side") == "long"
+            c[0 if lo else 1] += float(e.get("qty") or 0.0)
+            c[2 if lo else 3] += float(e.get("usd") or 0.0)
+        okx_liq_rows = [[x, round(v[0], 3), round(v[1], 3), round(v[2]), round(v[3])]
+                        for x, v in sorted(okx_liq_by_sec.items())]
+        # 스트림 나이. 조용히 죽으면 «부호 없음»으로 굳는데 화면에서 그걸 알 수가 없다
+        # (이 저장소에서 @aggTrade 가 3주간 0건이었던 전례).
+        _now_ms = time.time() * 1000
+        okx_meta = {"connected": bool(okx_state["connected"]),
+                    "tradeAge": round((_now_ms - okx_state["last_trade_ms"]) / 1000, 1)
+                                if okx_state["last_trade_ms"] else None,
+                    "oiAge": round((_now_ms - okx_state["last_oi_ms"]) / 1000, 1)
+                             if okx_state["last_oi_ms"] else None,
+                    "inst": OKX_INST, "errors": okx_state["errors"]}
         oi_floor = max(since_oi, (max(oi_1s) if oi_1s else 0) - SUPPLY_1S_SECONDS)
         # [초, 미결제약정]. 증분은 클라가 뺀다(창 시작을 0으로 두는 누적선이라 절대값이 필요).
         oi_rows = [[s, oi_1s[s]] for s in sorted(oi_1s) if s > oi_floor]
         if not by_sec:
             return web.json_response({"symbol": FOOTPRINT_SYMBOL, "seconds": [], "now": 0,
                                       "oi": oi_rows, "liq": [],
+                                      "okx": okx_rows, "okxOi": okx_oi_rows,
+                                      "okxLiq": okx_liq_rows, "okxNow": okx_newest,
+                                      "okxMeta": okx_meta,
                                       "retailMaxUsd": RETAIL_MAX_USD,
                                       "whaleMinUsd": WHALE_MIN_USD}, headers=NOCACHE)
         newest = max(by_sec)
@@ -3485,6 +3684,12 @@ def make_app() -> web.Application:
             "whaleMinUsd": WHALE_MIN_USD,
             "oi": oi_rows,
             "liq": liq_rows,
+            # OKX 레인 -- 바이낸스와 **같은 칸 구조**라 클라가 같은 렌더러에 그대로 먹인다
+            "okx": okx_rows,
+            "okxOi": okx_oi_rows,
+            "okxLiq": okx_liq_rows,
+            "okxNow": okx_newest,
+            "okxMeta": okx_meta,
             # [초, 리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
             "seconds": [[s] + [round(x, 3) for x in by_sec[s]]
                         for s in sorted(by_sec) if floor < s < newest],

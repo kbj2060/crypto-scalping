@@ -8,11 +8,12 @@
 const fs = require("fs");
 const src = fs.readFileSync("dashboard/live/app.js", "utf8");
 const grab = (re, what) => { const m = src.match(re); if (!m) { console.log(`🔴 못 찾음: ${what}`); process.exit(1); } return m[0]; };
-const FN = grab(/function renderSupply1s\(box = null\) \{[\s\S]*?\n\}\n/, "renderSupply1s");
+const FN = grab(/function renderSupply1s\(box = null, src = null\) \{[\s\S]*?\n\}\n/, "renderSupply1s");
 const PRE = grab(/function fmtFootprintQty\(v\) \{[\s\S]*?\n\}\n/, "fmtFootprintQty")
           + grab(/const SUPPLY_1S_SEGMENT = \d+;/, "SEGMENT")
           + "\n" + grab(/const SUPPLY_1S_STEPS = \[[^\]]*\];/, "STEPS") + "\n";
 
+const SHARED = "const supply1sPeaks = { bn: 0, okx: 0 };\n";
 const SEG = Number(PRE.match(/const SUPPLY_1S_SEGMENT = (\d+);/)[1]);
 const NOW = 1700000000;   // CI 의 esprima 4 는 숫자 구분자(1_700_000_000)를 모른다
 const BOUND = Math.floor(NOW / SEG) * SEG;      // 창 안의 5분 경계
@@ -33,10 +34,13 @@ function draw(label, { qty = 10, hole = null, oi = null } = {}) {
   global.supply1s = sup;
   global.oi1s = oiMap;
   global.supply1sMeta = { now: NOW, retailMaxUsd: 10000, whaleMinUsd: 100000 };
+  // 2026-09-23 렌더러가 기본 출처 객체를 만들 때 세 전역을 **즉시** 읽는다(예전엔 청산 루프
+  // 안에서만 읽어서 하네스가 비워둬도 지나갔다). 실제 앱은 셋 다 항상 선언돼 있다.
+  global.liq1s = new Map();
   const svg = { _a: {}, innerHTML: "", kids: [], setAttribute(k, v) { this._a[k] = v; },
                 appendChild(c) { this.kids.push(c); }, parentElement: { clientWidth: W } };
   try {
-    eval(PRE + FN + "\nrenderSupply1s({ svg, w: W, h: H });");
+    eval(PRE + SHARED + FN + "\nrenderSupply1s({ svg, w: W, h: H });");
   } catch (e) { console.log(`🔴 ${label}: ${e.constructor.name} — ${e.message}`); return null; }
   const nums = els.flatMap((e) => ["x", "y", "x1", "x2", "y1", "y2", "width", "height"]
     .filter((k) => k in e._a).map((k) => Number(e._a[k])));

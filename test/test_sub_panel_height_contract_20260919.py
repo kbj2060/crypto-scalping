@@ -29,7 +29,9 @@ def test_heights_match_between_js_and_css():
     # 🔴2026-09-21 이 공식이 낡아 검사가 **계속 실패 중**이었다(배포본에서도). 상자는 두 덩이를
     #   더 갖는다: 청산밀도 범례(SUB_LEGEND_H)와 가격 플롯 아래 레인 5종.
     legend = _num(r"const SUB_LEGEND_H = subOn \? (\d+)", JS, "SUB_LEGEND_H")
-    total = gap + prof + legend + gap + one_s          # = app.js 의 SUB_TOTAL
+    # 2026-09-23 OKX 레인이 1초 수급 **바로 아래**에 같은 높이로 붙었다(눈으로 대조하려고).
+    okx = _num(r"const SUB_OKX_H = subOn \? (\d+)", JS, "SUB_OKX_H")
+    total = gap + prof + legend + gap + one_s + gap + okx     # = app.js 의 SUB_TOTAL
 
     # 2026-09-22 레인 5종 -> 두 행(사분면 + 누적 CVD). 데스크톱 값으로 센다.
     # 2026-09-23 RVOL 은 **전용 행을 안 쓴다** -- 누적 CVD 레인 안에 자기 축으로 겹친다.
@@ -81,7 +83,7 @@ def test_lanes_tile_without_overlap():
 
 
 def test_sub_panels_tile_without_overlap():
-    """세 패널(프로파일·1초 수급·밀도 범례)이 **겹치지 않고** SUB_TOTAL 을 정확히 채워야 한다.
+    """네 패널(프로파일·1초 수급·OKX 수급·밀도 범례)이 **겹치지 않고** SUB_TOTAL 을 채워야 한다.
 
     🔴겹쳐도 SVG 는 안 잘라준다 -- 그냥 포개져 그려진다. 에러도 경고도 없다.
       모자라면 가격 플롯 위에 빈 띠가 생기고, 넘치면 캔들 위로 올라탄다.
@@ -92,24 +94,31 @@ def test_sub_panels_tile_without_overlap():
            "SUB_GAP": _num(r"const SUB_GAP = (\d+)", JS, "SUB_GAP"),
            "SUB_PROFILE_H": _num(r"SUB_PROFILE_H = subOn \? (\d+)", JS, "SUB_PROFILE_H"),
            "SUB_1S_H": _num(r"SUB_1S_H = subOn \? (\d+)", JS, "SUB_1S_H"),
-           "SUB_LEGEND_H": _num(r"const SUB_LEGEND_H = subOn \? (\d+)", JS, "SUB_LEGEND_H")}
-    for name in ("subProfileY", "sub1sY", "subLegendY"):
+           "SUB_LEGEND_H": _num(r"const SUB_LEGEND_H = subOn \? (\d+)", JS, "SUB_LEGEND_H"),
+           "SUB_OKX_H": _num(r"const SUB_OKX_H = subOn \? (\d+)", JS, "SUB_OKX_H")}
+    for name in ("subProfileY", "sub1sY", "subOkxY", "subLegendY"):
         m = re.search(rf"  const {name} = ([^;]+);", JS)
         assert m, f"못 찾음: {name}"
         env[name] = eval(m.group(1).strip(), {"__builtins__": {}}, env)  # noqa: S307 -- 저장소 제 코드
 
     panels = sorted([("프로파일", env["subProfileY"], env["SUB_PROFILE_H"]),
                      ("1초 수급", env["sub1sY"], env["SUB_1S_H"]),
+                     ("OKX 수급", env["subOkxY"], env["SUB_OKX_H"]),
                      ("밀도 범례", env["subLegendY"], env["SUB_LEGEND_H"])], key=lambda r: r[1])
     for (n1, y1, h1), (n2, y2, _) in zip(panels, panels[1:]):
         assert y1 + h1 <= y2, f"{n1}({y1}+{h1})가 {n2}({y2}) 위로 올라탄다 -- SVG 는 안 잘라준다"
 
     assert panels[0][0] == "프로파일", f"맨 위가 프로파일이 아니다: {panels[0][0]}"
     assert panels[1][0] == "1초 수급", f"둘째가 1초 수급이 아니다: {panels[1][0]}"
-    assert panels[2][0] == "밀도 범례", "밀도 범례는 가격 플롯 바로 위에 남아야 한다"
+    assert panels[2][0] == "OKX 수급", (
+        f"OKX 레인은 바이낸스 **바로 아래**여야 한다(사용자 지시): {panels[2][0]}")
+    assert panels[3][0] == "밀도 범례", "밀도 범례는 가격 플롯 바로 위에 남아야 한다"
+    assert env["SUB_OKX_H"] == env["SUB_1S_H"], (
+        "🔴두 레인은 **같은 높이**여야 한다 -- 눈금을 공유해도 높이가 다르면 비교가 왜곡된다")
 
     total = (env["SUB_GAP"] + env["SUB_PROFILE_H"] + env["SUB_LEGEND_H"]
-             + env["SUB_GAP"] + env["SUB_1S_H"])          # = app.js 의 SUB_TOTAL
+             + env["SUB_GAP"] + env["SUB_1S_H"]
+             + env["SUB_GAP"] + env["SUB_OKX_H"])         # = app.js 의 SUB_TOTAL
     used = panels[-1][1] + panels[-1][2] + env["SUB_GAP"] - env["mtTop"]
     assert used == total, (
         f"패널이 쓰는 높이 {used} != SUB_TOTAL {total} -- "
