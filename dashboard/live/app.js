@@ -390,7 +390,13 @@ const CHART_MAX_CANDLES = 200;
 // "차트를 4시간만 보여주는건 어떨까", then same day "4시간은 너무 작다" -> 6h -- see
 // live_liquidation_map_20260824.py::compute_heatmap_history and its HEATMAP_HISTORY_DISPLAY_HOURS,
 // which this must match).
-const SNAPSHOT_CHART_MAX_CANDLES = 72; // 6h at 5-min candles
+// 🔴2026-09-23 72(6h) -> 96(8h), 사용자 지시. 이 값과 청산밀도 이력(LIQUIDATION_MAP_
+//   DISPLAY_HOURS · HEATMAP_HISTORY_DISPLAY_HOURS)은 **짝**이다 -- 2026-08-25 에 «보이는
+//   칸마다 진짜 스냅샷이 있게» 같이 맞춘 것이다. 셋을 따로 움직이면 배경 없는 칸이 생긴다.
+//   🔴«밀도 배경이 빈다»는 내 우려는 **틀렸다**: 그 상수는 버퍼가 아니라 **설정**이고
+//     원본은 23시간을 갖고 있다(실측 lookback_hours=23.0 · bars_used=24). 늘리면 스냅샷을
+//     그만큼 더 계산할 뿐 빈 칸은 안 생긴다.
+const SNAPSHOT_CHART_MAX_CANDLES = 96; // 8h at 5-min candles
 const MOBILE_CHART_DEFAULT_CANDLES = 34;
 const MOBILE_CHART_MIN_CANDLES = 12;
 const MOBILE_CHART_MAX_CANDLES = 72;

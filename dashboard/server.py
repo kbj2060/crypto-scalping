@@ -255,7 +255,7 @@ MACRO_CALENDAR_CACHE_SECONDS = 6 * 3600  # calendar dates change at most once/da
 # minute (tail_risk_interceptor.py's insert cadence), so this mostly tightens worst-case staleness
 # rather than surfacing meaningfully new data every second.
 LIQUIDATION_5M_SIGNAL_CACHE_SECONDS = 1
-LIQUIDATION_MAP_DISPLAY_HOURS = 6  # 2026-08-25 user request: density-history snapshot count for the
+LIQUIDATION_MAP_DISPLAY_HOURS = 8  # 2026-09-23 6 -> 8 (짝: SNAPSHOT_CHART_MAX_CANDLES=96) # 2026-08-25 user request: density-history snapshot count for the
                                     # chart's time-varying heatmap overlay (see compute_heatmap_
                                     # history() docstring) -- matches the Snapshot-tab chart's own
                                     # visible-candle window (4h->6h same day, "4시간은 너무 작다")

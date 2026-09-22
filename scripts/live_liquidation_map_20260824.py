@@ -311,7 +311,7 @@ def compute_spliced_levels(df: pd.DataFrame, current_price: float) -> dict:
     }
 
 
-HEATMAP_HISTORY_DISPLAY_HOURS = 6  # 2026-08-25 user request: matches the chart's own visible-candle
+HEATMAP_HISTORY_DISPLAY_HOURS = 8  # 2026-09-23 6 -> 8 (원본 23h 라 빈 칸 없음) # 2026-08-25 user request: matches the chart's own visible-candle
                                     # window (narrowed from ~8h to 4h at the same request, then
                                     # widened 4h->6h same day -- "4시간은 너무 작다" -- see
                                     # dashboard/live/app.js SNAPSHOT_CHART_MAX_CANDLES), so every
