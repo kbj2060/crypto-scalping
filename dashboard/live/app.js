@@ -6138,6 +6138,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   {
     const vp = candles.map((c, i) => ({ i, sma: Number(c.sma), atr: Number(c.atr), v: Number(c.veto) }))
                       .filter((p) => Number.isFinite(p.sma) && Number.isFinite(p.atr));
+    // 밴드 배수는 **서버가 준다**(dashboard/server.py TREND_VETO_K). 여기 숫자를 또 적으면
+    // 두 곳을 따로 고쳐야 하고, 실제로 2026-09-23 에 K 가 1.0 -> 2.0 으로 바뀌었다.
+    // 🔴폴백은 **서버 기본값과 같아야** 한다(TREND_VETO_K=1.0). 2 로 두면 vk 를 안 보내는
+    //   옛 서버와 붙었을 때 서버는 K=1 로 측면을 정하는데 화면은 ±2 로 그려 **밴드와 색이
+    //   어긋난다**(가격이 ±1 을 넘었는데 밴드 안에 있는 것처럼 보인다).
+    const bandK = Number((candles.find((c) => Number.isFinite(Number(c.vk))) || {}).vk) || 1;
     // 2026-09-22 사용자 요청 「현재가에 맞게 현재 봉에서 움직이게」. 서버는 **마감된 봉**만 준다
     // (evidence_signal_cache 의 closed_df) -- 형성 중 봉은 updateSnapshotCandleLive() 가 따로
     // 밀어 넣으므로 sma 가 없어 위 filter 에서 빠지고, 선이 오른쪽 끝에서 한 봉 모자랐다.
@@ -6152,7 +6158,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const tr = Math.max(lastC.high - lastC.low, Math.abs(lastC.high - prevC.close),
                             Math.abs(lastC.low - prevC.close));
         const atr = prevP.atr + (tr - prevP.atr) / n;
-        const dev = (lastC.close - sma) / sma, eps = atr / lastC.close;
+        const dev = (lastC.close - sma) / sma, eps = bandK * atr / lastC.close;
         live = { i: candles.length - 1, sma, atr,
                  v: dev > eps ? 1 : dev < -eps ? -1 : prevP.v };
         vp.push(live);
@@ -6163,8 +6169,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const cx = (i) => xAt(i) + bw / 2;
       const band = document.createElementNS(NS, "polygon");
       band.setAttribute("points",
-        vp.map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma + p.atr).toFixed(1)}`).join(" ") + " " +
-        vp.slice().reverse().map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma - p.atr).toFixed(1)}`).join(" "));
+        vp.map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma + bandK * p.atr).toFixed(1)}`).join(" ") + " " +
+        vp.slice().reverse().map((p) => `${cx(p.i).toFixed(1)},${yAt(p.sma - bandK * p.atr).toFixed(1)}`).join(" "));
       band.setAttribute("fill", "color-mix(in srgb, var(--muted) 14%, transparent)");
       band.setAttribute("stroke", "none");
       // 2026-09-22 사용자 «하단 빨강 · 상단 초록». 뜻과 색이 맞는다: 상단 **위**로 벗어나면
@@ -6181,18 +6187,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         return pl;
       };
       g.appendChild(band);
-      g.appendChild(edge((p) => p.sma + p.atr, "good"));   // 상단: 위로 벗어나면 상승(롱만)
-      g.appendChild(edge((p) => p.sma - p.atr, "bad"));    // 하단: 아래로 벗어나면 하락(숏만)
-      // ── ±2×ATR (2026-09-23) ─────────────────────────────────────────────────
-      // 편익은 밴드 «가장자리»가 아니라 **2×ATR 밖**에 있다. ETH 5m 4.7년 R1
-      // (허용 측면 − 금지 측면, TP1.5/SL0.7/24h, USDC 1.36bp 차감):
-      //   |z|<0.5 롱 −0.18 / 숏 −1.15   ← 밴드 깊숙한 곳은 편익이 **0 또는 음수**
-      //   1.0~1.5 롱 +0.65 / 숏 +3.90
-      //   2.0~3.0 롱 +5.92 / 숏 +11.76  · 3.0+ 롱 +6.42 / 숏 +9.10
-      // ±1 은 «언제 뒤집는가»(히스테리시스)를 정하고, ±2 는 «지금 믿을 만한가»를 말한다.
-      // 그래서 서로 다른 선이고 둘 다 필요하다. 서버 변경 0 — sma·atr 이 이미 온다.
-      g.appendChild(edge((p) => p.sma + 2 * p.atr, "good", 30, "2 4"));
-      g.appendChild(edge((p) => p.sma - 2 * p.atr, "bad", 30, "2 4"));
+      g.appendChild(edge((p) => p.sma + bandK * p.atr, "good"));  // 상단: 위로 벗어나면 상승(롱만)
+      g.appendChild(edge((p) => p.sma - bandK * p.atr, "bad"));   // 하단: 아래로 벗어나면 하락(숏만)
+      // ── 참조선: 밴드와 «편익이 시작되는 2xATR» 중 안 겹치는 쪽을 점선으로 ───────────
+      // 🔴둘은 다른 물건이다. 밴드(실선)는 «언제 뒤집히나»(히스테리시스)이고, 2xATR 은
+      //   «지금 얼마나 믿을 만한가»다. ETH 5m 4.7년 R1(허용−금지):
+      //     |z|<0.5 롱 −0.18/숏 −1.15 · 1~1.5 +0.65/+3.90 · 2~3 **+5.92/+11.76**
+      //   2026-09-23 밴드를 2xATR 로 올려봤다가 되돌렸다 -- 지그재그 채점에서 추세 일치율·
+      //   전환 포착률이 **단조로 나빠졌다**(서버 TREND_VETO_K 주석). 두 선은 계속 분리한다.
+      const refK = bandK < 1.8 ? 2 : 1;
+      g.appendChild(edge((p) => p.sma + refK * p.atr, "good", 30, "2 4"));
+      g.appendChild(edge((p) => p.sma - refK * p.atr, "bad", 30, "2 4"));
       const side = vp[vp.length - 1].v;
       const col = side > 0 ? "var(--good)" : side < 0 ? "var(--bad)" : "var(--muted)";
       const closed = live ? vp.slice(0, -1) : vp;
@@ -6223,10 +6228,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       tag.textContent = (side > 0 ? "추세 veto: 롱만" : side < 0 ? "추세 veto: 숏만" : "추세 veto: 워밍업")
         + (side === 0 ? "" : grade + (Number.isFinite(zAbs) ? ` (${zAbs.toFixed(1)}×ATR)` : ""));
       const tagT = document.createElementNS(NS, "title");
-      tagT.textContent = "점선 = ±2×ATR. ETH 5m 4.7년 실측에서 허용 측면의 우위는 여기서부터 나온다 — "
+      tagT.textContent = "실선·음영 = ±" + bandK + "×ATR(여기를 벗어날 때만 측면이 바뀐다) · "
+        + "점선 = ±" + refK + "×ATR. ETH 5m 4.7년 실측에서 허용 측면의 우위는 2×ATR 부터 나온다 — "
         + "|거리|<0.5×ATR 롱 −0.2 / 숏 −1.2bp, 1~1.5 롱 +0.7 / 숏 +3.9, 2~3 롱 +5.9 / 숏 +11.8bp.\n"
         + "🔴 우위는 대칭이 아니다: 롱 쪽 값은 «위에서 롱이 좋다»가 아니라 «SMA 한참 아래에서 롱 금지»다"
         + "(십분위 실측 — 가장 아래 롱 −7.5bp, 가장 위 롱 −0.1bp).\n"
+        + "\n🔴 밴드 폭을 2×ATR 로 넓히면 **추세는 더 못 맞힌다** — 지그재그 채점(θ=2%)에서 "
+        + "일치율 .6378→.6213 · 전환 포착률 .8362→.7932 · 전환 지연 150→180분으로 전부 나빠진다. "
+        + "좋아지는 건 유령 뒤집힘(.3238→.2525) 하나이고 그게 히스테리시스의 존재 이유다.\n"
+        + "🔴 어느 폭에서도 «맞힌다»고 할 수 없다 — 앞 24시간 방향 정확도가 전 구간 0.47~0.48 로 "
+        + "무조건부 상승률 0.5056 보다 낮다. 값은 정확도가 아니라 허용/금지 측면의 «차이»에 있다.\n"
         + "🔴 ETH 5m 에서만 검정됐다.";
       tag.appendChild(tagT);
       g.appendChild(tag);

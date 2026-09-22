@@ -19,7 +19,7 @@ for (; end < src.length; end++) {
 const BLOCK = src.slice(open, end);
 
 const NS = "http://www.w3.org/2000/svg";
-function run({ n = 8, atr = 2, closeLast = 100, warmup = false, live = false } = {}) {
+function run({ n = 8, atr = 2, closeLast = 100, warmup = false, live = false, vk = 1 } = {}) {
   const els = [];
   const mk = (kind) => ({ _a: {}, _kind: kind, kids: [],
     setAttribute(k, v) { this._a[k] = v; }, appendChild(c) { this.kids.push(c); },
@@ -30,7 +30,7 @@ function run({ n = 8, atr = 2, closeLast = 100, warmup = false, live = false } =
     const last = i === n - 1;
     const cl = last ? closeLast : 100;
     const row = { close: cl, high: cl + 1, low: cl - 1, open: cl,
-                  sma: 100, atr, veto: warmup ? 0 : 1, drop: 100, vn: 144 };
+                  sma: 100, atr, veto: warmup ? 0 : 1, drop: 100, vn: 144, vk };
     if (live && last) { delete row.sma; delete row.atr; delete row.veto; }  // 형성 중 봉
     candles.push(row);
   }
@@ -49,9 +49,33 @@ const ck = (cond, what) => { if (!cond) { console.log("🔴 " + what); fail++; }
 {
   const { els } = run({ atr: 2 });
   const dashed = els.filter((e) => e._kind === "polyline" && e._a["stroke-dasharray"] === "2 4");
-  ck(dashed.length === 2, `±2×ATR 점선 2줄 (실제 ${dashed.length})`);
+  ck(dashed.length === 2, `참조 점선 2줄 (실제 ${dashed.length})`);
   const ys = dashed.map((e) => Number(e._a.points.split(" ")[0].split(",")[1])).sort((a, b) => a - b);
-  ck(ys[0] === 96 && ys[1] === 104, `점선이 sma∓2·atr = 96 / 104 (실제 ${ys})`);
+  ck(ys[0] === 96 && ys[1] === 104, `K=1 이면 점선이 **2×ATR**(96/104)에 (실제 ${ys})`);
+  // 실선 밴드는 ±1×ATR (98/102) -- 점선과 **다른 자리**여야 한다
+  const solid = els.filter((e) => e._kind === "polyline" && !e._a["stroke-dasharray"]
+                                  && Number(e._a["stroke-width"]) === 1.25);
+  const sy = solid.map((e) => Number(e._a.points.split(" ")[0].split(",")[1])).sort((a, b) => a - b);
+  ck(sy[0] === 98 && sy[1] === 102, `실선 밴드는 ±1×ATR = 98/102 (실제 ${sy})`);
+}
+// ①b K=2 를 서버가 보내면 밴드가 따라가고 점선은 안쪽 1×ATR 로 바뀐다(배선 확인)
+{
+  const { els } = run({ atr: 2, vk: 2 });
+  const solid = els.filter((e) => e._kind === "polyline" && !e._a["stroke-dasharray"]
+                                  && Number(e._a["stroke-width"]) === 1.25);
+  const sy = solid.map((e) => Number(e._a.points.split(" ")[0].split(",")[1])).sort((a, b) => a - b);
+  ck(sy[0] === 96 && sy[1] === 104, `vk=2 -> 실선이 ±2×ATR (실제 ${sy})`);
+  const dy = els.filter((e) => e._a["stroke-dasharray"] === "2 4")
+                .map((e) => Number(e._a.points.split(" ")[0].split(",")[1])).sort((a, b) => a - b);
+  ck(dy[0] === 98 && dy[1] === 102, `vk=2 -> 점선이 안쪽 ±1×ATR (실제 ${dy})`);
+}
+// ①c vk 가 아예 없으면(옛 서버) **서버 기본값 K=1** 로 떨어져야 한다
+{
+  const { els } = run({ atr: 2, vk: NaN });
+  const solid = els.filter((e) => e._kind === "polyline" && !e._a["stroke-dasharray"]
+                                  && Number(e._a["stroke-width"]) === 1.25);
+  const sy = solid.map((e) => Number(e._a.points.split(" ")[0].split(",")[1])).sort((a, b) => a - b);
+  ck(sy[0] === 98 && sy[1] === 102, `vk 없음 -> 실선이 ±1×ATR (실제 ${sy})`);
 }
 // ② 등급 경계 -- |종가−SMA|/ATR 이 <1 / 1~2 / ≥2
 for (const [close, want] of [[101.5, "약"], [103, "보통"], [105, "강"], [95, "강"]]) {
