@@ -2002,6 +2002,8 @@ svg {
   grid-template-rows: auto 1fr; gap: 4px; }
 .acct-plot-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 /* 기간: 이 기록이 언제 것인지 차트 옆에 적는다(사용자 지시) */
+.acct-span-wrap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  justify-content: flex-end; }
 .acct-span { font: 600 11px/1 var(--font-sans); color: var(--muted); white-space: nowrap;
   border-bottom: 1px dotted var(--soft-line); cursor: help; }
 /* 커서를 대면 바로 뜨는 상세 -- 네이티브 title(1초 지연)로는 "세부 정보"가 안 읽힌다 */
