@@ -919,15 +919,28 @@ async function fetchBinanceHistory(asset) {
 //     **증상**을 조건으로 건다: 마감된 봉에 sma 가 없으면 곧 다시 묻는다. 채워지면 저절로
 //     원래 주기로 돌아간다(풋프린트 «전량 재수신» 자가복구와 같은 방식).
 //   서버는 마감봉 100개를 전부 sma 와 함께 준다(실측 서버 뒤처짐 0) -- 못 받는 건 타이밍뿐이다.
-const HISTORY_RETRY_MS = 10000;
+//   🔴2026-09-23 사용자 지시 «5분봉 할 때 한 번만». 10초 재시도는 **원천보다 6배 빨랐다** --
+//     서버의 마감봉 프레임은 EVIDENCE_SIGNAL_CACHE_SECONDS(60초) TTL 이라 그 안에 여섯 번
+//     물어도 다섯 번은 같은 답이다. 그래서 봉당 **정확히 한 번**으로 줄인다.
+//     한 번뿐이라 «언제»가 중요해졌다. 마감 직후에 쏘면 서버가 아직 안 만들어 한 발을
+//     헛되이 쓴다(위 «경계에서 한 번»의 실패가 바로 그것) -- TTL 60초를 넘긴 뒤에 쏜다.
+//     sma 가 이미 들어와 있으면 재시도 자체가 **0회**다(조건이 증상이라 그대로 남는다).
+// ponytail: 그 한 번마저 빗나가면 다음 봉의 재시도까지 밴드가 한 봉 뒤처진다(최대 ~6분).
+//   지금 실측 서버 뒤처짐이 0 이라 감수한다. 잦아지면 «봉당 두 번»이 가장 싼 상향이다.
+const HISTORY_RETRY_AFTER_CLOSE_S = 70;   // 서버 프레임 TTL 60초 + 여유
+let historyRetryDoneBar = 0;              // 재시도를 이미 쓴 마감봉 -- 봉당 한 번을 강제한다
 async function maybeFetchSnapshotChartHistory() {
   const now = Date.now();
   const cached = candleHistoryByAsset[activeSnapshotAsset] || [];
   // 마지막은 형성 중 봉이라 sma 가 없는 게 정상이다. 그 **직전**(마감된 봉)에 없으면 밀렸다.
-  const stale = cached.length >= 2
-    && !Number.isFinite(Number(cached[cached.length - 2] && cached[cached.length - 2].sma));
-  const wait = stale ? HISTORY_RETRY_MS : CANDLE_HISTORY_POLL_MS;
-  if (cached.length && now - lastSnapshotHistoryFetchAt < wait) return;
+  const closed = cached.length >= 2 ? cached[cached.length - 2] : null;
+  const closedTime = Number(closed && closed.time) || 0;
+  const retryDue = closedTime > 0
+    && !Number.isFinite(Number(closed.sma))
+    && historyRetryDoneBar !== closedTime
+    && now / 1000 >= closedTime + CHART_CANDLE_MIN * 60 + HISTORY_RETRY_AFTER_CLOSE_S;
+  if (!retryDue && cached.length && now - lastSnapshotHistoryFetchAt < CANDLE_HISTORY_POLL_MS) return;
+  if (retryDue) historyRetryDoneBar = closedTime;
   lastSnapshotHistoryFetchAt = now;
   await fetchBinanceHistory(activeSnapshotAsset);
   scheduleSnapshotChartRender();
