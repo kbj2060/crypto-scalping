@@ -116,3 +116,9 @@ scripts/ops/handoff.hosts.conf*
 # 2026-09-04 (deploy_watcher autostash 사고 정리): 학습 데이터/코드의 수동 백업 사본은 git 밖에 둔다.
 *.bak_pre_extend_*
 *.pre_instrumentation_backup_*
+
+# graft 의 로컬 그래프·세션 캐시. 재생성 가능하고(`graft build`) 커밋 대상이 아니다.
+# 🔴2026-09-22: 이 규칙은 «메인 체크아웃에만» 커밋 안 된 채로 있었다 -- 워크트리와 서버에는
+# 없어서 graft/.cache 가 커밋 가능한 상태였다. `session/*.json` 은 **프롬프트를 원문 그대로**
+# 담는다(실측). 공개 저장소이므로 로컬 편집이 아니라 커밋된 규칙이어야 한다.
+/graft/
