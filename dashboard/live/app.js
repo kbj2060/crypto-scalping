@@ -1286,6 +1286,9 @@ function applyAcctPreview(pos, mark, equity) {
     if (!g) { g = document.createElement("u"); gauge.appendChild(g); }
     g.className = "acct-gauge-pv";
     g.style.left = `${at.toFixed(1)}%`;
+    // 🔴유령 손잡이에는 라벨을 안 붙인다. 투영 청산가는 바로 아래 범례가 이미
+    //   «청산 $2,197.56 → ~$2,197.01» 로 말한다 -- 같은 말을 두 번 하면서, 접힌 눈금에서
+    //   진입은 **항상 50%** 라 진입 라벨과 겹친다(스캘핑에선 현재≈진입이 기본 상태다).
     g.title = `지금 설정으로 넣으면 손잡이가 여기로 옵니다 (청산 ~${fmtUsd(newLiq)})`;
   }
 }
@@ -1507,8 +1510,9 @@ function renderSnapshotAccount() {
         pl === null ? " (크기 워커가 값을 내면 여기에 «지금 넣으면»이 뜹니다)" : ""}</div>`;
     }
     setH("snapAcctPosition", `<div class="acct-card">
-        <div class="acct-main">${hero}${body}</div>${perf}
+        <div class="acct-spine-top">${hero}</div>${body}
       </div>${otherNote}`);
+    setH("snapAcctPerf", perf);
     bindAcctChartTip();
     // 🔴패처(applyAcctPreview)는 «실제 포지션» 타일을 제자리에서 고치는 물건이다. 포지션이
     //   없을 때 그게 돌면 방금 그린 투영 값을 덮는다 -- 문맥을 비워 전체 재렌더로 보낸다.
@@ -1533,8 +1537,8 @@ function renderSnapshotAccount() {
   // 노출은 **계좌 전체** 기준이다(명목 ÷ 순자산). 포지션 레버리지(×30)와 다른 값이라
   //   같은 "배"를 써서 혼동이 났다 -- 라벨을 「계좌 노출」로 바꾸고 명목을 툴팁에 적는다.
   const expo = equity > 0 ? (Number(pos.notional) || 0) / equity : 0;
-  const tiles = `<div class="acct-pv-cap entry-cap" hidden>큰 숫자는 <b>지금 내 계좌</b> · 주황 <u class="pv-after">→</u> 와 점선 눈금은 <b>지금 설정으로 넣었을 때</b></div>
-    <div class="acct-tiles">
+  const pvCap = `<div class="acct-pv-cap entry-cap" hidden>큰 숫자는 <b>지금 내 계좌</b> · 주황 <u class="pv-after">→</u> 와 점선 눈금은 <b>지금 설정으로 넣었을 때</b></div>`;
+  const tiles = `<div class="acct-tiles">
       ${tile("liq", "청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
              `마크 ${fmtUsd(mark)} → 청산 ${fmtUsd(liq)}\n교차증거금이라 1/레버리지(${
                (100 / (Number(pos.leverage) || 1)).toFixed(2)}%)가 아니라 지갑 전체가 버팁니다.`)}
@@ -1545,6 +1549,17 @@ function renderSnapshotAccount() {
       ${tile("expo", "계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
              `명목 ${fmtUsd(pos.notional)} ÷ 순자산 ${fmtUsd(equity)}\n포지션 레버리지(${
                pos.leverage}배)와 다른 값입니다 — 증거금을 계좌의 일부만 썼기 때문입니다.`)}
+      ${tile("upnl", "미실현", usd2(upnl), upnl >= 0 ? "good" : "bad", Math.min(1, Math.abs(upnlPct) / 5),
+             `거래소가 준 미실현 손익입니다. 막대는 순자산 대비 ±5% 를 만재로 봅니다.`)}
+      ${(() => {
+        // 🔴시안 B: «지금 닫으면»이 청산을 누르기 직전 유일하게 중요한 숫자인데 레인 안 작은
+        //   글씨였다. 같은 식(exitNetUsd)을 써야 레인과 타일이 어긋나지 않는다.
+        const e = exitNetUsd(pos, 100);
+        return tile("close", "지금 닫으면", e.net === null ? "—" : usd2(e.net),
+                    (e.net || 0) >= 0 ? "good" : "bad", Math.min(1, Math.abs(e.net || 0) / (equity * 0.05 || 1)),
+                    `전량 청산 시 지갑이 늘어나는 금액입니다.\n미실현 ${usd2(e.gross || 0)} − 청산 수수료 ≈$${
+                      e.fee.toFixed(2)} (peg 실측 ${EXIT_FEE_BP_PEG}bp)\n진입 수수료는 이미 빠졌으므로 다시 빼지 않습니다.`);
+      })()}
     </div>`;
 
   // ⭐청산 거리 게이지 -- 롱/숏 모두 **왼쪽 끝이 청산**이 되도록 접는다.
@@ -1553,28 +1568,36 @@ function renderSnapshotAccount() {
   const span = Math.abs(entry - liq) * 2;
   const safe = span > 0 ? clamp01(Math.abs(mark - liq) / span) : 0;
   const sideTone = pos.side === "LONG" ? "good" : "bad";
-  const position = `<div class="acct-pos" data-side="${pos.side === "LONG" ? "long" : "short"}">
-      <div class="acct-pos-head">
+  // 🔴2026-09-22 시안 B: 레일이 이 카드의 척추다. 머리줄(심볼·측면·수량)은 순자산 옆으로
+  //   올려 한 줄이 되고, 게이지는 카드 전폭을 가로지른다. data-pv 훅은 **하나도 안 옮겼다**
+  //   -- applyAcctPreview 는 한 줄도 안 고친다.
+  const posHead = `<div class="acct-pos-head">
         <b>${escapeHtml(pos.symbol)}</b>
         <span class="acct-tag ${sideTone}" data-pv="tag">${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</span>
         <span class="acct-pos-qty" data-pv="qty">${escapeHtml(pos.qty)}</span>
-      </div>
+      </div>`;
+  const position = `<div class="acct-pos spine" data-side="${pos.side === "LONG" ? "long" : "short"}">
       <div class="acct-gauge" title="왼쪽 끝이 청산가, 가운데 눈금이 진입가입니다. 손잡이가 왼쪽에 붙을수록 위험합니다.">
         <span class="acct-gauge-track"></span>
         <span class="acct-gauge-entry"></span>
         <span class="acct-gauge-knob" data-pv="knob" style="left:${(safe * 100).toFixed(1)}%"></span>
+        <span class="acct-gauge-now" style="left:${(safe * 100).toFixed(1)}%">현재 ${fmtUsd(mark)}</span>
       </div>
       <div class="acct-gauge-legend">
-        <span class="bad" data-pv="liqpx">청산 ${fmtUsd(liq)}</span>
-        <span data-pv="entrypx">진입 ${fmtUsd(entry)}</span>
-        <span class="acct-gauge-now">현재 ${fmtUsd(mark)}</span>
+        <span class="bad" data-pv="liqpx" style="left:0">청산 ${fmtUsd(liq)}</span>
+        <span data-pv="entrypx" style="left:50%">진입 ${fmtUsd(entry)}</span>
       </div>
     </div>`;
 
+  // 시안 B 구성: 척추(순자산+포지션 한 줄 → 전폭 레일) → KPI 5칸 → [index.html 의 두 레인]
+  //   → 자산 곡선. 곡선은 «역사»라 조작보다 아래가 맞다(사용자 선택 2026-09-22).
   setH("snapAcctPosition", `<div class="acct-card">
-      <div class="acct-main">${hero}${tiles}${position}</div>
-      ${perf}
+      <div class="acct-spine-top">${hero}${posHead}</div>
+      ${pvCap}
+      ${position}
+      ${tiles}
     </div>${otherNote}`);
+  setH("snapAcctPerf", perf);
   bindAcctChartTip();
   // 🔴계좌 폴링이 카드를 다시 그리면 미리보기가 지워진다 -- 렌더 직후 곧바로 다시 입힌다.
   //   (이 경로는 노드가 새로 생겨서 애니메이션은 안 걸린다. 값이 맞는 게 먼저다.)
@@ -8146,6 +8169,20 @@ const EXIT_FEE_BP_TAKER = 5.0;
 // «≈$2.0831» 로 찍히면 정밀해 보일 뿐 읽기 나쁘다. 부호는 항상 붙인다 -- 색만으로는 부족하다.
 const usd2 = (v) => `${v < 0 ? "-" : "+"}$${Math.abs(Number(v) || 0).toFixed(2)}`;
 
+// 2026-09-22 시안 B: KPI 타일 「지금 닫으면」과 청산 레인이 **같은 식**을 써야 한다.
+//   두 군데서 따로 계산하면 반올림 한 자리만 달라져도 «어느 쪽이 맞나»가 된다.
+function exitNetUsd(pos, pct) {
+  const qty = Number(pos.qty) || 0, mark = Number(pos.mark_price) || 0;
+  const entry = Number(pos.entry_price) || 0, dir = pos.side === "LONG" ? 1 : -1;
+  const close = qty * pct / 100;
+  const full = Number.isFinite(Number(pos.unrealized_pnl)) ? Number(pos.unrealized_pnl)
+    : (entry > 0 && mark > 0 ? qty * (mark - entry) * dir : null);
+  const gross = full === null ? null : full * pct / 100;
+  const fee = mark > 0 ? close * mark * EXIT_FEE_BP_PEG / 10000 : 0;
+  return { close, gross, fee, net: gross === null ? null : gross - fee,
+           move: entry > 0 && mark > 0 ? (mark - entry) / entry * 100 * dir : null };
+}
+
 // 「지금 닫으면 얼마인가」를 미리보기 **전에** 그린다. 손익은 거래소가 준 unrealized_pnl 에
 // 비율을 곱한 것이고(우리가 VWAP 을 다시 계산하지 않는다), 체결가는 모르므로 ≈ 다.
 function renderExitNow() {
@@ -8156,19 +8193,9 @@ function renderExitNow() {
   for (const pos of lastExitPositions.values()) {
     const qty = Number(pos.qty) || 0;
     if (!(qty > 0)) continue;
-    const entry = Number(pos.entry_price) || 0;
-    const mark = Number(pos.mark_price) || 0;
-    const dir = pos.side === "LONG" ? 1 : -1;
-    const close = qty * pct / 100;
-    const move = entry > 0 && mark > 0 ? (mark - entry) / entry * 100 * dir : null;
-    // 거래소 값이 없을 때만 가격으로 되짚는다 -- 있으면 그게 진실이다.
-    const full = Number.isFinite(Number(pos.unrealized_pnl)) ? Number(pos.unrealized_pnl)
-      : (entry > 0 && mark > 0 ? qty * (mark - entry) * dir : null);
-    const gross = full === null ? null : full * pct / 100;
     // 청산 수수료만 뺀다. 진입 수수료는 **이미 지갑에서 빠져 나갔으므로**, 여기 숫자가
     // «지금 닫으면 지갑이 얼마 늘어나는가»와 일치하려면 빼면 안 된다(title 에 적어 둔다).
-    const fee = mark > 0 ? close * mark * EXIT_FEE_BP_PEG / 10000 : 0;
-    const net = gross === null ? null : gross - fee;
+    const { close, gross, fee, net, move } = exitNetUsd(pos, pct);
     const head = `${pos.side === "LONG" ? "롱" : "숏"} `
       + (pct >= 100 ? `전량 <b>${qty.toFixed(3)}</b>`
                     : `≈<b>${close.toFixed(3)}</b> 닫고 <b>${(qty - close).toFixed(3)}</b> 남김`);

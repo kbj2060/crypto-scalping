@@ -1876,11 +1876,15 @@ svg {
    따로 생겨 리듬이 깨졌고, 색 글씨로만 상태를 말해 흑백/저시력에서 정보가 사라졌다.
    새 구조: ①순자산 히어로 하나 ②같은 모양 타일 셋(라벨·값·레일) ③청산 거리 게이지.
    색은 기존 변수만 쓴다 -- 새 색을 만들지 않는다(표시 규약). */
-.acct-card { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-  gap: 20px; padding: 18px 20px 20px; align-items: stretch; }
+/* 2026-09-22 시안 B: 2열(왼쪽 지표 / 오른쪽 곡선)을 **전폭 한 열**로 폈다. 레일이 이 카드의
+   척추인데 절반 폭에서는 척추가 안 된다. 곡선은 레인 아래 #snapAcctPerf 로 내려갔다. */
+.acct-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px;
+  padding: 4px 18px 2px; align-content: start; }
 .acct-main { min-width: 0; display: grid; gap: 16px; }
 
 /* 히어로 -- 숫자 하나가 헤드라인이다 */
+.acct-spine-top { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 18px; flex-wrap: wrap; }
 .acct-hero { display: grid; gap: 4px; }
 .acct-eyebrow { font: 700 11px/1 var(--font-sans); letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--muted); }
@@ -1899,7 +1903,9 @@ svg {
 .acct-delta.neutral { color: var(--muted); background: var(--glass); }
 
 /* 타일 셋 -- 라벨·값·레일이 같은 모양이라 눈이 세로로 훑힌다 */
-.acct-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+/* 2026-09-22 시안 B: 3칸 -> 5칸(미실현·지금 닫으면 추가, 증거금 사용 유지 — 사용자 선택).
+   좁아지면 접힌다: 넷 -> 셋 -> 둘. 한 칸이 130px 밑으로 내려가면 21px 값이 잘린다. */
+.acct-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .acct-tile { display: grid; gap: 7px; padding: 11px 12px 12px; border-radius: var(--radius-sm);
   background: var(--glass); border: 1px solid var(--soft-line); }
 .acct-tile-lab { font: 600 11px/1 var(--font-sans); color: var(--muted); white-space: nowrap; }
@@ -1935,8 +1941,16 @@ svg {
 
 /* ⭐청산 거리 게이지: 0=청산가 · 0.5=진입가 · 1=진입에서 청산 거리만큼 이익.
    롱/숏 둘 다 **왼쪽 끝이 청산**이라 측면마다 읽는 법을 바꾸지 않아도 된다. */
+/* 척추 레일. 상자(.acct-pos)의 테두리·패딩을 벗고 카드 전폭을 가로지른다. */
+/* 🔴overflow:hidden 을 반드시 푼다 -- 레일 «위»의 «현재» 라벨이 상자 밖이라 잘린다.
+   위쪽 패딩은 그 라벨이 앉을 자리다(라벨 12px + 간격 8px). */
+.acct-pos.spine { padding: 24px 2px 2px; border: 0; background: none; border-radius: 0;
+  overflow: visible; }
+.acct-pos.spine::before { content: none; }
 /* 2026-09-22 시안 B: 레일이 이 카드의 척추다 -- 청산이 어느 쪽으로 끌려오는지를 여기서 읽는다. */
-.acct-gauge { position: relative; height: 10px; }
+.acct-gauge { position: relative; height: 14px; }
+.acct-pos.spine .acct-gauge-knob { width: 16px; height: 16px; }
+.acct-pos.spine .acct-gauge-legend { margin-top: 10px; font-size: 12px; }
 .acct-gauge-track { display: block; height: 100%; border-radius: 999px; overflow: hidden;
   background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 42%, transparent),
     color-mix(in srgb, var(--amber) 24%, transparent) 48%, rgb(var(--lift) / 0.06)); }
@@ -1951,10 +1965,20 @@ svg {
 .acct-gauge-knob { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
   background: var(--ink); border: 2px solid var(--bg); transform: translate(-50%, -50%);
   box-shadow: 0 0 0 1px var(--line); }
+/* 2026-09-22 시안 B: space-between 은 라벨을 **실제 위치에서 떼어놓는다**. 좁은 상자 안에서는
+   범례로 읽혔지만 전폭 레일에서는 «현재»가 오른쪽 끝에 적힌 채 손잡이는 50% 에 있어 거짓말이
+   됐다. 이제 청산은 0%, 진입은 50%(접힌 눈금의 실제 자리)에 고정하고, «현재»는 손잡이 위로
+   올라갔다. 위(현재·가정) / 아래(고정 눈금)로 층을 갈라 겹치지 않는다. */
 .acct-gauge-legend { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px;
-  font: 600 11px/1 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+                     font: 600 11px/1 var(--font-mono); color: var(--muted); }
+/* 🔴척추 레일에서만 절대배치다. 포지션이 없을 때의 증거금 막대도 같은 클래스를 쓰는데 거기엔
+   left 값이 없어서, 범위를 안 좁히면 라벨이 전부 0 에 쌓인다(실제로 겹쳤다). */
+.acct-pos.spine .acct-gauge-legend { display: block; position: relative; height: 15px; margin-top: 9px; }
+.acct-pos.spine .acct-gauge-legend > span { position: absolute; top: 0; white-space: nowrap; }
+.acct-pos.spine .acct-gauge-legend > span[style*="50%"] { transform: translateX(-50%); }
 .acct-gauge-legend .bad { color: var(--bad); }
-.acct-gauge-now { color: var(--text); }
+.acct-gauge-now { position: absolute; bottom: calc(100% + 8px); transform: translateX(-50%);
+  white-space: nowrap; font: 800 12px/1 var(--font-mono); color: var(--ink); z-index: 2; }
 
 /* 성과 */
 .acct-perf { min-width: 0; display: grid; gap: 9px; grid-template-rows: auto 1fr auto; }
@@ -2034,7 +2058,7 @@ svg {
 /* 게이지 위 «넣으면 여기» 유령 손잡이. 실제 손잡이(.acct-gauge-knob)는 안 움직인다 --
    청산선이 어느 쪽으로 얼마나 끌려오는지를 숫자가 아니라 **거리**로 읽는 게 이 안의 핵심이다. */
 .acct-gauge-pv {
-  position: absolute; top: 50%; width: 15px; height: 15px; border-radius: 50%;
+  position: absolute; top: 50%; width: 16px; height: 16px; border-radius: 50%;
   transform: translate(-50%, -50%); text-decoration: none; pointer-events: auto;
   border: 1.5px dashed var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent);
   transition: left 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -2050,9 +2074,19 @@ svg {
 /* 숨은 확인 버튼만 든 행이 flex gap 을 두 번 먹어 버튼과 «약속» 사이에 빈 60px 가 남는다.
    확인 버튼은 미리보기 뒤에만 잠깐 뜨므로 이 빈칸이 **평소 모습**이다. */
 .manual-entry-row:has(> [hidden]:only-child) { display: none; }
+#snapAcctPerf { display: block; padding: 0 18px 4px; }
+#snapAcctPerf:empty { display: none; }
+#snapAcctPerf .acct-perf { padding-top: 14px; border-top: 1px solid var(--soft-line); }
+#snapAcctPerf .acct-plot svg { max-height: 190px; }
 /* 각 레인의 «약속». 두 행동은 확인 방식이 다르고, 그 차이가 이 화면에서 가장 비싼 오해다. */
 @media (max-width: 720px) {
   .acct-lanes { grid-template-columns: 1fr; margin-left: -14px; margin-right: -14px; }
+  /* 330px 레일에 «청산 … → ~…» 185px 라벨 둘을 위치로 놓을 수 없다(실측 겹침). 그 폭에서는
+     위치 라벨이 어차피 성립 안 하므로 세로로 쌓는다 -- 투영값을 버리지 않는다. */
+  .acct-pos.spine .acct-gauge-legend { height: auto; display: grid; gap: 3px; }
+  .acct-pos.spine .acct-gauge-legend > span,
+  .acct-pos.spine .acct-gauge-legend > span[style*="50%"] {
+    position: static; transform: none; }
   .acct-lanes > * { padding: 12px 14px 14px; }
 }
 .lane-pact { margin: 10px 0 0; font: 600 10.5px/1.5 var(--font-mono); color: var(--muted); }
