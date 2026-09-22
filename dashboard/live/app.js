@@ -121,7 +121,9 @@ let footprintLastFetchAt = 0;
 // 구간을 말하면 읽는 사람이 속는다 -- 그래서 토글도 하나다.
 // 서버 링은 24시간(288봉)이라 4h 도 이미 쌓여 있는 데이터다. 더 긴 창을 안 주는 건 값이
 // 없어서가 아니라, 48봉이면 풋프린트 셀이 25px 라 숫자가 이미 안 들어가서다.
-const CHART_WINDOW_BARS = [12, 24, 48];   // 5분봉 기준 1h · 2h · 4h
+const CHART_WINDOW_BARS = [12, 24, 48, 144];   // 5분봉 기준 1h · 2h · 4h · 12h
+// 🔴12h(144봉)에서는 봉이 ~9px 라 셀 숫자가 안 들어간다 -- showQty(half >= 18)가 꺼져
+//   색 농담만 남는 «시간축 볼륨 프로파일»이 된다. 4h 에서도 이미 그렇다(봉 26px).
 let chartWindowBars = (() => {
   try {
     const saved = Number(localStorage.getItem("chartWindowBars"));
@@ -5248,8 +5250,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 같은 풋프린트 봉에서 나온다: 거래대금 = Σ가격x(매수+매도) · 델타 = Σ(매수-매도) ·
   // CVD = 그 창 안에서의 델타 누적.
   // 🔴CVD 의 기준점은 **창 시작**이고, 창은 1h/2h/4h 선택기를 그대로 따른다(사용자 결정).
-  //   `CHART_WINDOW_BARS` 12/24/48 이 곧 그 셋이고 서버 상한(FOOTPRINT_MAX_WINDOW_BARS)도
-  //   48 이라 셋 다 덮인다. 창을 바꾸면 기준점도 같이 옮겨간다 -- 절대 누적이 아니다.
+  //   `CHART_WINDOW_BARS` 12/24/48/144 가 곧 그 넷이고 서버 상한(FOOTPRINT_MAX_WINDOW_BARS)도
+  //   144 라 넷 다 덮인다. 창을 바꾸면 기준점도 같이 옮겨간다 -- 절대 누적이 아니다.
   // 🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이다(dashboard/situation.py 의 WINDOW=6).
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
   const cw = w - ml - mr;
