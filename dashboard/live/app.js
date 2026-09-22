@@ -3472,20 +3472,25 @@ const SIT_CLAMP = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const SIT_FIN = (x) => (Number.isFinite(x) ? x : null);
 // 두 값의 상대 편중을 -100~100 으로. 둘 다 0 이면 «재료 없음»(null).
 const SIT_TILT = (a, b) => (a || b ? ((a - b) / (Math.abs(a) + Math.abs(b))) * 100 : null);
+// 값 칸은 46px 다. 청산·CVD·델타·OI 는 상한이 없어 그대로 쓰면 넘친다(실측 «961/16691»
+// 이 8px 넘쳤다 -- 렌더 검사기가 잡았다. 픽스처의 «96/412» 로는 안 보였다).
+const SIT_K = (v) => { const n = Math.round(Math.abs(v)), s = v < 0 ? "-" : "";
+  return n >= 1e6 ? `${s}${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${s}${Math.round(n / 1e3)}k`
+       : n >= 1e3 ? `${s}${(n / 1e3).toFixed(1)}k` : `${s}${n}`; };
 
 const SIT_SIGNALS = [
   // ── 방향 압력 8칸 ──
   ["청산 편중", "d", (e) => {
     const v = SIT_TILT(e.liq_short || 0, e.liq_long || 0);          // + = 숏이 더 청산 = 위쪽 압력
-    return v == null ? null : { v, txt: `${Math.round(e.liq_short || 0)}/${Math.round(e.liq_long || 0)}` };
+    return v == null ? null : { v, txt: SIT_K((e.liq_short || 0) - (e.liq_long || 0)) };
   }],
   ["창 CVD", "d", (e) => {
     const c = SIT_FIN(e.cvd), m = Math.abs(SIT_FIN(e.max_delta) || 0);
-    return c == null || !m ? null : { v: SIT_CLAMP((c / m) * 100, -100, 100), txt: Math.round(c) };
+    return c == null || !m ? null : { v: SIT_CLAMP((c / m) * 100, -100, 100), txt: SIT_K(c) };
   }],
   ["마지막 봉 델타", "d", (e, t) => {
     const l = SIT_FIN(e.last_delta), m = Math.abs(SIT_FIN(e.max_delta) || 0);
-    return l == null || !m ? null : { v: SIT_CLAMP((l / m) * 100, -100, 100), txt: Math.round(l),
+    return l == null || !m ? null : { v: SIT_CLAMP((l / m) * 100, -100, 100), txt: SIT_K(l),
                                       mark: (t.reject || 0.5) * 100 };
   }],
   ["고래−리테일", "d", (e) => {
@@ -3511,7 +3516,7 @@ const SIT_SIGNALS = [
   ["BTC 이동", "d", (e) => {
     const b = SIT_FIN(e.btc_move_bp), m = Math.abs(SIT_FIN(e.move_bp) || 0);
     return b == null ? null : { v: m ? SIT_CLAMP((b / m) * 100, -100, 100) : 0,
-                                on: e.btc_rel != null, txt: Math.round(b) };
+                                on: e.btc_rel != null, txt: SIT_K(b) };
   }],
   // ── 강도 · 위치 10칸 ──
   ["레짐 세기", "m", (e) => {
@@ -3521,7 +3526,7 @@ const SIT_SIGNALS = [
   }],
   ["OI 동조율", "m", (e) => {
     if (e.oi_sum == null) return null;                               // OI 스트림이 비었다
-    return { v: SIT_CLAMP((e.oi_agree || 0) * 100, 0, 100), txt: Math.round(e.oi_sum) };
+    return { v: SIT_CLAMP((e.oi_agree || 0) * 100, 0, 100), txt: SIT_K(e.oi_sum) };
   }],
   ["활동 분위", "m", (e, t) => {
     const a = SIT_FIN(e.act_pct);
