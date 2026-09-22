@@ -2824,8 +2824,14 @@ function situationTargetLevels(footprint) {
     const passed = !(Number(live) > 0);
     const v = passed ? raw : live;
     if (!(Number(v) > 0)) continue;
+    // 🔴«사실»과 «예측»을 **형태로** 가른다(2026-09-22 사용자 «보통 라벨과는 달랐으면», 시안 Q).
+    //   현재가·진입가·청산 S/R 은 채운 배지(확정), 시나리오는 **비운 배지**(잠정)다.
+    //   그리고 그 테두리 안을 확률만큼 채운다 -- 배지 자체가 게이지라서 숫자를 읽기 전에
+    //   56 과 26 의 차이가 길이로 먼저 들어온다. 새 색도 새 자리도 안 쓴다.
+    //   «지남»은 채움이 0 이라 자연히 빈 껍데기가 된다 -- «쓴 목표»라는 뜻에 형태가 맞는다.
     out.push({ val: Number(v), color: "var(--muted)", label: "",
                sub: passed ? "지남" : `${Number((n.prob || {})[k]) || 0}%`,
+               gauge: passed ? 0 : Math.max(0, Math.min(100, Number((n.prob || {})[k]) || 0)),
                faded: passed, dashed: true, width: 1, marker: !!footprint, scenario: k });
   }
   return out;
@@ -5807,8 +5813,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       // 플롯 오른쪽 가장자리에서 **왼쪽을 가리키는** 삼각형. 꼭짓점이 곧 그 가격의 행이다.
       const tri = document.createElementNS(NS, "polygon");
       tri.setAttribute("points", markerPoints(ml + cw, p.realY));
-      tri.setAttribute("fill", p.color);
-      if (p.faded) tri.setAttribute("opacity", "0.42");        // 지나간 목표
+      if (p.gauge === undefined) {
+        tri.setAttribute("fill", p.color);
+      } else {                                   // 예측 = 속 빈 꺾쇠
+        tri.setAttribute("fill", "none");
+        tri.setAttribute("stroke", p.color);
+        tri.setAttribute("stroke-width", "1.2");
+        tri.setAttribute("stroke-linejoin", "round");
+      }
+      if (p.faded) tri.setAttribute("opacity", "0.5");         // 지나간 목표
       else if (p.outOfView) tri.setAttribute("opacity", "0.72");
       // ⚠️여기서 append 하지 않는다. 플롯 오른쪽 끝(ml+cw)과 가격 배지(w-mr+4)가 4px 차이라
       //   먼저 그리면 배지에 **가려진다**(2026-09-16 첫 판이 그래서 안 보였다). 배지 뒤에
@@ -5847,8 +5860,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const rect = document.createElementNS(NS, "rect");
     rect.setAttribute("x", w - mr + 4); rect.setAttribute("y", labelY - 9);
     rect.setAttribute("width", boxW); rect.setAttribute("height", boxH);
-    rect.setAttribute("fill", p.color); rect.setAttribute("rx", "2");
-    if (p.faded) rect.setAttribute("opacity", "0.42");
+    rect.setAttribute("rx", "2");
+    if (p.gauge === undefined) {
+      rect.setAttribute("fill", p.color);
+    } else {
+      rect.setAttribute("fill", "none");
+      rect.setAttribute("stroke", p.color);
+      rect.setAttribute("stroke-width", "1.2");
+      if (p.gauge > 0) {                         // 테두리 «안»을 확률만큼 채운다
+        const fillW = Math.max(2, (boxW - 2) * (p.gauge / 100));
+        const g = document.createElementNS(NS, "rect");
+        g.setAttribute("x", w - mr + 5); g.setAttribute("y", labelY - 8);
+        g.setAttribute("width", fillW); g.setAttribute("height", boxH - 2);
+        g.setAttribute("fill", p.color); g.setAttribute("opacity", "0.32");
+        g.setAttribute("rx", "1.5");
+        svg.appendChild(g);
+      }
+    }
+    if (p.faded) rect.setAttribute("opacity", "0.5");
     svg.appendChild(rect);
 
     const pTxt = document.createElementNS(NS, "text");
@@ -5856,16 +5885,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 값이 같이 들어가면 가격을 한 단계 줄인다 -- 76px 안에 «2700.0»(11px, 40) + «56%»(9.5px, 17)
     pTxt.setAttribute("font-size", subOk ? "11" : (mobileChart ? "11" : "12"));
     pTxt.setAttribute("font-weight", "bold");
-    pTxt.setAttribute("fill", inkOnFill());
-    if (p.faded) pTxt.setAttribute("opacity", "0.72");
+    pTxt.setAttribute("fill", p.gauge === undefined ? inkOnFill() : "var(--ink)");
+    if (p.faded) pTxt.setAttribute("opacity", "0.62");
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
     svg.appendChild(pTxt);
     if (subOk) {
       const sTxt = document.createElementNS(NS, "text");
       sTxt.setAttribute("x", w - mr + 4 + boxW - 5); sTxt.setAttribute("y", labelY + 4);
       sTxt.setAttribute("text-anchor", "end"); sTxt.setAttribute("font-size", "9.5");
-      sTxt.setAttribute("font-weight", "700"); sTxt.setAttribute("fill", inkOnFill());
-      sTxt.setAttribute("opacity", ".72");
+      sTxt.setAttribute("font-weight", "700");
+      sTxt.setAttribute("fill", p.gauge === undefined ? inkOnFill() : "var(--muted)");
+      if (p.gauge === undefined) sTxt.setAttribute("opacity", ".72");
       sTxt.textContent = p.sub;
       svg.appendChild(sTxt);
     }

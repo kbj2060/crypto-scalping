@@ -22,6 +22,9 @@ assert.equal(r.length, 3, "지나간 목표가 빠졌다");
 assert.deepEqual(r.map((x) => x.sub), ["56%", "26%", "지남"]);
 assert.deepEqual(r.map((x) => !!x.faded), [false, false, true], "지나간 것만 흐려야 한다");
 assert.equal(r[2].val, 2634.2, "지나간 목표는 targets_raw 의 가격을 쓴다");
+// 배지가 게이지다(시안 Q) -- 확률만큼 채운다. 지나간 목표는 0(빈 껍데기).
+assert.deepEqual(r.map((x) => x.gauge), [56, 26, 0], "게이지가 확률을 안 따른다");
+assert.ok(r.every((x) => x.gauge >= 0 && x.gauge <= 100), "게이지가 0~100 밖");
 assert.ok(r.every((x) => x.label === ""), "왼쪽 라벨이 남아 있다");
 assert.deepEqual(r.map((x) => x.scenario), ["A", "B", "C"]);
 assert.ok(r.every((x) => x.marker === true), "풋프린트인데 선으로 그린다");
