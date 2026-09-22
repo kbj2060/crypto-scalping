@@ -1270,6 +1270,10 @@ function applyAcctPreview(pos, mark, equity) {
 let entryProjPreview = null;
 let lastAcctPos = null;   // 패처가 쓰는 마지막 렌더 문맥(포지션·마크가·순자산)
 let entryProjKey = "";
+// 2026-09-22 아티팩트 댓글 «포지션이 없으면 카드가 안 보이는데 없어도 max 수치를».
+//   미리보기(/api/manual-entry/preview)가 이미 받아오는 cap 을 그대로 들고 있는다 --
+//   새 엔드포인트도 새 폴링도 없다. 포지션이 없을 때 이 값으로 타일을 채운다.
+let lastEntryCap = null;
 
 function renderSnapshotAccount() {
   const summary = el("snapAcctSummary");
@@ -1383,15 +1387,57 @@ function renderSnapshotAccount() {
        </section>`
     : `<section class="acct-perf"><div class="acct-empty">닫힌 왕복이 아직 없습니다.</div></section>`;
 
+  const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
+  const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
+  // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
+  // ⭐여기서는 **항상 실제 계좌**를 그린다. 진입 미리보기는 렌더가 아니라 applyAcctPreview 가
+  //   **같은 노드를 제자리에서** 고친다 -- 노드를 갈아치우면 transition 이 안 걸린다.
+  //   `data-pv` 가 그 손잡이다.
+  // 🔴2026-09-22 «포지션 없음» 분기도 같은 헬퍼를 쓰므로 그 분기보다 **위**에 있어야 한다.
+  const tile = (key, lab, val, tone, fill, title) => `<div class="acct-tile" data-pv="${key}"${
+      title ? ` title="${escapeHtml(title)}"` : ""}>
+      <span class="acct-tile-lab">${lab}</span>
+      <b class="acct-tile-val ${tone}">${val}</b>
+      <span class="acct-rail"><i class="${tone}" style="width:${clamp01(fill) * 100}%"></i></span>
+    </div>`;
+
   const otherNote = others > 0
     ? `<p class="acct-foot">다른 코인에 ${others}종목을 더 보유 중입니다 — 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
     : "";
   if (!pos) {
+    // ── 포지션이 없어도 «최대» 를 띄운다 (2026-09-22 아티팩트 댓글) ──────────────
+    // 빈 카드는 «지금 얼마나 넣을 수 있나»에 답하지 않는다. 사이징 서버가 이미 상한을
+    // 계산해 미리보기에 실어 보내므로(lastEntryCap) 같은 타일 모양으로 그 천장을 그린다.
+    // 🔴«증거금 사용» 자리를 «최대 명목»이 대신한다 -- 포지션이 0 이면 사용률도 0 이라
+    //   아무것도 재고 있지 않다. 여기서 알고 싶은 건 사용률이 아니라 **넣을 수 있는 양**이다.
+    // 🔴이 값은 «지금 진입 비율» 과 무관한 천장이다(실측: pct 25 와 100 에서 동일).
+    //   비율은 이 천장의 몇 %를 쓸지만 정한다.
+    const cp = lastEntryCap;
+    const capN = Number(cp && cp.cap_notional_usdt) || 0;
+    const capX = Number(cp && cp.equity_x) || 0;
+    const capLiq = Number(cp && cp.liq_floor_pct) || 0;
+    const BIND = { equity: "순자산", ledger: "원장 중앙", model: "위험 모델", survival: "생존" };
+    const body = capN > 0
+      ? `<div class="acct-pv-cap entry-cap">최대 — 지금 넣을 수 있는 천장 (포지션 아님)</div>
+         <div class="acct-tiles">
+           ${tile("liq", "청산까지", `${capLiq.toFixed(1)}%`, acctRiskTone(capLiq),
+                  capLiq / LIQ_FULL,
+                  `천장까지 넣었을 때의 청산 거리입니다.\n교차증거금이라 지갑 전체가 버팁니다.`)}
+           ${tile("used", "최대 명목", fmtUsd(capN), "warn", capX / EXPO_CAP,
+                  `묶는 조건: ${BIND[cp.binding] || cp.binding || "—"}\n`
+                  + `순자산 ${fmtUsd(cp.cap_equity_usdt)} · 원장 ${fmtUsd(cp.cap_ledger_usdt)}`
+                  + ` · 모델 ${fmtUsd(cp.cap_model_usdt)} 중 **가장 작은 것**입니다.\n`
+                  + `최근 ${cp.trips ?? "—"}왕복 중앙 명목 ${fmtUsd(cp.median_notional_usdt)} × ${cp.mult ?? "—"}`)}
+           ${tile("expo", "최대 노출", `${capX.toFixed(1)}배`, capX > 15 ? "bad" : "warn",
+                  capX / EXPO_CAP,
+                  `명목 ${fmtUsd(capN)} ÷ 순자산 ${fmtUsd(equity)}\n`
+                  + `진입 비율은 이 천장의 몇 %를 쓸지만 정합니다 — 천장 자체는 안 움직입니다.`)}
+         </div>`
+      : `<div class="acct-empty">${ASSET_CONFIG[activeSnapshotAsset]?.label
+          || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.${
+          cp === null ? " (상한은 크기 워커가 값을 내면 표시됩니다)" : ""}</div>`;
     setH("snapAcctPosition", `<div class="acct-card">
-        <div class="acct-main">${hero}
-          <div class="acct-empty">${ASSET_CONFIG[activeSnapshotAsset]?.label
-            || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.</div>
-        </div>${perf}
+        <div class="acct-main">${hero}${body}</div>${perf}
       </div>${otherNote}`);
     bindAcctChartTip();
     return;
@@ -1414,18 +1460,6 @@ function renderSnapshotAccount() {
   // 노출은 **계좌 전체** 기준이다(명목 ÷ 순자산). 포지션 레버리지(×30)와 다른 값이라
   //   같은 "배"를 써서 혼동이 났다 -- 라벨을 「계좌 노출」로 바꾸고 명목을 툴팁에 적는다.
   const expo = equity > 0 ? (Number(pos.notional) || 0) / equity : 0;
-  const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
-  const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
-  // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
-  // ⭐여기서는 **항상 실제 계좌**를 그린다. 진입 미리보기는 렌더가 아니라 applyAcctPreview 가
-  //   **같은 노드를 제자리에서** 고친다 -- 노드를 갈아치우면 transition 이 안 걸린다.
-  //   `data-pv` 가 그 손잡이다.
-  const tile = (key, lab, val, tone, fill, title) => `<div class="acct-tile" data-pv="${key}"${
-      title ? ` title="${escapeHtml(title)}"` : ""}>
-      <span class="acct-tile-lab">${lab}</span>
-      <b class="acct-tile-val ${tone}">${val}</b>
-      <span class="acct-rail"><i class="${tone}" style="width:${clamp01(fill) * 100}%"></i></span>
-    </div>`;
   const tiles = `<div class="acct-pv-cap entry-cap" hidden>진입 미리보기 — 지금 넣으면 (실제 계좌 아님)</div>
     <div class="acct-tiles">
       ${tile("liq", "청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
@@ -7422,6 +7456,7 @@ async function manualEntryRefreshSize() {
     line.textContent = plan.blocked ? `주문 불가 — ${plan.blocked}`
       : ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "";
     renderEntryFoldNote(plan);
+    lastEntryCap = cap && cap.available ? cap : null;
     setEntryProjPreview(plan);
     // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
     const hb = el("snapHoldRisk");
