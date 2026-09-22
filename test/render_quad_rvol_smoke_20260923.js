@@ -118,11 +118,16 @@ for (const [sv, lab] of [[0.55, "적음"], [1.02, "보통"], [2.10, "많음"]]) 
   ck(!texts(els).some((t) => t.includes("RVOL")), "모바일 범례에도 선 항목 없음");
   ck(els.badge.hidden === false, "모바일에서도 상단 배지");
 }
-// ══ RVOL 선 레인 (2026-09-23, 누적 CVD 아래) ═══════════════════════════════════
-// 🔴사분면 행과 **다른 블록**이다 -- 따로 잘라 따로 돈다.
+// ══ RVOL 두 선이 **누적 CVD 레인 안**에 있다 (2026-09-23 2차 사용자 지시) ═════════
+// 🔴전용 레인(rvolLane)을 없애고 cumLane 안으로 옮겼다. 축이 다르므로(CVD=ETH 누적 0중심,
+//   RVOL=배수 0~cap) «평소»(1.0) 점선을 제 기준으로 따로 깐다 -- 그게 있어야 읽을 수 있다.
 {
-  const i0 = src.indexOf('cachedLayer("rvolLane"');
-  if (i0 < 0) { console.log("🔴 rvolLane 블록을 못 찾음"); process.exit(1); }
+  ck(!/cachedLayer\("rvolLane"/.test(src), "전용 rvolLane 이 없다(되돌림 확인)");
+  ck(!/RVOL_H/.test(src), "RVOL_H 높이 예산이 없다");
+  const key = src.match(/cachedLayer\("cumLane",[\s\S]{0,260}?\(g\) => \{/);
+  ck(!!key && /rvolSig/.test(key[0]), "cumLane 캐시 키에 rvolSig 포함(안 넣으면 옛 노드 재사용)");
+
+  const i0 = src.indexOf('cachedLayer("cumLane"');
   const open = src.indexOf("{", src.indexOf("(g) => ", i0));
   let depth = 0, end = open;
   for (; end < src.length; end++) {
@@ -131,63 +136,79 @@ for (const [sv, lab] of [[0.55, "적음"], [1.02, "보통"], [2.10, "많음"]]) 
   }
   const LANE = src.slice(open + 1, end - 1);
 
-  function lane({ a = 1.3, b = 1.1, n = 12, worker = true, spike = false } = {}) {
+  function cum({ a = 1.3, b = 1.1, n = 12, worker = true, spike = false } = {}) {
     const els = [];
     const mk = (kind) => ({ _a: {}, _kind: kind, kids: [],
       setAttribute(k, v) { this._a[k] = v; }, appendChild(c) { this.kids.push(c); },
-      set textContent(v) { this._t = v; }, get textContent() { return this._t; } });
+      set textContent(v) { this._t = v; }, get textContent() { return this._t; },
+      getComputedTextLength() { return String(this._t || "").length * 6; } });
     const document = { createElementNS: (ns, kind) => { const e = mk(kind); els.push(e); return e; } };
     const T0 = 1789430000 - (1789430000 % 300);
-    const candles = [], rvolBy = new Map(), rvolBar5By = new Map();
+    const candles = [], fpBars = [], oiBars = [], rvolBy = new Map(), rvolBar5By = new Map();
     for (let i = 0; i < n; i++) {
       const t = T0 + i * 300;
       candles.push({ time: t });
+      fpBars.push({ time: t, levels: [[100, 5, 4]] });
+      oiBars.push([t, i % 2 ? 3 : -3]);
       if (worker) {
         if (Number.isFinite(a)) rvolBy.set(t, a);
         if (Number.isFinite(b)) rvolBar5By.set(t, spike && i === n - 1 ? 9.8 : b);
       }
     }
     const g = mk("g");
-    new Function("candles", "rvolBy", "rvolBar5By", "rvolMinutes", "rvolBaseDays", "RVOL_H",
-                 "rvolY", "NS", "document", "xAt", "bw", "ml", "cw", "w", "mobileChart", "g",
-                 "{" + LANE + "}")(
-      candles, rvolBy, rvolBar5By, 60, 14, 90, 500, NS, document,
-      (i) => 40 + i * 20, 16, 40, 240, 320, false, g);
+    new Function("candles", "fpBars", "oiBars", "rvolBy", "rvolBar5By", "rvolMinutes",
+                 "rvolBaseDays", "cumY", "CUM_H", "cumBottom", "chartWindowBars", "NS",
+                 "document", "xAt", "bw", "ml", "cw", "w", "mobileChart", "supplyFlowOfBar",
+                 "fmtFootprintQty", "g", "{" + LANE + "}")(
+      candles, fpBars, oiBars, rvolBy, rvolBar5By, 60, 14, 300, 190, 490, 12, NS, document,
+      (i) => 40 + i * 20, 16, 40, 240, 320, false,
+      () => ({ whale: 2, mid: 1, retail: 1 }), (v) => String(Math.round(v)), g);
     return els;
   }
   const paths = (els) => els.filter((e) => e._kind === "path");
   const txts = (els) => els.filter((e) => e._kind === "text").map((e) => String(e.textContent));
+  const rvPaths = (els) => paths(els).filter((e) => e._a.stroke === "var(--turnover)");
 
-  // ⑨ 정상 -- 선 둘 · 평소 점선 · 좌측 라벨 · 우측 값 둘
+  // ⑨ 정상 -- RVOL 선 둘 + 제 «평소» 점선 + 범례 둘 + 왼쪽 «+ RVOL»
   {
-    const els = lane();
-    ck(paths(els).length === 2, `선 2줄 (실제 ${paths(els).length})`);
-    const w5 = paths(els).map((e) => Number(e._a["stroke-width"])).sort((x, y) => x - y);
-    ck(w5[0] === 1 && w5[1] === 2.2, `5분은 얇고(1) 1시간은 굵다(2.2) (실제 ${w5})`);
-    ck(els.some((e) => e._kind === "line" && e._a["stroke-dasharray"] === "3 4"), "«평소»(1.0) 점선");
-    ck(txts(els).includes("RVOL"), "좌측 라벨 «RVOL»");
-    ck(txts(els).some((t) => t.includes("━ 60분 1.30배")), `우측 1시간 값 (실제 ${txts(els)})`);
-    ck(txts(els).some((t) => t.includes("─ 5분 1.10배")), "우측 5분 값");
+    const els = cum();
+    ck(rvPaths(els).length === 2, `RVOL 선 2줄 (실제 ${rvPaths(els).length})`);
+    const ws = rvPaths(els).map((e) => Number(e._a["stroke-width"])).sort((x, y) => x - y);
+    ck(ws[0] === 1 && ws[1] === 2.2, `5분 얇고(1) 1시간 굵다(2.2) (실제 ${ws})`);
+    const dash = els.filter((e) => e._kind === "line" && e._a["stroke-dasharray"] === "3 4");
+    ck(dash.length === 1, `RVOL «평소»(1.0) 점선 1줄 (실제 ${dash.length})`);
+    ck(txts(els).includes("+ RVOL"), `왼쪽 라벨 «+ RVOL» (실제 ${txts(els).filter((t) => t.includes("RVOL"))})`);
+    ck(txts(els).some((t) => t === "RVOL 60분 1.30배"), "범례 1시간 값");
+    ck(txts(els).some((t) => t === "RVOL 5분 1.10배"), "범례 5분 값");
+    ck(txts(els).some((t) => t.startsWith("CVD ")), "CVD 범례는 그대로 남아 있다");
   }
-  // ⑩ 워커 부재 -- 레인을 **아예 안 그린다**(빈 판을 남기지 않는다)
-  ck(lane({ worker: false }).length === 0, "워커 부재 -> 레인 미생성");
-  // ⑪ 한쪽만 있어도 그린다
+  // ⑩ 축이 다르다 -- RVOL 점선(1.0)과 CVD 0선이 **다른 y** 여야 한다(같으면 축을 섞은 것)
   {
-    const only1h = lane({ b: NaN });
-    ck(paths(only1h).length === 1 && txts(only1h).some((t) => t.includes("60분")),
-       "1시간만 있어도 그린다");
-    const only5m = lane({ a: NaN });
-    ck(paths(only5m).length === 1 && txts(only5m).some((t) => t.includes("5분")),
-       "5분만 있어도 그린다");
-  }
-  // ⑫ 축 잘림 -- 9.8배 스파이크에도 축은 5배에서 멈추고 «평소» 선이 바닥에 안 깔린다
-  {
-    const els = lane({ spike: true });
-    ck(txts(els).some((t) => /축 5\.0배\+/.test(t)), `축 잘림 표기 (실제 ${txts(els).filter((t) => t.includes("축"))})`);
+    const els = cum();
     const one = els.find((e) => e._kind === "line" && e._a["stroke-dasharray"] === "3 4");
-    ck(Number(one._a.y1) < 500 + 90 - 10, `«평소» 선이 바닥이 아니다 (y=${one._a.y1}, 바닥 590)`);
+    const zero = els.find((e) => e._kind === "line" && e._a.stroke === "var(--line)");
+    ck(one && zero && Number(one._a.y1) !== Number(zero._a.y1),
+       `RVOL 1.0 선(y=${one && one._a.y1})과 CVD 0 선(y=${zero && zero._a.y1})이 다른 자리`);
   }
-  // ⑬ 봉이 1개뿐이면 선을 못 그린다 -- 조용히 비운다
-  ck(lane({ n: 1 }).length === 0, "봉 1개 -> 레인 미생성");
+  // ⑪ 워커 부재 -> RVOL 만 빠지고 CVD 는 그대로 그린다
+  {
+    const els = cum({ worker: false });
+    ck(rvPaths(els).length === 0, "워커 부재 -> RVOL 선 없음");
+    ck(!txts(els).some((t) => t.includes("RVOL")), "워커 부재 -> RVOL 범례·라벨 없음");
+    ck(txts(els).some((t) => t.startsWith("CVD ")), "워커 부재에도 CVD 는 그린다");
+  }
+  // ⑫ 한쪽만 있어도 그린다
+  {
+    const only1h = cum({ b: NaN });
+    ck(rvPaths(only1h).length === 1 && txts(only1h).some((t) => t.includes("60분")), "1시간만 있어도");
+    const only5m = cum({ a: NaN });
+    ck(rvPaths(only5m).length === 1 && txts(only5m).some((t) => t.includes("5분")), "5분만 있어도");
+  }
+  // ⑬ 축 잘림 -- 9.8배 스파이크에도 «평소» 선이 바닥에 안 깔린다
+  {
+    const els = cum({ spike: true });
+    const one = els.find((e) => e._kind === "line" && e._a["stroke-dasharray"] === "3 4");
+    ck(Number(one._a.y1) < 490 - 15, `«평소» 선이 바닥이 아니다 (y=${one._a.y1}, 바닥 490)`);
+  }
 }
 process.exit(fail ? 1 : 0);
