@@ -2081,6 +2081,9 @@ svg {
    종류의 흔들림이다. 닫을 게 없을 때는 그 자리에 그 사실을 적는다. */
 .lane-empty { display: none; margin: 0; }
 .acct-lanes > .manual-entry:has(#snapExitRow[hidden]) .lane-empty { display: block; }
+/* 빈 상태는 레인 **세로 중앙**에 둔다(2026-09-22 사용자). 레인은 flex 세로열이라
+   주축이 세로다 -- justify-content 한 줄이면 된다. 옆 진입 레인 높이가 이 칸을 정한다. */
+.acct-lanes > .manual-entry:has(#snapExitRow[hidden]) { justify-content: center; }
 .acct-lanes > .manual-entry:has(#snapExitRow[hidden]) .lane-pact { display: none; }
 /* 숨은 확인 버튼만 든 행이 flex gap 을 두 번 먹어 버튼과 «약속» 사이에 빈 60px 가 남는다.
    확인 버튼은 미리보기 뒤에만 잠깐 뜨므로 이 빈칸이 **평소 모습**이다. */
@@ -2102,7 +2105,6 @@ svg {
 }
 .lane-pact { margin: 10px 0 0; font: 600 10.5px/1.5 var(--font-mono); color: var(--muted); }
 .lane-pact b { color: var(--text); font-weight: 800; }
-.lane-pact.warn b { color: var(--bad); }
 
 .manual-entry { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .manual-entry-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: space-between; }
