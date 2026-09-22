@@ -2217,12 +2217,32 @@ def make_app() -> web.Application:
 
         요청당 1000건·가중치 20 이라 FOOTPRINT_CATCHUP_SECONDS 로 페이스를 걸고, 총 요청 수에
         상한을 둔다(폭주 구간에서 무한정 긁지 않도록)."""
-        budget = 400          # 총 요청 상한 ≈ 17분·가중치 8000. 평소 1시간 백필은 ~200회면 끝난다
+        # 🔴2026-09-23 400 -> 1200. 창을 1시간(12봉)에서 12시간(144봉)으로 넓혔으므로 예산도
+        #   같이 늘린다 -- 안 늘리면 깊은 꼬리가 영영 안 찬다. 페이스가 2.5초라 최악 50분이고
+        #   가중치는 1200*20/50분 = 480/분(한도 2400/분)이라 여유가 있다. 동시 실행 가드가
+        #   있어(`backfill is None or backfill.done()`) 재연결이 잦아도 겹치지 않는다.
+        # ponytail: 그래도 콜드스타트 12시간을 한 번에 다 못 채울 수 있다(봉당 요청 수가
+        #   거래량에 비례). 최신 봉부터 돌므로 «보이는 쪽»이 먼저 차고, 남은 꼬리는 다음
+        #   재연결과 라이브 누적이 메운다. 더 필요하면 duckdb trade_tape 에서 파생이 정답.
+        budget = 1200         # 평소 1시간 백필은 ~200회면 끝난다
         MISS_LIMIT = 10       # 빈 응답(429·5xx) 연속 허용치 -- 한 번에 포기하면 조용히 죽는다
         now_bar = footprint_bar_start(until_ms)
-        window_floor = (now_bar - (FOOTPRINT_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+        # 🔴2026-09-23 여기가 FOOTPRINT_BARS(=12, 1시간)였다. 차트에 1h 창 하나뿐이던 시절의
+        #   상수인데 지금 창은 1h/2h/4h/12h(12/24/48/144봉)다. 그래서 재시작 뒤 **최근 1시간만**
+        #   보장되고 나머지는 라이브로 쌓이길 기다렸다 -- 실측 링 64봉(5.3h)/144. 창 밖 봉은
+        #   화면에서 셀 없는 맨 캔들로 남는다(사용자 신고 «맨 왼쪽 캔들이 그냥 캔들이야»).
+        #   스냅샷이 저장하는 깊이와 같은 상수로 맞춘다 -- 둘이 어긋나면 복원해도 구멍이 남는다.
+        #   따뜻한 재시작에서는 대부분 `lo >= hi` 로 건너뛰어 요청이 0 이다. 비싼 건 콜드스타트뿐.
+        window_floor = (now_bar - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS)
         try:
-            for bar in [now_bar - i * FOOTPRINT_BAR_SECONDS for i in range(FOOTPRINT_BARS)]:
+            for idx, bar in enumerate(
+                    [now_bar - i * FOOTPRINT_BAR_SECONDS
+                     for i in range(FOOTPRINT_MAX_WINDOW_BARS)]):
+                # 🔴최근 1시간이 끝나면 곧바로 ready 다. 창을 12배로 넓히면서 이걸 안 하면
+                #   콜드스타트에서 budget 이 깊은 꼬리에 소진돼 **ready 가 영영 False** 로 남고,
+                #   화면은 계속 「수집 중」이며 full=not ready 라 매 폴링이 전량(12.5KB)이 된다.
+                if idx == FOOTPRINT_BARS:
+                    footprint_state["ready"] = True
                 if bar < window_floor:
                     continue
                 lo = (bar * 1000 if bar not in footprint_state["bars"]
