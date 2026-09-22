@@ -876,19 +876,23 @@ async function fetchBinanceHistory(asset) {
   } catch (e) { console.error("History Error:", e); }
 }
 
-// 🔴2026-09-22 «봉이 바뀌면 곧바로». 주기(5분)는 봉 길이와 같은데 **위상이 안 맞는다** --
-//   경계 직후 새로 마감된 봉은 라이브 갱신이 밀어 넣은 OHLC 뿐이라 sma/vn/drop 이 없고,
-//   서버판이 올 때까지 최대 5분 SMA144±ATR 선이 멈춘다(실측: 경계 넘자 뒤처짐 1 -> 2봉,
-//   90초 뒤에도 2봉 그대로). 마감된 봉 시각을 기억해 두고 바뀌면 게이트를 연다.
-let lastHistoryBarSeen = 0;
+// 🔴2026-09-22 주기(5분)가 봉 길이와 같은데 **위상이 안 맞는다** -- 경계 직후 새로 마감된
+//   봉은 라이브 갱신이 밀어 넣은 OHLC 뿐이라 sma/vn/drop 이 없고, 서버판이 올 때까지
+//   SMA144±ATR 선이 멈춘다(실측: 경계 넘자 뒤처짐 1 -> 2봉, 5분 내내 2봉).
+//   🔴«경계에서 한 번 연다»로 고치려다 실패했다 -- 그 순간 서버 워커가 아직 그 봉을 안
+//     만들었으면 낡은 값을 받고 게이트가 다시 5분 닫힌다(실측으로 확인). 시계가 아니라
+//     **증상**을 조건으로 건다: 마감된 봉에 sma 가 없으면 곧 다시 묻는다. 채워지면 저절로
+//     원래 주기로 돌아간다(풋프린트 «전량 재수신» 자가복구와 같은 방식).
+//   서버는 마감봉 100개를 전부 sma 와 함께 준다(실측 서버 뒤처짐 0) -- 못 받는 건 타이밍뿐이다.
+const HISTORY_RETRY_MS = 10000;
 async function maybeFetchSnapshotChartHistory() {
   const now = Date.now();
   const cached = candleHistoryByAsset[activeSnapshotAsset] || [];
-  // 지금 «마감된» 봉 = 현재 봉의 직전. 이게 바뀌었다는 건 봉이 넘어갔다는 뜻이다.
-  const closedBar = Math.floor(now / 1000 / 300) * 300 - 300;
-  const rolled = closedBar !== lastHistoryBarSeen;
-  if (cached.length && !rolled && now - lastSnapshotHistoryFetchAt < CANDLE_HISTORY_POLL_MS) return;
-  lastHistoryBarSeen = closedBar;
+  // 마지막은 형성 중 봉이라 sma 가 없는 게 정상이다. 그 **직전**(마감된 봉)에 없으면 밀렸다.
+  const stale = cached.length >= 2
+    && !Number.isFinite(Number(cached[cached.length - 2] && cached[cached.length - 2].sma));
+  const wait = stale ? HISTORY_RETRY_MS : CANDLE_HISTORY_POLL_MS;
+  if (cached.length && now - lastSnapshotHistoryFetchAt < wait) return;
   lastSnapshotHistoryFetchAt = now;
   await fetchBinanceHistory(activeSnapshotAsset);
   scheduleSnapshotChartRender();
