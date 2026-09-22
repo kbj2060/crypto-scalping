@@ -898,6 +898,16 @@ async function fetchBinanceHistory(asset) {
     if (!res.ok) return;
     const payload = await res.json();
     candleHistoryByAsset[asset] = Array.isArray(payload?.candles) ? payload.candles : [];
+    // 🔴2026-09-23 5분봉 깜빡임의 정체. 서버는 **마감봉만** 준다(closed_df) -- 형성 중 봉은
+    //   updateSnapshotCandleLive() 가 따로 밀어 넣는다. 그런데 이 교체 직후 호출자가 바로
+    //   렌더를 예약하고, scheduleSnapshotChartRender() 는 그 함수를 **안 부른다**
+    //   (부르는 건 maybeRenderSnapshotChartNow() 뿐). 그래서 fetch 마다 형성 중 봉이 빠진
+    //   프레임이 한 번 그려지고 -- slice(-chartWindowBars) 가 한 칸 왼쪽으로 밀려 맨 과거
+    //   봉이 되살아났다가 다음 틱에 되돌아온다. 1h 창(12봉)에서는 화면의 1/12 가 움직인다.
+    //   위상이 안 맞는 폴링이라 봉 경계와 무관하게 났고, HISTORY_RETRY_MS(10초)가 빈도를
+    //   5분에 한 번에서 10초에 한 번으로 늘렸다.
+    //   교체와 형성봉 복원을 **한 틱 안에서** 끝낸다 -- 배열이 형성봉 없이 관측되지 않는다.
+    updateSnapshotCandleLive();
   } catch (e) { console.error("History Error:", e); }
 }
 
