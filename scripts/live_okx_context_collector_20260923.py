@@ -191,10 +191,14 @@ class ContextStore:
             return 0
         try:
             with self._connect() as con:
+                # 🔴트랜잭션 하나로 -- 자동커밋이면 행마다 fsync 라 10초 주기의 ~50행이 8~10초
+                #   걸려 락을 늘 쥐고(읽기 0/60) OI 폴러가 굶었다(2026-09-23 실측).
+                con.begin()
                 for table, rows in self.pending.items():
                     if rows:
                         marks = ",".join("?" * INSERTS[table])
                         con.executemany(f"INSERT INTO {table} VALUES ({marks})", rows)
+                con.commit()
             self.pending.clear()
             return total
         except Exception as exc:  # noqa: BLE001 -- 대개 읽는 쪽이 잡고 있는 락이다

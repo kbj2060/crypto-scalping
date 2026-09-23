@@ -116,6 +116,9 @@ async def run(inst: str, root: Path) -> None:
                     await ws.send_json({"op": "subscribe",
                                         "args": [{"channel": "bbo-tbt", "instId": inst}]})
                     log.info("연결 %s", WS_URL)
+                    # 🔴OKX 는 점검 때 seqId 를 **리셋**한다(문서). 옛 last_seq 를 들고 가면 그 뒤
+                    #   전부가 «역행»으로 버려지고, 로그도 n 이 안 늘어 조용하다. 연결마다 새로 잰다.
+                    last_seq = -1
                     while True:
                         msg = await ws.receive(timeout=RECV_TIMEOUT)
                         if msg.type is not WSMsgType.TEXT:
@@ -190,6 +193,7 @@ def selftest() -> None:
     with tempfile.TemporaryDirectory() as td:
         hf = HourFile(Path(td), "ETH-USDT-SWAP")
         hf.write(ts, bid, bq, ask, aq, seq)
+        hf.close()                                # 재연결 -- 같은 시각에 다시 써져야 한다
         hf.write(ts + 7, bid, bq, ask, aq, seq + 1)
         hf.close()                                # compress=False -- 바로 읽는다
         files = sorted(Path(td).glob("ETH-USDT-SWAP/*.bt"))

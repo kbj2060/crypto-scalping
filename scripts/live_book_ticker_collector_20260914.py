@@ -89,8 +89,12 @@ class HourFile:
     def write(self, ts_ms: int, bid: float, bq: float, ask: float, aq: float,
               first_u: int) -> None:
         key, path = self._path(ts_ms)
-        if key != self.hour:
-            self.close(compress=True)
+        # 🔴close() 는 fh 만 비우고 hour 는 남긴다. 재연결 뒤 같은 시각이면 key == hour 라
+        #   None.write 로 터져 그 시각이 끝날 때까지 재연결만 돌았다(2026-09-23 HL 32분·
+        #   바이낸스 09-15 42분 유실). 같은 시각은 압축 없이 이어 쓴다.
+        if key != self.hour or self.fh is None:
+            if key != self.hour:
+                self.close(compress=True)
             new = not path.exists()
             self.fh = open(path, "ab")
             if new:

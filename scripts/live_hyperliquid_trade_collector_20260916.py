@@ -110,10 +110,12 @@ def write(rows: list[tuple], gap: tuple | None = None) -> None:
             coin VARCHAR, ts_ms BIGINT, tid BIGINT, hash VARCHAR, side VARCHAR,
             px DOUBLE, sz DOUBLE, buyer VARCHAR, seller VARCHAR)""")
         con.execute("CREATE TABLE IF NOT EXISTS gaps (coin VARCHAR, from_ms BIGINT, to_ms BIGINT, reason VARCHAR)")
+        con.begin()      # 🔴자동커밋이면 500행 = fsync 500번이다(체결 테이프 TapeStore.write 참고)
         if rows:
             con.executemany("INSERT INTO hl_trades VALUES (?,?,?,?,?,?,?,?,?)", rows)
         if gap:
             con.execute("INSERT INTO gaps VALUES (?,?,?,?)", list(gap))
+        con.commit()
     finally:
         con.close()          # 붙들고 있으면 감시기·연구 쿼리가 BLOCKED 된다.
 
@@ -122,14 +124,23 @@ async def run() -> None:
     import websockets
     buf: list[tuple] = []
     last = time.time()
+    down: tuple[int, str] | None = None   # (끊긴 시각, 이유) -- 다시 붙으면 그때 공백으로 적는다
     while True:
-        down_from = int(time.time() * 1000)
         try:
             async with websockets.connect(WS, ping_interval=20, ping_timeout=20) as ws:
                 for coin in COINS:
                     await ws.send(json.dumps({"method": "subscribe",
                                               "subscription": {"type": "trades", "coin": coin}}))
                 print(f"구독 {COINS} · {db_path()}", flush=True)
+                # 🔴공백은 «끊긴 시각 → 다시 붙은 시각»이다. 예전엔 from 을 **연결 시작**에 찍어
+                #   연결돼 있던 ~2.8시간 전체가 gaps 에 들어갔다(2026-09-23 실측: 기록 10,150초 vs
+                #   실제 무체결 최대 348초).
+                if down:
+                    try:     # 기록 실패로 막 붙은 연결을 끊지 않는다
+                        write([], gap=(",".join(COINS), down[0], int(time.time() * 1000), down[1]))
+                    except Exception as e2:
+                        print(f"  gap 기록 실패: {e2}", flush=True)
+                    down = None
                 while True:
                     buf += parse(json.loads(await ws.recv()))
                     if len(buf) >= FLUSH_N or (buf and time.time() - last >= FLUSH_SEC):
@@ -137,10 +148,11 @@ async def run() -> None:
         except Exception as e:
             # 구멍은 **메운다고 되는 게 아니라 기록하는 것**이다 -- 체결 테이프 수집기와 같은 규약.
             print(f"WS 끊김: {type(e).__name__}: {e} — 5초 후 재연결", flush=True)
+            down = down or (int(time.time() * 1000), type(e).__name__)
             try:
-                write(buf, gap=(",".join(COINS), down_from, int(time.time() * 1000), type(e).__name__))
+                write(buf)
             except Exception as e2:
-                print(f"  gap 기록 실패(보류): {e2}", flush=True)
+                print(f"  잔여 {len(buf)}행 기록 실패: {e2}", flush=True)
             buf = []
             await asyncio.sleep(5)
 

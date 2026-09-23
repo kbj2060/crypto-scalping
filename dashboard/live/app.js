@@ -273,12 +273,16 @@ function mergedSupplySrc() {
     if (!t) { t = [0, 0, 0, 0]; liq.set(sec, t); }
     for (let i = 0; i < 4; i++) t[i] += c[i] || 0;
   }));
-  const ages = [["선물", supply1sMeta.now ? 0 : null], ["OKX", okxMeta.tradeAge],
-                ["현물", spotMeta.tradeAge]];
-  const dead = ages.filter(([, a]) => a != null && a > 10).map(([n]) => n);
+  const now = Math.max(supply1sMeta.now || 0, okxMeta.now || 0, spotMeta.now || 0);
+  // 🔴선물 나이는 «가장 최근 거래소 대비» 로 잰다(예전엔 늘 0 이라 선물이 죽어도 OKX·현물이
+  //   now 를 밀어 합산이 절반짜리로 멀쩡해 보였다). 🔴한 번도 안 붙은 거래소(null)도 죽은 것이다
+  //   -- 빠진 거래소는 합에서 0 으로 들어가므로 이름을 화면에 적는다.
+  const ages = [["선물", supply1sMeta.now ? now - supply1sMeta.now : null],
+                ["OKX", okxMeta.tradeAge], ["현물", spotMeta.tradeAge]];
+  const dead = ages.filter(([, a]) => a == null || a > 10).map(([n]) => n);
   return {
     key: "bn", supply: merged, liq, oi: oi1s,
-    now: Math.max(supply1sMeta.now || 0, okxMeta.now || 0, spotMeta.now || 0),
+    now,
     label: "합산 · 바이낸스 선물+현물 · OKX",
     // OI 는 레인 둘 -- 얇게 눌러 배경 참고선으로 둔다(갈릴 때만 눈에 들어오게).
     oiLanes: [{ oi: oi1s, color: "var(--warn)", width: 2, opacity: 0.95 },
@@ -287,7 +291,8 @@ function mergedSupplySrc() {
     thin: [{ supply: supply1s, label: "선물" }, { supply: okxSupply1s, label: "OKX" }],
     imbSources: [["선물", supply1s], ["OKX", okxSupply1s], ["현물", spotSupply1s]],
     age: `체결 OKX ${okxMeta.tradeAge == null ? "-" : okxMeta.tradeAge + "s"}`
-         + ` · 현물 ${spotMeta.tradeAge == null ? "-" : spotMeta.tradeAge + "s"}`,
+         + ` · 현물 ${spotMeta.tradeAge == null ? "-" : spotMeta.tradeAge + "s"}`
+         + (dead.length ? ` · 합에서 빠짐: ${dead.join("/")}` : ""),
     stale: dead.length > 0,
   };
 }

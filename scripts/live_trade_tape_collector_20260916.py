@@ -380,9 +380,13 @@ class TapeStore:
             return
         try:
             with self._connect() as con:
+                # 🔴트랜잭션 하나로 -- 자동커밋이면 **행마다 fsync** 다(2026-09-23 서버 실측
+                #   50행 8~10초 vs 0.1~0.24초). 그동안 락을 쥐고 이벤트 루프도 멈춘다.
+                con.begin()
                 con.executemany(
                     "INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                                 [(self.symbol, *r) for r in self.pending])
+                con.commit()
             self.pending.clear()
         except Exception as exc:  # noqa: BLE001 -- 락 충돌(읽는 쪽이 잡고 있음)이 대부분이다
             if len(self.pending) > self.PENDING_CAP:
@@ -429,10 +433,13 @@ class TapeStore:
         return out
 
     def unverified_minutes(self, limit: int = 5) -> list[int]:
+        # 🔴`- 120` 이다(`- 60` 이면 끝난 지 몇 초 안 된 분도 뽑힌다). 그 분의 마지막 초들은
+        #   아직 버퍼/flush 대기라 «유실»로 찍히고 verify_1m 에 영구히 남는다 -- 2026-09-23 OKX
+        #   06:13/07:03/08:09 가 분 종료 2~7초 뒤 검사로 −2~−14% 거짓 경보였다(재대조 전부 일치).
         with self._connect() as con:
             rows = con.execute("""
                 SELECT DISTINCT ts_sec // 60 * 60 AS m FROM trade_tape_1s
-                WHERE symbol = ? AND ts_sec < ? - 60
+                WHERE symbol = ? AND ts_sec < ? - 120
                   AND NOT EXISTS (SELECT 1 FROM verify_1m v
                                   WHERE v.symbol = trade_tape_1s.symbol AND v.ts_min = m)
                 ORDER BY m DESC LIMIT ?""", [self.symbol, int(time.time()), limit]).fetchall()

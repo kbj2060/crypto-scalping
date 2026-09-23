@@ -132,7 +132,9 @@ class CtxStore:
         try:
             marks = ",".join("?" * CTX_WIDTH)
             with self._connect() as con:
+                con.begin()      # 🔴자동커밋이면 행마다 fsync 다(체결 테이프 TapeStore.write 참고)
                 con.executemany(f"INSERT INTO hl_asset_ctx VALUES ({marks})", self.pending)
+                con.commit()
             self.pending.clear()
         except Exception as exc:  # noqa: BLE001 -- 대개 읽는 쪽이 잡고 있는 락이다
             if len(self.pending) > 50_000:
