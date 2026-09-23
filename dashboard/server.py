@@ -2695,6 +2695,18 @@ def make_app() -> web.Application:
     okx_oi_1s: dict[int, float] = {}
     okx_state: dict[str, Any] = {"connected": False, "trades": 0, "errors": 0,
                                  "last_trade_ms": 0, "last_oi_ms": 0, "last_liq_ms": 0}
+    # 풋프린트용 OKX 봉. `footprint_state["bars"]` 와 **같은 격자·같은 6칸**이다
+    # ([매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도]).
+    # 🔴바이낸스 bars 에 **섞지 않는다** -- 거기엔 kline 완전성 검사·REST 백필·스냅샷이
+    #   전부 «바이낸스 aggTrades» 를 전제로 걸려 있다. 합치는 건 API 응답을 만들 때만.
+    okx_bars: dict[int, dict[int, list[float]]] = {}
+    # 🔴OKX 는 **풋프린트 백필이 불가능하다**(history-trades 가 100행=10.8초, 2026-09-23 실측).
+    #   그래서 서버가 뜨기 전 봉은 바이낸스만 있고, 그냥 더하면 재기동마다 **봉 높이가
+    #   경계에서 튄다**(흡수·벽을 읽는 그림에서 없던 단차). 답은 «OKX 가 **완전히 덮은**
+    #   첫 봉 이후만 내보내기»다 -- 창이 짧아지는 대신 단차가 없다(사용자 선택 C).
+    #   ⚠️«OKX 가 있는 봉만» 으로 짜면 OKX 가 잠깐 끊길 때 풋프린트가 **통째로 사라진다**.
+    #     시작 봉만 기억하는 이 방식은 순간 끊김에 안 죽는다(재연결 3초 = 봉의 1%).
+    okx_fp = {"first_bar": 0}
 
     def okx_sec_cell(ts_ms: int) -> list[float]:
         """그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(체결마다 돌 일이 아니다)."""
@@ -2761,6 +2773,24 @@ def make_app() -> web.Application:
                                         cell[i] += qty
                                     okx_state["trades"] += 1
                                     okx_state["last_trade_ms"] = ts_ms
+                                    # 풋프린트 봉(바이낸스와 같은 격자)
+                                    bar = footprint_bar_start(ts_ms)
+                                    if not okx_fp["first_bar"]:
+                                        okx_fp["first_bar"] = bar
+                                    cells = okx_bars.get(bar)
+                                    if cells is None:
+                                        cells = okx_bars[bar] = {}
+                                        cut = (footprint_bar_start(time.time() * 1000)
+                                               - (FOOTPRINT_KEEP_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+                                        for ob in [b for b in okx_bars if b < cut]:
+                                            del okx_bars[ob]
+                                    fc = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)),
+                                                          [0.0] * 6)
+                                    fc[i] += qty
+                                    if notional >= WHALE_MIN_USD:
+                                        fc[2 + i] += qty
+                                    elif notional < RETAIL_MAX_USD:
+                                        fc[4 + i] += qty
                             elif ch == "liquidation-orders":
                                 for r in d.get("data") or []:
                                     if str(r.get("instId") or "") != OKX_INST:
@@ -3606,7 +3636,24 @@ def make_app() -> web.Application:
         -- 키 이름을 반복해 싣지 않으려는 것(12봉 x 수십 레벨을 2초마다 보낸다).
         고래·리테일은 매수/매도의 **부분집합**이고, 중형은 셋을 빼서 얻는다."""
         want = footprint_window_bars(request)
-        recent = sorted(footprint_state["bars"].items())[-want:]
+        # 🔴OKX 를 **여기서만** 더한다(위 okx_bars 주석). 그리고 OKX 가 완전히 덮은 첫 봉
+        #   **이후**만 내보낸다 -- 그 전 봉은 바이낸스만이라 더하면 단차가 된다.
+        #   `first_bar` 자신은 OKX 가 중간에 합류한 봉이라 **빼고**(> 비교) 시작한다.
+        okx_from = okx_fp["first_bar"]
+        base = sorted(footprint_state["bars"].items())
+        if okx_from:
+            base = [(b, c) for b, c in base if b > okx_from]
+        recent = base[-want:]
+        def _merged(bar: int, cells: dict[int, list[float]]) -> dict[int, list[float]]:
+            add = okx_bars.get(bar)
+            if not add:
+                return cells
+            out = {k: list(v) for k, v in cells.items()}
+            for k, v in add.items():
+                t = out.setdefault(k, [0.0] * 6)
+                for j in range(6):
+                    t[j] += v[j]
+            return out
         agg_bars = footprint_state["agg_bars"]
         # ── `?since=<봉시각>` 증분 (2026-09-20) ──────────────────────────────
         # 400ms 폴링인데 48봉을 통째로 보내고 있었다. 실측: 400ms 간격 19번 중 내용이 실제로
@@ -3641,12 +3688,18 @@ def make_app() -> web.Application:
             # 무슨 뜻인지 보는 사람이 알 방법이 없다.
             "retailMaxUsd": RETAIL_MAX_USD,
             "whaleMinUsd": WHALE_MIN_USD,
+            # 체결 출처. 화면이 「무엇이 더해진 그림인지」를 적을 수 있어야 한다.
+            # 🔴현물은 **안 들어간다** -- 현물이 선물보다 +4.69bp 높아 $0.1 빈 기준 12.9빈
+            #   어긋나고(2026-09-23 실측) 베이시스가 시변이라 가짜 이중 봉우리가 된다.
+            #   수급(CVD)은 «수량의 합»이라 가격이 무관해서 현물이 들어간다 -- 같은 데이터가
+            #   한 쪽엔 들어가고 한 쪽엔 안 들어가는 게 맞다.
+            "venues": ["binance-perp", "okx-swap"] if okx_from else ["binance-perp"],
             "bars": [
                 {"time": bar,
                  # aggTrades 로 메운 봉은 체결이 **묶여** 있어 고래가 과장된다.
                  "agg": bar in agg_bars,
                  "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
-                            for k, v in sorted(cells.items())]}
+                            for k, v in sorted(_merged(bar, cells).items())]}
                 for bar, cells in sent
             ],
         }, headers=NOCACHE)
