@@ -269,7 +269,7 @@ async def collect(inst: str, db_path: Path) -> None:
                         now = time.monotonic()
                         if now - flushed_at >= FLUSH_SECONDS:
                             flushed_at = now
-                            store.write(buffer.take_closed())
+                            await asyncio.to_thread(store.write, buffer.take_closed())  # 스레드로: close() 체크포인트 fsync(~0.5초)가 WS 수신을 막지 않게
                         if now - verified_at >= VERIFY_SECONDS:
                             verified_at = now
                             await verify_recent(store, session, inst)
@@ -279,7 +279,7 @@ async def collect(inst: str, db_path: Path) -> None:
                 log("25초 무음 -- 재연결")               # ping 을 보내느니 다시 붙는 게 짧다
             except Exception as exc:  # noqa: BLE001
                 log(f"연결 실패, 3초 뒤 재시도: {type(exc).__name__} {exc}")
-            store.write(buffer.take_closed())
+            await asyncio.to_thread(store.write, buffer.take_closed())
             await asyncio.sleep(3.0)
 
 

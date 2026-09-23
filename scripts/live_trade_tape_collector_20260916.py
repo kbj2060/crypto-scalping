@@ -524,7 +524,7 @@ async def collect(symbol: str, db_path: Path) -> None:
                         now = time.monotonic()
                         if now - flushed_at >= FLUSH_SECONDS:
                             flushed_at = now
-                            store.write(buffer.take_closed())
+                            await asyncio.to_thread(store.write, buffer.take_closed())  # 스레드로: close() 체크포인트 fsync(~0.5초)가 WS 수신을 막지 않게
                         if now - verified_at >= VERIFY_SECONDS:
                             verified_at = now
                             await verify_recent(store, session)
@@ -533,7 +533,7 @@ async def collect(symbol: str, db_path: Path) -> None:
             except Exception as exc:  # noqa: BLE001 -- 한 번의 끊김이 수집기를 죽이면 그 뒤가
                 # 통째로 빈다. 빈 구간은 소급 불가가 아니지만(zip) 알아채는 게 늦어진다.
                 log(f"연결 실패, 3초 뒤 재시도: {type(exc).__name__} {exc}")
-            store.write(buffer.take_closed())
+            await asyncio.to_thread(store.write, buffer.take_closed())
             await asyncio.sleep(3.0)
 
 

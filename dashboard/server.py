@@ -592,13 +592,16 @@ MARK_PRICE_RING_S = 7200          # 메모리 링(초). 베이시스 임계 분�
 #    (3일 백필 실측). 나란히 두면 ctVal 같은 체계적 버그가 «한 레인만 10배»로 즉시 보인다.
 OKX_INST = os.getenv("DASHBOARD_OKX_INST", "ETH-USDT-SWAP").upper()
 OKX_WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
-OKX_OI_URL = "https://www.okx.com/api/v5/public/open-interest"
-OKX_CT_VAL = 0.1        # 🔴ETH-USDT-SWAP 1계약 = 0.1 ETH. 안 곱하면 이 레인이 10배로 그려진다
-OKX_HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; crypto-scalping-dashboard/1.0)"}  # 🔴없으면 403
-# 🔴바이낸스 OI_1S_POLL_SECONDS 와 **같은 값**이어야 두 OI 선을 나란히 읽을 수 있다.
-#   WS `open-interest` 를 안 쓰는 이유: 2.7배 성기다(180초 실측 -- WS stamp 19개(중앙 9.28초) vs
-#   REST 0.25초 폴링이 본 값 변화 48번). OKX `ts` 는 응답 시각이라 변화 신호가 아니다 -- 값으로 거른다.
-OKX_OI_POLL_SECONDS = OI_1S_POLL_SECONDS
+# 🔴계약 크기(1계약 = ctVal 기초자산). 안 곱하면 이 레인이 10배로 그려진다. 표는 수집기와 **하나**
+#   (import) -- 종목을 env 로 바꿔도 맞는 값을 쓰고, 모르는 종목이면 OKX 레인을 켜지 않는다.
+#   시작할 때 거래소 REST 와 대조해 갈라졌으면 역시 켜지 않는다(collect_okx_flow).
+from scripts.live_okx_trade_tape_collector_20260923 import (  # noqa: E402
+    CT_VALS as OKX_CT_VALS, HTTP_HEADERS as OKX_HTTP_HEADERS, INSTRUMENTS_URL as OKX_INSTRUMENTS_URL)
+OKX_CT_VAL = OKX_CT_VALS.get(OKX_INST)
+# ⭐OI 는 **WS `open-interest`** 로 받는다(2026-09-23 정정). REST 0.25초 폴링이 «2.7배 더 본» 변화는
+#   60%가 A->B->A 되돌림(응답 노드 불일치) 잡음이었고, 동시 75초에 REST 고유 값 10개 = WS 10개였다.
+#   거래소 OI 갱신은 5~10초이고 WS 가 전부 준다(`ts` 도 진짜 거래소 시각). REST 는 수집기와 같은 IP
+#   에서 한도 80% 를 먹다 429 를 냈다.
 OKX_RECV_TIMEOUT = 25.0
 # ⑨ 바이낸스 **현물**(2026-09-23). 점유는 4.5%로 작지만 3일 백필에서 OKX 위에 얹었을 때
 #   1분 +1.6pp / 5분 +3.0pp 로 **3일 전부 양수**였고 비용이 스트림 한 줄이다.
@@ -2732,7 +2735,25 @@ def make_app() -> web.Application:
           USD 환산에 쓰긴 하지만 두 거래소 청산«가»를 같은 축에 놓으면 안 된다."""
         ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
         args = [{"channel": "trades", "instId": OKX_INST},
+                {"channel": "open-interest", "instId": OKX_INST},
                 {"channel": "liquidation-orders", "instType": "SWAP"}]
+        # 🔴계약 크기가 틀리면 레인이 조용히 10배가 된다 -- 모르거나 거래소와 다르면 **켜지 않는다**
+        #   (화면에선 «합에서 빠짐: OKX» 로 보인다). REST 가 안 될 때만 표 값으로 간다.
+        if OKX_CT_VAL is None:
+            print(f"okx ws: {OKX_INST} ctVal 모름 -- OKX 레인 끔", flush=True)
+            await ws_session.close()
+            return
+        try:
+            async with ws_session.get(OKX_INSTRUMENTS_URL, headers=OKX_HTTP_HEADERS,
+                                      params={"instType": "SWAP", "instId": OKX_INST},
+                                      timeout=ClientTimeout(total=10)) as r:
+                got = float((await r.json())["data"][0]["ctVal"])
+            if abs(got - OKX_CT_VAL) > 1e-12:
+                print(f"okx ws: 🔴ctVal 갈라짐 표 {OKX_CT_VAL} vs 거래소 {got} -- OKX 레인 끔", flush=True)
+                await ws_session.close()
+                return
+        except Exception as exc:  # noqa: BLE001
+            print(f"okx ws: ctVal 대조 실패({exc!r}) -- 표 값 {OKX_CT_VAL} 로 계속", flush=True)
         try:
             while True:
                 try:
@@ -2791,6 +2812,16 @@ def make_app() -> web.Application:
                                         fc[2 + i] += qty
                                     elif notional < RETAIL_MAX_USD:
                                         fc[4 + i] += qty
+                            elif ch == "open-interest":
+                                for r in d.get("data") or []:
+                                    oi = float(r.get("oiCcy") or 0.0)      # oiCcy = 기초자산(ETH)
+                                    ts_ms = int(r.get("ts") or 0)
+                                    if oi > 0 and ts_ms > 0:
+                                        sec = ts_ms // 1000
+                                        okx_oi_1s[sec] = oi
+                                        okx_state["last_oi_ms"] = ts_ms
+                                        for old in [x for x in okx_oi_1s if x < sec - SUPPLY_1S_SECONDS]:
+                                            del okx_oi_1s[old]
                             elif ch == "liquidation-orders":
                                 for r in d.get("data") or []:
                                     if str(r.get("instId") or "") != OKX_INST:
@@ -2884,58 +2915,17 @@ def make_app() -> web.Application:
         finally:
             await ws_session.close()
 
-    async def collect_okx_oi(app: web.Application) -> None:
-        """⑧ OKX OI 를 REST 로 -- 바이낸스와 **같은 주기**(위 OKX_OI_POLL_SECONDS 주석 참고).
-
-        🔴중복 제거를 **값**으로 한다. OKX `ts` 는 응답 시각이라(0.25초 요청 718번에 고유
-          stamp 718개) 바이낸스의 「본 stamp 집합」 방식을 옮기면 안 바뀐 값이 초당 4번 쌓인다."""
-        oi_session = ClientSession(timeout=ClientTimeout(total=10.0),
-                                   connector=TCPConnector(limit=2), headers=OKX_HTTP_HEADERS)
-        last: float | None = None
-        try:
-            while True:
-                t0 = time.monotonic()
-                try:
-                    async with oi_session.get(OKX_OI_URL, params={"instType": "SWAP",
-                                                                  "instId": OKX_INST}) as resp:
-                        body = await resp.json()
-                    row = (body.get("data") or [{}])[0]
-                    oi = float(row.get("oiCcy") or 0.0)
-                    ts_ms = int(row.get("ts") or time.time() * 1000)
-                    # ⚠️인접한 두 초에 **같은 값**이 남을 수 있다(2026-09-23 실측 33%). 버그가
-                    #   아니다 -- 한 초 안에서 A->B->A 로 튀면 그 초 버킷이 덮어써져 앞 초와
-                    #   같아진다. 바이낸스 레인도 `oi_1s[sec] = value` 로 같은 구조이고(게다가
-                    #   값 중복 제거가 없어 stamp 마다 쓴다), 레벨 선이라 화면에 안 보인다.
-                    if oi > 0 and oi != last:
-                        last = oi
-                        sec = ts_ms // 1000
-                        okx_oi_1s[sec] = oi
-                        okx_state["last_oi_ms"] = ts_ms
-                        cutoff = sec - SUPPLY_1S_SECONDS
-                        for old in [x for x in okx_oi_1s if x < cutoff]:
-                            del okx_oi_1s[old]
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001 -- OI 때문에 화면이 멈추면 안 된다
-                    okx_state["errors"] += 1
-                    if okx_state["errors"] in (1, 10, 100) or okx_state["errors"] % 1000 == 0:
-                        print(f"okx oi: {exc!r} ({okx_state['errors']}회째)", flush=True)
-                await asyncio.sleep(max(0.0, OKX_OI_POLL_SECONDS - (time.monotonic() - t0)))
-        finally:
-            await oi_session.close()
-
     async def start_micro_ref(app: web.Application) -> None:
         _situation_load_log()
         app["micro_ref_task"] = asyncio.create_task(collect_micro_ref(app))
         app["force_order_task"] = asyncio.create_task(collect_force_orders(app))
         app["mark_price_task"] = asyncio.create_task(collect_mark_price(app))
         app["okx_flow_task"] = asyncio.create_task(collect_okx_flow(app))
-        app["okx_oi_task"] = asyncio.create_task(collect_okx_oi(app))
         app["spot_flow_task"] = asyncio.create_task(collect_spot_flow(app))
 
     async def stop_micro_ref(app: web.Application) -> None:
         for key in ("micro_ref_task", "force_order_task", "mark_price_task",
-                    "okx_flow_task", "okx_oi_task", "spot_flow_task"):
+                    "okx_flow_task", "spot_flow_task"):
             app[key].cancel()
             try:
                 await app[key]

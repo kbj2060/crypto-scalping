@@ -137,20 +137,20 @@ async def run() -> None:
                 #   실제 무체결 최대 348초).
                 if down:
                     try:     # 기록 실패로 막 붙은 연결을 끊지 않는다
-                        write([], gap=(",".join(COINS), down[0], int(time.time() * 1000), down[1]))
+                        await asyncio.to_thread(write, [], gap=(",".join(COINS), down[0], int(time.time() * 1000), down[1]))
                     except Exception as e2:
                         print(f"  gap 기록 실패: {e2}", flush=True)
                     down = None
                 while True:
                     buf += parse(json.loads(await ws.recv()))
                     if len(buf) >= FLUSH_N or (buf and time.time() - last >= FLUSH_SEC):
-                        write(buf); print(f"  +{len(buf)}행", flush=True); buf, last = [], time.time()
+                        await asyncio.to_thread(write, buf); print(f"  +{len(buf)}행", flush=True); buf, last = [], time.time()
         except Exception as e:
             # 구멍은 **메운다고 되는 게 아니라 기록하는 것**이다 -- 체결 테이프 수집기와 같은 규약.
             print(f"WS 끊김: {type(e).__name__}: {e} — 5초 후 재연결", flush=True)
             down = down or (int(time.time() * 1000), type(e).__name__)
             try:
-                write(buf)
+                await asyncio.to_thread(write, buf)
             except Exception as e2:
                 print(f"  잔여 {len(buf)}행 기록 실패: {e2}", flush=True)
             buf = []

@@ -5,18 +5,14 @@
 체결·호가처럼 포맷이 다른 것도 아니라 프로세스를 넷으로 쪼갤 이유가 없다. 반대로 체결·호가와
 합치지 않는 이유는 그쪽이 초당 20~51건이라 duckdb 쓰기 지연이 호가 수집을 막을 수 있어서다.
 
-🔴**OI 는 WS 가 아니라 REST 0.25초 폴링으로 받는다 -- WS `open-interest` 가 합쳐져서 오기
-  때문이다.** 2026-09-23 동시 실측(180초): WS 는 stamp 19개(중앙 9.28초 간격)인데 REST 0.25초
-  폴링은 **값이 실제로 바뀐 것을 48번** 봤다(2.7배). 처음엔 「푸시라 바이낸스 REST 문제가 없다」고
-  적었는데 틀렸다 -- 푸시가 더 성기다.
-  바이낸스(`dashboard/server.py::OI_1S_POLL_SECONDS`=0.25)와 **같은 주기**라 두 거래소 OI 를
-  나란히 볼 수 있다. OKX REST 는 오히려 깨끗하다: 응답 지연 중앙 **51ms**(바이낸스는 2.65초),
-  stamp 나이 중앙 0.30초. 리밋 20req/2s 중 4req/s 를 쓰고, **다른 거래소라 봇의 바이낸스
-  weight 를 한 톨도 안 쓴다**.
-🔴**중복 제거는 stamp 가 아니라 «값»으로 한다.** 바이낸스는 `data["time"]` 이 진짜 거래소
-  stamp 라 「본 stamp 집합」으로 거르지만, OKX 는 0.25초 요청 718번에 고유 stamp 가 **718개**
-  였다(간격이 정확히 폴링 주기와 일치) -- `ts` 가 응답 시각이다. stamp 로 거르면 안 바뀐 값이
-  초당 4번 쌓인다.
+🔴**OI 는 WS `open-interest` 로 받는다 -- REST 폴링은 «잡음»만 더한다.** (2026-09-23 정정)
+  한때 REST 0.25초 폴링으로 바꿨었다(「REST 가 값 변화를 2.7배 더 본다」). 그런데 그 «변화»의
+  **60%가 A->B->A 되돌림**이었다(재시작 후 418행 중 250) -- 응답 노드마다 값이 달라 왔다 갔다
+  한 것이다. 동시 실측 75초: REST 가 본 고유 값 10개가 **WS 10개와 정확히 같았다**(10/10),
+  REST 는 되돌림 4번만 더했다. 즉 거래소 OI 는 5~10초마다 갱신되고 WS 가 그걸 전부 준다.
+  게다가 대시보드도 같은 IP 에서 0.25초로 폴링해 둘이 한도(20req/2s)의 80% 를 먹었고, 조사
+  스크립트 하나가 더 붙자 **429** 가 났다. WS 는 요청 한도가 없고 `ts` 가 진짜 거래소 시각이다.
+  ⚠️이 날 05:30~23:59 사이 `okx_oi` 행은 REST 폴링분이라 되돌림 잡음이 섞여 있다(meta 참고).
 
 실측 페이로드(2026-09-23, ETH-USDT-SWAP, 150초):
   open-interest(REST)       {"oi":"5941713.19","oiCcy":"594171.319","oiUsd":"...","ts":...}
@@ -71,8 +67,6 @@ DEFAULT_DB = ROOT / "data" / "live" / "okx_context.duckdb"
 WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
 FLUSH_SECONDS = 10.0
 RECV_TIMEOUT = 40.0      # 마크는 5/s 지만 펀딩은 분 단위라 체결보다 여유를 둔다
-OI_URL = "https://www.okx.com/api/v5/public/open-interest"
-OI_POLL_SECONDS = 0.25   # 바이낸스 OI_1S_POLL_SECONDS 와 **같은 값**이어야 비교가 된다
 
 SCHEMA = (
     """CREATE TABLE IF NOT EXISTS okx_oi(
@@ -185,29 +179,39 @@ class ContextStore:
         for table, rows in batch.items():
             self.pending.setdefault(table, []).extend(rows)
 
-    def flush(self) -> int:
+    async def aflush(self) -> int:
+        """쓰기를 스레드로 뺀다 -- close() 의 체크포인트 fsync(서버 ~0.5초)가 WS 수신을 막지 않게.
+        pending 은 루프 스레드에서만 만진다: 떼어서 넘기고, 실패하면 앞에 되돌려 붙인다."""
         total = sum(len(v) for v in self.pending.values())
         if not total:
             return 0
+        batch, self.pending = self.pending, {}
+        exc = await asyncio.to_thread(self._write, batch)
+        if exc is None:
+            return total
+        for table, rows in batch.items():
+            self.pending[table] = rows + self.pending.get(table, [])
+        if total > self.PENDING_CAP:
+            self.pending.clear()
+            log(f"⚠️쓰기가 계속 막혀 {total}행 버림 -- 그 구간은 소급 복원 불가다")
+        else:
+            log(f"쓰기 보류 {total}행, 다음 주기 재시도: {type(exc).__name__}")
+        return 0
+
+    def _write(self, batch: dict[str, list[tuple]]) -> Exception | None:
         try:
             with self._connect() as con:
                 # 🔴트랜잭션 하나로 -- 자동커밋이면 행마다 fsync 라 10초 주기의 ~50행이 8~10초
                 #   걸려 락을 늘 쥐고(읽기 0/60) OI 폴러가 굶었다(2026-09-23 실측).
                 con.begin()
-                for table, rows in self.pending.items():
+                for table, rows in batch.items():
                     if rows:
                         marks = ",".join("?" * INSERTS[table])
                         con.executemany(f"INSERT INTO {table} VALUES ({marks})", rows)
                 con.commit()
-            self.pending.clear()
-            return total
+            return None
         except Exception as exc:  # noqa: BLE001 -- 대개 읽는 쪽이 잡고 있는 락이다
-            if total > self.PENDING_CAP:
-                self.pending.clear()
-                log(f"⚠️쓰기가 계속 막혀 {total}행 버림 -- 그 구간은 소급 복원 불가다")
-            else:
-                log(f"쓰기 보류 {total}행, 다음 주기 재시도: {type(exc).__name__}")
-            return 0
+            return exc
 
     def record_gap(self, channel: str, from_ms: int, to_ms: int, reason: str) -> None:
         if to_ms - from_ms < 1500:
@@ -220,49 +224,6 @@ class ContextStore:
             log(f"gap 기록 실패(수집은 계속): {type(exc).__name__}")
 
 
-def oi_row_from_rest(body: dict, inst: str) -> tuple | None:
-    """OI REST 응답 → `okx_oi` 행. WS 페이로드와 필드가 같아 파싱도 같다."""
-    for r in body.get("data") or []:
-        if str(r.get("instId", "")) != inst:
-            continue
-        ts, oi, oi_ccy = int(_f(r.get("ts"), 0) or 0), _f(r.get("oi")), _f(r.get("oiCcy"))
-        if ts > 0 and oi is not None and oi_ccy is not None:
-            return (inst, ts, oi, oi_ccy, _f(r.get("oiUsd")))
-    return None
-
-
-async def poll_open_interest(session, inst: str, store: "ContextStore") -> None:
-    """🔴바이낸스(`OI_1S_POLL_SECONDS`=0.25)와 **같은 주기**로 REST 를 때린다.
-
-    WS `open-interest` 를 쓰지 않는 이유와 「값으로 중복 제거」하는 이유는 맨 위 도크스트링에
-    실측과 함께 적어 뒀다. 요약: WS 는 2.7배 성기고, OKX 의 `ts` 는 응답 시각이라 변화 신호가
-    아니다. 실패해도 조용히 다음 주기로 넘어간다 -- OI 때문에 WS 수집이 멈추면 안 된다."""
-    last: float | None = None
-    fails = 0
-    while True:
-        t0 = time.monotonic()
-        try:
-            async with session.get(OI_URL, headers=_tape.HTTP_HEADERS,
-                                   params={"instType": "SWAP", "instId": inst}) as r:
-                body = await r.json()
-            row = oi_row_from_rest(body, inst)
-            fails = 0
-            if row is not None and row[3] != last:      # 값이 바뀐 것만 (stamp 는 응답 시각이다)
-                last = row[3]
-                bad = oi_mismatch([row], CT_VALS)
-                if bad:
-                    log(f"🔴OI 단위가 갈라졌다 {bad[0]}: oiCcy {bad[3]} vs oi*ctVal {bad[4]}"
-                        " -- CT_VALS 를 확인할 것(계속 쌓기는 한다)")
-                store.stage({"okx_oi": [row]})
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            fails += 1
-            if fails in (1, 10, 100) or fails % 1000 == 0:   # 시끄럽지 않게, 그러나 조용하지도 않게
-                log(f"OI 폴링 실패 {fails}회째: {type(exc).__name__}")
-        await asyncio.sleep(max(0.0, OI_POLL_SECONDS - (time.monotonic() - t0)))
-
-
 async def collect(inst: str, db_path: Path) -> None:
     from aiohttp import ClientSession, ClientTimeout, WSMsgType
 
@@ -272,19 +233,18 @@ async def collect(inst: str, db_path: Path) -> None:
     store = ContextStore(db_path)
     store.set_meta([(f"ct_val:{inst}", repr(ct_val)),
                     ("liquidation_scope", "instType=SWAP (전 종목) · sz_base 는 ctVal 아는 것만"),
-                    ("bk_px_note", "파산가격이다 -- 바이낸스 forceOrder 의 체결가와 다르다")])
-    args = [{"channel": c, "instId": inst}          # OI 는 WS 가 아니라 아래 REST 폴러가 받는다
-            for c in ("mark-price", "funding-rate")]
+                    ("bk_px_note", "파산가격이다 -- 바이낸스 forceOrder 의 체결가와 다르다"),
+                    ("okx_oi_note", "2026-09-23 05:30~23:59 KST 행은 REST 0.25초 폴링분이라 "
+                     "A->B->A 되돌림(응답 노드 불일치) 잡음이 ~60% 섞여 있다. 그 뒤는 WS "
+                     "open-interest(진짜 거래소 ts, 5~10초 간격)")])
+    args = [{"channel": c, "instId": inst}
+            for c in ("open-interest", "mark-price", "funding-rate")]
     args.append({"channel": "liquidation-orders", "instType": "SWAP"})
     log(f"{inst} 컨텍스트 수집 시작 (ctVal {ct_val}, db {db_path})")
     down_from = int(time.time() * 1000)
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
         await assert_ct_val(session, inst, ct_val)
-        oi_task = asyncio.create_task(poll_open_interest(session, inst, store))
-        try:
-            await _ws_loop(session, inst, args, store, down_from)
-        finally:
-            oi_task.cancel()
+        await _ws_loop(session, inst, args, store, down_from)
 
 
 async def _ws_loop(session, inst: str, args: list, store: "ContextStore",
@@ -322,7 +282,7 @@ async def _ws_loop(session, inst: str, args: list, store: "ContextStore",
                     now = time.monotonic()
                     if now - flushed_at >= FLUSH_SECONDS:
                         flushed_at = now
-                        wrote += store.flush()
+                        wrote += await store.aflush()
                         if wrote and wrote % 5000 < 200:
                             log(f"누적 {wrote:,}행")
         except asyncio.CancelledError:
@@ -332,7 +292,7 @@ async def _ws_loop(session, inst: str, args: list, store: "ContextStore",
         except Exception as exc:  # noqa: BLE001
             log(f"연결 실패, 3초 뒤 재시도: {type(exc).__name__} {exc}")
         down_from = int(time.time() * 1000)
-        store.flush()
+        await store.aflush()
         await asyncio.sleep(3.0)
 
 
@@ -380,20 +340,6 @@ def selftest() -> None:
     assert abs(eth[7] - 0.797) < 1e-12, ("sz 는 계약 수다", eth)
     pengu = [x for x in rows if x[0] == "PENGU-USDT-SWAP"][0]
     assert pengu[7] is None, ("ctVal 을 모르면 0 이 아니라 NULL 이다", pengu)
-
-    # REST OI 폴러: 파싱과 «값으로 중복 제거» 규칙
-    rest = {"code": "0", "data": [{"instId": "ETH-USDT-SWAP", "instType": "SWAP",
-                                   "oi": "5941713.19000001727", "oiCcy": "594171.319000001727",
-                                   "oiUsd": "1631065629.5", "ts": "1790092405208"}]}
-    row = oi_row_from_rest(rest, "ETH-USDT-SWAP")
-    assert row == oi["okx_oi"][0], ("REST 와 WS 파싱 결과가 같아야 한다", row)
-    assert len(row) == INSERTS["okx_oi"]
-    assert oi_row_from_rest(rest, "BTC-USDT-SWAP") is None, "다른 종목 응답은 버린다"
-    assert oi_row_from_rest({"data": []}, "ETH-USDT-SWAP") is None
-    # 🔴stamp 는 응답 시각이라 변화 신호가 아니다 -- 같은 값이면 ts 가 달라도 같은 것으로 본다
-    newer = {"data": [dict(rest["data"][0], ts="1790092405999")]}
-    assert oi_row_from_rest(newer, "ETH-USDT-SWAP")[3] == row[3], "값이 같으면 중복이다"
-    assert oi_row_from_rest(newer, "ETH-USDT-SWAP")[1] != row[1], "그래도 ts 는 따라 들어온다"
 
     assert parse_message({"arg": {"channel": "tickers"}, "data": [{}]}, ct) == {}
     assert parse_message({"event": "subscribe"}, ct) == {}

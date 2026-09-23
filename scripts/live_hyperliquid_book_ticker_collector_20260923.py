@@ -200,14 +200,14 @@ async def run(coin: str, root: Path, ctx_db: Path) -> None:
                         now = time.monotonic()
                         if now - flushed_at >= CTX_FLUSH_SECONDS:
                             flushed_at = now
-                            store.write(ctx_buf)
+                            await asyncio.to_thread(store.write, ctx_buf)  # 스레드로: close() 체크포인트 fsync(~0.5초)가 WS 수신을 막지 않게
                             ctx_buf = []
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 -- 빈 구간은 영원히 못 채운다. 다시 붙는다.
                 log.warning("WS 끊김 %s: %s — 3초 뒤 재연결", type(exc).__name__, exc)
             out.close()
-            store.write(ctx_buf)
+            await asyncio.to_thread(store.write, ctx_buf)
             ctx_buf = []
             await asyncio.sleep(3)
 
