@@ -596,7 +596,90 @@ OKX_WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
 #   (import) -- 종목을 env 로 바꿔도 맞는 값을 쓰고, 모르는 종목이면 OKX 레인을 켜지 않는다.
 #   시작할 때 거래소 REST 와 대조해 갈라졌으면 역시 켜지 않는다(collect_okx_flow).
 from scripts.live_okx_trade_tape_collector_20260923 import (  # noqa: E402
-    CT_VALS as OKX_CT_VALS, HTTP_HEADERS as OKX_HTTP_HEADERS, INSTRUMENTS_URL as OKX_INSTRUMENTS_URL)
+    BUCKETS as OKX_TAPE_BUCKETS, CT_VALS as OKX_CT_VALS, HTTP_HEADERS as OKX_HTTP_HEADERS,
+    INSTRUMENTS_URL as OKX_INSTRUMENTS_URL)
+OKX_TAPE_DB_PATH = LIVE_DIR / "okx_trade_tape.duckdb"
+OKX_CTX_DB_PATH = LIVE_DIR / "okx_context.duckdb"
+
+
+def _read_only_rows(path: Path, sql: str, params: list) -> list[tuple]:
+    """수집기 duckdb 를 read_only 로 잠깐 연다. 쓰는 쪽(5~10초마다 수백 ms)과 겹치면 짧게 다시."""
+    for i in range(25):
+        try:
+            con = duckdb.connect(str(path), read_only=True)
+            try:
+                return con.execute(sql, params).fetchall()
+            finally:
+                con.close()
+        except duckdb.IOException as exc:
+            if "lock" not in str(exc).lower() or i == 24:
+                raise
+            time.sleep(0.2)
+    return []
+
+
+def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_ms: int,
+                       bar_seconds: int, bucket: float) -> dict:
+    """OKX 체결 테이프(수집기 duckdb)에서 풋프린트 봉을 되살린다 (2026-09-24, 사용자 A안).
+
+    왜: 대시보드가 재기동하면 OKX 풋프린트 과거분이 사라지고(REST history-trades 백필은 10.8초치
+      뿐), 그래서 «OKX 가 온전히 덮은 봉부터만» 내보냈다(C안) -- 재기동마다 화면이 몇 분치로
+      줄었다. 그런데 OKX 테이프 수집기가 **같은 WS `trades` 를 1초×$0.1 칸으로 빠짐없이** 쌓고
+      있고(1분봉 대조 + 자동 복구), 칸의 뜻도 라이브와 같다(메시지 = 주문 단위로 고래/리테일).
+    돌려주는 것 -- 읽기만 한다(메모리 반영은 이벤트 루프가 한다):
+      bars:   {봉: {가격칸: [매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도]}}  (ts < t0 초만)
+      ok_min: 온전한 분 집합 -- 1분봉과 맞은 분(자동 복구분 포함) 또는 «아직 검사 전인 최근 15분 중
+              기록된 공백과 안 겹치는 분»(검사가 2~5분 늦게 돈다).
+      oi:     {봉: (첫 OI, 끝 OI)} -- okx_context 의 WS OI(ETH). ts < t0 만.
+    🔴가격칸: 테이프 칸(0.1)을 풋프린트 칸(0.5)으로 올린다. 0.5 가 0.1 의 정수배라 경계가 겹친다
+      (정수/5 는 .5 가 안 나와 반올림 동률이 없다)."""
+    t0_sec = t0_ms // 1000
+    q = """SELECT ts_sec // ? * ? AS bar, CAST(round(price_bin * ? / ?) AS INTEGER) AS k,
+                  sum(buy_qty), sum(sell_qty),
+                  sum(coalesce(whale_buy_qty, 0)), sum(coalesce(whale_sell_qty, 0)),
+                  sum(coalesce(retail_buy_qty, 0)), sum(coalesce(retail_sell_qty, 0))
+           FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY 1, 2"""
+    tape_bucket = OKX_TAPE_BUCKETS[inst]
+    bars: dict[int, dict[int, list[float]]] = {}
+    for bar, k, *v in _read_only_rows(tape_db, q, [bar_seconds, bar_seconds, tape_bucket, bucket,
+                                                   inst, lo_sec, t0_sec]):
+        bars.setdefault(int(bar), {})[int(k)] = [float(x) for x in v]
+    ver = _read_only_rows(tape_db, "SELECT ts_min, rel_err FROM verify_1m WHERE symbol = ? AND ts_min >= ?",
+                          [inst, lo_sec])
+    gaps = _read_only_rows(tape_db, "SELECT from_ms, to_ms FROM gaps WHERE symbol = ? AND to_ms > ?",
+                           [inst, lo_sec * 1000])
+    good = {int(m) for m, r in ver if abs(r) <= 1e-4}
+    seen = {int(m) for m, _ in ver}
+    now = int(time.time())
+    ok_min = set(good)
+    for m in range(lo_sec, t0_sec + 60, 60):
+        if m not in seen and m >= now - 900 and not any(a < (m + 60) * 1000 and b > m * 1000
+                                                         for a, b in gaps):
+            ok_min.add(m)
+    oi: dict[int, tuple[float, float]] = {}
+    try:
+        for bar, o, c in _read_only_rows(ctx_db, """
+                SELECT ts_ms // 1000 // ? * ?, arg_min(oi_base, ts_ms), arg_max(oi_base, ts_ms)
+                FROM okx_oi WHERE inst = ? AND ts_ms >= ? AND ts_ms < ? GROUP BY 1""",
+                [bar_seconds, bar_seconds, inst, lo_sec * 1000, t0_ms]):
+            oi[int(bar)] = (float(o), float(c))
+    except duckdb.Error:
+        pass                      # OI 가 없어도 풋프린트는 되살린다(사분면 OI 만 바이낸스로 남는다)
+    # 청산도 같은 구간을 되살린다 -- 봉에 «바이낸스+OKX» 가 붙는데 OKX 청산이 0 이면 합산 표시가
+    #   거짓이 된다(피어 지적, 2026-09-24). 모양은 라이브 okx_liq_events 원소와 같다.
+    liq: list[dict] = []
+    try:
+        for ts, pos, qty, px in _read_only_rows(ctx_db, """
+                SELECT ts_ms, pos_side, sz_base, bk_px FROM okx_liquidations
+                WHERE inst_id = ? AND ts_ms >= ? AND ts_ms < ? AND sz_base > 0 ORDER BY ts_ms""",
+                [inst, lo_sec * 1000, t0_ms]):
+            liq.append({"ts_ms": int(ts), "side": "long" if pos == "long" else "short",
+                        "qty": float(qty), "price": float(px or 0.0),
+                        "usd": float(qty) * float(px or 0.0), "symbol": inst})
+    except duckdb.Error:
+        pass
+    tape_max = _read_only_rows(tape_db, "SELECT max(ts_sec) FROM trade_tape_1s WHERE symbol = ?", [inst])
+    return {"bars": bars, "ok_min": ok_min, "oi": oi, "liq": liq, "tape_max": int(tape_max[0][0] or 0)}
 OKX_CT_VAL = OKX_CT_VALS.get(OKX_INST)
 # ⭐OI 는 **WS `open-interest`** 로 받는다(2026-09-23 정정). REST 0.25초 폴링이 «2.7배 더 본» 변화는
 #   60%가 A->B->A 되돌림(응답 노드 불일치) 잡음이었고, 동시 75초에 REST 고유 값 10개 = WS 10개였다.
@@ -2720,7 +2803,9 @@ def make_app() -> web.Application:
     #   첫 봉 이후만 내보내기»다 -- 창이 짧아지는 대신 단차가 없다(사용자 선택 C).
     #   ⚠️«OKX 가 있는 봉만» 으로 짜면 OKX 가 잠깐 끊길 때 풋프린트가 **통째로 사라진다**.
     #     시작 봉만 기억하는 이 방식은 순간 끊김에 안 죽는다(재연결 3초 = 봉의 1%).
-    okx_fp = {"first_bar": 0}
+    # ⭐2026-09-24 A안: 기동 뒤 okx_footprint_restore 가 OKX 테이프에서 과거 봉을 되살려
+    #   first_bar 를 창 끝까지 당긴다(아래 okx_tape_footprint). 그 전까지는 위 C안 그대로다.
+    okx_fp = {"first_bar": 0, "t0_ms": 0, "resync_until": 0.0}
     # 5분봉별 OKX OI [봉 첫 값, 봉 끝 값](ETH, oiCcy). 2026-09-24 사용자 «사분면·누적 OI 도 OKX
     #   합산». okx_oi_1s 는 11분 링이라 창(1~4h)의 봉별 Δ 를 못 낸다. 재기동 전 봉은 없다 --
     #   풋프린트가 어차피 OKX 가 덮은 봉부터만 나가므로(okx_fp) 레인에 그려지는 봉과 겹친다.
@@ -2813,6 +2898,7 @@ def make_app() -> web.Application:
                                     bar = footprint_bar_start(ts_ms)
                                     if not okx_fp["first_bar"]:
                                         okx_fp["first_bar"] = bar
+                                        okx_fp["t0_ms"] = ts_ms      # 이 앞은 테이프가 맡는다
                                     cells = okx_bars.get(bar)
                                     if cells is None:
                                         cells = okx_bars[bar] = {}
@@ -2938,17 +3024,80 @@ def make_app() -> web.Application:
         finally:
             await ws_session.close()
 
+    async def okx_footprint_restore(app: web.Application) -> None:
+        """A안(2026-09-24): 기동 뒤 OKX 풋프린트 과거분을 OKX 체결 테이프에서 되살린다.
+
+        진행 중인 봉은 **T0(라이브 첫 체결) 앞 몫만** 테이프에서 더하고, 그 앞 봉들은 테이프로
+        통째로 채운다 -- 온전한 봉이 끊김 없이 이어지는 데까지만(중간에 온전하지 않은 봉이 있으면
+        거기서 멈춘다: 그 앞을 내보내면 C안이 막으려던 단차가 창 안에 생긴다). 사분면 OI 도 같은 봉까지.
+        테이프 자동 복구가 공백을 메우는 데 몇 분 걸리므로 5분마다 35분까지 다시 본다.
+        🔴DB 읽기는 스레드, 메모리 반영은 **이 루프에서** -- 라이브 체결이 같은 dict 를 만진다."""
+        while not okx_fp["t0_ms"]:
+            await asyncio.sleep(1.0)
+        t0 = okx_fp["t0_ms"]
+        start_bar = footprint_bar_start(t0)
+        lo = start_bar - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS
+        t0_min = (t0 // 1000) // 60 * 60
+        start_filled, restored, liq_upto = False, set(), t0   # liq_upto: 청산을 이미 채운 구간의 앞끝
+        for attempt in range(8):
+            await asyncio.sleep(15.0 if attempt == 0 else 300.0)
+            try:
+                got = await asyncio.to_thread(okx_tape_footprint, OKX_TAPE_DB_PATH, OKX_CTX_DB_PATH,
+                                              OKX_INST, lo, t0, FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET)
+            except Exception as exc:  # noqa: BLE001 -- 테이프가 없으면 C안 그대로 산다
+                print(f"okx footprint 복원 실패({attempt + 1}회): {exc!r}", flush=True)
+                continue
+            if got["tape_max"] < t0 // 1000:
+                continue                          # 테이프가 아직 T0 를 지나 쓰지 않았다
+            ok = got["ok_min"]
+            covered = lambda a, b: all(m in ok for m in range(a, b, 60))  # noqa: E731
+            if not start_filled:
+                if not covered(start_bar, t0_min + 60):
+                    continue
+                cells = okx_bars.setdefault(start_bar, {})
+                for k, v in got["bars"].get(start_bar, {}).items():
+                    t = cells.setdefault(k, [0.0] * 6)
+                    for j in range(6):
+                        t[j] += v[j]
+                start_filled = True
+            earliest, b = start_bar, start_bar - FOOTPRINT_BAR_SECONDS
+            while b >= lo and covered(b, b + FOOTPRINT_BAR_SECONDS):
+                if b not in restored:             # 라이브는 이 봉을 모른다 -- 교체
+                    okx_bars[b] = got["bars"].get(b, {})
+                    restored.add(b)
+                earliest, b = b, b - FOOTPRINT_BAR_SECONDS
+            for ob, (o, c) in got["oi"].items():
+                if earliest <= ob < start_bar:
+                    okx_oi_5m[ob] = [o, c]
+                elif ob == start_bar:
+                    okx_oi_5m.setdefault(ob, [o, c])[0] = o
+            # 청산: 이번에 새로 덮은 구간 [earliest, liq_upto) 만 앞에 넣는다(시각 순 유지).
+            #   🔴deque(maxlen) 에 appendleft 하다 차면 **가장 최신**이 밀려난다 -- 남은 자리만큼만.
+            add = [e for e in got["liq"] if earliest * 1000 <= e["ts_ms"] < liq_upto]
+            room = (okx_liq_events.maxlen or 10**9) - len(okx_liq_events)
+            for e in reversed(add[-room:] if room > 0 else []):
+                okx_liq_events.appendleft(e)
+            liq_upto = earliest * 1000
+            okx_fp["first_bar"] = earliest - FOOTPRINT_BAR_SECONDS
+            okx_fp["resync_until"] = time.time() + 15.0   # 열린 화면도 전량 한 번 받게
+            print(f"okx footprint: 테이프에서 {len(restored)}봉 + 진행 봉 앞부분 복원 "
+                  f"(창 {(start_bar - earliest) // FOOTPRINT_BAR_SECONDS + 1}"
+                  f"/{FOOTPRINT_MAX_WINDOW_BARS}봉)", flush=True)
+            if earliest <= lo:
+                return
+
     async def start_micro_ref(app: web.Application) -> None:
         _situation_load_log()
         app["micro_ref_task"] = asyncio.create_task(collect_micro_ref(app))
         app["force_order_task"] = asyncio.create_task(collect_force_orders(app))
         app["mark_price_task"] = asyncio.create_task(collect_mark_price(app))
         app["okx_flow_task"] = asyncio.create_task(collect_okx_flow(app))
+        app["okx_restore_task"] = asyncio.create_task(okx_footprint_restore(app))
         app["spot_flow_task"] = asyncio.create_task(collect_spot_flow(app))
 
     async def stop_micro_ref(app: web.Application) -> None:
         for key in ("micro_ref_task", "force_order_task", "mark_price_task",
-                    "okx_flow_task", "spot_flow_task"):
+                    "okx_flow_task", "okx_restore_task", "spot_flow_task"):
             app[key].cancel()
             try:
                 await app[key]
@@ -3726,7 +3875,8 @@ def make_app() -> web.Application:
             since = int(request.query.get("since", "0"))
         except (TypeError, ValueError):
             since = 0
-        full = since <= 0 or not footprint_state["ready"]
+        # A안: OKX 과거 봉을 방금 되살렸으면 잠깐 전량 -- 증분만 받는 열린 화면은 그 봉을 못 받는다.
+        full = since <= 0 or not footprint_state["ready"] or time.time() < okx_fp["resync_until"]
         sent = recent if full else [(b, c) for b, c in recent if b >= since]
         # 2026-09-24 진행 중인 봉의 **OKX 몫만** 따로. 클라는 그 봉을 바이낸스 직결 WS 셀로
         #   갈아끼우므로(footprintMergeLive) 합산분이 빠져 봉이 ~2/3 로 그려지다가 마감 때 튀었다
