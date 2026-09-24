@@ -167,20 +167,29 @@ async def verify_recent(store, session, inst: str) -> None:
     minutes = store.unverified_minutes()
     if not minutes:
         return
-    try:
-        # 🔴`candles` 는 최근 100분뿐이라 그보다 밀린 분은 영영 검사 못 했다 -- 과거용
-        #   history-candles 로 «이번 묶음의 최근 분 + 1분» 앞 100분을 받는다(남은 분은 다음 주기).
-        async with session.get(HISTORY_CANDLES_URL, headers=HTTP_HEADERS,
-                               params={"instId": inst, "bar": "1m", "limit": "100",
-                                       "after": str((max(minutes) + 60) * 1000)}) as r:
-            if r.status != 200:
-                return
-            body = await r.json()
-    except Exception as exc:  # noqa: BLE001
-        log(f"kline 조회 실패(수집은 계속): {type(exc).__name__}")
-        return
-    kvol = {int(row[0]) // 1000: float(row[6])
-            for row in body.get("data", []) if str(row[8]) == "1"}
+    # 🔴`candles` 는 최근 100분뿐이라 밀린 분을 영영 못 봤다 -> 과거용 history-candles(요청당 100분).
+    # 🔴그리고 **구간마다** 받는다: 묶음의 최근 분 하나에만 맞춰 100분을 받으면, 새 분이 늘 최근에
+    #   생기므로 100분보다 오래된 밀린 분은 영원히 범위 밖이었다(2026-09-24: 19:48 이전 65분 정체).
+    kvol: dict[int, float] = {}
+    left = sorted(minutes, reverse=True)
+    for _ in range(6):                        # 30분이 흩어져도 보통 2~4번이면 덮는다(한도 20/2초)
+        if not left:
+            break
+        anchor = left[0]
+        try:
+            async with session.get(HISTORY_CANDLES_URL, headers=HTTP_HEADERS,
+                                   params={"instId": inst, "bar": "1m", "limit": "100",
+                                           "after": str((anchor + 60) * 1000)}) as r:
+                if r.status != 200:
+                    break
+                body = await r.json()
+        except Exception as exc:  # noqa: BLE001
+            log(f"kline 조회 실패(수집은 계속): {type(exc).__name__}")
+            break
+        kvol.update({int(row[0]) // 1000: float(row[6])
+                     for row in body.get("data", []) if str(row[8]) == "1"})
+        left = [m for m in left if m < anchor - 99 * 60]
+        await asyncio.sleep(0.12)
     if not kvol:
         return
     results = store.verify(kvol, minutes)
