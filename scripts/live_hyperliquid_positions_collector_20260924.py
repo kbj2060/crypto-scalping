@@ -15,6 +15,12 @@
 요청 한도: info 가중치 1,200/분 · clearinghouseState 가중치 2 -- 0.4초 간격(150회/분 = 300)이면 25%.
 시각: `ts_ms` 는 **서버 시계**다(응답에 거래소 시각 `time` 이 오면 그것을 `ex_ms` 로 같이 적는다).
 
+⭐고래 청산 감지(2026-09-24 추가): 바퀴 사이에 포지션이 **줄었거나 사라진** 주소 중, 그 사이 HL 1분봉
+  고가~저가가 **직전 청산가 ±LIQ_TOL** 을 지나간 주소만 `userFillsByTime` 으로 조회해, 본인이 청산당한
+  체결(`liquidation.liquidatedUser == 그 주소`)을 `hl_liquidations` 에 적는다. 모든 테이커를 조회하는
+  전수 식별은 너무 비싸다(급변 8분·64회 조회에 ETH 청산 1건) -- 관심 대상(큰손)만 정확히 잡는다.
+  🔴청산 체결의 `liquidation` 표시는 **상대방 쪽 기록에도** 붙는다 -- 그래서 liquidatedUser 로 거른다.
+
 사용:
   python scripts/live_hyperliquid_positions_collector_20260924.py
   python scripts/live_hyperliquid_positions_collector_20260924.py --selftest
@@ -46,6 +52,7 @@ UNIVERSE_N = 300
 UNIVERSE_HOURS = 48
 UNIVERSE_REFRESH_S = 6 * 3600
 REQ_GAP_S = 0.4
+LIQ_TOL = 0.005        # 청산가가 바퀴 사이 가격 범위의 ±0.5% 안이면 조회
 # ponytail: 단일 duckdb -- ETH 포지션 있는 주소만 적어 ~수만 행/일이라 당장은 작다. 커지면 날짜별 분할.
 
 DDL = (
@@ -55,6 +62,10 @@ DDL = (
          unrealized_pnl DOUBLE, cum_funding DOUBLE, account_value DOUBLE)""",
     """CREATE TABLE IF NOT EXISTS hl_universe(
          ts_ms BIGINT, user VARCHAR, rank INTEGER, notional_48h DOUBLE)""",
+    """CREATE TABLE IF NOT EXISTS hl_liquidations(
+         detected_ms BIGINT, tid BIGINT, user VARCHAR, coin VARCHAR, fill_ms BIGINT, px DOUBLE,
+         sz DOUBLE, side VARCHAR, dir VARCHAR, start_position DOUBLE, closed_pnl DOUBLE,
+         mark_px DOUBLE, method VARCHAR)""",
     """CREATE TABLE IF NOT EXISTS hl_cycles(
          ts_ms BIGINT, n_users INTEGER, n_ok INTEGER, n_pos INTEGER, seconds DOUBLE)""",
 )
@@ -87,6 +98,36 @@ def parse_state(state: dict, user: str, coin: str, ts_ms: int) -> tuple | None:
                 _f(p.get("positionValue")), _f(p.get("unrealizedPnl")),
                 _f((p.get("cumFunding") or {}).get("sinceOpen")), acct)
     return None
+
+
+def liquidation_candidates(prev: dict[str, tuple[float, float | None]],
+                           cur: dict[str, float], low: float, high: float,
+                           tol: float = LIQ_TOL) -> list[str]:
+    """직전 바퀴 {주소: (szi, 청산가)} · 이번 {주소: szi} · 그 사이 가격 저가/고가 -> 조회할 주소.
+    포지션이 줄었거나(부호가 바뀐 것 포함) 사라졌고, 직전 청산가가 [저가·(1-tol), 고가·(1+tol)] 안."""
+    out = []
+    for u, (szi, liq) in prev.items():
+        if not liq or not szi:
+            continue
+        now = cur.get(u, 0.0)
+        shrank = now * szi <= 0 or abs(now) < abs(szi) * 0.999
+        if shrank and low * (1 - tol) <= liq <= high * (1 + tol):
+            out.append(u)
+    return out
+
+
+def parse_liq_fills(fills: list[dict], user: str, coin: str, detected_ms: int) -> list[tuple]:
+    """`userFillsByTime` -> 그 주소가 **청산당한** 체결만(상대방 쪽 기록은 뺀다)."""
+    rows = []
+    for f in fills or []:
+        lq = f.get("liquidation") or {}
+        if f.get("coin") != coin or str(lq.get("liquidatedUser", "")).lower() != user.lower():
+            continue
+        rows.append((detected_ms, int(f.get("tid") or 0), user, coin, int(f.get("time") or 0),
+                     _f(f.get("px")), _f(f.get("sz")), str(f.get("side") or ""), str(f.get("dir") or ""),
+                     _f(f.get("startPosition")), _f(f.get("closedPnl")), _f(lq.get("markPx")),
+                     str(lq.get("method") or "")))
+    return rows
 
 
 def universe(now: float) -> list[tuple[str, float]]:
@@ -128,6 +169,39 @@ def write(sql_rows: dict[str, list[tuple]]) -> None:
         con.commit()
 
 
+async def _info(session, body: dict):
+    async with session.post(INFO_URL, json=body) as r:
+        r.raise_for_status()
+        return await r.json()
+
+
+async def detect_liquidations(session, prev, rows, prev_t0: float, seen_tids: set[int]) -> list[tuple]:
+    """직전 바퀴와 비교해 청산 후보만 조회한다(liquidation_candidates 도크스트링)."""
+    now_ms = int(time.time() * 1000)
+    candles = await _info(session, {"type": "candleSnapshot", "req": {
+        "coin": COIN, "interval": "1m", "startTime": int(prev_t0 * 1000) - 60_000, "endTime": now_ms}})
+    if not candles:
+        return []
+    low = min(float(c["l"]) for c in candles)
+    high = max(float(c["h"]) for c in candles)
+    cands = liquidation_candidates(prev, {r[2]: r[4] for r in rows}, low, high)
+    out: list[tuple] = []
+    for u in cands:
+        fills = await _info(session, {"type": "userFillsByTime", "user": u,
+                                      "startTime": int(prev_t0 * 1000) - 60_000, "endTime": now_ms})
+        got = [r for r in parse_liq_fills(fills, u, COIN, now_ms) if r[1] not in seen_tids]
+        seen_tids.update(r[1] for r in got)
+        if got:
+            sz = sum(r[6] for r in got)
+            log(f"🔥고래 청산 {u[:10]}… {COIN} {sz:,.1f} (직전 {prev[u][0]:+,.1f} · 청산가 {prev[u][1]:,.2f} · "
+                f"{len(got)}체결 · {got[0][12]})")
+        out += got
+        await asyncio.sleep(REQ_GAP_S)
+    if cands and not out:
+        log(f"청산 후보 {len(cands)}주소 조회 -- 청산 체결 없음(스스로 줄임)")
+    return out
+
+
 async def run() -> None:
     from aiohttp import ClientSession, ClientTimeout
     DB.parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +210,9 @@ async def run() -> None:
             con.execute(ddl)
     users: list[str] = []
     picked_at = 0.0
+    prev: dict[str, tuple[float, float | None]] = {}   # 직전 바퀴 {주소: (szi, 청산가)}
+    prev_t0 = 0.0
+    seen_tids: set[int] = set()
     log(f"{COIN} 포지션 수집 시작 (상위 {UNIVERSE_N}주소 · {REQ_GAP_S}초 간격 · db {DB})")
     async with ClientSession(timeout=ClientTimeout(total=15)) as session:
         while True:
@@ -170,9 +247,18 @@ async def run() -> None:
                         log(f"조회 실패: {type(exc).__name__} {exc}")
                 await asyncio.sleep(REQ_GAP_S)
             took = time.time() - t0
+            liq_rows: list[tuple] = []
+            if prev and ok:
+                try:
+                    liq_rows = await detect_liquidations(session, prev, rows, prev_t0, seen_tids)
+                except Exception as exc:  # noqa: BLE001 -- 감지 실패로 수집을 멈추지 않는다
+                    log(f"청산 감지 실패: {type(exc).__name__} {exc}")
+            if ok:
+                prev = {r[2]: (r[4], r[6]) for r in rows}
+                prev_t0 = t0
             try:
-                await asyncio.to_thread(write, {"hl_positions": rows, "hl_cycles": [
-                    (int(t0 * 1000), len(users), ok, len(rows), took)]})
+                await asyncio.to_thread(write, {"hl_positions": rows, "hl_liquidations": liq_rows,
+                                                "hl_cycles": [(int(t0 * 1000), len(users), ok, len(rows), took)]})
             except Exception as exc:  # noqa: BLE001
                 log(f"쓰기 실패(이번 바퀴 유실): {type(exc).__name__} {exc}")
             long_n = sum(r[4] for r in rows if r[4] > 0)
@@ -198,6 +284,24 @@ def selftest() -> None:
     flat = json.loads(json.dumps(state)); flat["assetPositions"][1]["position"]["szi"] = "0.0"
     assert parse_state(flat, "0xabc", "ETH", 1) is None, "포지션 0 은 적지 않는다"
     assert parse_state({"assetPositions": []}, "0xabc", "ETH", 1) is None
+
+    # ── 청산 후보: 줄었거나 사라졌고, 청산가가 그 사이 가격 범위 근처 ─────────────
+    prev = {"a": (100.0, 2540.0),     # 사라짐 · 청산가가 범위 안 -> 후보
+            "b": (100.0, 2540.0),     # 그대로 -> 아님
+            "c": (100.0, 2400.0),     # 사라졌지만 청산가가 멀다 -> 아님
+            "d": (-50.0, 2700.0),     # 숏이 줄었고 청산가가 고가 +0.3% -> 후보
+            "e": (100.0, None),       # 청산가 없음 -> 아님
+            "f": (100.0, 2560.0)}     # 부호가 뒤집힘(롱 -> 숏) · 범위 안 -> 후보
+    cur = {"b": 100.0, "d": -20.0, "e": 0.0, "f": -10.0}
+    assert sorted(liquidation_candidates(prev, cur, low=2545.0, high=2692.0)) == ["a", "d", "f"]
+    # ── 청산 체결: 본인이 청산당한 것만(상대방 쪽 기록은 뺀다) ─────────────────────
+    fills = [{"coin": "ETH", "tid": 1, "time": 5, "px": "2541", "sz": "30", "side": "A", "dir": "Close Long",
+              "startPosition": "100", "closedPnl": "-900", "liquidation": {"liquidatedUser": "0xAA", "markPx": "2540.5", "method": "market"}},
+             {"coin": "ETH", "tid": 2, "time": 6, "px": "2541", "sz": "5", "side": "B", "liquidation": {"liquidatedUser": "0xbb"}},
+             {"coin": "BTC", "tid": 3, "liquidation": {"liquidatedUser": "0xaa"}},
+             {"coin": "ETH", "tid": 4, "px": "2600", "sz": "1"}]
+    lr = parse_liq_fills(fills, "0xaa", "ETH", 9)
+    assert len(lr) == 1 and lr[0][1] == 1 and lr[0][6] == 30.0 and lr[0][11] == 2540.5 and lr[0][12] == "market", lr
     print("selftest OK")
 
 
