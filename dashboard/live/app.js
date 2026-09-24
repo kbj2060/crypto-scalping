@@ -184,10 +184,12 @@ const API_SUPPLY_PROFILE_URL = "/api/supply-profile";
 // ── 수급 · 최근 5분 × 1초 (2026-09-19) ────────────────────────────────────
 // 서버가 초 단위 칸을 들고 있고, 여기선 **증분만** 받는다(?since=). 300초를 매초 전부 받으면
 // 시간당 60MB 가 넘는다 -- 증분이면 보통 한두 줄이다.
-// ⚠️서버는 **진행 중인 초를 안 보낸다**(반쪽이 굳는 걸 막으려고). 그래서 맨 오른쪽 막대는
-//   최대 2초 묵은 값이다. 그보다 더 당기려면 폴링이 아니라 SSE 여야 한다 -- 지금 필요 없다.
+// ⚠️서버는 진행 중인 초를 목록(커서가 움직이는 쪽)에 안 넣는다 -- 반쪽이 굳는 걸 막으려고.
+// ⭐2026-09-24: 대신 `partial` 로 따로 받아 **커서를 안 옮기고** 칸만 채운다. 초가 닫히면 확정본이
+//   목록으로 와서 같은 칸을 덮는다. 폴링도 0.25초로 -- 오른쪽 끝 지연이 1~2초에서 ~0.1초대로.
+//   (증분이라 회당 보통 수백 B. 틱(0.5초)과 따로 도는 타이머를 쓴다.)
 const API_SUPPLY_1S_URL = "/api/supply-1s";
-const SUPPLY_1S_POLL_MS = 1000;
+const SUPPLY_1S_POLL_MS = 250;
 const SUPPLY_1S_SEGMENT = 300;          // 누적을 0으로 되돌리는 **벽시계** 경계(초). 5분봉과 같은 자리.
 // 계단 눈금(ETH). 자동정규화를 안 쓰는 이유는 renderSupply1s 주석에 있다.
 const SUPPLY_1S_STEPS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000];
@@ -199,6 +201,7 @@ let supply1sMeta = { retailMaxUsd: 0, whaleMinUsd: 0, now: 0 };
 //   렌더에서 오른쪽에 공백 띠가 계속 자라는 걸로 드러났다).
 let supply1sSince = 0;
 let supply1sLastFetchAt = 0;
+let supply1sInFlight = false;   // 0.25초 타이머라 응답이 늦으면 겹친다 -- 겹치면 커서가 꼬인다
 // 초 -> 그 초의 미결제약정(ETH). 같은 응답에 얹혀 온다(별도 폴링을 하나 더 두지 않는다).
 // ⚠️바이낸스가 OI 를 3~7초에 한 번만 갱신한다(서버 OI_1S_URL 주석의 실측) -- 점이 초마다
 //   있지 않은 게 정상이다. 창 시작을 0으로 두고 «그 뒤로 몇 계약이 새로 생겼나»를 그린다.
@@ -3423,8 +3426,9 @@ async function refreshSupply1s() {
   if (activePageTab !== "snapshot" || document.hidden) return;   // 안 보이는 걸 매초 받지 않는다
   if (activeSnapshotAsset !== "eth") return;                     // 테이프는 ETH 만 수집한다
   const now = Date.now();
-  if (now - supply1sLastFetchAt < SUPPLY_1S_POLL_MS) return;
+  if (now - supply1sLastFetchAt < SUPPLY_1S_POLL_MS || supply1sInFlight) return;
   supply1sLastFetchAt = now;
+  supply1sInFlight = true;
   try {
     const res = await fetch(`${API_SUPPLY_1S_URL}?since=${supply1sSince}&sinceOi=${oi1sSince}`
                             + `&sinceLiq=${liq1sSince}&sinceOkx=${okxSupply1sSince}`
@@ -3463,6 +3467,11 @@ async function refreshSupply1s() {
       spotSupply1s.set(r[0], r.slice(1));
       if (r[0] > spotSupply1sSince) spotSupply1sSince = r[0];
     });
+    // 진행 중인 초 -- 칸만 채우고 **커서(since)는 안 옮긴다**. 그래야 닫힌 뒤 확정본이 온다.
+    const part = payload.partial || {};
+    [[part.bn, supply1s], [part.okx, okxSupply1s], [part.spot, spotSupply1s]].forEach(([r, m]) => {
+      if (r) m.set(r[0], r.slice(1));
+    });
     okxMeta = Object.assign({}, payload.okxMeta || {},
                             { now: Number(payload.okxNow) || okxMeta.now });
     spotMeta = Object.assign({}, payload.spotMeta || {},
@@ -3489,6 +3498,8 @@ async function refreshSupply1s() {
     supply1sVer += 1;
   } catch (error) {
     console.error("Supply 1s fetch error:", error);
+  } finally {
+    supply1sInFlight = false;
   }
   // 받은 즉시 **이 패널만** 다시 그린다. 캔들 SVG 전체를 다시 그리지 않으므로 비싼 패스
   // (캔들·청산밀도·프로파일)는 안 탄다 -- 호버/스크롤 게이트에도 안 걸린다.
@@ -7564,6 +7575,7 @@ async function tick() {
   connectDashboardEvents();
   tick();
   setInterval(tick, POLL_MS);
+  setInterval(refreshSupply1s, SUPPLY_1S_POLL_MS);   // 수급만 틱(0.5초)보다 빠르게 -- 자체 게이트가 있다
 })();
 setInterval(() => {
   if (!isScrolling()) { setT("topClock", fmtNowClock()); }

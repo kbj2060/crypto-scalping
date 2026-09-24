@@ -21,8 +21,10 @@ $0.1 은 $2,400 자산에서 0.4bp 다. 이 저장소의 왕복 비용(5.88bp)�
 **자기 검증이 내장돼 있다(선택이 아니다).** 체결이 빠지면 델타가 **조용히** 틀어진다 — 화면도
 쿼리도 아무 말을 안 한다. 그래서 5분마다 직전 분들의 `sum(buy_qty+sell_qty)` 를 같은 분의
 kline `volume` 과 대조해 `verify_1m` 에 남긴다. 연구 쿼리는 이 표를 조인해 나쁜 분을 빼면 된다.
-WS 가 끊긴 구간은 `gaps` 에 기록한다 — 메우지 않고 **기록만** 한다(메우면 그게 진짜인지
-아닌지 알 수 없어진다. 메울 때는 벌크 zip 으로 그 날을 통째로 덮어쓴다).
+WS 가 끊긴 구간은 `gaps` 에 기록한다. 그리고 (2026-09-24) 공백·불일치 분을 거래소 REST 로
+**다시 받아, 그 분의 합이 1분봉과 맞을 때만** 통째로 교체한다(`backfill_loop`). «메우면 진짜인지
+알 수 없어진다»는 원래 우려는 두 가지로 막는다 -- ①1분봉과 1e-4 안에서 맞지 않으면 교체하지
+않는다 ②교체한 분은 `backfill_1m` 에 출처와 함께 남는다(연구 쿼리가 가를 수 있다).
 
 트레이딩 봇과 완전 분리: 자기 WS · 자기 duckdb · 주문 없음 · 죽어도 봇에 영향 없다.
 (래스터/bookTicker 수집기 도크스트링의 규약을 그대로 따른다.)
@@ -43,7 +45,9 @@ import argparse
 import asyncio
 import json
 import os
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +56,10 @@ DEFAULT_DB = ROOT / "data" / "live" / "trade_tape.duckdb"
 BUCKETS = {"ethusdt": 0.1, "btcusdt": 1.0, "solusdt": 0.01, "xrpusdt": 0.0001, "hypeusdt": 0.001}
 WS_URL = "wss://fstream.binance.com/ws/{symbol}@trade"
 KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
+AGG_TRADES_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
+BACKFILL_SECONDS = 60.0   # 복구 주기. 한 주기에 몇 분을 받을지는 거래소별 per_cycle
+BACKFILL_MAX_ATTEMPTS = 3
+BACKFILL_LOOKBACK_S = 7 * 86400
 FLUSH_SECONDS = 5.0      # 완결된 초만 쓴다 -- 한 초는 정확히 한 번 기록된다
 VERIFY_SECONDS = 300.0
 VERIFY_TOLERANCE = 1e-4  # 이보다 어긋나면 로그로 떠든다(행은 어차피 남긴다)
@@ -272,9 +280,31 @@ class TapeBuffer:
             cell[8 + i] += qty
             cell[10 + i] += 1
 
-    def take_closed(self) -> list[tuple]:
-        """진행 중인 초(max_sec)를 빼고 꺼낸다. 그 초는 아직 체결이 더 올 수 있다."""
-        done = [(sec, b, c) for (sec, b), c in self.rows.items() if sec < self.max_sec]
+    def add_agg(self, ts_ms: int, price: float, qty: float, sell: bool, fills: int) -> None:
+        """이미 **주문 단위**로 묶인 것 하나가 모든 칸을 한 번에 채운다 -- OKX `trades`(라이브)와
+        REST 복구(바이낸스 aggTrades · OKX 체결 묶음)가 쓴다. `fills` = 그 주문의 개별 체결 수.
+        🔴4~5번 칸(최대)은 «최대 주문»이 된다(`add` 경로는 «최대 개별 체결»)."""
+        cell = self._cell(ts_ms, price)
+        if cell is None:
+            return
+        i = 1 if sell else 0
+        cell[i] += qty
+        cell[2 + i] += fills
+        cell[4 + i] = max(cell[4 + i], qty)
+        cell[14 + i] += 1
+        notional = price * qty
+        if notional < RETAIL_MAX_USD:
+            cell[6 + i] += qty
+            cell[12 + i] += 1
+        elif notional >= WHALE_MIN_USD:
+            cell[8 + i] += qty
+            cell[10 + i] += 1
+
+    def take_closed(self, everything: bool = False) -> list[tuple]:
+        """진행 중인 초(max_sec)를 빼고 꺼낸다. 그 초는 아직 체결이 더 올 수 있다.
+        `everything=True` 는 끝난 구간(REST 복구)을 통째로 꺼낼 때만 쓴다."""
+        done = [(sec, b, c) for (sec, b), c in self.rows.items()
+                if everything or sec < self.max_sec]
         for sec, b, _ in done:
             del self.rows[(sec, b)]
         self.closed_before = max(self.closed_before, self.max_sec)
@@ -300,6 +330,7 @@ class TapeStore:
         self.db_path = db_path
         self.symbol = symbol
         self.pending: list[tuple] = []
+        self._lock = threading.Lock()   # 쓰기 스레드와 복구 태스크가 같은 파일을 동시에 연다
         with self._connect() as con:
             con.execute("""
                 CREATE TABLE IF NOT EXISTS trade_tape_1s(
@@ -354,6 +385,12 @@ class TapeStore:
                 CREATE TABLE IF NOT EXISTS verify_1m(
                   symbol VARCHAR, ts_min BIGINT, tape_qty DOUBLE, kline_qty DOUBLE,
                   rel_err DOUBLE, checked_at TIMESTAMP)""")
+            # REST 로 통째로 교체한 분. ok=false 는 받았지만 1분봉과 안 맞아 **교체하지 않은** 것.
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS backfill_1m(
+                  symbol VARCHAR, ts_min BIGINT, source VARCHAR, n_rows INTEGER,
+                  tape_qty DOUBLE, kline_qty DOUBLE, rel_err DOUBLE, ok BOOLEAN,
+                  attempts INTEGER, note VARCHAR, done_at TIMESTAMP)""")
             con.execute("CREATE TABLE IF NOT EXISTS meta(key VARCHAR, value VARCHAR)")
             # 경계는 **데이터와 함께** 남는다. 코드가 바뀌어도 이 표를 보면 그때 기준을 안다.
             for key, value in (("schema_version", str(SCHEMA_VERSION)),
@@ -363,10 +400,87 @@ class TapeStore:
                 con.execute("DELETE FROM meta WHERE key = ?", [key])
                 con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
 
+    @contextmanager
     def _connect(self):
         import duckdb
 
-        return duckdb.connect(str(self.db_path))
+        with self._lock:
+            con = duckdb.connect(str(self.db_path))
+            try:
+                yield con
+            finally:
+                con.close()
+
+    def backfill_candidates(self, limit: int) -> list[int]:
+        """다시 받을 분: 공백과 겹치거나 1분봉과 안 맞은 분. 이미 맞는 분·교체한 분·3번 실패한 분,
+        끝난 지 3분 안 된 분(아직 flush·검사 전)은 뺀다. 최근 분부터."""
+        now = int(time.time())
+        with self._connect() as con:
+            rows = con.execute("""
+                WITH g AS (SELECT unnest(range(from_ms // 60000 * 60,
+                                               (to_ms - 1) // 60000 * 60 + 60, 60)) AS m
+                           FROM gaps WHERE symbol = ? AND to_ms > ?),
+                     v AS (SELECT ts_min AS m FROM verify_1m
+                           WHERE symbol = ? AND abs(rel_err) > ?),
+                     okv AS (SELECT ts_min AS m FROM verify_1m
+                             WHERE symbol = ? AND abs(rel_err) <= ?),
+                     done AS (SELECT ts_min AS m FROM backfill_1m
+                              WHERE symbol = ? AND (ok OR attempts >= ?))
+                SELECT DISTINCT m FROM (SELECT m FROM g UNION SELECT m FROM v)
+                WHERE m <= ? AND m NOT IN (SELECT m FROM done)
+                  AND (m IN (SELECT m FROM v) OR m NOT IN (SELECT m FROM okv))
+                ORDER BY m DESC LIMIT ?""",
+                [self.symbol, (now - BACKFILL_LOOKBACK_S) * 1000,
+                 self.symbol, VERIFY_TOLERANCE, self.symbol, VERIFY_TOLERANCE,
+                 self.symbol, BACKFILL_MAX_ATTEMPTS, now - 180, limit]).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def live_rows_outside_gaps(self, ts_min: int) -> list[tuple]:
+        """그 분에서 **공백과 안 겹치는 초**의 라이브 행 -- 복구할 때 그대로 둔다.
+        🔴이유(2026-09-24 실측): 바이낸스 REST aggTrades 는 **시장 체결만** 준다. 16:52 분이 1분봉보다
+          0.793 ETH(−0.064%) 적었는데, 라이브(@trade)는 그 체결을 0초에 갖고 있었다(초별 대조로 확인).
+          라이브가 온전히 받은 초까지 REST 로 덮으면 그런 체결이 사라진다."""
+        with self._connect() as con:
+            return [tuple(r) for r in con.execute("""
+                SELECT * EXCLUDE (symbol) FROM trade_tape_1s t
+                WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ?
+                  AND NOT EXISTS (SELECT 1 FROM gaps g WHERE g.symbol = t.symbol
+                                  AND g.from_ms < (t.ts_sec + 1) * 1000 AND g.to_ms > t.ts_sec * 1000)
+                ORDER BY 1, 2""", [self.symbol, ts_min, ts_min + 60]).fetchall()]
+
+    def _mark_backfill(self, con, ts_min: int, source: str, n_rows: int, tape_qty: float,
+                       kline_qty: float, rel: float, ok: bool, note: str) -> None:
+        prev = con.execute("SELECT coalesce(max(attempts), 0) FROM backfill_1m "
+                           "WHERE symbol = ? AND ts_min = ?", [self.symbol, ts_min]).fetchone()[0]
+        con.execute("DELETE FROM backfill_1m WHERE symbol = ? AND ts_min = ?", [self.symbol, ts_min])
+        con.execute("INSERT INTO backfill_1m VALUES (?,?,?,?,?,?,?,?,?,?,now())",
+                    [self.symbol, ts_min, source, n_rows, tape_qty, kline_qty, rel, ok,
+                     prev + 1, note])
+
+    def replace_minute(self, ts_min: int, rows: list[tuple], kline_qty: float,
+                       source: str, note: str) -> None:
+        """그 분의 행을 **통째로** 갈아 끼운다(한 트랜잭션). 분 단위인 이유: 끊긴 경계의 초는 라이브
+        반쪽이 이미 들어 있어 초 단위로 메우면 겹친다. 분이 끝난 뒤라 라이브가 다시 쓰지 않는다."""
+        tape_qty = sum(r[2] + r[3] for r in rows)
+        rel = (tape_qty - kline_qty) / kline_qty if kline_qty else 0.0
+        with self._connect() as con:
+            con.begin()
+            con.execute("DELETE FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ?",
+                        [self.symbol, ts_min, ts_min + 60])
+            if rows:
+                con.executemany(
+                    "INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    [(self.symbol, *r) for r in rows])
+            con.execute("DELETE FROM verify_1m WHERE symbol = ? AND ts_min = ?", [self.symbol, ts_min])
+            con.execute("INSERT INTO verify_1m VALUES (?,?,?,?,?,now())",
+                        [self.symbol, ts_min, tape_qty, kline_qty, rel])
+            self._mark_backfill(con, ts_min, source, len(rows), tape_qty, kline_qty, rel, True, note)
+            con.commit()
+
+    def mark_backfill_failed(self, ts_min: int, source: str, n_rows: int, tape_qty: float,
+                             kline_qty: float, rel: float, note: str) -> None:
+        with self._connect() as con:
+            self._mark_backfill(con, ts_min, source, n_rows, tape_qty, kline_qty, rel, False, note)
 
     def last_ts_ms(self) -> int:
         with self._connect() as con:
@@ -475,6 +589,86 @@ async def verify_recent(store: TapeStore, session) -> None:
                 " -- 체결 유실. 그 구간은 벌크 zip 으로 덮어써야 한다")
 
 
+async def backfill_loop(store: TapeStore, fetch_minute, per_cycle: int, source: str,
+                        note: str) -> None:
+    """공백·불일치 분을 REST 로 다시 받아 **1분봉과 맞을 때만** 통째로 교체한다(2026-09-24).
+
+    `fetch_minute(m)` -> (행 목록, 1분봉 물량 | None). None 이면 1분봉이 아직 확정 전이라 다음
+    주기로 넘긴다. 맞지 않으면 교체하지 않고 실패로 적는다(3번이면 포기 -- 그 분은 verify_1m 에
+    불일치로 남아 연구 쿼리가 뺀다). 수집 루프와 **따로 도는 태스크**라 WS 수신을 막지 않는다."""
+    while True:
+        await asyncio.sleep(BACKFILL_SECONDS)
+        try:
+            minutes = await asyncio.to_thread(store.backfill_candidates, per_cycle)
+        except Exception as exc:  # noqa: BLE001
+            log(f"복구 대상 조회 실패: {type(exc).__name__} {exc}")
+            continue
+        fixed = []
+        for m in minutes:
+            stamp = time.strftime("%m-%d %H:%M", time.localtime(m))
+            try:
+                rows, kline_qty = await fetch_minute(m)
+            except Exception as exc:  # noqa: BLE001 -- 거래소 오류면 다음 주기에 다시
+                log(f"복구 {stamp} 받기 실패(다음 주기 재시도): {type(exc).__name__} {exc}")
+                break
+            if kline_qty is None:
+                continue
+            try:
+                # ⭐라이브가 온전히 받은 초는 라이브 그대로, 공백에 걸린 초만 REST 로(`live_rows_outside_gaps`
+                #   이유). 그래도 안 맞으면(공백 없이 조용히 빠진 분 등) REST 만으로 한 번 더 본다.
+                live = await asyncio.to_thread(store.live_rows_outside_gaps, m)
+                live_secs = {r[0] for r in live}
+                hybrid = sorted(live + [r for r in rows if r[0] not in live_secs])
+                for cand, how in ((hybrid, "라이브+REST"), (rows, "REST")):
+                    got = sum(r[2] + r[3] for r in cand)
+                    rel = (got - kline_qty) / kline_qty if kline_qty else 0.0
+                    if abs(rel) <= VERIFY_TOLERANCE:
+                        break
+                if abs(rel) <= VERIFY_TOLERANCE:
+                    await asyncio.to_thread(store.replace_minute, m, cand, kline_qty, source,
+                                            f"{how} · {note}")
+                    fixed.append(stamp)
+                else:
+                    await asyncio.to_thread(store.mark_backfill_failed, m, source, len(rows),
+                                            got, kline_qty, rel, note)
+                    log(f"⚠️복구 {stamp} REST 합이 1분봉과 안 맞는다 rel {rel:+.4%} -- 교체 안 함")
+            except Exception as exc:  # noqa: BLE001
+                log(f"복구 {stamp} 쓰기 실패(다음 주기 재시도): {type(exc).__name__} {exc}")
+        if fixed:
+            log(f"복구 {len(fixed)}분 교체 ({fixed[-1]} ~ {fixed[0]}, 1분봉과 일치)")
+
+
+def binance_minute_fetcher(session, symbol: str, bucket: float):
+    """바이낸스 REST aggTrades 로 한 분을 다시 만든다. aggTrade = 테이커 주문 조각(라이브 되묶기의
+    정답 기준이 원래 aggTrades 다). 🔴buy_max/sell_max 는 NULL -- «그 초의 최대 개별 체결»은 REST
+    aggTrades 에 없다(0 이 아니라 NULL: 「없었다」와 「모른다」는 다른 말이다).
+    weight: aggTrades 20/회 · 분당 1~3회. 봇과 IP 한도를 나누므로 per_cycle 을 작게 둔다."""
+    async def fetch(m: int):
+        start, end = m * 1000, m * 1000 + 59_999
+        async with session.get(KLINES_URL, params={"symbol": symbol.upper(), "interval": "1m",
+                                                   "startTime": start, "limit": 1}) as r:
+            r.raise_for_status()
+            k = await r.json()
+        if not k or int(k[0][0]) != start or int(k[0][6]) >= time.time() * 1000:
+            return [], None
+        buf = TapeBuffer(bucket)
+        params = {"symbol": symbol.upper(), "startTime": start, "endTime": end, "limit": 1000}
+        while True:
+            async with session.get(AGG_TRADES_URL, params=params) as r:
+                r.raise_for_status()
+                batch = await r.json()
+            for a in batch:
+                ts, price, qty = int(a["T"]), float(a["p"]), float(a["q"])
+                if start <= ts <= end and price > 0 and qty > 0:
+                    buf.add_agg(ts, price, qty, bool(a["m"]), int(a["l"]) - int(a["f"]) + 1)
+            if len(batch) < 1000 or int(batch[-1]["T"]) > end:
+                break
+            params = {"symbol": symbol.upper(), "fromId": int(batch[-1]["a"]) + 1, "limit": 1000}
+        rows = [r[:6] + (None, None) + r[8:] for r in buf.take_closed(everything=True)]
+        return rows, float(k[0][5])
+    return fetch
+
+
 async def collect(symbol: str, db_path: Path) -> None:
     from aiohttp import ClientSession, ClientTimeout, WSMsgType
 
@@ -487,6 +681,10 @@ async def collect(symbol: str, db_path: Path) -> None:
     log(f"{symbol} 수집 시작 (빈 {bucket}, db {db_path})")
     # total=None 을 **명시**한다: aiohttp 기본 5분이라 그냥 두면 5분마다 끊긴다.
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
+        backfill = asyncio.create_task(backfill_loop(  # noqa: F841 -- 수집이 끝날 때까지 돈다
+            store, binance_minute_fetcher(session, symbol, bucket), per_cycle=3,
+            source="binance rest aggTrades",
+            note="buy_max/sell_max NULL(REST 에 개별 체결 최대가 없다) · 주문=aggTrade"))
         flushed_at = verified_at = time.monotonic()
         while True:
             try:
@@ -611,6 +809,48 @@ def selftest() -> None:
     assert buf.take_closed() == [], "같은 초를 두 번 쓰면 안 된다"
     buf.add(1_002_000, 2440.04, 2.0, sell=True)    # 1001 초가 완결됨
     assert [r[:2] for r in buf.take_closed()] == [(1001, 24400)]
+
+    # ── REST 복구 (2026-09-24) ─────────────────────────────────────────────
+    ag = TapeBuffer(0.1)
+    ag.add_agg(7_000_000, 2500.0, 40.0, sell=True, fills=9)
+    rows = ag.take_closed()
+    assert rows == [], "진행 중인 초는 기본으로는 안 나온다"
+    rows = ag.take_closed(everything=True)
+    assert len(rows) == 1 and rows[0][3] == 40.0 and rows[0][5] == 9, ("끝난 구간은 통째로", rows)
+    assert rows[0][11] == 40.0 and rows[0][13] == 1 and rows[0][17] == 1, ("고래·주문수", rows)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        st = TapeStore(Path(td) / "t.duckdb", "ethusdt", 0.1)
+        now = int(time.time()) // 60 * 60
+        m_gap, m_bad, m_ok, m_new = now - 600, now - 540, now - 480, now - 60
+        st.write([(m_ok + 5, 25000, 1.0, 1.0, 1, 1, 1.0, 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1)])
+        st.record_gap(m_gap * 1000 + 10_000, m_gap * 1000 + 20_000, "ws_reconnect")
+        st.record_gap(m_ok * 1000 + 1_000, m_ok * 1000 + 5_000, "ws_reconnect")   # 겹쳐도 맞는 분
+        st.record_gap(m_new * 1000, m_new * 1000 + 5_000, "ws_reconnect")         # 아직 너무 새 분
+        with st._connect() as con:
+            for m, rel in ((m_bad, -0.2), (m_ok, 0.0)):
+                con.execute("INSERT INTO verify_1m VALUES (?,?,1,1,?,now())", ["ethusdt", m, rel])
+        st.write([(m_gap + 5, 25000, 1.0, 0, 1, 0, 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0),
+                  (m_gap + 15, 25000, 1.0, 0, 1, 0, 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)])
+        assert [r[0] for r in st.live_rows_outside_gaps(m_gap)] == [m_gap + 5], \
+            "공백(10~20초)에 걸린 초의 라이브 행은 REST 로 갈아 끼울 대상이다"
+        cands = st.backfill_candidates(10)
+        assert cands == [m_bad, m_gap], ("공백 분·불일치 분만, 최근 먼저. 맞는 분·새 분은 뺀다", cands)
+        new_rows = [(m_bad + 1, 25000, 2.0, 3.0, 2, 3, None, None, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1)]
+        st.replace_minute(m_bad, new_rows, 5.0, "test", "t")
+        for _ in range(BACKFILL_MAX_ATTEMPTS):
+            st.mark_backfill_failed(m_gap, "test", 0, 1.0, 2.0, -0.5, "t")
+        assert st.backfill_candidates(10) == [], "교체했거나 3번 실패한 분은 다시 안 뽑는다"
+        with st._connect() as con:
+            got = con.execute("SELECT count(*), sum(buy_qty + sell_qty), max(buy_max IS NULL::INT) "
+                              "FROM trade_tape_1s WHERE ts_sec // 60 * 60 = ?", [m_bad]).fetchone()
+            v = con.execute("SELECT count(*), max(rel_err) FROM verify_1m WHERE ts_min = ?",
+                            [m_bad]).fetchone()
+            b = con.execute("SELECT ok, attempts FROM backfill_1m WHERE ts_min = ?", [m_gap]).fetchone()
+        assert got == (1, 5.0, 1), ("분이 통째로 바뀌고 모르는 칸은 NULL", got)
+        assert v == (1, 0.0), ("verify_1m 도 새 값 한 줄", v)
+        assert b == (False, BACKFILL_MAX_ATTEMPTS), b
     print("selftest OK")
 
 

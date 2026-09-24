@@ -3699,8 +3699,11 @@ def make_app() -> web.Application:
 
         매초 폴링이라 전량을 매번 보내면 안 된다 -- 300초 x 7숫자면 회당 ~18KB 이고, 1초
         주기면 시간당 60MB 가 넘는다. 증분이면 보통 한두 줄(~100B)이다. 첫 요청만 전량이다.
-        ⚠️**진행 중인 초는 안 보낸다**. 보내면 그 초가 자라는 동안 클라가 이미 «받은 초»로
-          알고 건너뛰어, 반쪽짜리로 굳는다(풋프린트 스냅샷에서 겪은 그 실패와 같은 모양).
+        ⚠️**진행 중인 초는 목록에 넣지 않는다**. 넣으면 그 초가 자라는 동안 클라가 이미 «받은
+          초»로 알고 건너뛰어, 반쪽짜리로 굳는다(풋프린트 스냅샷에서 겪은 그 실패와 같은 모양).
+        ⭐대신 `partial` 에 **따로** 싣는다(2026-09-24). 클라는 그 칸을 그리되 커서를 안 옮기므로,
+          초가 닫히면 확정본이 목록으로 와서 같은 칸을 덮어쓴다 -- 오른쪽 끝이 1~2초 묵던 것이
+          폴링 주기(0.25초)만큼으로 준다.
         """
         by_sec = footprint_state["sec"]
         try:
@@ -3733,6 +3736,10 @@ def make_app() -> web.Application:
         since_okx, since_okx_oi, since_okx_liq = _q("sinceOkx"), _q("sinceOkxOi"), _q("sinceOkxLiq")
         since_spot = _q("sinceSpot")
         spot_newest = max(spot_sec) if spot_sec else 0
+        _part = lambda d, x: [x] + [round(v, 3) for v in d[x]] if x in d else None  # noqa: E731
+        partial = {"okx": _part(okx_sec, max(okx_sec)) if okx_sec else None,
+                   "spot": _part(spot_sec, spot_newest) if spot_sec else None,
+                   "bn": _part(by_sec, max(by_sec)) if by_sec else None}
         spot_floor = max(since_spot, spot_newest - SUPPLY_1S_SECONDS)
         spot_rows = [[x] + [round(v, 3) for v in spot_sec[x]]
                      for x in sorted(spot_sec) if spot_floor < x < spot_newest]
@@ -3779,6 +3786,7 @@ def make_app() -> web.Application:
                                       "okxMeta": okx_meta,
                                       "spot": spot_rows, "spotNow": spot_newest,
                                       "spotMeta": spot_meta,
+                                      "partial": partial,
                                       "retailMaxUsd": RETAIL_MAX_USD,
                                       "whaleMinUsd": WHALE_MIN_USD}, headers=NOCACHE)
         newest = max(by_sec)
@@ -3821,6 +3829,7 @@ def make_app() -> web.Application:
             "spot": spot_rows,
             "spotNow": spot_newest,
             "spotMeta": spot_meta,
+            "partial": partial,       # 진행 중인 초(거래소별). 커서를 옮기지 않는 칸이다
             # [초, 리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
             "seconds": [[s] + [round(x, 3) for x in by_sec[s]]
                         for s in sorted(by_sec) if floor < s < newest],

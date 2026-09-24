@@ -85,6 +85,8 @@ DEFAULT_DB = ROOT / "data" / "live" / "okx_trade_tape.duckdb"
 WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
 CANDLES_URL = "https://www.okx.com/api/v5/market/candles"
 INSTRUMENTS_URL = "https://www.okx.com/api/v5/public/instruments"
+HISTORY_TRADES_URL = "https://www.okx.com/api/v5/market/history-trades"
+HISTORY_CANDLES_URL = "https://www.okx.com/api/v5/market/history-candles"
 # 🔴User-Agent 가 없으면 OKX REST 가 **403** 을 준다(2026-09-23 실측). WS 는 상관없다.
 HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; crypto-scalping-collector/1.0)"}
 
@@ -107,23 +109,7 @@ class OkxTapeBuffer(TapeBuffer):
     이미 주문 단위이고 `count` 로 개별 체결 수를 함께 준다. 그래서 호출이 하나다.
     🔴그 결과 `buy_max`(4~5번 칸)의 단위만 달라진다 -- 도크스트링 ⚠️ 항목 참고."""
 
-    def add_okx_order(self, ts_ms: int, price: float, qty: float, sell: bool,
-                      fills: int) -> None:
-        cell = self._cell(ts_ms, price)
-        if cell is None:
-            return
-        i = 1 if sell else 0
-        cell[i] += qty                          # 0~1 총량 (뜻 동일)
-        cell[2 + i] += fills                    # 2~3 **개별 체결** 수 = count 합 (뜻 동일)
-        cell[4 + i] = max(cell[4 + i], qty)     # 4~5 🔴최대 «주문» (바이낸스는 최대 «체결»)
-        cell[14 + i] += 1                       # 14~15 전체 주문 수 (뜻 동일)
-        notional = price * qty
-        if notional < RETAIL_MAX_USD:
-            cell[6 + i] += qty
-            cell[12 + i] += 1
-        elif notional >= WHALE_MIN_USD:
-            cell[8 + i] += qty
-            cell[10 + i] += 1
+    add_okx_order = TapeBuffer.add_agg      # 같은 규칙을 공용 버퍼가 갖고 있다(REST 복구도 쓴다)
 
 
 def parse_trade(t: dict, ct_val: float) -> tuple[int, float, float, bool, int] | None:
@@ -210,6 +196,63 @@ async def verify_recent(store, session, inst: str) -> None:
                 "(okx.com/cdn/okex/traderecords, 🔴파일 경계 UTC+8)로 덮어써야 한다")
 
 
+def group_fills(fills: list[dict]) -> list[tuple[int, float, float, bool, int]]:
+    """REST 개별 체결(tradeId 순) -> 라이브 `trades` 와 같은 묶음 (ts_ms, px, sz계약, sell, 체결수).
+
+    2026-09-24 같은 분 WS/REST 동시 실측: 연속된 (ts, side, px) 묶음 191개가 WS 메시지와 **수량까지
+    191/191 일치**했다. 다만 WS 는 같은 키를 다시 쪼개 메시지가 205개였다 -- 복구한 분의 «주문 수»는
+    라이브보다 ~7% 적게 나온다(총량·체결수는 정확). backfill_1m.note 에 적는다."""
+    out: list[list] = []
+    key = None
+    for f in fills:
+        k = (f["ts"], f["side"], f["px"])
+        if k == key:
+            out[-1][2] += float(f["sz"])
+            out[-1][4] += 1
+        else:
+            out.append([int(f["ts"]), float(f["px"]), float(f["sz"]), f["side"] == "sell", 1])
+            key = k
+    return [tuple(x) for x in out]
+
+
+def okx_minute_fetcher(session, inst: str, bucket: float, ct_val: float):
+    """OKX REST 로 한 분을 다시 만든다. 🔴페이지는 **tradeId(type=1)** 로 넘긴다 -- ts(type=2)로
+    넘기면 같은 ms 의 체결이 경계에서 빠져 2026-09-24 실측 −9.4% 였다(tradeId 로는 연속 1,853건,
+    1분봉 volCcy 와 오차 0). 요청 한도 20회/2초 -- 사이에 0.12초 쉰다."""
+    async def get(url: str, params: dict) -> list:
+        async with session.get(url, headers=HTTP_HEADERS, params=params) as r:
+            r.raise_for_status()
+            body = await r.json()
+        if str(body.get("code")) != "0":
+            raise RuntimeError(f"okx {body.get('code')} {body.get('msg')}")
+        return body.get("data") or []
+
+    async def fetch(m: int):
+        start, end = m * 1000, (m + 60) * 1000
+        c = await get(HISTORY_CANDLES_URL, {"instId": inst, "bar": "1m", "after": end, "limit": 1})
+        if not c or int(c[0][0]) != start or str(c[0][8]) != "1":
+            return [], None
+        edge = await get(HISTORY_TRADES_URL, {"instId": inst, "type": 2, "after": end + 1, "limit": 1})
+        fills: list[dict] = []
+        after = int(edge[0]["tradeId"]) + 1 if edge else None
+        while after is not None:
+            await asyncio.sleep(0.12)
+            page = await get(HISTORY_TRADES_URL, {"instId": inst, "type": 1, "after": after,
+                                                  "limit": 100})
+            if not page:
+                break
+            fills += [f for f in page if start <= int(f["ts"]) < end]
+            after = int(page[-1]["tradeId"])
+            if int(page[-1]["ts"]) < start or len(page) < 100:
+                break
+        fills.sort(key=lambda f: int(f["tradeId"]))
+        buf = OkxTapeBuffer(bucket)
+        for ts, px, sz, sell, n in group_fills(fills):
+            buf.add_okx_order(ts, px, sz * ct_val, sell, n)
+        return buf.take_closed(everything=True), float(c[0][6])
+    return fetch
+
+
 async def collect(inst: str, db_path: Path) -> None:
     from aiohttp import ClientSession, ClientTimeout, WSMsgType
 
@@ -229,6 +272,10 @@ async def collect(inst: str, db_path: Path) -> None:
     log(f"{inst} 수집 시작 (빈 {bucket}, ctVal {ct_val}, db {db_path})")
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
         await assert_ct_val(session, inst, ct_val)
+        backfill = asyncio.create_task(_bn.backfill_loop(  # noqa: F841 -- 수집이 끝날 때까지 돈다
+            store, okx_minute_fetcher(session, inst, bucket, ct_val), per_cycle=5,
+            source="okx rest history-trades(type=1)",
+            note="주문 = 연속 (ts,side,px) 묶음 -- 라이브보다 주문수 ~7% 적음, 총량·체결수 정확"))
         flushed_at = verified_at = time.monotonic()
         while True:
             try:
@@ -334,6 +381,14 @@ def selftest() -> None:
     assert RETAIL_MAX_USD == _bn.RETAIL_MAX_USD == 10_000.0
     assert WHALE_MIN_USD == _bn.WHALE_MIN_USD == 100_000.0
     assert OkxTapeBuffer.WIDTH == _bn.TapeBuffer.WIDTH == 16
+
+    # ── REST 복구의 묶기: 연속된 (ts, side, px) 가 한 주문 ──────────────────
+    f = lambda i, ts, side, px, sz: {"tradeId": str(i), "ts": str(ts), "side": side, "px": px, "sz": sz}
+    g = group_fills([f(1, 100, "buy", "2500.0", "3"), f(2, 100, "buy", "2500.0", "2"),
+                     f(3, 100, "buy", "2500.1", "1"), f(4, 100, "sell", "2500.1", "1"),
+                     f(5, 101, "sell", "2500.1", "1"), f(6, 101, "sell", "2500.1", "4")])
+    assert g == [(100, 2500.0, 5.0, False, 2), (100, 2500.1, 1.0, False, 1),
+                 (100, 2500.1, 1.0, True, 1), (101, 2500.1, 5.0, True, 2)], g
     print("selftest OK")
 
 
