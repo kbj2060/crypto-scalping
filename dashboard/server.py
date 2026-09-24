@@ -611,6 +611,7 @@ OKX_RECV_TIMEOUT = 25.0
 SPOT_WS_URL = "wss://stream.binance.com:9443/ws/ethusdt@aggTrade"
 SPOT_RECV_TIMEOUT = 60.0        # 12 msg/s 지만 한산한 초가 있어 여유를 둔다
 MICRO_BASELINE_SECONDS = 3600
+STREAM_TICK_S = 0.25                                   # /api/stream 밀어주기 주기 = 수급 폴링 주기(app.js SUPPLY_1S_POLL_MS)
 SITUATION_EVERY_TICKS = 1                              # micro-ref 1초 루프마다 (09-21 사용자 «급변 때 느리다» -- 실측 비용 30ms, duckdb 둘은 아래서 5초 캐시)
 SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30분 뒤 결과와 맞춰 적중률을 낸다
 SITUATION_LOG_MIN_GAP_S = 300                          # 상태가 안 바뀌어도 이 간격으로 한 줄
@@ -2608,17 +2609,10 @@ def make_app() -> web.Application:
         finally:
             await ws_session.close()
 
-    # ponytail: 임시 진단(2026-09-24) -- 상황 카드가 ~35초마다 4초 멈춘다. 원인 단계를 찾으면 지운다.
-    micro_laps: list[tuple[str, float]] = []
-
-    def _lap(name: str) -> None:
-        micro_laps.append((name, time.perf_counter()))
-
     async def collect_micro_ref(app: web.Application) -> None:
         from scripts.live_orderflow_raster_collector_20260914 import read_window  # noqa: PLC0415
         loop = asyncio.get_running_loop()
         while True:
-            micro_laps.clear(); _lap("start")
             try:
                 now = time.time(); now_sec = int(now)
                 # 기준선이 없으면 60초마다 다시 시도한다 -- 수집기가 같은 파일에 쓰는 순간 read_only
@@ -2636,14 +2630,11 @@ def make_app() -> web.Application:
                 if now - micro_state["liq_prev_at"] >= 10.0:
                     micro_state["liq_prev_at"] = now
                     micro_state["liq_prev"] = await asyncio.to_thread(mref.liq_prev_minute, LIVE_DIR / "tail_risk.duckdb")
-                _lap("baseline+liq_prev")
                 book = await fetch_binance_json(MICRO_BOOK_URL, {"symbol": FOOTPRINT_SYMBOL})
-                _lap("bookTicker")
                 qi_val = mref.qi(float(book["bidQty"]), float(book["askQty"]))
                 mid = (float(book["bidPrice"]) + float(book["askPrice"])) / 2.0
                 w = await loop.run_in_executor(
                     HEATMAP_EXECUTOR, functools.partial(read_window, FOOTPRINT_SYMBOL.lower(), int(now * 1000), 12, 1))
-                _lap("read_window")
                 flow = mref.raster_flow(w)
                 if flow.get("ok"):
                     ofi_hist.append(abs(flow["ofi10"]))
@@ -2668,7 +2659,6 @@ def make_app() -> web.Application:
                 med = base["minute_vol_sorted"][hour] if base else None
                 vol60_x = (vol60 / med[len(med) // 2]) if med and med[len(med) // 2] > 0 else None
                 levels = await load_liquidation_map("eth")
-                _lap("liqmap")
                 sr = mref.sr_context(levels if levels.get("warmed_up") else None, mid, flow.get("imb40") if flow.get("ok") else None)
                 if levels.get("warmed_up"):   # 상황 읽기의 플러시 목표(청산 군집)용 -- 가까운 순 [{price, weight_pct}]
                     sr["sup_levels"] = [{"price": lv["price"], "weight_pct": lv.get("weight_pct")} for lv in levels.get("support_levels") or []]
@@ -2708,10 +2698,6 @@ def make_app() -> web.Application:
                     raise
                 except Exception as exc:  # noqa: BLE001
                     situation_state["now"] = {"ok": False, "reason": repr(exc)[:160]}
-            _lap("end")
-            if micro_laps[-1][1] - micro_laps[0][1] > 1.0:
-                print("micro-ref slow tick " + " ".join(
-                    f"{n}={t - p:.2f}s" for (_, p), (n, t) in zip(micro_laps, micro_laps[1:]) if t - p >= 0.05), flush=True)
             await asyncio.sleep(MICRO_REF_POLL_SECONDS)
 
     # ── OKX 실시간 ─────────────────────────────────────────────────────────
@@ -3097,26 +3083,23 @@ def make_app() -> web.Application:
             situation_state["btc_candles"] = await load_market_history("btc")   # 같은 캐시 프레임에서 자른다
         except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
             situation_state["btc_candles"] = None
-        _lap("sit.candles")
         situation_state["breakout"] = await load_breakout_detector()
-        _lap("sit.breakout")
         try:
             situation_state["minutes"] = await load_minute_candles()
         except Exception as exc:  # noqa: BLE001 -- 실패하면 직전 1분봉으로 푼다(없으면 해결을 미룬다)
             print(f"situation minutes: {exc!r}", flush=True)
-        _lap("sit.minutes")
-        situation_state["oi_5m"] = await swr_cached("situation_oi5m", 5.0, lambda: asyncio.to_thread(oi_5m_buckets, 2 * sit.WINDOW + 3))
-        situation_state["liq_5m"] = await swr_cached("situation_liq5m", 5.0, lambda: asyncio.to_thread(compute_liquidation_5m_history, "eth", 2 * sit.WINDOW + 3))
-        _lap("sit.oi5m+liq5m")
+        # 2026-09-24 max_stale 30: 둘 다 duckdb 읽기라 회당 0.4~0.5초(서버 로그)인데 블로킹이면 5초마다
+        #   1초 루프가 그만큼 멈췄다(실측 slow tick oi5m+liq5m=1.00~1.25s). 입력이 5분봉이라 몇 초
+        #   묵은 값으로 충분하다. 30초를 넘기면(읽기가 계속 실패) 다시 기다린다.
+        situation_state["oi_5m"] = await swr_cached("situation_oi5m", 5.0, lambda: asyncio.to_thread(oi_5m_buckets, 2 * sit.WINDOW + 3), max_stale=30.0)
+        situation_state["liq_5m"] = await swr_cached("situation_liq5m", 5.0, lambda: asyncio.to_thread(compute_liquidation_5m_history, "eth", 2 * sit.WINDOW + 3), max_stale=30.0)
         try:
             hm = await swr_cached("situation_book", 5.0, lambda: loop.run_in_executor(
                 HEATMAP_EXECUTOR, functools.partial(_heatmap_read, "ethusdt", 300, 3, True)))
             situation_state["book"] = (hm or {}).get("summary") or {}
         except Exception:  # noqa: BLE001
             situation_state["book"] = {}
-        _lap("sit.book")
         inp = await asyncio.to_thread(_situation_inputs, now)
-        _lap("sit.inputs")
         # 슈미트 트리거의 «이전 레짐». classify 는 순수 함수라 상태를 여기서 들고 넘긴다.
         # 재기동 직후엔 0(중립)에서 시작한다 -- 추세로 들어가려면 ENTER 를 넘어야 한다.
         inp["prev_dir"] = (situation_state.get("now") or {}).get("dir") or 0
@@ -3158,12 +3141,54 @@ def make_app() -> web.Application:
                                            "outcome_sym": e.get("outcome_sym"),
                                            "path": e.get("path")})   # 해결 줄 -- 재기동 뒤에도 남는다
 
-    async def api_situation(request: web.Request) -> web.Response:
+    def situation_payload() -> dict[str, Any]:
         log = situation_state["log"]
-        return web.json_response({"now": situation_state["now"], "computed_at": situation_state["computed_at"],
-                                  "recent": [{k: e.get(k) for k in ("ts", "mid", "dir", "prob", "outcome", "outcome_sym", "flips_on")} for e in log[-12:]],
-                                  "calibration": sit.calibration(log, SITUATION_HORIZON_S),
-                                  "streams": {"fo": dict(fo_state), "mp": dict(mp_state)}}, headers=NOCACHE)
+        return {"now": situation_state["now"], "computed_at": situation_state["computed_at"],
+                "recent": [{k: e.get(k) for k in ("ts", "mid", "dir", "prob", "outcome", "outcome_sym", "flips_on")} for e in log[-12:]],
+                "calibration": sit.calibration(log, SITUATION_HORIZON_S),
+                "streams": {"fo": dict(fo_state), "mp": dict(mp_state)}}
+
+    async def api_situation(request: web.Request) -> web.Response:
+        return web.json_response(situation_payload(), headers=NOCACHE)
+
+    # 수급 커서 = 목록 키 -> 쿼리 이름. 클라(refreshSupply1s)와 같은 규칙: 받은 행의 최대 초.
+    SUPPLY_CURSORS = (("seconds", "since"), ("oi", "sinceOi"), ("liq", "sinceLiq"), ("okx", "sinceOkx"),
+                      ("okxOi", "sinceOkxOi"), ("okxLiq", "sinceOkxLiq"), ("spot", "sinceSpot"))
+
+    async def api_stream(request: web.Request) -> web.StreamResponse:
+        """폴링 대신 밀어주기(2026-09-24 속도 2단계). 수급(`supply=1`, ETH)과 상황 카드를 연결 하나로.
+
+        /api/events 를 안 쓰는 이유: 그건 1초 브로드캐스트에 클라별 큐가 **1칸이고 밀리면 버린다**
+        -- 증분(since=) 수급을 실으면 버려진 초가 영영 안 온다. 여기선 클라마다 **커서를 서버가
+        들고** 매 틱 «그 커서 이후»를 만든다(폴링 본문과 같은 함수). 버릴 메시지가 없다.
+        틱 = 폴링 주기(0.25초)와 같다 -- 요청 왕복(클라우드플레어 ~100ms)과 대기만 없어진다.
+        상황은 계산될 때만(computed_at 이 바뀔 때) 보낸다."""
+        q = {k: v for k, v in request.query.items()}
+        want_supply = q.get("supply") == "1"
+        response = web.StreamResponse(status=web.HTTPOk.status_code, headers={
+            "Content-Type": "text/event-stream", "Cache-Control": "no-cache",
+            "Connection": "keep-alive", "X-Accel-Buffering": "no"})
+        await response.prepare(request)
+        sent_sit = None
+        try:
+            while True:
+                out = []
+                if want_supply:
+                    sup = supply_1s_payload(q)
+                    for key, name in SUPPLY_CURSORS:
+                        rows = sup.get(key)
+                        if rows:
+                            q[name] = str(max(int(q.get(name) or 0), int(rows[-1][0])))
+                    out.append(("supply", sup))
+                if situation_state["computed_at"] != sent_sit:
+                    sent_sit = situation_state["computed_at"]
+                    out.append(("situation", situation_payload()))
+                for ev, data in out:
+                    await response.write(f"event: {ev}\ndata: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n".encode("utf-8"))
+                await asyncio.sleep(STREAM_TICK_S)
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass
+        return response
 
     async def load_chart_klines_frames() -> dict[str, Any]:
         """차트 캔들용 ETH/BTC 5분봉 프레임 캐시 (1500봉, 닫힌 봉만).
@@ -3725,7 +3750,7 @@ def make_app() -> web.Application:
             ],
         }, headers=NOCACHE)
 
-    async def api_supply_1s(request: web.Request) -> web.Response:
+    def supply_1s_payload(q: Any) -> dict[str, Any]:
         """최근 5분을 1초 해상도로. `?since=<초>` 면 그 뒤에 **새로 생긴 초만** 보낸다.
 
         매초 폴링이라 전량을 매번 보내면 안 된다 -- 300초 x 7숫자면 회당 ~18KB 이고, 1초
@@ -3738,13 +3763,13 @@ def make_app() -> web.Application:
         """
         by_sec = footprint_state["sec"]
         try:
-            since = int(request.query.get("since", "0"))
+            since = int(q.get("since", "0"))
         except ValueError:
             since = 0
         # OI 는 별도 `sinceOi` 로 증분한다 -- 체결 초와 갱신 시점이 다르므로(3~7초) 같은 커서를
         # 공유하면 체결 초가 앞서갈 때 그 사이의 OI 점이 통째로 건너뛰어진다.
         try:
-            since_oi = int(request.query.get("sinceOi", "0"))
+            since_oi = int(q.get("sinceOi", "0"))
         except ValueError:
             since_oi = 0
         # 2026-09-22 청산도 같은 payload 로 (사용자 요청). **새 스트림을 안 만든다** --
@@ -3753,7 +3778,7 @@ def make_app() -> web.Application:
         # ⭐USD 가 아니라 **수량**을 보낸다. 이 차트의 다른 선(고래·리테일·OI)이 전부
         #   ETH 단위라 수량이어야 같은 축에 그대로 얹힌다. USD 였으면 축이 하나 더 필요하다.
         try:
-            since_liq = int(request.query.get("sinceLiq", "0"))
+            since_liq = int(q.get("sinceLiq", "0"))
         except ValueError:
             since_liq = 0
         # OKX 레인(2026-09-23). 🔴**합치지 않는다** -- 각자 보낸다. 커서도 각자다(거래소마다
@@ -3761,7 +3786,7 @@ def make_app() -> web.Application:
         #   sinceOi 를 따로 쓰는 것과 같은 이유).
         def _q(name: str) -> int:
             try:
-                return int(request.query.get(name, "0"))
+                return int(q.get(name, "0"))
             except ValueError:
                 return 0
         since_okx, since_okx_oi, since_okx_liq = _q("sinceOkx"), _q("sinceOkxOi"), _q("sinceOkxLiq")
@@ -3810,7 +3835,7 @@ def make_app() -> web.Application:
         # [초, 미결제약정]. 증분은 클라가 뺀다(창 시작을 0으로 두는 누적선이라 절대값이 필요).
         oi_rows = [[s, oi_1s[s]] for s in sorted(oi_1s) if s > oi_floor]
         if not by_sec:
-            return web.json_response({"symbol": FOOTPRINT_SYMBOL, "seconds": [], "now": 0,
+            return ({"symbol": FOOTPRINT_SYMBOL, "seconds": [], "now": 0,
                                       "oi": oi_rows, "liq": [],
                                       "okx": okx_rows, "okxOi": okx_oi_rows,
                                       "okxLiq": okx_liq_rows, "okxNow": okx_newest,
@@ -3819,7 +3844,7 @@ def make_app() -> web.Application:
                                       "spotMeta": spot_meta,
                                       "partial": partial,
                                       "retailMaxUsd": RETAIL_MAX_USD,
-                                      "whaleMinUsd": WHALE_MIN_USD}, headers=NOCACHE)
+                                      "whaleMinUsd": WHALE_MIN_USD})
         newest = max(by_sec)
         # 🔴**진행 중인 초는 안 보낸다** -- seconds 와 같은 규칙이다. 보내면 그 초가 자라는
         #   동안 클라가 «받은 초»로 알고 건너뛰어 반쪽으로 굳는다.
@@ -3843,7 +3868,7 @@ def make_app() -> web.Application:
         liq_rows = [[s, round(v[0], 3), round(v[1], 3), round(v[2]), round(v[3])]
                     for s, v in sorted(liq_by_sec.items())]
         floor = max(since, newest - SUPPLY_1S_SECONDS)
-        return web.json_response({
+        return ({
             "symbol": FOOTPRINT_SYMBOL,
             "now": newest,
             "retailMaxUsd": RETAIL_MAX_USD,
@@ -3864,7 +3889,10 @@ def make_app() -> web.Application:
             # [초, 리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
             "seconds": [[s] + [round(x, 3) for x in by_sec[s]]
                         for s in sorted(by_sec) if floor < s < newest],
-        }, headers=NOCACHE)
+        })
+
+    async def api_supply_1s(request: web.Request) -> web.Response:
+        return web.json_response(supply_1s_payload(request.query), headers=NOCACHE)
 
     async def api_oi_5m(request: web.Request) -> web.Response:
         """OI 5분 누적(신규 계약). duckdb 를 읽으므로 to_thread 로 뺀다(이벤트 루프 블로킹 방지)."""
@@ -5026,6 +5054,7 @@ def make_app() -> web.Application:
     app.router.add_get("/dashboard/live/{name:sw\\.js|manifest\\.webmanifest}", pwa_asset)
     app.router.add_get("/api/state", api_state)
     app.router.add_get("/api/events", api_events)
+    app.router.add_get("/api/stream", api_stream)
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/footprint", api_footprint)
     app.router.add_get("/api/supply-profile", api_supply_profile)

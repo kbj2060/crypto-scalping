@@ -3402,6 +3402,7 @@ async function refreshSupply1s() {
   if (activePageTab !== "snapshot" || document.hidden) return;   // 안 보이는 걸 매초 받지 않는다
   if (activeSnapshotAsset !== "eth") return;                     // 테이프는 ETH 만 수집한다
   const now = Date.now();
+  if (liveStreamOn()) return;                                    // /api/stream 이 밀어주는 중
   if (now - supply1sLastFetchAt < SUPPLY_1S_POLL_MS || supply1sInFlight) return;
   supply1sLastFetchAt = now;
   supply1sInFlight = true;
@@ -3412,66 +3413,7 @@ async function refreshSupply1s() {
                             + `&sinceSpot=${spotSupply1sSince}`,
                             { cache: "no-cache" });
     if (!res.ok) throw new Error(`supply-1s ${res.status}`);
-    const payload = await res.json();
-    (payload.seconds || []).forEach((r) => {
-      supply1s.set(r[0], r.slice(1));
-      if (r[0] > supply1sSince) supply1sSince = r[0];
-    });
-    (payload.liq || []).forEach((r) => {
-      liq1s.set(r[0], [r[1], r[2], r[3], r[4]]);   // [롱수량, 숏수량, 롱USD, 숏USD]
-      if (r[0] > liq1sSince) liq1sSince = r[0];
-    });
-    (payload.oi || []).forEach((r) => {
-      oi1s.set(r[0], r[1]);
-      if (r[0] > oi1sSince) oi1sSince = r[0];
-    });
-    // OKX 레인. 커서가 각자인 이유는 바이낸스 OI/청산이 각자인 것과 같다 -- 거래소마다
-    // 체결 초가 앞서가므로 하나를 공유하면 뒤처진 쪽이 통째로 건너뛰어진다.
-    (payload.okx || []).forEach((r) => {
-      okxSupply1s.set(r[0], r.slice(1));
-      if (r[0] > okxSupply1sSince) okxSupply1sSince = r[0];
-    });
-    (payload.okxLiq || []).forEach((r) => {
-      okxLiq1s.set(r[0], [r[1], r[2], r[3], r[4]]);
-      if (r[0] > okxLiq1sSince) okxLiq1sSince = r[0];
-    });
-    (payload.okxOi || []).forEach((r) => {
-      okxOi1s.set(r[0], r[1]);
-      if (r[0] > okxOi1sSince) okxOi1sSince = r[0];
-    });
-    (payload.spot || []).forEach((r) => {
-      spotSupply1s.set(r[0], r.slice(1));
-      if (r[0] > spotSupply1sSince) spotSupply1sSince = r[0];
-    });
-    // 진행 중인 초 -- 칸만 채우고 **커서(since)는 안 옮긴다**. 그래야 닫힌 뒤 확정본이 온다.
-    const part = payload.partial || {};
-    [[part.bn, supply1s], [part.okx, okxSupply1s], [part.spot, spotSupply1s]].forEach(([r, m]) => {
-      if (r) m.set(r[0], r.slice(1));
-    });
-    okxMeta = Object.assign({}, payload.okxMeta || {},
-                            { now: Number(payload.okxNow) || okxMeta.now });
-    spotMeta = Object.assign({}, payload.spotMeta || {},
-                             { now: Number(payload.spotNow) || spotMeta.now });
-    supply1sMeta = {
-      retailMaxUsd: Number(payload.retailMaxUsd) || 0,
-      whaleMinUsd: Number(payload.whaleMinUsd) || 0,
-      now: Number(payload.now) || supply1sMeta.now,
-    };
-    // 창 밖은 버린다. 안 버리면 탭을 켜둔 채로 며칠이면 Map 이 수십만 칸이 된다.
-    // 그리는 구간이 **현재 5분봉 하나**라 그 경계까지만 있으면 된다(최악 now-300).
-    // OI 는 갱신이 3~7초라 20초를 더 준다. 넉넉히 두 봉치를 남겨 봉이 바뀌는 순간에도
-    // 새 봉의 앞부분이 비지 않게 한다.
-    const floor = supply1sMeta.now - 2 * SUPPLY_1S_SEGMENT - 20;
-    supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
-    const okxFloor = (okxMeta.now || 0) - 2 * SUPPLY_1S_SEGMENT - 20;
-    okxSupply1s.forEach((_v, k) => { if (k < okxFloor) okxSupply1s.delete(k); });
-    okxOi1s.forEach((_v, k) => { if (k < okxFloor) okxOi1s.delete(k); });
-    okxLiq1s.forEach((_v, k) => { if (k < okxFloor) okxLiq1s.delete(k); });
-    const spotFloor = (spotMeta.now || 0) - 2 * SUPPLY_1S_SEGMENT - 20;
-    spotSupply1s.forEach((_v, k) => { if (k < spotFloor) spotSupply1s.delete(k); });
-    oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
-    liq1s.forEach((_v, k) => { if (k < floor) liq1s.delete(k); });
-    supply1sVer += 1;
+    applySupply1s(await res.json());
   } catch (error) {
     console.error("Supply 1s fetch error:", error);
   } finally {
@@ -3480,6 +3422,109 @@ async function refreshSupply1s() {
   // 받은 즉시 **이 패널만** 다시 그린다. 캔들 SVG 전체를 다시 그리지 않으므로 비싼 패스
   // (캔들·청산밀도·프로파일)는 안 탄다 -- 호버/스크롤 게이트에도 안 걸린다.
   repaintSupply1sPanel();
+}
+
+// 받은 수급 한 덩이를 칸·커서에 얹는다. 폴링과 /api/stream 이 **같은 함수**를 지난다.
+function applySupply1s(payload) {
+  (payload.seconds || []).forEach((r) => {
+    supply1s.set(r[0], r.slice(1));
+    if (r[0] > supply1sSince) supply1sSince = r[0];
+  });
+  (payload.liq || []).forEach((r) => {
+    liq1s.set(r[0], [r[1], r[2], r[3], r[4]]);   // [롱수량, 숏수량, 롱USD, 숏USD]
+    if (r[0] > liq1sSince) liq1sSince = r[0];
+  });
+  (payload.oi || []).forEach((r) => {
+    oi1s.set(r[0], r[1]);
+    if (r[0] > oi1sSince) oi1sSince = r[0];
+  });
+  // OKX 레인. 커서가 각자인 이유는 바이낸스 OI/청산이 각자인 것과 같다 -- 거래소마다
+  // 체결 초가 앞서가므로 하나를 공유하면 뒤처진 쪽이 통째로 건너뛰어진다.
+  (payload.okx || []).forEach((r) => {
+    okxSupply1s.set(r[0], r.slice(1));
+    if (r[0] > okxSupply1sSince) okxSupply1sSince = r[0];
+  });
+  (payload.okxLiq || []).forEach((r) => {
+    okxLiq1s.set(r[0], [r[1], r[2], r[3], r[4]]);
+    if (r[0] > okxLiq1sSince) okxLiq1sSince = r[0];
+  });
+  (payload.okxOi || []).forEach((r) => {
+    okxOi1s.set(r[0], r[1]);
+    if (r[0] > okxOi1sSince) okxOi1sSince = r[0];
+  });
+  (payload.spot || []).forEach((r) => {
+    spotSupply1s.set(r[0], r.slice(1));
+    if (r[0] > spotSupply1sSince) spotSupply1sSince = r[0];
+  });
+  // 진행 중인 초 -- 칸만 채우고 **커서(since)는 안 옮긴다**. 그래야 닫힌 뒤 확정본이 온다.
+  const part = payload.partial || {};
+  [[part.bn, supply1s], [part.okx, okxSupply1s], [part.spot, spotSupply1s]].forEach(([r, m]) => {
+    if (r) m.set(r[0], r.slice(1));
+  });
+  okxMeta = Object.assign({}, payload.okxMeta || {},
+                          { now: Number(payload.okxNow) || okxMeta.now });
+  spotMeta = Object.assign({}, payload.spotMeta || {},
+                           { now: Number(payload.spotNow) || spotMeta.now });
+  supply1sMeta = {
+    retailMaxUsd: Number(payload.retailMaxUsd) || 0,
+    whaleMinUsd: Number(payload.whaleMinUsd) || 0,
+    now: Number(payload.now) || supply1sMeta.now,
+  };
+  // 창 밖은 버린다. 안 버리면 탭을 켜둔 채로 며칠이면 Map 이 수십만 칸이 된다.
+  // 그리는 구간이 **현재 5분봉 하나**라 그 경계까지만 있으면 된다(최악 now-300).
+  // OI 는 갱신이 3~7초라 20초를 더 준다. 넉넉히 두 봉치를 남겨 봉이 바뀌는 순간에도
+  // 새 봉의 앞부분이 비지 않게 한다.
+  const floor = supply1sMeta.now - 2 * SUPPLY_1S_SEGMENT - 20;
+  supply1s.forEach((_v, k) => { if (k < floor) supply1s.delete(k); });
+  const okxFloor = (okxMeta.now || 0) - 2 * SUPPLY_1S_SEGMENT - 20;
+  okxSupply1s.forEach((_v, k) => { if (k < okxFloor) okxSupply1s.delete(k); });
+  okxOi1s.forEach((_v, k) => { if (k < okxFloor) okxOi1s.delete(k); });
+  okxLiq1s.forEach((_v, k) => { if (k < okxFloor) okxLiq1s.delete(k); });
+  const spotFloor = (spotMeta.now || 0) - 2 * SUPPLY_1S_SEGMENT - 20;
+  spotSupply1s.forEach((_v, k) => { if (k < spotFloor) spotSupply1s.delete(k); });
+  oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
+  liq1s.forEach((_v, k) => { if (k < floor) liq1s.delete(k); });
+  supply1sVer += 1;
+}
+
+// ── 밀어주기 스트림 (2026-09-24 속도 2단계) ─────────────────────────────────
+// 수급(ETH)·상황 카드를 폴링 대신 /api/stream 하나로 받는다. 서버가 **클라별 커서**를 들고
+// 0.25초마다 «그 뒤»를 보낸다 -- 요청 왕복(클라우드플레어 경유 ~100ms)과 폴링 대기가 없어진다.
+// 스트림이 조용해지면(마지막 메시지 3초 전) 위 폴링이 그대로 대신한다 -- 폴링을 안 지운 이유.
+const API_STREAM_URL = "/api/stream";
+let liveStream = null, liveStreamKey = "", liveStreamAt = 0, liveStreamRetryAt = 0;
+const liveStreamOn = () => liveStream !== null && Date.now() - liveStreamAt < 3000;
+
+function ensureLiveStream() {
+  const want = activePageTab === "snapshot" && !document.hidden;
+  const key = want ? (activeSnapshotAsset === "eth" ? "eth" : "other") : "";
+  if (liveStream && (key !== liveStreamKey || Date.now() - liveStreamAt > 10000)) {
+    liveStream.close(); liveStream = null;           // 탭·코인·가시성이 바뀌었거나 10초 침묵
+  }
+  if (!key || liveStream || Date.now() < liveStreamRetryAt) return;
+  liveStreamKey = key;
+  // 수급은 ETH 만 수집한다. 커서는 **지금 가진 것**으로 -- 전량은 첫 연결 한 번뿐이다.
+  const q = key !== "eth" ? "" :
+    `?supply=1&since=${supply1sSince}&sinceOi=${oi1sSince}&sinceLiq=${liq1sSince}`
+    + `&sinceOkx=${okxSupply1sSince}&sinceOkxOi=${okxOi1sSince}&sinceOkxLiq=${okxLiq1sSince}`
+    + `&sinceSpot=${spotSupply1sSince}`;
+  const es = new EventSource(API_STREAM_URL + q);
+  liveStream = es; liveStreamAt = Date.now();
+  es.addEventListener("supply", (ev) => {
+    liveStreamAt = Date.now();
+    try { applySupply1s(JSON.parse(ev.data)); } catch (e) { console.error("stream supply:", e); return; }
+    repaintSupply1sPanel();
+  });
+  es.addEventListener("situation", (ev) => {
+    liveStreamAt = Date.now();
+    try { latestSituation = JSON.parse(ev.data); } catch (e) { return; }
+    renderSituation();
+  });
+  // 🔴브라우저 자동 재연결은 **처음 URL(옛 커서)** 로 붙는다 -- 닫고 5초 뒤 현재 커서로 연다
+  //   (막힌 환경에서 틱마다 실패를 반복하지 않게. 그동안은 폴링이 받는다).
+  es.onerror = () => {
+    if (liveStream === es) { es.close(); liveStream = null; liveStreamRetryAt = Date.now() + 5000; }
+  };
 }
 
 function gexIndicatorItem() {
@@ -3648,6 +3693,7 @@ async function refreshSituation() {
   //   고른 코인의 상황이라고 읽는다. 멈춘 옛 값보다 «살아 있는 ETH 값 + ETH 전용 배지»가 정직하다.
   //   비용은 1초마다 작은 JSON 하나이고 서버는 어차피 계산하고 있다.
   const now = Date.now();
+  if (liveStreamOn()) return;                                    // /api/stream 이 밀어주는 중
   if (now - situationLastFetchAt < SITUATION_POLL_MS) return;
   situationLastFetchAt = now;
   try {
@@ -7503,6 +7549,7 @@ async function tick() {
   if (document.hidden || tickInFlight) return;
   tickInFlight = true;
   try {
+    ensureLiveStream();              // 2026-09-24 수급·상황 밀어주기 (탭/코인/가시성 변화가 여기로 수렴)
     // 2026-08-25 perf pass (Snapshot's 6 fetches), extended 2026-08-31 to Ops's own status poll
     // now that the Live tab (previously the 3rd, always-unconditional, tab) is gone -- each branch
     // only matters while that tab is actually visible; gating stops background fetch/compute work
@@ -7559,6 +7606,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     disconnectDashboardEvents();
     ensurePriceWs();   // 숨으면 닫는다 -- 백그라운드 탭이 초당 수백 메시지를 받을 이유가 없다
+    ensureLiveStream();
     return;
   }
   connectDashboardEvents();

@@ -42,7 +42,7 @@ def test_in_progress_second_is_excluded():
 
 def test_cursor_is_separate_from_trade_cursor():
     """청산은 이벤트가 없는 초가 많다 -- 체결 초 커서를 공유하면 통째로 건너뛰어진다."""
-    assert 'request.query.get("sinceLiq"' in SRV, "서버에 sinceLiq 커서가 없다"
+    assert 'q.get("sinceLiq"' in SRV, "서버에 sinceLiq 커서가 없다"   # 2026-09-24 supply_1s_payload(q)
     assert "sinceLiq=${liq1sSince}" in JS, "클라가 sinceLiq 를 안 보낸다"
     assert "let liq1sSince = 0;" in JS, "클라에 청산 전용 커서가 없다"
 
