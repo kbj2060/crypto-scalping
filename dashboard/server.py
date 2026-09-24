@@ -2034,6 +2034,8 @@ def make_app() -> web.Application:
             out[int(ts.timestamp())] = row
         return out
 
+    market_rows_memo: dict[str, tuple[Any, list[dict[str, float | int]]]] = {}   # asset -> (프레임, 행)
+
     async def load_market_history_from_evidence_cache(asset: str) -> list[dict[str, float | int]]:
         """ETH/BTC candle-chart data (2026-08-26, user request to de-duplicate) sliced straight out
         of evidence_signal_cache["frames"] instead of a separate Binance klines fetch -- that cache
@@ -2054,8 +2056,14 @@ def make_app() -> web.Application:
         src = closed_df if asset == "eth" else btc_df
         if src is None or src.empty:
             raise web.HTTPBadGateway(reason="market_history_upstream_error")
+        # 2026-09-24 프레임이 같으면 행도 같다 -- 상황 계산이 매초 ETH·BTC 로 불러 이 조립
+        #   (veto+iterrows, 로컬 11.7ms/회)이 이벤트 루프를 초당 ~23ms 막았다. 프레임은 60초에
+        #   한 번 바뀐다. 호출부는 전부 읽기만 한다(행을 고치면 이 캐시가 오염된다).
+        memo = market_rows_memo.get(asset)
+        if memo is not None and memo[0] is src:
+            return memo[1]
         veto = trend_veto_rows(src)
-        return [
+        rows = [
             {
                 "time": int(row["timestamp"].timestamp()),
                 "open": float(row["open"]),
@@ -2069,6 +2077,8 @@ def make_app() -> web.Application:
             #   계산하느라 이미 그보다 길다 -- 자르는 폭만 넓히면 된다. 200 = 16.6시간.
             for _, row in src.tail(200).iterrows()
         ]
+        market_rows_memo[asset] = (src, rows)
+        return rows
 
     async def load_market_history(asset: str) -> list[dict[str, float | int]]:
         if asset in ("eth", "btc"):
@@ -2598,10 +2608,17 @@ def make_app() -> web.Application:
         finally:
             await ws_session.close()
 
+    # ponytail: 임시 진단(2026-09-24) -- 상황 카드가 ~35초마다 4초 멈춘다. 원인 단계를 찾으면 지운다.
+    micro_laps: list[tuple[str, float]] = []
+
+    def _lap(name: str) -> None:
+        micro_laps.append((name, time.perf_counter()))
+
     async def collect_micro_ref(app: web.Application) -> None:
         from scripts.live_orderflow_raster_collector_20260914 import read_window  # noqa: PLC0415
         loop = asyncio.get_running_loop()
         while True:
+            micro_laps.clear(); _lap("start")
             try:
                 now = time.time(); now_sec = int(now)
                 # 기준선이 없으면 60초마다 다시 시도한다 -- 수집기가 같은 파일에 쓰는 순간 read_only
@@ -2619,11 +2636,14 @@ def make_app() -> web.Application:
                 if now - micro_state["liq_prev_at"] >= 10.0:
                     micro_state["liq_prev_at"] = now
                     micro_state["liq_prev"] = await asyncio.to_thread(mref.liq_prev_minute, LIVE_DIR / "tail_risk.duckdb")
+                _lap("baseline+liq_prev")
                 book = await fetch_binance_json(MICRO_BOOK_URL, {"symbol": FOOTPRINT_SYMBOL})
+                _lap("bookTicker")
                 qi_val = mref.qi(float(book["bidQty"]), float(book["askQty"]))
                 mid = (float(book["bidPrice"]) + float(book["askPrice"])) / 2.0
                 w = await loop.run_in_executor(
                     HEATMAP_EXECUTOR, functools.partial(read_window, FOOTPRINT_SYMBOL.lower(), int(now * 1000), 12, 1))
+                _lap("read_window")
                 flow = mref.raster_flow(w)
                 if flow.get("ok"):
                     ofi_hist.append(abs(flow["ofi10"]))
@@ -2648,6 +2668,7 @@ def make_app() -> web.Application:
                 med = base["minute_vol_sorted"][hour] if base else None
                 vol60_x = (vol60 / med[len(med) // 2]) if med and med[len(med) // 2] > 0 else None
                 levels = await load_liquidation_map("eth")
+                _lap("liqmap")
                 sr = mref.sr_context(levels if levels.get("warmed_up") else None, mid, flow.get("imb40") if flow.get("ok") else None)
                 if levels.get("warmed_up"):   # 상황 읽기의 플러시 목표(청산 군집)용 -- 가까운 순 [{price, weight_pct}]
                     sr["sup_levels"] = [{"price": lv["price"], "weight_pct": lv.get("weight_pct")} for lv in levels.get("support_levels") or []]
@@ -2687,6 +2708,10 @@ def make_app() -> web.Application:
                     raise
                 except Exception as exc:  # noqa: BLE001
                     situation_state["now"] = {"ok": False, "reason": repr(exc)[:160]}
+            _lap("end")
+            if micro_laps[-1][1] - micro_laps[0][1] > 1.0:
+                print("micro-ref slow tick " + " ".join(
+                    f"{n}={t - p:.2f}s" for (_, p), (n, t) in zip(micro_laps, micro_laps[1:]) if t - p >= 0.05), flush=True)
             await asyncio.sleep(MICRO_REF_POLL_SECONDS)
 
     # ── OKX 실시간 ─────────────────────────────────────────────────────────
@@ -3072,20 +3097,26 @@ def make_app() -> web.Application:
             situation_state["btc_candles"] = await load_market_history("btc")   # 같은 캐시 프레임에서 자른다
         except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
             situation_state["btc_candles"] = None
+        _lap("sit.candles")
         situation_state["breakout"] = await load_breakout_detector()
+        _lap("sit.breakout")
         try:
             situation_state["minutes"] = await load_minute_candles()
         except Exception as exc:  # noqa: BLE001 -- 실패하면 직전 1분봉으로 푼다(없으면 해결을 미룬다)
             print(f"situation minutes: {exc!r}", flush=True)
+        _lap("sit.minutes")
         situation_state["oi_5m"] = await swr_cached("situation_oi5m", 5.0, lambda: asyncio.to_thread(oi_5m_buckets, 2 * sit.WINDOW + 3))
         situation_state["liq_5m"] = await swr_cached("situation_liq5m", 5.0, lambda: asyncio.to_thread(compute_liquidation_5m_history, "eth", 2 * sit.WINDOW + 3))
+        _lap("sit.oi5m+liq5m")
         try:
             hm = await swr_cached("situation_book", 5.0, lambda: loop.run_in_executor(
                 HEATMAP_EXECUTOR, functools.partial(_heatmap_read, "ethusdt", 300, 3, True)))
             situation_state["book"] = (hm or {}).get("summary") or {}
         except Exception:  # noqa: BLE001
             situation_state["book"] = {}
+        _lap("sit.book")
         inp = await asyncio.to_thread(_situation_inputs, now)
+        _lap("sit.inputs")
         # 슈미트 트리거의 «이전 레짐». classify 는 순수 함수라 상태를 여기서 들고 넘긴다.
         # 재기동 직후엔 0(중립)에서 시작한다 -- 추세로 들어가려면 ENTER 를 넘어야 한다.
         inp["prev_dir"] = (situation_state.get("now") or {}).get("dir") or 0
@@ -4409,7 +4440,8 @@ def make_app() -> web.Application:
                 return None, {}, {}, ({"error": "sizing_unavailable",
                                        "detail": sizing.get("error")}, 503)
             account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
-                                       produce_account, max_stale=STALE_GRACE_SECONDS)
+                                       produce_account, max_stale=STALE_GRACE_SECONDS,
+                                       cache=binance_account_cache)   # 계좌 카드와 같은 캐시 -- 없으면 두 벌을 따로 받는다
             positions = [p for p in (account.get("positions") or []) if p.get("symbol") == symbol]
             # 헤지 모드라 롱·숏이 동시에 열린다. 위험 상쇄를 가정하지 않고 **절대값 합**으로 본다
             # -- 두 다리 다 증거금을 먹고, 둘 다 청산될 수 있다.
@@ -4740,7 +4772,8 @@ def make_app() -> web.Application:
             # 과청산 방어가 수량뿐인데, 그 수량이 30초 묵으면 방어가 30초 묵는다.
             account = (await produce_account() if fresh else
                        await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
-                                        produce_account, max_stale=STALE_GRACE_SECONDS))
+                                        produce_account, max_stale=STALE_GRACE_SECONDS,
+                                        cache=binance_account_cache))
             # 결정 규칙과 자체점검은 live_manual_peg_entry 모듈에 있다(85/85).
             position, symbol, leftover = resolve_exit_position(
                 account.get("positions") or [], position_side, candidates)

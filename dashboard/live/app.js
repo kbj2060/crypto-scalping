@@ -8,7 +8,6 @@ const API_REGIME_BTC_URL = "/api/regime-btc";
 const API_REGIME_XRP_URL = "/api/regime-xrp";
 const API_COIN_INDICATORS_URL = "/api/coin-indicators";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
-const API_LIQ_BURST_STATE_URL = "/api/liq-burst-state";
 const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
 // 2026-09-11 사용자 "청산맵 차트에 매 5분봉 청산 데이터를 추가" -- 게이지는 현재 봉 하나만
 // 주므로 지나간 봉은 이 이력에서 온다. 캔들과 같은 **5분** 정렬이다(게이지 BAR_MINUTES=30 과 별개).
@@ -367,12 +366,9 @@ let liquidation5mLastFetchAt = 0;
 // 20260827.py). RISK GAUGE, not a price-direction claim -- see MODEL_INDICATOR_DETAIL.liq_pressure.
 let latestVolLevel = null;
 let volLevelLastFetchAt = 0;
-// Sudden-liquidation alert (2026-08-27) -- backed by tail_risk_interceptor.py's event-triggered
-// liq_burst_state.json (own file, own writer, updated the instant a new @forceOrder event lands),
-// not the once-a-minute tail_risk.duckdb path the gauge above reads. Own short poll interval since
-// the source can change sub-second during a real cascade -- see API_LIQ_BURST_STATE_URL below.
+// Sudden-liquidation alert (2026-08-27). 2026-09-24 1초 폴링을 걷어냈다 -- 받는 쪽 게이지
+// (#liqVolumeGauge)가 HTML 에 없어 분당 55건을 받아 버리고 있었다. 게이지를 되살리면 폴링도 되살린다.
 let latestLiqBurstState = null;
-let liqBurstStateLastFetchAt = 0;
 // Liquidation map (Snapshot tab, 2026-08-24) -- estimated support/resistance, own fetch/render
 // cycle same as latestVRebound above (computed dashboard-side, not part of trading_bot.py state).
 // lastSnapshotHistoryFetchAt tracks the candle history this panel's chart needs (activeSnapshotAsset,
@@ -428,11 +424,6 @@ let dashboardEvents = null;
 const OPS_POLL_MS = 30000;
 const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-row-per-minute source
 const VOL_LEVEL_POLL_MS = 60000;          // 사이징 워커 주기 300초 — 1분 폴링이면 충분하다
-// 2026-08-27: liq_burst_state.json is written the instant a new liquidation event arrives (see
-// tail_risk_interceptor.py::_write_liq_burst_state()), not on a timer -- polling faster than ~1s
-// wouldn't surface anything sooner than the file itself changes, given the remaining hop (this
-// fetch) is the last one in the chain.
-const LIQ_BURST_STATE_POLL_MS = 1000;
 // 2026-09-16 300초 -> 60초. 서버 캐시를 60초로 줄였으므로(입력이 1시간봉이라 그 아래로는
 // 의미가 없다) 클라가 5분마다 물으면 **새 시간봉이 최대 5분 늦게** 보인다. 캐시와 같은 주기로.
 // 🔴2026-09-22 60초 -> 30초. «캐시와 같은 주기»는 최선이 아니라 **최악**이다 -- 둘이 동기화돼
@@ -2822,20 +2813,6 @@ async function refreshVolLevel() {
 }
 
 
-async function refreshLiqBurstState() {
-  const now = Date.now();
-  if (now - liqBurstStateLastFetchAt < LIQ_BURST_STATE_POLL_MS) return;
-  liqBurstStateLastFetchAt = now;
-  try {
-    const res = await fetch(API_LIQ_BURST_STATE_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`liq burst state ${res.status}`);
-    latestLiqBurstState = await res.json();
-  } catch (error) {
-    console.error("Liq burst state fetch error:", error);
-    latestLiqBurstState = { available: false };
-  }
-}
-
 // Unlike latestVRebound (picked up by the next state-driven render() pass), the liquidation map
 // has no such host -- it self-triggers both the panel list and the snapshot chart right after a
 // fetch resolves, same pattern as refreshEvidenceSignals().
@@ -3028,7 +3005,6 @@ function setupPageTabs() {
       breakoutDetectorLastFetchAt = 0; refreshBreakoutDetector();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
-      liqBurstStateLastFetchAt = 0; refreshLiqBurstState();
       liquidationMapLastFetchAt = 0; refreshLiquidationMap();
       regimeWide24LastFetchAt = 0; refreshRegimeWide24();
       regimeBtcLastFetchAt = 0; refreshRegimeBtc();
@@ -7541,7 +7517,6 @@ async function tick() {
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
-      refreshLiqBurstState();
       refreshLiquidationMap();
       refreshActiveRegime();
       refreshCoinIndicators();
