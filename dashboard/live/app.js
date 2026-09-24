@@ -2267,7 +2267,22 @@ const MODEL_INDICATOR_DETAIL = {
     + "축소 29.7%), 2배 이상이 13.5%입니다. 평평한 대상이 아닙니다.\n\n"
     + "쓰는 자리는 **수량**(배포 공식 = 기준수량 × 기준예측 ÷ 현재예측)과 **손절폭**입니다. "
     + "«진입할지 말지»의 하드 차단은 이 저장소에서 이미 졌습니다(E|r| 게이트, 실계좌 72왕복).\n\n"
-    + "등급 경계는 평소 대비 배수입니다 — 1.39배 미만 안정, 1.88배 이상 위험(기준 = 최근 30일 중앙값).",
+    + "등급 경계는 평소 대비 배수입니다 — 1.39배 미만 안정, 1.88배 이상 위험(기준 = 최근 30일 중앙값).\n\n"
+    + "⭐**2026-09-25 추가 — 30분 줄.** 「다음 30분 고저폭 ~45bp (평소의 1.40배 · 큰 쪽 52%)」는 "
+    + "여기 4시간 모델과 **별개**입니다. 입력은 직전 30분 고저폭 하나이고, 그건 «상황 읽기 30분» 카드가 "
+    + "이미 쓰는 range_bp 와 같은 값입니다 — 새 원천이 없습니다.\n\n"
+    + "왜 여기 붙었나: 상황 카드는 «어느 쪽»을 묻는데 그 축이 죽어 있었습니다. 채점축을 등거리 배리어로 "
+    + "통일하니 엔진이 무모델 «항상 되돌림»과 **소수점까지 같았습니다**(추세 49.3% vs 49.3%, 89블록). "
+    + "같은 입력으로 «얼마나»를 물으면 완전히 다릅니다 — 4.7년 표본외에서 방향 천장이 **+3.5pp**인데 "
+    + "크기는 **+43pp**였고, 방향 쪽은 158피쳐 로지스틱이 최선 단일피쳐를 못 이겼습니다(.5144 < .5196). "
+    + "축이 같은 카드를 둘 두지 않으려고 새 카드 대신 이 카드에 넣었습니다.\n\n"
+    + "«평소»는 최근 24시간(288봉) 중앙값, «큰 쪽»은 그 창의 상위 3분위입니다. 🔴임계가 **후행 분위**라 "
+    + "조용한 주에도 시끄러운 주에도 기저율이 34% 근처에서 스스로 안정됩니다 — 전역 분위로 박으면 "
+    + "조용한 주엔 0%, 시끄러운 주엔 100%가 되어 화면이 죽습니다.\n\n"
+    + "표본외 AUC 0.7182 · 보정기울기 0.982 · 말한 33.7% / 실제 34.2%. 배수 5분위별로 실제 «큰 쪽» 비율이 "
+    + "15.2 → 22.3 → 29.5 → 39.9 → 64.1%로 단조입니다.\n\n"
+    + "🔴**실제로 쓰이는 값은 일 안 AUC 0.6917입니다.** 전역 0.7182의 상당 부분은 «이번 달이 조용한가»라 "
+    + "오늘 안에서 고르는 이 화면에는 안 걸립니다. 3.6일 라이브 장부로 재면 0.6754로, 일 안 값과 맞습니다.",
   breakout_detector:
     "변동성이 추세로 넘어가는 **시점**만 잡습니다. 2026-09-11 압축 게이트를 제거해 «횡보를 거친» "
     + "전환뿐 아니라 **모든** 전환을 봅니다 -- 실제로 전환의 77%는 압축을 거치지 않고 일어납니다. "
@@ -2380,22 +2395,56 @@ function volLevelTitle(v) {
 // 일블록 CI [0.754,0.822]). 보정 기울기 1.0365 라 크기도 편향이 없다.
 // 🔴점으로 읽히면 안 되므로 **배수와 확률을 항상 같이** 낸다(예측 1.5배의 실제 68% 구간이
 // [1.07,2.12]배다). 그래서 subText 가 "1.36배 · 확대 56%" 형태다.
+// 2026-09-25 ⭐**30분 줄**. 상황 카드가 «어느 쪽»을 묻다가 통일축에서 «항상 되돌림»과 같은 값이
+// 됐다(49.3% vs 49.3%). 같은 입력으로 «얼마나»를 물으면 다르다 -- 4.7년 OOS 방향 +3.5pp vs 크기 +43pp.
+// 사용자 결정으로 새 카드를 만들지 않고 이 카드에 붙인다(축이 같은 카드 둘은 화면 규약에 어긋난다).
+// 🔴subText 는 건드리지 않는다 -- MODEL_INDICATOR_MEANING 이 그 문자열로 조회된다(규약 §5-1).
+//   30분 값은 `liveText`(지금 숫자 자리)와 툴팁으로 간다.
+function amp30Text(v) {
+  const a = v && v.amp30;
+  if (!a || !Number.isFinite(a.pred_bp) || !Number.isFinite(a.mult)) return "";
+  return `다음 30분 고저폭 ~${a.pred_bp.toFixed(0)}bp (평소의 ${a.mult.toFixed(2)}배`
+    + `${Number.isFinite(a.p_big) ? ` · 큰 쪽 ${Math.round(a.p_big * 100)}%` : ""})`;
+}
+
+function amp30Title(v) {
+  const a = v && v.amp30;
+  if (!a || !Number.isFinite(a.pred_bp)) return "";
+  return `«다음 30분 고저폭» 예보. 입력은 직전 30분 고저폭 ${a.range_bp}bp 하나이고`
+    + ` 상황 카드의 range_bp 와 같은 값이다(새 원천 없음).`
+    + ` «평소» = 최근 24시간(${a.look_bars}봉) 중앙 ${a.base_bp}bp, «큰 쪽» = 그 창의 상위 3분위 ${a.thr_bp}bp 이상.`
+    + ` 🔴임계가 후행 분위라 조용한 주에도 시끄러운 주에도 기저율이 34% 근처에서 안정된다.`
+    + ` TRAIN(<2025-09) 적합 · OOS AUC 0.7182 · 보정기울기 0.982 · 말한 33.7% / 실제 34.2%.`
+    + ` 🔴실제로 쓰이는 값은 **일 안 AUC 0.6917** 이다 -- 전역값의 상당 부분은 «이번 달이 조용한가»라`
+    + ` 오늘 안에서 고르는 이 화면에는 안 걸린다.`
+    + ` ⚠️방향은 여기 없다: 같은 입력으로 방향을 물으면 4.7년 OOS 천장이 +3.5pp 였고 158피쳐`
+    + ` 로지스틱이 최선 단일피쳐를 못 이겼다.`;
+}
+
 function volLevelIndicatorItem() {
   const v = latestVolLevel;
+  const amp = amp30Text(v);
   const base = {
     key: "vol_level", label: "변동성 수준 (4시간)",
     history: toneHistory.vol_level, times: toneHistoryTimes.vol_level,
-    derivedTag: "= 사이징 모델", derivedTitle: volLevelTitle(v),
+    derivedTag: "= 사이징 모델",
+    derivedTitle: [volLevelTitle(v), amp30Title(v)].filter(Boolean).join(" "),
   };
-  if (!v || !v.available) return { ...base, tone: "neutral", subText: (v && v.grade) || "웜업" };
+  // 사이징 워커가 죽어도 30분 줄은 캔들만 있으면 산다 -- 그때도 숫자를 보여준다.
+  if (!v || !v.available) {
+    return { ...base, tone: "neutral", subText: (v && v.grade) || "웜업", liveText: amp || undefined };
+  }
   const hasExp = Number.isFinite(v.mult) && Number.isFinite(v.p_expand);
-  if (!hasExp) return { ...base, tone: v.tone || "neutral", subText: v.grade || "웜업" };
+  if (!hasExp) {
+    return { ...base, tone: v.tone || "neutral", subText: v.grade || "웜업", liveText: amp || undefined };
+  }
   return {
     ...base,
     tone: v.tone || "neutral",
     // 등급(평소 대비)보다 **확장 읽기**를 앞에 둔다 -- 그쪽이 통제 검정을 통과한 축이다.
     subText: `${v.mult.toFixed(2)}배 · 확대 ${Math.round(v.p_expand * 100)}%`,
-    liveText: `평소 대비 ${v.ratio.toFixed(2)}배 (${v.grade}) · 수량 배수 ${v.qty_mult.toFixed(2)}배`,
+    liveText: [amp, `평소 대비 ${v.ratio.toFixed(2)}배 (${v.grade})`,
+               `수량 배수 ${v.qty_mult.toFixed(2)}배`].filter(Boolean).join(" · "),
     probaSlot: true, proba: v.p_expand, meterNote: "확대 확률",
     meterNoteTitle: `«앞으로 4시간 실현변동성이 직전 4시간의 ${v.expand_k || 1.3}배 이상일 확률».`
       + ` 배수(예측÷직전) ${v.mult.toFixed(2)} 를 TRAIN 적합 로지스틱으로 옮긴 값이다`

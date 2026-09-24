@@ -1476,6 +1476,46 @@ VOL_EXPAND_K = 1.3                 # «확장» 정의: 앞 4시간 RV >= 1.3 x 
 VOL_EXPAND_LOGIT_A = -1.6560       # sigmoid(A + B*ln(pred/rv48))
 VOL_EXPAND_LOGIT_B = 6.1834
 
+# ── «다음 30분 고저폭» 예보 (2026-09-25) ──────────────────────────────────────────
+# 왜 여기 붙나: 상황 카드는 «어느 쪽»을 묻는데 그 축이 죽어 있다 -- 채점축을 등거리로 통일하니
+#   엔진이 «항상 되돌림»과 소수점까지 같았다(추세 49.3% vs 49.3%, 89블록).
+#   같은 입력으로 **크기**를 물으면 완전히 다르다: 4.7년 OOS 에서 방향 천장 +3.47pp 인데
+#   크기는 +43pp 였고, 방향은 로지스틱 158피쳐가 최선 단일피쳐를 못 이겼다(.5144 < .5196).
+#   ⇒ 사용자 결정(09-25): 새 카드를 만들지 말고 **이 카드에 30분 줄로 통합**.
+#   근거 scripts/research_situation_question_swap_20260925.py · 적합 research_amp30_fit_20260925.py
+# 입력은 직전 30분 고저폭 하나다 -- 상황 카드의 `feat.range_bp` 와 **같은 값**이라 새 원천이 없다.
+# 상수는 TRAIN(<2025-09, 385,321행) 적합. 모델을 다시 적합하면 셋을 같이 바꾼다.
+#   OOS AUC 0.7182 · 보정기울기 0.982 · 말한 33.7% / 실제 34.2% · 진폭 중앙 상대오차 -0.6%
+# 🔴화면에 걸리는 값은 전역 AUC 가 아니라 **일 안 0.6917** 이다. 전역값의 상당 부분은
+#   «2026-04 는 조용하고 07 은 시끄럽다»는 레짐 간 구분이고 라이브는 오늘 안에서 고른다.
+# 🔴«큰 쪽» 임계는 **후행 24시간 분위**다. 전역 분위로 박으면 조용한 주엔 0%·시끄러운 주엔 100%
+#   가 되어 화면이 죽는다(2026-09-23 에 적응형 임계를 전역 분위로 재서 한 번 틀렸다).
+AMP30_WIN, AMP30_LOOK = 6, 288     # 30분 창 · 24시간 기준창 (5분봉)
+AMP30_BIG_Q = 2 / 3                # «큰 쪽» = 최근 24시간 상위 3분위
+AMP30_RATIO = 0.9694               # 다음 30분 고저폭 / 직전 30분 고저폭 (TRAIN 중앙)
+AMP30_LOGIT_A = -0.8552            # sigmoid(A + B*ln(배수)), 배수 = 직전 30분 고저폭 / 최근 24h 중앙
+AMP30_LOGIT_B = 1.6550
+
+
+def amp30_item(closed_df: Any) -> dict[str, Any]:
+    """완결 5분봉 프레임(high/low/close) -> 다음 30분 고저폭 예보. 봉이 모자라면 {}."""
+    if closed_df is None or len(closed_df) < AMP30_LOOK + AMP30_WIN:
+        return {}
+    hi = closed_df["high"].astype(float)
+    lo = closed_df["low"].astype(float)
+    cl = closed_df["close"].astype(float)
+    rng = (hi.rolling(AMP30_WIN).max() - lo.rolling(AMP30_WIN).min()) / cl * 1e4
+    win = rng.iloc[-AMP30_LOOK:]
+    r = float(rng.iloc[-1])
+    base = float(win.median())
+    if not (r > 0 and base > 0) or not math.isfinite(r) or not math.isfinite(base):
+        return {}
+    mult = r / base
+    return {"range_bp": round(r, 1), "pred_bp": round(AMP30_RATIO * r, 1),
+            "base_bp": round(base, 1), "thr_bp": round(float(win.quantile(AMP30_BIG_Q)), 1),
+            "mult": mult, "big_q": AMP30_BIG_Q, "look_bars": AMP30_LOOK,
+            "p_big": 1.0 / (1.0 + math.exp(-(AMP30_LOGIT_A + AMP30_LOGIT_B * math.log(mult))))}
+
 
 def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
     """예측 변동성 등급(기준 = 최근 30일) + **수량 배수**(배포 공식 = 고정 ref_pred / pred)."""
@@ -4271,11 +4311,29 @@ def make_app() -> web.Application:
             venues = venues + ["hyperliquid-whales"]
         return {**payload, "bars": merged, "venues": venues}
 
+    async def load_amp30() -> dict[str, Any]:
+        """30분 고저폭 예보. 캔들 원천은 차트와 **같은 프레임**(1500봉)이다 -- 클라에 나가는
+        `load_market_history` 는 tail(200) 이라 24시간 기준창(294봉)에 모자란다."""
+        async def produce() -> dict[str, Any]:
+            await load_chart_klines_frames()
+            frames = evidence_signal_cache["frames"]
+            return {} if frames is None else amp30_item(frames[0])
+        # 프레임 자체가 60초마다 갱신되므로 그보다 자주 다시 계산할 이유가 없다.
+        return await swr_cached("amp30", 60.0, produce, max_stale=STALE_GRACE_SECONDS)
+
     async def api_position_sizing(request: web.Request) -> web.Response:
         payload = await swr_cached(
             "position_sizing", 30.0, lambda: asyncio.to_thread(position_sizing_payload),
             max_stale=STALE_GRACE_SECONDS,
         )
+        try:
+            amp = await load_amp30()
+        except Exception as exc:  # noqa: BLE001 -- 30분 줄이 없다고 사이징 카드를 죽이지 않는다
+            print(f"amp30: {exc!r}", flush=True)
+            amp = {}
+        if amp:
+            # 🔴swr 캐시가 들고 있는 dict 를 **고치지 않는다** -- 얕은 복사로 새 dict 를 만든다.
+            payload = {**payload, "vol_level": {**(payload.get("vol_level") or {}), "amp30": amp}}
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_breakout_detector(request: web.Request) -> web.Response:
