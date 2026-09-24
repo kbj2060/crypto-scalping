@@ -103,16 +103,20 @@ tunnel_running() {
   pgrep -f "[c]loudflared tunnel" >/dev/null 2>&1
 }
 
+# 🔴`9>&-` 로 잠금 fd 를 닫고 띄운다(2026-09-24 사고). 여기서 뜨는 대시보드·cloudflared 는 오래
+#   산다 -- fd 9 를 물려받으면 **이 스크립트의 flock 을 영원히 쥔다**. WSL 재시작 뒤 이 함수가
+#   cloudflared 를 되살리자 이후 모든 사이클이 «previous run still in flight» 로 건너뛰었고,
+#   c73f133e 가 30분 넘게 배포되지 않았다(fd 주인을 /proc/*/fd 로 찾아 확인).
 revive_serving_if_down() {
   if ! dashboard_listening; then
     log "dashboard NOT listening on ${DASHBOARD_PORT} -- starting (no deploy involved)"
-    bash "$ROOT/dashboard/scripts/start_external.sh" >/dev/null 2>&1 ||       log "start_external.sh failed"
+    bash "$ROOT/dashboard/scripts/start_external.sh" >/dev/null 2>&1 9>&- ||       log "start_external.sh failed"
     sleep 8
     dashboard_listening && log "dashboard revived" ||       { log "dashboard STILL not listening after start"; send_telegram "🔴 [WATCHER] dashboard down and revive failed (port ${DASHBOARD_PORT})"; }
   fi
   if ! tunnel_running; then
     log "cloudflared not running -- starting"
-    bash "$ROOT/dashboard/scripts/start_cloudflare_tunnel.sh" >/dev/null 2>&1 ||       log "start_cloudflare_tunnel.sh failed"
+    bash "$ROOT/dashboard/scripts/start_cloudflare_tunnel.sh" >/dev/null 2>&1 9>&- ||       log "start_cloudflare_tunnel.sh failed"
     sleep 5
     tunnel_running && log "tunnel revived" ||       { log "tunnel STILL not running"; send_telegram "🔴 [WATCHER] cloudflared down and revive failed"; }
   fi
