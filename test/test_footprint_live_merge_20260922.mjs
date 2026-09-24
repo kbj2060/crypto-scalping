@@ -15,8 +15,9 @@ const body = src.slice(i, src.indexOf("\n}\n", i) + 2);
 
 const BAR = 1790085600;                       // 봉 시각(초)
 const cells = (n) => new Map(Array.from({ length: n }, (_, k) => [5480 + k, [1, 2, 0, 0, 0, 0]]));
-const run = (live) => {
+const run = (live, okxLive = null) => {
   const footprintLive = { bucket: 0.5, ...live };
+  const latestFootprint = { okxLive };          // app.js 에선 전역 -- 2026-09-24 OKX 몫
   const byTime = new Map([[BAR, [[2740, 9, 9, 0, 0, 0, 0]]]]);   // 서버가 준 멀쩡한 봉
   eval(body + "\nfootprintMergeLive(byTime, 0.5);");
   return byTime.get(BAR);
@@ -48,4 +49,18 @@ assert.ok(same(run({ barStart: 0, since: 0, cells: cells(3) })), "barStart 0 인
 assert.match(src, /footprintLive\.since = Infinity;/,
              "새 연결에서 since 를 되돌리는 줄이 없다 — 재연결 뒤 가드가 죽는다");
 
-console.log("모두 통과 (가드 3 + 재연결 리셋)");
+// ── OKX 몫 (2026-09-24): 같은 봉이면 실시간 바이낸스 셀에 **더한다** ──
+const live = { barStart: BAR, since: (BAR - 10) * 1000, cells: cells(3) };   // 2740·2740.5·2741 각 [1,2]
+const okxLv = { time: BAR, levels: [[2740, 1, 1, 0, 0, 0, 0], [2745, 5, 0, 5, 0, 0, 0]] };
+const summed = run(live, okxLv);
+assert.deepEqual(summed.find((l) => l[0] === 2740), [2740, 2, 3, 0, 0, 0, 0], "같은 가격 칸에 안 더했다");
+assert.deepEqual(summed.find((l) => l[0] === 2745), [2745, 5, 0, 5, 0, 0, 0], "OKX 에만 있는 칸이 빠졌다");
+assert.equal(summed.length, 4);
+// 렌더마다 불린다 -- 실시간 셀을 고쳐 쓰면 OKX 몫이 렌더 횟수만큼 쌓인다
+assert.deepEqual(run(live, okxLv), summed, "두 번째 렌더에서 값이 불었다 — 실시간 셀을 변형했다");
+assert.deepEqual(live.cells.get(5480), [1, 2, 0, 0, 0, 0], "실시간 셀이 바뀌었다");
+// 다른 봉의 OKX 몫(롤오버 직후 서버가 아직 옛 봉을 줄 때)은 더하지 않는다
+assert.equal(run(live, { time: BAR - 300, levels: [[2740, 99, 99, 0, 0, 0, 0]] })
+  .find((l) => l[0] === 2740)[1], 1, "다른 봉의 OKX 몫을 더했다");
+
+console.log("모두 통과 (가드 3 + 재연결 리셋 + OKX 합산 3)");

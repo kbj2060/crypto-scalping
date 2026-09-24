@@ -3346,7 +3346,19 @@ function footprintMergeLive(byTime, bucket) {
   //   barStart 는 체결이 와야 넘어가므로, 그 틈에 이 함수가 서버의 멀쩡한 봉을 빈 배열로
   //   갈아치웠다. 이 함수는 «더 나은 값으로 교체»할 때만 의미가 있다.
   if (!footprintLive.cells.size) return;
-  byTime.set(bar, [...footprintLive.cells.entries()]
+  const merged = new Map([...footprintLive.cells.entries()].map(([k, c]) => [k, c.slice(0, 6)]));
+  // 2026-09-24 서버가 준 **OKX 몫**을 더한다(`okxLive`, 같은 봉일 때만). 빼면 이 봉만 바이낸스
+  //   단독이라 ~2/3 로 그려지다 마감 때 합산본으로 튄다. OKX 쪽만 폴링 주기만큼 늦다.
+  const okx = latestFootprint && latestFootprint.okxLive;
+  if (okx && okx.time === bar) {
+    (okx.levels || []).forEach((l) => {
+      const k = Math.round(l[0] / bucket);
+      const c = merged.get(k) || [0, 0, 0, 0, 0, 0];
+      for (let j = 0; j < 6; j++) c[j] += Number(l[j + 1]) || 0;
+      merged.set(k, c);
+    });
+  }
+  byTime.set(bar, [...merged.entries()]
     .map(([k, c]) => [k * bucket, c[0], c[1], c[2], c[3], c[4], c[5]])
     .sort((a, b) => a[0] - b[0]));
 }

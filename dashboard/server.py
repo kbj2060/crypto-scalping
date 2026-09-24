@@ -2721,6 +2721,10 @@ def make_app() -> web.Application:
     #   ⚠️«OKX 가 있는 봉만» 으로 짜면 OKX 가 잠깐 끊길 때 풋프린트가 **통째로 사라진다**.
     #     시작 봉만 기억하는 이 방식은 순간 끊김에 안 죽는다(재연결 3초 = 봉의 1%).
     okx_fp = {"first_bar": 0}
+    # 5분봉별 OKX OI [봉 첫 값, 봉 끝 값](ETH, oiCcy). 2026-09-24 사용자 «사분면·누적 OI 도 OKX
+    #   합산». okx_oi_1s 는 11분 링이라 창(1~4h)의 봉별 Δ 를 못 낸다. 재기동 전 봉은 없다 --
+    #   풋프린트가 어차피 OKX 가 덮은 봉부터만 나가므로(okx_fp) 레인에 그려지는 봉과 겹친다.
+    okx_oi_5m: dict[int, list[float]] = {}
 
     def okx_sec_cell(ts_ms: int) -> list[float]:
         """그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(체결마다 돌 일이 아니다)."""
@@ -2831,6 +2835,14 @@ def make_app() -> web.Application:
                                         sec = ts_ms // 1000
                                         okx_oi_1s[sec] = oi
                                         okx_state["last_oi_ms"] = ts_ms
+                                        ob = sec // OI_5M_BAR_SECONDS * OI_5M_BAR_SECONDS
+                                        if ob in okx_oi_5m:
+                                            okx_oi_5m[ob][1] = oi
+                                        else:
+                                            okx_oi_5m[ob] = [oi, oi]
+                                            for old in [x for x in okx_oi_5m
+                                                        if x < ob - FOOTPRINT_KEEP_BARS * OI_5M_BAR_SECONDS]:
+                                                del okx_oi_5m[old]
                                         for old in [x for x in okx_oi_1s if x < sec - SUPPLY_1S_SECONDS]:
                                             del okx_oi_1s[old]
                             elif ch == "liquidation-orders":
@@ -3716,7 +3728,16 @@ def make_app() -> web.Application:
             since = 0
         full = since <= 0 or not footprint_state["ready"]
         sent = recent if full else [(b, c) for b, c in recent if b >= since]
+        # 2026-09-24 진행 중인 봉의 **OKX 몫만** 따로. 클라는 그 봉을 바이낸스 직결 WS 셀로
+        #   갈아끼우므로(footprintMergeLive) 합산분이 빠져 봉이 ~2/3 로 그려지다가 마감 때 튀었다
+        #   (실측 화면 2,908 vs 서버 4,343). 클라가 실시간 바이낸스 셀에 이걸 더한다.
+        live_bar = recent[-1][0] if recent else 0
+        okx_live = ({"time": live_bar,
+                     "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
+                                for k, v in sorted(okx_bars[live_bar].items())]}
+                    if okx_from and live_bar in okx_bars else None)
         return web.json_response({
+            "okxLive": okx_live,
             "symbol": FOOTPRINT_SYMBOL,
             "bucket": FOOTPRINT_BUCKET,
             "barSeconds": FOOTPRINT_BAR_SECONDS,
@@ -3909,12 +3930,25 @@ def make_app() -> web.Application:
                                    lambda: asyncio.to_thread(oi_5m_buckets, bars))
         # 현재 OI 는 링에서 바로 준다 -- duckdb 는 최대 OI_1S_FLUSH_SECONDS 만큼 뒤처져 있다.
         now_oi = oi_1s[max(oi_1s)] if oi_1s else (buckets[-1][2] if buckets else 0.0)
+        # 2026-09-24 OKX 합산(사용자 지시 -- 사분면·누적 OI). Δ 규칙은 바이낸스와 같다: 직전 봉 끝
+        #   -> 이 봉 끝, 앞 봉이 없으면 봉 안에서만. OKX 기록이 없는 봉(재기동 전)은 바이낸스만이다.
+        # 🔴캐시된 buckets 를 고치면 안 된다(swr 가 같은 리스트를 다시 준다) -- 새로 만든다.
+        # ⚠️09-23 실측: 두 거래소 봉별 ΔOI 상관 +0.000 -- 더하면 서로 상쇄될 수 있다(CVD 는 +0.736).
+        okx_d: dict[int, tuple[float, float]] = {}
+        prev: tuple[int, float] | None = None
+        for ob in sorted(okx_oi_5m):
+            o, c = okx_oi_5m[ob]
+            okx_d[ob] = ((c - o) if prev is None or ob - prev[0] > OI_5M_BAR_SECONDS else (c - prev[1]), c)
+            prev = (ob, c)
+        bars_out = [[b[0], round(b[1] + okx_d[b[0]][0], 3), round(b[2] + okx_d[b[0]][1], 3)] + b[3:]
+                    if b[0] in okx_d else b for b in buckets]
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
             "barSeconds": OI_5M_BAR_SECONDS,
-            "openInterest": round(float(now_oi), 3),
-            # [봉시각, 신규계약, 봉 끝 OI, 스냅샷 수, 공백여부]
-            "bars": buckets,
+            "openInterest": round(float(now_oi), 3),     # 바이낸스만(현재값 표시용)
+            "venues": ["binance-perp", "okx-swap"] if okx_d else ["binance-perp"],
+            # [봉시각, 신규계약, 봉 끝 OI, 스냅샷 수, 공백여부] -- OKX 가 있는 봉은 두 거래소 합
+            "bars": bars_out,
         }, headers=NOCACHE)
 
     async def api_supply_profile(request: web.Request) -> web.Response:
