@@ -3960,13 +3960,20 @@ def make_app() -> web.Application:
         # 쌓인 것을 전부(최대 24시간) 접었는데, 아래 풋프린트는 1시간이라 위아래 두 그림이
         # 다른 구간을 말하고 있었다 -- 한 카드 안에서 그건 읽는 사람을 속이는 것이다.
         want = footprint_window_bars(request)
-        recent = sorted(footprint_state["bars"].items())[-want:]
+        # 2026-09-24 OKX 합산(사용자 지시). 풋프린트(api_footprint)와 **같은 봉·같은 합**이어야 한다 --
+        #   한 카드의 두 그림이다. OKX 가 온전히 덮은 봉부터만 쓰는 규칙도 그대로 따른다.
+        okx_from = okx_fp["first_bar"]
+        base = sorted(footprint_state["bars"].items())
+        if okx_from:
+            base = [(b, c) for b, c in base if b > okx_from]
+        recent = base[-want:]
         merged: dict[int, list[float]] = {}
-        for _, cells in recent:
-            for k, v in cells.items():
-                row = merged.setdefault(k, [0.0] * 6)
-                for i in range(6):
-                    row[i] += v[i]
+        for bar, cells in recent:
+            for src_cells in (cells, okx_bars.get(bar) or {}):
+                for k, v in src_cells.items():
+                    row = merged.setdefault(k, [0.0] * 6)
+                    for i in range(6):
+                        row[i] += v[i]
         span = len(recent) * FOOTPRINT_BAR_SECONDS
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
@@ -3978,6 +3985,7 @@ def make_app() -> web.Application:
             "whaleMinUsd": WHALE_MIN_USD,
             # 창 안의 봉만 센다 -- 링 전체를 세면 1h 를 보는데 24h 치 경고가 뜬다.
             "aggBars": sum(1 for bar, _ in recent if bar in footprint_state["agg_bars"]),
+            "venues": ["binance-perp", "okx-swap"] if okx_from else ["binance-perp"],
             "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
                        for k, v in sorted(merged.items())],
         }, headers=NOCACHE)
@@ -4009,7 +4017,29 @@ def make_app() -> web.Application:
             lambda: asyncio.to_thread(compute_liquidation_5m_history, asset, 96),
             max_stale=STALE_GRACE_SECONDS,
         )
-        return web.json_response(payload, headers=NOCACHE)
+        okx_from = okx_fp["first_bar"]
+        if asset != "eth" or not okx_from or not payload.get("bars"):
+            return web.json_response(payload, headers=NOCACHE)
+        # 2026-09-24 OKX 청산 합산(사용자 지시). 메모리의 OKX 청산을 5분봉으로 더한다 -- 풋프린트와
+        #   같은 규칙으로 OKX 가 봉 전체를 본 봉(okx_fp 이후)만. 재기동 전 봉은 바이낸스만(okx 없음).
+        #   🔴swr 캐시 dict 를 고치면 30초 동안 요청마다 또 더해진다 -- 새로 만든다.
+        add: dict[int, list[float]] = {}
+        for e in list(okx_liq_events):
+            bar = int(e["ts_ms"]) // 1000 // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
+            if bar > okx_from:
+                a = add.setdefault(bar, [0.0, 0.0, 0])
+                a[0 if e["side"] == "long" else 1] += float(e.get("usd") or 0.0)
+                a[2] += 1
+        bars = []
+        for b in payload["bars"]:
+            t = int(datetime.fromisoformat(b["ts"]).timestamp())
+            if t > okx_from:
+                a = add.get(t, [0.0, 0.0, 0])
+                b = {**b, "okx": True, "long_usd": b["long_usd"] + a[0],
+                     "short_usd": b["short_usd"] + a[1], "events": b["events"] + a[2]}
+            bars.append(b)
+        return web.json_response({**payload, "bars": bars, "venues": ["binance-perp", "okx-swap"]},
+                                 headers=NOCACHE)
 
     async def api_position_sizing(request: web.Request) -> web.Response:
         payload = await swr_cached(

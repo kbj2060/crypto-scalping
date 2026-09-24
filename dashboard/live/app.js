@@ -7392,7 +7392,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const tip = document.createElementNS(NS, "title");
         tip.textContent = fmtDateTick(c.time * 1000) + " 청산 " + fmtUsdCompact(v)
           + " (롱 " + fmtUsdCompact(lo) + " / 숏 " + fmtUsdCompact(sh) + ")"
-          + (b.partial ? " · 진행 중" : "");
+          + (b.partial ? " · 진행 중" : "")
+          + (b.okx ? " · 바이낸스+OKX" : "");   // 2026-09-24 재기동 전 봉은 바이낸스만(서버 주석)
         dot.appendChild(tip);
         g.appendChild(dot);
       });
