@@ -15,4 +15,12 @@ assert.strictEqual(run(700, 699, 1.2, 698, 2).stale, false, "셋 다 살아 있�
 assert.strictEqual(run(100, 700, 0.2, 700, 0.3).stale, true, "선물이 600초 멈췄다");
 const never = run(100, 0, null, 0, null);
 assert.ok(never.stale && never.age.includes("OKX/현물"), "한 번도 안 붙은 거래소는 빠짐으로 적는다");
-console.log("merged supply stale OK");
+// ── OI 합 (2026-09-24): 초마다 각자의 직전 관측값을 더한다 · 둘 다 관측된 뒤부터 · OKX 없으면 바이낸스 ──
+global.oi1s = new Map([[100, 1000], [104, 1010]]);
+global.okxOi1s = new Map([[102, 500], [103, 505], [106, 490]]);
+const oi = run(700, 699, 1.2, 698, 2).oi;
+assert.deepStrictEqual([...oi.entries()], [[102, 1500], [103, 1505], [104, 1515], [106, 1500]],
+                       "계단 채움 합이 아니다 (100 은 OKX 관측 전이라 빠져야 한다)");
+global.okxOi1s = new Map();
+assert.strictEqual(run(700, 699, 1.2, 698, 2).oi, global.oi1s, "OKX 가 없으면 바이낸스 선이 그대로여야 한다");
+console.log("merged supply stale OK · OI 합 OK");

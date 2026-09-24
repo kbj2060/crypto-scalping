@@ -255,8 +255,9 @@ const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}`;
 // 🔴**무엇을 더하고 무엇을 안 더하는지가 전부 측정에서 나왔다:**
 //   · 수급(CVD/스택) = 선물 + OKX + 현물. 거래소 간 CVD 상관 **+0.736**(1분, 3일)이라
 //     합이 «같은 이야기의 합»이다. 단위는 셋 다 ETH 이고 가격축이 없어 베이시스가 무관하다.
-//   · OI = **안 더한다.** ΔOI 상관 **+0.000** · 부호 일치 48.0%(1시간) -- 무관한 둘을 더하면
-//     상쇄로 정보가 사라진다(실측: 바이낸스 +228 / OKX -137 → 합 +91, 「반대로 갔다」가 지워짐).
+//   · OI = 2026-09-24 사용자 지시로 **더한다**(5분 레인과 같게). ⚠️ΔOI 상관 **+0.000** · 부호
+//     일치 48.0%(1시간)라 합은 상쇄될 수 있다(실측: 바이낸스 +228 / OKX -137 → 합 +91) --
+//     그래서 거래소별 선을 얇게 남겨 «반대로 갔다»가 안 지워지게 한다(CVD 의 얇은 선과 같은 문법).
 //     현물엔 OI 가 **아예 없다**(포지션 개념이 없다).
 //   · 청산 = 더한다. 이벤트라 점을 다 찍으면 되고 손실이 없다. 현물엔 강제청산이 없다.
 //   · 크기 주의: |합산|/|바이낸스| 중앙 **2.1배**(MM 헤지 이중계상). 라벨에 적는다.
@@ -282,12 +283,24 @@ function mergedSupplySrc() {
   const ages = [["선물", supply1sMeta.now ? now - supply1sMeta.now : null],
                 ["OKX", okxMeta.tradeAge], ["현물", spotMeta.tradeAge]];
   const dead = ages.filter(([, a]) => a == null || a > 10).map(([n]) => n);
+  // OI 합: 두 거래소는 갱신 시각이 달라(바이낸스 폴링 · OKX WS) 초마다 **각자의 직전 관측값**을
+  //   더한다(계단 채움). 둘 다 한 번은 관측된 뒤부터 -- 한쪽만 있는 앞부분을 합이라 부르면 거짓이다.
+  //   OKX 가 아예 없으면 바이낸스만 쓴다(선이 통째로 사라지지 않게).
+  const oiSum = new Map();
+  let lastBn = null, lastOkx = null;
+  [...new Set([...oi1s.keys(), ...okxOi1s.keys()])].sort((a, b) => a - b).forEach((s) => {
+    if (oi1s.has(s)) lastBn = oi1s.get(s);
+    if (okxOi1s.has(s)) lastOkx = okxOi1s.get(s);
+    if (lastBn != null && lastOkx != null) oiSum.set(s, lastBn + lastOkx);
+  });
+  const oiMain = oiSum.size ? oiSum : oi1s;
   return {
-    key: "bn", supply: merged, liq, oi: oi1s,
+    key: "bn", supply: merged, liq, oi: oiMain,
     now,
     label: "합산 · 바이낸스 선물+현물 · OKX",
-    // OI 는 레인 둘 -- 얇게 눌러 배경 참고선으로 둔다(갈릴 때만 눈에 들어오게).
-    oiLanes: [{ oi: oi1s, color: "var(--warn)", width: 2, opacity: 0.95 },
+    // OI 본선 = 합(굵게). 거래소별은 얇게 눌러 배경 참고선으로 둔다(갈릴 때만 눈에 들어오게).
+    oiLanes: [{ oi: oiMain, color: "var(--warn)", width: 2, opacity: 0.95 },
+              { oi: oi1s, color: "var(--warn)", width: 1.2, opacity: 0.5 },
               { oi: okxOi1s, color: "var(--warn)", width: 1.2, opacity: 0.5, dash: "3 2" }],
     // 거래소별 CVD 얇은 선. 현물은 점유 4.5% 라 선이 0선에 붙어 안 그린다 -- 불균형 % 로 읽는다.
     thin: [{ supply: supply1s, label: "선물" }, { supply: okxSupply1s, label: "OKX" }],
@@ -4297,7 +4310,7 @@ function renderSupply1s(box = null, src = null) {
     });
     return out;
   };
-  // 🔴거래소별 OI 는 **안 더한다**(위 mergedSupplySrc 주석: ΔOI 상관 +0.000).
+  // OI 본선은 합, 거래소별은 얇은 참고선(위 mergedSupplySrc 주석: ΔOI 상관 +0.000 이라 둘 다 남긴다).
   const oiLanes = (S.oiLanes || [{ oi: S.oi, color: "var(--warn)", width: 2, opacity: 0.95 }])
     .map((l) => Object.assign({}, l, { rows: oiRowsFor(l.oi) }));
   const oiKeys = [...S.oi.keys()].filter((s) => s > first - SUPPLY_1S_SEGMENT - 20 && s <= now)
