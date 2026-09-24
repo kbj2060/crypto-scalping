@@ -387,6 +387,13 @@ let latestLiqBurstState = null;
 // lastSnapshotHistoryFetchAt tracks the candle history this panel's chart needs (activeSnapshotAsset,
 // see below), independently of activeChartAsset (the Live tab's own, separate coin selector).
 let latestLiquidationMap = null;
+// 2026-09-24 하이퍼리퀴드 고래 **실제** 청산가 뭉치(/api/hl-whale-liq). 추정인 청산맵과 달리 공개
+//   포지션의 청산가다. 대상이 «48h 거래액 상위 300주소»라 오래 들고만 있는 고래는 빠진다.
+let latestHlWhaleLiq = null;
+let hlWhaleLiqLastFetchAt = 0;
+const HL_WHALE_LIQ_POLL_MS = 60000;      // 수집기 한 바퀴가 ~2.5분이라 더 자주 받을 이유가 없다
+const HL_WHALE_LIQ_MIN_ETH = 1000;       // 이보다 작은 뭉치는 꼬리표를 달지 않는다
+const HL_WHALE_LIQ_RANGE = 0.10;         // 현재가 ±10% 안의 뭉치만
 let latestRegimeWide24 = null;
 let latestRegimeBtc = null;
 let latestRegimeXrp = null;
@@ -2829,6 +2836,21 @@ async function refreshVolLevel() {
 // Unlike latestVRebound (picked up by the next state-driven render() pass), the liquidation map
 // has no such host -- it self-triggers both the panel list and the snapshot chart right after a
 // fetch resolves, same pattern as refreshEvidenceSignals().
+async function refreshHlWhaleLiq() {
+  if (activeSnapshotAsset !== "eth") return;             // 수집기가 ETH 만 본다
+  const now = Date.now();
+  if (now - hlWhaleLiqLastFetchAt < HL_WHALE_LIQ_POLL_MS) return;
+  hlWhaleLiqLastFetchAt = now;
+  try {
+    const res = await fetch("/api/hl-whale-liq", { cache: "no-cache" });
+    if (!res.ok) throw new Error(`hl whale liq ${res.status}`);
+    latestHlWhaleLiq = await res.json();
+  } catch (error) {
+    console.error("HL whale liq fetch error:", error);
+    latestHlWhaleLiq = null;
+  }
+}
+
 async function refreshLiquidationMap() {
   const now = Date.now();
   if (now - liquidationMapLastFetchAt < LIQUIDATION_MAP_POLL_MS) return;
@@ -3189,6 +3211,24 @@ function nearestLiquidationLevel() {
   }];
 }
 
+
+// 하이퍼리퀴드 고래 청산 뭉치 -> 레벨(renderCandleSvg 의 riskLevels 모양). 아래(롱 청산)·위(숏 청산)
+// 에서 각각 **가장 큰** 뭉치 하나만. 여럿을 달면 오른쪽 열이 넘쳐 이름 있는 꼬리표가 잘린다(09-22 사고).
+// 🔴10분 넘게 묵은 스냅샷은 안 그린다 -- 수집기가 멈춘 채 낡은 청산가를 «지금»처럼 보이면 안 된다.
+function hlWhaleLiqLevels(currentPrice, footprint) {
+  const d = latestHlWhaleLiq;
+  if (activeSnapshotAsset !== "eth" || !d || !d.ok || !(currentPrice > 0)) return [];
+  if (!(Number(d.age_s) < 600)) return [];
+  const pick = (idx, below) => (d.clusters || [])
+    .filter((c) => (below ? c[0] < currentPrice : c[0] > currentPrice)
+      && Math.abs(c[0] / currentPrice - 1) <= HL_WHALE_LIQ_RANGE && c[idx] >= HL_WHALE_LIQ_MIN_ETH)
+    .sort((a, b) => b[idx] - a[idx])[0];
+  const fmt = (x) => (x >= 1000 ? `${(x / 1000).toFixed(1)}k` : `${Math.round(x)}`);
+  return [[pick(1, true), "HL롱", "var(--liq-support)", 1], [pick(2, false), "HL숏", "var(--liq-resistance)", 2]]
+    .filter(([c]) => c)
+    .map(([c, label, color, idx]) => ({ val: c[0], color, label, sub: `${fmt(c[idx])}`,
+                                        dashed: true, width: 1, marker: !!footprint }));
+}
 
 // Keeps candleHistoryByAsset[activeSnapshotAsset]'s rightmost candle live between the 5-min
 // maybeFetchSnapshotChartHistory() fetches, mirroring updateChart()'s in-place extend/roll logic
@@ -5255,7 +5295,8 @@ function renderSnapshotChart() {
     ? fullCandles.slice(-chartWindowBars)
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
-  const riskLevels = [...nearestLiquidationLevel(), ...situationTargetLevels(footprint)];
+  const riskLevels = [...nearestLiquidationLevel(), ...situationTargetLevels(footprint),
+                      ...hlWhaleLiqLevels(currentPrice, footprint)];
   // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
   // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
   // /api/liquidation-map 이 갱신될 때(60초)만 다시 만든다.
@@ -6734,7 +6775,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     pTxt.setAttribute("font-weight", "bold");
     pTxt.setAttribute("fill", p.gauge === undefined ? inkOnFill() : "var(--ink)");
     if (p.faded) pTxt.setAttribute("opacity", "0.62");
-    pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, 1)}`;
+    // 🔴화면 밖이면 «↑ » 가 앞에 붙어 값(sub)과 겹쳤다(2026-09-24 캡처: «2780.Q.1k»·«2641.63%»).
+    //   78px 한계라 폭을 못 늘린다 -- 값이 같이 들어가는 화면 밖 배지만 소수점을 뗀다.
+    pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, subOk && p.outOfView ? 0 : 1)}`;
     if (!mobileChart) svg.appendChild(pTxt);
     if (subOk) {
       const sTxt = document.createElementNS(NS, "text");
@@ -7594,6 +7637,7 @@ async function tick() {
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
       refreshLiquidationMap();
+      refreshHlWhaleLiq();           // 2026-09-24 하이퍼리퀴드 고래 실제 청산가 (자체 60초 게이트)
       refreshActiveRegime();
       refreshCoinIndicators();
       refreshMacroCalendar();

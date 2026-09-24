@@ -599,6 +599,8 @@ from scripts.live_okx_trade_tape_collector_20260923 import (  # noqa: E402
     BUCKETS as OKX_TAPE_BUCKETS, CT_VALS as OKX_CT_VALS, HTTP_HEADERS as OKX_HTTP_HEADERS,
     INSTRUMENTS_URL as OKX_INSTRUMENTS_URL)
 OKX_TAPE_DB_PATH = LIVE_DIR / "okx_trade_tape.duckdb"
+HL_POS_DB_PATH = LIVE_DIR / "hyperliquid_positions.duckdb"
+HL_LIQ_BUCKET = 5.0      # 청산가 묶음 폭($). ETH ~$2,600 에서 0.2%
 OKX_CTX_DB_PATH = LIVE_DIR / "okx_context.duckdb"
 
 
@@ -616,6 +618,32 @@ def _read_only_rows(path: Path, sql: str, params: list) -> list[tuple]:
                 raise
             time.sleep(0.2)
     return []
+
+
+def hl_whale_liq(db: Path = HL_POS_DB_PATH, bucket: float = HL_LIQ_BUCKET) -> dict:
+    """하이퍼리퀴드 고래 **실제** 청산가 뭉치 (2026-09-24, 사용자 지시).
+
+    `live_hyperliquid_positions_collector_20260924.py` 의 최신 완결 바퀴(hl_cycles 행은 포지션 행과 한
+    트랜잭션이라 있으면 완결이다)에서 ETH 포지션의 청산가를 bucket 달러로 묶는다.
+    clusters: [[묶음 가격, 롱 ETH, 숏 ETH, 주소 수], ...] -- 롱 = 아래에서 청산(강제 매도),
+    숏 = 위에서 청산(강제 매수). 🔴대상은 «48h 거래액 상위 300주소»라 오래 들고만 있는 고래는 빠진다."""
+    last = _read_only_rows(db, "SELECT max(ts_ms) FROM hl_cycles WHERE n_ok > 0", [])
+    t = int(last[0][0] or 0) if last else 0
+    if not t:
+        return {"ok": False}
+    agg: dict[int, list[float]] = {}
+    n_pos = 0
+    for szi, liq in _read_only_rows(db, "SELECT szi, liq_px FROM hl_positions WHERE ts_ms >= ? AND coin = 'ETH'", [t]):
+        n_pos += 1
+        if not liq or liq <= 0:
+            continue
+        k = int(round(float(liq) / bucket))
+        c = agg.setdefault(k, [0.0, 0.0, 0])
+        c[0 if szi > 0 else 1] += abs(float(szi))
+        c[2] += 1
+    return {"ok": True, "ts_ms": t, "age_s": round(time.time() - t / 1000, 1), "n_positions": n_pos,
+            "bucket": bucket, "clusters": [[round(k * bucket, 2), round(v[0], 1), round(v[1], 1), v[2]]
+                                           for k, v in sorted(agg.items())]}
 
 
 def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_ms: int,
@@ -5274,6 +5302,15 @@ def make_app() -> web.Application:
     app.router.add_get("/api/supply-profile", api_supply_profile)
     app.router.add_get("/api/supply-1s", api_supply_1s)
     app.router.add_get("/api/oi-5m", api_oi_5m)
+
+    async def api_hl_whale_liq(request: web.Request) -> web.Response:
+        try:
+            body = await swr_cached("hl_whale_liq", 30.0, lambda: asyncio.to_thread(hl_whale_liq))
+        except Exception as exc:  # noqa: BLE001 -- 수집기가 없으면 화면은 이 레벨만 안 그린다
+            body = {"ok": False, "error": type(exc).__name__}
+        return web.json_response(body, headers=NOCACHE)
+
+    app.router.add_get("/api/hl-whale-liq", api_hl_whale_liq)
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
     app.router.add_get("/api/gex", api_gex)
     app.router.add_get("/api/flow/heatmap", api_flow_heatmap)
