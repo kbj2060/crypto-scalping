@@ -646,6 +646,42 @@ def hl_whale_liq(db: Path = HL_POS_DB_PATH, bucket: float = HL_LIQ_BUCKET) -> di
                                            for k, v in sorted(agg.items())]}
 
 
+def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH) -> list[tuple[int, float, bool, str]]:
+    """포지션 수집기가 확정한 HL 고래 청산 체결 -> [(체결 ms, USD, 롱청산?, 주소)]. 없으면 [].
+    롱 청산 = 롱 포지션이 강제로 닫힌 것(`dir` 이 «Close Long», 없으면 매도 체결 side=A)."""
+    try:
+        rows = _read_only_rows(db, """SELECT fill_ms, px * sz, dir, side, user FROM hl_liquidations
+                                      WHERE coin = 'ETH' AND fill_ms >= ?""", [since_ms])
+    except (duckdb.Error, OSError):
+        return []                                  # 수집기가 아직 없거나 표가 없다
+    return [(int(t), float(u or 0.0), ("Long" in str(d)) if d else side == "A", str(user))
+            for t, u, d, side, user in rows]
+
+
+def merge_hl_liq(bars: list[dict], events: list[tuple[int, float, bool, str]],
+                 bar_seconds: int) -> list[dict]:
+    """5분봉 청산 원에 HL 고래 청산을 **더하고** `hl` 로 따로도 남긴다(툴팁이 가른다).
+    🔴HL 은 «추적 중인 300주소» 청산뿐이다 -- HL 전체 청산이 아니다(툴팁에 적는다).
+    입력 dict 는 고치지 않는다(swr 캐시 객체일 수 있다)."""
+    add: dict[int, list] = {}
+    for t, usd, is_long, user in events:
+        bar = t // 1000 // bar_seconds * bar_seconds
+        a = add.setdefault(bar, [0.0, 0.0, 0, []])
+        a[0 if is_long else 1] += usd
+        a[2] += 1
+        if user not in a[3]:
+            a[3].append(user)
+    out = []
+    for b in bars:
+        a = add.get(int(datetime.fromisoformat(b["ts"]).timestamp()))
+        if a:
+            b = {**b, "long_usd": b["long_usd"] + a[0], "short_usd": b["short_usd"] + a[1],
+                 "events": b["events"] + a[2],
+                 "hl": {"long_usd": round(a[0]), "short_usd": round(a[1]), "n": a[2], "users": a[3][:5]}}
+        out.append(b)
+    return out
+
+
 def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_ms: int,
                        bar_seconds: int, bucket: float) -> dict:
     """OKX 체결 테이프(수집기 duckdb)에서 풋프린트 봉을 되살린다 (2026-09-24, 사용자 A안).
@@ -4196,8 +4232,11 @@ def make_app() -> web.Application:
             max_stale=STALE_GRACE_SECONDS,
         )
         okx_from = okx_fp["first_bar"]
-        if asset != "eth" or not okx_from or not payload.get("bars"):
+        if asset != "eth" or not payload.get("bars"):
             return web.json_response(payload, headers=NOCACHE)
+        if not okx_from:
+            return web.json_response(await _with_hl_liq(payload, payload["bars"], ["binance-perp"]),
+                                     headers=NOCACHE)
         # 2026-09-24 OKX 청산 합산(사용자 지시). 메모리의 OKX 청산을 5분봉으로 더한다 -- 풋프린트와
         #   같은 규칙으로 OKX 가 봉 전체를 본 봉(okx_fp 이후)만. 재기동 전 봉은 바이낸스만(okx 없음).
         #   🔴swr 캐시 dict 를 고치면 30초 동안 요청마다 또 더해진다 -- 새로 만든다.
@@ -4216,8 +4255,21 @@ def make_app() -> web.Application:
                 b = {**b, "okx": True, "long_usd": b["long_usd"] + a[0],
                      "short_usd": b["short_usd"] + a[1], "events": b["events"] + a[2]}
             bars.append(b)
-        return web.json_response({**payload, "bars": bars, "venues": ["binance-perp", "okx-swap"]},
+        return web.json_response(await _with_hl_liq(payload, bars, ["binance-perp", "okx-swap"]),
                                  headers=NOCACHE)
+
+    async def _with_hl_liq(payload: dict, bars: list[dict], venues: list[str]) -> dict:
+        """2026-09-24 사용자 지시: HL 고래 청산(포지션 수집기가 확정한 것)도 같은 원에 더한다."""
+        since = int(datetime.fromisoformat(bars[0]["ts"]).timestamp() * 1000) if bars else 0
+        try:
+            ev = await swr_cached("hl_whale_liq_events", 30.0,
+                                  lambda: asyncio.to_thread(hl_whale_liq_events, since))
+        except Exception:  # noqa: BLE001 -- HL 이 없어도 원은 그대로 그린다
+            ev = []
+        merged = merge_hl_liq(bars, ev, FOOTPRINT_BAR_SECONDS)
+        if any("hl" in b for b in merged):
+            venues = venues + ["hyperliquid-whales"]
+        return {**payload, "bars": merged, "venues": venues}
 
     async def api_position_sizing(request: web.Request) -> web.Response:
         payload = await swr_cached(

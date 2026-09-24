@@ -7436,7 +7436,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         tip.textContent = fmtDateTick(c.time * 1000) + " 청산 " + fmtUsdCompact(v)
           + " (롱 " + fmtUsdCompact(lo) + " / 숏 " + fmtUsdCompact(sh) + ")"
           + (b.partial ? " · 진행 중" : "")
-          + (b.okx ? " · 바이낸스+OKX" : "");   // 2026-09-24 재기동 전 봉은 바이낸스만(서버 주석)
+          + (b.okx ? " · 바이낸스+OKX" : "")    // 2026-09-24 재기동 전 봉은 바이낸스만(서버 주석)
+          // 2026-09-24 HL 고래 청산도 합산에 들어 있다 -- 무엇이 얼마인지 따로 적는다(추적 300지갑 한정).
+          + (b.hl ? " · HL 고래 청산 " + fmtUsdCompact((b.hl.long_usd || 0) + (b.hl.short_usd || 0))
+             + " (" + b.hl.n + "건 · 롱 " + fmtUsdCompact(b.hl.long_usd || 0) + " / 숏 "
+             + fmtUsdCompact(b.hl.short_usd || 0) + " · 추적 300지갑 한정)" : "");
         dot.appendChild(tip);
         g.appendChild(dot);
       });
