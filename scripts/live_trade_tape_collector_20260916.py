@@ -207,6 +207,25 @@ def log(msg: str) -> None:
     print(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {msg}", flush=True)
 
 
+def duckdb_connect_retry(path, attempts: int = 25, delay: float = 0.2):
+    """쓰기 연결을 열되 **잠금 충돌이면 잠깐 기다렸다 다시** 연다(최대 ~5초).
+
+    🔴duckdb 는 누가 read_only 로 잠깐만 열어도 writer 연결을 거부한다. ops_watchdog 의 신선도
+      검사·대시보드 기동 시 기준값 계산·연구 쿼리가 이 파일을 수백 ms 씩 연다. 평소 쓰기는 실패해도
+      보류했다 재시도하지만 **기동 시 테이블 초기화에는 그 장치가 없어 프로세스가 죽었다**
+      (2026-09-24 16:34:51, ops_watchdog PID 316 과 충돌 → supervisor 가 15초 뒤 재기동).
+    잠금 충돌이 아닌 오류와 마지막 시도의 실패는 그대로 올린다."""
+    import duckdb
+
+    for i in range(attempts):
+        try:
+            return duckdb.connect(str(path))
+        except duckdb.IOException as exc:
+            if "lock" not in str(exc).lower() or i == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 class TapeBuffer:
     """(초, 가격빈) -> 12칸.
 
@@ -402,10 +421,8 @@ class TapeStore:
 
     @contextmanager
     def _connect(self):
-        import duckdb
-
         with self._lock:
-            con = duckdb.connect(str(self.db_path))
+            con = duckdb_connect_retry(self.db_path)
             try:
                 yield con
             finally:
@@ -851,6 +868,26 @@ def selftest() -> None:
         assert got == (1, 5.0, 1), ("분이 통째로 바뀌고 모르는 칸은 NULL", got)
         assert v == (1, 0.0), ("verify_1m 도 새 값 한 줄", v)
         assert b == (False, BACKFILL_MAX_ATTEMPTS), b
+
+        # ── 읽는 쪽이 잠깐 쥐어도 기동이 안 죽는다 (2026-09-24 16:34:51 재현) ──────────
+        import subprocess
+        import sys
+        import duckdb
+        db = Path(td) / "t.duckdb"
+        hold = subprocess.Popen([sys.executable, "-c",
+                                 "import duckdb,sys,time; c=duckdb.connect(sys.argv[1], read_only=True);"
+                                 "print('held', flush=True); time.sleep(1.5); c.close()", str(db)],
+                                stdout=subprocess.PIPE, text=True)
+        assert hold.stdout.readline().strip() == "held"
+        try:
+            duckdb.connect(str(db)).close()
+            raise AssertionError("대조군: 읽는 쪽이 쥐고 있으면 그냥 connect 는 실패해야 한다")
+        except duckdb.IOException:
+            pass
+        t0 = time.monotonic()
+        TapeStore(db, "ethusdt", 0.1)                       # 기동 초기화 -- 예전엔 여기서 죽었다
+        assert time.monotonic() - t0 >= 0.5, "기다린 흔적이 없다 -- 재현이 안 됐다"
+        hold.wait(timeout=10)
     print("selftest OK")
 
 

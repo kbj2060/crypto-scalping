@@ -51,6 +51,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 _bn = importlib.import_module("scripts.live_book_ticker_collector_20260914")
+_tape = importlib.import_module("scripts.live_trade_tape_collector_20260916")   # duckdb_connect_retry
 HourFile = _bn.HourFile
 MAGIC, VER, HDR, ROW = _bn.MAGIC, _bn.VER, _bn.HDR, _bn.ROW
 
@@ -121,9 +122,7 @@ class CtxStore:
                 con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
 
     def _connect(self):
-        import duckdb
-
-        return duckdb.connect(str(self.db_path))
+        return _tape.duckdb_connect_retry(self.db_path)   # 읽는 쪽과 잠금 충돌이면 잠깐 기다린다
 
     def write(self, rows: list[tuple]) -> None:
         self.pending.extend(rows)

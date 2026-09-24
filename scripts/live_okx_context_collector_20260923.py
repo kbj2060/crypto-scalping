@@ -165,9 +165,7 @@ class ContextStore:
                 con.execute(ddl)
 
     def _connect(self):
-        import duckdb
-
-        return duckdb.connect(str(self.db_path))
+        return _tape._bn.duckdb_connect_retry(self.db_path)   # 읽는 쪽과 잠금 충돌이면 잠깐 기다린다
 
     def set_meta(self, pairs) -> None:
         with self._connect() as con:
