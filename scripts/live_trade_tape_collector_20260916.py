@@ -59,7 +59,8 @@ KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 AGG_TRADES_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
 BACKFILL_SECONDS = 60.0   # 복구 주기. 한 주기에 몇 분을 받을지는 거래소별 per_cycle
 BACKFILL_MAX_ATTEMPTS = 3
-BACKFILL_LOOKBACK_S = 7 * 86400
+BACKFILL_LOOKBACK_S = 7 * 86400        # 기본(OKX history-trades 는 수개월 가능)
+BINANCE_BACKFILL_LOOKBACK_S = 47 * 3600  # 🔴aggTrades 시각 검색은 «최근 2일»만(-4166, 2026-09-24 실측)
 FLUSH_SECONDS = 5.0      # 완결된 초만 쓴다 -- 한 초는 정확히 한 번 기록된다
 VERIFY_SECONDS = 300.0
 VERIFY_TOLERANCE = 1e-4  # 이보다 어긋나면 로그로 떠든다(행은 어차피 남긴다)
@@ -428,9 +429,9 @@ class TapeStore:
             finally:
                 con.close()
 
-    def backfill_candidates(self, limit: int) -> list[int]:
+    def backfill_candidates(self, limit: int, lookback_s: int = BACKFILL_LOOKBACK_S) -> list[int]:
         """다시 받을 분: 공백과 겹치거나 1분봉과 안 맞은 분. 이미 맞는 분·교체한 분·3번 실패한 분,
-        끝난 지 3분 안 된 분(아직 flush·검사 전)은 뺀다. 최근 분부터."""
+        끝난 지 3분 안 된 분(아직 flush·검사 전), 거래소가 더는 안 주는 옛 분(lookback)은 뺀다."""
         now = int(time.time())
         with self._connect() as con:
             rows = con.execute("""
@@ -444,12 +445,13 @@ class TapeStore:
                      done AS (SELECT ts_min AS m FROM backfill_1m
                               WHERE symbol = ? AND (ok OR attempts >= ?))
                 SELECT DISTINCT m FROM (SELECT m FROM g UNION SELECT m FROM v)
-                WHERE m <= ? AND m NOT IN (SELECT m FROM done)
+                WHERE m <= ? AND m >= ? AND m NOT IN (SELECT m FROM done)
                   AND (m IN (SELECT m FROM v) OR m NOT IN (SELECT m FROM okv))
                 ORDER BY m DESC LIMIT ?""",
-                [self.symbol, (now - BACKFILL_LOOKBACK_S) * 1000,
+                [self.symbol, (now - lookback_s) * 1000,
                  self.symbol, VERIFY_TOLERANCE, self.symbol, VERIFY_TOLERANCE,
-                 self.symbol, BACKFILL_MAX_ATTEMPTS, now - 180, limit]).fetchall()
+                 self.symbol, BACKFILL_MAX_ATTEMPTS, now - 180, now - lookback_s,
+                 limit]).fetchall()
         return [int(r[0]) for r in rows]
 
     def live_rows_outside_gaps(self, ts_min: int) -> list[tuple]:
@@ -607,7 +609,7 @@ async def verify_recent(store: TapeStore, session) -> None:
 
 
 async def backfill_loop(store: TapeStore, fetch_minute, per_cycle: int, source: str,
-                        note: str) -> None:
+                        note: str, lookback_s: int = BACKFILL_LOOKBACK_S) -> None:
     """공백·불일치 분을 REST 로 다시 받아 **1분봉과 맞을 때만** 통째로 교체한다(2026-09-24).
 
     `fetch_minute(m)` -> (행 목록, 1분봉 물량 | None). None 이면 1분봉이 아직 확정 전이라 다음
@@ -616,7 +618,7 @@ async def backfill_loop(store: TapeStore, fetch_minute, per_cycle: int, source: 
     while True:
         await asyncio.sleep(BACKFILL_SECONDS)
         try:
-            minutes = await asyncio.to_thread(store.backfill_candidates, per_cycle)
+            minutes = await asyncio.to_thread(store.backfill_candidates, per_cycle, lookback_s)
         except Exception as exc:  # noqa: BLE001
             log(f"복구 대상 조회 실패: {type(exc).__name__} {exc}")
             continue
@@ -625,7 +627,15 @@ async def backfill_loop(store: TapeStore, fetch_minute, per_cycle: int, source: 
             stamp = time.strftime("%m-%d %H:%M", time.localtime(m))
             try:
                 rows, kline_qty = await fetch_minute(m)
-            except Exception as exc:  # noqa: BLE001 -- 거래소 오류면 다음 주기에 다시
+            except Exception as exc:  # noqa: BLE001
+                status = getattr(exc, "status", None)
+                if status and 400 <= status < 500 and status not in (418, 429):
+                    # 🔴영구 거부(예: 바이낸스 -4166 «최근 2일만»)를 일시 오류처럼 다루면 **같은 분을
+                    #   1분마다 영원히** 다시 받는다(2026-09-24 서버 실측). 실패로 세고 다음 분으로.
+                    await asyncio.to_thread(store.mark_backfill_failed, m, source, 0, 0.0, 0.0,
+                                            0.0, f"거부 {status} · {note}")
+                    log(f"복구 {stamp} 거부됨 {status} -- 실패로 기록(3번이면 포기)")
+                    continue
                 log(f"복구 {stamp} 받기 실패(다음 주기 재시도): {type(exc).__name__} {exc}")
                 break
             if kline_qty is None:
@@ -701,7 +711,8 @@ async def collect(symbol: str, db_path: Path) -> None:
         backfill = asyncio.create_task(backfill_loop(  # noqa: F841 -- 수집이 끝날 때까지 돈다
             store, binance_minute_fetcher(session, symbol, bucket), per_cycle=3,
             source="binance rest aggTrades",
-            note="buy_max/sell_max NULL(REST 에 개별 체결 최대가 없다) · 주문=aggTrade"))
+            note="buy_max/sell_max NULL(REST 에 개별 체결 최대가 없다) · 주문=aggTrade",
+            lookback_s=BINANCE_BACKFILL_LOOKBACK_S))
         flushed_at = verified_at = time.monotonic()
         while True:
             try:
@@ -852,6 +863,7 @@ def selftest() -> None:
                   (m_gap + 15, 25000, 1.0, 0, 1, 0, 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)])
         assert [r[0] for r in st.live_rows_outside_gaps(m_gap)] == [m_gap + 5], \
             "공백(10~20초)에 걸린 초의 라이브 행은 REST 로 갈아 끼울 대상이다"
+        assert st.backfill_candidates(10, lookback_s=500) == [], "거래소가 안 주는 옛 분은 뺀다"
         cands = st.backfill_candidates(10)
         assert cands == [m_bad, m_gap], ("공백 분·불일치 분만, 최근 먼저. 맞는 분·새 분은 뺀다", cands)
         new_rows = [(m_bad + 1, 25000, 2.0, 3.0, 2, 3, None, None, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1)]
