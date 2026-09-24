@@ -565,7 +565,10 @@ class TapeStore:
                 out.append((ts_min, rel, bool(gapped)))
         return out
 
-    def unverified_minutes(self, limit: int = 5) -> list[int]:
+    def unverified_minutes(self, limit: int = 30) -> list[int]:
+        # 🔴30 이다(예전 5). «5분마다 최근 5분»은 주기가 조금만 늘어도 분을 영원히 건너뛴다 --
+        #   서버 시계가 0.917배라 5분 주기가 실제 5.45분이고, 11분마다 한 분이 창에서 빠져
+        #   **12시간 718분 중 80분이 검사된 적 없었다**(2026-09-24). 밀린 분을 따라잡게 넉넉히 본다.
         # 🔴`- 120` 이다(`- 60` 이면 끝난 지 몇 초 안 된 분도 뽑힌다). 그 분의 마지막 초들은
         #   아직 버퍼/flush 대기라 «유실»로 찍히고 verify_1m 에 영구히 남는다 -- 2026-09-23 OKX
         #   06:13/07:03/08:09 가 분 종료 2~7초 뒤 검사로 −2~−14% 거짓 경보였다(재대조 전부 일치).
@@ -585,7 +588,8 @@ async def verify_recent(store: TapeStore, session) -> None:
     if not minutes:
         return
     params = {"symbol": store.symbol.upper(), "interval": "1m",
-              "startTime": min(minutes) * 1000, "limit": len(minutes) + 2}
+              "startTime": min(minutes) * 1000,
+              "limit": min(1500, (max(minutes) - min(minutes)) // 60 + 2)}   # 흩어진 밀린 분까지 덮게
     async with session.get(KLINES_URL, params=params) as response:
         if response.status != 200:
             return

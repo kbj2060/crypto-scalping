@@ -168,8 +168,11 @@ async def verify_recent(store, session, inst: str) -> None:
     if not minutes:
         return
     try:
-        async with session.get(CANDLES_URL, headers=HTTP_HEADERS,
-                               params={"instId": inst, "bar": "1m", "limit": "100"}) as r:
+        # 🔴`candles` 는 최근 100분뿐이라 그보다 밀린 분은 영영 검사 못 했다 -- 과거용
+        #   history-candles 로 «이번 묶음의 최근 분 + 1분» 앞 100분을 받는다(남은 분은 다음 주기).
+        async with session.get(HISTORY_CANDLES_URL, headers=HTTP_HEADERS,
+                               params={"instId": inst, "bar": "1m", "limit": "100",
+                                       "after": str((max(minutes) + 60) * 1000)}) as r:
             if r.status != 200:
                 return
             body = await r.json()
