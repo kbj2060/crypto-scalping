@@ -3492,13 +3492,16 @@ function applySupply1s(payload) {
 // 0.25초마다 «그 뒤»를 보낸다 -- 요청 왕복(클라우드플레어 경유 ~100ms)과 폴링 대기가 없어진다.
 // 스트림이 조용해지면(마지막 메시지 3초 전) 위 폴링이 그대로 대신한다 -- 폴링을 안 지운 이유.
 const API_STREAM_URL = "/api/stream";
-let liveStream = null, liveStreamKey = "", liveStreamAt = 0, liveStreamRetryAt = 0;
+let liveStream = null, liveStreamKey = "", liveStreamAt = 0, liveStreamOpenedAt = 0, liveStreamRetryAt = 0;
+// 폴링을 쉬는 건 **메시지를 실제로 받고 있을 때만**. 연 시각으로 치면 중간(프록시)이 스트림을
+// 붙잡아 두는 환경에서 여는 순간마다 3초씩 비는 구멍이 생긴다.
 const liveStreamOn = () => liveStream !== null && Date.now() - liveStreamAt < 3000;
 
 function ensureLiveStream() {
   const want = activePageTab === "snapshot" && !document.hidden;
   const key = want ? (activeSnapshotAsset === "eth" ? "eth" : "other") : "";
-  if (liveStream && (key !== liveStreamKey || Date.now() - liveStreamAt > 10000)) {
+  if (liveStream && (key !== liveStreamKey
+                     || Date.now() - Math.max(liveStreamAt, liveStreamOpenedAt) > 10000)) {
     liveStream.close(); liveStream = null;           // 탭·코인·가시성이 바뀌었거나 10초 침묵
   }
   if (!key || liveStream || Date.now() < liveStreamRetryAt) return;
@@ -3509,7 +3512,7 @@ function ensureLiveStream() {
     + `&sinceOkx=${okxSupply1sSince}&sinceOkxOi=${okxOi1sSince}&sinceOkxLiq=${okxLiq1sSince}`
     + `&sinceSpot=${spotSupply1sSince}`;
   const es = new EventSource(API_STREAM_URL + q);
-  liveStream = es; liveStreamAt = Date.now();
+  liveStream = es; liveStreamAt = 0; liveStreamOpenedAt = Date.now();
   es.addEventListener("supply", (ev) => {
     liveStreamAt = Date.now();
     try { applySupply1s(JSON.parse(ev.data)); } catch (e) { console.error("stream supply:", e); return; }
