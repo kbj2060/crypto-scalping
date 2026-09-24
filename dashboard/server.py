@@ -4194,8 +4194,19 @@ def make_app() -> web.Application:
             o, c = okx_oi_5m[ob]
             okx_d[ob] = ((c - o) if prev is None or ob - prev[0] > OI_5M_BAR_SECONDS else (c - prev[1]), c)
             prev = (ob, c)
-        bars_out = [[b[0], round(b[1] + okx_d[b[0]][0], 3), round(b[2] + okx_d[b[0]][1], 3)] + b[3:]
-                    if b[0] in okx_d else b for b in buckets]
+        # 🔴2026-09-25 커버리지 가드. 전에는 `b[0] in okx_d` 면 더하고 아니면 **바이낸스만 그대로
+        #   뒀다** -- 한 창에 1거래소 봉과 2거래소 봉이 섞여 경계에서 봉 끝 OI 가 튀었다
+        #   (실측 bars=288 에서 282봉 중 87봉이 바이낸스만, 경계 2,302,631 -> 2,862,053 ETH = +24%).
+        #   풋프린트 계열은 이 가드를 이미 갖고 있었다(`b > okx_fp["first_bar"]`, api_footprint).
+        #   ⭐**같은 변수를 쓴다** -- okx_oi_5m 의 최솟값을 따로 쓰면 두 그림의 경계가 어긋난다.
+        #   화면은 풋프린트 봉이 없는 캔들을 이미 건너뛰므로(app.js quadLane/cumLane), 여기서
+        #   같은 경계로 자르면 «그려지는 봉 = OI 있는 봉»이 구성상 같아진다.
+        #   🔴OKX 가 아예 없으면(수집기 정지) 자르지 않는다 -- 레인이 통째로 사라지는 것보다
+        #     바이낸스 단독이 낫고, venues 가 그렇게 말한다.
+        okx_from = okx_fp["first_bar"]
+        bars_out = ([[b[0], round(b[1] + okx_d[b[0]][0], 3), round(b[2] + okx_d[b[0]][1], 3)] + b[3:]
+                     for b in buckets if b[0] > okx_from and b[0] in okx_d]
+                    if okx_d else buckets)
         return web.json_response({
             "symbol": FOOTPRINT_SYMBOL,
             "barSeconds": OI_5M_BAR_SECONDS,

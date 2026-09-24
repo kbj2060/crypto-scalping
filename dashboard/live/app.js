@@ -253,10 +253,18 @@ const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}`;
 
 // ── 합산 출처 (2026-09-23) ───────────────────────────────────────────────
 // 🔴**무엇을 더하고 무엇을 안 더하는지가 전부 측정에서 나왔다:**
-//   · 수급(CVD/스택) = 선물 + OKX + 현물. 거래소 간 CVD 상관 **+0.736**(1분, 3일)이라
-//     합이 «같은 이야기의 합»이다. 단위는 셋 다 ETH 이고 가격축이 없어 베이시스가 무관하다.
+//   · 수급(CVD/스택) = 선물 + OKX. 🔴**2026-09-25 현물을 본선에서 뺐다**(사용자 지시).
+//     현물이 틀려서가 아니라 **풋프린트·사분면과 원천을 맞추기 위해서다** -- 현물은 선물보다
+//     +4.69bp 높아 가격축에 못 올라가므로($0.1 빈 12.9칸) 풋프린트엔 원리적으로 못 들어간다.
+//     셋 중 «한 곳에만» 들어가는 유일한 원천이라 여기가 유일한 제거 지점이었다.
+//     값도 가장 싸다: 라이브 647초에서 거래량 몫 7.7% · 1초 델타 부호 뒤집기 3.4%(OKX 12.7%) ·
+//     1분 델타 부호 뒤집기 0/12. 3일 측정에서도 기여 +7/+9pp 로 OKX(+23/+41pp)의 1/4 이하다.
+//     ⭐**불균형 %(imbSources)에는 그대로 남긴다** -- 거기엔 가격축이 없어 문제가 없고,
+//     09-22 에 확인된 기여가 나오는 자리다.
 //   · OI = 2026-09-24 사용자 지시로 **더한다**(5분 레인과 같게). ⚠️ΔOI 상관 **+0.000** · 부호
 //     일치 48.0%(1시간)라 합은 상쇄될 수 있다(실측: 바이낸스 +228 / OKX -137 → 합 +91) --
+//     🔴2026-09-25 정정: 그 «+0.000» 은 **5분봉 2일(593봉)에서 +0.503** 으로 재현되지 않는다.
+//     1초에서 0 이 나오는 건 바이낸스 OI 가 REST 3~7초 지연이라서로 추정한다(확정 아님).
 //     그래서 거래소별 선을 얇게 남겨 «반대로 갔다»가 안 지워지게 한다(CVD 의 얇은 선과 같은 문법).
 //     현물엔 OI 가 **아예 없다**(포지션 개념이 없다).
 //   · 청산 = 더한다. 이벤트라 점을 다 찍으면 되고 손실이 없다. 현물엔 강제청산이 없다.
@@ -269,19 +277,22 @@ function mergedSupplySrc() {
     for (let i = 0; i < 6; i++) t[i] += c[i] || 0;
     if (c[6]) t[6] = c[6];
   });
-  addSupply(supply1s); addSupply(okxSupply1s); addSupply(spotSupply1s);
+  // 🔴현물은 여기 안 더한다(위 주석) -- 풋프린트·사분면과 같은 원천이어야 셋이 맞는다.
+  addSupply(supply1s); addSupply(okxSupply1s);
   const liq = new Map();
   [liq1s, okxLiq1s].forEach((m) => m.forEach((c, sec) => {
     let t = liq.get(sec);
     if (!t) { t = [0, 0, 0, 0]; liq.set(sec, t); }
     for (let i = 0; i < 4; i++) t[i] += c[i] || 0;
   }));
-  const now = Math.max(supply1sMeta.now || 0, okxMeta.now || 0, spotMeta.now || 0);
-  // 🔴선물 나이는 «가장 최근 거래소 대비» 로 잰다(예전엔 늘 0 이라 선물이 죽어도 OKX·현물이
+  // 🔴now·dead 는 **합에 들어가는 원천만** 본다(2026-09-25 현물이 합에서 빠지면서 같이 좁혔다).
+  //   현물이 죽어도 본선은 멀쩡하므로 «합에서 빠짐»에 적으면 거짓말이다 -- 나이는 아래 age 에 남긴다.
+  const now = Math.max(supply1sMeta.now || 0, okxMeta.now || 0);
+  // 🔴선물 나이는 «가장 최근 거래소 대비» 로 잰다(예전엔 늘 0 이라 선물이 죽어도 OKX 가
   //   now 를 밀어 합산이 절반짜리로 멀쩡해 보였다). 🔴한 번도 안 붙은 거래소(null)도 죽은 것이다
   //   -- 빠진 거래소는 합에서 0 으로 들어가므로 이름을 화면에 적는다.
   const ages = [["선물", supply1sMeta.now ? now - supply1sMeta.now : null],
-                ["OKX", okxMeta.tradeAge], ["현물", spotMeta.tradeAge]];
+                ["OKX", okxMeta.tradeAge]];
   const dead = ages.filter(([, a]) => a == null || a > 10).map(([n]) => n);
   // OI 합: 두 거래소는 갱신 시각이 달라(바이낸스 폴링 · OKX WS) 초마다 **각자의 직전 관측값**을
   //   더한다(계단 채움). 둘 다 한 번은 관측된 뒤부터 -- 한쪽만 있는 앞부분을 합이라 부르면 거짓이다.
@@ -297,12 +308,13 @@ function mergedSupplySrc() {
   return {
     key: "bn", supply: merged, liq, oi: oiMain,
     now,
-    label: "합산 · 바이낸스 선물+현물 · OKX",
+    label: "합산 · 바이낸스 선물 · OKX",
     // OI 본선 = 합(굵게). 거래소별은 얇게 눌러 배경 참고선으로 둔다(갈릴 때만 눈에 들어오게).
     oiLanes: [{ oi: oiMain, color: "var(--warn)", width: 2, opacity: 0.95 },
               { oi: oi1s, color: "var(--warn)", width: 1.2, opacity: 0.5 },
               { oi: okxOi1s, color: "var(--warn)", width: 1.2, opacity: 0.5, dash: "3 2" }],
-    // 거래소별 CVD 얇은 선. 현물은 점유 4.5% 라 선이 0선에 붙어 안 그린다 -- 불균형 % 로 읽는다.
+    // 거래소별 CVD 얇은 선 = 본선에 더해진 둘. 현물은 본선에도 얇은 선에도 없고 **불균형 % 로만**
+    //   읽는다(2026-09-25). 점유는 4.5% 로 적혀 있었는데 09-25 실측 창에서는 7.7% 였다.
     thin: [{ supply: supply1s, label: "선물" }, { supply: okxSupply1s, label: "OKX" }],
     imbSources: [["선물", supply1s], ["OKX", okxSupply1s], ["현물", spotSupply1s]],
     age: `체결 OKX ${okxMeta.tradeAge == null ? "-" : okxMeta.tradeAge + "s"}`
@@ -3788,8 +3800,12 @@ async function refreshOi5m() {
   if (now - oi5mLastFetchAt < OI_5M_POLL_MS) return;
   oi5mLastFetchAt = now;
   try {
-    // 캔들 차트가 최대 72봉(6시간)을 그린다 -- 그보다 넓게 받아 두면 창을 늘려도 레인이 안 끊긴다.
-    const res = await fetch(`${API_OI_5M_URL}?bars=96`, { cache: "no-cache" });
+    // 🔴2026-09-25: 주석이 «최대 72봉» 이라 96 을 받고 있었는데 창 토글은 그 뒤 **144봉(12시간)**
+    //   으로 늘었다(CHART_WINDOW_BARS). 12시간을 고르면 앞 48봉이 OI 없이 그려졌고, 아래
+    //   사분면이 `|| 0` 으로 받아 **전부 «신규 롱/숏» 으로 가짜 라벨**이 붙었다(OI=0 은 o>=0 이다).
+    //   창 최대치에서 파생시킨다 -- 토글을 늘리면 여기가 자동으로 따라온다. +4 는 Δ 의 기준봉 여유.
+    const oiBarsWanted = Math.max(...CHART_WINDOW_BARS) + 4;
+    const res = await fetch(`${API_OI_5M_URL}?bars=${oiBarsWanted}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`oi-5m ${res.status}`);
     latestOi5m = await res.json();
   } catch (error) {
@@ -7134,19 +7150,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       (b.levels || []).forEach((l) => {
         turn += (Number(l[0]) || 0) * ((Number(l[1]) || 0) + (Number(l[2]) || 0));
       });
+      // 🔴«OI 모름»과 «ΔOI 0» 을 가른다(2026-09-25). `|| 0` 이면 데이터가 없는 봉이 o>=0 이 되어
+      //   **«신규 롱/숏» 이라는 없는 사실**이 찍힌다. null 로 두고 아래에서 칸 이름을 유보한다.
       return { t: c.time, turn, delta: f.whale + f.mid + f.retail,
-               whale: f.whale, mid: f.mid, retail: f.retail, oi: oiByTs.get(c.time) || 0 };
+               whale: f.whale, mid: f.mid, retail: f.retail,
+               oi: oiByTs.has(c.time) ? (Number(oiByTs.get(c.time)) || 0) : null };
     });
     const have = rows.filter(Boolean);
     if (have.length) {
       const dMax = Math.max(...have.map((r) => Math.abs(r.delta)), 1e-9);
-      const oMax = Math.max(...have.map((r) => Math.abs(r.oi)), 1e-9);
+      const oMax = Math.max(...have.filter((r) => r.oi != null).map((r) => Math.abs(r.oi)), 1e-9);
       // 2026-09-23 사용자 지시로 이 행의 **선을 뺐다**. RVOL 은 누적 CVD 아래 제 레인으로
       // 갔고(누적 CVD 레인 안), 여기 남기면 1시간 RVOL 이 한 카드에 두 번 그려진다.
       // 이 행의 주인공은 막대(델타 x OI)다. 봉별 «평소 대비»는 막대 툴팁이 그대로 답한다.
       const TXT = mobileChart ? 10 : 12;
-      const QNAME = (d, o) => (d >= 0 ? (o >= 0 ? "신규 롱" : "숏 정리")
-                                      : (o >= 0 ? "신규 숏" : "롱 정리"));
+      // 🔴OI 를 모르면 칸 이름을 **유보한다** -- 사분면은 델타 x OI 라 한 축이 없으면 칸이 없다.
+      const QNAME = (d, o) => (o == null ? (d >= 0 ? "매수 우위" : "매도 우위")
+                                         : d >= 0 ? (o >= 0 ? "신규 롱" : "숏 정리")
+                                                  : (o >= 0 ? "신규 숏" : "롱 정리"));
       const put = (el) => { g.appendChild(el); return el; };
       // 막대 **안**의 해석은 --ink 하나로 통일한다(채운 면 위라 부호색을 쓰면 대비가 깨진다).
       // 막대 **아래**의 숫자는 어두운 배경이라 부호색을 쓸 수 있다(2026-09-22 사용자 지시).
@@ -7217,7 +7238,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       rows.forEach((r, i) => {
         if (!r) return;
         const hgt = 26 + (Math.abs(r.delta) / dMax) * (QUAD_H - RVOL_BAND - 26);
-        const op = 0.16 + (Math.abs(r.oi) / oMax) * 0.42;     // 상한 0.58 (위 주석)
+        // OI 모름이면 농도를 바닥값으로 둔다 -- 「OI 가 작다」로 읽히지만 캡·이름이 유보돼 있어
+        // 「모른다」가 같이 보인다. 농도만으로 «없음»을 그릴 자리가 없다(막대는 델타가 주인공).
+        const op = 0.16 + (r.oi == null ? 0 : (Math.abs(r.oi) / oMax) * 0.42);   // 상한 0.58 (위 주석)
         const rect = document.createElementNS(NS, "rect");
         rect.setAttribute("x", xAt(i)); rect.setAttribute("y", QB - hgt);
         rect.setAttribute("width", Math.max(1, bw)); rect.setAttribute("height", hgt);
@@ -7230,12 +7253,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           + " (고래 " + (r.whale >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.whale))
           + " · 중형 " + (r.mid >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.mid))
           + " · 리테일 " + (r.retail >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.retail)) + ")"
-          + " · 신규계약 " + (r.oi >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.oi)) + " ETH"
+          + " · 신규계약 " + (r.oi == null ? "모름"
+              : (r.oi >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.oi)) + " ETH")
           + " · 거래대금 " + fmtUsdCompact(r.turn)
 ;
         rect.appendChild(tip);
         put(rect);
-        if (r.oi >= 0) {                              // OI 증가 = 신규 진입
+        if (r.oi != null && r.oi >= 0) {              // OI 증가 = 신규 진입 (모름이면 안 찍는다)
           const cap = document.createElementNS(NS, "rect");
           cap.setAttribute("x", xAt(i)); cap.setAttribute("y", QB - hgt);
           cap.setAttribute("width", Math.max(1, bw)); cap.setAttribute("height", 3);
@@ -7252,8 +7276,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           mkText(cx, QB - r.hgt / 2 + TXT * 0.36, QNAME(r.delta, r.oi), "middle", "700");
           mkText(cx, QB + TXT + 2, "Δ" + (r.delta >= 0 ? "+" : "-")
                  + fmtFootprintQty(Math.abs(r.delta)), "middle", "700", sgnCol(r.delta));
-          mkText(cx, QB + TXT * 2 + 5, "OI" + (r.oi >= 0 ? "+" : "-")
-                 + fmtFootprintQty(Math.abs(r.oi)), "middle", null, sgnCol(r.oi));
+          mkText(cx, QB + TXT * 2 + 5,
+                 r.oi == null ? "OI —" : "OI" + (r.oi >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.oi)),
+                 "middle", null, r.oi == null ? "var(--muted)" : sgnCol(r.oi));
         });
       }
       // 🔴좁은 폭에서는 오른쪽 꼬리표를 **상자 오른쪽 끝 기준 우측정렬**한다. 왼쪽정렬이면
