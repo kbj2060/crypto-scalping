@@ -298,7 +298,7 @@
                보유 예정은 값이 고정(서버가 정한 planning_hold)이라 행을 먹을 이유가 없어
                같은 줄 끝의 작은 글씨로 내렸다. 슬라이더 둘도 위와 같은 방식으로 칩이 된다. -->
           <div class="manual-entry-row fields entry-line">
-            <span class="entry-cap">레버</span>
+            <span class="entry-cap">레버리지</span>
             <input type="range" id="snapLevGauge" min="5" max="50" step="5" value="5"
                    aria-label="거래소 레버리지" class="chip-input" tabindex="-1">
             <div class="chipset" data-for="snapLevGauge" role="group" aria-label="레버리지">
@@ -311,8 +311,10 @@
               <input type="checkbox" id="snapLevAuto" checked>
               <span>자동</span>
             </label>
-            <!-- 2026-09-25 비율 = 순자산 대비 이번 주문 증거금(10% = 순자산의 10%). 상한 넘으면 진입 불가. -->
-            <span class="entry-cap">증거금</span>
+            <!-- 2026-09-25 비율 = 순자산 대비 이번 주문 증거금(10% = 순자산의 10%). 상한 넘으면 진입 불가.
+                 사용자 지시: 레버리지 다음 줄에 «진입비율» 이름표로. -->
+            <span class="entry-break" aria-hidden="true"></span>
+            <span class="entry-cap">진입비율</span>
             <input type="range" id="snapEntryFrac" min="5" max="100" step="5" value="25"
                    aria-label="진입 증거금 (순자산 대비 %)" class="chip-input" tabindex="-1">
             <div class="chipset" data-for="snapEntryFrac" role="group" aria-label="진입 비율">
@@ -321,8 +323,6 @@
               <button type="button" class="chip" data-v="50">50%</button>
             </div>
             <b id="snapEntryFracVal" class="chip-val">25%</b>
-            <span class="entry-cap hold-line">보유 <b id="snapHoldPlanned" class="entry-val">—</b>
-              · <b id="snapHoldRisk" class="entry-was">—</b></span>
           </div>
           <div class="manual-entry-row actions entry-hold">
             <button type="button" id="snapEntryLong" class="notify-btn long hold-fire">

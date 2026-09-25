@@ -5120,6 +5120,7 @@ def make_app() -> web.Application:
                 binding = [(cap_model, "model")]
             # 증거금 상한. 레버리지는 주문이 실제로 걸 값 -- «자동»이면 처방(plan_now→prescribe)과
             #   **같은 입력**으로 같은 함수를 부른다(그래야 target_leverage 와 같은 값이다).
+            #   화면은 «자동»이어도 20배를 보낸다(app.js MANUAL_LEV_AUTO) -- 이 경로는 lev 없는 요청뿐.
             margin_lev = want_lev or (leverage_setting(
                 cap_notional=equity * policy_cap_x, equity=equity, existing_notional=exposure,
                 current_notional=exposure).get("setting") if policy_cap_x else None) or leverage

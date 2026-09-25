@@ -1296,13 +1296,17 @@ function acctPerfSvg(net, meta) {
   const peak = Math.max(...net.map(Math.abs), ...cums.map(Math.abs), 1e-9);
   const bw = (W - padX * 2) / net.length;
   const sc = (H / 2 - padY) / peak;
+  // 2026-09-25 사용자 «막대 높이를 키워줘» -- 누적과 같은 축이면 누적이 커질수록 건당 막대가 납작해진다
+  //   (실측 누적 $884 에 건당 대부분 $10 대라 몇 픽셀). 눈금 숫자가 없는 차트라 막대는 **자기 최대값**
+  //   으로 칸을 채우고, 크기는 툴팁 숫자가 말한다. 누적선은 위 공동 축 그대로.
+  const scBar = Math.min(zero - padY, H - zero - padY) * 0.95 / Math.max(...net.map(Math.abs), 1e-9);
   const xAt = (i) => padX + i * bw;
   const yAt = (v) => zero - v * sc;
   // 막대: 24px 상한 · 인접 막대 사이 2px 표면 간격(테두리를 그리지 않는다)
   const bwFill = Math.min(24, Math.max(1.5, bw - 2));
   const bars = net.map((v, i) => {
     const x = xAt(i) + (bw - bwFill) / 2;
-    const h = Math.max(Math.abs(v) * sc, 1);
+    const h = Math.max(Math.abs(v) * scBar, 1);
     const r = Math.min(4, bwFill / 2, h);          // 바깥 끝만 둥글고 **기준선 쪽은 각지게**
     const up = v >= 0;
     const tip = up ? zero - h : zero + h;
@@ -1320,15 +1324,17 @@ function acctPerfSvg(net, meta) {
   // 키보드로도 같은 내용이 나와야 하므로 tabindex 를 준다 -- 툴팁이 값의 유일한 통로가 되면 안 된다.
   const hits = net.map((v, i) => {
     const m = (meta && meta[i]) || {};
+    // 2026-09-25 사용자 «몇 일에 얼마를 벌었거나 잃었다» -- 첫 줄이 곧 그 문장이다.
+    const head = `<b class="${v < 0 ? "bad" : "good"}">${escapeHtml(m.day || `${i + 1}번째 왕복`)}`
+      + ` ${escapeHtml(fmtUsd(Math.abs(v)))} ${v < 0 ? "잃음" : "벌었음"}</b>`;
     const rows = [
-      `${m.when || `${i + 1}번째 왕복`}${m.side ? " · " + m.side : ""}${m.venue ? " · " + m.venue : ""}`,
-      m.qty ? `수량 ${m.qty} ETH · ${fmtUsd(m.notional)}` : "",
+      `${m.when || ""}${m.side ? " · " + m.side : ""}${m.venue ? " · " + m.venue : ""}`,
+      m.qty ? `수량 ${Number(m.qty.toFixed(3))} ETH · ${fmtUsd(m.notional)}` : "",
       m.entry && m.exit ? `진입 ${fmtUsd(m.entry)} → 청산 ${fmtUsd(m.exit)}` : "",
-      `손익 <b class="${v < 0 ? "bad" : "good"}">${v >= 0 ? "+" : ""}${fmtUsd(v)}</b>`
-        + ` · 누적 ${fmtUsd(cums[i])}`,
+      `누적 ${fmtUsd(cums[i])}`,
     ].filter(Boolean);
-    // 앞 세 줄은 사용자 데이터라 이스케이프하고, 마지막 줄의 <b> 만 우리가 넣은 마크업이다.
-    const html = rows.map((r, k) => (k === rows.length - 1 ? r : escapeHtml(r))).join("<br>");
+    // 머리줄의 <b> 만 우리가 넣은 마크업이고 나머지는 이스케이프한다.
+    const html = [head, ...rows.map(escapeHtml)].join("<br>");
     return `<rect x="${xAt(i).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" `
       + `fill="transparent" tabindex="0" data-tip="${escapeHtml(html)}"></rect>`;
   }).join("");
@@ -1353,7 +1359,9 @@ function acctPerfSvg(net, meta) {
 // 계좌 차트 툴팁. 🔴카드는 30초마다 innerHTML 로 통째로 다시 그려진다 -- 막대마다 리스너를
 // 달면 매번 새로 달아야 하고 옛 것이 샌다. 컨테이너(#snapAcctPosition)는 안 바뀌므로 위임한다.
 function bindAcctChartTip() {
-  const host = el("snapAcctPosition");
+  // 🔴2026-09-25 툴팁이 **안 떴다** -- 차트는 #snapAcctPerf 로 옮겨갔는데 위임 호스트가 옛 칸
+  //   (#snapAcctPosition)에 남아 있어 이벤트가 닿지 않았다(플레이라이트 호버로 확인).
+  const host = el("snapAcctPerf");
   if (!host || host.dataset.tipBound) return;
   host.dataset.tipBound = "1";
   const tipOf = (t) => (t && t.closest ? t.closest(".acct-plot") : null)?.querySelector(".acct-tip");
@@ -1570,6 +1578,7 @@ function renderSnapshotAccount() {
     return {
       when: Number.isNaN(d.getTime()) ? "" : `${d.getMonth() + 1}/${d.getDate()} `
         + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
+      day: Number.isNaN(d.getTime()) ? "" : `${d.getMonth() + 1}월 ${d.getDate()}일`,
       side: t.side === "LONG" ? "롱" : "숏", qty, notional: qty * px,
       entry: Number(t.entry_price) || 0, exit: px,
       // 한 코인을 두 심볼로 거래하므로(USDC=대시보드 수동, USDT=바이낸스 직접) 어느 쪽이었는지
@@ -8418,7 +8427,6 @@ function renderLevGauge(plan) {
   const low = !rejected && min != null && v < min;
   out.textContent = `${v}배`
     + (locked ? " (기존 포지션과 동일)" : manualLevAuto() ? " (자동)" : " (수동)")
-    + (plan.leverage_model && v !== plan.leverage_model ? ` · 모델 ${plan.leverage_model}배` : "")
     + (rejected ? ` · 🔴거래소가 거부합니다(포지션 때문에 최소 ${Math.ceil(floor)}배)`
        : low ? ` · ⚠상한만큼 못 엽니다(최소 ${Math.ceil(min)}배)` : "");
   // 🔴같은 줄을 두 번 쓰고 있었다 -- 뒤 줄이 앞 줄을 덮어 **rejected(거래소 거부)가 색을
@@ -8609,21 +8617,8 @@ async function manualEntryRefreshSize() {
     lastEntryCap = cap && cap.available ? cap : null;
     lastEntryPlan = plan && !plan.blocked ? plan : null;
     setEntryProjPreview(plan);
-    // 보유시간 옆 배지: 이 시간 기준으로 모델이 각오하라는 역행폭과 허용 배수.
-    const hb = el("snapHoldRisk");
-    if (hb) {
-      const r = (data.cap || {}).risk;
-      renderLevGauge(plan);
-      // 남은 보유시간을 같이 띄운다 -- 물타기를 해도 시계가 안 늘어난다는 사실이 보여야 한다.
-      const left = plan.hold_remaining_min;
-      const planned = plan.hold_planned_min;   // 크기를 실제로 정한 그 지평
-      const hf = el("snapHoldPlanned");
-      if (hf) hf.textContent = !planned ? "—"
-        : (left && left < planned ? `${planned / 60}시간 (남은 ~${left}분)`
-                                  : `${planned / 60}시간`);
-      hb.textContent = r && r.available ? `역행 ${r.safe_mae_pct}% · 최대 ${r.leverage}배`
-        : (r ? "모델 없음" : "—");
-    }
+    // 2026-09-25 «보유 N시간 · 역행 · 최대 N배» 줄은 뺐다(사용자 지시). 레버 게이지는 그대로 맞춘다.
+    renderLevGauge(plan);
   } catch (err) {
     line.hidden = false;
     line.textContent = "크기 확인 실패 — 서버 응답 없음";
