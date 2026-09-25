@@ -419,45 +419,53 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
-    def test_stop_plan_follows_blended_vwap(self) -> None:
-        """🔴손절은 **체결 후 평단** 기준이고, 물타기하면 따라 내려온다(2026-09-13).
+    def test_bracket_uses_liquidation_levels_or_says_why(self) -> None:
+        """2026-09-25 청산맵 TP/SL(고정 3% 손절 대체). 롱: TP 저항2 · SL 지지1 · 비상 스탑은 SL 너머.
+        숏은 거울. 레벨이 없으면 **이유를 싣는다** -- 옛 손절은 조용히 안 걸려 있었다(-4120)."""
+        # 🔴이 픽스처의 가짜 호가는 서버 안쪽 함수까지 못 닿아 미리보기가 **실시세**를 쓴다 --
+        #   레벨을 고정값으로 심으면 시세 쪽에 따라 전부 «지나간 레벨»이 된다. 시세 기준 ±3%/±6%.
+        seen = {}
 
-        기존 포지션이 있으면 «기존 + 이번 주문»의 가중평균이 새 평단이다. 기존 진입가만
-        보거나 이번 주문 가격만 보면 손절이 엉뚱한 자리에 걸린다.
-        주문 형태도 같이 고정한다 -- 헤지 모드라 reduceOnly 가 거부되고(-1106)
-        closePosition 주문에 수량을 실으면 거래소가 거부한다.
-        """
-        held = dict(FAKE_ACCOUNT)
-        held["positions"] = [{**FAKE_ACCOUNT["positions"][0], "qty": 1.0,
-                              "entry_price": 3000.0, "notional": 3000.0}]
-
-        async def fake_account(*_a, **_k):
-            return held
+        def levels(_df, price):
+            seen["p"] = price
+            return {"warmed_up": True,
+                    "support_levels": [{"price": price * 0.97}, {"price": price * 0.94}],
+                    "resistance_levels": [{"price": price * 1.03}, {"price": price * 1.06}]}
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account):
-                client = TestClient(TestServer(server.make_app()))
-                await client.start_server()
-                try:
-                    b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
-                    p = b["plan"]
-                    sp = p.get("stop_plan")
-                    self.assertIsNotNone(sp, p)
-                    self.assertEqual(sp["type"], "STOP_MARKET", sp)
-                    self.assertEqual(sp["closePosition"], "true", sp)
-                    self.assertNotIn("quantity", sp, "closePosition 주문에 수량을 실으면 거부된다")
-                    self.assertNotIn("reduceOnly", sp, "헤지 모드에서 reduceOnly 는 -1106")
-                    # 평단은 기존 3000 과 신규 2500.00 사이여야 한다
-                    self.assertGreater(sp["entry_price"], 2500.0, sp)
-                    self.assertLess(sp["entry_price"], 3000.0, sp)
-                    # 손절은 그 평단의 3% 아래
-                    self.assertAlmostEqual(sp["stopPrice"] / sp["entry_price"], 0.97,
-                                           places=3, msg=str(sp))
-                finally:
-                    await client.close()
+            client = TestClient(TestServer(server.make_app()))
+            await client.start_server()
+            try:
+                for side, tp_x, sl_x in (("LONG", 1.06, 0.97), ("SHORT", 0.94, 1.03)):
+                    b = (await (await client.get(
+                        f"/api/manual-entry/preview?side={side}&pct=5")).json())["plan"]["bracket"]
+                    self.assertTrue(b["available"], b)
+                    tp, sl = seen["p"] * tp_x * b["basis"], seen["p"] * sl_x * b["basis"]
+                    self.assertIsNotNone(b["tp_price"], b)
+                    self.assertAlmostEqual(b["tp_price"], tp, delta=0.02)
+                    self.assertAlmostEqual(b["sl_price"], sl, delta=0.02)
+                    far = b["backstop_price"] < sl if side == "LONG" else b["backstop_price"] > sl
+                    self.assertTrue(far, f"비상 스탑이 SL 보다 먼저 걸린다: {b}")
+            finally:
+                await client.close()
 
-        with _isolated_dirs():
+        with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels", levels):
             asyncio.run(exercise())
+
+        async def no_levels() -> None:
+            client = TestClient(TestServer(server.make_app()))
+            await client.start_server()
+            try:
+                b = (await (await client.get(
+                    "/api/manual-entry/preview?side=LONG&pct=5")).json())["plan"]["bracket"]
+                self.assertFalse(b["available"], b)
+                self.assertTrue(b.get("reason"), f"못 거는 이유가 없다: {b}")
+            finally:
+                await client.close()
+
+        with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels",
+                                                 lambda _d, _p: {"warmed_up": True}):
+            asyncio.run(no_levels())
 
     def test_entry_and_exit_share_one_horizon_and_one_cap(self) -> None:
         """🔴진입과 청산이 **같은 지평·같은 상한**을 쓴다(2026-09-14 병합 감사).

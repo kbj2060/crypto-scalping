@@ -229,55 +229,92 @@ STOP_SLIP_BP = 17.0
 STOP_SLIP_P99_BP = 230.0     # 수수료 3 + 초과폭 99분위 227
 
 
-def build_stop_plan(*, position_side: str, entry_price: float, filters: dict[str, float],
-                    symbol: str = "ETHUSDT", stop_pct: float = STOP_LOSS_PCT,
-                    leverage: float = 0.0) -> dict[str, Any]:
-    """평단에서 `stop_pct` 떨어진 곳의 손절 주문. **순수 함수**.
+# ── 청산맵 TP/SL (2026-09-25, 사용자 지시 -- 위 고정 3% 손절을 대신한다) ─────────────
+# «청산으로 만든 저항2 를 TP, 지지1 을 SL»(숏은 거울: TP 지지2 · SL 저항1). 진입 시점에 **고정**한다
+#   (레벨은 5분마다 재계산되지만 따라 옮기지 않는다 -- 사용자 선택).
+#   · TP = 지정가 GTX(메이커, USDC 0bp). 체결 직후 포지션 전량으로 건다.
+#   · SL = 대시보드가 SL 이탈을 보고 **메이커 추격 청산**(run_exit 와 같은 루프) + 거래소 비상 스탑
+#     (Algo STOP_MARKET, closePosition) 을 SL 에서 BACKSTOP_PCT 더 먼 곳에. 메이커 손절은 체결을 보장
+#     못 하고 서버가 멈추면 보호가 없어서 비상 스탑이 받친다.
+# 🔴레벨의 원천은 ETHUSDT(청산맵), 주문은 ETHUSDC 다 -- 가격을 `basis`(= USDC 중간가 / USDT 중간가)로
+#   옮긴다(실측 USDC 가 ~1.7bp 싸다).
+# ⚠️09-20 측정: 청산맵 레벨은 «청산이 몰리는 곳»은 맞히지만 «튕기나 뚫리나» 방향은 없다. 이건 거는
+#   자리를 정하는 규칙이지 우위의 근거가 아니다.
+# ponytail: 0.5% 는 메이커 추격(최대 120초)이 끝나기 전 급락을 받치는 폭으로 고른 값이다 -- 측정값 아님.
+BACKSTOP_PCT = 0.005
 
-    🔴헤지 모드라 `reduceOnly` 가 거부된다(-1106). `closePosition=true` 를 쓴다 --
-    수량을 안 받고 걸리면 그 측면 전량을 닫으므로 물타기로 수량이 바뀌어도 따라온다.
-    다만 **평단이 바뀌면 손절가는 다시 걸어야 한다**(호출부가 기존 주문을 지우고 새로 건다).
 
-    틱 반올림은 **넓은 쪽**으로 한다 -- 좁게 반올림하면 의도보다 빨리 잘린다.
-    """
+def build_bracket_plan(*, position_side: str, support_levels: list[float],
+                       resistance_levels: list[float], ref_price: float, basis: float,
+                       filters: dict[str, float]) -> dict[str, Any]:
+    """TP·SL·비상 스탑 가격. **순수 함수**. 레벨·ref_price 는 USDT(청산맵 원천), 결과는 주문 심볼 가격.
+
+    지지는 ref 아래·저항은 ref 위만 쓰고 가까운 순으로 번호를 매긴다(화면 «지지1/저항2»와 같은 규칙).
+    레벨이 모자라면 그 다리만 None -- 없는 레벨을 지어내지 않는다."""
     if position_side not in ("LONG", "SHORT"):
         raise ValueError(f"position_side must be LONG/SHORT, got {position_side!r}")
-    if not (entry_price > 0):
-        raise ValueError(f"bad entry price: {entry_price}")
-    if not (0.0 < float(stop_pct) < 1.0):
-        raise ValueError(f"stop_pct must be in (0,1), got {stop_pct!r}")
+    if not (ref_price > 0 and basis > 0):
+        raise ValueError(f"bad ref/basis: {ref_price} {basis}")
     tick = filters.get("tick") or 0.01
+    sup = sorted((float(x) for x in support_levels if 0 < float(x) < ref_price), reverse=True)
+    res = sorted(float(x) for x in resistance_levels if float(x) > ref_price)
     long_side = position_side == "LONG"
-    raw = entry_price * (1 - stop_pct) if long_side else entry_price * (1 + stop_pct)
-    # 롱 손절은 아래 -> 내림(더 멀리) · 숏 손절은 위 -> 올림(더 멀리)
-    price = (int(raw / tick) * tick if long_side
-             else math.ceil(raw / tick - 1e-9) * tick)
+    tp_lv = (res[1] if len(res) > 1 else None) if long_side else (sup[1] if len(sup) > 1 else None)
+    sl_lv = (sup[0] if sup else None) if long_side else (res[0] if res else None)
+    floor_t = lambda x: round(math.floor(x / tick + 1e-9) * tick, 8)
+    ceil_t = lambda x: round(math.ceil(x / tick - 1e-9) * tick, 8)
+    # 틱 반올림: TP 는 시장 쪽(먼저 닿게), 비상 스탑은 먼 쪽(SL 보다 먼저 걸리지 않게).
+    tp = None if tp_lv is None else (floor_t(tp_lv * basis) if long_side else ceil_t(tp_lv * basis))
+    sl = None if sl_lv is None else round(round(sl_lv * basis / tick) * tick, 8)
+    backstop = (None if sl is None else
+                floor_t(sl * (1 - BACKSTOP_PCT)) if long_side else ceil_t(sl * (1 + BACKSTOP_PCT)))
+    pct = lambda lv: None if lv is None else round(100 * (lv - ref_price) / ref_price, 2)
     return {
-        "symbol": symbol,
-        "side": "SELL" if long_side else "BUY",
-        "positionSide": position_side,     # 헤지 모드 필수. 반전하지 않는다.
-        "type": "STOP_MARKET",
-        "stopPrice": round(price, 8),
-        "closePosition": "true",           # 수량을 안 받는다 -- 걸리면 그 측면 전량
-        "timeInForce": "GTE_GTC",
-        "workingType": "MARK_PRICE",       # 체결가 스파이크로 잘리는 걸 줄인다
-        "stop_pct": round(float(stop_pct), 6),
-        "entry_price": round(entry_price, 8),
-        # 화면이 «계좌로 얼마인가»를 말할 수 있게. 이게 사용자가 실제로 묻는 값이다.
-        # 🔴**시장가라 슬리피지가 붙는다.** 표시값은 두 개다 -- 의도한 손실과 실측 기대 손실.
-        # 실측(869일, 3% 손절 2,046건): 트리거 봉 안 초과폭 중앙 14.0bp · 90% 65.6bp ·
-        # 99% 227bp. 수수료 3bp 를 더해 기대 17bp, 6배면 계좌 +1.0%p 다.
-        "account_loss_pct": round(100 * stop_pct * leverage, 1) if leverage else None,
-        "account_loss_expected_pct": (round(100 * (stop_pct + STOP_SLIP_BP / 1e4) * leverage, 1)
-                                      if leverage else None),
-        # 🔴100번에 1번은 이만큼이다. 「급락 시 더」로 두면 사용자가 크기를 못 잡는다.
-        "account_loss_tail_pct": (round(100 * (stop_pct + STOP_SLIP_P99_BP / 1e4) * leverage, 1)
-                                  if leverage else None),
-        "slip_bp": STOP_SLIP_BP,
-        "slip_tail_bp": STOP_SLIP_P99_BP,
-        "leverage": leverage or None,
-        "dry_run": not exec_enabled(),
+        "available": tp is not None or sl is not None,
+        "position_side": position_side,
+        "tp_price": tp, "sl_price": sl, "backstop_price": backstop,
+        "tp_level": tp_lv, "sl_level": sl_lv,             # 청산맵(USDT) 원래 값
+        "tp_pct": pct(tp_lv), "sl_pct": pct(sl_lv),      # ref 대비 %, 부호 그대로
+        "tp_name": "저항2" if long_side else "지지2",
+        "sl_name": "지지1" if long_side else "저항1",
+        "backstop_pct": BACKSTOP_PCT, "basis": round(basis, 8),
     }
+
+
+def bracket_sl_hit(position_side: str, bid: float, ask: float, sl_price: float | None) -> bool:
+    """SL 이탈인가. 롱은 **팔 수 있는 값**(최우선 매수호가)이 SL 이하, 숏은 살 값(매도호가)이 이상."""
+    if not sl_price or not (bid > 0 and ask > 0):
+        return False
+    return bid <= sl_price if position_side == "LONG" else ask >= sl_price
+
+
+def bracket_action(armed: dict, position_side: str, positions: list[dict], account_ok: bool,
+                   account_ts: float, bid: float, ask: float) -> str:
+    """감시 루프 한 틱의 판단: "clear"(포지션이 사라짐 -- 남은 우리 주문 정리) · "fire"(SL 이탈 --
+    메이커 추격 청산) · "hold".
+
+    🔴«사라짐»은 **무장보다 새** 계좌 조회에서만 판단한다 -- 계좌 캐시가 최대 30초 묵어 진입 직후엔
+    포지션이 아직 안 보이고, 조회 실패(ok=false)의 빈 목록도 «없음»이 아니다. 잘못 판단하면 살아 있는
+    포지션의 **비상 스탑을 지운다**."""
+    held = any(p.get("symbol") == armed["symbol"] and p.get("side") == position_side
+               and abs(float(p.get("qty") or 0.0)) > 0 for p in positions or [])
+    if account_ok and not held and account_ts > float(armed["armed_at"]) + 5:
+        return "clear"
+    return "fire" if bracket_sl_hit(position_side, bid, ask, armed.get("sl_price")) else "hold"
+
+
+def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
+    """감시 틱 결과(`mine`)를 저장본(`current`)에 합친다. 내가 읽을 때 본 무장(`seen_at` 의 armed_at)과
+    같은 측면에만 적용한다 -- 그 사이 새로 무장된 측면(물타기 포함)을 지우지 않는다."""
+    out = dict(current)
+    for side, armed_at in seen_at.items():
+        if out.get(side, {}).get("armed_at") != armed_at:
+            continue
+        if side in mine:
+            out[side] = mine[side]
+        else:
+            out.pop(side)
+    return out
 
 
 def realized_vol_bpm(closes: list[float]) -> float | None:
@@ -479,46 +516,55 @@ def _self_check() -> None:
                             recommended_qty=1.0, cap_notional=None, filters=f)
     assert plan["effective_leverage"] is None and plan["liq_distance_pct"] is None, plan
 
-    # ── 손절 계획 (2026-09-13) ────────────────────────────────────────────────
-    sp = build_stop_plan(position_side="LONG", entry_price=2521.11, filters=f, leverage=6.0)
-    assert sp["type"] == "STOP_MARKET" and sp["closePosition"] == "true", sp
-    assert "reduceOnly" not in sp, "헤지 모드에서 reduceOnly 는 -1106 로 거부된다"
-    assert sp["side"] == "SELL" and sp["positionSide"] == "LONG", sp
-    assert sp["stopPrice"] < 2521.11, "롱 손절은 진입가 아래"
-    assert abs(sp["stopPrice"] - 2445.47) < 0.02, sp["stopPrice"]      # 3% 아래, 틱 내림
-    assert sp["account_loss_pct"] == 18.0, sp                          # 3% × 6배
-    # 🔴시장가라 기대 손실은 그보다 크다 -- 화면이 낙관적인 숫자만 보여주면 안 된다
-    assert sp["account_loss_expected_pct"] > sp["account_loss_pct"], sp
-    assert abs(sp["account_loss_expected_pct"] - 19.0) < 0.2, sp["account_loss_expected_pct"]
-    # 🔴꼬리는 중앙의 **1.5배 이상**이다 -- 한 값으로 뭉뚱그리면 안 된다는 근거
-    assert sp["account_loss_tail_pct"] > sp["account_loss_expected_pct"] * 1.5, sp
-    assert abs(sp["account_loss_tail_pct"] - 31.8) < 0.3, sp["account_loss_tail_pct"]
-    # 배수가 0 이면 셋 다 None (화면이 «None%» 을 찍지 않게)
-    assert build_stop_plan(position_side="LONG", entry_price=2521.11, filters=f,
-                           leverage=0.0)["account_loss_tail_pct"] is None
-    sp2 = build_stop_plan(position_side="SHORT", entry_price=2521.11, filters=f, leverage=6.0)
-    assert sp2["side"] == "BUY" and sp2["stopPrice"] > 2521.11, sp2
-    assert abs(sp2["stopPrice"] - 2596.75) < 0.02, sp2["stopPrice"]
-    # 틱 반올림은 **넓은 쪽**이어야 한다 -- 좁으면 의도보다 빨리 잘린다
-    fine = {**f, "tick": 1.0}
-    assert build_stop_plan(position_side="LONG", entry_price=2521.11,
-                           filters=fine)["stopPrice"] <= 2521.11 * 0.97
-    assert build_stop_plan(position_side="SHORT", entry_price=2521.11,
-                           filters=fine)["stopPrice"] >= 2521.11 * 1.03
-    for bad in (dict(position_side="FLAT", entry_price=100.0),
-                dict(position_side="LONG", entry_price=0.0)):
-        try:
-            build_stop_plan(filters=f, **bad)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError(f"막았어야 한다: {bad}")
-    try:
-        build_stop_plan(position_side="LONG", entry_price=100.0, filters=f, stop_pct=1.5)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("stop_pct 범위를 막았어야 한다")
+    # ── 청산맵 TP/SL (2026-09-25) ─────────────────────────────────────────────
+    # 09-25 실측 레벨(USDT). 롱: TP 저항2 2727.27 · SL 지지1 2647.14 · basis 1 이면 그대로.
+    sup, res = [2647.1394, 2644.4682, 2628.4411], [2708.5765, 2727.2748, 2762.0001]
+    b = build_bracket_plan(position_side="LONG", support_levels=sup, resistance_levels=res,
+                           ref_price=2671.18, basis=1.0, filters=f)
+    assert (b["tp_price"], b["sl_price"]) == (2727.27, 2647.14), b
+    assert b["backstop_price"] < b["sl_price"] and abs(b["backstop_price"] - 2647.14 * 0.995) < 0.02, b
+    assert b["tp_name"] == "저항2" and b["sl_pct"] < 0 < b["tp_pct"], b
+    # 숏은 거울: TP 지지2 · SL 저항1 · 비상 스탑은 SL 위
+    b = build_bracket_plan(position_side="SHORT", support_levels=sup, resistance_levels=res,
+                           ref_price=2671.18, basis=1.0, filters=f)
+    assert (b["tp_price"], b["sl_price"]) == (2644.47, 2708.58), b
+    assert b["backstop_price"] > b["sl_price"], b
+    # 🔴이미 지나간 레벨은 번호에서 빠진다(현재가 2710 이면 2708 은 지나갔다 → 저항1 2727 · 저항2 2762)
+    b = build_bracket_plan(position_side="LONG", support_levels=sup + [2690.0], resistance_levels=res,
+                           ref_price=2710.0, basis=1.0, filters=f)
+    assert (b["tp_price"], b["sl_price"]) == (2762.0, 2690.0), b
+    # USDC 로 옮긴다: basis 0.99983 → 1.7bp 낮은 가격
+    b = build_bracket_plan(position_side="LONG", support_levels=sup, resistance_levels=res,
+                           ref_price=2671.18, basis=0.99983, filters=f)
+    assert abs(b["tp_price"] - 2727.2748 * 0.99983) < 0.011, b
+    assert bracket_sl_hit("LONG", 2647.14, 2647.15, 2647.14) and not bracket_sl_hit("LONG", 2647.15, 2647.16, 2647.14)
+    assert bracket_sl_hit("SHORT", 2708.57, 2708.58, 2708.58) and not bracket_sl_hit("SHORT", 2708.56, 2708.57, 2708.58)
+    assert not bracket_sl_hit("LONG", 0.0, 0.0, 2647.14), "호가를 못 읽으면 발동하지 않는다"
+    assert not bracket_sl_hit("LONG", 2000.0, 2000.01, None), "SL 이 없으면 발동하지 않는다"
+    arm = {"symbol": "ETHUSDC", "armed_at": 1000.0, "sl_price": 2647.14}
+    pos = [{"symbol": "ETHUSDC", "side": "LONG", "qty": 1.2}]
+    assert bracket_action(arm, "LONG", pos, True, 1100.0, 2660.0, 2660.01) == "hold"
+    assert bracket_action(arm, "LONG", pos, True, 1100.0, 2647.0, 2647.01) == "fire"
+    assert bracket_action(arm, "LONG", [], True, 1100.0, 2660.0, 2660.01) == "clear"
+    # 🔴묵은 계좌(무장 직후)·조회 실패의 빈 목록은 «사라짐»이 아니다 -- 비상 스탑을 지우면 안 된다
+    assert bracket_action(arm, "LONG", [], True, 1003.0, 2660.0, 2660.01) == "hold"
+    assert bracket_action(arm, "LONG", [], False, 1100.0, 2660.0, 2660.01) == "hold"
+    # 다른 심볼·반대 측면 포지션은 이 측면을 붙잡지 않는다
+    assert bracket_action(arm, "LONG", [{"symbol": "ETHUSDT", "side": "LONG", "qty": 1.0},
+                                        {"symbol": "ETHUSDC", "side": "SHORT", "qty": 1.0}],
+                          True, 1100.0, 2660.0, 2660.01) == "clear"
+    # 저장 병합: 내가 정리한 LONG 은 빠지고, 그 사이 새로 무장된 SHORT·물타기한 LONG 은 살아남는다
+    seen = {"LONG": 1.0, "SHORT": 2.0}
+    assert bracket_merge({"LONG": {"armed_at": 1.0}, "SHORT": {"armed_at": 2.0}},
+                         {"SHORT": {"armed_at": 2.0, "retry_after": 9}}, seen) == \
+        {"SHORT": {"armed_at": 2.0, "retry_after": 9}}
+    assert bracket_merge({"LONG": {"armed_at": 5.0}}, {}, seen) == {"LONG": {"armed_at": 5.0}}
+    assert bracket_merge({"LONG": {"armed_at": 1.0}, "SHORT": {"armed_at": 3.0}}, {}, {"LONG": 1.0}) == \
+        {"SHORT": {"armed_at": 3.0}}
+    # 레벨이 모자라면 그 다리만 None -- 지어내지 않는다
+    b = build_bracket_plan(position_side="LONG", support_levels=[], resistance_levels=res[:1],
+                           ref_price=2671.18, basis=1.0, filters=f)
+    assert b["tp_price"] is None and b["sl_price"] is None and not b["available"], b
 
     # 최소 명목 미달은 조용히 보내지 않고 막는다
     plan = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,

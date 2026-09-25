@@ -178,9 +178,10 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 # trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
-    EXIT_VOL_WINDOW, STOP_LOSS_PCT, build_entry_plan, build_exit_plan, build_stop_plan,
+    EXIT_VOL_WINDOW, bracket_action, bracket_merge, build_bracket_plan, build_entry_plan, build_exit_plan,
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position)
-from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa: E402
+from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
+    clear_bracket, place_bracket, run_entry, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
@@ -4906,6 +4907,144 @@ def make_app() -> web.Application:
             pass
         return None
 
+    async def bracket_for(side: str, book: dict, filters: dict) -> dict:
+        """진입 시점 청산맵(ETHUSDT)으로 TP/SL/비상 스탑. 못 읽으면 **이유를 싣고** 빈 계획 --
+        조용히 빼면 화면이 «SL 걸림»으로 읽힌다."""
+        try:
+            lm = await load_liquidation_map("eth")
+            ref = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
+                                           {"symbol": MARKET_SYMBOLS["eth"]},
+                                           error_reason="book_ticker_failed")
+            ref_mid = (float(ref["bidPrice"]) + float(ref["askPrice"])) / 2
+            mid = (float(book["bidPrice"]) + float(book["askPrice"])) / 2
+            b = build_bracket_plan(
+                position_side=side, ref_price=ref_mid, basis=mid / ref_mid, filters=filters,
+                support_levels=[lv["price"] for lv in lm.get("support_levels") or []],
+                resistance_levels=[lv["price"] for lv in lm.get("resistance_levels") or []])
+            if not b["available"]:
+                b["reason"] = "청산맵 레벨이 모자랍니다" if lm.get("warmed_up") else "청산맵 웜업 중"
+            return b
+        except Exception as exc:  # noqa: BLE001 -- 계획은 계속 만든다, 대신 이유를 싣는다
+            return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    # ── 청산맵 TP/SL 감시 (2026-09-25) ────────────────────────────────────────────
+    # 무장 상태는 **파일**에 둔다 -- 옛 3% 손절의 실패가 메모리 state 에만 있어 재시작하면 사라졌다.
+    #   {측면: {symbol, sl_price, tp_price, backstop_price, armed_at, placed}}
+    def bracket_path() -> Path:
+        return LIVE_DIR / "manual_bracket_state.json"
+
+    def bracket_load() -> dict[str, Any]:
+        try:
+            return json.loads(bracket_path().read_text("utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def bracket_save(st: dict[str, Any]) -> None:
+        tmp = bracket_path().with_suffix(".tmp")
+        tmp.write_text(json.dumps(st, ensure_ascii=False), "utf-8")
+        tmp.replace(bracket_path())
+
+    async def entry_then_bracket(plan: dict, state: dict) -> None:
+        """진입 → 체결이 있으면(부분 포함, 모든 종료 경로) TP·비상 스탑을 걸고 감시를 무장한다."""
+        await run_entry(binance_session(), plan, state)
+        if not float(state.get("filled") or 0.0) > 0:
+            return
+        b, pside = plan.get("bracket") or {}, plan["positionSide"]
+        if not b.get("available"):
+            state["bracket"] = {"placed": False, "reason": b.get("reason") or "청산맵 레벨 없음"}
+            return
+        try:
+            state["bracket"] = await place_bracket(binance_session(), b, plan["symbol"], pside)
+        except Exception as exc:  # noqa: BLE001 -- 결과 칸은 반드시 채운다(화면 폴링이 이걸 기다린다)
+            state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
+        st = bracket_load()
+        st[pside] = {"symbol": plan["symbol"], "sl_price": b.get("sl_price"),
+                     "tp_price": b.get("tp_price"), "backstop_price": b.get("backstop_price"),
+                     "armed_at": time.time(), "placed": state["bracket"]}
+        bracket_save(st)
+
+    async def bracket_tick() -> None:
+        """무장된 측면마다: 포지션이 사라졌으면(TP·비상 스탑·수동 청산) 남은 우리 주문을 지우고 내린다.
+        SL 을 넘었으면 **메이커 추격 청산**(청산 버튼과 같은 run_exit)을 돌린다."""
+        st = bracket_load()
+        if not st or not exec_enabled():
+            return
+        account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
+                                   produce_account, max_stale=STALE_GRACE_SECONDS,
+                                   cache=binance_account_cache)
+        try:
+            acct_ts = datetime.fromisoformat(str(account.get("generated_at"))).timestamp()
+        except ValueError:
+            acct_ts = 0.0
+        changed = False
+        seen_at = {k: v.get("armed_at") for k, v in st.items()}
+        for pside, b in list(st.items()):
+            book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
+                                            {"symbol": b["symbol"]}, error_reason="book_ticker_failed")
+            act = bracket_action(b, pside, account.get("positions") or [], bool(account.get("ok")),
+                                 acct_ts, float(book["bidPrice"]), float(book["askPrice"]))
+            if act == "clear":
+                st.pop(pside)
+                changed = True
+                print(f"bracket {pside}: 포지션 없음 -> 정리 "
+                      f"{await clear_bracket(binance_session(), b['symbol'], pside)}", flush=True)
+                continue
+            if (act != "fire" or manual_entry_state.get("phase") in ("working", "submitting")
+                    or time.time() < float(b.get("retry_after") or 0)):
+                continue
+            plan, err = await assemble_exit_plan(pside, 1.0, fresh=True)
+            if err and err[0].get("error") == "no_position":     # 이미 닫혔다 -- 정리하고 내린다
+                st.pop(pside)
+                changed = True
+                await clear_bracket(binance_session(), b["symbol"], pside)
+                continue
+            if err or plan.get("blocked"):
+                # 🔴조회 실패는 «닫혔다»가 아니다 -- 비상 스탑을 두고 30초 뒤 다시 본다.
+                b["retry_after"] = time.time() + 30
+                b["last_error"] = (err[0] if err else {}).get("detail") or plan.get("blocked")
+                changed = True
+                continue
+            manual_entry_state.clear()
+            manual_entry_state.update(phase="submitting", kind="exit", trigger="bracket_sl",
+                                      side=pside, plan=plan,
+                                      started_at=datetime.now(timezone.utc).isoformat())
+            await run_exit(binance_session(), plan, manual_entry_state)
+            # 🔴다 닫혔을 때만 비상 스탑을 지운다 -- 청산이 실패했는데 지우면 무방비가 된다.
+            if manual_entry_state.get("phase") in ("filled_maker", "filled_taker"):
+                manual_entry_state["bracket_cleanup"] = await clear_bracket(
+                    binance_session(), b["symbol"], pside)
+                st.pop(pside)
+            else:
+                b["retry_after"] = time.time() + 30
+                b["last_error"] = manual_entry_state.get("error")
+            changed = True
+            print(f"bracket {pside}: SL {b.get('sl_price')} 이탈 -> {manual_entry_state.get('phase')}",
+                  flush=True)
+        if changed:
+            # 🔴다시 읽고 **내가 본 무장(armed_at)** 에만 적용한다 -- 위 await 동안 새 진입이 다른
+            #   측면(또는 같은 측면 물타기)을 무장했으면 통째로 쓰면 그걸 지운다.
+            bracket_save(bracket_merge(bracket_load(), st, seen_at))
+
+    async def watch_brackets(app: web.Application) -> None:
+        while True:
+            await asyncio.sleep(2.0)
+            try:
+                await bracket_tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- 감시는 죽지 않는다(한 틱 실패는 다음 틱에)
+                print(f"bracket watch: {type(exc).__name__}: {exc}", flush=True)
+
+    async def start_bracket_watcher(app: web.Application) -> None:
+        app["bracket_task"] = asyncio.create_task(watch_brackets(app))
+
+    async def stop_bracket_watcher(app: web.Application) -> None:
+        app["bracket_task"].cancel()
+        try:
+            await app["bracket_task"]
+        except asyncio.CancelledError:
+            pass
+
     async def assemble_entry_plan(side: str, fraction: float = 1.0,
                                   want_lev: int | None = None):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
@@ -5054,26 +5193,8 @@ def make_app() -> web.Application:
             # 집행기는 계획 dict 하나만 받는다. 처방 깊숙이 손을 넣게 하지 않고 여기서 꺼내 준다.
             _rx = (plan["trade_plan"] or {}).get("prescription") or {}
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
-            # 🔴손절은 **체결 후 평단** 기준이다(2026-09-13, 사용자 결정 가격 3%).
-            # 기존 포지션이 있으면 «기존 + 이번 주문»의 가중평균이 새 평단이 된다 --
-            # 물타기하면 손절가가 따라 내려온다(기존 주문은 집행기가 지우고 다시 건다).
-            _sq = sum(abs(float(p.get("qty") or 0.0)) for p in same)
-            _sv = sum(abs(float(p.get("qty") or 0.0)) * float(p.get("entry_price") or 0.0)
-                      for p in same)
-            _nq = float(plan.get("quantity") or 0.0)
-            _np = float(plan.get("price") or 0.0)
-            _vwap = ((_sv + _nq * _np) / (_sq + _nq)) if (_sq + _nq) > 0 else 0.0
-            if _vwap > 0:
-                # 🔴«계좌로 얼마인가»는 **이 주문 뒤 실제 명목**으로 재야 한다(2026-09-13 감사).
-                # 상한 배수를 쓰면 분할 진입에서는 과대, **상한을 넘긴 상태에서는 과소**로 나온다
-                # (실계좌 실측: 화면 18% vs 실제 45.4%). 손절 손실은 사용자가 «버틸 수 있나»를
-                # 판단하는 바로 그 숫자라 상한이 아니라 사실을 적는다.
-                _total_x = (float(plan.get("total_notional_usdt") or 0.0) / equity
-                            if equity > 0 else 0.0)
-                plan["stop_plan"] = build_stop_plan(
-                    position_side=side, entry_price=_vwap, filters=filters, symbol=symbol,
-                    leverage=_total_x)
-                plan["stop_pct"] = STOP_LOSS_PCT
+            # 2026-09-25 청산맵 TP/SL(사용자 지시) -- 고정 3% 손절을 대신한다. 진입 시점 레벨로 고정.
+            plan["bracket"] = await bracket_for(side, book, filters)
             # 게이지가 값을 주면 그걸 쓰고, «자동»이면 모델 추천을 쓴다. 어느 쪽인지 남긴다 --
             # 안 남기면 나중에 «왜 30배로 걸렸지»를 못 푼다.
             plan["target_leverage"] = want_lev or _lv.get("setting")
@@ -5153,7 +5274,7 @@ def make_app() -> web.Application:
                                   started_at=datetime.now(timezone.utc).isoformat())
         # refresh_tasks 에 넣어 두면 stop_http_session 이 세션을 닫기 전에 취소해 준다.
         refresh_tasks["manual_entry"] = asyncio.create_task(
-            run_entry(binance_session(), plan, manual_entry_state))
+            entry_then_bracket(plan, manual_entry_state))
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
                                  headers=NOCACHE)
 
@@ -5411,7 +5532,7 @@ def make_app() -> web.Application:
         """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
         보여준다. 주문은 최대 하나만 동시에 둔다."""
         return web.json_response({"ok": True, "state": manual_entry_state,
-                                  "exec_enabled": exec_enabled()},
+                                  "exec_enabled": exec_enabled(), "bracket_armed": bracket_load()},
                                  headers=NOCACHE)
 
     async def api_ops_status(request: web.Request) -> web.Response:
@@ -5590,6 +5711,8 @@ def make_app() -> web.Application:
     app.on_startup.append(start_footprint_collector)
     app.on_startup.append(start_oi_1s_collector)
     app.on_startup.append(start_micro_ref)
+    app.on_startup.append(start_bracket_watcher)
+    app.on_cleanup.append(stop_bracket_watcher)
     app.on_cleanup.append(stop_micro_ref)
     app.on_cleanup.append(stop_oi_1s_collector)
     app.on_cleanup.append(stop_footprint_collector)

@@ -102,51 +102,96 @@ async def ensure_leverage(session, symbol: str, target: int, key: str, secret: s
     return {"changed": True, "from": now, "to": int(float(r.get("leverage") or target))}
 
 
-async def ensure_stop(session, stop_plan: dict, key: str, secret: str, offset: int) -> dict:
-    """손절을 **다시 건다**. 기존 같은 측면 STOP_MARKET 을 지우고 새로 넣는다.
+# ── 청산맵 TP/SL (2026-09-25) ────────────────────────────────────────────────
+# 🔴옛 3% 손절(ensure_stop)은 지웠다 -- `/fapi/v1/order` 로 STOP_MARKET 을 보냈는데 바이낸스가 조건부
+#   주문을 Algo API 로 옮긴 뒤 **-4120 으로 거부**해 한 번도 안 걸렸다(4일 이력 STOP 0건). 실패는 메모리
+#   state 에만 있어 재시작하면 흔적이 없었다. 조건부 주문은 이제 `/fapi/v1/algoOrder` 로만 간다.
+# 우리가 건 주문만 고른다 -- 사용자는 앱에서도 지정가 청산을 건다(09-24 aos_… 실측). 측면 글자까지 붙인다.
+TP_TAG, SL_TAG = "dbtp", "dbsl"
 
-    🔴다시 거는 이유: 물타기로 평단이 움직이면 옛 손절은 엉뚱한 자리에 남는다. 수량은
-    `closePosition=true` 가 알아서 따라오지만 **가격은 안 따라온다**.
-    취소를 재조회로 확인하지 않는 이유: 여기서는 남아도 과청산이 안 생긴다(closePosition 이
-    막는다). 대신 지운 개수를 상태에 싣는다 -- 계속 늘면 취소가 안 되고 있다는 신호다.
-    """
-    sym, pside = stop_plan["symbol"], stop_plan["positionSide"]
-    opens = await signed(session, "GET", "/fapi/v1/openOrders", {"symbol": sym},
+
+def bracket_tag(tag: str, pside: str) -> str:
+    return f"{tag}{pside[:1]}"
+
+
+async def cancel_bracket(session, symbol: str, pside: str, key: str, secret: str,
+                         offset: int) -> dict:
+    """이 측면에 **우리가 건** TP 지정가와 비상 스탑을 지운다. 목록을 못 읽으면 그 사실을 돌려준다
+    (못 지웠는데 «지웠다»로 넘어가면 닫힌 포지션 위에 주문이 남는다)."""
+    tp_pre, sl_pre = bracket_tag(TP_TAG, pside), bracket_tag(SL_TAG, pside)
+    n, errors = 0, []
+    opens = await signed(session, "GET", "/fapi/v1/openOrders", {"symbol": symbol},
                          key, secret, offset)
-    stale = 0
-    if isinstance(opens, list):
-        for o in opens:
-            if o.get("type") == "STOP_MARKET" and o.get("positionSide") == pside:
-                await signed(session, "DELETE", "/fapi/v1/order",
-                             {"symbol": sym, "orderId": o.get("orderId")}, key, secret, offset)
-                stale += 1
-    params = {k: v for k, v in stop_plan.items()
-              if k in ("symbol", "side", "positionSide", "type", "stopPrice",
-                       "closePosition", "timeInForce", "workingType")}
-    r = await signed(session, "POST", "/fapi/v1/order", params, key, secret, offset)
-    if "__error__" in r:
-        return {"placed": False, "replaced": stale, "stop_price": stop_plan["stopPrice"],
-                "error": r["__error__"]}
-    return {"placed": True, "replaced": stale, "stop_price": stop_plan["stopPrice"],
-            "order_id": r.get("orderId")}
+    if not isinstance(opens, list):
+        errors.append(f"openOrders: {opens.get('__error__') if isinstance(opens, dict) else opens}")
+    for o in opens if isinstance(opens, list) else []:
+        if str(o.get("clientOrderId") or "").startswith(tp_pre):
+            r = await signed(session, "DELETE", "/fapi/v1/order",
+                             {"symbol": symbol, "orderId": o.get("orderId")}, key, secret, offset)
+            n, errors = (n + 1, errors) if "__error__" not in r else (n, errors + [r["__error__"]])
+    algos = await signed(session, "GET", "/fapi/v1/openAlgoOrders", {"symbol": symbol},
+                         key, secret, offset)
+    if not isinstance(algos, list):
+        errors.append(f"openAlgoOrders: {algos.get('__error__') if isinstance(algos, dict) else algos}")
+    for a in algos if isinstance(algos, list) else []:
+        if str(a.get("clientAlgoId") or "").startswith(sl_pre):
+            r = await signed(session, "DELETE", "/fapi/v1/algoOrder",
+                             {"algoId": a.get("algoId")}, key, secret, offset)
+            n, errors = (n + 1, errors) if "__error__" not in r else (n, errors + [r["__error__"]])
+    return {"cancelled": n, "errors": errors}
 
 
-async def _place_stop(session, plan: dict, state: dict, key, secret, offset) -> None:
-    """체결 뒤 손절을 건다. **실패해도 진입을 되돌리지 않는다**(이미 체결됐다) -- 대신 상태에
-    실어 화면이 «손절 없음»을 크게 말하게 한다. 무방비 포지션은 조용하면 안 된다.
+async def clear_bracket(session, symbol: str, pside: str) -> dict:
+    """cancel_bracket 을 키·시계보정까지 스스로 챙겨 부른다(서버 감시 루프용)."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        return {"cancelled": 0, "errors": ["API 키가 없습니다"]}
+    return await cancel_bracket(session, symbol, pside, key, secret, await _clock_offset(session))
 
-    🔴**모든 종료 경로에서 불려야 한다**(2026-09-13 감사). 예전에는 전량 메이커 체결과
-    테이커 성공에서만 불렀다 -- peg 가 일부만 체결된 뒤 폴백 시장가가 에러나면 실제 포지션이
-    남는데 손절이 안 걸렸고, `state["stop"]` 이 아예 없어서 **화면 경고도 안 떴다**.
-    체결이 0 이면 걸 포지션이 없으므로 그 사실을 기록만 한다(경고 아님)."""
-    if not (float(state.get("filled") or 0.0) > 0):
-        state["stop"] = {"placed": False, "no_position": True, "reason": "체결 없음"}
-        return
-    sp = plan.get("stop_plan")
-    if not sp:
-        state["stop"] = {"placed": False, "reason": "손절 계획 없음"}
-        return
-    state["stop"] = await ensure_stop(session, sp, key, secret, offset)
+
+async def place_bracket(session, bracket: dict, symbol: str, pside: str) -> dict:
+    """체결 뒤 TP 지정가(GTX, 포지션 **전량**)와 비상 스탑(Algo STOP_MARKET, closePosition)을 건다.
+    물타기면 우리 옛 주문을 지우고 새 레벨·새 수량으로 다시 건다.
+
+    🔴실패해도 진입을 되돌리지 않는다(이미 체결됐다) -- 결과를 그대로 돌려 화면이 크게 말하게 한다.
+    ponytail: TP 수량은 거는 순간의 포지션이다. 뒤에 일부만 수동 청산하면 TP 가 포지션보다 크게
+      남는다(헤지 모드라 반대로 열리진 않는다) -- 감시 루프가 포지션이 사라지면 지운다."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        return {"placed": False, "reason": "API 키가 없습니다"}
+    offset = await _clock_offset(session)
+    pos = await signed(session, "GET", "/fapi/v2/positionRisk", {"symbol": symbol},
+                       key, secret, offset)
+    if not isinstance(pos, list):
+        return {"placed": False, "reason": f"포지션 조회 실패: {pos.get('__error__')}"}
+    qty = round(sum(abs(float(p.get("positionAmt") or 0.0)) for p in pos
+                    if p.get("positionSide") == pside), 8)
+    if qty <= 0:
+        return {"placed": False, "reason": "포지션 없음"}
+    out: dict[str, Any] = {"qty": qty, "cleared": await cancel_bracket(
+        session, symbol, pside, key, secret, offset)}
+    close_side = "SELL" if pside == "LONG" else "BUY"
+    stamp = int(time.time() * 1000)
+    if bracket.get("tp_price"):
+        r = await signed(session, "POST", "/fapi/v1/order",
+                         {"symbol": symbol, "side": close_side, "positionSide": pside,
+                          "type": "LIMIT", "timeInForce": "GTX", "price": bracket["tp_price"],
+                          "quantity": qty, "newClientOrderId": f"{bracket_tag(TP_TAG, pside)}{stamp}"},
+                         key, secret, offset)
+        out["tp"] = {"placed": "__error__" not in r, "price": bracket["tp_price"],
+                     "order_id": r.get("orderId"), "error": r.get("__error__")}
+    if bracket.get("backstop_price"):
+        r = await signed(session, "POST", "/fapi/v1/algoOrder",
+                         {"algoType": "CONDITIONAL", "symbol": symbol, "side": close_side,
+                          "positionSide": pside, "type": "STOP_MARKET",
+                          "triggerPrice": bracket["backstop_price"], "closePosition": "true",
+                          "workingType": "MARK_PRICE",
+                          "clientAlgoId": f"{bracket_tag(SL_TAG, pside)}{stamp}"},
+                         key, secret, offset)
+        out["backstop"] = {"placed": "__error__" not in r, "price": bracket["backstop_price"],
+                           "algo_id": r.get("algoId"), "error": r.get("__error__")}
+    out["placed"] = all(v.get("placed") for k, v in out.items() if k in ("tp", "backstop"))
+    return out
 
 
 async def run_entry(session, plan: dict, state: dict) -> dict:
@@ -182,16 +227,12 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
         key=key, secret=secret, offset=offset)
     state.update(filled=done, repegs=repegs, limit_price=price)
     if err is not None:
-        # 🔴부분체결이 남아 있을 수 있다 -- 그건 **무방비 포지션**이라 손절부터 건다.
-        # (GTX 거부처럼 체결이 0 인 경로는 _place_stop 이 «포지션 없음»으로 기록한다.)
-        await _place_stop(session, plan, state, key, secret, offset)
         state.update(phase=err["phase"], error=err["error"], done_at=now_iso())
         return state
 
     remaining = round(total - state["filled"], 8)
     if remaining <= 0:
         state.update(phase="filled_maker", taker_qty=0.0)
-        await _place_stop(session, plan, state, key, secret, offset)
         state.update(done_at=now_iso())
         return state
 
@@ -199,9 +240,7 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
                          {**common, "type": "MARKET", "quantity": remaining},
                          key, secret, offset)
     if "__error__" in taker:
-        # 🔴peg 로 일부 체결됐을 수 있다 -- 그건 **무방비 포지션**이다. 손절을 걸고 끝낸다.
         state.update(phase="taker_failed", taker_qty=0.0, error=taker["__error__"])
-        await _place_stop(session, plan, state, key, secret, offset)
         state.update(done_at=now_iso())
         return state
     # 체결량은 **응답에서 읽는다**. 시장가는 보통 전량이지만 «보통»을 상태에 적으면 안 된다.
@@ -209,7 +248,6 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
     state.update(phase="filled_taker", taker_qty=done,
                  filled=round(state["filled"] + done, 8),
                  taker_order_id=taker.get("orderId"))
-    await _place_stop(session, plan, state, key, secret, offset)
     state.update(done_at=now_iso())
     return state
 
@@ -422,39 +460,14 @@ def _self_check() -> None:
     assert "NEW" not in TERMINAL and "PARTIALLY_FILLED" not in TERMINAL, \
         "부분체결·대기는 종료 상태가 아니다 -- 종료로 치면 잔량을 테이커로 안 넘긴다"
 
-    # ── 손절 (2026-09-13) ────────────────────────────────────────────────────
-    from scripts.live_manual_peg_entry_20260912 import build_stop_plan
-    f2 = {"step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 20.0}
-    sp = build_stop_plan(position_side="LONG", entry_price=2521.11, filters=f2, leverage=6.0)
-    sent = {k: v for k, v in sp.items()
-            if k in ("symbol", "side", "positionSide", "type", "stopPrice",
-                     "closePosition", "timeInForce", "workingType")}
-    assert set(sent) == {"symbol", "side", "positionSide", "type", "stopPrice",
-                         "closePosition", "timeInForce", "workingType"}, sent
-    assert "quantity" not in sent, "closePosition 주문에 수량을 실으면 거래소가 거부한다"
-    assert "reduceOnly" not in sent, "헤지 모드에서 reduceOnly 는 -1106"
-    # 손절 계획이 없으면 조용히 넘어가지 않고 이유를 남긴다
-    import asyncio as _a2
-    st = {"filled": 1.0}
-    _a2.run(_place_stop(None, {}, st, "", "", 0))
-    assert st["stop"]["placed"] is False and st["stop"]["reason"], st
-    assert not st["stop"].get("no_position"), "체결이 있는데 «포지션 없음»으로 빠지면 안 된다"
-    # 🔴체결이 0 이면 걸 포지션이 없다 -- 경고가 아니라 사실 기록이다(화면이 구분해야 한다)
-    st0 = {"filled": 0.0}
-    _a2.run(_place_stop(None, {"stop_plan": sp}, st0, "", "", 0))
-    assert st0["stop"]["no_position"] is True and st0["stop"]["placed"] is False, st0
-    # 🔴**체결이 남을 수 있는** 두 종료 경로가 손절을 걸어야 한다(2026-09-13 감사).
-    # 그 경로에서 peg 가 일부 체결돼 있으면 포지션이 무방비로 남는데, state["stop"] 이
-    # 아예 없어서 화면 경고("🔴손절을 못 걸었습니다")조차 안 떴다.
-    # (GTX 거부·API키 없음 경로는 체결이 0 이라 여기 해당 없다.)
+    # ── 청산맵 TP/SL 표식 (2026-09-25) ───────────────────────────────────────
+    # 취소는 **표식으로만** 고른다 -- 측면마다 달라야 롱 정리가 숏 주문을 지우지 않는다.
+    assert bracket_tag(TP_TAG, "LONG") != bracket_tag(TP_TAG, "SHORT")
+    assert not bracket_tag(TP_TAG, "LONG").startswith(bracket_tag(SL_TAG, "LONG"))
+    # 🔴옛 3% 손절 경로는 -4120 으로 죽어 있었다 -- /fapi/v1/order 로 조건부 주문을 다시 보내지 않는다.
     import inspect as _i
-    _src = _i.getsource(run_entry)
-    # 마커는 «체결이 남을 수 있는 종료 경로»다. 2026-09-15 리페그 도입으로 취소 미확인 경로가
-    # fill_maker 안으로 들어가면서 진입 쪽 마커가 `if err is not None:` 로 바뀌었다.
-    for _mark in ('phase="taker_failed"', "if err is not None:"):
-        _blk = _src[_src.index(_mark):]
-        _blk = _blk[:_blk.index("return state")]
-        assert "_place_stop" in _blk, f"{_mark} 경로에 손절이 없다"
+    assert "STOP_MARKET" not in _i.getsource(run_entry)
+    assert "/fapi/v1/algoOrder" in _i.getsource(place_bracket)
 
     # ── 리페그 루프 공유 (2026-09-15) ────────────────────────────────────────
     # 진입과 청산이 **같은 함수**를 쓴다. 한쪽만 고쳐지는 걸 막는 검사다.

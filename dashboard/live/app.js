@@ -8206,27 +8206,21 @@ function manualEntryPlanHtml(data) {
   // 막는 것만 항상 보인다. 나머지 설명은 «자세히» 뒤로 접는다(사용자 요청 2026-09-13) --
   // 진입 화면은 «얼마를 넣나»와 «왜 못 넣나»만 보이면 되고, 근거는 펼쳐서 읽는 것이다.
   if (plan.blocked) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.blocked)}</div>`);
-  // 손절은 **접지 않는다** -- «얼마를 잃을 수 있나»는 행동을 바꾸는 값이다.
-  const sl = plan.stop_plan;
-  if (sl) {
-    parts.push(entryNote(`손절 ${Number(sl.stopPrice).toFixed(2)} `
-      + `(평단 ${Number(sl.entry_price).toFixed(2)} 에서 ${(100 * sl.stop_pct).toFixed(1)}%)`
-      // 🔴꼬리를 **숫자로** 말한다. 「급락 시 더」는 크기를 안 알려줘 사용자가 배수를 못 잡는다 --
-      // 6배에서 보통 19% 인데 100번에 1번은 32% 라 자릿수가 다르다(2026-09-14 봉단위 검사에서
-      // 실제 한 건 -22.8%). 값이 없으면 예전 문구로 떨어진다.
-      + (sl.account_loss_pct != null
-         ? ` — 걸리면 계좌 ${sl.account_loss_pct}% 손실`
-           + (sl.account_loss_expected_pct
-              ? ` (시장가라 보통 ~${sl.account_loss_expected_pct}%`
-                + (sl.account_loss_tail_pct
-                   // 🔴꼬리가 100% 를 넘으면 «132%» 가 아니라 «전액»이라고 말해야 한다.
-                   // 그 배수에서는 꼬리 손절이 청산선 밖이라 실제로는 청산이 먼저 온다.
-                   ? (sl.account_loss_tail_pct >= 100
-                      ? `, 100번에 1번은 **전액**)`
-                      : `, 100번에 1번은 ~${sl.account_loss_tail_pct}%)`)
-                   : `, 급락 시 더)`)
-              : "")
-         : "")));
+  // 2026-09-25 청산맵 TP/SL(사용자 지시) -- 고정 3% 손절을 대신한다. **접지 않는다**: «어디서 닫히나»는
+  //   행동을 바꾸는 값이다. 못 거는 경우도 반드시 말한다(옛 손절은 조용히 안 걸려 있었다).
+  const br = plan.bracket;
+  if (br && br.available) {
+    const f = (v) => Number(v).toFixed(2);
+    const pc = (v) => (v > 0 ? "+" : "") + Number(v).toFixed(1) + "%";
+    parts.push(entryNote(
+      (br.tp_price ? `TP ${br.tp_name} ${f(br.tp_price)} (${pc(br.tp_pct)}) 지정가` : `TP 없음(${br.tp_name} 없음)`)
+      + " · "
+      + (br.sl_price ? `SL ${br.sl_name} ${f(br.sl_price)} (${pc(br.sl_pct)}) 메이커 감시`
+                       + ` · 비상 스탑 ${f(br.backstop_price)}`
+                     : `🔴SL 없음(${br.sl_name} 없음)`),
+      br.sl_price ? "" : "bad"));
+  } else if (br) {
+    parts.push(entryNote(`🔴TP/SL 을 못 겁니다 — ${br.reason || "청산맵 레벨 없음"}`, "bad"));
   }
   // «자세히» 드롭다운도 같은 요청으로 뺐다. 여기 접혀 있던 위험모델 한 줄·처방 줄은
   // 모달 위쪽(보유 예정·레버리지·「지금 넣으면」)이 이미 같은 말을 한다.
@@ -8722,16 +8716,18 @@ function manualEntryStateText(state) {
     rows.push(`체결 ${Number(state.filled || 0)} / ${Number(state.quantity)} ETH` +
       (state.taker_qty ? ` (테이커 ${Number(state.taker_qty)})` : ""));
   }
-  const sl = state?.stop;
+  // 2026-09-25 청산맵 TP/SL 결과. 체결이 있는데 결과가 없거나 실패면 크게 말한다 -- 무방비 포지션은 조용하면 안 된다.
+  const br = state?.bracket;
   const filledQty = Number(state?.filled || 0);
-  if (sl && sl.placed) {
-    rows.push(`손절 ${sl.stop_price} 걸림` + (sl.replaced ? ` (기존 ${sl.replaced}건 교체)` : ""));
-  } else if (sl && sl.no_position) {
-    // 체결이 0 이면 걸 포지션이 없다 -- 경고가 아니다. 이걸 안 가르면 «무방비» 가 거짓으로 뜬다.
-  } else if (sl || filledQty > 0) {
-    // 🔴`sl` 이 **없는데 체결은 있는** 경우가 진짜 위험하다(2026-09-13 감사). 예전에는
-    // 이 조건이 `sl` 존재에만 걸려 있어, 손절 시도 자체가 없던 경로에서 경고가 조용했다.
-    rows.push(`🔴손절을 못 걸었습니다 — 포지션이 무방비입니다 (${sl?.error || sl?.reason || "손절 시도 기록 없음"})`);
+  if (br && (br.tp || br.backstop)) {
+    const leg = (name, x) => !x ? "" : x.placed ? `${name} ${x.price} 걸림` : `🔴${name} 실패 (${x.error || "?"})`;
+    rows.push([leg("TP", br.tp), leg("비상 스탑", br.backstop)].filter(Boolean).join(" · "));
+  } else if (state?.trigger === "bracket_sl") {
+    rows.push("SL 이탈 — 메이커 추격 청산");
+  } else if (filledQty > 0 && state?.kind !== "exit" && !br && /^filled|failed|error|rejected/.test(state?.phase || "")) {
+    rows.push("TP/SL 거는 중…");
+  } else if (br) {
+    rows.push(`🔴TP/SL 을 못 걸었습니다 (${br?.reason || "시도 기록 없음"})`);
   }
   // 2026-09-15 진입도 리페그한다. 쫓아간 횟수는 «의도한 가격보다 높게 들어갔을 수 있다»는
   // 뜻이라 숨기지 않는다 -- 청산과 달리 진입은 안 사도 되는 선택지가 있었기 때문이다.
@@ -8755,7 +8751,10 @@ async function manualEntryPollStatus() {
     box.innerHTML = entryNote(manualEntryStateText(data.state),
       /^(error|taker_failed|rejected)$/.test(data.state?.phase || "") ? "bad" : "live");
     const phase = data.state?.phase;
-    if (phase === "submitting" || phase === "working") {
+    // 진입이 끝나도 TP/SL 은 그 **뒤에** 걸린다 -- 체결이 있는데 결과가 아직 없으면 한 번 더 본다.
+    const bracketPending = data.state?.kind !== "exit" && Number(data.state?.filled || 0) > 0
+      && !data.state?.bracket;
+    if (phase === "submitting" || phase === "working" || bracketPending) {
       setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
     } else {
       manualOrderBusy = false;
