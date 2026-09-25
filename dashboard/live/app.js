@@ -4053,6 +4053,15 @@ function situationSignalRow(name, kind, r) {
 //   🔴방향 화살표는 서버가 dir 을 준 줄(근거·약함)에만 붙는다 -- «설명» 줄에 색을 칠하면 신호로 읽힌다.
 //   상황은 1초마다 오므로 내용이 같으면 다시 그리지 않는다(읽는 중 텍스트 선택·툴팁이 끊기지 않게).
 let flowReadKey = "";
+const frArrow = (d) => (d > 0 ? `<b class="fr-up" aria-label="위">↑</b> ` : d < 0 ? `<b class="fr-dn" aria-label="아래">↓</b> ` : "");
+// 융합 신호 줄 -- 30분 카드 맨 위(renderSituation). 발동이면 방향색 테두리·글자, 대기면 흐린 글자.
+function fusedRowHtml(f) {
+  if (!f) return "";
+  return `<div class="fr-fuse" data-side="${f.side > 0 ? "long" : f.side < 0 ? "short" : "wait"}">
+      <span class="fr-fuse-tag">융합 신호</span>
+      <span class="fr-fuse-text">${f.side ? frArrow(f.side) : ""}${escapeHtml(f.text || "")}<small class="fr-note">${escapeHtml(f.note || "")}</small></span>
+    </div>`;
+}
 function renderFlowRead() {
   const box = el("flowRead");
   if (!box) return;
@@ -4064,21 +4073,16 @@ function renderFlowRead() {
     box.innerHTML = `<div class="fr-sum">${escapeHtml((r && r.error) ? "관계 읽기 오류: " + r.error : "관계 읽기 계산 전")}</div>`;
     return;
   }
-  const arrow = (d) => (d > 0 ? `<b class="fr-up" aria-label="위">↑</b> ` : d < 0 ? `<b class="fr-dn" aria-label="아래">↓</b> ` : "");
+  const arrow = frArrow;
   const rows = r.lines.map((ln) => `<div class="fr-row" data-grade="${escapeHtml(ln.grade)}">
       <span class="fr-topic">${escapeHtml(ln.topic).replace("↔", "↔<wbr>")}</span>
       <span class="fr-text">${arrow(ln.dir)}${escapeHtml(ln.text)}${ln.note ? `<small class="fr-note">${escapeHtml(ln.note)}</small>` : ""}</span>
       <span class="fr-grade">${escapeHtml(ln.grade)}</span>
     </div>`).join("");
   const sumTone = r.up && r.down ? "" : r.up ? " fr-up" : r.down ? " fr-dn" : "";
-  // 2026-09-25 융합 신호(사용자 «방향 근거 + 30분 시나리오를 융합»)를 맨 위에. 발동이면 방향색 테두리·글자,
-  //   대기면 흐린 글자 -- 무엇이 켜졌고 무엇이 모자란지를 그대로 말한다(서버 flow_read.fuse).
-  const f = r.fused;
-  const fuse = f ? `<div class="fr-fuse" data-side="${f.side > 0 ? "long" : f.side < 0 ? "short" : "wait"}">
-      <span class="fr-fuse-tag">융합 신호</span>
-      <span class="fr-fuse-text">${f.side ? arrow(f.side) : ""}${escapeHtml(f.text || "")}<small class="fr-note">${escapeHtml(f.note || "")}</small></span>
-    </div>` : "";
-  box.innerHTML = `${fuse}<div class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}</div>${rows}`;
+  // 융합 신호는 카드 맨 위로 갔다(fusedRowHtml). 여기는 그 표의 재료인 근본 신호 목록이다.
+  box.innerHTML = `<div class="sit-sec fr-head">근본 신호 · 데이터 관계<span>근거 · 약함 · 설명 · 미측정</span></div>`
+    + `<div class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}</div>${rows}`;
 }
 
 function renderSituation() {
@@ -4092,6 +4096,7 @@ function renderSituation() {
     return;
   }
   const fmtPx = (v) => (v == null ? "-" : Number(v).toFixed(1));
+  const fz = (s.read && s.read.fused) || null;   // 2026-09-25 융합 신호(flow_read.fuse)
   const order = ["A", "B", "C"].sort((a, b) => n.prob[b] - n.prob[a]);
   const top = order[0];
 
@@ -4137,10 +4142,18 @@ function renderSituation() {
     const push = (n.flips || []).filter((f) => f.toward === k);
     const pushed = push.map((f) => `<div class="sit-push${f.on ? " on" : ""}">`
       + `<span class="dot"></span><span>${escapeHtml(f.signal)}</span></div>`).join("");
-    return `<div class="sit-col${i === 0 ? " sit-top" : ""}${dead ? " dead" : ""}">`
+    // 2026-09-25 융합 신호가 가리키는 열. 🔴위 큰 숫자(휴리스틱)는 안 바꾼다 -- 실측은 따로 적는다
+    //   (카드 축 Y_sym 에서 잰 값만 숫자로, 표본 부족이면 말로).
+    const fzHere = fz && fz.side && fz.card && fz.card.key === k;
+    const fzLine = fzHere
+      ? `<div class="sit-fz ${fz.side > 0 ? "fr-up" : "fr-dn"}" title="${escapeHtml(fz.card.note || "")}">융합 ${fz.side > 0 ? "↑" : "↓"} `
+        + `${fz.card.p != null ? `실측 ${Math.round(fz.card.p)}% · 기저 ${Math.round(fz.card.base)}%` : "표본 부족"}</div>`
+      : "";
+    return `<div class="sit-col${i === 0 ? " sit-top" : ""}${dead ? " dead" : ""}${fzHere ? " sit-fz-on" : ""}">`
       + `<div class="p">${n.prob[k]}%</div>`
       // 게이지: 숫자를 안 읽어도 56 vs 26 이 보인다. 채움 세기는 **키 고정**(위 주석과 같은 이유).
       + `<div class="sit-g k-${k}"><i style="width:${dead ? 0 : n.prob[k]}%"></i></div>`
+      + fzLine
       + `<div class="nm"${n.names_long ? ` title="${escapeHtml(n.names_long[k] || "")}"` : ""}>`
       + `<i class="sit-ar">${ARROW[k]}</i>${escapeHtml(n.names[k])}</div>`
       + `<div class="tg"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(tgt)}</div>`
@@ -4202,6 +4215,7 @@ function renderSituation() {
 
   body.innerHTML = `
     <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
+    ${fusedRowHtml(fz)}
     <div class="sit-cols">${scn}</div>
     <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details>
     <div class="sit-sec">현재 상황<span>${sigOn} / ${SIT_SIGNALS.length} 켜짐 · 뒤집기 ${armed}/${fl.length}</span></div>
@@ -4214,8 +4228,14 @@ function renderSituation() {
 
   if (badge) {
     const age = s.computed_at ? Math.round(Date.now() / 1000 - s.computed_at) : null;
-    badge.className = `ops-badge ${age != null && age <= 15 ? "good" : "neutral"}`;
-    badge.textContent = `${escapeHtml(n.names[top])} ${n.prob[top]}%${age != null ? ` · ${age}초 전` : ""}`;
+    // 융합 신호가 발동 중이면 배지가 그것을 말한다(방향색) -- 휴리스틱 1순위보다 잰 신호가 먼저다.
+    if (fz && fz.side) {
+      badge.className = `ops-badge ${fz.side > 0 ? "good" : "bad"}`;
+      badge.textContent = `융합 ${fz.side > 0 ? "롱" : "숏"} · 30분${fz.card && fz.card.p != null ? ` · ${fz.card.key} 실측 ${Math.round(fz.card.p)}%` : ""}`;
+    } else {
+      badge.className = `ops-badge ${age != null && age <= 15 ? "good" : "neutral"}`;
+      badge.textContent = `${escapeHtml(n.names[top])} ${n.prob[top]}%${age != null ? ` · ${age}초 전` : ""}`;
+    }
   }
 }
 

@@ -401,10 +401,6 @@
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
         <div id="liquidationMapList" class="liq-level-list"></div>
-        <!-- 2026-09-25 «데이터 관계 읽기»(사용자 지시 «지지/저항 하단에 말로»). 계산은 서버 dashboard/flow_read.py,
-             값은 상황 읽기와 같은 연결(/api/stream)로 온다. 근거·약함 줄만 방향(↑↓)을 갖고 나머지는 상태 설명이다.
-             원천(풋프린트·호가·청산)이 ETH 만 수집되므로 ETH 전용 배지를 단다. -->
-        <div id="flowRead" class="fr-read" data-eth-only></div>
       </section>
 
       <!-- 2026-09-21 «상황 읽기 · 30분» -- 사용자가 고른 트레이더 읽기(스퀴즈·클라이맥스·분배·얇은 벽·가치영역·
@@ -416,6 +412,10 @@
           <div class="ops-health-head-tools"><span id="situationBadge" class="ops-badge neutral">-</span></div>
         </div>
         <div id="situationBody" class="situation-body"></div>
+        <!-- 2026-09-25 근본 신호(데이터 관계 10쌍, dashboard/flow_read.py)를 지지/저항 아래에서 이 카드로 옮겼다
+             (사용자 «융합 신호와 근본 신호를 30분 카드에»). 융합 신호는 카드 본문 맨 위(renderSituation)에,
+             근거 줄은 여기(renderFlowRead). 카드가 이미 ETH 전용 배지를 달고 있어 여기엔 안 단다(겹친다). -->
+        <div id="flowRead" class="fr-read"></div>
       </section>
 
 

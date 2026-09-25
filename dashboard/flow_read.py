@@ -24,6 +24,10 @@ LIQ_MIN_USD = 50_000.0  # 30분 청산이 이보다 작으면 «거의 없다»
 #   카드에서 정보가 있는 것은 30분 방향(dir)·정렬·거부 봉·창 폭이고, 그것들이 여기 표와 관문으로 들어간다.
 FUSE_MIN_VOTES = 2
 GATE_PCT = 2 / 3
+# 카드 축(Y_sym ±0.5×30분 창폭, 1분봉 선착, 'none' 제외)에서 잰 값 — tmp/fusion/card_axis.py, ETH 3.7년 비겹침 30분.
+#   추세 + 융합이 이동 방향: B 적중 TRAIN 59.2%[55.4,63.4] · TEST 58.5%[54.3,62.7] vs 기저 52.0/52.3 (발동의 87%).
+#   추세 + 융합이 반대(n 33/48) · 횡보 발동(n 45) 은 표본 부족 — 카드에 숫자를 안 준다.
+CARD_B_P, CARD_B_BASE = 58.5, 52.3
 FUSE_EVID = ("ETH 3.7년(서버와 같은 24h 정의): 건당 TRAIN +4.1bp[+0.2,+8.2] · TEST +6.6bp[+2.1,+11.4] · 4/4년 · 롱숏 둘 다 + · "
              "회전 귀무 p<0.001 · 적중 48%(자주 조금 지고 가끔 크게 번다, 중앙 −2bp) · BTC 재현 안 됨 · 하루 ~1.7번 · 메이커 진입이어야 남는다")
 
@@ -263,7 +267,16 @@ def fuse(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
     else:
         need = "표가 한쪽으로 2개 필요" if abs(score) < FUSE_MIN_VOTES else "크기 관문 미달"
         text = f"대기 — {tag} (합 {score:+d}) · {gtxt} · {need}"
-    return {"side": side, "votes": votes, "score": score, "gate": gate, "gate_pct": gp, "text": text, "note": FUSE_EVID}
+    # 카드에서 가리키는 시나리오: 추세면 같은 쪽 = B(더 간다) · 반대 = A(되돌림 쪽), 횡보면 위 = B · 아래 = C.
+    card = None
+    if side:
+        if d30 and side == d30:
+            card = {"key": "B", "p": CARD_B_P, "base": CARD_B_BASE, "note": f"카드 축 실측 B {CARD_B_P:.0f}% (기저 {CARD_B_BASE:.0f}%)"}
+        elif d30:
+            card = {"key": "A", "p": None, "base": None, "note": "이동 반대쪽 발동 — 카드 축 표본 부족(n 48)"}
+        else:
+            card = {"key": "B" if side > 0 else "C", "p": None, "base": None, "note": "횡보 중 발동 — 카드 축 표본 부족(n 45)"}
+    return {"side": side, "votes": votes, "score": score, "gate": gate, "gate_pct": gp, "text": text, "note": FUSE_EVID, "card": card}
 
 
 if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등급·방향이 연구가 허락한 만큼인지
@@ -312,4 +325,8 @@ if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등�
     f3 = fuse(dict(ev, veto=-1, dir=-1, reject=False), dict(x, oi60=900.0, z60=None, range30_pct=0.9))
     assert f3["side"] == -1 and "숏" in f3["text"]                                                   # 하락+OI↑ ↓ + 정렬 ↓
     assert read(ev, dict(x, range30_pct=0.8))["fused"]["side"] in (-1, 0, 1)
+    assert f3["card"]["key"] == "B" and f3["card"]["p"] == CARD_B_P                                  # 하락 추세 + 숏 = B(더 간다)
+    assert f["card"]["key"] == "A" and f["card"]["p"] is None                                       # 하락 이동 + 롱 = 반대, 숫자 없음
+    assert fuse(dict(ev, reject=False, dir=0, veto=0), dict(x, range30_pct=0.8))["card"]["key"] == "B"   # 횡보 + 롱 = 위로 이탈
+    assert fuse(dict(ev, reject=False), dict(x, range30_pct=0.5))["card"] is None
     print("flow_read selfcheck ok")
