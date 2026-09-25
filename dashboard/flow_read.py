@@ -102,6 +102,73 @@ def _updn(x: float) -> str:
     return "상승" if x > 0 else "하락"
 
 
+def _k(v: float) -> str:
+    """게이지 값 칸(좁다)용 짧은 수: 35,574 → +36k · 2,086 → +2.1k · 420 → +420."""
+    a, sg = abs(v), "+" if v > 0 else ("−" if v < 0 else "")
+    return f"{sg}{a / 1e6:.1f}M" if a >= 1e6 else f"{sg}{a / 1e3:.0f}k" if a >= 1e4 else f"{sg}{a / 1e3:.1f}k" if a >= 1e3 else f"{sg}{a:.0f}"
+
+
+def _cl(v: float) -> float:
+    return max(-100.0, min(100.0, v))
+
+
+def _tilt(a: float, b: float) -> float | None:
+    return None if not (a or b) else (a - b) / (abs(a) + abs(b)) * 100
+
+
+def gauges(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """관계마다 롱/숏 게이지 하나 — 옛 카드 «현재 상황» 막대와 같은 문법.
+    kind d = 0 가운데 발산(−100 숏 쪽 · +100 롱 쪽), m = 0→100 세기. on=False 면 «조건 미달»(0 자리 눈금만).
+    🔴게이지는 «데이터가 어느 쪽으로 기울었나»이지 예측이 아니다 — 예측 근거는 줄의 등급(근거·약함)이 말하고,
+      화면은 그 등급일 때만 방향색을 칠한다."""
+    G: dict[str, dict[str, Any]] = {}
+    mv, cvd, cz = ev.get("move_bp"), ev.get("cvd"), x.get("cvd30_z")
+    if cvd is not None:
+        G["가격↔체결"] = {"kind": "d", "v": _cl(cz * 33) if cz is not None else (50.0 if cvd > 0 else -50.0 if cvd < 0 else 0.0),
+                        "txt": _k(cvd), "on": bool(cvd)}
+    net, z = x.get("net60") or {}, x.get("z60")
+    if net:
+        v = _cl(z["whale"] * 50) if z else _tilt(net["whale"], net["retail"])
+        G["고래"] = {"kind": "d", "v": v or 0.0, "txt": _k(net["whale"]), "on": v is not None}
+    m60, oi60, p75 = x.get("move60"), x.get("oi60"), x.get("move60_p75")
+    if m60 is not None and oi60 is not None:
+        big = p75 is not None and m60 < 0 and abs(m60) >= p75 and oi60 != 0
+        G["가격↔OI"] = {"kind": "d", "v": (-1 if oi60 > 0 else 1) * min(100.0, 50 * abs(m60) / p75) if big else 0.0,
+                       "txt": f"{m60:+.0f}bp", "on": big}
+    if "liq_long" in ev:
+        ll, ls = ev.get("liq_long") or 0.0, ev.get("liq_short") or 0.0
+        v = _tilt(ls, ll)                                   # 숏이 더 청산 = 강제 매수 = 위쪽
+        G["청산"] = {"kind": "d", "v": v or 0.0, "txt": "$" + _k(ls - ll).lstrip("+"), "on": ll + ls >= LIQ_MIN_USD}
+    ip, imb, obi = x.get("imb40_pct"), x.get("imb40"), ev.get("obi")
+    if ip is not None and imb is not None:
+        G["호가↔체결"] = {"kind": "d", "v": _cl((ip - 0.5) * 200), "txt": f"{imb:+.2f}", "on": ip >= DEEP_HI or ip <= DEEP_LO}
+    elif obi is not None:
+        G["호가↔체결"] = {"kind": "d", "v": _cl(obi * 100), "txt": f"{obi:+.2f}", "on": False}
+    sr = x.get("sr") or {}
+    sb, rb, near = sr.get("sup_bp"), sr.get("res_bp"), sr.get("near") or "없음"
+    if sb is not None or rb is not None:
+        hold = near != "없음" and sr.get("deep_wall") == "레벨쪽"
+        dist = min((d for d in (sb, rb) if d is not None))
+        G["지지/저항"] = {"kind": "d", "v": (70.0 if near == "지지근접" else -70.0) if hold else 0.0,
+                       "txt": f"{'지지' if dist == sb else '저항'} {dist:.0f}bp", "on": hold}
+    bd, thr = ev.get("basis_d_bp"), ev.get("basis_thr_bp")
+    if ev.get("basis_bp") is not None:
+        G["선물↔현물"] = {"kind": "d", "v": _cl(bd / thr * 100) if (bd is not None and thr) else 0.0,
+                       "txt": f"{bd:+.1f}" if bd is not None else "—", "on": bool(ev.get("lead"))}
+    bm = ev.get("btc_move_bp")
+    if bm is not None:
+        G["ETH↔BTC"] = {"kind": "d", "v": _cl(bm / abs(mv) * 100) if mv else 0.0, "txt": f"{bm:+.0f}bp",
+                       "on": ev.get("btc_rel") is not None}
+    veto, d30 = ev.get("veto") or 0, ev.get("dir") or 0
+    if veto and d30:
+        G["추세↔이동"] = {"kind": "d", "v": 50.0 * veto + 50.0 * d30, "txt": f"{'↑' if veto > 0 else '↓'}{'↑' if d30 > 0 else '↓'}",
+                       "on": veto == d30}
+    vp = x.get("vol_pct")
+    if vp is not None:
+        G["활동"] = {"kind": "m", "v": 100.0 * vp, "txt": f"{100 * vp:.0f}", "on": vp >= 0.8 or vp <= 0.2}
+    return G
+
+
 def read(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
     """ev: situation.classify 의 evidence(30분 창). x: 이 줄들 전용 입력(server `_flow_read_ctx`).
     반환 {lines:[{topic,text,note,grade,dir}], summary, up, down}. dir 은 근거/약함 줄에만 ±1."""
@@ -263,6 +330,15 @@ def read(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
             EVID["act"], "근거" if edge else "설명")
 
     fused = fuse(ev, x)
+    G = gauges(ev, x)
+    for ln in L:   # 줄 이름 → 게이지 키(고래↔리테일/고래↔중형 → 고래 · 청산/청산↔추세/청산↔가격 → 청산)
+        t = ln["topic"]
+        g = G.get("고래" if t.startswith("고래") else "청산" if t.startswith("청산") else t)
+        # 근거·약함 줄은 막대 부호 = 근거가 가리키는 방향(크기는 데이터). 🔴눌림 청산은 데이터(롱이 털림 = 아래)와
+        #   근거(추세 방향 = 위)가 반대라, 이걸 안 하면 방향색 막대와 화살표가 서로 반대를 가리킨다.
+        if g and ln["dir"]:
+            g = dict(g, v=ln["dir"] * max(abs(g["v"]), 30.0), on=True)
+        ln["g"] = g
     dirs = [ln for ln in L if ln["dir"]]
     up, dn = sum(1 for ln in dirs if ln["dir"] > 0), sum(1 for ln in dirs if ln["dir"] < 0)
     if not dirs:
@@ -388,4 +464,14 @@ if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등�
     o4 = outcome3(dict(ev, dir=0), 0.5, [("가격↔OI", 1), ("고래↔리테일", 1)], 2)
     assert (o4["reg"], o4["a"], o4["g"]) == ("range", 1, 1)
     assert outcome3({}, 0.5, [], 0) is None and outcome3(ev, None, [], 0) is None
+    # 게이지: 관계마다 붙고, 방향 부호가 줄의 해석과 같은 쪽이다
+    Tg = {ln["topic"]: ln["g"] for ln in r["lines"]}
+    assert all(g is not None for g in Tg.values()), [k for k, g in Tg.items() if g is None]
+    assert Tg["고래↔리테일"]["v"] > 0 and Tg["가격↔OI"]["v"] > 0 and Tg["가격↔OI"]["on"]       # 고래 매수 · 하락+OI↓ = 위
+    assert Tg["청산↔추세"]["v"] > 0 and Tg["호가↔체결"]["v"] > 0 and Tg["지지/저항"]["v"] == 70.0   # 눌림 청산 = 근거 쪽(위)
+    assert all((ln["g"]["v"] > 0) == (ln["dir"] > 0) for ln in r["lines"] if ln["dir"])                # 색 막대 = 화살표 방향
+    assert Tg["활동"]["kind"] == "m" and Tg["추세↔이동"]["v"] == 0 and Tg["추세↔이동"]["on"] is False  # 역행 = 0, 켜지지 않음
+    assert all(-100 <= g["v"] <= 100 for g in Tg.values() if g["kind"] == "d")
+    assert _k(35574) == "+36k" and _k(-2086) == "−2.1k" and _k(420) == "+420" and _k(0) == "0"
+    assert gauges({}, {}) == {}
     print("flow_read selfcheck ok")

@@ -3922,16 +3922,34 @@ function renderFlowRead() {
     box.innerHTML = `<div class="fr-sum">${escapeHtml((r && r.error) ? "관계 읽기 오류: " + r.error : "관계 읽기 계산 전")}</div>`;
     return;
   }
-  const arrow = frArrow;
-  const rows = r.lines.map((ln) => `<div class="fr-row" data-grade="${escapeHtml(ln.grade)}">
-      <span class="fr-topic">${escapeHtml(ln.topic).replace("↔", "↔<wbr>")}</span>
-      <span class="fr-text">${arrow(ln.dir)}${escapeHtml(ln.text)}${ln.note ? `<small class="fr-note">${escapeHtml(ln.note)}</small>` : ""}</span>
-      <span class="fr-grade">${escapeHtml(ln.grade)}</span>
-    </div>`).join("");
+  // 2026-09-25 «현재 상황» 막대와 같은 문법의 롱/숏 게이지(사용자 «근본 신호도 롱/숏 게이지로 깔끔하게»).
+  //   줄 = [관계 | 0 가운데 막대(− 숏 · 롱 +) | 값 | 등급] + 아래 한 줄 해석. 관찰 숫자·근거는 등급 칩의 즉시 팁으로.
+  //   🔴방향색(초록·빨강)은 **근거·약함 줄에만** -- 설명·미측정 줄의 막대는 기울기만 보여 주는 무채색이다.
+  //     색이 보이면 그건 «잰 근거가 그쪽을 가리킨다»는 뜻이어야 한다(DESIGN.md Three Signals).
+  //   세 상태는 형태로 갈린다(옛 막대와 같다): 막대 = 켜짐 · 0 자리 눈금 = 조건 미달 · 아무것도 없음 = 재료 없음.
+  const rows = r.lines.map((ln) => {
+    const g = ln.g;
+    const cut = (ln.text || "").indexOf(" — ");
+    const obs = cut >= 0 ? ln.text.slice(0, cut) : "";
+    const said = cut >= 0 ? ln.text.slice(cut + 3) : (ln.text || "");
+    const tip = [obs, ln.note].filter(Boolean).join("\n");
+    const lit = !!ln.dir;
+    let bar = "";
+    if (g && !g.on) bar = `<i class="z"></i>`;
+    else if (g && g.kind === "d") {
+      bar = `<i class="f${lit ? (g.v >= 0 ? " up" : " dn") : ""}" style="${g.v >= 0 ? "left:50%" : "right:50%"};`
+        + `width:${Math.min(Math.abs(g.v) / 2, 50)}%"></i>`;
+    } else if (g) bar = `<i class="f" style="width:${Math.max(0, Math.min(100, g.v))}%"></i>`;
+    return `<div class="fr-g${g ? (g.on ? "" : " off") : " none"}${g && g.kind === "d" ? " d" : ""}" data-grade="${escapeHtml(ln.grade)}">`
+      + `<span class="fr-gn">${escapeHtml(ln.topic).replace("↔", "↔<wbr>")}</span>`
+      + `<span class="fr-gt">${g && g.kind === "d" ? '<i class="c"></i>' : ""}${bar}</span>`
+      + `<span class="fr-gv">${g ? escapeHtml(g.txt) : "—"}</span>`
+      + `<span class="fr-grade" tabindex="0" data-tip="${escapeHtml(tip)}" aria-label="${escapeHtml(ln.grade + ". " + tip)}">${escapeHtml(ln.grade)}</span>`
+      + `<span class="fr-gs">${frArrow(ln.dir)}${escapeHtml(said)}</span></div>`;
+  }).join("");
   const sumTone = r.up && r.down ? "" : r.up ? " fr-up" : r.down ? " fr-dn" : "";
-  // 융합 신호는 카드 맨 위로 갔다(fusedRowHtml). 여기는 그 표의 재료인 근본 신호 목록이다.
-  box.innerHTML = `<div class="sit-sec fr-head">근본 신호 · 데이터 관계<span>근거 · 약함 · 설명 · 미측정</span></div>`
-    + `<div class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}</div>${rows}`;
+  box.innerHTML = `<div class="sit-sec fr-head">근본 신호 · 데이터 관계<span>− 숏 · 롱 +</span></div>`
+    + `<div class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}</div><div class="fr-gauges">${rows}</div>`;
 }
 
 function renderSituation() {
