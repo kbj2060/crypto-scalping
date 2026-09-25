@@ -2210,7 +2210,7 @@ svg {
    넘긴다(app.js syncRangeFill). 색은 --accent 를 쓴다: 녹색은 «롱/이익」이라는 뜻을 이미
    가진 색이라 **숏 진입 비율**과 **청산 비율**에 붙으면 거짓말을 한다(2026-09-14).
    손잡이는 두 테마 모두 흰색이다 -- 애플도 다크에서 흰 손잡이를 쓴다. */
-.exit-frac input[type="range"] {
+:is(.exit-frac, .ofab-panel) input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 132px;
@@ -2220,19 +2220,19 @@ svg {
   background: transparent;
   cursor: pointer;
 }
-.exit-frac input[type="range"]::-webkit-slider-runnable-track {
+:is(.exit-frac, .ofab-panel) input[type="range"]::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 999px;
   background: linear-gradient(to right,
     var(--accent) 0 var(--fill, 50%), rgb(var(--lift) / 0.16) var(--fill, 50%) 100%);
 }
-.exit-frac input[type="range"]::-moz-range-track {
+:is(.exit-frac, .ofab-panel) input[type="range"]::-moz-range-track {
   height: 4px; border-radius: 999px; background: rgb(var(--lift) / 0.16);
 }
-.exit-frac input[type="range"]::-moz-range-progress {
+:is(.exit-frac, .ofab-panel) input[type="range"]::-moz-range-progress {
   height: 4px; border-radius: 999px; background: var(--accent);
 }
-.exit-frac input[type="range"]::-webkit-slider-thumb {
+:is(.exit-frac, .ofab-panel) input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 20px;
@@ -2244,23 +2244,23 @@ svg {
   box-shadow: 0 1px 1px rgb(var(--shadow) / 0.18), 0 3px 8px rgb(var(--shadow) / 0.24);
   transition: transform .14s cubic-bezier(.22,.68,0,1.01), box-shadow .14s ease;
 }
-.exit-frac input[type="range"]::-moz-range-thumb {
+:is(.exit-frac, .ofab-panel) input[type="range"]::-moz-range-thumb {
   width: 20px; height: 20px; border-radius: 50%;
   border: 0.5px solid rgb(var(--shadow) / 0.22);
   background: #fff;
   box-shadow: 0 1px 1px rgb(var(--shadow) / 0.18), 0 3px 8px rgb(var(--shadow) / 0.24);
 }
 /* 누르면 살짝 커진다 -- iOS 의 «잡았다» 피드백. */
-.exit-frac input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.14); }
-.exit-frac input[type="range"]:focus-visible::-webkit-slider-thumb {
+:is(.exit-frac, .ofab-panel) input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.14); }
+:is(.exit-frac, .ofab-panel) input[type="range"]:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent);
 }
-.exit-frac input[type="range"]:focus { outline: none; }
+:is(.exit-frac, .ofab-panel) input[type="range"]:focus { outline: none; }
 /* 자동(모델) 일 때 레버리지 슬라이더는 disabled 다 -- 만질 수 없다는 걸 보이게 한다. */
-.exit-frac input[type="range"]:disabled { cursor: default; opacity: .55; }
-.exit-frac input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
+:is(.exit-frac, .ofab-panel) input[type="range"]:disabled { cursor: default; opacity: .55; }
+:is(.exit-frac, .ofab-panel) input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
 @media (prefers-reduced-motion: reduce) {
-  .exit-frac input[type="range"]::-webkit-slider-thumb { transition: none; }
+  :is(.exit-frac, .ofab-panel) input[type="range"]::-webkit-slider-thumb { transition: none; }
 }
 .exit-frac b { font: 700 12px/1 var(--font-mono); color: var(--text); min-width: 38px;
   text-align: right; font-variant-numeric: tabular-nums; }
@@ -2997,3 +2997,96 @@ details.sit-why { margin-top: 7px; }
 details.sit-why summary { cursor: pointer; font-size: 11px; color: var(--muted); }
 details.sit-why div { font: 500 11px/1.5 var(--font-mono); color: var(--muted); padding-left: 8px; margin-top: 4px; }
 @media (max-width: 520px) { .sit-sgs { grid-template-columns: 1fr; } .sit-cols { grid-template-columns: 1fr; gap: 6px; } }
+
+/* ── 떠다니는 주문 버튼 (2026-09-25 사용자 지시) ─────────────────────────────────────
+   접힌 상태 = 알약 하나(손잡이 ⠿ + 지금 포지션). 펼치면 계좌 카드의 .acct-lanes 가 **통째로**
+   패널 안으로 옮겨 온다(app.js ofabSetOpen) -- 여기 규칙은 그 조작부를 좁은 패널에 맞추는 것뿐이다.
+   좌표는 JS 가 left/top 으로 준다. 패널은 남은 공간이 넓은 쪽으로 연다(.up / .rightside).
+   🔴z-index 900: 툴팁(1000)·터치 팁(9999)보다 아래 -- 차트 툴팁이 이 버튼 뒤로 숨으면 안 된다. */
+.ofab { position: fixed; left: 0; top: 0; z-index: 900; }
+.ofab[hidden] { display: none; }
+.ofab-bar {
+  display: flex; align-items: center; gap: 2px; padding: 4px;
+  border-radius: 999px; background: var(--bg); border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.25), 0 8px 24px rgb(var(--shadow) / 0.32);
+}
+/* 손잡이만 끈다 -- touch-action:none 이 없으면 모바일에서 끄는 동안 페이지가 스크롤된다. */
+.ofab-grip {
+  width: 36px; height: 36px; border: 0; border-radius: 999px; background: transparent;
+  color: var(--muted); font-family: inherit; font-size: 18px; line-height: 1; cursor: grab; touch-action: none;
+}
+.ofab-grip:active { cursor: grabbing; color: var(--text); }
+.ofab-toggle {
+  min-height: 36px; padding: 0 14px 0 8px; border: 0; border-radius: 999px; background: transparent;
+  color: var(--text); font: 700 13px/1 var(--font-mono); white-space: nowrap; cursor: pointer;
+}
+.ofab.long .ofab-toggle { color: var(--good); }
+.ofab.short .ofab-toggle { color: var(--bad); }
+.ofab-toggle[aria-expanded="true"] { background: rgb(var(--lift) / 0.08); }
+.ofab-grip:focus-visible, .ofab-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ofab-panel {
+  position: absolute; left: 0; top: calc(100% + 8px);
+  width: min(380px, calc(100vw - 16px)); overflow: auto; overscroll-behavior: contain;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.25), 0 12px 32px rgb(var(--shadow) / 0.36);
+}
+.ofab-panel[hidden] { display: none; }
+.ofab.up .ofab-panel { top: auto; bottom: calc(100% + 8px); }
+.ofab.rightside .ofab-panel { left: auto; right: 0; }
+/* 카드에서는 두 레인이 나란히다 -- 좁은 패널에서는 세로로 쌓는다(청산이 위, 진입이 아래 그대로). */
+/* 🔴overflow:hidden 은 걸지 않는다 -- 모서리는 바깥 .ofab-panel 이 이미 자르고, 여기서 자르면 안쪽
+   포커스 링·툴팁 같은 위치 지정 요소가 잘린다(2026-09-25 디자인 훅 지적). */
+.ofab-panel .acct-lanes { grid-template-columns: 1fr; margin: 0; }
+/* ⭐레버·비율은 여기서 **게이지**다(사용자 지시). 칩을 감추고 칩이 덮고 있던 range 를 드러낸다 --
+   같은 input 이라 카드의 칩과 값이 어긋날 수 없다. 게이지 모양은 위의 애플식 슬라이더 규칙이다. */
+.ofab-panel .chipset { display: none; }
+.ofab-panel .chip-input {
+  position: static; opacity: 1; pointer-events: auto;
+  flex: 1 1 120px; width: auto; min-width: 96px; height: 28px;
+}
+.ofab-panel .chip-input[hidden] { display: none; }
+.ofab-panel .chip-input:disabled { pointer-events: none; }
+/* 카드에서는 칩과 값이 같으면 숫자를 숨긴다 -- 게이지에는 칩이 없으니 숫자가 늘 보여야 한다. */
+.ofab-panel .chipset[data-matched="1"] + .chip-val { display: inline; }
+.ofab-panel .chip-val { font-size: 12px; color: var(--text); min-width: 40px; text-align: right; }
+.ofab-away {
+  margin: 10px 0 0; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 10px;
+  font-size: 12px; color: var(--muted);
+}
+.ofab-away[hidden] { display: none; }
+.ofab-back {
+  margin-left: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600;
+  line-height: 1.4; cursor: pointer;
+}
+/* 🔴버튼은 페이지 폰트를 **물려받지 않는다**(UA 기본) -- 안 적으면 한글 없는 폰트로 떨어져 «□□□»가 된다
+   (2026-09-25 렌더 검사에서 «여기로 되돌리기»가 실제로 그렇게 나왔다).
+   🔴`font: 12px inherit` 처럼 **축약형 안에** inherit 를 넣으면 선언 전체가 무효라 버려진다 -- 따로 쓴다. */
+/* ⭐«버튼과 게이지만»(2026-09-25 사용자 지시). 패널 안에서는 설명 글자를 전부 걷는다 --
+   남기는 것: 주문 버튼(진입·청산·30초 확인) · 게이지와 그 옆 값 · 레버 «자동» 토글(켜져 있으면 게이지가
+   잠기므로 이게 없으면 레버 게이지를 풀 방법이 없다) · **오류·경고 문구**(주문이 안 나갔는데 화면이
+   조용하면 사람은 나간 줄 안다 -- 09-13 실장애의 교훈). */
+.ofab-panel .lane-pact, .ofab-panel .lane-empty, .ofab-panel #snapExitNow,
+.ofab-panel .hold-line, .ofab-panel #snapEntryFoldNote, .ofab-panel .entry-cap { display: none; }
+/* 포지션이 없으면 청산 레인은 빈 문장뿐이다 -- 레인째 걷는다. */
+.ofab-panel .acct-lanes > .manual-entry:has(#snapExitRow[hidden]) { display: none; }
+/* 물타기 접힘(09-14)은 **안전장치라 남긴다** -- 접혀 있을 때만 «추가 진입» 한 줄로 보이고,
+   펼치면 요약 줄은 걷는다(이미 펼친 사람에게 제목은 소음이다). */
+.ofab-panel details[open] > summary { display: none; }
+/* 미리보기 타일은 걷고 **문구(.entry-note)만** 남긴다 -- 청산은 확인 버튼 글자가 수량·비율·남은 초를 말한다. */
+.ofab-panel #snapEntryResult:not(:has(.entry-note)) { display: none; }
+.ofab-panel #snapEntryResult > :not(.entry-note) { display: none; }
+.ofab-panel .acct-lanes > * { padding: 12px 14px; }
+.ofab-panel .manual-entry-row.entry-hold { margin: 6px 0 0; }
+/* 게이지는 한 줄에 하나 -- 두 개가 한 줄에 서면 어느 게 레버인지 값 단위(배/%)로만 가려야 한다. */
+.ofab-panel .entry-line .chip-input, .ofab-panel .exit-row .chip-input { flex: 1 1 200px; }
+/* 🔴레버 값·«자동»은 **레버 게이지 바로 위**에 묶는다. 값 글자(«20배 (자동) · 모델 7배»)가 길어 줄이 넘치면
+   DOM 순서대로는 «자동»이 다음 줄 **비율 게이지 앞**에 붙어, 레버를 푸는 토글이 비율 설정처럼 읽혔다
+   (2026-09-25 렌더 스크린샷에서 발견 -- 겹침·잘림 검사로는 안 잡히는 «뜻의 배치» 결함). */
+.ofab-panel .entry-line > #snapLevVal { order: 1; }
+.ofab-panel .entry-line > .lev-auto { order: 2; }
+.ofab-panel .entry-line > #snapLevGauge { order: 3; flex-basis: 100%; }
+.ofab-panel .entry-line > #snapEntryFrac { order: 4; }
+.ofab-panel .entry-line > #snapEntryFracVal { order: 5; }
+.ofab-panel .manual-entry-row.exit-row { justify-content: center; }
+

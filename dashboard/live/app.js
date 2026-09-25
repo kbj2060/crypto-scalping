@@ -3153,6 +3153,7 @@ function setupPageTabs() {
     el("opsTabPanel")?.classList.toggle("hidden", target !== "ops");
     el("snapshotTabPanel")?.classList.toggle("hidden", target !== "snapshot");
     el("notifyTabPanel")?.classList.toggle("hidden", target !== "notify");
+    ofabSync();   // 2026-09-25 떠다니는 주문 버튼은 스냅샷 탭에서만 -- 떠나면 조작부를 카드로 먼저 돌려놓는다
     document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
     if (target === "notify") {
       // 탭을 열 때마다 다시 읽는다 -- 권한이나 구독은 다른 탭/기기에서 바뀔 수 있고,
@@ -7729,6 +7730,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
   // the user switches back to Snapshot.
   if (activePageTab === "snapshot") {
     renderLiquidationVolumeGauge();
+    renderOfab();                  // 2026-09-25 떠다니는 주문 버튼 글자(포지션·손익)
 
     // Bug found 2026-08-25: renderSnapshotChart() (candles + S/R line + the old liquidationMagnetLevel(),
     // removed 2026-08-31) used to be called ONLY from the two data-fetch functions that feed it, each
@@ -8983,6 +8985,125 @@ document.querySelectorAll(".chipset").forEach((box) => {
   inp.addEventListener("input", () => syncChipset(box));
   syncChipset(box);
 });
+
+// ── 떠다니는 주문 버튼 (2026-09-25 사용자 지시) ─────────────────────────────────────
+// 차트를 보다가 계좌 카드까지 내려가지 않고 바로 주문하려는 것. 사용자 선택 셋:
+//   ①진입 + 청산 ②안전장치는 카드와 같게(길게 누르기) ③레버·비율은 **게이지**로 버튼 안에서 바꾼다.
+// ⭐새 주문 경로를 만들지 않는다 -- 펼치면 카드의 .acct-lanes 를 **통째로 옮겨 오고** 접으면 되돌린다.
+//   핸들러가 전부 el("id") 기반이라(모달 ↔ 카드 이전 때와 같은 방식) 길게 누르기·미리보기·30초 확인·
+//   진행 중인 확인 버튼까지 그대로 따라온다. 같은 요소라 카드와 값이 어긋날 수도 없다.
+// ⭐게이지는 새로 안 만든다 -- 칩은 숨긴 <input type="range"> 위에 씌운 껍데기라, 패널 안에서만
+//   칩을 감추고 그 range 를 드러낸다(styles.css .ofab-panel). 칩은 range 의 input 을 듣고 있으니
+//   게이지를 밀면 되돌아간 카드의 칩도 이미 맞춰져 있다.
+// 🔴끄는 건 손잡이(⠿)로만 -- 주문 버튼이 «길게 누르기»라 끌기와 한 표면을 쓰면 옮기다 멈춘 순간 발주된다.
+const OFAB_POS_KEY = "ofabPos";
+const ofab = { open: false, home: null, next: null, x: null, y: null };
+
+function ofabPlace(x, y, save) {
+  const box = el("ofab"), bar = box?.querySelector(".ofab-bar");
+  if (!box || !bar) return;
+  const w = bar.offsetWidth || 120, h = bar.offsetHeight || 44;
+  ofab.x = Math.max(8, Math.min(x, innerWidth - w - 8));
+  ofab.y = Math.max(8, Math.min(y, innerHeight - h - 8));
+  box.style.left = `${ofab.x}px`;
+  box.style.top = `${ofab.y}px`;
+  // 패널은 **남은 공간이 넓은 쪽**으로 연다 -- 버튼을 어디에 두든 화면 밖으로 안 나간다.
+  const up = ofab.y + h / 2 > innerHeight / 2;
+  box.classList.toggle("up", up);
+  box.classList.toggle("rightside", ofab.x + w / 2 > innerWidth / 2);
+  const panel = el("ofabPanel");
+  if (panel) panel.style.maxHeight = `${Math.max(160, (up ? ofab.y : innerHeight - ofab.y - h) - 16)}px`;
+  if (save) {
+    try { localStorage.setItem(OFAB_POS_KEY, JSON.stringify([ofab.x, ofab.y])); } catch (e) { /* 위치 기억은 편의일 뿐 */ }
+  }
+}
+
+function ofabSetOpen(open) {
+  const panel = el("ofabPanel"), lanes = document.querySelector(".acct-lanes");
+  if (!panel || !lanes || open === ofab.open) return;
+  if (open) {
+    ofab.home = lanes.parentNode;
+    ofab.next = lanes.nextSibling;
+    panel.appendChild(lanes);
+  } else if (ofab.home) {
+    ofab.home.insertBefore(lanes, ofab.next);
+  }
+  ofab.open = open;
+  panel.hidden = !open;
+  el("ofabAway").hidden = !open;
+  el("ofabToggle")?.setAttribute("aria-expanded", String(open));
+  // 카드에서는 range 가 칩 뒤에 숨어 있어 탭 순서에서 빠져 있다(tabindex -1). 게이지로 드러나면 넣는다.
+  lanes.querySelectorAll(".chip-input").forEach((i) => { i.tabIndex = open ? 0 : -1; });
+  syncAllRangeFills(lanes);
+  syncChipsets();
+  ofabPlace(ofab.x, ofab.y, false);   // 열리면 위/아래·최대 높이를 다시 정한다
+}
+
+// 탭이 스냅샷일 때만 뜬다(주문 조작부가 사는 탭). 다른 탭으로 가면 조작부를 카드로 먼저 돌려놓는다.
+function ofabSync() {
+  const box = el("ofab");
+  if (!box) return;
+  const on = activePageTab === "snapshot";
+  if (!on) ofabSetOpen(false);
+  box.hidden = !on;
+  if (on) ofabPlace(ofab.x ?? innerWidth, ofab.y ?? innerHeight, false);
+}
+
+// 버튼 글자 = 지금 포지션. 펼치지 않아도 «들고 있나·얼마 벌었나»가 보여야 누를지 정한다.
+function renderOfab() {
+  const box = el("ofab");
+  if (!box || box.hidden) return;
+  const p = snapshotAccountPosition();
+  const qty = Number(p?.qty) || 0;
+  const side = qty ? String(p.side || "").toUpperCase() : "";
+  const pnl = Number(p?.unrealized_pnl) || 0;
+  setT("ofabPos", qty ? `${side} ${qty.toFixed(3)} · ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(0)}` : "주문");
+  box.classList.toggle("long", side === "LONG");
+  box.classList.toggle("short", side === "SHORT");
+}
+
+(() => {
+  const grip = el("ofabGrip"), tgl = el("ofabToggle");
+  if (!grip || !tgl) return;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(OFAB_POS_KEY) || "null"); } catch (e) { saved = null; }
+  // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.
+  [ofab.x, ofab.y] = Array.isArray(saved) ? saved : [innerWidth, innerHeight - 24];
+  tgl.addEventListener("click", () => ofabSetOpen(!ofab.open));
+  el("ofabBack")?.addEventListener("click", () => ofabSetOpen(false));
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const dx = e.clientX - ofab.x, dy = e.clientY - ofab.y;
+    const move = (ev) => ofabPlace(ev.clientX - dx, ev.clientY - dy, false);
+    const end = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", end);
+      grip.removeEventListener("pointercancel", end);
+      ofabPlace(ofab.x, ofab.y, true);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+  });
+  // 끌 수 없는 사람도 옮길 수 있게 -- 방향키 10px, Shift 는 40px.
+  grip.addEventListener("keydown", (e) => {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const s = e.shiftKey ? 40 : 10;
+    ofabPlace(ofab.x + d[0] * s, ofab.y + d[1] * s, true);
+  });
+  // ESC 는 패널 안에 초점이 있을 때만 -- 다른 곳의 ESC(모달 닫기 등)를 가로채지 않는다.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && ofab.open && el("ofab").contains(document.activeElement)) {
+      ofabSetOpen(false);
+      tgl.focus();
+    }
+  });
+  addEventListener("resize", () => { if (!el("ofab").hidden) ofabPlace(ofab.x, ofab.y, false); });
+  ofabSync();
+})();
 
 let entrySizeDebounce = null;
 for (const [slider, label, kind] of [["snapExitFrac", "snapExitFracVal", "exit"],
