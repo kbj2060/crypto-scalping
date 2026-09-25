@@ -3442,11 +3442,14 @@ def make_app() -> web.Application:
             ois = [b.get("oi_delta") for b in bars[-12:] if b.get("oi_delta") is not None]
             if len(ois) >= 10:
                 x["oi60"] = float(sum(ois))
-        closes = np.array([float(c["close"]) for c in (situation_state.get("candles") or [])[-300:]], dtype=float)
+        # 🔴24h 분위는 **정확히 24h** 여야 연구 정의와 같다. 상황 카드의 candles 캐시는 ~135봉(11h)뿐이라(09-25 실측
+        #   gate_pct 86/130) 따로 받은 5분봉 300개(candles_day)를 쓴다. 없으면 카드 캐시로 물러선다.
+        day5 = situation_state.get("candles_day") or situation_state.get("candles") or []
+        closes = np.array([float(c["close"]) for c in [c for c in day5 if int(c["time"]) < bar_start][-300:]], dtype=float)
         if len(closes) >= 100:
             x["move60_p75"] = float(np.percentile(np.abs(closes[12:] / closes[:-12] - 1) * 1e4, 75))
         # 융합 신호의 크기 관문: 완결 봉 30분 창 고저폭이 최근 24h(288창) 안 몇 분위인가(자기 포함). 연구와 같은 정의.
-        cds = [c for c in (situation_state.get("candles") or []) if int(c["time"]) < bar_start][-293:]
+        cds = [c for c in day5 if int(c["time"]) < bar_start][-293:]
         if len(cds) >= 66:
             hh = np.array([float(c["high"]) for c in cds]); lo = np.array([float(c["low"]) for c in cds])
             cc = np.array([float(c["close"]) for c in cds])
@@ -3480,6 +3483,17 @@ def make_app() -> web.Application:
         # 매초 왕복을 기다려 미시 참고까지 같이 멈춘다(09-21 검토).
         return await swr_cached("situation_minutes", 20.0, produce, max_stale=STALE_GRACE_SECONDS)
 
+    async def load_5m_day() -> list[dict[str, float]]:
+        """관계 읽기·융합 신호의 24h 분위 기준(5분봉 300개). 60초 캐시 · 형성 중 봉은 버린다."""
+        async def produce() -> list[dict[str, float]]:
+            raw = await fetch_binance_json(
+                "https://fapi.binance.com/fapi/v1/klines",
+                {"symbol": FOOTPRINT_SYMBOL, "interval": "5m", "limit": 300},
+                error_reason="flow_read_5m_upstream_error")
+            return [{"time": int(r[0]) // 1000, "high": float(r[2]), "low": float(r[3]), "close": float(r[4])}
+                    for r in raw[:-1]]
+        return await swr_cached("flow_read_5m_day", 60.0, produce, max_stale=STALE_GRACE_SECONDS)
+
     async def compute_situation(now: float) -> None:
         loop = asyncio.get_running_loop()
         # 느린 입력 셋은 캐시로 (캔들 60초 · 전환탐지기 60초 · 호가 요약 5초)
@@ -3489,6 +3503,10 @@ def make_app() -> web.Application:
         except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
             situation_state["btc_candles"] = None
         situation_state["breakout"] = await load_breakout_detector()
+        try:
+            situation_state["candles_day"] = await load_5m_day()
+        except Exception as exc:  # noqa: BLE001 -- 없으면 카드 캐시(짧다)로 물러선다
+            print(f"flow-read 5m day: {exc!r}", flush=True)
         try:
             situation_state["minutes"] = await load_minute_candles()
         except Exception as exc:  # noqa: BLE001 -- 실패하면 직전 1분봉으로 푼다(없으면 해결을 미룬다)
