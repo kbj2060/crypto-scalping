@@ -458,7 +458,14 @@ class TailRiskInterceptor:
                             msg = json.loads(raw)
                             o = msg.get("o", {})
                             side = str(o.get("S", ""))
-                            qty = float(o.get("l", 0.0))
+                            # 🔴2026-09-25 l -> z. `l` 은 «Order Last Filled Quantity» = 주문의 **마지막 체결 조각**이라
+                            #   청산 크기를 크게 과소계상했다 -- 24시간 1,395분 대조에서 건수는 88.6% 분이 대시보드
+                            #   (z 사용)와 같았는데 USD 합이 $6.2M vs $38.0M(6.1배). 예: 09-24 19:46:03 숏 청산
+                            #   492 ETH 주문을 마지막 조각 27 ETH($73,974)로 셌다. `z` = «Order Filled Accumulated
+                            #   Quantity» = 그 주문의 누적 체결량. 대시보드 collect_force_orders 와 같은 정의다.
+                            #   ⚠️tail_risk_1m 은 이 시각부터 값의 스케일이 바뀐다(~6배) -- 과거 행과 섞어 쓰지 말 것.
+                            #   ponytail: 같은 주문이 스냅샷 2개 이상으로 오면 z 합은 과대계상(주문 ID 가 없어 못 가른다).
+                            qty = float(o.get("z", 0.0))
                             price = float(o.get("ap", 0.0))
                             ts_ms = int(msg.get("E", 0))
                             qty_usd = qty * price
