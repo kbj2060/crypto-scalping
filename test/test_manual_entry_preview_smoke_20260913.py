@@ -570,25 +570,32 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             asyncio.run(exercise())
 
     def test_margin_cap_50pct_follows_order_leverage(self) -> None:
-        """2026-09-25 사용자 «증거금 사용을 50% 상한으로». 순자산 1000 · 기존 2500. 게이지 6배면
-        증거금 50% = 명목 3000 이 묶는다(모델 4184 보다 낮다). «자동»(정책 천장 25배 → 30배)이면
-        15000 이라 모델이 묶는다. 주문 뒤 증거금(총 명목 ÷ 걸 레버리지)이 50% 를 넘지 않는다."""
+        """2026-09-25 사용자 «증거금 50% 상한» + «비율 10% = 순자산의 10% 를 증거금으로, 넘으면 진입 불가».
+        순자산 1000 · 기존 2500. 게이지 6배면 상한 = 증거금 50% = 명목 3000(모델 4184 보다 낮다).
+          5%  → 증거금 50 = 명목 300 → 2800 ≤ 3000 통과(자르지 않은 그 크기).
+          100% → 명목 6000 → 넘는다 → **자르지 않고** 막는다.
+        «자동»(처방 30배)에서 10% → 명목 3000 → 5500 > 모델 4184 → «위험모델 상한» 으로 막는다."""
         async def exercise() -> None:
             with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
                  mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0):
                 client = TestClient(TestServer(server.make_app()))
                 await client.start_server()
+                get = lambda q: client.get("/api/manual-entry/preview?side=LONG" + q)
                 try:
-                    b = await (await client.get("/api/manual-entry/preview?side=LONG&lev=6")).json()
+                    b = await (await get("&lev=6&pct=5")).json()
                     cap, plan = b["cap"], b["plan"]
                     self.assertEqual(cap["binding"], "margin", cap)
                     self.assertAlmostEqual(cap["cap_notional_usdt"], 3000.0, places=2)
-                    self.assertLessEqual(plan["total_notional_usdt"] / 6 / 1000.0, 0.5 + 1e-6, plan)
-                    b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
+                    self.assertIsNone(plan["blocked"], plan["blocked"])
+                    self.assertAlmostEqual(plan["notional_usdt"], 300.0, delta=plan["price"] * 0.001)
+                    b = await (await get("&lev=6&pct=100")).json()
+                    self.assertTrue(str(b["plan"]["blocked"]).startswith("증거금 상한 50% 초과"),
+                                    b["plan"]["blocked"])
+                    self.assertAlmostEqual(b["plan"]["notional_usdt"], 6000.0, delta=3.0)
+                    b = await (await get("&pct=10")).json()
                     self.assertEqual(b["cap"]["binding"], "model", b["cap"])
-                    lev = b["plan"]["target_leverage"]
-                    self.assertLessEqual(b["plan"]["total_notional_usdt"] / lev / 1000.0, 0.5 + 1e-6,
-                                         f"자동 레버리지 {lev} 에서 증거금이 50% 를 넘는다")
+                    self.assertTrue(str(b["plan"]["blocked"]).startswith("위험모델 상한 초과"),
+                                    b["plan"]["blocked"])
                 finally:
                     await client.close()
 

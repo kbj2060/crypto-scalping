@@ -99,7 +99,8 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
                      cap_notional: float | None, filters: dict[str, float],
                      symbol: str = "ETHUSDT", existing_notional: float = 0.0,
                      equity: float = 0.0, leverage: float = 0.0,
-                     fraction: float = 1.0) -> dict[str, Any]:
+                     fraction: float = 1.0, fraction_of_equity: bool = False,
+                     order_leverage: float = 0.0, cap_label: str = "상한") -> dict[str, Any]:
     """보낼 주문 하나를 만든다. **순수 함수** -- 네트워크도 시계도 안 본다(그래야 검사가 된다).
 
     peg 는 «내가 메이커로 남는 가격»이다: 롱은 최우선 매수호가, 숏은 최우선 매도호가.
@@ -130,7 +131,13 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     qty = max(0.0, float(recommended_qty))
     existing_notional = max(0.0, float(existing_notional))
 
-    if cap_notional:
+    # 2026-09-25 사용자 지시: `fraction_of_equity` 면 비율 = **순자산 대비 이번 주문 증거금**
+    #   (10% = 순자산의 10% 를 증거금으로, 명목 = 그 × 주문이 걸 레버리지). 상한에 **자르지 않고**
+    #   넘으면 막는다 -- «상한 여유 중 몇 %» 로 조용히 줄이면 누른 비율과 들어간 크기가 달라진다.
+    if fraction_of_equity:
+        qty = (equity * float(fraction) * order_leverage / price
+               if equity > 0 and order_leverage > 0 else 0.0)
+    elif cap_notional:
         room = cap_notional - existing_notional
         if room <= 0:
             qty = 0.0
@@ -145,14 +152,20 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     # **«지금 넣을 수 있는 양 중 얼마»** 다. 칸마다 남은 여유에 비례하므로 반복해 넣어도
     # 상한을 넘지 않고, 반대로 가면 남겨 둔 여유로 대응할 수 있다.
     available_qty = qty          # 상한에 자른 «지금 넣을 수 있는 양»
-    if float(fraction) < 1.0:
+    if float(fraction) < 1.0 and not fraction_of_equity:
         qty = available_qty * float(fraction)
         notes.append(f"지금 넣을 수 있는 {available_qty:.3f} ETH 중 {int(round(100*fraction))}%"
                      f" 만 넣습니다 (나머지 {available_qty - qty:.3f} 는 남겨 둡니다)")
     qty = _floor_to(qty, filters["step"])
 
     blocked = None
-    if qty < filters["min_qty"] or qty <= 0:
+    after = existing_notional + qty * price
+    if fraction_of_equity and cap_notional and after > cap_notional:
+        used = (f" · 주문 뒤 증거금 {100 * after / order_leverage / equity:.0f}%"
+                if equity > 0 and order_leverage > 0 else "")
+        blocked = (f"{cap_label} 초과{used}"
+                   f" (주문 뒤 총 명목 {after:,.0f} > {cap_notional:,.0f} USDT)")
+    elif qty < filters["min_qty"] or qty <= 0:
         blocked = ("상한 여유가 없습니다" if cap_notional and existing_notional >= cap_notional
                    else f"수량이 최소 {filters['min_qty']} 미만")
     elif filters["min_notional"] and qty * price < filters["min_notional"]:
@@ -447,6 +460,19 @@ def _self_check() -> None:
     # 순자산 1,064.69 / 명목 6,802 ≈ 15.6% -- 거래소 실측(13.48% @ 7,642)과 같은 눈금
     assert 10.0 < plan["liq_distance_pct"] < 20.0, plan
     assert plan["margin_pct_of_equity"] is not None, plan
+
+    # 2026-09-25 비율 = 순자산 대비 증거금. 순자산 2000 · 20배 · 10% → 증거금 200 = 명목 4000.
+    #   기존 8000 이 있으면 12000 ≤ 상한 20000(증거금 50%) 통과, 40% 면 24000 > 20000 → 막는다(자르지 않는다).
+    plan = build_entry_plan(side="LONG", best_bid=2000.00, best_ask=2000.01,
+                            recommended_qty=99.0, cap_notional=20000.0, filters=f,
+                            existing_notional=8000.0, equity=2000.0, leverage=20.0, fraction=0.10,
+                            fraction_of_equity=True, order_leverage=20.0, cap_label="증거금 상한 50%")
+    assert plan["quantity"] == 2.0 and plan["blocked"] is None, plan
+    plan = build_entry_plan(side="LONG", best_bid=2000.00, best_ask=2000.01,
+                            recommended_qty=99.0, cap_notional=20000.0, filters=f,
+                            existing_notional=8000.0, equity=2000.0, leverage=20.0, fraction=0.40,
+                            fraction_of_equity=True, order_leverage=20.0, cap_label="증거금 상한 50%")
+    assert plan["quantity"] == 8.0 and plan["blocked"].startswith("증거금 상한 50% 초과 · 주문 뒤 증거금 60%"), plan
 
     # equity/leverage 를 모르면 설명값은 None 이지 0 이 아니다(0 은 "레버리지 0배"로 읽힌다)
     plan = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,

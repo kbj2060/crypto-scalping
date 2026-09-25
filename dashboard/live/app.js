@@ -8610,7 +8610,7 @@ async function manualEntryRefreshSize() {
     //   워커가 죽으면 경고까지 같이 사라지므로 여기 한 곳은 무조건이어야 한다.
     const ovX = cap.override_x;
     line.hidden = !plan.blocked && !ovX;
-    line.textContent = plan.blocked ? `주문 불가 — ${plan.blocked}`
+    line.textContent = plan.blocked ? `진입 불가 — ${plan.blocked}`
       : ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "";
     lastEntryCap = cap && cap.available ? cap : null;
     lastEntryPlan = plan && !plan.blocked ? plan : null;
