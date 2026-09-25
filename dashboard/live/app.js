@@ -4071,7 +4071,14 @@ function renderFlowRead() {
       <span class="fr-grade">${escapeHtml(ln.grade)}</span>
     </div>`).join("");
   const sumTone = r.up && r.down ? "" : r.up ? " fr-up" : r.down ? " fr-dn" : "";
-  box.innerHTML = `<div class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}</div>${rows}`;
+  // 2026-09-25 융합 신호(사용자 «방향 근거 + 30분 시나리오를 융합»)를 맨 위에. 발동이면 방향색 테두리·글자,
+  //   대기면 흐린 글자 -- 무엇이 켜졌고 무엇이 모자란지를 그대로 말한다(서버 flow_read.fuse).
+  const f = r.fused;
+  const fuse = f ? `<div class="fr-fuse" data-side="${f.side > 0 ? "long" : f.side < 0 ? "short" : "wait"}">
+      <span class="fr-fuse-tag">융합 신호</span>
+      <span class="fr-fuse-text">${f.side ? arrow(f.side) : ""}${escapeHtml(f.text || "")}<small class="fr-note">${escapeHtml(f.note || "")}</small></span>
+    </div>` : "";
+  box.innerHTML = `${fuse}<div class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}</div>${rows}`;
 }
 
 function renderSituation() {

@@ -17,6 +17,15 @@ FLAT_FRAC = 0.25        # |30분 이동| < 이 × 창 고저폭 이면 «제자�
 DEEP_HI, DEEP_LO = 0.8, 0.2   # 깊은 호가 불균형 자기 6시간 분위 — 연구 점유 각 20%
 NEAR_BP = 15.0          # 청산맵 레벨 근접(연구 판정폭, micro_ref.NEAR_BP 와 같다)
 LIQ_MIN_USD = 50_000.0  # 30분 청산이 이보다 작으면 «거의 없다»
+# ── 융합 신호 (2026-09-25 사용자 «방향 근거 + 30분 시나리오를 융합») ─────────────────────────────
+# 독립 원천 4표(고래 한 표 · 1시간 가격↔OI · 12h 추세↔30분 이동 정렬 · 거부 봉) 중 **같은 쪽 2표 이상** + 크기 관문
+# (30분 창 고저폭이 하루 분위 상위 1/3 — 카드의 크기 축 최선 단일피쳐). 지평 30분. tmp/fusion/build_eval*.py 로 쟀다.
+# 🔴카드의 A/B/C 확률은 **안 쓴다** — 09-25 통일축 재측정에서 «항상 되돌림»과 소수점까지 같았다(변별 0).
+#   카드에서 정보가 있는 것은 30분 방향(dir)·정렬·거부 봉·창 폭이고, 그것들이 여기 표와 관문으로 들어간다.
+FUSE_MIN_VOTES = 2
+GATE_PCT = 2 / 3
+FUSE_EVID = ("ETH 3.7년(서버와 같은 24h 정의): 건당 TRAIN +4.1bp[+0.2,+8.2] · TEST +6.6bp[+2.1,+11.4] · 4/4년 · 롱숏 둘 다 + · "
+             "회전 귀무 p<0.001 · 적중 48%(자주 조금 지고 가끔 크게 번다, 중앙 −2bp) · BTC 재현 안 됨 · 하루 ~1.7번 · 메이커 진입이어야 남는다")
 
 EVID = {   # 근거 한 줄 — 출처는 메모리/문서 이름(whale_mid_retail_follow · price_oi_quadrant · rt5_* · liq_hunt …)
     "price_flow": "3.7년 실측: 체결↔가격 역행은 봉의 1/4로 흔하고, 뒤따르는 가격 차이 +0.2bp — 방향 신호 아님",
@@ -214,6 +223,7 @@ def read(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
         add("활동", f"60초 거래량 같은 시간대 {100 * vp:.0f}분위({act}) — " + ("움직임이 커질 자리" if vp >= 0.8 else "움직임이 작을 자리" if vp <= 0.2 else "움직임 크기 평소"),
             EVID["act"], "근거" if edge else "설명")
 
+    fused = fuse(ev, x)
     dirs = [ln for ln in L if ln["dir"]]
     up, dn = sum(1 for ln in dirs if ln["dir"] > 0), sum(1 for ln in dirs if ln["dir"] < 0)
     if not dirs:
@@ -221,7 +231,39 @@ def read(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
     else:
         names = " · ".join(f"{ln['topic']}({'↑' if ln['dir'] > 0 else '↓'})" for ln in dirs)
         summary = f"방향 근거 {len(dirs)}개: {names}" + (" — 서로 엇갈린다" if up and dn else "")
-    return {"lines": L, "summary": summary, "up": up, "down": dn}
+    return {"lines": L, "summary": summary, "up": up, "down": dn, "fused": fused}
+
+
+def fuse(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
+    """독립 원천 4표 + 크기 관문 → {side ±1/0, votes [(이름, ±1)], score, gate, gate_pct, text}. 연구(build_eval)와 같은 정의."""
+    votes: list[tuple[str, int]] = []
+    z = x.get("z60")
+    if z:   # 고래는 한 표: 리테일과 갈리면 그걸로, 아니면 중형과 갈리면
+        zw = z["whale"]
+        for other, name in (("retail", "고래↔리테일"), ("mid", "고래↔중형")):
+            if abs(zw) >= Z_SIDE and abs(z[other]) >= Z_SIDE and _s(zw) != _s(z[other]):
+                votes.append((name, _s(zw)))
+                break
+    m60, oi60, p75 = x.get("move60"), x.get("oi60"), x.get("move60_p75")
+    if m60 is not None and oi60 and p75 is not None and m60 < 0 and abs(m60) >= p75:
+        votes.append(("가격↔OI", -1 if oi60 > 0 else 1))
+    veto, d30 = ev.get("veto") or 0, ev.get("dir") or 0
+    if veto and d30 and veto == d30:
+        votes.append(("추세정렬", d30))
+    if ev.get("reject") and d30:
+        votes.append(("거부 봉", -d30))
+    score = sum(v for _, v in votes)
+    gp = x.get("range30_pct")
+    gate = gp is not None and gp >= GATE_PCT
+    side = _s(score) if (abs(score) >= FUSE_MIN_VOTES and gate) else 0
+    tag = " · ".join(f"{n}{'↑' if v > 0 else '↓'}" for n, v in votes) or "켜진 표 없음"
+    gtxt = "관문 ?" if gp is None else f"30분 폭 하루 {100 * gp:.0f}분위{'(통과)' if gate else '(미달)'}"
+    if side:
+        text = f"{'롱' if side > 0 else '숏'} · 다음 30분 — {tag} · {gtxt}"
+    else:
+        need = "표가 한쪽으로 2개 필요" if abs(score) < FUSE_MIN_VOTES else "크기 관문 미달"
+        text = f"대기 — {tag} (합 {score:+d}) · {gtxt} · {need}"
+    return {"side": side, "votes": votes, "score": score, "gate": gate, "gate_pct": gp, "text": text, "note": FUSE_EVID}
 
 
 if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등급·방향이 연구가 허락한 만큼인지
@@ -259,4 +301,15 @@ if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등�
     # 빈 입력에서도 죽지 않고, 모르는 것은 «없다»로 말하지 않는다(서버 기동 직후 실측에서 «청산 거의 없다»가 나왔다)
     empty = read({}, {})
     assert all(ln["topic"] != "청산" for ln in empty["lines"]) and empty["up"] == empty["down"] == 0
+    # 융합: 고래 한 표(리테일·중형 둘 다 갈려도 1) + OI(하락+OI↓ = +1) = +2, 관문 통과 → 롱
+    f = fuse(dict(ev, reject=False), dict(x, range30_pct=0.8))
+    assert f["side"] == 1 and f["score"] == 2 and [n for n, _ in f["votes"]] == ["고래↔리테일", "가격↔OI"]
+    assert fuse(dict(ev, reject=False), dict(x, range30_pct=0.5))["side"] == 0                       # 관문 미달
+    assert fuse(dict(ev, reject=False), dict(x, range30_pct=0.8, z60=None))["side"] == 0            # 한 표뿐
+    # 정렬·거부 봉은 카드 방향에서 나온다: 상승 추세 + 30분 상승 = +1, 거부 봉 = −1 → 상쇄
+    f2 = fuse(dict(ev, veto=1, dir=1, reject=True), dict(x, z60=None, move60=10.0, range30_pct=0.9))
+    assert f2["score"] == 0 and f2["side"] == 0
+    f3 = fuse(dict(ev, veto=-1, dir=-1, reject=False), dict(x, oi60=900.0, z60=None, range30_pct=0.9))
+    assert f3["side"] == -1 and "숏" in f3["text"]                                                   # 하락+OI↑ ↓ + 정렬 ↓
+    assert read(ev, dict(x, range30_pct=0.8))["fused"]["side"] in (-1, 0, 1)
     print("flow_read selfcheck ok")

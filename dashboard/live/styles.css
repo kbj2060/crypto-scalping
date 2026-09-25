@@ -674,6 +674,15 @@ body {
    등급 칩: 근거 = 주황(«눈여겨봐라») · 약함 = 실선 · 설명 = 테두리 없음 · 미측정 = 점선(아직 사실 아님). */
 .fr-read { border-top: 1px solid var(--soft-line); padding: 8px 0 12px; }
 .fr-sum { padding: 4px 18px 8px; font: 700 12px/1.45 var(--font-mono); color: var(--muted); }
+/* 융합 신호 -- 이 블록에서 유일하게 «행동»을 말하는 줄. 주문 버튼과 같은 문법: 채우지 않고 방향색 테두리+글자. */
+.fr-fuse { display: grid; grid-template-columns: 84px 1fr; gap: 10px; align-items: start; margin: 2px 18px 10px;
+           padding: 9px 12px; border: 1px solid var(--soft-line); border-radius: var(--radius-sm); background: rgb(var(--lift) / 0.03); }
+.fr-fuse-tag { font: 700 11.5px/1.5 var(--font-mono); color: var(--muted); white-space: nowrap; }
+.fr-fuse-text { font-size: 13px; font-weight: 700; line-height: 1.5; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.fr-fuse[data-side="long"] { border-color: color-mix(in srgb, var(--good) 55%, transparent); }
+.fr-fuse[data-side="long"] .fr-fuse-text { color: var(--good); }
+.fr-fuse[data-side="short"] { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+.fr-fuse[data-side="short"] .fr-fuse-text { color: var(--bad); }
 .fr-sum.fr-up { color: var(--good); }
 .fr-sum.fr-dn { color: var(--bad); }
 .fr-row { display: grid; grid-template-columns: 84px 1fr auto; align-items: start; gap: 10px; padding: 5px 18px; }
@@ -690,6 +699,8 @@ body {
 .fr-row[data-grade="미측정"] .fr-grade { border: 1px dashed var(--line); }
 @media (max-width: 720px) {
   .fr-sum { padding: 4px 12px 8px; }
+  .fr-fuse { grid-template-columns: 1fr; gap: 4px; margin: 2px 12px 10px; }
+  .fr-fuse[data-side="wait"] .fr-note { display: none; }   /* 대기 중 근거 문구는 좁은 화면에서 소음 */
   .fr-row { grid-template-columns: 62px 1fr auto; gap: 8px; padding: 5px 12px; }
   .fr-topic { white-space: normal; font-size: 10.5px; }
   .fr-text { font-size: 12px; }

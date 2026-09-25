@@ -796,6 +796,7 @@ SPOT_RECV_TIMEOUT = 60.0        # 12 msg/s 지만 한산한 초가 있어 여유
 MICRO_BASELINE_SECONDS = 3600
 STREAM_TICK_S = 0.25                                   # /api/stream 밀어주기 주기 = 수급 폴링 주기(app.js SUPPLY_1S_POLL_MS)
 SITUATION_EVERY_TICKS = 1                              # micro-ref 1초 루프마다 (09-21 사용자 «급변 때 느리다» -- 실측 비용 30ms, duckdb 둘은 아래서 5초 캐시)
+FUSED_LOG_PATH = LIVE_DIR / "fused_signal_log.jsonl"   # 2026-09-25 융합 신호 발동(봉당 1줄) -- 라이브 전진 검증용
 SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30분 뒤 결과와 맞춰 적중률을 낸다
 SITUATION_LOG_MIN_GAP_S = 300                          # 상태가 안 바뀌어도 이 간격으로 한 줄
 SITUATION_VA_ROW_USD = 3.0                             # 가치영역 행 폭(차트의 행과 같다)
@@ -3444,6 +3445,14 @@ def make_app() -> web.Application:
         closes = np.array([float(c["close"]) for c in (situation_state.get("candles") or [])[-300:]], dtype=float)
         if len(closes) >= 100:
             x["move60_p75"] = float(np.percentile(np.abs(closes[12:] / closes[:-12] - 1) * 1e4, 75))
+        # 융합 신호의 크기 관문: 완결 봉 30분 창 고저폭이 최근 24h(288창) 안 몇 분위인가(자기 포함). 연구와 같은 정의.
+        cds = [c for c in (situation_state.get("candles") or []) if int(c["time"]) < bar_start][-293:]
+        if len(cds) >= 66:
+            hh = np.array([float(c["high"]) for c in cds]); lo = np.array([float(c["low"]) for c in cds])
+            cc = np.array([float(c["close"]) for c in cds])
+            win = np.lib.stride_tricks.sliding_window_view
+            rg = (win(hh, 6).max(1) - win(lo, 6).min(1)) / cc[5:]
+            x["range30_pct"] = float(np.mean(rg <= rg[-1]))
         mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
         imb = mp.get("imb40")
         if imb is not None and len(imb40_ring) >= 600:
@@ -3505,6 +3514,18 @@ def make_app() -> web.Application:
         situation_state["computed_at"] = now
         try:   # 관계 읽기는 상황 카드가 «완결 봉 부족»이어도 읽을 수 있는 만큼 읽는다. 죽어도 카드는 산다
             situation_state["read"] = fr.read(res.get("evidence") or {}, _flow_read_ctx(now, inp))
+            # 융합 신호 발동 장부 -- 봉마다 한 줄(같은 봉 안 1초 재계산은 같은 결정이다). 해결은 나중에 1분봉으로 맞춘다.
+            fu = situation_state["read"].get("fused") or {}
+            bar_now = int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
+            if fu.get("side") and situation_state.get("fused_bar") != bar_now:
+                situation_state["fused_bar"] = bar_now
+                try:
+                    with open(FUSED_LOG_PATH, "a", encoding="utf-8") as fh:
+                        fh.write(json.dumps({"ts": int(now), "bar": bar_now, "side": fu["side"], "mid": inp.get("mid"),
+                                             "votes": fu["votes"], "score": fu["score"], "gate_pct": fu["gate_pct"]},
+                                            ensure_ascii=False) + "\n")
+                except OSError as exc:
+                    print(f"fused log: {exc!r}", flush=True)
         except Exception as exc:  # noqa: BLE001
             situation_state["read"] = {"lines": [], "summary": "", "error": repr(exc)[:160]}
         if not res.get("ok"):
