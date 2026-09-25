@@ -658,6 +658,38 @@ def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH) -> list[tuple[
             for t, u, d, side, user in rows]
 
 
+def liq_5m_add(store: dict[int, list[float]], ev: dict[str, Any],
+               bar_s: int = FOOTPRINT_BAR_SECONDS, keep_bars: int = FOOTPRINT_KEEP_BARS) -> None:
+    """청산 이벤트 하나를 5분봉 누적에 더한다. store 는 봉 시작 -> [롱USD, 숏USD, 건수]."""
+    bar = int(ev.get("ts_ms") or 0) // 1000 // bar_s * bar_s
+    a = store.setdefault(bar, [0.0, 0.0, 0])
+    a[0 if ev.get("side") == "long" else 1] += float(ev.get("usd") or 0.0)
+    a[2] += 1
+    cut = bar - keep_bars * bar_s
+    for old in [b for b in store if b < cut]:     # ponytail: 선형 청소 -- 봉 288개라 이벤트마다 해도 싸다
+        del store[old]
+
+
+def liq_5m_payload(store: dict[int, list[float]], from_s: float, bars: int, now_s: float,
+                   bar_s: int = FOOTPRINT_BAR_SECONDS) -> dict[str, Any]:
+    """봇 DB 판(compute_liquidation_5m_history)과 **같은 모양**. 봉이 비어도 0 으로 싣는다 --
+    기록이 이어져 있는 구간의 0 은 «청산 없음»이 맞다. 기록 시작 전 봉은 싣지 않는다(= 모름).
+    ponytail: 대시보드가 꺼져 있던 몇 초~몇 분의 구멍은 0 으로 보인다(24시간 대조에서 봇에만 있는
+    분 10/1,438). 구멍 표시가 필요해지면 force-order WS 의 끊김 구간을 기록해 빼면 된다."""
+    now_bar = int(now_s) // bar_s * bar_s
+    from_bar = int(from_s) // bar_s * bar_s
+    out = []
+    for k in range(bars - 1, -1, -1):
+        b = now_bar - k * bar_s
+        if b <= from_bar:        # 기록이 봉 중간에 시작 -> 반쪽이라 뺀다(풋프린트 okx_from 과 같은 규약)
+            continue
+        a = store.get(b) or (0.0, 0.0, 0)
+        out.append({"ts": datetime.fromtimestamp(b, timezone.utc).isoformat(),
+                    "long_usd": round(a[0], 2), "short_usd": round(a[1], 2), "events": int(a[2]),
+                    "partial": b == now_bar})
+    return {"warmed_up": True, "bars": out, "error": None, "source": "dashboard-forceorder"}
+
+
 def merge_hl_liq(bars: list[dict], events: list[tuple[int, float, bool, str]],
                  bar_seconds: int) -> list[dict]:
     """5분봉 청산 원에 HL 고래 청산을 **더하고** `hl` 로 따로도 남긴다(툴팁이 가른다).
@@ -2683,6 +2715,15 @@ def make_app() -> web.Application:
                                    "trigger": {"side": None, "ts": None}}
     agree_ring: deque = deque(maxlen=60)        # 최근 60초 동조 상태(+1/0/-1) -- 표시용 집계
     liq_events: deque = deque(maxlen=5000)      # (ts_ms, side, qty, price, usd) -- side "long" = 롱 포지션 청산(SELL)
+    # 2026-09-25 풋프린트 차트 청산 원의 5분봉 누적 -- 수급 1초 차트와 **같은 원천**(이 프로세스의
+    #   @forceOrder, usd = z(누적 체결량) x ap). 전에는 봇의 tail_risk_1m 을 읽었는데 두 가지가 나빴다:
+    #   ① 지연 1~3분(완결 분마다 한 행 + 60초 폴링 + swr 묵은 값 한 번)
+    #   ② **크기가 달랐다** -- 봇은 l(마지막 체결 조각) x ap 를 합해 같은 이벤트를 작게 센다.
+    #      24시간 대조(1,395분): 건수는 88.6% 분에서 같은데 USD 합이 봇 $6.2M vs 여기 $38.0M(6.1배).
+    #      예: 09-24 19:46:03 숏 청산 1건 -- 봇 $73,974 / 여기 $1,327,307(492 ETH 주문의 마지막 조각 27 ETH).
+    #   ⇒ 봇 DB 와 이어 붙이면 이음새에서 원이 6배 튄다. ETH 는 통째로 이쪽에서 만든다.
+    liq_5m: dict[int, list[float]] = {}         # 봉 시작 -> [롱USD, 숏USD, 건수]
+    liq_5m_state: dict[str, Any] = {"from_s": None}   # 이 시각 이전 봉은 «모름» (기록 시작점)
     # WS 자체의 상태. 청산은 조용한 스트림이라 «이벤트 없음»과 «연결 없음»을 화면이 구별해야 한다
     # (tail_risk_interceptor 가 2026-07-30 에 77일간 잘못 connected=True 로 있던 그 함정).
     fo_state: dict[str, Any] = {"connected": False, "since": None, "last_event_ms": None, "events": 0, "errors": 0, "last_error": None}
@@ -2694,21 +2735,36 @@ def make_app() -> web.Application:
         """재시작 직후 1회. 청산은 **11분에 몇 건**이라 빈 deque 로 시작하면 새로고침해도
         수급 차트의 청산선이 한동안 안 그려진다(체결·OI 는 초당 들어와 1초면 다시 찬다).
         아래 루프가 이미 쓰고 있는 jsonl 이 그 구간을 들고 있으니 그걸 되읽는다."""
-        cut = time.time() * 1000 - SUPPLY_1S_SECONDS * 1000
+        now_ms = time.time() * 1000
+        cut = now_ms - SUPPLY_1S_SECONDS * 1000
+        # 2026-09-25 같은 줄들로 청산 원의 5분봉 누적도 되살린다(차트 창 최대 12시간 < 보관 24시간).
+        cut_5m = now_ms - FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS * 1000
+        # 기록 시작점: 읽은 꼬리의 첫 이벤트. 파일이 없거나 비면 **지금**이다 -- 그 앞 봉을 0 으로
+        #   내보내면 «청산 없음»이라는 거짓이 되므로 «모름»으로 둔다.
+        liq_5m_state["from_s"] = now_ms / 1000
         try:
             with open(LIQ_EVENTS_PATH, encoding="utf-8") as fh:
                 # ponytail: 파일 전체를 훑는다(지금 200KB·연 65MB, 기동 1회). 커지면 tail 바이트만.
                 tail = deque(fh, maxlen=liq_events.maxlen)
         except OSError:
             return
+        first = None
         for line in tail:
             try:
                 ev = json.loads(line)
             except ValueError:
                 continue    # 마지막 줄이 쓰다 만 상태일 수 있다
-            if int(ev.get("ts_ms") or 0) >= cut:
+            ts = int(ev.get("ts_ms") or 0)
+            first = ts if first is None else first
+            if ts >= cut:
                 liq_events.append(ev)
-        print(f"force-order: 지난 판 {len(liq_events)}건 복원", flush=True)
+            if ts >= cut_5m:
+                liq_5m_add(liq_5m, ev)
+        if first is not None:
+            liq_5m_state["from_s"] = first / 1000
+        print(f"force-order: 지난 판 {len(liq_events)}건 복원 · 5분봉 누적 {len(liq_5m)}봉"
+              f" (기록 시작 {datetime.fromtimestamp(liq_5m_state['from_s'], timezone.utc):%m-%d %H:%M} UTC)",
+              flush=True)
 
     async def collect_force_orders(app: web.Application) -> None:
         """⑤ @forceOrder 원시 이벤트를 jsonl 로 남기고 60초 링을 든다. 이벤트가 없으면 조용하다."""
@@ -2734,6 +2790,7 @@ def make_app() -> web.Application:
                                   "side": "long" if o.get("S") == "SELL" else "short",   # 롱 청산 = 시장에 SELL
                                   "qty": qty, "price": price, "usd": qty * price, "symbol": o.get("s")}
                             liq_events.append(ev)
+                            liq_5m_add(liq_5m, ev)     # 청산 원이 다음 폴링(2초)에 바로 본다 -- 봇 DB 1분 행을 안 기다린다
                             with open(LIQ_EVENTS_PATH, "a", encoding="utf-8") as fh:   # 분당 몇 줄 -- 블로킹 무시 가능
                                 fh.write(json.dumps(ev, separators=(",", ":")) + "\n")
                 except asyncio.CancelledError:
@@ -4282,11 +4339,17 @@ def make_app() -> web.Application:
         #   풋프린트·수급프로파일과 같은 파서를 쓴다 -- 창 폭 파싱은 한 곳에만 있어야 한다.
         #   🔴캐시 키에 bars 를 넣는다. 안 넣으면 창을 바꿔도 30초 동안 옛 폭이 나온다.
         bars = footprint_window_bars(request)
-        payload = await swr_cached(
-            f"liq5m_hist_{asset}_{bars}", 30.0,
-            lambda: asyncio.to_thread(compute_liquidation_5m_history, asset, bars),
-            max_stale=STALE_GRACE_SECONDS,
-        )
+        if asset == "eth" and liq_5m_state["from_s"] is not None:
+            # 2026-09-25 ETH 는 메모리 누적(수급 1초 차트와 같은 원천). 캐시가 없다 -- 계산이 봉 수만큼의
+            #   dict 조회라 매 요청 새로 만들어도 싸고, 그래야 방금 난 청산이 다음 폴링에 바로 보인다.
+            payload = liq_5m_payload(liq_5m, liq_5m_state["from_s"], bars, time.time())
+        else:
+            # 다른 코인은 여전히 봇 DB(tail_risk). 이 서버는 ETH @forceOrder 만 받는다.
+            payload = await swr_cached(
+                f"liq5m_hist_{asset}_{bars}", 30.0,
+                lambda: asyncio.to_thread(compute_liquidation_5m_history, asset, bars),
+                max_stale=STALE_GRACE_SECONDS,
+            )
         okx_from = okx_fp["first_bar"]
         if asset != "eth" or not payload.get("bars"):
             return web.json_response(payload, headers=NOCACHE)
@@ -4316,7 +4379,11 @@ def make_app() -> web.Application:
 
     async def _with_hl_liq(payload: dict, bars: list[dict], venues: list[str]) -> dict:
         """2026-09-24 사용자 지시: HL 고래 청산(포지션 수집기가 확정한 것)도 같은 원에 더한다."""
-        since = int(datetime.fromisoformat(bars[0]["ts"]).timestamp() * 1000) if bars else 0
+        # 🔴2026-09-25 캐시 키가 하나(`hl_whale_liq_events`)인데 since 를 요청 봉에서 뽑고 있었다 --
+        #   먼저 온 요청의 깊이가 30초간 모두에게 간다. 청산 원이 «최신 2봉 2초 폴링»을 시작하면
+        #   12시간 요청이 10분치 HL 만 받는다. 깊이를 고정한다(보관 한도). 창 밖 이벤트는
+        #   merge_hl_liq 가 어차피 버린다(없는 봉엔 안 더한다).
+        since = int((time.time() - FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS) * 1000) if bars else 0
         try:
             ev = await swr_cached("hl_whale_liq_events", 30.0,
                                   lambda: asyncio.to_thread(hl_whale_liq_events, since))

@@ -2853,6 +2853,45 @@ async function refreshBreakoutDetector() {
 }
 
 
+// 2026-09-25 청산 원의 **꼬리만** 빠르게. 서버가 ETH 청산 원을 수급 1초 차트와 같은 실시간 원천에서
+// 만들게 되면서(전에는 봇 DB 1분 행 + 60초 폴링 + 캐시 = 1~3분 지연) 막는 건 이 폴링 주기 하나다.
+// 전량(최대 144봉 ≈ 16KB)을 2초마다 받지 않고 최신 2봉만 받아 합친다 -- 2봉인 이유는 봉 경계에서
+// 늦게 도착한 청산이 **직전 봉**에 들어가기 때문이다(풋프린트 since = 최신봉-1봉 과 같은 이유).
+// 전량은 아래 refreshLiquidation5mSignal 이 60초마다·창 토글마다 그대로 받는다.
+const LIQ_5M_TAIL_POLL_MS = 2000;
+let liquidation5mTailFetchAt = 0;
+async function refreshLiquidation5mTail() {
+  if (activeSnapshotAsset !== "eth") return;     // 실시간 누적은 ETH 만 한다(서버가 ETH @forceOrder 만 받는다)
+  const base = latestLiquidation5mHist;
+  if (!Array.isArray(base) || !base.length) return;   // 전량이 먼저 와야 합칠 자리가 있다
+  const now = Date.now();
+  if (now - liquidation5mTailFetchAt < LIQ_5M_TAIL_POLL_MS) return;
+  liquidation5mTailFetchAt = now;
+  try {
+    const res = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=eth&bars=2`, { cache: "no-cache" });
+    if (!res.ok) return;
+    const j = await res.json();
+    if (activeSnapshotAsset !== "eth" || latestLiquidation5mHist !== base) return;   // 그 사이 전량이 왔으면 그쪽이 맞다
+    if (!(j && j.warmed_up && Array.isArray(j.bars) && j.bars.length)) return;
+    const same = (a, b) => a.long_usd === b.long_usd && a.short_usd === b.short_usd
+      && a.events === b.events && Boolean(a.partial) === Boolean(b.partial)
+      && Boolean(a.okx) === Boolean(b.okx) && JSON.stringify(a.hl || null) === JSON.stringify(b.hl || null);
+    const out = base.slice();
+    let changed = false;
+    j.bars.forEach((nb) => {
+      const i = out.findIndex((b) => b.ts === nb.ts);
+      if (i >= 0) {
+        if (!same(out[i], nb)) { out[i] = nb; changed = true; }
+      } else if (Date.parse(nb.ts) > Date.parse(out[out.length - 1].ts)) {
+        out.push(nb); out.shift(); changed = true;       // 새 봉 -- 창 길이를 유지한다
+      }
+    });
+    // 🔴바뀐 게 없으면 **같은 배열**을 둔다. 청산 원 층은 배열 신원(objToken)으로 캐시되므로
+    //   2초마다 새 배열을 만들면 내용이 같아도 매번 다시 그린다.
+    if (changed) latestLiquidation5mHist = out;
+  } catch (e) { /* 다음 2초에 다시 -- 전량 폴링이 따로 돈다 */ }
+}
+
 async function refreshLiquidation5mSignal() {
   const now = Date.now();
   if (now - liquidation5mLastFetchAt < LIQUIDATION_5M_POLL_MS) return;
@@ -7747,6 +7786,7 @@ async function tick() {
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
+      refreshLiquidation5mTail();    // 2026-09-25 청산 원 최신 2봉 (자체 2초 게이트)
       refreshLiquidationMap();
       refreshHlWhaleLiq();           // 2026-09-24 하이퍼리퀴드 고래 실제 청산가 (자체 60초 게이트)
       refreshActiveRegime();
