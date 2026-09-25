@@ -1667,6 +1667,12 @@ SIZING_CAP_WINDOW = 30      # 최근 N 왕복만 본다(2026-09-13). 아래 sizi
 #   줄어드는 건 짧은 보유(8->6, −25%)뿐이고 1년 중앙 계좌배수는 226 -> 230 으로 오히려 올랐다.
 #   근거: scratchpad kelly_cap / tradeoff 계산, research_sizing_growth_optimal_leverage_20260913.
 SIZING_CAP_EQUITY_X = 6.0
+# 🔴2026-09-25 사용자 지시: «증거금이 작아 위험 베팅을 해야 한다 -- 위험모델 상한만 남기고
+#   나머지(원장·순자산)는 해제, 나중에 다시 적용». True 면 상한 = 위험모델(자체 천장 HARD_CAP_X
+#   25배 포함) 하나이고, 지평·거래소 레버리지를 고르는 정책 천장도 HARD_CAP_X 가 된다(6배로
+#   두면 레버리지가 7배로 걸려 그 위 주문을 거래소가 거부한다). 모델이 없으면(워커 낡음) 옛
+#   두 상한으로 떨어진다 -- 기준이 없으면 수량을 못 만든다. 되돌리기 = False.
+SIZING_CAP_MODEL_ONLY = True
 # 🔴상한 무시 스위치 (2026-09-20 사용자 지시 «우리 사이징 코드는 잠깐 꺼줘»).
 # 세 상한(원장·순자산·위험모델)을 **전부 건너뛰고** 「순자산 × 이 배수」 하나만 기준으로 쓴다.
 # 🔴상한을 «없애는» 게 아니다. 진입 비율 슬라이더의 100% 가 **상한 명목에 대한 비율**이라
@@ -4867,6 +4873,10 @@ def make_app() -> web.Application:
             cands.append((equity * SIZING_CAP_EQUITY_X, "equity"))
             if safe_mae_pct and safe_mae_pct > 0:
                 cands.append((entry_notional(equity, safe_mae_pct)["total_notional"], "model"))
+        if SIZING_CAP_MODEL_ONLY and equity > 0:
+            # 모델 후보가 있으면 그것만, 정책 천장 질의(safe_mae_pct=None)면 모델의 자체 천장.
+            model = [c for c in cands if c[1] == "model"]
+            cands = model or ([(equity * HARD_CAP_X, "model")] if safe_mae_pct is None else cands)
         if not cands:
             return None, None, cap
         # 🔴값만 비교한다 -- 튜플 min 은 값이 같을 때 이름 알파벳순으로 갈린다.
@@ -4937,6 +4947,8 @@ def make_app() -> web.Application:
             # ⭐이 값이 **지평 선택의 순환을 끊는다**: 지평에는 상한이, 상한에는 지평이 필요한데
             #   정책 천장은 지평과 무관하므로 먼저 정해진다(planning_hold 주석 참조).
             policy_only = [v for v in (cap_ledger, cap_equity) if v]
+            if SIZING_CAP_MODEL_ONLY and equity > 0:      # effective_cap 과 같은 규칙
+                policy_only = [equity * HARD_CAP_X]
             policy_cap_x = (min(policy_only) / equity) if policy_only and equity > 0 else None
             # 🔴상한을 계산할 지평 = 처방이 고를 지평(2026-09-13 감사). 같은 방향 포지션이
             # 있으면 그 포지션의 **남은 시간**이 이긴다 -- 추가한다고 시계가 새로 생기지 않는다
@@ -4957,6 +4969,8 @@ def make_app() -> web.Application:
                             growth_x=round(e["growth_x"], 2) if e["growth_x"] else None)
             binding = [(v, k) for v, k in ((cap_ledger, "ledger"), (cap_equity, "equity"),
                                            (cap_model, "model")) if v]
+            if SIZING_CAP_MODEL_ONLY and cap_model:
+                binding = [(cap_model, "model")]
             cap_notional = min(v for v, _ in binding) if binding else None
             # 🔴상한 무시 스위치. 위 SIZING_CAP_OVERRIDE_X 주석이 계약이다.
             overridden = SIZING_CAP_OVERRIDE_X > 0 and equity > 0

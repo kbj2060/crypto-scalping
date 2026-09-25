@@ -86,7 +86,10 @@ def _isolated_dirs():
         async def fake_account(*_a, **_k):
             return FAKE_ACCOUNT
 
-        with mock.patch.object(server, "LIVE_DIR", live), \
+        # 🔴옛 정책(원장∧순자산∧모델)을 고정한다 -- 2026-09-25 «위험모델만» 스위치는 나중에
+        #   되돌릴 한시 설정이라, 되돌아올 규칙을 여기서 계속 지킨다. 새 동작은 test_model_only_*.
+        with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", False), \
+             mock.patch.object(server, "LIVE_DIR", live), \
              mock.patch.object(server, "DASHBOARD_DIR", dash), \
              mock.patch.object(server, "POSITION_SIZING_STATE_PATH",
                                live / "eth_position_sizing_state.json"), \
@@ -513,6 +516,52 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                         lev = p["trade_plan"]["size"]["leverage"]
                         self.assertEqual(lev, 4.0,
                                          f"{who} trade_plan 이 실효 상한을 안 쓴다: {lev}")
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_model_only_cap_drops_ledger_and_equity(self) -> None:
+        """2026-09-25 사용자 «위험모델 상한만, 나머지 해제». 원장 4.0배·순자산 6배가 모델보다
+        낮아도 진입·청산 둘 다 **모델**이 묶고, 거래소 레버리지는 그 크기를 열 만큼 올라간다
+        (정책 천장이 6배로 남으면 7배로 걸려 거래소가 주문을 거부한다). 모델이 없으면 옛 상한."""
+        real_payload = server.position_sizing_payload
+
+        def with_ledger_cap(drop_model=False):
+            def f():
+                pay = real_payload()
+                pay["cap"] = {"available": True, "cap_notional_usdt": 4000.0, "trips": 20, "need": 10}
+                if drop_model:
+                    pay["risk_mae"] = {}
+                return pay
+            return f
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
+                 mock.patch.object(server, "position_sizing_payload", with_ledger_cap()):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
+                    cap, plan = b["cap"], b["plan"]
+                    self.assertEqual(cap["binding"], "model", cap)
+                    self.assertEqual(cap["cap_notional_usdt"], cap["cap_model_usdt"], cap)
+                    self.assertGreater(cap["cap_notional_usdt"], 4000.0, "원장 4.0배가 아직 묶는다")
+                    lv = plan["trade_plan"]["prescription"]["exchange_leverage"]
+                    self.assertGreaterEqual(lv["setting"] * 1000.0, cap["cap_notional_usdt"], lv)
+                    x = (await (await client.get("/api/manual-exit/preview?side=LONG")).json())["plan"]
+                    self.assertEqual(x["risk"]["applied_binding"], "model", x["risk"])
+                finally:
+                    await client.close()
+            with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
+                 mock.patch.object(server, "position_sizing_payload", with_ledger_cap(True)):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
+                    self.assertEqual(b["cap"]["binding"], "ledger",
+                                     f"모델이 없으면 옛 상한으로 떨어져야 한다: {b['cap']}")
                 finally:
                     await client.close()
 
