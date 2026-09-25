@@ -131,6 +131,8 @@ from scripts.live_liquidation_map_20260824 import compute_spliced_levels, comput
 from dashboard import micro_ref as mref  # noqa: E402
 # 2026-09-21 «상황 읽기 · 30분» -- 사용자가 고른 트레이더 읽기를 규칙으로. 순수 함수 + 자체점검.
 from dashboard import situation as sit  # noqa: E402
+# 2026-09-25 «데이터 관계 읽기» -- 지지/저항 목록 아래 문장. 순수 함수 + 자체점검. 입력은 상황 읽기와 같은 원천.
+from dashboard import flow_read as fr  # noqa: E402
 # Regime overlay (bull/bear/chop probability per 5-min bar) for the Snapshot tab's liquidation-map
 # chart. 2026-08-26: swapped from the wide24 HMM+linear-calibration model to an independently
 # trained HistGradientBoostingClassifier (OOS balanced_accuracy 0.9189 vs wide24's 0.7691) -- see
@@ -2743,6 +2745,7 @@ def make_app() -> web.Application:
     # (tail_risk_interceptor 가 2026-07-30 에 77일간 잘못 connected=True 로 있던 그 함정).
     fo_state: dict[str, Any] = {"connected": False, "since": None, "last_event_ms": None, "events": 0, "errors": 0, "last_error": None}
     ofi_hist: deque = deque(maxlen=600)         # |OFI10| 최근 10분 -- 임계는 상수가 아니라 분위(p50)
+    imb40_ring: deque = deque(maxlen=6 * 3600)  # 깊은 호가 불균형(±0.4%) 초별 6시간 -- 관계 읽기의 «깊은 벽» 분위 기준
     mp_state: dict[str, Any] = {"connected": False, "since": None, "last_ms": None, "events": 0, "errors": 0, "last_error": None}
     mark_ring: dict[int, tuple[float, float, float]] = {}   # sec → (mark, index, funding). 상황 읽기의 펀딩·베이시스 입력
 
@@ -2897,6 +2900,7 @@ def make_app() -> web.Application:
                 flow = mref.raster_flow(w)
                 if flow.get("ok"):
                     ofi_hist.append(abs(flow["ofi10"]))
+                    imb40_ring.append(float(flow["imb40"]))
                 ofi_thr = float(np.median(ofi_hist)) if len(ofi_hist) >= 30 else None
                 if flow.get("ok") and ofi_thr:
                     agree, micro_state["qi_prev"] = mref.agree_state(
@@ -3394,6 +3398,61 @@ def make_app() -> web.Application:
                 "deriv": mref.deriv_from_ring(mark_ring, sit.WINDOW * FOOTPRINT_BAR_SECONDS, sit.BASIS_PCT), "btc": btc,
                 "breakout": {"detect_on": bool((bo.get("detect") or {}).get("on")), "prewarn_on": bool((bo.get("prewarn") or {}).get("on"))}}
 
+    # ── 데이터 관계 읽기 (2026-09-25) ────────────────────────────────────────
+    # 상황 읽기의 evidence(30분) 위에 «60분 크기별 z · 1시간 가격↔OI · OKX 몫 · 깊은 벽 분위»를 얹는다.
+    # 🔴크기별 z 의 분모는 연구(30일)와 달리 **서버 링 24h** 다 -- 링이 6시간 미만이면 z 를 안 준다.
+    fr_bar_net: dict[int, tuple[float, float, float]] = {}   # 완결 봉 -> (델타, 고래순, 리테일순)
+
+    def _flow_read_ctx(now: float, inp: dict[str, Any]) -> dict[str, Any]:
+        bar = FOOTPRINT_BAR_SECONDS
+        bar_start = int(now) // bar * bar
+        fbars = footprint_state["bars"]
+        done = [b for b in sorted(fbars) if b < bar_start]
+        for b in done:
+            # 최근 두 봉은 늦게 오는 백필이 있을 수 있어 매번 다시 센다. 그 앞은 굳었다.
+            if b not in fr_bar_net or b >= bar_start - 2 * bar:
+                cells = fbars[b].values()
+                fr_bar_net[b] = (sum(v[0] - v[1] for v in cells), sum(v[2] - v[3] for v in cells),
+                                 sum(v[4] - v[5] for v in cells))
+        for b in [b for b in fr_bar_net if b not in fbars]:
+            del fr_bar_net[b]
+        x: dict[str, Any] = {}
+        if len(done) >= 12:
+            grid = range(done[0], done[-1] + bar, bar)       # 빈 봉은 NaN -- 창 합이 구멍을 건너뛰지 않게
+            a = np.array([fr_bar_net.get(b, (np.nan, np.nan, np.nan)) for b in grid], dtype=float)
+            ser = {"whale": a[:, 1], "mid": a[:, 0] - a[:, 1] - a[:, 2], "retail": a[:, 2]}
+            roll = lambda v, k: np.convolve(v, np.ones(k), "valid")   # noqa: E731
+            r60 = {g: roll(v, 12) for g, v in ser.items()}
+            if all(np.isfinite(r[-1]) for r in r60.values()):
+                x["net60"] = {g: float(r[-1]) for g, r in r60.items()}
+                past = {g: r[:-1][np.isfinite(r[:-1])] for g, r in r60.items()}
+                if all(len(p) >= 72 and p.std() > 0 for p in past.values()):
+                    x["z60"] = {g: float(r60[g][-1] / past[g].std()) for g in r60}
+            r30 = roll(a[:, 0], 6)
+            p30 = r30[:-1][np.isfinite(r30[:-1])]
+            if np.isfinite(r30[-1]) and len(p30) >= 72 and p30.std() > 0:
+                x["cvd30_z"] = float(r30[-1] / p30.std())
+        last6 = done[-6:]
+        if okx_fp["first_bar"] and len(last6) == 6 and all(b > okx_fp["first_bar"] and b in okx_bars for b in last6):
+            x["okx30"] = float(sum(v[0] - v[1] for b in last6 for v in okx_bars[b].values()))
+        bars = inp.get("bars") or []
+        if len(bars) >= 13 and bars[-1].get("close") and bars[-13].get("close"):
+            x["move60"] = (bars[-1]["close"] / bars[-13]["close"] - 1) * 1e4
+            ois = [b.get("oi_delta") for b in bars[-12:] if b.get("oi_delta") is not None]
+            if len(ois) >= 10:
+                x["oi60"] = float(sum(ois))
+        closes = np.array([float(c["close"]) for c in (situation_state.get("candles") or [])[-300:]], dtype=float)
+        if len(closes) >= 100:
+            x["move60_p75"] = float(np.percentile(np.abs(closes[12:] / closes[:-12] - 1) * 1e4, 75))
+        mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
+        imb = mp.get("imb40")
+        if imb is not None and len(imb40_ring) >= 600:
+            ring = np.fromiter(imb40_ring, dtype=float)
+            x["imb40"], x["imb40_pct"] = float(imb), float(np.count_nonzero(ring <= imb) / ring.size)
+        x.update(liq60s=mp.get("liq60") or {}, agree=mp.get("agree"), trigger_live=bool((mp.get("trigger") or {}).get("live")),
+                 sr=mp.get("sr") or {}, act=mp.get("act"), vol_pct=mp.get("vol60_pct"))
+        return x
+
     async def load_minute_candles() -> list[dict[str, float]]:
         """예측 해결 전용 1분봉. 🔴5분봉으로 풀면 ①결정 시점이 든 봉을 통째로 건너뛰어 30분 창의
         최대 17%가 죽고 ②같은 봉 안 순서를 몰라 오채점된다 -- 09-21 장부를 두 해상도로 풀어보니
@@ -3444,6 +3503,10 @@ def make_app() -> web.Application:
         res["computed_at"] = now
         situation_state["now"] = res
         situation_state["computed_at"] = now
+        try:   # 관계 읽기는 상황 카드가 «완결 봉 부족»이어도 읽을 수 있는 만큼 읽는다. 죽어도 카드는 산다
+            situation_state["read"] = fr.read(res.get("evidence") or {}, _flow_read_ctx(now, inp))
+        except Exception as exc:  # noqa: BLE001
+            situation_state["read"] = {"lines": [], "summary": "", "error": repr(exc)[:160]}
         if not res.get("ok"):
             return
         key = sit.log_key(res)   # 라벨의 숫자를 뺀 종류 서명 -- 숫자를 두면 5초마다 새 항목(09-21 1,742건 사고)
@@ -3483,7 +3546,8 @@ def make_app() -> web.Application:
         return {"now": situation_state["now"], "computed_at": situation_state["computed_at"],
                 "recent": [{k: e.get(k) for k in ("ts", "mid", "dir", "prob", "outcome", "outcome_sym", "flips_on")} for e in log[-12:]],
                 "calibration": sit.calibration(log, SITUATION_HORIZON_S),
-                "streams": {"fo": dict(fo_state), "mp": dict(mp_state)}}
+                "streams": {"fo": dict(fo_state), "mp": dict(mp_state)},
+                "read": situation_state.get("read")}
 
     async def api_situation(request: web.Request) -> web.Response:
         return web.json_response(situation_payload(), headers=NOCACHE)

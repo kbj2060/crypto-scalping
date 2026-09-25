@@ -4048,7 +4048,34 @@ function situationSignalRow(name, kind, r) {
     + `<span class="v">${dead ? "—" : escapeHtml(String(r.txt))}</span></div>`;
 }
 
+// 2026-09-25 «데이터 관계 읽기» -- 서버 dashboard/flow_read.py 가 만든 줄을 그대로 그린다(화면은 계산하지 않는다).
+//   등급 칩: 근거(주황) · 약함(실선) · 설명(테두리 없음) · 미측정(점선 = 아직 사실 아님, DESIGN.md Shapes).
+//   🔴방향 화살표는 서버가 dir 을 준 줄(근거·약함)에만 붙는다 -- «설명» 줄에 색을 칠하면 신호로 읽힌다.
+//   상황은 1초마다 오므로 내용이 같으면 다시 그리지 않는다(읽는 중 텍스트 선택·툴팁이 끊기지 않게).
+let flowReadKey = "";
+function renderFlowRead() {
+  const box = el("flowRead");
+  if (!box) return;
+  const r = latestSituation && latestSituation.read;
+  const key = JSON.stringify(r || null);
+  if (key === flowReadKey) return;
+  flowReadKey = key;
+  if (!r || !Array.isArray(r.lines) || !r.lines.length) {
+    box.innerHTML = `<div class="fr-sum">${escapeHtml((r && r.error) ? "관계 읽기 오류: " + r.error : "관계 읽기 계산 전")}</div>`;
+    return;
+  }
+  const arrow = (d) => (d > 0 ? `<b class="fr-up" aria-label="위">↑</b> ` : d < 0 ? `<b class="fr-dn" aria-label="아래">↓</b> ` : "");
+  const rows = r.lines.map((ln) => `<div class="fr-row" data-grade="${escapeHtml(ln.grade)}">
+      <span class="fr-topic">${escapeHtml(ln.topic).replace("↔", "↔<wbr>")}</span>
+      <span class="fr-text">${arrow(ln.dir)}${escapeHtml(ln.text)}${ln.note ? `<small class="fr-note">${escapeHtml(ln.note)}</small>` : ""}</span>
+      <span class="fr-grade">${escapeHtml(ln.grade)}</span>
+    </div>`).join("");
+  const sumTone = r.up && r.down ? "" : r.up ? " fr-up" : r.down ? " fr-dn" : "";
+  box.innerHTML = `<div class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}</div>${rows}`;
+}
+
 function renderSituation() {
+  renderFlowRead();
   const body = el("situationBody"); const badge = el("situationBadge");
   if (!body) return;
   const s = latestSituation || {}; const n = s.now || {};

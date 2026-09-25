@@ -1,0 +1,262 @@
+"""«데이터끼리 무슨 말을 하나» — 청산맵 지지/저항 목록 아래 문장 (2026-09-25 사용자 지시).
+
+화면의 실시간 원천(체결·크기별 수급·OKX·OI·청산·호가·청산맵 S/R·베이시스/펀딩·BTC·추세 veto·활동)을
+**둘씩 맞대어** 지금 무슨 관계인지 한 줄씩 말한다. 줄마다 [관찰 숫자 → 해석 → 근거 등급].
+근거 등급은 **연구 결과가 허락하는 만큼만** 준다(PRODUCT.md «화면 신호는 측정 통과가 원칙»):
+  근거  표본외·연도 부호까지 통과          약함  부호 일관·CI 경계 또는 짧은 표본
+  설명  예측력을 재서 0 이었다(상태 설명만)  미측정 아직 안 잰 관계
+🔴«설명»·«미측정» 줄은 방향(dir)을 갖지 않는다. 맨 위 요약은 근거·약함 줄의 방향만 센다.
+ponytail: 문구·임계는 이 파일 한 곳. 부호 규약 매수·상승 = +.
+"""
+from __future__ import annotations
+from typing import Any
+
+Z_SIDE = 0.5            # 크기별 60분 순매수 z — 연구와 같은 값(사전 고정)
+CVD_Z_BIG = 1.0         # 30분 체결이 «뚜렷하다» (자기 24h 분포의 1σ)
+FLAT_FRAC = 0.25        # |30분 이동| < 이 × 창 고저폭 이면 «제자리»
+DEEP_HI, DEEP_LO = 0.8, 0.2   # 깊은 호가 불균형 자기 6시간 분위 — 연구 점유 각 20%
+NEAR_BP = 15.0          # 청산맵 레벨 근접(연구 판정폭, micro_ref.NEAR_BP 와 같다)
+LIQ_MIN_USD = 50_000.0  # 30분 청산이 이보다 작으면 «거의 없다»
+
+EVID = {   # 근거 한 줄 — 출처는 메모리/문서 이름(whale_mid_retail_follow · price_oi_quadrant · rt5_* · liq_hunt …)
+    "price_flow": "3.7년 실측: 체결↔가격 역행은 봉의 1/4로 흔하고, 뒤따르는 가격 차이 +0.2bp — 방향 신호 아님",
+    "whale_retail": "3.7년 실측: 갈리면 60분 고래 쪽 +6bp[+3,+10]·4/4년·BTC +3.5 — 메이커로만 비용을 넘는다",
+    "whale_mid": "3.7년 실측: 고래↔중형 갈리면 60분 고래 쪽 +7.6bp[+3,+12]",
+    "same_side": "3.7년 실측: 크기별 단독 추종은 셋 다 되돌림(리테일 최악) — 쏠림을 따라가지 말 것",
+    "oi_dn_up": "4.7년 1시간: 하락+OI↑ 다음 1시간 −2.3bp(0/5년 반등) — 숏 조기청산 금지",
+    "oi_dn_dn": "4.7년 1시간: 하락+OI↓ 다음 1시간 +1.2bp(OI↑ 대비 +3.5·5/5년) — 숏 거두기 순 +0.5bp로 얇다",
+    "oi_up": "상승 쪽 사분면은 1시간 틀에서 안 쟀다(30분 카드 감사에선 스퀴즈·신규유입 효과 0)",
+    "oi_small": "1초~5분 OI 는 체결의 4초 뒤 그림자 — 큰 1시간 이동에서만 뜻이 있다",
+    "liq_result": "청산은 가격을 따라온다(분→다음 분 −0.34, 반대 +0.01) · 버스트 뒤 5~60분 평평 — 꼭지 신호 아님",
+    "liq_flush": "69일: 추세 반대편 청산 뒤 추세 방향 60분 +13.7bp[−2.4,+28] — CI 0 포함",
+    "deep_wall": "5분 홀드아웃 통과: 깊은 매수벽−매도벽 +7~8bp(t 2.2) — 상승장 두 창·점유 40%라 «상태»에 가깝다",
+    "qi": "최우선 호가+호가 증감 동조는 1~15초만 앞선다(+0.4bp/15초) — 수수료를 못 넘는다",
+    "wall_sr": "벽은 지지·저항이 아니다(닿은 뒤 반등 0.509)",
+    "sr_near": "레벨 ±15bp 는 청산이 날 자리(청산 확률 0.52 vs 0.28) — 뚫림/버팀 방향은 없다",
+    "sr_wall": "깊은 벽이 레벨 쪽이면 버팀 후보(n 82/156, 1.5~2.5SE)",
+    "basis": "선물·현물 주도 구분의 예측력은 안 쟀다",
+    "funding": "펀딩 쏠림 반대 매매: 4.7년 극단 펀딩 0/10·30분 감사 부호 반대",
+    "btc": "BTC 동행/단독: 30분 감사 효과 0(±0.2pp)",
+    "veto_align": "30분 지속률 정렬 52.8% vs 역행 50.5%(+2.2pp·6/6년) — 작다",
+    "act": "활동은 움직임의 크기를 말한다(방향 아님) — 변동성 확대 OOS AUC 0.82",
+}
+
+
+def _s(x: float | None) -> int:
+    return 0 if not x else (1 if x > 0 else -1)
+
+
+def _side(x: float, buy: str = "매수", sell: str = "매도") -> str:
+    return buy if x > 0 else sell
+
+
+def _updn(x: float) -> str:
+    return "상승" if x > 0 else "하락"
+
+
+def read(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
+    """ev: situation.classify 의 evidence(30분 창). x: 이 줄들 전용 입력(server `_flow_read_ctx`).
+    반환 {lines:[{topic,text,note,grade,dir}], summary, up, down}. dir 은 근거/약함 줄에만 ±1."""
+    L: list[dict[str, Any]] = []
+
+    def add(topic: str, text: str, note: str, grade: str, d: int = 0) -> None:
+        L.append({"topic": topic, "text": text, "note": note, "grade": grade, "dir": d if grade in ("근거", "약함") else 0})
+
+    # ① 가격 ↔ 체결(30분) — 누가 가격을 움직였나
+    mv, rg, cvd = ev.get("move_bp"), ev.get("range_bp"), ev.get("cvd")
+    okx, cz = x.get("okx30"), x.get("cvd30_z")
+    if mv is not None and cvd is not None:
+        obs = f"30분 {mv:+.0f}bp · 바이낸스 체결 {cvd:+,.0f} ETH" + (f" · OKX {okx:+,.0f}" if okx is not None else "")
+        flat = rg is not None and abs(mv) < FLAT_FRAC * rg
+        loud = cz is None or abs(cz) >= CVD_Z_BIG
+        if flat and loud and cvd:
+            t = f"{obs} — 시장가가 {_side(cvd)}로 몰렸는데 가격은 제자리: 반대편 지정가가 받아내는 중(흡수)"
+        elif _s(cvd) == _s(mv) or not cvd:
+            t = f"{obs} — 시장가가 가격을 {'올렸다' if mv > 0 else '내렸다'}"
+        elif okx is not None and _s(okx) == _s(mv):
+            t = f"{obs} — 바이낸스 시장가는 {_side(cvd)}인데 가격은 {_updn(mv)}: OKX 가 {_side(okx)}로 끌었다"
+        else:
+            t = f"{obs} — 시장가는 {_side(cvd)}인데 가격은 {_updn(mv)}: 지정가 {_side(mv)}가 받아냈다(흡수)"
+        add("가격↔체결", t, EVID["price_flow"], "설명")
+
+    # ② 고래 ↔ 중형 ↔ 리테일(60분) — 누구 편인가
+    net, z = x.get("net60") or {}, x.get("z60")
+    if net:
+        obs = f"60분 순매수 고래 {net['whale']:+,.0f} · 중형 {net['mid']:+,.0f} · 리테일 {net['retail']:+,.0f} ETH"
+        if not z:
+            add("고래↔리테일", obs + " — 기준 분포 수집 중(서버 기동 뒤 6시간)", EVID["same_side"], "설명")
+        else:
+            zw, zm, zr = z["whale"], z["mid"], z["retail"]
+            big = lambda v: abs(v) >= Z_SIDE   # noqa: E731
+            m60 = x.get("move60")
+            against = m60 is not None and _s(zw) == -_s(m60)
+            if big(zw) and big(zr) and _s(zw) != _s(zr):
+                add("고래↔리테일", f"{obs} — 고래 {_side(zw)} · 리테일 {_side(zr)}로 갈렸다: 고래 쪽"
+                    + (" (고래가 가격과 반대로 섰다 — 이때 더 강했다 +10bp)" if against else ""),
+                    EVID["whale_retail"], "약함", _s(zw))
+            elif big(zw) and big(zm) and _s(zw) != _s(zm):
+                add("고래↔중형", f"{obs} — 고래 {_side(zw)} · 중형 {_side(zm)}로 갈렸다: 고래 쪽", EVID["whale_mid"], "약함", _s(zw))
+            elif big(zw) and big(zm) and big(zr) and _s(zw) == _s(zm) == _s(zr):
+                add("고래↔리테일", f"{obs} — 셋 다 {_side(zw)}: 한쪽 쏠림", EVID["same_side"], "설명")
+            else:
+                add("고래↔리테일", f"{obs} — 크기별로 뚜렷한 갈림·쏠림 없음", EVID["same_side"], "설명")
+
+    # ③ 가격 ↔ OI(1시간) — 새 포지션인가 빠지는 포지션인가
+    m60, oi60, p75 = x.get("move60"), x.get("oi60"), x.get("move60_p75")
+    if m60 is not None and oi60 is not None:
+        obs = f"1시간 {m60:+.0f}bp · OI {oi60:+,.0f} ETH"
+        if p75 is None or abs(m60) < p75:
+            add("가격↔OI", f"{obs} — 이동이 작다(하루 상위 25% 밖): OI 방향만으로는 말할 게 없다", EVID["oi_small"], "설명")
+        elif m60 < 0 and oi60 > 0:
+            add("가격↔OI", f"{obs} — 하락 + OI 증가: 새 숏이 밀고 있다", EVID["oi_dn_up"], "근거", -1)
+        elif m60 < 0:
+            add("가격↔OI", f"{obs} — 하락 + OI 감소: 롱이 손절·청산으로 빠진다", EVID["oi_dn_dn"], "근거", +1)
+        elif oi60 > 0:
+            add("가격↔OI", f"{obs} — 상승 + OI 증가: 새 롱 유입", EVID["oi_up"], "미측정")
+        else:
+            add("가격↔OI", f"{obs} — 상승 + OI 감소: 숏 커버(스퀴즈)로 오른다", EVID["oi_up"], "미측정")
+
+    # ④ 청산 ↔ 가격·추세(30분 + 최근 60초). 🔴evidence 에 청산 키가 없으면(상황 카드 워밍업) «거의 없다»가 아니라 안 말한다
+    ll, ls = ev.get("liq_long") or 0.0, ev.get("liq_short") or 0.0
+    s60 = x.get("liq60s") or {}
+    tail = ""
+    if (s60.get("long") or 0) + (s60.get("short") or 0) > 0:
+        tail = f" · 최근 60초 롱 ${s60.get('long', 0):,.0f} / 숏 ${s60.get('short', 0):,.0f}"
+    if "liq_long" not in ev:
+        pass
+    elif ll + ls < LIQ_MIN_USD:
+        add("청산", f"30분 청산 롱 ${ll:,.0f} · 숏 ${ls:,.0f}{tail} — 거의 없다", EVID["liq_result"], "설명")
+    else:
+        dom = 1 if ls > ll else -1            # 숏이 청산 = 강제 매수(+)
+        veto = ev.get("veto") or 0
+        who = "숏" if dom > 0 else "롱"
+        obs = f"30분 청산 롱 ${ll:,.0f} · 숏 ${ls:,.0f}{tail}"
+        if veto and dom == -veto:
+            add("청산↔추세", f"{obs} — 12시간 추세({_updn(veto)})의 반대편({who})이 털렸다: 눌림 청산", EVID["liq_flush"], "약함", veto)
+        elif mv is not None and _s(mv) == dom:
+            add("청산↔가격", f"{obs} — 이동이 {who}을 청산시켰다(결과)", EVID["liq_result"], "설명")
+        else:
+            add("청산↔가격", f"{obs} — {who} 청산이 우세", EVID["liq_result"], "설명")
+
+    # ⑤ 호가 ↔ 체결(지금) — 깊은 벽 · 최우선 동조 · 벽 지속
+    ip, imb = x.get("imb40_pct"), x.get("imb40")
+    agree, live = x.get("agree"), x.get("trigger_live")
+    if ip is not None and imb is not None and (ip >= DEEP_HI or ip <= DEEP_LO):
+        d = 1 if ip >= DEEP_HI else -1
+        rank = 100 * (1 - ip) if d > 0 else 100 * ip
+        t = f"깊은 호가(±0.4%) 불균형 {imb:+.2f}(6시간 {'상위' if d > 0 else '하위'} {rank:.0f}%) — {_side(d, '매수벽', '매도벽')} 우위"
+        if cvd and _s(cvd) == -d:
+            t += f", 시장가({_side(cvd)})를 받아낼 쪽이 두껍다"
+        add("호가↔체결", t, EVID["deep_wall"], "약함", d)
+    elif agree in ("동조매수", "동조매도") and live:
+        add("호가↔체결", f"최우선 호가 기울기와 호가 증감이 {agree[2:]} 쪽으로 동조(방금)", EVID["qi"], "설명")
+    else:
+        obi, pers = ev.get("obi"), ev.get("persist")
+        t = "호가 불균형 자료 없음"
+        if obi is not None:
+            t = f"호가 불균형 {obi:+.2f}" + (f" · 벽 지속 {pers:.0%}" if pers is not None else "") + " — 깊은 벽 쏠림 없음"
+        add("호가↔체결", t, EVID["wall_sr"], "설명")
+
+    # ⑥ 청산맵 지지/저항 ↔ 현재가·깊은 벽
+    sr = x.get("sr") or {}
+    sb, rb = sr.get("sup_bp"), sr.get("res_bp")
+    if sb is not None or rb is not None:
+        parts = []
+        if rb is not None:
+            parts.append(f"저항 {sr.get('res'):,.1f}(+{rb:.0f}bp)")
+        if sb is not None:
+            parts.append(f"지지 {sr.get('sup'):,.1f}(−{sb:.0f}bp)")
+        near = sr.get("near") or "없음"
+        if near != "없음":
+            t = " · ".join(parts) + f" — {near[:2]}에 붙어 있다: 청산이 날 자리"
+            dw = sr.get("deep_wall")
+            if dw:
+                t += f", 깊은 벽은 {dw}"
+                hold = dw == "레벨쪽"
+                add("지지/저항", t, EVID["sr_near"] + " · " + EVID["sr_wall"], "약함" if hold else "설명",
+                    (1 if near == "지지근접" else -1) if hold else 0)
+            else:
+                add("지지/저항", t, EVID["sr_near"], "설명")
+        else:
+            add("지지/저항", " · ".join(parts) + f" — 둘 다 ±{NEAR_BP:.0f}bp 밖", EVID["sr_near"], "설명")
+
+    # ⑦ 선물 ↔ 현물 · 펀딩
+    bas, bd, lead, fr, crowd = ev.get("basis_bp"), ev.get("basis_d_bp"), ev.get("lead"), ev.get("funding"), ev.get("crowd")
+    if bas is not None:
+        t = f"베이시스 {bas:+.1f}bp" + (f"(30분 {bd:+.1f})" if bd is not None else "")
+        if bd is None:
+            t += " — 30분 변화 수집 중"          # 모르는 것을 «아무도 안 끌었다»로 말하지 않는다
+        elif not ev.get("dir"):
+            t += " — 30분 추세가 없어 주도 판정 보류"
+        else:
+            t += {1: " — 선물이 이동을 끌었다", -1: " — 현물이 이동을 끌었다"}.get(lead or 0, " — 선물·현물 한쪽이 끈 흔적 없음")
+        if fr is not None:
+            t += f" · 펀딩 {fr * 100:+.4f}%" + {1: "(롱 쏠림)", -1: "(숏 쏠림)"}.get(crowd or 0, "")
+        add("선물↔현물", t, EVID["basis"] + " · " + EVID["funding"], "미측정" if lead else "설명")
+
+    # ⑧ ETH ↔ BTC
+    rel, bm = ev.get("btc_rel"), ev.get("btc_move_bp")
+    if bm is not None:
+        add("ETH↔BTC", f"BTC 30분 {bm:+.0f}bp — " + {"동행": "같이 움직인다(시장 전체)", "단독": "ETH 혼자 움직인다"}.get(rel or "", "ETH 가 추세가 아니라 비교 보류"),
+            EVID["btc"], "설명")
+
+    # ⑨ 추세 veto ↔ 30분 이동
+    veto, d30 = ev.get("veto") or 0, ev.get("dir") or 0
+    if veto and d30:
+        al = veto == d30
+        add("추세↔이동", f"12시간 추세 {_updn(veto)} 안의 30분 {_updn(d30)} — " + ("정렬: 더 갈 쪽에 조금 기운다" if al else "추세 안의 짧은 역행: 지속은 동전"),
+            EVID["veto_align"], "약함" if al else "설명", d30 if al else 0)
+
+    # ⑩ 활동
+    act, vp = x.get("act"), x.get("vol_pct")
+    if vp is not None:
+        edge = vp >= 0.8 or vp <= 0.2      # 가운데는 할 말이 없다 -- 근거 칩은 양끝에만
+        add("활동", f"60초 거래량 같은 시간대 {100 * vp:.0f}분위({act}) — " + ("움직임이 커질 자리" if vp >= 0.8 else "움직임이 작을 자리" if vp <= 0.2 else "움직임 크기 평소"),
+            EVID["act"], "근거" if edge else "설명")
+
+    dirs = [ln for ln in L if ln["dir"]]
+    up, dn = sum(1 for ln in dirs if ln["dir"] > 0), sum(1 for ln in dirs if ln["dir"] < 0)
+    if not dirs:
+        summary = "방향을 말할 근거가 있는 관계가 지금은 없다 — 아래는 상태 설명"
+    else:
+        names = " · ".join(f"{ln['topic']}({'↑' if ln['dir'] > 0 else '↓'})" for ln in dirs)
+        summary = f"방향 근거 {len(dirs)}개: {names}" + (" — 서로 엇갈린다" if up and dn else "")
+    return {"lines": L, "summary": summary, "up": up, "down": dn}
+
+
+if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등급·방향이 연구가 허락한 만큼인지
+    ev = dict(move_bp=-40.0, range_bp=60.0, cvd=900.0, liq_long=300_000.0, liq_short=20_000.0, veto=1, dir=-1,
+              obi=0.1, persist=0.5, basis_bp=2.0, basis_d_bp=-1.0, lead=0, funding=0.0001, crowd=0, btc_rel="단독", btc_move_bp=3.0)
+    x = dict(okx30=-500.0, cvd30_z=1.5, net60=dict(whale=800.0, mid=-100.0, retail=-600.0), z60=dict(whale=1.2, mid=-0.2, retail=-0.9),
+             move60=-80.0, move60_p75=50.0, oi60=-3000.0, liq60s={}, imb40=0.4, imb40_pct=0.9, agree="중립", trigger_live=False,
+             sr=dict(sup=2600.0, sup_bp=10.0, res=2700.0, res_bp=300.0, near="지지근접", deep_wall="레벨쪽"), act="활발", vol_pct=0.9)
+    r = read(ev, x)
+    T = {ln["topic"]: ln for ln in r["lines"]}
+    assert "OKX 가 매도로 끌었다" in T["가격↔체결"]["text"] and T["가격↔체결"]["dir"] == 0           # 역행 + OKX 가 가격 편
+    assert T["고래↔리테일"]["grade"] == "약함" and T["고래↔리테일"]["dir"] == 1 and "가격과 반대" in T["고래↔리테일"]["text"]
+    assert T["가격↔OI"]["grade"] == "근거" and T["가격↔OI"]["dir"] == 1                              # 하락+OI↓ = 되돌림 쪽
+    assert T["청산↔추세"]["dir"] == 1 and "눌림 청산" in T["청산↔추세"]["text"]                      # 상승추세에서 롱 청산
+    assert T["호가↔체결"]["dir"] == 1 and "받아낼 쪽" not in T["호가↔체결"]["text"]                   # 매수벽·체결 매수 = 같은 쪽
+    assert T["지지/저항"]["grade"] == "약함" and T["지지/저항"]["dir"] == 1
+    assert T["활동"]["grade"] == "근거" and T["활동"]["dir"] == 0                                    # 크기 근거는 방향이 아니다
+    assert {ln["topic"]: ln for ln in read(ev, dict(x, vol_pct=0.5))["lines"]}["활동"]["grade"] == "설명"
+    assert "수집 중" in {ln["topic"]: ln for ln in read(dict(ev, basis_d_bp=None), x)["lines"]}["선물↔현물"]["text"]
+    assert "추세↔이동" in T and T["추세↔이동"]["dir"] == 0                                           # 역행 = 동전
+    assert r["up"] >= 4 and r["down"] == 0 and "방향 근거" in r["summary"]
+    # 흡수: 제자리 + 뚜렷한 체결 / OKX 없음
+    r2 = read(dict(ev, move_bp=5.0, cvd=-1200.0), dict(x, okx30=None, cvd30_z=-2.0))
+    assert "흡수" in {ln["topic"]: ln for ln in r2["lines"]}["가격↔체결"]["text"]
+    # 작은 1시간 이동은 OI 를 설명으로만 / 하락+OI↑ 는 아래
+    T3 = {ln["topic"]: ln for ln in read(ev, dict(x, move60=-20.0))["lines"]}
+    assert T3["가격↔OI"]["grade"] == "설명" and T3["가격↔OI"]["dir"] == 0
+    assert {ln["topic"]: ln for ln in read(ev, dict(x, oi60=500.0))["lines"]}["가격↔OI"]["dir"] == -1
+    # 기준 분포가 없으면 방향을 안 준다 · 아무 근거도 없으면 요약이 그렇게 말한다
+    quiet = read(dict(ev, liq_long=0.0, liq_short=0.0, veto=0),
+                 dict(x, z60=None, move60=-5.0, imb40_pct=0.5, vol_pct=0.5, sr=dict(sup=2600.0, sup_bp=80.0, near="없음")))
+    assert quiet["up"] == quiet["down"] == 0 and quiet["summary"].startswith("방향을 말할 근거가")
+    # 설명·미측정 등급은 절대 방향을 갖지 않는다
+    assert all(ln["dir"] == 0 for rr in (r, r2, quiet) for ln in rr["lines"] if ln["grade"] in ("설명", "미측정"))
+    # 빈 입력에서도 죽지 않고, 모르는 것은 «없다»로 말하지 않는다(서버 기동 직후 실측에서 «청산 거의 없다»가 나왔다)
+    empty = read({}, {})
+    assert all(ln["topic"] != "청산" for ln in empty["lines"]) and empty["up"] == empty["down"] == 0
+    print("flow_read selfcheck ok")
