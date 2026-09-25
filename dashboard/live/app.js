@@ -291,7 +291,7 @@ function mergedSupplySrc() {
   // 🔴선물 나이는 «가장 최근 거래소 대비» 로 잰다(예전엔 늘 0 이라 선물이 죽어도 OKX 가
   //   now 를 밀어 합산이 절반짜리로 멀쩡해 보였다). 🔴한 번도 안 붙은 거래소(null)도 죽은 것이다
   //   -- 빠진 거래소는 합에서 0 으로 들어가므로 이름을 화면에 적는다.
-  const ages = [["선물", supply1sMeta.now ? now - supply1sMeta.now : null],
+  const ages = [["바이낸스", supply1sMeta.now ? now - supply1sMeta.now : null],
                 ["OKX", okxMeta.tradeAge]];
   const dead = ages.filter(([, a]) => a == null || a > 10).map(([n]) => n);
   // OI 합: 두 거래소는 갱신 시각이 달라(바이낸스 폴링 · OKX WS) 초마다 **각자의 직전 관측값**을
@@ -315,8 +315,8 @@ function mergedSupplySrc() {
               { oi: okxOi1s, color: "var(--warn)", width: 1.2, opacity: 0.5, dash: "3 2" }],
     // 거래소별 CVD 얇은 선 = 본선에 더해진 둘. 현물은 본선에도 얇은 선에도 없고 **불균형 % 로만**
     //   읽는다(2026-09-25). 점유는 4.5% 로 적혀 있었는데 09-25 실측 창에서는 7.7% 였다.
-    thin: [{ supply: supply1s, label: "선물" }, { supply: okxSupply1s, label: "OKX" }],
-    imbSources: [["선물", supply1s], ["OKX", okxSupply1s], ["현물", spotSupply1s]],
+    thin: [{ supply: supply1s, label: "바이낸스" }, { supply: okxSupply1s, label: "OKX" }],
+    imbSources: [["바이낸스", supply1s], ["OKX", okxSupply1s], ["현물", spotSupply1s]],
     age: `체결 OKX ${okxMeta.tradeAge == null ? "-" : okxMeta.tradeAge + "s"}`
          + ` · 현물 ${spotMeta.tradeAge == null ? "-" : spotMeta.tradeAge + "s"}`
          + (dead.length ? ` · 합에서 빠짐: ${dead.join("/")}` : ""),
