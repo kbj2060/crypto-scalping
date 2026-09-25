@@ -3913,140 +3913,6 @@ async function refreshSituation() {
   renderSituation();
 }
 
-// ── 현재 상황 · 고정 18칸 ── (2026-09-22 시안 U2, 사용자 «사라졌다 생겼다 하지 말고»)
-//   전에는 서버 labels 문장을 그대로 흘렸다. 조건을 통과한 것만 줄이 생기므로 1초마다
-//   3.3줄이 뜨고 졌다(실측). 이제 칸은 **절대 안 사라진다** -- 세 상태를 형태로 구분한다:
-//     값 있음  = 막대          · 조건 미달 = 0 자리 눈금 하나 · 재료 없음 = 눈금도 없음(dim)
-//   값은 전부 evidence 의 **원시값**에서 계산한다. labels 문자열을 파싱하면 서버 문구가
-//   바뀌는 날 조용히 깨진다(09-21 «표시용 dict 를 학습 피쳐로» 와 같은 함정).
-//   기준선(mark)은 서버가 보낸 ev.thr_ui 를 쓴다 -- 여기서 임계를 다시 선언하지 않는다.
-// kind "d" = 0 기준 발산. **+ 는 롱·상승 쪽, − 는 숏·하락 쪽으로 통일한다**(8칸 전부).
-// kind "m" = 0→100 강도·위치.
-const SIT_CLAMP = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
-const SIT_FIN = (x) => (Number.isFinite(x) ? x : null);
-// 두 값의 상대 편중을 -100~100 으로. 둘 다 0 이면 «재료 없음»(null).
-const SIT_TILT = (a, b) => (a || b ? ((a - b) / (Math.abs(a) + Math.abs(b))) * 100 : null);
-// 값 칸은 46px 다. 청산·CVD·델타·OI 는 상한이 없어 그대로 쓰면 넘친다(실측 «961/16691»
-// 이 8px 넘쳤다 -- 렌더 검사기가 잡았다. 픽스처의 «96/412» 로는 안 보였다).
-const SIT_K = (v) => { const n = Math.round(Math.abs(v)), s = v < 0 ? "-" : "";
-  return n >= 1e6 ? `${s}${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${s}${Math.round(n / 1e3)}k`
-       : n >= 1e3 ? `${s}${(n / 1e3).toFixed(1)}k` : `${s}${n}`; };
-
-const SIT_SIGNALS = [
-  // ── 방향 압력 8칸 ──
-  ["청산 편중", "d", (e) => {
-    const v = SIT_TILT(e.liq_short || 0, e.liq_long || 0);          // + = 숏이 더 청산 = 위쪽 압력
-    return v == null ? null : { v, txt: SIT_K((e.liq_short || 0) - (e.liq_long || 0)) };
-  }],
-  ["창 CVD", "d", (e) => {
-    const c = SIT_FIN(e.cvd), m = Math.abs(SIT_FIN(e.max_delta) || 0);
-    return c == null || !m ? null : { v: SIT_CLAMP((c / m) * 100, -100, 100), txt: SIT_K(c) };
-  }],
-  ["마지막 봉 델타", "d", (e, t) => {
-    const l = SIT_FIN(e.last_delta), m = Math.abs(SIT_FIN(e.max_delta) || 0);
-    return l == null || !m ? null : { v: SIT_CLAMP((l / m) * 100, -100, 100), txt: SIT_K(l),
-                                      mark: (t.reject || 0.5) * 100 };
-  }],
-  ["고래−리테일", "d", (e) => {
-    if (e.cur_whale == null && e.cur_retail == null) return null;    // 봉이 아직 안 익었다
-    const v = SIT_TILT(e.cur_whale || 0, e.cur_retail || 0);         // + = 축적 · − = 분배
-    return v == null ? { v: 0, on: false, txt: "0" } : { v, txt: e.cur_sig || "" };
-  }],
-  ["호가 OBI", "d", (e, t) => {
-    const o = SIT_FIN(e.obi);
-    return o == null ? null : { v: SIT_CLAMP(o * 100, -100, 100), on: !!e.wall,
-                                txt: o.toFixed(2), mark: (t.obi || 0.3) * 100 };
-  }],
-  ["펀딩 쏠림", "d", (e, t) => {
-    const f = SIT_FIN(e.funding), n = t.funding || 0.0001;
-    return f == null ? null : { v: SIT_CLAMP((f / (3 * n)) * 100, -100, 100), on: !!e.crowd,
-                                txt: `${(f * 100).toFixed(3)}%`, mark: 33 };
-  }],
-  ["베이시스 Δ", "d", (e) => {
-    const b = SIT_FIN(e.basis_d_bp), th = Math.abs(SIT_FIN(e.basis_thr_bp) || 0);
-    return b == null || !th ? null : { v: SIT_CLAMP((b / th) * 100, -100, 100), on: !!e.lead,
-                                       txt: b.toFixed(1), mark: 100 };
-  }],
-  ["BTC 이동", "d", (e) => {
-    const b = SIT_FIN(e.btc_move_bp), m = Math.abs(SIT_FIN(e.move_bp) || 0);
-    return b == null ? null : { v: m ? SIT_CLAMP((b / m) * 100, -100, 100) : 0,
-                                on: e.btc_rel != null, txt: SIT_K(b) };
-  }],
-  // ── 강도 · 위치 10칸 ──
-  ["레짐 세기", "m", (e) => {
-    const r = SIT_FIN(e.move_ratio);
-    return r == null ? null : { v: SIT_CLAMP(r * 100, 0, 100), txt: r.toFixed(2),
-                                mark: (SIT_FIN(e.thr_next) || 0) * 100 };
-  }],
-  ["OI 동조율", "m", (e) => {
-    if (e.oi_sum == null) return null;                               // OI 스트림이 비었다
-    return { v: SIT_CLAMP((e.oi_agree || 0) * 100, 0, 100), txt: SIT_K(e.oi_sum) };
-  }],
-  ["활동 분위", "m", (e, t) => {
-    const a = SIT_FIN(e.act_pct);
-    return a == null ? null : { v: a * 100, on: !!e.hot, txt: Math.round(a * 100),
-                                mark: (t.act || 0.8) * 100 };
-  }],
-  ["호가 지속", "m", (e, t) => {
-    const p = SIT_FIN(e.persist);
-    return p == null ? null : { v: p * 100, txt: Math.round(p * 100),
-                                mark: (t.persist_thick || 0.4) * 100 };
-  }],
-  ["저항 근접", "m", (e, t) => {
-    const r = SIT_FIN(e.res_bp), n = t.near_bp || 60;
-    return r == null ? null : { v: SIT_CLAMP((1 - r / n) * 100, 0, 100), on: !!e.near_res,
-                                txt: Math.round(r) };
-  }],
-  ["지지 근접", "m", (e, t) => {
-    const s = SIT_FIN(e.sup_bp), n = t.near_bp || 60;
-    return s == null ? null : { v: SIT_CLAMP((1 - s / n) * 100, 0, 100), on: !!e.near_sup,
-                                txt: Math.round(s) };
-  }],
-  ["쿠션 비대칭", "m", (e, t) => {
-    const r = SIT_FIN(e.res_bp), s = SIT_FIN(e.sup_bp), k = t.cushion || 3;
-    if (!r || !s) return null;
-    // 이동 반대쪽이 얼마나 먼가. 기준선이 곧 «쿠션 없음» 판정선이라 눈금이 k 배에 선다.
-    const ratio = e.dir >= 0 ? s / r : r / s;
-    return { v: SIT_CLAMP((ratio / (2 * k)) * 100, 0, 100), on: !!(e.no_cushion || e.no_cushion_up),
-             txt: ratio.toFixed(1), mark: 50 };
-  }],
-  ["가치영역 위치", "m", (e) => {
-    const lo = SIT_FIN(e.va_lo), hi = SIT_FIN(e.va_hi), m = SIT_FIN(e.mid);
-    if (lo == null || hi == null || m == null || hi <= lo) return null;
-    return { v: SIT_CLAMP(((m - lo) / (hi - lo)) * 100, 0, 100),
-             txt: m > hi ? "위" : m < lo ? "아래" : "안" };
-  }],
-  // 아래 둘은 «상태»라 축이 없다 -- 막대는 꽉 참/빔으로만 쓴다. 자리를 지키는 게 목적이다.
-  ["클라이맥스", "m", (e) => ({ v: e.climax ? 100 : 0, on: !!e.climax, txt: e.climax ? "켜짐" : "—" })],
-  ["전환 탐지", "m", (e) => ({ v: e.breakout_detect ? 100 : e.breakout_prewarn ? 50 : 0,
-                             on: !!(e.breakout_detect || e.breakout_prewarn),
-                             txt: e.breakout_detect ? "탐지" : e.breakout_prewarn ? "예고" : "—" })],
-];
-
-// 한 칸. r == null 이면 «재료 없음» -- 막대도 눈금도 없이 이름만 흐리게 남는다.
-function situationSignalRow(name, kind, r) {
-  const dead = r == null;
-  const on = dead ? false : r.on !== false;
-  const v = dead ? 0 : r.v;
-  const cls = `sit-sg${dead ? " none" : on ? "" : " off"}${kind === "d" ? " d" : ""}`;
-  let inner = "";
-  if (!dead && on) {
-    inner = kind === "d"
-      ? `<i class="f" style="${v >= 0 ? "left:50%" : "right:50%"};width:${Math.min(Math.abs(v) / 2, 50)}%;`
-        + `background:var(--${v >= 0 ? "good" : "bad"})"></i>`
-      : `<i class="f" style="width:${SIT_CLAMP(v, 0, 100)}%"></i>`;
-  } else if (!dead) {
-    inner = `<i class="z"></i>`;                       // 조건 미달 -- 0 자리 눈금만
-  }
-  const mark = !dead && Number.isFinite(r.mark) && r.mark > 0 && r.mark < 100
-    ? (kind === "d"
-        ? `<i class="m" style="left:${50 + r.mark / 2}%"></i><i class="m" style="left:${50 - r.mark / 2}%"></i>`
-        : `<i class="m" style="left:${r.mark}%"></i>`)
-    : "";
-  return `<div class="${cls}"><span class="n">${escapeHtml(name)}</span>`
-    + `<span class="t">${kind === "d" ? '<i class="c"></i>' : ""}${mark}${inner}</span>`
-    + `<span class="v">${dead ? "—" : escapeHtml(String(r.txt))}</span></div>`;
-}
 
 // 2026-09-25 «데이터 관계 읽기» -- 서버 dashboard/flow_read.py 가 만든 줄을 그대로 그린다(화면은 계산하지 않는다).
 //   등급 칩: 근거(주황) · 약함(실선) · 설명(테두리 없음) · 미측정(점선 = 아직 사실 아님, DESIGN.md Shapes).
@@ -4143,19 +4009,6 @@ function renderSituation() {
   // 그대로 쓴다(«상승 +124bp» / «횡보 (±15bp 안)») -- 클라이언트가 한국어를 다시 만들지 않는다.
   const regArrow = n.dir > 0 ? "↑" : n.dir < 0 ? "↓" : "↔";
   const regHead = `${regArrow} ${escapeHtml((n.labels || [])[0] || "")}${rgNum}`;
-  // ── STATE ── 서버가 고른 라벨 문장을 그대로 쓴다. 클라이언트가 문장을 쪼개 «키: 값»으로
-  //   만들려면 한국어 파싱이 필요하고, 그건 서버 문구가 바뀌는 날 조용히 깨진다.
-  // ── 현재 상황 ── 18칸 전부를 늘 그린다(위 SIT_SIGNALS 주석). 왼쪽 8칸은 부호 있는 값,
-  //   오른쪽 10칸은 0~100. 한 칸 안에서 막대 종류가 하나뿐이라 «어느 쪽을 미나»가 훑어진다.
-  const ev = n.evidence || {}; const thrUi = ev.thr_ui || {};
-  const sigCell = (from, to) => SIT_SIGNALS.slice(from, to).map(([nm, kind, fn]) => {
-    let r = null;
-    try { r = fn(ev, thrUi); } catch (_) { r = null; }   // 한 칸이 깨져도 나머지 17칸은 그린다
-    return [situationSignalRow(nm, kind, r), r && r.on !== false];
-  });
-  const sigL = sigCell(0, 8), sigR = sigCell(8, SIT_SIGNALS.length);
-  const sigOn = [...sigL, ...sigR].filter(([, on]) => on).length;
-  const sigHtml = (rows) => rows.map(([h]) => h).join("");
 
   // ── WS ── 장부(LEDGER)와 각주는 화면에서 뺐다(2026-09-22 사용자 «레져와 아래 텍스트들은
   //   제거해줘 · ws 상태만 남겨줘»). 🔴서버의 기록·해결은 그대로 돈다 -- calibration 집계도,
@@ -4170,11 +4023,6 @@ function renderSituation() {
     ${fusedRowHtml(fz)}
     ${o3 ? `<div class="sit-cols">${scn}</div><div class="sit-cal sit-src">${escapeHtml(o3.note)}</div>`
          : `<div class="sit-cal">융합 3결과 계산 전 — 30분 폭 분위(5분봉 24h)를 받는 중</div>`}
-    <div class="sit-sec">현재 상황<span>${sigOn} / ${SIT_SIGNALS.length} 켜짐</span></div>
-    <div class="sit-sgs">
-      <div><div class="h">방향 압력<span>− 숏 · 롱 +</span></div>${sigHtml(sigL)}</div>
-      <div><div class="h">강도 · 위치<span>0 → 100</span></div>${sigHtml(sigR)}</div>
-    </div>
     <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`;
 
   if (badge) {
