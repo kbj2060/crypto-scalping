@@ -2319,11 +2319,9 @@ svg {
    더 이상 그 gap 을 못 받는다 -- 여기서 같은 간격을 준다. summary 는 display 를 바꾸지
    않는다(바꾸면 브라우저가 그리는 펼침 삼각형이 사라진다). 높이는 패딩으로만 올린다. */
 .entry-fold { display: flex; flex-direction: column; gap: 8px; }
-.entry-fold > summary { font: 700 11.5px/1.4 var(--font-sans); color: var(--muted);
-  cursor: pointer; padding: 9px 2px; }
-.entry-fold > summary:hover, .entry-fold[open] > summary { color: var(--text); }
-/* 2026-09-25 상시 표시(접기 폐지) -- 제목 줄은 머리글일 뿐 누르는 곳이 아니다. */
-.entry-fold > summary { cursor: default; list-style: none; }
+/* 2026-09-25 상시 표시(접기 폐지) -- 제목 줄은 머리글일 뿐 누르는 곳이 아니다(늘 [open], 늘 본문색). */
+.entry-fold > summary { font: 700 11.5px/1.4 var(--font-sans); color: var(--text);
+  cursor: default; list-style: none; padding: 9px 2px; }
 .entry-fold > summary::-webkit-details-marker { display: none; }
 .manual-entry-result { margin: 0; display: grid; gap: 10px; color: var(--text); }
 /* 계좌 카드의 .acct-tile 을 그대로 쓰고, «전 → 후»만 덧입힌다.
@@ -3013,9 +3011,12 @@ details.sit-why div { font: 500 11px/1.5 var(--font-mono); color: var(--muted); 
 }
 /* 손잡이만 끈다 -- touch-action:none 이 없으면 모바일에서 끄는 동안 페이지가 스크롤된다. */
 .ofab-grip {
-  width: 36px; height: 36px; border: 0; border-radius: 999px; background: transparent;
-  color: var(--muted); font-family: inherit; font-size: 18px; line-height: 1; cursor: grab; touch-action: none;
+  display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
+  border: 0; border-radius: 999px; background: transparent;
+  color: var(--muted); cursor: grab; touch-action: none;
 }
+.ofab-grip svg { width: 18px; height: 18px; }
+.ofab-grip:hover { color: var(--text); }
 .ofab-grip:active { cursor: grabbing; color: var(--text); }
 .ofab-toggle {
   min-height: 36px; padding: 0 14px 0 8px; border: 0; border-radius: 999px; background: transparent;
@@ -3024,11 +3025,17 @@ details.sit-why div { font: 500 11px/1.5 var(--font-mono); color: var(--muted); 
 .ofab.long .ofab-toggle { color: var(--good); }
 .ofab.short .ofab-toggle { color: var(--bad); }
 .ofab-toggle[aria-expanded="true"] { background: rgb(var(--lift) / 0.08); }
-.ofab-grip:focus-visible, .ofab-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ofab-grip:focus-visible, .ofab-toggle:focus-visible, .ofab-back:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 손가락은 36px 을 자주 놓친다 -- 거친 포인터에서만 44px 로 키운다(마우스 화면은 그대로). */
+@media (pointer: coarse) {
+  .ofab-grip { width: 44px; height: 44px; }
+  .ofab-toggle { min-height: 44px; }
+}
 .ofab-panel {
   position: absolute; left: 0; top: calc(100% + 8px);
   width: min(380px, calc(100vw - 16px)); overflow: auto; overscroll-behavior: contain;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm);
   box-shadow: 0 1px 2px rgb(var(--shadow) / 0.25), 0 12px 32px rgb(var(--shadow) / 0.36);
 }
 .ofab-panel[hidden] { display: none; }
@@ -3050,16 +3057,15 @@ details.sit-why div { font: 500 11px/1.5 var(--font-mono); color: var(--muted); 
 /* 카드에서는 칩과 값이 같으면 숫자를 숨긴다 -- 게이지에는 칩이 없으니 숫자가 늘 보여야 한다. */
 .ofab-panel .chipset[data-matched="1"] + .chip-val { display: inline; }
 .ofab-panel .chip-val { font-size: 12px; color: var(--text); min-width: 40px; text-align: right; }
-.ofab-away {
-  margin: 10px 0 0; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 10px;
-  font-size: 12px; color: var(--muted);
-}
+/* 모양은 계좌 카드의 빈 상태(.acct-empty)를 그대로 쓴다 -- 여기는 자리 간격만. */
+.ofab-away { margin: 10px 0 0; }
 .ofab-away[hidden] { display: none; }
 .ofab-back {
   margin-left: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
   background: transparent; color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600;
-  line-height: 1.4; cursor: pointer;
+  line-height: 1.4; cursor: pointer; transition: border-color .16s ease;
 }
+.ofab-back:hover { border-color: var(--hover-line); }
 /* 🔴버튼은 페이지 폰트를 **물려받지 않는다**(UA 기본) -- 안 적으면 한글 없는 폰트로 떨어져 «□□□»가 된다
    (2026-09-25 렌더 검사에서 «여기로 되돌리기»가 실제로 그렇게 나왔다).
    🔴`font: 12px inherit` 처럼 **축약형 안에** inherit 를 넣으면 선언 전체가 무효라 버려진다 -- 따로 쓴다. */
@@ -3086,6 +3092,9 @@ details.sit-why div { font: 500 11px/1.5 var(--font-mono); color: var(--muted); 
 .ofab-panel .entry-line > #snapLevVal { order: 1; }
 .ofab-panel .entry-line > .lev-auto { order: 2; }
 .ofab-panel .entry-line > #snapLevGauge { order: 3; flex-basis: 100%; }
+/* 줄바꿈 칸도 순서를 받아야 한다 -- 없으면 order 0 이라 줄 **맨 앞**으로 가서 아무것도 안 가르고, 물타기로
+   레버 게이지가 숨으면 «20배 (기존…)» 과 진입비율 게이지가 한 줄에 붙어 값 «50%» 만 떨어졌다. */
+.ofab-panel .entry-line > .entry-break { order: 3; }
 .ofab-panel .entry-line > #snapEntryFrac { order: 4; }
 .ofab-panel .entry-line > #snapEntryFracVal { order: 5; }
 .ofab-panel .manual-entry-row.exit-row { justify-content: center; }

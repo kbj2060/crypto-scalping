@@ -8426,7 +8426,8 @@ function renderLevGauge(plan) {
   const rejected = floor != null && v < floor;
   const low = !rejected && min != null && v < min;
   out.textContent = `${v}배`
-    + (locked ? " (기존 포지션과 동일)" : manualLevAuto() ? " (자동)" : " (수동)")
+    // «자동»은 바로 옆 체크박스가 말한다 -- 값 글자에 또 쓰면 같은 말이 두 번이다(2026-09-25 통일).
+    + (locked ? " (기존 포지션과 동일)" : "")
     + (rejected ? ` · 🔴거래소가 거부합니다(포지션 때문에 최소 ${Math.ceil(floor)}배)`
        : low ? ` · ⚠상한만큼 못 엽니다(최소 ${Math.ceil(min)}배)` : "");
   // 🔴같은 줄을 두 번 쓰고 있었다 -- 뒤 줄이 앞 줄을 덮어 **rejected(거래소 거부)가 색을
@@ -8812,7 +8813,7 @@ document.addEventListener("input", (e) => {
 el("snapLevAuto")?.addEventListener("change", () => manualEntryRefreshSize());
 el("snapLevGauge")?.addEventListener("input", () => {
   const out = el("snapLevVal");
-  if (out) out.textContent = `${manualLevValue()}배 (수동)`;
+  if (out) out.textContent = `${manualLevValue()}배`;
   // 2026-09-20 레버리지도 **크기를 바꾼다** -- 진입 비율과 똑같이 다시 물어서 위 계좌 카드가
   // 따라 움직이게 한다. 예전엔 라벨만 고쳐서, 게이지를 밀어도 미리보기가 옛 값에 굳어 있었다.
   if (manualEntryPending?.kind === "entry") manualEntryClearConfirm();
