@@ -1,0 +1,410 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-25T09:43:33.826866+00:00",
+  "title": "Design System: 이더리움 트레이딩 대시보드",
+  "extensions": {
+    "colorMeta": {
+      "night-desk": {
+        "role": "neutral",
+        "displayName": "야간 책상",
+        "canonical": "#161a22",
+        "tonalRamp": [
+          "#1e242e",
+          "#353f52",
+          "#4c5a75",
+          "#637599",
+          "#8594b0",
+          "#a9b3c7",
+          "#ccd2de",
+          "#f0f1f5"
+        ]
+      },
+      "lamp-text": {
+        "role": "neutral",
+        "displayName": "등불 글자",
+        "canonical": "#eef0f6",
+        "tonalRamp": [
+          "#1a2032",
+          "#2f3958",
+          "#43527e",
+          "#576aa4",
+          "#7c8bba",
+          "#a2adce",
+          "#c8cfe2",
+          "#eef0f6"
+        ]
+      },
+      "dim-text": {
+        "role": "neutral",
+        "displayName": "흐린 글자",
+        "canonical": "#a6acc1",
+        "tonalRamp": [
+          "#1f222d",
+          "#373d4f",
+          "#4f5772",
+          "#677194",
+          "#8991ad",
+          "#abb1c5",
+          "#ced1dd",
+          "#f0f1f5"
+        ]
+      },
+      "bid-green": {
+        "role": "primary",
+        "displayName": "매수 초록",
+        "canonical": "#5dbf83",
+        "tonalRamp": [
+          "#163723",
+          "#26613d",
+          "#378a57",
+          "#47b471",
+          "#6fc691",
+          "#99d7b1",
+          "#c3e7d1",
+          "#edf8f1"
+        ]
+      },
+      "ask-red": {
+        "role": "primary",
+        "displayName": "매도 빨강",
+        "canonical": "#ef9387",
+        "tonalRamp": [
+          "#441009",
+          "#771c10",
+          "#aa2817",
+          "#de341e",
+          "#e7604e",
+          "#ee8e82",
+          "#f5bcb5",
+          "#fcebe8"
+        ]
+      },
+      "alarm-amber": {
+        "role": "secondary",
+        "displayName": "경보 주황",
+        "canonical": "#e99c57",
+        "tonalRamp": [
+          "#442509",
+          "#774110",
+          "#ab5c16",
+          "#de781d",
+          "#e8974e",
+          "#efb581",
+          "#f5d3b5",
+          "#fcf2e8"
+        ]
+      },
+      "steel-accent": {
+        "role": "neutral",
+        "displayName": "강철 강조",
+        "canonical": "#dfe4ee",
+        "tonalRamp": [
+          "#1b2232",
+          "#2f3d58",
+          "#43577e",
+          "#5771a4",
+          "#7c91b9",
+          "#a2b1ce",
+          "#c8d1e2",
+          "#eef1f6"
+        ]
+      },
+      "graphite-neutral": {
+        "role": "neutral",
+        "displayName": "흑연",
+        "canonical": "#cbd1e3",
+        "tonalRamp": [
+          "#1b2132",
+          "#2f3958",
+          "#44527d",
+          "#586ba3",
+          "#7d8cb9",
+          "#a3adcd",
+          "#c9cfe2",
+          "#eef0f6"
+        ]
+      },
+      "turnover-blue": {
+        "role": "tertiary",
+        "displayName": "거래대금 파랑",
+        "canonical": "#5aa9f5",
+        "tonalRamp": [
+          "#042748",
+          "#08457f",
+          "#0b62b6",
+          "#0e80ed",
+          "#429df4",
+          "#79b9f7",
+          "#b0d6fa",
+          "#e7f2fe"
+        ]
+      },
+      "light-bid-green": {
+        "role": "primary",
+        "displayName": "매수 초록 (라이트)",
+        "canonical": "#136436",
+        "tonalRamp": [
+          "#0c4023",
+          "#16713d",
+          "#1fa258",
+          "#28d372",
+          "#57df92",
+          "#88e8b1",
+          "#b9f2d1",
+          "#eafbf1"
+        ]
+      },
+      "light-ask-red": {
+        "role": "primary",
+        "displayName": "매도 빨강 (라이트)",
+        "canonical": "#9c3227",
+        "tonalRamp": [
+          "#3d140f",
+          "#6c231b",
+          "#9a3227",
+          "#c94032",
+          "#d76a5f",
+          "#e3958d",
+          "#eec1bc",
+          "#faeceb"
+        ]
+      },
+      "light-alarm-amber": {
+        "role": "secondary",
+        "displayName": "경보 주황 (라이트)",
+        "canonical": "#7a4809",
+        "tonalRamp": [
+          "#472a05",
+          "#7e4a09",
+          "#b46a0d",
+          "#ea8a11",
+          "#f1a544",
+          "#f5bf7b",
+          "#f9d9b1",
+          "#fdf4e7"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "시계",
+        "purpose": "상단 시계 전용, 등폭 숫자."
+      },
+      "headline": {
+        "displayName": "화면 제목",
+        "purpose": "운영 화면 제목."
+      },
+      "title": {
+        "displayName": "카드 제목",
+        "purpose": "«내 계좌» 같은 카드 제목."
+      },
+      "figure": {
+        "displayName": "큰 숫자",
+        "purpose": "순자산 같은 홀로 선 숫자, 비례 숫자."
+      },
+      "tile-value": {
+        "displayName": "타일 값",
+        "purpose": "계좌 타일 값."
+      },
+      "body": {
+        "displayName": "본문",
+        "purpose": "페이지 기본."
+      },
+      "note": {
+        "displayName": "안내",
+        "purpose": "안내·경고 상자와 차트 주석."
+      },
+      "label": {
+        "displayName": "눈썹",
+        "purpose": "대문자 눈썹 이름표."
+      },
+      "data": {
+        "displayName": "데이터",
+        "purpose": "칩·툴팁·가격·수량, 등폭."
+      }
+    },
+    "shadows": [
+      {
+        "name": "card-ambient",
+        "value": "0 20px 54px rgb(var(--shadow) / 0.28), inset 0 1px 0 var(--specular)",
+        "purpose": "모든 패널."
+      },
+      {
+        "name": "floating-control",
+        "value": "0 1px 2px rgb(var(--shadow) / 0.25), 0 12px 32px rgb(var(--shadow) / 0.36)",
+        "purpose": "떠다니는 주문 버튼과 패널."
+      },
+      {
+        "name": "tooltip",
+        "value": "0 6px 18px rgb(var(--shadow) / 0.35)",
+        "purpose": "계좌 차트 툴팁."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state",
+        "value": ".16s ease",
+        "purpose": "버튼·칩 색·테두리 전환(가장 흔함)."
+      },
+      {
+        "name": "preview-slide",
+        "value": ".32s cubic-bezier(.4, 0, .2, 1)",
+        "purpose": "진입 미리보기로 레일·손잡이가 미끄러질 때. 줄인 모션에서는 끈다."
+      },
+      {
+        "name": "card-enter",
+        "value": "0.6s cubic-bezier(0.2, 0.8, 0.2, 1)",
+        "purpose": "카드 첫 등장(fadeInUp)."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "stack",
+        "value": "720px"
+      },
+      {
+        "name": "tablet",
+        "value": "960px"
+      },
+      {
+        "name": "phone",
+        "value": "520px"
+      },
+      {
+        "name": "narrow",
+        "value": "420px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Long Button",
+      "kind": "button",
+      "refersTo": "button-long",
+      "description": "롱 진입/청산 — 방향색 테두리와 글자, 채우지 않는다.",
+      "html": "<button class=\"ds-btn-long\">롱 진입</button>",
+      "css": ".ds-btn-long{font:800 12px/1.3 var(--font-sans,'Pretendard Variable',sans-serif);padding:10px 16px;border-radius:999px;background:rgb(var(--lift,255 255 255)/.04);color:var(--good,#5dbf83);border:1px solid color-mix(in srgb,var(--good,#5dbf83) 45%,transparent);cursor:pointer;transition:border-color .16s ease}.ds-btn-long:hover{border-color:var(--good,#5dbf83)}.ds-btn-long:focus-visible{outline:2px solid var(--accent,#dfe4ee);outline-offset:2px}"
+    },
+    {
+      "name": "Short Button",
+      "kind": "button",
+      "refersTo": "button-short",
+      "description": "숏 진입/청산 — 빨강 테두리와 글자.",
+      "html": "<button class=\"ds-btn-short\">숏 진입</button>",
+      "css": ".ds-btn-short{font:800 12px/1.3 var(--font-sans,'Pretendard Variable',sans-serif);padding:10px 16px;border-radius:999px;background:rgb(var(--lift,255 255 255)/.04);color:var(--bad,#ef9387);border:1px solid color-mix(in srgb,var(--bad,#ef9387) 45%,transparent);cursor:pointer;transition:border-color .16s ease}.ds-btn-short:hover{border-color:var(--bad,#ef9387)}.ds-btn-short:focus-visible{outline:2px solid var(--accent,#dfe4ee);outline-offset:2px}"
+    },
+    {
+      "name": "Chip Set",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "숨긴 range 입력의 얼굴 — 선택은 경보 주황 틴트.",
+      "html": "<div class=\"ds-chips\"><button class=\"ds-chip\">10%</button><button class=\"ds-chip on\">25%</button><button class=\"ds-chip\">50%</button></div>",
+      "css": ".ds-chips{display:flex;gap:4px}.ds-chip{min-height:24px;padding:4px 9px;border:1px solid transparent;border-radius:7px;background:var(--glass,rgba(255,255,255,.05));color:var(--muted,#a6acc1);font:600 11.5px/1 var(--font-mono,'JetBrains Mono',monospace);cursor:pointer}.ds-chip:hover{color:var(--text,#eef0f6)}.ds-chip.on{background:color-mix(in srgb,var(--amber,#e99c57) 13%,transparent);color:var(--amber,#e99c57);border-color:color-mix(in srgb,var(--amber,#e99c57) 45%,transparent)}.ds-chip:focus-visible{outline:2px solid var(--accent,#dfe4ee);outline-offset:2px}"
+    },
+    {
+      "name": "Account Tile",
+      "kind": "card",
+      "refersTo": "tile",
+      "description": "이름 → 값(방향색) → 3px 레일.",
+      "html": "<div class=\"ds-tile\"><span class=\"ds-tile-lab\">청산까지</span><b class=\"ds-tile-val\">19.78%</b><span class=\"ds-rail\"><i style=\"width:66%\"></i></span></div>",
+      "css": ".ds-tile{display:grid;gap:7px;padding:11px 12px 12px;border-radius:var(--radius-sm,12px);background:var(--glass,rgba(255,255,255,.05));border:1px solid var(--soft-line,rgba(203,209,227,.095));width:180px}.ds-tile-lab{font:600 11px/1 var(--font-sans,'Pretendard Variable',sans-serif);color:var(--muted,#a6acc1)}.ds-tile-val{font:700 21px/1 var(--font-sans,'Pretendard Variable',sans-serif);letter-spacing:-.015em;color:var(--good,#5dbf83)}.ds-rail{display:block;height:3px;border-radius:3px;background:rgb(var(--lift,255 255 255)/.09);overflow:hidden}.ds-rail i{display:block;height:100%;background:var(--good,#5dbf83)}"
+    },
+    {
+      "name": "Page Tab",
+      "kind": "nav",
+      "refersTo": "page-tab",
+      "description": "상단 페이지 탭 — 활성은 강철 강조 틴트.",
+      "html": "<nav class=\"ds-tabs\"><button class=\"ds-tab active\">스냅샷</button><button class=\"ds-tab\">운영 관리</button><button class=\"ds-tab\">알림</button></nav>",
+      "css": ".ds-tabs{display:flex;gap:7px}.ds-tab{border:1px solid var(--line,rgba(203,209,227,.18));border-radius:999px;background:rgb(var(--lift,255 255 255)/.035);color:var(--muted,#a6acc1);padding:7px 11px;font:800 11px/1 var(--font-sans,'Pretendard Variable',sans-serif);cursor:pointer}.ds-tab:hover{color:var(--text,#eef0f6)}.ds-tab.active{border-color:color-mix(in srgb,var(--accent,#dfe4ee) 70%,transparent);background:color-mix(in srgb,var(--accent,#dfe4ee) 16%,transparent);color:var(--ink,#f5f6fb)}.ds-tab:focus-visible{outline:2px solid var(--accent,#dfe4ee);outline-offset:2px}"
+    },
+    {
+      "name": "Failure Note",
+      "kind": "custom",
+      "refersTo": "note-bad",
+      "description": "실패는 조용하지 않다 — 빨강 글자와 테두리의 안내 상자.",
+      "html": "<div class=\"ds-note bad\">진입 불가 — 증거금 상한 50% 초과 · 주문 뒤 증거금 62%</div>",
+      "css": ".ds-note{font:600 11px/1.55 var(--font-sans,'Pretendard Variable',sans-serif);padding:8px 10px;border-radius:8px;background:var(--glass,rgba(255,255,255,.05));border:1px solid var(--soft-line,rgba(203,209,227,.095));color:var(--muted,#a6acc1);max-width:360px}.ds-note.bad{color:var(--bad,#ef9387);border-color:color-mix(in srgb,var(--bad,#ef9387) 35%,transparent)}"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-good",
+      "description": "채운 면은 상태 배지뿐 — 방향색 바탕 + on-fill 글자.",
+      "html": "<span class=\"ds-badge\">롱 보유</span>",
+      "css": ".ds-badge{display:inline-block;padding:7px 12px;border-radius:999px;background:var(--good,#5dbf83);color:var(--on-fill,#12161d);font:700 11px/1 var(--font-sans,'Pretendard Variable',sans-serif)}"
+    },
+    {
+      "name": "Floating Order Pill",
+      "kind": "custom",
+      "refersTo": "button-long",
+      "description": "떠다니는 주문 버튼 — SVG 손잡이 + 포지션 글자.",
+      "html": "<div class=\"ds-ofab\"><span class=\"ds-grip\"><svg viewBox=\"0 0 24 24\" fill=\"currentColor\" width=\"18\" height=\"18\"><circle cx=\"9\" cy=\"6\" r=\"1.6\"/><circle cx=\"15\" cy=\"6\" r=\"1.6\"/><circle cx=\"9\" cy=\"12\" r=\"1.6\"/><circle cx=\"15\" cy=\"12\" r=\"1.6\"/><circle cx=\"9\" cy=\"18\" r=\"1.6\"/><circle cx=\"15\" cy=\"18\" r=\"1.6\"/></svg></span><button class=\"ds-ofab-pos\">LONG 2.294 · +$7</button></div>",
+      "css": ".ds-ofab{display:inline-flex;align-items:center;gap:2px;padding:4px;border-radius:999px;background:var(--bg,#161a22);border:1px solid var(--line,rgba(203,209,227,.18));box-shadow:0 1px 2px rgb(var(--shadow,0 0 0)/.25),0 8px 24px rgb(var(--shadow,0 0 0)/.32)}.ds-grip{display:grid;place-items:center;width:36px;height:36px;color:var(--muted,#a6acc1);cursor:grab}.ds-grip:hover{color:var(--text,#eef0f6)}.ds-ofab-pos{min-height:36px;padding:0 14px 0 8px;border:0;border-radius:999px;background:transparent;color:var(--good,#5dbf83);font:700 13px/1 var(--font-mono,'JetBrains Mono',monospace);cursor:pointer}.ds-ofab-pos:hover{background:rgb(var(--lift,255 255 255)/.08)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "야간 트레이딩 데스크",
+    "overview": "불을 거의 끈 책상 위에 조용한 계기들이 놓여 있다. 표면은 어둡고 납작하며, 눈이 피곤하지 않은 무채색이 화면의 대부분을 덮는다. 색은 **장식이 아니라 신호**다 — 초록은 매수·상승·지지, 빨강은 매도·하락·저항, 주황은 경보. 그 밖의 모든 것은 한 가지 무채색 재료에서 밝기만 달리해 나온다. 그래서 색이 보이는 순간 그건 읽어야 할 무엇이다.\n\n밀도가 장식을 이긴다. 한 화면에 수급 차트·풋프린트·청산·사분면·계좌·주문이 함께 산다. 숫자는 또렷하고(데이터는 등폭 숫자, 큰 단독 숫자는 비례 숫자), 설명은 작고 흐리다. 부품은 **조용하고 정밀하다** — 얇은 테두리와 옅은 필름 배경, 눌러야 하는 것은 분명하지만 도드라지지 않는다. 주문 버튼조차 채운 덩어리가 아니라 방향색 테두리와 글자다.\n\n라이트 테마는 같은 책상에 불을 켠 것이 아니라 **재질이 바뀐다**: 애플 «Liquid Glass» — 흐림 유리 패널 뒤로 초록·빨강·주황의 부드러운 색 덩어리가 비친다. 다크에서는 유리 효과를 끈다(흐림 없음). 두 테마는 같은 토큰 이름을 공유하고 값만 갈아 끼운다.",
+    "keyCharacteristics": [
+      "세 방향색(초록·빨강·주황) + 한 무채색 재료. 넷째 색(파랑)은 거래대금 선 하나 전용.",
+      "투명도는 `color-mix`, 명암은 `--lift`/`--shadow`/`--specular` — 흰색·검정·rgba 숫자를 직접 쓰지 않는다.",
+      "부품은 얇은 테두리 + 필름 배경. 채운 면은 상태 배지뿐.",
+      "데이터 숫자는 JetBrains Mono 등폭, 제목은 Space Grotesk, 본문·큰 숫자는 Pretendard.",
+      "다크 = 납작한 야간 표면, 라이트 = Liquid Glass."
+    ],
+    "rules": [
+      {
+        "name": "The Three Signals Rule",
+        "body": "색은 초록·빨강·주황 셋뿐이다. 새 색이 필요하면 «셋 중 무엇인가»를 먼저 답한다 — 답이 없으면 그건 무채색이다.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mix-Don't-Hardcode Rule",
+        "body": "투명한 방향색은 `color-mix(in srgb, var(--bad) 22%, transparent)` 로만 만든다. `rgba(207,106,92,.22)` 처럼 숫자를 박으면 토큰을 고쳐도 따라오지 않는다(정리 전 하드코딩 사본 134회가 있었다).",
+        "section": "colors"
+      },
+      {
+        "name": "The Signed Lift Rule",
+        "body": "띄우기·그늘은 `rgb(var(--lift) / a)`, `rgb(var(--shadow) / a)` 로. 라이트에서는 «띄우기»의 부호가 뒤집힌다(흰 유리 위의 흰 오버레이는 안 보인다).",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Data Rule",
+        "body": "줄을 맞춰 비교하는 숫자(가격·수량·칩·툴팁)는 등폭(JetBrains Mono 또는 tabular-nums). 홀로 선 큰 숫자는 비례 숫자 — 등폭은 큰 크기에서 헐거워 보인다.",
+        "section": "typography"
+      },
+      {
+        "name": "The Small Voice Rule",
+        "body": "설명은 11px 흐린 글자다. 크기가 아니라 **색(방향색)과 위치**가 중요도를 말한다.",
+        "section": "typography"
+      },
+      {
+        "name": "The Still Card Rule",
+        "body": "카드는 호버로 움직이지 않는다. 마우스가 지나가는 자리마다 카드가 뜨면 읽는 도중 화면이 흔들린다.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Glass Needs Something Behind Rule",
+        "body": "라이트의 유리는 뒤에 색이 있어야 유리로 보인다 — 흰 바탕 위 blur 는 아무 일도 안 한다. 배경의 부드러운 방향색 메시가 그 «뒤»다.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "새 색이 필요하면 초록·빨강·주황 중 무엇인지 먼저 정하고, 투명도는 `color-mix(in srgb, var(--X) N%, transparent)` 로 만든다.",
+      "비교하는 숫자는 등폭(JetBrains Mono / tabular-nums), 큰 단독 숫자는 비례 숫자.",
+      "모서리·간격은 토큰(`--radius`, `--radius-sm`, `--card-gap`)을 쓴다 — 라이트 테마에서 값이 바뀐다.",
+      "실패·차단·지연은 빨강 안내 상자로 크게 말한다. 추정값·가정값은 점선 테두리로 사실과 구분한다.",
+      "새 버튼에는 `font-family: inherit` 을 **축약형 밖에서** 준다(버튼은 페이지 글꼴을 물려받지 않아 한글이 □ 가 된다).",
+      "대비는 가장 어두운 실제 바탕에서 잰다: 보조 글자 4.5:1 이상."
+    ],
+    "donts": [
+      "흰색·검정·`rgba(…)` 숫자를 직접 쓴다 — `--lift`/`--shadow`/`--specular`/토큰으로.",
+      "거래대금 파랑(`--turnover`)을 다른 곳에 쓴다.",
+      "카드를 호버로 띄우거나 움직인다.",
+      "주문 버튼을 방향색으로 채운 덩어리로 만든다 — 테두리와 글자가 방향을 말한다.",
+      "다크 테마에 blur 를 켠다(현행 다크는 납작한 표면이다).",
+      "점자·이모지 글자로 아이콘을 대신한다 — 인라인 SVG, `currentColor`.",
+      "`.top` 같은 일반 클래스명을 새로 만든다 — 전역 규칙과 충돌한다(접두사를 붙인다)."
+    ]
+  }
+}
