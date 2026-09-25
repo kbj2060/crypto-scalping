@@ -66,3 +66,16 @@ def test_old_bars_are_pruned_to_the_keep_window():
     liq_5m_add(st, ev(T0, "long", 1.0))
     liq_5m_add(st, ev(T0 + (FOOTPRINT_KEEP_BARS + 1) * BAR, "long", 1.0))
     assert T0 not in st and len(st) == 1
+
+
+def test_gauge_is_derived_from_the_chart_circles():
+    """게이지 = 현재 30분 봉에 든 청산 원의 합 -- 원과 **정의상** 같은 값이어야 한다(2026-09-25).
+    전에는 봇 DB 30분 합(l 기반, ~6배 작고 1~3분 늦음)을 따로 받아 원과 다른 크기를 말했다."""
+    import re
+    app = (Path(__file__).resolve().parents[1] / "dashboard/live/app.js").read_text(encoding="utf-8")
+    body = app[app.index("function renderLiquidationVolumeGauge()"):]
+    body = re.sub(r"(?m)^\s*//.*$", "", body[:body.index("\nfunction ", 10)])   # 주석에 속지 않는다
+    assert "latestLiquidation5mHist" in body, "게이지가 청산 원 배열을 안 본다"
+    assert "Math.floor(Date.now() / 1000 / 1800) * 1800" in body, "30분 경계가 서버 게이지(_bar_start)와 달라졌다"
+    # 음성 대조군: 서버 게이지 값이 1순위로 돌아가 있으면 실패
+    assert "const longUsd = warmed ? Number(liq5m.long_usd_5m || 0) : 0;" not in body

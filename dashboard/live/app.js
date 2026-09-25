@@ -905,11 +905,27 @@ function renderLiquidationVolumeGauge() {
   const fresh = !host.querySelector(".liq-vol-gauge-track");
   if (fresh) host.innerHTML = liquidationVolumeGaugeSkeletonHtml();
 
+  // 🔴2026-09-25 게이지를 **차트의 청산 원에서 계산한다**. 전에는 봇 DB(tail_risk_1m)의 30분 합을 60초마다
+  //   받았는데 ①1~3분 늦었고 ②봇이 청산을 l(마지막 체결 조각)로 세어 ~6배 작았다(24h $6.2M vs $38.0M).
+  //   청산 원은 대시보드 자체 @forceOrder(z = 주문 누적 체결량)로 2초마다 갱신되므로, 현재 30분 봉에 든
+  //   원들을 더하면 **원과 게이지가 정의상 같은 값**이 되고 새 요청도 없다.
+  //   30분 경계는 서버 게이지(_bar_start)와 같다: UTC 분 // 30.
+  const liqBars = Array.isArray(latestLiquidation5mHist) ? latestLiquidation5mHist : [];
+  const barStart = Math.floor(Date.now() / 1000 / 1800) * 1800;
+  const inBar = liqBars.filter((b) => Date.parse(b.ts) / 1000 >= barStart);
+  const fromBars = inBar.length > 0;
   const liq5m = latestLiquidation5m;
-  const warmed = !!(liq5m && liq5m.warmed_up);
-  const longUsd = warmed ? Number(liq5m.long_usd_5m || 0) : 0;
-  const shortUsd = warmed ? Number(liq5m.short_usd_5m || 0) : 0;
+  const warmed = fromBars || !!(liq5m && liq5m.warmed_up);
+  const longUsd = fromBars ? inBar.reduce((s, b) => s + (Number(b.long_usd) || 0), 0)
+    : (warmed ? Number(liq5m.long_usd_5m || 0) : 0);        // 청산 원이 아직 없을 때만 서버 게이지
+  const shortUsd = fromBars ? inBar.reduce((s, b) => s + (Number(b.short_usd) || 0), 0)
+    : (warmed ? Number(liq5m.short_usd_5m || 0) : 0);
   const total = longUsd + shortUsd;
+  host.title = fromBars
+    ? "현재 30분 봉에 든 차트 청산 원의 합(바이낸스 선물" + (inBar.every((b) => b.okx) ? " + OKX" : "")
+      + (inBar.some((b) => b.hl) ? " + HL 고래" : "")
+      + ") -- 원과 같은 값이다. 2초마다 갱신."
+    : "";
 
   const win = host.querySelector(".liq-vol-gauge-window");
   if (win) win.textContent = warmed ? "(최근 30분 누적)" : "(최근 30분 누적) · 웜업";
