@@ -51,7 +51,10 @@ FAPI = "https://fapi.binance.com"
 SYMBOL = "ETHUSDT"
 BTC_SYMBOL = "BTCUSDT"
 DAYS_BACK = 15  # kept equal to the validated script -- see module docstring, do not shrink casually
-HISTORY_BARS_RETURNED = 120  # 10h of 5-min bars -- comfortably covers the 6h/72-candle chart window
+HISTORY_BARS_RETURNED = 152  # 🔴2026-09-25: 120 이었고 주석이 «6h/72-candle 창을 넉넉히 덮는다»
+# 였는데 차트 창 토글이 그 뒤 **144봉(12h)** 으로 늘었다(app.js CHART_WINDOW_BARS). 12시간을 고르면
+# 앞 24봉에 레짐 칸이 없었고, 리본은 «칸 없음 = 횡보» 규약이라 **모름이 횡보로 읽혔다**.
+# 144 + 여유 8. 창을 더 늘리면 여기도 같이 올린다(먹이는 쪽이 여기다).
 MODEL_PATH = (ROOT / "tmp/eth_hmm_wide24_resweep_train2026h1_20260821"
               / "postfix_recheck_states24_sticky0.90_seed7529/models/regime3_current_sensitive_v2_hmm_wide24_2024.joblib")
 CLASSES3 = ["bull", "bear", "chop"]

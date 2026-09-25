@@ -57,7 +57,10 @@ from retrain_clean_regime_hmm_raw_state12_20260517 import _with_raw_state12  # n
 
 SYMBOL = "XRPUSDT"          # subject asset
 CROSS_SYMBOL = "BTCUSDT"    # cross-asset -> fills the *_btc columns, see the docstring trap note
-HISTORY_BARS_RETURNED = 120  # matches the ETH regime scorers
+HISTORY_BARS_RETURNED = 152  # 🔴2026-09-25: 120 이었고 주석이 «6h/72-candle 창을 넉넉히 덮는다»
+# 였는데 차트 창 토글이 그 뒤 **144봉(12h)** 으로 늘었다(app.js CHART_WINDOW_BARS). 12시간을 고르면
+# 앞 24봉에 레짐 칸이 없었고, 리본은 «칸 없음 = 횡보» 규약이라 **모름이 횡보로 읽혔다**.
+# 144 + 여유 8. 창을 더 늘리면 여기도 같이 올린다(먹이는 쪽이 여기다).
 MODEL_PATH = ROOT / "tmp/xrp_regime_s96k9_20260903/model.joblib"   # 2026-09-03 S48_K6에서 교체
 CLASSES3 = ["bull", "bear", "chop"]
 

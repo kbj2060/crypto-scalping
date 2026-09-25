@@ -59,7 +59,10 @@ from live_regime_wide24_signal_20260826 import (  # noqa: E402
 )
 from retrain_clean_regime_hmm_raw_state12_20260517 import _with_raw_state12  # noqa: E402
 
-HISTORY_BARS_RETURNED = 120  # matches live_regime_wide24_signal_20260826.py
+HISTORY_BARS_RETURNED = 152  # 🔴2026-09-25: 120 이었고 주석이 «6h/72-candle 창을 넉넉히 덮는다»
+# 였는데 차트 창 토글이 그 뒤 **144봉(12h)** 으로 늘었다(app.js CHART_WINDOW_BARS). 12시간을 고르면
+# 앞 24봉에 레짐 칸이 없었고, 리본은 «칸 없음 = 횡보» 규약이라 **모름이 횡보로 읽혔다**.
+# 144 + 여유 8. 창을 더 늘리면 여기도 같이 올린다(먹이는 쪽이 여기다).
 # 2026-09-02: label swapped to S12_K3. 2026-09-10: swapped again to **balnobb** (user directive
 # "balnobb으로 대시보드도 교체해줘") -- the label adopted as the Omega4.6.1 regime spine, retrained
 # on THIS dashboard's TRAIN range (2024-01-01~2026-06-30) rather than reusing the Omega artifact,

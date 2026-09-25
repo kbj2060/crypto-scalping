@@ -4277,9 +4277,14 @@ def make_app() -> web.Application:
         게이지(/api/liquidation-5m-signal)는 현재 봉 하나만 주므로 지나간 봉은 여기서 온다.
         duckdb 를 읽으므로 to_thread 로 뺀다(이벤트 루프 블로킹 방지)."""
         asset = _query_coin_asset(request)
+        # 🔴2026-09-25: 96 이 하드코딩돼 있었다. 창 토글이 144봉까지 가므로 12시간을 고르면 앞 48봉에
+        #   청산 원이 아예 안 그려졌고, 화면에서는 «그 4시간엔 청산이 없었다»로 읽혔다(실제로는 모름).
+        #   풋프린트·수급프로파일과 같은 파서를 쓴다 -- 창 폭 파싱은 한 곳에만 있어야 한다.
+        #   🔴캐시 키에 bars 를 넣는다. 안 넣으면 창을 바꿔도 30초 동안 옛 폭이 나온다.
+        bars = footprint_window_bars(request)
         payload = await swr_cached(
-            f"liq5m_hist_{asset}", 30.0,
-            lambda: asyncio.to_thread(compute_liquidation_5m_history, asset, 96),
+            f"liq5m_hist_{asset}_{bars}", 30.0,
+            lambda: asyncio.to_thread(compute_liquidation_5m_history, asset, bars),
             max_stale=STALE_GRACE_SECONDS,
         )
         okx_from = okx_fp["first_bar"]

@@ -691,9 +691,13 @@ function setupChartWindowTabs() {
       footprintLastFetchAt = 0;
       supplyProfileLastFetchAt = 0;
       flowHeatmapLastFetchAt = 0;
+      // 🔴2026-09-25 청산 이력도 이제 창 폭을 들고 간다 -- 여기 안 넣으면 토글을 눌러도
+      //   다음 폴링까지 옛 폭으로 남는다(위 셋과 같은 이유).
+      liquidation5mLastFetchAt = 0;
       refreshFootprint();
       refreshSupplyProfile();
       refreshFlowHeatmap();
+      refreshLiquidation5mSignal();
       refreshGex();
     });
   });
@@ -2864,7 +2868,11 @@ async function refreshLiquidation5mSignal() {
     if (asset !== activeSnapshotAsset) return;
     latestLiquidation5m = j;
     try {
-      const rh = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${asset}`, { cache: "no-cache" });
+      // 🔴2026-09-25 폭을 보낸다. 안 보내면 서버가 96 봉으로 답해 12시간 창에서 앞 48봉에
+      //   청산 원이 사라졌다 -- 화면에서는 «청산이 없었다»로 읽힌다(실제로는 모름).
+      //   풋프린트·수급프로파일과 같은 규약(`?bars=${chartWindowBars}`).
+      const rh = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${asset}&bars=${chartWindowBars}`,
+                             { cache: "no-cache" });
       const jh = await rh.json();
       if (asset !== activeSnapshotAsset) return;
       latestLiquidation5mHist = (jh && jh.warmed_up && Array.isArray(jh.bars)) ? jh.bars : [];
@@ -5776,6 +5784,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const regimeByTsForChart = latestRegimeForChart && latestRegimeForChart.warmed_up
     ? new Map((latestRegimeForChart.history || []).map((r) => [Math.floor(r.ts_ms / 1000), r]))
     : null;
+  // 이력이 시작되는 시각. 리본·툴팁이 «모름»과 «횡보»를 가르는 데 쓴다 -- 호버마다 다시 세지
+  // 않도록 여기서 한 번만 구한다(2026-09-25).
+  const regimeFromTs = regimeByTsForChart && regimeByTsForChart.size
+    ? Math.min(...regimeByTsForChart.keys()) : null;
   // 2026-08-27 user report: ribbon "turns black" and stops updating for stretches -- tracing the
   // draw loop below, it never paints an invalid color (regimeDominant() only ever returns one of
   // the 3 REGIME_DOMINANT_COLOR keys); what actually happens is this block draws literally nothing
@@ -6049,6 +6061,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     + regimeRibbonWaiting + ":" + regimeRibbonUnsupported, (g) => {
   if (regimeByTsForChart) {
     drawLaneTrack(REGIME_RIBBON_Y, g);   // 천장·바닥과 같은 트랙 (2026-09-16)
+    // 🔴2026-09-25 «모름»과 «횡보»가 같은 그림이었다. 아래 규약이 «칸 없음 = 횡보»인데,
+    //   워커 이력이 창보다 짧으면(HISTORY_BARS_RETURNED) 그 앞 봉도 똑같이 칸이 없다.
+    //   12시간 창에서 앞 24봉이 실제로 그랬다 -- 데이터가 없는 구간이 «횡보였다»로 읽혔다.
+    //   이력이 시작되기 **전** 구간에만 흐린 띠를 깔아 둘을 가른다(안쪽 결손은 워커가 안 만든다).
+    const oldest = regimeFromTs == null ? [] : candles.filter((c) => c.time < regimeFromTs);
+    if (oldest.length) {
+      const j = candles.indexOf(oldest[oldest.length - 1]);
+      const un = document.createElementNS(NS, "rect");
+      un.setAttribute("x", xAt(0)); un.setAttribute("y", REGIME_RIBBON_Y);
+      un.setAttribute("width", Math.max(1, xAt(j) + laneW - xAt(0)));
+      un.setAttribute("height", REGIME_RIBBON_H); un.setAttribute("rx", laneRx);
+      un.setAttribute("fill", "var(--muted)"); un.setAttribute("fill-opacity", "0.14");
+      const ut = document.createElementNS(NS, "title");
+      ut.textContent = `레짐 모름 -- 워커 이력(${regimeByTsForChart.size}봉)이 이 창보다 짧다.`
+        + " 빈 칸이 아니라 «안 잰 구간»이다(빈 칸은 횡보를 뜻한다).";
+      un.appendChild(ut);
+      g.appendChild(un);
+    }
     candles.forEach((c, i) => {
       const r = regimeByTsForChart.get(c.time);
       if (!r) return;
@@ -7006,9 +7036,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     vLine.style.display = "block";
 
     const r = regimeByTsForChart ? regimeByTsForChart.get(c.time) : null;
+    // 🔴«값이 없으면 줄을 안 만든다»가 여기서는 거짓말이 된다 -- 리본은 빈 칸을 «횡보»로 쓰므로
+    //   모르는 봉도 횡보로 읽힌다. 이력 시작 전이면 그렇게 적는다(2026-09-25).
+    const regimeKnown = regimeFromTs != null && c.time >= regimeFromTs;
     const regimeLine = r
       ? `<br>레짐: ${regimeDominant(r) === "bull" ? "강세" : regimeDominant(r) === "bear" ? "약세" : "횡보"} ${Math.round(Math.max(r.bull_prob, r.bear_prob, r.chop_prob) * 100)}%`
-      : "";
+      : (regimeByTsForChart && !regimeKnown ? "<br>레짐: 모름 (워커 이력 밖)" : "");
     // 2026-09-16: 툴팁이 **그 봉에 표시된 모든 것**을 말한다. 그전에는 시각·OHLC·레짐뿐이라
     // 변동성 리본도, 새로 붙인 트리거 표시도 «왜 떴는지»를 화면에서 물어볼 데가 없었다.
     // 원칙: 값이 없는 항목은 줄 자체를 안 만든다(빈 줄은 «0» 으로 오독된다).

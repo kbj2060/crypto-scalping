@@ -39,7 +39,10 @@ from live_regime_wide24_signal_20260826 import (  # noqa: E402
 from retrain_clean_regime_hmm_raw_state12_20260517 import _with_raw_state12  # noqa: E402
 from train_eth_regime_gbm2_trend_chop_20260827 import _apply_hysteresis  # noqa: E402
 
-HISTORY_BARS_RETURNED = 120  # matches live_regime_gbm3_signal_20260826.py
+HISTORY_BARS_RETURNED = 152  # 🔴2026-09-25: 120 이었고 주석이 «6h/72-candle 창을 넉넉히 덮는다»
+# 였는데 차트 창 토글이 그 뒤 **144봉(12h)** 으로 늘었다(app.js CHART_WINDOW_BARS). 12시간을 고르면
+# 앞 24봉에 레짐 칸이 없었고, 리본은 «칸 없음 = 횡보» 규약이라 **모름이 횡보로 읽혔다**.
+# 144 + 여유 8. 창을 더 늘리면 여기도 같이 올린다(먹이는 쪽이 여기다).
 MODEL_PATH = ROOT / "tmp/eth_regime_gbm2_trend_chop_20260827/model.joblib"
 CLASSES2 = ["chop", "trend"]
 
