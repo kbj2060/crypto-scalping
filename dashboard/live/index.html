@@ -274,12 +274,13 @@
                아니라 «물타기»다 -- 예외적 행동이니 한 번 더 펼치게 한다(09-06 물타기 감사).
                열고 닫는 코드는 <details> 가 대신한다. 여는 초기값만 JS 가 정한다
                (app.js manualExitSyncButtons: 포지션 유무가 **바뀔 때만** 건드린다). -->
+          <!-- 2026-09-25 접기 폐지(사용자 «상시 표시») -- 항상 열려 있고 제목 줄은 안 눌린다. -->
           <details id="snapEntryBox" class="entry-fold" open>
             <!-- 2026-09-15 접혀 있어도 **대가는 보인다**(사용자 요청). 포지션을 들고
                  있으면 이 블록은 접히는데(09-14, 물타기를 한 번 더 확인시키려고),
                  그 바람에 «지금 추가하면 청산이 어디까지 오나»가 같이 사라졌다.
                  접기는 그대로 두고 대가만 요약 줄로 끌어올린다. -->
-            <summary id="snapEntrySummary"><span id="snapEntryFoldLabel">진입</span><span id="snapEntryFoldNote" class="entry-was"></span></summary>
+            <summary id="snapEntrySummary"><span id="snapEntryFoldLabel">진입</span></summary>
           <!-- 2026-09-16 크기 줄·모드 배지·권고 사슬을 뺐다(사용자 지시). 같은 내용이 위
                계좌 카드에 **미리보기로 이미 움직인다**(수량·평단·청산가·세 게이지).
                🔴실패만은 남긴다 -- 조회가 깨졌는데 화면이 조용하면 옛 숫자가 거짓말을 한다

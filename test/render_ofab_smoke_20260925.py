@@ -32,8 +32,6 @@ EMPTY = """() => {
   renderSnapshotAccount();
   renderOfab();
 }"""
-# 보유 중에 가장 오래 보는 모습 -- 진입 칸이 «물타기»로 접혀 있다(09-14 규약).
-FOLDED = "() => { (" + POS + ")(); const d = document.getElementById('snapEntryBox'); if (d) d.open = false; }"
 BOX = "(s) => { const r = document.querySelector(s)?.getBoundingClientRect(); return r && {x:r.x,y:r.y,w:r.width,h:r.height}; }"
 
 
@@ -43,7 +41,7 @@ def run(shot):
     fails = []
     with sync_playwright() as p:
         b = p.chromium.launch()
-        for state, fx in (("pos", POS), ("folded", FOLDED), ("empty", EMPTY)):
+        for state, fx in (("pos", POS), ("empty", EMPTY)):
             for w, h in ((1500, 900), (390, 844)):
                 tag = f"{state}·{w}"
                 pg = b.new_page(viewport={"width": w, "height": h})
@@ -63,6 +61,9 @@ def run(shot):
                 bad = lambda msg: fails.append(f"[{tag}] {msg}")
                 ok = lambda c, msg: None if c else bad(msg)
 
+                # 2026-09-25 접기 폐지: 포지션이 있어도 진입 칸은 열려 있고, 제목 줄을 눌러도 안 접힌다.
+                pg.evaluate("() => { manualExitSyncButtons(); document.getElementById('snapEntrySummary').click(); }")
+                ok(pg.evaluate("() => document.getElementById('snapEntryBox').open"), "진입 칸이 접혔다(상시 표시여야 한다)")
                 bar = pg.evaluate(BOX, "#ofab .ofab-bar")
                 ok(bar and 0 <= bar["x"] and bar["x"] + bar["w"] <= w and 0 <= bar["y"] and bar["y"] + bar["h"] <= h,
                    f"버튼이 화면 밖/없음 {bar}")

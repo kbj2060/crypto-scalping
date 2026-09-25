@@ -186,7 +186,8 @@ from scripts.live_manual_peg_execute_20260912 import run_entry, run_exit  # noqa
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
     HARD_CAP_X, entry_notional, exit_fraction_required)
 from scripts.live_eth_trade_plan_20260913 import (  # noqa: E402
-    EXCHANGE_MAX_LEVERAGE, LEVERAGE_STEPS, PRESCRIBE_ACC, plan_now, recommend_hold)
+    EXCHANGE_MAX_LEVERAGE, LEVERAGE_STEPS, PRESCRIBE_ACC, leverage_setting, plan_now,
+    recommend_hold)
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -1673,6 +1674,13 @@ SIZING_CAP_EQUITY_X = 6.0
 #   두면 레버리지가 7배로 걸려 그 위 주문을 거래소가 거부한다). 모델이 없으면(워커 낡음) 옛
 #   두 상한으로 떨어진다 -- 기준이 없으면 수량을 못 만든다. 되돌리기 = False.
 SIZING_CAP_MODEL_ONLY = True
+# 2026-09-25 사용자 지시 «증거금 사용을 50% 상한으로 막아줘». 이 주문 뒤 증거금(총 명목 ÷ 주문이 걸
+#   레버리지 -- 게이지 값, «자동»이면 처방 값)이 순자산의 이 %를 넘지 않는다. 위 스위치와 무관하게
+#   항상 경쟁한다. 진입에만 건다 -- 증거금 초과는 닫기가 아니라 레버리지로도 풀리므로 청산 카드의
+#   «최소 청산 비율»에 넣으면 틀린 처방이 된다. 0 = 끔.
+# ponytail: 계좌 전체 명목을 이 심볼 레버리지 하나로 나눈다(다른 심볼 다리는 자기 레버리지를 쓴다) --
+#   봇이 실주문을 내기 시작하면 balance.initial_margin 으로 바꾼다.
+SIZING_MARGIN_CAP_PCT = 50.0
 # 🔴상한 무시 스위치 (2026-09-20 사용자 지시 «우리 사이징 코드는 잠깐 꺼줘»).
 # 세 상한(원장·순자산·위험모델)을 **전부 건너뛰고** 「순자산 × 이 배수」 하나만 기준으로 쓴다.
 # 🔴상한을 «없애는» 게 아니다. 진입 비율 슬라이더의 100% 가 **상한 명목에 대한 비율**이라
@@ -4971,6 +4979,13 @@ def make_app() -> web.Application:
                                            (cap_model, "model")) if v]
             if SIZING_CAP_MODEL_ONLY and cap_model:
                 binding = [(cap_model, "model")]
+            # 증거금 상한. 레버리지는 주문이 실제로 걸 값 -- «자동»이면 처방(plan_now→prescribe)과
+            #   **같은 입력**으로 같은 함수를 부른다(그래야 target_leverage 와 같은 값이다).
+            margin_lev = want_lev or (leverage_setting(
+                cap_notional=equity * policy_cap_x, equity=equity, existing_notional=exposure,
+                current_notional=exposure).get("setting") if policy_cap_x else None) or leverage
+            if SIZING_MARGIN_CAP_PCT > 0 and equity > 0 and margin_lev:
+                binding.append((equity * margin_lev * SIZING_MARGIN_CAP_PCT / 100.0, "margin"))
             cap_notional = min(v for v, _ in binding) if binding else None
             # 🔴상한 무시 스위치. 위 SIZING_CAP_OVERRIDE_X 주석이 계약이다.
             overridden = SIZING_CAP_OVERRIDE_X > 0 and equity > 0
@@ -4991,6 +5006,7 @@ def make_app() -> web.Application:
                            cap_equity_usdt=round(cap_equity, 2) if cap_equity else None,
                            cap_ledger_usdt=round(cap_ledger, 2) if cap_ledger else None,
                            cap_model_usdt=round(cap_model, 2) if cap_model else None,
+                           margin_cap_pct=SIZING_MARGIN_CAP_PCT or None,
                            risk=risk,
                            equity_x=SIZING_CAP_EQUITY_X,
                            liq_floor_pct=round(100.0 / SIZING_CAP_EQUITY_X, 1),
@@ -5059,7 +5075,11 @@ def make_app() -> web.Application:
             plan["target_leverage"] = want_lev or _lv.get("setting")
             plan["leverage_source"] = "manual" if want_lev else "model"
             plan["leverage_model"] = _lv.get("setting")
-            plan["leverage_min_feasible"] = _lv.get("min_feasible")
+            # «상한만큼 열려면 최소 몇 배»는 **적용된** 상한으로 잰다(2026-09-25). 정책 천장(25배)으로
+            #   재면 증거금 50% 가 이미 10배로 묶었는데도 «최소 25배» 경고가 떴다.
+            plan["leverage_min_feasible"] = (round(cap_notional / equity, 2)
+                                             if cap_notional and equity > 0
+                                             else _lv.get("min_feasible"))
             # 열린 포지션이 만드는 바닥. 이 아래를 고르면 거래소가 -2028 로 거부한다.
             plan["leverage_position_floor"] = _lv.get("position_floor")
             # 🔴화면이 띄울 **계획 지평**. 상수가 아니라 크기를 실제로 정한 그 값이다

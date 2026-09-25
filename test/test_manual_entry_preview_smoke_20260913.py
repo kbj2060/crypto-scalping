@@ -89,6 +89,7 @@ def _isolated_dirs():
         # 🔴옛 정책(원장∧순자산∧모델)을 고정한다 -- 2026-09-25 «위험모델만» 스위치는 나중에
         #   되돌릴 한시 설정이라, 되돌아올 규칙을 여기서 계속 지킨다. 새 동작은 test_model_only_*.
         with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", False), \
+             mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 0.0), \
              mock.patch.object(server, "LIVE_DIR", live), \
              mock.patch.object(server, "DASHBOARD_DIR", dash), \
              mock.patch.object(server, "POSITION_SIZING_STATE_PATH",
@@ -562,6 +563,32 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
                     self.assertEqual(b["cap"]["binding"], "ledger",
                                      f"모델이 없으면 옛 상한으로 떨어져야 한다: {b['cap']}")
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_margin_cap_50pct_follows_order_leverage(self) -> None:
+        """2026-09-25 사용자 «증거금 사용을 50% 상한으로». 순자산 1000 · 기존 2500. 게이지 6배면
+        증거금 50% = 명목 3000 이 묶는다(모델 4184 보다 낮다). «자동»(정책 천장 25배 → 30배)이면
+        15000 이라 모델이 묶는다. 주문 뒤 증거금(총 명목 ÷ 걸 레버리지)이 50% 를 넘지 않는다."""
+        async def exercise() -> None:
+            with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
+                 mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0):
+                client = TestClient(TestServer(server.make_app()))
+                await client.start_server()
+                try:
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG&lev=6")).json()
+                    cap, plan = b["cap"], b["plan"]
+                    self.assertEqual(cap["binding"], "margin", cap)
+                    self.assertAlmostEqual(cap["cap_notional_usdt"], 3000.0, places=2)
+                    self.assertLessEqual(plan["total_notional_usdt"] / 6 / 1000.0, 0.5 + 1e-6, plan)
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
+                    self.assertEqual(b["cap"]["binding"], "model", b["cap"])
+                    lev = b["plan"]["target_leverage"]
+                    self.assertLessEqual(b["plan"]["total_notional_usdt"] / lev / 1000.0, 0.5 + 1e-6,
+                                         f"자동 레버리지 {lev} 에서 증거금이 50% 를 넘는다")
                 finally:
                     await client.close()
 

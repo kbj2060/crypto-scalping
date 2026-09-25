@@ -2324,6 +2324,9 @@ svg {
 .entry-fold > summary { font: 700 11.5px/1.4 var(--font-sans); color: var(--muted);
   cursor: pointer; padding: 9px 2px; }
 .entry-fold > summary:hover, .entry-fold[open] > summary { color: var(--text); }
+/* 2026-09-25 상시 표시(접기 폐지) -- 제목 줄은 머리글일 뿐 누르는 곳이 아니다. */
+.entry-fold > summary { cursor: default; list-style: none; }
+.entry-fold > summary::-webkit-details-marker { display: none; }
 .manual-entry-result { margin: 0; display: grid; gap: 10px; color: var(--text); }
 /* 계좌 카드의 .acct-tile 을 그대로 쓰고, «전 → 후»만 덧입힌다.
    눈금(u)은 이전 값의 자리다 -- 값이 늘든 줄든 같은 읽기 규칙이라 측면마다 뒤집지 않아도 된다. */
@@ -3067,11 +3070,10 @@ details.sit-why div { font: 500 11px/1.5 var(--font-mono); color: var(--muted); 
    잠기므로 이게 없으면 레버 게이지를 풀 방법이 없다) · **오류·경고 문구**(주문이 안 나갔는데 화면이
    조용하면 사람은 나간 줄 안다 -- 09-13 실장애의 교훈). */
 .ofab-panel .lane-pact, .ofab-panel .lane-empty, .ofab-panel #snapExitNow,
-.ofab-panel .hold-line, .ofab-panel #snapEntryFoldNote, .ofab-panel .entry-cap { display: none; }
+.ofab-panel .hold-line, .ofab-panel .entry-cap { display: none; }
 /* 포지션이 없으면 청산 레인은 빈 문장뿐이다 -- 레인째 걷는다. */
 .ofab-panel .acct-lanes > .manual-entry:has(#snapExitRow[hidden]) { display: none; }
-/* 물타기 접힘(09-14)은 **안전장치라 남긴다** -- 접혀 있을 때만 «추가 진입» 한 줄로 보이고,
-   펼치면 요약 줄은 걷는다(이미 펼친 사람에게 제목은 소음이다). */
+/* 진입 블록 제목 줄은 패널에서 걷는다(2026-09-25 접기 폐지 뒤로 항상 [open]). */
 .ofab-panel details[open] > summary { display: none; }
 /* 미리보기 타일은 걷고 **문구(.entry-note)만** 남긴다 -- 청산은 확인 버튼 글자가 수량·비율·남은 초를 말한다. */
 .ofab-panel #snapEntryResult:not(:has(.entry-note)) { display: none; }
