@@ -8905,7 +8905,21 @@ function manualHoldStart(btn, side, kind) {
  ["snapExitLong", "LONG", "exit"], ["snapExitShort", "SHORT", "exit"]].forEach(([id, side, kind]) => {
   const btn = el(id);
   if (!btn) return;
-  btn.addEventListener("pointerdown", (e) => { e.preventDefault(); manualHoldStart(btn, side, kind); });
+  // 🔴2026-09-25 사용자 지시: **터치(모바일)는 길게 누르기 발주를 끈다** -- 스크롤하다 버튼 위에서
+  //   0.4초가 지나 주문이 나갈 위험. 터치는 탭 → 미리보기 → 확인 버튼(30초) → 확인, 두 번 눌러야 나간다.
+  //   탭은 click 으로 받는다 -- 브라우저는 스크롤로 끝난 터치에 click 을 안 보낸다. 마우스는 그대로 길게 누르기.
+  //   판정은 **이벤트마다** pointerType 으로 한다(터치 노트북은 마우스·손가락을 둘 다 쓴다).
+  let touched = false;
+  btn.addEventListener("pointerdown", (e) => {
+    touched = e.pointerType === "touch";
+    if (touched) return;
+    e.preventDefault(); manualHoldStart(btn, side, kind);
+  });
+  btn.addEventListener("click", () => {
+    if (!touched || manualOrderBusy || btn.disabled) return;
+    touched = false;
+    if (kind === "exit") manualExitPreview(side); else manualEntryPreview(side, "entry");
+  });
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
     btn.addEventListener(ev, () => manualHoldCancel(btn)));
 });

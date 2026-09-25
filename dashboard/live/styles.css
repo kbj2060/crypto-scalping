@@ -2213,6 +2213,11 @@ svg {
   -webkit-user-select: none;
 }
 .notify-btn.hold-fire > span { position: relative; z-index: 1; }
+/* 2026-09-25 터치는 길게 누르기가 아니라 «탭 → 확인»이다(app.js) -- 누른 채 스크롤해도 발주가 없으니
+   버튼 위에서 시작한 스크롤을 다시 허용한다. */
+@media (pointer: coarse) { .notify-btn.hold-fire { touch-action: manipulation; } }
+.lane-pact .pact-touch { display: none; }
+@media (pointer: coarse) { .lane-pact .pact-touch { display: inline; } .lane-pact .pact-mouse { display: none; } }
 .notify-btn.hold-fire .hold-fill {
   position: absolute;
   left: 0; top: 0; bottom: 0;
