@@ -797,12 +797,7 @@ MICRO_BASELINE_SECONDS = 3600
 STREAM_TICK_S = 0.25                                   # /api/stream 밀어주기 주기 = 수급 폴링 주기(app.js SUPPLY_1S_POLL_MS)
 SITUATION_EVERY_TICKS = 1                              # micro-ref 1초 루프마다 (09-21 사용자 «급변 때 느리다» -- 실측 비용 30ms, duckdb 둘은 아래서 5초 캐시)
 FUSED_LOG_PATH = LIVE_DIR / "fused_card_log.jsonl"   # 2026-09-25 융합 카드(3결과 실측 확률·목표·표·발동) 봉당 1줄 -- 라이브 보정 검증용
-SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30분 뒤 결과와 맞춰 적중률을 낸다
-SITUATION_LOG_MIN_GAP_S = 300                          # 상태가 안 바뀌어도 이 간격으로 한 줄
-SITUATION_VA_ROW_USD = 3.0                             # 가치영역 행 폭(차트의 행과 같다)
-SITUATION_HORIZON_S = 1800
-SITUATION_LOG_KEEP = 2000              # 메모리에 드는 예측 수(≈하루). 카드가 «표본·에피소드»를 하루 단위로 말하려면 필요
-SITUATION_MINUTE_LIMIT = 500            # 해결 전용 1분봉(≈8시간). 5분봉은 창 앞 최대 5분을 버리고 봉 안 순서를 모른다
+
 
 
 def oi_1s_persist(rows: list[tuple[int, float]]) -> None:
@@ -3268,7 +3263,6 @@ def make_app() -> web.Application:
                 return
 
     async def start_micro_ref(app: web.Application) -> None:
-        _situation_load_log()
         app["micro_ref_task"] = asyncio.create_task(collect_micro_ref(app))
         app["force_order_task"] = asyncio.create_task(collect_force_orders(app))
         app["mark_price_task"] = asyncio.create_task(collect_mark_price(app))
@@ -3288,49 +3282,8 @@ def make_app() -> web.Application:
     async def api_micro_ref(request: web.Request) -> web.Response:
         return web.json_response(micro_state["payload"], headers=NOCACHE)
 
-    # ── 상황 읽기 · 30분 (2026-09-21) ──────────────────────────────────────────
-    situation_state: dict[str, Any] = {"now": {"ok": False, "reason": "계산 전"}, "computed_at": 0.0,
-                                       "log": [], "last_logged": 0.0, "last_key": None, "last_resolve": 0.0}
-
-    def _situation_append(rec: dict[str, Any]) -> None:
-        try:
-            with open(SITUATION_LOG_PATH, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(rec, ensure_ascii=False, separators=(",", ":")) + "\n")
-        except Exception as exc:  # noqa: BLE001
-            print(f"situation log write: {exc!r}", flush=True)
-
-    def _situation_load_log() -> None:
-        """예측 줄({ts, labels, ...})과 해결 줄({ts, outcome})이 한 파일에 섞여 있다. 해결을 영속하지 않으면
-        재기동(배포)마다 outcome 이 None 으로 돌아가 캔들 캐시(8시간) 밖의 예측은 영영 못 푼다."""
-        try:
-            entries: dict[int, dict[str, Any]] = {}
-            # 파일은 계속 자란다(P1 부터 피쳐까지 실린다). 꼬리만 파싱한다 -- 해결 줄은 예측 30분 뒤라
-            # 같은 꼬리 안에 들어온다. 이보다 오래된 항목은 이미 해결돼 화면 창 밖이다.
-            # 🔴read_text 는 슬라이스 전에 파일 전체를 메모리에 올린다. 이 기기는 실거래 봇과 공유하고
-            #   24GB OOM 이력이 있다(2026-09-18). deque 로 **꼬리만** 들고 있는다.
-            with SITUATION_LOG_PATH.open(encoding="utf-8") as fh:
-                tail = deque(fh, maxlen=20 * SITUATION_LOG_KEEP)
-            for x in tail:
-                if not x.strip():
-                    continue
-                rec = json.loads(x)
-                if "labels" in rec:
-                    entries[int(rec["ts"])] = rec
-                elif int(rec.get("ts", -1)) in entries:
-                    entries[int(rec["ts"])]["outcome"] = rec.get("outcome")
-                    entries[int(rec["ts"])]["outcome_sym"] = rec.get("outcome_sym")
-                    entries[int(rec["ts"])]["path"] = rec.get("path")
-            kept: list[dict[str, Any]] = []
-            for rec in entries.values():   # 같은 상태 서명이 300초 안에 이어지면 중복 -- 09-21 이전 파일의 5초 중복을 소급 정리
-                if kept and rec["ts"] - kept[-1]["ts"] < SITUATION_LOG_MIN_GAP_S and sit.log_key(rec) == sit.log_key(kept[-1]):
-                    continue
-                kept.append(rec)
-            situation_state["log"] = kept[-SITUATION_LOG_KEEP:]
-        except FileNotFoundError:
-            situation_state["log"] = []
-        except Exception as exc:  # noqa: BLE001
-            print(f"situation log load: {exc!r}", flush=True)
-            situation_state["log"] = []
+    # ── 30분 카드 입력 (2026-09-21 상황 읽기 → 2026-09-25 옛 시나리오·장부 제거, 융합 3결과의 입력만) ──
+    situation_state: dict[str, Any] = {"now": {"ok": False, "reason": "계산 전"}, "computed_at": 0.0}
 
     def _situation_inputs(now: float) -> dict[str, Any]:
         """기존 서버 상태를 situation.classify 의 입력 모양으로 접는다. 새 원천은 없다."""
@@ -3347,7 +3300,6 @@ def make_app() -> web.Application:
             pass
         candles = {int(c["time"]): c for c in (situation_state.get("candles") or [])}
         bars = []
-        levels: dict[float, float] = {}
         want = [b for b in sorted(fbars) if b < bar_start][-(2 * sit.WINDOW + 1):]
         for b in want:
             cells = fbars[b]
@@ -3358,16 +3310,10 @@ def make_app() -> web.Application:
                          "high": float(c["high"]) if c else (max(prices) if prices else None),
                          "low": float(c["low"]) if c else (min(prices) if prices else None),
                          "close": float(c["close"]) if c else None,
-                         "delta": buy - sell, "vol": buy + sell,
-                         "whale_net": sum(v[2] - v[3] for v in cells.values()),
-                         "retail_net": sum(v[4] - v[5] for v in cells.values()),
+                         "delta": buy - sell,
                          "oi_delta": oi_map.get(b), "liq_long": liq_map.get(b, (0, 0))[0], "liq_short": liq_map.get(b, (0, 0))[1],
                          # 추세 veto(2026-09-22) -- load_market_history 가 이미 봉마다 붙여 준다.
                          "veto": (c or {}).get("veto")})
-            if b >= (want[-sit.WINDOW] if len(want) >= sit.WINDOW else want[0]):
-                for k, v in cells.items():
-                    row = round(k * FOOTPRINT_BUCKET / SITUATION_VA_ROW_USD) * SITUATION_VA_ROW_USD
-                    levels[row] = levels.get(row, 0.0) + v[0] + v[1]
         # 종가가 캔들 캐시에 없으면(60초 캐시 지연, 또는 캐시 자체가 없는 dev) 초 링의 마지막 체결가로,
         # 그것도 없으면 그 봉 풋프린트의 **VWAP** 으로 메운다 -- 되돌림/지속 판정에 종가 근사는 충분하고,
         # 봉이 비어서 엔진이 통째로 «완결 봉 부족»으로 멈추는 것보다 낫다.
@@ -3380,10 +3326,6 @@ def make_app() -> web.Application:
                 else:
                     cells = fbars[b]; tot = sum(v[0] + v[1] for v in cells.values())
                     bar["close"] = (sum(k * FOOTPRINT_BUCKET * (v[0] + v[1]) for k, v in cells.items()) / tot) if tot > 0 else None
-        cur_cells = [by_sec[sc] for sc in by_sec if sc >= bar_start]
-        cur = {"elapsed_s": int(now) - bar_start,
-               "whale_net": sum(c[2] - c[3] for c in cur_cells), "retail_net": sum(c[0] - c[1] for c in cur_cells),
-               "delta": sum(c[4] - c[5] for c in cur_cells), "oi_delta": oi_map.get(bar_start)}
         # BTC 같은 창: ETH 봉과 같은 시각 구간의 이동·고저폭(bp). 캔들이 없거나 구간이 안 맞으면 생략
         btc: dict[str, float] = {}
         bc = {int(c["time"]): c for c in (situation_state.get("btc_candles") or [])}
@@ -3393,11 +3335,8 @@ def make_app() -> web.Application:
             btc = {"move_bp": (c1["close"] - c0["close"]) / c0["close"] * 1e4,
                    "range_bp": (max(c["high"] for c in span) - min(c["low"] for c in span)) / c1["close"] * 1e4}
         mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
-        bo = situation_state.get("breakout") or {}
-        return {"bars": bars, "levels": levels, "cur": cur, "mid": mp.get("mid"),
-                "book": situation_state.get("book") or {}, "act_pct": mp.get("vol60_pct"), "sr": mp.get("sr") or {},
-                "deriv": mref.deriv_from_ring(mark_ring, sit.WINDOW * FOOTPRINT_BAR_SECONDS, sit.BASIS_PCT), "btc": btc,
-                "breakout": {"detect_on": bool((bo.get("detect") or {}).get("on")), "prewarn_on": bool((bo.get("prewarn") or {}).get("on"))}}
+        return {"bars": bars, "mid": mp.get("mid"), "book": situation_state.get("book") or {},
+                "deriv": mref.deriv_from_ring(mark_ring, sit.WINDOW * FOOTPRINT_BAR_SECONDS, sit.BASIS_PCT), "btc": btc}
 
     # ── 데이터 관계 읽기 (2026-09-25) ────────────────────────────────────────
     # 상황 읽기의 evidence(30분) 위에 «60분 크기별 z · 1시간 가격↔OI · OKX 몫 · 깊은 벽 분위»를 얹는다.
@@ -3465,24 +3404,6 @@ def make_app() -> web.Application:
                  sr=mp.get("sr") or {}, act=mp.get("act"), vol_pct=mp.get("vol60_pct"))
         return x
 
-    async def load_minute_candles() -> list[dict[str, float]]:
-        """예측 해결 전용 1분봉. 🔴5분봉으로 풀면 ①결정 시점이 든 봉을 통째로 건너뛰어 30분 창의
-        최대 17%가 죽고 ②같은 봉 안 순서를 몰라 오채점된다 -- 09-21 장부를 두 해상도로 풀어보니
-        13.4%가 달라졌다. 20초 캐시라 1초 루프가 매번 부르지 않는다."""
-        async def produce() -> list[dict[str, float]]:
-            raw = await fetch_binance_json(
-                "https://fapi.binance.com/fapi/v1/klines",
-                {"symbol": FOOTPRINT_SYMBOL, "interval": "1m", "limit": SITUATION_MINUTE_LIMIT},
-                error_reason="situation_minute_upstream_error")
-            # 🔴마지막 행은 **형성 중인 봉**이다. 그대로 두면 해결의 일부가 «t+29분+α 의 임의 시점»으로
-            #   확정되고(ret_bp 가 창 끝 종가가 아니게 된다) 마지막 수십 초의 터치를 놓친다.
-            #   해결 줄은 영속되므로 되돌릴 수 없다 -- 닫힌 봉만 쓴다.
-            return [{"time": int(r[0]) // 1000, "high": float(r[2]), "low": float(r[3]), "close": float(r[4])}
-                    for r in raw[:-1]]
-        # max_stale: 바이낸스가 느리면 **직전 값을 내주고 뒤에서 갱신**한다. 없으면 1초 루프가
-        # 매초 왕복을 기다려 미시 참고까지 같이 멈춘다(09-21 검토).
-        return await swr_cached("situation_minutes", 20.0, produce, max_stale=STALE_GRACE_SECONDS)
-
     async def load_5m_day() -> list[dict[str, float]]:
         """관계 읽기·융합 신호의 24h 분위 기준(5분봉 300개). 60초 캐시 · 형성 중 봉은 버린다."""
         async def produce() -> list[dict[str, float]]:
@@ -3496,21 +3417,16 @@ def make_app() -> web.Application:
 
     async def compute_situation(now: float) -> None:
         loop = asyncio.get_running_loop()
-        # 느린 입력 셋은 캐시로 (캔들 60초 · 전환탐지기 60초 · 호가 요약 5초)
+        # 느린 입력은 캐시로 (캔들 60초 · 5분봉 하루 60초 · 호가 요약 5초)
         situation_state["candles"] = await load_market_history("eth")
         try:
             situation_state["btc_candles"] = await load_market_history("btc")   # 같은 캐시 프레임에서 자른다
         except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
             situation_state["btc_candles"] = None
-        situation_state["breakout"] = await load_breakout_detector()
         try:
             situation_state["candles_day"] = await load_5m_day()
         except Exception as exc:  # noqa: BLE001 -- 없으면 카드 캐시(짧다)로 물러선다
             print(f"flow-read 5m day: {exc!r}", flush=True)
-        try:
-            situation_state["minutes"] = await load_minute_candles()
-        except Exception as exc:  # noqa: BLE001 -- 실패하면 직전 1분봉으로 푼다(없으면 해결을 미룬다)
-            print(f"situation minutes: {exc!r}", flush=True)
         # 2026-09-24 max_stale 30: 둘 다 duckdb 읽기라 회당 0.4~0.5초(서버 로그)인데 블로킹이면 5초마다
         #   1초 루프가 그만큼 멈췄다(실측 slow tick oi5m+liq5m=1.00~1.25s). 입력이 5분봉이라 몇 초
         #   묵은 값으로 충분하다. 30초를 넘기면(읽기가 계속 실패) 다시 기다린다.
@@ -3551,45 +3467,9 @@ def make_app() -> web.Application:
                     print(f"fused log: {exc!r}", flush=True)
         except Exception as exc:  # noqa: BLE001
             situation_state["read"] = {"lines": [], "summary": "", "error": repr(exc)[:160]}
-        if not res.get("ok"):
-            return
-        key = sit.log_key(res)   # 라벨의 숫자를 뺀 종류 서명 -- 숫자를 두면 5초마다 새 항목(09-21 1,742건 사고)
-        # 🔴그래도 «상태 종류»는 초 단위로 떨린다: 실측 해결 1,867줄이 구별되는 분은 **366분**뿐이고
-        #   한 분에 최대 24줄이었다. 같은 분의 줄들은 라벨도 결과도 같다(해결이 보는 1분봉 집합이 같다).
-        #   깜빡임이 심한 구간이 표본에서 5배 가중되므로 **분당 1줄**로 막는다.
-        minute = int(now) // 60
-        if minute != situation_state.get("last_minute") and (
-                key != situation_state["last_key"] or now - situation_state["last_logged"] >= SITUATION_LOG_MIN_GAP_S):
-            situation_state["last_minute"] = minute
-            entry = {"ts": int(now), "mid": inp.get("mid"), "dir": res["dir"], "prob": res["prob"], "targets": res["targets"],
-                     "labels": res["labels"], "flips_on": [f["signal"] for f in res["flips"] if f["on"]],
-                     # 대칭 라벨(학습 주 타깃)과 목표 거리 -- 거리를 같이 남겨야 «근접 편향»을 나중에 다시 잴 수 있다
-                     "sym": res.get("sym"), "dist_bp": res.get("dist_bp"), "outcome": None, "outcome_sym": None,
-                     "scorable": res.get("scorable", True), "passed": res.get("passed") or [],
-                     # P1 학습 표본: 규칙의 근거 dict 가 그대로 피쳐다(전부 결정 시점 t 까지의 값).
-                     # 🔴분위 정규화는 여기서 하지 않는다 -- 원시값을 남겨야 나중에 정규화 방식을 바꿀 수 있다.
-                     "feat": res.get("evidence")}
-            situation_state["log"].append(entry); situation_state["log"] = situation_state["log"][-SITUATION_LOG_KEEP:]
-            situation_state["last_key"], situation_state["last_logged"] = key, now
-            _situation_append(entry)
-        if now - situation_state["last_resolve"] >= 60:
-            situation_state["last_resolve"] = now
-            ms = situation_state.get("minutes") or []
-            for e in situation_state["log"]:
-                if e.get("outcome") is None and e["ts"] + SITUATION_HORIZON_S <= now:
-                    e["outcome"] = sit.resolve(e, ms, SITUATION_HORIZON_S)
-                    e["outcome_sym"] = sit.resolve_sym(e, ms, SITUATION_HORIZON_S)
-                    e["path"] = sit.path_targets(e, ms, SITUATION_HORIZON_S)      # P1 연속 타깃
-                    if e["outcome"] is not None:
-                        _situation_append({"ts": e["ts"], "outcome": e["outcome"],
-                                           "outcome_sym": e.get("outcome_sym"),
-                                           "path": e.get("path")})   # 해결 줄 -- 재기동 뒤에도 남는다
 
     def situation_payload() -> dict[str, Any]:
-        log = situation_state["log"]
         return {"now": situation_state["now"], "computed_at": situation_state["computed_at"],
-                "recent": [{k: e.get(k) for k in ("ts", "mid", "dir", "prob", "outcome", "outcome_sym", "flips_on")} for e in log[-12:]],
-                "calibration": sit.calibration(log, SITUATION_HORIZON_S),
                 "streams": {"fo": dict(fo_state), "mp": dict(mp_state)},
                 "read": situation_state.get("read")}
 

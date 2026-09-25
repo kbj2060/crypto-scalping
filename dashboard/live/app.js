@@ -3289,37 +3289,20 @@ function liquidationDensityHistory() {
 // 2026-09-22 시나리오 목표는 차트의 **가로 위치**다 -- y 축이 이미 가격축이다(사용자).
 // nearestLiquidationLevel 과 같은 모양을 돌려주면 priceLabels 가 화면 밖 클램핑·겹침 회피·
 // 좌측 라벨·우측 가격 배지를 전부 해 준다(새로 그리는 코드 0).
-// 🔴풋프린트에서는 선이 아니라 삼각형이다 -- 가로선이 가격 행을 가로질러 셀 숫자를 덮는 문제는
-//   현재가에서 겪고 고쳤다(2026-09-16). 청산맵/폴백 캔들에서는 선이다.
-// 🔴색은 --muted. 초록/빨강은 청산 S/R, --accent 는 현재가, --amber 는 진입가로 예약돼 있다.
-//   위계상으로도 맞다 -- S/R·현재가는 **사실**, 시나리오는 **예측**이라 더 조용해야 한다.
-// 🔴왼쪽 라벨은 안 쓴다. 확률은 **오른쪽 배지 안**에 가격과 같이 넣는다(2026-09-22 사용자)
-//   -- 왼쪽 여백이 45px 뿐이라 둘을 다 못 담고, 가격과 확률은 어차피 같이 읽는 한 쌍이다.
-//   이름은 바로 아래 카드에 같은 숫자와 함께 있어 짝이 분명하다.
-// 🔴선점된 목표도 **그린다**(2026-09-22 사용자 «지났어도 라벨은 표시해줘»). targets 는 null
-//   이지만 targets_raw 에 원래 기하값이 남아 있다. 다만 «아직 갈 곳»으로 읽히면 안 되므로
-//   흐리게(faded) 그린다 -- 삼각형·배지·글자가 다 반투명이 되고, 확률 자리에 «지남»이 온다.
+// 🔴풋프린트에서는 선이 아니라 삼각형이다 -- 가로선이 가격 행을 가로질러 셀 숫자를 덮는다(2026-09-16).
+// 🔴색은 --muted. S/R·현재가는 **사실**, 이 선들은 **예측**이라 더 조용해야 한다. 형태도 «비운 배지»(잠정)이고
+//   테두리 안을 확률만큼 채운다 -- 배지 자체가 게이지다(시안 Q).
+// 2026-09-25 옛 A/B/C 기하 목표를 걷고 **융합 3결과의 두 선**(±0.5×30분 폭 — 위 먼저 · 아래 먼저)으로 바꿨다.
+//   배지 숫자 = 카드와 같은 실측 확률. «미도달»은 선이 없다(두 선 사이에 머묾).
 function situationTargetLevels(footprint) {
-  const n = (latestSituation || {}).now;
-  if (!n || !n.ok || activeSnapshotAsset !== "eth") return [];
-  const out = [];
-  for (const k of ["A", "B", "C"]) {
-    const live = (n.targets || {})[k], raw = (n.targets_raw || {})[k];
-    if (Array.isArray(live)) continue;                 // 09-21 이전 장부의 «띠»
-    const passed = !(Number(live) > 0);
-    const v = passed ? raw : live;
-    if (!(Number(v) > 0)) continue;
-    // 🔴«사실»과 «예측»을 **형태로** 가른다(2026-09-22 사용자 «보통 라벨과는 달랐으면», 시안 Q).
-    //   현재가·진입가·청산 S/R 은 채운 배지(확정), 시나리오는 **비운 배지**(잠정)다.
-    //   그리고 그 테두리 안을 확률만큼 채운다 -- 배지 자체가 게이지라서 숫자를 읽기 전에
-    //   56 과 26 의 차이가 길이로 먼저 들어온다. 새 색도 새 자리도 안 쓴다.
-    //   «지남»은 채움이 0 이라 자연히 빈 껍데기가 된다 -- «쓴 목표»라는 뜻에 형태가 맞는다.
-    out.push({ val: Number(v), color: "var(--muted)", label: "",
-               sub: passed ? "지남" : `${Number((n.prob || {})[k]) || 0}%`,
-               gauge: passed ? 0 : Math.max(0, Math.min(100, Number((n.prob || {})[k]) || 0)),
-               faded: passed, dashed: true, width: 1, marker: !!footprint, scenario: k });
-  }
-  return out;
+  const fz = ((latestSituation || {}).read || {}).fused;
+  const o3 = fz && fz.outcome;
+  if (!o3 || activeSnapshotAsset !== "eth") return [];
+  return o3.cols.filter((c) => c.key !== "none" && Number(c.target) > 0).map((c) => ({
+    val: Number(c.target), color: "var(--muted)", label: "",
+    sub: `${c.key === "up" ? "↑" : "↓"}${Math.round(c.p)}%`,
+    gauge: Math.max(0, Math.min(100, Number(c.p) || 0)),
+    faded: false, dashed: true, width: 1, marker: !!footprint, scenario: c.key }));
 }
 
 function nearestLiquidationLevel() {
