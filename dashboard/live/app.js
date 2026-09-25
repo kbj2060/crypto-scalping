@@ -4096,67 +4096,31 @@ function renderSituation() {
     return;
   }
   const fmtPx = (v) => (v == null ? "-" : Number(v).toFixed(1));
-  const fz = (s.read && s.read.fused) || null;   // 2026-09-25 융합 신호(flow_read.fuse)
-  const order = ["A", "B", "C"].sort((a, b) => n.prob[b] - n.prob[a]);
-  const top = order[0];
+  const fz = (s.read && s.read.fused) || null;
+  const o3 = fz && fz.outcome;
 
-  // ── SCENARIOS ── 막대 색은 **시나리오 키에 고정**한다(k-A/k-B/k-C). 순위로 칠하면
-  //   순위가 바뀔 때마다 같은 시나리오가 다른 색이 되어 «색이 정체성»이라는 규약이 깨진다.
-  // 🔴이름을 짧게 만들면서 **방향을 버렸다**(사용자 «더 간다는 건 어디로 더 간다는 건지»).
-  //   방향은 dir 과 시나리오 키에서 결정적으로 나오므로 화살표는 화면이 붙인다 -- 서버의
-  //   names 는 방향 없는 채로 둔다(장부는 상승·하락 추세를 **합쳐** 세므로 거기에 화살표를
-  //   붙이면 거짓이 된다). A·C 는 이동 반대쪽, C 는 더 깊다.
-  const ARROW = n.dir > 0 ? { A: "↓", B: "↑", C: "↓↓" }
-            : n.dir < 0 ? { A: "↑", B: "↓", C: "↑↑" }
-            : { A: "↔", B: "↑", C: "↓" };
-  // 🔴2026-09-22 표 -> **3열**(시안 E, 사용자 선택). 셋을 나란히 세우면 확률·방향·목표가를
-  //   세로로 훑지 않고 한 번에 비교한다. 순서는 확률 내림차순(order) 그대로.
-  const scn = order.map((k, i) => {
-    const t = n.targets[k];
-    // 목표가 없는 경우는 **두 가지**이고 뜻이 정반대다 -- 한 문구로 묶으면 오해한다(09-21 사용자 «왜 잔여가 뜨지»).
-    //  ① 횡보의 «레인지 유지» = 진짜 잔여: 위아래 둘 다 안 닿으면 이게 일어난다.
-    //  ② 목표 선점(이미 지나감)·가치영역 없음 = 해당 없음: 이 시나리오는 이번 창에서 **일어날 수 없다**.
-    //     «잔여»의 조건은 분명하다 -- **하단·상단 이탈선 사이에 머무는 것**이고 그 두 선은 이미 C·B 목표다.
-    //     지켜야 할 값을 숨기지 말고 그대로 띄운다(사용자 요청). 한쪽 이탈선이 선점됐으면 레인지는 이미 깨졌다.
-    // 🔴2026-09-22 사용자 «지나가도 이전 가격은 적어놔줘 -- 어떻게 지나갔는지 확인을 해야해».
-    //   선점된 목표는 targets 에서 null 이지만(그게 «채점 안 함»의 뜻이다) targets_raw 에 원래
-    //   기하값이 그대로 실려 온다. 숫자를 지우지 말고 «지남»을 덧붙인다.
-    const raw = (n.targets_raw || {})[k];
-    const residual = n.dir === 0 && k === "A";
-    const lo = n.targets.C ?? (n.targets_raw || {}).C, hi = n.targets.B ?? (n.targets_raw || {}).B;
-    const holds = residual && n.targets.C != null && n.targets.B != null;
-    const band = lo != null && hi != null ? `${fmtPx(lo)}~${fmtPx(hi)}` : null;
-    const tgt = t != null
-      ? (Array.isArray(t) ? `${fmtPx(t[0])}~${fmtPx(t[1])}` : fmtPx(t))
-      : residual ? (band ? `${band}${holds ? "" : " 깨짐"}` : "—")
-      : raw != null ? `${fmtPx(raw)} 지남` : "—";
-    const title = t != null ? ""
-      : residual ? (holds ? "이 폭 안에 머물면 이것 — 두 선은 아래·위 이탈 목표다"
-                          : "한쪽 선을 이미 넘었다 — 이 폭은 이미 깨졌다")
-      : raw != null ? "이 목표를 이미 지나쳤다 — 이번 30분 창에서는 일어날 수 없어 적중률 집계에서 빠진다"
-      : "목표를 만들 재료가 없다(가치영역 없음)";
-    const dead = t == null && !holds;
-    const d = (n.dist_bp || {})[k];
-    const dist = Number.isFinite(d) ? `${d > 0 ? "+" : ""}${Math.round(d)}bp` : "";
-    // 이 시나리오로 미는 신호를 바로 아래에 붙인다 -- 선 없이 연결이 보인다(시안 E).
-    const push = (n.flips || []).filter((f) => f.toward === k);
-    const pushed = push.map((f) => `<div class="sit-push${f.on ? " on" : ""}">`
-      + `<span class="dot"></span><span>${escapeHtml(f.signal)}</span></div>`).join("");
-    // 2026-09-25 융합 신호가 가리키는 열. 🔴위 큰 숫자(휴리스틱)는 안 바꾼다 -- 실측은 따로 적는다
-    //   (카드 축 Y_sym 에서 잰 값만 숫자로, 표본 부족이면 말로).
-    const fzHere = fz && fz.side && fz.card && fz.card.key === k;
-    const fzLine = fzHere
-      ? `<div class="sit-fz ${fz.side > 0 ? "fr-up" : "fr-dn"}" title="${escapeHtml(fz.card.note || "")}">융합 ${fz.side > 0 ? "↑" : "↓"} `
-        + `${fz.card.p != null ? `실측 ${Math.round(fz.card.p)}% · 기저 ${Math.round(fz.card.base)}%` : "표본 부족"}</div>`
-      : "";
-    return `<div class="sit-col${i === 0 ? " sit-top" : ""}${dead ? " dead" : ""}${fzHere ? " sit-fz-on" : ""}">`
-      + `<div class="p">${n.prob[k]}%</div>`
-      // 게이지: 숫자를 안 읽어도 56 vs 26 이 보인다. 채움 세기는 **키 고정**(위 주석과 같은 이유).
-      + `<div class="sit-g k-${k}"><i style="width:${dead ? 0 : n.prob[k]}%"></i></div>`
-      + fzLine
-      + `<div class="nm"${n.names_long ? ` title="${escapeHtml(n.names_long[k] || "")}"` : ""}>`
-      + `<i class="sit-ar">${ARROW[k]}</i>${escapeHtml(n.names[k])}</div>`
-      + `<div class="tg"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(tgt)}</div>`
+  // ── 30분 시나리오 = 융합 3결과 (2026-09-25 사용자 «옛 시나리오 로직을 걷고 하나의 융합 신호로», 같은 양식) ──
+  //   옛 A/B/C(휴리스틱 점수표 확률 · 기하 목표 · 뒤집기 신호)를 걷었다. 🔴이제 큰 숫자는 전부 **실측**이다:
+  //   같은 상태(카드 30분 방향 × 융합 4표 정렬 × 30분 폭 분위)의 3.7년 빈도(dashboard/flow_read.py CARD_CELLS).
+  //   열 = 위 먼저 · 아래 먼저 · 미도달(±0.5×30분 폭, 옛 카드와 같은 채점축). 순서는 확률 내림차순, 1순위만 윗선이 진하다.
+  //   열 아래 점 = 그 결과 쪽으로 미는 융합 표(켜진 것만 방향색) -- 옛 «뒤집기 신호» 자리를 측정된 표가 대신한다.
+  const OUT = { up: { ar: "↑", nm: "위로 먼저" }, dn: { ar: "↓", nm: "아래로 먼저" }, none: { ar: "↔", nm: "30분 안 미도달" } };
+  const cols = o3 ? [...o3.cols].sort((a, b) => b.p - a.p) : [];
+  const scn = cols.map((c, i) => {
+    const o = OUT[c.key];
+    const tgt = c.key === "none" ? (c.band ? `${fmtPx(c.band[0])}~${fmtPx(c.band[1])}` : "—") : fmtPx(c.target);
+    const dist = c.key === "none" ? "두 선 사이에 머묾"
+      : Number.isFinite(c.dist_bp) ? `${c.dist_bp > 0 ? "+" : ""}${Math.round(c.dist_bp)}bp` : "";
+    const moveDir = o3.dir > 0 ? "up" : o3.dir < 0 ? "dn" : null;
+    const title = c.key === "none" ? "30분 안에 위·아래 선 어디에도 안 닿음"
+      : `${o.nm}${moveDir ? (c.key === moveDir ? " — 30분 이동 방향으로 더 간다" : " — 30분 이동 반대로 되돌린다") : ""}`;
+    const pushed = (c.push || []).map((q) => `<div class="sit-push${q.on ? " on" : ""}">`
+      + `<span class="dot"></span><span>${escapeHtml(q.t)}</span></div>`).join("");
+    return `<div class="sit-col k-${c.key}${i === 0 ? " sit-top" : ""}">`
+      + `<div class="p">${Math.round(c.p)}%</div>`
+      + `<div class="sit-g k-${c.key}"><i style="width:${c.p}%"></i></div>`
+      + `<div class="nm" title="${escapeHtml(title)}"><i class="sit-ar">${o.ar}</i>${o.nm}</div>`
+      + `<div class="tg">${escapeHtml(tgt)}</div>`
       + `<div class="ds">${escapeHtml(dist)}</div>`
       + (pushed ? `<div class="sit-pushes">${pushed}</div>` : "")
       + `</div>`;
@@ -4193,18 +4157,6 @@ function renderSituation() {
   const sigOn = [...sigL, ...sigR].filter(([, on]) => on).length;
   const sigHtml = (rows) => rows.map(([h]) => h).join("");
 
-  // ── FLIP TRIGGERS ──
-  const fl = n.flips || [];
-  const armed = fl.filter((f) => f.on).length;
-  // 3열로 바뀌면서 뒤집기 신호는 **미는 열 아래**로 갔다(시안 E). 여기 남는 건 어느 시나리오에도
-  // 안 묶인 신호뿐이다 -- 보통 없다. 있으면 그때만 줄이 뜬다.
-  const loose = fl.filter((f) => !["A", "B", "C"].includes(f.toward));
-  const flips = loose.map((f) => `<div class="sit-flip${f.on ? " on" : ""}"><span class="dot"></span>`
-    + `<span>${escapeHtml(f.signal)}</span>`
-    + `<span class="to">${escapeHtml(n.names[f.toward] || f.toward)}</span></div>`).join("");
-  const why = (n.why || []).map((w) => `${w["근거"]}: ${Object.entries(w).filter(([k]) => k !== "근거")
-    .map(([k, v]) => `${k}${v >= 0 ? "+" : ""}${v}`).join(" ")}`).join(" · ");
-
   // ── WS ── 장부(LEDGER)와 각주는 화면에서 뺐다(2026-09-22 사용자 «레져와 아래 텍스트들은
   //   제거해줘 · ws 상태만 남겨줘»). 🔴서버의 기록·해결은 그대로 돈다 -- calibration 집계도,
   //   예측 장부 파일도 계속 쌓인다. 지운 건 «표시»뿐이라 적중률 학습 루프는 안 끊긴다.
@@ -4216,25 +4168,27 @@ function renderSituation() {
   body.innerHTML = `
     <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
     ${fusedRowHtml(fz)}
-    <div class="sit-cols">${scn}</div>
-    <details class="sit-why"><summary>점수 근거</summary><div>${escapeHtml(why || "기본값만")}</div></details>
-    <div class="sit-sec">현재 상황<span>${sigOn} / ${SIT_SIGNALS.length} 켜짐 · 뒤집기 ${armed}/${fl.length}</span></div>
+    ${o3 ? `<div class="sit-cols">${scn}</div><div class="sit-cal sit-src">${escapeHtml(o3.note)}</div>`
+         : `<div class="sit-cal">융합 3결과 계산 전 — 30분 폭 분위(5분봉 24h)를 받는 중</div>`}
+    <div class="sit-sec">현재 상황<span>${sigOn} / ${SIT_SIGNALS.length} 켜짐</span></div>
     <div class="sit-sgs">
       <div><div class="h">방향 압력<span>− 숏 · 롱 +</span></div>${sigHtml(sigL)}</div>
       <div><div class="h">강도 · 위치<span>0 → 100</span></div>${sigHtml(sigR)}</div>
     </div>
-    ${flips ? `<div class="sit-flips">${flips}</div>` : ""}
     <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`;
 
   if (badge) {
+    // 발동 중이면 배지가 융합 방향과 두 방향 확률을 말한다(방향색). 아니면 1순위 결과.
     const age = s.computed_at ? Math.round(Date.now() / 1000 - s.computed_at) : null;
-    // 융합 신호가 발동 중이면 배지가 그것을 말한다(방향색) -- 휴리스틱 1순위보다 잰 신호가 먼저다.
-    if (fz && fz.side) {
+    const P = o3 ? Object.fromEntries(o3.cols.map((c) => [c.key, Math.round(c.p)])) : null;
+    if (fz && fz.side && P) {
       badge.className = `ops-badge ${fz.side > 0 ? "good" : "bad"}`;
-      badge.textContent = `융합 ${fz.side > 0 ? "롱" : "숏"} · 30분${fz.card && fz.card.p != null ? ` · ${fz.card.key} 실측 ${Math.round(fz.card.p)}%` : ""}`;
-    } else {
+      badge.textContent = `융합 ${fz.side > 0 ? "롱" : "숏"} · ${fz.side > 0 ? `↑${P.up}% vs ↓${P.dn}%` : `↓${P.dn}% vs ↑${P.up}%`}`;
+    } else if (cols.length) {
       badge.className = `ops-badge ${age != null && age <= 15 ? "good" : "neutral"}`;
-      badge.textContent = `${escapeHtml(n.names[top])} ${n.prob[top]}%${age != null ? ` · ${age}초 전` : ""}`;
+      badge.textContent = `${OUT[cols[0].key].ar} ${OUT[cols[0].key].nm} ${Math.round(cols[0].p)}%${age != null ? ` · ${age}초 전` : ""}`;
+    } else {
+      badge.className = "ops-badge neutral"; badge.textContent = "대기";
     }
   }
 }

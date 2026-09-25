@@ -796,7 +796,7 @@ SPOT_RECV_TIMEOUT = 60.0        # 12 msg/s 지만 한산한 초가 있어 여유
 MICRO_BASELINE_SECONDS = 3600
 STREAM_TICK_S = 0.25                                   # /api/stream 밀어주기 주기 = 수급 폴링 주기(app.js SUPPLY_1S_POLL_MS)
 SITUATION_EVERY_TICKS = 1                              # micro-ref 1초 루프마다 (09-21 사용자 «급변 때 느리다» -- 실측 비용 30ms, duckdb 둘은 아래서 5초 캐시)
-FUSED_LOG_PATH = LIVE_DIR / "fused_signal_log.jsonl"   # 2026-09-25 융합 신호 발동(봉당 1줄) -- 라이브 전진 검증용
+FUSED_LOG_PATH = LIVE_DIR / "fused_card_log.jsonl"   # 2026-09-25 융합 카드(3결과 실측 확률·목표·표·발동) 봉당 1줄 -- 라이브 보정 검증용
 SITUATION_LOG_PATH = LIVE_DIR / "situation_log.jsonl"    # 예측 장부 -- 30분 뒤 결과와 맞춰 적중률을 낸다
 SITUATION_LOG_MIN_GAP_S = 300                          # 상태가 안 바뀌어도 이 간격으로 한 줄
 SITUATION_VA_ROW_USD = 3.0                             # 가치영역 행 폭(차트의 행과 같다)
@@ -3532,15 +3532,20 @@ def make_app() -> web.Application:
         situation_state["computed_at"] = now
         try:   # 관계 읽기는 상황 카드가 «완결 봉 부족»이어도 읽을 수 있는 만큼 읽는다. 죽어도 카드는 산다
             situation_state["read"] = fr.read(res.get("evidence") or {}, _flow_read_ctx(now, inp))
-            # 융합 신호 발동 장부 -- 봉마다 한 줄(같은 봉 안 1초 재계산은 같은 결정이다). 해결은 나중에 1분봉으로 맞춘다.
+            # 융합 카드 장부 -- 봉마다 한 줄(같은 봉 안 1초 재계산은 같은 결정이다). 3결과 확률·목표를 남겨야
+            #   «실측 확률이 라이브에서도 맞나»(보정)를 나중에 1분봉으로 잴 수 있다. 발동 여부(side)도 같은 줄에.
             fu = situation_state["read"].get("fused") or {}
+            o3 = fu.get("outcome") or {}
             bar_now = int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
-            if fu.get("side") and situation_state.get("fused_bar") != bar_now:
+            if o3 and situation_state.get("fused_bar") != bar_now:
                 situation_state["fused_bar"] = bar_now
                 try:
                     with open(FUSED_LOG_PATH, "a", encoding="utf-8") as fh:
-                        fh.write(json.dumps({"ts": int(now), "bar": bar_now, "side": fu["side"], "mid": inp.get("mid"),
-                                             "votes": fu["votes"], "score": fu["score"], "gate_pct": fu["gate_pct"]},
+                        fh.write(json.dumps({"ts": int(now), "bar": bar_now, "side": fu.get("side"), "mid": inp.get("mid"),
+                                             "votes": fu.get("votes"), "score": fu.get("score"), "gate_pct": fu.get("gate_pct"),
+                                             "cell": [o3["reg"], o3["a"], o3["g"]],
+                                             "p": {c["key"]: c["p"] for c in o3["cols"]},
+                                             "up": o3["cols"][0].get("target"), "dn": o3["cols"][1].get("target")},
                                             ensure_ascii=False) + "\n")
                 except OSError as exc:
                     print(f"fused log: {exc!r}", flush=True)

@@ -681,7 +681,6 @@ body {
 /* 30분 카드 안(2026-09-25): 카드 본문이 이미 18px 안쪽 여백을 준다 -- 겹치지 않게. */
 .situation-body .fr-fuse { margin: 2px 0 10px; }
 .fr-read .fr-head { padding: 0 18px; margin: 12px 0 2px; }
-.sit-fz { margin-top: 5px; font: 700 11px/1.3 var(--font-mono); }
 .fr-fuse-text { font-size: 13px; font-weight: 700; line-height: 1.5; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 .fr-fuse[data-side="long"] { border-color: color-mix(in srgb, var(--good) 55%, transparent); }
 .fr-fuse[data-side="long"] .fr-fuse-text { color: var(--good); }
@@ -704,6 +703,7 @@ body {
 @media (max-width: 720px) {
   .fr-sum { padding: 4px 12px 8px; }
   .fr-fuse { grid-template-columns: 1fr; gap: 4px; margin: 2px 12px 10px; }
+  .fr-read .fr-head span { display: none; }   /* 등급 범례는 칩이 이미 말한다 -- 좁은 화면에선 제목만 */
   .fr-fuse[data-side="wait"] .fr-note { display: none; }   /* 대기 중 근거 문구는 좁은 화면에서 소음 */
   .fr-row { grid-template-columns: 62px 1fr auto; gap: 8px; padding: 5px 12px; }
   .fr-topic { white-space: normal; font-size: 10.5px; }
@@ -2956,15 +2956,26 @@ svg {
 /* 🔴이름이 «top» 이면 안 된다 -- 327행의 전역 .top(페이지 헤더)이 display:flex 를 걸어
    1순위 열만 가로로 눕는다(자식 넷이 한 줄이 되고 게이지는 폭 0). 시안 E 배포 때부터
    깨져 있었고 게이지가 그걸 드러냈다. 2026-09-22 top -> sit-top. */
-.sit-col.dead { opacity: .5; }
 .sit-col .p { font: 800 26px/1 var(--font-mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 /* 2026-09-22 확률 게이지(시안 U2). 채움 세기는 **시나리오 키 고정** -- 순위로 칠하면
    순위가 바뀔 때 같은 시나리오가 다른 밝기가 되어 «색이 정체성» 규약이 깨진다. */
 .sit-g { height: 6px; border-radius: 3px; margin-top: 7px; overflow: hidden;
   background: color-mix(in srgb, var(--neutral) 10%, transparent); }
 .sit-g i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
-.sit-g.k-B i { opacity: .62; }
-.sit-g.k-C i { opacity: .40; }
+/* 2026-09-25 융합 3결과: 색이 곧 결과다 -- 위 먼저 = 초록 · 아래 먼저 = 빨강 · 미도달 = 주황(방향이 아니라 «멀다»).
+   열 아래 미는 표도 같은 색으로 켜진다(옛 뒤집기 신호의 초록 고정을 결과색으로). */
+.sit-g.k-up i { background: var(--good); }
+.sit-g.k-dn i { background: var(--bad); }
+.sit-g.k-none i { background: var(--amber); opacity: .7; }
+.sit-col.k-up .sit-ar { color: var(--good); }
+.sit-col.k-dn .sit-ar { color: var(--bad); }
+.sit-col.k-none .sit-ar { color: var(--amber); }
+.sit-col.k-dn .sit-push.on { color: var(--bad); }
+.sit-col.k-dn .sit-push.on .dot { background: var(--bad); border-color: var(--bad); box-shadow: none; }
+.sit-col.k-none .sit-push.on { color: var(--amber); }
+.sit-col.k-none .sit-push.on .dot { background: var(--amber); border-color: var(--amber); box-shadow: none; }
+.sit-col.k-up .sit-push.on .dot { box-shadow: none; }
+.sit-src { margin-top: 8px; }
 .sit-col .nm { margin-top: 6px; font-size: 12px; font-weight: 600;
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sit-col .tg { margin-top: 5px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
@@ -3011,12 +3022,6 @@ svg {
 .sit-sec .sit-edge { color: var(--warn); font-weight: 700; }
 
 /* FLIP TRIGGERS */
-.sit-flips { display: grid; gap: 2px; }
-.sit-flip { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: baseline; }
-.sit-flip .dot { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--hover-line); }
-.sit-flip.on .dot { background: var(--good); border-color: var(--good); box-shadow: 0 0 6px var(--good); }
-.sit-flip .to { color: var(--muted); font-size: 11px; }
-.sit-flip.on .to { color: var(--good); font-weight: 600; }
 
 /* 2026-09-22 «ETH 전용» 배지. 이 카드들의 서버 엔드포인트에는 asset 파라미터가 없어서
    코인을 바꿔도 ETH 값이 나온다 -- 표시가 없으면 고른 코인의 숫자로 오독한다.
@@ -3040,9 +3045,6 @@ body.not-eth [data-eth-only]::after {
 .sit-ws i.off { background: var(--bad); }
 .sit-cal { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .sit-cal b { color: var(--ink, inherit); }
-details.sit-why { margin-top: 7px; }
-details.sit-why summary { cursor: pointer; font-size: 11px; color: var(--muted); }
-details.sit-why div { font: 500 11px/1.5 var(--font-mono); color: var(--muted); padding-left: 8px; margin-top: 4px; }
 @media (max-width: 520px) { .sit-sgs { grid-template-columns: 1fr; } .sit-cols { grid-template-columns: 1fr; gap: 6px; } }
 
 /* ── 떠다니는 주문 버튼 (2026-09-25 사용자 지시) ─────────────────────────────────────
