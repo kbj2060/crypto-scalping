@@ -19,7 +19,7 @@ URL = "http://127.0.0.1:18787/dashboard/live/"
 POS = (HERE / "fixtures" / "acct_position.js").read_text("utf-8")
 
 
-def page(browser, touch, submits, errs):
+def page(browser, touch, submits, errs, preview_delay_ms=0):
     ctx = browser.new_context(viewport={"width": 390, "height": 844} if touch else {"width": 1500, "height": 1000},
                               has_touch=touch, is_mobile=touch)
     pg = ctx.new_page()
@@ -28,6 +28,9 @@ def page(browser, touch, submits, errs):
     pg.route("**/api/manual-*/submit*", lambda r: (submits.append(r.request.url), r.abort()))
 
     def unblock(route):
+        if preview_delay_ms:
+            import time
+            time.sleep(preview_delay_ms / 1000)     # 🔴미리보기가 0.4초 채움보다 **늦게** 오는 경우(비평 P0)
         resp = route.fetch()
         d = resp.json()
         (d.get("plan") or {})["blocked"] = None
@@ -103,6 +106,20 @@ def main() -> int:
         pg.wait_for_timeout(500)
         ok(len(submits) == 1, f"마우스 길게 누르기로 제출이 안 나갔다 {submits}")
         ok(not errs, f"JS 오류(마우스) {errs[:2]}")
+        ctx.close()
+        # ── 마우스 + 늦은 미리보기(2026-09-26 비평 P0): 0.4초를 채웠으면 미리보기가 늦어도 **바로** 나간다 ──
+        #   옛 동작은 이때 확인 버튼을 띄웠다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다.
+        submits, errs = [], []
+        ctx, pg = page(b, False, submits, errs, preview_delay_ms=1500)
+        box = pg.locator("#snapEntryLong").bounding_box()
+        pg.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        pg.mouse.down()
+        pg.wait_for_timeout(600)          # 0.4초는 넘기고, 미리보기(1.5초)보다는 먼저 뗀다
+        pg.mouse.up()
+        pg.wait_for_timeout(3500)
+        ok(len(submits) == 1, f"늦은 미리보기에서 길게 누르기가 바로 안 나갔다(두 단계로 갈렸다) {submits}")
+        ok(pg.evaluate("() => document.getElementById('snapEntryConfirm').hidden"),
+           "늦은 미리보기에서 확인 버튼이 떴다 -- 마우스는 한 단계여야 한다")
         ctx.close()
         b.close()
     for f in fails:

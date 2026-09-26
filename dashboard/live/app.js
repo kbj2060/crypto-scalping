@@ -1335,8 +1335,12 @@ function acctPerfSvg(net, meta) {
     ].filter(Boolean);
     // 머리줄의 <b> 만 우리가 넣은 마크업이고 나머지는 이스케이프한다.
     const html = [head, ...rows.map(escapeHtml)].join("<br>");
+    // 2026-09-26 비평: 막대마다 tabindex 0 이라 탭 정지가 28개였고 읽어 줄 이름도 없었다 -- 최근 막대 하나만
+    //   탭 순서에 두고(좌우 방향키로 옮긴다, bindAcctChartTip) 머리줄을 이름으로 준다.
+    const name = `${m.day || `${i + 1}번째 왕복`} ${fmtUsd(Math.abs(v))} ${v < 0 ? "잃음" : "벌었음"}`;
     return `<rect x="${xAt(i).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" `
-      + `fill="transparent" tabindex="0" data-tip="${escapeHtml(html)}"></rect>`;
+      + `fill="transparent" role="img" aria-label="${escapeHtml(name)}" `
+      + `tabindex="${i === net.length - 1 ? 0 : -1}" data-tip="${escapeHtml(html)}"></rect>`;
   }).join("");
   // 길이 0 + round cap = 지름이 stroke-width 인 정원. non-scaling 이라 늘어나지 않는다.
   const dot = (w, color, op) => `<line x1="${lastX.toFixed(1)}" y1="${lastY.toFixed(1)}" `
@@ -1389,6 +1393,14 @@ function bindAcctChartTip() {
   host.addEventListener("mouseout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
   host.addEventListener("focusin", (e) => { if (e.target.dataset && e.target.dataset.tip) show(e.target, null); });
   host.addEventListener("focusout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
+  // 막대 사이는 좌우 방향키로 옮긴다(탭 정지는 하나 -- 위 acctPerfSvg 주석).
+  host.addEventListener("keydown", (e) => {
+    if (!e.target.dataset?.tip || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    const next = e.key === "ArrowLeft" ? e.target.previousElementSibling : e.target.nextElementSibling;
+    if (!next?.dataset?.tip) return;
+    e.preventDefault();
+    e.target.tabIndex = -1; next.tabIndex = 0; next.focus();
+  });
 }
 
 // 값이 바뀐 노드만 짧게 강조한다. 막대는 CSS transition 으로 미끄러지지만 글자는 즉시
@@ -3914,11 +3926,25 @@ async function refreshSituation() {
 let flowReadKey = "";
 const frArrow = (d) => (d > 0 ? `<b class="fr-up" aria-label="위">↑</b> ` : d < 0 ? `<b class="fr-dn" aria-label="아래">↓</b> ` : "");
 // 융합 신호 줄 -- 30분 카드 맨 위(renderSituation). 발동이면 방향색 테두리·글자, 대기면 흐린 글자.
+// 2026-09-26 비평 + 사용자 «연구 원문은 접어서 숨기기»: TRAIN bp·표본 수 같은 연구 근거는 매매 화면의 본문이
+//   아니다 -- «근거»를 눌러야 펼쳐진다. 펼침은 자리(key)마다 기억한다(카드는 수 초마다 다시 그려진다).
+const whyOpen = (() => { try { return new Set(JSON.parse(localStorage.getItem("whyOpen") || "[]")); } catch (e) { return new Set(); } })();
+function whyFold(text, key, label = "근거") {
+  if (!text) return "";
+  return `<details class="why-fold" data-why="${escapeHtml(key)}"${whyOpen.has(key) ? " open" : ""}>`
+    + `<summary>${escapeHtml(label)}</summary><div class="why-body">${escapeHtml(text)}</div></details>`;
+}
+document.addEventListener("toggle", (e) => {
+  const k = e.target?.dataset?.why;
+  if (!k) return;
+  if (e.target.open) whyOpen.add(k); else whyOpen.delete(k);
+  try { localStorage.setItem("whyOpen", JSON.stringify([...whyOpen])); } catch (err) { /* 저장 못 해도 동작은 같다 */ }
+}, true);
 function fusedRowHtml(f) {
   if (!f) return "";
   return `<div class="fr-fuse" data-side="${f.side > 0 ? "long" : f.side < 0 ? "short" : "wait"}">
       <span class="fr-fuse-tag">융합 신호</span>
-      <span class="fr-fuse-text">${f.side ? frArrow(f.side) : ""}${escapeHtml(f.text || "")}<small class="fr-note">${escapeHtml(f.note || "")}</small></span>
+      <span class="fr-fuse-text">${f.side ? frArrow(f.side) : ""}${escapeHtml(f.text || "")}${whyFold(f.note, "fused")}</span>
     </div>`;
 }
 function renderFlowRead() {
@@ -3958,8 +3984,11 @@ function renderFlowRead() {
       + `<span class="fr-gs">${frArrow(ln.dir)}${escapeHtml(said)}</span></div>`;
   }).join("");
   const sumTone = r.up && r.down ? "" : r.up ? " fr-up" : r.down ? " fr-dn" : "";
+  // 2026-09-26 사용자 «접어서 숨기기»: 10줄은 요약 한 줄 아래로 접는다(요약이 결론이다). 펼침은 기억한다.
   box.innerHTML = `<div class="sit-sec fr-head">근본 신호 · 데이터 관계<span>− 숏 · 롱 +</span></div>`
-    + `<div class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}</div><div class="fr-gauges">${rows}</div>`;
+    + `<details class="why-fold fr-fold" data-why="flow"${whyOpen.has("flow") ? " open" : ""}>`
+    + `<summary class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}<span class="fr-more">${r.lines.length}줄</span></summary>`
+    + `<div class="fr-gauges">${rows}</div></details>`;
 }
 
 function renderSituation() {
@@ -4032,7 +4061,7 @@ function renderSituation() {
   body.innerHTML = `
     <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
     ${fusedRowHtml(fz)}
-    ${o3 ? `<div class="sit-cols">${scn}</div><div class="sit-cal sit-src">${escapeHtml(o3.note)}</div>`
+    ${o3 ? `<div class="sit-cols">${scn}</div><div class="sit-cal sit-src">${whyFold(o3.note, "outcome", "근거 · 측정 방법")}</div>`
          : `<div class="sit-cal">융합 3결과 계산 전 — 30분 폭 분위(5분봉 24h)를 받는 중</div>`}
     <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`;
 
@@ -4044,8 +4073,16 @@ function renderSituation() {
       badge.className = `ops-badge ${fz.side > 0 ? "good" : "bad"}`;
       badge.textContent = `융합 ${fz.side > 0 ? "롱" : "숏"} · ${fz.side > 0 ? `↑${P.up}% vs ↓${P.dn}%` : `↓${P.dn}% vs ↑${P.up}%`}`;
     } else if (cols.length) {
-      badge.className = `ops-badge ${age != null && age <= 15 ? "good" : "neutral"}`;
-      badge.textContent = `${OUT[cols[0].key].ar} ${OUT[cols[0].key].nm} ${Math.round(cols[0].p)}%${age != null ? ` · ${age}초 전` : ""}`;
+      // 🔴2026-09-26 비평: 여기 초록은 방향이 아니라 «15초 안에 계산됨»이었다(age<=15 → good) -- 37% 대 36% 인
+      //   동전 던지기에 화면에서 가장 강한 방향색이 칠해졌다. 3색 규칙: 초록은 방향·정상에만. 신선함은 글자로만.
+      //   1·2위 차이가 5pp 미만이면 1위를 내세우지 않고 «비등»이라고 말한다.
+      const [c0, c1] = cols;
+      const close = c1 && Math.abs(c0.p - c1.p) < 5;
+      badge.className = "ops-badge neutral";
+      badge.textContent = (close
+        ? `비등 · ${OUT[c0.key].ar}${Math.round(c0.p)}% ${OUT[c1.key].ar}${Math.round(c1.p)}%`
+        : `${OUT[c0.key].ar} ${OUT[c0.key].nm} ${Math.round(c0.p)}%`)
+        + (age != null ? ` · ${age}초 전` : "");
     } else {
       badge.className = "ops-badge neutral"; badge.textContent = "대기";
     }
@@ -5405,6 +5442,21 @@ function densityColor(t) {
   return `rgb(${last[0]},${last[1]},${last[2]})`;
 }
 
+// 가격 꼬리표 세로 배치(2026-09-26). 가격 순서(rawY)를 지키며 겹치지 않게 민다 -- 위→아래로 최소 간격,
+// 아래→위로 바닥 안에 되민다. 자리가 모자라면 겹칠 수는 있어도 **순서는 절대 안 뒤집힌다**.
+// 입력: [{rawY, realY}] (realY = 화면 밖이면 가장자리로 clamp 한 y). adjustedY 를 채운다.
+function declutterTagY(labels, lo, hi, gap) {
+  labels.sort((a, b) => a.rawY - b.rawY);
+  let prev = -Infinity;
+  labels.forEach((p) => { p.adjustedY = Math.max(p.realY, prev + gap, lo); prev = p.adjustedY; });
+  prev = Infinity;
+  for (let i = labels.length - 1; i >= 0; i--) {
+    labels[i].adjustedY = Math.min(labels[i].adjustedY, prev - gap, hi);
+    prev = labels[i].adjustedY;
+  }
+  return labels;
+}
+
 function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = [], footprint = null) {
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
   // 2026-09-18 부모가 아니라 **SVG 자신의** 높이를 본다. 부모는 마진 12px 를 포함하므로
@@ -5896,40 +5948,21 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // one, or it can't tell they collide.
   priceLabels.forEach(p => {
     const rawY = yAt(p.val);
+    p.rawY = rawY;
     p.offTop = rawY < mt;
     p.offBottom = rawY > plotBottom;
     p.outOfView = p.offTop || p.offBottom;
     p.realY = p.outOfView ? (p.offTop ? mt + 2 : plotBottom - 2) : rawY;
   });
 
-  // Sort by Y position (Price descending = Y ascending). Off-view levels on the same edge tie on
-  // realY; stable sort then falls back to insertion order (callers pass nearest-to-price first) --
-  // so the cascade below places the most relevant level closest to the edge and farther ones
-  // deeper into the chart.
-  priceLabels.sort((a, b) => a.realY - b.realY);
-
-  // Adjust Y to avoid overlap. Off-view levels clamped to the same edge pixel need an
-  // unconditional cascade, not a "would this collide" check -- a distance-gated nudge only fires
-  // once, since every clamped item after the first sits exactly minGap*k away from a still-
-  // identical realY and the gate never re-triggers. In-view levels (current/entry price) keep the
-  // original "only nudge if actually close" behavior since their true positions are meaningful.
-  // minGap must exceed the price-tag box height (18px, drawn below) or cascaded boxes touch
-  // edge-to-edge with no visible gap between them -- 22 leaves a small visible seam.
-  const minGap = 22;
-  let topStack = mt + 2, bottomStack = plotBottom - 2;
-  priceLabels.forEach((p, i) => {
-    if (p.offTop) {
-      p.adjustedY = topStack;
-      topStack += minGap;
-    } else if (p.offBottom) {
-      p.adjustedY = bottomStack;
-      bottomStack -= minGap;
-    } else if (i > 0) {
-      const prev = priceLabels[i - 1];
-      const prevY = prev.adjustedY !== undefined ? prev.adjustedY : prev.realY;
-      if (Math.abs(p.realY - prevY) < minGap) p.adjustedY = prevY + minGap;
-    }
-  });
+  // 🔴2026-09-26 비평: 꼬리표가 겹치고 **순서가 뒤집혔다**(«↑ 2765» 가 2708.5 아래). 원인 둘 --
+  //   ① 화면 밖 레벨을 같은 가장자리 픽셀(realY)로 정렬해 동점을 삽입순(가까운 것 먼저)으로 풀었다 →
+  //     더 먼(더 높은) 가격이 더 아래에 쌓였다. ② 화면 안 꼬리표는 **바로 앞 하나**하고만 비교했다 →
+  //     아래 가장자리에서 위로 쌓인 것과 다시 겹쳤다.
+  //   고침: 실제 가격 순(rawY)으로 정렬하고, 위→아래 한 번(최소 간격 밀기)·아래→위 한 번(바닥 안으로
+  //   되밀기) 훑는다. 순서는 항상 가격 순이고, 자리가 모자라지 않는 한 겹치지 않는다.
+  //   minGap 은 꼬리표 상자 높이(18px)보다 커야 틈이 보인다. 범위는 그리는 쪽의 clamp(mt+9 ~ plotBottom-9)와 같다.
+  declutterTagY(priceLabels, mt + 9, plotBottom - 9, 22);
 
   // 격자·x눈금은 기하와 봉 시각만 보므로 한 층으로 묶어 캐시한다(cachedLayer 주석).
   cachedLayer("grid", "", (g) => {
@@ -8430,6 +8463,7 @@ async function manualEntryPreview(side, kind = "entry") {
     box.innerHTML = entryNote(`실패: ${err && err.message ? err.message : err}`, "bad");
   } finally {
     manualPreviewInFlight = false;
+    manualFireOnPreview = false;   // 실패·막힘으로 발주가 안 됐으면 다음 미리보기로 새지 않게
     if (!manualOrderBusy) manualButtonsDisabled(false);
   }
 }
@@ -8565,10 +8599,14 @@ function manualEntryClearConfirm() {
 }
 
 function manualEntryArmConfirm(side, plan, kind = "entry") {
-  if (plan.blocked) return;
+  if (plan.blocked) { manualFireOnPreview = false; return; }
   const pct = Math.round(100 * (plan.fraction ?? 1));
   manualEntryPending = { side, quantity: plan.quantity, kind, pct,
                          lev: manualLevEffective() };
+  // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
+  //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
+  //   확인했다. 미리보기가 오는 즉시 발주한다(막혔으면 위에서 이미 멈췄다).
+  if (manualFireOnPreview) { manualFireOnPreview = false; manualEntrySubmit(); return; }
   // 🔴진입은 «길게 누르기»가 곧 확인이다 -- 확인 버튼을 띄우면 같은 주문이 두 번 나갈 길이
   //   생긴다(누르고 있는 동안 pending 이 잡히므로). 청산은 그대로 버튼으로 확인한다.
   const btn = el("snapEntryConfirm");
@@ -8732,6 +8770,7 @@ function syncAllRangeFills(root) {
 // (없으면 모바일에서 누른 채 스크롤하다 발주된다).
 const HOLD_FIRE_MS = 400;
 let manualPreviewInFlight = false;
+let manualFireOnPreview = false;
 let manualHoldFire = false;
 let manualHoldTimer = null;
 let manualHoldRaf = null;
@@ -8769,11 +8808,12 @@ function manualHoldStart(btn, side, kind) {
     manualHoldFire = false;
     // 미리보기가 막혔거나(blocked) 아직 안 왔으면 pending 이 없다 -- 그때는 안 나간다.
     if (manualEntryPending) manualEntrySubmit();
+    // 미리보기가 아직 오는 중이면 **오는 즉시** 발주한다(manualEntryArmConfirm) -- 채움을 끝냈으면 확인은 끝났다.
     // 🔴미리보기가 **왔는데** pending 이 없으면 막혔거나 게이트가 꺼진 것이다 -- 상자에 이미 사유가 있다.
-    //   «아직 안 왔습니다»로 덮으면 원인을 잘못 말한다(2026-09-26 비평).
     else if (manualPreviewInFlight) {
+      manualFireOnPreview = true;
       const box = el("snapEntryResult");
-      if (box) { box.hidden = false; box.innerHTML = entryNote("미리보기가 아직 안 왔습니다 — 다시 누르세요.", "bad"); }
+      if (box) { box.hidden = false; box.innerHTML = entryNote("미리보기 받는 중 — 오면 바로 나갑니다.", "live"); }
     }
   }, HOLD_FIRE_MS);
 }
@@ -8890,7 +8930,7 @@ document.querySelectorAll(".chipset").forEach((box) => {
 //   게이지를 밀면 되돌아간 카드의 칩도 이미 맞춰져 있다.
 // 🔴끄는 건 손잡이(⠿)로만 -- 주문 버튼이 «길게 누르기»라 끌기와 한 표면을 쓰면 옮기다 멈춘 순간 발주된다.
 const OFAB_POS_KEY = "ofabPos";
-const ofab = { open: false, home: null, next: null, x: null, y: null };
+const ofab = { open: false, home: null, next: null, x: null, y: null, cardVisible: false };
 
 function ofabPlace(x, y, save) {
   const box = el("ofab"), bar = box?.querySelector(".ofab-bar");
@@ -8930,6 +8970,7 @@ function ofabSetOpen(open) {
   syncAllRangeFills(lanes);
   syncChipsets();
   ofabPlace(ofab.x, ofab.y, false);   // 열리면 위/아래·최대 높이를 다시 정한다
+  el("ofab")?.classList.toggle("tucked", ofab.cardVisible && !open);   // 카드 앞에서 닫으면 다시 접는다
 }
 
 // 탭이 스냅샷일 때만 뜬다(주문 조작부가 사는 탭). 다른 탭으로 가면 조작부를 카드로 먼저 돌려놓는다.
@@ -8939,7 +8980,12 @@ function ofabSync() {
   const on = activePageTab === "snapshot";
   if (!on) ofabSetOpen(false);
   box.hidden = !on;
-  if (on) ofabPlace(ofab.x ?? innerWidth, ofab.y ?? innerHeight, false);
+  if (on) ofabPlace(ofab.x ?? ofabDefaultX(), ofab.y ?? innerHeight, false);
+}
+// 2026-09-26 비평: 모바일 기본 자리는 **하단 가운데**(엄지 영역) -- 오른쪽 아래는 «지금 닫으면»·미실현 타일을 덮었다.
+function ofabDefaultX() {
+  const w = el("ofab")?.querySelector(".ofab-bar")?.offsetWidth || 220;
+  return matchMedia("(pointer: coarse)").matches ? (innerWidth - w) / 2 : innerWidth;
 }
 
 // 버튼 글자 = 지금 포지션. 펼치지 않아도 «들고 있나·얼마 벌었나»가 보여야 누를지 정한다.
@@ -8962,8 +9008,18 @@ function renderOfab() {
   //   첫 배치 폭으로 clamp 한 자리에서 오른쪽이 최대 112px 화면 밖으로 잘렸다. 크기 변화 자체를 따라가 다시 잡는다.
   if (window.ResizeObserver) {
     new ResizeObserver(() => {
-      if (!el("ofab").hidden) ofabPlace(ofab.x ?? innerWidth, ofab.y ?? innerHeight, false);
+      if (!el("ofab").hidden) ofabPlace(ofab.x ?? ofabDefaultX(), ofab.y ?? innerHeight, false);
     }).observe(el("ofab").querySelector(".ofab-bar"));
+  }
+  // 🔴2026-09-26 비평: 계좌 카드가 화면에 보이는 동안엔 같은 조작부가 **카드 안에** 있다 -- 떠 있는 버튼은
+  //   그 카드의 «지금 닫으면»·미실현 값을 덮기만 한다. 카드가 보이면 접어 두고(펼쳐 쓰는 중이면 그대로),
+  //   카드를 벗어나면 다시 뜬다.
+  const card = el("snapAcctPosition")?.closest(".panel");
+  if (card && window.IntersectionObserver) {
+    new IntersectionObserver(([e]) => {
+      ofab.cardVisible = e.isIntersecting;
+      el("ofab").classList.toggle("tucked", ofab.cardVisible && !ofab.open);
+    }, { threshold: 0.12 }).observe(card);
   }
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(OFAB_POS_KEY) || "null"); } catch (e) { saved = null; }

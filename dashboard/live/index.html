@@ -263,7 +263,7 @@
             <!-- 2026-09-14 «지금 닫으면 얼마인가»를 누르기 **전에** 보여준다. 계좌 payload 의
                  진입가·마크가로 화면이 바로 계산한다(≈ 표시: 체결가·수수료는 빠진 근사다). -->
             <span id="snapExitNow" class="exit-now"></span>
-            <p class="lane-pact"><span class="pact-mouse">0.4초 누르면 <b>미리보기</b> → 확인 버튼이 <b>30초</b> 동안 뜹니다.</span><span
+            <p class="lane-pact"><span class="pact-mouse"><b>0.4초</b> 누르고 있으면 <b>바로 나갑니다</b> — 떼면 취소.</span><span
               class="pact-touch">누르면 <b>미리보기</b> → 확인 버튼을 <b>한 번 더</b> 눌러야 나갑니다(30초).</span></p>
           </div>
           <!-- 2026-09-22 사용자 «청산과 진입이 한 줄에 같이 있는 거였어 · 포지션이 없어도».
@@ -340,6 +340,9 @@
             <button type="button" id="snapEntryShort" class="notify-btn short hold-fire">
               <i class="hold-fill" aria-hidden="true"></i><span>숏 진입</span></button>
           </div>
+          <!-- 2026-09-26 비평: 진입 레인에는 약속 문구가 없었다. 청산과 같은 규칙이다(마우스 = 바로, 터치·키보드 = 확인). -->
+          <p class="lane-pact"><span class="pact-mouse"><b>0.4초</b> 누르고 있으면 <b>바로 나갑니다</b> — 떼면 취소.</span><span
+            class="pact-touch">누르면 <b>미리보기</b> → 확인 버튼을 <b>한 번 더</b> 눌러야 나갑니다(30초).</span></p>
           </details>
           <!-- 2026-09-12 계좌 카드와 **같은 타일**로 그린다(사용자 요청) -- 미리보기가 말 그대로
                «진입 후의 그 카드»가 되도록. 옛 판은 고정폭 텍스트라 계좌 패널과 따로 놀았다. -->
@@ -407,7 +410,8 @@
              레짐 리본이 같은 이유로 여기 들어와 있다. app.js renderCandleSvg 의 「봉별 OI
              신규계약 레인」 블록. -->
         <div class="chart-container candle-container">
-          <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet"></svg>
+          <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet" role="img"
+            aria-label="ETH 5분봉 차트 — 풋프린트·수급(CVD)·호가 프로파일·청산·사분면"></svg>
         </div>
         <div id="liquidationMapList" class="liq-level-list"></div>
       </section>
@@ -416,7 +420,9 @@
            S/R 비대칭 → 시나리오 셋 → 생각을 바꾸는 신호)를 규칙으로 옮긴 카드. dashboard/situation.py.
            🔴확률은 휴리스틱(점수표)이다. 그래서 예측을 전부 장부에 남기고 30분 뒤 결과와 맞춘 적중률을 같이 그린다. -->
       <section class="panel ops-health-panel situation-panel" data-asset-scope="situation" data-eth-only>
-        <!-- 2026-09-21 사용자 요청(아티팩트 댓글): 제목·설명 줄을 빼고 배지 칩만 남긴다. -->
+        <!-- 2026-09-21 사용자 요청(아티팩트 댓글): 제목·설명 줄을 빼고 배지 칩만 남긴다.
+             2026-09-26 비평: 그래서 헤딩 탐색에서 통째로 빠졌다 -- 보이는 줄은 그대로 두고 스크린리더 제목만 단다. -->
+        <h3 class="sr-only">30분 시나리오</h3>
         <div class="ops-health-head">
           <div class="ops-health-head-tools"><span id="situationBadge" class="ops-badge neutral">-</span></div>
         </div>
@@ -429,11 +435,13 @@
 
 
       <section class="panel ops-health-panel" data-asset-scope="indicators" data-eth-only>
+        <h3 class="sr-only">신호</h3>
         <div id="snapModelIndicatorList" class="ops-health-list"></div>
       </section>
 
 
       <section class="panel ops-health-panel">
+        <h3 class="sr-only">특화 신호</h3>
         <div id="snapSpecializedSignalList" class="ops-health-list"></div>
       </section>
 

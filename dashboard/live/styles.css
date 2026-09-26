@@ -2059,8 +2059,22 @@ svg {
 /* 성과 */
 .acct-perf { min-width: 0; display: grid; gap: 9px; grid-template-rows: auto 1fr auto; }
 .acct-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+/* 2026-09-26 «근거» 접기 -- 연구 원문은 누를 때만. 요약 줄은 누르는 곳이라는 표시(▸/▾)만 단다. */
+.why-fold > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  font: 600 11px/1.4 var(--font-sans); color: var(--muted); min-height: 24px; }
+.why-fold > summary::-webkit-details-marker { display: none; }
+.why-fold > summary::after { content: "▸"; font-size: 10px; }
+.why-fold[open] > summary::after { content: "▾"; }
+.why-fold > summary:hover { color: var(--text); }
+.why-fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.why-body { font: 600 11px/1.55 var(--font-sans); color: var(--muted); margin-top: 4px; }
+.fr-fold > summary.fr-sum { display: flex; width: 100%; font: 700 12px/1.45 var(--font-mono); color: var(--muted); }
+.fr-fold > summary.fr-sum.fr-up { color: var(--good); }
+.fr-fold > summary.fr-sum.fr-dn { color: var(--bad); }
+.fr-fold .fr-more { margin-left: auto; color: var(--muted); font: 600 11px/1 var(--font-sans); padding-left: 8px; white-space: nowrap; align-self: center; }
+.fr-fold[open] > .fr-gauges { margin-top: 6px; }
 /* 2026-09-26 성과는 한 줄 요약이 기본(펼치면 차트). 요약 줄 자체가 누르는 곳이다. */
-.acct-perf-fold > summary { list-style: none; cursor: pointer; align-items: center; }
+.acct-perf-fold > summary { list-style: none; cursor: pointer; align-items: center; min-height: 28px; }
 .acct-perf-fold > summary::-webkit-details-marker { display: none; }
 .acct-perf-fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
 .acct-perf-more::after { content: "차트 펼치기 ▾"; font: 600 11px/1 var(--font-sans); color: var(--muted); }
@@ -2093,7 +2107,8 @@ svg {
 .acct-tip .bad { color: var(--bad); }
 /* 키보드로 막대를 훑을 때 어디인지 보이게 -- 툴팁이 값의 유일한 통로가 되지 않는다 */
 .acct-perf-svg rect[tabindex]:focus { outline: none; fill: rgb(var(--lift) / 0.06); }
-.acct-perf-svg rect[tabindex]:focus-visible { fill: rgb(var(--lift) / 0.10); }
+.acct-perf-svg rect[tabindex]:focus-visible { fill: rgb(var(--lift) / 0.10);
+  stroke: var(--accent); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }  /* 2026-09-26 포커스가 안 보였다 */
 /* 🔴칸을 꽉 채우면 비균일 확대다. 늘어나면 안 되는 것(선 두께·끝점)은 SVG 쪽에서
    vector-effect / 둥근 캡으로 확대를 껐다 -- acctPerfSvg() 주석 참고. */
 .acct-perf-svg { display: block; width: 100%; height: 100%; min-height: 96px; }
@@ -3069,7 +3084,13 @@ body.not-eth [data-eth-only]::after {
    패널 안으로 옮겨 온다(app.js ofabSetOpen) -- 여기 규칙은 그 조작부를 좁은 패널에 맞추는 것뿐이다.
    좌표는 JS 가 left/top 으로 준다. 패널은 남은 공간이 넓은 쪽으로 연다(.up / .rightside).
    🔴z-index 900: 툴팁(1000)·터치 팁(9999)보다 아래 -- 차트 툴팁이 이 버튼 뒤로 숨으면 안 된다. */
-.ofab { position: fixed; left: 0; top: 0; z-index: 900; }
+.ofab { position: fixed; left: 0; top: 0; z-index: 900; transition: opacity .2s ease, transform .2s ease; }
+/* 계좌 카드가 보이는 동안 접어 둔다(app.js IntersectionObserver) -- 카드 안에 같은 조작부가 있다. */
+.ofab.tucked { opacity: 0; transform: translateY(12px); pointer-events: none; visibility: hidden;
+  transition: opacity .2s ease, transform .2s ease, visibility 0s linear .2s; }
+@media (prefers-reduced-motion: reduce) { .ofab, .ofab.tucked { transition: none; } }
+/* 모바일: 페이지 끝이 떠 있는 버튼 뒤에 묻히지 않게 버튼 높이 + 16px 만큼 여백. */
+@media (pointer: coarse) { main.app { padding-bottom: 76px; } }
 .ofab[hidden] { display: none; }
 .ofab-bar {
   display: flex; align-items: center; gap: 2px; padding: 4px;

@@ -60,6 +60,15 @@ def run(shot):
                 pg.wait_for_timeout(400)
                 bad = lambda msg: fails.append(f"[{tag}] {msg}")
                 ok = lambda c, msg: None if c else bad(msg)
+                # 2026-09-26: 계좌 카드가 보이는 동안엔 접혀 있어야 한다(카드 안에 같은 조작부가 있다) --
+                #   그다음 카드를 화면 밖으로 보내고 나머지 검사를 한다.
+                ok(pg.evaluate("() => document.getElementById('ofab').classList.contains('tucked')"),
+                   "계좌 카드가 보이는데 떠 있는 버튼이 안 접혔다")
+                pg.evaluate("() => { const c = document.getElementById('snapAcctPosition').closest('.panel');"
+                            " window.scrollTo(0, c.getBoundingClientRect().bottom + scrollY + 40); }")
+                pg.wait_for_timeout(500)
+                ok(not pg.evaluate("() => document.getElementById('ofab').classList.contains('tucked')"),
+                   "계좌 카드를 벗어났는데 떠 있는 버튼이 안 떴다")
 
                 # 2026-09-25 접기 폐지: 포지션이 있어도 진입 칸은 열려 있고, 제목 줄을 눌러도 안 접힌다.
                 pg.evaluate("() => { manualExitSyncButtons(); document.getElementById('snapEntrySummary').click(); }")
