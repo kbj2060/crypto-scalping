@@ -2023,8 +2023,9 @@ def _flow_spec(asset: str, bucket: float, price_dp: int, oi_poll_s: float) -> Fl
         oi_poll_s=oi_poll_s,
         snapshot_path=LIVE_DIR / f"footprint_{asset}.json",
         okx_tape_db=OKX_TAPE_DB_PATH if eth else LIVE_DIR / f"okx_trade_tape_{asset}.duckdb",
-        # SOL·XRP 의 OKX 맥락(OI·청산) DB 는 Pi 에만 있다 -- 없으면 복원이 OI·청산 없이 체결만 되살린다.
-        okx_ctx_db=OKX_CTX_DB_PATH if eth else LIVE_DIR / f"okx_context_{asset}.duckdb")
+        # SOL·XRP 의 OKX 맥락(OI·청산)은 Pi 가 수집하고 3분마다 .from_pi 로 복제한다(Pi crontab). 이 파일이 없으면
+        #   복원이 체결만 되살리고, OI 5분봉은 커버리지 가드가 OKX 없는 봉을 버려 재시작 이후분만 남는다.
+        okx_ctx_db=OKX_CTX_DB_PATH if eth else LIVE_DIR / f"okx_context_{asset}.from_pi.duckdb")
 
 
 FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2, OI_1S_POLL_SECONDS),
