@@ -176,6 +176,7 @@ from scripts.live_macro_calendar_20260826 import compute_macro_event_alert  # no
 # specialized-detector (EVIDENCE_SIGNAL_SYMBOL etc. below) are untouched -- those are trained ML
 # models with no BTC-trained artifact yet, not something a symbol swap alone can serve.
 from scripts.coin_config import COIN_CONFIG  # noqa: E402
+import scripts.binance_ban_guard as ban_guard  # noqa: E402 -- requests 도 전역으로 감싼다(주문·계좌 경로)
 # 2026-09-10: 거래소 계정 자체(수동 매매 포함)를 읽는 유일한 경로. trade_journal.jsonl은
 # trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
@@ -2167,9 +2168,16 @@ def make_app() -> web.Application:
         `error_reason` reproduces what each per-endpoint block used to do on a non-200: raise
         HTTPBadGateway with that reason. Passing None instead returns None on a non-200, for the
         two legs (BTC/funding, forming-bar preview) that are documented as fail-soft."""
+        # 2026-09-26 IP 밴: 차단 중엔 **보내지 않는다**(보내면 해제 시각이 늘어난다) -- 공용 가드 파일 기준.
+        if ban_guard.is_binance(url) and ban_guard.ban_remaining() > 0:
+            if error_reason is None:
+                return None
+            raise web.HTTPServiceUnavailable(reason="binance_ip_ban")
         async with binance_session().get(url, params=params,
                                          timeout=ClientTimeout(total=timeout)) as response:
             if response.status != web.HTTPOk.status_code:
+                if response.status in (418, 429) and ban_guard.is_binance(url):
+                    ban_guard.note(response.status, await response.text(), response.headers.get("Retry-After"))
                 if error_reason is None:
                     return None
                 raise web.HTTPBadGateway(reason=error_reason)
@@ -2693,10 +2701,15 @@ def make_app() -> web.Application:
         flushed_at = time.time()
         while True:
             try:
+                left = ban_guard.ban_remaining()
+                if left > 0:                      # 다른 프로세스가 받은 차단도 따른다(공용 가드)
+                    await asyncio.sleep(min(left + 1, 300))
+                    continue
                 async with http_session["session"].get(
                         OI_1S_URL, params={"symbol": FOOTPRINT_SYMBOL}) as resp:
                     data = await resp.json()
                 if "time" not in data:
+                    ban_guard.note(resp.status, json.dumps(data), resp.headers.get("Retry-After"))
                     # 🔴2026-09-26 긴급: 한도 초과(429)·IP 밴(418)에도 0.25초마다 다시 두드려 **밴을 계속 연장**했다
                     #   (밴 중 로그 93/100줄). IP 한도는 봇·대시보드·수집기가 같이 쓴다 -- 밴이면 풀릴 때까지, 아니면 30초.
                     m = re.search(r"banned until (\d+)", str(data.get("msg", "")))

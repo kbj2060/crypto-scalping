@@ -39,6 +39,7 @@ import requests
 # 학습과 라이브가 따로 만들면 조용히 어긋나고, 그 어긋남은 에러가 아니라
 # «좀 이상한 수량»으로만 나타난다.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import binance_ban_guard  # noqa: E402,F401 -- 2026-09-26 IP 밴 중엔 바이낸스 REST 를 안 내보낸다(공용 가드)
 import live_eth_sizing_vol_model_20260912 as svm  # noqa: E402
 # 2026-09-13 보유시간 조건부 MAE 분위 모델. **여기서** 계산해 상태파일에 싣는다 --
 # 대시보드 요청 경로에서 돌리면 스레드 풀이 고갈된다(2026-09-10 실장애).

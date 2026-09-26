@@ -27,6 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
+import binance_ban_guard  # noqa: E402,F401 -- 2026-09-26 IP 밴 중엔 바이낸스 REST 를 안 내보낸다(공용 가드)
 from live_eth_breakout_detector_20260911 import get_signals  # noqa: E402
 
 STATE = ROOT / "data" / "live" / "eth_breakout_detector_state.json"
