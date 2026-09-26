@@ -31,20 +31,6 @@ colors:
   light-alarm-amber: "#7a4809"
   light-steel-accent: "#2b3444"
 typography:
-  display:
-    fontFamily: "Pretendard Variable, Pretendard, -apple-system, Noto Sans KR, sans-serif"
-    fontSize: "clamp(28px, 4vw, 38px)"
-    fontWeight: 600
-    lineHeight: 1
-    letterSpacing: "-0.02em"
-    fontFeature: "tnum"
-  clock:
-    fontFamily: "Space Grotesk, Pretendard Variable, Noto Sans KR, sans-serif"
-    fontSize: "12px"
-    fontWeight: 500
-    lineHeight: 1
-    letterSpacing: "0.04em"
-    fontFeature: "tnum"
   headline:
     fontFamily: "Space Grotesk, Pretendard Variable, Noto Sans KR, sans-serif"
     fontSize: "28px"
@@ -210,15 +196,14 @@ components:
 
 ## Typography
 
-**Display Font:** Space Grotesk (with Pretendard Variable) — 제목·시계. 상단 현재가는 Pretendard.
+**Display Font:** Space Grotesk (with Pretendard Variable) — 카드·화면 제목.
 **Body Font:** Pretendard Variable (with Pretendard, -apple-system, Noto Sans KR)
 **Label/Mono Font:** JetBrains Mono (with Pretendard Variable, ui-monospace)
 
 **Character:** 기하학적인 Space Grotesk 가 제목과 시계를 맡아 계기판의 표지판처럼 서고, 한글 가독성이 좋은 Pretendard 가 본문과 큰 숫자를, JetBrains Mono 가 줄을 맞춰야 하는 데이터 숫자를 맡는다.
 
 ### Hierarchy
-- **Display** (600, clamp(28px, 4vw, 38px), 1, Pretendard): 상단 **현재가** + 5분봉 시가 대비. 화면에서 가장 큰 숫자는 지금 가격이다(2026-09-26 — 예전엔 벽시계였다). 1초마다 바뀌므로 등폭 숫자.
-- **Clock** (500, 12px, Space Grotesk, 흐린 글자): 현재가 아래의 작은 시계.
+- 상단 가운데에는 **아무것도 두지 않는다**(2026-09-26 사용자 지시로 현재가·5분 변화·시계 제거 — 가격은 차트·계좌 레일에 이미 있다). 상단은 왼쪽 탭 · 오른쪽 세션 두 칸이다.
 - **Headline** (500, 28px, 1.1): 운영 화면 제목.
 - **Title** (500, 17px): 카드 제목(«내 계좌», «진단»).
 - **Figure** (600, 40px, 1.02, -0.025em): 순자산 같은 큰 단독 숫자. 디스플레이 서체도 등폭 숫자도 쓰지 않는다 — 비례 숫자.

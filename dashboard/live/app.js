@@ -802,14 +802,6 @@ function fmtHourMinute(v) {
   return `${hh}:${mm}`;
 }
 
-function fmtNowClock() {
-  const d = new Date();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
-}
-
 function buildSessionHtml(sess) {
   const sAsiaOn = Number(sess.session_asia || 0) >= 0.5;
   const sEurOn = Number(sess.session_europe || 0) >= 0.5;
@@ -1036,22 +1028,31 @@ async function fetchBinanceHistory(asset) {
 //     한 번뿐이라 «언제»가 중요해졌다. 마감 직후에 쏘면 서버가 아직 안 만들어 한 발을
 //     헛되이 쓴다(위 «경계에서 한 번»의 실패가 바로 그것) -- TTL 60초를 넘긴 뒤에 쏜다.
 //     sma 가 이미 들어와 있으면 재시도 자체가 **0회**다(조건이 증상이라 그대로 남는다).
-// ponytail: 그 한 번마저 빗나가면 다음 봉의 재시도까지 밴드가 한 봉 뒤처진다(최대 ~6분).
-//   지금 실측 서버 뒤처짐이 0 이라 감수한다. 잦아지면 «봉당 두 번»이 가장 싼 상향이다.
-const HISTORY_RETRY_AFTER_CLOSE_S = 70;   // 서버 프레임 TTL 60초 + 여유
-let historyRetryDoneBar = 0;              // 재시도를 이미 쓴 마감봉 -- 봉당 한 번을 강제한다
+// 🔴2026-09-26 사용자 «추세 veto 선이 5분마다 업데이트가 안 된다» -- 위 ponytail 이 예고한 그 실패였다.
+//   실측(서버, 10초 간격): 마감봉 값은 마감 뒤 ~60~65초에 붙는데 재시도는 +70초 **한 번**뿐이라, 서버 시계
+//   톱니·조회 지연으로 그 한 발이 옛 프레임을 받으면 다음 5분 폴링까지 선이 두 봉 모자란 채 멈췄다
+//   (라이브 한 칸 연장은 «직전 마감봉에 sma 가 있을 때»만 되므로). ⇒ **값이 붙을 때까지 15초마다** 다시 묻는다.
+//   조건이 증상(직전 마감봉에 sma 없음)이라 붙는 순간 멈추고, 마감 뒤 두 봉이 지나면 정기 폴링에 맡긴다.
+const HISTORY_RETRY_AFTER_CLOSE_S = 60;   // 서버 프레임 TTL 60초 -- 그 전엔 물어도 같은 답
+const HISTORY_RETRY_EVERY_MS = 15000;
+let historyRetryAt = 0;
+// 순수 함수(test/test_history_retry_due_20260926.py 가 본문을 떼어 돌린다). barMin 은 봉 길이(분).
+function historyRetryDue(closedTime, closedSma, nowMs, lastRetryMs, barMin = CHART_CANDLE_MIN) {
+  const sinceClose = nowMs / 1000 - (closedTime + barMin * 60);
+  // null 도 «없음»이다 -- Number(null) 은 0 이라 «있음»으로 새었다(테스트가 잡았다).
+  return closedTime > 0 && (closedSma == null || !Number.isFinite(Number(closedSma)))
+    && sinceClose >= HISTORY_RETRY_AFTER_CLOSE_S && sinceClose < 2 * barMin * 60
+    && nowMs - lastRetryMs >= HISTORY_RETRY_EVERY_MS;
+}
 async function maybeFetchSnapshotChartHistory() {
   const now = Date.now();
   const cached = candleHistoryByAsset[activeSnapshotAsset] || [];
   // 마지막은 형성 중 봉이라 sma 가 없는 게 정상이다. 그 **직전**(마감된 봉)에 없으면 밀렸다.
   const closed = cached.length >= 2 ? cached[cached.length - 2] : null;
   const closedTime = Number(closed && closed.time) || 0;
-  const retryDue = closedTime > 0
-    && !Number.isFinite(Number(closed.sma))
-    && historyRetryDoneBar !== closedTime
-    && now / 1000 >= closedTime + CHART_CANDLE_MIN * 60 + HISTORY_RETRY_AFTER_CLOSE_S;
+  const retryDue = historyRetryDue(closedTime, closed && closed.sma, now, historyRetryAt);
   if (!retryDue && cached.length && now - lastSnapshotHistoryFetchAt < CANDLE_HISTORY_POLL_MS) return;
-  if (retryDue) historyRetryDoneBar = closedTime;
+  if (retryDue) historyRetryAt = now;
   lastSnapshotHistoryFetchAt = now;
   await fetchBinanceHistory(activeSnapshotAsset);
   scheduleSnapshotChartRender();
@@ -7653,7 +7654,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
 
   const sessionHtml = buildSessionHtml(sess);
   setH("topSession", sessionHtml);
-  setT("topClock", fmtNowClock());
   
   // 2026-08-25: perf pass -- this whole block (gauge + chart + model-indicator list) only paints
   // anything the user can see while the Snapshot tab is active (snapshotTabPanel is display:none
@@ -7774,24 +7774,6 @@ async function tick() {
   setInterval(tick, POLL_MS);
   setInterval(refreshSupply1s, SUPPLY_1S_POLL_MS);   // 수급만 틱(0.5초)보다 빠르게 -- 자체 게이트가 있다
 })();
-// 2026-09-26 헤더 가격: 지금 가격 + 이번 5분봉 시가 대비. 틱마다가 아니라 시계와 같은 1초 박자로 충분하다.
-function renderTopPrice() {
-  const price = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
-  const candles = candleHistoryByAsset[activeSnapshotAsset];
-  const open = Array.isArray(candles) && candles.length ? Number(candles[candles.length - 1].open) : 0;
-  setT("topPrice", price > 0 ? `${(ASSET_CONFIG[activeSnapshotAsset]?.label || activeSnapshotAsset.toUpperCase())} ${fmtNum(price, 2)}` : "-");
-  const d = el("topPriceDelta");
-  if (!d) return;
-  // 표시 자리(0.01%)에서 반올림한 값으로 부호·색을 정한다 -- 아니면 «−0.00%» 가 빨갛게 뜬다.
-  const raw = price > 0 && open > 0 ? 100 * (price - open) / open : null;
-  const pct = raw === null ? null : Math.round(raw * 100) / 100;
-  const text = pct === null ? "" : `${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct).toFixed(2)}% · 5분`;
-  if (d.textContent !== text) d.textContent = text;
-  d.className = "top-price-delta" + (!pct ? "" : pct > 0 ? " good" : " bad");
-}
-setInterval(() => {
-  if (!isScrolling()) { setT("topClock", fmtNowClock()); renderTopPrice(); }
-}, 1000);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     disconnectDashboardEvents();
@@ -9022,11 +9004,24 @@ function renderOfab() {
   const p = snapshotAccountPosition();
   const qty = Number(p?.qty) || 0;
   const side = qty ? String(p.side || "").toUpperCase() : "";
-  const pnl = Number(p?.unrealized_pnl) || 0;
-  setT("ofabPos", qty ? `${side} ${qty.toFixed(3)} · ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(0)}` : "주문");
+  const pnl = ofabLivePnl(p, qty, side);
+  // 센트까지 -- 달러 반올림이면 3초 갱신이 작은 움직임에서 안 보인다(계좌 카드 미실현과 같은 자리수).
+  setT("ofabPos", qty ? `${side} ${qty.toFixed(3)} · ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : "주문");
   box.classList.toggle("long", side === "LONG");
   box.classList.toggle("short", side === "SHORT");
 }
+// 🔴2026-09-26 사용자 지시 «미실현손익 3초 갱신». 계좌 조회는 30초라 그 사이 숫자가 멈춰 있었다. 거래소를 3초마다
+//   부르는 대신 **거래소 값 + 그 뒤 시세 변화 × 수량**으로 민다. 기준 시세는 계좌 스냅샷이 바뀐 순간의 실시간 시세라
+//   심볼 차이(주문 ETHUSDC · 시세 ETHUSDT, ~1.7bp)는 변화분에서 지워진다. 다음 계좌 조회가 오면 거래소 값으로 되돌아간다.
+const ofabPnlRef = { acct: null, price: 0 };
+function ofabLivePnl(p, qty, side) {
+  const base = Number(p?.unrealized_pnl) || 0;
+  const live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
+  if (!qty || !(live > 0)) return base;
+  if (ofabPnlRef.acct !== latestBinanceAccount) { ofabPnlRef.acct = latestBinanceAccount; ofabPnlRef.price = live; }
+  return base + (live - ofabPnlRef.price) * qty * (side === "SHORT" ? -1 : 1);
+}
+setInterval(renderOfab, 3000);
 
 (() => {
   const grip = el("ofabGrip"), tgl = el("ofabToggle");
