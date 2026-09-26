@@ -3377,7 +3377,7 @@ function hlWhaleLiqLevels(currentPrice, footprint) {
   const fmt = (x) => (x >= 1000 ? `${(x / 1000).toFixed(1)}k` : `${Math.round(x)}`);
   return [[pick(1, true), "HL롱", "var(--liq-support)", 1], [pick(2, false), "HL숏", "var(--liq-resistance)", 2]]
     .filter(([c]) => c)
-    .map(([c, label, color, idx]) => ({ val: c[0], color, label, sub: `${fmt(c[idx])}`,
+    .map(([c, label, color, idx]) => ({ val: c[0], color, label, sub: `${fmt(c[idx])}`, priceLeft: true,
                                         dashed: true, width: 1, marker: !!footprint }));
 }
 
@@ -6781,8 +6781,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-09-22 사용자 지시: **모바일은 배지를 안 그린다.** 값은 플롯 아래 한 줄이 갖고,
     //   플롯 안에서는 꺾쇠(화살표)가 «어느 행인가»만 가리킨다. 배지를 안에 띄우면 가장 최근
     //   봉을 덮고, 밖에 두면 그 폭만큼 플롯이 짧아진다 -- 아래로 내리면 둘 다 없다.
-    const subOk = !!p.sub && !mobileChart;
     const priceLeft = p.priceLeft && !mobileChart;   // 모바일은 원래 배지가 없다(가격은 아래 줄)
+    const subOk = !!p.sub && !mobileChart && !priceLeft;   // 왼쪽 여백엔 값(HL 수량)까지 못 넣는다
     const boxW = subOk ? 76 : 64, boxH = 18;
     const boxX = w - mr + 4;
 
