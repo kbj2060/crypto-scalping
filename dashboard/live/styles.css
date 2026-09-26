@@ -3200,3 +3200,11 @@ body.not-eth [data-eth-only]::after {
 .ofab-panel .entry-line > #snapEntryFracVal { order: 5; }
 .ofab-panel .manual-entry-row.exit-row { justify-content: center; }
 
+
+/* 2026-09-26 주문 심볼의 코인이 아닌 탭(SOL·XRP)에서는 주문 조작부를 막는다 -- app.js syncOrderCoinGate.
+   JS 가드(미리보기·전송 거절)가 본체이고, 이건 «눌러도 안 된다»를 보이게 하고 길게 누르기를 원천 차단한다. */
+body.order-coin-off .acct-lanes > * { opacity: 0.35; pointer-events: none; }
+body.order-coin-off .acct-lanes::before {
+  content: attr(data-order-note); display: block; grid-column: 1 / -1;   /* 2칸 그리드 -- 한 칸을 먹으면 배치가 깨진다 */
+  background: var(--panel); padding: 10px 18px; font-size: 12px; color: var(--muted);
+}

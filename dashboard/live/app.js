@@ -1569,6 +1569,7 @@ document.addEventListener("click", (e) => {
 });
 
 function renderSnapshotAccount() {
+  syncOrderCoinGate();
   const summary = el("snapAcctSummary");
   if (!el("snapAcctPosition")) return;
   if (!latestBinanceAccount) {
@@ -8528,7 +8529,28 @@ function renderLevGauge(plan) {
   syncRangeFill(g);
 }
 
+// 2026-09-26 SOL·XRP 탭이 생기면서 주문 버튼이 다른 코인 탭에도 보인다 -- 그런데 서버 주문 경로는 **exec_symbol 하나**
+//   (ETHUSDC)로만 나간다. SOL 탭에서 누르면 ETH 가 체결된다(데스크톱은 길게 누르면 확인 없이). 탭의 코인이 주문 심볼의
+//   코인과 다르면 미리보기·전송 둘 다 거절하고, 화면에서도 조작부를 막는다(CSS body.order-coin-off).
+function orderCoinOk() {
+  const exec = String((latestBinanceAccount || lastGoodAccount || {}).exec_symbol || "ETHUSDC").toUpperCase();
+  return exec.startsWith(coinUnit().toUpperCase());
+}
+function syncOrderCoinGate() {
+  const off = !orderCoinOk();
+  document.body.classList.toggle("order-coin-off", off);
+  const lanes = document.querySelector(".acct-lanes");
+  if (lanes) {
+    const exec = String((latestBinanceAccount || lastGoodAccount || {}).exec_symbol || "ETHUSDC").toUpperCase();
+    lanes.dataset.orderNote = off ? `주문은 ${exec.replace(/USD[CT]$/, "")} 탭에서만 됩니다 — 이 탭(${coinUnit()})에서는 주문을 낼 수 없습니다` : "";
+  }
+}
+
 async function manualEntryFetch(side, kind = "entry") {
+  if (!orderCoinOk()) {
+    return { ok: false, error: "order_coin_mismatch",
+             detail: `주문 심볼은 ${(latestBinanceAccount || {}).exec_symbol || "ETHUSDC"} 입니다 — ${coinUnit()} 탭에서는 주문하지 않습니다` };
+  }
   const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`
     + (kind === "exit" ? "" : manualLevQuery());
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}${q}`, { cache: "no-cache" });
@@ -8883,6 +8905,12 @@ async function manualEntrySubmit() {
   const pending = manualEntryPending;
   const box = el("snapEntryResult");
   if (!pending || !box) return;
+  if (!orderCoinOk()) {                 // 미리보기 뒤 탭을 바꿨어도 여기서 막는다
+    manualEntryClearConfirm();
+    box.hidden = false;
+    box.innerHTML = entryNote(`주문 취소 — 지금 탭(${coinUnit()})은 주문 심볼의 코인이 아닙니다`, "bad");
+    return;
+  }
   manualEntryClearConfirm();
   manualOrderBusy = true;
   manualButtonsDisabled(true);
