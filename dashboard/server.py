@@ -582,8 +582,17 @@ MICRO_BOOK_URL = "https://fapi.binance.com/fapi/v1/ticker/bookTicker"   # weight
 #   /ws/ethusdt@forceOrder · /market/ws/ethusdt@forceOrder · /ws/!forceOrder@arr 셋을 동시에 열어 두니 22:40:48 의
 #   실제 ETH 청산(SELL 1.000 @2575.83)이 **/market/ws/ 에만** 왔다. /ws/ 는 연결은 되는데(핸드셰이크 OK, 오류 0)
 #   이벤트를 안 준다 -- 첫 배포에서 tail_risk 가 4건을 적는 동안 이 카드가 0건이었던 원인.
-FORCE_ORDER_WS_URL = "wss://fstream.binance.com/market/ws/ethusdt@forceOrder"
-LIQ_EVENTS_PATH = LIVE_DIR / "liq_events.jsonl"      # ⑤ 원시 이벤트. 봇의 tail_risk 는 1분 합만 남긴다
+# 2026-09-26 전 종목 스트림(사용자 지시): BTC·SOL 청산이 봇 tail_risk 에서 09-18 부터 끊겨 0 으로 보였다.
+#   `!forceOrder@arr` 하나로 COIN_CONFIG 코인을 전부 받는다(메시지 모양은 단일 종목과 같다).
+#   경로 함정도 같다 -- 09-26 90초 실측 /market/ws/!forceOrder@arr 11건 vs /ws/!forceOrder@arr 0건.
+FORCE_ORDER_WS_URL = "wss://fstream.binance.com/market/ws/!forceOrder@arr"
+LIQ_ASSET_BY_SYMBOL = {c["binance_symbol"]: a for a, c in COIN_CONFIG.items()}
+LIQ_EVENTS_PATH = LIVE_DIR / "liq_events.jsonl"      # ⑤ 원시 이벤트(ETH). 봇의 tail_risk 는 1분 합만 남긴다
+
+
+def liq_events_path(asset: str) -> Path:
+    """ETH 는 옛 파일 그대로(연구 스크립트가 읽는다), 나머지는 코인별 파일."""
+    return LIQ_EVENTS_PATH if asset == "eth" else LIVE_DIR / f"liq_events_{asset}.jsonl"
 MICRO_TAPE_DB_PATH = LIVE_DIR / "trade_tape.duckdb"  # ② 기준선(시간대별 분위). 읽기 전용, 1시간마다
 # ⑥ 마크가격 스트림(2026-09-21): 예상 펀딩(«어느 쪽이 갇혔나») + 마크−인덱스 베이시스(«누가 주도하나»).
 #    🔴forceOrder 와 같은 함정 -- `/ws/` 는 연결되는데 이벤트 0, `/market/ws/` 만 온다(09-21 dev 실측 0 vs 8건/6초).
@@ -2745,8 +2754,9 @@ def make_app() -> web.Application:
     #      24시간 대조(1,395분): 건수는 88.6% 분에서 같은데 USD 합이 봇 $6.2M vs 여기 $38.0M(6.1배).
     #      예: 09-24 19:46:03 숏 청산 1건 -- 봇 $73,974 / 여기 $1,327,307(492 ETH 주문의 마지막 조각 27 ETH).
     #   ⇒ 봇 DB 와 이어 붙이면 이음새에서 원이 6배 튄다. ETH 는 통째로 이쪽에서 만든다.
-    liq_5m: dict[int, list] = {}                # 봉 시작 -> [롱USD, 숏USD, 건수, 롱최저가, 숏최고가]
-    liq_5m_state: dict[str, Any] = {"from_s": None}   # 이 시각 이전 봉은 «모름» (기록 시작점)
+    # 코인 -> {봉 시작 -> [롱USD, 숏USD, 건수, 롱최저가, 숏최고가]} (2026-09-26 전 종목)
+    liq_5m: dict[str, dict[int, list]] = {a: {} for a in COIN_CONFIG}
+    liq_5m_state: dict[str, Any] = {"from_s": {}}   # 코인 -> 이 시각 이전 봉은 «모름» (기록 시작점)
     # WS 자체의 상태. 청산은 조용한 스트림이라 «이벤트 없음»과 «연결 없음»을 화면이 구별해야 한다
     # (tail_risk_interceptor 가 2026-07-30 에 77일간 잘못 connected=True 로 있던 그 함정).
     fo_state: dict[str, Any] = {"connected": False, "since": None, "last_event_ms": None, "events": 0, "errors": 0, "last_error": None}
@@ -2763,32 +2773,34 @@ def make_app() -> web.Application:
         cut = now_ms - SUPPLY_1S_SECONDS * 1000
         # 2026-09-25 같은 줄들로 청산 원의 5분봉 누적도 되살린다(차트 창 최대 12시간 < 보관 24시간).
         cut_5m = now_ms - FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS * 1000
-        # 기록 시작점: 읽은 꼬리의 첫 이벤트. 파일이 없거나 비면 **지금**이다 -- 그 앞 봉을 0 으로
-        #   내보내면 «청산 없음»이라는 거짓이 되므로 «모름»으로 둔다.
-        liq_5m_state["from_s"] = now_ms / 1000
-        try:
-            with open(LIQ_EVENTS_PATH, encoding="utf-8") as fh:
-                # ponytail: 파일 전체를 훑는다(지금 200KB·연 65MB, 기동 1회). 커지면 tail 바이트만.
-                tail = deque(fh, maxlen=liq_events.maxlen)
-        except OSError:
-            return
-        first = None
-        for line in tail:
+        for asset in COIN_CONFIG:
+            # 기록 시작점: 읽은 꼬리의 첫 이벤트. 파일이 없거나 비면 **지금**이다 -- 그 앞 봉을 0 으로
+            #   내보내면 «청산 없음»이라는 거짓이 되므로 «모름»으로 둔다.
+            liq_5m_state["from_s"][asset] = now_ms / 1000
             try:
-                ev = json.loads(line)
-            except ValueError:
-                continue    # 마지막 줄이 쓰다 만 상태일 수 있다
-            ts = int(ev.get("ts_ms") or 0)
-            first = ts if first is None else first
-            if ts >= cut:
-                liq_events.append(ev)
-            if ts >= cut_5m:
-                liq_5m_add(liq_5m, ev)
-        if first is not None:
-            liq_5m_state["from_s"] = first / 1000
-        print(f"force-order: 지난 판 {len(liq_events)}건 복원 · 5분봉 누적 {len(liq_5m)}봉"
-              f" (기록 시작 {datetime.fromtimestamp(liq_5m_state['from_s'], timezone.utc):%m-%d %H:%M} UTC)",
-              flush=True)
+                with open(liq_events_path(asset), encoding="utf-8") as fh:
+                    # ponytail: 파일 전체를 훑는다(지금 200KB·연 65MB, 기동 1회). 커지면 tail 바이트만.
+                    tail = deque(fh, maxlen=liq_events.maxlen)
+            except OSError:
+                continue
+            first = None
+            for line in tail:
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue    # 마지막 줄이 쓰다 만 상태일 수 있다
+                ts = int(ev.get("ts_ms") or 0)
+                first = ts if first is None else first
+                if asset == "eth" and ts >= cut:
+                    liq_events.append(ev)
+                if ts >= cut_5m:
+                    liq_5m_add(liq_5m[asset], ev)
+            if first is not None:
+                liq_5m_state["from_s"][asset] = first / 1000
+            print(f"force-order {asset}: 5분봉 누적 {len(liq_5m[asset])}봉"
+                  f" (기록 시작 {datetime.fromtimestamp(liq_5m_state['from_s'][asset], timezone.utc):%m-%d %H:%M} UTC)",
+                  flush=True)
+        print(f"force-order: ETH 60초 링 {len(liq_events)}건 복원", flush=True)
 
     async def collect_force_orders(app: web.Application) -> None:
         """⑤ @forceOrder 원시 이벤트를 jsonl 로 남기고 60초 링을 든다. 이벤트가 없으면 조용하다."""
@@ -2805,17 +2817,19 @@ def make_app() -> web.Application:
                                 print(f"force-order ws: non-text {msg.type!r} -> reconnect", flush=True)
                                 break
                             o = (json.loads(msg.data) or {}).get("o") or {}
-                            if not o:
-                                continue
+                            asset = LIQ_ASSET_BY_SYMBOL.get(o.get("s"))
+                            if not asset:
+                                continue    # 전 종목 스트림 -- 대시보드 코인만 남긴다
                             fo_state["events"] += 1
                             fo_state["last_event_ms"] = int(o.get("T") or time.time() * 1000)
                             qty, price = float(o.get("z") or o.get("q") or 0.0), float(o.get("ap") or o.get("p") or 0.0)
                             ev = {"ts_ms": int(o.get("T") or time.time() * 1000),
                                   "side": "long" if o.get("S") == "SELL" else "short",   # 롱 청산 = 시장에 SELL
                                   "qty": qty, "price": price, "usd": qty * price, "symbol": o.get("s")}
-                            liq_events.append(ev)
-                            liq_5m_add(liq_5m, ev)     # 청산 원이 다음 폴링(2초)에 바로 본다 -- 봇 DB 1분 행을 안 기다린다
-                            with open(LIQ_EVENTS_PATH, "a", encoding="utf-8") as fh:   # 분당 몇 줄 -- 블로킹 무시 가능
+                            if asset == "eth":
+                                liq_events.append(ev)      # 1초 수급·미시 참고는 ETH 만 본다
+                            liq_5m_add(liq_5m[asset], ev)  # 청산 원이 다음 폴링(2초)에 바로 본다 -- 봇 DB 1분 행을 안 기다린다
+                            with open(liq_events_path(asset), "a", encoding="utf-8") as fh:   # 분당 몇 줄 -- 블로킹 무시 가능
                                 fh.write(json.dumps(ev, separators=(",", ":")) + "\n")
                 except asyncio.CancelledError:
                     raise
@@ -4366,10 +4380,10 @@ def make_app() -> web.Application:
         #   풋프린트·수급프로파일과 같은 파서를 쓴다 -- 창 폭 파싱은 한 곳에만 있어야 한다.
         #   🔴캐시 키에 bars 를 넣는다. 안 넣으면 창을 바꿔도 30초 동안 옛 폭이 나온다.
         bars = footprint_window_bars(request)
-        if asset == "eth" and liq_5m_state["from_s"] is not None:
+        if liq_5m_state["from_s"].get(asset) is not None:
             # 2026-09-25 ETH 는 메모리 누적(수급 1초 차트와 같은 원천). 캐시가 없다 -- 계산이 봉 수만큼의
             #   dict 조회라 매 요청 새로 만들어도 싸고, 그래야 방금 난 청산이 다음 폴링에 바로 보인다.
-            payload = liq_5m_payload(liq_5m, liq_5m_state["from_s"], bars, time.time())
+            payload = liq_5m_payload(liq_5m[asset], liq_5m_state["from_s"][asset], bars, time.time())
         else:
             # 다른 코인은 여전히 봇 DB(tail_risk). 이 서버는 ETH @forceOrder 만 받는다.
             payload = await swr_cached(

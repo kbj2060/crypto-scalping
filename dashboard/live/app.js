@@ -2916,17 +2916,18 @@ async function refreshBreakoutDetector() {
 const LIQ_5M_TAIL_POLL_MS = 2000;
 let liquidation5mTailFetchAt = 0;
 async function refreshLiquidation5mTail() {
-  if (activeSnapshotAsset !== "eth") return;     // 실시간 누적은 ETH 만 한다(서버가 ETH @forceOrder 만 받는다)
+  // 2026-09-26 서버가 전 종목 @forceOrder 로 코인마다 실시간 누적한다 -- ETH 제한을 풀었다.
+  const asset = activeSnapshotAsset;
   const base = latestLiquidation5mHist;
   if (!Array.isArray(base) || !base.length) return;   // 전량이 먼저 와야 합칠 자리가 있다
   const now = Date.now();
   if (now - liquidation5mTailFetchAt < LIQ_5M_TAIL_POLL_MS) return;
   liquidation5mTailFetchAt = now;
   try {
-    const res = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=eth&bars=2`, { cache: "no-cache" });
+    const res = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${asset}&bars=2`, { cache: "no-cache" });
     if (!res.ok) return;
     const j = await res.json();
-    if (activeSnapshotAsset !== "eth" || latestLiquidation5mHist !== base) return;   // 그 사이 전량이 왔으면 그쪽이 맞다
+    if (activeSnapshotAsset !== asset || latestLiquidation5mHist !== base) return;   // 그 사이 전량이 왔으면 그쪽이 맞다
     if (!(j && j.warmed_up && Array.isArray(j.bars) && j.bars.length)) return;
     const same = (a, b) => a.long_usd === b.long_usd && a.short_usd === b.short_usd
       && a.events === b.events && Boolean(a.partial) === Boolean(b.partial)
@@ -3390,7 +3391,7 @@ function nearestLiquidationLevel() {
 function liqExtremeLevels(footprint) {
   const bars = latestLiquidation5mHist;
   const b = Array.isArray(bars) && bars.length ? bars[bars.length - 1] : null;
-  if (activeSnapshotAsset !== "eth" || !b || !b.partial) return [];
+  if (!b || !b.partial) return [];
   return [[b.long_min_px, "롱청산", "var(--bad)"], [b.short_max_px, "숏청산", "var(--good)"]]
     .filter(([px]) => Number(px) > 0)
     .map(([px, label, color]) => ({ val: Number(px), color, label, priceLeft: true,

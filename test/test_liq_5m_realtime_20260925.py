@@ -92,3 +92,13 @@ def test_extremes_are_lowest_long_and_highest_short_fill_per_bar():
     assert (b["long_min_px"], b["short_max_px"]) == (2661.4, 2694.2)
     empty = liq_5m_payload(st, T0 - 5 * BAR, 2, T0 + BAR + 1)["bars"][-1]
     assert (empty["long_min_px"], empty["short_max_px"]) == (None, None), "청산 없는 봉은 극값이 없다"
+
+
+def test_all_market_stream_routes_dashboard_coins_only():
+    """2026-09-26 전 종목 스트림: 대시보드 코인만 남기고, ETH 는 옛 파일(연구 스크립트가 읽는다) 그대로."""
+    from dashboard.server import FORCE_ORDER_WS_URL, LIQ_ASSET_BY_SYMBOL, LIQ_EVENTS_PATH, liq_events_path
+    assert FORCE_ORDER_WS_URL.endswith("/market/ws/!forceOrder@arr"), "/ws/ 경로는 이벤트 0 (09-26 실측)"
+    assert {"ETHUSDT": "eth", "BTCUSDT": "btc", "SOLUSDT": "sol"}.items() <= LIQ_ASSET_BY_SYMBOL.items()
+    assert LIQ_ASSET_BY_SYMBOL.get("JELLYJELLYUSDT") is None
+    assert liq_events_path("eth") == LIQ_EVENTS_PATH
+    assert liq_events_path("btc").name == "liq_events_btc.jsonl"
