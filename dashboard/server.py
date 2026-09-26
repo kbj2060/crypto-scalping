@@ -2903,12 +2903,19 @@ def make_app() -> web.Application:
                 if now - micro_state["baseline_at"] >= (MICRO_BASELINE_SECONDS if micro_state["baseline"] else 60.0):
                     micro_state["baseline_at"] = now
                     try:
-                        micro_state["baseline"] = await asyncio.to_thread(mref.baseline_from_tape, MICRO_TAPE_DB_PATH)
+                        got = await asyncio.to_thread(mref.baseline_from_tape, MICRO_TAPE_DB_PATH)
                     except Exception as exc:  # noqa: BLE001
-                        micro_state["baseline"] = None
+                        got = None
                         print(f"micro-ref baseline: {exc!r}", flush=True)
-                    if micro_state["baseline"] is None:
-                        print("micro-ref baseline: none (재시도 60초 뒤)", flush=True)
+                    # 2026-09-26 갱신에 실패해도 **있던 기준선은 둔다** -- 전에는 None 으로 지워 카드가
+                    #   60초 동안 «기준없음»이 됐다. 대신 60초 뒤 다시 시도하도록 시각을 당긴다.
+                    if got is not None:
+                        micro_state["baseline"] = got
+                    else:
+                        if micro_state["baseline"]:
+                            micro_state["baseline_at"] = now - MICRO_BASELINE_SECONDS + 60.0
+                        print("micro-ref baseline: 갱신 실패 (재시도 60초 뒤"
+                              + (", 기존 기준선 유지)" if micro_state["baseline"] else ")"), flush=True)
                 if now - micro_state["liq_prev_at"] >= 10.0:
                     micro_state["liq_prev_at"] = now
                     micro_state["liq_prev"] = await asyncio.to_thread(mref.liq_prev_minute, LIVE_DIR / "tail_risk.duckdb")

@@ -184,12 +184,29 @@ def burst_state(vol1s: list[tuple[int, float]], oi_ring: dict[int, float], vol1s
 
 
 # ── 기준선(같은 시간대 분위) — trade_tape.duckdb 읽기 전용 ──────────────────
+# 2026-09-26 잠금 재시도: 수집기가 ~4.6초마다 파일 잠금을 쥔다(중앙 0.49초·최대 1.1초·시간의 10.6%,
+#   F_GETLK 비침습 실측). duckdb 는 read_only 연결도 그동안 거부하므로 무작위 시도의 ~10%가 실패했다.
+#   최대 점유보다 긴 간격으로 몇 번 다시 열면 실패는 ~0.1% 이하로 내려간다.
+BASELINE_LOCK_RETRIES = 4
+BASELINE_LOCK_WAIT_S = 1.2
+
+
+def _connect_read_only_retry(db_path: Path, retries: int = BASELINE_LOCK_RETRIES, wait_s: float = BASELINE_LOCK_WAIT_S):
+    import duckdb  # noqa: PLC0415
+    for i in range(retries + 1):
+        try:
+            return duckdb.connect(str(db_path), read_only=True)
+        except duckdb.IOException as exc:
+            if "could not set lock" not in str(exc).lower() or i == retries:   # 경로에 «lock» 이 든 다른 오류까지 기다리지 않는다
+                raise
+            time.sleep(wait_s)
+
+
 def baseline_from_tape(db_path: Path, days: int = 7) -> dict[str, Any] | None:
     """UTC 시간대별 «1분 거래량» 분포와 «1초 거래량 p99». 수집기 아카이브를 읽기 전용으로 연다.
     실패(락·파일 없음)면 None -- 화면은 절대값만 보인다."""
     try:
-        import duckdb  # noqa: PLC0415
-        con = duckdb.connect(str(db_path), read_only=True)
+        con = _connect_read_only_retry(db_path)
         try:
             since = int(time.time()) - days * 86400
             rows = con.execute(
