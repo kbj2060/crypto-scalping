@@ -3171,13 +3171,13 @@ def make_app() -> web.Application:
                 cur = 1
             elif dev[i] < -eps[i]:
                 cur = -1                        # 밴드 안이면 직전 유지(히스테리시스)
-            row: dict[str, float | int] = {"sma": round(float(sma.iloc[i]), 4),
-                                           "atr": round(float(atr.iloc[i]), 4), "veto": cur}
+            row: dict[str, float | int] = {"sma": round(float(sma.iloc[i]), 6),    # 6자리: XRP ATR ~0.003
+                                           "atr": round(float(atr.iloc[i]), 6), "veto": cur}
             if np.isfinite(drop[i]):
                 # n·k 도 같이 보낸다 -- 클라에 또 적으면 두 곳을 따로 고쳐야 한다.
                 # (K 는 2026-09-23 에 실제로 바뀌었고, 클라의 live-advance 가 K=1 을
                 #  하드코딩하고 있어 그대로였으면 형성 중 봉만 옛 규칙으로 판정됐다.)
-                row["drop"], row["vn"] = round(float(drop[i]), 4), TREND_VETO_N
+                row["drop"], row["vn"] = round(float(drop[i]), 6), TREND_VETO_N
                 row["vk"] = TREND_VETO_K
             out[int(ts.timestamp())] = row
         return out
@@ -3231,14 +3231,21 @@ def make_app() -> web.Application:
     async def load_market_history(asset: str) -> list[dict[str, float | int]]:
         if asset in ("eth", "btc"):
             return await load_market_history_from_evidence_cache(asset)
-        # sol: no evidence-signal history exists for it (those only ever cover ETH+BTC), so this
-        # keeps its own independent fetch -- unchanged from before.
+        # sol/xrp: 증거신호 캐시(ETH+BTC)가 없어 따로 받는다. 2026-09-27 ETH 와 같은 추세 밴드(SMA144±ATR, 사용자 지시) --
+        #   SMA144 + ewm 워밍업이라 1000봉(가중치 5)을 받고 veto 는 **마감봉**에만 붙인다(ETH closed_df 와 같은 규약:
+        #   형성 중 봉은 클라가 점선으로 한 칸 전진). 60초 = ETH 캐시 주기 -- 300초면 새 봉 뒤 선이 몇 분 끊긴다.
         async def produce() -> list[dict[str, float | int]]:
             rows = await fetch_binance_json(
                 "https://fapi.binance.com/fapi/v1/klines",
-                {"symbol": MARKET_SYMBOLS[asset], "interval": "5m", "limit": 100},
+                {"symbol": MARKET_SYMBOLS[asset], "interval": "5m", "limit": 1000},
                 timeout=3.0, error_reason="market_history_upstream_error",
             )
+            now_ms = time.time() * 1000
+            closed = [r for r in rows if int(r[6]) < now_ms]
+            df = pd.DataFrame({"timestamp": pd.to_datetime([int(r[0]) for r in closed], unit="ms", utc=True),
+                               "high": [float(r[2]) for r in closed], "low": [float(r[3]) for r in closed],
+                               "close": [float(r[4]) for r in closed]})
+            veto = trend_veto_rows(df)
             candles = [
                 {
                     "time": int(row[0]) // 1000,
@@ -3246,13 +3253,14 @@ def make_app() -> web.Application:
                     "high": float(row[2]),
                     "low": float(row[3]),
                     "close": float(row[4]),
+                    **veto.get(int(row[0]) // 1000, {}),
                 }
-                for row in rows
+                for row in rows[-200:]                # ETH 와 같은 200봉(16.6시간)
             ]
             return candles
 
         return await swr_cached(
-            f"market_history:{asset}", MARKET_HISTORY_CACHE_SECONDS, produce,
+            f"market_history:{asset}", EVIDENCE_SIGNAL_CACHE_SECONDS, produce,
             cache=market_history_cache.setdefault(asset, {"ts": 0.0, "payload": None}),
             max_stale=STALE_GRACE_SECONDS,
         )
