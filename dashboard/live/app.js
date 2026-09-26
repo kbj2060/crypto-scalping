@@ -3356,6 +3356,7 @@ function nearestLiquidationLevel() {
     val: nearest.lv.price,
     color: nearest.color,
     label: nearest.tag,
+    priceLeft: true,   // 2026-09-26 사용자 지시: 지지/저항 가격은 오른쪽 배지가 아니라 왼쪽 이름 옆에
     dashed: true,
     width: Math.max(1, Math.min(4, Math.round(1 + (nearest.lv.weight_pct || 0) * 3))),
   }];
@@ -6781,6 +6782,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   플롯 안에서는 꺾쇠(화살표)가 «어느 행인가»만 가리킨다. 배지를 안에 띄우면 가장 최근
     //   봉을 덮고, 밖에 두면 그 폭만큼 플롯이 짧아진다 -- 아래로 내리면 둘 다 없다.
     const subOk = !!p.sub && !mobileChart;
+    const priceLeft = p.priceLeft && !mobileChart;   // 모바일은 원래 배지가 없다(가격은 아래 줄)
     const boxW = subOk ? 76 : 64, boxH = 18;
     const boxX = w - mr + 4;
 
@@ -6826,6 +6828,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", p.color);
       txt.textContent = `${p.label}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;
       svg.appendChild(txt);
+      if (priceLeft) {
+        // 왼쪽 여백(ml-5)을 넘으면 SVG 밖으로 잘린다 -- 재서 소수점을 뗀다.
+        const name = txt.textContent;
+        txt.textContent = `${name} ${fmtNum(p.val, 1)}`;
+        try { if (txt.getComputedTextLength() > ml - 7) txt.textContent = `${name} ${fmtNum(p.val, 0)}`; } catch (e) { /* 비렌더 */ }
+      }
     }
 
     // Right box (follows label position). p.sub 가 있으면 배지 안에 «가격 + 값»을 같이 넣는다.
@@ -6853,7 +6861,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
     }
     if (p.faded) rect.setAttribute("opacity", "0.5");
-    if (!mobileChart) svg.appendChild(rect);
+    if (!mobileChart && !priceLeft) svg.appendChild(rect);
 
     const pTxt = document.createElementNS(NS, "text");
     pTxt.setAttribute("x", boxX + 4); pTxt.setAttribute("y", labelY + 4);
@@ -6865,7 +6873,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴화면 밖이면 «↑ » 가 앞에 붙어 값(sub)과 겹쳤다(2026-09-24 캡처: «2780.Q.1k»·«2641.63%»).
     //   78px 한계라 폭을 못 늘린다 -- 값이 같이 들어가는 화면 밖 배지만 소수점을 뗀다.
     pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, subOk && p.outOfView ? 0 : 1)}`;
-    if (!mobileChart) svg.appendChild(pTxt);
+    if (!mobileChart && !priceLeft) svg.appendChild(pTxt);
     if (subOk) {
       const sTxt = document.createElementNS(NS, "text");
       sTxt.setAttribute("x", boxX + boxW - 5); sTxt.setAttribute("y", labelY + 4);
