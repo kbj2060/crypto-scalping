@@ -1270,10 +1270,16 @@ function acctMarginUsed(b) {
     : Math.max(0, (Number(b.margin) || 0) - (Number(b.available) || 0));
   return { used, equity, pct: equity > 0 ? used / equity * 100 : 0 };
 }
+// 2026-09-26 코인별 주문 심볼(서버 MANUAL_EXEC_SYMBOLS: eth→ETHUSDC · sol→SOLUSDC · xrp→XRPUSDC). 표에 없는 코인은 ""(주문 불가).
+function execSymbolFor(asset) {
+  const acc = latestBinanceAccount || lastGoodAccount || {};
+  return String((acc.exec_symbols || {})[asset] || (asset === "eth" ? acc.exec_symbol || "" : "")).toUpperCase();
+}
+
 function snapshotAccountPosition() {
   const positions = latestBinanceAccount?.positions || [];
   const market = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
-  const exec = latestBinanceAccount?.exec_symbol || "";
+  const exec = execSymbolFor(activeSnapshotAsset);
   const base = market.replace(/USDT$/, "");
   // 수동 심볼이 **이 코인의 것일 때만** 본다(ETH 탭에서 ETHUSDC, BTC 탭에서는 무시).
   const order = exec && exec !== market && exec.startsWith(base) ? [exec, market] : [market];
@@ -1523,8 +1529,8 @@ function applyAcctPreview(pos, mark, equity) {
   const ep = q("entrypx");
   if (ep) {
     pvAfter(ep, `~${fmtUsd(newEntry)}`);
-    ep.title = `추측치 — 지금 ${fmtUsd(havePx)} (${haveQty.toFixed(3)} ETH)에`
-      + ` ${addQty.toFixed(3)} ETH 를 ${fmtUsd(addPx)}(peg 호가)에 더한 가중평균입니다.`
+    ep.title = `추측치 — 지금 ${fmtUsd(havePx)} (${haveQty.toFixed(3)} ${coinUnit()})에`
+      + ` ${addQty.toFixed(3)} ${coinUnit()} 를 ${fmtUsd(addPx)}(peg 호가)에 더한 가중평균입니다.`
       + `\n실제 체결가가 다르면(부분체결·테이커 폴백) 평단도 달라집니다.`;
   }
   // 🔴손잡이는 **지금 내 자리**다 -- 옮기면 사실이 사라진다. 대신 «넣으면 여기»를 같은 레일에
@@ -8292,7 +8298,7 @@ function manualEntryPlanHtml(data) {
   const plan = data.plan || {};
   const cap = data.cap || {};
   const dir = plan.positionSide === "LONG" ? "롱" : "숏";
-  const parts = [`<div class="entry-head"><b>${dir} ${escapeHtml(String(plan.quantity))} ETH</b>
+  const parts = [`<div class="entry-head"><b>${dir} ${escapeHtml(String(plan.quantity))} ${coinUnit()}</b>
       <span>@ ${escapeHtml(Number(plan.price).toLocaleString())}</span>
       <span>내 돈 ${escapeHtml(won(plan.margin_usdt || 0))} USDT${
         plan.leverage ? ` = 명목 ${escapeHtml(won(plan.notional_usdt))} ÷ ${plan.leverage}배` : ""}</span>
@@ -8533,27 +8539,27 @@ function renderLevGauge(plan) {
 //   (ETHUSDC)로만 나간다. SOL 탭에서 누르면 ETH 가 체결된다(데스크톱은 길게 누르면 확인 없이). 탭의 코인이 주문 심볼의
 //   코인과 다르면 미리보기·전송 둘 다 거절하고, 화면에서도 조작부를 막는다(CSS body.order-coin-off).
 function orderCoinOk() {
-  const exec = String((latestBinanceAccount || lastGoodAccount || {}).exec_symbol || "ETHUSDC").toUpperCase();
-  return exec.startsWith(coinUnit().toUpperCase());
+  // 2026-09-26 SOL·XRP 주문이 생겼다 -- 서버가 이 코인의 주문 심볼을 주면 주문할 수 있다(계좌 전이면 ETH 만).
+  const exec = execSymbolFor(activeSnapshotAsset) || (activeSnapshotAsset === "eth" ? "ETHUSDC" : "");
+  return !!exec && exec.startsWith(coinUnit().toUpperCase());
 }
 function syncOrderCoinGate() {
   const off = !orderCoinOk();
   document.body.classList.toggle("order-coin-off", off);
   const lanes = document.querySelector(".acct-lanes");
   if (lanes) {
-    const exec = String((latestBinanceAccount || lastGoodAccount || {}).exec_symbol || "ETHUSDC").toUpperCase();
-    lanes.dataset.orderNote = off ? `주문은 ${exec.replace(/USD[CT]$/, "")} 탭에서만 됩니다 — 이 탭(${coinUnit()})에서는 주문을 낼 수 없습니다` : "";
+    lanes.dataset.orderNote = off ? `이 탭(${coinUnit()})에서는 주문을 낼 수 없습니다 — 주문은 ETH·SOL·XRP 탭에서만 됩니다` : "";
   }
 }
 
 async function manualEntryFetch(side, kind = "entry") {
   if (!orderCoinOk()) {
     return { ok: false, error: "order_coin_mismatch",
-             detail: `주문 심볼은 ${(latestBinanceAccount || {}).exec_symbol || "ETHUSDC"} 입니다 — ${coinUnit()} 탭에서는 주문하지 않습니다` };
+             detail: `${coinUnit()} 탭에서는 주문하지 않습니다` };
   }
   const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`
     + (kind === "exit" ? "" : manualLevQuery());
-  const res = await fetch(`/api/manual-${kind}/preview?side=${side}${q}`, { cache: "no-cache" });
+  const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
   return res.json();
 }
 
@@ -8590,7 +8596,7 @@ function manualExitPlanHtml(plan) {
   const of = pct < 100
     ? ` <span class="entry-was">${plan.position_qty} 중 ${pct}% · 남김 ${plan.remaining_qty}</span>`
     : "";
-  const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ETH 청산</b>${of}`
+  const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ${coinUnit()} 청산</b>${of}`
     + `<span>${Number(plan.price ?? plan.reference_price).toFixed(2)}`
     + `${plan.type === "MARKET" ? " 근처" : ""} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>`];
   // 🔴미리보기 카드의 주인공은 «지금 닫으면 순손익 얼마»다(2026-09-14, 사용자 요청).
@@ -8799,7 +8805,7 @@ function manualEntryClearConfirm() {
 function manualEntryArmConfirm(side, plan, kind = "entry") {
   if (plan.blocked) { manualFireOnPreview = false; return; }
   const pct = Math.round(100 * (plan.fraction ?? 1));
-  manualEntryPending = { side, quantity: plan.quantity, kind, pct,
+  manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
                          lev: manualLevEffective() };
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
@@ -8813,7 +8819,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   // 미리보기에만 띄우면 슬라이더를 다시 내린 뒤에는 안 보인다.
   const need = Math.round(100 * ((plan.risk || {}).required_fraction || 0));
   const short = kind === "exit" && need > pct ? ` ⚠한도 복귀엔 ${need}% 필요` : "";
-  const base = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ETH `
+  const base = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ${coinUnit()} `
     + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short;
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
@@ -8845,7 +8851,7 @@ function manualEntryStateText(state) {
   const phase = state?.phase || "idle";
   const rows = [MANUAL_ENTRY_PHASE_KO[phase] || phase];
   if (state?.quantity !== undefined) {
-    rows.push(`체결 ${Number(state.filled || 0)} / ${Number(state.quantity)} ETH` +
+    rows.push(`체결 ${Number(state.filled || 0)} / ${Number(state.quantity)} ${(ASSET_CONFIG[state.asset] || {}).label || coinUnit()}` +
       (state.taker_qty ? ` (테이커 ${Number(state.taker_qty)})` : ""));
   }
   // 2026-09-25 청산맵 TP/SL 결과. 체결이 있는데 결과가 없거나 실패면 크게 말한다 -- 무방비 포지션은 조용하면 안 된다.
@@ -8905,7 +8911,7 @@ async function manualEntrySubmit() {
   const pending = manualEntryPending;
   const box = el("snapEntryResult");
   if (!pending || !box) return;
-  if (!orderCoinOk()) {                 // 미리보기 뒤 탭을 바꿨어도 여기서 막는다
+  if (!orderCoinOk() || (pending.asset && pending.asset !== activeSnapshotAsset)) {   // 미리보기 뒤 탭을 바꿨으면 막는다
     manualEntryClearConfirm();
     box.hidden = false;
     box.innerHTML = entryNote(`주문 취소 — 지금 탭(${coinUnit()})은 주문 심볼의 코인이 아닙니다`, "bad");
@@ -8920,7 +8926,7 @@ async function manualEntrySubmit() {
     const q = `&pct=${pending.pct ?? 100}`
       + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : ""));
     const res = await fetch(
-      `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&confirm=1${q}`,
+      `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&asset=${pending.asset || "eth"}&confirm=1${q}`,
       { method: "POST", cache: "no-cache" });
     const data = await res.json();
     if (!data.ok) {
@@ -9382,8 +9388,8 @@ function manualExitSyncButtons() {
   //   서버(live_manual_peg_entry resolve_exit_position)와 같은 규칙을 쓴다: 수동 심볼에
   //   포지션이 있으면 그것, 없으면 시장 심볼. 심볼은 payload 의 exec_symbol 이 말한다
   //   (환경변수라 하드코딩하면 또 갈라진다). snapshotAccountPosition 은 이미 이 규칙이다.
-  const market = ASSET_CONFIG.eth?.symbol || "ETHUSDT";
-  const execSym = (latestBinanceAccount || lastGoodAccount)?.exec_symbol || "";
+  const market = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
+  const execSym = execSymbolFor(activeSnapshotAsset);     // 2026-09-26 탭 코인의 포지션만(SOL·XRP 주문)
   const base = market.replace(/USDT$/, "");
   const cand = execSym && execSym !== market && execSym.startsWith(base)
     ? [execSym, market] : [market];

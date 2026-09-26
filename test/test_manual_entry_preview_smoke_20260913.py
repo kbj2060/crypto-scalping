@@ -576,6 +576,34 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
+    def test_sol_order_uses_solusdc_margin_cap_only_and_never_touches_eth(self) -> None:
+        """2026-09-26 SOL·XRP 주문(단순 규칙): 주문 심볼 SOLUSDC · 상한은 증거금 50% 하나 · ETH 위험 모델 없음.
+        🔴SOL 탭의 청산은 **ETH 포지션을 못 건드린다**(가짜 계좌엔 ETHUSDT LONG 만 있다 -> no_position)."""
+        async def exercise() -> None:
+            with mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0):
+                client = TestClient(TestServer(offline_app(server)))
+                await client.start_server()
+                try:
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG&asset=sol&lev=20")).json()
+                    self.assertTrue(b.get("ok"), b)
+                    plan, cap = b["plan"], b["cap"]
+                    self.assertEqual(plan["symbol"], "SOLUSDC", plan)
+                    self.assertEqual(cap["binding"], "margin", cap)
+                    self.assertAlmostEqual(cap["cap_notional_usdt"], 1000.0 * 20 * 0.5, places=2)
+                    self.assertIsNone(cap.get("cap_model_usdt"), "SOL 에 ETH 위험 모델 상한이 들어갔다")
+                    bad = await client.get("/api/manual-entry/preview?side=LONG&asset=btc")
+                    self.assertEqual(bad.status, 400)
+                    x = await client.get("/api/manual-exit/preview?side=LONG&asset=sol")
+                    self.assertEqual(x.status, 400)
+                    self.assertEqual((await x.json())["error"], "no_position", "SOL 청산이 ETH 포지션을 잡았다")
+                    e = await (await client.get("/api/manual-exit/preview?side=LONG&asset=eth")).json()
+                    self.assertTrue(e.get("ok"), e)     # 대조군: ETH 탭은 그 포지션을 닫는다
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
     def test_model_only_cap_drops_ledger_and_equity(self) -> None:
         """2026-09-25 사용자 «위험모델 상한만, 나머지 해제». 원장 4.0배·순자산 6배가 모델보다
         낮아도 진입·청산 둘 다 **모델**이 묶고, 거래소 레버리지는 그 크기를 열 만큼 올라간다

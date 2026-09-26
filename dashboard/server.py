@@ -486,6 +486,18 @@ MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "
 #   2026-09-19 실측 USDT 1,355 / USDC 0 -- 이 상태로 ETHUSDC 주문은 증거금 부족으로 거절된다.
 MANUAL_EXEC_SYMBOL = (os.getenv("DASHBOARD_MANUAL_EXEC_SYMBOL", "").strip().upper()
                       or MARKET_SYMBOLS["eth"])
+# 2026-09-26 SOL·XRP 주문(사용자 지시, 단순 규칙). 🔴데이터는 USDT · 주문만 USDC -- SOLUSDC·XRPUSDC 는 계정 요율
+#   메이커 0bp·테이커 4bp(ETHUSDC 와 같음, 09-26 commissionRate 조회). SOL·XRP 는 ETH 위험 모델을 안 쓰고
+#   상한은 증거금 50% 하나뿐이다(assemble_entry_plan 의 asset 분기).
+MANUAL_EXEC_SYMBOLS = {"eth": MANUAL_EXEC_SYMBOL, "sol": "SOLUSDC", "xrp": "XRPUSDC"}
+
+
+def exec_asset_of(symbol: str) -> str | None:
+    """주문/시장 심볼 → 코인. 브래킷 감시가 걸린 심볼에서 청산 경로를 고를 때 쓴다."""
+    for a, sym in MANUAL_EXEC_SYMBOLS.items():
+        if symbol in (sym, MARKET_SYMBOLS.get(a)):
+            return a
+    return None
 # 대시보드가 **보여줄** 코인 (2026-09-16 사용자 요청 "나머지 코인은 리소스 먹지 않게 비활성").
 # 실측으로 본 실제 절약: 엔드포인트별 코인 계산은 요청이 와야 도는 on-demand(swr_cached, 콜드
 # 0.05초)라 안 쓰면 안 돈다. **무조건 도는 건 SSE 루프의 시세 팬아웃 하나뿐**이었다 --
@@ -4026,13 +4038,14 @@ def make_app() -> web.Application:
         quote = "USDC" if MANUAL_EXEC_SYMBOL.endswith("USDC") else "USDT"
         payload = await fetch_account(
             binance_session(),
-            list(dict.fromkeys([*MARKET_SYMBOLS.values(), MANUAL_EXEC_SYMBOL])),
+            list(dict.fromkeys([*MARKET_SYMBOLS.values(), *MANUAL_EXEC_SYMBOLS.values()])),
             quote_asset=quote)
         # 화면이 «이 코인의 포지션»을 찾을 때 USDT 심볼 하나만 보면 USDC 포지션을 못 본다.
         # 서버가 실제로 쓰는 심볼을 payload 에 실어 보내 화면이 하드코딩하지 않게 한다 --
         # 환경변수(DASHBOARD_MANUAL_EXEC_SYMBOL)로 바뀌는 값이다.
         if isinstance(payload, dict):
             payload["exec_symbol"] = MANUAL_EXEC_SYMBOL
+            payload["exec_symbols"] = dict(MANUAL_EXEC_SYMBOLS)   # 코인 -> 주문 심볼(화면이 탭마다 고른다)
         added = record_account_trips(payload, account_trip_state["seen"])
         if added:
             print(f"account_round_trips: +{added}건 (누적 {len(account_trip_state['seen'])}건)", flush=True)
@@ -5154,13 +5167,13 @@ def make_app() -> web.Application:
             pass
         return None
 
-    async def bracket_for(side: str, book: dict, filters: dict) -> dict:
+    async def bracket_for(side: str, book: dict, filters: dict, asset: str = "eth") -> dict:
         """진입 시점 청산맵(ETHUSDT)으로 TP/SL/비상 스탑. 못 읽으면 **이유를 싣고** 빈 계획 --
         조용히 빼면 화면이 «SL 걸림»으로 읽힌다."""
         try:
-            lm = await load_liquidation_map("eth")
+            lm = await load_liquidation_map(asset)
             ref = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
-                                           {"symbol": MARKET_SYMBOLS["eth"]},
+                                           {"symbol": MARKET_SYMBOLS[asset]},
                                            error_reason="book_ticker_failed")
             ref_mid = (float(ref["bidPrice"]) + float(ref["askPrice"])) / 2
             mid = (float(book["bidPrice"]) + float(book["askPrice"])) / 2
@@ -5241,7 +5254,7 @@ def make_app() -> web.Application:
             if (act != "fire" or manual_entry_state.get("phase") in ("working", "submitting")
                     or time.time() < float(b.get("retry_after") or 0)):
                 continue
-            plan, err = await assemble_exit_plan(pside, 1.0, fresh=True)
+            plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth")
             if err and err[0].get("error") == "no_position":     # 이미 닫혔다 -- 정리하고 내린다
                 st.pop(key)
                 changed = True
@@ -5295,16 +5308,20 @@ def make_app() -> web.Application:
             pass
 
     async def assemble_entry_plan(side: str, fraction: float = 1.0,
-                                  want_lev: int | None = None):
+                                  want_lev: int | None = None, asset: str = "eth"):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
         반환: (plan, cap, sizing, error). error 는 (본문, HTTP상태) 또는 None.
         계좌를 같이 읽는 이유 둘: (1) 상한을 **합산 포지션**에 걸어야 하고
         (2) 화면이 «현금 얼마·레버리지 몇 배·청산까지 몇 %»를 말할 수 있어야 한다."""
-        symbol = MANUAL_EXEC_SYMBOL        # 2026-09-19 차트 심볼과 분리(위 상수 주석)
+        symbol = MANUAL_EXEC_SYMBOLS[asset]   # 2026-09-19 차트 심볼과 분리(위 상수 주석) · 09-26 코인별
         try:
-            sizing = await asyncio.to_thread(position_sizing_payload)
+            # 🔴SOL·XRP 는 ETH 위험 모델(보유시간·안전 역행폭·권고 수량)을 쓰지 않는다 -- ETH 로 학습된 값이다.
+            #   빈 사이징을 넘겨 모델 상한·권고가 «없음»으로 흐르게 하고, 상한은 아래 증거금 50% 하나만 남긴다.
+            sizing = (await asyncio.to_thread(position_sizing_payload) if asset == "eth"
+                      else {"available": True, "cap": {}, "risk_mae": {}, "vol_equivalent_qty": 0.0,
+                            "atr_pct": None, "source": "simple_rule"})
             if not sizing.get("available"):
                 return None, {}, {}, ({"error": "sizing_unavailable",
                                        "detail": sizing.get("error")}, 503)
@@ -5370,6 +5387,8 @@ def make_app() -> web.Application:
                                            (cap_model, "model")) if v]
             if SIZING_CAP_MODEL_ONLY and cap_model:
                 binding = [(cap_model, "model")]
+            if asset != "eth":
+                binding = []          # 단순 규칙(사용자 지시): 원장·순자산 6배·모델 상한 없음 -- 증거금 50% 만
             # 증거금 상한. 레버리지는 주문이 실제로 걸 값 -- «자동»이면 처방(plan_now→prescribe)과
             #   **같은 입력**으로 같은 함수를 부른다(그래야 target_leverage 와 같은 값이다).
             #   화면은 «자동»이어도 20배를 보낸다(app.js MANUAL_LEV_AUTO) -- 이 경로는 lev 없는 요청뿐.
@@ -5447,7 +5466,7 @@ def make_app() -> web.Application:
             _rx = (plan["trade_plan"] or {}).get("prescription") or {}
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
             # 2026-09-25 청산맵 TP/SL(사용자 지시) -- 고정 3% 손절을 대신한다. 진입 시점 레벨로 고정.
-            plan["bracket"] = await bracket_for(side, book, filters)
+            plan["bracket"] = await bracket_for(side, book, filters, asset)
             # 게이지가 값을 주면 그걸 쓰고, «자동»이면 모델 추천을 쓴다. 어느 쪽인지 남긴다 --
             # 안 남기면 나중에 «왜 30배로 걸렸지»를 못 푼다.
             plan["target_leverage"] = want_lev or _lv.get("setting")
@@ -5477,12 +5496,15 @@ def make_app() -> web.Application:
         side = (request.query.get("side") or "").upper()
         if side not in ("LONG", "SHORT"):
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
+        if query_asset(request) is None:
+            return web.json_response({"ok": False, "error": "bad_asset",
+                                      "detail": "주문할 수 없는 코인입니다"}, status=400)
         frac = query_fraction(request)
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
-                                                             query_leverage(request))
+                                                             query_leverage(request), query_asset(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
@@ -5502,6 +5524,9 @@ def make_app() -> web.Application:
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
         if request.query.get("confirm") != "1":
             return web.json_response({"ok": False, "error": "confirm=1 required"}, status=400)
+        if query_asset(request) is None:
+            return web.json_response({"ok": False, "error": "bad_asset",
+                                      "detail": "주문할 수 없는 코인입니다"}, status=400)
         frac = query_fraction(request)
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
@@ -5516,14 +5541,14 @@ def make_app() -> web.Application:
         # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
-                                                             query_leverage(request))
+                                                             query_leverage(request), query_asset(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
         manual_entry_state.clear()
-        manual_entry_state.update(phase="submitting", side=side, plan=plan,
+        manual_entry_state.update(phase="submitting", side=side, plan=plan, asset=query_asset(request),
                                   started_at=datetime.now(timezone.utc).isoformat())
         # refresh_tasks 에 넣어 두면 stop_http_session 이 세션을 닫기 전에 취소해 준다.
         refresh_tasks["manual_entry"] = asyncio.create_task(
@@ -5603,6 +5628,11 @@ def make_app() -> web.Application:
         return {"available": True, "hold_min": hold_min,
                 "safe_mae_pct": cell["safe_mae_pct"]}
 
+    def query_asset(request: web.Request) -> str | None:
+        """주문 코인(`?asset=`, 기본 eth). 주문 심볼 표에 없는 코인이면 None -- 호출부가 400 으로 막는다."""
+        a = str(request.query.get("asset") or "eth").lower()
+        return a if a in MANUAL_EXEC_SYMBOLS else None
+
     def query_leverage(request: web.Request) -> int | None:
         """화면 게이지가 고른 거래소 레버리지. 없으면 None -- 그때는 **모델 추천**을 쓴다.
 
@@ -5631,7 +5661,7 @@ def make_app() -> web.Application:
         return pct / 100.0 if 0.0 < pct <= 100.0 else None
 
     async def assemble_exit_plan(position_side: str, fraction: float = 1.0,
-                                 fresh: bool = False):
+                                 fresh: bool = False, asset: str = "eth"):
         """청산 계획 조립. 진입과 같은 이유로 **여기 한 곳뿐**이다.
 
         수량은 반드시 **방금 읽은 포지션**에서 온다 -- 헤지 모드라 reduceOnly 를 못 써서
@@ -5641,7 +5671,7 @@ def make_app() -> web.Application:
         🔴2026-09-19 심볼도 **설정이 아니라 실제 포지션**에서 온다. 진입 심볼을 USDC 로
         바꿔도 그 전에 연 ETHUSDT 포지션은 계속 닫을 수 있어야 하고, 반대로 설정값을 믿고
         보내면 «없는 포지션을 닫는» 주문이 헤지 모드에서 **반대 방향 신규 진입**이 된다."""
-        candidates = list(dict.fromkeys([MANUAL_EXEC_SYMBOL, MARKET_SYMBOLS["eth"]]))
+        candidates = list(dict.fromkeys([MANUAL_EXEC_SYMBOLS[asset], MARKET_SYMBOLS[asset]]))   # 그 코인만(09-26)
         try:
             # 🔴실주문(fresh=True)은 30초 캐시를 **우회**한다. 헤지 모드라 reduceOnly 가 없어
             # 과청산 방어가 수량뿐인데, 그 수량이 30초 묵으면 방어가 30초 묵는다.
@@ -5736,6 +5766,9 @@ def make_app() -> web.Application:
         side = (request.query.get("side") or "").upper()
         if side not in ("LONG", "SHORT"):
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
+        if query_asset(request) is None:
+            return web.json_response({"ok": False, "error": "bad_asset",
+                                      "detail": "주문할 수 없는 코인입니다"}, status=400)
         frac = query_fraction(request)
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
@@ -5744,7 +5777,7 @@ def make_app() -> web.Application:
         # 사람이 버튼을 눌러야만 오는 경로라 호출이 잦지 않고, 30초 캐시로 그리면 화면이
         # 「2.754 닫는다」고 말한 뒤 submit(이미 fresh)이 다른 수량을 내보낼 수 있다.
         # 미리보기와 실주문이 **같은 수량을 보는 것**이 이 화면의 존재 이유다.
-        plan, error = await assemble_exit_plan(side, frac, fresh=True)
+        plan, error = await assemble_exit_plan(side, frac, fresh=True, asset=query_asset(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "exec_enabled": exec_enabled()},
@@ -5758,6 +5791,9 @@ def make_app() -> web.Application:
             return web.json_response({"ok": False, "error": "side must be LONG or SHORT"}, status=400)
         if request.query.get("confirm") != "1":
             return web.json_response({"ok": False, "error": "confirm=1 required"}, status=400)
+        if query_asset(request) is None:
+            return web.json_response({"ok": False, "error": "bad_asset",
+                                      "detail": "주문할 수 없는 코인입니다"}, status=400)
         frac = query_fraction(request)
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
@@ -5771,14 +5807,14 @@ def make_app() -> web.Application:
                                       "state": manual_entry_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 포지션도 다시 읽으므로 미리보기 이후에 포지션이
         # 줄었으면 그만큼 줄어든 수량이 나간다(프런트가 계산한 수량을 받지 않는 이유).
-        plan, error = await assemble_exit_plan(side, frac, fresh=True)
+        plan, error = await assemble_exit_plan(side, frac, fresh=True, asset=query_asset(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
         manual_entry_state.clear()
-        manual_entry_state.update(phase="submitting", kind="exit", side=side, plan=plan,
+        manual_entry_state.update(phase="submitting", kind="exit", side=side, plan=plan, asset=query_asset(request),
                                   started_at=datetime.now(timezone.utc).isoformat())
         refresh_tasks["manual_entry"] = asyncio.create_task(
             run_exit(binance_session(), plan, manual_entry_state))
