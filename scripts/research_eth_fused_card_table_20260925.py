@@ -1,9 +1,10 @@
-# 입력: tmp/fusion/build_eval_24h.py = scripts/research_eth_fused_signal_votes_gate_20260925.py 에서 z 창을 rolling(288, min_periods=84).std().shift(1) 로 바꾼 판(서버 정의).
+# 입력: scripts/research_eth_fused_signal_votes_gate_20260925.py 를 FUSED_Z=24h(서버 정의)로 읽는다. 테이프는 scripts/build_aggtrades_size3_tape_1m_20260925.py.
 """융합 카드의 3결과 확률표 — 카드 축(±0.5×30분 창폭, 다음 30분 1분봉 선착)에서 잰 조건부 빈도.
 셀 = 레짐(추세/횡보) × 정렬 점수(추세: S1×dir, 횡보: S1) 구간 × 창폭 24h 분위 삼분위. 결과 = 추세 {with, against, none} / 횡보 {up, dn, none}.
 결정 = 모든 5분봉(라벨 겹침 → CI 는 일 블록). TRAIN 표 → TEST 로그손실을 «표 없음(레짐×창폭)» 기준과 비교."""
 import sys, numpy as np, pandas as pd, json
-src = open('tmp/fusion/build_eval_24h.py').read().split("for H in (")[0]
+import os; os.environ['FUSED_Z'] = '24h'
+src = open('scripts/research_eth_fused_signal_votes_gate_20260925.py').read().split("for H in (")[0]
 sys.argv = ['x', 'ETHUSDT']; exec(src)
 m1h, m1l = T.h.values.astype(np.float32), T.l.values.astype(np.float32)
 pos = np.searchsorted(T.index.values, b5.index.values + np.timedelta64(5, 'm'))
@@ -75,4 +76,5 @@ for reg in ('trend', 'range'):
         print(f"  a={key[0]:+d} g={key[1]}  n{nn:6d}  " + " ".join(f"{100 * P_all.loc[key, k]:5.1f}" for k in K1[reg])
               + f"  | {k0} TR {100 * P_tr.loc[key, k0] if key in P_tr.index else float('nan'):5.1f} TE {100 * P_te.loc[key, k0] if key in P_te.index else float('nan'):5.1f}")
         full[f"{reg}|{key[0]}|{key[1]}"] = {"n": nn, **{k: round(float(P_all.loc[key, k]), 4) for k in K1[reg]}}
+os.makedirs('tmp/fusion', exist_ok=True)
 json.dump(full, open('tmp/fusion/card_table.json', 'w'), ensure_ascii=False, indent=0)

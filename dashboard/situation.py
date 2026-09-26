@@ -29,7 +29,8 @@ def classify(inp: dict[str, Any]) -> dict[str, Any]:
     """inp: bars(완결 5분봉 오래된→최신, {time, high, low, close, delta, liq_long, liq_short, veto, oi_delta}) ·
     mid · prev_dir(직전 방향, 슈미트 상태) · book{obi, persist_share} · deriv{funding, basis_bp, basis_d_bp, basis_thr_bp} · btc{move_bp, range_bp}.
     반환 {ok, dir, labels[머리글 한 줄], regime{ratio, thr, margin, enter, exit}, evidence{…}}."""
-    bars = [b for b in inp.get("bars", []) if b.get("close")]
+    # 고가·저가가 없는 봉(캔들도 가격 셀도 없음)은 max/min 비교에서 죽는다 — 옛 코드부터 있던 구멍(09-25 퍼징)
+    bars = [b for b in inp.get("bars", []) if b.get("close") and b.get("high") is not None and b.get("low") is not None]
     if len(bars) < WINDOW + 1:
         return {"ok": False, "reason": f"완결 봉 {len(bars)} < {WINDOW + 1}"}
     w = bars[-WINDOW:]
@@ -102,4 +103,5 @@ if __name__ == "__main__":   # 자체점검 — 슈미트·거부 봉·청산·�
     assert classify(dict(bars=sb, prev_dir=1))["dir"] == 1 and classify(dict(bars=sb, prev_dir=0))["dir"] == 0
     assert classify(dict(bars=sb, prev_dir=1))["regime"]["thr"] == TREND_EXIT
     assert classify(dict(inp, bars=bars[:5]))["ok"] is False
+    assert classify(dict(inp, bars=[dict(b, high=None) if i == 3 else b for i, b in enumerate(bars)]))["ok"] is True   # 구멍 봉은 건너뛴다
     print("situation selfcheck ok")

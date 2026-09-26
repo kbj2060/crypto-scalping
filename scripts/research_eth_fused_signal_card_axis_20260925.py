@@ -1,4 +1,4 @@
-# 🔴위 스크립트의 z 창은 30일(사전 정의)이다. 서버 정의(24h)로 재려면 거기서 rolling(8640…) 을 rolling(288, min_periods=84).std().shift(1) 로 바꾼다(tmp/fusion/build_eval_24h.py).
+# 🔴z 창: 기본 30일(사전 정의). 서버 정의(24h)로 재려면 FUSED_Z=24h 로 실행한다(research_eth_fused_signal_votes_gate_20260925.py 가 읽는다).
 """융합 신호를 카드의 축(Y_sym: ±0.5×30분 창폭, 다음 30분 1분봉 선착)으로 잰다. 서버 정의(24h z · 고래 한 표).
 추세(dir≠0): P(이동 방향 먼저 = B). 횡보(dir=0): P(위 먼저). 'none'·'amb' 는 방향 질문의 답이 아니라 뺀다(카드 규약)."""
 import sys, numpy as np, pandas as pd

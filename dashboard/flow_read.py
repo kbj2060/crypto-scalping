@@ -132,7 +132,7 @@ def gauges(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, dict[str, Any]]:
         G["고래"] = {"kind": "d", "v": v or 0.0, "txt": _k(net["whale"]), "on": v is not None}
     m60, oi60, p75 = x.get("move60"), x.get("oi60"), x.get("move60_p75")
     if m60 is not None and oi60 is not None:
-        big = p75 is not None and m60 < 0 and abs(m60) >= p75 and oi60 != 0
+        big = bool(p75) and m60 < 0 and abs(m60) >= p75 and oi60 != 0   # p75=0(24h 평탄·캐시 이상)이면 아래 나눗셈이 0 으로 나눈다
         G["가격↔OI"] = {"kind": "d", "v": (-1 if oi60 > 0 else 1) * min(100.0, 50 * abs(m60) / p75) if big else 0.0,
                        "txt": f"{m60:+.0f}bp", "on": big}
     if "liq_long" in ev:
@@ -326,7 +326,7 @@ def read(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
     act, vp = x.get("act"), x.get("vol_pct")
     if vp is not None:
         edge = vp >= 0.8 or vp <= 0.2      # 가운데는 할 말이 없다 -- 근거 칩은 양끝에만
-        add("활동", f"60초 거래량 같은 시간대 {100 * vp:.0f}분위({act}) — " + ("움직임이 커질 자리" if vp >= 0.8 else "움직임이 작을 자리" if vp <= 0.2 else "움직임 크기 평소"),
+        add("활동", f"60초 거래량 같은 시간대 {100 * vp:.0f}분위" + (f"({act})" if act else "") + " — " + ("움직임이 커질 자리" if vp >= 0.8 else "움직임이 작을 자리" if vp <= 0.2 else "움직임 크기 평소"),
             EVID["act"], "근거" if edge else "설명")
 
     fused = fuse(ev, x)
@@ -474,4 +474,5 @@ if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등�
     assert all(-100 <= g["v"] <= 100 for g in Tg.values() if g["kind"] == "d")
     assert _k(35574) == "+36k" and _k(-2086) == "−2.1k" and _k(420) == "+420" and _k(0) == "0"
     assert gauges({}, {}) == {}
+    assert gauges(ev, dict(x, move60_p75=0.0))["가격↔OI"]["on"] is False                           # 0 으로 나누지 않는다(퍼징이 잡음)
     print("flow_read selfcheck ok")

@@ -3404,6 +3404,16 @@ def make_app() -> web.Application:
                  sr=mp.get("sr") or {}, act=mp.get("act"), vol_pct=mp.get("vol60_pct"))
         return x
 
+    def _last_logged_bar(path: Path) -> int | None:
+        """jsonl 마지막 줄의 bar. 파일 전체를 읽지 않는다(꼬리 16KB — 한 줄은 ~300B). 못 읽으면 None(최악 = 중복 한 줄)."""
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(0, 2); size = fh.tell(); fh.seek(max(0, size - 16384))
+                tail = fh.read().decode("utf-8", "ignore").strip().splitlines()
+            return int(json.loads(tail[-1])["bar"]) if tail else None
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            return None
+
     async def load_5m_day() -> list[dict[str, float]]:
         """관계 읽기·융합 신호의 24h 분위 기준(5분봉 300개). 60초 캐시 · 형성 중 봉은 버린다."""
         async def produce() -> list[dict[str, float]]:
@@ -3453,6 +3463,10 @@ def make_app() -> web.Application:
             fu = situation_state["read"].get("fused") or {}
             o3 = fu.get("outcome") or {}
             bar_now = int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
+            if o3 and "fused_bar" not in situation_state:
+                # 🔴재기동 직후엔 «마지막으로 쓴 봉»을 파일 꼬리에서 되살린다. 안 그러면 배포(재기동)가 봉 중간에 끼면
+                #   옛 프로세스가 쓴 봉을 새 프로세스가 한 번 더 쓴다(09-25 실측 14줄 중 3봉 중복 = 배포 3번).
+                situation_state["fused_bar"] = _last_logged_bar(FUSED_LOG_PATH)
             if o3 and situation_state.get("fused_bar") != bar_now:
                 situation_state["fused_bar"] = bar_now
                 try:

@@ -8,7 +8,7 @@
   rj   거부 봉(마지막 봉 델타가 30분 방향 반대 & |델타| ≥ 0.5×창 최대) → −30분 방향
 관문 G: 30분 창 고저폭의 과거 24h 분위 ≥ 2/3 (카드 크기 축 최선 단일피쳐 range_bp).
 평가: 표 각각 · 합 S · S×G. TRAIN < 2025 ≤ TEST. 비겹침(H 간격) 결정만. 일 블록 CI."""
-import glob, numpy as np, pandas as pd, sys
+import glob, os, numpy as np, pandas as pd, sys
 rng = np.random.default_rng(20260925)
 SYM = sys.argv[1] if len(sys.argv) > 1 else 'ETHUSDT'
 T = pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(f'tmp/whale/tape/{SYM}/*.parquet'))]).sort_index()
@@ -42,7 +42,10 @@ veto = pd.Series(np.where(c > sma + atr, 1.0, np.where(c < sma - atr, -1.0, np.n
 Z = {}
 for g in ['ret', 'mid', 'whl']:
     s = b5[g].rolling(12).sum()
-    Z[g] = (s / s.rolling(8640, min_periods=2016).std().shift(12)).values
+    # FUSED_Z=24h 면 서버 정의(링 24h: 288봉 창합 표준편차, 자기 창 제외) · 기본 30d = 사전 정의
+    sd_ = (s.rolling(288, min_periods=84).std().shift(1) if os.environ.get('FUSED_Z') == '24h'
+           else s.rolling(8640, min_periods=2016).std().shift(12))
+    Z[g] = (s / sd_).values
 # ── 1시간 가격↔OI ──
 mv60 = np.r_[np.full(12, np.nan), (c[12:] / c[:-12] - 1) * 1e4]
 p75 = pd.Series(np.abs(mv60)).rolling(288, min_periods=144).quantile(0.75).shift(1).values
