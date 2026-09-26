@@ -2696,6 +2696,14 @@ def make_app() -> web.Application:
                 async with http_session["session"].get(
                         OI_1S_URL, params={"symbol": FOOTPRINT_SYMBOL}) as resp:
                     data = await resp.json()
+                if "time" not in data:
+                    # 🔴2026-09-26 긴급: 한도 초과(429)·IP 밴(418)에도 0.25초마다 다시 두드려 **밴을 계속 연장**했다
+                    #   (밴 중 로그 93/100줄). IP 한도는 봇·대시보드·수집기가 같이 쓴다 -- 밴이면 풀릴 때까지, 아니면 30초.
+                    m = re.search(r"banned until (\d+)", str(data.get("msg", "")))
+                    wait = max(5.0, int(m.group(1)) / 1000 - time.time() + 1) if m else 30.0
+                    print(f"oi-1s: 거래소 거절 {resp.status} {data.get('code')} -- {wait:.0f}초 쉰다", flush=True)
+                    await asyncio.sleep(wait)
+                    continue
                 ts_ms = int(data["time"])
                 if ts_ms not in seen_ms:     # 같은 스냅샷을 다른 초에 복제하지 않는다
                     seen_ms.add(ts_ms)
