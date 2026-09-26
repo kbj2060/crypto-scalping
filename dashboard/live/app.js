@@ -3338,17 +3338,39 @@ function situationTargetLevels(footprint) {
     faded: false, dashed: true, width: 1, marker: !!footprint, scenario: c.key }));
 }
 
+// 2026-09-26 사용자 지시(B): 청산맵은 **완성된 1시간봉**까지만 쓸림을 반영한다(서버가 형성 중 봉을 뺀다) --
+//   마지막 스냅샷 ts 는 그 봉의 **시작**이라 서버가 아는 건 ts+1h 까지다. 그 뒤 가격이 지나간 레벨은
+//   최대 1시간 «안 쓸린 벽»으로 남았다. 차트 5분봉(현재 봉은 틱으로 매초 갱신)으로 그 공백을 메운다.
+//   반환: 가격 -> 처음 지나간 봉 인덱스(없으면 -1). 봉의 [저가, 고가] 가 가격을 품으면 지나간 것이다.
+function liqSweepIdx(candles, sinceSec, price) {
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    if (c.time >= sinceSec && c.low <= price && price <= c.high) return i;
+  }
+  return -1;
+}
+function liqMapKnownUntilSec(map) {
+  const h = (map && map.heatmap_history) || [];
+  const t = h.length ? Date.parse(h[h.length - 1].ts_utc) : NaN;
+  return Number.isFinite(t) ? Math.floor(t / 1000) + 3600 : Infinity;   // 모르면 아무것도 안 지운다
+}
+
 function nearestLiquidationLevel() {
   const map = latestLiquidationMap;
   if (!map || !map.warmed_up) return [];
   const liveCurrentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || map.current_price || 0);
   if (!(liveCurrentPrice > 0)) return [];
+  const since = liqMapKnownUntilSec(map);
+  const candles = candleHistoryByAsset[activeSnapshotAsset] || [];
+  // 목록은 가까운 순이다 -- 현재가 쪽에 있고 **아직 안 쓸린** 첫 레벨을 고른다.
+  const pick = (levels, below) => (levels || []).find((lv) => Number(lv.price) > 0
+    && (below ? lv.price < liveCurrentPrice : lv.price > liveCurrentPrice)
+    && liqSweepIdx(candles, since, Number(lv.price)) < 0);
   const candidates = [
-    { lv: (map.support_levels || [])[0], color: "var(--liq-support)", tag: "지지1", side: "support" },
-    { lv: (map.resistance_levels || [])[0], color: "var(--liq-resistance)", tag: "저항1", side: "resistance" },
+    { lv: pick(map.support_levels, true), color: "var(--liq-support)", tag: "지지1", side: "support" },
+    { lv: pick(map.resistance_levels, false), color: "var(--liq-resistance)", tag: "저항1", side: "resistance" },
   ]
-    .filter((c) => c.lv && Number(c.lv.price) > 0)
-    .filter((c) => c.side === "support" ? c.lv.price < liveCurrentPrice : c.lv.price > liveCurrentPrice);
+    .filter((c) => c.lv);
   if (!candidates.length) return [];
   candidates.sort((a, b) => Math.abs(a.lv.price - liveCurrentPrice) - Math.abs(b.lv.price - liveCurrentPrice));
   const nearest = candidates[0];
@@ -3362,6 +3384,18 @@ function nearestLiquidationLevel() {
   }];
 }
 
+
+// 2026-09-26 사용자 지시(A): **현재 5분봉**의 실제 청산 극값 -- 롱 청산 최저 체결가·숏 청산 최고 체결가
+//   (바이낸스 @forceOrder ap, 2초 갱신). 추정 청산맵과 달리 «실제로 여기까지 청산됐다»는 사실이다.
+function liqExtremeLevels(footprint) {
+  const bars = latestLiquidation5mHist;
+  const b = Array.isArray(bars) && bars.length ? bars[bars.length - 1] : null;
+  if (activeSnapshotAsset !== "eth" || !b || !b.partial) return [];
+  return [[b.long_min_px, "롱청산", "var(--bad)"], [b.short_max_px, "숏청산", "var(--good)"]]
+    .filter(([px]) => Number(px) > 0)
+    .map(([px, label, color]) => ({ val: Number(px), color, label, priceLeft: true,
+                                    dashed: true, width: 1, marker: !!footprint }));
+}
 
 // 하이퍼리퀴드 고래 청산 뭉치 -> 레벨(renderCandleSvg 의 riskLevels 모양). 아래(롱 청산)·위(숏 청산)
 // 에서 각각 **가장 큰** 뭉치 하나만. 여럿을 달면 오른쪽 열이 넘쳐 이름 있는 꼬리표가 잘린다(09-22 사고).
@@ -5363,7 +5397,7 @@ function renderSnapshotChart() {
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel(), ...situationTargetLevels(footprint),
-                      ...hlWhaleLiqLevels(currentPrice, footprint)];
+                      ...hlWhaleLiqLevels(currentPrice, footprint), ...liqExtremeLevels(footprint)];
   // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
   // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
   // /api/liquidation-map 이 갱신될 때(60초)만 다시 만든다.
@@ -5921,8 +5955,20 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴키에 **모드**를 넣는다. 불투명도가 모드마다 다른데(풋프린트 0.25 / 청산맵 0.85)
   //   baseGeomSig 에는 모드가 없어서, 기하가 우연히 같으면 옛 불투명도 층을 그대로
   //   재사용한다. 캐시가 «맞는 그림»을 돌려주는지는 키가 정한다.
+  // B: 마지막 스냅샷이 모르는 구간(ts+1h 이후)에 가격이 지나간 칸 -> 그 봉 가운데서 끊고 뒤는 «쓸림»(t=0)으로.
+  //   앞 스냅샷들은 자기 시간봉까지 이미 반영돼 있다. 키에 넣어야 틱으로 새로 쓸릴 때 층이 다시 그려진다.
+  const densitySweep = new Map();
+  const lastSnap = sortedDensityHistory[sortedDensityHistory.length - 1];
+  if (lastSnap) {
+    const since = Math.floor((lastSnap.tsMs || 0) / 1000) + 3600;
+    (lastSnap.bins || []).forEach((b) => {
+      if (!(b.weightPct > 0)) return;
+      const i = liqSweepIdx(candles, since, b.price);
+      if (i >= 0) densitySweep.set(b.price, i);
+    });
+  }
   if (sortedDensityHistory.length) cachedLayer("density",
-      objToken(densityHistory) + ":" + densityClip, (g) => {
+      objToken(densityHistory) + ":" + densityClip + ":" + [...densitySweep].join(","), (g) => {
   const densityPriceUnion = Array.from(new Set(sortedDensityHistory.flatMap(snap => (snap.bins || []).map(b => b.price))));
   sortedDensityHistory.forEach((snap, si) => {
     const xStartIdx = densityBoundaryIdx[si];
@@ -5937,7 +5983,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (bottom <= top) return;
       const pct = clamp01(weightByPrice.get(price) || 0);
       const t = densityClip > 0 ? Math.min(1, pct / densityClip) : 0;
-      drawDensitySeg(g, x0, x1, top, bottom, t);
+      const cut = si === sortedDensityHistory.length - 1 ? densitySweep.get(price) : undefined;
+      if (cut !== undefined && cut >= xStartIdx) {
+        const xc = Math.min(x1, Math.max(x0, xAt(cut) + bw / 2));
+        drawDensitySeg(g, x0, xc, top, bottom, t);
+        drawDensitySeg(g, xc, x1, top, bottom, 0);
+      } else {
+        drawDensitySeg(g, x0, x1, top, bottom, t);
+      }
     });
   });
   });
@@ -7553,8 +7606,25 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           + (b.hl ? " · HL 고래 청산 " + fmtUsdCompact((b.hl.long_usd || 0) + (b.hl.short_usd || 0))
              + " (" + b.hl.n + "건 · 롱 " + fmtUsdCompact(b.hl.long_usd || 0) + " / 숏 "
              + fmtUsdCompact(b.hl.short_usd || 0) + " · 추적 300지갑 한정)" : "");
+        const lx = Number(b.long_min_px), sx = Number(b.short_max_px);
+        if (lx > 0 || sx > 0) tip.textContent += " · 청산 극값(바이낸스 체결가)"
+          + (lx > 0 ? " 롱 최저 " + fmtNum(lx, 1) : "") + (sx > 0 ? " 숏 최고 " + fmtNum(sx, 1) : "");
         dot.appendChild(tip);
         g.appendChild(dot);
+        // 2026-09-26 A: 그 봉에서 청산이 닿은 가장 먼 가격 -- 봉 왼쪽 틈에서 오른쪽을 가리키는 꺾쇠.
+        //   셀 숫자를 가로지르지 않으려고 선이 아니라 틈에 둔다.
+        const tw = Math.max(3, Math.min(6, xAt(1) - xAt(0) - bw - 1));
+        [[lx, "var(--bad)"], [sx, "var(--good)"]].forEach(([px, col]) => {
+          if (!(px > 0)) return;
+          const y = yAt(px);
+          if (y < mt || y > plotBottom) return;
+          const tri = document.createElementNS(NS, "polygon");
+          const x = xAt(i) - 0.5;
+          tri.setAttribute("points", `${x},${y} ${x - tw},${y - tw * 0.7} ${x - tw},${y + tw * 0.7}`);
+          tri.setAttribute("fill", col);
+          tri.setAttribute("data-liq-extreme", col === "var(--bad)" ? "long" : "short");
+          g.appendChild(tri);
+        });
       });
     }
   }

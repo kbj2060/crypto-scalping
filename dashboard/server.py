@@ -664,11 +664,20 @@ def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH) -> list[tuple[
 
 def liq_5m_add(store: dict[int, list[float]], ev: dict[str, Any],
                bar_s: int = FOOTPRINT_BAR_SECONDS, keep_bars: int = FOOTPRINT_KEEP_BARS) -> None:
-    """청산 이벤트 하나를 5분봉 누적에 더한다. store 는 봉 시작 -> [롱USD, 숏USD, 건수]."""
+    """청산 이벤트 하나를 5분봉 누적에 더한다. store 는 봉 시작 -> [롱USD, 숏USD, 건수, 롱최저가, 숏최고가].
+    2026-09-26 극값(사용자 지시): 롱 청산이 닿은 **가장 낮은** 체결가·숏 청산의 **가장 높은** 체결가.
+    price 는 ap(평균 체결가)라 봉 고저 안이다(3일 2,981건 실측 밖 0건). OKX bkPx(파산가)는 여기 안 온다."""
     bar = int(ev.get("ts_ms") or 0) // 1000 // bar_s * bar_s
-    a = store.setdefault(bar, [0.0, 0.0, 0])
-    a[0 if ev.get("side") == "long" else 1] += float(ev.get("usd") or 0.0)
+    a = store.setdefault(bar, [0.0, 0.0, 0, None, None])
+    is_long = ev.get("side") == "long"
+    a[0 if is_long else 1] += float(ev.get("usd") or 0.0)
     a[2] += 1
+    px = float(ev.get("price") or 0.0)
+    if px > 0:
+        if is_long:
+            a[3] = px if a[3] is None else min(a[3], px)
+        else:
+            a[4] = px if a[4] is None else max(a[4], px)
     cut = bar - keep_bars * bar_s
     for old in [b for b in store if b < cut]:     # ponytail: 선형 청소 -- 봉 288개라 이벤트마다 해도 싸다
         del store[old]
@@ -687,9 +696,10 @@ def liq_5m_payload(store: dict[int, list[float]], from_s: float, bars: int, now_
         b = now_bar - k * bar_s
         if b <= from_bar:        # 기록이 봉 중간에 시작 -> 반쪽이라 뺀다(풋프린트 okx_from 과 같은 규약)
             continue
-        a = store.get(b) or (0.0, 0.0, 0)
+        a = store.get(b) or (0.0, 0.0, 0, None, None)
         out.append({"ts": datetime.fromtimestamp(b, timezone.utc).isoformat(),
                     "long_usd": round(a[0], 2), "short_usd": round(a[1], 2), "events": int(a[2]),
+                    "long_min_px": a[3], "short_max_px": a[4],     # 바이낸스 체결가 극값(없으면 None)
                     "partial": b == now_bar})
     return {"warmed_up": True, "bars": out, "error": None, "source": "dashboard-forceorder"}
 
@@ -2735,7 +2745,7 @@ def make_app() -> web.Application:
     #      24시간 대조(1,395분): 건수는 88.6% 분에서 같은데 USD 합이 봇 $6.2M vs 여기 $38.0M(6.1배).
     #      예: 09-24 19:46:03 숏 청산 1건 -- 봇 $73,974 / 여기 $1,327,307(492 ETH 주문의 마지막 조각 27 ETH).
     #   ⇒ 봇 DB 와 이어 붙이면 이음새에서 원이 6배 튄다. ETH 는 통째로 이쪽에서 만든다.
-    liq_5m: dict[int, list[float]] = {}         # 봉 시작 -> [롱USD, 숏USD, 건수]
+    liq_5m: dict[int, list] = {}                # 봉 시작 -> [롱USD, 숏USD, 건수, 롱최저가, 숏최고가]
     liq_5m_state: dict[str, Any] = {"from_s": None}   # 이 시각 이전 봉은 «모름» (기록 시작점)
     # WS 자체의 상태. 청산은 조용한 스트림이라 «이벤트 없음»과 «연결 없음»을 화면이 구별해야 한다
     # (tail_risk_interceptor 가 2026-07-30 에 77일간 잘못 connected=True 로 있던 그 함정).

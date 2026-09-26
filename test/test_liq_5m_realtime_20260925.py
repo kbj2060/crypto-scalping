@@ -17,8 +17,8 @@ T0 = 1_790_000_100          # 봉 경계(300 의 배수)
 BAR = 300
 
 
-def ev(t_s, side, usd):
-    return {"ts_ms": int(t_s * 1000), "side": side, "usd": usd}
+def ev(t_s, side, usd, price=0.0):
+    return {"ts_ms": int(t_s * 1000), "side": side, "usd": usd, "price": price}
 
 
 def ts_of(p):
@@ -30,7 +30,7 @@ def test_sums_usd_per_bar_and_splits_sides():
     for e in (ev(T0 + 5, "long", 100.0), ev(T0 + 250, "long", 50.0), ev(T0 + 299, "short", 7.0),
               ev(T0 + 300, "short", 1.0)):                     # 마지막은 다음 봉
         liq_5m_add(st, e)
-    assert st[T0] == [150.0, 7.0, 3] and st[T0 + BAR] == [0.0, 1.0, 1]
+    assert st[T0][:3] == [150.0, 7.0, 3] and st[T0 + BAR][:3] == [0.0, 1.0, 1]
 
 
 def test_payload_shape_matches_bot_db_version_and_marks_partial():
@@ -40,7 +40,7 @@ def test_payload_shape_matches_bot_db_version_and_marks_partial():
     assert p["warmed_up"] and p["error"] is None and p["source"] == "dashboard-forceorder"
     assert ts_of(p) == [T0 - BAR, T0, T0 + BAR]
     b = p["bars"][1]
-    assert set(b) == {"ts", "long_usd", "short_usd", "events", "partial"}
+    assert set(b) == {"ts", "long_usd", "short_usd", "events", "long_min_px", "short_max_px", "partial"}
     assert (b["long_usd"], b["short_usd"], b["events"], b["partial"]) == (1327307.0, 0.0, 1, False)
     assert p["bars"][0]["events"] == 0, "기록이 이어진 구간의 빈 봉은 0 으로 싣는다(= 청산 없음)"
     assert p["bars"][2]["partial"] is True and p["bars"][1]["partial"] is False
@@ -79,3 +79,16 @@ def test_gauge_is_derived_from_the_chart_circles():
     assert "Math.floor(Date.now() / 1000 / 1800) * 1800" in body, "30분 경계가 서버 게이지(_bar_start)와 달라졌다"
     # 음성 대조군: 서버 게이지 값이 1순위로 돌아가 있으면 실패
     assert "const longUsd = warmed ? Number(liq5m.long_usd_5m || 0) : 0;" not in body
+
+
+def test_extremes_are_lowest_long_and_highest_short_fill_per_bar():
+    """2026-09-26 극값: 롱 청산 최저 체결가·숏 청산 최고 체결가. 반대 측면 가격은 섞이지 않는다."""
+    st = {}
+    for e in (ev(T0 + 5, "long", 1.0, 2670.5), ev(T0 + 9, "long", 1.0, 2661.4), ev(T0 + 20, "long", 1.0, 2665.0),
+              ev(T0 + 30, "short", 1.0, 2690.0), ev(T0 + 40, "short", 1.0, 2694.2), ev(T0 + 50, "short", 1.0, 2689.0),
+              ev(T0 + 60, "long", 1.0, 0.0)):                   # 가격 없는 이벤트는 극값을 안 건드린다
+        liq_5m_add(st, e)
+    b = liq_5m_payload(st, T0 - 5 * BAR, 1, T0 + 100)["bars"][-1]
+    assert (b["long_min_px"], b["short_max_px"]) == (2661.4, 2694.2)
+    empty = liq_5m_payload(st, T0 - 5 * BAR, 2, T0 + BAR + 1)["bars"][-1]
+    assert (empty["long_min_px"], empty["short_max_px"]) == (None, None), "청산 없는 봉은 극값이 없다"
