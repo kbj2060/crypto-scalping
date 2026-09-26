@@ -87,6 +87,11 @@ def run(shot):
                    f"버튼이 화면 밖/없음 {bar}")
                 label = pg.inner_text("#ofabPos")
                 ok(("LONG" in label) if state != "empty" else (label == "주문"), f"버튼 글자 «{label}»")
+                # 2026-09-26 사용자: 수량 대신 증거금 사용 % -- 계좌 카드 «증거금 사용» 타일과 **같은 값**이어야 한다.
+                if state != "empty":
+                    tile = pg.evaluate("() => document.querySelector('[data-pv=\"used\"] .acct-tile-val')?.textContent.trim()")
+                    real = (tile or "").split("→")[0].strip()      # 타일 뒤의 «→ 25%» 는 진입 미리보기(가정값)다
+                    ok(real and f" {real} " in f" {label} ", f"버튼 증거금 %가 카드 타일과 다르다 «{label}» vs «{tile}»")
                 if shot: pg.screenshot(path=f"{shot}/ofab_{state}_{w}_closed.png")
 
                 pg.click("#ofabToggle")

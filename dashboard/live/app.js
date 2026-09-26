@@ -1238,6 +1238,15 @@ function balanceAssetNote() {
 //   «청산하려다 신규 진입»이 된다.
 // ⭐심볼은 하드코딩하지 않고 서버가 payload 에 실어 보낸 exec_symbol 을 쓴다 -- 환경변수라
 //   바뀔 수 있고, 두 벌로 적어 두면 언젠가 한쪽만 고쳐진다.
+// 증거금 사용 % = 사용 증거금(initialMargin) / 순자산(지갑+미실현). 계좌 카드 타일과 떠 있는 주문 버튼이 **같은 값**을
+//   말해야 해서 한 곳에 둔다(2026-09-26). 옛 상태파일은 initial_margin 이 없어 순자산−가용으로 되짚는다(바이낸스 정의상 같다).
+function acctMarginUsed(b) {
+  b = b || {};
+  const equity = (Number(b.wallet) || 0) + (Number(b.unrealized) || 0);
+  const used = Number.isFinite(Number(b.initial_margin)) && b.initial_margin != null ? Number(b.initial_margin)
+    : Math.max(0, (Number(b.margin) || 0) - (Number(b.available) || 0));
+  return { used, equity, pct: equity > 0 ? used / equity * 100 : 0 };
+}
 function snapshotAccountPosition() {
   const positions = latestBinanceAccount?.positions || [];
   const market = ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`;
@@ -1802,9 +1811,7 @@ function renderSnapshotAccount() {
   // equity 는 이 함수 앞쪽(991행)에서 이미 선언돼 있다 -- 같은 식(wallet + upnl)이고
   // wallet/upnl 이 const 라 값이 바뀔 수 없으므로 그대로 쓴다. 여기서 다시 const 로
   // 선언하면 **같은 스코프 중복 선언**이라 app.js 전체가 SyntaxError 로 죽는다(2026-09-11 실장애).
-  const usedMargin = Number.isFinite(Number(b.initial_margin)) ? Number(b.initial_margin)
-    : Math.max(0, (Number(b.margin) || 0) - (Number(b.available) || 0));
-  const usedPct = equity > 0 ? usedMargin / equity * 100 : 0;
+  const { used: usedMargin, pct: usedPct } = acctMarginUsed(b);
   // 노출은 **계좌 전체** 기준이다(명목 ÷ 순자산). 포지션 레버리지(×30)와 다른 값이라
   //   같은 "배"를 써서 혼동이 났다 -- 라벨을 「계좌 노출」로 바꾸고 명목을 툴팁에 적는다.
   const expo = equity > 0 ? (Number(pos.notional) || 0) / equity : 0;
@@ -9006,7 +9013,9 @@ function renderOfab() {
   const side = qty ? String(p.side || "").toUpperCase() : "";
   const pnl = ofabLivePnl(p, qty, side);
   // 센트까지 -- 달러 반올림이면 3초 갱신이 작은 움직임에서 안 보인다(계좌 카드 미실현과 같은 자리수).
-  setT("ofabPos", qty ? `${side} ${qty.toFixed(3)} · ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : "주문");
+  // 2026-09-26 사용자 지시: 코인 수량 대신 **증거금 사용 %**(계좌 카드 «증거금 사용» 타일과 같은 값).
+  const used = acctMarginUsed(latestBinanceAccount?.balance).pct;
+  setT("ofabPos", qty ? `${side} ${used.toFixed(0)}% · ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : "주문");
   box.classList.toggle("long", side === "LONG");
   box.classList.toggle("short", side === "SHORT");
 }
