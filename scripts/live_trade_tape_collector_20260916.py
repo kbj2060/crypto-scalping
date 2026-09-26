@@ -52,6 +52,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "live" / "trade_tape.duckdb"
+
+
+def default_db(symbol: str) -> Path:
+    """ETH 는 기존 파일(대시보드·복제가 읽는다). 다른 심볼은 자기 파일(2026-09-26) -- duckdb 는
+    writer 가 하나라 심볼 5개가 한 파일을 5초마다 번갈아 열면 읽는 쪽과 잠금 충돌이 5배가 된다."""
+    s = symbol.lower()
+    return DEFAULT_DB if s == "ethusdt" else DEFAULT_DB.with_name(f"trade_tape_{s.removesuffix('usdt')}.duckdb")
+
+
 # 가격빈. 자산마다 틱과 가격대가 달라 한 값을 못 쓴다 -- 대략 «가격의 0.4bp» 로 맞췄다.
 BUCKETS = {"ethusdt": 0.1, "btcusdt": 1.0, "solusdt": 0.01, "xrpusdt": 0.0001, "hypeusdt": 0.001}
 WS_URL = "wss://fstream.binance.com/ws/{symbol}@trade"
@@ -713,7 +722,9 @@ async def collect(symbol: str, db_path: Path) -> None:
     # total=None 을 **명시**한다: aiohttp 기본 5분이라 그냥 두면 5분마다 끊긴다.
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
         backfill = asyncio.create_task(backfill_loop(  # noqa: F841 -- 수집이 끝날 때까지 돈다
-            store, binance_minute_fetcher(session, symbol, bucket), per_cycle=3,
+            # 🔴ETH 외는 한 주기 1분만. 망이 끊겼다 붙으면 모든 심볼(과 두 호스트)이 동시에 복구를
+            #   시작하는데 BTC 한 분은 aggTrades 여러 쪽(쪽당 20)이다 -- 봇과 같은 IP 한도 2,400/분이다.
+            store, binance_minute_fetcher(session, symbol, bucket), per_cycle=3 if symbol == "ethusdt" else 1,
             source="binance rest aggTrades",
             note="buy_max/sell_max NULL(REST 에 개별 체결 최대가 없다) · 주문=aggTrade",
             lookback_s=BINANCE_BACKFILL_LOOKBACK_S))
@@ -910,14 +921,15 @@ def selftest() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--symbol", default=os.getenv("TAPE_SYMBOL", "ethusdt").lower())
-    parser.add_argument("--db", type=Path, default=Path(os.getenv("TAPE_DB_PATH", DEFAULT_DB)))
+    parser.add_argument("--db", type=Path, default=Path(os.environ["TAPE_DB_PATH"])
+                        if os.getenv("TAPE_DB_PATH") else None)
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
     if args.selftest:
         selftest()
         return
     try:
-        asyncio.run(collect(args.symbol, args.db))
+        asyncio.run(collect(args.symbol, args.db or default_db(args.symbol)))
     except KeyboardInterrupt:
         log("종료")
 

@@ -439,6 +439,9 @@ def _f32_to_parquet(src: Path, dst: Path) -> None:
         "ts_ms": pa.array(ts[r], pa.int64()),
         "bin": pa.array((lo[r] + c).astype(np.int32), pa.int32()),
         "qty": pa.array(qty[r, c], pa.float32()),        # 부호가 방향: + 비드 / - 아스크
+        # 2026-09-26 다코인: 가격 = bin * bin_size 인데 빈 폭은 심볼마다 다르다. 파일에 박아 둔다
+        #   (상수 열이라 zstd 로 거의 공짜). 이전 파일엔 이 열이 없다 -- 뷰에서 NULL 로 보인다.
+        "bin_size": pa.array(np.full(len(r), binsz, np.float32), pa.float32()),
     })
     meta = pa.table({"ts_ms": pa.array(ts, pa.int64()), "mid": pa.array(mid, pa.float32())})
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -461,8 +464,14 @@ def _ensure_archive_db() -> None:
     try:
         g = str(OF_ARCHIVE_ROOT / "*" / "*" / "*T[0-9][0-9].f32.parquet")
         m = str(OF_ARCHIVE_ROOT / "*" / "*" / "*_mid.parquet")
-        con.execute(f"CREATE OR REPLACE VIEW book AS SELECT * FROM read_parquet('{g}')")
-        con.execute(f"CREATE OR REPLACE VIEW book_mid AS SELECT * FROM read_parquet('{m}')")
+        # 🔴2026-09-26 다코인: 글롭이 심볼 폴더를 전부 덮으므로 `symbol` 이 없으면 ETH 와 BTC 의 빈이
+        #   구별 없이 섞인다. 심볼은 경로(<SYMBOL>/<날짜>/파일)에서 뽑는다. `bin_size` 가 NULL 인 행은
+        #   이 열이 생기기 전 파일이다(그때는 ETHUSDT 수집기 하나뿐이었다 -- 기본값 OF_BIN_SIZE=0.5).
+        sym = r"regexp_extract(filename, '([^/\\]+)[/\\][^/\\]+[/\\][^/\\]+$', 1) AS symbol"
+        con.execute(f"CREATE OR REPLACE VIEW book AS SELECT {sym}, * EXCLUDE (filename) "
+                    f"FROM read_parquet('{g}', filename = true, union_by_name = true)")
+        con.execute(f"CREATE OR REPLACE VIEW book_mid AS SELECT {sym}, * EXCLUDE (filename) "
+                    f"FROM read_parquet('{m}', filename = true)")
     finally:
         con.close()
 

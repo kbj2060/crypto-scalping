@@ -58,7 +58,16 @@ MAGIC, VER, HDR, ROW = _bn.MAGIC, _bn.VER, _bn.HDR, _bn.ROW
 COIN = os.getenv("HL_BT_COIN", "ETH").upper()
 BT_ROOT = Path(os.getenv("HL_BT_ROOT",
                          str(ROOT / "data" / "live" / "orderflow" / "hyperliquid_bookticker")))
-CTX_DB = Path(os.getenv("HL_CTX_DB_PATH", str(ROOT / "data" / "live" / "hyperliquid_context.duckdb")))
+CTX_DB_ENV = os.getenv("HL_CTX_DB_PATH")
+
+
+def default_ctx_db(coin: str) -> Path:
+    """ETH 는 기존 파일(대시보드·연구가 읽는다). 다른 코인은 자기 파일 -- duckdb 는 writer 가 하나라
+    코인 5개가 한 파일을 번갈아 열면 잠금 충돌이 5배가 된다(microstructure_xrp.duckdb 와 같은 규약)."""
+    name = "hyperliquid_context.duckdb" if coin.upper() == "ETH" else f"hyperliquid_context_{coin.lower()}.duckdb"
+    return ROOT / "data" / "live" / name
+
+
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 RECV_TIMEOUT = 30.0      # 이만큼 조용하면 ping 을 보낸다(끊지 않는다 -- 재연결이 더 비싸다)
 CTX_FLUSH_SECONDS = 30.0
@@ -267,14 +276,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--coin", default=COIN)
     ap.add_argument("--root", default=str(BT_ROOT))
-    ap.add_argument("--ctx-db", type=Path, default=CTX_DB)
+    ap.add_argument("--ctx-db", type=Path, default=Path(CTX_DB_ENV) if CTX_DB_ENV else None)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         selftest()
         return
     try:
-        asyncio.run(run(a.coin.upper(), Path(a.root), a.ctx_db))
+        asyncio.run(run(a.coin.upper(), Path(a.root), a.ctx_db or default_ctx_db(a.coin)))
     except KeyboardInterrupt:
         log.info("종료")
 

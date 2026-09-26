@@ -129,6 +129,10 @@ def recommended_action(component: str) -> str:
                 ">> logs/supervisor/trade_tape_manual.log 2>&1 < /dev/null &")
     if component.startswith("duckdb_"):
         return "scripts/ops/botctl.sh status; journalctl -u trading-bot.service -n 100 --no-pager"
+    if component.startswith("multicoin_"):
+        # 다시 띄우는 것도 같은 스크립트다(supervisor 가 중복을 막아 이미 돌면 건너뛴다).
+        return ("python scripts/ops/multicoin_collectors_20260926.py check; "
+                "python scripts/ops/multicoin_collectors_20260926.py resume")
     return "scripts/ops/triage.sh"
 
 
@@ -468,6 +472,56 @@ def check_shadow_runner(component: str, filename: str, warn_minutes: float = 15,
     })
 
 
+# ── 다코인 수집기 (2026-09-26) ─────────────────────────────────────────────────────────────
+# BTC·SOL·XRP·HYPE 수집기는 `scripts/ops/multicoin_collectors_20260926.py start` 가 띄우고, 띄운 것만
+# 이 호스트의 매니페스트에 적는다. 감시는 **매니페스트에 있는 것만** 본다 -- 코드에 박으면
+#   ① 서버/Pi 중 안 띄운 호스트에서 «파일 없음» BLOCKED 가 영구히 울리고(위 SHADOW_RUNNERS 사고),
+#   ② 배포(머지)가 기동보다 먼저 닿는 순간 울린다.
+# 은퇴는 러너 정지 + @reboot 제거 + 매니페스트에서 항목 삭제가 **한 쌍**이다.
+MULTICOIN_MANIFEST = LIVE / "multicoin_collectors.json"
+
+
+def check_file_dir_freshness(component: str, directory: Path, pattern: str,
+                             warn_minutes: float, critical_minutes: float) -> Check:
+    """시각별 파일(.bt/.jsonl/.f32/날짜별 duckdb)을 쓰는 수집기 -- 가장 최근에 쓴 파일의 mtime.
+    진행 중인 시각 파일에 계속 append 하므로 mtime 이 곧 생존 신호다."""
+    try:
+        newest = max((f.stat().st_mtime for f in directory.glob(pattern) if f.is_file()), default=None)
+    except OSError as exc:
+        return Check(component, "BLOCKED", "collector directory cannot be read",
+                     {"path": str(directory), "error": type(exc).__name__})
+    if newest is None:
+        return Check(component, "BLOCKED", "collector directory has no files", {"path": str(directory)})
+    age = max(0.0, (time.time() - newest) / 60.0)
+    return Check(component, stale_status(age, warn_minutes, critical_minutes), "collector file freshness", {
+        "path": str(directory), "age_minutes": round(age, 1),
+        "warn_minutes": warn_minutes, "critical_minutes": critical_minutes,
+    })
+
+
+def check_multicoin_collectors() -> list[Check]:
+    manifest, error = load_json(MULTICOIN_MANIFEST)
+    if manifest is None:
+        # 파일이 없으면 이 호스트엔 다코인 수집기가 없다 -- 알릴 일이 아니다. 깨졌으면 알린다.
+        return [] if not MULTICOIN_MANIFEST.exists() else [
+            Check("multicoin_manifest", "BLOCKED", "multicoin manifest cannot be read",
+                  {"path": str(MULTICOIN_MANIFEST), "error": error})]
+    out = []
+    for c in (manifest.get("collectors") or {}).values():
+        # 막 띄운 수집기는 첫 쓰기 전이다(파일 없음 = 즉시 BLOCKED = 즉시 텔레그램). 유예를 둔다.
+        if time.time() - float(c.get("started_at", 0)) < 60.0 * float(c.get("grace_minutes", 15)):
+            continue
+        for f in c.get("fresh") or []:
+            component = f"multicoin_{f['name']}"
+            if f.get("kind") == "duckdb":
+                out.append(check_duckdb_table_freshness(component, ROOT / f["path"], f["table"], f["ts"],
+                                                        f["warn"], f["critical"]))
+            elif f.get("kind") == "dir":
+                out.append(check_file_dir_freshness(component, ROOT / f["path"], f["glob"],
+                                                    f["warn"], f["critical"]))
+    return sorted(out, key=lambda ch: ch.component)
+
+
 def check_runtime_resources() -> Check:
     usage = shutil.disk_usage(ROOT)
     free_gib = usage.free / (1024 ** 3)
@@ -707,6 +761,7 @@ def run_once(dry_run: bool) -> list[Check]:
                                      "to_timestamp(ts_sec)", 5, 10),
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
         *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
+        *check_multicoin_collectors(),
     ]
     state = load_state(state_path)
     stored = state.setdefault("checks", {})

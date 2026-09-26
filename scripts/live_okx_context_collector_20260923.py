@@ -60,7 +60,10 @@ CT_VALS = _tape.CT_VALS
 assert_ct_val = _tape.assert_ct_val
 log = _tape.log
 
-DEFAULT_DB = ROOT / "data" / "live" / "okx_context.duckdb"
+# 🔴청산은 `instType=SWAP` 로 **전 종목**이 한 구독에 온다. 종목마다 프로세스를 띄우면 같은 청산이
+#   프로세스 수만큼 중복 저장된다(2026-09-26). 그래서 ETH 프로세스 **하나만** 받는다 -- 다른 종목의
+#   청산도 거기에 이미 있고, ctVal 을 아는 종목은 sz_base 까지 채워진다.
+LIQ_INST = "ETH-USDT-SWAP"
 # ponytail: 마크가격 5/s 를 **중복 제거 없이** 그대로 적는다(~440k행/일, ~10MB/일). 「값이
 # 바뀔 때만」으로 줄이면 45% 쯤 아끼지만 «안 바뀐 것»과 «안 온 것»의 구분이 gaps 에만 남아
 # 미묘해진다. 디스크가 급해지면 그때 바꾼다.
@@ -228,16 +231,19 @@ async def collect(inst: str, db_path: Path) -> None:
     ct_val = CT_VALS.get(inst)
     if ct_val is None:
         raise SystemExit(f"🔴{inst} 의 ctVal 을 모른다 -- CT_VALS 에 실측값을 적고 다시 돌릴 것")
+    liqs = inst == LIQ_INST
     store = ContextStore(db_path)
     store.set_meta([(f"ct_val:{inst}", repr(ct_val)),
-                    ("liquidation_scope", "instType=SWAP (전 종목) · sz_base 는 ctVal 아는 것만"),
+                    ("liquidation_scope", "instType=SWAP (전 종목) · sz_base 는 ctVal 아는 것만" if liqs
+                     else f"없음 -- {LIQ_INST} 프로세스(okx_context.duckdb)가 전 종목을 받는다"),
                     ("bk_px_note", "파산가격이다 -- 바이낸스 forceOrder 의 체결가와 다르다"),
                     ("okx_oi_note", "2026-09-23 05:30~23:59 KST 행은 REST 0.25초 폴링분이라 "
                      "A->B->A 되돌림(응답 노드 불일치) 잡음이 ~60% 섞여 있다. 그 뒤는 WS "
                      "open-interest(진짜 거래소 ts, 5~10초 간격)")])
     args = [{"channel": c, "instId": inst}
             for c in ("open-interest", "mark-price", "funding-rate")]
-    args.append({"channel": "liquidation-orders", "instType": "SWAP"})
+    if liqs:
+        args.append({"channel": "liquidation-orders", "instType": "SWAP"})
     log(f"{inst} 컨텍스트 수집 시작 (ctVal {ct_val}, db {db_path})")
     down_from = int(time.time() * 1000)
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
@@ -351,14 +357,15 @@ def selftest() -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--inst", default=os.getenv("OKX_CTX_INST", "ETH-USDT-SWAP").upper())
-    ap.add_argument("--db", type=Path, default=Path(os.getenv("OKX_CTX_DB_PATH", DEFAULT_DB)))
+    ap.add_argument("--db", type=Path, default=Path(os.environ["OKX_CTX_DB_PATH"])
+                    if os.getenv("OKX_CTX_DB_PATH") else None)
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         selftest()
         return
     try:
-        asyncio.run(collect(a.inst, a.db))
+        asyncio.run(collect(a.inst, a.db or _tape.default_db(a.inst, "okx_context")))
     except KeyboardInterrupt:
         log("종료")
 
