@@ -640,6 +640,8 @@ HL_LIQ_BY_ASSET = {"eth": (HL_POS_DB_PATH, HL_LIQ_BUCKET, 2),
                    "sol": (HL_POS_MULTI_DB_PATH, 0.2, 2),
                    "xrp": (HL_POS_MULTI_DB_PATH, 0.003, 4)}
 OKX_CTX_DB_PATH = LIVE_DIR / "okx_context.duckdb"
+# OKX 청산은 ETH 맥락 수집기 하나가 전 종목(instType=SWAP)을 받아 여기에 쌓는다 -- 코인별 맥락 DB 에는 0건(09-27 실측).
+OKX_LIQ_DB_PATH = OKX_CTX_DB_PATH
 
 
 def _read_only_rows(path: Path, sql: str, params: list) -> list[tuple]:
@@ -763,7 +765,8 @@ def merge_hl_liq(bars: list[dict], events: list[tuple[int, float, bool, str]],
 
 
 def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_ms: int,
-                       bar_seconds: int, bucket: float, tape_bucket: float | None = None) -> dict:
+                       bar_seconds: int, bucket: float, tape_bucket: float | None = None,
+                       liq_db: Path | None = None) -> dict:
     """OKX 체결 테이프(수집기 duckdb)에서 풋프린트 봉을 되살린다 (2026-09-24, 사용자 A안).
 
     왜: 대시보드가 재기동하면 OKX 풋프린트 과거분이 사라지고(REST history-trades 백필은 10.8초치
@@ -814,7 +817,7 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
     #   거짓이 된다(피어 지적, 2026-09-24). 모양은 라이브 okx_liq_events 원소와 같다.
     liq: list[dict] = []
     try:
-        for ts, pos, qty, px in _read_only_rows(ctx_db, """
+        for ts, pos, qty, px in _read_only_rows(liq_db or ctx_db, """
                 SELECT ts_ms, pos_side, sz_base, bk_px FROM okx_liquidations
                 WHERE inst_id = ? AND ts_ms >= ? AND ts_ms < ? AND sz_base > 0 ORDER BY ts_ms""",
                 [inst, lo_sec * 1000, t0_ms]):
@@ -2731,7 +2734,8 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
             await asyncio.sleep(15.0 if attempt == 0 else 300.0)
             try:
                 got = await asyncio.to_thread(okx_tape_footprint, OKX_TAPE_DB_PATH, OKX_CTX_DB_PATH,
-                                              OKX_INST, lo, t0, FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET)
+                                              OKX_INST, lo, t0, FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET,
+                                              liq_db=OKX_LIQ_DB_PATH)
             except Exception as exc:  # noqa: BLE001 -- 테이프가 없으면 C안 그대로 산다
                 print(f"{TAG}okx footprint 복원 실패({attempt + 1}회): {exc!r}", flush=True)
                 continue

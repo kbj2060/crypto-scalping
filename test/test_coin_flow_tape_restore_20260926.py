@@ -89,3 +89,20 @@ def test_tape_seconds_matches_live_1s_cell_order(tmp_path):
     rb, rs, wb, ws, tb, ts, px = got[T0]
     assert (rb, rs, wb, ws, tb, ts) == (1.0, 0.5, 3.0, 2.0, 4.0, 3.0), got
     assert abs(px - (1.5360 * 4 + 1.5370 * 3) / 7) < 1e-9          # 칸 가중평균
+
+
+def test_okx_liq_restore_reads_all_coin_liq_db(tmp_path):
+    """OKX 청산은 ETH 맥락 DB 하나에 전 종목이 쌓인다 -- SOL 맥락 DB(OI 만)에서 찾으면 재시작마다 청산 과거분이 0 이 된다."""
+    tape = tmp_path / "okx_tape_sol.duckdb"
+    _tape(tape, [("SOL-USDT-SWAP", T0 + 5, 12000, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)])
+    liq = tmp_path / "okx_context.duckdb"
+    con = duckdb.connect(str(liq))
+    con.execute("CREATE TABLE okx_liquidations (inst_id VARCHAR, ts_ms BIGINT, pos_side VARCHAR, sz_base DOUBLE, bk_px DOUBLE)")
+    con.execute("INSERT INTO okx_liquidations VALUES ('SOL-USDT-SWAP', ?, 'long', 3.0, 120.0), ('ETH-USDT-SWAP', ?, 'short', 1.0, 2600.0)",
+                [(T0 + 10) * 1000, (T0 + 11) * 1000])
+    con.close()
+    args = (tape, tmp_path / "okx_context_sol.duckdb", "SOL-USDT-SWAP", T0 - BAR, (T0 + 60) * 1000, BAR, 0.02)
+    assert srv.okx_tape_footprint(*args)["liq"] == [], "대조군: 코인 맥락 DB 에는 청산이 없다"
+    got = srv.okx_tape_footprint(*args, liq_db=liq)["liq"]
+    assert [(e["side"], e["qty"], e["usd"]) for e in got] == [("long", 3.0, 360.0)], got
+    assert srv.OKX_LIQ_DB_PATH == srv.OKX_CTX_DB_PATH
