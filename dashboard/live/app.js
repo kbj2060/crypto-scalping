@@ -4067,25 +4067,46 @@ function renderSituation() {
   //   열 아래 점 = 그 결과 쪽으로 미는 융합 표(켜진 것만 방향색) -- 옛 «뒤집기 신호» 자리를 측정된 표가 대신한다.
   const OUT = { up: { ar: "↑", nm: "위로 먼저" }, dn: { ar: "↓", nm: "아래로 먼저" }, none: { ar: "↔", nm: "30분 안 미도달" } };
   const cols = o3 ? [...o3.cols].sort((a, b) => b.p - a.p) : [];
-  const scn = cols.map((c, i) => {
-    const o = OUT[c.key];
-    const tgt = c.key === "none" ? (c.band ? `${fmtPx(c.band[0])}~${fmtPx(c.band[1])}` : "—") : fmtPx(c.target);
-    const dist = c.key === "none" ? "두 선 사이에 머묾"
-      : Number.isFinite(c.dist_bp) ? `${c.dist_bp > 0 ? "+" : ""}${Math.round(c.dist_bp)}bp` : "";
+  // 2026-09-26 사용자 «위로 먼저·아래로 먼저가 항상 비슷» → 두 질문으로 가른다(카드 업그레이드 1+2).
+  //   ① 닿을 확률(표: 30분 폭 분위가 잘 가른다, 미도달 9~48%) ② 닿는다면 어느 쪽(방향 HGB 모델, 대부분 동전).
+  //   🔴«동전»(50±5pp)이면 방향색을 안 칠한다 -- 비등을 1위처럼 보이지 않게(DESIGN «비등» 규칙). 기울면 그쪽만 색.
+  let scn = "";
+  if (o3) {
+    const col = (k) => o3.cols.find((c) => c.key === k) || {};
+    const up = col("up"), dn = col("dn"), nn = col("none");
+    const reach = Number.isFinite(o3.reach) ? o3.reach : 100 - (nn.p || 0);
+    const us = Number.isFinite(o3.up_share) ? o3.up_share : 50;
+    const lean = o3.coin ? null : (us > 50 ? "up" : "dn");
     const moveDir = o3.dir > 0 ? "up" : o3.dir < 0 ? "dn" : null;
-    const title = c.key === "none" ? "30분 안에 위·아래 선 어디에도 안 닿음"
-      : `${o.nm}${moveDir ? (c.key === moveDir ? " — 30분 이동 방향으로 더 간다" : " — 30분 이동 반대로 되돌린다") : ""}`;
-    const pushed = (c.push || []).map((q) => `<div class="sit-push${q.on ? " on" : ""}">`
-      + `<span class="dot"></span><span>${escapeHtml(q.t)}</span></div>`).join("");
-    return `<div class="sit-col k-${c.key}${i === 0 ? " sit-top" : ""}">`
-      + `<div class="p">${Math.round(c.p)}%</div>`
-      + `<div class="sit-g k-${c.key}"><i style="width:${c.p}%"></i></div>`
-      + `<div class="nm" title="${escapeHtml(title)}"><i class="sit-ar">${o.ar}</i>${o.nm}</div>`
-      + `<div class="tg">${escapeHtml(tgt)}</div>`
-      + `<div class="ds">${escapeHtml(dist)}</div>`
-      + (pushed ? `<div class="sit-pushes">${pushed}</div>` : "")
-      + `</div>`;
-  }).join("");
+    const side = (c, k) => {
+      const o = OUT[k]; const share = k === "up" ? us : 100 - us;
+      const dist = Number.isFinite(c.dist_bp) ? `${c.dist_bp > 0 ? "+" : ""}${Math.round(c.dist_bp)}bp` : "";
+      const title = `${o.nm}${moveDir ? (k === moveDir ? " — 30분 이동 방향으로 더 간다" : " — 30분 이동 반대로 되돌린다") : ""}`
+        + ` · 닿는다면 ${Math.round(share)}% · 무조건 ${Math.round(c.p)}%`;
+      const pushed = (c.push || []).map((q) => `<div class="sit-push${q.on ? " on" : ""}">`
+        + `<span class="dot"></span><span>${escapeHtml(q.t)}</span></div>`).join("");
+      return `<div class="sit-col sit-side k-${k}${lean === k ? " sit-top lean" : ""}" title="${escapeHtml(title)}">`
+        + `<div class="nm"><i class="sit-ar">${o.ar}</i>${o.nm}</div>`
+        + `<div class="p">${Math.round(share)}%</div>`
+        + `<div class="tg">${escapeHtml(fmtPx(c.target))} <span class="ds">${escapeHtml(dist)}</span></div>`
+        + (pushed ? `<div class="sit-pushes">${pushed}</div>` : "")
+        + `</div>`;
+    };
+    const band = nn.band ? `${fmtPx(nn.band[0])}~${fmtPx(nn.band[1])}` : "—";
+    const wide = (nn.push || [])[0];
+    const verdict = lean ? `${OUT[lean].ar} ${lean === "up" ? "위" : "아래"} 우세` : "동전";
+    scn = `<div class="sit-reach">`
+      + `<div class="sit-row-h"><span>30분 안 위·아래 선 중 하나에 닿을 확률</span><b>${Math.round(reach)}%</b></div>`
+      + `<div class="sit-g"><i style="width:${reach}%"></i></div>`
+      + `<div class="sit-cal">미도달 ${Math.round(nn.p || 0)}% · ${escapeHtml(band)} 사이에 머묾`
+      + (wide ? ` · <span class="${wide.on ? "sit-edge" : ""}">${escapeHtml(wide.t)}</span>` : "") + `</div></div>`
+      + `<div class="sit-dir">`
+      + `<div class="sit-row-h"><span>닿는다면 어느 쪽 먼저${o3.dir_src === "model" ? "" : " (모델 없음 · 표)"}</span>`
+      + `<b class="${lean ? `k-${lean}` : "coin"}">${verdict}</b></div>`
+      + `<div class="sit-split"><i class="k-dn${lean === "dn" ? " lean" : ""}" style="width:${100 - us}%"></i>`
+      + `<i class="k-up${lean === "up" ? " lean" : ""}" style="width:${us}%"></i></div>`
+      + `<div class="sit-sides">${side(dn, "dn")}${side(up, "up")}</div></div>`;
+  }
 
   // ── 레짐 여유 ── «곧 바뀔 수 있나»를 바뀌기 **전에** 보인다(2026-09-22 사용자 «급변한다»).
   //   레짐은 |이동|÷창폭 하나로 갈리는데 분자·분모가 둘 다 매 봉 움직여, 선을 스칠 때 아주 작은
@@ -4116,7 +4137,7 @@ function renderSituation() {
   keepFocus(body, () => { body.innerHTML = `
     <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
     ${fusedRowHtml(fz)}
-    ${o3 ? `<div class="sit-cols">${scn}</div><div class="sit-cal sit-src">${whyFold(o3.note, "outcome", "근거 · 측정 방법")}</div>`
+    ${o3 ? `${scn}<div class="sit-cal sit-src">${whyFold([o3.note, o3.dir_note].filter(Boolean).join(" · "), "outcome", "근거 · 측정 방법")}</div>`
          : `<div class="sit-cal">융합 3결과 계산 전 — 30분 폭 분위(5분봉 24h)를 받는 중</div>`}
     <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`; });
 
@@ -4128,9 +4149,15 @@ function renderSituation() {
       badge.className = `ops-badge ${fz.side > 0 ? "good" : "bad"}`;
       // 방향색은 **발동한 융합 신호**의 것이다(연구 통과 신호). 그 아래 확률이 비등하면 그 사실을 말한다 --
       //   «↑27% vs ↓26%» 를 1위처럼 읽히게 두지 않는다(2026-09-26 비평, DESIGN «비등» 규칙).
-      const tie = Math.abs(P.up - P.dn) < 5;
+      const tie = typeof o3.coin === "boolean" ? o3.coin : Math.abs(P.up - P.dn) < 5;
       badge.textContent = `융합 ${fz.side > 0 ? "롱" : "숏"} · ${tie ? `확률 비등 ↑${P.up}% ↓${P.dn}%`
         : fz.side > 0 ? `↑${P.up}% vs ↓${P.dn}%` : `↓${P.dn}% vs ↑${P.up}%`}`;
+    } else if (o3 && Number.isFinite(o3.up_share)) {
+      // 2026-09-26 두 질문으로 가른 뒤: 배지 = 방향 판정(동전/우세) + 닿을 확률. 방향색은 안 쓴다(발동한 융합 신호만 색).
+      const us = Math.round(o3.up_share);
+      badge.className = "ops-badge neutral";
+      badge.textContent = (o3.coin ? `방향 동전 ↑${us}:↓${100 - us}` : us > 50 ? `↑ 위 우세 ${us}%` : `↓ 아래 우세 ${100 - us}%`)
+        + ` · 닿을 ${Math.round(o3.reach)}%` + (age != null ? ` · ${age}초 전` : "");
     } else if (cols.length) {
       // 🔴2026-09-26 비평: 여기 초록은 방향이 아니라 «15초 안에 계산됨»이었다(age<=15 → good) -- 37% 대 36% 인
       //   동전 던지기에 화면에서 가장 강한 방향색이 칠해졌다. 3색 규칙: 초록은 방향·정상에만. 신선함은 글자로만.
