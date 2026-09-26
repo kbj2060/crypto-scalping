@@ -676,11 +676,11 @@ body {
    관계 이름은 레벨 목록의 태그 열과 같은 등폭·흐린 글자, 근거 한 줄은 11px 흐린 글자(Small Voice Rule).
    등급 칩: 근거 = 주황(«눈여겨봐라») · 약함 = 실선 · 설명 = 테두리 없음 · 미측정 = 점선(아직 사실 아님). */
 .fr-read { border-top: 1px solid var(--soft-line); padding: 8px 0 12px; }
-.fr-sum { padding: 4px 18px 8px; font: 700 12px/1.45 var(--font-mono); color: var(--muted); }
+.fr-sum { padding: 4px 18px 8px; font: 700 12px/1.45 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; }
 /* 융합 신호 -- 이 블록에서 유일하게 «행동»을 말하는 줄. 주문 버튼과 같은 문법: 채우지 않고 방향색 테두리+글자. */
 .fr-fuse { display: grid; grid-template-columns: 84px 1fr; gap: 10px; align-items: start; margin: 2px 18px 10px;
            padding: 9px 12px; border: 1px solid var(--soft-line); border-radius: var(--radius-sm); background: rgb(var(--lift) / 0.03); }
-.fr-fuse-tag { font: 700 11.5px/1.5 var(--font-mono); color: var(--muted); white-space: nowrap; }
+.fr-fuse-tag { font: 700 11.5px/1.5 var(--font-sans); color: var(--muted); white-space: nowrap; }
 /* 30분 카드 안(2026-09-25): 카드 본문이 이미 18px 안쪽 여백을 준다 -- 겹치지 않게. */
 .situation-body .fr-fuse { margin: 2px 0 10px; }
 .fr-read .fr-head { padding: 0 18px; margin: 12px 0 2px; }
@@ -2063,12 +2063,12 @@ svg {
 .why-fold > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
   font: 600 11px/1.4 var(--font-sans); color: var(--muted); min-height: 24px; }
 .why-fold > summary::-webkit-details-marker { display: none; }
-.why-fold > summary::after { content: "▸"; font-size: 10px; }
+.why-fold > summary::after { content: "▸"; font-size: 11px; }
 .why-fold[open] > summary::after { content: "▾"; }
 .why-fold > summary:hover { color: var(--text); }
 .why-fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .why-body { font: 600 11px/1.55 var(--font-sans); color: var(--muted); margin-top: 4px; }
-.fr-fold > summary.fr-sum { display: flex; width: 100%; font: 700 12px/1.45 var(--font-mono); color: var(--muted); }
+.fr-fold > summary.fr-sum { display: flex; width: 100%; font: 700 12px/1.45 var(--font-sans); color: var(--muted); }
 .fr-fold > summary.fr-sum.fr-up { color: var(--good); }
 .fr-fold > summary.fr-sum.fr-dn { color: var(--bad); }
 .fr-fold .fr-more { margin-left: auto; color: var(--muted); font: 600 11px/1 var(--font-sans); padding-left: 8px; white-space: nowrap; align-self: center; }
@@ -2196,12 +2196,14 @@ svg {
   /* 330px 레일에 «청산 … → ~…» 185px 라벨 둘을 위치로 놓을 수 없다(실측 겹침). 그 폭에서는
      위치 라벨이 어차피 성립 안 하므로 세로로 쌓는다 -- 투영값을 버리지 않는다. */
   .acct-pos.spine .acct-gauge-legend { height: auto; display: grid; gap: 3px; }
+  /* 🔴2026-09-26 비평: [style*="100%"](숏 청산 라벨)이 빠져 translateX(-100%) 가 남아 x=-77 로 화면 밖이었다. */
   .acct-pos.spine .acct-gauge-legend > span,
-  .acct-pos.spine .acct-gauge-legend > span[style*="50%"] {
+  .acct-pos.spine .acct-gauge-legend > span[style*="50%"],
+  .acct-pos.spine .acct-gauge-legend > span[style*="100%"] {
     position: static; transform: none; }
   .acct-lanes > * { padding: 12px 14px 14px; }
 }
-.lane-pact { margin: 10px 0 0; font: 600 11px/1.5 var(--font-mono); color: var(--muted); }
+.lane-pact { margin: 10px 0 0; font: 600 11px/1.5 var(--font-sans); color: var(--muted); }
 .lane-pact b { color: var(--text); font-weight: 800; }
 
 .manual-entry { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
@@ -2288,6 +2290,10 @@ svg {
 @media (pointer: coarse) { .notify-btn.hold-fire { touch-action: manipulation; } }
 .lane-pact .pact-touch { display: none; }
 @media (pointer: coarse) { .lane-pact .pact-touch { display: inline; } .lane-pact .pact-mouse { display: none; } }
+/* 2026-09-26 비평: 키보드(Enter)는 미리보기 → 확인인데 데스크톱에선 마우스 약속(«바로 나갑니다»)이 보였다.
+   주문 버튼에 키보드 포커스가 있으면 그 레인의 약속을 확인 쪽으로 바꿔 보인다. */
+.manual-entry:has(.hold-fire:focus-visible) .lane-pact .pact-touch { display: inline; }
+.manual-entry:has(.hold-fire:focus-visible) .lane-pact .pact-mouse { display: none; }
 .notify-btn.hold-fire .hold-fill {
   position: absolute;
   left: 0; top: 0; bottom: 0;
@@ -2998,9 +3004,11 @@ svg {
    배정한다(순위가 아니라 정체성에 묶어, 순위가 바뀌어도 색이 안 따라 바뀐다). 이름이 늘
    붙으므로 색만으로 구분하지 않는다. 초록/빨강/주황은 이 저장소에서 방향·위험도로 예약돼
    있어 시나리오에 쓰지 않는다(표시 규약 §2). 주황은 기존대로 «활발/임박» 라벨에만. */
+/* 2026-09-26 비평: 한국어 산문이 등폭이라 글자 사이가 벌어져 흩어졌다 -- 본문은 Pretendard, 숫자만 등폭 숫자.
+   큰 확률(.sit-col .p)·가격은 여전히 등폭이다(비교하는 숫자 = Tabular Data Rule). */
 .situation-body { display: flex; flex-direction: column; gap: 0; padding: 0 18px 14px;
-                  font-family: var(--font-mono); font-size: 11.5px; }
-.sit-sec { font: 700 11px/1.4 var(--font-mono); letter-spacing: .1em; color: var(--muted);
+                  font-family: var(--font-sans); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sit-sec { font: 700 11px/1.4 var(--font-sans); letter-spacing: .04em; color: var(--muted);
            margin: 14px 0 5px; display: flex; align-items: baseline; justify-content: space-between; }
 .sit-sec span { font-weight: 500; letter-spacing: 0; }
 

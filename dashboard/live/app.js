@@ -3185,7 +3185,10 @@ function setupPageTabs() {
     el("snapshotTabPanel")?.classList.toggle("hidden", target !== "snapshot");
     el("notifyTabPanel")?.classList.toggle("hidden", target !== "notify");
     ofabSync();   // 2026-09-25 떠다니는 주문 버튼은 스냅샷 탭에서만 -- 떠나면 조작부를 카드로 먼저 돌려놓는다
-    document.querySelectorAll(".page-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
+    document.querySelectorAll(".page-tab").forEach((tab) => {
+      tab.classList.toggle("active", tab === button);
+      if (tab === button) tab.setAttribute("aria-current", "page"); else tab.removeAttribute("aria-current");
+    });
     if (target === "notify") {
       // 탭을 열 때마다 다시 읽는다 -- 권한이나 구독은 다른 탭/기기에서 바뀔 수 있고,
       // 낡은 상태를 보여주면 "켰는데 꺼졌다고 나온다"는 혼란만 만든다.
@@ -3940,6 +3943,15 @@ document.addEventListener("toggle", (e) => {
   if (e.target.open) whyOpen.add(k); else whyOpen.delete(k);
   try { localStorage.setItem("whyOpen", JSON.stringify([...whyOpen])); } catch (err) { /* 저장 못 해도 동작은 같다 */ }
 }, true);
+// 2026-09-26 비평: 수 초마다 innerHTML 을 통째로 갈아 끼우는 카드에서 Tab 으로 훑던 포커스가 <body> 로 떨어졌다.
+//   갈아 끼우기 전 «몇 번째 포커스 가능한 요소»였는지 기억했다가 같은 자리로 돌려놓는다.
+const FOCUSABLE = "summary, button, a[href], [tabindex]:not([tabindex='-1'])";
+function keepFocus(box, render) {
+  const a = document.activeElement;
+  const idx = a && a !== document.body && box.contains(a) ? [...box.querySelectorAll(FOCUSABLE)].indexOf(a) : -1;
+  render();
+  if (idx >= 0) box.querySelectorAll(FOCUSABLE)[idx]?.focus({ preventScroll: true });
+}
 function fusedRowHtml(f) {
   if (!f) return "";
   return `<div class="fr-fuse" data-side="${f.side > 0 ? "long" : f.side < 0 ? "short" : "wait"}">
@@ -3985,10 +3997,10 @@ function renderFlowRead() {
   }).join("");
   const sumTone = r.up && r.down ? "" : r.up ? " fr-up" : r.down ? " fr-dn" : "";
   // 2026-09-26 사용자 «접어서 숨기기»: 10줄은 요약 한 줄 아래로 접는다(요약이 결론이다). 펼침은 기억한다.
-  box.innerHTML = `<div class="sit-sec fr-head">근본 신호 · 데이터 관계<span>− 숏 · 롱 +</span></div>`
+  keepFocus(box, () => { box.innerHTML = `<div class="sit-sec fr-head">근본 신호 · 데이터 관계<span>− 숏 · 롱 +</span></div>`
     + `<details class="why-fold fr-fold" data-why="flow"${whyOpen.has("flow") ? " open" : ""}>`
     + `<summary class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}<span class="fr-more">${r.lines.length}줄</span></summary>`
-    + `<div class="fr-gauges">${rows}</div></details>`;
+    + `<div class="fr-gauges">${rows}</div></details>`; });
 }
 
 function renderSituation() {
@@ -4058,12 +4070,12 @@ function renderSituation() {
     ? `연결 · ${w.events || 0}건` : `끊김${w.last_error ? ` (${w.last_error})` : ""}`}">`
     + `<i class="${w.connected ? "" : "off"}"></i>${escapeHtml(label)}</span>`;
 
-  body.innerHTML = `
+  keepFocus(body, () => { body.innerHTML = `
     <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
     ${fusedRowHtml(fz)}
     ${o3 ? `<div class="sit-cols">${scn}</div><div class="sit-cal sit-src">${whyFold(o3.note, "outcome", "근거 · 측정 방법")}</div>`
          : `<div class="sit-cal">융합 3결과 계산 전 — 30분 폭 분위(5분봉 24h)를 받는 중</div>`}
-    <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`;
+    <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`; });
 
   if (badge) {
     // 발동 중이면 배지가 융합 방향과 두 방향 확률을 말한다(방향색). 아니면 1순위 결과.
@@ -4071,7 +4083,11 @@ function renderSituation() {
     const P = o3 ? Object.fromEntries(o3.cols.map((c) => [c.key, Math.round(c.p)])) : null;
     if (fz && fz.side && P) {
       badge.className = `ops-badge ${fz.side > 0 ? "good" : "bad"}`;
-      badge.textContent = `융합 ${fz.side > 0 ? "롱" : "숏"} · ${fz.side > 0 ? `↑${P.up}% vs ↓${P.dn}%` : `↓${P.dn}% vs ↑${P.up}%`}`;
+      // 방향색은 **발동한 융합 신호**의 것이다(연구 통과 신호). 그 아래 확률이 비등하면 그 사실을 말한다 --
+      //   «↑27% vs ↓26%» 를 1위처럼 읽히게 두지 않는다(2026-09-26 비평, DESIGN «비등» 규칙).
+      const tie = Math.abs(P.up - P.dn) < 5;
+      badge.textContent = `융합 ${fz.side > 0 ? "롱" : "숏"} · ${tie ? `확률 비등 ↑${P.up}% ↓${P.dn}%`
+        : fz.side > 0 ? `↑${P.up}% vs ↓${P.dn}%` : `↓${P.dn}% vs ↑${P.up}%`}`;
     } else if (cols.length) {
       // 🔴2026-09-26 비평: 여기 초록은 방향이 아니라 «15초 안에 계산됨»이었다(age<=15 → good) -- 37% 대 36% 인
       //   동전 던지기에 화면에서 가장 강한 방향색이 칠해졌다. 3색 규칙: 초록은 방향·정상에만. 신선함은 글자로만.
@@ -6580,6 +6596,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       tag.setAttribute("y", Math.min(Math.max(yAt(last.sma) - 5, mt + 10), mt + ch - 4));
       tag.setAttribute("text-anchor", "end"); tag.setAttribute("font-size", "9");
       tag.setAttribute("fill", col);
+      // 🔴2026-09-26 비평: 풋프린트 셀 숫자 위에 얹혀 읽을 수 없었다 -- 차트 배경색 외곽선으로 아래 셀과 떼어 낸다.
+      tag.setAttribute("stroke", "var(--chart-bg)"); tag.setAttribute("stroke-width", "4");
+      tag.setAttribute("stroke-linejoin", "round"); tag.setAttribute("paint-order", "stroke");
       // 세기 = |종가 − SMA| / ATR. 위 R1 표의 세 구간과 같은 경계다(<1 / 1~2 / ≥2).
       const lastClose = Number(candles[last.i] && candles[last.i].close);
       const zAbs = last.atr > 0 && Number.isFinite(lastClose)
@@ -6848,6 +6867,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (p.gauge === undefined) sTxt.setAttribute("opacity", ".72");
       sTxt.textContent = p.sub;
       svg.appendChild(sTxt);
+      // 🔴2026-09-26 비평: 가격과 값이 한 상자 안에서 겹쳤다(«↓ 2535 3.0k»·«2687.7↑25%»). 상자 폭은 늘릴 수 없으니
+      //   글자 폭을 재서 안 들어가면 값을 뺀다 -- 이 꼬리표의 주인은 가격이다.
+      try {
+        if (pTxt.isConnected && pTxt.getComputedTextLength() + sTxt.getComputedTextLength() + 6 > boxW - 9) sTxt.remove();
+      } catch (e) { /* 측정 불가(비렌더) -- 그대로 둔다 */ }
     }
     if (p.marker) svg.appendChild(line);   // 배지 위에 -- 위 주석 참조
 
@@ -8899,6 +8923,9 @@ function syncChipset(box) {
     const on = Number(c.dataset.v) === Number(inp.value);
     hit = hit || on;
     c.classList.toggle("on", on);
+    // 2026-09-26 비평: 선택이 색으로만 보였다(스크린리더 무음) · 잠긴(«자동») 칩이 키보드로는 눌렸다.
+    c.setAttribute("aria-pressed", String(on));
+    c.disabled = !!inp.disabled;
   });
   // 칩이 맞으면 옆 숫자를 숨긴다(같은 값을 두 번 말하지 않는다). 칩에 없는 값 -- 서버가
   // 추천한 레버리지 15x 같은 -- 일 때만 숫자가 나타나 진짜 값을 말한다.
