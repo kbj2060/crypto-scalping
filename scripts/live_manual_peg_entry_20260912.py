@@ -307,6 +307,22 @@ def bracket_action(armed: dict, position_side: str, positions: list[dict], accou
     return "fire" if bracket_sl_hit(position_side, bid, ask, armed.get("sl_price")) else "hold"
 
 
+def bracket_key(symbol: str, position_side: str) -> str:
+    """무장 상태의 키 = «심볼:측면». 측면만 쓰면 코인이 늘 때 ETH 롱과 SOL 롱이 서로 덮는다(2026-09-26)."""
+    return f"{symbol}:{position_side}"
+
+
+def bracket_rekey(state: dict) -> dict:
+    """옛 키(«LONG»/«SHORT»)를 «심볼:측면»으로 옮긴다. 값에 측면(`side`)도 적어 둔다. 새 키는 그대로."""
+    out: dict = {}
+    for k, v in (state or {}).items():
+        if k in ("LONG", "SHORT"):
+            out[bracket_key(v.get("symbol", ""), k)] = {**v, "side": k}
+        else:
+            out[k] = v
+    return out
+
+
 def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
     """감시 틱 결과(`mine`)를 저장본(`current`)에 합친다. 내가 읽을 때 본 무장(`seen_at` 의 armed_at)과
     같은 측면에만 적용한다 -- 그 사이 새로 무장된 측면(물타기 포함)을 지우지 않는다."""

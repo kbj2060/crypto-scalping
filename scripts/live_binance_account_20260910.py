@@ -266,7 +266,12 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
         return {"ok": False, "error": error, **({"hint": hint} if hint else {})}
 
     risk = await _get(session, "/fapi/v2/positionRisk", {}, key, secret, offset)
-    positions = [] if isinstance(risk, dict) else [
+    if isinstance(risk, dict):
+        # 🔴2026-09-26 사고: 잔고는 읽고 포지션 조회만 실패(418 IP 밴)했는데 ok=True + positions=[] 를 돌려줬다.
+        #   브래킷 감시가 그걸 «포지션이 사라졌다»로 읽고 열린 숏의 익절·비상 스탑을 **스스로 지웠다**.
+        #   «못 읽음»은 «없음»이 아니다 -- 실패로 돌려 모든 소비자가 «모름»으로 다루게 한다.
+        return {"ok": False, "error": f"positionRisk: {risk.get('__error__')}"}
+    positions = [
         {
             "symbol": p["symbol"],
             "side": p.get("positionSide") if p.get("positionSide") in ("LONG", "SHORT")

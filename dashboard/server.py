@@ -185,7 +185,7 @@ import scripts.binance_ban_guard as ban_guard  # noqa: E402 -- requests 도 전�
 # trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
-    EXIT_VOL_WINDOW, bracket_action, bracket_merge, build_bracket_plan, build_entry_plan, build_exit_plan,
+    EXIT_VOL_WINDOW, bracket_action, bracket_key, bracket_merge, bracket_rekey, build_bracket_plan, build_entry_plan, build_exit_plan,
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position)
 from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
     clear_bracket, place_bracket, run_entry, run_exit)
@@ -5182,9 +5182,10 @@ def make_app() -> web.Application:
 
     def bracket_load() -> dict[str, Any]:
         try:
-            return json.loads(bracket_path().read_text("utf-8"))
+            raw = json.loads(bracket_path().read_text("utf-8"))
         except (OSError, ValueError):
             return {}
+        return bracket_rekey(raw)
 
     def bracket_save(st: dict[str, Any]) -> None:
         tmp = bracket_path().with_suffix(".tmp")
@@ -5205,7 +5206,7 @@ def make_app() -> web.Application:
         except Exception as exc:  # noqa: BLE001 -- 결과 칸은 반드시 채운다(화면 폴링이 이걸 기다린다)
             state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
         st = bracket_load()
-        st[pside] = {"symbol": plan["symbol"], "sl_price": b.get("sl_price"),
+        st[bracket_key(plan["symbol"], pside)] = {"symbol": plan["symbol"], "side": pside, "sl_price": b.get("sl_price"),
                      "tp_price": b.get("tp_price"), "backstop_price": b.get("backstop_price"),
                      "armed_at": time.time(), "placed": state["bracket"]}
         bracket_save(st)
@@ -5225,13 +5226,14 @@ def make_app() -> web.Application:
             acct_ts = 0.0
         changed = False
         seen_at = {k: v.get("armed_at") for k, v in st.items()}
-        for pside, b in list(st.items()):
+        for key, b in list(st.items()):
+            pside = b.get("side") or key.rsplit(":", 1)[-1]
             book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
                                             {"symbol": b["symbol"]}, error_reason="book_ticker_failed")
             act = bracket_action(b, pside, account.get("positions") or [], bool(account.get("ok")),
                                  acct_ts, float(book["bidPrice"]), float(book["askPrice"]))
             if act == "clear":
-                st.pop(pside)
+                st.pop(key)
                 changed = True
                 print(f"bracket {pside}: 포지션 없음 -> 정리 "
                       f"{await clear_bracket(binance_session(), b['symbol'], pside)}", flush=True)
@@ -5241,7 +5243,7 @@ def make_app() -> web.Application:
                 continue
             plan, err = await assemble_exit_plan(pside, 1.0, fresh=True)
             if err and err[0].get("error") == "no_position":     # 이미 닫혔다 -- 정리하고 내린다
-                st.pop(pside)
+                st.pop(key)
                 changed = True
                 await clear_bracket(binance_session(), b["symbol"], pside)
                 continue
@@ -5260,7 +5262,7 @@ def make_app() -> web.Application:
             if manual_entry_state.get("phase") in ("filled_maker", "filled_taker"):
                 manual_entry_state["bracket_cleanup"] = await clear_bracket(
                     binance_session(), b["symbol"], pside)
-                st.pop(pside)
+                st.pop(key)
             else:
                 b["retry_after"] = time.time() + 30
                 b["last_error"] = manual_entry_state.get("error")
@@ -5309,6 +5311,9 @@ def make_app() -> web.Application:
             account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
                                        produce_account, max_stale=STALE_GRACE_SECONDS,
                                        cache=binance_account_cache)   # 계좌 카드와 같은 캐시 -- 없으면 두 벌을 따로 받는다
+            if not account.get("ok"):   # 못 읽은 계좌로 상한(합산 노출)을 계산하면 상한이 헐거워진다
+                return None, {}, {}, ({"error": "account_unavailable",
+                                       "detail": f"계좌 조회 실패: {account.get('error')}"}, 503)
             positions = [p for p in (account.get("positions") or []) if p.get("symbol") == symbol]
             # 헤지 모드라 롱·숏이 동시에 열린다. 위험 상쇄를 가정하지 않고 **절대값 합**으로 본다
             # -- 두 다리 다 증거금을 먹고, 둘 다 청산될 수 있다.
@@ -5645,6 +5650,10 @@ def make_app() -> web.Application:
                                         produce_account, max_stale=STALE_GRACE_SECONDS,
                                         cache=binance_account_cache))
             # 결정 규칙과 자체점검은 live_manual_peg_entry 모듈에 있다(85/85).
+            if not account.get("ok"):
+                # 🔴«못 읽음»을 no_position 으로 돌려주면 브래킷 감시가 정리(=익절·비상 스탑 삭제)로 간다.
+                return None, ({"error": "account_unavailable",
+                               "detail": f"계좌 조회 실패: {account.get('error')}"}, 503)
             position, symbol, leftover = resolve_exit_position(
                 account.get("positions") or [], position_side, candidates)
             if position is None:
