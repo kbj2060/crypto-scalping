@@ -80,6 +80,32 @@ def test_duckdb_view_queries_the_parquet():
         assert m == 5, m
 
 
+def test_view_separates_symbols_and_carries_bin_size():
+    """다코인(2026-09-26): 글롭이 심볼 폴더를 다 덮는다 -- symbol·bin_size 가 없으면 빈이 섞인다.
+    이 열이 생기기 전 파일(bin_size 없음)도 같은 뷰에서 읽혀야 한다(NULL)."""
+    import duckdb
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d); M = _mod(tmp)
+        M._archive_then_unlink(_src(tmp), "ethusdt")
+        M._archive_then_unlink(_src(tmp, name="2026-09-01T04.f32"), "btcusdt")
+        old = tmp / "archive" / "ETHUSDT" / "2026-08-31" / "2026-08-31T23.f32.parquet"
+        old.parent.mkdir(parents=True)
+        pq.write_table(pa.table({"ts_ms": pa.array([1], pa.int64()), "bin": pa.array([7], pa.int32()),
+                                 "qty": pa.array([9.0], pa.float32())}), old)
+        M._ensure_archive_db()
+        con = duckdb.connect(str(M.OF_ARCHIVE_DB))
+        try:
+            got = con.execute("""SELECT symbol, count(*), sum(qty), min(bin_size), max(bin_size)
+                                 FROM book GROUP BY 1 ORDER BY 1""").fetchall()
+            mids = con.execute("SELECT symbol, count(*) FROM book_mid GROUP BY 1 ORDER BY 1").fetchall()
+        finally:
+            con.close()
+        assert got == [("BTCUSDT", 5, 15.0, 0.5, 0.5), ("ETHUSDT", 6, 24.0, 0.5, 0.5)], got
+        assert mids == [("BTCUSDT", 5), ("ETHUSDT", 5)], mids
+
+
 def test_idempotent_when_archive_already_complete():
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d); M = _mod(tmp)

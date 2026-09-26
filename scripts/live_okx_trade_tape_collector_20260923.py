@@ -77,7 +77,15 @@ RETAIL_MAX_USD = _bn.RETAIL_MAX_USD
 WHALE_MIN_USD = _bn.WHALE_MIN_USD
 log = _bn.log
 
-DEFAULT_DB = ROOT / "data" / "live" / "okx_trade_tape.duckdb"
+
+def default_db(inst: str, name: str = "okx_trade_tape") -> Path:
+    """ETH 는 기존 파일(대시보드가 읽는다). 다른 종목은 자기 파일(2026-09-26) -- duckdb 는 writer 가
+    하나라 종목 5개가 한 파일을 5초마다 번갈아 열면 읽는 쪽(대시보드·감시기·복제)과 잠금 충돌이 5배다."""
+    if inst.upper() == "ETH-USDT-SWAP":
+        return ROOT / "data" / "live" / f"{name}.duckdb"
+    return ROOT / "data" / "live" / f"{name}_{inst.split('-')[0].lower()}.duckdb"
+
+
 # ponytail: 바이낸스 테이프와 같은 «단일 duckdb» 다 -- 회수 경로가 없다(DELETE 는 파일을 안
 # 줄인다). 하이퍼리퀴드 수집기가 겪고 날짜별 파일로 옮긴 그 문제다. ~330k행/일이라 당장은
 # 문제가 아니고, 디스크가 급해지면 날짜별 분할이 업그레이드 경로다.
@@ -91,10 +99,15 @@ HISTORY_CANDLES_URL = "https://www.okx.com/api/v5/market/history-candles"
 HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; crypto-scalping-collector/1.0)"}
 
 # 가격빈은 바이낸스 표와 **같은 뜻**이어야 한다(대략 가격의 0.4bp). ETH 는 양쪽 다 0.1.
-BUCKETS = {"ETH-USDT-SWAP": 0.1, "BTC-USDT-SWAP": 1.0, "SOL-USDT-SWAP": 0.01}
+BUCKETS = {"ETH-USDT-SWAP": 0.1, "BTC-USDT-SWAP": 1.0, "SOL-USDT-SWAP": 0.01,
+           "XRP-USDT-SWAP": 0.0001, "HYPE-USDT-SWAP": 0.001}
 # 계약당 기초자산 수량. 하드코딩하는 이유는 바이낸스 수집기가 경계를 하드코딩한 이유와 같다 --
 # 쌓인 행의 뜻이 영원히 고정돼야 한다. 대신 시작할 때 REST 와 대조해서 «갈라진 순간» 에 뜬다.
-CT_VALS = {"ETH-USDT-SWAP": 0.1, "BTC-USDT-SWAP": 0.01, "SOL-USDT-SWAP": 1.0}
+# 🔴XRP·HYPE(2026-09-26 추가)는 이 세션에서 거래소 REST 에 닿지 못해 **실측 전**이다. 그래서
+#   `assert_ct_val` 의 «REST 가 안 되면 통과» 에 기대면 안 된다 -- 기동은 반드시
+#   `scripts/ops/multicoin_collectors_20260926.py start` 로 한다(REST 대조가 실패하면 띄우지 않는다).
+CT_VALS = {"ETH-USDT-SWAP": 0.1, "BTC-USDT-SWAP": 0.01, "SOL-USDT-SWAP": 1.0,
+           "XRP-USDT-SWAP": 100.0, "HYPE-USDT-SWAP": 0.1}
 
 FLUSH_SECONDS = 5.0
 VERIFY_SECONDS = 300.0
@@ -407,14 +420,15 @@ def selftest() -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--inst", default=os.getenv("OKX_TAPE_INST", "ETH-USDT-SWAP").upper())
-    ap.add_argument("--db", type=Path, default=Path(os.getenv("OKX_TAPE_DB_PATH", DEFAULT_DB)))
+    ap.add_argument("--db", type=Path, default=Path(os.environ["OKX_TAPE_DB_PATH"])
+                    if os.getenv("OKX_TAPE_DB_PATH") else None)
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
         selftest()
         return
     try:
-        asyncio.run(collect(args.inst, args.db))
+        asyncio.run(collect(args.inst, args.db or default_db(args.inst)))
     except KeyboardInterrupt:
         log("종료")
 

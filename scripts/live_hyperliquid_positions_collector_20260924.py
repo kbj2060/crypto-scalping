@@ -21,8 +21,16 @@
   전수 식별은 너무 비싸다(급변 8분·64회 조회에 ETH 청산 1건) -- 관심 대상(큰손)만 정확히 잡는다.
   🔴청산 체결의 `liquidation` 표시는 **상대방 쪽 기록에도** 붙는다 -- 그래서 liquidatedUser 로 거른다.
 
+⭐여러 코인(2026-09-26): `clearinghouseState` 는 한 주소의 **전 코인** 포지션을 한 번에 준다. 그래서
+  코인마다 프로세스를 띄우면 같은 주소를 코인 수만큼 다시 조회한다(5개면 1,500/분 > 한도 1,200).
+  대신 `HL_POS_COINS=BTC,SOL,XRP,HYPE` 로 **한 프로세스**가 코인별 상위 주소의 합집합을 돌고, 응답
+  하나에서 그 코인들을 전부 적는다. ETH 프로세스는 그대로 둔다 -- 2.5분 바퀴가 사전등록 검정
+  (research_hl_whale_liq_magnet_20260924.py)의 전제라 합치면 ETH 바퀴가 길어진다.
+  두 프로세스 합계 300+300 = 600/분(50%). 다코인 바퀴는 합집합 크기 x 0.4초(최대 1,200주소 = 8분).
+
 사용:
-  python scripts/live_hyperliquid_positions_collector_20260924.py
+  python scripts/live_hyperliquid_positions_collector_20260924.py                        # ETH
+  HL_POS_COINS=BTC,SOL,XRP,HYPE python scripts/live_hyperliquid_positions_collector_20260924.py
   python scripts/live_hyperliquid_positions_collector_20260924.py --selftest
 """
 from __future__ import annotations
@@ -45,10 +53,14 @@ _tape = importlib.import_module("scripts.live_trade_tape_collector_20260916")   
 log = _tape.log
 
 INFO_URL = "https://api.hyperliquid.xyz/info"
-COIN = os.getenv("HL_POS_COIN", "ETH").upper()
-DB = Path(os.getenv("HL_POS_DB", str(ROOT / "data" / "live" / "hyperliquid_positions.duckdb")))
+COINS = [c.strip().upper() for c in os.getenv("HL_POS_COINS", os.getenv("HL_POS_COIN", "ETH")).split(",")
+         if c.strip()]
+# ETH 단독은 기존 파일 그대로(대시보드·연구가 이 경로를 읽는다). 다른 조합은 자기 파일 -- duckdb 는 writer 가 하나다.
+_DEFAULT_DB = ("hyperliquid_positions.duckdb" if COINS == ["ETH"]
+               else f"hyperliquid_positions_{'_'.join(c.lower() for c in COINS)}.duckdb")
+DB = Path(os.getenv("HL_POS_DB", str(ROOT / "data" / "live" / _DEFAULT_DB)))
 TRADES_ROOT = Path(os.getenv("HL_ROOT", str(ROOT / "data" / "live" / "orderflow" / "hyperliquid")))
-UNIVERSE_N = 300
+UNIVERSE_N = 300        # 코인마다. 다코인이면 코인별 상위 N 의 합집합이다
 UNIVERSE_HOURS = 48
 UNIVERSE_REFRESH_S = 6 * 3600
 REQ_GAP_S = 0.4
@@ -62,6 +74,8 @@ DDL = (
          unrealized_pnl DOUBLE, cum_funding DOUBLE, account_value DOUBLE)""",
     """CREATE TABLE IF NOT EXISTS hl_universe(
          ts_ms BIGINT, user VARCHAR, rank INTEGER, notional_48h DOUBLE)""",
+    # 2026-09-26 다코인: 순위는 코인별이다. 이전 행(NULL)은 전부 ETH 단독 프로세스가 적은 것이다.
+    "ALTER TABLE hl_universe ADD COLUMN IF NOT EXISTS coin VARCHAR",
     """CREATE TABLE IF NOT EXISTS hl_liquidations(
          detected_ms BIGINT, tid BIGINT, user VARCHAR, coin VARCHAR, fill_ms BIGINT, px DOUBLE,
          sz DOUBLE, side VARCHAR, dir VARCHAR, start_position DOUBLE, closed_pnl DOUBLE,
@@ -79,25 +93,27 @@ def _f(v):
         return None
 
 
-def parse_state(state: dict, user: str, coin: str, ts_ms: int) -> tuple | None:
-    """`clearinghouseState` 응답 -> 그 코인 포지션 행. 포지션이 없으면 None.
+def parse_state(state: dict, user: str, coins, ts_ms: int) -> list[tuple]:
+    """`clearinghouseState` 응답 -> `coins` 에 든 코인별 포지션 행(포지션 0 인 코인은 뺀다).
     🔴`liquidationPx` 는 교차 증거금에서 **없을 수 있다**(None -- 0 이 아니다: 담보가 충분해 계산상
       청산가가 없거나 음수)."""
     acct = _f((state.get("marginSummary") or {}).get("accountValue"))
     ex_ms = int(state["time"]) if str(state.get("time", "")).isdigit() else None
+    out = []
     for ap in state.get("assetPositions") or []:
         p = ap.get("position") or {}
-        if p.get("coin") != coin:
+        coin = p.get("coin")
+        if coin not in coins:
             continue
         szi = _f(p.get("szi"))
         if not szi:
-            return None
+            continue
         lev = p.get("leverage") or {}
-        return (ts_ms, ex_ms, user, coin, szi, _f(p.get("entryPx")), _f(p.get("liquidationPx")),
-                _f(lev.get("value")), str(lev.get("type") or ""), _f(p.get("marginUsed")),
-                _f(p.get("positionValue")), _f(p.get("unrealizedPnl")),
-                _f((p.get("cumFunding") or {}).get("sinceOpen")), acct)
-    return None
+        out.append((ts_ms, ex_ms, user, coin, szi, _f(p.get("entryPx")), _f(p.get("liquidationPx")),
+                    _f(lev.get("value")), str(lev.get("type") or ""), _f(p.get("marginUsed")),
+                    _f(p.get("positionValue")), _f(p.get("unrealizedPnl")),
+                    _f((p.get("cumFunding") or {}).get("sinceOpen")), acct))
+    return out
 
 
 def liquidation_candidates(prev: dict[str, tuple[float, float | None]],
@@ -130,12 +146,12 @@ def parse_liq_fills(fills: list[dict], user: str, coin: str, detected_ms: int) -
     return rows
 
 
-def universe(now: float) -> list[tuple[str, float]]:
-    """최근 UNIVERSE_HOURS 체결 거래액 상위 주소(테이커+메이커). 날짜별 duckdb 를 read_only 로."""
+def universe(now: float, coin: str) -> list[tuple[str, float]]:
+    """그 코인의 최근 UNIVERSE_HOURS 체결 거래액 상위 주소(테이커+메이커). 날짜별 duckdb 를 read_only 로."""
     import duckdb
     since = int((now - UNIVERSE_HOURS * 3600) * 1000)
     days = {(datetime.fromtimestamp(now, timezone.utc) - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)}
-    files = [f for f in glob.glob(str(TRADES_ROOT / COIN / "*.duckdb")) if Path(f).stem in days]
+    files = [f for f in glob.glob(str(TRADES_ROOT / coin / "*.duckdb")) if Path(f).stem in days]
     agg: dict[str, float] = {}
     for f in files:
         for _ in range(25):
@@ -151,12 +167,25 @@ def universe(now: float) -> list[tuple[str, float]]:
                 SELECT u, sum(n) FROM (
                   SELECT buyer AS u, px * sz AS n FROM hl_trades WHERE coin = ? AND ts_ms >= ?
                   UNION ALL SELECT seller, px * sz FROM hl_trades WHERE coin = ? AND ts_ms >= ?)
-                GROUP BY 1""", [COIN, since, COIN, since]).fetchall()
+                GROUP BY 1""", [coin, since, coin, since]).fetchall()
         finally:
             con.close()
         for u, n in rows:
             agg[u] = agg.get(u, 0.0) + float(n)
     return sorted(agg.items(), key=lambda kv: -kv[1])[:UNIVERSE_N]
+
+
+def merge_universe(ranked: dict[str, list[tuple[str, float]]]) -> list[str]:
+    """코인별 순위 -> 조회할 주소(합집합). 순서는 코인들을 번갈아 1위부터 -- 바퀴 도중 끊겨도
+    어느 코인도 통째로 빠지지 않는다."""
+    users: list[str] = []
+    seen: set[str] = set()
+    for i in range(max((len(v) for v in ranked.values()), default=0)):
+        for coin in ranked:
+            if i < len(ranked[coin]) and ranked[coin][i][0] not in seen:
+                seen.add(ranked[coin][i][0])
+                users.append(ranked[coin][i][0])
+    return users
 
 
 def write(sql_rows: dict[str, list[tuple]]) -> None:
@@ -176,29 +205,39 @@ async def _info(session, body: dict):
 
 
 async def detect_liquidations(session, prev, rows, prev_t0: float, seen_tids: set[int]) -> list[tuple]:
-    """직전 바퀴와 비교해 청산 후보만 조회한다(liquidation_candidates 도크스트링)."""
+    """직전 바퀴와 비교해 청산 후보만 조회한다(liquidation_candidates 도크스트링). 코인마다 따로 본다
+    -- 가격 범위가 코인마다 다르다. `prev` = {코인: {주소: (szi, 청산가)}}."""
     now_ms = int(time.time() * 1000)
-    candles = await _info(session, {"type": "candleSnapshot", "req": {
-        "coin": COIN, "interval": "1m", "startTime": int(prev_t0 * 1000) - 60_000, "endTime": now_ms}})
-    if not candles:
-        return []
-    low = min(float(c["l"]) for c in candles)
-    high = max(float(c["h"]) for c in candles)
-    cands = liquidation_candidates(prev, {r[2]: r[4] for r in rows}, low, high)
     out: list[tuple] = []
-    for u in cands:
-        fills = await _info(session, {"type": "userFillsByTime", "user": u,
-                                      "startTime": int(prev_t0 * 1000) - 60_000, "endTime": now_ms})
-        got = [r for r in parse_liq_fills(fills, u, COIN, now_ms) if r[1] not in seen_tids]
-        seen_tids.update(r[1] for r in got)
-        if got:
-            sz = sum(r[6] for r in got)
-            log(f"🔥고래 청산 {u[:10]}… {COIN} {sz:,.1f} (직전 {prev[u][0]:+,.1f} · 청산가 {prev[u][1]:,.2f} · "
-                f"{len(got)}체결 · {got[0][12]})")
-        out += got
-        await asyncio.sleep(REQ_GAP_S)
-    if cands and not out:
-        log(f"청산 후보 {len(cands)}주소 조회 -- 청산 체결 없음(스스로 줄임)")
+    fills_cache: dict[str, list] = {}      # 한 주소가 두 코인의 후보여도 조회는 한 번(응답이 전 코인이다)
+    for coin in COINS:
+        if not prev.get(coin):
+            continue
+        candles = await _info(session, {"type": "candleSnapshot", "req": {
+            "coin": coin, "interval": "1m", "startTime": int(prev_t0 * 1000) - 60_000, "endTime": now_ms}})
+        if not candles:
+            continue
+        low = min(float(c["l"]) for c in candles)
+        high = max(float(c["h"]) for c in candles)
+        cands = liquidation_candidates(prev[coin], {r[2]: r[4] for r in rows if r[3] == coin}, low, high)
+        got_coin: list[tuple] = []
+        for u in cands:
+            if u not in fills_cache:
+                fills_cache[u] = await _info(session, {"type": "userFillsByTime", "user": u,
+                                                       "startTime": int(prev_t0 * 1000) - 60_000,
+                                                       "endTime": now_ms})
+                await asyncio.sleep(REQ_GAP_S)
+            got = [r for r in parse_liq_fills(fills_cache[u], u, coin, now_ms) if r[1] not in seen_tids]
+            seen_tids.update(r[1] for r in got)
+            if got:
+                sz = sum(r[6] for r in got)
+                p0 = prev[coin][u]
+                log(f"🔥고래 청산 {u[:10]}… {coin} {sz:,.1f} (직전 {p0[0]:+,.1f} · 청산가 {p0[1]:,.2f} · "
+                    f"{len(got)}체결 · {got[0][12]})")
+            got_coin += got
+        if cands and not got_coin:
+            log(f"{coin} 청산 후보 {len(cands)}주소 조회 -- 청산 체결 없음(스스로 줄임)")
+        out += got_coin
     return out
 
 
@@ -210,20 +249,25 @@ async def run() -> None:
             con.execute(ddl)
     users: list[str] = []
     picked_at = 0.0
-    prev: dict[str, tuple[float, float | None]] = {}   # 직전 바퀴 {주소: (szi, 청산가)}
+    prev: dict[str, dict[str, tuple[float, float | None]]] = {}   # 직전 바퀴 {코인: {주소: (szi, 청산가)}}
     prev_t0 = 0.0
     seen_tids: set[int] = set()
-    log(f"{COIN} 포지션 수집 시작 (상위 {UNIVERSE_N}주소 · {REQ_GAP_S}초 간격 · db {DB})")
+    coins = set(COINS)
+    label = ",".join(COINS)
+    log(f"{label} 포지션 수집 시작 (코인별 상위 {UNIVERSE_N}주소 · {REQ_GAP_S}초 간격 · db {DB})")
     async with ClientSession(timeout=ClientTimeout(total=15)) as session:
         while True:
             t0 = time.time()
             if not users or t0 - picked_at >= UNIVERSE_REFRESH_S:
-                ranked = await asyncio.to_thread(universe, t0)
+                ranked = {c: await asyncio.to_thread(universe, t0, c) for c in COINS}
+                ranked = {c: v for c, v in ranked.items() if v}
                 if ranked:
-                    users, picked_at = [u for u, _ in ranked], t0
+                    users, picked_at = merge_universe(ranked), t0
                     await asyncio.to_thread(write, {"hl_universe": [
-                        (int(t0 * 1000), u, i + 1, n) for i, (u, n) in enumerate(ranked)]})
-                    log(f"대상 {len(users)}주소 갱신 (48h 거래액 1위 ${ranked[0][1]/1e6:,.0f}M)")
+                        (int(t0 * 1000), u, i + 1, n, c)
+                        for c, v in ranked.items() for i, (u, n) in enumerate(v)]})
+                    log(f"대상 {len(users)}주소 갱신 (" + " · ".join(
+                        f"{c} {len(v)}·1위 ${v[0][1]/1e6:,.0f}M" for c, v in ranked.items()) + ")")
                 elif not users:
                     log("대상 주소를 못 뽑았다(체결 DB 없음?) -- 60초 뒤 다시")
                     await asyncio.sleep(60)
@@ -239,9 +283,7 @@ async def run() -> None:
                         r.raise_for_status()
                         state = await r.json()
                     ok += 1
-                    row = parse_state(state, u, COIN, int(time.time() * 1000))
-                    if row:
-                        rows.append(row)
+                    rows += parse_state(state, u, coins, int(time.time() * 1000))
                 except Exception as exc:  # noqa: BLE001 -- 한 주소 실패로 바퀴를 멈추지 않는다
                     if ok == 0 and u == users[0]:
                         log(f"조회 실패: {type(exc).__name__} {exc}")
@@ -254,16 +296,20 @@ async def run() -> None:
                 except Exception as exc:  # noqa: BLE001 -- 감지 실패로 수집을 멈추지 않는다
                     log(f"청산 감지 실패: {type(exc).__name__} {exc}")
             if ok:
-                prev = {r[2]: (r[4], r[6]) for r in rows}
+                prev = {c: {r[2]: (r[4], r[6]) for r in rows if r[3] == c} for c in COINS}
                 prev_t0 = t0
             try:
                 await asyncio.to_thread(write, {"hl_positions": rows, "hl_liquidations": liq_rows,
                                                 "hl_cycles": [(int(t0 * 1000), len(users), ok, len(rows), took)]})
             except Exception as exc:  # noqa: BLE001
                 log(f"쓰기 실패(이번 바퀴 유실): {type(exc).__name__} {exc}")
-            long_n = sum(r[4] for r in rows if r[4] > 0)
-            short_n = -sum(r[4] for r in rows if r[4] < 0)
-            log(f"바퀴 {took:.0f}s · 응답 {ok}/{len(users)} · {COIN} 보유 {len(rows)}주소 · 롱 {long_n:,.0f} 숏 {short_n:,.0f}")
+            per = []
+            for c in COINS:
+                cr = [r for r in rows if r[3] == c]
+                long_n = sum(r[4] for r in cr if r[4] > 0)
+                short_n = -sum(r[4] for r in cr if r[4] < 0)
+                per.append(f"{c} 보유 {len(cr)}주소 · 롱 {long_n:,.0f} 숏 {short_n:,.0f}")
+            log(f"바퀴 {took:.0f}s · 응답 {ok}/{len(users)} · " + " | ".join(per))
 
 
 def selftest() -> None:
@@ -275,15 +321,23 @@ def selftest() -> None:
                      "leverage": {"type": "cross", "value": 25}, "marginUsed": "3900000.0",
                      "positionValue": "97800000.0", "unrealizedPnl": "12345.6",
                      "cumFunding": {"allTime": "1.0", "sinceOpen": "-50.5"}}}]}
-    r = parse_state(state, "0xabc", "ETH", 1)
-    assert r is not None and len(r) == WIDTH, r
+    rs = parse_state(state, "0xabc", {"ETH"}, 1)
+    assert len(rs) == 1 and len(rs[0]) == WIDTH, rs
+    r = rs[0]
     assert (r[2], r[4], r[5], r[6], r[7], r[8]) == ("0xabc", 36686.1, 2658.57, 2543.8665, 25.0, "cross"), r
     assert r[1] == 1790258000123 and r[12] == -50.5 and r[13] == 7666554.1, r
     none_liq = json.loads(json.dumps(state)); none_liq["assetPositions"][1]["position"]["liquidationPx"] = None
-    assert parse_state(none_liq, "0xabc", "ETH", 1)[6] is None, "청산가 없음은 NULL(0 이 아니다)"
+    assert parse_state(none_liq, "0xabc", {"ETH"}, 1)[0][6] is None, "청산가 없음은 NULL(0 이 아니다)"
     flat = json.loads(json.dumps(state)); flat["assetPositions"][1]["position"]["szi"] = "0.0"
-    assert parse_state(flat, "0xabc", "ETH", 1) is None, "포지션 0 은 적지 않는다"
-    assert parse_state({"assetPositions": []}, "0xabc", "ETH", 1) is None
+    assert parse_state(flat, "0xabc", {"ETH"}, 1) == [], "포지션 0 은 적지 않는다"
+    assert parse_state({"assetPositions": []}, "0xabc", {"ETH"}, 1) == []
+    # 다코인: 응답 하나에서 요청한 코인만 전부(여기선 BTC·ETH), 요청 안 한 코인은 뺀다
+    both = parse_state(state, "0xabc", {"ETH", "BTC"}, 1)
+    assert sorted(x[3] for x in both) == ["BTC", "ETH"], both
+    assert [x[3] for x in parse_state(state, "0xabc", {"BTC", "SOL"}, 1)] == ["BTC"]
+    # 합집합: 코인을 번갈아 1위부터, 중복 주소는 한 번
+    assert merge_universe({"BTC": [("a", 9.0), ("b", 5.0), ("c", 1.0)],
+                           "SOL": [("b", 7.0), ("d", 3.0)]}) == ["a", "b", "d", "c"]
 
     # ── 청산 후보: 줄었거나 사라졌고, 청산가가 그 사이 가격 범위 근처 ─────────────
     prev = {"a": (100.0, 2540.0),     # 사라짐 · 청산가가 범위 안 -> 후보
