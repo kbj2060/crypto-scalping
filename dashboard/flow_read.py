@@ -63,8 +63,12 @@ SYM_K = 0.5   # 카드 배리어 = ±0.5 × 30분 창폭 (옛 상황 카드 채�
 #   🔴metrics(OI·롱숏비)를 넣으면 오히려 .525 로 준다 → 5분봉 klines 만 쓴다(라이브 배관 없음).
 #   scripts/research_eth_card30_direction_hgb_tabpfn_20260926.py (build · fit · report · export · parity).
 DIR_COIN_PP = 5.0     # 닿는다면 위:아래 가 50 에서 이만큼 안 벌어지면 «동전»이라고 말한다
+# 융합 발동 중(|4표|≥2 & 관문)엔 방향 = (모델의 융합쪽 확률 + 발동 실측 0.567) / 2. 표를 모델 피쳐로 넣으면 증분 0(KV .5248 = Kv .5251)이고,
+#   발동 봉 TEST 에선 모델·발동빈도·평균이 동률(Δ로그손실 CI 0 포함) — 평균만 «융합 롱인데 모델 반대» 10% → 0.2% 로 화면 모순을 없앤다.
+#   0.567 = TRAIN(2023-02~2024) 3,946봉 · TEST 실현 0.560[.534,.583]. research_…_20260926.py fire
+FUSE_DIR_P = 0.567
 DIR_EVID = ("방향 = HGB(5분봉 26피쳐, 1분봉 선착 라벨) · TEST 2025~ AUC .525 · 50:50 에서 5pp 이상 벌어지는 건 결정의 ~7%, "
-            "그때 방향 적중 ~56% · 나머지는 동전 — 30분 방향은 대부분 예측이 안 된다")
+            "그때 방향 적중 ~56% · 나머지는 동전 — 30분 방향은 대부분 예측이 안 된다 · 융합 발동 중엔 모델과 발동 실측(57%)의 평균")
 
 
 def card30_features(bars: list[dict[str, float]]) -> dict[str, float] | None:
@@ -441,6 +445,11 @@ def outcome3(ev: dict[str, Any], gp: float | None, votes: list[tuple[str, int]],
     n, p1, p2, pn = CARD_CELLS[(reg, a, g)]
     p_up, p_dn = (p1, p2) if (not d or d > 0) else (p2, p1)
     reach = round(100.0 - pn, 1)
+    side = _s(score) if (abs(score) >= FUSE_MIN_VOTES and gp >= GATE_PCT) else 0   # fuse() 의 발동과 같은 조건
+    blend = bool(side and pdir is not None and 0.0 < pdir < 1.0)
+    if blend:
+        ps = (pdir if side > 0 else 1 - pdir) + FUSE_DIR_P
+        pdir = ps / 2 if side > 0 else 1 - ps / 2
     if pdir is not None and 0.0 < pdir < 1.0:
         p_up = round(reach * pdir, 1); p_dn = round(reach - p_up, 1)
     share = 100.0 * p_up / max(p_up + p_dn, 1e-9)
@@ -457,7 +466,7 @@ def outcome3(ev: dict[str, Any], gp: float | None, votes: list[tuple[str, int]],
         {"key": "none", "p": pn, "band": [lo, hi] if hi else None, "push": [wide]},
     ]
     return {"reg": reg, "dir": d, "a": a, "g": g, "n": n, "cols": cols, "reach": reach, "up_share": round(float(share), 1),
-            "dir_src": "model" if (pdir is not None and 0.0 < pdir < 1.0) else "table",
+            "dir_src": ("model+fuse" if blend else "model") if (pdir is not None and 0.0 < pdir < 1.0) else "table",
             "coin": bool(abs(share - 50.0) < DIR_COIN_PP), "dir_note": DIR_EVID,
             "note": f"닿을 확률 = 3.7년 실측 · 같은 상태 {n:,}번 · 다음 30분 안 ±{SYM_K:g}×30분 폭 중 하나에 닿는가"}
 
@@ -524,6 +533,10 @@ if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등�
     assert o5["dir_src"] == "model" and o5["reach"] == 51.8 and P5["none"] == 48.2 and P5["up"] == 31.1 and P5["dn"] == 20.7
     json.dumps(o5); json.dumps(outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, np.float64(0.52)))   # np.bool_ 는 JSON 이 못 쓴다
     assert o5["up_share"] == 60.0 and not o5["coin"] and abs(sum(P5.values()) - 100) < 0.2
+    # 융합 발동(−2표·관문) 중엔 모델과 발동 실측의 평균: 모델 위 0.60 → 아래쪽 0.40 → (0.40+0.567)/2 = 0.4835 → 위 0.5165
+    o7 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [("가격↔OI", -1), ("추세정렬", -1)], -2, 0.60)
+    assert o7["dir_src"] == "model+fuse" and abs(o7["up_share"] - 51.6) < 0.11 and o7["coin"]
+    assert outcome3(dict(ev, veto=-1, dir=-1), 0.5, [("가격↔OI", -1), ("추세정렬", -1)], -2, 0.60)["dir_src"] == "model"   # 관문 미달
     o6 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, 0.52)
     assert o6["coin"] and outcome3(dict(ev, dir=-1), 0.9, [], 0, None)["dir_src"] == "table"
     # 피쳐: 봉 부족·간격 끊김 = None, 정상 = 26개 유한값

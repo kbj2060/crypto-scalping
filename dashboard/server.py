@@ -3514,7 +3514,8 @@ def make_app() -> web.Application:
                         fh.write(json.dumps({"ts": int(now), "bar": bar_now, "side": fu.get("side"), "mid": inp.get("mid"),
                                              "votes": fu.get("votes"), "score": fu.get("score"), "gate_pct": fu.get("gate_pct"),
                                              "cell": [o3["reg"], o3["a"], o3["g"]],
-                                             "p": {c["key"]: c["p"] for c in o3["cols"]}, "dir_p": card30["p"] if o3.get("dir_src") == "model" else None,
+                                             "p": {c["key"]: c["p"] for c in o3["cols"]}, "dir_p": card30["p"] if str(o3.get("dir_src", "")).startswith("model") else None,
+                                             "dir_src": o3.get("dir_src"), "up_share": o3.get("up_share"),
                                              "up": o3["cols"][0].get("target"), "dn": o3["cols"][1].get("target")},
                                             ensure_ascii=False) + "\n")
                 except OSError as exc:

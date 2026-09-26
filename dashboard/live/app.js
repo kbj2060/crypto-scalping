@@ -4101,7 +4101,8 @@ function renderSituation() {
       + `<div class="sit-cal">미도달 ${Math.round(nn.p || 0)}% · ${escapeHtml(band)} 사이에 머묾`
       + (wide ? ` · <span class="${wide.on ? "sit-edge" : ""}">${escapeHtml(wide.t)}</span>` : "") + `</div></div>`
       + `<div class="sit-dir">`
-      + `<div class="sit-row-h"><span>닿는다면 어느 쪽 먼저${o3.dir_src === "model" ? "" : " (모델 없음 · 표)"}</span>`
+      + `<div class="sit-row-h"><span>닿는다면 어느 쪽 먼저${o3.dir_src === "model" ? "" : o3.dir_src === "model+fuse"
+        ? " · 융합 발동: 모델과 발동 실측 57% 평균" : " (모델 없음 · 표)"}</span>`
       + `<b class="${lean ? `k-${lean}` : "coin"}">${verdict}</b></div>`
       + `<div class="sit-split"><i class="k-dn${lean === "dn" ? " lean" : ""}" style="width:${100 - us}%"></i>`
       + `<i class="k-up${lean === "up" ? " lean" : ""}" style="width:${us}%"></i></div>`

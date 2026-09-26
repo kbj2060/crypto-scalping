@@ -16,6 +16,9 @@
     python scripts/... report
     python scripts/... parity      # 라이브 피쳐 함수 ↔ 데이터셋 대조(배포 전 필수)
     python scripts/... export      # 보정 온도 + 전 구간 재학습 → tmp/card30_direction_20260926/model.joblib
+    python scripts/... votes       # 융합 4표 재구성(2023~, 서버 정의) → KV/Kv 팔 · fire(발동 봉 결합)
+결과(09-26): 표를 피쳐로 넣어도 KV .5248 = Kv .5251(같은 행) → 증분 0. 발동 봉에선 모델·발동빈도·평균이 동률(CI 0 포함)이고
+      평균이 «융합 롱인데 모델 반대» 10% → 0.2% 로 화면 모순을 없앤다 → 라이브는 발동 중에만 평균.
 """
 from __future__ import annotations
 import argparse, io, json, zipfile, urllib.error, urllib.request
@@ -139,10 +142,15 @@ def build() -> None:
 
 
 def _load(feats: str):
+    """feats: L6 | K[M1][M] · 'V' = 융합 표 피쳐 추가 · 'v'/'V' 가 있으면 표가 알려진 행(2023~)만 — Kv 와 KV 는 같은 행."""
     X = pd.read_parquet(OUT / "dataset.parquet")
     FE = json.load(open(OUT / "feats.json"))
     cols = LOGIT6 if feats == "L6" else \
         FE["K"] + (FE["M1"] if "M1" in feats else []) + (FE["M"] if feats.endswith("M") else [])
+    if "v" in feats.lower():
+        X = X.merge(pd.read_parquet(OUT / "votes.parquet"), on="ts", how="left").set_axis(X.index)
+        X = X[X.v_score.notna()]
+        cols = cols + (VOTE_COLS if "V" in feats else [])
     X = X[X.res.isin((0, 1))]
     return X, cols, (X.ts < SPLIT).to_numpy(), (X.ts >= SPLIT).to_numpy()
 
@@ -180,32 +188,35 @@ def fit(model: str, feats: str, cap: int, seeds: list[int]) -> None:
         if model == "logit":
             break
     tag = f"{model}_{feats}" + (f"_c{cap}" if model in ("hgb_sub", "tabpfn") else "")
-    pd.DataFrame(preds).to_parquet(OUT / f"pred_{tag}.parquet")
+    pd.DataFrame(preds, index=X.index[te]).to_parquet(OUT / f"pred_{tag}.parquet")   # 행 = 데이터셋 인덱스(팔마다 행이 다를 수 있다)
     json.dump({"seeds": seeds, "cols": cols, "cap": cap}, open(OUT / f"pred_{tag}.json", "w"))
 
 
 def report() -> None:
     from sklearn.metrics import roc_auc_score as auc
-    X, _, _, te = _load("K")
-    y = X.res.to_numpy(int)[te]
-    day = X.ts[te].dt.normalize().to_numpy()
-    u, inv = np.unique(day, return_inverse=True)
+    X, _, _, te0 = _load("K")
+    XT = X[te0]
+    print(f"TEST 결정(닿은 것만) {len(XT):,} · 위 먼저 {XT.res.mean():.4f}")
     rng = np.random.default_rng(7)
-    B = [np.bincount(rng.integers(0, len(u), len(u)), minlength=len(u))[inv] for _ in range(200)]
-    yr = X.ts[te].dt.year.to_numpy()
-    base = y.mean()
-    ll0 = -np.mean(y * np.log(base) + (1 - y) * np.log(1 - base))
-    print(f"TEST 결정(닿은 것만) {len(y):,} · 위 먼저 {base:.4f} · 일수 {len(u)}")
     rows = []
     for f in sorted(OUT.glob("pred_*.parquet")):
         P = pd.read_parquet(f)
+        if isinstance(P.index, pd.RangeIndex) and len(P) == len(XT):   # 행 인덱스 저장 전 파일 = K 전체 TEST 순서
+            P.index = XT.index
+        Xa = XT.loc[P.index]
+        y = Xa.res.to_numpy(int)
+        u, inv = np.unique(Xa.ts.dt.normalize().to_numpy(), return_inverse=True)
+        B = [np.bincount(rng.integers(0, len(u), len(u)), minlength=len(u))[inv] for _ in range(200)]
+        yr = Xa.ts.dt.year.to_numpy()
+        base = y.mean()
+        ll0 = -np.mean(y * np.log(base) + (1 - y) * np.log(1 - base))
         aucs = [auc(y, P[c]) for c in P.columns]
         p = P.mean(1).to_numpy()                                   # 시드 평균
         ci = np.percentile([auc(y, p, sample_weight=w) for w in B], [2.5, 97.5])
         ll = -np.mean(y * np.log(np.clip(p, 1e-6, 1)) + (1 - y) * np.log(np.clip(1 - p, 1e-6, 1)))
         s5 = np.abs(p - .5) >= .05
         dec = pd.qcut(p, 10, labels=False, duplicates="drop")
-        rows.append(dict(arm=f.stem[5:], auc=auc(y, p), ci=f"[{ci[0]:.4f},{ci[1]:.4f}]",
+        rows.append(dict(arm=f.stem[5:], n=len(y), auc=auc(y, p), ci=f"[{ci[0]:.4f},{ci[1]:.4f}]",
                          seeds=f"{min(aucs):.4f}~{max(aucs):.4f}" if len(aucs) > 1 else "-",
                          y2025=auc(y[yr == 2025], p[yr == 2025]), y2026=auc(y[yr == 2026], p[yr == 2026]),
                          dll_x1e3=1e3 * (ll0 - ll), ge5pp=s5.mean(), acc5=((p[s5] > .5) == y[s5]).mean() if s5.any() else np.nan,
@@ -214,6 +225,63 @@ def report() -> None:
     pd.set_option("display.width", 220)
     print(R.round(4).to_string())
     R.to_csv(OUT / "report.csv")
+
+
+VOTE_COLS = ["v_whale", "v_oi", "v_al", "v_rj", "v_score", "dir30"]
+
+
+def votes() -> None:
+    """융합 4표 + 카드 30분 방향을 과거 전체로 재구성 → votes.parquet. 서버와 같은 정의(FUSED_Z=24h, 고래 한 표 =
+    리테일 갈림 우선 아니면 중형). 입력 tmp/whale/tape/ETHUSDT(scripts/build_aggtrades_size3_tape_1m_20260925.py, 2023~).
+    연구↔라이브 flow_read.fuse 패리티는 09-25 에 21,151/21,151 봉으로 확인됐다(같은 정의를 그대로 쓴다)."""
+    import os, sys
+    os.environ["FUSED_Z"] = "24h"
+    os.chdir(ROOT)
+    src = (ROOT / "scripts/research_eth_fused_signal_votes_gate_20260925.py").read_text().split("for H in (")[0]
+    g: dict = {}
+    sys.argv = ["x", "ETHUSDT"]
+    exec(src, g)
+    V = g["V"]
+    whale = np.where(V["wr"] != 0, V["wr"], V["wm"])
+    d = pd.DataFrame({"ts": g["ts"].tz_convert(None), "v_whale": whale, "v_oi": V["oi"], "v_al": V["al"], "v_rj": V["rj"],
+                      "dir30": g["dir30"]})
+    d["v_score"] = d.v_whale + d.v_oi + d.v_al + d.v_rj
+    zok = np.isfinite(g["Z"]["whl"]) & np.isfinite(g["Z"]["ret"])       # 고래 z 가 아직 없으면(워밍업) 표를 모름으로
+    d.loc[~zok, VOTE_COLS] = np.nan
+    d.to_parquet(OUT / "votes.parquet")
+    print(f"표 {len(d):,}봉 · {d.ts.min()} ~ {d.ts.max()} · 켜진 비율 " +
+          " ".join(f"{c} {(d[c].fillna(0) != 0).mean():.3f}" for c in ("v_whale", "v_oi", "v_al", "v_rj")))
+
+
+def fire() -> None:
+    """융합 발동 봉(|4표 합|≥2 & 30분 폭 24h 분위≥2/3)에서 방향: 모델 · 발동 실측 빈도 · 둘의 평균.
+    발동 빈도 상수는 TRAIN(2023-02~2024)에서만 잰다 → TEST(2025~) 에서 로그손실 차를 일 블록 CI 로."""
+    import joblib
+    X = pd.read_parquet(OUT / "dataset.parquet").pipe(lambda d: d.merge(pd.read_parquet(OUT / "votes.parquet"), on="ts",
+                                                                          how="left").set_axis(d.index))
+    hit, te = X.res.isin((0, 1)), X.ts >= SPLIT
+    on = (X.v_score.abs() >= 2) & (X.rgq >= 2 / 3)
+    Zt = X[hit & on & (X.ts >= "2023-02-01") & ~te]
+    wt = float(((Zt.res == 1) == (Zt.v_score > 0)).mean())
+    pK = pd.read_parquet(OUT / "pred_hgb_K.parquet").mean(1)
+    pK.index = X.index[hit & te]                                    # TRAIN<2025 모델의 TEST 예측
+    M = joblib.load(OUT / "model.joblib")
+    lg = lambda q: np.log(q / (1 - q))                              # noqa: E731
+    pc = 1 / (1 + np.exp(-(M["k"] * lg(pK) + (1 - M["k"]) * lg(M["base"]))))
+    Z = X[hit & on & te]
+    sd = np.sign(Z.v_score).to_numpy()
+    y = ((Z.res == 1).to_numpy() == (sd > 0)).astype(int)
+    ps = np.where(sd > 0, pc.loc[Z.index], 1 - pc.loc[Z.index])
+    L = lambda p: -(y * np.log(p) + (1 - y) * np.log(1 - p))       # noqa: E731
+    u, inv = np.unique(Z.ts.dt.normalize().to_numpy(), return_inverse=True)
+    rng = np.random.default_rng(2)
+    print(f"TRAIN 발동 {len(Zt):,} · 융합 쪽 먼저 {wt:.3f} || TEST 발동 {len(Z):,}·{len(u)}일 · 실현 {y.mean():.3f} · 모델 평균 {ps.mean():.3f}")
+    for nm, pp in (("모델만", ps), ("발동 빈도만", np.full(len(y), wt)), ("평균", (ps + wt) / 2)):
+        d = L(pp) - L(ps)
+        s_, c_ = np.bincount(inv, d), np.bincount(inv)
+        bs = [s_[k].sum() / c_[k].sum() for k in (rng.integers(0, len(u), len(u)) for _ in range(2000))]
+        print(f"  {nm:8s} Δ로그손실 {1e3 * d.mean():+.2f}e-3 [{1e3 * np.percentile(bs, 2.5):+.2f},{1e3 * np.percentile(bs, 97.5):+.2f}]"
+              f" · 동전 {np.mean(np.abs(pp - .5) < .05):.3f} · 반대 {np.mean(pp < .5):.3f}")
 
 
 def _hgb(s: int):
@@ -280,7 +348,7 @@ def parity(n: int = 400) -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["build", "fit", "report", "export", "parity"])
+    ap.add_argument("cmd", choices=["build", "votes", "fit", "report", "export", "parity", "fire"])
     ap.add_argument("--model", default="hgb")
     ap.add_argument("--feats", default="K,KM1,KM1M")
     ap.add_argument("--cap", type=int, default=10000)
@@ -288,6 +356,8 @@ if __name__ == "__main__":
     a = ap.parse_args()
     if a.cmd == "build":
         build()
+    elif a.cmd == "votes":
+        votes()
     elif a.cmd in ("fit", "export"):
         # 시드는 고정 간격이 아니라 무작위 추출(시드 다양성 정책) — 기본값은 한 번 뽑아 결과 json 에 기록한다.
         seeds = [int(s) for s in a.seeds.split(",")] if a.seeds else \
@@ -298,5 +368,7 @@ if __name__ == "__main__":
             fit(a.model, fs, a.cap, seeds)
     elif a.cmd == "parity":
         parity()
+    elif a.cmd == "fire":
+        fire()
     else:
         report()
