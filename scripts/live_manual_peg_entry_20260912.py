@@ -250,8 +250,9 @@ BACKSTOP_PCT = 0.005
 
 def build_bracket_plan(*, position_side: str, support_levels: list[float],
                        resistance_levels: list[float], ref_price: float, basis: float,
-                       filters: dict[str, float]) -> dict[str, Any]:
+                       filters: dict[str, float], step: int = 0) -> dict[str, Any]:
     """TP·SL·비상 스탑 가격. **순수 함수**. 레벨·ref_price 는 USDT(청산맵 원천), 결과는 주문 심볼 가격.
+    step: TP·SL 을 둘 다 몇 단계 더 멀리(2026-09-27 SOL·XRP = 1 -- 변동성이 커 너무 빨리 닿는다, 사용자 지시).
 
     지지는 ref 아래·저항은 ref 위만 쓰고 가까운 순으로 번호를 매긴다(화면 «지지1/저항2»와 같은 규칙).
     레벨이 모자라면 그 다리만 None -- 없는 레벨을 지어내지 않는다."""
@@ -263,8 +264,10 @@ def build_bracket_plan(*, position_side: str, support_levels: list[float],
     sup = sorted((float(x) for x in support_levels if 0 < float(x) < ref_price), reverse=True)
     res = sorted(float(x) for x in resistance_levels if float(x) > ref_price)
     long_side = position_side == "LONG"
-    tp_lv = (res[1] if len(res) > 1 else None) if long_side else (sup[1] if len(sup) > 1 else None)
-    sl_lv = (sup[0] if sup else None) if long_side else (res[0] if res else None)
+    near, far = (sup, res) if long_side else (res, sup)       # SL 쪽 · TP 쪽
+    tp_i, sl_i = 1 + step, step
+    tp_lv = far[tp_i] if len(far) > tp_i else None
+    sl_lv = near[sl_i] if len(near) > sl_i else None
     floor_t = lambda x: round(math.floor(x / tick + 1e-9) * tick, 8)
     ceil_t = lambda x: round(math.ceil(x / tick - 1e-9) * tick, 8)
     # 틱 반올림: TP 는 시장 쪽(먼저 닿게), 비상 스탑은 먼 쪽(SL 보다 먼저 걸리지 않게).
@@ -279,8 +282,8 @@ def build_bracket_plan(*, position_side: str, support_levels: list[float],
         "tp_price": tp, "sl_price": sl, "backstop_price": backstop,
         "tp_level": tp_lv, "sl_level": sl_lv,             # 청산맵(USDT) 원래 값
         "tp_pct": pct(tp_lv), "sl_pct": pct(sl_lv),      # ref 대비 %, 부호 그대로
-        "tp_name": "저항2" if long_side else "지지2",
-        "sl_name": "지지1" if long_side else "저항1",
+        "tp_name": f"{'저항' if long_side else '지지'}{tp_i + 1}",
+        "sl_name": f"{'지지' if long_side else '저항'}{sl_i + 1}",
         "backstop_pct": BACKSTOP_PCT, "basis": round(basis, 8),
     }
 

@@ -5248,7 +5248,8 @@ def make_app() -> web.Application:
             b = build_bracket_plan(
                 position_side=side, ref_price=ref_mid, basis=mid / ref_mid, filters=filters,
                 support_levels=[lv["price"] for lv in lm.get("support_levels") or []],
-                resistance_levels=[lv["price"] for lv in lm.get("resistance_levels") or []])
+                resistance_levels=[lv["price"] for lv in lm.get("resistance_levels") or []],
+                step=0 if asset == "eth" else 1)   # SOL·XRP 한 단계 더 멀리(롱 = 익절 저항3·손절 지지2)
             if not b["available"]:
                 b["reason"] = "청산맵 레벨이 모자랍니다" if lm.get("warmed_up") else "청산맵 웜업 중"
             return b

@@ -62,3 +62,15 @@ def test_long_tp_resistance2_sl_support1_short_mirrored():
                             ref_price=2688.0, basis=1.0, filters=f)
     assert (sh["tp_name"], sh["tp_level"], sh["sl_name"], sh["sl_level"]) == ("지지2", 2667.76, "저항1", 2702.76)
     assert sh["tp_price"] < 2688.0 < sh["sl_price"] < sh["backstop_price"], sh
+
+
+def test_step1_moves_both_legs_one_level_further():
+    """SOL·XRP(step=1): 롱 = 익절 저항3·손절 지지2, 숏 = 익절 지지3·손절 저항2. step=0(ETH)은 그대로."""
+    sup, res = [2670.45, 2667.76, 2597.77], [2702.76, 2705.45, 2708.14]
+    kw = dict(support_levels=sup, resistance_levels=res, ref_price=2688.0, basis=1.0, filters={"tick": 0.01}, step=1)
+    lg = build_bracket_plan(position_side="LONG", **kw)
+    assert (lg["tp_name"], lg["tp_level"], lg["sl_name"], lg["sl_level"]) == ("저항3", 2708.14, "지지2", 2667.76)
+    sh = build_bracket_plan(position_side="SHORT", **kw)
+    assert (sh["tp_name"], sh["tp_level"], sh["sl_name"], sh["sl_level"]) == ("지지3", 2597.77, "저항2", 2705.45)
+    short2 = build_bracket_plan(position_side="LONG", **{**kw, "resistance_levels": res[:2]})
+    assert short2["tp_price"] is None and short2["sl_level"] == 2667.76, "레벨이 모자라면 그 다리만 비운다"
