@@ -67,6 +67,9 @@ DIR_COIN_PP = 5.0     # 닿는다면 위:아래 가 50 에서 이만큼 안 벌�
 #   발동 봉 TEST 에선 모델·발동빈도·평균이 동률(Δ로그손실 CI 0 포함) — 평균만 «융합 롱인데 모델 반대» 10% → 0.2% 로 화면 모순을 없앤다.
 #   0.567 = TRAIN(2023-02~2024) 3,946봉 · TEST 실현 0.560[.534,.583]. research_…_20260926.py fire
 FUSE_DIR_P = 0.567
+# 닿을 확률 = HGB(같은 26피쳐, 1분봉 선착 라벨). TEST 2025~ AUC .784 · 로그손실 .465 vs 옛 21칸 표 .723 · .505. 보정 k=.92(거의 그대로).
+#   research_…_20260926.py fit/export --task reach
+REACH_EVID = "닿을 확률 = HGB(5분봉 26피쳐) · TEST 2025~ AUC .78(옛 표 .72) · 예측 구간별 실측 ±2pp"
 DIR_EVID = ("방향 = HGB(5분봉 26피쳐, 1분봉 선착 라벨) · TEST 2025~ AUC .525 · 50:50 에서 5pp 이상 벌어지는 건 결정의 ~7%, "
             "그때 방향 적중 ~56% · 나머지는 동전 — 30분 방향은 대부분 예측이 안 된다 · 융합 발동 중엔 모델과 발동 실측(57%)의 평균")
 
@@ -429,13 +432,14 @@ def fuse(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
         need = "표가 한쪽으로 2개 필요" if abs(score) < FUSE_MIN_VOTES else "크기 관문 미달"
         text = f"대기 — {tag} (합 {score:+d}) · {gtxt} · {need}"
     return {"side": side, "votes": votes, "score": score, "gate": gate, "gate_pct": gp, "text": text, "note": FUSE_EVID,
-            "outcome": outcome3(ev, gp, votes, score, x.get("dir_p"))}
+            "outcome": outcome3(ev, gp, votes, score, x.get("dir_p"), x.get("reach_p"))}
 
 
 def outcome3(ev: dict[str, Any], gp: float | None, votes: list[tuple[str, int]], score: int,
-             pdir: float | None = None) -> dict[str, Any] | None:
+             pdir: float | None = None, preach: float | None = None) -> dict[str, Any] | None:
     """카드 3결과 — 위 먼저 · 아래 먼저 · 미도달의 실측 확률 + 목표가 + 그쪽으로 미는 조건. 입력이 모자라면 None.
-    pdir(닿는다면 위 먼저일 확률, 방향 모델)가 있으면 닿을 확률(표)을 그 비율로 가른다. 없으면 표 그대로."""
+    pdir(닿는다면 위 먼저일 확률, 방향 모델)가 있으면 닿을 확률을 그 비율로 가른다. preach(닿을 확률, 닿음 모델)가 있으면
+    표의 미도달 대신 쓴다. 둘 다 없으면 표 그대로."""
     d = ev.get("dir")
     if d is None or gp is None:
         return None
@@ -444,6 +448,11 @@ def outcome3(ev: dict[str, Any], gp: float | None, votes: list[tuple[str, int]],
     g = 0 if gp < 1 / 3 else (1 if gp < 2 / 3 else 2)
     n, p1, p2, pn = CARD_CELLS[(reg, a, g)]
     p_up, p_dn = (p1, p2) if (not d or d > 0) else (p2, p1)
+    reach_model = preach is not None and 0.0 < preach < 1.0
+    if reach_model:
+        pn = round(100.0 * (1.0 - preach), 1)
+        p1, p2 = p1 / max(p1 + p2, 1e-9) * (100.0 - pn), p2 / max(p1 + p2, 1e-9) * (100.0 - pn)   # 표 방향은 비율로만 남긴다
+        p_up, p_dn = (round(p1, 1), round(p2, 1)) if (not d or d > 0) else (round(p2, 1), round(p1, 1))
     reach = round(100.0 - pn, 1)
     side = _s(score) if (abs(score) >= FUSE_MIN_VOTES and gp >= GATE_PCT) else 0   # fuse() 의 발동과 같은 조건
     blend = bool(side and pdir is not None and 0.0 < pdir < 1.0)
@@ -466,9 +475,11 @@ def outcome3(ev: dict[str, Any], gp: float | None, votes: list[tuple[str, int]],
         {"key": "none", "p": pn, "band": [lo, hi] if hi else None, "push": [wide]},
     ]
     return {"reg": reg, "dir": d, "a": a, "g": g, "n": n, "cols": cols, "reach": reach, "up_share": round(float(share), 1),
+            "reach_src": "model" if reach_model else "table",
             "dir_src": ("model+fuse" if blend else "model") if (pdir is not None and 0.0 < pdir < 1.0) else "table",
             "coin": bool(abs(share - 50.0) < DIR_COIN_PP), "dir_note": DIR_EVID,
-            "note": f"닿을 확률 = 3.7년 실측 · 같은 상태 {n:,}번 · 다음 30분 안 ±{SYM_K:g}×30분 폭 중 하나에 닿는가"}
+            "note": (REACH_EVID if reach_model else f"닿을 확률 = 3.7년 실측 · 같은 상태 {n:,}번")
+                    + f" · 다음 30분 안 ±{SYM_K:g}×30분 폭 중 하나에 닿는가"}
 
 
 if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등급·방향이 연구가 허락한 만큼인지
@@ -537,6 +548,12 @@ if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등�
     o7 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [("가격↔OI", -1), ("추세정렬", -1)], -2, 0.60)
     assert o7["dir_src"] == "model+fuse" and abs(o7["up_share"] - 51.6) < 0.11 and o7["coin"]
     assert outcome3(dict(ev, veto=-1, dir=-1), 0.5, [("가격↔OI", -1), ("추세정렬", -1)], -2, 0.60)["dir_src"] == "model"   # 관문 미달
+    # 닿음 모델: 미도달 = 100 × (1 − preach), 위·아래는 그 안에서 방향 비율로
+    o8 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, 0.60, 0.80); P8 = {c["key"]: c["p"] for c in o8["cols"]}
+    assert o8["reach_src"] == "model" and P8["none"] == 20.0 and o8["reach"] == 80.0 and P8["up"] == 48.0 and P8["dn"] == 32.0
+    o9 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, None, 0.80); P9 = {c["key"]: c["p"] for c in o9["cols"]}
+    assert o9["reach_src"] == "model" and o9["dir_src"] == "table" and abs(P9["up"] + P9["dn"] - 80.0) < 0.15
+    assert abs(o9["up_share"] - 100 * 23.9 / (23.9 + 27.9)) < 0.2 and "HGB" in o9["note"]      # 표 방향 비율은 그대로(trend,0,2 · 하락이라 위=반대 23.9)
     o6 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, 0.52)
     assert o6["coin"] and outcome3(dict(ev, dir=-1), 0.9, [], 0, None)["dir_src"] == "table"
     # 피쳐: 봉 부족·간격 끊김 = None, 정상 = 26개 유한값

@@ -4096,7 +4096,8 @@ function renderSituation() {
     const wide = (nn.push || [])[0];
     const verdict = lean ? `${OUT[lean].ar} ${lean === "up" ? "위" : "아래"} 우세` : "동전";
     scn = `<div class="sit-reach">`
-      + `<div class="sit-row-h"><span>30분 안 위·아래 선 중 하나에 닿을 확률</span><b>${Math.round(reach)}%</b></div>`
+      + `<div class="sit-row-h"><span>30분 안 위·아래 선 중 하나에 닿을 확률${o3.reach_src === "table" ? " (모델 없음 · 표)" : ""}</span>`
+      + `<b>${Math.round(reach)}%</b></div>`
       + `<div class="sit-g"><i style="width:${reach}%"></i></div>`
       + `<div class="sit-cal">미도달 ${Math.round(nn.p || 0)}% · ${escapeHtml(band)} 사이에 머묾`
       + (wide ? ` · <span class="${wide.on ? "sit-edge" : ""}">${escapeHtml(wide.t)}</span>` : "") + `</div></div>`

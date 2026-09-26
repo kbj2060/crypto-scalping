@@ -141,7 +141,10 @@ def build() -> None:
     json.dump(FEATS, open(OUT / "feats.json", "w"), ensure_ascii=False)
 
 
-def _load(feats: str):
+TASK = "dir"   # dir = 닿는다면 위 먼저(res 0/1) · reach = 30분 안 한쪽에 닿는가(res 0/1/-1 = 닿음, 2 = 미도달). --task
+
+
+def _load(feats: str, task: str | None = None):
     """feats: L6 | K[M1][M] · 'V' = 융합 표 피쳐 추가 · 'v'/'V' 가 있으면 표가 알려진 행(2023~)만 — Kv 와 KV 는 같은 행."""
     X = pd.read_parquet(OUT / "dataset.parquet")
     FE = json.load(open(OUT / "feats.json"))
@@ -151,13 +154,15 @@ def _load(feats: str):
         X = X.merge(pd.read_parquet(OUT / "votes.parquet"), on="ts", how="left").set_axis(X.index)
         X = X[X.v_score.notna()]
         cols = cols + (VOTE_COLS if "V" in feats else [])
-    X = X[X.res.isin((0, 1))]
+    task = task or TASK
+    X = X[X.res.isin((0, 1))] if task == "dir" else X[X.res.isin((0, 1, 2, -1))]
+    X = X.assign(y=(X.res == 1) if task == "dir" else (X.res != 2)).astype({"y": int})
     return X, cols, (X.ts < SPLIT).to_numpy(), (X.ts >= SPLIT).to_numpy()
 
 
 def fit(model: str, feats: str, cap: int, seeds: list[int]) -> None:
     X, cols, tr, te = _load(feats)
-    y = X.res.to_numpy(int)
+    y = X.y.to_numpy(int)
     Xtr, Xte, ytr = X.loc[tr, cols].to_numpy(np.float32), X.loc[te, cols].to_numpy(np.float32), y[tr]
     preds = {}
     for s in seeds:
@@ -187,24 +192,27 @@ def fit(model: str, feats: str, cap: int, seeds: list[int]) -> None:
         print(f"{model} {feats} seed {s}: n_ctx {len(idx):,} · TEST 평균 p {preds[f's{s}'].mean():.4f}", flush=True)
         if model == "logit":
             break
-    tag = f"{model}_{feats}" + (f"_c{cap}" if model in ("hgb_sub", "tabpfn") else "")
+    tag = ("reach_" if TASK == "reach" else "") + f"{model}_{feats}" + (f"_c{cap}" if model in ("hgb_sub", "tabpfn") else "")
     pd.DataFrame(preds, index=X.index[te]).to_parquet(OUT / f"pred_{tag}.parquet")   # 행 = 데이터셋 인덱스(팔마다 행이 다를 수 있다)
     json.dump({"seeds": seeds, "cols": cols, "cap": cap}, open(OUT / f"pred_{tag}.json", "w"))
 
 
 def report() -> None:
     from sklearn.metrics import roc_auc_score as auc
-    X, _, _, te0 = _load("K")
-    XT = X[te0]
-    print(f"TEST 결정(닿은 것만) {len(XT):,} · 위 먼저 {XT.res.mean():.4f}")
+    XTs = {}
+    for t in ("dir", "reach"):
+        X_, _, _, te_ = _load("K", t)
+        XTs[t] = X_[te_]
+    print(f"TEST 방향 {len(XTs['dir']):,}(위 먼저 {XTs['dir'].y.mean():.4f}) · 닿음 {len(XTs['reach']):,}(닿음 {XTs['reach'].y.mean():.4f})")
     rng = np.random.default_rng(7)
     rows = []
     for f in sorted(OUT.glob("pred_*.parquet")):
         P = pd.read_parquet(f)
+        XT = XTs["reach" if f.stem.startswith("pred_reach_") else "dir"]
         if isinstance(P.index, pd.RangeIndex) and len(P) == len(XT):   # 행 인덱스 저장 전 파일 = K 전체 TEST 순서
             P.index = XT.index
         Xa = XT.loc[P.index]
-        y = Xa.res.to_numpy(int)
+        y = Xa.y.to_numpy(int)
         u, inv = np.unique(Xa.ts.dt.normalize().to_numpy(), return_inverse=True)
         B = [np.bincount(rng.integers(0, len(u), len(u)), minlength=len(u))[inv] for _ in range(200)]
         yr = Xa.ts.dt.year.to_numpy()
@@ -298,7 +306,7 @@ def export(seeds: list[int]) -> None:
     from scipy.optimize import minimize_scalar
     from sklearn.metrics import roc_auc_score as auc
     X, cols, _, te = _load("K")
-    y = X.res.to_numpy(int)
+    y = X.y.to_numpy(int)
     tr0, ca = (X.ts < "2024-07-01").to_numpy(), ((X.ts >= "2024-07-01") & (X.ts < SPLIT)).to_numpy()
     lg = lambda p: np.log(p / (1 - p))                                          # noqa: E731
     sg = lambda z: 1 / (1 + np.exp(-z))                                         # noqa: E731
@@ -315,8 +323,9 @@ def export(seeds: list[int]) -> None:
     print("보정 프로토콜(TEST 2025~):", {a: round(b, 4) for a, b in rep.items()})
     final = [_hgb(s).fit(X[cols], y) for s in seeds]
     joblib.dump({"models": final, "k": k, "base": base, "cols": cols, "seeds": seeds,
-                 "trained_through": str(X.ts.max()), "report": rep}, OUT / "model.joblib")
-    print(f"저장 {OUT / 'model.joblib'} · 학습 {len(X):,}결정 · ~{X.ts.max()}")
+                 "trained_through": str(X.ts.max()), "task": TASK, "report": rep},
+                OUT / ("model_reach.joblib" if TASK == "reach" else "model.joblib"))
+    print(f"저장({TASK}) · 학습 {len(X):,}결정 · ~{X.ts.max()}")
 
 
 def parity(n: int = 400) -> None:
@@ -352,8 +361,10 @@ if __name__ == "__main__":
     ap.add_argument("--model", default="hgb")
     ap.add_argument("--feats", default="K,KM1,KM1M")
     ap.add_argument("--cap", type=int, default=10000)
+    ap.add_argument("--task", choices=["dir", "reach"], default="dir")
     ap.add_argument("--seeds", default="")
     a = ap.parse_args()
+    TASK = a.task
     if a.cmd == "build":
         build()
     elif a.cmd == "votes":
