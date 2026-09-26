@@ -2787,16 +2787,19 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
             if not dst:
                 return
             t0 = min(dst)
-            try:
-                for _ in range(12):                 # 테이프는 5초마다 쓴다 -- t0 직전까지 따라잡을 때까지
+            got, err = None, None
+            for _ in range(12):                     # 테이프는 5초마다 쓴다 -- t0 직전까지 따라잡을 때까지
+                try:
                     got, top = await asyncio.to_thread(load, t0 - SUPPLY_1S_SECONDS, t0)
                     if top >= t0 - 1:
                         break
-                    await asyncio.sleep(5.0)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 -- 원천이 없으면 라이브만으로 산다
-                print(f"{TAG}1초 수급 복원 실패({name}): {exc!r}", flush=True)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- 외부 쓰기 연결이 잠금을 쥐면 다음 회차에 다시(09-27 실측)
+                    err = exc
+                await asyncio.sleep(5.0)
+            if got is None:                         # 원천이 없으면 라이브만으로 산다
+                print(f"{TAG}1초 수급 복원 실패({name}): {err!r}", flush=True)
                 return
             n = sum(1 for k, v in got.items() if dst.setdefault(k, v) is v)
             print(f"{TAG}1초 수급 복원({name}): {n}초", flush=True)
