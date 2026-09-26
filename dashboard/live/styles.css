@@ -3068,6 +3068,29 @@ body.not-eth [data-eth-only]::after {
 .sit-cal { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .sit-cal b { color: var(--ink, inherit); }
 @media (max-width: 520px) { .sit-cols { grid-template-columns: 1fr; gap: 6px; } }
+/* 2026-09-26 두 질문(닿을 확률 · 닿는다면 어느 쪽). 닿을 확률 게이지는 방향이 아니라 --accent(기본 .sit-g i).
+   분할 막대는 두 칸 모두 무채색이고 **기운 쪽만** 방향색 -- 동전(50±5pp)은 색이 없다(DESIGN «비등»). */
+.sit-reach, .sit-dir { margin-top: 4px; }
+.sit-dir { margin-top: 12px; }
+.sit-row-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+             font-size: 12px; font-weight: 600; }
+.sit-row-h b { font: 800 20px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.sit-row-h b.coin { font: 700 13px/1 var(--font-sans); color: var(--muted); }
+.sit-row-h b.k-up { font: 700 13px/1 var(--font-sans); color: var(--good); }
+.sit-row-h b.k-dn { font: 700 13px/1 var(--font-sans); color: var(--bad); }
+.sit-reach .sit-cal { margin-top: 5px; }
+.sit-split { display: flex; gap: 2px; height: 8px; margin-top: 7px; border-radius: 4px; overflow: hidden; }
+.sit-split i { display: block; height: 100%; background: color-mix(in srgb, var(--neutral) 18%, transparent); }
+.sit-split i.k-up.lean { background: var(--good); }
+.sit-split i.k-dn.lean { background: var(--bad); }
+.sit-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
+.sit-side .nm { margin-top: 0; }
+.sit-side .p { margin-top: 5px; color: var(--muted); }
+.sit-side.lean.k-up .p { color: var(--good); }
+.sit-side.lean.k-dn .p { color: var(--bad); }
+.sit-side.k-dn.sit-top { border-top-color: var(--bad); }
+.sit-side.k-up.sit-top { border-top-color: var(--good); }
+.sit-side .tg .ds { font-weight: 400; }
 
 /* ── 떠다니는 주문 버튼 (2026-09-25 사용자 지시) ─────────────────────────────────────
    접힌 상태 = 알약 하나(손잡이 ⠿ + 지금 포지션). 펼치면 계좌 카드의 .acct-lanes 가 **통째로**

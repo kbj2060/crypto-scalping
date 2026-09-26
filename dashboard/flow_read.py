@@ -10,6 +10,7 @@ ponytail: 문구·임계는 이 파일 한 곳. 부호 규약 매수·상승 = +
 """
 from __future__ import annotations
 from typing import Any
+import numpy as np
 
 Z_SIDE = 0.5            # 크기별 60분 순매수 z — 연구와 같은 값(사전 고정)
 CVD_Z_BIG = 1.0         # 30분 체결이 «뚜렷하다» (자기 24h 분포의 1σ)
@@ -56,6 +57,58 @@ CARD_CELLS = {   # (레짐, a, g): (n, 이동방향 또는 위 %, 반대 또는 
     ("range", +1, 2): (6695, 27.9, 31.1, 41.0),
 }
 SYM_K = 0.5   # 카드 배리어 = ±0.5 × 30분 창폭 (옛 상황 카드 채점축과 같은 값)
+# ── 방향 = HGB 모델 (2026-09-26 사용자 «모델부터 바꾸자 · tabpfn/hgb») ────────────────────────────────
+# 표의 위·아래 격차는 가중 평균 2.1pp 라 «항상 비슷»했다. 이제 표는 «닿을 확률»(미도달)만 맡고, 닿는다면 어느 쪽인지는
+#   5분봉 피쳐 26개 HGB(보정)가 맡는다. 1분봉 선착 라벨 · TEST 2025~ AUC .528(TabPFN 같은 컨텍스트 .523 = HGB 부분표집과 동률).
+#   🔴metrics(OI·롱숏비)를 넣으면 오히려 .525 로 준다 → 5분봉 klines 만 쓴다(라이브 배관 없음).
+#   scripts/research_eth_card30_direction_hgb_tabpfn_20260926.py (build · fit · report · export · parity).
+DIR_COIN_PP = 5.0     # 닿는다면 위:아래 가 50 에서 이만큼 안 벌어지면 «동전»이라고 말한다
+# 융합 발동 중(|4표|≥2 & 관문)엔 방향 = (모델의 융합쪽 확률 + 발동 실측 0.567) / 2. 표를 모델 피쳐로 넣으면 증분 0(KV .5248 = Kv .5251)이고,
+#   발동 봉 TEST 에선 모델·발동빈도·평균이 동률(Δ로그손실 CI 0 포함) — 평균만 «융합 롱인데 모델 반대» 10% → 0.2% 로 화면 모순을 없앤다.
+#   0.567 = TRAIN(2023-02~2024) 3,946봉 · TEST 실현 0.560[.534,.583]. research_…_20260926.py fire
+FUSE_DIR_P = 0.567
+# 닿을 확률 = HGB(같은 26피쳐, 1분봉 선착 라벨). TEST 2025~ AUC .784 · 로그손실 .465 vs 옛 21칸 표 .723 · .505. 보정 k=.92(거의 그대로).
+#   research_…_20260926.py fit/export --task reach
+REACH_EVID = "닿을 확률 = HGB(5분봉 26피쳐) · TEST 2025~ AUC .78(옛 표 .72) · 예측 구간별 실측 ±2pp"
+DIR_EVID = ("방향 = HGB(5분봉 26피쳐, 1분봉 선착 라벨) · TEST 2025~ AUC .525 · 50:50 에서 5pp 이상 벌어지는 건 결정의 ~7%, "
+            "그때 방향 적중 ~56% · 나머지는 동전 — 30분 방향은 대부분 예측이 안 된다 · 융합 발동 중엔 모델과 발동 실측(57%)의 평균")
+
+
+def card30_features(bars: list[dict[str, float]]) -> dict[str, float] | None:
+    """완결 5분봉(시간순, time=봉 시작 초, high/low/close/volume/taker) → 방향 모델 피쳐. 연구 build() 와 같은 정의.
+    봉이 293개 미만이거나 5분 간격이 끊기면 None(모름을 추정으로 메우지 않는다)."""
+    if len(bars) < 293:
+        return None
+    b = bars[-293:]
+    t = np.array([int(x["time"]) for x in b])
+    if np.any(np.diff(t) != 300):
+        return None
+    h, lo, c, v, tb = (np.array([float(x[k]) for x in b]) for k in ("high", "low", "close", "volume", "taker"))
+    f: dict[str, float] = {}
+    lr = np.log(c)
+    for k in (1, 3, 6, 12, 24, 48, 144, 288):
+        f[f"ret{k}"] = (lr[-1] - lr[-1 - k]) * 1e4
+    for n in (6, 24, 144, 288):
+        H, L = h[-n:].max(), lo[-n:].min()
+        f[f"pos{n}"] = (c[-1] - L) / max(H - L, 1e-9)
+    atr = (h - lo)[-144:].mean()
+    for n in (48, 144, 288):
+        f[f"sma{n}"] = (c[-1] - c[-n:].mean()) / atr
+    imb = 2 * tb / np.maximum(v, 1e-9) - 1
+    for k in (1, 6, 12, 48):
+        f[f"imb{k}"] = (imb * v)[-k:].sum() / max(v[-k:].sum(), 1e-9)
+    W = np.lib.stride_tricks.sliding_window_view
+    rg = (W(h, 6).max(1) - W(lo, 6).min(1)) / c[5:] * 1e4                 # 288개, 마지막 = 지금
+    f["rg30"] = rg[-1]
+    f["rgq"] = (np.sum(rg < rg[-1]) + (np.sum(rg == rg[-1]) + 1) / 2) / rg.size   # pandas rank(pct) 평균 순위
+    f["volz"] = (v[-1] - v[-288:].mean()) / v[-288:].std(ddof=1)
+    pc = c[-2]
+    f["last_body"] = (c[-1] - pc) / max(h[-1] - lo[-1], 1e-9)
+    f["wick"] = ((h[-1] - max(c[-1], pc)) - (min(c[-1], pc) - lo[-1])) / max(h[-1] - lo[-1], 1e-9)
+    tt = np.datetime64(int(t[-1]), "s")
+    f["hour"] = float(int(t[-1]) // 3600 % 24)
+    f["dow"] = float((tt.astype("datetime64[D]").astype(int) + 3) % 7)       # 1970-01-01 = 목(3), 월 = 0
+    return f
 # 각 결과 열 아래에 거는 «그쪽으로 미는 조건» -- 융합 4표의 각 방향판. (표 이름 접두, 부호, 문구)
 PUSH = {
     +1: (("고래", +1, "고래 매수 · 리테일/중형 매도"), ("가격↔OI", +1, "1시간 하락 + OI 감소(롱 이탈 끝물)"),
@@ -379,11 +432,14 @@ def fuse(ev: dict[str, Any], x: dict[str, Any]) -> dict[str, Any]:
         need = "표가 한쪽으로 2개 필요" if abs(score) < FUSE_MIN_VOTES else "크기 관문 미달"
         text = f"대기 — {tag} (합 {score:+d}) · {gtxt} · {need}"
     return {"side": side, "votes": votes, "score": score, "gate": gate, "gate_pct": gp, "text": text, "note": FUSE_EVID,
-            "outcome": outcome3(ev, gp, votes, score)}
+            "outcome": outcome3(ev, gp, votes, score, x.get("dir_p"), x.get("reach_p"))}
 
 
-def outcome3(ev: dict[str, Any], gp: float | None, votes: list[tuple[str, int]], score: int) -> dict[str, Any] | None:
-    """카드 3결과 — 위 먼저 · 아래 먼저 · 미도달의 실측 확률 + 목표가 + 그쪽으로 미는 조건. 입력이 모자라면 None."""
+def outcome3(ev: dict[str, Any], gp: float | None, votes: list[tuple[str, int]], score: int,
+             pdir: float | None = None, preach: float | None = None) -> dict[str, Any] | None:
+    """카드 3결과 — 위 먼저 · 아래 먼저 · 미도달의 실측 확률 + 목표가 + 그쪽으로 미는 조건. 입력이 모자라면 None.
+    pdir(닿는다면 위 먼저일 확률, 방향 모델)가 있으면 닿을 확률을 그 비율로 가른다. preach(닿을 확률, 닿음 모델)가 있으면
+    표의 미도달 대신 쓴다. 둘 다 없으면 표 그대로."""
     d = ev.get("dir")
     if d is None or gp is None:
         return None
@@ -392,6 +448,20 @@ def outcome3(ev: dict[str, Any], gp: float | None, votes: list[tuple[str, int]],
     g = 0 if gp < 1 / 3 else (1 if gp < 2 / 3 else 2)
     n, p1, p2, pn = CARD_CELLS[(reg, a, g)]
     p_up, p_dn = (p1, p2) if (not d or d > 0) else (p2, p1)
+    reach_model = preach is not None and 0.0 < preach < 1.0
+    if reach_model:
+        pn = round(100.0 * (1.0 - preach), 1)
+        p1, p2 = p1 / max(p1 + p2, 1e-9) * (100.0 - pn), p2 / max(p1 + p2, 1e-9) * (100.0 - pn)   # 표 방향은 비율로만 남긴다
+        p_up, p_dn = (round(p1, 1), round(p2, 1)) if (not d or d > 0) else (round(p2, 1), round(p1, 1))
+    reach = round(100.0 - pn, 1)
+    side = _s(score) if (abs(score) >= FUSE_MIN_VOTES and gp >= GATE_PCT) else 0   # fuse() 의 발동과 같은 조건
+    blend = bool(side and pdir is not None and 0.0 < pdir < 1.0)
+    if blend:
+        ps = (pdir if side > 0 else 1 - pdir) + FUSE_DIR_P
+        pdir = ps / 2 if side > 0 else 1 - ps / 2
+    if pdir is not None and 0.0 < pdir < 1.0:
+        p_up = round(reach * pdir, 1); p_dn = round(reach - p_up, 1)
+    share = 100.0 * p_up / max(p_up + p_dn, 1e-9)
     mid, rg = ev.get("mid"), ev.get("range_bp")
     hi = lo = None
     if mid and rg:
@@ -404,11 +474,16 @@ def outcome3(ev: dict[str, Any], gp: float | None, votes: list[tuple[str, int]],
         {"key": "dn", "p": p_dn, "target": lo, "dist_bp": (-SYM_K * rg) if rg else None, "push": push(-1)},
         {"key": "none", "p": pn, "band": [lo, hi] if hi else None, "push": [wide]},
     ]
-    return {"reg": reg, "dir": d, "a": a, "g": g, "n": n, "cols": cols,
-            "note": f"3.7년 실측 · 같은 상태 {n:,}번 · 다음 30분 안 ±{SYM_K:g}×30분 폭 중 먼저 닿는 쪽"}
+    return {"reg": reg, "dir": d, "a": a, "g": g, "n": n, "cols": cols, "reach": reach, "up_share": round(float(share), 1),
+            "reach_src": "model" if reach_model else "table",
+            "dir_src": ("model+fuse" if blend else "model") if (pdir is not None and 0.0 < pdir < 1.0) else "table",
+            "coin": bool(abs(share - 50.0) < DIR_COIN_PP), "dir_note": DIR_EVID,
+            "note": (REACH_EVID if reach_model else f"닿을 확률 = 3.7년 실측 · 같은 상태 {n:,}번")
+                    + f" · 다음 30분 안 ±{SYM_K:g}×30분 폭 중 하나에 닿는가"}
 
 
 if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등급·방향이 연구가 허락한 만큼인지
+    import json
     ev = dict(mid=2600.0, move_bp=-40.0, range_bp=60.0, cvd=900.0, liq_long=300_000.0, liq_short=20_000.0, veto=1, dir=-1,
               obi=0.1, persist=0.5, basis_bp=2.0, basis_d_bp=-1.0, lead=0, funding=0.0001, crowd=0, btc_rel="단독", btc_move_bp=3.0)
     x = dict(okx30=-500.0, cvd30_z=1.5, net60=dict(whale=800.0, mid=-100.0, retail=-600.0), z60=dict(whale=1.2, mid=-0.2, retail=-0.9),
@@ -464,6 +539,31 @@ if __name__ == "__main__":   # 자체점검 — 관계마다 한 경우씩, 등�
     o4 = outcome3(dict(ev, dir=0), 0.5, [("가격↔OI", 1), ("고래↔리테일", 1)], 2)
     assert (o4["reg"], o4["a"], o4["g"]) == ("range", 1, 1)
     assert outcome3({}, 0.5, [], 0) is None and outcome3(ev, None, [], 0) is None
+    # 방향 모델: 닿을 확률(표 100 − 미도달)은 그대로, 위:아래 만 모델 비율로 가른다
+    o5 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, 0.60); P5 = {c["key"]: c["p"] for c in o5["cols"]}
+    assert o5["dir_src"] == "model" and o5["reach"] == 51.8 and P5["none"] == 48.2 and P5["up"] == 31.1 and P5["dn"] == 20.7
+    json.dumps(o5); json.dumps(outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, np.float64(0.52)))   # np.bool_ 는 JSON 이 못 쓴다
+    assert o5["up_share"] == 60.0 and not o5["coin"] and abs(sum(P5.values()) - 100) < 0.2
+    # 융합 발동(−2표·관문) 중엔 모델과 발동 실측의 평균: 모델 위 0.60 → 아래쪽 0.40 → (0.40+0.567)/2 = 0.4835 → 위 0.5165
+    o7 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [("가격↔OI", -1), ("추세정렬", -1)], -2, 0.60)
+    assert o7["dir_src"] == "model+fuse" and abs(o7["up_share"] - 51.6) < 0.11 and o7["coin"]
+    assert outcome3(dict(ev, veto=-1, dir=-1), 0.5, [("가격↔OI", -1), ("추세정렬", -1)], -2, 0.60)["dir_src"] == "model"   # 관문 미달
+    # 닿음 모델: 미도달 = 100 × (1 − preach), 위·아래는 그 안에서 방향 비율로
+    o8 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, 0.60, 0.80); P8 = {c["key"]: c["p"] for c in o8["cols"]}
+    assert o8["reach_src"] == "model" and P8["none"] == 20.0 and o8["reach"] == 80.0 and P8["up"] == 48.0 and P8["dn"] == 32.0
+    o9 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, None, 0.80); P9 = {c["key"]: c["p"] for c in o9["cols"]}
+    assert o9["reach_src"] == "model" and o9["dir_src"] == "table" and abs(P9["up"] + P9["dn"] - 80.0) < 0.15
+    assert abs(o9["up_share"] - 100 * 23.9 / (23.9 + 27.9)) < 0.2 and "HGB" in o9["note"]      # 표 방향 비율은 그대로(trend,0,2 · 하락이라 위=반대 23.9)
+    o6 = outcome3(dict(ev, veto=-1, dir=-1), 0.9, [], 0, 0.52)
+    assert o6["coin"] and outcome3(dict(ev, dir=-1), 0.9, [], 0, None)["dir_src"] == "table"
+    # 피쳐: 봉 부족·간격 끊김 = None, 정상 = 26개 유한값
+    rng = np.random.default_rng(0); px = 2600 * np.exp(np.cumsum(rng.normal(0, 8e-4, 299)))
+    bars = [dict(time=1_790_000_100 + 300 * i, high=p * 1.001, low=p * 0.999, close=p, volume=100.0 + i, taker=55.0)
+            for i, p in enumerate(px)]
+    fz = card30_features(bars)
+    assert fz is not None and len(fz) == 26 and all(np.isfinite(v) for v in fz.values())
+    assert card30_features(bars[:292]) is None and card30_features(bars[:150] + bars[151:]) is None
+    assert fz["dow"] == float(np.datetime64(bars[-1]["time"], "s").astype("datetime64[D]").item().weekday())
     # 게이지: 관계마다 붙고, 방향 부호가 줄의 해석과 같은 쪽이다
     Tg = {ln["topic"]: ln["g"] for ln in r["lines"]}
     assert all(g is not None for g in Tg.values()), [k for k, g in Tg.items() if g is None]

@@ -816,6 +816,10 @@ MICRO_BASELINE_SECONDS = 3600
 STREAM_TICK_S = 0.25                                   # /api/stream 밀어주기 주기 = 수급 폴링 주기(app.js SUPPLY_1S_POLL_MS)
 SITUATION_EVERY_TICKS = 1                              # micro-ref 1초 루프마다 (09-21 사용자 «급변 때 느리다» -- 실측 비용 30ms, duckdb 둘은 아래서 5초 캐시)
 FUSED_LOG_PATH = LIVE_DIR / "fused_card_log.jsonl"   # 2026-09-25 융합 카드(3결과 실측 확률·목표·표·발동) 봉당 1줄 -- 라이브 보정 검증용
+# 2026-09-26 30분 카드 방향 모델(HGB·5분봉 26피쳐·보정). 서버 전용 파일(handoff push) -- 없으면 카드는 옛 표 방향으로 물러선다.
+#   만든 곳: scripts/research_eth_card30_direction_hgb_tabpfn_20260926.py export (배포 전 parity 필수)
+CARD30_MODEL_PATH = REPO_ROOT / "tmp" / "card30_direction_20260926" / "model.joblib"
+CARD30_REACH_PATH = REPO_ROOT / "tmp" / "card30_direction_20260926" / "model_reach.joblib"   # 닿을 확률(표 AUC .72 → .78)
 
 
 
@@ -3373,6 +3377,33 @@ def make_app() -> web.Application:
     # 상황 읽기의 evidence(30분) 위에 «60분 크기별 z · 1시간 가격↔OI · OKX 몫 · 깊은 벽 분위»를 얹는다.
     # 🔴크기별 z 의 분모는 연구(30일)와 달리 **서버 링 24h** 다 -- 링이 6시간 미만이면 z 를 안 준다.
     fr_bar_net: dict[int, tuple[float, float, float]] = {}   # 완결 봉 -> (델타, 고래순, 리테일순)
+    # 방향(model.joblib)·닿음(model_reach.joblib) 두 모델 · 봉당 한 번만 예측. 둘 다 같은 26피쳐(card30_features).
+    card30: dict[str, Any] = {"m": None, "err": None, "bar": None, "p": {}}
+
+    def _card30_pred(bars: list[dict[str, Any]]) -> dict[str, float]:
+        """완결 5분봉 → {"dir": 닿는다면 위 먼저, "reach": 30분 안 한쪽에 닿음} 보정 확률. 모델·피쳐가 없으면 빈 dict(카드는 표로 물러선다)."""
+        if not bars or card30["err"]:
+            return {}
+        if card30["bar"] == bars[-1]["time"]:
+            return card30["p"]
+        if card30["m"] is None:
+            try:
+                import joblib
+                card30["m"] = {"dir": joblib.load(CARD30_MODEL_PATH), "reach": joblib.load(CARD30_REACH_PATH)}
+            except Exception as exc:  # noqa: BLE001 -- 한 번만 알리고 표로 물러선다(매초 재시도 안 함)
+                card30["err"] = repr(exc)[:160]
+                print(f"card30 model: {card30['err']}", flush=True)
+                return {}
+        f = fr.card30_features(bars)
+        p: dict[str, float] = {}
+        if f is not None:
+            lg = lambda q: np.log(q / (1 - q))   # noqa: E731
+            for key, M in card30["m"].items():
+                row = np.array([[f[c] for c in M["cols"]]], dtype=np.float32)
+                raw = float(np.mean([m.predict_proba(row)[0, 1] for m in M["models"]]))
+                p[key] = float(1 / (1 + np.exp(-(M["k"] * lg(raw) + (1 - M["k"]) * lg(M["base"])))))
+        card30.update(bar=bars[-1]["time"], p=p)
+        return p
 
     def _flow_read_ctx(now: float, inp: dict[str, Any]) -> dict[str, Any]:
         bar = FOOTPRINT_BAR_SECONDS
@@ -3426,6 +3457,8 @@ def make_app() -> web.Application:
             win = np.lib.stride_tricks.sliding_window_view
             rg = (win(hh, 6).max(1) - win(lo, 6).min(1)) / cc[5:]
             x["range30_pct"] = float(np.mean(rg <= rg[-1]))
+        pr = _card30_pred([c for c in day5 if int(c["time"]) < bar_start and "taker" in c])
+        x["dir_p"], x["reach_p"] = pr.get("dir"), pr.get("reach")
         mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
         imb = mp.get("imb40")
         if imb is not None and len(imb40_ring) >= 600:
@@ -3452,8 +3485,8 @@ def make_app() -> web.Application:
                 "https://fapi.binance.com/fapi/v1/klines",
                 {"symbol": FOOTPRINT_SYMBOL, "interval": "5m", "limit": 300},
                 error_reason="flow_read_5m_upstream_error")
-            return [{"time": int(r[0]) // 1000, "high": float(r[2]), "low": float(r[3]), "close": float(r[4])}
-                    for r in raw[:-1]]
+            return [{"time": int(r[0]) // 1000, "high": float(r[2]), "low": float(r[3]), "close": float(r[4]),
+                     "volume": float(r[5]), "taker": float(r[9])} for r in raw[:-1]]
         return await swr_cached("flow_read_5m_day", 60.0, produce, max_stale=STALE_GRACE_SECONDS)
 
     async def compute_situation(now: float) -> None:
@@ -3505,7 +3538,9 @@ def make_app() -> web.Application:
                         fh.write(json.dumps({"ts": int(now), "bar": bar_now, "side": fu.get("side"), "mid": inp.get("mid"),
                                              "votes": fu.get("votes"), "score": fu.get("score"), "gate_pct": fu.get("gate_pct"),
                                              "cell": [o3["reg"], o3["a"], o3["g"]],
-                                             "p": {c["key"]: c["p"] for c in o3["cols"]},
+                                             "p": {c["key"]: c["p"] for c in o3["cols"]}, "dir_p": card30["p"].get("dir") if str(o3.get("dir_src", "")).startswith("model") else None,
+                                             "reach_p": card30["p"].get("reach") if o3.get("reach_src") == "model" else None,
+                                             "dir_src": o3.get("dir_src"), "up_share": o3.get("up_share"),
                                              "up": o3["cols"][0].get("target"), "dn": o3["cols"][1].get("target")},
                                             ensure_ascii=False) + "\n")
                 except OSError as exc:
