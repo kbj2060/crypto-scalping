@@ -5108,7 +5108,10 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     foot.textContent = footText;
     const ft = document.createElementNS(NS, "title");
     ft.textContent = sm
-      ? "왼쪽 = 걸려 있는 호가(길이 = 지금 걸린 양 · 진할수록 이 창에서 자꾸 다시 깔린 것)\n"
+      // 2026-09-26 SOL·XRP 탭에서도 이 설명이 뜬다 -- 아래 «실측» 수치(분위별 수익률·상관·CI)는 전부 ETH 에서 잰 것이다.
+      ? (activeSnapshotAsset === "eth" ? "" : "🔴아래 «실측» 수치(분위별 수익률·상관·신뢰구간)는 전부 ETH 에서 잰 값입니다 — "
+                                              + coinUnit() + " 에서는 검정하지 않았습니다. 막대·지속·이탈·불균형 값은 이 코인 것입니다.\n\n")
+        + "왼쪽 = 걸려 있는 호가(길이 = 지금 걸린 양 · 진할수록 이 창에서 자꾸 다시 깔린 것)\n"
         + "오른쪽 = 체결 거래량(매수+매도) · 바깥 띠 = 순델타(초록 매수 · 빨강 매도)\n\n"
         + `불균형(OBI) ${sm.obi} — 현재가 ±${sm.obi_band_pct}% 안에서 (매수−매도)/(매수+매도).\n`
         + "  +면 매수호가가 두껍다. 🔴밴드가 값을 정한다(실측 ±0.1% +0.504 vs ±2% +0.071, 7배).\n"
@@ -5122,7 +5125,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
         // 2026-09-20 «벽»을 요약에서 뺐다(사용자 요청). 지지·저항이 아니라는 걸 실측으로
         //   확인한 뒤(5.8일 71,293건 · 반등률 0.509 = 동전 · 크기 사분위 0.502/0.510/0.520/0.503)
         //   화면에 남겨두면 「여기서 멈춘다」로 읽히기만 한다. 큰 호가는 막대 길이로 이미 보인다.
-        + `기준가 ${sm.spot} · 창 ${Math.round(sm.window_s / 60)}분`
+        + `기준가 ${fmtNum(sm.spot, pxDp())} · 창 ${Math.round(sm.window_s / 60)}분`
         // 2026-09-20 「벽이 지지·저항이 아니면 이 화면은 뭘 말하나」에 답한다. 화면에 있는
         //   축 전부를 앞으로의 가격과 맞댄 결과다(60초마다 한 표본 · 7,676개 · 독립 일수 7 ·
         //   일자 블록 부트스트랩). 방향은 전부 CI 가 0 을 품고, 움직임 «크기»만 남았다.

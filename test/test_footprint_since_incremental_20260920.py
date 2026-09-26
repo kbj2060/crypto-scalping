@@ -27,6 +27,7 @@ from pathlib import Path
 from unittest import mock
 
 from aiohttp.test_utils import TestClient, TestServer
+from offline_app import offline_app  # noqa: E402 -- 수집기·주문 감시기를 안 띄운다(같은 공인 IP 한도)
 
 from dashboard import server
 
@@ -101,7 +102,7 @@ class FootprintPayloadShapeTest(unittest.TestCase):
 
     def _exercise(self, queries: list[str]) -> None:
         async def run() -> None:
-            client = TestClient(TestServer(server.make_app()))
+            client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
                 for q in queries:

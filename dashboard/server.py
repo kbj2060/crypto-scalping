@@ -4812,7 +4812,7 @@ def make_app() -> web.Application:
                      **{f"{k}_f4": base64.b64encode(
                          np.ascontiguousarray(v, "<f4")).decode() for k, v in st.items()}},
             "summary": {
-                "spot": round(spot, 2),
+                "spot": round(spot, 6),     # 2026-09-26 XRP(0.0001 틱)도 담기게 -- 표시 자릿수는 화면(pxDp)이 정한다
                 "persist_share": round(float(pers.sum() / max(inst.sum(), 1e-9)), 3),
                 "offtouch_leave_share": offtouch_leave_share, "fill_source": fill_source,
                 "offtouch_bins": int(same_bid.sum() + same_ask.sum()),

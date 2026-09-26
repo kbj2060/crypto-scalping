@@ -10,6 +10,7 @@ from unittest import mock
 
 import duckdb
 from aiohttp.test_utils import TestClient, TestServer
+from offline_app import offline_app  # noqa: E402 -- 수집기·주문 감시기를 안 띄운다(같은 공인 IP 한도)
 
 from dashboard import server
 
@@ -222,7 +223,7 @@ class DashboardServerTest(unittest.TestCase):
             )
 
             async def exercise_api() -> None:
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     state_response = await client.get(
@@ -290,7 +291,7 @@ class DashboardServerTest(unittest.TestCase):
             write_scalp_shadow_fixture(live_dir)
 
             async def exercise_api() -> None:
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     response = await client.get("/api/scalp-shadow")
@@ -343,7 +344,7 @@ class DashboardServerTest(unittest.TestCase):
             write_scalp_shadow_fixture(live_dir, "sol")
 
             async def exercise_api() -> None:
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     btc = await client.get("/api/scalp-shadow?asset=btc")
@@ -385,7 +386,7 @@ class DashboardServerTest(unittest.TestCase):
                 write_scalp_shadow_fixture(live_dir, mode, server.SCALP_REUSE_MODES)
 
             async def exercise_api() -> None:
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     lifecycle = await client.get(
@@ -446,7 +447,7 @@ class StaticAssetCacheHeaderTest(unittest.TestCase):
         #   (2026-09-20 확인). 아무 데서도 못 도는 시험은 회귀를 못 잡는다. 같은 파일의 다른
         #   시험들이 이미 쓰는 방식(임시 디렉터리로 패치)을 여기에도 쓴다.
         async def exercise() -> None:
-            client = TestClient(TestServer(server.make_app()))
+            client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
                 for path in ("app.js", "styles.css", "index.html"):

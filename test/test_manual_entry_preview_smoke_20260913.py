@@ -28,9 +28,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
+import aiohttp
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
+from offline_app import offline_app  # noqa: E402 -- 수집기·주문 감시기를 안 띄운다(같은 공인 IP 한도)
 
 from dashboard import server  # noqa: E402
 
@@ -62,6 +65,11 @@ FAKE_ACCOUNT = {
 
 async def _fake_binance(url, params, *, timeout=10.0, error_reason=None):
     """bookTicker/klines 만 흉내낸다. **테스트가 바깥 세상을 건드리면 안 된다.**"""
+    return _fake_binance_data(url, params)
+
+
+def _fake_binance_data(url, params):
+    url = str(url)
     if "bookTicker" in url:
         return {"symbol": "ETHUSDT", "bidPrice": "2500.00", "askPrice": "2500.01"}
     if "klines" in url:
@@ -69,6 +77,42 @@ async def _fake_binance(url, params, *, timeout=10.0, error_reason=None):
         return [[1700000000000 + i * 300000, "2500", "2501", "2499", "2500",
                  "10", 0, "25000", 100, "5", "12500", "0"] for i in range(n)]
     return None
+
+
+# 🔴2026-09-26 위 `_fake_binance` 는 모듈 패치라 make_app **클로저**(fetch_binance_json)에 안 닿았다 -- 호가·클라인은
+#   실제 바이낸스를 쳤다(네트워크 차단 하네스 실측: 한 번 돌 때 연결 시도 170회). 이 PC 는 서버와 같은 공인 IP 라
+#   그 요청이 서버·봇의 한도를 먹는다. 그래서 aiohttp 의 `ClientSession.get` 을 갈아끼워 바이낸스 주소만 가짜로 답한다
+#   (시험 클라이언트는 `.request` 를 써서 영향이 없다).
+class _FakeResp:
+    def __init__(self, data):
+        self._d, self.status, self.headers = data, (200 if data is not None else 404), {}
+
+    async def json(self, **_k):
+        return self._d
+
+    async def text(self):
+        import json as _json
+        return _json.dumps(self._d)
+
+
+class _FakeCtx:
+    def __init__(self, resp):
+        self._r = resp
+
+    async def __aenter__(self):
+        return self._r
+
+    async def __aexit__(self, *_a):
+        return False
+
+
+_REAL_GET = aiohttp.ClientSession.get
+
+
+def _offline_get(self, url, *args, params=None, **kwargs):
+    if "binance.com" in str(url):
+        return _FakeCtx(_FakeResp(_fake_binance_data(url, params or {})))
+    return _REAL_GET(self, url, *args, params=params, **kwargs)
 
 
 @contextlib.contextmanager
@@ -96,6 +140,7 @@ def _isolated_dirs():
                                live / "eth_position_sizing_state.json"), \
              mock.patch.object(server, "POSITION_SIZING_MAX_AGE_MIN", 10 ** 9), \
              mock.patch.object(server, "fetch_binance_json", _fake_binance, create=True), \
+             mock.patch.object(aiohttp.ClientSession, "get", _offline_get), \
              mock.patch.object(server, "produce_account", fake_account, create=True), \
              mock.patch.object(server, "fetch_account", fake_account), \
              mock.patch.object(server, "load_filters", mock.AsyncMock(return_value={
@@ -107,7 +152,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
     def _get_all(self, checks) -> None:
         """checks: [(path, expected_status|None)]. status 가 None 이면 아무 값이나 좋다."""
         async def exercise() -> None:
-            client = TestClient(TestServer(server.make_app()))
+            client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
                 for path, expect in checks:
@@ -145,7 +190,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
     def test_trade_plan_is_attached(self) -> None:
         """2026-09-13 «지금 상황» 플랜이 진입·청산 미리보기에 실려 온다(보유 권고·사다리)."""
         async def exercise() -> None:
-            client = TestClient(TestServer(server.make_app()))
+            client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
                 for path in ("/api/manual-entry/preview?side=LONG&hold=240",
@@ -189,7 +234,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             with mock.patch.object(server, "fetch_account", fake_account), \
                  mock.patch.object(server, "exec_enabled", lambda: True), \
                  mock.patch.object(server, "run_entry", never_run):
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     prev = await (await client.get(
@@ -226,7 +271,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
 
         async def exercise() -> None:
             with mock.patch.object(server, "fetch_account", fake_account):
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     body = await (await client.get(
@@ -255,7 +300,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         여기서 잡는다. 배수는 방향 가정과 무관해야 하므로 그 사실도 같이 고정한다.
         """
         async def exercise() -> None:
-            client = TestClient(TestServer(server.make_app()))
+            client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
                 for path in ("/api/manual-entry/preview?side=LONG&hold=240",
@@ -294,7 +339,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         (원장·순자산의 작은 쪽)이어야 한다. 로컬에서는 순자산 상한이 묶여 증상이 안 보였다.
         """
         async def exercise() -> None:
-            client = TestClient(TestServer(server.make_app()))
+            client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
                 seen = set()
@@ -318,7 +363,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         이 값이 틀리면 실계좌 레버리지가 틀리게 걸린다.
         """
         async def exercise() -> None:
-            client = TestClient(TestServer(server.make_app()))
+            client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
                 base = await (await client.get(
@@ -363,7 +408,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
 
         async def exercise() -> None:
             with mock.patch.object(server, "fetch_account", fake_account):
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     body = await (await client.get(
@@ -400,7 +445,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
 
         async def exercise() -> None:
             with mock.patch.object(server, "fetch_account", fake_account):
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     for q in ("", "&hold=60", "&hold=1440", "&hold=abc"):
@@ -433,7 +478,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     "resistance_levels": [{"price": price * 1.03}, {"price": price * 1.06}]}
 
         async def exercise() -> None:
-            client = TestClient(TestServer(server.make_app()))
+            client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
                 for side, tp_x, sl_x in (("LONG", 1.06, 0.97), ("SHORT", 0.94, 1.03)):
@@ -453,7 +498,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             asyncio.run(exercise())
 
         async def no_levels() -> None:
-            client = TestClient(TestServer(server.make_app()))
+            client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
                 b = (await (await client.get(
@@ -502,7 +547,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                  mock.patch.object(server, "position_sizing_payload", with_ledger_cap), \
                  mock.patch.object(server, "recommend_hold", lambda *a, **k: {
                      "available": True, "recommended_min": 1440}):
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     e = (await (await client.get(
@@ -549,7 +594,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         async def exercise() -> None:
             with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
                  mock.patch.object(server, "position_sizing_payload", with_ledger_cap()):
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
@@ -565,7 +610,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     await client.close()
             with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
                  mock.patch.object(server, "position_sizing_payload", with_ledger_cap(True)):
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
                     b = await (await client.get("/api/manual-entry/preview?side=LONG")).json()
@@ -586,7 +631,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         async def exercise() -> None:
             with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
                  mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0):
-                client = TestClient(TestServer(server.make_app()))
+                client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 get = lambda q: client.get("/api/manual-entry/preview?side=LONG" + q)
                 try:
