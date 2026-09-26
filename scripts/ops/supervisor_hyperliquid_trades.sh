@@ -12,16 +12,28 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PY="${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}"
 cd "$ROOT"
 
-if pgrep -f "[l]ive_hyperliquid_trade_collector_20260916.py" >/dev/null; then
-  echo "[$(date -Iseconds)] 하이퍼리퀴드 체결 수집기가 이미 실행 중 -- 켜지 않는다." >&2
-  exit 1
-fi
+# 2026-09-26 다코인: **코인당 프로세스 하나**(HL_COINS=BTC 처럼 한 코인). 한 프로세스에 여러 코인을
+#   넣으면 저장 폴더가 `ETH_BTC/` 가 되어 포지션 수집기(`<COIN>/` 를 읽는다)와 ETH 폴더 연속성이 깨진다.
+TARGET="${HL_COINS:-ETH}"
+case "$TARGET" in *,*)
+  echo "[$(date -Iseconds)] HL_COINS=$TARGET -- 코인당 하나씩 띄울 것(폴더가 코인 조합으로 갈린다)." >&2
+  exit 1 ;;
+esac
+for pid in $(pgrep -f "[l]ive_hyperliquid_trade_collector_20260916.py"); do
+  cur=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep '^HL_COINS=' | cut -d= -f2)
+  if [ "${cur:-ETH}" = "$TARGET" ]; then
+    echo "[$(date -Iseconds)] 하이퍼리퀴드 체결 수집기($TARGET)가 이미 실행 중(pid $pid) -- 켜지 않는다." >&2
+    exit 1
+  fi
+done
+# ETH 는 기존 락·로그 경로 그대로(이미 떠 있는 supervisor 와 같은 락이어야 중복이 막힌다).
+if [ "$TARGET" = "ETH" ]; then SFX=""; else SFX="_$TARGET"; fi
 
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-export HL_COINS="${HL_COINS:-ETH}"
+export HL_COINS="$TARGET"
 
 exec "$ROOT/scripts/ops/_supervise.sh" \
   "live_hyperliquid_trade_collector_20260916.py($HL_COINS)" \
-  "$ROOT/data/live/.supervisor_hyperliquid_trades.lock" \
-  "$ROOT/logs/supervisor/hyperliquid_trades" \
+  "$ROOT/data/live/.supervisor_hyperliquid_trades$SFX.lock" \
+  "$ROOT/logs/supervisor/hyperliquid_trades$SFX" \
   "$PY" -u "$ROOT/scripts/live_hyperliquid_trade_collector_20260916.py"

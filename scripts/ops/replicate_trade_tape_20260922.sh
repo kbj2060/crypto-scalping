@@ -14,8 +14,11 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
 PY="${PYTHON_BIN:-$HOME/miniforge3/envs/quant_ai/bin/python}"
-SRC="data/live/trade_tape.duckdb"
-DEST="${TT_DEST:-data/live/trade_tape.from_pi.duckdb}"   # 전환 시 trade_tape.duckdb 로
+# 2026-09-26 다코인: 코인별 테이프(trade_tape_btc.duckdb, okx_trade_tape_xrp.duckdb …)도 같은 스크립트로
+#   보낸다 -- TT_SRC 만 바꿔 cron 줄을 하나씩 더 둔다. 목적지 기본값은 원본 이름에 .from_pi 를 붙인
+#   것이라 서버에 같은 이름의 수집기가 있어도 덮지 않는다.
+SRC="${TT_SRC:-data/live/trade_tape.duckdb}"
+DEST="${TT_DEST:-${SRC%.duckdb}.from_pi.duckdb}"   # 전환 시 원본과 같은 이름으로
 
 [[ -f "$SRC" ]] || { echo "[$(date -Iseconds)] 원본 없음: $SRC"; exit 0; }
 
