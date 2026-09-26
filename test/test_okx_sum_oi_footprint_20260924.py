@@ -5,6 +5,7 @@ import asyncio, json, re
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from aiohttp import web
 
 src = (Path(__file__).resolve().parents[1] / "dashboard" / "server.py").read_text(encoding="utf-8")
@@ -30,6 +31,28 @@ ns = {"web": web, "asyncio": asyncio, "swr_cached": swr_cached, "oi_1s": {}, "OI
       "okx_liq_events": deque([{"ts_ms": 610_000, "side": "long", "usd": 999.0},
                                {"ts_ms": 950_000, "side": "long", "usd": 100.0},
                                {"ts_ms": 960_000, "side": "short", "usd": 40.0}])}
+# 2026-09-26 코인별 흐름 엔진 -- 핸들러는 `?asset=` 로 엔진을 고른다. ETH 엔진은 위 값들을 그대로 묶는다.
+def _flow(asset, symbol, bucket, dp, **state):
+    return SimpleNamespace(spec=SimpleNamespace(asset=asset, symbol=symbol, bucket=bucket, price_dp=dp,
+                                                okx_inst=f"{asset.upper()}-USDT-SWAP"), **state)
+flows = {"eth": _flow("eth", "ETHUSDT", 0.5, 2, footprint_state=ns["footprint_state"], oi_1s=ns["oi_1s"],
+                      okx_oi_5m=ns["okx_oi_5m"], okx_fp=ns["okx_fp"], okx_bars=ns["okx_bars"],
+                      okx_liq_events=ns["okx_liq_events"]),
+         # XRP: 칸 0.0003 -- 소수 둘째 자리로 반올림하면 이웃 칸이 한 값으로 뭉친다(가격 1.5363 -> 1.54)
+         "xrp": _flow("xrp", "XRPUSDT", 0.0003, 4,
+                      footprint_state={"bars": {1200: {5121: [1.0] * 6, 5122: [2.0] * 6}}, "agg_bars": set(), "ready": True},
+                      oi_1s={}, okx_oi_5m={}, okx_fp={"first_bar": 0}, okx_bars={}, okx_liq_events=deque())}
+def flow_for(q):
+    f = flows.get(str(q.get("asset") or "eth").lower())
+    if f is None:
+        raise web.HTTPNotFound(reason="flow_off")
+    return f
+ns.update(flows=flows, flow_for=flow_for, SimpleNamespace=SimpleNamespace,
+          liq_5m_state={"from_s": {}},   # 실시간 누적 없음 -> 캐시(liq_cached) 경로를 탄다
+          # HL 고래 합산(09-24)은 이 시험 대상이 아니다 -- 있는 그대로 통과시킨다
+          time=__import__("time"), FOOTPRINT_KEEP_BARS=288, hl_whale_liq_events=None,
+          merge_hl_liq=lambda bars, ev, bar_s: bars,
+          HL_LIQ_BY_ASSET={"eth": (None, 5.0, 2)})   # 코인별 HL DB 표(09-26) -- 이 시험은 ETH 만 본다
 exec(compile(chunk, "okxsum", "exec"), ns)
 liq_cached = {"warmed_up": True, "bars": [
     {"ts": datetime.fromtimestamp(t, timezone.utc).isoformat(), "long_usd": 10.0, "short_usd": 5.0,
@@ -44,9 +67,11 @@ class Req:
 async def main():
     oi = json.loads((await ns["api_oi_5m"](Req({"bars": "3"}))).body)
     assert oi["venues"] == ["binance-perp", "okx-swap"]
-    assert oi["bars"][0] == [600, 10.0, 1000.0, 50, 0]                 # OKX 기록 없는 봉 = 바이낸스만
-    assert oi["bars"][1] == [900, -1.0, 1499.0, 50, 0]                 # -4 + (503-500)
-    assert oi["bars"][2] == [1200, 0.0, 1499.0, 50, 0]                 # 2 + (501-503)
+    # 09-25 커버리지 가드(test_oi5m_okx_coverage_guard): OKX 가 온전히 못 본 봉(600 = 재기동 봉)은 뺀다
+    #   -- 한 창에 1거래소 봉·2거래소 봉이 섞이지 않게. 이 시험은 그 가드 전 기대값에 멈춰 있었다.
+    assert [b[0] for b in oi["bars"]] == [900, 1200]
+    assert oi["bars"][0] == [900, -1.0, 1499.0, 50, 0]                 # -4 + (503-500)
+    assert oi["bars"][1] == [1200, 0.0, 1499.0, 50, 0]                 # 2 + (501-503)
     assert cached[1] == [900, -4.0, 996.0, 50, 0], "swr 캐시를 고쳤다 -- 다음 요청에 두 번 더해진다"
     fp = json.loads((await ns["api_footprint"](Req({"since": "0"}))).body)
     assert [b["time"] for b in fp["bars"]] == [900, 1200]
@@ -65,6 +90,15 @@ async def main():
     assert b1200["okx"] and b1200["long_usd"] == 10.0                      # OKX 이벤트 없는 봉도 표시는 합산판
     assert liq_cached["bars"][1]["long_usd"] == 10.0, "swr 캐시를 고쳤다 -- 30초 동안 요청마다 또 더해진다"
     assert json.loads((await ns["api_liquidation_5m_history"](Req({"asset": "btc"}))).body) == liq_cached
+    # ── 코인별(2026-09-26): XRP 칸 가격은 4자리 · 꺼진 코인은 ETH 대신 404 ──
+    xfp = json.loads((await ns["api_footprint"](Req({"since": "0", "asset": "xrp"}))).body)
+    assert xfp["symbol"] == "XRPUSDT" and xfp["bucket"] == 0.0003
+    assert [l[0] for l in xfp["bars"][0]["levels"]] == [1.5363, 1.5366], xfp["bars"][0]["levels"]
+    try:
+        await ns["api_footprint"](Req({"since": "0", "asset": "btc"}))
+        raise AssertionError("꺼진 코인에 ETH 풋프린트를 줬다")
+    except web.HTTPNotFound:
+        pass
     ns["okx_fp"]["first_bar"] = 0                                         # OKX 없음 -> okxLive 없음
     assert json.loads((await ns["api_footprint"](Req({"since": "0"}))).body)["okxLive"] is None
     print("ok")

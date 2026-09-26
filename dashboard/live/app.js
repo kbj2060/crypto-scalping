@@ -27,10 +27,24 @@ const MICRO_HISTORY_MAX = 48; // matches MODEL_INDICATOR_HISTORY_MAX in server.p
 // Kept post-Live-tab-removal solely as the SSE ticker payload's asset allowlist (see
 // applyDashboardEvent()) -- eth/btc still need their live price tracked for the Snapshot tab's own
 // coin switcher (activeSnapshotAsset), sol is tracked too for parity even though nothing reads it.
+// 2026-09-26 dp = 화면 가격 소수 자릿수, qtyScale = 수량 눈금 배율(ETH=1 기준, 대략 ETH가격/코인가격).
+//   🔴데이터 심볼은 전부 USDT 시장이다(주문만 USDC -- 사용자 규칙).
 const ASSET_CONFIG = {
-  eth: { label: "ETH", symbol: "ETHUSDT" },
-  sol: { label: "SOL", symbol: "SOLUSDT" },
-  btc: { label: "BTC", symbol: "BTCUSDT" },
+  eth: { label: "ETH", symbol: "ETHUSDT", dp: 1, qtyScale: 1 },
+  sol: { label: "SOL", symbol: "SOLUSDT", dp: 2, qtyScale: 20 },
+  btc: { label: "BTC", symbol: "BTCUSDT", dp: 0, qtyScale: 0.03 },
+  xrp: { label: "XRP", symbol: "XRPUSDT", dp: 4, qtyScale: 2000 },
+};
+// 풋프린트·1초 수급·OI·호가 히트맵을 서버가 실시간으로 만드는 코인(server.py FLOW_SPECS 와 같은 목록).
+const FLOW_ASSETS = new Set(["eth", "sol", "xrp"]);
+const flowOn = () => FLOW_ASSETS.has(activeSnapshotAsset);
+const coinUnit = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).label || String(activeSnapshotAsset).toUpperCase();
+const pxDp = () => { const d = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp; return Number.isFinite(d) ? d : 1; };
+const qtyScale = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).qtyScale || 1;
+// 가격 격자 한 칸(행 크기)을 정확히 적는 소수 자릿수 -- 0.5 -> 1, 2 -> 0, 0.02 -> 2, 0.0003 -> 4.
+const dpOf = (step) => {
+  const t = String(Number(Number(step).toPrecision(6)));
+  return t.includes("e-") ? Number(t.split("e-")[1]) : (t.split(".")[1] || "").length;
 };
 
 const el = (id) => document.getElementById(id);
@@ -584,6 +598,15 @@ async function setActiveSnapshotAsset(asset) {
   // ETH 전용 그림들의 캐시도 비운다 -- 안 비우면 ETH 로 **돌아올 때** 옛 그림이 한 프레임 번쩍인다.
   latestSupplyProfile = null; supplyProfileLastFetchAt = 0;
   footprintBars = new Map(); latestFootprint = null;
+  // 2026-09-26 SOL·XRP 도 흐름이 있다 -- 1초 수급 칸·커서·실시간 셀·히트맵을 코인마다 새로 받는다.
+  //   🔴커서를 안 비우면 새 코인에 옛 코인의 초 번호로 «그 뒤만» 달라고 해서 창 앞부분이 빈다.
+  resetSupply1sState();
+  // 🔴칸 폭은 **모른다**(0)로 둔다 -- 옛 코인 폭(ETH 0.5)으로 XRP 체결을 묶으면 진행 봉 셀이 엉뚱한 행에 쌓인다.
+  //   새 코인 풋프린트 응답이 폭을 알려 줄 때까지 실시간 셀은 안 쌓고(footprintLiveAdd), 그 봉은 서버 값을 쓴다.
+  footprintLive = { barStart: 0, since: Infinity, bucket: 0, cells: new Map(),
+                    orderQty: 0, orderAt: null, orderLastMs: 0, orderLastTid: -1 };
+  latestFlowHeatmap = null; flowHeatmapLastFetchAt = 0;
+  latestHlWhaleLiq = null; hlWhaleLiqLastFetchAt = 0;
   latestLiquidation5m = null;
   latestLiquidation5mHist = [];
   latestOi5m = null; oi5mLastFetchAt = 0;
@@ -3001,14 +3024,17 @@ async function refreshVolLevel() {
 // has no such host -- it self-triggers both the panel list and the snapshot chart right after a
 // fetch resolves, same pattern as refreshEvidenceSignals().
 async function refreshHlWhaleLiq() {
-  if (activeSnapshotAsset !== "eth") return;             // 수집기가 ETH 만 본다
+  if (!flowOn()) return;             // 2026-09-26 ETH·SOL·XRP (SOL·XRP 는 Pi 수집 → 서버 복제)
   const now = Date.now();
   if (now - hlWhaleLiqLastFetchAt < HL_WHALE_LIQ_POLL_MS) return;
   hlWhaleLiqLastFetchAt = now;
+  const asset = activeSnapshotAsset;
   try {
-    const res = await fetch("/api/hl-whale-liq", { cache: "no-cache" });
+    const res = await fetch(`/api/hl-whale-liq?asset=${asset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`hl whale liq ${res.status}`);
-    latestHlWhaleLiq = await res.json();
+    const j = await res.json();
+    if (asset !== activeSnapshotAsset) return;
+    latestHlWhaleLiq = j;
   } catch (error) {
     console.error("HL whale liq fetch error:", error);
     latestHlWhaleLiq = null;
@@ -3403,11 +3429,11 @@ function liqExtremeLevels(footprint) {
 // 🔴10분 넘게 묵은 스냅샷은 안 그린다 -- 수집기가 멈춘 채 낡은 청산가를 «지금»처럼 보이면 안 된다.
 function hlWhaleLiqLevels(currentPrice, footprint) {
   const d = latestHlWhaleLiq;
-  if (activeSnapshotAsset !== "eth" || !d || !d.ok || !(currentPrice > 0)) return [];
+  if (!flowOn() || !d || !d.ok || !(currentPrice > 0)) return [];
   if (!(Number(d.age_s) < 600)) return [];
   const pick = (idx, below) => (d.clusters || [])
     .filter((c) => (below ? c[0] < currentPrice : c[0] > currentPrice)
-      && Math.abs(c[0] / currentPrice - 1) <= HL_WHALE_LIQ_RANGE && c[idx] >= HL_WHALE_LIQ_MIN_ETH)
+      && Math.abs(c[0] / currentPrice - 1) <= HL_WHALE_LIQ_RANGE && c[idx] >= HL_WHALE_LIQ_MIN_ETH * qtyScale())
     .sort((a, b) => b[idx] - a[idx])[0];
   const fmt = (x) => (x >= 1000 ? `${(x / 1000).toFixed(1)}k` : `${Math.round(x)}`);
   return [[pick(1, true), "HL롱", "var(--liq-support)", 1], [pick(2, false), "HL숏", "var(--liq-resistance)", 2]]
@@ -3494,11 +3520,11 @@ function updateLivePriceFast(price) {
   // 2026-09-22 모바일에는 배지가 없다(값은 플롯 아래 한 줄에 있다). 옛 판은 box/txt 가
   //   없으면 **여기서 return** 해서 화살표까지 같이 멈췄다 -- 전체 렌더(1초)까지 어긋난다.
   const row = c.svg.querySelector('[data-live="rowtext"]');
-  if (row) row.textContent = (row.textContent.split(" ")[0] || "현재") + " " + fmtNum(price, 1);
+  if (row) row.textContent = (row.textContent.split(" ")[0] || "현재") + " " + fmtNum(price, pxDp());
   if (!box || !txt) return;
   box.setAttribute("y", labelY - 9);
   txt.setAttribute("y", labelY + 4);
-  txt.textContent = fmtNum(price, 1);
+  txt.textContent = fmtNum(price, pxDp());
 }
 
 // ── 진행 중인 봉의 셀을 브라우저가 직접 쌓는다 (2026-09-16) ───────────────────────
@@ -3522,6 +3548,7 @@ function roundHalfEven(x) {
 }
 
 function footprintLiveAdd(price, qty, tsMs, sell, tid) {
+  if (!(footprintLive.bucket > 0)) return;   // 코인을 막 바꿨다 -- 서버가 칸 폭을 알려 줄 때까지 기다린다
   const barSec = Math.floor(tsMs / 1000 / CHART_CANDLE_MIN / 60) * CHART_CANDLE_MIN * 60;
   if (barSec !== footprintLive.barStart) {
     footprintLiveCloseOrder();     // 이전 봉의 마지막 주문을 흘리지 않는다
@@ -3634,7 +3661,7 @@ function ensurePriceWs() {
         latestLivePriceByAsset[priceWsAsset] = price;
         updateLivePriceFast(price);
         const qty = Number(d.q);
-        if (qty > 0 && priceWsAsset === "eth") {
+        if (qty > 0 && FLOW_ASSETS.has(priceWsAsset) && priceWsAsset === activeSnapshotAsset) {
           footprintLiveAdd(price, qty, Number(d.T), !!d.m,
                            d.t == null ? null : Number(d.t));
           // 체결이 곧 셀의 변화다. 스로틀은 maybeRenderSnapshotChartNow 안에 있다(모드별).
@@ -3651,20 +3678,23 @@ function ensurePriceWs() {
 
 async function refreshSupply1s() {
   if (activePageTab !== "snapshot" || document.hidden) return;   // 안 보이는 걸 매초 받지 않는다
-  if (activeSnapshotAsset !== "eth") return;                     // 테이프는 ETH 만 수집한다
+  if (!flowOn()) return;                                         // 흐름 엔진이 있는 코인만(FLOW_ASSETS)
   const now = Date.now();
   if (liveStreamOn()) return;                                    // /api/stream 이 밀어주는 중
   if (now - supply1sLastFetchAt < SUPPLY_1S_POLL_MS || supply1sInFlight) return;
   supply1sLastFetchAt = now;
   supply1sInFlight = true;
   try {
-    const res = await fetch(`${API_SUPPLY_1S_URL}?since=${supply1sSince}&sinceOi=${oi1sSince}`
+    const asset = activeSnapshotAsset;
+    const res = await fetch(`${API_SUPPLY_1S_URL}?asset=${asset}&since=${supply1sSince}&sinceOi=${oi1sSince}`
                             + `&sinceLiq=${liq1sSince}&sinceOkx=${okxSupply1sSince}`
                             + `&sinceOkxOi=${okxOi1sSince}&sinceOkxLiq=${okxLiq1sSince}`
                             + `&sinceSpot=${spotSupply1sSince}`,
                             { cache: "no-cache" });
     if (!res.ok) throw new Error(`supply-1s ${res.status}`);
-    applySupply1s(await res.json());
+    const j = await res.json();
+    if (asset !== activeSnapshotAsset) return;     // 그 사이 코인이 바뀌었다 -- 남의 초를 얹지 않는다
+    applySupply1s(j);
   } catch (error) {
     console.error("Supply 1s fetch error:", error);
   } finally {
@@ -3673,6 +3703,18 @@ async function refreshSupply1s() {
   // 받은 즉시 **이 패널만** 다시 그린다. 캔들 SVG 전체를 다시 그리지 않으므로 비싼 패스
   // (캔들·청산밀도·프로파일)는 안 탄다 -- 호버/스크롤 게이트에도 안 걸린다.
   repaintSupply1sPanel();
+}
+
+function resetSupply1sState() {
+  supply1s = new Map(); oi1s = new Map(); liq1s = new Map();
+  okxSupply1s = new Map(); okxOi1s = new Map(); okxLiq1s = new Map(); spotSupply1s = new Map();
+  supply1sSince = 0; oi1sSince = 0; liq1sSince = 0;
+  okxSupply1sSince = 0; okxOi1sSince = 0; okxLiq1sSince = 0; spotSupply1sSince = 0;
+  supply1sMeta = { retailMaxUsd: 0, whaleMinUsd: 0, now: 0 };
+  okxMeta = { now: 0, connected: false, tradeAge: null, oiAge: null, inst: "", errors: 0 };
+  spotMeta = { now: 0, connected: false, tradeAge: null, errors: 0 };
+  supply1sLastFetchAt = 0;
+  supply1sVer += 1;
 }
 
 // 받은 수급 한 덩이를 칸·커서에 얹는다. 폴링과 /api/stream 이 **같은 함수**를 지난다.
@@ -3750,7 +3792,7 @@ const liveStreamOn = () => liveStream !== null && Date.now() - liveStreamAt < 30
 
 function ensureLiveStream() {
   const want = activePageTab === "snapshot" && !document.hidden;
-  const key = want ? (activeSnapshotAsset === "eth" ? "eth" : "other") : "";
+  const key = want ? (flowOn() ? activeSnapshotAsset : "other") : "";   // 코인이 바뀌면 다시 연다(커서가 코인별)
   if (liveStream && (key !== liveStreamKey
                      || Date.now() - Math.max(liveStreamAt, liveStreamOpenedAt) > 10000)) {
     liveStream.close(); liveStream = null;           // 탭·코인·가시성이 바뀌었거나 10초 침묵
@@ -3758,8 +3800,8 @@ function ensureLiveStream() {
   if (!key || liveStream || Date.now() < liveStreamRetryAt) return;
   liveStreamKey = key;
   // 수급은 ETH 만 수집한다. 커서는 **지금 가진 것**으로 -- 전량은 첫 연결 한 번뿐이다.
-  const q = key !== "eth" ? "" :
-    `?supply=1&since=${supply1sSince}&sinceOi=${oi1sSince}&sinceLiq=${liq1sSince}`
+  const q = key === "other" ? "" :
+    `?supply=1&asset=${key}&since=${supply1sSince}&sinceOi=${oi1sSince}&sinceLiq=${liq1sSince}`
     + `&sinceOkx=${okxSupply1sSince}&sinceOkxOi=${okxOi1sSince}&sinceOkxLiq=${okxLiq1sSince}`
     + `&sinceSpot=${spotSupply1sSince}`;
   const es = new EventSource(API_STREAM_URL + q);
@@ -3855,17 +3897,19 @@ async function refreshGex() {
 
 async function refreshFlowHeatmap() {
   if (activePageTab !== "snapshot" || document.hidden) return;
-  if (activeSnapshotAsset !== "eth") return;   // 래스터 수집은 ETH 만 한다
+  if (!flowOn()) return;   // 래스터 수집기가 있는 코인만
   const now = Date.now();
   if (now - flowHeatmapLastFetchAt < flowHeatmapPollMs()) return;
   flowHeatmapLastFetchAt = now;
   try {
+    const asset = activeSnapshotAsset;
     const res = await fetch(
-      `/api/flow/heatmap?symbol=ethusdt&cols=${FLOW_HEATMAP_COLS}`
+      `/api/flow/heatmap?symbol=${asset}usdt&cols=${FLOW_HEATMAP_COLS}`
       + `&agg=${flowHeatmapAgg()}&mode=rows`,
       { cache: "no-cache" });
     if (!res.ok) throw new Error(`flow-heatmap ${res.status}`);
     const j = await res.json();
+    if (asset !== activeSnapshotAsset) return;
     // 서버가 qty 를 **int8 로 양자화**해 보낸다(±127 = ±p97). 화면은 농도만 쓰므로
     // 원값이 필요 없고 페이로드가 f32 대비 1/4 이다. mid 는 가격이라 f32 그대로다.
     const raw = (b64) => {
@@ -3902,14 +3946,17 @@ async function refreshFlowHeatmap() {
 
 async function refreshSupplyProfile() {
   if (activePageTab !== "snapshot" || document.hidden) return;
-  if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
+  if (!flowOn()) return;   // 흐름 엔진이 있는 코인만
   const now = Date.now();
   if (now - supplyProfileLastFetchAt < SUPPLY_PROFILE_POLL_MS) return;
   supplyProfileLastFetchAt = now;
   try {
-    const res = await fetch(`${API_SUPPLY_PROFILE_URL}?bars=${chartWindowBars}`, { cache: "no-cache" });
+    const asset = activeSnapshotAsset;
+    const res = await fetch(`${API_SUPPLY_PROFILE_URL}?asset=${asset}&bars=${chartWindowBars}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`supply-profile ${res.status}`);
-    latestSupplyProfile = await res.json();
+    const j = await res.json();
+    if (asset !== activeSnapshotAsset) return;
+    latestSupplyProfile = j;
   } catch (error) {
     console.error("Supply profile fetch error:", error);
     latestSupplyProfile = null;
@@ -3920,7 +3967,7 @@ async function refreshSupplyProfile() {
 
 async function refreshOi5m() {
   if (activePageTab !== "snapshot" || document.hidden) return;
-  if (activeSnapshotAsset !== "eth") return;   // OI 수집은 ETH 만 한다
+  if (!flowOn()) return;   // 흐름 엔진이 있는 코인만
   const now = Date.now();
   if (now - oi5mLastFetchAt < OI_5M_POLL_MS) return;
   oi5mLastFetchAt = now;
@@ -3930,9 +3977,12 @@ async function refreshOi5m() {
     //   사분면이 `|| 0` 으로 받아 **전부 «신규 롱/숏» 으로 가짜 라벨**이 붙었다(OI=0 은 o>=0 이다).
     //   창 최대치에서 파생시킨다 -- 토글을 늘리면 여기가 자동으로 따라온다. +4 는 Δ 의 기준봉 여유.
     const oiBarsWanted = Math.max(...CHART_WINDOW_BARS) + 4;
-    const res = await fetch(`${API_OI_5M_URL}?bars=${oiBarsWanted}`, { cache: "no-cache" });
+    const asset = activeSnapshotAsset;
+    const res = await fetch(`${API_OI_5M_URL}?asset=${asset}&bars=${oiBarsWanted}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`oi-5m ${res.status}`);
-    latestOi5m = await res.json();
+    const j = await res.json();
+    if (asset !== activeSnapshotAsset) return;
+    latestOi5m = j;
   } catch (error) {
     console.error("OI 5m fetch error:", error);
     latestOi5m = null;
@@ -4190,7 +4240,7 @@ let footprintBars = new Map();          // 봉시각 -> 서버가 준 봉 객체
 let footprintCacheKey = "";             // 코인|창 -- 달라지면 캐시를 버리고 전량부터
 
 async function refreshFootprint() {
-  if (activeSnapshotAsset !== "eth") return;   // 테이프는 ETH 만 수집한다
+  if (!flowOn()) return;   // 흐름 엔진이 있는 코인만
   const now = Date.now();
   if (now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
   footprintLastFetchAt = now;
@@ -4210,10 +4260,11 @@ async function refreshFootprint() {
   }
   const since = newest ? newest - barSec : 0;   // 0 = 전량
   try {
-    const res = await fetch(`${API_FOOTPRINT_URL}?bars=${chartWindowBars}&since=${since}`,
+    const res = await fetch(`${API_FOOTPRINT_URL}?asset=${activeSnapshotAsset}&bars=${chartWindowBars}&since=${since}`,
                             { cache: "no-cache" });
     if (!res.ok) throw new Error(`footprint ${res.status}`);
     const payload = await res.json();
+    if (`${activeSnapshotAsset}|${chartWindowBars}` !== key) return;   // 그 사이 코인·창이 바뀌었다
     if (payload.full) footprintBars = new Map();
     (payload.bars || []).forEach((b) => footprintBars.set(b.time, b));
     // 창 밖으로 밀려난 봉은 버린다 -- 증분이라 서버가 «빠졌다»를 말해 주지 않는다.
@@ -4238,7 +4289,7 @@ async function refreshFootprint() {
 
 // 풋프린트가 없으면(다른 코인 · 서버 웜업 · fetch 실패) null 을 돌려주고, 차트는 캔들로 그린다.
 function footprintForChart() {
-  if (activeSnapshotAsset !== "eth") return null;
+  if (!flowOn()) return null;
   const payload = latestFootprint;
   const bars = Array.isArray(payload && payload.bars)
     ? payload.bars.filter((b) => Array.isArray(b.levels) && b.levels.length) : [];
@@ -4263,6 +4314,7 @@ function footprintForChart() {
 // 체결량 표기 -- 셀 폭이 30px 대라 네 글자를 넘기면 안 된다(ETH 수량 기준).
 function fmtFootprintQty(v) {
   if (!(v > 0)) return "";
+  if (v >= 1e6) return (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M";      // XRP 수량(ETH 의 ~2,000배)
   if (v >= 1000) return (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "k";
   if (v >= 100) return v.toFixed(0);
   return v.toFixed(1);
@@ -4503,7 +4555,7 @@ function renderSupply1s(box = null, src = null) {
                         // 거짓 인상을 준다(yF 가 ±1 로 자른다).
                         ...thinRows.flatMap((t) => t.rows.map((r) => Math.abs(r.v))),
                         ...oiLanes.flatMap((l) => l.rows.map((r) => Math.abs(r.v))));
-  const span = SUPPLY_1S_STEPS.find((a) => a >= peak) || Math.max(peak, 1e-9);
+  const span = SUPPLY_1S_STEPS.map((a) => a * qtyScale()).find((a) => a >= peak) || Math.max(peak, 1e-9);
   const mid = flowTop + flowH / 2;
   const half = flowH / 2 - 4;
   // 마지막 계단을 넘는 폭발은 잘라서 상자 안에 둔다 -- 넘치면 옆 패널을 침범한다.
@@ -4564,7 +4616,7 @@ function renderSupply1s(box = null, src = null) {
     path.setAttribute("d", d.trim()); path.setAttribute("fill", color);
     path.setAttribute("fill-opacity", opacity); path.setAttribute("stroke", "none");
     const t = document.createElementNS(NS, "title");
-    t.textContent = title + " " + (end >= 0 ? "+" : "-") + qty(end) + " ETH";
+    t.textContent = title + " " + (end >= 0 ? "+" : "-") + qty(end) + " " + coinUnit();
     path.appendChild(t);
     svg.appendChild(path);
     return color;
@@ -4669,7 +4721,7 @@ function renderSupply1s(box = null, src = null) {
       const lc = S.liq.get(e.s) || [0, 0, 0, 0];
       const t = document.createElementNS(NS, "title");
       t.textContent = "청산 롱 " + fmtUsdCompact(lc[2]) + " / 숏 " + fmtUsdCompact(lc[3])
-        + "  (" + qty(lc[0]) + " / " + qty(lc[1]) + " ETH)";
+        + "  (" + qty(lc[0]) + " / " + qty(lc[1]) + " " + coinUnit() + ")";
       c.appendChild(t);
       svg.appendChild(c);
     });
@@ -4770,7 +4822,7 @@ function renderSupply1s(box = null, src = null) {
   // 🔴어느 거래소인지와 **스트림 나이**를 같이 적는다. 스트림이 조용히 죽으면 선이 그냥
   //   멈추는데, 나이가 없으면 그게 「시장이 조용한 것」과 구별되지 않는다(이 저장소에서
   //   @aggTrade 가 3주간 0건이었는데 아무도 몰랐다).
-  label(ml + 2, mt - 5, S.label + "  ·  이번 5분봉 누적 순수급 ETH"
+  label(ml + 2, mt - 5, S.label + "  ·  이번 5분봉 누적 순수급 " + coinUnit()
         + (S.age ? `  ·  ${S.age}` : "")
         + (narrow ? "" : "  ·  아래 풋프린트 봉과 같은 구간 · 다음 봉에서 0"),
         S.stale ? "var(--bad, #e05260)" : "var(--muted)");
@@ -4903,7 +4955,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
       const wid = sideW * v / max;
       const x = dir > 0 ? edge + cursor : edge - cursor - wid;
       bar(x, y, wid, color, SEG_OPACITY[s],
-        price.toFixed(1) + " · " + side + " " + SEG_NAME[s] + " " + v.toFixed(1) + " ETH ("
+        price.toFixed(pxDp()) + " · " + side + " " + SEG_NAME[s] + " " + v.toFixed(1) + " " + coinUnit() + " ("
           + (total > 0 ? Math.round(v / total * 100) : 0) + "% · 합계 " + total.toFixed(1) + ")");
       cursor += wid;
     });
@@ -4940,8 +4992,8 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
       dRect.setAttribute("fill", delta > 0 ? "var(--good)" : "var(--bad)");
       dRect.setAttribute("opacity", (0.2 + 0.8 * Math.min(1, Math.abs(delta) / maxDelta)).toFixed(2));
       const dTip = document.createElementNS(NS, "title");
-      dTip.textContent = price.toFixed(rowSize >= 1 ? 0 : 1) + " · 순델타 "
-        + (delta > 0 ? "+" : "") + delta.toFixed(1) + " ETH"
+      dTip.textContent = price.toFixed(dpOf(rowSize)) + " · 순델타 "
+        + (delta > 0 ? "+" : "") + delta.toFixed(1) + " " + coinUnit()
         + " (공격적 매수 " + buy.toFixed(1) + " / 매도 " + sell.toFixed(1) + ")\n"
         + "⚠️테이커가 어느 쪽이었나일 뿐이다 -- 수동 쪽은 정확히 거울상이다.\n"
         + "⚠️같은 값을 반대로도 읽는다: 매수 델타가 큰데 가격이 안 오르면 흡수(수동 대량매도)다.";
@@ -4962,7 +5014,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
       lbl.setAttribute("font-size", Math.min(13, Math.max(9, rowPx)));
       lbl.setAttribute("font-weight", key === pocKey ? "700" : "600");
       lbl.setAttribute("fill", key === pocKey ? "var(--text)" : "var(--neutral)");
-      lbl.textContent = price.toFixed(rowSize >= 1 ? 0 : 1);
+      lbl.textContent = price.toFixed(dpOf(rowSize));
       svg.appendChild(lbl);
     }
   });
@@ -5263,11 +5315,11 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
           ? Math.round(latestFlowHeatmap.summary.window_s / 60) : 0;
         const win = winMin ? winMin + "분 창" : "창";
         t.textContent = "호가 " + (k * rowSize).toFixed(rowSize >= 1 ? 0 : 1)
-          + " — 지금 걸린 양 " + Math.round(inst) + " ETH"
+          + " — 지금 걸린 양 " + Math.round(inst) + " " + coinUnit()
           + " · " + win + " 최대 " + Math.round(peak) + " · 내내 남은 것 " + Math.round(pers)
           + " (" + Math.round(100 * pers / Math.max(inst, 1e-9)) + "%)\n"
           + "재깔림 " + rw.toFixed(1) + "배 — " + win + " 안에서 최대치의 "
-          + rw.toFixed(1) + "배(" + Math.round(refill) + " ETH)가 다시 깔렸습니다. "
+          + rw.toFixed(1) + "배(" + Math.round(refill) + " " + coinUnit() + ")가 다시 깔렸습니다. "
           + "이 창의 상위 " + Math.round(100 * (1 - rwPct(rw))) + "% 입니다"
           + (blk > 0
              // 2026-09-20 «단위». 같은 배수라도 「1,780 ETH 를 18번」과 「15 ETH 를 2,000번」은
@@ -5276,7 +5328,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
              // 🔴blk 은 «물량 가중 중앙값»이다 -- 개수 기준 분위는 잔물결에 묻힌다.
              ? "\n(재깔림이 높던 국면은 이후 더 «크게» 움직였습니다 — 방향은 아닙니다.\n"
                + " 바닥 줄 툴팁에 근거가 있습니다.)"
-               + "\n단위: " + fmtNum(blk, blk >= 100 ? 0 : 1) + " ETH 씩 "
+               + "\n단위: " + fmtNum(blk, blk >= 100 ? 0 : 1) + " " + coinUnit() + " 씩 "
                + Math.round(n_up) + "번"
                + (blk / Math.max(peak, 1e-9) >= 0.35
                   ? " — 한 덩어리를 같은 자리에 계속 다시 까는 중입니다(작업자 한 명일 수 있습니다)."
@@ -5284,7 +5336,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
              : "")
           + " — 🔴농도는 **이 창 안의 상대 순위**라, 조용한 시간과 시끄러운 시간이 같은 "
           + "진하기로 보입니다. 절대값은 이 숫자로 보세요.\n"
-          + "최근 60초 " + (d60 >= 0 ? "+" : "") + Math.round(d60) + " ETH — "
+          + "최근 60초 " + (d60 >= 0 ? "+" : "") + Math.round(d60) + " " + coinUnit() + " — "
           + (Math.abs(d60) < 1 ? "변화 없음" : d60 > 0 ? "쌓는 중" : "빼는 중") + "\n"
           + (apr === null ? ""
              : "접근행동 " + apr.toFixed(2) + "배 — 가격이 이 근처(0.35% 안)에 왔을 때 "
@@ -5601,7 +5653,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴ETH 전용 -- OI 레인과 같은 이유다(다른 코인 캔들에 ETH 수급을 얹지 않는다).
   // ⚠️대가: 이 SVG 는 가격 틱마다 통째로 다시 그려진다(초당 ~1.7회). 밖에 있을 때 두 그림은
   //   5초·1초 주기였다 -- 이제 그 주기로 같이 다시 그려진다. 사용자 결정으로 감수한다.
-  const subOn = svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth";
+  const subOn = svg.id === "candleSvgSnapshot" && flowOn();
   // 🔴이 세 값의 합(SUB_TOTAL)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야
   //   한다(666 = 400 + 266 -> 706 = 400 + 306 -> 756 = 400 + 356). 상자가 작으면
   //   그만큼 가격 플롯이 눌린다.
@@ -5679,7 +5731,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴ETH 전용이다. 다른 코인을 보는 동안 ETH 값을 얹으면 2026-08-31 레짐 리본 사고와 같은
   //   모양이 된다 -- 자산 전환에서 latestOi5m 을 비우는 것과 이 조건, 둘 다 필요하다.
   // 데이터가 없으면 자리를 아예 안 잡는다(웜업·다른 코인에서 가격 플롯만 40px 손해다).
-  const oiBars = (svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth"
+  const oiBars = (svg.id === "candleSvgSnapshot" && flowOn()
                   && latestOi5m && Array.isArray(latestOi5m.bars)) ? latestOi5m.bars : [];
   // 모바일 26 / 데스크톱 34. h 는 모바일에서도 실제로 400 이다(styles.css 가 #candleSvgSnapshot
   // 높이를 400px 로 고정 -- `Math.max(parentH, 260)` 의 260 은 SVG 가 안 그려질 때의 바닥값이다).
@@ -5691,7 +5743,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   보여 거짓이 된다). 이 리본의 값이 바로 그 엇갈림이다 -- 실측 12봉 중 4봉에서 부호가
   //   반대였다. 자 자체는 log1p 다(아래 hgt 주석).
   // 데이터가 없으면 자리를 아예 안 잡는다(OI 레인과 같은 규약).
-  const fpBars = (svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth"
+  const fpBars = (svg.id === "candleSvgSnapshot" && flowOn()
                    && latestFootprint && Array.isArray(latestFootprint.bars))
                   ? latestFootprint.bars : [];
   // ── 5분봉 레인: 여덟 줄 -> 두 행 (2026-09-22 사용자 선택) ─────────────────────
@@ -6324,7 +6376,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", shade(v, max));
       const title = document.createElementNS(NS, "title");
       const ratio = other > 0 ? v / other : Infinity;
-      title.textContent = price.toFixed(1) + " · " + (color === "var(--good)" ? "매수 " : "매도 ")
+      title.textContent = price.toFixed(pxDp()) + " · " + (color === "var(--good)" ? "매수 " : "매도 ")
         + v.toFixed(1) + " (반대편 " + other.toFixed(1) + ")"
         + (v > 0 && v > other * FOOTPRINT_IMBALANCE_RATIO
           ? " · 불균형 " + (Number.isFinite(ratio) ? ratio.toFixed(1) + "배" : "일방") : "");
@@ -6389,7 +6441,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           poc.setAttribute("fill", "none"); poc.setAttribute("stroke", "var(--amber)");
           poc.setAttribute("stroke-opacity", "0.85");
           const pocTitle = document.createElementNS(NS, "title");
-          pocTitle.textContent = "POC " + price.toFixed(1) + " · 총 " + pocVol.toFixed(1);
+          pocTitle.textContent = "POC " + price.toFixed(pxDp()) + " · 총 " + pocVol.toFixed(1);
           poc.appendChild(pocTitle);
           barG.appendChild(poc);
         }
@@ -6914,8 +6966,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (priceLeft) {
         // 왼쪽 여백(ml-5)을 넘으면 SVG 밖으로 잘린다 -- 재서 소수점을 뗀다.
         const name = txt.textContent;
-        txt.textContent = `${name} ${fmtNum(p.val, 1)}`;
-        try { if (txt.getComputedTextLength() > ml - 7) txt.textContent = `${name} ${fmtNum(p.val, 0)}`; } catch (e) { /* 비렌더 */ }
+        txt.textContent = `${name} ${fmtNum(p.val, pxDp())}`;
+        try { if (txt.getComputedTextLength() > ml - 7) txt.textContent = `${name} ${fmtNum(p.val, Math.max(0, pxDp() - 1))}`; } catch (e) { /* 비렌더 */ }
       }
     }
 
@@ -6955,7 +7007,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     if (p.faded) pTxt.setAttribute("opacity", "0.62");
     // 🔴화면 밖이면 «↑ » 가 앞에 붙어 값(sub)과 겹쳤다(2026-09-24 캡처: «2780.Q.1k»·«2641.63%»).
     //   78px 한계라 폭을 못 늘린다 -- 값이 같이 들어가는 화면 밖 배지만 소수점을 뗀다.
-    pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, subOk && p.outOfView ? 0 : 1)}`;
+    pTxt.textContent = `${p.offTop ? "↑ " : p.offBottom ? "↓ " : ""}${fmtNum(p.val, subOk && p.outOfView ? Math.max(0, pxDp() - 1) : pxDp())}`;
     if (!mobileChart && !priceLeft) svg.appendChild(pTxt);
     if (subOk) {
       const sTxt = document.createElementNS(NS, "text");
@@ -6999,7 +7051,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       t.setAttribute("font-size", "10.5"); t.setAttribute("fill", p.color);
       if (p.faded) t.setAttribute("opacity", "0.55");
       const arrow = p.offTop ? "↑" : p.offBottom ? "↓" : "";
-      t.textContent = (p.label || "") + " " + arrow + fmtNum(p.val, 1);
+      t.textContent = (p.label || "") + " " + arrow + fmtNum(p.val, pxDp());
       if (p.label === "현재" && isSnapshotChart) t.dataset.live = "rowtext";
       svg.appendChild(t);
       let adv = 0;
@@ -7102,7 +7154,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const badgeY = Math.max(mt, Math.min(plotBottom - priceBadgeH, my - priceBadgeH / 2));
       priceBadgeRect.setAttribute("y", badgeY);
       priceBadgeText.setAttribute("y", badgeY + 13);
-      priceBadgeText.textContent = fmtNum(priceAtCursor, 1);
+      priceBadgeText.textContent = fmtNum(priceAtCursor, pxDp());
       priceBadgeRect.style.display = "block";
       priceBadgeText.style.display = "block";
     } else {
@@ -7163,10 +7215,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
     showTooltip(evt.pageX, evt.pageY, `
       <b>${fmtDateTick(c.time * 1000)}</b><br>
-      시가: ${fmtNum(c.open, 2)}<br>
-      고가: ${fmtNum(c.high, 2)}<br>
-      저가: ${fmtNum(c.low, 2)}<br>
-      종가: ${fmtNum(c.close, 2)}${regimeLine}${volLine}${trigLines}
+      시가: ${fmtNum(c.open, Math.max(2, pxDp()))}<br>
+      고가: ${fmtNum(c.high, Math.max(2, pxDp()))}<br>
+      저가: ${fmtNum(c.low, Math.max(2, pxDp()))}<br>
+      종가: ${fmtNum(c.close, Math.max(2, pxDp()))}${regimeLine}${volLine}${trigLines}
     `);
   };
   svg.onmouseleave = () => {
@@ -7370,12 +7422,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         rect.setAttribute("fill-opacity", op.toFixed(3));
         const tip = document.createElementNS(NS, "title");
         tip.textContent = fmtDateTick(r.t * 1000) + " " + QNAME(r.delta, r.oi)
-          + " · 델타 " + (r.delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.delta)) + " ETH"
+          + " · 델타 " + (r.delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.delta)) + " " + coinUnit()
           + " (고래 " + (r.whale >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.whale))
           + " · 중형 " + (r.mid >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.mid))
           + " · 리테일 " + (r.retail >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.retail)) + ")"
           + " · 신규계약 " + (r.oi == null ? "모름"
-              : (r.oi >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.oi)) + " ETH")
+              : (r.oi >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.oi)) + " " + coinUnit())
           + " · 거래대금 " + fmtUsdCompact(r.turn)
 ;
         rect.appendChild(tip);
@@ -7638,7 +7690,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
              + fmtUsdCompact(b.hl.short_usd || 0) + " · 추적 300지갑 한정)" : "");
         const lx = Number(b.long_min_px), sx = Number(b.short_max_px);
         if (lx > 0 || sx > 0) tip.textContent += " · 청산 극값(바이낸스 체결가)"
-          + (lx > 0 ? " 롱 최저 " + fmtNum(lx, 1) : "") + (sx > 0 ? " 숏 최고 " + fmtNum(sx, 1) : "");
+          + (lx > 0 ? " 롱 최저 " + fmtNum(lx, pxDp()) : "") + (sx > 0 ? " 숏 최고 " + fmtNum(sx, pxDp()) : "");
         dot.appendChild(tip);
         g.appendChild(dot);
         // 2026-09-26 A: 그 봉에서 청산이 닿은 가장 먼 가격 -- 봉 왼쪽 틈에서 오른쪽을 가리키는 꺾쇠.

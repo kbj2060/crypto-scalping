@@ -19,14 +19,16 @@ PY="${PYTHON_BIN:-$HOME/miniforge3/envs/quant_ai/bin/python}"
 #   것이라 서버에 같은 이름의 수집기가 있어도 덮지 않는다.
 SRC="${TT_SRC:-data/live/trade_tape.duckdb}"
 DEST="${TT_DEST:-${SRC%.duckdb}.from_pi.duckdb}"   # 전환 시 원본과 같은 이름으로
+# 2026-09-26 테이프 외 DB 도 보낸다(HL 멀티코인 포지션 -- 대시보드 SOL·XRP 고래 청산가). 스냅샷 검증 표만 바꾼다.
+VERIFY_TABLE="${TT_VERIFY_TABLE:-trade_tape_1s}"
 
 [[ -f "$SRC" ]] || { echo "[$(date -Iseconds)] 원본 없음: $SRC"; exit 0; }
 
 # 일관 스냅샷. 락이 걸려 있으면 재시도하고, 끝내 못 열면 이번 주기를 건너뛴다
 # (다음 시각에 다시 시도한다 -- 한 번 실패로 복제를 영구히 멈추지 않는다).
-"$PY" - "$SRC" "$DEST" <<'PYEOF'
+"$PY" - "$SRC" "$DEST" "$VERIFY_TABLE" <<'PYEOF'
 import duckdb, pathlib, sys, time
-src, dest = sys.argv[1], sys.argv[2]
+src, dest, verify_table = sys.argv[1], sys.argv[2], sys.argv[3]
 tmp = dest + ".tmp"
 for f in (tmp, tmp + ".wal"):
     pathlib.Path(f).unlink(missing_ok=True)
@@ -50,7 +52,7 @@ finally:
     con.close()
 # 열리는지 확인하고 나서야 제자리에 놓는다 -- 깨진 스냅샷을 보내지 않는다.
 v = duckdb.connect(tmp, read_only=True)
-n = v.execute("SELECT count(*) FROM trade_tape_1s").fetchone()[0]
+n = v.execute('SELECT count(*) FROM "%s"' % verify_table.replace('"', '""')).fetchone()[0]
 v.close()
 pathlib.Path(tmp).replace(dest)
 pathlib.Path(tmp + ".wal").unlink(missing_ok=True)

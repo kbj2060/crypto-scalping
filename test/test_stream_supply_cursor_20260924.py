@@ -24,6 +24,14 @@ ns = {"Any": object, "web": web, "json": json, "asyncio": asyncio, "time": time,
       "OKX_INST": "ETH-USDT-SWAP", "SITUATION_HORIZON_S": 1800, "fo_state": {}, "mp_state": {},
       "situation_state": {"log": [], "now": {"ok": True}, "computed_at": 1.0},
       "sit": type("S", (), {"calibration": staticmethod(lambda log, h: {})})}
+# 2026-09-26 코인별 흐름 엔진: 수급은 `?asset=` 의 엔진을 본다(기본 ETH). 위 값들을 ETH 엔진으로 묶는다.
+from types import SimpleNamespace  # noqa: E402
+_eth = SimpleNamespace(spec=SimpleNamespace(asset="eth", symbol="ETHUSDT", okx_inst="ETH-USDT-SWAP"),
+                       footprint_state=ns["footprint_state"], oi_1s=ns["oi_1s"], okx_sec=ns["okx_sec"],
+                       okx_oi_1s=ns["okx_oi_1s"], okx_liq_events=ns["okx_liq_events"], okx_state=ns["okx_state"],
+                       spot_sec=ns["spot_sec"], spot_state=ns["spot_state"])
+ns.update(SimpleNamespace=SimpleNamespace, _eth=_eth, flows={"eth": _eth},
+          flow_for=lambda q: _eth, liq_events_by={"eth": ns["liq_events"]})
 exec(compile(chunk, "stream", "exec"), ns)
 
 async def main():

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from dataclasses import dataclass
+from types import SimpleNamespace
 import base64
 import concurrent.futures
 import csv
@@ -48,9 +50,11 @@ load_dotenv(REPO_ROOT / ".env")
 # compute_signals/SIGNAL_ORDER/PCTRANK/FUNDING_* 는 8종 계산 전용이라 같이 내렸다.
 # (모듈 자체는 남긴다 -- 극점 탐지기가 compute_signals 를 직접 import 한다.)
 from scripts.live_trade_tape_collector_20260916 import (  # noqa: E402
+    BUCKETS as TAPE_BUCKETS,
     RETAIL_MAX_USD,
     WHALE_MIN_USD,
     TakerOrderAggregator,
+    default_db as tape_default_db,
 )
 from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
     FETCH_LIMIT as EVIDENCE_FETCH_LIMIT,
@@ -459,7 +463,7 @@ GEX_MAX_AGE_MIN = 150.0   # 매시 cron -- 두 사이클 놓치면 죽은 것으
 #   기본 executor 를 물면 같은 풀을 쓰는 다른 핸들러가 같이 막히고, 이벤트루프에서 읽으면
 #   SSE 가 멈춘다(설계서 dashboard_orderflow_footprint_heatmap_design_20260914 P2).
 # 🔴symbol 은 **파일 경로로 들어간다**. 화이트리스트로만 받는다(`../` 탈출 차단).
-HEATMAP_SYMBOLS = {"ethusdt", "btcusdt"}
+HEATMAP_SYMBOLS = {"ethusdt", "btcusdt", "solusdt", "xrpusdt"}   # 래스터 수집기가 있는 심볼(USDT)
 HEATMAP_MAX_COLS = 900          # 캔버스 폭 상한 -- 이보다 넓게 그릴 화면이 없다
 HEATMAP_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2,
                                                          thread_name_prefix="heatmap")
@@ -489,7 +493,9 @@ MANUAL_EXEC_SYMBOL = (os.getenv("DASHBOARD_MANUAL_EXEC_SYMBOL", "").strip().uppe
 # 되돌리려면 환경변수 하나: DASHBOARD_ASSETS="eth,btc,sol,xrp,hype"
 # ⚠️계좌 패널(fetch_account)은 이 목록을 **쓰지 않는다** -- 다른 코인에 포지션이 있으면 그건
 #   보여야 한다. 화면에서 코인을 지우는 것과 «내 돈이 어디 있는지»는 다른 문제다.
-DASHBOARD_ASSETS = [a.strip().lower() for a in os.getenv("DASHBOARD_ASSETS", "eth").split(",")
+# 2026-09-26 사용자 지시: SOL·XRP 도 ETH 와 같은 구성(풋프린트·1초 수급·OI·호가) -- 기본값을 eth,sol,xrp 로.
+#   켜진 코인마다 흐름 엔진(make_coin_flow)이 WS 3개(바이낸스 체결·현물, OKX)와 OI 1초 폴링(가중치 1)을 쓴다.
+DASHBOARD_ASSETS = [a.strip().lower() for a in os.getenv("DASHBOARD_ASSETS", "eth,sol,xrp").split(",")
                     if a.strip().lower() in MARKET_SYMBOLS] or ["eth"]
 DASHBOARD_TICKER_SYMBOLS = {a: MARKET_SYMBOLS[a] for a in DASHBOARD_ASSETS}
 # 볼륨 풋프린트 (2026-09-15) -- ETH 만. 자세한 근거는 collect_footprint() 주석.
@@ -615,6 +621,12 @@ from scripts.live_okx_trade_tape_collector_20260923 import (  # noqa: E402
 OKX_TAPE_DB_PATH = LIVE_DIR / "okx_trade_tape.duckdb"
 HL_POS_DB_PATH = LIVE_DIR / "hyperliquid_positions.duckdb"
 HL_LIQ_BUCKET = 5.0      # 청산가 묶음 폭($). ETH ~$2,600 에서 0.2%
+# 2026-09-26 SOL·XRP: 멀티코인 HL 포지션 수집기는 **Pi** 에서 돈다 -- Pi 크론이 3분마다 일관 스냅샷을 떠
+#   서버로 보낸다(replicate_trade_tape_20260922.sh, TT_VERIFY_TABLE=hl_positions). 묶음 폭은 ETH 와 같은 상대 폭(~0.19%).
+HL_POS_MULTI_DB_PATH = LIVE_DIR / "hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb"
+HL_LIQ_BY_ASSET = {"eth": (HL_POS_DB_PATH, HL_LIQ_BUCKET, 2),
+                   "sol": (HL_POS_MULTI_DB_PATH, 0.2, 2),
+                   "xrp": (HL_POS_MULTI_DB_PATH, 0.003, 4)}
 OKX_CTX_DB_PATH = LIVE_DIR / "okx_context.duckdb"
 
 
@@ -634,7 +646,7 @@ def _read_only_rows(path: Path, sql: str, params: list) -> list[tuple]:
     return []
 
 
-def hl_whale_liq(db: Path = HL_POS_DB_PATH, bucket: float = HL_LIQ_BUCKET) -> dict:
+def hl_whale_liq(db: Path = HL_POS_DB_PATH, bucket: float = HL_LIQ_BUCKET, coin: str = "ETH", dp: int = 2) -> dict:
     """하이퍼리퀴드 고래 **실제** 청산가 뭉치 (2026-09-24, 사용자 지시).
 
     `live_hyperliquid_positions_collector_20260924.py` 의 최신 완결 바퀴(hl_cycles 행은 포지션 행과 한
@@ -647,7 +659,7 @@ def hl_whale_liq(db: Path = HL_POS_DB_PATH, bucket: float = HL_LIQ_BUCKET) -> di
         return {"ok": False}
     agg: dict[int, list[float]] = {}
     n_pos = 0
-    for szi, liq in _read_only_rows(db, "SELECT szi, liq_px FROM hl_positions WHERE ts_ms >= ? AND coin = 'ETH'", [t]):
+    for szi, liq in _read_only_rows(db, "SELECT szi, liq_px FROM hl_positions WHERE ts_ms >= ? AND coin = ?", [t, coin]):
         n_pos += 1
         if not liq or liq <= 0:
             continue
@@ -656,16 +668,16 @@ def hl_whale_liq(db: Path = HL_POS_DB_PATH, bucket: float = HL_LIQ_BUCKET) -> di
         c[0 if szi > 0 else 1] += abs(float(szi))
         c[2] += 1
     return {"ok": True, "ts_ms": t, "age_s": round(time.time() - t / 1000, 1), "n_positions": n_pos,
-            "bucket": bucket, "clusters": [[round(k * bucket, 2), round(v[0], 1), round(v[1], 1), v[2]]
+            "bucket": bucket, "clusters": [[round(k * bucket, dp), round(v[0], 1), round(v[1], 1), v[2]]
                                            for k, v in sorted(agg.items())]}
 
 
-def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH) -> list[tuple[int, float, bool, str]]:
+def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH, coin: str = "ETH") -> list[tuple[int, float, bool, str]]:
     """포지션 수집기가 확정한 HL 고래 청산 체결 -> [(체결 ms, USD, 롱청산?, 주소)]. 없으면 [].
     롱 청산 = 롱 포지션이 강제로 닫힌 것(`dir` 이 «Close Long», 없으면 매도 체결 side=A)."""
     try:
         rows = _read_only_rows(db, """SELECT fill_ms, px * sz, dir, side, user FROM hl_liquidations
-                                      WHERE coin = 'ETH' AND fill_ms >= ?""", [since_ms])
+                                      WHERE coin = ? AND fill_ms >= ?""", [coin, since_ms])
     except (duckdb.Error, OSError):
         return []                                  # 수집기가 아직 없거나 표가 없다
     return [(int(t), float(u or 0.0), ("Long" in str(d)) if d else side == "A", str(user))
@@ -739,7 +751,7 @@ def merge_hl_liq(bars: list[dict], events: list[tuple[int, float, bool, str]],
 
 
 def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_ms: int,
-                       bar_seconds: int, bucket: float) -> dict:
+                       bar_seconds: int, bucket: float, tape_bucket: float | None = None) -> dict:
     """OKX 체결 테이프(수집기 duckdb)에서 풋프린트 봉을 되살린다 (2026-09-24, 사용자 A안).
 
     왜: 대시보드가 재기동하면 OKX 풋프린트 과거분이 사라지고(REST history-trades 백필은 10.8초치
@@ -759,7 +771,8 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
                   sum(coalesce(whale_buy_qty, 0)), sum(coalesce(whale_sell_qty, 0)),
                   sum(coalesce(retail_buy_qty, 0)), sum(coalesce(retail_sell_qty, 0))
            FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY 1, 2"""
-    tape_bucket = OKX_TAPE_BUCKETS[inst]
+    # 2026-09-26 바이낸스 체결 테이프(trade_tape_<coin>.duckdb)도 같은 표 모양이라 이 함수를 쓴다 -- 칸 폭만 준다.
+    tape_bucket = tape_bucket or OKX_TAPE_BUCKETS[inst]
     bars: dict[int, dict[int, list[float]]] = {}
     for bar, k, *v in _read_only_rows(tape_db, q, [bar_seconds, bar_seconds, tape_bucket, bucket,
                                                    inst, lo_sec, t0_sec]):
@@ -824,7 +837,7 @@ CARD30_REACH_PATH = REPO_ROOT / "tmp" / "card30_direction_20260926" / "model_rea
 
 
 
-def oi_1s_persist(rows: list[tuple[int, float]]) -> None:
+def oi_1s_persist(rows: list[tuple[int, float]], symbol: str = FOOTPRINT_SYMBOL.lower()) -> None:
     """OI 스냅샷을 duckdb 에 남긴다(연결-작업-닫기). rows 는 (ts_ms, open_interest).
 
     PK 는 **밀리초**다. 초로 잡으면 같은 초에 온 둘째 스냅샷이 조용히 사라진다 -- 2026-09-19
@@ -859,7 +872,7 @@ def oi_1s_persist(rows: list[tuple[int, float]]) -> None:
                 ts_ms BIGINT, symbol VARCHAR, open_interest DOUBLE,
                 PRIMARY KEY (ts_ms, symbol))""")
             con.executemany(f"INSERT OR IGNORE INTO {OI_1S_TABLE} VALUES (?, ?, ?)",
-                            [(int(ms), FOOTPRINT_SYMBOL.lower(), float(v)) for ms, v in rows])
+                            [(int(ms), symbol, float(v)) for ms, v in rows])
         finally:
             con.close()
 
@@ -881,7 +894,7 @@ def mark_price_persist(rows: list[tuple[int, float, float, float, int]]) -> None
             con.close()
 
 
-def oi_5m_buckets(bars: int) -> list[list[float]]:
+def oi_5m_buckets(bars: int, symbol: str = FOOTPRINT_SYMBOL.lower()) -> list[list[float]]:
     """5분 봉별 [봉시각, 신규계약(Δ), 봉 끝 OI, 스냅샷 수, 공백여부].
 
     Δ 는 «직전 봉 끝 -> 이 봉 끝»이다. 봉 안(열림->닫힘)만 재면 봉 사이 3~7초에 일어난 변화가
@@ -906,7 +919,7 @@ def oi_5m_buckets(bars: int) -> list[list[float]]:
                     FROM {OI_1S_TABLE}
                     WHERE symbol = ? AND ts_ms >= ?
                     GROUP BY 1 ORDER BY 1
-                """, [OI_5M_BAR_SECONDS, OI_5M_BAR_SECONDS, FOOTPRINT_SYMBOL.lower(),
+                """, [OI_5M_BAR_SECONDS, OI_5M_BAR_SECONDS, symbol,
                       (floor - OI_5M_BAR_SECONDS) * 1000]).fetchall()  # 한 봉 더: 첫 봉의 기준점
             finally:
                 con.close()
@@ -1966,6 +1979,797 @@ def json_response(request: web.Request, payload: Any, etag: str) -> web.Response
     return response
 
 
+# ── 코인별 흐름 엔진 (2026-09-26 사용자 지시: SOL·XRP 도 ETH 와 같은 구성) ──────────────────
+# 풋프린트·1초 수급·OI·OKX·현물 수집을 **코인 하나를 받아 만드는** 공장이다. 본문은 make_app 에
+#   있던 ETH 코드를 옮긴 것이다(로그 표식·OI 저장 심볼 인자만 바뀜) -- 맨 위에서 같은 이름의 지역 변수
+#   (FOOTPRINT_SYMBOL 등)가 모듈 상수를 가려 코인별 값을 쓰게 한다. ETH 는 전과 같은 값·파일·로그다.
+# 🔴데이터는 전부 **USDT 시장**이다(선물 <COIN>USDT · 현물 <coin>usdt · OKX <COIN>-USDT-SWAP). 주문만 USDC
+#   (MANUAL_EXEC_SYMBOL) -- 사용자 규칙. 여기에 USDC 심볼을 넣지 않는다.
+# 🔴가격칸(bucket)은 ETH 의 상대 폭(0.5/2,680 ≈ 1.9bp)에 맞추고 거래소 틱의 배수로 잡았다. OKX 테이프 칸
+#   (OKX_TAPE_BUCKETS: SOL 0.01 · XRP 0.0001)의 정수배여야 복원(okx_tape_footprint)이 칸 경계를 안 찢는다.
+#   price_dp 는 칸 가격을 응답에 실을 때 반올림 자릿수 -- 2 로 고정하면 XRP 0.0003 칸들이 한 값으로 뭉친다.
+@dataclass(frozen=True)
+class FlowSpec:
+    asset: str
+    symbol: str              # 바이낸스 선물(USDT)
+    bucket: float
+    price_dp: int
+    okx_inst: str            # OKX 무기한(USDT)
+    spot_url: str            # 바이낸스 현물(USDT) @aggTrade
+    oi_poll_s: float         # ETH 0.25초 · 나머지 1초(REST 가중치 -- 같은 IP 를 봇도 쓴다)
+    snapshot_path: Path
+    okx_tape_db: Path
+    okx_ctx_db: Path
+
+
+def _flow_spec(asset: str, bucket: float, price_dp: int, oi_poll_s: float) -> FlowSpec:
+    eth = asset == "eth"
+    return FlowSpec(
+        asset=asset, symbol=f"{asset.upper()}USDT", bucket=bucket, price_dp=price_dp,
+        okx_inst=OKX_INST if eth else f"{asset.upper()}-USDT-SWAP",
+        spot_url=f"wss://stream.binance.com:9443/ws/{asset}usdt@aggTrade",
+        oi_poll_s=oi_poll_s,
+        snapshot_path=LIVE_DIR / f"footprint_{asset}.json",
+        okx_tape_db=OKX_TAPE_DB_PATH if eth else LIVE_DIR / f"okx_trade_tape_{asset}.duckdb",
+        # SOL·XRP 의 OKX 맥락(OI·청산) DB 는 Pi 에만 있다 -- 없으면 복원이 OI·청산 없이 체결만 되살린다.
+        okx_ctx_db=OKX_CTX_DB_PATH if eth else LIVE_DIR / f"okx_context_{asset}.duckdb")
+
+
+FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2, OI_1S_POLL_SECONDS),
+              "sol": _flow_spec("sol", 0.02, 2, 1.0),
+              "xrp": _flow_spec("xrp", 0.0003, 4, 1.0)}
+assert FLOW_SPECS["eth"].snapshot_path == FOOTPRINT_SNAPSHOT_PATH and FLOW_SPECS["eth"].spot_url == SPOT_WS_URL
+
+
+def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) -> SimpleNamespace:
+    FOOTPRINT_SYMBOL = spec.symbol                  # noqa: N806 -- 아래 옮긴 본문이 이 이름들을 그대로 쓴다
+    FOOTPRINT_BUCKET = spec.bucket                  # noqa: N806
+    FOOTPRINT_SNAPSHOT_PATH = spec.snapshot_path    # noqa: N806
+    OKX_INST = spec.okx_inst                        # noqa: N806
+    OKX_CT_VAL = OKX_CT_VALS.get(spec.okx_inst)     # noqa: N806
+    SPOT_WS_URL = spec.spot_url                     # noqa: N806
+    OKX_TAPE_DB_PATH = spec.okx_tape_db             # noqa: N806
+    OKX_CTX_DB_PATH = spec.okx_ctx_db               # noqa: N806
+    OI_1S_POLL_SECONDS = spec.oi_poll_s             # noqa: N806
+    TAG = "" if spec.asset == "eth" else f"[{spec.asset}] "   # noqa: N806 -- 로그 표식(ETH 는 전과 같게 비움)
+    # 🔴2026-09-26 IP 밴 사고: aggTrades 백필은 요청당 가중치 20 이고 IP 한도(2,400/분)를 봇·대시보드·수집기가 같이
+    #   쓴다. 코인마다 REST 백필을 돌리면 콜드스타트에 한도를 넘긴다(실측: 418 밴 27분). ETH 외 코인은 서버에 이미
+    #   쌓이는 **코인별 체결 테이프**(같은 되묶기·같은 고래/리테일 칸, 1분봉 대조 통과)에서 되살린다 -- REST 0.
+    REST_BACKFILL = spec.asset == "eth"                                      # noqa: N806
+    TAPE_DB = tape_default_db(spec.symbol.lower())                           # noqa: N806
+
+    # ── 볼륨 풋프린트 체결 테이프 (2026-09-15) ────────────────────────────────────
+    # 봉 하나를 가격레벨로 쪼개 **공격적 매수/매도** 체결량을 따로 센다. klines 에는 이 정보가
+    # 없다(봉당 taker_buy 합계 하나뿐) -- 그래서 체결 테이프를 직접 누적한다.
+    # `m` = "매수자가 메이커" 이므로 m=True 면 **공격자는 매도자**다(check_footprint_tape 로 검증).
+    #
+    # 실시간은 WS, 과거는 REST 다. 처음엔 REST 폴링만으로 만들었다가 갈아엎었다 -- 2026-09-15
+    # 22:35 봉이 275,040 ETH(평소의 8배)로 터지자 1000건/요청 페이스가 **25분** 뒤처졌다.
+    # 풋프린트가 가장 필요한 순간이 바로 그때인데 그때 밀린다. WS 는 가중치가 0이라 급증에도
+    # 안 밀리고, REST 는 «연결 이전 구간» 백필에만 쓴다(이건 늦어도 라벨로 알리면 그만이다).
+    # ⚠️@aggTrade 는 2026-09-02 부터 바이낸스가 배달을 멈췄다(구독은 에러 없이 되고 메시지만
+    #   안 온다 -- 2026-09-15 재확인: 10초에 0건). @trade 를 쓴다(개별 체결, 같은 p/q/T/m).
+    FOOTPRINT_AGG_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
+    FOOTPRINT_WS_URL = f"wss://fstream.binance.com/ws/{FOOTPRINT_SYMBOL.lower()}@trade"
+    footprint_state: dict[str, Any] = {"bars": {}, "ready": False, "updated": 0.0,
+                                   "last_ms": 0, "saved_at": 0.0,
+                                   # aggTrades 로 메운 봉. 출처 표시일 뿐 «덜 정확하다»는 뜻이
+                                   # 아니다 -- 크기 구간은 주문 단위라 aggTrades 쪽이 오히려
+                                   # 정확하다(footprint_add 도크스트링의 2026-09-19 정정).
+                                   "agg_bars": set(),
+                                   # 초 -> [리테일매수, 리테일매도, 고래매수, 고래매도,
+                                   #        총매수, 총매도, 마지막가격]. 아래 supply_1s_cell 참고.
+                                   "sec": {}}
+
+    def supply_1s_cell(ts_ms: int) -> list[float]:
+        """그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(체결마다 돌 일이 아니다)."""
+        sec = int(ts_ms) // 1000
+        by_sec = footprint_state["sec"]
+        cell = by_sec.get(sec)
+        if cell is None:
+            cell = by_sec[sec] = [0.0] * 7
+            cutoff = sec - SUPPLY_1S_SECONDS
+            for old in [s for s in by_sec if s < cutoff]:
+                del by_sec[old]
+        return cell
+
+    def footprint_bar_start(ts_ms: float) -> int:
+        return (int(ts_ms) // 1000) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
+
+    def footprint_add(price: float, qty: float, ts_ms: int, sell: bool,
+                      agg: bool = False, order: bool = False) -> None:
+        """order=False 는 **개별 체결**(셀 총량만), True 는 **테이커 주문**(크기 구간만).
+
+        백필의 aggTrades 한 줄은 그 자체가 주문이라 둘 다다. 실시간 `@trade` 는 총량을 바로
+        넣고, 주문이 닫힐 때 구간을 따로 넣는다 -- 한 번에 못 하는 이유는 주문이 닫히기
+        전에는 그 주문이 어느 통에 속하는지 알 수 없기 때문이다(쓸어담는 중에는 계속 자란다).
+
+        🔴여기서 한 번 틀렸다(2026-09-19). 처음엔 개별 체결(`@trade`)로 갈랐는데, 큰 주문이
+          호가를 쓸면 그게 작은 체결 수십 건으로 쪼개져 **고래가 사라진다**(같은 11.3초 구간
+          실측: aggTrade 기준 37.4% vs @trade 기준 9.6%, 총 명목은 동일). 그다음엔 반대로
+          백필 덩어리를 개별 수로 나눠봤는데 그건 **과교정**이라 고래가 0.0% 가 됐다 --
+          덩어리는 이미 «주문 하나»라 나눌 것이 아니었다.
+          답은 둘 다 **주문 단위로 맞추는 것**이다: 백필은 덩어리를 그대로 쓰고, 실시간은
+          같은 규칙(가격·방향·ms)으로 되묶는다. 기존 `nif_whale` 도 @aggTrade 기준이라
+          이래야 이 저장소에서 「고래」가 한 뜻이 된다."""
+        bars = footprint_state["bars"]
+        bar = footprint_bar_start(ts_ms)
+        cells = bars.get(bar)
+        if cells is None:
+            cutoff = (footprint_bar_start(time.time() * 1000)
+                      - (FOOTPRINT_KEEP_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+            if bar < cutoff:
+                return              # 창을 벗어난 봉 -- 넣어봐야 바로 아래에서 지워진다
+            cells = bars[bar] = {}
+            for old_bar in [b for b in bars if b < cutoff]:
+                del bars[old_bar]   # 새 봉이 생길 때만 정리한다 -- 체결마다 돌 일이 아니다(266/s)
+                footprint_state["agg_bars"].discard(old_bar)
+        cell = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)), [0.0] * 6)
+        sec_cell = supply_1s_cell(ts_ms)
+        side = 1 if sell else 0
+        if not order:
+            cell[side] += qty
+            sec_cell[4 + side] += qty
+            sec_cell[6] = price          # 그 초의 마지막 체결가 = 1초 가격선
+        if order or agg:
+            notional = price * qty
+            if notional >= WHALE_MIN_USD:
+                cell[2 + side] += qty
+                sec_cell[2 + side] += qty
+            elif notional < RETAIL_MAX_USD:
+                cell[4 + side] += qty
+                sec_cell[side] += qty
+        if agg:
+            footprint_state["agg_bars"].add(bar)
+        # 🔴`now` 는 아래 스냅샷 저장 조건이 쓴다. 2026-09-19 리팩터에서 이 줄을 지웠다가
+        #   **ready 가 되는 순간 모든 체결이 NameError** 로 터졌다(단락평가 때문에 ready
+        #   이전에는 조용했다). 결과: WS 루프가 크래시->재연결->백필을 무한 반복해 실시간
+        #   누적이 아예 안 됐고 REST 를 계속 때렸다. 한 줄이 지워진 걸 테스트가 못 잡은 건
+        #   이 경로에 «ready 이후 체결» 을 태우는 시험이 없었기 때문이다.
+        now = time.time()
+        footprint_state["updated"] = now
+        # ⚠️ready 일 때만 저장한다. 백필이 **진행 중인 봉**을 저장하면, 다음 판이 그걸 «이미 있는
+        # 봉»으로 보고 건너뛰어 반쪽짜리로 굳는다(2026-09-15 시험에서 한 봉이 -83.7% 로 남았다).
+        # 저장된 스냅샷의 계약은 «last_ms 까지 공백이 없다» 이고, 그 보증이 곧 ready 다.
+        if footprint_state["ready"] and now - footprint_state["saved_at"] >= FOOTPRINT_SNAPSHOT_SECONDS:
+            footprint_save()   # 30초마다 -- 죽어도 잃는 건 30초어치이고 그건 REST 로 메운다
+
+    def footprint_save() -> None:
+        """봉 상태를 통째로 덮어쓴다(수십 KB). 증분 append 를 안 쓰는 이유는 진행 중인 봉이
+        계속 자라기 때문 -- 어차피 마지막 상태만 쓸모 있다. tmp -> replace 로 원자적으로."""
+        try:
+            tmp = FOOTPRINT_SNAPSHOT_PATH.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({
+                "bar_seconds": FOOTPRINT_BAR_SECONDS, "bucket": FOOTPRINT_BUCKET,
+                "symbol": FOOTPRINT_SYMBOL, "last_ms": footprint_state["last_ms"],
+                # 셀 칸수 표식. 2칸 시절 스냅샷을 4칸 코드가 읽으면 IndexError 가 아니라
+                # **조용히 고래 0** 이 된다 -- 그래서 버전을 적고 다르면 통째로 버린다.
+                "cells_v": 3,
+                # 봉 링은 24시간이지만 저장은 **화면이 고를 수 있는 가장 긴 창**만 한다
+                # (위 FOOTPRINT_MAX_WINDOW_BARS). 그 밖은 재시작 뒤 다시 찬다 -- 화면이
+                # 실제 봉 수를 적으므로 짧아진 걸 숨기지 않는다.
+                "bars": {str(bar): {str(k): v for k, v in cells.items()}
+                         for bar, cells in sorted(footprint_state["bars"].items())[-FOOTPRINT_MAX_WINDOW_BARS:]},
+            }))
+            tmp.replace(FOOTPRINT_SNAPSHOT_PATH)
+            footprint_state["saved_at"] = time.time()
+        except OSError as exc:
+            footprint_state["saved_at"] = time.time()   # 매 체결마다 재시도하지 않게
+            print(f"{TAG}footprint snapshot save failed: {exc}", flush=True)
+
+    def footprint_load() -> None:
+        """재시작 직후 1회. 창 밖 봉은 버리고, last_ms 를 복원해 백필이 «꺼져 있던 구간»만
+        메우게 한다. 봉 길이나 버킷이 바뀌었으면 통째로 무시한다 -- 섞이면 조용히 틀린다."""
+        try:
+            saved = json.loads(FOOTPRINT_SNAPSHOT_PATH.read_text())
+        except (OSError, ValueError):
+            return
+        if (saved.get("bar_seconds") != FOOTPRINT_BAR_SECONDS
+                or saved.get("bucket") != FOOTPRINT_BUCKET
+                or saved.get("symbol") != FOOTPRINT_SYMBOL
+                or saved.get("cells_v") != 3):
+            print(f"{TAG}footprint snapshot: 설정이 달라 무시한다", flush=True)
+            return
+        cutoff = (footprint_bar_start(time.time() * 1000)
+                  - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+        bars = {int(bar): {int(k): [float(x) for x in v] for k, v in cells.items()}
+                for bar, cells in (saved.get("bars") or {}).items() if int(bar) >= cutoff}
+        if not bars:
+            return
+        footprint_state["bars"] = bars
+        footprint_state["last_ms"] = int(saved.get("last_ms") or 0)
+        print(f"{TAG}footprint snapshot: {len(bars)}봉 복원", flush=True)
+
+    async def footprint_backfill(gap_from_ms: int, until_ms: int) -> None:
+        """WS 가 못 준 구간을 aggTrades 로 메운다. 최신 봉부터, 봉마다 «받을 창»을 따로 잡는다.
+
+        창 계산이 이 함수의 전부다:
+          - state 에 **없는** 봉  -> 봉 전체(단 until_ms 까지). 처음 뜰 때·WS 가 오래 끊겼을 때.
+          - state에 **있는** 봉   -> [gap_from_ms, until_ms] 와 겹치는 부분만. gap_from_ms 는
+            끊기기 직전 마지막 WS 체결 시각이라, 이미 센 체결을 다시 세지 않는다.
+        이 구분이 없으면 둘 중 하나가 깨진다 -- 「있는 봉은 건너뛴다」로 두면 **서버가 뜬 봉의
+        앞부분**이 통째로 빈다(2026-09-15 실측 43% 누락), 무조건 다시 받으면 이중계상이다.
+
+        왜 최신 봉부터인가: 오래된 쪽부터 한 줄로 걸었더니 거래량이 8배로 터진 봉(275,040 ETH
+        ≈ 요청 130회)에 막혀 **정작 사용자가 보는 최근 봉이 계속 비어 있었다**.
+
+        요청당 1000건·가중치 20 이라 FOOTPRINT_CATCHUP_SECONDS 로 페이스를 걸고, 총 요청 수에
+        상한을 둔다(폭주 구간에서 무한정 긁지 않도록)."""
+        # 🔴2026-09-23 400 -> 1200. 창을 1시간(12봉)에서 12시간(144봉)으로 넓혔으므로 예산도
+        #   같이 늘린다 -- 안 늘리면 깊은 꼬리가 영영 안 찬다. 페이스가 2.5초라 최악 50분이고
+        #   가중치는 1200*20/50분 = 480/분(한도 2400/분)이라 여유가 있다. 동시 실행 가드가
+        #   있어(`backfill is None or backfill.done()`) 재연결이 잦아도 겹치지 않는다.
+        # ponytail: 그래도 콜드스타트 12시간을 한 번에 다 못 채울 수 있다(봉당 요청 수가
+        #   거래량에 비례). 최신 봉부터 돌므로 «보이는 쪽»이 먼저 차고, 남은 꼬리는 다음
+        #   재연결과 라이브 누적이 메운다. 더 필요하면 duckdb trade_tape 에서 파생이 정답.
+        budget = 1200         # 평소 1시간 백필은 ~200회면 끝난다
+        MISS_LIMIT = 10       # 빈 응답(429·5xx) 연속 허용치 -- 한 번에 포기하면 조용히 죽는다
+        now_bar = footprint_bar_start(until_ms)
+        # 🔴2026-09-23 여기가 FOOTPRINT_BARS(=12, 1시간)였다. 차트에 1h 창 하나뿐이던 시절의
+        #   상수인데 지금 창은 1h/2h/4h/12h(12/24/48/144봉)다. 그래서 재시작 뒤 **최근 1시간만**
+        #   보장되고 나머지는 라이브로 쌓이길 기다렸다 -- 실측 링 64봉(5.3h)/144. 창 밖 봉은
+        #   화면에서 셀 없는 맨 캔들로 남는다(사용자 신고 «맨 왼쪽 캔들이 그냥 캔들이야»).
+        #   스냅샷이 저장하는 깊이와 같은 상수로 맞춘다 -- 둘이 어긋나면 복원해도 구멍이 남는다.
+        #   따뜻한 재시작에서는 대부분 `lo >= hi` 로 건너뛰어 요청이 0 이다. 비싼 건 콜드스타트뿐.
+        window_floor = (now_bar - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+        try:
+            for idx, bar in enumerate(
+                    [now_bar - i * FOOTPRINT_BAR_SECONDS
+                     for i in range(FOOTPRINT_MAX_WINDOW_BARS)]):
+                # 🔴최근 1시간이 끝나면 곧바로 ready 다. 창을 12배로 넓히면서 이걸 안 하면
+                #   콜드스타트에서 budget 이 깊은 꼬리에 소진돼 **ready 가 영영 False** 로 남고,
+                #   화면은 계속 「수집 중」이며 full=not ready 라 매 폴링이 전량(12.5KB)이 된다.
+                if idx == FOOTPRINT_BARS:
+                    footprint_state["ready"] = True
+                if bar < window_floor:
+                    continue
+                lo = (bar * 1000 if bar not in footprint_state["bars"]
+                      else max(bar * 1000, gap_from_ms))
+                hi = min((bar + FOOTPRINT_BAR_SECONDS) * 1000, until_ms)
+                if lo >= hi:
+                    continue                  # 이 봉은 이미 채워져 있다(겹치는 공백이 없다)
+                next_id, misses = None, 0
+                while budget > 0:
+                    budget -= 1
+                    rows = None
+                    if next_id is None:
+                        seed = await fetch_binance_json(FOOTPRINT_AGG_URL, {
+                            "symbol": FOOTPRINT_SYMBOL, "startTime": lo,
+                            "endTime": lo + 2000, "limit": 1})
+                        if seed:
+                            next_id, misses = int(seed[0]["a"]), 0
+                            continue
+                    else:
+                        rows = await fetch_binance_json(FOOTPRINT_AGG_URL, {
+                            "symbol": FOOTPRINT_SYMBOL, "fromId": next_id, "limit": 1000})
+                    if not rows:
+                        misses += 1
+                        if misses > MISS_LIMIT:
+                            print(f"{TAG}footprint backfill: {bar} 봉 빈 응답 {MISS_LIMIT}회, 포기",
+                                  flush=True)
+                            break
+                        await asyncio.sleep(5.0)
+                        continue
+                    misses = 0
+                    for row in rows:
+                        ts_ms = int(row["T"])
+                        if lo <= ts_ms < hi:   # 창 밖은 그 창의 차례에 받는다(또는 이미 있다)
+                            # aggTrades 한 줄이 곧 주문 하나다 -- 나누지 않는다.
+                            footprint_add(float(row["p"]), float(row["q"]), ts_ms,
+                                          bool(row["m"]), agg=True)
+                    next_id = int(rows[-1]["a"]) + 1
+                    if len(rows) < 1000 or int(rows[-1]["T"]) >= hi:
+                        break                  # 이 봉 끝
+                    await asyncio.sleep(FOOTPRINT_CATCHUP_SECONDS)
+                if budget <= 0:
+                    print(f"{TAG}footprint backfill: 요청 상한 소진 -- 남은 봉은 다음 재연결에", flush=True)
+                    return
+            footprint_state["ready"] = True    # 공백이 없다 = 화면의 「수집 중」을 내린다
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- 실패하면 ready 가 False 로 남아 화면이
+            # 계속 「수집 중」이라고 말한다. 다음 재연결이 다시 시도한다.
+            print(f"{TAG}footprint backfill failed: {exc}", flush=True)
+
+    async def footprint_tape_restore(gap_from_ms: int, until_ms: int) -> None:
+        """REST 백필 대신 체결 테이프로 (gap_from_ms, until_ms) 를 메운다(ETH 외 코인).
+
+        초 단위라 경계 두 초는 뺀다 -- 끊기기 직전 초(WS 가 이미 일부 셈)와 붙은 첫 초(WS 가 나머지를 센다).
+        ponytail: 경계 두 초의 일부 체결은 빠진다(5분봉의 <1%). 초를 ms 로 쪼개 겹치게 하려면 테이프가 ms 를 들어야 한다.
+        테이프는 5초마다 쓰므로 붙은 직후엔 아직 그 앞 몇 초가 없다 -- 따라잡을 때까지 기다린다(최대 60초)."""
+        now_bar = footprint_bar_start(until_ms)
+        floor_sec = now_bar - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS
+        lo_sec = max(floor_sec, gap_from_ms // 1000 + 1) if gap_from_ms else floor_sec
+        hi_sec = until_ms // 1000                     # 이 초는 WS 가 센다(배타)
+        got = None
+        try:
+            for _ in range(12):
+                got = await asyncio.to_thread(okx_tape_footprint, TAPE_DB, LIVE_DIR / "_no_ctx.duckdb",
+                                              spec.symbol.lower(), lo_sec, hi_sec * 1000,
+                                              FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET,
+                                              TAPE_BUCKETS[spec.symbol.lower()])
+                if got["tape_max"] >= hi_sec - 1:
+                    break
+                await asyncio.sleep(5.0)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- 테이프가 없으면 라이브만으로 산다(그 앞 봉은 빈 캔들)
+            print(f"{TAG}footprint 테이프 복원 실패: {exc!r}", flush=True)
+        if got:
+            cut = now_bar - (FOOTPRINT_KEEP_BARS - 1) * FOOTPRINT_BAR_SECONDS
+            bars = footprint_state["bars"]
+            for bar, cells in got["bars"].items():
+                if bar < cut:
+                    continue
+                dst = bars.setdefault(bar, {})
+                for k, v in cells.items():
+                    t = dst.setdefault(k, [0.0] * 6)
+                    for j in range(6):
+                        t[j] += v[j]
+            print(f"{TAG}footprint 테이프 복원: {len(got['bars'])}봉 (테이프 끝 {hi_sec - got['tape_max']}초 전)",
+                  flush=True)
+        footprint_state["ready"] = True
+
+    # 진행 중인 테이커 주문(같은 가격·방향·ms). 수집기와 **같은 클래스**를 쓴다 -- 되묶기
+    # 규칙이 두 벌이 되면 화면과 DB 의 「고래」가 또 갈라진다.
+    fp_orders = TakerOrderAggregator()
+
+    async def collect_footprint(app: web.Application) -> None:
+        backfill: asyncio.Task | None = None
+        footprint_load()   # 지난 판이 남긴 봉들 -- 이게 있으면 아래 백필은 공백만 메운다
+        # 공용 세션(binance_session)은 total=10초라 WS 에 못 쓴다 -- aiohttp 버전에 따라 그
+        # 타임아웃이 WS 에도 걸려 10초마다 끊긴다(끊길 때마다 백필이 다시 뜬다). 전용 세션을
+        # 쓰되 total=None 을 **명시**한다: aiohttp 기본값은 5분이라 그냥 두면 5분마다 끊긴다.
+        ws_session = ClientSession(timeout=ClientTimeout(total=None),
+                                   connector=TCPConnector(limit=2))
+        try:
+            while True:
+                try:
+                    async with ws_session.ws_connect(FOOTPRINT_WS_URL, heartbeat=30) as ws:
+                        # WS 는 연결 이후만 준다 -- 그 앞의 빈 봉은 REST 가 메운다. 메시지를
+                        # 읽으면서 **동시에** 채운다(백필을 기다리면 그동안 오는 체결이 aiohttp
+                        # 큐에 수만 건 쌓인다).
+                        first_ms: int | None = None
+                        async for msg in ws:
+                            if msg.type is not WSMsgType.TEXT:
+                                break
+                            trade = json.loads(msg.data)
+                            if trade.get("e") != "trade":
+                                continue
+                            price, qty = float(trade["p"]), float(trade["q"])
+                            if not (price > 0 and qty > 0):
+                                # 바이낸스가 {"p":"0","q":"0","X":"NA","st":1} 를 섞어 보낸다
+                                # (2026-09-16 실측 0.3%). 수량이 0이라 합계는 안 틀려서
+                                # klines 대조로는 안 잡힌다 -- 대신 **가격 0 레벨**이 생긴다.
+                                continue
+                            ts_ms = int(trade["T"])
+                            if first_ms is None:
+                                # 백필의 경계를 **로컬 시계가 아니라 첫 체결의 거래소 시각**으로
+                                # 잡는다. time.time() 으로 잡았더니 시계 차이만큼 REST 와 WS 가
+                                # 겹쳐 그 봉만 +0.54% 더 세어졌다(2026-09-15 klines 대조).
+                                first_ms = ts_ms
+                                # 돌고 있는 백필이 있으면 새로 띄우지 않는다(REST 가중치가 두 배).
+                                # 대가: 첫 백필 도중 WS 가 끊기면 그 공백은 다음 재연결 때 메워진다.
+                                if backfill is None or backfill.done():
+                                    fp_orders.reset()   # 끊김 전 묶음은 버린다
+                                    footprint_state["ready"] = False
+                                    backfill = asyncio.create_task(
+                                        (footprint_backfill if REST_BACKFILL else footprint_tape_restore)(
+                                            footprint_state["last_ms"], first_ms))
+                            sell = bool(trade["m"])
+                            footprint_add(price, qty, ts_ms, sell)      # 총량
+                            tid = trade.get("t")
+                            done = fp_orders.add(price, qty, ts_ms, sell,
+                                                 None if tid is None else int(tid))
+                            if done is not None:                        # 닫힌 주문의 크기 구간
+                                footprint_add(done[0], done[1], done[2], done[3], order=True)
+                            footprint_state["last_ms"] = ts_ms   # 다음 재연결이 메울 공백의 시작
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- 한 번의 끊김/에러가 수집기를 영구히
+                    # 죽이면 재시작 전까지 풋프린트가 통째로 빈다(publish_dashboard_events 와
+                    # 같은 이유). 끊기면 3초 뒤 다시 붙는다.
+                    print(f"{TAG}footprint collector cycle failed (will reconnect): {exc}", flush=True)
+                await asyncio.sleep(3.0)
+        finally:
+            if backfill is not None:
+                backfill.cancel()
+            await ws_session.close()
+
+    # 초 -> 그 초의 미결제약정(ETH). 값이 **바뀐** 초만 들어간다(OI_1S_URL 주석 참고).
+    oi_1s: dict[int, float] = {}
+
+    async def collect_oi_1s(app: web.Application) -> None:
+        # 🔴«본 stamp 의 집합»이지 최고수위(last_ms)가 아니다. 바이낸스는 stamp 를 도착 순서대로
+        #   주지 않는다 -- 2026-09-19 실측: stamp 가 응답에 나타나기까지 중앙 2.65초·p90 5.08초가
+        #   걸리고, 그 편차 때문에 115개 중 4개(3.5%)는 «더 새 stamp 가 먼저» 도착했다. 최고수위로
+        #   비교하면 그 4개를 «이미 본 것»으로 오인해 버린다(짝비교에서 실측 손실 4/243 과 일치).
+        #   순서가 뒤바뀌어 들어와도 문제없다: 봉 집계는 ts_ms 로 arg_min/arg_max 를 잡고
+        #   저장은 PK(ts_ms, symbol) 가 중복을 막는다.
+        seen_ms: set[int] = set()
+        pending: list[tuple[int, float]] = []      # 아직 duckdb 에 못 넣은 스냅샷
+        flushed_at = time.time()
+        while True:
+            try:
+                left = ban_guard.ban_remaining()
+                if left > 0:                      # 다른 프로세스가 받은 차단도 따른다(공용 가드)
+                    await asyncio.sleep(min(left + 1, 300))
+                    continue
+                async with http_session["session"].get(
+                        OI_1S_URL, params={"symbol": FOOTPRINT_SYMBOL}) as resp:
+                    data = await resp.json()
+                if "time" not in data:
+                    ban_guard.note(resp.status, json.dumps(data), resp.headers.get("Retry-After"))
+                    # 🔴2026-09-26: 한도 초과(429)·IP 밴(418)에도 0.25초마다 다시 두드리고 있었다(밴 중 로그 146줄/200).
+                    #   IP 한도는 봇·대시보드·수집기가 같이 쓴다 -- 밴이면 풀릴 때까지, 아니면 30초 물러선다.
+                    m = re.search(r"banned until (\d+)", str(data.get("msg", "")))
+                    wait = max(5.0, int(m.group(1)) / 1000 - time.time() + 1) if m else 30.0
+                    print(f"{TAG}oi-1s: 거래소 거절 {resp.status} {data.get('code')} -- {wait:.0f}초 쉰다", flush=True)
+                    await asyncio.sleep(wait)
+                    continue
+                ts_ms = int(data["time"])
+                if ts_ms not in seen_ms:     # 같은 스냅샷을 다른 초에 복제하지 않는다
+                    seen_ms.add(ts_ms)
+                    if len(seen_ms) > 8192:  # 메모리 상한만 건다. 10분이면 재도착이 끝난다(최대 6.4초).
+                        seen_ms = {m for m in seen_ms if m >= ts_ms - 600_000}
+                    sec = ts_ms // 1000
+                    value = float(data["openInterest"])
+                    oi_1s[sec] = value          # 화면 링은 1초 해상도 그대로
+                    pending.append((ts_ms, value))
+                    for old in [s for s in oi_1s if s < sec - SUPPLY_1S_SECONDS]:
+                        del oi_1s[old]
+                now = time.time()
+                if pending and now - flushed_at >= OI_1S_FLUSH_SECONDS:
+                    # 성공했을 때만 비운다 -- 파일이 잠깐 잠겨 있으면 다음 flush 로 미룬다.
+                    await asyncio.to_thread(oi_1s_persist, pending, FOOTPRINT_SYMBOL.lower())
+                    pending = []
+                    flushed_at = now
+            except asyncio.CancelledError:
+                # 정상 종료(배포 재기동)에서 미저장분을 버리지 않는다 -- 이 경로가 유일하게
+                # 자주 도는 손실이었다(재기동마다 최대 OI_1S_FLUSH_SECONDS 만큼). 취소된
+                # 태스크에서는 await 가 즉시 다시 취소되므로 to_thread 없이 그 자리에서 쓴다.
+                if pending:
+                    try:
+                        oi_1s_persist(pending, FOOTPRINT_SYMBOL.lower())
+                    except Exception as exc:  # noqa: BLE001 -- 종료 중엔 알리고 넘어간다
+                        print(f"{TAG}oi-1s final flush failed: {exc}", flush=True)
+                raise
+            except Exception as exc:  # noqa: BLE001 -- 한 번의 실패로 수집을 영구히 멈추지 않는다
+                print(f"{TAG}oi-1s poll/flush failed (will retry): {exc}", flush=True)
+                # 보류분이 끝없이 자라지는 않게 한다(디스크가 통째로 나간 경우). 1시간치면
+                # 그건 일시적 잠금이 아니라 사람이 봐야 하는 고장이다.
+                del pending[:-1200]
+                flushed_at = time.time()
+            await asyncio.sleep(OI_1S_POLL_SECONDS)
+
+    # ── OKX 실시간 ─────────────────────────────────────────────────────────
+    # 바이낸스와 **같은 모양**으로 든다. 그래야 클라 렌더러가 데이터 출처만 바꿔 끼우면
+    # 누적·스택·청산점 수식이 그대로 돈다(복사본을 만들면 한쪽만 고쳐진다).
+    #   okx_sec[s] = [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
+    okx_sec: dict[int, list[float]] = {}
+    okx_liq_events: deque = deque(maxlen=5000)
+    okx_oi_1s: dict[int, float] = {}
+    okx_state: dict[str, Any] = {"connected": False, "trades": 0, "errors": 0,
+                                 "last_trade_ms": 0, "last_oi_ms": 0, "last_liq_ms": 0}
+    # 풋프린트용 OKX 봉. `footprint_state["bars"]` 와 **같은 격자·같은 6칸**이다
+    # ([매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도]).
+    # 🔴바이낸스 bars 에 **섞지 않는다** -- 거기엔 kline 완전성 검사·REST 백필·스냅샷이
+    #   전부 «바이낸스 aggTrades» 를 전제로 걸려 있다. 합치는 건 API 응답을 만들 때만.
+    okx_bars: dict[int, dict[int, list[float]]] = {}
+    # 🔴OKX 는 **풋프린트 백필이 불가능하다**(history-trades 가 100행=10.8초, 2026-09-23 실측).
+    #   그래서 서버가 뜨기 전 봉은 바이낸스만 있고, 그냥 더하면 재기동마다 **봉 높이가
+    #   경계에서 튄다**(흡수·벽을 읽는 그림에서 없던 단차). 답은 «OKX 가 **완전히 덮은**
+    #   첫 봉 이후만 내보내기»다 -- 창이 짧아지는 대신 단차가 없다(사용자 선택 C).
+    #   ⚠️«OKX 가 있는 봉만» 으로 짜면 OKX 가 잠깐 끊길 때 풋프린트가 **통째로 사라진다**.
+    #     시작 봉만 기억하는 이 방식은 순간 끊김에 안 죽는다(재연결 3초 = 봉의 1%).
+    # ⭐2026-09-24 A안: 기동 뒤 okx_footprint_restore 가 OKX 테이프에서 과거 봉을 되살려
+    #   first_bar 를 창 끝까지 당긴다(아래 okx_tape_footprint). 그 전까지는 위 C안 그대로다.
+    okx_fp = {"first_bar": 0, "t0_ms": 0, "resync_until": 0.0}
+    # 5분봉별 OKX OI [봉 첫 값, 봉 끝 값](ETH, oiCcy). 2026-09-24 사용자 «사분면·누적 OI 도 OKX
+    #   합산». okx_oi_1s 는 11분 링이라 창(1~4h)의 봉별 Δ 를 못 낸다. 재기동 전 봉은 없다 --
+    #   풋프린트가 어차피 OKX 가 덮은 봉부터만 나가므로(okx_fp) 레인에 그려지는 봉과 겹친다.
+    okx_oi_5m: dict[int, list[float]] = {}
+
+    def okx_sec_cell(ts_ms: int) -> list[float]:
+        """그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(체결마다 돌 일이 아니다)."""
+        sec = int(ts_ms) // 1000
+        cell = okx_sec.get(sec)
+        if cell is None:
+            cell = okx_sec[sec] = [0.0] * 7
+            cutoff = sec - SUPPLY_1S_SECONDS
+            for old in [x for x in okx_sec if x < cutoff]:
+                del okx_sec[old]
+        return cell
+
+    async def collect_okx_flow(app: web.Application) -> None:
+        """⑦ OKX 체결 + 청산. 주문 없음, 바이낸스 weight 안 씀.
+
+        🔴세 가지를 바이낸스와 다르게 다뤄야 한다(전부 2026-09-23 실측으로 확정):
+          1. `sz` 는 **계약 수**다 -> OKX_CT_VAL 을 곱해야 ETH 다.
+          2. `side` 는 **테이커 측면 그 자체**다 -> 바이낸스 `m`(매수자가 메이커)처럼 뒤집으면
+             부호가 통째로 반대가 된다.
+          3. `trades` 채널은 **이미 주문 단위**다(`trades-all` 4,810건 vs `trades` 1,780건,
+             sz 합은 1.0000x 동일) -> 되묶기를 이식하면 이중 집계다. 크기 구간을 바로 가른다.
+        ⚠️청산 `bkPx` 는 **파산가격**이라 바이낸스 `ap`(평균체결가)와 같은 것이 아니다.
+          USD 환산에 쓰긴 하지만 두 거래소 청산«가»를 같은 축에 놓으면 안 된다."""
+        ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
+        args = [{"channel": "trades", "instId": OKX_INST},
+                {"channel": "open-interest", "instId": OKX_INST},
+                {"channel": "liquidation-orders", "instType": "SWAP"}]
+        # 🔴계약 크기가 틀리면 레인이 조용히 10배가 된다 -- 모르거나 거래소와 다르면 **켜지 않는다**
+        #   (화면에선 «합에서 빠짐: OKX» 로 보인다). REST 가 안 될 때만 표 값으로 간다.
+        if OKX_CT_VAL is None:
+            print(f"{TAG}okx ws: {OKX_INST} ctVal 모름 -- OKX 레인 끔", flush=True)
+            await ws_session.close()
+            return
+        try:
+            async with ws_session.get(OKX_INSTRUMENTS_URL, headers=OKX_HTTP_HEADERS,
+                                      params={"instType": "SWAP", "instId": OKX_INST},
+                                      timeout=ClientTimeout(total=10)) as r:
+                got = float((await r.json())["data"][0]["ctVal"])
+            if abs(got - OKX_CT_VAL) > 1e-12:
+                print(f"{TAG}okx ws: 🔴ctVal 갈라짐 표 {OKX_CT_VAL} vs 거래소 {got} -- OKX 레인 끔", flush=True)
+                await ws_session.close()
+                return
+        except Exception as exc:  # noqa: BLE001
+            print(f"{TAG}okx ws: ctVal 대조 실패({exc!r}) -- 표 값 {OKX_CT_VAL} 로 계속", flush=True)
+        try:
+            while True:
+                try:
+                    async with ws_session.ws_connect(OKX_WS_URL, heartbeat=20) as ws:
+                        await ws.send_json({"op": "subscribe", "args": args})
+                        okx_state.update(connected=True)
+                        print(f"{TAG}okx ws: connected", flush=True)
+                        while True:
+                            msg = await ws.receive(timeout=OKX_RECV_TIMEOUT)
+                            if msg.type is not WSMsgType.TEXT:
+                                print(f"{TAG}okx ws: non-text {msg.type!r} -> reconnect", flush=True)
+                                break
+                            if msg.data == "pong":
+                                continue
+                            d = json.loads(msg.data)
+                            if d.get("event") == "error":
+                                print(f"{TAG}okx ws: 구독 거부 {d.get('msg')}", flush=True)
+                                break
+                            if d.get("event"):
+                                continue
+                            ch = (d.get("arg") or {}).get("channel")
+                            if ch == "trades":
+                                for t in d.get("data") or []:
+                                    price = float(t.get("px") or 0.0)
+                                    qty = float(t.get("sz") or 0.0) * OKX_CT_VAL
+                                    side = str(t.get("side") or "")
+                                    if not (price > 0 and qty > 0 and side in ("buy", "sell")):
+                                        continue
+                                    ts_ms = int(t.get("ts") or time.time() * 1000)
+                                    i = 1 if side == "sell" else 0
+                                    cell = okx_sec_cell(ts_ms)
+                                    cell[4 + i] += qty
+                                    cell[6] = price
+                                    notional = price * qty
+                                    if notional >= WHALE_MIN_USD:
+                                        cell[2 + i] += qty
+                                    elif notional < RETAIL_MAX_USD:
+                                        cell[i] += qty
+                                    okx_state["trades"] += 1
+                                    okx_state["last_trade_ms"] = ts_ms
+                                    # 풋프린트 봉(바이낸스와 같은 격자)
+                                    bar = footprint_bar_start(ts_ms)
+                                    if not okx_fp["first_bar"]:
+                                        okx_fp["first_bar"] = bar
+                                        okx_fp["t0_ms"] = ts_ms      # 이 앞은 테이프가 맡는다
+                                    cells = okx_bars.get(bar)
+                                    if cells is None:
+                                        cells = okx_bars[bar] = {}
+                                        cut = (footprint_bar_start(time.time() * 1000)
+                                               - (FOOTPRINT_KEEP_BARS - 1) * FOOTPRINT_BAR_SECONDS)
+                                        for ob in [b for b in okx_bars if b < cut]:
+                                            del okx_bars[ob]
+                                    fc = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)),
+                                                          [0.0] * 6)
+                                    fc[i] += qty
+                                    if notional >= WHALE_MIN_USD:
+                                        fc[2 + i] += qty
+                                    elif notional < RETAIL_MAX_USD:
+                                        fc[4 + i] += qty
+                            elif ch == "open-interest":
+                                for r in d.get("data") or []:
+                                    oi = float(r.get("oiCcy") or 0.0)      # oiCcy = 기초자산(ETH)
+                                    ts_ms = int(r.get("ts") or 0)
+                                    if oi > 0 and ts_ms > 0:
+                                        sec = ts_ms // 1000
+                                        okx_oi_1s[sec] = oi
+                                        okx_state["last_oi_ms"] = ts_ms
+                                        ob = sec // OI_5M_BAR_SECONDS * OI_5M_BAR_SECONDS
+                                        if ob in okx_oi_5m:
+                                            okx_oi_5m[ob][1] = oi
+                                        else:
+                                            okx_oi_5m[ob] = [oi, oi]
+                                            for old in [x for x in okx_oi_5m
+                                                        if x < ob - FOOTPRINT_KEEP_BARS * OI_5M_BAR_SECONDS]:
+                                                del okx_oi_5m[old]
+                                        for old in [x for x in okx_oi_1s if x < sec - SUPPLY_1S_SECONDS]:
+                                            del okx_oi_1s[old]
+                            elif ch == "liquidation-orders":
+                                for r in d.get("data") or []:
+                                    if str(r.get("instId") or "") != OKX_INST:
+                                        continue            # instType:SWAP 은 전 종목이 온다
+                                    for det in r.get("details") or []:
+                                        qty = float(det.get("sz") or 0.0) * OKX_CT_VAL
+                                        px = float(det.get("bkPx") or 0.0)
+                                        if qty <= 0:
+                                            continue
+                                        ts_ms = int(det.get("ts") or time.time() * 1000)
+                                        okx_liq_events.append({
+                                            "ts_ms": ts_ms,
+                                            # posSide 가 **청산된 포지션**의 방향이다(바이낸스는
+                                            # 주문 방향에서 뒤집어 얻는다 -- 결과는 같은 뜻).
+                                            "side": "long" if det.get("posSide") == "long" else "short",
+                                            "qty": qty, "price": px, "usd": qty * px,
+                                            "symbol": OKX_INST})
+                                        okx_state["last_liq_ms"] = ts_ms
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- 끊기면 3초 뒤 다시. 봇에 영향 없음
+                    okx_state.update(errors=okx_state["errors"] + 1)
+                    print(f"{TAG}okx ws: {exc!r}", flush=True)
+                    await asyncio.sleep(3.0)
+                finally:
+                    okx_state["connected"] = False
+        finally:
+            await ws_session.close()
+
+    # ── 바이낸스 현물 (2026-09-23) ─────────────────────────────────────────
+    # OKX 와 **같은 7칸 모양**. 합산 패널이 셋을 그대로 더한다.
+    # 🔴현물엔 OI·펀딩·마크·강제청산이 **존재하지 않는다** -- 포지션 개념이 없다.
+    spot_sec: dict[int, list[float]] = {}
+    spot_state: dict[str, Any] = {"connected": False, "trades": 0, "errors": 0, "last_trade_ms": 0}
+
+    def spot_sec_cell(ts_ms: int) -> list[float]:
+        sec = int(ts_ms) // 1000
+        cell = spot_sec.get(sec)
+        if cell is None:
+            cell = spot_sec[sec] = [0.0] * 7
+            cutoff = sec - SUPPLY_1S_SECONDS
+            for old in [x for x in spot_sec if x < cutoff]:
+                del spot_sec[old]
+        return cell
+
+    async def collect_spot_flow(app: web.Application) -> None:
+        """⑨ 바이낸스 현물 @aggTrade. 주문 없음. 선물과 **다른 시장**이라 weight 도 별개다.
+
+        ⚠️풋프린트에는 안 쓴다 -- 현물은 선물보다 +4.69bp 높아 $0.1 빈 기준 **12.9빈**
+          어긋난다(2026-09-23 실측). 가격축에 쌓으면 가짜 이중 봉우리가 된다. 수급(CVD)은
+          «수량의 합»이라 가격이 무관해서 문제가 없다."""
+        ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
+        try:
+            while True:
+                try:
+                    async with ws_session.ws_connect(SPOT_WS_URL, heartbeat=30) as ws:
+                        spot_state.update(connected=True)
+                        print(f"{TAG}spot ws: connected", flush=True)
+                        while True:
+                            msg = await ws.receive(timeout=SPOT_RECV_TIMEOUT)
+                            if msg.type is not WSMsgType.TEXT:
+                                break
+                            t = json.loads(msg.data)
+                            if t.get("e") != "aggTrade":
+                                continue
+                            price, qty = float(t.get("p") or 0.0), float(t.get("q") or 0.0)
+                            if not (price > 0 and qty > 0):
+                                continue
+                            ts_ms = int(t.get("T") or time.time() * 1000)
+                            i = 1 if t.get("m") else 0          # 매수자가 메이커 -> 공격자는 매도
+                            cell = spot_sec_cell(ts_ms)
+                            cell[4 + i] += qty
+                            cell[6] = price
+                            # 이 7칸에는 체결 수 자리가 없다(총량·구간·가격뿐) -- `f`/`l` 은
+                            # 안 쓴다. 필요해지면 그때 칸을 늘린다.
+                            notional = price * qty
+                            if notional >= WHALE_MIN_USD:
+                                cell[2 + i] += qty
+                            elif notional < RETAIL_MAX_USD:
+                                cell[i] += qty
+                            spot_state["trades"] += 1
+                            spot_state["last_trade_ms"] = ts_ms
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    spot_state.update(errors=spot_state["errors"] + 1)
+                    print(f"{TAG}spot ws: {exc!r}", flush=True)
+                    await asyncio.sleep(3.0)
+                finally:
+                    spot_state["connected"] = False
+        finally:
+            await ws_session.close()
+
+    async def okx_footprint_restore(app: web.Application) -> None:
+        """A안(2026-09-24): 기동 뒤 OKX 풋프린트 과거분을 OKX 체결 테이프에서 되살린다.
+
+        진행 중인 봉은 **T0(라이브 첫 체결) 앞 몫만** 테이프에서 더하고, 그 앞 봉들은 테이프로
+        통째로 채운다 -- 온전한 봉이 끊김 없이 이어지는 데까지만(중간에 온전하지 않은 봉이 있으면
+        거기서 멈춘다: 그 앞을 내보내면 C안이 막으려던 단차가 창 안에 생긴다). 사분면 OI 도 같은 봉까지.
+        테이프 자동 복구가 공백을 메우는 데 몇 분 걸리므로 5분마다 35분까지 다시 본다.
+        🔴DB 읽기는 스레드, 메모리 반영은 **이 루프에서** -- 라이브 체결이 같은 dict 를 만진다."""
+        while not okx_fp["t0_ms"]:
+            await asyncio.sleep(1.0)
+        t0 = okx_fp["t0_ms"]
+        start_bar = footprint_bar_start(t0)
+        lo = start_bar - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS
+        t0_min = (t0 // 1000) // 60 * 60
+        start_filled, restored, liq_upto = False, set(), t0   # liq_upto: 청산을 이미 채운 구간의 앞끝
+        for attempt in range(8):
+            await asyncio.sleep(15.0 if attempt == 0 else 300.0)
+            try:
+                got = await asyncio.to_thread(okx_tape_footprint, OKX_TAPE_DB_PATH, OKX_CTX_DB_PATH,
+                                              OKX_INST, lo, t0, FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET)
+            except Exception as exc:  # noqa: BLE001 -- 테이프가 없으면 C안 그대로 산다
+                print(f"{TAG}okx footprint 복원 실패({attempt + 1}회): {exc!r}", flush=True)
+                continue
+            if got["tape_max"] < t0 // 1000:
+                continue                          # 테이프가 아직 T0 를 지나 쓰지 않았다
+            ok = got["ok_min"]
+            covered = lambda a, b: all(m in ok for m in range(a, b, 60))  # noqa: E731
+            if not start_filled:
+                if not covered(start_bar, t0_min + 60):
+                    continue
+                cells = okx_bars.setdefault(start_bar, {})
+                for k, v in got["bars"].get(start_bar, {}).items():
+                    t = cells.setdefault(k, [0.0] * 6)
+                    for j in range(6):
+                        t[j] += v[j]
+                start_filled = True
+            earliest, b = start_bar, start_bar - FOOTPRINT_BAR_SECONDS
+            while b >= lo and covered(b, b + FOOTPRINT_BAR_SECONDS):
+                if b not in restored:             # 라이브는 이 봉을 모른다 -- 교체
+                    okx_bars[b] = got["bars"].get(b, {})
+                    restored.add(b)
+                earliest, b = b, b - FOOTPRINT_BAR_SECONDS
+            for ob, (o, c) in got["oi"].items():
+                if earliest <= ob < start_bar:
+                    okx_oi_5m[ob] = [o, c]
+                elif ob == start_bar:
+                    okx_oi_5m.setdefault(ob, [o, c])[0] = o
+            # 청산: 이번에 새로 덮은 구간 [earliest, liq_upto) 만 앞에 넣는다(시각 순 유지).
+            #   🔴deque(maxlen) 에 appendleft 하다 차면 **가장 최신**이 밀려난다 -- 남은 자리만큼만.
+            add = [e for e in got["liq"] if earliest * 1000 <= e["ts_ms"] < liq_upto]
+            room = (okx_liq_events.maxlen or 10**9) - len(okx_liq_events)
+            for e in reversed(add[-room:] if room > 0 else []):
+                okx_liq_events.appendleft(e)
+            liq_upto = earliest * 1000
+            okx_fp["first_bar"] = earliest - FOOTPRINT_BAR_SECONDS
+            okx_fp["resync_until"] = time.time() + 15.0   # 열린 화면도 전량 한 번 받게
+            print(f"{TAG}okx footprint: 테이프에서 {len(restored)}봉 + 진행 봉 앞부분 복원 "
+                  f"(창 {(start_bar - earliest) // FOOTPRINT_BAR_SECONDS + 1}"
+                  f"/{FOOTPRINT_MAX_WINDOW_BARS}봉)", flush=True)
+            if earliest <= lo:
+                return
+
+    tasks: list[asyncio.Task] = []
+
+    async def start(app: web.Application) -> None:
+        for fn in (collect_footprint, collect_oi_1s, collect_okx_flow, okx_footprint_restore, collect_spot_flow):
+            tasks.append(asyncio.create_task(fn(app)))
+
+    async def stop(app: web.Application) -> None:
+        # 내려가기 직전에 한 번 더 남긴다 -- 다음 판이 메울 공백이 «재시작에 걸린 시간»으로 준다.
+        if footprint_state["ready"]:
+            footprint_save()
+        for t in tasks:
+            t.cancel()
+        for t in tasks:
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+
+    return SimpleNamespace(
+        spec=spec, footprint_state=footprint_state, footprint_bar_start=footprint_bar_start, oi_1s=oi_1s,
+        okx_sec=okx_sec, okx_liq_events=okx_liq_events, okx_oi_1s=okx_oi_1s, okx_state=okx_state,
+        okx_bars=okx_bars, okx_fp=okx_fp, okx_oi_5m=okx_oi_5m, spot_sec=spot_sec, spot_state=spot_state,
+        footprint_tape_restore=footprint_tape_restore, start=start, stop=stop)
+
+
 def make_app() -> web.Application:
     @web.middleware
     async def static_asset_headers(
@@ -2373,394 +3177,28 @@ def make_app() -> web.Application:
             max_stale=STALE_GRACE_SECONDS,
         )
 
-    # ── 볼륨 풋프린트 체결 테이프 (2026-09-15) ────────────────────────────────────
-    # 봉 하나를 가격레벨로 쪼개 **공격적 매수/매도** 체결량을 따로 센다. klines 에는 이 정보가
-    # 없다(봉당 taker_buy 합계 하나뿐) -- 그래서 체결 테이프를 직접 누적한다.
-    # `m` = "매수자가 메이커" 이므로 m=True 면 **공격자는 매도자**다(check_footprint_tape 로 검증).
-    #
-    # 실시간은 WS, 과거는 REST 다. 처음엔 REST 폴링만으로 만들었다가 갈아엎었다 -- 2026-09-15
-    # 22:35 봉이 275,040 ETH(평소의 8배)로 터지자 1000건/요청 페이스가 **25분** 뒤처졌다.
-    # 풋프린트가 가장 필요한 순간이 바로 그때인데 그때 밀린다. WS 는 가중치가 0이라 급증에도
-    # 안 밀리고, REST 는 «연결 이전 구간» 백필에만 쓴다(이건 늦어도 라벨로 알리면 그만이다).
-    # ⚠️@aggTrade 는 2026-09-02 부터 바이낸스가 배달을 멈췄다(구독은 에러 없이 되고 메시지만
-    #   안 온다 -- 2026-09-15 재확인: 10초에 0건). @trade 를 쓴다(개별 체결, 같은 p/q/T/m).
-    FOOTPRINT_AGG_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
-    FOOTPRINT_WS_URL = f"wss://fstream.binance.com/ws/{FOOTPRINT_SYMBOL.lower()}@trade"
-    footprint_state: dict[str, Any] = {"bars": {}, "ready": False, "updated": 0.0,
-                                   "last_ms": 0, "saved_at": 0.0,
-                                   # aggTrades 로 메운 봉. 출처 표시일 뿐 «덜 정확하다»는 뜻이
-                                   # 아니다 -- 크기 구간은 주문 단위라 aggTrades 쪽이 오히려
-                                   # 정확하다(footprint_add 도크스트링의 2026-09-19 정정).
-                                   "agg_bars": set(),
-                                   # 초 -> [리테일매수, 리테일매도, 고래매수, 고래매도,
-                                   #        총매수, 총매도, 마지막가격]. 아래 supply_1s_cell 참고.
-                                   "sec": {}}
+    # ── 코인별 흐름 엔진 (2026-09-26) -- 본문은 모듈 수준 make_coin_flow 로 옮겼다 ──
+    #   켜진 코인(DASHBOARD_ASSETS)만 만든다 -- 꺼진 코인은 연결·메모리를 전혀 안 쓴다. ETH 는 항상.
+    flows = {a: make_coin_flow(FLOW_SPECS[a], fetch_binance_json, http_session)
+             for a in FLOW_SPECS if a == "eth" or a in DASHBOARD_ASSETS}
+    _eth = flows["eth"]
+    # ETH 전용 소비자(상황 읽기·미시 참고·히트맵 체결 대조)는 옛 이름 그대로 ETH 를 본다.
+    footprint_state, oi_1s, okx_bars, okx_fp = _eth.footprint_state, _eth.oi_1s, _eth.okx_bars, _eth.okx_fp
 
-    def supply_1s_cell(ts_ms: int) -> list[float]:
-        """그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(체결마다 돌 일이 아니다)."""
-        sec = int(ts_ms) // 1000
-        by_sec = footprint_state["sec"]
-        cell = by_sec.get(sec)
-        if cell is None:
-            cell = by_sec[sec] = [0.0] * 7
-            cutoff = sec - SUPPLY_1S_SECONDS
-            for old in [s for s in by_sec if s < cutoff]:
-                del by_sec[old]
-        return cell
+    def flow_for(q: Any) -> SimpleNamespace:
+        """`?asset=` 의 흐름 엔진. 꺼진 코인이면 404 -- ETH 값을 대신 주면 코인 이름 아래 ETH 가 앉는다."""
+        f = flows.get(str(q.get("asset") or "eth").lower())
+        if f is None:
+            raise web.HTTPNotFound(reason="flow_off")
+        return f
 
-    def footprint_bar_start(ts_ms: float) -> int:
-        return (int(ts_ms) // 1000) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS
+    async def start_flows(app: web.Application) -> None:
+        for f in flows.values():
+            await f.start(app)
 
-    def footprint_add(price: float, qty: float, ts_ms: int, sell: bool,
-                      agg: bool = False, order: bool = False) -> None:
-        """order=False 는 **개별 체결**(셀 총량만), True 는 **테이커 주문**(크기 구간만).
-
-        백필의 aggTrades 한 줄은 그 자체가 주문이라 둘 다다. 실시간 `@trade` 는 총량을 바로
-        넣고, 주문이 닫힐 때 구간을 따로 넣는다 -- 한 번에 못 하는 이유는 주문이 닫히기
-        전에는 그 주문이 어느 통에 속하는지 알 수 없기 때문이다(쓸어담는 중에는 계속 자란다).
-
-        🔴여기서 한 번 틀렸다(2026-09-19). 처음엔 개별 체결(`@trade`)로 갈랐는데, 큰 주문이
-          호가를 쓸면 그게 작은 체결 수십 건으로 쪼개져 **고래가 사라진다**(같은 11.3초 구간
-          실측: aggTrade 기준 37.4% vs @trade 기준 9.6%, 총 명목은 동일). 그다음엔 반대로
-          백필 덩어리를 개별 수로 나눠봤는데 그건 **과교정**이라 고래가 0.0% 가 됐다 --
-          덩어리는 이미 «주문 하나»라 나눌 것이 아니었다.
-          답은 둘 다 **주문 단위로 맞추는 것**이다: 백필은 덩어리를 그대로 쓰고, 실시간은
-          같은 규칙(가격·방향·ms)으로 되묶는다. 기존 `nif_whale` 도 @aggTrade 기준이라
-          이래야 이 저장소에서 「고래」가 한 뜻이 된다."""
-        bars = footprint_state["bars"]
-        bar = footprint_bar_start(ts_ms)
-        cells = bars.get(bar)
-        if cells is None:
-            cutoff = (footprint_bar_start(time.time() * 1000)
-                      - (FOOTPRINT_KEEP_BARS - 1) * FOOTPRINT_BAR_SECONDS)
-            if bar < cutoff:
-                return              # 창을 벗어난 봉 -- 넣어봐야 바로 아래에서 지워진다
-            cells = bars[bar] = {}
-            for old_bar in [b for b in bars if b < cutoff]:
-                del bars[old_bar]   # 새 봉이 생길 때만 정리한다 -- 체결마다 돌 일이 아니다(266/s)
-                footprint_state["agg_bars"].discard(old_bar)
-        cell = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)), [0.0] * 6)
-        sec_cell = supply_1s_cell(ts_ms)
-        side = 1 if sell else 0
-        if not order:
-            cell[side] += qty
-            sec_cell[4 + side] += qty
-            sec_cell[6] = price          # 그 초의 마지막 체결가 = 1초 가격선
-        if order or agg:
-            notional = price * qty
-            if notional >= WHALE_MIN_USD:
-                cell[2 + side] += qty
-                sec_cell[2 + side] += qty
-            elif notional < RETAIL_MAX_USD:
-                cell[4 + side] += qty
-                sec_cell[side] += qty
-        if agg:
-            footprint_state["agg_bars"].add(bar)
-        # 🔴`now` 는 아래 스냅샷 저장 조건이 쓴다. 2026-09-19 리팩터에서 이 줄을 지웠다가
-        #   **ready 가 되는 순간 모든 체결이 NameError** 로 터졌다(단락평가 때문에 ready
-        #   이전에는 조용했다). 결과: WS 루프가 크래시->재연결->백필을 무한 반복해 실시간
-        #   누적이 아예 안 됐고 REST 를 계속 때렸다. 한 줄이 지워진 걸 테스트가 못 잡은 건
-        #   이 경로에 «ready 이후 체결» 을 태우는 시험이 없었기 때문이다.
-        now = time.time()
-        footprint_state["updated"] = now
-        # ⚠️ready 일 때만 저장한다. 백필이 **진행 중인 봉**을 저장하면, 다음 판이 그걸 «이미 있는
-        # 봉»으로 보고 건너뛰어 반쪽짜리로 굳는다(2026-09-15 시험에서 한 봉이 -83.7% 로 남았다).
-        # 저장된 스냅샷의 계약은 «last_ms 까지 공백이 없다» 이고, 그 보증이 곧 ready 다.
-        if footprint_state["ready"] and now - footprint_state["saved_at"] >= FOOTPRINT_SNAPSHOT_SECONDS:
-            footprint_save()   # 30초마다 -- 죽어도 잃는 건 30초어치이고 그건 REST 로 메운다
-
-    def footprint_save() -> None:
-        """봉 상태를 통째로 덮어쓴다(수십 KB). 증분 append 를 안 쓰는 이유는 진행 중인 봉이
-        계속 자라기 때문 -- 어차피 마지막 상태만 쓸모 있다. tmp -> replace 로 원자적으로."""
-        try:
-            tmp = FOOTPRINT_SNAPSHOT_PATH.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps({
-                "bar_seconds": FOOTPRINT_BAR_SECONDS, "bucket": FOOTPRINT_BUCKET,
-                "symbol": FOOTPRINT_SYMBOL, "last_ms": footprint_state["last_ms"],
-                # 셀 칸수 표식. 2칸 시절 스냅샷을 4칸 코드가 읽으면 IndexError 가 아니라
-                # **조용히 고래 0** 이 된다 -- 그래서 버전을 적고 다르면 통째로 버린다.
-                "cells_v": 3,
-                # 봉 링은 24시간이지만 저장은 **화면이 고를 수 있는 가장 긴 창**만 한다
-                # (위 FOOTPRINT_MAX_WINDOW_BARS). 그 밖은 재시작 뒤 다시 찬다 -- 화면이
-                # 실제 봉 수를 적으므로 짧아진 걸 숨기지 않는다.
-                "bars": {str(bar): {str(k): v for k, v in cells.items()}
-                         for bar, cells in sorted(footprint_state["bars"].items())[-FOOTPRINT_MAX_WINDOW_BARS:]},
-            }))
-            tmp.replace(FOOTPRINT_SNAPSHOT_PATH)
-            footprint_state["saved_at"] = time.time()
-        except OSError as exc:
-            footprint_state["saved_at"] = time.time()   # 매 체결마다 재시도하지 않게
-            print(f"footprint snapshot save failed: {exc}", flush=True)
-
-    def footprint_load() -> None:
-        """재시작 직후 1회. 창 밖 봉은 버리고, last_ms 를 복원해 백필이 «꺼져 있던 구간»만
-        메우게 한다. 봉 길이나 버킷이 바뀌었으면 통째로 무시한다 -- 섞이면 조용히 틀린다."""
-        try:
-            saved = json.loads(FOOTPRINT_SNAPSHOT_PATH.read_text())
-        except (OSError, ValueError):
-            return
-        if (saved.get("bar_seconds") != FOOTPRINT_BAR_SECONDS
-                or saved.get("bucket") != FOOTPRINT_BUCKET
-                or saved.get("symbol") != FOOTPRINT_SYMBOL
-                or saved.get("cells_v") != 3):
-            print("footprint snapshot: 설정이 달라 무시한다", flush=True)
-            return
-        cutoff = (footprint_bar_start(time.time() * 1000)
-                  - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS)
-        bars = {int(bar): {int(k): [float(x) for x in v] for k, v in cells.items()}
-                for bar, cells in (saved.get("bars") or {}).items() if int(bar) >= cutoff}
-        if not bars:
-            return
-        footprint_state["bars"] = bars
-        footprint_state["last_ms"] = int(saved.get("last_ms") or 0)
-        print(f"footprint snapshot: {len(bars)}봉 복원", flush=True)
-
-    async def footprint_backfill(gap_from_ms: int, until_ms: int) -> None:
-        """WS 가 못 준 구간을 aggTrades 로 메운다. 최신 봉부터, 봉마다 «받을 창»을 따로 잡는다.
-
-        창 계산이 이 함수의 전부다:
-          - state 에 **없는** 봉  -> 봉 전체(단 until_ms 까지). 처음 뜰 때·WS 가 오래 끊겼을 때.
-          - state에 **있는** 봉   -> [gap_from_ms, until_ms] 와 겹치는 부분만. gap_from_ms 는
-            끊기기 직전 마지막 WS 체결 시각이라, 이미 센 체결을 다시 세지 않는다.
-        이 구분이 없으면 둘 중 하나가 깨진다 -- 「있는 봉은 건너뛴다」로 두면 **서버가 뜬 봉의
-        앞부분**이 통째로 빈다(2026-09-15 실측 43% 누락), 무조건 다시 받으면 이중계상이다.
-
-        왜 최신 봉부터인가: 오래된 쪽부터 한 줄로 걸었더니 거래량이 8배로 터진 봉(275,040 ETH
-        ≈ 요청 130회)에 막혀 **정작 사용자가 보는 최근 봉이 계속 비어 있었다**.
-
-        요청당 1000건·가중치 20 이라 FOOTPRINT_CATCHUP_SECONDS 로 페이스를 걸고, 총 요청 수에
-        상한을 둔다(폭주 구간에서 무한정 긁지 않도록)."""
-        # 🔴2026-09-23 400 -> 1200. 창을 1시간(12봉)에서 12시간(144봉)으로 넓혔으므로 예산도
-        #   같이 늘린다 -- 안 늘리면 깊은 꼬리가 영영 안 찬다. 페이스가 2.5초라 최악 50분이고
-        #   가중치는 1200*20/50분 = 480/분(한도 2400/분)이라 여유가 있다. 동시 실행 가드가
-        #   있어(`backfill is None or backfill.done()`) 재연결이 잦아도 겹치지 않는다.
-        # ponytail: 그래도 콜드스타트 12시간을 한 번에 다 못 채울 수 있다(봉당 요청 수가
-        #   거래량에 비례). 최신 봉부터 돌므로 «보이는 쪽»이 먼저 차고, 남은 꼬리는 다음
-        #   재연결과 라이브 누적이 메운다. 더 필요하면 duckdb trade_tape 에서 파생이 정답.
-        budget = 1200         # 평소 1시간 백필은 ~200회면 끝난다
-        MISS_LIMIT = 10       # 빈 응답(429·5xx) 연속 허용치 -- 한 번에 포기하면 조용히 죽는다
-        now_bar = footprint_bar_start(until_ms)
-        # 🔴2026-09-23 여기가 FOOTPRINT_BARS(=12, 1시간)였다. 차트에 1h 창 하나뿐이던 시절의
-        #   상수인데 지금 창은 1h/2h/4h/12h(12/24/48/144봉)다. 그래서 재시작 뒤 **최근 1시간만**
-        #   보장되고 나머지는 라이브로 쌓이길 기다렸다 -- 실측 링 64봉(5.3h)/144. 창 밖 봉은
-        #   화면에서 셀 없는 맨 캔들로 남는다(사용자 신고 «맨 왼쪽 캔들이 그냥 캔들이야»).
-        #   스냅샷이 저장하는 깊이와 같은 상수로 맞춘다 -- 둘이 어긋나면 복원해도 구멍이 남는다.
-        #   따뜻한 재시작에서는 대부분 `lo >= hi` 로 건너뛰어 요청이 0 이다. 비싼 건 콜드스타트뿐.
-        window_floor = (now_bar - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS)
-        try:
-            for idx, bar in enumerate(
-                    [now_bar - i * FOOTPRINT_BAR_SECONDS
-                     for i in range(FOOTPRINT_MAX_WINDOW_BARS)]):
-                # 🔴최근 1시간이 끝나면 곧바로 ready 다. 창을 12배로 넓히면서 이걸 안 하면
-                #   콜드스타트에서 budget 이 깊은 꼬리에 소진돼 **ready 가 영영 False** 로 남고,
-                #   화면은 계속 「수집 중」이며 full=not ready 라 매 폴링이 전량(12.5KB)이 된다.
-                if idx == FOOTPRINT_BARS:
-                    footprint_state["ready"] = True
-                if bar < window_floor:
-                    continue
-                lo = (bar * 1000 if bar not in footprint_state["bars"]
-                      else max(bar * 1000, gap_from_ms))
-                hi = min((bar + FOOTPRINT_BAR_SECONDS) * 1000, until_ms)
-                if lo >= hi:
-                    continue                  # 이 봉은 이미 채워져 있다(겹치는 공백이 없다)
-                next_id, misses = None, 0
-                while budget > 0:
-                    budget -= 1
-                    rows = None
-                    if next_id is None:
-                        seed = await fetch_binance_json(FOOTPRINT_AGG_URL, {
-                            "symbol": FOOTPRINT_SYMBOL, "startTime": lo,
-                            "endTime": lo + 2000, "limit": 1})
-                        if seed:
-                            next_id, misses = int(seed[0]["a"]), 0
-                            continue
-                    else:
-                        rows = await fetch_binance_json(FOOTPRINT_AGG_URL, {
-                            "symbol": FOOTPRINT_SYMBOL, "fromId": next_id, "limit": 1000})
-                    if not rows:
-                        misses += 1
-                        if misses > MISS_LIMIT:
-                            print(f"footprint backfill: {bar} 봉 빈 응답 {MISS_LIMIT}회, 포기",
-                                  flush=True)
-                            break
-                        await asyncio.sleep(5.0)
-                        continue
-                    misses = 0
-                    for row in rows:
-                        ts_ms = int(row["T"])
-                        if lo <= ts_ms < hi:   # 창 밖은 그 창의 차례에 받는다(또는 이미 있다)
-                            # aggTrades 한 줄이 곧 주문 하나다 -- 나누지 않는다.
-                            footprint_add(float(row["p"]), float(row["q"]), ts_ms,
-                                          bool(row["m"]), agg=True)
-                    next_id = int(rows[-1]["a"]) + 1
-                    if len(rows) < 1000 or int(rows[-1]["T"]) >= hi:
-                        break                  # 이 봉 끝
-                    await asyncio.sleep(FOOTPRINT_CATCHUP_SECONDS)
-                if budget <= 0:
-                    print("footprint backfill: 요청 상한 소진 -- 남은 봉은 다음 재연결에", flush=True)
-                    return
-            footprint_state["ready"] = True    # 공백이 없다 = 화면의 「수집 중」을 내린다
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 -- 실패하면 ready 가 False 로 남아 화면이
-            # 계속 「수집 중」이라고 말한다. 다음 재연결이 다시 시도한다.
-            print(f"footprint backfill failed: {exc}", flush=True)
-
-    # 진행 중인 테이커 주문(같은 가격·방향·ms). 수집기와 **같은 클래스**를 쓴다 -- 되묶기
-    # 규칙이 두 벌이 되면 화면과 DB 의 「고래」가 또 갈라진다.
-    fp_orders = TakerOrderAggregator()
-
-    async def collect_footprint(app: web.Application) -> None:
-        backfill: asyncio.Task | None = None
-        footprint_load()   # 지난 판이 남긴 봉들 -- 이게 있으면 아래 백필은 공백만 메운다
-        # 공용 세션(binance_session)은 total=10초라 WS 에 못 쓴다 -- aiohttp 버전에 따라 그
-        # 타임아웃이 WS 에도 걸려 10초마다 끊긴다(끊길 때마다 백필이 다시 뜬다). 전용 세션을
-        # 쓰되 total=None 을 **명시**한다: aiohttp 기본값은 5분이라 그냥 두면 5분마다 끊긴다.
-        ws_session = ClientSession(timeout=ClientTimeout(total=None),
-                                   connector=TCPConnector(limit=2))
-        try:
-            while True:
-                try:
-                    async with ws_session.ws_connect(FOOTPRINT_WS_URL, heartbeat=30) as ws:
-                        # WS 는 연결 이후만 준다 -- 그 앞의 빈 봉은 REST 가 메운다. 메시지를
-                        # 읽으면서 **동시에** 채운다(백필을 기다리면 그동안 오는 체결이 aiohttp
-                        # 큐에 수만 건 쌓인다).
-                        first_ms: int | None = None
-                        async for msg in ws:
-                            if msg.type is not WSMsgType.TEXT:
-                                break
-                            trade = json.loads(msg.data)
-                            if trade.get("e") != "trade":
-                                continue
-                            price, qty = float(trade["p"]), float(trade["q"])
-                            if not (price > 0 and qty > 0):
-                                # 바이낸스가 {"p":"0","q":"0","X":"NA","st":1} 를 섞어 보낸다
-                                # (2026-09-16 실측 0.3%). 수량이 0이라 합계는 안 틀려서
-                                # klines 대조로는 안 잡힌다 -- 대신 **가격 0 레벨**이 생긴다.
-                                continue
-                            ts_ms = int(trade["T"])
-                            if first_ms is None:
-                                # 백필의 경계를 **로컬 시계가 아니라 첫 체결의 거래소 시각**으로
-                                # 잡는다. time.time() 으로 잡았더니 시계 차이만큼 REST 와 WS 가
-                                # 겹쳐 그 봉만 +0.54% 더 세어졌다(2026-09-15 klines 대조).
-                                first_ms = ts_ms
-                                # 돌고 있는 백필이 있으면 새로 띄우지 않는다(REST 가중치가 두 배).
-                                # 대가: 첫 백필 도중 WS 가 끊기면 그 공백은 다음 재연결 때 메워진다.
-                                if backfill is None or backfill.done():
-                                    fp_orders.reset()   # 끊김 전 묶음은 버린다
-                                    footprint_state["ready"] = False
-                                    backfill = asyncio.create_task(footprint_backfill(
-                                        footprint_state["last_ms"], first_ms))
-                            sell = bool(trade["m"])
-                            footprint_add(price, qty, ts_ms, sell)      # 총량
-                            tid = trade.get("t")
-                            done = fp_orders.add(price, qty, ts_ms, sell,
-                                                 None if tid is None else int(tid))
-                            if done is not None:                        # 닫힌 주문의 크기 구간
-                                footprint_add(done[0], done[1], done[2], done[3], order=True)
-                            footprint_state["last_ms"] = ts_ms   # 다음 재연결이 메울 공백의 시작
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001 -- 한 번의 끊김/에러가 수집기를 영구히
-                    # 죽이면 재시작 전까지 풋프린트가 통째로 빈다(publish_dashboard_events 와
-                    # 같은 이유). 끊기면 3초 뒤 다시 붙는다.
-                    print(f"footprint collector cycle failed (will reconnect): {exc}", flush=True)
-                await asyncio.sleep(3.0)
-        finally:
-            if backfill is not None:
-                backfill.cancel()
-            await ws_session.close()
-
-    async def start_footprint_collector(app: web.Application) -> None:
-        app["footprint_task"] = asyncio.create_task(collect_footprint(app))
-
-    async def stop_footprint_collector(app: web.Application) -> None:
-        # 내려가기 직전에 한 번 더 남긴다 -- 이러면 다음 판이 메울 공백이 «재시작에 걸린 시간»
-        # (보통 1분 남짓)으로 줄어든다. 배포 재시작이 잦은 저장소라 이 한 줄이 제일 크게 먹는다.
-        if footprint_state["ready"]:
-            footprint_save()
-        task = app["footprint_task"]
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-
-    # 초 -> 그 초의 미결제약정(ETH). 값이 **바뀐** 초만 들어간다(OI_1S_URL 주석 참고).
-    oi_1s: dict[int, float] = {}
-
-    async def collect_oi_1s(app: web.Application) -> None:
-        # 🔴«본 stamp 의 집합»이지 최고수위(last_ms)가 아니다. 바이낸스는 stamp 를 도착 순서대로
-        #   주지 않는다 -- 2026-09-19 실측: stamp 가 응답에 나타나기까지 중앙 2.65초·p90 5.08초가
-        #   걸리고, 그 편차 때문에 115개 중 4개(3.5%)는 «더 새 stamp 가 먼저» 도착했다. 최고수위로
-        #   비교하면 그 4개를 «이미 본 것»으로 오인해 버린다(짝비교에서 실측 손실 4/243 과 일치).
-        #   순서가 뒤바뀌어 들어와도 문제없다: 봉 집계는 ts_ms 로 arg_min/arg_max 를 잡고
-        #   저장은 PK(ts_ms, symbol) 가 중복을 막는다.
-        seen_ms: set[int] = set()
-        pending: list[tuple[int, float]] = []      # 아직 duckdb 에 못 넣은 스냅샷
-        flushed_at = time.time()
-        while True:
-            try:
-                left = ban_guard.ban_remaining()
-                if left > 0:                      # 다른 프로세스가 받은 차단도 따른다(공용 가드)
-                    await asyncio.sleep(min(left + 1, 300))
-                    continue
-                async with http_session["session"].get(
-                        OI_1S_URL, params={"symbol": FOOTPRINT_SYMBOL}) as resp:
-                    data = await resp.json()
-                if "time" not in data:
-                    ban_guard.note(resp.status, json.dumps(data), resp.headers.get("Retry-After"))
-                    # 🔴2026-09-26 긴급: 한도 초과(429)·IP 밴(418)에도 0.25초마다 다시 두드려 **밴을 계속 연장**했다
-                    #   (밴 중 로그 93/100줄). IP 한도는 봇·대시보드·수집기가 같이 쓴다 -- 밴이면 풀릴 때까지, 아니면 30초.
-                    m = re.search(r"banned until (\d+)", str(data.get("msg", "")))
-                    wait = max(5.0, int(m.group(1)) / 1000 - time.time() + 1) if m else 30.0
-                    print(f"oi-1s: 거래소 거절 {resp.status} {data.get('code')} -- {wait:.0f}초 쉰다", flush=True)
-                    await asyncio.sleep(wait)
-                    continue
-                ts_ms = int(data["time"])
-                if ts_ms not in seen_ms:     # 같은 스냅샷을 다른 초에 복제하지 않는다
-                    seen_ms.add(ts_ms)
-                    if len(seen_ms) > 8192:  # 메모리 상한만 건다. 10분이면 재도착이 끝난다(최대 6.4초).
-                        seen_ms = {m for m in seen_ms if m >= ts_ms - 600_000}
-                    sec = ts_ms // 1000
-                    value = float(data["openInterest"])
-                    oi_1s[sec] = value          # 화면 링은 1초 해상도 그대로
-                    pending.append((ts_ms, value))
-                    for old in [s for s in oi_1s if s < sec - SUPPLY_1S_SECONDS]:
-                        del oi_1s[old]
-                now = time.time()
-                if pending and now - flushed_at >= OI_1S_FLUSH_SECONDS:
-                    # 성공했을 때만 비운다 -- 파일이 잠깐 잠겨 있으면 다음 flush 로 미룬다.
-                    await asyncio.to_thread(oi_1s_persist, pending)
-                    pending = []
-                    flushed_at = now
-            except asyncio.CancelledError:
-                # 정상 종료(배포 재기동)에서 미저장분을 버리지 않는다 -- 이 경로가 유일하게
-                # 자주 도는 손실이었다(재기동마다 최대 OI_1S_FLUSH_SECONDS 만큼). 취소된
-                # 태스크에서는 await 가 즉시 다시 취소되므로 to_thread 없이 그 자리에서 쓴다.
-                if pending:
-                    try:
-                        oi_1s_persist(pending)
-                    except Exception as exc:  # noqa: BLE001 -- 종료 중엔 알리고 넘어간다
-                        print(f"oi-1s final flush failed: {exc}", flush=True)
-                raise
-            except Exception as exc:  # noqa: BLE001 -- 한 번의 실패로 수집을 영구히 멈추지 않는다
-                print(f"oi-1s poll/flush failed (will retry): {exc}", flush=True)
-                # 보류분이 끝없이 자라지는 않게 한다(디스크가 통째로 나간 경우). 1시간치면
-                # 그건 일시적 잠금이 아니라 사람이 봐야 하는 고장이다.
-                del pending[:-1200]
-                flushed_at = time.time()
-            await asyncio.sleep(OI_1S_POLL_SECONDS)
-
-    async def start_oi_1s_collector(app: web.Application) -> None:
-        app["oi_1s_task"] = asyncio.create_task(collect_oi_1s(app))
-
-    async def stop_oi_1s_collector(app: web.Application) -> None:
-        app["oi_1s_task"].cancel()
-        try:
-            await app["oi_1s_task"]
-        except asyncio.CancelledError:
-            pass
+    async def stop_flows(app: web.Application) -> None:
+        for f in flows.values():
+            await f.stop(app)
 
     # ── 미시 참고 (2026-09-20) ──────────────────────────────────────────────
     micro_state: dict[str, Any] = {"payload": {"available": False}, "baseline": None, "baseline_at": 0.0,
@@ -2771,7 +3209,9 @@ def make_app() -> web.Application:
                                    # 값의 전부가 발동한 그 초에 있어서(나이 0초 +0.55bp · 3초 이후 0) 늦추면 잃는다.
                                    "trigger": {"side": None, "ts": None}}
     agree_ring: deque = deque(maxlen=60)        # 최근 60초 동조 상태(+1/0/-1) -- 표시용 집계
-    liq_events: deque = deque(maxlen=5000)      # (ts_ms, side, qty, price, usd) -- side "long" = 롱 포지션 청산(SELL)
+    # (ts_ms, side, qty, price, usd) -- side "long" = 롱 포지션 청산(SELL). 코인별(1초 수급의 청산 레인).
+    liq_events_by: dict[str, deque] = {a: deque(maxlen=5000) for a in COIN_CONFIG}
+    liq_events = liq_events_by["eth"]           # ETH 전용 소비자(미시 참고)는 옛 이름 그대로
     # 2026-09-25 풋프린트 차트 청산 원의 5분봉 누적 -- 수급 1초 차트와 **같은 원천**(이 프로세스의
     #   @forceOrder, usd = z(누적 체결량) x ap). 전에는 봇의 tail_risk_1m 을 읽었는데 두 가지가 나빴다:
     #   ① 지연 1~3분(완결 분마다 한 행 + 60초 폴링 + swr 묵은 값 한 번)
@@ -2816,8 +3256,8 @@ def make_app() -> web.Application:
                     continue    # 마지막 줄이 쓰다 만 상태일 수 있다
                 ts = int(ev.get("ts_ms") or 0)
                 first = ts if first is None else first
-                if asset == "eth" and ts >= cut:
-                    liq_events.append(ev)
+                if ts >= cut:
+                    liq_events_by[asset].append(ev)
                 if ts >= cut_5m:
                     liq_5m_add(liq_5m[asset], ev)
             if first is not None:
@@ -2851,8 +3291,7 @@ def make_app() -> web.Application:
                             ev = {"ts_ms": int(o.get("T") or time.time() * 1000),
                                   "side": "long" if o.get("S") == "SELL" else "short",   # 롱 청산 = 시장에 SELL
                                   "qty": qty, "price": price, "usd": qty * price, "symbol": o.get("s")}
-                            if asset == "eth":
-                                liq_events.append(ev)      # 1초 수급·미시 참고는 ETH 만 본다
+                            liq_events_by[asset].append(ev)   # 1초 수급의 청산 레인(미시 참고는 ETH 만 본다)
                             liq_5m_add(liq_5m[asset], ev)  # 청산 원이 다음 폴링(2초)에 바로 본다 -- 봇 DB 1분 행을 안 기다린다
                             with open(liq_events_path(asset), "a", encoding="utf-8") as fh:   # 분당 몇 줄 -- 블로킹 무시 가능
                                 fh.write(json.dumps(ev, separators=(",", ":")) + "\n")
@@ -3015,320 +3454,13 @@ def make_app() -> web.Application:
                     situation_state["now"] = {"ok": False, "reason": repr(exc)[:160]}
             await asyncio.sleep(MICRO_REF_POLL_SECONDS)
 
-    # ── OKX 실시간 ─────────────────────────────────────────────────────────
-    # 바이낸스와 **같은 모양**으로 든다. 그래야 클라 렌더러가 데이터 출처만 바꿔 끼우면
-    # 누적·스택·청산점 수식이 그대로 돈다(복사본을 만들면 한쪽만 고쳐진다).
-    #   okx_sec[s] = [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
-    okx_sec: dict[int, list[float]] = {}
-    okx_liq_events: deque = deque(maxlen=5000)
-    okx_oi_1s: dict[int, float] = {}
-    okx_state: dict[str, Any] = {"connected": False, "trades": 0, "errors": 0,
-                                 "last_trade_ms": 0, "last_oi_ms": 0, "last_liq_ms": 0}
-    # 풋프린트용 OKX 봉. `footprint_state["bars"]` 와 **같은 격자·같은 6칸**이다
-    # ([매수, 매도, 고래매수, 고래매도, 리테일매수, 리테일매도]).
-    # 🔴바이낸스 bars 에 **섞지 않는다** -- 거기엔 kline 완전성 검사·REST 백필·스냅샷이
-    #   전부 «바이낸스 aggTrades» 를 전제로 걸려 있다. 합치는 건 API 응답을 만들 때만.
-    okx_bars: dict[int, dict[int, list[float]]] = {}
-    # 🔴OKX 는 **풋프린트 백필이 불가능하다**(history-trades 가 100행=10.8초, 2026-09-23 실측).
-    #   그래서 서버가 뜨기 전 봉은 바이낸스만 있고, 그냥 더하면 재기동마다 **봉 높이가
-    #   경계에서 튄다**(흡수·벽을 읽는 그림에서 없던 단차). 답은 «OKX 가 **완전히 덮은**
-    #   첫 봉 이후만 내보내기»다 -- 창이 짧아지는 대신 단차가 없다(사용자 선택 C).
-    #   ⚠️«OKX 가 있는 봉만» 으로 짜면 OKX 가 잠깐 끊길 때 풋프린트가 **통째로 사라진다**.
-    #     시작 봉만 기억하는 이 방식은 순간 끊김에 안 죽는다(재연결 3초 = 봉의 1%).
-    # ⭐2026-09-24 A안: 기동 뒤 okx_footprint_restore 가 OKX 테이프에서 과거 봉을 되살려
-    #   first_bar 를 창 끝까지 당긴다(아래 okx_tape_footprint). 그 전까지는 위 C안 그대로다.
-    okx_fp = {"first_bar": 0, "t0_ms": 0, "resync_until": 0.0}
-    # 5분봉별 OKX OI [봉 첫 값, 봉 끝 값](ETH, oiCcy). 2026-09-24 사용자 «사분면·누적 OI 도 OKX
-    #   합산». okx_oi_1s 는 11분 링이라 창(1~4h)의 봉별 Δ 를 못 낸다. 재기동 전 봉은 없다 --
-    #   풋프린트가 어차피 OKX 가 덮은 봉부터만 나가므로(okx_fp) 레인에 그려지는 봉과 겹친다.
-    okx_oi_5m: dict[int, list[float]] = {}
-
-    def okx_sec_cell(ts_ms: int) -> list[float]:
-        """그 초의 칸. 오래된 초는 새 초가 생길 때만 버린다(체결마다 돌 일이 아니다)."""
-        sec = int(ts_ms) // 1000
-        cell = okx_sec.get(sec)
-        if cell is None:
-            cell = okx_sec[sec] = [0.0] * 7
-            cutoff = sec - SUPPLY_1S_SECONDS
-            for old in [x for x in okx_sec if x < cutoff]:
-                del okx_sec[old]
-        return cell
-
-    async def collect_okx_flow(app: web.Application) -> None:
-        """⑦ OKX 체결 + 청산. 주문 없음, 바이낸스 weight 안 씀.
-
-        🔴세 가지를 바이낸스와 다르게 다뤄야 한다(전부 2026-09-23 실측으로 확정):
-          1. `sz` 는 **계약 수**다 -> OKX_CT_VAL 을 곱해야 ETH 다.
-          2. `side` 는 **테이커 측면 그 자체**다 -> 바이낸스 `m`(매수자가 메이커)처럼 뒤집으면
-             부호가 통째로 반대가 된다.
-          3. `trades` 채널은 **이미 주문 단위**다(`trades-all` 4,810건 vs `trades` 1,780건,
-             sz 합은 1.0000x 동일) -> 되묶기를 이식하면 이중 집계다. 크기 구간을 바로 가른다.
-        ⚠️청산 `bkPx` 는 **파산가격**이라 바이낸스 `ap`(평균체결가)와 같은 것이 아니다.
-          USD 환산에 쓰긴 하지만 두 거래소 청산«가»를 같은 축에 놓으면 안 된다."""
-        ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
-        args = [{"channel": "trades", "instId": OKX_INST},
-                {"channel": "open-interest", "instId": OKX_INST},
-                {"channel": "liquidation-orders", "instType": "SWAP"}]
-        # 🔴계약 크기가 틀리면 레인이 조용히 10배가 된다 -- 모르거나 거래소와 다르면 **켜지 않는다**
-        #   (화면에선 «합에서 빠짐: OKX» 로 보인다). REST 가 안 될 때만 표 값으로 간다.
-        if OKX_CT_VAL is None:
-            print(f"okx ws: {OKX_INST} ctVal 모름 -- OKX 레인 끔", flush=True)
-            await ws_session.close()
-            return
-        try:
-            async with ws_session.get(OKX_INSTRUMENTS_URL, headers=OKX_HTTP_HEADERS,
-                                      params={"instType": "SWAP", "instId": OKX_INST},
-                                      timeout=ClientTimeout(total=10)) as r:
-                got = float((await r.json())["data"][0]["ctVal"])
-            if abs(got - OKX_CT_VAL) > 1e-12:
-                print(f"okx ws: 🔴ctVal 갈라짐 표 {OKX_CT_VAL} vs 거래소 {got} -- OKX 레인 끔", flush=True)
-                await ws_session.close()
-                return
-        except Exception as exc:  # noqa: BLE001
-            print(f"okx ws: ctVal 대조 실패({exc!r}) -- 표 값 {OKX_CT_VAL} 로 계속", flush=True)
-        try:
-            while True:
-                try:
-                    async with ws_session.ws_connect(OKX_WS_URL, heartbeat=20) as ws:
-                        await ws.send_json({"op": "subscribe", "args": args})
-                        okx_state.update(connected=True)
-                        print("okx ws: connected", flush=True)
-                        while True:
-                            msg = await ws.receive(timeout=OKX_RECV_TIMEOUT)
-                            if msg.type is not WSMsgType.TEXT:
-                                print(f"okx ws: non-text {msg.type!r} -> reconnect", flush=True)
-                                break
-                            if msg.data == "pong":
-                                continue
-                            d = json.loads(msg.data)
-                            if d.get("event") == "error":
-                                print(f"okx ws: 구독 거부 {d.get('msg')}", flush=True)
-                                break
-                            if d.get("event"):
-                                continue
-                            ch = (d.get("arg") or {}).get("channel")
-                            if ch == "trades":
-                                for t in d.get("data") or []:
-                                    price = float(t.get("px") or 0.0)
-                                    qty = float(t.get("sz") or 0.0) * OKX_CT_VAL
-                                    side = str(t.get("side") or "")
-                                    if not (price > 0 and qty > 0 and side in ("buy", "sell")):
-                                        continue
-                                    ts_ms = int(t.get("ts") or time.time() * 1000)
-                                    i = 1 if side == "sell" else 0
-                                    cell = okx_sec_cell(ts_ms)
-                                    cell[4 + i] += qty
-                                    cell[6] = price
-                                    notional = price * qty
-                                    if notional >= WHALE_MIN_USD:
-                                        cell[2 + i] += qty
-                                    elif notional < RETAIL_MAX_USD:
-                                        cell[i] += qty
-                                    okx_state["trades"] += 1
-                                    okx_state["last_trade_ms"] = ts_ms
-                                    # 풋프린트 봉(바이낸스와 같은 격자)
-                                    bar = footprint_bar_start(ts_ms)
-                                    if not okx_fp["first_bar"]:
-                                        okx_fp["first_bar"] = bar
-                                        okx_fp["t0_ms"] = ts_ms      # 이 앞은 테이프가 맡는다
-                                    cells = okx_bars.get(bar)
-                                    if cells is None:
-                                        cells = okx_bars[bar] = {}
-                                        cut = (footprint_bar_start(time.time() * 1000)
-                                               - (FOOTPRINT_KEEP_BARS - 1) * FOOTPRINT_BAR_SECONDS)
-                                        for ob in [b for b in okx_bars if b < cut]:
-                                            del okx_bars[ob]
-                                    fc = cells.setdefault(int(round(price / FOOTPRINT_BUCKET)),
-                                                          [0.0] * 6)
-                                    fc[i] += qty
-                                    if notional >= WHALE_MIN_USD:
-                                        fc[2 + i] += qty
-                                    elif notional < RETAIL_MAX_USD:
-                                        fc[4 + i] += qty
-                            elif ch == "open-interest":
-                                for r in d.get("data") or []:
-                                    oi = float(r.get("oiCcy") or 0.0)      # oiCcy = 기초자산(ETH)
-                                    ts_ms = int(r.get("ts") or 0)
-                                    if oi > 0 and ts_ms > 0:
-                                        sec = ts_ms // 1000
-                                        okx_oi_1s[sec] = oi
-                                        okx_state["last_oi_ms"] = ts_ms
-                                        ob = sec // OI_5M_BAR_SECONDS * OI_5M_BAR_SECONDS
-                                        if ob in okx_oi_5m:
-                                            okx_oi_5m[ob][1] = oi
-                                        else:
-                                            okx_oi_5m[ob] = [oi, oi]
-                                            for old in [x for x in okx_oi_5m
-                                                        if x < ob - FOOTPRINT_KEEP_BARS * OI_5M_BAR_SECONDS]:
-                                                del okx_oi_5m[old]
-                                        for old in [x for x in okx_oi_1s if x < sec - SUPPLY_1S_SECONDS]:
-                                            del okx_oi_1s[old]
-                            elif ch == "liquidation-orders":
-                                for r in d.get("data") or []:
-                                    if str(r.get("instId") or "") != OKX_INST:
-                                        continue            # instType:SWAP 은 전 종목이 온다
-                                    for det in r.get("details") or []:
-                                        qty = float(det.get("sz") or 0.0) * OKX_CT_VAL
-                                        px = float(det.get("bkPx") or 0.0)
-                                        if qty <= 0:
-                                            continue
-                                        ts_ms = int(det.get("ts") or time.time() * 1000)
-                                        okx_liq_events.append({
-                                            "ts_ms": ts_ms,
-                                            # posSide 가 **청산된 포지션**의 방향이다(바이낸스는
-                                            # 주문 방향에서 뒤집어 얻는다 -- 결과는 같은 뜻).
-                                            "side": "long" if det.get("posSide") == "long" else "short",
-                                            "qty": qty, "price": px, "usd": qty * px,
-                                            "symbol": OKX_INST})
-                                        okx_state["last_liq_ms"] = ts_ms
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001 -- 끊기면 3초 뒤 다시. 봇에 영향 없음
-                    okx_state.update(errors=okx_state["errors"] + 1)
-                    print(f"okx ws: {exc!r}", flush=True)
-                    await asyncio.sleep(3.0)
-                finally:
-                    okx_state["connected"] = False
-        finally:
-            await ws_session.close()
-
-    # ── 바이낸스 현물 (2026-09-23) ─────────────────────────────────────────
-    # OKX 와 **같은 7칸 모양**. 합산 패널이 셋을 그대로 더한다.
-    # 🔴현물엔 OI·펀딩·마크·강제청산이 **존재하지 않는다** -- 포지션 개념이 없다.
-    spot_sec: dict[int, list[float]] = {}
-    spot_state: dict[str, Any] = {"connected": False, "trades": 0, "errors": 0, "last_trade_ms": 0}
-
-    def spot_sec_cell(ts_ms: int) -> list[float]:
-        sec = int(ts_ms) // 1000
-        cell = spot_sec.get(sec)
-        if cell is None:
-            cell = spot_sec[sec] = [0.0] * 7
-            cutoff = sec - SUPPLY_1S_SECONDS
-            for old in [x for x in spot_sec if x < cutoff]:
-                del spot_sec[old]
-        return cell
-
-    async def collect_spot_flow(app: web.Application) -> None:
-        """⑨ 바이낸스 현물 @aggTrade. 주문 없음. 선물과 **다른 시장**이라 weight 도 별개다.
-
-        ⚠️풋프린트에는 안 쓴다 -- 현물은 선물보다 +4.69bp 높아 $0.1 빈 기준 **12.9빈**
-          어긋난다(2026-09-23 실측). 가격축에 쌓으면 가짜 이중 봉우리가 된다. 수급(CVD)은
-          «수량의 합»이라 가격이 무관해서 문제가 없다."""
-        ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
-        try:
-            while True:
-                try:
-                    async with ws_session.ws_connect(SPOT_WS_URL, heartbeat=30) as ws:
-                        spot_state.update(connected=True)
-                        print("spot ws: connected", flush=True)
-                        while True:
-                            msg = await ws.receive(timeout=SPOT_RECV_TIMEOUT)
-                            if msg.type is not WSMsgType.TEXT:
-                                break
-                            t = json.loads(msg.data)
-                            if t.get("e") != "aggTrade":
-                                continue
-                            price, qty = float(t.get("p") or 0.0), float(t.get("q") or 0.0)
-                            if not (price > 0 and qty > 0):
-                                continue
-                            ts_ms = int(t.get("T") or time.time() * 1000)
-                            i = 1 if t.get("m") else 0          # 매수자가 메이커 -> 공격자는 매도
-                            cell = spot_sec_cell(ts_ms)
-                            cell[4 + i] += qty
-                            cell[6] = price
-                            # 이 7칸에는 체결 수 자리가 없다(총량·구간·가격뿐) -- `f`/`l` 은
-                            # 안 쓴다. 필요해지면 그때 칸을 늘린다.
-                            notional = price * qty
-                            if notional >= WHALE_MIN_USD:
-                                cell[2 + i] += qty
-                            elif notional < RETAIL_MAX_USD:
-                                cell[i] += qty
-                            spot_state["trades"] += 1
-                            spot_state["last_trade_ms"] = ts_ms
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    spot_state.update(errors=spot_state["errors"] + 1)
-                    print(f"spot ws: {exc!r}", flush=True)
-                    await asyncio.sleep(3.0)
-                finally:
-                    spot_state["connected"] = False
-        finally:
-            await ws_session.close()
-
-    async def okx_footprint_restore(app: web.Application) -> None:
-        """A안(2026-09-24): 기동 뒤 OKX 풋프린트 과거분을 OKX 체결 테이프에서 되살린다.
-
-        진행 중인 봉은 **T0(라이브 첫 체결) 앞 몫만** 테이프에서 더하고, 그 앞 봉들은 테이프로
-        통째로 채운다 -- 온전한 봉이 끊김 없이 이어지는 데까지만(중간에 온전하지 않은 봉이 있으면
-        거기서 멈춘다: 그 앞을 내보내면 C안이 막으려던 단차가 창 안에 생긴다). 사분면 OI 도 같은 봉까지.
-        테이프 자동 복구가 공백을 메우는 데 몇 분 걸리므로 5분마다 35분까지 다시 본다.
-        🔴DB 읽기는 스레드, 메모리 반영은 **이 루프에서** -- 라이브 체결이 같은 dict 를 만진다."""
-        while not okx_fp["t0_ms"]:
-            await asyncio.sleep(1.0)
-        t0 = okx_fp["t0_ms"]
-        start_bar = footprint_bar_start(t0)
-        lo = start_bar - (FOOTPRINT_MAX_WINDOW_BARS - 1) * FOOTPRINT_BAR_SECONDS
-        t0_min = (t0 // 1000) // 60 * 60
-        start_filled, restored, liq_upto = False, set(), t0   # liq_upto: 청산을 이미 채운 구간의 앞끝
-        for attempt in range(8):
-            await asyncio.sleep(15.0 if attempt == 0 else 300.0)
-            try:
-                got = await asyncio.to_thread(okx_tape_footprint, OKX_TAPE_DB_PATH, OKX_CTX_DB_PATH,
-                                              OKX_INST, lo, t0, FOOTPRINT_BAR_SECONDS, FOOTPRINT_BUCKET)
-            except Exception as exc:  # noqa: BLE001 -- 테이프가 없으면 C안 그대로 산다
-                print(f"okx footprint 복원 실패({attempt + 1}회): {exc!r}", flush=True)
-                continue
-            if got["tape_max"] < t0 // 1000:
-                continue                          # 테이프가 아직 T0 를 지나 쓰지 않았다
-            ok = got["ok_min"]
-            covered = lambda a, b: all(m in ok for m in range(a, b, 60))  # noqa: E731
-            if not start_filled:
-                if not covered(start_bar, t0_min + 60):
-                    continue
-                cells = okx_bars.setdefault(start_bar, {})
-                for k, v in got["bars"].get(start_bar, {}).items():
-                    t = cells.setdefault(k, [0.0] * 6)
-                    for j in range(6):
-                        t[j] += v[j]
-                start_filled = True
-            earliest, b = start_bar, start_bar - FOOTPRINT_BAR_SECONDS
-            while b >= lo and covered(b, b + FOOTPRINT_BAR_SECONDS):
-                if b not in restored:             # 라이브는 이 봉을 모른다 -- 교체
-                    okx_bars[b] = got["bars"].get(b, {})
-                    restored.add(b)
-                earliest, b = b, b - FOOTPRINT_BAR_SECONDS
-            for ob, (o, c) in got["oi"].items():
-                if earliest <= ob < start_bar:
-                    okx_oi_5m[ob] = [o, c]
-                elif ob == start_bar:
-                    okx_oi_5m.setdefault(ob, [o, c])[0] = o
-            # 청산: 이번에 새로 덮은 구간 [earliest, liq_upto) 만 앞에 넣는다(시각 순 유지).
-            #   🔴deque(maxlen) 에 appendleft 하다 차면 **가장 최신**이 밀려난다 -- 남은 자리만큼만.
-            add = [e for e in got["liq"] if earliest * 1000 <= e["ts_ms"] < liq_upto]
-            room = (okx_liq_events.maxlen or 10**9) - len(okx_liq_events)
-            for e in reversed(add[-room:] if room > 0 else []):
-                okx_liq_events.appendleft(e)
-            liq_upto = earliest * 1000
-            okx_fp["first_bar"] = earliest - FOOTPRINT_BAR_SECONDS
-            okx_fp["resync_until"] = time.time() + 15.0   # 열린 화면도 전량 한 번 받게
-            print(f"okx footprint: 테이프에서 {len(restored)}봉 + 진행 봉 앞부분 복원 "
-                  f"(창 {(start_bar - earliest) // FOOTPRINT_BAR_SECONDS + 1}"
-                  f"/{FOOTPRINT_MAX_WINDOW_BARS}봉)", flush=True)
-            if earliest <= lo:
-                return
-
     async def start_micro_ref(app: web.Application) -> None:
         app["micro_ref_task"] = asyncio.create_task(collect_micro_ref(app))
         app["force_order_task"] = asyncio.create_task(collect_force_orders(app))
         app["mark_price_task"] = asyncio.create_task(collect_mark_price(app))
-        app["okx_flow_task"] = asyncio.create_task(collect_okx_flow(app))
-        app["okx_restore_task"] = asyncio.create_task(okx_footprint_restore(app))
-        app["spot_flow_task"] = asyncio.create_task(collect_spot_flow(app))
 
     async def stop_micro_ref(app: web.Application) -> None:
-        for key in ("micro_ref_task", "force_order_task", "mark_price_task",
-                    "okx_flow_task", "okx_restore_task", "spot_flow_task"):
+        for key in ("micro_ref_task", "force_order_task", "mark_price_task"):
             app[key].cancel()
             try:
                 await app[key]
@@ -3591,6 +3723,7 @@ def make_app() -> web.Application:
         상황은 계산될 때만(computed_at 이 바뀔 때) 보낸다."""
         q = {k: v for k, v in request.query.items()}
         want_supply = q.get("supply") == "1"
+        flow = flow_for(q) if want_supply else None      # 코인별 수급(꺼진 코인이면 연결 전에 404)
         response = web.StreamResponse(status=web.HTTPOk.status_code, headers={
             "Content-Type": "text/event-stream", "Cache-Control": "no-cache",
             "Connection": "keep-alive", "X-Accel-Buffering": "no"})
@@ -3600,7 +3733,7 @@ def make_app() -> web.Application:
             while True:
                 out = []
                 if want_supply:
-                    sup = supply_1s_payload(q)
+                    sup = supply_1s_payload(q, flow)
                     for key, name in SUPPLY_CURSORS:
                         rows = sup.get(key)
                         if rows:
@@ -4108,6 +4241,9 @@ def make_app() -> web.Application:
         -- 키 이름을 반복해 싣지 않으려는 것(12봉 x 수십 레벨을 2초마다 보낸다).
         고래·리테일은 매수/매도의 **부분집합**이고, 중형은 셋을 빼서 얻는다."""
         want = footprint_window_bars(request)
+        f = flow_for(request.query)       # 2026-09-26 코인별 -- 아래 본문의 이름을 그 코인으로 가린다
+        footprint_state, okx_bars, okx_fp = f.footprint_state, f.okx_bars, f.okx_fp
+        FOOTPRINT_SYMBOL, FOOTPRINT_BUCKET, dp = f.spec.symbol, f.spec.bucket, f.spec.price_dp   # noqa: N806
         # 🔴OKX 를 **여기서만** 더한다(위 okx_bars 주석). 그리고 OKX 가 완전히 덮은 첫 봉
         #   **이후**만 내보낸다 -- 그 전 봉은 바이낸스만이라 더하면 단차가 된다.
         #   `first_bar` 자신은 OKX 가 중간에 합류한 봉이라 **빼고**(> 비교) 시작한다.
@@ -4148,7 +4284,7 @@ def make_app() -> web.Application:
         #   (실측 화면 2,908 vs 서버 4,343). 클라가 실시간 바이낸스 셀에 이걸 더한다.
         live_bar = recent[-1][0] if recent else 0
         okx_live = ({"time": live_bar,
-                     "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
+                     "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
                                 for k, v in sorted(okx_bars[live_bar].items())]}
                     if okx_from and live_bar in okx_bars else None)
         return web.json_response({
@@ -4180,13 +4316,13 @@ def make_app() -> web.Application:
                 {"time": bar,
                  # aggTrades 로 메운 봉은 체결이 **묶여** 있어 고래가 과장된다.
                  "agg": bar in agg_bars,
-                 "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
+                 "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
                             for k, v in sorted(_merged(bar, cells).items())]}
                 for bar, cells in sent
             ],
         }, headers=NOCACHE)
 
-    def supply_1s_payload(q: Any) -> dict[str, Any]:
+    def supply_1s_payload(q: Any, f: SimpleNamespace | None = None) -> dict[str, Any]:
         """최근 5분을 1초 해상도로. `?since=<초>` 면 그 뒤에 **새로 생긴 초만** 보낸다.
 
         매초 폴링이라 전량을 매번 보내면 안 된다 -- 300초 x 7숫자면 회당 ~18KB 이고, 1초
@@ -4197,7 +4333,13 @@ def make_app() -> web.Application:
           초가 닫히면 확정본이 목록으로 와서 같은 칸을 덮어쓴다 -- 오른쪽 끝이 1~2초 묵던 것이
           폴링 주기(0.25초)만큼으로 준다.
         """
-        by_sec = footprint_state["sec"]
+        # 2026-09-26 코인별 -- 아래 본문이 쓰는 이름을 그 코인 엔진으로 가린다(본문은 그대로).
+        f = f or _eth
+        oi_1s, liq_events = f.oi_1s, liq_events_by[f.spec.asset]
+        okx_sec, okx_oi_1s, okx_liq_events, okx_state = f.okx_sec, f.okx_oi_1s, f.okx_liq_events, f.okx_state
+        spot_sec, spot_state = f.spot_sec, f.spot_state
+        FOOTPRINT_SYMBOL, OKX_INST = f.spec.symbol, f.spec.okx_inst   # noqa: N806
+        by_sec = f.footprint_state["sec"]
         try:
             since = int(q.get("since", "0"))
         except ValueError:
@@ -4328,7 +4470,7 @@ def make_app() -> web.Application:
         })
 
     async def api_supply_1s(request: web.Request) -> web.Response:
-        return web.json_response(supply_1s_payload(request.query), headers=NOCACHE)
+        return web.json_response(supply_1s_payload(request.query, flow_for(request.query)), headers=NOCACHE)
 
     async def api_oi_5m(request: web.Request) -> web.Response:
         """OI 5분 누적(신규 계약). duckdb 를 읽으므로 to_thread 로 뺀다(이벤트 루프 블로킹 방지)."""
@@ -4341,8 +4483,11 @@ def make_app() -> web.Application:
         #   (oi_1s_persist)와 탭 수만큼 부딪힌다. TTL 은 클라 폴링(OI_5M_POLL_MS=15초)의
         #   3분의 1이라 **단일 탭에서는 늘 미스**다 -- 신선도는 그대로고 탭이 늘어도 duckdb
         #   열기 횟수만 5초당 한 번으로 묶인다. 값 자체도 5분봉이라 5초는 해상도 아래다.
-        buckets = await swr_cached(f"oi_5m:{bars}", 5.0,
-                                   lambda: asyncio.to_thread(oi_5m_buckets, bars))
+        f = flow_for(request.query)       # 2026-09-26 코인별
+        oi_1s, okx_oi_5m, okx_fp, FOOTPRINT_SYMBOL = f.oi_1s, f.okx_oi_5m, f.okx_fp, f.spec.symbol   # noqa: N806
+        sym = f.spec.symbol.lower()
+        buckets = await swr_cached(f"oi_5m:{sym}:{bars}", 5.0,
+                                   lambda: asyncio.to_thread(oi_5m_buckets, bars, sym))
         # 현재 OI 는 링에서 바로 준다 -- duckdb 는 최대 OI_1S_FLUSH_SECONDS 만큼 뒤처져 있다.
         now_oi = oi_1s[max(oi_1s)] if oi_1s else (buckets[-1][2] if buckets else 0.0)
         # 2026-09-24 OKX 합산(사용자 지시 -- 사분면·누적 OI). Δ 규칙은 바이낸스와 같다: 직전 봉 끝
@@ -4386,6 +4531,9 @@ def make_app() -> web.Application:
         # 쌓인 것을 전부(최대 24시간) 접었는데, 아래 풋프린트는 1시간이라 위아래 두 그림이
         # 다른 구간을 말하고 있었다 -- 한 카드 안에서 그건 읽는 사람을 속이는 것이다.
         want = footprint_window_bars(request)
+        f = flow_for(request.query)
+        footprint_state, okx_bars, okx_fp = f.footprint_state, f.okx_bars, f.okx_fp
+        FOOTPRINT_SYMBOL, FOOTPRINT_BUCKET, dp = f.spec.symbol, f.spec.bucket, f.spec.price_dp   # noqa: N806
         # 2026-09-24 OKX 합산(사용자 지시). 풋프린트(api_footprint)와 **같은 봉·같은 합**이어야 한다 --
         #   한 카드의 두 그림이다. OKX 가 온전히 덮은 봉부터만 쓰는 규칙도 그대로 따른다.
         okx_from = okx_fp["first_bar"]
@@ -4412,7 +4560,7 @@ def make_app() -> web.Application:
             # 창 안의 봉만 센다 -- 링 전체를 세면 1h 를 보는데 24h 치 경고가 뜬다.
             "aggBars": sum(1 for bar, _ in recent if bar in footprint_state["agg_bars"]),
             "venues": ["binance-perp", "okx-swap"] if okx_from else ["binance-perp"],
-            "levels": [[round(k * FOOTPRINT_BUCKET, 2)] + [round(x, 3) for x in v]
+            "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
                        for k, v in sorted(merged.items())],
         }, headers=NOCACHE)
 
@@ -4454,12 +4602,17 @@ def make_app() -> web.Application:
                 lambda: asyncio.to_thread(compute_liquidation_5m_history, asset, bars),
                 max_stale=STALE_GRACE_SECONDS,
             )
-        okx_from = okx_fp["first_bar"]
-        if asset != "eth" or not payload.get("bars"):
+        f = flows.get(asset)
+        if f is None or not payload.get("bars"):
             return web.json_response(payload, headers=NOCACHE)
+        okx_from, okx_liq_events = f.okx_fp["first_bar"], f.okx_liq_events
+
+        async def _done(bars: list[dict], venues: list[str]) -> dict:
+            if asset in HL_LIQ_BY_ASSET:
+                return await _with_hl_liq(payload, bars, venues, asset)
+            return {**payload, "bars": bars, "venues": venues}
         if not okx_from:
-            return web.json_response(await _with_hl_liq(payload, payload["bars"], ["binance-perp"]),
-                                     headers=NOCACHE)
+            return web.json_response(await _done(payload["bars"], ["binance-perp"]), headers=NOCACHE)
         # 2026-09-24 OKX 청산 합산(사용자 지시). 메모리의 OKX 청산을 5분봉으로 더한다 -- 풋프린트와
         #   같은 규칙으로 OKX 가 봉 전체를 본 봉(okx_fp 이후)만. 재기동 전 봉은 바이낸스만(okx 없음).
         #   🔴swr 캐시 dict 를 고치면 30초 동안 요청마다 또 더해진다 -- 새로 만든다.
@@ -4478,10 +4631,9 @@ def make_app() -> web.Application:
                 b = {**b, "okx": True, "long_usd": b["long_usd"] + a[0],
                      "short_usd": b["short_usd"] + a[1], "events": b["events"] + a[2]}
             bars.append(b)
-        return web.json_response(await _with_hl_liq(payload, bars, ["binance-perp", "okx-swap"]),
-                                 headers=NOCACHE)
+        return web.json_response(await _done(bars, ["binance-perp", "okx-swap"]), headers=NOCACHE)
 
-    async def _with_hl_liq(payload: dict, bars: list[dict], venues: list[str]) -> dict:
+    async def _with_hl_liq(payload: dict, bars: list[dict], venues: list[str], asset: str = "eth") -> dict:
         """2026-09-24 사용자 지시: HL 고래 청산(포지션 수집기가 확정한 것)도 같은 원에 더한다."""
         # 🔴2026-09-25 캐시 키가 하나(`hl_whale_liq_events`)인데 since 를 요청 봉에서 뽑고 있었다 --
         #   먼저 온 요청의 깊이가 30초간 모두에게 간다. 청산 원이 «최신 2봉 2초 폴링»을 시작하면
@@ -4489,8 +4641,9 @@ def make_app() -> web.Application:
         #   merge_hl_liq 가 어차피 버린다(없는 봉엔 안 더한다).
         since = int((time.time() - FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS) * 1000) if bars else 0
         try:
-            ev = await swr_cached("hl_whale_liq_events", 30.0,
-                                  lambda: asyncio.to_thread(hl_whale_liq_events, since))
+            db = HL_LIQ_BY_ASSET[asset][0]
+            ev = await swr_cached(f"hl_whale_liq_events:{asset}", 30.0,
+                                  lambda: asyncio.to_thread(hl_whale_liq_events, since, db, asset.upper()))
         except Exception:  # noqa: BLE001 -- HL 이 없어도 원은 그대로 그린다
             ev = []
         merged = merge_hl_liq(bars, ev, FOOTPRINT_BAR_SECONDS)
@@ -4546,7 +4699,7 @@ def make_app() -> web.Application:
         scale = float(np.percentile(nz, 97)) if nz.size else 1.0
         if not (scale > 0):
             scale = 1.0
-        out = {**w, "scale": scale, **_heatmap_rows(w, qty, mid)}
+        out = {**w, "scale": scale, **_heatmap_rows(w, qty, mid, symbol)}
         if rows_only:
             # 2026-09-19 히트맵 «그림»을 걷어낸 뒤로 화면은 행 집계와 요약만 쓴다.
             # 이미지 배열을 계속 보내면 서버 실측 **102KB** 가 매 폴링 그냥 버려진다.
@@ -4556,7 +4709,7 @@ def make_app() -> web.Application:
                 "qty_i8": base64.b64encode(np.ascontiguousarray(q8, dtype=np.int8)).decode(),
                 "mid_b64": base64.b64encode(np.ascontiguousarray(mid, dtype="<f4")).decode()}
 
-    def _heatmap_rows(w: dict, qty: "np.ndarray", mid: "np.ndarray") -> dict[str, Any]:
+    def _heatmap_rows(w: dict, qty: "np.ndarray", mid: "np.ndarray", symbol: str = "ethusdt") -> dict[str, Any]:
         """그림에서 **뽑은 수치**. 히트맵 이미지로는 구별 안 되는 것을 숫자로 가른다.
 
         ⭐2026-09-20 행마다 다섯 값을 낸다(`row_stats`, 수집기에 있다 -- 래스터 축소는
@@ -4627,11 +4780,16 @@ def make_app() -> web.Application:
         try:
             t_start = w["t0_ms"] / 1000.0
             t_end = t_start + w["cols"] * w["dt_s"]
-            for bar, cells in footprint_state["bars"].items():
+            # 🔴2026-09-26 전에는 심볼과 무관하게 ETH 체결로 대조했다(BTC 창에 ETH 체결). 그 코인의
+            #   흐름 엔진이 없으면(BTC 등) 대조하지 않는다 -- 남의 체결로 채우느니 «모름»이 낫다.
+            fl = next((x for x in flows.values() if x.spec.symbol.lower() == symbol), None)
+            if fl is None:
+                raise LookupError(symbol)
+            for bar, cells in fl.footprint_state["bars"].items():
                 if bar + FOOTPRINT_BAR_SECONDS < t_start or bar > t_end:
                     continue
                 for key, v in cells.items():
-                    i = int(round(key * FOOTPRINT_BUCKET / w["bin_size"])) - w["bin_lo"]
+                    i = int(round(key * fl.spec.bucket / w["bin_size"])) - w["bin_lo"]
                     if 0 <= i < w["n_bins"]:
                         fill_ask[i] += float(v[0])
                         fill_bid[i] += float(v[1])
@@ -5746,8 +5904,14 @@ def make_app() -> web.Application:
     app.router.add_get("/api/oi-5m", api_oi_5m)
 
     async def api_hl_whale_liq(request: web.Request) -> web.Response:
+        asset = str(request.query.get("asset") or "eth").lower()
+        cfg = HL_LIQ_BY_ASSET.get(asset)
+        if cfg is None:
+            return web.json_response({"ok": False, "error": "asset_off"}, headers=NOCACHE)
+        db, bucket, dp = cfg
         try:
-            body = await swr_cached("hl_whale_liq", 30.0, lambda: asyncio.to_thread(hl_whale_liq))
+            body = await swr_cached(f"hl_whale_liq:{asset}", 30.0,
+                                    lambda: asyncio.to_thread(hl_whale_liq, db, bucket, asset.upper(), dp))
         except Exception as exc:  # noqa: BLE001 -- 수집기가 없으면 화면은 이 레벨만 안 그린다
             body = {"ok": False, "error": type(exc).__name__}
         return web.json_response(body, headers=NOCACHE)
@@ -5798,14 +5962,12 @@ def make_app() -> web.Application:
     # stop_http_session LAST for the mirror-image reason.
     app.on_startup.append(start_http_session)
     app.on_startup.append(start_dashboard_events)
-    app.on_startup.append(start_footprint_collector)
-    app.on_startup.append(start_oi_1s_collector)
+    app.on_startup.append(start_flows)
     app.on_startup.append(start_micro_ref)
     app.on_startup.append(start_bracket_watcher)
     app.on_cleanup.append(stop_bracket_watcher)
     app.on_cleanup.append(stop_micro_ref)
-    app.on_cleanup.append(stop_oi_1s_collector)
-    app.on_cleanup.append(stop_footprint_collector)
+    app.on_cleanup.append(stop_flows)
     app.on_cleanup.append(stop_dashboard_events)
     app.on_cleanup.append(stop_http_session)
     return app
