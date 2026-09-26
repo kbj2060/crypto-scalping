@@ -825,6 +825,21 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
         pass
     tape_max = _read_only_rows(tape_db, "SELECT max(ts_sec) FROM trade_tape_1s WHERE symbol = ?", [inst])
     return {"bars": bars, "ok_min": ok_min, "oi": oi, "liq": liq, "tape_max": int(tape_max[0][0] or 0)}
+def tape_seconds(tape_db: Path, symbol: str, lo_sec: int, hi_sec: int,
+                 tape_bucket: float) -> tuple[dict[int, list[float]], int]:
+    """체결 테이프 -> 1초 수급 칸 {초: [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]} (2026-09-27 재시작 복원).
+    고래/리테일 경계는 테이프 수집기와 같은 상수(주문 단위)라 라이브 칸과 뜻이 같다. [lo, hi) 초, 테이프 끝 초도 준다.
+    ponytail: 가격은 그 초의 «마지막 체결가»가 아니라 칸 가중평균(테이프에 순서가 없다) -- 오차 < 칸 1개(ETH $0.1)."""
+    rows = _read_only_rows(tape_db, """
+        SELECT ts_sec, sum(coalesce(retail_buy_qty, 0)), sum(coalesce(retail_sell_qty, 0)),
+               sum(coalesce(whale_buy_qty, 0)), sum(coalesce(whale_sell_qty, 0)), sum(buy_qty), sum(sell_qty),
+               sum(price_bin * (buy_qty + sell_qty)) / nullif(sum(buy_qty + sell_qty), 0) * ?
+        FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY 1""",
+        [tape_bucket, symbol, lo_sec, hi_sec])
+    top = _read_only_rows(tape_db, "SELECT max(ts_sec) FROM trade_tape_1s WHERE symbol = ?", [symbol])
+    return {int(r[0]): [float(x or 0.0) for x in r[1:]] for r in rows}, int(top[0][0] or 0)
+
+
 OKX_CT_VAL = OKX_CT_VALS.get(OKX_INST)
 # ⭐OI 는 **WS `open-interest`** 로 받는다(2026-09-23 정정). REST 0.25초 폴링이 «2.7배 더 본» 변화는
 #   60%가 A->B->A 되돌림(응답 노드 불일치) 잡음이었고, 동시 75초에 REST 고유 값 10개 = WS 10개였다.
@@ -2008,7 +2023,7 @@ class FlowSpec:
     price_dp: int
     okx_inst: str            # OKX 무기한(USDT)
     spot_url: str            # 바이낸스 현물(USDT) @aggTrade
-    oi_poll_s: float         # ETH 0.25초 · 나머지 1초(REST 가중치 -- 같은 IP 를 봇도 쓴다)
+    oi_poll_s: float         # 초. 전 코인 0.25초(REST 가중치 1 -- 같은 IP 를 봇도 쓴다)
     snapshot_path: Path
     okx_tape_db: Path
     okx_ctx_db: Path
@@ -2029,8 +2044,9 @@ def _flow_spec(asset: str, bucket: float, price_dp: int, oi_poll_s: float) -> Fl
 
 
 FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2, OI_1S_POLL_SECONDS),
-              "sol": _flow_spec("sol", 0.02, 2, 1.0),
-              "xrp": _flow_spec("xrp", 0.0003, 4, 1.0)}
+              # 2026-09-27 ETH 와 같은 0.25초(사용자 지시) -- 실측 가중치 1,017~1,189/분 + 360 = 약 1,500/2,400. 밴이면 ban_guard 가 멈춘다.
+              "sol": _flow_spec("sol", 0.02, 2, OI_1S_POLL_SECONDS),
+              "xrp": _flow_spec("xrp", 0.0003, 4, OI_1S_POLL_SECONDS)}
 assert FLOW_SPECS["eth"].snapshot_path == FOOTPRINT_SNAPSHOT_PATH and FLOW_SPECS["eth"].spot_url == SPOT_WS_URL
 
 
@@ -2758,10 +2774,54 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
             if earliest <= lo:
                 return
 
+    async def supply_1s_restore(app: web.Application) -> None:
+        """재시작 직후 1초 수급 11분을 되살린다(2026-09-27 사용자 지시). 라이브가 첫 초(t0)를 잡은 뒤 그 **앞만**
+        채우고 라이브가 가진 초는 안 건드린다. 체결 = 체결 테이프(바이낸스·OKX), OI = oi_1s DB·OKX 맥락 DB.
+        청산은 이미 되살린다(liq_events_load·okx_footprint_restore). 🔴현물은 테이프가 없어 못 한다.
+        ponytail: 복원은 새로 연 화면(커서 0)만 받는다 -- 열려 있던 화면은 제 커서 뒤라 재시작 공백이 그대로다."""
+        async def fill(dst: dict, load: Any, name: str) -> None:
+            for _ in range(60):                     # 라이브 첫 초를 기다린다
+                if dst:
+                    break
+                await asyncio.sleep(1.0)
+            if not dst:
+                return
+            t0 = min(dst)
+            try:
+                for _ in range(12):                 # 테이프는 5초마다 쓴다 -- t0 직전까지 따라잡을 때까지
+                    got, top = await asyncio.to_thread(load, t0 - SUPPLY_1S_SECONDS, t0)
+                    if top >= t0 - 1:
+                        break
+                    await asyncio.sleep(5.0)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- 원천이 없으면 라이브만으로 산다
+                print(f"{TAG}1초 수급 복원 실패({name}): {exc!r}", flush=True)
+                return
+            n = sum(1 for k, v in got.items() if dst.setdefault(k, v) is v)
+            print(f"{TAG}1초 수급 복원({name}): {n}초", flush=True)
+
+        def oi_rows(db: Path, sql: str, key: str, lo: int, hi: int) -> tuple[dict[int, float], int]:
+            with duckdb_path_lock(db):
+                rows = _read_only_rows(db, sql, [key, lo * 1000, hi * 1000])
+            out = {int(ms) // 1000: float(v) for ms, v in rows}   # 시각 순이라 같은 초는 마지막 값
+            return out, hi - 1                                    # DB 는 기다려도 안 는다(10초 flush) -- 한 번만
+        await asyncio.gather(
+            fill(footprint_state["sec"], lambda lo, hi: tape_seconds(
+                TAPE_DB, spec.symbol.lower(), lo, hi, TAPE_BUCKETS[spec.symbol.lower()]), "바이낸스 체결"),
+            fill(okx_sec, lambda lo, hi: tape_seconds(
+                OKX_TAPE_DB_PATH, OKX_INST, lo, hi, OKX_TAPE_BUCKETS[OKX_INST]), "OKX 체결"),
+            fill(oi_1s, lambda lo, hi: oi_rows(
+                OI_1S_DB_PATH, f"SELECT ts_ms, open_interest FROM {OI_1S_TABLE} WHERE symbol = ? "
+                "AND ts_ms >= ? AND ts_ms < ? ORDER BY ts_ms", spec.symbol.lower(), lo, hi), "바이낸스 OI"),
+            fill(okx_oi_1s, lambda lo, hi: oi_rows(
+                OKX_CTX_DB_PATH, "SELECT ts_ms, oi_base FROM okx_oi WHERE inst = ? "
+                "AND ts_ms >= ? AND ts_ms < ? ORDER BY ts_ms", OKX_INST, lo, hi), "OKX OI"))
+
     tasks: list[asyncio.Task] = []
 
     async def start(app: web.Application) -> None:
-        for fn in (collect_footprint, collect_oi_1s, collect_okx_flow, okx_footprint_restore, collect_spot_flow):
+        for fn in (collect_footprint, collect_oi_1s, collect_okx_flow, okx_footprint_restore, collect_spot_flow, supply_1s_restore):
             tasks.append(asyncio.create_task(fn(app)))
 
     async def stop(app: web.Application) -> None:

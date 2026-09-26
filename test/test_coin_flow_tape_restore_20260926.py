@@ -75,3 +75,17 @@ def test_hl_whale_liq_filters_coin_and_keeps_xrp_decimals(tmp_path):
     assert r["ok"] and r["n_positions"] == 3, r
     assert r["clusters"] == [[1.431, 70000.0, 0.0, 2], [1.653, 0.0, 30000.0, 1]], r["clusters"]
     assert srv.HL_LIQ_BY_ASSET["xrp"][0] == srv.HL_LIQ_BY_ASSET["sol"][0] != srv.HL_LIQ_BY_ASSET["eth"][0]
+
+
+def test_tape_seconds_matches_live_1s_cell_order(tmp_path):
+    """재시작 1초 수급 복원: 칸 순서가 라이브 supply_1s_cell 과 같아야 한다 -- [리테일매수, 리테일매도, 고래매수,
+    고래매도, 총매수, 총매도, 가격]. 테이블 열 순서(총·고래·리테일)와 다르므로 뒤섞이면 고래가 리테일로 그려진다."""
+    db = tmp_path / "t.duckdb"
+    _tape(db, [("xrpusdt", T0, 15360, 1.0, 3.0, 0.0, 2.0, 1.0, 0.5),
+               ("xrpusdt", T0, 15370, 3.0, 0.0, 3.0, 0.0, 0.0, 0.0),
+               ("xrpusdt", T0 + 1, 15360, 9.0, 9.0, 0.0, 0.0, 0.0, 0.0)])     # hi 배타 -> 빠진다
+    got, top = srv.tape_seconds(db, "xrpusdt", T0 - 10, T0 + 1, 0.0001)
+    assert top == T0 + 1 and set(got) == {T0}
+    rb, rs, wb, ws, tb, ts, px = got[T0]
+    assert (rb, rs, wb, ws, tb, ts) == (1.0, 0.5, 3.0, 2.0, 4.0, 3.0), got
+    assert abs(px - (1.5360 * 4 + 1.5370 * 3) / 7) < 1e-9          # 칸 가중평균
