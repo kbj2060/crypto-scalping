@@ -62,13 +62,13 @@ $PY scripts/ops/multicoin_collectors_20260926.py start --phase 2 --install-cron
 - `--tail-risk-btc-sol`: 09-19 에 멈춘 BTC·SOL 청산(forceOrder) 1분 워커를 되살린다. **서버에서만**
   (기존 `tail_risk_btc_sol.duckdb` 가 서버에 있다). ⚠️09-25 커밋 `671c0b1` 로 청산 수량 정의가 바뀌어
   USD 값이 ~6배다 — 09-19 이전 행과 섞지 말 것.
-- **어느 호스트?** Pi 권장(수집 전용 박스). 단 §2 메모리. 새 코인은 **한 호스트에서만** 띄운다
-  (두 곳이면 IP 한도를 두 번 쓴다). Pi 에서 띄우면:
-  - orderflow `.gz`(bookTicker·depthDiff·OKX/HL 호가·HL 체결 일별)는 기존 `ship_orderflow_archive` 가 그대로 서버로 보낸다.
-  - 코인별 테이프 duckdb 는 `TT_SRC=data/live/trade_tape_btc.duckdb bash scripts/ops/replicate_trade_tape_20260922.sh`
-    식으로 cron 줄을 코인·거래소마다 하나씩 더 둔다(목적지는 `*.from_pi.duckdb` — 서버 파일을 덮지 않는다).
-  - OKX/HL 컨텍스트·HL 포지션 duckdb 와 래스터는 복제 경로가 **아직 없다**(ETH 도 마찬가지 — Pi 에만 남는다).
-  - 워치독(`ops_watchdog.py`)이 서버에서만 돈다면 Pi 매니페스트는 안 본다 → §4 의 `check` 로 본다.
+- **어느 호스트? — 실제 배치(2026-09-26 기동): 1단계 = Pi, 2단계 = 서버.** 한 스트림은 **한 호스트에서만** 띄운다
+  (두 곳이면 IP 한도를 두 번 쓴다). Pi(3.8GB)는 1단계 실측 RSS 합 2.5GB 로 2단계(+1.5GB)가 안 들어가서 갈랐다.
+  - 1단계 orderflow `.gz`(bookTicker·depthDiff·OKX/HL 호가·HL 체결 일별)는 기존 `ship_orderflow_archive` 가 그대로 서버로 보낸다.
+  - 2단계 테이프·래스터는 처음부터 서버에 있으므로 테이프 복제 cron 이 필요 없다.
+  - Pi 의 OKX/HL 컨텍스트·HL 포지션 duckdb 는 복제 경로가 **아직 없다**(ETH 도 마찬가지 — Pi 에만 남는다).
+  - 워치독(`ops_watchdog.py`)은 서버 매니페스트(2단계)만 본다. Pi(1단계)는 §4 의 `check` 로 본다.
+  - Pi 의 `check` 디스크 줄은 재검토선 100GB(서버 기준)라 117GB SSD 에선 늘 음수 일수로 나온다 — Pi 는 전송 cron(48h 뒤 삭제)이 지킨다.
 
 ## 4. 하루 뒤 점검
 
