@@ -581,8 +581,8 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         """2026-09-25 사용자 «증거금 50% 상한» + «비율 10% = 순자산의 10% 를 증거금으로, 넘으면 진입 불가».
         순자산 1000 · 기존 2500. 게이지 6배면 상한 = 증거금 50% = 명목 3000(모델 4184 보다 낮다).
           5%  → 증거금 50 = 명목 300 → 2800 ≤ 3000 통과(자르지 않은 그 크기).
-          100% → 명목 6000 → 넘는다 → **자르지 않고** 막는다.
-        «자동»(처방 30배)에서 10% → 명목 3000 → 5500 > 모델 4184 → «위험모델 상한» 으로 막는다."""
+          100% → 명목 6000 → 넘는다 → 🔴09-26 «넘치면 50%까지만»: 막지 않고 **여유 500 까지만** 채운다.
+        «자동»(처방 30배)에서 10% → 명목 3000 → 5500 > 모델 4184 → 모델 상한까지만 채운다."""
         async def exercise() -> None:
             with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
                  mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0):
@@ -597,13 +597,16 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     self.assertIsNone(plan["blocked"], plan["blocked"])
                     self.assertAlmostEqual(plan["notional_usdt"], 300.0, delta=plan["price"] * 0.001)
                     b = await (await get("&lev=6&pct=100")).json()
-                    self.assertTrue(str(b["plan"]["blocked"]).startswith("증거금 상한 50% 초과"),
-                                    b["plan"]["blocked"])
-                    self.assertAlmostEqual(b["plan"]["notional_usdt"], 6000.0, delta=3.0)
+                    p = b["plan"]
+                    self.assertIsNone(p["blocked"], p["blocked"])
+                    self.assertTrue(p["capped"], p)
+                    self.assertLessEqual(p["total_notional_usdt"], 3000.0 + 1e-6, p)
+                    self.assertGreater(p["total_notional_usdt"], 3000.0 - p["price"] * 0.002, p)
                     b = await (await get("&pct=10")).json()
                     self.assertEqual(b["cap"]["binding"], "model", b["cap"])
-                    self.assertTrue(str(b["plan"]["blocked"]).startswith("위험모델 상한 초과"),
-                                    b["plan"]["blocked"])
+                    self.assertTrue(b["plan"]["capped"] and b["plan"]["blocked"] is None, b["plan"])
+                    self.assertLessEqual(b["plan"]["total_notional_usdt"],
+                                         b["cap"]["cap_notional_usdt"] + 1e-6, b["plan"])
                 finally:
                     await client.close()
 

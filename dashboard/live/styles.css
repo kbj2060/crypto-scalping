@@ -50,6 +50,9 @@
      묻혔다. 다른 자리에 이 토큰을 쓰기 전에 그 이유부터 적을 것.
      측정: 차트 배경(#171b23) 대비 6.92:1 · 기존 세 색과 RGB 거리 113~213(60 이상이면 구별) */
   --turnover: #5aa9f5;        /* 파랑 -- 거래대금 전용 */
+  /* 2026-09-26 호가 프로파일 왼쪽(쌓인 호가 깊이) 막대 -- app.js 에 리터럴 #7dd3fc 로 박혀 있던 것을 토큰으로.
+     방향이 없는 «양»이라 방향색을 못 준다(청산 밀도 쿨 램프와 같은 이유). 값은 그대로다. */
+  --book-depth: #7dd3fc;
   --on-fill: #12161d;         /* 색을 «채운» 면 위의 글자 */
   --ink: #f5f6fb;
   --line: rgba(203, 209, 227, 0.18);
@@ -403,9 +406,9 @@ body {
   background: var(--line);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--neutral) 6%, transparent);
 }
-.ops-health-row.good .ops-health-dot { background: var(--good); box-shadow: 0 0 10px var(--good); animation: statusPulse 2.4s ease-in-out infinite; }
-.ops-health-row.warn .ops-health-dot { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
-.ops-health-row.bad .ops-health-dot { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+.ops-health-row.good .ops-health-dot { background: var(--good); animation: statusPulse 2.4s ease-in-out infinite; }
+.ops-health-row.warn .ops-health-dot { background: var(--amber); }
+.ops-health-row.bad .ops-health-dot { background: var(--bad); }
 
 .ops-health-info { display: grid; gap: 3px; min-width: 0; }
 .ops-health-info strong { font-size: 13px; color: var(--text); }
@@ -522,7 +525,7 @@ body {
    asked for 주의(warn) to read as orange (--warn) with no yellow (--amber) specifically within the
    Snapshot tab; the Ops tab's health checklist keeps the amber above unchanged, so these override
    only inside #snapshotTabPanel via ID specificity rather than editing the shared base rules. */
-#snapshotTabPanel .ops-health-row.warn .ops-health-dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+#snapshotTabPanel .ops-health-row.warn .ops-health-dot { background: var(--warn); }
 #snapshotTabPanel .ops-health-row.warn .ops-health-status-badge { background: var(--warn); }
 #snapshotTabPanel .ops-health-row.warn .signal-meaning { border-left-color: var(--warn); }
 
@@ -693,7 +696,7 @@ body {
 /* 근본 신호 게이지(2026-09-25) — 옛 «현재 상황» 막대(.sit-sg)와 같은 치수·문법. 넓은 화면 2열, 좁으면 1열. */
 .fr-gauges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; padding: 2px 18px 0; }
 .fr-g { display: grid; grid-template-columns: minmax(0, 84px) minmax(40px, 1fr) 52px auto; column-gap: 8px; row-gap: 3px;
-        align-items: center; padding: 6px 0 7px; border-bottom: 1px solid var(--soft-line); font: 600 10.5px/1.2 var(--font-mono); }
+        align-items: center; padding: 6px 0 7px; border-bottom: 1px solid var(--soft-line); font: 600 11px/1.2 var(--font-mono); }
 .fr-gn { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fr-gv { text-align: right; font-weight: 800; color: var(--ink); white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
 .fr-gt { position: relative; display: block; height: 7px; border-radius: 3.5px; background: color-mix(in srgb, var(--neutral) 8%, transparent); }
@@ -719,7 +722,7 @@ body {
   border: 1px solid var(--line); background: var(--panel-strong); box-shadow: 0 6px 18px rgb(var(--shadow) / .35);
   font: 500 11px/1.55 var(--font-mono); color: var(--ink); letter-spacing: 0; }
 .fr-dn { color: var(--bad); }
-.fr-grade { font: 600 10.5px/1 var(--font-mono); color: var(--muted); border: 1px solid transparent;
+.fr-grade { font: 600 11px/1 var(--font-mono); color: var(--muted); border: 1px solid transparent;
             border-radius: 7px; padding: 4px 7px; white-space: nowrap; }
 .fr-g[data-grade="근거"] .fr-grade { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent);
                                         background: color-mix(in srgb, var(--amber) 13%, transparent); }
@@ -871,11 +874,11 @@ body {
 }
 .shadow-slot-range-zero { position: absolute; top: -3px; bottom: -3px; width: 1px; background: color-mix(in srgb, var(--neutral) 28%, transparent); transform: translateX(-0.5px); }
 .shadow-slot-range-fill { position: absolute; top: 1px; bottom: 1px; border-radius: 5px; transition: left 0.45s cubic-bezier(.22,.68,0,1.01), width 0.45s cubic-bezier(.22,.68,0,1.01); }
-.shadow-slot-range-fill.good { background: linear-gradient(90deg, color-mix(in srgb, var(--good) 18%, transparent), var(--good)); box-shadow: 0 0 10px color-mix(in srgb, var(--good) 40%, transparent); }
-.shadow-slot-range-fill.bad { background: linear-gradient(90deg, var(--bad), color-mix(in srgb, var(--bad) 18%, transparent)); box-shadow: 0 0 10px color-mix(in srgb, var(--bad) 40%, transparent); }
+.shadow-slot-range-fill.good { background: linear-gradient(90deg, color-mix(in srgb, var(--good) 18%, transparent), var(--good)); }
+.shadow-slot-range-fill.bad { background: linear-gradient(90deg, var(--bad), color-mix(in srgb, var(--bad) 18%, transparent)); }
 .shadow-slot-range-mark { position: absolute; top: -4px; bottom: -4px; width: 3px; border-radius: 3px; transform: translateX(-1.5px); transition: left 0.45s cubic-bezier(.22,.68,0,1.01); }
-.shadow-slot-range-mark.sl { background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 35%, transparent), var(--bad)); box-shadow: 0 0 7px color-mix(in srgb, var(--bad) 55%, transparent); }
-.shadow-slot-range-mark.tp { background: linear-gradient(180deg, var(--good), color-mix(in srgb, var(--good) 35%, transparent)); box-shadow: 0 0 7px color-mix(in srgb, var(--good) 55%, transparent); }
+.shadow-slot-range-mark.sl { background: linear-gradient(180deg, color-mix(in srgb, var(--bad) 35%, transparent), var(--bad)); }
+.shadow-slot-range-mark.tp { background: linear-gradient(180deg, var(--good), color-mix(in srgb, var(--good) 35%, transparent)); }
 .shadow-slot-range-current {
   position: absolute;
   top: 50%;
@@ -892,12 +895,12 @@ body {
 .shadow-slot-range-current.bad { border-color: var(--bad); animation: rangePulseBad 2.4s ease-in-out infinite; }
 .shadow-slot-range-current.muted { border-color: var(--muted); box-shadow: 0 0 0 4px rgba(139, 145, 166, 0.14); }
 @keyframes rangePulseGood {
-  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 20%, transparent), 0 0 10px color-mix(in srgb, var(--good) 55%, transparent); }
-  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--good) 8%, transparent), 0 0 18px color-mix(in srgb, var(--good) 80%, transparent); }
+  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 20%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--good) 8%, transparent); }
 }
 @keyframes rangePulseBad {
-  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 20%, transparent), 0 0 10px color-mix(in srgb, var(--bad) 55%, transparent); }
-  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--bad) 8%, transparent), 0 0 18px color-mix(in srgb, var(--bad) 80%, transparent); }
+  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 20%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--bad) 8%, transparent); }
 }
 .shadow-slot-range-labels { display: flex; justify-content: space-between; align-items: center; }
 .shadow-slot-range-labels .tag { font: 800 11px/1 var(--font-mono); padding: 4px 8px; border-radius: 999px; letter-spacing: 0.02em; }
@@ -917,14 +920,18 @@ body {
   .shadow-ribbon { grid-template-columns: 1fr; }
 }
 
+/* 2026-09-26 가격이 헤드라인, 시계는 그 아래 작은 보조. 둘 다 1초마다 바뀌므로 등폭 숫자(떨림 방지). */
+.top-center { display: grid; justify-items: center; gap: 3px; }
+.top-price { display: flex; align-items: baseline; gap: 8px; }
+.top-price b { font: 600 clamp(28px, 4vw, 38px)/1 var(--font-sans); letter-spacing: -0.02em;
+  color: var(--ink); font-variant-numeric: tabular-nums; }
+.top-price-delta { font: 700 12px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.top-price-delta.good { color: var(--good); }
+.top-price-delta.bad { color: var(--bad); }
 .top-clock {
-  font-family: var(--font-display);
-  font-size: clamp(30px, 4.5vw, 40px); /* 다시 크게 조정 */
-  font-weight: 500;
-  color: var(--text);
-  text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 22%, transparent);
-  letter-spacing: 0.02em;
-  line-height: 1;
+  font: 500 12px/1 var(--font-display);
+  color: var(--muted);
+  letter-spacing: 0.04em;
   margin: 0;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -943,10 +950,10 @@ body {
   border-radius: 50%;
   display: inline-block;
   margin-right: 6px;
-  box-shadow: 0 0 8px rgb(var(--shadow) / 0.4);
 }
-.session-led.on { background-color: var(--good); box-shadow: 0 0 10px var(--good); }
-.session-led.off { background-color: var(--bad); }
+/* 2026-09-26 비평: 꺼진 세션은 «이상»이 아니라 평상 상태 -- 빨강이면 상단에 경보 점이 셋 켜진다. 흐린 무채색. */
+.session-led.on { background-color: var(--good); }
+.session-led.off { background-color: rgb(var(--lift) / 0.22); }
 
 .session-item {
   display: inline-flex;
@@ -1076,9 +1083,11 @@ body {
 .trade-journal-pnl.bad { color: var(--bad); }
 .trade-journal-pnl.muted { color: var(--muted); }
 
-.good, .long { color: var(--good); text-shadow: 0 0 18px color-mix(in srgb, var(--good) 22%, transparent); }
-.bad, .short { color: var(--bad); text-shadow: 0 0 18px color-mix(in srgb, var(--bad) 22%, transparent); }
-.warn, .hold { color: var(--amber); text-shadow: 0 0 18px color-mix(in srgb, var(--warn) 20%, transparent); }
+/* 2026-09-26 비평: 방향색 글자 발광(text-shadow 0 0 18px)을 걷었다 -- 83곳(주문 버튼 포함)에 번져 «조용하고
+   정밀한» 원칙과 어긋났고 DESIGN.md 그림자 목록에도 없다. 색만으로 방향을 말한다. */
+.good, .long { color: var(--good); }
+.bad, .short { color: var(--bad); }
+.warn, .hold { color: var(--amber); }
 .muted { color: var(--muted); }
 
 /* "고래 포지션" is a bounded transform of "수급 흐름" (whale_position_score is reconstructable
@@ -1419,11 +1428,7 @@ svg {
     min-height: 0;
   }
 
-  .top-clock {
-    justify-self: center;
-    font-size: clamp(25px, 9vw, 34px);
-    letter-spacing: 0.8px;
-  }
+  .top-center { justify-self: center; }
 
   .top-session {
     justify-content: center;
@@ -2054,6 +2059,14 @@ svg {
 /* 성과 */
 .acct-perf { min-width: 0; display: grid; gap: 9px; grid-template-rows: auto 1fr auto; }
 .acct-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+/* 2026-09-26 성과는 한 줄 요약이 기본(펼치면 차트). 요약 줄 자체가 누르는 곳이다. */
+.acct-perf-fold > summary { list-style: none; cursor: pointer; align-items: center; }
+.acct-perf-fold > summary::-webkit-details-marker { display: none; }
+.acct-perf-fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+.acct-perf-more::after { content: "차트 펼치기 ▾"; font: 600 11px/1 var(--font-sans); color: var(--muted); }
+.acct-perf-fold[open] .acct-perf-more::after { content: "접기 ▴"; }
+.acct-perf-fold > summary:hover .acct-perf-more::after { color: var(--text); }
+.acct-perf-fold[open] > summary { margin-bottom: 10px; }
 .acct-chip { display: inline-flex; align-items: baseline; gap: 5px; padding: 4px 9px;
   border-radius: 8px; background: var(--glass); border: 1px solid var(--soft-line); }
 .acct-chip b { font: 700 12.5px/1 var(--font-mono); color: var(--text);
@@ -2087,7 +2100,12 @@ svg {
 /* 범례: 계열이 둘이면 항상 둔다. 글씨는 계열 색을 입지 않고 옆의 견본이 색을 진다. */
 .acct-legend { display: flex; gap: 12px; margin-bottom: 2px;
   font: 600 11px/1 var(--font-sans); color: var(--muted); }
-.acct-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.acct-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+/* 2026-09-26 비평(Casey): 손가락은 24px 칩을 자주 놓친다 -- 거친 포인터에서만 칩·탭을 40px 로. */
+@media (pointer: coarse) {
+  .chipset .chip { min-height: 40px; min-width: 44px; padding: 0 12px; }
+  .page-tab { min-height: 40px; }
+}
 .acct-legend .sw { width: 8px; height: 8px; border-radius: 2px; }
 .acct-legend .sw.good { background: var(--good); }
 .acct-legend .sw.bad { background: var(--bad); }
@@ -2168,7 +2186,7 @@ svg {
     position: static; transform: none; }
   .acct-lanes > * { padding: 12px 14px 14px; }
 }
-.lane-pact { margin: 10px 0 0; font: 600 10.5px/1.5 var(--font-mono); color: var(--muted); }
+.lane-pact { margin: 10px 0 0; font: 600 11px/1.5 var(--font-mono); color: var(--muted); }
 .lane-pact b { color: var(--text); font-weight: 800; }
 
 .manual-entry { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
@@ -2383,6 +2401,8 @@ svg {
 .notify-btn.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 .notify-btn.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }
+/* 2026-09-26 상한 여유가 없는 쪽 -- 누를 수는 있되(사유가 뜬다) 흐리게 «지금은 못 들어간다»를 보인다. */
+.notify-btn[aria-disabled="true"] { opacity: .45; }
 .notify-btn.short:hover:not(:disabled) { border-color: var(--bad); }
 
 /* 2026-09-14 진입 블록 접기. <details> 가 .manual-entry 의 flex 자식이 되면서 안쪽 행들은
@@ -2488,8 +2508,8 @@ svg {
    («|» 구분자는 장식이라 제외한다. 다크도 1.55 로 같다.) */
 /* 옅은 색 칩 위라 토큰 그대로는 4.0 에 걸린다 -- 리터럴을 박지 않고 **토큰에서 파생**한다.
    이래야 --bad/--good 만 고쳐도 여기까지 따라온다. */
-[data-theme="light"] .acct-delta.bad { color: color-mix(in srgb, var(--bad) 82%, #000); }
-[data-theme="light"] .acct-tag.good { color: color-mix(in srgb, var(--good) 84%, #000); }
+[data-theme="light"] .acct-delta.bad { color: color-mix(in srgb, var(--bad) 82%, var(--ink)); }
+[data-theme="light"] .acct-tag.good { color: color-mix(in srgb, var(--good) 84%, var(--ink)); }
 
 /* 조작 요소는 «조작 요소로 보여야» 한다. 라이트에서 흰 유리 위의 흰 4% 버튼은 글자만 떠 있다
    -- 대비 검사는 통과하지만(글자색 기준) 버튼으로 읽히지 않는다. 면과 테두리를 준다. */
@@ -2865,8 +2885,8 @@ svg {
   background: rgb(var(--lift) / .14);
   border: 0;
   transform: translateX(calc(var(--i, 0) * 100%));
-  /* 스프링 -- 1.56 이 1.0 을 넘어 살짝 지나쳤다 돌아온다(참조 자료의 이징). */
-  transition: transform .34s cubic-bezier(.34, 1.56, .64, 1);
+  /* 2026-09-26 스프링(1.56 오버슈트) -> 지수 감속. 되튀는 움직임은 «조용하고 정밀한»과 맞지 않는다. */
+  transition: transform .34s cubic-bezier(.22, 1, .36, 1);
   z-index: 0;
 }
 .chart-mode-tabs:has(.asset-tab:nth-child(2).active)::before { --i: 1; }
@@ -3002,14 +3022,14 @@ svg {
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sit-col .tg { margin-top: 5px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sit-col .ds { margin-top: 2px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sit-col .ds { margin-top: 2px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 /* 그 시나리오로 «미는» 뒤집기 신호 -- 선 없이 열 아래에 붙어 연결이 보인다 */
 .sit-pushes { margin-top: 8px; display: grid; gap: 3px; }
 .sit-push { display: grid; grid-template-columns: 10px 1fr; gap: 6px; align-items: baseline;
-            font-size: 10.5px; color: var(--muted); }
+            font-size: 11px; color: var(--muted); }
 .sit-push .dot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--hover-line); }
 .sit-push.on { color: var(--good); font-weight: 600; }
-.sit-push.on .dot { background: var(--good); border-color: var(--good); box-shadow: 0 0 6px var(--good); }
+.sit-push.on .dot { background: var(--good); border-color: var(--good); }
 
 /* STATE */
 /* 2026-09-22 «현재 상황»: 라벨 문장 목록 -> 고정 18칸 차트(시안 U2). 두 칸은 gap:1px +

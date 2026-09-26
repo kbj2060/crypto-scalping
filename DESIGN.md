@@ -17,6 +17,7 @@ colors:
   steel-accent: "#dfe4ee"
   graphite-neutral: "#cbd1e3"
   turnover-blue: "#5aa9f5"
+  book-depth-blue: "#7dd3fc"
   on-fill: "#12161d"
   line: "rgba(203, 209, 227, 0.18)"
   soft-line: "rgba(203, 209, 227, 0.095)"
@@ -31,11 +32,18 @@ colors:
   light-steel-accent: "#2b3444"
 typography:
   display:
+    fontFamily: "Pretendard Variable, Pretendard, -apple-system, Noto Sans KR, sans-serif"
+    fontSize: "clamp(28px, 4vw, 38px)"
+    fontWeight: 600
+    lineHeight: 1
+    letterSpacing: "-0.02em"
+    fontFeature: "tnum"
+  clock:
     fontFamily: "Space Grotesk, Pretendard Variable, Noto Sans KR, sans-serif"
-    fontSize: "clamp(30px, 4.5vw, 40px)"
+    fontSize: "12px"
     fontWeight: 500
     lineHeight: 1
-    letterSpacing: "0.02em"
+    letterSpacing: "0.04em"
     fontFeature: "tnum"
   headline:
     fontFamily: "Space Grotesk, Pretendard Variable, Noto Sans KR, sans-serif"
@@ -179,7 +187,9 @@ components:
 - **경보 주황 (Alarm Amber)** (`alarm-amber`): 주의·경보·선택된 칩·OI. 방향이 아니라 «지금 눈여겨봐라». 라이트는 `light-alarm-amber`.
 
 ### Tertiary
-- **거래대금 파랑 (Turnover Blue)** (`turnover-blue`): **사분면 행의 거래대금 선 하나에만** 쓴다. 방향이 없는 크기라 방향색을 줄 수 없어서 들어온 유일한 예외다.
+- **거래대금 파랑 (Turnover Blue)** (`turnover-blue`): **사분면 행의 거래대금 선 하나에만** 쓴다. 방향이 없는 크기라 방향색을 줄 수 없어서 들어온 예외다.
+- **호가 깊이 하늘 (Book Depth Blue)** (`book-depth-blue`, `--book-depth`): 호가 프로파일 왼쪽(쌓인 호가 깊이) 막대 전용. 같은 이유(방향 없는 «양»)의 예외다.
+- **청산 밀도 쿨 램프** (app.js `DENSITY_STOPS_DARK/LIGHT`): 밀도는 방향이 없어 초록·빨강·주황을 쓰면 캔들 방향으로 오독된다 — 단색 쿨 램프로 밝기만 올린다(배경 대비가 밀도에 따라 단조 증가하도록 테마별로 따로 잰 값). 비평(2026-09-26)이 «파랑 3곳»을 짚었지만 이 셋은 **허가된 예외**다.
 
 ### Neutral
 - **야간 책상 (Night Desk)** (`night-desk`): 페이지 바닥. 명도 계단의 맨 아래.
@@ -200,18 +210,20 @@ components:
 
 ## Typography
 
-**Display Font:** Space Grotesk (with Pretendard Variable)
+**Display Font:** Space Grotesk (with Pretendard Variable) — 제목·시계. 상단 현재가는 Pretendard.
 **Body Font:** Pretendard Variable (with Pretendard, -apple-system, Noto Sans KR)
 **Label/Mono Font:** JetBrains Mono (with Pretendard Variable, ui-monospace)
 
 **Character:** 기하학적인 Space Grotesk 가 제목과 시계를 맡아 계기판의 표지판처럼 서고, 한글 가독성이 좋은 Pretendard 가 본문과 큰 숫자를, JetBrains Mono 가 줄을 맞춰야 하는 데이터 숫자를 맡는다.
 
 ### Hierarchy
-- **Display** (500, clamp(30px, 4.5vw, 40px), 1): 상단 시계. 등폭 숫자(tabular-nums).
+- **Display** (600, clamp(28px, 4vw, 38px), 1, Pretendard): 상단 **현재가** + 5분봉 시가 대비. 화면에서 가장 큰 숫자는 지금 가격이다(2026-09-26 — 예전엔 벽시계였다). 1초마다 바뀌므로 등폭 숫자.
+- **Clock** (500, 12px, Space Grotesk, 흐린 글자): 현재가 아래의 작은 시계.
 - **Headline** (500, 28px, 1.1): 운영 화면 제목.
 - **Title** (500, 17px): 카드 제목(«내 계좌», «진단»).
 - **Figure** (600, 40px, 1.02, -0.025em): 순자산 같은 큰 단독 숫자. 디스플레이 서체도 등폭 숫자도 쓰지 않는다 — 비례 숫자.
 - **Tile value** (700, 21px, 1): 계좌 타일 값(청산까지·증거금·노출).
+- 최소 글자 크기는 **11px**다(10.5px 은 2026-09-26 전부 11px 로 올렸다).
 - **Body** (400, 16px): 페이지 기본.
 - **Note** (600, 11px, 1.55): 안내·경고 상자(entry-note), 차트 주석.
 - **Label** (700, 11px, 0.12em, 대문자): 눈썹 이름표(«순자산»). 타일 이름은 600 11px.
@@ -300,5 +312,7 @@ components:
 - **Don't** 카드를 호버로 띄우거나 움직인다.
 - **Don't** 주문 버튼을 방향색으로 채운 덩어리로 만든다 — 테두리와 글자가 방향을 말한다.
 - **Don't** 다크 테마에 blur 를 켠다(현행 다크는 납작한 표면이다).
+- **Don't** 방향색 글자·점에 발광(`text-shadow`/`box-shadow: 0 0 Npx`)을 넣는다 — 2026-09-26 83곳에서 걷었다. 색만으로 방향을 말한다.
+- **Don't** 평상 상태(꺼진 세션·상한에 걸린 진입)를 빨강으로 칠한다 — 빨강은 실패·위험에만. 상한 막힘은 흐린 문구 + 흐린 버튼.
 - **Don't** 점자·이모지 글자로 아이콘을 대신한다 — 인라인 SVG, `currentColor`.
 - **Don't** `.top` 같은 일반 클래스명을 새로 만든다 — 전역 규칙과 충돌한다(접두사를 붙인다).

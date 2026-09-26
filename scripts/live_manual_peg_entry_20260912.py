@@ -132,11 +132,20 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     existing_notional = max(0.0, float(existing_notional))
 
     # 2026-09-25 사용자 지시: `fraction_of_equity` 면 비율 = **순자산 대비 이번 주문 증거금**
-    #   (10% = 순자산의 10% 를 증거금으로, 명목 = 그 × 주문이 걸 레버리지). 상한에 **자르지 않고**
-    #   넘으면 막는다 -- «상한 여유 중 몇 %» 로 조용히 줄이면 누른 비율과 들어간 크기가 달라진다.
+    #   (10% = 순자산의 10% 를 증거금으로, 명목 = 그 × 주문이 걸 레버리지).
+    # 🔴2026-09-26 사용자 지시 «넘치면 50%까지만 채우기»: 상한을 넘으면 막지 않고 **남은 여유까지만** 넣는다.
+    #   막는 건 여유가 0 일 때뿐. 줄였다는 사실은 notes 와 `capped` 로 화면에 말한다(조용히 줄이지 않는다).
+    capped = False
     if fraction_of_equity:
         qty = (equity * float(fraction) * order_leverage / price
                if equity > 0 and order_leverage > 0 else 0.0)
+        room = (cap_notional - existing_notional) if cap_notional else None
+        if room is not None and qty * price > room:
+            want_pct = 100 * float(fraction)
+            qty, capped = max(0.0, room) / price, True
+            if room > 0 and equity > 0 and order_leverage > 0:
+                notes.append(f"요청 {want_pct:.0f}% → {cap_label}까지 "
+                             f"{100 * room / order_leverage / equity:.1f}% 만 넣습니다")
     elif cap_notional:
         room = cap_notional - existing_notional
         if room <= 0:
@@ -159,14 +168,8 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
     qty = _floor_to(qty, filters["step"])
 
     blocked = None
-    after = existing_notional + qty * price
-    if fraction_of_equity and cap_notional and after > cap_notional:
-        used = (f" · 주문 뒤 증거금 {100 * after / order_leverage / equity:.0f}%"
-                if equity > 0 and order_leverage > 0 else "")
-        blocked = (f"{cap_label} 초과{used}"
-                   f" (주문 뒤 총 명목 {after:,.0f} > {cap_notional:,.0f} USDT)")
-    elif qty < filters["min_qty"] or qty <= 0:
-        blocked = ("상한 여유가 없습니다" if cap_notional and existing_notional >= cap_notional
+    if qty < filters["min_qty"] or qty <= 0:
+        blocked = (f"{cap_label} 여유가 없습니다" if capped or (cap_notional and existing_notional >= cap_notional)
                    else f"수량이 최소 {filters['min_qty']} 미만")
     elif filters["min_notional"] and qty * price < filters["min_notional"]:
         blocked = f"명목이 최소 {filters['min_notional']:,.0f} USDT 미만"
@@ -194,6 +197,7 @@ def build_entry_plan(*, side: str, best_bid: float, best_ask: float, recommended
         "liq_distance_pct": round(100 * equity / total_notional, 1) if equity and total_notional else None,
         "cap_used_pct": round(100 * total_notional / cap_notional, 0) if cap_notional else None,
         "fraction": round(float(fraction), 4),
+        "capped": capped,             # 상한 여유까지만 채웠다(요청보다 적게 들어간다)
         # 비율 적용 **전**, 상한까지 자른 양. 화면이 «이 중 얼마»를 쓴다.
         "available_qty": round(available_qty, 8),
         # 이번 주문 뒤에 상한까지 남는 여유. 분할 진입의 다음 칸을 가늠하는 값이다.
@@ -509,7 +513,14 @@ def _self_check() -> None:
                             recommended_qty=99.0, cap_notional=20000.0, filters=f,
                             existing_notional=8000.0, equity=2000.0, leverage=20.0, fraction=0.40,
                             fraction_of_equity=True, order_leverage=20.0, cap_label="증거금 상한 50%")
-    assert plan["quantity"] == 8.0 and plan["blocked"].startswith("증거금 상한 50% 초과 · 주문 뒤 증거금 60%"), plan
+    # 🔴09-26 «넘치면 50%까지만»: 막지 않고 여유 12000(=20000-8000) 까지만 → 6 ETH · 요청 40% → 30%
+    assert plan["quantity"] == 6.0 and plan["blocked"] is None and plan["capped"], plan
+    assert any("요청 40% → 증거금 상한 50%까지 30.0%" in n for n in plan["notes"]), plan["notes"]
+    plan = build_entry_plan(side="LONG", best_bid=2000.00, best_ask=2000.01,
+                            recommended_qty=99.0, cap_notional=20000.0, filters=f,
+                            existing_notional=20000.0, equity=2000.0, leverage=20.0, fraction=0.10,
+                            fraction_of_equity=True, order_leverage=20.0, cap_label="증거금 상한 50%")
+    assert plan["quantity"] == 0.0 and plan["blocked"] == "증거금 상한 50% 여유가 없습니다", plan
 
     # equity/leverage 를 모르면 설명값은 None 이지 0 이 아니다(0 은 "레버리지 0배"로 읽힌다)
     plan = build_entry_plan(side="LONG", best_bid=2470.00, best_ask=2470.01,

@@ -52,14 +52,20 @@
           <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
           <button type="button" class="page-tab" data-page-tab="notify">알림</button>
         </nav>
-        <div id="topClock" class="top-clock">-</div>
+        <!-- 2026-09-26 비평: 화면의 가장 큰 숫자가 벽시계였다. 매매 중엔 **지금 가격**이 그 자리다
+             (PRODUCT 원칙 «지금 행동에 필요한 값이 가장 먼저·가장 크게»). 시계는 그 아래 작게. -->
+        <div class="top-center">
+          <div class="top-price"><b id="topPrice">-</b><span id="topPriceDelta" class="top-price-delta"
+            title="이번 5분봉 시가 대비"></span></div>
+          <div id="topClock" class="top-clock">-</div>
+        </div>
         <div class="top-right">
           <div id="topSession" class="ops-session top-session">-</div>
         </div>
       </div>
     </header>
 
-    <section id="notifyTabPanel" class="ops-tab-panel hidden" aria-live="polite">
+    <section id="notifyTabPanel" class="ops-tab-panel hidden">
       <div class="ops-panel-head">
         <div>
           <p class="eyebrow">PUSH NOTIFICATIONS</p>
@@ -125,7 +131,7 @@
       </section>
     </section>
 
-    <section id="opsTabPanel" class="ops-tab-panel hidden" aria-live="polite">
+    <section id="opsTabPanel" class="ops-tab-panel hidden">
       <div class="ops-panel-head">
         <div>
           <p class="eyebrow">READ-ONLY OPERATIONS</p>
@@ -160,7 +166,9 @@
       </section>
     </section>
 
-    <section id="snapshotTabPanel" class="ops-tab-panel" aria-live="polite">
+    <!-- 2026-09-26 비평: 탭 패널 전체의 aria-live 를 걷었다 -- 0.25초마다 바뀌는 화면 전체가 낭독 대상이었다.
+         알릴 것은 주문 결과(#snapEntryResult)와 진입 가부(#snapEntrySize)뿐이다. -->
+    <section id="snapshotTabPanel" class="ops-tab-panel">
       <div class="ops-panel-head">
         <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
           <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
@@ -193,7 +201,8 @@
           <div><h3>내 계좌</h3><p id="snapAcctBalance" class="muted">-</p></div>
           <div class="ops-health-head-tools acct-tools">
             <span id="snapAcctSummary" class="ops-health-summary">-</span>
-            <span class="ops-readonly">거래소 실계좌 · 읽기 전용 · 30초 갱신</span>
+            <!-- 2026-09-26 비평: 이 카드에서 실주문이 나가므로 «읽기 전용»은 거짓이었다. -->
+            <span class="ops-readonly">거래소 실계좌 · 30초 조회</span>
             <!-- 2026-09-13 강제 새로고침. 30초 폴링을 기다리지 않고 지금 받는다 --
                  조회가 끊겨 청산 버튼이 «정보 낡음»일 때 사람이 직접 되살릴 수단이다. -->
             <button type="button" id="snapAcctRefresh" class="acct-refresh" title="계좌 강제 조회" aria-label="계좌 강제 조회"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"></path><path d="M20.5 4.5V10h-5.5"></path></svg></button>
@@ -288,7 +297,7 @@
                (2026-09-13 실장애). 정상일 때는 이 칸이 비어 있다. 「실주문 활성」 경고는
                확인 단계 문구가 대신한다(「확인 버튼을 누르면 실제 주문이 나갑니다」). -->
           <div class="manual-entry-row">
-            <span id="snapEntrySize" class="entry-note bad" hidden></span>
+            <span id="snapEntrySize" class="entry-note bad" role="status" hidden></span>
           </div>
           <!-- 2026-09-13 분할 진입. 한 번에 다 넣으면 반대로 갈 때 손쓸 게 없다 --
                09-06 물타기 감사에서 살아남은 유일한 부품이 «부분 투입»이었다. -->
@@ -334,7 +343,7 @@
           </details>
           <!-- 2026-09-12 계좌 카드와 **같은 타일**로 그린다(사용자 요청) -- 미리보기가 말 그대로
                «진입 후의 그 카드»가 되도록. 옛 판은 고정폭 텍스트라 계좌 패널과 따로 놀았다. -->
-          <div id="snapEntryResult" class="manual-entry-result" hidden></div>
+          <div id="snapEntryResult" class="manual-entry-result" role="status" hidden></div>
           <!-- 2026-09-12 2단 확인. 진입 버튼은 «보여주기»만 하고, 실제 주문은 이 버튼에서만
                나간다. 한 번의 오클릭이 주문이 되지 않게 하는 게 목적이라 기본은 숨김이고
                미리보기를 본 뒤에만 잠깐 나타난다(CONFIRM_WINDOW_MS). -->

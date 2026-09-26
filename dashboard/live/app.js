@@ -1358,12 +1358,19 @@ function acctPerfSvg(net, meta) {
 
 // 계좌 차트 툴팁. 🔴카드는 30초마다 innerHTML 로 통째로 다시 그려진다 -- 막대마다 리스너를
 // 달면 매번 새로 달아야 하고 옛 것이 샌다. 컨테이너(#snapAcctPosition)는 안 바뀌므로 위임한다.
+let acctPerfOpen = (() => { try { return localStorage.getItem("acctPerfOpen") === "1"; } catch (e) { return false; } })();
 function bindAcctChartTip() {
   // 🔴2026-09-25 툴팁이 **안 떴다** -- 차트는 #snapAcctPerf 로 옮겨갔는데 위임 호스트가 옛 칸
   //   (#snapAcctPosition)에 남아 있어 이벤트가 닿지 않았다(플레이라이트 호버로 확인).
   const host = el("snapAcctPerf");
   if (!host || host.dataset.tipBound) return;
   host.dataset.tipBound = "1";
+  // 펼침 기억 -- toggle 은 버블링하지 않으므로 캡처로 받는다. 카드는 30초마다 다시 그려지므로 상태를 들고 있어야 한다.
+  host.addEventListener("toggle", (e) => {
+    if (!e.target.classList?.contains("acct-perf-fold")) return;
+    acctPerfOpen = e.target.open;
+    try { localStorage.setItem("acctPerfOpen", acctPerfOpen ? "1" : "0"); } catch (err) { /* 저장 못 해도 동작은 같다 */ }
+  }, true);
   const tipOf = (t) => (t && t.closest ? t.closest(".acct-plot") : null)?.querySelector(".acct-tip");
   const show = (target, clientX) => {
     const tip = tipOf(target);
@@ -1614,12 +1621,15 @@ function renderSnapshotAccount() {
       <span><i class="sw ln"></i>누적</span>
     </div>`;
   const perf = net.length
-    ? `<section class="acct-perf">
-         <div class="acct-chips">
+    // 🔴2026-09-26 비평: 회고 차트(≈330px)가 주문 조작부와 시장 사이를 막아 시장이 y≈1150 에서야 시작했다.
+    //   기본은 **한 줄 요약**(왕복·승률·누적)만, 차트는 펼쳐서 본다. 펼침 상태는 기억한다(acctPerfOpen).
+    ? `<section class="acct-perf"><details class="acct-perf-fold"${acctPerfOpen ? " open" : ""}>
+         <summary class="acct-chips">
            ${chip(net.length, "왕복")}
            ${chip(`${Math.round(wins / net.length * 100)}%`, "승률")}
            ${chip(`<span class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</span>`, "누적")}
-         </div>
+           <span class="acct-perf-more" aria-hidden="true"></span>
+         </summary>
          <figure class="acct-plot">
            <div class="acct-plot-head">${legend}
              <span class="acct-span-wrap">
@@ -1639,7 +1649,7 @@ function renderSnapshotAccount() {
             ? `<p class="acct-perf-note"><span class="bad">최악 1건 ${fmtUsd(net[worstIdx])}</span>
                  · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
             : ""}
-       </section>`
+       </details></section>`
     : `<section class="acct-perf"><div class="acct-empty">${
         hiddenTrips > 0
           ? `최근 ${acctSpanDays}일에 닫힌 왕복이 없습니다 — 이 밖에 <b>${hiddenTrips}건</b> 있습니다.`
@@ -5096,7 +5106,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
         const r = document.createElementNS(NS, "rect");
         r.setAttribute("x", leftEdge - 1 - bl); r.setAttribute("y", mt + j * rowPx + 0.5);
         r.setAttribute("width", Math.max(1, bl)); r.setAttribute("height", Math.max(1, rowPx - 1));
-        r.setAttribute("fill", "#7dd3fc");
+        r.setAttribute("fill", "var(--book-depth)");
         r.setAttribute("opacity", (0.22 + 0.78 * rwPct(rw)).toFixed(2));
         // ── 접근행동(사용자 요청 2026-09-20) ────────────────────────────
         // 「가격이 다가왔을 때 이 가격대가 얇아졌나」. 자격 빈이 전체의 28%뿐이라
@@ -5118,7 +5128,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
           mk.setAttribute("cy", mt + j * rowPx + rowPx / 2);
           mk.setAttribute("r", Math.min(3, Math.max(1.8, rowPx / 4)));
           mk.setAttribute("fill", "none");
-          mk.setAttribute("stroke", "#7dd3fc");
+          mk.setAttribute("stroke", "var(--book-depth)");
           mk.setAttribute("stroke-width", "1.2");
           svg.appendChild(mk);
         }
@@ -7707,8 +7717,23 @@ async function tick() {
   setInterval(tick, POLL_MS);
   setInterval(refreshSupply1s, SUPPLY_1S_POLL_MS);   // 수급만 틱(0.5초)보다 빠르게 -- 자체 게이트가 있다
 })();
+// 2026-09-26 헤더 가격: 지금 가격 + 이번 5분봉 시가 대비. 틱마다가 아니라 시계와 같은 1초 박자로 충분하다.
+function renderTopPrice() {
+  const price = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
+  const candles = candleHistoryByAsset[activeSnapshotAsset];
+  const open = Array.isArray(candles) && candles.length ? Number(candles[candles.length - 1].open) : 0;
+  setT("topPrice", price > 0 ? `${(ASSET_CONFIG[activeSnapshotAsset]?.label || activeSnapshotAsset.toUpperCase())} ${fmtNum(price, 2)}` : "-");
+  const d = el("topPriceDelta");
+  if (!d) return;
+  // 표시 자리(0.01%)에서 반올림한 값으로 부호·색을 정한다 -- 아니면 «−0.00%» 가 빨갛게 뜬다.
+  const raw = price > 0 && open > 0 ? 100 * (price - open) / open : null;
+  const pct = raw === null ? null : Math.round(raw * 100) / 100;
+  const text = pct === null ? "" : `${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct).toFixed(2)}% · 5분`;
+  if (d.textContent !== text) d.textContent = text;
+  d.className = "top-price-delta" + (!pct ? "" : pct > 0 ? " good" : " bad");
+}
 setInterval(() => {
-  if (!isScrolling()) { setT("topClock", fmtNowClock()); }
+  if (!isScrolling()) { setT("topClock", fmtNowClock()); renderTopPrice(); }
 }, 1000);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
@@ -8071,7 +8096,8 @@ function manualEntryPlanHtml(data) {
 
   // 막는 것만 항상 보인다. 나머지 설명은 «자세히» 뒤로 접는다(사용자 요청 2026-09-13) --
   // 진입 화면은 «얼마를 넣나»와 «왜 못 넣나»만 보이면 되고, 근거는 펼쳐서 읽는 것이다.
-  if (plan.blocked) parts.push(`<div class="entry-note bad">🔴 ${escapeHtml(plan.blocked)}</div>`);
+  // 2026-09-26 막힘(상한 여유 없음·최소 수량)은 평상 상태라 흐린 문구다 -- 빨강은 실패에만.
+  if (plan.blocked) parts.push(`<div class="entry-note">진입 불가 — ${escapeHtml(plan.blocked)}</div>`);
   // 2026-09-25 청산맵 TP/SL(사용자 지시) -- 고정 3% 손절을 대신한다. **접지 않는다**: «어디서 닫히나»는
   //   행동을 바꾸는 값이다. 못 거는 경우도 반드시 말한다(옛 손절은 조용히 안 걸려 있었다).
   const br = plan.bracket;
@@ -8388,6 +8414,7 @@ const manualButtonsDisabled = (v) =>
 async function manualEntryPreview(side, kind = "entry") {
   const box = el("snapEntryResult");
   if (!box || manualOrderBusy) return;   // 진행 중인 주문 표시를 덮지 않는다
+  manualPreviewInFlight = true;
   manualButtonsDisabled(true);
   box.hidden = false;
   box.innerHTML = entryNote("확인 중…");
@@ -8402,6 +8429,7 @@ async function manualEntryPreview(side, kind = "entry") {
   } catch (err) {
     box.innerHTML = entryNote(`실패: ${err && err.message ? err.message : err}`, "bad");
   } finally {
+    manualPreviewInFlight = false;
     if (!manualOrderBusy) manualButtonsDisabled(false);
   }
 }
@@ -8445,8 +8473,10 @@ async function manualEntryRefreshSize() {
   //   말했지만 실제로는 "사이징 워커가 죽어 미리보기가 503"이었다(재부팅 후 실장애).
   //   **실패 시 이전 값을 남기는 UI 는 조용히 거짓말한다.**
   try {
-    const data = await manualEntryFetch("LONG");
+    // 2026-09-26 양쪽을 본다 -- 위험모델 상한은 방향마다 다르다(롱이 막혀도 숏은 열릴 수 있다).
+    const [data, dataShort] = await Promise.all([manualEntryFetch("LONG"), manualEntryFetch("SHORT")]);
     if (!data.ok) {
+      line.className = "entry-note bad";
       const why = data.detail === "worker_stale" ? "크기 워커 정지"
         : data.error === "sizing_unavailable" ? "크기 데이터 없음"
         : (data.error || "알 수 없음");
@@ -8469,9 +8499,21 @@ async function manualEntryRefreshSize() {
     //   riskLine 에도 같은 사실을 적지만 그쪽은 위험모델이 살아 있을 때만 그려진다 --
     //   워커가 죽으면 경고까지 같이 사라지므로 여기 한 곳은 무조건이어야 한다.
     const ovX = cap.override_x;
-    line.hidden = !plan.blocked && !ovX;
-    line.textContent = plan.blocked ? `진입 불가 — ${plan.blocked}`
-      : ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "";
+    // 🔴2026-09-26 비평 «상시 빨강은 경보가 아니라 벽지»: 상한에 걸린 건 **평상 상태**라 흐린 문구로 내리고,
+    //   막힌 쪽 버튼만 흐리게 한다. 빨강은 조회 실패·상한 꺼짐 같은 진짜 이상에만 남긴다.
+    const planShort = (dataShort && dataShort.ok && dataShort.plan) || {};
+    const blockedL = plan.blocked, blockedS = planShort.blocked;
+    el("snapEntryLong")?.setAttribute("aria-disabled", String(!!blockedL));
+    el("snapEntryShort")?.setAttribute("aria-disabled", String(!!blockedS));
+    const capNote = (plan.capped || planShort.capped)
+      ? ((plan.capped ? plan : planShort).notes || []).find((n) => n.startsWith("요청 ")) || "" : "";
+    const blockText = blockedL && blockedS
+      ? (blockedL === blockedS ? `진입 불가 — ${blockedL}` : `롱 진입 불가 — ${blockedL} · 숏 진입 불가 — ${blockedS}`)
+      : blockedL ? `롱 진입 불가 — ${blockedL}` : blockedS ? `숏 진입 불가 — ${blockedS}` : "";
+    line.hidden = !blockText && !ovX && !capNote;
+    line.className = "entry-note" + (ovX && !blockText ? " bad" : "");
+    line.textContent = blockText
+      || (ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "") || capNote;
     lastEntryCap = cap && cap.available ? cap : null;
     lastEntryPlan = plan && !plan.blocked ? plan : null;
     setEntryProjPreview(plan);
@@ -8479,6 +8521,7 @@ async function manualEntryRefreshSize() {
     renderLevGauge(plan);
   } catch (err) {
     line.hidden = false;
+    line.className = "entry-note bad";
     line.textContent = "크기 확인 실패 — 서버 응답 없음";
     setEntryProjPreview(null);
   }
@@ -8688,6 +8731,7 @@ function syncAllRangeFills(root) {
 // pointer 이벤트라 마우스·터치가 한 경로다. touch-action: none 은 styles.css 에서 준다
 // (없으면 모바일에서 누른 채 스크롤하다 발주된다).
 const HOLD_FIRE_MS = 400;
+let manualPreviewInFlight = false;
 let manualHoldFire = false;
 let manualHoldTimer = null;
 let manualHoldRaf = null;
@@ -8725,7 +8769,9 @@ function manualHoldStart(btn, side, kind) {
     manualHoldFire = false;
     // 미리보기가 막혔거나(blocked) 아직 안 왔으면 pending 이 없다 -- 그때는 안 나간다.
     if (manualEntryPending) manualEntrySubmit();
-    else {
+    // 🔴미리보기가 **왔는데** pending 이 없으면 막혔거나 게이트가 꺼진 것이다 -- 상자에 이미 사유가 있다.
+    //   «아직 안 왔습니다»로 덮으면 원인을 잘못 말한다(2026-09-26 비평).
+    else if (manualPreviewInFlight) {
       const box = el("snapEntryResult");
       if (box) { box.hidden = false; box.innerHTML = entryNote("미리보기가 아직 안 왔습니다 — 다시 누르세요.", "bad"); }
     }
@@ -8745,8 +8791,10 @@ function manualHoldStart(btn, side, kind) {
     if (touched) return;
     e.preventDefault(); manualHoldStart(btn, side, kind);
   });
-  btn.addEventListener("click", () => {
-    if (!touched || manualOrderBusy || btn.disabled) return;
+  // 2026-09-26 비평 P1: **키보드**(Enter/Space → detail 0 인 click)도 터치와 같은 «미리보기 → 확인» 경로다.
+  //   예전엔 키보드로 누르면 아무 반응도 없었다(길게 누르기는 포인터 전용). 마우스 click 은 여전히 무시한다.
+  btn.addEventListener("click", (e) => {
+    if (!(touched || e.detail === 0) || manualOrderBusy || btn.disabled) return;
     touched = false;
     if (kind === "exit") manualExitPreview(side); else manualEntryPreview(side, "entry");
   });
@@ -8910,6 +8958,13 @@ function renderOfab() {
 (() => {
   const grip = el("ofabGrip"), tgl = el("ofabToggle");
   if (!grip || !tgl) return;
+  // 🔴2026-09-26 비평: 버튼 폭은 배치 **뒤에** 바뀐다 -- 글자(«주문» 94px → 포지션 214px)와 웹폰트 로딩(195 → 206px).
+  //   첫 배치 폭으로 clamp 한 자리에서 오른쪽이 최대 112px 화면 밖으로 잘렸다. 크기 변화 자체를 따라가 다시 잡는다.
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => {
+      if (!el("ofab").hidden) ofabPlace(ofab.x ?? innerWidth, ofab.y ?? innerHeight, false);
+    }).observe(el("ofab").querySelector(".ofab-bar"));
+  }
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(OFAB_POS_KEY) || "null"); } catch (e) { saved = null; }
   // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.

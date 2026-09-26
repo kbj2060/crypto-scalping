@@ -64,6 +64,15 @@ def run(shot):
                 # 2026-09-25 접기 폐지: 포지션이 있어도 진입 칸은 열려 있고, 제목 줄을 눌러도 안 접힌다.
                 pg.evaluate("() => { manualExitSyncButtons(); document.getElementById('snapEntrySummary').click(); }")
                 ok(pg.evaluate("() => document.getElementById('snapEntryBox').open"), "진입 칸이 접혔다(상시 표시여야 한다)")
+                # 🔴2026-09-26 비평: 첫 배치는 «주문»(좁은 폭)으로 잡히고 뒤에 포지션 글자가 채워지며 폭이 2배가 됐는데
+                #   다시 안 잡아 오른쪽 112px 가 화면 밖이었다. 그 순서를 그대로 재현한다: 좁은 글자로 배치 → 글자 채움.
+                #   🔴두 단계를 **다른 프레임**에 둔다 -- 실제로도 배치와 글자 채움은 다른 프레임이고, 한 프레임 안에서
+                #   줄였다 늘리면 ResizeObserver 는 «크기 변화 없음»으로 본다(198→94→198).
+                pg.evaluate("() => { document.getElementById('ofabPos').textContent = '주문'; ofab.x = null; ofab.y = null;"
+                            " ofabPlace(innerWidth, innerHeight, false); }")
+                pg.wait_for_timeout(150)
+                pg.evaluate("() => renderOfab()")
+                pg.wait_for_timeout(150)
                 bar = pg.evaluate(BOX, "#ofab .ofab-bar")
                 ok(bar and 0 <= bar["x"] and bar["x"] + bar["w"] <= w and 0 <= bar["y"] and bar["y"] + bar["h"] <= h,
                    f"버튼이 화면 밖/없음 {bar}")

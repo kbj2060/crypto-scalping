@@ -76,6 +76,22 @@ def main() -> int:
             ok(len(submits) == 1, f"확인 탭 뒤 제출이 1건이 아니다 {submits}")
         ok(not errs, f"JS 오류(터치) {errs[:2]}")
         ctx.close()
+        # ── 키보드(2026-09-26 비평 P1): Enter 도 «미리보기 → 확인» 경로. 예전엔 아무 반응이 없었다 ──
+        submits, errs = [], []
+        ctx, pg = page(b, False, submits, errs)
+        pg.focus("#snapEntryLong")
+        pg.keyboard.press("Enter")
+        pg.wait_for_timeout(2500)
+        ok(not submits, f"키보드 Enter 한 번에 제출이 나갔다 {submits}")
+        kb_confirm = pg.evaluate("() => !document.getElementById('snapEntryConfirm').hidden")
+        ok(kb_confirm, "키보드 Enter 뒤 확인 버튼이 안 떴다(키보드 주문 불가)")
+        if kb_confirm:
+            pg.focus("#snapEntryConfirm")
+            pg.keyboard.press("Enter")
+            pg.wait_for_timeout(800)
+            ok(len(submits) == 1, f"키보드 확인 뒤 제출이 1건이 아니다 {submits}")
+        ok(not errs, f"JS 오류(키보드) {errs[:2]}")
+        ctx.close()
         # ── 마우스: 길게 누르기는 그대로 ────────────────────────────────────────
         submits, errs = [], []
         ctx, pg = page(b, False, submits, errs)
