@@ -633,13 +633,10 @@ from scripts.live_okx_trade_tape_collector_20260923 import (  # noqa: E402
     INSTRUMENTS_URL as OKX_INSTRUMENTS_URL)
 OKX_TAPE_DB_PATH = LIVE_DIR / "okx_trade_tape.duckdb"
 HL_POS_DB_PATH = LIVE_DIR / "hyperliquid_positions.duckdb"
-HL_LIQ_BUCKET = 5.0      # 청산가 묶음 폭($). ETH ~$2,600 에서 0.2%
 # 2026-09-26 SOL·XRP: 멀티코인 HL 포지션 수집기는 **Pi** 에서 돈다 -- Pi 크론이 3분마다 일관 스냅샷을 떠
-#   서버로 보낸다(replicate_trade_tape_20260922.sh, TT_VERIFY_TABLE=hl_positions). 묶음 폭은 ETH 와 같은 상대 폭(~0.19%).
+#   서버로 보낸다(replicate_trade_tape_20260922.sh, TT_VERIFY_TABLE=hl_positions).
 HL_POS_MULTI_DB_PATH = LIVE_DIR / "hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb"
-HL_LIQ_BY_ASSET = {"eth": (HL_POS_DB_PATH, HL_LIQ_BUCKET, 2),
-                   "sol": (HL_POS_MULTI_DB_PATH, 0.2, 2),
-                   "xrp": (HL_POS_MULTI_DB_PATH, 0.003, 4)}
+HL_LIQ_BY_ASSET = {"eth": HL_POS_DB_PATH, "sol": HL_POS_MULTI_DB_PATH, "xrp": HL_POS_MULTI_DB_PATH}
 OKX_CTX_DB_PATH = LIVE_DIR / "okx_context.duckdb"
 # OKX 청산은 ETH 맥락 수집기 하나가 전 종목(instType=SWAP)을 받아 여기에 쌓는다 -- 코인별 맥락 DB 에는 0건(09-27 실측).
 OKX_LIQ_DB_PATH = OKX_CTX_DB_PATH
@@ -659,32 +656,6 @@ def _read_only_rows(path: Path, sql: str, params: list) -> list[tuple]:
                 raise
             time.sleep(0.2)
     return []
-
-
-def hl_whale_liq(db: Path = HL_POS_DB_PATH, bucket: float = HL_LIQ_BUCKET, coin: str = "ETH", dp: int = 2) -> dict:
-    """하이퍼리퀴드 고래 **실제** 청산가 뭉치 (2026-09-24, 사용자 지시).
-
-    `live_hyperliquid_positions_collector_20260924.py` 의 최신 완결 바퀴(hl_cycles 행은 포지션 행과 한
-    트랜잭션이라 있으면 완결이다)에서 ETH 포지션의 청산가를 bucket 달러로 묶는다.
-    clusters: [[묶음 가격, 롱 ETH, 숏 ETH, 주소 수], ...] -- 롱 = 아래에서 청산(강제 매도),
-    숏 = 위에서 청산(강제 매수). 🔴대상은 «48h 거래액 상위 300주소»라 오래 들고만 있는 고래는 빠진다."""
-    last = _read_only_rows(db, "SELECT max(ts_ms) FROM hl_cycles WHERE n_ok > 0", [])
-    t = int(last[0][0] or 0) if last else 0
-    if not t:
-        return {"ok": False}
-    agg: dict[int, list[float]] = {}
-    n_pos = 0
-    for szi, liq in _read_only_rows(db, "SELECT szi, liq_px FROM hl_positions WHERE ts_ms >= ? AND coin = ?", [t, coin]):
-        n_pos += 1
-        if not liq or liq <= 0:
-            continue
-        k = int(round(float(liq) / bucket))
-        c = agg.setdefault(k, [0.0, 0.0, 0])
-        c[0 if szi > 0 else 1] += abs(float(szi))
-        c[2] += 1
-    return {"ok": True, "ts_ms": t, "age_s": round(time.time() - t / 1000, 1), "n_positions": n_pos,
-            "bucket": bucket, "clusters": [[round(k * bucket, dp), round(v[0], 1), round(v[1], 1), v[2]]
-                                           for k, v in sorted(agg.items())]}
 
 
 def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH, coin: str = "ETH") -> list[tuple[int, float, bool, str]]:
@@ -4648,7 +4619,7 @@ def make_app() -> web.Application:
         #   merge_hl_liq 가 어차피 버린다(없는 봉엔 안 더한다).
         since = int((time.time() - FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS) * 1000) if bars else 0
         try:
-            db = HL_LIQ_BY_ASSET[asset][0]
+            db = HL_LIQ_BY_ASSET[asset]
             ev = await swr_cached(f"hl_whale_liq_events:{asset}", 30.0,
                                   lambda: asyncio.to_thread(hl_whale_liq_events, since, db, asset.upper()))
         except Exception:  # noqa: BLE001 -- HL 이 없어도 원은 그대로 그린다
@@ -5942,20 +5913,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/supply-1s", api_supply_1s)
     app.router.add_get("/api/oi-5m", api_oi_5m)
 
-    async def api_hl_whale_liq(request: web.Request) -> web.Response:
-        asset = str(request.query.get("asset") or "eth").lower()
-        cfg = HL_LIQ_BY_ASSET.get(asset)
-        if cfg is None:
-            return web.json_response({"ok": False, "error": "asset_off"}, headers=NOCACHE)
-        db, bucket, dp = cfg
-        try:
-            body = await swr_cached(f"hl_whale_liq:{asset}", 30.0,
-                                    lambda: asyncio.to_thread(hl_whale_liq, db, bucket, asset.upper(), dp))
-        except Exception as exc:  # noqa: BLE001 -- 수집기가 없으면 화면은 이 레벨만 안 그린다
-            body = {"ok": False, "error": type(exc).__name__}
-        return web.json_response(body, headers=NOCACHE)
-
-    app.router.add_get("/api/hl-whale-liq", api_hl_whale_liq)
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
     app.router.add_get("/api/gex", api_gex)
     app.router.add_get("/api/flow/heatmap", api_flow_heatmap)

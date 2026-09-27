@@ -14,7 +14,7 @@ def cut(a, b):
 chunk = cut("    async def api_oi_5m(", "    async def api_supply_profile(") \
     + cut("    async def api_footprint(", "    def supply_1s_payload(") \
     + cut("    async def api_supply_profile(", "    # 🔴이 응답은 **페이지 로드를 막는다**") \
-    + cut("    async def api_liquidation_5m_history(", "    async def api_position_sizing(")
+    + cut("    async def api_liquidation_5m_history(", "    async def api_breakout_detector(")
 cached = [[600, 10.0, 1000.0, 50, 0], [900, -4.0, 996.0, 50, 0], [1200, 2.0, 998.0, 50, 0]]
 async def swr_cached(key, ttl, produce, **kw): return cached
 ns = {"web": web, "asyncio": asyncio, "swr_cached": swr_cached, "oi_1s": {}, "OI_5M_WINDOW_BARS": 48,
@@ -34,7 +34,8 @@ ns = {"web": web, "asyncio": asyncio, "swr_cached": swr_cached, "oi_1s": {}, "OI
 # 2026-09-26 코인별 흐름 엔진 -- 핸들러는 `?asset=` 로 엔진을 고른다. ETH 엔진은 위 값들을 그대로 묶는다.
 def _flow(asset, symbol, bucket, dp, **state):
     return SimpleNamespace(spec=SimpleNamespace(asset=asset, symbol=symbol, bucket=bucket, price_dp=dp,
-                                                okx_inst=f"{asset.upper()}-USDT-SWAP"), **state)
+                                                okx_inst=f"{asset.upper()}-USDT-SWAP"),
+                           retail_max=10_000.0, whale_min=100_000.0, **state)   # 코인별 고래 기준(09-26)
 flows = {"eth": _flow("eth", "ETHUSDT", 0.5, 2, footprint_state=ns["footprint_state"], oi_1s=ns["oi_1s"],
                       okx_oi_5m=ns["okx_oi_5m"], okx_fp=ns["okx_fp"], okx_bars=ns["okx_bars"],
                       okx_liq_events=ns["okx_liq_events"]),
@@ -52,7 +53,7 @@ ns.update(flows=flows, flow_for=flow_for, SimpleNamespace=SimpleNamespace,
           # HL 고래 합산(09-24)은 이 시험 대상이 아니다 -- 있는 그대로 통과시킨다
           time=__import__("time"), FOOTPRINT_KEEP_BARS=288, hl_whale_liq_events=None,
           merge_hl_liq=lambda bars, ev, bar_s: bars,
-          HL_LIQ_BY_ASSET={"eth": (None, 5.0, 2)})   # 코인별 HL DB 표(09-26) -- 이 시험은 ETH 만 본다
+          HL_LIQ_BY_ASSET={"eth": None})   # 코인별 HL DB 표(09-26) -- 이 시험은 ETH 만 본다
 exec(compile(chunk, "okxsum", "exec"), ns)
 liq_cached = {"warmed_up": True, "bars": [
     {"ts": datetime.fromtimestamp(t, timezone.utc).isoformat(), "long_usd": 10.0, "short_usd": 5.0,

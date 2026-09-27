@@ -58,23 +58,7 @@ def test_coin_specs_are_usdt_data_markets():
         tape = srv.TAPE_BUCKETS[sp.symbol.lower()]
         assert abs(sp.bucket / tape - round(sp.bucket / tape)) < 1e-9, "풋프린트 칸이 테이프 칸의 정수배가 아니다"
     assert srv.FLOW_SPECS["eth"].bucket == srv.FOOTPRINT_BUCKET and srv.FLOW_SPECS["eth"].oi_poll_s == srv.OI_1S_POLL_SECONDS
-
-
-def test_hl_whale_liq_filters_coin_and_keeps_xrp_decimals(tmp_path):
-    """HL 멀티코인 DB 에서 **그 코인만** 묶는다(ETH 가 XRP 레벨에 섞이면 안 된다) · XRP 는 4자리."""
-    db = tmp_path / "hl.duckdb"
-    con = duckdb.connect(str(db))
-    con.execute("CREATE TABLE hl_cycles (ts_ms BIGINT, n_ok INTEGER)")
-    con.execute("CREATE TABLE hl_positions (ts_ms BIGINT, coin VARCHAR, szi DOUBLE, liq_px DOUBLE)")
-    con.execute("INSERT INTO hl_cycles VALUES (1000, 5)")
-    con.executemany("INSERT INTO hl_positions VALUES (?,?,?,?)", [
-        (1000, "XRP", 50000.0, 1.4301), (1000, "XRP", 20000.0, 1.4302), (1000, "XRP", -30000.0, 1.6519),
-        (1000, "ETH", 10.0, 2500.0)])
-    con.close()
-    r = srv.hl_whale_liq(db, 0.003, "XRP", 4)
-    assert r["ok"] and r["n_positions"] == 3, r
-    assert r["clusters"] == [[1.431, 70000.0, 0.0, 2], [1.653, 0.0, 30000.0, 1]], r["clusters"]
-    assert srv.HL_LIQ_BY_ASSET["xrp"][0] == srv.HL_LIQ_BY_ASSET["sol"][0] != srv.HL_LIQ_BY_ASSET["eth"][0]
+    assert srv.HL_LIQ_BY_ASSET["xrp"] == srv.HL_LIQ_BY_ASSET["sol"] != srv.HL_LIQ_BY_ASSET["eth"]   # HL 청산(원) 원천
 
 
 def test_tape_seconds_matches_live_1s_cell_order(tmp_path):
