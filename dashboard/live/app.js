@@ -1,7 +1,6 @@
 const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
-const API_POSITION_SIZING_URL = "/api/position-sizing";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
 const API_REGIME_BTC_URL = "/api/regime-btc";
@@ -65,47 +64,6 @@ const setB = (id, cls) => {
 //   innerHTML 재대입은 같은 문자열이어도 자식을 전부 버리고 다시 파싱한다.
 const setH = (id, html) => { const target = el(id); if (target && target.innerHTML !== html) target.innerHTML = html; };
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
-
-// Snapshot tab: same 5 model indicators (bot-state ones only -- see the "own fetch cycle" model
-// indicators like liq_pressure, which carry their own server-provided
-// tone_history instead), but as a tone-per-bar strip (matching the evidence signals' activity-strip
-// graph) instead of a continuous sparkline. Stores the ALREADY-COMPUTED tone string
-// ("good"/"bad"/"neutral") from each render() pass rather than re-deriving it from raw values
-// later -- some tones (tail risk) depend on more than one raw field, so capturing the tone at
-// computation time is the only way to stay exactly consistent with what the live cards show,
-// instead of an approximation that ignores the cross-field dependency.
-// 2026-09-21 whale/liq_cascade/retail_flow 칩 제거 -- 남은 띠는 변동성 수준 하나다.
-const toneHistory = { vol_level: [] };
-// Parallel to toneHistory, same keys/push/shift cadence -- these 5 indicators have no server-side
-// timestamp per reading (client-accumulated tally, see comment above), so the only honest per-bar
-// time is "when this browser tab actually pushed the reading", recorded here at push time.
-const toneHistoryTimes = { vol_level: [] };
-// 🔴이 띠는 «48칸 x 5분 = 4시간»이라고 적혀 있는데(MICRO_HISTORY_MAX 주석, 서버의
-//   MODEL_INDICATOR_SAMPLE_SECONDS=300), 라이브 경로는 **상태 푸시마다** 한 칸을 밀어 넣고
-//   있었다. SSE 는 dashboard_state.json 이 바뀔 때마다 오므로(실측 수 초) 48칸이 몇 분 만에
-//   다 차고, 그 과정에서 seedModelIndicatorHistory() 가 서버에서 받아 온 4시간치가 통째로
-//   밀려난다 -- 서버가 그 이력을 디스크에 남기는 이유(재기동해도 띠가 안 사라지게)가 매번
-//   무효가 됐다. 라이브 푸시도 같은 5분 주기로 맞춘다.
-// `at`(ISO)은 **서버 이력 씨앗** 전용이다: 그 샘플이 실제로 찍힌 시각을 그대로 적고(안 그러면
-//   48칸이 전부 «지금»이 되어 축이 거짓말을 한다) 주기 제한도 걸지 않는다.
-const TONE_PUSH_MIN_MS = 300000;   // = server.py MODEL_INDICATOR_SAMPLE_SECONDS
-const toneHistoryLastAt = {};
-function pushToneHistory(key, tone, at) {
-  const arr = toneHistory[key];
-  if (!arr) return;
-  const now = Date.now();
-  if (at) {
-    toneHistoryLastAt[key] = Date.parse(at) || now;   // 다음 라이브 칸이 씨앗과 같은 격자에 온다
-  } else {
-    if (now - (toneHistoryLastAt[key] || 0) < TONE_PUSH_MIN_MS) return;
-    toneHistoryLastAt[key] = now;
-  }
-  arr.push(tone || "neutral");
-  if (arr.length > MICRO_HISTORY_MAX) arr.shift();
-  const times = toneHistoryTimes[key];
-  times.push(at || new Date(now).toISOString());
-  if (times.length > MICRO_HISTORY_MAX) times.shift();
-}
 
 let latestMainState = null;
 let latestCompactState = null;
@@ -400,11 +358,6 @@ const BREAKOUT_DETECTOR_POLL_MS = 60000;
 let latestLiquidation5m = null;
 let latestLiquidation5mHist = [];
 let liquidation5mLastFetchAt = 0;
-// 베이시스 청산압박 model indicator (replaces 독성/toxicity, 2026-08-27) -- own fetch cycle, same
-// dashboard-side-computed category as latestVRebound above (scripts/live_spot_perp_basis_signal_
-// 20260827.py). RISK GAUGE, not a price-direction claim -- see MODEL_INDICATOR_DETAIL.liq_pressure.
-let latestVolLevel = null;
-let volLevelLastFetchAt = 0;
 // Sudden-liquidation alert (2026-08-27). 2026-09-24 1초 폴링을 걷어냈다 -- 받는 쪽 게이지
 // (#liqVolumeGauge)가 HTML 에 없어 분당 55건을 받아 버리고 있었다. 게이지를 되살리면 폴링도 되살린다.
 let latestLiqBurstState = null;
@@ -469,7 +422,6 @@ let scrollIdleTimer = 0;
 let dashboardEvents = null;
 const OPS_POLL_MS = 30000;
 const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-row-per-minute source
-const VOL_LEVEL_POLL_MS = 60000;          // 사이징 워커 주기 300초 — 1분 폴링이면 충분하다
 // 2026-09-16 300초 -> 60초. 서버 캐시를 60초로 줄였으므로(입력이 1시간봉이라 그 아래로는
 // 의미가 없다) 클라가 5분마다 물으면 **새 시간봉이 최대 5분 늦게** 보인다. 캐시와 같은 주기로.
 // 🔴2026-09-22 60초 -> 30초. «캐시와 같은 주기»는 최선이 아니라 **최악**이다 -- 둘이 동기화돼
@@ -592,7 +544,6 @@ async function setActiveSnapshotAsset(asset) {
   // Clear the 4 wired signals' cached readings + their poll-interval gates immediately -- without
   // this, the panels would keep showing the PREVIOUS coin's numbers (mislabeled as the new one)
   // until each signal's own poll interval next elapses (up to 5min for the slowest).
-  latestVolLevel = null; volLevelLastFetchAt = 0;
   // 2026-09-22 ETH 전용 카드에 «ETH 전용» 배지를 켠다(styles.css 의 body.not-eth 규칙).
   document.body.classList.toggle("not-eth", asset !== "eth");
   // ETH 전용 그림들의 캐시도 비운다 -- 안 비우면 ETH 로 **돌아올 때** 옛 그림이 한 프레임 번쩍인다.
@@ -649,7 +600,6 @@ async function setActiveSnapshotAsset(asset) {
 
   await Promise.all([
     settleScope("indicators", [
-      refreshVolLevel(),
       refreshCoinIndicators(),
     ]),
     settleScope("liqmap", [
@@ -2325,17 +2275,6 @@ function toggleEntryDetail(btn) {
 // indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
-  // 2026-09-14 변동성 예측. ⚠️키는 subText 문자열이다(규약 §5-1).
-  // 🔴2026-09-15 정정: 이 칩은 **표시 전용**이다. 권고 수량을 실제로 정하는 건 MAE 분위 모델
-  //   (`live_eth_mae_quantile_model_20260913`, 09-13 교체)이고 이 모델(`pred_vol`)은 그 모델이
-  //   없을 때의 폴백(`vol_equivalent_qty`)으로 밀렸다. 칩 문구가 «수량을 정한다»고 읽히면 안 된다.
-  vol_level: {
-    "안정": "앞으로 4시간 예상 변동폭이 **최근 30일 평소 이하**입니다(그 분포의 하위 80%, 평소의 1.39배 미만). 조용하다는 **눈금**이지 주문 수량이 아닙니다 — 권고 수량은 MAE 분위 모델이 정합니다(이 칩은 그 모델이 없을 때만 대신 씁니다).",
-    "주의": "앞으로 4시간 예상 변동폭이 **최근 30일 평소보다 뚜렷이 큽니다**(평소의 1.39~1.88배, 상위 20~5%). 같은 위험을 지려면 수량을 줄여야 하는 국면이라는 **눈금**입니다 — 실제 감축은 **MAE 분위 모델**이 합니다(E|r| 배수는 2026-09-15 켜기 전에 철회됐습니다 — 순차 검정 후반 36건 +0.73bp·Δ>0 47.2%로 동전이고, 상위 10건을 빼면 부호가 뒤집혔습니다).",
-    "위험": "앞으로 4시간 예상 변동폭이 **최근 30일 평소의 1.9배 이상**입니다(상위 5%). 방향 경고가 아닙니다 — 이 모델은 방향을 예측하지 않습니다.",
-    "웜업": "사이징 워커가 아직 첫 예측을 내지 않았습니다.",
-    "데이터 없음": "사이징 워커 상태파일에서 예측값을 읽지 못했습니다.",
-  },
   // 2026-09-09 극점 탐지기. ⚠️키는 subText 문자열이다(규약 §5-1).
   breakout_prewarn: {
     "전환 예고": "앞으로 30분 안에 전환이 시작될 확률이 상위 10%에 들었어요 — 새 진입을 미룰 구간입니다.",
@@ -2355,41 +2294,6 @@ const MODEL_INDICATOR_MEANING = {
 };
 
 const MODEL_INDICATOR_DETAIL = {
-  vol_level:
-    "**앞으로 4시간(48봉) 실현변동성**을 예측합니다. 방향도 수익도 예측하지 않습니다.\n\n"
-    + "화면은 두 숫자를 같이 냅니다 — **배수**(예측 ÷ 직전 4시간)와 **확대 확률**(앞 4시간이 "
-    + "직전 4시간의 1.3배 이상일 확률). 그 아래 «평소 대비 N배(등급)»는 다른 축입니다"
-    + "(최근 30일 중앙값 대비). 수량 배수는 또 다른 기준(학습창 고정)입니다 — 셋 다 분모가 다릅니다.\n\n"
-    + "모델은 HGB 8시드 앙상블, 입력은 공개 kline 22열입니다. 학습은 2025-08-31 까지이고 그 뒤는 표본외입니다.\n\n"
-    + "⭐**2026-09-21 정정 — 이 카드는 그전까지 「곧 커진다는 못 맞힙니다(AUC .46~.52 = 동전)」라고 "
-    + "적고 있었는데 그건 채점 오류였습니다.** 확장은 «비율» 질문인데 모델의 «수준»으로 채점했습니다"
-    + "(수준은 스케일을 갖고 비율은 안 갖습니다). 올바른 점수인 예측÷직전으로 재면 표본외 109,267행에서 "
-    + "**AUC 0.8237**, rv48 십분위를 통제해도 **0.7865**(10/10 셀 0.69 이상 · 분기 5/5 0.729~0.791 · "
-    + "일블록 부트스트랩 CI [0.754, 0.822]로 0.5 배제). 축소 쪽도 대칭입니다(0.8015).\n\n"
-    + "크기도 편향이 없습니다: log(실제배수) = −0.0091 + **1.0365**×log(예측배수). 예측 십분위별 "
-    + "실제 중앙값이 0.55 → 1.78 로 단조이고, P(1.3배 이상)이 2.3% → 82.5% 로 갈립니다(기저 26.8%).\n\n"
-    + "🔴**점으로 읽지 마세요.** 잔차 SD 0.34라 예측 1.5배일 때 실제는 68% 확률로 1.07~2.12배입니다. "
-    + "불확실성은 27%만 줄어듭니다.\n\n"
-    + "변동성은 4시간 안에 실제로 많이 움직입니다 — 1.3배 이상 변하는 경우가 56.5%(확대 26.8% + "
-    + "축소 29.7%), 2배 이상이 13.5%입니다. 평평한 대상이 아닙니다.\n\n"
-    + "쓰는 자리는 **수량**(배포 공식 = 기준수량 × 기준예측 ÷ 현재예측)과 **손절폭**입니다. "
-    + "«진입할지 말지»의 하드 차단은 이 저장소에서 이미 졌습니다(E|r| 게이트, 실계좌 72왕복).\n\n"
-    + "등급 경계는 평소 대비 배수입니다 — 1.39배 미만 안정, 1.88배 이상 위험(기준 = 최근 30일 중앙값).\n\n"
-    + "⭐**2026-09-25 추가 — 30분 줄.** 「다음 30분 고저폭 ~45bp (평소의 1.40배 · 큰 쪽 52%)」는 "
-    + "여기 4시간 모델과 **별개**입니다. 입력은 직전 30분 고저폭 하나이고, 그건 «상황 읽기 30분» 카드가 "
-    + "이미 쓰는 range_bp 와 같은 값입니다 — 새 원천이 없습니다.\n\n"
-    + "왜 여기 붙었나: 상황 카드는 «어느 쪽»을 묻는데 그 축이 죽어 있었습니다. 채점축을 등거리 배리어로 "
-    + "통일하니 엔진이 무모델 «항상 되돌림»과 **소수점까지 같았습니다**(추세 49.3% vs 49.3%, 89블록). "
-    + "같은 입력으로 «얼마나»를 물으면 완전히 다릅니다 — 4.7년 표본외에서 방향 천장이 **+3.5pp**인데 "
-    + "크기는 **+43pp**였고, 방향 쪽은 158피쳐 로지스틱이 최선 단일피쳐를 못 이겼습니다(.5144 < .5196). "
-    + "축이 같은 카드를 둘 두지 않으려고 새 카드 대신 이 카드에 넣었습니다.\n\n"
-    + "«평소»는 최근 24시간(288봉) 중앙값, «큰 쪽»은 그 창의 상위 3분위입니다. 🔴임계가 **후행 분위**라 "
-    + "조용한 주에도 시끄러운 주에도 기저율이 34% 근처에서 스스로 안정됩니다 — 전역 분위로 박으면 "
-    + "조용한 주엔 0%, 시끄러운 주엔 100%가 되어 화면이 죽습니다.\n\n"
-    + "표본외 AUC 0.7182 · 보정기울기 0.982 · 말한 33.7% / 실제 34.2%. 배수 5분위별로 실제 «큰 쪽» 비율이 "
-    + "15.2 → 22.3 → 29.5 → 39.9 → 64.1%로 단조입니다.\n\n"
-    + "🔴**실제로 쓰이는 값은 일 안 AUC 0.6917입니다.** 전역 0.7182의 상당 부분은 «이번 달이 조용한가»라 "
-    + "오늘 안에서 고르는 이 화면에는 안 걸립니다. 3.6일 라이브 장부로 재면 0.6754로, 일 안 값과 맞습니다.",
   breakout_detector:
     "변동성이 추세로 넘어가는 **시점**만 잡습니다. 2026-09-11 압축 게이트를 제거해 «횡보를 거친» "
     + "전환뿐 아니라 **모든** 전환을 봅니다 -- 실제로 전환의 77%는 압축을 거치지 않고 일어납니다. "
@@ -2481,85 +2385,6 @@ function ethOnlyIndicator(item) {
 // 전부 회색이다. 스트립 SVG는 이미 flat 을 neutral 과 같은 회색으로 칠하고 있었으니(toneStripSvg 의
 // fill 폴백) 배지·행·칩만 법칙에서 벗어나 있었다. 여기서 한 번에 정규화한다.
 function toneClass(tone) { return tone === "flat" ? "neutral" : (tone || "neutral"); }
-
-// 2026-09-14: 등급(안정/주의/위험)만으로는 «얼마나»를 못 본다. 실시간 배수를 툴팁에 싣는다 --
-// 상태 열은 92px nowrap 이라 문장을 못 넣는다(규약 §3).
-function volLevelTitle(v) {
-  // 🔴2026-09-16 정정: "이미 수량 공식에 쓰이고 있다"는 **틀린 문장**이었다. 요청 경로는 MAE
-  //   위험 모델로 수량을 내고(rec_src="risk_model"), 이 변동성 공식은 그게 없을 때의 폴백이다
-  //   (rec_src="vol_equivalent"). 화면이 코드보다 강하게 말하고 있었다.
-  const base = "봇 내부 상태가 아니라 배포된 사이징 변동성 모델의 예측 -- 권고 수량은 MAE 위험 모델이 내고, 이 변동성 공식(수량 = 기준수량 x 기준예측/현재예측)은 그 모델이 없을 때의 폴백이다.";
-  if (!v || !v.available || !Number.isFinite(v.ratio)) return base;
-  // 2026-09-15: 등급의 「평소」는 **최근 30일**이고 수량 배수의 기준은 **학습창 고정**이다.
-  // 두 숫자가 다른 기준을 쓰므로 말도 다르게 한다(고정으로 떨어졌으면 그대로 말한다).
-  const norm = v.ref_source === "recent" ? `최근 ${v.ref_days || 30}일` : "학습창(기준 갱신 실패)";
-  return `${base} 지금 예상 변동폭은 ${norm} 평소의 ${v.ratio.toFixed(2)}배, 같은 위험 기준 수량 배수는 ${v.qty_mult.toFixed(2)}배(이쪽 기준은 학습창 고정).`;
-}
-
-// 2026-09-21 ⭐**배수 + 확률**. 화면이 오래 «수준»만 띄우면서 이 모델의 가장 좋은 출력을 버리고
-// 있었다 -- 「확장은 못 맞힌다(AUC .46~.52)」는 **채점 오류**였다(비율 질문을 수준으로 채점).
-// pred/rv48 로 재면 OOS AUC 0.8237, rv48 십분위 통제 후 0.7865(10/10 셀 · 분기 5/5 ·
-// 일블록 CI [0.754,0.822]). 보정 기울기 1.0365 라 크기도 편향이 없다.
-// 🔴점으로 읽히면 안 되므로 **배수와 확률을 항상 같이** 낸다(예측 1.5배의 실제 68% 구간이
-// [1.07,2.12]배다). 그래서 subText 가 "1.36배 · 확대 56%" 형태다.
-// 2026-09-25 ⭐**30분 줄**. 상황 카드가 «어느 쪽»을 묻다가 통일축에서 «항상 되돌림»과 같은 값이
-// 됐다(49.3% vs 49.3%). 같은 입력으로 «얼마나»를 물으면 다르다 -- 4.7년 OOS 방향 +3.5pp vs 크기 +43pp.
-// 사용자 결정으로 새 카드를 만들지 않고 이 카드에 붙인다(축이 같은 카드 둘은 화면 규약에 어긋난다).
-// 🔴subText 는 건드리지 않는다 -- MODEL_INDICATOR_MEANING 이 그 문자열로 조회된다(규약 §5-1).
-//   30분 값은 `liveText`(지금 숫자 자리)와 툴팁으로 간다.
-function amp30Text(v) {
-  const a = v && v.amp30;
-  if (!a || !Number.isFinite(a.pred_bp) || !Number.isFinite(a.mult)) return "";
-  return `다음 30분 고저폭 ~${a.pred_bp.toFixed(0)}bp (평소의 ${a.mult.toFixed(2)}배`
-    + `${Number.isFinite(a.p_big) ? ` · 큰 쪽 ${Math.round(a.p_big * 100)}%` : ""})`;
-}
-
-function amp30Title(v) {
-  const a = v && v.amp30;
-  if (!a || !Number.isFinite(a.pred_bp)) return "";
-  return `«다음 30분 고저폭» 예보. 입력은 직전 30분 고저폭 ${a.range_bp}bp 하나이고`
-    + ` 상황 카드의 range_bp 와 같은 값이다(새 원천 없음).`
-    + ` «평소» = 최근 24시간(${a.look_bars}봉) 중앙 ${a.base_bp}bp, «큰 쪽» = 그 창의 상위 3분위 ${a.thr_bp}bp 이상.`
-    + ` 🔴임계가 후행 분위라 조용한 주에도 시끄러운 주에도 기저율이 34% 근처에서 안정된다.`
-    + ` TRAIN(<2025-09) 적합 · OOS AUC 0.7182 · 보정기울기 0.982 · 말한 33.7% / 실제 34.2%.`
-    + ` 🔴실제로 쓰이는 값은 **일 안 AUC 0.6917** 이다 -- 전역값의 상당 부분은 «이번 달이 조용한가»라`
-    + ` 오늘 안에서 고르는 이 화면에는 안 걸린다.`
-    + ` ⚠️방향은 여기 없다: 같은 입력으로 방향을 물으면 4.7년 OOS 천장이 +3.5pp 였고 158피쳐`
-    + ` 로지스틱이 최선 단일피쳐를 못 이겼다.`;
-}
-
-function volLevelIndicatorItem() {
-  const v = latestVolLevel;
-  const amp = amp30Text(v);
-  const base = {
-    key: "vol_level", label: "변동성 수준 (4시간)",
-    history: toneHistory.vol_level, times: toneHistoryTimes.vol_level,
-    derivedTag: "= 사이징 모델",
-    derivedTitle: [volLevelTitle(v), amp30Title(v)].filter(Boolean).join(" "),
-  };
-  // 사이징 워커가 죽어도 30분 줄은 캔들만 있으면 산다 -- 그때도 숫자를 보여준다.
-  if (!v || !v.available) {
-    return { ...base, tone: "neutral", subText: (v && v.grade) || "웜업", liveText: amp || undefined };
-  }
-  const hasExp = Number.isFinite(v.mult) && Number.isFinite(v.p_expand);
-  if (!hasExp) {
-    return { ...base, tone: v.tone || "neutral", subText: v.grade || "웜업", liveText: amp || undefined };
-  }
-  return {
-    ...base,
-    tone: v.tone || "neutral",
-    // 등급(평소 대비)보다 **확장 읽기**를 앞에 둔다 -- 그쪽이 통제 검정을 통과한 축이다.
-    subText: `${v.mult.toFixed(2)}배 · 확대 ${Math.round(v.p_expand * 100)}%`,
-    liveText: [amp, `평소 대비 ${v.ratio.toFixed(2)}배 (${v.grade})`,
-               `수량 배수 ${v.qty_mult.toFixed(2)}배`].filter(Boolean).join(" · "),
-    probaSlot: true, proba: v.p_expand, meterNote: "확대 확률",
-    meterNoteTitle: `«앞으로 4시간 실현변동성이 직전 4시간의 ${v.expand_k || 1.3}배 이상일 확률».`
-      + ` 배수(예측÷직전) ${v.mult.toFixed(2)} 를 TRAIN 적합 로지스틱으로 옮긴 값이다`
-      + ` -- OOS 109,267행 AUC 0.8237 · Brier 0.1388(상수 0.1961) · 십분위 보정오차 ≤4pp.`
-      + ` 🔴점이 아니라 중심값이다: 예측 1.5배일 때 실제는 68% 확률로 1.07~2.12배다.`
-      + ` rv48 십분위를 통제해도 AUC 0.7865(10/10 셀 0.69+ · 분기 5/5 · 일블록 CI [0.754,0.822]).`,
-  };
-}
 
 function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { forceMeter = false } = {}) {
   // 2026-08-25: perf pass -- render() drives this on every SSE push (~2.5s), but the underlying
@@ -2758,37 +2583,16 @@ async function refreshSessionAlerts() {
     const res = await fetch(API_SESSION_ALERTS_URL, { cache: "no-cache" });
     if (!res.ok) throw new Error(`session alerts ${res.status}`);
     const data = await res.json();
-    renderSessionVolatilityAlert(data.session_volatility_alert);
     renderMacroEventAlert(data.macro_event_alert);
   } catch (error) {
     console.error("Session alerts fetch error:", error);
-    const alertBadge = el("sessionVolAlertBadge");
-    if (alertBadge) alertBadge.style.display = "none";
     const macroAlertBadge = el("macroEventAlertBadge");
     if (macroAlertBadge) macroAlertBadge.style.display = "none";
   }
 }
 
-// Session-open volatility risk alert (2026-08-26), centered on the Snapshot tab's top line (same
-// row as the EVIDENCE LIVE badge, just below the header clock) -- see scripts/live_session_
-// volatility_alert_20260826.py's docstring for the empirical windows (NYSE +-60min real effect;
-// LSE/JPX 0..+30min only, marginal effect). Fixed label text by design (user request) -- the
-// per-market/minutes detail goes in the title tooltip only, not the visible badge.
-function renderSessionVolatilityAlert(alertPayload) {
-  const badge = el("sessionVolAlertBadge");
-  if (!badge) return;
-  const active = alertPayload && Array.isArray(alertPayload.active) ? alertPayload.active : [];
-  if (!active.length) { badge.style.display = "none"; return; }
-  const a = active[0];
-  const when = a.minutes_from_open < 0
-    ? `개장 ${Math.round(Math.abs(a.minutes_from_open))}분 전`
-    : a.minutes_from_open === 0 ? "개장 순간" : `개장 ${Math.round(a.minutes_from_open)}분 후`;
-  badge.style.display = "";
-  badge.title = `${a.label} ${when} — 실측(2026-08-26): 미국장 ±60분은 ETH 변동성 평소 대비 1.5~2.3배, 유럽/일본 개장 후 30분은 효과가 약함(참고용, 매매룰 아님)`;
-}
-
 // Macro-event (CPI/NFP/GDP/PCE/내구재/FOMC/연준 의장 발언) release-time alert (2026-08-26 follow-up) -- same
-// fixed-text/tooltip-detail pattern as renderSessionVolatilityAlert() above, +-30min window (see
+// fixed-text/tooltip-detail pattern as the (2026-09-27 제거) session-open alert, +-30min window (see
 // scripts/live_macro_calendar_20260826.py::MACRO_EVENT_ALERT_WINDOW_MIN). Separate badge, separate
 // question ("is a scheduled data release imminent" vs "is it near a session open") -- both can be
 // active at once, hence the shared flex wrapper in index.html rather than one badge with two texts.
@@ -3013,25 +2817,6 @@ async function refreshLiquidation5mSignal() {
     if (asset === activeSnapshotAsset) latestLiquidation5m = { warmed_up: false, error: "fetch_failed" };
   }
 }
-
-// 2026-09-14 변동성 예측 칩. /api/position-sizing 은 **파일 하나만 읽는 엔드포인트**라
-// (서버 position_sizing_payload 주석 참조) 새 계산을 요청 경로에 넣지 않는다.
-async function refreshVolLevel() {
-  const now = Date.now();
-  if (now - volLevelLastFetchAt < VOL_LEVEL_POLL_MS) return;
-  volLevelLastFetchAt = now;
-  try {
-    const res = await fetch(API_POSITION_SIZING_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`position sizing ${res.status}`);
-    const j = await res.json();
-    latestVolLevel = (j && j.vol_level) || { available: false, grade: "데이터 없음", tone: "neutral" };
-  } catch (error) {
-    console.error("Vol level fetch error:", error);
-    latestVolLevel = { available: false, grade: "오류", tone: "neutral" };
-  }
-  pushToneHistory("vol_level", (latestVolLevel && latestVolLevel.tone) || "neutral");
-}
-
 
 // Unlike latestVRebound (picked up by the next state-driven render() pass), the liquidation map
 // has no such host -- it self-triggers both the panel list and the snapshot chart right after a
@@ -7899,7 +7684,6 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
 
     // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
     renderModelIndicatorList([
-      volLevelIndicatorItem(),                // 2026-09-21 배수 + 확장 확률
       gexIndicatorItem(),                     // 2026-09-19 옵션 감마 노출 (09-28 판정일까지 한시)
     ]);
   }
@@ -7920,7 +7704,6 @@ async function tick() {
       refreshOpsStatus();
     } else if (activePageTab === "snapshot") {
       refreshBreakoutDetector();     // 2026-09-11 횡보→추세 전환
-      refreshVolLevel();             // 2026-09-14 사이징 모델 변동성 예측(4시간 수준)
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();

@@ -170,7 +170,6 @@ from dashboard import flow_read as fr  # noqa: E402
 # calendar/clock computation (pandas_market_calendars), no price data, so it needs no cache of its
 # own; computed fresh on every evidence-signal refresh. See that module's docstring for the
 # same-day empirical research (NYSE open real effect, LSE/JPX marginal) behind the chosen windows.
-from scripts.live_session_volatility_alert_20260826 import compute_session_volatility_alert  # noqa: E402
 # US macro/corporate event calendar for the Snapshot tab (2026-08-26) -- see that module's
 # docstring for the 6 sources (FRED/FOMC-static/Fed Chair HTML/EIA-rule-based/Finnhub/Treasury) and their
 # individual caveats. Independent of evidence-signal's klines fetch -- own cache below.
@@ -1531,131 +1530,6 @@ def gex_payload() -> dict[str, Any]:
                           extra_missing={"currencies": {}})
 
 
-# 2026-09-14 사용자 요청: 사이징 변동성 모델(A)을 «모델 내부 지표»에 신호로 띄운다.
-# 🔴여기서 **모델을 돌리지 않는다** -- 사이징 워커(`live_eth_position_sizing_worker_20260911`)가
-#   이미 매 300초 `sizing_model.pred_vol` 을 상태파일에 남긴다. 요청 경로 계산 금지(2026-09-10 실장애).
-# 🔴컷은 **절대값이 아니라 비율(pred / ref_pred)** 이다. 이 아티팩트는 **기계마다 다르게 학습된다**
-#   -- 학습 CSV 길이가 다르기 때문이다(모듈 verify() 주석: 로컬 385k · 서버 175k). 2026-09-14 실측
-#   md5 도 달랐고 ref_pred 가 0.0015594(로컬) vs 0.0016025(서버)였다. 절대 분위를 박으면 배포 기계에서
-#   어긋난다. 비율은 같은 분포의 중앙으로 나눈 값이라 기계가 달라도 거의 같다:
-#   ref_pred 는 워커가 내려주는 그 아티팩트 자신의 값을 쓴다(자기보정).
-# 🔴2026-09-14 재설정(사용자 지적 "텍스트는 평소라는데 라벨은 주의"): 처음엔 학습창 40%/80%
-#   분위를 경계로 썼는데, 그러면 **40~80% 구간 = 평소**를 「주의」라고 부르고 시간의 40%를
-#   주황으로 칠하게 된다. 위험도 어휘(안정/주의/위험)는 «지금 위험한가»를 말하는 자리다.
-#   그래서 **평소는 안정**으로 옮긴다: 안정 = 학습창 하위 80%(<1.39배) · 주의 = 상위 20~5%
-#   · 위험 = 상위 5%(>=1.88배). 서버 실측 비율 분위 80/90/95 = 1.392 / 1.646 / 1.882.
-#   최근 구간 점유율: OOS 74.7/15.6/9.7% · TEST 94.0/4.4/1.5%.
-# 근거: research_eth_vol_forecast_head_to_head_20260914.py — 이 모델은 앞으로 4시간 실현변동성
-#   **수준**을 맞히고(1시간 앞 ρ .642 · 4시간 .712, 단순 rv48 은 .553/.486), 「확장」은 못 맞힌다
-#   (AUC .46~.52). 그래서 어휘는 위험도 3등급이고 **방향 신호가 아니다**.
-# 🔴2026-09-15 «안정만 뜬다»(사용자). 버그가 아니라 **기준이 고정**이어서였다 -- `ref_pred` 는
-#   학습창(2021-12~2025-08) 예측 중앙값으로 아티팩트에 박히는데 2026-04 이후 ETH 가 그 「평소」보다
-#   25% 조용하다(비율 중앙값 0.78). 고정 기준 ÷ 내려앉은 분포 = 최근 7일 98.3% 「안정」.
-#   실현변동성 비율도 같은 방향(p50 0.73)이라 **모델이 틀린 게 아니라 레짐이 내려앉은 것**이다.
-#   그래서 등급은 워커가 주는 **최근 30일 예측 중앙값**(`ref_pred_recent`)으로 자른다.
-#   재현: 컷 그대로 두고 기준만 롤링하면 전구간(2022-06~) 81.2/13.5/5.3%, 최근 30일 80.3/14.6/5.1%.
-#   ⚠️**수량 배수는 그대로 고정 기준**이다 -- 사이징은 «평소보다 조용하면 크게»가 의도이고
-#   배포 공식(`ref_pred/pred`)이 그것이다. 둘을 같은 값으로 합치면 안 된다.
-VOL_LEVEL_RATIO_CALM = 1.39        # 이 아래 = 안정(평소 이하) — 상위 20% 경계
-VOL_LEVEL_RATIO_HOT = 1.88         # 이 위 = 위험 — 상위 5% 경계
-VOL_LEVEL_REF_FALLBACK = 0.00160   # 워커가 ref_pred 를 안 줄 때만 (서버 아티팩트 기준)
-
-# 2026-09-21 ⭐**확장 배수 + 확률**. 위 `ratio`(평소 대비)와 **다른 축**이다 --
-# 이건 `pred / rv48` = «앞으로 4시간이 직전 4시간 대비 몇 배».
-# 🔴카드가 오래 「곧 커진다는 못 맞힌다(AUC .46~.52)」라고 적어 왔는데 **채점을 잘못한 것**이었다:
-#   확장은 «비율» 질문인데 모델의 «수준»으로 채점했다(수준은 스케일을 갖고 비율은 안 갖는다).
-#   올바른 점수인 pred/rv48 로 재면 OOS 109,267행 AUC **0.8237**, rv48 십분위 통제 후 **0.7865**
-#   (10/10 셀 0.69 이상 · 분기 5/5 0.729~0.791 · 일블록 부트 CI [0.754, 0.822] 로 0.5 배제).
-#   보정도 편향 없다: log(실제배수) = -0.0091 + **1.0365**·log(예측배수).
-# 아래 두 상수는 TRAIN(<=2025-08-31, 385,453행)에서 적합한 로지스틱이다.
-#   OOS Brier 0.1388(상수예측 0.1961) · 십분위 보정오차 <=4pp.
-# ⚠️점으로 읽으면 안 된다 -- 예측 1.5배일 때 실제 68% 구간이 [1.07, 2.12]배다(잔차 SD 0.34).
-#   그래서 화면은 배수와 **확률을 같이** 띄운다.
-#   근거: docs/experiments/eth_dashboard_signal_cull_and_vol_expansion_rescore_20260921.md
-VOL_EXPAND_K = 1.3                 # «확장» 정의: 앞 4시간 RV >= 1.3 x 직전 4시간 RV
-VOL_EXPAND_LOGIT_A = -1.6560       # sigmoid(A + B*ln(pred/rv48))
-VOL_EXPAND_LOGIT_B = 6.1834
-
-# ── «다음 30분 고저폭» 예보 (2026-09-25) ──────────────────────────────────────────
-# 왜 여기 붙나: 상황 카드는 «어느 쪽»을 묻는데 그 축이 죽어 있다 -- 채점축을 등거리로 통일하니
-#   엔진이 «항상 되돌림»과 소수점까지 같았다(추세 49.3% vs 49.3%, 89블록).
-#   같은 입력으로 **크기**를 물으면 완전히 다르다: 4.7년 OOS 에서 방향 천장 +3.47pp 인데
-#   크기는 +43pp 였고, 방향은 로지스틱 158피쳐가 최선 단일피쳐를 못 이겼다(.5144 < .5196).
-#   ⇒ 사용자 결정(09-25): 새 카드를 만들지 말고 **이 카드에 30분 줄로 통합**.
-#   근거 scripts/research_situation_question_swap_20260925.py · 적합 research_amp30_fit_20260925.py
-# 입력은 직전 30분 고저폭 하나다 -- 상황 카드의 `feat.range_bp` 와 **같은 값**이라 새 원천이 없다.
-# 상수는 TRAIN(<2025-09, 385,321행) 적합. 모델을 다시 적합하면 셋을 같이 바꾼다.
-#   OOS AUC 0.7182 · 보정기울기 0.982 · 말한 33.7% / 실제 34.2% · 진폭 중앙 상대오차 -0.6%
-# 🔴화면에 걸리는 값은 전역 AUC 가 아니라 **일 안 0.6917** 이다. 전역값의 상당 부분은
-#   «2026-04 는 조용하고 07 은 시끄럽다»는 레짐 간 구분이고 라이브는 오늘 안에서 고른다.
-# 🔴«큰 쪽» 임계는 **후행 24시간 분위**다. 전역 분위로 박으면 조용한 주엔 0%·시끄러운 주엔 100%
-#   가 되어 화면이 죽는다(2026-09-23 에 적응형 임계를 전역 분위로 재서 한 번 틀렸다).
-AMP30_WIN, AMP30_LOOK = 6, 288     # 30분 창 · 24시간 기준창 (5분봉)
-AMP30_BIG_Q = 2 / 3                # «큰 쪽» = 최근 24시간 상위 3분위
-AMP30_RATIO = 0.9694               # 다음 30분 고저폭 / 직전 30분 고저폭 (TRAIN 중앙)
-AMP30_LOGIT_A = -0.8552            # sigmoid(A + B*ln(배수)), 배수 = 직전 30분 고저폭 / 최근 24h 중앙
-AMP30_LOGIT_B = 1.6550
-
-
-def amp30_item(closed_df: Any) -> dict[str, Any]:
-    """완결 5분봉 프레임(high/low/close) -> 다음 30분 고저폭 예보. 봉이 모자라면 {}."""
-    if closed_df is None or len(closed_df) < AMP30_LOOK + AMP30_WIN:
-        return {}
-    hi = closed_df["high"].astype(float)
-    lo = closed_df["low"].astype(float)
-    cl = closed_df["close"].astype(float)
-    rng = (hi.rolling(AMP30_WIN).max() - lo.rolling(AMP30_WIN).min()) / cl * 1e4
-    win = rng.iloc[-AMP30_LOOK:]
-    r = float(rng.iloc[-1])
-    base = float(win.median())
-    if not (r > 0 and base > 0) or not math.isfinite(r) or not math.isfinite(base):
-        return {}
-    mult = r / base
-    return {"range_bp": round(r, 1), "pred_bp": round(AMP30_RATIO * r, 1),
-            "base_bp": round(base, 1), "thr_bp": round(float(win.quantile(AMP30_BIG_Q)), 1),
-            "mult": mult, "big_q": AMP30_BIG_Q, "look_bars": AMP30_LOOK,
-            "p_big": 1.0 / (1.0 + math.exp(-(AMP30_LOGIT_A + AMP30_LOGIT_B * math.log(mult))))}
-
-
-def vol_level_item(state: dict[str, Any]) -> dict[str, Any]:
-    """예측 변동성 등급(기준 = 최근 30일) + **수량 배수**(배포 공식 = 고정 ref_pred / pred)."""
-    sm = (state or {}).get("sizing_model") or {}
-    pred = sm.get("pred_vol")
-    if not sm.get("used") or not isinstance(pred, (int, float)) or not (float(pred) > 0):
-        return {"available": False, "grade": "데이터 없음", "tone": "neutral"}
-    pred = float(pred)
-    ref_fixed = float(sm.get("ref_pred") or VOL_LEVEL_REF_FALLBACK)
-    recent = sm.get("ref_pred_recent")
-    use_recent = isinstance(recent, (int, float)) and float(recent) > 0
-    ref = float(recent) if use_recent else ref_fixed
-    if not (ref > 0 and ref_fixed > 0):
-        return {"available": False, "grade": "데이터 없음", "tone": "neutral"}
-    ratio = pred / ref
-    if ratio < VOL_LEVEL_RATIO_CALM:
-        grade, tone = "안정", "good"
-    elif ratio >= VOL_LEVEL_RATIO_HOT:
-        grade, tone = "위험", "bad"
-    else:
-        grade, tone = "주의", "warn"
-    # ⭐확장 축(«직전 4시간 대비»). rv48 을 워커가 안 주는 옛 상태파일이면 조용히 생략한다.
-    rv48 = sm.get("rv48")
-    expand: dict[str, Any] = {}
-    if isinstance(rv48, (int, float)) and float(rv48) > 0:
-        _m = pred / float(rv48)
-        expand = {"mult": _m, "expand_k": VOL_EXPAND_K, "rv48": float(rv48),
-                  "p_expand": 1.0 / (1.0 + math.exp(
-                      -(VOL_EXPAND_LOGIT_A + VOL_EXPAND_LOGIT_B * math.log(_m))))}
-    return {"available": True, "grade": grade, "tone": tone, "pred_vol": pred, "ref_pred": ref,
-            **expand,
-            "ratio": ratio, "qty_mult": ref_fixed / pred,
-            # 어느 기준으로 잘랐는지 숨기지 않는다(고정으로 떨어졌으면 화면도 그렇게 말한다).
-            "ref_source": "recent" if use_recent else "train",
-            "ref_days": sm.get("ref_recent_days"), "ref_asof": sm.get("ref_recent_asof"),
-            "ref_error": sm.get("ref_recent_error"),
-            "cuts": {"calm": VOL_LEVEL_RATIO_CALM, "hot": VOL_LEVEL_RATIO_HOT}}
-
-
-
 # 2026-09-19 Zeus 섀도우 페이로드·엔드포인트 제거(사용자 지시로 대시보드 카드 삭제).
 # 러너 v3/v4 는 같은 날 다른 세션이 정지시켰고 감시표 줄도 함께 뺐다 -- 카드를 지우면 이
 # API 는 소비자가 없다. 원장 파일(data/live/zeus_v*_shadow_*)과 연구 문서는 그대로 둔다.
@@ -1663,12 +1537,12 @@ def position_sizing_payload() -> dict[str, Any]:
     """크기 가늠자 상태. **계좌 포지션과의 결합은 프런트가 한다** -- 프런트는 이미
     `/api/binance-account` 를 들고 있어(app.js latestBinanceAccount) 서버에 비동기 의존을
     새로 만들 이유가 없다. 여기서는 파일 하나만 읽는다(요청 경로 계산 금지, 2026-09-10 실장애)."""
+    if not SIZING_RISK_MODEL_ENABLED:
+        return dict(SIMPLE_SIZING)
     out = worker_payload(POSITION_SIZING_STATE_PATH, POSITION_SIZING_MAX_AGE_MIN,
                          ts_field="generated_at", require_ok=True, stamp_available=True,
                          bare_missing=True)
-    if not out.get("available"):
-        return {**out, "vol_level": {"available": False, "grade": "웜업", "tone": "neutral"}}
-    return {**out, "cap": sizing_cap(), "vol_level": vol_level_item(out)}
+    return {**out, "cap": sizing_cap()} if out.get("available") else out
 
 
 # 2026-09-12 단건 상한. ⚠️이 값은 처음 19왕복에서 골랐는데 **그 원장이 틀려 있었다** --
@@ -1741,6 +1615,16 @@ SIZING_CAP_EQUITY_X = 6.0
 #   두면 레버리지가 7배로 걸려 그 위 주문을 거래소가 거부한다). 모델이 없으면(워커 낡음) 옛
 #   두 상한으로 떨어진다 -- 기준이 없으면 수량을 못 만든다. 되돌리기 = False.
 SIZING_CAP_MODEL_ONLY = True
+# 🔴2026-09-27 사용자 지시 «변동성 모델이 필요없다고 판명 났으니 제거»: 위험(MAE 분위) 모델을 끈다.
+#   False 면 ETH 도 SOL·XRP 와 같은 단순 규칙이다 -- 위험모델·원장·순자산 상한 없이 **증거금 50%
+#   상한 하나**, 권고 수량·청산 권고 하한·보유시간 처방 없음. 사이징 워커도 서버에서 멈췄다.
+#   근거: 새 실거래 38건에서 E|r| 크기 기울기 재현 실패(ρ +0.298→−0.075) — 메모리
+#   direction_evr_gate_real_ledger_20260915 · vol-risk-upgrade-audit-20260927.
+#   되돌리기 = True + 워커 재기동(scripts/ops/supervisor_position_sizing_worker.sh).
+SIZING_RISK_MODEL_ENABLED = False
+# 위험 모델 없이 주문할 때의 사이징 입력(SOL·XRP 는 원래 이것, ETH 는 위 스위치가 꺼지면 이것).
+SIMPLE_SIZING = {"available": True, "cap": {}, "risk_mae": {}, "vol_equivalent_qty": 0.0,
+                 "atr_pct": None, "source": "simple_rule"}
 # 2026-09-25 사용자 지시 «증거금 사용을 50% 상한으로 막아줘». 이 주문 뒤 증거금(총 명목 ÷ 주문이 걸
 #   레버리지 -- 게이지 값, «자동»이면 처방 값)이 순자산의 이 %를 넘지 않는다. 위 스위치와 무관하게
 #   항상 경쟁한다. 진입에만 건다 -- 증거금 초과는 닫기가 아니라 레버리지로도 풀리므로 청산 카드의
@@ -4757,31 +4641,6 @@ def make_app() -> web.Application:
             venues = venues + ["hyperliquid-whales"]
         return {**payload, "bars": merged, "venues": venues}
 
-    async def load_amp30() -> dict[str, Any]:
-        """30분 고저폭 예보. 캔들 원천은 차트와 **같은 프레임**(1500봉)이다 -- 클라에 나가는
-        `load_market_history` 는 tail(200) 이라 24시간 기준창(294봉)에 모자란다."""
-        async def produce() -> dict[str, Any]:
-            await load_chart_klines_frames()
-            frames = evidence_signal_cache["frames"]
-            return {} if frames is None else amp30_item(frames[0])
-        # 프레임 자체가 60초마다 갱신되므로 그보다 자주 다시 계산할 이유가 없다.
-        return await swr_cached("amp30", 60.0, produce, max_stale=STALE_GRACE_SECONDS)
-
-    async def api_position_sizing(request: web.Request) -> web.Response:
-        payload = await swr_cached(
-            "position_sizing", 30.0, lambda: asyncio.to_thread(position_sizing_payload),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-        try:
-            amp = await load_amp30()
-        except Exception as exc:  # noqa: BLE001 -- 30분 줄이 없다고 사이징 카드를 죽이지 않는다
-            print(f"amp30: {exc!r}", flush=True)
-            amp = {}
-        if amp:
-            # 🔴swr 캐시가 들고 있는 dict 를 **고치지 않는다** -- 얕은 복사로 새 dict 를 만든다.
-            payload = {**payload, "vol_level": {**(payload.get("vol_level") or {}), "amp30": amp}}
-        return web.json_response(payload, headers=NOCACHE)
-
     async def api_breakout_detector(request: web.Request) -> web.Response:
         return web.json_response(await load_breakout_detector(),
                                  headers=NOCACHE)
@@ -5118,7 +4977,6 @@ def make_app() -> web.Application:
         without adding real load."""
         macro_cal = await load_macro_calendar()
         payload = {
-            "session_volatility_alert": compute_session_volatility_alert(),
             "macro_event_alert": compute_macro_event_alert(macro_cal.get("events", [])),
         }
         return web.json_response(payload, headers=NOCACHE)
@@ -5424,8 +5282,7 @@ def make_app() -> web.Application:
             # 🔴SOL·XRP 는 ETH 위험 모델(보유시간·안전 역행폭·권고 수량)을 쓰지 않는다 -- ETH 로 학습된 값이다.
             #   빈 사이징을 넘겨 모델 상한·권고가 «없음»으로 흐르게 하고, 상한은 아래 증거금 50% 하나만 남긴다.
             sizing = (await asyncio.to_thread(position_sizing_payload) if asset == "eth"
-                      else {"available": True, "cap": {}, "risk_mae": {}, "vol_equivalent_qty": 0.0,
-                            "atr_pct": None, "source": "simple_rule"})
+                      else dict(SIMPLE_SIZING))
             if not sizing.get("available"):
                 return None, {}, {}, ({"error": "sizing_unavailable",
                                        "detail": sizing.get("error")}, 503)
@@ -5491,7 +5348,7 @@ def make_app() -> web.Application:
                                            (cap_model, "model")) if v]
             if SIZING_CAP_MODEL_ONLY and cap_model:
                 binding = [(cap_model, "model")]
-            if asset != "eth":
+            if asset != "eth" or not SIZING_RISK_MODEL_ENABLED:
                 binding = []          # 단순 규칙(사용자 지시): 원장·순자산 6배·모델 상한 없음 -- 증거금 50% 만
             # 증거금 상한. 레버리지는 주문이 실제로 걸 값 -- «자동»이면 처방(plan_now→prescribe)과
             #   **같은 입력**으로 같은 함수를 부른다(그래야 target_leverage 와 같은 값이다).
@@ -6094,7 +5951,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/manual-entry/status", api_manual_entry_status)
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
-    app.router.add_get("/api/position-sizing", api_position_sizing)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)

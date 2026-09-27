@@ -132,7 +132,10 @@ def _isolated_dirs():
 
         # 🔴옛 정책(원장∧순자산∧모델)을 고정한다 -- 2026-09-25 «위험모델만» 스위치는 나중에
         #   되돌릴 한시 설정이라, 되돌아올 규칙을 여기서 계속 지킨다. 새 동작은 test_model_only_*.
-        with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", False), \
+        # 🔴2026-09-27 위험 모델은 스위치로 꺼졌다(SIZING_RISK_MODEL_ENABLED=False). 되살릴 경로를
+        #   여기서 계속 지킨다 -- 꺼진 동작은 test_risk_model_off_eth_uses_simple_rule.
+        with mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", True), \
+             mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", False), \
              mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 0.0), \
              mock.patch.object(server, "LIVE_DIR", live), \
              mock.patch.object(server, "DASHBOARD_DIR", dash), \
@@ -598,6 +601,32 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     self.assertEqual((await x.json())["error"], "no_position", "SOL 청산이 ETH 포지션을 잡았다")
                     e = await (await client.get("/api/manual-exit/preview?side=LONG&asset=eth")).json()
                     self.assertTrue(e.get("ok"), e)     # 대조군: ETH 탭은 그 포지션을 닫는다
+                finally:
+                    await client.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
+
+    def test_risk_model_off_eth_uses_simple_rule(self) -> None:
+        """2026-09-27 사용자 «변동성 모델 제거». 스위치가 꺼지면 ETH 도 SOL·XRP 와 같은 단순 규칙 --
+        워커 상태가 있어도 안 읽고, 상한은 증거금 50% 하나, 권고 수량·청산 권고 하한·지평 처방 없음."""
+        async def exercise() -> None:
+            with mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0):
+                self.assertEqual(server.position_sizing_payload()["source"], "simple_rule")
+                client = TestClient(TestServer(offline_app(server)))
+                await client.start_server()
+                try:
+                    b = await (await client.get("/api/manual-entry/preview?side=LONG&lev=10")).json()
+                    cap, plan = b["cap"], b["plan"]
+                    self.assertEqual(cap["binding"], "margin", cap)
+                    self.assertIsNone(cap.get("cap_model_usdt"), cap)
+                    self.assertAlmostEqual(cap["cap_notional_usdt"], FAKE_ACCOUNT["balance"]["margin"] * 10 * 0.5, delta=1.0)
+                    self.assertEqual(plan["recommended_source"], "vol_equivalent", plan)
+                    self.assertEqual(plan["hold_planned_min"], 240, plan)   # = server 의 HOLD_FIXED_MIN(앱 함수 안 상수)
+                    x = (await (await client.get("/api/manual-exit/preview?side=LONG")).json())["plan"]
+                    self.assertFalse(x["risk"]["available"], x["risk"])
+                    self.assertEqual((await client.get("/api/position-sizing")).status, 404)
                 finally:
                     await client.close()
 
