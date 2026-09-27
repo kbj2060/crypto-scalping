@@ -5517,12 +5517,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   SUB_TOTAL 620 = 190(프로파일) + 8 + 400(1초 수급) + 14(밀도 범례) + 8
   //   ← 2026-09-20 뒤집었다가 2026-09-22 다시 프로파일이 위로(사용자 지시)
   // 2단이면 플롯 위에는 밀도 범례만 남는다(호가·1초 수급은 오른쪽 칸) -- 상자 872 = 12 + 22 + 400 + 368 + 70.
-  // 2026-09-27 모바일은 **풋프린트가 먼저**(사용자 «모바일 최적화») -- 호가 프로파일·1초 수급을 풋프린트 레인 **아래**로 내린다.
-  //   전에는 두 패널(598px)이 위에 있어 첫 화면(844px)에 풋프린트가 한 줄도 안 보였다. 프로파일 → 1초 수급 순서는 그대로.
-  //   본문은 `h` 를 «풋프린트 영역 높이»로 쓰므로(x축·리본이 h - mb 기준) 상자 높이 hAll 에서 두 패널만큼 뺀다.
+  // 2026-09-27 모바일(세로) 순서: **1초 수급 → 밀도 범례 → 풋프린트 → 레인 → 호가 프로파일**(사용자 «수급차트는 풋프린트 위로»).
+  //   같은 날 먼저 «풋프린트 먼저»로 두 패널을 다 내렸다가 수급만 다시 올렸다. 호가 프로파일은 풋프린트 아래에 남는다.
+  //   본문은 `h` 를 «풋프린트 영역 높이»로 쓰므로(x축·리본이 h - mb 기준) 상자 높이 hAll 에서 아래로 간 프로파일만큼 뺀다.
   const SUB_BELOW = subOn && !splitR && mobileChart;
-  const h = SUB_BELOW ? hAll - (SUB_PROFILE_H + SUB_GAP + SUB_1S_H + SUB_GAP) : hAll;
-  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_BELOW ? SUB_LEGEND_H + SUB_GAP
+  const h = SUB_BELOW ? hAll - (SUB_PROFILE_H + SUB_GAP) : hAll;
+  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP
+    : SUB_BELOW ? SUB_1S_H + SUB_LEGEND_H + SUB_GAP
     : SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
@@ -5647,8 +5648,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   프로파일에 붙여 올리면 설명하는 그림에서 400px 멀어진다.
   // 소비 합 = SUB_TOTAL: 190(프로파일) + 8 + 400(1초) + 14(범례) + 8 = 620.
   const subProfileY = SUB_BELOW ? h + SUB_GAP : mtTop;   // 모바일: 풋프린트 영역(x축·리본) 바로 아래
-  const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
-  const subLegendY = splitR ? mtTop : SUB_BELOW ? mtTop : sub1sY + SUB_1S_H;   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
+  const sub1sY = SUB_BELOW ? mtTop : subProfileY + SUB_PROFILE_H + SUB_GAP;   // 모바일: 맨 위
+  const subLegendY = splitR ? mtTop : sub1sY + SUB_1S_H;   // 2단: 왼쪽 칸 맨 위 · 그 밖: 1초 수급 바로 아래(= 풋프린트 바로 위)   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
   const quadY = plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
   const cumY = LANE_MERGE ? quadY : quadY + QUAD_H + QUAD_TXT + ROW_H + LANE_GAP; // 누적 행 위쪽
   const cumBottom = cumY + CUM_DRAW_H;                    // 그 아래 한 줄이 ROW_H 를 쓴다

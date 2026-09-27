@@ -141,12 +141,13 @@ def test_sub_panels_tile_without_overlap():
         return eval(expr.strip(), {"__builtins__": {}}, e)                     # noqa: S307 -- 저장소 제 코드
 
     env["SUB_BELOW"] = False
-    # 모바일(풋프린트 먼저): 범례는 맨 위, 프로파일·1초 수급은 풋프린트 영역(h) 아래로 겹침 없이.
+    # 모바일(세로): 1초 수급 맨 위 → 범례(풋프린트 바로 위) → … → 호가 프로파일은 풋프린트 영역(h) 아래.
     mob = dict(env, splitR=0, SUB_BELOW=True, h=1000)
     for name, expr in exprs.items():
         mob[name] = ev(expr, mob)
-    assert mob["subLegendY"] == env["mtTop"] and mob["subProfileY"] > mob["h"], mob
-    assert mob["subProfileY"] + env["SUB_PROFILE_H"] <= mob["sub1sY"], "모바일: 프로파일이 1초 수급 위로 올라탄다"
+    assert mob["sub1sY"] == env["mtTop"], mob
+    assert mob["subLegendY"] == mob["sub1sY"] + env["SUB_1S_H"], "모바일: 범례가 1초 수급 바로 아래가 아니다"
+    assert mob["subProfileY"] > mob["h"], "모바일: 호가 프로파일이 풋프린트 영역 아래가 아니다"
     wide = dict(env, splitR=1)
     for name, expr in exprs.items():
         wide[name] = ev(expr, wide)
