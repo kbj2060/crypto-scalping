@@ -4668,6 +4668,18 @@ def make_app() -> web.Application:
         if rows_only:
             # 2026-09-19 히트맵 «그림»을 걷어낸 뒤로 화면은 행 집계와 요약만 쓴다.
             # 이미지 배열을 계속 보내면 서버 실측 **102KB** 가 매 폴링 그냥 버려진다.
+            # 2026-09-27 풋프린트 «실시간 호가 띠»(사용자 지시): 창 접기(agg) 없는 **마지막 1초** 열을 부호째
+            #   싣는다(+매수 / −매도). 위 inst 는 agg 초(1h 창이면 12초) 중 |최대|라 묵고 부호가 없다. 약 1KB.
+            try:
+                b = read_window(symbol, int(time.time() * 1000), 3, 1)
+                live = np.nonzero(np.isfinite(b["mid"]))[0]
+                if b["n_bins"] and live.size:
+                    i = int(live[-1])
+                    out["book"] = {"t_ms": int(b["t0_ms"]) + i * 1000, "bin_lo": int(b["bin_lo"]),
+                                   "bin_size": float(b["bin_size"]), "mid": float(b["mid"][i]),
+                                   "q_f4": base64.b64encode(np.ascontiguousarray(b["qty"][i], dtype="<f4")).decode()}
+            except Exception:  # noqa: BLE001, S110 -- 띠 하나 때문에 프로파일 호가까지 비면 안 된다
+                pass
             return out
         q8 = np.rint(np.clip(qty / scale, -1.0, 1.0) * 127.0)   # rint: 절단하면 오차가 2배다
         return {**out,

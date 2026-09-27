@@ -3727,6 +3727,7 @@ async function refreshFlowHeatmap() {
     // 2026-09-20 접근행동은 **4시간 창**이라 bin_lo/n_bins 가 위 다섯과 다르다
     // (그 사이 mid 가 움직여 격자가 넓다). 절대가격으로 따로 찾는다.
     if (j.rows && j.rows.approach_f4) j.rows.approach = f4(j.rows.approach_f4);
+    if (j.book && j.book.q_f4) j.book.q = f4(j.book.q_f4);   // 2026-09-27 풋프린트 실시간 호가 띠(마지막 1초, +매수/−매도)
     // 🔴**없는 키는 건너뛴다.** 예전엔 ROW_STATS 를 그대로 돌려 f4(undefined) 가 던졌고,
     //   그 예외를 아래 catch 가 잡아 latestFlowHeatmap 을 통째로 null 로 만들었다 --
     //   화면에서 호가 막대가 조용히 사라진다. 서버보다 app.js 가 **먼저** 배포되면
@@ -5628,7 +5629,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   144 라 넷 다 덮인다. 창을 바꾸면 기준점도 같이 옮겨간다 -- 절대 누적이 아니다.
   // 🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이다(dashboard/situation.py 의 WINDOW=6).
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
-  const cw = w - ml - mr;
+  // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 70px 을 뗀다. 모바일은 없다.
+  const BOOK_W = (footprint && !mobileChart) ? 70 : 0;
+  const cw = w - ml - mr - BOOK_W;
   const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H - 2 * ROW_H;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
@@ -7164,6 +7167,59 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
     }
   }
+  // ── 실시간 호가 띠 (2026-09-27 사용자 지시) ─────────────────────────────────────────
+  // 서버가 준 **마지막 1초** 호가 열(부호: +매수 / −매도)을 풋프린트와 같은 가격축에 가로 막대로 그린다.
+  //   길이 = √(수량/창 안 최대) -- 비례로 두면 제일 큰 벽 하나에 나머지가 선이 됐다(시안). 창 안 상위 10% 는 진하게 + 수량.
+  // 🔴«지지·저항»이 아니다 -- 벽에 닿은 뒤 반등률 0.509(동전, 5.8일 71,293건, 09-20). 서술만 한다.
+  //   수량은 수집기 래스터 값(칸 $0.5 합산)이고, 가격선은 이 띠를 가로질러 배지까지 이어진다(호가창 사다리처럼).
+  const book = BOOK_W && latestFlowHeatmap && latestFlowHeatmap.book;
+  cachedLayer("bookStrip", book ? book.t_ms + "|" + activeSnapshotAsset : "none", (g) => {
+    if (!book || !book.q || !(book.bin_size > 0)) return;
+    const bs = book.bin_size, x0 = ml + cw + 6, L = BOOK_W - 10;
+    const vis = [];
+    for (let i = 0; i < book.q.length; i++) {
+      const v = book.q[i], p = (book.bin_lo + i) * bs;
+      if (!v || p + bs / 2 < yMin || p - bs / 2 > yMax) continue;
+      vis.push([p, Math.abs(v), v > 0]);
+    }
+    if (!vis.length) return;
+    const mx = Math.max(...vis.map((v) => v[1]));
+    const sorted = vis.map((v) => v[1]).sort((a, b) => a - b);
+    const p90 = sorted[Math.floor(sorted.length * 0.9)];
+    const unit = coinUnit();
+    const fmtQ = (q) => (q >= 1000 ? (q / 1000).toFixed(1) + "k" : q >= 10 ? q.toFixed(0) : q.toFixed(1));
+    const hd = document.createElementNS(NS, "text");
+    hd.setAttribute("x", x0); hd.setAttribute("y", mt - 4); hd.setAttribute("font-size", "10");
+    hd.setAttribute("fill", "var(--muted)"); hd.textContent = "호가";
+    g.appendChild(hd);
+    const base = document.createElementNS(NS, "line");
+    base.setAttribute("x1", x0 - 1); base.setAttribute("x2", x0 - 1);
+    base.setAttribute("y1", mt); base.setAttribute("y2", plotBottom);
+    base.setAttribute("stroke", "var(--soft-line)");
+    g.appendChild(base);
+    vis.forEach(([p, q, bid]) => {
+      const yTop = Math.max(mt, yAt(p + bs / 2)), yBot = Math.min(plotBottom, yAt(p - bs / 2));
+      const wall = q >= p90, len = Math.max(1, Math.sqrt(q / mx) * L);
+      const r = document.createElementNS(NS, "rect");
+      r.setAttribute("x", x0); r.setAttribute("y", yTop + 0.5);
+      r.setAttribute("width", len); r.setAttribute("height", Math.max(1, yBot - yTop - 1));
+      r.setAttribute("fill", bid ? "var(--good)" : "var(--bad)");
+      r.setAttribute("fill-opacity", wall ? "0.85" : "0.38");
+      const t = document.createElementNS(NS, "title");
+      t.textContent = `${bid ? "매수" : "매도"} 호가 ${p.toFixed(pxDp())} · ${fmtQ(q)} ${unit}`
+        + (wall ? " (보이는 범위 상위 10%)" : "") + " -- 지지·저항 신호가 아니다(실측 반등률 0.509)";
+      r.appendChild(t);
+      g.appendChild(r);
+      if (wall) {
+        const lb = document.createElementNS(NS, "text");
+        lb.setAttribute("x", Math.min(x0 + len + 2, x0 + L - 12));
+        lb.setAttribute("y", Math.max(mt + 8, Math.min(plotBottom - 2, (yTop + yBot) / 2 + 3)));
+        lb.setAttribute("font-size", "9"); lb.setAttribute("fill", bid ? "var(--good)" : "var(--bad)");
+        lb.textContent = fmtQ(q);
+        g.appendChild(lb);
+      }
+    });
+  });
   cachedLayer("quadLane", objToken(fpBars) + "|" + objToken(oiBars)
               + "|" + activeSnapshotAsset + "|" + rvolSig, (g) => {
   if (fpBars.length && candles.length && QUAD_H) {
@@ -7452,7 +7508,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const y = mobileChart ? rowY : LANE_MERGE ? cumY + 82 + k * 17 : cumY + 14 + k * 19;
         if (!mobileChart) {
           const sw = document.createElementNS(NS, "rect");
-          sw.setAttribute("x", ml + cw + 2); sw.setAttribute("y", y - 9);
+          sw.setAttribute("x", ml + cw + BOOK_W + 2); sw.setAttribute("y", y - 9);
           sw.setAttribute("width", 10); sw.setAttribute("height", 10);
           sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
           g.appendChild(sw);
