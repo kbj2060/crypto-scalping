@@ -648,7 +648,13 @@ body {
    패딩 18 -> 10 으로 빈 행 높이도 줄인다. (2026-09-09 의 오른쪽 끝 정렬은 이 지시로 대체됨) */
 .liq-map-panel .ops-health-head { padding: 10px 18px; }
 
-.liq-level-list { padding: 4px 8px 8px; min-height: 190px; }   /* 2026-09-28 거리 수직선 SVG(시안 B) -- 행 스타일은 지웠다 */
+.liq-level-list { padding: 4px 16px 10px; }
+/* 2026-09-28 지지·저항 글자 줄(모바일 -- 데스크톱은 사분면 값 칸 아래 SVG 글자). 이름 | 가격 | 강도 */
+.sr-row { display: grid; grid-template-columns: 52px 1fr auto; gap: 10px; padding: 4px 0; font: 12px/1.4 var(--font-mono); }
+.sr-row b { color: var(--ink); }
+.sr-row.sr-res > span:first-child { color: var(--liq-resistance); font-weight: 700; }
+.sr-row.sr-sup > span:first-child { color: var(--liq-support); font-weight: 700; }
+.sr-str { color: var(--muted); }
 }
 
 /* 2026-09-25 «데이터 관계 읽기» -- 청산 레벨 목록 바로 아래(사용자 지시). 줄 = [관계 | 관찰→해석 + 근거 | 등급].
@@ -3064,8 +3070,8 @@ body.order-coin-off .acct-lanes::before {
    ≥1700px 인 이유: 풋프린트 칸이 1,000px 밑으로 가면 셀 숫자가 안 들어간다(1440 창이면 776px 였다). */
 @media (min-width: 1700px) and (orientation: landscape) {
   .app { max-width: none; }
-  #candleSvgSnapshot { --fp-split: 0.38; height: 1062px; }   /* 2026-09-28 +190 = 레인 아래 지지/저항 */
-  .candle-container { height: 1074px; }
+  #candleSvgSnapshot { --fp-split: 0.38; height: 872px; }
+  .candle-container { height: 884px; }
   .liq-map-panel { position: relative; }
   /* 풋프린트 아래 카드는 한 줄 너비에 세 칸(사용자 «최대한 너비 하나에 모두»): 내 계좌 | 30분 시나리오 | 신호·특화 신호·경제 일정.
      다섯 장을 한 줄에 다 놓으면 칸이 360px 안팎이라 신호 카드 글자가 한 글자씩 꺾인다(09-27 시안 B 의 420px 칸에서 실측). */

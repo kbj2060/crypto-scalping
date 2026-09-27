@@ -2444,6 +2444,17 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
 // stays: this list reads the same backend snapshot (map.current_price, up to ~5min stale -- the
 // server cache interval) as the chart overlay, so an already-crossed level still needs dropping
 // client-side between refreshes.
+// 2026-09-28 지지·저항 = 청산맵 레벨, 현재가 쪽으로 이미 지나간 것은 버리고 **가까운 순 3개씩**.
+//   사분면 값 칸(데스크톱)과 차트 아래 목록(모바일)이 같은 목록을 쓴다.
+function srLevelsLive(n = 3) {
+  const map = latestLiquidationMap;
+  if (!map || !map.warmed_up) return null;
+  const cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || map.current_price || 0);
+  if (!(cur > 0)) return null;
+  const pick = (levels, below) => (levels || []).filter((lv) => (below ? lv.price < cur : lv.price > cur)).slice(0, n);
+  return { cur, res: pick(map.resistance_levels, false), sup: pick(map.support_levels, true) };
+}
+
 function renderLiquidationMapPanel() {
   const map = latestLiquidationMap;
   const badge = el("liqMapBadge");
@@ -2472,60 +2483,19 @@ function renderLiquidationMapPanel() {
   }
   setMapBadge("neutral", "");
 
-  const liveCurrentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || map.current_price || 0);
-  const liveRedistanced = (levels, side) => {
-    if (!(liveCurrentPrice > 0)) return levels || [];
-    return (levels || [])
-      .filter((lv) => side === "support" ? lv.price < liveCurrentPrice : lv.price > liveCurrentPrice)
-      .map((lv) => ({ ...lv, distance_pct: (lv.price - liveCurrentPrice) / liveCurrentPrice * 100 }));
-  };
-  // 2026-09-11 사용자 요청: 각 측면 **3개**만(원 배열은 현재가에서 가까운 순).
-  // 2026-09-28 사용자 선택 시안 B -- 행 목록 대신 **거리 수직선**: 가로 = 현재가 대비 %, 레벨 = 원(크기·농도 = 청산 밀집 강도),
-  //   맨 위 한 줄이 결론(«위로 +x% · 아래로 −y%» + 가까운 쪽이 몇 배 가까운지). 행 간격이 균등하던 목록은 거리를 숫자로만 말했다.
+  // 2026-09-28 차트(거리 수직선)를 없앴다(사용자 «사분면 라벨 아래에 가격과 강도를 적어줘»). 데스크톱은 renderCandleSvg 가
+  //   사분면 값 칸 아래에 적고 이 목록은 비운다. 모바일은 판 아래 값 한 줄뿐이라 여기에 같은 줄을 글자로 적는다.
   //   🔴서술이다 -- 청산 밀집은 추정이고 지지·저항 반등을 예측하지 않는다(벽 반등률 0.509, 09-20).
-  const SR_ROWS = 3;
-  const res = liveRedistanced(map.resistance_levels, "resistance").slice(0, SR_ROWS);
-  const sup = liveRedistanced(map.support_levels, "support").slice(0, SR_ROWS);
-  const list = el("liquidationMapList");
-  const cur = liveCurrentPrice || Number(map.current_price) || 0;
-  if (!list || !(cur > 0) || (!res.length && !sup.length)) {
-    setH("liquidationMapList", `<p class="muted" style="padding:16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
+  const sr = srLevelsLive();
+  if (!isMobileChartMode()) { setH("liquidationMapList", ""); return; }
+  if (!sr || (!sr.res.length && !sr.sup.length)) {
+    setH("liquidationMapList", `<p class="muted" style="padding:12px 16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
     return;
   }
-  // 🔴높이는 **정해진 값**에서 받는다 -- clientHeight 를 읽으면 그린 SVG 가 상자를 키우고 다음 틱에 또 키운다(1초에 수십 px 씩 자랐다).
-  const W = Math.max(280, list.clientWidth || 600), H = Math.max(150, parseFloat(list.style.height) || 190);
-  const narrow = W < 460, x0 = 30, x1 = W - 30;
-  const ds = [...res, ...sup].map((lv) => lv.distance_pct);
-  const lo = Math.min(0, ...ds) - 0.12, hi = Math.max(0, ...ds) + 0.12;
-  const X = (v) => x0 + (v - lo) / (hi - lo) * (x1 - x0);
-  const yl = Math.round(H * 0.5);
-  const t = (x, y, str, fs, fill, anc = "middle", wt = 400) =>
-    `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${fs}" fill="${fill}" text-anchor="${anc}" font-weight="${wt}">${escapeHtml(str)}</text>`;
-  const up = res.length ? res[0].distance_pct : null, dn = sup.length ? sup[0].distance_pct : null;
-  const pc = (v) => (v > 0 ? "+" : "") + fmtNum(v, 2) + "%";
-  // 2026-09-28 머리 한 줄(«위로·아래로»)·부제·% 눈금은 뺐다(사용자 지시) -- 이름과 가격만. 거리는 원 툴팁에.
-  const head = [up != null ? "위로 " + pc(up) : "", dn != null ? "아래로 " + pc(dn) : ""].filter(Boolean).join(" · ");
-  const o = [`<line x1="${x0}" x2="${x1}" y1="${yl}" y2="${yl}" stroke="var(--line)"/>`];
-  if (up != null && dn != null) {
-    o.push(`<rect x="${X(dn).toFixed(1)}" y="${yl - 3}" width="${(X(up) - X(dn)).toFixed(1)}" height="6" fill="var(--ink)" fill-opacity="0.08"/>`);
-  }
-  // 이름표는 **겹치지 않는 줄**에 놓는다: 위 → 아래 → 더 위 → 더 아래 순으로, 그 줄에 64px 안쪽 이름표가 없으면 거기.
-  //   (가까운 레벨 셋이 몰리면 위/아래 번갈이만으로는 1·3번이 포개졌다 -- 모바일 실측)
-  const rMax = narrow ? 11 : 14, TIERS = [-(rMax + 16), rMax + 16, -(rMax + 40), rMax + 40], taken = TIERS.map(() => []);
-  [...res.map((lv, i) => [lv, i, "저항", "var(--liq-resistance)"]), ...sup.map((lv, i) => [lv, i, "지지", "var(--liq-support)"])]
-    .sort((a, b) => a[0].distance_pct - b[0].distance_pct)
-    .forEach(([lv, i, name, col]) => {
-      const wv = Math.max(0, Math.min(1, lv.weight_pct || 0)), x = X(lv.distance_pct), r = 4 + (narrow ? 7 : 10) * wv;
-      o.push(`<circle cx="${x.toFixed(1)}" cy="${yl}" r="${r.toFixed(1)}" fill="${col}" fill-opacity="${(0.35 + 0.55 * wv).toFixed(2)}" stroke="${col}"><title>${escapeHtml(`${name}${i + 1} ${fmtNum(lv.price, 2)} (${pc(lv.distance_pct)}) · 청산 밀집 ${Math.round(wv * 100)}%`)}</title></circle>`);
-      let k = TIERS.findIndex((_, j) => taken[j].every((tx) => Math.abs(tx - x) >= 64));
-      if (k < 0) k = 0;
-      taken[k].push(x);
-      const ty = yl + TIERS[k] + (TIERS[k] > 0 ? 4 : 0);
-      o.push(t(x, ty, `${name}${i + 1}`, narrow ? 10 : 11, col, "middle", 700), t(x, ty + (narrow ? 11 : 13), fmtNum(lv.price, 1), narrow ? 10 : 11, "var(--muted)"));
-    });
-  o.push(`<line x1="${X(0).toFixed(1)}" x2="${X(0).toFixed(1)}" y1="${yl - 30}" y2="${yl + 30}" stroke="var(--ink)" stroke-width="2"/>`,
-         t(X(0), yl + (narrow ? 44 : 48), "현재 " + fmtNum(cur, 2), narrow ? 11 : 12, "var(--ink)", "middle", 700));
-  setH("liquidationMapList", `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" style="display:block" font-family="inherit" role="img" aria-label="${escapeHtml(head)}">${o.join("")}</svg>`);
+  const row = (lv, name, cls) => `<div class="sr-row ${cls}"><span>${name}</span><b>${fmtNum(lv.price, 2)}</b>`
+    + `<span class="sr-str">강도 ${Math.round((lv.weight_pct || 0) * 100)}%</span></div>`;
+  setH("liquidationMapList", [...sr.res.map((lv, i) => row(lv, "저항" + (i + 1), "sr-res")).reverse(),
+                              ...sr.sup.map((lv, i) => row(lv, "지지" + (i + 1), "sr-sup"))].join(""));
 }
 
 // 2026-08-25 실측(VAL+OOS 48,853봉): 같은 쪽 신호가 동시에 몇 개 뜨는지(bottom_votes/top_votes)
@@ -4571,18 +4541,6 @@ function declutterTagY(labels, lo, hi, gap) {
   return labels;
 }
 
-// 2026-09-27 넓은 화면 2단: 지지/저항 목록(HTML)을 차트 오른쪽 칸, 1초 수급 바로 아래에 얹는다.
-//   자리는 렌더러가 정한 좌표 그대로다 -- CSS 로 따로 맞추면 칸 비율·패널 높이가 바뀔 때 어긋난다.
-//   viewBox 가 상자와 1:1 이라(w·h 를 상자에서 받는다) SVG 좌표가 곧 px 다. box=null 이면 원래 흐름으로.
-function placeLevelList(svg, box) {
-  const list = el("liquidationMapList"), card = list && list.parentElement;
-  if (!list) return;
-  if (!box || !card) { list.style.cssText = ""; return; }
-  const sr = svg.getBoundingClientRect(), cr = card.getBoundingClientRect();
-  Object.assign(list.style, { position: "absolute", margin: "0", width: `${box.w}px`,
-                              left: `${sr.left - cr.left + box.x}px`, top: `${sr.top - cr.top + box.y}px`,
-                              height: box.h > 0 ? `${box.h}px` : "", padding: "0" });
-}
 
 function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = [], footprint = null) {
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
@@ -4677,9 +4635,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   같은 날 먼저 «풋프린트 먼저»로 두 패널을 다 내렸다가 수급만 다시 올렸다. 호가 프로파일은 풋프린트 아래에 남는다.
   //   본문은 `h` 를 «풋프린트 영역 높이»로 쓰므로(x축·리본이 h - mb 기준) 상자 높이 hAll 에서 아래로 간 프로파일만큼 뺀다.
   // 2026-09-28 프로파일이 빠져 데스크톱(1단)·모바일이 같은 순서다: 1초 수급 → 밀도 범례 → 풋프린트.
-  // 2026-09-28 2단: 지지/저항 판이 왼쪽 레인 **아래**로 왔다(사용자 지시) -- 본문 `h` 는 그만큼 위에서 끝나고, 상자(styles.css)는 그만큼 크다.
-  const SR_BELOW = splitR ? 190 : 0;
-  const h = hAll - SR_BELOW;
+  const h = hAll;
   const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_1S_H + SUB_LEGEND_H + SUB_GAP;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
@@ -4819,11 +4775,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   svg.setAttribute("viewBox", `0 0 ${wAll} ${hAll}`);
   svg.innerHTML = "";
-  if (svg.id === "candleSvgSnapshot") {
-    // 2026-09-28 2단 오른쪽 칸을 왼쪽과 **가로줄로 맞춘다**(사용자 «수급차트들이랑 높이 맞춰줘»):
-    //   1초 수급 = 맨 위 ~ 레인 판 윗변 직전(= 가격 플롯 옆), 지지/저항 = 레인 판(사분면·누적) 옆 같은 높이.
-    placeLevelList(svg, splitR ? { x: 0, y: h, w, h: SR_BELOW } : null);
-  }
   
   if (!candles.length) {
     const txt = document.createElementNS(NS, "text");
@@ -6890,6 +6841,29 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
   }
   }, LANE_MERGE ? "quadLane" : null);   // 합친 판: 사분면 막대 **뒤에**
+
+  // 2026-09-28 지지·저항 = 사분면 값 칸 **아래** 글자 줄(사용자 «차트를 없애고 가격과 강도를 적어줘»).
+  //   값 칸과 같은 두 세로줄(이름 | 가격) + 강도(청산 밀집 %). 위에서 아래로 저항3 → 지지3 = 가격 순서.
+  if (svg.id === "candleSvgSnapshot" && fpBars.length && !mobileChart) {
+    const sr = srLevelsLive();
+    if (sr && (sr.res.length || sr.sup.length)) {
+      const vx = ml + cw + 16;
+      let y = cumY + 18 + 6 * 19 + 6 + 14;          // 값 칸(여섯 줄 + 틈) 다음
+      const rows = [...sr.res.map((lv, i) => ["저항" + (i + 1), lv, "var(--liq-resistance)"]).reverse(),
+                    ...sr.sup.map((lv, i) => ["지지" + (i + 1), lv, "var(--liq-support)"])];
+      rows.forEach(([name, lv, col]) => {
+        [[vx, name, col, "700"], [vx + 60, fmtNum(lv.price, 2), "var(--ink)", null],
+         [vx + 136, "강도 " + Math.round((lv.weight_pct || 0) * 100) + "%", "var(--muted)", null]].forEach(([x, txt, fill, wt]) => {
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("font-size", "12"); t.setAttribute("fill", fill);
+          if (wt) t.setAttribute("font-weight", wt);
+          t.textContent = txt;
+          svg.appendChild(t);
+        });
+        y += 18;
+      });
+    }
+  }
 
 
   // ── ③ 청산 — 풋프린트 봉 고가 «바로 위» 동그라미 (2026-09-22 사용자 지시) ────
