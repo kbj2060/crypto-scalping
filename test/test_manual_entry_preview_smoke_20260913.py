@@ -465,23 +465,23 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             asyncio.run(exercise())
 
     def test_bracket_uses_liquidation_levels_or_says_why(self) -> None:
-        """2026-09-25 청산맵 TP/SL(고정 3% 손절 대체). 롱: TP 저항2 · SL 지지1 · 비상 스탑은 SL 너머.
+        """2026-09-25 청산맵 TP/SL(고정 3% 손절 대체). 롱: TP 저항3 · SL 지지2(2026-09-27 세 코인 모두 한 단계 멀리) · 비상 스탑은 SL 너머.
         숏은 거울. 레벨이 없으면 **이유를 싣는다** -- 옛 손절은 조용히 안 걸려 있었다(-4120)."""
         # 🔴이 픽스처의 가짜 호가는 서버 안쪽 함수까지 못 닿아 미리보기가 **실시세**를 쓴다 --
-        #   레벨을 고정값으로 심으면 시세 쪽에 따라 전부 «지나간 레벨»이 된다. 시세 기준 ±3%/±6%.
+        #   레벨을 고정값으로 심으면 시세 쪽에 따라 전부 «지나간 레벨»이 된다. 시세 기준 ±3%/±6%/±9%.
         seen = {}
 
         def levels(_df, price):
             seen["p"] = price
             return {"warmed_up": True,
-                    "support_levels": [{"price": price * 0.97}, {"price": price * 0.94}],
-                    "resistance_levels": [{"price": price * 1.03}, {"price": price * 1.06}]}
+                    "support_levels": [{"price": price * 0.97}, {"price": price * 0.94}, {"price": price * 0.91}],
+                    "resistance_levels": [{"price": price * 1.03}, {"price": price * 1.06}, {"price": price * 1.09}]}
 
         async def exercise() -> None:
             client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
-                for side, tp_x, sl_x in (("LONG", 1.06, 0.97), ("SHORT", 0.94, 1.03)):
+                for side, tp_x, sl_x in (("LONG", 1.09, 0.94), ("SHORT", 0.91, 1.06)):
                     b = (await (await client.get(
                         f"/api/manual-entry/preview?side={side}&pct=5")).json())["plan"]["bracket"]
                     self.assertTrue(b["available"], b)

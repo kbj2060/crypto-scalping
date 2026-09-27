@@ -5274,7 +5274,7 @@ def make_app() -> web.Application:
                 position_side=side, ref_price=ref_mid, basis=mid / ref_mid, filters=filters,
                 support_levels=[lv["price"] for lv in lm.get("support_levels") or []],
                 resistance_levels=[lv["price"] for lv in lm.get("resistance_levels") or []],
-                step=0 if asset == "eth" else 1)   # SOL·XRP 한 단계 더 멀리(롱 = 익절 저항3·손절 지지2)
+                step=1)   # 한 단계 더 멀리(롱 = 익절 저항3·손절 지지2). 2026-09-27 ETH 도(사용자 지시 -- 09-27 숏 SL 이 진입가 13bp)
             if not b["available"]:
                 b["reason"] = "청산맵 레벨이 모자랍니다" if lm.get("warmed_up") else "청산맵 웜업 중"
             return b
@@ -5314,6 +5314,7 @@ def make_app() -> web.Application:
             state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
         st = bracket_load()
         st[bracket_key(plan["symbol"], pside)] = {"symbol": plan["symbol"], "side": pside, "sl_price": b.get("sl_price"),
+                     "sl_level": b.get("sl_level"),   # 5분봉 종가 판정은 USDT 레벨로(bracket_sl_hit)
                      "tp_price": b.get("tp_price"), "backstop_price": b.get("backstop_price"),
                      "armed_at": time.time(), "placed": state["bracket"]}
         bracket_save(st)
@@ -5335,10 +5336,18 @@ def make_app() -> web.Application:
         seen_at = {k: v.get("armed_at") for k, v in st.items()}
         for key, b in list(st.items()):
             pside = b.get("side") or key.rsplit(":", 1)[-1]
-            book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
-                                            {"symbol": b["symbol"]}, error_reason="book_ticker_failed")
+            # 2026-09-27 SL = 마감된 USDT 5분봉 종가(사용자 지시). 차트가 쓰는 60초 캐시라 REST 가 늘지 않는다
+            #   (옛 판은 측면마다 2초에 한 번 bookTicker). 못 읽으면 None -> hold -- «정리»는 계속 판단한다.
+            try:
+                now_s = time.time()
+                closed = [c for c in await load_market_history(exec_asset_of(b["symbol"]) or "eth")
+                          if int(c["time"]) + FOOTPRINT_BAR_SECONDS <= now_s]
+                last_bar = (int(closed[-1]["time"]) + FOOTPRINT_BAR_SECONDS, float(closed[-1]["close"])) if closed else None
+            except Exception as exc:  # noqa: BLE001
+                last_bar = None
+                print(f"bracket {pside}: 5분봉 못 읽음 {type(exc).__name__}: {exc}", flush=True)
             act = bracket_action(b, pside, account.get("positions") or [], bool(account.get("ok")),
-                                 acct_ts, float(book["bidPrice"]), float(book["askPrice"]))
+                                 acct_ts, last_bar)
             if act == "clear":
                 st.pop(key)
                 changed = True
@@ -5374,7 +5383,8 @@ def make_app() -> web.Application:
                 b["retry_after"] = time.time() + 30
                 b["last_error"] = manual_entry_state.get("error")
             changed = True
-            print(f"bracket {pside}: SL {b.get('sl_price')} 이탈 -> {manual_entry_state.get('phase')}",
+            print(f"bracket {pside}: SL {b.get('sl_price')} (레벨 {b.get('sl_level')}) 5분봉 종가 {last_bar} 이탈 -> "
+                  f"{manual_entry_state.get('phase')}",
                   flush=True)
         if changed:
             # 🔴다시 읽고 **내가 본 무장(armed_at)** 에만 적용한다 -- 위 await 동안 새 진입이 다른

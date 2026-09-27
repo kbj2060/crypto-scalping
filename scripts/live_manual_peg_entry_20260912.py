@@ -288,15 +288,20 @@ def build_bracket_plan(*, position_side: str, support_levels: list[float],
     }
 
 
-def bracket_sl_hit(position_side: str, bid: float, ask: float, sl_price: float | None) -> bool:
-    """SL 이탈인가. 롱은 **팔 수 있는 값**(최우선 매수호가)이 SL 이하, 숏은 살 값(매도호가)이 이상."""
-    if not sl_price or not (bid > 0 and ask > 0):
+def bracket_sl_hit(position_side: str, last_bar: tuple[float, float] | None, armed: dict) -> bool:
+    """SL 이탈인가 = **무장 뒤 마감된 5분봉 종가**가 청산맵 레벨(USDT)을 넘었나 (2026-09-27 사용자 지시).
+    호가 터치로 판정하던 옛 판은 꼬리 한 번에 나갔다(09-27 숏: 레벨이 진입가 13bp 위 = 5분 고저폭 중앙값).
+    last_bar = (봉 마감 시각 초, 종가) -- 레벨과 같은 USDT 심볼의 마감봉. 꼬리가 넘어도 종가가 돌아오면 hold.
+    ponytail: 09-27 이전 무장 상태엔 sl_level 이 없어 주문 심볼 가격 sl_price 로 비교한다(USDT/USDC 베이시스 수 bp 오차)."""
+    level = armed.get("sl_level") or armed.get("sl_price")
+    if not level or not last_bar or last_bar[0] <= float(armed["armed_at"]):
         return False
-    return bid <= sl_price if position_side == "LONG" else ask >= sl_price
+    close = last_bar[1]
+    return close <= level if position_side == "LONG" else close >= level
 
 
 def bracket_action(armed: dict, position_side: str, positions: list[dict], account_ok: bool,
-                   account_ts: float, bid: float, ask: float) -> str:
+                   account_ts: float, last_bar: tuple[float, float] | None) -> str:
     """감시 루프 한 틱의 판단: "clear"(포지션이 사라짐 -- 남은 우리 주문 정리) · "fire"(SL 이탈 --
     메이커 추격 청산) · "hold".
 
@@ -307,7 +312,7 @@ def bracket_action(armed: dict, position_side: str, positions: list[dict], accou
                and abs(float(p.get("qty") or 0.0)) > 0 for p in positions or [])
     if account_ok and not held and account_ts > float(armed["armed_at"]) + 5:
         return "clear"
-    return "fire" if bracket_sl_hit(position_side, bid, ask, armed.get("sl_price")) else "hold"
+    return "fire" if bracket_sl_hit(position_side, last_bar, armed) else "hold"
 
 
 def bracket_key(symbol: str, position_side: str) -> str:
