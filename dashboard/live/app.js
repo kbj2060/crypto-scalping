@@ -2431,21 +2431,6 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
   setH(targetId, html);
 }
 
-// One row of the liquidation-map price ladder -- tag+price+density bar+distance, color-coded by
-// side. Bar width floors at 4% so even a low-weight surviving level stays visible (a 0%-wide bar
-// would look broken/missing rather than "weak").
-function liquidationLevelRowHtml(lv, tag, sideClass) {
-  const pct = Math.round((lv.weight_pct || 0) * 100);
-  const dist = Number(lv.distance_pct);
-  const distText = Number.isFinite(dist) ? `${dist > 0 ? "+" : ""}${fmtNum(dist, 2)}%` : "-";
-  return `<div class="liq-level-row ${sideClass}">
-      <span class="liq-level-tag">${escapeHtml(tag)}</span>
-      <span class="liq-level-price">${fmtNum(lv.price, 2)}</span>
-      <div class="liq-level-bar-track"><div class="liq-level-bar-fill" style="width:${Math.max(pct, 4)}%;"></div></div>
-      <span class="liq-level-dist">${distText}</span>
-    </div>`;
-}
-
 // Renders the Snapshot tab's liquidation-map list as a price ladder: resistance levels (farthest
 // first) above a highlighted current-price row, support levels (nearest first) below -- reads
 // top-to-bottom the same way the chart overlay's lines sit above/below current price.
@@ -2494,21 +2479,60 @@ function renderLiquidationMapPanel() {
       .filter((lv) => side === "support" ? lv.price < liveCurrentPrice : lv.price > liveCurrentPrice)
       .map((lv) => ({ ...lv, distance_pct: (lv.price - liveCurrentPrice) / liveCurrentPrice * 100 }));
   };
-  // 2026-09-11 사용자 요청: 각 측면 **3개**만. 원 배열은 현재가에서 가까운 순이므로
-  // 자르고 나서 뒤집는다(저항은 먼 것이 위, 가까운 것이 현재가 줄 바로 위로 온다).
+  // 2026-09-11 사용자 요청: 각 측면 **3개**만(원 배열은 현재가에서 가까운 순).
+  // 2026-09-28 사용자 선택 시안 B -- 행 목록 대신 **거리 수직선**: 가로 = 현재가 대비 %, 레벨 = 원(크기·농도 = 청산 밀집 강도),
+  //   맨 위 한 줄이 결론(«위로 +x% · 아래로 −y%» + 가까운 쪽이 몇 배 가까운지). 행 간격이 균등하던 목록은 거리를 숫자로만 말했다.
+  //   🔴서술이다 -- 청산 밀집은 추정이고 지지·저항 반등을 예측하지 않는다(벽 반등률 0.509, 09-20).
   const SR_ROWS = 3;
-  const resistanceRows = liveRedistanced(map.resistance_levels, "resistance").slice(0, SR_ROWS).reverse()
-    .map((lv, i, arr) => liquidationLevelRowHtml(lv, `저항${arr.length - i}`, "liq-resistance"));
-  const supportRows = liveRedistanced(map.support_levels, "support").slice(0, SR_ROWS)
-    .map((lv, i) => liquidationLevelRowHtml(lv, `지지${i + 1}`, "liq-support"));
-  const currentRow = `<div class="liq-level-row liq-current">
-      <span class="liq-level-tag">현재가</span>
-      <span class="liq-level-price">${fmtNum(liveCurrentPrice || map.current_price, 2)}</span>
-      <div class="liq-level-bar-track"></div>
-      <span class="liq-level-dist">-</span>
-    </div>`;
-  const rows = [...resistanceRows, currentRow, ...supportRows];
-  setH("liquidationMapList", rows.length ? rows.join("") : `<p class="muted" style="padding:16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
+  const res = liveRedistanced(map.resistance_levels, "resistance").slice(0, SR_ROWS);
+  const sup = liveRedistanced(map.support_levels, "support").slice(0, SR_ROWS);
+  const list = el("liquidationMapList");
+  const cur = liveCurrentPrice || Number(map.current_price) || 0;
+  if (!list || !(cur > 0) || (!res.length && !sup.length)) {
+    setH("liquidationMapList", `<p class="muted" style="padding:16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
+    return;
+  }
+  // 🔴높이는 **정해진 값**에서 받는다 -- clientHeight 를 읽으면 그린 SVG 가 상자를 키우고 다음 틱에 또 키운다(1초에 수십 px 씩 자랐다).
+  const W = Math.max(280, list.clientWidth || 600), H = Math.max(150, parseFloat(list.style.height) || 190);
+  const narrow = W < 460, x0 = 30, x1 = W - 30;
+  const ds = [...res, ...sup].map((lv) => lv.distance_pct);
+  const lo = Math.min(0, ...ds) - 0.12, hi = Math.max(0, ...ds) + 0.12;
+  const X = (v) => x0 + (v - lo) / (hi - lo) * (x1 - x0);
+  const yl = Math.round(H * 0.56);
+  const t = (x, y, str, fs, fill, anc = "middle", wt = 400) =>
+    `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${fs}" fill="${fill}" text-anchor="${anc}" font-weight="${wt}">${escapeHtml(str)}</text>`;
+  const up = res.length ? res[0].distance_pct : null, dn = sup.length ? sup[0].distance_pct : null;
+  const pc = (v) => (v > 0 ? "+" : "") + fmtNum(v, 2) + "%";
+  let head = [up != null ? "위로 " + pc(up) : "", dn != null ? "아래로 " + pc(dn) : ""].filter(Boolean).join("  ·  ");
+  let sub = "";
+  if (up != null && dn != null && Math.min(up, -dn) > 0) {
+    const r = up / -dn;
+    sub = r >= 1 ? `가장 가까운 지지가 저항보다 ${fmtNum(r, 1)}배 가깝다` : `가장 가까운 저항이 지지보다 ${fmtNum(1 / r, 1)}배 가깝다`;
+  }
+  const o = [t(W / 2, narrow ? 22 : 26, head, narrow ? 15 : 19, "var(--ink)", "middle", 700),
+             sub ? t(W / 2, narrow ? 40 : 46, sub, narrow ? 11 : 12, "var(--muted)") : "",
+             `<line x1="${x0}" x2="${x1}" y1="${yl}" y2="${yl}" stroke="var(--line)"/>`];
+  if (up != null && dn != null) {
+    o.push(`<rect x="${X(dn).toFixed(1)}" y="${yl - 3}" width="${(X(up) - X(dn)).toFixed(1)}" height="6" fill="var(--ink)" fill-opacity="0.08"/>`);
+  }
+  // 이름표는 **겹치지 않는 줄**에 놓는다: 위 → 아래 → 더 위 → 더 아래 순으로, 그 줄에 64px 안쪽 이름표가 없으면 거기.
+  //   (가까운 레벨 셋이 몰리면 위/아래 번갈이만으로는 1·3번이 포개졌다 -- 모바일 실측)
+  const rMax = narrow ? 11 : 14, TIERS = [-(rMax + 16), rMax + 16, -(rMax + 40), rMax + 40], taken = TIERS.map(() => []);
+  [...res.map((lv, i) => [lv, i, "저항", "var(--liq-resistance)"]), ...sup.map((lv, i) => [lv, i, "지지", "var(--liq-support)"])]
+    .sort((a, b) => a[0].distance_pct - b[0].distance_pct)
+    .forEach(([lv, i, name, col]) => {
+      const wv = Math.max(0, Math.min(1, lv.weight_pct || 0)), x = X(lv.distance_pct), r = 4 + (narrow ? 7 : 10) * wv;
+      o.push(`<circle cx="${x.toFixed(1)}" cy="${yl}" r="${r.toFixed(1)}" fill="${col}" fill-opacity="${(0.35 + 0.55 * wv).toFixed(2)}" stroke="${col}"><title>${escapeHtml(`${name}${i + 1} ${fmtNum(lv.price, 2)} (${pc(lv.distance_pct)}) · 청산 밀집 ${Math.round(wv * 100)}%`)}</title></circle>`);
+      let k = TIERS.findIndex((_, j) => taken[j].every((tx) => Math.abs(tx - x) >= 64));
+      if (k < 0) k = 0;
+      taken[k].push(x);
+      const ty = yl + TIERS[k] + (TIERS[k] > 0 ? 4 : 0);
+      o.push(t(x, ty, `${name}${i + 1}`, narrow ? 10 : 11, col, "middle", 700), t(x, ty + (narrow ? 11 : 13), fmtNum(lv.price, 1), narrow ? 10 : 11, "var(--muted)"));
+    });
+  o.push(`<line x1="${X(0).toFixed(1)}" x2="${X(0).toFixed(1)}" y1="${yl - 30}" y2="${yl + 30}" stroke="var(--ink)" stroke-width="2"/>`,
+         t(X(0), yl + (narrow ? 44 : 48), "현재 " + fmtNum(cur, 2), narrow ? 11 : 12, "var(--ink)", "middle", 700));
+  [-2, -1.5, -1, -0.5, 0.5, 1, 1.5, 2].forEach((v) => { if (v > lo && v < hi) o.push(t(X(v), H - 6, (v > 0 ? "+" : "") + v + "%", 10, "var(--muted)")); });
+  setH("liquidationMapList", `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" style="display:block" font-family="inherit" role="img" aria-label="${escapeHtml(head)}">${o.join("")}</svg>`);
 }
 
 // 2026-08-25 실측(VAL+OOS 48,853봉): 같은 쪽 신호가 동시에 몇 개 뜨는지(bottom_votes/top_votes)
@@ -3151,18 +3175,6 @@ function nearestLiquidationLevel() {
   }];
 }
 
-
-// 2026-09-26 사용자 지시(A): **현재 5분봉**의 실제 청산 극값 -- 롱 청산 최저 체결가·숏 청산 최고 체결가
-//   (바이낸스 @forceOrder ap, 2초 갱신). 추정 청산맵과 달리 «실제로 여기까지 청산됐다»는 사실이다.
-function liqExtremeLevels(footprint) {
-  const bars = latestLiquidation5mHist;
-  const b = Array.isArray(bars) && bars.length ? bars[bars.length - 1] : null;
-  if (!b || !b.partial) return [];
-  return [[b.long_min_px, "롱청산", "var(--bad)"], [b.short_max_px, "숏청산", "var(--good)"]]
-    .filter(([px]) => Number(px) > 0)
-    .map(([px, label, color]) => ({ val: Number(px), color, label, priceLeft: true,
-                                    dashed: true, width: 1, marker: !!footprint }));
-}
 
 // Keeps candleHistoryByAsset[activeSnapshotAsset]'s rightmost candle live between the 5-min
 // maybeFetchSnapshotChartHistory() fetches, mirroring updateChart()'s in-place extend/roll logic
@@ -4447,7 +4459,7 @@ function renderSnapshotChart() {
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel(), ...trendFlipLevels(footprint, candles),
-                      ...liqExtremeLevels(footprint)];
+];
   // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
   // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
   // /api/liquidation-map 이 갱신될 때(60초)만 다시 만든다.
@@ -4575,7 +4587,8 @@ function placeLevelList(svg, box) {
   if (!box || !card) { list.style.cssText = ""; return; }
   const sr = svg.getBoundingClientRect(), cr = card.getBoundingClientRect();
   Object.assign(list.style, { position: "absolute", margin: "0", width: `${box.w}px`,
-                              left: `${sr.left - cr.left + box.x}px`, top: `${sr.top - cr.top + box.y}px` });
+                              left: `${sr.left - cr.left + box.x}px`, top: `${sr.top - cr.top + box.y}px`,
+                              height: box.h > 0 ? `${box.h}px` : "", padding: "0" });
 }
 
 function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = [], footprint = null) {
@@ -4653,9 +4666,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   190 에서 118px 이었고, 400 이면 290px 가 된다.
   //   🔴가격 플롯(400)에서 뺏지 않고 상자를 키운다 -- 캔들이 눌리면 안 된다.
   const SUB_GAP = 8, SUB_1S_H = subOn ? 400 : 0;
-  // 2026-09-28 호가·체결 프로파일 상자를 걷어냈다(체결은 풋프린트 기둥으로, 사용자 선택 시안 B) -- 2단 오른쪽 칸은
-  //   1초 수급이 그 자리(190 + 간격 8)까지 가져간다. 아래 레벨 목록 위치는 그대로다(12 + 598 + 12).
-  const SUB_1S_SIDE_H = subOn ? 598 : 0;
   // 1단(데스크톱·모바일)은 호가 요약 네 숫자가 1초 수급 바닥에서 한 줄(14)을 떼어 간다 -- SUB_TOTAL 은 그대로.
   //   (그냥 풋프린트 위에 얹으면 모바일은 밀도 범례, 데스크톱은 1초 수급의 시각 눈금과 겹쳤다.)
   const STATS_ROW_H = subOn && !splitR ? 14 : 0;
@@ -4815,7 +4825,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   svg.setAttribute("viewBox", `0 0 ${wAll} ${hAll}`);
   svg.innerHTML = "";
   if (svg.id === "candleSvgSnapshot") {
-    placeLevelList(svg, splitR ? { x: subX, y: mtTop + SUB_1S_SIDE_H + 12, w: subW } : null);
+    // 2026-09-28 2단 오른쪽 칸을 왼쪽과 **가로줄로 맞춘다**(사용자 «수급차트들이랑 높이 맞춰줘»):
+    //   1초 수급 = 맨 위 ~ 레인 판 윗변 직전(= 가격 플롯 옆), 지지/저항 = 레인 판(사분면·누적) 옆 같은 높이.
+    placeLevelList(svg, splitR ? { x: subX, y: quadY, w: subW, h: QUAD_H + QUAD_TXT } : null);
   }
   
   if (!candles.length) {
@@ -6938,25 +6950,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           + (b.hl ? " · HL 고래 청산 " + fmtUsdCompact((b.hl.long_usd || 0) + (b.hl.short_usd || 0))
              + " (" + b.hl.n + "건 · 롱 " + fmtUsdCompact(b.hl.long_usd || 0) + " / 숏 "
              + fmtUsdCompact(b.hl.short_usd || 0) + " · 추적 300지갑 한정)" : "");
-        const lx = Number(b.long_min_px), sx = Number(b.short_max_px);
-        if (lx > 0 || sx > 0) tip.textContent += " · 청산 극값(바이낸스 체결가)"
-          + (lx > 0 ? " 롱 최저 " + fmtNum(lx, pxDp()) : "") + (sx > 0 ? " 숏 최고 " + fmtNum(sx, pxDp()) : "");
         dot.appendChild(tip);
         g.appendChild(dot);
-        // 2026-09-26 A: 그 봉에서 청산이 닿은 가장 먼 가격 -- 봉 왼쪽 틈에서 오른쪽을 가리키는 꺾쇠.
-        //   셀 숫자를 가로지르지 않으려고 선이 아니라 틈에 둔다.
-        const tw = Math.max(3, Math.min(6, xAt(1) - xAt(0) - bw - 1));
-        [[lx, "var(--bad)"], [sx, "var(--good)"]].forEach(([px, col]) => {
-          if (!(px > 0)) return;
-          const y = yAt(px);
-          if (y < mt || y > plotBottom) return;
-          const tri = document.createElementNS(NS, "polygon");
-          const x = xAt(i) - 0.5;
-          tri.setAttribute("points", `${x},${y} ${x - tw},${y - tw * 0.7} ${x - tw},${y + tw * 0.7}`);
-          tri.setAttribute("fill", col);
-          tri.setAttribute("data-liq-extreme", col === "var(--bad)" ? "long" : "short");
-          g.appendChild(tri);
-        });
       });
     }
   }
@@ -6985,7 +6980,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     };
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
-    const s1H = splitR ? SUB_1S_SIDE_H : SUB_1S_H - STATS_ROW_H;
+    const s1H = splitR ? Math.max(200, quadY - 8 - mtTop) : SUB_1S_H - STATS_ROW_H;   // 2단: 레인 판 윗변까지
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),

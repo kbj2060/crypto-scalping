@@ -143,8 +143,8 @@ def test_sub_panels_tile_without_overlap():
     for name, expr in exprs.items():
         wide[name] = ev(expr, wide)
     assert wide["subLegendY"] == env["mtTop"], "2단에서 밀도 범례가 풋프린트 바로 위(맨 위)가 아니다"
-    # 2단 오른쪽 칸: 1초 수급이 옛 프로파일 자리까지 가져간다 -- 아래 레벨 목록 자리(12 + 598 + 12)는 그대로.
-    assert _num(r"const SUB_1S_SIDE_H = subOn \? (\d+)", JS, "SUB_1S_SIDE_H") == 598
+    # 2단 오른쪽 칸(2026-09-28): 1초 수급은 레인 판 윗변까지, 지지/저항은 레인 판과 같은 높이 -- 왼쪽과 가로줄이 맞는다.
+    assert "Math.max(200, quadY - 8 - mtTop)" in JS and "{ x: subX, y: quadY, w: subW, h: QUAD_H + QUAD_TXT }" in JS
 
     env["splitR"] = 0
     for name, expr in exprs.items():
