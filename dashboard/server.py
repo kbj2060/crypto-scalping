@@ -3722,8 +3722,14 @@ def make_app() -> web.Application:
         except (OSError, ValueError, KeyError, IndexError, TypeError):
             return None
 
-    async def load_5m_day() -> list[dict[str, float]]:
-        """관계 읽기·융합 신호의 24h 분위 기준(5분봉 300개). 60초 캐시 · 형성 중 봉은 버린다."""
+    async def load_5m_day(bar_start: int) -> list[dict[str, float]]:
+        """관계 읽기·융합 신호의 24h 분위 기준(5분봉 300개). 60초 캐시 · 형성 중 봉은 버린다.
+        🔴2026-09-27: 60초 캐시라 봉 경계 직후엔 **방금 닫힌 봉이 없었다** — 카드 장부 179/179 줄이 한 봉 전 피쳐로 찍혔다
+          (방향·닿음 모델 · 융합 관문 분위 전부). 방금 닫힌 봉이 없으면 캐시를 식혀 새로 받는다(2초에 한 번까지)."""
+        st = swr_store.setdefault("flow_read_5m_day", {"ts": 0.0, "payload": None})
+        pl = st.get("payload")
+        if pl and int(pl[-1]["time"]) < bar_start - FOOTPRINT_BAR_SECONDS and time.monotonic() - st.get("ts", 0.0) > 2.0:
+            st["ts"] = 0.0
         async def produce() -> list[dict[str, float]]:
             raw = await fetch_binance_json(
                 "https://fapi.binance.com/fapi/v1/klines",
@@ -3742,7 +3748,7 @@ def make_app() -> web.Application:
         except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
             situation_state["btc_candles"] = None
         try:
-            situation_state["candles_day"] = await load_5m_day()
+            situation_state["candles_day"] = await load_5m_day(int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS)
         except Exception as exc:  # noqa: BLE001 -- 없으면 카드 캐시(짧다)로 물러선다
             print(f"flow-read 5m day: {exc!r}", flush=True)
         # 2026-09-24 max_stale 30: 둘 다 duckdb 읽기라 회당 0.4~0.5초(서버 로그)인데 블로킹이면 5초마다
@@ -3784,6 +3790,7 @@ def make_app() -> web.Application:
                                              "cell": [o3["reg"], o3["a"], o3["g"]],
                                              "p": {c["key"]: c["p"] for c in o3["cols"]}, "dir_p": card30["p"].get("dir") if str(o3.get("dir_src", "")).startswith("model") else None,
                                              "reach_p": card30["p"].get("reach") if o3.get("reach_src") == "model" else None,
+                                             "feat_bar": card30.get("bar"),   # 모델 피쳐의 마지막 봉 -- bar−300 이 아니면 낡은 값
                                              "dir_src": o3.get("dir_src"), "up_share": o3.get("up_share"),
                                              "up": o3["cols"][0].get("target"), "dn": o3["cols"][1].get("target")},
                                             ensure_ascii=False) + "\n")
