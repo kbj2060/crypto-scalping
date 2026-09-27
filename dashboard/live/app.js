@@ -7094,6 +7094,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       priceBadgeText.style.display = "none";
     }
 
+    // 2026-09-27 호가 띠 위면 봉 툴팁 대신 **호가 해석** -- 커서 가격의 칸(없으면 가장 가까운 칸).
+    if (bookInfo && mx > ml + cw && mx <= w - mr) {
+      vLine.style.display = "none";
+      const priceAt = yMax - ((my - mt) * ySpan) / ch;
+      let best = null;
+      bookInfo.cells.forEach((c) => { if (!best || Math.abs(c.p - priceAt) < Math.abs(best.p - priceAt)) best = c; });
+      if (best && Math.abs(best.p - priceAt) <= bookInfo.bs) { showTooltip(evt.pageX, evt.pageY, bookTipHtml(best)); return; }
+      hideTooltip(); return;
+    }
     if (mx < ml || mx > w - mr) { hideTooltip(); return; }
 
     const idx = Math.min(candles.length - 1, Math.max(0, Math.floor(((mx - ml) / cw) * candles.length)));
@@ -7241,24 +7250,71 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   수량은 수집기 래스터 값(칸 $0.5 합산)이고, 가격선은 이 띠를 가로질러 배지까지 이어진다(호가창 사다리처럼).
   // 2026-09-27 축적 호가를 입혔다(사용자 선택 A + «재깔림도»): 한 칸 = 두 겹.
   //   **심(진함) = 창 내내 한 번도 안 빠진 양(pers)** -- 버텨 온 벽 vs 방금 깔린 호가를 가른다(창 안 호가의 36% 는 창을 못 버틴다).
-  //   **겉 = 지금 양, 밝기 = 재깔림(refill/peak)의 창 안 순위** -- 밝으면 계속 다시 채워지는 자리, 흐리면 한 번 깔리고 만 호가.
+  //   **겉 = 지금 양, 그 안 글자 = 재깔림(refill/peak) 3분위** -- A 는 계속 다시 채워지는 자리, C 는 한 번 깔리고 만 호가.
   //   🔴둘 다 «성격»의 서술이다 -- 지속률은 반등을 못 가렸다(상위−하위 +0.001, 09-20). 창 = 위 1h/2h/4h/12h 토글.
   const book = BOOK_W && latestFlowHeatmap && latestFlowHeatmap.book;
   const acc = latestFlowHeatmap && latestFlowHeatmap.rows;
-  cachedLayer("bookStrip", book ? book.t_ms + "|" + activeSnapshotAsset + "|" + (acc ? acc.bin_lo : 0) : "none", (g) => {
-    if (!book || !book.q || !(book.bin_size > 0)) return;
+  // 칸별 값은 층 캐시 **밖에서** 매 렌더 계산한다(≈250칸) -- 캐시가 재사용돼도 호버 해석(bookInfo)이 같은 값을 본다.
+  const bookInfo = (() => {
+    if (!book || !book.q || !(book.bin_size > 0)) return null;
     const bs = book.bin_size, x0 = ml + cw + 6, L = BOOK_W - 10;
-    const vis = [];
+    const accAt = (key, p) => {               // 축적 통계는 창 전체를 접은 행 배열이라 제 격자(bin_lo) -- 가격으로 찾는다
+      if (!acc || !acc[key] || !(acc.bin_size > 0)) return 0;
+      const i = Math.round(p / acc.bin_size) - acc.bin_lo;
+      return i >= 0 && i < acc[key].length ? acc[key][i] : 0;
+    };
+    const cells = [];
     for (let i = 0; i < book.q.length; i++) {
       const v = book.q[i], p = (book.bin_lo + i) * bs;
       if (!v || p + bs / 2 < yMin || p - bs / 2 > yMax) continue;
-      vis.push([p, Math.abs(v), v > 0]);
+      const q = Math.abs(v), pk = accAt("peak", p);
+      cells.push({ p, q, bid: v > 0, pers: Math.min(q, accAt("pers", p)), rw: pk > 0 ? accAt("refill", p) / pk : 0 });
     }
-    if (!vis.length) return;
-    const mx = Math.max(...vis.map((v) => v[1]));
-    const sorted = vis.map((v) => v[1]).sort((a, b) => a - b);
-    const p90 = sorted[Math.floor(sorted.length * 0.9)];
-    const unit = coinUnit();
+    if (!cells.length) return null;
+    const mx = Math.max(...cells.map((c) => c.q));
+    const qs = cells.map((c) => c.q).sort((a, b) => a - b);
+    const p90 = qs[Math.floor(qs.length * 0.9)];
+    const rwSorted = cells.map((c) => c.rw).filter((x) => x > 0).sort((a, b) => a - b);
+    cells.forEach((c) => {                    // 재깔림 = 보이는 범위 안 순위(0~1) -- 프로파일 호가 막대와 같은 방식
+      c.wall = c.q >= p90;
+      if (rwSorted.length < 2 || !(c.rw > 0)) { c.rwPct = 0; return; }
+      let lo = 0, hi = rwSorted.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (rwSorted[m] < c.rw) lo = m + 1; else hi = m; }
+      c.rwPct = lo / (rwSorted.length - 1);
+    });
+    // 2026-09-27 재깔림은 밝기 대신 **3분위 글자**(사용자 지시): A = 상위 1/3(자주 다시 채움) · B = 중간 · C = 하위 1/3. 기록 없으면 빈칸.
+    cells.forEach((c) => { c.rwGrade = !(c.rw > 0) || rwSorted.length < 3 ? "" : c.rwPct >= 2 / 3 ? "A" : c.rwPct >= 1 / 3 ? "B" : "C"; });
+    return { bs, x0, L, mx, cells };
+  })();
+  // 2026-09-27 호가 해석 툴팁(사용자 지시) -- 첫 줄이 결론(DESIGN: 툴팁 첫 줄 = 결론). 모양 넷 + «현재가 바로 옆».
+  //   두꺼운 심 = 지금 양의 절반 이상이 창 내내 버텼다 · 자주 다시 채움 = 재깔림 A(상위 1/3).
+  //   🔴전부 «성격»의 서술이다 -- 벽 반등률 0.509(동전), 지속률 상위−하위 +0.001(09-20). 재깔림 예측력은 아직 안 쟀다.
+  const bookTipHtml = (c) => {
+    const unit = coinUnit(), dp = pxDp(), win = Math.round(chartWindowBars * 5 / 60) + "h";
+    const fq = (q) => (q >= 1000 ? (q / 1000).toFixed(1) + "k" : q >= 10 ? q.toFixed(0) : q.toFixed(1));
+    const side = c.bid ? "매수" : "매도", col = c.bid ? "var(--good)" : "var(--bad)";
+    const distBp = currentPrice > 0 ? (c.p - currentPrice) / currentPrice * 1e4 : 0;
+    const near = currentPrice > 0 && Math.abs(c.p - currentPrice) <= bookInfo.bs * 2;
+    const thick = c.q > 0 && c.pers / c.q >= 0.5, bright = c.rwGrade === "A";   // 자주 다시 채움 = A
+    const read = near ? ["현재가 바로 옆", "마켓메이커가 가격 따라 호가를 고쳐 거는 자리라 재깔림·변동이 늘 크다 -- 정보가 적다"]
+      : thick && bright ? ["지키는 모양", "창 내내 버티면서, 빠지거나 먹혀도 다시 채웠다"]
+      : !thick && bright ? ["깜빡이는 호가", "자주 걸었다 뺐다 한다(알고리즘 재호가·보여 주기) -- 벽으로 믿기 가장 어렵다"]
+      : thick ? ["앉아 있는 호가", "한 번 걸어 두고 가만히 있다 -- 닿으면 그냥 체결되거나 빠진다"]
+      : ["방금 깔린 호가", "창 안에서 버틴 이력이 거의 없다"];
+    return `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))"><span style="color:${col};font-weight:700">${read[0]}</span> · ${side} 호가 ${c.p.toFixed(dp)}`
+      + (currentPrice > 0 ? ` (현재가 ${distBp >= 0 ? "+" : ""}${distBp.toFixed(1)}bp)` : "")
+      + `<br>${read[1]}`
+      + `<br><br>지금 ${fq(c.q)} ${unit}${c.wall ? " · 보이는 범위 상위 10% 벽" : ""}`
+      + `<br>버틴 양 ${fq(c.pers)} (${c.q > 0 ? Math.round(c.pers / c.q * 100) : 0}% · ${win} 창 내내 안 빠진 양 = 진한 심)`
+      + `<br>재깔림 ${c.rw > 0 ? c.rw.toFixed(1) + "배" : "없음"}`
+      + (c.rwGrade ? ` · <span style="font-weight:700">${c.rwGrade}</span> (보이는 범위 ${{ A: "상위", B: "중간", C: "하위" }[c.rwGrade]} 1/3 = 막대 속 글자)` : "")
+      + `<br><br>닿을 때 이 줄 풋프린트에 체결이 크게 찍히는데 막대가 안 줄면 <span style="font-weight:700">흡수</span>,`
+      + `<br>체결 없이 막대가 사라지면 빠진 호가다.`
+      + `<br><span style="opacity:.7">성격의 서술 · 지지·저항 신호 아님(벽 반등률 0.509)</span></div>`;
+  };
+  cachedLayer("bookStrip", book ? book.t_ms + "|" + activeSnapshotAsset + "|" + (acc ? acc.bin_lo : 0) : "none", (g) => {
+    if (!bookInfo) return;
+    const { bs, x0, L, mx, cells } = bookInfo;
     const fmtQ = (q) => (q >= 1000 ? (q / 1000).toFixed(1) + "k" : q >= 10 ? q.toFixed(0) : q.toFixed(1));
     const hd = document.createElementNS(NS, "text");
     hd.setAttribute("x", x0); hd.setAttribute("y", mt - 4); hd.setAttribute("font-size", "10");
@@ -7269,51 +7325,45 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     base.setAttribute("y1", mt); base.setAttribute("y2", plotBottom);
     base.setAttribute("stroke", "var(--soft-line)");
     g.appendChild(base);
-    // 축적 통계는 창 전체를 접은 행 배열이라 제 격자(bin_lo)를 쓴다 -- 가격으로 찾는다.
-    const accAt = (key, p) => {
-      if (!acc || !acc[key] || !(acc.bin_size > 0)) return 0;
-      const i = Math.round(p / acc.bin_size) - acc.bin_lo;
-      return i >= 0 && i < acc[key].length ? acc[key][i] : 0;
-    };
-    const rwOf = (p) => { const pk = accAt("peak", p); return pk > 0 ? accAt("refill", p) / pk : 0; };
-    const rwSorted = vis.map(([p]) => rwOf(p)).filter((x) => x > 0).sort((a, b) => a - b);
-    const rwPct = (x) => {                // 0~1 창(보이는 범위) 안 순위 -- 프로파일 호가 막대와 같은 방식
-      if (rwSorted.length < 2 || !(x > 0)) return 0;
-      let lo = 0, hi = rwSorted.length;
-      while (lo < hi) { const m = (lo + hi) >> 1; if (rwSorted[m] < x) lo = m + 1; else hi = m; }
-      return lo / (rwSorted.length - 1);
-    };
-    vis.forEach(([p, q, bid]) => {
-      const yTop = Math.max(mt, yAt(p + bs / 2)), yBot = Math.min(plotBottom, yAt(p - bs / 2));
-      const wall = q >= p90, len = Math.max(1, Math.sqrt(q / mx) * L);
-      const pers = Math.min(q, accAt("pers", p)), rw = rwOf(p);
-      const color = bid ? "var(--good)" : "var(--bad)", rh = Math.max(1, yBot - yTop - 1);
-      const cell = document.createElementNS(NS, "g");
+    cells.forEach((c) => {
+      const yTop = Math.max(mt, yAt(c.p + bs / 2)), yBot = Math.min(plotBottom, yAt(c.p - bs / 2));
+      const len = Math.max(1, Math.sqrt(c.q / mx) * L);
+      const color = c.bid ? "var(--good)" : "var(--bad)", rh = Math.max(1, yBot - yTop - 1);
       const shell = document.createElementNS(NS, "rect");
       shell.setAttribute("x", x0); shell.setAttribute("y", yTop + 0.5);
       shell.setAttribute("width", len); shell.setAttribute("height", rh);
       shell.setAttribute("fill", color);
-      shell.setAttribute("fill-opacity", (0.14 + 0.56 * rwPct(rw)).toFixed(2));
-      cell.appendChild(shell);
-      if (pers > 0) {
+      shell.setAttribute("fill-opacity", "0.3");
+      g.appendChild(shell);
+      const coreLen = c.pers > 0 ? Math.max(1, Math.sqrt(c.pers / mx) * L) : 0;
+      if (coreLen) {
         const core = document.createElementNS(NS, "rect");
         core.setAttribute("x", x0); core.setAttribute("y", yTop + 0.5);
-        core.setAttribute("width", Math.max(1, Math.sqrt(pers / mx) * L)); core.setAttribute("height", rh);
+        core.setAttribute("width", coreLen); core.setAttribute("height", rh);
         core.setAttribute("fill", color); core.setAttribute("fill-opacity", "0.9");
-        cell.appendChild(core);
+        g.appendChild(core);
       }
-      const t = document.createElementNS(NS, "title");
-      t.textContent = `${bid ? "매수" : "매도"} 호가 ${p.toFixed(pxDp())} · 지금 ${fmtQ(q)} ${unit}`
-        + ` · 버틴 양 ${fmtQ(pers)}` + (rw > 0 ? ` · 재깔림 ${rw.toFixed(1)}배` : "")
-        + (wall ? " (보이는 범위 상위 10%)" : "") + " -- 성격의 서술이지 지지·저항 신호가 아니다(실측 반등률 0.509)";
-      cell.appendChild(t);
-      g.appendChild(cell);
-      if (wall && !mobileChart) {
+      // 재깔림 등급 글자: 겉(심 바깥) 빈 공간 안에. 좁으면 막대 바로 오른쪽(벽 수량 글자 자리면 생략). 행이 너무 얇으면 안 쓴다.
+      const fs = Math.min(9, rh - 1);
+      if (c.rwGrade && fs >= 6) {
+        const inside = len - coreLen >= fs + 2;
+        if (inside || !c.wall) {
+          const tg = document.createElementNS(NS, "text");
+          tg.setAttribute("x", inside ? x0 + coreLen + 2 : x0 + len + 2);
+          tg.setAttribute("y", (yTop + yBot) / 2 + fs * 0.36);
+          tg.setAttribute("font-size", fs); tg.setAttribute("font-weight", "700");
+          tg.setAttribute("fill", inside ? "var(--ink)" : color);
+          if (c.rwGrade === "C") tg.setAttribute("opacity", "0.6");
+          tg.textContent = c.rwGrade;
+          g.appendChild(tg);
+        }
+      }
+      if (c.wall && !mobileChart) {
         const lb = document.createElementNS(NS, "text");
         lb.setAttribute("x", Math.min(x0 + len + 2, x0 + L - 12));
         lb.setAttribute("y", Math.max(mt + 8, Math.min(plotBottom - 2, (yTop + yBot) / 2 + 3)));
-        lb.setAttribute("font-size", "9"); lb.setAttribute("fill", bid ? "var(--good)" : "var(--bad)");
-        lb.textContent = fmtQ(q);
+        lb.setAttribute("font-size", "9"); lb.setAttribute("fill", color);
+        lb.textContent = fmtQ(c.q);
         g.appendChild(lb);
       }
     });
@@ -7989,6 +8039,7 @@ function showTooltip(x, y, html) {
   // Use a smaller offset (8px) and check right boundary
   let left = x + 8;
   if (left + tWidth > w) left = x - tWidth - 8; 
+  left = Math.max(4, left);   // 2026-09-27 좁은 화면에서 왼쪽 밖으로 나가지 않게
   
   t.style.left = left + "px";
   t.style.top = (y + 15) + "px"; // Position slightly below cursor
