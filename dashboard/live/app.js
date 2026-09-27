@@ -6705,11 +6705,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         pl.appendChild(pt);
         put(pl);
         const lastT = have[have.length - 1];
+        if (mobileChart) {
         const tv = document.createElementNS(NS, "text");
         tv.setAttribute("x", w - 2); tv.setAttribute("y", QB - 6); tv.setAttribute("text-anchor", "end");
         tv.setAttribute("font-size", mobileChart ? "10" : "12"); tv.setAttribute("fill", "var(--turnover)");
         tv.textContent = "거래대금 " + fmtUsdCompact(lastT.turn);
         put(tv);
+        }
       }
       if (QUAD_TEXT_OK) {
         const sgnCol = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
@@ -6723,29 +6725,42 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
                  "middle", null, r.oi == null ? "var(--muted)" : sgnCol(r.oi));
         });
       }
-      // 🔴좁은 폭에서는 오른쪽 꼬리표를 **상자 오른쪽 끝 기준 우측정렬**한다. 왼쪽정렬이면
-      //   mr(68px)을 넘는 순간 잘리는데, 우측정렬이면 긴 것만 플롯 쪽으로 조금 들어온다.
-      //   왼쪽 보조 라벨(«높이 |Δ|»·«농도 |OI|», 11px 로 42~50px)은 ml 44px 를 넘어
-      //   x<0 으로 잘렸다 -- 좁은 폭에서는 아예 안 그린다(실렌더 414px 에서 확인).
-      const side = (y, txt, anchor, color) => {
-        const t = document.createElementNS(NS, "text");
-        t.setAttribute("text-anchor", "end");
-        t.setAttribute("x", anchor === "end" ? ml - 6 : w - 2);
-        t.setAttribute("y", y); t.setAttribute("font-size", mobileChart ? "10" : "11");
-        t.setAttribute("fill", color || "var(--muted)");
-        t.textContent = txt;
-        return put(t);
-      };
-      const lbl = side(quadY + 14, "사분면", "end", "var(--accent)");
-      lbl.setAttribute("font-weight", "700");
-      const lblTip = document.createElementNS(NS, "title");
-      lblTip.textContent = "봉마다 델타(매수-매도)의 부호와 미결제약정(OI) 증분의 부호를 짝지은 것입니다. "
-        + "칸 배경 색 = 델타 부호(초록 매수·빨강 매도), 진하면 OI 증가(신규 롱/숏) · 옅으면 OI 감소(정리)이고 "
-        + "이름은 칸 위에 적습니다. 그 위의 흰 선은 누적 CVD, 주황 선은 누적 OI, 파란 점선은 봉별 거래대금입니다.";
-      lbl.appendChild(lblTip);
+      // ── 판 범례 (2026-09-28 사용자 «라벨을 깔끔하게») ────────────────────────────────
+      //   데스크톱 왼쪽 칸 = **무엇이 무엇인지**(선 견본 CVD·OI·거래대금 + 칸 농도 신규·정리), 오른쪽 = **지금 값**(cumLane).
+      //   모바일은 왼쪽 칸(44px)이 좁아 견본을 안 그린다 -- 값 줄이 아래에 있다.
       if (!mobileChart) {
-        side(quadY + 30, "진함 = 신규", "end"); side(quadY + 45, "옅음 = 정리", "end");
-        side(quadY + 64, "- - 거래대금", "end", "var(--turnover)");
+        const key = document.createElementNS(NS, "g");
+        const tipK = document.createElementNS(NS, "title");
+        tipK.textContent = "봉 칸 배경 = 사분면: 색은 델타 부호(초록 매수·빨강 매도), 진하면 OI 증가(신규 롱/숏) · 옅으면 OI 감소(정리). "
+          + "이름은 칸 위, Δ·OI 는 칸 아래. 흰 선 = 창 시작부터 누적 CVD, 주황 = 누적 OI(같은 축), 파란 점선 = 봉별 거래대금(판 아래 40% 제 축).";
+        key.appendChild(tipK);
+        const kx = 8, row = (i) => quadY + 16 + i * 17;
+        [["CVD", "var(--accent)", 2.6, null], ["OI", "var(--warn)", 2.4, null], ["거래대금", "var(--turnover)", 1.8, "5 3"]]
+          .forEach(([name, color, sw, dash], i) => {
+            const l = document.createElementNS(NS, "line");
+            l.setAttribute("x1", kx); l.setAttribute("x2", kx + 14); l.setAttribute("y1", row(i) - 4); l.setAttribute("y2", row(i) - 4);
+            l.setAttribute("stroke", color); l.setAttribute("stroke-width", sw);
+            if (dash) l.setAttribute("stroke-dasharray", dash);
+            key.appendChild(l);
+            const t = document.createElementNS(NS, "text");
+            t.setAttribute("x", kx + 18); t.setAttribute("y", row(i)); t.setAttribute("font-size", "11");
+            t.setAttribute("fill", color); t.textContent = name;
+            key.appendChild(t);
+          });
+        [["신규", "0.2"], ["정리", "0.1"]].forEach(([name, op], i) => {
+          const y = row(3.4 + i);
+          ["var(--good)", "var(--bad)"].forEach((c, j) => {
+            const r = document.createElementNS(NS, "rect");
+            r.setAttribute("x", kx + j * 7); r.setAttribute("y", y - 10); r.setAttribute("width", 7); r.setAttribute("height", 12);
+            r.setAttribute("fill", c); r.setAttribute("fill-opacity", String(Number(op) * 3));
+            key.appendChild(r);
+          });
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", kx + 18); t.setAttribute("y", y); t.setAttribute("font-size", "11");
+          t.setAttribute("fill", "var(--muted)"); t.textContent = name;
+          key.appendChild(t);
+        });
+        put(key);
       }
     }
   }
@@ -6770,7 +6785,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (!b) return null;
       const f = supplyFlowOfBar(b.levels);
       aw += f.whale; am += f.mid; ar += f.retail; ao += (oiByTs.get(c.time) || 0);
-      return { t: c.time, w: aw, m: aw + am, c: aw + am + ar, oi: ao };
+      let turn = 0;
+      (b.levels || []).forEach((l) => { turn += (Number(l[0]) || 0) * ((Number(l[1]) || 0) + (Number(l[2]) || 0)); });
+      return { t: c.time, w: aw, m: aw + am, c: aw + am + ar, oi: ao, turn };
     });
     const have = rows.filter(Boolean);
     if (have.length >= 2) {
@@ -6822,67 +6839,44 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       line((r) => r.c, "var(--accent)", 2.6, 1);     // = CVD (스택의 윤곽)
       const last = have[have.length - 1];
       const sgn = (v) => (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v));
-      // 🔴RVOL 은 2026-09-23 에 **사분면 레인 위 띠**로 옮겼다. 이 레인은 CVD 축 하나만 쓴다.
-      const legend = [["CVD", last.c, "var(--accent)", 1],
-                      ["고래", last.w, "var(--bad)", 0.67],
-                      ["중형", last.m - last.w, "var(--bad)", 0.49],
-                      ["리테일", last.c - last.m, "var(--bad)", 0.36],
-                      ["OI", last.oi, "var(--warn)", 0.95]];
-      // 🔴좁은 폭은 색표를 빼고 오른쪽 끝 기준 우측정렬한다 -- mr 68px 에 색표(14px)까지
-      //   넣으면 «리테일 -1.8k»(10px 로 약 66px)가 잘린다(실렌더 414px 에서 확인).
-      // 2026-09-22 모바일(사용자 지시): 세로 범례를 누적 행 **아래 한 줄**로 내린다.
-      //   위 사분면 줄과 같은 문법이라 두 레인이 한 덩어리로 읽힌다.
-      let rowX = 3;
-      const rowY = cumBottom + 11;
-      legend.forEach((row, k) => {
-        // 합친 판: 오른쪽 위는 사분면의 «RVOL 배수 · 추향 캡» 자리라 그 아래부터 쌓는다.
-        const y = mobileChart ? rowY : LANE_MERGE ? cumY + 30 + k * 18 : cumY + 14 + k * 19;
-        if (!mobileChart) {
-          const sw = document.createElementNS(NS, "rect");
-          sw.setAttribute("x", w - 84); sw.setAttribute("y", y - 9);   // 글자(오른쪽 끝 정렬) 바로 왼쪽 -- 띠 폭과 무관
-          sw.setAttribute("width", 10); sw.setAttribute("height", 10);
-          sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
-          g.appendChild(sw);
-        }
-        const t = document.createElementNS(NS, "text");
-        if (mobileChart) t.setAttribute("x", rowX);
-        else { t.setAttribute("x", w - 2); t.setAttribute("text-anchor", "end"); }
-        t.setAttribute("y", y);
-        // 2026-09-22 위 1초 차트 범례와 **같은 크기**로 맞춘다(사용자 지시).
-        //   두 범례가 같은 카드에서 같은 역할인데 12/11 과 19/15 로 갈려 있었다.
-        t.setAttribute("font-size", mobileChart ? (k === 0 ? 11 : 10) : (k === 0 ? 14 : 12));
-        // 2026-09-22 사용자 지시: 라벨은 **부호색**이다. 계열 구분은 왼쪽 색표가 맡는다.
-        t.setAttribute("fill", row[4] === "x" ? row[2]
-                                              : (row[1] >= 0 ? "var(--good)" : "var(--bad)"));
-        if (k === 0) t.setAttribute("font-weight", "700");
-        t.textContent = row[4] === "x" ? row[0] + " " + row[1].toFixed(2) + "배"
-                                       : row[0] + " " + sgn(row[1]);
-        g.appendChild(t);
-        if (mobileChart) {
+      // 2026-09-28 값 칸(사용자 «라벨을 깔끔하게»): 데스크톱 = 판 오른쪽 위에 **지금 값만**(무엇인지는 왼쪽 견본이 말한다) --
+      //   CVD 15 굵게 · OI · 거래대금 13, 한 칸 띄우고 고래·중형·리테일 11. 모바일 = 판 아래 한 줄(견본 없이 이름+값).
+      const sgnCol = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
+      const vals = [["CVD", sgn(last.c), sgnCol(last.c), 15, "700"],
+                    ["OI", sgn(last.oi), "var(--warn)", 13, "700"],
+                    ["거래대금", fmtUsdCompact(last.turn), "var(--turnover)", 13, null],
+                    null,
+                    ["고래", sgn(last.w), sgnCol(last.w), 11, null],
+                    ["중형", sgn(last.m - last.w), sgnCol(last.m - last.w), 11, null],
+                    ["리테일", sgn(last.c - last.m), sgnCol(last.c - last.m), 11, null]];
+      if (!mobileChart) {
+        let y = cumY + 18;
+        vals.forEach((v) => {
+          if (!v) { y += 6; return; }
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", w - 2); t.setAttribute("y", y); t.setAttribute("text-anchor", "end");
+          t.setAttribute("font-size", v[3]); t.setAttribute("fill", v[2]);
+          if (v[4]) t.setAttribute("font-weight", v[4]);
+          const n = document.createElementNS(NS, "tspan");
+          n.setAttribute("fill", "var(--muted)"); n.setAttribute("font-weight", "400"); n.textContent = v[0] + " ";
+          t.appendChild(n); t.appendChild(document.createTextNode(v[1]));
+          g.appendChild(t);
+          y += v[3] + 6;
+        });
+      } else {
+        let rowX = 3;
+        vals.filter(Boolean).filter((v) => v[0] !== "거래대금").forEach((v, k) => {
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", rowX); t.setAttribute("y", cumBottom + 11);
+          t.setAttribute("font-size", k === 0 ? 11 : 10); t.setAttribute("fill", v[2]);
+          if (k === 0) t.setAttribute("font-weight", "700");
+          t.textContent = v[0] + " " + v[1];
+          g.appendChild(t);
           let adv = 0;
           try { adv = t.getComputedTextLength(); } catch (_) { adv = t.textContent.length * 6.2; }
           rowX += (adv > 0 ? adv : t.textContent.length * 6.2) + 8;
-        }
-      });
-      const lbl = document.createElementNS(NS, "text");
-      // 합친 판: 왼쪽 위는 «사분면» 이름표 자리 -- 판 아래쪽으로 내린다.
-      lbl.setAttribute("x", ml - 6); lbl.setAttribute("y", LANE_MERGE ? cumY + CUM_DRAW_H - 16 : mid - 4);
-      lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "11");
-      lbl.setAttribute("fill", "var(--accent)"); lbl.setAttribute("font-weight", "700");
-      lbl.textContent = mobileChart ? "누적" : "누적 CVD";
-      const tip = document.createElementNS(NS, "title");
-      tip.textContent = "창 시작(" + Math.round(chartWindowBars * 5 / 60) + "시간 전)을 0으로 두고"
-        + " 쌓은 누적 순수급입니다. 세 층(고래·중형·리테일)의 합이 곧 CVD 라 맨 위 윤곽선이"
-        + " CVD 입니다. 주황 실선은 같은 축의 누적 신규계약(OI)이고, 둘이 벌어지면"
-        + " «매도 주도인데 미결제약정은 늘었다» = 신규 숏 같은 읽기가 됩니다.";
-      lbl.appendChild(tip);
-      g.appendChild(lbl);
-      const lbl2 = document.createElementNS(NS, "text");
-      lbl2.setAttribute("x", ml - 6); lbl2.setAttribute("y", LANE_MERGE ? cumY + CUM_DRAW_H - 1 : mid + 11);
-      lbl2.setAttribute("text-anchor", "end"); lbl2.setAttribute("font-size", "11");
-      lbl2.setAttribute("fill", "var(--warn)");
-      lbl2.textContent = mobileChart ? "+OI" : "+ 누적 OI";
-      g.appendChild(lbl2);
+        });
+      }
     }
   }
   }, LANE_MERGE ? "quadLane" : null);   // 합친 판: 사분면 막대 **뒤에**
