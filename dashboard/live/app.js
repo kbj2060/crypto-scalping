@@ -7289,7 +7289,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   수량은 수집기 래스터 값(칸 $0.5 합산)이고, 가격선은 이 띠를 가로질러 배지까지 이어진다(호가창 사다리처럼).
   // 2026-09-27 축적 호가를 입혔다(사용자 선택 A + «재깔림도»): 한 칸 = 두 겹.
   //   **심(진함) = 창 내내 한 번도 안 빠진 양(pers)** -- 버텨 온 벽 vs 방금 깔린 호가를 가른다(창 안 호가의 36% 는 창을 못 버틴다).
-  //   **겉 = 지금 양, 그 안 글자 = 재깔림(refill/peak) 3분위** -- A 는 계속 다시 채워지는 자리, C 는 한 번 깔리고 만 호가.
+  //   **겉 = 지금 양, 그 위 빗금 농도 = 재깔림(refill/peak) 4단** -- 촘촘할수록 계속 다시 채워지는 자리, 빗금 없거나 성기면 한 번 깔리고 만 호가.
   //   🔴둘 다 «성격»의 서술이다 -- 지속률은 반등을 못 가렸다(상위−하위 +0.001, 09-20). 창 = 위 1h/2h/4h/12h 토글.
   const book = BOOK_W && latestFlowHeatmap && latestFlowHeatmap.book;
   const acc = latestFlowHeatmap && latestFlowHeatmap.rows;
@@ -7322,8 +7322,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       while (lo < hi) { const m = (lo + hi) >> 1; if (rwSorted[m] < c.rw) lo = m + 1; else hi = m; }
       c.rwPct = lo / (rwSorted.length - 1);
     });
-    // 2026-09-27 재깔림은 밝기 대신 **3분위 글자**(사용자 지시): A = 상위 1/3(자주 다시 채움) · B = 중간 · C = 하위 1/3. 기록 없으면 빈칸.
-    cells.forEach((c) => { c.rwGrade = !(c.rw > 0) || rwSorted.length < 3 ? "" : c.rwPct >= 2 / 3 ? "A" : c.rwPct >= 1 / 3 ? "B" : "C"; });
+    // 2026-09-28 재깔림 = 겉의 **빗금 농도 4단**(사용자 선택 시안 ②, ABC 글자 대체): 0 = 상위 1/4(가장 촘촘) … 3 = 하위 1/4. 기록 없으면 빗금 없음.
+    cells.forEach((c) => { c.hatch = !(c.rw > 0) || rwSorted.length < 4 ? -1 : c.rwPct >= 0.75 ? 0 : c.rwPct >= 0.5 ? 1 : c.rwPct >= 0.25 ? 2 : 3; });
     return { bs, x0, L, mx, cells };
   })();
   // 2026-09-28 툴팁 = «심 × ◌» 여섯 조합의 풀이(사용자 지시 -- 기존 수치·해석 문구는 뺐다). 이 칸의 조합만 진하게.
@@ -7346,7 +7346,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           ? `<div style="margin:2px 0"><span style="color:${col};font-weight:700">▸ ${name}</span><br>${read}</div>`
           : `<div style="margin:2px 0;opacity:.5">${name}<br>${read}</div>`)).join("")
       + `<div style="margin-top:6px;opacity:.7">심 두꺼움 = 지금 양의 절반 이상이 창 내내 버팀 · ○ = 최근 4h 가격이 0.35% 안에 왔을 때 `
-      + `두께가 멀 때의 0.8배 미만 · 모름 = 가까울 때와 멀 때를 둘 다 겪지 않음. 성격의 서술 · 예측력 안 잼 · 지지·저항 아님</div></div>`;
+      + `두께가 멀 때의 0.8배 미만 · 모름 = 가까울 때와 멀 때를 둘 다 겪지 않음 · 빗금 = 재깔림, 촘촘할수록 자주 다시 채움`
+      + (c.rw > 0 ? ` (이 칸 ${c.rw.toFixed(1)}배 · 보이는 범위 상위 ${Math.round(100 * (1 - c.rwPct))}%)` : "")
+      + `. 성격의 서술 · 예측력 안 잼 · 지지·저항 아님</div></div>`;
   };
   cachedLayer("bookStrip", book ? book.t_ms + "|" + activeSnapshotAsset + "|" + (acc ? acc.bin_lo : 0) : "none", (g) => {
     if (!bookInfo) return;
@@ -7361,6 +7363,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     base.setAttribute("y1", mt); base.setAttribute("y2", plotBottom);
     base.setAttribute("stroke", "var(--soft-line)");
     g.appendChild(base);
+    // 빗금 무늬 4단(촘촘 → 성김). 45° 선 -- 심(단색)·겉(연한 단색)과 겹쳐도 질감으로 갈린다.
+    const hid = (k) => "bkh" + k + "-" + svg.id;
+    const defs = document.createElementNS(NS, "defs");
+    [2.6, 4, 6.5, 11].forEach((sp, k) => {
+      const pt = document.createElementNS(NS, "pattern");
+      pt.setAttribute("id", hid(k)); pt.setAttribute("width", sp); pt.setAttribute("height", sp);
+      pt.setAttribute("patternUnits", "userSpaceOnUse"); pt.setAttribute("patternTransform", "rotate(45)");
+      const ln = document.createElementNS(NS, "line");
+      ln.setAttribute("x1", 0); ln.setAttribute("y1", 0); ln.setAttribute("x2", 0); ln.setAttribute("y2", sp);
+      ln.setAttribute("stroke", "var(--ink)"); ln.setAttribute("stroke-opacity", "0.55"); ln.setAttribute("stroke-width", "1.1");
+      pt.appendChild(ln); defs.appendChild(pt);
+    });
+    g.appendChild(defs);
     cells.forEach((c) => {
       const yTop = Math.max(mt, yAt(c.p + bs / 2)), yBot = Math.min(plotBottom, yAt(c.p - bs / 2));
       const len = Math.max(1, Math.sqrt(c.q / mx) * L);
@@ -7372,6 +7387,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       shell.setAttribute("fill-opacity", "0.3");
       g.appendChild(shell);
       const coreLen = c.pers > 0 ? Math.max(1, Math.sqrt(c.pers / mx) * L) : 0;
+      if (c.hatch >= 0 && len - coreLen > 1) {
+        const ht = document.createElementNS(NS, "rect");
+        ht.setAttribute("x", x0 + coreLen); ht.setAttribute("y", yTop + 0.5);
+        ht.setAttribute("width", len - coreLen); ht.setAttribute("height", rh);
+        ht.setAttribute("fill", `url(#${hid(c.hatch)})`);
+        g.appendChild(ht);
+      }
       if (coreLen) {
         const core = document.createElementNS(NS, "rect");
         core.setAttribute("x", x0); core.setAttribute("y", yTop + 0.5);
@@ -7389,21 +7411,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         mk.setAttribute("stroke", "var(--ink)"); mk.setAttribute("stroke-width", "1.2");
         g.appendChild(mk);
         ringW = 2 * rr + 2;
-      }
-      // 재깔림 등급 글자: 겉(심 바깥) 빈 공간 안에. 좁으면 막대 바로 오른쪽(벽 수량 글자 자리면 생략). 행이 너무 얇으면 안 쓴다.
-      const fs = Math.min(9, rh - 1);
-      if (c.rwGrade && fs >= 6) {
-        const inside = len - coreLen >= fs + 2;
-        if (inside || !c.wall) {
-          const tg = document.createElementNS(NS, "text");
-          tg.setAttribute("x", inside ? x0 + coreLen + 2 : x0 + len + 2 + ringW);
-          tg.setAttribute("y", (yTop + yBot) / 2 + fs * 0.36);
-          tg.setAttribute("font-size", fs); tg.setAttribute("font-weight", "700");
-          tg.setAttribute("fill", inside ? "var(--ink)" : color);
-          if (c.rwGrade === "C") tg.setAttribute("opacity", "0.6");
-          tg.textContent = c.rwGrade;
-          g.appendChild(tg);
-        }
       }
       if (c.wall && !mobileChart) {
         const lb = document.createElementNS(NS, "text");
