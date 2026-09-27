@@ -5690,11 +5690,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const pad = (maxP - minP) * padPct || 1;
   let yMin = minP - pad, yMax = maxP + pad;
   // 2026-09-27 풋프린트는 현재가를 세로 **정중앙**에(사용자 지시) -- 먼 쪽 거리로 위아래 대칭.
-  //   🔴가운데는 풋프린트 칸 단위, 반폭은 두 칸 단위로 반올림한다. yMin/yMax 가 층 캐시 서명(baseGeomSig)에
-  //   들어 있어 틱마다 바뀌면 셀 전체를 매번 다시 그린다 -- 칸을 넘을 때만 바뀌게 한다(어긋남 < 칸 반 개).
+  //   가운데는 **5분봉마다 한 번** 잡는다(같은 날 사용자 «매 5분봉마다»): 봉이 바뀔 때의 현재가로 정하고 그 봉 동안은
+  //   고정한다 -- 틱마다 따라가면 화면 전체가 계속 출렁인다. 봉 안에서 범위를 벗어나면 가운데는 두고 위아래만 넓힌다.
+  //   🔴가운데는 풋프린트 칸 단위, 반폭은 두 칸 단위로 반올림한다(yMin/yMax 가 층 캐시 서명 baseGeomSig 에 들어 있다).
   if (footprint && currentPrice > 0) {
     const q = Number(footprint.bucket) || 0;
-    const c = q > 0 ? Math.round(currentPrice / q) * q : currentPrice;
+    const barT = candles.length ? candles[candles.length - 1].time : 0;
+    const fc = renderCandleSvg._fpCenter || (renderCandleSvg._fpCenter = { key: "", c: 0 });
+    const fcKey = activeSnapshotAsset + "|" + barT;
+    if (fc.key !== fcKey) {
+      fc.key = fcKey;
+      fc.c = q > 0 ? Math.round(currentPrice / q) * q : currentPrice;
+    }
+    const c = fc.c;
     let half = Math.max(yMax - c, c - yMin);
     if (q > 0) half = Math.ceil(half / (2 * q)) * 2 * q;
     yMin = c - half; yMax = c + half;
