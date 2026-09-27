@@ -3787,27 +3787,6 @@ async function refreshTrend() {
 }
 
 
-// 2026-09-25 «데이터 관계 읽기» -- 서버 dashboard/flow_read.py 가 만든 줄을 그대로 그린다(화면은 계산하지 않는다).
-//   등급 칩: 근거(주황) · 약함(실선) · 설명(테두리 없음) · 미측정(점선 = 아직 사실 아님, DESIGN.md Shapes).
-//   🔴방향 화살표는 서버가 dir 을 준 줄(근거·약함)에만 붙는다 -- «설명» 줄에 색을 칠하면 신호로 읽힌다.
-//   상황은 1초마다 오므로 내용이 같으면 다시 그리지 않는다(읽는 중 텍스트 선택·툴팁이 끊기지 않게).
-let flowReadKey = "";
-const frArrow = (d) => (d > 0 ? `<b class="fr-up" aria-label="위">↑</b> ` : d < 0 ? `<b class="fr-dn" aria-label="아래">↓</b> ` : "");
-// 융합 신호 줄 -- 30분 카드 맨 위(renderSituation). 발동이면 방향색 테두리·글자, 대기면 흐린 글자.
-// 2026-09-26 비평 + 사용자 «연구 원문은 접어서 숨기기»: TRAIN bp·표본 수 같은 연구 근거는 매매 화면의 본문이
-//   아니다 -- «근거»를 눌러야 펼쳐진다. 펼침은 자리(key)마다 기억한다(카드는 수 초마다 다시 그려진다).
-const whyOpen = (() => { try { return new Set(JSON.parse(localStorage.getItem("whyOpen") || "[]")); } catch (e) { return new Set(); } })();
-function whyFold(text, key, label = "근거") {
-  if (!text) return "";
-  return `<details class="why-fold" data-why="${escapeHtml(key)}"${whyOpen.has(key) ? " open" : ""}>`
-    + `<summary>${escapeHtml(label)}</summary><div class="why-body">${escapeHtml(text)}</div></details>`;
-}
-document.addEventListener("toggle", (e) => {
-  const k = e.target?.dataset?.why;
-  if (!k) return;
-  if (e.target.open) whyOpen.add(k); else whyOpen.delete(k);
-  try { localStorage.setItem("whyOpen", JSON.stringify([...whyOpen])); } catch (err) { /* 저장 못 해도 동작은 같다 */ }
-}, true);
 // 2026-09-26 비평: 수 초마다 innerHTML 을 통째로 갈아 끼우는 카드에서 Tab 으로 훑던 포커스가 <body> 로 떨어졌다.
 //   갈아 끼우기 전 «몇 번째 포커스 가능한 요소»였는지 기억했다가 같은 자리로 돌려놓는다.
 const FOCUSABLE = "summary, button, a[href], [tabindex]:not([tabindex='-1'])";
@@ -3817,97 +3796,73 @@ function keepFocus(box, render) {
   render();
   if (idx >= 0) box.querySelectorAll(FOCUSABLE)[idx]?.focus({ preventScroll: true });
 }
-function fusedRowHtml(f) {
-  if (!f) return "";
-  return `<div class="fr-fuse" data-side="${f.side > 0 ? "long" : f.side < 0 ? "short" : "wait"}">
-      <span class="fr-fuse-tag">융합 신호</span>
-      <span class="fr-fuse-text">${f.side ? frArrow(f.side) : ""}${escapeHtml(f.text || "")}${whyFold(f.note, "fused")}</span>
-    </div>`;
-}
-function renderFlowRead() {
-  const box = el("flowRead");
-  if (!box) return;
-  const r = latestSituation && latestSituation.read;
-  const key = JSON.stringify(r || null);
-  if (key === flowReadKey) return;
-  flowReadKey = key;
-  if (!r || !Array.isArray(r.lines) || !r.lines.length) {
-    box.innerHTML = `<div class="fr-sum">${escapeHtml((r && r.error) ? "관계 읽기 오류: " + r.error : "관계 읽기 계산 전")}</div>`;
-    return;
-  }
-  // 2026-09-25 «현재 상황» 막대와 같은 문법의 롱/숏 게이지(사용자 «근본 신호도 롱/숏 게이지로 깔끔하게»).
-  //   줄 = [관계 | 0 가운데 막대(− 숏 · 롱 +) | 값 | 등급] + 아래 한 줄 해석. 관찰 숫자·근거는 등급 칩의 즉시 팁으로.
-  //   🔴방향색(초록·빨강)은 **근거·약함 줄에만** -- 설명·미측정 줄의 막대는 기울기만 보여 주는 무채색이다.
-  //     색이 보이면 그건 «잰 근거가 그쪽을 가리킨다»는 뜻이어야 한다(DESIGN.md Three Signals).
-  //   세 상태는 형태로 갈린다(옛 막대와 같다): 막대 = 켜짐 · 0 자리 눈금 = 조건 미달 · 아무것도 없음 = 재료 없음.
-  const rows = r.lines.map((ln) => {
-    const g = ln.g;
-    const cut = (ln.text || "").indexOf(" — ");
-    const obs = cut >= 0 ? ln.text.slice(0, cut) : "";
-    const said = cut >= 0 ? ln.text.slice(cut + 3) : (ln.text || "");
-    const tip = [obs, ln.note].filter(Boolean).join("\n");
-    const lit = !!ln.dir;
-    let bar = "";
-    if (g && !g.on) bar = `<i class="z"></i>`;
-    else if (g && g.kind === "d") {
-      bar = `<i class="f${lit ? (g.v >= 0 ? " up" : " dn") : ""}" style="${g.v >= 0 ? "left:50%" : "right:50%"};`
-        + `width:${Math.min(Math.abs(g.v) / 2, 50)}%"></i>`;
-    } else if (g) bar = `<i class="f" style="width:${Math.max(0, Math.min(100, g.v))}%"></i>`;
-    return `<div class="fr-g${g ? (g.on ? "" : " off") : " none"}${g && g.kind === "d" ? " d" : ""}" data-grade="${escapeHtml(ln.grade)}">`
-      + `<span class="fr-gn">${escapeHtml(ln.topic).replace("↔", "↔<wbr>")}</span>`
-      + `<span class="fr-gt">${g && g.kind === "d" ? '<i class="c"></i>' : ""}${bar}</span>`
-      + `<span class="fr-gv">${g ? escapeHtml(g.txt) : "—"}</span>`
-      + `<span class="fr-grade" tabindex="0" data-tip="${escapeHtml(tip)}" aria-label="${escapeHtml(ln.grade + ". " + tip)}">${escapeHtml(ln.grade)}</span>`
-      + `<span class="fr-gs">${frArrow(ln.dir)}${escapeHtml(said)}</span></div>`;
-  }).join("");
-  const sumTone = r.up && r.down ? "" : r.up ? " fr-up" : r.down ? " fr-dn" : "";
-  // 2026-09-26 사용자 «접어서 숨기기»: 10줄은 요약 한 줄 아래로 접는다(요약이 결론이다). 펼침은 기억한다.
-  keepFocus(box, () => { box.innerHTML = `<div class="sit-sec fr-head">근본 신호 · 데이터 관계<span>− 숏 · 롱 +</span></div>`
-    + `<details class="why-fold fr-fold" data-why="flow"${whyOpen.has("flow") ? " open" : ""}>`
-    + `<summary class="fr-sum${sumTone}">${escapeHtml(r.summary || "")}<span class="fr-more">${r.lines.length}줄</span></summary>`
-    + `<div class="fr-gauges">${rows}</div></details>`; });
-}
 
-// 2026-09-28 사용자 지시: 30분 카드의 «위:아래 방향»을 일 단위 추세 4가지로 대체 --
-//   ① 신호와 표 구성 ② 뒤집히는 가격선(차트에도) ③ 권장 크기 ④ 내 포지션이 역추세면 경고.
-//   표 L 은 «UTC 00시 일봉 종가 > L일 전 종가». 다음 00시에 그 표를 가르는 가격이 flip_price 라,
-//   지금 가격으로 일봉이 닫히면 어떻게 되는지를 실시간으로 보인다(점선 = 지금 가격이면 내일 뒤집힘).
-function trendBlockHtml() {
-  const t = latestTrend;
-  const head = `<div class="sit-row-h"><span title="UTC 00시 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표. 백테스트(ETH 현물 2017~2026) 샤프 1.0 대 · 표본 안에서 고른 설정이라 과신 금지">큰 방향 · 일 단위 추세</span>`;
-  if (!t) return `<div class="sit-dir">${head}<b class="coin">계산 중</b></div></div>`;
-  if (!t.ok) return `<div class="sit-dir">${head}<b class="coin">없음</b></div>`
-    + `<div class="sit-cal">${escapeHtml(t.reason || "")}</div></div>`;
-  const live = Number(latestLivePriceByAsset.eth || t.close);
-  const up = t.signal > 0;
+// 2026-09-28 시안 B «시간 사다리»(사용자 선택) -- 왼쪽 두 칸 = 지금·30분 / 큰 흐름·1–13주, 오른쪽 = 값.
+//   지금: 융합 신호(발동만 방향색) · 30분 안 ±폭 선에 닿을 확률. 큰 흐름: 큰 방향 · 권장 크기 · 가장 가까운 뒤집힘 ·
+//   역추세 경고. 연구 근거 접기와 근본 신호 10줄은 사용자 지시로 걷었다(서버 계산은 그대로 돈다).
+//   큰 방향 = UTC 00시 일봉 종가를 7·14·28·56·90일 전과 비교한 5표(dashboard/trend_rule.py). 확률은 싣지 않는다 --
+//   신호 단계별 다음 7일 상승 확률이 23→37% 로만 움직여 과잉 정밀이 된다.
+function situationLadderHtml(o3, fz) {
+  const live = Number(latestLivePriceByAsset.eth || 0);
   const px = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: v >= 100 ? 0 : 2 });
-  const tmrUps = t.votes.filter((v) => live > v.flip_price).length;
-  const tmrSig = (2 * tmrUps - t.votes.length) / t.votes.length;
-  const chips = t.votes.map((v) => {
-    const tmr = live > v.flip_price;
-    const d = (v.flip_price / live - 1) * 100;
-    const tip = `${v.L}일 표: 어제 00시 종가가 ${v.L}일 전(${px(v.ref_now)})보다 ${v.up ? "높다 → 상승" : "낮다 → 하락"}. `
-      + `다음 00시에 이 표를 가르는 가격 ${px(v.flip_price)} -- 지금 가격 ${px(live)} 로 닫히면 ${tmr ? "상승" : "하락"}.`;
-    return `<span class="tr-v ${v.up ? "k-up" : "k-dn"}${tmr !== v.up ? " flip" : ""}" title="${escapeHtml(tip)}">`
-      + `${v.L}일 ${v.up ? "↑" : "↓"}<em>${px(v.flip_price)} ${d >= 0 ? "+" : ""}${d.toFixed(1)}%</em></span>`;
-  }).join("");
-  const size = Number(t.size) || 0;
-  const asof = new Date(t.asof_ms).toISOString().slice(5, 10);
-  // ④ 역추세 경고 -- 이 코인의 포지션 전부(헤지 모드면 롱·숏 둘 다 있을 수 있다)
-  const mine = ((latestBinanceAccount || {}).positions || [])
-    .filter((p) => String(p.symbol || "").startsWith("ETH") && Math.abs(Number(p.qty) || 0) > 0);
-  const against = mine.filter((p) => (p.side === "LONG") !== up);
-  const warn = against.length
-    ? `<div class="tr-warn" title="원장 ETH 79왕복(08~09월): 추세와 같은 방향 47건 +898$ · 반대 28건 −468$(최악 −549$ 포함)">`
-      + `⚠ 역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유 — 추세는 ${up ? "롱" : "숏"}</div>`
-    : mine.length ? `<div class="sit-cal">보유 ${mine.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} = 추세 방향</div>` : "";
-  return `<div class="sit-dir">${head}<b class="${up ? "k-up" : "k-dn"}">${up ? "↑ 롱" : "↓ 숏"} ${t.signal > 0 ? "+" : ""}${t.signal.toFixed(1)}</b></div>`
-    + `<div class="sit-cal">${t.votes.length}표 중 ${t.ups}표 상승 · ${t.age_days}일째 같은 방향 · 기준 ${escapeHtml(asof)} 00시(UTC) 일봉`
-    + (tmrSig !== t.signal ? ` · <span class="sit-edge">지금 가격으로 닫히면 ${tmrSig > 0 ? "+" : ""}${tmrSig.toFixed(1)}</span>` : "") + `</div>`
-    + `<div class="tr-votes">${chips}</div>`
-    + `<div class="sit-cal">권장 크기 순자산의 <b>${size > 0 ? "+" : ""}${size.toFixed(2)}배</b> ${size > 0 ? "롱" : "숏"}`
-    + ` (신호 × 연 50% ÷ 20일 변동성 ${Math.round(t.vol_ann * 100)}%, 최대 2배)</div>`
-    + warn + `</div>`;
+  const arw = (up) => `<svg class="sit-lad-ic" viewBox="0 0 12 12" aria-hidden="true"><path d="${up ? "M6 2 L10 8 H2 Z" : "M6 10 L10 4 H2 Z"}" fill="currentColor"/></svg>`;
+  const row = (label, value, cls = "", extra = "") => `<div class="sit-lad-r"><div class="sit-lad-l">${label}</div>`
+    + `<div class="sit-lad-v ${cls}">${value}</div>${extra}</div>`;
+  // ── 지금 · 30분 ──
+  let now = "";
+  if (fz) {
+    const d = fz.side > 0 ? "up" : fz.side < 0 ? "dn" : "";
+    const tail = escapeHtml(String(fz.text || "").replace(/^[^—]*—\s*/, ""));   // 서버 문장의 «대기 — » / «숏 · 다음 30분 — » 머리를 뗀다
+    now += d
+      ? row(`<span class="k-${d}">융합 ${d === "up" ? "롱" : "숏"} 발동</span> · ${tail}`, `${arw(d === "up")}${d === "up" ? "롱" : "숏"}`, `k-${d}`)
+      : row(`융합 신호 · ${tail}`, "대기", "quiet");
+  }
+  if (o3) {
+    const nn = o3.cols.find((c) => c.key === "none") || {};
+    const reach = Number.isFinite(o3.reach) ? o3.reach : 100 - (nn.p || 0);
+    const b = nn.band;
+    const halfBp = b ? ((b[1] - b[0]) / (b[0] + b[1])) * 1e4 : null;   // ±0.5×30분 폭(채점축)
+    now += row(`${halfBp ? `±${Math.round(halfBp)}bp ` : ""}선에 닿을 확률${b ? ` · 미도달 시 <span class="num">${px(b[0])}–${px(b[1])}</span>` : ""}`,
+               `${Math.round(reach)}%`, "num",
+               `<div class="sit-lad-bar"><i style="width:${Math.max(0, Math.min(100, reach))}%"></i></div>`);
+  } else {
+    now += row("30분 폭 분위(5분봉 24h)를 받는 중", "—", "quiet");
+  }
+  // ── 큰 흐름 · 1–13주 ──
+  const t = latestTrend;
+  let big = "";
+  if (!t) big = row("큰 방향 · 일 단위 추세", "계산 중", "quiet");
+  else if (!t.ok) big = row(`큰 방향 · ${escapeHtml(t.reason === "fetch_failed" ? "조회 실패 — 1분 뒤 다시 시도" : (t.reason || ""))}`, "없음", "quiet");
+  else {
+    const up = t.signal > 0;
+    const dots = t.votes.map((v) => `<b class="${v.up ? "u" : "d"}" title="${v.L}일 ${v.up ? "상승" : "하락"}"></b>`).join("");
+    big += row(`큰 방향<span class="sit-lad-dots" role="img" aria-label="${t.votes.length}표 중 ${t.ups}표 상승">${dots}</span>`
+               + `${t.ups}/${t.votes.length} · ${t.age_days}일째`,
+               `${arw(up)}${up ? "롱" : "숏"} <span class="num">${up ? "+" : ""}${t.signal.toFixed(1)}</span>`, up ? "k-up" : "k-dn");
+    const size = Number(t.size) || 0;
+    big += row(`권장 크기 · 변동성 ${Math.round(t.vol_ann * 100)}% · 최대 2배`,
+               `<span class="num">${size > 0 ? "+" : ""}${size.toFixed(2)}</span>배`, size > 0 ? "k-up" : "k-dn");
+    if (live > 0) {
+      const nr = t.votes.map((v) => ({ ...v, d: (v.flip_price / live - 1) * 100 }))
+        .sort((a, b) => Math.abs(a.d) - Math.abs(b.d))[0];
+      const flips = t.votes.filter((v) => (live > v.flip_price) !== v.up).map((v) => `${v.L}일`);
+      big += row(`가장 가까운 뒤집힘 · ${nr.L}일 표`
+                 + (flips.length ? ` · <span class="sit-lad-edge">지금 가격으로 닫히면 ${flips.join("·")} 표가 뒤집힘</span>` : ""),
+                 `<span class="num">${px(nr.flip_price)}</span><small>${nr.d >= 0 ? "+" : ""}${nr.d.toFixed(1)}%</small>`, "sit-lad-sm");
+    }
+    // 역추세 경고 -- 이 코인의 포지션 전부(헤지 모드면 롱·숏 둘 다 있을 수 있다)
+    const against = ((latestBinanceAccount || {}).positions || [])
+      .filter((p) => String(p.symbol || "").startsWith("ETH") && Math.abs(Number(p.qty) || 0) > 0 && (p.side === "LONG") !== up);
+    if (against.length) {
+      big += `<div class="sit-lad-warn" title="원장 ETH 79왕복(08~09월): 추세와 같은 방향 47건 +898$ · 반대 28건 −468$(최악 −549$ 포함)">`
+        + `<svg class="sit-lad-ic" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 L11.5 10.5 H0.5 Z" fill="none" stroke="currentColor" stroke-width="1.3"/>`
+        + `<path d="M6 4.5 V7.2 M6 8.6 V8.7" stroke="currentColor" stroke-width="1.3"/></svg>`
+        + `역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유 — 큰 방향은 ${up ? "롱" : "숏"}</div>`;
+    }
+  }
+  return `<div class="sit-lad">`
+    + `<div class="sit-lad-w">지금<span>30분</span></div><div class="sit-lad-rows">${now}</div>`
+    + `<div class="sit-lad-w">큰 흐름<span>1–13주</span></div><div class="sit-lad-rows">${big}</div></div>`;
 }
 
 // 차트에는 **보이는 캔들 범위 안**의 뒤집힘 가격만 그린다 -- 레벨은 세로 축을 넓히지 않고 화면 밖이면 가장자리에
@@ -3922,7 +3877,6 @@ function trendFlipLevels(footprint, candles) {
 }
 
 function renderSituation() {
-  renderFlowRead();
   const body = el("situationBody"); const badge = el("situationBadge");
   if (!body) return;
   const s = latestSituation || {}; const n = s.now || {};
@@ -3931,7 +3885,6 @@ function renderSituation() {
     body.innerHTML = `<div class="sit-cal">${escapeHtml(n.reason || "서버가 첫 값을 계산하는 중")}</div>`;
     return;
   }
-  const fmtPx = (v) => (v == null ? "-" : Number(v).toFixed(1));
   const fz = (s.read && s.read.fused) || null;
   const o3 = fz && fz.outcome;
 
@@ -3944,21 +3897,7 @@ function renderSituation() {
   const cols = o3 ? [...o3.cols].sort((a, b) => b.p - a.p) : [];
   // 2026-09-26 사용자 «위로 먼저·아래로 먼저가 항상 비슷» → 두 질문으로 가른다(카드 업그레이드 1+2).
   //   ① 닿을 확률(표: 30분 폭 분위가 잘 가른다, 미도달 9~48%) ② 닿는다면 어느 쪽 -- 🔴2026-09-28 제거(AUC .525,
-  //   대부분 51:49 동전) → 그 자리를 일 단위 추세(trendBlockHtml)가 대신한다(사용자 지시).
-  let scn = "";
-  if (o3) {
-    const col = (k) => o3.cols.find((c) => c.key === k) || {};
-    const nn = col("none");
-    const reach = Number.isFinite(o3.reach) ? o3.reach : 100 - (nn.p || 0);
-    const band = nn.band ? `${fmtPx(nn.band[0])}~${fmtPx(nn.band[1])}` : "—";
-    const wide = (nn.push || [])[0];
-    scn = `<div class="sit-reach">`
-      + `<div class="sit-row-h"><span>30분 안 위·아래 선 중 하나에 닿을 확률${o3.reach_src === "table" ? " (모델 없음 · 표)" : ""}</span>`
-      + `<b>${Math.round(reach)}%</b></div>`
-      + `<div class="sit-g"><i style="width:${reach}%"></i></div>`
-      + `<div class="sit-cal">미도달 ${Math.round(nn.p || 0)}% · ${escapeHtml(band)} 사이에 머묾`
-      + (wide ? ` · <span class="${wide.on ? "sit-edge" : ""}">${escapeHtml(wide.t)}</span>` : "") + `</div></div>`;
-  }
+  //   대부분 51:49 동전) → 그 자리를 일 단위 추세(situationLadderHtml)가 대신한다(사용자 지시).
 
   // ── 레짐 여유 ── «곧 바뀔 수 있나»를 바뀌기 **전에** 보인다(2026-09-22 사용자 «급변한다»).
   //   레짐은 |이동|÷창폭 하나로 갈리는데 분자·분모가 둘 다 매 봉 움직여, 선을 스칠 때 아주 작은
@@ -3988,10 +3927,7 @@ function renderSituation() {
 
   keepFocus(body, () => { body.innerHTML = `
     <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
-    ${fusedRowHtml(fz)}
-    ${o3 ? scn : `<div class="sit-cal">융합 3결과 계산 전 — 30분 폭 분위(5분봉 24h)를 받는 중</div>`}
-    ${trendBlockHtml()}
-    ${o3 ? `<div class="sit-cal sit-src">${whyFold([o3.note].filter(Boolean).join(" · "), "outcome", "근거 · 측정 방법")}</div>` : ""}
+    ${situationLadderHtml(o3, fz)}
     <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`; });
 
   if (badge) {

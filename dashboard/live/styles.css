@@ -673,68 +673,9 @@ body {
 }
 
 /* 2026-09-25 «데이터 관계 읽기» -- 청산 레벨 목록 바로 아래(사용자 지시). 줄 = [관계 | 관찰→해석 + 근거 | 등급].
-   관계 이름은 레벨 목록의 태그 열과 같은 등폭·흐린 글자, 근거 한 줄은 11px 흐린 글자(Small Voice Rule).
-   등급 칩: 근거 = 주황(«눈여겨봐라») · 약함 = 실선 · 설명 = 테두리 없음 · 미측정 = 점선(아직 사실 아님). */
-.fr-read { border-top: 1px solid var(--soft-line); padding: 8px 0 12px; }
-.fr-sum { padding: 4px 18px 8px; font: 700 12px/1.45 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; }
-/* 융합 신호 -- 이 블록에서 유일하게 «행동»을 말하는 줄. 주문 버튼과 같은 문법: 채우지 않고 방향색 테두리+글자. */
-.fr-fuse { display: grid; grid-template-columns: 84px 1fr; gap: 10px; align-items: start; margin: 2px 18px 10px;
-           padding: 9px 12px; border: 1px solid var(--soft-line); border-radius: var(--radius-sm); background: rgb(var(--lift) / 0.03); }
-.fr-fuse-tag { font: 700 11.5px/1.5 var(--font-sans); color: var(--muted); white-space: nowrap; }
-/* 30분 카드 안(2026-09-25): 카드 본문이 이미 18px 안쪽 여백을 준다 -- 겹치지 않게. */
-.situation-body .fr-fuse { margin: 2px 0 10px; }
-.fr-read .fr-head { padding: 0 18px; margin: 12px 0 2px; }
-.fr-fuse-text { font-size: 13px; font-weight: 700; line-height: 1.5; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
-.fr-fuse[data-side="long"] { border-color: color-mix(in srgb, var(--good) 55%, transparent); }
-.fr-fuse[data-side="long"] .fr-fuse-text { color: var(--good); }
-.fr-fuse[data-side="short"] { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
-.fr-fuse[data-side="short"] .fr-fuse-text { color: var(--bad); }
-.fr-sum.fr-up { color: var(--good); }
-.fr-sum.fr-dn { color: var(--bad); }
-.fr-note { display: block; font-size: 11px; font-weight: 600; line-height: 1.55; color: var(--muted); }
-.fr-up { color: var(--good); }
-/* 근본 신호 게이지(2026-09-25) — 옛 «현재 상황» 막대(.sit-sg)와 같은 치수·문법. 넓은 화면 2열, 좁으면 1열. */
-.fr-gauges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; padding: 2px 18px 0; }
-.fr-g { display: grid; grid-template-columns: minmax(0, 84px) minmax(40px, 1fr) 52px auto; column-gap: 8px; row-gap: 3px;
-        align-items: center; padding: 6px 0 7px; border-bottom: 1px solid var(--soft-line); font: 600 11px/1.2 var(--font-mono); }
-.fr-gn { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fr-gv { text-align: right; font-weight: 800; color: var(--ink); white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
-.fr-gt { position: relative; display: block; height: 7px; border-radius: 3.5px; background: color-mix(in srgb, var(--neutral) 8%, transparent); }
-.fr-g.d .fr-gt { background: none; }
-.fr-gt i { position: absolute; }
-.fr-gt .f { top: 0; height: 7px; border-radius: 3.5px; background: color-mix(in srgb, var(--neutral) 45%, transparent); }
-.fr-gt .f.up { background: var(--good); }
-.fr-gt .f.dn { background: var(--bad); }
-.fr-g:not(.d) .fr-gt .f { background: var(--amber); opacity: .75; }   /* 세기(활동) — 방향이 아니라 «크기» */
-.fr-gt .c { left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--soft-line); }   /* 0 선 */
-.fr-gt .z { top: 3px; width: 6px; height: 1px; background: var(--muted); opacity: .5; }        /* 조건 미달 */
-.fr-g.d .fr-gt .z { left: calc(50% - 3px); }
-.fr-g.off .fr-gn, .fr-g.off .fr-gv { color: var(--muted); font-weight: 600; }
-.fr-g.none .fr-gn, .fr-g.none .fr-gv { color: var(--muted); opacity: .45; font-weight: 500; }
-.fr-gs { grid-column: 2 / -1; font: 500 11px/1.45 var(--font-sans, inherit); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
-.fr-g[data-grade="근거"] .fr-gs, .fr-g[data-grade="약함"] .fr-gs { color: var(--ink); }
-/* 등급 칩 = 즉시 팁의 손잡이(네이티브 title 의 1초 지연 금지 · 키보드 포커스로도 뜬다). 카드가 overflow:hidden 이라 위로 연다. */
-.fr-grade { position: relative; cursor: help; }
-.fr-grade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.fr-grade[data-tip]:not([data-tip=""]):hover::after, .fr-grade[data-tip]:not([data-tip=""]):focus-visible::after {
-  content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; width: max-content;
-  max-width: min(340px, 78vw); white-space: pre-line; text-align: left; padding: 8px 10px; border-radius: 8px;
-  border: 1px solid var(--line); background: var(--panel-strong); box-shadow: 0 6px 18px rgb(var(--shadow) / .35);
-  font: 500 11px/1.55 var(--font-mono); color: var(--ink); letter-spacing: 0; }
-.fr-dn { color: var(--bad); }
-.fr-grade { font: 600 11px/1 var(--font-mono); color: var(--muted); border: 1px solid transparent;
-            border-radius: 7px; padding: 4px 7px; white-space: nowrap; }
-.fr-g[data-grade="근거"] .fr-grade { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent);
-                                        background: color-mix(in srgb, var(--amber) 13%, transparent); }
-.fr-g[data-grade="약함"] .fr-grade { border-color: var(--line); }
-.fr-g[data-grade="미측정"] .fr-grade { border: 1px dashed var(--line); }
-@media (max-width: 720px) {
-  .fr-sum { padding: 4px 12px 8px; }
-  .fr-fuse { grid-template-columns: 1fr; gap: 4px; margin: 2px 12px 10px; }
-  .fr-gauges { grid-template-columns: 1fr; padding: 2px 12px 0; }
-  .fr-g { grid-template-columns: minmax(0, 66px) minmax(40px, 1fr) 50px auto; }
-  .fr-read .fr-head span { display: none; }   /* 등급 범례는 칩이 이미 말한다 -- 좁은 화면에선 제목만 */
-  .fr-fuse[data-side="wait"] .fr-note { display: none; }   /* 대기 중 근거 문구는 좁은 화면에서 소음 */
+   관계 이름은 레벨 목록의 태그 열과 같은 등폭·흐린 글자 { border-top: 1px solid var(--soft-line); padding: 8px 0 12px; }
+/* 근본 신호 게이지(2026-09-25) — 옛 «현재 상황» 막대(.sit-sg)와 같은 치수·문법. 넓은 화면 2열 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; padding: 2px 18px 0; }
+@media (max-width: 720px) {   /* 대기 중 근거 문구는 좁은 화면에서 소음 */
 }
 
 /* 2026-08-27: the liq-burst alert banner (removed) used to sit right below this panel's header,
@@ -1411,7 +1352,6 @@ svg {
     min-height: 0;
   }
 
-
   .top-session {
     justify-content: center;
     flex-wrap: wrap;
@@ -2041,20 +1981,6 @@ svg {
 /* 성과 */
 .acct-perf { min-width: 0; display: grid; gap: 9px; grid-template-rows: auto 1fr auto; }
 .acct-chips { display: flex; flex-wrap: wrap; gap: 7px; }
-/* 2026-09-26 «근거» 접기 -- 연구 원문은 누를 때만. 요약 줄은 누르는 곳이라는 표시(▸/▾)만 단다. */
-.why-fold > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
-  font: 600 11px/1.4 var(--font-sans); color: var(--muted); min-height: 24px; }
-.why-fold > summary::-webkit-details-marker { display: none; }
-.why-fold > summary::after { content: "▸"; font-size: 11px; }
-.why-fold[open] > summary::after { content: "▾"; }
-.why-fold > summary:hover { color: var(--text); }
-.why-fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
-.why-body { font: 600 11px/1.55 var(--font-sans); color: var(--muted); margin-top: 4px; }
-.fr-fold > summary.fr-sum { display: flex; width: 100%; font: 700 12px/1.45 var(--font-sans); color: var(--muted); }
-.fr-fold > summary.fr-sum.fr-up { color: var(--good); }
-.fr-fold > summary.fr-sum.fr-dn { color: var(--bad); }
-.fr-fold .fr-more { margin-left: auto; color: var(--muted); font: 600 11px/1 var(--font-sans); padding-left: 8px; white-space: nowrap; align-self: center; }
-.fr-fold[open] > .fr-gauges { margin-top: 6px; }
 /* 2026-09-26 성과는 한 줄 요약이 기본(펼치면 차트). 요약 줄 자체가 누르는 곳이다. */
 .acct-perf-fold > summary { list-style: none; cursor: pointer; align-items: center; min-height: 28px; }
 .acct-perf-fold > summary::-webkit-details-marker { display: none; }
@@ -2986,9 +2912,7 @@ svg {
    배정한다(순위가 아니라 정체성에 묶어, 순위가 바뀌어도 색이 안 따라 바뀐다). 이름이 늘
    붙으므로 색만으로 구분하지 않는다. 초록/빨강/주황은 이 저장소에서 방향·위험도로 예약돼
    있어 시나리오에 쓰지 않는다(표시 규약 §2). 주황은 기존대로 «활발/임박» 라벨에만. */
-/* 2026-09-26 비평: 한국어 산문이 등폭이라 글자 사이가 벌어져 흩어졌다 -- 본문은 Pretendard, 숫자만 등폭 숫자.
-   큰 확률(.sit-col .p)·가격은 여전히 등폭이다(비교하는 숫자 = Tabular Data Rule). */
-.situation-body { display: flex; flex-direction: column; gap: 0; padding: 0 18px 14px;
+/* 2026-09-26 비평: 한국어 산문이 등폭이라 글자 사이가 벌어져 흩어졌다 -- 본문은 Pretendard { display: flex; flex-direction: column; gap: 0; padding: 0 18px 14px;
                   font-family: var(--font-sans); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .sit-sec { font: 700 11px/1.4 var(--font-sans); letter-spacing: .04em; color: var(--muted);
            margin: 14px 0 5px; display: flex; align-items: baseline; justify-content: space-between; }
@@ -2998,43 +2922,6 @@ svg {
    확률·방향·목표가를 한 번에 비교한다. 순서는 확률 내림차순이고, 1순위만 윗선을 진하게
    준다(순위 표시는 «색»이 아니라 굵기다 -- 색은 정체성에 묶고 순위엔 안 쓴다는 규약). */
 .sit-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.sit-col { border-top: 2px solid var(--soft-line); padding-top: 9px; min-width: 0; }
-.sit-col.sit-top { border-top-color: var(--accent); }
-/* 🔴이름이 «top» 이면 안 된다 -- 327행의 전역 .top(페이지 헤더)이 display:flex 를 걸어
-   1순위 열만 가로로 눕는다(자식 넷이 한 줄이 되고 게이지는 폭 0). 시안 E 배포 때부터
-   깨져 있었고 게이지가 그걸 드러냈다. 2026-09-22 top -> sit-top. */
-.sit-col .p { font: 800 26px/1 var(--font-mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
-/* 2026-09-22 확률 게이지(시안 U2). 채움 세기는 **시나리오 키 고정** -- 순위로 칠하면
-   순위가 바뀔 때 같은 시나리오가 다른 밝기가 되어 «색이 정체성» 규약이 깨진다. */
-.sit-g { height: 6px; border-radius: 3px; margin-top: 7px; overflow: hidden;
-  background: color-mix(in srgb, var(--neutral) 10%, transparent); }
-.sit-g i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
-/* 2026-09-25 융합 3결과: 색이 곧 결과다 -- 위 먼저 = 초록 · 아래 먼저 = 빨강 · 미도달 = 주황(방향이 아니라 «멀다»).
-   열 아래 미는 표도 같은 색으로 켜진다(옛 뒤집기 신호의 초록 고정을 결과색으로). */
-.sit-g.k-up i { background: var(--good); }
-.sit-g.k-dn i { background: var(--bad); }
-.sit-g.k-none i { background: var(--amber); opacity: .7; }
-.sit-col.k-up .sit-ar { color: var(--good); }
-.sit-col.k-dn .sit-ar { color: var(--bad); }
-.sit-col.k-none .sit-ar { color: var(--amber); }
-.sit-col.k-dn .sit-push.on { color: var(--bad); }
-.sit-col.k-dn .sit-push.on .dot { background: var(--bad); border-color: var(--bad); box-shadow: none; }
-.sit-col.k-none .sit-push.on { color: var(--amber); }
-.sit-col.k-none .sit-push.on .dot { background: var(--amber); border-color: var(--amber); box-shadow: none; }
-.sit-col.k-up .sit-push.on .dot { box-shadow: none; }
-.sit-src { margin-top: 8px; }
-.sit-col .nm { margin-top: 6px; font-size: 12px; font-weight: 600;
-               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sit-col .tg { margin-top: 5px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
-               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sit-col .ds { margin-top: 2px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
-/* 그 시나리오로 «미는» 뒤집기 신호 -- 선 없이 열 아래에 붙어 연결이 보인다 */
-.sit-pushes { margin-top: 8px; display: grid; gap: 3px; }
-.sit-push { display: grid; grid-template-columns: 10px 1fr; gap: 6px; align-items: baseline;
-            font-size: 11px; color: var(--muted); }
-.sit-push .dot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--hover-line); }
-.sit-push.on { color: var(--good); font-weight: 600; }
-.sit-push.on .dot { background: var(--good); border-color: var(--good); }
 
 /* STATE */
 /* 2026-09-22 «현재 상황»: 라벨 문장 목록 -> 고정 18칸 차트(시안 U2). 두 칸은 gap:1px +
@@ -3068,41 +2955,12 @@ body.not-eth [data-eth-only]::after {
 .sit-cal { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .sit-cal b { color: var(--ink, inherit); }
 @media (max-width: 520px) { .sit-cols { grid-template-columns: 1fr; gap: 6px; } }
-/* 2026-09-26 두 질문(닿을 확률 · 닿는다면 어느 쪽). 닿을 확률 게이지는 방향이 아니라 --accent(기본 .sit-g i).
-   분할 막대는 두 칸 모두 무채색이고 **기운 쪽만** 방향색 -- 동전(50±5pp)은 색이 없다(DESIGN «비등»). */
-.sit-reach, .sit-dir { margin-top: 4px; }
-.sit-dir { margin-top: 12px; }
 .sit-row-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
              font-size: 12px; font-weight: 600; }
 .sit-row-h b { font: 800 20px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .sit-row-h b.coin { font: 700 13px/1 var(--font-sans); color: var(--muted); }
 .sit-row-h b.k-up { font: 700 13px/1 var(--font-sans); color: var(--good); }
 .sit-row-h b.k-dn { font: 700 13px/1 var(--font-sans); color: var(--bad); }
-.sit-reach .sit-cal { margin-top: 5px; }
-/* 2026-09-28 30분 카드 «위:아래 방향» 자리 = 일 단위 추세(trendBlockHtml). 표 칩 = 기간 · 방향 · 뒤집힘 가격과 거리.
-   점선 칩 = 지금 가격으로 일봉이 닫히면 그 표가 뒤집힌다. */
-.sit-dir .sit-cal { margin-top: 5px; }
-.sit-dir .sit-row-h b { white-space: nowrap; }
-.tr-votes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
-.tr-v { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 7px; border: 1px solid var(--line);
-        border-radius: 4px; font: 700 11px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
-.tr-v.k-up { color: var(--good); }
-.tr-v.k-dn { color: var(--bad); }
-.tr-v em { font-style: normal; font-weight: 500; color: var(--muted); }
-.tr-v.flip { border-style: dashed; border-color: currentColor; }
-.tr-warn { margin-top: 7px; font-size: 12px; font-weight: 700; color: var(--bad); }
-.sit-split { display: flex; gap: 2px; height: 8px; margin-top: 7px; border-radius: 4px; overflow: hidden; }
-.sit-split i { display: block; height: 100%; background: color-mix(in srgb, var(--neutral) 18%, transparent); }
-.sit-split i.k-up.lean { background: var(--good); }
-.sit-split i.k-dn.lean { background: var(--bad); }
-.sit-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
-.sit-side .nm { margin-top: 0; }
-.sit-side .p { margin-top: 5px; color: var(--muted); }
-.sit-side.lean.k-up .p { color: var(--good); }
-.sit-side.lean.k-dn .p { color: var(--bad); }
-.sit-side.k-dn.sit-top { border-top-color: var(--bad); }
-.sit-side.k-up.sit-top { border-top-color: var(--good); }
-.sit-side .tg .ds { font-weight: 400; }
 
 /* ── 떠다니는 주문 버튼 (2026-09-25 사용자 지시) ─────────────────────────────────────
    접힌 상태 = 알약 하나(손잡이 ⠿ + 지금 포지션). 펼치면 계좌 카드의 .acct-lanes 가 **통째로**
@@ -3209,7 +3067,6 @@ body.not-eth [data-eth-only]::after {
 .ofab-panel .entry-line > #snapEntryFracVal { order: 5; }
 .ofab-panel .manual-entry-row.exit-row { justify-content: center; }
 
-
 /* 2026-09-26 주문 심볼의 코인이 아닌 탭(SOL·XRP)에서는 주문 조작부를 막는다 -- app.js syncOrderCoinGate.
    JS 가드(미리보기·전송 거절)가 본체이고, 이건 «눌러도 안 된다»를 보이게 하고 길게 누르기를 원천 차단한다. */
 body.order-coin-off .acct-lanes > * { opacity: 0.35; pointer-events: none; }
@@ -3266,3 +3123,29 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (pointer: coarse) {
   .asset-tabs .asset-tab, .theme-toggle { min-height: 40px; }
 }
+
+/* 2026-09-28 시안 B «시간 사다리»(사용자 선택) -- 30분 카드 본문(situationLadderHtml).
+   왼쪽 64px = 시간대 이름(지금·30분 / 큰 흐름·1–13주), 오른쪽 = 이름표 | 값. 색은 방향(초록·빨강)과 주의(주황)에만. */
+.sit-lad { display: grid; grid-template-columns: 64px minmax(0, 1fr); margin-top: 8px; }
+.sit-lad-w { padding: 11px 0; border-top: 1px solid var(--soft-line); font: 700 11px/1.25 var(--font-sans); color: var(--muted); }
+.sit-lad-w span { display: block; margin-top: 3px; font-weight: 600; opacity: .8; }
+.sit-lad-rows { display: flex; flex-direction: column; min-width: 0; padding: 6px 0; border-top: 1px solid var(--soft-line); }
+.sit-lad-r { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; min-height: 26px; padding: 5px 0; }
+.sit-lad-l { min-width: 0; font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--muted); }
+.sit-lad-v { font: 700 17px/1 var(--font-sans); color: var(--text); text-align: right; white-space: nowrap; }
+.sit-lad .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.sit-lad-v.quiet { font-size: 13px; color: var(--muted); }
+.sit-lad-v.sit-lad-sm { font-size: 14px; }
+.sit-lad-v small { margin-left: 5px; font: 600 11px/1 var(--font-sans); color: var(--muted); }
+.sit-lad-v.k-up, .sit-lad-l .k-up { color: var(--good); }
+.sit-lad-v.k-dn, .sit-lad-l .k-dn { color: var(--bad); }
+.sit-lad-edge { color: var(--warn); font-weight: 700; }
+.sit-lad-ic { display: inline-block; width: .8em; height: .8em; margin-right: .18em; vertical-align: .02em; }
+.sit-lad-bar { grid-column: 1 / -1; height: 5px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--neutral) 16%, transparent); }
+.sit-lad-bar i { display: block; height: 100%; border-radius: 3px; background: var(--text); opacity: .72; }
+.sit-lad-dots { display: inline-flex; gap: 2px; margin: 0 5px; vertical-align: 1px; }
+.sit-lad-dots b { width: 7px; height: 7px; border-radius: 2px; background: var(--bad); }
+.sit-lad-dots b.u { background: var(--good); }
+.sit-lad-warn { display: flex; align-items: center; gap: 7px; margin: 4px 0 2px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent);
+  font-size: 12px; font-weight: 700; color: var(--bad); }
