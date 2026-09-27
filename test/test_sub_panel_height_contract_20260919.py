@@ -92,7 +92,7 @@ def test_lanes_tile_without_overlap():
 
     # 2026-09-27 데스크톱은 누적을 사분면 막대 판에 **겹친다**(사용자 선택 A) -- 겹침이 곧 설계다.
     #   누적 판 = 사분면 막대 판(같은 y · 같은 높이)이어야 한다. 어긋나면 막대 밖으로 새거나 반만 덮는다.
-    assert re.search(r"const LANE_MERGE = !mobileChart;", JS), "합친 판은 데스크톱만이어야 한다(모바일은 제 줄)"
+    assert re.search(r"const LANE_MERGE = true;", JS), "2026-09-28 시안 E: 데스크톱·모바일 모두 한 판이어야 한다"
     merged = dict(env, LANE_MERGE=True, CUM_DRAW_H=env["QUAD_H"])
     for name, expr in exprs.items():
         merged[name] = ev(expr, merged)
