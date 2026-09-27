@@ -5403,6 +5403,18 @@ function declutterTagY(labels, lo, hi, gap) {
   return labels;
 }
 
+// 2026-09-27 넓은 화면 2단: 지지/저항 목록(HTML)을 차트 오른쪽 칸, 1초 수급 바로 아래에 얹는다.
+//   자리는 렌더러가 정한 좌표 그대로다 -- CSS 로 따로 맞추면 칸 비율·패널 높이가 바뀔 때 어긋난다.
+//   viewBox 가 상자와 1:1 이라(w·h 를 상자에서 받는다) SVG 좌표가 곧 px 다. box=null 이면 원래 흐름으로.
+function placeLevelList(svg, box) {
+  const list = el("liquidationMapList"), card = list && list.parentElement;
+  if (!list) return;
+  if (!box || !card) { list.style.cssText = ""; return; }
+  const sr = svg.getBoundingClientRect(), cr = card.getBoundingClientRect();
+  Object.assign(list.style, { position: "absolute", margin: "0", width: `${box.w}px`,
+                              left: `${sr.left - cr.left + box.x}px`, top: `${sr.top - cr.top + box.y}px` });
+}
+
 function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = [], footprint = null) {
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
   // 2026-09-18 부모가 아니라 **SVG 자신의** 높이를 본다. 부모는 마진 12px 를 포함하므로
@@ -5414,7 +5426,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-19 2열 배치(사용자 지시)로 상자가 카드 폭의 68%/32% 가 됐다. 1200/400 을 고정으로
   // 두면 viewBox 가 상자보다 커서 meet 축소가 걸리고 글자가 그만큼 작아진다 -- 상자에서 받는다.
   // 하한은 «아직 레이아웃 전»(parentW/H = 0)일 때의 폴백이다.
-  const w = parentW > 0 ? Math.max(parentW, 320) : 1200;
+  const wAll = parentW > 0 ? Math.max(parentW, 320) : 1200;
   const h = parentH > 0 ? Math.max(parentH, 260) : 400;
   // 하단/상단 여백 안의 것들(x축 눈금·라벨·레짐 리본·증거신호 레인)은 전부 `mt` / `h - mb`
   // 상대 오프셋이다 -- 여백을 늘리면 통째로 따라 움직인다.
@@ -5459,6 +5471,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⚠️대가: 이 SVG 는 가격 틱마다 통째로 다시 그려진다(초당 ~1.7회). 밖에 있을 때 두 그림은
   //   5초·1초 주기였다 -- 이제 그 주기로 같이 다시 그려진다. 사용자 결정으로 감수한다.
   const subOn = svg.id === "candleSvgSnapshot" && flowOn();
+  // 2026-09-27 넓은 화면 2단(사용자 선택 62:38): CSS 가 --fp-split(오른쪽 칸 비율)을 준다 -- 판정은 CSS 한 곳.
+  //   가격 플롯·레인·밀도 범례는 왼쪽 w, 호가 프로파일·1초 수급은 오른쪽 칸(subX, subW). viewBox 는 wAll.
+  //   아래 본문은 전부 `w` 를 «플롯 폭»으로 쓰므로 한 줄도 안 바뀐다.
+  const splitR = subOn ? Number(getComputedStyle(svg).getPropertyValue("--fp-split")) || 0 : 0;
+  const SPLIT_GAP = 20;
+  const subW = splitR ? Math.round((wAll - SPLIT_GAP) * splitR) : wAll;
+  const w = splitR ? wAll - SPLIT_GAP - subW : wAll, subX = splitR ? w + SPLIT_GAP : 0;
   // 🔴이 세 값의 합(SUB_TOTAL)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야
   //   한다(666 = 400 + 266 -> 706 = 400 + 306 -> 756 = 400 + 356). 상자가 작으면
   //   그만큼 가격 플롯이 눌린다.
@@ -5481,7 +5500,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ⭐데스크톱·모바일이 같은 모양이 되므로 subStack 분기가 통째로 사라진다.
   //   SUB_TOTAL 620 = 190(프로파일) + 8 + 400(1초 수급) + 14(밀도 범례) + 8
   //   ← 2026-09-20 뒤집었다가 2026-09-22 다시 프로파일이 위로(사용자 지시)
-  const SUB_TOTAL = subOn ? SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H : 0;
+  // 2단이면 플롯 위에는 밀도 범례만 남는다(호가·1초 수급은 오른쪽 칸) -- 상자 872 = 12 + 22 + 400 + 368 + 70.
+  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP
+    : SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
   //   빼기 때문). 인라인 height 로 JS 가 상자를 정하는 방법은 쓰지 않는다 -- 2열에서는 상자가
@@ -5600,7 +5621,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 소비 합 = SUB_TOTAL: 190(프로파일) + 8 + 400(1초) + 14(범례) + 8 = 620.
   const subProfileY = mtTop;
   const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
-  const subLegendY = sub1sY + SUB_1S_H;
+  const subLegendY = splitR ? mtTop : sub1sY + SUB_1S_H;   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
   const quadY = plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
   const cumY = quadY + QUAD_H + QUAD_TXT + ROW_H + LANE_GAP; // 누적 행 위쪽
   const cumBottom = cumY + CUM_H;                    // 그 아래 한 줄이 ROW_H 를 쓴다
@@ -5611,8 +5632,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   candles = viewport.candles;
   const includeCurrentPrice = viewport.includeCurrent;
 
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("viewBox", `0 0 ${wAll} ${h}`);
   svg.innerHTML = "";
+  if (svg.id === "candleSvgSnapshot") {
+    placeLevelList(svg, splitR ? { x: subX, y: mtTop + SUB_PROFILE_H + SUB_GAP + SUB_1S_H + 12, w: subW } : null);
+  }
   
   if (!candles.length) {
     const txt = document.createElementNS(NS, "text");
@@ -6946,8 +6970,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // assumed rect IS the rendered content box, under/over-scaled y more the further the cursor
     // sat from the vertical center -- exactly the reported "worse near top/bottom" symptom.
     // Correct conversion needs the actual uniform "meet" scale plus the centering offset it implies.
-    const svgScale = Math.min(rect.width / w, rect.height / h);
-    const svgOffsetX = (rect.width - w * svgScale) / 2;
+    const svgScale = Math.min(rect.width / wAll, rect.height / h);   // viewBox 는 wAll(2단이면 오른쪽 칸 포함)
+    const svgOffsetX = (rect.width - wAll * svgScale) / 2;
     const svgOffsetY = (rect.height - h * svgScale) / 2;
     const mx = (evt.clientX - rect.left - svgOffsetX) / svgScale;
     const my = (evt.clientY - rect.top - svgOffsetY) / svgScale;
@@ -7543,19 +7567,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴프로파일을 **먼저** 그린다 -- supplyProfileNow 에 행 기하를 남겨야 히트맵이
     //   같은 y 에 포갠다(x 위치는 호출 순서와 무관하다. 각자 제 <svg> 상자를 받는다).
     supplyProfileSubBox = {
-      svg: subSvg("prof", 0, subProfileY, w, SUB_PROFILE_H,
-                  subProfileKey(entryPrice, w, SUB_PROFILE_H),
+      svg: subSvg("prof", subX, subProfileY, subW, SUB_PROFILE_H,
+                  subProfileKey(entryPrice, subW, SUB_PROFILE_H),
                   (g) => renderSupplyProfileSvg(g, latestSupplyProfile, currentPrice,
-                                                entryPrice, { w, h: SUB_PROFILE_H })),
-      w, h: SUB_PROFILE_H };
+                                                entryPrice, { w: subW, h: SUB_PROFILE_H })),
+      w: subW, h: SUB_PROFILE_H };
     // 재사용했으면 renderSupplyProfileSvg 가 안 돌았으므로 현재가 줄을 여기서 맞춘다.
     updateSupplyProfileNow(currentPrice);
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
     supply1sSubBox = {
-      svg: subSvg("s1", 0, sub1sY, w, SUB_1S_H, sub1sKey(w, SUB_1S_H),
-                  (g) => renderSupply1s({ svg: g, w, h: SUB_1S_H })),
-      w, h: SUB_1S_H };
+      svg: subSvg("s1", subX, sub1sY, subW, SUB_1S_H, sub1sKey(subW, SUB_1S_H),
+                  (g) => renderSupply1s({ svg: g, w: subW, h: SUB_1S_H })),
+      w: subW, h: SUB_1S_H };
 
     // ── 청산 밀도 범례 (2026-09-21 아티팩트 댓글) ────────────────────────────
     // 전에는 헤더 행의 HTML(#liqDensityLegend)이었다. 밀도가 풋프린트의 **배경**이 된
@@ -8936,7 +8960,7 @@ document.querySelectorAll(".chipset").forEach((box) => {
 //   게이지를 밀면 되돌아간 카드의 칩도 이미 맞춰져 있다.
 // 🔴끄는 건 손잡이(⠿)로만 -- 주문 버튼이 «길게 누르기»라 끌기와 한 표면을 쓰면 옮기다 멈춘 순간 발주된다.
 const OFAB_POS_KEY = "ofabPos";
-const ofab = { open: false, home: null, next: null, x: null, y: null, cardVisible: false };
+const ofab = { open: false, home: null, next: null, x: null, y: null };
 
 function ofabPlace(x, y, save) {
   const box = el("ofab"), bar = box?.querySelector(".ofab-bar");
@@ -8976,7 +9000,6 @@ function ofabSetOpen(open) {
   syncAllRangeFills(lanes);
   syncChipsets();
   ofabPlace(ofab.x, ofab.y, false);   // 열리면 위/아래·최대 높이를 다시 정한다
-  el("ofab")?.classList.toggle("tucked", ofab.cardVisible && !open);   // 카드 앞에서 닫으면 다시 접는다
 }
 
 // 탭이 스냅샷일 때만 뜬다(주문 조작부가 사는 탭). 다른 탭으로 가면 조작부를 카드로 먼저 돌려놓는다.
@@ -9032,16 +9055,7 @@ setInterval(renderOfab, 3000);
       if (!el("ofab").hidden) ofabPlace(ofab.x ?? ofabDefaultX(), ofab.y ?? innerHeight, false);
     }).observe(el("ofab").querySelector(".ofab-bar"));
   }
-  // 🔴2026-09-26 비평: 계좌 카드가 화면에 보이는 동안엔 같은 조작부가 **카드 안에** 있다 -- 떠 있는 버튼은
-  //   그 카드의 «지금 닫으면»·미실현 값을 덮기만 한다. 카드가 보이면 접어 두고(펼쳐 쓰는 중이면 그대로),
-  //   카드를 벗어나면 다시 뜬다.
-  const card = el("snapAcctPosition")?.closest(".panel");
-  if (card && window.IntersectionObserver) {
-    new IntersectionObserver(([e]) => {
-      ofab.cardVisible = e.isIntersecting;
-      el("ofab").classList.toggle("tucked", ofab.cardVisible && !ofab.open);
-    }, { threshold: 0.12 }).observe(card);
-  }
+  // 2026-09-27 사용자 «주문 움직이는 버튼은 상시 띄워줘» -- 계좌 카드 앞에서 접던 관찰자(09-26)를 걷었다.
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(OFAB_POS_KEY) || "null"); } catch (e) { saved = null; }
   // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.

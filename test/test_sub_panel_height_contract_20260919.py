@@ -52,6 +52,14 @@ def test_heights_match_between_js_and_css():
         f"가격 플롯 {price_plot}) -- 가격 플롯이 {css_svg - want + price_plot}px 로 눌린다")
     assert css_box == css_svg + 12, f"상자 {css_box} != {css_svg + 12} (SVG + margin-top 12)"
 
+    # 2026-09-27 넓은 화면 2단: 호가·1초 수급이 오른쪽 칸으로 가서 플롯 위에는 밀도 범례만 남는다.
+    #   가격 플롯 400 은 여기서도 지켜야 한다.
+    wide_svg = _num(r"#candleSvgSnapshot \{ --fp-split: 0\.\d+; height: (\d+)px; \}", CSS, "2단 SVG 높이")
+    wide_box = _num(r"\.candle-container \{ height: (\d+)px; \}", CSS[CSS.index("--fp-split"):], "2단 컨테이너")
+    want_wide = mt_top + legend + gap + price_plot + lanes + mb
+    assert wide_svg == want_wide, f"2단 SVG {wide_svg} != {want_wide} -- 가격 플롯이 {wide_svg - want_wide + price_plot}px 로 눌린다"
+    assert wide_box == wide_svg + 12
+
 
 def test_lanes_tile_without_overlap():
     """레인 두 행(사분면 -> 누적 CVD)이 **겹치지 않아야** 한다.
@@ -94,10 +102,30 @@ def test_sub_panels_tile_without_overlap():
            "SUB_PROFILE_H": _num(r"SUB_PROFILE_H = subOn \? (\d+)", JS, "SUB_PROFILE_H"),
            "SUB_1S_H": _num(r"SUB_1S_H = subOn \? (\d+)", JS, "SUB_1S_H"),
            "SUB_LEGEND_H": _num(r"const SUB_LEGEND_H = subOn \? (\d+)", JS, "SUB_LEGEND_H")}
+    exprs = {}
     for name in ("subProfileY", "sub1sY", "subLegendY"):
         m = re.search(rf"  const {name} = ([^;]+);", JS)
         assert m, f"못 찾음: {name}"
-        env[name] = eval(m.group(1).strip(), {"__builtins__": {}}, env)  # noqa: S307 -- 저장소 제 코드
+        exprs[name] = m.group(1).strip()
+
+    def ev(expr, e):
+        # 2026-09-27 넓은 화면 2단(`splitR ? a : b`) -- JS 삼항을 풀어 두 모드를 다 잰다.
+        if "?" in expr:
+            cond, rest = expr.split("?", 1)
+            a, b = rest.split(":", 1)
+            expr = a if eval(cond.strip(), {"__builtins__": {}}, e) else b   # noqa: S307
+        return eval(expr.strip(), {"__builtins__": {}}, e)                     # noqa: S307 -- 저장소 제 코드
+
+    wide = dict(env, splitR=1)
+    for name, expr in exprs.items():
+        wide[name] = ev(expr, wide)
+    # 2단: 밀도 범례는 왼쪽 칸 맨 위, 그 아래 간격 하나 뒤가 가격 플롯(SUB_TOTAL = 범례 + 간격).
+    #   호가·1초 수급은 오른쪽 칸에서 위아래로 겹치지 않아야 한다.
+    assert wide["subLegendY"] == env["mtTop"], "2단에서 밀도 범례가 풋프린트 바로 위(맨 위)가 아니다"
+    assert wide["subProfileY"] + env["SUB_PROFILE_H"] <= wide["sub1sY"], "2단 오른쪽 칸: 프로파일이 1초 수급 위로 올라탄다"
+    env["splitR"] = 0
+    for name, expr in exprs.items():
+        env[name] = ev(expr, env)
 
     panels = sorted([("프로파일", env["subProfileY"], env["SUB_PROFILE_H"]),
                      ("1초 수급", env["sub1sY"], env["SUB_1S_H"]),
