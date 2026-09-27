@@ -142,7 +142,8 @@ def test_one_pane_uses_the_whole_drawing_area():
       빈 띠가 생긴다. 캔들 상자 높이 계약(styles.css)과 이 파일이 갈라져 있어 한쪽만
       고치면 조용히 깨지므로 여기서 다시 센다.
     """
-    m = re.search(r"const mt = (\d+), mb = narrow \? (\d+) : (\d+);", JS)
+    # 2026-09-27 모바일 범례가 차트 안 박스로(boxLegend) 들어가 mb 가 한 갈래 늘었다 -- 박스일 땐 바닥 줄이 없다.
+    m = re.search(r"const mt = (\d+), mb = boxLegend \? \d+ : narrow \? (\d+) : (\d+);", JS)
     assert m, "mt/mb 선언 모양이 바뀌었다 -- 계약을 다시 세운다"
     mt, mb_narrow, mb_wide = (int(g) for g in m.groups())
     sub_h = int(re.search(r"SUB_1S_H = subOn \? (\d+)", JS).group(1))
@@ -156,14 +157,14 @@ def test_one_pane_uses_the_whole_drawing_area():
         "narrow 선언이 mb 보다 뒤다 -- TDZ 로 app.js 가 통째로 죽는다"
     assert re.search(r"const mid = flowTop \+ flowH / 2;", JS), "0선이 그리기 영역 한가운데가 아니다"
     assert re.search(r"const half = flowH / 2 - 4;", JS), "반폭이 flowH 기준이 아니다"
-    body = JS[JS.index("function renderSupply1s"):JS.index("function renderSupplyProfileSvg")]
+    body = JS[JS.index("function renderSupply1s"):JS.index("function bookStatsTip")]
     assert "tMax" not in body and "barMax" not in body, \
         "거래대금 막대가 되살아났다 -- 2026-09-22 사용자 지시로 이 차트에서 뺐다"
 
 
 def test_no_new_colour_was_invented():
     """3색 계약(초록·빨강·주황 + 중립). 층 구분은 색이 아니라 농담이어야 한다."""
-    body = JS[JS.index("function renderSupply1s"):JS.index("function renderSupplyProfileSvg")]
+    body = JS[JS.index("function renderSupply1s"):JS.index("function bookStatsTip")]
     # var(--토큰, #폴백) 은 토큰 사용이다 -- 폴백만 빼고 센다.
     bare = re.sub(r"var\(--[\w-]+,\s*#[0-9a-fA-F]{3,8}\)", "", body)
     hexes = set(re.findall(r"#[0-9a-fA-F]{3,8}", bare))
