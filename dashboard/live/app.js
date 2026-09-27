@@ -7224,8 +7224,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   길이 = √(수량/창 안 최대) -- 비례로 두면 제일 큰 벽 하나에 나머지가 선이 됐다(시안). 창 안 상위 10% 는 진하게 + 수량.
   // 🔴«지지·저항»이 아니다 -- 벽에 닿은 뒤 반등률 0.509(동전, 5.8일 71,293건, 09-20). 서술만 한다.
   //   수량은 수집기 래스터 값(칸 $0.5 합산)이고, 가격선은 이 띠를 가로질러 배지까지 이어진다(호가창 사다리처럼).
+  // 2026-09-27 축적 호가를 입혔다(사용자 선택 A + «재깔림도»): 한 칸 = 두 겹.
+  //   **심(진함) = 창 내내 한 번도 안 빠진 양(pers)** -- 버텨 온 벽 vs 방금 깔린 호가를 가른다(창 안 호가의 36% 는 창을 못 버틴다).
+  //   **겉 = 지금 양, 밝기 = 재깔림(refill/peak)의 창 안 순위** -- 밝으면 계속 다시 채워지는 자리, 흐리면 한 번 깔리고 만 호가.
+  //   🔴둘 다 «성격»의 서술이다 -- 지속률은 반등을 못 가렸다(상위−하위 +0.001, 09-20). 창 = 위 1h/2h/4h/12h 토글.
   const book = BOOK_W && latestFlowHeatmap && latestFlowHeatmap.book;
-  cachedLayer("bookStrip", book ? book.t_ms + "|" + activeSnapshotAsset : "none", (g) => {
+  const acc = latestFlowHeatmap && latestFlowHeatmap.rows;
+  cachedLayer("bookStrip", book ? book.t_ms + "|" + activeSnapshotAsset + "|" + (acc ? acc.bin_lo : 0) : "none", (g) => {
     if (!book || !book.q || !(book.bin_size > 0)) return;
     const bs = book.bin_size, x0 = ml + cw + 6, L = BOOK_W - 10;
     const vis = [];
@@ -7249,19 +7254,45 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     base.setAttribute("y1", mt); base.setAttribute("y2", plotBottom);
     base.setAttribute("stroke", "var(--soft-line)");
     g.appendChild(base);
+    // 축적 통계는 창 전체를 접은 행 배열이라 제 격자(bin_lo)를 쓴다 -- 가격으로 찾는다.
+    const accAt = (key, p) => {
+      if (!acc || !acc[key] || !(acc.bin_size > 0)) return 0;
+      const i = Math.round(p / acc.bin_size) - acc.bin_lo;
+      return i >= 0 && i < acc[key].length ? acc[key][i] : 0;
+    };
+    const rwOf = (p) => { const pk = accAt("peak", p); return pk > 0 ? accAt("refill", p) / pk : 0; };
+    const rwSorted = vis.map(([p]) => rwOf(p)).filter((x) => x > 0).sort((a, b) => a - b);
+    const rwPct = (x) => {                // 0~1 창(보이는 범위) 안 순위 -- 프로파일 호가 막대와 같은 방식
+      if (rwSorted.length < 2 || !(x > 0)) return 0;
+      let lo = 0, hi = rwSorted.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (rwSorted[m] < x) lo = m + 1; else hi = m; }
+      return lo / (rwSorted.length - 1);
+    };
     vis.forEach(([p, q, bid]) => {
       const yTop = Math.max(mt, yAt(p + bs / 2)), yBot = Math.min(plotBottom, yAt(p - bs / 2));
       const wall = q >= p90, len = Math.max(1, Math.sqrt(q / mx) * L);
-      const r = document.createElementNS(NS, "rect");
-      r.setAttribute("x", x0); r.setAttribute("y", yTop + 0.5);
-      r.setAttribute("width", len); r.setAttribute("height", Math.max(1, yBot - yTop - 1));
-      r.setAttribute("fill", bid ? "var(--good)" : "var(--bad)");
-      r.setAttribute("fill-opacity", wall ? "0.85" : "0.38");
+      const pers = Math.min(q, accAt("pers", p)), rw = rwOf(p);
+      const color = bid ? "var(--good)" : "var(--bad)", rh = Math.max(1, yBot - yTop - 1);
+      const cell = document.createElementNS(NS, "g");
+      const shell = document.createElementNS(NS, "rect");
+      shell.setAttribute("x", x0); shell.setAttribute("y", yTop + 0.5);
+      shell.setAttribute("width", len); shell.setAttribute("height", rh);
+      shell.setAttribute("fill", color);
+      shell.setAttribute("fill-opacity", (0.14 + 0.56 * rwPct(rw)).toFixed(2));
+      cell.appendChild(shell);
+      if (pers > 0) {
+        const core = document.createElementNS(NS, "rect");
+        core.setAttribute("x", x0); core.setAttribute("y", yTop + 0.5);
+        core.setAttribute("width", Math.max(1, Math.sqrt(pers / mx) * L)); core.setAttribute("height", rh);
+        core.setAttribute("fill", color); core.setAttribute("fill-opacity", "0.9");
+        cell.appendChild(core);
+      }
       const t = document.createElementNS(NS, "title");
-      t.textContent = `${bid ? "매수" : "매도"} 호가 ${p.toFixed(pxDp())} · ${fmtQ(q)} ${unit}`
-        + (wall ? " (보이는 범위 상위 10%)" : "") + " -- 지지·저항 신호가 아니다(실측 반등률 0.509)";
-      r.appendChild(t);
-      g.appendChild(r);
+      t.textContent = `${bid ? "매수" : "매도"} 호가 ${p.toFixed(pxDp())} · 지금 ${fmtQ(q)} ${unit}`
+        + ` · 버틴 양 ${fmtQ(pers)}` + (rw > 0 ? ` · 재깔림 ${rw.toFixed(1)}배` : "")
+        + (wall ? " (보이는 범위 상위 10%)" : "") + " -- 성격의 서술이지 지지·저항 신호가 아니다(실측 반등률 0.509)";
+      cell.appendChild(t);
+      g.appendChild(cell);
       if (wall && !mobileChart) {
         const lb = document.createElementNS(NS, "text");
         lb.setAttribute("x", Math.min(x0 + len + 2, x0 + L - 12));
