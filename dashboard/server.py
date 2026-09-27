@@ -3735,8 +3735,12 @@ def make_app() -> web.Application:
                 "https://fapi.binance.com/fapi/v1/klines",
                 {"symbol": FOOTPRINT_SYMBOL, "interval": "5m", "limit": 300},
                 error_reason="flow_read_5m_upstream_error")
+            # 🔴형성 중 봉은 «마지막 행»이 아니라 «시각»으로 거른다: 바이낸스는 새 봉을 경계 **~5초 뒤**에야 붙여서
+            #   (09-27 서버 실측 +5.28초) 그 전엔 마지막 행이 방금 닫힌 봉이다 -- raw[:-1] 이 그걸 버렸다.
+            now_s = time.time()
             return [{"time": int(r[0]) // 1000, "high": float(r[2]), "low": float(r[3]), "close": float(r[4]),
-                     "volume": float(r[5]), "taker": float(r[9])} for r in raw[:-1]]
+                     "volume": float(r[5]), "taker": float(r[9])} for r in raw
+                    if int(r[0]) // 1000 + FOOTPRINT_BAR_SECONDS <= now_s]
         return await swr_cached("flow_read_5m_day", 60.0, produce, max_stale=STALE_GRACE_SECONDS)
 
     async def compute_situation(now: float) -> None:
