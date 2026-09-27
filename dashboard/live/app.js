@@ -151,7 +151,6 @@ const footprintShades = () =>
 //   ≥$100k 는 건수 0.17%에 물량 14.6%다. 하나로 가르면 둘 중 하나가 거짓말이 된다 --
 //   $10k 를 고래라 하면 물량의 3/4이 고래고, $100k 위만 고래라 하고 나머지를 리테일이라
 //   부르면 그 «리테일»의 대부분이 실은 중형이다. 화면은 경계를 숫자로 적어야 한다.
-const API_SUPPLY_PROFILE_URL = "/api/supply-profile";
 // ── 수급 · 최근 5분 × 1초 (2026-09-19) ────────────────────────────────────
 // 서버가 초 단위 칸을 들고 있고, 여기선 **증분만** 받는다(?since=). 300초를 매초 전부 받으면
 // 시간당 60MB 가 넘는다 -- 증분이면 보통 한두 줄이다.
@@ -208,21 +207,14 @@ let spotMeta = { now: 0, connected: false, tradeAge: null, errors: 0 };
 // 들어오면서(2026-09-19) 「보려고 커서를 올리면 1초 차트가 멈춘다」가 됐다.
 // 노드는 캔들 렌더가 다시 붙여 주므로(subPanelCache) isConnected 로 옛 노드를 거른다.
 let supply1sSubBox = null;
-let supplyProfileSubBox = null;
 // ⭐두 패널을 캔들 렌더와 **분리**한다(2026-09-20). 캔들 SVG 는 풋프린트 모드에서 초당 2.5번
 //   통째로 다시 그려지는데, 이 두 그림의 입력은 0.2~1Hz 로만 바뀐다. 실측(헤드리스 크로미움,
 //   실제 페이로드): renderSnapshotChart 6.1ms 중 **3.9ms(64%)가 이 두 패널**이었고, 그 위에
 //   자기 폴링(1초 히트맵 · 1초 수급 · 5초 프로파일)이 또 겹쳐 프로파일은 초당 3.7번 그려졌다.
 //   그래서 «판번호»가 바뀌었을 때만 다시 그리고, 아니면 만들어 둔 <svg> 노드를 그대로 다시
 //   붙인다(innerHTML="" 은 DOM 에서 떼어낼 뿐 JS 참조가 쥔 서브트리는 살아 있다).
-// 🔴현재가는 판번호에 넣지 않는다 -- 그 한 줄만 updateSupplyProfileNow 가 transform 으로
-//   따로 옮긴다(원래 설계). 넣으면 틱마다 캐시가 깨져 이 최적화가 통째로 무효가 된다.
-let supplyProfileVer = 0, supply1sVer = 0, flowHeatmapVer = 0;
-const subPanelCache = { prof: { node: null, key: "" }, s1: { node: null, key: "" },
-                        dens: { node: null, key: "" } };
-// 2026-09-27 현재가 행도 키에 넣는다 -- 프로파일이 현재가를 세로 가운데에 두므로 행이 바뀌면 다시 그려 가운데를 잡는다.
-const subProfileKey = (entry, w, h, price = 0) =>
-  `${supplyProfileVer}|${flowHeatmapVer}|${entry}|${w}|${h}|${Math.round(price / ((latestSupplyProfile && latestSupplyProfile.bucket) || 0.5))}`;
+let supply1sVer = 0;
+const subPanelCache = { s1: { node: null, key: "" }, dens: { node: null, key: "" } };
 const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}`;
 
 // ── 합산 출처 (2026-09-23) ───────────────────────────────────────────────
@@ -304,16 +296,6 @@ function repaintSupply1sPanel() {
   renderSupply1s(b);
   subPanelCache.s1.key = sub1sKey(b.w, b.h);
 }
-function repaintSupplyProfilePanel() {
-  const b = supplyProfileSubBox;
-  if (!b || !b.svg.isConnected) return;
-  const entry = Number(snapshotAccountPosition()?.entry_price || 0);
-  renderSupplyProfileSvg(b.svg, latestSupplyProfile,
-    Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0,
-    entry, { w: b.w, h: b.h });
-  subPanelCache.prof.key = subProfileKey(entry, b.w, b.h,
-    Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0);
-}
 
 const API_OI_5M_URL = "/api/oi-5m";
 const OI_5M_POLL_MS = 15000;
@@ -346,16 +328,11 @@ const flowHeatmapAgg = () =>         // 창 전체를 300열에 담는 초/열
 // 🔴비용은 **서버가 1초 SWR 로 묶는다**(server.py api_flow_heatmap) -- 안 그러면 탭 수만큼
 //   곱해진다. 한 번 11~32ms(탭별 창 길이), 1Hz 면 코어 1.1~3.2%.
 const flowHeatmapPollMs = () => 1000;
-const SUPPLY_PROFILE_POLL_MS = 5000;    // 24시간 창이라 더 자주 받아봐야 같은 그림이다
-let latestSupplyProfile = null;
-let supplyProfileLastFetchAt = 0;
 // 2026-09-19 호가 히트맵. 래스터는 1초/열인데 agg=3 으로 접어 받으므로 3초면 새 열이 하나다.
 let latestGex = null;
 let gexLastFetchAt = 0;
 let latestFlowHeatmap = null;
 let flowHeatmapLastFetchAt = 0;
-// 현재가 박스가 스스로 움직이는 데 필요한 기하(행 높이·행 키). 렌더가 적고 체결 WS 가 읽는다.
-let supplyProfileNow = null;
 // 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
 // 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
 let latestBreakoutDetector = null;
@@ -550,7 +527,6 @@ async function setActiveSnapshotAsset(asset) {
   // 2026-09-22 ETH 전용 카드에 «ETH 전용» 배지를 켠다(styles.css 의 body.not-eth 규칙).
   document.body.classList.toggle("not-eth", asset !== "eth");
   // ETH 전용 그림들의 캐시도 비운다 -- 안 비우면 ETH 로 **돌아올 때** 옛 그림이 한 프레임 번쩍인다.
-  latestSupplyProfile = null; supplyProfileLastFetchAt = 0;
   footprintBars = new Map(); latestFootprint = null;
   // 2026-09-26 SOL·XRP 도 흐름이 있다 -- 1초 수급 칸·커서·실시간 셀·히트맵을 코인마다 새로 받는다.
   //   🔴커서를 안 비우면 새 코인에 옛 코인의 초 번호로 «그 뒤만» 달라고 해서 창 앞부분이 빈다.
@@ -670,13 +646,11 @@ function setupChartWindowTabs() {
       renderChartWindowTabs();
       // 폴링 간격(0.4초/5초)을 기다리지 않고 바로 받는다 -- 누른 티가 나야 한다.
       footprintLastFetchAt = 0;
-      supplyProfileLastFetchAt = 0;
       flowHeatmapLastFetchAt = 0;
       // 🔴2026-09-25 청산 이력도 이제 창 폭을 들고 간다 -- 여기 안 넣으면 토글을 눌러도
       //   다음 폴링까지 옛 폭으로 남는다(위 셋과 같은 이유).
       liquidation5mLastFetchAt = 0;
       refreshFootprint();
-      refreshSupplyProfile();
       refreshFlowHeatmap();
       refreshLiquidation5mSignal();
       refreshGex();
@@ -1080,9 +1054,6 @@ function applyDashboardEvent(payload) {
     latestLivePriceByAsset[asset] = price;
     latestLivePriceTsByAsset[asset] = String(ticker.ts || "");
   });
-  // 바이낸스 직결 WS 가 막힌 환경에서는 이 푸시가 유일한 시세다 -- 없으면 현재가 박스가
-  // 프로파일 폴링(5초)에 묶여 멈춘 것처럼 보인다.
-  updateSupplyProfileNow(Number(latestLivePriceByAsset[activeSnapshotAsset] || 0));
   if (payload?.state?.state) {
     latestMainState = payload.state.state;
     latestCompactState = payload.state.compactState || null;
@@ -3252,9 +3223,6 @@ function updateLivePriceFast(price) {
   const now = Date.now();
   if (now - lastFastPriceAt < FAST_PRICE_MIN_INTERVAL_MS) return;
   lastFastPriceAt = now;
-  // 수급 프로파일의 현재가 박스는 캔들 차트와 무관하게 움직인다 -- 청산맵을 보고 있어도
-  // 프로파일은 늘 화면에 있으므로 아래 liveLineCtx 가드보다 **앞에** 둔다.
-  updateSupplyProfileNow(price);
   if (!c || !c.svg.isConnected) return;
   const span = Math.max(c.yMax - c.yMin, 1e-5);
   const raw = c.mt + ((c.yMax - price) * c.ch) / span;
@@ -3692,35 +3660,12 @@ async function refreshFlowHeatmap() {
           return acc;
         }, { ...j.rows })
       : null };
-    flowHeatmapVer += 1;
-    repaintSupplyProfilePanel();   // 행별 지속 잔량이 같이 갱신된다
   } catch (error) {
     console.error("Flow heatmap fetch error:", error);
     latestFlowHeatmap = null;
-    flowHeatmapVer += 1;
   }
 }
 
-async function refreshSupplyProfile() {
-  if (activePageTab !== "snapshot" || document.hidden) return;
-  if (!flowOn()) return;   // 흐름 엔진이 있는 코인만
-  const now = Date.now();
-  if (now - supplyProfileLastFetchAt < SUPPLY_PROFILE_POLL_MS) return;
-  supplyProfileLastFetchAt = now;
-  try {
-    const asset = activeSnapshotAsset;
-    const res = await fetch(`${API_SUPPLY_PROFILE_URL}?asset=${asset}&bars=${chartWindowBars}`, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`supply-profile ${res.status}`);
-    const j = await res.json();
-    if (asset !== activeSnapshotAsset) return;
-    latestSupplyProfile = j;
-  } catch (error) {
-    console.error("Supply profile fetch error:", error);
-    latestSupplyProfile = null;
-  }
-  supplyProfileVer += 1;
-  repaintSupplyProfilePanel();
-}
 
 async function refreshOi5m() {
   if (activePageTab !== "snapshot" || document.hidden) return;
@@ -4693,280 +4638,14 @@ function renderSupply1s(box = null, src = null) {
 //   FOOTPRINT_KEEP_BARS 주석). 그래서 실제 창 길이를 머리글에 **항상** 적는다.
 
 
-function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box = null) {
-  const NS = "http://www.w3.org/2000/svg";
-  const mobileChart = isMobileChartMode();
-  // 2026-09-19 2열 배치(사용자 지시)로 상자가 카드 폭의 68%/32% 가 됐다. 1200/400 을 고정으로
-  // 두면 viewBox 가 상자보다 커서 meet 축소가 걸리고 글자가 그만큼 작아진다 -- 상자에서 받는다.
-  // 하한은 «아직 레이아웃 전»(parentW/H = 0)일 때의 폴백이다.
-  // box 가 오면 재지 않는다 -- 캔들 SVG 안의 중첩 <svg> 로 그릴 때 그 상자가 곧 좌표계다.
-  // 🔴«재지 않는다»가 **측정을 건너뛴다**는 뜻이어야 한다. 값만 버리고 호출은 그대로 두면
-  //   getBoundingClientRect 가 방금 만든 수천 노드의 레이아웃을 강제로 확정시킨다 -- 이 함수는
-  //   캔들 렌더 한가운데서 불린다.
-  const measured = box ? null : {
-    w: svg.parentElement ? svg.parentElement.clientWidth : 0,
-    h: svg.getBoundingClientRect().height
-       || (svg.parentElement ? svg.parentElement.clientHeight : 0),
-  };
-  const w = box ? box.w : (measured.w > 0 ? Math.max(measured.w, 320) : 1200);
-  const h = box ? box.h : (measured.h > 0 ? Math.max(measured.h, 260) : 400);
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = "";
-
-  const levels = (profile && Array.isArray(profile.levels) ? profile.levels : [])
-    .filter((l) => (Number(l[1]) || 0) + (Number(l[2]) || 0) > 0);
-  if (!levels.length) {
-    supplyProfileNow = null;   // 그릴 행이 없다 -- 옛 기하를 남기면 박스가 유령 행을 가리킨다
-    const txt = document.createElementNS(NS, "text");
-    txt.setAttribute("x", w / 2); txt.setAttribute("y", h / 2);
-    txt.setAttribute("text-anchor", "middle"); txt.setAttribute("fill", "var(--muted)");
-    txt.textContent = "체결 테이프 집계 중...";
-    svg.appendChild(txt);
-    return;
-  }
-
-  // 여백은 캔들 차트와 **같은 값**이다(2026-09-19 사용자 요청: 풋프린트와 같은 너비).
-  // 머리글 세 줄(창 길이 · 지지/저항 · 벽)은 같은 날 사용자 지시로 걷어냈다 -- 그 세로
-  // 공간을 행에 돌려줬다. 값은 전부 **툴팁**에 남아 있고, 경계($100k/<$10k)는 아래 범례가
-  // 계속 적는다.
-  // 여백도 상자 폭을 따른다 -- 2열의 오른쪽 열(≈400px)에서 45/112 는 폭의 40% 를 먹는다.
-  const narrow = w < 760;
-  // mr 은 띠 이름표가 앉는 자리다 -- 좁을 때 64 면 «리테일 매수»가 밖으로 나간다(2026-09-19
-  // 모바일 실측). 78 로 늘려도 막대는 한쪽당 7px 만 잃는다.
-  // 🔴2026-09-22 실측: 좁은 폭에서 그 이름표들은 **이미 안 그려진다**(아래 !narrow 가드 넷).
-  //   남은 것은 델타 띠뿐이고 그건 w-mr+2 에서 5px 다. 78 중 **69px 이 빈칸**이었다 --
-  //   348px 화면에서 막대 한쪽이 그만큼 짧았다. 12 면 띠(2+5)와 5px 여백이 다 들어간다.
-  const ml = narrow ? 34 : 45, mr = narrow ? 12 : 112, mt = 14, mb = 22;
-  const centerW = narrow ? 54 : 68;   // 굵고 커진 가격 라벨 자리(사용자 요청)
-  const sideW = (w - ml - mr - centerW) / 2;
-  const avail = h - mt - mb;
-  const bucket = Number(profile.bucket) || 0.5;
-  const prices = levels.map((l) => Number(l[0]));
-  let minP = Math.min(...prices), maxP = Math.max(...prices);
-  // 2026-09-27 현재가를 세로 **정중앙**에(사용자 지시) -- 현재가에서 먼 쪽 거리로 위아래를 대칭으로 편다.
-  //   행은 아래에서 현재가 행을 가운데 둔 **연속** 행으로 만든다(체결 없는 행은 빈 막대).
-  const cur = Number(currentPrice) || 0;
-  if (cur > 0) {
-    const half = Math.max(maxP - cur, cur - minP, bucket);
-    minP = cur - half; maxP = cur + half;
-  }
-  // 행은 «읽히는 높이»가 정한다 -- 가격 폭이 아니라. 창이 24시간까지 자라면 빈이 수천 개라
-  // 격자 그대로 그리면 한 행이 0.1px 가 된다.
-  const maxRows = Math.max(8, Math.floor(avail / (mobileChart ? 6 : 7)));
-  const rowSize = Math.max(bucket, Math.ceil(((maxP - minP + bucket) / maxRows) / bucket) * bucket);
-
-  const rows = new Map();
-  levels.forEach((l) => {
-    const key = Math.floor(Number(l[0]) / rowSize);
-    const row = rows.get(key) || [0, 0, 0, 0, 0, 0];
-    for (let i = 0; i < 6; i++) row[i] += Number(l[i + 1]) || 0;
-    rows.set(key, row);
-  });
-  let keys = [...rows.keys()].sort((a, b) => b - a);   // 위가 높은 가격
-  if (cur > 0) {                                         // 현재가 행 c 를 가운데로: c+n … c-n
-    const c = Math.floor(cur / rowSize);
-    const n = Math.max(0, ...keys.map((k) => Math.abs(k - c)));
-    keys = Array.from({ length: 2 * n + 1 }, (_, j) => c + n - j);
-  }
-  const rowPx = avail / keys.length;
-  // 🔴합산으로 바뀌었으니 정규화도 «행 총량»이어야 한다. max(buy,sell) 로 두면 막대가
-  //   상자를 넘어간다(합계가 그 두 배까지 된다).
-  const max = Math.max(...[...rows.values()].map((r) => r[0] + r[1]), 1e-9);
-  // 2026-09-19 델타 띠(사용자 지시 B안): 합산 막대 **바깥**에 얇은 띠로 «테이커가 어느
-  // 쪽이었나»를 되살린다. 라벨은 안 붙인다 -- 값은 툴팁에 있다.
-  // ⭐합산이 «얼마나 거래됐나»(길이), 띠가 «누가 급했나»(색)로 축이 갈린다.
-  // 🔴이건 지지·저항이 아니다. 저장소 실측: 3봉 연속 델타 편중 0.44x(**반예측적**),
-  //   단일봉 테이커 서지만 2.75x 로 살아남았다 -- «쌓인 급함»은 신호가 아니다.
-  const maxDelta = Math.max(...[...rows.values()].map((r) => Math.abs(r[0] - r[1])), 1e-9);
-  const centerX = ml + sideW + centerW / 2;
-  const leftEdge = ml + sideW, rightEdge = ml + sideW + centerW;
-  let pocKey = null, pocVol = -1;
-  rows.forEach((r, k) => { if (r[0] + r[1] > pocVol) { pocVol = r[0] + r[1]; pocKey = k; } });
-
-
-  // 안쪽부터 고래 · 중형 · 리테일. 농담이 곧 크기 계단이다.
-  const SEG_OPACITY = [0.95, 0.55, 0.28];
-  const SEG_NAME = ["고래", "중형", "리테일"];
-  const bar = (x, y, wid, color, opacity, tip) => {
-    if (!(wid > 0)) return;
-    const rect = document.createElementNS(NS, "rect");
-    rect.setAttribute("x", x); rect.setAttribute("y", y);
-    rect.setAttribute("width", Math.max(1, wid)); rect.setAttribute("height", Math.max(1, rowPx - 1));
-    rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", opacity);
-    const title = document.createElementNS(NS, "title");
-    title.textContent = tip;
-    rect.appendChild(title);
-    svg.appendChild(rect);
-  };
-  // 한 쪽(매수 또는 매도)을 세 토막으로 쌓는다. dir = +1 이면 오른쪽, -1 이면 왼쪽.
-  const stack = (edge, dir, y, segs, total, color, side, price) => {
-    let cursor = 0;
-    segs.forEach((v, s) => {
-      const wid = sideW * v / max;
-      const x = dir > 0 ? edge + cursor : edge - cursor - wid;
-      bar(x, y, wid, color, SEG_OPACITY[s],
-        price.toFixed(pxDp()) + " · " + side + " " + SEG_NAME[s] + " " + v.toFixed(1) + " " + coinUnit() + " ("
-          + (total > 0 ? Math.round(v / total * 100) : 0) + "% · 합계 " + total.toFixed(1) + ")");
-      cursor += wid;
-    });
-  };
-
-  // 2026-09-19 «매수/매도 압력 구간»과 오른쪽 이름표·벽 틱을 걷어냈다(사용자 지시).
-  // 프로파일이 VPVR 식 **합산**으로 바뀌면서 sign*(buy-sell) 기반 구간은 정의 자체가
-  // 사라졌다 -- 방향은 봉별 델타가 말한다. 오른쪽 여백은 이제 비어 있다.
-
-  keys.forEach((key, j) => {
-    const [buy, sell, wBuy, wSell, rBuy, rSell] = rows.get(key) || [0, 0, 0, 0, 0, 0];   // 가운데 맞추며 생긴 빈 행
-    const y = mt + j * rowPx;
-    const price = key * rowSize;
-    // 2026-09-19 VPVR 식으로 **매수/매도를 합산**한다(사용자 지시).
-    // ⭐근거: 체결에는 언제나 짝이 있다 -- 공격적 매수 N ETH 는 «누군가 그 값에 팔아줬다»와
-    //   같은 말이다. 방향을 가르는 건 «누가 샀나»가 아니라 «테이커가 어느 쪽이었나»뿐이고,
-    //   같은 수치가 규약에 따라 지지도 저항도 된다. 그래서 가격대별 **총 거래량**만 그린다.
-    //   방향 정보는 봉별 델타(풋프린트 셀·하단 델타 숫자)가 이미 말한다.
-    // 계층(고래/중형/리테일)은 남긴다 -- 그건 대칭 문제가 없는 진짜 분해다.
-    const vol = buy + sell;
-    stack(rightEdge, 1, y,
-          [wBuy + wSell, Math.max(0, vol - (wBuy + wSell) - (rBuy + rSell)), rBuy + rSell],
-          vol, "var(--amber)", "거래량", price);
-
-    // 델타 띠 -- 합산 막대 바깥(오른쪽 여백 안쪽). 폭은 고정, **진하기가 크기**다.
-    // 폭으로 크기를 말하면 옆의 거래량 막대와 같은 문법이 되어 둘이 헷갈린다.
-    const delta = buy - sell;
-    if (delta !== 0) {
-      const dRect = document.createElementNS(NS, "rect");
-      dRect.setAttribute("x", rightEdge + sideW + 2);
-      dRect.setAttribute("y", y + 0.5);
-      dRect.setAttribute("width", 5);
-      dRect.setAttribute("height", Math.max(1, rowPx - 1));
-      dRect.setAttribute("fill", delta > 0 ? "var(--good)" : "var(--bad)");
-      dRect.setAttribute("opacity", (0.2 + 0.8 * Math.min(1, Math.abs(delta) / maxDelta)).toFixed(2));
-      const dTip = document.createElementNS(NS, "title");
-      dTip.textContent = price.toFixed(dpOf(rowSize)) + " · 순델타 "
-        + (delta > 0 ? "+" : "") + delta.toFixed(1) + " " + coinUnit()
-        + " (공격적 매수 " + buy.toFixed(1) + " / 매도 " + sell.toFixed(1) + ")\n"
-        + "⚠️테이커가 어느 쪽이었나일 뿐이다 -- 수동 쪽은 정확히 거울상이다.\n"
-        + "⚠️같은 값을 반대로도 읽는다: 매수 델타가 큰데 가격이 안 오르면 흡수(수동 대량매도)다.";
-      dRect.appendChild(dTip);
-      svg.appendChild(dRect);
-    }
-
-    // 🔴행이 $1 보다 촘촘한데 toFixed(0) 로 찍으면 «2608, 2608» 처럼 같은 값이 두 줄 나온다
-    //   (2026-09-19 첫 렌더에서 실제로 그랬다). 자릿수는 행 크기가 정한다.
-    //   그래도 촘촘하면(9px 미만) 한 줄 걸러 찍는다 -- 글자가 겹치면 둘 다 못 읽는다.
-    // 🔴글자를 키우면(사용자 요청) 행 간격보다 글자가 커져 붙는다 -- 한 줄 걸러 찍는
-    //   기준을 9px 에서 폰트 크기에 맞춰 올린다. POC 행은 언제나 보인다.
-    if (rowPx >= 13 || j % 2 === 0 || key === pocKey) {
-      const lbl = document.createElementNS(NS, "text");
-      lbl.setAttribute("x", centerX); lbl.setAttribute("y", y + rowPx / 2 + 3);
-      lbl.setAttribute("text-anchor", "middle");
-      // 2026-09-19 사용자 요청: 가운데 가격을 굵게 + 조금 더 크게.
-      lbl.setAttribute("font-size", Math.min(13, Math.max(9, rowPx)));
-      lbl.setAttribute("font-weight", key === pocKey ? "700" : "600");
-      lbl.setAttribute("fill", key === pocKey ? "var(--text)" : "var(--neutral)");
-      lbl.textContent = price.toFixed(dpOf(rowSize));
-      svg.appendChild(lbl);
-    }
-  });
-
-  // ── 벽 (2026-09-19 사용자 요청) ─────────────────────────────────────────
-  // ⚠️여기서 「벽」은 **체결이 몰린 가격**이지 호가창에 걸린 대기 물량이 아니다. 이 화면의
-  //   원천은 체결 테이프뿐이라 «걸려 있는 것»은 볼 수 없다. 그래서 이름표에 «체결»을 적고
-  //   툴팁에 뜻을 풀어 둔다 -- 「벽」이라는 말이 오해를 부르기 가장 쉬운 자리다.
-  // ⭐여기서도 «지지/저항» 단정은 하지 않는다(위 띠 주석과 같은 이유). 공격적 매도가 몰린
-  //   가격은 누군가 받아냈다는 뜻이고 공격적 매수가 몰린 가격은 누군가 넘겼다는 뜻인데,
-  //   둘 다 이미 체결된 사실이라 «지금 거기 뭐가 걸려 있나»를 말하지 않는다. 툴팁도 그대로.
-  // 세기는 **«균등하게 퍼졌을 때의 몇 배»**로 잰다. 비율(%)로 두면 행 수에 따라 뜻이
-  // 달라진다 -- 35행에서 8%는 2.8배지만 15행에서 8%는 1.2배다.
-  // 🔴문턱을 데이터 보기 전에 정했다가 두 번 틀렸다(12% -> 3배). 2026-09-19 실측(ETH 55분,
-  //   35행): 고래매도 2.7배 · 고래매수 2.0배 · 리테일 양쪽 1.9배, 전체 물량조차 1.8배다.
-  //   가격이 머문 자리에 물량이 몰리는 건 기본값이라 «3배»는 실제로 거의 안 나온다.
-  //   그래서 문턱은 **1.5배**로 낮게 두고, 대신 **배수를 이름표에 그대로 적어** 세기를
-  //   사람이 판단하게 한다. 문턱은 「이름표를 붙일 가치」 선이지 「진짜 벽」 선이 아니다.
-  const WALL_MIN_MULT = 1.5;
-
-  // 범례. 농담 세 단계는 설명 없이는 안 읽힌다 -- 견본을 같이 놓는다.
-  const kUsd = (v) => "$" + Math.round(v / 1000) + "k";
-  // 🔴범례와 아래 바닥 설명은 **같은 줄**(h - 6)에 왼쪽·오른쪽으로 앉는다. 상자가 좁으면
-  //   둘이 겹쳐 글자가 서로를 덮는다(2026-09-19 모바일 실측 -- 사용자 보고). 좁을 때는
-  //   범례에서 달러 경계를 떼고(막대 툴팁에 그대로 있다) 바닥 설명도 줄인다.
-  const legend = narrow
-    ? [["고래", ""], ["중형", ""], ["리테일", ""]]
-    : [
-      ["고래", "≥" + kUsd(profile.whaleMinUsd || 0)],
-      ["중형", kUsd(profile.retailMaxUsd || 0) + "~" + kUsd(profile.whaleMinUsd || 0)],
-      ["리테일", "<" + kUsd(profile.retailMaxUsd || 0)],
-    ];
-  // 2026-09-20 사용자 지시: 범례와 요약 숫자의 **자리를 맞바꾼다**(범례 오른쪽 · 숫자 왼쪽).
-  // 🔴범례를 오른쪽 끝에 붙이려면 폭을 **먼저** 알아야 한다 -- 아래 루프가 쓰는 증가폭과
-  //   같은 식으로 미리 합산한다(식이 둘로 갈리면 한쪽만 고치고 어긋난다).
-  const legW = (item) => 13 + (item[0].length + item[1].length) * 6.2 + 16;
-  const legendTotal = legend.reduce((acc, it) => acc + legW(it), 0) - 16;  // 마지막 여백 제외
-  const legendStart = Math.max(ml, w - mr - legendTotal);
-  let lx = legendStart;
-  legend.forEach(([name, range], s) => {
-    const sw = document.createElementNS(NS, "rect");
-    sw.setAttribute("x", lx); sw.setAttribute("y", h - 14);
-    sw.setAttribute("width", 9); sw.setAttribute("height", 9);
-    // 🔴막대가 --amber(합산)로 바뀌었다. 견본이 초록이면 범례가 다른 그림을 설명한다.
-    sw.setAttribute("fill", "var(--amber)"); sw.setAttribute("fill-opacity", SEG_OPACITY[s]);
-    svg.appendChild(sw);
-    const t = document.createElementNS(NS, "text");
-    t.setAttribute("x", lx + 13); t.setAttribute("y", h - 6);
-    t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)");
-    t.textContent = range ? name + " " + range : name;
-    svg.appendChild(t);
-    lx += 13 + (name.length + range.length) * 6.2 + 16;
-  });
-  // 🔴길이로 고른다, `narrow` 로 고르지 않는다 -- 임계값(760)과 «실제로 들어가느냐»는 다른
-  //   물음이라, 그걸로 나누면 768px 같은 폭에서 긴 문장이 범례를 덮는다(계산으로 확인).
-  //   긴 것 -> 짧은 것 -> 생략 순으로 내려간다. 내용은 전부 툴팁에도 있다.
-  // 2026-09-19 방향을 말하던 문구를 버렸다 -- 합산이라 좌우가 방향이 아니라 **원천**이다.
-  // 2026-09-20 사용자 요청: 서버가 매 폴링 계산해 보내는 요약 스칼라 8개가 **전부 버려지고
-  //   있었다**(app.js 가 window_s 하나만 썼다). 그 자리에 숫자를 넣고, 안내 문구는 툴팁으로
-  //   내린다 -- 문구는 한 번 읽으면 끝이고 숫자는 매초 바뀐다.
-  // 🔴obi 는 막대가 못 담는 유일한 축이다. 프로파일은 abs(qty) 로 그려 **매수/매도를 버린다**.
-  //   「위=매도·아래=매수」로 눈대중할 수는 있지만(실측 지금 이 순간 100%/99.5%), 창이
-  //   1~4시간이라 그동안 가격이 지나간 가격대는 창 안에서 측면이 뒤집힌다 -- 실측 1h 8% ·
-  //   2h 13% · **4h 33%**. 그 행들의 peak/refill 은 두 측면이 섞여 있어 위치로 복원이 안 된다.
-  const sm = latestFlowHeatmap && latestFlowHeatmap.summary;
+// 2026-09-28 호가 요약 네 숫자(변동·불균형·지속·이탈)의 설명 -- 옛 호가·체결 프로파일 바닥글 툴팁을 그대로 옮겼다
+//   (프로파일 상자는 사라지고 숫자는 풋프린트 체결·호가 기둥 머리로 갔다, 사용자 선택 시안 B).
+function bookStatsTip(sm) {
   const pct1 = (v) => (v == null ? "—" : Math.round(100 * v) + "%");
-  // 🔴좁으면 **뒤에서부터 덜어낸다**. 예전에 여기 안내문이 범례를 덮어 글자가 겹쳤다
-  //   (2026-09-19 모바일, 사용자 보고). 폭 판정은 `narrow` 임계값이 아니라 «실제로
-  //   들어가는가»로 한다 -- 768px 같은 폭에서 임계값만 보면 또 겹친다.
-  // 변동 신호는 **맨 앞**이다 -- 뒤에서부터 덜어내므로 좁은 화면에서 마지막까지 남는다.
-  // 없으면 «—» 가 아니라 아예 안 적는다(옛 서버 · 워밍업 중이면 자가 없다).
-  const footParts = sm
-    ? [...(sm.vol_pct == null ? [] : ["변동 " + sm.vol_pct + "%"]),
-       "불균형 " + (sm.obi == null ? "—" : (sm.obi > 0 ? "+" : "") + sm.obi.toFixed(2)),
-       "지속 " + pct1(sm.persist_share),
-       "이탈 " + pct1(sm.offtouch_leave_share),
-      ]
-    : ["← 호가  ·  거래량 →"];
-  // 숫자는 왼쪽(ml)에서 시작해 **범례 시작점 앞까지**만 쓴다. 넘치면 뒤에서부터 덜어낸다.
-  const footFits = (t) => ml + t.length * 6.2 < legendStart - 8;
-  let footText = footParts.join("  ·  ");
-  while (footParts.length > 1 && !footFits(footText)) {
-    footParts.pop();
-    footText = footParts.join("  ·  ");
-  }
-  if (!footFits(footText)) footText = "";
-  {
-    const foot = document.createElementNS(NS, "text");
-    foot.setAttribute("x", ml); foot.setAttribute("y", h - 6);
-    foot.setAttribute("font-size", "9"); foot.setAttribute("fill", "var(--muted)");
-    foot.textContent = footText;
-    const ft = document.createElementNS(NS, "title");
-    ft.textContent = sm
-      // 2026-09-26 SOL·XRP 탭에서도 이 설명이 뜬다 -- 아래 «실측» 수치(분위별 수익률·상관·CI)는 전부 ETH 에서 잰 것이다.
-      ? (activeSnapshotAsset === "eth" ? "" : "🔴아래 «실측» 수치(분위별 수익률·상관·신뢰구간)는 전부 ETH 에서 잰 값입니다 — "
+  return (activeSnapshotAsset === "eth" ? "" : "🔴아래 «실측» 수치(분위별 수익률·상관·신뢰구간)는 전부 ETH 에서 잰 값입니다 — "
                                               + coinUnit() + " 에서는 검정하지 않았습니다. 막대·지속·이탈·불균형 값은 이 코인 것입니다.\n\n")
-        + "왼쪽 = 걸려 있는 호가(길이 = 지금 걸린 양 · 진할수록 이 창에서 자꾸 다시 깔린 것)\n"
-        + "오른쪽 = 체결 거래량(매수+매도) · 바깥 띠 = 순델타(초록 매수 · 빨강 매도)\n\n"
         + `불균형(OBI) ${sm.obi} — 현재가 ±${sm.obi_band_pct}% 안에서 (매수−매도)/(매수+매도).\n`
         + "  +면 매수호가가 두껍다. 🔴밴드가 값을 정한다(실측 ±0.1% +0.504 vs ±2% +0.071, 7배).\n"
-        + "  🔴막대는 매수·매도를 합쳐 그리므로 이 축은 숫자로만 있습니다. 「위=매도·아래=매수」로\n"
-        + "  눈대중할 수 있지만, 이 창 안에서 측면이 뒤집힌 가격대가 있습니다(4h 탭 실측 33%).\n"
         + `지속 ${pct1(sm.persist_share)} — 창 내내 한 번도 안 빠진 양이 지금 걸린 양의 몇 %인가.\n`
         + `이탈 ${pct1(sm.offtouch_leave_share)} — 사라진 호가 중 **체결 없이** 빠진 비율`
         + ` (${sm.fill_source ? "풋프린트 대조" : "대조 불가"} · 판정 가능 ${sm.offtouch_bins}칸).\n`
@@ -4991,250 +4670,20 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
              + "  🔴호가만으로 만든 신호는 전부 최상위 분위에서 꺾입니다(재깔림 단독 Q4 12.0 →\n"
              + "  Q5 8.4bp). 그래서 재깔림 단독도, 블록·지속을 섞은 합성도 안 씁니다.\n"
              + "  🔴방향은 말하지 않습니다. 크기만입니다.\n")
-        + "\n\n■ 이 패널의 쓰임 — 「어디서 멈출까」가 아니라 「얼마나 흔들릴까」입니다.\n"
+        + "\n\n■ 이 숫자들의 쓰임 — 「어디서 멈출까」가 아니라 「얼마나 흔들릴까」입니다.\n"
         + "  방향: OBI +0.033 · 60초Δ +0.004 — 둘 다 신뢰구간이 0 을 품습니다(= 못 말합니다).\n"
         + "  크기(|수익률|과의 상관): 재깔림 +0.165 · 블록 +0.124 · 지속률 −0.111,\n"
         + "  셋 다 0 을 배제하고 직전 300초 실현변동을 통제해도 +0.139/+0.093/−0.076 로 남습니다.\n"
         + "  → 방향을 고르는 도구가 아니라 **크기·손절폭·대기 여부**를 정하는 도구입니다.\n"
         + "  🔴독립 일수 7 · 홀드아웃 없음 — 「예측한다」가 아니라 「5.8일 이 데이터에서\n"
         + "  이렇게 보였다」입니다. rho 0.14 는 약한 실재이지 그 자체로 엣지가 아닙니다."
-        + (() => {                       // 🔴hm 은 아래에서 선언된다(TDZ) -- 여기선 원본을 직접 본다
+        + (() => {
              const ap = latestFlowHeatmap && latestFlowHeatmap.rows
                         && latestFlowHeatmap.rows.approach;
              if (!ap) return "";
              const fin = [...ap].filter(Number.isFinite);
-             return ` · 접근행동 자격 ${fin.length}행 (◌ 표식 ${fin.filter((v) => v < 0.8).length}개)`;
-           })()
-      : "← 걸려 있는 호가  ·  체결 거래량 →";
-    foot.appendChild(ft);
-    svg.appendChild(foot);
-  }
-
-  // ── 현재가 (2026-09-19 사용자 요청) ────────────────────────────────────
-  // 점선 한 줄이었다. 바꾼 이유: 프로파일에서 제일 자주 보는 건 «내가 지금 어느 행에
-  // 서 있나»인데, 점선은 행을 **가리키기만** 하고 그 행의 가격은 다른 글자들과 같은
-  // 크기라 눈으로 찾아야 했다. 이제 띠가 그 행을 덮고 값을 크게 적는다.
-  //
-  // 🔴맨 마지막에 붙인다 -- 칩이 그 행의 작은 가격 라벨을 **가려야** 같은 값이 두 번
-  //   겹쳐 보이지 않는다. SVG 는 뒤에 붙은 것이 위에 칠해진다.
-  // 🔴프로파일 전체는 5초마다 다시 그려지는데 현재가는 초당 수십 번 바뀐다. 전체를 다시
-  //   그리면 비싸고 움직임도 끊긴다. 그래서 **기하만 적어 두고**(supplyProfileNow) 체결
-  //   WS 가 아래 updateSupplyProfileNow 로 직접 와서 transform 만 바꾼다. 행에서 행으로
-  //   미끄러지는 건 CSS transition(.supply-now)이 잇는다.
-  // 띠는 **칩만큼**은 높아야 한다. 행이 11px 인데 칩이 22px 이면 칩이 이웃 행의 가격
-  // 라벨을 반만 덮어 «글자가 잘린» 것처럼 보인다 -- 띠가 그만큼 크면 덮인 자리가
-  // «강조 구간 안»으로 읽힌다.
-  // 🔴2026-09-19 3차. 처음엔 점선, 다음엔 «띠 + 테두리 칩 + 15px 숫자»였는데 사용자가
-  //   "너무 정신이 없다". 셋이 동시에 움직이니 시선이 거기 묶인다. 게다가 **값은 중복**이다
-  //   -- 가운데 열이 모든 행의 가격을 이미 적고 있다. 필요한 건 «어느 줄인가» 하나다.
-  //   그래서 그 줄의 가격 글자 좌우에 화살표만 둔다(사용자 제안). 차트 위에 덮는 것도,
-  //   가리는 글자도, 새로 읽을 숫자도 없다.
-  // ── 진입가 (2026-09-19 사용자 요청) ────────────────────────────────────
-  // 현재가는 «어느 줄인가»만 화살표로 가리킨다(바로 위 주석의 3차 결론). 진입가는 체결
-  // 전까지 안 움직이고 읽는 목적도 달라서(«내 값이 이 분포의 어디인가») 얇은 가로선으로
-  // 긋는다. 가운데 가격 열은 비우고 좌우 막대 구간만 -- 그 열의 숫자를 덮으면 현재가에서
-  // 겪은 문제를 되풀이한다.
-  // 🔴창 밖이면 가장자리에 **붙이지 않는다**(현재가와 같은 규약). 이 축은 체결이 있었던
-  //   값만 있어서 붙이는 순간 «진입가가 저기 있다»는 거짓말이 된다 -- 대신 위/아래 어느
-  //   쪽인지와 값만 여백에 적는다.
-  if (entryPrice > 0) {
-    const ej = keys.indexOf(Math.floor(entryPrice / rowSize));
-    const eLbl = (x, y, text, anchor) => {
-      const t = document.createElementNS(NS, "text");
-      t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("font-size", "10");
-      t.setAttribute("font-weight", "bold"); t.setAttribute("fill", "var(--amber)");
-      if (anchor) t.setAttribute("text-anchor", anchor);
-      t.textContent = text;
-      svg.appendChild(t);
-    };
-    if (ej >= 0) {
-      const ey = mt + ej * rowPx + rowPx / 2;
-      [[ml, leftEdge - 2], [rightEdge + 2, w - mr]].forEach((seg) => {
-        const ln = document.createElementNS(NS, "line");
-        ln.setAttribute("x1", seg[0]); ln.setAttribute("x2", seg[1]);
-        ln.setAttribute("y1", ey); ln.setAttribute("y2", ey);
-        ln.setAttribute("stroke", "var(--amber)"); ln.setAttribute("stroke-width", "1.5");
-        svg.appendChild(ln);
-      });
-      eLbl(ml - 5, ey + 3, "진입", "end");
-      // 🔴좁은 상자에서는 값을 안 적는다 -- 오른쪽 여백은 띠 이름표 넷이 이미 쓰고 있어서
-      //   진입 행이 그중 하나와 같은 높이면 글자가 겹친다. 값은 바로 위 가격 플롯의 진입
-      //   배지에 그대로 있다(같은 SVG 안이다).
-      if (!narrow) eLbl(w - mr + 6, ey + 3, fmtNum(entryPrice, 1));
-    } else if (!narrow) {
-      // 창 밖. 좁을 때는 아예 안 적는다 -- 위 가격 플롯이 ↑/↓ 배지로 이미 말하고 있고,
-      // 여기 top/bottom 자리는 띠 이름표의 첫·마지막 줄과 겹친다.
-      const above = entryPrice > (keys[0] + 1) * rowSize;
-      eLbl(w - mr + 6, above ? mt + 8 : h - mb - 2,
-           `진입 ${above ? "↑" : "↓"} ${fmtNum(entryPrice, 1)}`);
-    }
-  }
-
-  supplyProfileNow = { svg, mt, rowPx, rowSize, keys, pocKey, digits: rowSize >= 1 ? 0 : 1 };
-
-  // ── 왼쪽 = 호가(걸려 있는 양) ─────────────────────────────────────────
-  // 2026-09-19 사용자 지시. 오른쪽이 «체결»(과거·취소 불가)이고 여기는 «호가»(현재·언제든
-  // 취소)다 -- 다른 물건이라 색을 가른다(파랑). 같은 행에서 둘을 나란히 읽는 게 목적이다.
-  // ⭐2026-09-20 축을 둘로 갈랐다: **길이 = 지금 걸린 양**, **농도 = 재깔림**(창 안에서
-  //   제 크기의 몇 배가 다시 깔렸나). 그전에는 길이가 «창 내내 안 빠진 양»(min) 하나였다.
-  // 🔴min 을 그린다는 건 넷 중 가장 작은 걸 그린다는 뜻이었다. 실측 600초(ETH 247빈):
-  //   sum(min) 103,531 < sum(now) 170,775 < sum(max) 310,024 << **sum(refill) 1,029,281**.
-  //   걸린 양의 6배가 창 안에서 회전하는데(refill/drain = 1.00) 화면에 그 축이 없었다.
-  //   더 나쁜 건 **순위가 뒤집힌다**는 것이다: -2.05% 빈은 1,780 ETH 블록을 10분에 18번
-  //   재호가하는데(증분 p90 1,750 = 지터가 아니라 덩어리) min 이 675 라 짧은 막대였고,
-  //   한 번 깔고 앉은 +1.94% 빈(refill 641)이 2,610 으로 더 길었다.
-  // 🔴min 은 터치 근처를 구조적으로 지운다 -- pers/peak 중앙값이 0~0.1% 에서 **0.03**,
-  //   0.5~1% 에서 0.42 다. 길이를 inst 로 바꾸면 그 눈멂이 같이 없어진다.
-  // 🔴«지지·저항»이 아니다 -- 2026-09-20 에 **실제로 쟀고 없었다**. 5.8일 71,293건에서
-  //   벽에 닿은 뒤 반등률 0.509(동전), 크기 사분위 0.502/0.510/0.520/0.503 로 순서조차 없고,
-  //   같은 크기 안에서 지속률 상위−하위 +0.001(섞기 귀무 z=0.22). 판정폭 $1.5→$5 ·
-  //   지평 5→15분에서도 같다(z=−0.45). 그래서 이 화면은 **서술만** 한다.
-  const hm = latestFlowHeatmap && latestFlowHeatmap.rows;
-  if (hm && hm.bin_size > 0 && keys.length) {
-    const at = (px) => Math.round(px / hm.bin_size) - hm.bin_lo;
-    let maxI = 0;
-    const per = keys.map((k) => {
-      const v = { inst: 0, pers: 0, peak: 0, refill: 0, d60: 0, blk: 0, n_up: 0 };
-      for (let q = 0; q < rowSize; q += hm.bin_size) {
-        const i = at(k * rowSize + q);
-        if (i >= 0 && i < hm.inst.length) {
-          v.inst += hm.inst[i]; v.pers += hm.pers[i]; v.peak += hm.peak[i];
-          v.refill += hm.refill[i]; v.d60 += hm.d60[i];
-          // 🔴blk 은 **더하지 않는다** -- 크기이지 양이 아니다. 한 행이 여러 빈을 덮으면
-          //   그중 가장 큰 덩어리를 그 행의 «단위»로 본다. 횟수는 더한다.
-          if (hm.blk && hm.blk[i] > v.blk) v.blk = hm.blk[i];
-          if (hm.n_up) v.n_up += hm.n_up[i];
-        }
-      }
-      if (v.inst > maxI) maxI = v.inst;
-      v.rw = v.refill / Math.max(v.peak, 1e-9);
-      return v;
-    });
-    // 🔴2026-09-20 농도를 **창 안 순위**로 칠한다. 절대 곡선(log2(rw)/2.6)으로 칠했더니
-    //   탭마다 죽었다 -- 실측 포화율 15m 11% · 1h 67% · 2h 90% · **4h 97%**(sd 0.037).
-    //   refill 은 창에 비례해 쌓이는데 나는 15분 창에서 보정했다. 창 길이로 나누는 것도
-    //   답이 아니다 -- peak 도 같이 커져 단순 비례가 아니고, 그렇게 하면 4h 에서 rw 중앙이
-    //   0.79 라 전부 최저 농도가 된다(sd 0.015). 양쪽 다 «축이 없는» 상태다.
-    //   순위는 탭과 무관하게 잉크 범위를 다 쓴다. 대신 농도는 **이 창 안에서의 상대값**이고
-    //   절대 배수는 툴팁이 숫자로 말한다(조용한 시간과 시끄러운 시간이 같아 보이는 것이
-    //   이 선택의 대가다).
-    const liveRw = per.filter((v) => v.inst > 0).map((v) => v.rw).sort((a, b) => a - b);
-    const rwPct = (x) => {            // 0~1 분위. 같은 값이 여럿이면 가운데를 준다.
-      if (liveRw.length < 2) return 0.5;
-      let lo = 0, hi = liveRw.length;
-      while (lo < hi) { const m = (lo + hi) >> 1; if (liveRw[m] < x) lo = m + 1; else hi = m; }
-      let hi2 = lo;
-      while (hi2 < liveRw.length && liveRw[hi2] === x) hi2++;
-      return ((lo + hi2) / 2) / liveRw.length;
-    };
-    if (maxI > 0) {
-      keys.forEach((k, j) => {
-        const { inst, pers, peak, refill, d60, blk, n_up } = per[j];
-        if (inst <= 0) return;
-        const bl = (inst / maxI) * (sideW - 2);
-        // 재깔림 = refill/peak. 농도는 그 값의 **창 안 분위**다(위 주석).
-        const rw = refill / Math.max(peak, 1e-9);
-        const r = document.createElementNS(NS, "rect");
-        r.setAttribute("x", leftEdge - 1 - bl); r.setAttribute("y", mt + j * rowPx + 0.5);
-        r.setAttribute("width", Math.max(1, bl)); r.setAttribute("height", Math.max(1, rowPx - 1));
-        r.setAttribute("fill", "var(--book-depth)");
-        r.setAttribute("opacity", (0.22 + 0.78 * rwPct(rw)).toFixed(2));
-        // ── 접근행동(사용자 요청 2026-09-20) ────────────────────────────
-        // 「가격이 다가왔을 때 이 가격대가 얇아졌나」. 자격 빈이 전체의 28%뿐이라
-        // 막대 색·길이 같은 **행 채널로는 못 쓴다**(72%가 빈칸이면 «얇다»와 «모른다»가
-        // 같은 그림이 된다). 그래서 얇아진 행에만 작은 고리를 얹는다.
-        // 🔴0.8 은 임의값이 아니라 **실측 분포에서 잡은 선**이다(정규화 후 p10 0.66 ·
-        //   p50 1.22 · shrink<0.8 이 16%). 아무것도 안 걸리는 날은 표식이 0개여도
-        //   맞다 -- 분위로 고정하면 «언제나 몇 개»가 나와 거짓 존재감을 만든다.
-        // ⭐2026-09-20 검증함(ETH 5.2일·4시간 창 31개): 얇아진 가격대 비율이 창마다
-        //   9~20%로 안정적이고, 인접 창 지속성 rho +0.262±0.026(양수 28/30)이 회전
-        //   대조군 +0.067±0.032 를 4.7 SE 로 앞선다. 표식 지속률 25% vs 기저 15%.
-        //   ⇒ 표식은 잡음이 아니라 그 가격대의 성질이다.
-        // 🔴그래도 스푸핑 «판정»이 아니다. 반대 방향(다가오면 두꺼워짐)이 46%로 더 흔하고,
-        //   표식의 75%는 4시간 뒤 사라지며, **가격 예측력은 재지 않았다**. 툴팁도 그렇게 적는다.
-        const apr = approachAt(hm, k * rowSize, rowSize);
-        if (apr !== null && apr < 0.8) {
-          const mk = document.createElementNS(NS, "circle");
-          mk.setAttribute("cx", Math.max(ml + 4, leftEdge - 1 - bl - 4));
-          mk.setAttribute("cy", mt + j * rowPx + rowPx / 2);
-          mk.setAttribute("r", Math.min(3, Math.max(1.8, rowPx / 4)));
-          mk.setAttribute("fill", "none");
-          mk.setAttribute("stroke", "var(--book-depth)");
-          mk.setAttribute("stroke-width", "1.2");
-          svg.appendChild(mk);
-        }
-        const t = document.createElementNS(NS, "title");
-        const winMin = latestFlowHeatmap && latestFlowHeatmap.summary
-          ? Math.round(latestFlowHeatmap.summary.window_s / 60) : 0;
-        const win = winMin ? winMin + "분 창" : "창";
-        t.textContent = "호가 " + (k * rowSize).toFixed(rowSize >= 1 ? 0 : 1)
-          + " — 지금 걸린 양 " + Math.round(inst) + " " + coinUnit()
-          + " · " + win + " 최대 " + Math.round(peak) + " · 내내 남은 것 " + Math.round(pers)
-          + " (" + Math.round(100 * pers / Math.max(inst, 1e-9)) + "%)\n"
-          + "재깔림 " + rw.toFixed(1) + "배 — " + win + " 안에서 최대치의 "
-          + rw.toFixed(1) + "배(" + Math.round(refill) + " " + coinUnit() + ")가 다시 깔렸습니다. "
-          + "이 창의 상위 " + Math.round(100 * (1 - rwPct(rw))) + "% 입니다"
-          + (blk > 0
-             // 2026-09-20 «단위». 같은 배수라도 「1,780 ETH 를 18번」과 「15 ETH 를 2,000번」은
-             // 전혀 다른 행동인데 농도로는 구별이 안 된다. 실측(1,960행) rho(배수, 블록/peak)
-             // = 0.333 이고 같은 배수 구간 안에서 40배까지 갈린다 = 별개 축이다.
-             // 🔴blk 은 «물량 가중 중앙값»이다 -- 개수 기준 분위는 잔물결에 묻힌다.
-             ? "\n(재깔림이 높던 국면은 이후 더 «크게» 움직였습니다 — 방향은 아닙니다.\n"
-               + " 바닥 줄 툴팁에 근거가 있습니다.)"
-               + "\n단위: " + fmtNum(blk, blk >= 100 ? 0 : 1) + " " + coinUnit() + " 씩 "
-               + Math.round(n_up) + "번"
-               + (blk / Math.max(peak, 1e-9) >= 0.35
-                  ? " — 한 덩어리를 같은 자리에 계속 다시 까는 중입니다(작업자 한 명일 수 있습니다)."
-                  : " — 잘게 나눠 계속 깔립니다(알고리즘 잔물결).")
-             : "")
-          + " — 🔴농도는 **이 창 안의 상대 순위**라, 조용한 시간과 시끄러운 시간이 같은 "
-          + "진하기로 보입니다. 절대값은 이 숫자로 보세요.\n"
-          + "최근 60초 " + (d60 >= 0 ? "+" : "") + Math.round(d60) + " " + coinUnit() + " — "
-          + (Math.abs(d60) < 1 ? "변화 없음" : d60 > 0 ? "쌓는 중" : "빼는 중") + "\n"
-          + (apr === null ? ""
-             : "접근행동 " + apr.toFixed(2) + "배 — 가격이 이 근처(0.35% 안)에 왔을 때 "
-               + "같은 거리 평균 두께의 " + apr.toFixed(2) + "배였습니다(최근 4시간). "
-               + (apr < 0.8 ? "◌ 표식: 다가오면 얇아진 쪽입니다."
-                            : apr > 1.25 ? "다가오면 두꺼워진 쪽입니다." : "거의 그대로입니다.")
-               + "\n검증(ETH 5.2일·4시간 창 31개): 이 성질은 창마다 안정적이고"
-               + "(얇아진 가격대 9~20%), 지금 표식이 붙은 가격대는 4시간 뒤에도 표식일 확률이 "
-               + "25%로 평균 15%의 1.7배입니다. 지속성 rho +0.26 vs 회전 대조군 +0.07.\n"
-               + "🔴그래도 «스푸핑» 판정이 아닙니다 — 같은 창에서 반대 방향(다가오면 두꺼워짐)이 "
-               + "46%로 더 흔하고, 표식의 75%는 4시간 뒤 사라지며, **가격이 어디로 갈지는 "
-               + "재지 않았습니다**.\n")
-          + "⚠️체결이 아니라 **지금 걸려 있는** 지정가다 -- 언제든 취소될 수 있다.\n"
-          + "⚠️지지·저항이 아닙니다 — 5.8일 71,293건에서 벽에 닿은 뒤 반등률이 0.509 로\n"
-          + "   동전이고, 크기·지속 어느 쪽도 예측하지 못했습니다(2026-09-20 실측).";
-        r.appendChild(t);
-        svg.appendChild(r);
-      });
-    }
-  }
-
-  const nowG = document.createElementNS(NS, "g");
-  nowG.setAttribute("class", "supply-now");
-  // 🔴화살표만 두면 **라벨이 없는 행**을 가리킬 수 있다. 행이 13px 보다 촘촘하면 위에서
-  //   한 줄 걸러 찍기 때문이다(그러지 않으면 글자가 겹친다). 그래서 그룹이 그 줄의 가격을
-  //   **직접** 들고 다닌다 -- 위 라벨과 좌표·크기·내용이 같아 있으면 정확히 포개지고,
-  //   없으면 이것이 그 줄의 라벨이 된다.
-  // 🔴굵기까지 **똑같아야** 한다. 700 으로 올렸더니 글자 폭이 달라져(가운데 정렬이라 각
-  //   자리가 어긋난다) 겹친 두 글자가 고스팅으로 번졌다. 구별은 **색**으로만 한다.
-  const nowTxt = document.createElementNS(NS, "text");
-  nowTxt.setAttribute("x", centerX); nowTxt.setAttribute("y", 3);
-  nowTxt.setAttribute("text-anchor", "middle");
-  nowTxt.setAttribute("font-size", Math.min(13, Math.max(9, rowPx)));
-  nowTxt.setAttribute("fill", "var(--text)");
-  nowG.appendChild(nowTxt);
-  // 가운데 열 [leftEdge, rightEdge] 안쪽에 둔다 -- 막대 위로 넘어가지 않는다.
-  [`${leftEdge + 1},-4 ${leftEdge + 7},0.5 ${leftEdge + 1},5`,
-   `${rightEdge - 1},-4 ${rightEdge - 7},0.5 ${rightEdge - 1},5`].forEach((pts) => {
-    const a = document.createElementNS(NS, "polygon");
-    a.setAttribute("points", pts);
-    a.setAttribute("fill", "var(--accent)");
-    nowG.appendChild(a);
-  });
-  svg.appendChild(nowG);
-  updateSupplyProfileNow(currentPrice);
+             return ` · 접근행동 자격 ${fin.length}행 (○ 표식 ${fin.filter((v) => v < 0.8).length}개)`;
+           })();
 }
 
 // 접근행동 값을 **절대 가격**으로 찾는다. 4시간 창이라 격자가 위 다섯 배열과 다르다.
@@ -5250,28 +4699,6 @@ function approachAt(hm, price, rowSize) {
     if (Number.isFinite(v) && (best === null || v < best)) best = v;
   }
   return best;
-}
-
-// 현재가 박스를 제 행으로 옮긴다. 프로파일을 통째로 다시 그리지 않는 **유일한** 경로다.
-// (그려 둔 기하는 renderSupplyProfileSvg 가 supplyProfileNow 에 적어 둔다.)
-function updateSupplyProfileNow(price) {
-  const g = supplyProfileNow;
-  if (!g || !g.svg.isConnected) return;
-  const el = g.svg.querySelector(".supply-now");
-  if (!el) return;
-  // 🔴창 밖이면 **숨긴다**. 가장자리에 붙여 두면 «현재가가 저기 있다»는 거짓말이 된다
-  //   (캔들 차트는 축을 다시 잡으니 붙여도 되지만, 여기 축은 체결이 있었던 값뿐이다).
-  const j = price > 0 ? g.keys.indexOf(Math.floor(price / g.rowSize)) : -1;
-  if (j < 0) { el.setAttribute("opacity", "0"); return; }
-  el.setAttribute("opacity", "1");
-  el.setAttribute("transform", `translate(0 ${g.mt + j * g.rowPx + g.rowPx / 2})`);
-  // 🔴적는 건 «틱 가격»이 아니라 **그 행의 가격**이다. 위아래 이웃과 같은 자에서 읽혀야
-  //   한 열로 보인다 -- 2631.36 이 2631.5 · 2630.5 사이에 끼면 그것만 다른 물건이 된다.
-  const t = el.querySelector("text");
-  if (t) {
-    t.textContent = (g.keys[j] * g.rowSize).toFixed(g.digits);
-    t.setAttribute("font-weight", g.keys[j] === g.pocKey ? "700" : "600");   // 위 라벨과 동일
-  }
 }
 
 // Snapshot tab's own candlestick chart -- same renderCandleSvg() the Live tab uses, always ETH, no
@@ -5539,7 +4966,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   안보일 거 같아»). 150 -> 190 -> 400 으로 두 번 올렸다: 150 에서 누적 판이 78px,
   //   190 에서 118px 이었고, 400 이면 290px 가 된다.
   //   🔴가격 플롯(400)에서 뺏지 않고 상자를 키운다 -- 캔들이 눌리면 안 된다.
-  const SUB_GAP = 8, SUB_PROFILE_H = subOn ? 190 : 0, SUB_1S_H = subOn ? 400 : 0;
+  const SUB_GAP = 8, SUB_1S_H = subOn ? 400 : 0;
+  // 2026-09-28 호가·체결 프로파일 상자를 걷어냈다(체결은 풋프린트 기둥으로, 사용자 선택 시안 B) -- 2단 오른쪽 칸은
+  //   1초 수급이 그 자리(190 + 간격 8)까지 가져간다. 아래 레벨 목록 위치는 그대로다(12 + 598 + 12).
+  const SUB_1S_SIDE_H = subOn ? 598 : 0;
+  // 1단(데스크톱·모바일)은 호가 요약 네 숫자가 1초 수급 바닥에서 한 줄(14)을 떼어 간다 -- SUB_TOTAL 은 그대로.
+  //   (그냥 풋프린트 위에 얹으면 모바일은 밀도 범례, 데스크톱은 1초 수급의 시각 눈금과 겹쳤다.)
+  const STATS_ROW_H = subOn && !splitR ? 14 : 0;
   // 2026-09-21 청산 밀도 범례를 헤더 행에서 **여기로** 옮겼다(아티팩트 댓글).
   //   «풋프린트 차트 바로 위와 프로파일 바닥글 사이». 밀도는 이제 풋프린트의 배경이라
   //   범례가 헤더에 있으면 설명하는 그림에서 멀다. 글자 크기도 바닥글과 같은 9 로 맞췄다.
@@ -5554,11 +4987,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-27 모바일(세로) 순서: **1초 수급 → 밀도 범례 → 풋프린트 → 레인 → 호가 프로파일**(사용자 «수급차트는 풋프린트 위로»).
   //   같은 날 먼저 «풋프린트 먼저»로 두 패널을 다 내렸다가 수급만 다시 올렸다. 호가 프로파일은 풋프린트 아래에 남는다.
   //   본문은 `h` 를 «풋프린트 영역 높이»로 쓰므로(x축·리본이 h - mb 기준) 상자 높이 hAll 에서 아래로 간 프로파일만큼 뺀다.
-  const SUB_BELOW = subOn && !splitR && mobileChart;
-  const h = SUB_BELOW ? hAll - (SUB_PROFILE_H + SUB_GAP) : hAll;
-  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP
-    : SUB_BELOW ? SUB_1S_H + SUB_LEGEND_H + SUB_GAP
-    : SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H;
+  // 2026-09-28 프로파일이 빠져 데스크톱(1단)·모바일이 같은 순서다: 1초 수급 → 밀도 범례 → 풋프린트.
+  const h = hAll;
+  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_1S_H + SUB_LEGEND_H + SUB_GAP;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
   //   빼기 때문). 인라인 height 로 JS 가 상자를 정하는 방법은 쓰지 않는다 -- 2열에서는 상자가
@@ -5673,7 +5104,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 띠 폭을 뗀다(데스크톱 70 · 모바일 40).
   // 2026-09-27 넓혔다(사용자 «호가 너비를 키워줘») -- 오른쪽 배지 자리(86px)를 띠에 줬다: 70 -> 148 · 모바일 40 -> 56.
   const BOOK_W = footprint ? (mobileChart ? 56 : 148) : 0;   // 모바일은 수량 글자 없이
-  const cw = w - ml - mr - BOOK_W;
+  // 2026-09-28 체결 기둥(사용자 선택 시안 B) -- 풋프린트와 호가 띠 사이 150px. 모바일은 기둥 없이 셀 뒤에 깐다(시안 A).
+  const TRADE_W = footprint && !mobileChart ? 150 : 0;
+  const cw = w - ml - mr - BOOK_W - TRADE_W;
+  let tradeInfo = null;       // 체결 행(호버가 읽는다) -- 풋프린트 블록이 채운다
   const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H - 2 * ROW_H;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
@@ -5683,9 +5117,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   설명하는 것이라 그 바로 위에 있어야 한다(SUB_LEGEND_H 주석의 «풋프린트 차트 바로 위»).
   //   프로파일에 붙여 올리면 설명하는 그림에서 400px 멀어진다.
   // 소비 합 = SUB_TOTAL: 190(프로파일) + 8 + 400(1초) + 14(범례) + 8 = 620.
-  const subProfileY = SUB_BELOW ? h + SUB_GAP : mtTop;   // 모바일: 풋프린트 영역(x축·리본) 바로 아래
-  const sub1sY = SUB_BELOW ? mtTop : subProfileY + SUB_PROFILE_H + SUB_GAP;   // 모바일: 맨 위
-  const subLegendY = splitR ? mtTop : sub1sY + SUB_1S_H;   // 2단: 왼쪽 칸 맨 위 · 그 밖: 1초 수급 바로 아래(= 풋프린트 바로 위)   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
+  const sub1sY = mtTop;
+  const subLegendY = splitR ? mtTop : sub1sY + SUB_1S_H - STATS_ROW_H;   // 2단: 왼쪽 칸 맨 위 · 그 밖: 1초 수급 바로 아래(= 풋프린트 바로 위)   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
   const quadY = plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
   const cumY = LANE_MERGE ? quadY : quadY + QUAD_H + QUAD_TXT + ROW_H + LANE_GAP; // 누적 행 위쪽
   const cumBottom = cumY + CUM_DRAW_H;                    // 그 아래 한 줄이 ROW_H 를 쓴다
@@ -5699,7 +5132,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   svg.setAttribute("viewBox", `0 0 ${wAll} ${hAll}`);
   svg.innerHTML = "";
   if (svg.id === "candleSvgSnapshot") {
-    placeLevelList(svg, splitR ? { x: subX, y: mtTop + SUB_PROFILE_H + SUB_GAP + SUB_1S_H + 12, w: subW } : null);
+    placeLevelList(svg, splitR ? { x: subX, y: mtTop + SUB_1S_SIDE_H + 12, w: subW } : null);
   }
   
   if (!candles.length) {
@@ -6221,6 +5654,62 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const minRow = Math.ceil((ySpan * FOOTPRINT_MIN_ROW_PX / ch) / bucket) * bucket;
     const rowSize = Math.max(bucket, minRow, Math.round(0.2 * atr / bucket) * bucket);
     const rowPx = rowSize * ch / ySpan;
+
+    // ── 체결 프로파일 (2026-09-28 사용자 선택 시안 B · 모바일 A) ─────────────────────────
+    //   보이는 봉의 셀을 **이 행 크기로** 가격별로 합친다 -- 옛 오른쪽 열 상자(/api/supply-profile)를 대체한다.
+    //   원천·창·행이 풋프린트와 같아 둘이 어긋날 수 없다(옛 상자는 재시작 뒤 OKX 가 덮은 봉부터만 셌다).
+    //   데스크톱: 풋프린트와 호가 띠 사이 기둥, 호가 띠 바닥선에서 **왼쪽으로**(체결 ← ┃ → 호가) -- 같은 줄 = 같은 가격이라
+    //   «여기서 얼마나 거래됐나 vs 지금 얼마나 걸려 있나»를 한 줄에서 맞댄다. 모바일: 플롯 오른쪽 끝에서 왼쪽으로 셀 **뒤**에 흐리게.
+    //   막대 = 행 총 체결(매수+매도) · 안쪽부터 고래·중형·리테일 농담 · POC(최다 체결) 행은 테두리.
+    //   🔴체결 합산에는 방향이 없다(누가 사면 누가 판다) -- 지지·저항으로 읽지 않는다. 방향은 봉별 델타가 말한다.
+    {
+      const tr = new Map();   // 행 키 -> [총, 고래, 리테일, 매수, 매도]
+      candles.forEach((c) => (footprint.byTime.get(c.time) || []).forEach((l) => {
+        const k = Math.floor(l[0] / rowSize), a = tr.get(k) || [0, 0, 0, 0, 0];
+        a[0] += (+l[1] || 0) + (+l[2] || 0); a[1] += (+l[3] || 0) + (+l[4] || 0);
+        a[2] += (+l[5] || 0) + (+l[6] || 0); a[3] += +l[1] || 0; a[4] += +l[2] || 0;
+        tr.set(k, a);
+      }));
+      let tmax = 0, pocK = null;
+      tr.forEach((a, k) => { if (a[0] > tmax) { tmax = a[0]; pocK = k; } });
+      if (tmax > 0) {
+        const anchor = TRADE_W ? ml + cw + TRADE_W + 4 : ml + cw;   // 데스크톱 = 호가 띠 바닥선 2px 앞
+        const L = TRADE_W ? TRADE_W - 10 : cw * 0.35, alpha = TRADE_W ? 1 : 0.35;
+        tradeInfo = { rows: tr, rowSize, max: tmax, pocK, x1: anchor };
+        const g = document.createElementNS(NS, "g");
+        tr.forEach((a, k) => {
+          const yTop = Math.max(mt, yAt((k + 1) * rowSize)), yBot = Math.min(plotBottom, yAt(k * rowSize));
+          if (yBot - yTop < 1) return;
+          let cur = 0;
+          [a[1], Math.max(0, a[0] - a[1] - a[2]), a[2]].forEach((v, s) => {
+            const wd = L * v / tmax;
+            if (!(wd > 0)) return;
+            const r = document.createElementNS(NS, "rect");
+            r.setAttribute("x", anchor - cur - wd); r.setAttribute("y", yTop + 0.5);
+            r.setAttribute("width", wd); r.setAttribute("height", Math.max(1, yBot - yTop - 1));
+            r.setAttribute("fill", "var(--amber)"); r.setAttribute("fill-opacity", ([0.95, 0.55, 0.28][s] * alpha).toFixed(2));
+            g.appendChild(r);
+            cur += wd;
+          });
+          if (k === pocK) {
+            const o = document.createElementNS(NS, "rect");
+            o.setAttribute("x", anchor - cur); o.setAttribute("y", yTop + 0.5);
+            o.setAttribute("width", cur); o.setAttribute("height", Math.max(1, yBot - yTop - 1));
+            o.setAttribute("fill", "none"); o.setAttribute("stroke", "var(--ink)");
+            o.setAttribute("stroke-width", "1.2"); o.setAttribute("stroke-opacity", TRADE_W ? "0.9" : "0.45");
+            g.appendChild(o);
+          }
+        });
+        if (TRADE_W) {                            // 기둥 바닥선 -- 호가 띠 바닥선과 한 줄
+          const ln = document.createElementNS(NS, "line");
+          ln.setAttribute("x1", anchor + 1); ln.setAttribute("x2", anchor + 1);
+          ln.setAttribute("y1", mt); ln.setAttribute("y2", plotBottom);
+          ln.setAttribute("stroke", "var(--soft-line)");
+          g.appendChild(ln);
+        }
+        svg.appendChild(g);                        // 셀보다 **먼저** -- 모바일에선 셀 뒤에 깔린다
+      }
+    }
 
     // 서버 버킷을 화면 행으로 묶는다. 서버는 0.5달러로만 모아 보내고, 행 크기는 여기서 정한다
     // -- 행을 바꾸려고 테이프를 다시 수집할 일이 없게.
@@ -7089,6 +6578,32 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       priceBadgeText.style.display = "none";
     }
 
+    // 2026-09-28 네 숫자(기둥 머리 · 모바일은 풋프린트 위 왼쪽) 위면 그 설명.
+    const sm = latestFlowHeatmap && latestFlowHeatmap.summary;
+    if (bookInfo && sm && my < mt && my > mt - (TRADE_W ? 30 : 22) && (TRADE_W ? mx > ml + cw : mx < bookInfo.x0 - 4)) {
+      vLine.style.display = "none";
+      const esc = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(460px,calc(100vw - 24px))">`
+        + esc(bookStatsTip(sm)).replace(/\n/g, "<br>") + "</div>");
+      return;
+    }
+    // 2026-09-28 체결 기둥 위면 그 가격 행의 체결 풀이(데스크톱만 -- 모바일은 셀 뒤라 봉 툴팁이 이긴다).
+    if (tradeInfo && TRADE_W && mx > ml + cw && mx < tradeInfo.x1 + 2) {
+      vLine.style.display = "none";
+      const k = Math.floor((yMax - ((my - mt) * ySpan) / ch) / tradeInfo.rowSize), a = tradeInfo.rows.get(k);
+      if (!a) { hideTooltip(); return; }
+      const fq = (q) => (q >= 1000 ? (q / 1000).toFixed(1) + "k" : q >= 10 ? q.toFixed(0) : q.toFixed(1));
+      const pct = (v) => Math.round(100 * v / Math.max(a[0], 1e-9)) + "%", dp = pxDp(), rs = tradeInfo.rowSize;
+      showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))">`
+        + `<span style="color:var(--amber);font-weight:700">체결 ${fq(a[0])} ${coinUnit()}</span> · ${(k * rs).toFixed(dp)}–${((k + 1) * rs).toFixed(dp)}`
+        + (k === tradeInfo.pocK ? ` · <span style="font-weight:700">최다 체결(POC)</span>` : "")
+        + `<br>매수 ${fq(a[3])} · 매도 ${fq(a[4])} · 고래 ${pct(a[1])} · 중형 ${pct(Math.max(0, a[0] - a[1] - a[2]))} · 리테일 ${pct(a[2])}`
+        + `<br>보이는 봉 ${candles.length}개 합 · 가장 많이 거래된 줄의 ${Math.round(100 * a[0] / tradeInfo.max)}%`
+        + `<br><br>옆 호가 막대와 맞대 읽기: 체결이 긴데 호가가 그대로 남아 있으면 <span style="font-weight:700">흡수</span>,`
+        + `<br>체결 없이 호가만 두꺼우면 아직 안 닿은 자리다.`
+        + `<br><span style="opacity:.7">체결 합산에는 방향이 없다 · 지지·저항 신호 아님</span></div>`);
+      return;
+    }
     // 2026-09-27 호가 띠 위면 봉 툴팁 대신 **호가 해석** -- 커서 가격의 칸(없으면 가장 가까운 칸).
     if (bookInfo && mx > ml + cw && mx <= w - mr) {
       vLine.style.display = "none";
@@ -7252,7 +6767,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 칸별 값은 층 캐시 **밖에서** 매 렌더 계산한다(≈250칸) -- 캐시가 재사용돼도 호버 해석(bookInfo)이 같은 값을 본다.
   const bookInfo = (() => {
     if (!book || !book.q || !(book.bin_size > 0)) return null;
-    const bs = book.bin_size, x0 = ml + cw + 6, L = BOOK_W - 10;
+    const bs = book.bin_size, x0 = ml + cw + TRADE_W + 6, L = BOOK_W - 10;
     const accAt = (key, p) => {               // 축적 통계는 창 전체를 접은 행 배열이라 제 격자(bin_lo) -- 가격으로 찾는다
       if (!acc || !acc[key] || !(acc.bin_size > 0)) return 0;
       const i = Math.round(p / acc.bin_size) - acc.bin_lo;
@@ -7310,10 +6825,37 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     if (!bookInfo) return;
     const { bs, x0, L, mx, cells } = bookInfo;
     const fmtQ = (q) => (q >= 1000 ? (q / 1000).toFixed(1) + "k" : q >= 10 ? q.toFixed(0) : q.toFixed(1));
-    const hd = document.createElementNS(NS, "text");
-    hd.setAttribute("x", x0); hd.setAttribute("y", mt - 4); hd.setAttribute("font-size", "10");
-    hd.setAttribute("fill", "var(--muted)"); hd.textContent = "호가";
-    g.appendChild(hd);
+    const head = (x, anchor, fill, str) => {
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", x); t.setAttribute("y", mt - 4); t.setAttribute("font-size", "10");
+      t.setAttribute("text-anchor", anchor); t.setAttribute("fill", fill); t.textContent = str;
+      g.appendChild(t);
+    };
+    if (TRADE_W) { head(x0 - 6, "end", "var(--amber)", "← 체결"); head(x0, "start", "var(--muted)", "호가 →"); }
+    else head(x0, "start", "var(--muted)", "호가");
+    // 2026-09-28 호가 요약 네 숫자(옛 프로파일 바닥글) -- 데스크톱은 체결·호가 기둥 머리 한 줄, 모바일은 풋프린트 위 왼쪽 한 줄.
+    //   변동이 맨 앞(좁으면 뒤에서부터 덜어낸다 -- 옛 바닥글과 같은 규칙). 설명은 호버(bookStatsTip).
+    const sm = latestFlowHeatmap && latestFlowHeatmap.summary;
+    if (sm) {
+      const parts = [...(sm.vol_pct == null ? [] : [["변동", sm.vol_pct + "%"]]),
+                     ["불균형", sm.obi == null ? "—" : (sm.obi > 0 ? "+" : "") + sm.obi.toFixed(2)],
+                     ["지속", sm.persist_share == null ? "—" : Math.round(100 * sm.persist_share) + "%"],
+                     ["이탈", sm.offtouch_leave_share == null ? "—" : Math.round(100 * sm.offtouch_leave_share) + "%"]];
+      const sx = TRADE_W ? ml + cw + 6 : ml, sy = TRADE_W ? mt - 18 : mt - 11, fs = mobileChart ? 9.5 : 10;
+      const room = (TRADE_W ? w - mr : x0 - 8) - sx;
+      const estW = (ps) => ps.reduce((a, [k, v]) => a + k.length * fs + v.length * fs * 0.6 + fs * 1.6, 0);
+      while (parts.length > 1 && estW(parts) > room) parts.pop();
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", sx); t.setAttribute("y", sy); t.setAttribute("font-size", fs);
+      parts.forEach(([k, v], i) => {
+        const a = document.createElementNS(NS, "tspan");
+        a.setAttribute("fill", "var(--muted)"); a.textContent = (i ? "  " : "") + k + " ";
+        const b = document.createElementNS(NS, "tspan");
+        b.setAttribute("fill", "var(--ink)"); b.setAttribute("font-weight", "700"); b.textContent = v;
+        t.appendChild(a); t.appendChild(b);
+      });
+      g.appendChild(t);
+    }
     const base = document.createElementNS(NS, "line");
     base.setAttribute("x1", x0 - 1); base.setAttribute("x2", x0 - 1);
     base.setAttribute("y1", mt); base.setAttribute("y2", plotBottom);
@@ -7816,24 +7358,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (!hit) { draw(g); slotState.key = key; }
       return g;
     };
-    // 히트맵이 왼쪽, 프로파일이 오른쪽(사용자 지시). 히트맵의 오른쪽 끝 = 지금 호가라
-    // 그 옆에 프로파일 가격행이 바로 이어진다 -- 두 그림이 같은 가격축에서 만난다.
-    // 🔴프로파일을 **먼저** 그린다 -- supplyProfileNow 에 행 기하를 남겨야 히트맵이
-    //   같은 y 에 포갠다(x 위치는 호출 순서와 무관하다. 각자 제 <svg> 상자를 받는다).
-    supplyProfileSubBox = {
-      svg: subSvg("prof", subX, subProfileY, subW, SUB_PROFILE_H,
-                  subProfileKey(entryPrice, subW, SUB_PROFILE_H, currentPrice),
-                  (g) => renderSupplyProfileSvg(g, latestSupplyProfile, currentPrice,
-                                                entryPrice, { w: subW, h: SUB_PROFILE_H })),
-      w: subW, h: SUB_PROFILE_H };
-    // 재사용했으면 renderSupplyProfileSvg 가 안 돌았으므로 현재가 줄을 여기서 맞춘다.
-    updateSupplyProfileNow(currentPrice);
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
+    const s1H = splitR ? SUB_1S_SIDE_H : SUB_1S_H - STATS_ROW_H;
     supply1sSubBox = {
-      svg: subSvg("s1", subX, sub1sY, subW, SUB_1S_H, sub1sKey(subW, SUB_1S_H),
-                  (g) => renderSupply1s({ svg: g, w: subW, h: SUB_1S_H })),
-      w: subW, h: SUB_1S_H };
+      svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
+                  (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),
+      w: subW, h: s1H };
 
     // ── 청산 밀도 범례 (2026-09-21 아티팩트 댓글) ────────────────────────────
     // 전에는 헤더 행의 HTML(#liqDensityLegend)이었다. 밀도가 풋프린트의 **배경**이 된
@@ -7890,8 +7421,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   } else {
     // 다른 코인·웜업이면 자리를 안 잡는다. 캐시 키를 비워 두지 않으면 ETH 로 돌아왔을 때
     // 낡은 그림이 «맞는 판»으로 다시 붙는다.
-    supplyProfileSubBox = supply1sSubBox = null;
-    subPanelCache.prof.key = subPanelCache.s1.key = subPanelCache.dens.key = "";
+    supply1sSubBox = null;
+    subPanelCache.s1.key = subPanelCache.dens.key = "";
   }
 }
 
@@ -7992,7 +7523,6 @@ async function tick() {
       refreshMacroCalendar();
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
-      refreshSupplyProfile();        // 2026-09-19 가격축 수급 프로파일
       refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)
       refreshGex();                  // 2026-09-19 옵션 감마 노출(참고 표시 · 신호 아님)
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
