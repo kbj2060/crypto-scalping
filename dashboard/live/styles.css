@@ -3217,7 +3217,17 @@ body.order-coin-off .acct-lanes::before {
   #candleSvgSnapshot { --fp-split: 0.38; height: 872px; }
   .candle-container { height: 884px; }
   .liq-map-panel { position: relative; }
+  /* 풋프린트 아래 카드는 한 줄 너비에 세 칸(사용자 «최대한 너비 하나에 모두»): 내 계좌 | 30분 시나리오 | 신호·특화 신호·경제 일정.
+     다섯 장을 한 줄에 다 놓으면 칸이 360px 안팎이라 신호 카드 글자가 한 글자씩 꺾인다(09-27 시안 B 의 420px 칸에서 실측). */
+  #snapshotTabPanel { grid-template-columns: 600px minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  #snapshotTabPanel > * { grid-column: 1 / -1; }
+  #snapshotTabPanel > .liq-map-panel { grid-row: 1; }
+  #snapshotTabPanel > .acct-panel { grid-column: 1; grid-row: 2; }
+  #snapshotTabPanel > .situation-panel { grid-column: 2; grid-row: 2; }
+  #snapshotTabPanel > .snap-side { grid-column: 3; grid-row: 2; display: grid; gap: var(--card-gap); align-content: start; }
+  .acct-panel .acct-lanes { grid-template-columns: 1fr; }   /* 600px 에 두 레인은 안 들어간다 -- 청산이 위 */
 }
+.snap-side { display: contents; }
 
 /* 2026-09-27 헤더 한 줄(사용자 지시): 스냅샷의 «코인 탭 · 발표 경보 · 테마» 줄을 페이지 탭과 세션 사이로 올렸다.
    다른 탭에서는 지금처럼 안 보인다. 모바일(≤720)은 세션 다음 줄로 보내 전과 같은 모양을 지킨다. */

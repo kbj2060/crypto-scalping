@@ -5592,6 +5592,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const QUAD_H = fpBars.length ? (mobileChart ? 112 : 162) : 0;
   const QUAD_TXT = (fpBars.length && QUAD_TEXT_OK) ? (mobileChart ? 28 : 34) : 0;
   const CUM_H = fpBars.length ? (mobileChart ? 104 : 160) : 0;
+  // 2026-09-27 데스크톱은 누적 CVD·OI 를 사분면 막대 **뒤에** 흐리게 깐다(사용자 선택 A) -- 제 줄(160+6)을 풋프린트에 준다.
+  //   가격 플롯 400 -> 566. 모바일은 제 줄 그대로(사용자 «모바일은 지금대로»).
+  const LANE_MERGE = !mobileChart;
+  const CUM_DRAW_H = LANE_MERGE ? QUAD_H : CUM_H;   // 누적이 그리는 높이 = 합치면 사분면 막대 판
   // 2026-09-23(2차) 사용자 「RVOL 선 2개는 CVD 차트로 옮겨줘」 -- 전용 레인을 없애고
   // cumLane **안에** 자기 축으로 겹쳐 그린다. 높이 예산은 레인 둘로 되돌아간다.
   const LANE_GAP = fpBars.length ? 6 : 0;
@@ -5610,7 +5614,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이다(dashboard/situation.py 의 WINDOW=6).
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
   const cw = w - ml - mr;
-  const ch = h - mt - mb - QUAD_H - QUAD_TXT - CUM_H - 2 * LANE_GAP
+  const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H - 2 * ROW_H;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
   // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). OI·청산 레인은 플롯 바로 아래 그대로다.
@@ -5623,8 +5627,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
   const subLegendY = splitR ? mtTop : sub1sY + SUB_1S_H;   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
   const quadY = plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
-  const cumY = quadY + QUAD_H + QUAD_TXT + ROW_H + LANE_GAP; // 누적 행 위쪽
-  const cumBottom = cumY + CUM_H;                    // 그 아래 한 줄이 ROW_H 를 쓴다
+  const cumY = LANE_MERGE ? quadY : quadY + QUAD_H + QUAD_TXT + ROW_H + LANE_GAP; // 누적 행 위쪽
+  const cumBottom = cumY + CUM_DRAW_H;                    // 그 아래 한 줄이 ROW_H 를 쓴다
   const NS = "http://www.w3.org/2000/svg";
   // 풋프린트는 서버가 주는 12봉이 곧 창이다 -- 모바일 핀치줌(visibleCandleWindow)으로 더
   // 잘라내면 셀만 커지고 볼 구간이 사라진다.
@@ -5697,7 +5701,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   빠뜨리면 테마를 바꿔도 캐시된 층이 옛 색 그대로 남는다(모드 키와 같은 함정).
   const themeSig = document.documentElement.getAttribute("data-theme") || "dark";
   const baseGeomSig = [themeSig, w, h, mt, ch, ml, mr, cw, bw, yMin, yMax, plotBottom,
-                       mobileChart, quadY, cumY, QUAD_H, QUAD_TXT, CUM_H,
+                       mobileChart, quadY, cumY, QUAD_H, QUAD_TXT, CUM_H, CUM_DRAW_H,
                        QUAD_TEXT_OK, ROW_H, PRICE_ROW_H].join("|");
   // 봉 시각만. 진행 중인 봉의 OHLC 는 여기 없다(위 주석).
   const timesSig = candles.length + ":" + (candles[0] ? candles[0].time : 0)
@@ -5705,13 +5709,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const layerCache = renderCandleSvg._layers || (renderCandleSvg._layers = new Map());
   /** 층 하나를 <g> 로 묶어 캐시한다. sig 가 같으면 만들어 둔 노드를 그대로 다시 붙인다.
    *  draw(g) 는 그 <g> 안에만 그려야 한다 -- svg 에 직접 붙이면 캐시를 우회한다. */
-  const cachedLayer = (name, sig, draw) => {
+  const cachedLayer = (name, sig, draw, before = null) => {
     const full = baseGeomSig + "|" + timesSig + "|" + sig;
     const prev = layerCache.get(name);
-    if (prev && prev.sig === full) { svg.appendChild(prev.g); return prev.g; }
+    // before: 그 층 **뒤에**(먼저) 깐다 -- 2026-09-27 누적 레인을 사분면 막대 뒤로.
+    const under = before && layerCache.get(before)?.g;
+    const put = (x) => (under && under.parentNode === svg ? svg.insertBefore(x, under) : svg.appendChild(x));
+    if (prev && prev.sig === full) { put(prev.g); return prev.g; }
     const g = document.createElementNS(NS, "g");
     draw(g);
-    svg.appendChild(g);
+    put(g);
     layerCache.set(name, { sig: full, g });
     return g;
   };
@@ -7342,7 +7349,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   RVOL 만 갱신됐을 때 옛 노드가 그대로 재사용된다(사분면에서 같은 버그를 이미 겪었다).
   cachedLayer("cumLane", objToken(fpBars) + "|" + objToken(oiBars) + "|" + chartWindowBars
               + "|" + activeSnapshotAsset + "|" + rvolSig, (g) => {
-  if (fpBars.length && candles.length && CUM_H) {
+  if (fpBars.length && candles.length && CUM_DRAW_H) {
     const oiByTs = new Map(oiBars.map((b) => [Number(b[0]), Number(b[1]) || 0]));
     let aw = 0, am = 0, ar = 0, ao = 0;
     const rows = candles.map((c) => {
@@ -7355,7 +7362,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const have = rows.filter(Boolean);
     if (have.length >= 2) {
       const amp = Math.max(...have.map((r) => Math.max(Math.abs(r.c), Math.abs(r.oi))), 1e-9) * 1.06;
-      const mid = cumY + CUM_H / 2, half = CUM_H / 2 - 6;
+      // 합친 판: 맨 위 RVOL 띠(~20px) 아래로만 그린다 -- 파란 거래량 선과 섞이지 않게.
+      const mid = LANE_MERGE ? cumY + CUM_DRAW_H * 0.58 : cumY + CUM_H / 2;
+      const half = LANE_MERGE ? CUM_DRAW_H * 0.40 : CUM_H / 2 - 6;
       const yv = (v) => mid - (v / amp) * half;
       const cx = (i) => xAt(i) + bw / 2;
       const zero = document.createElementNS(NS, "line");
@@ -7378,9 +7387,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         path.setAttribute("fill-opacity", op); path.setAttribute("stroke", "none");
         g.appendChild(path);
       };
-      band(() => 0, (r) => r.w, "0.42");
-      band((r) => r.w, (r) => r.m, "0.24");
-      band((r) => r.m, (r) => r.c, "0.11");
+      // 합친 판(데스크톱)에서는 막대가 주연이다 -- 누적은 옅은 배경(사용자 선택 A).
+      const fade = LANE_MERGE ? 1 / 3 : 1;
+      band(() => 0, (r) => r.w, String(0.42 * fade));
+      band((r) => r.w, (r) => r.m, String(0.24 * fade));
+      band((r) => r.m, (r) => r.c, String(0.11 * fade));
       const line = (val, color, width, opacity) => {
         let d = "";
         rows.forEach((r, i) => { if (r) d += (d ? " L" : "M") + cx(i).toFixed(1) + " " + yv(val(r)).toFixed(1); });
@@ -7391,10 +7402,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         path.setAttribute("stroke-opacity", opacity); path.setAttribute("stroke-linejoin", "round");
         g.appendChild(path);
       };
-      line((r) => r.w, "var(--bad)", 1, 0.55);        // 층 경계(농도만으로는 안 갈린다)
-      line((r) => r.m, "var(--bad)", 1, 0.55);
-      line((r) => r.oi, "var(--warn)", 2.4, 0.95);    // 누적 신규계약
-      line((r) => r.c, "var(--accent)", 2.6, 1);      // = CVD (스택의 윤곽)
+      if (!LANE_MERGE) {
+        line((r) => r.w, "var(--bad)", 1, 0.55);      // 층 경계(농도만으로는 안 갈린다)
+        line((r) => r.m, "var(--bad)", 1, 0.55);
+      }
+      line((r) => r.oi, "var(--warn)", LANE_MERGE ? 1.8 : 2.4, LANE_MERGE ? 0.55 : 0.95);   // 누적 신규계약
+      line((r) => r.c, "var(--accent)", LANE_MERGE ? 2 : 2.6, LANE_MERGE ? 0.6 : 1);        // = CVD (스택의 윤곽)
       const last = have[have.length - 1];
       const sgn = (v) => (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v));
       // 🔴RVOL 은 2026-09-23 에 **사분면 레인 위 띠**로 옮겼다. 이 레인은 CVD 축 하나만 쓴다.
@@ -7410,7 +7423,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       let rowX = 3;
       const rowY = cumBottom + 11;
       legend.forEach((row, k) => {
-        const y = mobileChart ? rowY : cumY + 14 + k * 19;
+        // 합친 판: 오른쪽 위는 사분면의 «RVOL 배수 · 추향 캡» 자리라 그 아래부터 쌓는다.
+        const y = mobileChart ? rowY : LANE_MERGE ? cumY + 82 + k * 17 : cumY + 14 + k * 19;
         if (!mobileChart) {
           const sw = document.createElementNS(NS, "rect");
           sw.setAttribute("x", ml + cw + 2); sw.setAttribute("y", y - 9);
@@ -7439,7 +7453,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         }
       });
       const lbl = document.createElementNS(NS, "text");
-      lbl.setAttribute("x", ml - 6); lbl.setAttribute("y", mid - 4);
+      // 합친 판: 왼쪽 위는 «사분면» 이름표 자리 -- 판 아래쪽으로 내린다.
+      lbl.setAttribute("x", ml - 6); lbl.setAttribute("y", LANE_MERGE ? cumY + CUM_DRAW_H - 16 : mid - 4);
       lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "11");
       lbl.setAttribute("fill", "var(--accent)"); lbl.setAttribute("font-weight", "700");
       lbl.textContent = mobileChart ? "누적" : "누적 CVD";
@@ -7451,14 +7466,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       lbl.appendChild(tip);
       g.appendChild(lbl);
       const lbl2 = document.createElementNS(NS, "text");
-      lbl2.setAttribute("x", ml - 6); lbl2.setAttribute("y", mid + 11);
+      lbl2.setAttribute("x", ml - 6); lbl2.setAttribute("y", LANE_MERGE ? cumY + CUM_DRAW_H - 1 : mid + 11);
       lbl2.setAttribute("text-anchor", "end"); lbl2.setAttribute("font-size", "11");
       lbl2.setAttribute("fill", "var(--warn)");
       lbl2.textContent = mobileChart ? "+OI" : "+ 누적 OI";
       g.appendChild(lbl2);
     }
   }
-  });
+  }, LANE_MERGE ? "quadLane" : null);   // 합친 판: 사분면 막대 **뒤에**
 
 
   // ── ③ 청산 — 풋프린트 봉 고가 «바로 위» 동그라미 (2026-09-22 사용자 지시) ────

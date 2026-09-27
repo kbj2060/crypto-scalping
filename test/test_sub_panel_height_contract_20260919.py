@@ -51,13 +51,18 @@ def test_heights_match_between_js_and_css():
         f"SVG {css_svg} != {want} (여백 {mt_top}+{mb} · SUB {total} · 레인 {lanes} · "
         f"가격 플롯 {price_plot}) -- 가격 플롯이 {css_svg - want + price_plot}px 로 눌린다")
     assert css_box == css_svg + 12, f"상자 {css_box} != {css_svg + 12} (SVG + margin-top 12)"
+    # 2026-09-27 데스크톱은 누적이 사분면 판에 겹쳐 제 줄(CUM_H + 간격)을 풋프린트에 준다 -- 가격 플롯 400 + 166.
+    merged_lanes = lanes - _num(r"CUM_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "CUM_H") \
+        - _num(r"LANE_GAP = fpBars\.length \? (\d+)", JS, "LANE_GAP")
+    desk_plot = css_svg - mt_top - total - merged_lanes - mb
+    assert desk_plot >= price_plot, f"데스크톱 가격 플롯 {desk_plot} < {price_plot}"
 
     # 2026-09-27 넓은 화면 2단: 호가·1초 수급이 오른쪽 칸으로 가서 플롯 위에는 밀도 범례만 남는다.
     #   가격 플롯 400 은 여기서도 지켜야 한다.
     wide_svg = _num(r"#candleSvgSnapshot \{ --fp-split: 0\.\d+; height: (\d+)px; \}", CSS, "2단 SVG 높이")
     wide_box = _num(r"\.candle-container \{ height: (\d+)px; \}", CSS[CSS.index("--fp-split"):], "2단 컨테이너")
-    want_wide = mt_top + legend + gap + price_plot + lanes + mb
-    assert wide_svg == want_wide, f"2단 SVG {wide_svg} != {want_wide} -- 가격 플롯이 {wide_svg - want_wide + price_plot}px 로 눌린다"
+    wide_plot = wide_svg - mt_top - legend - gap - merged_lanes - mb   # 넓은 화면은 항상 데스크톱(합친 판)
+    assert wide_plot >= price_plot, f"2단 가격 플롯 {wide_plot} < {price_plot} -- 풋프린트가 눌린다"
     assert wide_box == wide_svg + 12
 
 
@@ -72,10 +77,29 @@ def test_lanes_tile_without_overlap():
            "CUM_H": _num(r"CUM_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "CUM_H"),
            "LANE_GAP": _num(r"LANE_GAP = fpBars\.length \? (\d+)", JS, "LANE_GAP"),
            "ROW_H": 0, "PRICE_ROW_H": 0, "plotBottom": 0}
+    exprs = {}
     for name in ("quadY", "cumY", "cumBottom"):
         m = re.search(rf"  const {name} = ([^;]+?);", JS)
         assert m, f"못 찾음: {name}"
-        env[name] = eval(m.group(1).split("//")[0].strip(), {"__builtins__": {}}, env)  # noqa: S307
+        exprs[name] = m.group(1).split("//")[0].strip()
+
+    def ev(expr, e):
+        if "?" in expr:                                   # `LANE_MERGE ? a : b` (2026-09-27)
+            cond, rest = expr.split("?", 1)
+            a, b = rest.split(":", 1)
+            expr = a if eval(cond.strip(), {"__builtins__": {}}, e) else b   # noqa: S307
+        return eval(expr.strip(), {"__builtins__": {}}, e)                     # noqa: S307
+
+    # 2026-09-27 데스크톱은 누적을 사분면 막대 판에 **겹친다**(사용자 선택 A) -- 겹침이 곧 설계다.
+    #   누적 판 = 사분면 막대 판(같은 y · 같은 높이)이어야 한다. 어긋나면 막대 밖으로 새거나 반만 덮는다.
+    assert re.search(r"const LANE_MERGE = !mobileChart;", JS), "합친 판은 데스크톱만이어야 한다(모바일은 제 줄)"
+    merged = dict(env, LANE_MERGE=True, CUM_DRAW_H=env["QUAD_H"])
+    for name, expr in exprs.items():
+        merged[name] = ev(expr, merged)
+    assert merged["cumY"] == merged["quadY"] and merged["cumBottom"] == merged["quadY"] + env["QUAD_H"], merged
+    env.update(LANE_MERGE=False, CUM_DRAW_H=env["CUM_H"])       # 이하 = 모바일처럼 제 줄로 쌓는 경로
+    for name, expr in exprs.items():
+        env[name] = ev(expr, env)
 
     lanes = [("사분면", env["quadY"], env["QUAD_H"] + env["QUAD_TXT"]),
              ("누적 CVD", env["cumY"], env["CUM_H"])]
