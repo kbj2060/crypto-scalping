@@ -3318,6 +3318,7 @@ function updateLivePriceFast(price) {
   if (tri) tri.setAttribute("points", markerPoints(c.markerX, y));
   const labelY = Math.max(c.mt + 9, Math.min(c.mt + c.ch - 9, y));
   if (lab) lab.setAttribute("y", labelY + 4);
+  if (lab && lab.dataset.withPrice) lab.textContent = "현재 " + fmtNum(price, pxDp());   // 2026-09-27 풋프린트: 가격이 왼쪽 글자 안
   // 2026-09-22 모바일에는 배지가 없다(값은 플롯 아래 한 줄에 있다). 옛 판은 box/txt 가
   //   없으면 **여기서 return** 해서 화살표까지 같이 멈췄다 -- 전체 렌더(1초)까지 어긋난다.
   const row = c.svg.querySelector('[data-live="rowtext"]');
@@ -5602,7 +5603,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   mr 은 얇은 여백만 남긴다. 실측 348px 화면에서 플롯 280 -> 338px = **+21%**.
   //   배지는 아래 boxX 가 오른쪽 끝 기준으로 다시 잡는다(왼쪽정렬 그대로 두면 밖으로 나간다).
   const ml = (mobileChart ? 44 : 45) + CENTER_NUDGE,
-        mr = (mobileChart ? 10 : 112) - CENTER_NUDGE,
+        // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
+        mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
         mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 70;
   // 2026-09-21 사용자 요청: 「차트가 너무 많다 -- 레인을 한 덩어리로」 + 「가격 플롯을 키워라」.
   //   레인 5종(거래대금·델타/CVD·OI·수급·청산)이 각자 6px 간격으로 떨어져 있어 **다섯 장의
@@ -5674,7 +5676,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이다(dashboard/situation.py 의 WINDOW=6).
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
   // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 띠 폭을 뗀다(데스크톱 70 · 모바일 40).
-  const BOOK_W = footprint ? (mobileChart ? 40 : 70) : 0;   // 모바일은 좁아 40px(수량 글자 없이)
+  // 2026-09-27 넓혔다(사용자 «호가 너비를 키워줘») -- 오른쪽 배지 자리(86px)를 띠에 줬다: 70 -> 148 · 모바일 40 -> 56.
+  const BOOK_W = footprint ? (mobileChart ? 56 : 148) : 0;   // 모바일은 수량 글자 없이
   const cw = w - ml - mr - BOOK_W;
   const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H - 2 * ROW_H;
@@ -6003,8 +6006,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 삼각형은 플롯 **바깥**(오른쪽 가장자리)에 앉아 어느 행인지만 가리키고 아무것도 안 가린다.
   // 청산맵 모드는 그대로 선이다 -- 거기선 덮을 셀이 없고, 선이 가격대를 가로로 읽게 해 준다.
   if (includeCurrentPrice && currentPrice > 0) {
+    // 2026-09-27 풋프린트도 다시 **가로선**이다(사용자 «현재가는 가격선»). 09-16 의 걱정(선이 셀 숫자를 덮는다)은
+    //   선을 **셀 뒤**(격자 층 바로 위)에 얇게 깔아 푼다 -- 아래 priceLabels 루프의 insertBefore.
     priceLabels.push({ val: currentPrice, color: "var(--accent)", label: "현재", dashed: true,
-                       width: 2, marker: !!footprint });
+                       width: footprint ? 1 : 2, marker: false, behindCells: !!footprint });
   }
   // 2026-09-19 풋프린트에서는 진입선도 **삼각형**이다. 선이 가격 행을 가로질러 셀 숫자를
   // 덮는 문제는 현재가에서 이미 겪었고(바로 위 주석), 진입선은 굵기 3이라 더 넓게 덮는다.
@@ -6832,7 +6837,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-09-22 사용자 지시: **모바일은 배지를 안 그린다.** 값은 플롯 아래 한 줄이 갖고,
     //   플롯 안에서는 꺾쇠(화살표)가 «어느 행인가»만 가리킨다. 배지를 안에 띄우면 가장 최근
     //   봉을 덮고, 밖에 두면 그 폭만큼 플롯이 짧아진다 -- 아래로 내리면 둘 다 없다.
-    const priceLeft = p.priceLeft && !mobileChart;   // 모바일은 원래 배지가 없다(가격은 아래 줄)
+    // 2026-09-27 풋프린트(데스크톱)는 **모든** 가격을 왼쪽 글자로 -- 오른쪽은 호가 띠 자리다(사용자 지시).
+    const priceLeft = (p.priceLeft || !!footprint) && !mobileChart;   // 모바일은 원래 배지가 없다(가격은 아래 줄)
     const subOk = !!p.sub && !mobileChart && !priceLeft;   // 왼쪽 여백엔 값(HL 수량)까지 못 넣는다
     const boxW = subOk ? 76 : 64, boxH = 18;
     const boxX = w - mr + 4;
@@ -6867,17 +6873,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (lineDashed) line.setAttribute("stroke-dasharray", "4,4");
       if (p.outOfView) line.setAttribute("opacity", "0.72");
       svg.appendChild(line);
+      if (p.behindCells) {                       // 셀 숫자를 덮지 않게 격자 바로 위(셀 아래)로
+        line.setAttribute("opacity", "0.85");
+        const gridG = layerCache.get("grid")?.g;
+        if (gridG && gridG.parentNode === svg) svg.insertBefore(line, gridG.nextSibling);
+      }
     }
 
     // Left label (follows label position)
     // 2026-09-22 label 이 비면 안 그린다 -- 시나리오는 확률을 **오른쪽 배지 안**으로 옮겼다
     // (사용자 «오른쪽 라벨에 가격이랑 확률만»). 왼쪽 여백은 45px 뿐이라 둘을 다 못 넣는다.
-    const txt = p.label ? document.createElementNS(NS, "text") : null;
+    // 이름이 없는 것(30분 시나리오 목표 «↑56%»)은 왼쪽으로 옮길 때 sub 를 이름으로 쓴다.
+    const leftName = p.label || (priceLeft && p.sub ? p.sub : "");
+    const txt = leftName ? document.createElementNS(NS, "text") : null;
     if (txt) {
       txt.setAttribute("x", ml - 5); txt.setAttribute("y", labelY + 4);
       txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10");
       txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", p.color);
-      txt.textContent = `${p.label}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;
+      txt.textContent = `${leftName}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;
       svg.appendChild(txt);
       if (priceLeft) {
         // 왼쪽 여백(ml-5)을 넘으면 SVG 밖으로 잘린다 -- 재서 소수점을 뗀다.
@@ -6901,7 +6914,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       rect.setAttribute("fill", "none");
       rect.setAttribute("stroke", p.color);
       rect.setAttribute("stroke-width", "1.2");
-      if (p.gauge > 0 && !mobileChart) {          // 테두리 «안»을 확률만큼 채운다
+      if (p.gauge > 0 && !mobileChart && !priceLeft) {   // 테두리 «안»을 확률만큼 채운다(배지를 왼쪽 글자로 옮기면 안 그린다)
         const fillW = Math.max(2, (boxW - 2) * (p.gauge / 100));
         const g = document.createElementNS(NS, "rect");
         g.setAttribute("x", boxX + 1); g.setAttribute("y", labelY - 8);
@@ -6949,6 +6962,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       rect.dataset.live = "box";
       pTxt.dataset.live = "text";
       txt.dataset.live = "label";
+      if (priceLeft) txt.dataset.withPrice = "1";   // 빠른 갱신이 글자 속 가격도 바꾼다
     }
   });
   // 2026-09-22 사용자 지시: 모바일은 배지 대신 플롯 **아래 한 줄**이 값을 갖는다.
@@ -7023,7 +7037,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   const priceBadgeW = mobileChart ? 56 : 64, priceBadgeH = 18;
   // 위 가격 배지와 **같은 기준**으로 잡는다 -- 둘이 어긋나면 호버 배지만 다른 열에 뜬다.
-  const priceBadgeX = mobileChart ? w - 4 - priceBadgeW : w - mr + 4;
+  // 2026-09-27 풋프린트는 오른쪽이 호가 띠라 호버 배지도 왼쪽 여백으로.
+  const priceBadgeX = mobileChart ? w - 4 - priceBadgeW : footprint ? Math.max(2, ml - priceBadgeW - 3) : w - mr + 4;
   const priceBadgeRect = document.createElementNS(NS, "rect");
   priceBadgeRect.setAttribute("x", priceBadgeX);
   priceBadgeRect.setAttribute("width", priceBadgeW);
@@ -7591,7 +7606,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const y = mobileChart ? rowY : LANE_MERGE ? cumY + 82 + k * 17 : cumY + 14 + k * 19;
         if (!mobileChart) {
           const sw = document.createElementNS(NS, "rect");
-          sw.setAttribute("x", ml + cw + BOOK_W + 2); sw.setAttribute("y", y - 9);
+          sw.setAttribute("x", w - 84); sw.setAttribute("y", y - 9);   // 글자(오른쪽 끝 정렬) 바로 왼쪽 -- 띠 폭과 무관
           sw.setAttribute("width", 10); sw.setAttribute("height", 10);
           sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
           g.appendChild(sw);
