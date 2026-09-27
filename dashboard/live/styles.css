@@ -3079,6 +3079,18 @@ body.not-eth [data-eth-only]::after {
 .sit-row-h b.k-up { font: 700 13px/1 var(--font-sans); color: var(--good); }
 .sit-row-h b.k-dn { font: 700 13px/1 var(--font-sans); color: var(--bad); }
 .sit-reach .sit-cal { margin-top: 5px; }
+/* 2026-09-28 30분 카드 «위:아래 방향» 자리 = 일 단위 추세(trendBlockHtml). 표 칩 = 기간 · 방향 · 뒤집힘 가격과 거리.
+   점선 칩 = 지금 가격으로 일봉이 닫히면 그 표가 뒤집힌다. */
+.sit-dir .sit-cal { margin-top: 5px; }
+.sit-dir .sit-row-h b { white-space: nowrap; }
+.tr-votes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.tr-v { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 7px; border: 1px solid var(--line);
+        border-radius: 4px; font: 700 11px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
+.tr-v.k-up { color: var(--good); }
+.tr-v.k-dn { color: var(--bad); }
+.tr-v em { font-style: normal; font-weight: 500; color: var(--muted); }
+.tr-v.flip { border-style: dashed; border-color: currentColor; }
+.tr-warn { margin-top: 7px; font-size: 12px; font-weight: 700; color: var(--bad); }
 .sit-split { display: flex; gap: 2px; height: 8px; margin-top: 7px; border-radius: 4px; overflow: hidden; }
 .sit-split i { display: block; height: 100%; background: color-mix(in srgb, var(--neutral) 18%, transparent); }
 .sit-split i.k-up.lean { background: var(--good); }

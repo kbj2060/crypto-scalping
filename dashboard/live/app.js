@@ -322,6 +322,13 @@ const API_SITUATION_URL = "/api/situation";
 const SITUATION_POLL_MS = 1000;   // 09-21 서버 계산도 1초로 -- 응답은 작은 JSON 하나
 let latestSituation = null;
 let situationLastFetchAt = 0;
+// 2026-09-28 30분 카드 «위:아래 방향» 자리 = 일 단위 추세(dashboard/trend_rule.py, 5기간 묶음 7·14·28·56·90일).
+//   위:아래는 AUC .525(대부분 51:49 동전)였다. 추세는 ETH 현물 9년 샤프 1.0 대(규칙, 확률은 안 싣는다).
+//   일봉이라 하루 한 번 바뀐다 -- 60초 간격이면 충분하고 서버도 5분 캐시다.
+const API_TREND_URL = "/api/trend";
+const TREND_POLL_MS = 60000;
+let latestTrend = null;
+let trendLastFetchAt = 0;
 let latestOi5m = null;
 let oi5mLastFetchAt = 0;
 const GEX_POLL_MS = 120000;          // 매시 cron -- 2분 폴링이면 충분히 앞선다
@@ -3155,17 +3162,6 @@ function liquidationDensityHistory() {
 //   테두리 안을 확률만큼 채운다 -- 배지 자체가 게이지다(시안 Q).
 // 2026-09-25 옛 A/B/C 기하 목표를 걷고 **융합 3결과의 두 선**(±0.5×30분 폭 — 위 먼저 · 아래 먼저)으로 바꿨다.
 //   배지 숫자 = 카드와 같은 실측 확률. «미도달»은 선이 없다(두 선 사이에 머묾).
-function situationTargetLevels(footprint) {
-  const fz = ((latestSituation || {}).read || {}).fused;
-  const o3 = fz && fz.outcome;
-  if (!o3 || activeSnapshotAsset !== "eth") return [];
-  return o3.cols.filter((c) => c.key !== "none" && Number(c.target) > 0).map((c) => ({
-    val: Number(c.target), color: "var(--muted)", label: "",
-    sub: `${c.key === "up" ? "↑" : "↓"}${Math.round(c.p)}%`,
-    gauge: Math.max(0, Math.min(100, Number(c.p) || 0)),
-    faded: false, dashed: true, width: 1, marker: !!footprint, scenario: c.key }));
-}
-
 // 2026-09-26 사용자 지시(B): 청산맵은 **완성된 1시간봉**까지만 쓸림을 반영한다(서버가 형성 중 봉을 뺀다) --
 //   마지막 스냅샷 ts 는 그 봉의 **시작**이라 서버가 아는 건 ts+1h 까지다. 그 뒤 가격이 지나간 레벨은
 //   최대 1시간 «안 쓸린 벽»으로 남았다. 차트 5분봉(현재 봉은 틱으로 매초 갱신)으로 그 공백을 메운다.
@@ -3820,6 +3816,20 @@ async function refreshSituation() {
   renderSituation();
 }
 
+async function refreshTrend() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  const now = Date.now();
+  if (now - trendLastFetchAt < TREND_POLL_MS) return;
+  trendLastFetchAt = now;
+  try {
+    const res = await fetch(API_TREND_URL, { cache: "no-cache" });
+    latestTrend = res.ok ? await res.json() : { ok: false, reason: `HTTP ${res.status}` };
+  } catch (error) {
+    latestTrend = { ok: false, reason: "fetch_failed" };
+  }
+  renderSituation();
+}
+
 
 // 2026-09-25 «데이터 관계 읽기» -- 서버 dashboard/flow_read.py 가 만든 줄을 그대로 그린다(화면은 계산하지 않는다).
 //   등급 칩: 근거(주황) · 약함(실선) · 설명(테두리 없음) · 미측정(점선 = 아직 사실 아님, DESIGN.md Shapes).
@@ -3902,6 +3912,59 @@ function renderFlowRead() {
     + `<div class="fr-gauges">${rows}</div></details>`; });
 }
 
+// 2026-09-28 사용자 지시: 30분 카드의 «위:아래 방향»을 일 단위 추세 4가지로 대체 --
+//   ① 신호와 표 구성 ② 뒤집히는 가격선(차트에도) ③ 권장 크기 ④ 내 포지션이 역추세면 경고.
+//   표 L 은 «UTC 00시 일봉 종가 > L일 전 종가». 다음 00시에 그 표를 가르는 가격이 flip_price 라,
+//   지금 가격으로 일봉이 닫히면 어떻게 되는지를 실시간으로 보인다(점선 = 지금 가격이면 내일 뒤집힘).
+function trendBlockHtml() {
+  const t = latestTrend;
+  const head = `<div class="sit-row-h"><span title="UTC 00시 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표. 백테스트(ETH 현물 2017~2026) 샤프 1.0 대 · 표본 안에서 고른 설정이라 과신 금지">큰 방향 · 일 단위 추세</span>`;
+  if (!t) return `<div class="sit-dir">${head}<b class="coin">계산 중</b></div></div>`;
+  if (!t.ok) return `<div class="sit-dir">${head}<b class="coin">없음</b></div>`
+    + `<div class="sit-cal">${escapeHtml(t.reason || "")}</div></div>`;
+  const live = Number(latestLivePriceByAsset.eth || t.close);
+  const up = t.signal > 0;
+  const px = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: v >= 100 ? 0 : 2 });
+  const tmrUps = t.votes.filter((v) => live > v.flip_price).length;
+  const tmrSig = (2 * tmrUps - t.votes.length) / t.votes.length;
+  const chips = t.votes.map((v) => {
+    const tmr = live > v.flip_price;
+    const d = (v.flip_price / live - 1) * 100;
+    const tip = `${v.L}일 표: 어제 00시 종가가 ${v.L}일 전(${px(v.ref_now)})보다 ${v.up ? "높다 → 상승" : "낮다 → 하락"}. `
+      + `다음 00시에 이 표를 가르는 가격 ${px(v.flip_price)} -- 지금 가격 ${px(live)} 로 닫히면 ${tmr ? "상승" : "하락"}.`;
+    return `<span class="tr-v ${v.up ? "k-up" : "k-dn"}${tmr !== v.up ? " flip" : ""}" title="${escapeHtml(tip)}">`
+      + `${v.L}일 ${v.up ? "↑" : "↓"}<em>${px(v.flip_price)} ${d >= 0 ? "+" : ""}${d.toFixed(1)}%</em></span>`;
+  }).join("");
+  const size = Number(t.size) || 0;
+  const asof = new Date(t.asof_ms).toISOString().slice(5, 10);
+  // ④ 역추세 경고 -- 이 코인의 포지션 전부(헤지 모드면 롱·숏 둘 다 있을 수 있다)
+  const mine = ((latestBinanceAccount || {}).positions || [])
+    .filter((p) => String(p.symbol || "").startsWith("ETH") && Math.abs(Number(p.qty) || 0) > 0);
+  const against = mine.filter((p) => (p.side === "LONG") !== up);
+  const warn = against.length
+    ? `<div class="tr-warn" title="원장 ETH 79왕복(08~09월): 추세와 같은 방향 47건 +898$ · 반대 28건 −468$(최악 −549$ 포함)">`
+      + `⚠ 역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유 — 추세는 ${up ? "롱" : "숏"}</div>`
+    : mine.length ? `<div class="sit-cal">보유 ${mine.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} = 추세 방향</div>` : "";
+  return `<div class="sit-dir">${head}<b class="${up ? "k-up" : "k-dn"}">${up ? "↑ 롱" : "↓ 숏"} ${t.signal > 0 ? "+" : ""}${t.signal.toFixed(1)}</b></div>`
+    + `<div class="sit-cal">${t.votes.length}표 중 ${t.ups}표 상승 · ${t.age_days}일째 같은 방향 · 기준 ${escapeHtml(asof)} 00시(UTC) 일봉`
+    + (tmrSig !== t.signal ? ` · <span class="sit-edge">지금 가격으로 닫히면 ${tmrSig > 0 ? "+" : ""}${tmrSig.toFixed(1)}</span>` : "") + `</div>`
+    + `<div class="tr-votes">${chips}</div>`
+    + `<div class="sit-cal">권장 크기 순자산의 <b>${size > 0 ? "+" : ""}${size.toFixed(2)}배</b> ${size > 0 ? "롱" : "숏"}`
+    + ` (신호 × 연 50% ÷ 20일 변동성 ${Math.round(t.vol_ann * 100)}%, 최대 2배)</div>`
+    + warn + `</div>`;
+}
+
+// 차트에는 **보이는 캔들 범위 안**의 뒤집힘 가격만 그린다 -- 레벨은 세로 축을 넓히지 않고 화면 밖이면 가장자리에
+//   쌓이므로, 20% 넘게 떨어진 선 넷이 바닥에 겹치면 읽을 수 없다. 5개 전체는 카드에 거리와 함께 있다.
+function trendFlipLevels(footprint, candles) {
+  const t = latestTrend;
+  if (!t || !t.ok || activeSnapshotAsset !== "eth" || !candles.length) return [];
+  const lo = Math.min(...candles.map((c) => c.low)), hi = Math.max(...candles.map((c) => c.high));
+  return t.votes.filter((v) => v.flip_price >= lo && v.flip_price <= hi).map((v) => ({
+    val: Number(v.flip_price), color: "var(--muted)", label: `추세${v.L}일`, priceLeft: true,
+    dashed: true, width: 1, marker: !!footprint }));
+}
+
 function renderSituation() {
   renderFlowRead();
   const body = el("situationBody"); const badge = el("situationBadge");
@@ -3924,46 +3987,21 @@ function renderSituation() {
   const OUT = { up: { ar: "↑", nm: "위로 먼저" }, dn: { ar: "↓", nm: "아래로 먼저" }, none: { ar: "↔", nm: "30분 안 미도달" } };
   const cols = o3 ? [...o3.cols].sort((a, b) => b.p - a.p) : [];
   // 2026-09-26 사용자 «위로 먼저·아래로 먼저가 항상 비슷» → 두 질문으로 가른다(카드 업그레이드 1+2).
-  //   ① 닿을 확률(표: 30분 폭 분위가 잘 가른다, 미도달 9~48%) ② 닿는다면 어느 쪽(방향 HGB 모델, 대부분 동전).
-  //   🔴«동전»(50±5pp)이면 방향색을 안 칠한다 -- 비등을 1위처럼 보이지 않게(DESIGN «비등» 규칙). 기울면 그쪽만 색.
+  //   ① 닿을 확률(표: 30분 폭 분위가 잘 가른다, 미도달 9~48%) ② 닿는다면 어느 쪽 -- 🔴2026-09-28 제거(AUC .525,
+  //   대부분 51:49 동전) → 그 자리를 일 단위 추세(trendBlockHtml)가 대신한다(사용자 지시).
   let scn = "";
   if (o3) {
     const col = (k) => o3.cols.find((c) => c.key === k) || {};
-    const up = col("up"), dn = col("dn"), nn = col("none");
+    const nn = col("none");
     const reach = Number.isFinite(o3.reach) ? o3.reach : 100 - (nn.p || 0);
-    const us = Number.isFinite(o3.up_share) ? o3.up_share : 50;
-    const lean = o3.coin ? null : (us > 50 ? "up" : "dn");
-    const moveDir = o3.dir > 0 ? "up" : o3.dir < 0 ? "dn" : null;
-    const side = (c, k) => {
-      const o = OUT[k]; const share = k === "up" ? us : 100 - us;
-      const dist = Number.isFinite(c.dist_bp) ? `${c.dist_bp > 0 ? "+" : ""}${Math.round(c.dist_bp)}bp` : "";
-      const title = `${o.nm}${moveDir ? (k === moveDir ? " — 30분 이동 방향으로 더 간다" : " — 30분 이동 반대로 되돌린다") : ""}`
-        + ` · 닿는다면 ${Math.round(share)}% · 무조건 ${Math.round(c.p)}%`;
-      const pushed = (c.push || []).map((q) => `<div class="sit-push${q.on ? " on" : ""}">`
-        + `<span class="dot"></span><span>${escapeHtml(q.t)}</span></div>`).join("");
-      return `<div class="sit-col sit-side k-${k}${lean === k ? " sit-top lean" : ""}" title="${escapeHtml(title)}">`
-        + `<div class="nm"><i class="sit-ar">${o.ar}</i>${o.nm}</div>`
-        + `<div class="p">${Math.round(share)}%</div>`
-        + `<div class="tg">${escapeHtml(fmtPx(c.target))} <span class="ds">${escapeHtml(dist)}</span></div>`
-        + (pushed ? `<div class="sit-pushes">${pushed}</div>` : "")
-        + `</div>`;
-    };
     const band = nn.band ? `${fmtPx(nn.band[0])}~${fmtPx(nn.band[1])}` : "—";
     const wide = (nn.push || [])[0];
-    const verdict = lean ? `${OUT[lean].ar} ${lean === "up" ? "위" : "아래"} 우세` : "동전";
     scn = `<div class="sit-reach">`
       + `<div class="sit-row-h"><span>30분 안 위·아래 선 중 하나에 닿을 확률${o3.reach_src === "table" ? " (모델 없음 · 표)" : ""}</span>`
       + `<b>${Math.round(reach)}%</b></div>`
       + `<div class="sit-g"><i style="width:${reach}%"></i></div>`
       + `<div class="sit-cal">미도달 ${Math.round(nn.p || 0)}% · ${escapeHtml(band)} 사이에 머묾`
-      + (wide ? ` · <span class="${wide.on ? "sit-edge" : ""}">${escapeHtml(wide.t)}</span>` : "") + `</div></div>`
-      + `<div class="sit-dir">`
-      + `<div class="sit-row-h"><span>닿는다면 어느 쪽 먼저${o3.dir_src === "model" ? "" : o3.dir_src === "model+fuse"
-        ? " · 융합 발동: 모델과 발동 실측 57% 평균" : " (모델 없음 · 표)"}</span>`
-      + `<b class="${lean ? `k-${lean}` : "coin"}">${verdict}</b></div>`
-      + `<div class="sit-split"><i class="k-dn${lean === "dn" ? " lean" : ""}" style="width:${100 - us}%"></i>`
-      + `<i class="k-up${lean === "up" ? " lean" : ""}" style="width:${us}%"></i></div>`
-      + `<div class="sit-sides">${side(dn, "dn")}${side(up, "up")}</div></div>`;
+      + (wide ? ` · <span class="${wide.on ? "sit-edge" : ""}">${escapeHtml(wide.t)}</span>` : "") + `</div></div>`;
   }
 
   // ── 레짐 여유 ── «곧 바뀔 수 있나»를 바뀌기 **전에** 보인다(2026-09-22 사용자 «급변한다»).
@@ -3995,8 +4033,9 @@ function renderSituation() {
   keepFocus(body, () => { body.innerHTML = `
     <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
     ${fusedRowHtml(fz)}
-    ${o3 ? `${scn}<div class="sit-cal sit-src">${whyFold([o3.note, o3.dir_note].filter(Boolean).join(" · "), "outcome", "근거 · 측정 방법")}</div>`
-         : `<div class="sit-cal">융합 3결과 계산 전 — 30분 폭 분위(5분봉 24h)를 받는 중</div>`}
+    ${o3 ? scn : `<div class="sit-cal">융합 3결과 계산 전 — 30분 폭 분위(5분봉 24h)를 받는 중</div>`}
+    ${trendBlockHtml()}
+    ${o3 ? `<div class="sit-cal sit-src">${whyFold([o3.note].filter(Boolean).join(" · "), "outcome", "근거 · 측정 방법")}</div>` : ""}
     <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`; });
 
   if (badge) {
@@ -4010,12 +4049,12 @@ function renderSituation() {
       const tie = typeof o3.coin === "boolean" ? o3.coin : Math.abs(P.up - P.dn) < 5;
       badge.textContent = `융합 ${fz.side > 0 ? "롱" : "숏"} · ${tie ? `확률 비등 ↑${P.up}% ↓${P.dn}%`
         : fz.side > 0 ? `↑${P.up}% vs ↓${P.dn}%` : `↓${P.dn}% vs ↑${P.up}%`}`;
-    } else if (o3 && Number.isFinite(o3.up_share)) {
-      // 2026-09-26 두 질문으로 가른 뒤: 배지 = 방향 판정(동전/우세) + 닿을 확률. 방향색은 안 쓴다(발동한 융합 신호만 색).
-      const us = Math.round(o3.up_share);
+    } else if (o3 && latestTrend && latestTrend.ok) {
+      // 2026-09-28 배지 = 일 단위 추세 + 닿을 확률(위:아래 동전 자리 대체). 방향색은 여전히 발동한 융합 신호만.
+      const tg = latestTrend.signal;
       badge.className = "ops-badge neutral";
-      badge.textContent = (o3.coin ? `방향 동전 ↑${us}:↓${100 - us}` : us > 50 ? `↑ 위 우세 ${us}%` : `↓ 아래 우세 ${100 - us}%`)
-        + ` · 닿을 ${Math.round(o3.reach)}%` + (age != null ? ` · ${age}초 전` : "");
+      badge.textContent = `추세 ${tg > 0 ? "↑ 롱" : "↓ 숏"} ${tg > 0 ? "+" : ""}${tg.toFixed(1)}`
+        + ` · 닿을 ${Math.round(Number.isFinite(o3.reach) ? o3.reach : 0)}%` + (age != null ? ` · ${age}초 전` : "");
     } else if (cols.length) {
       // 🔴2026-09-26 비평: 여기 초록은 방향이 아니라 «15초 안에 계산됨»이었다(age<=15 → good) -- 37% 대 36% 인
       //   동전 던지기에 화면에서 가장 강한 방향색이 칠해졌다. 3색 규칙: 초록은 방향·정상에만. 신선함은 글자로만.
@@ -5338,7 +5377,7 @@ function renderSnapshotChart() {
     ? fullCandles.slice(-chartWindowBars)
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
-  const riskLevels = [...nearestLiquidationLevel(), ...situationTargetLevels(footprint),
+  const riskLevels = [...nearestLiquidationLevel(), ...trendFlipLevels(footprint, candles),
                       ...hlWhaleLiqLevels(currentPrice, footprint), ...liqExtremeLevels(footprint)];
   // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
   // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
@@ -7997,6 +8036,7 @@ async function tick() {
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
       refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)
+      refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }

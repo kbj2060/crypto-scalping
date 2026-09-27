@@ -138,6 +138,7 @@ from dashboard import micro_ref as mref  # noqa: E402
 from dashboard import situation as sit  # noqa: E402
 # 2026-09-25 «데이터 관계 읽기» -- 지지/저항 목록 아래 문장. 순수 함수 + 자체점검. 입력은 상황 읽기와 같은 원천.
 from dashboard import flow_read as fr  # noqa: E402
+from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
 # Regime overlay (bull/bear/chop probability per 5-min bar) for the Snapshot tab's liquidation-map
 # chart. 2026-08-26: swapped from the wide24 HMM+linear-calibration model to an independently
 # trained HistGradientBoostingClassifier (OOS balanced_accuracy 0.9189 vs wide24's 0.7691) -- see
@@ -3695,6 +3696,22 @@ def make_app() -> web.Application:
     async def api_situation(request: web.Request) -> web.Response:
         return web.json_response(situation_payload(), headers=NOCACHE)
 
+    async def api_trend(request: web.Request) -> web.Response:
+        """30분 카드의 «위:아래 방향» 자리를 대신하는 일 단위 추세(5기간 묶음, dashboard/trend_rule.py).
+        일봉은 하루에 한 번 바뀌므로 5분 캐시(가중치 1). 형성 중 일봉은 뺀다(종가 시각 < 지금)."""
+        async def produce() -> dict[str, Any]:
+            raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                           {"symbol": MARKET_SYMBOLS["eth"], "interval": "1d", "limit": 120},
+                                           error_reason="trend_upstream_error")
+            now_ms = time.time() * 1000
+            done = [r for r in raw if int(r[6]) < now_ms]
+            return trend_payload([float(r[4]) for r in done], [int(r[6]) + 1 for r in done])
+        try:
+            payload = await swr_cached("trend_eth_1d", 300.0, produce, max_stale=STALE_GRACE_SECONDS)
+        except Exception as exc:  # noqa: BLE001 -- 카드는 이유를 말하고 계속 그린다
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return web.json_response(payload, headers=NOCACHE)
+
     # 수급 커서 = 목록 키 -> 쿼리 이름. 클라(refreshSupply1s)와 같은 규칙: 받은 행의 최대 초.
     SUPPLY_CURSORS = (("seconds", "since"), ("oi", "sinceOi"), ("liq", "sinceLiq"), ("okx", "sinceOkx"),
                       ("okxOi", "sinceOkxOi"), ("okxLiq", "sinceOkxLiq"), ("spot", "sinceSpot"))
@@ -5954,6 +5971,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
     app.router.add_get("/api/micro-ref", api_micro_ref)
     app.router.add_get("/api/situation", api_situation)
+    app.router.add_get("/api/trend", api_trend)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)
     app.router.add_post("/api/push/subscribe", api_push_subscribe)
