@@ -61,7 +61,8 @@ def test_heights_match_between_js_and_css():
     #   가격 플롯 400 은 여기서도 지켜야 한다.
     wide_svg = _num(r"#candleSvgSnapshot \{ --fp-split: 0\.\d+; height: (\d+)px; \}", CSS, "2단 SVG 높이")
     wide_box = _num(r"\.candle-container \{ height: (\d+)px; \}", CSS[CSS.index("--fp-split"):], "2단 컨테이너")
-    wide_plot = wide_svg - mt_top - legend - gap - merged_lanes - mb   # 넓은 화면은 항상 데스크톱(합친 판)
+    sr_below = _num(r"const SR_BELOW = splitR \? (\d+)", JS, "SR_BELOW")   # 2026-09-28 레인 아래 지지/저항 줄
+    wide_plot = wide_svg - sr_below - mt_top - legend - gap - merged_lanes - mb   # 넓은 화면은 항상 데스크톱(합친 판)
     assert wide_plot >= price_plot, f"2단 가격 플롯 {wide_plot} < {price_plot} -- 풋프린트가 눌린다"
     assert wide_box == wide_svg + 12
 
@@ -143,8 +144,8 @@ def test_sub_panels_tile_without_overlap():
     for name, expr in exprs.items():
         wide[name] = ev(expr, wide)
     assert wide["subLegendY"] == env["mtTop"], "2단에서 밀도 범례가 풋프린트 바로 위(맨 위)가 아니다"
-    # 2단 오른쪽 칸(2026-09-28): 1초 수급은 레인 판 윗변까지, 지지/저항은 레인 판과 같은 높이 -- 왼쪽과 가로줄이 맞는다.
-    assert "Math.max(200, quadY - 8 - mtTop)" in JS and "{ x: subX, y: quadY, w: subW, h: QUAD_H + QUAD_TXT }" in JS
+    # 2단(2026-09-28 2차): 오른쪽 칸 = 1초 수급 전체 높이, 지지/저항 = 왼쪽 레인 **아래** SR_BELOW 줄.
+    assert "const s1H = splitR ? hAll - mtTop - 4" in JS and "placeLevelList(svg, splitR ? { x: 0, y: h, w, h: SR_BELOW } : null);" in JS
 
     env["splitR"] = 0
     for name, expr in exprs.items():

@@ -3064,8 +3064,8 @@ body.order-coin-off .acct-lanes::before {
    ≥1700px 인 이유: 풋프린트 칸이 1,000px 밑으로 가면 셀 숫자가 안 들어간다(1440 창이면 776px 였다). */
 @media (min-width: 1700px) and (orientation: landscape) {
   .app { max-width: none; }
-  #candleSvgSnapshot { --fp-split: 0.38; height: 872px; }
-  .candle-container { height: 884px; }
+  #candleSvgSnapshot { --fp-split: 0.38; height: 1062px; }   /* 2026-09-28 +190 = 레인 아래 지지/저항 */
+  .candle-container { height: 1074px; }
   .liq-map-panel { position: relative; }
   /* 풋프린트 아래 카드는 한 줄 너비에 세 칸(사용자 «최대한 너비 하나에 모두»): 내 계좌 | 30분 시나리오 | 신호·특화 신호·경제 일정.
      다섯 장을 한 줄에 다 놓으면 칸이 360px 안팎이라 신호 카드 글자가 한 글자씩 꺾인다(09-27 시안 B 의 420px 칸에서 실측). */

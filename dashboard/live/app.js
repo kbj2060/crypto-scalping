@@ -2498,20 +2498,14 @@ function renderLiquidationMapPanel() {
   const ds = [...res, ...sup].map((lv) => lv.distance_pct);
   const lo = Math.min(0, ...ds) - 0.12, hi = Math.max(0, ...ds) + 0.12;
   const X = (v) => x0 + (v - lo) / (hi - lo) * (x1 - x0);
-  const yl = Math.round(H * 0.56);
+  const yl = Math.round(H * 0.5);
   const t = (x, y, str, fs, fill, anc = "middle", wt = 400) =>
     `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${fs}" fill="${fill}" text-anchor="${anc}" font-weight="${wt}">${escapeHtml(str)}</text>`;
   const up = res.length ? res[0].distance_pct : null, dn = sup.length ? sup[0].distance_pct : null;
   const pc = (v) => (v > 0 ? "+" : "") + fmtNum(v, 2) + "%";
-  let head = [up != null ? "위로 " + pc(up) : "", dn != null ? "아래로 " + pc(dn) : ""].filter(Boolean).join("  ·  ");
-  let sub = "";
-  if (up != null && dn != null && Math.min(up, -dn) > 0) {
-    const r = up / -dn;
-    sub = r >= 1 ? `가장 가까운 지지가 저항보다 ${fmtNum(r, 1)}배 가깝다` : `가장 가까운 저항이 지지보다 ${fmtNum(1 / r, 1)}배 가깝다`;
-  }
-  const o = [t(W / 2, narrow ? 22 : 26, head, narrow ? 15 : 19, "var(--ink)", "middle", 700),
-             sub ? t(W / 2, narrow ? 40 : 46, sub, narrow ? 11 : 12, "var(--muted)") : "",
-             `<line x1="${x0}" x2="${x1}" y1="${yl}" y2="${yl}" stroke="var(--line)"/>`];
+  // 2026-09-28 머리 한 줄(«위로·아래로»)·부제·% 눈금은 뺐다(사용자 지시) -- 이름과 가격만. 거리는 원 툴팁에.
+  const head = [up != null ? "위로 " + pc(up) : "", dn != null ? "아래로 " + pc(dn) : ""].filter(Boolean).join(" · ");
+  const o = [`<line x1="${x0}" x2="${x1}" y1="${yl}" y2="${yl}" stroke="var(--line)"/>`];
   if (up != null && dn != null) {
     o.push(`<rect x="${X(dn).toFixed(1)}" y="${yl - 3}" width="${(X(up) - X(dn)).toFixed(1)}" height="6" fill="var(--ink)" fill-opacity="0.08"/>`);
   }
@@ -2531,7 +2525,6 @@ function renderLiquidationMapPanel() {
     });
   o.push(`<line x1="${X(0).toFixed(1)}" x2="${X(0).toFixed(1)}" y1="${yl - 30}" y2="${yl + 30}" stroke="var(--ink)" stroke-width="2"/>`,
          t(X(0), yl + (narrow ? 44 : 48), "현재 " + fmtNum(cur, 2), narrow ? 11 : 12, "var(--ink)", "middle", 700));
-  [-2, -1.5, -1, -0.5, 0.5, 1, 1.5, 2].forEach((v) => { if (v > lo && v < hi) o.push(t(X(v), H - 6, (v > 0 ? "+" : "") + v + "%", 10, "var(--muted)")); });
   setH("liquidationMapList", `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" style="display:block" font-family="inherit" role="img" aria-label="${escapeHtml(head)}">${o.join("")}</svg>`);
 }
 
@@ -4684,7 +4677,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   같은 날 먼저 «풋프린트 먼저»로 두 패널을 다 내렸다가 수급만 다시 올렸다. 호가 프로파일은 풋프린트 아래에 남는다.
   //   본문은 `h` 를 «풋프린트 영역 높이»로 쓰므로(x축·리본이 h - mb 기준) 상자 높이 hAll 에서 아래로 간 프로파일만큼 뺀다.
   // 2026-09-28 프로파일이 빠져 데스크톱(1단)·모바일이 같은 순서다: 1초 수급 → 밀도 범례 → 풋프린트.
-  const h = hAll;
+  // 2026-09-28 2단: 지지/저항 판이 왼쪽 레인 **아래**로 왔다(사용자 지시) -- 본문 `h` 는 그만큼 위에서 끝나고, 상자(styles.css)는 그만큼 크다.
+  const SR_BELOW = splitR ? 190 : 0;
+  const h = hAll - SR_BELOW;
   const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_1S_H + SUB_LEGEND_H + SUB_GAP;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
@@ -4827,7 +4822,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   if (svg.id === "candleSvgSnapshot") {
     // 2026-09-28 2단 오른쪽 칸을 왼쪽과 **가로줄로 맞춘다**(사용자 «수급차트들이랑 높이 맞춰줘»):
     //   1초 수급 = 맨 위 ~ 레인 판 윗변 직전(= 가격 플롯 옆), 지지/저항 = 레인 판(사분면·누적) 옆 같은 높이.
-    placeLevelList(svg, splitR ? { x: subX, y: quadY, w: subW, h: QUAD_H + QUAD_TXT } : null);
+    placeLevelList(svg, splitR ? { x: 0, y: h, w, h: SR_BELOW } : null);
   }
   
   if (!candles.length) {
@@ -6755,7 +6750,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             if (dash) l.setAttribute("stroke-dasharray", dash);
             key.appendChild(l);
             const t = document.createElementNS(NS, "text");
-            t.setAttribute("x", kx + 18); t.setAttribute("y", row(i)); t.setAttribute("font-size", "11");
+            t.setAttribute("x", kx + 18); t.setAttribute("y", row(i)); t.setAttribute("font-size", "12");
             t.setAttribute("fill", color); t.textContent = name;
             key.appendChild(t);
           });
@@ -6768,7 +6763,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             key.appendChild(r);
           });
           const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", kx + 18); t.setAttribute("y", y); t.setAttribute("font-size", "11");
+          t.setAttribute("x", kx + 18); t.setAttribute("y", y); t.setAttribute("font-size", "12");
           t.setAttribute("fill", "var(--muted)"); t.textContent = name;
           key.appendChild(t);
         });
@@ -6854,26 +6849,29 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       // 2026-09-28 값 칸(사용자 «라벨을 깔끔하게»): 데스크톱 = 판 오른쪽 위에 **지금 값만**(무엇인지는 왼쪽 견본이 말한다) --
       //   CVD 15 굵게 · OI · 거래대금 13, 한 칸 띄우고 고래·중형·리테일 11. 모바일 = 판 아래 한 줄(견본 없이 이름+값).
       const sgnCol = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
-      const vals = [["CVD", sgn(last.c), sgnCol(last.c), 15, "700"],
-                    ["OI", sgn(last.oi), "var(--warn)", 13, "700"],
-                    ["거래대금", fmtUsdCompact(last.turn), "var(--turnover)", 13, null],
+      // 2026-09-28 크기 12 하나로 통일 · **왼쪽 정렬**(사용자 지시) -- 이름 칸 폭을 맞춰 값이 한 세로줄에 선다.
+      const vals = [["CVD", sgn(last.c), sgnCol(last.c), 12, "700"],
+                    ["OI", sgn(last.oi), "var(--warn)", 12, "700"],
+                    ["거래대금", fmtUsdCompact(last.turn), "var(--turnover)", 12, "700"],
                     null,
-                    ["고래", sgn(last.w), sgnCol(last.w), 11, null],
-                    ["중형", sgn(last.m - last.w), sgnCol(last.m - last.w), 11, null],
-                    ["리테일", sgn(last.c - last.m), sgnCol(last.c - last.m), 11, null]];
+                    ["고래", sgn(last.w), sgnCol(last.w), 12, null],
+                    ["중형", sgn(last.m - last.w), sgnCol(last.m - last.w), 12, null],
+                    ["리테일", sgn(last.c - last.m), sgnCol(last.c - last.m), 12, null]];
       if (!mobileChart) {
         let y = cumY + 18;
+        const vx = ml + cw + 16;                       // 체결 기둥 왼쪽 끝 아래
         vals.forEach((v) => {
           if (!v) { y += 6; return; }
+          const n = document.createElementNS(NS, "text");
+          n.setAttribute("x", vx); n.setAttribute("y", y); n.setAttribute("font-size", v[3]);
+          n.setAttribute("fill", "var(--muted)"); n.textContent = v[0];
+          g.appendChild(n);
           const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", w - 2); t.setAttribute("y", y); t.setAttribute("text-anchor", "end");
-          t.setAttribute("font-size", v[3]); t.setAttribute("fill", v[2]);
+          t.setAttribute("x", vx + 60); t.setAttribute("y", y); t.setAttribute("font-size", v[3]); t.setAttribute("fill", v[2]);
           if (v[4]) t.setAttribute("font-weight", v[4]);
-          const n = document.createElementNS(NS, "tspan");
-          n.setAttribute("fill", "var(--muted)"); n.setAttribute("font-weight", "400"); n.textContent = v[0] + " ";
-          t.appendChild(n); t.appendChild(document.createTextNode(v[1]));
+          t.textContent = v[1];
           g.appendChild(t);
-          y += v[3] + 6;
+          y += v[3] + 7;
         });
       } else {
         let rowX = 3;
@@ -6980,7 +6978,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     };
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
-    const s1H = splitR ? Math.max(200, quadY - 8 - mtTop) : SUB_1S_H - STATS_ROW_H;   // 2단: 레인 판 윗변까지
+    const s1H = splitR ? hAll - mtTop - 4 : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸 전체(다섯 줄이 고르게 나눈다)
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),
