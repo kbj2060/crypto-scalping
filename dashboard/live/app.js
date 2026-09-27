@@ -8116,7 +8116,7 @@ function manualEntryPlanHtml(data) {
     parts.push(entryNote(
       (br.tp_price ? `TP ${br.tp_name} ${f(br.tp_price)} (${pc(br.tp_pct)}) 지정가` : `TP 없음(${br.tp_name} 없음)`)
       + " · "
-      + (br.sl_price ? `SL ${br.sl_name} ${f(br.sl_price)} (${pc(br.sl_pct)}) 5분봉 종가 이탈 시 청산`
+      + (br.sl_price ? `SL ${br.sl_name} ${f(br.sl_price)}${br.sl_pct == null ? "" : ` (${pc(br.sl_pct)})`} 5분봉 종가 이탈 시 청산`
                        + ` · 비상 스탑 ${f(br.backstop_price)}`
                      : `🔴SL 없음(${br.sl_name} 없음)`),
       br.sl_price ? "" : "bad"));

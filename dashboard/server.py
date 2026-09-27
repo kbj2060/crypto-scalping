@@ -185,7 +185,7 @@ import scripts.binance_ban_guard as ban_guard  # noqa: E402 -- requests 도 전�
 # trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
-    EXIT_VOL_WINDOW, bracket_action, bracket_key, bracket_merge, bracket_rekey, build_bracket_plan, build_entry_plan, build_exit_plan,
+    EXIT_VOL_WINDOW, bracket_action, bracket_keep_farther_sl, bracket_key, bracket_merge, bracket_rekey, build_bracket_plan, build_entry_plan, build_exit_plan,
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position)
 from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
     clear_bracket, place_bracket, run_entry, run_exit)
@@ -5428,6 +5428,10 @@ def make_app() -> web.Application:
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
             # 2026-09-25 청산맵 TP/SL(사용자 지시) -- 고정 3% 손절을 대신한다. 진입 시점 레벨로 고정.
             plan["bracket"] = await bracket_for(side, book, filters, asset)
+            # 2026-09-27 물타기면 SL 은 멀어질 때만 바꾼다(사용자 지시) -- 미리보기에도 실제로 걸릴 SL 이 보이게 여기서 합친다.
+            if same:
+                plan["bracket"] = bracket_keep_farther_sl(
+                    plan["bracket"], bracket_load().get(bracket_key(symbol, side)), side)
             # 게이지가 값을 주면 그걸 쓰고, «자동»이면 모델 추천을 쓴다. 어느 쪽인지 남긴다 --
             # 안 남기면 나중에 «왜 30배로 걸렸지»를 못 푼다.
             plan["target_leverage"] = want_lev or _lv.get("setting")

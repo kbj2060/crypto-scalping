@@ -288,6 +288,20 @@ def build_bracket_plan(*, position_side: str, support_levels: list[float],
     }
 
 
+def bracket_keep_farther_sl(new: dict, prev: dict | None, position_side: str) -> dict:
+    """추가 진입(물타기)의 새 계획에 이전 무장의 SL 을 합친다 -- **SL 은 멀어질 때만 바뀐다**, TP 는 새 값
+    (2026-09-27 사용자 지시). 계획은 매번 «지금 가격» 기준 레벨을 골라서, 숏 물타기(가격이 오른 뒤)는
+    SL 을 가격 쪽으로 끌어왔다(09-27 XRP: 1.5434 → 1.5336, 거기서 손절). 비상 스탑도 유지하는 SL 의 것을 쓴다
+    -- 새 비상 스탑이 옛 SL 보다 가까우면 SL 보다 먼저 걸린다. 이전 비상 스탑 값이 없으면 합치지 않는다."""
+    if not prev or not prev.get("sl_price") or not prev.get("backstop_price"):
+        return new
+    old, cur = float(prev["sl_price"]), new.get("sl_price")
+    if cur is not None and (cur < old if position_side == "LONG" else cur > old):
+        return new
+    return {**new, "available": True, "sl_price": old, "sl_level": prev.get("sl_level"),
+            "backstop_price": prev["backstop_price"], "sl_name": "이전 SL 유지", "sl_pct": None}
+
+
 def bracket_sl_hit(position_side: str, last_bar: tuple[float, float] | None, armed: dict) -> bool:
     """SL 이탈인가 = **무장 뒤 마감된 5분봉 종가**가 청산맵 레벨(USDT)을 넘었나 (2026-09-27 사용자 지시).
     호가 터치로 판정하던 옛 판은 꼬리 한 번에 나갔다(09-27 숏: 레벨이 진입가 13bp 위 = 5분 고저폭 중앙값).
