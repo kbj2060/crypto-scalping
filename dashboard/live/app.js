@@ -7268,7 +7268,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const v = book.q[i], p = (book.bin_lo + i) * bs;
       if (!v || p + bs / 2 < yMin || p - bs / 2 > yMax) continue;
       const q = Math.abs(v), pk = accAt("peak", p);
-      cells.push({ p, q, bid: v > 0, pers: Math.min(q, accAt("pers", p)), rw: pk > 0 ? accAt("refill", p) / pk : 0 });
+      cells.push({ p, q, bid: v > 0, pers: Math.min(q, accAt("pers", p)), rw: pk > 0 ? accAt("refill", p) / pk : 0,
+                   apr: approachAt(acc, p, bs) });   // 접근행동(4h) -- 프로파일 ◌ 와 같은 값 · null = 모름
     }
     if (!cells.length) return null;
     const mx = Math.max(...cells.map((c) => c.q));
@@ -7286,31 +7287,27 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     cells.forEach((c) => { c.rwGrade = !(c.rw > 0) || rwSorted.length < 3 ? "" : c.rwPct >= 2 / 3 ? "A" : c.rwPct >= 1 / 3 ? "B" : "C"; });
     return { bs, x0, L, mx, cells };
   })();
-  // 2026-09-27 호가 해석 툴팁(사용자 지시) -- 첫 줄이 결론(DESIGN: 툴팁 첫 줄 = 결론). 모양 넷 + «현재가 바로 옆».
-  //   두꺼운 심 = 지금 양의 절반 이상이 창 내내 버텼다 · 자주 다시 채움 = 재깔림 A(상위 1/3).
-  //   🔴전부 «성격»의 서술이다 -- 벽 반등률 0.509(동전), 지속률 상위−하위 +0.001(09-20). 재깔림 예측력은 아직 안 쟀다.
+  // 2026-09-28 툴팁 = «심 × ◌» 여섯 조합의 풀이(사용자 지시 -- 기존 수치·해석 문구는 뺐다). 이 칸의 조합만 진하게.
+  //   심 두꺼움 = 지금 양의 절반 이상이 창 내내 버텼다 · ◌ = 최근 4h 가까울 때(0.35% 안) 두께가 멀 때의 0.8배 미만 · 모름 = 비교 자격 없음.
+  //   🔴전부 «성격»의 서술이다 -- 조합이 다음 가격을 말하는지는 안 쟀다(벽 반등률 0.509 = 동전, 09-20).
+  const BOOK_COMBOS = [
+    [true, "ring", "두꺼운 심 · ○", "멀 때는 버티지만 가격이 오면 빼던 자리 -- 지금 두께를 그대로 믿기 어렵다"],
+    [true, "none", "두꺼운 심 · ○ 없음", "창 내내 버텼고 가격이 와도 얇아지지 않았다 -- 가장 «걸려 있는» 모양"],
+    [true, "unk", "두꺼운 심 · 모름", "창 내내 버텼지만 4h 동안 가격이 다가온 적이 없어 그때의 행동은 모른다"],
+    [false, "ring", "얇은 심 · ○", "이번 창에서도 들락날락했고 다가오면 빼던 자리 -- 벽으로 믿기 가장 어렵다"],
+    [false, "none", "얇은 심 · ○ 없음", "자주 바뀌지만 다가와도 얇아지진 않았다 -- 새로 깔리거나 고쳐 거는 호가"],
+    [false, "unk", "얇은 심 · 모름", "방금 깔렸고 다가온 이력도 없다 -- 읽을 게 거의 없다"],
+  ];
   const bookTipHtml = (c) => {
-    const unit = coinUnit(), dp = pxDp(), win = Math.round(chartWindowBars * 5 / 60) + "h";
-    const fq = (q) => (q >= 1000 ? (q / 1000).toFixed(1) + "k" : q >= 10 ? q.toFixed(0) : q.toFixed(1));
-    const side = c.bid ? "매수" : "매도", col = c.bid ? "var(--good)" : "var(--bad)";
-    const distBp = currentPrice > 0 ? (c.p - currentPrice) / currentPrice * 1e4 : 0;
-    const near = currentPrice > 0 && Math.abs(c.p - currentPrice) <= bookInfo.bs * 2;
-    const thick = c.q > 0 && c.pers / c.q >= 0.5, bright = c.rwGrade === "A";   // 자주 다시 채움 = A
-    const read = near ? ["현재가 바로 옆", "마켓메이커가 가격 따라 호가를 고쳐 거는 자리라 재깔림·변동이 늘 크다 -- 정보가 적다"]
-      : thick && bright ? ["지키는 모양", "창 내내 버티면서, 빠지거나 먹혀도 다시 채웠다"]
-      : !thick && bright ? ["깜빡이는 호가", "자주 걸었다 뺐다 한다(알고리즘 재호가·보여 주기) -- 벽으로 믿기 가장 어렵다"]
-      : thick ? ["앉아 있는 호가", "한 번 걸어 두고 가만히 있다 -- 닿으면 그냥 체결되거나 빠진다"]
-      : ["방금 깔린 호가", "창 안에서 버틴 이력이 거의 없다"];
-    return `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))"><span style="color:${col};font-weight:700">${read[0]}</span> · ${side} 호가 ${c.p.toFixed(dp)}`
-      + (currentPrice > 0 ? ` (현재가 ${distBp >= 0 ? "+" : ""}${distBp.toFixed(1)}bp)` : "")
-      + `<br>${read[1]}`
-      + `<br><br>지금 ${fq(c.q)} ${unit}${c.wall ? " · 보이는 범위 상위 10% 벽" : ""}`
-      + `<br>버틴 양 ${fq(c.pers)} (${c.q > 0 ? Math.round(c.pers / c.q * 100) : 0}% · ${win} 창 내내 안 빠진 양 = 진한 심)`
-      + `<br>재깔림 ${c.rw > 0 ? c.rw.toFixed(1) + "배" : "없음"}`
-      + (c.rwGrade ? ` · <span style="font-weight:700">${c.rwGrade}</span> (보이는 범위 ${{ A: "상위", B: "중간", C: "하위" }[c.rwGrade]} 1/3 = 막대 속 글자)` : "")
-      + `<br><br>닿을 때 이 줄 풋프린트에 체결이 크게 찍히는데 막대가 안 줄면 <span style="font-weight:700">흡수</span>,`
-      + `<br>체결 없이 막대가 사라지면 빠진 호가다.`
-      + `<br><span style="opacity:.7">성격의 서술 · 지지·저항 신호 아님(벽 반등률 0.509)</span></div>`;
+    const thick = c.q > 0 && c.pers / c.q >= 0.5;
+    const ring = c.apr === null ? "unk" : c.apr < 0.8 ? "ring" : "none";
+    const col = c.bid ? "var(--good)" : "var(--bad)";
+    return `<div style="white-space:normal;max-width:min(380px,calc(100vw - 24px))">`
+      + BOOK_COMBOS.map(([t, r, name, read]) => (t === thick && r === ring
+          ? `<div style="margin:2px 0"><span style="color:${col};font-weight:700">▸ ${name}</span><br>${read}</div>`
+          : `<div style="margin:2px 0;opacity:.5">${name}<br>${read}</div>`)).join("")
+      + `<div style="margin-top:6px;opacity:.7">심 두꺼움 = 지금 양의 절반 이상이 창 내내 버팀 · ○ = 최근 4h 가격이 0.35% 안에 왔을 때 `
+      + `두께가 멀 때의 0.8배 미만 · 모름 = 가까울 때와 멀 때를 둘 다 겪지 않음. 성격의 서술 · 예측력 안 잼 · 지지·저항 아님</div></div>`;
   };
   cachedLayer("bookStrip", book ? book.t_ms + "|" + activeSnapshotAsset + "|" + (acc ? acc.bin_lo : 0) : "none", (g) => {
     if (!bookInfo) return;
@@ -7343,13 +7340,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         core.setAttribute("fill", color); core.setAttribute("fill-opacity", "0.9");
         g.appendChild(core);
       }
+      // ◌ = 다가오면 얇아진 가격대(프로파일과 같은 표식) -- 막대 끝에 붙이고, 막대 밖 글자는 그만큼 오른쪽으로 민다.
+      let ringW = 0;
+      if (c.apr !== null && c.apr < 0.8) {
+        const rr = Math.max(1.8, Math.min(3.2, rh / 2));
+        const mk = document.createElementNS(NS, "circle");
+        mk.setAttribute("cx", x0 + len + 1.5 + rr); mk.setAttribute("cy", (yTop + yBot) / 2);
+        mk.setAttribute("r", rr); mk.setAttribute("fill", "none");
+        mk.setAttribute("stroke", "var(--ink)"); mk.setAttribute("stroke-width", "1.2");
+        g.appendChild(mk);
+        ringW = 2 * rr + 2;
+      }
       // 재깔림 등급 글자: 겉(심 바깥) 빈 공간 안에. 좁으면 막대 바로 오른쪽(벽 수량 글자 자리면 생략). 행이 너무 얇으면 안 쓴다.
       const fs = Math.min(9, rh - 1);
       if (c.rwGrade && fs >= 6) {
         const inside = len - coreLen >= fs + 2;
         if (inside || !c.wall) {
           const tg = document.createElementNS(NS, "text");
-          tg.setAttribute("x", inside ? x0 + coreLen + 2 : x0 + len + 2);
+          tg.setAttribute("x", inside ? x0 + coreLen + 2 : x0 + len + 2 + ringW);
           tg.setAttribute("y", (yTop + yBot) / 2 + fs * 0.36);
           tg.setAttribute("font-size", fs); tg.setAttribute("font-weight", "700");
           tg.setAttribute("fill", inside ? "var(--ink)" : color);
@@ -7360,7 +7368,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
       if (c.wall && !mobileChart) {
         const lb = document.createElementNS(NS, "text");
-        lb.setAttribute("x", Math.min(x0 + len + 2, x0 + L - 12));
+        lb.setAttribute("x", Math.min(x0 + len + 2 + ringW, x0 + L - 12));
         lb.setAttribute("y", Math.max(mt + 8, Math.min(plotBottom - 2, (yTop + yBot) / 2 + 3)));
         lb.setAttribute("font-size", "9"); lb.setAttribute("fill", color);
         lb.textContent = fmtQ(c.q);
