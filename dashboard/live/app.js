@@ -5443,7 +5443,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 두면 viewBox 가 상자보다 커서 meet 축소가 걸리고 글자가 그만큼 작아진다 -- 상자에서 받는다.
   // 하한은 «아직 레이아웃 전»(parentW/H = 0)일 때의 폴백이다.
   const wAll = parentW > 0 ? Math.max(parentW, 320) : 1200;
-  const h = parentH > 0 ? Math.max(parentH, 260) : 400;
+  const hAll = parentH > 0 ? Math.max(parentH, 260) : 400;   // 상자 전체(viewBox). 본문의 `h` 는 아래(모바일은 풋프린트 영역만)
   // 하단/상단 여백 안의 것들(x축 눈금·라벨·레짐 리본·증거신호 레인)은 전부 `mt` / `h - mb`
   // 상대 오프셋이다 -- 여백을 늘리면 통째로 따라 움직인다.
   // 2026-09-10 mb 40 -> 56 (레짐 리본 20px 확보).
@@ -5517,7 +5517,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   SUB_TOTAL 620 = 190(프로파일) + 8 + 400(1초 수급) + 14(밀도 범례) + 8
   //   ← 2026-09-20 뒤집었다가 2026-09-22 다시 프로파일이 위로(사용자 지시)
   // 2단이면 플롯 위에는 밀도 범례만 남는다(호가·1초 수급은 오른쪽 칸) -- 상자 872 = 12 + 22 + 400 + 368 + 70.
-  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP
+  // 2026-09-27 모바일은 **풋프린트가 먼저**(사용자 «모바일 최적화») -- 호가 프로파일·1초 수급을 풋프린트 레인 **아래**로 내린다.
+  //   전에는 두 패널(598px)이 위에 있어 첫 화면(844px)에 풋프린트가 한 줄도 안 보였다. 프로파일 → 1초 수급 순서는 그대로.
+  //   본문은 `h` 를 «풋프린트 영역 높이»로 쓰므로(x축·리본이 h - mb 기준) 상자 높이 hAll 에서 두 패널만큼 뺀다.
+  const SUB_BELOW = subOn && !splitR && mobileChart;
+  const h = SUB_BELOW ? hAll - (SUB_PROFILE_H + SUB_GAP + SUB_1S_H + SUB_GAP) : hAll;
+  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_BELOW ? SUB_LEGEND_H + SUB_GAP
     : SUB_GAP + SUB_PROFILE_H + SUB_LEGEND_H + SUB_GAP + SUB_1S_H;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
@@ -5629,8 +5634,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   144 라 넷 다 덮인다. 창을 바꾸면 기준점도 같이 옮겨간다 -- 절대 누적이 아니다.
   // 🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이다(dashboard/situation.py 의 WINDOW=6).
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
-  // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 70px 을 뗀다. 모바일은 없다.
-  const BOOK_W = (footprint && !mobileChart) ? 70 : 0;
+  // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 띠 폭을 뗀다(데스크톱 70 · 모바일 40).
+  const BOOK_W = footprint ? (mobileChart ? 40 : 70) : 0;   // 모바일은 좁아 40px(수량 글자 없이)
   const cw = w - ml - mr - BOOK_W;
   const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H - 2 * ROW_H;
@@ -5641,9 +5646,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   설명하는 것이라 그 바로 위에 있어야 한다(SUB_LEGEND_H 주석의 «풋프린트 차트 바로 위»).
   //   프로파일에 붙여 올리면 설명하는 그림에서 400px 멀어진다.
   // 소비 합 = SUB_TOTAL: 190(프로파일) + 8 + 400(1초) + 14(범례) + 8 = 620.
-  const subProfileY = mtTop;
+  const subProfileY = SUB_BELOW ? h + SUB_GAP : mtTop;   // 모바일: 풋프린트 영역(x축·리본) 바로 아래
   const sub1sY = subProfileY + SUB_PROFILE_H + SUB_GAP;
-  const subLegendY = splitR ? mtTop : sub1sY + SUB_1S_H;   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
+  const subLegendY = splitR ? mtTop : SUB_BELOW ? mtTop : sub1sY + SUB_1S_H;   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
   const quadY = plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
   const cumY = LANE_MERGE ? quadY : quadY + QUAD_H + QUAD_TXT + ROW_H + LANE_GAP; // 누적 행 위쪽
   const cumBottom = cumY + CUM_DRAW_H;                    // 그 아래 한 줄이 ROW_H 를 쓴다
@@ -5654,7 +5659,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   candles = viewport.candles;
   const includeCurrentPrice = viewport.includeCurrent;
 
-  svg.setAttribute("viewBox", `0 0 ${wAll} ${h}`);
+  svg.setAttribute("viewBox", `0 0 ${wAll} ${hAll}`);
   svg.innerHTML = "";
   if (svg.id === "candleSvgSnapshot") {
     placeLevelList(svg, splitR ? { x: subX, y: mtTop + SUB_PROFILE_H + SUB_GAP + SUB_1S_H + 12, w: subW } : null);
@@ -7013,9 +7018,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // assumed rect IS the rendered content box, under/over-scaled y more the further the cursor
     // sat from the vertical center -- exactly the reported "worse near top/bottom" symptom.
     // Correct conversion needs the actual uniform "meet" scale plus the centering offset it implies.
-    const svgScale = Math.min(rect.width / wAll, rect.height / h);   // viewBox 는 wAll(2단이면 오른쪽 칸 포함)
+    const svgScale = Math.min(rect.width / wAll, rect.height / hAll);   // viewBox 는 wAll(2단이면 오른쪽 칸 포함)
     const svgOffsetX = (rect.width - wAll * svgScale) / 2;
-    const svgOffsetY = (rect.height - h * svgScale) / 2;
+    const svgOffsetY = (rect.height - hAll * svgScale) / 2;
     const mx = (evt.clientX - rect.left - svgOffsetX) / svgScale;
     const my = (evt.clientY - rect.top - svgOffsetY) / svgScale;
 
@@ -7218,7 +7223,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         + (wall ? " (보이는 범위 상위 10%)" : "") + " -- 지지·저항 신호가 아니다(실측 반등률 0.509)";
       r.appendChild(t);
       g.appendChild(r);
-      if (wall) {
+      if (wall && !mobileChart) {
         const lb = document.createElementNS(NS, "text");
         lb.setAttribute("x", Math.min(x0 + len + 2, x0 + L - 12));
         lb.setAttribute("y", Math.max(mt + 8, Math.min(plotBottom - 2, (yTop + yBot) / 2 + 3)));

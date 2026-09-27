@@ -3235,11 +3235,22 @@ body.order-coin-off .acct-lanes::before {
 .topbar > .snap-head { padding: 0; align-items: center; justify-content: flex-end; }   /* 코인 탭이 차트 카드로 가서(09-27) 테마만 남는다 -- 오른쪽 */
 body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (max-width: 720px) {
-  .topbar { grid-template-columns: 1fr; }
-  .topbar > .snap-head { order: 3; margin-top: 4px; }
+  /* 2026-09-27 모바일 최적화: 세션과 테마를 한 줄에(전엔 테마 혼자 한 줄). 1줄 = 페이지 탭, 2줄 = 세션 | 테마. */
+  .topbar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
+  .topbar > .page-tabs { grid-column: 1 / -1; }
+  .topbar > .top-right { grid-column: 1; grid-row: 2; justify-content: flex-start; }
+  .topbar > .snap-head { grid-column: 2; grid-row: 2; margin-top: 0; }
+  /* 차트 머리: 1h~12h 와 ETH·SOL·XRP 를 한 줄에(전엔 두 줄). 좁은 폰에서만 줄바꿈된다. */
+  .chart-head-left { gap: 6px; }
+  .chart-head-left .asset-tab { min-width: 0; padding-left: 8px; padding-right: 8px; }
 }
 
 /* 2026-09-27 코인 탭이 차트 카드 머리(창 탭 오른쪽)로 왔다. 두 묶음 사이 간격은 «따로»로 읽히게 넓게.
    🔴이 카드는 코인 전환 중 덮개(asset-loading)가 깔린다 -- 머리 줄은 그 위로 올려 코인 버튼이 늘 눌리게 한다. */
 .chart-head-left { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; min-width: 0; }
 [data-asset-scope].asset-loading > .ops-health-head { opacity: 1; filter: none; pointer-events: auto; z-index: 4; }
+
+/* 2026-09-27 손가락 목표: 창 탭·코인 탭·테마도 40px(27~32px 였다). 위 .chart-mode-tabs .asset-tab 과 같은 무게라 파일 끝에 둔다. */
+@media (pointer: coarse) {
+  .asset-tabs .asset-tab, .theme-toggle { min-height: 40px; }
+}

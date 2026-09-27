@@ -133,13 +133,20 @@ def test_sub_panels_tile_without_overlap():
         exprs[name] = m.group(1).strip()
 
     def ev(expr, e):
-        # 2026-09-27 넓은 화면 2단(`splitR ? a : b`) -- JS 삼항을 풀어 두 모드를 다 잰다.
+        # 2026-09-27 넓은 화면 2단·모바일 아래 배치(`splitR ? a : SUB_BELOW ? b : c`) -- JS 삼항을 풀어 모드별로 잰다.
         if "?" in expr:
             cond, rest = expr.split("?", 1)
             a, b = rest.split(":", 1)
-            expr = a if eval(cond.strip(), {"__builtins__": {}}, e) else b   # noqa: S307
+            return ev(a if eval(cond.strip(), {"__builtins__": {}}, e) else b, e)   # noqa: S307
         return eval(expr.strip(), {"__builtins__": {}}, e)                     # noqa: S307 -- 저장소 제 코드
 
+    env["SUB_BELOW"] = False
+    # 모바일(풋프린트 먼저): 범례는 맨 위, 프로파일·1초 수급은 풋프린트 영역(h) 아래로 겹침 없이.
+    mob = dict(env, splitR=0, SUB_BELOW=True, h=1000)
+    for name, expr in exprs.items():
+        mob[name] = ev(expr, mob)
+    assert mob["subLegendY"] == env["mtTop"] and mob["subProfileY"] > mob["h"], mob
+    assert mob["subProfileY"] + env["SUB_PROFILE_H"] <= mob["sub1sY"], "모바일: 프로파일이 1초 수급 위로 올라탄다"
     wide = dict(env, splitR=1)
     for name, expr in exprs.items():
         wide[name] = ev(expr, wide)
