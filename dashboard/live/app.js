@@ -4191,7 +4191,10 @@ function renderSupply1s(box = null, src = null) {
   // 🔴narrow 를 **먼저** 선언한다. 아래 mb 가 이걸 읽는데 순서를 바꾸면 TDZ
   //   ReferenceError 로 app.js 전체가 죽는다 -- node --check 는 못 잡는다(문법은 옳다).
   const narrow = w < 760;   // 모바일이든 좁은 상자든 여백 규칙은 같다
-  const mt = 16, mb = narrow ? 28 : 14;
+  // 2026-09-27 모바일(세로)은 범례를 플롯 **안 박스**로 그린다(사용자 «아래 글자가 안 보인다») -- 바닥 한 줄 자리(mb 28)를 돌려받는다.
+  //   데스크톱 2단의 오른쪽 칸(691px)도 narrow 지만 그쪽은 바닥 한 줄 그대로다(요청 범위 밖).
+  const boxLegend = narrow && isMobileChartMode();
+  const mt = 16, mb = boxLegend ? 16 : narrow ? 28 : 14;
   // mr 은 오른쪽 꼬리표(고래/리테일/신규계약 + 값)가 앉는 자리다. 64 면 «신규계약 +0.4k»
   // 가 약 4px 넘친다(2026-09-19 계산) -- 72 로 두면 셋 다 들어가고 선은 8px 만 짧아진다.
   // 2026-09-22 꼬리표 글자를 키우면서 자리도 넓혔다(사용자 «많이 키워줘»).
@@ -4588,7 +4591,42 @@ function renderSupply1s(box = null, src = null) {
                       : "청산 롱" + fmtUsdCompact(liqSum[2]) + "/숏" + fmtUsdCompact(liqSum[3]),
                null, liqSum[3] >= liqSum[2] ? "var(--good)" : "var(--bad)", 0.92]);
   }
-  if (narrow) {
+  if (boxLegend) {
+    // 박스 범례: CVD(12px 굵게) + 거래소별 불균형 + 고래·중형·리테일 + OI + 청산, 색표 붙여 한 열.
+    //   🔴11px 밝은 글자 -- 바닥 한 줄은 9.5px 흐린 글자라 폰에서 안 읽혔다. 넘치면 자르던 것도 없어진다(세로라서).
+    //   자리는 오른쪽 위/아래 중 **지금 CVD 끝점의 반대쪽** -- 방금 그린 선을 덮지 않는다.
+    const items = [["CVD", cvd[cvd.length - 1].v, "var(--accent)", 1]].concat(rows);
+    const FS = 11, LH = 15, PAD = 7, SWB = 7;
+    const g = document.createElementNS(NS, "g");
+    svg.appendChild(g);
+    const bg = document.createElementNS(NS, "rect");
+    g.appendChild(bg);
+    let maxW = 0;
+    const ts = items.map((row, i) => {
+      const txt = row[1] === null ? row[0] : row[0] + " " + sgn(row[1]);
+      const t = label(0, 0, txt, i === 0 ? "var(--ink)" : "var(--text)", null, i === 0 ? 12 : FS, g);
+      if (i === 0) t.setAttribute("font-weight", "700");
+      let adv = 0;
+      try { adv = t.getComputedTextLength(); } catch (_) { adv = 0; }
+      maxW = Math.max(maxW, adv > 0 ? adv : txt.length * FS * 0.62);
+      return t;
+    });
+    const bw = PAD * 2 + SWB + 5 + maxW, bh = PAD * 2 + items.length * LH - 3;
+    const bx = ml + cw - bw - 4;
+    const by = yF(cvd[cvd.length - 1].v) < mid ? flowTop + flowH - bh - 4 : flowTop + 4;
+    bg.setAttribute("x", bx); bg.setAttribute("y", by); bg.setAttribute("width", bw); bg.setAttribute("height", bh);
+    bg.setAttribute("rx", 6); bg.setAttribute("fill", "var(--panel)"); bg.setAttribute("fill-opacity", "0.9");
+    bg.setAttribute("stroke", "var(--line)");
+    ts.forEach((t, i) => {
+      const y = by + PAD + (i + 1) * LH - 4;
+      t.setAttribute("x", bx + PAD + SWB + 5); t.setAttribute("y", y);
+      const sw = document.createElementNS(NS, "rect");
+      sw.setAttribute("x", bx + PAD); sw.setAttribute("y", y - SWB);
+      sw.setAttribute("width", SWB); sw.setAttribute("height", SWB);
+      sw.setAttribute("fill", items[i][2]); sw.setAttribute("fill-opacity", items[i][3]);
+      g.appendChild(sw);
+    });
+  } else if (narrow) {
     // 바닥 한 줄. 왼쪽 끝(x=3)부터 흐른다 -- ml 로 들여쓰면 마지막 항목이 밖으로 나간다.
     // 🔴색표를 안 그린다. 2026-09-22 실측에서 여섯 항목 글자가 299px 인데 색표 여섯이
     //   96px 을 더해 342px 를 넘겨 «청산 $16.2k» 가 잘렸다. 아래 5분봉 «누적 CVD» 줄도
@@ -4635,7 +4673,7 @@ function renderSupply1s(box = null, src = null) {
   // 「지금」이 오른쪽 끝이 아니라는 걸 분명히 해야 빈 오른쪽이 오해되지 않는다.
   const hhmm = (t) => { const d = new Date(t * 1000);
     return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
-  const axisY = narrow ? h - mb + 8 : h - 3;   // 좁을 땐 그 아래 한 줄을 범례가 쓴다
+  const axisY = narrow && !boxLegend ? h - mb + 8 : h - 3;   // 바닥 한 줄 범례일 때만 그 위로 올린다
   label(ml, axisY, hhmm(first) + " 봉 시작", "var(--muted)");
   label(ml + cw, axisY, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
   // 🔴봉 끝으로 갈수록 이 꼬리표가 오른쪽 «닫힐 시각»과 겹친다(280/300초에서 실제로
