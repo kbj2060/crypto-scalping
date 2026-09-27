@@ -128,14 +128,14 @@ def test_one_pane_uses_the_whole_drawing_area():
     assert sub_h - stats - mt - mb == 364, f"1단 그리기 영역이 {sub_h - stats - mt - mb}px 다(400-14-6-16=364 이어야)"
     assert mb >= 14, "바닥 시각 꼬리표(h-3) 자리가 없다"
     assert "const NL = LANES.length + 1, laneH = flowH / NL;" in JS, "다섯 줄이 그리기 영역(flowH)을 정확히 나눠 쓰지 않는다"
-    body = JS[JS.index("function renderSupply1s"):JS.index("function bookStatsTip")]
+    body = JS[JS.index("function renderSupply1s"):JS.index("const STAT_KEYS = ")]
     assert "tMax" not in body and "barMax" not in body, \
         "거래대금 막대가 되살아났다 -- 2026-09-22 사용자 지시로 이 차트에서 뺐다"
 
 
 def test_no_new_colour_was_invented():
     """3색 계약(초록·빨강·주황 + 중립). 층 구분은 색이 아니라 농담이어야 한다."""
-    body = JS[JS.index("function renderSupply1s"):JS.index("function bookStatsTip")]
+    body = JS[JS.index("function renderSupply1s"):JS.index("const STAT_KEYS = ")]
     # var(--토큰, #폴백) 은 토큰 사용이다 -- 폴백만 빼고 센다.
     bare = re.sub(r"var\(--[\w-]+,\s*#[0-9a-fA-F]{3,8}\)", "", body)
     hexes = set(re.findall(r"#[0-9a-fA-F]{3,8}", bare))
