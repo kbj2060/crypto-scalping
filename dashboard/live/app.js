@@ -5563,6 +5563,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             g.appendChild(r);
             cur += wd;
           });
+          // 2026-09-28 매수·매도 우위(사용자 선택 시안 B): 막대 **바깥 끝**에서 |매수−매도| 만큼을 초록/빨강으로 칠한다 --
+          //   총량과 같은 자라 «이 줄 체결 중 한쪽으로 쏠린 몫»이 길이로 읽힌다(|Δ| ≤ 총량이라 막대 밖으로 안 나간다).
+          const dq = a[3] - a[4], dw = L * Math.abs(dq) / tmax;
+          if (dw > 0.5) {
+            const d = document.createElementNS(NS, "rect");
+            d.setAttribute("x", anchor - cur); d.setAttribute("y", yTop + 0.5);
+            d.setAttribute("width", dw); d.setAttribute("height", Math.max(1, yBot - yTop - 1));
+            d.setAttribute("fill", dq >= 0 ? "var(--good)" : "var(--bad)");
+            d.setAttribute("fill-opacity", (0.95 * alpha).toFixed(2));
+            g.appendChild(d);
+          }
           if (k === pocK) {
             const o = document.createElementNS(NS, "rect");
             o.setAttribute("x", anchor - cur); o.setAttribute("y", yTop + 0.5);
@@ -6487,11 +6498,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))">`
         + `<span style="color:var(--amber);font-weight:700">체결 ${fq(a[0])} ${coinUnit()}</span> · ${(k * rs).toFixed(dp)}–${((k + 1) * rs).toFixed(dp)}`
         + (k === tradeInfo.pocK ? ` · <span style="font-weight:700">최다 체결(POC)</span>` : "")
-        + `<br>매수 ${fq(a[3])} · 매도 ${fq(a[4])} · 고래 ${pct(a[1])} · 중형 ${pct(Math.max(0, a[0] - a[1] - a[2]))} · 리테일 ${pct(a[2])}`
+        + `<br>매수 ${fq(a[3])} · 매도 ${fq(a[4])} → <span style="color:${a[3] >= a[4] ? "var(--good)" : "var(--bad)"};font-weight:700">${a[3] >= a[4] ? "매수" : "매도"} 우위 ${fq(Math.abs(a[3] - a[4]))}</span> (막대 끝 색칠)`
+        + `<br>고래 ${pct(a[1])} · 중형 ${pct(Math.max(0, a[0] - a[1] - a[2]))} · 리테일 ${pct(a[2])}`
         + `<br>보이는 봉 ${candles.length}개 합 · 가장 많이 거래된 줄의 ${Math.round(100 * a[0] / tradeInfo.max)}%`
         + `<br><br>옆 호가 막대와 맞대 읽기: 체결이 긴데 호가가 그대로 남아 있으면 <span style="font-weight:700">흡수</span>,`
         + `<br>체결 없이 호가만 두꺼우면 아직 안 닿은 자리다.`
-        + `<br><span style="opacity:.7">체결 합산에는 방향이 없다 · 지지·저항 신호 아님</span></div>`);
+        + `<br><span style="opacity:.7">우위는 테이커(먼저 친 쪽) 기준 · 지지·저항 신호 아님</span></div>`);
       return;
     }
     // 2026-09-27 호가 띠 위면 봉 툴팁 대신 **호가 해석** -- 커서 가격의 칸(없으면 가장 가까운 칸).
