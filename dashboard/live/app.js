@@ -40,11 +40,6 @@ const flowOn = () => FLOW_ASSETS.has(activeSnapshotAsset);
 const coinUnit = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).label || String(activeSnapshotAsset).toUpperCase();
 const pxDp = () => { const d = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp; return Number.isFinite(d) ? d : 1; };
 const qtyScale = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).qtyScale || 1;
-// 가격 격자 한 칸(행 크기)을 정확히 적는 소수 자릿수 -- 0.5 -> 1, 2 -> 0, 0.02 -> 2, 0.0003 -> 4.
-const dpOf = (step) => {
-  const t = String(Number(Number(step).toPrecision(6)));
-  return t.includes("e-") ? Number(t.split("e-")[1]) : (t.split(".")[1] || "").length;
-};
 
 const el = (id) => document.getElementById(id);
 const setT = (id, txt) => {
@@ -52,18 +47,10 @@ const setT = (id, txt) => {
   if (!target || target.textContent === String(txt)) return;
   target.textContent = txt;
 };
-const setC = (id, cls) => { const target = el(id); if (target && target.className !== cls) target.className = cls; };
-const setB = (id, cls) => {
-  const target = el(id);
-  if (!target) return;
-  target.classList.remove("good-border", "bad-border", "warn-border", "neutral-border");
-  if (cls) target.classList.add(`${cls}-border`);
-};
 // 🔴같은 html 을 다시 넣지 않는다(2026-09-16). 현재가 틱마다 청산맵 목록·배지가 통째로
 //   다시 쓰였고, 그 줄은 진입/청산 버튼 바로 아래 **유리 헤더**라 재래스터가 눈에 띈다.
 //   innerHTML 재대입은 같은 문자열이어도 자식을 전부 버리고 다시 파싱한다.
 const setH = (id, html) => { const target = el(id); if (target && target.innerHTML !== html) target.innerHTML = html; };
-const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
 let latestMainState = null;
 let latestCompactState = null;
@@ -905,16 +892,6 @@ function renderLiquidationVolumeGauge() {
 // value tail_risk_interceptor.py's own status_line() already uses for "급증⚠️", not a new number.
 
 
-// 안정=문제없음(녹색), 주의=경계(호박색), 위험=경계강함(적색) -- liq_cascade(리스크게이지)
-// 지표 전용. 방향성 매매신호(롱 진입/숏 진입)는 whale/retail_flow가 directionalCaution()로
-// 별도 처리하므로 여기서 다루지 않는다.
-function signalTone(signal) {
-  const s = String(signal || "");
-  if (s === "위험") return "bad";
-  if (s.includes("주의")) return "warn";
-  if (s === "안정") return "good";
-  return "neutral";
-}
 
 // Single source of truth for the 3 model-internal indicators' tone/read-text classification --
 // called both on the live state (render(), every tick) and on server-provided history samples
@@ -1942,25 +1919,6 @@ async function refreshOpsStatus() {
   }
 }
 
-// Small per-bar activity strip (oldest bar left, most recent bar right) for a "good"/"bad"/
-// "neutral" tone-per-bar history -- builds an SVG string directly (no DOM diffing), discrete
-// bars instead of a continuous line. The most recent
-// bar gets the "evidence-bar-live" class ONLY when it's non-neutral, which is what styles.css
-// hooks the pulsing animation to -- idle bars stay static (just color-transition on change, via
-// CSS), so several strips sitting side by side don't all pulse at once when nothing is actually
-// happening. Shared by both the evidence-signal strips (bottom/top fired -> tone) and the
-// Snapshot tab's model-indicator strips (thresholded value -> tone).
-// Builds an oldest-to-newest array of ISO timestamps for a strip whose bars are known to be evenly
-// spaced (server-computed histories: evidence signals/v_rebound at 5-min klines) -- the payload only ever sends the LATEST bar's timestamp, so the rest
-// are derived by walking back stepMinutes at a time. Returns [] if latestIso is missing (not warmed
-// up yet), so hover-time silently does nothing rather than showing a wrong guess.
-function evenlySpacedBarTimes(latestIso, n, stepMinutes) {
-  if (!latestIso || !(n > 0)) return [];
-  const latestMs = Date.parse(latestIso);
-  if (!Number.isFinite(latestMs)) return [];
-  const stepMs = stepMinutes * 60000;
-  return Array.from({ length: n }, (_, i) => new Date(latestMs - (n - 1 - i) * stepMs).toISOString());
-}
 
 // 2026-08-25: hover-time -- times[i] (oldest-to-newest, parallel to tones) is optional; a bar with
 // no known time just renders without the hover handlers, no error. NOT shown on the graph itself
@@ -2511,36 +2469,6 @@ function renderLiquidationMapPanel() {
                               ...sr.sup.map((lv, i) => row(lv, "지지" + (i + 1), "liq-support"))].join(""));
 }
 
-// 2026-08-25 실측(VAL+OOS 48,853봉): 같은 쪽 신호가 동시에 몇 개 뜨는지(bottom_votes/top_votes)
-// 자체가 검증된 신뢰도 축 -- votes>=N lift가 N에 대해 단조증가함을 확인(N>4는 미검증, 4로 캡).
-// scripts/research_eth_evidence_signal_indicator_cooking_research_20260825.md 참고.
-const VOTE_LIFT_BY_SIDE = {
-  bottom: { 1: 1.81, 2: 2.10, 3: 2.32, 4: 2.72 },
-  top: { 1: 1.58, 2: 1.85, 3: 1.89, 4: 2.07 },
-};
-// 🔴2026-09-10 정정: 위 lift 는 **반전 사건이 일어나는가(분류)** 기준이고 단조증가가 맞다.
-// 그러나 **손익 기준으로는 반대다.** 순환이동 귀무(발동 군집·개수를 보존한 채 가격 정렬만 파괴)
-// 대비 초과수익을 815일에서 재면 겹칠수록 좋아지지 않는다:
-//     바닥  1종 +0.20 / 2종 +1.04 / 3종+ +0.60 bp (H=1시간),  H=4시간에서는 3종+ 가 **-5.91**
-//     천장  1종 +0.21 / 2종 -0.56 / 3종+ -2.28 bp,            H=4시간 3종+ **-5.99**
-// 즉 3종 이상 동시발동은 두 측면 모두에서 가장 나쁘다. 화면이 "겹칠수록 신뢰도가 높아진다"고만
-// 쓰면 사용자가 그걸 진입 근거로 읽는다 -- 그래서 두 축을 문장에서 분리한다.
-// scripts/research_eth_signal_confluence_null_20260910.py
-const VOTE_ECON_BY_SIDE = {   // 동시발동 개수별 귀무 대비 초과 bp (H=1시간 / H=4시간)
-  bottom: { 1: [0.20, 1.96], 2: [1.04, 1.29], 3: [0.60, -5.91], 4: [0.60, -5.91] },
-  top: { 1: [0.21, -2.78], 2: [-0.56, 1.07], 3: [-2.28, -5.99], 4: [-2.28, -5.99] },
-};
-function voteLiftNote(side, votes) {
-  const capped = Math.min(Math.max(Math.round(votes), 1), 4);
-  const lift = VOTE_LIFT_BY_SIDE[side][capped];
-  const [e1, e4] = VOTE_ECON_BY_SIDE[side][capped];
-  const sideKo = side === "bottom" ? "바닥" : "천장";
-  return `실측: ${sideKo} 신호 ${capped}개↑ 동시발동 구간 lift ${lift.toFixed(2)}배(무작위 대비) — `
-    + `이건 **반전 사건이 일어나는가(분류)** 기준입니다. `
-    + `⚠️손익은 다릅니다: 같은 구간의 귀무 대비 초과수익은 ${e1 >= 0 ? "+" : ""}${e1.toFixed(2)}bp/건`
-    + `(H=1시간), ${e4 >= 0 ? "+" : ""}${e4.toFixed(2)}bp(H=4시간)이고 왕복비용은 10bp입니다. `
-    + `겹칠수록 좋아지지도 않습니다 — 3종 이상 동시발동이 두 측면 모두에서 가장 나쁩니다.`;
-}
 
 
 // 2026-08-27: split off /api/evidence-signals (see api_session_alerts() docstring in server.py) --
@@ -2611,19 +2539,7 @@ async function refreshChartMarkers() {
 // 규약: 라벨 §1(측면 어휘) · 색 §2(바닥=good/천장=bad/그 외 neutral) · 제목 밑 데이터 줄 없음 §4
 // ⭐5번째 색을 만들지 않는다 -- 억제/미발동은 전부 neutral 이다.
 
-// 2026-09-11 추세 전환 **탐지기** — 발동 여부 한 축. 확률이 없으므로 게이지 없음(규약 §3).
-// 2026-09-15 **E|r| 게이트** — 「언제」만 말한다. 방향 축이 아예 없는 카드다.
-// 🔴카드에 방향을 넣지 말 것: 같은 아티팩트의 방향 분류기는 실계좌 72왕복에서 적중 47.2%
-//   (동전 아래)이고 게이트가 고른 좋은 자리일수록 더 나빴다(−51.18bp · 호메로스 §5.36-R).
-const GATE_GAUGE_NOTE = "게이지는 20자산 중 발동 비율입니다 — 확률이 아닙니다."
-  + " 게이트 자체가 봉의 10% 만 켜도록 맞춰져 있습니다.";
 
-// /api/evr-gate 처럼 «톤이 박힌 객체»로 오는 이력을 스트립이 먹는 모양으로 바꾼다.
-function toneStripFromHistory(rows) {
-  const list = Array.isArray(rows) ? rows : [];
-  return { history: list.map((h) => (h && h.tone) || "neutral"),
-           times: list.map((h) => (h && h.ts) || null) };
-}
 
 // 예고는 별도 카드(breakoutPrewarnIndicatorItem)로 뺐다 — 카드당 축 하나.
 function breakoutDetectorIndicatorItem() {
@@ -4598,42 +4514,22 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   5초·1초 주기였다 -- 이제 그 주기로 같이 다시 그려진다. 사용자 결정으로 감수한다.
   const subOn = svg.id === "candleSvgSnapshot" && flowOn();
   // 2026-09-27 넓은 화면 2단(사용자 선택 62:38): CSS 가 --fp-split(오른쪽 칸 비율)을 준다 -- 판정은 CSS 한 곳.
-  //   가격 플롯·레인·밀도 범례는 왼쪽 w, 호가 프로파일·1초 수급은 오른쪽 칸(subX, subW). viewBox 는 wAll.
+  //   가격 플롯·레인·밀도 범례는 왼쪽 w, 1초 수급은 오른쪽 칸(subX, subW) 전체 높이. viewBox 는 wAll.
   //   아래 본문은 전부 `w` 를 «플롯 폭»으로 쓰므로 한 줄도 안 바뀐다.
   const splitR = subOn ? Number(getComputedStyle(svg).getPropertyValue("--fp-split")) || 0 : 0;
   const SPLIT_GAP = 20;
   const subW = splitR ? Math.round((wAll - SPLIT_GAP) * splitR) : wAll;
   const w = splitR ? wAll - SPLIT_GAP - subW : wAll, subX = splitR ? w + SPLIT_GAP : 0;
-  // 🔴이 세 값의 합(SUB_TOTAL)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야
-  //   한다(666 = 400 + 266 -> 706 = 400 + 306 -> 756 = 400 + 356). 상자가 작으면
-  //   그만큼 가격 플롯이 눌린다.
-  // 2026-09-19 프로파일 150 -> 190 (아티팩트 댓글 "조금만 더 키워줘"). 행 수는 높이가 정하므로
-  //   (renderSupplyProfileSvg 의 maxRows) 16행 -> 22행이 된다.
-  // 2026-09-20 1초 수급 100 -> 150 (사용자 요청 "좀 더 키워줘"). 상자도 706 -> 756 으로
-//   같이 키운다 -- 안 그러면 가격 플롯이 그만큼 눌린다(아래 경고 블록).
-  // 2026-09-22 1초 수급을 **풋프린트(가격 플롯)와 같은 높이**로(사용자 «너무 작아서
-  //   안보일 거 같아»). 150 -> 190 -> 400 으로 두 번 올렸다: 150 에서 누적 판이 78px,
-  //   190 에서 118px 이었고, 400 이면 290px 가 된다.
-  //   🔴가격 플롯(400)에서 뺏지 않고 상자를 키운다 -- 캔들이 눌리면 안 된다.
+  // 🔴SUB_TOTAL(아래)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야 한다 -- 상자가 작으면 가격 플롯이 눌린다
+  //   (test_sub_panel_height_contract 가 두 파일을 대조한다). 1초 수급 400 = 가격 플롯과 같은 높이(2026-09-22 사용자 «너무 작아서»).
   const SUB_GAP = 8, SUB_1S_H = subOn ? 400 : 0;
   // 1단(데스크톱·모바일)은 호가 요약 네 숫자가 1초 수급 바닥에서 한 줄(14)을 떼어 간다 -- SUB_TOTAL 은 그대로.
   //   (그냥 풋프린트 위에 얹으면 모바일은 밀도 범례, 데스크톱은 1초 수급의 시각 눈금과 겹쳤다.)
   const STATS_ROW_H = subOn && !splitR ? 14 : 0;
-  // 2026-09-21 청산 밀도 범례를 헤더 행에서 **여기로** 옮겼다(아티팩트 댓글).
-  //   «풋프린트 차트 바로 위와 프로파일 바닥글 사이». 밀도는 이제 풋프린트의 배경이라
-  //   범례가 헤더에 있으면 설명하는 그림에서 멀다. 글자 크기도 바닥글과 같은 9 로 맞췄다.
+  // 청산 밀도 범례(9px 한 줄) -- 풋프린트 배경을 설명하므로 풋프린트 바로 위(2026-09-21).
   const SUB_LEGEND_H = subOn ? 14 : 0;
-  // 2026-09-19 히트맵은 프로파일 **아래 제 줄**이다(사용자 지시). 좌우 반씩 나누던 판을
-  // 되돌렸다 -- 프로파일 막대 해상도가 절반이 됐고, 두 패널의 자연 가격범위가 15배 달라
-  // (호가 ±2.4% vs 체결 ±0.16%) 나란히 둘 이유였던 «같은 축»도 성립하지 않았다.
-  // ⭐데스크톱·모바일이 같은 모양이 되므로 subStack 분기가 통째로 사라진다.
-  //   SUB_TOTAL 620 = 190(프로파일) + 8 + 400(1초 수급) + 14(밀도 범례) + 8
-  //   ← 2026-09-20 뒤집었다가 2026-09-22 다시 프로파일이 위로(사용자 지시)
-  // 2단이면 플롯 위에는 밀도 범례만 남는다(호가·1초 수급은 오른쪽 칸) -- 상자 872 = 12 + 22 + 400 + 368 + 70.
-  // 2026-09-27 모바일(세로) 순서: **1초 수급 → 밀도 범례 → 풋프린트 → 레인 → 호가 프로파일**(사용자 «수급차트는 풋프린트 위로»).
-  //   같은 날 먼저 «풋프린트 먼저»로 두 패널을 다 내렸다가 수급만 다시 올렸다. 호가 프로파일은 풋프린트 아래에 남는다.
-  //   본문은 `h` 를 «풋프린트 영역 높이»로 쓰므로(x축·리본이 h - mb 기준) 상자 높이 hAll 에서 아래로 간 프로파일만큼 뺀다.
-  // 2026-09-28 프로파일이 빠져 데스크톱(1단)·모바일이 같은 순서다: 1초 수급 → 밀도 범례 → 풋프린트.
+  // 순서(2026-09-28, 호가·체결 프로파일 제거 후): 1단(데스크톱·모바일) = 1초 수급 → 밀도 범례 → 풋프린트 → 레인,
+  //   2단 = 왼쪽 밀도 범례 → 풋프린트 → 레인 · 오른쪽 1초 수급. 본문의 `h` 는 상자 전체(hAll)다.
   const h = hAll;
   const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_1S_H + SUB_LEGEND_H + SUB_GAP;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
@@ -6590,25 +6486,29 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
     });
   });
+  // 2026-09-28 사분면·누적 두 레인이 같은 봉별 값을 쓴다 -- 렌더마다 한 번만 만든다(층 캐시가 둘 다 맞으면 안 만든다).
+  //   봉 찾기는 Map 이다(예전 find 는 봉 수의 제곱). 같은 시각이 둘이면 **앞의 것**(find 와 같은 결과).
+  //   🔴«OI 모름»과 «ΔOI 0» 을 가른다(2026-09-25) -- 없는 봉은 oi = null(«신규 롱/숏» 이라는 없는 사실을 안 찍는다).
+  let laneBars = null;
+  const laneBarsOf = () => laneBars || (laneBars = (() => {
+    const byT = new Map();
+    fpBars.forEach((b) => { const t = Number(b && b.time); if (!byT.has(t)) byT.set(t, b); });
+    const oiByTs = new Map(oiBars.map((b) => [Number(b[0]), Number(b[1]) || 0]));
+    return candles.map((c) => {
+      const b = byT.get(c.time);
+      if (!b) return null;
+      const f = supplyFlowOfBar(b.levels);
+      let turn = 0;
+      (b.levels || []).forEach((l) => { turn += (Number(l[0]) || 0) * ((Number(l[1]) || 0) + (Number(l[2]) || 0)); });
+      return { t: c.time, turn, delta: f.whale + f.mid + f.retail, whale: f.whale, mid: f.mid, retail: f.retail,
+               oi: oiByTs.has(c.time) ? (Number(oiByTs.get(c.time)) || 0) : null };
+    });
+  })());
   cachedLayer("quadLane", objToken(fpBars) + "|" + objToken(oiBars)
               + "|" + activeSnapshotAsset, (g) => {
   if (fpBars.length && candles.length && QUAD_H) {
     const QB = quadY + QUAD_H;                       // 판 바닥
-    const oiByTs = new Map(oiBars.map((b) => [Number(b[0]), Number(b[1]) || 0]));
-    const rows = candles.map((c) => {
-      const b = fpBars.find((x) => Number(x && x.time) === c.time);
-      if (!b) return null;
-      const f = supplyFlowOfBar(b.levels);
-      let turn = 0;
-      (b.levels || []).forEach((l) => {
-        turn += (Number(l[0]) || 0) * ((Number(l[1]) || 0) + (Number(l[2]) || 0));
-      });
-      // 🔴«OI 모름»과 «ΔOI 0» 을 가른다(2026-09-25). `|| 0` 이면 데이터가 없는 봉이 o>=0 이 되어
-      //   **«신규 롱/숏» 이라는 없는 사실**이 찍힌다. null 로 두고 아래에서 칸 이름을 유보한다.
-      return { t: c.time, turn, delta: f.whale + f.mid + f.retail,
-               whale: f.whale, mid: f.mid, retail: f.retail,
-               oi: oiByTs.has(c.time) ? (Number(oiByTs.get(c.time)) || 0) : null };
-    });
+    const rows = laneBarsOf();
     const have = rows.filter(Boolean);
     if (have.length) {
       // 2026-09-23 사용자 지시로 이 행의 **선을 뺐다**. RVOL 은 누적 CVD 아래 제 레인으로
@@ -6749,16 +6649,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   cachedLayer("cumLane", objToken(fpBars) + "|" + objToken(oiBars) + "|" + chartWindowBars
               + "|" + activeSnapshotAsset, (g) => {
   if (fpBars.length && candles.length && CUM_DRAW_H) {
-    const oiByTs = new Map(oiBars.map((b) => [Number(b[0]), Number(b[1]) || 0]));
     let aw = 0, am = 0, ar = 0, ao = 0;
-    const rows = candles.map((c) => {
-      const b = fpBars.find((x) => Number(x && x.time) === c.time);
-      if (!b) return null;
-      const f = supplyFlowOfBar(b.levels);
-      aw += f.whale; am += f.mid; ar += f.retail; ao += (oiByTs.get(c.time) || 0);
-      let turn = 0;
-      (b.levels || []).forEach((l) => { turn += (Number(l[0]) || 0) * ((Number(l[1]) || 0) + (Number(l[2]) || 0)); });
-      return { t: c.time, w: aw, m: aw + am, c: aw + am + ar, oi: ao, turn };
+    const rows = laneBarsOf().map((r) => {
+      if (!r) return null;
+      aw += r.whale; am += r.mid; ar += r.retail; ao += (r.oi || 0);
+      return { t: r.t, w: aw, m: aw + am, c: aw + am + ar, oi: ao, turn: r.turn };
     });
     const have = rows.filter(Boolean);
     if (have.length >= 2) {
