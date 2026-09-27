@@ -601,6 +601,12 @@ async function setActiveSnapshotAsset(asset) {
   // 2026-09-26 SOL·XRP 도 흐름이 있다 -- 1초 수급 칸·커서·실시간 셀·히트맵을 코인마다 새로 받는다.
   //   🔴커서를 안 비우면 새 코인에 옛 코인의 초 번호로 «그 뒤만» 달라고 해서 창 앞부분이 빈다.
   resetSupply1sState();
+  // 🔴2026-09-27 옛 코인 스트림을 **여기서 바로** 닫는다. 다음 틱(ensureLiveStream)까지 열려 있으면 그 사이 온
+  //   ETH 한 덩이가 방금 비운 칸에 얹혀 커서를 ETH 최신 초로 옮기고, 새 코인 스트림이 그 뒤만 받아 수급이
+  //   몇 초치로 굳었다(실측 ETH->XRP 8초 뒤에도 8초치 · OI 는 커서가 따로라 11분치 = «OI 만 보인다»).
+  if (liveStream) { liveStream.close(); liveStream = null; }
+  ensureLiveStream();
+  footprintLastFetchAt = 0;   // 풋프린트도 폴링 간격을 기다리지 않고 곧바로
   // 🔴칸 폭은 **모른다**(0)로 둔다 -- 옛 코인 폭(ETH 0.5)으로 XRP 체결을 묶으면 진행 봉 셀이 엉뚱한 행에 쌓인다.
   //   새 코인 풋프린트 응답이 폭을 알려 줄 때까지 실시간 셀은 안 쌓고(footprintLiveAdd), 그 봉은 서버 값을 쓴다.
   footprintLive = { barStart: 0, since: Infinity, bucket: 0, cells: new Map(),
@@ -3814,11 +3820,13 @@ function ensureLiveStream() {
   const es = new EventSource(API_STREAM_URL + q);
   liveStream = es; liveStreamAt = 0; liveStreamOpenedAt = Date.now();
   es.addEventListener("supply", (ev) => {
+    if (es !== liveStream) return;                   // 닫힌(옛 코인) 스트림의 늦은 메시지
     liveStreamAt = Date.now();
     try { applySupply1s(JSON.parse(ev.data)); } catch (e) { console.error("stream supply:", e); return; }
     repaintSupply1sPanel();
   });
   es.addEventListener("situation", (ev) => {
+    if (es !== liveStream) return;
     liveStreamAt = Date.now();
     try { latestSituation = JSON.parse(ev.data); } catch (e) { return; }
     renderSituation();
@@ -5484,7 +5492,9 @@ function renderSnapshotChart() {
   //   drawCells(봉 폭 기준)가 이미 해결했다: 얇아지면 셀을 안 그린다.
   //   이제 창이 자른다. 풋프린트가 없는 봉은 셀·델타가 그냥 비고(buyTot+sellTot>0 가드),
   //   사분면·누적 레인은 **캔들을 돌며 fpBars 를 조회**하는 구조라 빠진 봉을 알아서 건너뛴다.
-  const candles = footprint
+  // 2026-09-27 흐름 코인은 풋프린트가 **아직 안 와도** 창으로 자른다 -- 전환 직후 0.3~0.7초 동안 96봉 캔들로
+  //   넓어졌다 줄어드는 게 «1h 인데 캔들로 12h» 로 보였다.
+  const candles = footprint || flowOn()
     ? fullCandles.slice(-chartWindowBars)
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
