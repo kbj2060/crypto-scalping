@@ -106,3 +106,23 @@ def test_okx_liq_restore_reads_all_coin_liq_db(tmp_path):
     got = srv.okx_tape_footprint(*args, liq_db=liq)["liq"]
     assert [(e["side"], e["qty"], e["usd"]) for e in got] == [("long", 3.0, 360.0)], got
     assert srv.OKX_LIQ_DB_PATH == srv.OKX_CTX_DB_PATH
+
+
+def test_size_bands_per_coin_tape_and_dashboard_agree():
+    """코인별 고래 경계(2026-09-27): 같은 $30k 주문이 ETH 는 중형, XRP 는 고래. 테이프·대시보드가 같은 표를 본다."""
+    from scripts.live_trade_tape_collector_20260916 import TapeBuffer, size_bands
+    assert size_bands("ethusdt") == (10_000.0, 100_000.0), "ETH 경계는 바뀌면 안 된다(연구·기존 행)"
+    assert size_bands("XRP-USDT-SWAP") == size_bands("xrpusdt") == (3_400.0, 23_000.0)
+
+    eth, xrp = TapeBuffer(0.1, "ethusdt"), TapeBuffer(0.0001, "xrpusdt")
+    for b in (eth, xrp):
+        b.add_agg(T0 * 1000, 2.0, 15_000.0, False, 1)                 # $30,000 매수 주문 하나
+    (e,), (x,) = eth.take_closed(everything=True), xrp.take_closed(everything=True)
+    cols = TapeBuffer.WIDTH                                              # 행 = (sec, bin, 칸 16개)
+    assert len(e) == cols + 2
+    ecell, xcell = e[2:], x[2:]
+    assert ecell[8] == 0 and ecell[6] == 0, "ETH: $30k 는 중형(고래·리테일 둘 다 아님)"
+    assert xcell[8] == 15_000.0, "XRP: $30k 는 고래"
+    f = srv.make_coin_flow(dataclasses.replace(srv.FLOW_SPECS["xrp"], snapshot_path=Path("/nonexistent/fp.json")),
+                           None, {"session": None})
+    assert (f.retail_max, f.whale_min) == size_bands("xrpusdt")

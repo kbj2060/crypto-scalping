@@ -55,6 +55,7 @@ from scripts.live_trade_tape_collector_20260916 import (  # noqa: E402
     WHALE_MIN_USD,
     TakerOrderAggregator,
     default_db as tape_default_db,
+    size_bands,
 )
 from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
     FETCH_LIMIT as EVIDENCE_FETCH_LIMIT,
@@ -2063,6 +2064,7 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
     OKX_TAPE_DB_PATH = spec.okx_tape_db             # noqa: N806
     OKX_CTX_DB_PATH = spec.okx_ctx_db               # noqa: N806
     OI_1S_POLL_SECONDS = spec.oi_poll_s             # noqa: N806
+    RETAIL_MAX_USD, WHALE_MIN_USD = size_bands(spec.symbol)   # noqa: N806 -- 2026-09-27 코인별 고래 경계(테이프 수집기와 같은 표)
     TAG = "" if spec.asset == "eth" else f"[{spec.asset}] "   # noqa: N806 -- 로그 표식(ETH 는 전과 같게 비움)
     # 🔴2026-09-26 IP 밴 사고: aggTrades 백필은 요청당 가중치 20 이고 IP 한도(2,400/분)를 봇·대시보드·수집기가 같이
     #   쓴다. 코인마다 REST 백필을 돌리면 콜드스타트에 한도를 넘긴다(실측: 418 밴 27분). ETH 외 코인은 서버에 이미
@@ -2847,7 +2849,8 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
         spec=spec, footprint_state=footprint_state, footprint_bar_start=footprint_bar_start, oi_1s=oi_1s,
         okx_sec=okx_sec, okx_liq_events=okx_liq_events, okx_oi_1s=okx_oi_1s, okx_state=okx_state,
         okx_bars=okx_bars, okx_fp=okx_fp, okx_oi_5m=okx_oi_5m, spot_sec=spot_sec, spot_state=spot_state,
-        footprint_tape_restore=footprint_tape_restore, start=start, stop=stop)
+        footprint_tape_restore=footprint_tape_restore, start=start, stop=stop,
+        retail_max=RETAIL_MAX_USD, whale_min=WHALE_MIN_USD)
 
 
 def make_app() -> web.Application:
@@ -4331,6 +4334,7 @@ def make_app() -> web.Application:
         고래·리테일은 매수/매도의 **부분집합**이고, 중형은 셋을 빼서 얻는다."""
         want = footprint_window_bars(request)
         f = flow_for(request.query)       # 2026-09-26 코인별 -- 아래 본문의 이름을 그 코인으로 가린다
+        RETAIL_MAX_USD, WHALE_MIN_USD = f.retail_max, f.whale_min   # noqa: N806 -- 코인별 경계
         footprint_state, okx_bars, okx_fp = f.footprint_state, f.okx_bars, f.okx_fp
         FOOTPRINT_SYMBOL, FOOTPRINT_BUCKET, dp = f.spec.symbol, f.spec.bucket, f.spec.price_dp   # noqa: N806
         # 🔴OKX 를 **여기서만** 더한다(위 okx_bars 주석). 그리고 OKX 가 완전히 덮은 첫 봉
@@ -4424,6 +4428,7 @@ def make_app() -> web.Application:
         """
         # 2026-09-26 코인별 -- 아래 본문이 쓰는 이름을 그 코인 엔진으로 가린다(본문은 그대로).
         f = f or _eth
+        RETAIL_MAX_USD, WHALE_MIN_USD = f.retail_max, f.whale_min   # noqa: N806 -- 코인별 경계
         oi_1s, liq_events = f.oi_1s, liq_events_by[f.spec.asset]
         okx_sec, okx_oi_1s, okx_liq_events, okx_state = f.okx_sec, f.okx_oi_1s, f.okx_liq_events, f.okx_state
         spot_sec, spot_state = f.spot_sec, f.spot_state
@@ -4621,6 +4626,7 @@ def make_app() -> web.Application:
         # 다른 구간을 말하고 있었다 -- 한 카드 안에서 그건 읽는 사람을 속이는 것이다.
         want = footprint_window_bars(request)
         f = flow_for(request.query)
+        RETAIL_MAX_USD, WHALE_MIN_USD = f.retail_max, f.whale_min   # noqa: N806 -- 코인별 경계
         footprint_state, okx_bars, okx_fp = f.footprint_state, f.okx_bars, f.okx_fp
         FOOTPRINT_SYMBOL, FOOTPRINT_BUCKET, dp = f.spec.symbol, f.spec.bucket, f.spec.price_dp   # noqa: N806
         # 2026-09-24 OKX 합산(사용자 지시). 풋프린트(api_footprint)와 **같은 봉·같은 합**이어야 한다 --

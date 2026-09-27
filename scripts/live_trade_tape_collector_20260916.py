@@ -103,6 +103,17 @@ SCHEMA_VERSION = 2
 # 대신 아래 `warn_if_whale_threshold_diverged()` 가 «갈라진 순간»을 시끄럽게 만든다.
 RETAIL_MAX_USD = 10_000.0     # 미만 = 리테일
 WHALE_MIN_USD = 100_000.0     # 이상 = 고래 (그 사이는 중형)
+# 2026-09-27 코인별 경계(사용자 «고래 기준을 코인별로»). ETH 는 위 값 그대로 -- 연구·기존 행의 뜻이 거기 묶여 있다.
+#   나머지는 **거래량 중 리테일·고래 비중이 ETH 와 같아지는 금액**이다(aggTrades 아카이브 09-22~25 실측:
+#   ETH 리테일 10.1% · 중형 43.2% · 고래 46.7%. 날짜별 SOL 고래 $52k~60k · XRP $22k~25k 로 안정).
+#   ETH 경계를 그대로 쓰면 XRP 고래가 거래량의 8% 뿐이라 «고래»가 거의 안 보였다.
+#   🔴전환 전 행은 ETH 경계로 쌓였다 -- TapeStore 가 meta `size_bands_changed:<심볼>` 에 시각을 남긴다.
+SIZE_BANDS_USD = {"solusdt": (7_500.0, 55_000.0), "xrpusdt": (3_400.0, 23_000.0)}
+
+
+def size_bands(symbol: str) -> tuple[float, float]:
+    """(리테일 상한, 고래 하한). OKX 인스트루먼트(SOL-USDT-SWAP)도 같은 코인 값. 표에 없으면 ETH 경계."""
+    return SIZE_BANDS_USD.get(symbol.lower().replace("-usdt-swap", "usdt"), (RETAIL_MAX_USD, WHALE_MIN_USD))
 
 
 class TakerOrderAggregator:
@@ -260,8 +271,9 @@ class TapeBuffer:
 
     WIDTH = 16
 
-    def __init__(self, bucket: float) -> None:
+    def __init__(self, bucket: float, symbol: str = "ethusdt") -> None:
         self.bucket = bucket
+        self.retail_max, self.whale_min = size_bands(symbol)
         self.rows: dict[tuple[int, int], list[float]] = {}
         self.max_sec = 0
         self.closed_before = 0   # 이 초보다 앞은 이미 꺼내 갔다
@@ -302,10 +314,10 @@ class TapeBuffer:
         i = 1 if sell else 0
         cell[14 + i] += 1          # 구간과 무관하게 «주문 하나»
         notional = price * qty
-        if notional < RETAIL_MAX_USD:
+        if notional < self.retail_max:
             cell[6 + i] += qty
             cell[12 + i] += 1
-        elif notional >= WHALE_MIN_USD:
+        elif notional >= self.whale_min:
             cell[8 + i] += qty
             cell[10 + i] += 1
 
@@ -322,10 +334,10 @@ class TapeBuffer:
         cell[4 + i] = max(cell[4 + i], qty)
         cell[14 + i] += 1
         notional = price * qty
-        if notional < RETAIL_MAX_USD:
+        if notional < self.retail_max:
             cell[6 + i] += qty
             cell[12 + i] += 1
-        elif notional >= WHALE_MIN_USD:
+        elif notional >= self.whale_min:
             cell[8 + i] += qty
             cell[10 + i] += 1
 
@@ -422,10 +434,15 @@ class TapeStore:
                   attempts INTEGER, note VARCHAR, done_at TIMESTAMP)""")
             con.execute("CREATE TABLE IF NOT EXISTS meta(key VARCHAR, value VARCHAR)")
             # 경계는 **데이터와 함께** 남는다. 코드가 바뀌어도 이 표를 보면 그때 기준을 안다.
+            lo, hi = size_bands(symbol)
+            old = con.execute("SELECT value FROM meta WHERE key = 'whale_min_usd'").fetchall()
+            if old and float(old[0][0]) != hi:          # 경계가 바뀐 순간 -- 이 앞 행은 옛 경계다
+                con.execute("INSERT INTO meta VALUES (?, ?)",
+                            [f"size_bands_changed:{symbol}", f"{time.time():.0f} whale {old[0][0]} -> {hi!r}"])
             for key, value in (("schema_version", str(SCHEMA_VERSION)),
                                (f"bucket:{symbol}", repr(bucket)),
-                               ("retail_max_usd", repr(RETAIL_MAX_USD)),
-                               ("whale_min_usd", repr(WHALE_MIN_USD))):
+                               ("retail_max_usd", repr(lo)),
+                               ("whale_min_usd", repr(hi))):
                 con.execute("DELETE FROM meta WHERE key = ?", [key])
                 con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
 
@@ -691,7 +708,7 @@ def binance_minute_fetcher(session, symbol: str, bucket: float):
             k = await r.json()
         if not k or int(k[0][0]) != start or int(k[0][6]) >= time.time() * 1000:
             return [], None
-        buf = TapeBuffer(bucket)
+        buf = TapeBuffer(bucket, symbol)
         params = {"symbol": symbol.upper(), "startTime": start, "endTime": end, "limit": 1000}
         while True:
             async with session.get(AGG_TRADES_URL, params=params) as r:
@@ -715,7 +732,7 @@ async def collect(symbol: str, db_path: Path) -> None:
     warn_if_whale_threshold_diverged()
     bucket = BUCKETS.get(symbol, 0.01)
     store = TapeStore(db_path, symbol, bucket)
-    buffer = TapeBuffer(bucket)
+    buffer = TapeBuffer(bucket, symbol)
     orders = TakerOrderAggregator()
     last_ms = store.last_ts_ms()      # 지난 판이 남긴 끝 -- 재시작 공백을 gaps 에 적으려고
     log(f"{symbol} 수집 시작 (빈 {bucket}, db {db_path})")

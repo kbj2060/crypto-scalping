@@ -271,7 +271,7 @@ def okx_minute_fetcher(session, inst: str, bucket: float, ct_val: float):
             if int(page[-1]["ts"]) < start or len(page) < 100:
                 break
         fills.sort(key=lambda f: int(f["tradeId"]))
-        buf = OkxTapeBuffer(bucket)
+        buf = OkxTapeBuffer(bucket, inst)
         for ts, px, sz, sell, n in group_fills(fills):
             buf.add_okx_order(ts, px, sz * ct_val, sell, n)
         return buf.take_closed(everything=True), float(c[0][6])
@@ -292,7 +292,7 @@ async def collect(inst: str, db_path: Path) -> None:
                            (f"source:{inst}", "okx ws v5 public trades (already order-aggregated)")):
             con.execute("DELETE FROM meta WHERE key = ?", [key])
             con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
-    buffer = OkxTapeBuffer(bucket)
+    buffer = OkxTapeBuffer(bucket, inst)
     last_ms = store.last_ts_ms()
     log(f"{inst} 수집 시작 (빈 {bucket}, ctVal {ct_val}, db {db_path})")
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
