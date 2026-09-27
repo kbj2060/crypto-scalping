@@ -161,8 +161,6 @@ const footprintShades = () =>
 const API_SUPPLY_1S_URL = "/api/supply-1s";
 const SUPPLY_1S_POLL_MS = 250;
 const SUPPLY_1S_SEGMENT = 300;          // 누적을 0으로 되돌리는 **벽시계** 경계(초). 5분봉과 같은 자리.
-// 계단 눈금(ETH). 자동정규화를 안 쓰는 이유는 renderSupply1s 주석에 있다.
-const SUPPLY_1S_STEPS = [50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000];
 let supply1s = new Map();               // 초 -> [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]
 let supply1sMeta = { retailMaxUsd: 0, whaleMinUsd: 0, now: 0 };
 // 🔴`since` 는 «내가 **받은** 마지막 초»여야 한다. 서버가 보낸 `now`(진행 중인 초)를 그대로
@@ -4043,11 +4041,9 @@ function supplyFlowOfBar(levels) {
 //   리테일 80 / 고래 180 / 신규계약 889 로 **11배 안**에 들어와 셋 다 한 눈금에서 보인다.
 //   비선형 축(symlog)을 쓰지 않아도 되므로 「높이 2배 = 수량 2배」가 지켜진다.
 // 누적이 매초 한 번만 움직이므로 가짜 사건도 안 생긴다.
-// 눈금은 **계단 고정**(SUPPLY_1S_STEPS)이다. 완전 고정은 잘리고 자동은 크기를 지운다 --
-// 계단이면 «같은 높이 = 같은 수량»이 대체로 성립하고 스케일이 초마다 튀지 않는다.
-// 세 선(고래·리테일·신규계약)은 같은 자로 그린다. 단위가 같은 ETH 라서, 들어온 순수급 중
-// 얼마가 새 포지션이고 얼마가 손바뀜인지가 세 선의 간격으로 바로 읽힌다.
-// 창 누적(옛 화면이 그리던 값)은 선을 지우고 머리글 숫자로만 남겼다.
+// ⭐2026-09-28 사용자 «고래/중형/리테일이 매초 어떻게 거래하는지 5분 내내» -- 누적 한 판을 **다섯 줄 거울 막대**로 바꿨다
+//   (CVD · 고래 · 중형 · 리테일 · 신규 OI). 위 «초별 원값은 꼬리가 무겁다(260배)»는 **√ 눈금 + 줄마다 제 최대**로 접는다 --
+//   대신 «같은 높이 = 같은 수량»은 줄 안에서만 성립한다(줄끼리 크기는 왼쪽 숫자). 누적은 줄마다 흰 선으로 남는다.
 function renderSupply1s(box = null, src = null) {
   // src 가 오면 그 출처로 그린다(OKX 레인). 없으면 바이낸스 전역이다. 칸 구조가 같으므로
   // **수식은 한 줄도 안 바뀐다** -- 바뀌는 건 어느 Map 을 읽느냐뿐이다.
@@ -4084,7 +4080,8 @@ function renderSupply1s(box = null, src = null) {
   //   자리**다. 88 을 비워 두면 348px 화면에서 선이 260px 로 눌린다(실측). 8 로 줄이면 같은
   //   화면에서 플롯이 344px = **+32%** 가 되고, 범례는 아래에서 플롯 위로 얹는다.
   //   🔴데스크톱은 그대로 둔다 -- 폭이 남는 화면에서 글자를 데이터 위에 올릴 이유가 없다.
-  const ml = narrow ? 34 : 45, mr = 8;   // 2026-09-28 범례가 안으로 들어와 오른쪽 150 을 선에 돌려준다
+  // 2026-09-28 다섯 줄 거울 막대 -- 왼쪽 칸에 줄 이름·누적값(범례 박스를 대체), 오른쪽은 얇은 여백만.
+  const ml = narrow ? 52 : 66, mr = 8;
   const cw = w - ml - mr;
   const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
@@ -4159,352 +4156,168 @@ function renderSupply1s(box = null, src = null) {
 
   // 구간 경계에서 0으로 되돌리며 쌓는다. 경계 이전 초도 **계산에는** 들어간다(누산기를
   // 그때 0으로 되돌리는 게 전부이고, 그리는 건 first 이후뿐이다).
-  const cumOf = (at) => {
-    const rows = [];
-    let acc = 0, seg = null;
-    allSecs.forEach((s) => {
-      if (segOf(s) !== seg) { seg = segOf(s); acc = 0; }
-      acc += at(s);
-      if (s > first) rows.push({ s, v: acc });
-    });
-    return rows;
-  };
-  const whale = cumOf((s) => { const c = S.supply.get(s); return c[2] - c[3]; });
-  const retail = cumOf((s) => { const c = S.supply.get(s); return c[0] - c[1]; });
-  // 2026-09-22 **CVD = 고래 + 중형 + 리테일 은 항등식이다**(실측 확인: -2,688 + -3,834 +
-  //   -559 = -7,081). 그래서 수급은 CVD 와 별개 계열이 아니라 그 **분해**다. 셋을 따로
-  //   그리는 대신 0선에서 쌓고, 맨 위 윤곽을 CVD 로 둔다 -- 그림이 항등식을 말한다.
-  // ⭐이 배치가 리테일 문제를 푼다: 리테일 진폭(559)이 CVD(7,548)와 **경쟁하지 않고**
-  //   스택의 얇은 맨 윗층이 된다. 예전엔 같은 축에서 12배 눌려 납작했다.
-  const cvd = cumOf((s) => { const c = S.supply.get(s); return c[4] - c[5]; });
-  // 거래소별 CVD 얇은 선(2026-09-23). 본선이 합산이므로 이건 «갈림»을 보여주는 용도다.
-  // 🔴같은 5분 세그먼트 리셋 규약을 쓴다 -- 본선과 기준점이 다르면 비교가 성립하지 않는다.
-  const thinRows = (S.thin || []).map((t) => {
-    const out = [];
-    let acc = 0, seg = null;
-    allSecs.forEach((x) => {
-      if (segOf(x) !== seg) { seg = segOf(x); acc = 0; }
-      const c = t.supply.get(x);
-      if (c) acc += c[4] - c[5];
-      if (x > first) out.push({ s: x, v: acc });
-    });
-    return { rows: out, label: t.label };
-  });
-  // 스택 경계: 0 → 고래 → (CVD-리테일) → CVD. 가운데 층이 곧 중형이라 따로 안 만든다.
-  const stackMid = cvd.map((r, i) => ({ s: r.s, v: r.v - retail[i].v }));
-  // 🔴청산은 **선이 아니라 이벤트다**. 269초에 5건이고, 봉당 중앙 6.8 ETH 가 CVD 진폭의
-  //   0.09% 라 어떤 선형 ETH 축에서도 0선에 붙는다(2026-09-22 첫 판의 실제 버그).
-  //   27시간 실측은 봉당 중앙 6.8 / p90 217 / 최대 3,877 -- 계열 하나 안에서 570배다.
-  //   그래서 축에서 빼고 아래 판에 «크기를 가진 점»으로 둔다.
-  const liqEv = [];
-  allSecs.forEach((s2) => {
-    if (s2 <= first) return;
-    const c = S.liq.get(s2);
-    if (!c) return;
-    if (c[0] > 0 || c[1] > 0) liqEv.push({ s: s2, v: c[1] - c[0] });
-  });
-  // 신규계약(OI)은 **레벨**이라 더하지 않는다: 그 구간 첫 관측 대비 증분이다.
-  // 🔴갱신이 3~7초라 구간의 «첫 관측»이 경계보다 조금 뒤다 -- 그만큼 증분이 과소평가된다.
-  //   서버가 초 단위 OI 를 안 들고 있어 더 정확히는 못 한다. 체결(고래·리테일)은 초 단위라
-  //   이 근사가 없다.
-  const oiRowsFor = (map) => {
-    const keys = [...map.keys()].filter((x) => x > first - SUPPLY_1S_SEGMENT - 20 && x <= now)
-                                .sort((x, y) => x - y);
-    const out = [];
-    let sg = null, base = 0;
-    keys.forEach((x) => {
-      if (segOf(x) !== sg) { sg = segOf(x); base = map.get(x); }
-      if (x > first) out.push({ s: x, v: map.get(x) - base });
-    });
-    return out;
-  };
-  // OI 본선은 합, 거래소별은 얇은 참고선(위 mergedSupplySrc 주석: ΔOI 상관 +0.000 이라 둘 다 남긴다).
-  const oiLanes = (S.oiLanes || [{ oi: S.oi, color: "var(--warn)", width: 2, opacity: 0.95 }])
-    .map((l) => Object.assign({}, l, { rows: oiRowsFor(l.oi) }));
-  const oiKeys = [...S.oi.keys()].filter((s) => s > first - SUPPLY_1S_SEGMENT - 20 && s <= now)
-                                 .sort((a, b) => a - b);
+  // ── 다섯 줄 거울 막대 (2026-09-28 사용자 선택 시안 ① + «CVD·OI 도 같은 형식으로») ───────────────
+  //   줄 = CVD(합) · 고래 · 중형 · 리테일 · 신규(OI). 매초 **매수량은 위(초록) · 매도량은 아래(빨강)** -- √ 눈금, 줄마다 제 최대
+  //   (고래는 드문드문 크게, 리테일은 잘게 꾸준히 -- 그 «리듬»을 보려는 화면이라 줄끼리 눈금을 묶지 않는다. 크기는 왼쪽 숫자).
+  //   흰 선 = 그 줄의 **이번 5분봉 누적 순수급**(경계에서 0, 줄마다 제 눈금). 중형 = 전체 − 고래 − 리테일.
+  //   OI 줄: 매초 증분(늘면 위 주황 · 줄면 아래 흐림) + 누적 증분 선(주황) · 청산은 그 선 위 점(크기 = 로그 수량).
+  //   거래소는 합산만 본다(사용자 «합산해도 문제없다») -- 거래소별 쏠림 숫자와 3·3·2 범례 박스는 이 판에서 빠졌다.
+  const inSeg = allSecs.filter((x) => x > first);
+  const zero6 = [0, 0, 0, 0, 0, 0];
+  const cellOf = (x) => S.supply.get(x) || zero6;
+  const LANES = [
+    ["CVD", (c) => [c[4], c[5]]],
+    ["고래", (c) => [c[2], c[3]]],
+    ["중형", (c) => [Math.max(0, c[4] - c[2] - c[0]), Math.max(0, c[5] - c[3] - c[1])]],
+    ["리테일", (c) => [c[0], c[1]]],
+  ];
+  const TIER_OP = { CVD: 0.9, "고래": 0.95, "중형": 0.6, "리테일": 0.38 };
+  // OI: 경계 직전 마지막 관측을 0 으로 두고 매초 증분을 잰다(3~7초 갱신이라 대부분 초는 0).
+  const oiKeys = [...S.oi.keys()].filter((x) => x <= now).sort((a, b) => a - b);
+  const oiBase = (() => { let v = null; oiKeys.forEach((x) => { if (x <= first || v === null) v = S.oi.get(x); }); return v; })();
   const oiRows = [];
-  let oiSeg = null, oiBase = 0;
-  oiKeys.forEach((s) => {
-    if (segOf(s) !== oiSeg) { oiSeg = segOf(s); oiBase = S.oi.get(s); }
-    if (s > first) oiRows.push({ s, v: S.oi.get(s) - oiBase });
-  });
-  // ── 한 판 (2026-09-22 사용자 지시로 아래 판을 걷어냈다) ─────────────────────
-  // 원래 «위=누적 / 아래=순간(거래대금·청산)» 두 판이었다. 거래대금 막대를 빼자 아래
-  // 판에 청산 원만 남았는데, 점 몇 개에 76px 를 쓰는 건 낭비다 -- 판을 없애고 청산은
-  // **0선 위**로 올렸다. 청산은 강제 유출입이라 이 축(순수급)의 원점에 앉는 게 맞다.
-  // 그 76px 는 전부 누적 스택이 가져간다(294 -> 370px).
-  const peak = Math.max(0, ...cvd.map((r) => Math.abs(r.v)), ...whale.map((r) => Math.abs(r.v)),
-                        ...stackMid.map((r) => Math.abs(r.v)), ...oiRows.map((r) => Math.abs(r.v)),
-                        // 합산선도 눈금에 넣는다 -- 빼면 상자 위에 눌려 붙어 «천장에 닿았다»는
-                        // 거짓 인상을 준다(yF 가 ±1 로 자른다).
-                        ...thinRows.flatMap((t) => t.rows.map((r) => Math.abs(r.v))),
-                        ...oiLanes.flatMap((l) => l.rows.map((r) => Math.abs(r.v))));
-  const span = SUPPLY_1S_STEPS.map((a) => a * qtyScale()).find((a) => a >= peak) || Math.max(peak, 1e-9);
-  const mid = flowTop + flowH / 2;
-  const half = flowH / 2 - 4;
-  // 마지막 계단을 넘는 폭발은 잘라서 상자 안에 둔다 -- 넘치면 옆 패널을 침범한다.
-  const yF = (v) => mid - Math.max(-1, Math.min(1, v / span)) * half;
-
+  { let prev = oiBase; oiKeys.forEach((x) => { if (x <= first) return; const v = S.oi.get(x); oiRows.push({ s: x, v: v - oiBase, d: v - prev }); prev = v; }); }
+  const NL = LANES.length + 1, laneH = flowH / NL;
+  const bw = Math.max(0.8, cw / SUPPLY_1S_SEGMENT - 0.25);
+  // 막대는 색마다 path 하나로 모은다(5줄 × 300초 × 2 = 3천 노드 대신 10개).
+  const barPath = (bars, color, opacity) => {
+    if (!bars.length) return;
+    const pth = document.createElementNS(NS, "path");
+    pth.setAttribute("d", bars.join(" ")); pth.setAttribute("fill", color); pth.setAttribute("fill-opacity", opacity);
+    svg.appendChild(pth);
+  };
+  const rect = (x, y, wd, ht) => `M${x.toFixed(1)} ${y.toFixed(1)}h${wd.toFixed(2)}v${ht.toFixed(1)}h${(-wd).toFixed(2)}Z`;
+  const sgn = (v) => (v >= 0 ? "+" : "-") + qty(v);
+  // 체결 없는 초(5초 넘게)는 «0» 이 아니라 «모름» -- 판 전체에 흐린 띠.
   let prevSec = null;
-  secs.forEach((s) => {
-    if (prevSec !== null && s - prevSec > SUPPLY_1S_GAP_SEC) {
+  secs.forEach((x) => {
+    if (prevSec !== null && x - prevSec > SUPPLY_1S_GAP_SEC) {
       const g = document.createElementNS(NS, "rect");
       g.setAttribute("x", xAt(prevSec)); g.setAttribute("y", flowTop);
-      g.setAttribute("width", Math.max(1, xAt(s) - xAt(prevSec)));
-      g.setAttribute("height", flowH);
+      g.setAttribute("width", Math.max(1, xAt(x) - xAt(prevSec))); g.setAttribute("height", flowH);
       g.setAttribute("fill", "var(--neutral)"); g.setAttribute("fill-opacity", "0.07");
       const t = document.createElementNS(NS, "title");
-      t.textContent = "체결 기록 없음 " + (s - prevSec) + "초 -- 0이 아니라 «모름»이다";
-      g.appendChild(t);
-      svg.appendChild(g);
+      t.textContent = "체결 기록 없음 " + (x - prevSec) + "초 -- 0이 아니라 «모름»이다";
+      g.appendChild(t); svg.appendChild(g);
     }
-    prevSec = s;
+    prevSec = x;
   });
-
-  // ±span 눈금선. 절대 눈금이 이 화면의 요점이라 숫자를 축에 적는다.
-  [span, -span].forEach((v) => {
-    const g = document.createElementNS(NS, "line");
-    g.setAttribute("x1", ml); g.setAttribute("x2", ml + cw);
-    g.setAttribute("y1", yF(v)); g.setAttribute("y2", yF(v));
-    g.setAttribute("stroke", "var(--line)"); g.setAttribute("stroke-opacity", "0.4");
-    g.setAttribute("stroke-dasharray", "3 3");
-    svg.appendChild(g);
-    label(ml - 3, yF(v) + 3, (v > 0 ? "+" : "-") + qty(span), "var(--muted)", "end");
-  });
-
-  // 끊김 없는 초 묶음. 밴드 셋이 같은 경계에서 갈라져야 층이 어긋나지 않는다.
-  const runs = [];
-  cvd.forEach((r, i) => {
-    if (i === 0 || brk(r.s, cvd[i - 1].s, SUPPLY_1S_GAP_SEC)) runs.push([i, i]);
-    else runs[runs.length - 1][1] = i;
-  });
-  // 🔴**쌓기이지 겹치기가 아니다**. 겹쳐 그리면 가려진 층의 두께를 눈으로 잴 수 없다
-  //   (가격축 프로파일에서 같은 결론을 이미 냈다 -- 그 함수 머리글 주석).
-  // 색은 **층의 부호**를 따른다. 3색 계약이라 「고래색」을 새로 만들 수 없으므로
-  //   층 구분은 색이 아니라 **농담**이다.
-  const band = (lo, hi, opacity, title) => {
-    let d = "";
-    runs.forEach(([a, b]) => {
-      if (b <= a) return;
-      for (let i = a; i <= b; i++) {
-        d += (i === a ? "M" : " L") + xAt(lo[i].s).toFixed(1) + " " + yF(lo[i].v).toFixed(1);
-      }
-      for (let i = b; i >= a; i--) {
-        d += " L" + xAt(hi[i].s).toFixed(1) + " " + yF(hi[i].v).toFixed(1);
-      }
-      d += " Z ";
-    });
-    const end = hi[hi.length - 1].v - lo[lo.length - 1].v;
-    const color = end < 0 ? "var(--bad)" : "var(--good)";
-    const path = document.createElementNS(NS, "path");
-    path.setAttribute("d", d.trim()); path.setAttribute("fill", color);
-    path.setAttribute("fill-opacity", opacity); path.setAttribute("stroke", "none");
-    const t = document.createElementNS(NS, "title");
-    t.textContent = title + " " + (end >= 0 ? "+" : "-") + qty(end) + " " + coinUnit();
-    path.appendChild(t);
-    svg.appendChild(path);
-    return color;
+  const laneFrame = (k, name, value, color, maxTxt) => {
+    const y0 = flowTop + k * laneH, zc = y0 + laneH / 2;
+    const zl = document.createElementNS(NS, "line");
+    zl.setAttribute("x1", ml); zl.setAttribute("x2", ml + cw); zl.setAttribute("y1", zc); zl.setAttribute("y2", zc);
+    zl.setAttribute("stroke", "var(--ink)"); zl.setAttribute("stroke-opacity", "0.18");
+    svg.appendChild(zl);
+    if (k) {
+      const sep = document.createElementNS(NS, "line");
+      sep.setAttribute("x1", 4); sep.setAttribute("x2", w - 4); sep.setAttribute("y1", y0); sep.setAttribute("y2", y0);
+      sep.setAttribute("stroke", "var(--line)");
+      svg.appendChild(sep);
+    }
+    const big = laneH >= 44;
+    const nt = label(6, zc - (big ? 4 : -4), name, "var(--text)", null, narrow ? 11 : 12);
+    nt.setAttribute("font-weight", "700");
+    if (big) {
+      const vt = label(6, zc + 12, value, color, null, narrow ? 12 : 13);
+      vt.setAttribute("font-weight", "700");
+      if (maxTxt && laneH >= 62) label(6, zc + 25, maxTxt, "var(--muted)", null, 9);
+    } else {
+      label(ml - 4, zc + 4, value, color, "end", 10);
+    }
+    return { y0, zc, hh: laneH / 2 - 3 };
   };
-  const zeroRows = cvd.map((r) => ({ s: r.s, v: 0 }));
-  const cW = band(zeroRows, whale, 0.42, "고래");
-  const cM = band(whale, stackMid, 0.24, "중형");
-  const cR = band(stackMid, cvd, 0.11, "리테일");
-  // 🔴농담만으로는 층이 안 갈린다(실렌더에서 확인). 경계에 실선 한 올을 얹는다 --
-  //   리테일은 −226 일 때 두께가 2px 라 이 선이 없으면 층이 있는지조차 모른다.
-  line(pathOf(whale, (r) => yF(r.v)), cW, 0.8, 0.55);
-  line(pathOf(stackMid, (r) => yF(r.v)), cM, 0.8, 0.55);
+  const cumLine = (rows, zc, hh, color) => {
+    const cs = Math.max(1e-9, ...rows.map((r) => Math.abs(r.v)));
+    line(pathOf(rows, (r) => zc - (r.v / cs) * hh * 0.9), color, 1.5, 0.9);
+  };
+  LANES.forEach(([name, pick], k) => {
+    let mx = 0, acc = 0;
+    const rows = inSeg.map((x) => { const [b, sl] = pick(cellOf(x)); mx = Math.max(mx, b, sl); acc += b - sl; return { s: x, b, sl, v: acc }; });
+    const { zc, hh } = laneFrame(k, name, sgn(acc), acc >= 0 ? "var(--good)" : "var(--bad)",
+                                 mx > 0 ? "최대 " + qty(mx) + "/초" : "");
+    if (mx > 0) {
+      const up = [], dn = [];
+      rows.forEach((r) => {
+        const x0 = xAt(r.s) - bw;
+        if (r.b > 0) { const hgt = hh * Math.sqrt(r.b / mx); up.push(rect(x0, zc - hgt, bw, hgt)); }
+        if (r.sl > 0) dn.push(rect(x0, zc, bw, hh * Math.sqrt(r.sl / mx)));
+      });
+      barPath(up, "var(--good)", TIER_OP[name]);
+      barPath(dn, "var(--bad)", TIER_OP[name]);
+    }
+    cumLine(rows, zc, hh, "var(--ink)");
+  });
+  // 신규(OI) 줄 -- 같은 형식: 늘면 위, 줄면 아래.
+  {
+    const k = LANES.length, oiEnd = oiRows.length ? oiRows[oiRows.length - 1].v : 0;
+    const dmax = Math.max(0, ...oiRows.map((r) => Math.abs(r.d)));
+    const { zc, hh } = laneFrame(k, "신규", oiRows.length ? sgn(oiEnd) : "—", "var(--warn)",
+                                 dmax > 0 ? "최대 " + qty(dmax) + "/초" : "");
+    if (dmax > 0) {
+      const up = [], dn = [];
+      oiRows.forEach((r) => {
+        if (!r.d) return;
+        const hgt = hh * Math.sqrt(Math.abs(r.d) / dmax), x0 = xAt(r.s) - bw;
+        (r.d > 0 ? up : dn).push(rect(x0, r.d > 0 ? zc - hgt : zc, bw, hgt));
+      });
+      barPath(up, "var(--warn)", 0.9);
+      barPath(dn, "var(--muted)", 0.6);
+    }
+    if (oiRows.length >= 2) {
+      const cs = Math.max(1e-9, ...oiRows.map((r) => Math.abs(r.v)));
+      const yOi = (v) => zc - (v / cs) * hh * 0.9;
+      line(pathOf(oiRows, (r) => yOi(r.v), 20), "var(--warn)", 1.6, 0.95);
+      // 청산: 그 초의 OI 누적선 위 점 -- 청산은 포지션을 강제로 닫아 OI 를 줄이는 사건이다. 크기는 **로그**(건당 0.86~2,556 ETH).
+      const oiAt = (sec) => {
+        if (sec <= oiRows[0].s) return oiRows[0].v;
+        for (let i = 1; i < oiRows.length; i++) {
+          if (oiRows[i].s < sec) continue;
+          const a = oiRows[i - 1], b = oiRows[i];
+          if (b.s - a.s > 20) return b.s - sec <= sec - a.s ? b.v : a.v;
+          return a.v + (b.v - a.v) * (sec - a.s) / (b.s - a.s);
+        }
+        return oiRows[oiRows.length - 1].v;
+      };
+      inSeg.forEach((x) => {
+        const lc = S.liq.get(x);
+        if (!lc || !(lc[0] > 0 || lc[1] > 0)) return;
+        const e = { s: x, v: lc[1] - lc[0] };
+        const c = document.createElementNS(NS, "circle");
+        c.setAttribute("cx", xAt(e.s).toFixed(1));
+        c.setAttribute("cy", yOi(oiAt(e.s)).toFixed(1));
+        c.setAttribute("r", (2 + Math.log10(1 + Math.abs(e.v)) / Math.log10(3001) * 7).toFixed(1));
+        c.setAttribute("fill", e.v >= 0 ? "var(--good)" : "var(--bad)");
+        c.setAttribute("fill-opacity", "0.92");
+        const t = document.createElementNS(NS, "title");
+        t.textContent = "청산 롱 " + fmtUsdCompact(lc[2]) + " / 숏 " + fmtUsdCompact(lc[3])
+          + "  (" + qty(lc[0]) + " / " + qty(lc[1]) + " " + coinUnit() + ")";
+        c.appendChild(t); svg.appendChild(c);
+      });
+    }
+  }
 
-  // 봉 진행선. x축이 **봉 전체**라 아직 안 온 시간이 오른쪽에 비어 있는데, 그게 «데이터가
-  // 없다»가 아니라 «아직 안 왔다»라는 걸 화면이 말해야 한다. 봉이 막 바뀐 직후엔 거의
-  // 전부가 빈 상태라 이 선이 없으면 고장난 것처럼 보인다.
+  // «지금» 세로선과 아직 안 온 시간 음영 -- 빈 오른쪽이 «없음»이 아니라 «아직»으로 읽히게.
   {
     const nx = xAt(now);
     const g = document.createElementNS(NS, "line");
-    g.setAttribute("x1", nx); g.setAttribute("x2", nx);
-    g.setAttribute("y1", flowTop); g.setAttribute("y2", flowTop + flowH);
-    g.setAttribute("stroke", "var(--ink)"); g.setAttribute("stroke-opacity", "0.35");
-    g.setAttribute("stroke-dasharray", "2 3");
+    g.setAttribute("x1", nx); g.setAttribute("x2", nx); g.setAttribute("y1", flowTop); g.setAttribute("y2", flowTop + flowH);
+    g.setAttribute("stroke", "var(--ink)"); g.setAttribute("stroke-opacity", "0.35"); g.setAttribute("stroke-dasharray", "2 3");
     svg.appendChild(g);
     const rest = document.createElementNS(NS, "rect");
     rest.setAttribute("x", nx); rest.setAttribute("y", flowTop);
-    rest.setAttribute("width", Math.max(0, ml + cw - nx));
-    rest.setAttribute("height", flowH);
+    rest.setAttribute("width", Math.max(0, ml + cw - nx)); rest.setAttribute("height", flowH);
     rest.setAttribute("fill", "var(--lift-solid, #8b949e)"); rest.setAttribute("fill-opacity", "0.05");
     svg.appendChild(rest);
   }
 
-  const rule = (y, opacity) => {
-    const g = document.createElementNS(NS, "line");
-    g.setAttribute("x1", ml); g.setAttribute("x2", ml + cw);
-    g.setAttribute("y1", y); g.setAttribute("y2", y);
-    g.setAttribute("stroke", "var(--line)");
-    if (opacity) g.setAttribute("stroke-opacity", opacity);
-    svg.appendChild(g);
-  };
-  rule(mid);
-
-  // 신규계약: **같은 ETH 축**이다. 둘 다 ETH 이고 실측 진폭도 같은 자릿수라(7,548 vs
-  //   4,734) 축을 나눌 이유가 없다 -- 나누면 세로 위치에 뜻이 없어진다. 합치면
-  //   「매도 주도인데 미결제약정이 늘었다 = 신규 숏」이 한 눈에 읽힌다.
-  // 갱신 간격이 3~7초라 체결선의 5초 절단을 그대로 쓰면 조각난다. 20초를 쓴다.
-  // 2026-09-22 사용자 지시로 **굵은 주황 실선**(CVD 와 같은 굵기 2). 가는 점선일 때는
-  //   CVD 와 겹치면 구별이 안 됐는데, 이제 색이 가른다 -- 주황은 이 차트에서 신규계약 하나뿐이다.
-  oiLanes.forEach((l) => {
-    if (l.rows.length >= 2) line(pathOf(l.rows, (r) => yF(r.v), 20), l.color, l.width, l.opacity, l.dash);
-  });
-  // 맨 위 윤곽이 곧 CVD 다. 중립 강조색이라 층의 방향색과 안 싸운다.
-  // 얇은 선을 **먼저** 그려 합산 본선 뒤에 깔리게 한다.
-  thinRows.forEach((t) => {
-    if (t.rows.length >= 2) line(pathOf(t.rows, (r) => yF(r.v)), "var(--ink)", 1, 0.42);
-  });
-  line(pathOf(cvd, (r) => yF(r.v)), "var(--accent)", 2, 1);
-
-  // 청산: 크기를 가진 점. **로그**다 -- 실측 건당 중앙 0.86 / p99 270 / 최대 2,556 ETH 라
-  //   선형이면 큰 것 하나가 나머지를 점으로 만들고, √ 로도 모자란다.
-  if (liqEv.length) {
-    // 2026-09-22 0선에서 **신규계약 선 위**로 옮겼다(사용자 «원이 조금 부자연스러운데»).
-    //   0선 위에 일렬로 늘어서면 시각만 맞고 뜻이 안 붙는다. 청산은 포지션을 **강제로
-    //   닫는** 사건이라 미결제약정을 줄인다 -- 그 선 위에 앉히면 「이 강제청산이 OI 를
-    //   어디서 꺾었나」가 같은 자리에서 읽힌다.
-    // 🔴OI 는 3~7초마다 갱신이라 청산 초에 점이 없을 수 있다. «직전 관측값»(계단)으로
-    //   두면 선은 두 점 사이를 **직선으로 잇는데** 점만 계단에 남아 최대 7px 떠 있다
-    //   (실측). 선과 **같은 방식으로 보간**해야 점이 선 위에 정확히 앉는다.
-    const oiAt = (sec) => {
-      if (!oiRows.length) return 0;
-      if (sec <= oiRows[0].s) return oiRows[0].v;
-      for (let i = 1; i < oiRows.length; i++) {
-        if (oiRows[i].s < sec) continue;
-        const a = oiRows[i - 1], b = oiRows[i];
-        // 선이 끊기는 구간(20초 초과 공백)에서는 잇지 않는다 -- 없는 선 위에 점을 둘 수 없다.
-        if (b.s - a.s > 20) return b.s - sec <= sec - a.s ? b.v : a.v;
-        const t = (sec - a.s) / (b.s - a.s);
-        return a.v + (b.v - a.v) * t;
-      }
-      return oiRows[oiRows.length - 1].v;
-    };
-    const rMax = 9;
-    liqEv.forEach((e) => {
-      const c = document.createElementNS(NS, "circle");
-      const r = 2 + Math.log10(1 + Math.abs(e.v)) / Math.log10(3001) * (rMax - 2);
-      c.setAttribute("cx", xAt(e.s).toFixed(1));
-      c.setAttribute("cy", (oiRows.length ? yF(oiAt(e.s)) : mid).toFixed(1));
-      c.setAttribute("r", r.toFixed(1));
-      c.setAttribute("fill", e.v >= 0 ? "var(--good)" : "var(--bad)");
-      c.setAttribute("fill-opacity", "0.92");
-      const lc = S.liq.get(e.s) || [0, 0, 0, 0];
-      const t = document.createElementNS(NS, "title");
-      t.textContent = "청산 롱 " + fmtUsdCompact(lc[2]) + " / 숏 " + fmtUsdCompact(lc[3])
-        + "  (" + qty(lc[0]) + " / " + qty(lc[1]) + " " + coinUnit() + ")";
-      c.appendChild(t);
-      svg.appendChild(c);
-    });
-  }
-
-  // ── 범례 (고정 블록) ──────────────────────────────────────────────────────
-  // 🔴선마다 끝점 꼬리표를 달던 방식을 버렸다. 스택은 층 두께가 3px 까지 얇아질 수 있어
-  //   (리테일 -559 는 축의 5.6%) 끝점 y 로 놓으면 층끼리 글자가 겹친다. 예전엔 그걸
-  //   정렬·밀어내기로 막았는데, 자리가 고정이면 그 기계 자체가 필요 없다.
-  // 2026-09-22 모바일(사용자 지시): 이 블록을 플롯 **밖·아래**로 내린다. 차트 안에 띄우면
-  //   어디에 두든 데이터를 가리고, 가리지 않으려고 표면을 깔면 그만큼 또 데이터가 사라진다.
-  //   프로파일 바닥 범례와 같은 문법 -- 색표 + 이름 + 값이 한 줄로 흐른다.
-  const sgn = (v) => (v >= 0 ? "+" : "-") + qty(v);
-  // 🔴**CVD 절대값을 두 거래소끼리 비교하면 안 된다.** net 은 «큰 두 수의 차»라 한쪽이
-  //   균형에 가까우면 배율이 10배로도 튄다 -- 2026-09-23 실측: 바이낸스 CVD +70.9 vs
-  //   OKX -788 인데 같은 창의 **총량 비율은 0.75**였다(단위 문제가 아니다).
-  //   스케일 무관한 비교는 **불균형 비율**(net / 총량)이다. 같은 실측에서
-  //   바이낸스 +24.0% vs OKX -14.9% -- 「10배」가 아니라 «반대 방향, 비슷한 강도»다.
-  // ⭐분모는 화면의 CVD 와 **같은 구간**(현재 5분 세그먼트)이어야 뜻이 맞는다.
-  const curSeg = allSecs.length ? segOf(allSecs[allSecs.length - 1]) : null;
-  let grossSeg = 0;
-  allSecs.forEach((s) => {
-    if (s > first && segOf(s) === curSeg) { const c = S.supply.get(s); grossSeg += c[4] + c[5]; }
-  });
-  const imb = grossSeg > 0 ? 100 * cvd[cvd.length - 1].v / grossSeg : null;
-  const g1 = [];   // 거래소별 불균형(바이낸스·OKX·현물)
-  // 거래소별 불균형. **얇은 선을 안 그리는 현물**의 갈림도 여기서 읽힌다(점유 4.5% 라 선은
-  // 0선에 붙는다). 셋 다 같은 세그먼트·같은 정의라 그대로 비교된다.
-  (S.imbSources || []).forEach(([name, map]) => {
-    let g = 0, n = 0;
-    allSecs.forEach((x) => {
-      if (x <= first || segOf(x) !== curSeg) return;
-      const c = map.get(x);
-      if (c) { g += c[4] + c[5]; n += c[4] - c[5]; }
-    });
-    if (g > 0) {
-      const v = 100 * n / g;
-      g1.push([name + " " + (v >= 0 ? "+" : "") + v.toFixed(1) + "%", null,
-                 v >= 0 ? "var(--good)" : "var(--bad)", 0.75]);
-    }
-  });
-  if (imb !== null && !(S.imbSources || []).length) {
-    g1.push(["불균형 " + (imb >= 0 ? "+" : "") + imb.toFixed(1) + "%", null,
-               imb >= 0 ? "var(--good)" : "var(--bad)", 0.8]);
-  }
-  const g2 = [["고래", whale[whale.length - 1].v, cW, 0.63],
-              ["중형", cvd[cvd.length - 1].v - whale[whale.length - 1].v - retail[retail.length - 1].v, cM, 0.49],
-              ["리테일", retail[retail.length - 1].v, cR, 0.38]];
-  const g3 = [["CVD", cvd[cvd.length - 1].v, "var(--accent)", 1, true]]
-    .concat(oiRows.length >= 2 ? [["신규", oiRows[oiRows.length - 1].v, "var(--warn)", 0.95]] : []);
-  // ── 범례 = 플롯 안 박스 셋 (2026-09-28 사용자 지시: 거래소 3 · 고래·중형·리테일 3 · CVD·신규 2) ──────────
-  //   왼쪽→오른쪽으로 나란히, 오른쪽 끝에 붙인다. 위/아래는 **지금 CVD 끝점의 반대쪽** -- 방금 그린 선을 덮지 않는다.
-  //   🔴청산 합계 줄은 뺐다(3·3·2 지정) -- 청산은 점마다 툴팁에 롱/숏 금액이 있다.
-  // 글자: 데스크톱은 아래 5분봉 «누적 CVD» 범례와 같은 12/14(09-22 사용자 «같은 크기»), 모바일은 09-27 박스의 11/12.
-  const LBL = narrow ? 11 : 12;                 // 범례 본문
-  const LBL_HEAD = narrow ? 12 : 14;            // CVD (한 단계 위)
-  const FS = LBL, LH = FS + 4, PAD = 7, SWB = 7, BGAP = 6;
-  const boxes = [g1, g2, g3].filter((items) => items.length).map((items) => {
-    const g = document.createElementNS(NS, "g");
-    svg.appendChild(g);
-    const bg = document.createElementNS(NS, "rect");
-    g.appendChild(bg);
-    let maxW = 0;
-    const ts = items.map((row) => {
-      const txt = row[1] === null ? row[0] : row[0] + " " + sgn(row[1]);
-      const t = label(0, 0, txt, row[4] ? "var(--ink)" : "var(--text)", null, row[4] ? LBL_HEAD : FS, g);
-      if (row[4]) t.setAttribute("font-weight", "700");
-      let adv = 0;
-      try { adv = t.getComputedTextLength(); } catch (_) { adv = 0; }
-      maxW = Math.max(maxW, adv > 0 ? adv : txt.length * FS * 0.62);
-      return t;
-    });
-    return { g, bg, ts, items, bw: PAD * 2 + SWB + 5 + maxW, bh: PAD * 2 + items.length * LH - 3 };
-  });
-  const bh = Math.max(0, ...boxes.map((bx) => bx.bh));
-  const by = yF(cvd[cvd.length - 1].v) < mid ? flowTop + flowH - bh - 4 : flowTop + 4;
-  let bxR = ml + cw - 4;
-  boxes.slice().reverse().forEach((bx) => {
-    const x0 = bxR - bx.bw;
-    bx.bg.setAttribute("x", x0); bx.bg.setAttribute("y", by);
-    bx.bg.setAttribute("width", bx.bw); bx.bg.setAttribute("height", bx.bh);
-    bx.bg.setAttribute("rx", 6); bx.bg.setAttribute("fill", "var(--panel)"); bx.bg.setAttribute("fill-opacity", "0.9");
-    bx.bg.setAttribute("stroke", "var(--line)");
-    bx.ts.forEach((t, i) => {
-      const y = by + PAD + (i + 1) * LH - 4;
-      t.setAttribute("x", x0 + PAD + SWB + 5); t.setAttribute("y", y);
-      const sw = document.createElementNS(NS, "rect");
-      sw.setAttribute("x", x0 + PAD); sw.setAttribute("y", y - SWB);
-      sw.setAttribute("width", SWB); sw.setAttribute("height", SWB);
-      sw.setAttribute("fill", bx.items[i][2]); sw.setAttribute("fill-opacity", bx.items[i][3]);
-      bx.g.appendChild(sw);
-    });
-    bxR = x0 - BGAP;
-  });
-
-  // 2026-09-28 위 제목 줄(원천 · 스트림 나이)을 없앴다(사용자 지시). 🔴스트림이 죽었을 때만 빨간 경고로 남긴다 --
-  //   나이가 없으면 「스트림이 죽었다」와 「시장이 조용하다」가 구별되지 않는다(@aggTrade 3주 0건 사고).
+  // 위 제목 줄은 없다(2026-09-28). 🔴스트림이 죽었을 때만 빨간 경고 -- 나이가 없으면 «죽었다»와 «조용하다»가 구별 안 된다.
   if (S.stale) label(ml + 4, flowTop + 12, S.label + (S.age ? "  ·  " + S.age : ""), "var(--bad, #e05260)");
 
-  // 왼쪽은 이 봉이 열린 시각, 오른쪽은 닫힐 시각. 가운데에 진행 상황을 적는다 --
-  // 「지금」이 오른쪽 끝이 아니라는 걸 분명히 해야 빈 오른쪽이 오해되지 않는다.
-  const hhmm = (t) => { const d = new Date(t * 1000);
-    return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+  const hhmm = (t) => { const dd = new Date(t * 1000);
+    return String(dd.getHours()).padStart(2, "0") + ":" + String(dd.getMinutes()).padStart(2, "0"); };
   const axisY = h - 3;
   label(ml, axisY, hhmm(first) + " 봉 시작", "var(--muted)");
   label(ml + cw, axisY, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
-  // 🔴봉 끝으로 갈수록 이 꼬리표가 오른쪽 «닫힐 시각»과 겹친다(280/300초에서 실제로
-  //   포개졌다). 끝 18% 구간에서는 안 그린다 -- 그때는 진행선이 이미 오른쪽 끝에 붙어
-  //   있어 «지금»이 어디인지 말할 필요가 없다.
   if (!narrow && now - first < SUPPLY_1S_SEGMENT * 0.82) {
     label(xAt(now) + 4, axisY, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
   }

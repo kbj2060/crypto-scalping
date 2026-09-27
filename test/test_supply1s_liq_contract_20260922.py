@@ -30,7 +30,7 @@ def test_client_reads_same_order_and_sign():
     """클라는 [롱, 숏] 로 받아 «숏 − 롱» 을 그린다."""
     assert re.search(r"liq1s\.set\(r\[0\], \[r\[1\], r\[2\], r\[3\], r\[4\]\]\)", JS), \
         "클라가 liq 행을 [롱수량, 숏수량, 롱USD, 숏USD] 로 안 읽는다"
-    assert re.search(r"liqEv\.push\(\{ s: s2, v: c\[1\] - c\[0\] \}\)", JS), \
+    assert "const e = { s: x, v: lc[1] - lc[0] };" in JS, \
         "청산 부호가 «숏 − 롱» 이 아니다 -- 점의 색이 통째로 뒤집힌다"
 
 
@@ -75,36 +75,16 @@ def test_size_is_quantity_label_is_money():
         "청산 점 툴팁이 금액(USD)이 아니다 -- 아래 5분봉 청산과 단위가 갈린다"
 
 
-def test_liq_labels_match_the_cumulative_chart():
-    """1초 차트와 5분봉 누적 CVD 행의 범례는 **같은 크기**여야 한다(2026-09-22 사용자 지시).
+def test_lanes_decompose_the_total():
+    """줄 = CVD(합) · 고래 · 중형 · 리테일 · 신규. **중형만 뺄셈**이다(2026-09-28 다섯 줄 거울 막대).
 
-    같은 카드 안에서 역할이 같은데 19/15 와 12/11 로 갈려 있었다. 5분봉 쪽을 19 로 올릴
-    수는 없다 -- 그 행의 꼬리표 자리가 mr 86px 인데 «CVD +12k» 가 19px 로 약 105px 다.
+    칸은 [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]. 중형을 «총 − 고래»로 쓰면
+    리테일이 섞인 **이름만 틀린** 줄이 된다 -- 눈으로는 구별이 안 된다.
     """
-    one = re.search(r"const LBL = narrow \? (\d+) : (\d+);", JS)
-    one_head = re.search(r"const LBL_HEAD = narrow \? (\d+) : (\d+);", JS)
-    five = re.search(r'font-size", mobileChart \? \(k === 0 \? (\d+) : (\d+)\) : \(k === 0 \? (\d+) : (\d+)\)', JS)
-    assert one and one_head and five, "라벨 크기 선언을 못 찾았다"
-    assert (int(one_head.group(2)), int(one.group(2))) == (int(five.group(3)), int(five.group(4))), \
-        (f"데스크톱이 안 맞는다: 1초 {one_head.group(2)}/{one.group(2)} vs "
-         f"5분봉 {five.group(3)}/{five.group(4)}")
-    # 모바일은 09-27 사용자 요청(«아래 글자가 안 보인다»)으로 1초 박스 범례가 한 단계 크다 -- 데스크톱만 맞춘다.
-
-
-# ── 두 판 배치 (2026-09-22) ──────────────────────────────────────────────────
-
-def test_stack_is_an_identity_not_three_lines():
-    """CVD = 고래 + 중형 + 리테일. 층 경계가 0 → 고래 → (CVD−리테일) → CVD 순이어야 한다.
-
-    경계를 바꾸면 층이 서로를 파고들거나 뒤집히는데, path 는 그래도 그려진다.
-    특히 stackMid 를 «cvd − whale» 로 잘못 쓰면 가운데 층이 리테일이 되어 **이름만 틀린**
-    그림이 나온다 -- 눈으로는 구별이 안 된다.
-    """
-    assert re.search(r"const stackMid = cvd\.map\(\(r, i\) => \(\{ s: r\.s, v: r\.v - retail\[i\]\.v \}\)\)", JS), \
-        "스택 가운데 경계가 «CVD − 리테일» 이 아니다 -- 중형 층이 리테일 층이 된다"
-    order = re.findall(r'band\((\w+), (\w+), [\d.]+, "(\w+)"\)', JS)
-    assert order == [("zeroRows", "whale", "고래"), ("whale", "stackMid", "중형"),
-                     ("stackMid", "cvd", "리테일")], f"스택 순서가 바뀌었다: {order}"
+    assert '["CVD", (c) => [c[4], c[5]]]' in JS, "CVD 줄이 총매수/총매도가 아니다"
+    assert '["고래", (c) => [c[2], c[3]]]' in JS and '["리테일", (c) => [c[0], c[1]]]' in JS
+    assert "Math.max(0, c[4] - c[2] - c[0]), Math.max(0, c[5] - c[3] - c[1])" in JS, \
+        "중형이 «총 − 고래 − 리테일»이 아니다"
 
 
 def test_liquidation_is_not_on_the_shared_axis():
@@ -124,8 +104,8 @@ def test_liquidation_dots_sit_on_the_oi_line():
     사건이라 미결제약정을 줄인다 -- 그 선 위에 앉혀야 «이 청산이 OI 를 어디서 꺾었나»가
     같은 자리에서 읽힌다. OI 는 3~7초 갱신이라 그 초 이전의 마지막 관측을 쓴다.
     """
-    assert re.search(r'c\.setAttribute\("cy", \(oiRows\.length \? yF\(oiAt\(e\.s\)\) : mid\)', JS), \
-        "청산 원이 신규계약(OI) 선 위에 안 앉는다"
+    assert 'c.setAttribute("cy", yOi(oiAt(e.s)).toFixed(1));' in JS, \
+        "청산 원이 신규계약(OI) 누적선 위에 안 앉는다"
     assert "const LOW_H" not in JS and "const PANE_GAP" not in JS, \
         "아래 판 껍데기 상수가 남아 있다 -- 지웠으면 같이 지운다"
 
@@ -147,8 +127,7 @@ def test_one_pane_uses_the_whole_drawing_area():
     stats = int(re.search(r"const STATS_ROW_H = subOn && !splitR \? (\d+)", JS).group(1))
     assert sub_h - stats - mt - mb == 364, f"1단 그리기 영역이 {sub_h - stats - mt - mb}px 다(400-14-6-16=364 이어야)"
     assert mb >= 14, "바닥 시각 꼬리표(h-3) 자리가 없다"
-    assert re.search(r"const mid = flowTop \+ flowH / 2;", JS), "0선이 그리기 영역 한가운데가 아니다"
-    assert re.search(r"const half = flowH / 2 - 4;", JS), "반폭이 flowH 기준이 아니다"
+    assert "const NL = LANES.length + 1, laneH = flowH / NL;" in JS, "다섯 줄이 그리기 영역(flowH)을 정확히 나눠 쓰지 않는다"
     body = JS[JS.index("function renderSupply1s"):JS.index("function bookStatsTip")]
     assert "tMax" not in body and "barMax" not in body, \
         "거래대금 막대가 되살아났다 -- 2026-09-22 사용자 지시로 이 차트에서 뺐다"
