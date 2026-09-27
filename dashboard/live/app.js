@@ -4081,7 +4081,7 @@ function renderSupply1s(box = null, src = null) {
   //   화면에서 플롯이 344px = **+32%** 가 되고, 범례는 아래에서 플롯 위로 얹는다.
   //   🔴데스크톱은 그대로 둔다 -- 폭이 남는 화면에서 글자를 데이터 위에 올릴 이유가 없다.
   // 2026-09-28 다섯 줄 거울 막대 -- 왼쪽 칸에 줄 이름·누적값(범례 박스를 대체), 오른쪽은 얇은 여백만.
-  const ml = narrow ? 52 : 66, mr = 8;
+  const ml = narrow ? 62 : 82, mr = 8;   // 2026-09-28 왼쪽 이름·값 글자를 키우며 칸도 넓힘(사용자 지시)
   const cw = w - ml - mr;
   const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
@@ -4214,15 +4214,16 @@ function renderSupply1s(box = null, src = null) {
       sep.setAttribute("stroke", "var(--line)");
       svg.appendChild(sep);
     }
-    const big = laneH >= 44;
-    const nt = label(6, zc - (big ? 4 : -4), name, "var(--text)", null, narrow ? 11 : 12);
+    // 2026-09-28 이름 15·값 17(모바일 13·15)로 키웠다(사용자 «라벨이랑 수치 크기를 키워줘»).
+    const big = laneH >= 50;
+    const nt = label(6, zc - (big ? 5 : -5), name, "var(--text)", null, narrow ? 13 : 15);
     nt.setAttribute("font-weight", "700");
     if (big) {
-      const vt = label(6, zc + 12, value, color, null, narrow ? 12 : 13);
+      const vt = label(6, zc + 15, value, color, null, narrow ? 15 : 17);
       vt.setAttribute("font-weight", "700");
-      if (maxTxt && laneH >= 62) label(6, zc + 25, maxTxt, "var(--muted)", null, 9);
+      if (maxTxt && laneH >= 66) label(6, zc + 30, maxTxt, "var(--muted)", null, 10.5);
     } else {
-      label(ml - 4, zc + 4, value, color, "end", 10);
+      label(ml - 4, zc + 5, value, color, "end", 12);
     }
     return { y0, zc, hh: laneH / 2 - 3 };
   };
