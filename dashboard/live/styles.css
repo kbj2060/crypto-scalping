@@ -3098,10 +3098,7 @@ body.not-eth [data-eth-only]::after {
    좌표는 JS 가 left/top 으로 준다. 패널은 남은 공간이 넓은 쪽으로 연다(.up / .rightside).
    🔴z-index 900: 툴팁(1000)·터치 팁(9999)보다 아래 -- 차트 툴팁이 이 버튼 뒤로 숨으면 안 된다. */
 .ofab { position: fixed; left: 0; top: 0; z-index: 900; transition: opacity .2s ease, transform .2s ease; }
-/* 계좌 카드가 보이는 동안 접어 둔다(app.js IntersectionObserver) -- 카드 안에 같은 조작부가 있다. */
-.ofab.tucked { opacity: 0; transform: translateY(12px); pointer-events: none; visibility: hidden;
-  transition: opacity .2s ease, transform .2s ease, visibility 0s linear .2s; }
-@media (prefers-reduced-motion: reduce) { .ofab, .ofab.tucked { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .ofab { transition: none; } }
 /* 모바일: 페이지 끝이 떠 있는 버튼 뒤에 묻히지 않게 버튼 높이 + 16px 만큼 여백. */
 @media (pointer: coarse) { main.app { padding-bottom: 76px; } }
 .ofab[hidden] { display: none; }
@@ -3209,16 +3206,25 @@ body.order-coin-off .acct-lanes::before {
   background: var(--panel); padding: 10px 18px; font-size: 12px; color: var(--muted);
 }
 
-/* 2026-09-27 데스크톱(가로 ≥1700px) -- 사용자가 고른 A′ 첫 화면: 본문을 전체 폭으로 쓰고 맨 윗줄에
-   «차트 | 내 계좌(600px)» 를 나란히. 그 아래 카드는 지금처럼 전체 폭 한 줄씩(사용자 «세로로 늘어진
-   버전은 현재대로»). 모바일·좁은 창·세로 화면은 이 블록 밖이라 그대로다.
-   ≥1700px 인 이유: 차트가 지금(1,318px)보다 너무 좁아지지 않게 -- 1440px 창이면 776px 로 반 토막이 났다(실측).
-   그보다 좁은 창은 지금 모양 그대로. 600px 에는 두 레인(청산 | 진입)이 안 들어가서 계좌 카드 안에서만 위아래로 쌓는다 -- 청산이 위(09-22 규칙). */
+/* 2026-09-27 넓은 화면(가로 ≥1700px) -- 풋프린트 카드 2단(사용자 선택 62:38).
+   본문은 전체 폭. 차트 SVG 안에서 왼쪽 62% = 밀도 범례·풋프린트·사분면·누적 CVD·리본,
+   오른쪽 38% = 호가 프로파일·1초 수급, 그 아래 지지/저항 목록(app.js placeLevelList 가 얹는다).
+   --fp-split 이 곧 «2단이냐»의 유일한 판정이다 -- app.js renderCandleSvg 가 이 값을 읽는다.
+   상자 872 = 12 + 범례 14 + 8 + 가격 플롯 400 + 레인 368 + mb 70 (test_sub_panel_height_contract 가 검사).
+   ≥1700px 인 이유: 풋프린트 칸이 1,000px 밑으로 가면 셀 숫자가 안 들어간다(1440 창이면 776px 였다). */
 @media (min-width: 1700px) and (orientation: landscape) {
   .app { max-width: none; }
-  #snapshotTabPanel { grid-template-columns: minmax(0, 1fr) 600px; align-items: start; }
-  #snapshotTabPanel > * { grid-column: 1 / -1; }
-  #snapshotTabPanel > .liq-map-panel { grid-column: 1; grid-row: 2; }
-  #snapshotTabPanel > .acct-panel { grid-column: 2; grid-row: 2; }
-  .acct-panel .acct-lanes { grid-template-columns: 1fr; }
+  #candleSvgSnapshot { --fp-split: 0.38; height: 872px; }
+  .candle-container { height: 884px; }
+  .liq-map-panel { position: relative; }
+}
+
+/* 2026-09-27 헤더 한 줄(사용자 지시): 스냅샷의 «코인 탭 · 발표 경보 · 테마» 줄을 페이지 탭과 세션 사이로 올렸다.
+   다른 탭에서는 지금처럼 안 보인다. 모바일(≤720)은 세션 다음 줄로 보내 전과 같은 모양을 지킨다. */
+.topbar { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 20px; }
+.topbar > .snap-head { padding: 0; align-items: center; }
+body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
+@media (max-width: 720px) {
+  .topbar { grid-template-columns: 1fr; }
+  .topbar > .snap-head { order: 3; margin-top: 4px; }
 }

@@ -60,18 +60,13 @@ def run(shot):
                 pg.wait_for_timeout(400)
                 bad = lambda msg: fails.append(f"[{tag}] {msg}")
                 ok = lambda c, msg: None if c else bad(msg)
-                # 2026-09-26: 계좌 카드가 보이는 동안엔 접혀 있어야 한다(카드 안에 같은 조작부가 있다) --
-                #   그다음 카드를 화면 밖으로 보내고 나머지 검사를 한다.
-                # 2026-09-27 차트 카드가 위로 올라가 첫 화면에 계좌 카드가 없다 -- 순서에 기대지 않고 카드로 먼저 간다.
+                # 2026-09-27 사용자 «주문 버튼은 상시 띄워줘» -- 계좌 카드 앞에서도 떠 있어야 한다(09-26 의 접기를 걷었다).
                 pg.evaluate("() => document.getElementById('snapAcctPosition').closest('.panel').scrollIntoView()")
                 pg.wait_for_timeout(500)
-                ok(pg.evaluate("() => document.getElementById('ofab').classList.contains('tucked')"),
-                   "계좌 카드가 보이는데 떠 있는 버튼이 안 접혔다")
-                pg.evaluate("() => { const c = document.getElementById('snapAcctPosition').closest('.panel');"
-                            " window.scrollTo(0, c.getBoundingClientRect().bottom + scrollY + 40); }")
-                pg.wait_for_timeout(500)
-                ok(not pg.evaluate("() => document.getElementById('ofab').classList.contains('tucked')"),
-                   "계좌 카드를 벗어났는데 떠 있는 버튼이 안 떴다")
+                ok(pg.evaluate("() => { const o = document.getElementById('ofab'); const cs = getComputedStyle(o);"
+                               " return !o.hidden && cs.visibility !== 'hidden' && Number(cs.opacity) > 0.9; }"),
+                   "계좌 카드 앞에서 떠 있는 버튼이 사라졌다(상시 표시여야 한다)")
+                pg.evaluate("() => window.scrollTo(0, 0)")
 
                 # 2026-09-25 접기 폐지: 포지션이 있어도 진입 칸은 열려 있고, 제목 줄을 눌러도 안 접힌다.
                 pg.evaluate("() => { manualExitSyncButtons(); document.getElementById('snapEntrySummary').click(); }")
