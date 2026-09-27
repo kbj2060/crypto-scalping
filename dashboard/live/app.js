@@ -3237,8 +3237,13 @@ function updateLivePriceFast(price) {
   if (line) { line.setAttribute("y1", y); line.setAttribute("y2", y); }
   if (tri) tri.setAttribute("points", markerPoints(c.markerX, y));
   const labelY = Math.max(c.mt + 9, Math.min(c.mt + c.ch - 9, y));
-  if (lab) lab.setAttribute("y", labelY + 4);
+  const labBg = c.svg.querySelector('[data-live="labelbg"]');   // 2026-09-28 풋프린트 현재가 태그 바탕
+  if (lab) lab.setAttribute("y", labelY + (labBg ? 4.5 : 4));
   if (lab && lab.dataset.withPrice) lab.textContent = "현재 " + fmtNum(price, pxDp());   // 2026-09-27 풋프린트: 가격이 왼쪽 글자 안
+  if (labBg && lab) {
+    labBg.setAttribute("y", labelY - 9);
+    try { labBg.setAttribute("width", lab.getComputedTextLength() + 10); } catch (e) { /* 비렌더 */ }
+  }
   // 2026-09-22 모바일에는 배지가 없다(값은 플롯 아래 한 줄에 있다). 옛 판은 box/txt 가
   //   없으면 **여기서 return** 해서 화살표까지 같이 멈췄다 -- 전체 렌더(1초)까지 어긋난다.
   const row = c.svg.querySelector('[data-live="rowtext"]');
@@ -4068,10 +4073,9 @@ function renderSupply1s(box = null, src = null) {
   // 🔴narrow 를 **먼저** 선언한다. 아래 mb 가 이걸 읽는데 순서를 바꾸면 TDZ
   //   ReferenceError 로 app.js 전체가 죽는다 -- node --check 는 못 잡는다(문법은 옳다).
   const narrow = w < 760;   // 모바일이든 좁은 상자든 여백 규칙은 같다
-  // 2026-09-27 모바일(세로)은 범례를 플롯 **안 박스**로 그린다(사용자 «아래 글자가 안 보인다») -- 바닥 한 줄 자리(mb 28)를 돌려받는다.
-  //   데스크톱 2단의 오른쪽 칸(691px)도 narrow 지만 그쪽은 바닥 한 줄 그대로다(요청 범위 밖).
-  const boxLegend = narrow && isMobileChartMode();
-  const mt = 16, mb = boxLegend ? 16 : narrow ? 28 : 14;
+  // 2026-09-28 모든 폭에서 범례는 플롯 **안 박스 셋**(사용자 «거래소 3 · 크기별 3 · 신규 2»)이고 위 제목 줄도 없앴다 --
+  //   mt 는 위 여백만, mb 는 바닥 시각 꼬리표(h-3) 한 줄이다. (09-27 모바일 박스가 모든 폭으로 넓어진 것)
+  const mt = 6, mb = 16;
   // mr 은 오른쪽 꼬리표(고래/리테일/신규계약 + 값)가 앉는 자리다. 64 면 «신규계약 +0.4k»
   // 가 약 4px 넘친다(2026-09-19 계산) -- 72 로 두면 셋 다 들어가고 선은 8px 만 짧아진다.
   // 2026-09-22 꼬리표 글자를 키우면서 자리도 넓혔다(사용자 «많이 키워줘»).
@@ -4080,7 +4084,7 @@ function renderSupply1s(box = null, src = null) {
   //   자리**다. 88 을 비워 두면 348px 화면에서 선이 260px 로 눌린다(실측). 8 로 줄이면 같은
   //   화면에서 플롯이 344px = **+32%** 가 되고, 범례는 아래에서 플롯 위로 얹는다.
   //   🔴데스크톱은 그대로 둔다 -- 폭이 남는 화면에서 글자를 데이터 위에 올릴 이유가 없다.
-  const ml = narrow ? 34 : 45, mr = narrow ? 8 : 150;
+  const ml = narrow ? 34 : 45, mr = 8;   // 2026-09-28 범례가 안으로 들어와 오른쪽 150 을 선에 돌려준다
   const cw = w - ml - mr;
   const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
@@ -4193,13 +4197,10 @@ function renderSupply1s(box = null, src = null) {
   //   27시간 실측은 봉당 중앙 6.8 / p90 217 / 최대 3,877 -- 계열 하나 안에서 570배다.
   //   그래서 축에서 빼고 아래 판에 «크기를 가진 점»으로 둔다.
   const liqEv = [];
-  const liqSum = [0, 0, 0, 0];   // 롱수량, 숏수량, 롱USD, 숏USD
   allSecs.forEach((s2) => {
     if (s2 <= first) return;
     const c = S.liq.get(s2);
     if (!c) return;
-    liqSum[0] += c[0]; liqSum[1] += c[1];
-    liqSum[2] += (c[2] || 0); liqSum[3] += (c[3] || 0);
     if (c[0] > 0 || c[1] > 0) liqEv.push({ s: s2, v: c[1] - c[0] });
   });
   // 신규계약(OI)은 **레벨**이라 더하지 않는다: 그 구간 첫 관측 대비 증분이다.
@@ -4359,17 +4360,6 @@ function renderSupply1s(box = null, src = null) {
   });
   line(pathOf(cvd, (r) => yF(r.v)), "var(--accent)", 2, 1);
 
-  // 2026-09-22 아래 5분봉 «누적 CVD» 행의 범례와 **같은 크기**로 맞춘다(사용자 지시).
-  //   같은 카드 안에서 같은 역할(계열 범례)인데 19/15 와 12/11 로 갈려 있었다.
-  //   🔴두 값의 중간으로 간다. 5분봉 쪽을 19 로 올릴 수는 없다 -- 그 행의 꼬리표 자리는
-  //     mr 86px 인데 «CVD +12k» 가 19px 로 약 105px 라 잘린다. 14/12 는 78/72px 로 들어간다.
-  //   ⭐크기를 상수로 박지 않고 **한 곳에서 파생**시킨다 -- 줄 간격·색표·들여쓰기가 전부
-  //     글자 크기를 따라가야 키울 때마다 셋을 같이 고치는 일이 안 생긴다.
-  const LBL = narrow ? 10 : 12;                 // 범례 본문
-  const LBL_HEAD = narrow ? 11 : 14;            // CVD (한 단계 위)
-  const STEP = Math.round(LBL * 1.34);          // 줄 간격
-  const SW = Math.round(LBL * 0.55);            // 색표 한 변
-
   // 청산: 크기를 가진 점. **로그**다 -- 실측 건당 중앙 0.86 / p99 270 / 최대 2,556 ETH 라
   //   선형이면 큰 것 하나가 나머지를 점으로 만들고, √ 로도 모자란다.
   if (liqEv.length) {
@@ -4418,11 +4408,7 @@ function renderSupply1s(box = null, src = null) {
   // 2026-09-22 모바일(사용자 지시): 이 블록을 플롯 **밖·아래**로 내린다. 차트 안에 띄우면
   //   어디에 두든 데이터를 가리고, 가리지 않으려고 표면을 깔면 그만큼 또 데이터가 사라진다.
   //   프로파일 바닥 범례와 같은 문법 -- 색표 + 이름 + 값이 한 줄로 흐른다.
-  const lx = ml + cw + 5;
   const sgn = (v) => (v >= 0 ? "+" : "-") + qty(v);
-  if (!narrow) {
-    label(lx, flowTop + LBL_HEAD, "CVD " + sgn(cvd[cvd.length - 1].v), "var(--ink)", null, LBL_HEAD);
-  }
   // 🔴**CVD 절대값을 두 거래소끼리 비교하면 안 된다.** net 은 «큰 두 수의 차»라 한쪽이
   //   균형에 가까우면 배율이 10배로도 튄다 -- 2026-09-23 실측: 바이낸스 CVD +70.9 vs
   //   OKX -788 인데 같은 창의 **총량 비율은 0.75**였다(단위 문제가 아니다).
@@ -4435,7 +4421,7 @@ function renderSupply1s(box = null, src = null) {
     if (s > first && segOf(s) === curSeg) { const c = S.supply.get(s); grossSeg += c[4] + c[5]; }
   });
   const imb = grossSeg > 0 ? 100 * cvd[cvd.length - 1].v / grossSeg : null;
-  const rows = [];
+  const g1 = [];   // 거래소별 불균형(바이낸스·OKX·현물)
   // 거래소별 불균형. **얇은 선을 안 그리는 현물**의 갈림도 여기서 읽힌다(점유 4.5% 라 선은
   // 0선에 붙는다). 셋 다 같은 세그먼트·같은 정의라 그대로 비교된다.
   (S.imbSources || []).forEach(([name, map]) => {
@@ -4447,110 +4433,73 @@ function renderSupply1s(box = null, src = null) {
     });
     if (g > 0) {
       const v = 100 * n / g;
-      rows.push([name + " " + (v >= 0 ? "+" : "") + v.toFixed(1) + "%", null,
+      g1.push([name + " " + (v >= 0 ? "+" : "") + v.toFixed(1) + "%", null,
                  v >= 0 ? "var(--good)" : "var(--bad)", 0.75]);
     }
   });
   if (imb !== null && !(S.imbSources || []).length) {
-    rows.push(["불균형 " + (imb >= 0 ? "+" : "") + imb.toFixed(1) + "%", null,
+    g1.push(["불균형 " + (imb >= 0 ? "+" : "") + imb.toFixed(1) + "%", null,
                imb >= 0 ? "var(--good)" : "var(--bad)", 0.8]);
   }
-  rows.push(["고래", whale[whale.length - 1].v, cW, 0.63],
-             ["중형", cvd[cvd.length - 1].v - whale[whale.length - 1].v - retail[retail.length - 1].v, cM, 0.49],
-             ["리테일", retail[retail.length - 1].v, cR, 0.38]);
-  if (oiRows.length >= 2) {
-    rows.push([narrow ? "OI" : "신규", oiRows[oiRows.length - 1].v, "var(--warn)", 0.95]);
-  }
-  // 2026-09-22 청산 꼬리표가 차트 한가운데 떠 있었다. 범례로 들여 같은 열·같은 크기로
-  //   맞춘다(사용자 «통일성»). 값은 **금액**이다 -- 아래 5분봉 청산이 USD 라 단위를 맞췄다.
-  if (liqSum[2] > 0 || liqSum[3] > 0) {
-    rows.push([narrow ? "청산 " + fmtUsdCompact(liqSum[2] + liqSum[3])
-                      : "청산 롱" + fmtUsdCompact(liqSum[2]) + "/숏" + fmtUsdCompact(liqSum[3]),
-               null, liqSum[3] >= liqSum[2] ? "var(--good)" : "var(--bad)", 0.92]);
-  }
-  if (boxLegend) {
-    // 박스 범례: CVD(12px 굵게) + 거래소별 불균형 + 고래·중형·리테일 + OI + 청산, 색표 붙여 한 열.
-    //   🔴11px 밝은 글자 -- 바닥 한 줄은 9.5px 흐린 글자라 폰에서 안 읽혔다. 넘치면 자르던 것도 없어진다(세로라서).
-    //   자리는 오른쪽 위/아래 중 **지금 CVD 끝점의 반대쪽** -- 방금 그린 선을 덮지 않는다.
-    const items = [["CVD", cvd[cvd.length - 1].v, "var(--accent)", 1]].concat(rows);
-    const FS = 11, LH = 15, PAD = 7, SWB = 7;
+  const g2 = [["고래", whale[whale.length - 1].v, cW, 0.63],
+              ["중형", cvd[cvd.length - 1].v - whale[whale.length - 1].v - retail[retail.length - 1].v, cM, 0.49],
+              ["리테일", retail[retail.length - 1].v, cR, 0.38]];
+  const g3 = [["CVD", cvd[cvd.length - 1].v, "var(--accent)", 1, true]]
+    .concat(oiRows.length >= 2 ? [["신규", oiRows[oiRows.length - 1].v, "var(--warn)", 0.95]] : []);
+  // ── 범례 = 플롯 안 박스 셋 (2026-09-28 사용자 지시: 거래소 3 · 고래·중형·리테일 3 · CVD·신규 2) ──────────
+  //   왼쪽→오른쪽으로 나란히, 오른쪽 끝에 붙인다. 위/아래는 **지금 CVD 끝점의 반대쪽** -- 방금 그린 선을 덮지 않는다.
+  //   🔴청산 합계 줄은 뺐다(3·3·2 지정) -- 청산은 점마다 툴팁에 롱/숏 금액이 있다.
+  // 글자: 데스크톱은 아래 5분봉 «누적 CVD» 범례와 같은 12/14(09-22 사용자 «같은 크기»), 모바일은 09-27 박스의 11/12.
+  const LBL = narrow ? 11 : 12;                 // 범례 본문
+  const LBL_HEAD = narrow ? 12 : 14;            // CVD (한 단계 위)
+  const FS = LBL, LH = FS + 4, PAD = 7, SWB = 7, BGAP = 6;
+  const boxes = [g1, g2, g3].filter((items) => items.length).map((items) => {
     const g = document.createElementNS(NS, "g");
     svg.appendChild(g);
     const bg = document.createElementNS(NS, "rect");
     g.appendChild(bg);
     let maxW = 0;
-    const ts = items.map((row, i) => {
+    const ts = items.map((row) => {
       const txt = row[1] === null ? row[0] : row[0] + " " + sgn(row[1]);
-      const t = label(0, 0, txt, i === 0 ? "var(--ink)" : "var(--text)", null, i === 0 ? 12 : FS, g);
-      if (i === 0) t.setAttribute("font-weight", "700");
+      const t = label(0, 0, txt, row[4] ? "var(--ink)" : "var(--text)", null, row[4] ? LBL_HEAD : FS, g);
+      if (row[4]) t.setAttribute("font-weight", "700");
       let adv = 0;
       try { adv = t.getComputedTextLength(); } catch (_) { adv = 0; }
       maxW = Math.max(maxW, adv > 0 ? adv : txt.length * FS * 0.62);
       return t;
     });
-    const bw = PAD * 2 + SWB + 5 + maxW, bh = PAD * 2 + items.length * LH - 3;
-    const bx = ml + cw - bw - 4;
-    const by = yF(cvd[cvd.length - 1].v) < mid ? flowTop + flowH - bh - 4 : flowTop + 4;
-    bg.setAttribute("x", bx); bg.setAttribute("y", by); bg.setAttribute("width", bw); bg.setAttribute("height", bh);
-    bg.setAttribute("rx", 6); bg.setAttribute("fill", "var(--panel)"); bg.setAttribute("fill-opacity", "0.9");
-    bg.setAttribute("stroke", "var(--line)");
-    ts.forEach((t, i) => {
+    return { g, bg, ts, items, bw: PAD * 2 + SWB + 5 + maxW, bh: PAD * 2 + items.length * LH - 3 };
+  });
+  const bh = Math.max(0, ...boxes.map((bx) => bx.bh));
+  const by = yF(cvd[cvd.length - 1].v) < mid ? flowTop + flowH - bh - 4 : flowTop + 4;
+  let bxR = ml + cw - 4;
+  boxes.slice().reverse().forEach((bx) => {
+    const x0 = bxR - bx.bw;
+    bx.bg.setAttribute("x", x0); bx.bg.setAttribute("y", by);
+    bx.bg.setAttribute("width", bx.bw); bx.bg.setAttribute("height", bx.bh);
+    bx.bg.setAttribute("rx", 6); bx.bg.setAttribute("fill", "var(--panel)"); bx.bg.setAttribute("fill-opacity", "0.9");
+    bx.bg.setAttribute("stroke", "var(--line)");
+    bx.ts.forEach((t, i) => {
       const y = by + PAD + (i + 1) * LH - 4;
-      t.setAttribute("x", bx + PAD + SWB + 5); t.setAttribute("y", y);
+      t.setAttribute("x", x0 + PAD + SWB + 5); t.setAttribute("y", y);
       const sw = document.createElementNS(NS, "rect");
-      sw.setAttribute("x", bx + PAD); sw.setAttribute("y", y - SWB);
+      sw.setAttribute("x", x0 + PAD); sw.setAttribute("y", y - SWB);
       sw.setAttribute("width", SWB); sw.setAttribute("height", SWB);
-      sw.setAttribute("fill", items[i][2]); sw.setAttribute("fill-opacity", items[i][3]);
-      g.appendChild(sw);
+      sw.setAttribute("fill", bx.items[i][2]); sw.setAttribute("fill-opacity", bx.items[i][3]);
+      bx.g.appendChild(sw);
     });
-  } else if (narrow) {
-    // 바닥 한 줄. 왼쪽 끝(x=3)부터 흐른다 -- ml 로 들여쓰면 마지막 항목이 밖으로 나간다.
-    // 🔴색표를 안 그린다. 2026-09-22 실측에서 여섯 항목 글자가 299px 인데 색표 여섯이
-    //   96px 을 더해 342px 를 넘겨 «청산 $16.2k» 가 잘렸다. 아래 5분봉 «누적 CVD» 줄도
-    //   같은 이유로 색표가 없다 -- 이름이 계열을 이미 말하고, 줄이 그림 바로 아래 붙어 있다.
-    // 🔴그리고 **넘칠 것 같으면 멈춘다**. 자릿수는 데이터가 정하므로 상수로는 못 막는다.
-    const items = [["CVD", cvd[cvd.length - 1].v, "var(--accent)", 1]].concat(rows);
-    const RLBL = LBL - 0.5;
-    let x = 3;
-    items.forEach((row) => {
-      if (x > w - 24) return;
-      // 청산 행은 값이 null 이다 -- 라벨에 이미 «$X» 가 들어 있어 부호가 없다.
-      const txt = row[1] === null ? row[0] : row[0] + " " + sgn(row[1]);
-      const t = label(x, h - 9, txt, "var(--muted)", null, RLBL);
-      // 다음 항목 자리는 **실측 폭**으로 민다 -- 글자 수로 어림하면 자릿수가 늘 때 겹친다.
-      let adv = 0;
-      try { adv = t.getComputedTextLength(); } catch (_) { adv = txt.length * RLBL * 0.62; }
-      if (!(adv > 0)) adv = txt.length * RLBL * 0.62;
-      if (x + adv > w - 3) { t.remove(); x = w; return; }   // 잘린 글자를 남기지 않는다
-      x += adv + 8;
-    });
-  } else {
-    rows.forEach((row, i) => {
-      const y = flowTop + LBL_HEAD + 8 + (i + 1) * STEP;
-      const sw = document.createElementNS(NS, "rect");
-      sw.setAttribute("x", lx); sw.setAttribute("y", y - SW);
-      sw.setAttribute("width", SW); sw.setAttribute("height", SW);
-      sw.setAttribute("fill", row[2]); sw.setAttribute("fill-opacity", row[3]);
-      svg.appendChild(sw);
-      label(lx + SW + 4, y, row[1] === null ? row[0] : row[0] + " " + sgn(row[1]),
-            "var(--muted)", null, LBL);
-    });
-  }
+    bxR = x0 - BGAP;
+  });
 
-  // 무엇을 보고 있는지 한 줄. 끝점 꼬리표가 곧 «이번 5분 순수급»이라 여기 숫자를 또 적지 않는다.
-  // 🔴어느 거래소인지와 **스트림 나이**를 같이 적는다. 스트림이 조용히 죽으면 선이 그냥
-  //   멈추는데, 나이가 없으면 그게 「시장이 조용한 것」과 구별되지 않는다(이 저장소에서
-  //   @aggTrade 가 3주간 0건이었는데 아무도 몰랐다).
-  label(ml + 2, mt - 5, S.label + "  ·  이번 5분봉 누적 순수급 " + coinUnit()
-        + (S.age ? `  ·  ${S.age}` : "")
-        + (narrow ? "" : "  ·  아래 풋프린트 봉과 같은 구간 · 다음 봉에서 0"),
-        S.stale ? "var(--bad, #e05260)" : "var(--muted)");
+  // 2026-09-28 위 제목 줄(원천 · 스트림 나이)을 없앴다(사용자 지시). 🔴스트림이 죽었을 때만 빨간 경고로 남긴다 --
+  //   나이가 없으면 「스트림이 죽었다」와 「시장이 조용하다」가 구별되지 않는다(@aggTrade 3주 0건 사고).
+  if (S.stale) label(ml + 4, flowTop + 12, S.label + (S.age ? "  ·  " + S.age : ""), "var(--bad, #e05260)");
 
   // 왼쪽은 이 봉이 열린 시각, 오른쪽은 닫힐 시각. 가운데에 진행 상황을 적는다 --
   // 「지금」이 오른쪽 끝이 아니라는 걸 분명히 해야 빈 오른쪽이 오해되지 않는다.
   const hhmm = (t) => { const d = new Date(t * 1000);
     return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
-  const axisY = narrow && !boxLegend ? h - mb + 8 : h - 3;   // 바닥 한 줄 범례일 때만 그 위로 올린다
+  const axisY = h - 3;
   label(ml, axisY, hhmm(first) + " 봉 시작", "var(--muted)");
   label(ml + cw, axisY, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
   // 🔴봉 끝으로 갈수록 이 꼬리표가 오른쪽 «닫힐 시각»과 겹친다(280/300초에서 실제로
@@ -4560,19 +4509,6 @@ function renderSupply1s(box = null, src = null) {
     label(xAt(now) + 4, axisY, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
   }
 }
-
-// ── 가격축 수급 프로파일 (2026-09-19) ───────────────────────────────────────
-// 시간을 버리고 가격만 남긴다. 창 전체(최대 24시간)를 가격빈으로 접어 «어느 값에서 누가
-// 공격했는가»를 본다. 리본이 «지금»을 말한다면 이 화면은 «자리»를 말한다.
-// 왼쪽이 공격적 매도, 오른쪽이 공격적 매수, 가운데가 가격이다. 한 막대는 가운데부터
-// **고래 → 중형 → 리테일** 순으로 이어 붙인 세 토막이다(쌓기이지 겹치기가 아니다 --
-// 겹쳐 그리면 가려진 토막의 길이를 눈으로 잴 수 없다). 큰 것부터 안쪽에 두는 이유는
-// 가운데 선이 기준이라 거기서 출발하는 토막만 길이를 바로 읽을 수 있기 때문이다.
-// 색은 셋 다 방향색(초록/빨강) 하나이고, 구분은 **농담**이다 -- 이 저장소의 색 계약이
-// 초록·빨강·주황 셋뿐이라 「고래색」을 새로 만들 수 없다(styles.css 디자인 토큰 주석).
-// ⚠️창은 프로세스가 살아 있는 동안만 찬다 -- 스냅샷에는 최근 12봉만 남긴다(server.py의
-//   FOOTPRINT_KEEP_BARS 주석). 그래서 실제 창 길이를 머리글에 **항상** 적는다.
-
 
 // 2026-09-28 호가 요약 네 숫자(변동·불균형·지속·이탈)의 설명 -- 옛 호가·체결 프로파일 바닥글 툴팁을 그대로 옮겼다
 //   (프로파일 상자는 사라지고 숫자는 풋프린트 체결·호가 기둥 머리로 갔다, 사용자 선택 시안 B).
@@ -6306,17 +6242,34 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 이름이 없는 것(30분 시나리오 목표 «↑56%»)은 왼쪽으로 옮길 때 sub 를 이름으로 쓴다.
     const leftName = p.label || (priceLeft && p.sub ? p.sub : "");
     const txt = leftName ? document.createElementNS(NS, "text") : null;
+    // 2026-09-28 풋프린트 현재가는 **채운 태그**(사용자 «현재가 라벨을 더 크게») -- 13px(모바일 12) 어두운 글자, 왼쪽 끝에서
+    //   시작해 필요하면 플롯 안으로 조금 들어간다(가격 태그 관례). 빠른 갱신(updateLivePriceFast)이 글자·폭·높이를 같이 옮긴다.
+    const nowTag = p.label === "현재" && !!footprint;
+    const tagBg = nowTag ? document.createElementNS(NS, "rect") : null;
+    if (tagBg) {
+      tagBg.setAttribute("x", 2); tagBg.setAttribute("y", labelY - 9); tagBg.setAttribute("height", 18);
+      tagBg.setAttribute("rx", 3); tagBg.setAttribute("fill", p.color);
+      svg.appendChild(tagBg);
+    }
     if (txt) {
-      txt.setAttribute("x", ml - 5); txt.setAttribute("y", labelY + 4);
-      txt.setAttribute("text-anchor", "end"); txt.setAttribute("font-size", "10");
-      txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", p.color);
+      txt.setAttribute("x", nowTag ? 7 : ml - 5); txt.setAttribute("y", labelY + (nowTag ? 4.5 : 4));
+      txt.setAttribute("text-anchor", nowTag ? "start" : "end");
+      txt.setAttribute("font-size", nowTag ? (mobileChart ? "12" : "13") : "10");
+      txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", nowTag ? inkOnFill() : p.color);
       txt.textContent = `${leftName}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;
       svg.appendChild(txt);
-      if (priceLeft) {
+      if (priceLeft && nowTag) {
+        txt.textContent = `${txt.textContent} ${fmtNum(p.val, pxDp())}`;
+      } else if (priceLeft) {
         // 왼쪽 여백(ml-5)을 넘으면 SVG 밖으로 잘린다 -- 재서 소수점을 뗀다.
         const name = txt.textContent;
         txt.textContent = `${name} ${fmtNum(p.val, pxDp())}`;
         try { if (txt.getComputedTextLength() > ml - 7) txt.textContent = `${name} ${fmtNum(p.val, Math.max(0, pxDp() - 1))}`; } catch (e) { /* 비렌더 */ }
+      }
+      if (tagBg) {
+        let tw = 0;
+        try { tw = txt.getComputedTextLength(); } catch (e) { /* 비렌더 */ }
+        tagBg.setAttribute("width", (tw > 0 ? tw : txt.textContent.length * 7.5) + 10);
       }
     }
 
@@ -6382,6 +6335,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       rect.dataset.live = "box";
       pTxt.dataset.live = "text";
       txt.dataset.live = "label";
+      if (tagBg) tagBg.dataset.live = "labelbg";
       if (priceLeft) txt.dataset.withPrice = "1";   // 빠른 갱신이 글자 속 가격도 바꾼다
     }
   });

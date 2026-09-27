@@ -70,8 +70,9 @@ def test_size_is_quantity_label_is_money():
     """
     assert re.search(r"Math\.log10\(1 \+ Math\.abs\(e\.v\)\)", JS), \
         "점 크기가 수량 기반 로그가 아니다"
-    assert "fmtUsdCompact(liqSum[2])" in JS and "fmtUsdCompact(liqSum[3])" in JS, \
-        "청산 꼬리표가 금액(USD)이 아니다 -- 아래 5분봉 청산과 단위가 갈린다"
+    # 2026-09-28 범례의 청산 합계 줄은 빠졌다(사용자 3·3·2 박스) -- 금액은 점마다 툴팁에 남는다.
+    assert '"청산 롱 " + fmtUsdCompact(lc[2]) + " / 숏 " + fmtUsdCompact(lc[3])' in JS, \
+        "청산 점 툴팁이 금액(USD)이 아니다 -- 아래 5분봉 청산과 단위가 갈린다"
 
 
 def test_liq_labels_match_the_cumulative_chart():
@@ -87,9 +88,7 @@ def test_liq_labels_match_the_cumulative_chart():
     assert (int(one_head.group(2)), int(one.group(2))) == (int(five.group(3)), int(five.group(4))), \
         (f"데스크톱이 안 맞는다: 1초 {one_head.group(2)}/{one.group(2)} vs "
          f"5분봉 {five.group(3)}/{five.group(4)}")
-    assert (int(one_head.group(1)), int(one.group(1))) == (int(five.group(1)), int(five.group(2))), \
-        (f"모바일이 안 맞는다: 1초 {one_head.group(1)}/{one.group(1)} vs "
-         f"5분봉 {five.group(1)}/{five.group(2)}")
+    # 모바일은 09-27 사용자 요청(«아래 글자가 안 보인다»)으로 1초 박스 범례가 한 단계 크다 -- 데스크톱만 맞춘다.
 
 
 # ── 두 판 배치 (2026-09-22) ──────────────────────────────────────────────────
@@ -134,27 +133,20 @@ def test_liquidation_dots_sit_on_the_oi_line():
 def test_one_pane_uses_the_whole_drawing_area():
     """그리기 영역(flowH) 전부를 누적 스택이 쓴다.
 
-    데스크톱 SUB_1S_H(400) − mt(16) − mb(14) = 370.
-    2026-09-22 모바일은 범례가 플롯 밖 **바닥 한 줄**로 내려가 mb 가 28 이다 → 356.
-    그 14px 이 범례 줄 값이고, 그만큼만 선이 짧아져야 한다.
+    2026-09-28 범례가 모든 폭에서 플롯 **안 박스**로 들어가고 위 제목 줄도 없어졌다 -- 여백은
+    위 mt(6) + 바닥 시각 꼬리표 한 줄 mb(16) 뿐이다. 1단 상자 386(400 − 네 숫자 줄 14)이면 364.
 
     🔴이 산수가 어긋나면 SVG 는 잘라주지 않는다 -- 넘치면 옆 패널을 침범하고, 모자라면
       빈 띠가 생긴다. 캔들 상자 높이 계약(styles.css)과 이 파일이 갈라져 있어 한쪽만
       고치면 조용히 깨지므로 여기서 다시 센다.
     """
-    # 2026-09-27 모바일 범례가 차트 안 박스로(boxLegend) 들어가 mb 가 한 갈래 늘었다 -- 박스일 땐 바닥 줄이 없다.
-    m = re.search(r"const mt = (\d+), mb = boxLegend \? \d+ : narrow \? (\d+) : (\d+);", JS)
+    m = re.search(r"const mt = (\d+), mb = (\d+);", JS)
     assert m, "mt/mb 선언 모양이 바뀌었다 -- 계약을 다시 세운다"
-    mt, mb_narrow, mb_wide = (int(g) for g in m.groups())
+    mt, mb = (int(g) for g in m.groups())
     sub_h = int(re.search(r"SUB_1S_H = subOn \? (\d+)", JS).group(1))
-    assert sub_h - mt - mb_wide == 370, \
-        f"데스크톱 그리기 영역이 {sub_h - mt - mb_wide}px 다(400-16-14=370 이어야)"
-    assert sub_h - mt - mb_narrow == 356, \
-        f"모바일 그리기 영역이 {sub_h - mt - mb_narrow}px 다(400-16-28=356 이어야)"
-    # 🔴narrow 는 mb 보다 **먼저** 선언돼야 한다. 순서가 뒤집히면 TDZ ReferenceError 로
-    #   app.js 전체가 죽는데 node --check 는 문법이 옳아 못 잡는다(2026-09-22 실제 발생).
-    assert JS.index("const narrow = w < 760;") < m.start(), \
-        "narrow 선언이 mb 보다 뒤다 -- TDZ 로 app.js 가 통째로 죽는다"
+    stats = int(re.search(r"const STATS_ROW_H = subOn && !splitR \? (\d+)", JS).group(1))
+    assert sub_h - stats - mt - mb == 364, f"1단 그리기 영역이 {sub_h - stats - mt - mb}px 다(400-14-6-16=364 이어야)"
+    assert mb >= 14, "바닥 시각 꼬리표(h-3) 자리가 없다"
     assert re.search(r"const mid = flowTop \+ flowH / 2;", JS), "0선이 그리기 영역 한가운데가 아니다"
     assert re.search(r"const half = flowH / 2 - 4;", JS), "반폭이 flowH 기준이 아니다"
     body = JS[JS.index("function renderSupply1s"):JS.index("function bookStatsTip")]
