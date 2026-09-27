@@ -62,6 +62,9 @@ def run(shot):
                 ok = lambda c, msg: None if c else bad(msg)
                 # 2026-09-26: 계좌 카드가 보이는 동안엔 접혀 있어야 한다(카드 안에 같은 조작부가 있다) --
                 #   그다음 카드를 화면 밖으로 보내고 나머지 검사를 한다.
+                # 2026-09-27 차트 카드가 위로 올라가 첫 화면에 계좌 카드가 없다 -- 순서에 기대지 않고 카드로 먼저 간다.
+                pg.evaluate("() => document.getElementById('snapAcctPosition').closest('.panel').scrollIntoView()")
+                pg.wait_for_timeout(500)
                 ok(pg.evaluate("() => document.getElementById('ofab').classList.contains('tucked')"),
                    "계좌 카드가 보이는데 떠 있는 버튼이 안 접혔다")
                 pg.evaluate("() => { const c = document.getElementById('snapAcctPosition').closest('.panel');"

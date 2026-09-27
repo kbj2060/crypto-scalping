@@ -187,6 +187,62 @@
 
       <!-- 2026-09-21 사용자 요청(아티팩트 댓글): 상단 «요약 카드» 제거. 같은 세 지표가
            아래 «모델 내부 지표» 목록에 값·이력·설명까지 갖춰 그대로 있다. -->
+      <!-- 2026-09-27 사용자 요청: 차트 카드와 «내 계좌» 카드 자리를 맞바꿨다(차트가 위). -->
+      <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
+        <!-- 2026-09-19 2열 배치를 되돌렸다(사용자 지시 "지지·저항 게이지를 이전 위치로").
+             오른쪽 열에는 청산 레벨 목록만 남아 있었는데, 그게 제자리(차트 바로 아래
+             전체 폭)로 돌아오면 열이 빈다 -- 그래서 열 자체를 없앴다. 카드 안 순서는
+             모드 탭 -> 캔들 SVG(가격 플롯·수급 프로파일·1초 수급·OI/청산 레인이 전부
+             그 안에 있다) -> 청산 레벨 목록이다. -->
+        <div class="ops-health-head">
+          <!-- 2026-09-21 청산 밀도 범례는 여기서 **캔들 SVG 안**(프로파일 바닥글 바로 아래)
+               으로 내려갔다(아티팩트 댓글). 밀도가 풋프린트의 배경이 된 뒤로 헤더에 있으면
+               설명하는 그림에서 멀다. -->
+          <!-- 2026-09-19 창 토글(사용자 요청). 풋프린트와 **그 위 수급 프로파일**이 같은
+               창을 쓴다 -- 한 카드 안의 두 그림이 다른 구간을 말하면 읽는 사람이 속는다.
+               청산맵은 제 창(72봉)을 따로 쓰므로 이 토글이 건드리지 않는다.
+               🔴행의 **왼쪽 끝**에 둔다. 모드 탭 옆에 붙였더니 다섯 알약이 한 줄로 이어져
+                 «세그먼트 하나»처럼 읽혔다(사용자 "따로따로 배치해줘"). -->
+          <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
+               title="풋프린트와 수급 프로파일이 보는 구간. 서버는 24시간까지 쌓아 두므로 바꾸면 즉시 반영된다.">
+            <button type="button" class="asset-tab active" data-bars="12">1h</button>
+            <button type="button" class="asset-tab" data-bars="24">2h</button>
+            <button type="button" class="asset-tab" data-bars="48">4h</button>
+            <button type="button" class="asset-tab" data-bars="144">12h</button>
+          </div>
+          <div class="ops-health-head-tools">
+            <!-- 2026-09-16 차트 모드 전환. 풋프린트는 12봉(1시간)이라 가격 폭이 $45 안팎인데
+                 청산밀도 빈은 $620 범위에 깔려 있어 창 안에 9%밖에 안 들어온다 -- 한 화면에
+                 둘을 같이 담을 방법이 없어서 «바꿔 보는» 쪽을 택했다(사용자 결정). -->
+            <!-- 2026-09-21 청산맵 모드 제거(사용자 결정). 풋프린트가 유일한 차트다 --
+                 청산 밀도 히트맵·S/R 레벨 목록·최근접 레벨 선이 전부 풋프린트에서 나온다.
+                 아래 liqMapBadge 는 청산맵 «데이터» 상태 배지라 그대로 둔다. -->
+            <!-- 2026-09-23 사용자 「세션 RVOL 은 카드 상단에 오늘 거래량이 많다/적다로」.
+                 🔴톤은 **항상 neutral** 이다. warn/bad 를 쓰면 «맥락»이 «신호»로 읽힌다 --
+                 이 값은 앞 24h 레인지 중앙값을 378/451/516bp 로 가르지만(단조) 그건
+                 «오늘의 온도»이지 방향도 진입 근거도 아니다. 뜻은 글자가 나른다. -->
+            <span id="rvolSessionBadge" class="ops-badge neutral" hidden>-</span>
+            <span id="liqMapBadge" class="ops-badge neutral">-</span>
+          </div>
+        </div>
+        <!-- 2026-09-11 청산 규모 게이지는 모델 지표 칩(청산 규모)으로 옮겼다(사용자 지시).
+             같은 원천(latestLiquidation5m, 30분 누적)이라 두 곳에 두면 중복이다. -->
+        <!-- 2026-09-19 수급 프로파일과 1초 수급도 이 SVG **안**(바닥 두 패널)으로 들어갔다
+             -- 아티팩트 댓글 "svg 안으로는 못 들어가?". 독립 컨테이너 둘은 없앴고, 그리는
+             코드는 그대로 중첩 <svg> 에 그린다(app.js renderCandleSvg 의 SUB_* 블록). -->
+        <!-- 2026-09-19 OI 신규계약(5분) 레인은 이 SVG **안**, 청산 레인 바로 위에 그린다
+             (사용자 지시). 별도 패널로 두지 않는 이유는 캔들과 x축이 구성상 같아야 해서다 --
+             레짐 리본이 같은 이유로 여기 들어와 있다. app.js renderCandleSvg 의 「봉별 OI
+             신규계약 레인」 블록. -->
+        <div class="chart-container candle-container">
+          <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet" role="img"
+            aria-label="ETH 5분봉 차트 — 풋프린트·수급(CVD)·호가 프로파일·청산·사분면"></svg>
+        </div>
+        <div id="liquidationMapList" class="liq-level-list"></div>
+      </section>
+      <!-- 2026-09-11 청산 위험 패널 제거 -- 같은 숫자가 지표 행의 「청산 위험」 칩에도
+           있어 중복이었다(사용자 지시). 칩이 등급·게이지·툴팁을 모두 담는다. -->
+
       <!-- 2026-09-10 사용자 요청: 청산맵 바로 위에 현 계좌/포지션 요약. 숫자는 거래소 실계좌
            (/api/binance-account)라 봇 원장과 달리 수동 매매도 보인다. 운영 관리 탭의 "바이낸스 계정"
            패널과 같은 payload 를 쓰며(app.js latestBinanceAccount) 여기선 보고 있는 코인만 접어 보인다. -->
@@ -353,61 +409,6 @@
              전에는 카드 오른쪽 절반을 먹어 레일이 «척추»가 될 폭이 없었다. 곡선은 «역사»라
              조작보다 아래가 맞다 -- 이 카드의 일은 «지금 무엇을 할까»다. -->
         <div id="snapAcctPerf"></div>
-      </section>
-      <!-- 2026-09-11 청산 위험 패널 제거 -- 같은 숫자가 지표 행의 「청산 위험」 칩에도
-           있어 중복이었다(사용자 지시). 칩이 등급·게이지·툴팁을 모두 담는다. -->
-
-      <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
-        <!-- 2026-09-19 2열 배치를 되돌렸다(사용자 지시 "지지·저항 게이지를 이전 위치로").
-             오른쪽 열에는 청산 레벨 목록만 남아 있었는데, 그게 제자리(차트 바로 아래
-             전체 폭)로 돌아오면 열이 빈다 -- 그래서 열 자체를 없앴다. 카드 안 순서는
-             모드 탭 -> 캔들 SVG(가격 플롯·수급 프로파일·1초 수급·OI/청산 레인이 전부
-             그 안에 있다) -> 청산 레벨 목록이다. -->
-        <div class="ops-health-head">
-          <!-- 2026-09-21 청산 밀도 범례는 여기서 **캔들 SVG 안**(프로파일 바닥글 바로 아래)
-               으로 내려갔다(아티팩트 댓글). 밀도가 풋프린트의 배경이 된 뒤로 헤더에 있으면
-               설명하는 그림에서 멀다. -->
-          <!-- 2026-09-19 창 토글(사용자 요청). 풋프린트와 **그 위 수급 프로파일**이 같은
-               창을 쓴다 -- 한 카드 안의 두 그림이 다른 구간을 말하면 읽는 사람이 속는다.
-               청산맵은 제 창(72봉)을 따로 쓰므로 이 토글이 건드리지 않는다.
-               🔴행의 **왼쪽 끝**에 둔다. 모드 탭 옆에 붙였더니 다섯 알약이 한 줄로 이어져
-                 «세그먼트 하나»처럼 읽혔다(사용자 "따로따로 배치해줘"). -->
-          <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
-               title="풋프린트와 수급 프로파일이 보는 구간. 서버는 24시간까지 쌓아 두므로 바꾸면 즉시 반영된다.">
-            <button type="button" class="asset-tab active" data-bars="12">1h</button>
-            <button type="button" class="asset-tab" data-bars="24">2h</button>
-            <button type="button" class="asset-tab" data-bars="48">4h</button>
-            <button type="button" class="asset-tab" data-bars="144">12h</button>
-          </div>
-          <div class="ops-health-head-tools">
-            <!-- 2026-09-16 차트 모드 전환. 풋프린트는 12봉(1시간)이라 가격 폭이 $45 안팎인데
-                 청산밀도 빈은 $620 범위에 깔려 있어 창 안에 9%밖에 안 들어온다 -- 한 화면에
-                 둘을 같이 담을 방법이 없어서 «바꿔 보는» 쪽을 택했다(사용자 결정). -->
-            <!-- 2026-09-21 청산맵 모드 제거(사용자 결정). 풋프린트가 유일한 차트다 --
-                 청산 밀도 히트맵·S/R 레벨 목록·최근접 레벨 선이 전부 풋프린트에서 나온다.
-                 아래 liqMapBadge 는 청산맵 «데이터» 상태 배지라 그대로 둔다. -->
-            <!-- 2026-09-23 사용자 「세션 RVOL 은 카드 상단에 오늘 거래량이 많다/적다로」.
-                 🔴톤은 **항상 neutral** 이다. warn/bad 를 쓰면 «맥락»이 «신호»로 읽힌다 --
-                 이 값은 앞 24h 레인지 중앙값을 378/451/516bp 로 가르지만(단조) 그건
-                 «오늘의 온도»이지 방향도 진입 근거도 아니다. 뜻은 글자가 나른다. -->
-            <span id="rvolSessionBadge" class="ops-badge neutral" hidden>-</span>
-            <span id="liqMapBadge" class="ops-badge neutral">-</span>
-          </div>
-        </div>
-        <!-- 2026-09-11 청산 규모 게이지는 모델 지표 칩(청산 규모)으로 옮겼다(사용자 지시).
-             같은 원천(latestLiquidation5m, 30분 누적)이라 두 곳에 두면 중복이다. -->
-        <!-- 2026-09-19 수급 프로파일과 1초 수급도 이 SVG **안**(바닥 두 패널)으로 들어갔다
-             -- 아티팩트 댓글 "svg 안으로는 못 들어가?". 독립 컨테이너 둘은 없앴고, 그리는
-             코드는 그대로 중첩 <svg> 에 그린다(app.js renderCandleSvg 의 SUB_* 블록). -->
-        <!-- 2026-09-19 OI 신규계약(5분) 레인은 이 SVG **안**, 청산 레인 바로 위에 그린다
-             (사용자 지시). 별도 패널로 두지 않는 이유는 캔들과 x축이 구성상 같아야 해서다 --
-             레짐 리본이 같은 이유로 여기 들어와 있다. app.js renderCandleSvg 의 「봉별 OI
-             신규계약 레인」 블록. -->
-        <div class="chart-container candle-container">
-          <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet" role="img"
-            aria-label="ETH 5분봉 차트 — 풋프린트·수급(CVD)·호가 프로파일·청산·사분면"></svg>
-        </div>
-        <div id="liquidationMapList" class="liq-level-list"></div>
       </section>
 
       <!-- 2026-09-21 «상황 읽기 · 30분» -- 사용자가 고른 트레이더 읽기(스퀴즈·클라이맥스·분배·얇은 벽·가치영역·
