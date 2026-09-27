@@ -220,7 +220,9 @@ let supplyProfileSubBox = null;
 let supplyProfileVer = 0, supply1sVer = 0, flowHeatmapVer = 0;
 const subPanelCache = { prof: { node: null, key: "" }, s1: { node: null, key: "" },
                         dens: { node: null, key: "" } };
-const subProfileKey = (entry, w, h) => `${supplyProfileVer}|${flowHeatmapVer}|${entry}|${w}|${h}`;
+// 2026-09-27 현재가 행도 키에 넣는다 -- 프로파일이 현재가를 세로 가운데에 두므로 행이 바뀌면 다시 그려 가운데를 잡는다.
+const subProfileKey = (entry, w, h, price = 0) =>
+  `${supplyProfileVer}|${flowHeatmapVer}|${entry}|${w}|${h}|${Math.round(price / ((latestSupplyProfile && latestSupplyProfile.bucket) || 0.5))}`;
 const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}`;
 
 // ── 합산 출처 (2026-09-23) ───────────────────────────────────────────────
@@ -309,7 +311,8 @@ function repaintSupplyProfilePanel() {
   renderSupplyProfileSvg(b.svg, latestSupplyProfile,
     Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0,
     entry, { w: b.w, h: b.h });
-  subPanelCache.prof.key = subProfileKey(entry, b.w, b.h);
+  subPanelCache.prof.key = subProfileKey(entry, b.w, b.h,
+    Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || 0);
 }
 
 const API_OI_5M_URL = "/api/oi-5m";
@@ -4704,7 +4707,14 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   const avail = h - mt - mb;
   const bucket = Number(profile.bucket) || 0.5;
   const prices = levels.map((l) => Number(l[0]));
-  const minP = Math.min(...prices), maxP = Math.max(...prices);
+  let minP = Math.min(...prices), maxP = Math.max(...prices);
+  // 2026-09-27 현재가를 세로 **정중앙**에(사용자 지시) -- 현재가에서 먼 쪽 거리로 위아래를 대칭으로 편다.
+  //   행은 아래에서 현재가 행을 가운데 둔 **연속** 행으로 만든다(체결 없는 행은 빈 막대).
+  const cur = Number(currentPrice) || 0;
+  if (cur > 0) {
+    const half = Math.max(maxP - cur, cur - minP, bucket);
+    minP = cur - half; maxP = cur + half;
+  }
   // 행은 «읽히는 높이»가 정한다 -- 가격 폭이 아니라. 창이 24시간까지 자라면 빈이 수천 개라
   // 격자 그대로 그리면 한 행이 0.1px 가 된다.
   const maxRows = Math.max(8, Math.floor(avail / (mobileChart ? 6 : 7)));
@@ -4717,7 +4727,12 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
     for (let i = 0; i < 6; i++) row[i] += Number(l[i + 1]) || 0;
     rows.set(key, row);
   });
-  const keys = [...rows.keys()].sort((a, b) => b - a);   // 위가 높은 가격
+  let keys = [...rows.keys()].sort((a, b) => b - a);   // 위가 높은 가격
+  if (cur > 0) {                                         // 현재가 행 c 를 가운데로: c+n … c-n
+    const c = Math.floor(cur / rowSize);
+    const n = Math.max(0, ...keys.map((k) => Math.abs(k - c)));
+    keys = Array.from({ length: 2 * n + 1 }, (_, j) => c + n - j);
+  }
   const rowPx = avail / keys.length;
   // 🔴합산으로 바뀌었으니 정규화도 «행 총량»이어야 한다. max(buy,sell) 로 두면 막대가
   //   상자를 넘어간다(합계가 그 두 배까지 된다).
@@ -4766,7 +4781,7 @@ function renderSupplyProfileSvg(svg, profile, currentPrice, entryPrice = 0, box 
   // 사라졌다 -- 방향은 봉별 델타가 말한다. 오른쪽 여백은 이제 비어 있다.
 
   keys.forEach((key, j) => {
-    const [buy, sell, wBuy, wSell, rBuy, rSell] = rows.get(key);
+    const [buy, sell, wBuy, wSell, rBuy, rSell] = rows.get(key) || [0, 0, 0, 0, 0, 0];   // 가운데 맞추며 생긴 빈 행
     const y = mt + j * rowPx;
     const price = key * rowSize;
     // 2026-09-19 VPVR 식으로 **매수/매도를 합산**한다(사용자 지시).
@@ -5670,7 +5685,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //    (rowSize 는 ySpan/ch 로 정해진다 -- 여백을 늘리면 ySpan 이 커져 행이 얇아진다.)
   const padPct = footprint ? CHART_Y_PAD_FOOTPRINT : CHART_Y_PAD_PLAIN;
   const pad = (maxP - minP) * padPct || 1;
-  const yMin = minP - pad, yMax = maxP + pad;
+  let yMin = minP - pad, yMax = maxP + pad;
+  // 2026-09-27 풋프린트는 현재가를 세로 **정중앙**에(사용자 지시) -- 먼 쪽 거리로 위아래 대칭.
+  //   🔴가운데는 풋프린트 칸 단위, 반폭은 두 칸 단위로 반올림한다. yMin/yMax 가 층 캐시 서명(baseGeomSig)에
+  //   들어 있어 틱마다 바뀌면 셀 전체를 매번 다시 그린다 -- 칸을 넘을 때만 바뀌게 한다(어긋남 < 칸 반 개).
+  if (footprint && currentPrice > 0) {
+    const q = Number(footprint.bucket) || 0;
+    const c = q > 0 ? Math.round(currentPrice / q) * q : currentPrice;
+    let half = Math.max(yMax - c, c - yMin);
+    if (q > 0) half = Math.ceil(half / (2 * q)) * 2 * q;
+    yMin = c - half; yMax = c + half;
+  }
   const ySpan = Math.max(yMax - yMin, 1e-5); // Prevent division by zero
 
   // 2026-09-21 청산 밀도는 **전체폭**이다 -- 체결 봉 뒤로 지나간다(사용자 요청).
@@ -7583,7 +7608,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   같은 y 에 포갠다(x 위치는 호출 순서와 무관하다. 각자 제 <svg> 상자를 받는다).
     supplyProfileSubBox = {
       svg: subSvg("prof", subX, subProfileY, subW, SUB_PROFILE_H,
-                  subProfileKey(entryPrice, subW, SUB_PROFILE_H),
+                  subProfileKey(entryPrice, subW, SUB_PROFILE_H, currentPrice),
                   (g) => renderSupplyProfileSvg(g, latestSupplyProfile, currentPrice,
                                                 entryPrice, { w: subW, h: SUB_PROFILE_H })),
       w: subW, h: SUB_PROFILE_H };

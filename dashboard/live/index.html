@@ -55,13 +55,6 @@
         <!-- 2026-09-26 사용자 지시로 가운데 현재가·5분 변화·시계를 뺐다(가격은 차트·계좌 레일에 이미 있다). -->
         <!-- 2026-09-27 헤더 한 줄(사용자 지시) -- 원래 스냅샷 패널 첫 줄이었다. 다른 탭에서는 CSS 가 숨긴다. -->
         <div class="ops-panel-head snap-head">
-          <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
-            <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
-            <button type="button" class="asset-tab" data-asset="btc">BTC</button>
-            <button type="button" class="asset-tab" data-asset="sol">SOL</button>
-            <button type="button" class="asset-tab" data-asset="xrp">XRP</button>
-            <button type="button" class="asset-tab" data-asset="hype">HYPE</button>
-          </div>
           <div class="session-alert-center">
             <span id="macroEventAlertBadge" class="ops-badge warn" style="display:none">⚠️ 발표 변동성 주의</span>
           </div>
@@ -203,12 +196,23 @@
                청산맵은 제 창(72봉)을 따로 쓰므로 이 토글이 건드리지 않는다.
                🔴행의 **왼쪽 끝**에 둔다. 모드 탭 옆에 붙였더니 다섯 알약이 한 줄로 이어져
                  «세그먼트 하나»처럼 읽혔다(사용자 "따로따로 배치해줘"). -->
-          <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
-               title="풋프린트와 수급 프로파일이 보는 구간. 서버는 24시간까지 쌓아 두므로 바꾸면 즉시 반영된다.">
-            <button type="button" class="asset-tab active" data-bars="12">1h</button>
-            <button type="button" class="asset-tab" data-bars="24">2h</button>
-            <button type="button" class="asset-tab" data-bars="48">4h</button>
-            <button type="button" class="asset-tab" data-bars="144">12h</button>
+          <!-- 2026-09-27 코인 탭을 헤더에서 여기(창 탭 오른쪽)로 옮겼다(사용자 지시). 간격을 둬 두 묶음이
+               «세그먼트 하나»로 읽히지 않게 한다(09-19 «따로따로 배치해줘»). -->
+          <div class="chart-head-left">
+            <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
+                 title="풋프린트와 수급 프로파일이 보는 구간. 서버는 24시간까지 쌓아 두므로 바꾸면 즉시 반영된다.">
+              <button type="button" class="asset-tab active" data-bars="12">1h</button>
+              <button type="button" class="asset-tab" data-bars="24">2h</button>
+              <button type="button" class="asset-tab" data-bars="48">4h</button>
+              <button type="button" class="asset-tab" data-bars="144">12h</button>
+            </div>
+            <div id="snapshotAssetTabs" class="asset-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
+              <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
+              <button type="button" class="asset-tab" data-asset="btc">BTC</button>
+              <button type="button" class="asset-tab" data-asset="sol">SOL</button>
+              <button type="button" class="asset-tab" data-asset="xrp">XRP</button>
+              <button type="button" class="asset-tab" data-asset="hype">HYPE</button>
+            </div>
           </div>
           <div class="ops-health-head-tools">
             <!-- 2026-09-16 차트 모드 전환. 풋프린트는 12봉(1시간)이라 가격 폭이 $45 안팎인데

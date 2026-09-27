@@ -3232,9 +3232,14 @@ body.order-coin-off .acct-lanes::before {
 /* 2026-09-27 헤더 한 줄(사용자 지시): 스냅샷의 «코인 탭 · 발표 경보 · 테마» 줄을 페이지 탭과 세션 사이로 올렸다.
    다른 탭에서는 지금처럼 안 보인다. 모바일(≤720)은 세션 다음 줄로 보내 전과 같은 모양을 지킨다. */
 .topbar { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 20px; }
-.topbar > .snap-head { padding: 0; align-items: center; }
+.topbar > .snap-head { padding: 0; align-items: center; justify-content: flex-end; }   /* 코인 탭이 차트 카드로 가서(09-27) 테마만 남는다 -- 오른쪽 */
 body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (max-width: 720px) {
   .topbar { grid-template-columns: 1fr; }
   .topbar > .snap-head { order: 3; margin-top: 4px; }
 }
+
+/* 2026-09-27 코인 탭이 차트 카드 머리(창 탭 오른쪽)로 왔다. 두 묶음 사이 간격은 «따로»로 읽히게 넓게.
+   🔴이 카드는 코인 전환 중 덮개(asset-loading)가 깔린다 -- 머리 줄은 그 위로 올려 코인 버튼이 늘 눌리게 한다. */
+.chart-head-left { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; min-width: 0; }
+[data-asset-scope].asset-loading > .ops-health-head { opacity: 1; filter: none; pointer-events: auto; z-index: 4; }
