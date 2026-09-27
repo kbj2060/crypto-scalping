@@ -2446,6 +2446,11 @@ function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { 
 // client-side between refreshes.
 // 2026-09-28 지지·저항 = 청산맵 레벨, 현재가 쪽으로 이미 지나간 것은 버리고 **가까운 순 3개씩**.
 //   사분면 값 칸(데스크톱)과 차트 아래 목록(모바일)이 같은 목록을 쓴다.
+// 게이지 행(차트 아래 목록)을 쓰는 화면 = 모바일(≤720) 또는 세로 방향. 그 밖(가로 데스크톱)은 사분면 값 칸 아래 글자 줄.
+function srGaugeMode() {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 720px), (orientation: portrait)").matches;
+}
+
 function srLevelsLive(n = 3) {
   const map = latestLiquidationMap;
   if (!map || !map.warmed_up) return null;
@@ -2486,16 +2491,24 @@ function renderLiquidationMapPanel() {
   // 2026-09-28 차트(거리 수직선)를 없앴다(사용자 «사분면 라벨 아래에 가격과 강도를 적어줘»). 데스크톱은 renderCandleSvg 가
   //   사분면 값 칸 아래에 적고 이 목록은 비운다. 모바일은 판 아래 값 한 줄뿐이라 여기에 같은 줄을 글자로 적는다.
   //   🔴서술이다 -- 청산 밀집은 추정이고 지지·저항 반등을 예측하지 않는다(벽 반등률 0.509, 09-20).
+  // 2026-09-28(2차) 모바일·세로 화면은 **예전 게이지 행**으로 되돌렸다(사용자 지시) -- 이름 · 가격 · 강도 막대 · 거리 %.
   const sr = srLevelsLive();
-  if (!isMobileChartMode()) { setH("liquidationMapList", ""); return; }
+  if (!srGaugeMode()) { setH("liquidationMapList", ""); return; }
   if (!sr || (!sr.res.length && !sr.sup.length)) {
-    setH("liquidationMapList", `<p class="muted" style="padding:12px 16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
+    setH("liquidationMapList", `<p class="muted" style="padding:16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
     return;
   }
-  const row = (lv, name, cls) => `<div class="sr-row ${cls}"><span>${name}</span><b>${fmtNum(lv.price, 2)}</b>`
-    + `<span class="sr-str">강도 ${Math.round((lv.weight_pct || 0) * 100)}%</span></div>`;
-  setH("liquidationMapList", [...sr.res.map((lv, i) => row(lv, "저항" + (i + 1), "sr-res")).reverse(),
-                              ...sr.sup.map((lv, i) => row(lv, "지지" + (i + 1), "sr-sup"))].join(""));
+  const row = (lv, tag, cls) => {
+    const pct = Math.round((lv.weight_pct || 0) * 100), dist = (lv.price - sr.cur) / sr.cur * 100;
+    return `<div class="liq-level-row ${cls}"><span class="liq-level-tag">${tag}</span>`
+      + `<span class="liq-level-price">${fmtNum(lv.price, 2)}</span>`
+      + `<div class="liq-level-bar-track"><div class="liq-level-bar-fill" style="width:${Math.max(pct, 4)}%;"></div></div>`
+      + `<span class="liq-level-dist">${dist > 0 ? "+" : ""}${fmtNum(dist, 2)}%</span></div>`;
+  };
+  const cur = `<div class="liq-level-row liq-current"><span class="liq-level-tag">현재가</span>`
+    + `<span class="liq-level-price">${fmtNum(sr.cur, 2)}</span><div class="liq-level-bar-track"></div><span class="liq-level-dist">-</span></div>`;
+  setH("liquidationMapList", [...sr.res.map((lv, i) => row(lv, "저항" + (i + 1), "liq-resistance")).reverse(), cur,
+                              ...sr.sup.map((lv, i) => row(lv, "지지" + (i + 1), "liq-support"))].join(""));
 }
 
 // 2026-08-25 실측(VAL+OOS 48,853봉): 같은 쪽 신호가 동시에 몇 개 뜨는지(bottom_votes/top_votes)
@@ -6844,7 +6857,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   // 2026-09-28 지지·저항 = 사분면 값 칸 **아래** 글자 줄(사용자 «차트를 없애고 가격과 강도를 적어줘»).
   //   값 칸과 같은 두 세로줄(이름 | 가격) + 강도(청산 밀집 %). 위에서 아래로 저항3 → 지지3 = 가격 순서.
-  if (svg.id === "candleSvgSnapshot" && fpBars.length && !mobileChart) {
+  if (svg.id === "candleSvgSnapshot" && fpBars.length && !mobileChart && !srGaugeMode()) {
     const sr = srLevelsLive();
     if (sr && (sr.res.length || sr.sup.length)) {
       const vx = ml + cw + 16;
