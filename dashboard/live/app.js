@@ -4312,52 +4312,38 @@ function renderSupply1s(box = null, src = null) {
   }
 }
 
-// 2026-09-28 호가 요약 네 숫자(변동·불균형·지속·이탈)의 설명 -- 옛 호가·체결 프로파일 바닥글 툴팁을 그대로 옮겼다
-//   (프로파일 상자는 사라지고 숫자는 풋프린트 체결·호가 기둥 머리로 갔다, 사용자 선택 시안 B).
-function bookStatsTip(sm) {
-  const pct1 = (v) => (v == null ? "—" : Math.round(100 * v) + "%");
-  return (activeSnapshotAsset === "eth" ? "" : "🔴아래 «실측» 수치(분위별 수익률·상관·신뢰구간)는 전부 ETH 에서 잰 값입니다 — "
-                                              + coinUnit() + " 에서는 검정하지 않았습니다. 막대·지속·이탈·불균형 값은 이 코인 것입니다.\n\n")
-        + `불균형(OBI) ${sm.obi} — 현재가 ±${sm.obi_band_pct}% 안에서 (매수−매도)/(매수+매도).\n`
-        + "  +면 매수호가가 두껍다. 🔴밴드가 값을 정한다(실측 ±0.1% +0.504 vs ±2% +0.071, 7배).\n"
-        + `지속 ${pct1(sm.persist_share)} — 창 내내 한 번도 안 빠진 양이 지금 걸린 양의 몇 %인가.\n`
-        + `이탈 ${pct1(sm.offtouch_leave_share)} — 사라진 호가 중 **체결 없이** 빠진 비율`
-        + ` (${sm.fill_source ? "풋프린트 대조" : "대조 불가"} · 판정 가능 ${sm.offtouch_bins}칸).\n`
-        + "  🔴«취소율»이 아닙니다 — 터치 구간은 구조적으로 빠져 있고, 취소와 리프라이싱을\n"
-        + "  가를 수 없습니다(선물 WS 는 레벨별 총량만 주고 주문 ID 가 없습니다).\n"
-        // 2026-09-20 «벽»을 요약에서 뺐다(사용자 요청). 지지·저항이 아니라는 걸 실측으로
-        //   확인한 뒤(5.8일 71,293건 · 반등률 0.509 = 동전 · 크기 사분위 0.502/0.510/0.520/0.503)
-        //   화면에 남겨두면 「여기서 멈춘다」로 읽히기만 한다. 큰 호가는 막대 길이로 이미 보인다.
-        + `기준가 ${fmtNum(sm.spot, pxDp())} · 창 ${Math.round(sm.window_s / 60)}분`
-        // 2026-09-20 「벽이 지지·저항이 아니면 이 화면은 뭘 말하나」에 답한다. 화면에 있는
-        //   축 전부를 앞으로의 가격과 맞댄 결과다(60초마다 한 표본 · 7,676개 · 독립 일수 7 ·
-        //   일자 블록 부트스트랩). 방향은 전부 CI 가 0 을 품고, 움직임 «크기»만 남았다.
-        + (sm.vol_pct == null ? ""
-           : `\n변동 ${sm.vol_pct}% — 「지금이 최근 4시간 중 몇 분위로 시끄러운가」.\n`
-             + `  재료 둘: 직전 300초 실현변동 ${sm.vol_past_pct}% + 재깔림 ${sm.vol_refill_pct}%`
-             + ` (자 ${sm.vol_ref_n}표본 · 60초 간격).\n`
-             + "  실측 5분위별 실제 |수익률|(300초 뒤) 중앙: 6.0 → 7.2 → 8.2 → 8.7 → 11.5bp.\n"
-             + "  상위20%는 하위33%의 **1.77배** 흔들렸습니다(7,864표본 · 독립 일수 7).\n"
-             + "  🔴주역은 직전 실현변동입니다(그것만으로 1.63배). 호가(재깔림)가 더한 몫은\n"
-             + "  +0.14배인데 CI [−0.01, +0.30] 으로 **0 을 포함**합니다 — 상관에서는 섰지만\n"
-             + "  (부분ρ +0.139) 배수에서는 못 섰습니다.\n"
-             + "  🔴호가만으로 만든 신호는 전부 최상위 분위에서 꺾입니다(재깔림 단독 Q4 12.0 →\n"
-             + "  Q5 8.4bp). 그래서 재깔림 단독도, 블록·지속을 섞은 합성도 안 씁니다.\n"
-             + "  🔴방향은 말하지 않습니다. 크기만입니다.\n")
-        + "\n\n■ 이 숫자들의 쓰임 — 「어디서 멈출까」가 아니라 「얼마나 흔들릴까」입니다.\n"
-        + "  방향: OBI +0.033 · 60초Δ +0.004 — 둘 다 신뢰구간이 0 을 품습니다(= 못 말합니다).\n"
-        + "  크기(|수익률|과의 상관): 재깔림 +0.165 · 블록 +0.124 · 지속률 −0.111,\n"
-        + "  셋 다 0 을 배제하고 직전 300초 실현변동을 통제해도 +0.139/+0.093/−0.076 로 남습니다.\n"
-        + "  → 방향을 고르는 도구가 아니라 **크기·손절폭·대기 여부**를 정하는 도구입니다.\n"
-        + "  🔴독립 일수 7 · 홀드아웃 없음 — 「예측한다」가 아니라 「5.8일 이 데이터에서\n"
-        + "  이렇게 보였다」입니다. rho 0.14 는 약한 실재이지 그 자체로 엣지가 아닙니다."
-        + (() => {
-             const ap = latestFlowHeatmap && latestFlowHeatmap.rows
-                        && latestFlowHeatmap.rows.approach;
-             if (!ap) return "";
-             const fin = [...ap].filter(Number.isFinite);
-             return ` · 접근행동 자격 ${fin.length}행 (○ 표식 ${fin.filter((v) => v < 0.8).length}개)`;
-           })();
+// 2026-09-28 호가 요약 네 막대 계기(사용자 선택 시안 A) -- 막대마다 «이 값이 정확히 무엇인가»를 툴팁으로(사용자 지시).
+//   원천은 서버 /api/flow/heatmap 의 summary(호가 래스터 · 창 = 차트 창). 🔴넷 다 **서술**이다 -- 방향 예측력은 없다.
+const STAT_KEYS = ["vol", "obi", "persist", "leave"];
+const STAT_NAME = { vol: "변동", obi: "불균형", persist: "지속", leave: "이탈" };
+function statFrac(k, sm) {
+  const v = k === "vol" ? (sm.vol_pct == null ? null : sm.vol_pct / 100) : k === "obi" ? sm.obi
+    : k === "persist" ? sm.persist_share : sm.offtouch_leave_share;
+  return v == null || !Number.isFinite(Number(v)) ? null : Math.max(-1, Math.min(1, Number(v)));
+}
+function statTipHtml(k, sm) {
+  const pct = (v) => (v == null ? "—" : Math.round(100 * v) + "%");
+  const win = sm.window_s ? Math.round(sm.window_s / 60) + "분" : "차트";
+  const eth = activeSnapshotAsset === "eth" ? "" : "<br><span style=\"opacity:.7\">🔴아래 실측 수치는 ETH 에서 잰 것 — " + coinUnit() + " 에선 검정 안 함.</span>";
+  const B = (s) => `<span style="font-weight:700">${s}</span>`;
+  const body = {
+    vol: `${B("변동 " + (sm.vol_pct == null ? "—" : sm.vol_pct + "%"))} — 지금이 최근 4시간 중 몇 분위로 시끄러운가(100% = 가장 시끄러움).`
+      + `<br>재료 둘: 직전 300초 실제 가격 변동 ${sm.vol_past_pct ?? "—"}% 분위 + 호가 재깔림 ${sm.vol_refill_pct ?? "—"}% 분위.`
+      + `<br>읽는 법: 높을수록 ${B("앞으로 5분이 크게 흔들렸다")} — 상위 20% 는 하위 33% 의 1.77배(|수익률| 중앙 11.5 vs 6.0bp).`
+      + `<br>쓰임: 손절 폭·크기·대기 여부. <span style="opacity:.7">🔴방향은 말하지 않는다 · 7일 실측, 홀드아웃 없음.</span>`,
+    obi: `${B("불균형 " + (sm.obi == null ? "—" : (sm.obi > 0 ? "+" : "") + Number(sm.obi).toFixed(2)))} — 현재가 ±${sm.obi_band_pct ?? 0.5}% 안에 걸린`
+      + ` (매수 호가 − 매도 호가) ÷ (둘의 합). −1 ~ +1.`
+      + `<br>읽는 법: + = 아래(매수) 호가가 두껍다 · − = 위(매도) 호가가 두껍다. 막대는 가운데 0 에서 초록/빨강으로.`
+      + `<br><span style="opacity:.7">🔴방향 예측력 없음(실측 상관 +0.03, 신뢰구간 0 포함) · 밴드 폭이 값을 크게 바꾼다(±0.1% 와 ±2% 가 7배).</span>`,
+    persist: `${B("지속 " + pct(sm.persist_share))} — 지금 걸린 호가 중 ${win} 창 내내 ${B("한 번도 안 빠진")} 양의 비율.`
+      + `<br>읽는 법: 높다 = 호가가 오래 버티는 장(같은 주문이 계속 걸려 있다) · 낮다 = 호가를 자주 걸었다 뺐다 하는 장.`
+      + `<br><span style="opacity:.7">🔴크기 쪽으론 약하게 반대(지속 높을수록 덜 흔들림, 상관 −0.11) · 방향 예측력 없음.</span>`,
+    leave: `${B("이탈 " + pct(sm.offtouch_leave_share))} — ${win} 창에서 사라진 호가 중 ${B("체결 없이")} 빠진 비율`
+      + ` (${sm.fill_source ? "풋프린트 체결과 대조" : "대조 불가"} · 판정 ${sm.offtouch_bins ?? "—"}칸).`
+      + `<br>읽는 법: 높다 = 가격이 닿기 전에 호가가 빠지는 장(재호가·허수가 많다) · 낮다 = 사라진 호가가 대부분 실제로 먹혔다.`
+      + `<br><span style="opacity:.7">🔴«취소율»이 아니다 — 가격이 닿은 구간은 빠져 있고, 취소와 가격 이동을 구분 못 한다(선물 WS 에 주문 ID 가 없다).</span>`,
+  }[k];
+  return `<div style="white-space:normal;max-width:min(400px,calc(100vw - 24px))">${body}${eth}</div>`;
 }
 
 // 접근행동 값을 **절대 가격**으로 찾는다. 4시간 창이라 격자가 위 다섯 배열과 다르다.
@@ -6263,11 +6249,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
     // 2026-09-28 네 숫자(기둥 머리 · 모바일은 풋프린트 위 왼쪽) 위면 그 설명.
     const sm = latestFlowHeatmap && latestFlowHeatmap.summary;
-    if (bookInfo && sm && my < mt && my > mt - (TRADE_W ? 30 : 22) && (TRADE_W ? mx > ml + cw : mx < bookInfo.x0 - 4)) {
+    if (statsGeo && sm && my >= statsGeo.y0 && my <= statsGeo.y1 && mx >= statsGeo.sx && mx < statsGeo.sx + 4 * statsGeo.slotW) {
       vLine.style.display = "none";
-      const esc = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(460px,calc(100vw - 24px))">`
-        + esc(bookStatsTip(sm)).replace(/\n/g, "<br>") + "</div>");
+      showTooltip(evt.pageX, evt.pageY, statTipHtml(STAT_KEYS[Math.floor((mx - statsGeo.sx) / statsGeo.slotW)], sm));
       return;
     }
     // 2026-09-28 체결 기둥 위면 그 가격 행의 체결 풀이(데스크톱만 -- 모바일은 셀 뒤라 봉 툴팁이 이긴다).
@@ -6467,6 +6451,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     cells.forEach((c) => { c.hatch = !(c.rw > 0) || rwSorted.length < 4 ? -1 : c.rwPct >= 0.75 ? 0 : c.rwPct >= 0.5 ? 1 : c.rwPct >= 0.25 ? 2 : 3; });
     return { bs, x0, L, mx, cells };
   })();
+  // 네 막대 계기 자리(그림과 호버가 같이 쓴다). 데스크톱 = 기둥 머리(체결 기둥 왼쪽 끝 ~ 오른쪽 여백), 모바일 = 풋프린트 위 한 줄.
+  const statsGeo = bookInfo ? (() => {
+    const sx = TRADE_W ? ml + cw + 6 : ml, room = (TRADE_W ? w - mr : bookInfo.x0 - 8) - sx;
+    return TRADE_W ? { sx, slotW: room / 4, labY: mt - 24, barY: mt - 20, y0: mt - 34, y1: mt - 11 }
+                   : { sx, slotW: room / 4, labY: mt - 14, barY: mt - 11, y0: mt - 24, y1: mt - 2 };
+  })() : null;
   // 2026-09-28 툴팁 = «심 × ◌» 여섯 조합의 풀이(사용자 지시 -- 기존 수치·해석 문구는 뺐다). 이 칸의 조합만 진하게.
   //   심 두꺼움 = 지금 양의 절반 이상이 창 내내 버텼다 · ◌ = 최근 4h 가까울 때(0.35% 안) 두께가 멀 때의 0.8배 미만 · 모름 = 비교 자격 없음.
   //   🔴전부 «성격»의 서술이다 -- 조합이 다음 가격을 말하는지는 안 쟀다(벽 반등률 0.509 = 동전, 09-20).
@@ -6503,28 +6493,38 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     };
     if (TRADE_W) { head(x0 - 6, "end", "var(--amber)", "← 체결"); head(x0, "start", "var(--muted)", "호가 →"); }
     else head(x0, "start", "var(--muted)", "호가");
-    // 2026-09-28 호가 요약 네 숫자(옛 프로파일 바닥글) -- 데스크톱은 체결·호가 기둥 머리 한 줄, 모바일은 풋프린트 위 왼쪽 한 줄.
-    //   변동이 맨 앞(좁으면 뒤에서부터 덜어낸다 -- 옛 바닥글과 같은 규칙). 설명은 호버(bookStatsTip).
+    // 2026-09-28 호가 요약 네 숫자 = **막대 계기 넷**(사용자 선택 시안 A) -- 데스크톱은 체결·호가 기둥 머리, 모바일은 풋프린트 위 한 줄.
+    //   변동 0→100 채움(높으면 주황) · 불균형 가운데 0 에서 초록(매수 호가 두꺼움)/빨강 · 지속·이탈 0→100 채움.
+    //   값·뜻은 막대마다 호버 툴팁(statTipHtml). 좌표는 statsGeo 하나를 그림과 호버가 같이 쓴다.
     const sm = latestFlowHeatmap && latestFlowHeatmap.summary;
-    if (sm) {
-      const parts = [...(sm.vol_pct == null ? [] : [["변동", sm.vol_pct + "%"]]),
-                     ["불균형", sm.obi == null ? "—" : (sm.obi > 0 ? "+" : "") + sm.obi.toFixed(2)],
-                     ["지속", sm.persist_share == null ? "—" : Math.round(100 * sm.persist_share) + "%"],
-                     ["이탈", sm.offtouch_leave_share == null ? "—" : Math.round(100 * sm.offtouch_leave_share) + "%"]];
-      const sx = TRADE_W ? ml + cw + 6 : ml, sy = TRADE_W ? mt - 18 : mt - 11, fs = mobileChart ? 9.5 : 10;
-      const room = (TRADE_W ? w - mr : x0 - 8) - sx;
-      const estW = (ps) => ps.reduce((a, [k, v]) => a + k.length * fs + v.length * fs * 0.6 + fs * 1.6, 0);
-      while (parts.length > 1 && estW(parts) > room) parts.pop();
-      const t = document.createElementNS(NS, "text");
-      t.setAttribute("x", sx); t.setAttribute("y", sy); t.setAttribute("font-size", fs);
-      parts.forEach(([k, v], i) => {
-        const a = document.createElementNS(NS, "tspan");
-        a.setAttribute("fill", "var(--muted)"); a.textContent = (i ? "  " : "") + k + " ";
-        const b = document.createElementNS(NS, "tspan");
-        b.setAttribute("fill", "var(--ink)"); b.setAttribute("font-weight", "700"); b.textContent = v;
-        t.appendChild(a); t.appendChild(b);
+    if (sm && statsGeo) {
+      const { sx, slotW, labY, barY } = statsGeo, bw = slotW - 10;
+      STAT_KEYS.forEach((k, i) => {
+        const x = sx + i * slotW, f = statFrac(k, sm);
+        const lb = document.createElementNS(NS, "text");
+        lb.setAttribute("x", x); lb.setAttribute("y", labY); lb.setAttribute("font-size", "9");
+        lb.setAttribute("fill", "var(--muted)"); lb.textContent = STAT_NAME[k];
+        g.appendChild(lb);
+        const tr = document.createElementNS(NS, "rect");
+        tr.setAttribute("x", x); tr.setAttribute("y", barY); tr.setAttribute("width", bw); tr.setAttribute("height", 7);
+        tr.setAttribute("rx", 2); tr.setAttribute("fill", "var(--ink)"); tr.setAttribute("fill-opacity", "0.12");
+        g.appendChild(tr);
+        if (f == null) return;
+        const fl = document.createElementNS(NS, "rect");
+        let fx = x, fw = bw * f, col = k === "vol" ? (f >= 0.66 ? "var(--warn)" : f >= 0.33 ? "var(--ink)" : "var(--muted)")
+                                   : k === "persist" ? "var(--ink)" : "var(--muted)";
+        if (k === "obi") {                     // -1..+1, 가운데 0
+          const c = x + bw / 2, L = bw / 2 * Math.min(1, Math.abs(f));
+          fx = f >= 0 ? c : c - L; fw = L; col = f >= 0 ? "var(--good)" : "var(--bad)";
+          const z = document.createElementNS(NS, "line");
+          z.setAttribute("x1", c); z.setAttribute("x2", c); z.setAttribute("y1", barY - 2); z.setAttribute("y2", barY + 9);
+          z.setAttribute("stroke", "var(--ink)"); z.setAttribute("stroke-opacity", "0.6");
+          g.appendChild(z);
+        }
+        fl.setAttribute("x", fx); fl.setAttribute("y", barY); fl.setAttribute("width", Math.max(1, fw)); fl.setAttribute("height", 7);
+        fl.setAttribute("rx", 2); fl.setAttribute("fill", col); fl.setAttribute("fill-opacity", "0.95");
+        g.appendChild(fl);
       });
-      g.appendChild(t);
     }
     const base = document.createElementNS(NS, "line");
     base.setAttribute("x1", x0 - 1); base.setAttribute("x2", x0 - 1);
