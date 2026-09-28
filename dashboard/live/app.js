@@ -4500,9 +4500,7 @@ function renderSnapshotChart() {
     ? fullCandles.slice(-chartWindowBars)
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
-  const kn = footprint ? kalshiNow() : null;
   const riskLevels = [...nearestLiquidationLevel(), ...trendFlipLevels(footprint, candles),
-    ...(kn ? [{ val: kn.k.strike, color: kn.color, label: "칼시", priceLeft: true, dashed: true, width: 1.4, behindCells: true }] : []),
 ];
   // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
   // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
@@ -6035,6 +6033,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-28 옵션 가격축 표시(사용자 선택 A+C, 기본 켜짐 · 옵션 카드의 «가격축 표시»로 끔): 예상 폭 띠(DVOL 1σ 5분·1시간) ·
   //   max pain(가까운 만기) · 감마 플립. 격자 바로 위(셀 아래)에 깔아 셀 숫자를 덮지 않는다.
   //   🔴행사가 자석·핀닝은 우리 검정에서 없었다 -- 그래서 흐린 점선 + 글자이고 굵은 벽처럼 그리지 않는다.
+  const optBx = ml + cw - 3;   // 옵션 괄호·칼시 눈금이 같이 쓰는 x -- 형성 중 봉 오른쪽 끝(플롯 경계)에 걸친다
+  let optLab5Y = null;         // 5분 글자 y -- 칼시 글자가 가까우면 한 줄 비켜 선다
   if (isSnapshotChart && footprint && optOverlayOn()) {
     const { o } = optData();
     if (o && optIv(o)) {
@@ -6057,14 +6057,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (memo.t5 !== last.time || memo.cur !== activeSnapshotAsset) Object.assign(memo, { t5: last.time, s5: optSigma(o, 300), cur: activeSnapshotAsset });
       if (memo.t1 !== hourT || memo.cur1 !== activeSnapshotAsset) Object.assign(memo, { t1: hourT, s1h: optSigma(o, 3600), cur1: activeSnapshotAsset });
       const s5 = memo.s5, s1h = memo.s1h, o5 = Number(last.open) || px, o1 = Number(candles[hi].open) || px;
-      const x5 = xAt(candles.length - 1), x1h = xAt(hi), xe = ml + cw;
-      const a1 = cy(yAt(o1 + s1h)), b1 = cy(yAt(o1 - s1h)), a5 = yAt(o5 + s5), b5 = yAt(o5 - s5);
-      add("rect", { x: x1h, y: a1, width: xe - x1h, height: Math.max(0, b1 - a1), fill: "var(--option)", "fill-opacity": 0.05 });
-      add("rect", { x: x5, y: cy(a5), width: xe - x5, height: Math.max(0, cy(b5) - cy(a5)), fill: "var(--option)", "fill-opacity": 0.13 });
-      [a5, b5].forEach((y) => { if (y > mt && y < plotBottom) add("line", { x1: x5, x2: xe, y1: y, y2: y, stroke: "var(--option)", "stroke-opacity": 0.8, "stroke-dasharray": "5 4" }); });
-      if (a5 > mt + fs + 4) add("text", { x: xe - 4, y: a5 - 4, "font-size": fs, "font-weight": 700, fill: "var(--option)", "text-anchor": "end" }, `5분봉 시가 ±${optQ(s5)}$`);
-      add("text", { x: x1h + 4, y: a1 + fs + 2, "font-size": fs, "font-weight": 600, fill: "var(--option)", opacity: 0.85 },
-          `${optKst(hourT * 1000, false).slice(0, 2)}시 시가 ±${optQ(s1h)}$${yAt(o1 + s1h) < mt ? " (창 밖까지)" : ""}`);
+      // 2026-09-28 사용자 선택(옵션 시안 B의 괄호): 가격판 전폭 띠 두 장 -> **형성 중 봉 바로 오른쪽 괄호 하나**.
+      //   바깥 옅은 세로줄+꺾쇠 = 1시간(정시 봉 시가 ± 1σ) · 안쪽 진한 막대 = 5분(이번 봉 시가 ± 1σ). 고정 규칙은 위와 같다.
+      //   괄호는 플롯 오른쪽 끝에 걸치고 글자는 바깥쪽(데스크톱 오른쪽 · 모바일은 호가 띠라 안쪽 왼쪽)에 바탕색 외곽선으로.
+      const bx = optBx, a1r = yAt(o1 + s1h), b1r = yAt(o1 - s1h), a1 = cy(a1r), b1 = cy(b1r), a5 = cy(yAt(o5 + s5)), b5 = cy(yAt(o5 - s5));
+      const side = mobileChart ? -1 : 1, lx = bx + side * 8, anchor = mobileChart ? "end" : "start";
+      const halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
+      add("line", { x1: bx, x2: bx, y1: a1, y2: b1, stroke: "var(--option)", "stroke-opacity": 0.55, "stroke-width": 1.5 });
+      [[a1r, a1], [b1r, b1]].forEach(([r, y]) => { if (r >= mt && r <= plotBottom) add("line", { x1: bx - 5, x2: bx + 5, y1: y, y2: y, stroke: "var(--option)", "stroke-opacity": 0.55, "stroke-width": 1.5 }); });
+      add("rect", { x: bx - 3, y: a5, width: 6, height: Math.max(1, b5 - a5), rx: 2, fill: "var(--option)" });
+      optLab5Y = a5 + 4;
+      add("text", { x: lx, y: a5 + 4, "font-size": fs, "font-weight": 700, fill: "var(--option)", "text-anchor": anchor, ...halo }, `5분 ±${optQ(s5)}`);
+      if (a1 < a5 - fs - 2) add("text", { x: lx, y: a1 + (a1r < mt ? fs : 4), "font-size": fs, "font-weight": 600, fill: "var(--option)", "text-anchor": anchor, ...halo },
+          `1시간 ±${optQ(s1h)}${a1r < mt ? "↑" : ""}`);
       const f = optFront(o);
       if (f) {
         const y = yAt(f.pain), lab = `max pain ${optQ(f.pain)} · ${optKst(f.exp_ms)} 만기`;
@@ -6091,34 +6096,25 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
   }
 
-  // 2026-09-28 칼시 15분(사용자 선택 B): 기준가 선은 위 priceLabels 가 긋고, 여기서는 **이번 창**만 --
-  //   창 시작 경계 점선 + 옅은 면, 선 위 오른쪽 끝에 «아래 72% · 11:00 남음». 참고 · 신호 아님
-  //   (확률은 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침이다).
+  // 2026-09-28 칼시 15분: 가격판 전폭 선·창 음영 -> **옵션 괄호를 가로지르는 짧은 눈금 하나**(사용자 선택, 옵션 시안 A의 칼시 선).
+  //   글자 «칼시 아래 72% · 11:00»는 괄호 글자와 같은 쪽에. 참고 · 신호 아님(확률은 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침).
   const kn = isSnapshotChart && footprint ? kalshiNow() : null;
   if (kn) {
-    const kg = document.createElementNS(NS, "g");
-    kg.setAttribute("pointer-events", "none");
-    const add = (tag, attrs, text) => {
-      const e = document.createElementNS(NS, tag);
-      Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
-      if (text != null) e.textContent = text;
-      kg.appendChild(e);
-    };
-    const i0 = candles.findIndex((c) => c.time >= kn.k.open_ts);
-    if (i0 >= 0) {
-      const x0 = xAt(i0);
-      add("rect", { x: x0, y: mt, width: ml + cw - x0, height: plotBottom - mt, fill: "rgb(var(--lift) / .035)" });
-      add("line", { x1: x0, x2: x0, y1: mt, y2: plotBottom, stroke: "var(--hover-line)", "stroke-dasharray": "2 3" });
-    }
+    const fs = mobileChart ? 10 : 11, yr = yAt(kn.k.strike), ys = Math.max(mt + 2, Math.min(plotBottom - 2, yr));
     const left = Math.max(0, Math.round(kn.k.close_ts - Date.now() / 1000));
-    const fs = mobileChart ? 10 : 11, ys = Math.max(mt + fs + 2, Math.min(plotBottom - 2, yAt(kn.k.strike)));
-    add("text", { x: ml + cw - 4, y: ys - 4, "font-size": fs, "font-weight": 700, fill: kn.color, "text-anchor": "end",
-                  stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke", style: "font-variant-numeric: tabular-nums" },
-        `칼시 ${kn.word} · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} 남음`);
-    const label = kg.lastChild;   // 글자는 셀 위, 면·경계는 셀 뒤
-    const gridG = layerCache.get("grid")?.g;
-    if (gridG && gridG.parentNode === svg) svg.insertBefore(kg, gridG.nextSibling); else svg.appendChild(kg);
-    svg.appendChild(label);
+    const tick = document.createElementNS(NS, "line");
+    Object.entries({ x1: optBx - 12, x2: optBx + 12, y1: ys, y2: ys, stroke: kn.color, "stroke-width": 2.2, "stroke-linecap": "round",
+                     "pointer-events": "none" }).forEach(([k, v]) => tick.setAttribute(k, v));
+    const t = document.createElementNS(NS, "text");
+    // 글자는 옵션 괄호 글자와 같은 쪽(데스크톱 = 괄호 바깥 오른쪽, 셀을 안 덮는다 · 모바일 = 오른쪽이 호가 띠라 안쪽 왼쪽).
+    const ty = optLab5Y != null && Math.abs(ys + 4 - optLab5Y) < fs + 3 ? optLab5Y + fs + 3 : ys + 4;
+    Object.entries({ x: optBx + (mobileChart ? -16 : 16), y: ty, "font-size": fs, "font-weight": 700, fill: kn.color,
+                     "text-anchor": mobileChart ? "end" : "start", "pointer-events": "none",
+                     stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke", style: "font-variant-numeric: tabular-nums" })
+      .forEach(([k, v]) => t.setAttribute(k, v));
+    t.textContent = `칼시 ${kn.word} · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}${yr < mt ? " ↑" : yr > plotBottom ? " ↓" : ""}`;
+    svg.appendChild(tick);
+    svg.appendChild(t);
   }
 
   priceLabels.forEach(p => {
