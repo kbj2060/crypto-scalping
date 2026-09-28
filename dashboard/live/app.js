@@ -3477,7 +3477,7 @@ function optData() {
 }
 const optIv = (o) => o.dvol ?? o.iv30;                      // 연 변동성(%) -- 예상 폭의 기준
 // 가격 자릿수: ETH·BTC 는 정수, SOL 은 소수 1~2, XRP 는 소수 3~4 (±0.004$ 가 «±0$» 로 뭉개지지 않게)
-const optQ = (v) => (v == null ? "-" : v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v >= 0.1 ? v.toFixed(3) : v.toPrecision(2));
+const optQ = (v) => (v == null ? "-" : v >= 20 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v >= 0.1 ? v.toFixed(3) : v.toPrecision(2));
 function optKst(ms, withDate = true) {
   const d = new Date(ms + 9 * 3600e3), p = (n) => String(n).padStart(2, "0");
   return (withDate ? `${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` : "") + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
@@ -3546,6 +3546,16 @@ function optHedgeHtml(o) {
   return out;
 }
 
+const optTipOpen = new Set();
+el("optBody")?.addEventListener("click", (e) => {
+  const b = e.target.closest(".opt-q");
+  if (!b) return;
+  const k = b.dataset.tip, open = !optTipOpen.has(k);
+  if (open) optTipOpen.add(k); else optTipOpen.delete(k);
+  b.setAttribute("aria-expanded", String(open));
+  b.closest(".opt-sec").querySelector(".opt-tip").hidden = !open;
+});
+
 function renderOptions() {
   const body = el("optBody"), chip = el("optChip");
   if (!body) return;
@@ -3572,18 +3582,20 @@ function renderOptions() {
     }
   }
   const kv = (k, v, cls = "") => `<div class="opt-kv"><span>${k}</span><b class="${cls}">${v}</b></div>`;
-  const sec = (key, title, inner) => `<div class="opt-sec"><h4 title="${escapeHtml(OPT_TIPS[key])}">${title}</h4>${inner}</div>`;
+  // 칸 제목을 누르면(휴대폰 포함 -- 호버가 없다) 정의·읽는 법·우리 검정 결과가 제목 아래에 펼쳐진다. 펼침은 다시 그려도 유지.
+  const sec = (key, title, inner) => `<div class="opt-sec"><h4><button type="button" class="opt-q" data-tip="${key}" aria-expanded="${optTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
+    + `<p class="opt-tip"${optTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(OPT_TIPS[key]).replace(/\n/g, "<br>")}</p>${inner}</div>`;
   const gm = o.gamma || {}, posG = !(gm.now_usd < 0);
   const exRows = (o.expiries || []).filter((e) => e.exp_ms > Date.now()).slice(0, 4).map((e) =>
-    `<div class="opt-ex"><b class="opt-num">${optKst(e.exp_ms)}</b><span class="opt-num">${optUsd(e.call_oi_usd + e.put_oi_usd)}</span>`
-    + `<span class="opt-num">pain ${optQ(e.pain)}</span><span class="opt-num">P/C ${e.pc == null ? "-" : e.pc.toFixed(2)}</span></div>`).join("");
+    `<div class="opt-ex"><b>${optKst(e.exp_ms)}</b><span>${optUsd(e.call_oi_usd + e.put_oi_usd)}</span>`
+    + `<span><em>pain</em> ${optQ(e.pain)}</span><span><em>P/C</em> ${e.pc == null ? "-" : e.pc.toFixed(2)}</span></div>`).join("");
   const blkRows = blocks.slice(0, 5).map((b) => {
     const legs = (b.legs || []).map((l) => `${l.direction === "buy" ? "매수" : "매도"} ${String(l.instrument_name).replace(/^[A-Z_]+-/, "")}`).join(" / ");
-    return `<div class="opt-blk"><b class="opt-num">${optKst(b.ts_ms, false)}</b><span class="opt-num">${optUsd(b.notional_usd || 0)}</span><span class="legs">${b.legs_seen}다리 · ${escapeHtml(legs)}</span></div>`;
+    return `<div class="opt-blk"><b>${optKst(b.ts_ms, false)}</b><span>${optUsd(b.notional_usd || 0)}</span><span class="legs">${b.legs_seen}다리 · ${escapeHtml(legs)}</span></div>`;
   }).join("");
   body.innerHTML = [
     sec("move", "예상 폭", kv("오늘 1σ", s1d == null ? "-" : `${pm(s1d)} (${(optIv(o) / Math.sqrt(365)).toFixed(1)}%)`)
-      + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 -- 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
+      + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 — 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
       + kv("IV − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`)),
     sec("gamma", "딜러 감마", kv("구간", posG ? "양감마 · 눌림 쪽" : "음감마 · 튐 쪽", posG ? "opt-good" : "opt-warn")
       + kv("플립", gm.flip ? `${optQ(gm.flip)} (${gm.flip < px ? "아래" : "위"} ${optQ(Math.abs(gm.flip - px))}$)` : "±15% 안 없음")
