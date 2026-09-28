@@ -4572,7 +4572,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   배지는 아래 boxX 가 오른쪽 끝 기준으로 다시 잡는다(왼쪽정렬 그대로 두면 밖으로 나간다).
   // 2026-09-28 모바일 체결 띠(사용자 «호가처럼 풋프린트 왼쪽 축으로»): 가격 글자와 캔들 사이 50px. ml 이 «플롯 왼쪽»이라 그만큼 민다.
   const TRADE_L = footprint && mobileChart ? 50 : 0;
-  const ml = (mobileChart ? 44 : 45) + CENTER_NUDGE + TRADE_L,
+  // 2026-09-28 모바일 풋프린트는 왼쪽 가격 글자를 없앴다(사용자 «차트가 너무 작다») -- 값은 플롯 아래 한 줄이 갖는다. 여백 44 -> 4.
+  const ml = (mobileChart ? (footprint ? 4 : 44) : 45) + CENTER_NUDGE + TRADE_L,
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
         mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 70;
@@ -5919,11 +5920,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-09-22 label 이 비면 안 그린다 -- 시나리오는 확률을 **오른쪽 배지 안**으로 옮겼다
     // (사용자 «오른쪽 라벨에 가격이랑 확률만»). 왼쪽 여백은 45px 뿐이라 둘을 다 못 넣는다.
     // 이름이 없는 것(30분 시나리오 목표 «↑56%»)은 왼쪽으로 옮길 때 sub 를 이름으로 쓴다.
-    const leftName = p.label || (priceLeft && p.sub ? p.sub : "");
+    const leftName = mobileChart && footprint ? "" : p.label || (priceLeft && p.sub ? p.sub : "");   // 모바일 풋프린트는 아래 한 줄만
     const txt = leftName ? document.createElementNS(NS, "text") : null;
     // 2026-09-28 풋프린트 현재가는 **채운 태그**(사용자 «현재가 라벨을 더 크게») -- 13px(모바일 12) 어두운 글자, 왼쪽 끝에서
     //   시작해 필요하면 플롯 안으로 조금 들어간다(가격 태그 관례). 빠른 갱신(updateLivePriceFast)이 글자·폭·높이를 같이 옮긴다.
-    const nowTag = p.label === "현재" && !!footprint;
+    const nowTag = p.label === "현재" && !!footprint && !!txt;
     const tagBg = nowTag ? document.createElementNS(NS, "rect") : null;
     if (tagBg) {
       tagBg.setAttribute("x", 2); tagBg.setAttribute("y", labelY - 9); tagBg.setAttribute("height", 18);
@@ -6013,9 +6014,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       line.dataset.live = p.marker ? "tri" : "line";
       rect.dataset.live = "box";
       pTxt.dataset.live = "text";
-      txt.dataset.live = "label";
+      if (txt) txt.dataset.live = "label";
       if (tagBg) tagBg.dataset.live = "labelbg";
-      if (priceLeft) txt.dataset.withPrice = "1";   // 빠른 갱신이 글자 속 가격도 바꾼다
+      if (priceLeft && txt) txt.dataset.withPrice = "1";   // 빠른 갱신이 글자 속 가격도 바꾼다
     }
   });
   // 2026-09-22 사용자 지시: 모바일은 배지 대신 플롯 **아래 한 줄**이 값을 갖는다.
