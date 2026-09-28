@@ -3461,7 +3461,7 @@ function ensureLiveStream() {
 //   DVOL 방향 0). 남은 쓸모는 «얼마나 움직일 것 같은가»(크기)와 «언제 큰 이벤트가 있는가»(일정)다.
 //   옛 «신호» 카드의 GEX 한 줄(gexIndicatorItem)은 이 카드의 «딜러 감마» 칸으로 들어왔다.
 const OPT_TIPS = {
-  move: "옵션 가격에 들어 있는 기대 움직임. 1σ = 가격 × DVOL × √(기간/1년) — 약 68% 확률로 이 안. 손절이 5분 1σ 보다 훨씬 좁으면 소음에 걸리기 쉽다.\nIV−실현(VRP): 양수면 옵션시장이 실제보다 큰 움직임을 값에 넣는 중(보통 양수).\n우리 검정: DVOL 로 변동성을 예측하는 건 실현 변동성 지표에 졌다 — 기준 폭 참고로만.",
+  move: "옵션 가격에 들어 있는 기대 움직임. 1σ = 가격 × DVOL × √(기간/1년) — 약 68% 확률로 이 안. 손절이 5분 1σ 보다 훨씬 좁으면 소음에 걸리기 쉽다.\n차트 띠는 봉 시가에 고정된다: 5분 띠 = 이번 5분봉 시가 ± 5분 1σ, 1시간 띠 = 이번 정시 첫 봉 시가 ± 1시간 1σ(폭도 봉이 열릴 때 값으로 고정). 가격이 띠를 벗어나면 옵션시장 예상보다 큰 움직임.\nIV−실현(VRP): 양수면 옵션시장이 실제보다 큰 움직임을 값에 넣는 중(보통 양수).\n우리 검정: DVOL 로 변동성을 예측하는 건 실현 변동성 지표에 졌다 — 기준 폭 참고로만.",
   gamma: "옵션을 판 딜러의 헤지 방향. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 그 부호가 바뀌는 가격.\n우리 검정: ETH 전체 GEX 는 37일 내내 양수(플립이 거의 없다) · 방향 예측은 가격수준의 사본으로 기각 · 가까운 만기 비중(구조)은 크기 쪽에서 이론 부호를 회복(t −6.22), 판정 진행 중.",
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 차트 아래 «옵션 만기 · 블록 거래» 카드.",
   mood: "25Δ 리스크 리버설 = 같은 거리 콜 IV − 풋 IV. 음수로 깊으면 하락 방어 수요(공포), 양수면 상승 베팅. 버터플라이 = 양 끝 IV − ATM(꼬리 가격). 기간 구조 = 만기별 ATM IV — 가까운 게 더 높으면(역전) 스트레스.\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중.",
@@ -6014,14 +6014,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         og.appendChild(e);
       };
       const px = Number(currentPrice) || o.index, fs = mobileChart ? 10 : 11, cy = (y) => Math.max(mt, Math.min(plotBottom, y));
-      const s1h = optSigma(o, 3600), s5 = optSigma(o, 300);
-      const a1 = cy(yAt(px + s1h)), b1 = cy(yAt(px - s1h)), a5 = yAt(px + s5), b5 = yAt(px - s5);
-      add("rect", { x: ml, y: a1, width: cw, height: Math.max(0, b1 - a1), fill: "var(--option)", "fill-opacity": 0.05 });
-      add("rect", { x: ml, y: cy(a5), width: cw, height: Math.max(0, cy(b5) - cy(a5)), fill: "var(--option)", "fill-opacity": 0.11 });
-      [a5, b5].forEach((y) => { if (y > mt && y < plotBottom) add("line", { x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--option)", "stroke-opacity": 0.7, "stroke-dasharray": "5 4" }); });
-      if (a5 > mt + fs + 4) add("text", { x: ml + 4, y: a5 - 4, "font-size": fs, "font-weight": 700, fill: "var(--option)" }, `5분 ±${optQ(s5)}$`);
-      add("text", { x: ml + 4, y: a1 + fs + 2, "font-size": fs, "font-weight": 600, fill: "var(--option)", opacity: 0.85 },
-          `1시간 ±${optQ(s1h)}$${yAt(px + s1h) < mt ? " (창 밖까지)" : ""}`);
+      // 2026-09-28 사용자 «현재가를 따라 움직이면 정보가 안 된다 -- 고정해야»: 띠는 **봉 시가에 고정**한다.
+      //   5분 띠 = 이번 5분봉 시가 ± 5분 1σ (다음 봉까지 고정) · 1시간 띠 = 이번 정시(KST) 첫 봉 시가 ± 1시간 1σ.
+      //   폭(σ)도 그 봉이 열릴 때 값으로 얼린다(DVOL 이 10분마다 바뀌어도 봉 중간에 띠가 흔들리지 않게).
+      //   그래서 «가격이 띠를 벗어났다 = 옵션시장이 예상한 것보다 큰 움직임»으로 읽힌다. 띠는 그 봉(정시 봉)부터 오른쪽만 칠한다.
+      const last = candles[candles.length - 1], hourT = Math.floor(last.time / 3600) * 3600;
+      const hi = Math.max(0, candles.findIndex((c) => c.time >= hourT));
+      const memo = renderCandleSvg._optBand || (renderCandleSvg._optBand = {});
+      if (memo.t5 !== last.time || memo.cur !== activeSnapshotAsset) Object.assign(memo, { t5: last.time, s5: optSigma(o, 300), cur: activeSnapshotAsset });
+      if (memo.t1 !== hourT || memo.cur1 !== activeSnapshotAsset) Object.assign(memo, { t1: hourT, s1h: optSigma(o, 3600), cur1: activeSnapshotAsset });
+      const s5 = memo.s5, s1h = memo.s1h, o5 = Number(last.open) || px, o1 = Number(candles[hi].open) || px;
+      const x5 = xAt(candles.length - 1), x1h = xAt(hi), xe = ml + cw;
+      const a1 = cy(yAt(o1 + s1h)), b1 = cy(yAt(o1 - s1h)), a5 = yAt(o5 + s5), b5 = yAt(o5 - s5);
+      add("rect", { x: x1h, y: a1, width: xe - x1h, height: Math.max(0, b1 - a1), fill: "var(--option)", "fill-opacity": 0.05 });
+      add("rect", { x: x5, y: cy(a5), width: xe - x5, height: Math.max(0, cy(b5) - cy(a5)), fill: "var(--option)", "fill-opacity": 0.13 });
+      [a5, b5].forEach((y) => { if (y > mt && y < plotBottom) add("line", { x1: x5, x2: xe, y1: y, y2: y, stroke: "var(--option)", "stroke-opacity": 0.8, "stroke-dasharray": "5 4" }); });
+      if (a5 > mt + fs + 4) add("text", { x: xe - 4, y: a5 - 4, "font-size": fs, "font-weight": 700, fill: "var(--option)", "text-anchor": "end" }, `5분봉 시가 ±${optQ(s5)}$`);
+      add("text", { x: x1h + 4, y: a1 + fs + 2, "font-size": fs, "font-weight": 600, fill: "var(--option)", opacity: 0.85 },
+          `${optKst(hourT * 1000, false).slice(0, 2)}시 시가 ±${optQ(s1h)}$${yAt(o1 + s1h) < mt ? " (창 밖까지)" : ""}`);
       const f = optFront(o);
       if (f) {
         const y = yAt(f.pain), lab = `max pain ${optQ(f.pain)} · ${optKst(f.exp_ms)} 만기`;
