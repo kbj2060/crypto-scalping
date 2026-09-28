@@ -8315,9 +8315,34 @@ function ofabSetOpen(open) {
   el("ofabToggle")?.setAttribute("aria-expanded", String(open));
   // 카드에서는 range 가 칩 뒤에 숨어 있어 탭 순서에서 빠져 있다(tabindex -1). 게이지로 드러나면 넣는다.
   lanes.querySelectorAll(".chip-input").forEach((i) => { i.tabIndex = open ? 0 : -1; });
+  if (open) ofabApplyDefaults();
   syncAllRangeFills(lanes);
   syncChipsets();
   ofabPlace(ofab.x, ofab.y, false);   // 열리면 위/아래·최대 높이를 다시 정한다
+}
+
+// 2026-09-28 사용자 지시: 펼치면 **진입 비율 5% · SL/TP 해제**가 기본. 체크는 저장하지 않는다(카드의 기억된 선택은 그대로 --
+//   다음에 카드에서 새로고침하면 기억값으로 돌아간다). 비율은 input 을 쏴서 칩·글자·크기 재조회가 평소 경로로 따라오게 한다.
+function ofabApplyDefaults() {
+  const fr = el("snapEntryFrac"), sl = el("snapSltp");
+  if (sl) sl.checked = false;
+  if (fr) { fr.value = "5"; fr.dispatchEvent(new Event("input", { bubbles: true })); }
+}
+// 2026-09-28 사용자 지시: 버튼을 0.5초 꾹 누르면 **지금 포지션 방향으로 바로 추가 진입**(5% · SL/TP 해제).
+//   패널을 펼쳐 결과를 보여 주고, 미리보기가 오는 즉시 발주한다 -- 진입 버튼의 «길게 누르기 = 확인»과 같은 경로
+//   (manualFireOnPreview → manualEntryArmConfirm). 포지션이 없으면 방향을 모르니 안 나간다. 서버 게이트·코인 검사는 그대로.
+function ofabQuickAdd() {
+  const p = snapshotAccountPosition();
+  const side = Number(p?.qty) ? String(p.side || "").toUpperCase() : "";
+  ofabSetOpen(true);
+  ofabApplyDefaults();
+  const box = el("snapEntryResult");
+  const say = (msg) => { if (box) { box.hidden = false; box.innerHTML = entryNote(msg, "bad"); } };
+  if (side !== "LONG" && side !== "SHORT") return say("추가 진입 안 함 — 열린 포지션이 없어 방향을 모릅니다.");
+  if (manualOrderBusy || manualPreviewInFlight) return say("추가 진입 안 함 — 진행 중인 주문·미리보기가 있습니다.");
+  clearTimeout(entrySizeDebounce);   // 기본값이 건 크기 재조회는 필요 없다(미리보기가 같은 값을 받는다)
+  manualFireOnPreview = true;
+  manualEntryPreview(side, "entry");
 }
 
 // 탭이 스냅샷일 때만 뜬다(주문 조작부가 사는 탭). 다른 탭으로 가면 조작부를 카드로 먼저 돌려놓는다.
@@ -8378,7 +8403,19 @@ setInterval(renderOfab, 3000);
   try { saved = JSON.parse(localStorage.getItem(OFAB_POS_KEY) || "null"); } catch (e) { saved = null; }
   // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.
   [ofab.x, ofab.y] = Array.isArray(saved) ? saved : [innerWidth, innerHeight - 24];
-  tgl.addEventListener("click", () => ofabSetOpen(!ofab.open));
+  // 짧게 = 펼치기/접기 · 0.5초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
+  const OFAB_HOLD_MS = 500;
+  let hold = null, held = false;
+  const holdEnd = () => { if (hold) { clearTimeout(hold.t); hold = null; } tgl.classList.remove("holding"); };
+  tgl.addEventListener("pointerdown", (e) => {
+    holdEnd(); held = false;
+    hold = { x: e.clientX, y: e.clientY, t: setTimeout(() => { hold = null; held = true; tgl.classList.remove("holding"); ofabQuickAdd(); }, OFAB_HOLD_MS) };
+    tgl.classList.add("holding");
+  });
+  tgl.addEventListener("pointermove", (e) => { if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) holdEnd(); });
+  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => tgl.addEventListener(ev, holdEnd));
+  tgl.addEventListener("contextmenu", (e) => e.preventDefault());   // 모바일 길게 누르기 메뉴
+  tgl.addEventListener("click", () => { if (held) { held = false; return; } ofabSetOpen(!ofab.open); });
   el("ofabBack")?.addEventListener("click", () => ofabSetOpen(false));
   grip.addEventListener("pointerdown", (e) => {
     e.preventDefault();

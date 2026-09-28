@@ -2496,9 +2496,14 @@ body.not-eth [data-eth-only]::after {
   min-height: 36px; padding: 0 14px 0 8px; border: 0; border-radius: 999px; background: transparent;
   color: var(--text); font: 700 13px/1 var(--font-mono); white-space: nowrap; cursor: pointer;
 }
+.ofab-toggle { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+/* 2026-09-28 0.5초 꾹 = 추가 진입 -- 누르는 동안 바닥에서 채움이 차오른다(진입 버튼 .hold-fill 과 같은 뜻). */
+.ofab-toggle { background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat;
+  background-position: 0 100%; background-size: 0% 3px; }
+.ofab-toggle.holding { background-size: 100% 3px; transition: background-size .5s linear; }
 .ofab.long .ofab-toggle { color: var(--good); }
 .ofab.short .ofab-toggle { color: var(--bad); }
-.ofab-toggle[aria-expanded="true"] { background: rgb(var(--lift) / 0.08); }
+.ofab-toggle[aria-expanded="true"] { background-color: rgb(var(--lift) / 0.08); }
 .ofab-grip:focus-visible, .ofab-toggle:focus-visible, .ofab-back:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 손가락은 36px 을 자주 놓친다 -- 거친 포인터에서만 44px 로 키운다(마우스 화면은 그대로). */
