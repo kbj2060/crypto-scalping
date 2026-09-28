@@ -2497,10 +2497,10 @@ body.not-eth [data-eth-only]::after {
   color: var(--text); font: 700 13px/1 var(--font-mono); white-space: nowrap; cursor: pointer;
 }
 .ofab-toggle { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
-/* 2026-09-28 0.5초 꾹 = 추가 진입 -- 누르는 동안 바닥에서 채움이 차오른다(진입 버튼 .hold-fill 과 같은 뜻). */
+/* 2026-09-28 2초 꾹 = 추가 진입 -- 누르는 동안 바닥에서 채움이 차오른다(진입 버튼 .hold-fill 과 같은 뜻). */
 .ofab-toggle { background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat;
   background-position: 0 100%; background-size: 0% 3px; }
-.ofab-toggle.holding { background-size: 100% 3px; transition: background-size .5s linear; }
+.ofab-toggle.holding { background-size: 100% 3px; transition: background-size 2s linear; }
 .ofab.long .ofab-toggle { color: var(--good); }
 .ofab.short .ofab-toggle { color: var(--bad); }
 .ofab-toggle[aria-expanded="true"] { background-color: rgb(var(--lift) / 0.08); }

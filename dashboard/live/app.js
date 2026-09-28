@@ -8328,7 +8328,7 @@ function ofabApplyDefaults() {
   if (sl) sl.checked = false;
   if (fr) { fr.value = "5"; fr.dispatchEvent(new Event("input", { bubbles: true })); }
 }
-// 2026-09-28 사용자 지시: 버튼을 0.5초 꾹 누르면 **지금 포지션 방향으로 바로 추가 진입**(5% · SL/TP 해제). 마우스만 -- 터치(모바일)는 없다.
+// 2026-09-28 사용자 지시: 버튼을 2초 꾹 누르면 **지금 포지션 방향으로 바로 추가 진입**(5% · SL/TP 해제). 마우스만 -- 터치(모바일)는 없다.
 //   패널을 펼쳐 결과를 보여 주고, 미리보기가 오는 즉시 발주한다 -- 진입 버튼의 «길게 누르기 = 확인»과 같은 경로
 //   (manualFireOnPreview → manualEntryArmConfirm). 포지션이 없으면 방향을 모르니 안 나간다. 서버 게이트·코인 검사는 그대로.
 function ofabQuickAdd() {
@@ -8403,8 +8403,8 @@ setInterval(renderOfab, 3000);
   try { saved = JSON.parse(localStorage.getItem(OFAB_POS_KEY) || "null"); } catch (e) { saved = null; }
   // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.
   [ofab.x, ofab.y] = Array.isArray(saved) ? saved : [innerWidth, innerHeight - 24];
-  // 짧게 = 펼치기/접기 · 0.5초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
-  const OFAB_HOLD_MS = 500;
+  // 짧게 = 펼치기/접기 · 2초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
+  const OFAB_HOLD_MS = 2000;   // 2026-09-28 사용자 지시 0.5 -> 2초
   let hold = null, held = false;
   const holdEnd = () => { if (hold) { clearTimeout(hold.t); hold = null; } tgl.classList.remove("holding"); };
   tgl.addEventListener("pointerdown", (e) => {
