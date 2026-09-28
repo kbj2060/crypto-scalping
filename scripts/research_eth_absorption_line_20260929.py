@@ -68,7 +68,7 @@ def build(t: pd.DataFrame, b: pd.DataFrame):
     roll_lo = pd.Series(lo).rolling(W, min_periods=1).min().to_numpy()
 
     rows = []
-    for i in range(W, n - H5 - 1):
+    for i in range(W, n - 2 * H5 - 1):   # 2×H5: 돌파 순간(≤ t+300) 뒤 300초까지 라벨이 필요하다(09-29 역방향 탐색)
         if ok_cum[i + 1] - ok_cum[i + 1 - W] < W * 0.9 or not bt_ok[i] or not bt_ok[i + H5] or np.isnan(cpx[i]):
             continue
         s, e = start[i - W + 1], end[i]
@@ -93,15 +93,19 @@ def build(t: pd.DataFrame, b: pd.DataFrame):
             if side == "ask":
                 m = (ap[sl] >= lvl - 1e-9) & (ap[sl] < lvl + 0.1 - 1e-9)
                 disp = np.nanmedian(aq[sl][m]) if m.any() else np.nan
-                brk = np.nanmax(ap_hi[i + 1:i + H5 + 1]) > (lvl + 0.1) * (1 + BREAK_BP / 1e4)
+                over = np.flatnonzero(ap_hi[i + 1:i + H5 + 1] > (lvl + 0.1) * (1 + BREAK_BP / 1e4))
                 sg = -1.0
             else:
                 m = (bp[sl] >= lvl - 1e-9) & (bp[sl] < lvl + 0.1 - 1e-9)
                 disp = np.nanmedian(bq[sl][m]) if m.any() else np.nan
-                brk = np.nanmin(bp_lo[i + 1:i + H5 + 1]) < lvl * (1 - BREAK_BP / 1e4)
+                over = np.flatnonzero(bp_lo[i + 1:i + H5 + 1] < lvl * (1 - BREAK_BP / 1e4))
                 sg = 1.0
-            rows.append((i, side, V, disp, bool(brk), sg * (mid[i + H5] - mid[i]) / mid[i] * 1e4))
-    ev = pd.DataFrame(rows, columns=["i", "side", "V", "disp", "brk", "r5s"])
+            brk = over.size > 0
+            # 돌파 순간 tau = 라인을 처음 넘은 초(그 초가 끝나야 안다) -> 따라가기 라벨은 mid[tau] 에서 mid[tau+300] (돌파 방향 = −sg)
+            tau = i + 1 + over[0] if brk else -1
+            cont = (-sg) * (mid[tau + H5] - mid[tau]) / mid[tau] * 1e4 if brk and bt_ok[tau] and bt_ok[tau + H5] else np.nan
+            rows.append((i, side, V, disp, bool(brk), sg * (mid[i + H5] - mid[i]) / mid[i] * 1e4, tau - i if brk else np.nan, cont))
+    ev = pd.DataFrame(rows, columns=["i", "side", "V", "disp", "brk", "r5s", "ttb", "cont"])
     ev["ts"] = secs[ev.i] if len(ev) else []
     mids = pd.Series(mid)
     rmax = mids.rolling(3600, min_periods=600).max(); rmin = mids.rolling(3600, min_periods=600).min()
