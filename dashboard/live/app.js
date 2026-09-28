@@ -316,6 +316,10 @@ const flowHeatmapPollMs = () => 1000;
 // 2026-09-19 호가 히트맵. 래스터는 1초/열인데 agg=3 으로 접어 받으므로 3초면 새 열이 하나다.
 let latestGex = null;
 let gexLastFetchAt = 0;
+// 2026-09-28 칼시 15분 ETH 위/아래 확률(사용자 선택 B · «매 1초»). 서버 /api/kalshi 가 1초 캐시.
+const KALSHI_POLL_MS = 1000;
+let latestKalshi = null;
+let kalshiLastFetchAt = 0;
 let latestFlowHeatmap = null;
 let flowHeatmapLastFetchAt = 0;
 // 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
@@ -3644,6 +3648,33 @@ async function refreshGex() {
   }
 }
 
+async function refreshKalshi() {
+  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  const now = Date.now();
+  if (now - kalshiLastFetchAt < KALSHI_POLL_MS) return;
+  kalshiLastFetchAt = now;
+  try {
+    const res = await fetch("/api/kalshi", { cache: "no-cache" });
+    if (!res.ok) throw new Error(`kalshi ${res.status}`);
+    latestKalshi = await res.json();
+  } catch (error) {
+    latestKalshi = null;   // 선을 지운다 -- 묵은 확률을 지금 값처럼 두지 않는다
+  }
+}
+
+// 칼시 창이 지금 유효하면 {k, pct, color, word}. 서버가 10초 넘게 못 받았거나 창이 끝났으면 null.
+function kalshiNow() {
+  const k = latestKalshi;
+  if (activeSnapshotAsset !== "eth" || !k || !k.ok || !(k.strike > 0) || k.p == null) return null;
+  const nowS = Date.now() / 1000;
+  if (nowS - k.fetched_ts > 10 || nowS >= k.close_ts) return null;
+  const pct = Math.round(k.p * 100);
+  // 5pp 안쪽은 «비등» -- 방향색을 주지 않는다(DESIGN.md 비등 규칙과 같은 폭).
+  const up = pct >= 55, dn = pct <= 45;
+  return { k, pct, color: up ? "var(--good)" : dn ? "var(--bad)" : "var(--muted)",
+           word: dn ? `아래 ${100 - pct}%` : up ? `위 ${pct}%` : `비등 위 ${pct}%` };
+}
+
 async function refreshFlowHeatmap() {
   if (activePageTab !== "snapshot" || document.hidden) return;
   if (!flowOn()) return;   // 래스터 수집기가 있는 코인만
@@ -4469,7 +4500,9 @@ function renderSnapshotChart() {
     ? fullCandles.slice(-chartWindowBars)
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
+  const kn = footprint ? kalshiNow() : null;
   const riskLevels = [...nearestLiquidationLevel(), ...trendFlipLevels(footprint, candles),
+    ...(kn ? [{ val: kn.k.strike, color: kn.color, label: "칼시", priceLeft: true, dashed: true, width: 1.4, behindCells: true }] : []),
 ];
   // 2026-09-21 사용자 요청: **풋프린트에도 청산 밀도 배경을 깐다**(전에는 청산맵 전용이었다).
   // 비용 걱정은 없다 -- liquidationDensityHistory() 가 payload 신원으로 memoize 돼 있어
@@ -6048,6 +6081,36 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
   }
 
+  // 2026-09-28 칼시 15분(사용자 선택 B): 기준가 선은 위 priceLabels 가 긋고, 여기서는 **이번 창**만 --
+  //   창 시작 경계 점선 + 옅은 면, 선 위 오른쪽 끝에 «아래 72% · 11:00 남음». 참고 · 신호 아님
+  //   (확률은 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침이다).
+  const kn = isSnapshotChart && footprint ? kalshiNow() : null;
+  if (kn) {
+    const kg = document.createElementNS(NS, "g");
+    kg.setAttribute("pointer-events", "none");
+    const add = (tag, attrs, text) => {
+      const e = document.createElementNS(NS, tag);
+      Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+      if (text != null) e.textContent = text;
+      kg.appendChild(e);
+    };
+    const i0 = candles.findIndex((c) => c.time >= kn.k.open_ts);
+    if (i0 >= 0) {
+      const x0 = xAt(i0);
+      add("rect", { x: x0, y: mt, width: ml + cw - x0, height: plotBottom - mt, fill: "rgb(var(--lift) / .035)" });
+      add("line", { x1: x0, x2: x0, y1: mt, y2: plotBottom, stroke: "var(--hover-line)", "stroke-dasharray": "2 3" });
+    }
+    const left = Math.max(0, Math.round(kn.k.close_ts - Date.now() / 1000));
+    const fs = mobileChart ? 10 : 11, ys = Math.max(mt + fs + 2, Math.min(plotBottom - 2, yAt(kn.k.strike)));
+    add("text", { x: ml + cw - 4, y: ys - 4, "font-size": fs, "font-weight": 700, fill: kn.color, "text-anchor": "end",
+                  stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke", style: "font-variant-numeric: tabular-nums" },
+        `칼시 ${kn.word} · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} 남음`);
+    const label = kg.lastChild;   // 글자는 셀 위, 면·경계는 셀 뒤
+    const gridG = layerCache.get("grid")?.g;
+    if (gridG && gridG.parentNode === svg) svg.insertBefore(kg, gridG.nextSibling); else svg.appendChild(kg);
+    svg.appendChild(label);
+  }
+
   priceLabels.forEach(p => {
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
     const labelY = Math.max(mt + 9, Math.min(plotBottom - 9, labelYRaw));
@@ -7221,6 +7284,7 @@ async function tick() {
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)
       refreshGex();                  // 2026-09-19 옵션 감마 노출(참고 표시 · 신호 아님)
+      refreshKalshi();               // 2026-09-28 칼시 15분 확률 (1초, ETH 만 · 참고 · 신호 아님)
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
       refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)

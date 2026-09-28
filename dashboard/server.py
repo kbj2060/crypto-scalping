@@ -24,7 +24,7 @@ from typing import Any
 import duckdb
 import numpy as np
 import pandas as pd
-from aiohttp import ClientSession, ClientTimeout, TCPConnector, WSMsgType, web
+from aiohttp import ClientError, ClientSession, ClientTimeout, TCPConnector, WSMsgType, web
 from dotenv import load_dotenv
 
 
@@ -1486,6 +1486,28 @@ def breakout_detector_payload() -> dict[str, Any]:
     return worker_payload(BREAKOUT_DETECTOR_STATE_PATH, BREAKOUT_DETECTOR_MAX_AGE_MIN,
                           require_ok=True, stamp_available=True,
                           extra_missing={"history": [], "times": []})
+
+
+KALSHI_ETH15M_URL = "https://api.elections.kalshi.com/trade-api/v2/markets"
+
+
+def kalshi_pick(markets: list[dict], now: float) -> dict[str, Any]:
+    """칼시 KXETH15M «열린» 시장 목록에서 지금 창 하나를 골라 화면용으로 줄인다. 참고 표시 · 신호 아님.
+
+    확률 = 위(Yes) 호가 가운데. 창 경계에서는 다음 창이 같이 열려 있을 수 있어 open<=now<close 를 먼저,
+    없으면 가장 먼저 닫히는 것. 기준가(floor_strike)는 창이 열린 뒤 60초 평균이 정해져야 채워진다 -- 없으면 None."""
+    def ts(s: str) -> float:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    rows = [(ts(m["open_time"]), ts(m["close_time"]), m) for m in markets if m.get("open_time") and m.get("close_time")]
+    live = [r for r in rows if r[0] <= now < r[1]] or sorted(rows, key=lambda r: r[1])[:1]
+    if not live:
+        return {"ok": False, "reason": "no_open_market"}
+    o, c, m = live[0]
+    bid, ask = float(m.get("yes_bid_dollars") or 0), float(m.get("yes_ask_dollars") or 0)
+    strike = m.get("floor_strike")
+    return {"ok": True, "ticker": m.get("ticker"), "open_ts": int(o), "close_ts": int(c),
+            "strike": float(strike) if strike else None, "bid": bid, "ask": ask,
+            "p": (bid + ask) / 2 if ask > 0 else None, "volume": float(m.get("volume_fp") or 0)}
 
 
 def gex_payload() -> dict[str, Any]:
@@ -4908,6 +4930,20 @@ def make_app() -> web.Application:
             "gex", 60.0, lambda: asyncio.to_thread(gex_payload), max_stale=STALE_GRACE_SECONDS)
         return web.json_response(payload, headers=NOCACHE)
 
+    async def kalshi_payload() -> dict[str, Any]:
+        try:
+            j = await fetch_binance_json(KALSHI_ETH15M_URL, {"series_ticker": "KXETH15M", "status": "open"}, timeout=3.0)
+        except (asyncio.TimeoutError, ClientError, ValueError):   # 칼시가 죽어도 화면은 선만 안 그린다
+            j = None
+        if not j:
+            return {"ok": False, "reason": "kalshi_unavailable"}
+        return {**kalshi_pick(j.get("markets") or [], time.time()), "fetched_ts": time.time()}
+
+    async def api_kalshi(request: web.Request) -> web.Response:
+        # 사용자 지시 «매 1초»(2026-09-28). 캐시 1초라 브라우저가 몇 개든 칼시로는 초당 1회뿐(기본 한도 20/초).
+        payload = await swr_cached("kalshi", 1.0, kalshi_payload, max_stale=5.0)
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_chart_markers(request: web.Request) -> web.Response:
         payload = await load_chart_markers(request.query.get("asset", "eth"))
         return web.json_response(payload, headers=NOCACHE)
@@ -5941,6 +5977,7 @@ def make_app() -> web.Application:
 
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
     app.router.add_get("/api/gex", api_gex)
+    app.router.add_get("/api/kalshi", api_kalshi)
     app.router.add_get("/api/flow/heatmap", api_flow_heatmap)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
