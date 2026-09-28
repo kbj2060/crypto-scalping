@@ -1506,8 +1506,10 @@ def gex_payload() -> dict[str, Any]:
     # 2026-09-28 옵션 카드(사용자 선택 A+C)의 «최근 블록 거래» -- 같은 폴링에 싣는다(요청 하나 덜).
     blk = worker_payload(BLOCK_TRADES_STATE_PATH, BLOCK_TRADES_MAX_AGE_MIN, ts_field="generated_at",
                          stamp_available=True, bare_missing=True, extra_missing={"blocks": []})
-    return {**out, "block_trades": {"available": bool(blk.get("available")), "blocks": (blk.get("blocks") or [])[:8],
-                                    "n_blocks": blk.get("n_blocks"), "error": blk.get("error")}}
+    by_coin = blk.get("blocks_by_coin") or {"ETH": blk.get("blocks") or []}   # 2026-09-28 네 코인(ETH·BTC·SOL·XRP)
+    return {**out, "block_trades": {"available": bool(blk.get("available")), "error": blk.get("error"),
+                                    "by_coin": {c: (v or [])[:8] for c, v in by_coin.items()},
+                                    "n_by_coin": blk.get("n_blocks_by_coin") or {c: len(v or []) for c, v in by_coin.items()}}}
 
 
 # 2026-09-19 Zeus 섀도우 페이로드·엔드포인트 제거(사용자 지시로 대시보드 카드 삭제).

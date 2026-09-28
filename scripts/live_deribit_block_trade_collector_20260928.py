@@ -52,8 +52,16 @@ CHAIN_SEC = 600.0                   # 체인·요약 주기(옛 매시 cron 을 
 STATE_PATH = LIVE / "deribit_block_trades_state.json"
 WS = "wss://www.deribit.com/ws/api/v2"
 REST = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency_and_time"
-CURRENCY = "ETH"
-CHANNEL = f"trades.option.{CURRENCY}.100ms"
+# 2026-09-28 네 코인(사용자 지시 «sol, eth, btc, xrp»). SOL·XRP 는 Deribit 에서 USDC 결제 선형 옵션이라 `USDC` 채널 하나에
+#   HYPE·AVAX·TRX 까지 섞여 온다 -- 접두어로 네 코인만 남긴다. 선형은 가격이 USDC 라 프리미엄에 지수를 곱하지 않는다.
+API_CURRENCIES = ("ETH", "BTC", "USDC")
+CHANNELS = tuple(f"trades.option.{c}.100ms" for c in API_CURRENCIES)
+COIN_PREFIX = (("ETH-", "ETH"), ("BTC-", "BTC"), ("SOL_USDC-", "SOL"), ("XRP_USDC-", "XRP"))
+COINS = tuple(c for _, c in COIN_PREFIX)
+
+
+def coin_of(inst: str) -> str | None:
+    return next((c for pre, c in COIN_PREFIX if inst.startswith(pre)), None)
 STATE_WINDOW_MS = 24 * 3600 * 1000
 BACKFILL_MAX_MS = STATE_WINDOW_MS   # 첫 기동이면 24h 를 채워 상태 JSON 이 바로 찬다
 FLUSH_SEC = 20.0
@@ -87,7 +95,7 @@ def group_blocks(rows: list[dict]) -> list[dict]:
         idx = r["index_price"] or 0.0
         b["legs_seen"] += 1
         b["notional_usd"] += r["amount"] * idx
-        b["premium_usd"] += r["amount"] * r["price"] * idx
+        b["premium_usd"] += r["amount"] * r["price"] * (1.0 if "_USDC-" in r["instrument_name"] else idx)
         b["legs"].append({k: r[k] for k in ("instrument_name", "direction", "amount", "price",
                                             "iv", "mark_price", "index_price", "trade_id")})
     for b in blocks.values():
@@ -183,12 +191,15 @@ def write(rows: list[tuple], gap: tuple | None = None) -> int:
         added = con.execute("SELECT count(*) FROM option_trades").fetchone()[0] - before
         cur = con.execute(f"SELECT {','.join(COLS)} FROM option_trades WHERE is_block AND ts_ms >= ?",
                           [int(time.time() * 1000) - STATE_WINDOW_MS])
-        blocks = group_blocks([dict(zip(COLS, r)) for r in cur.fetchall()])
+        legs = [dict(zip(COLS, r)) for r in cur.fetchall()]
+        by_coin = {c: group_blocks([x for x in legs if coin_of(x["instrument_name"]) == c]) for c in COINS}
     finally:
         con.close()      # 붙들고 있으면 연구 쿼리가 막힌다
-    out = {"generated_at": datetime.now(timezone.utc).isoformat(), "currency": CURRENCY,
-           "source": f"deribit {CHANNEL}", "window_hours": STATE_WINDOW_MS // 3_600_000,
-           "n_blocks": len(blocks), "blocks": blocks}
+    # blocks/n_blocks = ETH(옛 계약 그대로) · blocks_by_coin = 네 코인
+    out = {"generated_at": datetime.now(timezone.utc).isoformat(), "coins": list(COINS),
+           "source": "deribit " + " · ".join(CHANNELS), "window_hours": STATE_WINDOW_MS // 3_600_000,
+           "n_blocks": len(by_coin["ETH"]), "blocks": by_coin["ETH"],
+           "blocks_by_coin": by_coin, "n_blocks_by_coin": {c: len(v) for c, v in by_coin.items()}}
     tmp = STATE_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     tmp.replace(STATE_PATH)
@@ -199,20 +210,22 @@ def backfill(since_ms: int, until_ms: int) -> list[tuple]:
     """REST 로 [since, until] 옵션 체결을 오래된 것부터 끝까지 넘긴다. 겹침은 PK 가 버린다."""
     import requests
     out: list[tuple] = []
-    start = since_ms
-    while True:
-        r = requests.get(REST, timeout=20, params={
-            "currency": CURRENCY, "kind": "option", "start_timestamp": start, "end_timestamp": until_ms,
-            "count": 1000, "sorting": "asc", "include_old": "true"})
-        r.raise_for_status()
-        res = r.json()["result"]
-        trades = res.get("trades") or []
-        out += [row(t) for t in trades]
-        nxt = max((t["timestamp"] for t in trades), default=start)
-        # ponytail: 같은 ms 에 1,000건 넘게 몰리면 그 ms 의 나머지를 놓친다 -- 옵션 체결 밀도로는 없음
-        if not res.get("has_more") or nxt <= start:
-            return out
-        start = nxt
+    for api in API_CURRENCIES:
+        start = since_ms
+        while True:
+            r = requests.get(REST, timeout=20, params={
+                "currency": api, "kind": "option", "start_timestamp": start, "end_timestamp": until_ms,
+                "count": 1000, "sorting": "asc", "include_old": "true"})
+            r.raise_for_status()
+            res = r.json()["result"]
+            trades = res.get("trades") or []
+            out += [row(t) for t in trades if coin_of(t["instrument_name"])]
+            nxt = max((t["timestamp"] for t in trades), default=start)
+            # ponytail: 같은 ms 에 1,000건 넘게 몰리면 그 ms 의 나머지를 놓친다 -- 옵션 체결 밀도로는 없음
+            if not res.get("has_more") or nxt <= start:
+                break
+            start = nxt
+    return out
 
 
 async def run() -> None:
@@ -226,7 +239,7 @@ async def run() -> None:
         try:
             async with websockets.connect(WS, ping_interval=20, ping_timeout=20) as ws:
                 await ws.send(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "public/subscribe",
-                                          "params": {"channels": [CHANNEL]}}))
+                                          "params": {"channels": list(CHANNELS)}}))
                 await ws.send(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "public/set_heartbeat",
                                           "params": {"interval": 30}}))
                 # 구독 **뒤에** 백필한다 -- 그래야 백필 끝과 WS 시작 사이에 틈이 없다(겹침은 PK 가 버림).
@@ -235,7 +248,7 @@ async def run() -> None:
                 bf = await asyncio.to_thread(backfill, since, now)
                 gap = (down[0], now, down[1], None) if down else None
                 added = await asyncio.to_thread(write, bf, gap and gap[:3] + (len(bf),))
-                print(f"구독 {CHANNEL} · 백필 {len(bf)}건(새 {added}) since={since} · {DB}", flush=True)
+                print(f"구독 {'·'.join(CHANNELS)} · 백필 {len(bf)}건(새 {added}) since={since} · {DB}", flush=True)
                 down = None
                 while True:
                     m = json.loads(await asyncio.wait_for(ws.recv(), IDLE_SEC))
@@ -244,8 +257,8 @@ async def run() -> None:
                     p = m.get("params") or {}
                     if p.get("type") == "test_request":    # 하트비트 응답 안 하면 서버가 끊는다
                         await ws.send(json.dumps({"jsonrpc": "2.0", "id": 3, "method": "public/test", "params": {}}))
-                    elif p.get("channel") == CHANNEL:
-                        buf += [row(t) for t in p["data"]]
+                    elif p.get("channel") in CHANNELS:
+                        buf += [row(t) for t in p["data"] if coin_of(t["instrument_name"])]
                     if time.time() - last >= FLUSH_SEC:
                         n = len(buf)
                         added = await asyncio.to_thread(write, buf)
@@ -286,6 +299,11 @@ def _selftest() -> None:
     assert b1["notional_usd"] == 500000.0                       # 250 ETH × 2000
     assert b1["premium_usd"] == round(125 * 0.0163 * 2000 + 125 * 0.0245 * 2000, 2)
     assert g[0]["legs_seen"] == 1 and g[0]["leg_count"] == 2, "선물 다리 등 못 받은 다리는 legs_seen 으로 드러난다"
+    lin = group_blocks([dict(zip(COLS, row(dict(base, timestamp=5000, trade_id="U-1", instrument_name="XRP_USDC-2OCT26-1d55-C",
+                                                  direction="buy", amount=1000.0, price=0.02, index_price=1.5,
+                                                  block_trade_id="BLOCK-9", block_trade_leg_count=1))))])
+    assert lin[0]["premium_usd"] == 20.0, "선형(USDC) 옵션은 가격이 이미 USDC -- 지수를 곱하지 않는다"
+    assert coin_of("SOL_USDC-2OCT26-120-P") == "SOL" and coin_of("HYPE_USDC-2OCT26-40-P") is None
     print("selftest ok")
 
 

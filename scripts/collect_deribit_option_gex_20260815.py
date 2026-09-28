@@ -75,9 +75,15 @@ STATE_PATH = ROOT / "data/live/deribit_gex_state.json"
 STATE_HISTORY = 288       # 48시간 스트립. 2026-09-28 cron 1시간 -> 10분이라 48 -> 288
 PUBLIC = "https://www.deribit.com/api/v2/public/"
 BASE_URL = "https://www.deribit.com/api/v2/public/get_book_summary_by_currency"
-CURRENCIES = ("ETH", "BTC")
+CURRENCIES = ("ETH", "BTC", "SOL", "XRP")
+# 2026-09-28 SOL·XRP(사용자 지시): Deribit 에서 이 둘은 **USDC 결제 선형 옵션**이다 -- `currency=USDC` 한 목록에
+#   SOL_USDC-·XRP_USDC-(와 HYPE·AVAX·TRX…)가 섞여 온다(실측: SOL 720 · XRP 440종목). 표시가(mark_price)는 USDC,
+#   미결제는 기초자산 수량(ETH·BTC 역옵션과 같은 단위), 행사가 소수점은 `d`(XRP `1d55` = 1.55), DVOL 지수는 없다.
+#   (API 목록 이름, 종목 접두어, 지수 이름, 역옵션 여부 = 표시가가 코인 단위인가)
+SPECS = {"ETH": ("ETH", "ETH-", "eth_usd", True), "BTC": ("BTC", "BTC-", "btc_usd", True),
+         "SOL": ("USDC", "SOL_USDC-", "sol_usdc", False), "XRP": ("USDC", "XRP_USDC-", "xrp_usdc", False)}
 FRONT_MONTH_DAYS = 30.0
-INSTRUMENT_RE = re.compile(r"^(?P<ccy>[A-Z]+)-(?P<exp>\d{1,2}[A-Z]{3}\d{2})-(?P<strike>\d+(?:\.\d+)?)-(?P<type>[CP])$")
+INSTRUMENT_RE = re.compile(r"^(?P<ccy>[A-Z_]+)-(?P<exp>\d{1,2}[A-Z]{3}\d{2})-(?P<strike>\d+(?:[.d]\d+)?)-(?P<type>[CP])$")
 
 
 def log(msg: str) -> None:
@@ -126,7 +132,7 @@ def _parse_instrument(name: str) -> dict | None:
         return None
     exp_dt = datetime.strptime(m.group("exp"), "%d%b%y").replace(hour=8, tzinfo=timezone.utc)
     return {
-        "strike": float(m.group("strike")),
+        "strike": float(m.group("strike").replace("d", ".")),
         "expiration_ts": exp_dt,
         "option_type": "call" if m.group("type") == "C" else "put",
     }
@@ -142,10 +148,26 @@ def _bs_gamma(spot: float, strike: float, iv_pct: float, years: float) -> float:
     return pdf / (spot * sigma * math.sqrt(years))
 
 
+_LIST_CACHE: dict = {}
+_RV_CACHE: dict = {}
+
+
+class _Cached(Exception):
+    pass
+
+
 def fetch_chain(currency: str) -> pd.DataFrame:
-    r = requests.get(BASE_URL, params={"currency": currency, "kind": "option"}, timeout=20)
-    r.raise_for_status()
-    rows = r.json().get("result", [])
+    api, prefix, _, _ = SPECS[currency]
+    # USDC 목록은 SOL·XRP 가 같이 쓴다 -- 한 폴링 안(60초)에서는 한 번만 받는다.
+    hit = _LIST_CACHE.get(api)
+    if hit and time.time() - hit[0] < 60:
+        rows = hit[1]
+    else:
+        r = requests.get(BASE_URL, params={"currency": api, "kind": "option"}, timeout=20)
+        r.raise_for_status()
+        rows = r.json().get("result", [])
+        _LIST_CACHE[api] = (time.time(), rows)
+    rows = [x for x in rows if x["instrument_name"].startswith(prefix)]
     now = datetime.now(timezone.utc)
     out = []
     for row in rows:
@@ -205,22 +227,33 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
     먼 만기 것을 «현물»로 쓰면 1~2% 어긋난다(2026-09-28 실측 2,700 vs 지수 2,645). 부가 조회 실패는 None 으로 둔다."""
     now = datetime.now(timezone.utc)
     out: dict = {"recorded_at_utc": now.isoformat(), "currency": currency}
-    for key, fn in (("index", lambda: _pub("get_index_price", index_name=f"{currency.lower()}_usd")["index_price"]),
-                    ("dvol", lambda: _pub("get_volatility_index_data", currency=currency, resolution="60",
+    _, _, index_name, inverse = SPECS[currency]
+    out["dvol"] = None                          # DVOL 지수는 ETH·BTC 뿐 -- SOL·XRP 는 아래 iv30 을 쓴다
+    for key, fn in (("index", lambda: _pub("get_index_price", index_name=index_name)["index_price"]),
+                    ("dvol" if inverse else "_skip", lambda: _pub("get_volatility_index_data", currency=currency, resolution="60",
                                           start_timestamp=int((time.time() - 7200) * 1000),
                                           end_timestamp=int(time.time() * 1000))["data"][-1][4])):
+        if key == "_skip":
+            continue
         try:
             out[key] = float(fn())
         except Exception as exc:        # 부가 값 -- 없으면 None, GEX 수집은 계속
             out[key] = None; log(f"{currency}: {key} 실패 {exc}")
+    # 실현 7일은 Deribit 차트 응답이 자주 30초를 넘긴다(실측) -- 성공값을 1시간 재사용하고, 실패하면 직전 값을 쓴다.
+    hit = _RV_CACHE.get(currency)
     try:
-        tv = _pub("get_tradingview_chart_data", instrument_name=f"{currency}-PERPETUAL", resolution="60",
+        if hit and time.time() - hit[0] < 3600:
+            raise _Cached
+        tv = _pub("get_tradingview_chart_data", instrument_name=f"{currency}-PERPETUAL" if inverse else f"{currency}_USDC-PERPETUAL", resolution="60",
                   start_timestamp=int((time.time() - 7 * 86400) * 1000), end_timestamp=int(time.time() * 1000))
         cl = [c for c in tv["close"] if c]
         rets = [math.log(b / a) for a, b in zip(cl, cl[1:])]
         out["rv7"] = math.sqrt(sum(x * x for x in rets) / len(rets) * 24 * 365) * 100 if len(rets) > 24 else None
+        _RV_CACHE[currency] = (time.time(), out["rv7"])
+    except _Cached:
+        out["rv7"] = hit[1]
     except Exception as exc:
-        out["rv7"] = None; log(f"{currency}: rv7 실패 {exc}")
+        out["rv7"] = hit[1] if hit else None; log(f"{currency}: rv7 실패 {exc}")
     idx = out["index"] or float(chain["underlying_price"].median())
     exps = []
     for exp, g in sorted(chain.groupby("expiration_ts"), key=lambda kv: kv[0]):
@@ -243,6 +276,9 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
                      "bf25": (c25 + p25) / 2 - atm_iv, "call_oi_usd": coi * idx, "put_oi_usd": poi * idx,
                      "pc": (poi / coi) if coi else None, "pain": float(pain)})
     out["expiries"] = exps[:8]
+    # 30일에 가장 가까운 만기의 ATM IV -- DVOL(30일 내재 변동성 지수)이 없는 코인의 대용. 화면은 dvol ?? iv30.
+    near30 = min(exps, key=lambda e: abs(e["exp_ms"] / 1000 - time.time() - 30 * 86400), default=None)
+    out["iv30"] = near30["atm_iv"] if near30 else None
     # 감마 곡선: 지수 ±15% 를 25 점으로 -- 가격이 옮겨 가면 딜러 감마가 어디서 부호를 바꾸는가(플립).
     #   부호 관례는 summarize_gex 와 같다(콜 +, 풋 −). 🔴ETH 는 37일 내내 total<0 이 0% 였다 -- 플립이 없으면 None.
     yrs_a = (chain["days_to_expiry"] / 365.0).to_numpy(); k_a = chain["strike"].to_numpy()
@@ -272,7 +308,7 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
                   (r["option_type"] == "call" and idx <= r["strike"] <= idx * 1.1)
             if otm and r["mark_price"] > 0:
                 hedge.append({"exp_ms": e["exp_ms"], "k": float(r["strike"]), "type": r["option_type"][0].upper(),
-                              "usd": float(r["mark_price"]) * idx, "iv": float(r["mark_iv"])})
+                              "usd": float(r["mark_price"]) * (idx if inverse else 1.0), "iv": float(r["mark_iv"])})
     out["hedge"] = hedge
     return out
 

@@ -3468,19 +3468,23 @@ const OPT_TIPS = {
   hedge: "포지션을 옵션으로 보호하면: 손절 주문은 윅에 털릴 수 있지만 풋(숏이면 콜)은 비용이 확정이고 행사가 너머 손실이 고정된다. 계산만 — 주문은 넣지 않는다(지금 주문 경로는 USDC 선물).\n손절 기준 = 청산맵 지지1(롱) / 저항1(숏). 비용 = Deribit 표시가 × 수량.",
 };
 const optOverlayOn = () => el("optOverlay")?.checked !== false;
+// 2026-09-28 네 코인(ETH·BTC 역옵션 · SOL·XRP USDC 선형옵션). DVOL 지수는 ETH·BTC 뿐 -- 나머지는 30일 ATM IV(iv30)로 폭을 잰다.
 function optData() {
-  const cur = activeSnapshotAsset === "btc" ? "BTC" : activeSnapshotAsset === "eth" ? "ETH" : null;
+  const cur = { eth: "ETH", btc: "BTC", sol: "SOL", xrp: "XRP" }[activeSnapshotAsset] || null;
   const g = cur && latestGex && latestGex.available ? (latestGex.currencies || {})[cur] : null;
-  const blocks = cur === "ETH" ? (((latestGex || {}).block_trades || {}).blocks || []) : [];
+  const blocks = cur ? ((((latestGex || {}).block_trades || {}).by_coin || {})[cur] || []) : [];
   return { cur, g, o: g && g.options, blocks };
 }
+const optIv = (o) => o.dvol ?? o.iv30;                      // 연 변동성(%) -- 예상 폭의 기준
+// 가격 자릿수: ETH·BTC 는 정수, SOL 은 소수 1~2, XRP 는 소수 3~4 (±0.004$ 가 «±0$» 로 뭉개지지 않게)
+const optQ = (v) => (v == null ? "-" : v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v >= 0.1 ? v.toFixed(3) : v.toPrecision(2));
 function optKst(ms, withDate = true) {
   const d = new Date(ms + 9 * 3600e3), p = (n) => String(n).padStart(2, "0");
   return (withDate ? `${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` : "") + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
 const optUsd = (v) => (v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : fmtUsdCompact(v));
 const optPx = (o) => Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || o.index;
-const optSigma = (o, sec) => (o.dvol ? optPx(o) * (o.dvol / 100) * Math.sqrt(sec / 31536000) : null);
+const optSigma = (o, sec) => (optIv(o) ? optPx(o) * (optIv(o) / 100) * Math.sqrt(sec / 31536000) : null);
 const optFront = (o) => (o.expiries || []).find((e) => e.exp_ms > Date.now()) || null;
 
 // C 시간축: −24h ~ +120h · 막대 = 만기 규모 · 선 = ATM IV · 점 = 블록 거래.
@@ -3497,7 +3501,7 @@ function optTimelineSvg(o, blocks) {
   ex.forEach((e) => {
     const v = e.call_oi_usd + e.put_oi_usd, hh = 5 + 40 * Math.sqrt(v / mx), cx = X((e.exp_ms - now) / 3.6e6);
     s += `<rect x="${(cx - 4).toFixed(1)}" y="${(base - hh).toFixed(1)}" width="8" height="${hh.toFixed(1)}" rx="2" fill="var(--warn)" fill-opacity=".8">`
-      + `<title>${optKst(e.exp_ms)} 만기 · ${optUsd(v)} · max pain ${fmtNum(e.pain, 0)} · ATM IV ${e.atm_iv.toFixed(1)}%</title></rect>`;
+      + `<title>${optKst(e.exp_ms)} 만기 · ${optUsd(v)} · max pain ${optQ(e.pain)} · ATM IV ${e.atm_iv.toFixed(1)}%</title></rect>`;
     if (v / mx > 0.3) s += `<text x="${cx.toFixed(1)}" y="${(base - hh - 3).toFixed(1)}" font-size="9" font-weight="700" fill="var(--warn)" text-anchor="middle">${optUsd(v)}</text>`;
   });
   if (ex.length >= 2) {
@@ -3528,16 +3532,16 @@ function optHedgeHtml(o) {
     if (!byExp.has(h.exp_ms)) byExp.set(h.exp_ms, []);
     byExp.get(h.exp_ms).push(h);
   });
-  let out = `<div class="opt-kv"><span>${long ? "롱" : "숏"} ${fmtNum(qty, 3)} ${coinUnit()}</span><b>진입 ${fmtNum(entry, 1)}</b></div>`;
+  let out = `<div class="opt-kv"><span>${long ? "롱" : "숏"} ${fmtNum(qty, 3)} ${coinUnit()}</span><b>진입 ${optQ(entry)}</b></div>`;
   if (stop) {
-    out += `<div class="opt-kv"><span>손절(${long ? "지지1" : "저항1"}) ${fmtNum(stop, 1)}</span><b class="opt-bad">−$${fmtNum(Math.abs(entry - stop) * qty, 0)}</b></div>`
+    out += `<div class="opt-kv"><span>손절(${long ? "지지1" : "저항1"}) ${optQ(stop)}</span><b class="opt-bad">−$${fmtNum(Math.abs(entry - stop) * qty, 0)}</b></div>`
       + `<div class="opt-note">윅에 털릴 수 있음</div>`;
   }
   byExp.forEach((list, exp) => {
     const h = list.reduce((a, b) => (Math.abs(b.k - ref) < Math.abs(a.k - ref) ? b : a));
     const hrs = (exp - now) / 3.6e6;
-    out += `<div class="opt-kv"><span>${long ? "풋" : "콜"} ${optKst(exp)} · ${fmtNum(h.k, 0)}</span><b>$${fmtNum(h.usd * qty, 0)}</b></div>`
-      + `<div class="opt-note">${hrs < 48 ? `${hrs.toFixed(0)}시간` : `${(hrs / 24).toFixed(1)}일`} · ${fmtNum(h.k, 0)} ${long ? "아래" : "위"} 손실 고정 · IV ${h.iv.toFixed(0)}%</div>`;
+    out += `<div class="opt-kv"><span>${long ? "풋" : "콜"} ${optKst(exp)} · ${optQ(h.k)}</span><b>$${fmtNum(h.usd * qty, 0)}</b></div>`
+      + `<div class="opt-note">${hrs < 48 ? `${hrs.toFixed(0)}시간` : `${(hrs / 24).toFixed(1)}일`} · ${optQ(h.k)} ${long ? "아래" : "위"} 손실 고정 · IV ${h.iv.toFixed(0)}%</div>`;
   });
   return out;
 }
@@ -3549,7 +3553,7 @@ function renderOptions() {
   if (!o) {
     if (chip) chip.hidden = true;
     body.innerHTML = "";
-    setT("optSub", !cur ? "Deribit 옵션은 ETH·BTC 만 있습니다"
+    setT("optSub", !cur ? "Deribit 옵션은 ETH·BTC·SOL·XRP 만 수집합니다"
       : latestGex && latestGex.error ? `수집 지연 (${latestGex.error})` : "불러오는 중…");
     return;
   }
@@ -3557,7 +3561,7 @@ function renderOptions() {
   const s1d = optSigma(o, 86400), s5 = optSigma(o, 300);
   const sExp = f && hrs > 0 ? px * (f.atm_iv / 100) * Math.sqrt(hrs / 8760) : null;
   const vrp = o.dvol != null && o.rv7 != null ? o.dvol - o.rv7 : null;
-  const pm = (v, d = 0) => (v == null ? "-" : `±${v.toFixed(d)}$`);
+  const pm = (v) => (v == null ? "-" : `±${optQ(v)}$`);
   setT("optSub", `Deribit ${cur} · ${optKst(Date.parse(o.recorded_at_utc), false)} · 참고, 신호 아님`);
   if (chip) {
     chip.hidden = !f;
@@ -3572,24 +3576,24 @@ function renderOptions() {
   const gm = o.gamma || {}, posG = !(gm.now_usd < 0);
   const exRows = (o.expiries || []).filter((e) => e.exp_ms > Date.now()).slice(0, 4).map((e) =>
     `<div class="opt-ex"><b class="opt-num">${optKst(e.exp_ms)}</b><span class="opt-num">${optUsd(e.call_oi_usd + e.put_oi_usd)}</span>`
-    + `<span class="opt-num">pain ${fmtNum(e.pain, 0)}</span><span class="opt-num">P/C ${e.pc == null ? "-" : e.pc.toFixed(2)}</span></div>`).join("");
+    + `<span class="opt-num">pain ${optQ(e.pain)}</span><span class="opt-num">P/C ${e.pc == null ? "-" : e.pc.toFixed(2)}</span></div>`).join("");
   const blkRows = blocks.slice(0, 5).map((b) => {
-    const legs = (b.legs || []).map((l) => `${l.direction === "buy" ? "매수" : "매도"} ${String(l.instrument_name).replace(/^[A-Z]+-/, "")}`).join(" / ");
+    const legs = (b.legs || []).map((l) => `${l.direction === "buy" ? "매수" : "매도"} ${String(l.instrument_name).replace(/^[A-Z_]+-/, "")}`).join(" / ");
     return `<div class="opt-blk"><b class="opt-num">${optKst(b.ts_ms, false)}</b><span class="opt-num">${optUsd(b.notional_usd || 0)}</span><span class="legs">${b.legs_seen}다리 · ${escapeHtml(legs)}</span></div>`;
   }).join("");
   body.innerHTML = [
-    sec("move", "예상 폭", kv("오늘 1σ", s1d == null ? "-" : `${pm(s1d)} (${(o.dvol / Math.sqrt(365)).toFixed(1)}%)`)
-      + kv("이번 5분 1σ", pm(s5, 1)) + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
+    sec("move", "예상 폭", kv("오늘 1σ", s1d == null ? "-" : `${pm(s1d)} (${(optIv(o) / Math.sqrt(365)).toFixed(1)}%)`)
+      + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 -- 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
       + kv("IV − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`)),
     sec("gamma", "딜러 감마", kv("구간", posG ? "양감마 · 눌림 쪽" : "음감마 · 튐 쪽", posG ? "opt-good" : "opt-warn")
-      + kv("플립", gm.flip ? `${fmtNum(gm.flip, 0)} (${gm.flip < px ? "아래" : "위"} ${fmtNum(Math.abs(gm.flip - px), 0)}$)` : "±15% 안 없음")
+      + kv("플립", gm.flip ? `${optQ(gm.flip)} (${gm.flip < px ? "아래" : "위"} ${optQ(Math.abs(gm.flip - px))}$)` : "±15% 안 없음")
       + kv("수준 분위 · 구조", `${g.total_pct == null ? "-" : Math.round(g.total_pct * 100) + "%"} · ${g.front_ratio == null ? "-" : g.front_ratio.toFixed(2)}`,
            g.front_negative ? "opt-warn" : "")),
     sec("exp", "만기", optTimelineSvg(o, blocks) + exRows),
     sec("mood", "심리", kv("25Δ 리스크 리버설", f && f.rr25 != null ? `${f.rr25 >= 0 ? "+" : ""}${f.rr25.toFixed(1)}pt` : "-")
       + kv("버터플라이", f && f.bf25 != null ? `${f.bf25 >= 0 ? "+" : ""}${f.bf25.toFixed(1)}pt` : "-")
       + kv("기간 구조(ATM IV)", (o.expiries || []).filter((e) => e.exp_ms > Date.now()).slice(0, 5).map((e) => e.atm_iv.toFixed(0)).join(" → ") || "-")
-      + (cur === "ETH" ? kv("블록 거래 24h", `${blocks.length}건`) + blkRows : "")),
+      + kv("블록 거래 24h", `${((((latestGex || {}).block_trades || {}).n_by_coin || {})[cur]) ?? blocks.length}건`) + blkRows),
     sec("hedge", "보험", optHedgeHtml(o)),
   ].join("");
 }
@@ -5971,7 +5975,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   🔴행사가 자석·핀닝은 우리 검정에서 없었다 -- 그래서 흐린 점선 + 글자이고 굵은 벽처럼 그리지 않는다.
   if (isSnapshotChart && footprint && optOverlayOn()) {
     const { o } = optData();
-    if (o && o.dvol) {
+    if (o && optIv(o)) {
       const og = document.createElementNS(NS, "g");
       og.setAttribute("pointer-events", "none");
       const add = (tag, attrs, text) => {
@@ -5986,27 +5990,27 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       add("rect", { x: ml, y: a1, width: cw, height: Math.max(0, b1 - a1), fill: "var(--option)", "fill-opacity": 0.05 });
       add("rect", { x: ml, y: cy(a5), width: cw, height: Math.max(0, cy(b5) - cy(a5)), fill: "var(--option)", "fill-opacity": 0.11 });
       [a5, b5].forEach((y) => { if (y > mt && y < plotBottom) add("line", { x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--option)", "stroke-opacity": 0.7, "stroke-dasharray": "5 4" }); });
-      if (a5 > mt + fs + 4) add("text", { x: ml + 4, y: a5 - 4, "font-size": fs, "font-weight": 700, fill: "var(--option)" }, `5분 ±${s5.toFixed(1)}$`);
+      if (a5 > mt + fs + 4) add("text", { x: ml + 4, y: a5 - 4, "font-size": fs, "font-weight": 700, fill: "var(--option)" }, `5분 ±${optQ(s5)}$`);
       add("text", { x: ml + 4, y: a1 + fs + 2, "font-size": fs, "font-weight": 600, fill: "var(--option)", opacity: 0.85 },
-          `1시간 ±${s1h.toFixed(0)}$${yAt(px + s1h) < mt ? " (창 밖까지)" : ""}`);
+          `1시간 ±${optQ(s1h)}$${yAt(px + s1h) < mt ? " (창 밖까지)" : ""}`);
       const f = optFront(o);
       if (f) {
-        const y = yAt(f.pain), lab = `max pain ${fmtNum(f.pain, 0)} · ${optKst(f.exp_ms)} 만기`;
+        const y = yAt(f.pain), lab = `max pain ${optQ(f.pain)} · ${optKst(f.exp_ms)} 만기`;
         if (y >= mt && y <= plotBottom) {
           add("line", { x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--warn)", "stroke-opacity": 0.6, "stroke-dasharray": "2 5" });
           add("text", { x: ml + cw - 4, y: y - 4, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" }, lab);
         } else {
           add("text", { x: ml + 4, y: y < mt ? mt + 2 * fs + 8 : plotBottom - fs - 8, "font-size": fs, "font-weight": 700, fill: "var(--warn)" },
-              `${lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${fmtNum(Math.abs(f.pain - px), 0)}$)`);
+              `${lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
         }
       }
       const gm = o.gamma || {}, fl = gm.flip;
       if (fl && yAt(fl) >= mt && yAt(fl) <= plotBottom) {
         add("line", { x1: ml, x2: ml + cw, y1: yAt(fl), y2: yAt(fl), stroke: "var(--muted)", "stroke-opacity": 0.8, "stroke-dasharray": "8 4" });
-        add("text", { x: ml + 4, y: yAt(fl) - 4, "font-size": fs, "font-weight": 700, fill: "var(--muted)" }, `감마 플립 ${fmtNum(fl, 0)}`);
+        add("text", { x: ml + 4, y: yAt(fl) - 4, "font-size": fs, "font-weight": 700, fill: "var(--muted)" }, `감마 플립 ${optQ(fl)}`);
       } else {
         add("text", { x: ml + 4, y: plotBottom - 4, "font-size": fs, "font-weight": 600, fill: "var(--muted)" },
-            fl ? `감마 플립 ${fmtNum(fl, 0)} ${fl < px ? "↓" : "↑"}(창 밖)`
+            fl ? `감마 플립 ${optQ(fl)} ${fl < px ? "↓" : "↑"}(창 밖)`
               : mobileChart ? `플립 없음 · ${gm.now_usd < 0 ? "음감마" : "양감마"}`
               : `감마 플립 없음(±15%) — ${gm.now_usd < 0 ? "음감마, 딜러가 키우는 쪽" : "양감마, 딜러가 눌러 주는 쪽"}`);
       }
