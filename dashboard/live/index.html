@@ -213,6 +213,7 @@
               <button type="button" class="asset-tab" data-asset="xrp">XRP</button>
               <button type="button" class="asset-tab" data-asset="hype">HYPE</button>
             </div>
+            <span id="optChip" class="opt-chip" hidden></span>
           </div>
           <div class="ops-health-head-tools">
             <!-- 2026-09-16 차트 모드 전환. 풋프린트는 12봉(1시간)이라 가격 폭이 $45 안팎인데
@@ -438,9 +439,16 @@
       <!-- 2026-09-27 넓은 화면에서 이 세 장(신호·특화 신호·경제 일정)은 한 칸에 위아래로 쌓인다(사용자 «한 너비에 모두»).
            평소(모바일 포함)에는 display:contents 라 이 묶음이 없는 것과 같다. -->
       <div class="snap-side">
-      <section class="panel ops-health-panel" data-asset-scope="indicators" data-eth-only>
-        <h3 class="sr-only">신호</h3>
-        <div id="snapModelIndicatorList" class="ops-health-list"></div>
+      <!-- 2026-09-28 옵션 카드(사용자 선택 A+C) -- 옛 «신호» 카드(GEX 한 줄)를 대체한다. Deribit 체인(10분) + 블록 거래(20초).
+           다섯 칸 = 옵션을 선물에 쓰는 다섯 방법(예상 폭 · 딜러 감마 · 만기 · 심리 · 보험). 전부 참고 · 신호 아님. -->
+      <section id="optPanel" class="panel ops-health-panel opt-panel">
+        <div class="ops-health-head">
+          <div><h3>옵션</h3><p id="optSub" class="muted">불러오는 중…</p></div>
+          <div class="ops-health-head-tools">
+            <label class="lev-auto opt-toggle" title="풋프린트 가격축에 예상 폭 띠 · max pain · 감마 플립을 그린다"><input type="checkbox" id="optOverlay" checked> 가격축 표시</label>
+          </div>
+        </div>
+        <div id="optBody" class="opt-body"></div>
       </section>
 
 

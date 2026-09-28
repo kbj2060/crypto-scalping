@@ -72,7 +72,8 @@ DB_PATH = ROOT / "data/live/deribit_gex.duckdb"
 # 대시보드가 직접 열면 `Could not set lock` 이 난다 -- 이 저장소 수집기 관례대로
 # 끝에 작은 상태파일을 떨군다(tmp -> os.replace, 부분 읽기 없음).
 STATE_PATH = ROOT / "data/live/deribit_gex_state.json"
-STATE_HISTORY = 48        # 48시간 스트립. 매시 1행이라 그대로 48개다
+STATE_HISTORY = 288       # 48시간 스트립. 2026-09-28 cron 1시간 -> 10분이라 48 -> 288
+PUBLIC = "https://www.deribit.com/api/v2/public/"
 BASE_URL = "https://www.deribit.com/api/v2/public/get_book_summary_by_currency"
 CURRENCIES = ("ETH", "BTC")
 FRONT_MONTH_DAYS = 30.0
@@ -101,6 +102,13 @@ def ensure_tables(con) -> None:
             option_type VARCHAR, strike DOUBLE, expiration_ts TIMESTAMPTZ, days_to_expiry DOUBLE,
             open_interest DOUBLE, mark_iv DOUBLE, underlying_price DOUBLE, mark_price DOUBLE,
             volume DOUBLE, gamma_bs DOUBLE
+        )"""
+    )
+    # 2026-09-28 옵션 요약 이력(스큐·기간 구조·만기 규모) -- 과거분을 살 수 없어서 지금부터 쌓는다(나중에 검정).
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS option_summary (
+            recorded_at_utc TIMESTAMPTZ, currency VARCHAR, index_price DOUBLE, dvol DOUBLE, rv7 DOUBLE,
+            front_atm_iv DOUBLE, front_rr25 DOUBLE, front_bf25 DOUBLE, gamma_flip DOUBLE, payload VARCHAR
         )"""
     )
     con.execute(
@@ -175,6 +183,100 @@ def summarize_gex(chain: pd.DataFrame, currency: str) -> dict:
     }
 
 
+def _pub(method: str, **params):
+    r = requests.get(PUBLIC + method, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()["result"]
+
+
+def _bs_delta(fwd: float, strike: float, iv_pct: float, years: float, call: bool) -> float:
+    sigma = iv_pct / 100.0
+    if fwd <= 0 or strike <= 0 or sigma <= 0 or years <= 0:
+        return 0.0
+    d1 = (math.log(fwd / strike) + 0.5 * sigma * sigma * years) / (sigma * math.sqrt(years))
+    nd1 = 0.5 * (1.0 + math.erf(d1 / math.sqrt(2.0)))
+    return nd1 if call else nd1 - 1.0
+
+
+def options_summary(chain: pd.DataFrame, currency: str) -> dict:
+    """화면 «옵션» 카드 한 판(2026-09-28 사용자 선택 A+C). **참고 표시 전용 -- 신호 아님.**
+    예상 폭(DVOL) · VRP(DVOL − 실현 7일) · 만기별(ATM IV·25Δ RR/BF·콜/풋 미결제·P/C·max pain) · 감마 곡선/플립 ·
+    보험용 OTM 옵션 가격. 🔴가격 기준은 **지수**(eth_usd)다 -- 체인의 underlying_price 는 만기마다 다른 선도가라
+    먼 만기 것을 «현물»로 쓰면 1~2% 어긋난다(2026-09-28 실측 2,700 vs 지수 2,645). 부가 조회 실패는 None 으로 둔다."""
+    now = datetime.now(timezone.utc)
+    out: dict = {"recorded_at_utc": now.isoformat(), "currency": currency}
+    for key, fn in (("index", lambda: _pub("get_index_price", index_name=f"{currency.lower()}_usd")["index_price"]),
+                    ("dvol", lambda: _pub("get_volatility_index_data", currency=currency, resolution="60",
+                                          start_timestamp=int((time.time() - 7200) * 1000),
+                                          end_timestamp=int(time.time() * 1000))["data"][-1][4])):
+        try:
+            out[key] = float(fn())
+        except Exception as exc:        # 부가 값 -- 없으면 None, GEX 수집은 계속
+            out[key] = None; log(f"{currency}: {key} 실패 {exc}")
+    try:
+        tv = _pub("get_tradingview_chart_data", instrument_name=f"{currency}-PERPETUAL", resolution="60",
+                  start_timestamp=int((time.time() - 7 * 86400) * 1000), end_timestamp=int(time.time() * 1000))
+        cl = [c for c in tv["close"] if c]
+        rets = [math.log(b / a) for a, b in zip(cl, cl[1:])]
+        out["rv7"] = math.sqrt(sum(x * x for x in rets) / len(rets) * 24 * 365) * 100 if len(rets) > 24 else None
+    except Exception as exc:
+        out["rv7"] = None; log(f"{currency}: rv7 실패 {exc}")
+    idx = out["index"] or float(chain["underlying_price"].median())
+    exps = []
+    for exp, g in sorted(chain.groupby("expiration_ts"), key=lambda kv: kv[0]):
+        yrs = float(g["days_to_expiry"].iloc[0]) / 365.0
+        fwd = float(g["underlying_price"].iloc[0])
+        calls, puts = g[g["option_type"] == "call"], g[g["option_type"] == "put"]
+        if calls.empty or puts.empty:
+            continue
+        atm_k = float(g.iloc[(g["strike"] - fwd).abs().argsort()[:1]]["strike"].iloc[0])
+        atm_iv = float(g[g["strike"] == atm_k]["mark_iv"].mean())
+        cd = calls.assign(d=[_bs_delta(fwd, k, v, yrs, True) for k, v in zip(calls["strike"], calls["mark_iv"])])
+        pdl = puts.assign(d=[_bs_delta(fwd, k, v, yrs, False) for k, v in zip(puts["strike"], puts["mark_iv"])])
+        c25 = float(cd.iloc[(cd["d"] - 0.25).abs().argsort()[:1]]["mark_iv"].iloc[0])
+        p25 = float(pdl.iloc[(pdl["d"] + 0.25).abs().argsort()[:1]]["mark_iv"].iloc[0])
+        ks = sorted(g["strike"].unique())
+        pain = min(ks, key=lambda P: float(((P - calls["strike"]).clip(lower=0) * calls["open_interest"]).sum()
+                                          + ((puts["strike"] - P).clip(lower=0) * puts["open_interest"]).sum()))
+        coi, poi = float(calls["open_interest"].sum()), float(puts["open_interest"].sum())
+        exps.append({"exp_ms": int(exp.timestamp() * 1000), "atm_iv": atm_iv, "rr25": c25 - p25,
+                     "bf25": (c25 + p25) / 2 - atm_iv, "call_oi_usd": coi * idx, "put_oi_usd": poi * idx,
+                     "pc": (poi / coi) if coi else None, "pain": float(pain)})
+    out["expiries"] = exps[:8]
+    # 감마 곡선: 지수 ±15% 를 25 점으로 -- 가격이 옮겨 가면 딜러 감마가 어디서 부호를 바꾸는가(플립).
+    #   부호 관례는 summarize_gex 와 같다(콜 +, 풋 −). 🔴ETH 는 37일 내내 total<0 이 0% 였다 -- 플립이 없으면 None.
+    yrs_a = (chain["days_to_expiry"] / 365.0).to_numpy(); k_a = chain["strike"].to_numpy()
+    iv_a = (chain["mark_iv"] / 100.0).to_numpy(); oi_a = chain["open_interest"].to_numpy()
+    sg_a = chain["option_type"].map({"call": 1.0, "put": -1.0}).to_numpy()
+    import numpy as np
+    def gex_at(px: float) -> float:
+        ok = (iv_a > 0) & (yrs_a > 0)
+        d1 = (np.log(px / k_a[ok]) + 0.5 * iv_a[ok] ** 2 * yrs_a[ok]) / (iv_a[ok] * np.sqrt(yrs_a[ok]))
+        gam = np.exp(-0.5 * d1 * d1) / np.sqrt(2 * np.pi) / (px * iv_a[ok] * np.sqrt(yrs_a[ok]))
+        return float((sg_a[ok] * gam * oi_a[ok]).sum() * px * px * 0.01)
+    prof = [(idx * (0.85 + 0.0125 * i), gex_at(idx * (0.85 + 0.0125 * i))) for i in range(25)]
+    flip = None
+    for (a, ga), (b, gb) in zip(prof, prof[1:]):
+        if (ga < 0) != (gb < 0):
+            cand = a + (b - a) * (-ga) / (gb - ga)
+            if flip is None or abs(cand - idx) < abs(flip - idx):
+                flip = cand
+    out["gamma"] = {"now_usd": gex_at(idx), "flip": flip, "profile": [[round(p, 1), g] for p, g in prof]}
+    # 보험: 가까운 만기 둘(12시간 이상 남은 것 중)의 지수 ±10% OTM 옵션 -- 화면이 포지션·손절에 맞춰 고른다.
+    near = [e for e in exps if e["exp_ms"] / 1000 - time.time() > 12 * 3600][:2]
+    hedge = []
+    for e in near:
+        g = chain[chain["expiration_ts"] == pd.Timestamp(e["exp_ms"], unit="ms", tz="UTC")]
+        for _, r in g.iterrows():
+            otm = (r["option_type"] == "put" and idx * 0.9 <= r["strike"] <= idx) or \
+                  (r["option_type"] == "call" and idx <= r["strike"] <= idx * 1.1)
+            if otm and r["mark_price"] > 0:
+                hedge.append({"exp_ms": e["exp_ms"], "k": float(r["strike"]), "type": r["option_type"][0].upper(),
+                              "usd": float(r["mark_price"]) * idx, "iv": float(r["mark_iv"])})
+    out["hedge"] = hedge
+    return out
+
+
 def poll_once(con) -> None:
     for currency in CURRENCIES:
         chain = fetch_chain(currency)
@@ -194,6 +296,14 @@ def poll_once(con) -> None:
         log(f"{currency}: spot={summary['spot_price']:.1f} total_gex=${summary['total_gex_usd']:,.0f} "
             f"front_month_gex=${summary['front_month_gex_usd']:,.0f} n={summary['n_instruments']} "
             f"n_front={summary['n_front_month']}")
+        try:
+            opt = options_summary(chain, currency)
+            f0 = (opt["expiries"] or [{}])[0]
+            con.execute("INSERT INTO option_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        [summary["recorded_at_utc"], currency, opt.get("index"), opt.get("dvol"), opt.get("rv7"),
+                         f0.get("atm_iv"), f0.get("rr25"), f0.get("bf25"), opt["gamma"]["flip"], json.dumps(opt)])
+        except Exception as exc:     # 옵션 요약이 깨져도 GEX 스냅샷은 이미 저장됐다
+            log(f"{currency}: options_summary 실패 {exc}")
     write_state(con)
 
 
@@ -231,7 +341,10 @@ def write_state(con) -> None:
             "       avg(CASE WHEN front_month_gex_usd <= ? THEN 1.0 ELSE 0.0 END), "
             "       count(*), count(DISTINCT date_trunc('day', recorded_at_utc)) "
             "FROM gex_summary WHERE currency = ?", [total, front, currency]).fetchone()
+        opt_row = con.execute("SELECT payload FROM option_summary WHERE currency = ? "
+                              "ORDER BY recorded_at_utc DESC LIMIT 1", [currency]).fetchone()
         out["currencies"][currency] = {
+            "options": json.loads(opt_row[0]) if opt_row else None,
             "recorded_at_utc": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
             "spot_price": spot, "total_gex_usd": total, "front_month_gex_usd": front,
             "front_ratio": ratio,

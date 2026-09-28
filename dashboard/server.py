@@ -458,7 +458,10 @@ BREAKOUT_DETECTOR_MAX_AGE_MIN = 15.0       # 5분봉 3개 -- 봉 마감 +20초�
 # 2026-09-19 GEX. 🔴duckdb(`deribit_gex.duckdb`)는 **열지 않는다** -- 단일 writer 라
 #   매시 cron 과 부딪히면 `Could not set lock` 이다. 수집기가 떨구는 JSON 만 읽는다.
 GEX_STATE_PATH = REPO_ROOT / "data" / "live" / "deribit_gex_state.json"
-GEX_MAX_AGE_MIN = 150.0   # 매시 cron -- 두 사이클 놓치면 죽은 것으로 본다
+GEX_MAX_AGE_MIN = 35.0    # 2026-09-28 cron 10분 -- 세 사이클 놓치면 죽은 것으로 본다(옵션 카드 원천이기도 하다)
+# 2026-09-28 Deribit ETH 옵션 블록 거래(scripts/live_deribit_block_trade_collector_20260928.py) -- 상주 WS 가 20초마다 쓴다.
+BLOCK_TRADES_STATE_PATH = REPO_ROOT / "data" / "live" / "deribit_block_trades_state.json"
+BLOCK_TRADES_MAX_AGE_MIN = 3.0
 
 # 2026-09-19 호가 히트맵. 🔴**전용 스레드풀**을 쓴다 -- 디스크에서 수 MB 를 읽는 동안
 #   기본 executor 를 물면 같은 풀을 쓰는 다른 핸들러가 같이 막히고, 이벤트루프에서 읽으면
@@ -1497,9 +1500,14 @@ def gex_payload() -> dict[str, Any]:
     0 을 포함하므로 화면은 «참고»라고 말해야 한다.
     출처: docs/experiments/eth_gamma_zomma_graphic_research_20260916.md
     """
-    return worker_payload(GEX_STATE_PATH, GEX_MAX_AGE_MIN, ts_field="generated_at",
-                          stamp_available=True, bare_missing=True,
-                          extra_missing={"currencies": {}})
+    out = worker_payload(GEX_STATE_PATH, GEX_MAX_AGE_MIN, ts_field="generated_at",
+                         stamp_available=True, bare_missing=True,
+                         extra_missing={"currencies": {}})
+    # 2026-09-28 옵션 카드(사용자 선택 A+C)의 «최근 블록 거래» -- 같은 폴링에 싣는다(요청 하나 덜).
+    blk = worker_payload(BLOCK_TRADES_STATE_PATH, BLOCK_TRADES_MAX_AGE_MIN, ts_field="generated_at",
+                         stamp_available=True, bare_missing=True, extra_missing={"blocks": []})
+    return {**out, "block_trades": {"available": bool(blk.get("available")), "blocks": (blk.get("blocks") or [])[:8],
+                                    "n_blocks": blk.get("n_blocks"), "error": blk.get("error")}}
 
 
 # 2026-09-19 Zeus 섀도우 페이로드·엔드포인트 제거(사용자 지시로 대시보드 카드 삭제).

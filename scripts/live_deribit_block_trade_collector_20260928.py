@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""**Deribit ETH 옵션 체결·블록 거래 수집기** — 대시보드 «옵션» 카드의 «최근 블록 거래» 원천. (2026-09-28)
+"""**Deribit 옵션 통합 수집기** — 대시보드 «옵션» 카드의 원천 전부를 **duckdb 한 파일**에. (2026-09-28)
+
+2026-09-28 사용자 «옵션 데이터들 모아서 하나의 duckdb 에»: 상주 프로세스 하나가 `deribit_options.duckdb` 에
+  ① ETH 옵션 체결 전체 + 블록 거래(WS 실시간, 아래)            -> option_trades · gaps
+  ② ETH·BTC 옵션 체인 스냅샷(10분, collect_deribit_option_gex) -> option_chain_snapshot · gex_summary
+  ③ 옵션 요약(10분: DVOL·실현7일·만기별 ATM IV/RR/BF/미결제/P·C/max pain·감마 곡선/플립·보험용 OTM 가격) -> option_summary
+를 쓴다. 옛 두 파일(deribit_gex.duckdb = 매시 cron · deribit_option_trades.duckdb)의 이력은 첫 기동 때 한 번 옮긴다.
+상태 JSON 둘(deribit_gex_state.json · deribit_block_trades_state.json)은 그대로 -- 대시보드 계약은 안 바뀐다.
+🔴매시 GEX cron 은 **끈다**(같은 상태 파일을 두 곳이 쓰면 안 된다).
 
 원천(실측 2026-09-28, 키 없음):
   WS  `wss://www.deribit.com/ws/api/v2` · `public/subscribe` · 채널 `trades.option.ETH.100ms`
@@ -31,11 +39,16 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # collect_deribit_option_gex_20260815 (같은 폴더)
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE = Path(os.getenv("DERIBIT_BT_DIR", str(ROOT / "data/live")))
-DB = LIVE / "deribit_option_trades.duckdb"
+DB = LIVE / "deribit_options.duckdb"
+OLD_DBS = (LIVE / "deribit_gex.duckdb", LIVE / "deribit_option_trades.duckdb")   # 첫 기동 때 이력을 옮길 옛 파일
+CHAIN_SEC = 600.0                   # 체인·요약 주기(옛 매시 cron 을 10분으로)
 STATE_PATH = LIVE / "deribit_block_trades_state.json"
 WS = "wss://www.deribit.com/ws/api/v2"
 REST = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency_and_time"
@@ -98,6 +111,56 @@ def _connect():
     return con
 
 
+def migrate_once() -> None:
+    """옛 두 파일의 이력을 새 파일로 한 번 옮긴다(대상 테이블이 비어 있을 때만 -- 다시 켜도 중복 없음).
+    🔴옛 파일은 지우지 않는다(되돌리기용). 매시 cron 이 켜져 있으면 옛 gex 파일이 잠겨 있을 수 있다 -- 그때는 건너뛴다."""
+    import collect_deribit_option_gex_20260815 as gex
+    con = _connect()
+    try:
+        gex.ensure_tables(con)
+        for old in OLD_DBS:
+            if not old.exists():
+                continue
+            try:
+                con.execute(f"ATTACH '{old}' AS old (READ_ONLY)")
+            except Exception as e:
+                print(f"옮기기 건너뜀 {old.name}: {e}", flush=True); continue
+            try:
+                have = {r[0] for r in con.execute(
+                    "SELECT table_name FROM information_schema.tables WHERE table_catalog = 'old'").fetchall()}
+                for t in ("option_trades", "gaps", "option_chain_snapshot", "gex_summary", "option_summary"):
+                    if t in have and con.execute(f"SELECT count(*) FROM main.{t}").fetchone()[0] == 0:
+                        n = con.execute(f"SELECT count(*) FROM old.{t}").fetchone()[0]
+                        con.execute(f"INSERT INTO main.{t} SELECT * FROM old.{t}")
+                        print(f"옮김 {old.name}.{t} {n}행", flush=True)
+            finally:
+                con.execute("DETACH old")
+    finally:
+        con.close()
+
+
+def chain_poll() -> None:
+    """체인 스냅샷 + GEX + 옵션 요약 + deribit_gex_state.json -- collect_deribit_option_gex 의 poll_once 를 이 파일에."""
+    import collect_deribit_option_gex_20260815 as gex
+    gex.STATE_PATH = LIVE / "deribit_gex_state.json"     # 상태 파일도 이 수집기의 폴더를 따른다(시험 폴더 포함)
+    con = _connect()
+    try:
+        gex.ensure_tables(con)
+        gex.poll_once(con)
+    finally:
+        con.close()
+
+
+async def chain_loop() -> None:
+    while True:
+        t0 = time.time()
+        try:
+            await asyncio.to_thread(chain_poll)
+        except Exception as e:           # 체인 조회가 실패해도 체결 수집은 계속 -- 다음 주기에 다시
+            print(f"체인 폴링 실패: {type(e).__name__}: {e}", flush=True)
+        await asyncio.sleep(max(30.0, CHAIN_SEC - (time.time() - t0)))
+
+
 def last_ts() -> int | None:
     con = _connect()
     try:
@@ -154,6 +217,8 @@ def backfill(since_ms: int, until_ms: int) -> list[tuple]:
 
 async def run() -> None:
     import websockets
+    await asyncio.to_thread(migrate_once)
+    asyncio.get_running_loop().create_task(chain_loop())   # 체인·요약 10분 -- WS 재연결과 무관하게 돈다
     buf: list[tuple] = []
     last = time.time()
     down: tuple[int, str] | None = None

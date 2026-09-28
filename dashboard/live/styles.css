@@ -51,6 +51,7 @@
      측정: 차트 배경(#171b23) 대비 6.92:1 · 기존 세 색과 RGB 거리 113~213(60 이상이면 구별) */
   --turnover: #5aa9f5;        /* 파랑 -- 거래대금 전용 */
   --spot: #b89cff;            /* 보라 -- 현물 CVD 누적선 전용(2026-09-28) */
+  --option: #8fd0c8;          /* 청록 -- 옵션(예상 폭 띠·옵션 카드) 전용(2026-09-28) */
   /* 2026-09-26 호가 프로파일 왼쪽(쌓인 호가 깊이) 막대 -- app.js 에 리터럴 #7dd3fc 로 박혀 있던 것을 토큰으로.
      방향이 없는 «양»이라 방향색을 못 준다(청산 밀도 쿨 램프와 같은 이유). 값은 그대로다. */
   --book-depth: #7dd3fc;
@@ -110,6 +111,7 @@
   --accent: #2b3444;          /* 중립 강조 · 최악 유리바탕 8.5:1 */
   --turnover: #1d5590;        /* 파랑 · 6.99:1 (다크 토큰 주석 참고) */
   --spot: #6b46c9;
+  --option: #1d7a70;
   --amber: var(--warn);
   --liq-support: var(--good);
   --liq-resistance: var(--bad);
@@ -2663,3 +2665,23 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .sit-lad-warn { display: flex; align-items: center; gap: 7px; margin: 4px 0 2px; padding: 8px 10px; border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent);
   font-size: 12px; font-weight: 700; color: var(--bad); }
+
+/* 2026-09-28 옵션 카드(사용자 선택 A+C) · 차트 머리 칩. 색은 --option(청록) 하나 + 기존 방향색. */
+.opt-chip { display: inline-flex; align-items: center; min-height: 26px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--option) 50%, transparent); background: color-mix(in srgb, var(--option) 12%, transparent);
+  color: var(--option); font: 700 12px/1 var(--font-sans); white-space: nowrap; }
+.opt-chip.soon { background: color-mix(in srgb, var(--warn) 18%, transparent); border-color: var(--warn); color: var(--warn); }
+@media (max-width: 720px) { .opt-chip { display: none; } }
+.opt-body { display: flex; flex-direction: column; }
+.opt-sec { border-top: 1px solid var(--soft-line); padding: 10px 0 8px; }
+.opt-sec h4 { margin: 0 0 6px; font: 700 12px/1.2 var(--font-sans); color: var(--option); letter-spacing: .02em; cursor: help; }
+.opt-kv { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; font-size: 12.5px; }
+.opt-kv span { color: var(--muted); }
+.opt-kv b, .opt-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); }
+.opt-note { font-size: 11px; color: var(--muted); opacity: .85; margin-top: 3px; line-height: 1.4; }
+.opt-ex { display: grid; grid-template-columns: 84px 44px 1fr auto; gap: 6px; font-size: 12px; padding: 2px 0; }
+.opt-ex > :nth-child(2) { color: var(--muted); }
+.opt-tl { display: block; width: 100%; height: auto; margin: 6px 0 2px; }
+.opt-blk { display: grid; grid-template-columns: 40px 52px minmax(0, 1fr); gap: 6px; font-size: 11.5px; padding: 2px 0; }
+.opt-blk .legs { color: var(--muted); overflow-wrap: anywhere; }
+.opt-good { color: var(--good) !important; } .opt-bad { color: var(--bad) !important; } .opt-warn { color: var(--warn) !important; }

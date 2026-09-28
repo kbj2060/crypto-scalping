@@ -298,7 +298,7 @@ let latestTrend = null;
 let trendLastFetchAt = 0;
 let latestOi5m = null;
 let oi5mLastFetchAt = 0;
-const GEX_POLL_MS = 120000;          // 매시 cron -- 2분 폴링이면 충분히 앞선다
+const GEX_POLL_MS = 60000;           // 2026-09-28 체인 10분 · 블록 20초(옵션 카드) -- 1분 폴링
 // 2026-09-20 호가 창을 **차트 창 탭에 맞춘다**(사용자 지시).
 // 🔴전에는 15분 고정이라 1h 탭에서 왼쪽(호가 15분)과 오른쪽(체결 60분)이 4배, 4h 탭에서는
 //   16배 다른 구간을 말하고 있었다. index.html 의 창 토글 주석이 경계한 바로 그 상황이다 --
@@ -3454,61 +3454,145 @@ function ensureLiveStream() {
   };
 }
 
-function gexIndicatorItem() {
-  /* 옵션 감마 노출(GEX) -- **참고 표시 전용이고 신호가 아니다.**
+// ── 옵션 카드 · 차트 머리 칩 · 가격축 표시 (2026-09-28 사용자 선택 A+C) ───────────────────────────────
+// 원천: /api/gex 한 요청 = Deribit 옵션 통합 수집기(scripts/live_deribit_block_trade_collector_20260928.py, duckdb 하나)가
+//   10분마다 쓰는 체인 요약(currencies[ETH|BTC].options) + 20초마다 쓰는 블록 거래(block_trades).
+// 🔴전부 참고 · 신호 아님. 우리 검정: 방향 예측은 전부 기각(GEX 방향 = 가격수준 사본 · 행사가 자석·핀닝 없음 ·
+//   DVOL 방향 0). 남은 쓸모는 «얼마나 움직일 것 같은가»(크기)와 «언제 큰 이벤트가 있는가»(일정)다.
+//   옛 «신호» 카드의 GEX 한 줄(gexIndicatorItem)은 이 카드의 «딜러 감마» 칸으로 들어왔다.
+const OPT_TIPS = {
+  move: "옵션 가격에 들어 있는 기대 움직임. 1σ = 가격 × DVOL × √(기간/1년) — 약 68% 확률로 이 안. 손절이 5분 1σ 보다 훨씬 좁으면 소음에 걸리기 쉽다.\nIV−실현(VRP): 양수면 옵션시장이 실제보다 큰 움직임을 값에 넣는 중(보통 양수).\n우리 검정: DVOL 로 변동성을 예측하는 건 실현 변동성 지표에 졌다 — 기준 폭 참고로만.",
+  gamma: "옵션을 판 딜러의 헤지 방향. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 그 부호가 바뀌는 가격.\n우리 검정: ETH 전체 GEX 는 37일 내내 양수(플립이 거의 없다) · 방향 예측은 가격수준의 사본으로 기각 · 가까운 만기 비중(구조)은 크기 쪽에서 이론 부호를 회복(t −6.22), 판정 진행 중.",
+  exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n그림: −24h~+120h · 막대 = 만기 규모 · 청록 선 = 만기별 ATM IV(기간 구조) · 점 = 블록 거래.",
+  mood: "25Δ 리스크 리버설 = 같은 거리 콜 IV − 풋 IV. 음수로 깊으면 하락 방어 수요(공포), 양수면 상승 베팅. 버터플라이 = 양 끝 IV − ATM(꼬리 가격). 기간 구조 = 만기별 ATM IV — 가까운 게 더 높으면(역전) 스트레스.\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중.",
+  hedge: "포지션을 옵션으로 보호하면: 손절 주문은 윅에 털릴 수 있지만 풋(숏이면 콜)은 비용이 확정이고 행사가 너머 손실이 고정된다. 계산만 — 주문은 넣지 않는다(지금 주문 경로는 USDC 선물).\n손절 기준 = 청산맵 지지1(롱) / 저항1(숏). 비용 = Deribit 표시가 × 수량.",
+};
+const optOverlayOn = () => el("optOverlay")?.checked !== false;
+function optData() {
+  const cur = activeSnapshotAsset === "btc" ? "BTC" : activeSnapshotAsset === "eth" ? "ETH" : null;
+  const g = cur && latestGex && latestGex.available ? (latestGex.currencies || {})[cur] : null;
+  const blocks = cur === "ETH" ? (((latestGex || {}).block_trades || {}).blocks || []) : [];
+  return { cur, g, o: g && g.options, blocks };
+}
+function optKst(ms, withDate = true) {
+  const d = new Date(ms + 9 * 3600e3), p = (n) => String(n).padStart(2, "0");
+  return (withDate ? `${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` : "") + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+const optUsd = (v) => (v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : fmtUsdCompact(v));
+const optPx = (o) => Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || o.index;
+const optSigma = (o, sec) => (o.dvol ? optPx(o) * (o.dvol / 100) * Math.sqrt(sec / 31536000) : null);
+const optFront = (o) => (o.expiries || []).find((e) => e.exp_ms > Date.now()) || null;
 
-     🔴라벨을 이론대로 붙이면 안 된다. 실측 rho(GEX, 전방RV) = **+0.44~+0.51** 로 부호가
-       반대다(후행RV 통제 후에도 +0.25~+0.34). GEX 는 명목 달러라 «옵션시장 활동 수준 =
-       변동성»의 결과 대리변수로 작동한다. 그래서 두 축으로 나눠 적는다:
-         수준(total)        -> 변동성 대리. 높다고 «눌린다»가 아니다
-         구조(front/total)  -> total 을 통제하면 front 가 이론 부호를 회복한다(t -6.22)
-     ⏰판정일 1h 2026-09-28 / 4h 10-17. 그 전까지 CI 는 전부 0 을 포함한다.
-     출처: docs/experiments/eth_gamma_zomma_graphic_research_20260916.md */
-  const g = latestGex && latestGex.available
-    ? (latestGex.currencies || {})[activeSnapshotAsset === "btc" ? "BTC" : "ETH"] : null;
-  if (!g) {
-    return { key: "gex", label: "옵션 감마 노출 (GEX)", tone: "neutral",
-             subText: latestGex && latestGex.error ? "수집 지연" : "대기",
-             derivedTag: "= 참고 · 신호 아님", derivedTitle: GEX_TITLE };
+// C 시간축: −24h ~ +120h · 막대 = 만기 규모 · 선 = ATM IV · 점 = 블록 거래.
+function optTimelineSvg(o, blocks) {
+  const W = 360, H = 118, x0 = 10, x1 = W - 10, t0 = -24, t1 = 120, now = Date.now(), base = 66;
+  const X = (h) => x0 + ((h - t0) / (t1 - t0)) * (x1 - x0);
+  const ex = (o.expiries || []).filter((e) => e.exp_ms > now && (e.exp_ms - now) / 3.6e6 <= t1);
+  const mx = Math.max(1, ...ex.map((e) => e.call_oi_usd + e.put_oi_usd));
+  let s = `<line x1="${x0}" x2="${x1}" y1="${base}" y2="${base}" stroke="var(--line)"/>`
+    + `<line x1="${X(0)}" x2="${X(0)}" y1="4" y2="${H - 14}" stroke="var(--ink)" stroke-opacity=".45" stroke-dasharray="3 3"/>`;
+  [-24, 0, 24, 48, 72, 96, 120].forEach((h) => {
+    s += `<text x="${X(h)}" y="${H - 2}" font-size="9" fill="var(--muted)" text-anchor="middle">${h === 0 ? "지금" : `${h > 0 ? "+" : ""}${h}h`}</text>`;
+  });
+  ex.forEach((e) => {
+    const v = e.call_oi_usd + e.put_oi_usd, hh = 5 + 40 * Math.sqrt(v / mx), cx = X((e.exp_ms - now) / 3.6e6);
+    s += `<rect x="${(cx - 4).toFixed(1)}" y="${(base - hh).toFixed(1)}" width="8" height="${hh.toFixed(1)}" rx="2" fill="var(--warn)" fill-opacity=".8">`
+      + `<title>${optKst(e.exp_ms)} 만기 · ${optUsd(v)} · max pain ${fmtNum(e.pain, 0)} · ATM IV ${e.atm_iv.toFixed(1)}%</title></rect>`;
+    if (v / mx > 0.3) s += `<text x="${cx.toFixed(1)}" y="${(base - hh - 3).toFixed(1)}" font-size="9" font-weight="700" fill="var(--warn)" text-anchor="middle">${optUsd(v)}</text>`;
+  });
+  if (ex.length >= 2) {
+    const ivs = ex.map((e) => e.atm_iv), lo = Math.min(...ivs), hi = Math.max(...ivs);
+    const yIv = (v) => 98 - (hi > lo ? (v - lo) / (hi - lo) : 0.5) * 20;
+    s += `<path d="M${ex.map((e) => `${X((e.exp_ms - now) / 3.6e6).toFixed(1)} ${yIv(e.atm_iv).toFixed(1)}`).join(" L")}" fill="none" stroke="var(--option)" stroke-width="1.6"/>`;
+    [ex[0], ex[ex.length - 1]].forEach((e, i) => {
+      s += `<text x="${X((e.exp_ms - now) / 3.6e6).toFixed(1)}" y="${(yIv(e.atm_iv) - 4).toFixed(1)}" font-size="9" font-weight="700" fill="var(--option)" text-anchor="${i ? "end" : "start"}">IV ${e.atm_iv.toFixed(0)}</text>`;
+    });
   }
-  const bn = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "-"}$${Math.abs(v / 1e9).toFixed(2)}B`);
-  const ratio = g.front_ratio;
-  // 2026-09-20 두 가지를 고쳤다(연구: docs/experiments/eth_realtime_five_stream_1s_joint_analysis_20260920.md §11).
-  // 🔴①톤이 상수였다 -- `negative_gamma`(= total<0)가 854 스냅샷 37일 내내 0.0% 로 한 번도 참이 아니었다.
-  //    실제로 변하는 축은 front 월물(6.7%)이고, 연구가 이론 부호를 회복한다고 한 축도 그쪽이다.
-  // 🔴②달러 절대값($xx.xB)은 보정이 안 된다 -- 이 저장소 규약대로 **분위**를 같이 적는다.
-  const pct = g.total_pct == null ? null : Math.round(g.total_pct * 100);
-  const negFront = g.front_negative ?? false;      // 새 필드가 오기 전(cron 한 주기)에는 false
-  return {
-    key: "gex", label: "옵션 감마 노출 (GEX)",
-    // 🔴톤은 위험도도 방향도 아니다. front 월물이 음수일 때만 주의(6.7%), 그 외 중립.
-    tone: negFront ? "warn" : "neutral",
-    subText: negFront ? "front 음감마" : (pct == null ? "양감마" : `수준 상위 ${100 - pct}%`),
-    liveText: `수준 ${bn(g.total_gex_usd)}${pct == null ? "" : ` (분위 ${pct}%)`}`
-      + ` · 구조 ${ratio == null ? "-" : ratio.toFixed(2)} (front÷total)`
-      + (g.history_days ? ` · 기준 ${g.history_days}일` : ""),
-    derivedTag: "= 참고 · 신호 아님",
-    derivedTitle: GEX_TITLE,
-  };
+  blocks.forEach((b) => {
+    const h = (b.ts_ms - now) / 3.6e6;
+    if (h < t0) return;
+    s += `<circle cx="${X(h).toFixed(1)}" cy="16" r="${(2.5 + 2 * Math.sqrt((b.notional_usd || 0) / 1e6)).toFixed(1)}" fill="var(--option)" fill-opacity=".85">`
+      + `<title>블록 ${optKst(b.ts_ms)} · ${optUsd(b.notional_usd || 0)} · ${b.legs_seen}다리</title></circle>`;
+  });
+  return `<svg class="opt-tl" viewBox="0 0 ${W} ${H}" role="img" aria-label="옵션 시간축: 만기 규모, ATM IV, 블록 거래">${s}</svg>`;
 }
 
-const GEX_TITLE = "딜러 감마 노출. Deribit 옵션 체인을 매시 수집해 계산합니다(2026-08-15~, 750+ 스냅샷).\n\n"
-  + "🔴이론과 부호가 반대입니다. 실측 상관 rho(GEX, 앞으로의 실현변동성) = +0.44~+0.51 로, "
-  + "GEX 가 높을수록 변동성이 «눌린다»가 아니라 «옵션시장 활동이 많다»는 뜻으로 작동합니다 "
-  + "(명목 달러라 활동 수준의 결과 대리변수입니다).\n\n"
-  + "그래서 두 축으로 나눠 읽습니다 — 수준(total)은 변동성 대리, 구조(front÷total)는 딜러 감마입니다. "
-  + "total 을 통제하면 front 가 이론 부호를 회복합니다(t −6.22).\n\n"
-  + "⏰아직 판정 전입니다. HAR-RV 대비 증분 R² 는 세 지평 모두 양수·단조지만(+0.011/+0.026/+0.041) "
-  + "CI 가 전부 0 을 포함합니다(독립일 31). 판정 예정일은 1시간 지평 2026-09-28, 4시간 10-17 입니다. "
-  + "그때까지 이 값은 매매 판단의 근거가 아니라 맥락입니다.\n\n"
-  + "🔴방향으로 읽지 마세요. 2026-09-20 재측정(854스냅샷·37일)에서 GEX 와 앞 1~4시간 수익의 상관이 "
-  + "−0.25~−0.34 로 크게 나왔지만, GEX 공식에 스팟²이 들어 있어 전부 가격수준의 사본이었습니다 "
-  + "— 스팟을 통제하면 −0.05/−0.09(오차 안)로 사라지고, 스팟 단독이 GEX 보다 강합니다.\n\n"
-  + "느린 지표입니다. 매시 갱신이라 화면 값은 최대 1시간 묵었고, 24시간 뒤 자기상관이 +0.40 "
-  + "(높음/낮음 상태가 중앙 3시간 이어집니다). 초 단위 칩과 시간축이 다릅니다.\n\n"
-  + "«미시 참고» 카드에는 넣지 않았습니다. 60초 거래량 분위를 고정하면 GEX 높음/낮음 행이 "
-  + "갈리지 않고(앞 5분 고저폭 교차), 호가 방아쇠의 값도 GEX 레짐에 따라 달라지지 않았습니다"
-  + "(+1.06 vs +1.17, 겹침 6일).";
+function optHedgeHtml(o) {
+  const p = snapshotAccountPosition(), qty = Math.abs(Number(p?.qty) || 0);
+  if (!qty) return `<div class="opt-note">열린 포지션이 없어 계산할 것이 없습니다.</div>`;
+  const long = String(p.side || "").toUpperCase() === "LONG", entry = Number(p.entry_price) || 0;
+  const sr = srLevelsLive(1), stop = sr ? (long ? sr.sup[0] : sr.res[0])?.price : null;
+  const ref = stop || optPx(o), type = long ? "P" : "C", now = Date.now();
+  const byExp = new Map();
+  (o.hedge || []).filter((h) => h.type === type && h.exp_ms > now).forEach((h) => {
+    if (!byExp.has(h.exp_ms)) byExp.set(h.exp_ms, []);
+    byExp.get(h.exp_ms).push(h);
+  });
+  let out = `<div class="opt-kv"><span>${long ? "롱" : "숏"} ${fmtNum(qty, 3)} ${coinUnit()}</span><b>진입 ${fmtNum(entry, 1)}</b></div>`;
+  if (stop) {
+    out += `<div class="opt-kv"><span>손절(${long ? "지지1" : "저항1"}) ${fmtNum(stop, 1)}</span><b class="opt-bad">−$${fmtNum(Math.abs(entry - stop) * qty, 0)}</b></div>`
+      + `<div class="opt-note">윅에 털릴 수 있음</div>`;
+  }
+  byExp.forEach((list, exp) => {
+    const h = list.reduce((a, b) => (Math.abs(b.k - ref) < Math.abs(a.k - ref) ? b : a));
+    const hrs = (exp - now) / 3.6e6;
+    out += `<div class="opt-kv"><span>${long ? "풋" : "콜"} ${optKst(exp)} · ${fmtNum(h.k, 0)}</span><b>$${fmtNum(h.usd * qty, 0)}</b></div>`
+      + `<div class="opt-note">${hrs < 48 ? `${hrs.toFixed(0)}시간` : `${(hrs / 24).toFixed(1)}일`} · ${fmtNum(h.k, 0)} ${long ? "아래" : "위"} 손실 고정 · IV ${h.iv.toFixed(0)}%</div>`;
+  });
+  return out;
+}
+
+function renderOptions() {
+  const body = el("optBody"), chip = el("optChip");
+  if (!body) return;
+  const { cur, g, o, blocks } = optData();
+  if (!o) {
+    if (chip) chip.hidden = true;
+    body.innerHTML = "";
+    setT("optSub", !cur ? "Deribit 옵션은 ETH·BTC 만 있습니다"
+      : latestGex && latestGex.error ? `수집 지연 (${latestGex.error})` : "불러오는 중…");
+    return;
+  }
+  const px = optPx(o), f = optFront(o), hrs = f ? (f.exp_ms - Date.now()) / 3.6e6 : null;
+  const s1d = optSigma(o, 86400), s5 = optSigma(o, 300);
+  const sExp = f && hrs > 0 ? px * (f.atm_iv / 100) * Math.sqrt(hrs / 8760) : null;
+  const vrp = o.dvol != null && o.rv7 != null ? o.dvol - o.rv7 : null;
+  const pm = (v, d = 0) => (v == null ? "-" : `±${v.toFixed(d)}$`);
+  setT("optSub", `Deribit ${cur} · ${optKst(Date.parse(o.recorded_at_utc), false)} · 참고, 신호 아님`);
+  if (chip) {
+    chip.hidden = !f;
+    if (f) {
+      chip.textContent = `옵션 · 만기 ${optKst(f.exp_ms)} (${hrs.toFixed(0)}h) · ${optUsd(f.call_oi_usd + f.put_oi_usd)} · 오늘 ${pm(s1d)}`;
+      chip.classList.toggle("soon", hrs < 3);
+      chip.title = OPT_TIPS.exp;
+    }
+  }
+  const kv = (k, v, cls = "") => `<div class="opt-kv"><span>${k}</span><b class="${cls}">${v}</b></div>`;
+  const sec = (key, title, inner) => `<div class="opt-sec"><h4 title="${escapeHtml(OPT_TIPS[key])}">${title}</h4>${inner}</div>`;
+  const gm = o.gamma || {}, posG = !(gm.now_usd < 0);
+  const exRows = (o.expiries || []).filter((e) => e.exp_ms > Date.now()).slice(0, 4).map((e) =>
+    `<div class="opt-ex"><b class="opt-num">${optKst(e.exp_ms)}</b><span class="opt-num">${optUsd(e.call_oi_usd + e.put_oi_usd)}</span>`
+    + `<span class="opt-num">pain ${fmtNum(e.pain, 0)}</span><span class="opt-num">P/C ${e.pc == null ? "-" : e.pc.toFixed(2)}</span></div>`).join("");
+  const blkRows = blocks.slice(0, 5).map((b) => {
+    const legs = (b.legs || []).map((l) => `${l.direction === "buy" ? "매수" : "매도"} ${String(l.instrument_name).replace(/^[A-Z]+-/, "")}`).join(" / ");
+    return `<div class="opt-blk"><b class="opt-num">${optKst(b.ts_ms, false)}</b><span class="opt-num">${optUsd(b.notional_usd || 0)}</span><span class="legs">${b.legs_seen}다리 · ${escapeHtml(legs)}</span></div>`;
+  }).join("");
+  body.innerHTML = [
+    sec("move", "예상 폭", kv("오늘 1σ", s1d == null ? "-" : `${pm(s1d)} (${(o.dvol / Math.sqrt(365)).toFixed(1)}%)`)
+      + kv("이번 5분 1σ", pm(s5, 1)) + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
+      + kv("IV − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`)),
+    sec("gamma", "딜러 감마", kv("구간", posG ? "양감마 · 눌림 쪽" : "음감마 · 튐 쪽", posG ? "opt-good" : "opt-warn")
+      + kv("플립", gm.flip ? `${fmtNum(gm.flip, 0)} (${gm.flip < px ? "아래" : "위"} ${fmtNum(Math.abs(gm.flip - px), 0)}$)` : "±15% 안 없음")
+      + kv("수준 분위 · 구조", `${g.total_pct == null ? "-" : Math.round(g.total_pct * 100) + "%"} · ${g.front_ratio == null ? "-" : g.front_ratio.toFixed(2)}`,
+           g.front_negative ? "opt-warn" : "")),
+    sec("exp", "만기", optTimelineSvg(o, blocks) + exRows),
+    sec("mood", "심리", kv("25Δ 리스크 리버설", f && f.rr25 != null ? `${f.rr25 >= 0 ? "+" : ""}${f.rr25.toFixed(1)}pt` : "-")
+      + kv("버터플라이", f && f.bf25 != null ? `${f.bf25 >= 0 ? "+" : ""}${f.bf25.toFixed(1)}pt` : "-")
+      + kv("기간 구조(ATM IV)", (o.expiries || []).filter((e) => e.exp_ms > Date.now()).slice(0, 5).map((e) => e.atm_iv.toFixed(0)).join(" → ") || "-")
+      + (cur === "ETH" ? kv("블록 거래 24h", `${blocks.length}건`) + blkRows : "")),
+    sec("hedge", "보험", optHedgeHtml(o)),
+  ].join("");
+}
 
 
 async function refreshGex() {
@@ -3520,6 +3604,7 @@ async function refreshGex() {
     const res = await fetch("/api/gex", { cache: "no-cache" });
     if (!res.ok) throw new Error(`gex ${res.status}`);
     latestGex = await res.json();
+    renderOptions();
   } catch (error) {
     console.error("GEX fetch error:", error);
     latestGex = null;
@@ -5881,6 +5966,55 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     });
   }
 
+  // 2026-09-28 옵션 가격축 표시(사용자 선택 A+C, 기본 켜짐 · 옵션 카드의 «가격축 표시»로 끔): 예상 폭 띠(DVOL 1σ 5분·1시간) ·
+  //   max pain(가까운 만기) · 감마 플립. 격자 바로 위(셀 아래)에 깔아 셀 숫자를 덮지 않는다.
+  //   🔴행사가 자석·핀닝은 우리 검정에서 없었다 -- 그래서 흐린 점선 + 글자이고 굵은 벽처럼 그리지 않는다.
+  if (isSnapshotChart && footprint && optOverlayOn()) {
+    const { o } = optData();
+    if (o && o.dvol) {
+      const og = document.createElementNS(NS, "g");
+      og.setAttribute("pointer-events", "none");
+      const add = (tag, attrs, text) => {
+        const e = document.createElementNS(NS, tag);
+        Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+        if (text != null) e.textContent = text;
+        og.appendChild(e);
+      };
+      const px = Number(currentPrice) || o.index, fs = mobileChart ? 10 : 11, cy = (y) => Math.max(mt, Math.min(plotBottom, y));
+      const s1h = optSigma(o, 3600), s5 = optSigma(o, 300);
+      const a1 = cy(yAt(px + s1h)), b1 = cy(yAt(px - s1h)), a5 = yAt(px + s5), b5 = yAt(px - s5);
+      add("rect", { x: ml, y: a1, width: cw, height: Math.max(0, b1 - a1), fill: "var(--option)", "fill-opacity": 0.05 });
+      add("rect", { x: ml, y: cy(a5), width: cw, height: Math.max(0, cy(b5) - cy(a5)), fill: "var(--option)", "fill-opacity": 0.11 });
+      [a5, b5].forEach((y) => { if (y > mt && y < plotBottom) add("line", { x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--option)", "stroke-opacity": 0.7, "stroke-dasharray": "5 4" }); });
+      if (a5 > mt + fs + 4) add("text", { x: ml + 4, y: a5 - 4, "font-size": fs, "font-weight": 700, fill: "var(--option)" }, `5분 ±${s5.toFixed(1)}$`);
+      add("text", { x: ml + 4, y: a1 + fs + 2, "font-size": fs, "font-weight": 600, fill: "var(--option)", opacity: 0.85 },
+          `1시간 ±${s1h.toFixed(0)}$${yAt(px + s1h) < mt ? " (창 밖까지)" : ""}`);
+      const f = optFront(o);
+      if (f) {
+        const y = yAt(f.pain), lab = `max pain ${fmtNum(f.pain, 0)} · ${optKst(f.exp_ms)} 만기`;
+        if (y >= mt && y <= plotBottom) {
+          add("line", { x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--warn)", "stroke-opacity": 0.6, "stroke-dasharray": "2 5" });
+          add("text", { x: ml + cw - 4, y: y - 4, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" }, lab);
+        } else {
+          add("text", { x: ml + 4, y: y < mt ? mt + 2 * fs + 8 : plotBottom - fs - 8, "font-size": fs, "font-weight": 700, fill: "var(--warn)" },
+              `${lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${fmtNum(Math.abs(f.pain - px), 0)}$)`);
+        }
+      }
+      const gm = o.gamma || {}, fl = gm.flip;
+      if (fl && yAt(fl) >= mt && yAt(fl) <= plotBottom) {
+        add("line", { x1: ml, x2: ml + cw, y1: yAt(fl), y2: yAt(fl), stroke: "var(--muted)", "stroke-opacity": 0.8, "stroke-dasharray": "8 4" });
+        add("text", { x: ml + 4, y: yAt(fl) - 4, "font-size": fs, "font-weight": 700, fill: "var(--muted)" }, `감마 플립 ${fmtNum(fl, 0)}`);
+      } else {
+        add("text", { x: ml + 4, y: plotBottom - 4, "font-size": fs, "font-weight": 600, fill: "var(--muted)" },
+            fl ? `감마 플립 ${fmtNum(fl, 0)} ${fl < px ? "↓" : "↑"}(창 밖)`
+              : mobileChart ? `플립 없음 · ${gm.now_usd < 0 ? "음감마" : "양감마"}`
+              : `감마 플립 없음(±15%) — ${gm.now_usd < 0 ? "음감마, 딜러가 키우는 쪽" : "양감마, 딜러가 눌러 주는 쪽"}`);
+      }
+      const gridG = layerCache.get("grid")?.g;
+      if (gridG && gridG.parentNode === svg) svg.insertBefore(og, gridG.nextSibling); else svg.appendChild(og);
+    }
+  }
+
   priceLabels.forEach(p => {
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
     const labelY = Math.max(mt + 9, Math.min(plotBottom - 9, labelYRaw));
@@ -7023,10 +7157,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       ethOnlyIndicator(breakoutDetectorIndicatorItem()),  // 2026-09-11 추세 전환 탐지기
     ], "snapSpecializedSignalList", { forceMeter: true });
 
-    // Snapshot tab: renderModelIndicatorList mirrors renderEvidenceSignals's row/strip UI.
-    renderModelIndicatorList([
-      gexIndicatorItem(),                     // 2026-09-19 옵션 감마 노출 (09-28 판정일까지 한시)
-    ]);
+    renderOptions();                          // 2026-09-28 옵션 카드(옛 «신호» 카드의 GEX 한 줄 대체)
   }
 }
 
@@ -8100,6 +8231,13 @@ document.addEventListener("input", (e) => {
 });
 
 el("snapLevAuto")?.addEventListener("change", () => manualEntryRefreshSize());
+{ // 2026-09-28 옵션 가격축 표시 -- 기본 켜짐, 끈 선택만 브라우저에 기억한다.
+  const box = el("optOverlay");
+  try { if (box && localStorage.getItem("optOverlay") === "0") box.checked = false; } catch (e) { /* 저장소 없음 -- 기본 켜짐 */ }
+  box?.addEventListener("change", () => {
+    try { localStorage.setItem("optOverlay", box.checked ? "1" : "0"); } catch (e) { /* 기억 못 해도 동작은 한다 */ }
+  });
+}
 {
   const box = el("snapSltp");
   try { if (box && localStorage.getItem("manualSltp") === "0") box.checked = false; } catch (e) { /* 저장소 없음 -- 기본 켜짐 */ }
