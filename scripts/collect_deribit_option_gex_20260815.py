@@ -312,6 +312,21 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
                 hedge.append({"exp_ms": e["exp_ms"], "k": float(r["strike"]), "type": r["option_type"][0].upper(),
                               "usd": float(r["mark_price"]) * (idx if inverse else 1.0), "iv": float(r["mark_iv"])})
     out["hedge"] = hedge
+    # 2026-09-28 행사가 사다리(사용자 선택 1-B): 지수 ±8% 행사가별 콜·풋 미결제(USD)와 순감마(GEX, 콜 + / 풋 −).
+    #   범위 셋 -- front(가장 가까운 만기) · week(7일 안 만기 합) · all(전 만기). 행 = [행사가, 콜$, 풋$, 순감마$].
+    #   🔴«행사가 자석»은 검정에서 기각 -- 화면은 «어디에 계약이 쌓였나»로만 쓴다.
+    band = chain[(chain["strike"] >= idx * 0.92) & (chain["strike"] <= idx * 1.08)]
+    fut = band[band["expiration_ts"] > pd.Timestamp.now(tz="UTC")]
+    first = fut["expiration_ts"].min() if len(fut) else None
+    usd_oi = band["open_interest"] * idx
+    g_usd = band["option_type"].map({"call": 1.0, "put": -1.0}) * band["gamma_bs"] * band["open_interest"] * idx * idx * 0.01
+    band = band.assign(c=usd_oi.where(band["option_type"] == "call", 0.0), p=usd_oi.where(band["option_type"] == "put", 0.0), g=g_usd)
+    def _ladder(sel):
+        agg = band[sel].groupby("strike")[["c", "p", "g"]].sum().reset_index()
+        return [[float(r.strike), round(float(r.c)), round(float(r.p)), round(float(r.g))] for r in agg.itertuples()]
+    out["strikes"] = {"front": _ladder(band["expiration_ts"] == first) if first is not None else [],
+                      "week": _ladder(band["days_to_expiry"] <= 7), "all": _ladder(band["days_to_expiry"] > 0),
+                      "front_exp_ms": int(first.timestamp() * 1000) if first is not None else None}
     return out
 
 

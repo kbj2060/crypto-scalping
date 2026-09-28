@@ -1533,7 +1533,8 @@ def gex_payload() -> dict[str, Any]:
     by_coin.update(blk.get("blocks_by_coin") or {"ETH": blk.get("blocks") or []})
     return {**out, "block_trades": {"available": bool(blk.get("available")), "error": blk.get("error"),
                                     "by_coin": {c: (v or [])[:8] for c, v in by_coin.items()},
-                                    "n_by_coin": blk.get("n_blocks_by_coin") or {c: len(v or []) for c, v in by_coin.items()}}}
+                                    "n_by_coin": blk.get("n_blocks_by_coin") or {c: len(v or []) for c, v in by_coin.items()},
+                                    "flow_by_coin": blk.get("flow_by_coin") or {}}}
 
 
 # 2026-09-19 Zeus 섀도우 페이로드·엔드포인트 제거(사용자 지시로 대시보드 카드 삭제).

@@ -181,6 +181,30 @@ async def chain_loop() -> None:
         await asyncio.sleep(max(30.0, CHAIN_SEC - (time.time() - t0)))
 
 
+def hourly_flow(rows) -> dict:
+    """2026-09-28 옵션 순매수 흐름(사용자 선택 2-A) -- 코인별 정시(UTC=KST 정시) 버킷 25개(지난 24시간 + 진행 중).
+    cb/cs/pb/ps = 콜·풋 테이커 매수·매도 수량(기초자산 단위), dlt = 옵션으로 산 순델타(콜 매수·풋 매도 +).
+    델타는 체결 시점의 IV·지수로 블랙-숄즈(r=0, 선도 대신 지수 -- ponytail: 먼 만기는 캐리만큼 어긋난다, 흐름 방향엔 영향 작음).
+    🔴방향은 Deribit 공개 체결의 «테이커 방향»이다(문서 확인 09-28). 개시/청산은 모른다."""
+    import collect_deribit_option_gex_20260815 as gex
+    now_h = int(time.time() // 3600) * 3_600_000
+    hours = [now_h - i * 3_600_000 for i in range(24, -1, -1)]
+    out = {c: {h: {"h": h, "cb": 0.0, "cs": 0.0, "pb": 0.0, "ps": 0.0, "dlt": 0.0} for h in hours} for c in COINS}
+    for ts, inst, direction, amt, iv, ix in rows:
+        c = coin_of(inst)
+        spec = gex._parse_instrument(inst) if c else None
+        b = out[c].get(int(ts // 3_600_000) * 3_600_000) if spec else None
+        if b is None:
+            continue
+        call = spec["option_type"] == "call"
+        buy = direction == "buy"
+        b[("cb" if buy else "cs") if call else ("pb" if buy else "ps")] += float(amt)
+        yrs = (spec["expiration_ts"].timestamp() - ts / 1000) / (365.0 * 86400)
+        d = gex._bs_delta(float(ix or 0), spec["strike"], float(iv or 0), yrs, call)
+        b["dlt"] += (1 if buy else -1) * float(amt) * d
+    return {c: [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in b.items()} for b in hs.values()] for c, hs in out.items()}
+
+
 def last_ts() -> dict:
     """목록(ETH·BTC·USDC)별 마지막 저장 시각. 🔴전체 max 하나로 잡으면 새로 붙은 목록(2026-09-28 BTC·USDC)이
     ETH 의 최신 시각부터만 채워져 24시간 이력이 통째로 빠진다(실제로 블록 0건이 났다)."""
@@ -209,13 +233,16 @@ def write(rows: list[tuple], gap: tuple | None = None) -> int:
                           [int(time.time() * 1000) - STATE_WINDOW_MS])
         legs = [dict(zip(COLS, r)) for r in cur.fetchall()]
         by_coin = {c: group_blocks([x for x in legs if coin_of(x["instrument_name"]) == c]) for c in COINS}
+        flow = hourly_flow(con.execute("SELECT ts_ms, instrument_name, direction, amount, iv, index_price FROM option_trades "
+                                       "WHERE ts_ms >= ?", [(int(time.time() // 3600) - 24) * 3_600_000]).fetchall())
     finally:
         con.close()      # 붙들고 있으면 연구 쿼리가 막힌다
     # blocks/n_blocks = ETH(옛 계약 그대로) · blocks_by_coin = 네 코인
     out = {"generated_at": datetime.now(timezone.utc).isoformat(), "coins": list(COINS),
            "source": "deribit " + " · ".join(CHANNELS), "window_hours": STATE_WINDOW_MS // 3_600_000,
            "n_blocks": len(by_coin["ETH"]), "blocks": by_coin["ETH"],
-           "blocks_by_coin": by_coin, "n_blocks_by_coin": {c: len(v) for c, v in by_coin.items()}}
+           "blocks_by_coin": by_coin, "n_blocks_by_coin": {c: len(v) for c, v in by_coin.items()},
+           "flow_by_coin": flow}
     tmp = STATE_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     tmp.replace(STATE_PATH)
@@ -330,6 +357,13 @@ def _selftest() -> None:
                                                   block_trade_id="BLOCK-9", block_trade_leg_count=1))))])
     assert lin[0]["premium_usd"] == 20.0, "선형(USDC) 옵션은 가격이 이미 USDC -- 지수를 곱하지 않는다"
     assert coin_of("SOL_USDC-2OCT26-120-P") == "SOL" and coin_of("HYPE_USDC-2OCT26-40-P") is None
+    # 흐름: 콜 매수 1 · 풋 매수 2(델타 음수 → 순델타는 콜 +, 풋 매수 −) · 버킷 밖/모르는 종목은 버린다
+    tnow = int(time.time() * 1000)
+    fl = hourly_flow([(tnow, "ETH-30DEC26-2000-C", "buy", 1.0, 50.0, 2000.0), (tnow, "ETH-30DEC26-2000-P", "buy", 2.0, 50.0, 2000.0),
+                      (tnow - 90 * 3_600_000, "ETH-30DEC26-2000-C", "buy", 5.0, 50.0, 2000.0), (tnow, "HYPE_USDC-30DEC26-40-P", "buy", 9.0, 50.0, 40.0)])
+    last = fl["ETH"][-1]
+    assert len(fl["ETH"]) == 25 and last["cb"] == 1.0 and last["pb"] == 2.0 and sum(b["cb"] for b in fl["ETH"]) == 1.0
+    assert 0.5 < last["dlt"] + 2 * 0.45 < 1.5 and last["dlt"] < 0.5, last   # ATM 콜 +0.5 남짓, 풋 2개 −0.9 남짓
     print("selftest ok")
 
 
