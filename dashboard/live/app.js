@@ -4570,7 +4570,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-22 모바일(사용자 «라벨들을 차트 안으로»): 가격 배지를 플롯 **안**으로 들이고
   //   mr 은 얇은 여백만 남긴다. 실측 348px 화면에서 플롯 280 -> 338px = **+21%**.
   //   배지는 아래 boxX 가 오른쪽 끝 기준으로 다시 잡는다(왼쪽정렬 그대로 두면 밖으로 나간다).
-  const ml = (mobileChart ? 44 : 45) + CENTER_NUDGE,
+  // 2026-09-28 모바일 체결 띠(사용자 «호가처럼 풋프린트 왼쪽 축으로»): 가격 글자와 캔들 사이 50px. ml 이 «플롯 왼쪽»이라 그만큼 민다.
+  const TRADE_L = footprint && mobileChart ? 50 : 0;
+  const ml = (mobileChart ? 44 : 45) + CENTER_NUDGE + TRADE_L,
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
         mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 70;
@@ -5016,7 +5018,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   axisTicks(yMin, yMax, 6).forEach(t => {
     const y = yAt(t);
     const line = document.createElementNS(NS, "line");
-    line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
+    line.setAttribute("x1", ml - TRADE_L); line.setAttribute("x2", w - mr);
     line.setAttribute("y1", y); line.setAttribute("y2", y);
     line.setAttribute("class", "chart-grid");
     g.appendChild(line);
@@ -5197,7 +5199,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   보이는 봉의 셀을 **이 행 크기로** 가격별로 합친다 -- 옛 오른쪽 열 상자(/api/supply-profile)를 대체한다.
     //   원천·창·행이 풋프린트와 같아 둘이 어긋날 수 없다(옛 상자는 재시작 뒤 OKX 가 덮은 봉부터만 셌다).
     //   데스크톱: 풋프린트와 호가 띠 사이 기둥, 호가 띠 바닥선에서 **왼쪽으로**(체결 ← ┃ → 호가) -- 같은 줄 = 같은 가격이라
-    //   «여기서 얼마나 거래됐나 vs 지금 얼마나 걸려 있나»를 한 줄에서 맞댄다. 모바일: 플롯 오른쪽 끝에서 왼쪽으로 셀 **뒤**에 흐리게.
+    //   «여기서 얼마나 거래됐나 vs 지금 얼마나 걸려 있나»를 한 줄에서 맞댄다. 모바일: 가격 글자와 캔들 사이 띠(TRADE_L), 캔들 왼쪽 끝에서 **왼쪽으로**(호가 띠의 거울).
     //   막대 = 행 총 체결(매수+매도) · 안쪽부터 고래·중형·리테일 농담 · POC(최다 체결) 행은 테두리.
     //   🔴체결 합산에는 방향이 없다(누가 사면 누가 판다) -- 지지·저항으로 읽지 않는다. 방향은 봉별 델타가 말한다.
     {
@@ -5211,9 +5213,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       let tmax = 0, pocK = null;
       tr.forEach((a, k) => { if (a[0] > tmax) { tmax = a[0]; pocK = k; } });
       if (tmax > 0) {
-        const anchor = TRADE_W ? ml + cw + TRADE_W + 4 : ml + cw;   // 데스크톱 = 호가 띠 바닥선 2px 앞
-        const L = TRADE_W ? TRADE_W - 10 : cw * 0.35, alpha = TRADE_W ? 1 : 0.35;
-        tradeInfo = { rows: tr, rowSize, max: tmax, pocK, x1: anchor };
+        const anchor = TRADE_W ? ml + cw + TRADE_W + 4 : ml - 2;   // 데스크톱 = 호가 띠 바닥선 2px 앞 · 모바일 = 캔들 왼쪽 끝(밖으로 자란다)
+        const L = TRADE_W ? TRADE_W - 10 : TRADE_L - 6, alpha = 1;
+        tradeInfo = { rows: tr, rowSize, max: tmax, pocK, x0: TRADE_W ? ml + cw : ml - TRADE_L, x1: anchor };
         const g = document.createElementNS(NS, "g");
         tr.forEach((a, k) => {
           const yTop = Math.max(mt, yAt((k + 1) * rowSize)), yBot = Math.min(plotBottom, yAt(k * rowSize));
@@ -5245,18 +5247,18 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             o.setAttribute("x", anchor - cur); o.setAttribute("y", yTop + 0.5);
             o.setAttribute("width", cur); o.setAttribute("height", Math.max(1, yBot - yTop - 1));
             o.setAttribute("fill", "none"); o.setAttribute("stroke", "var(--ink)");
-            o.setAttribute("stroke-width", "1.2"); o.setAttribute("stroke-opacity", TRADE_W ? "0.9" : "0.45");
+            o.setAttribute("stroke-width", "1.2"); o.setAttribute("stroke-opacity", "0.9");
             g.appendChild(o);
           }
         });
-        if (TRADE_W) {                            // 기둥 바닥선 -- 호가 띠 바닥선과 한 줄
+        if (TRADE_W || TRADE_L) {                 // 기둥 바닥선 -- 호가 띠 바닥선과 한 줄
           const ln = document.createElementNS(NS, "line");
           ln.setAttribute("x1", anchor + 1); ln.setAttribute("x2", anchor + 1);
           ln.setAttribute("y1", mt); ln.setAttribute("y2", plotBottom);
           ln.setAttribute("stroke", "var(--soft-line)");
           g.appendChild(ln);
         }
-        svg.appendChild(g);                        // 셀보다 **먼저** -- 모바일에선 셀 뒤에 깔린다
+        svg.appendChild(g);                        // 셀보다 먼저
       }
     }
 
@@ -5899,7 +5901,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       line = tri;   // 아래 data-live 표식과 빠른 갱신이 같은 변수를 쓴다
     } else {
       line = document.createElementNS(NS, "line");
-      line.setAttribute("x1", ml); line.setAttribute("x2", w - mr);
+      line.setAttribute("x1", ml - TRADE_L); line.setAttribute("x2", w - mr);
       line.setAttribute("y1", p.realY); line.setAttribute("y2", p.realY);
       line.setAttribute("stroke", p.color);
       line.setAttribute("stroke-width", String(p.width || 2));
@@ -5929,7 +5931,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       svg.appendChild(tagBg);
     }
     if (txt) {
-      txt.setAttribute("x", nowTag ? 7 : ml - 5); txt.setAttribute("y", labelY + (nowTag ? 4.5 : 4));
+      txt.setAttribute("x", nowTag ? 7 : ml - TRADE_L - 5); txt.setAttribute("y", labelY + (nowTag ? 4.5 : 4));
       txt.setAttribute("text-anchor", nowTag ? "start" : "end");
       txt.setAttribute("font-size", nowTag ? (mobileChart ? "12" : "13") : "10");
       txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", nowTag ? inkOnFill() : p.color);
@@ -5941,7 +5943,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         // 왼쪽 여백(ml-5)을 넘으면 SVG 밖으로 잘린다 -- 재서 소수점을 뗀다.
         const name = txt.textContent;
         txt.textContent = `${name} ${fmtNum(p.val, pxDp())}`;
-        try { if (txt.getComputedTextLength() > ml - 7) txt.textContent = `${name} ${fmtNum(p.val, Math.max(0, pxDp() - 1))}`; } catch (e) { /* 비렌더 */ }
+        try { if (txt.getComputedTextLength() > ml - TRADE_L - 7) txt.textContent = `${name} ${fmtNum(p.val, Math.max(0, pxDp() - 1))}`; } catch (e) { /* 비렌더 */ }
       }
       if (tagBg) {
         let tw = 0;
@@ -6078,7 +6080,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // rather than snapping to a candle's OHLC, so it answers "what price is under my cursor right
   // now" instead of "what did this bar do".
   const hLine = document.createElementNS(NS, "line");
-  hLine.setAttribute("x1", ml); hLine.setAttribute("x2", w - mr);
+  hLine.setAttribute("x1", ml - TRADE_L); hLine.setAttribute("x2", w - mr);
   hLine.setAttribute("y1", 0); hLine.setAttribute("y2", 0);
   hLine.setAttribute("stroke", "var(--hover-line)");
   hLine.setAttribute("stroke-dasharray", "4,4");
@@ -6152,8 +6154,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       showTooltip(evt.pageX, evt.pageY, statTipHtml(STAT_KEYS[Math.floor((mx - statsGeo.sx) / statsGeo.slotW)], sm));
       return;
     }
-    // 2026-09-28 체결 기둥 위면 그 가격 행의 체결 풀이(데스크톱만 -- 모바일은 셀 뒤라 봉 툴팁이 이긴다).
-    if (tradeInfo && TRADE_W && mx > ml + cw && mx < tradeInfo.x1 + 2) {
+    // 2026-09-28 체결 기둥 위면 그 가격 행의 체결 풀이(데스크톱 기둥 · 모바일 왼쪽 띠).
+    if (tradeInfo && mx > tradeInfo.x0 && mx < tradeInfo.x1 + 2) {
       vLine.style.display = "none";
       const k = Math.floor((yMax - ((my - mt) * ySpan) / ch) / tradeInfo.rowSize), a = tradeInfo.rows.get(k);
       if (!a) { hideTooltip(); return; }
@@ -6402,7 +6404,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       g.appendChild(t);
     };
     if (TRADE_W) { head(x0 - 6, "end", "var(--amber)", "← 체결"); head(x0, "start", "var(--muted)", "호가 →"); }
-    else head(x0, "start", "var(--muted)", "호가");
+    else { head(x0, "start", "var(--muted)", "호가"); if (TRADE_L) head(ml - 2, "end", "var(--amber)", "체결"); }
     // 2026-09-28 호가 요약 네 숫자 = **막대 계기 넷**(사용자 선택 시안 A) -- 데스크톱은 체결·호가 기둥 머리, 모바일은 풋프린트 위 한 줄.
     //   변동 0→100 채움(높으면 주황) · 불균형 가운데 0 에서 초록(매수 호가 두꺼움)/빨강 · 지속·이탈 0→100 채움.
     //   값·뜻은 막대마다 호버 툴팁(statTipHtml). 좌표는 statsGeo 하나를 그림과 호버가 같이 쓴다.
