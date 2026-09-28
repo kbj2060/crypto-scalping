@@ -3469,6 +3469,8 @@ const OPT_TIPS = {
   gamma: "옵션을 판 딜러의 헤지 방향. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 그 부호가 바뀌는 가격.\n우리 검정: ETH 전체 GEX 는 37일 내내 양수(플립이 거의 없다) · 방향 예측은 가격수준의 사본으로 기각 · 크기(앞으로의 변동 폭) 예측도 2026-09-28 사전등록 판정에서 불합격 — 43일 표본, 1시간 설명력 증분 +0.008(CI 0 포함)·24시간은 오히려 악화. 그래서 이 칸은 지금 상태 서술일 뿐이다.",
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 차트 아래 «옵션 만기 · 블록 거래» 카드.",
   mood: "25Δ 리스크 리버설 = 같은 거리 콜 IV − 풋 IV. 음수로 깊으면 하락 방어 수요(공포), 양수면 상승 베팅. 버터플라이 = 양 끝 IV − ATM(꼬리 가격). 기간 구조 = 만기별 ATM IV — 가까운 게 더 높으면(역전) 스트레스.\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중.",
+  ladder: "행사가 사다리: 세로 = 행사가(지수 ±8%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러), 맨 오른쪽 = 행사가별 순감마(청록 = 콜 쪽 +, 주황 = 풋 쪽 −). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
+  flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 옵션으로 산 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 롱으로 얼마나 기울었나».\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). 새로 연 거래인지 닫은 거래인지는 모른다. 검정 전 — 참고.",
   hedge: "포지션을 옵션으로 보호하면: 손절 주문은 윅에 털릴 수 있지만 풋(숏이면 콜)은 비용이 확정이고 행사가 너머 손실이 고정된다. 계산만 — 주문은 넣지 않는다(지금 주문 경로는 USDC 선물).\n손절 기준 = 청산맵 지지1(롱) / 저항1(숏). 비용 = Deribit 표시가 × 수량.",
 };
 const optOverlayOn = () => el("optOverlay")?.checked !== false;
@@ -3563,15 +3565,90 @@ function optHedgeHtml(o) {
   return out;
 }
 
+// 행사가 사다리(1-B, 2026-09-28): 옵션 카드 폭에 맞춘 세로 막대. 범위 칩은 브라우저에 기억한다.
+let optLadderScope = (() => { try { return localStorage.getItem("optLadder") || "week"; } catch (e) { return "week"; } })();
+function optLadderSvg(o, W) {
+  const st = o.strikes || {}, rows = st[optLadderScope] || [];
+  if (!rows.length) return `<div class="opt-note">행사가 데이터 없음(수집기 다음 주기에 채워진다)</div>`;
+  const px = optPx(o), lo = px * 0.92, hi = px * 1.08, H = 380, y0 = 22, y1 = H - 8;
+  const Y = (p) => y1 - ((p - lo) / (hi - lo)) * (y1 - y0);
+  const mid = Math.round(W * 0.47), half = mid - 46, gW = 34, gx = W - gW;
+  const mx = Math.max(1, ...rows.map((r) => Math.max(r[1], r[2]))), gm = Math.max(1, ...rows.map((r) => Math.abs(r[3])));
+  const ks = rows.map((r) => r[0]), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k, i) => k - ks[i])) : 25;
+  const bh = Math.max(2, Math.min(12, ((y1 - y0) * step) / (hi - lo) - 1.5));
+  const top = [...rows].sort((a, b) => b[1] + b[2] - a[1] - a[2]).slice(0, 3).map((r) => r[0]);
+  let s = `<text x="${mid - 6}" y="12" font-size="10" font-weight="700" fill="var(--bad)" text-anchor="end">← 풋</text>`
+    + `<text x="${mid + 6}" y="12" font-size="10" font-weight="700" fill="var(--good)">콜 →</text>`
+    + `<text x="${W}" y="12" font-size="10" font-weight="700" fill="var(--option)" text-anchor="end">감마</text>`
+    + `<line x1="${mid}" x2="${mid}" y1="${y0 - 4}" y2="${y1}" stroke="var(--line)"/>`;
+  rows.forEach(([k, c, p, g]) => {
+    const y = Y(k), pw = (half * p) / mx, cwid = (half * c) / mx, gwid = 3 + ((gW - 6) * Math.abs(g)) / gm;
+    s += `<g><title>${optQ(k)} · 콜 ${optUsd(c)} · 풋 ${optUsd(p)} · 순감마 ${g >= 0 ? "+" : "−"}${optUsd(Math.abs(g))}/1%</title>`
+      + `<rect x="${(mid - pw).toFixed(1)}" y="${(y - bh / 2).toFixed(1)}" width="${pw.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--bad)" fill-opacity=".75"/>`
+      + `<rect x="${mid}" y="${(y - bh / 2).toFixed(1)}" width="${cwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--good)" fill-opacity=".75"/>`
+      + `<rect x="${(W - gwid).toFixed(1)}" y="${(y - bh / 2).toFixed(1)}" width="${gwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="${g >= 0 ? "var(--option)" : "var(--warn)"}" fill-opacity=".85"/></g>`;
+    if (top.includes(k)) s += `<text x="${(mid + (c >= p ? cwid + 4 : -pw - 4)).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="9.5" font-weight="700" fill="var(--text)" text-anchor="${c >= p ? "start" : "end"}">${optUsd(c + p)}</text>`;
+  });
+  const lab = (v, y) => `<text x="0" y="${(y + 3.5).toFixed(1)}" font-size="9.5" fill="var(--muted)">${optQ(v)}</text>`;
+  const every = step * Math.max(1, Math.round((hi - lo) / step / 8));
+  ks.filter((k) => Math.abs(k / every - Math.round(k / every)) < 1e-6).forEach((k) => { s += lab(k, Y(k)); });
+  s += `<line x1="30" x2="${gx - 4}" y1="${Y(px).toFixed(1)}" y2="${Y(px).toFixed(1)}" stroke="var(--ink)" stroke-dasharray="4 3" stroke-opacity=".8"/>`
+    + `<text x="${gx - 6}" y="${(Y(px) - 4).toFixed(1)}" font-size="10" font-weight="700" fill="var(--ink)" text-anchor="end">지금 ${optQ(px)}</text>`;
+  const f = optFront(o);
+  if (f && f.pain >= lo && f.pain <= hi) {
+    s += `<line x1="30" x2="${gx - 4}" y1="${Y(f.pain).toFixed(1)}" y2="${Y(f.pain).toFixed(1)}" stroke="var(--warn)" stroke-dasharray="2 4"/>`
+      + `<text x="32" y="${(Y(f.pain) + (f.pain < px ? 12 : -4)).toFixed(1)}" font-size="9.5" font-weight="700" fill="var(--warn)">max pain ${optQ(f.pain)}</text>`;
+  }
+  const chip = (k, t) => `<button type="button" class="opt-chip-btn${optLadderScope === k ? " on" : ""}" data-scope="${k}" aria-pressed="${optLadderScope === k}">${t}</button>`;
+  return `<div class="opt-chips">${chip("front", "가까운 만기")}${chip("week", "7일 안")}${chip("all", "전 만기")}</div>`
+    + `<svg class="opt-ladder" viewBox="0 0 ${W} ${H}" role="img" aria-label="행사가별 콜·풋 미결제와 순감마">${s}</svg>`;
+}
+
+// 옵션 순매수 흐름(2-A, 2026-09-28): 만기 시간축 카드 아래 줄. 정시 버킷 25개(마지막은 진행 중).
+function optFlowSvg(flow, W) {
+  if (!flow || !flow.length) return "";
+  const narrow = W < 700, H = narrow ? 150 : 170, x0 = narrow ? 34 : 60, x1 = W - (narrow ? 8 : 20), base = narrow ? 84 : 94, amp = narrow ? 44 : 52;
+  const n = flow.length, X = (i) => x0 + (i / n) * (x1 - x0), bw = ((x1 - x0) / n) * 0.36;
+  const nets = flow.map((b) => [b.cb - b.cs, b.pb - b.ps]);
+  const mx = Math.max(1e-9, ...nets.flat().map(Math.abs));
+  let acc = 0; const cum = flow.map((b) => (acc += b.dlt));
+  const dm = Math.max(1e-9, ...cum.map(Math.abs));
+  let s = `<line x1="${x0}" x2="${x1}" y1="${base}" y2="${base}" stroke="var(--line)"/>`
+    + `<text x="${x0 - 6}" y="${base - amp + 8}" font-size="9.5" fill="var(--muted)" text-anchor="end">순매수</text>`
+    + `<text x="${x0 - 6}" y="${base + amp - 2}" font-size="9.5" fill="var(--muted)" text-anchor="end">순매도</text>`;
+  nets.forEach(([c, p], i) => {
+    [[c, "var(--good)", 0], [p, "var(--bad)", bw + 1]].forEach(([v, col, dx]) => {
+      const hh = (amp * Math.abs(v)) / mx;
+      if (hh < 0.5) return;
+      s += `<rect x="${(X(i) + 3 + dx).toFixed(1)}" y="${(v >= 0 ? base - hh : base).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${col}" fill-opacity="${i === n - 1 ? 0.45 : 0.8}"/>`;
+    });
+    const b = flow[i];
+    s += `<rect x="${X(i).toFixed(1)}" y="${base - amp}" width="${((x1 - x0) / n).toFixed(1)}" height="${2 * amp}" fill="transparent"><title>${optKst(b.h)}~ · 콜 매수 ${fmtNum(b.cb, 0)} / 매도 ${fmtNum(b.cs, 0)} · 풋 매수 ${fmtNum(b.pb, 0)} / 매도 ${fmtNum(b.ps, 0)} · 순델타 ${b.dlt >= 0 ? "+" : ""}${fmtNum(b.dlt, 0)}${i === n - 1 ? " (진행 중)" : ""}</title></rect>`;
+    if (i % (narrow ? 6 : 4) === 0) s += `<text x="${(X(i) + 3).toFixed(1)}" y="${H - 2}" font-size="9.5" fill="var(--muted)">${optKst(b.h, false).slice(0, 2)}시</text>`;
+  });
+  s += `<path d="M${cum.map((v, i) => `${X(i + 1).toFixed(1)} ${(base - (amp * v) / dm).toFixed(1)}`).join(" L")}" fill="none" stroke="var(--option)" stroke-width="2"/>`
+    + `<text x="${x1}" y="${(base - (amp * cum[n - 1]) / dm - 6).toFixed(1)}" font-size="${narrow ? 10 : 11}" font-weight="700" fill="var(--option)" text-anchor="end">순델타 ${cum[n - 1] >= 0 ? "+" : ""}${fmtNum(cum[n - 1], 0)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="옵션 순매수 흐름: 시간별 콜·풋 순매수와 순델타 누적">${s}</svg>`;
+}
+
 const optTipOpen = new Set();
-el("optBody")?.addEventListener("click", (e) => {
+const optClick = (e) => {
+  const sc = e.target.closest(".opt-chip-btn");
+  if (sc) {
+    optLadderScope = sc.dataset.scope;
+    try { localStorage.setItem("optLadder", optLadderScope); } catch (err) { /* 기억은 편의 */ }
+    renderOptions();
+    return;
+  }
   const b = e.target.closest(".opt-q");
   if (!b) return;
   const k = b.dataset.tip, open = !optTipOpen.has(k);
   if (open) optTipOpen.add(k); else optTipOpen.delete(k);
   b.setAttribute("aria-expanded", String(open));
-  b.closest(".opt-sec").querySelector(".opt-tip").hidden = !open;
-});
+  const tip = (b.closest(".opt-sec") || b.closest(".opt-lane-body"))?.querySelector(".opt-tip");
+  if (tip) tip.hidden = !open;
+};
+["optBody", "optLaneBody"].forEach((id) => el(id)?.addEventListener("click", optClick));
 
 function renderOptions() {
   const body = el("optBody"), chip = el("optChip");
@@ -3621,6 +3698,7 @@ function renderOptions() {
       + kv("플립", gm.flip ? `${optQ(gm.flip)} (${gm.flip < px ? "아래" : "위"} ${optQ(Math.abs(gm.flip - px))}$)` : "±15% 안 없음")
       + kv("수준 분위 · 구조", `${g.total_pct == null ? "-" : Math.round(g.total_pct * 100) + "%"} · ${g.front_ratio == null ? "-" : g.front_ratio.toFixed(2)}`,
            g.front_negative ? "opt-warn" : "")),
+    sec("ladder", "행사가 사다리", optLadderSvg(o, 336)),
     sec("exp", "만기", exRows),
     sec("mood", "심리", kv("25Δ 리스크 리버설", f && f.rr25 != null ? `${f.rr25 >= 0 ? "+" : ""}${f.rr25.toFixed(1)}pt` : "-")
       + kv("버터플라이", f && f.bf25 != null ? `${f.bf25 >= 0 ? "+" : ""}${f.bf25.toFixed(1)}pt` : "-")
@@ -3628,7 +3706,13 @@ function renderOptions() {
       + kv("블록 거래 24h", `${((((latestGex || {}).block_trades || {}).n_by_coin || {})[cur]) ?? blocks.length}건`) + blkRows),
     sec("hedge", "보험", optHedgeHtml(o)),
   ].join("");
-  if (laneBody && laneBody.clientWidth > 0) laneBody.innerHTML = optLaneSvg(o, blocks, Math.round(laneBody.clientWidth));
+  if (laneBody && laneBody.clientWidth > 0) {
+    const lw = Math.round(laneBody.clientWidth), fl = ((((latestGex || {}).block_trades || {}).flow_by_coin || {})[cur]) || [];
+    laneBody.innerHTML = optLaneSvg(o, blocks, lw)
+      + (fl.length ? `<div class="opt-flow-head"><button type="button" class="opt-q" data-tip="flow" aria-expanded="${optTipOpen.has("flow")}">옵션 순매수 흐름 · 지난 24시간<span aria-hidden="true">?</span></button>`
+        + `<span class="opt-lane-legend"><b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 옵션 순델타 누적 · 테이커 기준</span></div>`
+        + `<p class="opt-tip"${optTipOpen.has("flow") ? "" : " hidden"}>${escapeHtml(OPT_TIPS.flow).replace(/\n/g, "<br>")}</p>` + optFlowSvg(fl, lw) : "");
+  }
 }
 
 

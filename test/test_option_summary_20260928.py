@@ -38,3 +38,6 @@ def test_options_summary_synthetic(monkeypatch):
     assert o["gamma"]["now_usd"] != 0 and len(o["gamma"]["profile"]) == 25
     assert all(h["type"] in ("P", "C") and h["usd"] > 0 for h in o["hedge"])
     assert {h["type"] for h in o["hedge"]} == {"P", "C"}, "지수 아래 풋 · 위 콜"
+    fr = {r[0]: r for r in o["strikes"]["front"]}
+    assert set(fr) == {1900.0, 2000.0, 2100.0}, "사다리 = 지수 ±8% 행사가만(2000 기준 1840~2160)"
+    assert fr[2000.0][1] == fr[2000.0][2] == 100 * 2000 and fr[2000.0][3] < fr[2100.0][3] + 1e9
