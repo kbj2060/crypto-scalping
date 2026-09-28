@@ -4647,6 +4647,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const TRADE_W = footprint && !mobileChart ? 150 : 0;
   const cw = w - ml - mr - BOOK_W - TRADE_W;
   let tradeInfo = null;       // 체결 행(호버가 읽는다) -- 풋프린트 블록이 채운다
+  let fpRowSize = 0;          // 풋프린트 행 크기($) -- 호가 띠가 같은 행으로 묶는다(2026-09-28)
   const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H - 2 * ROW_H;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
@@ -5190,6 +5191,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const minRow = Math.ceil((ySpan * FOOTPRINT_MIN_ROW_PX / ch) / bucket) * bucket;
     const rowSize = Math.max(bucket, minRow, Math.round(0.2 * atr / bucket) * bucket);
     const rowPx = rowSize * ch / ySpan;
+    fpRowSize = rowSize;
 
     // ── 체결 프로파일 (2026-09-28 사용자 선택 시안 B · 모바일 A) ─────────────────────────
     //   보이는 봉의 셀을 **이 행 크기로** 가격별로 합친다 -- 옛 오른쪽 열 상자(/api/supply-profile)를 대체한다.
@@ -6317,20 +6319,32 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 칸별 값은 층 캐시 **밖에서** 매 렌더 계산한다(≈250칸) -- 캐시가 재사용돼도 호버 해석(bookInfo)이 같은 값을 본다.
   const bookInfo = (() => {
     if (!book || !book.q || !(book.bin_size > 0)) return null;
-    const bs = book.bin_size, x0 = ml + cw + TRADE_W + 6, L = BOOK_W - 10;
+    // 2026-09-28 호가 칸을 **풋프린트(체결 기둥)와 같은 행**으로 묶는다(사용자 «y축이 벌어지면 막대가 작아진다») --
+    //   0.5달러 칸 그대로면 창이 넓을 때 한 칸이 2~3px 로 눌렸다. 행 안에서 수량·버틴 양·재깔림(refill·peak)은 더하고,
+    //   매수·매도가 한 행에 섞이면(현재가 행) 큰 쪽으로 칠한다. ○(접근행동)는 행 안 **가장 얇아진** 값(approachAt).
+    const bin = book.bin_size, bs = Math.max(bin, fpRowSize || bin), x0 = ml + cw + TRADE_W + 6, L = BOOK_W - 10;
     const accAt = (key, p) => {               // 축적 통계는 창 전체를 접은 행 배열이라 제 격자(bin_lo) -- 가격으로 찾는다
       if (!acc || !acc[key] || !(acc.bin_size > 0)) return 0;
       const i = Math.round(p / acc.bin_size) - acc.bin_lo;
       return i >= 0 && i < acc[key].length ? acc[key][i] : 0;
     };
-    const cells = [];
+    const rowsBy = new Map();                 // 행 키 -> {b: 매수 합, a: 매도 합} 각 {q, pers, peak, refill}
     for (let i = 0; i < book.q.length; i++) {
-      const v = book.q[i], p = (book.bin_lo + i) * bs;
-      if (!v || p + bs / 2 < yMin || p - bs / 2 > yMax) continue;
-      const q = Math.abs(v), pk = accAt("peak", p);
-      cells.push({ p, q, bid: v > 0, pers: Math.min(q, accAt("pers", p)), rw: pk > 0 ? accAt("refill", p) / pk : 0,
-                   apr: approachAt(acc, p, bs) });   // 접근행동(4h) -- 프로파일 ◌ 와 같은 값 · null = 모름
+      const v = book.q[i], p = (book.bin_lo + i) * bin;
+      if (!v) continue;
+      const k = Math.floor((p + 1e-9) / bs), r = rowsBy.get(k) || { b: null, a: null }, side = v > 0 ? "b" : "a";
+      const q = Math.abs(v), s = r[side] || (r[side] = { q: 0, pers: 0, peak: 0, refill: 0 });
+      s.q += q; s.pers += Math.min(q, accAt("pers", p)); s.peak += accAt("peak", p); s.refill += accAt("refill", p);
+      rowsBy.set(k, r);
     }
+    const cells = [];
+    rowsBy.forEach((r, k) => {
+      const p = (k + 0.5) * bs;                 // 행 가운데(그림은 p ± bs/2 = 풋프린트 행과 같은 줄)
+      if (p + bs / 2 < yMin || p - bs / 2 > yMax) return;
+      const bid = (r.b ? r.b.q : 0) >= (r.a ? r.a.q : 0), s = bid ? r.b : r.a;
+      cells.push({ p, q: s.q, bid, pers: s.pers, rw: s.peak > 0 ? s.refill / s.peak : 0,
+                   apr: approachAt(acc, k * bs, bs) });   // 접근행동(4h) -- 프로파일 ◌ 와 같은 값 · null = 모름
+    });
     if (!cells.length) return null;
     const mx = Math.max(...cells.map((c) => c.q));
     const qs = cells.map((c) => c.q).sort((a, b) => a - b);
