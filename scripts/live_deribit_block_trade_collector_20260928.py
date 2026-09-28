@@ -169,10 +169,14 @@ async def chain_loop() -> None:
         await asyncio.sleep(max(30.0, CHAIN_SEC - (time.time() - t0)))
 
 
-def last_ts() -> int | None:
+def last_ts() -> dict:
+    """목록(ETH·BTC·USDC)별 마지막 저장 시각. 🔴전체 max 하나로 잡으면 새로 붙은 목록(2026-09-28 BTC·USDC)이
+    ETH 의 최신 시각부터만 채워져 24시간 이력이 통째로 빠진다(실제로 블록 0건이 났다)."""
     con = _connect()
     try:
-        return con.execute("SELECT max(ts_ms) FROM option_trades").fetchone()[0]
+        return {api: con.execute("SELECT max(ts_ms) FROM option_trades WHERE instrument_name LIKE ?",
+                                 ["%_USDC-%" if api == "USDC" else f"{api}-%"]).fetchone()[0]
+                for api in API_CURRENCIES}
     finally:
         con.close()
 
@@ -206,12 +210,12 @@ def write(rows: list[tuple], gap: tuple | None = None) -> int:
     return added
 
 
-def backfill(since_ms: int, until_ms: int) -> list[tuple]:
+def backfill(since_by_api: dict, until_ms: int) -> list[tuple]:
     """REST 로 [since, until] 옵션 체결을 오래된 것부터 끝까지 넘긴다. 겹침은 PK 가 버린다."""
     import requests
     out: list[tuple] = []
     for api in API_CURRENCIES:
-        start = since_ms
+        start = since_by_api[api]
         while True:
             r = requests.get(REST, timeout=20, params={
                 "currency": api, "kind": "option", "start_timestamp": start, "end_timestamp": until_ms,
@@ -244,7 +248,8 @@ async def run() -> None:
                                           "params": {"interval": 30}}))
                 # 구독 **뒤에** 백필한다 -- 그래야 백필 끝과 WS 시작 사이에 틈이 없다(겹침은 PK 가 버림).
                 now = int(time.time() * 1000)
-                since = max(await asyncio.to_thread(last_ts) or 0, now - BACKFILL_MAX_MS)
+                seen = await asyncio.to_thread(last_ts)      # (last 는 아래 flush 타이머 이름이다)
+                since = {api: max(seen.get(api) or 0, now - BACKFILL_MAX_MS) for api in API_CURRENCIES}
                 bf = await asyncio.to_thread(backfill, since, now)
                 gap = (down[0], now, down[1], None) if down else None
                 added = await asyncio.to_thread(write, bf, gap and gap[:3] + (len(bf),))
