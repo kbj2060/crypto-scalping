@@ -7419,7 +7419,9 @@ function manualEntryPlanHtml(data) {
   // 2026-09-25 청산맵 TP/SL(사용자 지시) -- 고정 3% 손절을 대신한다. **접지 않는다**: «어디서 닫히나»는
   //   행동을 바꾸는 값이다. 못 거는 경우도 반드시 말한다(옛 손절은 조용히 안 걸려 있었다).
   const br = plan.bracket;
-  if (br && br.available) {
+  if (br && br.disabled) {
+    parts.push(entryNote("SL/TP 끔 — 이번 진입에 TP·비상 스탑을 걸지 않고 SL 감시도 하지 않습니다. 이미 걸린 SL/TP 는 그대로 둡니다."));
+  } else if (br && br.available) {
     const f = (v) => Number(v).toFixed(2);
     const pc = (v) => (v > 0 ? "+" : "") + Number(v).toFixed(1) + "%";
     parts.push(entryNote(
@@ -7587,6 +7589,9 @@ function manualLevEffective() {
   if (locked) return locked;
   return manualLevAuto() ? MANUAL_LEV_AUTO : manualLevValue();
 }
+// 2026-09-28 SL/TP 체크(사용자 지시) -- 해제면 진입에 TP·비상 스탑을 안 걸고 SL 감시도 안 무장, 물타기면 기존 SL/TP 를 그대로 둔다.
+//   서버가 sltp=0 을 받으면 계획의 bracket 을 «끔»으로 바꾼다(주문·감시 파일 둘 다 안 건드림). 선택은 브라우저에 기억한다.
+const manualSltpOn = () => el("snapSltp")?.checked !== false;
 const manualLevQuery = () => {
   const v = manualLevEffective();
   return v ? `&lev=${v}` : "";
@@ -7660,7 +7665,7 @@ async function manualEntryFetch(side, kind = "entry") {
              detail: `${coinUnit()} 탭에서는 주문하지 않습니다` };
   }
   const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`
-    + (kind === "exit" ? "" : manualLevQuery());
+    + (kind === "exit" ? "" : manualLevQuery() + (manualSltpOn() ? "" : "&sltp=0"));
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
   return res.json();
 }
@@ -7908,7 +7913,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   if (plan.blocked) { manualFireOnPreview = false; return; }
   const pct = Math.round(100 * (plan.fraction ?? 1));
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
-                         lev: manualLevEffective() };
+                         lev: manualLevEffective(), sltp: manualSltpOn() };
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
   //   확인했다. 미리보기가 오는 즉시 발주한다(막혔으면 위에서 이미 멈췄다).
@@ -7962,6 +7967,8 @@ function manualEntryStateText(state) {
   if (br && (br.tp || br.backstop)) {
     const leg = (name, x) => !x ? "" : x.placed ? `${name} ${x.price} 걸림` : `🔴${name} 실패 (${x.error || "?"})`;
     rows.push([leg("TP", br.tp), leg("비상 스탑", br.backstop)].filter(Boolean).join(" · "));
+  } else if (br && br.disabled) {
+    rows.push("SL/TP 끔 — 걸지 않았습니다(기존 SL/TP 는 그대로)");
   } else if (state?.trigger === "bracket_sl") {
     rows.push("SL 이탈 — 메이커 추격 청산");
   } else if (filledQty > 0 && state?.kind !== "exit" && !br && /^filled|failed|error|rejected/.test(state?.phase || "")) {
@@ -8026,7 +8033,7 @@ async function manualEntrySubmit() {
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
     const q = `&pct=${pending.pct ?? 100}`
-      + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : ""));
+      + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : "") + (pending.sltp === false ? "&sltp=0" : ""));
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&asset=${pending.asset || "eth"}&confirm=1${q}`,
       { method: "POST", cache: "no-cache" });
@@ -8061,6 +8068,15 @@ document.addEventListener("input", (e) => {
 });
 
 el("snapLevAuto")?.addEventListener("change", () => manualEntryRefreshSize());
+{
+  const box = el("snapSltp");
+  try { if (box && localStorage.getItem("manualSltp") === "0") box.checked = false; } catch (e) { /* 저장소 없음 -- 기본 켜짐 */ }
+  box?.addEventListener("change", () => {
+    try { localStorage.setItem("manualSltp", box.checked ? "1" : "0"); } catch (e) { /* 기억 못 해도 동작은 한다 */ }
+    manualEntryClearConfirm();          // 끄고 켠 뒤의 확인 버튼은 옛 선택을 들고 있다 -- 다시 미리본다
+    manualEntryRefreshSize();
+  });
+}
 el("snapLevGauge")?.addEventListener("input", () => {
   const out = el("snapLevVal");
   if (out) out.textContent = `${manualLevValue()}배`;

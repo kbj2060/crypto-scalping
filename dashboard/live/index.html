@@ -387,6 +387,12 @@
               <button type="button" class="chip" data-v="50">50%</button>
             </div>
             <b id="snapEntryFracVal" class="chip-val">25%</b>
+            <!-- 2026-09-28 SL/TP 켜기/끄기(사용자 지시). 끄면 이번 진입에 TP·비상 스탑을 안 걸고 SL 감시도 안 무장하며,
+                 물타기면 이미 걸린 SL/TP 를 그대로 둔다(갱신 안 함). 브라우저에 기억한다. -->
+            <label class="lev-auto sltp-toggle" for="snapSltp" title="끄면 이번 진입에 SL/TP 를 걸지 않고, 이미 걸린 SL/TP 도 갱신하지 않습니다">
+              <input type="checkbox" id="snapSltp" checked>
+              <span>SL/TP</span>
+            </label>
           </div>
           <div class="manual-entry-row actions entry-hold">
             <button type="button" id="snapEntryLong" class="notify-btn long hold-fire">

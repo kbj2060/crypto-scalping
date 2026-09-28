@@ -2566,6 +2566,7 @@ body.not-eth [data-eth-only]::after {
 .ofab-panel .entry-line > .entry-break { order: 3; }
 .ofab-panel .entry-line > #snapEntryFrac { order: 4; }
 .ofab-panel .entry-line > #snapEntryFracVal { order: 5; }
+.ofab-panel .entry-line > .lev-auto.sltp-toggle { order: 6; }   /* 2026-09-28 SL/TP 토글 -- 비율 값 뒤(레버 «자동» 자리와 섞이지 않게) */
 .ofab-panel .manual-entry-row.exit-row { justify-content: center; }
 
 /* 2026-09-26 주문 심볼의 코인이 아닌 탭(SOL·XRP)에서는 주문 조작부를 막는다 -- app.js syncOrderCoinGate.

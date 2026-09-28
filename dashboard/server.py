@@ -5157,12 +5157,22 @@ def make_app() -> web.Application:
         tmp.write_text(json.dumps(st, ensure_ascii=False), "utf-8")
         tmp.replace(bracket_path())
 
+    def sltp_off(request: web.Request) -> bool:
+        """2026-09-28 화면 «SL/TP» 체크 해제(사용자 지시) -- 이번 진입에 SL/TP 를 걸지도, 기존 것을 갱신하지도 않는다."""
+        return request.query.get("sltp") == "0"
+
+    SLTP_OFF_BRACKET = {"available": False, "disabled": True, "reason": "SL/TP 끔(사용자) -- 걸지 않고 기존 것도 그대로"}
+
     async def entry_then_bracket(plan: dict, state: dict) -> None:
         """진입 → 체결이 있으면(부분 포함, 모든 종료 경로) TP·비상 스탑을 걸고 감시를 무장한다."""
         await run_entry(binance_session(), plan, state)
         if not float(state.get("filled") or 0.0) > 0:
             return
         b, pside = plan.get("bracket") or {}, plan["positionSide"]
+        if b.get("disabled"):
+            # 🔴주문도, 감시 파일(manual_bracket_state.json)도 건드리지 않는다 -- 물타기면 기존 SL/TP·감시가 그대로 남는다.
+            state["bracket"] = {"placed": False, "disabled": True, "reason": b.get("reason")}
+            return
         if not b.get("available"):
             state["bracket"] = {"placed": False, "reason": b.get("reason") or "청산맵 레벨 없음"}
             return
@@ -5472,6 +5482,8 @@ def make_app() -> web.Application:
                                                              query_leverage(request), query_asset(request))
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
+        if sltp_off(request):
+            plan["bracket"] = dict(SLTP_OFF_BRACKET)
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
                                   "recommended_qty": plan.get("recommended_qty"),
                                   "recommended_source": plan.get("recommended_source"),
@@ -5512,6 +5524,8 @@ def make_app() -> web.Application:
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
+        if sltp_off(request):
+            plan["bracket"] = dict(SLTP_OFF_BRACKET)
         manual_entry_state.clear()
         manual_entry_state.update(phase="submitting", side=side, plan=plan, asset=query_asset(request),
                                   started_at=datetime.now(timezone.utc).isoformat())
