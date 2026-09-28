@@ -1506,7 +1506,9 @@ def gex_payload() -> dict[str, Any]:
     # 2026-09-28 옵션 카드(사용자 선택 A+C)의 «최근 블록 거래» -- 같은 폴링에 싣는다(요청 하나 덜).
     blk = worker_payload(BLOCK_TRADES_STATE_PATH, BLOCK_TRADES_MAX_AGE_MIN, ts_field="generated_at",
                          stamp_available=True, bare_missing=True, extra_missing={"blocks": []})
-    by_coin = blk.get("blocks_by_coin") or {"ETH": blk.get("blocks") or []}   # 2026-09-28 네 코인(ETH·BTC·SOL·XRP)
+    # 2026-09-28 네 코인(ETH·BTC·SOL·XRP) -- 상태 파일이 없거나 옛 모양이어도 네 키가 다 있게(화면 계약)
+    by_coin = {c: [] for c in ("ETH", "BTC", "SOL", "XRP")}
+    by_coin.update(blk.get("blocks_by_coin") or {"ETH": blk.get("blocks") or []})
     return {**out, "block_trades": {"available": bool(blk.get("available")), "error": blk.get("error"),
                                     "by_coin": {c: (v or [])[:8] for c, v in by_coin.items()},
                                     "n_by_coin": blk.get("n_blocks_by_coin") or {c: len(v or []) for c, v in by_coin.items()}}}

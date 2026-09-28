@@ -205,8 +205,8 @@ def summarize_gex(chain: pd.DataFrame, currency: str) -> dict:
     }
 
 
-def _pub(method: str, **params):
-    r = requests.get(PUBLIC + method, params=params, timeout=30)
+def _pub(method: str, timeout: float = 30, **params):
+    r = requests.get(PUBLIC + method, params=params, timeout=timeout)
     r.raise_for_status()
     return r.json()["result"]
 
@@ -239,12 +239,13 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
             out[key] = float(fn())
         except Exception as exc:        # 부가 값 -- 없으면 None, GEX 수집은 계속
             out[key] = None; log(f"{currency}: {key} 실패 {exc}")
-    # 실현 7일은 Deribit 차트 응답이 자주 30초를 넘긴다(실측) -- 성공값을 1시간 재사용하고, 실패하면 직전 값을 쓴다.
+    # 실현 7일은 Deribit 차트 응답이 4초~55초+ 로 들쭉날쭉하다(2026-09-28 실측, 같은 호출) -- 7일치라 천천히 변하므로
+    #   성공값을 6시간 재사용하고, 실패하면 24시간 안의 직전 값을 쓴다. 이 호출만 제한 시간 90초.
     hit = _RV_CACHE.get(currency)
     try:
-        if hit and time.time() - hit[0] < 3600:
+        if hit and time.time() - hit[0] < 6 * 3600:
             raise _Cached
-        tv = _pub("get_tradingview_chart_data", instrument_name=f"{currency}-PERPETUAL" if inverse else f"{currency}_USDC-PERPETUAL", resolution="60",
+        tv = _pub("get_tradingview_chart_data", timeout=90, instrument_name=f"{currency}-PERPETUAL" if inverse else f"{currency}_USDC-PERPETUAL", resolution="60",
                   start_timestamp=int((time.time() - 7 * 86400) * 1000), end_timestamp=int(time.time() * 1000))
         cl = [c for c in tv["close"] if c]
         rets = [math.log(b / a) for a, b in zip(cl, cl[1:])]
@@ -253,7 +254,8 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
     except _Cached:
         out["rv7"] = hit[1]
     except Exception as exc:
-        out["rv7"] = hit[1] if hit else None; log(f"{currency}: rv7 실패 {exc}")
+        out["rv7"] = hit[1] if hit and time.time() - hit[0] < 24 * 3600 else None
+        log(f"{currency}: rv7 실패 {exc}{' (직전 값 사용)' if out['rv7'] is not None else ''}")
     idx = out["index"] or float(chain["underlying_price"].median())
     exps = []
     for exp, g in sorted(chain.groupby("expiration_ts"), key=lambda kv: kv[0]):

@@ -105,9 +105,17 @@ def group_blocks(rows: list[dict]) -> list[dict]:
 
 
 def _connect():
+    """🔴다른 프로세스(연구 쿼리·일회성 백필)가 파일을 잡고 있으면 duckdb 는 즉시 IOException 이다(단일 writer).
+    2026-09-28 서버 실측: 그 예외가 WS 루프까지 올라가 연결을 끊고 버퍼를 버렸다 -- 여기서 최대 30초 기다린다."""
     import duckdb
     LIVE.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(DB))
+    for i in range(15):
+        try:
+            con = duckdb.connect(str(DB)); break
+        except duckdb.IOException as e:
+            if "lock" not in str(e).lower() or i == 14:
+                raise
+            time.sleep(2)
     con.execute("""CREATE TABLE IF NOT EXISTS option_trades (
         ts_ms BIGINT, trade_id VARCHAR PRIMARY KEY, trade_seq BIGINT, instrument_name VARCHAR,
         direction VARCHAR, amount DOUBLE, price DOUBLE, mark_price DOUBLE, index_price DOUBLE,
@@ -138,9 +146,13 @@ def migrate_once() -> None:
                     "SELECT table_name FROM information_schema.tables WHERE table_catalog = 'old'").fetchall()}
                 for t in ("option_trades", "gaps", "option_chain_snapshot", "gex_summary", "option_summary"):
                     if t in have and con.execute(f"SELECT count(*) FROM main.{t}").fetchone()[0] == 0:
-                        n = con.execute(f"SELECT count(*) FROM old.{t}").fetchone()[0]
-                        con.execute(f"INSERT INTO main.{t} SELECT * FROM old.{t}")
-                        print(f"옮김 {old.name}.{t} {n}행", flush=True)
+                        # 🔴한 테이블이 실패(스키마 어긋남·손상)해도 수집기는 떠야 한다 -- 여기서 새면 run() 밖이라 크래시 루프가 된다.
+                        try:
+                            n = con.execute(f"SELECT count(*) FROM old.{t}").fetchone()[0]
+                            con.execute(f"INSERT INTO main.{t} SELECT * FROM old.{t}")
+                            print(f"옮김 {old.name}.{t} {n}행", flush=True)
+                        except Exception as e:
+                            print(f"옮기기 실패 {old.name}.{t} -- 건너뜀: {type(e).__name__}: {str(e)[:160]}", flush=True)
             finally:
                 con.execute("DETACH old")
     finally:
@@ -234,7 +246,10 @@ def backfill(since_by_api: dict, until_ms: int) -> list[tuple]:
 
 async def run() -> None:
     import websockets
-    await asyncio.to_thread(migrate_once)
+    try:
+        await asyncio.to_thread(migrate_once)
+    except Exception as e:            # 이력 옮기기는 부가 작업 -- 실패해도 수집은 시작한다
+        print(f"이력 옮기기 실패 -- 건너뜀: {type(e).__name__}: {e}", flush=True)
     asyncio.get_running_loop().create_task(chain_loop())   # 체인·요약 10분 -- WS 재연결과 무관하게 돈다
     buf: list[tuple] = []
     last = time.time()
@@ -266,7 +281,12 @@ async def run() -> None:
                         buf += [row(t) for t in p["data"] if coin_of(t["instrument_name"])]
                     if time.time() - last >= FLUSH_SEC:
                         n = len(buf)
-                        added = await asyncio.to_thread(write, buf)
+                        try:
+                            added = await asyncio.to_thread(write, buf)
+                        except Exception as e:     # 쓰기 실패는 WS 를 끊을 이유가 아니다 -- 버퍼를 들고 다음 주기에 다시
+                            print(f"  기록 보류 {n}행: {type(e).__name__}: {str(e)[:120]}", flush=True)
+                            last = time.time()
+                            continue
                         print(f"  +{n}행(새 {added}, 블록 {sum(r[12] for r in buf)})", flush=True)
                         buf, last = [], time.time()
         except Exception as e:
@@ -275,9 +295,10 @@ async def run() -> None:
             down = down or (int(time.time() * 1000), type(e).__name__)
             try:
                 await asyncio.to_thread(write, buf)
-            except Exception as e2:
-                print(f"  잔여 {len(buf)}행 기록 실패: {e2}", flush=True)
-            buf = []
+                buf = []
+            except Exception as e2:   # 버리지 않고 다음 연결에서 다시 쓴다(백필도 메우지만 24h 를 넘기면 영구 유실이라)
+                print(f"  잔여 {len(buf)}행 기록 보류: {e2}", flush=True)
+                buf = buf[-200_000:]
             await asyncio.sleep(5)
 
 
