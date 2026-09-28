@@ -8328,7 +8328,7 @@ function ofabApplyDefaults() {
   if (sl) sl.checked = false;
   if (fr) { fr.value = "5"; fr.dispatchEvent(new Event("input", { bubbles: true })); }
 }
-// 2026-09-28 사용자 지시: 버튼을 0.5초 꾹 누르면 **지금 포지션 방향으로 바로 추가 진입**(5% · SL/TP 해제).
+// 2026-09-28 사용자 지시: 버튼을 0.5초 꾹 누르면 **지금 포지션 방향으로 바로 추가 진입**(5% · SL/TP 해제). 마우스만 -- 터치(모바일)는 없다.
 //   패널을 펼쳐 결과를 보여 주고, 미리보기가 오는 즉시 발주한다 -- 진입 버튼의 «길게 누르기 = 확인»과 같은 경로
 //   (manualFireOnPreview → manualEntryArmConfirm). 포지션이 없으면 방향을 모르니 안 나간다. 서버 게이트·코인 검사는 그대로.
 function ofabQuickAdd() {
@@ -8409,6 +8409,9 @@ setInterval(renderOfab, 3000);
   const holdEnd = () => { if (hold) { clearTimeout(hold.t); hold = null; } tgl.classList.remove("holding"); };
   tgl.addEventListener("pointerdown", (e) => {
     holdEnd(); held = false;
+    // 🔴2026-09-28 사용자 지시 «모바일에서는 넣으면 안돼» -- 터치는 꾹 누르기 발주가 없다(짧게 = 펼치기만).
+    //   진입 버튼과 같은 판정(이벤트마다 pointerType) -- 터치 노트북의 마우스는 그대로 된다.
+    if (e.pointerType === "touch") return;
     hold = { x: e.clientX, y: e.clientY, t: setTimeout(() => { hold = null; held = true; tgl.classList.remove("holding"); ofabQuickAdd(); }, OFAB_HOLD_MS) };
     tgl.classList.add("holding");
   });
