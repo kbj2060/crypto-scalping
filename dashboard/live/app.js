@@ -4106,7 +4106,7 @@ function renderSupply1s(box = null, src = null) {
     }
     prevSec = x;
   });
-  const laneFrame = (k, name, value, color, maxTxt) => {
+  const laneFrame = (k, name, value, color, maxTxt, subColor = null) => {
     const y0 = flowTop + k * laneH, zc = y0 + laneH / 2;
     const zl = document.createElementNS(NS, "line");
     zl.setAttribute("x1", ml); zl.setAttribute("x2", ml + cw); zl.setAttribute("y1", zc); zl.setAttribute("y2", zc);
@@ -4123,9 +4123,11 @@ function renderSupply1s(box = null, src = null) {
     const nt = label(6, zc - (big ? 5 : -5), name, "var(--text)", null, narrow ? 13 : 15);
     nt.setAttribute("font-weight", "700");
     if (big) {
-      const vt = label(6, zc + 15, value, color, null, narrow ? 15 : 17);
+      const two = !!subColor;   // CVD 줄: 선물·현물 두 값(2026-09-28 시안 A) -- 글자를 줄여 칸 안에
+      const vt = label(6, zc + (two ? 13 : 15), value, color, null, two ? (narrow ? 11 : 13) : narrow ? 15 : 17);
       vt.setAttribute("font-weight", "700");
-      if (maxTxt && laneH >= 66) label(6, zc + 30, maxTxt, "var(--muted)", null, 10.5);
+      if (two) label(6, zc + 29, maxTxt, subColor, null, narrow ? 11 : 13).setAttribute("font-weight", "700");
+      else if (maxTxt && laneH >= 66) label(6, zc + 30, maxTxt, "var(--muted)", null, 10.5);
     } else {
       label(ml - 4, zc + 5, value, color, "end", 12);
     }
@@ -4135,11 +4137,20 @@ function renderSupply1s(box = null, src = null) {
     const cs = Math.max(1e-9, ...rows.map((r) => Math.abs(r.v)));
     line(pathOf(rows, (r) => zc - (r.v / cs) * hh * 0.9), color, 1.5, 0.9);
   };
+  // 2026-09-28 현물 CVD 누적(사용자 선택 시안 A) -- CVD 줄의 막대·흰 선은 선물(바이낸스+OKX, 위 mergedSupplySrc 가 현물을 뺀다),
+  //   보라 선 = 바이낸스 현물 누적(제 눈금). «선물이 끄는데 현물이 안 따라온다»를 두 선이 벌어지는 모양으로 읽는다. ETH 전역 원천일 때만.
+  let spotAcc = 0;
+  const spotRows = src ? null : [...spotSupply1s.keys()].filter((x) => x > first && x <= now).sort((a, b) => a - b)
+    .map((x) => { const c = spotSupply1s.get(x); spotAcc += (c[4] || 0) - (c[5] || 0); return { s: x, v: spotAcc }; });
+  const spotOn = !!(spotRows && spotRows.length >= 2);
   LANES.forEach(([name, pick], k) => {
     let mx = 0, acc = 0;
     const rows = inSeg.map((x) => { const [b, sl] = pick(cellOf(x)); mx = Math.max(mx, b, sl); acc += b - sl; return { s: x, b, sl, v: acc }; });
-    const { zc, hh } = laneFrame(k, name, sgn(acc), acc >= 0 ? "var(--good)" : "var(--bad)",
-                                 mx > 0 ? "최대 " + qty(mx) + "/초" : "");
+    const two = spotOn && name === "CVD";
+    const { zc, hh } = two
+      ? laneFrame(k, name, "선물 " + sgn(acc), "var(--ink)", "현물 " + sgn(spotAcc), "var(--spot)")
+      : laneFrame(k, name, sgn(acc), acc >= 0 ? "var(--good)" : "var(--bad)",
+                  mx > 0 ? "최대 " + qty(mx) + "/초" : "");
     if (mx > 0) {
       const up = [], dn = [];
       rows.forEach((r) => {
@@ -4151,6 +4162,10 @@ function renderSupply1s(box = null, src = null) {
       barPath(dn, "var(--bad)", TIER_OP[name]);
     }
     cumLine(rows, zc, hh, "var(--ink)");
+    if (two) {   // 현물은 초가 드문드문 비어도 이어 그린다(20초 넘게 비면 끊음)
+      const cs = Math.max(1e-9, ...spotRows.map((r) => Math.abs(r.v)));
+      line(pathOf(spotRows, (r) => zc - (r.v / cs) * hh * 0.9, 20), "var(--spot)", 1.5, 0.95);
+    }
   });
   // 신규(OI) 줄 -- 같은 형식: 늘면 위, 줄면 아래.
   {
