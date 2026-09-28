@@ -3463,7 +3463,7 @@ function ensureLiveStream() {
 const OPT_TIPS = {
   move: "옵션 가격에 들어 있는 기대 움직임. 1σ = 가격 × DVOL × √(기간/1년) — 약 68% 확률로 이 안. 손절이 5분 1σ 보다 훨씬 좁으면 소음에 걸리기 쉽다.\nIV−실현(VRP): 양수면 옵션시장이 실제보다 큰 움직임을 값에 넣는 중(보통 양수).\n우리 검정: DVOL 로 변동성을 예측하는 건 실현 변동성 지표에 졌다 — 기준 폭 참고로만.",
   gamma: "옵션을 판 딜러의 헤지 방향. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 그 부호가 바뀌는 가격.\n우리 검정: ETH 전체 GEX 는 37일 내내 양수(플립이 거의 없다) · 방향 예측은 가격수준의 사본으로 기각 · 가까운 만기 비중(구조)은 크기 쪽에서 이론 부호를 회복(t −6.22), 판정 진행 중.",
-  exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n그림: −24h~+120h · 막대 = 만기 규모 · 청록 선 = 만기별 ATM IV(기간 구조) · 점 = 블록 거래.",
+  exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 차트 아래 «옵션 만기 · 블록 거래» 카드.",
   mood: "25Δ 리스크 리버설 = 같은 거리 콜 IV − 풋 IV. 음수로 깊으면 하락 방어 수요(공포), 양수면 상승 베팅. 버터플라이 = 양 끝 IV − ATM(꼬리 가격). 기간 구조 = 만기별 ATM IV — 가까운 게 더 높으면(역전) 스트레스.\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중.",
   hedge: "포지션을 옵션으로 보호하면: 손절 주문은 윅에 털릴 수 있지만 풋(숏이면 콜)은 비용이 확정이고 행사가 너머 손실이 고정된다. 계산만 — 주문은 넣지 않는다(지금 주문 경로는 USDC 선물).\n손절 기준 = 청산맵 지지1(롱) / 저항1(숏). 비용 = Deribit 표시가 × 수량.",
 };
@@ -3487,38 +3487,51 @@ const optPx = (o) => Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) ||
 const optSigma = (o, sec) => (optIv(o) ? optPx(o) * (optIv(o) / 100) * Math.sqrt(sec / 31536000) : null);
 const optFront = (o) => (o.expiries || []).find((e) => e.exp_ms > Date.now()) || null;
 
-// C 시간축: −24h ~ +120h · 막대 = 만기 규모 · 선 = ATM IV · 점 = 블록 거래.
-function optTimelineSvg(o, blocks) {
-  const W = 360, H = 118, x0 = 10, x1 = W - 10, t0 = -24, t1 = 120, now = Date.now(), base = 66;
+// 만기 시간축 카드(C, 2026-09-28 사용자 지시 «아래 카드로»): −24h~+120h. 점 = 지난 24h 블록 거래(이름표) · 막대 = 다가올 만기 규모
+//   (옆에 max pain · P/C, 아래 날짜) · 선 = 만기별 ATM IV. 폭 W 는 카드에서 받는다 -- 좁으면(휴대폰) 이름표를 줄여 겹침을 피한다
+//   (블록 이름표는 «지금» 왼쪽 폭이 모자라 점만, 만기 옆 pain·P/C 는 옵션 카드 표에 있다).
+function optLaneSvg(o, blocks, W) {
+  const narrow = W < 700, H = narrow ? 170 : 190, x0 = narrow ? 10 : 20, x1 = W - (narrow ? 10 : 20), t0 = -24, t1 = 120, now = Date.now();
+  const base = narrow ? 104 : 118, fs = narrow ? 10 : 11;
   const X = (h) => x0 + ((h - t0) / (t1 - t0)) * (x1 - x0);
   const ex = (o.expiries || []).filter((e) => e.exp_ms > now && (e.exp_ms - now) / 3.6e6 <= t1);
   const mx = Math.max(1, ...ex.map((e) => e.call_oi_usd + e.put_oi_usd));
-  let s = `<line x1="${x0}" x2="${x1}" y1="${base}" y2="${base}" stroke="var(--line)"/>`
-    + `<line x1="${X(0)}" x2="${X(0)}" y1="4" y2="${H - 14}" stroke="var(--ink)" stroke-opacity=".45" stroke-dasharray="3 3"/>`;
-  [-24, 0, 24, 48, 72, 96, 120].forEach((h) => {
-    s += `<text x="${X(h)}" y="${H - 2}" font-size="9" fill="var(--muted)" text-anchor="middle">${h === 0 ? "지금" : `${h > 0 ? "+" : ""}${h}h`}</text>`;
-  });
-  ex.forEach((e) => {
-    const v = e.call_oi_usd + e.put_oi_usd, hh = 5 + 40 * Math.sqrt(v / mx), cx = X((e.exp_ms - now) / 3.6e6);
-    s += `<rect x="${(cx - 4).toFixed(1)}" y="${(base - hh).toFixed(1)}" width="8" height="${hh.toFixed(1)}" rx="2" fill="var(--warn)" fill-opacity=".8">`
-      + `<title>${optKst(e.exp_ms)} 만기 · ${optUsd(v)} · max pain ${optQ(e.pain)} · ATM IV ${e.atm_iv.toFixed(1)}%</title></rect>`;
-    if (v / mx > 0.3) s += `<text x="${cx.toFixed(1)}" y="${(base - hh - 3).toFixed(1)}" font-size="9" font-weight="700" fill="var(--warn)" text-anchor="middle">${optUsd(v)}</text>`;
-  });
-  if (ex.length >= 2) {
-    const ivs = ex.map((e) => e.atm_iv), lo = Math.min(...ivs), hi = Math.max(...ivs);
-    const yIv = (v) => 98 - (hi > lo ? (v - lo) / (hi - lo) : 0.5) * 20;
-    s += `<path d="M${ex.map((e) => `${X((e.exp_ms - now) / 3.6e6).toFixed(1)} ${yIv(e.atm_iv).toFixed(1)}`).join(" L")}" fill="none" stroke="var(--option)" stroke-width="1.6"/>`;
-    [ex[0], ex[ex.length - 1]].forEach((e, i) => {
-      s += `<text x="${X((e.exp_ms - now) / 3.6e6).toFixed(1)}" y="${(yIv(e.atm_iv) - 4).toFixed(1)}" font-size="9" font-weight="700" fill="var(--option)" text-anchor="${i ? "end" : "start"}">IV ${e.atm_iv.toFixed(0)}</text>`;
-    });
-  }
-  blocks.forEach((b) => {
+  let s = "";
+  for (let h = t0; h <= t1; h += 24) s += `<line x1="${X(h)}" x2="${X(h)}" y1="8" y2="${H - 18}" stroke="var(--line)" stroke-opacity=".5"/>`;
+  s += `<rect x="${x0}" y="8" width="${X(0) - x0}" height="${H - 26}" fill="var(--ink)" fill-opacity=".025"/>`
+    + `<line x1="${x0}" x2="${x1}" y1="${base}" y2="${base}" stroke="var(--line)"/>`
+    + `<line x1="${X(0)}" x2="${X(0)}" y1="6" y2="${H - 16}" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="3 3"/>`;
+  [...blocks].slice(0, narrow ? 4 : 6).sort((a, b) => a.ts_ms - b.ts_ms).forEach((b, i) => {
     const h = (b.ts_ms - now) / 3.6e6;
     if (h < t0) return;
-    s += `<circle cx="${X(h).toFixed(1)}" cy="16" r="${(2.5 + 2 * Math.sqrt((b.notional_usd || 0) / 1e6)).toFixed(1)}" fill="var(--option)" fill-opacity=".85">`
-      + `<title>블록 ${optKst(b.ts_ms)} · ${optUsd(b.notional_usd || 0)} · ${b.legs_seen}다리</title></circle>`;
+    const cx = X(h), y = 22 + i * (narrow ? 13 : 16), usd = b.notional_usd || 0;
+    s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y}" y2="${base}" stroke="var(--option)" stroke-opacity=".3"/>`
+      + `<circle cx="${cx.toFixed(1)}" cy="${y}" r="${(3 + 2.2 * Math.sqrt(usd / 1e6)).toFixed(1)}" fill="var(--option)"><title>블록 ${optKst(b.ts_ms)} · ${optUsd(usd)} · ${b.legs_seen}다리</title></circle>`;
+    if (!narrow) s += `<text x="${(cx - 10).toFixed(1)}" y="${y + 4}" font-size="${fs}" font-weight="700" fill="var(--option)" text-anchor="end">블록 ${optKst(b.ts_ms, false)} ${optUsd(usd)} · ${b.legs_seen}다리</text>`;
   });
-  return `<svg class="opt-tl" viewBox="0 0 ${W} ${H}" role="img" aria-label="옵션 시간축: 만기 규모, ATM IV, 블록 거래">${s}</svg>`;
+  ex.forEach((e) => {
+    const v = e.call_oi_usd + e.put_oi_usd, hh = 10 + (narrow ? 50 : 62) * Math.sqrt(v / mx), cx = X((e.exp_ms - now) / 3.6e6);
+    s += `<rect x="${(cx - 7).toFixed(1)}" y="${(base - hh).toFixed(1)}" width="14" height="${hh.toFixed(1)}" rx="3" fill="var(--warn)" fill-opacity=".85">`
+      + `<title>${optKst(e.exp_ms)} 만기 · ${optUsd(v)} · max pain ${optQ(e.pain)} · P/C ${e.pc == null ? "-" : e.pc.toFixed(2)} · ATM IV ${e.atm_iv.toFixed(1)}%</title></rect>`
+      + `<text x="${(cx + 12).toFixed(1)}" y="${(base - hh + 11).toFixed(1)}" font-size="${fs + 1}" font-weight="800" fill="var(--warn)">${optUsd(v)}</text>`
+      + (narrow ? "" : `<text x="${(cx + 12).toFixed(1)}" y="${(base - hh + 25).toFixed(1)}" font-size="10.5" fill="var(--muted)">pain ${optQ(e.pain)} · P/C ${e.pc == null ? "-" : e.pc.toFixed(2)}</text>`)
+      + `<text x="${cx.toFixed(1)}" y="${base + 14}" font-size="${narrow ? 9.5 : 10.5}" font-weight="600" fill="var(--muted)" text-anchor="middle">${narrow ? optKst(e.exp_ms).slice(0, 5) : optKst(e.exp_ms)}</text>`;
+  });
+  if (ex.length >= 2) {
+    const ivs = ex.map((e) => e.atm_iv), lo = Math.min(...ivs) - 1, hi = Math.max(...ivs) + 1;
+    const yTop = base + 26, yBot = H - 24, yIv = (v) => yBot - ((v - lo) / (hi - lo)) * (yBot - yTop);
+    s += `<text x="${x0 + 2}" y="${yBot + 2}" font-size="10.5" font-weight="700" fill="var(--option)">ATM IV</text>`
+      + `<path d="M${ex.map((e) => `${X((e.exp_ms - now) / 3.6e6).toFixed(1)} ${yIv(e.atm_iv).toFixed(1)}`).join(" L")}" fill="none" stroke="var(--option)" stroke-width="2"/>`;
+    ex.forEach((e) => {
+      const cx = X((e.exp_ms - now) / 3.6e6);
+      s += `<circle cx="${cx.toFixed(1)}" cy="${yIv(e.atm_iv).toFixed(1)}" r="3.5" fill="var(--option)"/>`
+        + `<text x="${(cx + 7).toFixed(1)}" y="${(yIv(e.atm_iv) - 5).toFixed(1)}" font-size="10.5" font-weight="700" fill="var(--option)">${e.atm_iv.toFixed(0)}</text>`;
+    });
+  }
+  for (let h = t0; h <= t1; h += 24) {
+    s += `<text x="${X(h)}" y="${H - 2}" font-size="10.5" fill="${h === 0 ? "var(--ink)" : "var(--muted)"}" font-weight="${h === 0 ? 700 : 500}" text-anchor="${h === t0 ? "start" : h === t1 ? "end" : "middle"}">${h === 0 ? "지금" : `${h > 0 ? "+" : ""}${h}h`}</text>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="옵션 만기 시간축: 블록 거래, 만기 규모, ATM IV">${s}</svg>`;
 }
 
 function optHedgeHtml(o) {
@@ -3560,9 +3573,12 @@ function renderOptions() {
   const body = el("optBody"), chip = el("optChip");
   if (!body) return;
   const { cur, g, o, blocks } = optData();
+  const lanePanel = el("optLanePanel"), laneBody = el("optLaneBody");
+  if (lanePanel) lanePanel.hidden = !o;
   if (!o) {
     if (chip) chip.hidden = true;
     body.innerHTML = "";
+    if (laneBody) laneBody.innerHTML = "";
     setT("optSub", !cur ? "Deribit 옵션은 ETH·BTC·SOL·XRP 만 수집합니다"
       : latestGex && latestGex.error ? `수집 지연 (${latestGex.error})` : "불러오는 중…");
     return;
@@ -3601,13 +3617,14 @@ function renderOptions() {
       + kv("플립", gm.flip ? `${optQ(gm.flip)} (${gm.flip < px ? "아래" : "위"} ${optQ(Math.abs(gm.flip - px))}$)` : "±15% 안 없음")
       + kv("수준 분위 · 구조", `${g.total_pct == null ? "-" : Math.round(g.total_pct * 100) + "%"} · ${g.front_ratio == null ? "-" : g.front_ratio.toFixed(2)}`,
            g.front_negative ? "opt-warn" : "")),
-    sec("exp", "만기", optTimelineSvg(o, blocks) + exRows),
+    sec("exp", "만기", exRows),
     sec("mood", "심리", kv("25Δ 리스크 리버설", f && f.rr25 != null ? `${f.rr25 >= 0 ? "+" : ""}${f.rr25.toFixed(1)}pt` : "-")
       + kv("버터플라이", f && f.bf25 != null ? `${f.bf25 >= 0 ? "+" : ""}${f.bf25.toFixed(1)}pt` : "-")
       + kv("기간 구조(ATM IV)", (o.expiries || []).filter((e) => e.exp_ms > Date.now()).slice(0, 5).map((e) => e.atm_iv.toFixed(0)).join(" → ") || "-")
       + kv("블록 거래 24h", `${((((latestGex || {}).block_trades || {}).n_by_coin || {})[cur]) ?? blocks.length}건`) + blkRows),
     sec("hedge", "보험", optHedgeHtml(o)),
   ].join("");
+  if (laneBody && laneBody.clientWidth > 0) laneBody.innerHTML = optLaneSvg(o, blocks, Math.round(laneBody.clientWidth));
 }
 
 

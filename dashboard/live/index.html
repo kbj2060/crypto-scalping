@@ -251,6 +251,27 @@
       <!-- 2026-09-10 사용자 요청: 청산맵 바로 위에 현 계좌/포지션 요약. 숫자는 거래소 실계좌
            (/api/binance-account)라 봇 원장과 달리 수동 매매도 보인다. 운영 관리 탭의 "바이낸스 계정"
            패널과 같은 payload 를 쓰며(app.js latestBinanceAccount) 여기선 보고 있는 코인만 접어 보인다. -->
+      <!-- 2026-09-28 옵션 만기 시간축 카드(사용자 지시 «만기 시간축을 아래 카드로») -- 넓은 화면에서 차트 바로 아래 차트 폭 전체.
+           −24h~+120h: 점 = 지난 24h 블록 거래 · 막대 = 다가올 만기 규모(max pain · P/C) · 선 = 만기별 ATM IV. app.js renderOptions. -->
+      <section id="optLanePanel" class="panel ops-health-panel opt-lane-panel">
+        <div class="opt-lane-head">
+          <h3>옵션 만기 · 블록 거래</h3>
+          <span class="opt-lane-legend">−24h ~ +120h · <b class="opt-warn">막대</b> 만기 규모(콜+풋 미결제) · max pain · P/C · <b class="opt-c">점</b> 블록 거래 · <b class="opt-c">선</b> 만기별 ATM IV</span>
+        </div>
+        <div id="optLaneBody" class="opt-lane-body"></div>
+      </section>
+      <!-- 2026-09-28 옵션 카드(사용자 선택 A+C, 배치 수정: 넓은 화면에서 차트 오른쪽 열) -- 옛 «신호» 카드(GEX 한 줄)를 대체한다. Deribit 체인(10분) + 블록 거래(20초).
+           다섯 칸 = 옵션을 선물에 쓰는 다섯 방법(예상 폭 · 딜러 감마 · 만기 · 심리 · 보험). 전부 참고 · 신호 아님. -->
+      <section id="optPanel" class="panel ops-health-panel opt-panel">
+        <div class="ops-health-head">
+          <div><h3>옵션</h3><p id="optSub" class="muted">불러오는 중…</p></div>
+          <div class="ops-health-head-tools">
+            <label class="lev-auto opt-toggle" title="풋프린트 가격축에 예상 폭 띠 · max pain · 감마 플립을 그린다"><input type="checkbox" id="optOverlay" checked> 가격축 표시</label>
+          </div>
+        </div>
+        <div id="optBody" class="opt-body"></div>
+      </section>
+
       <section class="panel ops-health-panel acct-panel">
         <div class="ops-health-head">
           <div><h3>내 계좌</h3><p id="snapAcctBalance" class="muted">-</p></div>
@@ -439,17 +460,6 @@
       <!-- 2026-09-27 넓은 화면에서 이 세 장(신호·특화 신호·경제 일정)은 한 칸에 위아래로 쌓인다(사용자 «한 너비에 모두»).
            평소(모바일 포함)에는 display:contents 라 이 묶음이 없는 것과 같다. -->
       <div class="snap-side">
-      <!-- 2026-09-28 옵션 카드(사용자 선택 A+C) -- 옛 «신호» 카드(GEX 한 줄)를 대체한다. Deribit 체인(10분) + 블록 거래(20초).
-           다섯 칸 = 옵션을 선물에 쓰는 다섯 방법(예상 폭 · 딜러 감마 · 만기 · 심리 · 보험). 전부 참고 · 신호 아님. -->
-      <section id="optPanel" class="panel ops-health-panel opt-panel">
-        <div class="ops-health-head">
-          <div><h3>옵션</h3><p id="optSub" class="muted">불러오는 중…</p></div>
-          <div class="ops-health-head-tools">
-            <label class="lev-auto opt-toggle" title="풋프린트 가격축에 예상 폭 띠 · max pain · 감마 플립을 그린다"><input type="checkbox" id="optOverlay" checked> 가격축 표시</label>
-          </div>
-        </div>
-        <div id="optBody" class="opt-body"></div>
-      </section>
 
 
       <section class="panel ops-health-panel">
