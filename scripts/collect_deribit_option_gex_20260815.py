@@ -250,7 +250,8 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
         cl = [c for c in tv["close"] if c]
         rets = [math.log(b / a) for a, b in zip(cl, cl[1:])]
         out["rv7"] = math.sqrt(sum(x * x for x in rets) / len(rets) * 24 * 365) * 100 if len(rets) > 24 else None
-        _RV_CACHE[currency] = (time.time(), out["rv7"])
+        if out["rv7"] is not None:      # None 을 6시간 붙잡지 않는다(09-30 검증)
+            _RV_CACHE[currency] = (time.time(), out["rv7"])
     except _Cached:
         out["rv7"] = hit[1]
     except Exception as exc:
@@ -295,6 +296,10 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
         yrs_a = (gch["days_to_expiry"] / 365.0).to_numpy(); k_a = gch["strike"].to_numpy()
         iv_a = (gch["mark_iv"] / 100.0).to_numpy(); oi_a = gch["open_interest"].to_numpy()
         sg_a = gch["option_type"].map({"call": 1.0, "put": -1.0}).to_numpy()
+        # 2026-09-30 검증: 그릭스는 **만기별 선도가**(underlying_price)로 -- 지수로 재면 먼 만기(선도 +2%)의 DEX·flip 이 틀어진다.
+        #   가격점 px 로 옮길 때는 선도가를 같은 비율(px/idx)로 옮긴다. 감마$ = γ·S²·1% · 델타$ = δ·px.
+        fw_a = gch["underlying_price"].to_numpy() if "underlying_price" in gch else np.full(len(gch), idx)
+        fw_a = np.where(fw_a > 0, fw_a, idx)
         # 2026-09-29 사용자 «체결 기반 딜러 DEX(일간부터)»: 딜러 = 테이커 반대편. **수집 시작 뒤 상장된 종목만**(cv) 처음부터
         #   체결을 다 봤으므로 그 종목의 딜러 순포지션 = −Σ(테이커 매수−매도). 나머지 종목은 수준을 모르므로 뺀다 → 커버리지로 알린다.
         names = gch["instrument_name"].to_numpy() if "instrument_name" in gch else np.array([], dtype=object)
@@ -305,11 +310,12 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
         # w = 델타에 곱할 수량(기본 미결제) · wg = 감마에 곱할 수량(기본 딜러 가정 = 콜 +OI · 풋 −OI)
         def gex_dex_at(px: float, w=None, wg=None) -> tuple[float, float]:
             ok = (iv_a > 0) & (yrs_a > 0)
-            d1 = (np.log(px / k_a[ok]) + 0.5 * iv_a[ok] ** 2 * yrs_a[ok]) / (iv_a[ok] * np.sqrt(yrs_a[ok]))
-            gam = np.exp(-0.5 * d1 * d1) / np.sqrt(2 * np.pi) / (px * iv_a[ok] * np.sqrt(yrs_a[ok]))
+            S = fw_a[ok] * (px / idx)
+            d1 = (np.log(S / k_a[ok]) + 0.5 * iv_a[ok] ** 2 * yrs_a[ok]) / (iv_a[ok] * np.sqrt(yrs_a[ok]))
+            gam = np.exp(-0.5 * d1 * d1) / np.sqrt(2 * np.pi) / (S * iv_a[ok] * np.sqrt(yrs_a[ok]))
             nd1 = 0.5 * (1.0 + np.vectorize(math.erf)(d1 / math.sqrt(2.0))) if ok.any() else d1
             dlt = np.where(sg_a[ok] > 0, nd1, nd1 - 1.0)
-            return (float((gam * (sg_a * oi_a if wg is None else wg)[ok]).sum() * px * px * 0.01),
+            return (float((gam * S * S * (sg_a * oi_a if wg is None else wg)[ok]).sum() * 0.01),
                     float((dlt * (oi_a if w is None else w)[ok]).sum() * px))
         gex_at = lambda px: gex_dex_at(px)[0]  # noqa: E731
         # 2026-09-29 사용자 «딜러 기준 3번(가정 + 체결 나란히), 체결 커버가 다 차면 가정 제거»:
@@ -343,17 +349,20 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
         def dealer_delta_after(px: float, w, dt_yrs: float) -> float:
             ok = (iv_a > 0) & (yrs_a > 0)
             t2 = np.maximum(yrs_a[ok] - dt_yrs, 1e-7)
-            d1 = (np.log(px / k_a[ok]) + 0.5 * iv_a[ok] ** 2 * t2) / (iv_a[ok] * np.sqrt(t2))
+            d1 = (np.log(fw_a[ok] * (px / idx) / k_a[ok]) + 0.5 * iv_a[ok] ** 2 * t2) / (iv_a[ok] * np.sqrt(t2))
             nd1 = 0.5 * (1.0 + np.vectorize(math.erf)(d1 / math.sqrt(2.0))) if ok.any() else d1
             return float((np.where(sg_a[ok] > 0, nd1, nd1 - 1.0) * w[ok]).sum() * px)
         charm_1h = (dealer_delta_after(idx, w_trd, 1 / 8760) - dealer_delta_after(idx, w_trd, 0.0)) if (w_trd is not None and len(gch)) else None
         dealer = {"dealer_dex_usd": trd_now[1], "dealer_gex_usd": trd_now[0], "dealer_flip": flip_of(5) if w_trd is not None else None,
-                  "dealer_charm_1h_usd": charm_1h,
+                  "dealer_charm_1h_usd": charm_1h, "dealer_n": int(cv_a.sum()),   # 커버 종목 수 -- 1시간 Δ 가 같은 묶음인지 보는 열쇠
                   "dealer_cov": oi_cv / float(oi_a.sum()) if len(gch) and oi_a.sum() > 0 else None,
                   # |테이커 순|/미결제 -- 딜러 순포지션은 미결제를 넘을 수 없다. 1 초과면 «메이커 = 딜러» 가정이 깨진 것
                   "dealer_net_oi": float(np.abs(tn_a[cv_a]).sum()) / oi_cv if oi_cv > 0 else None} if flow else {}
         return {"now_usd": now[0], "dex_usd": now[1], "dex_asm_usd": gex_dex_at(idx, w_asm)[1] if len(gch) else None,
-                "flip": flip, "profile": [[round(p, 1), g, d, da, dt, gt] for p, g, d, da, dt, gt in prof], **dealer}
+                # 곡선 가격은 유효숫자 6자리(XRP 1.5 를 소수 1자리로 반올림하면 25점이 계단 6개가 됐다 -- 09-30 검증)
+                "flip": flip, "profile": [[float(f"{p:.6g}"), g, d, da, dt, gt] for p, g, d, da, dt, gt in prof],
+                # 이 범위의 만기 집합 -- 1시간 사이 만기가 빠지거나 7일 경계로 들어오면 Δ 가 «묶음 교체»가 된다(화면이 거른다)
+                "exps": sorted({int(t.timestamp() * 1000) for t in gch["expiration_ts"]}) if len(gch) else [], **dealer}
     front_g = {**_gamma(g_fut[g_fut["expiration_ts"] == g_first] if g_first is not None else chain.iloc[0:0]),
                "exp_ms": int(g_first.timestamp() * 1000) if g_first is not None else None}
     out["gamma"] = front_g
@@ -377,13 +386,14 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
     fut = band[band["expiration_ts"] > pd.Timestamp.now(tz="UTC")]
     first = fut["expiration_ts"].min() if len(fut) else None
     usd_oi = band["open_interest"] * idx
-    g_usd = band["option_type"].map({"call": 1.0, "put": -1.0}) * band["gamma_bs"] * band["open_interest"] * idx * idx * 0.01
+    S2 = band["underlying_price"].where(band["underlying_price"] > 0, idx) ** 2     # gamma_bs 는 선도가로 잰 값 -- $ 환산도 선도가로
+    g_usd = band["option_type"].map({"call": 1.0, "put": -1.0}) * band["gamma_bs"] * band["open_interest"] * S2 * 0.01
     # 2026-09-29 사용자 «감마도 딜러·체결 기준으로»: 행 5번째 칸 = 딜러·체결 순감마$(수집 뒤 상장 종목의 −테이커 순수량 × 감마).
     #   그 행사가에 커버 종목이 없으면 None(0 이 아니라 «모름»).
     cvb = band["instrument_name"].isin(flow["covered"]) if flow else pd.Series(False, index=band.index)
     tnb = band["instrument_name"].map(flow["net"]).fillna(0.0) if flow else pd.Series(0.0, index=band.index)
     band = band.assign(c=usd_oi.where(band["option_type"] == "call", 0.0), p=usd_oi.where(band["option_type"] == "put", 0.0), g=g_usd,
-                       t=(-tnb * band["gamma_bs"] * idx * idx * 0.01).where(cvb, 0.0), n=cvb.astype(int))
+                       t=(-tnb * band["gamma_bs"] * S2 * 0.01).where(cvb, 0.0), n=cvb.astype(int))
     def _ladder(sel):
         agg = band[sel].groupby("strike")[["c", "p", "g", "t", "n"]].sum().reset_index()
         return [[float(r.strike), round(float(r.c)), round(float(r.p)), round(float(r.g)), round(float(r.t)) if r.n else None]
@@ -405,20 +415,30 @@ def _taker_flow(con, currency: str) -> dict | None:
                            "FROM option_trades WHERE starts_with(instrument_name, ?) GROUP BY 1", [prefix]).fetchall()
         hit = _CREATED.get(api)
         if not hit or time.time() - hit[0] > 3600:      # 상장 시각은 안 바뀐다 -- 1시간마다 새 종목만 반영
-            hit = (time.time(), {x["instrument_name"]: x["creation_timestamp"] for x in _pub("get_instruments", currency=api, kind="option")})
-            _CREATED[api] = hit
+            try:
+                hit = (time.time(), {x["instrument_name"]: x["creation_timestamp"] for x in _pub("get_instruments", currency=api, kind="option")})
+                _CREATED[api] = hit
+            except Exception:
+                if not hit:            # 조회 실패는 직전 목록으로 버틴다(새 종목만 한 주기 늦는다) -- 09-30 검증
+                    raise
+        # 백필로 못 메운 공백(재기동 전 24h 초과 정지) 뒤에 상장된 종목만 처음부터 봤다 -- 그 끝을 시작점으로
+        lost = con.execute("SELECT max(to_ms) FROM gaps WHERE reason = ?", [f"unrecoverable {api}"]).fetchone()[0]
     except Exception as exc:     # 옛 단독 수집기(option_trades 없음)·조회 실패 -- 딜러 DEX 만 빠진다
         log(f"{currency}: 체결 기반 딜러 DEX 생략 {exc}")
         return None
     if not rows:
         return None
-    t0 = min(r[2] for r in rows)
+    t0 = max(min(r[2] for r in rows), lost or 0)
     return {"net": {r[0]: float(r[1]) for r in rows}, "covered": {n for n, c in hit[1].items() if n.startswith(prefix) and c >= t0}}
 
 
 def poll_once(con) -> None:
     for currency in CURRENCIES:
-        chain = fetch_chain(currency)
+        try:
+            chain = fetch_chain(currency)
+        except Exception as exc:   # 한 코인 조회 실패가 나머지 코인·상태 파일을 막지 않게(09-30 검증)
+            log(f"{currency}: 체인 조회 실패 {exc}")
+            continue
         if chain.empty:
             log(f"{currency}: empty response, skipping")
             continue
@@ -493,7 +513,8 @@ def write_state(con) -> None:
             dex_ago = {k: {"dex_usd": v.get("dex_usd"), "dex_asm_usd": v.get("dex_asm_usd"),
                            "dealer_dex_usd": v.get("dealer_dex_usd"), "dealer_gex_usd": v.get("dealer_gex_usd"),
                            # 커버가 1시간 새 바뀌면(새 종목 상장) 체결 기반 Δ 는 «상장분»이 섞인다 -- 화면이 cov 를 비교해 거른다
-                           "dealer_cov": v.get("dealer_cov"), "exp_ms": v.get("exp_ms")} for k, v in gb_ago.items()
+                           "dealer_cov": v.get("dealer_cov"), "dealer_n": v.get("dealer_n"), "exps": v.get("exps"),
+                           "exp_ms": v.get("exp_ms")} for k, v in gb_ago.items()
                        if isinstance(v, dict) and v.get("dex_usd") is not None} or None
         out["currencies"][currency] = {
             "options": json.loads(opt_row[0]) if opt_row else None,

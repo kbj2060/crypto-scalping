@@ -217,7 +217,7 @@ def last_ts() -> dict:
         con.close()
 
 
-def write(rows: list[tuple], gap: tuple | None = None) -> int:
+def write(rows: list[tuple], gaps: list[tuple] | None = None) -> int:
     """행을 넣고(중복 무시) 상태 JSON 을 새로 쓴다. 넣은 새 행 수를 돌려준다."""
     con = _connect()
     try:
@@ -225,8 +225,8 @@ def write(rows: list[tuple], gap: tuple | None = None) -> int:
         con.begin()      # 🔴자동커밋이면 행마다 fsync(HL 수집기 참고)
         if rows:
             con.executemany(f"INSERT OR IGNORE INTO option_trades VALUES ({','.join('?' * len(COLS))})", rows)
-        if gap:
-            con.execute("INSERT INTO gaps VALUES (?,?,?,?)", list(gap))
+        for g in gaps or []:
+            con.execute("INSERT INTO gaps VALUES (?,?,?,?)", list(g))
         con.commit()
         added = con.execute("SELECT count(*) FROM option_trades").fetchone()[0] - before
         cur = con.execute(f"SELECT {','.join(COLS)} FROM option_trades WHERE is_block AND ts_ms >= ?",
@@ -294,7 +294,11 @@ async def run() -> None:
                 since = {api: max(seen.get(api) or 0, now - BACKFILL_MAX_MS) for api in API_CURRENCIES}
                 bf = await asyncio.to_thread(backfill, since, now)
                 gap = (down[0], now, down[1], None) if down else None
-                added = await asyncio.to_thread(write, bf, gap and gap[:3] + (len(bf),))
+                # 2026-09-30 검증: 24h 넘게 꺼져 있었으면 백필(최대 24h)이 못 메운 구간이 남는다 -- «복구 불가»로 적어 두면
+                #   체결 기반 딜러 값(_taker_flow)이 그 뒤에 상장된 종목만 «처음부터 본 종목»으로 센다.
+                lost = [(seen[api], since[api], f"unrecoverable {api}", 0) for api in API_CURRENCIES
+                        if seen.get(api) and seen[api] < since[api]]
+                added = await asyncio.to_thread(write, bf, ([gap[:3] + (len(bf),)] if gap else []) + lost)
                 print(f"구독 {'·'.join(CHANNELS)} · 백필 {len(bf)}건(새 {added}) since={since} · {DB}", flush=True)
                 down = None
                 while True:

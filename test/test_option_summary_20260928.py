@@ -130,6 +130,7 @@ def test_taker_flow_sql_and_covered(monkeypatch):
     import duckdb
     con = duckdb.connect()
     con.execute("CREATE TABLE option_trades (ts_ms BIGINT, instrument_name VARCHAR, direction VARCHAR, amount DOUBLE)")
+    con.execute("CREATE TABLE gaps (from_ms BIGINT, to_ms BIGINT, reason VARCHAR, backfilled INTEGER)")
     con.executemany("INSERT INTO option_trades VALUES (?, ?, ?, ?)", [
         (1000, "ETH-1OCT26-2700-C", "buy", 5.0), (2000, "ETH-1OCT26-2700-C", "sell", 2.0),
         (3000, "ETH-3OCT26-2700-P", "sell", 4.0), (1500, "BTC-1OCT26-60000-C", "buy", 9.0)])
@@ -139,6 +140,10 @@ def test_taker_flow_sql_and_covered(monkeypatch):
     f = gex._taker_flow(con, "ETH")
     assert f["net"] == {"ETH-1OCT26-2700-C": 3.0, "ETH-3OCT26-2700-P": -4.0}
     assert f["covered"] == {"ETH-3OCT26-2700-P"}, "첫 체결(1000) 전에 상장된 종목은 수준을 모른다"
+    # 09-30: 24h 넘게 꺼져 백필 못 한 공백(끝 2600) 뒤에 상장된 종목만 커버 -- 2500 상장 풋도 빠진다. 다른 목록 공백은 무관
+    con.execute("INSERT INTO gaps VALUES (1800, 2600, 'unrecoverable ETH', 0), (1800, 9999, 'unrecoverable BTC', 0)")
+    gex._CREATED.clear()
+    assert gex._taker_flow(con, "ETH")["covered"] == set()
 
 
 def test_dealer_gex_from_taker_flow(monkeypatch):
@@ -178,3 +183,40 @@ def test_dealer_charm_1h_sign_and_scale(monkeypatch):
     expect = -50 * (gex._bs_delta(2000.0, 2100.0, 50.0, t - h, True) - gex._bs_delta(2000.0, 2100.0, 50.0, t, True)) * 2000.0
     assert abs(otm - expect) < 1e-6 * abs(expect), (otm, expect)
     assert "dealer_charm_1h_usd" not in gex.options_summary(ch, "ETH")["gamma"]
+
+
+def test_greeks_use_forward_and_profile_keeps_small_prices(monkeypatch):
+    """09-30 검증: ① 그릭스는 만기별 선도가 -- 선도가가 지수보다 높으면 콜 델타(보유자 DEX)가 지수 기준보다 커진다.
+    ② XRP 처럼 가격이 1.5 면 곡선 가격 25점이 전부 달라야 한다(소수 1자리 반올림 계단 금지). ③ exps·dealer_n 이 나온다."""
+    def pub(method, **k):              # 지수만 2000 으로 고정(선도가 효과만 떼어 본다), 나머지 조회는 실패
+        if method == "get_index_price":
+            return {"index_price": 2000.0}
+        raise RuntimeError("offline")
+    monkeypatch.setattr(gex, "_pub", pub)
+    ch = _chain()
+    calls = ch[ch.option_type == "call"].assign(days_to_expiry=90.0)
+    lo = gex.options_summary(calls, "ETH")["gamma_by"]["all"]["dex_usd"]                                   # 선도 = 지수 2000
+    hi = gex.options_summary(calls.assign(underlying_price=2040.0), "ETH")["gamma_by"]["all"]["dex_usd"]   # 선도 +2%
+    assert hi > lo * 1.02, (lo, hi)     # 지수로 재던 옛 코드는 hi == lo 였다
+    x = ch.assign(strike=ch.strike / 1000 * 0.75, underlying_price=1.5, gamma_bs=0.0)
+    prof = gex.options_summary(x, "XRP")["gamma_by"]["all"]["profile"]
+    assert len({r[0] for r in prof}) == 25, [r[0] for r in prof]
+    g = gex.options_summary(ch, "ETH", {"net": {"x2000call": 5.0}, "covered": {"x2000call"}})["gamma_by"]["week"]
+    assert g["dealer_n"] == 1 and len(g["exps"]) == 1
+
+
+def test_unrecoverable_gap_written_and_read(tmp_path, monkeypatch):
+    """09-30 검증: 통합 수집기 write() 가 «복구 불가» 공백을 여러 건 기록하고, _taker_flow 가 그 끝 이후 상장 종목만 커버로 센다."""
+    import duckdb
+    import live_deribit_block_trade_collector_20260928 as col
+    monkeypatch.setattr(col, "DB", tmp_path / "o.duckdb")
+    monkeypatch.setattr(col, "STATE_PATH", tmp_path / "st.json")
+    row = lambda ts, n, d, a: (ts, f"t{ts}", 1, n, d, a, 0.01, 0.01, 2000.0, 50.0, 0, None, False, None, None, None, None, None)
+    col.write([row(1000, "ETH-1OCT26-2700-C", "buy", 5.0), row(3000, "ETH-3OCT26-2700-P", "sell", 4.0)],
+              [(500, 900, "ConnectionClosedError", 3), (1500, 2600, "unrecoverable ETH", 0)])
+    con = duckdb.connect(str(tmp_path / "o.duckdb"))
+    assert con.execute("SELECT count(*) FROM gaps").fetchone()[0] == 2
+    gex._CREATED.clear()
+    monkeypatch.setattr(gex, "_pub", lambda m, **k: [{"instrument_name": "ETH-1OCT26-2700-C", "creation_timestamp": 2000},
+                                                      {"instrument_name": "ETH-3OCT26-2700-P", "creation_timestamp": 2700}])
+    assert gex._taker_flow(con, "ETH")["covered"] == {"ETH-3OCT26-2700-P"}, "공백 끝(2600) 전 상장(2000)은 제외"
