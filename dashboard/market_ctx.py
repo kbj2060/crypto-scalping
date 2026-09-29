@@ -13,7 +13,9 @@ from typing import Iterable
 
 import numpy as np
 
-SWEEP_BPS = (10, 25, 50)   # «여기까지 쓸어올리려면 몇 ETH 가 필요한가» -- 현재 미드에서 한쪽으로
+SWEEP_BPS = (25, 50, 100)  # «여기까지 쓸어올리려면 몇 ETH 가 필요한가» -- 현재 미드에서 한쪽으로.
+# 🔴±10bp 는 뺐다: 칸($0.5 ≈ 1.8bp)이 미드를 품은 칸에서 매수·매도를 상계하므로 10bp 띠는 오차가 20% 넘게 난다(09-29 서버에서
+#   REST 호가 1000단계와 같은 순간 3회 대조: ±25bp 는 ±3% 안, ±10bp 매도는 −23~−26%). ±50bp 넘게는 REST 1000단계가 못 덮는다(±40bp).
 HL_LIQ_BIN_USD = 5.0       # HL 고래 청산가 묶음 폭($). ETH 2,700 에서 ~1.9bp
 HL_LIQ_MAX_PCT = 0.10      # 이보다 먼 청산가는 버린다(±10%)
 LIQ_PROFILE_BIN_USD = 2.5  # 실측 청산 가격 프로파일 묶음 폭($)
@@ -27,17 +29,29 @@ def pct_rank(x: float | None, hist: Iterable[float], min_n: int = 30) -> float |
     return float(np.count_nonzero(a <= x) / a.size)
 
 
-def sweep_depth(row: np.ndarray, px: np.ndarray, mid: float, bps: tuple[int, ...] = SWEEP_BPS) -> dict[str, list[float]]:
-    """래스터 한 초(row: +매수호가 / −매도호가 수량, px: 칸 가격) → 미드에서 ±bp 까지 걸린 호가 합(ETH).
-    ask[i] = 위로 bps[i] 까지 쓸어올리는 데 먹어야 할 매도호가 · bid[i] = 아래로 같은 폭의 매수호가.
+def sweep_depth(row: np.ndarray, px: np.ndarray, mid: float, bps: tuple[int, ...] = SWEEP_BPS,
+                top: tuple[float, float, float, float] | None = None) -> dict[str, list[float]]:
+    """래스터 한 초(row: +매수호가 / −매도호가 수량, px: 칸 **아래끝** 가격 -- 수집기가 floor(p/칸)로 넣는다) → 미드에서 ±bp 까지
+    걸린 호가 합(ETH). ask[i] = 위로 bps[i] 까지 쓸어올리는 데 먹어야 할 매도호가 · bid[i] = 아래로 같은 폭의 매수호가.
+    🔴미드를 품은 칸은 **매수·매도가 상계**돼 있다(수집기: «스프레드가 걸친 한 빈만 상계») -- 그 칸은 빼고, 그 칸 안의 최우선
+      호가는 top = (최우선 매수가, 수량, 최우선 매도가, 수량)(bookTicker)으로 정확히 더한다. 먼 쪽 경계는 칸 **가운데**로 판정한다.
+      (09-29 첫 판은 상계된 칸을 매수에 통째로 넣어 ±10bp 매수가 바이낸스 REST 호가보다 20~30% 작았다 -- 같은 순간 3회 대조)
     취소·재보충은 모른다(한 초 스냅샷) -- «지금 걸려 있는 양»이다."""
+    bs = float(px[1] - px[0]) if len(px) > 1 else 0.5
+    ctr = px + bs / 2
+    s_lo = np.floor(mid / bs) * bs                      # 미드를 품은(상계된) 칸의 아래끝
     out: dict[str, list[float]] = {"bid": [], "ask": []}
     for bp in bps:
         w = mid * bp / 1e4
-        up = (px > mid) & (px <= mid + w) & (row < 0)
-        dn = (px < mid) & (px >= mid - w) & (row > 0)
-        out["ask"].append(float(-row[up].sum()))
-        out["bid"].append(float(row[dn].sum()))
+        up = (px >= s_lo + bs) & (ctr <= mid + w) & (row < 0)
+        dn = (px + bs <= s_lo) & (ctr >= mid - w) & (row > 0)
+        a, b = float(-row[up].sum()), float(row[dn].sum())
+        if top:
+            bpx, bq, apx, aq = top
+            b += bq if bpx >= s_lo else 0.0            # 최우선 호가가 상계 칸 안일 때만(밖이면 위 합에 이미 들어 있다)
+            a += aq if apx < s_lo + bs else 0.0
+        out["ask"].append(a)
+        out["bid"].append(b)
     return out
 
 
@@ -152,10 +166,14 @@ def session_vwap(ts: list[int], high: list[float], low: list[float], close: list
 
 if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     assert pct_rank(5, range(100)) == 0.06 and pct_rank(5, range(10)) is None and pct_rank(None, range(100)) is None
-    px = np.arange(2690.0, 2710.5, 0.5)                    # 미드 2700, 칸 0.5
-    row = np.where(px < 2700, 2.0, np.where(px > 2700, -1.0, 0.0))
-    s = sweep_depth(row, px, 2700.0, (10, 25))             # 10bp = 2.7$ → 위 5칸·아래 5칸, 25bp = 6.75$ → 13칸
-    assert s == {"bid": [10.0, 26.0], "ask": [5.0, 13.0]}, s
+    px = np.arange(2690.0, 2710.5, 0.5)                    # 칸 아래끝 · 미드 2700.005 는 칸 [2700.0, 2700.5) 안
+    row = np.where(px < 2700, 2.0, np.where(px > 2700, -1.0, 0.5))   # 상계된 칸(2700.0)은 순 +0.5 -- 믿으면 안 되는 값
+    s = sweep_depth(row, px, 2700.005, (10, 25))           # 10bp = 2.7$: 가운데가 [2697.3, 2702.7] 안인 칸
+    assert s == {"bid": [5 * 2.0, 13 * 2.0], "ask": [4 * 1.0, 13 * 1.0]}, s   # 상계 칸은 뺀다 · 25bp 는 양쪽 13칸(대칭)
+    s = sweep_depth(row, px, 2700.005, (10,), top=(2700.0, 30.0, 2700.01, 7.0))  # 최우선 호가가 상계 칸 안 → 정확한 수량을 더한다
+    assert s == {"bid": [10.0 + 30.0], "ask": [4.0 + 7.0]}, s
+    s = sweep_depth(row, px, 2700.005, (10,), top=(2699.9, 30.0, 2700.6, 7.0))   # 최우선이 상계 칸 밖 → 이미 합에 있다(두 번 안 센다)
+    assert s == {"bid": [10.0], "ask": [4.0]}, s
     assert quad_1h(-40, 500, 30)["key"] == "dn_up" and quad_1h(-40, -5, 30)["key"] == "dn_dn"
     assert quad_1h(40, 5, 30)["key"] == "up_up" and quad_1h(40, -5, 30)["key"] == "up_dn"
     assert quad_1h(10, 5, 30)["key"] == "small" and quad_1h(10, 5, None)["key"] == "small" and quad_1h(None, 5, 30) is None

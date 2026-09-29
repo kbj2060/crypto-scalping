@@ -3430,11 +3430,12 @@ def make_app() -> web.Application:
                 if flow.get("ok"):
                     ofi_hist.append(abs(flow["ofi10"]))
                     imb40_ring.append(float(flow["imb40"]))
-                    # 시장 맥락: 미드에서 ±10/25/50bp 까지 걸린 호가 = «그만큼 밀려면 먹어야 할 양». 같은 마지막 유효 초.
+                    # 시장 맥락: 미드에서 ±25/50/100bp 까지 걸린 호가 = «그만큼 밀려면 먹어야 할 양». 같은 마지막 유효 초.
                     q = np.asarray(w["qty"]); mids = np.asarray(w["mid"], dtype=float)
                     last = int(np.flatnonzero(np.isfinite(mids))[-1])
-                    sweep = mctx.sweep_depth(q[last], (int(w["bin_lo"]) + np.arange(q.shape[1])) * float(w["bin_size"]), flow["mid"])
-                    depth25_ring.append((sweep["bid"][1], sweep["ask"][1]))
+                    sweep = mctx.sweep_depth(q[last], (int(w["bin_lo"]) + np.arange(q.shape[1])) * float(w["bin_size"]), flow["mid"],
+                                             top=(float(book["bidPrice"]), float(book["bidQty"]), float(book["askPrice"]), float(book["askQty"])))
+                    depth25_ring.append((sweep["bid"][0], sweep["ask"][0]))       # ±25bp = SWEEP_BPS[0]
                 ofi_thr = float(np.median(ofi_hist)) if len(ofi_hist) >= 30 else None
                 if flow.get("ok") and ofi_thr:
                     agree, micro_state["qi_prev"] = mref.agree_state(
@@ -3839,6 +3840,8 @@ def make_app() -> web.Application:
         ls = col.get("ls") or []
         # 롱숏비 행은 원천 넷 중 일부가 비는 5분이 있다(최신 행 NULL, 09-29 서버 실측) -- 칸마다 «마지막 유효값»
         lsv = lambda j, rows: next((r[j] for r in rows if r[j] is not None), None)   # noqa: E731
+        # «하루 전» = 24시간 전에 **가장 가까운** 유효 행(창은 결측 여유로 25시간 -- 맨 앞 행을 쓰면 ~25시간 전이 된다, 09-29 재검증)
+        ls24 = lambda j: min(((abs(r[0] - (time.time() - 86400)), r[j]) for r in ls if r[j] is not None), default=(0, None))[1]   # noqa: E731
         d25 = np.array(depth25_ring, dtype=float) if len(depth25_ring) >= 600 else None
         sw = mp.get("sweep")
         basis_pct = mctx.pct_rank(dv["basis_bp"], hist["basis"], min_n=600)
@@ -3854,7 +3857,7 @@ def make_app() -> web.Application:
             "lev": mctx.lev_state(basis_pct, oi["z1h"]),
             "oi": {**oi, "okx": okx_oi[0] if okx_oi else None, "hl": hl[1] if hl else None},
             "ls": ({"global": lsv(1, ls[::-1]), "top_pos": lsv(2, ls[::-1]), "taker": lsv(3, ls[::-1]),
-                    "global_24h": lsv(1, ls), "top_pos_24h": lsv(2, ls), "age_s": time.time() - ls[-1][0]} if ls else None),
+                    "global_24h": ls24(1), "top_pos_24h": ls24(2), "age_s": time.time() - ls[-1][0]} if ls else None),
             "quad": mctx.quad_1h(x.get("move60"), x.get("oi60"), x.get("move60_p75")),
             "move60": x.get("move60"), "oi60": x.get("oi60"),
             "flow": {"z60": x.get("z60"), "net60": x.get("net60"), "cvd30_z": x.get("cvd30_z"),
@@ -3864,9 +3867,11 @@ def make_app() -> web.Application:
             #   HL 마크−BN 마크로 재 19.5bp 로 보였다). HL = 미드 대 미드 · OKX = 수집기에 미드가 없어 마크 대 마크.
             "venues": {"okx_bp": bp(okx_mark[0] if okx_mark else None, bn_mark), "hl_bp": bp(hl[4] if hl else None, mp.get("mid"))},
             "book": {"spread": mp.get("spread"), "sweep": sw, "bps": list(mctx.SWEEP_BPS),
-                     "bid25_pct": float(np.mean(d25[:, 0] <= sw["bid"][1])) if d25 is not None and sw else None,
-                     "ask25_pct": float(np.mean(d25[:, 1] <= sw["ask"][1])) if d25 is not None and sw else None},
-            "hl_liq": mctx.hl_liq_levels(col.get("hl_pos") or [], mid) if mid else {"below": [], "above": []},
+                     "bid25_pct": float(np.mean(d25[:, 0] <= sw["bid"][0])) if d25 is not None and sw else None,
+                     "ask25_pct": float(np.mean(d25[:, 1] <= sw["ask"][0])) if d25 is not None and sw else None},
+            # 🔴HL 청산은 **HL 마크가**로 판정된다 -- 바이낸스 미드로 가르면 거래소 차이(~9bp)만큼 가격 바로 밑 롱 청산가가
+            #   «이미 넘어섰다»로 버려졌다(09-29 재검증). 금액도 HL 마크로. HL 맥락이 없을 때만 바이낸스 미드.
+            "hl_liq": mctx.hl_liq_levels(col.get("hl_pos") or [], (hl[3] if hl and hl[3] else mid)) if (mid or (hl and hl[3])) else {"below": [], "above": []},
             "liq_profile": prof,
             "burst": {k: burst.get(k) for k in ("updated_at", "hawkes_active", "crisis_type", "z_long", "z_short",
                                                 "long_usd_1m", "short_usd_1m", "valid_liq_stream")} if burst else None,

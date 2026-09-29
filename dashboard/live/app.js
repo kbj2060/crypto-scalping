@@ -3968,7 +3968,7 @@ async function refreshTrend() {
 const API_MARKET_CTX_URL = "/api/market-context";
 const MARKET_CTX_POLL_MS = 5000;
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
-let latestMacroEvents = [];          // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정»
+let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
 const mcTipOpen = new Set();
 const mcLine = { vwap: true, bb: false };   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
@@ -3978,7 +3978,7 @@ const MC_TIPS = {
   quad: "1시간 가격 이동 × OI 변화. 이동이 하루 1시간 이동의 상위 25% 안일 때만 판정한다.\n우리 검정(4.7년): 하락 + OI↑(새 숏 유입) 뒤 1시간은 더 내렸고, 하락 + OI↓(롱 정리) 뒤는 되돌렸다 — 숏을 «언제 거두나»의 근거. 상승 쪽 두 칸은 아직 안 쟀다. 차트 아래 사분면(5분 델타 × OI)은 방향 정보가 0으로 나온 서술용이다.",
   flow: "크기별 순매수 = 테이커 주문 크기로 가른 60분 순매수를 지난 24시간 분포로 나눈 값(σ). 고래 ≥ $10만 · 리테일 < $1만. 30분 체결 = 거래소별 순매수(ETH).\n우리 검정: 혼자서는 셋 다 되돌림 쪽(리테일이 가장 심하다). 고래와 리테일이 갈릴 때 60분 고래 쪽이 약하게 맞았다(메이커 전제). CVD는 «설명»이지 선행지표가 아니다.",
   cross: "BTC 30분 이동과 ETH의 동행 여부 · 거래소 가격차(바이낸스 기준 — OKX 는 마크 대 마크, HL 은 미드 대 미드. 마크는 평활값이라 미드와 섞어 재면 괴리가 부풀어 보인다) · HL 프리미엄(마크 − 오라클).\n우리 검정: BTC→ETH 1분 선행 0, 바이낸스가 HL을 1초 안쪽으로 앞선다 — 30분~2시간 방향에는 못 쓴다. 괴리가 커지는 순간(거래소 장애·한쪽 청산 쏠림)을 알아채는 용도.",
-  book: "미드에서 ±10/25/50bp까지 걸린 호가 합 = 그만큼 밀려면 먹어야 할 물량(한 초 스냅샷 · 취소·재보충은 모른다). 얇은 쪽 = ±25bp 호가가 지난 6시간 중 몇 분위인가.\n우리 검정: 미검정. 거래량 계열은 실현변동성에 대부분 먹혔으니 «크기·속도» 참고로만. ETH 스프레드는 거의 늘 1틱이라 벌어지면 그 자체가 이상 신호다.",
+  book: "미드에서 ±25/50/100bp까지 걸린 호가 합 = 그만큼 밀려면 먹어야 할 물량(한 초 스냅샷 · 취소·재보충은 모른다). 얇은 쪽 = ±25bp 호가가 지난 6시간 중 몇 분위인가.\n우리 검정: 미검정. 거래량 계열은 실현변동성에 대부분 먹혔으니 «크기·속도» 참고로만. ETH 스프레드는 거의 늘 1틱이라 벌어지면 그 자체가 이상 신호다.",
   liq: "청산 급증 = 봇의 1분 청산 z. HL 고래 청산가 = 추적 중인 HL 상위 300주소의 실제 청산가(추정 아님)를 $5 단위로 묶은 금액 — 차트에 점선으로도 그린다. 12시간 실측 = 바이낸스 강제청산이 실제로 체결된 가격(차트 체결 기둥 안쪽 눈금).\n우리 검정: 청산 급증 뒤 역매매·추종 둘 다 엣지 0 — «청산 동반 급등에 역매매 금지» 필터만 유효. 추정 청산맵은 «위치»는 맞고 방향은 없다. HL 실측 청산가는 미검정.",
   when: "다음 펀딩 정산 · 가까운 옵션 만기와 max pain · 미국장 · 다음 주요 지표.\n우리 검정: 펀딩 정산 전후 드리프트는 반기마다 부호가 뒤집혀 기각. max pain 쪽 1시간 규칙(만기 1시간 전 → 08:00 UTC)만 2026년 첫 검정 통과 — 후보라 표본외 장부로 계속 잰다.",
   px: "세션 VWAP = UTC 00시부터 거래량 가중 평균가(σ = 거래량 가중 표준편차). 볼린저 %B = (종가 − 하단) ÷ (상단 − 하단), 20봉·2σ. RSI 14 = 5분봉. 스위치로 차트에 선을 켠다.\n우리 검정: 볼린저·VWAP 셋업은 방향 엣지가 없었고 RSI·%B는 짧은 되돌림을 약하게 말한다(비용을 못 넘음). 위치 참고용.",
@@ -4076,6 +4076,8 @@ function renderMarketCtx() {
   const d = latestMarketCtx;
   if (!d || !d.available) {
     body.innerHTML = `<div class="mc-note">${d && d.error ? `시장 맥락 지연 (${escapeHtml(String(d.error))})` : "불러오는 중…"}</div>`;
+    body._mcHtml = null;
+    if (badge) { badge.textContent = d && d.error ? "지연" : "-"; badge.className = "ops-badge neutral"; }   // 옛 «쏠림» 배지가 남지 않게
     return;
   }
   const n = (v, dp = 0) => (v == null || !Number.isFinite(+v) ? "-" : (+v).toLocaleString("en-US", { maximumFractionDigits: dp, minimumFractionDigits: dp }));
@@ -4096,14 +4098,15 @@ function renderMarketCtx() {
   const bb = lc ? mcBollinger(full).get(lc.time) : null, px = Number(latestLivePriceByAsset.eth || lc?.close || d.mid || 0);
   const pb = bb && bb[2] > bb[0] ? (px - bb[0]) / (bb[2] - bb[0]) : null, rsi = mcRsi(full.map((c) => +c.close));
   const vz = lv && lv.vsd > 0 ? (px - lv.vwap) / lv.vsd : null;
-  // 일정 -- 옵션 만기는 옵션 카드와 같은 원천(latestGex)
-  const { o } = optData();
+  // 일정 -- 옵션 만기는 옵션 카드와 같은 원천(latestGex). 🔴optData() 는 «지금 보는 코인»이라 SOL 탭에서 SOL max pain 을 ETH 가격과
+  //   견줬다(09-29 재검증) -- 이 카드는 ETH 전용이므로 ETH 를 직접 읽는다.
+  const gEth = latestGex && latestGex.available ? (latestGex.currencies || {}).ETH : null, o = gEth && gEth.options;
   const ef = o ? optFront(o) : null, us = mcUsSession();
-  const nextMacro = latestMacroEvents.filter((e) => e.importance === "high" && Date.parse(e.time_utc) > Date.now())
+  const nextMacro = (latestMacroEvents || []).filter((e) => e.importance === "high" && Date.parse(e.time_utc) > Date.now())
     .sort((a, c) => a.time_utc.localeCompare(c.time_utc))[0];
   const hlRow = (arr) => (arr && arr.length ? arr.slice(0, 3).map((l) => `${n(l.px)} ${usd(l.usd)}`).join(" · ") : "없음(±10%)");
   const prof = d.liq_profile || [], top = prof.reduce((m, r) => (r[1] + r[2] > (m ? m[1] + m[2] : 0) ? r : m), null);
-  const sw = bk.sweep, bps = bk.bps || [10, 25, 50];
+  const sw = bk.sweep, bps = bk.bps || [25, 50, 100];
   const thin = bk.bid25_pct != null && bk.ask25_pct != null && Math.min(bk.bid25_pct, bk.ask25_pct) <= 0.1
     ? (bk.ask25_pct <= bk.bid25_pct ? "위쪽(매도호가)이 얇다" : "아래쪽(매수호가)이 얇다") : null;
   const burstHot = bu && (bu.hawkes_active || Math.max(bu.z_long || 0, bu.z_short || 0) >= 3);
@@ -4149,7 +4152,7 @@ function renderMarketCtx() {
       + kv("가까운 옵션 만기", ef ? `${optKst(ef.exp_ms)} (${left(ef.exp_ms)}) · max pain ${n(ef.pain)}${px ? ` (${ef.pain >= px ? "위" : "아래"} ${n(Math.abs(ef.pain / px - 1) * 100, 1)}%)` : ""}` : "-")
       + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? `<div class="mc-note">max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)</div>` : "")
       + kv("미국장", !us ? "-" : us.live ? `장중 · 마감까지 ${left(us.close)}` : `개장까지 ${left(us.open)}`)
-      + kv("다음 주요 지표", nextMacro ? `${escapeHtml(nextMacro.title_ko)} · ${fmtMacroCalendarTime(nextMacro.time_utc)}` : "오늘·내일 없음")),
+      + kv("다음 주요 지표", nextMacro ? `${escapeHtml(nextMacro.title_ko)} · ${fmtMacroCalendarTime(nextMacro.time_utc)}` : latestMacroEvents == null ? "불러오는 중" : "예정 없음")),
     sec("px", "가격 위치 · 5분봉", kv("세션 VWAP", lv ? `${n(lv.vwap, 1)} · 지금 ${sg(vz, 1, "σ")}` : "-")
       + kv("볼린저 %B (20, 2σ)", pb == null ? "-" : `${n(pb, 2)} · 폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%`)
       + kv("RSI 14", rsi == null ? "-" : n(rsi, 0), rsi == null ? "" : rsi >= 70 || rsi <= 30 ? "mc-warn" : "")
@@ -6120,7 +6123,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             if (y < mt || y > plotBottom) return;
             mk(lines, "line", { x1: ml, x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: col, "stroke-opacity": 0.55, "stroke-dasharray": "1 3", "stroke-width": 1.2 },
                `HL 고래 ${nm} 청산가 ${l.px} · ${fmtUsdCompact(l.usd)} (${l.n}주소, 추정 아님). 우리 검정: 미검정.`);
-            mk(svg, "text", { x: ml + cw - 4, y: (y - 3).toFixed(1), "text-anchor": "end", "font-size": mobileChart ? 9 : 10,   // 선 위 -- 아래는 플롯 바닥 태그와 겹친다
+            mk(svg, "text", { x: ml + cw - 4, y: (y - 3 < mt + 11 ? y + 11 : y - 3).toFixed(1), "text-anchor": "end", "font-size": mobileChart ? 9 : 10,   // 선 위(바닥 태그와 안 겹치게) · 위 끝 근처면 선 아래
                               "font-weight": 700, fill: col, "fill-opacity": 0.85, "pointer-events": "none" }).textContent = `HL ${nm}청산 ${fmtUsdCompact(l.usd)}`;
           });
         });
