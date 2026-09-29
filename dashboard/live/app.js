@@ -4010,27 +4010,27 @@ MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
 MC_TIPS.q_wall = MC_TIPS.book + "\n\n" + MC_TIPS.cross + "\n\n" + MC_TIPS.px;
 // 시안 B 그림 부품 -- 전부 SVG 문자열. 폭은 고정(칸 격자가 줄을 맞춘다), 색은 3색 규칙(방향만 초록·빨강, 극단 구간만 주황).
 const mcGfx = {
-  pct(p, w = 130) {   // 분위 0~1 · 양끝 10% 주황 띠 · 값 없으면 빈 막대
+  pct(p, w = mcGfx.gw || 130) {   // 분위 0~1 · 양끝 10% 주황 띠 · 값 없으면 빈 막대
     const x = 4 + (w - 8) * Math.max(0, Math.min(1, p ?? 0));
     return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="6" width="${w - 8}" height="4" rx="2" fill="rgb(var(--lift) / .12)"/>`
       + `<rect x="4" y="6" width="${(w - 8) * 0.1}" height="4" rx="2" fill="var(--warn)" opacity=".4"/><rect x="${4 + (w - 8) * 0.9}" y="6" width="${(w - 8) * 0.1}" height="4" rx="2" fill="var(--warn)" opacity=".4"/>`
       + `<line x1="${w / 2}" x2="${w / 2}" y1="3" y2="13" stroke="var(--line)"/>${p == null ? "" : `<circle cx="${x.toFixed(1)}" cy="8" r="5" fill="var(--text)"/>`}</svg>`;
   },
-  sig(zv, w = 130) {   // σ −3~+3 · 0 가운데 · ±2σ 점선
+  sig(zv, w = mcGfx.gw || 130) {   // σ −3~+3 · 0 가운데 · ±2σ 점선
     const c = w / 2, s = (w / 2 - 4) / 3, v = zv == null ? 0 : Math.max(-3, Math.min(3, zv)), x0 = v >= 0 ? c : c + v * s;
     const fill = zv == null || Math.abs(zv) < 0.5 ? "var(--muted)" : zv > 0 ? "var(--good)" : "var(--bad)";
     return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="7" width="${w - 8}" height="2" fill="rgb(var(--lift) / .1)"/>`
       + [-2, 2].map((q) => `<line x1="${c + q * s}" x2="${c + q * s}" y1="3" y2="13" stroke="var(--line)" stroke-dasharray="2 2"/>`).join("")
       + `<line x1="${c}" x2="${c}" y1="2" y2="14" stroke="var(--muted)"/>${zv == null ? "" : `<rect x="${x0.toFixed(1)}" y="4" width="${Math.max(1.5, Math.abs(v) * s).toFixed(1)}" height="8" rx="2" fill="${fill}"/>`}</svg>`;
   },
-  ratio(now, prev, w = 130, lo = 0.5, hi = 4) {   // 로그 눈금 · 1 가운데 · 빈 점 = 하루 전
+  ratio(now, prev, w = mcGfx.gw || 130, lo = 0.5, hi = 4) {   // 로그 눈금 · 1 가운데 · 빈 점 = 하루 전
     if (now == null) return mcGfx.pct(null, w);
     const X = (v) => 4 + (w - 8) * Math.max(0, Math.min(1, Math.log(v / lo) / Math.log(hi / lo)));
     return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="7" width="${w - 8}" height="2" fill="rgb(var(--lift) / .1)"/><line x1="${X(1)}" x2="${X(1)}" y1="2" y2="14" stroke="var(--muted)"/>`
       + (prev ? `<line x1="${X(prev)}" x2="${X(now)}" y1="8" y2="8" stroke="var(--muted)"/><circle cx="${X(prev)}" cy="8" r="4" fill="var(--panel)" stroke="var(--muted)"/>` : "")
       + `<circle cx="${X(now)}" cy="8" r="5" fill="var(--text)"/></svg>`;
   },
-  quad(move, oiPct, w = 96) {   // 가격(x, 1시간 bp ±60) × OI(y, 1시간 % ±1) -- 가운데 원 = «이동 작음, 판정 보류»
+  quad(move, oiPct, w = mcGfx.qw || 96) {   // 가격(x, 1시간 bp ±60) × OI(y, 1시간 % ±1) -- 가운데 원 = «이동 작음, 판정 보류»
     const c = w / 2, x = c + Math.max(-1, Math.min(1, (move || 0) / 60)) * (c - 10), y = c - Math.max(-1, Math.min(1, (oiPct || 0) / 1)) * (c - 10);
     return `<svg class="mc-svg" width="${w}" height="${w}" viewBox="0 0 ${w} ${w}" style="width:${w}px;height:${w}px" aria-hidden="true"><rect x="1" y="1" width="${w - 2}" height="${w - 2}" rx="6" fill="none" stroke="var(--line)"/>`
       + `<line x1="${c}" x2="${c}" y1="4" y2="${w - 4}" stroke="var(--line)"/><line x1="4" x2="${w - 4}" y1="${c}" y2="${c}" stroke="var(--line)"/>`
@@ -4038,7 +4038,7 @@ const mcGfx = {
       + `<text x="5" y="${w - 5}" font-size="9" fill="var(--muted)">롱 정리</text><text x="${w - 5}" y="${w - 5}" font-size="9" fill="var(--muted)" text-anchor="end">숏 정리</text>`
       + `<circle cx="${c}" cy="${c}" r="${((c - 10) * 0.25).toFixed(1)}" fill="rgb(var(--lift) / .07)"/>${move == null ? "" : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" fill="var(--text)"/>`}</svg>`;
   },
-  book(sw, bps, w = 300) {   // ±bp 매수벽 | 매도벽 거울 막대(ETH)
+  book(sw, bps, w = mcGfx.pw || 300) {   // ±bp 매수벽 | 매도벽 거울 막대(ETH)
     const b = sw.bid, a = sw.ask, mx = Math.max(1, ...b, ...a), c = w / 2, h = 4 + bps.length * 21;
     const kq = (v) => (v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : String(Math.round(v)));
     return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="호가 벽 매수 대 매도">` + bps.map((bp, i) => {
@@ -4048,7 +4048,7 @@ const mcGfx = {
         + `<text x="${(c - 22 - bw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + 22 + aw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)">${kq(a[i])}</text>`;
     }).join("") + `</svg>`;
   },
-  terrain(px, hl, lv, bps, top, bu = null, w = 300, h = 230) {   // 세로 가격축 ±6%: HL 고래 청산가 원 · VWAP ±1·2σ 띠 · 호가 ±bp 눈금 · 12시간 실측 최다 ◆ · 지금가
+  terrain(px, hl, lv, bps, top, bu = null, w = mcGfx.pw || 300, h = Math.round(Math.min(340, Math.max(230, (mcGfx.pw || 300) * 0.72)))) {   // 세로 가격축 ±6%: HL 고래 청산가 원 · VWAP ±1·2σ 띠 · 호가 ±bp 눈금 · 12시간 실측 최다 ◆ · 지금가
     if (!(px > 0)) return `<div class="mc-note">가격 대기</div>`;
     const lo = px * 0.94, hi = px * 1.06, Y = (p) => 10 + (h - 20) * (hi - p) / (hi - lo), cl = (p) => Math.max(10, Math.min(h - 10, Y(p)));
     let s = "";
@@ -4096,10 +4096,13 @@ const mcGfx = {
     }
     let s = `<line x1="12" x2="${w - 12}" y1="22" y2="22" stroke="var(--line)"/>`;
     [0, 6, 12, 18, 24].forEach((q) => { s += `<text x="${X2(q)}" y="${h - 2}" font-size="10" fill="var(--muted)" text-anchor="${q ? (q === 24 ? "end" : "middle") : "start"}">${q ? "+" + q + "h" : "지금"}</text>`; });
+    const lastX = [-1e9, -1e9];   // 위·아래 줄마다 마지막 이름표 오른쪽 끝 -- 겹치면 그 이름표는 점의 호버로만
     events.filter((e) => e.t > now).sort((a, c) => a.t - c.t).forEach((e, i) => {
-      const hr = (e.t - now) / 3.6e6, x = X2(hr), far = hr > 24;
-      s += `<circle cx="${x.toFixed(1)}" cy="22" r="5" fill="var(--warn)"${far ? ' opacity=".45"' : ""}/>`
-        + `<text x="${x.toFixed(1)}" y="${i % 2 ? 38 : 12}" font-size="10.5" fill="var(--text)" text-anchor="${x > w - 90 ? "end" : x < 90 ? "start" : "middle"}">${escapeHtml(e.nm)} ${fmtHourMinute(e.t)}${far ? " >" : ""}</text>`;
+      const hr = (e.t - now) / 3.6e6, x = X2(hr), far = hr > 24, row = i % 2, lab = `${e.nm} ${fmtHourMinute(e.t)}${far ? " >" : ""}`;
+      const col = e.hi === false ? "var(--muted)" : "var(--warn)", tw = lab.length * 10.5 * 0.62, anc = x > w - 90 ? "end" : x < 90 ? "start" : "middle";
+      const l0 = anc === "end" ? x - tw : anc === "start" ? x : x - tw / 2;
+      s += `<circle cx="${x.toFixed(1)}" cy="22" r="5" fill="${col}"${far ? ' opacity=".45"' : ""}><title>${escapeHtml(lab)}</title></circle>`;
+      if (l0 > lastX[row] + 8) { s += `<text x="${x.toFixed(1)}" y="${row ? 38 : 12}" font-size="10.5" fill="var(--text)" text-anchor="${anc}">${escapeHtml(lab)}</text>`; lastX[row] = l0 + tw; }
     });
     return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="다음 24시간 일정">${s}</svg>`;
   },
@@ -4190,8 +4193,9 @@ function renderMarketCtx() {
   //   견줬다(09-29 재검증) -- 이 카드는 ETH 전용이므로 ETH 를 직접 읽는다.
   const gEth = latestGex && latestGex.available ? (latestGex.currencies || {}).ETH : null, o = gEth && gEth.options;
   const ef = o ? optFront(o) : null, us = mcUsSession();
-  const nextMacro = (latestMacroEvents || []).filter((e) => e.importance === "high" && Date.parse(e.time_utc) > Date.now())
-    .sort((a, c) => a.time_utc.localeCompare(c.time_utc))[0];
+  // 2026-09-30 사용자 «주요 경제 일정이 왜 24시간 축에 없나» -- 전에는 «다음 high 하나»만 실었다. 경제 일정 카드와 같은 원천의 24시간 안 전부.
+  const macro24 = (latestMacroEvents || []).map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표", hi: e.importance === "high" }))
+    .filter((e) => e.t > Date.now() && e.t - Date.now() <= 24 * 3600e3);
   const prof = d.liq_profile || [], top = prof.reduce((m, r) => (r[1] + r[2] > (m ? m[1] + m[2] : 0) ? r : m), null);
   const sw = bk.sweep, bps = bk.bps || [25, 50, 100];
   const thin = bk.bid25_pct != null && bk.ask25_pct != null && Math.min(bk.bid25_pct, bk.ask25_pct) <= 0.1
@@ -4205,6 +4209,10 @@ function renderMarketCtx() {
   // ── 2026-09-30 시안 B(사용자 선택 «글자가 너무 많다 → 그릴 수 있는 건 그림으로»): 질문 네 판 + 다음 24시간 ──
   //   분위 = 0~100 게이지(양끝 10% 주황) · σ = 0 가운데 막대(±2σ 점선) · 비율 = 1 가운데 로그 눈금(빈 점 = 하루 전).
   //   그림 없는 부값(OKX/HL 펀딩·OI 합계·거래소별 30분 체결·스프레드·12시간 청산 최다·청산 급증)은 판마다 흐린 한 줄로 남긴다.
+  // 2026-09-30 사용자 «카드 너비 100% 안을 내용 크기를 키워 채워» -- 판 폭(격자 auto-fit 300px 칸)에서 그림 폭을 정한다.
+  { const BW = body.clientWidth || 1200, cols = Math.max(1, Math.min(4, Math.floor((BW + 22) / 322)))   /* 판은 넷 -- auto-fit 이 빈 칸을 접어 넷이 폭을 나눠 가진다 */, colW = Math.floor((BW - (cols - 1) * 22) / cols);
+    body.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;   // 🔴auto-fit 은 전폭 줄(⑤)이 있으면 빈 칸을 못 접어 5칸이 됐다 -- 계산과 같은 칸 수로 못 박는다
+    mcGfx.pw = Math.min(colW, 560); mcGfx.gw = Math.max(110, Math.min(300, colW - 96 - 90 - 16)); mcGfx.qw = Math.max(96, Math.min(150, Math.round(colW * 0.3))); }
   const G = mcGfx, gRow = (label, vis, val, cls = "", tip = "") => `<div class="mc-g"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${label}</span>${vis}<b class="${cls}">${val}</b></div>`;
   const note = (s) => `<div class="mc-note">${s}</div>`;
   const qSec = (key, title, inner, extra = "") => sec(key, title, (extra ? `<div class="mc-state">상태${extra}</div>` : "") + inner);
@@ -4214,7 +4222,7 @@ function renderMarketCtx() {
     f.next_ms ? { t: f.next_ms, nm: "펀딩 정산" } : null,
     ef ? { t: ef.exp_ms, nm: `옵션 만기 · pain ${n(ef.pain)}` } : null,
     us ? { t: us.live ? us.close : us.open, nm: us.live ? "미국장 마감" : "미국장 개장" } : null,
-    nextMacro ? { t: Date.parse(nextMacro.time_utc), nm: nextMacro.title_ko } : null,
+    ...macro24,
   ].filter(Boolean);
   const htmlB = [
     qSec("q_lev", "① 레버리지 과열?", gRow("펀딩 분위", G.pct(f.bn_at_base ? null : f.bn_pct180), f.bn_at_base ? "기본값" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`, "", `바이낸스 예상 ${fr(f.bn)}`)

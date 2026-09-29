@@ -2732,7 +2732,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 /* 2026-09-30 시안 B(사용자 선택): 판 네 개 + 다음 24시간 줄. 줄 = 이름 | 그림(분위·σ·비율) | 값, 판마다 흐린 부값 한 줄 */
 .mc-body .mc-wide { grid-column: 1 / -1; }
 .mc-svg { display: block; flex: none; max-width: 100%; height: auto; }
-.mc-g { display: grid; grid-template-columns: 88px 130px minmax(0, 1fr); align-items: center; gap: 8px; padding: 2px 0; font-size: 12px; }
+.mc-g { display: grid; grid-template-columns: 96px auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }   /* 2026-09-30 그림 폭은 판 폭에서(mcGfx.gw) */
 .mc-g > span { color: var(--muted); } .mc-g > b { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
 .mc-chip { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
 .mc-chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
