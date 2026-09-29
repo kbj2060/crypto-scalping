@@ -3915,6 +3915,14 @@ const mcGfx = {
       + (prev ? `<line x1="${X(prev)}" x2="${X(now)}" y1="8" y2="8" stroke="var(--muted)"/><circle cx="${X(prev)}" cy="8" r="4" fill="var(--panel)" stroke="var(--muted)"/>` : "")
       + `<circle cx="${X(now)}" cy="8" r="5" fill="var(--text)"/></svg>`;
   },
+  seg4(key, w = mcGfx.gw || 130) {   // 2026-09-30 가격×OI 사분면 한 줄: 네 칸 중 지금 칸만 채움(small·없음 = 전부 빈 칸)
+    const cells = [["up_up", "새롱"], ["up_dn", "숏커버"], ["dn_up", "새숏"], ["dn_dn", "롱정리"]], cw = (w - 6) / 4;
+    return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true">` + cells.map(([k, t], i) => {
+      const on = k === key, col = k === "dn_up" ? "var(--bad)" : k === "dn_dn" ? "var(--good)" : "var(--ink)", x = i * (cw + 2);
+      return `<rect x="${x.toFixed(1)}" y="1" width="${cw.toFixed(1)}" height="14" rx="3" fill="${on ? col : "rgb(var(--lift) / .08)"}" fill-opacity="${on ? 0.85 : 1}"/>`
+        + (cw >= 26 ? `<text x="${(x + cw / 2).toFixed(1)}" y="11.5" font-size="9" font-weight="700" text-anchor="middle" fill="${on ? "var(--chart-bg)" : "var(--muted)"}">${t}</text>` : "");
+    }).join("") + `</svg>`;
+  },
   quad(move, oiPct, w = mcGfx.qw || 96) {   // 가격(x, 1시간 bp ±60) × OI(y, 1시간 % ±1) -- 가운데 원 = «이동 작음, 판정 보류»
     const c = w / 2, x = c + Math.max(-1, Math.min(1, (move || 0) / 60)) * (c - 10), y = c - Math.max(-1, Math.min(1, (oiPct || 0) / 1)) * (c - 10);
     return `<svg class="mc-svg" width="${w}" height="${w}" viewBox="0 0 ${w} ${w}" style="width:${w}px;height:${w}px" aria-hidden="true"><rect x="1" y="1" width="${w - 2}" height="${w - 2}" rx="6" fill="none" stroke="var(--line)"/>`
@@ -3943,6 +3951,18 @@ const mcGfx = {
         + `<rect x="64" y="${cl(v + sd).toFixed(1)}" width="${w - 128}" height="${Math.max(0, cl(v - sd) - cl(v + sd)).toFixed(1)}" fill="rgb(var(--lift) / .08)"/>`
         + `<line x1="64" x2="${w - 64}" y1="${cl(v).toFixed(1)}" y2="${cl(v).toFixed(1)}" stroke="var(--muted)" stroke-dasharray="4 3"/><text x="${w - 60}" y="${(cl(v) + 4).toFixed(1)}" font-size="10" fill="var(--muted)">VWAP</text>`;
     }
+    // 2026-09-30 지지·저항(청산맵, 사용자 지시 «지지/저항을 ③ 가격 지형에») -- 옅은 가로 점선 + 왼쪽 이름·강도. 방향 신호 아님.
+    const sr = srLevelsLive();
+    let srLastY = -99;   // 이름표는 11px 안에 붙으면 뺀다(±6% 축에선 지지·저항이 지금가 근처에 몰린다) -- 선·툴팁은 그대로
+    if (sr) [...sr.res.map((lv, i) => ["저항" + (i + 1), lv, "var(--liq-resistance)"]).reverse(), ...sr.sup.map((lv, i) => ["지지" + (i + 1), lv, "var(--liq-support)"])]
+      .forEach(([nm, lv, col]) => {
+        if (!(lv.price >= lo && lv.price <= hi)) return;
+        const y = Y(lv.price).toFixed(1), pct = Math.round((lv.weight_pct || 0) * 100), showLab = +y - srLastY >= 11 && Math.abs(+y - Y(px)) >= 9 && !(bu && +y > Y(px) && +y - Y(px) < 24);   // 청산 급증 글자(지금가 아래 16px) 자리도 비킨다
+        if (showLab) srLastY = +y;
+        s += `<g><title>${nm} ${lv.price.toFixed(1)} · 강도 ${pct}%(청산 밀집) — 지지·저항 추정, 방향 신호 아님</title>`
+          + `<line x1="64" x2="${w - 30}" y1="${y}" y2="${y}" stroke="${col}" stroke-opacity=".6" stroke-dasharray="4 3"/>`
+          + (showLab ? `<text x="66" y="${(+y - 2.5).toFixed(1)}" font-size="9.5" font-weight="700" fill="${col}">${nm.replace("저항", "저").replace("지지", "지")} ${pct}%</text>` : "") + `</g>`;
+      });
     const all = [...(hl.below || []).map((r) => ({ ...r, side: "long" })), ...(hl.above || []).map((r) => ({ ...r, side: "short" }))].filter((r) => r.px >= lo && r.px <= hi);
     const mx = Math.max(1, ...all.map((r) => r.usd || 0));
     let lastY = -99;
@@ -4050,9 +4070,18 @@ function mcUsSession(nowMs = Date.now()) {
 
 // 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
-function mcPlace(svg, r) {
-  const body = el("mcBody"), card = el("fpCard");
+function mcPlace(svg, r, wr) {
+  const body = el("mcBody"), card = el("fpCard"), wall = el("mcWall");
   if (!body || !card) return;
+  if (wall) {   // 2026-09-30 ④ 자리 = 호가/체결 프로파일 아래
+    let wp = { left: "", top: "", width: "", height: "" };
+    if (wr) {
+      const a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
+      wp = { left: `${Math.round(a.left - c.left + wr.x)}px`, top: `${Math.round(a.top - c.top + wr.y)}px`, width: `${Math.round(wr.w)}px`, height: `${Math.max(0, Math.round(wr.h))}px` };
+    }
+    Object.entries(wp).forEach(([k, v]) => { if (wall.style[k] !== v) wall.style[k] = v; });
+    wall.classList.toggle("on", !!wr);
+  }
   let pos = { left: "", top: "", width: "", height: "" };
   if (r) {
     const a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
@@ -4115,7 +4144,7 @@ function renderMarketCtx() {
     body.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;   // 🔴auto-fit 은 전폭 줄(⑤)이 있으면 빈 칸을 못 접어 5칸이 됐다 -- 계산과 같은 칸 수로 못 박는다
     mcGfx.pw = Math.min(colW, 560); mcGfx.gw = cmp ? Math.max(48, colW - 64 - 46 - 12) : Math.max(110, Math.min(300, colW - 96 - 90 - 16));
     mcGfx.qw = cmp ? Math.max(70, Math.min(100, Math.round(colW * 0.42))) : Math.max(96, Math.min(150, Math.round(colW * 0.3)));
-    mcGfx.th = cmp ? Math.round(Math.max(170, colW * 0.9)) : null; }
+    mcGfx.th = cmp ? Math.round(Math.max(170, colW * 0.9)) : null; mcGfx.cmpW = cmp ? BW : null; }
   const G = mcGfx, gRow = (label, vis, val, cls = "", tip = "") => `<div class="mc-g"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${label}</span>${vis}<b class="${cls}">${val}</b></div>`;
   const note = (s) => `<div class="mc-note">${s}</div>`;
   const qSec = (key, title, inner, extra = "") => sec(key, title, (extra ? `<div class="mc-state">상태${extra}</div>` : "") + inner);
@@ -4127,7 +4156,7 @@ function renderMarketCtx() {
     us ? { t: us.live ? us.close : us.open, nm: us.live ? "미국장 마감" : "미국장 개장" } : null,
     ...macro24,
   ].filter(Boolean);
-  const htmlB = [
+  let htmlB = [
     qSec("q_lev", "① 레버리지 과열?", gRow("펀딩 분위", G.pct(f.bn_at_base ? null : f.bn_pct180), f.bn_at_base ? "기본값" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`, "", `바이낸스 예상 ${fr(f.bn)}`)
       + gRow("베이시스 분위", G.pct(b.pct7d), `${sg(b.bp, 1, "bp")}`, "", `마크−인덱스 · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위 · 30분 ${sg(b.d30_bp, 1, "bp")}`)
       + gRow("OI 1시간", G.sig(oi.z1h), `${sg(oi.z1h, 1, "σ")}`, tone(oi.z1h, 1.5), `1시간 ${sg(oi.d1h_pct, 2, "%")} · 24시간 ${sg(oi.d24h_pct, 1, "%")}`)
@@ -4138,14 +4167,29 @@ function renderMarketCtx() {
         : ["whale", "mid", "retail"].map((k2, i) => gRow(["고래", "중형", "리테일"][i], G.sig(z[k2]), sg(z[k2], 1, "σ"), tone(z[k2]))).join(""))
       + gRow("30분 CVD", G.sig(fl.cvd30_z), sg(fl.cvd30_z, 1, "σ"), tone(fl.cvd30_z))
       + (ls ? gRow("테이커 매수÷매도", G.ratio(ls.taker, null), n(ls.taker, 2), tone(ls.taker == null ? null : ls.taker - 1, 0.1)) : "")
-      + `<div class="mc-quad">${G.quad(d.move60, oi.d1h_pct)}<div><b class="${!d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : ""}">${d.quad ? escapeHtml(d.quad.label) : "-"}</b>`
-      + note(`1시간 ${sg(d.move60, 0, "bp")} · OI ${sg(d.oi60, 0)} ETH`) + `</div></div>`
+      // 2026-09-30 사분면 그림 → 한 줄 네 칸(사용자 «높이를 쓸데없이 잡아먹는다»): 새 롱 · 숏 커버 · 새 숏 · 롱 정리 중 지금 칸만 채움, 작으면 전부 빈 칸.
+      + gRow("가격×OI 1h", G.seg4(d.quad ? d.quad.key : null), d.quad ? ({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-" : "-",
+             !d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : "",
+             `${d.quad ? d.quad.label : "-"}\n1시간 ${sg(d.move60, 0, "bp")} · OI ${sg(d.oi60, 0)} ETH${d.quad && d.quad.note ? `\n${d.quad.note}` : ""}`)
       + note(`30분 체결 · 바이낸스 ${sg(fl.bn30, 0)} / OKX ${sg(fl.okx30, 0)} ETH`)),
     // 2026-09-30 사용자 «범례·청산 상태 글은 툴팁 안으로» -- 그림 위 호버에 두 줄. 청산 급증일 때만 판 위에 경고 한 줄을 남긴다(놓치면 안 되는 상태).
+  ];
+  // 2026-09-30 ④ 는 넓은 화면이면 오른쪽 칸 아랫줄 두 단(①② 아래, ③ 과 자리 바꿈) + 호가 계기 넷(변동·불균형·지속·이탈)을 여기로.
+  const wallBox = G.cmpW ? el("mcWall") : null, wallW = G.cmpW ? Math.max(160, Math.floor((G.cmpW - 18) / 2)) : null;   // ④ 두 단 중 한 단 폭
+  // 2026-09-30 ③ 가격 지형 = 넓은 화면이면 호가/체결 프로파일 **아래**(#mcWall, 사용자 «높이가 낮아 겹친다 → ④ 와 자리 바꿔») -- 그 칸의 높이를 다 쓴다.
+  const mapHtml =
     qSec("q_map", "③ 가격 지형 · ±6%", `<div class="mc-terrain" title="${escapeHtml(`원 = HL 고래 청산가(빨강 롱 · 초록 숏, 크기 = 금액) · 띠 = VWAP ±1·2σ · 왼쪽 눈금 = 호가 ±${bps.join("/")}bp · ◆ = 12시간 실측 청산 최다 · 오른쪽 막대 = 1분 청산 z(롱·숏, 점선 3 = 급증)`
         + `\n청산 ${!bu ? "-" : burstHot ? `${(bu.short_usd_1m || 0) > (bu.long_usd_1m || 0) ? "숏" : "롱"} 급증 · ${usd(Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0))}/1분` : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}`}`
-        + `${top ? ` · 12시간 최다 ${n(top[0], 1)}(롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : ""}`)}">${G.terrain(px, d.hl_liq || {}, lv, bps, top, bu)}</div>`),
-    qSec("q_wall", "④ 벽 · 교차 · 위치", (sw ? G.book(sw, bps) : note("호가 래스터 대기"))
+        + `${top ? ` · 12시간 최다 ${n(top[0], 1)}(롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : ""}`)}">${G.terrain(px, d.hl_liq || {}, lv, bps, top, bu,
+          ...(wallBox ? [wallBox.clientWidth - 4, Math.max(180, wallBox.clientHeight - 40)] : []))}</div>`);
+  const hsm = latestFlowHeatmap && latestFlowHeatmap.summary, gwKeep = G.gw;
+  if (wallW) G.gw = Math.max(40, wallW - 58 - 44 - 12);   // ④ 단 폭에 맞춘 게이지(아래 wallHtml 을 다 만든 뒤 되돌린다)
+  const statRows = G.cmpW && hsm ? STAT_KEYS.map((k) => {
+    const f = statFrac(k, hsm), tip = statTipHtml(k, hsm).replace(/<br>/g, "\n").replace(/<[^>]+>/g, "");
+    const val = f == null ? "-" : k === "obi" ? `${f > 0 ? "+" : ""}${f.toFixed(2)}` : `${Math.round(f * 100)}%`;
+    return gRow(STAT_NAME[k], k === "obi" ? G.sig(f == null ? null : f * 3) : G.pct(f), val, k === "vol" && f >= 0.66 ? "mc-warn" : "", tip);
+  }).join("") : "";
+  const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", (sw ? G.book(sw, bps, ...(wallW ? [wallW] : [])) : note("호가 래스터 대기")) + statRows
       + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(2)}${bk.spread > 0.015 ? " — 평소(1틱)보다 넓다" : ""}`
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
       + gRow("BTC 30분", G.sig((d.btc || {}).move_bp == null ? null : d.btc.move_bp / 20), sg((d.btc || {}).move_bp, 0, "bp"), "", btcTxt)
@@ -4156,16 +4200,25 @@ function renderMarketCtx() {
       + gRow("RSI 14", G.pct(rsi == null ? null : rsi / 100), rsi == null ? "-" : n(rsi, 0), rsi != null && (rsi >= 70 || rsi <= 30) ? "mc-warn" : "")
       + `<div class="mc-switch">차트에 그리기 <label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
       + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
-      + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label></div>`),
-    `<div class="mc-wide">` + qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round((body.clientWidth || 900) - 8)))
-      + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? note(`max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)`) : "")) + `</div>`,
-  ].join("");
+      + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label></div>`);
+  G.gw = gwKeep;
+  const wallHtml = G.cmpW ? wallHtml0.replace('<div class="mc-sec">', '<div class="mc-sec mc-span mc-2col">') : wallHtml0;
+  setH("mcWall", wallBox ? mapHtml : "");
+  if (!wallBox) htmlB.push(mapHtml);
+  htmlB.push(wallHtml);
+  htmlB = htmlB.join("");
+  // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
+  const whenBox = body.classList.contains("mc-cmp") ? el("mcWhen") : null;
+  const whenHtml = qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round(((whenBox || body).clientWidth || 900) - 8)))
+      + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? note(`max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)`) : ""));
+  setH("mcWhen", whenBox ? whenHtml : "");
+  if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
   body._mcHtml = htmlB;
   keepFocus(body, () => { body.innerHTML = htmlB; });
 }
 
-el("mcBody")?.addEventListener("click", (e) => {
+["mcBody", "mcWhen"].forEach((id) => el(id)?.addEventListener("click", (e) => {   // ⑤ 는 #mcWhen 에 있을 수 있다
   const b = e.target.closest(".mc-q");
   if (!b) return;
   const k = b.dataset.tip, open = !mcTipOpen.has(k);
@@ -4174,7 +4227,7 @@ el("mcBody")?.addEventListener("click", (e) => {
   const tip = b.closest(".mc-sec")?.querySelector(".mc-tip");
   if (tip) tip.hidden = !open;
   el("mcBody")._mcHtml = null;         // 다음 그리기에서 펼침 상태를 반영한다
-});
+}));
 el("mcBody")?.addEventListener("change", (e) => {
   const k = e.target?.dataset?.line;
   if (!k) return;
@@ -4983,7 +5036,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-28 모바일 체결 띠(사용자 «호가처럼 풋프린트 왼쪽 축으로»): 가격 글자와 캔들 사이 50px. ml 이 «플롯 왼쪽»이라 그만큼 민다.
   const TRADE_L = footprint && mobileChart ? 50 : 0;
   // 2026-09-28 모바일 풋프린트는 왼쪽 가격 글자를 없앴다(사용자 «차트가 너무 작다») -- 값은 플롯 아래 한 줄이 갖는다. 여백 44 -> 4.
-  const ml = (mobileChart ? (footprint ? 4 : 44) : 45) + CENTER_NUDGE + TRADE_L,
+  // 2026-09-30 풋프린트(데스크톱)는 가격 글자를 오른쪽 꼬리표 칸(TAG_W)으로 옮겨 왼쪽 여백 71 -> 36(레짐·전환 줄 이름 자리만, 사용자 «풋프린트를 왼쪽으로»).
+  const ml = (mobileChart ? (footprint ? 4 : 44) : footprint ? 36 - CENTER_NUDGE : 45) + CENTER_NUDGE + TRADE_L,
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
         mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 70;
@@ -5055,11 +5109,15 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
   // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 띠 폭을 뗀다(데스크톱 70 · 모바일 40).
   // 2026-09-27 넓혔다(사용자 «호가 너비를 키워줘») -- 오른쪽 배지 자리(86px)를 띠에 줬다: 70 -> 148 · 모바일 40 -> 56.
-  const BOOK_W = footprint ? (mobileChart ? 56 : 148) : 0;   // 모바일은 수량 글자 없이
+  const BOOK_W = footprint ? (mobileChart ? 56 : 112) : 0;   // 2026-09-30 148 -> 112(사용자 «차트·프로파일을 조금 줄여도 데이터가 다 보이게»)   // 모바일은 수량 글자 없이
   // 2026-09-28 체결 기둥(사용자 선택 시안 B) -- 풋프린트와 호가 띠 사이 150px. 모바일은 기둥 없이 셀 뒤에 깐다(시안 A).
-  const TRADE_W = footprint && !mobileChart ? 150 : 0;
-  const cw = w - ml - mr - BOOK_W - TRADE_W;
-  fpProfileSpan = TRADE_W ? [ml + cw, w - mr] : null;   // 아래 옵션 줄 가운데 칸이 이 폭·x 를 따른다(optRowCols)
+  const TRADE_W = footprint && !mobileChart ? 112 : 0;   // 2026-09-30 150 -> 112
+  // 2026-09-30 가격 꼬리표 칸(사용자 «왼쪽 라벨을 오른쪽으로, 겹치지 않게»): 캔들 칸과 체결 기둥 사이 120px.
+  //   가격 선·레벨의 이름+가격을 여기 세로로 쌓고(겹침 회피) 실제 가격 행까지 지시선을 긋는다. 오른쪽 끝 30px 는 행사가 감마 막대.
+  const TAG_W = footprint && !mobileChart ? 100 : 0;   // 2026-09-30 120 -> 100(사용자 «호가/체결 프로파일을 더 왼쪽으로»)
+  const cw = w - ml - mr - BOOK_W - TRADE_W - TAG_W;
+  const tradeX0 = ml + cw + TAG_W;   // 체결 기둥 왼쪽 끝(꼬리표 칸 뒤)
+  fpProfileSpan = TRADE_W ? [tradeX0, w - mr] : null;   // 아래 옵션 줄 가운데 칸이 이 폭·x 를 따른다(optRowCols)
   let tradeInfo = null;       // 체결 행(호버가 읽는다) -- 풋프린트 블록이 채운다
   let fpRowSize = 0;          // 풋프린트 행 크기($) -- 호가 띠가 같은 행으로 묶는다(2026-09-28)
   const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
@@ -5380,6 +5438,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // Rendering (the actual lines/boxes) still happens later, after candles/markers, so paint order
   // is unchanged.
   const priceLabels = [];
+  // 2026-09-30 겹침 선의 이름(VWAP·주간/앵커 VWAP·HL 청산·max pain·감마 플립·옵션 괄호)도 같은 꼬리표 칸으로 -- 선은 제자리에서 긋고 글자만 모은다.
+  const fpNotes = [], gutOn = footprint && !mobileChart;
   // 2026-09-16 풋프린트에서는 현재가를 **가로선이 아니라 삼각형**으로 찍는다(사용자 요청).
   // 선은 가격 행을 가로질러 셀 숫자를 덮는데, 하필 현재가 근처가 제일 중요한 행이다.
   // 삼각형은 플롯 **바깥**(오른쪽 가장자리)에 앉아 어느 행인지만 가리키고 아무것도 안 가린다.
@@ -5625,9 +5685,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       let tmax = 0, pocK = null;
       tr.forEach((a, k) => { if (a[0] > tmax) { tmax = a[0]; pocK = k; } });
       if (tmax > 0) {
-        const anchor = TRADE_W ? ml + cw + TRADE_W + 4 : ml - 2;   // 데스크톱 = 호가 띠 바닥선 2px 앞 · 모바일 = 캔들 왼쪽 끝(밖으로 자란다)
+        const anchor = TRADE_W ? tradeX0 + TRADE_W + 4 : ml - 2;   // 데스크톱 = 호가 띠 바닥선 2px 앞 · 모바일 = 캔들 왼쪽 끝(밖으로 자란다)
         const L = TRADE_W ? TRADE_W - 10 : TRADE_L - 6, alpha = 1;
-        tradeInfo = { rows: tr, rowSize, max: tmax, pocK, x0: TRADE_W ? ml + cw : ml - TRADE_L, x1: anchor };
+        tradeInfo = { rows: tr, rowSize, max: tmax, pocK, x0: TRADE_W ? tradeX0 : ml - TRADE_L, x1: anchor };
         const g = document.createElementNS(NS, "g");
         tr.forEach((a, k) => {
           const yTop = Math.max(mt, yAt((k + 1) * rowSize)), yBot = Math.min(plotBottom, yAt(k * rowSize));
@@ -5954,7 +6014,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         });
         const lv = [...candles].reverse().find((c) => c.vwap);
         if (lv && yAt(lv.vwap) > mt + 8 && yAt(lv.vwap) < plotBottom - 2) {
-          mk(svg, "text", { x: ml + 4, y: yAt(lv.vwap) - 3, "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" }).textContent = "VWAP";
+          if (gutOn) fpNotes.push({ val: lv.vwap, label: "VWAP", color: "var(--muted)" });
+          else mk(svg, "text", { x: ml + 4, y: yAt(lv.vwap) - 3, "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" }).textContent = "VWAP";
         }
       }
       // ③ 볼린저(20, 2σ) -- 창 슬라이스로는 20봉이 안 돼 전체 이력에서 센다
@@ -5977,6 +6038,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             if (y < mt || y > plotBottom) return;
             mk(lines, "line", { x1: ml, x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: col, "stroke-opacity": op, "stroke-dasharray": dash, "stroke-width": 1.2 },
                `${nm} ${pf[k].toFixed(1)} (${from} 거래량 가중 평균가). 우리 검정: VWAP 되돌림·방향 모두 가짜 레벨과 같았다 — 지지·저항으로 읽지 말 것.`);
+            if (gutOn) { fpNotes.push({ val: pf[k], label: nm.replace("앵커 VWAP·", "앵커·"), color: "var(--muted)" }); return; }
             if (y - lastY < 12) return;
             lastY = y;
             mk(svg, "text", { x: ml + 4, y: (y - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" }).textContent = nm;
@@ -5991,6 +6053,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             if (y < mt || y > plotBottom) return;
             mk(lines, "line", { x1: ml, x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: col, "stroke-opacity": 0.55, "stroke-dasharray": "1 3", "stroke-width": 1.2 },
                `HL 고래 ${nm} 청산가 ${l.px} · ${fmtUsdCompact(l.usd)} (${l.n}주소, 추정 아님). 우리 검정: 미검정.`);
+            if (gutOn) { fpNotes.push({ val: l.px, label: `HL ${nm} ${fmtUsdCompact(l.usd)}`, color: col, noPrice: true }); return; }
             mk(svg, "text", { x: ml + cw - 4, y: (y - 3 < mt + 11 ? y + 11 : y - 3).toFixed(1), "text-anchor": "end", "font-size": mobileChart ? 9 : 10,   // 선 위(바닥 태그와 안 겹치게) · 위 끝 근처면 선 아래
                               "font-weight": 700, fill: col, "fill-opacity": 0.85, "pointer-events": "none" }).textContent = `HL ${nm}청산 ${fmtUsdCompact(l.usd)}`;
           });
@@ -6420,15 +6483,21 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       [[a1r, a1], [b1r, b1]].forEach(([r, y]) => { if (r >= mt && r <= plotBottom) add("line", { x1: bx - 5, x2: bx + 5, y1: y, y2: y, stroke: "var(--option)", "stroke-opacity": 0.55, "stroke-width": 1.5 }); });
       add("rect", { x: bx - 3, y: a5, width: 6, height: Math.max(1, b5 - a5), rx: 2, fill: "var(--option)" });
       optLab5Y = a5 + 4;
-      add("text", { x: lx, y: a5 + 4, "font-size": fs, "font-weight": 700, fill: "var(--option)", "text-anchor": anchor, ...halo }, `5분 ±${optQ(s5)}`);
-      if (a1 < a5 - fs - 2) add("text", { x: lx, y: a1 + (a1r < mt ? fs : 4), "font-size": fs, "font-weight": 600, fill: "var(--option)", "text-anchor": anchor, ...halo },
+      if (gutOn) {   // 2026-09-30 꼬리표 칸으로(괄호 옆 글자가 꼬리표와 겹친다)
+        fpNotes.push({ val: o5 + s5, label: `5분 ±${optQ(s5)}`, color: "var(--option)", noPrice: true });
+        fpNotes.push({ val: o1 + s1h, label: `1시간 ±${optQ(s1h)}`, color: "var(--option)", noPrice: true });
+      } else add("text", { x: lx, y: a5 + 4, "font-size": fs, "font-weight": 700, fill: "var(--option)", "text-anchor": anchor, ...halo }, `5분 ±${optQ(s5)}`);
+      if (!gutOn && a1 < a5 - fs - 2) add("text", { x: lx, y: a1 + (a1r < mt ? fs : 4), "font-size": fs, "font-weight": 600, fill: "var(--option)", "text-anchor": anchor, ...halo },
           `1시간 ±${optQ(s1h)}${a1r < mt ? "↑" : ""}`);
       const f = optFront(o);
       if (f) {
         const y = yAt(f.pain), lab = `max pain ${optQ(f.pain)} · ${optKst(f.exp_ms)} 만기`;
         if (y >= mt && y <= plotBottom) {
           add("line", { x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--warn)", "stroke-opacity": 0.6, "stroke-dasharray": "2 5" });
-          add("text", { x: ml + cw - 4, y: y - 4, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" }, lab);
+          if (gutOn) fpNotes.push({ val: f.pain, label: "max pain", color: "var(--warn)", title: lab });
+          else add("text", { x: ml + cw - 4, y: y - 4, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" }, lab);
+        } else if (gutOn) {
+          fpNotes.push({ val: f.pain, label: "max pain", color: "var(--warn)", title: lab });
         } else {
           add("text", { x: ml + 4, y: y < mt ? mt + 2 * fs + 8 : plotBottom - fs - 8, "font-size": fs, "font-weight": 700, fill: "var(--warn)" },
               `${lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
@@ -6439,9 +6508,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const sAll = (o.strikes || {})[optLadderScope] || [], sRolled = optLadderScope === "front" && (o.strikes || {}).front_exp_ms <= Date.now();
       const sVis = sRolled ? [] : sAll.filter((r) => Number.isFinite(r[4]) && yAt(r[0]) >= mt && yAt(r[0]) <= plotBottom);
       if (sVis.length) {
-        const sg = document.createElementNS(NS, "g"), gmax = Math.max(1, ...sAll.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0))), xl = ml + cw + 4;   // 캔들 칸 오른쪽 경계 바로 밖(체결 기둥 왼쪽 끝) -- 셀 테두리와 헷갈리지 않게
+        const sg = document.createElementNS(NS, "g"), gmax = Math.max(1, ...sAll.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0))), xl = ml + cw + TAG_W - 14;   // 가격 꼬리표 칸 오른쪽 끝 14px(꼬리표는 왼쪽 84px) -- 셀 테두리와 헷갈리지 않게
         sVis.forEach(([k, , , , g, cov]) => {
-          const len = 6 + (34 * Math.abs(g)) / gmax, y = yAt(k), full = cov != null && cov >= 0.99, col = g >= 0 ? "var(--option)" : "var(--warn)";
+          const len = 3 + (9 * Math.abs(g)) / gmax, y = yAt(k), full = cov != null && cov >= 0.99, col = g >= 0 ? "var(--option)" : "var(--warn)";
           const e = document.createElementNS(NS, "rect");
           Object.entries({ x: xl.toFixed(1), y: (y - 3).toFixed(1), width: len.toFixed(1), height: 6, rx: 1.5, fill: full ? col : "none", "fill-opacity": 0.85, stroke: col, "stroke-width": 1.2 })
             .forEach(([a, v]) => e.setAttribute(a, v));
@@ -6459,7 +6528,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         // 체결 기반 값이 아직 없다(커버 종목 없음 · 수집기 재시작 전) -- 플립 글자를 안 쓴다
       } else if (fl && yAt(fl) >= mt && yAt(fl) <= plotBottom) {
         add("line", { x1: ml, x2: ml + cw, y1: yAt(fl), y2: yAt(fl), stroke: "var(--muted)", "stroke-opacity": 0.8, "stroke-dasharray": "8 4" });
-        add("text", { x: ml + 4, y: yAt(fl) - 4, "font-size": fs, "font-weight": 700, fill: "var(--muted)" }, `감마 플립(체결) ${optQ(fl)}`);
+        if (gutOn) fpNotes.push({ val: fl, label: "감마 플립", color: "var(--muted)", title: `감마 플립(체결) ${optQ(fl)}` });
+        else add("text", { x: ml + 4, y: yAt(fl) - 4, "font-size": fs, "font-weight": 700, fill: "var(--muted)" }, `감마 플립(체결) ${optQ(fl)}`);
       } else {
         add("text", { x: ml + 4, y: plotBottom - 4, "font-size": fs, "font-weight": 600, fill: "var(--muted)" },
             fl ? `감마 플립(체결) ${optQ(fl)} ${fl < px ? "↓" : "↑"}(창 밖)`
@@ -6494,8 +6564,37 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(t);
   }
 
+  // 2026-09-30 꼬리표 칸: 겹침 선 이름(fpNotes)을 가격 꼬리표와 한 줄에 세워 겹침 회피를 **함께** 다시 돈다.
+  if (gutOn && fpNotes.length) {
+    fpNotes.forEach((n) => {
+      const rawY = yAt(n.val);
+      Object.assign(n, { note: true, rawY, offTop: rawY < mt, offBottom: rawY > plotBottom });
+      n.outOfView = n.offTop || n.offBottom;
+      n.realY = n.outOfView ? (n.offTop ? mt + 2 : plotBottom - 2) : rawY;
+      priceLabels.push(n);
+    });
+    priceLabels.forEach((p) => { delete p.adjustedY; });
+    declutterTagY(priceLabels, mt + 9, plotBottom - 9, 19);
+  }
+  const tagX = ml + cw + 6;   // 꼬리표 왼쪽 끝(꼬리표 칸)
   priceLabels.forEach(p => {
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
+    if (p.note) {   // 겹침 선 이름 -- 선은 제자리에 이미 있다. 칸 안 글자 + 지시선만.
+      const ly = Math.max(mt + 9, Math.min(plotBottom - 9, labelYRaw));
+      const ng = document.createElementNS(NS, "g");
+      const lead = document.createElementNS(NS, "path");
+      lead.setAttribute("d", `M${ml + cw} ${p.realY.toFixed(1)} L${tagX - 2} ${ly.toFixed(1)}`);
+      lead.setAttribute("stroke", p.color); lead.setAttribute("stroke-opacity", "0.45"); lead.setAttribute("fill", "none");
+      ng.appendChild(lead);
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", tagX + 2); t.setAttribute("y", ly + 3.5); t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "700");
+      t.setAttribute("fill", p.color); t.setAttribute("style", "font-variant-numeric: tabular-nums");
+      t.textContent = `${p.label}${p.noPrice ? "" : " " + fmtNum(p.val, Math.max(0, pxDp() - 1))}${p.offTop ? " ↑" : p.offBottom ? " ↓" : ""}`;
+      if (p.title) { const ti = document.createElementNS(NS, "title"); ti.textContent = p.title; t.appendChild(ti); }
+      ng.appendChild(t);
+      svg.appendChild(ng);
+      return;
+    }
     const labelY = Math.max(mt + 9, Math.min(plotBottom - 9, labelYRaw));
     const lineDashed = p.dashed || p.outOfView;
     // 2026-09-22 사용자 지시: **모바일은 배지를 안 그린다.** 값은 플롯 아래 한 줄이 갖고,
@@ -6553,16 +6652,25 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-09-28 풋프린트 현재가는 **채운 태그**(사용자 «현재가 라벨을 더 크게») -- 13px(모바일 12) 어두운 글자, 왼쪽 끝에서
     //   시작해 필요하면 플롯 안으로 조금 들어간다(가격 태그 관례). 빠른 갱신(updateLivePriceFast)이 글자·폭·높이를 같이 옮긴다.
     const nowTag = p.label === "현재" && !!footprint && !!txt;
-    const tagBg = nowTag ? document.createElementNS(NS, "rect") : null;
+    const gutTag = gutOn && !!txt;   // 2026-09-30 꼬리표 칸: 모든 가격 이름이 상자(현재 = 채움 · 나머지 = 테두리)
+    const tagBg = nowTag || gutTag ? document.createElementNS(NS, "rect") : null;
+    if (gutTag) {
+      const lead = document.createElementNS(NS, "path");
+      lead.setAttribute("d", `M${ml + cw} ${p.realY.toFixed(1)} L${tagX - 2} ${labelY.toFixed(1)}`);
+      lead.setAttribute("stroke", p.color); lead.setAttribute("stroke-opacity", "0.6"); lead.setAttribute("fill", "none");
+      svg.appendChild(lead);
+    }
     if (tagBg) {
-      tagBg.setAttribute("x", 2); tagBg.setAttribute("y", labelY - 9); tagBg.setAttribute("height", 18);
-      tagBg.setAttribute("rx", 3); tagBg.setAttribute("fill", p.color);
+      tagBg.setAttribute("x", gutTag ? tagX : 2); tagBg.setAttribute("y", labelY - 9); tagBg.setAttribute("height", 18);
+      tagBg.setAttribute("rx", 3);
+      if (nowTag) tagBg.setAttribute("fill", p.color);
+      else { tagBg.setAttribute("fill", "var(--chart-bg)"); tagBg.setAttribute("stroke", p.color); tagBg.setAttribute("stroke-width", "1"); }
       svg.appendChild(tagBg);
     }
     if (txt) {
-      txt.setAttribute("x", nowTag ? 7 : ml - TRADE_L - 5); txt.setAttribute("y", labelY + (nowTag ? 4.5 : 4));
-      txt.setAttribute("text-anchor", nowTag ? "start" : "end");
-      txt.setAttribute("font-size", nowTag ? (mobileChart ? "12" : "13") : "10");
+      txt.setAttribute("x", gutTag ? tagX + 5 : nowTag ? 7 : ml - TRADE_L - 5); txt.setAttribute("y", labelY + (nowTag ? 4.5 : 4));
+      txt.setAttribute("text-anchor", gutTag || nowTag ? "start" : "end");
+      txt.setAttribute("font-size", nowTag ? (mobileChart ? "12" : "13") : gutTag ? "11" : "10");
       txt.setAttribute("font-weight", "bold"); txt.setAttribute("fill", nowTag ? inkOnFill() : p.color);
       txt.textContent = `${leftName}${p.offTop ? "↑" : p.offBottom ? "↓" : ""}`;
       svg.appendChild(txt);
@@ -6572,7 +6680,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         // 왼쪽 여백(ml-5)을 넘으면 SVG 밖으로 잘린다 -- 재서 소수점을 뗀다.
         const name = txt.textContent;
         txt.textContent = `${name} ${fmtNum(p.val, pxDp())}`;
-        try { if (txt.getComputedTextLength() > ml - TRADE_L - 7) txt.textContent = `${name} ${fmtNum(p.val, Math.max(0, pxDp() - 1))}`; } catch (e) { /* 비렌더 */ }
+        try { if (txt.getComputedTextLength() > (gutTag ? 84 : ml - TRADE_L - 7)) txt.textContent = `${name} ${fmtNum(p.val, Math.max(0, pxDp() - 1))}`; } catch (e) { /* 비렌더 */ }
       }
       if (tagBg) {
         let tw = 0;
@@ -6802,7 +6910,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       return;
     }
     // 2026-09-27 호가 띠 위면 봉 툴팁 대신 **호가 해석** -- 커서 가격의 칸(없으면 가장 가까운 칸).
-    if (bookInfo && mx > ml + cw && mx <= w - mr) {
+    if (bookInfo && mx > tradeX0 && mx <= w - mr) {
       vLine.style.display = "none";
       const priceAt = yMax - ((my - mt) * ySpan) / ch;
       let best = null;
@@ -6953,7 +7061,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-09-28 호가 칸을 **풋프린트(체결 기둥)와 같은 행**으로 묶는다(사용자 «y축이 벌어지면 막대가 작아진다») --
     //   0.5달러 칸 그대로면 창이 넓을 때 한 칸이 2~3px 로 눌렸다. 행 안에서 수량·버틴 양·재깔림(refill·peak)은 더하고,
     //   매수·매도가 한 행에 섞이면(현재가 행) 큰 쪽으로 칠한다. ○(접근행동)는 행 안 **가장 얇아진** 값(approachAt).
-    const bin = book.bin_size, bs = Math.max(bin, fpRowSize || bin), x0 = ml + cw + TRADE_W + 6, L = BOOK_W - 10;
+    const bin = book.bin_size, bs = Math.max(bin, fpRowSize || bin), x0 = tradeX0 + TRADE_W + 6, L = BOOK_W - 10;
     const accAt = (key, p) => {               // 축적 통계는 창 전체를 접은 행 배열이라 제 격자(bin_lo) -- 가격으로 찾는다
       if (!acc || !acc[key] || !(acc.bin_size > 0)) return 0;
       const i = Math.round(p / acc.bin_size) - acc.bin_lo;
@@ -6993,8 +7101,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     return { bs, x0, L, mx, cells };
   })();
   // 네 막대 계기 자리(그림과 호버가 같이 쓴다). 데스크톱 = 기둥 머리(체결 기둥 왼쪽 끝 ~ 오른쪽 여백), 모바일 = 풋프린트 위 한 줄.
-  const statsGeo = bookInfo ? (() => {
-    const sx = TRADE_W ? ml + cw + 6 : ml, room = (TRADE_W ? w - mr : bookInfo.x0 - 8) - sx;
+  const statsGeo = bookInfo && !(TRADE_W && splitR && activeSnapshotAsset === "eth") ? (() => {   // 2026-09-30 넓은 ETH 화면은 ④(#mcWall)로 옮겼다
+    const sx = TRADE_W ? tradeX0 + 6 : ml, room = (TRADE_W ? w - mr : bookInfo.x0 - 8) - sx;
     return TRADE_W ? { sx, slotW: room / 4, labY: mt - 24, barY: mt - 20, y0: mt - 34, y1: mt - 11 }
                    : { sx, slotW: room / 4, labY: mt - 14, barY: mt - 11, y0: mt - 24, y1: mt - 2 };
   })() : null;
@@ -7241,43 +7349,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
                  "middle", null, r.oi == null ? "var(--muted)" : sgnCol(r.oi));
         });
       }
-      // ── 판 범례 (2026-09-28 사용자 «라벨을 깔끔하게») ────────────────────────────────
-      //   데스크톱 왼쪽 칸 = **무엇이 무엇인지**(선 견본 CVD·OI·거래대금 + 칸 농도 신규·정리), 오른쪽 = **지금 값**(cumLane).
-      //   모바일은 왼쪽 칸(44px)이 좁아 견본을 안 그린다 -- 값 줄이 아래에 있다.
-      if (!mobileChart) {
-        const key = document.createElementNS(NS, "g");
-        const tipK = document.createElementNS(NS, "title");
-        tipK.textContent = "봉 칸 배경 = 사분면: 색은 델타 부호(초록 매수·빨강 매도), 진하면 OI 증가(신규 롱/숏) · 옅으면 OI 감소(정리). "
-          + "이름은 칸 위, Δ·OI 는 칸 아래. 흰 선 = 창 시작부터 누적 CVD, 주황 = 누적 OI(같은 축), 파란 점선 = 봉별 거래대금(판 아래 40% 제 축).";
-        key.appendChild(tipK);
-        const kx = 8, row = (i) => quadY + 16 + i * 17;
-        [["CVD", "var(--accent)", 2.6, null], ["OI", "var(--warn)", 2.4, null], ["거래대금", "var(--turnover)", 1.8, "5 3"]]
-          .forEach(([name, color, sw, dash], i) => {
-            const l = document.createElementNS(NS, "line");
-            l.setAttribute("x1", kx); l.setAttribute("x2", kx + 14); l.setAttribute("y1", row(i) - 4); l.setAttribute("y2", row(i) - 4);
-            l.setAttribute("stroke", color); l.setAttribute("stroke-width", sw);
-            if (dash) l.setAttribute("stroke-dasharray", dash);
-            key.appendChild(l);
-            const t = document.createElementNS(NS, "text");
-            t.setAttribute("x", kx + 18); t.setAttribute("y", row(i)); t.setAttribute("font-size", "12");
-            t.setAttribute("fill", color); t.textContent = name;
-            key.appendChild(t);
-          });
-        [["신규", "0.2"], ["정리", "0.1"]].forEach(([name, op], i) => {
-          const y = row(3.4 + i);
-          ["var(--good)", "var(--bad)"].forEach((c, j) => {
-            const r = document.createElementNS(NS, "rect");
-            r.setAttribute("x", kx + j * 7); r.setAttribute("y", y - 10); r.setAttribute("width", 7); r.setAttribute("height", 12);
-            r.setAttribute("fill", c); r.setAttribute("fill-opacity", String(Number(op) * 3));
-            key.appendChild(r);
-          });
-          const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", kx + 18); t.setAttribute("y", y); t.setAttribute("font-size", "12");
-          t.setAttribute("fill", "var(--muted)"); t.textContent = name;
-          key.appendChild(t);
-        });
-        put(key);
-      }
+      // 2026-09-30 왼쪽 판 범례(선 견본·칸 농도) 제거(사용자 지시) -- 이름은 판 안 값 줄(cumLane)의 글자 색이 말한다.
     }
   }
   });
@@ -7349,6 +7421,20 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       line((r) => r.oi, "var(--warn)", 2.4, 0.95);   // 누적 신규계약
       line((r) => r.c, "var(--accent)", 2.6, 1);     // = CVD (스택의 윤곽)
       const last = have[have.length - 1];
+      if (!mobileChart) {   // 2026-09-30 선 끝(마지막 점)에 값(사용자 지시) -- 둘이 가까우면 위아래로 비킨다
+        let li = rows.length - 1; while (li >= 0 && !rows[li]) li--;
+        const ex = cx(li) - 8, yc = yv(last.c), yo = yv(last.oi), push = Math.abs(yc - yo) < 14 ? (14 - Math.abs(yc - yo)) / 2 : 0;   // 점 왼쪽(오른쪽은 ④ 자리)
+        [[yc - (yc <= yo ? push : -push), "CVD", last.c, "var(--accent)"], [yo - (yo < yc ? push : -push), "OI", last.oi, "var(--warn)"]].forEach(([y, nm, v, col]) => {
+          const dot = document.createElementNS(NS, "circle");
+          dot.setAttribute("cx", cx(li)); dot.setAttribute("cy", nm === "CVD" ? yc : yo); dot.setAttribute("r", 3); dot.setAttribute("fill", col);
+          g.appendChild(dot);
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", ex); t.setAttribute("y", y + 4); t.setAttribute("text-anchor", "end"); t.setAttribute("font-size", "12"); t.setAttribute("font-weight", "700");
+          t.setAttribute("fill", col); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3"); t.setAttribute("paint-order", "stroke");
+          t.textContent = `${nm} ${(v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v))}`;
+          g.appendChild(t);
+        });
+      }
       const sgn = (v) => (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v));
       // 2026-09-28 값 칸(사용자 «라벨을 깔끔하게»): 데스크톱 = 판 오른쪽 위에 **지금 값만**(무엇인지는 왼쪽 견본이 말한다) --
       //   CVD 15 굵게 · OI · 거래대금 13, 한 칸 띄우고 고래·중형·리테일 11. 모바일 = 판 아래 한 줄(견본 없이 이름+값).
@@ -7362,21 +7448,28 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
                     ["중형", sgn(last.m - last.w), sgnCol(last.m - last.w), 12, null],
                     ["리테일", sgn(last.c - last.m), sgnCol(last.c - last.m), 12, null]];
       if (!mobileChart) {
-        let y = cumY + 18;
-        const vx = ml + cw + 16;                       // 체결 기둥 왼쪽 끝 아래
-        vals.forEach((v) => {
-          if (!v) { y += 6; return; }
-          const n = document.createElementNS(NS, "text");
-          n.setAttribute("x", vx); n.setAttribute("y", y); n.setAttribute("font-size", v[3]);
-          n.setAttribute("fill", "var(--muted)"); n.textContent = v[0];
-          g.appendChild(n);
-          const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", vx + 60); t.setAttribute("y", y); t.setAttribute("font-size", v[3]); t.setAttribute("fill", v[2]);
-          if (v[4]) t.setAttribute("font-weight", v[4]);
+        // 2026-09-30 값은 판 **안** 한 줄(사용자 «사분면 데이터 표시는 차트 안에 텍스트로») -- 이름 색 = 선 색(범례를 겸한다).
+        //   칸 배경(진함 신규 · 옅음 정리)은 줄 툴팁이 말한다. 오른쪽 값 칸·지지/저항 줄은 비웠다(지지/저항 → 시장 맥락 ③ 가격 지형).
+        const row = document.createElementNS(NS, "text");
+        row.setAttribute("x", ml + 6); row.setAttribute("y", cumY + 34); row.setAttribute("font-size", "12");
+        row.setAttribute("stroke", "var(--chart-bg)"); row.setAttribute("stroke-width", "3"); row.setAttribute("paint-order", "stroke");
+        row.setAttribute("style", "font-variant-numeric: tabular-nums");
+        const nameCol = { CVD: "var(--accent)", OI: "var(--warn)", "거래대금": "var(--turnover)" };
+        vals.filter(Boolean).filter((v) => v[0] !== "CVD" && v[0] !== "OI").forEach((v, k) => {   // CVD·OI 는 선 끝 값
+          const n = document.createElementNS(NS, "tspan");
+          n.setAttribute("fill", nameCol[v[0]] || "var(--muted)"); n.setAttribute("font-weight", "700");
+          if (k) n.setAttribute("dx", k === 1 ? "18" : "12");
+          n.textContent = v[0] + " ";
+          const t = document.createElementNS(NS, "tspan");
+          t.setAttribute("fill", v[2]); if (v[4]) t.setAttribute("font-weight", v[4]);
           t.textContent = v[1];
-          g.appendChild(t);
-          y += v[3] + 7;
+          row.append(n, t);
         });
+        const ti = document.createElementNS(NS, "title");
+        ti.textContent = "봉 칸 배경 = 사분면: 색은 델타 부호(초록 매수·빨강 매도), 진하면 OI 증가(신규 롱/숏) · 옅으면 OI 감소(정리). "
+          + "흰 선 = 창 시작부터 누적 CVD(고래·중형·리테일 면의 윤곽), 주황 = 누적 OI(같은 축), 파란 점선 = 봉별 거래대금(판 아래 40% 제 축).";
+        row.appendChild(ti);
+        g.appendChild(row);
       } else {
         let rowX = 3;
         vals.filter(Boolean).filter((v) => v[0] !== "거래대금").forEach((v, k) => {
@@ -7395,28 +7488,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   }
   }, LANE_MERGE ? "quadLane" : null);   // 합친 판: 사분면 막대 **뒤에**
 
-  // 2026-09-28 지지·저항 = 사분면 값 칸 **아래** 글자 줄(사용자 «차트를 없애고 가격과 강도를 적어줘»).
-  //   값 칸과 같은 두 세로줄(이름 | 가격) + 강도(청산 밀집 %). 위에서 아래로 저항3 → 지지3 = 가격 순서.
-  if (svg.id === "candleSvgSnapshot" && fpBars.length && !mobileChart && !srGaugeMode()) {
-    const sr = srLevelsLive();
-    if (sr && (sr.res.length || sr.sup.length)) {
-      const vx = ml + cw + 16;
-      let y = cumY + 18 + 6 * 19 + 6 + 14;          // 값 칸(여섯 줄 + 틈) 다음
-      const rows = [...sr.res.map((lv, i) => ["저항" + (i + 1), lv, "var(--liq-resistance)"]).reverse(),
-                    ...sr.sup.map((lv, i) => ["지지" + (i + 1), lv, "var(--liq-support)"])];
-      rows.forEach(([name, lv, col]) => {
-        [[vx, name, col, "700"], [vx + 60, fmtNum(lv.price, 2), "var(--ink)", null],
-         [vx + 136, "강도 " + Math.round((lv.weight_pct || 0) * 100) + "%", "var(--muted)", null]].forEach(([x, txt, fill, wt]) => {
-          const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("font-size", "12"); t.setAttribute("fill", fill);
-          if (wt) t.setAttribute("font-weight", wt);
-          t.textContent = txt;
-          svg.appendChild(t);
-        });
-        y += 18;
-      });
-    }
-  }
+  // 2026-09-30 지지·저항 글자 줄은 시장 맥락 ③ 가격 지형으로 옮겼다(사용자 지시) -- mcGfx.terrain 이 srLevelsLive() 를 그린다.
 
 
   // ── ③ 청산 — 풋프린트 봉 고가 «바로 위» 동그라미 (2026-09-22 사용자 지시) ────
@@ -7507,8 +7579,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
     // 2026-09-30 시안 Y(사용자 선택): ETH 는 오른쪽 칸 위 절반만 1초 수급, 아래 절반은 시장 맥락(#mcBody 를 그 자리에 겹쳐 놓는다).
     const mcSplit = !!splitR && activeSnapshotAsset === "eth";
-    const s1H = splitR ? (mcSplit ? Math.round((hAll - mtTop - 4) / 2) : hAll - mtTop - 4) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
-    mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: hAll - (sub1sY + s1H + 12) - 4 } : null);
+    const s1H = splitR ? (mcSplit ? Math.round((hAll - mtTop - 4) * 0.47) : hAll - mtTop - 4) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: hAll - (sub1sY + s1H + 12) - 4 } : null,
+            mcSplit && TRADE_W ? { x: ml + cw + 4, y: plotBottom + 12, w: TAG_W + TRADE_W + BOOK_W - 8, h: hAll - plotBottom - 16 } : null);   // ④ = 꼬리표 칸 + 프로파일 아래(두 단)
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),
