@@ -3467,11 +3467,11 @@ function ensureLiveStream() {
 const OPT_TIPS = {
   move: "옵션 가격에 들어 있는 기대 움직임. 1σ = 가격 × DVOL × √(기간/1년) — 약 68% 확률로 이 안. 손절이 5분 1σ 보다 훨씬 좁으면 소음에 걸리기 쉽다.\n차트 띠는 봉 시가에 고정된다: 5분 띠 = 이번 5분봉 시가 ± 5분 1σ, 1시간 띠 = 이번 정시 첫 봉 시가 ± 1시간 1σ(폭도 봉이 열릴 때 값으로 고정). 가격이 띠를 벗어나면 옵션시장 예상보다 큰 움직임.\nIV−실현(VRP): 양수면 옵션시장이 실제보다 큰 움직임을 값에 넣는 중(보통 양수).\n우리 검정(2026년만): DVOL 24시간 1σ 안에 실제로 든 날 77% · 크기 비 1.00(과거 24h 실현변동성 폭은 1.32 로 좁다). 평균 크기는 맞고 꼬리는 두껍다 — 벗어나는 23% 는 크게 벗어난다.",
   gamma: "행사가 사다리에서 고른 칩과 같은 범위(가까운 만기 · 7일 안 · 전 만기) — 칩을 바꾸면 이 칸과 가격축 플립도 바뀐다. 지금 값 = 사다리 감마 막대의 합(사다리는 지수 ±8% 만 그려 조금 다를 수 있다). 옵션을 판 딜러의 헤지 방향. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 그 부호가 바뀌는 가격.\n우리 검정: ETH 전체 GEX 는 37일 내내 양수(플립이 거의 없다) · 방향 예측은 가격수준의 사본으로 기각 · 크기(앞으로의 변동 폭) 예측도 2026-09-28 사전등록 판정에서 불합격 — 43일 표본, 1시간 설명력 증분 +0.008(CI 0 포함)·24시간은 오히려 악화. 그래서 이 칸은 지금 상태 서술일 뿐이다.",
-  exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기 · 블록 거래».",
+  exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기».",
   mood: "25Δ 리스크 리버설 = 같은 거리 콜 IV − 풋 IV. 음수로 깊으면 하락 방어 수요(공포), 양수면 상승 베팅. 버터플라이 = 양 끝 IV − ATM(꼬리 가격). 기간 구조 = 만기별 ATM IV — 가까운 게 더 높으면(역전) 스트레스.\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중.",
   ladder: "행사가 사다리: 세로 = 행사가(지수 ±8%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러), 맨 오른쪽 = 행사가별 순감마(청록 = 콜 쪽 +, 주황 = 풋 쪽 −). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
-  blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자)이라 롱/숏이나 신규/청산은 모른다.\n우리 검정 없음 — 참고로만. 시간축 점 = 같은 거래의 시각·크기.",
-  lane: "옵션 만기 · 블록 거래(−24시간 ~ +120시간): 점 = 지난 24시간 블록 거래(크기 = 명목, 마우스를 올리면 시각·금액·다리 수) · 막대 = 다가올 만기 규모(콜+풋 미결제, 달러) · pain = max pain · P/C = 풋÷콜 미결제 · 청록 선 = 만기별 ATM IV.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
+  blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자)이라 롱/숏이나 신규/청산은 모른다.\n우리 검정 없음 — 참고로만.",
+  lane: "옵션 만기(−24시간 ~ +120시간, 블록 거래는 옵션 카드 «블록 거래» 칸): 막대 = 다가올 만기 규모(콜+풋 미결제, 달러) · pain = max pain · P/C = 풋÷콜 미결제 · 청록 선 = 만기별 ATM IV.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
   flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 옵션으로 산 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 롱으로 얼마나 기울었나».\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). 새로 연 거래인지 닫은 거래인지는 모른다. 검정 전 — 참고.",
 };
 // 2026-09-28 네 코인(ETH·BTC 역옵션 · SOL·XRP USDC 선형옵션). DVOL 지수는 ETH·BTC 뿐 -- 나머지는 30일 ATM IV(iv30)로 폭을 잰다.
@@ -3496,7 +3496,7 @@ const optFront = (o) => (o.expiries || []).find((e) => e.exp_ms > Date.now()) ||
 // 만기 시간축 카드(C, 2026-09-28 사용자 지시 «아래 카드로»): −24h~+120h. 점 = 지난 24h 블록 거래(이름표) · 막대 = 다가올 만기 규모
 //   (옆에 max pain · P/C, 아래 날짜) · 선 = 만기별 ATM IV. 폭 W 는 카드에서 받는다 -- 좁으면(휴대폰) 이름표를 줄여 겹침을 피한다
 //   (블록 이름표는 «지금» 왼쪽 폭이 모자라 점만, 만기 옆 pain·P/C 는 옵션 카드 표에 있다).
-function optLaneSvg(o, blocks, W) {
+function optLaneSvg(o, W) {
   const narrow = W < 700, H = narrow ? 170 : 190, x0 = narrow ? 10 : 20, x1 = W - (narrow ? 10 : 20), t0 = -24, t1 = 120, now = Date.now();
   const base = narrow ? 104 : 118, fs = narrow ? 10 : 11;
   const X = (h) => x0 + ((h - t0) / (t1 - t0)) * (x1 - x0);
@@ -3507,14 +3507,6 @@ function optLaneSvg(o, blocks, W) {
   s += `<rect x="${x0}" y="8" width="${X(0) - x0}" height="${H - 26}" fill="var(--ink)" fill-opacity=".025"/>`
     + `<line x1="${x0}" x2="${x1}" y1="${base}" y2="${base}" stroke="var(--line)"/>`
     + `<line x1="${X(0)}" x2="${X(0)}" y1="6" y2="${H - 16}" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="3 3"/>`;
-  [...blocks].slice(0, narrow ? 4 : 6).sort((a, b) => a.ts_ms - b.ts_ms).forEach((b, i) => {
-    const h = (b.ts_ms - now) / 3.6e6;
-    if (h < t0) return;
-    const cx = X(h), y = 22 + i * (narrow ? 13 : 16), usd = b.notional_usd || 0;
-    s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y}" y2="${base}" stroke="var(--option)" stroke-opacity=".3"/>`
-      + `<circle cx="${cx.toFixed(1)}" cy="${y}" r="${(3 + 2.2 * Math.sqrt(usd / 1e6)).toFixed(1)}" fill="var(--option)"><title>블록 ${optKst(b.ts_ms)} · ${optUsd(usd)} · ${b.legs_seen}다리</title></circle>`;
-    // 2026-09-29 이름표는 뺐다(블록이 많아지면 겹친다) -- 내용은 옵션 카드 «블록 거래» 칸, 점 호버로 상세.
-  });
   ex.forEach((e) => {
     const v = e.call_oi_usd + e.put_oi_usd, hh = 10 + (narrow ? 50 : 62) * Math.sqrt(v / mx), cx = X((e.exp_ms - now) / 3.6e6);
     const ly = base - (narrow ? hh : Math.max(hh, 40));   // 규모·pain·P/C 세 줄이 기준선 위에 들어오게 짧은 막대는 글자를 띄운다(반쪽 폭에서 한 줄이면 옆 막대와 겹쳤다)
@@ -3539,7 +3531,7 @@ function optLaneSvg(o, blocks, W) {
   for (let h = t0; h <= t1; h += 24) {
     s += `<text x="${X(h)}" y="${H - 2}" font-size="10.5" fill="${h === 0 ? "var(--ink)" : "var(--muted)"}" font-weight="${h === 0 ? 700 : 500}" text-anchor="${h === t0 ? "start" : h === t1 ? "end" : "middle"}">${h === 0 ? "지금" : `${h > 0 ? "+" : ""}${h}h`}</text>`;
   }
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="옵션 만기 시간축: 블록 거래, 만기 규모, ATM IV">${s}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="옵션 만기 시간축: 만기 규모, ATM IV">${s}</svg>`;
 }
 
 // 행사가 사다리(1-B, 2026-09-28): 옵션 카드 폭에 맞춘 세로 막대. 범위 칩은 브라우저에 기억한다.
@@ -3707,8 +3699,8 @@ function renderOptions() {
     // 두 그림 제목은 같은 모양(청록 ? 버튼 + 범례, 2026-09-29 사용자 «제목 포맷 통일») -- 누르면 설명이 펼쳐진다.
     const head = (k, title, legend) => `<div class="opt-flow-head"><button type="button" class="opt-q" data-tip="${k}" aria-expanded="${optTipOpen.has(k)}">${title}<span aria-hidden="true">?</span></button>`
       + `<span class="opt-lane-legend">${legend}</span></div><p class="opt-tip"${optTipOpen.has(k) ? "" : " hidden"}>${escapeHtml(OPT_TIPS[k]).replace(/\n/g, "<br>")}</p>`;
-    laneBody.innerHTML = head("lane", "옵션 만기 · 블록 거래 · −24h ~ +120h", `<b class="opt-warn">막대</b> 만기 규모 · pain · P/C · <b class="opt-c">점</b> 블록 거래(내용은 옵션 카드) · <b class="opt-c">선</b> 만기별 ATM IV`)
-      + optLaneSvg(o, blocks, lw);
+    laneBody.innerHTML = head("lane", "옵션 만기 · −24h ~ +120h", `<b class="opt-warn">막대</b> 만기 규모 · pain · P/C · <b class="opt-c">선</b> 만기별 ATM IV`)
+      + optLaneSvg(o, lw);   // 2026-09-29 블록 점 제거(사용자 지시) -- 블록은 옵션 카드 «블록 거래» 칸만
     flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 옵션 순델타 누적 · 테이커 기준`) + optFlowSvg(fl, lw) : "");
   }
 }
