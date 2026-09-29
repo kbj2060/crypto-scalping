@@ -4257,14 +4257,18 @@ function situationLadderHtml(o3, fz) {
     const size = Number(t.size) || 0;
     big += row(`권장 크기 · 변동성 ${Math.round(t.vol_ann * 100)}% · 최대 2배`,
                `<span class="num">${size > 0 ? "+" : ""}${size.toFixed(2)}</span>배`, size > 0 ? "k-up" : "k-dn");
-    if (live > 0) {
-      const nr = t.votes.map((v) => ({ ...v, d: (v.flip_price / live - 1) * 100 }))
-        .sort((a, b) => Math.abs(a.d) - Math.abs(b.d))[0];
-      const flips = t.votes.filter((v) => (live > v.flip_price) !== v.up).map((v) => `${v.L}일`);
-      big += row(`가장 가까운 뒤집힘 · ${nr.L}일 표`
-                 + (flips.length ? ` · <span class="sit-lad-edge">지금 가격으로 닫히면 ${flips.join("·")} 표가 뒤집힘</span>` : ""),
-                 `<span class="num">${px(nr.flip_price)}</span><small>${nr.d >= 0 ? "+" : ""}${nr.d.toFixed(1)}%</small>`, "sit-lad-sm");
-    }
+    // 2026-09-30 사용자 «큰 흐름을 세분화해서 펼쳐줘» -- 5표를 한 줄씩: 기간 · 기준가(그 기간 전 UTC 00시 종가) · 지금 가격 거리 ·
+    //   표(어제 일봉 마감 기준) · 지금 가격으로 마감하면 뒤집히는가. 가장 가까운 기준가 줄을 강조(옛 «가장 가까운 뒤집힘» 줄 대체).
+    const nearL = live > 0 ? t.votes.map((v) => ({ L: v.L, a: Math.abs(live / v.flip_price - 1) })).sort((a, b) => a.a - b.a)[0].L : null;
+    big += `<div class="sit-trend" role="table" aria-label="큰 방향 5표"><div class="sit-trend-r h" role="row">`
+      + `<span>기간</span><span>기준가</span><span>지금 대비</span><span>표</span></div>`
+      + t.votes.map((v) => {
+        const d = live > 0 ? (live / v.flip_price - 1) * 100 : null, flip = live > 0 && (live > v.flip_price) !== v.up;
+        return `<div class="sit-trend-r${v.L === nearL ? " near" : ""}" role="row" title="${v.L}일 전 UTC 00시 종가 ${px(v.flip_price)} -- 어제 일봉 종가가 이보다 ${v.up ? "높아 상승" : "낮아 하락"} 표${flip ? " · 지금 가격으로 마감하면 뒤집힌다" : ""}">`
+          + `<span>${v.L}일</span><span class="num">${px(v.flip_price)}</span>`
+          + `<span class="num ${d == null ? "" : d >= 0 ? "k-up" : "k-dn"}">${d == null ? "-" : `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`}</span>`
+          + `<span class="${v.up ? "k-up" : "k-dn"}">${v.up ? "▲ 상승" : "▼ 하락"}${flip ? ` <em class="sit-lad-edge">뒤집힘</em>` : ""}</span></div>`;
+      }).join("") + `</div>`;
     // 역추세 경고 -- 이 코인의 포지션 전부(헤지 모드면 롱·숏 둘 다 있을 수 있다)
     const against = ((latestBinanceAccount || {}).positions || [])
       .filter((p) => String(p.symbol || "").startsWith("ETH") && Math.abs(Number(p.qty) || 0) > 0 && (p.side === "LONG") !== up);
