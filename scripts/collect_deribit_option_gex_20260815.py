@@ -360,17 +360,23 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
                               "usd": float(r["mark_price"]) * (idx if inverse else 1.0), "iv": float(r["mark_iv"])})
     out["hedge"] = hedge
     # 2026-09-28 행사가 사다리(사용자 선택 1-B): 지수 ±8% 행사가별 콜·풋 미결제(USD)와 순감마(GEX, 콜 + / 풋 −).
-    #   범위 셋 -- front(가장 가까운 만기) · week(7일 안 만기 합) · all(전 만기). 행 = [행사가, 콜$, 풋$, 순감마$].
+    #   범위 셋 -- front(가장 가까운 만기) · week(7일 안 만기 합) · all(전 만기). 행 = [행사가, 콜$, 풋$, 순감마$(가정), 딜러·체결 순감마$|None].
     #   🔴«행사가 자석»은 검정에서 기각 -- 화면은 «어디에 계약이 쌓였나»로만 쓴다.
     band = chain[(chain["strike"] >= idx * 0.92) & (chain["strike"] <= idx * 1.08)]
     fut = band[band["expiration_ts"] > pd.Timestamp.now(tz="UTC")]
     first = fut["expiration_ts"].min() if len(fut) else None
     usd_oi = band["open_interest"] * idx
     g_usd = band["option_type"].map({"call": 1.0, "put": -1.0}) * band["gamma_bs"] * band["open_interest"] * idx * idx * 0.01
-    band = band.assign(c=usd_oi.where(band["option_type"] == "call", 0.0), p=usd_oi.where(band["option_type"] == "put", 0.0), g=g_usd)
+    # 2026-09-29 사용자 «감마도 딜러·체결 기준으로»: 행 5번째 칸 = 딜러·체결 순감마$(수집 뒤 상장 종목의 −테이커 순수량 × 감마).
+    #   그 행사가에 커버 종목이 없으면 None(0 이 아니라 «모름»).
+    cvb = band["instrument_name"].isin(flow["covered"]) if flow else pd.Series(False, index=band.index)
+    tnb = band["instrument_name"].map(flow["net"]).fillna(0.0) if flow else pd.Series(0.0, index=band.index)
+    band = band.assign(c=usd_oi.where(band["option_type"] == "call", 0.0), p=usd_oi.where(band["option_type"] == "put", 0.0), g=g_usd,
+                       t=(-tnb * band["gamma_bs"] * idx * idx * 0.01).where(cvb, 0.0), n=cvb.astype(int))
     def _ladder(sel):
-        agg = band[sel].groupby("strike")[["c", "p", "g"]].sum().reset_index()
-        return [[float(r.strike), round(float(r.c)), round(float(r.p)), round(float(r.g))] for r in agg.itertuples()]
+        agg = band[sel].groupby("strike")[["c", "p", "g", "t", "n"]].sum().reset_index()
+        return [[float(r.strike), round(float(r.c)), round(float(r.p)), round(float(r.g)), round(float(r.t)) if r.n else None]
+                for r in agg.itertuples()]
     out["strikes"] = {"front": _ladder(band["expiration_ts"] == first) if first is not None else [],
                       "week": _ladder(band["days_to_expiry"] <= 7), "all": _ladder(band["days_to_expiry"] > 0),
                       "front_exp_ms": int(first.timestamp() * 1000) if first is not None else None}
