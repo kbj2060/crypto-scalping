@@ -3470,6 +3470,7 @@ const OPT_TIPS = {
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기 · 블록 거래».",
   mood: "25Δ 리스크 리버설 = 같은 거리 콜 IV − 풋 IV. 음수로 깊으면 하락 방어 수요(공포), 양수면 상승 베팅. 버터플라이 = 양 끝 IV − ATM(꼬리 가격). 기간 구조 = 만기별 ATM IV — 가까운 게 더 높으면(역전) 스트레스.\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중.",
   ladder: "행사가 사다리: 세로 = 행사가(지수 ±8%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러), 맨 오른쪽 = 행사가별 순감마(청록 = 콜 쪽 +, 주황 = 풋 쪽 −). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
+  blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자)이라 롱/숏이나 신규/청산은 모른다.\n우리 검정 없음 — 참고로만. 시간축 점 = 같은 거래의 시각·크기.",
   lane: "옵션 만기 · 블록 거래(−24시간 ~ +120시간): 점 = 지난 24시간 블록 거래(크기 = 명목, 마우스를 올리면 시각·금액·다리 수) · 막대 = 다가올 만기 규모(콜+풋 미결제, 달러) · pain = max pain · P/C = 풋÷콜 미결제 · 청록 선 = 만기별 ATM IV.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
   flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 옵션으로 산 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 롱으로 얼마나 기울었나».\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). 새로 연 거래인지 닫은 거래인지는 모른다. 검정 전 — 참고.",
 };
@@ -3496,7 +3497,7 @@ const optFront = (o) => (o.expiries || []).find((e) => e.exp_ms > Date.now()) ||
 //   (옆에 max pain · P/C, 아래 날짜) · 선 = 만기별 ATM IV. 폭 W 는 카드에서 받는다 -- 좁으면(휴대폰) 이름표를 줄여 겹침을 피한다
 //   (블록 이름표는 «지금» 왼쪽 폭이 모자라 점만, 만기 옆 pain·P/C 는 옵션 카드 표에 있다).
 function optLaneSvg(o, blocks, W) {
-  const narrow = W < 700, wide = W >= 900, H = narrow ? 170 : 190, x0 = narrow ? 10 : 20, x1 = W - (narrow ? 10 : 20), t0 = -24, t1 = 120, now = Date.now();
+  const narrow = W < 700, H = narrow ? 170 : 190, x0 = narrow ? 10 : 20, x1 = W - (narrow ? 10 : 20), t0 = -24, t1 = 120, now = Date.now();
   const base = narrow ? 104 : 118, fs = narrow ? 10 : 11;
   const X = (h) => x0 + ((h - t0) / (t1 - t0)) * (x1 - x0);
   const ex = (o.expiries || []).filter((e) => e.exp_ms > now && (e.exp_ms - now) / 3.6e6 <= t1);
@@ -3512,7 +3513,7 @@ function optLaneSvg(o, blocks, W) {
     const cx = X(h), y = 22 + i * (narrow ? 13 : 16), usd = b.notional_usd || 0;
     s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y}" y2="${base}" stroke="var(--option)" stroke-opacity=".3"/>`
       + `<circle cx="${cx.toFixed(1)}" cy="${y}" r="${(3 + 2.2 * Math.sqrt(usd / 1e6)).toFixed(1)}" fill="var(--option)"><title>블록 ${optKst(b.ts_ms)} · ${optUsd(usd)} · ${b.legs_seen}다리</title></circle>`;
-    if (wide) s += `<text x="${(cx - 10).toFixed(1)}" y="${y + 4}" font-size="${fs}" font-weight="700" fill="var(--option)" text-anchor="end">블록 ${optKst(b.ts_ms, false)} ${optUsd(usd)} · ${b.legs_seen}다리</text>`;
+    // 2026-09-29 이름표는 뺐다(블록이 많아지면 겹친다) -- 내용은 옵션 카드 «블록 거래» 칸, 점 호버로 상세.
   });
   ex.forEach((e) => {
     const v = e.call_oi_usd + e.put_oi_usd, hh = 10 + (narrow ? 50 : 62) * Math.sqrt(v / mx), cx = X((e.exp_ms - now) / 3.6e6);
@@ -3620,13 +3621,15 @@ function optBlkLegs(b) {   // ETH-16OCT26-2700-P -> «매수 10-16 2700P ×500»
     return `<span class="opt-leg"><i class="${l.direction === "buy" ? "opt-good" : "opt-bad"}">${l.direction === "buy" ? "매수" : "매도"}</i> ${k} ×${fmtNum(l.amount, 0)}</span>`;
   }).join(" · ");
 }
-function optBlkMobileHtml(blocks, n24) {
+// 2026-09-29 옵션 카드 «블록 거래» 칸(사용자 «데스크톱도 옵션 카드 안에») -- 데스크톱은 늘 펼침, 휴대폰만 «목록 ▾» 버튼.
+function optBlkHtml(blocks, n24, phone) {
   if (!blocks.length) return `<div class="opt-blk-sum"><span>블록 24h <b>0건</b></span></div>`;
+  const open = !phone || optBlkOpen;
   const tot = blocks.reduce((a, b) => a + (b.notional_usd || 0), 0), mx = blocks.reduce((a, b) => ((b.notional_usd || 0) > (a.notional_usd || 0) ? b : a));
   const rows = [...blocks].sort((a, b) => b.ts_ms - a.ts_ms).slice(0, 5).map((b) =>
     `<div class="opt-blk-row"><span class="t">${optKst(b.ts_ms, false)}</span><b>${optUsd(b.notional_usd || 0)}</b><span class="legs">${optBlkLegs(b)}</span></div>`).join("");
   return `<div class="opt-blk-sum"><span>블록 24h <b>${n24 ?? blocks.length}건 · ${optUsd(tot)}</b> · 최대 ${optUsd(mx.notional_usd || 0)} ${optKst(mx.ts_ms, false)}</span>`
-    + `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button></div>` + (optBlkOpen ? rows : "");
+    + (phone ? `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button>` : "") + `</div>` + (open ? rows : "");
 }
 const optClick = (e) => {
   if (e.target.closest(".opt-blk-btn")) {
@@ -3696,6 +3699,7 @@ function renderOptions() {
     sec("mood", "심리", kv("25Δ 리스크 리버설", f && f.rr25 != null ? `${f.rr25 >= 0 ? "+" : ""}${f.rr25.toFixed(1)}pt` : "-")
       + kv("버터플라이", f && f.bf25 != null ? `${f.bf25 >= 0 ? "+" : ""}${f.bf25.toFixed(1)}pt` : "-")
       + kv("기간 구조(ATM IV)", (o.expiries || []).filter((e) => e.exp_ms > Date.now()).slice(0, 5).map((e) => e.atm_iv.toFixed(0)).join(" → ") || "-")),
+    sec("blocks", "블록 거래", optBlkHtml(blocks, (((latestGex || {}).block_trades || {}).n_by_coin || {})[cur], window.matchMedia("(max-width: 720px)").matches)),
   ].join("");
   // 2026-09-29 풋프린트 카드 맨 아래 반반(휴대폰은 위아래) -- 두 칸 폭이 같아 한 번 잰다.
   if (laneBody && flowBody && laneBody.clientWidth > 0) {
@@ -3703,9 +3707,8 @@ function renderOptions() {
     // 두 그림 제목은 같은 모양(청록 ? 버튼 + 범례, 2026-09-29 사용자 «제목 포맷 통일») -- 누르면 설명이 펼쳐진다.
     const head = (k, title, legend) => `<div class="opt-flow-head"><button type="button" class="opt-q" data-tip="${k}" aria-expanded="${optTipOpen.has(k)}">${title}<span aria-hidden="true">?</span></button>`
       + `<span class="opt-lane-legend">${legend}</span></div><p class="opt-tip"${optTipOpen.has(k) ? "" : " hidden"}>${escapeHtml(OPT_TIPS[k]).replace(/\n/g, "<br>")}</p>`;
-    const phone = window.matchMedia("(max-width: 720px)").matches;   // 휴대폰만 C 안(데스크톱은 이름표 달린 점 유지)
-    laneBody.innerHTML = head("lane", "옵션 만기 · 블록 거래 · −24h ~ +120h", `<b class="opt-warn">막대</b> 만기 규모 · pain · P/C${phone ? "" : ` · <b class="opt-c">점</b> 블록 거래`} · <b class="opt-c">선</b> 만기별 ATM IV`)
-      + (phone ? optLaneSvg(o, [], lw) + optBlkMobileHtml(blocks, (((latestGex || {}).block_trades || {}).n_by_coin || {})[cur]) : optLaneSvg(o, blocks, lw));
+    laneBody.innerHTML = head("lane", "옵션 만기 · 블록 거래 · −24h ~ +120h", `<b class="opt-warn">막대</b> 만기 규모 · pain · P/C · <b class="opt-c">점</b> 블록 거래(내용은 옵션 카드) · <b class="opt-c">선</b> 만기별 ATM IV`)
+      + optLaneSvg(o, blocks, lw);
     flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 옵션 순델타 누적 · 테이커 기준`) + optFlowSvg(fl, lw) : "");
   }
 }
