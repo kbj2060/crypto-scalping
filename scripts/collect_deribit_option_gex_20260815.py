@@ -415,8 +415,19 @@ def write_state(con) -> None:
             "FROM gex_summary WHERE currency = ?", [total, front, currency]).fetchone()
         opt_row = con.execute("SELECT payload FROM option_summary WHERE currency = ? "
                               "ORDER BY recorded_at_utc DESC LIMIT 1", [currency]).fetchone()
+        # 2026-09-29 사용자 «ΔDEX»: 1시간 전(50~75분 전 가장 최근) 스냅샷의 칩 범위별 DEX -- 화면이 지금 값과 뺀다.
+        #   front 는 만기가 넘어가면 다른 계약 묶음이라 exp_ms 를 같이 싣는다(화면이 다르면 Δ 를 안 보인다).
+        ago_row = con.execute("SELECT payload FROM option_summary WHERE currency = ? "
+                              "AND recorded_at_utc BETWEEN now() - INTERVAL 75 MINUTE AND now() - INTERVAL 50 MINUTE "
+                              "ORDER BY recorded_at_utc DESC LIMIT 1", [currency]).fetchone()
+        dex_ago = None
+        if ago_row:
+            gb_ago = (json.loads(ago_row[0]) or {}).get("gamma_by") or {}
+            dex_ago = {k: {"dex_usd": v.get("dex_usd"), "exp_ms": v.get("exp_ms")} for k, v in gb_ago.items()
+                       if isinstance(v, dict) and v.get("dex_usd") is not None} or None
         out["currencies"][currency] = {
             "options": json.loads(opt_row[0]) if opt_row else None,
+            "dex_1h_ago": dex_ago,
             "recorded_at_utc": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
             "spot_price": spot, "total_gex_usd": total, "front_month_gex_usd": front,
             "front_ratio": ratio,

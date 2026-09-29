@@ -83,3 +83,22 @@ def test_dex_holder_sign_and_scale(monkeypatch):
     assert 0.45 * 100 * 2000 < d < 0.56 * 100 * 2000, d
     prof = calls["gamma_by"]["all"]["profile"]
     assert len(prof[0]) == 3 and prof[0][2] < prof[-1][2], "가격이 오르면 콜 델타(DEX)가 커진다"
+
+
+def test_write_state_dex_1h_ago(tmp_path, monkeypatch):
+    """2026-09-29 ΔDEX: write_state 가 50~75분 전 스냅샷의 칩별 DEX 를 dex_1h_ago 로 싣는다(5분 전 것은 안 쓴다)."""
+    import json
+    import duckdb
+    con = duckdb.connect(":memory:")
+    gex.ensure_tables(con)
+    monkeypatch.setattr(gex, "STATE_PATH", tmp_path / "st.json")
+    now = datetime.now(timezone.utc)
+    con.execute("INSERT INTO gex_summary VALUES (?, 'ETH', 2000, 1e6, 1e5, 10, 5)", [now])
+    for mins, dex in ((60, 111.0), (5, 999.0), (0, 500.0)):
+        pay = {"gamma_by": {"week": {"now_usd": 1.0, "dex_usd": dex}, "front": {"now_usd": 1.0, "dex_usd": dex, "exp_ms": 7}}}
+        con.execute("INSERT INTO option_summary VALUES (?, 'ETH', 2000, NULL, NULL, NULL, NULL, NULL, NULL, ?)",
+                    [now - timedelta(minutes=mins), json.dumps(pay)])
+    gex.write_state(con)
+    st = json.loads((tmp_path / "st.json").read_text())["currencies"]["ETH"]
+    assert st["dex_1h_ago"]["week"]["dex_usd"] == 111.0 and st["dex_1h_ago"]["front"]["exp_ms"] == 7
+    assert st["options"]["gamma_by"]["week"]["dex_usd"] == 500.0
