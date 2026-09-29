@@ -3777,7 +3777,7 @@ def make_app() -> web.Application:
         q("okx_fund", OKX_CTX_DB_PATH, "SELECT funding_rate, funding_time FROM okx_funding WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
         q("okx_mark", OKX_CTX_DB_PATH, "SELECT mark_px FROM okx_mark WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
         q("okx_oi", OKX_CTX_DB_PATH, "SELECT oi_base FROM okx_oi WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
-        q("hl_ctx", HL_CTX_DB_PATH, "SELECT funding, open_interest, premium, mark_px FROM hl_asset_ctx WHERE coin = 'ETH' ORDER BY recv_ms DESC LIMIT 1", [])
+        q("hl_ctx", HL_CTX_DB_PATH, "SELECT funding, open_interest, premium, mark_px, mid_px FROM hl_asset_ctx WHERE coin = 'ETH' ORDER BY recv_ms DESC LIMIT 1", [])
         # 마지막으로 **다 돈** 바퀴의 포지션(바퀴 행과 포지션이 한 트랜잭션으로 들어온다 -- 수집기 write())
         q("hl_pos", HL_POS_DB_PATH, "SELECT szi, liq_px FROM hl_positions WHERE coin = 'ETH' AND ts_ms >= (SELECT max(ts_ms) FROM hl_cycles)", [])
         q("ls", OI_LSRATIO_DB_PATH, """SELECT epoch(ts), global_ls_ratio, top_pos_ls_ratio, taker_ls_ratio FROM oi_lsratio_5m
@@ -3860,7 +3860,9 @@ def make_app() -> web.Application:
             "flow": {"z60": x.get("z60"), "net60": x.get("net60"), "cvd30_z": x.get("cvd30_z"),
                      "bn30": ev.get("cvd"), "okx30": x.get("okx30")},
             "btc": {"move_bp": ev.get("btc_move_bp"), "rel": ev.get("btc_rel")},
-            "venues": {"okx_bp": bp(okx_mark[0] if okx_mark else None, bn_mark), "hl_bp": bp(hl[3] if hl else None, bn_mark)},
+            # 🔴같은 종류끼리만 잰다: 바이낸스 마크는 평활값이라 체결 미드보다 ~10bp 늦게 따라올 때가 있다(09-29 실측 HL 미드−BN 미드 8.9bp 를
+            #   HL 마크−BN 마크로 재 19.5bp 로 보였다). HL = 미드 대 미드 · OKX = 수집기에 미드가 없어 마크 대 마크.
+            "venues": {"okx_bp": bp(okx_mark[0] if okx_mark else None, bn_mark), "hl_bp": bp(hl[4] if hl else None, mp.get("mid"))},
             "book": {"spread": mp.get("spread"), "sweep": sw, "bps": list(mctx.SWEEP_BPS),
                      "bid25_pct": float(np.mean(d25[:, 0] <= sw["bid"][1])) if d25 is not None and sw else None,
                      "ask25_pct": float(np.mean(d25[:, 1] <= sw["ask"][1])) if d25 is not None and sw else None},
