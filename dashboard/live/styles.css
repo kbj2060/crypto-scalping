@@ -2610,8 +2610,10 @@ body.order-coin-off .acct-lanes::before {
   #snapshotTabPanel > * { grid-column: 1 / -1; }
   /* 2026-09-29 30분 시나리오를 옵션 카드 아래로 올렸다가 같은 날 되돌림(사용자 «30분 시나리오 칸을 다시 내리고 블록 거래를 옵션 카드 안에»).
      오른쪽 열 = 옵션 카드 하나(맨 아래 «블록 거래» 칸) · 아랫줄 = 계좌 | 30분 | 신호·특화 신호·경제 일정(위아래). */
-  #snapshotTabPanel > .liq-map-panel { grid-column: 1 / 4; grid-row: 1; }
-  #snapshotTabPanel > .opt-panel { grid-column: 4; grid-row: 1; }
+  /* 2026-09-30 옵션 카드를 풋프린트 카드 안 오른쪽 칸으로 흡수(사용자 지시) -- 카드가 윗줄 전폭. */
+  #snapshotTabPanel > .liq-map-panel { grid-column: 1 / -1; grid-row: 1; grid-template-columns: minmax(0, 1fr) 380px; column-gap: 22px; align-items: start; }
+  .liq-map-panel > .opt-in-card { grid-column: 2; grid-row: 1 / span 30; border-top: 0; margin-top: 0; padding: 0 0 0 22px;
+    border-left: 1px solid var(--line); align-self: stretch; }
   #snapshotTabPanel > .acct-panel { grid-column: 1; grid-row: 2; }
   #snapshotTabPanel > .situation-panel { grid-column: 2; grid-row: 2; }
   #snapshotTabPanel > .snap-side { grid-column: 3 / 5; grid-row: 2; display: grid; gap: var(--card-gap); align-content: start; }
@@ -2706,6 +2708,10 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (max-width: 720px) { .opt-blk-list { max-height: none; mask-image: none; padding-bottom: 0; } }
 .opt-curve { display: block; width: 100%; height: auto; max-width: 440px; }
 .opt-dex { color: var(--ink); font-variant-numeric: tabular-nums; }
+/* 2026-09-30 옵션을 풋프린트 카드 안으로(사용자 «하나의 카드») -- 좁은 화면은 한 열로 맨 아래, 넓은 화면은 오른쪽 칸(위 ≥1700 규칙). */
+.liq-map-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
+.liq-map-panel > * { grid-column: 1; min-width: 0; }
+.liq-map-panel > .opt-in-card { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 14px; }
 /* 2026-09-29 옵션 카드 맨 위 체결 기반 커버 줄(사용자 지시) -- 커버 부족이면 경고 톤 */
 .opt-cov { font-size: 12px; line-height: 1.5; padding: 7px 10px; margin: 0 0 10px; border-radius: 8px; word-break: keep-all;
   border: 1px solid var(--soft-line); color: var(--muted); font-variant-numeric: tabular-nums; }

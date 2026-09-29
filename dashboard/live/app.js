@@ -6042,7 +6042,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
     // ── 시장 맥락 겹침 (2026-09-29, 사용자 «불합격이어도 쓸모 있으면 넣어줘 -- 우리 검증이 틀렸을 수도 있다») ──────────
     //   ① 스택 불균형(같은 쪽 3줄 연속) ② 패턴 글자(다이버·소진·흡수?) ③ 세션 VWAP ±1·2σ · 볼린저(카드 스위치)
-    //   ④ HL 고래 실측 청산가 점선 ⑤ 12시간 실측 청산 가격(체결 기둥 안쪽 눈금). 전부 서술 -- 뜻과 우리 검정은 각 <title>.
+    //   ④ HL 고래 실측 청산가 점선 (⑤ 12시간 실측 청산 눈금은 09-30 제거). 전부 서술 -- 뜻과 우리 검정은 각 <title>.
     //   선(③④)은 옵션 선과 같이 격자 바로 위(셀 아래)에, 표식(①②⑤)은 셀 위에. 가격 플롯 밖은 네이티브 clipPath 로 자른다.
     if (isSnapshotChart) {
       const clipId = (svg.id || "chart") + "-mcclip";
@@ -6101,18 +6101,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
       const gridG = layerCache.get("grid")?.g;
       if (gridG && gridG.parentNode === svg) svg.insertBefore(lines, gridG.nextSibling); else svg.appendChild(lines);
-      // ⑤ 12시간 실측 청산 가격 -- 체결 기둥 안쪽(왼쪽 끝)에서 오른쪽으로 자라는 얇은 눈금. 롱 청산 빨강 · 숏 청산 초록
-      if (mc && tradeInfo && (mc.liq_profile || []).length) {
-        const prof = mc.liq_profile, pmax = Math.max(...prof.map((r) => r[1] + r[2]));
-        const L = TRADE_W ? 40 : Math.max(10, TRADE_L - 10), x0 = tradeInfo.x0 + 2;
-        prof.forEach(([p, lo, sh]) => {
-          const y = yAt(p);
-          if (y < mt || y > plotBottom || !(pmax > 0)) return;
-          const wd = Math.max(2, L * Math.sqrt((lo + sh) / pmax));
-          mk(svg, "rect", { x: x0, y: (y - 1).toFixed(1), width: wd.toFixed(1), height: 2.4, fill: sh > lo ? "var(--good)" : "var(--bad)", "fill-opacity": 0.95 },
-             `12시간 실측 청산 ${p} · 롱 ${fmtUsdCompact(lo)} / 숏 ${fmtUsdCompact(sh)} (바이낸스 강제청산 체결가)`);
-        });
-      }
+      // ⑤ 12시간 실측 청산 눈금은 2026-09-30 뺐다(사용자 지시) -- 12시간 최다 가격은 시장 맥락 카드 한 줄에 남는다.
       if (drawCells) {
         // ① 스택 불균형 -- 같은 봉 안에서 반대편의 3배 넘는 줄이 같은 쪽으로 3줄 이상 이어지면 바깥에 굵은 막대
         const STACK_MIN = 3;
