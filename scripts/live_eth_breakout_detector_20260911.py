@@ -135,6 +135,10 @@ def _fetch(limit: int = FETCH_BARS) -> pd.DataFrame:
         if len(k) < 1500:
             break
     d = pd.DataFrame(out, columns=["ot", "o", "h", "l", "c", "v", "ct", "qv", "n", "tbv", "tbq", "x"])
+    # 2026-09-30 검증: 워커는 봉 마감 +20초에 도는데 바이낸스는 마감 ~5초 뒤 **새로 열린 봉**을 마지막 행으로 붙인다 --
+    #   «지금» 판정·경보 확률·전진 로그가 20초치 봉으로 계산되고 있었다(실측 18:30:20 에 18:30 봉, 거래대금 z −0.69).
+    #   종료 시각이 아직 안 지난 봉은 버린다 = 마지막 행이 **방금 마감된 봉**.
+    d = d[pd.to_numeric(d["ct"]) < time.time() * 1000]
     d["timestamp"] = pd.to_datetime(d.ot, unit="ms")
     for cc in ("o", "h", "l", "c", "qv", "tbq"):   # tbq 누락 시 피쳐가 터진다
         d[cc] = d[cc].astype(float)
