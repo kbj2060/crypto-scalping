@@ -102,3 +102,35 @@ def test_write_state_dex_1h_ago(tmp_path, monkeypatch):
     st = json.loads((tmp_path / "st.json").read_text())["currencies"]["ETH"]
     assert st["dex_1h_ago"]["week"]["dex_usd"] == 111.0 and st["dex_1h_ago"]["front"]["exp_ms"] == 7
     assert st["options"]["gamma_by"]["week"]["dex_usd"] == 500.0
+
+
+def test_dealer_dex_from_taker_flow(monkeypatch):
+    """2026-09-29 체결 기반 딜러 DEX: 수집 뒤 상장(covered) 종목만. 테이커가 ATM 콜 50개 순매수 → 딜러 −50콜 → 딜러 DEX ≈ −0.5×50×2000.
+    커버 = 그 종목 미결제 비중 · |테이커 순|/미결제 = 50/100. flow 가 없으면 딜러 키 자체가 없다(옛 단독 수집기)."""
+    monkeypatch.setattr(gex, "_pub", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+    ch = _chain()
+    atm_c = "x2000call"
+    flow = {"net": {atm_c: 50.0, "x2000put": 999.0}, "covered": {atm_c}}     # 풋은 커버 밖 -- 순수량이 있어도 안 센다
+    g = gex.options_summary(ch, "ETH", flow)["gamma"]
+    assert -0.56 * 50 * 2000 < g["dealer_dex_usd"] < -0.45 * 50 * 2000, g["dealer_dex_usd"]
+    assert abs(g["dealer_cov"] - 100 / ch.open_interest.sum()) < 1e-9
+    assert abs(g["dealer_net_oi"] - 0.5) < 1e-9
+    assert "dealer_dex_usd" not in gex.options_summary(ch, "ETH")["gamma"]
+    none_cov = gex.options_summary(ch, "ETH", {"net": {atm_c: 50.0}, "covered": set()})["gamma"]
+    assert none_cov["dealer_dex_usd"] is None and none_cov["dealer_cov"] == 0
+
+
+def test_taker_flow_sql_and_covered(monkeypatch):
+    """option_trades 에서 종목별 테이커 순수량, 상장 시각 ≥ 첫 체결이면 covered. 접두어 밖(BTC) 종목은 안 섞인다."""
+    import duckdb
+    con = duckdb.connect()
+    con.execute("CREATE TABLE option_trades (ts_ms BIGINT, instrument_name VARCHAR, direction VARCHAR, amount DOUBLE)")
+    con.executemany("INSERT INTO option_trades VALUES (?, ?, ?, ?)", [
+        (1000, "ETH-1OCT26-2700-C", "buy", 5.0), (2000, "ETH-1OCT26-2700-C", "sell", 2.0),
+        (3000, "ETH-3OCT26-2700-P", "sell", 4.0), (1500, "BTC-1OCT26-60000-C", "buy", 9.0)])
+    gex._CREATED.clear()
+    monkeypatch.setattr(gex, "_pub", lambda m, **k: [{"instrument_name": "ETH-1OCT26-2700-C", "creation_timestamp": 500},
+                                                      {"instrument_name": "ETH-3OCT26-2700-P", "creation_timestamp": 2500}])
+    f = gex._taker_flow(con, "ETH")
+    assert f["net"] == {"ETH-1OCT26-2700-C": 3.0, "ETH-3OCT26-2700-P": -4.0}
+    assert f["covered"] == {"ETH-3OCT26-2700-P"}, "첫 체결(1000) 전에 상장된 종목은 수준을 모른다"
