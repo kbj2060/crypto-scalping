@@ -167,7 +167,8 @@ def test_ladder_dealer_trade_gamma_column(monkeypatch):
     o = gex.options_summary(_chain(), "ETH", {"net": {"x2000call": 50.0}, "covered": {"x2000call"}})
     fr = {r[0]: r for r in o["strikes"]["front"]}
     assert fr[2000.0][4] < 0 and fr[1900.0][4] is None and fr[2100.0][4] is None
-    assert all(len(r) == 5 and r[4] is None for r in gex.options_summary(_chain(), "ETH")["strikes"]["front"])
+    assert all(len(r) == 6 and r[4] is None and r[5] == 0 for r in gex.options_summary(_chain(), "ETH")["strikes"]["front"])
+    assert fr[2000.0][5] == 0.5 and fr[1900.0][5] == 0, "2000 = 콜(커버)·풋(미커버) 미결제 같음 → 0.5"
 
 
 def test_dealer_charm_1h_sign_and_scale(monkeypatch):

@@ -382,7 +382,7 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
                               "usd": float(r["mark_price"]) * (idx if inverse else 1.0), "iv": float(r["mark_iv"])})
     out["hedge"] = hedge
     # 2026-09-28 행사가 사다리(사용자 선택 1-B): 지수 ±8% 행사가별 콜·풋 미결제(USD)와 순감마(GEX, 콜 + / 풋 −).
-    #   범위 셋 -- front(가장 가까운 만기) · week(7일 안 만기 합) · all(전 만기). 행 = [행사가, 콜$, 풋$, 순감마$(가정), 딜러·체결 순감마$|None].
+    #   범위 셋 -- front(가장 가까운 만기) · week(7일 안 만기 합) · all(전 만기). 행 = [행사가, 콜$, 풋$, 순감마$(가정), 딜러·체결 순감마$|None, 체결 커버율 0~1|None].
     #   🔴«행사가 자석»은 검정에서 기각 -- 화면은 «어디에 계약이 쌓였나»로만 쓴다.
     band = chain[(chain["strike"] >= idx * 0.92) & (chain["strike"] <= idx * 1.08)]
     first = g_first    # «가까운 만기» = 딜러 감마(gamma_by.front)와 같은 전체 최소 만기(±8% 띠 안 최소로 잡으면 드물게 갈렸다 -- 09-30 검증)
@@ -394,11 +394,14 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
     cvb = band["instrument_name"].isin(flow["covered"]) if flow else pd.Series(False, index=band.index)
     tnb = band["instrument_name"].map(flow["net"]).fillna(0.0) if flow else pd.Series(0.0, index=band.index)
     band = band.assign(c=usd_oi.where(band["option_type"] == "call", 0.0), p=usd_oi.where(band["option_type"] == "put", 0.0), g=g_usd,
-                       t=(-tnb * band["gamma_bs"] * S2 * 0.01).where(cvb, 0.0), n=cvb.astype(int))
+                       t=(-tnb * band["gamma_bs"] * S2 * 0.01).where(cvb, 0.0), n=cvb.astype(int),
+                       o=band["open_interest"], oc=band["open_interest"].where(cvb, 0.0))
     def _ladder(sel):
-        agg = band[sel].groupby("strike")[["c", "p", "g", "t", "n"]].sum().reset_index()
-        return [[float(r.strike), round(float(r.c)), round(float(r.p)), round(float(r.g)), round(float(r.t)) if r.n else None]
-                for r in agg.itertuples()]
+        agg = band[sel].groupby("strike")[["c", "p", "g", "t", "n", "o", "oc"]].sum().reset_index()
+        # 행 6번째 칸(2026-09-30 디자인 세션 협의) = 그 행사가의 체결 커버율(커버 종목 미결제 / 전체 미결제, 0~1, 미결제 0 이면 None)
+        #   -- 막대가 «체결로 본 몫»인지 화면이 말할 수 있게. 가정 몫을 이어 붙이지 않는다(사용자: 체결 기반만, 커버 차면 참고).
+        return [[float(r.strike), round(float(r.c)), round(float(r.p)), round(float(r.g)), round(float(r.t)) if r.n else None,
+                 round(float(r.oc) / float(r.o), 4) if r.o > 0 else None] for r in agg.itertuples()]
     out["strikes"] = {"front": _ladder(band["expiration_ts"] == first) if first is not None else [],
                       "week": _ladder(band["days_to_expiry"] <= 7), "all": _ladder(band["days_to_expiry"] > 0),
                       "front_exp_ms": int(first.timestamp() * 1000) if first is not None else None}
