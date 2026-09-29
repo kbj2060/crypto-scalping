@@ -19,6 +19,8 @@ SWEEP_BPS = (25, 50, 100)  # «여기까지 쓸어올리려면 몇 ETH 가 필�
 HL_LIQ_BIN_USD = 5.0       # HL 고래 청산가 묶음 폭($). ETH 2,700 에서 ~1.9bp
 HL_LIQ_MAX_PCT = 0.10      # 이보다 먼 청산가는 버린다(±10%)
 LIQ_PROFILE_BIN_USD = 2.5  # 실측 청산 가격 프로파일 묶음 폭($)
+PROFILE_BIN_FRAC = 5e-4    # 거래량 프로파일 칸 = 가격의 0.05%(연구 규약 -- ETH 2,600 에서 $1.3)
+NODE_WIN, NODE_SIG, NODE_MAX = 6, 2.0, 8   # HVN/LVN: 평활 σ 2칸 · ±6칸(±0.3%) 국소 극값 · 종류마다 최대 8개
 
 
 def pct_rank(x: float | None, hist: Iterable[float], min_n: int = 30) -> float | None:
@@ -164,6 +166,49 @@ def session_vwap(ts: list[int], high: list[float], low: list[float], close: list
     return vw, sd
 
 
+
+def value_area(k: Iterable[int], vol: Iterable[float], bw: float, frac: float = 0.7) -> dict[str, float] | None:
+    """가격 칸 번호 k(= floor(가격/bw))별 거래량 → VAL·POC·VAH. POC 에서 위/아래 중 큰 쪽부터 한 칸씩 넓혀 frac 을 채운다
+    (research_eth_fp_event_response_20260930.value_area 와 같은 규약). 09-30 검정: 닿아도 되돌림은 위약 레벨과 같다 -- 지도일 뿐."""
+    k = np.asarray(list(k), dtype=np.int64); v = np.asarray(list(vol), dtype=float)
+    if not len(k) or v.sum() <= 0:
+        return None
+    k0 = int(k.min()); hist = np.bincount(k - k0, weights=v)
+    poc = int(np.argmax(hist)); lo = hi = poc; tot = hist[poc]; target = frac * hist.sum()
+    while tot < target and (lo > 0 or hi < len(hist) - 1):
+        up = hist[hi + 1] if hi < len(hist) - 1 else -1.0
+        dn = hist[lo - 1] if lo > 0 else -1.0
+        if up >= dn:
+            hi += 1; tot += up
+        else:
+            lo -= 1; tot += dn
+    return {"val": (k0 + lo) * bw, "poc": (k0 + poc + 0.5) * bw, "vah": (k0 + hi + 1) * bw}
+
+
+def profile_nodes(k: Iterable[int], vol: Iterable[float], bw: float) -> dict[str, list[dict[str, float]]]:
+    """같은 입력 → HVN(평활 거래량의 ±6칸 국소 최대 · 최대의 25% 이상) · LVN(±6칸 국소 최소 · 양쪽 봉우리 중 낮은 쪽의 50% 이하).
+    연속 칸은 가운데 하나, 가격 = 칸 가운데. rel = 평활 거래량 ÷ 최대(굵기용). research_eth_profile_vwap_levels_20260930.hvn_lvn 과 같은 규약.
+    09-30 검정: HVN 되돌림·LVN 빠른 통과 둘 다 위약과 같다(LVN 돌파가 빨라 보이는 건 변동성 큰 때 닿아서) -- 지도일 뿐."""
+    k = np.asarray(list(k), dtype=np.int64); v = np.asarray(list(vol), dtype=float)
+    if len(k) < 2 * NODE_WIN or v.sum() <= 0:
+        return {"hvn": [], "lvn": []}
+    k0 = int(k.min()); hist = np.bincount(k - k0, weights=v)
+    x = np.arange(-3 * NODE_SIG, 3 * NODE_SIG + 1)
+    ker = np.exp(-0.5 * (x / NODE_SIG) ** 2); ker /= ker.sum()
+    s = np.convolve(hist, ker, "same")
+    swv = np.lib.stride_tricks.sliding_window_view
+    mx = swv(np.pad(s, NODE_WIN, constant_values=-np.inf), 2 * NODE_WIN + 1).max(1)
+    mn = swv(np.pad(s, NODE_WIN, constant_values=np.inf), 2 * NODE_WIN + 1).min(1)
+    left, right = np.maximum.accumulate(s), np.maximum.accumulate(s[::-1])[::-1]
+    out = {}
+    for name, isx, key in (("hvn", (s >= mx) & (s >= 0.25 * s.max()), -s), ("lvn", (s <= mn) & (s <= 0.5 * np.minimum(left, right)), s)):
+        d = np.diff(np.r_[0, isx.astype(np.int8), 0])
+        idx = (np.flatnonzero(d == 1) + np.flatnonzero(d == -1) - 1) // 2
+        idx = idx[np.argsort(key[idx], kind="stable")[:NODE_MAX]]
+        out[name] = [{"px": (k0 + int(i) + 0.5) * bw, "rel": round(float(s[i] / s.max()), 3)} for i in sorted(idx)]
+    return out
+
+
 if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     assert pct_rank(5, range(100)) == 0.06 and pct_rank(5, range(10)) is None and pct_rank(None, range(100)) is None
     px = np.arange(2690.0, 2710.5, 0.5)                    # 칸 아래끝 · 미드 2700.005 는 칸 [2700.0, 2700.5) 안
@@ -191,4 +236,15 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     t = [86400 - 600, 86400 - 300, 86400, 86400 + 300]
     vw, sd = session_vwap(t, [11, 13, 21, 23], [9, 11, 19, 21], [10, 12, 20, 22], [1, 1, 1, 3])
     assert vw[0] == 10 and vw[1] == 11 and abs(sd[1] - 1) < 1e-9 and vw[2] == 20 and abs(vw[3] - 21.5) < 1e-9, (vw, sd)
+    # 가치영역: 합 110 의 70% = 77. POC 칸 10(50)에서 큰 쪽(11, 30)을 먼저 붙이면 80 으로 채워진다 -- 작은 쪽(9)은 안 붙는다
+    va = value_area([8, 9, 10, 11, 12], [5, 20, 50, 30, 5], bw=2.0)
+    assert va == {"val": 20.0, "poc": 21.0, "vah": 24.0}, va
+    assert value_area([8, 9, 10, 11, 12], [5, 20, 50, 30, 5], bw=2.0, frac=0.9)["val"] == 18.0   # 90% = 99 → 9(20)까지
+    assert value_area([], [], 1.0) is None and value_area([3], [0], 1.0) is None
+    # 봉우리 둘(칸 20·60) 사이 골(칸 40) → HVN 두 개 · LVN 하나. 칸 가운데 가격
+    kk = np.arange(0, 81); vv = 100 * np.exp(-0.5 * ((kk - 20) / 4) ** 2) + 80 * np.exp(-0.5 * ((kk - 60) / 4) ** 2) + 1
+    nd = profile_nodes(kk, vv, bw=1.0)
+    assert [round(h["px"]) for h in nd["hvn"]] == [20, 60] and nd["hvn"][0]["rel"] == 1.0, nd
+    assert len(nd["lvn"]) == 1 and abs(nd["lvn"][0]["px"] - 40.5) <= 3, nd       # 골 바닥이 넓으면(연속 칸) 가운데
+    assert profile_nodes([1, 2], [1, 1], 1.0) == {"hvn": [], "lvn": []}
     print("market_ctx selftest ok")
