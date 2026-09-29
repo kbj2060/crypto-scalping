@@ -2552,12 +2552,36 @@ body.order-coin-off .acct-lanes::before {
   /* 2026-09-29 30분 시나리오를 옵션 카드 아래로 올렸다가 같은 날 되돌림(사용자 «30분 시나리오 칸을 다시 내리고 블록 거래를 옵션 카드 안에»).
      오른쪽 열 = 옵션 카드 하나(맨 아래 «블록 거래» 칸) · 아랫줄 = 계좌 | 30분 | 신호·특화 신호·경제 일정(위아래). */
   /* 2026-09-30 옵션 카드를 풋프린트 카드 안 오른쪽 칸으로 흡수(사용자 지시) -- 카드가 윗줄 전폭. */
-  #snapshotTabPanel > .mc-panel { grid-column: 1 / -1; grid-row: 1; }   /* 2026-09-30 시장 맥락(30분 흡수) = 풋프린트 위 전폭 */
-  #snapshotTabPanel > .liq-map-panel { grid-column: 1 / -1; grid-row: 2; grid-template-columns: minmax(0, 1fr) 380px; column-gap: 22px; align-items: start; }
-  .liq-map-panel > .opt-in-card { grid-column: 2; grid-row: 1 / span 30; border-top: 0; margin-top: 0; padding: 0 0 0 22px;
-    border-left: 1px solid var(--line); align-self: stretch; }
-  #snapshotTabPanel > .acct-panel { grid-column: 1 / -1; grid-row: 3; }   /* 2026-09-30 특화 신호·경제 일정 카드 제거 -- 계좌가 아랫줄 전폭 */
+  /* 2026-09-30 시안 Y(사용자 선택): 카드 셋이 위에서부터 Footprint · Option · 계좌(전부 전폭, 왼쪽 정렬) + 오른쪽 점 레일 자리.
+     시장 맥락은 Footprint 안(1초 수급 아래 칸, app.js mcPlace), 옵션·블록은 Option 카드. */
+  #snapshotTabPanel { margin-right: 36px; }
+  #snapshotTabPanel > .liq-map-panel { position: relative; }
+  #mcBody.mc-cmp { position: absolute; z-index: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+    border-top: 1px solid var(--line); padding-top: 4px; column-gap: 14px; }
+  #mcBody.mc-cmp .mc-g { grid-template-columns: 64px auto minmax(0, 1fr); gap: 6px; font-size: 11px; padding: 2px 0; }
+  #mcBody.mc-cmp .mc-sec { padding: 8px 0 6px; }
+  #mcBody.mc-cmp .mc-note { display: none; }   /* 좁은 칸 -- 부값은 줄 호버(title)로 남는다 */
+  .card-rail:not([hidden]) { display: grid; }
 }
+#optCard .opt-card-head { display: flex; align-items: baseline; gap: 12px; }
+#optCard .opt-card-head .muted { font-size: 12px; }
+@media (min-width: 1100px) {   /* Option 카드 칸은 가로로 편다(커버 경고 줄은 전폭) */
+  #optCard #optBody { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px 28px; align-items: start; }
+  #optCard #optBody > :not(.opt-sec) { grid-column: 1 / -1; }
+}
+.card-title { margin: 0 14px 0 0; font: 800 17px/1 var(--font-sans); letter-spacing: -.01em; color: var(--text); align-self: center; }
+body.not-eth #mcBody { display: none; }   /* 시장 맥락은 ETH 전용 */
+#mcBody.mc-in-fp:not(.mc-cmp) { border-top: 1px solid var(--line); margin-top: 12px; }
+/* 2026-09-30 카드 이동 레일(점만, 사용자 지시): 오른쪽 가운데 고정 · 지금 보는 카드 = 채운 점. 넓은 화면(위 미디어 쿼리)에서만 보인다. */
+.card-rail { display: none; position: fixed; z-index: 800; right: 12px; top: 50%; transform: translateY(-50%); gap: 18px; padding: 6px 0; }
+.card-rail::before { content: ""; position: absolute; left: 50%; top: 10px; bottom: 10px; width: 2px; margin-left: -1px; background: var(--line); border-radius: 1px; }
+.card-rail button { position: relative; width: 16px; height: 16px; padding: 0; border-radius: 50%; border: 2px solid var(--line); background: var(--bg, var(--panel)); cursor: pointer;
+  transition: background .18s ease-out, border-color .18s ease-out, transform .18s ease-out; }
+.card-rail button::after { content: ""; position: absolute; inset: -8px; }   /* 누르는 면 32px */
+.card-rail button:hover { border-color: var(--muted); }
+.card-rail button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.card-rail button.on { background: var(--text); border-color: var(--text); transform: scale(1.12); }
+@media (prefers-reduced-motion: reduce) { .card-rail button { transition: none; } }
 /* 2026-09-30 30분 시나리오 → 차트 머리 칩(사용자 선택 시안 A): 큰 방향 5표 · 융합 신호. 방향색은 칩 테두리·글자만, 역추세 보유는 주황 */
 .sit-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .sit-chips[hidden] { display: none; }
@@ -2567,12 +2591,6 @@ body.order-coin-off .acct-lanes::before {
 .sit-chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
 .sit-dots { display: inline-flex; gap: 2px; margin: 0 3px; vertical-align: 1px; }
 .sit-dots b { width: 7px; height: 7px; border-radius: 2px; background: var(--bad); } .sit-dots b.u { background: var(--good); }
-/* 2026-09-30 휴대폰은 시장 맥락(30분 흡수)을 풋프린트 **아래**로(사용자 지시 -- 1,700px 가까운 카드가 차트를 밀어냈다).
-   DOM 은 시장 맥락이 먼저라 order 로만 바꾼다: 풋프린트 0 → 시장 맥락 1 → 풋프린트 뒤 카드들 2. */
-@media (max-width: 720px) {
-  #snapshotTabPanel > .mc-panel { order: 1; }
-  #snapshotTabPanel > .liq-map-panel ~ * { order: 2; }
-}
 
 /* 2026-09-27 헤더 한 줄(사용자 지시): 스냅샷의 «코인 탭 · 발표 경보 · 테마» 줄을 페이지 탭과 세션 사이로 올렸다.
    다른 탭에서는 지금처럼 안 보인다. 모바일(≤720)은 세션 다음 줄로 보내 전과 같은 모양을 지킨다. */
@@ -2639,7 +2657,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 /* 2026-09-30 옵션을 풋프린트 카드 안으로(사용자 «하나의 카드») -- 좁은 화면은 한 열로 맨 아래, 넓은 화면은 오른쪽 칸(위 ≥1700 규칙). */
 .liq-map-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
 .liq-map-panel > * { grid-column: 1; min-width: 0; }
-.liq-map-panel > .opt-in-card { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 14px; }
 /* 2026-09-29 옵션 카드 맨 위 체결 기반 커버 줄(사용자 지시) -- 커버 부족이면 경고 톤 */
 .opt-cov { font-size: 12px; line-height: 1.5; padding: 7px 10px; margin: 0 0 10px; border-radius: 8px; word-break: keep-all;
   border: 1px solid var(--soft-line); color: var(--muted); font-variant-numeric: tabular-nums; }

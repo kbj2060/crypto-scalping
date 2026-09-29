@@ -2755,6 +2755,7 @@ function setupPageTabs() {
     el("opsTabPanel")?.classList.toggle("hidden", target !== "ops");
     el("snapshotTabPanel")?.classList.toggle("hidden", target !== "snapshot");
     el("notifyTabPanel")?.classList.toggle("hidden", target !== "notify");
+    cardRailSync();   // 2026-09-30 카드 이동 레일도 스냅샷 탭에서만
     ofabSync();   // 2026-09-25 떠다니는 주문 버튼은 스냅샷 탭에서만 -- 떠나면 조작부를 카드로 먼저 돌려놓는다
     document.querySelectorAll(".page-tab").forEach((tab) => {
       tab.classList.toggle("active", tab === button);
@@ -2780,6 +2781,26 @@ function setupPageTabs() {
       lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
     }
   }));
+}
+
+// 2026-09-30 카드 이동 레일(사용자 지시 «점만»): 점을 누르면 그 카드로 스크롤 · 지금 보는 카드의 점이 채워진다. 스냅샷 탭에서만.
+function cardRailSync() {
+  const rail = el("cardRail");
+  if (!rail) return;
+  rail.hidden = activePageTab !== "snapshot";
+  if (rail.hidden) return;
+  const y = innerHeight * 0.35;
+  let cur = null;
+  rail.querySelectorAll("[data-go]").forEach((b) => { const t = el(b.dataset.go); if (t && t.getBoundingClientRect().top < y) cur = b; });
+  cur = cur || rail.querySelector("[data-go]");
+  rail.querySelectorAll("[data-go]").forEach((b) => { const on = b === cur; b.classList.toggle("on", on); if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); });
+}
+function setupCardRail() {
+  const rail = el("cardRail");
+  if (!rail) return;
+  rail.addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) el(b.dataset.go)?.scrollIntoView({ behavior: "smooth", block: "start" }); });
+  addEventListener("scroll", () => requestAnimationFrame(cardRailSync), { passive: true });
+  cardRailSync();
 }
 
 function setupScrollRendering() {
@@ -3912,7 +3933,7 @@ const mcGfx = {
         + `<text x="${(c - 22 - bw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + 22 + aw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)">${kq(a[i])}</text>`;
     }).join("") + `</svg>`;
   },
-  terrain(px, hl, lv, bps, top, bu = null, w = mcGfx.pw || 300, h = Math.round(Math.min(340, Math.max(230, (mcGfx.pw || 300) * 0.72)))) {   // 세로 가격축 ±6%: HL 고래 청산가 원 · VWAP ±1·2σ 띠 · 호가 ±bp 눈금 · 12시간 실측 최다 ◆ · 지금가
+  terrain(px, hl, lv, bps, top, bu = null, w = mcGfx.pw || 300, h = mcGfx.th || Math.round(Math.min(340, Math.max(230, (mcGfx.pw || 300) * 0.72)))) {   // 세로 가격축 ±6%: HL 고래 청산가 원 · VWAP ±1·2σ 띠 · 호가 ±bp 눈금 · 12시간 실측 최다 ◆ · 지금가
     if (!(px > 0)) return `<div class="mc-note">가격 대기</div>`;
     const lo = px * 0.94, hi = px * 1.06, Y = (p) => 10 + (h - 20) * (hi - p) / (hi - lo), cl = (p) => Math.max(10, Math.min(h - 10, Y(p)));
     let s = "";
@@ -4027,6 +4048,21 @@ function mcUsSession(nowMs = Date.now()) {
   return null;
 }
 
+// 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
+//   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
+function mcPlace(svg, r) {
+  const body = el("mcBody"), card = el("fpCard");
+  if (!body || !card) return;
+  let pos = { left: "", top: "", width: "", height: "" };
+  if (r) {
+    const a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
+    pos = { left: `${Math.round(a.left - c.left + r.x)}px`, top: `${Math.round(a.top - c.top + r.y)}px`, width: `${Math.round(r.w)}px`, height: `${Math.max(0, Math.round(r.h))}px` };
+  }
+  // 🔴cssText 로 통째로 쓰면 renderMarketCtx 가 못 박은 gridTemplateColumns 가 지워진다 -- 위치 네 값만 쓴다
+  Object.entries(pos).forEach(([k, v]) => { if (body.style[k] !== v) body.style[k] = v; });
+  if (body.classList.contains("mc-cmp") !== !!r) { body.classList.toggle("mc-cmp", !!r); body._mcHtml = null; renderMarketCtx(); }
+}
+
 function renderMarketCtx() {
   const body = el("mcBody"), badge = el("mcBadge");
   if (!body) return;
@@ -4074,9 +4110,12 @@ function renderMarketCtx() {
   //   분위 = 0~100 게이지(양끝 10% 주황) · σ = 0 가운데 막대(±2σ 점선) · 비율 = 1 가운데 로그 눈금(빈 점 = 하루 전).
   //   그림 없는 부값(OKX/HL 펀딩·OI 합계·거래소별 30분 체결·스프레드·12시간 청산 최다·청산 급증)은 판마다 흐린 한 줄로 남긴다.
   // 2026-09-30 사용자 «카드 너비 100% 안을 내용 크기를 키워 채워» -- 판 폭(격자 auto-fit 300px 칸)에서 그림 폭을 정한다.
-  { const BW = body.clientWidth || 1200, cols = Math.max(1, Math.min(4, Math.floor((BW + 22) / 322)))   /* 판은 넷 -- auto-fit 이 빈 칸을 접어 넷이 폭을 나눠 가진다 */, colW = Math.floor((BW - (cols - 1) * 22) / cols);
+  { const cmp = body.classList.contains("mc-cmp"), gap = cmp ? 14 : 22;   // 2026-09-30 시안 Y: 풋프린트 1초 수급 아래 칸(~420px)에 2열 압축
+    const BW = body.clientWidth || 1200, cols = cmp ? 2 : Math.max(1, Math.min(4, Math.floor((BW + 22) / 322)))   /* 판은 넷 -- auto-fit 이 빈 칸을 접어 넷이 폭을 나눠 가진다 */, colW = Math.floor((BW - (cols - 1) * gap) / cols);
     body.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;   // 🔴auto-fit 은 전폭 줄(⑤)이 있으면 빈 칸을 못 접어 5칸이 됐다 -- 계산과 같은 칸 수로 못 박는다
-    mcGfx.pw = Math.min(colW, 560); mcGfx.gw = Math.max(110, Math.min(300, colW - 96 - 90 - 16)); mcGfx.qw = Math.max(96, Math.min(150, Math.round(colW * 0.3))); }
+    mcGfx.pw = Math.min(colW, 560); mcGfx.gw = cmp ? Math.max(48, colW - 64 - 46 - 12) : Math.max(110, Math.min(300, colW - 96 - 90 - 16));
+    mcGfx.qw = cmp ? Math.max(70, Math.min(100, Math.round(colW * 0.42))) : Math.max(96, Math.min(150, Math.round(colW * 0.3)));
+    mcGfx.th = cmp ? Math.round(Math.max(170, colW * 0.9)) : null; }
   const G = mcGfx, gRow = (label, vis, val, cls = "", tip = "") => `<div class="mc-g"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${label}</span>${vis}<b class="${cls}">${val}</b></div>`;
   const note = (s) => `<div class="mc-note">${s}</div>`;
   const qSec = (key, title, inner, extra = "") => sec(key, title, (extra ? `<div class="mc-state">상태${extra}</div>` : "") + inner);
@@ -6395,6 +6434,26 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
               `${lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
         }
       }
+      // 2026-09-30 행사가별 딜러 감마(사용자 지시, 옵션 세션 합의): 막대 = r4(딜러·체결 순감마)만 -- 가정 몫은 안 붙인다(부호 규칙이 달라 섞으면 막대 안에서 부호가 뒤섞인다).
+      //   r5 = 그 행사가 커버율(커버 종목 미결제 ÷ 전체) -- 99% 미만·모름이면 테두리만(«일부만 봄»). r4 null = 모름 = 막대 없음. 범위는 사다리 칩.
+      const sAll = (o.strikes || {})[optLadderScope] || [], sRolled = optLadderScope === "front" && (o.strikes || {}).front_exp_ms <= Date.now();
+      const sVis = sRolled ? [] : sAll.filter((r) => Number.isFinite(r[4]) && yAt(r[0]) >= mt && yAt(r[0]) <= plotBottom);
+      if (sVis.length) {
+        const sg = document.createElementNS(NS, "g"), gmax = Math.max(1, ...sAll.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0))), xl = ml + cw + 4;   // 캔들 칸 오른쪽 경계 바로 밖(체결 기둥 왼쪽 끝) -- 셀 테두리와 헷갈리지 않게
+        sVis.forEach(([k, , , , g, cov]) => {
+          const len = 6 + (34 * Math.abs(g)) / gmax, y = yAt(k), full = cov != null && cov >= 0.99, col = g >= 0 ? "var(--option)" : "var(--warn)";
+          const e = document.createElementNS(NS, "rect");
+          Object.entries({ x: xl.toFixed(1), y: (y - 3).toFixed(1), width: len.toFixed(1), height: 6, rx: 1.5, fill: full ? col : "none", "fill-opacity": 0.85, stroke: col, "stroke-width": 1.2 })
+            .forEach(([a, v]) => e.setAttribute(a, v));
+          const t = document.createElementNS(NS, "title");
+          t.textContent = `행사가 ${optQ(k)} · 딜러·체결 감마 ${g >= 0 ? "+" : "−"}${optUsd(Math.abs(g))}/1% · 이 행사가 커버 ${cov == null ? "모름" : optCovPct(cov)}\n`
+            + "딜러 = 체결 반대편(메이커)으로 본 순포지션. 커버 밖 미결제(수집 전 상장 종목)는 누가 들었는지 몰라 뺐다(테두리만 = 일부만 봄).\n"
+            + "우리 검정: 행사가 자석(가격이 미결제 큰 행사가로 끌림)과 GEX 크기로 변동폭 예측은 불합격 — 지지·저항이 아니라 딜러 헤지가 쌓인 자리의 참고.";
+          e.appendChild(t); sg.appendChild(e);
+        });
+        const gridS = layerCache.get("grid")?.g;
+        if (gridS && gridS.parentNode === svg) svg.insertBefore(sg, gridS.nextSibling); else svg.appendChild(sg);
+      }
       const gm = optDealer(o), fl = gm.flip;   // 2026-09-29 딜러·체결(커버 종목 기준)
       if (gm.now_usd == null) {
         // 체결 기반 값이 아직 없다(커버 종목 없음 · 수집기 재시작 전) -- 플립 글자를 안 쓴다
@@ -7446,7 +7505,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     };
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
-    const s1H = splitR ? hAll - mtTop - 4 : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸 전체(다섯 줄이 고르게 나눈다)
+    // 2026-09-30 시안 Y(사용자 선택): ETH 는 오른쪽 칸 위 절반만 1초 수급, 아래 절반은 시장 맥락(#mcBody 를 그 자리에 겹쳐 놓는다).
+    const mcSplit = !!splitR && activeSnapshotAsset === "eth";
+    const s1H = splitR ? (mcSplit ? Math.round((hAll - mtTop - 4) / 2) : hAll - mtTop - 4) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: hAll - (sub1sY + s1H + 12) - 4 } : null);
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),
@@ -7637,6 +7699,7 @@ setupThemeToggle();
 setupChartModeTabs();
 setupPageTabs();
 setupScrollRendering();
+setupCardRail();
 
 function showTooltip(x, y, html) {
   const t = el("chartTooltip");
