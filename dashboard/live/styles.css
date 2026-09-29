@@ -2698,6 +2698,20 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .opt-row[hidden] { display: none; }
 .opt-row .opt-flow-head { margin-top: 0; padding-top: 0; border-top: 0; }
 @media (max-width: 720px) { .opt-row { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+/* 2026-09-29 휴대폰 블록 거래 요약 한 줄 + 펼치기 목록(사용자 선택 C) */
+.opt-blk-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; padding: 8px 10px; margin-top: 6px;
+  border: 1px solid var(--soft-line); border-radius: 10px; font-variant-numeric: tabular-nums; }
+.opt-blk-sum b { color: var(--option); }
+.opt-blk-btn { flex: none; min-height: 30px; padding: 0 12px; border-radius: 999px; background: none; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--option) 50%, transparent); color: var(--option); font: 600 12px/1 var(--font-sans); }
+.opt-blk-btn:focus-visible { outline: 2px solid var(--option); outline-offset: 2px; }
+.opt-blk-row { display: grid; grid-template-columns: auto 64px minmax(0, 1fr); gap: 2px 10px; align-items: baseline; padding: 6px 0;
+  border-top: 1px solid var(--soft-line); font-size: 12px; font-variant-numeric: tabular-nums; }
+.opt-blk-row .t { color: var(--muted); }
+.opt-blk-row b { color: var(--option); font-weight: 800; }
+.opt-blk-row .legs { line-height: 1.45; word-break: keep-all; }
+.opt-leg { white-space: nowrap; }   /* «매수 10-16 2700P ×500» 한 다리는 안 쪼갠다(«매/도» 방지) */
+.opt-leg i { font-style: normal; font-weight: 700; }
 .opt-lane-legend { font-size: 11.5px; color: var(--muted); }
 .opt-lane-legend b { font-weight: 700; }
 .opt-c { color: var(--option); }

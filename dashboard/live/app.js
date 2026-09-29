@@ -3608,7 +3608,31 @@ function optFlowSvg(flow, W) {
 }
 
 const optTipOpen = new Set();
+// 2026-09-29 휴대폰 블록 거래(사용자 선택 C): 시간축 점이 한 칸에 겹쳐 안 보여 «요약 한 줄 + 펼치기 목록». 펼침은 브라우저 기억.
+let optBlkOpen = (() => { try { return localStorage.getItem("optBlkOpen") === "1"; } catch (e) { return false; } })();
+const OPT_MON = { JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06", JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12" };
+function optBlkLegs(b) {   // ETH-16OCT26-2700-P -> «매수 10-16 2700P ×500» (SOL·XRP 행사가 소수점 d)
+  return (b.legs || []).map((l) => {
+    const m = String(l.instrument_name).match(/-(\d+)([A-Z]{3})\d+-([\dd]+)-([CP])$/);
+    const k = m ? `${OPT_MON[m[2]] || m[2]}-${m[1].padStart(2, "0")} ${m[3].replace("d", ".")}${m[4]}` : escapeHtml(String(l.instrument_name));
+    return `<span class="opt-leg"><i class="${l.direction === "buy" ? "opt-good" : "opt-bad"}">${l.direction === "buy" ? "매수" : "매도"}</i> ${k} ×${fmtNum(l.amount, 0)}</span>`;
+  }).join(" · ");
+}
+function optBlkMobileHtml(blocks, n24) {
+  if (!blocks.length) return `<div class="opt-blk-sum"><span>블록 24h <b>0건</b></span></div>`;
+  const tot = blocks.reduce((a, b) => a + (b.notional_usd || 0), 0), mx = blocks.reduce((a, b) => ((b.notional_usd || 0) > (a.notional_usd || 0) ? b : a));
+  const rows = [...blocks].sort((a, b) => b.ts_ms - a.ts_ms).slice(0, 5).map((b) =>
+    `<div class="opt-blk-row"><span class="t">${optKst(b.ts_ms, false)}</span><b>${optUsd(b.notional_usd || 0)}</b><span class="legs">${optBlkLegs(b)}</span></div>`).join("");
+  return `<div class="opt-blk-sum"><span>블록 24h <b>${n24 ?? blocks.length}건 · ${optUsd(tot)}</b> · 최대 ${optUsd(mx.notional_usd || 0)} ${optKst(mx.ts_ms, false)}</span>`
+    + `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button></div>` + (optBlkOpen ? rows : "");
+}
 const optClick = (e) => {
+  if (e.target.closest(".opt-blk-btn")) {
+    optBlkOpen = !optBlkOpen;
+    try { localStorage.setItem("optBlkOpen", optBlkOpen ? "1" : "0"); } catch (err) { /* 기억은 편의 */ }
+    renderOptions();
+    return;
+  }
   const sc = e.target.closest(".opt-chip-btn");
   if (sc) {
     optLadderScope = sc.dataset.scope;
@@ -3676,7 +3700,9 @@ function renderOptions() {
     // 두 그림 제목은 같은 모양(청록 ? 버튼 + 범례, 2026-09-29 사용자 «제목 포맷 통일») -- 누르면 설명이 펼쳐진다.
     const head = (k, title, legend) => `<div class="opt-flow-head"><button type="button" class="opt-q" data-tip="${k}" aria-expanded="${optTipOpen.has(k)}">${title}<span aria-hidden="true">?</span></button>`
       + `<span class="opt-lane-legend">${legend}</span></div><p class="opt-tip"${optTipOpen.has(k) ? "" : " hidden"}>${escapeHtml(OPT_TIPS[k]).replace(/\n/g, "<br>")}</p>`;
-    laneBody.innerHTML = head("lane", "옵션 만기 · 블록 거래 · −24h ~ +120h", `<b class="opt-warn">막대</b> 만기 규모 · pain · P/C · <b class="opt-c">점</b> 블록 거래 · <b class="opt-c">선</b> 만기별 ATM IV`) + optLaneSvg(o, blocks, lw);
+    const phone = window.matchMedia("(max-width: 720px)").matches;   // 휴대폰만 C 안(데스크톱은 이름표 달린 점 유지)
+    laneBody.innerHTML = head("lane", "옵션 만기 · 블록 거래 · −24h ~ +120h", `<b class="opt-warn">막대</b> 만기 규모 · pain · P/C${phone ? "" : ` · <b class="opt-c">점</b> 블록 거래`} · <b class="opt-c">선</b> 만기별 ATM IV`)
+      + (phone ? optLaneSvg(o, [], lw) + optBlkMobileHtml(blocks, (((latestGex || {}).block_trades || {}).n_by_coin || {})[cur]) : optLaneSvg(o, blocks, lw));
     flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 옵션 순델타 누적 · 테이커 기준`) + optFlowSvg(fl, lw) : "");
   }
 }
