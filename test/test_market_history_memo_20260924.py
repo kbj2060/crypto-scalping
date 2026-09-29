@@ -25,13 +25,14 @@ def frame(p0):
     return pd.DataFrame({"timestamp": ts, "open": c, "high": c + 1, "low": c - 1, "close": c, "volume": 1.0})
 
 async def main():
-    eth, btc = frame(2600), frame(60000)
+    eth, btc = frame(2600), frame(60000).drop(columns=["volume"])   # 실제 BTC 프레임은 OHLC 뿐 -- 거래량 없어도 행이 나와야 한다(09-29 사고)
     ns["evidence_signal_cache"]["frames"] = (eth, btc, None)
     a = await load("eth")
     assert len(a) == 200 and a[-1]["close"] == 2899.0
     assert await load("eth") is a and len(calls) == 1          # 같은 프레임 -> 다시 안 만든다
     b = await load("btc")
     assert b[-1]["close"] == 60299.0 and len(calls) == 2       # 자산별로 따로 든다
+    assert "vwap" in a[-1] and "vwap" not in b[-1]             # 거래량 있으면 VWAP, 없으면 VWAP 없이(예외 아님)
     ns["evidence_signal_cache"]["frames"] = (frame(2700), btc, None)
     c = await load("eth")
     assert c is not a and c[-1]["close"] == 2999.0 and len(calls) == 3   # 새 프레임 -> 새 행

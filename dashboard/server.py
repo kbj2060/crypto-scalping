@@ -3145,10 +3145,13 @@ def make_app() -> web.Application:
             return memo[1]
         veto = trend_veto_rows(src)
         # 2026-09-29 세션 VWAP(UTC 00시 시작) ± 거래량 가중 σ -- 200봉(16.6h) 앞에서 세션이 시작할 수 있어 600봉에서 센다.
-        tail = src.tail(600)
-        tss = [int(t.timestamp()) for t in tail["timestamp"]]
-        vw, vsd = mctx.session_vwap(tss, tail["high"].tolist(), tail["low"].tolist(), tail["close"].tolist(), tail["volume"].tolist())
-        vwap = {t: {"vwap": round(a, 4), "vsd": round(b, 4)} for t, a, b in zip(tss, vw, vsd) if a is not None}
+        # 🔴BTC 프레임(증거신호 캐시)은 OHLC 뿐이라 거래량이 없다 -- 없으면 VWAP 없이 간다(09-29 배포 직후 BTC 캔들 500 · 30분 카드 BTC 판정 결측 사고)
+        vwap: dict[int, dict[str, float]] = {}
+        if "volume" in src.columns:
+            tail = src.tail(600)
+            tss = [int(t.timestamp()) for t in tail["timestamp"]]
+            vw, vsd = mctx.session_vwap(tss, tail["high"].tolist(), tail["low"].tolist(), tail["close"].tolist(), tail["volume"].tolist())
+            vwap = {t: {"vwap": round(a, 4), "vsd": round(b, 4)} for t, a, b in zip(tss, vw, vsd) if a is not None}
         rows = [
             {
                 "time": int(row["timestamp"].timestamp()),
