@@ -4003,6 +4003,90 @@ const MC_TIPS = {
   when: "다음 펀딩 정산 · 가까운 옵션 만기와 max pain · 미국장 · 다음 주요 지표.\n우리 검정: 펀딩 정산 전후 드리프트는 반기마다 부호가 뒤집혀 기각. max pain 쪽 1시간 규칙(만기 1시간 전 → 08:00 UTC)만 2026년 첫 검정 통과 — 후보라 표본외 장부로 계속 잰다.",
   px: "세션 VWAP = UTC 00시부터 거래량 가중 평균가(σ = 거래량 가중 표준편차). 볼린저 %B = (종가 − 하단) ÷ (상단 − 하단), 20봉·2σ. RSI 14 = 5분봉. 스위치로 차트에 선을 켠다.\n우리 검정: 볼린저·VWAP 셋업은 방향 엣지가 없었고 RSI·%B는 짧은 되돌림을 약하게 말한다(비용을 못 넘음). 위치 참고용.",
 };
+// 2026-09-30 시안 B 판 설명 = 옛 칸 설명을 판 단위로 묶은 것(문장은 그대로).
+MC_TIPS.q_lev = MC_TIPS.lev + "\n\n" + MC_TIPS.ls;
+MC_TIPS.q_flow = MC_TIPS.flow + "\n\n" + MC_TIPS.quad;
+MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
+MC_TIPS.q_wall = MC_TIPS.book + "\n\n" + MC_TIPS.cross + "\n\n" + MC_TIPS.px;
+// 시안 B 그림 부품 -- 전부 SVG 문자열. 폭은 고정(칸 격자가 줄을 맞춘다), 색은 3색 규칙(방향만 초록·빨강, 극단 구간만 주황).
+const mcGfx = {
+  pct(p, w = 130) {   // 분위 0~1 · 양끝 10% 주황 띠 · 값 없으면 빈 막대
+    const x = 4 + (w - 8) * Math.max(0, Math.min(1, p ?? 0));
+    return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="6" width="${w - 8}" height="4" rx="2" fill="rgb(var(--lift) / .12)"/>`
+      + `<rect x="4" y="6" width="${(w - 8) * 0.1}" height="4" rx="2" fill="var(--warn)" opacity=".4"/><rect x="${4 + (w - 8) * 0.9}" y="6" width="${(w - 8) * 0.1}" height="4" rx="2" fill="var(--warn)" opacity=".4"/>`
+      + `<line x1="${w / 2}" x2="${w / 2}" y1="3" y2="13" stroke="var(--line)"/>${p == null ? "" : `<circle cx="${x.toFixed(1)}" cy="8" r="5" fill="var(--text)"/>`}</svg>`;
+  },
+  sig(zv, w = 130) {   // σ −3~+3 · 0 가운데 · ±2σ 점선
+    const c = w / 2, s = (w / 2 - 4) / 3, v = zv == null ? 0 : Math.max(-3, Math.min(3, zv)), x0 = v >= 0 ? c : c + v * s;
+    const fill = zv == null || Math.abs(zv) < 0.5 ? "var(--muted)" : zv > 0 ? "var(--good)" : "var(--bad)";
+    return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="7" width="${w - 8}" height="2" fill="rgb(var(--lift) / .1)"/>`
+      + [-2, 2].map((q) => `<line x1="${c + q * s}" x2="${c + q * s}" y1="3" y2="13" stroke="var(--line)" stroke-dasharray="2 2"/>`).join("")
+      + `<line x1="${c}" x2="${c}" y1="2" y2="14" stroke="var(--muted)"/>${zv == null ? "" : `<rect x="${x0.toFixed(1)}" y="4" width="${Math.max(1.5, Math.abs(v) * s).toFixed(1)}" height="8" rx="2" fill="${fill}"/>`}</svg>`;
+  },
+  ratio(now, prev, w = 130, lo = 0.5, hi = 4) {   // 로그 눈금 · 1 가운데 · 빈 점 = 하루 전
+    if (now == null) return mcGfx.pct(null, w);
+    const X = (v) => 4 + (w - 8) * Math.max(0, Math.min(1, Math.log(v / lo) / Math.log(hi / lo)));
+    return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="7" width="${w - 8}" height="2" fill="rgb(var(--lift) / .1)"/><line x1="${X(1)}" x2="${X(1)}" y1="2" y2="14" stroke="var(--muted)"/>`
+      + (prev ? `<line x1="${X(prev)}" x2="${X(now)}" y1="8" y2="8" stroke="var(--muted)"/><circle cx="${X(prev)}" cy="8" r="4" fill="var(--panel)" stroke="var(--muted)"/>` : "")
+      + `<circle cx="${X(now)}" cy="8" r="5" fill="var(--text)"/></svg>`;
+  },
+  quad(move, oiPct, w = 96) {   // 가격(x, 1시간 bp ±60) × OI(y, 1시간 % ±1) -- 가운데 원 = «이동 작음, 판정 보류»
+    const c = w / 2, x = c + Math.max(-1, Math.min(1, (move || 0) / 60)) * (c - 10), y = c - Math.max(-1, Math.min(1, (oiPct || 0) / 1)) * (c - 10);
+    return `<svg class="mc-svg" width="${w}" height="${w}" viewBox="0 0 ${w} ${w}" style="width:${w}px;height:${w}px" aria-hidden="true"><rect x="1" y="1" width="${w - 2}" height="${w - 2}" rx="6" fill="none" stroke="var(--line)"/>`
+      + `<line x1="${c}" x2="${c}" y1="4" y2="${w - 4}" stroke="var(--line)"/><line x1="4" x2="${w - 4}" y1="${c}" y2="${c}" stroke="var(--line)"/>`
+      + `<text x="${w - 5}" y="13" font-size="9" fill="var(--muted)" text-anchor="end">신규 롱</text><text x="5" y="13" font-size="9" fill="var(--muted)">신규 숏</text>`
+      + `<text x="5" y="${w - 5}" font-size="9" fill="var(--muted)">롱 정리</text><text x="${w - 5}" y="${w - 5}" font-size="9" fill="var(--muted)" text-anchor="end">숏 정리</text>`
+      + `<circle cx="${c}" cy="${c}" r="${((c - 10) * 0.25).toFixed(1)}" fill="rgb(var(--lift) / .07)"/>${move == null ? "" : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" fill="var(--text)"/>`}</svg>`;
+  },
+  book(sw, bps, w = 300) {   // ±bp 매수벽 | 매도벽 거울 막대(ETH)
+    const b = sw.bid, a = sw.ask, mx = Math.max(1, ...b, ...a), c = w / 2, h = 4 + bps.length * 21;
+    const kq = (v) => (v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : String(Math.round(v)));
+    return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="호가 벽 매수 대 매도">` + bps.map((bp, i) => {
+      const y = 4 + i * 21, bw = (c - 64) * b[i] / mx, aw = (c - 64) * a[i] / mx;   // 64 = 가장 긴 벽의 «80.4k» 글자 자리
+      return `<rect x="${(c - 18 - bw).toFixed(1)}" y="${y}" width="${bw.toFixed(1)}" height="13" rx="2" fill="var(--good)" opacity=".75"/><rect x="${c + 18}" y="${y}" width="${aw.toFixed(1)}" height="13" rx="2" fill="var(--bad)" opacity=".75"/>`
+        + `<text x="${c}" y="${y + 10}" font-size="10" fill="var(--muted)" text-anchor="middle">±${bp}</text>`
+        + `<text x="${(c - 22 - bw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + 22 + aw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)">${kq(a[i])}</text>`;
+    }).join("") + `</svg>`;
+  },
+  terrain(px, hl, lv, bps, top, w = 300, h = 230) {   // 세로 가격축 ±6%: HL 고래 청산가 원 · VWAP ±1·2σ 띠 · 호가 ±bp 눈금 · 12시간 실측 최다 ◆ · 지금가
+    if (!(px > 0)) return `<div class="mc-note">가격 대기</div>`;
+    const lo = px * 0.94, hi = px * 1.06, Y = (p) => 10 + (h - 20) * (hi - p) / (hi - lo), cl = (p) => Math.max(10, Math.min(h - 10, Y(p)));
+    let s = "";
+    if (lv && lv.vsd > 0) {
+      const v = lv.vwap, sd = lv.vsd;
+      s += `<rect x="64" y="${cl(v + 2 * sd).toFixed(1)}" width="${w - 128}" height="${Math.max(0, cl(v - 2 * sd) - cl(v + 2 * sd)).toFixed(1)}" fill="rgb(var(--lift) / .05)"/>`
+        + `<rect x="64" y="${cl(v + sd).toFixed(1)}" width="${w - 128}" height="${Math.max(0, cl(v - sd) - cl(v + sd)).toFixed(1)}" fill="rgb(var(--lift) / .08)"/>`
+        + `<line x1="64" x2="${w - 64}" y1="${cl(v).toFixed(1)}" y2="${cl(v).toFixed(1)}" stroke="var(--muted)" stroke-dasharray="4 3"/><text x="${w - 60}" y="${(cl(v) + 4).toFixed(1)}" font-size="10" fill="var(--muted)">VWAP</text>`;
+    }
+    const all = [...(hl.below || []).map((r) => ({ ...r, side: "long" })), ...(hl.above || []).map((r) => ({ ...r, side: "short" }))].filter((r) => r.px >= lo && r.px <= hi);
+    const mx = Math.max(1, ...all.map((r) => r.usd || 0));
+    let lastY = -99;
+    all.sort((a, c) => c.usd - a.usd).forEach((r) => {
+      const rr = 3 + 12 * Math.sqrt((r.usd || 0) / mx), yy = Y(r.px);
+      s += `<circle cx="${w / 2}" cy="${yy.toFixed(1)}" r="${rr.toFixed(1)}" fill="${r.side === "long" ? "var(--bad)" : "var(--good)"}" opacity=".55"><title>HL 고래 ${r.side === "long" ? "롱" : "숏"} 청산가 ${r.px} · ${fmtUsdCompact(r.usd)}</title></circle>`;
+      if (Math.abs(yy - lastY) > 13) { s += `<text x="${w / 2 + 20}" y="${(yy + 4).toFixed(1)}" font-size="10" fill="var(--text)">${Math.round(r.px)} · ${fmtUsdCompact(r.usd)}</text>`; lastY = yy; }
+    });
+    if (top && top[0] >= lo && top[0] <= hi) s += `<path d="M${w / 2 - 70} ${Y(top[0]).toFixed(1)} l5 -5 l5 5 l-5 5 z" fill="var(--warn)"><title>12시간 실측 청산 최다 ${top[0]} · 롱 ${fmtUsdCompact(top[1])} / 숏 ${fmtUsdCompact(top[2])}</title></path>`;
+    bps.forEach((bp) => [1, -1].forEach((q) => { const p = px * (1 + q * bp / 1e4); s += `<line x1="54" x2="64" y1="${Y(p).toFixed(1)}" y2="${Y(p).toFixed(1)}" stroke="${q > 0 ? "var(--bad)" : "var(--good)"}" stroke-width="2"/>`; }));
+    s += `<line x1="50" x2="${w - 50}" y1="${Y(px).toFixed(1)}" y2="${Y(px).toFixed(1)}" stroke="var(--text)" stroke-width="1.5"/><text x="2" y="${(Y(px) + 4).toFixed(1)}" font-size="11" font-weight="700" fill="var(--text)">${Math.round(px)}</text>`;
+    [0.95, 1.05].forEach((q) => { s += `<text x="2" y="${(Y(px * q) + 4).toFixed(1)}" font-size="10" fill="var(--muted)">${Math.round(px * q)}</text>`; });
+    return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="가격 지형: HL 고래 청산가, VWAP 띠, 호가 거리">${s}</svg>`;
+  },
+  timeline(events, w = 900, h = 48) {   // 다음 24시간 -- 24시간 넘는 일정은 오른쪽 끝에 «>»
+    const now = Date.now(), X2 = (hr) => 12 + (w - 24) * Math.min(24, hr) / 24;
+    if (w < 600) {   // 휴대폰: 이름표가 서로 겹쳐 목록으로(같은 순서 · 남은 시간)
+      return events.filter((e) => e.t > now).sort((a, c) => a.t - c.t).map((e) => `<div class="mc-tlrow"><i></i><b>${fmtHourMinute(e.t)}</b> ${escapeHtml(e.nm)} <span>+${((e.t - now) / 3.6e6).toFixed(1)}h</span></div>`).join("");
+    }
+    let s = `<line x1="12" x2="${w - 12}" y1="22" y2="22" stroke="var(--line)"/>`;
+    [0, 6, 12, 18, 24].forEach((q) => { s += `<text x="${X2(q)}" y="${h - 2}" font-size="10" fill="var(--muted)" text-anchor="${q ? (q === 24 ? "end" : "middle") : "start"}">${q ? "+" + q + "h" : "지금"}</text>`; });
+    events.filter((e) => e.t > now).sort((a, c) => a.t - c.t).forEach((e, i) => {
+      const hr = (e.t - now) / 3.6e6, x = X2(hr), far = hr > 24;
+      s += `<circle cx="${x.toFixed(1)}" cy="22" r="5" fill="var(--warn)"${far ? ' opacity=".45"' : ""}/>`
+        + `<text x="${x.toFixed(1)}" y="${i % 2 ? 38 : 12}" font-size="10.5" fill="var(--text)" text-anchor="${x > w - 90 ? "end" : x < 90 ? "start" : "middle"}">${escapeHtml(e.nm)} ${fmtHourMinute(e.t)}${far ? " >" : ""}</text>`;
+    });
+    return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="다음 24시간 일정">${s}</svg>`;
+  },
+};
 
 async function refreshMarketCtx() {
   if (activePageTab !== "snapshot" || document.hidden) return;
@@ -4071,11 +4155,9 @@ function renderMarketCtx() {
   }
   const n = (v, dp = 0) => (v == null || !Number.isFinite(+v) ? "-" : (+v).toLocaleString("en-US", { maximumFractionDigits: dp, minimumFractionDigits: dp }));
   const sg = (v, dp = 1, u = "") => (v == null || !Number.isFinite(+v) ? "-" : `${+v >= 0 ? "+" : "−"}${n(Math.abs(v), dp)}${u}`);
-  const pctl = (p) => (p == null ? "" : ` · ${Math.round(p * 100)}분위`);
   const fr = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(4)}%`);
   const left = (ms) => { if (!ms) return "-"; const s = Math.max(0, (ms - Date.now()) / 1000); return s >= 3600 ? `${Math.floor(s / 3600)}시간 ${Math.floor((s % 3600) / 60)}분` : `${Math.ceil(s / 60)}분`; };
   const usd = (v) => (v == null ? "-" : fmtUsdCompact(v));
-  const kv = (k, v, cls = "") => `<div class="mc-kv"><span>${k}</span><b class="${cls}">${v}</b></div>`;
   const tone = (v, thr = 0.5) => (v == null || Math.abs(v) < thr ? "" : v > 0 ? "mc-good" : "mc-bad");
   const sec = (key, title, inner) => `<div class="mc-sec"><h4><button type="button" class="mc-q" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
     + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(MC_TIPS[key]).replace(/\n/g, "<br>")}</p>${inner}</div>`;
@@ -4093,7 +4175,6 @@ function renderMarketCtx() {
   const ef = o ? optFront(o) : null, us = mcUsSession();
   const nextMacro = (latestMacroEvents || []).filter((e) => e.importance === "high" && Date.parse(e.time_utc) > Date.now())
     .sort((a, c) => a.time_utc.localeCompare(c.time_utc))[0];
-  const hlRow = (arr) => (arr && arr.length ? arr.slice(0, 3).map((l) => `${n(l.px)} ${usd(l.usd)}`).join(" · ") : "없음(±10%)");
   const prof = d.liq_profile || [], top = prof.reduce((m, r) => (r[1] + r[2] > (m ? m[1] + m[2] : 0) ? r : m), null);
   const sw = bk.sweep, bps = bk.bps || [25, 50, 100];
   const thin = bk.bid25_pct != null && bk.ask25_pct != null && Math.min(bk.bid25_pct, bk.ask25_pct) <= 0.1
@@ -4104,53 +4185,55 @@ function renderMarketCtx() {
     badge.textContent = (d.lev || {}).label || "-";
     badge.className = `ops-badge ${levWarn ? "warn" : "neutral"}`;
   }
-  const html = [
-    sec("lev", "레버리지", kv("상태", escapeHtml((d.lev || {}).label || "-"), levWarn ? "mc-warn" : "")
-      + kv("펀딩 · 바이낸스 예상", `${fr(f.bn)}${f.bn_at_base ? " · 기본값(평온 고정)" : pctl(f.bn_pct180)} · 정산까지 ${left(f.next_ms)}`)
-      + kv("펀딩 · OKX / HL(8시간)", `${fr(f.okx)} / ${fr(f.hl_8h)}`)
-      + kv("베이시스(마크−인덱스)", `${sg(b.bp, 1, "bp")} · 30분 ${sg(b.d30_bp, 1, "bp")}${pctl(b.pct7d)}`)
-      + kv("OI · 바이낸스 + OKX", `${n((oi.oi || 0) / 1e6, 2)}M + ${n((oi.okx || 0) / 1e6, 2)}M ETH`)
-      + kv("OI 변화", `1시간 ${sg(oi.d1h_pct, 2, "%")}${oi.z1h == null ? "" : ` (z ${sg(oi.z1h, 1)})`} · 24시간 ${sg(oi.d24h_pct, 1, "%")}`, tone(oi.z1h, 1.5))
-      + kv("OI · HL", oi.hl == null ? "-" : `${n(oi.hl / 1e6, 2)}M ETH`)),
-    sec("ls", "포지션 비율 · 5분", !ls ? `<div class="mc-note">롱숏비 수집 없음</div>`
-      : kv("계정 롱숏비", `${n(ls.global, 2)} (하루 전 ${n(ls.global_24h, 2)})`)
-        + kv("탑트레이더 포지션", `${n(ls.top_pos, 2)} (하루 전 ${n(ls.top_pos_24h, 2)})`)
-        + kv("테이커 매수 ÷ 매도", n(ls.taker, 2), tone(ls.taker == null ? null : ls.taker - 1, 0.1))),
-    sec("quad", "가격 × OI · 1시간", kv("지금", d.quad ? escapeHtml(d.quad.label) : "-",
-        !d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : "")
-      + kv("1시간", `${sg(d.move60, 0, "bp")} · OI ${sg(d.oi60, 0)} ETH`)
-      + (d.quad ? `<div class="mc-note">${escapeHtml(d.quad.note)}</div>` : "")),
-    sec("flow", "크기별 수급 · 60분", kv("고래 / 중형 / 리테일", z.whale == null ? "기준 쌓는 중(6시간)"
-        : `<span class="${tone(z.whale)}">${sg(z.whale, 1, "σ")}</span> / <span class="${tone(z.mid)}">${sg(z.mid, 1, "σ")}</span> / <span class="${tone(z.retail)}">${sg(z.retail, 1, "σ")}</span>`)
-      + kv("30분 CVD", sg(fl.cvd30_z, 1, "σ"), tone(fl.cvd30_z))
-      + kv("30분 체결 · 바이낸스 / OKX", `${sg(fl.bn30, 0)} / ${sg(fl.okx30, 0)} ETH`)),
-    sec("cross", "교차 시장", kv("BTC 30분", `${sg((d.btc || {}).move_bp, 0, "bp")} · ${(d.btc || {}).rel === "동행" ? "ETH 같이 간다" : (d.btc || {}).rel === "단독" ? "ETH 혼자 간다" : (d.btc || {}).move_bp == null ? "수집 중" : "ETH 30분 방향 없음"}`)
-      + kv("가격차 · OKX(마크) / HL(미드)", `${sg((d.venues || {}).okx_bp, 1, "bp")} / ${sg((d.venues || {}).hl_bp, 1, "bp")}`)
-      + kv("HL 프리미엄", sg(b.hl_premium_bp, 1, "bp"))),
-    sec("book", "호가 유동성", kv("스프레드", bk.spread == null ? "-" : `$${bk.spread.toFixed(2)}${bk.spread > 0.015 ? " — 평소(1틱)보다 넓다" : ""}`, bk.spread > 0.015 ? "mc-warn" : "")
-      + (sw ? bps.map((bp, i) => kv(`±${bp}bp 까지 · 매수벽 / 매도벽`, `${n(sw.bid[i])} / ${n(sw.ask[i])} ETH`)).join("") : kv("호가", "래스터 대기"))
-      + kv("얇은 쪽(±25bp, 6시간 분위)", bk.bid25_pct == null ? "기준 쌓는 중(10분)"
-        : `매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}${thin ? ` — ${thin}` : ""}`, thin ? "mc-warn" : "")),
-    sec("liq", "청산", kv("청산 급증(1분 z)", !bu ? "-" : burstHot
-        ? `${(bu.short_usd_1m || 0) > (bu.long_usd_1m || 0) ? "숏" : "롱"} 청산 급증 · ${usd(Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0))}/1분`
-        : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}${bAge != null && bAge > 5 ? ` · 마지막 청산 ${Math.round(bAge)}분 전` : ""}`, burstHot ? "mc-warn" : "")
-      + kv("HL 고래 청산가 ↓(롱)", hlRow((d.hl_liq || {}).below))
-      + kv("HL 고래 청산가 ↑(숏)", hlRow((d.hl_liq || {}).above))
-      + kv("12시간 실측 청산 최다", top ? `${n(top[0], 1)} (롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : "없음")),
-    sec("when", "일정", kv("다음 펀딩 정산", f.next_ms ? `${fmtHourMinute(f.next_ms)} (${left(f.next_ms)})` : "-")
-      + kv("가까운 옵션 만기", ef ? `${optKst(ef.exp_ms)} (${left(ef.exp_ms)}) · max pain ${n(ef.pain)}${px ? ` (${ef.pain >= px ? "위" : "아래"} ${n(Math.abs(ef.pain / px - 1) * 100, 1)}%)` : ""}` : "-")
-      + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? `<div class="mc-note">max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)</div>` : "")
-      + kv("미국장", !us ? "-" : us.live ? `장중 · 마감까지 ${left(us.close)}` : `개장까지 ${left(us.open)}`)
-      + kv("다음 주요 지표", nextMacro ? `${escapeHtml(nextMacro.title_ko)} · ${fmtMacroCalendarTime(nextMacro.time_utc)}` : latestMacroEvents == null ? "불러오는 중" : "예정 없음")),
-    sec("px", "가격 위치 · 5분봉", kv("세션 VWAP", lv ? `${n(lv.vwap, 1)} · 지금 ${sg(vz, 1, "σ")}` : "-")
-      + kv("볼린저 %B (20, 2σ)", pb == null ? "-" : `${n(pb, 2)} · 폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%`)
-      + kv("RSI 14", rsi == null ? "-" : n(rsi, 0), rsi == null ? "" : rsi >= 70 || rsi <= 30 ? "mc-warn" : "")
+  // ── 2026-09-30 시안 B(사용자 선택 «글자가 너무 많다 → 그릴 수 있는 건 그림으로»): 질문 네 판 + 다음 24시간 ──
+  //   분위 = 0~100 게이지(양끝 10% 주황) · σ = 0 가운데 막대(±2σ 점선) · 비율 = 1 가운데 로그 눈금(빈 점 = 하루 전).
+  //   그림 없는 부값(OKX/HL 펀딩·OI 합계·거래소별 30분 체결·스프레드·12시간 청산 최다·청산 급증)은 판마다 흐린 한 줄로 남긴다.
+  const G = mcGfx, gRow = (label, vis, val, cls = "", tip = "") => `<div class="mc-g"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${label}</span>${vis}<b class="${cls}">${val}</b></div>`;
+  const note = (s) => `<div class="mc-note">${s}</div>`;
+  const qSec = (key, title, inner, extra = "") => sec(key, title, (extra ? `<div class="mc-state">상태${extra}</div>` : "") + inner);
+  const levChip = ` <span class="mc-chip${levWarn ? " warn" : ""}">${escapeHtml(((d.lev || {}).label || "-").split(" —")[0])}</span>`;
+  const btcTxt = (d.btc || {}).rel === "동행" ? "ETH 같이 간다" : (d.btc || {}).rel === "단독" ? "ETH 혼자 간다" : (d.btc || {}).move_bp == null ? "수집 중" : "ETH 30분 방향 없음";
+  const events = [
+    f.next_ms ? { t: f.next_ms, nm: "펀딩 정산" } : null,
+    ef ? { t: ef.exp_ms, nm: `옵션 만기 · pain ${n(ef.pain)}` } : null,
+    us ? { t: us.live ? us.close : us.open, nm: us.live ? "미국장 마감" : "미국장 개장" } : null,
+    nextMacro ? { t: Date.parse(nextMacro.time_utc), nm: nextMacro.title_ko } : null,
+  ].filter(Boolean);
+  const htmlB = [
+    qSec("q_lev", "① 레버리지 과열?", gRow("펀딩 분위", G.pct(f.bn_at_base ? null : f.bn_pct180), f.bn_at_base ? "기본값" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`, "", `바이낸스 예상 ${fr(f.bn)}`)
+      + gRow("베이시스 분위", G.pct(b.pct7d), `${sg(b.bp, 1, "bp")}`, "", `마크−인덱스 · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위 · 30분 ${sg(b.d30_bp, 1, "bp")}`)
+      + gRow("OI 1시간", G.sig(oi.z1h), `${sg(oi.z1h, 1, "σ")}`, tone(oi.z1h, 1.5), `1시간 ${sg(oi.d1h_pct, 2, "%")} · 24시간 ${sg(oi.d24h_pct, 1, "%")}`)
+      + (ls ? gRow("계정 롱숏", G.ratio(ls.global, ls.global_24h), n(ls.global, 2), "", `하루 전 ${n(ls.global_24h, 2)}`)
+        + gRow("탑트레이더", G.ratio(ls.top_pos, ls.top_pos_24h), n(ls.top_pos, 2), "", `하루 전 ${n(ls.top_pos_24h, 2)}`) : "")
+      + note(`정산까지 ${left(f.next_ms)} · 펀딩 OKX ${fr(f.okx)} / HL ${fr(f.hl_8h)} · OI ${n((oi.oi || 0) / 1e6, 2)}M + OKX ${n((oi.okx || 0) / 1e6, 2)}M + HL ${oi.hl == null ? "-" : n(oi.hl / 1e6, 2) + "M"} ETH`), levChip),
+    qSec("q_flow", "② 누가 밀고 있나 · 60분", (z.whale == null ? note("크기별 기준 쌓는 중(6시간)")
+        : ["whale", "mid", "retail"].map((k2, i) => gRow(["고래", "중형", "리테일"][i], G.sig(z[k2]), sg(z[k2], 1, "σ"), tone(z[k2]))).join(""))
+      + gRow("30분 CVD", G.sig(fl.cvd30_z), sg(fl.cvd30_z, 1, "σ"), tone(fl.cvd30_z))
+      + (ls ? gRow("테이커 매수÷매도", G.ratio(ls.taker, null), n(ls.taker, 2), tone(ls.taker == null ? null : ls.taker - 1, 0.1)) : "")
+      + `<div class="mc-quad">${G.quad(d.move60, oi.d1h_pct)}<div><b class="${!d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : ""}">${d.quad ? escapeHtml(d.quad.label) : "-"}</b>`
+      + note(`1시간 ${sg(d.move60, 0, "bp")} · OI ${sg(d.oi60, 0)} ETH`) + `</div></div>`
+      + note(`30분 체결 · 바이낸스 ${sg(fl.bn30, 0)} / OKX ${sg(fl.okx30, 0)} ETH`)),
+    qSec("q_map", "③ 가격 지형 · ±6%", G.terrain(px, d.hl_liq || {}, lv, bps, top)
+      + note(`원 = HL 고래 청산가(빨강 롱 · 초록 숏, 크기 = 금액) · 띠 = VWAP ±1·2σ · 왼쪽 눈금 = 호가 ±${bps.join("/")}bp · ◆ = 12시간 실측 청산 최다`)
+      + `<div class="mc-note${burstHot ? " mc-warn" : ""}">청산 ${!bu ? "-" : burstHot ? `${(bu.short_usd_1m || 0) > (bu.long_usd_1m || 0) ? "숏" : "롱"} 급증 · ${usd(Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0))}/1분`
+        : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}`}${top ? ` · 12시간 최다 ${n(top[0], 1)}(롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : ""}</div>`),
+    qSec("q_wall", "④ 벽 · 교차 · 위치", (sw ? G.book(sw, bps) : note("호가 래스터 대기"))
+      + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(2)}${bk.spread > 0.015 ? " — 평소(1틱)보다 넓다" : ""}`
+        + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
+      + gRow("BTC 30분", G.sig((d.btc || {}).move_bp == null ? null : d.btc.move_bp / 20), sg((d.btc || {}).move_bp, 0, "bp"), "", btcTxt)
+      + gRow("가격차 OKX", G.sig((d.venues || {}).okx_bp == null ? null : d.venues.okx_bp / 5), sg((d.venues || {}).okx_bp, 1, "bp"), "", "마크 대 마크")
+      + gRow("가격차 HL", G.sig((d.venues || {}).hl_bp == null ? null : d.venues.hl_bp / 5), sg((d.venues || {}).hl_bp, 1, "bp"), "", `미드 대 미드 · HL 프리미엄 ${sg(b.hl_premium_bp, 1, "bp")}`)
+      + gRow("VWAP 거리", G.sig(vz), sg(vz, 1, "σ"), "", lv ? `세션 VWAP ${n(lv.vwap, 1)}` : "")
+      + gRow("볼린저 %B", G.pct(pb), pb == null ? "-" : n(pb, 2), "", bb ? `폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%` : "")
+      + gRow("RSI 14", G.pct(rsi == null ? null : rsi / 100), rsi == null ? "-" : n(rsi, 0), rsi != null && (rsi >= 70 || rsi <= 30) ? "mc-warn" : "")
       + `<div class="mc-switch">차트에 그리기 <label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
       + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label></div>`),
+    `<div class="mc-wide">` + qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round((body.clientWidth || 900) - 8)))
+      + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? note(`max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)`) : "")) + `</div>`,
   ].join("");
-  if (body._mcHtml === html) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
-  body._mcHtml = html;
-  keepFocus(body, () => { body.innerHTML = html; });
+  if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
+  body._mcHtml = htmlB;
+  keepFocus(body, () => { body.innerHTML = htmlB; });
 }
 
 el("mcBody")?.addEventListener("click", (e) => {

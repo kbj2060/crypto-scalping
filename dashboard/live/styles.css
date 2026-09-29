@@ -2763,7 +2763,19 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-09-29 «시장 맥락» 카드 -- 옵션 카드와 같은 문법(칸 제목 «?» → 설명 펼침, 키-값 줄)이지만 옵션 색(--option)은 쓰지 않는다:
    이 카드는 서술이라 «?» 는 무채색이고, 방향색은 값에만 입힌다(DESIGN.md Three Signals). 넓으면 두 열, 좁으면 한 열. */
-.mc-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); column-gap: 22px; }   /* 2026-09-30 전폭 -- 칸 수는 폭 따라 */
+.mc-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); column-gap: 22px; }   /* 2026-09-30 전폭 -- 칸 수는 폭 따라 */
+/* 2026-09-30 시안 B(사용자 선택): 판 네 개 + 다음 24시간 줄. 줄 = 이름 | 그림(분위·σ·비율) | 값, 판마다 흐린 부값 한 줄 */
+.mc-body .mc-wide { grid-column: 1 / -1; }
+.mc-svg { display: block; flex: none; max-width: 100%; height: auto; }
+.mc-g { display: grid; grid-template-columns: 88px 130px minmax(0, 1fr); align-items: center; gap: 8px; padding: 2px 0; font-size: 12px; }
+.mc-g > span { color: var(--muted); } .mc-g > b { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+.mc-chip { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.mc-chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.mc-quad { display: flex; gap: 12px; align-items: center; margin: 6px 0 2px; }
+.mc-quad b { font-size: 12px; }
+.mc-quad > div { min-width: 0; word-break: keep-all; }
+.mc-tlrow { font-size: 12px; padding: 2px 0; } .mc-tlrow i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 6px; } .mc-tlrow span { color: var(--muted); }
+.mc-state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin: -2px 0 6px; }
 /* 2026-09-30 30분 시나리오 흡수 -- 넓으면 왼쪽 칸(방향 판정) | 오른쪽 시장 맥락 칸들, 좁으면 위아래 */
 .mc-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px 26px; }
 .mc-sit { min-width: 0; }
