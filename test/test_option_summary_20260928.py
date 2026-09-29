@@ -82,7 +82,7 @@ def test_dex_holder_sign_and_scale(monkeypatch):
     d = gex.options_summary(atm, "ETH")["gamma"]["dex_usd"]
     assert 0.45 * 100 * 2000 < d < 0.56 * 100 * 2000, d
     prof = calls["gamma_by"]["all"]["profile"]
-    assert len(prof[0]) == 5 and prof[0][2] < prof[-1][2], "가격이 오르면 콜 델타(DEX)가 커진다 (행 = 가격·감마·보유자·딜러가정·딜러체결)"
+    assert len(prof[0]) == 6 and prof[0][2] < prof[-1][2], "가격이 오르면 콜 델타(DEX)가 커진다 (행 = 가격·감마·보유자·딜러가정·딜러체결 DEX·딜러체결 감마)"
     # 2026-09-29 딜러 가정(콜 매수·풋 매도): 풋만 있는 체인에서 보유자 DEX 는 −, 딜러 가정 DEX 는 + (풋을 판 딜러는 롱 델타)
     assert puts["gamma"]["dex_asm_usd"] > 0 > puts["gamma"]["dex_usd"]
     assert abs(calls["gamma"]["dex_asm_usd"] - calls["gamma"]["dex_usd"]) < 1e-6, "콜만이면 두 기준이 같다"
@@ -137,3 +137,18 @@ def test_taker_flow_sql_and_covered(monkeypatch):
     f = gex._taker_flow(con, "ETH")
     assert f["net"] == {"ETH-1OCT26-2700-C": 3.0, "ETH-3OCT26-2700-P": -4.0}
     assert f["covered"] == {"ETH-3OCT26-2700-P"}, "첫 체결(1000) 전에 상장된 종목은 수준을 모른다"
+
+
+def test_dealer_gex_from_taker_flow(monkeypatch):
+    """2026-09-29 체결 기반 딜러 GEX: 테이커가 ATM 콜 50개 순매수 → 딜러 콜 숏 → 음감마(딜러 가정 «콜 +»와 반대 부호).
+    곡선 6번째 칸의 지금 가격 점 = dealer_gex_usd · 부호가 한쪽뿐이면 dealer_flip 없음 · flow 가 없으면 키 없음."""
+    monkeypatch.setattr(gex, "_pub", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+    ch = _chain()
+    g = gex.options_summary(ch, "ETH", {"net": {"x2000call": 50.0}, "covered": {"x2000call"}})["gamma"]
+    assert g["dealer_gex_usd"] < 0, g["dealer_gex_usd"]
+    expect = -50 * gex._bs_gamma(2000.0, 2000.0, 50.0, 2 / 365) * 2000.0 ** 2 * 0.01
+    assert abs(g["dealer_gex_usd"] - expect) < 1e-6 * abs(expect)
+    mid = g["profile"][12]
+    assert abs(mid[0] - 2000.0) < 0.1 and abs(mid[5] - g["dealer_gex_usd"]) < 1e-9
+    assert g["dealer_flip"] is None
+    assert "dealer_gex_usd" not in gex.options_summary(ch, "ETH")["gamma"]
