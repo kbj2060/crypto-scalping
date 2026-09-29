@@ -295,19 +295,26 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
         yrs_a = (gch["days_to_expiry"] / 365.0).to_numpy(); k_a = gch["strike"].to_numpy()
         iv_a = (gch["mark_iv"] / 100.0).to_numpy(); oi_a = gch["open_interest"].to_numpy()
         sg_a = gch["option_type"].map({"call": 1.0, "put": -1.0}).to_numpy()
-        def gex_at(px: float) -> float:
+        # 2026-09-29 사용자 «미결제 기반 DEX»: 같은 가격점의 순델타 × 미결제 × 가격(USD). 부호는 **보유자 기준**
+        #   (콜 δ +, 풋 δ −) -- 딜러 쪽은 정반대지만 누가 팔았는지 공개 미결제로는 모르므로 딜러 가정을 넣지 않는다.
+        def gex_dex_at(px: float) -> tuple[float, float]:
             ok = (iv_a > 0) & (yrs_a > 0)
             d1 = (np.log(px / k_a[ok]) + 0.5 * iv_a[ok] ** 2 * yrs_a[ok]) / (iv_a[ok] * np.sqrt(yrs_a[ok]))
             gam = np.exp(-0.5 * d1 * d1) / np.sqrt(2 * np.pi) / (px * iv_a[ok] * np.sqrt(yrs_a[ok]))
-            return float((sg_a[ok] * gam * oi_a[ok]).sum() * px * px * 0.01)
-        prof = [(idx * (0.85 + 0.0125 * i), gex_at(idx * (0.85 + 0.0125 * i))) for i in range(25)]
+            nd1 = 0.5 * (1.0 + np.vectorize(math.erf)(d1 / math.sqrt(2.0))) if ok.any() else d1
+            dlt = np.where(sg_a[ok] > 0, nd1, nd1 - 1.0)
+            return float((sg_a[ok] * gam * oi_a[ok]).sum() * px * px * 0.01), float((dlt * oi_a[ok]).sum() * px)
+        gex_at = lambda px: gex_dex_at(px)[0]  # noqa: E731
+        prof = [(p, *gex_dex_at(p)) for p in (idx * (0.85 + 0.0125 * i) for i in range(25))]
         flip = None
-        for (a, ga), (b, gb) in zip(prof, prof[1:]):
+        for (a, ga, _), (b, gb, _) in zip(prof, prof[1:]):
             if (ga < 0) != (gb < 0):
                 cand = a + (b - a) * (-ga) / (gb - ga)
                 if flip is None or abs(cand - idx) < abs(flip - idx):
                     flip = cand
-        return {"now_usd": gex_at(idx) if len(gch) else None, "flip": flip, "profile": [[round(p, 1), g] for p, g in prof]}
+        now = gex_dex_at(idx) if len(gch) else (None, None)
+        # profile 행 = [가격, 감마$, DEX$] -- 세 번째 칸은 09-29 추가(앞 두 칸을 읽는 옛 화면 호환).
+        return {"now_usd": now[0], "dex_usd": now[1], "flip": flip, "profile": [[round(p, 1), g, d] for p, g, d in prof]}
     front_g = {**_gamma(g_fut[g_fut["expiration_ts"] == g_first] if g_first is not None else chain.iloc[0:0]),
                "exp_ms": int(g_first.timestamp() * 1000) if g_first is not None else None}
     out["gamma"] = front_g

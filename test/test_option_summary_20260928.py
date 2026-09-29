@@ -69,3 +69,17 @@ def test_gamma_by_follows_ladder_scopes(monkeypatch):
     assert abs(gb["week"]["now_usd"] - gb["front"]["now_usd"]) < 1e-6, "7일 안 = 가까운 만기뿐(먼 만기 62일 제외)"
     assert gb["all"]["now_usd"] > 0, "전 만기는 먼 콜로 양수"
     assert len(gb["all"]["profile"]) == 25
+
+
+def test_dex_holder_sign_and_scale(monkeypatch):
+    """2026-09-29 미결제 기반 DEX(보유자 기준): 콜만 → +, 풋만 → −, ATM 콜 100개 ≈ 0.5 × 100 × 2000."""
+    monkeypatch.setattr(gex, "_pub", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+    ch = _chain()
+    calls = gex.options_summary(ch.assign(open_interest=ch.open_interest.where(ch.option_type == "call", 0.0)), "ETH")
+    puts = gex.options_summary(ch.assign(open_interest=ch.open_interest.where(ch.option_type == "put", 0.0)), "ETH")
+    assert calls["gamma"]["dex_usd"] > 0 > puts["gamma"]["dex_usd"]
+    atm = ch[(ch.strike == 2000) & (ch.option_type == "call")]
+    d = gex.options_summary(atm, "ETH")["gamma"]["dex_usd"]
+    assert 0.45 * 100 * 2000 < d < 0.56 * 100 * 2000, d
+    prof = calls["gamma_by"]["all"]["profile"]
+    assert len(prof[0]) == 3 and prof[0][2] < prof[-1][2], "가격이 오르면 콜 델타(DEX)가 커진다"
