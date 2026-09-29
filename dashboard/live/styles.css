@@ -2611,12 +2611,12 @@ body.order-coin-off .acct-lanes::before {
   /* 2026-09-29 30분 시나리오를 옵션 카드 아래로 올렸다가 같은 날 되돌림(사용자 «30분 시나리오 칸을 다시 내리고 블록 거래를 옵션 카드 안에»).
      오른쪽 열 = 옵션 카드 하나(맨 아래 «블록 거래» 칸) · 아랫줄 = 계좌 | 30분 | 신호·특화 신호·경제 일정(위아래). */
   /* 2026-09-30 옵션 카드를 풋프린트 카드 안 오른쪽 칸으로 흡수(사용자 지시) -- 카드가 윗줄 전폭. */
-  #snapshotTabPanel > .liq-map-panel { grid-column: 1 / -1; grid-row: 1; grid-template-columns: minmax(0, 1fr) 380px; column-gap: 22px; align-items: start; }
+  #snapshotTabPanel > .mc-panel { grid-column: 1 / -1; grid-row: 1; }   /* 2026-09-30 시장 맥락(30분 흡수) = 풋프린트 위 전폭 */
+  #snapshotTabPanel > .liq-map-panel { grid-column: 1 / -1; grid-row: 2; grid-template-columns: minmax(0, 1fr) 380px; column-gap: 22px; align-items: start; }
   .liq-map-panel > .opt-in-card { grid-column: 2; grid-row: 1 / span 30; border-top: 0; margin-top: 0; padding: 0 0 0 22px;
     border-left: 1px solid var(--line); align-self: stretch; }
-  #snapshotTabPanel > .acct-panel { grid-column: 1; grid-row: 2; }
-  #snapshotTabPanel > .situation-panel { grid-column: 2; grid-row: 2; }
-  #snapshotTabPanel > .snap-side { grid-column: 3 / 5; grid-row: 2; display: grid; gap: var(--card-gap); align-content: start; }
+  #snapshotTabPanel > .acct-panel { grid-column: 1; grid-row: 3; }
+  #snapshotTabPanel > .snap-side { grid-column: 2 / -1; grid-row: 3; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--card-gap); align-items: start; }
   .acct-panel .acct-lanes { grid-template-columns: 1fr; }   /* 600px 에 두 레인은 안 들어간다 -- 청산이 위 */
 }
 .snap-side { display: contents; }
@@ -2750,7 +2750,15 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-09-29 «시장 맥락» 카드 -- 옵션 카드와 같은 문법(칸 제목 «?» → 설명 펼침, 키-값 줄)이지만 옵션 색(--option)은 쓰지 않는다:
    이 카드는 서술이라 «?» 는 무채색이고, 방향색은 값에만 입힌다(DESIGN.md Three Signals). 넓으면 두 열, 좁으면 한 열. */
-.mc-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 22px; }
+.mc-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); column-gap: 22px; }   /* 2026-09-30 전폭 -- 칸 수는 폭 따라 */
+/* 2026-09-30 30분 시나리오 흡수 -- 넓으면 왼쪽 칸(방향 판정) | 오른쪽 시장 맥락 칸들, 좁으면 위아래 */
+.mc-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px 26px; }
+.mc-sit { min-width: 0; }
+.mc-sit-title { display: flex; align-items: center; gap: 8px; margin: 10px 0 8px; }
+@media (min-width: 1100px) {
+  .mc-wrap { grid-template-columns: 440px minmax(0, 1fr); }
+  .mc-sit { padding-right: 26px; border-right: 1px solid var(--line); }
+}
 @media (max-width: 720px) { .mc-body { grid-template-columns: minmax(0, 1fr); } }
 .mc-sec { border-top: 1px solid var(--soft-line); padding: 10px 0 8px; min-width: 0; }
 .mc-sec h4 { margin: 0 0 6px; }
