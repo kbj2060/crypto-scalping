@@ -3818,7 +3818,9 @@ function renderOptions() {
     const bt = (latestGex || {}).block_trades || {};
     if (blkBody) blkBody.innerHTML = head("blocks", "블록 거래 · 지난 24시간", "")
       + (bt.available === false ? `<div class="opt-note opt-warn">블록 수집 지연 — 아래 목록은 마지막으로 받은 값</div>` : "")
-      + optBlkHtml(blocks, bt.n_by_coin?.[cur], window.matchMedia("(max-width: 720px)").matches, bt.sum_by_coin?.[cur] ?? null, bt.max_by_coin?.[cur] ?? null);
+      // 🔴`?.[` 는 CI 문법 검사(esprima)가 못 읽는다(2026-09-30 배포 막힘) -- `(x || {})[k]` 로 쓴다.
+      + optBlkHtml(blocks, (bt.n_by_coin || {})[cur], window.matchMedia("(max-width: 720px)").matches,
+                   (bt.sum_by_coin || {})[cur] ?? null, (bt.max_by_coin || {})[cur] ?? null);
   }
 }
 
