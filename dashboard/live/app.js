@@ -6503,25 +6503,36 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
               `${lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
         }
       }
-      // 2026-09-30 행사가별 딜러 감마(사용자 지시, 옵션 세션 합의): 막대 = r4(딜러·체결 순감마)만 -- 가정 몫은 안 붙인다(부호 규칙이 달라 섞으면 막대 안에서 부호가 뒤섞인다).
-      //   r5 = 그 행사가 커버율(커버 종목 미결제 ÷ 전체) -- 99% 미만·모름이면 테두리만(«일부만 봄»). r4 null = 모름 = 막대 없음. 범위는 사다리 칩.
+      // 2026-09-30 행사가별 딜러 감마 = «GEX 레벨»(사용자 참고 사진 -- 꼬리표 칸의 작은 상자를 대체): 최근 봉부터 오른쪽 끝까지 가로 점선 +
+      //   선 왼쪽 끝 위에 «GEX + ▼▼» 글자. 청록 = +(양감마) · 주황 = −. 화살표(사용자 선택 a): +GEX 는 지금가 쪽(헤지가 움직임을 받치는 성격),
+      //   −GEX 는 지금가 반대쪽(돌파하면 헤지가 움직임을 따라가는 성격) · 개수 = 크기(범위 최대의 절반 이상이면 둘).
+      //   값은 r4(딜러·체결 순감마)만(옵션 세션 합의 -- 가정 몫 안 붙임). r5 커버 99% 미만·모름이면 옅게(«일부만 봄»). 범위는 사다리 칩, 많으면 크기 상위 6개.
       const sAll = (o.strikes || {})[optLadderScope] || [], sRolled = optLadderScope === "front" && (o.strikes || {}).front_exp_ms <= Date.now();
-      const sVis = sRolled ? [] : sAll.filter((r) => Number.isFinite(r[4]) && yAt(r[0]) >= mt && yAt(r[0]) <= plotBottom);
+      const sVis = sRolled ? [] : sAll.filter((r) => Number.isFinite(r[4]) && r[4] !== 0 && yAt(r[0]) >= mt && yAt(r[0]) <= plotBottom)
+        .sort((p, q) => Math.abs(q[4]) - Math.abs(p[4])).slice(0, 6);
       if (sVis.length) {
-        const sg = document.createElementNS(NS, "g"), gmax = Math.max(1, ...sAll.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0))), xl = ml + cw + TAG_W - 14;   // 가격 꼬리표 칸 오른쪽 끝 14px(꼬리표는 왼쪽 84px) -- 셀 테두리와 헷갈리지 않게
+        const lineG = document.createElementNS(NS, "g"), labG = document.createElementNS(NS, "g");
+        const gmax = Math.max(1, ...sAll.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0)));
+        const x0 = xAt(Math.max(0, candles.length - 10)), x1 = ml + cw, pxNow = Number(currentPrice) || o.index;
+        const mkEl = (parent, tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; parent.appendChild(e); return e; };
         sVis.forEach(([k, , , , g, cov]) => {
-          const len = 3 + (9 * Math.abs(g)) / gmax, y = yAt(k), full = cov != null && cov >= 0.99, col = g >= 0 ? "var(--option)" : "var(--warn)";
-          const e = document.createElementNS(NS, "rect");
-          Object.entries({ x: xl.toFixed(1), y: (y - 3).toFixed(1), width: len.toFixed(1), height: 6, rx: 1.5, fill: full ? col : "none", "fill-opacity": 0.85, stroke: col, "stroke-width": 1.2 })
-            .forEach(([a, v]) => e.setAttribute(a, v));
-          const t = document.createElementNS(NS, "title");
-          t.textContent = `행사가 ${optQ(k)} · 딜러·체결 감마 ${g >= 0 ? "+" : "−"}${optUsd(Math.abs(g))}/1% · 이 행사가 커버 ${cov == null ? "모름" : optCovPct(cov)}\n`
-            + "딜러 = 체결 반대편(메이커)으로 본 순포지션. 커버 밖 미결제(수집 전 상장 종목)는 누가 들었는지 몰라 뺐다(테두리만 = 일부만 봄).\n"
-            + "우리 검정: 행사가 자석(가격이 미결제 큰 행사가로 끌림)과 GEX 크기로 변동폭 예측은 불합격 — 지지·저항이 아니라 딜러 헤지가 쌓인 자리의 참고.";
-          e.appendChild(t); sg.appendChild(e);
+          const y = yAt(k).toFixed(1), full = cov != null && cov >= 0.99, col = g >= 0 ? "var(--option)" : "var(--warn)", op = full ? 1 : 0.75;
+          const toward = k >= pxNow ? "▼" : "▲", away = k >= pxNow ? "▲" : "▼";
+          const arrow = (g >= 0 ? toward : away).repeat(Math.abs(g) >= gmax * 0.5 ? 2 : 1);
+          mkEl(lineG, "line", { x1: x0, x2: x1, y1: y, y2: y, stroke: col, "stroke-opacity": op, "stroke-width": 1.8, "stroke-dasharray": "7 4" });
+          const t = mkEl(labG, "text", { x: x0 + 3, y: (+y - 4).toFixed(1), "font-size": 11, "font-weight": 700, fill: col, "fill-opacity": op,
+                                         stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" }, `GEX ${g >= 0 ? "+" : "−"} ${arrow}`);
+          mkEl(t, "title", {}, `행사가 ${optQ(k)} · 딜러·체결 감마 ${g >= 0 ? "+" : "−"}${optUsd(Math.abs(g))}/1% · 이 행사가 커버 ${cov == null ? "모름" : optCovPct(cov)}\n`
+            + "딜러 = 체결 반대편(메이커)으로 본 순포지션. 커버 밖 미결제(수집 전 상장 종목)는 누가 들었는지 몰라 뺐다(옅은 선 = 일부만 봄).\n"
+            + (g >= 0 ? "+GEX: 화살표 = 지금가 쪽 — 딜러 헤지가 움직임을 반대로 받치는 성격(교과서 설명).\n"
+                      : "−GEX: 화살표 = 지금가 반대쪽 — 돌파하면 딜러 헤지가 움직임을 따라가 커지는 성격(교과서 설명).\n")
+            + "개수 = 크기(범위 최대의 절반 이상이면 둘).\n"
+            + "우리 검정: 행사가 자석(가격이 미결제 큰 행사가로 끌림)과 GEX 크기로 변동폭 예측은 불합격 — 지지·저항이 아니라 딜러 헤지가 쌓인 자리의 참고.");
         });
+        labG.setAttribute("pointer-events", "visiblePainted");
         const gridS = layerCache.get("grid")?.g;
-        if (gridS && gridS.parentNode === svg) svg.insertBefore(sg, gridS.nextSibling); else svg.appendChild(sg);
+        if (gridS && gridS.parentNode === svg) svg.insertBefore(lineG, gridS.nextSibling); else svg.appendChild(lineG);   // 선은 셀 뒤
+        svg.appendChild(labG);                                                                                           // 글자는 위
       }
       const gm = optDealer(o), fl = gm.flip;   // 2026-09-29 딜러·체결(커버 종목 기준)
       if (gm.now_usd == null) {
