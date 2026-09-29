@@ -3854,7 +3854,7 @@ const MARKET_CTX_POLL_MS = 5000;
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
 const mcTipOpen = new Set();
-const mcLine = { vwap: true, bb: false };   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { vwap: true, bb: false, wvwap: false };   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
 const MC_TIPS = {
   lev: "펀딩 = 8시간마다 롱과 숏이 주고받는 이자(양수면 롱이 낸다). 바이낸스는 평온할 때 0.01%에 붙어 거의 안 움직여서 «비싸게 들고 있나»는 베이시스(선물 마크 − 현물 인덱스)의 7일 분위로 본다. OI = 열린 계약 수, z = 1시간 변화가 지난 7일 중 얼마나 튀었나.\n우리 검정: 극단 펀딩 뒤 가격 방향은 없었다(표본 충분). 그래도 넣은 이유 — 청산 연쇄는 쏠린 쪽에서 나고, 상태 줄은 그 쏠림을 말한다. 방향 신호로 쓰지 않는다.",
@@ -4116,7 +4116,8 @@ function renderMarketCtx() {
       + gRow("볼린저 %B", G.pct(pb), pb == null ? "-" : n(pb, 2), "", bb ? `폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%` : "")
       + gRow("RSI 14", G.pct(rsi == null ? null : rsi / 100), rsi == null ? "-" : n(rsi, 0), rsi != null && (rsi >= 70 || rsi <= 30) ? "mc-warn" : "")
       + `<div class="mc-switch">차트에 그리기 <label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
-      + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label></div>`),
+      + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
+      + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label></div>`),
     `<div class="mc-wide">` + qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round((body.clientWidth || 900) - 8)))
       + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? note(`max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)`) : "")) + `</div>`,
   ].join("");
@@ -5924,6 +5925,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           { stroke: "var(--muted)", "stroke-opacity": 0.55, "stroke-dasharray": "3 3", "stroke-width": 1 },
           "볼린저 밴드(20봉 · 2σ). 우리 검정: 4시간 볼린저는 평균회귀·이탈 추종 둘 다 비용을 못 넘었다 — 위치 참고."));
       }
+      // ③ 주간·앵커 VWAP(2026-09-30 사용자 지시, 기본 끔) -- 체결 테이프(/api/market-context profile). 지금 값 하나라 가로선.
+      //   우리 검정: VWAP 되돌림·위/아래 방향 모두 가짜 레벨과 같았다 — 지지·저항 아님, 위치 참고.
+      const pf = activeSnapshotAsset === "eth" && mcLine.wvwap ? ((latestMarketCtx || {}).profile || null) : null;
+      if (pf && pf.available) {
+        let lastY = -99;
+        [["vwap_week", "주간 VWAP", "월 00:00 UTC 부터", "var(--ink)", "8 4", 0.55],
+         ["avwap_hi", "앵커 VWAP·전일고", "전일 고가를 처음 찍은 시각부터", "var(--muted)", "2 3", 0.7],
+         ["avwap_lo", "앵커 VWAP·전일저", "전일 저가를 처음 찍은 시각부터", "var(--muted)", "2 3", 0.7]]
+          .filter(([k]) => pf[k] > 0).map((r) => [...r, yAt(pf[r[0]])]).sort((a, c) => a[6] - c[6])
+          .forEach(([k, nm, from, col, dash, op, y]) => {
+            if (y < mt || y > plotBottom) return;
+            mk(lines, "line", { x1: ml, x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: col, "stroke-opacity": op, "stroke-dasharray": dash, "stroke-width": 1.2 },
+               `${nm} ${pf[k].toFixed(1)} (${from} 거래량 가중 평균가). 우리 검정: VWAP 되돌림·방향 모두 가짜 레벨과 같았다 — 지지·저항으로 읽지 말 것.`);
+            if (y - lastY < 12) return;
+            lastY = y;
+            mk(svg, "text", { x: ml + 4, y: (y - 3).toFixed(1), "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" }).textContent = nm;
+          });
+      }
       // ④ HL 고래 실측 청산가 -- 추정 청산맵(배경)과 따로, 거래소가 준 실제 청산가(추적 300주소)
       const mc = activeSnapshotAsset === "eth" && latestMarketCtx && latestMarketCtx.available ? latestMarketCtx : null;
       if (mc && mc.hl_liq) {
@@ -6393,31 +6412,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
   }
 
-  // 2026-09-30 30분 도달 선(사용자 «30분 시나리오를 풋프린트로», 시안 A): 융합 3결과의 «미도달» 범위(±0.5×30분 폭 = 채점축) 두 줄을
-  //   최근 30분(6봉) 위에 긋고 «30분 안 닿을 N%»(같은 상태의 3.7년 실측 빈도 -- 크기 정보, 방향 아님). ETH 전용.
-  if (isSnapshotChart && footprint && activeSnapshotAsset === "eth" && candles.length) {
-    const fz = ((latestSituation || {}).read || {}).fused, o3 = fz && fz.outcome;
-    const nn = o3 ? (o3.cols.find((c) => c.key === "none") || {}) : {}, rb = nn.band;
-    if (rb && rb[0] > 0 && rb[1] > rb[0]) {
-      const reach = Number.isFinite(o3.reach) ? o3.reach : 100 - (nn.p || 0), mid = (rb[0] + rb[1]) / 2;
-      const sg = document.createElementNS(NS, "g");
-      sg.setAttribute("pointer-events", "none");
-      const put = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; sg.appendChild(e); };
-      const fs = mobileChart ? 10 : 11, x0 = xAt(Math.max(0, candles.length - 6)), x1 = ml + cw;
-      const halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
-      [rb[0], rb[1]].forEach((p, i) => {
-        const y = yAt(p);
-        if (y < mt || y > plotBottom) return;
-        put("line", { x1: x0, x2: x1, y1: y, y2: y, stroke: "var(--ink)", "stroke-opacity": 0.75, "stroke-width": 1.4, "stroke-dasharray": "6 3" });
-        put("text", { x: x0 - 6, y: y + 4, "font-size": fs, "font-weight": 700, fill: "var(--ink)", "text-anchor": "end", ...halo },
-            `${i ? "+" : "−"}${Math.round(Math.abs(p / mid - 1) * 1e4)}bp`);
-      });
-      put("text", { x: x0, y: Math.max(mt + fs, Math.min(plotBottom - 4, yAt(rb[1]) - 6)), "font-size": fs, "font-weight": 800, fill: "var(--ink)", ...halo },
-          `30분 안 닿을 ${Math.round(reach)}%`);
-      const gridG = layerCache.get("grid")?.g;
-      if (gridG && gridG.parentNode === svg) svg.insertBefore(sg, gridG.nextSibling); else svg.appendChild(sg);
-    }
-  }
+  // 2026-09-30 30분 도달 선 제거(사용자 지시 -- «±0.5×30분 폭에 닿는가»는 옵션 예상 폭 띠와 같은 크기 정보라 중복).
 
   // 2026-09-28 칼시 15분: 가격판 전폭 선·창 음영 -> **옵션 괄호를 가로지르는 짧은 눈금 하나**(사용자 선택, 옵션 시안 A의 칼시 선).
   //   글자 «칼시 아래 72% · 11:00»는 괄호 글자와 같은 쪽에. 참고 · 신호 아님(확률은 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침).
