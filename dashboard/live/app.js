@@ -3466,11 +3466,11 @@ function ensureLiveStream() {
 //   옛 «신호» 카드의 GEX 한 줄(gexIndicatorItem)은 이 카드의 «딜러 감마» 칸으로 들어왔다.
 const OPT_TIPS = {
   move: "옵션 가격에 들어 있는 기대 움직임. 1σ = 가격 × DVOL × √(기간/1년) — 약 68% 확률로 이 안. 손절이 5분 1σ 보다 훨씬 좁으면 소음에 걸리기 쉽다.\n차트 띠는 봉 시가에 고정된다: 5분 띠 = 이번 5분봉 시가 ± 5분 1σ, 1시간 띠 = 이번 정시 첫 봉 시가 ± 1시간 1σ(폭도 봉이 열릴 때 값으로 고정). 가격이 띠를 벗어나면 옵션시장 예상보다 큰 움직임.\nIV−실현(VRP): 양수면 옵션시장이 실제보다 큰 움직임을 값에 넣는 중(보통 양수).\n우리 검정(2026년만): DVOL 24시간 1σ 안에 실제로 든 날 77% · 크기 비 1.00(과거 24h 실현변동성 폭은 1.32 로 좁다). 평균 크기는 맞고 꼬리는 두껍다 — 벗어나는 23% 는 크게 벗어난다.",
-  gamma: "행사가 사다리에서 고른 칩과 같은 범위(가까운 만기 · 7일 안 · 전 만기) — 칩을 바꾸면 이 칸과 가격축 플립도 바뀐다. 지금 값 = 사다리 감마 막대의 합(사다리는 지수 ±8% 만 그려 조금 다를 수 있다). 옵션을 판 딜러의 헤지 방향. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 그 부호가 바뀌는 가격.\n우리 검정: ETH 전체 GEX 는 37일 내내 양수(플립이 거의 없다) · 방향 예측은 가격수준의 사본으로 기각 · 크기(앞으로의 변동 폭) 예측도 2026-09-28 사전등록 판정에서 불합격 — 43일 표본, 1시간 설명력 증분 +0.008(CI 0 포함)·24시간은 오히려 악화. 그래서 이 칸은 지금 상태 서술일 뿐이다.\n금액 = 가격 1% 움직임당 딜러가 사고팔 금액($) · 전 만기 합의 5% 미만이면 «거의 중립»(부호가 쉽게 뒤집힌다). DEX(딜러 가정) = 감마와 같은 관행(딜러가 콜을 사고 풋을 팔았다) → Σ콜 δ·미결제 − Σ풋 δ·미결제 × 가격. DEX(딜러·체결) = 테이커 반대편을 딜러로 본 실제 순포지션(수집 시작 뒤 상장 종목만, 커버 % = 그 종목의 미결제 비중) — 커버가 99% 이상이면 가정 줄을 빼고 체결 기반만 보인다. «1시간» = 1시간 전 대비 변화. 전부 검정 안 된 참고값.\nDEX(딜러·체결) = 테이커 반대편을 딜러로 보고 체결을 쌓은 딜러 순포지션 × 지금 델타 × 가격. 체결은 2026-09-27 부터라 그 뒤 상장된 종목만 센다 — 커버 % = 그 종목들의 미결제 비중(일간 만기부터 차고, 주·월물은 새 종목이 상장되며 늘어난다). 딜러 포지션은 미결제를 넘을 수 없어, 넘으면 경고한다(메이커가 고객일 때가 있다).",
+  gamma: "딜러·체결 기준(2026-09-29 사용자 지시): 테이커의 반대편(메이커)을 딜러로 보고, **수집 시작(09-27) 뒤 상장된 종목만** 첫 체결부터 센 딜러 순포지션으로 감마·플립·DEX 를 낸다. 그 전에 상장된 종목은 처음 재고를 몰라 뺀다 — 그래서 카드 맨 위에 칩별 커버 %(= 그 종목의 미결제 비중)를 띄운다. 커버가 낮으면 전체 딜러 포지션이 아니라 일부 종목의 값이다. «가정 깨짐 N배» = 테이커 순수량이 미결제를 넘었다(메이커 ≠ 딜러인 거래가 섞임).\n사다리 칩(가까운 만기 · 7일 안 · 전 만기)과 같은 범위. 금액 = 가격 1% 움직임당 딜러가 사고팔 금액. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 부호가 바뀌는 가격. DEX = 딜러 순델타 × 가격, «1시간» = 1시간 전 대비(그 사이 커버가 바뀌면 «커버 변화»).\n우리 검정: 감마(관행 가정 기준)의 방향·크기 예측은 불합격 · 체결 기반은 검정 전 — 참고로만.",
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기».",
   mood: "리버설·버터플라이는 «가까운 만기» 하나로 잰다(ETH 는 보통 다음 17:00 KST 일간 옵션). 단위 pt = IV %포인트(가격 % 아님), IV 는 Deribit 평가값(mark_iv).\n25Δ 리스크 리버설 = 델타 +0.25 콜 IV − 델타 −0.25 풋 IV(지금가에서 위아래 비슷한 거리). 음수로 깊으면(−5pt 쯤 아래) 하락 방어 풋 수요 = 공포 · 양수면 상승 콜에 웃돈 · ±1pt 안은 중립.\n버터플라이 = (25Δ 콜 IV + 25Δ 풋 IV)/2 − ATM IV = 스마일이 휜 정도. 클수록 «방향은 몰라도 크게 튈» 꼬리에 값이 붙음. 작은 양수가 평상시.\n만기가 하루 안 남으면 25Δ 행사가가 지금가에 바짝 붙어 행사가 한 칸에도 두 값이 흔들린다 — 작은 변화는 소음.\n기간 구조 = 앞 5개 만기의 ATM IV(연율 %, 가까운 순). 뒤로 갈수록 높으면 정상(콘탱고) · 앞이 더 높으면(역전) «지금 당장» 큰 움직임을 값에 넣는 스트레스(급락·이벤트 직전). IV 41 ≈ 하루 1σ ±2.1%(41/√365).\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중. 예측력 모름 → 매매 신호 말고 «분위기가 바뀌었나»(리버설 급락·기간 구조 역전) 확인용.",
   ladder: "행사가 사다리: 세로 = 행사가(지수 ±8%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러), 맨 오른쪽 = 행사가별 순감마(청록 = 콜 쪽 +, 주황 = 풋 쪽 −). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
-  curve: "감마 곡선: 가격이 지금에서 ±15% 옮겨 가면 딜러 감마 합이 얼마가 되는가(행사가 사다리 칩과 같은 범위 · 가까운 만기 / 7일 안 / 전 만기). 청록 = 양감마(움직임을 누르는 쪽) · 주황 = 음감마(키우는 쪽). 흰 점선 = 지금 가격, 주황 점선 = 플립(부호가 바뀌는 가격). 세로 = 가격 1% 움직임당 딜러가 사고파는 금액($).\n점선 = 딜러 DEX(델타 × 가격) — 체결 커버가 99% 미만이면 «딜러 가정»(콜 매수·풋 매도, 실선 감마와 같은 관행), 이상이면 «딜러·체결»(테이커 반대편의 실제 순포지션). 단위가 달라 0선만 맞추고 크기는 따로 늘렸다 — 이름표 값이 지금 가격에서의 DEX. 가격이 오르면 콜 델타가 커져 오른쪽으로 올라간다.\n우리 검정: 감마의 크기·방향 예측은 불합격 — «지금 계약이 어떻게 쌓였나»의 참고로만.",
+  curve: "감마 곡선(딜러·체결, 커버 종목만): 가격이 지금에서 ±15% 옮겨 가면 딜러 감마 합이 얼마가 되는가(사다리 칩과 같은 범위). 청록 = 양감마 · 주황 = 음감마. 흰 점선 = 지금 가격, 주황 점선 = 플립. 세로 = 가격 1% 움직임당 딜러가 사고파는 금액($).\n점선 = DEX(딜러·체결 순델타 × 가격) — 단위가 달라 0선만 맞추고 크기는 따로 늘렸다(값은 아래 줄).\n커버가 낮으면 일부 종목의 곡선이다(카드 맨 위 커버 %). 검정 전 — 참고로만.",
   blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자)이라 롱/숏이나 신규/청산은 모른다.\n우리 검정 없음 — 참고로만.",
   lane: "옵션 만기(지금 ~ +120시간, 블록 거래는 가운데 «블록 거래» 칸): 막대 = 다가올 만기 규모(콜+풋 미결제, 달러) · pain = max pain · P/C = 풋÷콜 미결제 · 청록 선 = 만기별 ATM IV.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
   flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 체결 순델타 누적(«감마 곡선»의 DEX 는 미결제 전체의 델타라 다른 값 · 콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 롱으로 얼마나 기울었나».\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). 새로 연 거래인지 닫은 거래인지는 모른다. 검정 전 — 참고.",
@@ -3539,9 +3539,27 @@ function optLaneSvg(o, W) {
 // 행사가 사다리(1-B, 2026-09-28): 옵션 카드 폭에 맞춘 세로 막대. 범위 칩은 브라우저에 기억한다.
 // 딜러 감마 칸·가격축 플립은 사다리에서 고른 칩과 같은 범위(2026-09-29 사용자 지시). 옛 수집기 상태면 가까운 만기(gamma).
 const optGamma = (o) => (o.gamma_by || {})[optLadderScope] || o.gamma || {};
-// 2026-09-29 딜러 DEX(사용자 선택 3번): 체결 기반 커버가 다 차면(≥99%) 체결 기반만, 그 전엔 딜러 가정(콜 매수·풋 매도, GEX 와 같은 관행)을 주로
-//   쓰고 체결 기반을 커버 % 와 나란히. 곡선 행 = [가격, 감마, 보유자, 딜러 가정, 딜러 체결].
-const optDexTrade = (gm) => gm.dealer_dex_usd != null && gm.dealer_cov >= 0.99;
+// 2026-09-29 사용자 «지금 부족한 데이터로 옵션을 모두 체결 기반으로, 상단에 커버 부족 경고·%»(옵션 세션과 합의 A~F):
+//   딜러 감마·플립·DEX·감마 곡선·사다리 감마 막대·가격축 플립 = **딜러·체결**(테이커 반대편, 수집 뒤 상장 종목만).
+//   가정 값(now_usd · flip · dex_asm_usd)은 수집만 하고 화면에서 뺐다. 커버 부족은 카드 맨 위 경고(optCovBanner)가 알린다.
+//   수집기 재시작 전(키 없음)에도 안 깨지게 전부 null 로 떨어진다. 곡선 행 = [가격, 감마(딜러·체결), DEX(딜러·체결)].
+const optDealer = (o) => {
+  const g = optGamma(o);
+  return { exp_ms: g.exp_ms, cov: g.dealer_cov ?? null, nr: g.dealer_net_oi ?? null, now_usd: g.dealer_gex_usd ?? null,
+           flip: g.dealer_flip ?? null, dex_usd: g.dealer_dex_usd ?? null,
+           profile: (g.profile || []).map((r) => [r[0], r[5] ?? null, r[4] ?? null]) };
+};
+const optCovPct = (c) => (c == null ? "-" : c < 0.1 && c > 0 ? `${(c * 100).toFixed(1)}%` : `${Math.round(c * 100)}%`);
+function optCovBanner(o) {
+  const gb = o.gamma_by || {}, names = { front: "가까운 만기", week: "7일 안", all: "전 만기" };
+  const parts = ["front", "week", "all"].map((k) => {
+    const x = gb[k] || {}, broke = x.dealer_net_oi > 1 ? ` <span class="opt-warn">가정 깨짐 ${x.dealer_net_oi.toFixed(1)}배</span>` : "";
+    const t = `${names[k]} ${optCovPct(x.dealer_cov)}${broke}`;
+    return k === optLadderScope ? `<b>${t}</b>` : t;
+  });
+  const full = ["front", "week", "all"].every((k) => (gb[k] || {}).dealer_cov >= 0.99 && !((gb[k] || {}).dealer_net_oi > 1));
+  return `<div class="opt-cov${full ? "" : " warn"}" role="status">${full ? "체결 기반 · 커버" : "⚠ 체결 기반 · 커버 부족 — 딜러 값은 커버 종목만"} · ${parts.join(" · ")}</div>`;
+}
 let optLadderScope = (() => { try { return localStorage.getItem("optLadder") || "week"; } catch (e) { return "week"; } })();
 function optLadderSvg(o, W) {
   const st = o.strikes || {}, rows = st[optLadderScope] || [];
@@ -3549,20 +3567,20 @@ function optLadderSvg(o, W) {
   const px = optPx(o), lo = px * 0.92, hi = px * 1.08, H = 380, y0 = 22, y1 = H - 8;
   const Y = (p) => y1 - ((p - lo) / (hi - lo)) * (y1 - y0);
   const mid = Math.round(W * 0.47), half = mid - 46, gW = 34, gx = W - gW;
-  const mx = Math.max(1, ...rows.map((r) => Math.max(r[1], r[2]))), gm = Math.max(1, ...rows.map((r) => Math.abs(r[3])));
+  const mx = Math.max(1, ...rows.map((r) => Math.max(r[1], r[2]))), gm = Math.max(1, ...rows.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0)));
   const ks = rows.map((r) => r[0]), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k, i) => k - ks[i])) : 25;
   const bh = Math.max(2, Math.min(12, ((y1 - y0) * step) / (hi - lo) - 1.5));
   const top = [...rows].sort((a, b) => b[1] + b[2] - a[1] - a[2]).slice(0, 3).map((r) => r[0]);
   let s = `<text x="${mid - 6}" y="12" font-size="10" font-weight="700" fill="var(--bad)" text-anchor="end">← 풋</text>`
     + `<text x="${mid + 6}" y="12" font-size="10" font-weight="700" fill="var(--good)">콜 →</text>`
-    + `<text x="${W}" y="12" font-size="10" font-weight="700" fill="var(--option)" text-anchor="end">감마</text>`
+    + `<text x="${W}" y="12" font-size="10" font-weight="700" fill="var(--option)" text-anchor="end">감마·체결</text>`
     + `<line x1="${mid}" x2="${mid}" y1="${y0 - 4}" y2="${y1}" stroke="var(--line)"/>`;
-  rows.forEach(([k, c, p, g]) => {
-    const y = Y(k), pw = (half * p) / mx, cwid = (half * c) / mx, gwid = 3 + ((gW - 6) * Math.abs(g)) / gm;
-    s += `<g><title>${optQ(k)} · 콜 ${optUsd(c)} · 풋 ${optUsd(p)} · 순감마 ${g >= 0 ? "+" : "−"}${optUsd(Math.abs(g))}/1%</title>`
+  rows.forEach(([k, c, p, , g]) => {   // g = 딜러·체결 순감마(커버 종목 없는 행사가는 null = «모름», 막대 없음)
+    const has = Number.isFinite(g), y = Y(k), pw = (half * p) / mx, cwid = (half * c) / mx, gwid = has ? 3 + ((gW - 6) * Math.abs(g)) / gm : 0;
+    s += `<g><title>${optQ(k)} · 콜 ${optUsd(c)} · 풋 ${optUsd(p)} · 딜러·체결 순감마 ${has ? `${g >= 0 ? "+" : "−"}${optUsd(Math.abs(g))}/1%` : "모름(커버 종목 없음)"}</title>`
       + `<rect x="${(mid - pw).toFixed(1)}" y="${(y - bh / 2).toFixed(1)}" width="${pw.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--bad)" fill-opacity=".75"/>`
       + `<rect x="${mid}" y="${(y - bh / 2).toFixed(1)}" width="${cwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--good)" fill-opacity=".75"/>`
-      + `<rect x="${(W - gwid).toFixed(1)}" y="${(y - bh / 2).toFixed(1)}" width="${gwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="${g >= 0 ? "var(--option)" : "var(--warn)"}" fill-opacity=".85"/></g>`;
+      + (has ? `<rect x="${(W - gwid).toFixed(1)}" y="${(y - bh / 2).toFixed(1)}" width="${gwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="${g >= 0 ? "var(--option)" : "var(--warn)"}" fill-opacity=".85"/>` : "") + `</g>`;
     if (top.includes(k)) s += `<text x="${(mid + (c >= p ? cwid + 4 : -pw - 4)).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="9.5" font-weight="700" fill="var(--text)" text-anchor="${c >= p ? "start" : "end"}">${optUsd(c + p)}</text>`;
   });
   const lab = (v, y) => `<text x="0" y="${(y + 3.5).toFixed(1)}" font-size="9.5" fill="var(--muted)">${optQ(v)}</text>`;
@@ -3583,12 +3601,12 @@ function optLadderSvg(o, W) {
 // 2026-09-29 감마 곡선(사용자 지시 «행사가 사다리 바로 아래, 칩에 맞게»): 수집기 profile(지수 ±15% 25점) = [가격, 감마$, DEX$].
 //   가로 = 가격 · 세로 = 1% 움직임당 딜러 감마($). 색은 사다리 감마 막대와 같다(+ 청록 · − 주황).
 function optGammaCurveSvg(o, W) {
-  const g = optGamma(o), pr = (g.profile || []).filter((r) => r[0] > 0);
-  if (pr.length < 2) return `<div class="opt-note">감마 곡선 없음(수집기 다음 주기에 채워진다)</div>`;
-  const H = 150, x0 = 30, x1 = W - 4, y0 = 16, y1 = H - 20, px = optPx(o);
+  const g = optDealer(o), pr = g.profile.filter((r) => r[0] > 0 && Number.isFinite(r[1]));
+  if (pr.length < 2) return `<div class="opt-note">감마 곡선 없음(체결 기반 — 커버 종목 없음 또는 수집기 재시작 전)</div>`;
+  const H = 150, x0 = 42, x1 = W - 4, y0 = 16, y1 = H - 20, px = optPx(o);
   const lo = pr[0][0], hi = pr[pr.length - 1][0], X = (p) => x0 + ((p - lo) / (hi - lo)) * (x1 - x0);
   // DEX(profile 세 번째 칸, 09-29 수집기 추가)는 단위·크기가 달라(수십 배) 0선만 감마와 맞추고 크기는 제 폭으로 늘린다.
-  const dc = optDexTrade(g) ? 4 : 3, dNow = dc === 4 ? g.dealer_dex_usd : g.dex_asm_usd;   // 딜러 가정 → 커버가 다 차면 딜러 체결
+  const dc = 2, dNow = g.dex_usd;   // 점선 = DEX(딜러·체결)
   const hasD = pr.every((r) => Number.isFinite(r[dc])), dAbs = hasD ? Math.max(...pr.map((r) => Math.abs(r[dc]))) : 0;
   const dk = dAbs > 0 ? Math.max(...pr.map((r) => Math.abs(r[1])), 1) / dAbs : 0;
   const gmax = Math.max(...pr.map((r) => Math.max(r[1], (r[dc] || 0) * dk)), 0), gmin = Math.min(...pr.map((r) => Math.min(r[1], (r[dc] || 0) * dk)), 0), span = gmax - gmin || 1;
@@ -3618,7 +3636,7 @@ function optGammaCurveSvg(o, W) {
   }
   pr.forEach((r) => { s += `<rect x="${(X(r[0]) - (x1 - x0) / pr.length / 2).toFixed(1)}" y="${y0}" width="${((x1 - x0) / pr.length).toFixed(1)}" height="${y1 - y0}" fill="transparent"><title>${optQ(r[0])} 에서 감마 ${m(r[1])}/1%${Number.isFinite(r[dc]) ? ` · DEX(딜러) ${m(r[dc])}` : ""}</title></rect>`; });
   // DEX 이름표는 그림 밖 한 줄(끝에서 두 선이 자주 교차해 글자가 곡선에 묻혔다)
-  const leg = `<div class="opt-note">실선 = 감마 · 점선 = DEX(${dc === 4 ? "딜러·체결" : "딜러 가정"})${dNow != null ? ` <b class="opt-dex">${m(dNow)}$</b> (지금 가격)` : " (수집 전)"}</div>`;
+  const leg = `<div class="opt-note">실선 = 감마 · 점선 = DEX (둘 다 딜러·체결)${dNow != null ? ` · DEX <b class="opt-dex">${m(dNow)}$</b> (지금 가격)` : ""}</div>`;
   return `<svg class="opt-curve" viewBox="0 0 ${W} ${H}" role="img" aria-label="가격별 딜러 감마 곡선과 DEX">${s}</svg>${dk ? leg : ""}`;
 }
 
@@ -3740,32 +3758,29 @@ function renderOptions() {
   // 칸 제목을 누르면(휴대폰 포함 -- 호버가 없다) 정의·읽는 법·우리 검정 결과가 제목 아래에 펼쳐진다. 펼침은 다시 그려도 유지.
   const sec = (key, title, inner) => `<div class="opt-sec"><h4><button type="button" class="opt-q" data-tip="${key}" aria-expanded="${optTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
     + `<p class="opt-tip"${optTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(OPT_TIPS[key]).replace(/\n/g, "<br>")}</p>${inner}</div>`;
-  const gm = optGamma(o), posG = !(gm.now_usd < 0), hasG = gm.now_usd != null;   // 2026-09-29 사다리 칩 범위를 따라간다
+  const gm = optDealer(o), posG = !(gm.now_usd < 0), hasG = gm.now_usd != null;   // 2026-09-29 딜러·체결 · 사다리 칩 범위
   // 2026-09-29 금액을 같이 보인다(사용자 승인) -- 0 근처에서 부호만 뒤집히는 값을 «양/음감마»로 단정하지 않게,
   //   전 만기 합의 5% 미만이면 «거의 중립». ΔDEX = 지금 − 1시간 전(수집기 dex_1h_ago, 가까운 만기는 같은 만기일 때만).
   const sgn = (v) => `${v >= 0 ? "+" : "−"}${optUsd(Math.abs(v))}`;
-  const allG = ((o.gamma_by || {}).all || {}).now_usd;
+  // «거의 중립»도 체결 기준 -- 전 만기 커버가 낮으면 기준 자체가 약해 판정을 생략한다(옵션 세션 합의).
+  const allX = (o.gamma_by || {}).all || {}, allG = allX.dealer_cov >= 0.99 ? allX.dealer_gex_usd : null;
   const neutralG = hasG && allG != null && optLadderScope !== "all" && Math.abs(gm.now_usd) < 0.05 * Math.abs(allG);
   const ago = ((g.dex_1h_ago || {})[optLadderScope]) || null;
-  const trd = optDexTrade(gm), dNow = trd ? gm.dealer_dex_usd : gm.dex_asm_usd, dAgo = ago && (trd ? ago.dealer_dex_usd : ago.dex_asm_usd);
-  const dexD = dNow != null && dAgo != null && (optLadderScope !== "front" || ago.exp_ms === gm.exp_ms) ? dNow - dAgo : null;
-  body.innerHTML = [
+  // 1시간 Δ: 그 사이 새 종목이 상장돼 커버가 바뀌면(>0.5%p) 상장분이 섞이므로 값 대신 «커버 변화»(옵션 세션 합의).
+  const dNow = gm.dex_usd, covMoved = ago && ago.dealer_cov != null && gm.cov != null && Math.abs(gm.cov - ago.dealer_cov) > 0.005;
+  const dexD = dNow != null && ago && ago.dealer_dex_usd != null && ago.dealer_cov != null && !covMoved
+    && (optLadderScope !== "front" || ago.exp_ms === gm.exp_ms) ? dNow - ago.dealer_dex_usd : null;
+  body.innerHTML = optCovBanner(o) + [
     sec("move", "예상 폭", kv("오늘 1σ", s1d == null ? "-" : `${pm(s1d)} (${(optIv(o) / Math.sqrt(365)).toFixed(1)}%)`)
       + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 — 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
       + kv("IV − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`)),
     sec("gamma", "딜러 감마", kv("구간", !hasG ? "-" : `${neutralG ? "거의 중립" : posG ? "양감마 · 눌림 쪽" : "음감마 · 튐 쪽"} ${sgn(gm.now_usd)}/1%`,
            !hasG || neutralG ? "" : posG ? "opt-good" : "opt-warn")
-      + kv("플립", gm.flip ? `${optQ(gm.flip)} (${gm.flip < px ? "아래" : "위"} ${optQ(Math.abs(gm.flip - px))}$)` : "±15% 안 없음")
+      + kv("플립", !hasG ? "-" : gm.flip ? `${optQ(gm.flip)} (${gm.flip < px ? "아래" : "위"} ${optQ(Math.abs(gm.flip - px))}$)` : "±15% 안 플립 없음(커버 종목 기준)")
       // 과거 분위는 «전체 GEX» 이력뿐이라 가까운 만기 기준과 못 견준다 -- 그 자리에 기준 만기를 보인다.
       + kv("기준", optLadderScope === "week" ? "7일 안 만기 합(사다리 칩)" : optLadderScope === "all" ? "전 만기 합(사다리 칩)"
            : gm.exp_ms ? `${optKst(gm.exp_ms)} 만기 (${Math.max(0, (gm.exp_ms - Date.now()) / 3600e3).toFixed(0)}h)` : "-")
-      // 2026-09-29 딜러 기준으로 통일(사용자 선택 3번) -- 보유자 DEX 는 수집만 하고 화면에서 뺐다.
-      + (trd ? kv("DEX(딜러·체결)", `${sgn(dNow)}${dexD == null ? "" : ` · 1시간 ${sgn(dexD)}`} · 커버 ${Math.round(gm.dealer_cov * 100)}%`)
-         : kv("DEX(딜러 가정)", dNow == null ? "-" : `${sgn(dNow)}${dexD == null ? "" : ` · 1시간 ${sgn(dexD)}`}`)
-           // 체결 기반 딜러 DEX(사용자 지시 «일간부터, 주·월은 차차»): 수집 뒤 상장 종목만 → 커버 % 를 같이 보인다.
-           + kv("DEX(딜러·체결)", gm.dealer_cov == null ? "-" : gm.dealer_dex_usd == null ? "커버 0% · 수집 전 상장"
-                : `${sgn(gm.dealer_dex_usd)} · 커버 ${Math.round(gm.dealer_cov * 100)}%`))
-      + (gm.dealer_net_oi > 1 ? `<div class="opt-note opt-warn">커버 종목의 테이커 순수량이 미결제의 ${gm.dealer_net_oi.toFixed(1)}배 — «메이커 = 딜러» 가정이 깨져 값 신뢰 낮음</div>` : "")),
+      + kv("DEX", dNow == null ? "-" : `${sgn(dNow)}${dexD != null ? ` · 1시간 ${sgn(dexD)}` : covMoved ? " · 1시간 커버 변화" : ""}`)),
     sec("ladder", "행사가 사다리", optLadderSvg(o, 336)),
     sec("curve", "감마 곡선", optGammaCurveSvg(o, 336)),
     sec("mood", "심리", kv("25Δ 리스크 리버설", f && f.rr25 != null ? `${f.rr25 >= 0 ? "+" : ""}${f.rr25.toFixed(1)}pt` : "-")
@@ -6237,15 +6252,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
               `${lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
         }
       }
-      const gm = optGamma(o), fl = gm.flip;
-      if (fl && yAt(fl) >= mt && yAt(fl) <= plotBottom) {
+      const gm = optDealer(o), fl = gm.flip;   // 2026-09-29 딜러·체결(커버 종목 기준)
+      if (gm.now_usd == null) {
+        // 체결 기반 값이 아직 없다(커버 종목 없음 · 수집기 재시작 전) -- 플립 글자를 안 쓴다
+      } else if (fl && yAt(fl) >= mt && yAt(fl) <= plotBottom) {
         add("line", { x1: ml, x2: ml + cw, y1: yAt(fl), y2: yAt(fl), stroke: "var(--muted)", "stroke-opacity": 0.8, "stroke-dasharray": "8 4" });
-        add("text", { x: ml + 4, y: yAt(fl) - 4, "font-size": fs, "font-weight": 700, fill: "var(--muted)" }, `감마 플립 ${optQ(fl)}`);
+        add("text", { x: ml + 4, y: yAt(fl) - 4, "font-size": fs, "font-weight": 700, fill: "var(--muted)" }, `감마 플립(체결) ${optQ(fl)}`);
       } else {
         add("text", { x: ml + 4, y: plotBottom - 4, "font-size": fs, "font-weight": 600, fill: "var(--muted)" },
-            fl ? `감마 플립 ${optQ(fl)} ${fl < px ? "↓" : "↑"}(창 밖)`
+            fl ? `감마 플립(체결) ${optQ(fl)} ${fl < px ? "↓" : "↑"}(창 밖)`
               : mobileChart ? `플립 없음 · ${gm.now_usd < 0 ? "음감마" : "양감마"}`
-              : `감마 플립 없음(±15%) — ${gm.now_usd < 0 ? "음감마, 딜러가 키우는 쪽" : "양감마, 딜러가 눌러 주는 쪽"}`);
+              : `감마 플립 없음(±15%, 체결·커버 종목 기준) — ${gm.now_usd < 0 ? "음감마, 딜러가 키우는 쪽" : "양감마, 딜러가 눌러 주는 쪽"}`);
       }
       const gridG = layerCache.get("grid")?.g;
       if (gridG && gridG.parentNode === svg) svg.insertBefore(og, gridG.nextSibling); else svg.appendChild(og);

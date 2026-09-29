@@ -2706,6 +2706,11 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (max-width: 720px) { .opt-blk-list { max-height: none; mask-image: none; padding-bottom: 0; } }
 .opt-curve { display: block; width: 100%; height: auto; max-width: 440px; }
 .opt-dex { color: var(--ink); font-variant-numeric: tabular-nums; }
+/* 2026-09-29 옵션 카드 맨 위 체결 기반 커버 줄(사용자 지시) -- 커버 부족이면 경고 톤 */
+.opt-cov { font-size: 12px; line-height: 1.5; padding: 7px 10px; margin: 0 0 10px; border-radius: 8px; word-break: keep-all;
+  border: 1px solid var(--soft-line); color: var(--muted); font-variant-numeric: tabular-nums; }
+.opt-cov.warn { color: var(--text); border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.opt-cov b { color: var(--text); }
 /* 2026-09-29 휴대폰 블록 거래 요약 한 줄 + 펼치기 목록(사용자 선택 C) */
 .opt-blk-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; padding: 8px 10px; margin-top: 6px;
   border: 1px solid var(--soft-line); border-radius: 10px; font-variant-numeric: tabular-nums; }
