@@ -282,10 +282,16 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
     near30 = min(exps, key=lambda e: abs(e["exp_ms"] / 1000 - time.time() - 30 * 86400), default=None)
     out["iv30"] = near30["atm_iv"] if near30 else None
     # 감마 곡선: 지수 ±15% 를 25 점으로 -- 가격이 옮겨 가면 딜러 감마가 어디서 부호를 바꾸는가(플립).
-    #   부호 관례는 summarize_gex 와 같다(콜 +, 풋 −). 🔴ETH 는 37일 내내 total<0 이 0% 였다 -- 플립이 없으면 None.
-    yrs_a = (chain["days_to_expiry"] / 365.0).to_numpy(); k_a = chain["strike"].to_numpy()
-    iv_a = (chain["mark_iv"] / 100.0).to_numpy(); oi_a = chain["open_interest"].to_numpy()
-    sg_a = chain["option_type"].map({"call": 1.0, "put": -1.0}).to_numpy()
+    #   부호 관례는 summarize_gex 와 같다(콜 +, 풋 −). 플립이 없으면 None.
+    # 2026-09-29 사용자 «딜러 감마는 모두 가까운 만기 기준»: 곡선·플립·지금 값을 **아직 안 끝난 가장 빠른 만기 하나**로
+    #   (아래 행사가 사다리 «가까운 만기»와 같은 정의). 전 만기 합은 12월물 먼 콜(+)이 부호를 뒤집어 사다리(−)와 엇갈렸다
+    #   (09-29 실측: 전체 +5.6M · 7일 안 −7.3M · 30~90일 +10.5M). 🔴gex_summary 표(전체·30일)는 이력용으로 그대로 둔다.
+    g_fut = chain[chain["expiration_ts"] > pd.Timestamp.now(tz="UTC")]
+    g_first = g_fut["expiration_ts"].min() if len(g_fut) else None
+    gch = chain[chain["expiration_ts"] == g_first] if g_first is not None else chain.iloc[0:0]
+    yrs_a = (gch["days_to_expiry"] / 365.0).to_numpy(); k_a = gch["strike"].to_numpy()
+    iv_a = (gch["mark_iv"] / 100.0).to_numpy(); oi_a = gch["open_interest"].to_numpy()
+    sg_a = gch["option_type"].map({"call": 1.0, "put": -1.0}).to_numpy()
     import numpy as np
     def gex_at(px: float) -> float:
         ok = (iv_a > 0) & (yrs_a > 0)
@@ -299,7 +305,8 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
             cand = a + (b - a) * (-ga) / (gb - ga)
             if flip is None or abs(cand - idx) < abs(flip - idx):
                 flip = cand
-    out["gamma"] = {"now_usd": gex_at(idx), "flip": flip, "profile": [[round(p, 1), g] for p, g in prof]}
+    out["gamma"] = {"now_usd": gex_at(idx) if len(gch) else None, "flip": flip, "profile": [[round(p, 1), g] for p, g in prof],
+                    "exp_ms": int(g_first.timestamp() * 1000) if g_first is not None else None}
     # 보험: 가까운 만기 둘(12시간 이상 남은 것 중)의 지수 ±10% OTM 옵션 -- 화면이 포지션·손절에 맞춰 고른다.
     near = [e for e in exps if e["exp_ms"] / 1000 - time.time() > 12 * 3600][:2]
     hedge = []

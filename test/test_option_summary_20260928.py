@@ -41,3 +41,16 @@ def test_options_summary_synthetic(monkeypatch):
     fr = {r[0]: r for r in o["strikes"]["front"]}
     assert set(fr) == {1900.0, 2000.0, 2100.0}, "사다리 = 지수 ±8% 행사가만(2000 기준 1840~2160)"
     assert fr[2000.0][1] == fr[2000.0][2] == 100 * 2000 and fr[2000.0][3] < fr[2100.0][3] + 1e9
+
+
+def test_gamma_uses_nearest_expiry_only(monkeypatch):
+    """2026-09-29: 딜러 감마 = 가장 가까운 만기 하나. 먼 만기에 콜을 잔뜩 쌓아도 now_usd 부호가 안 바뀐다."""
+    monkeypatch.setattr(gex, "_pub", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+    near = _chain()
+    near.loc[near.option_type == "call", "open_interest"] = 1.0          # 가까운 만기는 풋 우세 -> 음감마
+    far = _chain().assign(expiration_ts=near.expiration_ts.iloc[0] + pd.Timedelta(days=60), days_to_expiry=62.0)
+    far = far[far.option_type == "call"].assign(open_interest=1e5)       # 먼 만기 콜 산더미(+)
+    o = gex.options_summary(pd.concat([near, far], ignore_index=True), "ETH")
+    only = gex.options_summary(near, "ETH")
+    assert o["gamma"]["now_usd"] < 0 and abs(o["gamma"]["now_usd"] - only["gamma"]["now_usd"]) < 1e-6
+    assert o["gamma"]["exp_ms"] == int(near.expiration_ts.iloc[0].timestamp() * 1000)
