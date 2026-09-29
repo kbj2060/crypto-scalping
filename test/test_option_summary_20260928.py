@@ -98,12 +98,14 @@ def test_write_state_dex_1h_ago(tmp_path, monkeypatch):
     now = datetime.now(timezone.utc)
     con.execute("INSERT INTO gex_summary VALUES (?, 'ETH', 2000, 1e6, 1e5, 10, 5)", [now])
     for mins, dex in ((60, 111.0), (5, 999.0), (0, 500.0)):
-        pay = {"gamma_by": {"week": {"now_usd": 1.0, "dex_usd": dex}, "front": {"now_usd": 1.0, "dex_usd": dex, "exp_ms": 7}}}
+        pay = {"gamma_by": {"week": {"now_usd": 1.0, "dex_usd": dex, "dealer_gex_usd": -dex, "dealer_cov": dex / 1000},
+                            "front": {"now_usd": 1.0, "dex_usd": dex, "exp_ms": 7}}}
         con.execute("INSERT INTO option_summary VALUES (?, 'ETH', 2000, NULL, NULL, NULL, NULL, NULL, NULL, ?)",
                     [now - timedelta(minutes=mins), json.dumps(pay)])
     gex.write_state(con)
     st = json.loads((tmp_path / "st.json").read_text())["currencies"]["ETH"]
     assert st["dex_1h_ago"]["week"]["dex_usd"] == 111.0 and st["dex_1h_ago"]["front"]["exp_ms"] == 7
+    assert st["dex_1h_ago"]["week"]["dealer_gex_usd"] == -111.0 and st["dex_1h_ago"]["week"]["dealer_cov"] == 0.111
     assert st["options"]["gamma_by"]["week"]["dex_usd"] == 500.0
 
 

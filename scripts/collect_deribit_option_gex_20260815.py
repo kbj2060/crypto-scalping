@@ -480,7 +480,9 @@ def write_state(con) -> None:
         if ago_row:
             gb_ago = (json.loads(ago_row[0]) or {}).get("gamma_by") or {}
             dex_ago = {k: {"dex_usd": v.get("dex_usd"), "dex_asm_usd": v.get("dex_asm_usd"),
-                           "dealer_dex_usd": v.get("dealer_dex_usd"), "exp_ms": v.get("exp_ms")} for k, v in gb_ago.items()
+                           "dealer_dex_usd": v.get("dealer_dex_usd"), "dealer_gex_usd": v.get("dealer_gex_usd"),
+                           # 커버가 1시간 새 바뀌면(새 종목 상장) 체결 기반 Δ 는 «상장분»이 섞인다 -- 화면이 cov 를 비교해 거른다
+                           "dealer_cov": v.get("dealer_cov"), "exp_ms": v.get("exp_ms")} for k, v in gb_ago.items()
                        if isinstance(v, dict) and v.get("dex_usd") is not None} or None
         out["currencies"][currency] = {
             "options": json.loads(opt_row[0]) if opt_row else None,
