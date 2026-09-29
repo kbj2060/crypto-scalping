@@ -54,6 +54,8 @@ from scripts.live_trade_tape_collector_20260916 import (  # noqa: E402
     RETAIL_MAX_USD,
     WHALE_MIN_USD,
     TakerOrderAggregator,
+    TapeBuffer,
+    TapeStore,
     default_db as tape_default_db,
     size_bands,
 )
@@ -139,6 +141,8 @@ from dashboard import situation as sit  # noqa: E402
 # 2026-09-25 «데이터 관계 읽기» -- 지지/저항 목록 아래 문장. 순수 함수 + 자체점검. 입력은 상황 읽기와 같은 원천.
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
+# 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
+from dashboard import market_ctx as mctx  # noqa: E402
 # Regime overlay (bull/bear/chop probability per 5-min bar) for the Snapshot tab's liquidation-map
 # chart. 2026-08-26: swapped from the wide24 HMM+linear-calibration model to an independently
 # trained HistGradientBoostingClassifier (OOS balanced_accuracy 0.9189 vs wide24's 0.7691) -- see
@@ -942,6 +946,23 @@ def oi_5m_buckets(bars: int, symbol: str = FOOTPRINT_SYMBOL.lower()) -> list[lis
         if bar >= floor:
             out.append([bar, round(delta, 3), round(oi_close, 3), int(n), 1 if gap else 0])
     return out
+
+
+def own_db_rows(path: Path, sql: str, params: list) -> list[tuple]:
+    """이 프로세스가 writer 인 파일(oi_1s · mark_price_1s)을 같은 경로 락 + read_only 로 읽는다(oi_5m_buckets 와 같은 규약).
+    없거나 실패하면 [] -- 시장 맥락의 한 칸만 비고 나머지는 산다."""
+    if not path.exists():
+        return []
+    try:
+        with duckdb_path_lock(path):
+            con = duckdb.connect(str(path), read_only=True)
+            try:
+                return con.execute(sql, params).fetchall()
+            finally:
+                con.close()
+    except Exception as exc:  # noqa: BLE001
+        print(f"own db read failed ({path.name}): {exc}", flush=True)
+        return []
 
 # 2026-09-16 2.5 -> 1.0 (사용자 "최대한 빠르게"). 이 값이 곧 **현재가 선의 지연**이다 --
 # 차트는 SSE 푸시마다 다시 그린다. 코인을 ETH 하나로 줄이면서(DASHBOARD_ASSETS) 티커 요청이
@@ -2566,6 +2587,18 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
         ⚠️풋프린트에는 안 쓴다 -- 현물은 선물보다 +4.69bp 높아 $0.1 빈 기준 **12.9빈**
           어긋난다(2026-09-23 실측). 가격축에 쌓으면 가짜 이중 봉우리가 된다. 수급(CVD)은
           «수량의 합»이라 가격이 무관해서 문제가 없다."""
+        # 2026-09-29 현물 체결도 테이프로 남긴다 -- 화면엔 보이는데 저장이 없어 «현물이 끄는가 선물이 끄는가»를 영영 못 쟀다.
+        #   선물 테이프와 같은 표(trade_tape_1s)·같은 주문 단위(aggTrade 는 이미 주문 단위라 add_agg). 이 프로세스가
+        #   유일한 writer 이고 TapeStore 는 쓸 때만 연다. 저장이 막혀도 화면 흐름은 그대로 돈다.
+        bucket = TAPE_BUCKETS[FOOTPRINT_SYMBOL.lower()]
+        spot_buf = TapeBuffer(bucket, FOOTPRINT_SYMBOL.lower())
+        spot_db = LIVE_DIR / ("trade_tape_spot.duckdb" if spec.asset == "eth" else f"trade_tape_spot_{spec.asset}.duckdb")
+        try:
+            spot_store = await asyncio.to_thread(TapeStore, spot_db, FOOTPRINT_SYMBOL, bucket)
+        except Exception as exc:  # noqa: BLE001 -- 저장만 포기한다
+            spot_store = None
+            print(f"{TAG}spot tape: 저장 끔 ({exc!r})", flush=True)
+        spot_flushed = time.time()
         ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
         try:
             while True:
@@ -2597,6 +2630,12 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
                                 cell[i] += qty
                             spot_state["trades"] += 1
                             spot_state["last_trade_ms"] = ts_ms
+                            if spot_store is not None:
+                                spot_buf.add_agg(ts_ms, price, qty, bool(t.get("m")),
+                                                 max(1, int(t.get("l") or 0) - int(t.get("f") or 0) + 1))
+                                if time.time() - spot_flushed >= 5.0:
+                                    spot_flushed = time.time()
+                                    await asyncio.to_thread(spot_store.write, spot_buf.take_closed())
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001
@@ -3105,6 +3144,11 @@ def make_app() -> web.Application:
         if memo is not None and memo[0] is src:
             return memo[1]
         veto = trend_veto_rows(src)
+        # 2026-09-29 세션 VWAP(UTC 00시 시작) ± 거래량 가중 σ -- 200봉(16.6h) 앞에서 세션이 시작할 수 있어 600봉에서 센다.
+        tail = src.tail(600)
+        tss = [int(t.timestamp()) for t in tail["timestamp"]]
+        vw, vsd = mctx.session_vwap(tss, tail["high"].tolist(), tail["low"].tolist(), tail["close"].tolist(), tail["volume"].tolist())
+        vwap = {t: {"vwap": round(a, 4), "vsd": round(b, 4)} for t, a, b in zip(tss, vw, vsd) if a is not None}
         rows = [
             {
                 "time": int(row["timestamp"].timestamp()),
@@ -3113,6 +3157,7 @@ def make_app() -> web.Application:
                 "low": float(row["low"]),
                 "close": float(row["close"]),
                 **veto.get(int(row["timestamp"].timestamp()), {}),
+                **vwap.get(int(row["timestamp"].timestamp()), {}),
             }
             # 🔴2026-09-23 100 -> 200. 100 봉이면 8.3시간이라 12h 창을 골라도 8.3시간에서
             #   끊겼다(사용자 «12시간 데이터 추세를 보고 싶다»). closed_df 는 SMA144 를
@@ -3140,6 +3185,10 @@ def make_app() -> web.Application:
                                "high": [float(r[2]) for r in closed], "low": [float(r[3]) for r in closed],
                                "close": [float(r[4]) for r in closed]})
             veto = trend_veto_rows(df)
+            tss = [int(r[0]) // 1000 for r in rows]    # 세션 VWAP -- ETH 와 같은 규약(형성 중 봉 포함: 그 봉까지의 VWAP)
+            vw, vsd = mctx.session_vwap(tss, [float(r[2]) for r in rows], [float(r[3]) for r in rows],
+                                        [float(r[4]) for r in rows], [float(r[5]) for r in rows])
+            vwap = {t: {"vwap": round(a, 6), "vsd": round(b, 6)} for t, a, b in zip(tss, vw, vsd) if a is not None}
             candles = [
                 {
                     "time": int(row[0]) // 1000,
@@ -3148,6 +3197,7 @@ def make_app() -> web.Application:
                     "low": float(row[3]),
                     "close": float(row[4]),
                     **veto.get(int(row[0]) // 1000, {}),
+                    **vwap.get(int(row[0]) // 1000, {}),
                 }
                 for row in rows[-200:]                # ETH 와 같은 200봉(16.6시간)
             ]
@@ -3209,6 +3259,7 @@ def make_app() -> web.Application:
     fo_state: dict[str, Any] = {"connected": False, "since": None, "last_event_ms": None, "events": 0, "errors": 0, "last_error": None}
     ofi_hist: deque = deque(maxlen=600)         # |OFI10| 최근 10분 -- 임계는 상수가 아니라 분위(p50)
     imb40_ring: deque = deque(maxlen=6 * 3600)  # 깊은 호가 불균형(±0.4%) 초별 6시간 -- 관계 읽기의 «깊은 벽» 분위 기준
+    depth25_ring: deque = deque(maxlen=6 * 3600)  # ±25bp 매수·매도 호가 합 초별 6시간 -- 시장 맥락 «얇은 쪽» 분위 기준
     mp_state: dict[str, Any] = {"connected": False, "since": None, "last_ms": None, "events": 0, "errors": 0, "last_error": None}
     mark_ring: dict[int, tuple[float, float, float]] = {}   # sec → (mark, index, funding). 상황 읽기의 펀딩·베이시스 입력
 
@@ -3308,6 +3359,7 @@ def make_app() -> web.Application:
                                 continue
                             ts_ms = int(o["E"]); mark, idx, fr = float(o["p"]), float(o["i"]), float(o["r"])
                             mp_state["events"] += 1; mp_state["last_ms"] = ts_ms
+                            mp_state["next_funding_ms"] = int(o.get("T") or 0) or None   # 시장 맥락 카드의 정산 카운트다운
                             mark_ring[ts_ms // 1000] = (mark, idx, fr)
                             pending.append((ts_ms, mark, idx, fr, int(o.get("T") or 0)))
                             now = time.time()
@@ -3371,9 +3423,15 @@ def make_app() -> web.Application:
                 w = await loop.run_in_executor(
                     HEATMAP_EXECUTOR, functools.partial(read_window, FOOTPRINT_SYMBOL.lower(), int(now * 1000), 12, 1))
                 flow = mref.raster_flow(w)
+                sweep = None
                 if flow.get("ok"):
                     ofi_hist.append(abs(flow["ofi10"]))
                     imb40_ring.append(float(flow["imb40"]))
+                    # 시장 맥락: 미드에서 ±10/25/50bp 까지 걸린 호가 = «그만큼 밀려면 먹어야 할 양». 같은 마지막 유효 초.
+                    q = np.asarray(w["qty"]); mids = np.asarray(w["mid"], dtype=float)
+                    last = int(np.flatnonzero(np.isfinite(mids))[-1])
+                    sweep = mctx.sweep_depth(q[last], (int(w["bin_lo"]) + np.arange(q.shape[1])) * float(w["bin_size"]), flow["mid"])
+                    depth25_ring.append((sweep["bid"][1], sweep["ask"][1]))
                 ofi_thr = float(np.median(ofi_hist)) if len(ofi_hist) >= 30 else None
                 if flow.get("ok") and ofi_thr:
                     agree, micro_state["qi_prev"] = mref.agree_state(
@@ -3421,6 +3479,7 @@ def make_app() -> web.Application:
                     "baseline_days": (base or {}).get("days"), "hour_utc": hour,
                     "sr": sr, "burst": burst, "liq60": liq60, "liq_prev": micro_state["liq_prev"],
                     "fo": dict(fo_state), "mp": dict(mp_state),
+                    "spread": float(book["askPrice"]) - float(book["bidPrice"]), "sweep": sweep,
                 }
             except asyncio.CancelledError:
                 raise
@@ -3666,7 +3725,8 @@ def make_app() -> web.Application:
         situation_state["now"] = res
         situation_state["computed_at"] = now
         try:   # 관계 읽기는 상황 카드가 «완결 봉 부족»이어도 읽을 수 있는 만큼 읽는다. 죽어도 카드는 산다
-            situation_state["read"] = fr.read(res.get("evidence") or {}, _flow_read_ctx(now, inp))
+            situation_state["ctx"] = _flow_read_ctx(now, inp)     # 시장 맥락 카드도 같은 값을 읽는다(다시 안 센다)
+            situation_state["read"] = fr.read(res.get("evidence") or {}, situation_state["ctx"])
             # 융합 카드 장부 -- 봉마다 한 줄(같은 봉 안 1초 재계산은 같은 결정이다). 3결과 확률·목표를 남겨야
             #   «실측 확률이 라이브에서도 맞나»(보정)를 나중에 1분봉으로 잴 수 있다. 발동 여부(side)도 같은 줄에.
             fu = situation_state["read"].get("fused") or {}
@@ -3693,6 +3753,124 @@ def make_app() -> web.Application:
                     print(f"fused log: {exc!r}", flush=True)
         except Exception as exc:  # noqa: BLE001
             situation_state["read"] = {"lines": [], "summary": "", "error": repr(exc)[:160]}
+
+    # ── 시장 맥락 (2026-09-29, ETH) ─────────────────────────────────────────
+    # 레포트 대조 뒤 사용자 «불합격이어도 쓸모 있으면 넣어줘». 이 프로세스가 이미 가진 값(마크가격 링 · 미시 루프 ·
+    # 관계 읽기 컨텍스트) + 수집기 duckdb(OKX·HL 맥락 · HL 고래 포지션 · 봇 롱숏비) + 봇 청산 버스트 파일.
+    # 🔴전부 서술이다 -- 방향 판정은 30분 카드(융합)가 한다. 칸마다 우리 검정 판정은 화면 «?» 설명이 말한다.
+    HL_CTX_DB_PATH = LIVE_DIR / "hyperliquid_context.duckdb"
+    OI_LSRATIO_DB_PATH = LIVE_DIR / "oi_lsratio.duckdb"
+    MC_LIQ_PROFILE_S = 12 * 3600      # 실측 청산 가격 프로파일 창 = 차트 최대 창(12h)
+
+    def _mc_collectors() -> dict[str, Any]:
+        """수집기 duckdb 를 읽기 전용으로 한 번씩. 원천 하나가 없거나 잠겨도 나머지는 산다(그 키만 None)."""
+        out: dict[str, Any] = {"errors": {}}
+        def q(key: str, path: Path, sql: str, params: list) -> None:
+            try:
+                out[key] = _read_only_rows(path, sql, params) if path.exists() else None
+            except Exception as exc:  # noqa: BLE001
+                out[key] = None
+                out["errors"][key] = repr(exc)[:100]
+        q("okx_fund", OKX_CTX_DB_PATH, "SELECT funding_rate, funding_time FROM okx_funding WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
+        q("okx_mark", OKX_CTX_DB_PATH, "SELECT mark_px FROM okx_mark WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
+        q("okx_oi", OKX_CTX_DB_PATH, "SELECT oi_base FROM okx_oi WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
+        q("hl_ctx", HL_CTX_DB_PATH, "SELECT funding, open_interest, premium, mark_px FROM hl_asset_ctx WHERE coin = 'ETH' ORDER BY recv_ms DESC LIMIT 1", [])
+        # 마지막으로 **다 돈** 바퀴의 포지션(바퀴 행과 포지션이 한 트랜잭션으로 들어온다 -- 수집기 write())
+        q("hl_pos", HL_POS_DB_PATH, "SELECT szi, liq_px FROM hl_positions WHERE coin = 'ETH' AND ts_ms >= (SELECT max(ts_ms) FROM hl_cycles)", [])
+        q("ls", OI_LSRATIO_DB_PATH, """SELECT epoch(ts), global_ls_ratio, top_pos_ls_ratio, taker_ls_ratio FROM oi_lsratio_5m
+                                       WHERE ts >= now() - INTERVAL 25 HOUR ORDER BY ts""", [])
+        return out
+
+    def _mc_history() -> dict[str, Any]:
+        """7일 OI(바이낸스 5분 끝값)·7일 베이시스(1분에 한 점) -- 둘 다 이 프로세스가 쓰는 파일."""
+        since = int(time.time() * 1000) - 7 * 86400 * 1000
+        oi = own_db_rows(OI_1S_DB_PATH, f"""SELECT ts_ms // 300000 * 300, arg_max(open_interest, ts_ms) FROM {OI_1S_TABLE}
+                                           WHERE symbol = ? AND ts_ms >= ? GROUP BY 1 ORDER BY 1""", [FOOTPRINT_SYMBOL.lower(), since])
+        basis = own_db_rows(MARK_PRICE_DB_PATH, f"""SELECT (mark - index_px) / index_px * 1e4 FROM {MARK_PRICE_TABLE}
+                                                  WHERE ts_ms >= ? AND index_px > 0 AND ts_ms % 60000 < 1000""", [since])
+        return {"oi": [(int(t), float(v)) for t, v in oi], "basis": [float(b[0]) for b in basis]}
+
+    def _mc_liq_profile() -> list[list[float]]:
+        """ETH 실측 청산(바이낸스 forceOrder 체결가) 12시간 → 가격 묶음. 파일 꼬리만 읽는다.
+        ponytail: 꼬리 2MB(평소 ~하루치). 12h 에 2MB 넘게 청산이 쌓이는 날은 창이 조금 짧아진다."""
+        cut = (time.time() - MC_LIQ_PROFILE_S) * 1000
+        try:
+            with open(liq_events_path("eth"), "rb") as fh:
+                fh.seek(0, 2); fh.seek(max(0, fh.tell() - 2_000_000))
+                lines = fh.read().decode("utf-8", "ignore").splitlines()[1:]
+        except OSError:
+            return []
+        evs = []
+        for ln in lines:
+            try:
+                e = json.loads(ln)
+            except ValueError:
+                continue
+            if int(e.get("ts_ms") or 0) >= cut:
+                evs.append((float(e.get("price") or 0), float(e.get("usd") or 0), e.get("side") == "long"))
+        return mctx.liq_profile(evs)
+
+    async def market_context_payload() -> dict[str, Any]:
+        async def funding_hist() -> list[float]:
+            raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/fundingRate",
+                                           {"symbol": FOOTPRINT_SYMBOL, "limit": 1000}, error_reason="funding_hist_upstream_error")
+            return [float(r["fundingRate"]) for r in raw][-540:]     # 180일(8시간마다)
+        col = await swr_cached("mc_collectors", 15.0, lambda: asyncio.to_thread(_mc_collectors), max_stale=120.0)
+        hist = await swr_cached("mc_history", 300.0, lambda: asyncio.to_thread(_mc_history), max_stale=1800.0)
+        prof = await swr_cached("mc_liq_profile", 60.0, lambda: asyncio.to_thread(_mc_liq_profile), max_stale=600.0)
+        try:
+            fh = await swr_cached("mc_funding_hist", 3600.0, funding_hist, max_stale=6 * 3600.0)
+        except Exception:  # noqa: BLE001 -- 분위만 빠진다
+            fh = []
+        one = lambda k: (col.get(k) or [None])[0]   # noqa: E731 -- 없으면 None 한 줄
+        mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
+        x = situation_state.get("ctx") or {}
+        ev = (situation_state.get("now") or {}).get("evidence") or {}
+        dv = mref.deriv_from_ring(mark_ring, 1800, sit.BASIS_PCT)
+        bn_mark = mark_ring[max(mark_ring)][0] if mark_ring else None
+        mid = mp.get("mid") or bn_mark
+        oi = mctx.oi_stats(hist["oi"])
+        okx_oi, hl = one("okx_oi"), one("hl_ctx")
+        okx_mark, okx_fund = one("okx_mark"), one("okx_fund")
+        bp = lambda a, b: (a / b - 1) * 1e4 if a and b else None   # noqa: E731
+        ls = col.get("ls") or []
+        d25 = np.array(depth25_ring, dtype=float) if len(depth25_ring) >= 600 else None
+        sw = mp.get("sweep")
+        basis_pct = mctx.pct_rank(dv["basis_bp"], hist["basis"], min_n=600)
+        burst = load_json_cached(LIQ_BURST_STATE_PATH) or {}
+        return {
+            "available": True, "ts": time.time(), "mid": mid,
+            "funding": {"bn": dv["funding"], "bn_pct180": mctx.pct_rank(dv["funding"], fh), "next_ms": mp_state.get("next_funding_ms"),
+                        "okx": okx_fund[0] if okx_fund else None, "okx_next_ms": okx_fund[1] if okx_fund else None,
+                        "hl_8h": hl[0] * 8 if hl and hl[0] is not None else None},     # HL 펀딩은 1시간 단위 -- 8시간으로 맞춘다
+            "basis": {"bp": dv["basis_bp"], "d30_bp": dv["basis_d_bp"], "pct7d": basis_pct,
+                      "hl_premium_bp": hl[2] * 1e4 if hl and hl[2] is not None else None},
+            "lev": mctx.lev_state(basis_pct, oi["z1h"]),
+            "oi": {**oi, "okx": okx_oi[0] if okx_oi else None, "hl": hl[1] if hl else None},
+            "ls": ({"global": ls[-1][1], "top_pos": ls[-1][2], "taker": ls[-1][3],
+                    "global_24h": ls[0][1], "top_pos_24h": ls[0][2], "age_s": time.time() - ls[-1][0]} if ls else None),
+            "quad": mctx.quad_1h(x.get("move60"), x.get("oi60"), x.get("move60_p75")),
+            "move60": x.get("move60"), "oi60": x.get("oi60"),
+            "flow": {"z60": x.get("z60"), "net60": x.get("net60"), "cvd30_z": x.get("cvd30_z"),
+                     "bn30": ev.get("cvd"), "okx30": x.get("okx30")},
+            "btc": {"move_bp": ev.get("btc_move_bp"), "rel": ev.get("btc_rel")},
+            "venues": {"okx_bp": bp(okx_mark[0] if okx_mark else None, bn_mark), "hl_bp": bp(hl[3] if hl else None, bn_mark)},
+            "book": {"spread": mp.get("spread"), "sweep": sw, "bps": list(mctx.SWEEP_BPS),
+                     "bid25_pct": float(np.mean(d25[:, 0] <= sw["bid"][1])) if d25 is not None and sw else None,
+                     "ask25_pct": float(np.mean(d25[:, 1] <= sw["ask"][1])) if d25 is not None and sw else None},
+            "hl_liq": mctx.hl_liq_levels(col.get("hl_pos") or [], mid) if mid else {"below": [], "above": []},
+            "liq_profile": prof,
+            "burst": {k: burst.get(k) for k in ("updated_at", "hawkes_active", "crisis_type", "z_long", "z_short",
+                                                "long_usd_1m", "short_usd_1m", "valid_liq_stream")} if burst else None,
+            "errors": col.get("errors") or {},
+        }
+
+    async def api_market_context(request: web.Request) -> web.Response:
+        try:
+            payload = await market_context_payload()
+        except Exception as exc:  # noqa: BLE001 -- 카드는 이유를 말하고 계속 그린다
+            payload = {"available": False, "error": f"{type(exc).__name__}: {exc}"[:200]}
+        return web.json_response(payload, headers=NOCACHE)
 
     def situation_payload() -> dict[str, Any]:
         return {"now": situation_state["now"], "computed_at": situation_state["computed_at"],
@@ -5993,6 +6171,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/micro-ref", api_micro_ref)
     app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/trend", api_trend)
+    app.router.add_get("/api/market-context", api_market_context)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)
     app.router.add_post("/api/push/subscribe", api_push_subscribe)

@@ -1,0 +1,176 @@
+"""«시장 맥락» 카드 계산부 (2026-09-29). 서버는 원천을 모아 이 함수들에 넣고 결과를 그대로 보낸다.
+
+왜: ETH 오더플로 레포트 105항목을 대시보드와 대조한 뒤 사용자 지시 «불합격된 것들도 쓸모 있으면 넣어줘 --
+  우리 검증 방식이 틀렸을 수도 있다». 그래서 이 카드의 값은 **전부 서술**이다(방향 신호 아님). 칸마다
+  우리 검정 판정은 화면의 «?» 설명이 말로 한다(DESIGN.md: 매매 화면에 연구 원문 숫자를 올리지 않는다).
+원천: 바이낸스 markPrice@1s·OI·래스터(이미 이 프로세스에 있다) + OKX·HL 맥락 수집기 duckdb + 봇 롱숏비 duckdb.
+ponytail: 부호 규약 -- 매수·매수벽·롱 쪽이 양수(micro_ref.py 와 같다).
+"""
+from __future__ import annotations
+
+import math
+from typing import Iterable
+
+import numpy as np
+
+SWEEP_BPS = (10, 25, 50)   # «여기까지 쓸어올리려면 몇 ETH 가 필요한가» -- 현재 미드에서 한쪽으로
+HL_LIQ_BIN_USD = 5.0       # HL 고래 청산가 묶음 폭($). ETH 2,700 에서 ~1.9bp
+HL_LIQ_MAX_PCT = 0.10      # 이보다 먼 청산가는 버린다(±10%)
+LIQ_PROFILE_BIN_USD = 2.5  # 실측 청산 가격 프로파일 묶음 폭($)
+
+
+def pct_rank(x: float | None, hist: Iterable[float], min_n: int = 30) -> float | None:
+    """x 가 hist 에서 몇 분위인가(0~1, 자기 이하 비율). 표본이 min_n 미만이면 None(판정 보류)."""
+    a = np.asarray([v for v in hist if v is not None and math.isfinite(v)], dtype=float)
+    if x is None or not math.isfinite(x) or a.size < min_n:
+        return None
+    return float(np.count_nonzero(a <= x) / a.size)
+
+
+def sweep_depth(row: np.ndarray, px: np.ndarray, mid: float, bps: tuple[int, ...] = SWEEP_BPS) -> dict[str, list[float]]:
+    """래스터 한 초(row: +매수호가 / −매도호가 수량, px: 칸 가격) → 미드에서 ±bp 까지 걸린 호가 합(ETH).
+    ask[i] = 위로 bps[i] 까지 쓸어올리는 데 먹어야 할 매도호가 · bid[i] = 아래로 같은 폭의 매수호가.
+    취소·재보충은 모른다(한 초 스냅샷) -- «지금 걸려 있는 양»이다."""
+    out: dict[str, list[float]] = {"bid": [], "ask": []}
+    for bp in bps:
+        w = mid * bp / 1e4
+        up = (px > mid) & (px <= mid + w) & (row < 0)
+        dn = (px < mid) & (px >= mid - w) & (row > 0)
+        out["ask"].append(float(-row[up].sum()))
+        out["bid"].append(float(row[dn].sum()))
+    return out
+
+
+def quad_1h(move_bp: float | None, doi: float | None, p75: float | None) -> dict[str, str] | None:
+    """1시간 가격 × OI 사분면. flow_read ③ 과 **같은 기준**(|이동| 이 하루 1시간 이동의 p75 이상일 때만 판정).
+    note = 우리 검정의 말(1시간·청산 프레임에서만 근거, 상승 쪽 두 칸은 미측정)."""
+    if move_bp is None or doi is None:
+        return None
+    if p75 is None or abs(move_bp) < p75:
+        return {"key": "small", "label": "이동이 작다 — 판정 보류", "note": "1시간 이동이 하루 상위 25% 밖"}
+    if move_bp < 0 and doi > 0:
+        return {"key": "dn_up", "label": "하락 + OI↑ · 새 숏 유입", "note": "숏은 서두르지 않는 쪽(근거)"}
+    if move_bp < 0:
+        return {"key": "dn_dn", "label": "하락 + OI↓ · 롱 정리", "note": "숏은 거둘 쪽(근거)"}
+    if doi > 0:
+        return {"key": "up_up", "label": "상승 + OI↑ · 새 롱 유입", "note": "미측정 · 서술"}
+    return {"key": "up_dn", "label": "상승 + OI↓ · 숏 커버", "note": "미측정 · 서술"}
+
+
+def oi_stats(series: list[tuple[int, float]], step_s: int = 300) -> dict[str, float | None]:
+    """5분 격자 OI [(봉 시각, OI)] → 1시간·24시간 변화율(%)과 1시간 변화의 z(과거 1시간 변화들 대비).
+    격자에 구멍이 있으면 그 칸은 NaN 으로 두어 변화가 구멍을 건너뛰지 않게 한다."""
+    out: dict[str, float | None] = {"oi": None, "d1h_pct": None, "d24h_pct": None, "z1h": None}
+    if not series:
+        return out
+    t0, t1 = series[0][0], series[-1][0]
+    grid = np.full((t1 - t0) // step_s + 1, np.nan)
+    for t, v in series:
+        grid[(t - t0) // step_s] = v
+    out["oi"] = float(grid[-1])
+    k1, k24 = 3600 // step_s, 86400 // step_s
+    if grid.size > k1 and math.isfinite(grid[-1 - k1]):
+        out["d1h_pct"] = float((grid[-1] / grid[-1 - k1] - 1) * 100)
+    if grid.size > k24 and math.isfinite(grid[-1 - k24]):
+        out["d24h_pct"] = float((grid[-1] / grid[-1 - k24] - 1) * 100)
+    d = grid[k1:] / grid[:-k1] - 1 if grid.size > k1 else np.array([])
+    past = d[:-1][np.isfinite(d[:-1])]
+    if d.size and math.isfinite(d[-1]) and past.size >= 72 and past.std() > 0:
+        out["z1h"] = float((d[-1] - past.mean()) / past.std())
+    return out
+
+
+def lev_state(basis_pct: float | None, oi_z: float | None) -> dict[str, str]:
+    """레버리지 상태 한 줄. 🔴바이낸스 펀딩은 평온장에서 0.01% 에 클램프돼 거의 안 움직인다(2025~26 실측 최댓값 = 0.01%)
+    -- 그래서 «비싸게 들고 있나»는 펀딩이 아니라 베이시스(마크−인덱스)의 7일 분위로 본다. 방향 신호 아님(극단 펀딩 검정 0/10)."""
+    hot = oi_z is not None and oi_z >= 1.0
+    if basis_pct is None:
+        return {"key": "na", "label": "베이시스 이력 쌓는 중"}
+    if basis_pct >= 0.9 and hot:
+        return {"key": "long_crowd", "label": "롱 쏠림 — 프리미엄 높고 OI 급증"}
+    if basis_pct <= 0.1 and hot:
+        return {"key": "short_crowd", "label": "숏 쏠림 — 할인 깊고 OI 급증"}
+    if oi_z is not None and oi_z <= -1.5:
+        return {"key": "deleverage", "label": "레버리지 빠지는 중 — OI 급감"}
+    if basis_pct >= 0.9:
+        return {"key": "premium", "label": "선물 프리미엄 높음"}
+    if basis_pct <= 0.1:
+        return {"key": "discount", "label": "선물 할인 깊음"}
+    return {"key": "normal", "label": "보통"}
+
+
+def hl_liq_levels(rows: Iterable[tuple[float, float]], mid: float, bin_usd: float = HL_LIQ_BIN_USD,
+                  top: int = 3, max_pct: float = HL_LIQ_MAX_PCT) -> dict[str, list[dict[str, float]]]:
+    """HL 고래 포지션 [(szi, liq_px)] → 가격 묶음별 청산 예정 명목($). below = 롱 청산가(가격 아래), above = 숏.
+    각 쪽 금액 상위 top 개를 **가까운 순**으로. 추정이 아니라 거래소가 준 실제 청산가다(추적 300주소만)."""
+    agg: dict[tuple[str, float], list[float]] = {}
+    for szi, liq in rows:
+        if not (szi and liq and liq > 0) or abs(liq / mid - 1) > max_pct:
+            continue
+        side = "below" if szi > 0 else "above"
+        if (side == "below") != (liq < mid):
+            continue                     # 이미 넘어선 청산가(곧 사라질 행) -- 방향이 뒤집힌 건 버린다
+        k = (side, round(liq / bin_usd) * bin_usd)
+        a = agg.setdefault(k, [0.0, 0])
+        a[0] += abs(szi) * mid
+        a[1] += 1
+    out: dict[str, list[dict[str, float]]] = {"below": [], "above": []}
+    for side in out:
+        lv = sorted(((px, a) for (s, px), a in agg.items() if s == side), key=lambda t: -t[1][0])[:top]
+        out[side] = [{"px": px, "usd": round(a[0]), "n": a[1]} for px, a in sorted(lv, key=lambda t: abs(t[0] - mid))]
+    return out
+
+
+def liq_profile(events: Iterable[tuple[float, float, bool]], bin_usd: float = LIQ_PROFILE_BIN_USD) -> list[list[float]]:
+    """실측 청산 [(체결가, USD, 롱청산?)] → [[가격, 롱USD, 숏USD]] 가격 오름차순. 추정 청산맵과 따로 그린다."""
+    agg: dict[float, list[float]] = {}
+    for px, usd, is_long in events:
+        if px > 0 and usd > 0:
+            a = agg.setdefault(round(px / bin_usd) * bin_usd, [0.0, 0.0])
+            a[0 if is_long else 1] += usd
+    return [[k, round(a[0]), round(a[1])] for k, a in sorted(agg.items())]
+
+
+def session_vwap(ts: list[int], high: list[float], low: list[float], close: list[float],
+                 vol: list[float]) -> tuple[list[float | None], list[float | None]]:
+    """UTC 00:00 에 다시 시작하는 세션 VWAP 과 거래량 가중 표준편차(대표가 = (고+저+종)/3). 봉 t 의 값은 봉 t 까지만 본다."""
+    vw: list[float | None] = []
+    sd: list[float | None] = []
+    day, sv, spv, sp2v = None, 0.0, 0.0, 0.0
+    for t, h, lo, c, v in zip(ts, high, low, close, vol):
+        if t // 86400 != day:
+            day, sv, spv, sp2v = t // 86400, 0.0, 0.0, 0.0
+        tp = (h + lo + c) / 3.0
+        sv += v; spv += tp * v; sp2v += tp * tp * v
+        if sv > 0:
+            m = spv / sv
+            vw.append(m); sd.append(math.sqrt(max(0.0, sp2v / sv - m * m)))
+        else:
+            vw.append(None); sd.append(None)
+    return vw, sd
+
+
+if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
+    assert pct_rank(5, range(100)) == 0.06 and pct_rank(5, range(10)) is None and pct_rank(None, range(100)) is None
+    px = np.arange(2690.0, 2710.5, 0.5)                    # 미드 2700, 칸 0.5
+    row = np.where(px < 2700, 2.0, np.where(px > 2700, -1.0, 0.0))
+    s = sweep_depth(row, px, 2700.0, (10, 25))             # 10bp = 2.7$ → 위 5칸·아래 5칸, 25bp = 6.75$ → 13칸
+    assert s == {"bid": [10.0, 26.0], "ask": [5.0, 13.0]}, s
+    assert quad_1h(-40, 500, 30)["key"] == "dn_up" and quad_1h(-40, -5, 30)["key"] == "dn_dn"
+    assert quad_1h(40, 5, 30)["key"] == "up_up" and quad_1h(40, -5, 30)["key"] == "up_dn"
+    assert quad_1h(10, 5, 30)["key"] == "small" and quad_1h(10, 5, None)["key"] == "small" and quad_1h(None, 5, 30) is None
+    ser = [(i * 300, 1000.0 + (i * 7 % 5) + (20.0 if i == 299 else 0.0)) for i in range(300)]   # 마지막 봉에 급증
+    st = oi_stats(ser)
+    assert st["oi"] == 1000.0 + 299 * 7 % 5 + 20 and st["z1h"] is not None and st["z1h"] > 3 and st["d24h_pct"] is not None, st
+    holes = [(t, v) for t, v in ser if t != 299 * 300 - 12 * 300]                          # 1시간 전 칸이 비었다
+    assert oi_stats(holes)["d1h_pct"] is None and oi_stats([])["oi"] is None
+    assert lev_state(0.95, 1.2)["key"] == "long_crowd" and lev_state(0.05, 1.2)["key"] == "short_crowd"
+    assert lev_state(0.5, -2)["key"] == "deleverage" and lev_state(0.95, 0)["key"] == "premium" and lev_state(None, 3)["key"] == "na"
+    lv = hl_liq_levels([(10, 2601), (5, 2602), (-2, 2800), (3, 2710), (-1, 2500), (1, 1000)], mid=2700, bin_usd=5)
+    assert [l["px"] for l in lv["below"]] == [2600.0] and lv["below"][0]["usd"] == 15 * 2700 and lv["below"][0]["n"] == 2, lv
+    assert [l["px"] for l in lv["above"]] == [2800.0], lv   # 롱인데 청산가가 위(2710) · 숏인데 아래(2500) · 너무 먼 1000 은 버린다
+    assert liq_profile([(2700.4, 100, True), (2701.4, 50, False), (2701.3, 20, True), (0, 5, True)]) == [[2700.0, 100, 0], [2702.5, 20, 50]]
+    t = [86400 - 600, 86400 - 300, 86400, 86400 + 300]
+    vw, sd = session_vwap(t, [11, 13, 21, 23], [9, 11, 19, 21], [10, 12, 20, 22], [1, 1, 1, 3])
+    assert vw[0] == 10 and vw[1] == 11 and abs(sd[1] - 1) < 1e-9 and vw[2] == 20 and abs(vw[3] - 21.5) < 1e-9, (vw, sd)
+    print("market_ctx selftest ok")

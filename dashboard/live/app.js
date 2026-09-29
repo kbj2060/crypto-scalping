@@ -2863,6 +2863,7 @@ function isTodayOrTomorrowLocal(iso) {
 function renderMacroCalendar(payload) {
   const sub = el("macroCalendarSub");
   const allEvents = payload && Array.isArray(payload.events) ? payload.events : [];
+  latestMacroEvents = allEvents;     // 2026-09-29 시장 맥락 카드의 «다음 주요 지표»
   const events = allEvents.filter((e) => isTodayOrTomorrowLocal(e.time_utc))
     .sort((a, b) => a.time_utc.localeCompare(b.time_utc));
   if (sub) sub.textContent = events.length ? `오늘·내일 ${events.length}건 (경제지표·FOMC·연준 발언·EIA·국채입찰·실적 — 정치일정 미포함)` : "오늘·내일 예정된 일정 없음";
@@ -3956,6 +3957,225 @@ async function refreshTrend() {
   }
   renderSituation();
 }
+
+// ── 시장 맥락 (2026-09-29, ETH) ───────────────────────────────────────────
+// 레포트(ETH 오더플로 105항목) 대조 뒤 사용자 «불합격된 것들도 쓸모 있으면 넣어줘 -- 우리 검증 방식이 틀렸을 수도 있다».
+// 서버 /api/market-context(dashboard/market_ctx.py)를 그대로 그린다. 값은 전부 **서술** -- 방향 판정은 30분 카드(융합)가 한다.
+// 칸 제목의 «?» = 정의 · 읽는 법 · 우리 검정의 말(DESIGN.md: 매매 화면 본문에 연구 원문 숫자를 올리지 않는다).
+const API_MARKET_CTX_URL = "/api/market-context";
+const MARKET_CTX_POLL_MS = 5000;
+let latestMarketCtx = null, marketCtxLastFetchAt = 0;
+let latestMacroEvents = [];          // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정»
+const mcTipOpen = new Set();
+const mcLine = { vwap: true, bb: false };   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
+const MC_TIPS = {
+  lev: "펀딩 = 8시간마다 롱과 숏이 주고받는 이자(양수면 롱이 낸다). 바이낸스는 평온할 때 0.01%에 붙어 거의 안 움직여서 «비싸게 들고 있나»는 베이시스(선물 마크 − 현물 인덱스)의 7일 분위로 본다. OI = 열린 계약 수, z = 1시간 변화가 지난 7일 중 얼마나 튀었나.\n우리 검정: 극단 펀딩 뒤 가격 방향은 없었다(표본 충분). 그래도 넣은 이유 — 청산 연쇄는 쏠린 쪽에서 나고, 상태 줄은 그 쏠림을 말한다. 방향 신호로 쓰지 않는다.",
+  ls: "바이낸스 5분 통계: 계정 롱숏비(롱 계정 수 ÷ 숏 계정 수) · 탑트레이더 포지션 비율 · 테이커 매수 ÷ 매도. 괄호 = 하루 전.\n우리 검정: 30분 방향 모델에 넣으면 오히려 조금 나빠졌고 학술 근거도 없다. 군중이 어느 쪽에 몰렸나를 눈으로 보는 용도.",
+  quad: "1시간 가격 이동 × OI 변화. 이동이 하루 1시간 이동의 상위 25% 안일 때만 판정한다.\n우리 검정(4.7년): 하락 + OI↑(새 숏 유입) 뒤 1시간은 더 내렸고, 하락 + OI↓(롱 정리) 뒤는 되돌렸다 — 숏을 «언제 거두나»의 근거. 상승 쪽 두 칸은 아직 안 쟀다. 차트 아래 사분면(5분 델타 × OI)은 방향 정보가 0으로 나온 서술용이다.",
+  flow: "크기별 순매수 = 테이커 주문 크기로 가른 60분 순매수를 지난 24시간 분포로 나눈 값(σ). 고래 ≥ $10만 · 리테일 < $1만. 30분 체결 = 거래소별 순매수(ETH).\n우리 검정: 혼자서는 셋 다 되돌림 쪽(리테일이 가장 심하다). 고래와 리테일이 갈릴 때 60분 고래 쪽이 약하게 맞았다(메이커 전제). CVD는 «설명»이지 선행지표가 아니다.",
+  cross: "BTC 30분 이동과 ETH의 동행 여부 · 거래소 마크 가격차(바이낸스 기준) · HL 프리미엄(마크 − 오라클).\n우리 검정: BTC→ETH 1분 선행 0, 바이낸스가 HL을 1초 안쪽으로 앞선다 — 30분~2시간 방향에는 못 쓴다. 괴리가 커지는 순간(거래소 장애·한쪽 청산 쏠림)을 알아채는 용도.",
+  book: "미드에서 ±10/25/50bp까지 걸린 호가 합 = 그만큼 밀려면 먹어야 할 물량(한 초 스냅샷 · 취소·재보충은 모른다). 얇은 쪽 = ±25bp 호가가 지난 6시간 중 몇 분위인가.\n우리 검정: 미검정. 거래량 계열은 실현변동성에 대부분 먹혔으니 «크기·속도» 참고로만. ETH 스프레드는 거의 늘 1틱이라 벌어지면 그 자체가 이상 신호다.",
+  liq: "청산 급증 = 봇의 1분 청산 z. HL 고래 청산가 = 추적 중인 HL 상위 300주소의 실제 청산가(추정 아님)를 $5 단위로 묶은 금액 — 차트에 점선으로도 그린다. 12시간 실측 = 바이낸스 강제청산이 실제로 체결된 가격(차트 체결 기둥 안쪽 눈금).\n우리 검정: 청산 급증 뒤 역매매·추종 둘 다 엣지 0 — «청산 동반 급등에 역매매 금지» 필터만 유효. 추정 청산맵은 «위치»는 맞고 방향은 없다. HL 실측 청산가는 미검정.",
+  when: "다음 펀딩 정산 · 가까운 옵션 만기와 max pain · 미국장 · 다음 주요 지표.\n우리 검정: 펀딩 정산 전후 드리프트는 반기마다 부호가 뒤집혀 기각. max pain 쪽 1시간 규칙(만기 1시간 전 → 08:00 UTC)만 2026년 첫 검정 통과 — 후보라 표본외 장부로 계속 잰다.",
+  px: "세션 VWAP = UTC 00시부터 거래량 가중 평균가(σ = 거래량 가중 표준편차). 볼린저 %B = (종가 − 하단) ÷ (상단 − 하단), 20봉·2σ. RSI 14 = 5분봉. 스위치로 차트에 선을 켠다.\n우리 검정: 볼린저·VWAP 셋업은 방향 엣지가 없었고 RSI·%B는 짧은 되돌림을 약하게 말한다(비용을 못 넘음). 위치 참고용.",
+};
+
+async function refreshMarketCtx() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  const now = Date.now();
+  if (now - marketCtxLastFetchAt < MARKET_CTX_POLL_MS) return;
+  marketCtxLastFetchAt = now;
+  try {
+    const res = await fetch(API_MARKET_CTX_URL, { cache: "no-cache" });
+    latestMarketCtx = res.ok ? await res.json() : { available: false, error: `HTTP ${res.status}` };
+  } catch (error) {
+    latestMarketCtx = { available: false, error: "fetch_failed" };
+  }
+  renderMarketCtx();
+}
+
+// 볼린저(20, 2σ) -- {봉 시각: [하단, 중앙, 상단]}. 창 슬라이스(1h = 12봉)로는 20봉이 안 되니 전체 이력에서 센다.
+function mcBollinger(full, n = 20, k = 2) {
+  const out = new Map();
+  for (let j = n - 1; j < full.length; j++) {
+    let s = 0, s2 = 0;
+    for (let q = j - n + 1; q <= j; q++) { const v = +full[q].close; s += v; s2 += v * v; }
+    const m = s / n, sd = Math.sqrt(Math.max(0, s2 / n - m * m));
+    out.set(full[j].time, [m - k * sd, m, m + k * sd]);
+  }
+  return out;
+}
+
+// RSI(14, 와일더). 값이 모자라면 null.
+function mcRsi(closes, n = 14) {
+  if (closes.length <= n) return null;
+  let up = 0, dn = 0;
+  for (let i = 1; i <= n; i++) { const d = closes[i] - closes[i - 1]; if (d > 0) up += d; else dn -= d; }
+  up /= n; dn /= n;
+  for (let i = n + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    up = (up * (n - 1) + Math.max(d, 0)) / n; dn = (dn * (n - 1) + Math.max(-d, 0)) / n;
+  }
+  return dn === 0 ? 100 : 100 - 100 / (1 + up / dn);
+}
+
+// 다음 미국장 개장·마감(뉴욕 09:30~16:00, 평일). 서머타임은 브라우저의 시간대 표로 가린다 -- 13:30/14:30 UTC 중 뉴욕 09:30 인 쪽.
+function mcUsSession(nowMs = Date.now()) {
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", weekday: "short", hour: "2-digit", minute: "2-digit" });
+  const ny = (t) => Object.fromEntries(fmt.formatToParts(t).map((p) => [p.type, p.value]));   // 브라우저마다 쉼표·공백이 달라 문자열로 안 비교한다
+  const d0 = new Date(nowMs);
+  for (let k = -1; k < 5; k++) {
+    for (const h of [13, 14]) {
+      const open = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate() + k, h, 30), s = ny(open);
+      if (!(["Mon", "Tue", "Wed", "Thu", "Fri"].includes(s.weekday) && s.hour === "09" && s.minute === "30")) continue;
+      const close = open + 6.5 * 3600e3;
+      if (nowMs < close) return { open, close, live: nowMs >= open };
+    }
+  }
+  return null;
+}
+
+// 풋프린트 봉 → 서술 표식(2026-09-29). bars = [{high, low, close, delta, topBuy, botSell}] -- topBuy = 맨 윗줄 공격 매수, botSell = 맨 아랫줄 공격 매도.
+//   다이버: 새 30분(6봉) 고가(저가)인데 창 누적 CVD 가 직전 고가(저가) 때보다 낮다(높다).
+//   소진: 새 N봉 고가에서 델타가 창 상위 20% 매수인데 종가가 봉 아래 40% 안(윗꼬리) -- 저가는 거울.
+//   흡수?: 새 30분 고가의 맨 윗줄 공격 매수가 창 상위 10% 인데 다음 봉이 그 고가를 못 넘었다 -- 저가는 거울.
+// 🔴우리 검정에서 이 가족은 방향 엣지가 없었고, 흡수는 오히려 **더 잘 뚫렸다**(1초 가격행 검정). 화면은 «이렇게 보인다»까지만 말한다.
+function fpPatternMarks(bars, look = 6) {   // 6봉 = 30분 -- 1시간 창(12봉)에서도 찍히게
+  const out = [];
+  let run = 0;
+  const cv = bars.map((b) => (run += b.delta || 0));
+  const q = (arr, p) => { const a = arr.filter((v) => v > 0).sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.floor(a.length * p))] : Infinity; };
+  const bigD = q(bars.map((b) => Math.abs(b.delta || 0)), 0.8), tbQ = q(bars.map((b) => b.topBuy || 0), 0.9), bsQ = q(bars.map((b) => b.botSell || 0), 0.9);
+  for (let i = look; i < bars.length; i++) {
+    const b = bars[i];
+    let jh = i - look, jl = i - look;
+    for (let j = i - look; j < i; j++) { if (bars[j].high > bars[jh].high) jh = j; if (bars[j].low < bars[jl].low) jl = j; }
+    const rng = b.high - b.low, pos = rng > 0 ? (b.close - b.low) / rng : 0.5, nx = bars[i + 1];
+    // 셋 다 **새 극값**에서만 말한다(흡수도 -- 연구 정의가 «극값 줄»이다. 극값 조건이 없으면 평평한 구간에서 봉마다 찍힌다)
+    if (b.high > bars[jh].high) {
+      if (cv[i] < cv[jh]) out.push({ i, kind: "div", side: -1 });
+      if (b.delta > 0 && b.delta >= bigD && pos <= 0.4) out.push({ i, kind: "exh", side: -1 });
+      if (nx && b.topBuy >= tbQ && nx.high <= b.high) out.push({ i, kind: "abs", side: -1 });
+    }
+    if (b.low < bars[jl].low) {
+      if (cv[i] > cv[jl]) out.push({ i, kind: "div", side: 1 });
+      if (b.delta < 0 && -b.delta >= bigD && pos >= 0.6) out.push({ i, kind: "exh", side: 1 });
+      if (nx && b.botSell >= bsQ && nx.low >= b.low) out.push({ i, kind: "abs", side: 1 });
+    }
+  }
+  return out;
+}
+
+function renderMarketCtx() {
+  const body = el("mcBody"), badge = el("mcBadge");
+  if (!body) return;
+  const d = latestMarketCtx;
+  if (!d || !d.available) {
+    body.innerHTML = `<div class="mc-note">${d && d.error ? `시장 맥락 지연 (${escapeHtml(String(d.error))})` : "불러오는 중…"}</div>`;
+    return;
+  }
+  const n = (v, dp = 0) => (v == null || !Number.isFinite(+v) ? "-" : (+v).toLocaleString("en-US", { maximumFractionDigits: dp, minimumFractionDigits: dp }));
+  const sg = (v, dp = 1, u = "") => (v == null || !Number.isFinite(+v) ? "-" : `${+v >= 0 ? "+" : "−"}${n(Math.abs(v), dp)}${u}`);
+  const pctl = (p) => (p == null ? "" : ` · ${Math.round(p * 100)}분위`);
+  const fr = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(4)}%`);
+  const left = (ms) => { if (!ms) return "-"; const s = Math.max(0, (ms - Date.now()) / 1000); return s >= 3600 ? `${Math.floor(s / 3600)}시간 ${Math.floor((s % 3600) / 60)}분` : `${Math.ceil(s / 60)}분`; };
+  const usd = (v) => (v == null ? "-" : fmtUsdCompact(v));
+  const kv = (k, v, cls = "") => `<div class="mc-kv"><span>${k}</span><b class="${cls}">${v}</b></div>`;
+  const tone = (v, thr = 0.5) => (v == null || Math.abs(v) < thr ? "" : v > 0 ? "mc-good" : "mc-bad");
+  const sec = (key, title, inner) => `<div class="mc-sec"><h4><button type="button" class="mc-q" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
+    + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(MC_TIPS[key]).replace(/\n/g, "<br>")}</p>${inner}</div>`;
+  const f = d.funding || {}, b = d.basis || {}, oi = d.oi || {}, ls = d.ls, fl = d.flow || {}, z = fl.z60 || {}, bk = d.book || {}, bu = d.burst;
+  const levWarn = ["long_crowd", "short_crowd", "deleverage"].includes((d.lev || {}).key);
+  // 가격 위치 -- 차트와 같은 캔들 이력(서버가 봉마다 vwap/vsd 를 싣는다)
+  const full = candleHistoryByAsset.eth || [], lc = full[full.length - 1];
+  const lv = [...full].reverse().find((c) => c.vwap);      // 형성 중 봉(클라가 붙인다)엔 vwap 이 없다 -- 마감봉 값
+  const bb = lc ? mcBollinger(full).get(lc.time) : null, px = Number(latestLivePriceByAsset.eth || lc?.close || d.mid || 0);
+  const pb = bb && bb[2] > bb[0] ? (px - bb[0]) / (bb[2] - bb[0]) : null, rsi = mcRsi(full.map((c) => +c.close));
+  const vz = lv && lv.vsd > 0 ? (px - lv.vwap) / lv.vsd : null;
+  // 일정 -- 옵션 만기는 옵션 카드와 같은 원천(latestGex)
+  const { o } = optData();
+  const ef = o ? optFront(o) : null, us = mcUsSession();
+  const nextMacro = latestMacroEvents.filter((e) => e.importance === "high" && Date.parse(e.time_utc) > Date.now())
+    .sort((a, c) => a.time_utc.localeCompare(c.time_utc))[0];
+  const hlRow = (arr) => (arr && arr.length ? arr.slice(0, 3).map((l) => `${n(l.px)} ${usd(l.usd)}`).join(" · ") : "없음(±10%)");
+  const prof = d.liq_profile || [], top = prof.reduce((m, r) => (r[1] + r[2] > (m ? m[1] + m[2] : 0) ? r : m), null);
+  const sw = bk.sweep, bps = bk.bps || [10, 25, 50];
+  const thin = bk.bid25_pct != null && bk.ask25_pct != null && Math.min(bk.bid25_pct, bk.ask25_pct) <= 0.1
+    ? (bk.ask25_pct <= bk.bid25_pct ? "위쪽(매도호가)이 얇다" : "아래쪽(매수호가)이 얇다") : null;
+  const burstHot = bu && (bu.hawkes_active || Math.max(bu.z_long || 0, bu.z_short || 0) >= 3);
+  const bAge = bu && bu.updated_at ? (Date.now() - Date.parse(bu.updated_at)) / 60000 : null;
+  if (badge) {
+    badge.textContent = (d.lev || {}).label || "-";
+    badge.className = `ops-badge ${levWarn ? "warn" : "neutral"}`;
+  }
+  const html = [
+    sec("lev", "레버리지", kv("상태", escapeHtml((d.lev || {}).label || "-"), levWarn ? "mc-warn" : "")
+      + kv("펀딩 · 바이낸스 예상", `${fr(f.bn)}${pctl(f.bn_pct180)} · 정산까지 ${left(f.next_ms)}`)
+      + kv("펀딩 · OKX / HL(8시간)", `${fr(f.okx)} / ${fr(f.hl_8h)}`)
+      + kv("베이시스(마크−인덱스)", `${sg(b.bp, 1, "bp")} · 30분 ${sg(b.d30_bp, 1, "bp")}${pctl(b.pct7d)}`)
+      + kv("OI · 바이낸스 + OKX", `${n((oi.oi || 0) / 1e6, 2)}M + ${n((oi.okx || 0) / 1e6, 2)}M ETH`)
+      + kv("OI 변화", `1시간 ${sg(oi.d1h_pct, 2, "%")}${oi.z1h == null ? "" : ` (z ${sg(oi.z1h, 1)})`} · 24시간 ${sg(oi.d24h_pct, 1, "%")}`, tone(oi.z1h, 1.5))
+      + kv("OI · HL", oi.hl == null ? "-" : `${n(oi.hl / 1e6, 2)}M ETH`)),
+    sec("ls", "포지션 비율 · 5분", !ls ? `<div class="mc-note">롱숏비 수집 없음</div>`
+      : kv("계정 롱숏비", `${n(ls.global, 2)} (하루 전 ${n(ls.global_24h, 2)})`)
+        + kv("탑트레이더 포지션", `${n(ls.top_pos, 2)} (하루 전 ${n(ls.top_pos_24h, 2)})`)
+        + kv("테이커 매수 ÷ 매도", n(ls.taker, 2), tone(ls.taker == null ? null : ls.taker - 1, 0.1))),
+    sec("quad", "가격 × OI · 1시간", kv("지금", d.quad ? escapeHtml(d.quad.label) : "-",
+        !d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : "")
+      + kv("1시간", `${sg(d.move60, 0, "bp")} · OI ${sg(d.oi60, 0)} ETH`)
+      + (d.quad ? `<div class="mc-note">${escapeHtml(d.quad.note)}</div>` : "")),
+    sec("flow", "크기별 수급 · 60분", kv("고래 / 중형 / 리테일", z.whale == null ? "기준 쌓는 중(6시간)"
+        : `<span class="${tone(z.whale)}">${sg(z.whale, 1, "σ")}</span> / <span class="${tone(z.mid)}">${sg(z.mid, 1, "σ")}</span> / <span class="${tone(z.retail)}">${sg(z.retail, 1, "σ")}</span>`)
+      + kv("30분 CVD", sg(fl.cvd30_z, 1, "σ"), tone(fl.cvd30_z))
+      + kv("30분 체결 · 바이낸스 / OKX", `${sg(fl.bn30, 0)} / ${sg(fl.okx30, 0)} ETH`)),
+    sec("cross", "교차 시장", kv("BTC 30분", `${sg((d.btc || {}).move_bp, 0, "bp")} · ${(d.btc || {}).rel === "동행" ? "ETH 같이 간다" : (d.btc || {}).rel === "단독" ? "ETH 혼자 간다" : "ETH 30분 방향 없음"}`)
+      + kv("마크 가격차 · OKX / HL", `${sg((d.venues || {}).okx_bp, 1, "bp")} / ${sg((d.venues || {}).hl_bp, 1, "bp")}`)
+      + kv("HL 프리미엄", sg(b.hl_premium_bp, 1, "bp"))),
+    sec("book", "호가 유동성", kv("스프레드", bk.spread == null ? "-" : `$${bk.spread.toFixed(2)}${bk.spread > 0.015 ? " — 평소(1틱)보다 넓다" : ""}`, bk.spread > 0.015 ? "mc-warn" : "")
+      + (sw ? bps.map((bp, i) => kv(`±${bp}bp 까지 · 매수벽 / 매도벽`, `${n(sw.bid[i])} / ${n(sw.ask[i])} ETH`)).join("") : kv("호가", "래스터 대기"))
+      + kv("얇은 쪽(±25bp, 6시간 분위)", bk.bid25_pct == null ? "기준 쌓는 중(10분)"
+        : `매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}${thin ? ` — ${thin}` : ""}`, thin ? "mc-warn" : "")),
+    sec("liq", "청산", kv("청산 급증(1분 z)", !bu ? "-" : burstHot
+        ? `${(bu.short_usd_1m || 0) > (bu.long_usd_1m || 0) ? "숏" : "롱"} 청산 급증 · ${usd(Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0))}/1분`
+        : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}${bAge != null && bAge > 5 ? ` · 마지막 청산 ${Math.round(bAge)}분 전` : ""}`, burstHot ? "mc-warn" : "")
+      + kv("HL 고래 청산가 ↓(롱)", hlRow((d.hl_liq || {}).below))
+      + kv("HL 고래 청산가 ↑(숏)", hlRow((d.hl_liq || {}).above))
+      + kv("12시간 실측 청산 최다", top ? `${n(top[0], 1)} (롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : "없음")),
+    sec("when", "일정", kv("다음 펀딩 정산", f.next_ms ? `${fmtHourMinute(f.next_ms)} (${left(f.next_ms)})` : "-")
+      + kv("가까운 옵션 만기", ef ? `${optKst(ef.exp_ms)} (${left(ef.exp_ms)}) · max pain ${n(ef.pain)}${px ? ` (${ef.pain >= px ? "위" : "아래"} ${n(Math.abs(ef.pain / px - 1) * 100, 1)}%)` : ""}` : "-")
+      + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? `<div class="mc-note">max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)</div>` : "")
+      + kv("미국장", !us ? "-" : us.live ? `장중 · 마감까지 ${left(us.close)}` : `개장까지 ${left(us.open)}`)
+      + kv("다음 주요 지표", nextMacro ? `${escapeHtml(nextMacro.title_ko)} · ${fmtMacroCalendarTime(nextMacro.time_utc)}` : "오늘·내일 없음")),
+    sec("px", "가격 위치 · 5분봉", kv("세션 VWAP", lv ? `${n(lv.vwap, 1)} · 지금 ${sg(vz, 1, "σ")}` : "-")
+      + kv("볼린저 %B (20, 2σ)", pb == null ? "-" : `${n(pb, 2)} · 폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%`)
+      + kv("RSI 14", rsi == null ? "-" : n(rsi, 0), rsi == null ? "" : rsi >= 70 || rsi <= 30 ? "mc-warn" : "")
+      + `<div class="mc-switch">차트에 그리기 <label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
+      + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label></div>`),
+  ].join("");
+  if (body._mcHtml === html) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
+  body._mcHtml = html;
+  keepFocus(body, () => { body.innerHTML = html; });
+}
+
+el("mcBody")?.addEventListener("click", (e) => {
+  const b = e.target.closest(".mc-q");
+  if (!b) return;
+  const k = b.dataset.tip, open = !mcTipOpen.has(k);
+  if (open) mcTipOpen.add(k); else mcTipOpen.delete(k);
+  b.setAttribute("aria-expanded", String(open));
+  const tip = b.closest(".mc-sec")?.querySelector(".mc-tip");
+  if (tip) tip.hidden = !open;
+  el("mcBody")._mcHtml = null;         // 다음 그리기에서 펼침 상태를 반영한다
+});
+el("mcBody")?.addEventListener("change", (e) => {
+  const k = e.target?.dataset?.line;
+  if (!k) return;
+  mcLine[k] = e.target.checked;
+  try { localStorage.setItem("mcLine", JSON.stringify(mcLine)); } catch (err) { /* 기억은 편의 */ }
+  el("mcBody")._mcHtml = null;
+  scheduleSnapshotChartRender();
+});
 
 
 // 2026-09-26 비평: 수 초마다 innerHTML 을 통째로 갈아 끼우는 카드에서 Tab 으로 훑던 포커스가 <body> 로 떨어졌다.
@@ -5843,6 +6063,131 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       flush();
     }
 
+    // ── 시장 맥락 겹침 (2026-09-29, 사용자 «불합격이어도 쓸모 있으면 넣어줘 -- 우리 검증이 틀렸을 수도 있다») ──────────
+    //   ① 스택 불균형(같은 쪽 3줄 연속) ② 패턴 글자(다이버·소진·흡수?) ③ 세션 VWAP ±1·2σ · 볼린저(카드 스위치)
+    //   ④ HL 고래 실측 청산가 점선 ⑤ 12시간 실측 청산 가격(체결 기둥 안쪽 눈금). 전부 서술 -- 뜻과 우리 검정은 각 <title>.
+    //   선(③④)은 옵션 선과 같이 격자 바로 위(셀 아래)에, 표식(①②⑤)은 셀 위에. 가격 플롯 밖은 네이티브 clipPath 로 자른다.
+    if (isSnapshotChart) {
+      const clipId = (svg.id || "chart") + "-mcclip";
+      let cr = svg.querySelector("clipPath#" + clipId + " rect");
+      if (!cr) {
+        const defs = document.createElementNS(NS, "defs"), cp = document.createElementNS(NS, "clipPath");
+        cp.setAttribute("id", clipId); cr = document.createElementNS(NS, "rect");
+        cp.appendChild(cr); defs.appendChild(cp); svg.appendChild(defs);
+      }
+      cr.setAttribute("x", ml); cr.setAttribute("y", mt); cr.setAttribute("width", cw); cr.setAttribute("height", ch);   // 창·폭이 바뀌면 따라간다
+      const mk = (parent, tag, attrs, text) => {
+        const e = document.createElementNS(NS, tag);
+        Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+        if (text != null) { const t = document.createElementNS(NS, "title"); t.textContent = text; e.appendChild(t); }
+        parent.appendChild(e);
+        return e;
+      };
+      const lines = document.createElementNS(NS, "g");
+      lines.setAttribute("clip-path", `url(#${clipId})`);
+      const cx = (i) => (xAt(i) + bw / 2).toFixed(1);
+      const pl = (pts, attrs, tip) => { if (pts.length > 1) mk(lines, "polyline", { points: pts.join(" "), fill: "none", ...attrs }, tip); };
+      // ③ 세션 VWAP ±σ -- 서버가 봉마다 vwap/vsd 를 싣는다(UTC 00시 시작)
+      if (mcLine.vwap) {
+        [[0, "var(--ink)", 0.6, "6 3", 1.3], [1, "var(--muted)", 0.45, "1 4", 1], [-1, "var(--muted)", 0.45, "1 4", 1],
+         [2, "var(--muted)", 0.35, "1 6", 1], [-2, "var(--muted)", 0.35, "1 6", 1]].forEach(([k, col, op, dash, sw]) => {
+          const pts = candles.map((c, i) => (c.vwap ? `${cx(i)},${yAt(c.vwap + k * (c.vsd || 0)).toFixed(1)}` : null)).filter(Boolean);
+          pl(pts, { stroke: col, "stroke-opacity": op, "stroke-dasharray": dash, "stroke-width": sw },
+             k === 0 ? "세션 VWAP(UTC 00시부터 거래량 가중 평균가). 볼린저·VWAP 셋업은 우리 검정에서 방향 엣지가 없었다 — 위치 참고."
+                     : `VWAP ${k > 0 ? "+" : "−"}${Math.abs(k)}σ(거래량 가중 표준편차)`);
+        });
+        const lv = [...candles].reverse().find((c) => c.vwap);
+        if (lv && yAt(lv.vwap) > mt + 8 && yAt(lv.vwap) < plotBottom - 2) {
+          mk(svg, "text", { x: ml + 4, y: yAt(lv.vwap) - 3, "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" }).textContent = "VWAP";
+        }
+      }
+      // ③ 볼린저(20, 2σ) -- 창 슬라이스로는 20봉이 안 돼 전체 이력에서 센다
+      if (mcLine.bb) {
+        const bbm = mcBollinger(candleHistoryByAsset[activeSnapshotAsset] || []);
+        [0, 2].forEach((j) => pl(candles.map((c, i) => (bbm.has(c.time) ? `${cx(i)},${yAt(bbm.get(c.time)[j]).toFixed(1)}` : null)).filter(Boolean),
+          { stroke: "var(--muted)", "stroke-opacity": 0.55, "stroke-dasharray": "3 3", "stroke-width": 1 },
+          "볼린저 밴드(20봉 · 2σ). 우리 검정: 4시간 볼린저는 평균회귀·이탈 추종 둘 다 비용을 못 넘었다 — 위치 참고."));
+      }
+      // ④ HL 고래 실측 청산가 -- 추정 청산맵(배경)과 따로, 거래소가 준 실제 청산가(추적 300주소)
+      const mc = activeSnapshotAsset === "eth" && latestMarketCtx && latestMarketCtx.available ? latestMarketCtx : null;
+      if (mc && mc.hl_liq) {
+        [["below", "var(--bad)", "롱"], ["above", "var(--good)", "숏"]].forEach(([side, col, nm]) => {
+          [...(mc.hl_liq[side] || [])].sort((a, c) => c.usd - a.usd).slice(0, 2).forEach((l) => {
+            const y = yAt(l.px);
+            if (y < mt || y > plotBottom) return;
+            mk(lines, "line", { x1: ml, x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: col, "stroke-opacity": 0.55, "stroke-dasharray": "1 3", "stroke-width": 1.2 },
+               `HL 고래 ${nm} 청산가 ${l.px} · ${fmtUsdCompact(l.usd)} (${l.n}주소, 추정 아님). 우리 검정: 미검정.`);
+            mk(svg, "text", { x: ml + cw - 4, y: (y - 3).toFixed(1), "text-anchor": "end", "font-size": mobileChart ? 9 : 10,   // 선 위 -- 아래는 플롯 바닥 태그와 겹친다
+                              "font-weight": 700, fill: col, "fill-opacity": 0.85, "pointer-events": "none" }).textContent = `HL ${nm}청산 ${fmtUsdCompact(l.usd)}`;
+          });
+        });
+      }
+      const gridG = layerCache.get("grid")?.g;
+      if (gridG && gridG.parentNode === svg) svg.insertBefore(lines, gridG.nextSibling); else svg.appendChild(lines);
+      // ⑤ 12시간 실측 청산 가격 -- 체결 기둥 안쪽(왼쪽 끝)에서 오른쪽으로 자라는 얇은 눈금. 롱 청산 빨강 · 숏 청산 초록
+      if (mc && tradeInfo && (mc.liq_profile || []).length) {
+        const prof = mc.liq_profile, pmax = Math.max(...prof.map((r) => r[1] + r[2]));
+        const L = TRADE_W ? 40 : Math.max(10, TRADE_L - 10), x0 = tradeInfo.x0 + 2;
+        prof.forEach(([p, lo, sh]) => {
+          const y = yAt(p);
+          if (y < mt || y > plotBottom || !(pmax > 0)) return;
+          const wd = Math.max(2, L * Math.sqrt((lo + sh) / pmax));
+          mk(svg, "rect", { x: x0, y: (y - 1).toFixed(1), width: wd.toFixed(1), height: 2.4, fill: sh > lo ? "var(--good)" : "var(--bad)", "fill-opacity": 0.95 },
+             `12시간 실측 청산 ${p} · 롱 ${fmtUsdCompact(lo)} / 숏 ${fmtUsdCompact(sh)} (바이낸스 강제청산 체결가)`);
+        });
+      }
+      if (drawCells) {
+        // ① 스택 불균형 -- 같은 봉 안에서 반대편의 3배 넘는 줄이 같은 쪽으로 3줄 이상 이어지면 바깥에 굵은 막대
+        const STACK_MIN = 3;
+        barRows.forEach((rows, i) => {
+          const keys = [...rows.keys()].sort((a, c) => a - c), x = xAt(i);
+          [[0, 1, x + bw + 3, "var(--good)", "매수"], [1, 0, x - 5, "var(--bad)", "매도"]].forEach(([s, o, ex, col, nm]) => {
+            let run = [];
+            const flush = () => {
+              if (run.length >= STACK_MIN) {
+                const yTop = Math.max(mt, yAt((run[run.length - 1] + 1) * rowSize)), yBot = Math.min(plotBottom, yAt(run[0] * rowSize));
+                if (yBot - yTop > 2) mk(svg, "rect", { x: ex, y: yTop.toFixed(1), width: 2, height: (yBot - yTop).toFixed(1), fill: col, rx: 1 },
+                  `스택 불균형 · ${nm} ${run.length}줄 연속(반대편의 ${FOOTPRINT_IMBALANCE_RATIO}배 넘는 줄이 이어짐). 우리 검정: 미검정 — 흡수·소진 가족은 봉·60초·가격행 단위에서 방향 0이었다.`);
+              }
+              run = [];
+            };
+            keys.forEach((k) => {
+              const c = rows.get(k), imb = c[s] > 0 && c[s] > c[o] * FOOTPRINT_IMBALANCE_RATIO;
+              if (imb && run.length && k !== run[run.length - 1] + 1) flush();
+              if (imb) run.push(k); else flush();
+            });
+            flush();
+          });
+        });
+        // ② 패턴 글자 -- 맨 윗줄 위(청산 원·사건 삼각형 바깥) / 델타 글자 아래
+        const pb = candles.map((c, i) => {
+          const rows = barRows[i];
+          let d = 0, hk = -Infinity, lk = Infinity;
+          rows.forEach((cell, k) => { d += cell[0] - cell[1]; if (k > hk) hk = k; if (k < lk) lk = k; });
+          return { high: c.high, low: c.low, close: c.close, delta: d, hk, lk,
+                   topBuy: rows.size ? rows.get(hk)[0] : 0, botSell: rows.size ? rows.get(lk)[1] : 0 };
+        });
+        const TIP = {
+          div: "다이버전스 — 새 30분 고가(저가)인데 창 누적 CVD 는 직전 고가(저가) 때보다 약하다. 우리 검정: 봉 단위 «체결과 가격이 엇갈림»은 엣지 0이었다.",
+          exh: "소진 — 새 30분 고가(저가)에서 큰 공격 체결이 들어왔는데 봉이 반대쪽 꼬리로 닫혔다. 우리 검정: 미검정(흡수 가족은 방향 0).",
+          abs: "흡수처럼 보인다 — 극값 줄에 큰 공격 체결이 몰렸는데 다음 봉이 그 극값을 못 넘었다. 🔴우리 1초 검정: 이런 라인은 조용한 극값보다 오히려 더 잘 뚫렸다(지지·저항으로 읽지 말 것).",
+        };
+        const NAME = { div: "다이버", exh: "소진", abs: "흡수?" };
+        const stack = new Map(), fs = mobileChart ? 8.5 : 9.5;
+        fpPatternMarks(pb).forEach(({ i, kind, side }) => {
+          const key = `${i}:${side}`, k = stack.get(key) || 0;
+          stack.set(key, k + 1);
+          const b = pb[i];
+          // 위: 청산 원(고점 위 14px + 반지름 ≤13 → 최대 40px) 바깥 · 아래: 델타 글자(+13) 아래
+          const y = side < 0 ? yAt(Number.isFinite(b.hk) ? (b.hk + 1) * rowSize : b.high) - 46 - k * (fs + 2)
+                             : yAt(Number.isFinite(b.lk) ? b.lk * rowSize : b.low) + 30 + k * (fs + 2);
+          if (y < mt + fs || y > plotBottom - 2) return;
+          mk(svg, "text", { x: cx(i), y: y.toFixed(1), "text-anchor": "middle", "font-size": fs, "font-weight": 700, fill: "var(--muted)" },
+             TIP[kind]).appendChild(document.createTextNode(`${NAME[kind]}${kind === "abs" ? "" : side < 0 ? "↓" : "↑"}`));
+        });
+      }
+    }
+
     // 백필 중에는 왼쪽 봉들이 아직 비어 있다 -- 그걸 «거래가 없었다»로 읽지 않게 말해 둔다.
     // 판정은 **수집기 상태(ready)** 만 본다. 캔들 개수로 재면, 봉이 바뀌는 순간 캔들 이력이
     // 아직 그 봉을 모를 때 다 찼는데도 「수집 중」이 남는다(2026-09-15 화면에서 실제로 봤다).
@@ -7468,6 +7813,7 @@ async function tick() {
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
       refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
+      refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (5초, ETH 만 · 서술)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }

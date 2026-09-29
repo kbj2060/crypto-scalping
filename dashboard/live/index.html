@@ -453,6 +453,17 @@
            평소(모바일 포함)에는 display:contents 라 이 묶음이 없는 것과 같다. -->
       <div class="snap-side">
 
+      <!-- 2026-09-29 «시장 맥락»(사용자 «불합격된 것들도 쓸모 있으면 넣어줘»): 레버리지(펀딩·베이시스·OI) · 롱숏비 · 가격×OI 1시간 ·
+           크기별 수급 · 교차 시장 · 호가 유동성 · 청산(HL 고래 실측 청산가) · 일정 · 가격 위치(VWAP·볼린저·RSI).
+           /api/market-context(dashboard/market_ctx.py). 전부 서술 -- 칸 제목 «?» 가 정의·읽는 법·우리 검정을 말한다. -->
+      <section id="mcPanel" class="panel ops-health-panel mc-panel" data-eth-only>
+        <div class="ops-health-head">
+          <div><h3>시장 맥락</h3><p class="muted">레버리지 · 교차 시장 · 호가 · 청산 · 일정 — 서술이지 신호가 아니다</p></div>
+          <div class="ops-health-head-tools"><span id="mcBadge" class="ops-badge neutral">-</span></div>
+        </div>
+        <div id="mcBody" class="mc-body"></div>
+      </section>
+
 
       <section class="panel ops-health-panel">
         <h3 class="sr-only">특화 신호</h3>

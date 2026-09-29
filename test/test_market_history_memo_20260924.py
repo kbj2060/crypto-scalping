@@ -11,7 +11,9 @@ start = src.index("    market_rows_memo: dict")
 end = src.index("    async def load_market_history(asset: str)")
 chunk = re.sub(r"^    ", "", src[start:end], flags=re.M)
 calls = []
-ns = {"Any": object, "web": None, "evidence_signal_cache": {}, "trend_veto_rows": lambda df: calls.append(df) or {}}
+import sys; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from dashboard import market_ctx as mctx  # 2026-09-29 캔들 행에 세션 VWAP(mctx.session_vwap)이 붙는다
+ns = {"Any": object, "web": None, "evidence_signal_cache": {}, "trend_veto_rows": lambda df: calls.append(df) or {}, "mctx": mctx}
 async def warm(): pass
 ns["load_chart_klines_frames"] = warm
 exec(compile(chunk, "memo", "exec"), ns)
@@ -20,7 +22,7 @@ load = ns["load_market_history_from_evidence_cache"]
 def frame(p0):
     ts = pd.date_range("2026-09-24", periods=300, freq="5min", tz="UTC")
     c = p0 + np.arange(300.0)
-    return pd.DataFrame({"timestamp": ts, "open": c, "high": c + 1, "low": c - 1, "close": c})
+    return pd.DataFrame({"timestamp": ts, "open": c, "high": c + 1, "low": c - 1, "close": c, "volume": 1.0})
 
 async def main():
     eth, btc = frame(2600), frame(60000)
