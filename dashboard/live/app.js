@@ -4111,7 +4111,7 @@ function renderMarketCtx() {
   }
   const html = [
     sec("lev", "레버리지", kv("상태", escapeHtml((d.lev || {}).label || "-"), levWarn ? "mc-warn" : "")
-      + kv("펀딩 · 바이낸스 예상", `${fr(f.bn)}${pctl(f.bn_pct180)} · 정산까지 ${left(f.next_ms)}`)
+      + kv("펀딩 · 바이낸스 예상", `${fr(f.bn)}${f.bn_at_base ? " · 기본값(평온 고정)" : pctl(f.bn_pct180)} · 정산까지 ${left(f.next_ms)}`)
       + kv("펀딩 · OKX / HL(8시간)", `${fr(f.okx)} / ${fr(f.hl_8h)}`)
       + kv("베이시스(마크−인덱스)", `${sg(b.bp, 1, "bp")} · 30분 ${sg(b.d30_bp, 1, "bp")}${pctl(b.pct7d)}`)
       + kv("OI · 바이낸스 + OKX", `${n((oi.oi || 0) / 1e6, 2)}M + ${n((oi.okx || 0) / 1e6, 2)}M ETH`)
@@ -4129,7 +4129,7 @@ function renderMarketCtx() {
         : `<span class="${tone(z.whale)}">${sg(z.whale, 1, "σ")}</span> / <span class="${tone(z.mid)}">${sg(z.mid, 1, "σ")}</span> / <span class="${tone(z.retail)}">${sg(z.retail, 1, "σ")}</span>`)
       + kv("30분 CVD", sg(fl.cvd30_z, 1, "σ"), tone(fl.cvd30_z))
       + kv("30분 체결 · 바이낸스 / OKX", `${sg(fl.bn30, 0)} / ${sg(fl.okx30, 0)} ETH`)),
-    sec("cross", "교차 시장", kv("BTC 30분", `${sg((d.btc || {}).move_bp, 0, "bp")} · ${(d.btc || {}).rel === "동행" ? "ETH 같이 간다" : (d.btc || {}).rel === "단독" ? "ETH 혼자 간다" : "ETH 30분 방향 없음"}`)
+    sec("cross", "교차 시장", kv("BTC 30분", `${sg((d.btc || {}).move_bp, 0, "bp")} · ${(d.btc || {}).rel === "동행" ? "ETH 같이 간다" : (d.btc || {}).rel === "단독" ? "ETH 혼자 간다" : (d.btc || {}).move_bp == null ? "수집 중" : "ETH 30분 방향 없음"}`)
       + kv("마크 가격차 · OKX / HL", `${sg((d.venues || {}).okx_bp, 1, "bp")} / ${sg((d.venues || {}).hl_bp, 1, "bp")}`)
       + kv("HL 프리미엄", sg(b.hl_premium_bp, 1, "bp"))),
     sec("book", "호가 유동성", kv("스프레드", bk.spread == null ? "-" : `$${bk.spread.toFixed(2)}${bk.spread > 0.015 ? " — 평소(1틱)보다 넓다" : ""}`, bk.spread > 0.015 ? "mc-warn" : "")

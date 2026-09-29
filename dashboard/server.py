@@ -3834,6 +3834,8 @@ def make_app() -> web.Application:
         okx_mark, okx_fund = one("okx_mark"), one("okx_fund")
         bp = lambda a, b: (a / b - 1) * 1e4 if a and b else None   # noqa: E731
         ls = col.get("ls") or []
+        # 롱숏비 행은 원천 넷 중 일부가 비는 5분이 있다(최신 행 NULL, 09-29 서버 실측) -- 칸마다 «마지막 유효값»
+        lsv = lambda j, rows: next((r[j] for r in rows if r[j] is not None), None)   # noqa: E731
         d25 = np.array(depth25_ring, dtype=float) if len(depth25_ring) >= 600 else None
         sw = mp.get("sweep")
         basis_pct = mctx.pct_rank(dv["basis_bp"], hist["basis"], min_n=600)
@@ -3841,14 +3843,15 @@ def make_app() -> web.Application:
         return {
             "available": True, "ts": time.time(), "mid": mid,
             "funding": {"bn": dv["funding"], "bn_pct180": mctx.pct_rank(dv["funding"], fh), "next_ms": mp_state.get("next_funding_ms"),
+                        "bn_at_base": dv["funding"] is not None and abs(dv["funding"] - 0.0001) < 1e-9,   # 평온장 고정값(클램프)
                         "okx": okx_fund[0] if okx_fund else None, "okx_next_ms": okx_fund[1] if okx_fund else None,
                         "hl_8h": hl[0] * 8 if hl and hl[0] is not None else None},     # HL 펀딩은 1시간 단위 -- 8시간으로 맞춘다
             "basis": {"bp": dv["basis_bp"], "d30_bp": dv["basis_d_bp"], "pct7d": basis_pct,
                       "hl_premium_bp": hl[2] * 1e4 if hl and hl[2] is not None else None},
             "lev": mctx.lev_state(basis_pct, oi["z1h"]),
             "oi": {**oi, "okx": okx_oi[0] if okx_oi else None, "hl": hl[1] if hl else None},
-            "ls": ({"global": ls[-1][1], "top_pos": ls[-1][2], "taker": ls[-1][3],
-                    "global_24h": ls[0][1], "top_pos_24h": ls[0][2], "age_s": time.time() - ls[-1][0]} if ls else None),
+            "ls": ({"global": lsv(1, ls[::-1]), "top_pos": lsv(2, ls[::-1]), "taker": lsv(3, ls[::-1]),
+                    "global_24h": lsv(1, ls), "top_pos_24h": lsv(2, ls), "age_s": time.time() - ls[-1][0]} if ls else None),
             "quad": mctx.quad_1h(x.get("move60"), x.get("oi60"), x.get("move60_p75")),
             "move60": x.get("move60"), "oi60": x.get("oi60"),
             "flow": {"z60": x.get("z60"), "net60": x.get("net60"), "cvd30_z": x.get("cvd30_z"),
