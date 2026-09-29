@@ -324,23 +324,6 @@ body {
 .ops-health-row:nth-child(odd) { border-right: 1px solid var(--soft-line); }
 .ops-health-row:hover { background: rgb(var(--lift) / 0.025); }
 
-/* Macro calendar (2026-08-26) -- single-column chronological list, reuses .ops-health-row/-dot/
-   -info/-status-badge as-is (see scripts/live_macro_calendar_20260826.py for the event data). */
-.macro-calendar-list { grid-template-columns: 1fr; }
-.macro-calendar-list .ops-health-row:nth-child(odd) { border-right: none; }
-/* 🔴이 배지는 **언제나 시각**이다("내일 03:00 AM"). 좁은 칸에서 «내일 / 03:00 / AM» 로
-   세 줄이 되어 배지가 72x54 였다(사용자 지적). 시각은 쪼개면 못 읽는다.
-   nowrap 만으로는 부족했다 -- 트랙이 72px 에 머물러 이번엔 «내일 03:0» 로 **잘렸다**.
-   `min-width: max-content` 가 트랙에게 «이만큼은 필요하다»를 알려주는 유일한 한 줄이다
-   (실측: 트랙 72 → 108, 잘림 해소). 3열을 max-content 로 바꾸는 것으로는 안 됐다.
-   ⚠️다른 배지에는 걸지 않는다 -- 헬스 체크의 긴 진단 문자열("0/100쌍 (0%) · 표본 없음 …",
-   실측 190px)에 걸면 제목을 다시 밀어 2026-08 사고가 재발한다. 거긴 줄바꿈이 **맞다**. */
-.macro-calendar-list .ops-health-status-badge {
-  white-space: nowrap;
-  min-width: max-content;
-}
-.macro-calendar-empty { padding: 16px 18px; color: var(--muted); font-size: 12.5px; }
-
 .ops-health-dot {
   width: 9px;
   height: 9px;
@@ -396,16 +379,6 @@ body {
   width: 64px;
   text-align: center;
 }
-/* 2026-08-27 (user request, same ask extended to the macro calendar): #macroCalendarList's badge
-   now shows just 오늘/내일 + time ("오늘 14:30", category dropped same day per a follow-up request),
-   so its own width shrank from an earlier 100px (sized for the category text) down to fit this --
-   still its own rule rather than reusing the 64px above since the content shape (short label vs
-   date+time) differs. */
-#macroCalendarList .ops-health-status-badge {
-  width: 72px;
-  text-align: center;
-}
-
 /* Inline probability meter (2026-08-31, 9th pass -- see
    eth_dashboard_evidence_signal_tp_price_display_20260831 memory for the full redesign history:
    crammed badge -> badge+<small> -> probability ring ("옵션 B" of a 4-way mockup) -> user decided
@@ -665,26 +638,6 @@ body {
   .ops-health-meta small { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
   .ops-health-head { flex-direction: column; align-items: flex-start; }
   .ops-health-head-tools { width: 100%; justify-content: space-between; }
-
-  /* 🔴경제 일정은 시각 배지(108px)가 설명 칸을 175px 로 눌러 «잘려서 내려간다»(사용자 지적).
-     배지를 없앨 수도, 설명을 줄일 수도 없다 -- 배치를 바꾼다:
-         [점] 제목 ................... 내일 03:00 AM
-              설명은 여기서부터 **전체 폭**을 쓴다
-     마크업이 [점][info(제목+설명)][배지] 라 제목과 설명을 따로 칸에 놓을 수 없는데,
-     `display: contents` 가 info 를 «투명하게» 만들어 자식을 행의 직접 칸으로 올린다.
-     (자식 스타일은 `.ops-health-info strong/span` 후손 선택자라 그대로 살아 있다.) */
-  .macro-calendar-list .ops-health-row {
-    grid-template-columns: auto 1fr auto;
-    align-items: start;
-    row-gap: 4px;
-  }
-  .macro-calendar-list .ops-health-info { display: contents; }
-  .macro-calendar-list .ops-health-dot { grid-column: 1; grid-row: 1; align-self: center; }
-  .macro-calendar-list .ops-health-info strong { grid-column: 2; grid-row: 1; align-self: center; }
-  .macro-calendar-list .ops-health-info span { grid-column: 2 / -1; grid-row: 2; }
-  .macro-calendar-list .ops-health-status-badge {
-    grid-column: 3; grid-row: 1; justify-self: end; align-self: center;
-  }
 }
 
 @keyframes rangePulseGood {
@@ -2603,11 +2556,8 @@ body.order-coin-off .acct-lanes::before {
   #snapshotTabPanel > .liq-map-panel { grid-column: 1 / -1; grid-row: 2; grid-template-columns: minmax(0, 1fr) 380px; column-gap: 22px; align-items: start; }
   .liq-map-panel > .opt-in-card { grid-column: 2; grid-row: 1 / span 30; border-top: 0; margin-top: 0; padding: 0 0 0 22px;
     border-left: 1px solid var(--line); align-self: stretch; }
-  #snapshotTabPanel > .acct-panel { grid-column: 1; grid-row: 3; }
-  #snapshotTabPanel > .snap-side { grid-column: 2 / -1; grid-row: 3; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--card-gap); align-items: start; }
-  .acct-panel .acct-lanes { grid-template-columns: 1fr; }   /* 600px 에 두 레인은 안 들어간다 -- 청산이 위 */
+  #snapshotTabPanel > .acct-panel { grid-column: 1 / -1; grid-row: 3; }   /* 2026-09-30 특화 신호·경제 일정 카드 제거 -- 계좌가 아랫줄 전폭 */
 }
-.snap-side { display: contents; }
 /* 2026-09-30 30분 시나리오 → 차트 머리 칩(사용자 선택 시안 A): 큰 방향 5표 · 융합 신호. 방향색은 칩 테두리·글자만, 역추세 보유는 주황 */
 .sit-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .sit-chips[hidden] { display: none; }
@@ -2621,7 +2571,7 @@ body.order-coin-off .acct-lanes::before {
    DOM 은 시장 맥락이 먼저라 order 로만 바꾼다: 풋프린트 0 → 시장 맥락 1 → 풋프린트 뒤 카드들 2. */
 @media (max-width: 720px) {
   #snapshotTabPanel > .mc-panel { order: 1; }
-  #snapshotTabPanel > .liq-map-panel ~ *, #snapshotTabPanel > .snap-side > * { order: 2; }   /* .snap-side 는 display:contents -- 그 자식이 격자 항목이다 */
+  #snapshotTabPanel > .liq-map-panel ~ * { order: 2; }
 }
 
 /* 2026-09-27 헤더 한 줄(사용자 지시): 스냅샷의 «코인 탭 · 발표 경보 · 테마» 줄을 페이지 탭과 세션 사이로 올렸다.

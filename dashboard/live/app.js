@@ -2261,20 +2261,6 @@ function horizonBadgeHtml(key, progress, extraTitle) {
   return ` <span class="horizon-badge" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
 }
 
-// ⚠️2026-09-03: 스냅샷 탭은 코인을 전환하는데, 아래 지표 중 일부는 **ETH 전용 출처**다:
-//   · whale / retail_flow / liq_cascade -- trading_bot.py의 dashboard_state(봇은 ETH만 돌린다)
-//   · v_rebound                          -- ETH 전용 TabPFN 모델(/api/v-rebound-signal)
-// 자산 게이트가 없어서 XRP/BTC 탭에서도 **ETH 값이 그대로** 보이고 있었다. 사용자가 이미
-// 신고했던 "비트코인 페이지에 이더리움 증거신호가 나온다"와 같은 계열의 버그다.
-// 값을 지우고 "ETH 전용" 상태로 바꾼다 -- 다른 코인의 값인 척하는 것보다 없는 게 낫다.
-function ethOnlyIndicator(item) {
-  if (activeSnapshotAsset === "eth") return item;
-  return { ...item, tone: "neutral", proba: null, history: [], times: [], callHistory: [],
-           subText: "미지원",   // 2026-09-06: 상태 열은 92px nowrap이라 문장이 들어가면 넘친다. 설명은 derivedTitle에 있다.
-           derivedTag: "= ETH 전용",
-           derivedTitle: "이 지표의 데이터 출처가 ETH 전용입니다(봇 상태 또는 ETH 학습 모델). "
-             + "다른 코인 탭에서는 값을 숨깁니다 -- ETH 값을 그 코인 값인 것처럼 보여주지 않기 위해서입니다." };
-}
 
 // ⭐2026-09-03: ETH가 아닌 코인은 **그 코인 자신의** 실시간 수집기 값으로 대체한다.
 // 데이터가 없으면 ethOnlyIndicator로 폴백해 "미지원"으로 정직하게 표시한다.
@@ -2520,45 +2506,6 @@ async function refreshChartMarkers() {
 
 
 
-// 2026-09-11 추세 전환 **경보기** — «앞으로 30분 이내에 탐지기(거래대금·체결속도 동시 q90)가 발동할 확률»(HGB 5시드 동결).
-// 2026-09-30 탐지기 카드는 제거했다(사용자 결정 -- 재생 검증에서 «봉 가격폭 상위»보다 약하고 방향 지속 45~49%). 워커·API 는
-//   그대로다: 경보기의 타깃이자 RVOL 선의 원천이다.
-// 옛 경보 신호등 3종을 교체했다: 그 lift 5.75x 는 «앞 24봉 실현변동성»이라는 자명한 대리
-// 타깃 값이었고(atr_pct 단독 7.01), 전환 기준으로 재면 1.98~2.53 으로 무작위 수준이었다.
-// ⭐확률 축이 생겼으므로 게이지를 둔다(규약 §3 — 확률인 행만 게이지).
-function breakoutPrewarnIndicatorItem() {
-  const p = latestBreakoutDetector;
-  const w = (p && p.prewarn) || null;
-  const base = { key: "breakout_prewarn", label: "추세 전환 경보기", probaSlot: true,
-                 derivedTag: "= 대시보드 자체계산",
-                 derivedTitle: "전용 워커가 5분봉 마감마다 33개 피쳐를 만들어 동결된 HGB 5시드에 넣습니다. "
-                   + "방향은 예측하지 않습니다 -- «곧 전환이 온다»만 말합니다. 매매에 연결돼 있지 않습니다." };
-  if (!p || p.error || !p.available || !w || !w.available) {
-    const sub = !p ? "웜업"
-      : (p.error ? "오류" : (w && w.subText) || "데이터 없음");
-    return { ...base, tone: "neutral", subText: sub, proba: null, history: [], times: [] };
-  }
-  const pct = w.proba != null ? (Number(w.proba) * 100).toFixed(1) : null;
-  const stateTitle = [
-    w.on ? `예고 발동 — 확률 ${pct}% 가 후행 임계 ${(Number(w.threshold) * 100).toFixed(1)}% 를 넘었습니다`
-      : `미발동 — 확률 ${pct}% · 후행 임계 ${(Number(w.threshold) * 100).toFixed(1)}%`,
-    `타깃: ${w.horizon} 거래대금·체결속도가 함께 급증하는가(둘 다 후행 q90 이상)`,
-    "재생 검증(2026-09-30): 배포 후 09-11~28 정밀도 77.8% · 기저 23% · 모델 없는 z합보다 +5~8%p",
-    "임계는 확률의 **후행 2016봉 분위** q90 입니다 — 전역 분위를 쓰면 미래참조입니다",
-    "⚠️방향도 «큰 이동»도 말하지 않습니다 — 급증 방향으로 이어진 비율 45~49% · 큰 이동은 봉 가격폭 규칙이 더 잘 잡았습니다.",
-  ].filter(Boolean).join("\n");
-  return { ...base,
-    tone: w.tone === "warn" ? "warn" : "neutral",
-    subText: w.subText || "미발동",
-    // 2026-09-11 사용자 요청: 울리면 **지속시간 동안 게이지를 채워 둔다**. 비활성일 때만 실제 확률.
-    proba: w.active ? 1 : (w.proba != null ? Number(w.proba) : null),
-    meterNote: w.active ? `예고 지속 ${w.sustain_left_min}분` : (pct != null ? `예고 ${pct}%` : null),
-    meterNoteTitle: w.active
-      ? `발동 후 ${w.sustain_min}분 동안 게이지를 채워 둡니다 -- 신호의 수명입니다. 현재 확률 ${pct}%`
-      : "앞으로 30분 이내에 거래대금·체결속도가 함께 급증할 확률입니다(HGB 5시드 평균)",
-    stateTitle,
-    history: w.history || [], times: w.times || [] };
-}
 
 
 async function refreshBreakoutDetector() {
@@ -2783,8 +2730,6 @@ async function refreshMacroCalendar() {
     renderMacroCalendar(await res.json());
   } catch (error) {
     console.error("Macro calendar fetch error:", error);
-    const sub = el("macroCalendarSub");
-    if (sub) sub.textContent = "불러오기 실패";
   }
 }
 // 2026-08-26 user request: only today+tomorrow, by viewer's own local calendar day (not ET) --
@@ -2798,26 +2743,8 @@ function isTodayOrTomorrowLocal(iso) {
   return d >= startOfToday && d < startOfDayAfterTomorrow;
 }
 function renderMacroCalendar(payload) {
-  const sub = el("macroCalendarSub");
-  const allEvents = payload && Array.isArray(payload.events) ? payload.events : [];
-  latestMacroEvents = allEvents;     // 2026-09-29 시장 맥락 카드의 «다음 주요 지표»
-  const events = allEvents.filter((e) => isTodayOrTomorrowLocal(e.time_utc))
-    .sort((a, b) => a.time_utc.localeCompare(b.time_utc));
-  if (sub) sub.textContent = events.length ? `오늘·내일 ${events.length}건 (경제지표·FOMC·연준 발언·EIA·국채입찰·실적 — 정치일정 미포함)` : "오늘·내일 예정된 일정 없음";
-  setH("macroCalendarList", events.length
-    ? events.map((e) => {
-        const tone = e.importance === "high" ? "warn" : "neutral";
-        return `<article class="ops-health-row ${tone}">
-          <span class="ops-health-dot" aria-hidden="true"></span>
-          <div class="ops-health-info">
-            <strong>${e.title_ko}</strong>
-            <span>${e.detail || ""}</span>
-          </div>
-          <span class="ops-health-status-badge">${fmtMacroCalendarTime(e.time_utc)}</span>
-        </article>`;
-      }).join("")
-    : `<div class="macro-calendar-empty">예정된 일정이 없습니다.</div>`
-  );
+  // 2026-09-30 경제 일정 카드 제거(사용자 지시) -- 시장 맥락 ⑤ 시간축이 이 값을 그린다.
+  latestMacroEvents = payload && Array.isArray(payload.events) ? payload.events : [];
 }
 
 
@@ -4132,7 +4059,7 @@ function renderMarketCtx() {
   const ef = o ? optFront(o) : null, us = mcUsSession();
   // 2026-09-30 사용자 «주요 경제 일정이 왜 24시간 축에 없나» -- 전에는 «다음 high 하나»만 실었다. 경제 일정 카드와 같은 원천의 24시간 안 전부.
   const macro24 = (latestMacroEvents || []).map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표", hi: e.importance === "high" }))
-    .filter((e) => e.t > Date.now() && e.t - Date.now() <= 24 * 3600e3);
+    .filter((e) => e.t > Date.now() && isTodayOrTomorrowLocal(e.t));   // 2026-09-30 경제 일정 카드 제거 -- 카드가 보이던 오늘·내일 전부(24시간 넘는 건 시간축 오른쪽 끝 «>»)
   const prof = d.liq_profile || [], top = prof.reduce((m, r) => (r[1] + r[2] > (m ? m[1] + m[2] : 0) ? r : m), null);
   const sw = bk.sweep, bps = bk.bps || [25, 50, 100];
   const thin = bk.bid25_pct != null && bk.ask25_pct != null && Math.min(bk.bid25_pct, bk.ask25_pct) <= 0.1
@@ -7638,21 +7565,7 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
       renderLiquidationMapPanel();
     }
 
-    // 특화 감지기 (2026-08-30 user request): event-triggered, model-driven detectors that don't fit
-    // either the always-on model-indicator gauges below or the scorecard-gated evidence-signal tier
-    // above -- V자 급등락(2026-08-31, "V자 반등락"에서 개명)이 첫 입주(TabPFN, fires only on a
-    // liquidity_sweep, long idle "대기" gaps between events), more will land here over time. Reuses
-    // renderModelIndicatorList's row/strip markup verbatim (2nd param = its own target list, own
-    // memoized-html slot) rather than a new template -- same reasoning as the model-indicator/
-    // evidence-signal panels already sharing one markup. Append new specialized-detector objects to
-    // this array as they're built.
-    // 2026-08-31: liveText's old "급등 확률(TabPFN) 76%" sentence (shown under the title) dropped in
-    // favor of `proba` -- renderModelIndicatorList now shows that as the same inline meter bar the
-    // evidence-signal list uses (user: "인라인 미터로 바꿔줘"), in the meta column next to the state,
-    // instead of duplicating the same number as a plain sentence.
-    renderModelIndicatorList([
-      ethOnlyIndicator(breakoutPrewarnIndicatorItem()),   // 2026-09-11 추세 전환 경보기
-    ], "snapSpecializedSignalList", { forceMeter: true });
+    // 2026-09-30 특화 신호(추세 전환 경보기) 카드 제거(사용자 지시) -- 같은 것이 풋프린트 차트 아래에 있다.
 
     renderOptions();                          // 2026-09-28 옵션 카드(옛 «신호» 카드의 GEX 한 줄 대체)
   }
