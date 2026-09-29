@@ -36,8 +36,8 @@ def test_window_max_is_what_we_think():
 
 
 @pytest.mark.parametrize("name,pattern", [
-    ("풋프린트", r"API_FOOTPRINT_URL\}\?bars=\$\{chartWindowBars\}"),
-    ("수급 프로파일", r"API_SUPPLY_PROFILE_URL\}\?bars=\$\{chartWindowBars\}"),
+    # 2026-09-30 갱신: 풋프린트는 코인별(?asset=)로 받는다 · 수급 프로파일 레인은 제거됐다(09-28 호가·체결 프로파일 제거).
+    ("풋프린트", r"API_FOOTPRINT_URL\}\?asset=\$\{activeSnapshotAsset\}&bars=\$\{chartWindowBars\}"),
     ("청산 이력", r"API_LIQUIDATION_5M_HIST_URL\}\?asset=\$\{asset\}&bars=\$\{chartWindowBars\}"),
 ])
 def test_lane_fetch_width_is_derived_from_the_window(name, pattern):
@@ -48,7 +48,7 @@ def test_oi_fetch_width_is_derived_from_the_window_max():
     """OI 는 Δ 의 기준봉이 필요해 창 최대치 + 여유로 **한 번만** 받는다(창마다 다시 안 받는다)."""
     code = strip_js_comments(APP)
     assert "Math.max(...CHART_WINDOW_BARS) + 4" in code
-    assert re.search(r"API_OI_5M_URL\}\?bars=\$\{oiBarsWanted\}", code)
+    assert re.search(r"API_OI_5M_URL\}\?asset=\$\{asset\}&bars=\$\{oiBarsWanted\}", code)   # 2026-09-30 코인별
 
 
 def test_no_hardcoded_bar_width_survives_in_lane_fetches():
@@ -63,7 +63,7 @@ def test_window_toggle_refetches_every_width_bearing_lane():
     m = re.search(r"chartWindowBars = bars;(.{0,900}?)\}\);", strip_js_comments(APP), re.S)
     assert m, "창 토글 핸들러를 못 찾았다"
     body = m.group(1)
-    for fn in ("refreshFootprint()", "refreshSupplyProfile()", "refreshLiquidation5mSignal()"):
+    for fn in ("refreshFootprint()", "refreshLiquidation5mSignal()"):   # 수급 프로파일은 제거됐다
         assert fn in body, f"토글이 {fn} 를 다시 안 부른다"
 
 

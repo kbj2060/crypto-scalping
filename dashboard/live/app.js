@@ -7022,7 +7022,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       + (c.rw > 0 ? ` (이 칸 ${c.rw.toFixed(1)}배 · 보이는 범위 상위 ${Math.round(100 * (1 - c.rwPct))}%)` : "")
       + `. 성격의 서술 · 예측력 안 잼 · 지지·저항 아님</div></div>`;
   };
-  cachedLayer("bookStrip", book ? book.t_ms + "|" + activeSnapshotAsset + "|" + (acc ? acc.bin_lo : 0) : "none", (g) => {
+  cachedLayer("bookStrip", book ? objToken(book) + "|" + objToken(acc) + "|" + activeSnapshotAsset : "none", (g) => {   // 2026-09-30 신원 = 객체(히트맵 행이 bin_lo 그대로 바뀌어도 다시 그린다)
     if (!bookInfo) return;
     const { bs, x0, L, mx, cells } = bookInfo;
     const fmtQ = (q) => (q >= 1000 ? (q / 1000).toFixed(1) + "k" : q >= 10 ? q.toFixed(0) : q.toFixed(1));

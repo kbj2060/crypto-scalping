@@ -17,7 +17,12 @@ def test_every_queried_handle_is_emitted():
     queried = set(re.findall(r'q\("(\w+)"\)', JS)) | set(re.findall(r'setTile\("(\w+)"', JS))
     assert queried, "패처가 손잡이를 안 읽는다 — applyAcctPreview 가 사라졌나?"
     assert queried <= emitted, f"렌더가 안 내는 손잡이를 읽는다: {sorted(queried - emitted)}"
-    assert emitted <= queried, f"아무도 안 읽는 손잡이가 남았다: {sorted(emitted - queried)}"
+    # 2026-09-30: 미리보기가 **일부러** 안 고치는 손잡이 -- knob(«지금 내 자리», 유령 눈금을 따로 세운다) ·
+    #   margin/room(포지션 없음 레인의 타일 -- 값 자체가 이미 «지금 설정으로 넣으면»이다) · upnl(진입 순간 미실현은 안 바뀐다).
+    #   새 손잡이가 여기 없이 생기면 여전히 실패한다.
+    intentionally_unpatched = {"knob", "margin", "room", "upnl"}
+    assert intentionally_unpatched <= emitted, f"예외 목록이 낡았다: {sorted(intentionally_unpatched - emitted)}"
+    assert emitted - intentionally_unpatched <= queried, f"아무도 안 읽는 손잡이가 남았다: {sorted(emitted - intentionally_unpatched - queried)}"
     # 타일 키가 실제로 속성으로 나가는지 -- tile() 이 data-pv 를 안 붙이면 위 교집합이 거짓이 된다.
     assert 'class="acct-tile" data-pv="${key}"' in JS
 
