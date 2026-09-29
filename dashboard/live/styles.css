@@ -2432,9 +2432,6 @@ svg {
    있어 시나리오에 쓰지 않는다(표시 규약 §2). 주황은 기존대로 «활발/임박» 라벨에만. */
 /* 2026-09-26 비평: 한국어 산문이 등폭이라 글자 사이가 벌어져 흩어졌다 -- 본문은 Pretendard { display: flex; flex-direction: column; gap: 0; padding: 0 18px 14px;
                   font-family: var(--font-sans); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.sit-sec { font: 700 11px/1.4 var(--font-sans); letter-spacing: .04em; color: var(--muted);
-           margin: 14px 0 5px; display: flex; align-items: baseline; justify-content: space-between; }
-.sit-sec span { font-weight: 500; letter-spacing: 0; }
 
 /* SCENARIOS — 3열 (2026-09-22, 시안 E). 표를 세로로 훑는 대신 셋을 나란히 세워
    확률·방향·목표가를 한 번에 비교한다. 순서는 확률 내림차순이고, 1순위만 윗선을 진하게
@@ -2445,7 +2442,6 @@ svg {
    soft-line 헤어라인으로 붙인다(ops-shadow-body 와 같은 문법). 칸이 안 사라지므로 행 높이가
    고정이고, 켜지고 꺼져도 아래 행이 1px 도 안 움직인다. */
 /* 레짐이 문턱에 가까울 때만(2026-09-22) — «활발/임박»과 같은 뜻이라 같은 색을 쓴다 */
-.sit-sec .sit-edge { color: var(--warn); font-weight: 700; }
 
 /* FLIP TRIGGERS */
 
@@ -2461,16 +2457,8 @@ body.not-eth [data-eth-only]::after {
   background: var(--panel); pointer-events: none;
 }
 
-.sit-foot { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 7px; font-size: 11px;
-            color: var(--muted); font-variant-numeric: tabular-nums; }
-.sit-ws { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 /* 각주 텍스트를 뺀 뒤(2026-09-22) margin-left:auto 가 «둘 다»에 걸려 WS 점 두 개가 양끝으로
    벌어졌다. 미는 건 첫 번째 하나면 된다 -- 나머지는 gap 으로 붙는다. */
-.sit-ws + .sit-ws { margin-left: 0; }
-.sit-ws i { width: 6px; height: 6px; border-radius: 50%; background: var(--good); display: inline-block; }
-.sit-ws i.off { background: var(--bad); }
-.sit-cal { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.sit-cal b { color: var(--ink, inherit); }
 
 /* ── 떠다니는 주문 버튼 (2026-09-25 사용자 지시) ─────────────────────────────────────
    접힌 상태 = 알약 하나(손잡이 ⠿ + 지금 포지션). 펼치면 계좌 카드의 .acct-lanes 가 **통째로**
@@ -2620,13 +2608,15 @@ body.order-coin-off .acct-lanes::before {
   .acct-panel .acct-lanes { grid-template-columns: 1fr; }   /* 600px 에 두 레인은 안 들어간다 -- 청산이 위 */
 }
 .snap-side { display: contents; }
-/* 2026-09-30 큰 흐름 5표 펼침(사용자 «세분화해서 펼쳐줘») -- 기간 · 기준가 · 지금 대비 · 표. 가장 가까운 기준가 줄은 옅은 바탕. */
-.sit-trend { margin: 4px 0 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
-.sit-trend-r { display: grid; grid-template-columns: 44px minmax(0, 1fr) 70px 92px; gap: 8px; align-items: baseline; padding: 3px 6px; border-radius: 6px; }
-.sit-trend-r > :nth-child(n+2) { text-align: right; }
-.sit-trend-r.h { color: var(--muted); font-size: 11px; }
-.sit-trend-r.near { background: rgb(var(--lift) / .06); }
-.sit-trend-r em { font-style: normal; font-weight: 700; }
+/* 2026-09-30 30분 시나리오 → 차트 머리 칩(사용자 선택 시안 A): 큰 방향 5표 · 융합 신호. 방향색은 칩 테두리·글자만, 역추세 보유는 주황 */
+.sit-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sit-chips[hidden] { display: none; }
+.sit-chip { font: 700 12px/1.6 var(--font-sans); padding: 1px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; cursor: help; }
+.sit-chip.up { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.sit-chip.dn { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.sit-chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
+.sit-dots { display: inline-flex; gap: 2px; margin: 0 3px; vertical-align: 1px; }
+.sit-dots b { width: 7px; height: 7px; border-radius: 2px; background: var(--bad); } .sit-dots b.u { background: var(--good); }
 /* 2026-09-30 휴대폰은 시장 맥락(30분 흡수)을 풋프린트 **아래**로(사용자 지시 -- 1,700px 가까운 카드가 차트를 밀어냈다).
    DOM 은 시장 맥락이 먼저라 order 로만 바꾼다: 풋프린트 0 → 시장 맥락 1 → 풋프린트 뒤 카드들 2. */
 @media (max-width: 720px) {
@@ -2660,31 +2650,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   .asset-tabs .asset-tab, .theme-toggle { min-height: 40px; }
 }
 
-/* 2026-09-28 시안 B «시간 사다리»(사용자 선택) -- 30분 카드 본문(situationLadderHtml).
-   왼쪽 64px = 시간대 이름(지금·30분 / 큰 흐름·1–13주), 오른쪽 = 이름표 | 값. 색은 방향(초록·빨강)과 주의(주황)에만. */
-.sit-lad { display: grid; grid-template-columns: 64px minmax(0, 1fr); margin-top: 8px; }
-.sit-lad-w { padding: 11px 0; border-top: 1px solid var(--soft-line); font: 700 11px/1.25 var(--font-sans); color: var(--muted); }
-.sit-lad-w span { display: block; margin-top: 3px; font-weight: 600; opacity: .8; }
-.sit-lad-rows { display: flex; flex-direction: column; min-width: 0; padding: 6px 0; border-top: 1px solid var(--soft-line); }
-.sit-lad-r { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; min-height: 26px; padding: 5px 0; }
-.sit-lad-l { min-width: 0; font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--muted); }
-.sit-lad-v { font: 700 17px/1 var(--font-sans); color: var(--text); text-align: right; white-space: nowrap; }
-.sit-lad .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.sit-lad-v.quiet { font-size: 13px; color: var(--muted); }
-.sit-lad-v.sit-lad-sm { font-size: 14px; }
-.sit-lad-v small { margin-left: 5px; font: 600 11px/1 var(--font-sans); color: var(--muted); }
-.sit-lad-v.k-up, .sit-lad-l .k-up { color: var(--good); }
-.sit-lad-v.k-dn, .sit-lad-l .k-dn { color: var(--bad); }
-.sit-lad-edge { color: var(--warn); font-weight: 700; }
-.sit-lad-ic { display: inline-block; width: .8em; height: .8em; margin-right: .18em; vertical-align: .02em; }
-.sit-lad-bar { grid-column: 1 / -1; height: 5px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--neutral) 16%, transparent); }
-.sit-lad-bar i { display: block; height: 100%; border-radius: 3px; background: var(--text); opacity: .72; }
-.sit-lad-dots { display: inline-flex; gap: 2px; margin: 0 5px; vertical-align: 1px; }
-.sit-lad-dots b { width: 7px; height: 7px; border-radius: 2px; background: var(--bad); }
-.sit-lad-dots b.u { background: var(--good); }
-.sit-lad-warn { display: flex; align-items: center; gap: 7px; margin: 4px 0 2px; padding: 8px 10px; border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent);
-  font-size: 12px; font-weight: 700; color: var(--bad); }
 
 /* 2026-09-28 옵션 카드(사용자 선택 A+C) · 차트 머리 칩. 색은 --option(청록) 하나 + 기존 방향색. */
 .opt-chip { display: inline-flex; align-items: center; min-height: 26px; padding: 0 12px; border-radius: 999px;
@@ -2775,15 +2740,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .mc-quad b { font-size: 12px; }
 .mc-quad > div { min-width: 0; word-break: keep-all; }
 .mc-tlrow { font-size: 12px; padding: 2px 0; } .mc-tlrow i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 6px; } .mc-tlrow span { color: var(--muted); }
+.mc-terrain { cursor: help; }
 .mc-state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin: -2px 0 6px; }
-/* 2026-09-30 30분 시나리오 흡수 -- 넓으면 왼쪽 칸(방향 판정) | 오른쪽 시장 맥락 칸들, 좁으면 위아래 */
-.mc-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px 26px; }
-.mc-sit { min-width: 0; }
-.mc-sit-title { display: flex; align-items: center; gap: 8px; margin: 10px 0 8px; }
-@media (min-width: 1100px) {
-  .mc-wrap { grid-template-columns: 440px minmax(0, 1fr); }
-  .mc-sit { padding-right: 26px; border-right: 1px solid var(--line); }
-}
 @media (max-width: 720px) { .mc-body { grid-template-columns: minmax(0, 1fr); } }
 .mc-sec { border-top: 1px solid var(--soft-line); padding: 10px 0 8px; min-width: 0; }
 .mc-sec h4 { margin: 0 0 6px; }

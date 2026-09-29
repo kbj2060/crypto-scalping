@@ -185,20 +185,8 @@
            크기별 수급 · 교차 시장 · 호가 유동성 · 청산(HL 고래 실측 청산가) · 일정 · 가격 위치(VWAP·볼린저·RSI).
            /api/market-context(dashboard/market_ctx.py). 전부 서술 -- 칸 제목 «?» 가 정의·읽는 법·우리 검정을 말한다. -->
       <section id="mcPanel" class="panel ops-health-panel mc-panel" data-eth-only>
-        <div class="ops-health-head">
-          <div><h3>시장 맥락</h3><p class="muted">30분 시나리오 · 레버리지 · 교차 시장 · 호가 · 청산 · 일정 — 방향 판정은 30분 시나리오, 나머지는 서술</p></div>
-          <div class="ops-health-head-tools"><span id="mcBadge" class="ops-badge neutral">-</span></div>
-        </div>
-        <!-- 2026-09-30 30분 시나리오를 이 카드 왼쪽 칸으로 흡수(사용자 «시장 맥락 안에 잘 녹여줘») -- 렌더러는 그대로(#situationBody/#situationBadge).
-             옛 카드(2026-09-21 «상황 읽기 · 30분»: 스퀴즈·클라이맥스·S/R 비대칭 → 시나리오 셋, dashboard/situation.py)의 뜻은 app.js 주석에 남는다. -->
-        <div class="mc-wrap">
-          <div class="mc-sit" data-asset-scope="situation">
-            <h4 class="sr-only">30분 시나리오</h4>   <!-- 본문 첫 줄이 «30분 시나리오 ↔ …» 라 보이는 제목은 겹친다 -->
-            <div class="mc-sit-title"><span id="situationBadge" class="ops-badge neutral">-</span></div>
-            <div id="situationBody" class="situation-body"></div>
-          </div>
-          <div id="mcBody" class="mc-body"></div>
-        </div>
+        <h3 class="sr-only">시장 맥락</h3>   <!-- 2026-09-30 사용자 «제목·부제 제거» -- 배지(레버리지 상태)도 ① 판 칩과 같아 함께 뺐다 -->
+        <div id="mcBody" class="mc-body"></div>
       </section>
 
       <section class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
@@ -234,6 +222,7 @@
               <button type="button" class="asset-tab" data-asset="hype">HYPE</button>
             </div>
             <span id="optChip" class="opt-chip" hidden></span>
+            <span id="sitChips" class="sit-chips" hidden></span>   <!-- 2026-09-30 30분 시나리오 → 차트 머리 칩(큰 방향 · 융합) -->
           </div>
           <div class="ops-health-head-tools">
             <!-- 2026-09-16 차트 모드 전환. 풋프린트는 12봉(1시간)이라 가격 폭이 $45 안팎인데

@@ -284,7 +284,7 @@ function repaintSupply1sPanel() {
 
 const API_OI_5M_URL = "/api/oi-5m";
 const OI_5M_POLL_MS = 15000;
-// 2026-09-21 상황 읽기 · 30분 (index.html .mc-sit -- 2026-09-30 시장 맥락 카드 왼쪽 칸으로 흡수). 서버가 5초마다 계산해 둔 것을 받는다.
+// 2026-09-21 상황 읽기 · 30분 -- 2026-09-30 카드는 없애고 차트 머리 칩(#sitChips)·가격판 30분 도달 선으로 옮겼다. 서버가 5초마다 계산해 둔 것을 받는다.
 const API_SITUATION_URL = "/api/situation";
 const SITUATION_POLL_MS = 1000;   // 09-21 서버 계산도 1초로 -- 응답은 작은 JSON 하나
 let latestSituation = null;
@@ -4048,7 +4048,7 @@ const mcGfx = {
         + `<text x="${(c - 22 - bw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + 22 + aw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)">${kq(a[i])}</text>`;
     }).join("") + `</svg>`;
   },
-  terrain(px, hl, lv, bps, top, w = 300, h = 230) {   // 세로 가격축 ±6%: HL 고래 청산가 원 · VWAP ±1·2σ 띠 · 호가 ±bp 눈금 · 12시간 실측 최다 ◆ · 지금가
+  terrain(px, hl, lv, bps, top, bu = null, w = 300, h = 230) {   // 세로 가격축 ±6%: HL 고래 청산가 원 · VWAP ±1·2σ 띠 · 호가 ±bp 눈금 · 12시간 실측 최다 ◆ · 지금가
     if (!(px > 0)) return `<div class="mc-note">가격 대기</div>`;
     const lo = px * 0.94, hi = px * 1.06, Y = (p) => 10 + (h - 20) * (hi - p) / (hi - lo), cl = (p) => Math.max(10, Math.min(h - 10, Y(p)));
     let s = "";
@@ -4070,7 +4070,24 @@ const mcGfx = {
     bps.forEach((bp) => [1, -1].forEach((q) => { const p = px * (1 + q * bp / 1e4); s += `<line x1="54" x2="64" y1="${Y(p).toFixed(1)}" y2="${Y(p).toFixed(1)}" stroke="${q > 0 ? "var(--bad)" : "var(--good)"}" stroke-width="2"/>`; }));
     s += `<line x1="50" x2="${w - 50}" y1="${Y(px).toFixed(1)}" y2="${Y(px).toFixed(1)}" stroke="var(--text)" stroke-width="1.5"/><text x="2" y="${(Y(px) + 4).toFixed(1)}" font-size="11" font-weight="700" fill="var(--text)">${Math.round(px)}</text>`;
     [0.95, 1.05].forEach((q) => { s += `<text x="2" y="${(Y(px * q) + 4).toFixed(1)}" font-size="10" fill="var(--muted)">${Math.round(px * q)}</text>`; });
-    return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="가격 지형: HL 고래 청산가, VWAP 띠, 호가 거리">${s}</svg>`;
+    // 2026-09-30 청산 급증을 그림 안에(사용자 지시): 오른쪽 끝 세로 막대 둘 = 1분 청산 z(롱 · 숏, 0~5, 3 눈금 = 급증 문턱).
+    //   급증이면 막대가 주황이고 지금가 줄 위에 «롱 청산 급증 · $/1분» 꼬리표 -- 롱 청산은 아래로 미는 힘이라 ↓, 숏 청산은 ↑.
+    if (bu) {
+      const bx = [w - 20, w - 8], bt = 16, bb = h - 22, zY = (zv) => bb - (bb - bt) * Math.max(0, Math.min(5, zv || 0)) / 5;
+      [["롱", bu.z_long], ["숏", bu.z_short]].forEach(([nm, zv], i) => {
+        const hot = (zv || 0) >= 3 || bu.hawkes_active;
+        s += `<rect x="${bx[i] - 3}" y="${bt}" width="6" height="${bb - bt}" rx="3" fill="rgb(var(--lift) / .1)"/>`
+          + `<rect x="${bx[i] - 3}" y="${zY(zv).toFixed(1)}" width="6" height="${Math.max(0, bb - zY(zv)).toFixed(1)}" rx="3" fill="${hot ? "var(--warn)" : "var(--muted)"}"><title>${nm} 청산 1분 z ${(zv ?? 0).toFixed(1)}${hot ? " — 급증" : ""}</title></rect>`
+          + `<text x="${bx[i]}" y="${h - 10}" font-size="9" fill="var(--muted)" text-anchor="middle">${nm}</text>`;
+      });
+      s += `<line x1="${bx[0] - 6}" x2="${bx[1] + 6}" y1="${zY(3).toFixed(1)}" y2="${zY(3).toFixed(1)}" stroke="var(--warn)" stroke-dasharray="2 2" opacity=".7"/>`;
+      const hotAny = bu.hawkes_active || Math.max(bu.z_long || 0, bu.z_short || 0) >= 3;
+      if (hotAny) {
+        const shortSide = (bu.short_usd_1m || 0) > (bu.long_usd_1m || 0), amt = Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0);
+        s += `<text x="${w - 30}" y="${(Y(px) + (shortSide ? -8 : 16)).toFixed(1)}" font-size="11" font-weight="800" fill="var(--warn)" text-anchor="end">${shortSide ? "↑ 숏" : "↓ 롱"} 청산 급증 · ${fmtUsdCompact(amt)}/1분</text>`;
+      }
+    }
+    return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="가격 지형: HL 고래 청산가, VWAP 띠, 호가 거리, 청산 급증">${s}</svg>`;
   },
   timeline(events, w = 900, h = 48) {   // 다음 24시간 -- 24시간 넘는 일정은 오른쪽 끝에 «>»
     const now = Date.now(), X2 = (hr) => 12 + (w - 24) * Math.min(24, hr) / 24;
@@ -4213,10 +4230,10 @@ function renderMarketCtx() {
       + `<div class="mc-quad">${G.quad(d.move60, oi.d1h_pct)}<div><b class="${!d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : ""}">${d.quad ? escapeHtml(d.quad.label) : "-"}</b>`
       + note(`1시간 ${sg(d.move60, 0, "bp")} · OI ${sg(d.oi60, 0)} ETH`) + `</div></div>`
       + note(`30분 체결 · 바이낸스 ${sg(fl.bn30, 0)} / OKX ${sg(fl.okx30, 0)} ETH`)),
-    qSec("q_map", "③ 가격 지형 · ±6%", G.terrain(px, d.hl_liq || {}, lv, bps, top)
-      + note(`원 = HL 고래 청산가(빨강 롱 · 초록 숏, 크기 = 금액) · 띠 = VWAP ±1·2σ · 왼쪽 눈금 = 호가 ±${bps.join("/")}bp · ◆ = 12시간 실측 청산 최다`)
-      + `<div class="mc-note${burstHot ? " mc-warn" : ""}">청산 ${!bu ? "-" : burstHot ? `${(bu.short_usd_1m || 0) > (bu.long_usd_1m || 0) ? "숏" : "롱"} 급증 · ${usd(Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0))}/1분`
-        : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}`}${top ? ` · 12시간 최다 ${n(top[0], 1)}(롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : ""}</div>`),
+    // 2026-09-30 사용자 «범례·청산 상태 글은 툴팁 안으로» -- 그림 위 호버에 두 줄. 청산 급증일 때만 판 위에 경고 한 줄을 남긴다(놓치면 안 되는 상태).
+    qSec("q_map", "③ 가격 지형 · ±6%", `<div class="mc-terrain" title="${escapeHtml(`원 = HL 고래 청산가(빨강 롱 · 초록 숏, 크기 = 금액) · 띠 = VWAP ±1·2σ · 왼쪽 눈금 = 호가 ±${bps.join("/")}bp · ◆ = 12시간 실측 청산 최다 · 오른쪽 막대 = 1분 청산 z(롱·숏, 점선 3 = 급증)`
+        + `\n청산 ${!bu ? "-" : burstHot ? `${(bu.short_usd_1m || 0) > (bu.long_usd_1m || 0) ? "숏" : "롱"} 급증 · ${usd(Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0))}/1분` : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}`}`
+        + `${top ? ` · 12시간 최다 ${n(top[0], 1)}(롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : ""}`)}">${G.terrain(px, d.hl_liq || {}, lv, bps, top, bu)}</div>`),
     qSec("q_wall", "④ 벽 · 교차 · 위치", (sw ? G.book(sw, bps) : note("호가 래스터 대기"))
       + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(2)}${bk.spread > 0.015 ? " — 평소(1틱)보다 넓다" : ""}`
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
@@ -4266,78 +4283,6 @@ function keepFocus(box, render) {
   if (idx >= 0) box.querySelectorAll(FOCUSABLE)[idx]?.focus({ preventScroll: true });
 }
 
-// 2026-09-28 시안 B «시간 사다리»(사용자 선택) -- 왼쪽 두 칸 = 지금·30분 / 큰 흐름·1–13주, 오른쪽 = 값.
-//   지금: 융합 신호(발동만 방향색) · 30분 안 ±폭 선에 닿을 확률. 큰 흐름: 큰 방향 · 권장 크기 · 가장 가까운 뒤집힘 ·
-//   역추세 경고. 연구 근거 접기와 근본 신호 10줄은 사용자 지시로 걷었다(서버 계산은 그대로 돈다).
-//   큰 방향 = UTC 00시 일봉 종가를 7·14·28·56·90일 전과 비교한 5표(dashboard/trend_rule.py). 확률은 싣지 않는다 --
-//   신호 단계별 다음 7일 상승 확률이 23→37% 로만 움직여 과잉 정밀이 된다.
-function situationLadderHtml(o3, fz) {
-  const live = Number(latestLivePriceByAsset.eth || 0);
-  const px = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: v >= 100 ? 0 : 2 });
-  const arw = (up) => `<svg class="sit-lad-ic" viewBox="0 0 12 12" aria-hidden="true"><path d="${up ? "M6 2 L10 8 H2 Z" : "M6 10 L10 4 H2 Z"}" fill="currentColor"/></svg>`;
-  const row = (label, value, cls = "", extra = "") => `<div class="sit-lad-r"><div class="sit-lad-l">${label}</div>`
-    + `<div class="sit-lad-v ${cls}">${value}</div>${extra}</div>`;
-  // ── 지금 · 30분 ──
-  let now = "";
-  if (fz) {
-    const d = fz.side > 0 ? "up" : fz.side < 0 ? "dn" : "";
-    const tail = escapeHtml(String(fz.text || "").replace(/^[^—]*—\s*/, ""));   // 서버 문장의 «대기 — » / «숏 · 다음 30분 — » 머리를 뗀다
-    now += d
-      ? row(`<span class="k-${d}">융합 ${d === "up" ? "롱" : "숏"} 발동</span> · ${tail}`, `${arw(d === "up")}${d === "up" ? "롱" : "숏"}`, `k-${d}`)
-      : row(`융합 신호 · ${tail}`, "대기", "quiet");
-  }
-  if (o3) {
-    const nn = o3.cols.find((c) => c.key === "none") || {};
-    const reach = Number.isFinite(o3.reach) ? o3.reach : 100 - (nn.p || 0);
-    const b = nn.band;
-    const halfBp = b ? ((b[1] - b[0]) / (b[0] + b[1])) * 1e4 : null;   // ±0.5×30분 폭(채점축)
-    now += row(`${halfBp ? `±${Math.round(halfBp)}bp ` : ""}선에 닿을 확률${b ? ` · 미도달 시 <span class="num">${px(b[0])}–${px(b[1])}</span>` : ""}`,
-               `${Math.round(reach)}%`, "num",
-               `<div class="sit-lad-bar"><i style="width:${Math.max(0, Math.min(100, reach))}%"></i></div>`);
-  } else {
-    now += row("30분 폭 분위(5분봉 24h)를 받는 중", "—", "quiet");
-  }
-  // ── 큰 흐름 · 1–13주 ──
-  const t = latestTrend;
-  let big = "";
-  if (!t) big = row("큰 방향 · 일 단위 추세", "계산 중", "quiet");
-  else if (!t.ok) big = row(`큰 방향 · ${escapeHtml(t.reason === "fetch_failed" ? "조회 실패 — 1분 뒤 다시 시도" : (t.reason || ""))}`, "없음", "quiet");
-  else {
-    const up = t.signal > 0;
-    const dots = t.votes.map((v) => `<b class="${v.up ? "u" : "d"}" title="${v.L}일 ${v.up ? "상승" : "하락"}"></b>`).join("");
-    big += row(`큰 방향<span class="sit-lad-dots" role="img" aria-label="${t.votes.length}표 중 ${t.ups}표 상승">${dots}</span>`
-               + `${t.ups}/${t.votes.length} · ${t.age_days}일째`,
-               `${arw(up)}${up ? "롱" : "숏"} <span class="num">${up ? "+" : ""}${t.signal.toFixed(1)}</span>`, up ? "k-up" : "k-dn");
-    const size = Number(t.size) || 0;
-    big += row(`권장 크기 · 변동성 ${Math.round(t.vol_ann * 100)}% · 최대 2배`,
-               `<span class="num">${size > 0 ? "+" : ""}${size.toFixed(2)}</span>배`, size > 0 ? "k-up" : "k-dn");
-    // 2026-09-30 사용자 «큰 흐름을 세분화해서 펼쳐줘» -- 5표를 한 줄씩: 기간 · 기준가(그 기간 전 UTC 00시 종가) · 지금 가격 거리 ·
-    //   표(어제 일봉 마감 기준) · 지금 가격으로 마감하면 뒤집히는가. 가장 가까운 기준가 줄을 강조(옛 «가장 가까운 뒤집힘» 줄 대체).
-    const nearL = live > 0 ? t.votes.map((v) => ({ L: v.L, a: Math.abs(live / v.flip_price - 1) })).sort((a, b) => a.a - b.a)[0].L : null;
-    big += `<div class="sit-trend" role="table" aria-label="큰 방향 5표"><div class="sit-trend-r h" role="row">`
-      + `<span>기간</span><span>기준가</span><span>지금 대비</span><span>표</span></div>`
-      + t.votes.map((v) => {
-        const d = live > 0 ? (live / v.flip_price - 1) * 100 : null, flip = live > 0 && (live > v.flip_price) !== v.up;
-        return `<div class="sit-trend-r${v.L === nearL ? " near" : ""}" role="row" title="${v.L}일 전 UTC 00시 종가 ${px(v.flip_price)} -- 어제 일봉 종가가 이보다 ${v.up ? "높아 상승" : "낮아 하락"} 표${flip ? " · 지금 가격으로 마감하면 뒤집힌다" : ""}">`
-          + `<span>${v.L}일</span><span class="num">${px(v.flip_price)}</span>`
-          + `<span class="num ${d == null ? "" : d >= 0 ? "k-up" : "k-dn"}">${d == null ? "-" : `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`}</span>`
-          + `<span class="${v.up ? "k-up" : "k-dn"}">${v.up ? "▲ 상승" : "▼ 하락"}${flip ? ` <em class="sit-lad-edge">뒤집힘</em>` : ""}</span></div>`;
-      }).join("") + `</div>`;
-    // 역추세 경고 -- 이 코인의 포지션 전부(헤지 모드면 롱·숏 둘 다 있을 수 있다)
-    const against = ((latestBinanceAccount || {}).positions || [])
-      .filter((p) => String(p.symbol || "").startsWith("ETH") && Math.abs(Number(p.qty) || 0) > 0 && (p.side === "LONG") !== up);
-    if (against.length) {
-      big += `<div class="sit-lad-warn" title="원장 ETH 79왕복(08~09월): 추세와 같은 방향 47건 +898$ · 반대 28건 −468$(최악 −549$ 포함)">`
-        + `<svg class="sit-lad-ic" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 L11.5 10.5 H0.5 Z" fill="none" stroke="currentColor" stroke-width="1.3"/>`
-        + `<path d="M6 4.5 V7.2 M6 8.6 V8.7" stroke="currentColor" stroke-width="1.3"/></svg>`
-        + `역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유 — 큰 방향은 ${up ? "롱" : "숏"}</div>`;
-    }
-  }
-  return `<div class="sit-lad">`
-    + `<div class="sit-lad-w">지금<span>30분</span></div><div class="sit-lad-rows">${now}</div>`
-    + `<div class="sit-lad-w">큰 흐름<span>1–13주</span></div><div class="sit-lad-rows">${big}</div></div>`;
-}
-
 // 차트에는 **보이는 캔들 범위 안**의 뒤집힘 가격만 그린다 -- 레벨은 세로 축을 넓히지 않고 화면 밖이면 가장자리에
 //   쌓이므로, 20% 넘게 떨어진 선 넷이 바닥에 겹치면 읽을 수 없다. 5개 전체는 카드에 거리와 함께 있다.
 function trendFlipLevels(footprint, candles) {
@@ -4349,92 +4294,38 @@ function trendFlipLevels(footprint, candles) {
     dashed: true, width: 1, marker: !!footprint }));
 }
 
+// 2026-09-30 사용자 «30분 시나리오를 풋프린트로»(시안 A — 레짐·권장 크기 칩과 검증 꼬리표는 뺌): 30분 칸을 없애고
+//   ① 차트 머리 칩 둘(큰 방향 5표 · 융합 신호) ② 가격판 «30분 도달 선»(renderCandleSvg)으로 옮겼다.
+//   5표 표(기간·기준가·지금 대비·뒤집힘)는 추세 칩 툴팁, 역추세 보유면 칩이 주황. 서버 계산·SSE(latestSituation)는 그대로.
+//   큰 방향 = UTC 00시 일봉 종가를 7·14·28·56·90일 전과 비교한 5표(dashboard/trend_rule.py) · 융합 = 독립 4표 ≥2 + 크기 관문.
 function renderSituation() {
-  const body = el("situationBody"); const badge = el("situationBadge");
-  if (!body) return;
-  const s = latestSituation || {}; const n = s.now || {};
-  if (!n.ok) {
-    if (badge) { badge.className = "ops-badge neutral"; badge.textContent = "대기"; }
-    body.innerHTML = `<div class="sit-cal">${escapeHtml(n.reason || "서버가 첫 값을 계산하는 중")}</div>`;
-    return;
+  const box = el("sitChips");
+  if (!box) return;
+  const eth = activeSnapshotAsset === "eth", s = latestSituation || {}, fz = (s.read && s.read.fused) || null;
+  const t = latestTrend && latestTrend.ok ? latestTrend : null;
+  const pxf = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: v >= 100 ? 0 : 2 });
+  let h = "";
+  if (eth && t) {
+    const up = t.signal > 0, live = Number(latestLivePriceByAsset.eth || 0);
+    const rows = t.votes.map((v) => {
+      const d = live > 0 ? (live / v.flip_price - 1) * 100 : null, flip = live > 0 && (live > v.flip_price) !== v.up;
+      return `${v.L}일 · 기준가 ${pxf(v.flip_price)} · 지금 ${d == null ? "-" : `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`} · ${v.up ? "상승" : "하락"}${flip ? " (지금 가격으로 마감하면 뒤집힘)" : ""}`;
+    }).join("\n");
+    const against = ((latestBinanceAccount || {}).positions || [])
+      .filter((p) => String(p.symbol || "").startsWith("ETH") && Math.abs(Number(p.qty) || 0) > 0 && (p.side === "LONG") !== up);
+    const tip = `큰 방향(1~13주) — UTC 00시 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 · ${t.age_days}일째\n${rows}`
+      + (against.length ? `\n역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유 — 원장 79왕복: 추세 쪽 +898$ vs 역추세 −468$(최악 −549$)` : "");
+    h += `<span class="sit-chip ${up ? "up" : "dn"}${against.length ? " warn" : ""}" title="${escapeHtml(tip)}">${up ? "▲ 추세 롱" : "▼ 추세 숏"}`
+      + ` <span class="sit-dots">${t.votes.map((v) => `<b class="${v.up ? "u" : ""}"></b>`).join("")}</span> ${t.ups}/${t.votes.length} · ${t.age_days}일`
+      + `${against.length ? " · 역추세 보유" : ""}</span>`;
   }
-  const fz = (s.read && s.read.fused) || null;
-  const o3 = fz && fz.outcome;
-
-  // ── 30분 시나리오 = 융합 3결과 (2026-09-25 사용자 «옛 시나리오 로직을 걷고 하나의 융합 신호로», 같은 양식) ──
-  //   옛 A/B/C(휴리스틱 점수표 확률 · 기하 목표 · 뒤집기 신호)를 걷었다. 🔴이제 큰 숫자는 전부 **실측**이다:
-  //   같은 상태(카드 30분 방향 × 융합 4표 정렬 × 30분 폭 분위)의 3.7년 빈도(dashboard/flow_read.py CARD_CELLS).
-  //   열 = 위 먼저 · 아래 먼저 · 미도달(±0.5×30분 폭, 옛 카드와 같은 채점축). 순서는 확률 내림차순, 1순위만 윗선이 진하다.
-  //   열 아래 점 = 그 결과 쪽으로 미는 융합 표(켜진 것만 방향색) -- 옛 «뒤집기 신호» 자리를 측정된 표가 대신한다.
-  const OUT = { up: { ar: "↑", nm: "위로 먼저" }, dn: { ar: "↓", nm: "아래로 먼저" }, none: { ar: "↔", nm: "30분 안 미도달" } };
-  const cols = o3 ? [...o3.cols].sort((a, b) => b.p - a.p) : [];
-  // 2026-09-26 사용자 «위로 먼저·아래로 먼저가 항상 비슷» → 두 질문으로 가른다(카드 업그레이드 1+2).
-  //   ① 닿을 확률(표: 30분 폭 분위가 잘 가른다, 미도달 9~48%) ② 닿는다면 어느 쪽 -- 🔴2026-09-28 제거(AUC .525,
-  //   대부분 51:49 동전) → 그 자리를 일 단위 추세(situationLadderHtml)가 대신한다(사용자 지시).
-
-  // ── 레짐 여유 ── «곧 바뀔 수 있나»를 바뀌기 **전에** 보인다(2026-09-22 사용자 «급변한다»).
-  //   레짐은 |이동|÷창폭 하나로 갈리는데 분자·분모가 둘 다 매 봉 움직여, 선을 스칠 때 아주 작은
-  //   변화가 이름·목표·사전확률·순위를 한꺼번에 뒤집는다. 슈미트 트리거가 빈도를 28% 줄이지만
-  //   경계 구간 자체는 남으므로, 남는 절반은 «지금 경계에 있다»고 말해 주는 게 맞다.
-  const rg = n.regime || {};
-  const near = Number.isFinite(rg.margin) && rg.margin <= 0.08;
-  const rgNum = Number.isFinite(rg.ratio)
-    ? ` <span class="${near ? "sit-edge" : ""}" title="레짐 = |30분 이동| ÷ 창 고저폭. 지금 ${rg.ratio}`
-      + ` 이고 다음에 상태를 바꾸는 문턱은 ${rg.thr} (여유 ${rg.margin}).`
-      + ` 들어갈 때 ${rg.enter} · 나올 때 ${rg.exit} 로 문턱을 다르게 둬서(슈미트 트리거) 선을 스칠 때마다`
-      + ` 뒤집히지 않게 한다 -- 4.7년 실측으로 «바꿨다 되돌아오는» 변경이 45%에서 28%로 준다.">`
-      + `${rg.ratio.toFixed(2)} / ${rg.thr.toFixed(2)}${near ? " 경계" : ""}</span>`
-    : "";
-  // 「지금 무엇인가」를 시나리오 표 **위**에 둔다. labels[0] 은 서버가 이미 만든 문장이라
-  // 그대로 쓴다(«상승 +124bp» / «횡보 (±15bp 안)») -- 클라이언트가 한국어를 다시 만들지 않는다.
-  const regArrow = n.dir > 0 ? "↑" : n.dir < 0 ? "↓" : "↔";
-  const regHead = `${regArrow} ${escapeHtml((n.labels || [])[0] || "")}${rgNum}`;
-
-  // ── WS ── 장부(LEDGER)와 각주는 화면에서 뺐다(2026-09-22 사용자 «레져와 아래 텍스트들은
-  //   제거해줘 · ws 상태만 남겨줘»). 🔴서버의 기록·해결은 그대로 돈다 -- calibration 집계도,
-  //   예측 장부 파일도 계속 쌓인다. 지운 건 «표시»뿐이라 적중률 학습 루프는 안 끊긴다.
-  const st = s.streams || {}; const fo = st.fo || {}; const mp = st.mp || {};
-  const wsDot = (w, label) => `<span class="sit-ws" title="${escapeHtml(label)} ${w.connected
-    ? `연결 · ${w.events || 0}건` : `끊김${w.last_error ? ` (${w.last_error})` : ""}`}">`
-    + `<i class="${w.connected ? "" : "off"}"></i>${escapeHtml(label)}</span>`;
-
-  keepFocus(body, () => { body.innerHTML = `
-    <div class="sit-sec sit-head">30분 시나리오<span>${regHead}</span></div>
-    ${situationLadderHtml(o3, fz)}
-    <div class="sit-foot">${wsDot(fo, "청산 WS")}${wsDot(mp, "마크가격 WS")}</div>`; });
-
-  if (badge) {
-    // 발동 중이면 배지가 융합 방향과 두 방향 확률을 말한다(방향색). 아니면 1순위 결과.
-    const age = s.computed_at ? Math.round(Date.now() / 1000 - s.computed_at) : null;
-    const P = o3 ? Object.fromEntries(o3.cols.map((c) => [c.key, Math.round(c.p)])) : null;
-    if (fz && fz.side && P) {
-      badge.className = `ops-badge ${fz.side > 0 ? "good" : "bad"}`;
-      // 방향색은 **발동한 융합 신호**의 것이다(연구 통과 신호). 그 아래 확률이 비등하면 그 사실을 말한다 --
-      //   «↑27% vs ↓26%» 를 1위처럼 읽히게 두지 않는다(2026-09-26 비평, DESIGN «비등» 규칙).
-      const tie = typeof o3.coin === "boolean" ? o3.coin : Math.abs(P.up - P.dn) < 5;
-      badge.textContent = `융합 ${fz.side > 0 ? "롱" : "숏"} · ${tie ? `확률 비등 ↑${P.up}% ↓${P.dn}%`
-        : fz.side > 0 ? `↑${P.up}% vs ↓${P.dn}%` : `↓${P.dn}% vs ↑${P.up}%`}`;
-    } else if (o3 && latestTrend && latestTrend.ok) {
-      // 2026-09-28 배지 = 일 단위 추세 + 닿을 확률(위:아래 동전 자리 대체). 방향색은 여전히 발동한 융합 신호만.
-      const tg = latestTrend.signal;
-      badge.className = "ops-badge neutral";
-      badge.textContent = `추세 ${tg > 0 ? "↑ 롱" : "↓ 숏"} ${tg > 0 ? "+" : ""}${tg.toFixed(1)}`
-        + ` · 닿을 ${Math.round(Number.isFinite(o3.reach) ? o3.reach : 0)}%` + (age != null ? ` · ${age}초 전` : "");
-    } else if (cols.length) {
-      // 🔴2026-09-26 비평: 여기 초록은 방향이 아니라 «15초 안에 계산됨»이었다(age<=15 → good) -- 37% 대 36% 인
-      //   동전 던지기에 화면에서 가장 강한 방향색이 칠해졌다. 3색 규칙: 초록은 방향·정상에만. 신선함은 글자로만.
-      //   1·2위 차이가 5pp 미만이면 1위를 내세우지 않고 «비등»이라고 말한다.
-      const [c0, c1] = cols;
-      const close = c1 && Math.abs(c0.p - c1.p) < 5;
-      badge.className = "ops-badge neutral";
-      badge.textContent = (close
-        ? `비등 · ${OUT[c0.key].ar}${Math.round(c0.p)}% ${OUT[c1.key].ar}${Math.round(c1.p)}%`
-        : `${OUT[c0.key].ar} ${OUT[c0.key].nm} ${Math.round(c0.p)}%`)
-        + (age != null ? ` · ${age}초 전` : "");
-    } else {
-      badge.className = "ops-badge neutral"; badge.textContent = "대기";
-    }
+  if (eth && fz) {
+    const d = fz.side > 0 ? "up" : fz.side < 0 ? "dn" : "";
+    const tail = String(fz.text || "").replace(/^[^—]*—\s*/, "");   // 서버 문장의 «대기 — » 머리를 뗀다
+    h += `<span class="sit-chip ${d || "q"}" title="${escapeHtml(`융합 신호(다음 30분) — ${tail}`)}">${d ? `융합 ${d === "up" ? "롱" : "숏"} 발동` : "융합 대기"}</span>`;
   }
+  if (box._h !== h) { box._h = h; box.innerHTML = h; }
+  box.hidden = !h;
 }
 
 // ── 풋프린트 증분 (2026-09-20) ──────────────────────────────────────────
@@ -6627,6 +6518,32 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
       const gridG = layerCache.get("grid")?.g;
       if (gridG && gridG.parentNode === svg) svg.insertBefore(og, gridG.nextSibling); else svg.appendChild(og);
+    }
+  }
+
+  // 2026-09-30 30분 도달 선(사용자 «30분 시나리오를 풋프린트로», 시안 A): 융합 3결과의 «미도달» 범위(±0.5×30분 폭 = 채점축) 두 줄을
+  //   최근 30분(6봉) 위에 긋고 «30분 안 닿을 N%»(같은 상태의 3.7년 실측 빈도 -- 크기 정보, 방향 아님). ETH 전용.
+  if (isSnapshotChart && footprint && activeSnapshotAsset === "eth" && candles.length) {
+    const fz = ((latestSituation || {}).read || {}).fused, o3 = fz && fz.outcome;
+    const nn = o3 ? (o3.cols.find((c) => c.key === "none") || {}) : {}, rb = nn.band;
+    if (rb && rb[0] > 0 && rb[1] > rb[0]) {
+      const reach = Number.isFinite(o3.reach) ? o3.reach : 100 - (nn.p || 0), mid = (rb[0] + rb[1]) / 2;
+      const sg = document.createElementNS(NS, "g");
+      sg.setAttribute("pointer-events", "none");
+      const put = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; sg.appendChild(e); };
+      const fs = mobileChart ? 10 : 11, x0 = xAt(Math.max(0, candles.length - 6)), x1 = ml + cw;
+      const halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
+      [rb[0], rb[1]].forEach((p, i) => {
+        const y = yAt(p);
+        if (y < mt || y > plotBottom) return;
+        put("line", { x1: x0, x2: x1, y1: y, y2: y, stroke: "var(--ink)", "stroke-opacity": 0.75, "stroke-width": 1.4, "stroke-dasharray": "6 3" });
+        put("text", { x: x0 - 6, y: y + 4, "font-size": fs, "font-weight": 700, fill: "var(--ink)", "text-anchor": "end", ...halo },
+            `${i ? "+" : "−"}${Math.round(Math.abs(p / mid - 1) * 1e4)}bp`);
+      });
+      put("text", { x: x0, y: Math.max(mt + fs, Math.min(plotBottom - 4, yAt(rb[1]) - 6)), "font-size": fs, "font-weight": 800, fill: "var(--ink)", ...halo },
+          `30분 안 닿을 ${Math.round(reach)}%`);
+      const gridG = layerCache.get("grid")?.g;
+      if (gridG && gridG.parentNode === svg) svg.insertBefore(sg, gridG.nextSibling); else svg.appendChild(sg);
     }
   }
 
