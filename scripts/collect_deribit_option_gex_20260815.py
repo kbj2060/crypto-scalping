@@ -337,7 +337,18 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
         # profile 행 = [가격, 감마$, DEX$] -- 세 번째 칸은 09-29 추가(앞 두 칸을 읽는 옛 화면 호환).
         oi_cv = float(oi_a[cv_a].sum()) if len(gch) else 0.0
         trd_now = gex_dex_at(idx, w_trd, w_trd) if w_trd is not None else (None, None)
+        # 2026-09-29 사용자 «charm 한 줄»: 같은 가격·같은 IV·같은 딜러 포지션(체결 기반 w_trd)에서 **시간만** 1시간 흐른 뒤
+        #   딜러 델타가 얼마나 변하나($). 딜러는 이걸 반대로 헤지한다(+ 면 헤지 매도). 만기가 1시간 안에 끝나는 종목은 τ 를 거의 0 으로
+        #   두어 내재가치 델타(콜 1/0 · 풋 −1/0)로 간다. 🔴서술이다 -- 우리 검정에 charm 은 없다(max pain 규칙의 메커니즘 후보일 뿐).
+        def dealer_delta_after(px: float, w, dt_yrs: float) -> float:
+            ok = (iv_a > 0) & (yrs_a > 0)
+            t2 = np.maximum(yrs_a[ok] - dt_yrs, 1e-7)
+            d1 = (np.log(px / k_a[ok]) + 0.5 * iv_a[ok] ** 2 * t2) / (iv_a[ok] * np.sqrt(t2))
+            nd1 = 0.5 * (1.0 + np.vectorize(math.erf)(d1 / math.sqrt(2.0))) if ok.any() else d1
+            return float((np.where(sg_a[ok] > 0, nd1, nd1 - 1.0) * w[ok]).sum() * px)
+        charm_1h = (dealer_delta_after(idx, w_trd, 1 / 8760) - dealer_delta_after(idx, w_trd, 0.0)) if (w_trd is not None and len(gch)) else None
         dealer = {"dealer_dex_usd": trd_now[1], "dealer_gex_usd": trd_now[0], "dealer_flip": flip_of(5) if w_trd is not None else None,
+                  "dealer_charm_1h_usd": charm_1h,
                   "dealer_cov": oi_cv / float(oi_a.sum()) if len(gch) and oi_a.sum() > 0 else None,
                   # |테이커 순|/미결제 -- 딜러 순포지션은 미결제를 넘을 수 없다. 1 초과면 «메이커 = 딜러» 가정이 깨진 것
                   "dealer_net_oi": float(np.abs(tn_a[cv_a]).sum()) / oi_cv if oi_cv > 0 else None} if flow else {}

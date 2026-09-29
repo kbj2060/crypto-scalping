@@ -163,3 +163,18 @@ def test_ladder_dealer_trade_gamma_column(monkeypatch):
     fr = {r[0]: r for r in o["strikes"]["front"]}
     assert fr[2000.0][4] < 0 and fr[1900.0][4] is None and fr[2100.0][4] is None
     assert all(len(r) == 5 and r[4] is None for r in gex.options_summary(_chain(), "ETH")["strikes"]["front"])
+
+
+def test_dealer_charm_1h_sign_and_scale(monkeypatch):
+    """2026-09-29 charm: 시간만 1시간 흐를 때 딜러 델타 변화($, 체결 기반 딜러 포지션). 테이커가 콜 50개 순매수 → 딜러 콜 숏.
+    외가격 콜은 델타가 0 쪽으로 줄어 딜러 델타가 올라간다(+, 헤지 매도) · 내가격 콜은 1 쪽으로 늘어 내려간다(−, 헤지 매수).
+    크기 = −50 × (Δ(τ−1h) − Δ(τ)) × 가격 -- _bs_delta 와 같은 식. flow 가 없으면 키 없음."""
+    monkeypatch.setattr(gex, "_pub", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+    ch = _chain()
+    otm = gex.options_summary(ch, "ETH", {"net": {"x2100call": 50.0}, "covered": {"x2100call"}})["gamma"]["dealer_charm_1h_usd"]
+    itm = gex.options_summary(ch, "ETH", {"net": {"x1900call": 50.0}, "covered": {"x1900call"}})["gamma"]["dealer_charm_1h_usd"]
+    assert otm > 0 > itm, (otm, itm)
+    t, h = 2 / 365, 1 / 8760
+    expect = -50 * (gex._bs_delta(2000.0, 2100.0, 50.0, t - h, True) - gex._bs_delta(2000.0, 2100.0, 50.0, t, True)) * 2000.0
+    assert abs(otm - expect) < 1e-6 * abs(expect), (otm, expect)
+    assert "dealer_charm_1h_usd" not in gex.options_summary(ch, "ETH")["gamma"]
