@@ -194,7 +194,9 @@ def summarize_gex(chain: pd.DataFrame, currency: str) -> dict:
     if chain.empty:
         return {"recorded_at_utc": datetime.now(timezone.utc), "currency": currency, "spot_price": None,
                 "total_gex_usd": None, "front_month_gex_usd": None, "n_instruments": 0, "n_front_month": 0}
-    spot = float(chain["underlying_price"].iloc[0])
+    # 2026-09-30 검증: iloc[0] 은 API 첫 행의 선도가라 만기가 매번 달라 total/front GEX 이력 스케일이 1~2% 흔들렸다 --
+    #   가장 가까운 만기의 선도가(≈ 지수)로 고정. (09-30 이전 행은 옛 규약 -- 이력 비교 시 ≤2% 단차 주의)
+    spot = float(chain.loc[chain["days_to_expiry"].idxmin(), "underlying_price"])
     sign = chain["option_type"].map({"call": 1.0, "put": -1.0})
     contrib = sign * chain["gamma_bs"] * chain["open_interest"] * (spot ** 2) * 0.01
     front = chain["days_to_expiry"] <= FRONT_MONTH_DAYS
@@ -383,8 +385,7 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
     #   범위 셋 -- front(가장 가까운 만기) · week(7일 안 만기 합) · all(전 만기). 행 = [행사가, 콜$, 풋$, 순감마$(가정), 딜러·체결 순감마$|None].
     #   🔴«행사가 자석»은 검정에서 기각 -- 화면은 «어디에 계약이 쌓였나»로만 쓴다.
     band = chain[(chain["strike"] >= idx * 0.92) & (chain["strike"] <= idx * 1.08)]
-    fut = band[band["expiration_ts"] > pd.Timestamp.now(tz="UTC")]
-    first = fut["expiration_ts"].min() if len(fut) else None
+    first = g_first    # «가까운 만기» = 딜러 감마(gamma_by.front)와 같은 전체 최소 만기(±8% 띠 안 최소로 잡으면 드물게 갈렸다 -- 09-30 검증)
     usd_oi = band["open_interest"] * idx
     S2 = band["underlying_price"].where(band["underlying_price"] > 0, idx) ** 2     # gamma_bs 는 선도가로 잰 값 -- $ 환산도 선도가로
     g_usd = band["option_type"].map({"call": 1.0, "put": -1.0}) * band["gamma_bs"] * band["open_interest"] * S2 * 0.01

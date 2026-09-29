@@ -220,3 +220,32 @@ def test_unrecoverable_gap_written_and_read(tmp_path, monkeypatch):
     monkeypatch.setattr(gex, "_pub", lambda m, **k: [{"instrument_name": "ETH-1OCT26-2700-C", "creation_timestamp": 2000},
                                                       {"instrument_name": "ETH-3OCT26-2700-P", "creation_timestamp": 2700}])
     assert gex._taker_flow(con, "ETH")["covered"] == {"ETH-3OCT26-2700-P"}, "공백 끝(2600) 전 상장(2000)은 제외"
+
+
+def test_flush_buf_keeps_rows_arriving_during_write_and_on_failure(monkeypatch):
+    """09-30 검증: 체인 폴링 직전 flush. 쓰는 동안 들어온 체결은 남고, 쓰기 실패면 버퍼 그대로."""
+    import asyncio
+    import live_deribit_block_trade_collector_20260928 as col
+    r = lambda k: (k,) * 12 + (False,)           # 13번째 칸 = is_block
+    col._BUF[:] = [r("a"), r("b")]
+    def w(rows, gaps=None):
+        col._BUF.append(r("late"))               # 쓰는 사이 WS 가 붙인 행
+        return len(rows)
+    monkeypatch.setattr(col, "write", w)
+    n, added, _ = asyncio.run(col.flush_buf())
+    assert n == 2 and col._BUF == [r("late")]
+    monkeypatch.setattr(col, "write", lambda rows, gaps=None: (_ for _ in ()).throw(OSError("locked")))
+    try:
+        asyncio.run(col.flush_buf())
+    except OSError:
+        pass
+    assert col._BUF == [r("late")], "실패하면 지우지 않는다"
+    col._BUF.clear()
+
+
+def test_summarize_gex_spot_is_nearest_expiry_forward():
+    """09-30 검증: gex_summary 의 spot 은 API 첫 행이 아니라 가장 가까운 만기의 선도가."""
+    ch = _chain()
+    far = ch.assign(days_to_expiry=90.0, underlying_price=2100.0)
+    mixed = pd.concat([far, ch], ignore_index=True)        # 첫 행이 먼 만기
+    assert gex.summarize_gex(mixed, "ETH")["spot_price"] == 2000.0

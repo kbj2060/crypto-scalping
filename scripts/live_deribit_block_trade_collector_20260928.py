@@ -171,9 +171,30 @@ def chain_poll() -> None:
         con.close()
 
 
+# 2026-09-30 검증: 체결 버퍼는 20초마다만 DB 로 갔다 -- 10분 체인 폴링이 직전 ≤20초 체결을 못 봐 딜러 값이 한 주기 늦었다
+#   (BTC 3건이 감마 18%). 버퍼를 모듈에 두고, 체인 폴링 직전에도 비운다. 두 곳이 동시에 비우지 않게 잠금 하나로 묶는다 --
+#   붙이기는 끝에만 하고 지우기는 잠금 안에서 «쓴 만큼 앞에서»만 하므로 그 사이 들어온 체결은 남는다.
+_BUF: list[tuple] = []
+_BUF_LOCK = asyncio.Lock()
+
+
+async def flush_buf() -> tuple[int, int, int]:
+    """버퍼를 DB 에 쓰고 쓴 만큼 앞에서 지운다. 쓰기 실패는 예외 그대로(버퍼는 남는다). (행 수, 새 행, 블록)"""
+    async with _BUF_LOCK:
+        rows = _BUF[:]
+        added = await asyncio.to_thread(write, rows)
+        del _BUF[:len(rows)]
+        return len(rows), added, sum(r[12] for r in rows)
+
+
 async def chain_loop() -> None:
     while True:
         t0 = time.time()
+        try:
+            if _BUF:
+                await flush_buf()
+        except Exception as e:           # 못 쓰면 WS 루프의 다음 flush 가 다시 시도한다 -- 체인은 그대로 간다
+            print(f"체인 전 flush 보류: {type(e).__name__}: {e}", flush=True)
         try:
             await asyncio.to_thread(chain_poll)
         except Exception as e:           # 체인 조회가 실패해도 체결 수집은 계속 -- 다음 주기에 다시
@@ -278,7 +299,6 @@ async def run() -> None:
     except Exception as e:            # 이력 옮기기는 부가 작업 -- 실패해도 수집은 시작한다
         print(f"이력 옮기기 실패 -- 건너뜀: {type(e).__name__}: {e}", flush=True)
     asyncio.get_running_loop().create_task(chain_loop())   # 체인·요약 10분 -- WS 재연결과 무관하게 돈다
-    buf: list[tuple] = []
     last = time.time()
     down: tuple[int, str] | None = None
     while True:
@@ -309,27 +329,25 @@ async def run() -> None:
                     if p.get("type") == "test_request":    # 하트비트 응답 안 하면 서버가 끊는다
                         await ws.send(json.dumps({"jsonrpc": "2.0", "id": 3, "method": "public/test", "params": {}}))
                     elif p.get("channel") in CHANNELS:
-                        buf += [row(t) for t in p["data"] if coin_of(t["instrument_name"])]
+                        _BUF.extend(row(t) for t in p["data"] if coin_of(t["instrument_name"]))
                     if time.time() - last >= FLUSH_SEC:
-                        n = len(buf)
                         try:
-                            added = await asyncio.to_thread(write, buf)
+                            n, added, nb = await flush_buf()
                         except Exception as e:     # 쓰기 실패는 WS 를 끊을 이유가 아니다 -- 버퍼를 들고 다음 주기에 다시
-                            print(f"  기록 보류 {n}행: {type(e).__name__}: {str(e)[:120]}", flush=True)
+                            print(f"  기록 보류 {len(_BUF)}행: {type(e).__name__}: {str(e)[:120]}", flush=True)
                             last = time.time()
                             continue
-                        print(f"  +{n}행(새 {added}, 블록 {sum(r[12] for r in buf)})", flush=True)
-                        buf, last = [], time.time()
+                        print(f"  +{n}행(새 {added}, 블록 {nb})", flush=True)
+                        last = time.time()
         except Exception as e:
             # 틈은 다음 연결의 REST 백필이 메우고, 끊긴 구간은 gaps 에 «메운 건수»와 함께 남긴다.
             print(f"WS 끊김: {type(e).__name__}: {e} — 5초 후 재연결", flush=True)
             down = down or (int(time.time() * 1000), type(e).__name__)
             try:
-                await asyncio.to_thread(write, buf)
-                buf = []
+                await flush_buf()
             except Exception as e2:   # 버리지 않고 다음 연결에서 다시 쓴다(백필도 메우지만 24h 를 넘기면 영구 유실이라)
-                print(f"  잔여 {len(buf)}행 기록 보류: {e2}", flush=True)
-                buf = buf[-200_000:]
+                print(f"  잔여 {len(_BUF)}행 기록 보류: {e2}", flush=True)
+                del _BUF[:-200_000]
             await asyncio.sleep(5)
 
 
