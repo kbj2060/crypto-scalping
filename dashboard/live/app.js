@@ -4059,37 +4059,6 @@ function mcUsSession(nowMs = Date.now()) {
   return null;
 }
 
-// 풋프린트 봉 → 서술 표식(2026-09-29). bars = [{high, low, close, delta, topBuy, botSell}] -- topBuy = 맨 윗줄 공격 매수, botSell = 맨 아랫줄 공격 매도.
-//   다이버: 새 30분(6봉) 고가(저가)인데 창 누적 CVD 가 직전 고가(저가) 때보다 낮다(높다).
-//   소진: 새 N봉 고가에서 델타가 창 상위 20% 매수인데 종가가 봉 아래 40% 안(윗꼬리) -- 저가는 거울.
-//   흡수?: 새 30분 고가의 맨 윗줄 공격 매수가 창 상위 10% 인데 다음 봉이 그 고가를 못 넘었다 -- 저가는 거울.
-// 🔴우리 검정에서 이 가족은 방향 엣지가 없었고, 흡수는 오히려 **더 잘 뚫렸다**(1초 가격행 검정). 화면은 «이렇게 보인다»까지만 말한다.
-function fpPatternMarks(bars, look = 6) {   // 6봉 = 30분 -- 1시간 창(12봉)에서도 찍히게
-  const out = [];
-  let run = 0;
-  const cv = bars.map((b) => (run += b.delta || 0));
-  const q = (arr, p) => { const a = arr.filter((v) => v > 0).sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.floor(a.length * p))] : Infinity; };
-  const bigD = q(bars.map((b) => Math.abs(b.delta || 0)), 0.8), tbQ = q(bars.map((b) => b.topBuy || 0), 0.9), bsQ = q(bars.map((b) => b.botSell || 0), 0.9);
-  for (let i = look; i < bars.length; i++) {
-    const b = bars[i];
-    let jh = i - look, jl = i - look;
-    for (let j = i - look; j < i; j++) { if (bars[j].high > bars[jh].high) jh = j; if (bars[j].low < bars[jl].low) jl = j; }
-    const rng = b.high - b.low, pos = rng > 0 ? (b.close - b.low) / rng : 0.5, nx = bars[i + 1];
-    // 셋 다 **새 극값**에서만 말한다(흡수도 -- 연구 정의가 «극값 줄»이다. 극값 조건이 없으면 평평한 구간에서 봉마다 찍힌다)
-    if (b.high > bars[jh].high) {
-      if (cv[i] < cv[jh]) out.push({ i, kind: "div", side: -1 });
-      if (b.delta > 0 && b.delta >= bigD && pos <= 0.4) out.push({ i, kind: "exh", side: -1 });
-      if (nx && b.topBuy >= tbQ && nx.high <= b.high) out.push({ i, kind: "abs", side: -1 });
-    }
-    if (b.low < bars[jl].low) {
-      if (cv[i] > cv[jl]) out.push({ i, kind: "div", side: 1 });
-      if (b.delta < 0 && -b.delta >= bigD && pos >= 0.6) out.push({ i, kind: "exh", side: 1 });
-      if (nx && b.botSell >= bsQ && nx.low >= b.low) out.push({ i, kind: "abs", side: 1 });
-    }
-  }
-  return out;
-}
-
 function renderMarketCtx() {
   const body = el("mcBody"), badge = el("mcBadge");
   if (!body) return;
@@ -6065,7 +6034,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
 
     // ── 시장 맥락 겹침 (2026-09-29, 사용자 «불합격이어도 쓸모 있으면 넣어줘 -- 우리 검증이 틀렸을 수도 있다») ──────────
-    //   ① 스택 불균형(같은 쪽 3줄 연속) ② 패턴 글자(다이버·소진·흡수?) ③ 세션 VWAP ±1·2σ · 볼린저(카드 스위치)
+    //   ① 스택 불균형(같은 쪽 3줄 연속) (② 패턴 글자 다이버·소진·흡수?는 09-30 제거 -- 4.7년·2025/2026 검정 방향 0) ③ 세션 VWAP ±1·2σ · 볼린저(카드 스위치)
     //   ④ HL 고래 실측 청산가 점선 (⑤ 12시간 실측 청산 눈금은 09-30 제거). 전부 서술 -- 뜻과 우리 검정은 각 <title>.
     //   선(③④)은 옵션 선과 같이 격자 바로 위(셀 아래)에, 표식(①②⑤)은 셀 위에. 가격 플롯 밖은 네이티브 clipPath 로 자른다.
     if (isSnapshotChart) {
@@ -6148,32 +6117,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
             });
             flush();
           });
-        });
-        // ② 패턴 글자 -- 맨 윗줄 위(청산 원·사건 삼각형 바깥) / 델타 글자 아래
-        const pb = candles.map((c, i) => {
-          const rows = barRows[i];
-          let d = 0, hk = -Infinity, lk = Infinity;
-          rows.forEach((cell, k) => { d += cell[0] - cell[1]; if (k > hk) hk = k; if (k < lk) lk = k; });
-          return { high: c.high, low: c.low, close: c.close, delta: d, hk, lk,
-                   topBuy: rows.size ? rows.get(hk)[0] : 0, botSell: rows.size ? rows.get(lk)[1] : 0 };
-        });
-        const TIP = {
-          div: "다이버전스 — 새 30분 고가(저가)인데 창 누적 CVD 는 직전 고가(저가) 때보다 약하다. 우리 검정: 봉 단위 «체결과 가격이 엇갈림»은 엣지 0이었다.",
-          exh: "소진 — 새 30분 고가(저가)에서 큰 공격 체결이 들어왔는데 봉이 반대쪽 꼬리로 닫혔다. 우리 검정: 미검정(흡수 가족은 방향 0).",
-          abs: "흡수처럼 보인다 — 극값 줄에 큰 공격 체결이 몰렸는데 다음 봉이 그 극값을 못 넘었다. 🔴우리 1초 검정: 이런 라인은 조용한 극값보다 오히려 더 잘 뚫렸다(지지·저항으로 읽지 말 것).",
-        };
-        const NAME = { div: "다이버", exh: "소진", abs: "흡수?" };
-        const stack = new Map(), fs = mobileChart ? 8.5 : 9.5;
-        fpPatternMarks(pb).forEach(({ i, kind, side }) => {
-          const key = `${i}:${side}`, k = stack.get(key) || 0;
-          stack.set(key, k + 1);
-          const b = pb[i];
-          // 위: 청산 원(고점 위 14px + 반지름 ≤13 → 최대 40px) 바깥 · 아래: 델타 글자(+13) 아래
-          const y = side < 0 ? yAt(Number.isFinite(b.hk) ? (b.hk + 1) * rowSize : b.high) - 46 - k * (fs + 2)
-                             : yAt(Number.isFinite(b.lk) ? b.lk * rowSize : b.low) + 30 + k * (fs + 2);
-          if (y < mt + fs || y > plotBottom - 2) return;
-          mk(svg, "text", { x: cx(i), y: y.toFixed(1), "text-anchor": "middle", "font-size": fs, "font-weight": 700, fill: "var(--muted)" },
-             TIP[kind]).appendChild(document.createTextNode(`${NAME[kind]}${kind === "abs" ? "" : side < 0 ? "↓" : "↑"}`));
         });
       }
     }
