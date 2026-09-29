@@ -286,27 +286,32 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
     # 2026-09-29 사용자 «딜러 감마는 모두 가까운 만기 기준»: 곡선·플립·지금 값을 **아직 안 끝난 가장 빠른 만기 하나**로
     #   (아래 행사가 사다리 «가까운 만기»와 같은 정의). 전 만기 합은 12월물 먼 콜(+)이 부호를 뒤집어 사다리(−)와 엇갈렸다
     #   (09-29 실측: 전체 +5.6M · 7일 안 −7.3M · 30~90일 +10.5M). 🔴gex_summary 표(전체·30일)는 이력용으로 그대로 둔다.
+    #   2026-09-29 사용자 «사다리 칩 따라가게»: 같은 계산을 사다리 칩 셋(front 가장 가까운 만기 · week 7일 안 · all 전 만기)으로
+    #   gamma_by 에 낸다. `gamma` = front(이전 키, 이력 표·옛 화면 호환).
     g_fut = chain[chain["expiration_ts"] > pd.Timestamp.now(tz="UTC")]
     g_first = g_fut["expiration_ts"].min() if len(g_fut) else None
-    gch = chain[chain["expiration_ts"] == g_first] if g_first is not None else chain.iloc[0:0]
-    yrs_a = (gch["days_to_expiry"] / 365.0).to_numpy(); k_a = gch["strike"].to_numpy()
-    iv_a = (gch["mark_iv"] / 100.0).to_numpy(); oi_a = gch["open_interest"].to_numpy()
-    sg_a = gch["option_type"].map({"call": 1.0, "put": -1.0}).to_numpy()
     import numpy as np
-    def gex_at(px: float) -> float:
-        ok = (iv_a > 0) & (yrs_a > 0)
-        d1 = (np.log(px / k_a[ok]) + 0.5 * iv_a[ok] ** 2 * yrs_a[ok]) / (iv_a[ok] * np.sqrt(yrs_a[ok]))
-        gam = np.exp(-0.5 * d1 * d1) / np.sqrt(2 * np.pi) / (px * iv_a[ok] * np.sqrt(yrs_a[ok]))
-        return float((sg_a[ok] * gam * oi_a[ok]).sum() * px * px * 0.01)
-    prof = [(idx * (0.85 + 0.0125 * i), gex_at(idx * (0.85 + 0.0125 * i))) for i in range(25)]
-    flip = None
-    for (a, ga), (b, gb) in zip(prof, prof[1:]):
-        if (ga < 0) != (gb < 0):
-            cand = a + (b - a) * (-ga) / (gb - ga)
-            if flip is None or abs(cand - idx) < abs(flip - idx):
-                flip = cand
-    out["gamma"] = {"now_usd": gex_at(idx) if len(gch) else None, "flip": flip, "profile": [[round(p, 1), g] for p, g in prof],
-                    "exp_ms": int(g_first.timestamp() * 1000) if g_first is not None else None}
+    def _gamma(gch) -> dict:
+        yrs_a = (gch["days_to_expiry"] / 365.0).to_numpy(); k_a = gch["strike"].to_numpy()
+        iv_a = (gch["mark_iv"] / 100.0).to_numpy(); oi_a = gch["open_interest"].to_numpy()
+        sg_a = gch["option_type"].map({"call": 1.0, "put": -1.0}).to_numpy()
+        def gex_at(px: float) -> float:
+            ok = (iv_a > 0) & (yrs_a > 0)
+            d1 = (np.log(px / k_a[ok]) + 0.5 * iv_a[ok] ** 2 * yrs_a[ok]) / (iv_a[ok] * np.sqrt(yrs_a[ok]))
+            gam = np.exp(-0.5 * d1 * d1) / np.sqrt(2 * np.pi) / (px * iv_a[ok] * np.sqrt(yrs_a[ok]))
+            return float((sg_a[ok] * gam * oi_a[ok]).sum() * px * px * 0.01)
+        prof = [(idx * (0.85 + 0.0125 * i), gex_at(idx * (0.85 + 0.0125 * i))) for i in range(25)]
+        flip = None
+        for (a, ga), (b, gb) in zip(prof, prof[1:]):
+            if (ga < 0) != (gb < 0):
+                cand = a + (b - a) * (-ga) / (gb - ga)
+                if flip is None or abs(cand - idx) < abs(flip - idx):
+                    flip = cand
+        return {"now_usd": gex_at(idx) if len(gch) else None, "flip": flip, "profile": [[round(p, 1), g] for p, g in prof]}
+    front_g = {**_gamma(g_fut[g_fut["expiration_ts"] == g_first] if g_first is not None else chain.iloc[0:0]),
+               "exp_ms": int(g_first.timestamp() * 1000) if g_first is not None else None}
+    out["gamma"] = front_g
+    out["gamma_by"] = {"front": front_g, "week": _gamma(g_fut[g_fut["days_to_expiry"] <= 7]), "all": _gamma(g_fut)}
     # 보험: 가까운 만기 둘(12시간 이상 남은 것 중)의 지수 ±10% OTM 옵션 -- 화면이 포지션·손절에 맞춰 고른다.
     near = [e for e in exps if e["exp_ms"] / 1000 - time.time() > 12 * 3600][:2]
     hedge = []

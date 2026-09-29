@@ -54,3 +54,18 @@ def test_gamma_uses_nearest_expiry_only(monkeypatch):
     only = gex.options_summary(near, "ETH")
     assert o["gamma"]["now_usd"] < 0 and abs(o["gamma"]["now_usd"] - only["gamma"]["now_usd"]) < 1e-6
     assert o["gamma"]["exp_ms"] == int(near.expiration_ts.iloc[0].timestamp() * 1000)
+
+
+def test_gamma_by_follows_ladder_scopes(monkeypatch):
+    """2026-09-29 사용자 «사다리 칩 따라가게»: gamma_by 는 사다리 칩과 같은 범위. 먼 만기 콜 산더미는 all 만 +로 뒤집는다."""
+    monkeypatch.setattr(gex, "_pub", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+    near = _chain()
+    near.loc[near.option_type == "call", "open_interest"] = 1.0
+    far = _chain().assign(expiration_ts=near.expiration_ts.iloc[0] + pd.Timedelta(days=60), days_to_expiry=62.0)
+    far = far[far.option_type == "call"].assign(open_interest=1e5)
+    o = gex.options_summary(pd.concat([near, far], ignore_index=True), "ETH")
+    gb = o["gamma_by"]
+    assert gb["front"]["now_usd"] == o["gamma"]["now_usd"] < 0, "front = 이전 gamma 키"
+    assert abs(gb["week"]["now_usd"] - gb["front"]["now_usd"]) < 1e-6, "7일 안 = 가까운 만기뿐(먼 만기 62일 제외)"
+    assert gb["all"]["now_usd"] > 0, "전 만기는 먼 콜로 양수"
+    assert len(gb["all"]["profile"]) == 25

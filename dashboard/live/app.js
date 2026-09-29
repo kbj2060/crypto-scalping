@@ -3466,7 +3466,7 @@ function ensureLiveStream() {
 //   옛 «신호» 카드의 GEX 한 줄(gexIndicatorItem)은 이 카드의 «딜러 감마» 칸으로 들어왔다.
 const OPT_TIPS = {
   move: "옵션 가격에 들어 있는 기대 움직임. 1σ = 가격 × DVOL × √(기간/1년) — 약 68% 확률로 이 안. 손절이 5분 1σ 보다 훨씬 좁으면 소음에 걸리기 쉽다.\n차트 띠는 봉 시가에 고정된다: 5분 띠 = 이번 5분봉 시가 ± 5분 1σ, 1시간 띠 = 이번 정시 첫 봉 시가 ± 1시간 1σ(폭도 봉이 열릴 때 값으로 고정). 가격이 띠를 벗어나면 옵션시장 예상보다 큰 움직임.\nIV−실현(VRP): 양수면 옵션시장이 실제보다 큰 움직임을 값에 넣는 중(보통 양수).\n우리 검정(2026년만): DVOL 24시간 1σ 안에 실제로 든 날 77% · 크기 비 1.00(과거 24h 실현변동성 폭은 1.32 로 좁다). 평균 크기는 맞고 꼬리는 두껍다 — 벗어나는 23% 는 크게 벗어난다.",
-  gamma: "가장 가까운 만기 하나 기준(행사가 사다리 «가까운 만기»와 같음 — 먼 만기 콜이 합계 부호를 뒤집어 사다리와 엇갈리던 것을 맞췄다). 옵션을 판 딜러의 헤지 방향. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 그 부호가 바뀌는 가격.\n우리 검정: ETH 전체 GEX 는 37일 내내 양수(플립이 거의 없다) · 방향 예측은 가격수준의 사본으로 기각 · 크기(앞으로의 변동 폭) 예측도 2026-09-28 사전등록 판정에서 불합격 — 43일 표본, 1시간 설명력 증분 +0.008(CI 0 포함)·24시간은 오히려 악화. 그래서 이 칸은 지금 상태 서술일 뿐이다.",
+  gamma: "행사가 사다리에서 고른 칩과 같은 범위(가까운 만기 · 7일 안 · 전 만기) — 칩을 바꾸면 이 칸과 가격축 플립도 바뀐다. 지금 값 = 사다리 감마 막대의 합(사다리는 지수 ±8% 만 그려 조금 다를 수 있다). 옵션을 판 딜러의 헤지 방향. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 그 부호가 바뀌는 가격.\n우리 검정: ETH 전체 GEX 는 37일 내내 양수(플립이 거의 없다) · 방향 예측은 가격수준의 사본으로 기각 · 크기(앞으로의 변동 폭) 예측도 2026-09-28 사전등록 판정에서 불합격 — 43일 표본, 1시간 설명력 증분 +0.008(CI 0 포함)·24시간은 오히려 악화. 그래서 이 칸은 지금 상태 서술일 뿐이다.",
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기 · 블록 거래».",
   mood: "25Δ 리스크 리버설 = 같은 거리 콜 IV − 풋 IV. 음수로 깊으면 하락 방어 수요(공포), 양수면 상승 베팅. 버터플라이 = 양 끝 IV − ATM(꼬리 가격). 기간 구조 = 만기별 ATM IV — 가까운 게 더 높으면(역전) 스트레스.\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중.",
   ladder: "행사가 사다리: 세로 = 행사가(지수 ±8%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러), 맨 오른쪽 = 행사가별 순감마(청록 = 콜 쪽 +, 주황 = 풋 쪽 −). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
@@ -3542,6 +3542,8 @@ function optLaneSvg(o, blocks, W) {
 }
 
 // 행사가 사다리(1-B, 2026-09-28): 옵션 카드 폭에 맞춘 세로 막대. 범위 칩은 브라우저에 기억한다.
+// 딜러 감마 칸·가격축 플립은 사다리에서 고른 칩과 같은 범위(2026-09-29 사용자 지시). 옛 수집기 상태면 가까운 만기(gamma).
+const optGamma = (o) => (o.gamma_by || {})[optLadderScope] || o.gamma || {};
 let optLadderScope = (() => { try { return localStorage.getItem("optLadder") || "week"; } catch (e) { return "week"; } })();
 function optLadderSvg(o, W) {
   const st = o.strikes || {}, rows = st[optLadderScope] || [];
@@ -3680,7 +3682,7 @@ function renderOptions() {
   // 칸 제목을 누르면(휴대폰 포함 -- 호버가 없다) 정의·읽는 법·우리 검정 결과가 제목 아래에 펼쳐진다. 펼침은 다시 그려도 유지.
   const sec = (key, title, inner) => `<div class="opt-sec"><h4><button type="button" class="opt-q" data-tip="${key}" aria-expanded="${optTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
     + `<p class="opt-tip"${optTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(OPT_TIPS[key]).replace(/\n/g, "<br>")}</p>${inner}</div>`;
-  const gm = o.gamma || {}, posG = !(gm.now_usd < 0), hasG = gm.now_usd != null;   // 2026-09-29 가까운 만기 하나 기준(수집기)
+  const gm = optGamma(o), posG = !(gm.now_usd < 0), hasG = gm.now_usd != null;   // 2026-09-29 사다리 칩 범위를 따라간다
   body.innerHTML = [
     sec("move", "예상 폭", kv("오늘 1σ", s1d == null ? "-" : `${pm(s1d)} (${(optIv(o) / Math.sqrt(365)).toFixed(1)}%)`)
       + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 — 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
@@ -3688,7 +3690,8 @@ function renderOptions() {
     sec("gamma", "딜러 감마", kv("구간", !hasG ? "-" : posG ? "양감마 · 눌림 쪽" : "음감마 · 튐 쪽", !hasG ? "" : posG ? "opt-good" : "opt-warn")
       + kv("플립", gm.flip ? `${optQ(gm.flip)} (${gm.flip < px ? "아래" : "위"} ${optQ(Math.abs(gm.flip - px))}$)` : "±15% 안 없음")
       // 과거 분위는 «전체 GEX» 이력뿐이라 가까운 만기 기준과 못 견준다 -- 그 자리에 기준 만기를 보인다.
-      + kv("기준 만기", gm.exp_ms ? `${optKst(gm.exp_ms)} (${Math.max(0, (gm.exp_ms - Date.now()) / 3600e3).toFixed(0)}h)` : "-")),
+      + kv("기준", optLadderScope === "week" ? "7일 안 만기 합(사다리 칩)" : optLadderScope === "all" ? "전 만기 합(사다리 칩)"
+           : gm.exp_ms ? `${optKst(gm.exp_ms)} 만기 (${Math.max(0, (gm.exp_ms - Date.now()) / 3600e3).toFixed(0)}h)` : "-")),
     sec("ladder", "행사가 사다리", optLadderSvg(o, 336)),
     sec("mood", "심리", kv("25Δ 리스크 리버설", f && f.rr25 != null ? `${f.rr25 >= 0 ? "+" : ""}${f.rr25.toFixed(1)}pt` : "-")
       + kv("버터플라이", f && f.bf25 != null ? `${f.bf25 >= 0 ? "+" : ""}${f.bf25.toFixed(1)}pt` : "-")
@@ -6157,7 +6160,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
               `${lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
         }
       }
-      const gm = o.gamma || {}, fl = gm.flip;
+      const gm = optGamma(o), fl = gm.flip;
       if (fl && yAt(fl) >= mt && yAt(fl) <= plotBottom) {
         add("line", { x1: ml, x2: ml + cw, y1: yAt(fl), y2: yAt(fl), stroke: "var(--muted)", "stroke-opacity": 0.8, "stroke-dasharray": "8 4" });
         add("text", { x: ml + 4, y: yAt(fl) - 4, "font-size": fs, "font-weight": 700, fill: "var(--muted)" }, `감마 플립 ${optQ(fl)}`);
