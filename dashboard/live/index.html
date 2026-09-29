@@ -245,9 +245,10 @@
         </div>
         <div id="liquidationMapList" class="liq-level-list"></div>
         <!-- 2026-09-29 옵션 차트 두 개(사용자 지시 «풋프린트 카드 제일 하단에 좌우 절반») -- 따로 있던 «옵션 만기 · 블록 거래» 카드를 옮겼다.
-             왼쪽 = 만기 시간축(−24h~+120h) · 오른쪽 = 옵션 순매수 흐름(지난 24시간). 휴대폰(≤720)은 위아래로 쌓는다. app.js renderOptions. -->
+             왼쪽 = 만기 시간축(지금~+120h) · 가운데 = 블록 거래(위 체결+호가 프로파일과 같은 폭·x) · 오른쪽 = 옵션 순매수 흐름(지난 24시간). 휴대폰(≤720)은 위아래로 쌓는다. app.js renderOptions. -->
         <div id="optRow" class="opt-row" hidden>
           <div id="optLaneBody" class="opt-lane-body"></div>
+          <div id="optBlkBody" class="opt-lane-body opt-blk-col"></div>
           <div id="optFlowBody" class="opt-lane-body"></div>
         </div>
       </section>
@@ -258,7 +259,7 @@
            (/api/binance-account)라 봇 원장과 달리 수동 매매도 보인다. 운영 관리 탭의 "바이낸스 계정"
            패널과 같은 payload 를 쓰며(app.js latestBinanceAccount) 여기선 보고 있는 코인만 접어 보인다. -->
       <!-- 2026-09-28 옵션 카드(사용자 선택 A+C, 배치 수정: 넓은 화면에서 차트 오른쪽 열) -- 옛 «신호» 카드(GEX 한 줄)를 대체한다. Deribit 체인(10분) + 블록 거래(20초).
-           칸 = 예상 폭 · 딜러 감마 · 행사가 사다리 · 심리(2026-09-29 사용자 지시: 머리·만기·블록 목록·보험·가격축 체크 제거). 전부 참고 · 신호 아님. -->
+           칸 = 예상 폭 · 딜러 감마 · 행사가 사다리 · 감마 곡선 · 심리(2026-09-29 사용자 지시: 머리·만기·블록 목록·보험·가격축 체크 제거). 전부 참고 · 신호 아님. -->
       <section id="optPanel" class="panel ops-health-panel opt-panel">
         <div id="optBody" class="opt-body"></div>
       </section>

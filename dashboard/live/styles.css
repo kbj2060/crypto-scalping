@@ -2694,10 +2694,17 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .opt-good { color: var(--good) !important; } .opt-bad { color: var(--bad) !important; } .opt-warn { color: var(--warn) !important; }
 
 /* 2026-09-29 옵션 차트 두 개 -- 풋프린트 카드 맨 아래 반반(사용자 지시), 휴대폰은 위아래 */
-.opt-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.opt-row { display: grid; grid-template-columns: minmax(0, 1fr) 298px minmax(0, 1fr); gap: 18px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .opt-row[hidden] { display: none; }
 .opt-row .opt-flow-head { margin-top: 0; padding-top: 0; border-top: 0; }
 @media (max-width: 720px) { .opt-row { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+/* 2026-09-29 가운데 블록 거래 칸 -- 목록은 옆 두 그림 높이 안에서 스크롤(카드가 목록 길이로 늘지 않게) */
+.opt-blk-col .opt-blk-sum { margin-top: 4px; }
+.opt-blk-list { max-height: 150px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--option) 35%, transparent) transparent;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); padding-bottom: 14px; }   /* 잘린 줄 대신 «더 있다» 페이드 */
+@media (max-width: 720px) { .opt-blk-list { max-height: none; mask-image: none; padding-bottom: 0; } }
+.opt-curve { display: block; width: 100%; height: auto; max-width: 440px; }
 /* 2026-09-29 휴대폰 블록 거래 요약 한 줄 + 펼치기 목록(사용자 선택 C) */
 .opt-blk-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; padding: 8px 10px; margin-top: 6px;
   border: 1px solid var(--soft-line); border-radius: 10px; font-variant-numeric: tabular-nums; }
