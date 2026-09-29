@@ -43,7 +43,7 @@ def test_tape_levels(tmp_path):
     assert abs(r["vwap_week"] - wavg([(30000, 1000), (21000, 6), (19000, 5), (20000, 100), (20500, 500)])) < 1e-9
     va = r["prev_day"]                                            # 전일 111 중 POC 칸 100 → 가치영역 = POC 칸 하나
     assert va["val"] <= px(20000) < va["vah"] and abs(va["vah"] - va["val"] - r["bin"]) < 1e-9, va
-    assert abs(r["bin"] - px(20500) * 5e-4) < 1e-12
+    assert abs(r["bin"] - 1.0) < 1e-12                                # 전일 마지막 가격 2000.05 × 0.05% → 테이프 칸(0.1) 격자 1.0 -- 지금 가격(2050)과 무관
     assert {"hvn", "lvn"} <= set(r)
 
 

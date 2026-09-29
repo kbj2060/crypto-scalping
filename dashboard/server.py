@@ -837,13 +837,16 @@ def tape_levels(tape_db: Path, sym: str, bk: float, now: int) -> dict[str, Any]:
         SELECT (SELECT sum(price_bin * q) / nullif(sum(q), 0) FROM t WHERE ts_sec >= ?),
                (SELECT sum(price_bin * q) / nullif(sum(q), 0) FROM t WHERE ts_sec >= (SELECT ts_sec FROM ah)),
                (SELECT sum(price_bin * q) / nullif(sum(q), 0) FROM t WHERE ts_sec >= (SELECT ts_sec FROM al)),
-               (SELECT ts_sec FROM ah), (SELECT ts_sec FROM al), (SELECT arg_max(price_bin, ts_sec) FROM t)""",
+               (SELECT ts_sec FROM ah), (SELECT ts_sec FROM al), (SELECT arg_max(price_bin, ts_sec) FROM t),
+               (SELECT arg_max(price_bin, ts_sec) FROM pd)""",
         [sym, min(w0, d0 - 86400), d0 - 86400, d0, w0])[0]
     px = lambda b: None if b is None else (float(b) + 0.5) * bk   # noqa: E731 -- 테이프 칸 가운데
     last = px(vw[5])
     if not last:
         return {"available": False}
-    bw = last * mctx.PROFILE_BIN_FRAC
+    # 칸 폭은 **하루 동안 고정**(전일 마지막 가격 × 0.05%, 테이프 칸 격자에 맞춤). 지금 가격으로 잡으면 가격이 움직일 때마다
+    #   칸 경계가 밀려 비슷한 봉우리 둘 사이에서 POC 가 오갔다(09-30 배포 직후 5분 사이 2697.2 → 2683.4).
+    bw = max(bk, round((px(vw[6]) or last) * mctx.PROFILE_BIN_FRAC / bk) * bk)
     rows = _read_only_rows(tape_db, """
         SELECT 0, CAST(floor((price_bin + 0.5) * ? / ?) AS BIGINT), sum(buy_qty + sell_qty) FROM trade_tape_1s
         WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY 2
