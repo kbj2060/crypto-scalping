@@ -3745,7 +3745,7 @@ function renderOptions() {
   const s1d = optSigma(o, 86400), s5 = optSigma(o, 300);
   // 2026-09-29 사용자 지시: 예상 폭은 전부 DVOL 하나로(만기별 ATM IV 는 이력이 09-28 부터라 검정 불가였다).
   const sExp = f && hrs > 0 ? optSigma(o, hrs * 3600) : null;
-  const vrp = o.dvol != null && o.rv7 != null ? o.dvol - o.rv7 : null;
+  const vrp = optIv(o) != null && o.rv7 != null ? optIv(o) - o.rv7 : null;   // 2026-09-30 DVOL 없는 SOL·XRP 는 30일 ATM IV(예상 폭과 같은 대체) -- 전엔 늘 «-»
   const pm = (v) => (v == null ? "-" : `±${optQ(v)}$`);
   if (chip) {
     chip.hidden = !f;
