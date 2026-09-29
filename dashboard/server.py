@@ -822,6 +822,46 @@ def tape_seconds(tape_db: Path, symbol: str, lo_sec: int, hi_sec: int,
     return {int(r[0]): [float(x or 0.0) for x in r[1:]] for r in rows}, int(top[0][0] or 0)
 
 
+def tape_levels(tape_db: Path, sym: str, bk: float, now: int) -> dict[str, Any]:
+    """ETH 선물 체결 테이프(가격 칸 0.1) → 전일(UTC) 가치영역 · 24시간 HVN/LVN · 주간 VWAP(월요일 00:00 UTC부터) ·
+    앵커드 VWAP(전일 고가·저가를 처음 찍은 초부터). 2026-09-30 사용자 «참고용이라도 시장 맥락에».
+    🔴전부 가격 지도다 -- 09-30 검정에서 닿은 뒤 되돌림·돌파 뒤 성질·사건 결합·레짐 분할 모두 위약 레벨과 같았다.
+    ponytail: 테이프 공백(재기동 틈)은 자동 복구가 메운 만큼만 -- 몇 분 빠져도 하루치 프로파일 모양은 거의 안 바뀐다."""
+    d0 = now // 86400 * 86400
+    w0 = d0 - ((d0 // 86400 + 3) % 7) * 86400                 # 1970-01-01 = 목요일 → 이번 주 월요일 00:00 UTC
+    vw = _read_only_rows(tape_db, """
+        WITH t AS (SELECT ts_sec, price_bin, buy_qty + sell_qty AS q FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ?),
+             pd AS (SELECT ts_sec, price_bin FROM t WHERE ts_sec >= ? AND ts_sec < ?),
+             ah AS (SELECT ts_sec FROM pd ORDER BY price_bin DESC, ts_sec LIMIT 1),
+             al AS (SELECT ts_sec FROM pd ORDER BY price_bin, ts_sec LIMIT 1)
+        SELECT (SELECT sum(price_bin * q) / nullif(sum(q), 0) FROM t WHERE ts_sec >= ?),
+               (SELECT sum(price_bin * q) / nullif(sum(q), 0) FROM t WHERE ts_sec >= (SELECT ts_sec FROM ah)),
+               (SELECT sum(price_bin * q) / nullif(sum(q), 0) FROM t WHERE ts_sec >= (SELECT ts_sec FROM al)),
+               (SELECT ts_sec FROM ah), (SELECT ts_sec FROM al), (SELECT arg_max(price_bin, ts_sec) FROM t),
+               (SELECT arg_max(price_bin, ts_sec) FROM pd)""",
+        [sym, min(w0, d0 - 86400), d0 - 86400, d0, w0])[0]
+    px = lambda b: None if b is None else (float(b) + 0.5) * bk   # noqa: E731 -- 테이프 칸 가운데
+    last = px(vw[5])
+    if not last:
+        return {"available": False}
+    # 칸 폭은 **하루 동안 고정**(전일 마지막 가격 × 0.05%, 테이프 칸 격자에 맞춤). 지금 가격으로 잡으면 가격이 움직일 때마다
+    #   칸 경계가 밀려 비슷한 봉우리 둘 사이에서 POC 가 오갔다(09-30 배포 직후 5분 사이 2697.2 → 2683.4).
+    bw = max(bk, round((px(vw[6]) or last) * mctx.PROFILE_BIN_FRAC / bk) * bk)
+    rows = _read_only_rows(tape_db, """
+        SELECT 0, CAST(floor((price_bin + 0.5) * ? / ?) AS BIGINT), sum(buy_qty + sell_qty) FROM trade_tape_1s
+        WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY 2
+        UNION ALL
+        SELECT 1, CAST(floor((price_bin + 0.5) * ? / ?) AS BIGINT), sum(buy_qty + sell_qty) FROM trade_tape_1s
+        WHERE symbol = ? AND ts_sec >= ? GROUP BY 2""", [bk, bw, sym, d0 - 86400, d0, bk, bw, sym, now - 86400])
+    prev = [(int(k), float(v)) for g, k, v in rows if g == 0]
+    h24 = [(int(k), float(v)) for g, k, v in rows if g == 1]
+    return {"available": True, "last": last, "bin": bw,
+            "prev_day": mctx.value_area([k for k, _ in prev], [v for _, v in prev], bw),
+            **mctx.profile_nodes([k for k, _ in h24], [v for _, v in h24], bw),
+            "vwap_week": px(vw[0]), "week_start": w0,
+            "avwap_hi": px(vw[1]), "avwap_hi_ts": vw[3], "avwap_lo": px(vw[2]), "avwap_lo_ts": vw[4]}
+
+
 OKX_CT_VAL = OKX_CT_VALS.get(OKX_INST)
 # ⭐OI 는 **WS `open-interest`** 로 받는다(2026-09-23 정정). REST 0.25초 폴링이 «2.7배 더 본» 변화는
 #   60%가 A->B->A 되돌림(응답 노드 불일치) 잡음이었고, 동시 75초에 REST 고유 값 10개 = WS 10개였다.
@@ -3817,7 +3857,19 @@ def make_app() -> web.Application:
                 evs.append((float(e.get("price") or 0), float(e.get("usd") or 0), e.get("side") == "long"))
         return mctx.liq_profile(evs)
 
+    def _mc_profile() -> dict[str, Any]:
+        sym = FOOTPRINT_SYMBOL.lower()
+        return tape_levels(MICRO_TAPE_DB_PATH, sym, TAPE_BUCKETS[sym], int(time.time()))
+
     async def market_context_payload() -> dict[str, Any]:
+        async def dvol_year() -> list[float]:
+            """ETH DVOL 일봉 종가 366개(Deribit 공개 API) -- 마지막 = 오늘 지금까지. IV 랭크 = 지금이 1년 중 어디쯤인가(서술)."""
+            now_ms = int(time.time() * 1000)
+            j = await fetch_binance_json("https://www.deribit.com/api/v2/public/get_volatility_index_data",
+                                         {"currency": "ETH", "start_timestamp": now_ms - 366 * 86_400_000,
+                                          "end_timestamp": now_ms, "resolution": "1D"}, error_reason="dvol_hist_upstream_error")
+            return [float(r[4]) for r in sorted(j["result"]["data"])]
+
         async def funding_hist() -> list[float]:
             raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/fundingRate",
                                            {"symbol": FOOTPRINT_SYMBOL, "limit": 1000}, error_reason="funding_hist_upstream_error")
@@ -3829,6 +3881,14 @@ def make_app() -> web.Application:
             fh = await swr_cached("mc_funding_hist", 3600.0, funding_hist, max_stale=6 * 3600.0)
         except Exception:  # noqa: BLE001 -- 분위만 빠진다
             fh = []
+        try:
+            dvy = await swr_cached("mc_dvol_year", 3600.0, dvol_year, max_stale=6 * 3600.0)
+        except Exception:  # noqa: BLE001 -- IV 랭크만 빠진다
+            dvy = []
+        try:
+            vprof = await swr_cached("mc_profile", 300.0, lambda: asyncio.to_thread(_mc_profile), max_stale=1800.0)
+        except Exception as exc:  # noqa: BLE001 -- 레벨만 빠진다(테이프 잠김·없음)
+            vprof = {"available": False, "error": repr(exc)[:100]}
         one = lambda k: (col.get(k) or [None])[0]   # noqa: E731 -- 없으면 None 한 줄
         mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
         x = situation_state.get("ctx") or {}
@@ -3876,6 +3936,8 @@ def make_app() -> web.Application:
             #   «이미 넘어섰다»로 버려졌다(09-29 재검증). 금액도 HL 마크로. HL 맥락이 없을 때만 바이낸스 미드.
             "hl_liq": mctx.hl_liq_levels(col.get("hl_pos") or [], (hl[3] if hl and hl[3] else mid)) if (mid or (hl and hl[3])) else {"below": [], "above": []},
             "liq_profile": prof,
+            "profile": vprof,
+            "iv_rank": ({"dvol": dvy[-1], "rank365": mctx.pct_rank(dvy[-1], dvy[:-1], min_n=200), "n": len(dvy) - 1} if dvy else None),
             "burst": {k: burst.get(k) for k in ("updated_at", "hawkes_active", "crisis_type", "z_long", "z_short",
                                                 "long_usd_1m", "short_usd_1m", "valid_liq_stream")} if burst else None,
             "errors": col.get("errors") or {},
