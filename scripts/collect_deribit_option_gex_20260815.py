@@ -310,9 +310,15 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
             dlt = np.where(sg_a[ok] > 0, nd1, nd1 - 1.0)
             return float((sg_a[ok] * gam * oi_a[ok]).sum() * px * px * 0.01), float((dlt * (oi_a if w is None else w)[ok]).sum() * px)
         gex_at = lambda px: gex_dex_at(px)[0]  # noqa: E731
-        prof = [(p, *gex_dex_at(p)) for p in (idx * (0.85 + 0.0125 * i) for i in range(25))]
+        # 2026-09-29 사용자 «딜러 기준 3번(가정 + 체결 나란히), 체결 커버가 다 차면 가정 제거»:
+        #   w_asm = 딜러 가정(콜 매수 · 풋 매도 -- GEX 와 같은 관행) → 딜러 DEX = Σ콜δ·OI − Σ풋δ·OI.
+        #   w_trd = 체결 기반(수집 뒤 상장 종목의 −테이커 순수량). 곡선 행 = [가격, 감마$, DEX 보유자$, DEX 딜러가정$, DEX 딜러체결$|None].
+        w_asm = sg_a * oi_a
+        w_trd = np.where(cv_a, -tn_a, 0.0) if (flow and cv_a.any()) else None
+        prof = [(p, *gex_dex_at(p), gex_dex_at(p, w_asm)[1], None if w_trd is None else gex_dex_at(p, w_trd)[1])
+                for p in (idx * (0.85 + 0.0125 * i) for i in range(25))]
         flip = None
-        for (a, ga, _), (b, gb, _) in zip(prof, prof[1:]):
+        for (a, ga, *_), (b, gb, *_) in zip(prof, prof[1:]):
             if (ga < 0) != (gb < 0):
                 cand = a + (b - a) * (-ga) / (gb - ga)
                 if flip is None or abs(cand - idx) < abs(flip - idx):
@@ -324,7 +330,8 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
                   "dealer_cov": oi_cv / float(oi_a.sum()) if len(gch) and oi_a.sum() > 0 else None,
                   # |테이커 순|/미결제 -- 딜러 순포지션은 미결제를 넘을 수 없다. 1 초과면 «메이커 = 딜러» 가정이 깨진 것
                   "dealer_net_oi": float(np.abs(tn_a[cv_a]).sum()) / oi_cv if oi_cv > 0 else None} if flow else {}
-        return {"now_usd": now[0], "dex_usd": now[1], "flip": flip, "profile": [[round(p, 1), g, d] for p, g, d in prof], **dealer}
+        return {"now_usd": now[0], "dex_usd": now[1], "dex_asm_usd": gex_dex_at(idx, w_asm)[1] if len(gch) else None,
+                "flip": flip, "profile": [[round(p, 1), g, d, da, dt] for p, g, d, da, dt in prof], **dealer}
     front_g = {**_gamma(g_fut[g_fut["expiration_ts"] == g_first] if g_first is not None else chain.iloc[0:0]),
                "exp_ms": int(g_first.timestamp() * 1000) if g_first is not None else None}
     out["gamma"] = front_g
@@ -455,7 +462,8 @@ def write_state(con) -> None:
         dex_ago = None
         if ago_row:
             gb_ago = (json.loads(ago_row[0]) or {}).get("gamma_by") or {}
-            dex_ago = {k: {"dex_usd": v.get("dex_usd"), "exp_ms": v.get("exp_ms")} for k, v in gb_ago.items()
+            dex_ago = {k: {"dex_usd": v.get("dex_usd"), "dex_asm_usd": v.get("dex_asm_usd"),
+                           "dealer_dex_usd": v.get("dealer_dex_usd"), "exp_ms": v.get("exp_ms")} for k, v in gb_ago.items()
                        if isinstance(v, dict) and v.get("dex_usd") is not None} or None
         out["currencies"][currency] = {
             "options": json.loads(opt_row[0]) if opt_row else None,

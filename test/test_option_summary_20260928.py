@@ -82,7 +82,10 @@ def test_dex_holder_sign_and_scale(monkeypatch):
     d = gex.options_summary(atm, "ETH")["gamma"]["dex_usd"]
     assert 0.45 * 100 * 2000 < d < 0.56 * 100 * 2000, d
     prof = calls["gamma_by"]["all"]["profile"]
-    assert len(prof[0]) == 3 and prof[0][2] < prof[-1][2], "가격이 오르면 콜 델타(DEX)가 커진다"
+    assert len(prof[0]) == 5 and prof[0][2] < prof[-1][2], "가격이 오르면 콜 델타(DEX)가 커진다 (행 = 가격·감마·보유자·딜러가정·딜러체결)"
+    # 2026-09-29 딜러 가정(콜 매수·풋 매도): 풋만 있는 체인에서 보유자 DEX 는 −, 딜러 가정 DEX 는 + (풋을 판 딜러는 롱 델타)
+    assert puts["gamma"]["dex_asm_usd"] > 0 > puts["gamma"]["dex_usd"]
+    assert abs(calls["gamma"]["dex_asm_usd"] - calls["gamma"]["dex_usd"]) < 1e-6, "콜만이면 두 기준이 같다"
 
 
 def test_write_state_dex_1h_ago(tmp_path, monkeypatch):
