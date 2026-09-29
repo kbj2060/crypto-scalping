@@ -81,8 +81,10 @@ else {
   if (ys.length < 30) fail(`점이 적다 (${ys.length})`);
   if (!ys.every((y, i) => i === 0 || y < ys[i - 1] + 1e-9)) fail("고래 누적이 단조 상승이 아니다");
   const span = NOW - BOUND;
-  for (const name of ["CVD", "고래", "중형", "리테일", "신규"]) if (!a.texts.includes(name)) fail(`줄 이름이 없다: ${name}`);
-  if (!a.texts.includes("+" + fmtK(span * 10))) fail(`고래·CVD 누적값(+${fmtK(span * 10)})이 없다: ${JSON.stringify(a.texts.slice(0, 12))}`);
+  // 2026-09-30 두 줄 선 차트(CVD·OI | 고래·중형·리테일)
+  for (const name of ["CVD · OI", "고래 · 중형 · 리테일"]) if (!a.texts.includes(name)) fail(`줄 이름이 없다: ${name}`);
+  if (!a.texts.includes("고래 +" + fmtK(span * 10))) fail(`고래 누적값(+${fmtK(span * 10)})이 없다: ${JSON.stringify(a.texts.slice(0, 12))}`);
+  if (!a.texts.includes("선물 +" + fmtK(span * 10))) fail(`선물 CVD 누적값이 없다: ${JSON.stringify(a.texts.slice(0, 12))}`);
   if (!a.texts.some((t) => t.includes("봉 시작"))) fail("왼쪽 축 라벨(봉 시작)이 없다");
   if (!a.texts.some((t) => /지금 \(\d+초 경과\)/.test(t))) fail("진행 표시(N초 경과)가 없다");
   const xs = [...String(cl[1]._a.d).matchAll(/[ML]([\d.]+) /g)].map((m) => Number(m[1]));
@@ -90,8 +92,7 @@ else {
   const rightEdge = Math.max(...rects.map((r) => Number(r._a.x) + Number(r._a.width)), 0);
   if (!(Math.max(...xs) < rightEdge - 5)) fail("선이 오른쪽 끝까지 갔다 -- x축이 봉 전체가 아니다");
   if (!rects.some((r) => Number(r._a["fill-opacity"]) === 0.05)) fail("남은 시간 음영이 없다");
-  if (!a.paths.some((p) => p._a.fill === "var(--good)")) fail("매수 막대(초록 path)가 없다");
-  if (a.paths.some((p) => p._a.fill === "var(--bad)")) fail("매도가 0 인데 매도 막대가 있다");
+  if (a.paths.some((p) => p._a.fill === "var(--good)" || p._a.fill === "var(--bad)")) fail("막대가 되살아났다 -- 2026-09-30 선만 남겼다");
 }
 
 // ② 공백은 이어 그리지 않는다(«0» 이 아니라 «모름»).
@@ -108,7 +109,7 @@ if (!z) ok = false;
 else {
   const bad = z.texts.filter((t) => /[+-]$/.test(t));
   if (bad.length) fail(`값이 부호로 끝난다: ${JSON.stringify(bad)}`);
-  if (!z.texts.includes("+0")) fail(`0 일 때 «+0» 이 아니다: ${JSON.stringify(z.texts)}`);
+  if (!z.texts.includes("고래 +0")) fail(`0 일 때 «고래 +0» 이 아니다: ${JSON.stringify(z.texts)}`);
 }
 
 // ④ 폭발해도(5000 ETH/s + OI) 상자를 안 넘는다 -- draw() 가 NaN·세로 넘침을 본다.

@@ -30,7 +30,7 @@ def test_client_reads_same_order_and_sign():
     """클라는 [롱, 숏] 로 받아 «숏 − 롱» 을 그린다."""
     assert re.search(r"liq1s\.set\(r\[0\], \[r\[1\], r\[2\], r\[3\], r\[4\]\]\)", JS), \
         "클라가 liq 행을 [롱수량, 숏수량, 롱USD, 숏USD] 로 안 읽는다"
-    assert "const e = { s: x, v: lc[1] - lc[0] };" in JS, \
+    assert "const v = lc[1] - lc[0];" in JS, \
         "청산 부호가 «숏 − 롱» 이 아니다 -- 점의 색이 통째로 뒤집힌다"
 
 
@@ -68,7 +68,7 @@ def test_size_is_quantity_label_is_money():
     꼬리표가 USD 인 이유: 같은 카드 아래 5분봉 청산이 USD 라 단위가 섞이면 안 된다
     (2026-09-22 사용자 «단위나 금액으로 맞춰줘»).
     """
-    assert re.search(r"Math\.log10\(1 \+ Math\.abs\(e\.v\)\)", JS), \
+    assert re.search(r"Math\.log10\(1 \+ Math\.abs\(v\)\)", JS), \
         "점 크기가 수량 기반 로그가 아니다"
     # 2026-09-28 범례의 청산 합계 줄은 빠졌다(사용자 3·3·2 박스) -- 금액은 점마다 툴팁에 남는다.
     assert '"청산 롱 " + fmtUsdCompact(lc[2]) + " / 숏 " + fmtUsdCompact(lc[3])' in JS, \
@@ -76,14 +76,14 @@ def test_size_is_quantity_label_is_money():
 
 
 def test_lanes_decompose_the_total():
-    """줄 = CVD(합) · 고래 · 중형 · 리테일 · 신규. **중형만 뺄셈**이다(2026-09-28 다섯 줄 거울 막대).
+    """줄 = CVD·OI · 고래·중형·리테일(2026-09-30 두 줄 선 차트). **중형만 뺄셈**이다.
 
     칸은 [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]. 중형을 «총 − 고래»로 쓰면
     리테일이 섞인 **이름만 틀린** 줄이 된다 -- 눈으로는 구별이 안 된다.
     """
-    assert '["CVD", (c) => [c[4], c[5]]]' in JS, "CVD 줄이 총매수/총매도가 아니다"
-    assert '["고래", (c) => [c[2], c[3]]]' in JS and '["리테일", (c) => [c[0], c[1]]]' in JS
-    assert "Math.max(0, c[4] - c[2] - c[0]), Math.max(0, c[5] - c[3] - c[1])" in JS, \
+    assert "acc += c[4] - c[5];" in JS, "CVD 선이 총매수 − 총매도가 아니다"
+    assert '["고래", (c) => c[2] - c[3]' in JS and '["리테일", (c) => c[0] - c[1]' in JS
+    assert "Math.max(0, c[4] - c[2] - c[0]) - Math.max(0, c[5] - c[3] - c[1])" in JS, \
         "중형이 «총 − 고래 − 리테일»이 아니다"
 
 
@@ -93,7 +93,7 @@ def test_liquidation_is_not_on_the_shared_axis():
     봉당 중앙 6.8 ETH 는 CVD 진폭(7,548)의 0.09% 다. 아무 에러도 안 나고 선만 안 보인다.
     """
     assert not re.search(r"yF\(.{0,20}liq", JS), "청산이 다시 공유 ETH 축(yF)에 올라갔다"
-    assert "Math.log10(1 + Math.abs(e.v))" in JS, \
+    assert "Math.log10(1 + Math.abs(v))" in JS, \
         "청산 점 크기가 로그가 아니다 -- 건당 0.86~2,556 ETH(2,970배)라 선형이면 큰 것만 남는다"
 
 
@@ -104,7 +104,7 @@ def test_liquidation_dots_sit_on_the_oi_line():
     사건이라 미결제약정을 줄인다 -- 그 선 위에 앉혀야 «이 청산이 OI 를 어디서 꺾었나»가
     같은 자리에서 읽힌다. OI 는 3~7초 갱신이라 그 초 이전의 마지막 관측을 쓴다.
     """
-    assert 'c.setAttribute("cy", yOi(oiAt(e.s)).toFixed(1));' in JS, \
+    assert 'c.setAttribute("cy", yOi(oiAt(x)).toFixed(1));' in JS, \
         "청산 원이 신규계약(OI) 누적선 위에 안 앉는다"
     assert "const LOW_H" not in JS and "const PANE_GAP" not in JS, \
         "아래 판 껍데기 상수가 남아 있다 -- 지웠으면 같이 지운다"
@@ -127,7 +127,7 @@ def test_one_pane_uses_the_whole_drawing_area():
     stats = int(re.search(r"const STATS_ROW_H = subOn && !splitR \? (\d+)", JS).group(1))
     assert sub_h - stats - mt - mb == 364, f"1단 그리기 영역이 {sub_h - stats - mt - mb}px 다(400-14-6-16=364 이어야)"
     assert mb >= 14, "바닥 시각 꼬리표(h-3) 자리가 없다"
-    assert "const NL = LANES.length + 1, laneH = flowH / NL;" in JS, "다섯 줄이 그리기 영역(flowH)을 정확히 나눠 쓰지 않는다"
+    assert "const NL = 2, laneH = flowH / NL;" in JS, "두 줄이 그리기 영역(flowH)을 정확히 나눠 쓰지 않는다"
     body = JS[JS.index("function renderSupply1s"):JS.index("const STAT_KEYS = ")]
     assert "tMax" not in body and "barMax" not in body, \
         "거래대금 막대가 되살아났다 -- 2026-09-22 사용자 지시로 이 차트에서 뺐다"
