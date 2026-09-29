@@ -2705,6 +2705,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); padding-bottom: 14px; }   /* 잘린 줄 대신 «더 있다» 페이드 */
 @media (max-width: 720px) { .opt-blk-list { max-height: none; mask-image: none; padding-bottom: 0; } }
 .opt-curve { display: block; width: 100%; height: auto; max-width: 440px; }
+.opt-dex { color: var(--ink); font-variant-numeric: tabular-nums; }
 /* 2026-09-29 휴대폰 블록 거래 요약 한 줄 + 펼치기 목록(사용자 선택 C) */
 .opt-blk-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; padding: 8px 10px; margin-top: 6px;
   border: 1px solid var(--soft-line); border-radius: 10px; font-variant-numeric: tabular-nums; }

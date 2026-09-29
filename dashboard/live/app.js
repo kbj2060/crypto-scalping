@@ -3470,7 +3470,7 @@ const OPT_TIPS = {
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 규모 = 콜+풋 미결제(달러). max pain = 옵션 매수자 손실이 가장 큰 결제가. P/C = 풋÷콜 미결제.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기».",
   mood: "리버설·버터플라이는 «가까운 만기» 하나로 잰다(ETH 는 보통 다음 17:00 KST 일간 옵션). 단위 pt = IV %포인트(가격 % 아님), IV 는 Deribit 평가값(mark_iv).\n25Δ 리스크 리버설 = 델타 +0.25 콜 IV − 델타 −0.25 풋 IV(지금가에서 위아래 비슷한 거리). 음수로 깊으면(−5pt 쯤 아래) 하락 방어 풋 수요 = 공포 · 양수면 상승 콜에 웃돈 · ±1pt 안은 중립.\n버터플라이 = (25Δ 콜 IV + 25Δ 풋 IV)/2 − ATM IV = 스마일이 휜 정도. 클수록 «방향은 몰라도 크게 튈» 꼬리에 값이 붙음. 작은 양수가 평상시.\n만기가 하루 안 남으면 25Δ 행사가가 지금가에 바짝 붙어 행사가 한 칸에도 두 값이 흔들린다 — 작은 변화는 소음.\n기간 구조 = 앞 5개 만기의 ATM IV(연율 %, 가까운 순). 뒤로 갈수록 높으면 정상(콘탱고) · 앞이 더 높으면(역전) «지금 당장» 큰 움직임을 값에 넣는 스트레스(급락·이벤트 직전). IV 41 ≈ 하루 1σ ±2.1%(41/√365).\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중. 예측력 모름 → 매매 신호 말고 «분위기가 바뀌었나»(리버설 급락·기간 구조 역전) 확인용.",
   ladder: "행사가 사다리: 세로 = 행사가(지수 ±8%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러), 맨 오른쪽 = 행사가별 순감마(청록 = 콜 쪽 +, 주황 = 풋 쪽 −). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
-  curve: "감마 곡선: 가격이 지금에서 ±15% 옮겨 가면 딜러 감마 합이 얼마가 되는가(행사가 사다리 칩과 같은 범위 · 가까운 만기 / 7일 안 / 전 만기). 청록 = 양감마(움직임을 누르는 쪽) · 주황 = 음감마(키우는 쪽). 흰 점선 = 지금 가격, 주황 점선 = 플립(부호가 바뀌는 가격). 세로 = 가격 1% 움직임당 딜러가 사고파는 금액($).\n우리 검정: 감마의 크기·방향 예측은 불합격 — «지금 계약이 어떻게 쌓였나»의 참고로만.",
+  curve: "감마 곡선: 가격이 지금에서 ±15% 옮겨 가면 딜러 감마 합이 얼마가 되는가(행사가 사다리 칩과 같은 범위 · 가까운 만기 / 7일 안 / 전 만기). 청록 = 양감마(움직임을 누르는 쪽) · 주황 = 음감마(키우는 쪽). 흰 점선 = 지금 가격, 주황 점선 = 플립(부호가 바뀌는 가격). 세로 = 가격 1% 움직임당 딜러가 사고파는 금액($).\n점선 = DEX(미결제 순델타 × 가격, 보유자 기준 — 콜 +, 풋 −; 딜러는 반대 부호). 단위가 달라 0선만 맞추고 크기는 따로 늘렸다 — 이름표 값이 지금 가격에서의 DEX. 가격이 오르면 콜 델타가 커져 오른쪽으로 올라간다.\n우리 검정: 감마의 크기·방향 예측은 불합격 — «지금 계약이 어떻게 쌓였나»의 참고로만.",
   blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자)이라 롱/숏이나 신규/청산은 모른다.\n우리 검정 없음 — 참고로만.",
   lane: "옵션 만기(지금 ~ +120시간, 블록 거래는 가운데 «블록 거래» 칸): 막대 = 다가올 만기 규모(콜+풋 미결제, 달러) · pain = max pain · P/C = 풋÷콜 미결제 · 청록 선 = 만기별 ATM IV.\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
   flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 옵션으로 산 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 롱으로 얼마나 기울었나».\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). 새로 연 거래인지 닫은 거래인지는 모른다. 검정 전 — 참고.",
@@ -3584,8 +3584,12 @@ function optGammaCurveSvg(o, W) {
   if (pr.length < 2) return `<div class="opt-note">감마 곡선 없음(수집기 다음 주기에 채워진다)</div>`;
   const H = 150, x0 = 30, x1 = W - 4, y0 = 16, y1 = H - 20, px = optPx(o);
   const lo = pr[0][0], hi = pr[pr.length - 1][0], X = (p) => x0 + ((p - lo) / (hi - lo)) * (x1 - x0);
-  const gmax = Math.max(...pr.map((r) => r[1]), 0), gmin = Math.min(...pr.map((r) => r[1]), 0), span = gmax - gmin || 1;
+  // DEX(profile 세 번째 칸, 09-29 수집기 추가)는 단위·크기가 달라(수십 배) 0선만 감마와 맞추고 크기는 제 폭으로 늘린다.
+  const hasD = pr.every((r) => Number.isFinite(r[2])), dAbs = hasD ? Math.max(...pr.map((r) => Math.abs(r[2]))) : 0;
+  const dk = dAbs > 0 ? Math.max(...pr.map((r) => Math.abs(r[1])), 1) / dAbs : 0;
+  const gmax = Math.max(...pr.map((r) => Math.max(r[1], (r[2] || 0) * dk)), 0), gmin = Math.min(...pr.map((r) => Math.min(r[1], (r[2] || 0) * dk)), 0), span = gmax - gmin || 1;
   const Y = (v) => y0 + ((gmax - v) / span) * (y1 - y0), z = Y(0);
+  const gTop = Math.max(...pr.map((r) => r[1])), gBot = Math.min(...pr.map((r) => r[1]));
   const pts = pr.map((r) => `${X(r[0]).toFixed(1)} ${Y(r[1]).toFixed(1)}`), area = `M${X(lo).toFixed(1)} ${z.toFixed(1)} L${pts.join(" L")} L${X(hi).toFixed(1)} ${z.toFixed(1)}Z`;
   const m = (v) => `${v >= 0 ? "+" : "−"}${optUsd(Math.abs(v)).replace("$", "")}`;
   const id = `optgc${W}`;
@@ -3595,8 +3599,10 @@ function optGammaCurveSvg(o, W) {
     + `<path d="${area}" fill="var(--warn)" fill-opacity=".28" clip-path="url(#${id}n)"/>`
     + `<line x1="${x0}" x2="${x1}" y1="${z.toFixed(1)}" y2="${z.toFixed(1)}" stroke="var(--line)"/>`
     + `<path d="M${pts.join(" L")}" fill="none" stroke="var(--text)" stroke-opacity=".8" stroke-width="1.5"/>`
-    + (gmax > 0 ? `<text x="${x0 - 4}" y="${y0 + 4}" font-size="9.5" fill="var(--option)" text-anchor="end">${m(gmax)}</text>` : "")
-    + (gmin < 0 ? `<text x="${x0 - 4}" y="${y1}" font-size="9.5" fill="var(--warn)" text-anchor="end">${m(gmin)}</text>` : "")
+    + (dk ? `<path d="M${pr.map((r) => `${X(r[0]).toFixed(1)} ${Y(r[2] * dk).toFixed(1)}`).join(" L")}" fill="none" stroke="var(--ink)" stroke-opacity=".7" stroke-width="1.5" stroke-dasharray="5 3"/>` : "")
+    // 눈금 글자는 감마 자신의 끝값만(늘린 DEX 값이 아니다) -- 폭의 5% 미만이면 0 과 겹쳐 생략
+    + (gTop > span * 0.05 ? `<text x="${x0 - 4}" y="${(Y(gTop) + 4).toFixed(1)}" font-size="9.5" fill="var(--option)" text-anchor="end">${m(gTop)}</text>` : "")
+    + (gBot < -span * 0.05 ? `<text x="${x0 - 4}" y="${Y(gBot).toFixed(1)}" font-size="9.5" fill="var(--warn)" text-anchor="end">${m(gBot)}</text>` : "")
     + `<text x="${x0 - 4}" y="${(z + 3.5).toFixed(1)}" font-size="9.5" fill="var(--muted)" text-anchor="end">0</text>`;
   [0.9, 1, 1.1].forEach((f) => { const p = px * f; if (p > lo && p < hi) s += `<text x="${X(p).toFixed(1)}" y="${H - 4}" font-size="9.5" fill="var(--muted)" text-anchor="middle">${optQ(p)}</text>`; });
   if (px > lo && px < hi) s += `<line x1="${X(px).toFixed(1)}" x2="${X(px).toFixed(1)}" y1="${y0 - 6}" y2="${y1}" stroke="var(--ink)" stroke-dasharray="4 3" stroke-opacity=".8"/>`
@@ -3606,8 +3612,10 @@ function optGammaCurveSvg(o, W) {
     s += `<line x1="${fx.toFixed(1)}" x2="${fx.toFixed(1)}" y1="${y0}" y2="${y1}" stroke="var(--warn)" stroke-dasharray="3 3"/>`
       + `<text x="${(fx + (right ? 4 : -4)).toFixed(1)}" y="${(y0 + 14).toFixed(1)}" font-size="10" font-weight="700" fill="var(--warn)" text-anchor="${right ? "start" : "end"}">플립 ${optQ(g.flip)}</text>`;
   }
-  pr.forEach((r) => { s += `<rect x="${(X(r[0]) - (x1 - x0) / pr.length / 2).toFixed(1)}" y="${y0}" width="${((x1 - x0) / pr.length).toFixed(1)}" height="${y1 - y0}" fill="transparent"><title>${optQ(r[0])} 에서 감마 ${m(r[1])}/1%</title></rect>`; });
-  return `<svg class="opt-curve" viewBox="0 0 ${W} ${H}" role="img" aria-label="가격별 딜러 감마 곡선">${s}</svg>`;
+  pr.forEach((r) => { s += `<rect x="${(X(r[0]) - (x1 - x0) / pr.length / 2).toFixed(1)}" y="${y0}" width="${((x1 - x0) / pr.length).toFixed(1)}" height="${y1 - y0}" fill="transparent"><title>${optQ(r[0])} 에서 감마 ${m(r[1])}/1%${Number.isFinite(r[2]) ? ` · DEX ${m(r[2])}` : ""}</title></rect>`; });
+  // DEX 이름표는 그림 밖 한 줄(끝에서 두 선이 자주 교차해 글자가 곡선에 묻혔다)
+  const leg = `<div class="opt-note">실선 = 감마 · 점선 = DEX${g.dex_usd != null ? ` <b class="opt-dex">${m(g.dex_usd)}$</b> (지금 가격, 보유자 기준)` : " (수집 전)"}</div>`;
+  return `<svg class="opt-curve" viewBox="0 0 ${W} ${H}" role="img" aria-label="가격별 딜러 감마 곡선과 DEX">${s}</svg>${dk ? leg : ""}`;
 }
 
 // 옵션 순매수 흐름(2-A, 2026-09-28): 만기 시간축 카드 아래 줄. 정시 버킷 25개(마지막은 진행 중).
