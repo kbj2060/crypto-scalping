@@ -1554,6 +1554,9 @@ def gex_payload() -> dict[str, Any]:
     by_coin.update(blk.get("blocks_by_coin") or {"ETH": blk.get("blocks") or []})
     return {**out, "block_trades": {"available": bool(blk.get("available")), "error": blk.get("error"),
                                     "by_coin": {c: (v or [])[:8] for c, v in by_coin.items()},
+                                    # 2026-09-30 검증: 목록은 최신 8건만 싣지만 합계·최대는 24h 전체로(화면이 8건으로 셌다 -- ETH 29건인데 8건 합)
+                                    "sum_by_coin": {c: sum(b.get("notional_usd") or 0 for b in (v or [])) for c, v in by_coin.items()},
+                                    "max_by_coin": {c: max(v, key=lambda b: b.get("notional_usd") or 0) if v else None for c, v in by_coin.items()},
                                     "n_by_coin": blk.get("n_blocks_by_coin") or {c: len(v or []) for c, v in by_coin.items()},
                                     "flow_by_coin": blk.get("flow_by_coin") or {}}}
 

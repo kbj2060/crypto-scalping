@@ -3490,7 +3490,8 @@ function optKst(ms, withDate = true) {
   const d = new Date(ms + 9 * 3600e3), p = (n) => String(n).padStart(2, "0");
   return (withDate ? `${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` : "") + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
-const optUsd = (v) => (v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : fmtUsdCompact(v));
+// 2026-09-30 검증: M 을 정수로 자르면 $1.38M 이 «$1M»이 되고 사다리 상위 셋이 «$2M $2M $2M»으로 안 갈렸다 -- 유효숫자 3자리 안팎
+const optUsd = (v) => (v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(v >= 1e8 ? 0 : v >= 1e7 ? 1 : 2)}M` : fmtUsdCompact(v));
 const optPx = (o) => Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || o.index;
 const optSigma = (o, sec) => (optIv(o) ? optPx(o) * (optIv(o) / 100) * Math.sqrt(sec / 31536000) : null);
 const optFront = (o) => (o.expiries || []).find((e) => e.exp_ms > Date.now()) || null;
@@ -3546,7 +3547,11 @@ const optGamma = (o) => (o.gamma_by || {})[optLadderScope] || o.gamma || {};
 //   수집기 재시작 전(키 없음)에도 안 깨지게 전부 null 로 떨어진다. 곡선 행 = [가격, 감마(딜러·체결), DEX(딜러·체결)].
 const optDealer = (o) => {
   const g = optGamma(o);
-  return { exp_ms: g.exp_ms, cov: g.dealer_cov ?? null, nr: g.dealer_net_oi ?? null, now_usd: g.dealer_gex_usd ?? null,
+  // 2026-09-30 검증: 수집은 10분마다라 08:00 UTC 만기 직후 최대 10분간 «가까운 만기»가 이미 끝난 만기를 가리킨다 -- 값 대신 «교체 중»
+  if (optLadderScope === "front" && g.exp_ms && g.exp_ms <= Date.now()) {
+    return { rolled: true, exp_ms: g.exp_ms, cov: null, nr: null, now_usd: null, flip: null, dex_usd: null, charm: null, n: null, exps: null, profile: [] };
+  }
+  return { exp_ms: g.exp_ms, n: g.dealer_n ?? null, exps: g.exps ?? null, cov: g.dealer_cov ?? null, nr: g.dealer_net_oi ?? null, now_usd: g.dealer_gex_usd ?? null,
            flip: g.dealer_flip ?? null, dex_usd: g.dealer_dex_usd ?? null, charm: g.dealer_charm_1h_usd ?? null,   // 2026-09-29 charm(1시간)
            profile: (g.profile || []).map((r) => [r[0], r[5] ?? null, r[4] ?? null]) };
 };
@@ -3562,9 +3567,15 @@ function optCovBanner(o) {
   return `<div class="opt-cov${full ? "" : " warn"}" role="status">${full ? "체결 기반 · 커버" : "⚠ 체결 기반 · 커버 부족 — 딜러 값은 커버 종목만"} · ${parts.join(" · ")}</div>`;
 }
 let optLadderScope = (() => { try { return localStorage.getItem("optLadder") || "week"; } catch (e) { return "week"; } })();
+// 범위 칩 -- 사다리가 비거나 «만기 교체 중»일 때도 보여야 다른 범위로 옮길 수 있다(2026-09-30 검증)
+function optLadderChips() {
+  const chip = (k, t) => `<button type="button" class="opt-chip-btn${optLadderScope === k ? " on" : ""}" data-scope="${k}" aria-pressed="${optLadderScope === k}">${t}</button>`;
+  return `<div class="opt-chips">${chip("front", "가까운 만기")}${chip("week", "7일 안")}${chip("all", "전 만기")}</div>`;
+}
 function optLadderSvg(o, W) {
   const st = o.strikes || {}, rows = st[optLadderScope] || [];
-  if (!rows.length) return `<div class="opt-note">행사가 데이터 없음(수집기 다음 주기에 채워진다)</div>`;
+  const rolled = optLadderScope === "front" && st.front_exp_ms && st.front_exp_ms <= Date.now();   // 만기 직후 ≤10분(optDealer 와 같은 규칙)
+  if (!rows.length || rolled) return optLadderChips() + `<div class="opt-note">${rolled ? "만기 교체 중 — 다음 수집(10분 안)부터 새 가까운 만기" : "행사가 데이터 없음(수집기 다음 주기에 채워진다)"}</div>`;
   const px = optPx(o), lo = px * 0.92, hi = px * 1.08, H = 380, y0 = 22, y1 = H - 8;
   const Y = (p) => y1 - ((p - lo) / (hi - lo)) * (y1 - y0);
   const mid = Math.round(W * 0.47), half = mid - 46, gW = 34, gx = W - gW;
@@ -3594,8 +3605,7 @@ function optLadderSvg(o, W) {
     s += `<line x1="30" x2="${gx - 4}" y1="${Y(f.pain).toFixed(1)}" y2="${Y(f.pain).toFixed(1)}" stroke="var(--warn)" stroke-dasharray="2 4"/>`
       + `<text x="32" y="${(Y(f.pain) + (f.pain < px ? 12 : -4)).toFixed(1)}" font-size="9.5" font-weight="700" fill="var(--warn)">max pain ${optQ(f.pain)}</text>`;
   }
-  const chip = (k, t) => `<button type="button" class="opt-chip-btn${optLadderScope === k ? " on" : ""}" data-scope="${k}" aria-pressed="${optLadderScope === k}">${t}</button>`;
-  return `<div class="opt-chips">${chip("front", "가까운 만기")}${chip("week", "7일 안")}${chip("all", "전 만기")}</div>`
+  return optLadderChips()
     + `<svg class="opt-ladder" viewBox="0 0 ${W} ${H}" role="img" aria-label="행사가별 콜·풋 미결제와 순감마">${s}</svg>`;
 }
 
@@ -3680,10 +3690,11 @@ function optBlkLegs(b) {   // ETH-16OCT26-2700-P -> «매수 10-16 2700P ×500»
   }).join(" · ");
 }
 // 2026-09-29 옵션 카드 «블록 거래» 칸(사용자 «데스크톱도 옵션 카드 안에») -- 데스크톱은 늘 펼침, 휴대폰만 «목록 ▾» 버튼.
-function optBlkHtml(blocks, n24, phone) {
+function optBlkHtml(blocks, n24, phone, sum24 = null, max24 = null) {
   if (!blocks.length) return `<div class="opt-blk-sum"><span>블록 24h <b>0건</b></span></div>`;
   const open = !phone || optBlkOpen;
-  const tot = blocks.reduce((a, b) => a + (b.notional_usd || 0), 0), mx = blocks.reduce((a, b) => ((b.notional_usd || 0) > (a.notional_usd || 0) ? b : a));
+  // 합계·최대는 서버가 24h 전체로 준 값(목록은 최신 8건뿐 -- 2026-09-30 검증). 옛 서버면 받은 목록으로.
+  const tot = sum24 ?? blocks.reduce((a, b) => a + (b.notional_usd || 0), 0), mx = max24 || blocks.reduce((a, b) => ((b.notional_usd || 0) > (a.notional_usd || 0) ? b : a));
   const rows = [...blocks].sort((a, b) => b.ts_ms - a.ts_ms).slice(0, 5).map((b) =>
     `<div class="opt-blk-row"><span class="t">${optKst(b.ts_ms, false)}</span><b>${optUsd(b.notional_usd || 0)}</b><span class="legs">${optBlkLegs(b)}</span></div>`).join("");
   return `<div class="opt-blk-sum"><span>블록 24h <b>${n24 ?? blocks.length}건 · ${optUsd(tot)}</b> · 최대 ${optUsd(mx.notional_usd || 0)} ${optKst(mx.ts_ms, false)}</span>`
@@ -3728,6 +3739,8 @@ function optRowCols() {
   if (row.style.gridTemplateColumns !== cols) row.style.gridTemplateColumns = cols;
 }
 
+addEventListener("resize", () => requestAnimationFrame(optRowCols));   // 2026-09-30 검증: 창 폭이 바뀌면 가운데 칸을 바로 다시 맞춘다
+
 function renderOptions() {
   const body = el("optBody"), chip = el("optChip");
   if (!body) return;
@@ -3767,21 +3780,23 @@ function renderOptions() {
   const allX = (o.gamma_by || {}).all || {}, allG = allX.dealer_cov >= 0.99 ? allX.dealer_gex_usd : null;
   const neutralG = hasG && allG != null && optLadderScope !== "all" && Math.abs(gm.now_usd) < 0.05 * Math.abs(allG);
   const ago = ((g.dex_1h_ago || {})[optLadderScope]) || null;
-  // 1시간 Δ: 그 사이 새 종목이 상장돼 커버가 바뀌면(>0.5%p) 상장분이 섞이므로 값 대신 «커버 변화»(옵션 세션 합의).
-  const dNow = gm.dex_usd, covMoved = ago && ago.dealer_cov != null && gm.cov != null && Math.abs(gm.cov - ago.dealer_cov) > 0.005;
-  const dexD = dNow != null && ago && ago.dealer_dex_usd != null && ago.dealer_cov != null && !covMoved
-    && (optLadderScope !== "front" || ago.exp_ms === gm.exp_ms) ? dNow - ago.dealer_dex_usd : null;
-  body.innerHTML = optCovBanner(o) + [
+  // 1시간 Δ: 커버 종목 수(dealer_n)와 만기 집합(exps)이 1시간 전과 같을 때만 -- 새 상장·만기 소멸·7일 경계 진입이면 «묶음 변화».
+  //   (2026-09-30 검증: 옛 «커버 >0.5%p» 기준은 커버 1% 미만인 전 만기에서 같은 변화를 못 걸렀다. 미결제 증감만으로도 커버 %는 움직인다)
+  const dNow = gm.dex_usd, hasSig = ago && ago.dealer_n != null && gm.n != null;
+  const covMoved = hasSig && (ago.dealer_n !== gm.n || String(ago.exps) !== String(gm.exps));
+  const dexD = dNow != null && hasSig && !covMoved && ago.dealer_dex_usd != null ? dNow - ago.dealer_dex_usd : null;
+  // 2026-09-30 검증: 갱신 실패·서버 상태 지연이면 마지막 값을 그대로 두되 «지연»을 먼저 말한다
+  body.innerHTML = (latestGex && latestGex.error ? `<div class="opt-note opt-warn">옵션 갱신 지연(${escapeHtml(String(latestGex.error))}) — 마지막으로 받은 값</div>` : "") + optCovBanner(o) + [
     sec("move", "예상 폭", kv("오늘 1σ", s1d == null ? "-" : `${pm(s1d)} (${(optIv(o) / Math.sqrt(365)).toFixed(1)}%)`)
       + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 — 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
       + kv("IV − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`)),
-    sec("gamma", "딜러 감마", kv("구간", !hasG ? "-" : `${neutralG ? "거의 중립" : posG ? "양감마 · 눌림 쪽" : "음감마 · 튐 쪽"} ${sgn(gm.now_usd)}/1%`,
+    sec("gamma", "딜러 감마", (gm.rolled ? `<div class="opt-note">만기 교체 중 — 다음 수집(10분 안)부터 새 가까운 만기 값</div>` : "") + kv("구간", !hasG ? "-" : `${neutralG ? "거의 중립" : posG ? "양감마 · 눌림 쪽" : "음감마 · 튐 쪽"} ${sgn(gm.now_usd)}/1%`,
            !hasG || neutralG ? "" : posG ? "opt-good" : "opt-warn")
       + kv("플립", !hasG ? "-" : gm.flip ? `${optQ(gm.flip)} (${gm.flip < px ? "아래" : "위"} ${optQ(Math.abs(gm.flip - px))}$)` : "±15% 안 플립 없음(커버 종목 기준)")
       // 과거 분위는 «전체 GEX» 이력뿐이라 가까운 만기 기준과 못 견준다 -- 그 자리에 기준 만기를 보인다.
       + kv("기준", optLadderScope === "week" ? "7일 안 만기 합(사다리 칩)" : optLadderScope === "all" ? "전 만기 합(사다리 칩)"
            : gm.exp_ms ? `${optKst(gm.exp_ms)} 만기 (${Math.max(0, (gm.exp_ms - Date.now()) / 3600e3).toFixed(0)}h)` : "-")
-      + kv("DEX", dNow == null ? "-" : `${sgn(dNow)}${dexD != null ? ` · 1시간 ${sgn(dexD)}` : covMoved ? " · 1시간 커버 변화" : ""}`)
+      + kv("DEX", dNow == null ? "-" : `${sgn(dNow)}${dexD != null ? ` · 1시간 ${sgn(dexD)}` : covMoved ? " · 1시간 새 종목·만기 변화" : ""}`)
       // 2026-09-29 사용자 «charm 한 줄»: 시간만 1시간 흐를 때 딜러 델타 변화 → 딜러는 반대로 헤지한다(+ 면 매도). 체결 기반 · 서술
       + kv("charm · 다음 1시간", gm.charm == null ? "-" : Math.abs(gm.charm) < 1 ? "거의 0"
            : `헤지 ${gm.charm > 0 ? "매도" : "매수"} ${optUsd(Math.abs(gm.charm))} (딜러 델타 ${sgn(gm.charm)})`)),
@@ -3800,8 +3815,10 @@ function renderOptions() {
     laneBody.innerHTML = head("lane", "옵션 만기 · 지금 ~ +120h", `<b class="opt-warn">막대</b> 만기 규모 · pain · P/C · <b class="opt-c">선</b> 만기별 ATM IV`)
       + optLaneSvg(o, lw);   // 2026-09-29 블록 점 제거(사용자 지시) -- 블록은 옵션 카드 «블록 거래» 칸만
     flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 체결 순델타(24h) 누적 · 테이커 기준`) + optFlowSvg(fl, fw) : "");
+    const bt = (latestGex || {}).block_trades || {};
     if (blkBody) blkBody.innerHTML = head("blocks", "블록 거래 · 지난 24시간", "")
-      + optBlkHtml(blocks, (((latestGex || {}).block_trades || {}).n_by_coin || {})[cur], window.matchMedia("(max-width: 720px)").matches);
+      + (bt.available === false ? `<div class="opt-note opt-warn">블록 수집 지연 — 아래 목록은 마지막으로 받은 값</div>` : "")
+      + optBlkHtml(blocks, bt.n_by_coin?.[cur], window.matchMedia("(max-width: 720px)").matches, bt.sum_by_coin?.[cur] ?? null, bt.max_by_coin?.[cur] ?? null);
   }
 }
 
@@ -3817,8 +3834,9 @@ async function refreshGex() {
     latestGex = await res.json();
     renderOptions();
   } catch (error) {
+    // 2026-09-30 검증: 한 번 실패로 null 을 넣으면 카드가 다음 폴링(60초)까지 통째로 사라졌다 -- 직전 값을 두고 오류만 싣는다
     console.error("GEX fetch error:", error);
-    latestGex = null;
+    if (latestGex) { latestGex = { ...latestGex, error: String(error.message || error) }; renderOptions(); }
   }
 }
 
