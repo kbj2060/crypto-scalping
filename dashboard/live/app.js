@@ -362,7 +362,7 @@ let regimeWide24LastFetchAt = 0;
 let regimeBtcLastFetchAt = 0;
 let regimeXrpLastFetchAt = 0;
 let coinIndicatorsLastFetchAt = 0;
-let macroCalendarLastFetchAt = 0;
+let macroCalendarLastFetchAt = 0, macroCalendarOkAt = 0;   // OkAt = 마지막으로 **받은** 시각(⑤ 시간축 아래 «일정 갱신»)
 // 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
 // 서버가 이미 30초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
 let latestBinanceAccount = null;
@@ -2730,6 +2730,7 @@ async function refreshMacroCalendar() {
     renderMacroCalendar(await res.json());
   } catch (error) {
     console.error("Macro calendar fetch error:", error);
+    macroCalendarLastFetchAt = now - MACRO_CALENDAR_POLL_MS + 60 * 1000;   // 2026-09-30 실패하면 6시간 기다리지 않고 1분 뒤 다시(배포 재시작 중 실패로 옛 목록에 굳었다)
   }
 }
 // 2026-08-26 user request: only today+tomorrow, by viewer's own local calendar day (not ET) --
@@ -2745,6 +2746,8 @@ function isTodayOrTomorrowLocal(iso) {
 function renderMacroCalendar(payload) {
   // 2026-09-30 경제 일정 카드 제거(사용자 지시) -- 시장 맥락 ⑤ 시간축이 이 값을 그린다.
   latestMacroEvents = payload && Array.isArray(payload.events) ? payload.events : [];
+  macroCalendarOkAt = Date.now();
+  if (typeof renderMarketCtx === "function") renderMarketCtx();   // ⑤ 시간축을 바로 다시 그린다
 }
 
 
@@ -2833,7 +2836,9 @@ function setupCardRail() {
   addEventListener("scroll", () => requestAnimationFrame(cardRailSync), { passive: true });
   cardRailSync();
   addEventListener("resize", () => requestAnimationFrame(fitLayout));
-  setInterval(fitLayout, 1500);   // 데이터가 오며 카드 높이가 바뀐다 -- 1.5초마다 다시 잰다(값이 같으면 아무것도 안 한다)
+  setInterval(fitLayout, 1500);
+  // 2026-09-30 ⑤ 시간축은 시장 맥락 응답이 없어도 1분마다 다시 그린다(«지금» 기준이 흐르고 지난 일정이 빠진다) -- 멈춘 채 어제 모습으로 남던 것
+  setInterval(() => { if (activePageTab === "snapshot" && !document.hidden && typeof renderMarketCtx === "function") renderMarketCtx(); }, 60 * 1000);   // 데이터가 오며 카드 높이가 바뀐다 -- 1.5초마다 다시 잰다(값이 같으면 아무것도 안 한다)
 }
 
 function setupScrollRendering() {
@@ -4256,7 +4261,8 @@ function renderMarketCtx() {
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
   const whenBox = body.classList.contains("mc-cmp") ? el("mcWhen") : null;
   const whenHtml = qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round(((whenBox || body).clientWidth || 900) - 8)))
-      + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? note(`max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)`) : ""));
+      + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? note(`max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)`) : "")
+      + note(macroCalendarOkAt ? `경제 일정 갱신 ${fmtHourMinute(macroCalendarOkAt)} · 6시간마다(실패하면 1분 뒤 다시)` : "경제 일정 불러오는 중…"));
   setH("mcWhen", whenBox ? whenHtml : "");
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
