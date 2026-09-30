@@ -2622,6 +2622,7 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
   html.fit1 #mcBody:not(.mc-cmp), html.fit1 #mcWall:not(.on) { display: none; }   /* 제자리(차트 오른쪽 칸)에 놓이기 전엔 안 보인다 -- 첫 0.5초 흐름 속에 나타났다 사라지던 것 */
   html.fit1 #mcWhen { height: 116px; overflow: hidden; flex: none; }
   html.fit1 #optCard { align-content: start; }
+  html.fit1 #optCard .opt-sec:has([data-tip="mood"]) .opt-kv { max-height: none; }   /* 2026-10-01 심리 세 줄이 셋째 줄(블록 거래 높이)을 고르게 나눠 채운다 */
   /* 2026-10-01 계좌: 성과 차트를 늘 펼치고(접기 숨김) 남는 높이를 fitLayout 이 --acctplot 으로 준다 */
   html.fit1 #acctCard .acct-perf-more { display: none; }
   html.fit1 #acctCard .acct-perf-fold > summary { pointer-events: none; }

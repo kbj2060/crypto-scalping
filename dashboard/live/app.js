@@ -2802,7 +2802,7 @@ function cardRailSync() {
 // 2026-09-30 «한 화면 모드»(사용자 1920×1080·90%): 넓은 화면에서 카드 하나 = 창 높이 하나 -- 레일 점/스크롤이 카드 단위로 딱 맞게 넘어간다.
 //   Footprint 는 차트 상자 높이를, Option 은 행사가 사다리 높이를 «창 높이 − 카드의 나머지»로 계산한다. 계좌는 창 높이까지 늘린다.
 //   창 높이 < 900 이면 끈다(가격판이 너무 좁아진다). 켜기/끄기 = 레일 아래 단추(브라우저 기억).
-let fitOptLadderH = null, fitOptChartK = FIT0.ck || 1, renderOptionsSoon = false, fitAcctPlotH = FIT0.ap || 0;   // 2026-10-01 Option 차트 셋 높이 배율 · 계좌 성과 차트 높이(한 화면 모드, fitLayout 이 잰다)
+let fitOptLadderH = null, fitOptChartK = FIT0.ck || 1, fitOptCurveK = FIT0.cc || 1, renderOptionsSoon = false, fitAcctPlotH = FIT0.ap || 0;   // 2026-10-01 Option 차트 셋 높이 배율 · 계좌 성과 차트 높이(한 화면 모드, fitLayout 이 잰다)
 const optColW = () => {   // .opt-ladder 최대 폭 440 과 같게(넓게 그리면 줄어 글자가 작아진다) · 첫 렌더(칸이 아직 없음)는 카드 폭의 가운데 열 몫으로
   const s = document.querySelector('#optCard .opt-sec:has([data-tip="ladder"])');
   if (s && s.clientWidth > 240) return Math.min(440, Math.round(s.clientWidth));
@@ -2826,7 +2826,9 @@ function fitLayout() {
   //   ① 각 칸 = 머리·꼬리(고정) + 그림(원래 높이 = 폭 × viewBox 비율) ② 원래 크기로 들어가면 상한 없음 + 사다리가 1·2줄을 채움
   //   ③ 안 들어가면 만기·흐름·감마곡선에 들어갈 만큼만 상한(이분 탐색). 바닥은 풋프린트처럼 12px 여유.
   let h = on ? (fitOptLadderH || fitLadderFormula()) : null;
-  if (on && opt && opt.offsetParent) {
+  // 화면 밖 카드는 재지 않는다 -- 밖에 있는 동안 잰 값이 틀어져(실측 k 0.6 · 사다리 1200) 돌아올 때 크기가 튀었다
+  const inView = (c) => { const r = c.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
+  if (on && opt && opt.offsetParent && inView(opt)) {
     const q = (sel) => opt.querySelector(sel), sec = (t) => q(`.opt-sec:has([data-tip="${t}"])`);
     const lane = q("#optLaneBody"), flow = q("#optFlowBody"), blk = q("#optBlkBody"), curve = sec("curve"), lad = sec("ladder"), move = sec("move"), when = q(":scope > #mcWhen");
     const box = (c) => c.getBoundingClientRect(), padB = (c) => parseFloat(getComputedStyle(c).paddingBottom) || 0;
@@ -2839,14 +2841,16 @@ function fitLayout() {
     if (lane && flow && blk && curve && lad && move) {
       // 2026-10-01(3) 상한 대신 **높이 배율 k**(사용자 «옵션 차트를 더 키워줘»): 차트 셋을 k 배 높이로 다시 그린다(글자 크기 그대로).
       //   남는 칸이 있으면 k>1 로 키우고, 모자라면 k<1. 사다리는 1·2줄(만기+흐름)을 채운다. 원래(k=1) 높이 = 지금 높이 / 지금 k.
-      const k0 = optChartK(), [la, ln] = fix(lane), [fa, fn] = fix(flow), [ca, cn] = fix(curve), [bn] = fix(blk);
-      const r12 = (k) => la + fa + (k * (ln + fn)) / k0, r3 = (k) => Math.max(ca + (k * cn) / k0, bn);
+      const k0 = optChartK(), [la, ln] = fix(lane), [fa, fn] = fix(flow), [ca, cn] = fix(curve), [bn] = fix(blk), cnB = cn / optCurveK();
+      const r12 = (k) => la + fa + (k * (ln + fn)) / k0, r3 = (k) => Math.max(ca + k * cnB, bn);
       const whenH = when && when.offsetParent ? box(when).height + (parseFloat(getComputedStyle(when).marginTop) || 0) : 0;
       const avail = box(opt).top + vh - padB(opt) - 12 - whenH - box(move).top;
       let lo = 0.6, hi = 1.8;
       while (hi - lo > 0.01) { const m = (lo + hi) / 2; if (r12(m) + r3(m) <= avail) lo = m; else hi = m; }
       const k = Math.round(lo * 50) / 50;   // 0.02 단위 -- 1px 흔들림에 다시 그리지 않게
       if (Math.abs(k - fitOptChartK) > 0.019) { fitOptChartK = k; renderOptionsSoon = true; }
+      const kc = Math.floor(Math.max(k, (r3(k) - ca) / cnB) * 50) / 50;   // 감마 곡선 = 셋째 줄(블록 거래 높이)을 꽉
+      if (Math.abs(kc - fitOptCurveK) > 0.019) { fitOptCurveK = kc; renderOptionsSoon = true; }
       const lg = lad.querySelector("svg");
       if (lg) {
         const [lx] = fix(lad), want = Math.max(200, r12(k) - lx), gh = box(lg).height;
@@ -2855,15 +2859,15 @@ function fitLayout() {
     }
   }
   // 2026-10-01 계좌 카드: 한 화면 모드면 성과 차트를 펼쳐 남는 높이를 그 차트에 준다(사용자 «내 계좌도 화면에 가득»)
-  const plot = on && acct && acct.offsetParent ? acct.querySelector("#snapAcctPerf .acct-plot svg") : null;
+  const plot = on && acct && acct.offsetParent && inView(acct) ? acct.querySelector("#snapAcctPerf .acct-plot svg") : null;
   if (plot) {
     const ab = Math.max(0, ...[...acct.children].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().bottom));
-    const ar = acct.getBoundingClientRect(), aslack = Math.round(ar.top + vh - parseFloat(getComputedStyle(acct).paddingBottom || 0) - ab);
+    const ar = acct.getBoundingClientRect(), aslack = Math.round(ar.top + vh - parseFloat(getComputedStyle(acct).paddingBottom || 0) - 12 - ab);   // 바닥 여유 12 = 풋프린트와 같게
     const cur = plot.getBoundingClientRect().height;
     if (Math.abs(aslack) > 4) { fitAcctPlotH = Math.max(120, Math.min(900, Math.round(cur + aslack))); acct.style.setProperty("--acctplot", `${fitAcctPlotH}px`); }
   }
   if (h !== fitOptLadderH || renderOptionsSoon) { fitOptLadderH = h; renderOptionsSoon = false; if (typeof renderOptions === "function") renderOptions(); }
-  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff, lad: fitOptLadderH, ck: fitOptChartK, ap: fitAcctPlotH })); } catch (e) { /* 기억은 편의 */ } }
+  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff, lad: fitOptLadderH, ck: fitOptChartK, cc: fitOptCurveK, ap: fitAcctPlotH })); } catch (e) { /* 기억은 편의 */ } }
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
 // 2026-10-01 ⑤ 다음 24시간(116 + 여백·선 36)이 맨 아래 전폭으로 들어와 그만큼 뺀다.
@@ -3472,6 +3476,8 @@ const optFront = (o) => (o.expiries || []).find((e) => e.exp_ms > Date.now()) ||
 //   (블록 이름표는 «지금» 왼쪽 폭이 모자라 점만, 만기 옆 pain·P/C 는 옵션 카드 표에 있다).
 // 2026-10-01 한 화면 모드에서 만기·흐름·감마곡선 차트의 높이 배율(fitLayout 이 남는 칸으로 정한다) -- 글자 크기는 그대로, 그림 높이만.
 function optChartK() { return document.documentElement.classList.contains("fit1") ? fitOptChartK : 1; }
+// 감마 곡선은 제 배율 -- 블록 거래 칸 높이까지 채운다(사용자 «심리·감마곡선 아래 빈칸 → 블록거래와 높이 맞춰 · 감마곡선이 작다»)
+function optCurveK() { return document.documentElement.classList.contains("fit1") ? fitOptCurveK : 1; }
 function optLaneSvg(o, W) {
   // 2026-09-29 가운데 블록 칸이 생겨 1920 에서도 545px -- 만기 넷(24h 간격)이면 pain·P/C 세 줄이 들어간다
   const narrow = W < 480,
@@ -3607,7 +3613,7 @@ function optLadderSvg(o, W, Hfit = null) {
 function optGammaCurveSvg(o, W) {
   const g = optDealer(o), pr = g.profile.filter((r) => r[0] > 0 && Number.isFinite(r[1]));
   if (pr.length < 2) return `<div class="opt-note">감마 곡선 없음(체결 기반 — 커버 종목 없음 또는 수집기 재시작 전)</div>`;
-  const H = Math.round(150 * optChartK()), x0 = 42, x1 = W - 4, y0 = 16, y1 = H - 20, px = optPx(o);
+  const H = Math.round(150 * optCurveK()), x0 = 42, x1 = W - 4, y0 = 16, y1 = H - 20, px = optPx(o);
   const lo = pr[0][0], hi = pr[pr.length - 1][0], X = (p) => x0 + ((p - lo) / (hi - lo)) * (x1 - x0);
   // DEX(profile 세 번째 칸, 09-29 수집기 추가)는 단위·크기가 달라(수십 배) 0선만 감마와 맞추고 크기는 제 폭으로 늘린다.
   const dc = 2, dNow = g.dex_usd;   // 점선 = DEX(딜러·체결)
