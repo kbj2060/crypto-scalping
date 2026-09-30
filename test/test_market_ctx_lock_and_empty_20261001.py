@@ -1,4 +1,4 @@
-"""시장 맥락 -- 수집기 락 때 마지막 성공값 (2026-10-01).
+"""시장 맥락 -- 수집기 락 때 마지막 성공값 · 느린/실패 계산에도 JSON 본문 (2026-10-01).
 
     python3 -m pytest -q test/test_market_ctx_lock_and_empty_20261001.py
 
@@ -44,3 +44,27 @@ def test_ls_keeps_last_good_rows_while_writer_holds_lock(tmp_path):
     assert "lock" in locked["errors"]["ls"].lower(), locked["errors"]      # 락은 실제로 났다
     assert locked["ls"] == first["ls"], locked                              # 그래도 ls 는 마지막 성공 행
 
+
+def test_market_context_always_returns_json_body():
+    ns: dict[str, Any] = {"asyncio": asyncio, "time": time, "web": web, "Any": Any, "NOCACHE": {}}
+    exec(_chunk("    MC_RESPONSE_S, MC_STALE_MAX_S", "    def situation_payload(", True), ns)
+    ns["MC_RESPONSE_S"] = 0.2
+    mode = {"m": "ok"}
+
+    async def fake_payload():
+        if mode["m"] == "slow":
+            await asyncio.sleep(1.0)
+        if mode["m"] == "boom":
+            raise RuntimeError("x")
+        return {"available": True, "v": 1}
+    ns["market_context_payload"] = fake_payload
+    call = lambda: json.loads(asyncio.run(ns["api_market_context"](None)).body)   # noqa: E731
+
+    assert call() == {"available": True, "v": 1}
+    for m in ("slow", "boom"):          # 식은 캐시(느림)·예외 -> 마지막 성공값 + stale
+        mode["m"] = m
+        t0 = time.time(); got = call()
+        assert time.time() - t0 < 0.8 and got["stale"] is True and got["v"] == 1 and got["error"], (m, got)
+    ns["mc_last_payload"]["at"] -= 1000  # 너무 낡은 값은 현재처럼 보이지 않게 -> «지연»
+    got = call()
+    assert got["available"] is False and "RuntimeError" in got["error"], got

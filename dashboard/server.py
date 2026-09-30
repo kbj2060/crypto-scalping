@@ -3973,11 +3973,25 @@ def make_app() -> web.Application:
             "errors": col.get("errors") or {},
         }
 
+    # 🔴2026-10-01 빈 응답: 캐시가 식은 요청(재기동 직후 · 아무도 안 본 뒤 ttl+max_stale 경과)은 원천 여섯 개를 **줄줄이**
+    #   기다린다(수집기 락 재시도 최대 5초 × 원천 · 바이낸스/Deribit 왕복 각 10초). 그동안 뒤따른 요청도 같은 락에 줄 서서
+    #   클라이언트 타임아웃이 먼저 끊으면 본문 0바이트가 된다(감사 «10초 간격 3번 중 2번 빈 응답»). 응답은 MC_RESPONSE_S 안에
+    #   끊고 계산은 shield 로 뒤에서 마저 돌려 캐시를 채운다 -- 그 사이엔 마지막 성공 페이로드를 stale 표시와 함께 준다.
+    #   화면은 stale 를 안 읽으므로 MC_STALE_MAX_S 넘게 낡은 값은 주지 않는다(«지연» 표시 = available False + error).
+    MC_RESPONSE_S, MC_STALE_MAX_S = 3.0, 120.0
+    mc_last_payload: dict[str, Any] = {}
+
     async def api_market_context(request: web.Request) -> web.Response:
         try:
-            payload = await market_context_payload()
+            payload = await asyncio.wait_for(asyncio.shield(market_context_payload()), MC_RESPONSE_S)
+            resp = web.json_response(payload, headers=NOCACHE)      # 직렬화 실패도 아래 폴백으로
+            mc_last_payload.update(payload=payload, at=time.time())
+            return resp
         except Exception as exc:  # noqa: BLE001 -- 카드는 이유를 말하고 계속 그린다
-            payload = {"available": False, "error": f"{type(exc).__name__}: {exc}"[:200]}
+            err = f"{type(exc).__name__}: {exc}"[:200]
+            age = time.time() - mc_last_payload.get("at", 0.0)
+            payload = ({**mc_last_payload["payload"], "stale": True, "stale_age_s": age, "error": err}
+                       if age < MC_STALE_MAX_S else {"available": False, "error": err})
         return web.json_response(payload, headers=NOCACHE)
 
     def situation_payload() -> dict[str, Any]:
