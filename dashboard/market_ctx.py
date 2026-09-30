@@ -9,7 +9,11 @@ ponytail: 부호 규약 -- 매수·매수벽·롱 쪽이 양수(micro_ref.py 와
 from __future__ import annotations
 
 import math
-from typing import Iterable
+from bisect import bisect_right
+from datetime import datetime, timezone
+from functools import lru_cache
+from typing import Callable, Iterable
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -147,15 +151,37 @@ def liq_profile(events: Iterable[tuple[float, float, bool]], bin_usd: float = LI
     return [[k, round(a[0]), round(a[1])] for k, a in sorted(agg.items())]
 
 
+# 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- 현지 개장 시각(서머타임 반영). 셋 다 같은 UTC 날짜 안에 떨어진다
+#   (도쿄 09:00 JST = 00:00 UTC · 런던 08:00 = 07/08 UTC · 뉴욕 09:30 = 13:30/14:30 UTC).
+#   ponytail: 주말·휴장일에도 같은 시각에 다시 센다(코인은 24시간) -- 거래소 달력을 따르려면 여기서 날짜를 거른다.
+MARKET_OPENS = (("아시아", "Asia/Tokyo", 9, 0), ("유럽", "Europe/London", 8, 0), ("미국", "America/New_York", 9, 30))
+
+
+@lru_cache(maxsize=64)
+def session_starts(day: int) -> tuple[int, ...]:
+    """UTC 날짜 번호 day(= t // 86400) 의 세 세션 시작 초 (아시아, 유럽, 미국)."""
+    d = datetime.fromtimestamp(day * 86400, timezone.utc).date()
+    return tuple(int(datetime(d.year, d.month, d.day, h, m, tzinfo=ZoneInfo(tz)).timestamp()) for _, tz, h, m in MARKET_OPENS)
+
+
+def market_session(t: int) -> tuple[int, str]:
+    """초 t 가 속한 세션의 (시작 초, 이름). 다음 세션이 열리면 넘어간다 -- 미국장 뒤 ~00시는 미국 세션이 이어진다."""
+    st = session_starts(t // 86400)
+    i = bisect_right(st, t) - 1
+    return (st[i], MARKET_OPENS[i][0]) if i >= 0 else (st[0], MARKET_OPENS[0][0])
+
+
 def session_vwap(ts: list[int], high: list[float], low: list[float], close: list[float],
-                 vol: list[float]) -> tuple[list[float | None], list[float | None]]:
-    """UTC 00:00 에 다시 시작하는 세션 VWAP 과 거래량 가중 표준편차(대표가 = (고+저+종)/3). 봉 t 의 값은 봉 t 까지만 본다."""
+                 vol: list[float], key: Callable[[int], object] | None = None) -> tuple[list[float | None], list[float | None]]:
+    """key(t) 가 바뀔 때 다시 시작하는 VWAP 과 거래량 가중 표준편차(대표가 = (고+저+종)/3). 봉 t 의 값은 봉 t 까지만 본다.
+    기본 key = UTC 날짜(00:00 에 다시 시작)."""
+    key = key or (lambda t: t // 86400)
     vw: list[float | None] = []
     sd: list[float | None] = []
-    day, sv, spv, sp2v = None, 0.0, 0.0, 0.0
+    day, sv, spv, sp2v = object(), 0.0, 0.0, 0.0
     for t, h, lo, c, v in zip(ts, high, low, close, vol):
-        if t // 86400 != day:
-            day, sv, spv, sp2v = t // 86400, 0.0, 0.0, 0.0
+        if key(t) != day:
+            day, sv, spv, sp2v = key(t), 0.0, 0.0, 0.0
         tp = (h + lo + c) / 3.0
         sv += v; spv += tp * v; sp2v += tp * tp * v
         if sv > 0:
@@ -209,6 +235,26 @@ def profile_nodes(k: Iterable[int], vol: Iterable[float], bw: float) -> dict[str
     return out
 
 
+
+def vwap_rows(ts: list[int], high: list[float], low: list[float], close: list[float], vol: list[float],
+              nd: int = 4) -> dict[int, dict]:
+    """봉 시각 → 캔들 행에 붙일 VWAP 두 벌: vwap/vsd = UTC 00시부터 · svwap/svsd = 지금 시장 세션 개장부터(sstart 초, sname 이름).
+    화면의 «세션 시작부터» 스위치가 둘 중 하나를 고른다."""
+    vw, vsd = session_vwap(ts, high, low, close, vol)
+    sw, ssd = session_vwap(ts, high, low, close, vol, key=lambda t: market_session(t)[0])
+    out: dict[int, dict] = {}
+    for t, a, b, c, d in zip(ts, vw, vsd, sw, ssd):
+        row: dict = {}
+        if a is not None:
+            row.update(vwap=round(a, nd), vsd=round(b, nd))
+        if c is not None:
+            st, nm = market_session(t)
+            row.update(svwap=round(c, nd), svsd=round(d, nd), sstart=st, sname=nm)
+        if row:
+            out[t] = row
+    return out
+
+
 if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     assert pct_rank(5, range(100)) == 0.06 and pct_rank(5, range(10)) is None and pct_rank(None, range(100)) is None
     px = np.arange(2690.0, 2710.5, 0.5)                    # 칸 아래끝 · 미드 2700.005 는 칸 [2700.0, 2700.5) 안
@@ -247,4 +293,18 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     assert [round(h["px"]) for h in nd["hvn"]] == [20, 60] and nd["hvn"][0]["rel"] == 1.0, nd
     assert len(nd["lvn"]) == 1 and abs(nd["lvn"][0]["px"] - 40.5) <= 3, nd       # 골 바닥이 넓으면(연속 칸) 가운데
     assert profile_nodes([1, 2], [1, 1], 1.0) == {"hvn": [], "lvn": []}
+    # 세션 시작: 2026-09-30(서머타임) 00:00 · 07:00 · 13:30 UTC / 2026-12-15(표준시) 00:00 · 08:00 · 14:30 UTC
+    D = lambda s: int(datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp())   # noqa: E731
+    assert session_starts(D("2026-09-30 00:00") // 86400) == (D("2026-09-30 00:00"), D("2026-09-30 07:00"), D("2026-09-30 13:30"))
+    assert session_starts(D("2026-12-15 00:00") // 86400) == (D("2026-12-15 00:00"), D("2026-12-15 08:00"), D("2026-12-15 14:30"))
+    assert market_session(D("2026-09-30 06:59")) == (D("2026-09-30 00:00"), "아시아")
+    assert market_session(D("2026-09-30 13:30")) == (D("2026-09-30 13:30"), "미국")
+    assert market_session(D("2026-09-30 23:55")) == (D("2026-09-30 13:30"), "미국")      # 미국장 뒤도 다음 00시까지 미국 세션
+    t5 = [D("2026-09-30 06:55"), D("2026-09-30 07:00"), D("2026-09-30 07:05")]
+    vw, _ = session_vwap(t5, [11, 21, 23], [9, 19, 21], [10, 20, 22], [1, 1, 1], key=lambda t: market_session(t)[0])
+    assert vw == [10, 20, 21], vw                                                          # 07:00(런던 개장)에 다시 센다
+    vw, _ = session_vwap(t5, [11, 21, 23], [9, 19, 21], [10, 20, 22], [1, 1, 1])
+    assert vw[:2] == [10, 15] and abs(vw[2] - 52 / 3) < 1e-9, vw                            # 기본(UTC 날짜)은 이어서 센다
+    r = vwap_rows(t5, [11, 21, 23], [9, 19, 21], [10, 20, 22], [1, 1, 1])
+    assert r[t5[2]]["svwap"] == 21 and r[t5[2]]["sname"] == "유럽" and r[t5[2]]["sstart"] == D("2026-09-30 07:00") and r[t5[0]]["sname"] == "아시아", r
     print("market_ctx selftest ok")

@@ -33,6 +33,7 @@ async def main():
     b = await load("btc")
     assert b[-1]["close"] == 60299.0 and len(calls) == 2       # 자산별로 따로 든다
     assert "vwap" in a[-1] and "vwap" not in b[-1]             # 거래량 있으면 VWAP, 없으면 VWAP 없이(예외 아님)
+    assert {"svwap", "svsd", "sstart", "sname"} <= set(a[-1])   # 2026-09-30 시장 세션 개장부터 센 VWAP 도 같은 행에
     ns["evidence_signal_cache"]["frames"] = (frame(2700), btc, None)
     c = await load("eth")
     assert c is not a and c[-1]["close"] == 2999.0 and len(calls) == 3   # 새 프레임 -> 새 행

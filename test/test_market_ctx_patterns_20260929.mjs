@@ -12,6 +12,16 @@ const take = (name) => {
 const mcUsSession = eval(`(${take("mcUsSession")})`);
 const mcBollinger = eval(`(${take("mcBollinger")})`);
 const mcRsi = eval(`(${take("mcRsi")})`);
+const mcLine = { vsess: false };                                  // mcVwapOf 가 읽는 스위치 -- 직접 eval 이라 이 바인딩을 본다
+const mcVwapOf = eval(`(${take("mcVwapOf")})`);
+
+// ── VWAP 기준 스위치: 끄면 하루(UTC 날짜가 seg) · 켜면 시장 세션(개장 초가 seg, 이름) · 없는 쪽은 null ──
+const row = { time: 1790640000 + 3600, vwap: 2690, vsd: 3, svwap: 2695, svsd: 1, sstart: 1790640000, sname: "아시아" };
+assert.deepEqual(mcVwapOf(row), { vwap: 2690, vsd: 3, seg: Math.floor(row.time / 86400), name: "하루" });
+mcLine.vsess = true;
+assert.deepEqual(mcVwapOf(row), { vwap: 2695, vsd: 1, seg: 1790640000, name: "아시아" });
+assert.equal(mcVwapOf({ time: 1, vwap: 1, vsd: 1 }), null);          // 서버가 아직 세션 VWAP 을 안 실었으면 선을 안 그린다
+mcLine.vsess = false;
 
 // ── 미국장: 서머타임 13:30 UTC · 주말 건너뜀 · 표준시 14:30 UTC · 장중 판정 ──
 const us = (iso) => { const r = mcUsSession(Date.parse(iso)); return [new Date(r.open).toISOString().slice(0, 16), r.live]; };

@@ -3880,8 +3880,14 @@ const MARKET_CTX_POLL_MS = 5000;
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
 const mcTipOpen = new Set();
-const mcLine = { vwap: true, bb: false, wvwap: false };   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { vwap: true, bb: false, wvwap: false, vsess: false };   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
+// 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- vsess 켜면 지금 시장 세션 개장(현지 시각, 서머타임 반영)부터 센 VWAP.
+//   서버가 봉마다 두 벌을 싣는다: vwap/vsd = UTC 00시부터 · svwap/svsd/sstart/sname = 세션 개장부터. seg 가 바뀌는 곳에서 선을 끊는다.
+function mcVwapOf(c) {
+  if (mcLine.vsess) return c && c.svwap ? { vwap: c.svwap, vsd: c.svsd || 0, seg: c.sstart, name: c.sname || "세션" } : null;
+  return c && c.vwap ? { vwap: c.vwap, vsd: c.vsd || 0, seg: Math.floor(c.time / 86400), name: "하루" } : null;
+}
 const MC_TIPS = {
   lev: "펀딩 = 8시간마다 롱과 숏이 주고받는 이자(양수면 롱이 낸다). 바이낸스는 평온할 때 0.01%에 붙어 거의 안 움직여서 «비싸게 들고 있나»는 베이시스(선물 마크 − 현물 인덱스)의 7일 분위로 본다. OI = 열린 계약 수, z = 1시간 변화가 지난 7일 중 얼마나 튀었나.\n우리 검정: 극단 펀딩 뒤 가격 방향은 없었다(표본 충분). 그래도 넣은 이유 — 청산 연쇄는 쏠린 쪽에서 나고, 상태 줄은 그 쏠림을 말한다. 방향 신호로 쓰지 않는다.",
   ls: "바이낸스 5분 통계: 계정 롱숏비(롱 계정 수 ÷ 숏 계정 수) · 탑트레이더 포지션 비율 · 테이커 매수 ÷ 매도. 괄호 = 하루 전.\n우리 검정: 30분 방향 모델에 넣으면 오히려 조금 나빠졌고 학술 근거도 없다. 군중이 어느 쪽에 몰렸나를 눈으로 보는 용도.",
@@ -3891,7 +3897,7 @@ const MC_TIPS = {
   book: "미드에서 ±25/50/100bp까지 걸린 호가 합 = 그만큼 밀려면 먹어야 할 물량(한 초 스냅샷 · 취소·재보충은 모른다). 얇은 쪽 = ±25bp 호가가 지난 6시간 중 몇 분위인가.\n우리 검정: 미검정. 거래량 계열은 실현변동성에 대부분 먹혔으니 «크기·속도» 참고로만. ETH 스프레드는 거의 늘 1틱이라 벌어지면 그 자체가 이상 신호다.",
   liq: "청산 급증 = 봇의 1분 청산 z. HL 고래 청산가 = 추적 중인 HL 상위 300주소의 실제 청산가(추정 아님)를 $5 단위로 묶은 금액 — 차트에 점선으로도 그린다. 12시간 실측 = 바이낸스 강제청산이 실제로 체결된 가격(차트 체결 기둥 안쪽 눈금).\n우리 검정: 청산 급증 뒤 역매매·추종 둘 다 엣지 0 — «청산 동반 급등에 역매매 금지» 필터만 유효. 추정 청산맵은 «위치»는 맞고 방향은 없다. HL 실측 청산가는 미검정.",
   when: "다음 펀딩 정산 · 가까운 옵션 만기와 max pain · 미국장 · 다음 주요 지표.\n우리 검정: 펀딩 정산 전후 드리프트는 반기마다 부호가 뒤집혀 기각. max pain 쪽 1시간 규칙(만기 1시간 전 → 08:00 UTC)만 2026년 첫 검정 통과 — 후보라 표본외 장부로 계속 잰다.",
-  px: "세션 VWAP = UTC 00시부터 거래량 가중 평균가(σ = 거래량 가중 표준편차). 볼린저 %B = (종가 − 하단) ÷ (상단 − 하단), 20봉·2σ. RSI 14 = 5분봉. 스위치로 차트에 선을 켠다.\n우리 검정: 볼린저·VWAP 셋업은 방향 엣지가 없었고 RSI·%B는 짧은 되돌림을 약하게 말한다(비용을 못 넘음). 위치 참고용.",
+  px: "VWAP = 거래량 가중 평균가(σ = 거래량 가중 표준편차). 기본은 하루(UTC 00시부터) · «세션 시작부터»를 켜면 지금 시장 세션 개장부터 센다(아시아 도쿄 09시 · 유럽 런던 08시 · 미국 뉴욕 09:30, 현지 시각 · 서머타임 반영 · 미국장 뒤는 다음 00시까지 미국 세션). 개장 직후 30~60분은 봉이 적어 가격에 붙어 다닌다. 볼린저 %B = (종가 − 하단) ÷ (상단 − 하단), 20봉·2σ. RSI 14 = 5분봉. 스위치로 차트에 선을 켠다.\n우리 검정: 볼린저·VWAP 셋업은 방향 엣지가 없었고 RSI·%B는 짧은 되돌림을 약하게 말한다(비용을 못 넘음). 위치 참고용.",
 };
 // 2026-09-30 시안 B 판 설명 = 옛 칸 설명을 판 단위로 묶은 것(문장은 그대로).
 MC_TIPS.q_lev = MC_TIPS.lev + "\n\n" + MC_TIPS.ls;
@@ -4119,7 +4125,7 @@ function renderMarketCtx() {
   const levWarn = ["long_crowd", "short_crowd", "deleverage"].includes((d.lev || {}).key);
   // 가격 위치 -- 차트와 같은 캔들 이력(서버가 봉마다 vwap/vsd 를 싣는다)
   const full = candleHistoryByAsset.eth || [], lc = full[full.length - 1];
-  const lv = [...full].reverse().find((c) => c.vwap);      // 형성 중 봉(클라가 붙인다)엔 vwap 이 없다 -- 마감봉 값
+  const lvC = [...full].reverse().find((c) => mcVwapOf(c)), lv = mcVwapOf(lvC);      // 형성 중 봉(클라가 붙인다)엔 vwap 이 없다 -- 마감봉 값
   const bb = lc ? mcBollinger(full).get(lc.time) : null, px = Number(latestLivePriceByAsset.eth || lc?.close || d.mid || 0);
   const pb = bb && bb[2] > bb[0] ? (px - bb[0]) / (bb[2] - bb[0]) : null, rsi = mcRsi(full.map((c) => +c.close));
   const vz = lv && lv.vsd > 0 ? (px - lv.vwap) / lv.vsd : null;
@@ -4200,10 +4206,11 @@ function renderMarketCtx() {
       + gRow("BTC 30분", G.sig((d.btc || {}).move_bp == null ? null : d.btc.move_bp / 20), sg((d.btc || {}).move_bp, 0, "bp"), "", btcTxt)
       + gRow("가격차 OKX", G.sig((d.venues || {}).okx_bp == null ? null : d.venues.okx_bp / 5), sg((d.venues || {}).okx_bp, 1, "bp"), "", "마크 대 마크")
       + gRow("가격차 HL", G.sig((d.venues || {}).hl_bp == null ? null : d.venues.hl_bp / 5), sg((d.venues || {}).hl_bp, 1, "bp"), "", `미드 대 미드 · HL 프리미엄 ${sg(b.hl_premium_bp, 1, "bp")}`)
-      + gRow("VWAP 거리", G.sig(vz), sg(vz, 1, "σ"), "", lv ? `세션 VWAP ${n(lv.vwap, 1)}` : "")
+      + gRow("VWAP 거리", G.sig(vz), sg(vz, 1, "σ"), "", lv ? `${lv.name} VWAP ${n(lv.vwap, 1)}` : "")
       + gRow("볼린저 %B", G.pct(pb), pb == null ? "-" : n(pb, 2), "", bb ? `폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%` : "")
       + gRow("RSI 14", G.pct(rsi == null ? null : rsi / 100), rsi == null ? "-" : n(rsi, 0), rsi != null && (rsi >= 70 || rsi <= 30) ? "mc-warn" : "")
       + `<div class="mc-switch">차트에 그리기 <label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
+      + `<label title="끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)"><input type="checkbox" data-line="vsess"${mcLine.vsess ? " checked" : ""}> 세션 시작부터</label>`
       + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
       + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label></div>`);
   G.gw = gwKeep;
@@ -6011,19 +6018,26 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       lines.setAttribute("clip-path", `url(#${clipId})`);
       const cx = (i) => (xAt(i) + bw / 2).toFixed(1);
       const pl = (pts, attrs, tip) => { if (pts.length > 1) mk(lines, "polyline", { points: pts.join(" "), fill: "none", ...attrs }, tip); };
-      // ③ 세션 VWAP ±σ -- 서버가 봉마다 vwap/vsd 를 싣는다(UTC 00시 시작)
+      // ③ VWAP ±σ -- 서버가 봉마다 두 벌(하루 · 시장 세션)을 싣고 mcVwapOf 가 스위치대로 고른다. 기준이 다시 시작하는 곳(seg)에서 선을 끊는다.
       if (mcLine.vwap) {
+        const vws = candles.map(mcVwapOf);
         [[0, "var(--ink)", 0.6, "6 3", 1.3], [1, "var(--muted)", 0.45, "1 4", 1], [-1, "var(--muted)", 0.45, "1 4", 1],
          [2, "var(--muted)", 0.35, "1 6", 1], [-2, "var(--muted)", 0.35, "1 6", 1]].forEach(([k, col, op, dash, sw]) => {
-          const pts = candles.map((c, i) => (c.vwap ? `${cx(i)},${yAt(c.vwap + k * (c.vsd || 0)).toFixed(1)}` : null)).filter(Boolean);
-          pl(pts, { stroke: col, "stroke-opacity": op, "stroke-dasharray": dash, "stroke-width": sw },
-             k === 0 ? "세션 VWAP(UTC 00시부터 거래량 가중 평균가). 볼린저·VWAP 셋업은 우리 검정에서 방향 엣지가 없었다 — 위치 참고."
-                     : `VWAP ${k > 0 ? "+" : "−"}${Math.abs(k)}σ(거래량 가중 표준편차)`);
+          let seg = null, pts = [];
+          const tip = k === 0 ? `${mcLine.vsess ? "시장 세션 개장부터" : "하루(UTC 00시부터)"} VWAP · 거래량 가중 평균가. 볼린저·VWAP 셋업은 우리 검정에서 방향 엣지가 없었다 — 위치 참고.`
+                              : `VWAP ${k > 0 ? "+" : "−"}${Math.abs(k)}σ(거래량 가중 표준편차)`;
+          const flush = () => { pl(pts, { stroke: col, "stroke-opacity": op, "stroke-dasharray": dash, "stroke-width": sw }, tip); pts = []; };
+          vws.forEach((v, i) => {
+            if (!v) return;
+            if (v.seg !== seg) { flush(); seg = v.seg; }
+            pts.push(`${cx(i)},${yAt(v.vwap + k * v.vsd).toFixed(1)}`);
+          });
+          flush();
         });
-        const lv = [...candles].reverse().find((c) => c.vwap);
+        const lv = [...vws].reverse().find(Boolean), lab = lv && mcLine.vsess ? `VWAP·${lv.name}` : "VWAP";
         if (lv && yAt(lv.vwap) > mt + 8 && yAt(lv.vwap) < plotBottom - 2) {
-          if (gutOn) fpNotes.push({ val: lv.vwap, label: "VWAP", color: "var(--muted)" });
-          else mk(svg, "text", { x: ml + 4, y: yAt(lv.vwap) - 3, "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" }).textContent = "VWAP";
+          if (gutOn) fpNotes.push({ val: lv.vwap, label: lab, color: "var(--muted)" });
+          else mk(svg, "text", { x: ml + 4, y: yAt(lv.vwap) - 3, "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: "var(--muted)", "pointer-events": "none" }).textContent = lab;
         }
       }
       // ③ 볼린저(20, 2σ) -- 창 슬라이스로는 20봉이 안 돼 전체 이력에서 센다

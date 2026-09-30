@@ -3193,8 +3193,7 @@ def make_app() -> web.Application:
         if "volume" in src.columns:
             tail = src.tail(600)
             tss = [int(t.timestamp()) for t in tail["timestamp"]]
-            vw, vsd = mctx.session_vwap(tss, tail["high"].tolist(), tail["low"].tolist(), tail["close"].tolist(), tail["volume"].tolist())
-            vwap = {t: {"vwap": round(a, 4), "vsd": round(b, 4)} for t, a, b in zip(tss, vw, vsd) if a is not None}
+            vwap = mctx.vwap_rows(tss, tail["high"].tolist(), tail["low"].tolist(), tail["close"].tolist(), tail["volume"].tolist())
         rows = [
             {
                 "time": int(row["timestamp"].timestamp()),
@@ -3232,9 +3231,8 @@ def make_app() -> web.Application:
                                "close": [float(r[4]) for r in closed]})
             veto = trend_veto_rows(df)
             tss = [int(r[0]) // 1000 for r in rows]    # 세션 VWAP -- ETH 와 같은 규약(형성 중 봉 포함: 그 봉까지의 VWAP)
-            vw, vsd = mctx.session_vwap(tss, [float(r[2]) for r in rows], [float(r[3]) for r in rows],
-                                        [float(r[4]) for r in rows], [float(r[5]) for r in rows])
-            vwap = {t: {"vwap": round(a, 6), "vsd": round(b, 6)} for t, a, b in zip(tss, vw, vsd) if a is not None}
+            vwap = mctx.vwap_rows(tss, [float(r[2]) for r in rows], [float(r[3]) for r in rows],
+                                  [float(r[4]) for r in rows], [float(r[5]) for r in rows], nd=6)
             candles = [
                 {
                     "time": int(row[0]) // 1000,
