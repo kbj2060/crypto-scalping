@@ -124,6 +124,14 @@ def _connect():
         combo_id VARCHAR, combo_trade_id VARCHAR)""")
     con.execute("""CREATE TABLE IF NOT EXISTS gaps (
         from_ms BIGINT, to_ms BIGINT, reason VARCHAR, backfilled INTEGER)""")
+    # 2026-10-01 연구(research_eth_option_trade_identity_20260930) 뒤 추가: 블록 RFQ 패키지(다리 비율·패키지가·헤지)와
+    #   블록의 선물 헤지 다리(옵션 채널만 구독해 못 받던 것). 둘 다 reconcile() 이 매시 채운다.
+    con.execute("""CREATE TABLE IF NOT EXISTS block_rfq_trades (
+        rfq_id VARCHAR PRIMARY KEY, ts_ms BIGINT, api VARCHAR, direction VARCHAR, amount DOUBLE, price DOUBLE,
+        mark_price DOUBLE, combo_id VARCHAR, legs VARCHAR, hedge VARCHAR, index_prices VARCHAR)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS block_future_legs (
+        trade_id VARCHAR PRIMARY KEY, ts_ms BIGINT, instrument_name VARCHAR, direction VARCHAR, amount DOUBLE,
+        price DOUBLE, index_price DOUBLE, block_trade_id VARCHAR)""")
     return con
 
 
@@ -199,7 +207,109 @@ async def chain_loop() -> None:
             await asyncio.to_thread(chain_poll)
         except Exception as e:           # 체인 조회가 실패해도 체결 수집은 계속 -- 다음 주기에 다시
             print(f"체인 폴링 실패: {type(e).__name__}: {e}", flush=True)
-        await asyncio.sleep(max(30.0, CHAIN_SEC - (time.time() - t0)))
+        if time.time() - _RECON["at"] >= RECON_SEC:
+            _RECON["at"] = time.time()
+            try:
+                print(f"대조 {await asyncio.to_thread(reconcile)}", flush=True)
+            except Exception as e:       # 대조는 부가 작업 -- 다음 시간에 다시
+                print(f"대조 실패: {type(e).__name__}: {e}", flush=True)
+        await asyncio.sleep(next_chain_wait(time.time()))
+
+
+# 2026-10-01 연구: 체인 폴링이 기동 시각 기준(:50:27 등)이라 10분 스냅샷 사이 ΔOI(신규/청산 판별)가 정시 칸과 어긋났다 --
+#   정시(:00, :10 …) + 5초에 맞춘다. 남은 시간이 30초보다 짧으면 한 칸 건너뛴다(연속 폴링 방지).
+def next_chain_wait(now: float) -> float:
+    w = CHAIN_SEC - (now % CHAIN_SEC) + 5.0
+    return w + CHAIN_SEC if w < 30.0 else w
+
+
+RECON_SEC = 3600.0
+RECON_LOOKBACK_MS = 3 * 3600 * 1000     # history 반영이 늦어도 겹치게 3시간
+_RECON = {"at": 0.0}
+HIST = "https://history.deribit.com/api/v2/public/"
+API_PUB = "https://www.deribit.com/api/v2/public/"
+FUT_API = {"ETH": "ETH", "BTC": "BTC", "SOL": "USDC", "XRP": "USDC"}
+
+
+def _get(base: str, method: str, **params) -> dict:
+    import requests
+    r = requests.get(base + method, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()["result"]
+
+
+def reconcile() -> dict:
+    """매시 한 번(2026-10-01 연구 뒤 추가). ① history.deribit.com 으로 지난 3시간 옵션 체결을 다시 받아 빠진 행을 넣고
+    강제청산 표시(liquidation)를 채운다 -- 서버는 같은 구간 12건 중 1건만 갖고 있었다(WS 가 안 싣는 것으로 추정).
+    ② 다리 수(block_trade_leg_count)가 옵션 다리보다 많은 블록 = 선물 헤지 다리가 있는 블록 → 같은 ms 선물 체결에서 찾아 저장.
+    ③ 블록 RFQ 패키지(get_block_rfq_trades, 보존 ~6일)를 저장."""
+    now = int(time.time() * 1000)
+    since = now - RECON_LOOKBACK_MS
+    rows: list[tuple] = []
+    for api in API_CURRENCIES:
+        t = since
+        while True:
+            res = _get(HIST, "get_last_trades_by_currency_and_time", currency=api, kind="option", start_timestamp=t,
+                       end_timestamp=now, count=1000, sorting="asc", include_old="true")
+            tr = res.get("trades") or []
+            rows += [row(x) for x in tr if coin_of(x["instrument_name"])]
+            nxt = max((x["timestamp"] for x in tr), default=t)
+            if not res.get("has_more") or nxt <= t:
+                break
+            t = nxt
+    liq = [(r[11], r[1]) for r in rows if r[11]]
+    fut: list[tuple] = []
+    rfq: list[tuple] = []
+    con = _connect()
+    try:
+        con.begin()
+        if rows:
+            con.executemany(f"INSERT OR IGNORE INTO option_trades VALUES ({','.join('?' * len(COLS))})", rows)
+        if liq:
+            con.executemany("UPDATE option_trades SET liquidation = ? WHERE trade_id = ? AND liquidation IS NULL", liq)
+        con.commit()
+        need = con.execute("""SELECT block_trade_id, min(ts_ms), any_value(instrument_name) FROM option_trades
+                              WHERE is_block AND ts_ms >= ? GROUP BY 1
+                              HAVING max(block_trade_leg_count) > count(*)
+                                 AND block_trade_id NOT IN (SELECT block_trade_id FROM block_future_legs)""",
+                           [since]).fetchall()
+        last_rfq = dict(con.execute("SELECT api, max(ts_ms) FROM block_rfq_trades GROUP BY 1").fetchall())
+    finally:
+        con.close()
+    for bid, ts, inst in need:
+        base = API_PUB if now - ts < 20 * 3600 * 1000 else HIST
+        for x in _get(base, "get_last_trades_by_currency_and_time", currency=FUT_API[coin_of(inst)], kind="future",
+                      start_timestamp=ts, end_timestamp=ts, count=100).get("trades") or []:
+            if x.get("block_trade_id") == bid:
+                fut.append((str(x["trade_id"]), int(x["timestamp"]), x["instrument_name"], x["direction"], float(x["amount"]),
+                            float(x["price"]), x.get("index_price"), bid))
+    for api in API_CURRENCIES:
+        cont = None
+        try:
+            for _ in range(20):
+                r = _get(API_PUB, "get_block_rfq_trades", currency=api, count=50, **({"continuation": cont} if cont else {}))
+                got = r.get("block_rfqs") or []
+                rfq += [(str(b["id"]), int(b["timestamp"]), api, b.get("direction"), b.get("amount"),
+                         ((b.get("trades") or [{}])[0]).get("price"), b.get("mark_price"), b.get("combo_id"),
+                         json.dumps(b.get("legs") or []), json.dumps(b.get("hedge")) if b.get("hedge") else None,
+                         json.dumps(b.get("index_prices") or {})) for b in got]
+                cont = r.get("continuation")
+                if not cont or not got or min(b["timestamp"] for b in got) <= (last_rfq.get(api) or 0):
+                    break
+        except Exception as e:           # RFQ 목록이 없는 통화(USDC 등)는 건너뛴다
+            print(f"  RFQ {api} 건너뜀: {type(e).__name__}: {str(e)[:80]}", flush=True)
+    if fut or rfq:
+        con = _connect()
+        try:
+            con.begin()
+            if fut:
+                con.executemany("INSERT OR IGNORE INTO block_future_legs VALUES (?,?,?,?,?,?,?,?)", fut)
+            if rfq:
+                con.executemany("INSERT OR IGNORE INTO block_rfq_trades VALUES (?,?,?,?,?,?,?,?,?,?,?)", rfq)
+            con.commit()
+        finally:
+            con.close()
+    return {"체결": len(rows), "강제청산": len(liq), "헤지 다리": len(fut), "RFQ": len(rfq)}
 
 
 def hourly_flow(rows) -> dict:
@@ -352,6 +462,9 @@ async def run() -> None:
 
 
 def _selftest() -> None:
+    b0 = 600.0 * 1_666_667                                              # 10분 경계
+    assert next_chain_wait(b0 + 200) == 600 - 200 + 5                    # :03:20 → 다음 :10:05
+    assert next_chain_wait(b0 + 590) == 600 - 590 + 5 + 600              # 15초 남으면 한 칸 건너뜀
     base = {"iv": 46.0, "mark_price": 0.02, "tick_direction": 0, "trade_seq": 1}
     t = [dict(base, timestamp=2000, trade_id="ETH-2", instrument_name="ETH-9OCT26-2550-P", direction="sell",
               amount=125.0, price=0.0163, index_price=2000.0, block_trade_id="BLOCK-1",

@@ -126,25 +126,18 @@ def test_dealer_dex_from_taker_flow(monkeypatch):
 
 
 def test_taker_flow_sql_and_covered(monkeypatch):
-    """option_trades 에서 종목별 테이커 순수량, 상장 시각 ≥ 첫 체결이면 covered. 접두어 밖(BTC) 종목은 안 섞인다."""
+    """option_trades 에서 종목별 테이커 순수량 · trade_seq 가 1 부터 끊김 없으면 covered(2026-10-01). 접두어 밖(BTC) 종목은 안 섞인다."""
     import duckdb
     con = duckdb.connect()
-    con.execute("CREATE TABLE option_trades (ts_ms BIGINT, instrument_name VARCHAR, direction VARCHAR, amount DOUBLE)")
-    con.execute("CREATE TABLE gaps (from_ms BIGINT, to_ms BIGINT, reason VARCHAR, backfilled INTEGER)")
-    con.executemany("INSERT INTO option_trades VALUES (?, ?, ?, ?)", [
-        (1000, "ETH-1OCT26-2700-C", "buy", 5.0), (2000, "ETH-1OCT26-2700-C", "sell", 2.0),
-        (3000, "ETH-3OCT26-2700-P", "sell", 4.0), (1500, "BTC-1OCT26-60000-C", "buy", 9.0)])
-    gex._CREATED.clear()
-    monkeypatch.setattr(gex, "_pub", lambda m, **k: [{"instrument_name": "ETH-1OCT26-2700-C", "creation_timestamp": 500},
-                                                      {"instrument_name": "ETH-3OCT26-2700-P", "creation_timestamp": 2500}])
+    con.execute("CREATE TABLE option_trades (ts_ms BIGINT, trade_seq BIGINT, instrument_name VARCHAR, direction VARCHAR, amount DOUBLE)")
+    con.executemany("INSERT INTO option_trades VALUES (?, ?, ?, ?, ?)", [
+        (1000, 1, "ETH-1OCT26-2700-C", "buy", 5.0), (2000, 2, "ETH-1OCT26-2700-C", "sell", 2.0),     # 1·2 = 완결
+        (3000, 3, "ETH-3OCT26-2700-P", "sell", 4.0),                                                # 첫 건 없음(수집 뒤부터)
+        (3100, 1, "ETH-4OCT26-2700-P", "buy", 1.0), (3200, 3, "ETH-4OCT26-2700-P", "buy", 1.0),     # 가운데 2 가 빠짐
+        (1500, 1, "BTC-1OCT26-60000-C", "buy", 9.0)])
     f = gex._taker_flow(con, "ETH")
-    assert f["net"] == {"ETH-1OCT26-2700-C": 3.0, "ETH-3OCT26-2700-P": -4.0}
-    assert f["covered"] == {"ETH-3OCT26-2700-P"}, "첫 체결(1000) 전에 상장된 종목은 수준을 모른다"
-    # 09-30: 24h 넘게 꺼져 백필 못 한 공백(끝 2600) 뒤에 상장된 종목만 커버 -- 2500 상장 풋도 빠진다. 다른 목록 공백은 무관
-    con.execute("INSERT INTO gaps VALUES (1800, 2600, 'unrecoverable ETH', 0), (1800, 9999, 'unrecoverable BTC', 0)")
-    gex._CREATED.clear()
-    assert gex._taker_flow(con, "ETH")["covered"] == set()
-
+    assert f["net"] == {"ETH-1OCT26-2700-C": 3.0, "ETH-3OCT26-2700-P": -4.0, "ETH-4OCT26-2700-P": 2.0}
+    assert f["covered"] == {"ETH-1OCT26-2700-C"}, "첫 건이 없거나 중간이 빠진 종목은 수준을 모른다"
 
 def test_dealer_gex_from_taker_flow(monkeypatch):
     """2026-09-29 체결 기반 딜러 GEX: 테이커가 ATM 콜 50개 순매수 → 딜러 콜 숏 → 음감마(딜러 가정 «콜 +»와 반대 부호).
@@ -207,7 +200,7 @@ def test_greeks_use_forward_and_profile_keeps_small_prices(monkeypatch):
 
 
 def test_unrecoverable_gap_written_and_read(tmp_path, monkeypatch):
-    """09-30 검증: 통합 수집기 write() 가 «복구 불가» 공백을 여러 건 기록하고, _taker_flow 가 그 끝 이후 상장 종목만 커버로 센다."""
+    """09-30 검증: 통합 수집기 write() 가 공백을 여러 건 기록한다(10-01 부터 커버 판정은 trade_seq 완결)."""
     import duckdb
     import live_deribit_block_trade_collector_20260928 as col
     monkeypatch.setattr(col, "DB", tmp_path / "o.duckdb")
@@ -217,10 +210,8 @@ def test_unrecoverable_gap_written_and_read(tmp_path, monkeypatch):
               [(500, 900, "ConnectionClosedError", 3), (1500, 2600, "unrecoverable ETH", 0)])
     con = duckdb.connect(str(tmp_path / "o.duckdb"))
     assert con.execute("SELECT count(*) FROM gaps").fetchone()[0] == 2
-    gex._CREATED.clear()
-    monkeypatch.setattr(gex, "_pub", lambda m, **k: [{"instrument_name": "ETH-1OCT26-2700-C", "creation_timestamp": 2000},
-                                                      {"instrument_name": "ETH-3OCT26-2700-P", "creation_timestamp": 2700}])
-    assert gex._taker_flow(con, "ETH")["covered"] == {"ETH-3OCT26-2700-P"}, "공백 끝(2600) 전 상장(2000)은 제외"
+    # 2026-10-01 커버는 공백 기록이 아니라 trade_seq 완결로 정한다 -- 둘 다 seq 1 한 건뿐이라 완결
+    assert gex._taker_flow(con, "ETH")["covered"] == {"ETH-1OCT26-2700-C", "ETH-3OCT26-2700-P"}
 
 
 def test_flush_buf_keeps_rows_arriving_during_write_and_on_failure(monkeypatch):

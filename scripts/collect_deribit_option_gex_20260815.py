@@ -451,33 +451,26 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
     return out
 
 
-_CREATED: dict = {}
 
 
 def _taker_flow(con, currency: str) -> dict | None:
-    """종목별 테이커 순수량(매수−매도, 기초자산 수량) + «수집 시작 뒤 상장» 종목 집합. 통합 수집기(option_trades 가 같은 파일)에서만."""
-    api, prefix = SPECS[currency][0], SPECS[currency][1]
+    """종목별 테이커 순수량(매수−매도, 기초자산 수량) + 체결 이력이 **완결된** 종목 집합(covered).
+    2026-10-01 커버 판정 변경(사용자 «과거 체결 기록을 받아 커버 100%»): 옛 규칙은 «수집 시작 뒤 상장»이라 09-27 전 상장 종목이
+      전부 빠졌다(전 만기 1.1%). 이제 history 백필(backfill_deribit_option_trades_history_20261001)로 첫 체결부터 채우고,
+      trade_seq 가 1 부터 끊김 없이 이어진 종목(고유 개수 = 최댓값)을 covered 로 본다 -- 수집기가 24h 넘게 꺼져 생긴 구멍도
+      seq 가 비어 저절로 빠진다(옛 «unrecoverable» 공백 규칙 대체)."""
+    prefix = SPECS[currency][1]
     try:
-        rows = con.execute("SELECT instrument_name, sum(CASE WHEN direction = 'buy' THEN amount ELSE -amount END), min(ts_ms) "
+        rows = con.execute("SELECT instrument_name, sum(CASE WHEN direction = 'buy' THEN amount ELSE -amount END), "
+                           "min(trade_seq), max(trade_seq), count(DISTINCT trade_seq) "
                            "FROM option_trades WHERE starts_with(instrument_name, ?) GROUP BY 1", [prefix]).fetchall()
-        hit = _CREATED.get(api)
-        if not hit or time.time() - hit[0] > 3600:      # 상장 시각은 안 바뀐다 -- 1시간마다 새 종목만 반영
-            try:
-                hit = (time.time(), {x["instrument_name"]: x["creation_timestamp"] for x in _pub("get_instruments", currency=api, kind="option")})
-                _CREATED[api] = hit
-            except Exception:
-                if not hit:            # 조회 실패는 직전 목록으로 버틴다(새 종목만 한 주기 늦는다) -- 09-30 검증
-                    raise
-        # 백필로 못 메운 공백(재기동 전 24h 초과 정지) 뒤에 상장된 종목만 처음부터 봤다 -- 그 끝을 시작점으로
-        lost = con.execute("SELECT max(to_ms) FROM gaps WHERE reason = ?", [f"unrecoverable {api}"]).fetchone()[0]
     except Exception as exc:     # 옛 단독 수집기(option_trades 없음)·조회 실패 -- 딜러 DEX 만 빠진다
         log(f"{currency}: 체결 기반 딜러 DEX 생략 {exc}")
         return None
     if not rows:
         return None
-    t0 = max(min(r[2] for r in rows), lost or 0)
-    return {"net": {r[0]: float(r[1]) for r in rows}, "covered": {n for n, c in hit[1].items() if n.startswith(prefix) and c >= t0}}
-
+    return {"net": {r[0]: float(r[1]) for r in rows},
+            "covered": {r[0] for r in rows if r[2] == 1 and r[3] is not None and r[4] == r[3]}}
 
 def poll_once(con) -> None:
     for currency in CURRENCIES:
