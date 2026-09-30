@@ -52,6 +52,10 @@ For multi-step tasks, state a brief plan:
 3. [Step] → verify: [check]
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+Dashboard Frontend Design → /impeccable (대시보드 화면 수정 규칙)
+`dashboard/live/` 의 화면(app.js 렌더러·styles.css·index.html)에서 **보이는 모양·배치·표시 방식**을 바꾸는 작업(카드 배치, 차트 표현, 라벨·색·간격, 새 칸 추가 등)은 사용자가 명시하지 않아도 **먼저 `/impeccable` 스킬을 호출**해 그 절차로 진행한다(2026-09-30 사용자 지시). 사용자가 «시안»을 요청하면 실데이터 캡처로 시안을 먼저 보이고, «바로 배포»면 구현·검증 후 배포한다.
+화면과 무관한 순수 로직·데이터·버그 수정(API 모양, 계산, 성능)은 해당 없음.
+
 Event-Label Boundary Contract (사건 라벨 경계 계약)
 사건 트리거로 시작하는 라벨을 쓸 때, **피쳐 창의 끝은 라벨 탐색 시작 인덱스보다 반드시 최소 한 단위 앞서야 한다.** 라벨이 인덱스 `S`부터 배리어/수익을 탐색하면 모든 피쳐는 `S-1`까지만 본다. 같은 봉(분/5분)을 피쳐와 라벨이 공유하면 그 자체로 미래참조다 — 그 봉의 큰 움직임이 피쳐를 키우는 동시에 배리어를 때려 라벨을 정하기 때문이다.
 `S`가 파생 심볼이면 그 **조상까지** 본다. 2026-09-08 사고에서 라벨은 `first_touch(hi1, lo1, s1, ...)`, 피쳐는 `mask = span <= tmin`이었고 `s1 = s0 + tmin`이라 같은 봉을 공유했다. 정확도가 **54.7~57.4% → 50.0~54.3%**로 4pp 부풀어 있었다.
