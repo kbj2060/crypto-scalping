@@ -3478,7 +3478,12 @@ function optLadderSvg(o, W) {
       + `<rect x="${(mid - pw).toFixed(1)}" y="${(y - bh / 2).toFixed(1)}" width="${pw.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--bad)" fill-opacity=".75"/>`
       + `<rect x="${mid}" y="${(y - bh / 2).toFixed(1)}" width="${cwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--good)" fill-opacity=".75"/>`
       + (has ? `<rect x="${(W - gwid).toFixed(1)}" y="${(y - bh / 2).toFixed(1)}" width="${gwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="${g >= 0 ? "var(--option)" : "var(--warn)"}" fill-opacity=".85"/>` : "") + `</g>`;
-    if (top.includes(k)) s += `<text x="${(mid + (c >= p ? cwid + 4 : -pw - 4)).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="9.5" font-weight="700" fill="var(--text)" text-anchor="${c >= p ? "start" : "end"}">${optUsd(c + p)}</text>`;
+    if (top.includes(k)) {   // 2026-09-30 큰 막대 값은 막대 **안**(사용자 지시) -- 막대 끝에서 안쪽으로, 글자가 안 들어가면 예전처럼 옆에
+      const lab = optUsd(c + p), bw = c >= p ? cwid : pw, fit = bw >= lab.length * 5.9 + 8;
+      const x = mid + (c >= p ? (fit ? cwid - 4 : cwid + 4) : (fit ? -pw + 4 : -pw - 4));
+      s += `<text x="${x.toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="9.5" font-weight="800" fill="${fit ? "var(--chart-bg)" : "var(--text)"}"`
+        + ` text-anchor="${(c >= p) === fit ? "end" : "start"}">${lab}</text>`;
+    }
   });
   const lab = (v, y) => `<text x="0" y="${(y + 3.5).toFixed(1)}" font-size="9.5" fill="var(--muted)">${optQ(v)}</text>`;
   const every = step * Math.max(1, Math.round((hi - lo) / step / 8));
