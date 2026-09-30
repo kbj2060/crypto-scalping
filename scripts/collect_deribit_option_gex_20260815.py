@@ -222,6 +222,45 @@ def _bs_delta(fwd: float, strike: float, iv_pct: float, years: float, call: bool
     return nd1 if call else nd1 - 1.0
 
 
+def _skew_interp(g: pd.DataFrame, fwd: float, yrs: float) -> dict:
+    """한 만기의 외가격 옵션만으로 델타 보간 25Δ(콜 +0.25 · 풋 −0.25) IV 와 로그머니니스 보간 ATM IV → rr25i · bf25i · atm_i · hours.
+    외가격이 양쪽 2개 미만이거나 25Δ 가 행사가 범위 밖이면 None(외삽하지 않는다)."""
+    import numpy as np
+    out = {"hours": yrs * 8760, "rr25i": None, "bf25i": None, "atm_i": None}
+    oc = g[(g["option_type"] == "call") & (g["strike"] >= fwd)].sort_values("strike")
+    op = g[(g["option_type"] == "put") & (g["strike"] <= fwd)].sort_values("strike")
+    if len(oc) < 2 or len(op) < 2 or yrs <= 0:
+        return out
+    def at(x, y, x0):
+        o = np.argsort(x); x, y = np.asarray(x, float)[o], np.asarray(y, float)[o]
+        return float(np.interp(x0, x, y)) if x[0] <= x0 <= x[-1] else None
+    otm = pd.concat([op[op["strike"] < fwd], oc])
+    atm = at(np.log(otm["strike"] / fwd), otm["mark_iv"], 0.0)
+    dc = [_bs_delta(fwd, k, v, yrs, True) for k, v in zip(oc["strike"], oc["mark_iv"])]
+    dp = [_bs_delta(fwd, k, v, yrs, False) for k, v in zip(op["strike"], op["mark_iv"])]
+    c25, p25 = at(dc, oc["mark_iv"], 0.25), at(dp, op["mark_iv"], -0.25)
+    out["atm_i"] = atm
+    if c25 is not None and p25 is not None:
+        out["rr25i"] = c25 - p25
+        if atm is not None:
+            out["bf25i"] = (c25 + p25) / 2 - atm
+    return out
+
+
+def _const_maturity(exps: list[dict], days: float) -> dict | None:
+    """만기 둘 사이 보간한 고정만기 값: ATM = 총분산 선형 · RR/BF = 시간 선형. 양쪽 만기가 없으면(외삽) None."""
+    tgt = days * 24
+    ok = [e for e in exps if e.get("rr25i") is not None and e.get("bf25i") is not None and e.get("atm_i") is not None]
+    a = max((e for e in ok if e["hours"] <= tgt), key=lambda e: e["hours"], default=None)
+    b = min((e for e in ok if e["hours"] >= tgt), key=lambda e: e["hours"], default=None)
+    if a is None or b is None:
+        return None
+    w = 0.0 if b["hours"] == a["hours"] else (tgt - a["hours"]) / (b["hours"] - a["hours"])
+    var = (1 - w) * a["atm_i"] ** 2 * a["hours"] + w * b["atm_i"] ** 2 * b["hours"]
+    return {"atm": math.sqrt(var / tgt) if var > 0 else None, "rr": (1 - w) * a["rr25i"] + w * b["rr25i"],
+            "bf": (1 - w) * a["bf25i"] + w * b["bf25i"]}
+
+
 def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None) -> dict:
     """화면 «옵션» 카드 한 판(2026-09-28 사용자 선택 A+C). **참고 표시 전용 -- 신호 아님.**
     예상 폭(DVOL) · VRP(DVOL − 실현 7일) · 만기별(ATM IV·25Δ RR/BF·콜/풋 미결제·P/C·max pain) · 감마 곡선/플립 ·
@@ -279,8 +318,12 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
         coi, poi = float(calls["open_interest"].sum()), float(puts["open_interest"].sum())
         exps.append({"exp_ms": int(exp.timestamp() * 1000), "atm_iv": atm_iv, "rr25": c25 - p25,
                      "bf25": (c25 + p25) / 2 - atm_iv, "call_oi_usd": coi * idx, "put_oi_usd": poi * idx,
-                     "pc": (poi / coi) if coi else None, "pain": float(pain)})
+                     "pc": (poi / coi) if coi else None, "pain": float(pain), **_skew_interp(g, fwd, yrs)})
     out["expiries"] = exps[:8]
+    # 2026-10-01 연구(research_eth_option_metric_ambiguity_20260930): 가까운 만기(늘 24시간 미만)의 최근접 행사가 RR·BF 는
+    #   실제 델타가 0.15~0.31 이고 1시간 변화 SD 3.6pt(61% 가 1pt 넘게 흔들리고 되돌림) = 잡음. 화면은 고정만기(7·30일)
+    #   델타 보간 값을 쓴다(7일 SD 0.58pt). expiries[*].rr25/bf25(최근접)는 이력 호환으로 남긴다.
+    out["cm"] = {str(d): _const_maturity(exps, d) for d in (7, 30)}
     # 30일에 가장 가까운 만기의 ATM IV -- DVOL(30일 내재 변동성 지수)이 없는 코인의 대용. 화면은 dvol ?? iv30.
     near30 = min(exps, key=lambda e: abs(e["exp_ms"] / 1000 - time.time() - 30 * 86400), default=None)
     out["iv30"] = near30["atm_iv"] if near30 else None

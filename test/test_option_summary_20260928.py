@@ -250,3 +250,31 @@ def test_summarize_gex_spot_is_nearest_expiry_forward():
     far = ch.assign(days_to_expiry=90.0, underlying_price=2100.0)
     mixed = pd.concat([far, ch], ignore_index=True)        # 첫 행이 먼 만기
     assert gex.summarize_gex(mixed, "ETH")["spot_price"] == 2000.0
+
+
+def test_constant_maturity_skew(monkeypatch):
+    """고정만기 RR/BF: 델타 보간(외가격만) + 만기 사이 시간 보간 · 양쪽 만기가 없으면 None(외삽 금지)."""
+    monkeypatch.setattr(gex, "_pub", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")))
+    now = datetime.now(timezone.utc)
+    def exp_rows(days, skew):
+        exp = (now + timedelta(days=days)).replace(microsecond=0); rows = []
+        for k in range(1500, 2525, 25):
+            for t in ("call", "put"):
+                iv = 50.0 + (skew if t == "put" and k < 2000 else 0.0) * (2000 - k) / 500   # 풋 날개로 갈수록 비싸다
+                rows.append({"recorded_at_utc": now, "currency": "ETH", "instrument_name": f"{days}-{k}{t}", "option_type": t,
+                             "strike": float(k), "expiration_ts": pd.Timestamp(exp), "days_to_expiry": float(days),
+                             "open_interest": 10.0, "mark_iv": iv, "underlying_price": 2000.0, "mark_price": 0.01, "volume": 0.0,
+                             "gamma_bs": gex._bs_gamma(2000.0, k, iv, days / 365)})
+        return rows
+    ch = pd.DataFrame(exp_rows(3, 4.0) + exp_rows(10, 8.0) + exp_rows(40, 8.0))
+    o = gex.options_summary(ch, "ETH")
+    e3, e10 = o["expiries"][0], o["expiries"][1]
+    assert e3["rr25i"] < 0 and e10["rr25i"] < e3["rr25i"], "풋 스큐가 크면 리버설이 더 음수"
+    assert abs(e3["atm_i"] - 50.0) < 1e-9 and e3["bf25i"] > 0
+    cm7 = o["cm"]["7"]
+    w = (7 * 24 - e3["hours"]) / (e10["hours"] - e3["hours"])
+    assert abs(cm7["rr"] - ((1 - w) * e3["rr25i"] + w * e10["rr25i"])) < 1e-9, "7일 = 3일·10일 만기 시간 보간"
+    assert abs(cm7["atm"] - 50.0) < 1e-6
+    assert o["cm"]["30"] is not None
+    only_short = gex.options_summary(pd.DataFrame(exp_rows(3, 4.0)), "ETH")
+    assert only_short["cm"]["7"] is None, "7일보다 먼 만기가 없으면 외삽하지 않는다"
