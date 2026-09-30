@@ -9145,8 +9145,8 @@ setInterval(renderOfab, 3000);
   try { saved = JSON.parse(localStorage.getItem(OFAB_POS_KEY) || "null"); } catch (e) { saved = null; }
   // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.
   [ofab.x, ofab.y] = Array.isArray(saved) ? saved : [innerWidth, innerHeight - 24];
-  // 짧게 = 펼치기/접기 · 2초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
-  const OFAB_HOLD_MS = 2000;   // 2026-09-28 사용자 지시 0.5 -> 2초
+  // 짧게 = 펼치기/접기 · 1.5초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
+  const OFAB_HOLD_MS = 1500;   // 2026-09-28 사용자 지시 0.5 -> 2초 · 2026-09-30 «너무 느리다» -> 1.5초 (styles.css .ofab-toggle.holding 채움 시간과 같이)
   let hold = null, held = false;
   const holdEnd = () => { if (hold) { clearTimeout(hold.t); hold = null; } tgl.classList.remove("holding"); };
   tgl.addEventListener("pointerdown", (e) => {
