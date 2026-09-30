@@ -104,6 +104,11 @@ def _fetch_klines(symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
         time.sleep(0.12)
         if len(data) < 1500:
             break
+    # 🔴2026-09-30 endTime=지금이면 바이낸스가 **형성 중 봉**을 마지막 행으로 준다 -- 레짐(ETH·BTC·XRP 워커가 다 이 함수)이
+    #   미완성 봉으로 판정됐다(실측 XRP 같은 봉의 형성판 chop → 마감판 bull). 종료 시각이 안 지난 봉은 버린다
+    #   (live_eth_breakout_detector_20260911._fetch 와 같은 규약).
+    now_ms = time.time() * 1000
+    out = [k for k in out if int(k[6]) < now_ms]
     cols = ["timestamp", "open", "high", "low", "close", "volume", "close_time",
             "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
     df = pd.DataFrame(out, columns=cols)
