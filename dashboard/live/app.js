@@ -4284,7 +4284,7 @@ function renderMarketCtx() {
     qSec("q_map", "③ 가격 지형 · ±6%", `<div class="mc-terrain" title="${escapeHtml(`원 = HL 고래 청산가(빨강 롱 · 초록 숏, 크기 = 금액) · 띠 = VWAP ±1·2σ · 왼쪽 눈금 = 호가 ±${bps.join("/")}bp · ◆ = 12시간 실측 청산 최다 · 오른쪽 막대 = 1분 청산 z(롱·숏, 점선 3 = 급증)`
         + `\n청산 ${!bu ? "-" : burstSide ? `${burstSide === "short" ? "숏" : "롱"} 급증 · ${usd((burstSide === "short" ? bu.short_usd_1m : bu.long_usd_1m) || 0)}/1분` : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}`}`
         + `${top ? ` · 12시간 최다 ${n(top[0], 1)}(롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : ""}`)}">${G.terrain(px, d.hl_liq || {}, lv, bps, top, bu,
-          ...(wallBox ? [wallBox.clientWidth - 4, Math.max(120, wallBox.clientHeight - 52)] : []))}</div>`);
+          ...(wallBox ? [Math.max(120, wallBox.clientWidth - 4), Math.max(120, wallBox.clientHeight - 52)] : []))}</div>`);
   const hsm = latestFlowHeatmap && latestFlowHeatmap.summary, gwKeep = G.gw;
   if (wallW) G.gw = Math.max(40, wallW - 58 - 44 - 12);   // ④ 단 폭에 맞춘 게이지(아래 wallHtml 을 다 만든 뒤 되돌린다)
   const statRows = G.cmpW && hsm ? STAT_KEYS.map((k) => {
