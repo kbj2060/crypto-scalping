@@ -4114,6 +4114,7 @@ function mcUsSession(nowMs = Date.now()) {
 
 // 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
+let mcNeedH = 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 function mcPlace(svg, r, wr) {
   const body = el("mcBody"), card = el("fpCard"), wall = el("mcWall");
   if (!body || !card) return;
@@ -4261,6 +4262,10 @@ function renderMarketCtx() {
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
   body._mcHtml = htmlB;
   keepFocus(body, () => { body.innerHTML = htmlB; });
+  if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
+    const top = body.getBoundingClientRect().top, need = Math.ceil(Math.max(0, ...[...body.children].map((k) => k.getBoundingClientRect().bottom - top)) + 6);
+    if (need > 40 && Math.abs(need - mcNeedH) > 4) { mcNeedH = need; if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender(); }
+  }
 }
 
 ["mcBody", "mcWhen"].forEach((id) => el(id)?.addEventListener("click", (e) => {   // ⑤ 는 #mcWhen 에 있을 수 있다
@@ -7665,7 +7670,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
     // 2026-09-30 시안 Y(사용자 선택): ETH 는 오른쪽 칸 위 절반만 1초 수급, 아래 절반은 시장 맥락(#mcBody 를 그 자리에 겹쳐 놓는다).
     const mcSplit = !!splitR && activeSnapshotAsset === "eth";
-    const s1H = splitR ? (mcSplit ? Math.round((hAll - mtTop - 4) * 0.47) : hAll - mtTop - 4) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    // 2026-09-30 1초 수급 높이 = 칸 − 시장 맥락의 **실제 내용 높이**(mcNeedH, renderMarketCtx 가 잰다) -- 한 화면 모드로 칸이 줄어도 시장 맥락이 스크롤 없이 다 들어간다.
+    //   아직 못 쟀으면 47% · 1초 수급은 칸의 30% 아래로는 안 줄인다.
+    const s1Avail = hAll - mtTop - 4;
+    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16 : Math.round(s1Avail * 0.47)) : s1Avail) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: hAll - (sub1sY + s1H + 12) - 4 } : null,
             mcSplit && TRADE_W ? { x: ml + cw + 4, y: plotBottom + 12, w: TAG_W + TRADE_W + BOOK_W - 8, h: hAll - plotBottom - 16 } : null);   // ④ = 꼬리표 칸 + 프로파일 아래(두 단)
     supply1sSubBox = {

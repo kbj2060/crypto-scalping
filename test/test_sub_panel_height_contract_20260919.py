@@ -145,7 +145,7 @@ def test_sub_panels_tile_without_overlap():
     assert wide["subLegendY"] == env["mtTop"], "2단에서 밀도 범례가 풋프린트 바로 위(맨 위)가 아니다"
     # 2단(2026-09-28 2차): 오른쪽 칸 = 1초 수급, 지지/저항 = 왼쪽 레인 **아래** SR_BELOW 줄.
     # 2026-09-30 시안 Y: ETH 는 위 절반만 1초 수급, 아래 절반은 시장 맥락(mcPlace) -- 다른 코인은 전체 높이 그대로.
-    assert "const s1H = splitR ? (mcSplit ? Math.round((hAll - mtTop - 4) * 0.47) : hAll - mtTop - 4)" in JS and "placeLevelList" not in JS
+    assert "const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16" in JS and "placeLevelList" not in JS   # 2026-09-30 시장 맥락 내용 높이만큼 뺀다
     assert "mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16" in JS   # 절반 아래 칸이 시장 맥락 자리
 
     env["splitR"] = 0

@@ -2556,7 +2556,7 @@ body.order-coin-off .acct-lanes::before {
      시장 맥락은 Footprint 안(1초 수급 아래 칸, app.js mcPlace), 옵션·블록은 Option 카드. */
   #snapshotTabPanel { margin-right: 36px; }
   #snapshotTabPanel > .liq-map-panel { position: relative; }
-  #mcBody.mc-cmp { position: absolute; z-index: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  #mcBody.mc-cmp { position: absolute; z-index: 1; overflow: hidden;   /* 2026-09-30 스크롤 없음 -- 높이는 renderCandleSvg 가 내용에 맞춰 준다(mcNeedH) */
     border-top: 1px solid var(--line); padding-top: 4px; column-gap: 14px; }
   #mcBody.mc-cmp .mc-g { grid-template-columns: 64px auto minmax(0, 1fr); gap: 6px; font-size: 11px; padding: 2px 0; }
   #mcBody.mc-cmp .mc-sec { padding: 8px 0 6px; }
@@ -2687,6 +2687,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   scrollbar-color: color-mix(in srgb, var(--option) 35%, transparent) transparent;
   mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); padding-bottom: 14px; }   /* 잘린 줄 대신 «더 있다» 페이드 */
 @media (max-width: 720px) { .opt-blk-list { max-height: none; mask-image: none; padding-bottom: 0; } }
+@media (min-width: 1100px) { #optCard .opt-blk-list { max-height: none; overflow: visible; mask-image: none; padding-bottom: 0; } }   /* 2026-09-30 Option 카드 «시간» 열은 자리가 있다 -- 최근 5건을 스크롤 없이 */
 .opt-curve { display: block; width: 100%; height: auto; max-width: 440px; }
 .opt-dex { color: var(--ink); font-variant-numeric: tabular-nums; }
 /* 2026-09-30 옵션을 풋프린트 카드 안으로(사용자 «하나의 카드») -- 좁은 화면은 한 열로 맨 아래, 넓은 화면은 오른쪽 칸(위 ≥1700 규칙). */
