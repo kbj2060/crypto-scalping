@@ -4181,7 +4181,7 @@ function renderMarketCtx() {
     qSec("q_map", "③ 가격 지형 · ±6%", `<div class="mc-terrain" title="${escapeHtml(`원 = HL 고래 청산가(빨강 롱 · 초록 숏, 크기 = 금액) · 띠 = VWAP ±1·2σ · 왼쪽 눈금 = 호가 ±${bps.join("/")}bp · ◆ = 12시간 실측 청산 최다 · 오른쪽 막대 = 1분 청산 z(롱·숏, 점선 3 = 급증)`
         + `\n청산 ${!bu ? "-" : burstHot ? `${(bu.short_usd_1m || 0) > (bu.long_usd_1m || 0) ? "숏" : "롱"} 급증 · ${usd(Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0))}/1분` : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}`}`
         + `${top ? ` · 12시간 최다 ${n(top[0], 1)}(롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : ""}`)}">${G.terrain(px, d.hl_liq || {}, lv, bps, top, bu,
-          ...(wallBox ? [wallBox.clientWidth - 4, Math.max(180, wallBox.clientHeight - 40)] : []))}</div>`);
+          ...(wallBox ? [wallBox.clientWidth - 4, Math.max(120, wallBox.clientHeight - 52)] : []))}</div>`);
   const hsm = latestFlowHeatmap && latestFlowHeatmap.summary, gwKeep = G.gw;
   if (wallW) G.gw = Math.max(40, wallW - 58 - 44 - 12);   // ④ 단 폭에 맞춘 게이지(아래 wallHtml 을 다 만든 뒤 되돌린다)
   const statRows = G.cmpW && hsm ? STAT_KEYS.map((k) => {
@@ -6591,8 +6591,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     declutterTagY(priceLabels, mt + 9, plotBottom - 9, 19);
   }
   const tagX = ml + cw + 4, xR = ml + cw - 4, inR = LBL !== "B";   // B = 체결 기둥 왼쪽 위에 띄움 · A/C = 플롯 안 오른쪽 끝에 오른쪽 정렬
-  const CODE = (nm) => nm.replace(/^저항(\d)/, "R$1").replace(/^지지(\d)/, "S$1").replace("주간 VWAP", "wVW").replace("앵커·전일고", "aH").replace("앵커·전일저", "aL")
-    .replace("VWAP", "VW").replace("max pain", "MP").replace("감마 플립", "ΓF").replace(/^5분 ±.*/, "5m").replace(/^1시간 ±.*/, "1h").replace(/^HL (롱|숏).*/, "HL$1").replace("진입", "진입");
+  // 2026-09-30 약어 → 짧은 이름(사용자 «약어가 너무 많아 이해가 힘들다»): 이름은 그대로, 가격만 호버로 뺀다.
+  const CODE = (nm) => nm.replace("앵커·전일고", "앵커 전일고").replace("앵커·전일저", "앵커 전일저")
+    .replace(/^5분 ±.*/, "5분 폭").replace(/^1시간 ±.*/, "1시간 폭").replace(/^HL (롱|숏).*/, "HL $1청산");
   priceLabels.forEach(p => {
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
     if (p.note) {   // 겹침 선 이름 -- 선은 제자리에 이미 있다. 칸 안 글자 + 지시선만.

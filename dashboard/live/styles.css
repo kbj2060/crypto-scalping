@@ -2573,7 +2573,7 @@ body.order-coin-off .acct-lanes::before {
 body.not-eth #mcBody, body.not-eth #mcWhen { display: none; }
 #mcWhen:empty { display: none; }
 #mcWall { display: none; }
-#mcWall.on { display: block; position: absolute; z-index: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+#mcWall.on { display: block; position: absolute; z-index: 1; overflow: hidden; }   /* 2026-09-30 가격 지형은 칸 높이에 맞춰 그린다 -- 스크롤 없음 */
 #mcWall .mc-sec { border-top: 0; padding-top: 2px; }
 .mc-sec.mc-2col { column-count: 2; column-gap: 18px; }   /* 2026-09-30 ④ 두 단 -- 스크롤 없이 */
 .mc-sec.mc-2col > h4, .mc-sec.mc-2col > .mc-tip { column-span: all; }
