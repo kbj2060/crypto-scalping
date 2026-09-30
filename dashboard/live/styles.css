@@ -2723,6 +2723,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .opt-blk-row .legs { line-height: 1.45; word-break: keep-all; }
 .opt-leg { white-space: nowrap; }   /* «매수 10-16 2700P ×500» 한 다리는 안 쪼갠다(«매/도» 방지) */
 .opt-leg i { font-style: normal; font-weight: 700; }
+.opt-blk-shape { font-weight: 700; color: var(--text); white-space: nowrap; }   /* 2026-10-01 구조·헤지·델타/베가 쪽 */
 .opt-lane-legend { font-size: 11.5px; color: var(--muted); }
 .opt-lane-legend b { font-weight: 700; }
 .opt-c { color: var(--option); }

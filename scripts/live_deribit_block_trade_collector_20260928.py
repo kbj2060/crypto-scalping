@@ -37,6 +37,7 @@ import argparse
 import asyncio
 import json
 import os
+import math
 import time
 from datetime import datetime, timezone
 import sys
@@ -82,9 +83,91 @@ def row(t: dict) -> tuple:
             t.get("combo_id"), t.get("combo_trade_id"))
 
 
-def group_blocks(rows: list[dict]) -> list[dict]:
+def _shape(o: list[dict]) -> str:
+    """옵션 다리(같은 종목 상계 후, 만기·유형·행사가 순) → 구조 이름. 2026-09-30 연구에서 Deribit 자체 구조 코드와 313/313 일치
+    (research_eth_option_trade_identity_20260930.classify 와 같은 규칙)."""
+    n, exps, kinds = len(o), {x["exp"] for x in o}, {x["kind"] for x in o}
+    s = [1 if x["q"] > 0 else -1 for x in o]
+    q = [abs(x["q"]) for x in o]
+    eq = lambda a, b: abs(a - b) <= 1e-9 * max(a, b)   # noqa: E731
+    if n == 1:
+        return "single"
+    if n == 2 and len(exps) == 1:
+        if kinds == {"C", "P"}:
+            c, p = (o[0], o[1]) if o[0]["kind"] == "C" else (o[1], o[0])
+            if (c["q"] > 0) == (p["q"] > 0):
+                return "straddle" if c["strike"] == p["strike"] else "strangle"
+            return "synthetic" if c["strike"] == p["strike"] else "risk_reversal"
+        return "other" if s[0] == s[1] else ("vertical" if eq(q[0], q[1]) else "ratio_spread")
+    if n == 2:
+        if len(kinds) == 1 and s[0] != s[1] and eq(q[0], q[1]):
+            return "calendar" if o[0]["strike"] == o[1]["strike"] else "diagonal"
+        return "other"
+    if len(exps) != 1:
+        return "other"
+    if n == 3 and len(kinds) == 1:
+        if s[0] == s[2] != s[1] and eq(q[0], q[2]) and eq(q[1], q[0] + q[2]):
+            return "butterfly"
+        if eq(q[0], q[1]) and eq(q[1], q[2]) and (s[0] != s[1] == s[2] or s[0] == s[1] != s[2]):
+            return "ladder"
+        return "other"
+    if n == 4 and all(eq(x, q[0]) for x in q):
+        if len(kinds) == 1:
+            return "condor" if s[0] == s[3] != s[1] == s[2] else "other"
+        puts, calls = [x for x in o if x["kind"] == "P"], [x for x in o if x["kind"] == "C"]
+        if len(puts) != 2:
+            return "other"
+        if len({x["strike"] for x in o}) == 2 and puts[0]["strike"] == calls[0]["strike"]:
+            lo_c = calls[0]["q"] > 0
+            return "box" if lo_c != (puts[0]["q"] > 0) and (calls[1]["q"] > 0) != lo_c else "other"
+        if (puts[0]["q"] > 0) != (puts[1]["q"] > 0) and (calls[0]["q"] > 0) != (calls[1]["q"] > 0) \
+                and (puts[1]["q"] > 0) == (calls[0]["q"] > 0):
+            if puts[1]["strike"] == calls[0]["strike"]:
+                return "iron_butterfly"
+            return "iron_condor" if puts[1]["strike"] < calls[0]["strike"] else "other"
+    return "other"
+
+
+def block_shape(legs: list[dict], ts_ms: int, fut: list[dict] | None = None) -> dict:
+    """블록 한 건(테이커 관점)의 구조 · 선물 헤지 다리 유무 · 순델타 쪽 · 순베가 쪽(2026-10-01 사용자 «새로 보여 줄 것»).
+    그릭스는 체결 IV·지수로 BS(r=0) -- 부호만 쓴다(크기로 «방향 vs 변동성»을 가르는 건 가정 의존이라 안 한다).
+    쪽 = |순| < 총의 10% 면 neutral(선물 헤지가 붙은 패키지는 순델타 비율 중앙 0.04)."""
+    import collect_deribit_option_gex_20260815 as gex
+    net: dict = {}
+    for l in legs:
+        net[l["instrument_name"]] = net.get(l["instrument_name"], 0.0) + (1 if l["direction"] == "buy" else -1) * float(l["amount"])
+    o = []
+    for inst, qq in net.items():
+        sp = gex._parse_instrument(inst)
+        if sp and abs(qq) > 1e-12:
+            o.append({"exp": sp["expiration_ts"], "kind": "C" if sp["option_type"] == "call" else "P", "strike": sp["strike"], "q": qq})
+    o.sort(key=lambda x: (x["exp"], x["kind"], x["strike"]))
+    nd = gd = nv = gv = 0.0
+    for l in legs:
+        sp = gex._parse_instrument(l["instrument_name"])
+        S, iv = float(l.get("index_price") or 0), float(l.get("iv") or 0)
+        yrs = (sp["expiration_ts"].timestamp() - ts_ms / 1000) / (365.0 * 86400) if sp else 0
+        if not sp or S <= 0 or iv <= 0 or yrs <= 0:
+            continue
+        sig = iv / 100
+        d1 = (math.log(S / sp["strike"]) + 0.5 * sig * sig * yrs) / (sig * math.sqrt(yrs))
+        de = gex._bs_delta(S, sp["strike"], iv, yrs, sp["option_type"] == "call")
+        ve = S * math.exp(-0.5 * d1 * d1) / math.sqrt(2 * math.pi) * math.sqrt(yrs) / 100
+        qq = (1 if l["direction"] == "buy" else -1) * float(l["amount"])
+        nd, gd, nv, gv = nd + qq * de, gd + abs(qq * de), nv + qq * ve, gv + abs(qq * ve)
+    for f in fut or []:     # 선물 amount: 역선물(ETH·BTC) = USD 명목 → 코인 · USDC 선형 = 코인 수량
+        qq = (1 if f["direction"] == "buy" else -1) * float(f["amount"])
+        d = qq if "_USDC" in f["instrument_name"] else qq / float(f["price"])
+        nd, gd = nd + d, gd + abs(d)
+    side = lambda v, g, pos, neg: None if g <= 0 else ("neutral" if abs(v) < 0.1 * g else (pos if v > 0 else neg))   # noqa: E731
+    return {"structure": _shape(o) if o else "future_only", "hedge": bool(fut),
+            "delta_side": side(nd, gd, "long", "short"), "vol_side": side(nv, gv, "long_vol", "short_vol")}
+
+
+def group_blocks(rows: list[dict], fut: dict | None = None) -> list[dict]:
     """블록 다리 행 → 블록 단위 목록(최신 먼저). 합계는 USD: 명목 = Σ amount×index,
-    프리미엄 = Σ amount×price×index (**총액** -- 매수·매도 다리 부호를 상쇄하지 않는다; 순액은 legs 의 direction 으로)."""
+    프리미엄 = Σ amount×price×index (**총액** -- 매수·매도 다리 부호를 상쇄하지 않는다; 순액은 legs 의 direction 으로).
+    fut = {block_trade_id: [선물 헤지 다리]}(reconcile 이 채운 block_future_legs) → 블록마다 block_shape."""
     blocks: dict[str, dict] = {}
     for r in sorted(rows, key=lambda r: (r["ts_ms"], r["trade_id"])):
         b = blocks.setdefault(r["block_trade_id"], {
@@ -101,6 +184,10 @@ def group_blocks(rows: list[dict]) -> list[dict]:
     for b in blocks.values():
         b["notional_usd"] = round(b["notional_usd"], 2)
         b["premium_usd"] = round(b["premium_usd"], 2)
+        try:
+            b.update(block_shape(b["legs"], b["ts_ms"], (fut or {}).get(b["block_trade_id"])))
+        except Exception:    # 이름 규칙 밖 종목 -- 구조만 빠진다
+            pass
     return sorted(blocks.values(), key=lambda b: b["ts_ms"], reverse=True)
 
 
@@ -312,7 +399,31 @@ def reconcile() -> dict:
     return {"체결": len(rows), "강제청산": len(liq), "헤지 다리": len(fut), "RFQ": len(rfq)}
 
 
-def hourly_flow(rows) -> dict:
+_DOI = {"key": None, "val": {}}
+
+
+def hourly_doi(con) -> dict:
+    """코인·정시별 미결제 변화(ΔOI, 기초자산 수량) = 그 시각 첫 체인 스냅샷 → 다음 시각 첫 스냅샷, **두 스냅샷에 다 있는 종목만**
+    (만기로 사라지는 종목의 감소는 청산이 아니다 -- 2026-10-01 연구). 스냅샷이 바뀔 때만 다시 센다(write 는 20초마다)."""
+    try:
+        key = con.execute("SELECT max(recorded_at_utc) FROM option_chain_snapshot").fetchone()[0]
+    except Exception:
+        return {}
+    if key is None or key == _DOI["key"]:
+        return _DOI["val"]
+    rows = con.execute("""
+        WITH s AS (SELECT recorded_at_utc t, currency, instrument_name, open_interest FROM option_chain_snapshot
+                   WHERE recorded_at_utc >= now() - INTERVAL 26 HOUR),
+             hs AS (SELECT currency, date_trunc('hour', t) h, min(t) t0 FROM s GROUP BY 1, 2),
+             a AS (SELECT s.currency, hs.h, s.instrument_name, s.open_interest oi FROM s JOIN hs ON s.currency = hs.currency AND s.t = hs.t0)
+        SELECT a.currency, epoch_ms(a.h), sum(b.oi - a.oi) FROM a JOIN a b
+          ON a.currency = b.currency AND a.instrument_name = b.instrument_name AND b.h = a.h + INTERVAL 1 HOUR
+        GROUP BY 1, 2""").fetchall()
+    _DOI.update(key=key, val={(c, int(h)): float(d) for c, h, d in rows})
+    return _DOI["val"]
+
+
+def hourly_flow(rows, doi: dict | None = None) -> dict:
     """2026-09-28 옵션 순매수 흐름(사용자 선택 2-A) -- 코인별 정시(UTC=KST 정시) 버킷 25개(지난 24시간 + 진행 중).
     cb/cs/pb/ps = 콜·풋 테이커 매수·매도 수량(기초자산 단위), dlt = 옵션으로 산 순델타(콜 매수·풋 매도 +).
     델타는 체결 시점의 IV·지수로 블랙-숄즈(r=0, 선도 대신 지수 -- ponytail: 먼 만기는 캐리만큼 어긋난다, 흐름 방향엔 영향 작음).
@@ -320,8 +431,10 @@ def hourly_flow(rows) -> dict:
     import collect_deribit_option_gex_20260815 as gex
     now_h = int(time.time() // 3600) * 3_600_000
     hours = [now_h - i * 3_600_000 for i in range(24, -1, -1)]
-    out = {c: {h: {"h": h, "cb": 0.0, "cs": 0.0, "pb": 0.0, "ps": 0.0, "dlt": 0.0} for h in hours} for c in COINS}
-    for ts, inst, direction, amt, iv, ix in rows:
+    # 2026-10-01 liq = 강제청산 체결 수량 · doi = 그 시간 미결제 변화(hourly_doi, 없으면 None) → 화면이 신규 비율 (V+ΔOI)/2V 를 낸다
+    out = {c: {h: {"h": h, "cb": 0.0, "cs": 0.0, "pb": 0.0, "ps": 0.0, "dlt": 0.0, "liq": 0.0, "doi": (doi or {}).get((c, h))}
+               for h in hours} for c in COINS}
+    for ts, inst, direction, amt, iv, ix, *rest in rows:
         c = coin_of(inst)
         spec = gex._parse_instrument(inst) if c else None
         b = out[c].get(int(ts // 3_600_000) * 3_600_000) if spec else None
@@ -330,6 +443,8 @@ def hourly_flow(rows) -> dict:
         call = spec["option_type"] == "call"
         buy = direction == "buy"
         b[("cb" if buy else "cs") if call else ("pb" if buy else "ps")] += float(amt)
+        if rest and rest[0]:
+            b["liq"] += float(amt)
         yrs = (spec["expiration_ts"].timestamp() - ts / 1000) / (365.0 * 86400)
         d = gex._bs_delta(float(ix or 0), spec["strike"], float(iv or 0), yrs, call)
         b["dlt"] += (1 if buy else -1) * float(amt) * d
@@ -363,9 +478,17 @@ def write(rows: list[tuple], gaps: list[tuple] | None = None) -> int:
         cur = con.execute(f"SELECT {','.join(COLS)} FROM option_trades WHERE is_block AND ts_ms >= ?",
                           [int(time.time() * 1000) - STATE_WINDOW_MS])
         legs = [dict(zip(COLS, r)) for r in cur.fetchall()]
-        by_coin = {c: group_blocks([x for x in legs if coin_of(x["instrument_name"]) == c]) for c in COINS}
-        flow = hourly_flow(con.execute("SELECT ts_ms, instrument_name, direction, amount, iv, index_price FROM option_trades "
-                                       "WHERE ts_ms >= ?", [(int(time.time() // 3600) - 24) * 3_600_000]).fetchall())
+        fut: dict = {}
+        try:
+            for bid, inst, d, a, p in con.execute("SELECT block_trade_id, instrument_name, direction, amount, price FROM block_future_legs "
+                                                  "WHERE ts_ms >= ?", [int(time.time() * 1000) - STATE_WINDOW_MS]).fetchall():
+                fut.setdefault(bid, []).append({"instrument_name": inst, "direction": d, "amount": a, "price": p})
+        except Exception:    # 표가 아직 없으면(옛 DB) 헤지 표시만 빠진다
+            fut = {}
+        by_coin = {c: group_blocks([x for x in legs if coin_of(x["instrument_name"]) == c], fut) for c in COINS}
+        flow = hourly_flow(con.execute("SELECT ts_ms, instrument_name, direction, amount, iv, index_price, liquidation FROM option_trades "
+                                       "WHERE ts_ms >= ?", [(int(time.time() // 3600) - 24) * 3_600_000]).fetchall(),
+                           hourly_doi(con))
     finally:
         con.close()      # 붙들고 있으면 연구 쿼리가 막힌다
     # blocks/n_blocks = ETH(옛 계약 그대로) · blocks_by_coin = 네 코인
@@ -462,6 +585,24 @@ async def run() -> None:
 
 
 def _selftest() -> None:
+    L = lambda inst, d, a, iv=50.0: {"instrument_name": inst, "direction": d, "amount": a, "iv": iv, "index_price": 2600.0}   # noqa: E731
+    ts = 1_790_000_000_000     # 2026-09-21
+    st = block_shape([L("ETH-16OCT26-2600-C", "sell", 100), L("ETH-16OCT26-2600-P", "sell", 100)], ts)
+    assert st["structure"] == "straddle" and st["vol_side"] == "short_vol" and st["hedge"] is False, st
+    vs = block_shape([L("ETH-16OCT26-2600-C", "buy", 50), L("ETH-16OCT26-2800-C", "sell", 50)], ts)
+    assert vs["structure"] == "vertical" and vs["delta_side"] == "long", vs
+    hg = block_shape([L("ETH-16OCT26-2600-C", "buy", 100)], ts,
+                     [{"instrument_name": "ETH-PERPETUAL", "direction": "sell", "amount": 0.5 * 100 * 2600, "price": 2600.0}])
+    assert hg["structure"] == "single" and hg["hedge"] and hg["delta_side"] == "neutral", hg      # ATM 콜 ≈ 0.5Δ 를 선물로 상쇄
+    fl = hourly_flow([(ts, "ETH-16OCT26-2600-C", "buy", 3.0, 50.0, 2600.0, "T"), (ts, "ETH-16OCT26-2600-P", "sell", 2.0, 50.0, 2600.0, None)],
+                     {("ETH", ts // 3_600_000 * 3_600_000): 1.5})
+    # hourly_flow 는 «지금부터 24시간 전»만 버킷을 만든다 -- 이 ts 는 과거라 버킷 밖일 수 있으니, 있을 때만 확인
+    hb = [b for b in fl["ETH"] if b["h"] == ts // 3_600_000 * 3_600_000]
+    assert not hb or (hb[0]["liq"] == 3.0 and hb[0]["doi"] == 1.5 and hb[0]["cb"] == 3.0 and hb[0]["ps"] == 2.0), hb
+    now_ts = int(time.time() * 1000)
+    fl2 = hourly_flow([(now_ts, "ETH-16OCT27-2600-C", "buy", 3.0, 50.0, 2600.0, "T")], {("ETH", now_ts // 3_600_000 * 3_600_000): 1.5})
+    b2 = [b for b in fl2["ETH"] if b["h"] == now_ts // 3_600_000 * 3_600_000][0]
+    assert b2["liq"] == 3.0 and b2["doi"] == 1.5 and b2["cb"] == 3.0, b2
     b0 = 600.0 * 1_666_667                                              # 10분 경계
     assert next_chain_wait(b0 + 200) == 600 - 200 + 5                    # :03:20 → 다음 :10:05
     assert next_chain_wait(b0 + 590) == 600 - 590 + 5 + 600              # 15초 남으면 한 칸 건너뜀

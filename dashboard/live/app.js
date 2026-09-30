@@ -3399,9 +3399,9 @@ const OPT_TIPS = {
   mood: "리버설·버터플라이는 «7일 고정만기»로 잰다: 만기마다 외가격 옵션의 델타로 보간해 정확히 델타 ±0.25 의 IV 를 구하고, 7일 양옆 두 만기를 시간으로 보간한다(30일 값은 괄호). 2026-10-01 까지는 가까운 만기(늘 24시간 미만) 최근접 행사가로 쟀는데 실제 델타가 0.15~0.31 이고 1시간에 평균 3.6pt 흔들려 잡음이었다(7일 고정만기는 0.58pt). 단위 pt = IV %포인트(가격 % 아님), IV 는 Deribit 평가값(mark_iv).\n25Δ 리스크 리버설 = 델타 +0.25 콜 IV − 델타 −0.25 풋 IV(지금가에서 위아래 비슷한 거리). 음수로 깊으면(−5pt 쯤 아래) 하락 방어 풋 수요 = 공포 · 양수면 상승 콜에 웃돈 · ±1pt 안은 중립.\n버터플라이 = (25Δ 콜 IV + 25Δ 풋 IV)/2 − ATM IV = 스마일이 휜 정도. 클수록 «방향은 몰라도 크게 튈» 꼬리에 값이 붙음. 작은 양수가 평상시.\n기간 구조 = 7·30·60일 고정만기 ATM IV(연율 %, 양옆 만기의 총분산 보간). 가까운 일간 만기는 남은 시간에 미국장이 드느냐에 따라 7일 대비 0.71~0.92배로 출렁여 뺐다(만기별 값은 «옵션 만기» 시간축 선). 뒤로 갈수록 높으면 정상(콘탱고) · 앞이 더 높으면(역전) «지금 당장» 큰 움직임을 값에 넣는 스트레스(급락·이벤트 직전). IV 41 ≈ 하루 1σ ±2.1%(41/√365).\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중. 예측력 모름 → 매매 신호 말고 «분위기가 바뀌었나»(리버설 급락·기간 구조 역전) 확인용.",
   ladder: "행사가 사다리: 세로 = 행사가(지수 ±8%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러), 맨 오른쪽 = 행사가별 순감마(청록 = 콜 쪽 +, 주황 = 풋 쪽 −). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
   curve: "감마 곡선(딜러·체결, 커버 종목만): 가격이 지금에서 ±15% 옮겨 가면 딜러 감마 합이 얼마가 되는가(사다리 칩과 같은 범위). 청록 = 양감마 · 주황 = 음감마. 흰 점선 = 지금 가격, 주황 점선 = 플립. 세로 = 가격 1% 움직임당 딜러가 사고파는 금액($).\n점선 = DEX(딜러·체결 순델타 × 가격) — 단위가 달라 0선만 맞추고 크기는 따로 늘렸다(값은 아래 줄).\n커버가 낮으면 일부 종목의 곡선이다(카드 맨 위 커버 %). 검정 전 — 참고로만.",
-  blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자)이라 롱/숏이나 신규/청산은 모른다.\n우리 검정 없음 — 참고로만.",
+  blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자). 줄 머리 = 다리 구조로 분류한 전략 이름(Deribit 자체 구조 코드와 313/313 일치) · «+ 선물 헤지» = 같은 블록에 선물 다리가 붙음(보통 델타 중립 패키지) · 델타/베가 롱·숏 = 요청자 쪽 순델타·순베가 부호(체결 IV 로 계산, 총량의 10% 미만이면 중립). 단일 다리 블록은 다른 곳 헤지의 일부일 수 있어 의도를 모른다. 신규/청산·신원은 모른다. 금액 = 다리별 명목 합(스프레드면 두 다리가 다 더해진다).\n우리 검정 없음 — 참고로만.",
   lane: "옵션 만기(지금 ~ +120시간, 블록 거래는 가운데 «블록 거래» 칸): 시각 KST. 막대 = 다가올 만기 규모(콜+풋 미결제 × 지수 = 명목 달러) · pain = max pain(그 만기 미결제만으로 계산) · P/C = 풋÷콜 미결제 수량(심리 지표 아님) · 청록 선 = 만기별 ATM IV(가까운 만기는 남은 시간이 짧아 시간대에 따라 출렁인다).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
-  flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 테이커 체결 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 테이커가 롱으로 얼마나 기울었나». «감마 곡선»의 DEX 와는 다른 값이다: DEX 는 딜러(= 테이커 반대편) 순델타라 부호가 대략 반대이고(흐름 + = 테이커 롱 · DEX + = 딜러 롱), 창도 다르다(흐름 = 지난 24시간 · DEX = 종목 상장 이후 전체).\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). 새로 연 거래인지 닫은 거래인지는 모른다. 검정 전 — 참고.",
+  flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 테이커 체결 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 테이커가 롱으로 얼마나 기울었나». «감마 곡선»의 DEX 와는 다른 값이다: DEX 는 딜러(= 테이커 반대편) 순델타라 부호가 대략 반대이고(흐름 + = 테이커 롱 · DEX + = 딜러 롱), 창도 다르다(흐름 = 지난 24시간 · DEX = 종목 상장 이후 전체).\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). «신규 약 N%» = 그 시간 새로 열린 계약의 비율(체결량 V · 미결제 변화 ΔOI 로 (V+ΔOI)/2V, 매수·매도 양쪽 몫 기준) — 이 비율은 정확하지만 테이커와 메이커 중 누가 열었는지는 모른다(테이커 몫은 약 70% 만 확정). 예: 순매수가 0 근처여도 미결제가 크게 늘면 롱과 숏이 양쪽으로 새로 쌓인 것. «강제청산» = 테이커가 강제청산된 체결(Deribit 표시, 매시 history 로 대조). 만기로 사라지는 계약은 미결제 변화에서 뺀다. 검정 전 — 참고.",
 };
 // 2026-09-28 네 코인(ETH·BTC 역옵션 · SOL·XRP USDC 선형옵션). DVOL 지수는 ETH·BTC 뿐 -- 나머지는 30일 ATM IV(iv30)로 폭을 잰다.
 function optData() {
@@ -3598,6 +3598,15 @@ function optGammaCurveSvg(o, W) {
 }
 
 // 옵션 순매수 흐름(2-A, 2026-09-28): 만기 시간축 카드 아래 줄. 정시 버킷 25개(마지막은 진행 중).
+// 2026-10-01 «새로 연 쪽이냐 닫은 쪽이냐»(연구 research_eth_option_open_close_20260930): 체결량 V 와 미결제 변화 ΔOI 로
+//   신규 비율 = (V + ΔOI) / 2V 는 **정확**하다(매수·매도 양쪽 몫 기준). 누가 열었는지(테이커냐 메이커냐)는 모른다.
+//   ΔOI 는 수집기가 정시 첫 스냅샷끼리, 두 스냅샷에 다 있는 종목만(만기 소멸 제외)으로 센다 -- 없으면(옛 수집기·첫 시간) 빈칸.
+function optNewTxt(bs) {
+  const ok = bs.filter((b) => b.doi != null), V = ok.reduce((a, b) => a + b.cb + b.cs + b.pb + b.ps, 0), dOi = ok.reduce((a, b) => a + b.doi, 0);
+  if (!(V > 0)) return "";
+  const r = Math.max(0, Math.min(1, (V + dOi) / (2 * V)));
+  return ` · 미결제 ${dOi >= 0 ? "+" : "−"}${fmtNum(Math.abs(dOi), 0)} · 신규 약 ${Math.round(r * 100)}%`;
+}
 function optFlowSvg(flow, W) {
   if (!flow || !flow.length) return "";
   const narrow = W < 700, H = narrow ? 150 : 170, x0 = narrow ? 34 : 60, x1 = W - (narrow ? 8 : 20), base = narrow ? 84 : 94, amp = narrow ? 44 : 52;
@@ -3616,7 +3625,7 @@ function optFlowSvg(flow, W) {
       s += `<rect x="${(X(i) + 3 + dx).toFixed(1)}" y="${(v >= 0 ? base - hh : base).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${col}" fill-opacity="${i === n - 1 ? 0.45 : 0.8}"/>`;
     });
     const b = flow[i];
-    s += `<rect x="${X(i).toFixed(1)}" y="${base - amp}" width="${((x1 - x0) / n).toFixed(1)}" height="${2 * amp}" fill="transparent"><title>${optKst(b.h)}~ · 콜 매수 ${fmtNum(b.cb, 0)} / 매도 ${fmtNum(b.cs, 0)} · 풋 매수 ${fmtNum(b.pb, 0)} / 매도 ${fmtNum(b.ps, 0)} · 순델타 ${b.dlt >= 0 ? "+" : ""}${fmtNum(b.dlt, 0)}${i === n - 1 ? " (진행 중)" : ""}</title></rect>`;
+    s += `<rect x="${X(i).toFixed(1)}" y="${base - amp}" width="${((x1 - x0) / n).toFixed(1)}" height="${2 * amp}" fill="transparent"><title>${optKst(b.h)}~ · 콜 매수 ${fmtNum(b.cb, 0)} / 매도 ${fmtNum(b.cs, 0)} · 풋 매수 ${fmtNum(b.pb, 0)} / 매도 ${fmtNum(b.ps, 0)} · 순델타 ${b.dlt >= 0 ? "+" : ""}${fmtNum(b.dlt, 0)}${optNewTxt([b])}${b.liq > 0 ? ` · 강제청산 ${fmtNum(b.liq, 0)}` : ""}${i === n - 1 ? " (진행 중)" : ""}</title></rect>`;
     if (i % (narrow ? 6 : 4) === 0) s += `<text x="${(X(i) + 3).toFixed(1)}" y="${H - 2}" font-size="9.5" fill="var(--muted)">${optKst(b.h, false).slice(0, 2)}시</text>`;
   });
   s += `<path d="M${cum.map((v, i) => `${X(i + 1).toFixed(1)} ${(base - (amp * v) / dm).toFixed(1)}`).join(" L")}" fill="none" stroke="var(--option)" stroke-width="2"/>`
@@ -3628,6 +3637,15 @@ const optTipOpen = new Set();
 // 2026-09-29 휴대폰 블록 거래(사용자 선택 C): 시간축 점이 한 칸에 겹쳐 안 보여 «요약 한 줄 + 펼치기 목록». 펼침은 브라우저 기억.
 let optBlkOpen = (() => { try { return localStorage.getItem("optBlkOpen") === "1"; } catch (e) { return false; } })();
 const OPT_MON = { JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06", JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12" };
+// 2026-10-01 블록 한 줄 머리: 구조(Deribit 구조 코드와 313/313 일치하는 규칙) · 선물 헤지 · 순델타 쪽 · 베가 쪽 -- 전부 요청자(테이커) 기준 부호.
+const OPT_SHAPE = { single: "단일", straddle: "스트래들", strangle: "스트랭글", risk_reversal: "리스크 리버설", synthetic: "합성 선물",
+  vertical: "수직 스프레드", ratio_spread: "비율 스프레드", calendar: "캘린더", diagonal: "대각", butterfly: "버터플라이", ladder: "래더",
+  condor: "콘도르", iron_condor: "아이언 콘도르", iron_butterfly: "아이언 버터플라이", box: "박스", other: "복합", future_only: "선물" };
+function optBlkShape(b) {
+  if (!b.structure) return "";
+  const d = { long: "델타 롱", short: "델타 숏", neutral: "델타 중립" }[b.delta_side], v = { long_vol: "베가 롱", short_vol: "베가 숏", neutral: "베가 중립" }[b.vol_side];
+  return `<span class="opt-blk-shape">${OPT_SHAPE[b.structure] || b.structure}${b.hedge ? " + 선물 헤지" : ""}${d ? ` · ${d}` : ""}${v ? ` · ${v}` : ""}</span> `;
+}
 function optBlkLegs(b) {   // ETH-16OCT26-2700-P -> «매수 10-16 2700P ×500» (SOL·XRP 행사가 소수점 d)
   return (b.legs || []).map((l) => {
     const m = String(l.instrument_name).match(/-(\d+)([A-Z]{3})\d+-([\dd]+)-([CP])$/);
@@ -3642,7 +3660,7 @@ function optBlkHtml(blocks, n24, phone, sum24 = null, max24 = null) {
   // 합계·최대는 서버가 24h 전체로 준 값(목록은 최신 8건뿐 -- 2026-09-30 검증). 옛 서버면 받은 목록으로.
   const tot = sum24 ?? blocks.reduce((a, b) => a + (b.notional_usd || 0), 0), mx = max24 || blocks.reduce((a, b) => ((b.notional_usd || 0) > (a.notional_usd || 0) ? b : a));
   const rows = [...blocks].sort((a, b) => b.ts_ms - a.ts_ms).slice(0, 5).map((b) =>
-    `<div class="opt-blk-row"><span class="t">${optKst(b.ts_ms, false)}</span><b>${optUsd(b.notional_usd || 0)}</b><span class="legs">${optBlkLegs(b)}</span></div>`).join("");
+    `<div class="opt-blk-row"><span class="t">${optKst(b.ts_ms, false)}</span><b>${optUsd(b.notional_usd || 0)}</b><span class="legs">${optBlkShape(b)}${optBlkLegs(b)}</span></div>`).join("");
   return `<div class="opt-blk-sum"><span>블록 24h <b>${n24 ?? blocks.length}건 · ${optUsd(tot)}</b> · 최대 ${optUsd(mx.notional_usd || 0)} ${optKst(mx.ts_ms, false)}</span>`
     + (phone ? `<button type="button" class="opt-blk-btn" aria-expanded="${optBlkOpen}">${optBlkOpen ? "접기 ▴" : "목록 ▾"}</button>` : "") + `</div>` + (open ? `<div class="opt-blk-list">${rows}</div>` : "");
 }
@@ -3763,7 +3781,7 @@ function renderOptions() {
       + `<span class="opt-lane-legend">${legend}</span></div><p class="opt-tip"${optTipOpen.has(k) ? "" : " hidden"}>${escapeHtml(OPT_TIPS[k]).replace(/\n/g, "<br>")}</p>`;
     laneBody.innerHTML = head("lane", "옵션 만기 · 지금 ~ +120h", `<b class="opt-warn">막대</b> 만기 규모(명목) · pain · P/C(미결제) · <b class="opt-c">선</b> 만기별 ATM IV · KST`)
       + optLaneSvg(o, lw);   // 2026-09-29 블록 점 제거(사용자 지시) -- 블록은 옵션 카드 «블록 거래» 칸만
-    flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 체결 순델타(24h) 누적 · 테이커 기준`) + optFlowSvg(fl, fw) : "");
+    flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 체결 순델타(24h) 누적 · 테이커 기준${optNewTxt(fl.slice(0, -1)).replace(" · 미결제", " · 24h 미결제")}${fl.some((b) => b.liq > 0) ? ` · 강제청산 ${fmtNum(fl.reduce((a, b) => a + (b.liq || 0), 0), 0)}` : ""}`) + optFlowSvg(fl, fw) : "");
     const bt = (latestGex || {}).block_trades || {};
     if (blkBody) blkBody.innerHTML = head("blocks", "블록 거래 · 지난 24시간", "")
       + (bt.available === false ? `<div class="opt-note opt-warn">블록 수집 지연 — 아래 목록은 마지막으로 받은 값</div>` : "")
