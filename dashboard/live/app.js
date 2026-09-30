@@ -2795,12 +2795,45 @@ function cardRailSync() {
   cur = cur || rail.querySelector("[data-go]");
   rail.querySelectorAll("[data-go]").forEach((b) => { const on = b === cur; b.classList.toggle("on", on); if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); });
 }
+// 2026-09-30 «한 화면 모드»(사용자 1920×1080·90%): 넓은 화면에서 카드 하나 = 창 높이 하나 -- 레일 점/스크롤이 카드 단위로 딱 맞게 넘어간다.
+//   Footprint 는 차트 상자 높이를, Option 은 행사가 사다리 높이를 «창 높이 − 카드의 나머지»로 계산한다. 계좌는 창 높이까지 늘린다.
+//   창 높이 < 900 이면 끈다(가격판이 너무 좁아진다). 켜기/끄기 = 레일 아래 단추(브라우저 기억).
+let fitOptLadderH = null;
+const optColW = () => { const s = document.querySelector('#optCard .opt-sec:has([data-tip="ladder"])'); return s && s.clientWidth > 240 ? Math.min(440, Math.round(s.clientWidth)) : 336; };   // .opt-ladder 최대 폭 440 과 같게(넓게 그리면 줄어 글자가 작아진다)
+function fitOn() {
+  let on = true; try { on = localStorage.getItem("fit1") !== "0"; } catch (e) { /* 기억은 편의 */ }
+  return on && innerWidth >= 1700 && innerWidth > innerHeight && innerHeight >= 900 && activePageTab === "snapshot";
+}
+function fitLayout() {
+  const on = fitOn(), vh = innerHeight - 20;
+  document.documentElement.classList.toggle("fit1", on);
+  const fp = el("fpCard"), cc = fp && fp.querySelector(".candle-container"), svg = el("candleSvgSnapshot"), acct = el("acctCard"), opt = el("optCard");
+  if (cc && svg) {
+    let want = "";
+    if (on) { const rest = fp.offsetHeight - cc.offsetHeight; want = `${Math.max(640, Math.min(1400, vh - rest - 12))}px`; }
+    if (svg.style.height !== want) {
+      svg.style.height = want; cc.style.height = want ? `${parseInt(want, 10) + 12}px` : "";
+      if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
+    }
+  }
+  if (acct) acct.style.minHeight = on ? `${vh}px` : "";
+  if (opt) opt.style.minHeight = on ? `${vh}px` : "";   // 세 열은 stretch 로 같이 늘어난다
+  if (opt) {
+    let h = null;
+    const lad = opt.querySelector('.opt-sec:has([data-tip="ladder"]) svg');
+    if (on && lad) h = Math.max(320, Math.min(900, Math.round(vh - (opt.offsetHeight - lad.getBoundingClientRect().height))));
+    if (on && fitOptLadderH && h && Math.abs(h - fitOptLadderH) < 6) h = fitOptLadderH;   // 떨림 방지
+    if (h !== fitOptLadderH) { fitOptLadderH = h; if (typeof renderOptions === "function") renderOptions(); }
+  }
+}
 function setupCardRail() {
   const rail = el("cardRail");
   if (!rail) return;
   rail.addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) el(b.dataset.go)?.scrollIntoView({ behavior: "smooth", block: "start" }); });
   addEventListener("scroll", () => requestAnimationFrame(cardRailSync), { passive: true });
   cardRailSync();
+  addEventListener("resize", () => requestAnimationFrame(fitLayout));
+  setInterval(fitLayout, 1500);   // 데이터가 오며 카드 높이가 바뀐다 -- 1.5초마다 다시 잰다(값이 같으면 아무것도 안 한다)
 }
 
 function setupScrollRendering() {
@@ -3457,11 +3490,11 @@ function optLadderChips() {
   const chip = (k, t) => `<button type="button" class="opt-chip-btn${optLadderScope === k ? " on" : ""}" data-scope="${k}" aria-pressed="${optLadderScope === k}">${t}</button>`;
   return `<div class="opt-chips">${chip("front", "가까운 만기")}${chip("week", "7일 안")}${chip("all", "전 만기")}</div>`;
 }
-function optLadderSvg(o, W) {
+function optLadderSvg(o, W, Hfit = null) {
   const st = o.strikes || {}, rows = st[optLadderScope] || [];
   const rolled = optLadderScope === "front" && st.front_exp_ms && st.front_exp_ms <= Date.now();   // 만기 직후 ≤10분(optDealer 와 같은 규칙)
   if (!rows.length || rolled) return optLadderChips() + `<div class="opt-note">${rolled ? "만기 교체 중 — 다음 수집(10분 안)부터 새 가까운 만기" : "행사가 데이터 없음(수집기 다음 주기에 채워진다)"}</div>`;
-  const px = optPx(o), lo = px * 0.92, hi = px * 1.08, H = 560, y0 = 22, y1 = H - 8;   // 2026-09-30 380 -> 560(막대를 두껍게 -- 값 글자가 막대 안에 들어가게, 사용자 지시)
+  const px = optPx(o), lo = px * 0.92, hi = px * 1.08, H = Hfit || 560, y0 = 22, y1 = H - 8;   // 2026-09-30 380 -> 560(막대를 두껍게 -- 값 글자가 막대 안에 들어가게, 사용자 지시)
   const Y = (p) => y1 - ((p - lo) / (hi - lo)) * (y1 - y0);
   const mid = Math.round(W * 0.47), half = mid - 46, gW = 34, gx = W - gW;
   const mx = Math.max(1, ...rows.map((r) => Math.max(r[1], r[2]))), gm = Math.max(1, ...rows.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0)));
@@ -3690,8 +3723,8 @@ function renderOptions() {
       // 2026-09-29 사용자 «charm 한 줄»: 시간만 1시간 흐를 때 딜러 델타 변화 → 딜러는 반대로 헤지한다(+ 면 매도). 체결 기반 · 서술
       + kv("charm · 다음 1시간", gm.charm == null ? "-" : Math.abs(gm.charm) < 1 ? "거의 0"
            : `헤지 ${gm.charm > 0 ? "매도" : "매수"} ${optUsd(Math.abs(gm.charm))} (딜러 델타 ${sgn(gm.charm)})`)),
-    sec("ladder", "행사가 사다리", optLadderSvg(o, 336)),
-    sec("curve", "감마 곡선", optGammaCurveSvg(o, 336)),
+    sec("ladder", "행사가 사다리", optLadderSvg(o, optColW(), fitOptLadderH)),
+    sec("curve", "감마 곡선", optGammaCurveSvg(o, optColW())),
     sec("mood", "심리", kv("25Δ 리스크 리버설", f && f.rr25 != null ? `${f.rr25 >= 0 ? "+" : ""}${f.rr25.toFixed(1)}pt` : "-")
       + kv("버터플라이", f && f.bf25 != null ? `${f.bf25 >= 0 ? "+" : ""}${f.bf25.toFixed(1)}pt` : "-")
       + kv("기간 구조(ATM IV)", (o.expiries || []).filter((e) => e.exp_ms > Date.now()).slice(0, 5).map((e) => e.atm_iv.toFixed(0)).join(" → ") || "-")),

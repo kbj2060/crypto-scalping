@@ -2605,6 +2605,9 @@ body.not-eth #mcWall { display: none; }
 #mcWhen { border-top: 1px solid var(--line); margin-top: 10px; }   /* 시장 맥락은 ETH 전용 */
 #mcBody.mc-in-fp:not(.mc-cmp) { border-top: 1px solid var(--line); margin-top: 12px; }
 /* 2026-09-30 카드 이동 레일(점만, 사용자 지시): 오른쪽 가운데 고정 · 지금 보는 카드 = 채운 점. 넓은 화면(위 미디어 쿼리)에서만 보인다. */
+/* 2026-09-30 한 화면 모드(app.js fitLayout): 카드 단위 스냅 */
+html.fit1 { scroll-snap-type: y proximity; }
+html.fit1 #snapshotTabPanel > .panel { scroll-snap-align: start; scroll-margin-top: 10px; }
 .card-rail { display: none; position: fixed; z-index: 800; right: 12px; top: 50%; transform: translateY(-50%); gap: 18px; padding: 6px 0; }
 .card-rail::before { content: ""; position: absolute; left: 50%; top: 10px; bottom: 10px; width: 2px; margin-left: -1px; background: var(--line); border-radius: 1px; }
 .card-rail button { position: relative; width: 16px; height: 16px; padding: 0; border-radius: 50%; border: 2px solid var(--line); background: var(--bg, var(--panel)); cursor: pointer;
