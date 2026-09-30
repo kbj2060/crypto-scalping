@@ -2821,19 +2821,34 @@ function fitLayout() {
   const acct = el("acctCard"), opt = el("optCard");
   if (acct) acct.style.minHeight = on ? `${vh}px` : "";
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
-  // 2026-10-01 사다리 높이 = 남는 칸을 재서 맞춘다(사용자 «내용이 늘어도 Option 카드가 화면을 가득») -- 공식은 첫 추정·캐시 없을 때만.
-  //   격자는 위로 붙이고(html.fit1 #optCard align-content:start) 마지막 칸 아래 빈자리(음수 = 넘침)만큼 사다리를 늘리고 줄인다.
+  // 2026-10-01(2) Option 칸 높이 = **원래 크기로 매번 계산**(되먹임 없음). 앞 판은 넘칠 때마다 사다리를 깎는 톱니라 한 번 300 에 닿으면
+  //   다시 안 커졌고(캐시에도 남음) 차트 상한만 쌓여 «전부 작아지고 바닥은 잘렸다». 이제:
+  //   ① 각 칸 = 머리·꼬리(고정) + 그림(원래 높이 = 폭 × viewBox 비율) ② 원래 크기로 들어가면 상한 없음 + 사다리가 1·2줄을 채움
+  //   ③ 안 들어가면 만기·흐름·감마곡선에 들어갈 만큼만 상한(이분 탐색). 바닥은 풋프린트처럼 12px 여유.
   let h = on ? (fitOptLadderH || fitLadderFormula()) : null;
   if (on && opt && opt.offsetParent) {
-    const items = opt.querySelectorAll(":scope > .ops-health-head, #optBody > *, #optRow > *, :scope > #mcWhen");
-    const bottom = Math.max(0, ...[...items].map((k) => k.getBoundingClientRect().bottom));
-    const r = opt.getBoundingClientRect(), slack = Math.round(r.top + vh - parseFloat(getComputedStyle(opt).paddingBottom || 0) - bottom);
-    // 2026-10-01 사다리가 바닥(300)인데도 넘치면(작은 창 · 사다리가 아닌 열이 줄 높이를 정할 때) 만기·흐름·감마곡선 차트 셋에 높이 상한을 준다 -- ⑤ 가 잘리던 것
-    const svgs = opt.querySelectorAll("#optLaneBody svg, #optFlowBody svg, .opt-sec:has([data-tip=curve]) svg");
-    if (bottom > 0 && Math.abs(slack) > 4) {
-      if (slack < 0 && h <= 300) fitOptSvgCap = Math.max(80, (fitOptSvgCap || Math.max(0, ...[...svgs].map((k) => k.getBoundingClientRect().height))) + Math.floor(slack / 2));
-      else if (slack > 0 && fitOptSvgCap) fitOptSvgCap = fitOptSvgCap + slack > 700 ? 0 : fitOptSvgCap + slack;
-      else h = Math.max(300, Math.min(900, h + slack));
+    const q = (sel) => opt.querySelector(sel), sec = (t) => q(`.opt-sec:has([data-tip="${t}"])`);
+    const lane = q("#optLaneBody"), flow = q("#optFlowBody"), blk = q("#optBlkBody"), curve = sec("curve"), lad = sec("ladder"), move = sec("move"), when = q(":scope > #mcWhen");
+    const box = (c) => c.getBoundingClientRect(), padB = (c) => parseFloat(getComputedStyle(c).paddingBottom) || 0;
+    const fix = (c) => {   // [머리·꼬리 고정 높이, 그림 원래 높이]
+      const g = c && c.querySelector("svg");
+      if (!g) return c ? [Math.max(0, ...[...c.children].map((k) => box(k).bottom)) - box(c).top + padB(c), 0] : [0, 0];
+      const gb = box(g), last = Math.max(gb.bottom, ...[...c.children].map((k) => box(k).bottom)), vb = g.viewBox && g.viewBox.baseVal;
+      return [gb.top - box(c).top + (last - gb.bottom) + padB(c), vb && vb.width ? (g.clientWidth * vb.height) / vb.width : gb.height];
+    };
+    if (lane && flow && blk && curve && lad && move) {
+      const [la, ln] = fix(lane), [fa, fn] = fix(flow), [ca, cn] = fix(curve), [bn] = fix(blk);
+      const r12 = (cap) => la + Math.min(ln, cap) + fa + Math.min(fn, cap), r3 = (cap) => Math.max(ca + Math.min(cn, cap), bn);
+      const whenH = when && when.offsetParent ? box(when).height + (parseFloat(getComputedStyle(when).marginTop) || 0) : 0;
+      const avail = box(opt).top + vh - padB(opt) - 12 - whenH - box(move).top;
+      let cap = Infinity;
+      if (r12(cap) + r3(cap) > avail) { let lo = 60, hi = Math.max(ln, fn, cn); while (hi - lo > 2) { const m = (lo + hi) / 2; if (r12(m) + r3(m) <= avail) lo = m; else hi = m; } cap = lo; }
+      fitOptSvgCap = cap === Infinity ? 0 : Math.floor(cap);
+      const lg = lad.querySelector("svg");
+      if (lg) {
+        const [lx] = fix(lad), want = Math.max(200, (cap === Infinity ? avail - r3(cap) : r12(cap)) - lx), gh = box(lg).height;
+        if (gh > 0 && Math.abs(want - gh) > 4) h = Math.max(200, Math.min(1200, Math.round((h * want) / gh)));
+      }
     }
   }
   if (opt) opt.style.setProperty("--optsvg", on && fitOptSvgCap ? `${Math.round(fitOptSvgCap)}px` : "none");
