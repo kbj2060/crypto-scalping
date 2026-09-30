@@ -3361,6 +3361,10 @@ def make_app() -> web.Application:
                             micro_state["baseline_at"] = now - MICRO_BASELINE_SECONDS + 60.0
                         print("micro-ref baseline: 갱신 실패 (재시도 60초 뒤"
                               + (", 기존 기준선 유지)" if micro_state["baseline"] else ")"), flush=True)
+                    try:   # 2026-10-01 «누가 밀고 있나» z 의 분모(UTC 시별). 실패면 있던 값 유지 → 없으면 옛 식
+                        micro_state["flow_scales"] = await asyncio.to_thread(mref.flow_hour_scales, MICRO_TAPE_DB_PATH) or micro_state.get("flow_scales")
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"micro-ref flow_scales: {exc!r}", flush=True)
                 if now - micro_state["liq_prev_at"] >= 10.0:
                     micro_state["liq_prev_at"] = now
                     micro_state["liq_prev"] = await asyncio.to_thread(mref.liq_prev_minute, LIVE_DIR / "tail_risk.duckdb")
@@ -3575,6 +3579,11 @@ def make_app() -> web.Application:
                 past = {g: r[:-1][np.isfinite(r[:-1])] for g, r in r60.items()}
                 if all(len(p) >= 72 and p.std() > 0 for p in past.values()):
                     x["z60"] = {g: float(r60[g][-1] / past[g].std()) for g in r60}
+                # 2026-10-01 화면용: 같은 UTC 시 14일 MAD 로 나눈 값(docs/experiments/flow_z60_baseline_20261001 -- 방향성 동률,
+                #   새벽·미국장 공정). z60 은 융합·관계 문장이 검정된 정의라 그대로 둔다.
+                sc = (micro_state.get("flow_scales") or {}).get(time.gmtime(done[-1]).tm_hour)
+                if sc:
+                    x["z60h"] = {g: float(r60[g][-1] / sc[g]) for g in r60}
             r30 = roll(a[:, 0], 6)
             p30 = r30[:-1][np.isfinite(r30[:-1])]
             if np.isfinite(r30[-1]) and len(p30) >= 72 and p30.std() > 0:
@@ -3835,7 +3844,7 @@ def make_app() -> web.Application:
                     "global_24h": ls24(1), "top_pos_24h": ls24(2), "age_s": time.time() - ls[-1][0]} if ls else None),
             "quad": mctx.quad_1h(x.get("move60"), x.get("oi60"), x.get("move60_p75")),
             "move60": x.get("move60"), "oi60": x.get("oi60"),
-            "flow": {"z60": x.get("z60"), "net60": x.get("net60"), "cvd30_z": x.get("cvd30_z"),
+            "flow": {"z60": x.get("z60"), "z60h": x.get("z60h"), "net60": x.get("net60"), "cvd30_z": x.get("cvd30_z"),
                      "bn30": ev.get("cvd"), "okx30": x.get("okx30")},
             "btc": {"move_bp": ev.get("btc_move_bp"), "rel": ev.get("btc_rel")},
             # 🔴같은 종류끼리만 잰다: 바이낸스 마크는 평활값이라 체결 미드보다 ~10bp 늦게 따라올 때가 있다(09-29 실측 HL 미드−BN 미드 8.9bp 를

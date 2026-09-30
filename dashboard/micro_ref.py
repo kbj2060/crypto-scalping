@@ -229,6 +229,47 @@ def baseline_from_tape(db_path: Path, days: int = 7) -> dict[str, Any] | None:
             "sec_vol_p99": {int(h): float(p) for h, p in sec}, "days": days, "built_at": time.time()}
 
 
+FLOW_SCALE_DAYS = 14   # 2026-10-01 «누가 밀고 있나» 고래·중형·리테일 z 의 분모 = 같은 UTC 시 60분 순매수의 MAD
+
+
+def flow_hour_scales_from_bars(rows: list) -> dict[int, dict[str, float]]:
+    """(5분봉 시작 ts, 총 순매수, 고래, 리테일) → UTC 시별 60분(12봉) 롤링합의 1.4826·MAD.
+    ETH 3.7년 64개 기준선 비교(docs/experiments/flow_z60_baseline_20261001): 방향성은 전부 동률,
+    같은 시간대 기준만 새벽·미국장의 |z|≥1 비율을 평평하게(시간대 편차 7.1→0.4pp) 만든다.
+    시간당 표본이 7일치(84개)보다 적은 시는 뺀다 -- 호출 측이 옛 식으로 대체."""
+    if not rows:
+        return {}
+    t0 = int(rows[0][0]); n = (int(rows[-1][0]) - t0) // 300 + 1
+    a = np.full((n, 3), np.nan)
+    for t, tot, wh, rt in rows:
+        a[(int(t) - t0) // 300] = (float(tot) - float(wh) - float(rt), float(wh), float(rt))
+    r = np.array([np.convolve(a[:, j], np.ones(12), "valid") for j in range(3)]).T   # 끝 봉 = 인덱스 k+11
+    hour = ((t0 + (np.arange(len(r)) + 11) * 300) % 86400) // 3600
+    out: dict[int, dict[str, float]] = {}
+    for h in range(24):
+        v = r[(hour == h) & np.isfinite(r).all(axis=1)]
+        if len(v) < 84:
+            continue
+        mad = 1.4826 * np.median(np.abs(v - np.median(v, axis=0)), axis=0)
+        if (mad > 1e-9).all():
+            out[h] = dict(zip(("mid", "whale", "retail"), map(float, mad)))
+    return out
+
+
+def flow_hour_scales(db_path: Path, days: int = FLOW_SCALE_DAYS) -> dict[int, dict[str, float]]:
+    """trade_tape_1s 의 크기별 수량(2026-09-19~ 채워짐, 그 전은 NULL)을 읽기 전용으로 -- 오늘 0시(UTC) 전 days 일."""
+    today = int(time.time()) // 86400 * 86400
+    con = _connect_read_only_retry(db_path)
+    try:
+        rows = con.execute(
+            "SELECT ts_sec // 300 * 300 AS b, sum(buy_qty - sell_qty), sum(whale_buy_qty - whale_sell_qty), "
+            "sum(retail_buy_qty - retail_sell_qty) FROM trade_tape_1s WHERE whale_buy_qty IS NOT NULL "
+            "AND ts_sec >= ? AND ts_sec < ? GROUP BY 1 ORDER BY 1", [today - days * 86400, today]).fetchall()
+    finally:
+        con.close()
+    return flow_hour_scales_from_bars(rows)
+
+
 def liq_prev_minute(db_path: Path) -> dict[str, Any] | None:
     """tail_risk_1m 의 마지막 완결 분 (봇이 쓰는 표, 읽기 전용)."""
     try:
@@ -265,6 +306,14 @@ def deriv_from_ring(ring: dict[int, tuple[float, float, float]], horizon_s: int,
 
 
 if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근접 판정, 버스트 판정
+    # flow_hour_scales_from_bars: 8일 × 5분 · 리테일 0 이면 전 시 제외 · 셋 다 흔들리면 24시 전부 · 6일치면 표본 부족
+    _rng = np.random.default_rng(0)
+    _rows = [(1_700_000_000 // 86400 * 86400 + k * 300, w + 1.0, w, 0.0) for k, w in enumerate(_rng.normal(0, 10, 8 * 288))]
+    assert flow_hour_scales_from_bars(_rows) == {}                       # 리테일 MAD 0 → 전부 제외
+    _rows = [(t, w + m + r, w, r) for (t, _, w, _), m, r in zip(_rows, _rng.normal(0, 1, len(_rows)), _rng.normal(0, 1, len(_rows)))]
+    _sc = flow_hour_scales_from_bars(_rows)                               # 12봉 합의 표준편차 = √12 × 봉 표준편차
+    assert sorted(_sc) == list(range(24)) and all(15 < v["whale"] < 60 and 1.5 < v["mid"] < 6 and 1.5 < v["retail"] < 6 for v in _sc.values()), _sc
+    assert flow_hour_scales_from_bars(_rows[:6 * 288]) == {}            # 6일치 → 시당 표본 부족
     assert qi(3, 1) == 0.5 and qi(0, 0) == 0.0 and side_of(0.6, QI_SIDE_ABS) == "매수" and side_of(-0.2, QI_SIDE_ABS) == "중립"
     # 격자: bin_size 0.5, bin_lo 5200 → 가격 2600.0 부터. mid 2600.5. +매수 −매도.
     q = np.zeros((3, 8), np.float32)
