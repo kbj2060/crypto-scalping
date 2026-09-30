@@ -511,6 +511,10 @@ async function setActiveSnapshotAsset(asset) {
   if (!SNAPSHOT_ASSET_KEYS.includes(asset) || asset === activeSnapshotAsset) return;
   activeSnapshotAsset = asset;
   renderSnapshotAssetTabs();
+  // 🔴2026-09-30 진입 미리보기(plan·cap)는 **코인별**인데 전환 때 안 비워 XRP 탭이 최대 60초(주문 불가 코인이면
+  //   계속) ETH 계획(~$2,676)을 «지금 설정으로 넣으면»에 그렸다. 비우고 새 코인 것을 바로 받는다.
+  lastEntryPlan = null; lastEntryCap = null; setEntryProjPreview(null);
+  manualEntryRefreshSize();
   // 계좌 payload 는 전 코인의 포지션을 담고 있어 재요청 없이 다시 그리기만 하면 된다.
   renderSnapshotAccount();
   // Clear the 4 wired signals' cached readings + their poll-interval gates immediately -- without
@@ -551,6 +555,8 @@ async function setActiveSnapshotAsset(asset) {
   regimeWide24LastFetchAt = 0;
   regimeBtcLastFetchAt = 0;
   regimeXrpLastFetchAt = 0;
+  // 🔴2026-09-30 차트 표식(전환 예고/탐지)도 코인별이다 -- 안 비우면 ETH 사각형이 SOL 차트에 최대 60초 남았다.
+  latestChartMarkers = null; chartMarkersLastFetchAt = 0;
 
   // ⭐await보다 먼저 -- 스켈레톤은 첫 fetch가 나가기 전에 이미 화면에 올라가 있어야 한다.
   const generation = beginAssetScopeLoading();
@@ -932,12 +938,27 @@ function axisTicks(min, max, targetTicks = 4) {
   return ticks;
 }
 
+// 🔴2026-09-30 SOL·XRP 는 서버 market-history 가 **형성 중 봉**까지 60초 캐시로 준다 -- 통째로 갈아 끼우면
+//   라이브 틱이 넓혀 둔 그 봉의 고가·저가가 최대 60초 전 값으로 쪼그라들었다. 같은 시각의 형성 봉이면
+//   고가=max·저가=min 으로 합친다(종가는 바로 뒤 updateSnapshotCandleLive 가 최신 라이브가로 덮는다).
+//   마감된 봉은 서버 값 그대로. 순수 함수(test/test_merge_forming_candle_20260930.py 가 본문을 떼어 돌린다).
+function mergeFormingCandle(prev, next, nowS, barMin = CHART_CANDLE_MIN) {
+  const a = Array.isArray(prev) && prev.length ? prev[prev.length - 1] : null;
+  const b = next.length ? next[next.length - 1] : null;
+  if (a && b && a.time === b.time && nowS < b.time + barMin * 60) {
+    b.high = Math.max(b.high, a.high);
+    b.low = Math.min(b.low, a.low);
+  }
+  return next;
+}
+
 async function fetchBinanceHistory(asset) {
   try {
     const res = await fetch(`/api/market-history?asset=${asset}`, { cache: "no-cache" });
     if (!res.ok) return;
     const payload = await res.json();
-    candleHistoryByAsset[asset] = Array.isArray(payload?.candles) ? payload.candles : [];
+    candleHistoryByAsset[asset] = mergeFormingCandle(candleHistoryByAsset[asset],
+      Array.isArray(payload?.candles) ? payload.candles : [], Date.now() / 1000);
     // 🔴2026-09-23 5분봉 깜빡임의 정체. 서버는 **마감봉만** 준다(closed_df) -- 형성 중 봉은
     //   updateSnapshotCandleLive() 가 따로 밀어 넣는다. 그런데 이 교체 직후 호출자가 바로
     //   렌더를 예약하고, scheduleSnapshotChartRender() 는 그 함수를 **안 부른다**
@@ -2479,13 +2500,16 @@ async function refreshChartMarkers() {
   const now = Date.now();
   if (now - chartMarkersLastFetchAt < CHART_MARKERS_POLL_MS) return;
   chartMarkersLastFetchAt = now;
+  const asset = activeSnapshotAsset;
   try {
-    const res = await fetch(`${API_CHART_MARKERS_URL}?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
+    const res = await fetch(`${API_CHART_MARKERS_URL}?asset=${asset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`chart markers ${res.status}`);
-    latestChartMarkers = await res.json();
+    const data = await res.json();
+    // 🔴2026-09-30 늦게 온 옛 코인 응답은 버린다(도착 전에 코인이 바뀌면 옛 코인 표식이 새 차트에 얹혔다).
+    if (asset === activeSnapshotAsset) latestChartMarkers = data;
   } catch (error) {
     console.error("Chart markers fetch error:", error);
-    latestChartMarkers = { available: false, error: "fetch_failed" };
+    if (asset === activeSnapshotAsset) latestChartMarkers = { available: false, error: "fetch_failed" };
   }
 }
 
@@ -4037,15 +4061,15 @@ const mcGfx = {
     if (bu) {
       const bx = [w - 20, w - 8], bt = 16, bb = h - 22, zY = (zv) => bb - (bb - bt) * Math.max(0, Math.min(5, zv || 0)) / 5;
       [["롱", bu.z_long], ["숏", bu.z_short]].forEach(([nm, zv], i) => {
-        const hot = (zv || 0) >= 3 || bu.hawkes_active;
+        const hot = mcLiqBurstHot(bu, i ? "short" : "long");
         s += `<rect x="${bx[i] - 3}" y="${bt}" width="6" height="${bb - bt}" rx="3" fill="rgb(var(--lift) / .1)"/>`
           + `<rect x="${bx[i] - 3}" y="${zY(zv).toFixed(1)}" width="6" height="${Math.max(0, bb - zY(zv)).toFixed(1)}" rx="3" fill="${hot ? "var(--warn)" : "var(--muted)"}"><title>${nm} 청산 1분 z ${(zv ?? 0).toFixed(1)}${hot ? " — 급증" : ""}</title></rect>`
           + `<text x="${bx[i]}" y="${h - 10}" font-size="9" fill="var(--muted)" text-anchor="middle">${nm}</text>`;
       });
       s += `<line x1="${bx[0] - 6}" x2="${bx[1] + 6}" y1="${zY(3).toFixed(1)}" y2="${zY(3).toFixed(1)}" stroke="var(--warn)" stroke-dasharray="2 2" opacity=".7"/>`;
-      const hotAny = bu.hawkes_active || Math.max(bu.z_long || 0, bu.z_short || 0) >= 3;
-      if (hotAny) {
-        const shortSide = (bu.short_usd_1m || 0) > (bu.long_usd_1m || 0), amt = Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0);
+      const hotSide = mcLiqBurstSide(bu);
+      if (hotSide) {
+        const shortSide = hotSide === "short", amt = (shortSide ? bu.short_usd_1m : bu.long_usd_1m) || 0;
         s += `<text x="${w - 30}" y="${(Y(px) + (shortSide ? -8 : 16)).toFixed(1)}" font-size="11" font-weight="800" fill="var(--warn)" text-anchor="end">${shortSide ? "↑ 숏" : "↓ 롱"} 청산 급증 · ${fmtUsdCompact(amt)}/1분</text>`;
       }
     }
@@ -4082,6 +4106,24 @@ async function refreshMarketCtx() {
     latestMarketCtx = { available: false, error: "fetch_failed" };
   }
   renderMarketCtx();
+}
+
+// 🔴2026-09-30 청산 «급증»은 **쪽마다** 판정한다. 옛 판은 `z>=3 || hawkes_active` 를 롱·숏 막대에 똑같이 걸어
+//   hawkes_active 하나로 z −0.24 인 숏 막대까지 주황·«급증»이 됐다. 규칙: 그 쪽 z>=3 이거나, hawkes 가 켜져 있고
+//   그 쪽이 1분 금액이 0 이 아닌 **큰 쪽**일 때. 파일(tail_risk_interceptor 10초마다 씀)이 60초 넘게 낡았으면 급증 없음.
+//   순수 함수(test/test_mc_liq_burst_hot_20260930.py 가 본문을 떼어 돌린다).
+const LIQ_BURST_STALE_MS = 60000;
+function mcLiqBurstHot(bu, side, nowMs = Date.now()) {
+  if (!bu || !(nowMs - Date.parse(bu.updated_at || "") <= LIQ_BURST_STALE_MS)) return false;
+  const lu = bu.long_usd_1m || 0, su = bu.short_usd_1m || 0;
+  const [z, mine, other] = side === "long" ? [bu.z_long, lu, su] : [bu.z_short, su, lu];
+  return (z || 0) >= 3 || (!!bu.hawkes_active && mine > 0 && mine >= other);
+}
+// 꼬리표·툴팁이 말할 쪽: 급증인 쪽, 둘 다면 1분 금액이 큰 쪽. 없으면 null.
+function mcLiqBurstSide(bu, nowMs = Date.now()) {
+  const hl = mcLiqBurstHot(bu, "long", nowMs), hs = mcLiqBurstHot(bu, "short", nowMs);
+  if (!hl && !hs) return null;
+  return hs && (!hl || (bu.short_usd_1m || 0) > (bu.long_usd_1m || 0)) ? "short" : "long";
 }
 
 // 볼린저(20, 2σ) -- {봉 시각: [하단, 중앙, 상단]}. 창 슬라이스(1h = 12봉)로는 20봉이 안 되니 전체 이력에서 센다.
@@ -4187,8 +4229,7 @@ function renderMarketCtx() {
   const sw = bk.sweep, bps = bk.bps || [25, 50, 100];
   const thin = bk.bid25_pct != null && bk.ask25_pct != null && Math.min(bk.bid25_pct, bk.ask25_pct) <= 0.1
     ? (bk.ask25_pct <= bk.bid25_pct ? "위쪽(매도호가)이 얇다" : "아래쪽(매수호가)이 얇다") : null;
-  const burstHot = bu && (bu.hawkes_active || Math.max(bu.z_long || 0, bu.z_short || 0) >= 3);
-  const bAge = bu && bu.updated_at ? (Date.now() - Date.parse(bu.updated_at)) / 60000 : null;
+  const burstSide = mcLiqBurstSide(bu);
   if (badge) {
     badge.textContent = (d.lev || {}).label || "-";
     badge.className = `ops-badge ${levWarn ? "warn" : "neutral"}`;
@@ -4237,7 +4278,7 @@ function renderMarketCtx() {
   // 2026-09-30 ③ 가격 지형 = 넓은 화면이면 호가/체결 프로파일 **아래**(#mcWall, 사용자 «높이가 낮아 겹친다 → ④ 와 자리 바꿔») -- 그 칸의 높이를 다 쓴다.
   const mapHtml =
     qSec("q_map", "③ 가격 지형 · ±6%", `<div class="mc-terrain" title="${escapeHtml(`원 = HL 고래 청산가(빨강 롱 · 초록 숏, 크기 = 금액) · 띠 = VWAP ±1·2σ · 왼쪽 눈금 = 호가 ±${bps.join("/")}bp · ◆ = 12시간 실측 청산 최다 · 오른쪽 막대 = 1분 청산 z(롱·숏, 점선 3 = 급증)`
-        + `\n청산 ${!bu ? "-" : burstHot ? `${(bu.short_usd_1m || 0) > (bu.long_usd_1m || 0) ? "숏" : "롱"} 급증 · ${usd(Math.max(bu.long_usd_1m || 0, bu.short_usd_1m || 0))}/1분` : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}`}`
+        + `\n청산 ${!bu ? "-" : burstSide ? `${burstSide === "short" ? "숏" : "롱"} 급증 · ${usd((burstSide === "short" ? bu.short_usd_1m : bu.long_usd_1m) || 0)}/1분` : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}`}`
         + `${top ? ` · 12시간 최다 ${n(top[0], 1)}(롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : ""}`)}">${G.terrain(px, d.hl_liq || {}, lv, bps, top, bu,
           ...(wallBox ? [wallBox.clientWidth - 4, Math.max(120, wallBox.clientHeight - 52)] : []))}</div>`);
   const hsm = latestFlowHeatmap && latestFlowHeatmap.summary, gwKeep = G.gw;
@@ -4601,7 +4642,10 @@ function renderSupply1s(box = null, src = null) {
 
   // 구간 경계에서 0으로 되돌리며 쌓는다. 경계 이전 초도 **계산에는** 들어간다(누산기를
   // 그때 0으로 되돌리는 게 전부이고, 그리는 건 first 이후뿐이다).
-  const inSeg = allSecs.filter((x) => x > first);
+  // 🔴2026-09-30 `x > first` 는 봉의 **첫 초**(키 first = [first, first+1) 체결)를 빼서 선물 CVD·고래/중형/리테일이
+  //   풋프린트 봉 델타와 달랐다(실측 봉 −569 vs 그린 −744, 첫 초 +177). 체결 흐름은 첫 초부터 센다.
+  //   OI 는 따로(oiRows) -- 경계 이전 마지막 관측이 기준점이라 `> first` 그대로다.
+  const inSeg = allSecs;
   const zero6 = [0, 0, 0, 0, 0, 0];
   const cellOf = (x) => S.supply.get(x) || zero6;
   // ── 두 줄 선 차트 (2026-09-30 사용자 «CVD 와 OI 를 하나로, 고래/중형/리테일을 하나로, 막대는 없애고 선만, 폭 1/3 줄여») ──
@@ -4671,7 +4715,7 @@ function renderSupply1s(box = null, src = null) {
   let acc = 0;
   const cvdRows = inSeg.map((x) => { const c = cellOf(x); acc += c[4] - c[5]; return { s: x, v: acc }; });
   let spotAcc = 0;
-  const spotRows = src ? null : [...spotSupply1s.keys()].filter((x) => x > first && x <= now).sort((a, b) => a - b)
+  const spotRows = src ? null : [...spotSupply1s.keys()].filter((x) => x >= first && x <= now).sort((a, b) => a - b)
     .map((x) => { const c = spotSupply1s.get(x); spotAcc += (c[4] || 0) - (c[5] || 0); return { s: x, v: spotAcc }; });
   const spotOn = !!(spotRows && spotRows.length >= 2);
   const oiEnd = oiRows.length ? oiRows[oiRows.length - 1].v : null;
@@ -8631,9 +8675,12 @@ async function manualEntryRefreshSize() {
   //   초기값("미리보기 전용")이나 마지막 성공값에 굳었다 -- 화면이 "게이트가 꺼져 있다"고
   //   말했지만 실제로는 "사이징 워커가 죽어 미리보기가 503"이었다(재부팅 후 실장애).
   //   **실패 시 이전 값을 남기는 UI 는 조용히 거짓말한다.**
+  const asset = activeSnapshotAsset;
   try {
     // 2026-09-26 양쪽을 본다 -- 위험모델 상한은 방향마다 다르다(롱이 막혀도 숏은 열릴 수 있다).
     const [data, dataShort] = await Promise.all([manualEntryFetch("LONG"), manualEntryFetch("SHORT")]);
+    // 🔴2026-09-30 응답 도착 전에 코인이 바뀌었으면 버린다 -- 옛 코인의 계획을 새 코인 카드에 얹지 않는다.
+    if (asset !== activeSnapshotAsset) return;
     if (!data.ok) {
       line.className = "entry-note bad";
       const why = data.detail === "worker_stale" ? "크기 워커 정지"
