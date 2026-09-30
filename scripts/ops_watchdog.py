@@ -255,6 +255,21 @@ def check_dashboard() -> Check:
     })
 
 
+def check_gex_state() -> Check:
+    """옵션 통합 수집기(live_deribit_block_trade_collector_20260928.py)가 10분마다 원자 교체하는 요약 JSON.
+    2026-09-28 부터 옛 deribit_gex.duckdb 에는 아무도 안 써서 옛 검사가 거짓 CRITICAL 이었다. 새 DB
+    (deribit_options.duckdb)를 열면 수집기의 단일 writer 락과 부딪히므로 JSON 의 generated_at 을 본다."""
+    path = LIVE / "deribit_gex_state.json"
+    state, error = load_json(path)
+    if error:
+        return Check("deribit_gex_state", "BLOCKED", "gex state cannot be read", {"path": str(path), "error": error})
+    stamp = state.get("generated_at")
+    age = age_minutes_utc_naive(stamp)
+    return Check("deribit_gex_state", stale_status(age, 30, 60), "options collector summary freshness", {
+        "generated_at": stamp, "age_minutes": age, "warn_minutes": 30, "critical_minutes": 60,
+    })
+
+
 def check_pipeline_contract() -> Check:
     path = LIVE / "data_pipeline_health.json"
     state, error = load_json(path)
@@ -716,7 +731,6 @@ def run_once(dry_run: bool) -> list[Check]:
     tape_db = LIVE / "trade_tape.duckdb"
     tail_db = LIVE / "tail_risk.duckdb"
     tail_btc_sol_db = LIVE / "tail_risk_btc_sol.duckdb"
-    gex_db = LIVE / "deribit_gex.duckdb"
     altdata_db = RESEARCH / "altdata.duckdb"
     checks = [
         check_process("trading_bot_process", "trading_bot.py"),
@@ -746,8 +760,7 @@ def run_once(dry_run: bool) -> list[Check]:
         # 쓰던 워커(supervisor_tail_risk_btc_sol_worker.sh)도 같은 날 정지 + @reboot 제거했다.
         # 러너 정지 + @reboot 제거 + 이 줄 삭제가 **한 쌍**이다(SHADOW_RUNNERS 주석의 사고).
         # 되살리려면: .env 플래그 True -> 워커 재기동 -> 이 두 줄 복원, 순서로.
-        # hourly cron; one missed run is normal, two in a row is not.
-        check_duckdb_table_freshness("duckdb_deribit_gex", gex_db, "gex_summary", "recorded_at_utc", 90, 150),
+        check_gex_state(),
         # daily cron (0 1 * * *); warn/critical give ~1 and ~2 missed days of slack.
         check_duckdb_table_freshness("duckdb_altdata_fear_greed", altdata_db, "fear_greed_index", "recorded_at_utc", 1800, 2880),
         check_duckdb_table_freshness("duckdb_altdata_funding_spread", altdata_db, "cross_exchange_funding_spread", "recorded_at_utc", 1800, 2880),
