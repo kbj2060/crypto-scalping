@@ -500,6 +500,9 @@ function renderSnapshotAssetTabs() {
     if (enabledAssets) btn.hidden = !on;
     btn.classList.toggle("active", on && btn.dataset.asset === activeSnapshotAsset);
   });
+  // 2026-10-01 코인 탭 = 1h~12h 와 같은 세그먼트(사용자 지시) -- 숨은 코인(BTC·HYPE)은 칸이 아니므로 «보이는 칸» 기준으로 조각 폭·위치를 준다.
+  const host = el("snapshotAssetTabs"), vis = [...document.querySelectorAll("#snapshotAssetTabs .asset-tab")].filter((b) => !b.hidden);
+  if (host) { host.style.setProperty("--seg-n", String(vis.length || 1)); host.style.setProperty("--i", String(Math.max(0, vis.findIndex((b) => b.classList.contains("active"))))); }
 }
 
 async function setActiveSnapshotAsset(asset) {
@@ -2818,9 +2821,17 @@ function fitLayout() {
   const acct = el("acctCard"), opt = el("optCard");
   if (acct) acct.style.minHeight = on ? `${vh}px` : "";
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
-  const h = on ? fitLadderFormula() : null;
+  // 2026-10-01 사다리 높이 = 남는 칸을 재서 맞춘다(사용자 «내용이 늘어도 Option 카드가 화면을 가득») -- 공식은 첫 추정·캐시 없을 때만.
+  //   격자는 위로 붙이고(html.fit1 #optCard align-content:start) 마지막 칸 아래 빈자리(음수 = 넘침)만큼 사다리를 늘리고 줄인다.
+  let h = on ? (fitOptLadderH || fitLadderFormula()) : null;
+  if (on && opt && opt.offsetParent) {
+    const items = opt.querySelectorAll(":scope > .ops-health-head, #optBody > *, #optRow > *, :scope > #mcWhen");
+    const bottom = Math.max(0, ...[...items].map((k) => k.getBoundingClientRect().bottom));
+    const r = opt.getBoundingClientRect(), slack = Math.round(r.top + vh - parseFloat(getComputedStyle(opt).paddingBottom || 0) - bottom);
+    if (bottom > 0 && Math.abs(slack) > 4) h = Math.max(300, Math.min(900, h + slack));
+  }
   if (h !== fitOptLadderH) { fitOptLadderH = h; if (typeof renderOptions === "function") renderOptions(); }
-  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff })); } catch (e) { /* 기억은 편의 */ } }
+  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff, lad: fitOptLadderH })); } catch (e) { /* 기억은 편의 */ } }
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
 // 2026-10-01 ⑤ 다음 24시간(116 + 여백·선 36)이 맨 아래 전폭으로 들어와 그만큼 뺀다.
@@ -2829,7 +2840,7 @@ function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((in
 function fitApplyCached() {
   if (!fitOn()) return;
   document.documentElement.classList.add("fit1");
-  fitOptLadderH = fitLadderFormula();
+  fitOptLadderH = FIT0.lad || fitLadderFormula();   // 지난번에 잰 값(같은 창 높이) -- 새로고침 첫 그림부터 맞는다
   ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
 }
 function setupCardRail() {
@@ -2841,6 +2852,21 @@ function setupCardRail() {
   cardRailSync();
   addEventListener("resize", () => requestAnimationFrame(fitLayout));
   setInterval(fitLayout, 1500);
+  // 2026-10-01 한 화면 모드: 휠 한 칸(작게 굴려도)이면 다음/이전 카드로(사용자 지시). 트랙패드 관성은 이벤트가 멎을 때까지 한 번으로 친다.
+  //   창보다 긴 카드(한 화면 모드 밖 패널) 안에서는 보통 스크롤.
+  let wheelLock = 0;
+  addEventListener("wheel", (e) => {
+    if (!document.documentElement.classList.contains("fit1") || e.ctrlKey || Math.abs(e.deltaY) < Math.abs(e.deltaX) || !e.deltaY) return;
+    const cards = [...document.querySelectorAll("#snapshotTabPanel > .panel")].filter((c) => c.offsetParent);
+    const tops = cards.map((c) => c.getBoundingClientRect().top), cur = tops.reduce((b, t, i) => (Math.abs(t - 10) < Math.abs(tops[b] - 10) ? i : b), 0);
+    const nxt = cur + Math.sign(e.deltaY);
+    if (!cards[cur] || cards[cur].offsetHeight > innerHeight + 40 || nxt < 0 || nxt >= cards.length) return;
+    e.preventDefault();
+    const now = performance.now();
+    if (now < wheelLock) { wheelLock = Math.max(wheelLock, now + 200); return; }
+    wheelLock = now + 700;
+    cards[nxt].scrollIntoView({ behavior: "smooth", block: "start" });
+  }, { passive: false });
   // 2026-09-30 ⑤ 시간축은 시장 맥락 응답이 없어도 1분마다 다시 그린다(«지금» 기준이 흐르고 지난 일정이 빠진다) -- 멈춘 채 어제 모습으로 남던 것
   setInterval(() => { if (activePageTab === "snapshot" && !document.hidden && typeof renderMarketCtx === "function") renderMarketCtx(); }, 60 * 1000);   // 데이터가 오며 카드 높이가 바뀐다 -- 1.5초마다 다시 잰다(값이 같으면 아무것도 안 한다)
 }
@@ -3986,7 +4012,7 @@ const mcGfx = {
       + `<circle cx="${X(now)}" cy="8" r="5" fill="var(--text)"/></svg>`;
   },
   seg4(key, w = mcGfx.gw || 130) {   // 2026-09-30 가격×OI 사분면 한 줄: 네 칸 중 지금 칸만 채움(small·없음 = 전부 빈 칸)
-    const cells = [["up_up", "새롱"], ["up_dn", "숏커버"], ["dn_up", "새숏"], ["dn_dn", "롱정리"]], cw = (w - 6) / 4;
+    const cells = [["up_up", "신규 롱"], ["up_dn", "숏커버"], ["dn_up", "신규 숏"], ["dn_dn", "롱정리"]], cw = (w - 6) / 4;
     return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true">` + cells.map(([k, t], i) => {
       const on = k === key, col = k === "dn_up" ? "var(--bad)" : k === "dn_dn" ? "var(--good)" : "var(--ink)", x = i * (cw + 2);
       return `<rect x="${x.toFixed(1)}" y="1" width="${cw.toFixed(1)}" height="14" rx="3" fill="${on ? col : "rgb(var(--lift) / .08)"}" fill-opacity="${on ? 0.85 : 1}"/>`
@@ -4291,7 +4317,7 @@ function renderMarketCtx() {
       + gRow("VWAP 거리", G.sig(vz), sg(vz, 1, "σ"), "", lv ? `${lv.name} VWAP ${n(lv.vwap, 1)}` : "")
       + gRow("볼린저 %B", G.pct(pb), pb == null ? "-" : n(pb, 2), "", bb ? `폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%` : "")
       + gRow("RSI 14", G.pct(rsi == null ? null : rsi / 100), rsi == null ? "-" : n(rsi, 0), rsi != null && (rsi >= 70 || rsi <= 30) ? "mc-warn" : "")
-      + `<div class="mc-switch">차트에 그리기 <label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
+      + `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span><label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
       + `<label title="끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)"><input type="checkbox" data-line="vsess"${mcLine.vsess ? " checked" : ""}> 세션 시작부터</label>`
       + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
       + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label></div>`);

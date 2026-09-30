@@ -2273,6 +2273,7 @@ svg {
    여기 숫자를 버튼 수와 맞춰 두는 걸 잊으면 선택 칸이 어긋난다(2026-09-23 실제로 그랬다). */
 #chartWindowTabs { --seg-n: 4; }   /* 1h · 2h · 4h · 12h */
 #chartModeTabs { --seg-n: 2; }     /* 청산맵 · 풋프린트 */
+#snapshotAssetTabs { --seg-n: 3; }   /* ETH · SOL · XRP(서버가 켠 코인) -- 실제 값은 renderSnapshotAssetTabs */
 /* 선택 칸. 테두리도 그림자도 없다 -- 참조 이미지처럼 «조금 더 밝은 면» 하나다.
    이동은 transform 뿐이라 리플로우가 없고, 칸이 등폭이라 제 폭의 100% 씩 옮기면 맞는다. */
 .chart-mode-tabs::before {
@@ -2296,8 +2297,9 @@ svg {
   transition: transform .34s cubic-bezier(.22, 1, .36, 1);
   z-index: 0;
 }
-.chart-mode-tabs:has(.asset-tab:nth-child(2).active)::before { --i: 1; }
-.chart-mode-tabs:has(.asset-tab:nth-child(3).active)::before { --i: 2; }
+/* 코인 탭은 숨은 칸(hidden)이 섞여 nth-child 가 틀린다 -- renderSnapshotAssetTabs 가 --i 를 준다 */
+.chart-mode-tabs:not(#snapshotAssetTabs):has(.asset-tab:nth-child(2).active)::before { --i: 1; }
+.chart-mode-tabs:not(#snapshotAssetTabs):has(.asset-tab:nth-child(3).active)::before { --i: 2; }
 /* 칸은 글자만. 알약 프리미티브의 면·테두리·그림자를 여기서 전부 걷어낸다. */
 .chart-mode-tabs .asset-tab {
   position: relative;
@@ -2557,9 +2559,9 @@ body.order-coin-off .acct-lanes::before {
   #snapshotTabPanel { margin-right: 36px; }
   #snapshotTabPanel > .liq-map-panel { position: relative; }
   #mcBody.mc-cmp { position: absolute; z-index: 1; overflow: hidden; align-content: start;   /* 줄을 위로 -- 칸 높이만큼 늘어난 줄을 «내용 높이»로 재던 되먹임(5초마다 +10px)을 막는다 */   /* 2026-09-30 스크롤 없음 -- 높이는 renderCandleSvg 가 내용에 맞춰 준다(mcNeedH) */
-    border-top: 1px solid var(--line); padding-top: 4px; column-gap: 14px; }
+    padding-top: 4px; column-gap: 14px; }   /* 2026-10-01 윗선 제거(사용자 «①~④ 회색 실선 모두 제거») */
   #mcBody.mc-cmp .mc-g { grid-template-columns: 64px auto minmax(0, 1fr); gap: 6px; font-size: 11px; padding: 2px 0; }
-  #mcBody.mc-cmp .mc-sec { padding: 8px 0 6px; }
+  #mcBody.mc-cmp .mc-sec { padding: 8px 0 6px; border-top: 0; }
   #mcBody.mc-cmp .mc-note { display: none; }   /* 좁은 칸 -- 부값은 줄 호버(title)로 남는다 */
   .card-rail:not([hidden]) { display: grid; }
 }
@@ -2595,11 +2597,13 @@ body.not-eth #mcBody, body.not-eth #mcWhen { display: none; }
 #mcWhen:empty { display: none; }
 #mcWall { display: none; }
 #mcWall.on { display: block; position: absolute; z-index: 1; overflow: hidden; }   /* 2026-09-30 가격 지형은 칸 높이에 맞춰 그린다 -- 스크롤 없음 */
-#mcWall .mc-sec { border-top: 0; padding-top: 2px; }
+#mcWall .mc-sec { border-top: 0; padding-top: 8px; }   /* 2026-10-01 ④(#mcBody .mc-sec 윗여백 8)와 같은 여백 -- ③·④ 제목이 같은 높이 */
 .mc-sec.mc-2col { column-count: 2; column-gap: 18px; }   /* 2026-09-30 ④ 두 단 -- 스크롤 없이 */
 .mc-sec.mc-2col > h4, .mc-sec.mc-2col > .mc-tip { column-span: all; }
 .mc-2col .mc-g, .mc-2col .mc-svg, .mc-2col .mc-note, .mc-2col .mc-switch { break-inside: avoid; }
-.mc-2col .mc-switch { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; }
+/* 2026-10-01 차트에 그리기 = 제목 한 줄 + 체크 넷을 2×2 격자로(사용자 «잘 정렬») -- 줄바꿈으로 한 칸만 떨어지던 것 */
+.mc-2col .mc-switch { display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 5px 18px; font-size: 11px; }
+.mc-2col .mc-switch-t { grid-column: 1 / -1; }
 #mcBody.mc-cmp .mc-2col .mc-g { grid-template-columns: 58px auto minmax(0, 1fr); gap: 6px; font-size: 11px; padding: 2px 0; }
 #mcBody.mc-cmp .mc-span { grid-column: 1 / -1; }
 body.not-eth #mcWall { display: none; }
@@ -2616,7 +2620,8 @@ html.fit1 #snapshotTabPanel > .panel { scroll-snap-align: start; scroll-margin-t
   html.fit1 #fpCard > .candle-container { flex: 1 1 0; min-height: 0; height: auto !important; }
   html.fit1 #candleSvgSnapshot { height: calc(100% - 12px) !important; }   /* 상자 = 차트 + 12(예전 884/872 과 같은 여유) */
   html.fit1 #mcBody:not(.mc-cmp), html.fit1 #mcWall:not(.on) { display: none; }   /* 제자리(차트 오른쪽 칸)에 놓이기 전엔 안 보인다 -- 첫 0.5초 흐름 속에 나타났다 사라지던 것 */
-  html.fit1 #mcWhen { height: 116px; overflow: hidden; flex: none; }   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
+  html.fit1 #mcWhen { height: 116px; overflow: hidden; flex: none; }
+  html.fit1 #optCard { align-content: start; }   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
   html.fit1 #fpCard > .ops-health-head, html.fit1 #liquidationMapList { flex: none; }
 }
 .card-rail { display: none; position: fixed; z-index: 800; right: 12px; top: 50%; transform: translateY(-50%); gap: 18px; padding: 6px 0; }
