@@ -26,7 +26,10 @@ def test_ls_keeps_last_good_rows_while_writer_holds_lock(tmp_path):
     con.execute("CREATE TABLE oi_lsratio_5m (ts TIMESTAMPTZ, global_ls_ratio DOUBLE, top_pos_ls_ratio DOUBLE, taker_ls_ratio DOUBLE)")
     con.execute("INSERT INTO oi_lsratio_5m VALUES (now() - INTERVAL 5 MINUTE, 2.7, 1.6, 0.7)")
     con.close()
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts.data_store import read_rows   # _read_only_rows 가 넘겨준다(2026-10-01 저장 재설계 3단계)
     ns: dict[str, Any] = {"duckdb": duckdb, "time": time, "Path": Path, "Any": Any, "OKX_INST": "ETH-USDT-SWAP",
+                          "read_rows": read_rows,
                           "OI_LSRATIO_DB_PATH": db, **{k: tmp_path / "missing.duckdb" for k in
                                                         ("OKX_CTX_DB_PATH", "HL_CTX_DB_PATH", "HL_POS_DB_PATH")}}
     exec(_chunk("def _read_only_rows(", "def hl_whale_liq_events(", False), ns)

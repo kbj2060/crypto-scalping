@@ -6,6 +6,7 @@
 """
 import asyncio
 import dataclasses
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -29,14 +30,28 @@ def _tape(path: Path, rows):
     con.close()
 
 
+def _hot(path: Path, rows):
+    """hot 사본(2026-10-01 저장 재설계 3단계): SQLite, 5코인 한 파일 -- 대시보드가 심볼로 거른다."""
+    con = sqlite3.connect(path)
+    con.execute("""CREATE TABLE trade_tape_1s (symbol TEXT, ts_sec INTEGER, price_bin INTEGER,
+                   buy_qty REAL, sell_qty REAL, whale_buy_qty REAL, whale_sell_qty REAL,
+                   retail_buy_qty REAL, retail_sell_qty REAL)""")
+    con.execute("CREATE TABLE verify_1m (symbol TEXT, ts_min INTEGER, rel_err REAL)")
+    con.execute("CREATE TABLE gaps (symbol TEXT, from_ms INTEGER, to_ms INTEGER)")
+    con.executemany("INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?)", rows)
+    con.commit()
+    con.close()
+
+
 def test_non_eth_restores_from_tape_not_rest(tmp_path, monkeypatch):
-    db = tmp_path / "trade_tape_xrp.duckdb"
+    db = tmp_path / "binance_tape.sqlite"
     # XRP 테이프 칸 0.0001 -> 15363·15364·15365 는 풋프린트 0.0003 칸 5121 로 모인다(15363/3=5121, 15365/3≈5121.7→5122)
-    _tape(db, [("xrpusdt", T0 - BAR + 10, 15363, 1.0, 2.0, 0.0, 0.5, 1.0, 1.5),     # 앞 봉
+    _hot(db, [("solusdt", T0 + 5, 15364, 50.0, 50.0, 0.0, 0.0, 0.0, 0.0),            # 다른 코인 -> 섞이면 안 된다
+              ("xrpusdt", T0 - BAR + 10, 15363, 1.0, 2.0, 0.0, 0.5, 1.0, 1.5),     # 앞 봉
                ("xrpusdt", T0 + 5, 15364, 3.0, 0.0, 3.0, 0.0, 0.0, 0.0),              # 진행 봉
                ("xrpusdt", T0 + 60, 15365, 4.0, 1.0, 0.0, 0.0, 4.0, 1.0),             # = WS 첫 초 -> 빠져야 한다
                ("xrpusdt", T0 + 70, 15365, 9.0, 9.0, 0.0, 0.0, 0.0, 0.0)])            # WS 이후 -> 빠져야 한다
-    monkeypatch.setattr(srv, "tape_default_db", lambda sym: db)
+    monkeypatch.setattr(srv, "HOT_TAPE_DB", db)
     monkeypatch.setattr(srv.time, "time", lambda: T0 + 70.0)                          # 창 계산의 «지금»
 
     async def rest_must_not_be_called(*a, **k):

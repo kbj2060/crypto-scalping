@@ -373,6 +373,24 @@ def _check_duckdb_table_freshness_uncached(component: str, db_path: Path, table:
     few short retries before being treated as a real failure."""
     if not db_path.is_file():
         return Check(component, "BLOCKED", "duckdb file is missing", {"path": str(db_path)})
+    if db_path.suffix == ".sqlite":
+        # hot(저장 재설계 3단계): WAL 이라 쓰는 쪽과 서로 안 막는다 -- 재시도·락 판정이 필요 없다.
+        #   ts_column 은 SQLite 식이고 집계까지 담는다(예: datetime(max(ts_sec), 'unixepoch', 'localtime') = KST).
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
+        try:
+            max_ts = con.execute(f"SELECT {ts_column} FROM {table}").fetchone()[0]
+        except sqlite3.Error as exc:
+            return Check(component, "BLOCKED", "sqlite table cannot be read",
+                         {"path": str(db_path), "table": table, "error": f"{type(exc).__name__}: {exc}"})
+        finally:
+            con.close()
+        if max_ts is None:
+            return Check(component, "BLOCKED", "duckdb table has no rows", {"path": str(db_path), "table": table})
+        age = age_minutes(max_ts)
+        return Check(component, stale_status(age, warn_minutes, critical_minutes), "hot table freshness", {
+            "path": str(db_path), "table": table, "latest_ts": str(max_ts), "age_minutes": age,
+            "warn_minutes": warn_minutes, "critical_minutes": critical_minutes,
+        })
     last_error: duckdb.Error | None = None
     # 2026-09-17: 재시도 사다리를 (0, 0.4, 0.8, 1.6)=최대 2.8초에서 (0, 0.5)=최대 0.5초로 줄였다.
     # 긴 사다리는 «거짓 BLOCKED 를 피하려고» 있었는데, 이제 락 충돌은 아래에서 WARN(120초
@@ -737,7 +755,7 @@ def run_once(dry_run: bool) -> list[Check]:
     state_path, db_path = OUT / "state.json", OUT / "incidents.sqlite"
     init_db(db_path)
     micro_db = LIVE / "microstructure.duckdb"
-    tape_db = LIVE / "trade_tape.duckdb"
+    tape_db = ROOT / "data" / "hot" / "binance_tape.sqlite"   # 2026-10-01 hot 사본(WAL) -- 수집기 DuckDB 커밋을 따라 쓴다
     tail_db = LIVE / "tail_risk.duckdb"
     tail_btc_sol_db = LIVE / "tail_risk_btc_sol.duckdb"
     altdata_db = RESEARCH / "altdata.duckdb"
@@ -783,8 +801,8 @@ def run_once(dry_run: bool) -> list[Check]:
         # ⚠️ts_sec 는 epoch 정수라 그대로 cast 하면 안 된다 -- to_timestamp 로 감싸 넘긴다.
         # ⚠️수집기를 **은퇴시키면 이 줄도 지운다**. 안 지우면 파일이 안 늘어나(또는 지워져)
         #   영구 BLOCKED/CRITICAL 이 된다 -- SHADOW_RUNNERS 주석의 사고가 세 번 반복된 자리다.
-        check_duckdb_table_freshness("duckdb_trade_tape_eth", tape_db, "trade_tape_1s",
-                                     "to_timestamp(ts_sec)", 5, 10),
+        check_duckdb_table_freshness("duckdb_trade_tape_eth", tape_db, "trade_tape_1s WHERE symbol = 'ethusdt'",
+                                     "datetime(max(ts_sec), 'unixepoch', 'localtime')", 5, 10),
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
         *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
         *check_multicoin_collectors(),

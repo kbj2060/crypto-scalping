@@ -113,7 +113,9 @@ def specs(coins: list[str], phases: set[int], tail_btc_sol: bool) -> list[dict]:
             eth=f"{of}/raster/ETHUSDT")
         add("bn_tape", lc, 2, "supervisor_trade_tape.sh", "live_trade_tape_collector_20260916.py",
             {"TAPE_SYMBOL": sym.lower()},
-            [_db(f"bn_tape_{lc}", f"data/live/trade_tape_{lc}.duckdb", "trade_tape_1s", "to_timestamp(ts_sec)")])
+            # 2026-10-01 hot 사본(SQLite WAL, 5코인 한 파일)을 본다 -- 코인별 DuckDB 를 열면 수집기 쓰기와 락이 부딪힌다.
+            [_db(f"bn_tape_{lc}", "data/hot/binance_tape.sqlite", f"trade_tape_1s WHERE symbol = '{sym.lower()}'",
+                 "datetime(max(ts_sec), 'unixepoch', 'localtime')")])
         add("okx_tape", lc, 2, "supervisor_okx_trade_tape.sh", "live_okx_trade_tape_collector_20260923.py",
             {"OKX_TAPE_INST": inst},
             [_db(f"okx_tape_{lc}", f"data/live/okx_trade_tape_{lc}.duckdb", "trade_tape_1s",

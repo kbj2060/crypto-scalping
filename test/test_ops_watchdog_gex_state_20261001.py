@@ -1,5 +1,5 @@
 """ops_watchdog -- ① check_gex_state: 옵션 수집기 요약 JSON 신선도(옛 deribit_gex.duckdb 거짓 CRITICAL 대체)
-② 락 충돌 시 파일 mtime 으로 신선도(writer 가 쥐고 있으면 살아 있다는 뜻)."""
+② 락 충돌 시 파일 mtime 으로 신선도(writer 가 쥐고 있으면 살아 있다는 뜻) ③ hot SQLite 신선도(심볼별, KST)."""
 import datetime as dt
 import json
 import os
@@ -40,7 +40,24 @@ def test_lock_conflict_uses_mtime():
         holder.kill()
 
 
+def test_hot_sqlite_freshness():
+    import sqlite3
+    db = Path(tempfile.mkdtemp()) / "binance_tape.sqlite"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE trade_tape_1s(symbol TEXT, ts_sec INTEGER)")
+    c.executemany("INSERT INTO trade_tape_1s VALUES (?, ?)", [("ethusdt", int(time.time()) - 30),
+                                                             ("btcusdt", int(time.time()) - 3600)])
+    c.commit()
+    c.close()
+    ts = "datetime(max(ts_sec), 'unixepoch', 'localtime')"
+    ok = w._check_duckdb_table_freshness_uncached("x", db, "trade_tape_1s WHERE symbol = 'ethusdt'", ts, 5, 10)
+    assert ok.status == "OK" and ok.details["age_minutes"] < 2, ok                      # localtime = KST 로 읽힌다
+    assert w._check_duckdb_table_freshness_uncached("x", db, "trade_tape_1s WHERE symbol = 'btcusdt'", ts, 5, 10).status == "CRITICAL"
+    assert w._check_duckdb_table_freshness_uncached("x", db, "trade_tape_1s WHERE symbol = 'solusdt'", ts, 5, 10).status == "BLOCKED"
+
+
 if __name__ == "__main__":
+    test_hot_sqlite_freshness()
     test_gex_state_freshness()
     test_lock_conflict_uses_mtime()
     print("ok")

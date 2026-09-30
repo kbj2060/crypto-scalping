@@ -183,50 +183,33 @@ def burst_state(vol1s: list[tuple[int, float]], oi_ring: dict[int, float], vol1s
     return out
 
 
-# ── 기준선(같은 시간대 분위) — trade_tape.duckdb 읽기 전용 ──────────────────
-# 2026-09-26 잠금 재시도: 수집기가 ~4.6초마다 파일 잠금을 쥔다(중앙 0.49초·최대 1.1초·시간의 10.6%,
-#   F_GETLK 비침습 실측). duckdb 는 read_only 연결도 그동안 거부하므로 무작위 시도의 ~10%가 실패했다.
-#   최대 점유보다 긴 간격으로 몇 번 다시 열면 실패는 ~0.1% 이하로 내려간다.
-BASELINE_LOCK_RETRIES = 4
-BASELINE_LOCK_WAIT_S = 1.2
+# ── 기준선(같은 시간대 분위) — hot 체결 테이프(SQLite) ──────────────────
+# 2026-10-01 저장 재설계 3단계: trade_tape.duckdb 대신 data/hot/binance_tape.sqlite(WAL -- 쓰는 쪽과 안 막는다).
+#   예전엔 수집기가 ~4.6초마다 DuckDB 잠금을 쥐어(시간의 10.6%) 무작위 시도의 ~10%가 실패했고, 그래서 재시도를 뒀다.
+#   hot 은 5코인 한 파일이라 **심볼로 거른다**(옛 파일은 ETH 전용이라 조건이 없었다).
+#   quantile_cont·`//` 는 SQLite 에 없다 -- 초 합계만 SQL 로 받고 분 합계·p99 는 numpy(선형 보간 = quantile_cont).
 
 
-def _connect_read_only_retry(db_path: Path, retries: int = BASELINE_LOCK_RETRIES, wait_s: float = BASELINE_LOCK_WAIT_S):
-    import duckdb  # noqa: PLC0415
-    for i in range(retries + 1):
-        try:
-            return duckdb.connect(str(db_path), read_only=True)
-        except duckdb.IOException as exc:
-            if "could not set lock" not in str(exc).lower() or i == retries:   # 경로에 «lock» 이 든 다른 오류까지 기다리지 않는다
-                raise
-            time.sleep(wait_s)
-
-
-def baseline_from_tape(db_path: Path, days: int = 7) -> dict[str, Any] | None:
-    """UTC 시간대별 «1분 거래량» 분포와 «1초 거래량 p99». 수집기 아카이브를 읽기 전용으로 연다.
-    실패(락·파일 없음)면 None -- 화면은 절대값만 보인다."""
+def baseline_from_tape(db_path: Path, days: int = 7, symbol: str = "ethusdt") -> dict[str, Any] | None:
+    """UTC 시간대별 «1분 거래량» 분포와 «1초 거래량 p99». 실패(파일 없음 등)면 예외 -- 화면은 절대값만 보인다."""
+    from scripts.data_store import read_rows  # noqa: PLC0415
+    since = int(time.time()) - days * 86400
     try:
-        con = _connect_read_only_retry(db_path)
-        try:
-            since = int(time.time()) - days * 86400
-            rows = con.execute(
-                "SELECT (ts_sec // 60) * 60 AS m, sum(buy_qty + sell_qty) AS v FROM trade_tape_1s "
-                "WHERE ts_sec >= ? GROUP BY 1", [since]).fetchall()
-            sec = con.execute(
-                "SELECT ((ts_sec % 86400) // 3600) AS h, quantile_cont(v, 0.99) FROM ("
-                "SELECT ts_sec, sum(buy_qty + sell_qty) AS v FROM trade_tape_1s WHERE ts_sec >= ? GROUP BY 1) "
-                "GROUP BY 1", [since]).fetchall()
-        finally:
-            con.close()
+        sec = read_rows(db_path, "SELECT ts_sec, sum(buy_qty + sell_qty) FROM trade_tape_1s "
+                                 "WHERE symbol = ? AND ts_sec >= ? GROUP BY 1", [symbol, since])
     except Exception as exc:  # noqa: BLE001 -- 기준선은 장식이다. 못 읽으면 없이 가되, 왜인지는 올린다.
         raise RuntimeError(f"baseline_from_tape({db_path.name}): {exc!r}") from exc
-    if len(rows) < 600:
+    if not sec:
         return None
-    by_hour: dict[int, list[float]] = {h: [] for h in range(24)}
-    for m, v in rows:
-        by_hour[int((m % 86400) // 3600)].append(float(v))
-    return {"minute_vol_sorted": {h: sorted(vs) for h, vs in by_hour.items()},
-            "sec_vol_p99": {int(h): float(p) for h, p in sec}, "days": days, "built_at": time.time()}
+    a = np.asarray(sec, dtype=float)
+    ts, v = a[:, 0].astype(np.int64), a[:, 1]
+    mins, inv = np.unique(ts - ts % 60, return_inverse=True)
+    if len(mins) < 600:
+        return None
+    mvol, mh, sh = np.bincount(inv, weights=v), (mins % 86400) // 3600, (ts % 86400) // 3600
+    return {"minute_vol_sorted": {h: sorted(mvol[mh == h].tolist()) for h in range(24)},
+            "sec_vol_p99": {int(h): float(np.quantile(v[sh == h], 0.99)) for h in np.unique(sh)},
+            "days": days, "built_at": time.time()}
 
 
 FLOW_SCALE_DAYS = 14   # 2026-10-01 «누가 밀고 있나» 고래·중형·리테일 z 의 분모 = 같은 UTC 시 60분 순매수의 MAD
@@ -256,17 +239,14 @@ def flow_hour_scales_from_bars(rows: list) -> dict[int, dict[str, float]]:
     return out
 
 
-def flow_hour_scales(db_path: Path, days: int = FLOW_SCALE_DAYS) -> dict[int, dict[str, float]]:
-    """trade_tape_1s 의 크기별 수량(2026-09-19~ 채워짐, 그 전은 NULL)을 읽기 전용으로 -- 오늘 0시(UTC) 전 days 일."""
+def flow_hour_scales(db_path: Path, days: int = FLOW_SCALE_DAYS, symbol: str = "ethusdt") -> dict[int, dict[str, float]]:
+    """trade_tape_1s 의 크기별 수량(2026-09-19~ 채워짐, 그 전은 NULL) -- 오늘 0시(UTC) 전 days 일. hot 은 심볼로 거른다."""
+    from scripts.data_store import read_rows  # noqa: PLC0415
     today = int(time.time()) // 86400 * 86400
-    con = _connect_read_only_retry(db_path)
-    try:
-        rows = con.execute(
-            "SELECT ts_sec // 300 * 300 AS b, sum(buy_qty - sell_qty), sum(whale_buy_qty - whale_sell_qty), "
-            "sum(retail_buy_qty - retail_sell_qty) FROM trade_tape_1s WHERE whale_buy_qty IS NOT NULL "
-            "AND ts_sec >= ? AND ts_sec < ? GROUP BY 1 ORDER BY 1", [today - days * 86400, today]).fetchall()
-    finally:
-        con.close()
+    rows = read_rows(db_path,
+                     "SELECT ts_sec - ts_sec % 300 AS b, sum(buy_qty - sell_qty), sum(whale_buy_qty - whale_sell_qty), "
+                     "sum(retail_buy_qty - retail_sell_qty) FROM trade_tape_1s WHERE symbol = ? AND whale_buy_qty IS NOT NULL "
+                     "AND ts_sec >= ? AND ts_sec < ? GROUP BY 1 ORDER BY 1", [symbol, today - days * 86400, today])
     return flow_hour_scales_from_bars(rows)
 
 

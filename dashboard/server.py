@@ -55,10 +55,11 @@ from scripts.live_trade_tape_collector_20260916 import (  # noqa: E402
     WHALE_MIN_USD,
     TakerOrderAggregator,
     TapeBuffer,
+    HOT_TAPE_DB,
     TapeStore,
-    default_db as tape_default_db,
     size_bands,
 )
+from scripts.data_store import read_rows  # noqa: E402
 from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
     FETCH_LIMIT as EVIDENCE_FETCH_LIMIT,
     bars_since_last_true,
@@ -620,7 +621,7 @@ LIQ_EVENTS_PATH = LIVE_DIR / "liq_events.jsonl"      # ⑤ 원시 이벤트(ETH)
 def liq_events_path(asset: str) -> Path:
     """ETH 는 옛 파일 그대로(연구 스크립트가 읽는다), 나머지는 코인별 파일."""
     return LIQ_EVENTS_PATH if asset == "eth" else LIVE_DIR / f"liq_events_{asset}.jsonl"
-MICRO_TAPE_DB_PATH = LIVE_DIR / "trade_tape.duckdb"  # ② 기준선(시간대별 분위). 읽기 전용, 1시간마다
+MICRO_TAPE_DB_PATH = HOT_TAPE_DB  # ② 기준선(시간대별 분위), 1시간마다. 2026-10-01 hot SQLite(5코인 한 파일 -- 쿼리가 심볼로 거른다)
 # ⑥ 마크가격 스트림(2026-09-21): 예상 펀딩(«어느 쪽이 갇혔나») + 마크−인덱스 베이시스(«누가 주도하나»).
 #    🔴forceOrder 와 같은 함정 -- `/ws/` 는 연결되는데 이벤트 0, `/market/ws/` 만 온다(09-21 dev 실측 0 vs 8건/6초).
 MARK_PRICE_WS_URL = "wss://fstream.binance.com/market/ws/ethusdt@markPrice@1s"
@@ -650,19 +651,8 @@ OKX_LIQ_DB_PATH = OKX_CTX_DB_PATH
 
 
 def _read_only_rows(path: Path, sql: str, params: list) -> list[tuple]:
-    """수집기 duckdb 를 read_only 로 잠깐 연다. 쓰는 쪽(5~10초마다 수백 ms)과 겹치면 짧게 다시."""
-    for i in range(25):
-        try:
-            con = duckdb.connect(str(path), read_only=True)
-            try:
-                return con.execute(sql, params).fetchall()
-            finally:
-                con.close()
-        except duckdb.IOException as exc:
-            if "lock" not in str(exc).lower() or i == 24:
-                raise
-            time.sleep(0.2)
-    return []
+    """수집기 저장소를 잠깐 열어 읽는다 -- .sqlite(hot)면 락 없이, .duckdb 면 read_only + 짧은 재시도(data_store.read_rows)."""
+    return read_rows(path, sql, params)
 
 
 def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH, coin: str = "ETH") -> list[tuple[int, float, bool, str]]:
@@ -760,7 +750,7 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
     🔴가격칸: 테이프 칸(0.1)을 풋프린트 칸(0.5)으로 올린다. 0.5 가 0.1 의 정수배라 경계가 겹친다
       (정수/5 는 .5 가 안 나와 반올림 동률이 없다)."""
     t0_sec = t0_ms // 1000
-    q = """SELECT ts_sec // ? * ? AS bar, CAST(round(price_bin * ? / ?) AS INTEGER) AS k,
+    q = """SELECT ts_sec - ts_sec % ? AS bar, CAST(round(price_bin * ? / ?) AS INTEGER) AS k,
                   sum(buy_qty), sum(sell_qty),
                   sum(coalesce(whale_buy_qty, 0)), sum(coalesce(whale_sell_qty, 0)),
                   sum(coalesce(retail_buy_qty, 0)), sum(coalesce(retail_sell_qty, 0))
@@ -768,8 +758,8 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
     # 2026-09-26 바이낸스 체결 테이프(trade_tape_<coin>.duckdb)도 같은 표 모양이라 이 함수를 쓴다 -- 칸 폭만 준다.
     tape_bucket = tape_bucket or OKX_TAPE_BUCKETS[inst]
     bars: dict[int, dict[int, list[float]]] = {}
-    for bar, k, *v in _read_only_rows(tape_db, q, [bar_seconds, bar_seconds, tape_bucket, bucket,
-                                                   inst, lo_sec, t0_sec]):
+    # 🔴SQL 은 DuckDB(OKX 테이프)·SQLite(바이낸스 hot) 둘 다에서 같게 -- `//` 는 SQLite 에 없다(data_store.read_rows).
+    for bar, k, *v in _read_only_rows(tape_db, q, [bar_seconds, tape_bucket, bucket, inst, lo_sec, t0_sec]):
         bars.setdefault(int(bar), {})[int(k)] = [float(x) for x in v]
     ver = _read_only_rows(tape_db, "SELECT ts_min, rel_err FROM verify_1m WHERE symbol = ? AND ts_min >= ?",
                           [inst, lo_sec])
@@ -837,8 +827,9 @@ def tape_levels(tape_db: Path, sym: str, bk: float, now: int) -> dict[str, Any]:
         SELECT (SELECT sum(price_bin * q) / nullif(sum(q), 0) FROM t WHERE ts_sec >= ?),
                (SELECT sum(price_bin * q) / nullif(sum(q), 0) FROM t WHERE ts_sec >= (SELECT ts_sec FROM ah)),
                (SELECT sum(price_bin * q) / nullif(sum(q), 0) FROM t WHERE ts_sec >= (SELECT ts_sec FROM al)),
-               (SELECT ts_sec FROM ah), (SELECT ts_sec FROM al), (SELECT arg_max(price_bin, ts_sec) FROM t),
-               (SELECT arg_max(price_bin, ts_sec) FROM pd)""",
+               (SELECT ts_sec FROM ah), (SELECT ts_sec FROM al),
+               (SELECT price_bin FROM t ORDER BY ts_sec DESC, price_bin DESC LIMIT 1),
+               (SELECT price_bin FROM pd ORDER BY ts_sec DESC, price_bin DESC LIMIT 1)""",
         [sym, min(w0, d0 - 86400), d0 - 86400, d0, w0])[0]
     px = lambda b: None if b is None else (float(b) + 0.5) * bk   # noqa: E731 -- 테이프 칸 가운데
     last = px(vw[5])
@@ -1927,7 +1918,7 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
     #   쓴다. 코인마다 REST 백필을 돌리면 콜드스타트에 한도를 넘긴다(실측: 418 밴 27분). ETH 외 코인은 서버에 이미
     #   쌓이는 **코인별 체결 테이프**(같은 되묶기·같은 고래/리테일 칸, 1분봉 대조 통과)에서 되살린다 -- REST 0.
     REST_BACKFILL = spec.asset == "eth"                                      # noqa: N806
-    TAPE_DB = tape_default_db(spec.symbol.lower())                           # noqa: N806
+    TAPE_DB = HOT_TAPE_DB     # 2026-10-01 hot SQLite(5코인 한 파일, 락 없음) -- 쿼리가 심볼로 거른다  # noqa: N806
 
     # ── 볼륨 풋프린트 체결 테이프 (2026-09-15) ────────────────────────────────────
     # 봉 하나를 가격레벨로 쪼개 **공격적 매수/매도** 체결량을 따로 센다. klines 에는 이 정보가

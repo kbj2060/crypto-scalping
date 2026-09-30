@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import gzip
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +29,34 @@ LAKE = Path(os.getenv("DATA_LAKE") or (_BACKUP_LAKE if not (ROOT / "data" / "lak
 # scripts/live_book_ticker_collector_20260914.py 의 HDR(32B)·ROW("<qdfdf", 32B)와 같아야 한다 -- 테스트가 대조한다.
 BT_HEADER_BYTES = 32
 BT_DTYPE = np.dtype([("ts_ms", "<i8"), ("bid_px", "<f8"), ("bid_qty", "<f4"), ("ask_px", "<f8"), ("ask_qty", "<f4")])
+
+
+def read_rows(path: Path, sql: str, params: list | tuple = ()) -> list[tuple]:
+    """라이브 저장소 읽기 한 곳. .sqlite(hot, 저장 재설계 3단계) = WAL 이라 쓰는 쪽과 서로 안 막는다 -- 그냥 연다.
+    .duckdb = read_only 로 열고 쓰는 쪽 락과 겹치면 0.2초씩 최대 25번 다시(읽는 쪽이 쓰는 쪽을 막을 수도 있다).
+    🔴SQL 은 두 엔진에서 같은 결과가 나오게 쓴다: `a // b` 대신 `a - a % b`, arg_max 대신 ORDER BY … LIMIT 1,
+    quantile_cont 는 파이썬에서. (DuckDB 의 sqlite ATTACH 는 조건을 못 내려보내 670만 행을 매번 다 읽는다 --
+    쿼리당 0.8~1.7초 vs SQLite 인덱스로 수 ms~수백 ms, 10-01 서버 실측.)"""
+    if path.suffix == ".sqlite":
+        import sqlite3
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
+        try:
+            return con.execute(sql, params).fetchall()
+        finally:
+            con.close()
+    import duckdb
+    for i in range(25):
+        try:
+            con = duckdb.connect(str(path), read_only=True)
+            try:
+                return con.execute(sql, params).fetchall()
+            finally:
+                con.close()
+        except duckdb.IOException as exc:
+            if "lock" not in str(exc).lower() or i == 24:
+                raise
+            time.sleep(0.2)
+    return []
 
 
 def lake_path(venue: str, stream: str, coin: str, day: str, lake: Path | None = None) -> Path:
