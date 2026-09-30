@@ -1,7 +1,11 @@
-"""ops_watchdog.check_gex_state -- 옵션 수집기 요약 JSON 신선도(옛 deribit_gex.duckdb 거짓 CRITICAL 대체)."""
+"""ops_watchdog -- ① check_gex_state: 옵션 수집기 요약 JSON 신선도(옛 deribit_gex.duckdb 거짓 CRITICAL 대체)
+② 락 충돌 시 파일 mtime 으로 신선도(writer 가 쥐고 있으면 살아 있다는 뜻)."""
 import datetime as dt
 import json
+import os
+import subprocess
 import sys
+import time
 import tempfile
 from pathlib import Path
 
@@ -19,6 +23,24 @@ def test_gex_state_freshness():
         assert w.check_gex_state().status == expected, minutes
 
 
+def test_lock_conflict_uses_mtime():
+    db = Path(tempfile.mkdtemp()) / "t.duckdb"
+    holder = subprocess.Popen([sys.executable, "-c",
+                               "import duckdb,time,sys; c=duckdb.connect(sys.argv[1]); "
+                               "c.execute('create table t(ts timestamp)'); c.execute('insert into t values (now())'); "
+                               "print('ready', flush=True); time.sleep(20)", str(db)], stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "ready"
+        c = w._check_duckdb_table_freshness_uncached("x", db, "t", "ts", 5, 10)
+        assert c.details.get("lock_conflict") is True and c.status == "OK", c
+        os.utime(db, (time.time() - 3600,) * 2)
+        c = w._check_duckdb_table_freshness_uncached("x", db, "t", "ts", 5, 10)
+        assert c.status == "CRITICAL", c
+    finally:
+        holder.kill()
+
+
 if __name__ == "__main__":
     test_gex_state_freshness()
+    test_lock_conflict_uses_mtime()
     print("ok")

@@ -403,13 +403,22 @@ def _check_duckdb_table_freshness_uncached(component: str, db_path: Path, table:
         #    파일 없음 / 행 없음 / 그 밖의 오류는 지금처럼 **즉시 BLOCKED** 다.
         # ⚠️이건 알림 소음만 고친다. 봇의 `MS duckdb insert failed`(실제 쓰기 실패)는 별건이고
         #    감시자가 라이브 DB 락을 아예 안 건드리게 해야 없어진다.
+        # 🔴2026-10-01: 그래도 디스크 부하(백업·봉인)로 충돌이 2분 넘게 이어지면 WARN 이 텔레그램으로 나갔다
+        #   (백업 중 3쌍, 데이터 결손 0). 락을 쥔 writer 가 있으면 **파일 mtime** 으로 신선도를 잰다 --
+        #   수집기는 커밋마다 파일을 쓰므로 쓰기가 멈추면 mtime 도 멈춰 진짜 정지는 그대로 잡힌다.
         busy = "conflicting lock" in str(last_error).lower()
-        return Check(component, "WARN" if busy else "BLOCKED",
-                     "duckdb table busy: writer holds the lock" if busy
-                     else "duckdb table cannot be read", {
-            "path": str(db_path), "table": table, "error": f"{type(last_error).__name__}: {last_error}",
-            "attempts": attempt + 1, "lock_conflict": busy,
-        })
+        details = {"path": str(db_path), "table": table, "error": f"{type(last_error).__name__}: {last_error}",
+                   "attempts": attempt + 1, "lock_conflict": busy}
+        if busy:
+            try:
+                mtime_age = max(0.0, (time.time() - db_path.stat().st_mtime) / 60.0)
+            except OSError:
+                mtime_age = None
+            return Check(component, "WARN" if mtime_age is None else stale_status(mtime_age, warn_minutes, critical_minutes),
+                         "duckdb table busy: writer holds the lock (freshness from file mtime)",
+                         {**details, "mtime_age_minutes": mtime_age,
+                          "warn_minutes": warn_minutes, "critical_minutes": critical_minutes})
+        return Check(component, "BLOCKED", "duckdb table cannot be read", details)
     if max_ts is None:
         return Check(component, "BLOCKED", "duckdb table has no rows", {"path": str(db_path), "table": table})
     # every timestamp column checked here is KST wall time whether or not duckdb attaches
