@@ -1598,7 +1598,7 @@ function renderSnapshotAccount() {
   const perf = net.length
     // 🔴2026-09-26 비평: 회고 차트(≈330px)가 주문 조작부와 시장 사이를 막아 시장이 y≈1150 에서야 시작했다.
     //   기본은 **한 줄 요약**(왕복·승률·누적)만, 차트는 펼쳐서 본다. 펼침 상태는 기억한다(acctPerfOpen).
-    ? `<section class="acct-perf"><details class="acct-perf-fold"${acctPerfOpen ? " open" : ""}>
+    ? `<section class="acct-perf"><details class="acct-perf-fold"${acctPerfOpen || document.documentElement.classList.contains("fit1") ? " open" : ""}>
          <summary class="acct-chips">
            ${chip(net.length, "왕복")}
            ${chip(`${Math.round(wins / net.length * 100)}%`, "승률")}
@@ -2802,7 +2802,7 @@ function cardRailSync() {
 // 2026-09-30 «한 화면 모드»(사용자 1920×1080·90%): 넓은 화면에서 카드 하나 = 창 높이 하나 -- 레일 점/스크롤이 카드 단위로 딱 맞게 넘어간다.
 //   Footprint 는 차트 상자 높이를, Option 은 행사가 사다리 높이를 «창 높이 − 카드의 나머지»로 계산한다. 계좌는 창 높이까지 늘린다.
 //   창 높이 < 900 이면 끈다(가격판이 너무 좁아진다). 켜기/끄기 = 레일 아래 단추(브라우저 기억).
-let fitOptLadderH = null;
+let fitOptLadderH = null, fitOptSvgCap = FIT0.cap || 0, fitAcctPlotH = FIT0.ap || 0;   // 2026-10-01 Option 차트 셋 상한 · 계좌 성과 차트 높이(한 화면 모드, fitLayout 이 잰다)
 const optColW = () => {   // .opt-ladder 최대 폭 440 과 같게(넓게 그리면 줄어 글자가 작아진다) · 첫 렌더(칸이 아직 없음)는 카드 폭의 가운데 열 몫으로
   const s = document.querySelector('#optCard .opt-sec:has([data-tip="ladder"])');
   if (s && s.clientWidth > 240) return Math.min(440, Math.round(s.clientWidth));
@@ -2828,10 +2828,25 @@ function fitLayout() {
     const items = opt.querySelectorAll(":scope > .ops-health-head, #optBody > *, #optRow > *, :scope > #mcWhen");
     const bottom = Math.max(0, ...[...items].map((k) => k.getBoundingClientRect().bottom));
     const r = opt.getBoundingClientRect(), slack = Math.round(r.top + vh - parseFloat(getComputedStyle(opt).paddingBottom || 0) - bottom);
-    if (bottom > 0 && Math.abs(slack) > 4) h = Math.max(300, Math.min(900, h + slack));
+    // 2026-10-01 사다리가 바닥(300)인데도 넘치면(작은 창 · 사다리가 아닌 열이 줄 높이를 정할 때) 만기·흐름·감마곡선 차트 셋에 높이 상한을 준다 -- ⑤ 가 잘리던 것
+    const svgs = opt.querySelectorAll("#optLaneBody svg, #optFlowBody svg, .opt-sec:has([data-tip=curve]) svg");
+    if (bottom > 0 && Math.abs(slack) > 4) {
+      if (slack < 0 && h <= 300) fitOptSvgCap = Math.max(80, (fitOptSvgCap || Math.max(0, ...[...svgs].map((k) => k.getBoundingClientRect().height))) + Math.floor(slack / 2));
+      else if (slack > 0 && fitOptSvgCap) fitOptSvgCap = fitOptSvgCap + slack > 700 ? 0 : fitOptSvgCap + slack;
+      else h = Math.max(300, Math.min(900, h + slack));
+    }
+  }
+  if (opt) opt.style.setProperty("--optsvg", on && fitOptSvgCap ? `${Math.round(fitOptSvgCap)}px` : "none");
+  // 2026-10-01 계좌 카드: 한 화면 모드면 성과 차트를 펼쳐 남는 높이를 그 차트에 준다(사용자 «내 계좌도 화면에 가득»)
+  const plot = on && acct && acct.offsetParent ? acct.querySelector("#snapAcctPerf .acct-plot svg") : null;
+  if (plot) {
+    const ab = Math.max(0, ...[...acct.children].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().bottom));
+    const ar = acct.getBoundingClientRect(), aslack = Math.round(ar.top + vh - parseFloat(getComputedStyle(acct).paddingBottom || 0) - ab);
+    const cur = plot.getBoundingClientRect().height;
+    if (Math.abs(aslack) > 4) { fitAcctPlotH = Math.max(120, Math.min(900, Math.round(cur + aslack))); acct.style.setProperty("--acctplot", `${fitAcctPlotH}px`); }
   }
   if (h !== fitOptLadderH) { fitOptLadderH = h; if (typeof renderOptions === "function") renderOptions(); }
-  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff, lad: fitOptLadderH })); } catch (e) { /* 기억은 편의 */ } }
+  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff, lad: fitOptLadderH, cap: fitOptSvgCap, ap: fitAcctPlotH })); } catch (e) { /* 기억은 편의 */ } }
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
 // 2026-10-01 ⑤ 다음 24시간(116 + 여백·선 36)이 맨 아래 전폭으로 들어와 그만큼 뺀다.
@@ -2842,6 +2857,8 @@ function fitApplyCached() {
   document.documentElement.classList.add("fit1");
   fitOptLadderH = FIT0.lad || fitLadderFormula();   // 지난번에 잰 값(같은 창 높이) -- 새로고침 첫 그림부터 맞는다
   ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
+  if (fitOptSvgCap) el("optCard")?.style.setProperty("--optsvg", `${fitOptSvgCap}px`);
+  if (fitAcctPlotH) el("acctCard")?.style.setProperty("--acctplot", `${fitAcctPlotH}px`);
 }
 function setupCardRail() {
   fitApplyCached();
@@ -2852,21 +2869,6 @@ function setupCardRail() {
   cardRailSync();
   addEventListener("resize", () => requestAnimationFrame(fitLayout));
   setInterval(fitLayout, 1500);
-  // 2026-10-01 한 화면 모드: 휠 한 칸(작게 굴려도)이면 다음/이전 카드로(사용자 지시). 트랙패드 관성은 이벤트가 멎을 때까지 한 번으로 친다.
-  //   창보다 긴 카드(한 화면 모드 밖 패널) 안에서는 보통 스크롤.
-  let wheelLock = 0;
-  addEventListener("wheel", (e) => {
-    if (!document.documentElement.classList.contains("fit1") || e.ctrlKey || Math.abs(e.deltaY) < Math.abs(e.deltaX) || !e.deltaY) return;
-    const cards = [...document.querySelectorAll("#snapshotTabPanel > .panel")].filter((c) => c.offsetParent);
-    const tops = cards.map((c) => c.getBoundingClientRect().top), cur = tops.reduce((b, t, i) => (Math.abs(t - 10) < Math.abs(tops[b] - 10) ? i : b), 0);
-    const nxt = cur + Math.sign(e.deltaY);
-    if (!cards[cur] || cards[cur].offsetHeight > innerHeight + 40 || nxt < 0 || nxt >= cards.length) return;
-    e.preventDefault();
-    const now = performance.now();
-    if (now < wheelLock) { wheelLock = Math.max(wheelLock, now + 200); return; }
-    wheelLock = now + 700;
-    cards[nxt].scrollIntoView({ behavior: "smooth", block: "start" });
-  }, { passive: false });
   // 2026-09-30 ⑤ 시간축은 시장 맥락 응답이 없어도 1분마다 다시 그린다(«지금» 기준이 흐르고 지난 일정이 빠진다) -- 멈춘 채 어제 모습으로 남던 것
   setInterval(() => { if (activePageTab === "snapshot" && !document.hidden && typeof renderMarketCtx === "function") renderMarketCtx(); }, 60 * 1000);   // 데이터가 오며 카드 높이가 바뀐다 -- 1.5초마다 다시 잰다(값이 같으면 아무것도 안 한다)
 }

@@ -2611,8 +2611,8 @@ body.not-eth #mcWall { display: none; }
 #mcBody.mc-in-fp:not(.mc-cmp) { border-top: 1px solid var(--line); margin-top: 12px; }
 /* 2026-09-30 카드 이동 레일(점만, 사용자 지시): 오른쪽 가운데 고정 · 지금 보는 카드 = 채운 점. 넓은 화면(위 미디어 쿼리)에서만 보인다. */
 /* 2026-09-30 한 화면 모드(app.js fitLayout): 카드 단위 스냅 */
-html.fit1 { scroll-snap-type: y proximity; }
-html.fit1 #snapshotTabPanel > .panel { scroll-snap-align: start; scroll-margin-top: 10px; }
+/* 2026-10-01 스크롤 스냅 제거(사용자 «스크롤 하면 자동으로 내려가는 건 제거») -- 카드 이동은 오른쪽 점 레일로 */
+html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
 /* 2026-09-30(2) 풋프린트 카드 = 창 높이, 차트 칸 = 남는 공간(flex) -- 차트 높이를 JS 가 재서 고치지 않는다(새로고침 때 흔들렸다).
    ⑤ 24시간은 자리를 미리 잡아(내용이 늦게 와도 차트 칸이 안 줄어든다). */
 @media (min-width: 1700px) and (orientation: landscape) {
@@ -2621,7 +2621,12 @@ html.fit1 #snapshotTabPanel > .panel { scroll-snap-align: start; scroll-margin-t
   html.fit1 #candleSvgSnapshot { height: calc(100% - 12px) !important; }   /* 상자 = 차트 + 12(예전 884/872 과 같은 여유) */
   html.fit1 #mcBody:not(.mc-cmp), html.fit1 #mcWall:not(.on) { display: none; }   /* 제자리(차트 오른쪽 칸)에 놓이기 전엔 안 보인다 -- 첫 0.5초 흐름 속에 나타났다 사라지던 것 */
   html.fit1 #mcWhen { height: 116px; overflow: hidden; flex: none; }
-  html.fit1 #optCard { align-content: start; }   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
+  html.fit1 #optCard { align-content: start; }
+  html.fit1 #optCard :is(#optLaneBody, #optFlowBody, .opt-sec:has([data-tip="curve"])) svg { max-height: var(--optsvg, none); }   /* 2026-10-01 작은 창에서 넘치면 fitLayout 이 상한을 준다(비율 유지) */
+  /* 2026-10-01 계좌: 성과 차트를 늘 펼치고(접기 숨김) 남는 높이를 fitLayout 이 --acctplot 으로 준다 */
+  html.fit1 #acctCard .acct-perf-more { display: none; }
+  html.fit1 #acctCard .acct-perf-fold > summary { pointer-events: none; }
+  html.fit1 #snapAcctPerf .acct-plot svg { height: var(--acctplot, 240px); max-height: none; }   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
   html.fit1 #fpCard > .ops-health-head, html.fit1 #liquidationMapList { flex: none; }
 }
 .card-rail { display: none; position: fixed; z-index: 800; right: 12px; top: 50%; transform: translateY(-50%); gap: 18px; padding: 6px 0; }
