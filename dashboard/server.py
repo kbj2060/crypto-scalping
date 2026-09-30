@@ -1498,6 +1498,20 @@ def _age_min(ts: Any) -> float | None:
     return round((datetime.now(timezone.utc) - dt).total_seconds() / 60.0, 1)
 
 
+def heatmap_obi(last_qty, price, center: float, band_pct: float = 0.5) -> float:
+    """호가 불균형 = (매수 − 매도) ÷ 합, 지금 호가(`last_qty`: + 매수 / − 매도)를 **지금 가격(center) ±band_pct%** 에서.
+
+    🔴2026-09-30 사용자 «작은 호가벽은 매수가 큰데 불균형은 −1»: 중심을 창 전체 mid 중앙값으로 잡았었다.
+      화면 창이 1~12시간이라 가격이 창 안에서 0.5% 넘게 움직이면 범위가 통째로 지금가 한쪽(위면 매도만)에 걸려
+      ±1 로 붙었다(실측 1h 창: 중앙값 2705.9 vs 지금 2691.8 → −1.000, 지금가 중심이면 +0.086).
+    """
+    import numpy as np  # noqa: PLC0415
+    band = np.abs((np.asarray(price, float) - center) / center * 100.0) <= band_pct
+    q = np.asarray(last_qty, float)
+    b = float(np.clip(q, 0, None)[band].sum()); k = float(np.clip(-q, 0, None)[band].sum())
+    return round((b - k) / max(b + k, 1e-9), 3)
+
+
 def worker_payload(path: Path, max_age_min: float, *, ts_field: str = "updated_utc",
                    require_ok: bool = False, stamp_available: bool = False,
                    bare_missing: bool = False, extra_missing: dict | None = None) -> dict[str, Any]:
@@ -4997,7 +5011,6 @@ def make_app() -> web.Application:
         inst, pers = st["inst"], st["pers"]
         spot = float(np.nanmedian(mid[ok]))
         price = (w["bin_lo"] + np.arange(w["n_bins"])) * w["bin_size"]
-        dist = (price - spot) / spot * 100.0 if spot else np.zeros_like(price)
 
         # ── 체결 vs 이탈: 풋프린트로 가른다 ──────────────────────────────────
         # 잔량 감소 = 체결 + 이탈(취소·리프라이싱·창 밖). 풋프린트가 **같은 $0.5 버킷**으로
@@ -5058,9 +5071,6 @@ def make_app() -> web.Application:
                                 if (fill_source and drop > 0) else None)
         tot_drop = float(np.clip(bid_now[0] - bid_now[-1], 0, None).sum()
                          + np.clip(ask_now[0] - ask_now[-1], 0, None).sum())
-        band = np.abs(dist) <= 0.5
-        b = float(np.clip(qty[ok][-1], 0, None)[band].sum())
-        k = float(np.clip(-qty[ok][-1], 0, None)[band].sum())
         return {
             "rows": {"bin_lo": int(w["bin_lo"]), "bin_size": float(w["bin_size"]),
                      **{f"{k}_f4": base64.b64encode(
@@ -5070,7 +5080,7 @@ def make_app() -> web.Application:
                 "persist_share": round(float(pers.sum() / max(inst.sum(), 1e-9)), 3),
                 "offtouch_leave_share": offtouch_leave_share, "fill_source": fill_source,
                 "offtouch_bins": int(same_bid.sum() + same_ask.sum()),
-                "obi": round((b - k) / max(b + k, 1e-9), 3), "obi_band_pct": 0.5,
+                "obi": heatmap_obi(qty[ok][-1], price, m1), "obi_band_pct": 0.5,   # 중심 = 지금 mid(m1), 창 중앙값 아님
                 "window_s": int(w["cols"] * w["dt_s"]),
             },
         }
