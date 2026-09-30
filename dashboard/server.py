@@ -1896,7 +1896,9 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
             finally:
                 con.close()
             if hrows:
-                picked = list(reversed(hrows))[::5][-MICRO_STRIP_SAMPLES:]
+                # 🔴2026-09-30 가장 **새** 행부터 5개마다 뽑는다. 옛 판(reversed 뒤 [::5])은 가장 오래된 행에서 세어
+                #   마지막 점이 최신 행보다 최대 4분 늦었다. hrows 는 ts desc 라 [::5] 의 첫 칸이 최신 -- 뒤집어 시간순.
+                picked = hrows[::5][:MICRO_STRIP_SAMPLES][::-1]
 
                 def _tone(v):
                     if v is None:
@@ -1931,7 +1933,7 @@ def coin_indicators_payload(asset: str) -> dict[str, Any]:
                 finally:
                     con.close()
                 if hr:
-                    picked = list(reversed(hr))[::5][-MICRO_STRIP_SAMPLES:]
+                    picked = hr[::5][:MICRO_STRIP_SAMPLES][::-1]   # 2026-09-30 최신 행부터(위 micro 와 같은 고침)
                     # ⚠️hawkes가 없으니 Z만으로 판정한다 -> "위험"(bad) 티어는 나오지 않는다.
                     out["tail"]["cascade_history"] = [
                         ("warn" if max(_z(x[1], x[3], x[4]), _z(x[2], x[5], x[6])) >= 2.0 else "good")
@@ -3320,6 +3322,7 @@ def make_app() -> web.Application:
     depth25_ring: deque = deque(maxlen=6 * 3600)  # ±25bp 매수·매도 호가 합 초별 6시간 -- 시장 맥락 «얇은 쪽» 분위 기준
     mp_state: dict[str, Any] = {"connected": False, "since": None, "last_ms": None, "events": 0, "errors": 0, "last_error": None}
     mark_ring: dict[int, tuple[float, float, float]] = {}   # sec → (mark, index, funding). 상황 읽기의 펀딩·베이시스 입력
+    mid_ring: dict[int, float] = {}   # sec → 바이낸스 미드(마이크로 루프). 시장 맥락 HL 가격차를 HL 표본 시각의 미드와 재려고(2026-09-30)
 
     def liq_events_load() -> None:
         """재시작 직후 1회. 청산은 **11분에 몇 건**이라 빈 deque 로 시작하면 새로고침해도
@@ -3478,6 +3481,9 @@ def make_app() -> web.Application:
                 book = await fetch_binance_json(MICRO_BOOK_URL, {"symbol": FOOTPRINT_SYMBOL})
                 qi_val = mref.qi(float(book["bidQty"]), float(book["askQty"]))
                 mid = (float(book["bidPrice"]) + float(book["askPrice"])) / 2.0
+                mid_ring[now_sec] = mid
+                for old in [sc for sc in mid_ring if sc < now_sec - 600]:   # HL 표본(30초 수집 + 15초 캐시)보다 넉넉히 10분
+                    del mid_ring[old]
                 w = await loop.run_in_executor(
                     HEATMAP_EXECUTOR, functools.partial(read_window, FOOTPRINT_SYMBOL.lower(), int(now * 1000), 12, 1))
                 flow = mref.raster_flow(w)
@@ -3831,9 +3837,9 @@ def make_app() -> web.Application:
                 out[key] = None
                 out["errors"][key] = repr(exc)[:100]
         q("okx_fund", OKX_CTX_DB_PATH, "SELECT funding_rate, funding_time FROM okx_funding WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
-        q("okx_mark", OKX_CTX_DB_PATH, "SELECT mark_px FROM okx_mark WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
+        q("okx_mark", OKX_CTX_DB_PATH, "SELECT mark_px, ts_ms FROM okx_mark WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
         q("okx_oi", OKX_CTX_DB_PATH, "SELECT oi_base FROM okx_oi WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
-        q("hl_ctx", HL_CTX_DB_PATH, "SELECT funding, open_interest, premium, mark_px, mid_px FROM hl_asset_ctx WHERE coin = 'ETH' ORDER BY recv_ms DESC LIMIT 1", [])
+        q("hl_ctx", HL_CTX_DB_PATH, "SELECT funding, open_interest, premium, mark_px, mid_px, recv_ms FROM hl_asset_ctx WHERE coin = 'ETH' ORDER BY recv_ms DESC LIMIT 1", [])
         # 마지막으로 **다 돈** 바퀴의 포지션(바퀴 행과 포지션이 한 트랜잭션으로 들어온다 -- 수집기 write())
         q("hl_pos", HL_POS_DB_PATH, "SELECT szi, liq_px FROM hl_positions WHERE coin = 'ETH' AND ts_ms >= (SELECT max(ts_ms) FROM hl_cycles)", [])
         q("ls", OI_LSRATIO_DB_PATH, """SELECT epoch(ts), global_ls_ratio, top_pos_ls_ratio, taker_ls_ratio FROM oi_lsratio_5m
@@ -3908,7 +3914,9 @@ def make_app() -> web.Application:
         dv = mref.deriv_from_ring(mark_ring, 1800, sit.BASIS_PCT)
         bn_mark = mark_ring[max(mark_ring)][0] if mark_ring else None
         mid = mp.get("mid") or bn_mark
-        oi = mctx.oi_stats(hist["oi"])
+        # 🔴2026-09-30 OI 격자는 5분 캐시(최대 30분 낡음)인데 다른 줄은 라이브라 «지금 OI»·1시간 변화·z(와 lev 라벨)가 캐시 나이만큼
+        #   낡았다. 끝 칸을 라이브 OI(oi_1s, 사분면 oi60 과 같은 원천)로 바꾼다 -- 기준(1시간 전 칸·과거 분포)은 격자 그대로.
+        oi = mctx.oi_stats(mctx.oi_series_live(hist["oi"], max(oi_1s), oi_1s[max(oi_1s)]) if oi_1s else hist["oi"])
         okx_oi, hl = one("okx_oi"), one("hl_ctx")
         okx_mark, okx_fund = one("okx_mark"), one("okx_fund")
         bp = lambda a, b: (a / b - 1) * 1e4 if a and b else None   # noqa: E731
@@ -3940,7 +3948,11 @@ def make_app() -> web.Application:
             "btc": {"move_bp": ev.get("btc_move_bp"), "rel": ev.get("btc_rel")},
             # 🔴같은 종류끼리만 잰다: 바이낸스 마크는 평활값이라 체결 미드보다 ~10bp 늦게 따라올 때가 있다(09-29 실측 HL 미드−BN 미드 8.9bp 를
             #   HL 마크−BN 마크로 재 19.5bp 로 보였다). HL = 미드 대 미드 · OKX = 수집기에 미드가 없어 마크 대 마크.
-            "venues": {"okx_bp": bp(okx_mark[0] if okx_mark else None, bn_mark), "hl_bp": bp(hl[4] if hl else None, mp.get("mid"))},
+            # 🔴2026-09-30 HL(30초 수집+15초 캐시)·OKX(15초 캐시) 표본을 바이낸스 «지금»과 견줘 그 사이 바이낸스 움직임이 가격차로 섞였다
+            #   (30초 새 −6.1 → +11.4bp). 상대 표본 시각의 바이낸스 값과 잰다 -- 링에 그 초가 없을 때만 지금 값.
+            "venues": {"okx_bp": bp(okx_mark[0] if okx_mark else None,
+                                    mctx.ring_at(mark_ring, int(okx_mark[1]) // 1000, (bn_mark,))[0] if okx_mark else None),
+                       "hl_bp": bp(hl[4] if hl else None, mctx.ring_at(mid_ring, int(hl[5]) // 1000, mp.get("mid")) if hl else None)},
             "book": {"spread": mp.get("spread"), "sweep": sw, "bps": list(mctx.SWEEP_BPS),
                      "bid25_pct": float(np.mean(d25[:, 0] <= sw["bid"][0])) if d25 is not None and sw else None,
                      "ask25_pct": float(np.mean(d25[:, 1] <= sw["ask"][0])) if d25 is not None and sw else None},

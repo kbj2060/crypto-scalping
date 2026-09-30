@@ -100,6 +100,24 @@ def oi_stats(series: list[tuple[int, float]], step_s: int = 300) -> dict[str, fl
     return out
 
 
+def oi_series_live(series: list[tuple[int, float]], sec: int, value: float,
+                   step_s: int = 300) -> list[tuple[int, float]]:
+    """2026-09-30: 7일 OI 격자(5분 캐시, 최대 30분 낡음) 끝에 **라이브 OI** 를 그 5분 칸의 끝값으로 붙인다(같은 칸이면 교체).
+    옛 판은 격자 끝값을 «지금 OI»로 써 1시간 변화·z 가 캐시 나이만큼 낡았다. 기준(1시간 전 칸·과거 분포)은 격자 그대로."""
+    b = sec // step_s * step_s
+    return [r for r in series if r[0] < b] + [(b, value)]
+
+
+def ring_at(ring: dict, sec: int, fallback, tol_s: int = 2):
+    """2026-09-30: 초별 링(sec→값)에서 sec 에 가장 가까운 값(±tol_s초). 없으면 fallback(지금 값).
+    거래소 간 가격차를 **같은 순간**끼리 재려고 -- 30초 묵은 HL/OKX 표본을 바이낸스 «지금»과 견주면
+    그 사이 바이낸스 움직임이 가격차로 섞였다(30초 새 −6.1 → +11.4bp)."""
+    for d in sorted(range(-tol_s, tol_s + 1), key=abs):
+        if sec + d in ring:
+            return ring[sec + d]
+    return fallback
+
+
 def lev_state(basis_pct: float | None, oi_z: float | None) -> dict[str, str]:
     """레버리지 상태 한 줄. 🔴바이낸스 펀딩은 평온장에서 0.01% 에 클램프돼 거의 안 움직인다(2025~26 실측 최댓값 = 0.01%)
     -- 그래서 «비싸게 들고 있나»는 펀딩이 아니라 베이시스(마크−인덱스)의 7일 분위로 본다. 방향 신호 아님(극단 펀딩 검정 0/10)."""
