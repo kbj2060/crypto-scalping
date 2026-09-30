@@ -2565,9 +2565,29 @@ body.order-coin-off .acct-lanes::before {
 }
 #optCard .opt-card-head { display: flex; align-items: baseline; gap: 12px; }
 #optCard .opt-card-head .muted { font-size: 12px; }
-@media (min-width: 1100px) {   /* Option 카드 칸은 가로로 편다(커버 경고 줄은 전폭) */
-  #optCard #optBody { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px 28px; align-items: start; }
-  #optCard #optBody > :not(.opt-sec) { grid-column: 1 / -1; }
+/* 2026-09-30 Option 카드 = 시안 C 변형(사용자 선택): 세 열 «지금 · 가격대 · 시간», 가격대 열은 행사가 사다리 아래 감마 곡선.
+   세 열 모두 카드 높이 끝까지 채운다 -- 행 여섯 줄에 각 칸이 두 줄씩(사다리는 넷) 걸치고 stretch 로 늘어난다.
+   #optBody · #optRow 는 display:contents 라 그 안 칸들이 이 격자의 직접 칸이 된다(렌더러는 그대로). */
+@media (min-width: 1100px) {
+  #optCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr) minmax(0, 1.3fr); column-gap: 28px;
+    grid-template-areas: "head head head" "cov cov cov" "move ladder lane" "move ladder lane" "gamma ladder flow" "gamma ladder flow" "mood curve blk" "mood curve blk"; }
+  #optCard > .ops-health-head { grid-area: head; }
+  #optCard #optBody, #optCard #optRow { display: contents; }
+  #optCard .opt-cov, #optCard #optBody > .opt-note { grid-area: cov; margin-bottom: 10px; }
+  #optCard .opt-sec:has([data-tip="move"]) { grid-area: move; } #optCard .opt-sec:has([data-tip="gamma"]) { grid-area: gamma; }
+  #optCard .opt-sec:has([data-tip="mood"]) { grid-area: mood; } #optCard .opt-sec:has([data-tip="ladder"]) { grid-area: ladder; }
+  #optCard .opt-sec:has([data-tip="curve"]) { grid-area: curve; }
+  #optCard #optLaneBody { grid-area: lane; } #optCard #optFlowBody { grid-area: flow; } #optCard #optBlkBody { grid-area: blk; }
+  #optCard .opt-sec, #optCard .opt-lane-body { min-width: 0; margin: 0; border-top: 1px solid var(--line); padding: 8px 0 12px; align-self: stretch; }
+  #optCard .opt-sec svg, #optCard .opt-lane-body svg { width: 100%; height: auto; }
+  #optCard .opt-sec:has([data-tip="move"])::before, #optCard .opt-sec:has([data-tip="ladder"])::before, #optCard #optLaneBody::before {
+    display: block; margin-bottom: 6px; font: 800 11px var(--font-sans); letter-spacing: .08em; color: var(--muted); }
+  #optCard .opt-sec:has([data-tip="move"])::before { content: "지금"; }
+  #optCard .opt-sec:has([data-tip="ladder"])::before { content: "가격대"; }
+  #optCard #optLaneBody::before { content: "시간"; }
+  /* «지금» 열의 숫자 칸은 늘어난 높이만큼 줄 간격을 벌려 칸을 채운다(빈 아래 공간 대신) */
+  #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="gamma"]), :has([data-tip="mood"])) { display: flex; flex-direction: column; }
+  #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="gamma"]), :has([data-tip="mood"])) .opt-kv { flex: 1 1 0; max-height: 46px; align-items: center; font-size: 13.5px; }
 }
 .card-title { margin: 0 14px 0 0; font: 800 17px/1 var(--font-sans); letter-spacing: -.01em; color: var(--text); align-self: center; }
 body.not-eth #mcBody, body.not-eth #mcWhen { display: none; }
