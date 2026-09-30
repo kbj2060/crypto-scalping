@@ -23,6 +23,14 @@ assert.deepEqual(mcVwapOf(row), { vwap: 2695, vsd: 1, seg: 1790640000, name: "�
 assert.equal(mcVwapOf({ time: 1, vwap: 1, vsd: 1 }), null);          // 서버가 아직 세션 VWAP 을 안 실었으면 선을 안 그린다
 mcLine.vsess = false;
 
+// ── 옵션 흐름 «신규 약 N%» = (V + ΔOI) / 2V · ΔOI 없는 시간은 뺀다 · 0~100% 로 자른다 (2026-10-01) ──
+const fmtNum = (v, d) => v.toFixed(d);
+const optNewTxt = eval(`(${take("optNewTxt")})`);
+assert.equal(optNewTxt([{ cb: 3, cs: 0, pb: 0, ps: 1, doi: 2 }]), " · 미결제 +2 · 신규 약 75%");
+assert.equal(optNewTxt([{ cb: 3, cs: 0, pb: 0, ps: 1, doi: -4 }]), " · 미결제 −4 · 신규 약 0%");      // 모두 청산
+assert.equal(optNewTxt([{ cb: 3, cs: 0, pb: 0, ps: 1, doi: null }]), "");                            // ΔOI 모름
+assert.equal(optNewTxt([{ cb: 1, cs: 1, pb: 0, ps: 0, doi: 2 }, { cb: 9, cs: 9, pb: 0, ps: 0, doi: null }]), " · 미결제 +2 · 신규 약 100%");
+
 // ── 미국장: 서머타임 13:30 UTC · 주말 건너뜀 · 표준시 14:30 UTC · 장중 판정 ──
 const us = (iso) => { const r = mcUsSession(Date.parse(iso)); return [new Date(r.open).toISOString().slice(0, 16), r.live]; };
 assert.deepEqual(us("2026-09-29T12:00:00Z"), ["2026-09-29T13:30", false]);
