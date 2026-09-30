@@ -9167,12 +9167,23 @@ function renderOfab() {
 // 🔴2026-09-26 사용자 지시 «미실현손익 3초 갱신». 계좌 조회는 30초라 그 사이 숫자가 멈춰 있었다. 거래소를 3초마다
 //   부르는 대신 **거래소 값 + 그 뒤 시세 변화 × 수량**으로 민다. 기준 시세는 계좌 스냅샷이 바뀐 순간의 실시간 시세라
 //   심볼 차이(주문 ETHUSDC · 시세 ETHUSDT, ~1.7bp)는 변화분에서 지워진다. 다음 계좌 조회가 오면 거래소 값으로 되돌아간다.
+// 🔴2026-09-30 사용자 «플로팅 버튼 미실현이 실제와 안 맞는다»: 기준 시세를 «계좌 스냅샷이 브라우저에 도착한 순간»으로 잡았는데,
+//   거래소 손익은 서버가 조회한 시각(generated_at) 값이고 서버 캐시 때문에 도착까지 30초 넘게 늦다(실측 33.8초).
+//   그 사이 움직임이 통째로 빠져 숏 1.6 ETH 면 $2 움직임에 $3 틀렸다. 기준 = generated_at 초의 시세(1초 수급 칸의 마지막가).
 const ofabPnlRef = { acct: null, price: 0 };
+function ofabPriceAt(sec) {                     // 그 초(없으면 5초 안 직전 초)의 마지막 체결가 -- 1초 수급 칸 [.., 가격]
+  for (let s = sec; s > sec - 5; s -= 1) { const r = supply1s.get(s); if (r && r[6] > 0) return r[6]; }
+  return 0;
+}
 function ofabLivePnl(p, qty, side) {
   const base = Number(p?.unrealized_pnl) || 0;
   const live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
   if (!qty || !(live > 0)) return base;
-  if (ofabPnlRef.acct !== latestBinanceAccount) { ofabPnlRef.acct = latestBinanceAccount; ofabPnlRef.price = live; }
+  if (ofabPnlRef.acct !== latestBinanceAccount) {
+    ofabPnlRef.acct = latestBinanceAccount;
+    const g = Math.floor(Date.parse(latestBinanceAccount?.generated_at || "") / 1000);
+    ofabPnlRef.price = (Number.isFinite(g) && ofabPriceAt(g)) || live;   // 기록이 없는 코인·재연결 직후는 옛 방식
+  }
   return base + (live - ofabPnlRef.price) * qty * (side === "SHORT" ? -1 : 1);
 }
 setInterval(renderOfab, 3000);
