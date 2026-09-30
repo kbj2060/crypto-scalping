@@ -4254,7 +4254,11 @@ function renderMarketCtx() {
     ef ? { t: ef.exp_ms, nm: `옵션 만기 · pain ${n(ef.pain)}` } : null,
     us ? { t: us.live ? us.close : us.open, nm: us.live ? "미국장 마감" : "미국장 개장" } : null,
     ...macro24,
-  ].filter(Boolean);
+  ].filter(Boolean).reduce((acc, e) => {   // 2026-09-30 같은 분(分)의 일정은 이름표 하나로 합친다 -- 겹침 회피가 둘째를 숨겨 ISM PMI(high)가 호버로만 보였다
+    const same = acc.find((a) => Math.abs(a.t - e.t) < 60e3);
+    if (same) { same.nm = `${same.nm} · ${e.nm}`; same.hi = same.hi === false && e.hi === false ? false : (same.hi || e.hi); } else acc.push({ ...e });
+    return acc;
+  }, []);
   let htmlB = [
     qSec("q_lev", "① 레버리지 과열?", gRow("펀딩 분위", G.pct(f.bn_at_base ? null : f.bn_pct180), f.bn_at_base ? "기본값" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`, "", `바이낸스 예상 ${fr(f.bn)}`)
       + gRow("베이시스 분위", G.pct(b.pct7d), `${sg(b.bp, 1, "bp")}`, "", `마크−인덱스 · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위 · 30분 ${sg(b.d30_bp, 1, "bp")}`)
