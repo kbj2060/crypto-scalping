@@ -5,7 +5,6 @@ const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
 const API_REGIME_WIDE24_URL = "/api/regime-wide24";
 const API_REGIME_BTC_URL = "/api/regime-btc";
 const API_REGIME_XRP_URL = "/api/regime-xrp";
-const API_COIN_INDICATORS_URL = "/api/coin-indicators";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
 const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
 // 2026-09-11 사용자 "청산맵 차트에 매 5분봉 청산 데이터를 추가" -- 게이지는 현재 봉 하나만
@@ -348,9 +347,6 @@ let latestLiquidationMap = null;
 let latestRegimeWide24 = null;
 let latestRegimeBtc = null;
 let latestRegimeXrp = null;
-// 코인별 실시간 지표(수급흐름/리테일수급/청산캐스케이드). ETH는 봇 state를 그대로 쓰고,
-// 다른 코인은 그 코인 자신의 duckdb에서 온다 -- 자산별 슬롯(공유 금지, 2026-08-31 교훈).
-let latestCoinIndicators = {};
 let liquidationMapLastFetchAt = 0;
 // Snapshot tab's own coin selector (2026-08-31, BTC then XRP then SOL then HYPE added) -- deliberately separate from
 // activeChartAsset (the Live tab's chart asset, which the Snapshot tab has never followed -- see
@@ -364,7 +360,6 @@ const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype"];
 let regimeWide24LastFetchAt = 0;
 let regimeBtcLastFetchAt = 0;
 let regimeXrpLastFetchAt = 0;
-let coinIndicatorsLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0, macroCalendarOkAt = 0;   // OkAt = 마지막으로 **받은** 시각(⑤ 시간축 아래 «일정 갱신»)
 // 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
 // 서버가 이미 30초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
@@ -545,11 +540,6 @@ async function setActiveSnapshotAsset(asset) {
   liquidation5mLastFetchAt = 0;
   liquidationMapLastFetchAt = 0;
   lastSnapshotHistoryFetchAt = 0;
-  // 2026-09-03: 수급흐름/리테일수급/청산캐스케이드(비ETH 코인의 coin-indicators)도 같은 이유로
-  // 게이트를 연다. 이 게이트는 자산별이 아니라 **전역 하나**라, 열어주지 않으면 20초(MODEL_
-  // INDICATOR_POLL_MS) 안에 코인을 두 번 바꿨을 때 두 번째 코인은 자기 값을 못 받아온 채
-  // 스켈레톤만 벗겨진다.
-  coinIndicatorsLastFetchAt = 0;
   // 레짐 리본도 코인별 모델이다. tick()이 이제 **활성 코인 것만** 가져오므로(refreshActiveRegime),
   // 전환 시엔 새 코인의 게이트를 열어 즉시 한 번 받아온다.
   regimeWide24LastFetchAt = 0;
@@ -575,9 +565,7 @@ async function setActiveSnapshotAsset(asset) {
       });
 
   await Promise.all([
-    settleScope("indicators", [
-      refreshCoinIndicators(),
-    ]),
+    settleScope("indicators", []),   // 비ETH 코인 지표 API 제거(2026-10-01) -- 스켈레톤 해제만
     settleScope("liqmap", [
       refreshLiquidation5mSignal(),
       refreshLiquidationMap(),
@@ -2712,22 +2700,6 @@ function refreshActiveRegime() {
   return Promise.resolve();   // SOL/HYPE: 학습된 레짐 모델이 아직 없다
 }
 
-async function refreshCoinIndicators() {
-  if (activeSnapshotAsset === "eth") return;
-  const now = Date.now();
-  if (now - coinIndicatorsLastFetchAt < MODEL_INDICATOR_POLL_MS) return;
-  coinIndicatorsLastFetchAt = now;
-  const asset = activeSnapshotAsset;
-  try {
-    const res = await fetch(`${API_COIN_INDICATORS_URL}?asset=${encodeURIComponent(asset)}`, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`coin indicators ${res.status}`);
-    latestCoinIndicators[asset] = await res.json();
-  } catch (error) {
-    console.error("Coin indicators fetch error:", error);
-    latestCoinIndicators[asset] = { warmed_up: false, error: "fetch_failed" };
-  }
-}
-
 // Macro/corporate event calendar (2026-08-26) -- see scripts/live_macro_calendar_20260826.py for
 // sources/caveats. Purely informational (same tier as the evidence-signal list below it) -- not a
 // trading signal, no economic-viability claim.
@@ -2805,7 +2777,6 @@ function setupPageTabs() {
       regimeWide24LastFetchAt = 0; refreshRegimeWide24();
       regimeBtcLastFetchAt = 0; refreshRegimeBtc();
       regimeXrpLastFetchAt = 0; refreshRegimeXrp();
-      coinIndicatorsLastFetchAt = 0; refreshCoinIndicators();
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
       lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
@@ -7903,7 +7874,6 @@ async function tick() {
       refreshLiquidation5mTail();    // 2026-09-25 청산 원 최신 2봉 (자체 2초 게이트)
       refreshLiquidationMap();
       refreshActiveRegime();
-      refreshCoinIndicators();
       refreshMacroCalendar();
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프

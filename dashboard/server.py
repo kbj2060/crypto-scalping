@@ -1480,7 +1480,6 @@ def btc_evidence_shadow_payload() -> dict[str, Any]:
     }
 
 
-COIN_INDICATOR_CACHE_SECONDS = 20
 # nif_whale은 간헐적이라 최신 1행만 보면 절반이 빈 값이다 -- 이 창 안의 마지막 값을 쓴다.
 MICRO_LOOKBACK_MIN = 15
 # ETH 톤 스트립과 같은 모양(app.js MICRO_HISTORY_MAX=48, 5분 간격 = 4시간)
@@ -1832,119 +1831,6 @@ def sizing_cap() -> dict[str, Any]:
             "window": SIZING_CAP_WINDOW, "mult": SIZING_CAP_MULT,
             "median_notional_usdt": round(median, 2),
             "cap_notional_usdt": round(SIZING_CAP_MULT * median, 2)}
-
-
-def coin_indicators_payload(asset: str) -> dict[str, Any]:
-    """코인별 **실시간 지표**(수급흐름/리테일수급/청산캐스케이드) — 2026-09-03.
-
-    그 전까지 이 세 지표는 `trading_bot.py`의 dashboard_state만 읽었는데 **봇은 ETH만 돌린다**.
-    그래서 XRP/BTC 탭에서도 ETH 값이 그대로 보이고 있었다(사용자 신고 "비트코인 페이지에
-    이더리움 증거신호가 나온다"와 같은 계열).
-
-    ⭐XRP/HYPE는 전용 워커가 microstructure까지 모으므로(`supervisor_xrp_worker.sh`:
-    "microstructure + tail-risk + OI/long-short-ratio, all three") **실제 그 코인 값**을 줄 수 있다.
-    tail_risk는 COIN_CONFIG에 5코인 전부 있다.
-
-    ⚠️`hawkes_active`는 봇 내부 상태라 다른 코인에는 없다. Z 기반 "주의" 티어까지만 판정 가능하고
-    "위험"(hawkes) 티어는 뜨지 않는다 -- `hawkes_available: False`로 명시해 UI가 숨기지 않고
-    사실대로 표시하게 한다.
-    """
-    cfg = COIN_CONFIG.get(asset) or {}
-    out: dict[str, Any] = {"asset": asset, "warmed_up": False, "error": None,
-                           "micro": None, "tail": None, "hawkes_available": False}
-    try:
-        mpath, mtable = cfg.get("microstructure_db_path"), cfg.get("microstructure_table")
-        if mpath and Path(mpath).exists():
-            # ⚠️`nif_whale`은 **대형 체결이 있는 분에만** 계산된다 -- XRP 실측 24시간 기준
-            # whale 49.7% / retail 93.7%만 비null이다. 최신 1행만 보면 whale이 절반은 빈 값이
-            # 되어 화면이 대부분 "값 없음"이 된다. 그래서 **최근 MICRO_LOOKBACK_MIN분 안의
-            # 마지막 비null 값**을 쓰고 **몇 분 전 값인지 함께** 내려준다(오래된 값을 지금 값인
-            # 것처럼 보여주지 않기 위해서다).
-            con = duckdb.connect(str(mpath), read_only=True)
-            try:
-                rows = con.execute(f"select ts, nif_whale, nif_retail from {mtable} "
-                                   f"order by ts desc limit {MICRO_LOOKBACK_MIN}").fetchall()
-            finally:
-                con.close()
-            if rows:
-                latest_ts = rows[0][0]
-
-                def _last(col_idx):
-                    for rr in rows:
-                        if rr[col_idx] is not None:
-                            age = None
-                            try:
-                                age = round((latest_ts - rr[0]).total_seconds() / 60.0, 1)
-                            except (TypeError, AttributeError):
-                                pass
-                            return float(rr[col_idx]), str(rr[0]), age
-                    return None, None, None
-
-                w, w_ts, w_age = _last(1)
-                rt, rt_ts, rt_age = _last(2)
-                out["micro"] = {"ts": str(latest_ts),
-                                "nif_whale": w, "nif_whale_ts": w_ts, "nif_whale_age_min": w_age,
-                                "nif_retail": rt, "nif_retail_ts": rt_ts, "nif_retail_age_min": rt_age,
-                                "lookback_min": MICRO_LOOKBACK_MIN}
-            # ⭐톤 스트립: ETH는 48샘플 x 5분(4시간)을 쓴다(app.js MICRO_HISTORY_MAX=48).
-            # 다른 코인도 **같은 모양**으로 만들어야 칩/스트립이 ETH와 똑같아 보인다.
-            # 1분 테이블에서 5분마다 하나씩 뽑는다. 임계값은 classifyIndicators와 동일(+-0.05).
-            con = duckdb.connect(str(mpath), read_only=True)
-            try:
-                hrows = con.execute(f"select ts, nif_whale, nif_retail from {mtable} "
-                                    f"order by ts desc limit {MICRO_STRIP_SAMPLES * 5}").fetchall()
-            finally:
-                con.close()
-            if hrows:
-                # 🔴2026-09-30 가장 **새** 행부터 5개마다 뽑는다. 옛 판(reversed 뒤 [::5])은 가장 오래된 행에서 세어
-                #   마지막 점이 최신 행보다 최대 4분 늦었다. hrows 는 ts desc 라 [::5] 의 첫 칸이 최신 -- 뒤집어 시간순.
-                picked = hrows[::5][:MICRO_STRIP_SAMPLES][::-1]
-
-                def _tone(v):
-                    if v is None:
-                        return "neutral"
-                    return "good" if v > 0.05 else ("bad" if v < -0.05 else "neutral")
-
-                out["micro"]["whale_history"] = [_tone(r[1]) for r in picked]
-                out["micro"]["retail_history"] = [_tone(r[2]) for r in picked]
-                out["micro"]["history_ts"] = [str(r[0]) for r in picked]
-        tpath, ttable = cfg.get("tail_risk_db_path"), cfg.get("tail_risk_table")
-        if tpath and Path(tpath).exists():
-            con = duckdb.connect(str(tpath), read_only=True)
-            try:
-                r = con.execute(f"select ts, long_usd_1m, short_usd_1m, mu_long, sigma_long, "
-                                f"mu_short, sigma_short from {ttable} order by ts desc limit 1").fetchone()
-            finally:
-                con.close()
-            if r:
-                def _z(v, mu, sd):
-                    try:
-                        return float((v - mu) / sd) if sd and sd > 0 else 0.0
-                    except (TypeError, ValueError):
-                        return 0.0
-                out["tail"] = {"ts": str(r[0]), "z_long": _z(r[1], r[3], r[4]),
-                               "z_short": _z(r[2], r[5], r[6]),
-                               "hawkes_active": False}
-                con = duckdb.connect(str(tpath), read_only=True)
-                try:
-                    hr = con.execute(f"select ts, long_usd_1m, short_usd_1m, mu_long, sigma_long, "
-                                     f"mu_short, sigma_short from {ttable} "
-                                     f"order by ts desc limit {MICRO_STRIP_SAMPLES * 5}").fetchall()
-                finally:
-                    con.close()
-                if hr:
-                    picked = hr[::5][:MICRO_STRIP_SAMPLES][::-1]   # 2026-09-30 최신 행부터(위 micro 와 같은 고침)
-                    # ⚠️hawkes가 없으니 Z만으로 판정한다 -> "위험"(bad) 티어는 나오지 않는다.
-                    out["tail"]["cascade_history"] = [
-                        ("warn" if max(_z(x[1], x[3], x[4]), _z(x[2], x[5], x[6])) >= 2.0 else "good")
-                        for x in picked]
-                    out["tail"]["history_ts"] = [str(x[0]) for x in picked]
-        out["warmed_up"] = bool(out["micro"] or out["tail"])
-        if not out["warmed_up"]:
-            out["error"] = "no_coin_indicator_data"
-    except Exception as e:                                     # noqa: BLE001 -- 절대 raise 안 함
-        out["error"] = f"coin_indicators_error: {e}"
-    return out
 
 
 # 🔴SSE 로 나가는 상태는 **화면이 실제로 읽는 세 블록**뿐이다.
@@ -5282,16 +5168,6 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers=NOCACHE)
 
 
-    async def load_coin_indicators(asset: str) -> dict[str, Any]:
-        return await swr_cached(
-            f"coin_indicator:{asset}", COIN_INDICATOR_CACHE_SECONDS,
-            lambda: asyncio.to_thread(coin_indicators_payload, asset),
-        )
-
-    async def api_coin_indicators(request: web.Request) -> web.Response:
-        payload = await load_coin_indicators(_query_coin_asset(request))
-        return web.json_response(payload, headers=NOCACHE)
-
     async def api_regime_xrp(request: web.Request) -> web.Response:
         payload = await load_regime_xrp()
         return web.json_response(payload, headers=NOCACHE)
@@ -6283,7 +6159,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/regime-wide24", api_regime_wide24)
     app.router.add_get("/api/regime-btc", api_regime_btc)
     app.router.add_get("/api/regime-xrp", api_regime_xrp)
-    app.router.add_get("/api/coin-indicators", api_coin_indicators)
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
     app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
     app.router.add_get("/api/micro-ref", api_micro_ref)
