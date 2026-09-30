@@ -42,6 +42,9 @@ const pxDp = () => { const d = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp; ret
 const qtyScale = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).qtyScale || 1;
 
 const el = (id) => document.getElementById(id);
+// 2026-09-30 한 화면 모드 크기 기억(사용자 «새로고침마다 흩어졌다가 맞춰진다»): 마지막으로 맞춘 차트·사다리·시장 맥락 높이를 창 높이와 함께 저장하고,
+//   같은 창 높이로 다시 열면 **첫 그림부터** 그 크기로 그린다(fitLayout · renderMarketCtx 가 갱신).
+const FIT0 = (() => { try { const c = JSON.parse(localStorage.getItem("fitCache") || "{}"); return c && c.vh === innerHeight ? c : {}; } catch (e) { return {}; } })();
 const setT = (id, txt) => {
   const target = el(id);
   if (!target || target.textContent === String(txt)) return;
@@ -2802,34 +2805,39 @@ function cardRailSync() {
 //   Footprint 는 차트 상자 높이를, Option 은 행사가 사다리 높이를 «창 높이 − 카드의 나머지»로 계산한다. 계좌는 창 높이까지 늘린다.
 //   창 높이 < 900 이면 끈다(가격판이 너무 좁아진다). 켜기/끄기 = 레일 아래 단추(브라우저 기억).
 let fitOptLadderH = null;
-const optColW = () => { const s = document.querySelector('#optCard .opt-sec:has([data-tip="ladder"])'); return s && s.clientWidth > 240 ? Math.min(440, Math.round(s.clientWidth)) : 336; };   // .opt-ladder 최대 폭 440 과 같게(넓게 그리면 줄어 글자가 작아진다)
+const optColW = () => {   // .opt-ladder 최대 폭 440 과 같게(넓게 그리면 줄어 글자가 작아진다) · 첫 렌더(칸이 아직 없음)는 카드 폭의 가운데 열 몫으로
+  const s = document.querySelector('#optCard .opt-sec:has([data-tip="ladder"])');
+  if (s && s.clientWidth > 240) return Math.min(440, Math.round(s.clientWidth));
+  const card = el("optCard"), guess = card && innerWidth >= 1100 ? Math.round(((card.clientWidth - 56) * 0.95) / 3.25) : 0;
+  return guess > 240 ? Math.min(440, guess) : 336;
+};
 function fitOn() {
   let on = true; try { on = localStorage.getItem("fit1") !== "0"; } catch (e) { /* 기억은 편의 */ }
   return on && innerWidth >= 1700 && innerWidth > innerHeight && innerHeight >= 900 && activePageTab === "snapshot";
 }
 function fitLayout() {
+  // 2026-09-30(2) 측정해서 고치는 방식을 버렸다(새로고침마다 두세 번 크기가 바뀌었다): 풋프린트 차트 칸은 CSS(html.fit1 — 카드 = 창 높이, 차트 칸 = 남는 공간)가
+  //   첫 배치부터 정하고, 행사가 사다리는 창 높이 공식 하나로 정한다. 여기서는 모드 켜기/끄기와 계좌·Option 최소 높이만.
   const on = fitOn(), vh = innerHeight - 20;
   document.documentElement.classList.toggle("fit1", on);
-  const fp = el("fpCard"), cc = fp && fp.querySelector(".candle-container"), svg = el("candleSvgSnapshot"), acct = el("acctCard"), opt = el("optCard");
-  if (cc && svg) {
-    let want = "";
-    if (on) { const rest = fp.offsetHeight - cc.offsetHeight; want = `${Math.max(640, Math.min(1400, vh - rest - 12))}px`; }
-    if (svg.style.height !== want) {
-      svg.style.height = want; cc.style.height = want ? `${parseInt(want, 10) + 12}px` : "";
-      if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
-    }
-  }
+  const acct = el("acctCard"), opt = el("optCard");
   if (acct) acct.style.minHeight = on ? `${vh}px` : "";
-  if (opt) opt.style.minHeight = on ? `${vh}px` : "";   // 세 열은 stretch 로 같이 늘어난다
-  if (opt) {
-    let h = null;
-    const lad = opt.querySelector('.opt-sec:has([data-tip="ladder"]) svg');
-    if (on && lad) h = Math.max(320, Math.min(900, Math.round(vh - (opt.offsetHeight - lad.getBoundingClientRect().height))));
-    if (on && fitOptLadderH && h && Math.abs(h - fitOptLadderH) < 6) h = fitOptLadderH;   // 떨림 방지
-    if (h !== fitOptLadderH) { fitOptLadderH = h; if (typeof renderOptions === "function") renderOptions(); }
-  }
+  if (opt) opt.style.minHeight = on ? `${vh}px` : "";
+  const h = on ? fitLadderFormula() : null;
+  if (h !== fitOptLadderH) { fitOptLadderH = h; if (typeof renderOptions === "function") renderOptions(); }
+  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH })); } catch (e) { /* 기억은 편의 */ } }
+}
+// Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
+function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((innerHeight - 20 - 130) * 4) / 6 - 70))); }
+// 첫 렌더 전에 모드 클래스와 최소 높이를 바로 입힌다 -- 데이터가 오기 전에 상자 높이가 이미 맞아 있다
+function fitApplyCached() {
+  if (!fitOn()) return;
+  document.documentElement.classList.add("fit1");
+  fitOptLadderH = fitLadderFormula();
+  ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
 }
 function setupCardRail() {
+  fitApplyCached();
   const rail = el("cardRail");
   if (!rail) return;
   rail.addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) el(b.dataset.go)?.scrollIntoView({ behavior: "smooth", block: "start" }); });
@@ -4119,7 +4127,7 @@ function mcUsSession(nowMs = Date.now()) {
 
 // 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
-let mcNeedH = 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
+let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 function mcPlace(svg, r, wr) {
   const body = el("mcBody"), card = el("fpCard"), wall = el("mcWall");
   if (!body || !card) return;

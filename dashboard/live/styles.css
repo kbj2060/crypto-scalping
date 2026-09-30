@@ -2556,7 +2556,7 @@ body.order-coin-off .acct-lanes::before {
      시장 맥락은 Footprint 안(1초 수급 아래 칸, app.js mcPlace), 옵션·블록은 Option 카드. */
   #snapshotTabPanel { margin-right: 36px; }
   #snapshotTabPanel > .liq-map-panel { position: relative; }
-  #mcBody.mc-cmp { position: absolute; z-index: 1; overflow: hidden;   /* 2026-09-30 스크롤 없음 -- 높이는 renderCandleSvg 가 내용에 맞춰 준다(mcNeedH) */
+  #mcBody.mc-cmp { position: absolute; z-index: 1; overflow: hidden; align-content: start;   /* 줄을 위로 -- 칸 높이만큼 늘어난 줄을 «내용 높이»로 재던 되먹임(5초마다 +10px)을 막는다 */   /* 2026-09-30 스크롤 없음 -- 높이는 renderCandleSvg 가 내용에 맞춰 준다(mcNeedH) */
     border-top: 1px solid var(--line); padding-top: 4px; column-gap: 14px; }
   #mcBody.mc-cmp .mc-g { grid-template-columns: 64px auto minmax(0, 1fr); gap: 6px; font-size: 11px; padding: 2px 0; }
   #mcBody.mc-cmp .mc-sec { padding: 8px 0 6px; }
@@ -2608,6 +2608,16 @@ body.not-eth #mcWall { display: none; }
 /* 2026-09-30 한 화면 모드(app.js fitLayout): 카드 단위 스냅 */
 html.fit1 { scroll-snap-type: y proximity; }
 html.fit1 #snapshotTabPanel > .panel { scroll-snap-align: start; scroll-margin-top: 10px; }
+/* 2026-09-30(2) 풋프린트 카드 = 창 높이, 차트 칸 = 남는 공간(flex) -- 차트 높이를 JS 가 재서 고치지 않는다(새로고침 때 흔들렸다).
+   ⑤ 24시간은 자리를 미리 잡아(내용이 늦게 와도 차트 칸이 안 줄어든다). */
+@media (min-width: 1700px) and (orientation: landscape) {
+  html.fit1 #fpCard { height: calc(100vh - 20px); display: flex; flex-direction: column; }
+  html.fit1 #fpCard > .candle-container { flex: 1 1 0; min-height: 0; height: auto !important; }
+  html.fit1 #candleSvgSnapshot { height: calc(100% - 12px) !important; }   /* 상자 = 차트 + 12(예전 884/872 과 같은 여유) */
+  html.fit1 #mcBody:not(.mc-cmp), html.fit1 #mcWall:not(.on) { display: none; }   /* 제자리(차트 오른쪽 칸)에 놓이기 전엔 안 보인다 -- 첫 0.5초 흐름 속에 나타났다 사라지던 것 */
+  html.fit1 #mcWhen { height: 116px; overflow: hidden; flex: none; }   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
+  html.fit1 #fpCard > .ops-health-head, html.fit1 #liquidationMapList { flex: none; }
+}
 .card-rail { display: none; position: fixed; z-index: 800; right: 12px; top: 50%; transform: translateY(-50%); gap: 18px; padding: 6px 0; }
 .card-rail::before { content: ""; position: absolute; left: 50%; top: 10px; bottom: 10px; width: 2px; margin-left: -1px; background: var(--line); border-radius: 1px; }
 .card-rail button { position: relative; width: 16px; height: 16px; padding: 0; border-radius: 50%; border: 2px solid var(--line); background: var(--bg, var(--panel)); cursor: pointer;
