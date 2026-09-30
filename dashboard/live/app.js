@@ -2849,10 +2849,11 @@ function fitLayout() {
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
   const h = on ? fitLadderFormula() : null;
   if (h !== fitOptLadderH) { fitOptLadderH = h; if (typeof renderOptions === "function") renderOptions(); }
-  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH })); } catch (e) { /* 기억은 편의 */ } }
+  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff })); } catch (e) { /* 기억은 편의 */ } }
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
-function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((innerHeight - 20 - 130) * 4) / 6 - 70))); }
+// 2026-10-01 ⑤ 다음 24시간(116 + 여백·선 36)이 맨 아래 전폭으로 들어와 그만큼 뺀다.
+function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((innerHeight - 20 - 130 - 152) * 4) / 6 - 70))); }
 // 첫 렌더 전에 모드 클래스와 최소 높이를 바로 입힌다 -- 데이터가 오기 전에 상자 높이가 이미 맞아 있다
 function fitApplyCached() {
   if (!fitOn()) return;
@@ -4169,6 +4170,7 @@ function mcUsSession(nowMs = Date.now()) {
 
 // 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
+let mcWallOff = FIT0.w4 || 0;   // 2026-10-01 ④ 벽·교차·위치가 시장 맥락 안에서 시작하는 높이 -- ③ 가격 지형 칸을 ④ 와 같은 위·아래로 맞춘다
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 function mcPlace(svg, r, wr) {
   const body = el("mcBody"), card = el("fpCard"), wall = el("mcWall");
@@ -4314,7 +4316,7 @@ function renderMarketCtx() {
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
   const whenBox = body.classList.contains("mc-cmp") ? el("mcWhen") : null;
   // 2026-09-30 폭: #mcWhen 은 비어 있으면 숨김(display:none)이라 첫 그림 때 clientWidth 0 → 900 으로 그려 2.3배 늘어났다(글자가 커졌다 작아짐) -- 카드 폭에서 잰다
-  const whenW = whenBox ? (whenBox.clientWidth || ((el("fpCard") || body).clientWidth - 48)) : body.clientWidth;
+  const whenW = whenBox ? (whenBox.clientWidth || ((el("optCard") || body).clientWidth - 48)) : body.clientWidth;   // 2026-10-01 ⑤ 는 Option 카드 맨 아래
   const whenHtml = qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round((whenW || 900) - 8)))
       + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? note(`max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)`) : "")
       + note(macroCalendarOkAt ? `경제 일정 갱신 ${fmtHourMinute(macroCalendarOkAt)} · 6시간마다(실패하면 1분 뒤 다시)` : "경제 일정 불러오는 중…"));
@@ -4325,7 +4327,10 @@ function renderMarketCtx() {
   keepFocus(body, () => { body.innerHTML = htmlB; });
   if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
     const top = body.getBoundingClientRect().top, need = Math.ceil(Math.max(0, ...[...body.children].map((k) => k.getBoundingClientRect().bottom - top)) + 6);
-    if (need > 40 && Math.abs(need - mcNeedH) > 4) { mcNeedH = need; if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender(); }
+    const w4 = body.querySelector(".mc-2col"), off = w4 ? Math.round(w4.getBoundingClientRect().top - top) : 0;
+    if ((need > 40 && Math.abs(need - mcNeedH) > 4) || Math.abs(off - mcWallOff) > 4) {
+      mcNeedH = need; mcWallOff = off; if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
+    }
   }
 }
 
@@ -5197,7 +5202,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   «신규 숏»(12px 기준 ~36px)이 넘친다 -- 그때는 글자를 **안 그리고** 그 자리도 안 잡는다.
   const laneSlot = candles.length ? (w - ml - mr) / candles.length : 0;
   const QUAD_TEXT_OK = laneSlot >= 66;
-  const QUAD_H = fpBars.length ? (mobileChart ? 112 : 162) : 0;
+  // 2026-10-01 넓은 ETH 2단: 사분면 줄을 줄여 가격 플롯 바닥 + 12 = ④ 윗변(③ 가격 지형 = ④ 와 같은 높이, 사용자 지시) -- 줄어든 만큼 풋프린트·프로파일이 길어진다.
+  //   ④ 윗변 = hAll − 8 − ④ 높이(시장 맥락이 칸 바닥에 붙는다), 플롯 바닥 = h − 76 − QUAD_H − QUAD_TXT ⇒ QUAD_H + QUAD_TXT = ④ 높이 − 56.
+  const wall4H = footprint && !mobileChart && splitR && activeSnapshotAsset === "eth" && mcWallOff ? mcNeedH - mcWallOff : 0;
+  const QUAD_H = fpBars.length ? (mobileChart ? 112 : wall4H ? Math.max(90, Math.min(162, wall4H - 56 - (QUAD_TEXT_OK ? 34 : 0))) : 162) : 0;
   const QUAD_TXT = (fpBars.length && QUAD_TEXT_OK) ? (mobileChart ? 28 : 34) : 0;
   const CUM_H = fpBars.length ? (mobileChart ? 104 : 160) : 0;
   // 2026-09-27 데스크톱은 누적 CVD·OI 를 사분면 막대 **뒤에** 흐리게 깐다(사용자 선택 A) -- 제 줄(160+6)을 풋프린트에 준다.
@@ -7739,7 +7747,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const s1Avail = hAll - mtTop - 4;
     const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16 : Math.round(s1Avail * 0.47)) : s1Avail) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: hAll - (sub1sY + s1H + 12) - 4 } : null,
-            mcSplit && TRADE_W ? { x: ml + cw + 4, y: plotBottom + 12, w: TAG_W + TRADE_W + BOOK_W - 8, h: hAll - plotBottom - 16 } : null);   // ④ = 꼬리표 칸 + 프로파일 아래(두 단)
+            mcSplit && TRADE_W ? (() => { const y = Math.max(plotBottom + 12, sub1sY + s1H + 12 + mcWallOff);   // ③ 윗변 = ④ 윗변
+              return { x: ml + cw + 4, y, w: TAG_W + TRADE_W + BOOK_W - 8, h: hAll - y - 4 }; })() : null);   // ④ = 꼬리표 칸 + 프로파일 아래(두 단)
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),

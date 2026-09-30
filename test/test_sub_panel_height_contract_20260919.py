@@ -35,7 +35,7 @@ def test_heights_match_between_js_and_css():
     # 2026-09-22 레인 5종 -> 두 행(사분면 + 누적 CVD). 데스크톱 값으로 센다.
     # 2026-09-23 RVOL 은 **전용 행을 안 쓴다** -- 누적 CVD 레인 안에 자기 축으로 겹친다.
     #   (한 번 세 행으로 갔다가 사용자 지시로 되돌렸다. 되돌릴 때 여기도 같이 와야 한다.)
-    lanes = (_num(r"QUAD_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "QUAD_H")
+    lanes = (_num(r"QUAD_H = fpBars\.length \? \(mobileChart \? \d+ : .*?(\d+)\) : 0;", JS, "QUAD_H")
              + _num(r"QUAD_TXT = \(fpBars\.length && QUAD_TEXT_OK\) \? \(mobileChart \? \d+ : (\d+)\)", JS, "QUAD_TXT")
              + _num(r"CUM_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "CUM_H")
              + 2 * _num(r"LANE_GAP = fpBars\.length \? (\d+)", JS, "LANE_GAP"))
@@ -72,7 +72,7 @@ def test_lanes_tile_without_overlap():
     🔴SVG 는 안 잘라준다 -- 겹치면 그냥 포개 그린다. 에러도 경고도 없다.
     데스크톱 기준(ROW_H=0 · PRICE_ROW_H=0)으로 y 좌표 식을 그대로 평가한다.
     """
-    env = {"QUAD_H": _num(r"QUAD_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "QUAD_H"),
+    env = {"QUAD_H": _num(r"QUAD_H = fpBars\.length \? \(mobileChart \? \d+ : .*?(\d+)\) : 0;", JS, "QUAD_H"),
            "QUAD_TXT": _num(r"QUAD_TXT = \(fpBars\.length && QUAD_TEXT_OK\) \? \(mobileChart \? \d+ : (\d+)\)", JS, "QUAD_TXT"),
            "CUM_H": _num(r"CUM_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "CUM_H"),
            "LANE_GAP": _num(r"LANE_GAP = fpBars\.length \? (\d+)", JS, "LANE_GAP"),

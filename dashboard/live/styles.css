@@ -2570,7 +2570,8 @@ body.order-coin-off .acct-lanes::before {
    #optBody · #optRow 는 display:contents 라 그 안 칸들이 이 격자의 직접 칸이 된다(렌더러는 그대로). */
 @media (min-width: 1100px) {
   #optCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr) minmax(0, 1.3fr); column-gap: 28px;
-    grid-template-areas: "head head head" "cov cov cov" "move ladder lane" "move ladder lane" "gamma ladder flow" "gamma ladder flow" "mood curve blk" "mood curve blk"; }
+    grid-template-areas: "head head head" "cov cov cov" "move ladder lane" "move ladder lane" "gamma ladder flow" "gamma ladder flow" "mood curve blk" "mood curve blk" "when when when"; }
+  #optCard > #mcWhen { grid-area: when; }   /* 2026-10-01 ⑤ 다음 24시간 = 맨 아래 전폭(풋프린트에서 옮김) */
   #optCard > .ops-health-head { grid-area: head; }
   #optCard #optBody, #optCard #optRow { display: contents; }
   #optCard .opt-cov, #optCard #optBody > .opt-note { grid-area: cov; margin-bottom: 10px; }
