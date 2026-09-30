@@ -1,5 +1,19 @@
 {
   "enabledPlugins": {
     "ponytail@ponytail": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r \".tool_input.file_path // \\\"\\\"\"); case \"$f\" in *dashboard/live/*) printf \"%s\" \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"additionalContext\\\":\\\"[대시보드 화면 수정] 보이는 모양·배치·표시를 바꾸는 작업이면 먼저 /impeccable 스킬을 호출했는지 확인하라(.claude/CLAUDE.md «Dashboard Frontend Design → /impeccable»). 화면과 무관한 로직·데이터·성능 수정이면 무시.\\\"}}\";; esac; exit 0",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
   }
 }

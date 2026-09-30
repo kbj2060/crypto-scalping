@@ -4313,7 +4313,9 @@ function renderMarketCtx() {
   htmlB = htmlB.join("");
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
   const whenBox = body.classList.contains("mc-cmp") ? el("mcWhen") : null;
-  const whenHtml = qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round(((whenBox || body).clientWidth || 900) - 8)))
+  // 2026-09-30 폭: #mcWhen 은 비어 있으면 숨김(display:none)이라 첫 그림 때 clientWidth 0 → 900 으로 그려 2.3배 늘어났다(글자가 커졌다 작아짐) -- 카드 폭에서 잰다
+  const whenW = whenBox ? (whenBox.clientWidth || ((el("fpCard") || body).clientWidth - 48)) : body.clientWidth;
+  const whenHtml = qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round((whenW || 900) - 8)))
       + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? note(`max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)`) : "")
       + note(macroCalendarOkAt ? `경제 일정 갱신 ${fmtHourMinute(macroCalendarOkAt)} · 6시간마다(실패하면 1분 뒤 다시)` : "경제 일정 불러오는 중…"));
   setH("mcWhen", whenBox ? whenHtml : "");
