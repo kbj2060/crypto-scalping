@@ -2802,7 +2802,7 @@ function cardRailSync() {
 // 2026-09-30 «한 화면 모드»(사용자 1920×1080·90%): 넓은 화면에서 카드 하나 = 창 높이 하나 -- 레일 점/스크롤이 카드 단위로 딱 맞게 넘어간다.
 //   Footprint 는 차트 상자 높이를, Option 은 행사가 사다리 높이를 «창 높이 − 카드의 나머지»로 계산한다. 계좌는 창 높이까지 늘린다.
 //   창 높이 < 900 이면 끈다(가격판이 너무 좁아진다). 켜기/끄기 = 레일 아래 단추(브라우저 기억).
-let fitOptLadderH = null, fitOptSvgCap = FIT0.cap || 0, fitAcctPlotH = FIT0.ap || 0;   // 2026-10-01 Option 차트 셋 상한 · 계좌 성과 차트 높이(한 화면 모드, fitLayout 이 잰다)
+let fitOptLadderH = null, fitOptChartK = FIT0.ck || 1, renderOptionsSoon = false, fitAcctPlotH = FIT0.ap || 0;   // 2026-10-01 Option 차트 셋 높이 배율 · 계좌 성과 차트 높이(한 화면 모드, fitLayout 이 잰다)
 const optColW = () => {   // .opt-ladder 최대 폭 440 과 같게(넓게 그리면 줄어 글자가 작아진다) · 첫 렌더(칸이 아직 없음)는 카드 폭의 가운데 열 몫으로
   const s = document.querySelector('#optCard .opt-sec:has([data-tip="ladder"])');
   if (s && s.clientWidth > 240) return Math.min(440, Math.round(s.clientWidth));
@@ -2837,21 +2837,23 @@ function fitLayout() {
       return [gb.top - box(c).top + (last - gb.bottom) + padB(c), vb && vb.width ? (g.clientWidth * vb.height) / vb.width : gb.height];
     };
     if (lane && flow && blk && curve && lad && move) {
-      const [la, ln] = fix(lane), [fa, fn] = fix(flow), [ca, cn] = fix(curve), [bn] = fix(blk);
-      const r12 = (cap) => la + Math.min(ln, cap) + fa + Math.min(fn, cap), r3 = (cap) => Math.max(ca + Math.min(cn, cap), bn);
+      // 2026-10-01(3) 상한 대신 **높이 배율 k**(사용자 «옵션 차트를 더 키워줘»): 차트 셋을 k 배 높이로 다시 그린다(글자 크기 그대로).
+      //   남는 칸이 있으면 k>1 로 키우고, 모자라면 k<1. 사다리는 1·2줄(만기+흐름)을 채운다. 원래(k=1) 높이 = 지금 높이 / 지금 k.
+      const k0 = optChartK(), [la, ln] = fix(lane), [fa, fn] = fix(flow), [ca, cn] = fix(curve), [bn] = fix(blk);
+      const r12 = (k) => la + fa + (k * (ln + fn)) / k0, r3 = (k) => Math.max(ca + (k * cn) / k0, bn);
       const whenH = when && when.offsetParent ? box(when).height + (parseFloat(getComputedStyle(when).marginTop) || 0) : 0;
       const avail = box(opt).top + vh - padB(opt) - 12 - whenH - box(move).top;
-      let cap = Infinity;
-      if (r12(cap) + r3(cap) > avail) { let lo = 60, hi = Math.max(ln, fn, cn); while (hi - lo > 2) { const m = (lo + hi) / 2; if (r12(m) + r3(m) <= avail) lo = m; else hi = m; } cap = lo; }
-      fitOptSvgCap = cap === Infinity ? 0 : Math.floor(cap);
+      let lo = 0.6, hi = 1.8;
+      while (hi - lo > 0.01) { const m = (lo + hi) / 2; if (r12(m) + r3(m) <= avail) lo = m; else hi = m; }
+      const k = Math.round(lo * 50) / 50;   // 0.02 단위 -- 1px 흔들림에 다시 그리지 않게
+      if (Math.abs(k - fitOptChartK) > 0.019) { fitOptChartK = k; renderOptionsSoon = true; }
       const lg = lad.querySelector("svg");
       if (lg) {
-        const [lx] = fix(lad), want = Math.max(200, (cap === Infinity ? avail - r3(cap) : r12(cap)) - lx), gh = box(lg).height;
+        const [lx] = fix(lad), want = Math.max(200, r12(k) - lx), gh = box(lg).height;
         if (gh > 0 && Math.abs(want - gh) > 4) h = Math.max(200, Math.min(1200, Math.round((h * want) / gh)));
       }
     }
   }
-  if (opt) opt.style.setProperty("--optsvg", on && fitOptSvgCap ? `${Math.round(fitOptSvgCap)}px` : "none");
   // 2026-10-01 계좌 카드: 한 화면 모드면 성과 차트를 펼쳐 남는 높이를 그 차트에 준다(사용자 «내 계좌도 화면에 가득»)
   const plot = on && acct && acct.offsetParent ? acct.querySelector("#snapAcctPerf .acct-plot svg") : null;
   if (plot) {
@@ -2860,8 +2862,8 @@ function fitLayout() {
     const cur = plot.getBoundingClientRect().height;
     if (Math.abs(aslack) > 4) { fitAcctPlotH = Math.max(120, Math.min(900, Math.round(cur + aslack))); acct.style.setProperty("--acctplot", `${fitAcctPlotH}px`); }
   }
-  if (h !== fitOptLadderH) { fitOptLadderH = h; if (typeof renderOptions === "function") renderOptions(); }
-  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff, lad: fitOptLadderH, cap: fitOptSvgCap, ap: fitAcctPlotH })); } catch (e) { /* 기억은 편의 */ } }
+  if (h !== fitOptLadderH || renderOptionsSoon) { fitOptLadderH = h; renderOptionsSoon = false; if (typeof renderOptions === "function") renderOptions(); }
+  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff, lad: fitOptLadderH, ck: fitOptChartK, ap: fitAcctPlotH })); } catch (e) { /* 기억은 편의 */ } }
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
 // 2026-10-01 ⑤ 다음 24시간(116 + 여백·선 36)이 맨 아래 전폭으로 들어와 그만큼 뺀다.
@@ -2872,7 +2874,6 @@ function fitApplyCached() {
   document.documentElement.classList.add("fit1");
   fitOptLadderH = FIT0.lad || fitLadderFormula();   // 지난번에 잰 값(같은 창 높이) -- 새로고침 첫 그림부터 맞는다
   ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
-  if (fitOptSvgCap) el("optCard")?.style.setProperty("--optsvg", `${fitOptSvgCap}px`);
   if (fitAcctPlotH) el("acctCard")?.style.setProperty("--acctplot", `${fitAcctPlotH}px`);
 }
 function setupCardRail() {
@@ -3469,11 +3470,13 @@ const optFront = (o) => (o.expiries || []).find((e) => e.exp_ms > Date.now()) ||
 // 만기 시간축 카드(C, 2026-09-28 사용자 지시 «아래 카드로»): −24h~+120h. 점 = 지난 24h 블록 거래(이름표) · 막대 = 다가올 만기 규모
 //   (옆에 max pain · P/C, 아래 날짜) · 선 = 만기별 ATM IV. 폭 W 는 카드에서 받는다 -- 좁으면(휴대폰) 이름표를 줄여 겹침을 피한다
 //   (블록 이름표는 «지금» 왼쪽 폭이 모자라 점만, 만기 옆 pain·P/C 는 옵션 카드 표에 있다).
+// 2026-10-01 한 화면 모드에서 만기·흐름·감마곡선 차트의 높이 배율(fitLayout 이 남는 칸으로 정한다) -- 글자 크기는 그대로, 그림 높이만.
+function optChartK() { return document.documentElement.classList.contains("fit1") ? fitOptChartK : 1; }
 function optLaneSvg(o, W) {
   // 2026-09-29 가운데 블록 칸이 생겨 1920 에서도 545px -- 만기 넷(24h 간격)이면 pain·P/C 세 줄이 들어간다
   const narrow = W < 480,
-    H = narrow ? 170 : 190, x0 = narrow ? 10 : 20, x1 = W - (narrow ? 10 : 20), t0 = 0, t1 = 120, now = Date.now();   // 2026-09-29 블록 점이 빠져 지난 24h 를 걷었다(사용자 지시)
-  const base = narrow ? 104 : 118, fs = narrow ? 10 : 11;
+    H = narrow ? 170 : Math.round(190 * optChartK()), x0 = narrow ? 10 : 20, x1 = W - (narrow ? 10 : 20), t0 = 0, t1 = 120, now = Date.now();   // 2026-09-29 블록 점이 빠져 지난 24h 를 걷었다(사용자 지시)
+  const base = narrow ? 104 : Math.round(118 * optChartK()), fs = narrow ? 10 : 11;
   const X = (h) => x0 + ((h - t0) / (t1 - t0)) * (x1 - x0);
   const ex = (o.expiries || []).filter((e) => e.exp_ms > now && (e.exp_ms - now) / 3.6e6 <= t1);
   const mx = Math.max(1, ...ex.map((e) => e.call_oi_usd + e.put_oi_usd));
@@ -3482,7 +3485,7 @@ function optLaneSvg(o, W) {
   s += `<line x1="${x0}" x2="${x1}" y1="${base}" y2="${base}" stroke="var(--line)"/>`
     + `<line x1="${X(0)}" x2="${X(0)}" y1="6" y2="${H - 16}" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="3 3"/>`;
   ex.forEach((e) => {
-    const v = e.call_oi_usd + e.put_oi_usd, hh = 10 + (narrow ? 50 : 62) * Math.sqrt(v / mx), cx = X((e.exp_ms - now) / 3.6e6);
+    const v = e.call_oi_usd + e.put_oi_usd, hh = 10 + (narrow ? 50 : 62 * optChartK()) * Math.sqrt(v / mx), cx = X((e.exp_ms - now) / 3.6e6);
     const ly = base - (narrow ? hh : Math.max(hh, 40));   // 규모·pain·P/C 세 줄이 기준선 위에 들어오게 짧은 막대는 글자를 띄운다(반쪽 폭에서 한 줄이면 옆 막대와 겹쳤다)
     s += `<rect x="${(cx - 7).toFixed(1)}" y="${(base - hh).toFixed(1)}" width="14" height="${hh.toFixed(1)}" rx="3" fill="var(--warn)" fill-opacity=".85">`
       + `<title>${optKst(e.exp_ms)} 만기 · ${optUsd(v)} · max pain ${optQ(e.pain)} · P/C ${e.pc == null ? "-" : e.pc.toFixed(2)} · ATM IV ${e.atm_iv.toFixed(1)}%</title></rect>`
@@ -3548,7 +3551,8 @@ function optCovBanner(o) {
     return k === optLadderScope ? `<b>${t}</b>` : t;
   });
   const full = ["front", "week", "all"].every((k) => (gb[k] || {}).dealer_cov >= 0.99 && !((gb[k] || {}).dealer_net_oi > 1));
-  return `<div class="opt-cov${full ? "" : " warn"}" role="status">${full ? "체결 기반 · 커버" : "⚠ 체결 기반 · 커버 부족 — 딜러 값은 커버 종목만"} · ${parts.join(" · ")}${optAsOf(o)}</div>`;
+  // 2026-10-01 제목 옆 한 줄(사용자 «Deribit 참고, 신호 아님 자리를 이 줄로 · 높이 확보») -- 따로 쓰던 줄(.opt-cov)을 없앴다
+  return `<span class="opt-cov-h${full ? "" : " warn"}" role="status">${full ? "체결 기반 · 커버" : "⚠ 체결 기반 · 커버 부족 — 딜러 값은 커버 종목만"} · ${parts.join(" · ")}${optAsOf(o)}</span>`;
 }
 let optLadderScope = (() => { try { return localStorage.getItem("optLadder") || "week"; } catch (e) { return "week"; } })();
 // 범위 칩 -- 사다리가 비거나 «만기 교체 중»일 때도 보여야 다른 범위로 옮길 수 있다(2026-09-30 검증)
@@ -3603,7 +3607,7 @@ function optLadderSvg(o, W, Hfit = null) {
 function optGammaCurveSvg(o, W) {
   const g = optDealer(o), pr = g.profile.filter((r) => r[0] > 0 && Number.isFinite(r[1]));
   if (pr.length < 2) return `<div class="opt-note">감마 곡선 없음(체결 기반 — 커버 종목 없음 또는 수집기 재시작 전)</div>`;
-  const H = 150, x0 = 42, x1 = W - 4, y0 = 16, y1 = H - 20, px = optPx(o);
+  const H = Math.round(150 * optChartK()), x0 = 42, x1 = W - 4, y0 = 16, y1 = H - 20, px = optPx(o);
   const lo = pr[0][0], hi = pr[pr.length - 1][0], X = (p) => x0 + ((p - lo) / (hi - lo)) * (x1 - x0);
   // DEX(profile 세 번째 칸, 09-29 수집기 추가)는 단위·크기가 달라(수십 배) 0선만 감마와 맞추고 크기는 제 폭으로 늘린다.
   const dc = 2, dNow = g.dex_usd;   // 점선 = DEX(딜러·체결)
@@ -3652,7 +3656,7 @@ function optNewTxt(bs) {
 }
 function optFlowSvg(flow, W) {
   if (!flow || !flow.length) return "";
-  const narrow = W < 700, H = narrow ? 150 : 170, x0 = narrow ? 34 : 60, x1 = W - (narrow ? 8 : 20), base = narrow ? 84 : 94, amp = narrow ? 44 : 52;
+  const narrow = W < 700, k = narrow ? 1 : optChartK(), H = narrow ? 150 : Math.round(170 * k), x0 = narrow ? 34 : 60, x1 = W - (narrow ? 8 : 20), base = narrow ? 84 : Math.round(94 * k), amp = narrow ? 44 : Math.round(52 * k);
   const n = flow.length, X = (i) => x0 + (i / n) * (x1 - x0), bw = ((x1 - x0) / n) * 0.36;
   const nets = flow.map((b) => [b.cb - b.cs, b.pb - b.ps]);
   const mx = Math.max(1e-9, ...nets.flat().map(Math.abs));
@@ -3792,8 +3796,10 @@ function renderOptions() {
   const dNow = gm.dex_usd, hasSig = ago && ago.dealer_n != null && gm.n != null;
   const covMoved = hasSig && (ago.dealer_n !== gm.n || String(ago.exps) !== String(gm.exps));
   const dexD = dNow != null && hasSig && !covMoved && ago.dealer_dex_usd != null ? dNow - ago.dealer_dex_usd : null;
+  const covHead = el("optCovHead");
+  if (covHead) covHead.innerHTML = optCovBanner(o);
   // 2026-09-30 검증: 갱신 실패·서버 상태 지연이면 마지막 값을 그대로 두되 «지연»을 먼저 말한다
-  body.innerHTML = (latestGex && latestGex.error ? `<div class="opt-note opt-warn">옵션 갱신 지연(${escapeHtml(String(latestGex.error))}) — 마지막으로 받은 값</div>` : "") + optCovBanner(o) + [
+  body.innerHTML = (latestGex && latestGex.error ? `<div class="opt-note opt-warn">옵션 갱신 지연(${escapeHtml(String(latestGex.error))}) — 마지막으로 받은 값</div>` : "") + [   // 커버 줄은 제목 옆(#optCovHead) -- 아래에서 넣는다
     sec("move", "예상 폭", kv("24시간 1σ", s1d == null ? "-" : `${pm(s1d)} (${(optIv(o) / Math.sqrt(365)).toFixed(1)}%)`)
       + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 — 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
       + kv("IV(30일) − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`)),

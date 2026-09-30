@@ -2622,7 +2622,6 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
   html.fit1 #mcBody:not(.mc-cmp), html.fit1 #mcWall:not(.on) { display: none; }   /* 제자리(차트 오른쪽 칸)에 놓이기 전엔 안 보인다 -- 첫 0.5초 흐름 속에 나타났다 사라지던 것 */
   html.fit1 #mcWhen { height: 116px; overflow: hidden; flex: none; }
   html.fit1 #optCard { align-content: start; }
-  html.fit1 #optCard :is(#optLaneBody, #optFlowBody, .opt-sec:has([data-tip="curve"])) svg { max-height: var(--optsvg, none); }   /* 2026-10-01 작은 창에서 넘치면 fitLayout 이 상한을 준다(비율 유지) */
   /* 2026-10-01 계좌: 성과 차트를 늘 펼치고(접기 숨김) 남는 높이를 fitLayout 이 --acctplot 으로 준다 */
   html.fit1 #acctCard .acct-perf-more { display: none; }
   html.fit1 #acctCard .acct-perf-fold > summary { pointer-events: none; }
@@ -2719,6 +2718,10 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   border: 1px solid var(--soft-line); color: var(--muted); font-variant-numeric: tabular-nums; }
 .opt-cov.warn { color: var(--text); border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
 .opt-cov b { color: var(--text); }
+/* 2026-10-01 커버 줄 = 제목 옆 한 줄(따로 쓰던 상자 줄을 걷어 높이 확보) */
+.opt-cov-h { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: keep-all; }
+.opt-cov-h b { color: var(--text); }
+.opt-cov-h.warn { color: var(--warn); }
 /* 2026-09-29 휴대폰 블록 거래 요약 한 줄 + 펼치기 목록(사용자 선택 C) */
 .opt-blk-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; padding: 8px 10px; margin-top: 6px;
   border: 1px solid var(--soft-line); border-radius: 10px; font-variant-numeric: tabular-nums; }
