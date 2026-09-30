@@ -266,6 +266,7 @@ def test_constant_maturity_skew(monkeypatch):
     w = (7 * 24 - e3["hours"]) / (e10["hours"] - e3["hours"])
     assert abs(cm7["rr"] - ((1 - w) * e3["rr25i"] + w * e10["rr25i"])) < 1e-9, "7일 = 3일·10일 만기 시간 보간"
     assert abs(cm7["atm"] - 50.0) < 1e-6
-    assert o["cm"]["30"] is not None
+    assert o["cm"]["30"] is not None and o["cm"]["60"] is None, "60일보다 먼 만기(40일이 끝)가 없으면 None"
+    assert abs(sum(e["oi_share"] for e in o["expiries"]) - 1.0) < 1e-9
     only_short = gex.options_summary(pd.DataFrame(exp_rows(3, 4.0)), "ETH")
     assert only_short["cm"]["7"] is None, "7일보다 먼 만기가 없으면 외삽하지 않는다"
