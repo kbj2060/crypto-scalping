@@ -45,6 +45,7 @@ import argparse
 import asyncio
 import json
 import os
+import sqlite3
 import threading
 import time
 from contextlib import contextmanager
@@ -52,6 +53,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "live" / "trade_tape.duckdb"
+HOT_TAPE_DB = ROOT / "data" / "hot" / "binance_tape.sqlite"   # 저장 재설계 3단계 -- 읽는 쪽 전용 사본, 5코인 한 파일
 
 
 def default_db(symbol: str) -> Path:
@@ -355,6 +357,69 @@ class TapeBuffer:
              int(c[12]), int(c[13]), int(c[14]), int(c[15])) for sec, b, c in done)
 
 
+_TAPE_COLS = ("symbol", "ts_sec", "price_bin", "buy_qty", "sell_qty", "buy_n", "sell_n", "buy_max", "sell_max",
+              "retail_buy_qty", "retail_sell_qty", "whale_buy_qty", "whale_sell_qty", "whale_buy_n", "whale_sell_n",
+              "retail_buy_n", "retail_sell_n", "order_buy_n", "order_sell_n")
+
+
+class HotMirror:
+    """대시보드·감시기가 읽는 세 표(trade_tape_1s·gaps·verify_1m)를 SQLite(WAL)에 한 벌 더 쓴다 (2026-10-01 저장 재설계 3단계).
+    DuckDB 는 읽는 쪽이 read_only 로 열어도 쓰는 쪽이 막히고 그 반대도 그렇다(10-01 실측: 쓰는 프로세스가 죽었다).
+    WAL SQLite 는 읽기·쓰기가 서로 안 막고, 코인별 수집기 여럿이 한 파일에 써도 짧은 트랜잭션끼리 차례를 기다릴 뿐이다.
+    **DuckDB 에 커밋된 것만 따라 쓴다.** 여기 실패는 수집을 멈추지 않는다 -- 보류했다가 다음에 먼저 쓴다(순서 유지).
+    ponytail: DuckDB 가 아직 원본이고 이건 사본이다. TapeStore 전체를 SQLite 로 옮기면(3b) 이 클래스가 없어진다."""
+
+    PENDING_CAP = 200   # 호출 묶음 수(묶음 하나 = 5초치). 넘치면 옛 것부터 버리며 **말한다**
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
+        self.pending: list[list[tuple]] = []
+        con = sqlite3.connect(self.path, timeout=10)
+        try:
+            con.execute("PRAGMA auto_vacuum = INCREMENTAL")   # 새 파일에서만 먹는다 -- WAL 전환·표보다 먼저(뒤면 조용히 0)
+            con.execute("PRAGMA journal_mode = WAL")
+            typ = lambda n: ("TEXT" if n == "symbol" else "INTEGER" if n in ("ts_sec", "price_bin") or n.endswith("_n")
+                             else "REAL")                         # noqa: E731 -- 타입이 없으면 DuckDB 가 BLOB 으로 읽는다
+            with con:
+                con.execute(f"CREATE TABLE IF NOT EXISTS trade_tape_1s({', '.join(f'{c} {typ(c)}' for c in _TAPE_COLS)}, "
+                            "PRIMARY KEY (symbol, ts_sec, price_bin)) WITHOUT ROWID")
+                con.execute("CREATE TABLE IF NOT EXISTS gaps(symbol TEXT, from_ms INTEGER, to_ms INTEGER, reason TEXT)")
+                con.execute("CREATE TABLE IF NOT EXISTS verify_1m(symbol TEXT, ts_min INTEGER, tape_qty REAL, "
+                            "kline_qty REAL, rel_err REAL, checked_at TEXT)")
+                con.execute("CREATE INDEX IF NOT EXISTS verify_1m_sym_min ON verify_1m(symbol, ts_min)")
+                con.execute("CREATE INDEX IF NOT EXISTS gaps_sym_to ON gaps(symbol, to_ms)")
+        finally:
+            con.close()
+
+    def _con(self) -> sqlite3.Connection:
+        con = sqlite3.connect(self.path, timeout=10)
+        con.execute("PRAGMA journal_mode = WAL")
+        return con
+
+    def run(self, stmts: list[tuple]) -> None:
+        """stmts = [(sql, params, many)]. 보류분 → 이번 것 순서로 트랜잭션 하나씩."""
+        self.pending.append(stmts)
+        try:
+            con = self._con()
+            try:
+                while self.pending:
+                    with con:
+                        for sql, params, many in self.pending[0]:
+                            (con.executemany if many else con.execute)(sql, params)
+                    self.pending.pop(0)
+            finally:
+                con.close()
+        except sqlite3.Error as exc:
+            if len(self.pending) > self.PENDING_CAP:
+                self.pending = self.pending[-self.PENDING_CAP // 2:]
+                log(f"⚠️hot 사본 쓰기가 계속 막혀 옛 묶음 버림 -- DuckDB 원본은 온전하다: {exc!r}")
+            else:
+                log(f"hot 사본 보류 {len(self.pending)}묶음, 다음에 재시도: {type(exc).__name__}")
+
+    INSERT = f"INSERT OR REPLACE INTO trade_tape_1s VALUES ({','.join('?' * len(_TAPE_COLS))})"
+
+
 class TapeStore:
     """duckdb 는 **프로세스 하나만** 파일을 연다. 그래서 연결을 붙들지 않고 **쓸 때만** 열었다
     닫는다 -- 붙들면 ops_watchdog 의 신선도 검사(읽기 전용 연결)가 매 사이클 BLOCKED 가 되어
@@ -366,10 +431,11 @@ class TapeStore:
 
     PENDING_CAP = 50_000   # ~3분치. 이보다 밀리면 락이 풀릴 가망이 없다고 보고 버리며 **말한다**
 
-    def __init__(self, db_path: Path, symbol: str, bucket: float) -> None:
+    def __init__(self, db_path: Path, symbol: str, bucket: float, mirror: HotMirror | None = None) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
         self.symbol = symbol
+        self.mirror = mirror
         self.pending: list[tuple] = []
         self._lock = threading.Lock()   # 쓰기 스레드와 복구 태스크가 같은 파일을 동시에 연다
         with self._connect() as con:
@@ -521,6 +587,14 @@ class TapeStore:
                         [self.symbol, ts_min, tape_qty, kline_qty, rel])
             self._mark_backfill(con, ts_min, source, len(rows), tape_qty, kline_qty, rel, True, note)
             con.commit()
+        if self.mirror:
+            self.mirror.run([
+                ("DELETE FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ?",
+                 (self.symbol, ts_min, ts_min + 60), False),
+                (HotMirror.INSERT, [(self.symbol, *r) for r in rows], True),
+                ("DELETE FROM verify_1m WHERE symbol = ? AND ts_min = ?", (self.symbol, ts_min), False),
+                ("INSERT INTO verify_1m VALUES (?,?,?,?,?,datetime('now'))", (self.symbol, ts_min, tape_qty, kline_qty, rel),
+                 False)])
 
     def mark_backfill_failed(self, ts_min: int, source: str, n_rows: int, tape_qty: float,
                              kline_qty: float, rel: float, note: str) -> None:
@@ -538,15 +612,17 @@ class TapeStore:
         if not self.pending:
             return
         try:
+            batch = [(self.symbol, *r) for r in self.pending]
             with self._connect() as con:
                 # 🔴트랜잭션 하나로 -- 자동커밋이면 **행마다 fsync** 다(2026-09-23 서버 실측
                 #   50행 8~10초 vs 0.1~0.24초). 그동안 락을 쥐고 이벤트 루프도 멈춘다.
                 con.begin()
                 con.executemany(
-                    "INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                                [(self.symbol, *r) for r in self.pending])
+                    "INSERT INTO trade_tape_1s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", batch)
                 con.commit()
             self.pending.clear()
+            if self.mirror:
+                self.mirror.run([(HotMirror.INSERT, batch, True)])
         except Exception as exc:  # noqa: BLE001 -- 락 충돌(읽는 쪽이 잡고 있음)이 대부분이다
             if len(self.pending) > self.PENDING_CAP:
                 dropped = len(self.pending) - self.PENDING_CAP // 2
@@ -565,12 +641,15 @@ class TapeStore:
         except Exception as exc:  # noqa: BLE001
             log(f"gap 기록 실패(수집은 계속): {type(exc).__name__}")
             return
+        if self.mirror:
+            self.mirror.run([("INSERT INTO gaps VALUES (?,?,?,?)", (self.symbol, from_ms, to_ms, reason), False)])
         log(f"gap {(to_ms - from_ms) / 1000:.1f}s 기록 ({reason})")
 
     def verify(self, kvol: dict[int, float], minutes: list[int]) -> list[tuple[int, float]]:
         """분별 테이프 합계를 kline 과 대조해 기록하고, (분, 상대오차) 목록을 돌려준다.
         연결 한 번 안에서 읽기·쓰기를 끝낸다 -- 검사마다 파일을 여러 번 여는 건 낭비다."""
         out: list[tuple[int, float]] = []
+        mirrored: list[tuple] = []
         with self._connect() as con:
             for ts_min in minutes:
                 if ts_min not in kvol:
@@ -583,12 +662,15 @@ class TapeStore:
                 rel = (tape_qty - kline_qty) / kline_qty if kline_qty else 0.0
                 con.execute("INSERT INTO verify_1m VALUES (?,?,?,?,?,now())",
                             [self.symbol, ts_min, tape_qty, kline_qty, rel])
+                mirrored.append((self.symbol, ts_min, tape_qty, kline_qty, rel))
                 # 밀리초 환산을 SQL 안에서 하면 안 된다 -- duckdb 가 바인드 파라미터를 INT32 로
                 # 보고 `1789485840 * 1000` 에서 오버플로를 낸다(2026-09-16 시험에서 터졌다).
                 gapped = con.execute(
                     "SELECT count(*) FROM gaps WHERE symbol = ? AND from_ms < ? AND to_ms > ?",
                     [self.symbol, (ts_min + 60) * 1000, ts_min * 1000]).fetchone()[0]
                 out.append((ts_min, rel, bool(gapped)))
+        if self.mirror and mirrored:
+            self.mirror.run([("INSERT INTO verify_1m VALUES (?,?,?,?,?,datetime('now'))", mirrored, True)])
         return out
 
     def unverified_minutes(self, limit: int = 30) -> list[int]:
@@ -731,7 +813,7 @@ async def collect(symbol: str, db_path: Path) -> None:
 
     warn_if_whale_threshold_diverged()
     bucket = BUCKETS.get(symbol, 0.01)
-    store = TapeStore(db_path, symbol, bucket)
+    store = TapeStore(db_path, symbol, bucket, mirror=HotMirror(Path(os.getenv("TAPE_HOT_PATH", str(HOT_TAPE_DB)))))
     buffer = TapeBuffer(bucket, symbol)
     orders = TakerOrderAggregator()
     last_ms = store.last_ts_ms()      # 지난 판이 남긴 끝 -- 재시작 공백을 gaps 에 적으려고
@@ -881,7 +963,7 @@ def selftest() -> None:
 
     import tempfile
     with tempfile.TemporaryDirectory() as td:
-        st = TapeStore(Path(td) / "t.duckdb", "ethusdt", 0.1)
+        st = TapeStore(Path(td) / "t.duckdb", "ethusdt", 0.1, mirror=HotMirror(Path(td) / "h.sqlite"))
         now = int(time.time()) // 60 * 60
         m_gap, m_bad, m_ok, m_new = now - 600, now - 540, now - 480, now - 60
         st.write([(m_ok + 5, 25000, 1.0, 1.0, 1, 1, 1.0, 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1)])
@@ -912,6 +994,29 @@ def selftest() -> None:
         assert got == (1, 5.0, 1), ("분이 통째로 바뀌고 모르는 칸은 NULL", got)
         assert v == (1, 0.0), ("verify_1m 도 새 값 한 줄", v)
         assert b == (False, BACKFILL_MAX_ATTEMPTS), b
+
+        # ── hot 사본(SQLite) = DuckDB 원본 (2026-10-01 저장 재설계 3단계) ──────────────────
+        with st._connect() as con:
+            want = sorted(con.execute("SELECT * FROM trade_tape_1s").fetchall())
+            want_gaps = sorted(con.execute("SELECT * FROM gaps").fetchall())
+        hc = sqlite3.connect(Path(td) / "h.sqlite")
+        assert sorted(hc.execute("SELECT * FROM trade_tape_1s").fetchall()) == want, "사본 행이 원본과 다르다"
+        assert sorted(hc.execute("SELECT * FROM gaps").fetchall()) == want_gaps, "사본 공백이 원본과 다르다"
+        assert hc.execute("SELECT count(*), max(rel_err) FROM verify_1m WHERE ts_min = ?",
+                          [m_bad]).fetchone() == (1, 0.0), "분 교체가 사본 verify_1m 에도 한 줄"
+        assert hc.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert hc.execute("PRAGMA auto_vacuum").fetchone()[0] == 2, "지운 행의 공간을 못 돌려준다(INCREMENTAL=2)"
+        # 사본 쓰기가 막히면 보류했다가 **순서대로** 다시 쓴다 -- 원본 쓰기는 막지 않는다.
+        good = st.mirror.path
+        st.mirror.path = Path(td) / "없는폴더" / "h.sqlite"
+        st.write([(m_new + 1, 25001, 7.0, 0, 1, 0, 7.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)])
+        assert not st.pending and len(st.mirror.pending) == 1, "원본은 썼고 사본만 보류"
+        st.mirror.path = good
+        st.write([(m_new + 2, 25001, 8.0, 0, 1, 0, 8.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)])
+        assert not st.mirror.pending
+        assert [r[0] for r in hc.execute("SELECT buy_qty FROM trade_tape_1s WHERE price_bin = 25001 "
+                                         "ORDER BY ts_sec")] == [7.0, 8.0], "보류분이 빠졌거나 순서가 틀렸다"
+        hc.close()
 
         # ── 읽는 쪽이 잠깐 쥐어도 기동이 안 죽는다 (2026-09-24 16:34:51 재현) ──────────
         import subprocess

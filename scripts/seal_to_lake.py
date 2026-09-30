@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import shutil
+import sqlite3
 import sys
 import tempfile
 import time
@@ -26,8 +27,10 @@ import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.data_store import LAKE, ROOT, lake_path  # noqa: E402
+from scripts.live_trade_tape_collector_20260916 import HOT_TAPE_DB  # noqa: E402
 
 LAG_HOURS = 2
+HOT_KEEP_DAYS = 16     # hot 테이프: micro_ref 기준선 7일 · flow_hour_scales 14일(오늘 0시 전) + 여유
 L, A = "data/live", "data/archive/live_retired_20261001"     # A = 1단계에서 보관한 09-19 정지 코인별 DB
 C5 = ("eth", "btc", "sol", "xrp", "hype")
 SYM = "upper(regexp_replace(symbol, '(?i)usdt$', ''))"         # ethusdt / ETHUSDT -> ETH
@@ -173,6 +176,25 @@ def seal(specs=SPECS, root: Path = ROOT, lake: Path = LAKE, now: dt.datetime | N
     return stats
 
 
+def prune_hot(hot: Path = HOT_TAPE_DB, now: dt.datetime | None = None, keep_days: int = HOT_KEEP_DAYS) -> int:
+    """hot 테이프(SQLite)에서 keep_days 넘은 행을 지우고 공간을 돌려준다(auto_vacuum=INCREMENTAL).
+    3단계(3a) 동안은 DuckDB 원본이 전부 갖고 있고 lake 도 그쪽에서 봉인하므로 지워도 유실이 아니다."""
+    if not hot.exists():
+        return 0
+    now = now or dt.datetime.now(dt.timezone.utc)
+    cut = int(now.timestamp()) // 86400 * 86400 - keep_days * 86400
+    con = sqlite3.connect(hot, timeout=30)
+    try:
+        with con:
+            n = con.execute("DELETE FROM trade_tape_1s WHERE ts_sec < ?", [cut]).rowcount
+            con.execute("DELETE FROM verify_1m WHERE ts_min < ?", [cut])
+            con.execute("DELETE FROM gaps WHERE to_ms < ?", [cut * 1000])
+        con.execute("PRAGMA incremental_vacuum")
+    finally:
+        con.close()
+    return n
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dry-run", action="store_true")
@@ -180,6 +202,8 @@ if __name__ == "__main__":
     a = ap.parse_args()
     t0 = time.time()
     s = seal(dry_run=a.dry_run, only=a.only)
+    if not a.dry_run and not a.only:
+        s["hot_pruned_rows"] = prune_hot()
     print(f"[seal] {'DRY-RUN ' if a.dry_run else ''}{dt.datetime.now().isoformat(timespec='seconds')} "
           f"lake={LAKE} {s} {time.time() - t0:.0f}s", flush=True)
     sys.exit(1 if s["failed"] else 0)

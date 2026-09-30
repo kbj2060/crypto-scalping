@@ -11,7 +11,8 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from scripts import data_store as ds  # noqa: E402
-from scripts.seal_to_lake import seal  # noqa: E402
+from scripts.live_trade_tape_collector_20260916 import HotMirror  # noqa: E402
+from scripts.seal_to_lake import prune_hot, seal  # noqa: E402
 
 D0 = int(dt.datetime(2026, 9, 28, tzinfo=dt.timezone.utc).timestamp())   # 09-28 00:00 UTC
 
@@ -58,7 +59,27 @@ def test_bt_format_matches_collector():
     assert a["ts_ms"].tolist() == [1, 2] and a["ask_px"].tolist() == [100.6, 101.1] and a["bid_qty"].tolist() == [2.0, 1.5]
 
 
+def test_prune_hot():
+    import sqlite3
+    hot = Path(tempfile.mkdtemp()) / "h.sqlite"
+    m = HotMirror(hot)
+    now = dt.datetime(2026, 10, 1, 5, tzinfo=dt.timezone.utc)
+    cut = int(now.timestamp()) // 86400 * 86400 - 16 * 86400
+    row = lambda ts: ("ethusdt", ts, 1) + (1.0,) * 16                                    # noqa: E731
+    m.run([(HotMirror.INSERT, [row(cut - 1), row(cut), row(cut + 3600)] + [row(cut - 10 - i) for i in range(3000)], True),
+           ("INSERT INTO verify_1m VALUES (?,?,?,?,?,?)", ("ethusdt", cut - 60, 1, 1, 0, "x"), False),
+           ("INSERT INTO gaps VALUES (?,?,?,?)", ("ethusdt", (cut - 9) * 1000, (cut - 5) * 1000, "t"), False)])
+    size0 = hot.stat().st_size
+    assert prune_hot(hot, now) == 3001                                                     # 경계 초(cut)는 남는다
+    c = sqlite3.connect(hot)
+    assert [r[0] for r in c.execute("SELECT ts_sec FROM trade_tape_1s ORDER BY 1")] == [cut, cut + 3600]
+    assert c.execute("SELECT count(*) FROM verify_1m").fetchone()[0] == 0 == c.execute("SELECT count(*) FROM gaps").fetchone()[0]
+    c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    assert hot.stat().st_size < size0, "공간을 안 돌려줬다(auto_vacuum)"
+
+
 if __name__ == "__main__":
+    test_prune_hot()
     test_seal_and_read()
     test_bt_format_matches_collector()
     print("ok")
