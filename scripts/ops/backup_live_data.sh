@@ -18,8 +18,10 @@ DEST="${BACKUP_DEST:-/mnt/d/crypto-scalping-backups}"
 if [[ -d "$(dirname "$DEST")" ]]; then
   mkdir -p "$DEST/data/live" "$DEST/data/ensemble"
   echo "[$(date -Iseconds)] backup starting -> $DEST"
-  for dir in data/live data/ensemble; do
-    rsync -a --exclude '*.tmp' "$ROOT/$dir/" "$DEST/$dir/"
+  for dir in data/live data/ensemble data/lake; do
+    [[ -d "$ROOT/$dir" ]] || continue
+    mkdir -p "$DEST/$dir"
+    rsync -a --exclude '*.tmp' --exclude '.snap_*' "$ROOT/$dir/" "$DEST/$dir/"
   done
   echo "[$(date -Iseconds)] backup done"
 else
@@ -51,9 +53,10 @@ SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -p "$DEV_PORT")
 
 echo "[$(date -Iseconds)] dev backup starting -> $DEV_HOST:$DEV_DEST"
 rc=0
-for dir in data/live data/ensemble; do
+for dir in data/live data/ensemble data/lake; do     # data/lake = 봉인된 일별 Parquet(안 바뀜, scripts/seal_to_lake.py)
+  [[ -d "$ROOT/$dir" ]] || continue
   "${SSH[@]}" "$DEV_HOST" "mkdir -p '$DEV_DEST/$dir'" || { rc=1; continue; }
-  rsync -a --exclude '*.tmp' --exclude '*.wal' -e "${SSH[*]}" "$ROOT/$dir/" "$DEV_HOST:$DEV_DEST/$dir/"
+  rsync -a --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*' -e "${SSH[*]}" "$ROOT/$dir/" "$DEV_HOST:$DEV_DEST/$dir/"
   r=$?; [[ $r -ne 0 && $r -ne 24 ]] && rc=1
 done
 for attempt in 1 2 3; do

@@ -737,6 +737,10 @@ def run_once(dry_run: bool) -> list[Check]:
         check_snapshot(), check_heartbeat(), check_pipeline(), check_pipeline_contract(),
         check_data_sources(), check_dashboard(), check_execution_contract(), check_runtime_resources(),
         check_watchdog_storage(), check_raster_archive(),
+        # 2026-10-01 lake 봉인(scripts/seal_to_lake.py, 매일 11:05 KST cron) -- 대표로 ETH 테이프의 가장 최근 일별 파일.
+        #   하루 한 번 쓰므로 warn 26h · critical 50h. cron 을 끄면 이 줄도 지운다.
+        check_file_dir_freshness("lake_seal", ROOT / "data" / "lake" / "binance" / "tape", "coin=ETH/date=*/part.parquet",
+                                 26 * 60, 50 * 60),
         # DuckDB write-freshness (2026-08-17): the checks above watch process liveness and
         # dashboard-reported connectivity flags, neither of which catches a process that stays
         # alive but silently stops persisting rows -- exactly the failure mode found in this
