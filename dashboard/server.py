@@ -3826,15 +3826,21 @@ def make_app() -> web.Application:
     HL_CTX_DB_PATH = LIVE_DIR / "hyperliquid_context.duckdb"
     OI_LSRATIO_DB_PATH = LIVE_DIR / "oi_lsratio.duckdb"
     MC_LIQ_PROFILE_S = 12 * 3600      # 실측 청산 가격 프로파일 창 = 차트 최대 창(12h)
+    # 🔴2026-10-01 롱숏비 수집기(oi_lsratio 워커)는 5분마다 ETH·BTC·SOL 세 종목을 **같은 순간**에 upsert 한다
+    #   (행마다 자동커밋) -- 그 쓰기 락이 _read_only_rows 의 재시도 창(5초)보다 길면 그 15초 주기 동안 ls 가 null 로 비었다.
+    #   원천마다 **마지막 성공 행**을 들고 있다가 잠김·오류 때 그대로 준다(errors 에는 이유를 남긴다). ls 는 age_s 가
+    #   행 시각에서 재므로 낡음이 그대로 보인다.
+    mc_last_good: dict[str, Any] = {}
 
     def _mc_collectors() -> dict[str, Any]:
-        """수집기 duckdb 를 읽기 전용으로 한 번씩. 원천 하나가 없거나 잠겨도 나머지는 산다(그 키만 None)."""
+        """수집기 duckdb 를 읽기 전용으로 한 번씩. 원천 하나가 없거나 잠겨도 나머지는 산다(그 키는 마지막 성공값, 없으면 None)."""
         out: dict[str, Any] = {"errors": {}}
         def q(key: str, path: Path, sql: str, params: list) -> None:
             try:
                 out[key] = _read_only_rows(path, sql, params) if path.exists() else None
+                mc_last_good[key] = out[key]
             except Exception as exc:  # noqa: BLE001
-                out[key] = None
+                out[key] = mc_last_good.get(key)
                 out["errors"][key] = repr(exc)[:100]
         q("okx_fund", OKX_CTX_DB_PATH, "SELECT funding_rate, funding_time FROM okx_funding WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
         q("okx_mark", OKX_CTX_DB_PATH, "SELECT mark_px, ts_ms FROM okx_mark WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
