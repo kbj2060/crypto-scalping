@@ -3461,12 +3461,12 @@ function optLadderSvg(o, W) {
   const st = o.strikes || {}, rows = st[optLadderScope] || [];
   const rolled = optLadderScope === "front" && st.front_exp_ms && st.front_exp_ms <= Date.now();   // 만기 직후 ≤10분(optDealer 와 같은 규칙)
   if (!rows.length || rolled) return optLadderChips() + `<div class="opt-note">${rolled ? "만기 교체 중 — 다음 수집(10분 안)부터 새 가까운 만기" : "행사가 데이터 없음(수집기 다음 주기에 채워진다)"}</div>`;
-  const px = optPx(o), lo = px * 0.92, hi = px * 1.08, H = 380, y0 = 22, y1 = H - 8;
+  const px = optPx(o), lo = px * 0.92, hi = px * 1.08, H = 560, y0 = 22, y1 = H - 8;   // 2026-09-30 380 -> 560(막대를 두껍게 -- 값 글자가 막대 안에 들어가게, 사용자 지시)
   const Y = (p) => y1 - ((p - lo) / (hi - lo)) * (y1 - y0);
   const mid = Math.round(W * 0.47), half = mid - 46, gW = 34, gx = W - gW;
   const mx = Math.max(1, ...rows.map((r) => Math.max(r[1], r[2]))), gm = Math.max(1, ...rows.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0)));
   const ks = rows.map((r) => r[0]), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k, i) => k - ks[i])) : 25;
-  const bh = Math.max(2, Math.min(12, ((y1 - y0) * step) / (hi - lo) - 1.5));
+  const bh = Math.max(2, Math.min(15, ((y1 - y0) * step) / (hi - lo) - 1)), fsz = Math.max(8, Math.min(10.5, bh - 1));   // 값 글자 = 막대 두께 − 1
   const top = [...rows].sort((a, b) => b[1] + b[2] - a[1] - a[2]).slice(0, 3).map((r) => r[0]);
   let s = `<text x="${mid - 6}" y="12" font-size="10" font-weight="700" fill="var(--bad)" text-anchor="end">← 풋</text>`
     + `<text x="${mid + 6}" y="12" font-size="10" font-weight="700" fill="var(--good)">콜 →</text>`
@@ -3479,9 +3479,9 @@ function optLadderSvg(o, W) {
       + `<rect x="${mid}" y="${(y - bh / 2).toFixed(1)}" width="${cwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--good)" fill-opacity=".75"/>`
       + (has ? `<rect x="${(W - gwid).toFixed(1)}" y="${(y - bh / 2).toFixed(1)}" width="${gwid.toFixed(1)}" height="${bh.toFixed(1)}" fill="${g >= 0 ? "var(--option)" : "var(--warn)"}" fill-opacity=".85"/>` : "") + `</g>`;
     if (top.includes(k)) {   // 2026-09-30 큰 막대 값은 막대 **안**(사용자 지시) -- 막대 끝에서 안쪽으로, 글자가 안 들어가면 예전처럼 옆에
-      const lab = optUsd(c + p), bw = c >= p ? cwid : pw, fit = bw >= lab.length * 5.9 + 8;
+      const lab = optUsd(c + p), bw = c >= p ? cwid : pw, fit = bw >= lab.length * fsz * 0.62 + 8;
       const x = mid + (c >= p ? (fit ? cwid - 4 : cwid + 4) : (fit ? -pw + 4 : -pw - 4));
-      s += `<text x="${x.toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="9.5" font-weight="800" fill="${fit ? "var(--chart-bg)" : "var(--text)"}"`
+      s += `<text x="${x.toFixed(1)}" y="${(y + fsz * 0.36).toFixed(1)}" font-size="${fsz.toFixed(1)}" font-weight="800" fill="${fit ? "var(--chart-bg)" : "var(--text)"}"`
         + ` text-anchor="${(c >= p) === fit ? "end" : "start"}">${lab}</text>`;
     }
   });
