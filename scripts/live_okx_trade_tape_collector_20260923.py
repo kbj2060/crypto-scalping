@@ -78,17 +78,20 @@ WHALE_MIN_USD = _bn.WHALE_MIN_USD
 log = _bn.log
 
 
+OKX_HOT_TAPE_DB = ROOT / "data" / "hot" / "okx_tape.sqlite"   # 2026-10-01 저장 재설계 4a: 5종목 한 파일(symbol = 종목)
+
+
 def default_db(inst: str, name: str = "okx_trade_tape") -> Path:
-    """ETH 는 기존 파일(대시보드가 읽는다). 다른 종목은 자기 파일(2026-09-26) -- duckdb 는 writer 가
-    하나라 종목 5개가 한 파일을 5초마다 번갈아 열면 읽는 쪽(대시보드·감시기·복제)과 잠금 충돌이 5배다."""
+    """테이프 = hot SQLite(4a -- 바이낸스 테이프와 같은 TapeStore, WAL 이라 읽는 쪽과 안 막힌다).
+    맥락(okx_context)은 아직 DuckDB: ETH 는 기존 파일, 다른 종목은 자기 파일(2026-09-26)."""
+    if name == "okx_trade_tape":
+        return OKX_HOT_TAPE_DB
     if inst.upper() == "ETH-USDT-SWAP":
         return ROOT / "data" / "live" / f"{name}.duckdb"
     return ROOT / "data" / "live" / f"{name}_{inst.split('-')[0].lower()}.duckdb"
 
 
-# ponytail: 바이낸스 테이프와 같은 «단일 duckdb» 다 -- 회수 경로가 없다(DELETE 는 파일을 안
-# 줄인다). 하이퍼리퀴드 수집기가 겪고 날짜별 파일로 옮긴 그 문제다. ~330k행/일이라 당장은
-# 문제가 아니고, 디스크가 급해지면 날짜별 분할이 업그레이드 경로다.
+# 보존: hot 은 16일(봉인기 prune_hot -- lake 에 봉인된 날짜만 지운다). 그 전은 data/lake/okx/tape.
 
 WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
 CANDLES_URL = "https://www.okx.com/api/v5/market/candles"
