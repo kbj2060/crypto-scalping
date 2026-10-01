@@ -51,13 +51,13 @@ def test_restored_on_restart():
     """청산은 11분에 몇 건이라 재시작 후 빈 deque 로 두면 새로고침해도 선이 안 그려진다.
 
     다른 수급 계열(체결·OI)은 초당 들어와 1초면 창이 다시 차므로 이 문제가 없다 --
-    청산만 디스크의 jsonl 을 되읽어야 하고, 안 읽어도 **에러가 없다**. 그래서 검사한다.
+    청산만 디스크(2026-10-01 4d: 수집기 hot 의 liquidations)를 되읽어야 하고, 안 읽어도 **에러가 없다**. 그래서 검사한다.
     """
     assert "def liq_events_load()" in SRV, "청산 복원 함수가 없다"
     assert re.search(r"async def collect_force_orders\(app: web\.Application\) -> None:\n"
                      r'\s+""".*?"""\n\s+liq_events_load\(\)', SRV, re.S), \
         "liq_events_load() 가 수집기 시작에서 안 불린다 -- 재시작 후 청산선이 빈다"
-    assert "deque(fh, maxlen=liq_events.maxlen)" in SRV, \
+    assert re.search(r'ORDER BY ts_ms DESC LIMIT \?", .{0,80}liq_events\.maxlen\]', SRV), \
         "복원이 deque 꼬리로 제한되지 않는다 -- 파일이 커지면 통째로 메모리에 올린다"
 
 

@@ -803,6 +803,12 @@ def run_once(dry_run: bool) -> list[Check]:
         #   영구 BLOCKED/CRITICAL 이 된다 -- SHADOW_RUNNERS 주석의 사고가 세 번 반복된 자리다.
         check_duckdb_table_freshness("duckdb_trade_tape_eth", tape_db, "trade_tape_1s WHERE symbol = 'ethusdt'",
                                      "datetime(max(ts_sec), 'unixepoch', 'localtime')", 5, 10),
+        # 2026-10-01 4d: 바이낸스 맥락 수집기(OI 0.25초·마크 1초, 대시보드에서 분리). OI 는 3~7초마다 바뀌고 수집기는
+        #   10초마다 쓴다. 죽으면 화면 OI·베이시스가 멈춘다. 수집기를 은퇴시키면 이 두 줄도 지운다.
+        check_duckdb_table_freshness("hot_binance_oi_1s_eth", ROOT / "data" / "hot" / "binance_ctx.sqlite",
+                                     "oi_1s WHERE symbol = 'ethusdt'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 5, 10),
+        check_duckdb_table_freshness("hot_binance_mark_1s_eth", ROOT / "data" / "hot" / "binance_ctx.sqlite",
+                                     "mark_price_1s WHERE symbol = 'ethusdt'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 5, 10),
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
         *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
         *check_multicoin_collectors(),

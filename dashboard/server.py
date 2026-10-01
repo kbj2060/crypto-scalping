@@ -61,6 +61,8 @@ from scripts.live_trade_tape_collector_20260916 import (  # noqa: E402
     size_bands,
 )
 from scripts.data_store import read_rows  # noqa: E402
+# 2026-10-01 저장 재설계 4d: OI 1초·마크 1초·청산 원시는 수집기가 이 hot 파일에 쓰고 대시보드는 읽기만 한다.
+from scripts.live_binance_ctx_collector_20261001 import HOT_DB as BINANCE_CTX_DB  # noqa: E402
 from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
     FETCH_LIMIT as EVIDENCE_FETCH_LIMIT,
     bars_since_last_true,
@@ -594,7 +596,7 @@ OI_1S_POLL_SECONDS = 0.25
 # 🔴체결 테이프 duckdb(TAPE_DB_PATH)에 끼워 넣지 않는다: 저쪽 writer 는 별도 프로세스가
 #   **연결을 붙들고** 있어 외부에서는 read_only 조차 거부된다(2026-09-19 실측). 여기서는
 #   대시보드가 유일한 writer 이고, 매 flush 마다 연결-작업-닫기라 연구/감시 쪽 읽기를 막지 않는다.
-OI_1S_DB_PATH = LIVE_DIR / "oi_1s.duckdb"
+OI_1S_DB_PATH = BINANCE_CTX_DB      # 4d: 수집기 hot(SQLite). 옛 data/live/oi_1s.duckdb 는 10-01 에 얼었다
 OI_1S_TABLE = "oi_1s"
 OI_1S_FLUSH_SECONDS = 10.0   # 크래시 시 잃는 최대치(스냅샷 ~3개). 파일 락 잡는 횟수와의 맞교환.
 OI_5M_BAR_SECONDS = 300
@@ -616,17 +618,11 @@ MICRO_BOOK_URL = "https://fapi.binance.com/fapi/v1/ticker/bookTicker"   # weight
 #   경로 함정도 같다 -- 09-26 90초 실측 /market/ws/!forceOrder@arr 11건 vs /ws/!forceOrder@arr 0건.
 FORCE_ORDER_WS_URL = "wss://fstream.binance.com/market/ws/!forceOrder@arr"
 LIQ_ASSET_BY_SYMBOL = {c["binance_symbol"]: a for a, c in COIN_CONFIG.items()}
-LIQ_EVENTS_PATH = LIVE_DIR / "liq_events.jsonl"      # ⑤ 원시 이벤트(ETH). 봇의 tail_risk 는 1분 합만 남긴다
-
-
-def liq_events_path(asset: str) -> Path:
-    """ETH 는 옛 파일 그대로(연구 스크립트가 읽는다), 나머지는 코인별 파일."""
-    return LIQ_EVENTS_PATH if asset == "eth" else LIVE_DIR / f"liq_events_{asset}.jsonl"
 MICRO_TAPE_DB_PATH = HOT_TAPE_DB  # ② 기준선(시간대별 분위), 1시간마다. 2026-10-01 hot SQLite(5코인 한 파일 -- 쿼리가 심볼로 거른다)
 # ⑥ 마크가격 스트림(2026-09-21): 예상 펀딩(«어느 쪽이 갇혔나») + 마크−인덱스 베이시스(«누가 주도하나»).
 #    🔴forceOrder 와 같은 함정 -- `/ws/` 는 연결되는데 이벤트 0, `/market/ws/` 만 온다(09-21 dev 실측 0 vs 8건/6초).
 MARK_PRICE_WS_URL = "wss://fstream.binance.com/market/ws/ethusdt@markPrice@1s"
-MARK_PRICE_DB_PATH = LIVE_DIR / "mark_price_1s.duckdb"
+MARK_PRICE_DB_PATH = BINANCE_CTX_DB  # 4d: 수집기 hot(SQLite)
 MARK_PRICE_TABLE = "mark_price_1s"
 MARK_PRICE_RING_S = 7200          # 메모리 링(초). 베이시스 임계 분위를 «창 Δ» 표본 60개 이상에서 잡으려면 1시간 넘게 필요
 # ⑦⑧ OKX 실시간(2026-09-23) -- 바이낸스 레인 **바로 아래**에 같은 그림을 그려 눈으로 대조한다.
@@ -878,63 +874,6 @@ CARD30_REACH_PATH = REPO_ROOT / "tmp" / "card30_direction_20260926" / "model_rea
 
 
 
-def oi_1s_persist(rows: list[tuple[int, float]], symbol: str = FOOTPRINT_SYMBOL.lower()) -> None:
-    """OI 스냅샷을 duckdb 에 남긴다(연결-작업-닫기). rows 는 (ts_ms, open_interest).
-
-    PK 는 **밀리초**다. 초로 잡으면 같은 초에 온 둘째 스냅샷이 조용히 사라진다 -- 2026-09-19
-    실측으로 10분간 갱신 163개 중 8개(4.91%)가 그렇게 버려지고 있었다(간격 최소 0.14초).
-    재기동 직후 겹치는 구간을 다시 써도 PK 가 무시하므로 호출부는 «어디까지 저장했나»를
-    따로 들고 있지 않아도 된다."""
-    if not rows:
-        return
-    with duckdb_path_lock(OI_1S_DB_PATH):
-        con = duckdb.connect(str(OI_1S_DB_PATH))
-        try:
-            # 2026-09-19 이전 스키마(ts_sec PK)를 한 번만 밀리초로 옮긴다. 옛 행은 그 초의
-            # 대표값이므로 .000ms 에 놓는다 -- 봉 집계는 초로 접으므로 결과가 안 변한다.
-            legacy = con.execute(
-                "SELECT count(*) FROM information_schema.columns "
-                "WHERE table_name = ? AND column_name = 'ts_sec'", [OI_1S_TABLE]).fetchone()[0]
-            if legacy:
-                # 한 트랜잭션. 중간에 죽으면 통째로 없던 일이 된다 -- 네 문장이 따로 커밋되면
-                # RENAME 만 성공한 상태로 남아 옛 행이 서빙 테이블에서 끊긴다.
-                con.execute("BEGIN TRANSACTION")
-                con.execute(f"ALTER TABLE {OI_1S_TABLE} RENAME TO {OI_1S_TABLE}_sec_legacy")
-                con.execute(f"""CREATE TABLE {OI_1S_TABLE} (
-                    ts_ms BIGINT, symbol VARCHAR, open_interest DOUBLE,
-                    PRIMARY KEY (ts_ms, symbol))""")
-                con.execute(f"INSERT INTO {OI_1S_TABLE} "
-                            f"SELECT ts_sec * 1000, symbol, open_interest "
-                            f"FROM {OI_1S_TABLE}_sec_legacy")
-                con.execute(f"DROP TABLE {OI_1S_TABLE}_sec_legacy")
-                con.execute("COMMIT")
-                print("oi-1s: ts_sec -> ts_ms 스키마 이관 완료", flush=True)
-            con.execute(f"""CREATE TABLE IF NOT EXISTS {OI_1S_TABLE} (
-                ts_ms BIGINT, symbol VARCHAR, open_interest DOUBLE,
-                PRIMARY KEY (ts_ms, symbol))""")
-            con.executemany(f"INSERT OR IGNORE INTO {OI_1S_TABLE} VALUES (?, ?, ?)",
-                            [(int(ms), symbol, float(v)) for ms, v in rows])
-        finally:
-            con.close()
-
-
-def mark_price_persist(rows: list[tuple[int, float, float, float, int]]) -> None:
-    """markPrice@1s 를 duckdb 에 남긴다. rows = (ts_ms, mark, index, funding_rate, next_funding_ms). PK ts_ms(밀리초).
-    재기동 직후 겹치는 구간을 다시 써도 PK 가 무시한다(oi_1s_persist 와 같은 계약)."""
-    if not rows:
-        return
-    with duckdb_path_lock(MARK_PRICE_DB_PATH):
-        con = duckdb.connect(str(MARK_PRICE_DB_PATH))
-        try:
-            con.execute(f"""CREATE TABLE IF NOT EXISTS {MARK_PRICE_TABLE} (
-                ts_ms BIGINT, symbol VARCHAR, mark DOUBLE, index_px DOUBLE, funding_rate DOUBLE, next_funding_ms BIGINT,
-                PRIMARY KEY (ts_ms, symbol))""")
-            con.executemany(f"INSERT OR IGNORE INTO {MARK_PRICE_TABLE} VALUES (?, ?, ?, ?, ?, ?)",
-                            [(int(ms), FOOTPRINT_SYMBOL.lower(), float(mk), float(ix), float(fr), int(nf)) for ms, mk, ix, fr, nf in rows])
-        finally:
-            con.close()
-
-
 def oi_5m_buckets(bars: int, symbol: str = FOOTPRINT_SYMBOL.lower()) -> list[list[float]]:
     """5분 봉별 [봉시각, 신규계약(Δ), 봉 끝 OI, 스냅샷 수, 공백여부].
 
@@ -946,27 +885,21 @@ def oi_5m_buckets(bars: int, symbol: str = FOOTPRINT_SYMBOL.lower()) -> list[lis
         return []
     floor = (int(time.time()) // OI_5M_BAR_SECONDS - (bars - 1)) * OI_5M_BAR_SECONDS
     try:
-        with duckdb_path_lock(OI_1S_DB_PATH):
-            # 🔴read_only 여야 한다. 쓰기로 열면 이 조회가 도는 동안(클라마다 15초 주기)
-            #   연구/감시 쪽 외부 read_only 연결이 거부된다 -- 2026-09-19 실측 30회 중 2회.
-            #   쓰기는 oi_1s_persist(10초 flush)뿐이고 같은 in-process 락이 둘을 갈라 준다.
-            con = duckdb.connect(str(OI_1S_DB_PATH), read_only=True)
-            try:
-                rows = con.execute(f"""
-                    SELECT (ts_ms // (? * 1000)) * ?          AS bar,
-                           arg_min(open_interest, ts_ms)      AS oi_open,
-                           arg_max(open_interest, ts_ms)      AS oi_close,
-                           count(*)                           AS n
-                    FROM {OI_1S_TABLE}
-                    WHERE symbol = ? AND ts_ms >= ?
-                    GROUP BY 1 ORDER BY 1
-                """, [OI_5M_BAR_SECONDS, OI_5M_BAR_SECONDS, symbol,
-                      (floor - OI_5M_BAR_SECONDS) * 1000]).fetchall()  # 한 봉 더: 첫 봉의 기준점
-            finally:
-                con.close()
-    except Exception as exc:  # noqa: BLE001 -- 아직 테이블이 없거나(첫 가동) 잠깐 잠겼다
+        # 4d: hot(WAL) -- 락 없음. 봉별 첫·끝·건수는 파이썬에서(arg_min/arg_max·`//` 는 SQLite 에 없다).
+        raw = read_rows(OI_1S_DB_PATH, f"SELECT ts_ms, open_interest FROM {OI_1S_TABLE} WHERE symbol = ? AND ts_ms >= ? "
+                                       "ORDER BY ts_ms", [symbol, (floor - OI_5M_BAR_SECONDS) * 1000])  # 한 봉 더: 첫 봉의 기준점
+    except Exception as exc:  # noqa: BLE001 -- 아직 표가 없다(첫 가동)
         print(f"oi-5m read failed: {exc}", flush=True)
         return []
+    agg: dict[int, list[float]] = {}
+    for ts_ms, v in raw:
+        bar = int(ts_ms) // 1000 // OI_5M_BAR_SECONDS * OI_5M_BAR_SECONDS
+        a = agg.get(bar)
+        if a is None:
+            agg[bar] = [float(v), float(v), 1]
+        else:
+            a[1] = float(v); a[2] += 1
+    rows = [(bar, o, c, n) for bar, (o, c, n) in sorted(agg.items())]
     out: list[list[float]] = []
     prev_bar: int | None = None
     prev_close = 0.0
@@ -981,17 +914,11 @@ def oi_5m_buckets(bars: int, symbol: str = FOOTPRINT_SYMBOL.lower()) -> list[lis
 
 
 def own_db_rows(path: Path, sql: str, params: list) -> list[tuple]:
-    """이 프로세스가 writer 인 파일(oi_1s · mark_price_1s)을 같은 경로 락 + read_only 로 읽는다(oi_5m_buckets 와 같은 규약).
-    없거나 실패하면 [] -- 시장 맥락의 한 칸만 비고 나머지는 산다."""
+    """수집기 hot(oi_1s · mark_price_1s, 4d)을 읽는다. 없거나 실패하면 [] -- 시장 맥락의 한 칸만 비고 나머지는 산다."""
     if not path.exists():
         return []
     try:
-        with duckdb_path_lock(path):
-            con = duckdb.connect(str(path), read_only=True)
-            try:
-                return con.execute(sql, params).fetchall()
-            finally:
-                con.close()
+        return read_rows(path, sql, params)
     except Exception as exc:  # noqa: BLE001
         print(f"own db read failed ({path.name}): {exc}", flush=True)
         return []
@@ -2263,67 +2190,29 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
     oi_1s: dict[int, float] = {}
 
     async def collect_oi_1s(app: web.Application) -> None:
-        # 🔴«본 stamp 의 집합»이지 최고수위(last_ms)가 아니다. 바이낸스는 stamp 를 도착 순서대로
-        #   주지 않는다 -- 2026-09-19 실측: stamp 가 응답에 나타나기까지 중앙 2.65초·p90 5.08초가
-        #   걸리고, 그 편차 때문에 115개 중 4개(3.5%)는 «더 새 stamp 가 먼저» 도착했다. 최고수위로
-        #   비교하면 그 4개를 «이미 본 것»으로 오인해 버린다(짝비교에서 실측 손실 4/243 과 일치).
-        #   순서가 뒤바뀌어 들어와도 문제없다: 봉 집계는 ts_ms 로 arg_min/arg_max 를 잡고
-        #   저장은 PK(ts_ms, symbol) 가 중복을 막는다.
-        seen_ms: set[int] = set()
-        pending: list[tuple[int, float]] = []      # 아직 duckdb 에 못 넣은 스냅샷
-        flushed_at = time.time()
+        """🔴2026-10-01 저장 재설계 4d: REST 폴링은 수집기(scripts/live_binance_ctx_collector_20261001.py) **하나만** 한다 --
+        대시보드와 둘이 0.25초씩 폴링하면 IP 한도(2,400/분)를 넘는다. 여기서는 그 수집기가 쓰는 hot(WAL)을 0.5초마다
+        꼬리만 읽어 화면 링을 채운다. 원천 갱신이 3~7초라 0.5초 읽기로 충분하다(수집기 flush 10초만큼 늦을 수 있다).
+        ponytail: 수집기 flush(10초)가 화면 OI 지연의 하한이다 -- 더 빨라야 하면 수집기 flush 를 1초로."""
+        sym = FOOTPRINT_SYMBOL.lower()
+        last_ms = int(time.time() * 1000) - SUPPLY_1S_SECONDS * 1000
         while True:
             try:
-                left = ban_guard.ban_remaining()
-                if left > 0:                      # 다른 프로세스가 받은 차단도 따른다(공용 가드)
-                    await asyncio.sleep(min(left + 1, 300))
-                    continue
-                async with http_session["session"].get(
-                        OI_1S_URL, params={"symbol": FOOTPRINT_SYMBOL}) as resp:
-                    data = await resp.json()
-                if "time" not in data:
-                    ban_guard.note(resp.status, json.dumps(data), resp.headers.get("Retry-After"))
-                    # 🔴2026-09-26: 한도 초과(429)·IP 밴(418)에도 0.25초마다 다시 두드리고 있었다(밴 중 로그 146줄/200).
-                    #   IP 한도는 봇·대시보드·수집기가 같이 쓴다 -- 밴이면 풀릴 때까지, 아니면 30초 물러선다.
-                    m = re.search(r"banned until (\d+)", str(data.get("msg", "")))
-                    wait = max(5.0, int(m.group(1)) / 1000 - time.time() + 1) if m else 30.0
-                    print(f"{TAG}oi-1s: 거래소 거절 {resp.status} {data.get('code')} -- {wait:.0f}초 쉰다", flush=True)
-                    await asyncio.sleep(wait)
-                    continue
-                ts_ms = int(data["time"])
-                if ts_ms not in seen_ms:     # 같은 스냅샷을 다른 초에 복제하지 않는다
-                    seen_ms.add(ts_ms)
-                    if len(seen_ms) > 8192:  # 메모리 상한만 건다. 10분이면 재도착이 끝난다(최대 6.4초).
-                        seen_ms = {m for m in seen_ms if m >= ts_ms - 600_000}
-                    sec = ts_ms // 1000
-                    value = float(data["openInterest"])
-                    oi_1s[sec] = value          # 화면 링은 1초 해상도 그대로
-                    pending.append((ts_ms, value))
-                    for old in [s for s in oi_1s if s < sec - SUPPLY_1S_SECONDS]:
+                rows = await asyncio.to_thread(read_rows, BINANCE_CTX_DB, "SELECT ts_ms, open_interest FROM oi_1s "
+                                               "WHERE symbol = ? AND ts_ms > ? ORDER BY ts_ms", [sym, last_ms])
+                for ts_ms, value in rows:
+                    oi_1s[int(ts_ms) // 1000] = float(value)
+                    last_ms = max(last_ms, int(ts_ms))
+                if rows:
+                    cut = int(time.time()) - SUPPLY_1S_SECONDS
+                    for old in [x for x in oi_1s if x < cut]:
                         del oi_1s[old]
-                now = time.time()
-                if pending and now - flushed_at >= OI_1S_FLUSH_SECONDS:
-                    # 성공했을 때만 비운다 -- 파일이 잠깐 잠겨 있으면 다음 flush 로 미룬다.
-                    await asyncio.to_thread(oi_1s_persist, pending, FOOTPRINT_SYMBOL.lower())
-                    pending = []
-                    flushed_at = now
             except asyncio.CancelledError:
-                # 정상 종료(배포 재기동)에서 미저장분을 버리지 않는다 -- 이 경로가 유일하게
-                # 자주 도는 손실이었다(재기동마다 최대 OI_1S_FLUSH_SECONDS 만큼). 취소된
-                # 태스크에서는 await 가 즉시 다시 취소되므로 to_thread 없이 그 자리에서 쓴다.
-                if pending:
-                    try:
-                        oi_1s_persist(pending, FOOTPRINT_SYMBOL.lower())
-                    except Exception as exc:  # noqa: BLE001 -- 종료 중엔 알리고 넘어간다
-                        print(f"{TAG}oi-1s final flush failed: {exc}", flush=True)
                 raise
-            except Exception as exc:  # noqa: BLE001 -- 한 번의 실패로 수집을 영구히 멈추지 않는다
-                print(f"{TAG}oi-1s poll/flush failed (will retry): {exc}", flush=True)
-                # 보류분이 끝없이 자라지는 않게 한다(디스크가 통째로 나간 경우). 1시간치면
-                # 그건 일시적 잠금이 아니라 사람이 봐야 하는 고장이다.
-                del pending[:-1200]
-                flushed_at = time.time()
-            await asyncio.sleep(OI_1S_POLL_SECONDS)
+            except Exception as exc:  # noqa: BLE001 -- 수집기가 아직 없거나 파일이 없으면 다음에
+                print(f"{TAG}oi-1s hot read failed (will retry): {exc!r}", flush=True)
+                await asyncio.sleep(5.0)
+            await asyncio.sleep(0.5)
 
     # ── OKX 실시간 ─────────────────────────────────────────────────────────
     # 바이낸스와 **같은 모양**으로 든다. 그래야 클라 렌더러가 데이터 출처만 바꿔 끼우면
@@ -3205,7 +3094,7 @@ def make_app() -> web.Application:
     def liq_events_load() -> None:
         """재시작 직후 1회. 청산은 **11분에 몇 건**이라 빈 deque 로 시작하면 새로고침해도
         수급 차트의 청산선이 한동안 안 그려진다(체결·OI 는 초당 들어와 1초면 다시 찬다).
-        아래 루프가 이미 쓰고 있는 jsonl 이 그 구간을 들고 있으니 그걸 되읽는다."""
+        수집기(live_binance_ctx_collector, 4d)가 쓰는 hot 의 liquidations 가 그 구간을 들고 있으니 그걸 되읽는다."""
         now_ms = time.time() * 1000
         cut = now_ms - SUPPLY_1S_SECONDS * 1000
         # 2026-09-25 같은 줄들로 청산 원의 5분봉 누적도 되살린다(차트 창 최대 12시간 < 보관 24시간).
@@ -3214,19 +3103,14 @@ def make_app() -> web.Application:
             # 기록 시작점: 읽은 꼬리의 첫 이벤트. 파일이 없거나 비면 **지금**이다 -- 그 앞 봉을 0 으로
             #   내보내면 «청산 없음»이라는 거짓이 되므로 «모름»으로 둔다.
             liq_5m_state["from_s"][asset] = now_ms / 1000
-            try:
-                with open(liq_events_path(asset), encoding="utf-8") as fh:
-                    # ponytail: 파일 전체를 훑는다(지금 200KB·연 65MB, 기동 1회). 커지면 tail 바이트만.
-                    tail = deque(fh, maxlen=liq_events.maxlen)
-            except OSError:
+            try:   # 4d: 수집기 hot(binance_ctx.sqlite) 의 최근 maxlen 건
+                rows = read_rows(BINANCE_CTX_DB, "SELECT ts_ms, side, qty, price, usd, symbol FROM liquidations WHERE symbol = ? "
+                                                 "ORDER BY ts_ms DESC LIMIT ?", [COIN_CONFIG[asset]["binance_symbol"], liq_events.maxlen])
+            except Exception:  # noqa: BLE001 -- 수집기가 아직 없다
                 continue
             first = None
-            for line in tail:
-                try:
-                    ev = json.loads(line)
-                except ValueError:
-                    continue    # 마지막 줄이 쓰다 만 상태일 수 있다
-                ts = int(ev.get("ts_ms") or 0)
+            for ts, side, qty, price, usd, sym in reversed(rows):
+                ev = {"ts_ms": int(ts), "side": side, "qty": qty, "price": price, "usd": usd, "symbol": sym}
                 first = ts if first is None else first
                 if ts >= cut:
                     liq_events_by[asset].append(ev)
@@ -3240,7 +3124,7 @@ def make_app() -> web.Application:
         print(f"force-order: ETH 60초 링 {len(liq_events)}건 복원", flush=True)
 
     async def collect_force_orders(app: web.Application) -> None:
-        """⑤ @forceOrder 원시 이벤트를 jsonl 로 남기고 60초 링을 든다. 이벤트가 없으면 조용하다."""
+        """⑤ @forceOrder 원시 이벤트로 60초 링을 든다(저장은 수집기, 4d). 이벤트가 없으면 조용하다."""
         liq_events_load()
         ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
         try:
@@ -3265,8 +3149,7 @@ def make_app() -> web.Application:
                                   "qty": qty, "price": price, "usd": qty * price, "symbol": o.get("s")}
                             liq_events_by[asset].append(ev)   # 1초 수급의 청산 레인(미시 참고는 ETH 만 본다)
                             liq_5m_add(liq_5m[asset], ev)  # 청산 원이 다음 폴링(2초)에 바로 본다 -- 봇 DB 1분 행을 안 기다린다
-                            with open(liq_events_path(asset), "a", encoding="utf-8") as fh:   # 분당 몇 줄 -- 블로킹 무시 가능
-                                fh.write(json.dumps(ev, separators=(",", ":")) + "\n")
+                            # 저장은 수집기(live_binance_ctx_collector, 4d) -- 여기서는 화면 링만
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001 -- 끊기면 3초 뒤 다시. 봇에 영향 없음
@@ -3279,10 +3162,9 @@ def make_app() -> web.Application:
             await ws_session.close()
 
     async def collect_mark_price(app: web.Application) -> None:
-        """⑥ @markPrice@1s → 메모리 링 + duckdb(10초마다 flush). 끊기면 3초 뒤 다시."""
+        """⑥ @markPrice@1s → 메모리 링(화면용). 저장은 수집기(live_binance_ctx_collector, 4d). 끊기면 3초 뒤 다시."""
         ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
-        pending: list[tuple[int, float, float, float, int]] = []
-        flushed_at = time.time()
+        trimmed_at = time.time()
         try:
             while True:
                 try:
@@ -3300,24 +3182,12 @@ def make_app() -> web.Application:
                             mp_state["events"] += 1; mp_state["last_ms"] = ts_ms
                             mp_state["next_funding_ms"] = int(o.get("T") or 0) or None   # 시장 맥락 카드의 정산 카운트다운
                             mark_ring[ts_ms // 1000] = (mark, idx, fr)
-                            pending.append((ts_ms, mark, idx, fr, int(o.get("T") or 0)))
                             now = time.time()
-                            if now - flushed_at >= OI_1S_FLUSH_SECONDS:
+                            if now - trimmed_at >= OI_1S_FLUSH_SECONDS:
                                 for old in [sc for sc in mark_ring if sc < now - MARK_PRICE_RING_S]:
                                     del mark_ring[old]
-                                try:
-                                    await asyncio.to_thread(mark_price_persist, pending)
-                                    pending = []
-                                except Exception as exc:  # noqa: BLE001 -- 잠깐 잠기면 다음 flush 로. WS 는 유지
-                                    print(f"mark-price flush failed (will retry): {exc}", flush=True)
-                                    del pending[:-1200]
-                                flushed_at = now
+                                trimmed_at = now
                 except asyncio.CancelledError:
-                    if pending:
-                        try:
-                            mark_price_persist(pending)
-                        except Exception as exc:  # noqa: BLE001
-                            print(f"mark-price final flush failed: {exc}", flush=True)
                     raise
                 except Exception as exc:  # noqa: BLE001 -- 끊기면 3초 뒤 다시. 봇에 영향 없음
                     mp_state.update(errors=mp_state["errors"] + 1, last_error=repr(exc)[:120])
@@ -3742,8 +3612,12 @@ def make_app() -> web.Application:
     def _mc_history() -> dict[str, Any]:
         """7일 OI(바이낸스 5분 끝값)·7일 베이시스(1분에 한 점) -- 둘 다 이 프로세스가 쓰는 파일."""
         since = int(time.time() * 1000) - 7 * 86400 * 1000
-        oi = own_db_rows(OI_1S_DB_PATH, f"""SELECT ts_ms // 300000 * 300, arg_max(open_interest, ts_ms) FROM {OI_1S_TABLE}
-                                           WHERE symbol = ? AND ts_ms >= ? GROUP BY 1 ORDER BY 1""", [FOOTPRINT_SYMBOL.lower(), since])
+        raw = own_db_rows(OI_1S_DB_PATH, f"""SELECT ts_ms, open_interest FROM {OI_1S_TABLE}
+                                           WHERE symbol = ? AND ts_ms >= ? ORDER BY ts_ms""", [FOOTPRINT_SYMBOL.lower(), since])
+        last5: dict[int, float] = {}                       # 5분 봉 끝값(arg_max 를 파이썬에서, 4d)
+        for t, v in raw:
+            last5[int(t) // 300000 * 300] = float(v)
+        oi = sorted(last5.items())
         basis = own_db_rows(MARK_PRICE_DB_PATH, f"""SELECT (mark - index_px) / index_px * 1e4 FROM {MARK_PRICE_TABLE}
                                                   WHERE ts_ms >= ? AND index_px > 0 AND ts_ms % 60000 < 1000""", [since])
         return {"oi": [(int(t), float(v)) for t, v in oi], "basis": [float(b[0]) for b in basis]}
@@ -3751,22 +3625,13 @@ def make_app() -> web.Application:
     def _mc_liq_profile() -> list[list[float]]:
         """ETH 실측 청산(바이낸스 forceOrder 체결가) 12시간 → 가격 묶음. 파일 꼬리만 읽는다.
         ponytail: 꼬리 2MB(평소 ~하루치). 12h 에 2MB 넘게 청산이 쌓이는 날은 창이 조금 짧아진다."""
-        cut = (time.time() - MC_LIQ_PROFILE_S) * 1000
-        try:
-            with open(liq_events_path("eth"), "rb") as fh:
-                fh.seek(0, 2); fh.seek(max(0, fh.tell() - 2_000_000))
-                lines = fh.read().decode("utf-8", "ignore").splitlines()[1:]
-        except OSError:
+        cut = int((time.time() - MC_LIQ_PROFILE_S) * 1000)
+        try:   # 4d: 수집기 hot
+            rows = read_rows(BINANCE_CTX_DB, "SELECT price, usd, side FROM liquidations WHERE symbol = ? AND ts_ms >= ?",
+                             [FOOTPRINT_SYMBOL, cut])
+        except Exception:  # noqa: BLE001
             return []
-        evs = []
-        for ln in lines:
-            try:
-                e = json.loads(ln)
-            except ValueError:
-                continue
-            if int(e.get("ts_ms") or 0) >= cut:
-                evs.append((float(e.get("price") or 0), float(e.get("usd") or 0), e.get("side") == "long"))
-        return mctx.liq_profile(evs)
+        return mctx.liq_profile([(float(p or 0), float(u or 0), side == "long") for p, u, side in rows])
 
     def _mc_profile() -> dict[str, Any]:
         sym = FOOTPRINT_SYMBOL.lower()

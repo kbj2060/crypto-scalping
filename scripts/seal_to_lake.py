@@ -37,6 +37,7 @@ RESEAL_DAYS = 8        # 테이프 백필이 고쳐 쓰는 기간(OKX 7일·바�
 HOT_REL = "data/hot/binance_tape.sqlite"
 OKX = "split_part(symbol, '-', 1)"                                     # ETH-USDT-SWAP -> ETH
 OKX_CTX_REL = "data/hot/okx_ctx.sqlite"
+BN_CTX_REL = "data/hot/binance_ctx.sqlite"
 _bn_coin, _okx_coin = (lambda s: s.upper().removesuffix("USDT")), (lambda s: s.split("-")[0])
 _TAPE_SIDE = (("verify_1m", "ts_min", 1), ("gaps", "to_ms", 1000))
 # hot 정리 대상: (파일, 표, 초 단위 시각 SQL, 코인 열, venue, stream, 코인 변환, 보존일, 딸린 표[(표, 시각 열, 배수)])
@@ -50,9 +51,10 @@ HOT_PRUNE = (
     (ROOT / "data/hot/hl_positions.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8,
      (("hl_cycles", "ts_ms", 1000), ("hl_universe", "ts_ms", 1000))),
     (ROOT / "data/hot/hl_positions.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8, ()),
+    *[(ROOT / BN_CTX_REL, t, "ts_ms / 1000", "symbol", "binance", st, _bn_coin, 8, ())
+      for t, st in (("oi_1s", "oi_1s"), ("mark_price_1s", "mark_1s"), ("liquidations", "liquidations"))],
 )
 L, A = "data/live", "data/archive/live_retired_20261001"     # A = 1단계에서 보관한 09-19 정지 코인별 DB
-C5 = ("eth", "btc", "sol", "xrp", "hype")
 SYM = "upper(regexp_replace(symbol, '(?i)usdt$', ''))"         # ethusdt / ETHUSDT -> ETH
 DERIBIT = "split_part(split_part(instrument_name, '-', 1), '_', 1)"   # SOL_USDC-... -> SOL
 
@@ -70,9 +72,10 @@ SPECS = [
     ("binance", "tape", [(HOT_REL, "trade_tape_1s", SYM)], "ts_sec * 1000"),     # 3b: 5코인 hot 한 파일(09-30 까지는 옛 DuckDB 에서 봉인됨)
     ("binance", "spot_tape", [(f"{L}/trade_tape_spot{sfx(c)}.duckdb", "trade_tape_1s", lit(c)) for c in ("eth", "sol", "xrp")],
      "ts_sec * 1000"),
-    ("binance", "oi_1s", [(f"{L}/oi_1s.duckdb", "oi_1s", SYM)], "ts_ms"),
-    ("binance", "mark_1s", [(f"{L}/mark_price_1s.duckdb", "mark_price_1s", SYM)], "ts_ms"),
-    ("binance", "liquidations", [(f"{L}/liq_events{sfx(c)}.jsonl", None, SYM) for c in C5], "ts_ms"),
+    # 4d(2026-10-01): 바이낸스 맥락 수집기 hot 한 파일(09-30 까지는 옛 oi_1s/mark_price_1s.duckdb · liq_events*.jsonl 에서 봉인됨)
+    ("binance", "oi_1s", [(BN_CTX_REL, "oi_1s", SYM)], "ts_ms"),
+    ("binance", "mark_1s", [(BN_CTX_REL, "mark_price_1s", SYM)], "ts_ms"),
+    ("binance", "liquidations", [(BN_CTX_REL, "liquidations", SYM)], "ts_ms"),
     ("binance", "oi_lsratio_5m", [(f"{L}/oi_lsratio.duckdb", f"oi_lsratio_5m{sfx(c)}", lit(c)) for c in ("eth", "btc", "sol")]
      + [(f"{A}/oi_lsratio_{c}.duckdb", f"oi_lsratio_5m_{c}", lit(c)) for c in ("xrp", "hype")], "epoch_ms(ts)"),
     ("binance", "micro_1m", [(f"{L}/microstructure.duckdb", f"microstructure_1m{sfx(c)}", lit(c)) for c in ("eth", "btc", "sol")]
