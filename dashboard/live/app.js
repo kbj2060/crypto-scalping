@@ -4352,7 +4352,7 @@ function renderMarketCtx() {
   htmlB.push(wallHtml0);
   htmlB = htmlB.join("");
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
-  const whenBox = body.classList.contains("mc-cmp") ? el("mcWhen") : null;
+  const whenBox = el("mcWhen");   // 2026-10-01 휴대폰·세로 화면도 Option 카드 맨 아래(넓은 화면과 같게)
   // 2026-09-30 폭: #mcWhen 은 비어 있으면 숨김(display:none)이라 첫 그림 때 clientWidth 0 → 900 으로 그려 2.3배 늘어났다(글자가 커졌다 작아짐) -- 카드 폭에서 잰다
   const whenW = whenBox ? (whenBox.clientWidth || ((el("optCard") || body).clientWidth - 48)) : body.clientWidth;   // 2026-10-01 ⑤ 는 Option 카드 맨 아래
   const whenHtml = qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round((whenW || 900) - 8)))
@@ -5247,8 +5247,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const SUB_LEGEND_H = subOn ? 14 : 0;
   // 순서(2026-09-28, 호가·체결 프로파일 제거 후): 1단(데스크톱·모바일) = 1초 수급 → 밀도 범례 → 풋프린트 → 레인,
   //   2단 = 왼쪽 밀도 범례 → 풋프린트 → 레인 · 오른쪽 1초 수급. 본문의 `h` 는 상자 전체(hAll)다.
-  const h = hAll;
-  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_1S_H + SUB_LEGEND_H + SUB_GAP;
+  // 2026-10-01 1단(휴대폰·세로 화면)은 1초 수급을 풋프린트 **아래**로(사용자 지시): 위 = 밀도 범례 + 호가 요약 줄 → 풋프린트 → 레인·리본 → 1초 수급.
+  //   상자 총높이는 그대로 -- 본문의 바닥 `h` 를 1초 수급 몫만큼 올린다(아래 기하는 전부 h 기준이라 한 줄도 안 바뀐다).
+  const S1_BELOW = subOn && !splitR;
+  const S1_PANEL = S1_BELOW ? SUB_1S_H - STATS_ROW_H - 18 : 0;
+  const h = S1_BELOW ? hAll - S1_PANEL - SUB_GAP : hAll;
+  const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_LEGEND_H + STATS_ROW_H + 10 + SUB_GAP;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
   //   빼기 때문). 인라인 height 로 JS 가 상자를 정하는 방법은 쓰지 않는다 -- 2열에서는 상자가
@@ -5388,8 +5392,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   설명하는 것이라 그 바로 위에 있어야 한다(SUB_LEGEND_H 주석의 «풋프린트 차트 바로 위»).
   //   프로파일에 붙여 올리면 설명하는 그림에서 400px 멀어진다.
   // 소비 합 = SUB_TOTAL: 190(프로파일) + 8 + 400(1초) + 14(범례) + 8 = 620.
-  const sub1sY = mtTop;
-  const subLegendY = splitR ? mtTop : sub1sY + SUB_1S_H - STATS_ROW_H;   // 2단: 왼쪽 칸 맨 위 · 그 밖: 1초 수급 바로 아래(= 풋프린트 바로 위)   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
+  const sub1sY = S1_BELOW ? h + SUB_GAP : mtTop;
+  const subLegendY = splitR ? mtTop : S1_BELOW ? mtTop : sub1sY + SUB_1S_H - STATS_ROW_H;   // 2단: 왼쪽 칸 맨 위 · 그 밖: 1초 수급 바로 아래(= 풋프린트 바로 위)   // 2단: 왼쪽 칸 맨 위(풋프린트 바로 위)
   const quadY = plotBottom + PRICE_ROW_H + LANE_GAP;  // 사분면 막대 바닥 = quadY + QUAD_H
   const cumY = LANE_MERGE ? quadY : quadY + QUAD_H + QUAD_TXT + ROW_H + LANE_GAP; // 누적 행 위쪽
   const cumBottom = cumY + CUM_DRAW_H;                    // 그 아래 한 줄이 ROW_H 를 쓴다
@@ -6763,12 +6767,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (y >= mt && y <= plotBottom) {
           add("line", { x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--warn)", "stroke-opacity": 0.6, "stroke-dasharray": "2 5" });
           if (gutOn) fpNotes.push({ val: f.pain, label: "max pain", color: "var(--warn)", title: lab });
-          else add("text", { x: ml + cw - 4, y: y - 4, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" }, lab);
+          else add("text", { x: ml + cw - 4, y: y - 4, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" }, mobileChart ? `max pain ${optQ(f.pain)}` : lab);   // 2026-10-01 휴대폰은 짧게(긴 글이 화면 밖으로 잘렸다)
         } else if (gutOn) {
           fpNotes.push({ val: f.pain, label: "max pain", color: "var(--warn)", title: lab });
         } else {
           add("text", { x: ml + 4, y: y < mt ? mt + 2 * fs + 8 : plotBottom - fs - 8, "font-size": fs, "font-weight": 700, fill: "var(--warn)" },
-              `${lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
+              `${mobileChart ? `max pain ${optQ(f.pain)}` : lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
         }
       }
       // 2026-09-30 행사가별 딜러 감마 = «GEX 레벨»(사용자 참고 사진 -- 꼬리표 칸의 작은 상자를 대체): 최근 봉부터 오른쪽 끝까지 가로 점선 +
@@ -7902,7 +7906,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·옵션 요약 칸이 같은 선에서 끝난다
     const floorY = Math.min(hAll - 2, TREND_ROW_Y + LANE_H);
     const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
-    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16 : Math.round(s1Avail * 0.47)) : s1Avail) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16 : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
         const on = mcSplit && SUB_LEGEND_H > 0, a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();

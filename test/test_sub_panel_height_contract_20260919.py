@@ -139,7 +139,7 @@ def test_sub_panels_tile_without_overlap():
             return ev(a if eval(cond.strip(), {"__builtins__": {}}, e) else b, e)   # noqa: S307
         return eval(expr.strip(), {"__builtins__": {}}, e)                     # noqa: S307 -- 저장소 제 코드
 
-    wide = dict(env, splitR=1)
+    wide = dict(env, splitR=1, S1_BELOW=0, h=10_000)   # 2026-10-01 1단만 1초 수급이 아래(S1_BELOW)
     for name, expr in exprs.items():
         wide[name] = ev(expr, wide)
     assert wide["subLegendY"] == env["mtTop"], "2단에서 밀도 범례가 풋프린트 바로 위(맨 위)가 아니다"
@@ -148,17 +148,24 @@ def test_sub_panels_tile_without_overlap():
     assert "const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16" in JS and "placeLevelList" not in JS   # 2026-09-30 시장 맥락 내용 높이만큼 뺀다
     assert "mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16" in JS   # 절반 아래 칸이 시장 맥락 자리
 
-    env["splitR"] = 0
+    # 2026-10-01 1단(휴대폰·세로)은 1초 수급이 풋프린트 **아래**(사용자 지시): 위 = 범례 + 호가 요약 줄 · 아래 = 1초 수급.
+    #   상자 총높이(CSS 계약)는 그대로여야 한다 -- 위 몫 + 아래 몫 = 예전 1단 SUB_TOTAL.
+    m = re.search(r"const S1_PANEL = S1_BELOW \? SUB_1S_H - STATS_ROW_H - (\d+) : 0;", JS)
+    assert m, "S1_PANEL 식을 못 찾았다"
+    s1 = env["SUB_1S_H"] - env["STATS_ROW_H"] - int(m.group(1))
+    m = re.search(r"const SUB_TOTAL = !subOn \? 0 : splitR \? SUB_LEGEND_H \+ SUB_GAP : SUB_LEGEND_H \+ STATS_ROW_H \+ (\d+) \+ SUB_GAP;", JS)
+    assert m, "1단 SUB_TOTAL 식을 못 찾았다"
+    top = env["SUB_LEGEND_H"] + env["STATS_ROW_H"] + int(m.group(1)) + env["SUB_GAP"]
+    env.update(splitR=0, S1_BELOW=1, h=10_000)
     for name, expr in exprs.items():
         env[name] = ev(expr, env)
-    assert env["sub1sY"] == env["mtTop"], "1초 수급이 맨 위가 아니다"
-    s1 = env["SUB_1S_H"] - env["STATS_ROW_H"]                     # app.js 의 s1H (1단)
-    assert env["subLegendY"] == env["sub1sY"] + s1, "밀도 범례가 1초 수급 바로 아래가 아니다"
-    used = env["subLegendY"] + env["SUB_LEGEND_H"] + env["STATS_ROW_H"] + env["SUB_GAP"] - env["mtTop"]
-    total = env["SUB_1S_H"] + env["SUB_LEGEND_H"] + env["SUB_GAP"]   # = app.js 의 SUB_TOTAL (1단)
+    assert env["subLegendY"] == env["mtTop"], "1단에서 밀도 범례가 맨 위가 아니다"
+    assert env["sub1sY"] == env["h"] + env["SUB_GAP"], "1단에서 1초 수급이 풋프린트(본문 바닥 h) 아래가 아니다"
+    used = top + s1 + env["SUB_GAP"]
+    total = env["SUB_1S_H"] + env["SUB_LEGEND_H"] + env["SUB_GAP"]   # = 예전 1단 SUB_TOTAL(CSS 상자 계약)
     assert used == total, (
-        f"패널이 쓰는 높이 {used} != SUB_TOTAL {total} -- "
-        f"{'가격 플롯 위에 빈 띠가 생긴다' if used < total else '캔들 위로 올라탄다'}")
+        f"패널이 쓰는 높이 {used} != 상자 계약 {total} -- "
+        f"{'가격 플롯이 커진다(상자 넘침)' if used < total else '가격 플롯이 눌린다'}")
 
 
 def test_layout_is_single_not_split():

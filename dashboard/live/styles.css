@@ -2570,7 +2570,7 @@ body.order-coin-off .acct-lanes::before {
 /* 2026-09-30 Option 카드 = 시안 C 변형(사용자 선택): 세 열 «지금 · 가격대 · 시간», 가격대 열은 행사가 사다리 아래 감마 곡선.
    세 열 모두 카드 높이 끝까지 채운다 -- 행 여섯 줄에 각 칸이 두 줄씩(사다리는 넷) 걸치고 stretch 로 늘어난다.
    #optBody · #optRow 는 display:contents 라 그 안 칸들이 이 격자의 직접 칸이 된다(렌더러는 그대로). */
-@media (min-width: 1100px) {
+@media (min-width: 721px) {   /* 2026-10-01 세로 화면(721~1099)도 격자 -- 열 배치만 아래 미디어에서 바꾼다 */
   /* 2026-10-01 배치(사용자 지시): 위 = 지금·딜러감마 | 사다리(넓게) | 블록 거래·심리 · 아래 한 줄 = 만기 | 순매수 흐름 | 감마 곡선 · 맨 아래 ⑤ */
   #optCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) minmax(0, 1.15fr); column-gap: 28px;
     grid-template-areas: "head head head" "cov cov cov" "move ladder blk" "gamma ladder mood" "lane flow curve" "when when when"; }
@@ -2709,9 +2709,9 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   scrollbar-color: color-mix(in srgb, var(--option) 35%, transparent) transparent;
   mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); padding-bottom: 14px; }   /* 잘린 줄 대신 «더 있다» 페이드 */
 @media (max-width: 720px) { .opt-blk-list { max-height: none; mask-image: none; padding-bottom: 0; } }
-@media (min-width: 1100px) { #optCard .opt-blk-list { max-height: none; overflow: visible; mask-image: none; padding-bottom: 0; } }   /* 2026-09-30 Option 카드 «시간» 열은 자리가 있다 -- 최근 5건을 스크롤 없이 */
+@media (min-width: 721px) { #optCard .opt-blk-list { max-height: none; overflow: visible; mask-image: none; padding-bottom: 0; } }   /* 2026-09-30 Option 카드 «시간» 열은 자리가 있다 -- 최근 5건을 스크롤 없이 */
 .opt-curve { display: block; width: 100%; height: auto; max-width: 440px; }
-@media (min-width: 1100px) { #optCard .opt-curve { max-width: none; } }   /* 2026-10-01 아래 한 줄의 제 칸을 다 쓴다 */
+@media (min-width: 721px) { #optCard .opt-curve { max-width: none; } }   /* 2026-10-01 아래 한 줄의 제 칸을 다 쓴다 */
 .opt-dex { color: var(--ink); font-variant-numeric: tabular-nums; }
 /* 2026-09-30 옵션을 풋프린트 카드 안으로(사용자 «하나의 카드») -- 좁은 화면은 한 열로 맨 아래, 넓은 화면은 오른쪽 칸(위 ≥1700 규칙). */
 .liq-map-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -2839,3 +2839,9 @@ body.not-eth #fpLineSwitch { display: none; }
 #mcBody.mc-cmp > .mc-stack { display: flex; flex-direction: column; justify-content: space-between; }
 #mcBody.mc-cmp > .mc-sec { display: flex; flex-direction: column; justify-content: space-between; }
 #mcWall .os { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; }
+
+/* 2026-10-01 세로 화면(태블릿·세로 모니터 721~1099): 두 열 -- 왼쪽 지금·딜러감마·심리 | 오른쪽 사다리, 그 아래 블록 거래 전폭, 차트 둘, 감마 곡선 전폭 */
+@media (min-width: 721px) and (max-width: 1099px) {
+  #optCard { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); column-gap: 22px;
+    grid-template-areas: "head head" "cov cov" "move ladder" "gamma ladder" "mood ladder" "blk blk" "lane flow" "curve curve" "when when"; }
+}
