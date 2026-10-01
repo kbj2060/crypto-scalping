@@ -79,13 +79,15 @@ log = _bn.log
 
 
 OKX_HOT_TAPE_DB = ROOT / "data" / "hot" / "okx_tape.sqlite"   # 2026-10-01 저장 재설계 4a: 5종목 한 파일(symbol = 종목)
+OKX_HOT_CTX_DB = ROOT / "data" / "hot" / "okx_ctx.sqlite"     # 4b: 맥락(OI·마크·펀딩·청산), 종목 = inst 열
 
 
 def default_db(inst: str, name: str = "okx_trade_tape") -> Path:
-    """테이프 = hot SQLite(4a -- 바이낸스 테이프와 같은 TapeStore, WAL 이라 읽는 쪽과 안 막힌다).
-    맥락(okx_context)은 아직 DuckDB: ETH 는 기존 파일, 다른 종목은 자기 파일(2026-09-26)."""
+    """테이프·맥락 = hot SQLite(4a·4b -- WAL 이라 읽는 쪽과 안 막힌다, 종목은 열). 그 밖의 이름은 옛 DuckDB 규칙."""
     if name == "okx_trade_tape":
         return OKX_HOT_TAPE_DB
+    if name == "okx_context":
+        return OKX_HOT_CTX_DB
     if inst.upper() == "ETH-USDT-SWAP":
         return ROOT / "data" / "live" / f"{name}.duckdb"
     return ROOT / "data" / "live" / f"{name}_{inst.split('-')[0].lower()}.duckdb"

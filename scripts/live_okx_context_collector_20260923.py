@@ -47,8 +47,10 @@ import asyncio
 import importlib
 import json
 import os
+import sqlite3
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -162,13 +164,31 @@ class ContextStore:
     def __init__(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
+        self.sqlite = db_path.suffix == ".sqlite"     # 4b(2026-10-01): hot = data/hot/okx_ctx.sqlite, 종목 여럿이 한 파일
         self.pending: dict[str, list[tuple]] = {}
+        if self.sqlite:                               # auto_vacuum 은 새 파일·WAL 전환보다 먼저(뒤면 조용히 0)
+            c = sqlite3.connect(db_path, timeout=30)
+            c.execute("PRAGMA auto_vacuum = INCREMENTAL")
+            c.execute("PRAGMA journal_mode = WAL")
+            c.close()
         with self._connect() as con:
             for ddl in SCHEMA:
                 con.execute(ddl)
+            if self.sqlite:                           # 대시보드는 «종목·시각 구간»으로 읽는다
+                for t, c in (("okx_oi", "inst"), ("okx_mark", "inst"), ("okx_funding", "inst"),
+                             ("okx_liquidations", "inst_id")):
+                    con.execute(f"CREATE INDEX IF NOT EXISTS {t}_i ON {t}({c}, ts_ms)")
+                con.execute("CREATE INDEX IF NOT EXISTS gaps_i ON gaps(channel, to_ms)")
 
+    @contextmanager
     def _connect(self):
-        return _tape._bn.duckdb_connect_retry(self.db_path)   # 읽는 쪽과 잠금 충돌이면 잠깐 기다린다
+        """SQLite 는 자동커밋(isolation_level=None) + BEGIN/COMMIT 문장 -- 두 엔진 같은 코드."""
+        con = (sqlite3.connect(self.db_path, timeout=30, isolation_level=None) if self.sqlite
+               else _tape._bn.duckdb_connect_retry(self.db_path))   # DuckDB: 읽는 쪽과 잠금 충돌이면 잠깐 기다린다
+        try:
+            yield con
+        finally:
+            con.close()
 
     def set_meta(self, pairs) -> None:
         with self._connect() as con:
@@ -204,12 +224,12 @@ class ContextStore:
             with self._connect() as con:
                 # 🔴트랜잭션 하나로 -- 자동커밋이면 행마다 fsync 라 10초 주기의 ~50행이 8~10초
                 #   걸려 락을 늘 쥐고(읽기 0/60) OI 폴러가 굶었다(2026-09-23 실측).
-                con.begin()
+                con.execute("BEGIN")
                 for table, rows in batch.items():
                     if rows:
                         marks = ",".join("?" * INSERTS[table])
                         con.executemany(f"INSERT INTO {table} VALUES ({marks})", rows)
-                con.commit()
+                con.execute("COMMIT")
             return None
         except Exception as exc:  # noqa: BLE001 -- 대개 읽는 쪽이 잡고 있는 락이다
             return exc
@@ -234,7 +254,7 @@ async def collect(inst: str, db_path: Path) -> None:
     liqs = inst == LIQ_INST
     store = ContextStore(db_path)
     store.set_meta([(f"ct_val:{inst}", repr(ct_val)),
-                    ("liquidation_scope", "instType=SWAP (전 종목) · sz_base 는 ctVal 아는 것만" if liqs
+                    (f"liquidation_scope:{inst}", "instType=SWAP (전 종목) · sz_base 는 ctVal 아는 것만" if liqs
                      else f"없음 -- {LIQ_INST} 프로세스(okx_context.duckdb)가 전 종목을 받는다"),
                     ("bk_px_note", "파산가격이다 -- 바이낸스 forceOrder 의 체결가와 다르다"),
                     ("okx_oi_note", "2026-09-23 05:30~23:59 KST 행은 REST 0.25초 폴링분이라 "
@@ -351,6 +371,24 @@ def selftest() -> None:
         got = {"okx_oi": oi.get("okx_oi"), "okx_mark": mk.get("okx_mark"),
                "okx_funding": fr.get("okx_funding"), "okx_liquidations": rows}[table]
         assert all(len(x) == width for x in got), (table, width, got)
+    # 저장소 둘(4b, 2026-10-01): 같은 코드로 DuckDB·SQLite(hot) 에 쓰고 읽힌다 -- 트랜잭션·meta·gaps
+    import asyncio as _aio
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        for name in ("c.duckdb", "c.sqlite"):
+            st = ContextStore(Path(td) / name)
+            st.set_meta([("k:ETH", "1"), ("k:ETH", "2")])
+            st.stage({**oi, **mk})
+            assert _aio.run(st.aflush()) == len(oi["okx_oi"]) + len(mk["okx_mark"]) and not st.pending, name
+            st.record_gap("mark-price", 0, 5000, "test")
+            with st._connect() as con:
+                assert con.execute("SELECT count(*) FROM okx_mark").fetchone()[0] == len(mk["okx_mark"]), name
+                assert con.execute("SELECT value FROM meta WHERE key = 'k:ETH'").fetchall() == [("2",)], name
+                assert con.execute("SELECT count(*) FROM gaps").fetchone()[0] == 1, name
+            if st.sqlite:
+                c = sqlite3.connect(Path(td) / name)
+                assert c.execute("PRAGMA journal_mode").fetchone()[0] == "wal" and c.execute("PRAGMA auto_vacuum").fetchone()[0] == 2
+                c.close()
     print("selftest OK")
 
 

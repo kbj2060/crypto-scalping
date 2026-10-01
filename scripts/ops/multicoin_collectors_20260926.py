@@ -105,9 +105,10 @@ def specs(coins: list[str], phases: set[int], tail_btc_sol: bool) -> list[dict]:
         add("okx_bbo", lc, 1, "supervisor_okx_book_ticker.sh", "live_okx_book_ticker_collector_20260923.py",
             {"OKX_BT_INST": inst}, [_dir(f"okx_bbo_{lc}", f"{of}/okx_bookticker/{inst}")],
             eth=f"{of}/okx_bookticker/ETH-USDT-SWAP")
-        add("okx_ctx", lc, 1, "supervisor_okx_context.sh", "live_okx_context_collector_20260923.py",
+        add("okx_ctx", lc, 2, "supervisor_okx_context.sh", "live_okx_context_collector_20260923.py",
             {"OKX_CTX_INST": inst},
-            [_db(f"okx_ctx_{lc}", f"data/live/okx_context_{lc}.duckdb", "okx_mark", "to_timestamp(ts_ms / 1000)")])
+            [_db(f"okx_ctx_{lc}", "data/hot/okx_ctx.sqlite", f"okx_mark WHERE inst = '{inst}'",
+                 "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')")])
         add("bn_raster", lc, 2, "supervisor_orderflow_raster.sh", "live_orderflow_raster_collector_20260914.py",
             {"OF_SYMBOL": sym.lower()}, [_dir(f"bn_raster_{lc}", f"{of}/raster/{sym}", glob="*.f32")],
             eth=f"{of}/raster/ETHUSDT")
