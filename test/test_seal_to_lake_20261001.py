@@ -87,10 +87,12 @@ def test_hot_source_reseal_and_guarded_prune():
     c = sqlite3.connect(hot)
     gone = ds.lake_path("binance", "tape", "XRP", "2026-09-28", lake)
     gone.rename(gone.with_suffix(".bak"))                                    # 봉인이 빠진 상황
-    assert prune_hot(hot, later, keep_days=16, lake=lake) == 0, "XRP 09-28 lake 가 없는데 지웠다"
+    args = (hot, "trade_tape_1s", "ts_sec", "symbol", "binance", "tape", lambda s: s.upper().removesuffix("USDT"), 16,
+            (("verify_1m", "ts_min", 1), ("gaps", "to_ms", 1000)))
+    assert prune_hot(*args, now=later, lake=lake) == 0, "XRP 09-28 lake 가 없는데 지웠다"
     assert c.execute("SELECT count(*) FROM trade_tape_1s").fetchone()[0] == 3
     gone.with_suffix(".bak").rename(gone)
-    assert prune_hot(hot, later, keep_days=16, lake=lake) == 3               # 행 없는 날(XRP 09-29)은 파일이 없어도 된다
+    assert prune_hot(*args, now=later, lake=lake) == 3                       # 행 없는 날(XRP 09-29)은 파일이 없어도 된다
     assert c.execute("SELECT count(*) FROM trade_tape_1s").fetchone()[0] == 0
     c.close()
 

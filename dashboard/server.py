@@ -13,6 +13,7 @@ import json
 import math
 import os
 import re
+import sqlite3
 import statistics
 import sys
 import time
@@ -638,14 +639,14 @@ OKX_WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
 #   시작할 때 거래소 REST 와 대조해 갈라졌으면 역시 켜지 않는다(collect_okx_flow).
 from scripts.live_okx_trade_tape_collector_20260923 import (  # noqa: E402
     BUCKETS as OKX_TAPE_BUCKETS, CT_VALS as OKX_CT_VALS, HTTP_HEADERS as OKX_HTTP_HEADERS,
-    INSTRUMENTS_URL as OKX_INSTRUMENTS_URL, OKX_HOT_TAPE_DB)
+    INSTRUMENTS_URL as OKX_INSTRUMENTS_URL, OKX_HOT_CTX_DB, OKX_HOT_TAPE_DB)
 OKX_TAPE_DB_PATH = OKX_HOT_TAPE_DB     # 2026-10-01 hot SQLite(5종목 한 파일, 락 없음) -- 쿼리가 종목으로 거른다
 HL_POS_DB_PATH = LIVE_DIR / "hyperliquid_positions.duckdb"
 # 2026-09-26 SOL·XRP: 멀티코인 HL 포지션 수집기는 **Pi** 에서 돈다 -- Pi 크론이 3분마다 일관 스냅샷을 떠
 #   서버로 보낸다(replicate_trade_tape_20260922.sh, TT_VERIFY_TABLE=hl_positions).
 HL_POS_MULTI_DB_PATH = LIVE_DIR / "hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb"
 HL_LIQ_BY_ASSET = {"eth": HL_POS_DB_PATH, "sol": HL_POS_MULTI_DB_PATH, "xrp": HL_POS_MULTI_DB_PATH}
-OKX_CTX_DB_PATH = LIVE_DIR / "okx_context.duckdb"
+OKX_CTX_DB_PATH = OKX_HOT_CTX_DB      # 2026-10-01 4b hot SQLite(종목 = inst 열, 락 없음)
 # OKX 청산은 ETH 맥락 수집기 하나가 전 종목(instType=SWAP)을 받아 여기에 쌓는다 -- 코인별 맥락 DB 에는 0건(09-27 실측).
 OKX_LIQ_DB_PATH = OKX_CTX_DB_PATH
 
@@ -775,12 +776,12 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
             ok_min.add(m)
     oi: dict[int, tuple[float, float]] = {}
     try:
-        for bar, o, c in _read_only_rows(ctx_db, """
-                SELECT ts_ms // 1000 // ? * ?, arg_min(oi_base, ts_ms), arg_max(oi_base, ts_ms)
-                FROM okx_oi WHERE inst = ? AND ts_ms >= ? AND ts_ms < ? GROUP BY 1""",
-                [bar_seconds, bar_seconds, inst, lo_sec * 1000, t0_ms]):
-            oi[int(bar)] = (float(o), float(c))
-    except duckdb.Error:
+        # 봉별 첫·끝 OI 는 파이썬에서 -- arg_min/arg_max·`//` 는 SQLite(hot, 4b)에 없다. 12h 창 ~수천 행.
+        for ts, v in _read_only_rows(ctx_db, "SELECT ts_ms, oi_base FROM okx_oi WHERE inst = ? AND ts_ms >= ? "
+                                              "AND ts_ms < ? ORDER BY ts_ms", [inst, lo_sec * 1000, t0_ms]):
+            bar = int(ts) // 1000 // bar_seconds * bar_seconds
+            oi[bar] = (oi[bar][0], float(v)) if bar in oi else (float(v), float(v))
+    except (duckdb.Error, sqlite3.Error):
         pass                      # OI 가 없어도 풋프린트는 되살린다(사분면 OI 만 바이낸스로 남는다)
     # 청산도 같은 구간을 되살린다 -- 봉에 «바이낸스+OKX» 가 붙는데 OKX 청산이 0 이면 합산 표시가
     #   거짓이 된다(피어 지적, 2026-09-24). 모양은 라이브 okx_liq_events 원소와 같다.
@@ -793,7 +794,7 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
             liq.append({"ts_ms": int(ts), "side": "long" if pos == "long" else "short",
                         "qty": float(qty), "price": float(px or 0.0),
                         "usd": float(qty) * float(px or 0.0), "symbol": inst})
-    except duckdb.Error:
+    except (duckdb.Error, sqlite3.Error):
         pass
     tape_max = _read_only_rows(tape_db, "SELECT max(ts_sec) FROM trade_tape_1s WHERE symbol = ?", [inst])
     return {"bars": bars, "ok_min": ok_min, "oi": oi, "liq": liq, "tape_max": int(tape_max[0][0] or 0)}
@@ -1892,7 +1893,7 @@ def _flow_spec(asset: str, bucket: float, price_dp: int, oi_poll_s: float) -> Fl
         okx_tape_db=OKX_HOT_TAPE_DB,
         # SOL·XRP 의 OKX 맥락(OI·청산)은 Pi 가 수집하고 3분마다 .from_pi 로 복제한다(Pi crontab). 이 파일이 없으면
         #   복원이 체결만 되살리고, OI 5분봉은 커버리지 가드가 OKX 없는 봉을 버려 재시작 이후분만 남는다.
-        okx_ctx_db=OKX_CTX_DB_PATH if eth else LIVE_DIR / f"okx_context_{asset}.from_pi.duckdb")
+        okx_ctx_db=OKX_HOT_CTX_DB)      # 4b: SOL·XRP 도 서버 수집(Pi 복제 .from_pi 끝)
 
 
 FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2, OI_1S_POLL_SECONDS),
