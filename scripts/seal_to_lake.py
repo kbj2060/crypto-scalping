@@ -152,17 +152,18 @@ def seal(specs=SPECS, root: Path = ROOT, lake: Path = LAKE, now: dt.datetime | N
             if not parts:
                 continue
             con.execute(f"create or replace temp view v as {' union all by name '.join(parts)}")
-            todo = con.execute("select __coin, __day, count(*) from v where __coin is not null and __day <= ? "
-                               "group by all order by all", [last_day]).fetchall()
-            fp = "select count(*), bit_xor(hash(x)) from ({}) x"
-            for coin, day, n in todo:
+            # 원천 지문(행 수 + 행 해시 XOR)을 날짜 고르는 쿼리에서 한 번에 -- 날짜마다 원천을 다시 훑으면 hot(SQLite)은
+            #   조건을 못 내려 매번 전체를 읽는다(10-01 서버: 바이낸스 테이프 31날짜 135초).
+            cols = [r[0] for r in con.execute("describe select * exclude (__coin, __day) from v").fetchall()]
+            row = "hash(row(" + ", ".join(f'"{c}"' for c in cols) + "))"
+            todo = con.execute(f"select __coin, __day, count(*), bit_xor({row}) from v "
+                               "where __coin is not null and __day <= ? group by all order by all", [last_day]).fetchall()
+            for coin, day, n, src_hash in todo:
                 out = lake_path(venue, stream, coin, day.isoformat(), lake)
                 if out.exists():
-                    if day <= last_day - dt.timedelta(days=RESEAL_DAYS) or (
-                            con.execute(fp.format("select * exclude (__coin, __day) from v where __coin = ? and __day = ?"),
-                                        [coin, day]).fetchone()
-                            == con.execute(fp.format(f"select * from read_parquet('{out.as_posix()}', hive_partitioning = false)"
-                                                     )).fetchone()):   # 경로의 coin=/date= 를 열로 붙이면 해시가 달라진다
+                    if day <= last_day - dt.timedelta(days=RESEAL_DAYS) or (n, src_hash) == con.execute(
+                            f"select count(*), bit_xor({row}) from read_parquet('{out.as_posix()}', hive_partitioning = false)"
+                            ).fetchone():   # 🔴hive_partitioning=false -- 경로의 coin=/date= 가 열로 붙으면 해시가 달라진다
                         stats["skipped_existing"] += 1
                         continue
                     stats["resealed"] += 1           # 원천이 그 날짜를 고쳐 썼다(백필) -- 아래에서 통째로 다시 쓴다
