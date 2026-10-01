@@ -37,6 +37,7 @@ WS 가 끊긴 구간은 `gaps` 에 기록한다. 그리고 (2026-09-24) 공백·
 사용:
   python scripts/live_trade_tape_collector_20260916.py                 # ethusdt
   TAPE_SYMBOL=btcusdt python scripts/live_trade_tape_collector_20260916.py
+  TAPE_MARKET=spot TAPE_SYMBOL=solusdt python scripts/live_trade_tape_collector_20260916.py   # 현물(2026-10-01 4d, 대시보드에서 옮김)
   python scripts/live_trade_tape_collector_20260916.py --selftest      # 네트워크·DB 없이 로직 점검
 """
 from __future__ import annotations
@@ -66,6 +67,14 @@ BUCKETS = {"ethusdt": 0.1, "btcusdt": 1.0, "solusdt": 0.01, "xrpusdt": 0.0001, "
 WS_URL = "wss://fstream.binance.com/ws/{symbol}@trade"
 KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 AGG_TRADES_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
+# 2026-10-01 저장 재설계 4d: 현물 테이프(전엔 대시보드가 data/live/trade_tape_spot*.duckdb 에 썼다). 현물은 @aggTrade(이미 주문 단위,
+#   add_agg) · REST weight 는 선물과 따로 센다 · 선물과 같은 symbol 이름이라 파일을 따로 둔다.
+#   (WS, 1분봉, aggTrades, 기본 저장) -- 대시보드 현물 레인이 쓰던 WS 주소 그대로.
+MARKETS = {
+    "futures": (WS_URL, KLINES_URL, AGG_TRADES_URL, HOT_TAPE_DB),
+    "spot": ("wss://stream.binance.com:9443/ws/{symbol}@aggTrade", "https://api.binance.com/api/v3/klines",
+             "https://api.binance.com/api/v3/aggTrades", ROOT / "data" / "hot" / "binance_spot_tape.sqlite"),
+}
 BACKFILL_SECONDS = 60.0   # 복구 주기. 한 주기에 몇 분을 받을지는 거래소별 per_cycle
 BACKFILL_MAX_ATTEMPTS = 3
 BACKFILL_LOOKBACK_S = 7 * 86400        # 기본(OKX history-trades 는 수개월 가능)
@@ -649,7 +658,7 @@ class TapeStore:
         return [int(r[0]) for r in rows]
 
 
-async def verify_recent(store: TapeStore, session) -> None:
+async def verify_recent(store: TapeStore, session, klines_url: str = KLINES_URL) -> None:
     """직전 분들을 kline volume 과 대조해 verify_1m 에 남긴다. 실패해도 수집은 계속한다."""
     minutes = store.unverified_minutes()
     if not minutes:
@@ -657,7 +666,7 @@ async def verify_recent(store: TapeStore, session) -> None:
     params = {"symbol": store.symbol.upper(), "interval": "1m",
               "startTime": min(minutes) * 1000,
               "limit": min(1500, (max(minutes) - min(minutes)) // 60 + 2)}   # 흩어진 밀린 분까지 덮게
-    async with session.get(KLINES_URL, params=params) as response:
+    async with session.get(klines_url, params=params) as response:
         if response.status != 200:
             return
         klines = await response.json()
@@ -736,14 +745,15 @@ async def backfill_loop(store: TapeStore, fetch_minute, per_cycle: int, source: 
             log(f"복구 {len(fixed)}분 교체 ({fixed[-1]} ~ {fixed[0]}, 1분봉과 일치)")
 
 
-def binance_minute_fetcher(session, symbol: str, bucket: float):
+def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str = KLINES_URL,
+                           agg_url: str = AGG_TRADES_URL):
     """바이낸스 REST aggTrades 로 한 분을 다시 만든다. aggTrade = 테이커 주문 조각(라이브 되묶기의
     정답 기준이 원래 aggTrades 다). 🔴buy_max/sell_max 는 NULL -- «그 초의 최대 개별 체결»은 REST
     aggTrades 에 없다(0 이 아니라 NULL: 「없었다」와 「모른다」는 다른 말이다).
     weight: aggTrades 20/회 · 분당 1~3회. 봇과 IP 한도를 나누므로 per_cycle 을 작게 둔다."""
     async def fetch(m: int):
         start, end = m * 1000, m * 1000 + 59_999
-        async with session.get(KLINES_URL, params={"symbol": symbol.upper(), "interval": "1m",
+        async with session.get(klines_url, params={"symbol": symbol.upper(), "interval": "1m",
                                                    "startTime": start, "limit": 1}) as r:
             r.raise_for_status()
             k = await r.json()
@@ -752,7 +762,7 @@ def binance_minute_fetcher(session, symbol: str, bucket: float):
         buf = TapeBuffer(bucket, symbol)
         params = {"symbol": symbol.upper(), "startTime": start, "endTime": end, "limit": 1000}
         while True:
-            async with session.get(AGG_TRADES_URL, params=params) as r:
+            async with session.get(agg_url, params=params) as r:
                 r.raise_for_status()
                 batch = await r.json()
             for a in batch:
@@ -767,8 +777,11 @@ def binance_minute_fetcher(session, symbol: str, bucket: float):
     return fetch
 
 
-async def collect(symbol: str, db_path: Path) -> None:
+async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
     from aiohttp import ClientSession, ClientTimeout, WSMsgType
+
+    ws_url, klines_url, agg_url, _ = MARKETS[market]
+    spot = market == "spot"
 
     warn_if_whale_threshold_diverged()
     bucket = BUCKETS.get(symbol, 0.01)
@@ -776,26 +789,27 @@ async def collect(symbol: str, db_path: Path) -> None:
     buffer = TapeBuffer(bucket, symbol)
     orders = TakerOrderAggregator()
     last_ms = store.last_ts_ms()      # 지난 판이 남긴 끝 -- 재시작 공백을 gaps 에 적으려고
-    log(f"{symbol} 수집 시작 (빈 {bucket}, db {db_path})")
+    log(f"{symbol} {market} 수집 시작 (빈 {bucket}, db {db_path})")
     # total=None 을 **명시**한다: aiohttp 기본 5분이라 그냥 두면 5분마다 끊긴다.
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
         backfill = asyncio.create_task(backfill_loop(  # noqa: F841 -- 수집이 끝날 때까지 돈다
             # 🔴ETH 외는 한 주기 1분만. 망이 끊겼다 붙으면 모든 심볼(과 두 호스트)이 동시에 복구를
             #   시작하는데 BTC 한 분은 aggTrades 여러 쪽(쪽당 20)이다 -- 봇과 같은 IP 한도 2,400/분이다.
-            store, binance_minute_fetcher(session, symbol, bucket), per_cycle=3 if symbol == "ethusdt" else 1,
+            store, binance_minute_fetcher(session, symbol, bucket, klines_url, agg_url),
+            per_cycle=3 if symbol == "ethusdt" else 1,
             source="binance rest aggTrades",
             note="buy_max/sell_max NULL(REST 에 개별 체결 최대가 없다) · 주문=aggTrade",
             lookback_s=BINANCE_BACKFILL_LOOKBACK_S))
         flushed_at = verified_at = time.monotonic()
         while True:
             try:
-                async with session.ws_connect(WS_URL.format(symbol=symbol), heartbeat=30) as ws:
+                async with session.ws_connect(ws_url.format(symbol=symbol), heartbeat=30) as ws:
                     first = True
                     async for msg in ws:
                         if msg.type is not WSMsgType.TEXT:
                             break
                         trade = json.loads(msg.data)
-                        if trade.get("e") != "trade":
+                        if trade.get("e") != ("aggTrade" if spot else "trade"):
                             continue
                         price, qty = float(trade["p"]), float(trade["q"])
                         if not (price > 0 and qty > 0):
@@ -813,12 +827,16 @@ async def collect(symbol: str, db_path: Path) -> None:
                                              "ws_reconnect" if last_ms else "startup")
                             log("스트림 연결됨")
                         sell = bool(trade["m"])
-                        buffer.add(ts_ms, price, qty, sell)
-                        tid = trade.get("t")
-                        order = orders.add(price, qty, ts_ms, sell,
-                                           None if tid is None else int(tid))
-                        if order is not None:
-                            buffer.add_order(order[2], order[0], order[1], order[3])
+                        if spot:                                # aggTrade = 이미 테이커 주문 하나(대시보드 현물 레인과 같은 규칙)
+                            buffer.add_agg(ts_ms, price, qty, sell,
+                                           max(1, int(trade.get("l") or 0) - int(trade.get("f") or 0) + 1))
+                        else:
+                            buffer.add(ts_ms, price, qty, sell)
+                            tid = trade.get("t")
+                            order = orders.add(price, qty, ts_ms, sell,
+                                               None if tid is None else int(tid))
+                            if order is not None:
+                                buffer.add_order(order[2], order[0], order[1], order[3])
                         last_ms = ts_ms
                         now = time.monotonic()
                         if now - flushed_at >= FLUSH_SECONDS:
@@ -826,7 +844,7 @@ async def collect(symbol: str, db_path: Path) -> None:
                             await asyncio.to_thread(store.write, buffer.take_closed())  # 스레드로: close() 체크포인트 fsync(~0.5초)가 WS 수신을 막지 않게
                         if now - verified_at >= VERIFY_SECONDS:
                             verified_at = now
-                            await verify_recent(store, session)
+                            await verify_recent(store, session, klines_url)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 -- 한 번의 끊김이 수집기를 죽이면 그 뒤가
@@ -1000,13 +1018,14 @@ def main() -> None:
     parser.add_argument("--symbol", default=os.getenv("TAPE_SYMBOL", "ethusdt").lower())
     parser.add_argument("--db", type=Path, default=Path(os.environ["TAPE_DB_PATH"])
                         if os.getenv("TAPE_DB_PATH") else None)
+    parser.add_argument("--market", choices=sorted(MARKETS), default=os.getenv("TAPE_MARKET", "futures"))
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
     if args.selftest:
         selftest()
         return
     try:
-        asyncio.run(collect(args.symbol, args.db or default_db(args.symbol)))
+        asyncio.run(collect(args.symbol, args.db or MARKETS[args.market][3], args.market))
     except KeyboardInterrupt:
         log("종료")
 
