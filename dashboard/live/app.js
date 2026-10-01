@@ -3839,6 +3839,27 @@ function renderOptions() {
       + kv("기간 구조 · ATM IV", ["7", "30", "60"].map((d) => ((o.cm || {})[d] || {}).atm).every((v) => v == null) ? "-"
            : ["7", "30", "60"].map((d) => { const v = ((o.cm || {})[d] || {}).atm; return `${d}일 ${v == null ? "-" : v.toFixed(0)}`; }).join(" → "))),
   ].join("");
+  // 2026-10-01 풋프린트 호가 프로파일 아래 «옵션 요약»(사용자 «어떻게 요약하면 좋을지 연구해서»). 고른 것 = **가격 칸과 같은 언어(가격)로 말하는 것**만,
+  //   근거 순: ① 24h 1σ 범위(DVOL 띠가 실현 변동성 띠보다 정확 — 09-29 재검정) ② max pain(만기 1h 전 +10.5bp 후보 — 44일, 통과 1회)
+  //   ③ 딜러 감마 구간·플립(서술 — 크기 예측은 불합격) ④ DEX·charm 헤지 1시간(서술, 체결 기반) ⑤ 7일 RR(서술).
+  //   머리 칩(만기 시각·규모·24h ±)과 겹치는 숫자는 뺐다. 방향 신호 아님.
+  { const wall = el("mcWall");
+    if (wall) {
+      const pct = (v) => `${v >= px ? "+" : "−"}${(Math.abs(v / px - 1) * 100).toFixed(1)}%`;
+      const row = (k, v, tag = "", cls = "") => `<div class="os-row"><span class="os-k">${k}</span><b class="os-v ${cls}">${v}</b>${tag ? `<i class="os-tag">${tag}</i>` : ""}</div>`;
+      const painWin = f && f.pain && hrs != null ? (hrs <= 1 ? "규칙 창 지금" : hrs <= 6 ? `규칙 창 ${(hrs - 1).toFixed(1)}h 뒤` : "") : "";
+      const html = `<div class="os"><h4 class="os-h">옵션 요약 <span>${cur} · ${optLadderScope === "front" ? "가까운 만기" : optLadderScope === "week" ? "7일 안" : "전 만기"}</span></h4>`
+        + row("24h 1σ", s1d == null ? "-" : `${optQ(px - s1d)} – ${optQ(px + s1d)}`, "DVOL")
+        + row("max pain", f && f.pain ? `${optQ(f.pain)} <small>${pct(f.pain)}</small>` : "-", painWin || "후보", f && f.pain ? (f.pain > px ? "opt-good" : "opt-bad") : "")
+        + row("딜러 감마", !hasG ? "-" : `${neutralG ? "중립" : posG ? "양감마" : "음감마"}${gm.flip ? ` · 플립 ${optQ(gm.flip)}` : ""}`, "", !hasG || neutralG ? "" : posG ? "opt-good" : "opt-warn")
+        // 2026-10-01 사용자 «DEX·헤지 매도 추가, 콜·풋 최대 제거» -- Option 카드 딜러 감마 칸과 같은 값(체결 기반 · 서술)
+        + row("DEX", dNow == null ? "-" : `${sgn(dNow)}${dexD != null ? ` <small>1h ${sgn(dexD)}</small>` : ""}`, "", dNow == null ? "" : dNow >= 0 ? "opt-good" : "opt-bad")
+        + row("헤지 1h", gm.charm == null ? "-" : Math.abs(gm.charm) < 1 ? "거의 0" : `${gm.charm > 0 ? "매도" : "매수"} ${optUsd(Math.abs(gm.charm))}`, "charm", gm.charm == null || Math.abs(gm.charm) < 1 ? "" : gm.charm > 0 ? "opt-bad" : "opt-good")
+        + row("RR 7일", optCm(o, "rr").split(" (")[0], "", "")
+        + `<div class="os-foot">서술 · 방향 신호 아님</div></div>`;
+      if (wall.innerHTML !== html) wall.innerHTML = html;
+    }
+  }
   // 2026-09-29 풋프린트 카드 맨 아래 반반(휴대폰은 위아래) -- 두 칸 폭이 같아 한 번 잰다.
   if (laneBody && flowBody && laneBody.clientWidth > 0) {
     const lw = Math.round(laneBody.clientWidth), fw = Math.round(flowBody.clientWidth) || lw, fl = ((((latestGex || {}).block_trades || {}).flow_by_coin || {})[cur]) || [];
@@ -4327,7 +4348,6 @@ function renderMarketCtx() {
       + gRow("RSI 14", G.pct(rsi == null ? null : rsi / 100), rsi == null ? "-" : n(rsi, 0), rsi != null && (rsi >= 70 || rsi <= 30) ? "mc-warn" : "")
       + (G.cmpW ? "" : lineSw));
   G.gw = gwKeep;
-  setH("mcWall", "");
   if (G.cmpW) htmlB = [`<div class="mc-stack">${htmlB.join("")}</div>`];   // ①② 를 한 단에 위아래로
   htmlB.push(wallHtml0);
   htmlB = htmlB.join("");
@@ -4387,7 +4407,7 @@ function trendFlipLevels(footprint, candles) {
   const t = latestTrend;
   if (!t || !t.ok || activeSnapshotAsset !== "eth" || !candles.length) return [];
   const lo = Math.min(...candles.map((c) => c.low)), hi = Math.max(...candles.map((c) => c.high));
-  return t.votes.filter((v) => v.flip_price >= lo && v.flip_price <= hi).map((v) => ({
+  return t.votes.filter((v) => Number(v.L) !== 7 && v.flip_price >= lo && v.flip_price <= hi).map((v) => ({   // 2026-10-01 7일선 제거(사용자 지시) -- 14~90일은 범위 안에 오면 그대로
     val: Number(v.flip_price), color: "var(--muted)", label: `추세${v.L}일`, priceLeft: true,
     dashed: true, width: 1, marker: !!footprint }));
 }
@@ -6823,7 +6843,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(t);
   }
 
-  const lblStay = (q) => !!q.note && /^(5분|1시간) ±/.test(q.label || "");   // 2026-10-01 제자리에 남는 이름(옵션 예상 폭 둘)
+  const lblStay = (q) => !!q.note && /^(5분|1시간) ±|^VWAP/.test(q.label || "");   // 2026-10-01 플롯 오른쪽 끝에 남는 이름(옵션 예상 폭 둘 · VWAP — 사용자 지시)
   // 2026-09-30 꼬리표 칸: 겹침 선 이름(fpNotes)을 가격 꼬리표와 한 줄에 세워 겹침 회피를 **함께** 다시 돈다.
   if (gutOn && fpNotes.length) {
     fpNotes.forEach((n) => {
@@ -7888,7 +7908,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (on) { fs.style.left = `${Math.round(a.left - c.left + ml + 290)}px`; fs.style.top = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`; }
       } }
     mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: hAll - (sub1sY + s1H + 12) - 4 } : null,
-            null);   // 2026-10-01(3) 프로파일 아래 칸은 비운다(사용자 지시)
+            mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 옵션 요약(renderOptions 가 채운다)
+              return { x: ml + cw + 4, y, w: TAG_W + TRADE_W + BOOK_W - 8, h: hAll - y - 4 }; })() : null);
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),

@@ -2823,3 +2823,14 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-line-switch .mc-switch-t { color: var(--muted); font-weight: 600; }
 body.not-eth #fpLineSwitch { display: none; }
 .fp-line-switch > .mc-switch { display: flex; flex-wrap: nowrap; gap: 14px; align-items: center; margin: 0; font-size: 11px; }
+
+/* 2026-10-01 풋프린트 호가 프로파일 아래 «옵션 요약» -- 가격으로 말하는 다섯 줄 · 숫자 등폭 · 근거 꼬리표 */
+#mcWall .os { padding: 6px 2px 0; font-size: 11px; }
+#mcWall .os-h { margin: 0 0 6px; font: 700 11px/1.2 var(--font-sans); color: var(--option); }
+#mcWall .os-h span { color: var(--muted); font-weight: 600; margin-left: 4px; }
+#mcWall .os-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: baseline; gap: 6px; padding: 3px 0; border-bottom: 1px solid rgb(var(--lift) / .05); }
+#mcWall .os-k { color: var(--muted); }
+#mcWall .os-v { font: 700 12px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+#mcWall .os-v small { font-size: 10px; font-weight: 600; color: var(--muted); margin-left: 3px; }
+#mcWall .os-tag { font: 600 9.5px/1 var(--font-sans); font-style: normal; color: var(--option); border: 1px solid color-mix(in srgb, var(--option) 40%, transparent); border-radius: 4px; padding: 2px 4px; }
+#mcWall .os-foot { margin-top: 6px; color: var(--muted); font-size: 10px; }
