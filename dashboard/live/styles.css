@@ -2571,8 +2571,9 @@ body.order-coin-off .acct-lanes::before {
    세 열 모두 카드 높이 끝까지 채운다 -- 행 여섯 줄에 각 칸이 두 줄씩(사다리는 넷) 걸치고 stretch 로 늘어난다.
    #optBody · #optRow 는 display:contents 라 그 안 칸들이 이 격자의 직접 칸이 된다(렌더러는 그대로). */
 @media (min-width: 1100px) {
-  #optCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr) minmax(0, 1.3fr); column-gap: 28px;
-    grid-template-areas: "head head head" "cov cov cov" "move ladder lane" "move ladder lane" "gamma ladder flow" "gamma ladder flow" "mood curve blk" "mood curve blk" "when when when"; }
+  /* 2026-10-01 배치(사용자 지시): 위 = 지금·딜러감마 | 사다리(넓게) | 블록 거래·심리 · 아래 한 줄 = 만기 | 순매수 흐름 | 감마 곡선 · 맨 아래 ⑤ */
+  #optCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) minmax(0, 1.15fr); column-gap: 28px;
+    grid-template-areas: "head head head" "cov cov cov" "move ladder blk" "gamma ladder mood" "lane flow curve" "when when when"; }
   #optCard > #mcWhen { grid-area: when; }   /* 2026-10-01 ⑤ 다음 24시간 = 맨 아래 전폭(풋프린트에서 옮김) */
   #optCard > .ops-health-head { grid-area: head; }
   #optCard #optBody, #optCard #optRow { display: contents; }
@@ -2583,11 +2584,11 @@ body.order-coin-off .acct-lanes::before {
   #optCard #optLaneBody { grid-area: lane; } #optCard #optFlowBody { grid-area: flow; } #optCard #optBlkBody { grid-area: blk; }
   #optCard .opt-sec, #optCard .opt-lane-body { min-width: 0; margin: 0; border-top: 1px solid var(--line); padding: 8px 0 12px; align-self: stretch; }
   #optCard .opt-sec svg, #optCard .opt-lane-body svg { width: 100%; height: auto; }
-  #optCard .opt-sec:has([data-tip="move"])::before, #optCard .opt-sec:has([data-tip="ladder"])::before, #optCard #optLaneBody::before {
+  #optCard .opt-sec:has([data-tip="move"])::before, #optCard .opt-sec:has([data-tip="ladder"])::before, #optCard #optBlkBody::before {
     display: block; margin-bottom: 6px; font: 800 11px var(--font-sans); letter-spacing: .08em; color: var(--muted); }
   #optCard .opt-sec:has([data-tip="move"])::before { content: "지금"; }
   #optCard .opt-sec:has([data-tip="ladder"])::before { content: "가격대"; }
-  #optCard #optLaneBody::before { content: "시간"; }
+  #optCard #optBlkBody::before { content: "거래 · 심리"; }
   /* «지금» 열의 숫자 칸은 늘어난 높이만큼 줄 간격을 벌려 칸을 채운다(빈 아래 공간 대신) */
   #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="gamma"]), :has([data-tip="mood"])) { display: flex; flex-direction: column; }
   #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="gamma"]), :has([data-tip="mood"])) .opt-kv { flex: 1 1 0; max-height: 46px; align-items: center; font-size: 13.5px; }
@@ -2710,6 +2711,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (max-width: 720px) { .opt-blk-list { max-height: none; mask-image: none; padding-bottom: 0; } }
 @media (min-width: 1100px) { #optCard .opt-blk-list { max-height: none; overflow: visible; mask-image: none; padding-bottom: 0; } }   /* 2026-09-30 Option 카드 «시간» 열은 자리가 있다 -- 최근 5건을 스크롤 없이 */
 .opt-curve { display: block; width: 100%; height: auto; max-width: 440px; }
+@media (min-width: 1100px) { #optCard .opt-curve { max-width: none; } }   /* 2026-10-01 아래 한 줄의 제 칸을 다 쓴다 */
 .opt-dex { color: var(--ink); font-variant-numeric: tabular-nums; }
 /* 2026-09-30 옵션을 풋프린트 카드 안으로(사용자 «하나의 카드») -- 좁은 화면은 한 열로 맨 아래, 넓은 화면은 오른쪽 칸(위 ≥1700 규칙). */
 .liq-map-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -2753,7 +2755,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .opt-ladder { display: block; width: 100%; height: auto; }
 .opt-flow-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin: 10px 0 2px; padding-top: 8px; border-top: 1px solid var(--soft-line); }
 .opt-lane-body .opt-tip { margin: 2px 0 4px; }
-.opt-ladder { max-width: 440px; }   /* 넓은 칸(1440 이하 전폭)에서 세로로 부풀지 않게 */
+.opt-ladder { max-width: 640px; }   /* 넓은 칸(1440 이하 전폭)에서 세로로 부풀지 않게 */
 
 /* 2026-09-29 «시장 맥락» 카드 -- 옵션 카드와 같은 문법(칸 제목 «?» → 설명 펼침, 키-값 줄)이지만 옵션 색(--option)은 쓰지 않는다:
    이 카드는 서술이라 «?» 는 무채색이고, 방향색은 값에만 입힌다(DESIGN.md Three Signals). 넓으면 두 열, 좁으면 한 열. */
@@ -2810,3 +2812,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   font: 600 12px/1.45 var(--font-sans); color: var(--text); }
 .ofab-say.bad { border-color: color-mix(in srgb, var(--bad) 60%, transparent); }
 .ofab-say[hidden] { display: none; }
+
+/* 2026-10-01(3) 넓은 화면 시장 맥락 = 왼쪽 단 ①② 위아래 · 오른쪽 단 ④ 한 덩어리 -- 차트에 그리기는 2×2 */
+#mcBody.mc-cmp .mc-switch { display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 5px 14px; font-size: 11px; }
+#mcBody.mc-cmp .mc-switch-t { grid-column: 1 / -1; }

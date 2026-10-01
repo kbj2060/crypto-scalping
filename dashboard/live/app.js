@@ -2811,9 +2811,9 @@ function cardRailSync() {
 let fitOptLadderH = null, fitOptChartK = FIT0.ck || 1, fitOptCurveK = FIT0.cc || 1, renderOptionsSoon = false, fitAcctPlotH = FIT0.ap || 0;   // 2026-10-01 Option 차트 셋 높이 배율 · 계좌 성과 차트 높이(한 화면 모드, fitLayout 이 잰다)
 const optColW = () => {   // .opt-ladder 최대 폭 440 과 같게(넓게 그리면 줄어 글자가 작아진다) · 첫 렌더(칸이 아직 없음)는 카드 폭의 가운데 열 몫으로
   const s = document.querySelector('#optCard .opt-sec:has([data-tip="ladder"])');
-  if (s && s.clientWidth > 240) return Math.min(440, Math.round(s.clientWidth));
+  if (s && s.clientWidth > 240) return Math.min(640, Math.round(s.clientWidth));   // 2026-10-01 440 -> 640(사다리 열을 넓혀 막대를 길게)
   const card = el("optCard"), guess = card && innerWidth >= 1100 ? Math.round(((card.clientWidth - 56) * 0.95) / 3.25) : 0;
-  return guess > 240 ? Math.min(440, guess) : 336;
+  return guess > 240 ? Math.min(640, guess) : 336;
 };
 function fitOn() {
   let on = true; try { on = localStorage.getItem("fit1") !== "0"; } catch (e) { /* 기억은 편의 */ }
@@ -2845,22 +2845,24 @@ function fitLayout() {
       return [gb.top - box(c).top + (last - gb.bottom) + padB(c), vb && vb.width ? (g.clientWidth * vb.height) / vb.width : gb.height];
     };
     if (lane && flow && blk && curve && lad && move) {
-      // 2026-10-01(3) 상한 대신 **높이 배율 k**(사용자 «옵션 차트를 더 키워줘»): 차트 셋을 k 배 높이로 다시 그린다(글자 크기 그대로).
-      //   남는 칸이 있으면 k>1 로 키우고, 모자라면 k<1. 사다리는 1·2줄(만기+흐름)을 채운다. 원래(k=1) 높이 = 지금 높이 / 지금 k.
-      const k0 = optChartK(), [la, ln] = fix(lane), [fa, fn] = fix(flow), [ca, cn] = fix(curve), [bn] = fix(blk), cnB = cn / optCurveK();
-      const r12 = (k) => la + fa + (k * (ln + fn)) / k0, r3 = (k) => Math.max(ca + k * cnB, bn);
+      // 2026-10-01(4) 배치(사용자 지시): 위 = 지금·딜러감마 | 사다리 | 블록 거래·심리 · 아래 한 줄 = 만기 | 순매수 흐름 | 감마 곡선(조금 낮게).
+      //   아래 줄 차트 셋은 같은 배율 k(기본 0.85, 남는 칸의 34% 이내) · 사다리는 위 블록을 채운다. 원래(k=1) 높이 = 지금 높이 / 지금 k.
+      const k0 = optChartK(), kc0 = optCurveK(), [la, ln] = fix(lane), [fa, fn] = fix(flow), [ca, cn] = fix(curve), [bn] = fix(blk);
+      const lnB = ln / k0, fnB = fn / k0, cnB = cn / kc0;
+      const bottom = (k) => Math.max(la + k * lnB, fa + k * fnB, ca + k * cnB);
       const whenH = when && when.offsetParent ? box(when).height + (parseFloat(getComputedStyle(when).marginTop) || 0) : 0;
       const avail = box(opt).top + vh - padB(opt) - 12 - whenH - box(move).top;
-      let lo = 0.6, hi = 1.8;
-      while (hi - lo > 0.01) { const m = (lo + hi) / 2; if (r12(m) + r3(m) <= avail) lo = m; else hi = m; }
+      const topNeed = bn + 130;   // 블록 거래 목록 + 심리 세 줄(최소) -- 위 블록이 이보다 작으면 넘친다
+      let lo = 0.5, hi = 0.95;   // 2026-10-01 0.85 -> 0.95 · 34% -> 38%(사용자 «조금만 더 키워줘»)
+      if (bottom(hi) <= Math.min(avail * 0.38, avail - topNeed)) lo = hi;
+      else while (hi - lo > 0.01) { const m = (lo + hi) / 2; if (bottom(m) <= Math.min(avail * 0.38, avail - topNeed)) lo = m; else hi = m; }
       const k = Math.round(lo * 50) / 50;   // 0.02 단위 -- 1px 흔들림에 다시 그리지 않게
       if (Math.abs(k - fitOptChartK) > 0.019) { fitOptChartK = k; renderOptionsSoon = true; }
-      const kc = Math.floor(Math.max(k, (r3(k) - ca) / cnB) * 50) / 50;   // 감마 곡선 = 셋째 줄(블록 거래 높이)을 꽉
-      if (Math.abs(kc - fitOptCurveK) > 0.019) { fitOptCurveK = kc; renderOptionsSoon = true; }
+      if (Math.abs(k - fitOptCurveK) > 0.019) { fitOptCurveK = k; renderOptionsSoon = true; }
       const lg = lad.querySelector("svg");
       if (lg) {
-        const [lx] = fix(lad), want = Math.max(200, r12(k) - lx), gh = box(lg).height;
-        if (gh > 0 && Math.abs(want - gh) > 4) h = Math.max(200, Math.min(1200, Math.round((h * want) / gh)));
+        const [lx] = fix(lad), want = Math.max(200, avail - bottom(k) - lx), gh = box(lg).height;
+        if (gh > 0 && Math.abs(want - gh) > 4) h = Math.max(200, Math.min(1400, Math.round((h * want) / gh)));
       }
     }
   }
@@ -2873,7 +2875,7 @@ function fitLayout() {
     if (Math.abs(aslack) > 4) { fitAcctPlotH = Math.max(120, Math.min(900, Math.round(cur + aslack))); acct.style.setProperty("--acctplot", `${fitAcctPlotH}px`); }
   }
   if (h !== fitOptLadderH || renderOptionsSoon) { fitOptLadderH = h; renderOptionsSoon = false; if (typeof renderOptions === "function") renderOptions(); }
-  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, w4: mcWallOff, lad: fitOptLadderH, ck: fitOptChartK, cc: fitOptCurveK, ap: fitAcctPlotH })); } catch (e) { /* 기억은 편의 */ } }
+  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, lad: fitOptLadderH, ck: fitOptChartK, cc: fitOptCurveK, ap: fitAcctPlotH })); } catch (e) { /* 기억은 편의 */ } }
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
 // 2026-10-01 ⑤ 다음 24시간(116 + 여백·선 36)이 맨 아래 전폭으로 들어와 그만큼 뺀다.
@@ -3451,7 +3453,7 @@ const OPT_TIPS = {
   gamma: "딜러·체결 기준(2026-09-29 사용자 지시): 테이커의 반대편(메이커)을 딜러로 보고, 종목의 **첫 체결부터** 누적한 −(테이커 순매수)를 딜러 순포지션으로 써서 감마·플립·DEX 를 낸다. 2026-10-01 부터 history.deribit.com 으로 09-27 전 상장 종목의 체결까지 채워, 체결 이력이 1번부터 끊김 없는 종목을 «커버»로 센다(카드 맨 위 커버 % = 그 종목들의 미결제 비중). «설명 X%» = 딜러 순포지션 크기(Σ|테이커 순수량|)가 미결제의 몇 %인가 — 3,023 종목 실측 평균 56%: 나머지는 고객끼리 거래했거나 딜러가 테이커로 들어온 몫이라 체결로는 안 보인다. 100% 를 넘으면 «메이커 = 딜러» 가정이 그 범위에서 깨졌다는 뜻. 🔴관행 가정(딜러 = 콜 매수·풋 매도)과는 전 만기 감마 부호가 9~21%만 같다 — 어느 쪽이 맞는지 확인할 방법이 없다(추정). 델타는 Deribit 표준(프리미엄 미조정 BS 선도 델타).\n사다리 칩(가까운 만기 · 7일 안 · 전 만기)과 같은 범위. 금액 = 가격 1% 움직임당 딜러가 사고팔 금액. 양감마 = 오르면 팔고 내리면 사서 움직임을 누른다 · 음감마 = 따라 사고팔아 키운다. 플립 = 부호가 바뀌는 가격. DEX = 딜러 순델타 × 가격, «1시간» = 1시간 전 대비(그 사이 커버가 바뀌면 «커버 변화»). charm = 가격·IV가 그대로여도 시간만 1시간 흐를 때 딜러 델타가 얼마나 변하나 — 딜러는 그만큼 반대로 헤지한다(«헤지 매도» = 딜러가 선물을 판다). 만기가 가까울수록 커진다(Deribit 매일 08:00 UTC).\nDEX 와 charm 은 다른 양이다 — DEX = 딜러 옵션 델타의 «지금 크기»(잔고) · charm = 앞으로 1시간 «변하는 양»(이번 시간 출금). 예: DEX +$18k · charm «헤지 매수 $2k (딜러 델타 −$2k)» → 딜러는 지금 선물 $18k 숏으로 중립을 맞춰 둔 것으로 본다 · 1시간 뒤 옵션 델타가 +$16k 로 줄면(만기가 다가오면 외가격 옵션 델타가 0 쪽으로 준다) 숏이 $2k 과해져 되산다 = 헤지 매수. 부호가 달라도 모순이 아니다.\n규모: 커버 종목만 센 값이라 보통 수천~수만 $ — ETH 선물 거래대금(분당 수백만 $)에 비하면 가격을 움직일 크기가 아니다.\n우리 검정: 감마(관행 가정 기준)의 방향·크기 예측은 불합격 · 체결 기반은 검정 전 — 참고로만. charm 은 검정한 적 없다(만기 1시간 전 max pain 규칙의 메커니즘 후보).",
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 시각은 모두 KST. 규모 = 콜+풋 미결제 × 지수 = 명목 달러(실제 옵션 값어치인 프리미엄은 그 0.2% 안팎). max pain = 만기에 보유자에게 줄 내재가치 합이 가장 작은 결제가(프리미엄 무시 · 누가 보유했는지 모른 채 미결제만으로 계산). 차트·사다리의 max pain 선은 늘 «가까운 만기» 하나이고, 그 만기 미결제는 보통 전체의 2% 안팎이다(라벨에 비중). P/C = 풋÷콜 미결제 수량 — 심리 지표가 아니다: 풋 매도는 강세·풋 매수는 헤지일 수 있고, 정의마다 값이 크게 다르다(가까운 만기 1.5 · 7일 1.0 · 전 만기 0.6 · 프리미엄 0.2).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기».",
   mood: "리버설·버터플라이는 «7일 고정만기»로 잰다: 만기마다 외가격 옵션의 델타로 보간해 정확히 델타 ±0.25 의 IV 를 구하고, 7일 양옆 두 만기를 시간으로 보간한다(30일 값은 괄호). 2026-10-01 까지는 가까운 만기(늘 24시간 미만) 최근접 행사가로 쟀는데 실제 델타가 0.15~0.31 이고 1시간에 평균 3.6pt 흔들려 잡음이었다(7일 고정만기는 0.58pt). 단위 pt = IV %포인트(가격 % 아님), IV 는 Deribit 평가값(mark_iv).\n25Δ 리스크 리버설 = 델타 +0.25 콜 IV − 델타 −0.25 풋 IV(지금가에서 위아래 비슷한 거리). 음수로 깊으면(−5pt 쯤 아래) 하락 방어 풋 수요 = 공포 · 양수면 상승 콜에 웃돈 · ±1pt 안은 중립.\n버터플라이 = (25Δ 콜 IV + 25Δ 풋 IV)/2 − ATM IV = 스마일이 휜 정도. 클수록 «방향은 몰라도 크게 튈» 꼬리에 값이 붙음. 작은 양수가 평상시.\n기간 구조 = 7·30·60일 고정만기 ATM IV(연율 %, 양옆 만기의 총분산 보간). 가까운 일간 만기는 남은 시간에 미국장이 드느냐에 따라 7일 대비 0.71~0.92배로 출렁여 뺐다(만기별 값은 «옵션 만기» 시간축 선). 뒤로 갈수록 높으면 정상(콘탱고) · 앞이 더 높으면(역전) «지금 당장» 큰 움직임을 값에 넣는 스트레스(급락·이벤트 직전). IV 41 ≈ 하루 1σ ±2.1%(41/√365).\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중. 예측력 모름 → 매매 신호 말고 «분위기가 바뀌었나»(리버설 급락·기간 구조 역전) 확인용.",
-  ladder: "행사가 사다리: 세로 = 행사가(지수 ±8%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러), 맨 오른쪽 = 행사가별 순감마(청록 = 콜 쪽 +, 주황 = 풋 쪽 −). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
+  ladder: "행사가 사다리: 세로 = 행사가(지수 ±6%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러), 맨 오른쪽 = 행사가별 순감마(청록 = 콜 쪽 +, 주황 = 풋 쪽 −). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
   curve: "감마 곡선(딜러·체결, 커버 종목만): 가격이 지금에서 ±15% 옮겨 가면 딜러 감마 합이 얼마가 되는가(사다리 칩과 같은 범위). 청록 = 양감마 · 주황 = 음감마. 흰 점선 = 지금 가격, 주황 점선 = 플립. 세로 = 가격 1% 움직임당 딜러가 사고파는 금액($).\n점선 = DEX(딜러·체결 순델타 × 가격) — 단위가 달라 0선만 맞추고 크기는 따로 늘렸다(값은 아래 줄).\n커버가 낮으면 일부 종목의 곡선이다(카드 맨 위 커버 %). 검정 전 — 참고로만.",
   blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자). 줄 머리 = 다리 구조로 분류한 전략 이름(Deribit 자체 구조 코드와 313/313 일치) · «+ 선물 헤지» = 같은 블록에 선물 다리가 붙음(보통 델타 중립 패키지) · 델타/베가 롱·숏 = 요청자 쪽 순델타·순베가 부호(체결 IV 로 계산, 총량의 10% 미만이면 중립). 단일 다리 블록은 다른 곳 헤지의 일부일 수 있어 의도를 모른다. 신규/청산·신원은 모른다. 금액 = 다리별 명목 합(스프레드면 두 다리가 다 더해진다).\n우리 검정 없음 — 참고로만.",
   lane: "옵션 만기(지금 ~ +120시간, 블록 거래는 가운데 «블록 거래» 칸): 시각 KST. 막대 = 다가올 만기 규모(콜+풋 미결제 × 지수 = 명목 달러) · pain = max pain(그 만기 미결제만으로 계산) · P/C = 풋÷콜 미결제 수량(심리 지표 아님) · 청록 선 = 만기별 ATM IV(가까운 만기는 남은 시간이 짧아 시간대에 따라 출렁인다).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
@@ -3576,18 +3578,21 @@ function optLadderSvg(o, W, Hfit = null) {
   const st = o.strikes || {}, rows = st[optLadderScope] || [];
   const rolled = optLadderScope === "front" && st.front_exp_ms && st.front_exp_ms <= Date.now();   // 만기 직후 ≤10분(optDealer 와 같은 규칙)
   if (!rows.length || rolled) return optLadderChips() + `<div class="opt-note">${rolled ? "만기 교체 중 — 다음 수집(10분 안)부터 새 가까운 만기" : "행사가 데이터 없음(수집기 다음 주기에 채워진다)"}</div>`;
-  const px = optPx(o), lo = px * 0.92, hi = px * 1.08, H = Hfit || 560, y0 = 22, y1 = H - 8;   // 2026-09-30 380 -> 560(막대를 두껍게 -- 값 글자가 막대 안에 들어가게, 사용자 지시)
+  const px = optPx(o), lo = px * 0.94, hi = px * 1.06, H = Hfit || 560,   // 2026-10-01 ±8% -> ±6%(사용자 «막대를 키워서» -- 행사가 간격 10/20 이 섞여 두께는 좁은 간격에 묶이므로 범위를 좁혀 1.33배)
+  y0 = 34, y1 = H - 8;   // y0 22 -> 34: 맨 위 막대가 «← 풋 · 콜 →» 머리글과 겹쳤다   // 2026-09-30 380 -> 560(막대를 두껍게 -- 값 글자가 막대 안에 들어가게, 사용자 지시)
   const Y = (p) => y1 - ((p - lo) / (hi - lo)) * (y1 - y0);
+  const vis = rows.filter((r) => r[0] >= lo && r[0] <= hi);   // 2026-10-01 범위 밖 행사가는 안 그린다(맨 위 막대가 머리글을 덮었다) · 막대 길이 기준도 범위 안에서
   const mid = Math.round(W * 0.47), half = mid - 46, gW = 34, gx = W - gW;
-  const mx = Math.max(1, ...rows.map((r) => Math.max(r[1], r[2]))), gm = Math.max(1, ...rows.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0)));
-  const ks = rows.map((r) => r[0]), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k, i) => k - ks[i])) : 25;
-  const bh = Math.max(2, Math.min(15, ((y1 - y0) * step) / (hi - lo) - 1)), fsz = Math.max(8, Math.min(10.5, bh - 1));   // 값 글자 = 막대 두께 − 1
-  const top = [...rows].sort((a, b) => b[1] + b[2] - a[1] - a[2]).slice(0, 3).map((r) => r[0]);
+  const mx = Math.max(1, ...vis.map((r) => Math.max(r[1], r[2]))), gm = Math.max(1, ...vis.map((r) => (Number.isFinite(r[4]) ? Math.abs(r[4]) : 0)));
+  const ks = vis.map((r) => r[0]), step = ks.length > 1 ? Math.min(...ks.slice(1).map((k, i) => k - ks[i])) : 25;
+  const bh = Math.max(2, Math.min(22, ((y1 - y0) * step) / (hi - lo) - 1)),   // 2026-10-01 상한 15 -> 22(사용자 «막대를 키워서»)
+    fsz = Math.max(8, Math.min(10.5, bh - 1));   // 값 글자 = 막대 두께 − 1
+  const top = [...vis].sort((a, b) => b[1] + b[2] - a[1] - a[2]).slice(0, 3).map((r) => r[0]);
   let s = `<text x="${mid - 6}" y="12" font-size="10" font-weight="700" fill="var(--bad)" text-anchor="end">← 풋</text>`
     + `<text x="${mid + 6}" y="12" font-size="10" font-weight="700" fill="var(--good)">콜 →</text>`
     + `<text x="${W}" y="12" font-size="10" font-weight="700" fill="var(--option)" text-anchor="end">감마·체결</text>`
     + `<line x1="${mid}" x2="${mid}" y1="${y0 - 4}" y2="${y1}" stroke="var(--line)"/>`;
-  rows.forEach(([k, c, p, , g]) => {   // g = 딜러·체결 순감마(커버 종목 없는 행사가는 null = «모름», 막대 없음)
+  vis.forEach(([k, c, p, , g]) => {   // g = 딜러·체결 순감마(커버 종목 없는 행사가는 null = «모름», 막대 없음)
     const has = Number.isFinite(g), y = Y(k), pw = (half * p) / mx, cwid = (half * c) / mx, gwid = has ? 3 + ((gW - 6) * Math.abs(g)) / gm : 0;
     s += `<g><title>${optQ(k)} · 콜 ${optUsd(c)} · 풋 ${optUsd(p)} · 딜러·체결 순감마 ${has ? `${g >= 0 ? "+" : "−"}${optUsd(Math.abs(g))}/1%` : "모름(커버 종목 없음)"}</title>`
       + `<rect x="${(mid - pw).toFixed(1)}" y="${(y - bh / 2).toFixed(1)}" width="${pw.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--bad)" fill-opacity=".75"/>`
@@ -3826,7 +3831,7 @@ function renderOptions() {
       + kv("charm · 다음 1시간", gm.charm == null ? "-" : Math.abs(gm.charm) < 1 ? "거의 0"
            : `헤지 ${gm.charm > 0 ? "매도" : "매수"} ${optUsd(Math.abs(gm.charm))} (딜러 델타 ${sgn(gm.charm)})`)),
     sec("ladder", "행사가 사다리", optLadderSvg(o, optColW(), fitOptLadderH)),
-    sec("curve", "감마 곡선", optGammaCurveSvg(o, optColW())),
+    sec("curve", "감마 곡선", optGammaCurveSvg(o, Math.round(document.querySelector('#optCard .opt-sec:has([data-tip="curve"])')?.clientWidth || 0) || optColW())),   // 2026-10-01 아래 줄 제 칸 폭
     // 2026-10-01 연구: 가까운 만기 최근접 RR/BF 는 잡음(1시간 SD 3.6pt) → 7일 고정만기 델타 보간(수집기 o.cm). 30일은 괄호.
     sec("mood", "심리", kv("25Δ 리스크 리버설 · 7일", optCm(o, "rr"))
       + kv("버터플라이 · 7일", optCm(o, "bf"))
@@ -4090,59 +4095,6 @@ const mcGfx = {
         + `<text x="${(c - 22 - bw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + 22 + aw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)">${kq(a[i])}</text>`;
     }).join("") + `</svg>`;
   },
-  terrain(px, hl, lv, bps, top, bu = null, w = mcGfx.pw || 300, h = mcGfx.th || Math.round(Math.min(340, Math.max(230, (mcGfx.pw || 300) * 0.72)))) {   // 세로 가격축 ±6%: HL 고래 청산가 원 · VWAP ±1·2σ 띠 · 호가 ±bp 눈금 · 12시간 실측 최다 ◆ · 지금가
-    if (!(px > 0)) return `<div class="mc-note">가격 대기</div>`;
-    const lo = px * 0.94, hi = px * 1.06, Y = (p) => 10 + (h - 20) * (hi - p) / (hi - lo), cl = (p) => Math.max(10, Math.min(h - 10, Y(p)));
-    let s = "";
-    if (lv && lv.vsd > 0) {
-      const v = lv.vwap, sd = lv.vsd;
-      s += `<rect x="64" y="${cl(v + 2 * sd).toFixed(1)}" width="${w - 128}" height="${Math.max(0, cl(v - 2 * sd) - cl(v + 2 * sd)).toFixed(1)}" fill="rgb(var(--lift) / .05)"/>`
-        + `<rect x="64" y="${cl(v + sd).toFixed(1)}" width="${w - 128}" height="${Math.max(0, cl(v - sd) - cl(v + sd)).toFixed(1)}" fill="rgb(var(--lift) / .08)"/>`
-        + `<line x1="64" x2="${w - 64}" y1="${cl(v).toFixed(1)}" y2="${cl(v).toFixed(1)}" stroke="var(--muted)" stroke-dasharray="4 3"/><text x="${w - 60}" y="${(cl(v) + 4).toFixed(1)}" font-size="10" fill="var(--muted)">VWAP</text>`;
-    }
-    // 2026-09-30 지지·저항(청산맵, 사용자 지시 «지지/저항을 ③ 가격 지형에») -- 옅은 가로 점선 + 왼쪽 이름·강도. 방향 신호 아님.
-    const sr = srLevelsLive();
-    let srLastY = -99;   // 이름표는 11px 안에 붙으면 뺀다(±6% 축에선 지지·저항이 지금가 근처에 몰린다) -- 선·툴팁은 그대로
-    if (sr) [...sr.res.map((lv, i) => ["저항" + (i + 1), lv, "var(--liq-resistance)"]).reverse(), ...sr.sup.map((lv, i) => ["지지" + (i + 1), lv, "var(--liq-support)"])]
-      .forEach(([nm, lv, col]) => {
-        if (!(lv.price >= lo && lv.price <= hi)) return;
-        const y = Y(lv.price).toFixed(1), pct = Math.round((lv.weight_pct || 0) * 100), showLab = +y - srLastY >= 11 && Math.abs(+y - Y(px)) >= 9 && !(bu && +y > Y(px) && +y - Y(px) < 24);   // 청산 급증 글자(지금가 아래 16px) 자리도 비킨다
-        if (showLab) srLastY = +y;
-        s += `<g><title>${nm} ${lv.price.toFixed(1)} · 강도 ${pct}%(청산 밀집) — 지지·저항 추정, 방향 신호 아님</title>`
-          + `<line x1="64" x2="${w - 30}" y1="${y}" y2="${y}" stroke="${col}" stroke-opacity=".6" stroke-dasharray="4 3"/>`
-          + (showLab ? `<text x="66" y="${(+y - 2.5).toFixed(1)}" font-size="9.5" font-weight="700" fill="${col}">${nm.replace("저항", "저").replace("지지", "지")} ${pct}%</text>` : "") + `</g>`;
-      });
-    const all = [...(hl.below || []).map((r) => ({ ...r, side: "long" })), ...(hl.above || []).map((r) => ({ ...r, side: "short" }))].filter((r) => r.px >= lo && r.px <= hi);
-    const mx = Math.max(1, ...all.map((r) => r.usd || 0));
-    let lastY = -99;
-    all.sort((a, c) => c.usd - a.usd).forEach((r) => {
-      const rr = 3 + 12 * Math.sqrt((r.usd || 0) / mx), yy = Y(r.px);
-      s += `<circle cx="${w / 2}" cy="${yy.toFixed(1)}" r="${rr.toFixed(1)}" fill="${r.side === "long" ? "var(--bad)" : "var(--good)"}" opacity=".55"><title>HL 고래 ${r.side === "long" ? "롱" : "숏"} 청산가 ${r.px} · ${fmtUsdCompact(r.usd)}</title></circle>`;
-      if (Math.abs(yy - lastY) > 13) { s += `<text x="${w / 2 + 20}" y="${(yy + 4).toFixed(1)}" font-size="10" fill="var(--text)">${Math.round(r.px)} · ${fmtUsdCompact(r.usd)}</text>`; lastY = yy; }
-    });
-    if (top && top[0] >= lo && top[0] <= hi) s += `<path d="M${w / 2 - 70} ${Y(top[0]).toFixed(1)} l5 -5 l5 5 l-5 5 z" fill="var(--warn)"><title>12시간 실측 청산 최다 ${top[0]} · 롱 ${fmtUsdCompact(top[1])} / 숏 ${fmtUsdCompact(top[2])}</title></path>`;
-    bps.forEach((bp) => [1, -1].forEach((q) => { const p = px * (1 + q * bp / 1e4); s += `<line x1="54" x2="64" y1="${Y(p).toFixed(1)}" y2="${Y(p).toFixed(1)}" stroke="${q > 0 ? "var(--bad)" : "var(--good)"}" stroke-width="2"/>`; }));
-    s += `<line x1="50" x2="${w - 50}" y1="${Y(px).toFixed(1)}" y2="${Y(px).toFixed(1)}" stroke="var(--text)" stroke-width="1.5"/><text x="2" y="${(Y(px) + 4).toFixed(1)}" font-size="11" font-weight="700" fill="var(--text)">${Math.round(px)}</text>`;
-    [0.95, 1.05].forEach((q) => { s += `<text x="2" y="${(Y(px * q) + 4).toFixed(1)}" font-size="10" fill="var(--muted)">${Math.round(px * q)}</text>`; });
-    // 2026-09-30 청산 급증을 그림 안에(사용자 지시): 오른쪽 끝 세로 막대 둘 = 1분 청산 z(롱 · 숏, 0~5, 3 눈금 = 급증 문턱).
-    //   급증이면 막대가 주황이고 지금가 줄 위에 «롱 청산 급증 · $/1분» 꼬리표 -- 롱 청산은 아래로 미는 힘이라 ↓, 숏 청산은 ↑.
-    if (bu) {
-      const bx = [w - 20, w - 8], bt = 16, bb = h - 22, zY = (zv) => bb - (bb - bt) * Math.max(0, Math.min(5, zv || 0)) / 5;
-      [["롱", bu.z_long], ["숏", bu.z_short]].forEach(([nm, zv], i) => {
-        const hot = mcLiqBurstHot(bu, i ? "short" : "long");
-        s += `<rect x="${bx[i] - 3}" y="${bt}" width="6" height="${bb - bt}" rx="3" fill="rgb(var(--lift) / .1)"/>`
-          + `<rect x="${bx[i] - 3}" y="${zY(zv).toFixed(1)}" width="6" height="${Math.max(0, bb - zY(zv)).toFixed(1)}" rx="3" fill="${hot ? "var(--warn)" : "var(--muted)"}"><title>${nm} 청산 1분 z ${(zv ?? 0).toFixed(1)}${hot ? " — 급증" : ""}</title></rect>`
-          + `<text x="${bx[i]}" y="${h - 10}" font-size="9" fill="var(--muted)" text-anchor="middle">${nm}</text>`;
-      });
-      s += `<line x1="${bx[0] - 6}" x2="${bx[1] + 6}" y1="${zY(3).toFixed(1)}" y2="${zY(3).toFixed(1)}" stroke="var(--warn)" stroke-dasharray="2 2" opacity=".7"/>`;
-      const hotSide = mcLiqBurstSide(bu);
-      if (hotSide) {
-        const shortSide = hotSide === "short", amt = (shortSide ? bu.short_usd_1m : bu.long_usd_1m) || 0;
-        s += `<text x="${w - 30}" y="${(Y(px) + (shortSide ? -8 : 16)).toFixed(1)}" font-size="11" font-weight="800" fill="var(--warn)" text-anchor="end">${shortSide ? "↑ 숏" : "↓ 롱"} 청산 급증 · ${fmtUsdCompact(amt)}/1분</text>`;
-      }
-    }
-    return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="가격 지형: HL 고래 청산가, VWAP 띠, 호가 거리, 청산 급증">${s}</svg>`;
-  },
   timeline(events, w = 900, h = 48) {   // 다음 24시간 -- 24시간 넘는 일정은 오른쪽 끝에 «>»
     const now = Date.now(), X2 = (hr) => 12 + (w - 24) * Math.min(24, hr) / 24;
     if (w < 600) {   // 휴대폰: 이름표가 서로 겹쳐 목록으로(같은 순서 · 남은 시간)
@@ -4237,7 +4189,6 @@ function mcUsSession(nowMs = Date.now()) {
 
 // 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
-let mcWallOff = FIT0.w4 || 0;   // 2026-10-01 ④ 벽·교차·위치가 시장 맥락 안에서 시작하는 높이 -- ③ 가격 지형 칸을 ④ 와 같은 위·아래로 맞춘다
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 function mcPlace(svg, r, wr) {
   const body = el("mcBody"), card = el("fpCard"), wall = el("mcWall");
@@ -4348,13 +4299,10 @@ function renderMarketCtx() {
     // 2026-09-30 사용자 «범례·청산 상태 글은 툴팁 안으로» -- 그림 위 호버에 두 줄. 청산 급증일 때만 판 위에 경고 한 줄을 남긴다(놓치면 안 되는 상태).
   ];
   // 2026-09-30 ④ 는 넓은 화면이면 오른쪽 칸 아랫줄 두 단(①② 아래, ③ 과 자리 바꿈) + 호가 계기 넷(변동·불균형·지속·이탈)을 여기로.
-  const wallBox = G.cmpW ? el("mcWall") : null, wallW = G.cmpW ? Math.max(160, Math.floor((G.cmpW - 18) / 2)) : null;   // ④ 두 단 중 한 단 폭
+  // 2026-10-01(3) 넓은 화면: 왼쪽 단 = ① 위 + ② 아래 · 오른쪽 단 = ④ 한 덩어리(사용자 지시 «④ 를 반씩 자르지 말고 하나로 · ② 를 ④ 반쪽 자리로») · 프로파일 아래는 비운다.
+  const wallW = G.cmpW ? Math.max(200, Math.floor((G.cmpW - 14) / 2)) : null;   // ④ = 한 단 폭
   // 2026-09-30 ③ 가격 지형 = 넓은 화면이면 호가/체결 프로파일 **아래**(#mcWall, 사용자 «높이가 낮아 겹친다 → ④ 와 자리 바꿔») -- 그 칸의 높이를 다 쓴다.
-  const mapHtml =
-    qSec("q_map", "③ 가격 지형 · ±6%", `<div class="mc-terrain" title="${escapeHtml(`원 = HL 고래 청산가(빨강 롱 · 초록 숏, 크기 = 금액) · 띠 = VWAP ±1·2σ · 왼쪽 눈금 = 호가 ±${bps.join("/")}bp · ◆ = 12시간 실측 청산 최다 · 오른쪽 막대 = 1분 청산 z(롱·숏, 점선 3 = 급증)`
-        + `\n청산 ${!bu ? "-" : burstSide ? `${burstSide === "short" ? "숏" : "롱"} 급증 · ${usd((burstSide === "short" ? bu.short_usd_1m : bu.long_usd_1m) || 0)}/1분` : `잠잠 · 롱 z ${n(bu.z_long, 1)} / 숏 z ${n(bu.z_short, 1)}`}`
-        + `${top ? ` · 12시간 최다 ${n(top[0], 1)}(롱 ${usd(top[1])} · 숏 ${usd(top[2])})` : ""}`)}">${G.terrain(px, d.hl_liq || {}, lv, bps, top, bu,
-          ...(wallBox ? [Math.max(120, wallBox.clientWidth - 4), Math.max(120, wallBox.clientHeight - 52)] : []))}</div>`);
+  // 2026-10-01 ③ 가격 지형 제거(사용자 지시 -- VWAP·현재가는 풋프린트와 중복, 나머지는 쓰임이 적었다). ④ 가 그 자리(호가/체결 프로파일 아래)로 돌아간다.
   const hsm = latestFlowHeatmap && latestFlowHeatmap.summary, gwKeep = G.gw;
   if (wallW) G.gw = Math.max(40, wallW - 58 - 44 - 12);   // ④ 단 폭에 맞춘 게이지(아래 wallHtml 을 다 만든 뒤 되돌린다)
   const statRows = G.cmpW && hsm ? STAT_KEYS.map((k) => {
@@ -4376,10 +4324,9 @@ function renderMarketCtx() {
       + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
       + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label></div>`);
   G.gw = gwKeep;
-  const wallHtml = G.cmpW ? wallHtml0.replace('<div class="mc-sec">', '<div class="mc-sec mc-span mc-2col">') : wallHtml0;
-  setH("mcWall", wallBox ? mapHtml : "");
-  if (!wallBox) htmlB.push(mapHtml);
-  htmlB.push(wallHtml);
+  setH("mcWall", "");
+  if (G.cmpW) htmlB = [`<div class="mc-stack">${htmlB.join("")}</div>`];   // ①② 를 한 단에 위아래로
+  htmlB.push(wallHtml0);
   htmlB = htmlB.join("");
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
   const whenBox = body.classList.contains("mc-cmp") ? el("mcWhen") : null;
@@ -4395,9 +4342,8 @@ function renderMarketCtx() {
   keepFocus(body, () => { body.innerHTML = htmlB; });
   if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
     const top = body.getBoundingClientRect().top, need = Math.ceil(Math.max(0, ...[...body.children].map((k) => k.getBoundingClientRect().bottom - top)) + 6);
-    const w4 = body.querySelector(".mc-2col"), off = w4 ? Math.round(w4.getBoundingClientRect().top - top) : 0;
-    if ((need > 40 && Math.abs(need - mcNeedH) > 4) || Math.abs(off - mcWallOff) > 4) {
-      mcNeedH = need; mcWallOff = off; if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
+    if (need > 40 && Math.abs(need - mcNeedH) > 4) {
+      mcNeedH = need; if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
     }
   }
 }
@@ -5370,8 +5316,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const QUAD_TEXT_OK = laneSlot >= 66;
   // 2026-10-01 넓은 ETH 2단: 사분면 줄을 줄여 가격 플롯 바닥 + 12 = ④ 윗변(③ 가격 지형 = ④ 와 같은 높이, 사용자 지시) -- 줄어든 만큼 풋프린트·프로파일이 길어진다.
   //   ④ 윗변 = hAll − 8 − ④ 높이(시장 맥락이 칸 바닥에 붙는다), 플롯 바닥 = h − 76 − QUAD_H − QUAD_TXT ⇒ QUAD_H + QUAD_TXT = ④ 높이 − 56.
-  const wall4H = footprint && !mobileChart && splitR && activeSnapshotAsset === "eth" && mcWallOff ? mcNeedH - mcWallOff : 0;
-  const QUAD_H = fpBars.length ? (mobileChart ? 112 : wall4H ? Math.max(90, Math.min(162, wall4H - 56 - (QUAD_TEXT_OK ? 34 : 0))) : 162) : 0;
+  const QUAD_H = fpBars.length ? (mobileChart ? 112 : 162) : 0;
   const QUAD_TXT = (fpBars.length && QUAD_TEXT_OK) ? (mobileChart ? 28 : 34) : 0;
   const CUM_H = fpBars.length ? (mobileChart ? 104 : 160) : 0;
   // 2026-09-27 데스크톱은 누적 CVD·OI 를 사분면 막대 **뒤에** 흐리게 깐다(사용자 선택 A) -- 제 줄(160+6)을 풋프린트에 준다.
@@ -7932,8 +7877,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const s1Avail = hAll - mtTop - 4;
     const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16 : Math.round(s1Avail * 0.47)) : s1Avail) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: hAll - (sub1sY + s1H + 12) - 4 } : null,
-            mcSplit && TRADE_W ? (() => { const y = Math.max(plotBottom + 12, sub1sY + s1H + 12 + mcWallOff);   // ③ 윗변 = ④ 윗변
-              return { x: ml + cw + 4, y, w: TAG_W + TRADE_W + BOOK_W - 8, h: hAll - y - 4 }; })() : null);   // ④ = 꼬리표 칸 + 프로파일 아래(두 단)
+            null);   // 2026-10-01(3) 프로파일 아래 칸은 비운다(사용자 지시)
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),
