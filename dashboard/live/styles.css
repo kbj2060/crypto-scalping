@@ -2816,3 +2816,10 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 /* 2026-10-01(3) 넓은 화면 시장 맥락 = 왼쪽 단 ①② 위아래 · 오른쪽 단 ④ 한 덩어리 -- 차트에 그리기는 2×2 */
 #mcBody.mc-cmp .mc-switch { display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 5px 14px; font-size: 11px; }
 #mcBody.mc-cmp .mc-switch-t { grid-column: 1 / -1; }
+
+/* 2026-10-01 «차트에 그리기» = 풋프린트 청산 밀도 범례 오른쪽 한 줄(넓은 화면) -- 자리는 app.js renderCandleSvg 가 준다(세로 가운데 맞춤) */
+.fp-line-switch { display: none; }
+.fp-line-switch.on { display: flex; position: absolute; z-index: 2; transform: translateY(-50%); margin: 0; gap: 14px; align-items: center; font-size: 11px; white-space: nowrap; }
+.fp-line-switch .mc-switch-t { color: var(--muted); font-weight: 600; }
+body.not-eth #fpLineSwitch { display: none; }
+.fp-line-switch > .mc-switch { display: flex; flex-wrap: nowrap; gap: 14px; align-items: center; margin: 0; font-size: 11px; }

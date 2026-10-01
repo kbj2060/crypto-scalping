@@ -4310,6 +4310,12 @@ function renderMarketCtx() {
     const val = f == null ? "-" : k === "obi" ? `${f > 0 ? "+" : ""}${f.toFixed(2)}` : `${Math.round(f * 100)}%`;
     return gRow(STAT_NAME[k], k === "obi" ? G.sig(f == null ? null : f * 3) : G.pct(f), val, k === "vol" && f >= 0.66 ? "mc-warn" : "", tip);
   }).join("") : "";
+  // 2026-10-01 «차트에 그리기» = 넓은 화면이면 풋프린트 청산 밀도 범례 오른쪽 한 줄(#fpLineSwitch, 사용자 지시) -- ④ 는 그만큼 짧아지고 1초 수급이 남는 높이를 가져간다
+  const lineSw = `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span><label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
+      + `<label title="끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)"><input type="checkbox" data-line="vsess"${mcLine.vsess ? " checked" : ""}> 세션 시작부터</label>`
+      + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
+      + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label></div>`;
+  setH("fpLineSwitch", G.cmpW ? lineSw : "");
   const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", (sw ? G.book(sw, bps, ...(wallW ? [wallW] : [])) : note("호가 래스터 대기")) + statRows
       + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(2)}${bk.spread > 0.015 ? " — 평소(1틱)보다 넓다" : ""}`
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
@@ -4319,10 +4325,7 @@ function renderMarketCtx() {
       + gRow("VWAP 거리", G.sig(vz), sg(vz, 1, "σ"), "", lv ? `${lv.name} VWAP ${n(lv.vwap, 1)}` : "")
       + gRow("볼린저 %B", G.pct(pb), pb == null ? "-" : n(pb, 2), "", bb ? `폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%` : "")
       + gRow("RSI 14", G.pct(rsi == null ? null : rsi / 100), rsi == null ? "-" : n(rsi, 0), rsi != null && (rsi >= 70 || rsi <= 30) ? "mc-warn" : "")
-      + `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span><label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
-      + `<label title="끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)"><input type="checkbox" data-line="vsess"${mcLine.vsess ? " checked" : ""}> 세션 시작부터</label>`
-      + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
-      + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label></div>`);
+      + (G.cmpW ? "" : lineSw));
   G.gw = gwKeep;
   setH("mcWall", "");
   if (G.cmpW) htmlB = [`<div class="mc-stack">${htmlB.join("")}</div>`];   // ①② 를 한 단에 위아래로
@@ -4358,14 +4361,14 @@ function renderMarketCtx() {
   if (tip) tip.hidden = !open;
   el("mcBody")._mcHtml = null;         // 다음 그리기에서 펼침 상태를 반영한다
 }));
-el("mcBody")?.addEventListener("change", (e) => {
+["mcBody", "fpLineSwitch"].forEach((id) => el(id)?.addEventListener("change", (e) => {   // 체크박스는 넓은 화면이면 #fpLineSwitch
   const k = e.target?.dataset?.line;
   if (!k) return;
   mcLine[k] = e.target.checked;
   try { localStorage.setItem("mcLine", JSON.stringify(mcLine)); } catch (err) { /* 기억은 편의 */ }
   el("mcBody")._mcHtml = null;
   scheduleSnapshotChartRender();
-});
+}));
 
 
 // 2026-09-26 비평: 수 초마다 innerHTML 을 통째로 갈아 끼우는 카드에서 Tab 으로 훑던 포커스가 <body> 로 떨어졌다.
@@ -7876,6 +7879,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   아직 못 쟀으면 47% · 1초 수급은 칸의 30% 아래로는 안 줄인다.
     const s1Avail = hAll - mtTop - 4;
     const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16 : Math.round(s1Avail * 0.47)) : s1Avail) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
+      if (fs && card) {
+        const on = mcSplit && SUB_LEGEND_H > 0, a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
+        fs.classList.toggle("on", on);
+        if (on) { fs.style.left = `${Math.round(a.left - c.left + ml + 290)}px`; fs.style.top = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`; }
+      } }
     mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: hAll - (sub1sY + s1H + 12) - 4 } : null,
             null);   // 2026-10-01(3) 프로파일 아래 칸은 비운다(사용자 지시)
     supply1sSubBox = {
