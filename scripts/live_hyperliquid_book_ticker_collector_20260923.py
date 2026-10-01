@@ -51,7 +51,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 _bn = importlib.import_module("scripts.live_book_ticker_collector_20260914")
-_tape = importlib.import_module("scripts.live_trade_tape_collector_20260916")   # duckdb_connect_retry
+_ds = importlib.import_module("scripts.data_store")                              # rw_connect · sqlite_init (4c)
 HourFile = _bn.HourFile
 MAGIC, VER, HDR, ROW = _bn.MAGIC, _bn.VER, _bn.HDR, _bn.ROW
 
@@ -62,10 +62,9 @@ CTX_DB_ENV = os.getenv("HL_CTX_DB_PATH")
 
 
 def default_ctx_db(coin: str) -> Path:
-    """ETH 는 기존 파일(대시보드·연구가 읽는다). 다른 코인은 자기 파일 -- duckdb 는 writer 가 하나라
-    코인 5개가 한 파일을 번갈아 열면 잠금 충돌이 5배가 된다(microstructure_xrp.duckdb 와 같은 규약)."""
-    name = "hyperliquid_context.duckdb" if coin.upper() == "ETH" else f"hyperliquid_context_{coin.lower()}.duckdb"
-    return ROOT / "data" / "live" / name
+    """2026-10-01 저장 재설계 4c: hot SQLite 한 파일(코인 = coin 열, WAL 이라 읽는 쪽과 안 막힌다). 옛 DuckDB 는
+    data/live/hyperliquid_context[_<coin>].duckdb 에 얼어 있다."""
+    return ROOT / "data" / "hot" / "hl_ctx.sqlite"
 
 
 WS_URL = "wss://api.hyperliquid.xyz/ws"
@@ -121,9 +120,14 @@ class CtxStore:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
         self.pending: list[tuple] = []
+        sqlite = db_path.suffix == ".sqlite"
+        if sqlite:
+            _ds.sqlite_init(db_path)
         with self._connect() as con:
             con.execute(CTX_DDL)
             con.execute("CREATE TABLE IF NOT EXISTS meta(key VARCHAR, value VARCHAR)")
+            if sqlite:
+                con.execute("CREATE INDEX IF NOT EXISTS hl_asset_ctx_i ON hl_asset_ctx(coin, recv_ms)")
             for key, value in (("recv_ms", "🔴우리 시계다 -- activeAssetCtx 에는 거래소 시각이 없다"),
                                ("sz_unit", "ETH (계약 수가 아니다)"),
                                ("l2book_note", "l2Book 은 중앙 5.4초 간격이라 받지 않는다")):
@@ -131,7 +135,7 @@ class CtxStore:
                 con.execute("INSERT INTO meta VALUES (?, ?)", [key, value])
 
     def _connect(self):
-        return _tape.duckdb_connect_retry(self.db_path)   # 읽는 쪽과 잠금 충돌이면 잠깐 기다린다
+        return _ds.rw_connect(self.db_path)   # .sqlite = hot / .duckdb = 읽는 쪽과 잠금 충돌이면 잠깐 기다린다
 
     def write(self, rows: list[tuple]) -> None:
         self.pending.extend(rows)
@@ -140,9 +144,9 @@ class CtxStore:
         try:
             marks = ",".join("?" * CTX_WIDTH)
             with self._connect() as con:
-                con.begin()      # 🔴자동커밋이면 행마다 fsync 다(체결 테이프 TapeStore.write 참고)
+                con.execute("BEGIN")      # 🔴자동커밋이면 행마다 fsync 다(체결 테이프 TapeStore.write 참고)
                 con.executemany(f"INSERT INTO hl_asset_ctx VALUES ({marks})", self.pending)
-                con.commit()
+                con.execute("COMMIT")
             self.pending.clear()
         except Exception as exc:  # noqa: BLE001 -- 대개 읽는 쪽이 잡고 있는 락이다
             if len(self.pending) > 50_000:

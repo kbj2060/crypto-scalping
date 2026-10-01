@@ -15,6 +15,7 @@ from __future__ import annotations
 import gzip
 import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +30,37 @@ LAKE = Path(os.getenv("DATA_LAKE") or (_BACKUP_LAKE if not (ROOT / "data" / "lak
 # scripts/live_book_ticker_collector_20260914.py 의 HDR(32B)·ROW("<qdfdf", 32B)와 같아야 한다 -- 테스트가 대조한다.
 BT_HEADER_BYTES = 32
 BT_DTYPE = np.dtype([("ts_ms", "<i8"), ("bid_px", "<f8"), ("bid_qty", "<f4"), ("ask_px", "<f8"), ("ask_qty", "<f4")])
+
+
+def sqlite_init(path: Path, indexes: tuple[str, ...] = ()) -> None:
+    """hot SQLite 새 파일 설정 + 인덱스. auto_vacuum 은 새 파일에서만, WAL 전환보다 먼저(뒤면 조용히 0)."""
+    import sqlite3
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(path, timeout=30)
+    try:
+        con.execute("PRAGMA auto_vacuum = INCREMENTAL")
+        con.execute("PRAGMA journal_mode = WAL")
+        for ddl in indexes:                       # 표는 호출 쪽이 먼저 만든다
+            con.execute(ddl)
+        con.commit()
+    finally:
+        con.close()
+
+
+@contextmanager
+def rw_connect(path: Path):
+    """수집기 쓰기 연결 하나 -- .sqlite(hot) = 자동커밋(isolation_level=None)이라 트랜잭션은 BEGIN/COMMIT 문장으로
+    두 엔진 똑같이 연다. .duckdb = 읽는 쪽과 잠금 충돌이면 잠깐 기다렸다 연다(duckdb_connect_retry)."""
+    if path.suffix == ".sqlite":
+        import sqlite3
+        con = sqlite3.connect(path, timeout=30, isolation_level=None)
+    else:
+        from scripts.live_trade_tape_collector_20260916 import duckdb_connect_retry
+        con = duckdb_connect_retry(path)
+    try:
+        yield con
+    finally:
+        con.close()
 
 
 def read_rows(path: Path, sql: str, params: list | tuple = ()) -> list[tuple]:

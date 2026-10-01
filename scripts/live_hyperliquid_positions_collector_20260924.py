@@ -49,16 +49,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-_tape = importlib.import_module("scripts.live_trade_tape_collector_20260916")   # duckdb_connect_retry · log
+_tape = importlib.import_module("scripts.live_trade_tape_collector_20260916")   # log
+_ds = importlib.import_module("scripts.data_store")                              # rw_connect · sqlite_init (4c)
 log = _tape.log
 
 INFO_URL = "https://api.hyperliquid.xyz/info"
 COINS = [c.strip().upper() for c in os.getenv("HL_POS_COINS", os.getenv("HL_POS_COIN", "ETH")).split(",")
          if c.strip()]
-# ETH 단독은 기존 파일 그대로(대시보드·연구가 이 경로를 읽는다). 다른 조합은 자기 파일 -- duckdb 는 writer 가 하나다.
-_DEFAULT_DB = ("hyperliquid_positions.duckdb" if COINS == ["ETH"]
-               else f"hyperliquid_positions_{'_'.join(c.lower() for c in COINS)}.duckdb")
-DB = Path(os.getenv("HL_POS_DB", str(ROOT / "data" / "live" / _DEFAULT_DB)))
+# 2026-10-01 저장 재설계 4c: hot SQLite. 🔴프로세스(코인 조합)마다 파일 하나 -- 대시보드가 «마지막으로 다 돈 바퀴»를
+#   hl_cycles 의 max(ts_ms) 로 고르므로, 바퀴가 다른 프로세스 둘이 한 파일에 섞이면 ETH 바퀴를 놓친다.
+_DEFAULT_DB = ("hl_positions.sqlite" if COINS == ["ETH"]
+               else f"hl_positions_{'_'.join(c.lower() for c in COINS)}.sqlite")
+DB = Path(os.getenv("HL_POS_DB", str(ROOT / "data" / "hot" / _DEFAULT_DB)))
 TRADES_ROOT = Path(os.getenv("HL_ROOT", str(ROOT / "data" / "live" / "orderflow" / "hyperliquid")))
 UNIVERSE_N = 300        # 코인마다. 다코인이면 코인별 상위 N 의 합집합이다
 UNIVERSE_HOURS = 48
@@ -189,13 +191,13 @@ def merge_universe(ranked: dict[str, list[tuple[str, float]]]) -> list[str]:
 
 
 def write(sql_rows: dict[str, list[tuple]]) -> None:
-    with _tape.duckdb_connect_retry(DB) as con:
-        con.begin()                         # 🔴한 번에 -- 자동커밋이면 행마다 fsync 다
+    with _ds.rw_connect(DB) as con:
+        con.execute("BEGIN")                # 🔴한 번에 -- 자동커밋이면 행마다 fsync 다
         for table, rows in sql_rows.items():
             if rows:
                 marks = ",".join("?" * len(rows[0]))
                 con.executemany(f"INSERT INTO {table} VALUES ({marks})", rows)
-        con.commit()
+        con.execute("COMMIT")
 
 
 async def _info(session, body: dict):
@@ -241,12 +243,31 @@ async def detect_liquidations(session, prev, rows, prev_t0: float, seen_tids: se
     return out
 
 
+def init_db(db: Path) -> None:
+    db.parent.mkdir(parents=True, exist_ok=True)
+    sqlite = db.suffix == ".sqlite"
+    if sqlite:
+        _ds.sqlite_init(db)
+    with _ds.rw_connect(db) as con:
+        for ddl in DDL:
+            if sqlite and ddl.startswith("ALTER"):          # SQLite 에는 ADD COLUMN IF NOT EXISTS 가 없다
+                try:
+                    con.execute(ddl.replace(" IF NOT EXISTS", ""))
+                except Exception:  # noqa: BLE001 -- 이미 있으면 그게 정상이다
+                    pass
+            else:
+                con.execute(ddl)
+        if sqlite:                                          # 대시보드: 코인·시각 구간 / 마지막 바퀴
+            for ddl in ("CREATE INDEX IF NOT EXISTS hl_positions_i ON hl_positions(coin, ts_ms)",
+                        "CREATE INDEX IF NOT EXISTS hl_liquidations_i ON hl_liquidations(coin, fill_ms)",
+                        "CREATE INDEX IF NOT EXISTS hl_cycles_i ON hl_cycles(ts_ms)",
+                        "CREATE INDEX IF NOT EXISTS hl_universe_i ON hl_universe(ts_ms)"):
+                con.execute(ddl)
+
+
 async def run() -> None:
     from aiohttp import ClientSession, ClientTimeout
-    DB.parent.mkdir(parents=True, exist_ok=True)
-    with _tape.duckdb_connect_retry(DB) as con:
-        for ddl in DDL:
-            con.execute(ddl)
+    init_db(DB)
     users: list[str] = []
     picked_at = 0.0
     prev: dict[str, dict[str, tuple[float, float | None]]] = {}   # 직전 바퀴 {코인: {주소: (szi, 청산가)}}
