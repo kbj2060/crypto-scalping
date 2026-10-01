@@ -15,10 +15,22 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEST="${BACKUP_DEST:-/mnt/d/crypto-scalping-backups}"
 
+# hot SQLite(2026-10-01 저장 재설계 3b -- 바이낸스 테이프 최근 16일의 원본)는 쓰는 중인 파일을 rsync 하면 찢긴다.
+#   SQLite 온라인 백업 API 로 한 시점 사본을 data/hot_backup/ 에 떠서 그걸 보낸다(WAL 이라 수집기 쓰기를 안 막는다).
+mkdir -p "$ROOT/data/hot_backup"
+for f in "$ROOT"/data/hot/*.sqlite; do
+  [[ -f "$f" ]] || continue
+  dst="$ROOT/data/hot_backup/$(basename "$f")"
+  python3 -c 'import sqlite3, sys
+s = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=60); d = sqlite3.connect(sys.argv[2])
+s.backup(d); d.close(); s.close()' "$f" "$dst.tmp" && mv "$dst.tmp" "$dst" \
+    || echo "[$(date -Iseconds)] 🔴 hot backup failed: $f"
+done
+
 if [[ -d "$(dirname "$DEST")" ]]; then
   mkdir -p "$DEST/data/live" "$DEST/data/ensemble"
   echo "[$(date -Iseconds)] backup starting -> $DEST"
-  for dir in data/live data/ensemble data/lake; do
+  for dir in data/live data/ensemble data/lake data/hot_backup; do
     [[ -d "$ROOT/$dir" ]] || continue
     mkdir -p "$DEST/$dir"
     rsync -a --exclude '*.tmp' --exclude '.snap_*' "$ROOT/$dir/" "$DEST/$dir/"
@@ -53,7 +65,7 @@ SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -p "$DEV_PORT")
 
 echo "[$(date -Iseconds)] dev backup starting -> $DEV_HOST:$DEV_DEST"
 rc=0
-for dir in data/live data/ensemble data/lake; do     # data/lake = 봉인된 일별 Parquet(안 바뀜, scripts/seal_to_lake.py)
+for dir in data/live data/ensemble data/lake data/hot_backup; do     # lake = 봉인된 일별 Parquet · hot_backup = hot SQLite 한 시점 사본
   [[ -d "$ROOT/$dir" ]] || continue
   "${SSH[@]}" "$DEV_HOST" "mkdir -p '$DEV_DEST/$dir'" || { rc=1; continue; }
   rsync -a --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*' -e "${SSH[*]}" "$ROOT/$dir/" "$DEV_HOST:$DEV_DEST/$dir/"

@@ -6,8 +6,9 @@
 - 끝난 UTC 날짜만 쓴다(자정 + LAG_HOURS 뒤). 파일이 있으면 건너뛰므로 여러 번 돌려도 같다 -- 첫 실행이 곧
   기존 이력 전체 내보내기다.
 - 쓰기는 .part -> 행 수 대조 -> rename. 원천 행 수와 다르면 버리고 실패로 센다.
-- ponytail: 봉인 뒤에 원천이 그 날짜를 고쳐 써도(테이프 백필 등) lake 는 모른다. LAG_HOURS 로 흔한 경우만
-  막는다. 3단계 hot(SQLite)에서 dirty_hours 표로 다시 봉인하게 바꾼다.
+- hot SQLite(바이낸스 테이프, 3b)는 복사하지 않고 그대로 읽는다 -- WAL 이라 쓰는 쪽과 안 막힌다.
+- 🔴봉인 뒤에도 원천이 그 날짜를 고쳐 쓴다(테이프 백필: 바이낸스 47시간·OKX 7일 전까지). 그래서 최근 RESEAL_DAYS 일은
+  이미 있는 파일도 «행 수 + 행 해시 XOR» 지문을 원천과 대조해 다르면 다시 쓴다(.part -> rename, 한 날짜 파일 하나).
 
 cron(서버, 매일 11:05 KST = 02:05 UTC):  python scripts/seal_to_lake.py
 수동: python scripts/seal_to_lake.py --dry-run [--only binance/tape]
@@ -30,6 +31,8 @@ from scripts.data_store import LAKE, ROOT, lake_path  # noqa: E402
 from scripts.live_trade_tape_collector_20260916 import HOT_TAPE_DB  # noqa: E402
 
 LAG_HOURS = 2
+RESEAL_DAYS = 8        # 테이프 백필이 고쳐 쓰는 기간(OKX 7일·바이낸스 47시간)보다 길게
+HOT_REL = "data/hot/binance_tape.sqlite"
 HOT_KEEP_DAYS = 16     # hot 테이프: micro_ref 기준선 7일 · flow_hour_scales 14일(오늘 0시 전) + 여유
 L, A = "data/live", "data/archive/live_retired_20261001"     # A = 1단계에서 보관한 09-19 정지 코인별 DB
 C5 = ("eth", "btc", "sol", "xrp", "hype")
@@ -47,7 +50,7 @@ def lit(c: str) -> str:
 
 # (venue, stream, [(원천 파일, 표 이름 | None=jsonl, coin SQL)], ts_ms SQL)
 SPECS = [
-    ("binance", "tape", [(f"{L}/trade_tape{sfx(c)}.duckdb", "trade_tape_1s", lit(c)) for c in C5], "ts_sec * 1000"),
+    ("binance", "tape", [(HOT_REL, "trade_tape_1s", SYM)], "ts_sec * 1000"),     # 3b: 5코인 hot 한 파일(09-30 까지는 옛 DuckDB 에서 봉인됨)
     ("binance", "spot_tape", [(f"{L}/trade_tape_spot{sfx(c)}.duckdb", "trade_tape_1s", lit(c)) for c in ("eth", "sol", "xrp")],
      "ts_sec * 1000"),
     ("binance", "oi_1s", [(f"{L}/oi_1s.duckdb", "oi_1s", SYM)], "ts_ms"),
@@ -81,7 +84,9 @@ SPECS = [
 
 
 def snapshot(src: Path, tmp: Path) -> Path | None:
-    """라이브 파일 사본. duckdb 는 열어 표마다 count 가 되는지 확인한다(찢긴 사본이면 다시)."""
+    """라이브 파일 사본. duckdb 는 열어 표마다 count 가 되는지 확인한다(찢긴 사본이면 다시). .sqlite 는 원본 그대로(WAL)."""
+    if src.suffix == ".sqlite":
+        return src
     dst = tmp / f"{len(list(tmp.iterdir()))}_{src.name}"
     for _ in range(3):
         shutil.copyfile(src, dst)
@@ -103,7 +108,7 @@ def seal(specs=SPECS, root: Path = ROOT, lake: Path = LAKE, now: dt.datetime | N
          dry_run: bool = False, only: str | None = None) -> dict[str, int]:
     now = now or dt.datetime.now(dt.timezone.utc)
     last_day = (now - dt.timedelta(hours=LAG_HOURS)).date() - dt.timedelta(days=1)   # 이 날짜까지 끝났다
-    stats = {"written": 0, "rows": 0, "skipped_existing": 0, "failed": 0, "missing_source": 0}
+    stats = {"written": 0, "rows": 0, "skipped_existing": 0, "resealed": 0, "failed": 0, "missing_source": 0}
     lake.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=".snap_", dir=lake))
     snaps: dict[Path, str | None] = {}           # 원천 -> attach 별칭 (jsonl 은 사본 경로)
@@ -123,7 +128,8 @@ def seal(specs=SPECS, root: Path = ROOT, lake: Path = LAKE, now: dt.datetime | N
                     snap = snapshot(src, tmp)
                     if snap is not None and table is not None:
                         alias = f"s{len(snaps)}"
-                        con.execute(f"attach '{snap.as_posix()}' as {alias} (read_only)")
+                        kind = ", TYPE sqlite" if snap.suffix == ".sqlite" else ""
+                        con.execute(f"attach '{snap.as_posix()}' as {alias} (read_only{kind})")
                         snaps[src] = alias
                     else:
                         snaps[src] = None if snap is None else snap.as_posix()
@@ -148,11 +154,18 @@ def seal(specs=SPECS, root: Path = ROOT, lake: Path = LAKE, now: dt.datetime | N
             con.execute(f"create or replace temp view v as {' union all by name '.join(parts)}")
             todo = con.execute("select __coin, __day, count(*) from v where __coin is not null and __day <= ? "
                                "group by all order by all", [last_day]).fetchall()
+            fp = "select count(*), bit_xor(hash(x)) from ({}) x"
             for coin, day, n in todo:
                 out = lake_path(venue, stream, coin, day.isoformat(), lake)
                 if out.exists():
-                    stats["skipped_existing"] += 1
-                    continue
+                    if day <= last_day - dt.timedelta(days=RESEAL_DAYS) or (
+                            con.execute(fp.format("select * exclude (__coin, __day) from v where __coin = ? and __day = ?"),
+                                        [coin, day]).fetchone()
+                            == con.execute(fp.format(f"select * from read_parquet('{out.as_posix()}', hive_partitioning = false)"
+                                                     )).fetchone()):   # 경로의 coin=/date= 를 열로 붙이면 해시가 달라진다
+                        stats["skipped_existing"] += 1
+                        continue
+                    stats["resealed"] += 1           # 원천이 그 날짜를 고쳐 썼다(백필) -- 아래에서 통째로 다시 쓴다
                 if dry_run:
                     stats["written"] += 1
                     stats["rows"] += n
@@ -176,13 +189,25 @@ def seal(specs=SPECS, root: Path = ROOT, lake: Path = LAKE, now: dt.datetime | N
     return stats
 
 
-def prune_hot(hot: Path = HOT_TAPE_DB, now: dt.datetime | None = None, keep_days: int = HOT_KEEP_DAYS) -> int:
+def prune_hot(hot: Path = HOT_TAPE_DB, now: dt.datetime | None = None, keep_days: int = HOT_KEEP_DAYS,
+              lake: Path = LAKE) -> int:
     """hot 테이프(SQLite)에서 keep_days 넘은 행을 지우고 공간을 돌려준다(auto_vacuum=INCREMENTAL).
-    3단계(3a) 동안은 DuckDB 원본이 전부 갖고 있고 lake 도 그쪽에서 봉인하므로 지워도 유실이 아니다."""
+    🔴3b 부터 hot 이 원본이다 -- 지울 행이 있는 (코인, 날짜)가 **전부** lake 에 봉인돼 있을 때만 지운다(아니면 0, 로그)."""
     if not hot.exists():
         return 0
     now = now or dt.datetime.now(dt.timezone.utc)
     cut = int(now.timestamp()) // 86400 * 86400 - keep_days * 86400
+    con = sqlite3.connect(f"file:{hot}?mode=ro", uri=True, timeout=30)
+    try:
+        held = con.execute("SELECT DISTINCT symbol, ts_sec / 86400 FROM trade_tape_1s WHERE ts_sec < ?", [cut]).fetchall()
+    finally:
+        con.close()
+    day = lambda d: dt.datetime.fromtimestamp(d * 86400, dt.timezone.utc).date().isoformat()   # noqa: E731
+    unsealed = [(s, day(d)) for s, d in held
+                if not lake_path("binance", "tape", s.upper().removesuffix("USDT"), day(d), lake).exists()]
+    if unsealed:
+        print(f"[seal] 🔴 hot 정리 건너뜀: lake 에 없는 날짜 {unsealed[:5]}", flush=True)
+        return 0
     con = sqlite3.connect(hot, timeout=30)
     try:
         with con:
@@ -202,7 +227,7 @@ if __name__ == "__main__":
     a = ap.parse_args()
     t0 = time.time()
     s = seal(dry_run=a.dry_run, only=a.only)
-    if not a.dry_run and not a.only:
+    if not a.dry_run and not a.only and not s["failed"]:
         s["hot_pruned_rows"] = prune_hot()
     print(f"[seal] {'DRY-RUN ' if a.dry_run else ''}{dt.datetime.now().isoformat(timespec='seconds')} "
           f"lake={LAKE} {s} {time.time() - t0:.0f}s", flush=True)

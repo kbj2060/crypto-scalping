@@ -11,7 +11,7 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from scripts import data_store as ds  # noqa: E402
-from scripts.live_trade_tape_collector_20260916 import HotMirror  # noqa: E402
+from scripts.live_trade_tape_collector_20260916 import TapeStore  # noqa: E402
 from scripts.seal_to_lake import prune_hot, seal  # noqa: E402
 
 D0 = int(dt.datetime(2026, 9, 28, tzinfo=dt.timezone.utc).timestamp())   # 09-28 00:00 UTC
@@ -37,7 +37,7 @@ def test_seal_and_read():
              ("x", "torn", [("live/torn.duckdb", "t", "'ETH'")], "ts_ms")]
     now = dt.datetime(2026, 9, 30, 12, tzinfo=dt.timezone.utc)
     s = seal(specs, root=root, lake=lake, now=now)
-    assert s == {"written": 4, "rows": 4, "skipped_existing": 0, "failed": 1, "missing_source": 0}, s
+    assert s == {"written": 4, "rows": 4, "skipped_existing": 0, "resealed": 0, "failed": 1, "missing_source": 0}, s
     again = seal(specs[:2], root=root, lake=lake, now=now)
     assert again["written"] == 0 and again["skipped_existing"] == 4, again
     eth = ds.read("x", "tape", "ETH", lake=lake)
@@ -59,27 +59,44 @@ def test_bt_format_matches_collector():
     assert a["ts_ms"].tolist() == [1, 2] and a["ask_px"].tolist() == [100.6, 101.1] and a["bid_qty"].tolist() == [2.0, 1.5]
 
 
-def test_prune_hot():
+def _row(sym, ts, q=1.0):
+    return (ts, 1) + (q,) * 16                                               # TapeStore.write 행 = 심볼 뺀 18칸
+
+
+def test_hot_source_reseal_and_guarded_prune():
     import sqlite3
-    hot = Path(tempfile.mkdtemp()) / "h.sqlite"
-    m = HotMirror(hot)
-    now = dt.datetime(2026, 10, 1, 5, tzinfo=dt.timezone.utc)
-    cut = int(now.timestamp()) // 86400 * 86400 - 16 * 86400
-    row = lambda ts: ("ethusdt", ts, 1) + (1.0,) * 16                                    # noqa: E731
-    m.run([(HotMirror.INSERT, [row(cut - 1), row(cut), row(cut + 3600)] + [row(cut - 10 - i) for i in range(3000)], True),
-           ("INSERT INTO verify_1m VALUES (?,?,?,?,?,?)", ("ethusdt", cut - 60, 1, 1, 0, "x"), False),
-           ("INSERT INTO gaps VALUES (?,?,?,?)", ("ethusdt", (cut - 9) * 1000, (cut - 5) * 1000, "t"), False)])
-    size0 = hot.stat().st_size
-    assert prune_hot(hot, now) == 3001                                                     # 경계 초(cut)는 남는다
+    root = Path(tempfile.mkdtemp())
+    hot = root / "data" / "hot" / "binance_tape.sqlite"
+    lake = root / "lake"
+    eth, xrp = TapeStore(hot, "ethusdt", 0.1), TapeStore(hot, "xrpusdt", 0.0001)
+    eth.write([_row("ethusdt", D0 + 10), _row("ethusdt", D0 + 86400 + 10)])
+    xrp.write([_row("xrpusdt", D0 + 20, 2.0)])
+    spec = [("binance", "tape", [("data/hot/binance_tape.sqlite", "trade_tape_1s",
+                                  "upper(regexp_replace(symbol, '(?i)usdt$', ''))")], "ts_sec * 1000")]
+    now = dt.datetime(2026, 9, 30, 12, tzinfo=dt.timezone.utc)
+    s1 = seal(spec, root=root, lake=lake, now=now)
+    assert s1["written"] == 3 and s1["failed"] == 0, s1                       # ETH 09-28·09-29, XRP 09-28 -- 복사 없이 읽음
+    assert sorted(ds.read("binance", "tape", "ETH", lake=lake)["ts_sec"]) == [D0 + 10, D0 + 86400 + 10]
+    # 백필이 봉인된 날짜를 고쳐 쓴다(분 통째 교체) -> 지문이 달라져 그 날짜 하나만 다시 쓴다
+    eth.replace_minute((D0 + 86400) // 60 * 60, [_row("ethusdt", D0 + 86400 + 10, 5.0)[0:]], 5.0, "test", "t")
+    s2 = seal(spec, root=root, lake=lake, now=now)
+    assert (s2["resealed"], s2["written"], s2["skipped_existing"]) == (1, 1, 2), s2
+    assert ds.read("binance", "tape", "ETH", "2026-09-29", "2026-09-30", lake=lake)["buy_qty"].tolist() == [5.0]
+    # 정리: 지울 행이 있는 (코인, 날짜)가 전부 lake 에 있어야 지운다
+    later = now + dt.timedelta(days=17)                                      # cut = 10-01 00:00 -> 09-28·09-29 행이 대상
     c = sqlite3.connect(hot)
-    assert [r[0] for r in c.execute("SELECT ts_sec FROM trade_tape_1s ORDER BY 1")] == [cut, cut + 3600]
-    assert c.execute("SELECT count(*) FROM verify_1m").fetchone()[0] == 0 == c.execute("SELECT count(*) FROM gaps").fetchone()[0]
-    c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    assert hot.stat().st_size < size0, "공간을 안 돌려줬다(auto_vacuum)"
+    gone = ds.lake_path("binance", "tape", "XRP", "2026-09-28", lake)
+    gone.rename(gone.with_suffix(".bak"))                                    # 봉인이 빠진 상황
+    assert prune_hot(hot, later, keep_days=16, lake=lake) == 0, "XRP 09-28 lake 가 없는데 지웠다"
+    assert c.execute("SELECT count(*) FROM trade_tape_1s").fetchone()[0] == 3
+    gone.with_suffix(".bak").rename(gone)
+    assert prune_hot(hot, later, keep_days=16, lake=lake) == 3               # 행 없는 날(XRP 09-29)은 파일이 없어도 된다
+    assert c.execute("SELECT count(*) FROM trade_tape_1s").fetchone()[0] == 0
+    c.close()
 
 
 if __name__ == "__main__":
-    test_prune_hot()
+    test_hot_source_reseal_and_guarded_prune()
     test_seal_and_read()
     test_bt_format_matches_collector()
     print("ok")
