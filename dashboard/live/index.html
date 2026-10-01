@@ -212,6 +212,7 @@
               <button type="button" class="asset-tab" data-bars="48">4h</button>
               <button type="button" class="asset-tab" data-bars="144">12h</button>
             </div>
+            <div id="chartPan" class="chart-pan" hidden></div>   <!-- 2026-10-01 창 이동 미니맵(12시간) · app.js renderChartPan -->
             <div id="snapshotAssetTabs" class="asset-tabs chart-mode-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
               <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
               <button type="button" class="asset-tab" data-asset="btc">BTC</button>
@@ -467,6 +468,7 @@
               aria-label="주문 버튼 옮기기 — 끌거나 방향키"><svg viewBox="0 0 24 24" fill="currentColor"
               aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle
               cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
+      <div id="ofabSay" class="ofab-say" role="status" aria-live="polite" hidden></div>   <!-- 2026-10-01 꾹 눌러 추가 진입 결과(패널 안 열고) -->
       <button type="button" id="ofabToggle" class="ofab-toggle" aria-expanded="false"
               aria-controls="ofabPanel"><span id="ofabPos">주문</span></button>
     </div>

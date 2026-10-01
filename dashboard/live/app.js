@@ -75,6 +75,10 @@ const API_CHART_MARKERS_URL = "/api/chart-markers";
 // klines 에는 없는 정보다(봉당 taker_buy 합계 하나뿐).
 // ETH 전용: 코인마다 스트림·백필이 붙어서, 일단 하나만 켠다.
 let latestFootprint = null;
+// 2026-10-01 창 이동(사용자 «1h·2h·4h·12h 를 창으로 두고 차트에서 이동»): 데이터는 늘 12시간(144봉)을 받고 화면은 창만큼만 그린다.
+//   chartPanEnd = 창 오른쪽 끝 봉의 시각(초) · null = 실시간(최신 봉을 따라간다). 과거로 옮기면 그 시각에 고정된다.
+const CHART_PAN_BARS = 144;
+let chartPanEnd = null;
 let footprintLastFetchAt = 0;
 // ── 창 토글 (2026-09-19 사용자 요청: 1h/2h/4h) ─────────────────────────────
 // 풋프린트와 수급 프로파일이 **같은 창**을 쓴다. 한 카드 안의 위아래 두 그림이 서로 다른
@@ -508,6 +512,7 @@ function renderSnapshotAssetTabs() {
 async function setActiveSnapshotAsset(asset) {
   if (!SNAPSHOT_ASSET_KEYS.includes(asset) || asset === activeSnapshotAsset) return;
   activeSnapshotAsset = asset;
+  chartPanEnd = null;   // 코인을 바꾸면 실시간으로
   renderSnapshotAssetTabs();
   // 🔴2026-09-30 진입 미리보기(plan·cap)는 **코인별**인데 전환 때 안 비워 XRP 탭이 최대 60초(주문 불가 코인이면
   //   계속) ETH 계획(~$2,676)을 «지금 설정으로 넣으면»에 그렸다. 비우고 새 코인 것을 바로 받는다.
@@ -622,6 +627,7 @@ function setupThemeToggle() {
 //   테이프가 웜업 중이면 null 이라, 그때 캔들을 그릴 것이 필요하다.
 function setupChartModeTabs() {
   setupChartWindowTabs();
+  setupChartPan();
 }
 
 
@@ -2599,7 +2605,7 @@ async function refreshLiquidation5mSignal() {
       // 🔴2026-09-25 폭을 보낸다. 안 보내면 서버가 96 봉으로 답해 12시간 창에서 앞 48봉에
       //   청산 원이 사라졌다 -- 화면에서는 «청산이 없었다»로 읽힌다(실제로는 모름).
       //   풋프린트·수급프로파일과 같은 규약(`?bars=${chartWindowBars}`).
-      const rh = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${asset}&bars=${chartWindowBars}`,
+      const rh = await fetch(`${API_LIQUIDATION_5M_HIST_URL}?asset=${asset}&bars=${CHART_PAN_BARS}`,
                              { cache: "no-cache" });
       const jh = await rh.json();
       if (asset !== activeSnapshotAsset) return;
@@ -4487,7 +4493,7 @@ async function refreshFootprint() {
   const now = Date.now();
   if (now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
   footprintLastFetchAt = now;
-  const key = `${activeSnapshotAsset}|${chartWindowBars}`;
+  const key = `${activeSnapshotAsset}|${CHART_PAN_BARS}`;   // 창과 무관하게 12시간 -- 창 이동은 받아 둔 것에서 고른다
   if (key !== footprintCacheKey) { footprintBars = new Map(); footprintCacheKey = key; }
   const barSec = Number(latestFootprint && latestFootprint.barSeconds) || 300;
   let newest = footprintBars.size ? Math.max(...footprintBars.keys()) : 0;
@@ -4503,17 +4509,17 @@ async function refreshFootprint() {
   }
   const since = newest ? newest - barSec : 0;   // 0 = 전량
   try {
-    const res = await fetch(`${API_FOOTPRINT_URL}?asset=${activeSnapshotAsset}&bars=${chartWindowBars}&since=${since}`,
+    const res = await fetch(`${API_FOOTPRINT_URL}?asset=${activeSnapshotAsset}&bars=${CHART_PAN_BARS}&since=${since}`,
                             { cache: "no-cache" });
     if (!res.ok) throw new Error(`footprint ${res.status}`);
     const payload = await res.json();
-    if (`${activeSnapshotAsset}|${chartWindowBars}` !== key) return;   // 그 사이 코인·창이 바뀌었다
+    if (`${activeSnapshotAsset}|${CHART_PAN_BARS}` !== key) return;   // 그 사이 코인·창이 바뀌었다
     if (payload.full) footprintBars = new Map();
     (payload.bars || []).forEach((b) => footprintBars.set(b.time, b));
     // 창 밖으로 밀려난 봉은 버린다 -- 증분이라 서버가 «빠졌다»를 말해 주지 않는다.
-    if (footprintBars.size > chartWindowBars) {
+    if (footprintBars.size > CHART_PAN_BARS) {
       [...footprintBars.keys()].sort((a, b) => a - b)
-        .slice(0, footprintBars.size - chartWindowBars)
+        .slice(0, footprintBars.size - CHART_PAN_BARS)
         .forEach((t) => footprintBars.delete(t));
     }
     // 아래 소비자(footprintForChart)는 예전과 **같은 모양**을 본다 -- 시각순 전체 배열.
@@ -4955,8 +4961,106 @@ const objToken = (() => {
   };
 })();
 
+// 창 오른쪽 끝(배타) 인덱스. 실시간이면 끝 · 과거면 chartPanEnd 시각의 봉 다음 -- 12시간 밖으로는 못 간다.
+function chartPanEndIndex(full) {
+  const len = full.length, minEnd = Math.min(len, Math.max(chartWindowBars, len - CHART_PAN_BARS + chartWindowBars));
+  if (chartPanEnd == null) return len;
+  const i = full.findIndex((c) => c.time > chartPanEnd);
+  return Math.max(minEnd, i < 0 ? len : i);
+}
+function chartPanTo(endIdx) {
+  const full = candleHistoryByAsset[activeSnapshotAsset] || [];
+  if (!full.length) return;
+  const len = full.length, minEnd = Math.min(len, Math.max(chartWindowBars, len - CHART_PAN_BARS + chartWindowBars));
+  const e = Math.max(minEnd, Math.min(len, Math.round(endIdx)));
+  const next = e >= len ? null : full[e - 1].time;
+  if (next === chartPanEnd) return;
+  chartPanEnd = next;
+  chartPanForce = true;
+  scheduleSnapshotChartRender();
+}
+const chartPanBy = (n) => chartPanTo(chartPanEndIndex(candleHistoryByAsset[activeSnapshotAsset] || []) - n);   // n>0 = 과거로
+// 헤더 미니맵: 12시간 종가 선 + 지금 창(밝은 띠). 누르거나 끌면 그 자리로 · 방향키 1봉(Shift 6봉).
+let chartPanKey = "";
+function renderChartPan() {
+  const box = el("chartPan");
+  if (!box) return;
+  const full = candleHistoryByAsset[activeSnapshotAsset] || [];
+  if (!full.length || !flowOn()) { box.hidden = true; chartPanKey = ""; return; }
+  box.hidden = false;
+  const hist = full.slice(-CHART_PAN_BARS), n = hist.length, off = full.length - n;
+  const e = chartPanEndIndex(full) - off, s = Math.max(0, e - chartWindowBars), live = chartPanEnd == null;
+  const key = `${n}|${s}|${e}|${live}|${hist[n - 1].close}|${hist[0].time}`;
+  if (key === chartPanKey) return;
+  chartPanKey = key;
+  const W = 176, H = 26, lo = Math.min(...hist.map((c) => c.low)), hi = Math.max(...hist.map((c) => c.high));
+  const X = (i) => (i / n) * W, Y = (v) => H - 3 - ((v - lo) / (hi - lo || 1)) * (H - 6);
+  const line = hist.map((c, i) => `${i ? "L" : "M"}${X(i + 0.5).toFixed(1)} ${Y(c.close).toFixed(1)}`).join("");
+  const t = (c) => fmtHourMinute(c.time * 1000), end = hist[Math.max(0, e - 1)];
+  const focused = box.contains(document.activeElement) && document.activeElement.classList.contains("chart-pan-map");
+  box.innerHTML = `<svg class="chart-pan-map" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="slider" tabindex="0"`
+    + ` aria-label="12시간 안에서 차트 창 위치 — 방향키로 이동" aria-valuemin="${chartWindowBars}" aria-valuemax="${n}" aria-valuenow="${e}"`
+    + ` aria-valuetext="${t(hist[s])}부터 ${t(end)}까지">`
+    + `<rect class="pan-win" x="${X(s).toFixed(1)}" y="0.5" width="${Math.max(3, X(e) - X(s)).toFixed(1)}" height="${H - 1}" rx="4"/>`
+    + `<path class="pan-line" d="${line}"/></svg>`
+    + `<span class="chart-pan-when">${t(hist[s])}–${live ? "지금" : t(end)}</span>`
+    + (live ? `<span class="chart-pan-live" title="최신 봉을 따라간다">실시간</span>`
+            : `<button type="button" class="chart-pan-now" title="최신 봉으로 돌아가기 (더블클릭도 같다)">최신으로</button>`);
+  if (focused) box.querySelector(".chart-pan-map")?.focus();
+}
+function setupChartPan() {
+  const box = el("chartPan"), svg = el("candleSvgSnapshot");
+  if (!box || !svg) return;
+  const full = () => candleHistoryByAsset[activeSnapshotAsset] || [];
+  const mapIdx = (ev) => { const m = box.querySelector(".chart-pan-map"); if (!m) return null; const r = m.getBoundingClientRect(), f = full(), n = Math.min(CHART_PAN_BARS, f.length);
+    return f.length - n + Math.round(((ev.clientX - r.left) / r.width) * n + chartWindowBars / 2); };
+  box.addEventListener("pointerdown", (ev) => {
+    if (!ev.target.closest(".chart-pan-map")) return;
+    box.setPointerCapture(ev.pointerId);
+    const go = (e2) => { const i = mapIdx(e2); if (i != null) chartPanTo(i); };
+    go(ev);
+    const up = () => { box.removeEventListener("pointermove", go); box.removeEventListener("pointerup", up); box.removeEventListener("pointercancel", up); };
+    box.addEventListener("pointermove", go); box.addEventListener("pointerup", up); box.addEventListener("pointercancel", up);
+  });
+  box.addEventListener("click", (ev) => { if (ev.target.closest(".chart-pan-now")) { chartPanEnd = null; scheduleSnapshotChartRender(); } });
+  box.addEventListener("keydown", (ev) => {
+    const d = { ArrowLeft: 1, ArrowRight: -1 }[ev.key];
+    if (ev.key === "End") { ev.preventDefault(); chartPanEnd = null; scheduleSnapshotChartRender(); return; }
+    if (!d) return;
+    ev.preventDefault(); chartPanBy(d * (ev.shiftKey ? 6 : 1));
+  });
+  // 차트 위: 휠(세로·가로 모두) 40px = 1봉 · 끌기 = 봉 폭만큼 · 더블클릭 = 최신으로. 12h 창(움직일 곳 없음)이면 휠을 페이지에 돌려준다.
+  const canPan = () => flowOn() && Math.min(full().length, CHART_PAN_BARS) > chartWindowBars;
+  let acc = 0;
+  svg.addEventListener("wheel", (ev) => {
+    if (!canPan() || ev.ctrlKey) return;
+    ev.preventDefault();
+    acc += Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : ev.deltaY;
+    const steps = Math.trunc(acc / 40);
+    if (steps) { acc -= steps * 40; chartPanBy(-steps); }   // 아래로·오른쪽으로 = 최신 쪽
+  }, { passive: false });
+  let drag = null;
+  svg.addEventListener("pointerdown", (ev) => {
+    if (!canPan() || ev.button !== 0 || ev.pointerType === "touch") return;
+    const slot = Math.max(4, (svg.getBoundingClientRect().width * 0.67 - 300) / chartWindowBars);
+    drag = { x: ev.clientX, end: chartPanEndIndex(full()), slot, moved: false, id: ev.pointerId };
+  });
+  svg.addEventListener("pointermove", (ev) => {
+    if (!drag || !(ev.buttons & 1)) { drag = null; return; }
+    const dx = ev.clientX - drag.x;
+    if (!drag.moved && Math.abs(dx) < 5) return;
+    if (!drag.moved) { drag.moved = true; svg.setPointerCapture(drag.id); svg.classList.add("panning"); }
+    chartPanTo(drag.end - dx / drag.slot);   // 오른쪽으로 끌면 과거가 보인다
+  });
+  const stop = () => { drag = null; svg.classList.remove("panning"); };
+  svg.addEventListener("pointerup", stop); svg.addEventListener("pointercancel", stop);
+  svg.addEventListener("dblclick", () => { if (chartPanEnd != null) { chartPanEnd = null; scheduleSnapshotChartRender(); } });
+}
+let chartPanForce = false;   // 창 이동은 호버 중에도 바로 그린다(호버 보류에 막히면 끌어도 안 움직인다)
 function renderSnapshotChart() {
-  if (chartHoverActive) { chartRenderDeferred = true; return; }
+  renderChartPan();
+  if (chartHoverActive && !chartPanForce) { chartRenderDeferred = true; return; }
+  chartPanForce = false;
   const svg = el("candleSvgSnapshot");
   if (!svg) return;
   const fullCandles = candleHistoryByAsset[activeSnapshotAsset] || [];
@@ -4977,7 +5081,7 @@ function renderSnapshotChart() {
   // 2026-09-27 흐름 코인은 풋프린트가 **아직 안 와도** 창으로 자른다 -- 전환 직후 0.3~0.7초 동안 96봉 캔들로
   //   넓어졌다 줄어드는 게 «1h 인데 캔들로 12h» 로 보였다.
   const candles = footprint || flowOn()
-    ? fullCandles.slice(-chartWindowBars)
+    ? fullCandles.slice(Math.max(0, chartPanEndIndex(fullCandles) - chartWindowBars), chartPanEndIndex(fullCandles))
     : fullCandles.slice(-SNAPSHOT_CHART_MAX_CANDLES);
   const currentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || candles[candles.length - 1]?.close || 0);
   const riskLevels = [...nearestLiquidationLevel(), ...trendFlipLevels(footprint, candles),
@@ -5349,7 +5453,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // the scale to fit it -- same "off-chart, so omit" treatment priceLabels below gives out-of-range
   // levels, just without an edge arrow since a profile bar has no sensible one.
   const allPrices = candles.flatMap(c => [c.high, c.low]);
-  if (includeCurrentPrice && currentPrice > 0) allPrices.push(currentPrice);
+  // 2026-10-01 과거 창(chartPanEnd)이면 축은 **보이는 봉만** -- 현재가를 넣고 가운데에 두면 과거 봉이 한쪽에 눌렸다(실측)
+  const panned = svg.id === "candleSvgSnapshot" && chartPanEnd != null;
+  if (includeCurrentPrice && currentPrice > 0 && !panned) allPrices.push(currentPrice);
 
   const minP = Math.min(...allPrices), maxP = Math.max(...allPrices);
   // 2026-09-21 사용자 요청 «청산맵 위아래 여유». 여백은 모드마다 값이 다르다:
@@ -5364,7 +5470,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   가운데는 **5분봉마다 한 번** 잡는다(같은 날 사용자 «매 5분봉마다»): 봉이 바뀔 때의 현재가로 정하고 그 봉 동안은
   //   고정한다 -- 틱마다 따라가면 화면 전체가 계속 출렁인다. 봉 안에서 범위를 벗어나면 가운데는 두고 위아래만 넓힌다.
   //   🔴가운데는 풋프린트 칸 단위, 반폭은 두 칸 단위로 반올림한다(yMin/yMax 가 층 캐시 서명 baseGeomSig 에 들어 있다).
-  if (footprint && currentPrice > 0) {
+  if (footprint && currentPrice > 0 && !panned) {
     const q = Number(footprint.bucket) || 0;
     const barT = candles.length ? candles[candles.length - 1].time : 0;
     const fc = renderCandleSvg._fpCenter || (renderCandleSvg._fpCenter = { key: "", c: 0 });
@@ -9251,13 +9357,28 @@ function ofabApplyDefaults() {
 // 2026-09-28 사용자 지시: 버튼을 2초 꾹 누르면 **지금 포지션 방향으로 바로 추가 진입**(5% · SL/TP 해제). 마우스만 -- 터치(모바일)는 없다.
 //   패널을 펼쳐 결과를 보여 주고, 미리보기가 오는 즉시 발주한다 -- 진입 버튼의 «길게 누르기 = 확인»과 같은 경로
 //   (manualFireOnPreview → manualEntryArmConfirm). 포지션이 없으면 방향을 모르니 안 나간다. 서버 게이트·코인 검사는 그대로.
+// 2026-10-01 꾹 눌러 추가 진입은 **패널을 열지 않는다**(사용자 지시) -- 결과는 버튼 위 말풍선(#ofabSay)이 카드의 결과 칸(snapEntryResult)을 따라 말한다.
+let ofabSayObs = null, ofabSayTimer = 0;
+function ofabSay(html, tone = "") {
+  const b = el("ofabSay");
+  if (!b) return;
+  b.className = `ofab-say${tone ? " " + tone : ""}`;
+  b.innerHTML = html; b.hidden = false;
+  clearTimeout(ofabSayTimer);
+  ofabSayTimer = setTimeout(() => { b.hidden = true; ofabSayObs?.disconnect(); ofabSayObs = null; }, 8000);
+}
 function ofabQuickAdd() {
   const p = snapshotAccountPosition();
   const side = Number(p?.qty) ? String(p.side || "").toUpperCase() : "";
-  ofabSetOpen(true);
   ofabApplyDefaults();
   const box = el("snapEntryResult");
-  const say = (msg) => { if (box) { box.hidden = false; box.innerHTML = entryNote(msg, "bad"); } };
+  const say = (msg) => ofabSay(escapeHtml(msg), "bad");
+  if (box) {   // 카드 결과 칸이 바뀌면(미리보기 → 발주 → 체결/거부) 그 글을 말풍선으로
+    ofabSayObs?.disconnect();
+    ofabSayObs = new MutationObserver(() => { const t = (box.textContent || "").trim(); if (t && !box.hidden) ofabSay(escapeHtml(t), box.querySelector(".bad") ? "bad" : ""); });
+    ofabSayObs.observe(box, { childList: true, subtree: true, characterData: true, attributes: true });
+  }
+  if (side === "LONG" || side === "SHORT") ofabSay(`${side === "LONG" ? "롱" : "숏"} 5% 추가 진입 — 미리보기 받는 중…`);
   if (side !== "LONG" && side !== "SHORT") return say("추가 진입 안 함 — 열린 포지션이 없어 방향을 모릅니다.");
   if (manualOrderBusy || manualPreviewInFlight) return say("추가 진입 안 함 — 진행 중인 주문·미리보기가 있습니다.");
   clearTimeout(entrySizeDebounce);   // 기본값이 건 크기 재조회는 필요 없다(미리보기가 같은 값을 받는다)

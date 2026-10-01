@@ -37,11 +37,15 @@ def test_window_max_is_what_we_think():
 
 @pytest.mark.parametrize("name,pattern", [
     # 2026-09-30 갱신: 풋프린트는 코인별(?asset=)로 받는다 · 수급 프로파일 레인은 제거됐다(09-28 호가·체결 프로파일 제거).
-    ("풋프린트", r"API_FOOTPRINT_URL\}\?asset=\$\{activeSnapshotAsset\}&bars=\$\{chartWindowBars\}"),
-    ("청산 이력", r"API_LIQUIDATION_5M_HIST_URL\}\?asset=\$\{asset\}&bars=\$\{chartWindowBars\}"),
+    # 2026-10-01 창 이동: 두 레인은 창과 무관하게 12시간(CHART_PAN_BARS)을 받고 화면이 창만큼 고른다 -- 폭 ≥ 창 최대치면 계약 충족.
+    ("풋프린트", r"API_FOOTPRINT_URL\}\?asset=\$\{activeSnapshotAsset\}&bars=\$\{CHART_PAN_BARS\}"),
+    ("청산 이력", r"API_LIQUIDATION_5M_HIST_URL\}\?asset=\$\{asset\}&bars=\$\{CHART_PAN_BARS\}"),
 ])
 def test_lane_fetch_width_is_derived_from_the_window(name, pattern):
-    assert re.search(pattern, strip_js_comments(APP)), f"{name} 폭이 창에서 파생되지 않는다"
+    code = strip_js_comments(APP)
+    assert re.search(pattern, code), f"{name} 폭이 12시간(CHART_PAN_BARS)이 아니다"
+    m = re.search(r"const CHART_PAN_BARS = (\d+);", code)
+    assert m and int(m.group(1)) >= window_max(), "받는 폭이 창 최대치보다 짧다 -- 큰 창 앞쪽이 빈다"
 
 
 def test_oi_fetch_width_is_derived_from_the_window_max():
