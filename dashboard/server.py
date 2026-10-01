@@ -55,9 +55,7 @@ from scripts.live_trade_tape_collector_20260916 import (  # noqa: E402
     RETAIL_MAX_USD,
     WHALE_MIN_USD,
     TakerOrderAggregator,
-    TapeBuffer,
     HOT_TAPE_DB,
-    TapeStore,
     size_bands,
 )
 from scripts.data_store import read_rows  # noqa: E402
@@ -2413,18 +2411,8 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
         ⚠️풋프린트에는 안 쓴다 -- 현물은 선물보다 +4.69bp 높아 $0.1 빈 기준 **12.9빈**
           어긋난다(2026-09-23 실측). 가격축에 쌓으면 가짜 이중 봉우리가 된다. 수급(CVD)은
           «수량의 합»이라 가격이 무관해서 문제가 없다."""
-        # 2026-09-29 현물 체결도 테이프로 남긴다 -- 화면엔 보이는데 저장이 없어 «현물이 끄는가 선물이 끄는가»를 영영 못 쟀다.
-        #   선물 테이프와 같은 표(trade_tape_1s)·같은 주문 단위(aggTrade 는 이미 주문 단위라 add_agg). 이 프로세스가
-        #   유일한 writer 이고 TapeStore 는 쓸 때만 연다. 저장이 막혀도 화면 흐름은 그대로 돈다.
-        bucket = TAPE_BUCKETS[FOOTPRINT_SYMBOL.lower()]
-        spot_buf = TapeBuffer(bucket, FOOTPRINT_SYMBOL.lower())
-        spot_db = LIVE_DIR / ("trade_tape_spot.duckdb" if spec.asset == "eth" else f"trade_tape_spot_{spec.asset}.duckdb")
-        try:
-            spot_store = await asyncio.to_thread(TapeStore, spot_db, FOOTPRINT_SYMBOL, bucket)
-        except Exception as exc:  # noqa: BLE001 -- 저장만 포기한다
-            spot_store = None
-            print(f"{TAG}spot tape: 저장 끔 ({exc!r})", flush=True)
-        spot_flushed = time.time()
+        # 현물 체결 저장은 2026-10-01 저장 재설계 4d 에 테이프 수집기로 옮겼다(TAPE_MARKET=spot -> data/hot/binance_spot_tape.sqlite,
+        #   공백 기록·1분봉 대조·REST 복구 포함). 여기는 화면 흐름만. 옛 data/live/trade_tape_spot*.duckdb 는 09-29~10-01 이력으로 얼었다.
         ws_session = ClientSession(timeout=ClientTimeout(total=None), connector=TCPConnector(limit=2))
         try:
             while True:
@@ -2456,12 +2444,6 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
                                 cell[i] += qty
                             spot_state["trades"] += 1
                             spot_state["last_trade_ms"] = ts_ms
-                            if spot_store is not None:
-                                spot_buf.add_agg(ts_ms, price, qty, bool(t.get("m")),
-                                                 max(1, int(t.get("l") or 0) - int(t.get("f") or 0) + 1))
-                                if time.time() - spot_flushed >= 5.0:
-                                    spot_flushed = time.time()
-                                    await asyncio.to_thread(spot_store.write, spot_buf.take_closed())
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001

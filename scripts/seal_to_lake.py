@@ -51,6 +51,8 @@ HOT_PRUNE = (
     (ROOT / "data/hot/hl_positions.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8,
      (("hl_cycles", "ts_ms", 1000), ("hl_universe", "ts_ms", 1000))),
     (ROOT / "data/hot/hl_positions.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8, ()),
+    (ROOT / "data/hot/binance_spot_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "binance", "spot_tape", _bn_coin, 8,
+     _TAPE_SIDE),
     *[(ROOT / BN_CTX_REL, t, "ts_ms / 1000", "symbol", "binance", st, _bn_coin, 8, ())
       for t, st in (("oi_1s", "oi_1s"), ("mark_price_1s", "mark_1s"), ("liquidations", "liquidations"))],
 )
@@ -70,8 +72,7 @@ def lit(c: str) -> str:
 # (venue, stream, [(원천 파일, 표 이름 | None=jsonl, coin SQL)], ts_ms SQL)
 SPECS = [
     ("binance", "tape", [(HOT_REL, "trade_tape_1s", SYM)], "ts_sec * 1000"),     # 3b: 5코인 hot 한 파일(09-30 까지는 옛 DuckDB 에서 봉인됨)
-    ("binance", "spot_tape", [(f"{L}/trade_tape_spot{sfx(c)}.duckdb", "trade_tape_1s", lit(c)) for c in ("eth", "sol", "xrp")],
-     "ts_sec * 1000"),
+    ("binance", "spot_tape", [("data/hot/binance_spot_tape.sqlite", "trade_tape_1s", SYM)], "ts_sec * 1000"),   # 4d hot(10-01 까지는 대시보드 DuckDB 에서)
     # 4d(2026-10-01): 바이낸스 맥락 수집기 hot 한 파일(09-30 까지는 옛 oi_1s/mark_price_1s.duckdb · liq_events*.jsonl 에서 봉인됨)
     ("binance", "oi_1s", [(BN_CTX_REL, "oi_1s", SYM)], "ts_ms"),
     ("binance", "mark_1s", [(BN_CTX_REL, "mark_price_1s", SYM)], "ts_ms"),
