@@ -387,6 +387,14 @@ def _dir_bytes_since(path: Path, since: float) -> tuple[int, float | None]:
 
 
 def _duckdb_latest(path: Path, table: str, ts: str):
+    if path.suffix == ".sqlite":   # hot(10-01): ts 는 감시기와 같은 SQLite 식(집계 포함, 예: datetime(max(ts_sec),'unixepoch','localtime'))
+        import sqlite3
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
+        try:
+            v = con.execute(f"SELECT {ts} FROM {table}").fetchone()[0]
+        finally:
+            con.close()
+        return datetime.fromisoformat(v) if v else None
     import duckdb
     for _ in range(10):
         try:
