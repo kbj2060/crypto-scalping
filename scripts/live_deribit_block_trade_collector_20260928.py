@@ -161,6 +161,7 @@ def block_shape(legs: list[dict], ts_ms: int, fut: list[dict] | None = None) -> 
         nd, gd = nd + d, gd + abs(d)
     side = lambda v, g, pos, neg: None if g <= 0 else ("neutral" if abs(v) < 0.1 * g else (pos if v > 0 else neg))   # noqa: E731
     return {"structure": _shape(o) if o else "future_only", "hedge": bool(fut),
+            "net_delta": round(nd, 4), "net_vega_usd": round(nv, 2),        # 2026-10-01 블록 24시간 합(요청자 쪽) 용
             "delta_side": side(nd, gd, "long", "short"), "vol_side": side(nv, gv, "long_vol", "short_vol")}
 
 
@@ -432,7 +433,8 @@ def hourly_flow(rows, doi: dict | None = None) -> dict:
     now_h = int(time.time() // 3600) * 3_600_000
     hours = [now_h - i * 3_600_000 for i in range(24, -1, -1)]
     # 2026-10-01 liq = 강제청산 체결 수량 · doi = 그 시간 미결제 변화(hourly_doi, 없으면 None) → 화면이 신규 비율 (V+ΔOI)/2V 를 낸다
-    out = {c: {h: {"h": h, "cb": 0.0, "cs": 0.0, "pb": 0.0, "ps": 0.0, "dlt": 0.0, "liq": 0.0, "doi": (doi or {}).get((c, h))}
+    # 2026-10-01 vg = 테이커 순베가($/1 vol pt, 매수 +) · vgb = 그중 블록 -- «변동성을 사는 흐름»(Alexander 외 2023, Ni·Pan·Poteshman 2008)
+    out = {c: {h: {"h": h, "cb": 0.0, "cs": 0.0, "pb": 0.0, "ps": 0.0, "dlt": 0.0, "vg": 0.0, "vgb": 0.0, "liq": 0.0, "doi": (doi or {}).get((c, h))}
                for h in hours} for c in COINS}
     for ts, inst, direction, amt, iv, ix, *rest in rows:
         c = coin_of(inst)
@@ -448,6 +450,13 @@ def hourly_flow(rows, doi: dict | None = None) -> dict:
         yrs = (spec["expiration_ts"].timestamp() - ts / 1000) / (365.0 * 86400)
         d = gex._bs_delta(float(ix or 0), spec["strike"], float(iv or 0), yrs, call)
         b["dlt"] += (1 if buy else -1) * float(amt) * d
+        S, sig = float(ix or 0), float(iv or 0) / 100
+        if S > 0 and sig > 0 and yrs > 0:
+            d1 = (math.log(S / spec["strike"]) + 0.5 * sig * sig * yrs) / (sig * math.sqrt(yrs))
+            vg = (1 if buy else -1) * float(amt) * S * math.exp(-0.5 * d1 * d1) / math.sqrt(2 * math.pi) * math.sqrt(yrs) / 100
+            b["vg"] += vg
+            if len(rest) > 1 and rest[1]:
+                b["vgb"] += vg
     return {c: [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in b.items()} for b in hs.values()] for c, hs in out.items()}
 
 
@@ -486,13 +495,16 @@ def write(rows: list[tuple], gaps: list[tuple] | None = None) -> int:
         except Exception:    # 표가 아직 없으면(옛 DB) 헤지 표시만 빠진다
             fut = {}
         by_coin = {c: group_blocks([x for x in legs if coin_of(x["instrument_name"]) == c], fut) for c in COINS}
-        flow = hourly_flow(con.execute("SELECT ts_ms, instrument_name, direction, amount, iv, index_price, liquidation FROM option_trades "
+        flow = hourly_flow(con.execute("SELECT ts_ms, instrument_name, direction, amount, iv, index_price, liquidation, is_block FROM option_trades "
                                        "WHERE ts_ms >= ?", [(int(time.time() // 3600) - 24) * 3_600_000]).fetchall(),
                            hourly_doi(con))
     finally:
         con.close()      # 붙들고 있으면 연구 쿼리가 막힌다
     # blocks/n_blocks = ETH(옛 계약 그대로) · blocks_by_coin = 네 코인
-    out = {"generated_at": datetime.now(timezone.utc).isoformat(), "coins": list(COINS),
+    # 2026-10-01 블록 요청자 쪽 24시간 순델타(코인)·순베가($/1 vol pt) 합 -- 블록이 방향을 샀나 변동성을 샀나(서술)
+    bsum = {c: {"net_delta": round(sum(b.get("net_delta") or 0 for b in v), 3), "net_vega_usd": round(sum(b.get("net_vega_usd") or 0 for b in v), 1),
+                "n": len(v)} for c, v in by_coin.items()}
+    out = {"generated_at": datetime.now(timezone.utc).isoformat(), "coins": list(COINS), "block_sum_by_coin": bsum,
            "source": "deribit " + " · ".join(CHANNELS), "window_hours": STATE_WINDOW_MS // 3_600_000,
            "n_blocks": len(by_coin["ETH"]), "blocks": by_coin["ETH"],
            "blocks_by_coin": by_coin, "n_blocks_by_coin": {c: len(v) for c, v in by_coin.items()},
@@ -603,6 +615,9 @@ def _selftest() -> None:
     fl2 = hourly_flow([(now_ts, "ETH-16OCT27-2600-C", "buy", 3.0, 50.0, 2600.0, "T")], {("ETH", now_ts // 3_600_000 * 3_600_000): 1.5})
     b2 = [b for b in fl2["ETH"] if b["h"] == now_ts // 3_600_000 * 3_600_000][0]
     assert b2["liq"] == 3.0 and b2["doi"] == 1.5 and b2["cb"] == 3.0, b2
+    fl3 = hourly_flow([(now_ts, "ETH-16OCT27-2600-C", "buy", 2.0, 50.0, 2600.0, None, True), (now_ts, "ETH-16OCT27-2600-P", "sell", 1.0, 50.0, 2600.0, None, False)])
+    b3 = [b for b in fl3["ETH"] if b["h"] == now_ts // 3_600_000 * 3_600_000][0]
+    assert b3["vg"] > 0 and abs(b3["vgb"] - 2 * b3["vg"]) < 1e-9, b3       # 같은 행사가 콜 2 매수(블록)·풋 1 매도 → 순베가 = 블록의 절반
     b0 = 600.0 * 1_666_667                                              # 10분 경계
     assert next_chain_wait(b0 + 200) == 600 - 200 + 5                    # :03:20 → 다음 :10:05
     assert next_chain_wait(b0 + 590) == 600 - 590 + 5 + 600              # 15초 남으면 한 칸 건너뜀

@@ -186,6 +186,8 @@ def fetch_chain(currency: str) -> pd.DataFrame:
             "open_interest": float(row.get("open_interest") or 0.0), "mark_iv": float(row.get("mark_iv") or 0.0),
             "underlying_price": spot, "mark_price": float(row.get("mark_price") or 0.0),
             "volume": float(row.get("volume") or 0.0), "gamma_bs": gamma,
+            # 2026-10-01 ATM 호가 폭(IV pt) 계산용 -- 표에는 안 넣는다(스키마 그대로, INSERT 는 열 이름으로)
+            "bid_price": float(row.get("bid_price") or 0.0), "ask_price": float(row.get("ask_price") or 0.0),
         })
     return pd.DataFrame(out)
 
@@ -245,6 +247,77 @@ def _skew_interp(g: pd.DataFrame, fwd: float, yrs: float) -> dict:
         if atm is not None:
             out["bf25i"] = (c25 + p25) / 2 - atm
     return out
+
+
+def _smile(g: pd.DataFrame, fwd: float):
+    """한 만기의 외가격 mark IV 를 k = ln(K/F) 로 선형 보간(양 끝 밖은 끝값 고정)하는 함수. 외가격이 3개 미만이면 None."""
+    import numpy as np
+    otm = pd.concat([g[(g["option_type"] == "put") & (g["strike"] < fwd)], g[(g["option_type"] == "call") & (g["strike"] >= fwd)]])
+    otm = otm[otm["mark_iv"] > 0].sort_values("strike")
+    if len(otm) < 3:
+        return None
+    k, v = np.log(otm["strike"].to_numpy(float) / fwd), otm["mark_iv"].to_numpy(float) / 100.0
+    return lambda kk: np.interp(kk, k, v)
+
+
+def _surface_stats(g: pd.DataFrame, fwd: float, yrs: float) -> dict:
+    """2026-10-01 문헌 조사 뒤 옵션 카드 «옵션 정보»: 한 만기 스마일에서
+    ① 모델프리 분산(VIX 식, 외가격 mark 가격 적분 -- Britten-Jones·Neuberger, Jiang·Tian) → 연율 IV
+    ② 위험중립 꼬리확률 P(만기 가격이 선도가 ±2·3·5% 밖) -- 스마일로 만든 콜·풋 가격의 행사가 미분(Breeden·Litzenberger)
+    ③ 위험중립 왜도·첨도(Bakshi·Kapadia·Madan 2003). r=0 · 선도가 기준 · 가격은 USD(역옵션도 같은 식 -- 비율만 쓴다).
+    🔴서술용(검정 전). 스마일 밖은 끝값 고정 외삽이라 먼 꼬리는 근사다."""
+    import numpy as np
+    out = {"mfiv": None, "tail": None, "rn_skew": None, "rn_kurt": None}
+    sm = _smile(g, fwd)
+    if sm is None or yrs <= 0:
+        return out
+    sig0 = float(sm(0.0))
+    w = max(4.5 * sig0 * math.sqrt(yrs), 0.06)
+    K = fwd * np.exp(np.linspace(-w, w, 801))
+    kk = np.log(K / fwd); sig = sm(kk); sq = sig * math.sqrt(yrs)
+    d1 = (-kk + 0.5 * sq * sq) / sq; d2 = d1 - sq
+    N = lambda x: 0.5 * (1 + np.vectorize(math.erf)(x / math.sqrt(2)))   # noqa: E731
+    call = fwd * N(d1) - K * N(d2); put = call - (fwd - K)
+    q = np.where(K < fwd, put, call)                                     # 외가격 가격
+    dK = np.gradient(K)
+    var = 2.0 / yrs * float(np.sum(q / K ** 2 * dK))                      # VIX 식(F = K0 근처라 보정항 생략)
+    out["mfiv"] = math.sqrt(var) * 100 if var > 0 else None
+    cdf = np.clip(1 + np.gradient(call, K), 0, 1)                         # P(S_T < K) = 1 + dC/dK
+    tail = {}
+    for x in (2, 3, 5):
+        lo, hi = float(np.interp(fwd * (1 - x / 100), K, cdf)), float(np.interp(fwd * (1 + x / 100), K, cdf))
+        tail[str(x)] = round(min(1.0, max(0.0, lo + (1 - hi))), 4)
+    out["tail"] = tail
+    up, dn = K >= fwd, K < fwd
+    lr = np.log(K / fwd)
+    V = np.sum((2 * (1 - lr) / K ** 2 * call * dK)[up]) + np.sum((2 * (1 - lr) / K ** 2 * put * dK)[dn])
+    W = np.sum(((6 * lr - 3 * lr ** 2) / K ** 2 * call * dK)[up]) + np.sum(((6 * lr - 3 * lr ** 2) / K ** 2 * put * dK)[dn])
+    X = np.sum(((12 * lr ** 2 - 4 * lr ** 3) / K ** 2 * call * dK)[up]) + np.sum(((12 * lr ** 2 - 4 * lr ** 3) / K ** 2 * put * dK)[dn])
+    mu = -V / 2 - W / 6 - X / 24
+    den = V - mu * mu
+    if den > 0:
+        out["rn_skew"] = float((W - 3 * mu * V + 2 * mu ** 3) / den ** 1.5)
+        out["rn_kurt"] = float((X - 4 * mu * W + 6 * mu * mu * V - 3 * mu ** 4) / den ** 2)
+    return out
+
+
+def _atm_spread_iv(g: pd.DataFrame, fwd: float, yrs: float, linear: bool) -> float | None:
+    """ATM(선도가 ±2%) 옵션 호가 폭을 IV 포인트로: (매도호가 − 매수호가)[USD] ÷ 베가[USD/1 vol pt] 의 중앙. 호가가 한쪽뿐이면 뺀다."""
+    import numpy as np
+    x = g[((g["strike"] / fwd - 1).abs() <= 0.02) & (g["bid_price"] > 0) & (g["ask_price"] > g["bid_price"])] if "bid_price" in g else g.iloc[0:0]
+    if x.empty or yrs <= 0:
+        return None
+    out = []
+    for _, r in x.iterrows():
+        sig = r["mark_iv"] / 100.0
+        if sig <= 0:
+            continue
+        d1 = (math.log(fwd / r["strike"]) + 0.5 * sig * sig * yrs) / (sig * math.sqrt(yrs))
+        vega = fwd * math.exp(-0.5 * d1 * d1) / math.sqrt(2 * math.pi) * math.sqrt(yrs) / 100.0
+        spread = (r["ask_price"] - r["bid_price"]) * (1.0 if linear else fwd)
+        if vega > 0:
+            out.append(spread / vega)
+    return float(np.median(out)) if out else None
 
 
 def _const_maturity(exps: list[dict], days: float) -> dict | None:
@@ -318,16 +391,30 @@ def options_summary(chain: pd.DataFrame, currency: str, flow: dict | None = None
         coi, poi = float(calls["open_interest"].sum()), float(puts["open_interest"].sum())
         exps.append({"exp_ms": int(exp.timestamp() * 1000), "atm_iv": atm_iv, "rr25": c25 - p25,
                      "bf25": (c25 + p25) / 2 - atm_iv, "call_oi_usd": coi * idx, "put_oi_usd": poi * idx,
-                     "pc": (poi / coi) if coi else None, "pain": float(pain), **_skew_interp(g, fwd, yrs)})
+                     "pc": (poi / coi) if coi else None, "pain": float(pain), **_skew_interp(g, fwd, yrs),
+                     "fwd": fwd, "atm_oi_usd": float(g.loc[(g["strike"] / fwd - 1).abs() <= 0.02, "open_interest"].sum()) * idx,
+                     "_g": g, "_yrs": yrs})
     # 2026-10-01 표기: 만기별 미결제가 전체의 몇 %인가 -- max pain 선(늘 가까운 만기)이 보통 2% 남짓의 계약만 반영한다는 걸 보이려고.
     tot_oi = sum(e["call_oi_usd"] + e["put_oi_usd"] for e in exps)
     for e in exps:
         e["oi_share"] = (e["call_oi_usd"] + e["put_oi_usd"]) / tot_oi if tot_oi else None
+    # 2026-10-01 «옵션 정보»(문헌 조사 ②): 가까운 만기(남은 3시간 미만이면 다음 만기)와 7·30일에 가장 가까운 만기의 표면 통계 ·
+    #   ATM 호가 폭(7일 근처) · 만기 ATM 미결제. 화면은 전부 «검정 전 · 서술».
+    live = [e for e in exps if e["hours"] >= 3]
+    near = lambda d: min(live, key=lambda e: abs(e["hours"] - d * 24), default=None)   # noqa: E731
+    pick = {"front": live[0] if live else None, "7": near(7), "30": near(30)}
+    out["surface"] = {k: ({"exp_ms": e["exp_ms"], "hours": round(e["hours"], 2), "fwd": e["fwd"], **_surface_stats(e["_g"], e["fwd"], e["_yrs"])}
+                          if e else None) for k, e in pick.items()}
+    e7 = pick["7"]
+    out["atm_spread_iv"] = _atm_spread_iv(e7["_g"], e7["fwd"], e7["_yrs"], not inverse) if e7 else None
+    out["front_atm_oi_usd"] = exps[0]["atm_oi_usd"] if exps else None
+    for e in exps:
+        e.pop("_g", None); e.pop("_yrs", None)
     out["expiries"] = exps[:8]
     # 2026-10-01 연구(research_eth_option_metric_ambiguity_20260930): 가까운 만기(늘 24시간 미만)의 최근접 행사가 RR·BF 는
     #   실제 델타가 0.15~0.31 이고 1시간 변화 SD 3.6pt(61% 가 1pt 넘게 흔들리고 되돌림) = 잡음. 화면은 고정만기(7·30일)
     #   델타 보간 값을 쓴다(7일 SD 0.58pt). expiries[*].rr25/bf25(최근접)는 이력 호환으로 남긴다.
-    out["cm"] = {str(d): _const_maturity(exps, d) for d in (7, 30, 60)}   # 60일 = 기간 구조 셋째 점
+    out["cm"] = {str(d): _const_maturity(exps, d) for d in (1, 7, 30, 60)}   # 1일 = 기울기(1일−7일) · 60일 = 기간 구조 셋째 점
     # 30일에 가장 가까운 만기의 ATM IV -- DVOL(30일 내재 변동성 지수)이 없는 코인의 대용. 화면은 dvol ?? iv30.
     near30 = min(exps, key=lambda e: abs(e["exp_ms"] / 1000 - time.time() - 30 * 86400), default=None)
     out["iv30"] = near30["atm_iv"] if near30 else None
@@ -487,7 +574,8 @@ def poll_once(con) -> None:
             log(f"{currency}: empty response, skipping")
             continue
         con.register("chain_df", chain)
-        con.execute("INSERT INTO option_chain_snapshot SELECT * FROM chain_df")
+        con.execute("INSERT INTO option_chain_snapshot SELECT recorded_at_utc, currency, instrument_name, option_type, strike, "
+                    "expiration_ts, days_to_expiry, open_interest, mark_iv, underlying_price, mark_price, volume, gamma_bs FROM chain_df")
         con.unregister("chain_df")
         summary = summarize_gex(chain, currency)
         con.execute(
@@ -560,7 +648,30 @@ def write_state(con) -> None:
                            "dealer_cov": v.get("dealer_cov"), "dealer_n": v.get("dealer_n"), "exps": v.get("exps"),
                            "exp_ms": v.get("exp_ms")} for k, v in gb_ago.items()
                        if isinstance(v, dict) and v.get("dex_usd") is not None} or None
+        # 2026-10-01 «옵션 정보»: VoV = 내재 변동성(DVOL, 없으면 iv30)의 시간별 로그 변화 표준편차(지난 24시간, %) ·
+        #   만기 ATM 미결제 분위 = 지금 값이 지난 30일 매일 07:00~07:10 UTC(정산 1시간 전) 값 중 몇 분위인가(Weiss 외 2026 의 «ATM 미결제 상위 날»).
+        oh: dict = {"vov24": None, "atm_oi_pct": None, "atm_oi_n": 0}
+        try:
+            iv = con.execute("""SELECT date_trunc('hour', recorded_at_utc) h,
+                                         arg_max(coalesce(dvol, TRY_CAST(json_extract_string(payload, '$.iv30') AS DOUBLE)), recorded_at_utc)
+                                  FROM option_summary WHERE currency = ? AND recorded_at_utc >= now() - INTERVAL 25 HOUR GROUP BY 1 ORDER BY 1""",
+                             [currency]).fetchall()
+            v = [x[1] for x in iv if x[1] and x[1] > 0]
+            if len(v) >= 12:
+                d = [math.log(b2 / a2) for a2, b2 in zip(v, v[1:])]
+                m = sum(d) / len(d)
+                oh["vov24"] = math.sqrt(sum((x - m) ** 2 for x in d) / max(1, len(d) - 1)) * 100
+            hist = [x[0] for x in con.execute("""SELECT TRY_CAST(json_extract_string(payload, '$.front_atm_oi_usd') AS DOUBLE) FROM option_summary
+                                                 WHERE currency = ? AND recorded_at_utc >= now() - INTERVAL 30 DAY
+                                                   AND hour(timezone('UTC', recorded_at_utc)) = 7 AND minute(timezone('UTC', recorded_at_utc)) < 10""", [currency]).fetchall()
+                    if x[0] is not None]
+            cur_oi = (json.loads(opt_row[0]) or {}).get("front_atm_oi_usd") if opt_row else None
+            if cur_oi is not None and len(hist) >= 5:
+                oh.update(atm_oi_pct=sum(1 for x in hist if x <= cur_oi) / len(hist), atm_oi_n=len(hist))
+        except Exception as exc:   # 부가 값 -- 없으면 None
+            log(f"{currency}: 옵션 이력 지표 생략 {exc}")
         out["currencies"][currency] = {
+            "opt_hist": oh,
             "options": json.loads(opt_row[0]) if opt_row else None,
             "dex_1h_ago": dex_ago,
             "recorded_at_utc": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),

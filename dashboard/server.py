@@ -1501,6 +1501,25 @@ def kalshi_pick(markets: list[dict], now: float) -> dict[str, Any]:
             "p": (bid + ask) / 2 if ask > 0 else None, "volume": float(m.get("volume_fp") or 0)}
 
 
+_FUT24 = {"at": 0.0, "val": {}}
+
+
+def fut_notional_24h(tape_db: Path = HOT_TAPE_DB) -> dict[str, float]:
+    """코인별 바이낸스 USDT 선물 24시간 체결 명목($) -- 옵션 카드 O/S 비(옵션 명목 ÷ 선물 명목, Roll·Schwartz·Subrahmanyam 2010)의 분모.
+    10분 캐시(하루 합이라 천천히 변한다). 테이프가 없거나 실패하면 {}(O/S 만 빠진다)."""
+    if time.time() - _FUT24["at"] < 600:
+        return _FUT24["val"]
+    coins = {"ethusdt": "ETH", "btcusdt": "BTC", "solusdt": "SOL", "xrpusdt": "XRP"}
+    try:
+        rows = _read_only_rows(tape_db, "SELECT symbol, sum((buy_qty + sell_qty) * price_bin) FROM trade_tape_1s "
+                                        "WHERE ts_sec >= ? GROUP BY symbol", [int(time.time()) - 86400])
+        val = {coins[sym]: float(v) * TAPE_BUCKETS[sym] for sym, v in rows if sym in coins and v}
+    except Exception:  # noqa: BLE001
+        val = {}
+    _FUT24.update(at=time.time(), val=val)
+    return val
+
+
 def gex_payload() -> dict[str, Any]:
     """옵션 감마 노출(GEX). **참고 표시 전용이고 신호가 아니다.**
 
@@ -1528,7 +1547,9 @@ def gex_payload() -> dict[str, Any]:
                                     "sum_by_coin": {c: sum(b.get("notional_usd") or 0 for b in (v or [])) for c, v in by_coin.items()},
                                     "max_by_coin": {c: max(v, key=lambda b: b.get("notional_usd") or 0) if v else None for c, v in by_coin.items()},
                                     "n_by_coin": blk.get("n_blocks_by_coin") or {c: len(v or []) for c, v in by_coin.items()},
-                                    "flow_by_coin": blk.get("flow_by_coin") or {}}}
+                                    "flow_by_coin": blk.get("flow_by_coin") or {},
+                                    "block_sum_by_coin": blk.get("block_sum_by_coin") or {}},
+            "fut24_usd": fut_notional_24h()}
 
 
 # 2026-09-19 Zeus 섀도우 페이로드·엔드포인트 제거(사용자 지시로 대시보드 카드 삭제).

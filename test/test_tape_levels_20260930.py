@@ -53,3 +53,22 @@ def test_tape_levels_empty(tmp_path):
     con.execute("CREATE TABLE trade_tape_1s (symbol VARCHAR, ts_sec BIGINT, price_bin INTEGER, buy_qty DOUBLE, sell_qty DOUBLE)")
     con.close()
     assert srv.tape_levels(db, "ethusdt", BK, ts("2026-09-30 12:00")) == {"available": False}
+
+
+def test_fut_notional_24h(tmp_path):
+    """옵션 카드 O/S 분모: 코인별 24시간 체결 명목 = Σ수량 × 칸가격(칸 × 칸 폭). 24시간 밖·모르는 심볼은 뺀다. 10분 캐시."""
+    import time
+    db = tmp_path / "tape.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute("CREATE TABLE trade_tape_1s (symbol VARCHAR, ts_sec BIGINT, price_bin INTEGER, buy_qty DOUBLE, sell_qty DOUBLE)")
+    now = int(time.time())
+    con.executemany("INSERT INTO trade_tape_1s VALUES (?,?,?,?,?)", [
+        ("ethusdt", now - 60, 26000, 1.0, 2.0),        # 3 ETH × 2600 = 7800
+        ("ethusdt", now - 90000, 26000, 9.0, 9.0),     # 24시간 밖
+        ("btcusdt", now - 60, 84000, 0.5, 0.0),        # 0.5 × 84000(칸 폭 1.0) = 42000
+        ("hypeusdt", now - 60, 40000, 5.0, 5.0)])      # 옵션 없는 코인
+    con.close()
+    srv._FUT24.update(at=0.0, val={})
+    v = srv.fut_notional_24h(db)
+    assert abs(v["ETH"] - 7800) < 1e-6 and abs(v["BTC"] - 42000) < 1e-6 and set(v) == {"ETH", "BTC"}, v
+    assert srv.fut_notional_24h(tmp_path / "없음.duckdb") is v, "10분 안에는 캐시"
