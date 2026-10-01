@@ -7670,7 +7670,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     });
     const have = rows.filter(Boolean);
     if (have.length >= 2) {
-      const amp = Math.max(...have.map((r) => Math.max(Math.abs(r.c), Math.abs(r.oi))), 1e-9) * 1.06;
+      // 🔴2026-10-01 눈금은 **쌓는 층 경계(고래 w · 고래+중형 m)까지** 본다 -- CVD·OI 만 보면 고래 −25k·중형 +18k 가 상쇄돼 CVD −2.3k 일 때
+      //   눈금이 작아져 고래 층이 레인 바닥을 뚫고 레짐 줄까지 내려왔다(사용자 신고).
+      const amp = Math.max(...have.map((r) => Math.max(Math.abs(r.w), Math.abs(r.m), Math.abs(r.c), Math.abs(r.oi))), 1e-9) * 1.06;
       // 합친 판: 맨 위 RVOL 띠(~20px) 아래로만 그린다 -- 파란 거래량 선과 섞이지 않게.
       // 2026-09-28 시안 E: 합친 판에서 누적이 **주연**이다(막대가 사라짐) -- 위 칸 이름 줄(~20px)만 비우고 판을 다 쓴다.
       const mid = LANE_MERGE ? cumY + 20 + (CUM_DRAW_H - 20) / 2 : cumY + CUM_H / 2;
