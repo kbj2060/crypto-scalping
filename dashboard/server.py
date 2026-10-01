@@ -638,8 +638,8 @@ OKX_WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
 #   시작할 때 거래소 REST 와 대조해 갈라졌으면 역시 켜지 않는다(collect_okx_flow).
 from scripts.live_okx_trade_tape_collector_20260923 import (  # noqa: E402
     BUCKETS as OKX_TAPE_BUCKETS, CT_VALS as OKX_CT_VALS, HTTP_HEADERS as OKX_HTTP_HEADERS,
-    INSTRUMENTS_URL as OKX_INSTRUMENTS_URL)
-OKX_TAPE_DB_PATH = LIVE_DIR / "okx_trade_tape.duckdb"
+    INSTRUMENTS_URL as OKX_INSTRUMENTS_URL, OKX_HOT_TAPE_DB)
+OKX_TAPE_DB_PATH = OKX_HOT_TAPE_DB     # 2026-10-01 hot SQLite(5종목 한 파일, 락 없음) -- 쿼리가 종목으로 거른다
 HL_POS_DB_PATH = LIVE_DIR / "hyperliquid_positions.duckdb"
 # 2026-09-26 SOL·XRP: 멀티코인 HL 포지션 수집기는 **Pi** 에서 돈다 -- Pi 크론이 3분마다 일관 스냅샷을 떠
 #   서버로 보낸다(replicate_trade_tape_20260922.sh, TT_VERIFY_TABLE=hl_positions).
@@ -1889,7 +1889,7 @@ def _flow_spec(asset: str, bucket: float, price_dp: int, oi_poll_s: float) -> Fl
         spot_url=f"wss://stream.binance.com:9443/ws/{asset}usdt@aggTrade",
         oi_poll_s=oi_poll_s,
         snapshot_path=LIVE_DIR / f"footprint_{asset}.json",
-        okx_tape_db=OKX_TAPE_DB_PATH if eth else LIVE_DIR / f"okx_trade_tape_{asset}.duckdb",
+        okx_tape_db=OKX_HOT_TAPE_DB,
         # SOL·XRP 의 OKX 맥락(OI·청산)은 Pi 가 수집하고 3분마다 .from_pi 로 복제한다(Pi crontab). 이 파일이 없으면
         #   복원이 체결만 되살리고, OI 5분봉은 커버리지 가드가 OKX 없는 봉을 버려 재시작 이후분만 남는다.
         okx_ctx_db=OKX_CTX_DB_PATH if eth else LIVE_DIR / f"okx_context_{asset}.from_pi.duckdb")

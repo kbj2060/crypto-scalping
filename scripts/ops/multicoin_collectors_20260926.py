@@ -118,8 +118,8 @@ def specs(coins: list[str], phases: set[int], tail_btc_sol: bool) -> list[dict]:
                  "datetime(max(ts_sec), 'unixepoch', 'localtime')")])
         add("okx_tape", lc, 2, "supervisor_okx_trade_tape.sh", "live_okx_trade_tape_collector_20260923.py",
             {"OKX_TAPE_INST": inst},
-            [_db(f"okx_tape_{lc}", f"data/live/okx_trade_tape_{lc}.duckdb", "trade_tape_1s",
-                 "to_timestamp(ts_sec)", 10, 30)])
+            [_db(f"okx_tape_{lc}", "data/hot/okx_tape.sqlite", f"trade_tape_1s WHERE symbol = '{inst}'",
+                 "datetime(max(ts_sec), 'unixepoch', 'localtime')", 10, 30)])     # 4a hot(SQLite)
     # HL 포지션은 코인마다가 아니라 **하나**다(한 번의 조회가 전 코인 -- 수집기 도크스트링).
     # 대상 주소를 HL 체결 DB 에서 뽑으므로 체결이 쌓인 뒤 첫 바퀴(최대 ~8분)가 돈다 -> 유예 30분.
     tag = "_".join(c.lower() for c in coins)
