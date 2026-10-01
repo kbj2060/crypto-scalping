@@ -2834,3 +2834,8 @@ body.not-eth #fpLineSwitch { display: none; }
 #mcWall .os-v small { font-size: 10px; font-weight: 600; color: var(--muted); margin-left: 3px; }
 #mcWall .os-tag { font: 600 9.5px/1 var(--font-sans); font-style: normal; color: var(--option); border: 1px solid color-mix(in srgb, var(--option) 40%, transparent); border-radius: 4px; padding: 2px 4px; }
 #mcWall .os-foot { margin-top: 6px; color: var(--muted); font-size: 10px; }
+
+/* 2026-10-01 바닥 맞춤(전환 리본 바닥): 짧은 단·④·옵션 요약이 칸 높이를 고르게 나눠 채운다(내용 높이는 그대로 재므로 되먹임 없음) */
+#mcBody.mc-cmp > .mc-stack { display: flex; flex-direction: column; justify-content: space-between; }
+#mcBody.mc-cmp > .mc-sec { display: flex; flex-direction: column; justify-content: space-between; }
+#mcWall .os { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; }

@@ -7899,7 +7899,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const mcSplit = !!splitR && activeSnapshotAsset === "eth";
     // 2026-09-30 1초 수급 높이 = 칸 − 시장 맥락의 **실제 내용 높이**(mcNeedH, renderMarketCtx 가 잰다) -- 한 화면 모드로 칸이 줄어도 시장 맥락이 스크롤 없이 다 들어간다.
     //   아직 못 쟀으면 47% · 1초 수급은 칸의 30% 아래로는 안 줄인다.
-    const s1Avail = hAll - mtTop - 4;
+    // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·옵션 요약 칸이 같은 선에서 끝난다
+    const floorY = Math.min(hAll - 2, TREND_ROW_Y + LANE_H);
+    const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
     const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16 : Math.round(s1Avail * 0.47)) : s1Avail) : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
@@ -7907,9 +7909,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         fs.classList.toggle("on", on);
         if (on) { fs.style.left = `${Math.round(a.left - c.left + ml + 290)}px`; fs.style.top = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`; }
       } }
-    mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: hAll - (sub1sY + s1H + 12) - 4 } : null,
+    mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: floorY - (sub1sY + s1H + 12) } : null,
             mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 옵션 요약(renderOptions 가 채운다)
-              return { x: ml + cw + 4, y, w: TAG_W + TRADE_W + BOOK_W - 8, h: hAll - y - 4 }; })() : null);
+              return { x: ml + cw + 4, y, w: TAG_W + TRADE_W + BOOK_W - 8, h: floorY - y }; })() : null);
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),
