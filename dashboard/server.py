@@ -934,7 +934,7 @@ SWR_SLOW_LOG_SECONDS = 0.30   # 이 아래는 «파일 읽기» 취급, 로그�
 MARKET_HISTORY_CACHE_SECONDS = 300
 # 3 + N개의 서명 GET(weight 5씩)이라 폴링 자체는 싸다. 포지션은 실시간성이 필요하고
 # 체결내역은 안 변하지만, 캐시를 둘로 쪼개는 값어치는 없어서 한 페이로드 30초로 묶었다.
-BINANCE_ACCOUNT_CACHE_SECONDS = 30
+BINANCE_ACCOUNT_CACHE_SECONDS = 10   # 2026-10-02 30 -> 10(사용자 지시). 조회 1회 ≈ 무게 50(계좌·포지션·심볼별 체결) → 분당 ~300 = IP 한도 2,400 의 ~12%
 SCALP_SHADOW_MODEL_ID = "eth_micro_scalp_source_stable_opportunity_moe_v4_20260718"
 SCALP_SHADOW_STATE_SCHEMA = "eth_micro_scalp_v4.shadow_bot_step.v1"
 SCALP_SHADOW_SUMMARY_SCHEMA = "eth_micro_scalp_v4.shadow_bot.v1"

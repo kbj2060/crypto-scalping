@@ -366,7 +366,7 @@ let regimeBtcLastFetchAt = 0;
 let regimeXrpLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0, macroCalendarOkAt = 0;   // OkAt = 마지막으로 **받은** 시각(⑤ 시간축 아래 «일정 갱신»)
 // 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
-// 서버가 이미 30초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
+// 서버가 10초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
 let latestBinanceAccount = null;
 // 🔴마지막으로 **성공한** 계좌. latestBinanceAccount 는 실패 시 null 이 되는데, 그걸로
 // 청산 버튼을 숨기면 «조회 실패»와 «포지션 없음»이 구분되지 않는다 -- 정작 닫아야 할 때
@@ -374,7 +374,7 @@ let latestBinanceAccount = null;
 let lastGoodAccount = null;
 let lastGoodAccountAt = 0;
 let binanceAccountLastFetchAt = 0;
-const BINANCE_ACCOUNT_POLL_MS = 30000;
+const BINANCE_ACCOUNT_POLL_MS = 10000;   // 2026-10-02 30 -> 10초(사용자 지시) -- 서버 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)와 같게
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
