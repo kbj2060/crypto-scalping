@@ -9442,7 +9442,13 @@ function renderOfab() {
   const pnl = ofabLivePnl(p, qty, side);
   // 센트까지 -- 달러 반올림이면 3초 갱신이 작은 움직임에서 안 보인다(계좌 카드 미실현과 같은 자리수).
   // 2026-09-26 사용자 지시: 코인 수량 대신 **증거금 사용 %**(계좌 카드 «증거금 사용» 타일과 같은 값).
-  const used = acctMarginUsed(latestBinanceAccount?.balance).pct;
+  // 🔴2026-10-01 비율도 수익금과 **같은 3초 시세**로(사용자 «업데이트 주기가 비율과 수익금이 안 맞는다») -- 전엔 비율만 30초 계좌 조회값이라
+  //   수익금이 움직이는 동안 비율이 멈춰 있다 조회 때 한꺼번에 튀었다. 교차증거금 사용 = 명목 ÷ 레버리지 → 시세 비율만큼, 순자산 = 지갑 + 미실현(같은 3초 값).
+  //   ponytail: 사용 증거금 전체를 이 코인 시세 비율로 민다 -- 다른 코인 포지션이 같이 열려 있으면 근사(지금은 ETH 하나), 다음 계좌 조회가 오면 거래소 값으로 돌아간다.
+  const bal = latestBinanceAccount?.balance || {}, m = acctMarginUsed(bal), live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
+  const k = qty && live > 0 && ofabPnlRef.price > 0 ? live / ofabPnlRef.price : 1;
+  const eqLive = (Number(bal.wallet) || 0) + (Number(bal.unrealized) || 0) + (pnl - (Number(p?.unrealized_pnl) || 0));
+  const used = eqLive > 0 ? (m.used * k) / eqLive * 100 : m.pct;
   setT("ofabPos", qty ? `${side} ${used.toFixed(0)}% · ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : "주문");
   box.classList.toggle("long", side === "LONG");
   box.classList.toggle("short", side === "SHORT");
