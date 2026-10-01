@@ -46,6 +46,10 @@ HOT_PRUNE = (
     *[(OKX_HOT_CTX_DB, f"okx_{t}", "ts_ms / 1000", "inst", "okx", t, _okx_coin, 8, ()) for t in ("oi", "mark", "funding")],
     (OKX_HOT_CTX_DB, "okx_liquidations", "ts_ms / 1000", "inst_id", "okx", "liquidations", lambda s: "ALL", 8,
      (("gaps", "to_ms", 1000),)),
+    (ROOT / "data/hot/hl_ctx.sqlite", "hl_asset_ctx", "recv_ms / 1000", "coin", "hl", "asset_ctx", str, 8, ()),
+    (ROOT / "data/hot/hl_positions.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8,
+     (("hl_cycles", "ts_ms", 1000), ("hl_universe", "ts_ms", 1000))),
+    (ROOT / "data/hot/hl_positions.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8, ()),
 )
 L, A = "data/live", "data/archive/live_retired_20261001"     # A = 1단계에서 보관한 09-19 정지 코인별 DB
 C5 = ("eth", "btc", "sol", "xrp", "hype")
@@ -80,10 +84,10 @@ SPECS = [
     # 4b(2026-10-01): OKX 맥락 = hot 한 파일(종목 = inst). 청산은 전 종목(~300)이라 날짜당 파일 하나(coin=ALL)
     *[("okx", s, [(OKX_CTX_REL, f"okx_{s}", "split_part(inst, '-', 1)")], "ts_ms") for s in ("oi", "mark", "funding")],
     ("okx", "liquidations", [(OKX_CTX_REL, "okx_liquidations", "'ALL'")], "ts_ms"),
-    ("hl", "asset_ctx", [(f"{L}/hyperliquid_context.duckdb", "hl_asset_ctx", "coin")], "recv_ms"),
-    ("hl", "positions", [(f"{L}/hyperliquid_positions.duckdb", "hl_positions", "coin"),
+    ("hl", "asset_ctx", [("data/hot/hl_ctx.sqlite", "hl_asset_ctx", "coin")], "recv_ms"),                    # 4c hot
+    ("hl", "positions", [("data/hot/hl_positions.sqlite", "hl_positions", "coin"),
                          (f"{L}/hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb", "hl_positions", "coin")], "ts_ms"),
-    ("hl", "liquidations", [(f"{L}/hyperliquid_positions.duckdb", "hl_liquidations", "coin"),
+    ("hl", "liquidations", [("data/hot/hl_positions.sqlite", "hl_liquidations", "coin"),
                             (f"{L}/hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb", "hl_liquidations", "coin")],
      "detected_ms"),
     ("deribit", "option_trades", [(f"{L}/deribit_options.duckdb", "option_trades", DERIBIT)], "ts_ms"),

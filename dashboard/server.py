@@ -641,7 +641,7 @@ from scripts.live_okx_trade_tape_collector_20260923 import (  # noqa: E402
     BUCKETS as OKX_TAPE_BUCKETS, CT_VALS as OKX_CT_VALS, HTTP_HEADERS as OKX_HTTP_HEADERS,
     INSTRUMENTS_URL as OKX_INSTRUMENTS_URL, OKX_HOT_CTX_DB, OKX_HOT_TAPE_DB)
 OKX_TAPE_DB_PATH = OKX_HOT_TAPE_DB     # 2026-10-01 hot SQLite(5종목 한 파일, 락 없음) -- 쿼리가 종목으로 거른다
-HL_POS_DB_PATH = LIVE_DIR / "hyperliquid_positions.duckdb"
+HL_POS_DB_PATH = REPO_ROOT / "data" / "hot" / "hl_positions.sqlite"   # 2026-10-01 4c hot(ETH 프로세스 파일)
 # 2026-09-26 SOL·XRP: 멀티코인 HL 포지션 수집기는 **Pi** 에서 돈다 -- Pi 크론이 3분마다 일관 스냅샷을 떠
 #   서버로 보낸다(replicate_trade_tape_20260922.sh, TT_VERIFY_TABLE=hl_positions).
 HL_POS_MULTI_DB_PATH = LIVE_DIR / "hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb"
@@ -662,7 +662,7 @@ def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH, coin: str = "E
     try:
         rows = _read_only_rows(db, """SELECT fill_ms, px * sz, dir, side, user FROM hl_liquidations
                                       WHERE coin = ? AND fill_ms >= ?""", [coin, since_ms])
-    except (duckdb.Error, OSError):
+    except (duckdb.Error, sqlite3.Error, OSError):
         return []                                  # 수집기가 아직 없거나 표가 없다
     return [(int(t), float(u or 0.0), ("Long" in str(d)) if d else side == "A", str(user))
             for t, u, d, side, user in rows]
@@ -3710,7 +3710,7 @@ def make_app() -> web.Application:
     # 레포트 대조 뒤 사용자 «불합격이어도 쓸모 있으면 넣어줘». 이 프로세스가 이미 가진 값(마크가격 링 · 미시 루프 ·
     # 관계 읽기 컨텍스트) + 수집기 duckdb(OKX·HL 맥락 · HL 고래 포지션 · 봇 롱숏비) + 봇 청산 버스트 파일.
     # 🔴전부 서술이다 -- 방향 판정은 30분 카드(융합)가 한다. 칸마다 우리 검정 판정은 화면 «?» 설명이 말한다.
-    HL_CTX_DB_PATH = LIVE_DIR / "hyperliquid_context.duckdb"
+    HL_CTX_DB_PATH = REPO_ROOT / "data" / "hot" / "hl_ctx.sqlite"   # 2026-10-01 4c hot(코인 = coin 열)
     OI_LSRATIO_DB_PATH = LIVE_DIR / "oi_lsratio.duckdb"
     MC_LIQ_PROFILE_S = 12 * 3600      # 실측 청산 가격 프로파일 창 = 차트 최대 창(12h)
     # 🔴2026-10-01 롱숏비 수집기(oi_lsratio 워커)는 5분마다 ETH·BTC·SOL 세 종목을 **같은 순간**에 upsert 한다
