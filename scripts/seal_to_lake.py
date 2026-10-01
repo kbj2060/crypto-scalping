@@ -39,21 +39,19 @@ OKX = "split_part(symbol, '-', 1)"                                     # ETH-USD
 OKX_CTX_REL = "data/hot/okx_ctx.sqlite"
 BN_CTX_REL = "data/hot/binance_ctx.sqlite"
 _bn_coin, _okx_coin = (lambda s: s.upper().removesuffix("USDT")), (lambda s: s.split("-")[0])
-_TAPE_SIDE = (("verify_1m", "ts_min", 1), ("gaps", "to_ms", 1000))
-# hot 정리 대상: (파일, 표, 초 단위 시각 SQL, 코인 열, venue, stream, 코인 변환, 보존일, 딸린 표[(표, 시각 열, 배수)])
+# hot 정리 대상: (파일, 표, 초 단위 시각 SQL, 코인 열, venue, stream, 코인 변환, 보존일).
+# 딸린 표(검증 verify_1m·공백 gaps·HL 바퀴 hl_cycles/hl_universe·OKX 청산 gaps)는 lake 로 안 가므로 **지우지 않는다**(10-01 리뷰:
+#   «0 과 모름을 가르는» 근거가 16일 뒤 사라지던 퇴행). ponytail: 하루 수천~1만 행이라 hot 에 쌓아 둔다 -- 커지면 lake 스트림으로.
 HOT_PRUNE = (
-    (HOT_TAPE_DB, "trade_tape_1s", "ts_sec", "symbol", "binance", "tape", _bn_coin, HOT_KEEP_DAYS, _TAPE_SIDE),
-    (OKX_HOT_TAPE_DB, "trade_tape_1s", "ts_sec", "symbol", "okx", "tape", _okx_coin, HOT_KEEP_DAYS, _TAPE_SIDE),
-    *[(OKX_HOT_CTX_DB, f"okx_{t}", "ts_ms / 1000", "inst", "okx", t, _okx_coin, 8, ()) for t in ("oi", "mark", "funding")],
-    (OKX_HOT_CTX_DB, "okx_liquidations", "ts_ms / 1000", "inst_id", "okx", "liquidations", lambda s: "ALL", 8,
-     (("gaps", "to_ms", 1000),)),
-    (ROOT / "data/hot/hl_ctx.sqlite", "hl_asset_ctx", "recv_ms / 1000", "coin", "hl", "asset_ctx", str, 8, ()),
-    (ROOT / "data/hot/hl_positions.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8,
-     (("hl_cycles", "ts_ms", 1000), ("hl_universe", "ts_ms", 1000))),
-    (ROOT / "data/hot/hl_positions.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8, ()),
-    (ROOT / "data/hot/binance_spot_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "binance", "spot_tape", _bn_coin, 8,
-     _TAPE_SIDE),
-    *[(ROOT / BN_CTX_REL, t, "ts_ms / 1000", "symbol", "binance", st, _bn_coin, 8, ())
+    (HOT_TAPE_DB, "trade_tape_1s", "ts_sec", "symbol", "binance", "tape", _bn_coin, HOT_KEEP_DAYS),
+    (OKX_HOT_TAPE_DB, "trade_tape_1s", "ts_sec", "symbol", "okx", "tape", _okx_coin, HOT_KEEP_DAYS),
+    *[(OKX_HOT_CTX_DB, f"okx_{t}", "ts_ms / 1000", "inst", "okx", t, _okx_coin, 8) for t in ("oi", "mark", "funding")],
+    (OKX_HOT_CTX_DB, "okx_liquidations", "ts_ms / 1000", "inst_id", "okx", "liquidations", lambda s: "ALL", 8),
+    (ROOT / "data/hot/hl_ctx.sqlite", "hl_asset_ctx", "recv_ms / 1000", "coin", "hl", "asset_ctx", str, 8),
+    (ROOT / "data/hot/hl_positions.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8),
+    (ROOT / "data/hot/hl_positions.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8),
+    (ROOT / "data/hot/binance_spot_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "binance", "spot_tape", _bn_coin, 8),
+    *[(ROOT / BN_CTX_REL, t, "ts_ms / 1000", "symbol", "binance", st, _bn_coin, 8)
       for t, st in (("oi_1s", "oi_1s"), ("mark_price_1s", "mark_1s"), ("liquidations", "liquidations"))],
 )
 L, A = "data/live", "data/archive/live_retired_20261001"     # A = 1단계에서 보관한 09-19 정지 코인별 DB
@@ -181,10 +179,17 @@ def seal(specs=SPECS, root: Path = ROOT, lake: Path = LAKE, now: dt.datetime | N
             for coin, day, n, src_hash in todo:
                 out = lake_path(venue, stream, coin, day.isoformat(), lake)
                 if out.exists():
-                    if day <= last_day - dt.timedelta(days=RESEAL_DAYS) or (n, src_hash) == con.execute(
-                            f"select count(*), bit_xor({row}) from read_parquet('{out.as_posix()}', hive_partitioning = false)"
-                            ).fetchone():   # 🔴hive_partitioning=false -- 경로의 coin=/date= 가 열로 붙으면 해시가 달라진다
+                    if day <= last_day - dt.timedelta(days=RESEAL_DAYS):
                         stats["skipped_existing"] += 1
+                        continue
+                    old_n, old_hash = con.execute(   # 🔴hive_partitioning=false -- 경로의 coin=/date= 가 열로 붙으면 해시가 달라진다
+                        f"select count(*), bit_xor({row}) from read_parquet('{out.as_posix()}', hive_partitioning = false)").fetchone()
+                    if (n, src_hash) == (old_n, old_hash):
+                        stats["skipped_existing"] += 1
+                        continue
+                    if n < old_n:   # 🔴원천이 lake 보다 적으면 덮지 않는다 -- 10-01 HL 맥락 채움이 같은 ms 행을 걸러 0.1~0.3% 적었다
+                        print(f"[seal] 🔴 재봉인 거부 {venue}/{stream} {coin} {day}: 원천 {n} < lake {old_n}", flush=True)
+                        stats["reseal_refused"] = stats.get("reseal_refused", 0) + 1
                         continue
                     stats["resealed"] += 1           # 원천이 그 날짜를 고쳐 썼다(백필) -- 아래에서 통째로 다시 쓴다
                 if dry_run:
@@ -211,10 +216,9 @@ def seal(specs=SPECS, root: Path = ROOT, lake: Path = LAKE, now: dt.datetime | N
 
 
 def prune_hot(hot: Path, table: str, ts_sql: str, coin_col: str, venue: str, stream: str, coin_of,
-              keep_days: int, side=(), now: dt.datetime | None = None, lake: Path = LAKE) -> int:
+              keep_days: int, now: dt.datetime | None = None, lake: Path = LAKE) -> int:
     """hot(SQLite) 한 표에서 keep_days 넘은 행을 지우고 공간을 돌려준다(auto_vacuum=INCREMENTAL).
-    🔴3b 부터 hot 이 원본이다 -- 지울 행이 있는 (코인, 날짜)가 **전부** lake 에 봉인돼 있을 때만 지운다(아니면 0, 로그).
-    side = 같은 파일의 딸린 표(검증·공백 기록 등) -- 같은 경계로 지운다."""
+    🔴3b 부터 hot 이 원본이다 -- 지울 행이 있는 (코인, 날짜)가 **전부** lake 에 봉인돼 있을 때만 지운다(아니면 0, 로그)."""
     if not hot.exists():
         return 0
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -235,9 +239,7 @@ def prune_hot(hot: Path, table: str, ts_sql: str, coin_col: str, venue: str, str
     try:
         with con:
             n = con.execute(f"DELETE FROM {table} WHERE {ts_sql} < ?", [cut]).rowcount
-            for t, col, mult in side:
-                con.execute(f"DELETE FROM {t} WHERE {col} < ?", [cut * mult])
-        con.execute("PRAGMA incremental_vacuum")
+        con.execute("PRAGMA incremental_vacuum").fetchall()   # 🔴fetchall 없으면 한 단계(페이지 1개)만 돈다(10-01 리뷰 실측)
     finally:
         con.close()
     return n
@@ -251,8 +253,8 @@ if __name__ == "__main__":
     t0 = time.time()
     s = seal(dry_run=a.dry_run, only=a.only)
     if not a.dry_run and not a.only and not s["failed"]:
-        s["hot_pruned"] = {f"{v}/{st}": prune_hot(h, t, ts, cc, v, st, fn, k, side)
-                           for h, t, ts, cc, v, st, fn, k, side in HOT_PRUNE}
+        s["hot_pruned"] = {f"{v}/{st}": prune_hot(h, t, ts, cc, v, st, fn, k)
+                           for h, t, ts, cc, v, st, fn, k in HOT_PRUNE}
     print(f"[seal] {'DRY-RUN ' if a.dry_run else ''}{dt.datetime.now().isoformat(timespec='seconds')} "
           f"lake={LAKE} {s} {time.time() - t0:.0f}s", flush=True)
     sys.exit(1 if s["failed"] else 0)

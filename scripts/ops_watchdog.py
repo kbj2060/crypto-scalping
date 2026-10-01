@@ -429,7 +429,9 @@ def _check_duckdb_table_freshness_uncached(component: str, db_path: Path, table:
                    "attempts": attempt + 1, "lock_conflict": busy}
         if busy:
             try:
-                mtime_age = max(0.0, (time.time() - db_path.stat().st_mtime) / 60.0)
+                wal = db_path.with_name(db_path.name + ".wal")   # 연결을 붙든 writer 는 체크포인트 전까지 .wal 만 쓴다
+                last = max([db_path.stat().st_mtime] + ([wal.stat().st_mtime] if wal.exists() else []))
+                mtime_age = max(0.0, (time.time() - last) / 60.0)
             except OSError:
                 mtime_age = None
             return Check(component, "WARN" if mtime_age is None else stale_status(mtime_age, warn_minutes, critical_minutes),

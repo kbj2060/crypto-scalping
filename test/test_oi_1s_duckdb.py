@@ -57,6 +57,10 @@ def main(tmp: Path) -> None:
     print("ok")
 
 
+def test_oi_1s_hot(tmp_path):     # pytest 가 줍게(10-01 리뷰: 함수가 없어 0개 수집이었다)
+    main(tmp_path / "binance_ctx.sqlite")
+
+
 if __name__ == "__main__":
     import tempfile
     with tempfile.TemporaryDirectory() as d:

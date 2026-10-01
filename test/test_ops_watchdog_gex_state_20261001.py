@@ -33,7 +33,12 @@ def test_lock_conflict_uses_mtime():
         assert holder.stdout.readline().strip() == "ready"
         c = w._check_duckdb_table_freshness_uncached("x", db, "t", "ts", 5, 10)
         assert c.details.get("lock_conflict") is True and c.status == "OK", c
-        os.utime(db, (time.time() - 3600,) * 2)
+        wal = db.with_name(db.name + ".wal")
+        assert wal.exists(), "holder 의 insert 는 체크포인트 전이라 .wal 에 있다"
+        os.utime(db, (time.time() - 3600,) * 2)               # 본체만 낡음 = 쓰는 중(10-01 리뷰: .wal 을 안 보면 거짓 CRITICAL)
+        c = w._check_duckdb_table_freshness_uncached("x", db, "t", "ts", 5, 10)
+        assert c.status == "OK", c
+        os.utime(wal, (time.time() - 3600,) * 2)              # 둘 다 낡음 = 진짜 정지
         c = w._check_duckdb_table_freshness_uncached("x", db, "t", "ts", 5, 10)
         assert c.status == "CRITICAL", c
     finally:

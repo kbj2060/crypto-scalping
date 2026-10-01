@@ -2196,8 +2196,9 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
         last_ms = int(time.time() * 1000) - SUPPLY_1S_SECONDS * 1000
         while True:
             try:
+                # 30초 겹쳐 읽는다 -- 늦게 도착한 stamp(약 3.5%)가 flush 경계를 넘어 last_ms 보다 앞에 써지면 놓친다(10-01 리뷰)
                 rows = await asyncio.to_thread(read_rows, BINANCE_CTX_DB, "SELECT ts_ms, open_interest FROM oi_1s "
-                                               "WHERE symbol = ? AND ts_ms > ? ORDER BY ts_ms", [sym, last_ms])
+                                               "WHERE symbol = ? AND ts_ms > ? ORDER BY ts_ms", [sym, last_ms - 30_000])
                 for ts_ms, value in rows:
                     oi_1s[int(ts_ms) // 1000] = float(value)
                     last_ms = max(last_ms, int(ts_ms))

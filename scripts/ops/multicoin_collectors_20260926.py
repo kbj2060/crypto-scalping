@@ -218,7 +218,8 @@ def pids_of(runner: str, match: dict) -> list[int]:
                        if "=" in kv)
         except OSError:
             continue
-        if all(env.get(k) == v for k, v in match.items()):
+        # 현물 테이프(TAPE_MARKET=spot, 10-01)는 같은 TAPE_SYMBOL 이지만 다른 수집기다 -- 없으면 선물
+        if all(env.get(k) == v for k, v in match.items()) and env.get("TAPE_MARKET", "futures") == match.get("TAPE_MARKET", "futures"):
             out.append(int(p.name))
     return out
 

@@ -82,18 +82,35 @@ def test_hot_source_reseal_and_guarded_prune():
     s2 = seal(spec, root=root, lake=lake, now=now)
     assert (s2["resealed"], s2["written"], s2["skipped_existing"]) == (1, 1, 2), s2
     assert ds.read("binance", "tape", "ETH", "2026-09-29", "2026-09-30", lake=lake)["buy_qty"].tolist() == [5.0]
+    # 원천이 lake 보다 적으면 재봉인하지 않는다(10-01 HL 맥락 채움이 같은 ms 행을 걸러 적었다 -- 덮었으면 lake 에서 사라졌다)
+    sqlite3.connect(hot).execute("DELETE FROM trade_tape_1s WHERE symbol = 'xrpusdt'").connection.commit()
+    xrp.write([_row("xrpusdt", D0 + 21, 3.0)])                               # XRP 09-28: 행 수는 같고 내용이 다름 -> 재봉인
+    s3 = seal(spec, root=root, lake=lake, now=now)
+    assert s3["resealed"] == 1 and "reseal_refused" not in s3, s3
+    sqlite3.connect(hot).execute("DELETE FROM trade_tape_1s WHERE symbol = 'xrpusdt'").connection.commit()
+    s4 = seal(spec, root=root, lake=lake, now=now)                           # XRP 09-28 원천 0행 -> 그 날짜가 원천에서 사라짐(재봉인 대상 아님)
+    assert s4["resealed"] == 0, s4
+    eth.write([_row("ethusdt", D0 + 11)])
+    s5 = seal(spec, root=root, lake=lake, now=now)                           # ETH 09-28: 2행으로 재봉인
+    sqlite3.connect(hot).execute("DELETE FROM trade_tape_1s WHERE ts_sec = ?", [D0 + 11]).connection.commit()
+    sqlite3.connect(hot).execute("UPDATE trade_tape_1s SET buy_qty = 9 WHERE ts_sec = ?", [D0 + 10]).connection.commit()
+    s6 = seal(spec, root=root, lake=lake, now=now)                           # 1행(내용 다름) < lake 2행 -> 거부
+    assert s5["resealed"] == 1 and s6.get("reseal_refused") == 1 and s6["resealed"] == 0, (s5, s6)
+    assert len(ds.read("binance", "tape", "ETH", "2026-09-28", "2026-09-29", lake=lake)) == 2, "lake 가 적은 원천으로 덮였다"
+    xrp.write([_row("xrpusdt", D0 + 20, 2.0)])                               # 아래 정리 시험을 위해 XRP 09-28 되살림
+    eth.record_gap((D0 - 86400) * 1000, (D0 - 86400) * 1000 + 5000, "test")   # 딸린 표 -- 정리가 지우면 안 된다
     # 정리: 지울 행이 있는 (코인, 날짜)가 전부 lake 에 있어야 지운다
     later = now + dt.timedelta(days=17)                                      # cut = 10-01 00:00 -> 09-28·09-29 행이 대상
     c = sqlite3.connect(hot)
     gone = ds.lake_path("binance", "tape", "XRP", "2026-09-28", lake)
     gone.rename(gone.with_suffix(".bak"))                                    # 봉인이 빠진 상황
-    args = (hot, "trade_tape_1s", "ts_sec", "symbol", "binance", "tape", lambda s: s.upper().removesuffix("USDT"), 16,
-            (("verify_1m", "ts_min", 1), ("gaps", "to_ms", 1000)))
+    args = (hot, "trade_tape_1s", "ts_sec", "symbol", "binance", "tape", lambda s: s.upper().removesuffix("USDT"), 16)
     assert prune_hot(*args, now=later, lake=lake) == 0, "XRP 09-28 lake 가 없는데 지웠다"
     assert c.execute("SELECT count(*) FROM trade_tape_1s").fetchone()[0] == 3
     gone.with_suffix(".bak").rename(gone)
     assert prune_hot(*args, now=later, lake=lake) == 3                       # 행 없는 날(XRP 09-29)은 파일이 없어도 된다
     assert c.execute("SELECT count(*) FROM trade_tape_1s").fetchone()[0] == 0
+    assert c.execute("SELECT count(*) FROM gaps WHERE reason = 'test'").fetchone()[0] == 1, "딸린 표(gaps)를 지웠다"
     c.close()
 
 
