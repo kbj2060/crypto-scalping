@@ -6078,6 +6078,11 @@ def main() -> None:
     args = parser.parse_args()
 
     print(f"Serving dashboard at http://{args.host}:{args.port}/dashboard/live/", flush=True)
+    # 2026-10-01: 스레드로 넘긴 작업이 안 돌아와 시장 맥락·OI 링이 멈추는 일이 두 번(4b·4d 배포 뒤). ptrace 가 막혀
+    #   py-spy 를 못 쓴다 -- `kill -USR2 <pid>` 면 모든 스레드 스택을 stderr(data/live/dashboard_external.err)에 쏟는다.
+    import faulthandler
+    import signal
+    faulthandler.register(signal.SIGUSR2, all_threads=True)
     web.run_app(
         make_app(),
         host=args.host,
