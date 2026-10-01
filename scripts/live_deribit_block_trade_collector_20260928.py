@@ -560,7 +560,7 @@ async def run() -> None:
                 bf = await asyncio.to_thread(backfill, since, now)
                 gap = (down[0], now, down[1], None) if down else None
                 # 2026-09-30 검증: 24h 넘게 꺼져 있었으면 백필(최대 24h)이 못 메운 구간이 남는다 -- «복구 불가»로 적어 두면
-                #   체결 기반 딜러 값(_taker_flow)이 그 뒤에 상장된 종목만 «처음부터 본 종목»으로 센다.
+                #   gaps 표에 체결 이력이 빈 구간이 남는다(2026-10-02 딜러 감마 제거 뒤에도 원자료 결손 기록으로 유지).
                 lost = [(seen[api], since[api], f"unrecoverable {api}", 0) for api in API_CURRENCIES
                         if seen.get(api) and seen[api] < since[api]]
                 added = await asyncio.to_thread(write, bf, ([gap[:3] + (len(bf),)] if gap else []) + lost)

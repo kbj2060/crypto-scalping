@@ -2571,16 +2571,15 @@ body.order-coin-off .acct-lanes::before {
    세 열 모두 카드 높이 끝까지 채운다 -- 행 여섯 줄에 각 칸이 두 줄씩(사다리는 넷) 걸치고 stretch 로 늘어난다.
    #optBody · #optRow 는 display:contents 라 그 안 칸들이 이 격자의 직접 칸이 된다(렌더러는 그대로). */
 @media (min-width: 721px) {   /* 2026-10-01 세로 화면(721~1099)도 격자 -- 열 배치만 아래 미디어에서 바꾼다 */
-  /* 2026-10-01 배치(사용자 지시): 위 = 지금·딜러감마 | 사다리(넓게) | 블록 거래·심리 · 아래 한 줄 = 만기 | 순매수 흐름 | 감마 곡선 · 맨 아래 ⑤ */
+  /* 2026-10-01 배치(사용자 지시): 위 = 지금·실현감마 | 사다리(넓게) | 블록 거래·심리 · 아래 한 줄 = 만기 | 순매수 흐름(2026-10-02 감마 곡선 제거 → 흐름이 두 칸) · 맨 아래 ⑤ */
   #optCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) minmax(0, 1.15fr); column-gap: 28px;
-    grid-template-areas: "head head head" "cov cov cov" "move ladder blk" "gamma ladder mood" "lane flow curve" "when when when"; }
+    grid-template-areas: "head head head" "cov cov cov" "move ladder blk" "gamma ladder mood" "lane flow flow" "when when when"; }
   #optCard > #mcWhen { grid-area: when; }   /* 2026-10-01 ⑤ 다음 24시간 = 맨 아래 전폭(풋프린트에서 옮김) */
   #optCard > .ops-health-head { grid-area: head; }
   #optCard #optBody, #optCard #optRow { display: contents; }
   #optCard .opt-cov, #optCard #optBody > .opt-note { grid-area: cov; margin-bottom: 10px; }
-  #optCard .opt-sec:has([data-tip="move"]) { grid-area: move; } #optCard .opt-sec:has([data-tip="gamma"]) { grid-area: gamma; }
+  #optCard .opt-sec:has([data-tip="move"]) { grid-area: move; } #optCard .opt-sec:has([data-tip="rg"]) { grid-area: gamma; }
   #optCard .opt-sec:has([data-tip="mood"]) { grid-area: mood; } #optCard .opt-sec:has([data-tip="ladder"]) { grid-area: ladder; }
-  #optCard .opt-sec:has([data-tip="curve"]) { grid-area: curve; }
   #optCard #optLaneBody { grid-area: lane; } #optCard #optFlowBody { grid-area: flow; } #optCard #optBlkBody { grid-area: blk; }
   #optCard .opt-sec, #optCard .opt-lane-body { min-width: 0; margin: 0; border-top: 1px solid var(--line); padding: 8px 0 12px; align-self: stretch; }
   #optCard .opt-sec svg, #optCard .opt-lane-body svg { width: 100%; height: auto; }
@@ -2590,8 +2589,8 @@ body.order-coin-off .acct-lanes::before {
   #optCard .opt-sec:has([data-tip="ladder"])::before { content: "가격대"; }
   #optCard #optBlkBody::before { content: "거래 · 심리"; }
   /* «지금» 열의 숫자 칸은 늘어난 높이만큼 줄 간격을 벌려 칸을 채운다(빈 아래 공간 대신) */
-  #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="gamma"]), :has([data-tip="mood"])) { display: flex; flex-direction: column; }
-  #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="gamma"]), :has([data-tip="mood"])) .opt-kv { flex: 1 1 0; max-height: 46px; align-items: center; font-size: 13.5px; }
+  #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="rg"]), :has([data-tip="mood"])) { display: flex; flex-direction: column; }
+  #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="rg"]), :has([data-tip="mood"])) .opt-kv { flex: 1 1 0; max-height: 46px; align-items: center; font-size: 13.5px; }
 }
 .card-title { margin: 0 14px 0 0; font: 800 17px/1 var(--font-sans); letter-spacing: -.01em; color: var(--text); align-self: center; }
 body.not-eth #mcBody, body.not-eth #mcWhen { display: none; }
@@ -2710,9 +2709,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); padding-bottom: 14px; }   /* 잘린 줄 대신 «더 있다» 페이드 */
 @media (max-width: 720px) { .opt-blk-list { max-height: none; mask-image: none; padding-bottom: 0; } }
 @media (min-width: 721px) { #optCard .opt-blk-list { max-height: none; overflow: visible; mask-image: none; padding-bottom: 0; } }   /* 2026-09-30 Option 카드 «시간» 열은 자리가 있다 -- 최근 5건을 스크롤 없이 */
-.opt-curve { display: block; width: 100%; height: auto; max-width: 440px; }
-@media (min-width: 721px) { #optCard .opt-curve { max-width: none; } }   /* 2026-10-01 아래 한 줄의 제 칸을 다 쓴다 */
-.opt-dex { color: var(--ink); font-variant-numeric: tabular-nums; }
 /* 2026-09-30 옵션을 풋프린트 카드 안으로(사용자 «하나의 카드») -- 좁은 화면은 한 열로 맨 아래, 넓은 화면은 오른쪽 칸(위 ≥1700 규칙). */
 .liq-map-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
 .liq-map-panel > * { grid-column: 1; min-width: 0; }
@@ -2721,10 +2717,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   border: 1px solid var(--soft-line); color: var(--muted); font-variant-numeric: tabular-nums; }
 .opt-cov.warn { color: var(--text); border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
 .opt-cov b { color: var(--text); }
-/* 2026-10-01 커버 줄 = 제목 옆 한 줄(따로 쓰던 상자 줄을 걷어 높이 확보) */
+/* 2026-10-01 제목 옆 한 줄(2026-10-02 커버 % 제거 -- 수집 시각만) */
 .opt-cov-h { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: keep-all; }
-.opt-cov-h b { color: var(--text); }
-.opt-cov-h.warn { color: var(--warn); }
 /* 2026-09-29 휴대폰 블록 거래 요약 한 줄 + 펼치기 목록(사용자 선택 C) */
 .opt-blk-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; padding: 8px 10px; margin-top: 6px;
   border: 1px solid var(--soft-line); border-radius: 10px; font-variant-numeric: tabular-nums; }
@@ -2840,8 +2834,8 @@ body.not-eth #fpLineSwitch { display: none; }
 #mcBody.mc-cmp > .mc-sec { display: flex; flex-direction: column; justify-content: space-between; }
 #mcWall .os { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; }
 
-/* 2026-10-01 세로 화면(태블릿·세로 모니터 721~1099): 두 열 -- 왼쪽 지금·딜러감마·심리 | 오른쪽 사다리, 그 아래 블록 거래 전폭, 차트 둘, 감마 곡선 전폭 */
+/* 2026-10-01 세로 화면(태블릿·세로 모니터 721~1099): 두 열 -- 왼쪽 지금·실현감마·심리 | 오른쪽 사다리, 그 아래 블록 거래 전폭, 차트 둘 */
 @media (min-width: 721px) and (max-width: 1099px) {
   #optCard { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); column-gap: 22px;
-    grid-template-areas: "head head" "cov cov" "move ladder" "gamma ladder" "mood ladder" "blk blk" "lane flow" "curve curve" "when when"; }
+    grid-template-areas: "head head" "cov cov" "move ladder" "gamma ladder" "mood ladder" "blk blk" "lane flow" "when when"; }
 }

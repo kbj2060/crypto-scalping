@@ -31,6 +31,23 @@ assert.equal(optNewTxt([{ cb: 3, cs: 0, pb: 0, ps: 1, doi: -4 }]), " · 미결�
 assert.equal(optNewTxt([{ cb: 3, cs: 0, pb: 0, ps: 1, doi: null }]), "");                            // ΔOI 모름
 assert.equal(optNewTxt([{ cb: 1, cs: 1, pb: 0, ps: 0, doi: 2 }, { cb: 9, cs: 9, pb: 0, ps: 0, doi: null }]), " · 미결제 +2 · 신규 약 100%");
 
+// ── 실현 감마(2026-10-02): 12시간 5분 수익률 acf1 · 마감봉만 · 분위·국면 경계 ──
+{
+  const ri = src.indexOf("const RG_REF ="), RG_REF = eval(src.slice(ri + 14, src.indexOf(";", ri)));
+  const optRealizedGamma = eval(`(${take("optRealizedGamma")})`);
+  const mk = (rets, t0 = 1e9) => { let p = 2000; const out = [{ time: t0, close: p }];
+    rets.forEach((r, i) => { p *= Math.exp(r); out.push({ time: t0 + (i + 1) * 300, close: p }); }); return out; };
+  const alt = Array.from({ length: 144 }, (_, i) => (i % 2 ? -0.001 : 0.001));          // 매 봉 되돌림 → acf ≈ −1
+  const rev = optRealizedGamma(mk(alt), 1e9 + 145 * 300);
+  assert.ok(rev.v < -0.9 && rev.side === "rev" && rev.pct === 0.5, JSON.stringify(rev));
+  const runs = Array.from({ length: 144 }, (_, i) => (Math.floor(i / 8) % 2 ? -0.001 : 0.001));   // 8봉씩 이어짐 → acf 양수
+  const tr = optRealizedGamma(mk(runs), 1e9 + 145 * 300);
+  assert.ok(tr.v > 0.5 && tr.side === "trend" && tr.pct === 99.5, JSON.stringify(tr));
+  assert.equal(optRealizedGamma(mk(alt), 1e9 + 144 * 300 + 10), null);                // 마지막 봉이 형성 중 → 마감봉 144개 → 계산 안 함
+  const mid = optRealizedGamma(mk(alt).map((c, i) => ({ ...c, close: 2000 * Math.exp(Math.sin(i * 1.3) * 0.001 + i * 0.00001) })), 1e9 + 145 * 300);
+  assert.ok(mid && mid.pct > 0 && mid.pct < 100, JSON.stringify(mid));
+}
+
 // ── 미국장: 서머타임 13:30 UTC · 주말 건너뜀 · 표준시 14:30 UTC · 장중 판정 ──
 const us = (iso) => { const r = mcUsSession(Date.parse(iso)); return [new Date(r.open).toISOString().slice(0, 16), r.live]; };
 assert.deepEqual(us("2026-09-29T12:00:00Z"), ["2026-09-29T13:30", false]);
