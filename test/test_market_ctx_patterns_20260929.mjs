@@ -31,20 +31,6 @@ assert.equal(optNewTxt([{ cb: 3, cs: 0, pb: 0, ps: 1, doi: -4 }]), " · 미결�
 assert.equal(optNewTxt([{ cb: 3, cs: 0, pb: 0, ps: 1, doi: null }]), "");                            // ΔOI 모름
 assert.equal(optNewTxt([{ cb: 1, cs: 1, pb: 0, ps: 0, doi: 2 }, { cb: 9, cs: 9, pb: 0, ps: 0, doi: null }]), " · 미결제 +2 · 신규 약 100%");
 
-// ── 옵션 이벤트 예상 폭(2026-10-01): 평평한 IV → 0 · 이벤트를 품은 만기만 분산이 더 크면 그 몫이 나온다 ──
-const optEventMove = eval(`(${take("optEventMove")})`);
-{
-  const now = Date.parse("2026-10-05T00:00:00Z"), H = 3.6e6, yr = 3.156e10;
-  const exp = (h, iv) => ({ exp_ms: now + h * H, atm_i: iv });
-  const ev = [{ importance: "high", time_utc: new Date(now + 20 * H).toISOString(), title_ko: "CPI" }];
-  assert.deepEqual(optEventMove({ expiries: [exp(12, 40), exp(36, 40), exp(60, 40)] }, now, ev), { nm: "CPI", pct: 0 });
-  // 36h 만기에 이벤트 몫 0.01%² 를 얹는다: v36·T36 = 0.16·T36 + x → 기대 = √x
-  const x = 0.0001, T36 = 36 * H / yr, iv36 = Math.sqrt((0.16 * T36 + x) / T36) * 100;
-  const r = optEventMove({ expiries: [exp(12, 40), exp(36, iv36), exp(60, Math.sqrt((0.16 * 60 * H / yr + x) / (60 * H / yr)) * 100)] }, now, ev);
-  assert.ok(Math.abs(r.pct - Math.sqrt(x) * 100) < 1e-6, r);
-  assert.equal(optEventMove({ expiries: [] }, now, []), null);                          // 4일 안 일정 없음
-}
-
 // ── 미국장: 서머타임 13:30 UTC · 주말 건너뜀 · 표준시 14:30 UTC · 장중 판정 ──
 const us = (iso) => { const r = mcUsSession(Date.parse(iso)); return [new Date(r.open).toISOString().slice(0, 16), r.live]; };
 assert.deepEqual(us("2026-09-29T12:00:00Z"), ["2026-09-29T13:30", false]);

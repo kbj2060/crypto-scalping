@@ -3457,7 +3457,7 @@ const OPT_TIPS = {
   curve: "감마 곡선(딜러·체결, 커버 종목만): 가격이 지금에서 ±15% 옮겨 가면 딜러 감마 합이 얼마가 되는가(사다리 칩과 같은 범위). 청록 = 양감마 · 주황 = 음감마. 흰 점선 = 지금 가격, 주황 점선 = 플립. 세로 = 가격 1% 움직임당 딜러가 사고파는 금액($).\n점선 = DEX(딜러·체결 순델타 × 가격) — 단위가 달라 0선만 맞추고 크기는 따로 늘렸다(값은 아래 줄).\n커버가 낮으면 일부 종목의 곡선이다(카드 맨 위 커버 %). 검정 전 — 참고로만.",
   blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자). 줄 머리 = 다리 구조로 분류한 전략 이름(Deribit 자체 구조 코드와 313/313 일치) · «+ 선물 헤지» = 같은 블록에 선물 다리가 붙음(보통 델타 중립 패키지) · 델타/베가 롱·숏 = 요청자 쪽 순델타·순베가 부호(체결 IV 로 계산, 총량의 10% 미만이면 중립). 단일 다리 블록은 다른 곳 헤지의 일부일 수 있어 의도를 모른다. 신규/청산·신원은 모른다. 금액 = 다리별 명목 합(스프레드면 두 다리가 다 더해진다).\n우리 검정 없음 — 참고로만.",
   lane: "옵션 만기(지금 ~ +120시간, 블록 거래는 가운데 «블록 거래» 칸): 시각 KST. 막대 = 다가올 만기 규모(콜+풋 미결제 × 지수 = 명목 달러) · pain = max pain(그 만기 미결제만으로 계산) · P/C = 풋÷콜 미결제 수량(심리 지표 아님) · 청록 선 = 만기별 ATM IV(가까운 만기는 남은 시간이 짧아 시간대에 따라 출렁인다).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
-  info: "옵션 문헌(2026-10-01 조사)이 «옵션이 선물에 알려 줄 수 있는 것»으로 꼽은 지표를 우리 데이터로 만든 칸. 문헌의 공통 결론은 «방향은 안 되고 크기(변동성)는 된다» — 전부 서술이고 우리 검정은 아직 없다(검정 전).\n다음 만기까지 · 옵션 내재 = 가까운 만기(3시간 미만이면 다음) 외가격 옵션 가격을 적분한 모델프리 분산(VIX 식)으로 만든 1σ 폭 — DVOL(30일)을 시간으로 나눈 «예상 폭»과 지평이 맞는 대안(Jiang·Tian 2005, Hoang·Baur 2020).\n꼬리 확률 = 옵션 가격(스마일)을 행사가로 미분한 위험중립 확률로, 만기에 선도가에서 2·3·5% 넘게 벗어날 확률(Breeden·Litzenberger 1978). 위험 프리미엄 때문에 실제보다 크게 나오는 경향.\n기간 구조 기울기 = 고정만기 ATM IV 의 1일−7일 · 7일−30일. 1일이 7일보다 높으면 «역전»(단기 스트레스·이벤트, Johnson 2017).\n위험중립 왜도·첨도(30일) = 옵션 가격으로 계산한 시장이 보는 분포 모양(Bakshi·Kapadia·Madan 2003). 왜도 음수 = 하락 꼬리가 비싸다 · 첨도 3 초과 = 꼬리가 두껍다.\n변동성 순매수 = Σ(테이커 매수−매도)×베가(1 vol pt 당 $), 지난 24시간. + 면 테이커가 변동성을 산다(Alexander 외 2023: Deribit 에서 이 흐름이 IV·실현변동성을 예측, 방향은 못 함).\n블록 요청자 = 지난 24시간 블록 요청자 쪽 순델타·순베가 합.\nO/S = 옵션 24시간 체결 명목 ÷ 바이낸스 선물 24시간 체결 명목(Roll·Schwartz·Subrahmanyam 2010: 높으면 이후 움직임이 크다).\n정산 창 = 가까운 만기 ATM(±2%) 미결제와 그 값이 지난 30일 정산 1시간 전 값 중 몇 분위인지. Deribit 정산 = 16:30~17:00 KST 지수 평균(Weiss 외 2026: ATM 미결제가 큰 날 만기 1시간 전 하락 → 뒤 되돌림, 효과 크기 미확인).\n이벤트 예상 폭 = 다음 주요 일정(4일 안)을 사이에 둔 두 만기의 분산 차에서 평소 하루 분산을 뺀 «이벤트 몫»(Dubinsky 외 2019).\nVoV = 내재 변동성(DVOL)의 시간당 로그 변화 흔들림, 지난 24시간.\nATM 호가 폭 = 7일 근처 만기 ATM 옵션 매도−매수 호가를 IV 포인트로 — 넓으면 마켓메이커가 위험을 피한다.\n옵션 선도 − 지수 = 같은 스냅샷의 Deribit 가까운 만기 선도가와 Deribit 지수 차(bp) — 단기 캐리·수요 쏠림(합성 선도 − 현물, Alexander 외 2024). 10분마다 갱신.",
+  info: "옵션이 선물에 알려 줄 수 있는 것 중 2026-10-02 의미 검증(ETH 2026)을 거쳐 남긴 다섯 줄. 전부 «크기·국면» 정보이고 방향은 말하지 않는다.\n기간 구조 기울기 = 고정만기 ATM IV 의 1일−7일 · 7일−30일. 1일이 7일보다 높으면 «역전»(주황). ✅검증: 역전이면 다음 24시간 실현 변동성이 DVOL 예상의 약 1.38배(45일, DVOL·최근 실현 통제 후에도 남음 · 겹치지 않는 하루 1표본 33일로는 경계선). 7일−30일도 같은 방향.\nVoV = 내재 변동성(DVOL)의 시간당 로그 변화 흔들림, 지난 24시간. ✅검증: 크면 다음 24시간 DVOL 이 더 크게 바뀐다(271일) · VoV 상위 20% 날은 24시간 1σ 띠 적중 66%(평소 80%) — 단 «최근 실현 변동성이 IV 보다 크다»와 같은 정보.\n꼬리 확률 = 옵션 가격(스마일)을 행사가로 미분한 위험중립 확률로, 만기에 선도가에서 2·3·5% 넘게 벗어날 확률(위·아래 합, Breeden·Litzenberger 1978). 🟡실제보다 크게 나오는 방향(±2% 예측 20% vs 실제 18% · ±3% 10% vs 7%)이나 46만기로는 확정 못 함. DVOL 로 환산한 확률(±2% 를 +15pp 과대)보다는 확실히 실제에 가깝다.\nATM 호가 폭 = 7일 근처 만기 ATM 옵션 매도−매수 호가를 IV 포인트로 — 넓으면 마켓메이커가 위험을 피한다. ⏳검정 불가(과거 호가 없음) — 10-01부터 쌓는 중, 나중에 검증.\n옵션 선도 − 지수 = 같은 스냅샷의 Deribit 가까운 만기 선도가와 Deribit 지수 차(bp). 대개 ±3bp 안이고 10분 변화 SD 1.9bp — 그 정도는 잡음. ⏳검정 불가(과거 Deribit 지수 없음, 09-28부터 쌓는 중) — «콜 수요면 +» 같은 해석은 아직 근거가 없다, 나중에 검증.\n뺀 줄(검증 결과): 옵션 내재 폭(DVOL 과 동률) · 위험중립 왜도·첨도(왜도는 반대 방향, 늘 음수·늘 3 초과) · 변동성 순매수(이후 24h 예측력 없음) · 블록 요청자(순베가 = 블록 몫과 중복 · 순델타 방향 정보 없음) · O/S(높을수록 오히려 조용) · 정산 창(07~08 UTC 는 평소의 0.8배로 조용 · 미결제 크기와 무관) · 이벤트 예상 폭(공식이 0 으로 잘림).",
   flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 테이커 체결 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 테이커가 롱으로 얼마나 기울었나». «감마 곡선»의 DEX 와는 다른 값이다: DEX 는 딜러(= 테이커 반대편) 순델타라 부호가 대략 반대이고(흐름 + = 테이커 롱 · DEX + = 딜러 롱), 창도 다르다(흐름 = 지난 24시간 · DEX = 종목 상장 이후 전체).\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). «신규 약 N%» = 그 시간 새로 열린 계약의 비율(체결량 V · 미결제 변화 ΔOI 로 (V+ΔOI)/2V, 매수·매도 양쪽 몫 기준) — 이 비율은 정확하지만 테이커와 메이커 중 누가 열었는지는 모른다(테이커 몫은 약 70% 만 확정). 예: 순매수가 0 근처여도 미결제가 크게 늘면 롱과 숏이 양쪽으로 새로 쌓인 것. «강제청산» = 테이커가 강제청산된 체결(Deribit 표시, 매시 history 로 대조). 만기로 사라지는 계약은 미결제 변화에서 뺀다. 검정 전 — 참고.",
 };
 // 2026-09-28 네 코인(ETH·BTC 역옵션 · SOL·XRP USDC 선형옵션). DVOL 지수는 ETH·BTC 뿐 -- 나머지는 30일 ATM IV(iv30)로 폭을 잰다.
@@ -3770,60 +3770,24 @@ function optRowCols() {
 
 addEventListener("resize", () => requestAnimationFrame(optRowCols));   // 2026-09-30 검증: 창 폭이 바뀌면 가운데 칸을 바로 다시 맞춘다
 
-// 2026-10-01 «옵션 정보»(문헌 조사 → 사용자 «모두 옵션 카드에»). 값은 수집기(o.surface·cm·atm_spread_iv·front_atm_oi_usd · g.opt_hist)와
-//   블록 수집기(흐름 vg·블록 합) · 서버(선물 24시간 명목)에서 온다. 빠진 값은 줄째 뺀다. 전부 서술(검정 전).
-function optInfoRows(o, g, cur, px, kv) {
-  const sf = o.surface || {}, fr = sf.front, s7 = sf["7"], s30 = sf["30"], cm = o.cm || {}, oh = (g && g.opt_hist) || {};
+// 2026-10-01 «옵션 정보»(문헌 조사 → 사용자 «모두 옵션 카드에») → 2026-10-02 의미 검증 뒤 사용자 «다섯만 남기고 제거»:
+//   지지(기간 구조 기울기 · VoV) · 방향 맞음·표본 부족(꼬리 확률) · 검정 불가 → 쌓아서 나중에 검증(ATM 호가 폭 · 선도 − 지수).
+//   뺀 것(옵션 내재 · 왜도첨도 · 변동성 순매수 · 블록 요청자 · O/S · 정산 창 · 이벤트 폭)은 근거 없음/반대/공식 결함이었다
+//   (scripts/research_eth_option_info_{surface,flow}_validate_20261002.py). 빠진 값은 줄째 뺀다.
+function optInfoRows(o, g, kv) {
+  const sf = o.surface || {}, fr = sf.front, s7 = sf["7"], cm = o.cm || {}, oh = (g && g.opt_hist) || {};
   const pct = (v) => (v == null ? "-" : `${(v * 100).toFixed(v < 0.1 ? 1 : 0)}%`);
   const sgnN = (v, d = 1) => (v == null ? "-" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(d)}`);
   const rows = [];
-  if (fr && fr.mfiv) {
-    const mv = fr.fwd * fr.mfiv / 100 * Math.sqrt(fr.hours / 8760);
-    rows.push(kv(`다음 만기까지 · 옵션 내재(${fr.hours.toFixed(0)}h)`, `±${optQ(mv)}$ (IV ${fr.mfiv.toFixed(0)}%)`));
-  }
-  if (fr && fr.tail) rows.push(kv(`꼬리 확률 · 만기까지(${fr.hours.toFixed(0)}h)`, `±2% 밖 ${pct(fr.tail["2"])} · ±3% ${pct(fr.tail["3"])} · ±5% ${pct(fr.tail["5"])}`));
-  if (s7 && s7.tail) rows.push(kv(`꼬리 확률 · ${Math.round(s7.hours / 24)}일 만기`, `±5% 밖 ${pct(s7.tail["5"])}`));
   const a1 = (cm["1"] || {}).atm, a7 = (cm["7"] || {}).atm, a30 = (cm["30"] || {}).atm;
   if (a1 != null && a7 != null) rows.push(kv("기간 구조 기울기", `1일−7일 ${sgnN(a1 - a7)}pt${a30 != null ? ` · 7일−30일 ${sgnN(a7 - a30)}pt` : ""}`, a1 > a7 ? "opt-warn" : ""));
-  if (s30 && s30.rn_skew != null) rows.push(kv(`위험중립 왜도·첨도 · ${Math.round(s30.hours / 24)}일`, `${sgnN(s30.rn_skew, 2)} · ${s30.rn_kurt.toFixed(1)}`));
-  const fl = (((latestGex || {}).block_trades || {}).flow_by_coin || {})[cur] || [], full = fl.slice(0, -1);
-  if (full.some((b) => b.vg != null)) {
-    const vg = full.reduce((a, b) => a + (b.vg || 0), 0), vgb = full.reduce((a, b) => a + (b.vgb || 0), 0);
-    rows.push(kv("변동성 순매수 · 24h", `${vg >= 0 ? "매수" : "매도"} ${optUsd(Math.abs(vg))}/vol pt (블록 ${vgb >= 0 ? "+" : "−"}${optUsd(Math.abs(vgb))})`));
-  }
-  const bs = ((((latestGex || {}).block_trades || {}).block_sum_by_coin) || {})[cur];
-  if (bs && bs.n) rows.push(kv(`블록 요청자 · 24h(${bs.n}건)`, `델타 ${sgnN(bs.net_delta, 0)} ${escapeHtml(cur)} · 베가 ${bs.net_vega_usd >= 0 ? "+" : "−"}${optUsd(Math.abs(bs.net_vega_usd))}`));
-  const f24 = ((latestGex || {}).fut24_usd || {})[cur], idx = o.index || px;
-  if (f24 && full.length && idx) {
-    const opt24 = full.reduce((a, b) => a + b.cb + b.cs + b.pb + b.ps, 0) * idx;
-    rows.push(kv("O/S · 24h", `${(opt24 / f24 * 100).toFixed(1)}% (옵션 ${optUsd(opt24)} ÷ 선물 ${optUsd(f24)})`));
-  }
-  const f = optFront(o);
-  if (f && o.front_atm_oi_usd != null) {
-    const left = (f.exp_ms - Date.now()) / 3.6e6, live = left > 0 && left <= 0.5;
-    rows.push(kv("정산 창 · ATM 미결제", `${optUsd(o.front_atm_oi_usd)}${oh.atm_oi_pct != null ? ` · 30일 중 ${Math.round(oh.atm_oi_pct * 100)}분위` : ""}${live ? " · 지금 정산 평균 중" : ` · 정산 ${optKst(f.exp_ms - 1.8e6, false)}~${optKst(f.exp_ms, false)} KST`}`, live ? "opt-warn" : ""));
-  }
-  const ev = optEventMove(o);
-  if (ev) rows.push(kv(`이벤트 예상 폭 · ${escapeHtml(ev.nm)}`, ev.pct == null ? "만기 사이에 안 걸림" : ev.pct < 0.05 ? "옵션에 거의 안 들어감" : `±${ev.pct.toFixed(2)}% (±${optQ(px * ev.pct / 100)}$)`));
   if (oh.vov24 != null) rows.push(kv("VoV · 24h", `내재 변동성 시간당 ±${oh.vov24.toFixed(1)}%`));
+  if (fr && fr.tail) rows.push(kv(`꼬리 확률 · 만기까지(${fr.hours.toFixed(0)}h)`, `±2% 밖 ${pct(fr.tail["2"])} · ±3% ${pct(fr.tail["3"])} · ±5% ${pct(fr.tail["5"])}`));
+  if (s7 && s7.tail) rows.push(kv(`꼬리 확률 · ${Math.round(s7.hours / 24)}일 만기`, `±5% 밖 ${pct(s7.tail["5"])}`));
   if (o.atm_spread_iv != null) rows.push(kv("ATM 호가 폭 · 7일 근처", `${o.atm_spread_iv.toFixed(1)} vol pt`));
   // 같은 스냅샷끼리만 잰다 -- 10분 묵은 선도가를 지금 바이낸스 가격과 견주면 그 사이 움직임이 섞였다(배포 직후 +30bp 로 보였다)
   if (fr && fr.fwd && o.index) rows.push(kv("옵션 선도 − 지수 · 가까운 만기", `${sgnN((fr.fwd / o.index - 1) * 1e4)}bp`));
   return rows.join("") || `<div class="opt-note">수집기 새 값 대기(다음 10분 수집)</div>`;
-}
-// 다음 «높음» 일정(4일 안)의 옵션 내재 이벤트 폭(%): 일정을 사이에 둔 만기 a·b 의 총분산 차 − 평소 분산 속도 × 시간(Dubinsky 외 2019).
-//   평소 = 그 다음 만기 쌍(b→c)의 분산 속도. a 가 없으면 지금(분산 0). ATM 은 보간값(atm_i) 우선.
-function optEventMove(o, now = Date.now(), events = latestMacroEvents) {
-  const evs = (events || []).filter((e) => e.importance === "high")
-    .map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표" })).filter((e) => e.t > now && e.t < now + 96 * 3.6e6).sort((a, b) => a.t - b.t);
-  if (!evs.length) return null;
-  const E = evs[0], ex = (o.expiries || []).filter((e) => e.exp_ms > now && (e.atm_i ?? e.atm_iv) > 0)
-    .map((e) => ({ T: (e.exp_ms - now) / 3.156e10, v: ((e.atm_i ?? e.atm_iv) / 100) ** 2, ms: e.exp_ms }));
-  const bi = ex.findIndex((e) => e.ms > E.t);
-  if (bi < 0 || bi + 1 >= ex.length) return { nm: E.nm, pct: null };
-  const a = bi > 0 ? ex[bi - 1] : { T: 0, v: 0 }, b = ex[bi], c = ex[bi + 1];
-  const normal = (c.v * c.T - b.v * b.T) / (c.T - b.T), evVar = b.v * b.T - a.v * a.T - normal * (b.T - a.T);
-  return { nm: E.nm, pct: evVar > 0 ? Math.sqrt(evVar) * 100 : 0 };
 }
 function renderOptions() {
   const body = el("optBody"), chip = el("optChip");
@@ -3894,7 +3858,7 @@ function renderOptions() {
       // 2026-10-01 기간 구조 = 고정만기 7·30·60일 ATM(가까운 일간 만기는 남은 시간 안에 미국장이 드느냐로 0.71~0.92배 출렁여 «역전»을 흉내 냈다)
       + kv("기간 구조 · ATM IV", ["7", "30", "60"].map((d) => ((o.cm || {})[d] || {}).atm).every((v) => v == null) ? "-"
            : ["7", "30", "60"].map((d) => { const v = ((o.cm || {})[d] || {}).atm; return `${d}일 ${v == null ? "-" : v.toFixed(0)}`; }).join(" → "))),
-    sec("info", "옵션 정보 · 검정 전", optInfoRows(o, g, cur, px, kv)),
+    sec("info", "옵션 정보", optInfoRows(o, g, kv)),
   ].join("");
   // 2026-10-01 풋프린트 호가 프로파일 아래 «옵션 요약»(사용자 «어떻게 요약하면 좋을지 연구해서»). 고른 것 = **가격 칸과 같은 언어(가격)로 말하는 것**만,
   //   근거 순: ① 24h 1σ 범위(DVOL 띠가 실현 변동성 띠보다 정확 — 09-29 재검정) ② max pain(만기 1h 전 +10.5bp 후보 — 44일, 통과 1회)
