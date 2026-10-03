@@ -3980,7 +3980,7 @@ async function refreshTrend() {
 // 서버 /api/market-context(dashboard/market_ctx.py)를 그대로 그린다. 값은 전부 **서술** -- 방향 판정은 30분 카드(융합)가 한다.
 // 칸 제목의 «?» = 정의 · 읽는 법 · 우리 검정의 말(DESIGN.md: 매매 화면 본문에 연구 원문 숫자를 올리지 않는다).
 const API_MARKET_CTX_URL = "/api/market-context";
-const MARKET_CTX_POLL_MS = 5000;
+const MARKET_CTX_POLL_MS = 1000;   // 2026-10-03 5초 -> 1초(사용자 «1초 원천은 화면도 1초») -- 호가 벽·스프레드·계기·BTC 동행은 서버 1초 루프 · 응답 중앙 14ms·3KB(서버 실측)
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
 const mcTipOpen = new Set();
@@ -7972,7 +7972,7 @@ async function tick() {
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
       refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
-      refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (5초, ETH 만 · 서술)
+      refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (1초 -- 10-03, ETH 만 · 서술)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }
