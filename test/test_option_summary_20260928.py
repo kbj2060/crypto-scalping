@@ -152,3 +152,19 @@ def test_write_state_opt_hist(tmp_path, monkeypatch):
     assert st["spot_price"] == 2000 and "dex_1h_ago" not in st and "total_gex_usd" not in st
     assert oh["atm_oi_n"] == 10 and abs(oh["atm_oi_pct"] - 0.7) < 1e-9, oh
     assert oh["vov24"] is not None and abs(oh["vov24"] - math.log(51 / 50) * 100) < 0.2, oh
+
+
+def test_other_venue_parse_and_insert(monkeypatch):
+    """2026-10-03 OKX·Bybit 옵션: 종목명 파싱(Bybit -USDT 접미사) · 표에 한 번에 들어간다(실패한 거래소는 빈 채로)."""
+    import duckdb
+    from datetime import datetime, timezone
+    assert gex.parse_other("OKX", "ETH-USD-261004-2700-C") == ("call", 2700.0, datetime(2026, 10, 4, 8, tzinfo=timezone.utc))
+    assert gex.parse_other("Bybit", "ETH-4OCT26-2650-P-USDT") == ("put", 2650.0, datetime(2026, 10, 4, 8, tzinfo=timezone.utc))
+    assert gex.parse_other("Bybit", "ETH-PERP") is None
+    now = datetime(2026, 10, 3, 8, tzinfo=timezone.utc)
+    rows = [(now, "OKX", "ETH", "ETH-USD-261004-2700-C", "call", 2700.0, datetime(2026, 10, 4, 8, tzinfo=timezone.utc), 10.0, 40.0, None)]
+    monkeypatch.setattr(gex, "fetch_other_venues", lambda c, n: rows if c == "ETH" else [])
+    monkeypatch.setattr(gex, "fetch_chain", lambda c: pd.DataFrame())
+    monkeypatch.setattr(gex, "write_state", lambda con: None)
+    con = duckdb.connect(":memory:"); gex.ensure_tables(con); gex.poll_once(con)
+    assert con.execute("SELECT venue, open_interest FROM option_oi_other").fetchall() == [("OKX", 10.0)]

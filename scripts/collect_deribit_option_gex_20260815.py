@@ -121,6 +121,14 @@ def ensure_tables(con) -> None:
             front_atm_iv DOUBLE, front_rr25 DOUBLE, front_bf25 DOUBLE, gamma_flip DOUBLE, payload VARCHAR
         )"""
     )
+    # 2026-10-03 사용자 «OKX·Bybit 옵션 수집»: 일간 만기 미결제의 70~80% 가 두 거래소에 있다(Deribit 21~29%, 10-03 실측).
+    #   원자료만 쌓는다(화면 없음) -- 세 거래소 합산 max pain 을 장부(eth_maxpain_1h_oos_ledger_20261003)와 나란히 판정하려고.
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS option_oi_other (
+            recorded_at_utc TIMESTAMPTZ, venue VARCHAR, currency VARCHAR, instrument_name VARCHAR, option_type VARCHAR,
+            strike DOUBLE, expiration_ts TIMESTAMPTZ, open_interest DOUBLE, mark_iv DOUBLE, volume_24h DOUBLE
+        )"""
+    )
 
 
 def _parse_instrument(name: str) -> dict | None:
@@ -431,7 +439,61 @@ def options_summary(chain: pd.DataFrame, currency: str) -> dict:
 
 
 
+OTHER_VENUE_COINS = ("ETH", "BTC")
+_OTHER_HDR = {"User-Agent": "Mozilla/5.0"}       # OKX 는 UA 없으면 403
+
+
+def parse_other(venue: str, name: str) -> tuple[str, float, datetime] | None:
+    """(콜/풋, 행사가, 만기 08:00 UTC). OKX `ETH-USD-261004-2700-C` · Bybit `ETH-4OCT26-2700-C-USDT`(접미사 있어도 됨)."""
+    if venue == "OKX":
+        m = re.match(r"^[A-Z]+-USD-(\d{6})-(\d+(?:\.\d+)?)-([CP])$", name)
+        fmt = "%y%m%d"
+    else:
+        m = re.match(r"^[A-Z]+-(\d{1,2}[A-Z]{3}\d{2})-(\d+(?:\.\d+)?)-([CP])(?:-[A-Z]+)?$", name)
+        fmt = "%d%b%y"
+    if not m:
+        return None
+    exp = datetime.strptime(m.group(1), fmt).replace(hour=8, tzinfo=timezone.utc)
+    return ("call" if m.group(3) == "C" else "put"), float(m.group(2)), exp
+
+
+def fetch_other_venues(currency: str, now: datetime) -> list[tuple]:
+    """OKX·Bybit 종목별 미결제(기초자산 수량)·mark IV(%)·24h 거래량. 실패한 거래소는 빈 채로 넘어간다."""
+    out: list[tuple] = []
+    try:
+        oi = requests.get("https://www.okx.com/api/v5/public/open-interest", headers=_OTHER_HDR, timeout=20,
+                          params={"instType": "OPTION", "instFamily": f"{currency}-USD"}).json()["data"]
+        iv = {x["instId"]: float(x["markVol"]) * 100 for x in requests.get(
+            "https://www.okx.com/api/v5/public/opt-summary", headers=_OTHER_HDR, timeout=20,
+            params={"instFamily": f"{currency}-USD"}).json()["data"] if x.get("markVol")}
+        for x in oi:
+            sp = parse_other("OKX", x["instId"])
+            if sp and sp[2] > now and float(x["oiCcy"]) > 0:   # OKX 는 끝난 만기(미결제 0)까지 돌려준다 -- ETH 10-03 실측 1,070종목 · 미결제 0 은 max pain 에 무관
+                out.append((now, "OKX", currency, x["instId"], sp[0], sp[1], sp[2], float(x["oiCcy"]), iv.get(x["instId"]), None))
+    except Exception as exc:
+        log(f"{currency}: OKX 옵션 실패 {exc}")
+    try:
+        for x in requests.get("https://api.bybit.com/v5/market/tickers", headers=_OTHER_HDR, timeout=20,
+                              params={"category": "option", "baseCoin": currency}).json()["result"]["list"]:
+            sp = parse_other("Bybit", x["symbol"])
+            if sp and float(x["openInterest"]) > 0:
+                out.append((now, "Bybit", currency, x["symbol"], sp[0], sp[1], sp[2], float(x["openInterest"]),
+                            float(x["markIv"]) * 100 if x.get("markIv") else None, float(x.get("volume24h") or 0)))
+    except Exception as exc:
+        log(f"{currency}: Bybit 옵션 실패 {exc}")
+    return out
+
+
 def poll_once(con) -> None:
+    now = datetime.now(timezone.utc)
+    for currency in OTHER_VENUE_COINS:
+        rows = fetch_other_venues(currency, now)
+        if rows:
+            con.register("oth_df", pd.DataFrame(rows, columns=["recorded_at_utc", "venue", "currency", "instrument_name", "option_type",
+                                                              "strike", "expiration_ts", "open_interest", "mark_iv", "volume_24h"]))
+            con.execute("INSERT INTO option_oi_other SELECT * FROM oth_df")      # 한 번에(executemany 는 행마다 커밋 -- 09-23 사고)
+            con.unregister("oth_df")
+            log(f"{currency}: OKX·Bybit 옵션 {len(rows)}종목")
     for currency in CURRENCIES:
         try:
             chain = fetch_chain(currency)
