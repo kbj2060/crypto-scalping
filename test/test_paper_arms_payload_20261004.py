@@ -11,3 +11,12 @@ def test_paper_arms_payload():
     assert d["available"] and not d["stale"] and d["age_s"] == 100
     assert set(d["arms"]) == set(server.PAPER_ARMS) and d["port"] == {"cum": 1.5} and d["signals"]["bar_s"] == 999
     assert server.paper_arms_payload(st, 1000 + server.PAPER_STALE_S + 1)["stale"] is True
+
+
+def test_pick_paper_state():
+    old = {"ts": 1000, "arms": {}}                                   # 옛 엔진: 신호 없음
+    new = {"ts": 1000, "arms": {}, "signals": {"bar_s": 1}}
+    assert server.pick_paper_state([old, new], 1010) is new          # 정식이 신호 전이면 미리보기
+    assert server.pick_paper_state([new, dict(new)], 1010) is new    # 정식이 쓰기 시작하면 정식
+    assert server.pick_paper_state([old, new], 1000 + server.PAPER_STALE_S + 1) is old   # 미리보기 멈춤 -> 정식(멈춤 표시)
+    assert server.pick_paper_state([None, None], 0) is None

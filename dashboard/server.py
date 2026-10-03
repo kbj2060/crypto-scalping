@@ -445,6 +445,8 @@ REGIME_MAX_AGE_MIN = 20.0                  # 레짐 워커 주기 300초 + 사�
 MACRO_CALENDAR_STATE_PATH = REPO_ROOT / "data" / "live" / "macro_calendar_state.json"
 # 2026-10-04 모의 매매 엔진(scripts/rl_1s_agent.py paper, 실주문 없음)이 1분마다 쓰는 상태 -- 풋프린트 «모의 판»·② 맞대결·④ 벽 신호의 원천
 PAPER_STATE_PATH = REPO_ROOT / "data" / "research" / "rl_1s_agent_20261002" / "paper" / "state.json"
+# 2026-10-04 미리보기 엔진(같은 코드, 별도 폴더) -- 정식 엔진이 신호를 쓰기 전까지만 화면이 읽는다(사용자 «둘 다 기록»)
+PAPER_PREVIEW_STATE_PATH = PAPER_STATE_PATH.parent.parent / "paper_preview" / "state.json"
 PAPER_ARMS = ("w80_z0.5_a24_mh15", "w100_z0.5_w60")   # 적응판 · 고래판 (반반 = 엔진 PORTFOLIOS["p1"])
 PAPER_STALE_S = 300                                    # 엔진은 1분마다 쓴다 -- 5분 넘게 안 바뀌면 멈춘 것
 MACRO_CALENDAR_MAX_AGE_MIN = 90.0          # 달력이라 분 단위 신선도가 의미 없다
@@ -1089,8 +1091,18 @@ def paper_arms_payload(st: Any, now: float) -> dict[str, Any]:
             "signals": st.get("signals") or {}}
 
 
+def pick_paper_state(sts: list[Any], now: float) -> Any:
+    """앞(정식 엔진)부터 «신호를 쓰고 살아 있는» 상태를 고른다. 둘 다 아니면 정식 것(없음·멈춤을 그대로 보인다)."""
+    for st in sts:
+        if isinstance(st, dict) and st.get("signals") and now - float(st.get("ts") or 0) <= PAPER_STALE_S:
+            return st
+    return sts[0]
+
+
 async def api_paper_arms(request: web.Request) -> web.Response:
-    return web.json_response(paper_arms_payload(load_json(PAPER_STATE_PATH), time.time()), headers=NOCACHE)
+    now = time.time()
+    st = pick_paper_state([load_json(PAPER_STATE_PATH), load_json(PAPER_PREVIEW_STATE_PATH)], now)
+    return web.json_response(paper_arms_payload(st, now), headers=NOCACHE)
 
 
 def load_json(path: Path) -> Any:
