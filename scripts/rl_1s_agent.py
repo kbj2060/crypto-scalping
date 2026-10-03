@@ -490,6 +490,7 @@ class Trader:
 
     def __init__(self):
         self.pos, self.tgt, self.entry, self.order, self.since = 0, 0, 0.0, None, 0
+        self.k = 1.0                                # 손익 배수(크기 조절 판만 바꾼다, 1 단위 체결 모델은 그대로)
         self.pnl = dict(hold=0.0, maker=0.0, taker=0.0)
         self.n = dict(maker_fills=0, taker_exits=0, secs=0, secs_long=0, secs_short=0)
         self.now, self.t_entry, self.closed = None, None, []   # 원장: 호출 쪽이 now(초)를 넣어 주면 끝난 거래를 closed 에 쌓는다
@@ -523,7 +524,7 @@ class Trader:
             self.tgt = 0
         else:                                       # 시장가: 결정 순간 반대편 최우선에 즉시
             px = (e["P"] if self.pos > 0 else e["A"]) / 100
-            r = self.pos * (px / e["midT"] - 1) * 1e4 - abs(self.pos) * TAKER_FEE_BP
+            r = (self.pos * (px / e["midT"] - 1) * 1e4 - abs(self.pos) * TAKER_FEE_BP) * self.k
             self.pnl["taker"] += r
             self.n["taker_exits"] += 1
             prev, self.pos, self.tgt, self.order = self.pos, 0, 0, None
@@ -536,8 +537,9 @@ class Trader:
         q = self.tgt - self.pos
         self.order, fc = queue_step(self.order, q, e["P"], e["A"], e["bq"], e["aq"], *w)
         fill, px, prev = fc is not None, (fc or 0) / 100, self.pos
-        h = prev * (mid1 / e["midT"] - 1) * 1e4
+        h = prev * (mid1 / e["midT"] - 1) * 1e4 * self.k
         r, self.pos = step_reward(prev, q, px, e["midT"], mid1, fill)
+        r *= self.k
         self.pnl["hold"] += h
         self.pnl["maker"] += r - h
         if fill:
@@ -1161,7 +1163,19 @@ VARIANTS = {"nochase": "진입 직전 5분이 이미 신호 방향이면 새로 
 ARMS = [f"w{q}_" + (f"z{z:g}" if z else "off") for q in WALL_Q for z in (None, 0.5, 1.0)] + [f"{TEACHER}_{v}" for v in VARIANTS] \
     + [f"{TEACHER}_nochase_{v}" for v in ("w60", "liq", "holdloss")] + [f"{TEACHER}_pullback"] \
     + [f"{TEACHER}_mv"] \
-    + [f"{TEACHER}_a24", f"{TEACHER}_a24_mh15", f"{TEACHER}_sticky60", "w100_z0.5_w60"]   # 10-03 추가 4판 + 움직이는 경계판 + 회전·고래 단독 4판
+    + [f"{TEACHER}_a24", f"{TEACHER}_a24_mh15", f"{TEACHER}_sticky60", "w100_z0.5_w60"] \
+    + ["trend4", "trend4_vs", "poi1h", f"{TEACHER}_a24_mh15_vt", "w100_z0.5_w60_vt", f"{TEACHER}_a24_mh15_er", "w100_z0.5_w60_er"]
+# 10-03 추가 4판 + 움직이는 경계판 + 회전·고래 단독 4판 · 10-04 «통과했는데 모의 판에 없던 것» 7판(사용자 지시):
+#   trend4    = 1~4주 추세(7·14·21·28일 종가 부호 평균, 매일 00시 UTC 결정) -- 현물 9년 샤프 0.99·선물 4.7년 0.62(eth_tsmom_1_4w_voltarget)
+#   trend4_vs = 같은 방향 × 변동성 사이징 크기(연 50% ÷ 20일 실현변동성, ±2배) -- 대시보드 추세 칸과 같은 식, 손익 배수로 반영
+#   poi1h     = 정시마다 직전 1시간 수익 ≤ 하위 25% 이면 ΔOI 1시간 < 0 → 롱 · > 0 → 숏, 1시간 보유(price_oi_quadrant 1h +3.5bp 차)
+#   _vt       = 24시간 SMA(5분봉 288개) 반대쪽 목표는 0(역추세 금지, czz SMA288 veto +12.1bp)
+#   _er       = 같은 거래를 동일위험 크기로: 직전 4시간 5분 수익 표준편차 대비 4.7년 중앙값(배 0.5~2). 🔴배포 위험모델(MAE 분위)이 아니라
+#               실현변동성 대용 -- 그 모델은 사이징 워커와 함께 09-27 에 꺼져 있다(dashboard_vol_model_removed).
+TREND_L, TREND_VOL_N, TREND_TARGET, TREND_MAX = (7, 14, 21, 28), 20, 0.50, 2.0
+POI_DOWN_BP = -26.68                            # ETH 4.7년(2022-01~2026-09) 5분 간격 1시간 수익 25분위 -- 원 연구 «Δ가격 하위 25%»
+ER_REF_BP, ER_CLIP = 14.95, (0.5, 2.0)          # 4.7년 «직전 48개 5분 수익 표준편차» 중앙값(bp)
+TREND = {"day": None, "sig": 0.0, "size": 0.0}  # 엔진이 매일 일봉으로 채운다(refresh_trend). 비면 추세 판은 관망
 SWITCH_MIN_DAYS, SWITCH_T = 7, 2.5              # 교사에서 갈아타려면: 최근 ≤14일 «판 − 교사» 일 손익 차가 n≥7·t>2.5 (16판 -- 우연 1등 막으려 2.0 에서 올림)
 # 10-02 저장 10일 시험: «3일 뒤부터 최근 평균 1등»은 +34bp/일 < 고정 교사 +75 (09-23 에 w70_off 로 갈아타 −176) = 잡음 추종.
 
@@ -1182,6 +1196,37 @@ def dd_init(daily: list[float]) -> list[float]:
 def dd_step(pm: list[float], cum: float) -> list[float]:
     peak = max(pm[0], cum)
     return [peak, min(pm[1], cum - peak)]
+
+
+def trend4_signal(closes: list[float]) -> tuple[float, float]:
+    """완결 일봉 종가(오래된 것부터) -> (신호 = 4기간 부호 평균 ∈ [−1,1], 크기 = 신호 × 50% ÷ 20일 연율 변동성, ±2배)."""
+    c = np.asarray(closes, float)
+    if len(c) < max(TREND_L) + 1 or len(c) < TREND_VOL_N + 1:
+        return 0.0, 0.0
+    sig = float(np.mean([np.sign(c[-1] - c[-1 - L]) for L in TREND_L]))
+    vol = float(np.std(np.diff(np.log(c[-TREND_VOL_N - 1:])), ddof=1) * np.sqrt(365))
+    return sig, float(np.clip(sig * TREND_TARGET / vol, -TREND_MAX, TREND_MAX)) if vol > 0 else 0.0
+
+
+def fetch_closes(interval: str, limit: int, now_ms: int) -> list[float]:
+    """바이낸스 선물 klines 완결 봉 종가(오래된 것부터). 서버(엔진·대시보드와 같은 IP)에서 하루 한두 번만 부른다."""
+    import requests
+    k = requests.get("https://fapi.binance.com/fapi/v1/klines",
+                     params=dict(symbol=SYMBOL, interval=interval, limit=limit), timeout=10).json()
+    return [float(r[4]) for r in k if int(r[6]) < now_ms]
+
+
+def refresh_trend(day: int) -> bool:
+    """TREND 를 «day 시작 직전까지 완결된 일봉»으로 채운다. 새 일봉이 아직 안 붙었으면(경계 ~5초 지연) False."""
+    try:
+        c = fetch_closes("1d", 40, day * 86_400_000)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[paper] 일봉 가져오기 실패(추세 판은 관망): {type(exc).__name__}: {exc}", flush=True)
+        return False
+    sig, size = trend4_signal(c)
+    TREND.update(day=day, sig=sig, size=size)
+    print(f"[paper] 추세 판 갱신 {pd.Timestamp(day * 86400, unit='s').date()} 신호 {sig:+.2f} 크기 {size:+.2f}", flush=True)
+    return True
 
 
 def arm_params(arm: str) -> tuple[float, float | None]:
@@ -1212,8 +1257,43 @@ class ArmPolicy:
         self.sticky = next((int(x[6:]) for x in self.f if x.startswith("sticky") and x[6:].isdigit()), 0)
         self.tp = any(x[:2] == "tp" and x[2:].isdigit() for x in self.f)
         self.tp_block = -1
+        self.k = 1.0                                               # 크기 배수(엔진이 Trader.k 로 옮긴다)
+        self.logp = deque(maxlen=288)                              # 5분봉 로그가격×1e4 (vt: 24h SMA) -- seed_logp 로 미리 채운다
+        self.r5, self.o5 = deque(maxlen=48), deque(maxlen=12)       # 봉마다 ret300(er 4h 변동성 · poi 1h 수익) · doi300(poi 1h ΔOI)
+        self.hour_t = 0                                            # poi1h: 이번 시간 목표
+
+    def seed_logp(self, closes: list[float]) -> None:
+        self.logp.extend(np.log(np.asarray(closes, float)) * 1e4)
+
+    def _special(self, x: np.ndarray, idx: dict, s: int, pos: int) -> int:
+        """벽·고래 계열이 아닌 판(trend4·poi1h)."""
+        if self.arm.startswith("trend4"):
+            if TREND["day"] is None:
+                return 0
+            t = int(np.sign(TREND["sig"]))
+            if t and t != pos:                                     # 크기는 새 진입 때만 바꾼다(보유 중 배수 고정)
+                self.k = abs(TREND["size"]) if self.arm == "trend4_vs" else 1.0
+            return t
+        if (s + 1) % 3600 == 0 and len(self.r5) >= 12:            # poi1h: 정시에만 정하고 다음 정시까지 유지
+            r1h, o1h = sum(list(self.r5)[-12:]), sum(self.o5)
+            self.hour_t = (1 if o1h < 0 else -1 if o1h > 0 else 0) if r1h <= POI_DOWN_BP else 0
+        return self.hour_t
 
     def bar(self, x: np.ndarray, idx: dict, s: int, pos: int, unr: float) -> int:
+        r5 = float(x[idx["ret300"]])
+        self.r5.append(r5); self.o5.append(float(x[idx["doi300"]]) if "doi300" in idx else 0.0)
+        self.logp.append((self.logp[-1] if self.logp else 0.0) + r5)
+        if self.arm.startswith(("trend4", "poi1h")):
+            return self._special(x, idx, s, pos)
+        t = self._bar(x, idx, s, pos, unr)
+        if "vt" in self.f and len(self.logp) >= 288:              # 역추세 금지: 24h SMA 반대쪽 목표는 0
+            if t * (self.logp[-1] - np.mean(self.logp)) < 0:
+                t = 0
+        if "er" in self.f and t and t != pos and len(self.r5) >= 24:
+            self.k = float(np.clip(ER_REF_BP / max(np.std(self.r5, ddof=1), 1e-9), *ER_CLIP))
+        return t
+
+    def _bar(self, x: np.ndarray, idx: dict, s: int, pos: int, unr: float) -> int:
         thr, zt = arm_params(self.arm)
         v = x[idx["imb50"]]
         if "a24" in self.f:
@@ -1303,14 +1383,14 @@ def paper_backtest(days=None) -> dict:
     """저장 10일에 9판을 날짜별로 돌리고 같은 선택 규칙을 인과적으로 적용 -> 고정 교사 대비 선택의 값."""
     p, e = pd.read_parquet(OUT / "panel.parquet"), pd.read_parquet(OUT / "exec.parquet")
     cols = features_cols()
-    idx = {c: cols.index(c) for c in ("imb50", "whale_z", "retail_z", "ret300", "liq_long60", "liq_short60")}
+    idx = {c: cols.index(c) for c in ("imb50", "whale_z", "retail_z", "ret300", "doi300", "liq_long60", "liq_short60")}
     days = days or [d.strftime("%Y-%m-%d") for d in pd.date_range("2026-09-20", "2026-09-29")]
     table = {a: [] for a in ARMS}
     for day in days:
         s0 = _ts(day)
         A = arrays(p.loc[s0 - WARMUP:s0 + 86400 - 1], e)
         for a in ARMS:
-            if a.endswith(("_xc60", "_mv")):           # 주문 거두기는 행동 공간에 없고, 움직이는 경계 z 는 저장 패널에 없다 -> 실시간 판에서만
+            if a.endswith(("_xc60", "_mv")) or a.startswith("trend4"):   # 주문 거두기·움직이는 경계 z·일봉 추세는 저장 패널에 없다 -> 실시간 판에서만
                 table[a].append(np.nan)
                 continue
 
@@ -1332,7 +1412,7 @@ def paper(out: Path = PAPER) -> None:
     import time
     out.mkdir(parents=True, exist_ok=True)
     cols = features_cols()
-    idx = {c: cols.index(c) for c in ("imb50", "whale_z", "retail_z", "ret300", "liq_long60", "liq_short60")}
+    idx = {c: cols.index(c) for c in ("imb50", "whale_z", "retail_z", "ret300", "doi300", "liq_long60", "liq_short60")}
     idx.update(whale_z_mv=len(cols), retail_z_mv=len(cols) + 1)    # 피쳐 뒤에 붙인다(obs_row 가 served 에 남긴 wz2·rz2)
     hist = {a: [] for a in ARMS}
     if (out / "daily.jsonl").exists():
@@ -1342,6 +1422,13 @@ def paper(out: Path = PAPER) -> None:
     active = pick_arm(hist)
     traders = {a: Trader() for a in ARMS}
     policies = {a: ArmPolicy(a) for a in ARMS}
+    try:                                           # vt 판의 24h SMA 를 재시작 직후부터 쓰게 5분봉 288개로 미리 채운다(실패하면 24h 예열)
+        c5 = fetch_closes("5m", 300, int(time.time() * 1000))[-288:]
+        for a in ARMS:
+            if a.endswith("_vt"):
+                policies[a].seed_logp(c5)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[paper] 5분봉 미리 채우기 실패(vt 판은 24h 예열): {type(exc).__name__}: {exc}", flush=True)
     phist = {k: [sum(wt * hist[a][len(hist[a]) - n + i] for a, wt in ws.items()) for i in range(n)]
              for k, ws in PORTFOLIOS.items() for n in [min(len(hist.get(a, [])) for a in ws)]}
     dd = {**{a: dd_init(hist[a]) for a in ARMS}, **{k: dd_init(v) for k, v in phist.items()}}
@@ -1359,6 +1446,8 @@ def paper(out: Path = PAPER) -> None:
     print(f"[paper] 시작 {pd.Timestamp(s, unit='s')} · 활성 {active}", flush=True)
     while True:
         if is_bar(s):
+            if TREND["day"] != (s + 1) // 86400:                   # 하루 한 번(실패하면 다음 봉에 다시)
+                refresh_trend((s + 1) // 86400)
             x = feed.obs_row(s)
             x = np.append(x, np.nan_to_num(feed.served[-1][["wz2", "rz2"]].to_numpy(float)))   # features 와 같은 규약: NaN -> 0
             ex = feed.exec_now(s)                      # 관측 계산 뒤 = 주문이 나가는 순간의 호가
@@ -1368,6 +1457,7 @@ def paper(out: Path = PAPER) -> None:
                     tr.now = s + 1
                     unr = tr.pos * (ex["midT"] / tr.entry - 1) * 1e4 if tr.pos else 0.0
                     tg[a] = policies[a].bar(x, idx, s, tr.pos, unr)
+                    tr.k = policies[a].k
                     tr.decide(tg[a] + 1, True, ex)
                 pa = policies.get(f"{TEACHER}_a24_mh15")
                 sig = dict(bar_s=s, zw=float(x[idx["whale_z"]]), zr=float(x[idx["retail_z"]]), imb50=float(x[idx["imb50"]]),
@@ -1655,6 +1745,45 @@ def selftest() -> None:
             runs.append((sum(rs), idles, sum(sp.tr.pnl.values())))
         (r0, i0_, p0), (r2, i2, p2) = runs
         assert i0_ == i2 > 0 and abs(p0 - p2) < 1e-9 and abs(r2 - (r0 - 2.0 * i2)) < 1e-6, runs
+    # 10-04 새 판: 추세 신호·크기 / 가격×OI 1시간 / 역추세 금지 / 동일위험 배수 / Trader 손익 배수
+    up = list(np.exp(np.linspace(0, 0.3, 40) + 0.01 * (-1.0) ** np.arange(40)) * 2000)   # 변동성 0 이면 크기 0 -- 잡음을 섞는다
+    sig, size = trend4_signal(up)
+    assert sig == 1.0 and 0 < size <= TREND_MAX and trend4_signal(up[:10]) == (0.0, 0.0)
+    dn = up[::-1]; dn[-1] = dn[-8] * 1.01                  # 7일 전보다만 위 -> 부호 [+,−,−,−] 평균 −0.5
+    assert trend4_signal(dn)[0] == -0.5
+    ix7 = {"imb50": 0, "whale_z": 1, "retail_z": 2, "ret300": 3, "doi300": 4, "liq_long60": 5, "liq_short60": 6}
+    X7 = lambda r5=0.0, o5=0.0, imb=0.0: np.array([imb, 0.0, 0.0, r5, o5, 0.0, 0.0])
+    TREND.update(day=1, sig=0.5, size=-1.3)
+    pv = ArmPolicy("trend4_vs")
+    assert pv.bar(X7(), ix7, 299, 0, 0) == 1 and abs(pv.k - 1.3) < 1e-12 and ArmPolicy("trend4").bar(X7(), ix7, 299, 0, 0) == 1
+    TREND.update(day=None)
+    assert ArmPolicy("trend4").bar(X7(), ix7, 299, 0, 0) == 0              # 일봉 없으면 관망
+    po = ArmPolicy("poi1h")
+    for i in range(11):
+        po.bar(X7(r5=-3.0, o5=+1.0), ix7, 300 * i + 299, 0, 0)
+    assert po.bar(X7(r5=-3.0, o5=+1.0), ix7, 3599, 0, 0) == -1           # 1h −36bp(≤ −26.68) · OI↑ -> 숏
+    assert po.bar(X7(), ix7, 3899, -1, 0) == -1                            # 다음 정시까지 유지
+    po2 = ArmPolicy("poi1h")
+    for i in range(12):
+        t = po2.bar(X7(r5=-3.0, o5=-1.0), ix7, 300 * i + 299, 0, 0)
+    assert t == 1                                                           # OI↓ -> 롱(롱 이탈 끝물 되돌림)
+    pt = ArmPolicy("w80_off_vt")
+    pt.seed_logp([2000.0 * (1 + 0.001 * i) for i in range(288)])           # 상승 추세 -> 지금가 > SMA
+    assert pt.bar(X7(imb=-0.5), ix7, 299, 0, 0) == 0 and pt.bar(X7(imb=0.5), ix7, 599, 0, 0) == 1   # 숏 금지 · 롱 허용
+    pe = ArmPolicy("w80_off_er")
+    for i in range(30):
+        pe.bar(X7(r5=(-1) ** i * 30.0), ix7, 300 * i + 299, 0, 0)          # 4h 변동성 ~30bp(기준 14.95 의 2배)
+    assert pe.bar(X7(imb=0.5, r5=30.0), ix7, 9299, 0, 0) == 1 and abs(pe.k - 0.5) < 0.02
+    e0 = dict(P=10000.0, A=10001.0, bq=1.0, aq=1.0, midT=100.005)       # 위 Trader 시험과 같은 호가(e 는 그 사이 집행 표로 바뀐다)
+    t1, t0 = Trader(), Trader(); t1.k = 1.0                 # 기존 판(k=1)은 손익이 배수 도입 전과 같다(대시보드 두 판)
+    for tt in (t1, t0):
+        tt.decide(2, True, e0); tt.tick(e0, (2.5, inf, 0.0, -inf), 100.02); tt.decide(2, False, dict(P=10002.0, A=10003.0, bq=1.0, aq=1.0, midT=100.025))
+    assert t1.pnl == t0.pnl and abs(sum(t1.pnl.values()) - ((100.02 / 100.00 - 1) * 1e4 + (100.02 / 100.025 - 1) * 1e4 - TAKER_FEE_BP)) < 1e-9
+    tk = Trader(); tk.k = 2.0
+    tk.decide(2, True, e0)
+    r = tk.tick(e0, (2.5, inf, 0.0, -inf), 100.02)
+    assert abs(r - 2 * (100.02 / 100.00 - 1) * 1e4) < 1e-9 and abs(sum(tk.pnl.values()) - r) < 1e-9
+    assert all(a in ARMS for a in ("trend4", "trend4_vs", "poi1h", "w100_z0.5_w60_vt", f"{TEACHER}_a24_mh15_er"))
     print("selftest ok")
 
 
