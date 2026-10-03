@@ -207,7 +207,20 @@ let supply1sSubBox = null;
 //   붙인다(innerHTML="" 은 DOM 에서 떼어낼 뿐 JS 참조가 쥔 서브트리는 살아 있다).
 let supply1sVer = 0;
 const subPanelCache = { s1: { node: null, key: "" }, dens: { node: null, key: "" } };
-const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}`;
+const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}|${liqBadgeKey()}`;
+// 2026-10-04 CVD·OI 제목 옆 청산 급증 배지가 바뀌면 다시 그린다(쪽 + $10만 단위 금액). 시장 맥락이 아직 없으면 빈 키.
+function liqBadgeKey() {
+  try {
+    const bu = latestMarketCtx && latestMarketCtx.burst, side = mcLiqBurstSide(bu);
+    return side ? side + Math.round(((side === "long" ? bu.long_usd_1m : bu.short_usd_1m) || 0) / 1e5) : "";
+  } catch (err) { return ""; }   // 스크립트 초기화 중(let 초기화 전) 호출 대비
+}
+let measureCtx2d = null;
+function measureTextW(txt, font) {   // SVG 글자 폭(배지 자리 계산) -- 붙이기 전 텍스트는 getComputedTextLength 가 0 이라 캔버스로 잰다
+  if (!measureCtx2d) measureCtx2d = document.createElement("canvas").getContext("2d");
+  measureCtx2d.font = font;
+  return measureCtx2d.measureText(txt).width;
+}
 
 // ── 합산 출처 (2026-09-23) ───────────────────────────────────────────────
 // 🔴**무엇을 더하고 무엇을 안 더하는지가 전부 측정에서 나왔다:**
@@ -3792,23 +3805,7 @@ function renderOptions() {
       + kv("기간 구조 · ATM IV", ["7", "30", "60"].map((d) => ((o.cm || {})[d] || {}).atm).every((v) => v == null) ? "-"
            : ["7", "30", "60"].map((d) => { const v = ((o.cm || {})[d] || {}).atm; return `${d}일 ${v == null ? "-" : v.toFixed(0)}`; }).join(" → ")) + info.mood),
   ].join("");
-  // 2026-10-01 풋프린트 호가 프로파일 아래 «옵션 요약»(사용자 «어떻게 요약하면 좋을지 연구해서»). 고른 것 = **가격 칸과 같은 언어(가격)로 말하는 것**만,
-  //   근거 순: ① 24h 1σ 범위(DVOL 띠가 실현 변동성 띠보다 정확 — 09-29 재검정) ② max pain(만기 1h 전 +10.5bp 후보 — 44일, 통과 1회)
-  //   ③ 7일 RR(서술). 2026-10-02 딜러 감마·DEX·charm 줄은 딜러 감마 교체와 함께 뺐다.
-  //   머리 칩(만기 시각·규모·24h ±)과 겹치는 숫자는 뺐다. 방향 신호 아님.
-  { const wall = el("mcWall");
-    if (wall) {
-      const pct = (v) => `${v >= px ? "+" : "−"}${(Math.abs(v / px - 1) * 100).toFixed(1)}%`;
-      const row = (k, v, tag = "", cls = "") => `<div class="os-row"><span class="os-k">${k}</span><b class="os-v ${cls}">${v}</b>${tag ? `<i class="os-tag">${tag}</i>` : ""}</div>`;
-      const painWin = f && f.pain && hrs != null ? (hrs <= 1 ? "규칙 창 지금" : hrs <= 6 ? `규칙 창 ${(hrs - 1).toFixed(1)}h 뒤` : "") : "";
-      const html = `<div class="os"><h4 class="os-h">옵션 요약 <span>${cur} · ${optLadderScope === "front" ? "가까운 만기" : optLadderScope === "week" ? "7일 안" : "전 만기"}</span></h4>`
-        + row("24h 1σ", s1d == null ? "-" : `${optQ(px - s1d)} – ${optQ(px + s1d)}`, "DVOL")
-        + row("max pain", f && f.pain ? `${optQ(f.pain)} <small>${pct(f.pain)}</small>` : "-", painWin || "후보", f && f.pain ? (f.pain > px ? "opt-good" : "opt-bad") : "")
-        + row("RR 7일", optCm(o, "rr").split(" (")[0], "", "")
-        + `<div class="os-foot">서술 · 방향 신호 아님</div></div>`;
-      if (wall.innerHTML !== html) wall.innerHTML = html;
-    }
-  }
+  renderPaper();   // 2026-10-04 옛 «옵션 요약» 자리(#mcWall) = 모의 판(사용자 지시). 옵션 범위·max pain·RR 은 머리 칩·Option 카드에 그대로
   // 2026-09-29 풋프린트 카드 맨 아래 반반(휴대폰은 위아래) -- 두 칸 폭이 같아 한 번 잰다.
   if (laneBody && flowBody && laneBody.clientWidth > 0) {
     const lw = Math.round(laneBody.clientWidth), fw = Math.round(flowBody.clientWidth) || lw, fl = ((((latestGex || {}).block_trades || {}).flow_by_coin || {})[cur]) || [];
@@ -3991,6 +3988,9 @@ async function refreshTrend() {
 const API_MARKET_CTX_URL = "/api/market-context";
 const MARKET_CTX_POLL_MS = 1000;   // 2026-10-03 5초 -> 1초(사용자 «1초 원천은 화면도 1초») -- 호가 벽·스프레드·계기·BTC 동행은 서버 1초 루프 · 응답 중앙 14ms·3KB(서버 실측)
 let latestMarketCtx = null, marketCtxLastFetchAt = 0;
+const API_PAPER_URL = "/api/paper-arms";
+const PAPER_POLL_MS = 10000;   // 2026-10-04 모의 매매 엔진은 1분마다 쓴다 -- 10초면 충분
+let latestPaper = null, paperLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
 const mcTipOpen = new Set();
 const mcLine = { vwap: true, bb: false, wvwap: false, vsess: false };   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
@@ -4017,6 +4017,10 @@ MC_TIPS.q_lev = MC_TIPS.lev + "\n\n" + MC_TIPS.ls;
 MC_TIPS.q_flow = MC_TIPS.flow + "\n\n" + MC_TIPS.quad;
 MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
 MC_TIPS.q_wall = MC_TIPS.book + "\n\n" + MC_TIPS.cross + "\n\n" + MC_TIPS.px;
+// 2026-10-04 맞대결·벽 신호·모의 판(사용자 승인 시안) -- 원천 = 모의 매매 엔진 상태(/api/paper-arms). 연구와 같은 계산을 엔진이 한 번만 한다.
+MC_TIPS.q_flow += "\n\n맞대결 = 정시마다 고래(체결 한 줄 $10만+)·리테일($1만 미만)의 60분 순매수를 자기 지난 30일과 견준 z 가 반대이고 둘 다 0.5 이상이면 고래 쪽, 다음 정시까지. 위 줄들(14일 같은 시간대 잣대)과 잣대가 달라 가끔 엇갈린다. 4.7년 검정에서 약하게 맞았다(메이커 체결 전제).";
+MC_TIPS.q_wall += "\n\n벽 신호 = 5분봉 마감 때 ±50bp 매수·매도 잔량 불균형이 지난 24시간 상위 20% 문턱(주황 점선)을 넘는 쪽, 다음 5분. 직전 5분이 이미 그 방향으로 움직였으면 «추격 주의». 본질은 «방금 움직인 반대쪽»이라 한 방향으로 계속 가는 날엔 틀린다.";
+MC_TIPS.paper = "서버가 같은 시세로 여러 판을 동시에 돌린 모의 매매(실주문 없음). 따라 하라는 신호가 아니라 «이 규칙이 지금 무엇을 들고 있나». 적응판 = 벽 신호 + 맞대결, 새 진입 뒤 15분 보유 · 고래판 = 맞대결이면 고래 쪽 60분 · 반반 = 둘을 ½씩(서로 따로 움직여 낙폭이 준다). 숫자 = 1 ETH 명목 대비 bp, 체결은 지정가 대기열로 판정 · 최대 낙폭은 기록 시작부터. 줄에 마우스를 올리면 진입가·미실현.";
 // 시안 B 그림 부품 -- 전부 SVG 문자열. 폭은 고정(칸 격자가 줄을 맞춘다), 색은 3색 규칙(방향만 초록·빨강, 극단 구간만 주황).
 const mcGfx = {
   pct(p, w = mcGfx.gw || 130) {   // 분위 0~1 · 양끝 10% 주황 띠 · 값 없으면 빈 막대
@@ -4054,6 +4058,13 @@ const mcGfx = {
       + `<text x="${w - 5}" y="13" font-size="9" fill="var(--muted)" text-anchor="end">신규 롱</text><text x="5" y="13" font-size="9" fill="var(--muted)">신규 숏</text>`
       + `<text x="5" y="${w - 5}" font-size="9" fill="var(--muted)">롱 정리</text><text x="${w - 5}" y="${w - 5}" font-size="9" fill="var(--muted)" text-anchor="end">숏 정리</text>`
       + `<circle cx="${c}" cy="${c}" r="${((c - 10) * 0.25).toFixed(1)}" fill="rgb(var(--lift) / .07)"/>${move == null ? "" : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" fill="var(--text)"/>`}</svg>`;
+  },
+  wall(imb, thr, w = mcGfx.gw || 130, span = 0.4) {   // 2026-10-04 깊은 벽 ±50bp 불균형 · 가운데 0 · 주황 점선 = 적응 문턱(±) · 문턱 밖이면 방향색
+    const c = w / 2, s = (w / 2 - 4) / span, v = imb == null ? 0 : Math.max(-span, Math.min(span, imb)), x0 = v >= 0 ? c : c + v * s;
+    const fill = imb == null || Math.abs(imb) <= thr ? "var(--muted)" : imb > 0 ? "var(--good)" : "var(--bad)";
+    return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="7" width="${w - 8}" height="2" fill="rgb(var(--lift) / .1)"/>`
+      + [-1, 1].map((q) => `<line x1="${(c + q * thr * s).toFixed(1)}" x2="${(c + q * thr * s).toFixed(1)}" y1="2" y2="14" stroke="var(--warn)" stroke-opacity=".75" stroke-dasharray="2 2"/>`).join("")
+      + `<line x1="${c}" x2="${c}" y1="2" y2="14" stroke="var(--muted)"/>${imb == null ? "" : `<rect x="${x0.toFixed(1)}" y="4" width="${Math.max(1.5, Math.abs(v) * s).toFixed(1)}" height="8" rx="2" fill="${fill}"/>`}</svg>`;
   },
   book(sw, bps, w = mcGfx.pw || 300) {   // ±bp 매수벽 | 매도벽 거울 막대(ETH)
     const b = sw.bid, a = sw.ask, mx = Math.max(1, ...b, ...a), c = w / 2, h = 4 + bps.length * 21;
@@ -4096,6 +4107,55 @@ async function refreshMarketCtx() {
     latestMarketCtx = { available: false, error: "fetch_failed" };
   }
   renderMarketCtx();
+}
+
+async function refreshPaper() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  const now = Date.now();
+  if (now - paperLastFetchAt < PAPER_POLL_MS) return;
+  paperLastFetchAt = now;
+  try {
+    const res = await fetch(API_PAPER_URL, { cache: "no-cache" });
+    latestPaper = res.ok ? await res.json() : { available: false, error: `HTTP ${res.status}` };
+  } catch (error) {
+    latestPaper = { available: false, error: "fetch_failed" };
+  }
+  renderPaper();
+}
+
+// 2026-10-04 모의 엔진 신호(마지막 5분봉 마감 값): 맞대결(정시에 잡은 고래 방향, 다음 정시까지) · 벽 신호(적응 문턱) · 추격 주의.
+//   엔진이 없거나 멈췄으면 null -- 칩은 «엔진 대기»(조용히 «없음»이라 말하지 않는다).
+function paperSignals(d = latestPaper, nowS = Date.now() / 1000) {
+  const sg = d && d.available && !d.stale ? d.signals : null;
+  if (!sg || sg.bar_s == null || sg.thr == null) return null;
+  const remain = Math.ceil(((Math.floor((sg.bar_s + 1) / 3600) + 1) * 3600 - nowS) / 60);
+  const dir = sg.imb50 > sg.thr ? 1 : sg.imb50 < -sg.thr ? -1 : 0;
+  return { duel: sg.whale_hold && remain > 0 ? sg.whale_hold : 0, remain, zw: sg.zw, zr: sg.zr,
+           imb: sg.imb50, thr: sg.thr, dir, chase: dir !== 0 && sg.r5 * dir > 0, r5: sg.r5 };
+}
+
+// 2026-10-04 풋프린트 «옵션 요약» 자리 = 모의 판(사용자 지시 -- 옵션 숫자는 머리 칩·Option 카드에 그대로 있다). 좁은 화면은 시장 맥락 끝.
+function paperHtml(d = latestPaper) {
+  const open = mcTipOpen.has("paper");
+  const head = `<h4><button type="button" class="mc-q" data-tip="paper" aria-expanded="${open}">모의 판<span aria-hidden="true">?</span></button><span class="ppm-sub">실주문 없음 · bp</span></h4>`
+    + `<p class="mc-tip"${open ? "" : " hidden"}>${escapeHtml(MC_TIPS.paper)}</p>`;
+  if (!d || !d.available) return `<div class="mc-sec ppm">${head}<div class="ppm-empty">모의 매매 엔진 상태 없음${d && d.error ? ` (${escapeHtml(String(d.error))})` : ""}</div></div>`;
+  const A = d.arms || {}, a1 = A["w80_z0.5_a24_mh15"], a2 = A["w100_z0.5_w60"], p1 = d.port;
+  if (!a1 || !a2 || a1.cum == null) return `<div class="mc-sec ppm">${head}<div class="ppm-empty">실시간 기록 시작 전<br>엔진 재시작부터 쌓입니다</div></div>`;
+  const n = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}`);
+  const tone = (v) => (v > 0 ? "mc-good" : v < 0 ? "mc-bad" : "");
+  const tgt = (pos) => (pos > 0 ? ["long", pos >= 1 ? "롱" : "롱 ½"] : pos < 0 ? ["short", pos <= -1 ? "숏" : "숏 ½"] : ["", "관망"]);
+  const row = (name, a, sum) => { const [c, t] = tgt(a.pos || 0);
+    return `<div class="ppm-row${sum ? " sum" : ""}" title="${a.entry ? `진입 ${a.entry} · 미실현 ${n(a.unr)}bp` : "포지션 없음"}"><div class="ppm-top"><span class="ppm-name">${name}</span><span class="ppm-tgt ${c}">${t}</span></div>`
+      + `<div class="ppm-line">오늘 <b class="${tone(a.pnl_today)}">${n(a.pnl_today)}</b> · 누적 <b class="${tone(a.cum)}">${n(a.cum)}</b> · 낙폭 <b>${n(a.mdd)}</b></div></div>`; };
+  return `<div class="mc-sec ppm">${head}${row("적응판", a1)}${row("고래판", a2)}${p1 ? row("반반 포트폴리오", p1, true) : ""}`
+    + `<div class="ppm-foot"><span>실시간 기록 ${a1.days}일째</span>${d.stale ? `<span class="mc-warn">엔진 멈춤 ${Math.round(d.age_s / 60)}분</span>` : ""}</div></div>`;
+}
+
+function renderPaper() {
+  const wall = el("mcWall"), body = el("mcBody");
+  if (wall) { const html = paperHtml(); if (wall._ppm !== html) { wall._ppm = html; keepFocus(wall, () => { wall.innerHTML = html; }); } }
+  if (body) body._mcHtml = null;   // 좁은 화면은 시장 맥락 끝에 같이 그린다 · ②④ 상태 줄도 다시
 }
 
 // 🔴2026-09-30 청산 «급증»은 **쪽마다** 판정한다. 옛 판은 `z>=3 || hawkes_active` 를 롱·숏 막대에 똑같이 걸어
@@ -4221,6 +4281,14 @@ function renderMarketCtx() {
   const thin = bk.bid25_pct != null && bk.ask25_pct != null && Math.min(bk.bid25_pct, bk.ask25_pct) <= 0.1
     ? (bk.ask25_pct <= bk.bid25_pct ? "위쪽(매도호가)이 얇다" : "아래쪽(매수호가)이 얇다") : null;
   const burstSide = mcLiqBurstSide(bu);
+  // 2026-10-04 ② 맞대결 · ④ 벽 신호 상태 줄 + 깊은 벽 줄(원천 = 모의 엔진, 5분봉 마감 값)
+  const ps = paperSignals(), chip = (cls, txt, tip = "") => `<span class="mc-chip ${cls}"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${txt}</span>`;
+  const zTip = ps ? `30일 기준 고래 z ${sg(ps.zw, 1)} · 리테일 z ${sg(ps.zr, 1)} (정시 판정)` : "";
+  const duelLine = `<div class="mc-state"><span class="mc-k">맞대결</span>${!ps ? chip("", "엔진 대기")
+    : ps.duel ? chip(ps.duel > 0 ? "good" : "bad", `고래 ${ps.duel > 0 ? "롱" : "숏"} · 남은 ${ps.remain}분`, zTip) : chip("", "없음", zTip)}</div>`;
+  const wallLine = `<div class="mc-state"><span class="mc-k">벽 신호</span>${!ps ? chip("", "엔진 대기") : !ps.dir ? chip("", "없음")
+    : ps.chase ? chip("warn", `${ps.dir > 0 ? "매수" : "매도"} · 추격 주의`, `직전 5분 ${sg(ps.r5, 0, "bp")} — 이미 그 방향으로 움직였다`)
+    : chip(ps.dir > 0 ? "good" : "bad", `${ps.dir > 0 ? "매수" : "매도"} 우세 · 5분`, `직전 5분 ${sg(ps.r5, 0, "bp")}`)}</div>`;
   if (badge) {
     badge.textContent = (d.lev || {}).label || "-";
     badge.className = `ops-badge ${levWarn ? "warn" : "neutral"}`;
@@ -4257,7 +4325,7 @@ function renderMarketCtx() {
       + (ls ? gRow("계정 롱숏", G.ratio(ls.global, ls.global_24h), n(ls.global, 2), "", `하루 전 ${n(ls.global_24h, 2)}`)
         + gRow("탑트레이더", G.ratio(ls.top_pos, ls.top_pos_24h), n(ls.top_pos, 2), "", `하루 전 ${n(ls.top_pos_24h, 2)}`) : "")
       + note(`정산까지 ${left(f.next_ms)} · 펀딩 OKX ${fr(f.okx)} / HL ${fr(f.hl_8h)} · OI ${n((oi.oi || 0) / 1e6, 2)}M + OKX ${n((oi.okx || 0) / 1e6, 2)}M + HL ${oi.hl == null ? "-" : n(oi.hl / 1e6, 2) + "M"} ETH`), levChip),
-    qSec("q_flow", "② 누가 밀고 있나 · 60분", (z.whale == null ? note("크기별 기준 쌓는 중(6시간)")
+    qSec("q_flow", "② 누가 밀고 있나 · 60분", duelLine + (z.whale == null ? note("크기별 기준 쌓는 중(6시간)")
         : ["whale", "mid", "retail"].map((k2, i) => gRow(["고래", "중형", "리테일"][i], G.sig(z[k2]), sg(z[k2], 1, "σ"), tone(z[k2]))).join(""))
       + gRow("30분 CVD", G.sig(fl.cvd30_z), sg(fl.cvd30_z, 1, "σ"), tone(fl.cvd30_z))
       + (ls ? gRow("테이커 매수÷매도", G.ratio(ls.taker, null), n(ls.taker, 2), tone(ls.taker == null ? null : ls.taker - 1, 0.1)) : "")
@@ -4286,7 +4354,9 @@ function renderMarketCtx() {
       + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
       + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label></div>`;
   setH("fpLineSwitch", G.cmpW ? lineSw : "");
-  const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", (sw ? G.book(sw, bps, ...(wallW ? [wallW] : [])) : note("호가 래스터 대기")) + statRows
+  const wallRow = ps ? gRow("깊은 벽", G.wall(ps.imb, ps.thr), sg(ps.imb, 2), ps.dir > 0 ? "mc-good" : ps.dir < 0 ? "mc-bad" : "",
+    `±50bp 매수·매도 잔량 불균형(5분봉 마감) · 점선 = 지난 24시간 상위 20% 문턱 ±${ps.thr.toFixed(2)}`) : "";
+  const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", wallLine + (sw ? G.book(sw, bps, ...(wallW ? [wallW] : [])) : note("호가 래스터 대기")) + wallRow + statRows
       + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(2)}${bk.spread > 0.015 ? " — 평소(1틱)보다 넓다" : ""}`
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
       + gRow("BTC 30분", G.sig((d.btc || {}).move_bp == null ? null : d.btc.move_bp / 20), sg((d.btc || {}).move_bp, 0, "bp"), "", btcTxt)
@@ -4299,6 +4369,7 @@ function renderMarketCtx() {
   G.gw = gwKeep;
   if (G.cmpW) htmlB = [`<div class="mc-stack">${htmlB.join("")}</div>`];   // ①② 를 한 단에 위아래로
   htmlB.push(wallHtml0);
+  if (!G.cmpW) htmlB.push(paperHtml());   // 2026-10-04 좁은 화면(옵션 요약 칸 없음)은 시장 맥락 끝에 모의 판
   htmlB = htmlB.join("");
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
   const whenBox = el("mcWhen");   // 2026-10-01 휴대폰·세로 화면도 Option 카드 맨 아래(넓은 화면과 같게)
@@ -4320,7 +4391,7 @@ function renderMarketCtx() {
   }
 }
 
-["mcBody", "mcWhen"].forEach((id) => el(id)?.addEventListener("click", (e) => {   // ⑤ 는 #mcWhen 에 있을 수 있다
+["mcBody", "mcWhen", "mcWall"].forEach((id) => el(id)?.addEventListener("click", (e) => {   // ⑤ 는 #mcWhen · 모의 판은 #mcWall 에 있을 수 있다
   const b = e.target.closest(".mc-q");
   if (!b) return;
   const k = b.dataset.tip, open = !mcTipOpen.has(k);
@@ -4720,7 +4791,23 @@ function renderSupply1s(box = null, src = null) {
     const items = [["선물 " + sgn(acc), "var(--ink)", { color: "var(--ink)", width: 1.8, op: 0.9 }]];
     if (spotOn) items.push(["현물 " + sgn(spotAcc), "var(--spot)", { color: "var(--spot)", width: 1.6, op: 0.95 }]);
     items.push(["OI " + (oiEnd == null ? "—" : sgn(oiEnd)), "var(--warn)", { color: "var(--warn)", width: 1.8, op: 0.95 }]);
-    const { zc, hh } = laneFrame(0, "CVD · OI", items);
+    const { y0: cvdY0, zc, hh } = laneFrame(0, "CVD · OI", items);
+    { // 2026-10-04 청산 급증 배지(사용자 지시 -- 계좌 카드 말고 이 차트). 판정 = 시장 맥락과 같은 mcLiqBurstSide.
+      const bu = latestMarketCtx && latestMarketCtx.burst, side = activeSnapshotAsset === "eth" ? mcLiqBurstSide(bu) : null;
+      if (side) {
+        const fsz = narrow ? 10.5 : 11, ff = "Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif";
+        const t1 = `${side === "long" ? "롱" : "숏"} 청산 급증 ${fmtUsdCompact((side === "long" ? bu.long_usd_1m : bu.short_usd_1m) || 0)}/1분`, t2 = " · 대개 되돌림";
+        const bx = 6 + measureTextW("CVD · OI", `700 ${narrow ? 12 : 13}px ${ff}`) + 10, bw = measureTextW(t1, `700 ${fsz}px ${ff}`) + measureTextW(t2, `600 ${fsz}px ${ff}`) + 18, bh = fsz + 9;
+        const g = document.createElementNS(NS, "g"), r = document.createElementNS(NS, "rect"), tt = document.createElementNS(NS, "title");
+        tt.textContent = "청산이 몰린 급락·급등은 대개 곧 되돌아옵니다 — 이때 시장가로 급히 닫지 마세요";
+        r.setAttribute("x", bx); r.setAttribute("y", cvdY0 + 14 - bh + 4); r.setAttribute("width", bw); r.setAttribute("height", bh); r.setAttribute("rx", bh / 2);
+        r.setAttribute("fill", "var(--warn)"); r.setAttribute("fill-opacity", ".12"); r.setAttribute("stroke", "var(--warn)"); r.setAttribute("stroke-opacity", ".55");
+        g.appendChild(tt); g.appendChild(r);
+        const tx = label(bx + 9, cvdY0 + 14, t1, "var(--warn)", null, fsz, g); tx.setAttribute("font-weight", "700");
+        const ts = document.createElementNS(NS, "tspan"); ts.setAttribute("fill", "var(--muted)"); ts.setAttribute("font-weight", "600"); ts.textContent = t2; tx.appendChild(ts);
+        svg.appendChild(g);
+      }
+    }
     const csOf = (rows) => Math.max(1e-9, ...rows.map((r) => Math.abs(r.v)));
     if (cvdRows.length >= 2) line(pathOf(cvdRows, scaled(cvdRows, zc, hh, csOf(cvdRows))), "var(--ink)", 1.8, 0.9);
     if (spotOn) line(pathOf(spotRows, scaled(spotRows, zc, hh, csOf(spotRows)), 20), "var(--spot)", 1.6, 0.95);
@@ -7809,7 +7896,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const mcSplit = !!splitR && activeSnapshotAsset === "eth";
     // 2026-09-30 1초 수급 높이 = 칸 − 시장 맥락의 **실제 내용 높이**(mcNeedH, renderMarketCtx 가 잰다) -- 한 화면 모드로 칸이 줄어도 시장 맥락이 스크롤 없이 다 들어간다.
     //   아직 못 쟀으면 47% · 1초 수급은 칸의 30% 아래로는 안 줄인다.
-    // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·옵션 요약 칸이 같은 선에서 끝난다
+    // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
     const floorY = Math.min(hAll - 2, TREND_ROW_Y + LANE_H);
     const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
     const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16 : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
@@ -7820,7 +7907,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (on) { fs.style.left = `${Math.round(a.left - c.left + ml + 290)}px`; fs.style.top = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`; }
       } }
     mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: floorY - (sub1sY + s1H + 12) } : null,
-            mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 옵션 요약(renderOptions 가 채운다)
+            mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
               return { x: ml + cw + 4, y, w: TAG_W + TRADE_W + BOOK_W - 8, h: floorY - y }; })() : null);
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
@@ -7983,6 +8070,7 @@ async function tick() {
       refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
       refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (1초 -- 10-03, ETH 만 · 서술)
+      refreshPaper();                // 2026-10-04 모의 판·맞대결·벽 신호 (10초, 모의 매매 엔진 상태)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }

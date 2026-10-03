@@ -2761,6 +2761,9 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .mc-g > span { color: var(--muted); } .mc-g > b { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
 .mc-chip { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
 .mc-chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.mc-chip.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 50%, transparent); }
+.mc-chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+.mc-k { color: var(--text); font-weight: 700; }   /* 2026-10-04 상태 줄 이름(맞대결·벽 신호) */
 .mc-quad { display: flex; gap: 12px; align-items: center; margin: 6px 0 2px; }
 .mc-quad b { font-size: 12px; }
 .mc-quad > div { min-width: 0; word-break: keep-all; }
@@ -2818,21 +2821,26 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 body.not-eth #fpLineSwitch { display: none; }
 .fp-line-switch > .mc-switch { display: flex; flex-wrap: nowrap; gap: 14px; align-items: center; margin: 0; font-size: 11px; }
 
-/* 2026-10-01 풋프린트 호가 프로파일 아래 «옵션 요약» -- 가격으로 말하는 다섯 줄 · 숫자 등폭 · 근거 꼬리표 */
-#mcWall .os { padding: 6px 2px 0; font-size: 11px; }
-#mcWall .os-h { margin: 0 0 6px; font: 700 11px/1.2 var(--font-sans); color: var(--option); }
-#mcWall .os-h span { color: var(--muted); font-weight: 600; margin-left: 4px; }
-#mcWall .os-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: baseline; gap: 6px; padding: 3px 0; border-bottom: 1px solid rgb(var(--lift) / .05); }
-#mcWall .os-k { color: var(--muted); }
-#mcWall .os-v { font: 700 12px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
-#mcWall .os-v small { font-size: 10px; font-weight: 600; color: var(--muted); margin-left: 3px; }
-#mcWall .os-tag { font: 600 9.5px/1 var(--font-sans); font-style: normal; color: var(--option); border: 1px solid color-mix(in srgb, var(--option) 40%, transparent); border-radius: 4px; padding: 2px 4px; }
-#mcWall .os-foot { margin-top: 6px; color: var(--muted); font-size: 10px; }
+/* 2026-10-04 풋프린트 «옵션 요약» 자리(#mcWall) = 모의 판 · 좁은 화면은 시장 맥락 끝(사용자 승인 시안) */
+.ppm { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
+.ppm h4 { margin: 0 0 4px; display: flex; align-items: center; justify-content: space-between; }
+.ppm-sub { font-size: 11px; color: var(--muted); font-weight: 600; }
+.ppm-row { padding: 5px 0; border-top: 1px solid var(--soft-line); }
+.ppm-row.sum { border-top-color: var(--line); }
+.ppm-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.ppm-name { font-size: 12px; font-weight: 700; color: var(--text); }
+.ppm-row.sum .ppm-name { font-weight: 800; }
+.ppm-line { margin-top: 3px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.ppm-line b { font: 700 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
+.ppm-tgt { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; font: 800 11px/1 var(--font-sans); padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.ppm-tgt.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.ppm-tgt.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.ppm-empty { flex: 1; display: grid; place-items: center; text-align: center; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; padding: 10px; margin-top: 4px; }
+.ppm-foot { margin-top: auto; padding-top: 6px; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
 
-/* 2026-10-01 바닥 맞춤(전환 리본 바닥): 짧은 단·④·옵션 요약이 칸 높이를 고르게 나눠 채운다(내용 높이는 그대로 재므로 되먹임 없음) */
+/* 2026-10-01 바닥 맞춤(전환 리본 바닥): 짧은 단·④가 칸 높이를 고르게 나눠 채운다(내용 높이는 그대로 재므로 되먹임 없음) */
 #mcBody.mc-cmp > .mc-stack { display: flex; flex-direction: column; justify-content: space-between; }
 #mcBody.mc-cmp > .mc-sec { display: flex; flex-direction: column; justify-content: space-between; }
-#mcWall .os { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; }
 
 /* 2026-10-01 세로 화면(태블릿·세로 모니터 721~1099): 두 열 -- 왼쪽 지금·실현감마·심리 | 오른쪽 사다리, 그 아래 블록 거래 전폭, 차트 둘 */
 @media (min-width: 721px) and (max-width: 1099px) {
