@@ -240,6 +240,21 @@ function measureTextW(txt, font) {   // SVG 글자 폭(배지 자리 계산) -- 
 //     현물엔 OI 가 **아예 없다**(포지션 개념이 없다).
 //   · 청산 = 더한다. 이벤트라 점을 다 찍으면 되고 손실이 없다. 현물엔 강제청산이 없다.
 //   · 크기 주의: |합산|/|바이낸스| 중앙 **2.1배**(MM 헤지 이중계상). 라벨에 적는다.
+// 2026-10-03 청산 원 툴팁의 거래소별 내역(사용자 «거래소 0건인데 왼쪽에 금액») -- 금액이 있는 거래소만 «이름 $금액 N건(롱/숏)».
+//   바이낸스 = 합 − OKX − Bybit − HL(서버가 바이낸스를 바탕으로 나머지를 더한다). 그 봉을 본 거래소 목록은 끝에 «합산:».
+//   순수 함수 -- test/test_market_ctx_patterns_20260929.mjs 가 본문을 떼어 돌린다.
+function liqVenueText(b) {
+  const u = (x) => (Number(x && x.long_usd) || 0) + (Number(x && x.short_usd) || 0);
+  const parts = [["OKX", b.okx_detail], ["Bybit", b.bybit], ["HL 고래", b.hl]];
+  const bnN = Math.max(0, (Number(b.events) || 0) - parts.reduce((a, [, x]) => a + ((x && x.n) || 0), 0));
+  const rows = [["바이낸스", { long_usd: (Number(b.long_usd) || 0) - parts.reduce((a, [, x]) => a + (Number(x && x.long_usd) || 0), 0),
+                                short_usd: (Number(b.short_usd) || 0) - parts.reduce((a, [, x]) => a + (Number(x && x.short_usd) || 0), 0), n: bnN }], ...parts]
+    .filter(([, x]) => x && u(x) >= 0.5)
+    .map(([nm, x]) => `${nm} ${fmtUsdCompact(u(x))} ${x.n}건(롱 ${fmtUsdCompact(Math.max(0, x.long_usd || 0))}/숏 ${fmtUsdCompact(Math.max(0, x.short_usd || 0))})`);
+  const seen = ["바이낸스", b.okx ? "OKX" : null, b.bybit ? "Bybit" : null, b.hl ? "HL 고래(추적 300지갑)" : null].filter(Boolean);
+  return (rows.length ? "\n" + rows.join("\n") : "") + "\n합산: " + seen.join(" · ");
+}
+
 function mergedSupplySrc() {
   const merged = new Map();
   const addSupply = (m) => m.forEach((c, sec) => {
@@ -7856,12 +7871,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         tip.textContent = fmtDateTick(c.time * 1000) + " 청산 " + fmtUsdCompact(v)
           + " (롱 " + fmtUsdCompact(lo) + " / 숏 " + fmtUsdCompact(sh) + ")"
           + (b.partial ? " · 진행 중" : "")
-          + (b.okx ? " · 바이낸스+OKX" : "")    // 2026-09-24 재기동 전 봉은 바이낸스만(서버 주석)
-          // 2026-09-24 HL 고래 청산도 합산에 들어 있다 -- 무엇이 얼마인지 따로 적는다(추적 300지갑 한정).
-          + (b.hl ? " · HL 고래 청산 " + fmtUsdCompact((b.hl.long_usd || 0) + (b.hl.short_usd || 0))
-             + " (" + b.hl.n + "건 · 롱 " + fmtUsdCompact(b.hl.long_usd || 0) + " / 숏 "
-             + fmtUsdCompact(b.hl.short_usd || 0) + " · 추적 300지갑 한정)" : "")
-          + (b.bybit ? " · Bybit " + fmtUsdCompact((b.bybit.long_usd || 0) + (b.bybit.short_usd || 0)) + " (" + b.bybit.n + "건)" : "");
+          + liqVenueText(b);
         dot.appendChild(tip);
         g.appendChild(dot);
       });

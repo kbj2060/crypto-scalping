@@ -64,3 +64,14 @@ assert.equal(mcRsi(Array.from({ length: 30 }, (_, i) => 100 + i)), 100);
 assert.equal(mcRsi(Array.from({ length: 30 }, (_, i) => 100 - i)), 0);
 assert.equal(mcRsi([1, 2, 3]), null);
 console.log("market ctx patterns ok");
+
+// ── 청산 원 툴팁 거래소별(2026-10-03): 바이낸스 = 합 − 나머지 · 0원 거래소는 줄을 안 쓴다 · 합산 목록 ──
+{
+  const fmtUsdCompact = (v) => `$${Math.round(v)}`;
+  const liqVenueText = eval(`(${take("liqVenueText")})`);
+  const t = liqVenueText({ long_usd: 1000, short_usd: 300, events: 4, okx: true, okx_detail: { long_usd: 200, short_usd: 0, n: 1 },
+                           bybit: { long_usd: 0, short_usd: 0, n: 0 } });
+  assert.ok(t.includes("바이낸스 $1100 3건(롱 $800/숏 $300)") && t.includes("OKX $200 1건"), t);
+  assert.ok(!t.includes("Bybit $"), "0원 거래소 줄은 안 쓴다");
+  assert.ok(t.endsWith("합산: 바이낸스 · OKX · Bybit"), t);
+}

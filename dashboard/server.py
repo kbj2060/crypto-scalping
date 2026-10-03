@@ -4774,7 +4774,10 @@ def make_app() -> web.Application:
             if t > okx_from:
                 a = add.get(t, [0.0, 0.0, 0])
                 b = {**b, "okx": True, "long_usd": b["long_usd"] + a[0],
-                     "short_usd": b["short_usd"] + a[1], "events": b["events"] + a[2]}
+                     "short_usd": b["short_usd"] + a[1], "events": b["events"] + a[2],
+                     # 2026-10-03 거래소별 툴팁(사용자 «거래소 0건인데 금액은 있다») -- OKX 몫을 따로 싣는다.
+                     #   바이낸스 몫 = 합 − OKX − Bybit − HL 은 화면이 뺀다(바이낸스가 바탕이라 따로 싣지 않는다).
+                     "okx_detail": {"long_usd": round(a[0]), "short_usd": round(a[1]), "n": a[2]}}
             bars.append(b)
         return web.json_response(await _done(bars, ["binance-perp", "okx-swap"]), headers=NOCACHE)
 
