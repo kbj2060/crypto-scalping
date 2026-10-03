@@ -5,7 +5,7 @@ const assert = require("assert");
 const src = require("fs").readFileSync(__dirname + "/../dashboard/live/app.js", "utf8");
 eval(src.match(/function mergedSupplySrc\(\)[\s\S]*?\n}\n/)[0].replace("function mergedSupplySrc", "global.mss = function"));
 Object.assign(global, { supply1s: new Map(), okxSupply1s: new Map(), spotSupply1s: new Map(),
-  liq1s: new Map(), okxLiq1s: new Map(), oi1s: new Map(), okxOi1s: new Map() });
+  liq1s: new Map(), okxLiq1s: new Map(), bybitLiq1s: new Map(), oi1s: new Map(), okxOi1s: new Map() });
 const run = (bn, okx, okxAge, spot, spotAge) => {
   Object.assign(global, { supply1sMeta: { now: bn }, okxMeta: { now: okx, tradeAge: okxAge },
     spotMeta: { now: spot, tradeAge: spotAge } });

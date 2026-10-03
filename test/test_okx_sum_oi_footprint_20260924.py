@@ -53,7 +53,10 @@ ns.update(flows=flows, flow_for=flow_for, SimpleNamespace=SimpleNamespace,
           # HL 고래 합산(09-24)은 이 시험 대상이 아니다 -- 있는 그대로 통과시킨다
           time=__import__("time"), FOOTPRINT_KEEP_BARS=288, hl_whale_liq_events=None,
           merge_hl_liq=lambda bars, ev, bar_s: bars,
-          HL_LIQ_BY_ASSET={"eth": None})   # 코인별 HL DB 표(09-26) -- 이 시험은 ETH 만 본다
+          HL_LIQ_BY_ASSET={"eth": None},   # 코인별 HL DB 표(09-26) -- 이 시험은 ETH 만 본다
+          # Bybit 청산 합산(10-03)도 이 시험 대상이 아니다 -- 수집기 없음(시작 None)으로 통과
+          bybit_liq_events=lambda sym: ([], None), merge_bybit_liq=lambda bars, ev, start, bar_s: bars,
+          COIN_CONFIG={a: {"binance_symbol": a.upper() + "USDT"} for a in ("eth", "btc", "sol", "xrp")})
 exec(compile(chunk, "okxsum", "exec"), ns)
 liq_cached = {"warmed_up": True, "bars": [
     {"ts": datetime.fromtimestamp(t, timezone.utc).isoformat(), "long_usd": 10.0, "short_usd": 5.0,

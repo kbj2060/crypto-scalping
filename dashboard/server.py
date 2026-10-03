@@ -704,6 +704,55 @@ def liq_5m_payload(store: dict[int, list[float]], from_s: float, bars: int, now_
     return {"warmed_up": True, "bars": out, "error": None, "source": "dashboard-forceorder"}
 
 
+BYBIT_LIQ_DB = REPO_ROOT / "data" / "hot" / "bybit_liq.sqlite"     # 2026-10-03 Bybit allLiquidation 수집기(f74a185c)
+_BYBIT_LIQ_CACHE: dict[str, tuple[float, list[dict], int | None]] = {}
+
+
+def bybit_liq_events(symbol: str, db: Path = BYBIT_LIQ_DB, ttl: float = 1.0) -> tuple[list[dict], int | None]:
+    """Bybit 청산(보관 창 = 풋프린트 봉 보관 깊이) -> ([{ts_ms, side, qty, price, usd}], 수집 시작 ms).
+    원소는 라이브 okx_liq_events 와 같은 모양. 🔴Bybit `side` 는 **청산된 포지션 방향**(Buy = 롱 청산) --
+    바이낸스 S(강제 주문, 롱 청산 = SELL)와 반대다. 수집 시작 = 표 전체(전 종목) 첫 청산 시각 -- 그 전 봉은 «Bybit 모름».
+    ponytail: 수집기 재시작 공백(gaps 표)은 빼지 않는다(공백 봉은 Bybit 0 으로 보인다) -- 필요하면 gaps 로 봉을 거른다.
+    깊이를 고정하고 1초 캐시 -- 수급 폴링(0.25초)·청산 원 요청마다 SQLite 를 열지 않는다. 없거나 실패면 ([], None)."""
+    hit = _BYBIT_LIQ_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1], hit[2]
+    since = int((time.time() - FOOTPRINT_KEEP_BARS * FOOTPRINT_BAR_SECONDS) * 1000)
+    try:
+        start = _read_only_rows(db, "SELECT min(ts_ms) FROM bybit_liquidations", [])[0][0]
+        rows = _read_only_rows(db, "SELECT ts_ms, side, qty, price FROM bybit_liquidations WHERE symbol = ? AND ts_ms >= ? "
+                                   "ORDER BY ts_ms", [symbol, since])
+    except (duckdb.Error, sqlite3.Error, OSError, IndexError):
+        return [], None
+    ev = [{"ts_ms": int(t), "side": "long" if sd == "Buy" else "short", "qty": float(q), "price": float(px),
+           "usd": float(q) * float(px)} for t, sd, q, px in rows]
+    _BYBIT_LIQ_CACHE[symbol] = (time.time(), ev, int(start) if start is not None else None)
+    return ev, _BYBIT_LIQ_CACHE[symbol][2]
+
+
+def merge_bybit_liq(bars: list[dict], events: list[dict], start_ms: int | None, bar_seconds: int) -> list[dict]:
+    """5분봉 청산 원에 Bybit 청산을 더하고 `bybit` 로 따로 남긴다(툴팁이 가른다). 수집 시작 뒤 온전한 봉만.
+    입력 dict 는 고치지 않는다(swr 캐시 객체일 수 있다)."""
+    if start_ms is None:
+        return bars
+    first = start_ms // 1000 // bar_seconds * bar_seconds          # 시작이 걸친 봉은 반쪽 -- 그다음 봉부터
+    add: dict[int, list[float]] = {}
+    for e in events:
+        b = e["ts_ms"] // 1000 // bar_seconds * bar_seconds
+        a = add.setdefault(b, [0.0, 0.0, 0])
+        a[0 if e["side"] == "long" else 1] += e["usd"]
+        a[2] += 1
+    out = []
+    for b in bars:
+        t = int(datetime.fromisoformat(b["ts"]).timestamp())
+        if t > first:
+            a = add.get(t, [0.0, 0.0, 0])
+            b = {**b, "long_usd": b["long_usd"] + a[0], "short_usd": b["short_usd"] + a[1], "events": b["events"] + a[2],
+                 "bybit": {"long_usd": round(a[0]), "short_usd": round(a[1]), "n": a[2]}}
+        out.append(b)
+    return out
+
+
 def merge_hl_liq(bars: list[dict], events: list[tuple[int, float, bool, str]],
                  bar_seconds: int) -> list[dict]:
     """5분봉 청산 원에 HL 고래 청산을 **더하고** `hl` 로 따로도 남긴다(툴팁이 가른다).
@@ -3755,7 +3804,8 @@ def make_app() -> web.Application:
 
     # 수급 커서 = 목록 키 -> 쿼리 이름. 클라(refreshSupply1s)와 같은 규칙: 받은 행의 최대 초.
     SUPPLY_CURSORS = (("seconds", "since"), ("oi", "sinceOi"), ("liq", "sinceLiq"), ("okx", "sinceOkx"),
-                      ("okxOi", "sinceOkxOi"), ("okxLiq", "sinceOkxLiq"), ("spot", "sinceSpot"))
+                      ("okxOi", "sinceOkxOi"), ("okxLiq", "sinceOkxLiq"), ("spot", "sinceSpot"),
+                      ("bybitLiq", "sinceBybitLiq"))
 
     async def api_stream(request: web.Request) -> web.StreamResponse:
         """폴링 대신 밀어주기(2026-09-24 속도 2단계). 수급(`supply=1`, ETH)과 상황 카드를 연결 하나로.
@@ -4415,6 +4465,17 @@ def make_app() -> web.Application:
             except ValueError:
                 return 0
         since_okx, since_okx_oi, since_okx_liq = _q("sinceOkx"), _q("sinceOkxOi"), _q("sinceOkxLiq")
+        # 2026-10-03 Bybit 청산 레인(사용자 «청산도 합산»). OKX 처럼 **따로** 보내고 화면이 더한다. 수집기가 2초마다
+        #   쓰므로 «지금 − 3초»보다 오래된 초만 보낸다 -- 늦게 써진 초를 커서가 건너뛰지 않게.
+        _bnow = int(time.time()) - 3
+        _bfloor = max(_q("sinceBybitLiq"), _bnow - SUPPLY_1S_SECONDS)
+        _bcells: dict[int, list[float]] = {}
+        for e in bybit_liq_events(FOOTPRINT_SYMBOL.upper())[0]:
+            x = e["ts_ms"] // 1000
+            if _bfloor < x <= _bnow:
+                c = _bcells.setdefault(x, [0.0, 0.0, 0.0, 0.0]); lo = e["side"] == "long"
+                c[0 if lo else 1] += e["qty"]; c[2 if lo else 3] += e["usd"]
+        bybit_liq_rows = [[x, round(v[0], 3), round(v[1], 3), round(v[2]), round(v[3])] for x, v in sorted(_bcells.items())]
         since_spot = _q("sinceSpot")
         spot_newest = max(spot_sec) if spot_sec else 0
         _part = lambda d, x: [x] + [round(v, 3) for v in d[x]] if x in d else None  # noqa: E731
@@ -4463,7 +4524,7 @@ def make_app() -> web.Application:
             return ({"symbol": FOOTPRINT_SYMBOL, "seconds": [], "now": 0,
                                       "oi": oi_rows, "liq": [],
                                       "okx": okx_rows, "okxOi": okx_oi_rows,
-                                      "okxLiq": okx_liq_rows, "okxNow": okx_newest,
+                                      "okxLiq": okx_liq_rows, "okxNow": okx_newest, "bybitLiq": bybit_liq_rows,
                                       "okxMeta": okx_meta,
                                       "spot": spot_rows, "spotNow": spot_newest,
                                       "spotMeta": spot_meta,
@@ -4505,6 +4566,7 @@ def make_app() -> web.Application:
             "okxOi": okx_oi_rows,
             "okxLiq": okx_liq_rows,
             "okxNow": okx_newest,
+            "bybitLiq": bybit_liq_rows,     # 2026-10-03 [초, 롱수량, 숏수량, 롱USD, 숏USD] -- liq 와 같은 칸
             "okxMeta": okx_meta,
             # 바이낸스 **현물**. OI·청산 칸이 없는 게 정상이다(현물엔 존재하지 않는다).
             "spot": spot_rows,
@@ -4656,6 +4718,10 @@ def make_app() -> web.Application:
         okx_from, okx_liq_events = f.okx_fp["first_bar"], f.okx_liq_events
 
         async def _done(bars: list[dict], venues: list[str]) -> dict:
+            # 2026-10-03 Bybit 청산 합산(사용자 지시) -- 수집 시작 뒤 온전한 봉만, `bybit` 로 따로도 남긴다(툴팁)
+            bev, bstart = await asyncio.to_thread(bybit_liq_events, COIN_CONFIG[asset]["binance_symbol"].upper())
+            if bstart is not None:
+                bars, venues = merge_bybit_liq(bars, bev, bstart, FOOTPRINT_BAR_SECONDS), venues + ["bybit-perp"]
             if asset in HL_LIQ_BY_ASSET:
                 return await _with_hl_liq(payload, bars, venues, asset)
             return {**payload, "bars": bars, "venues": venues}

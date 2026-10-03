@@ -182,6 +182,7 @@ let liq1sSince = 0;
 let okxSupply1s = new Map();
 let okxOi1s = new Map();
 let okxLiq1s = new Map();
+let bybitLiq1s = new Map(), bybitLiq1sSince = 0;   // 2026-10-03 Bybit 청산 레인(서버가 따로 보내고 여기서 더한다)
 let okxSupply1sSince = 0, okxOi1sSince = 0, okxLiq1sSince = 0;
 let okxMeta = { now: 0, connected: false, tradeAge: null, oiAge: null, inst: "", errors: 0 };
 let spotSupply1s = new Map();     // 바이낸스 **현물**. OI·청산 칸은 없다(현물엔 존재하지 않는다).
@@ -237,7 +238,7 @@ function mergedSupplySrc() {
   // 🔴현물은 여기 안 더한다(위 주석) -- 풋프린트·사분면과 같은 원천이어야 셋이 맞는다.
   addSupply(supply1s); addSupply(okxSupply1s);
   const liq = new Map();
-  [liq1s, okxLiq1s].forEach((m) => m.forEach((c, sec) => {
+  [liq1s, okxLiq1s, bybitLiq1s].forEach((m) => m.forEach((c, sec) => {
     let t = liq.get(sec);
     if (!t) { t = [0, 0, 0, 0]; liq.set(sec, t); }
     for (let i = 0; i < 4; i++) t[i] += c[i] || 0;
@@ -866,6 +867,7 @@ function renderLiquidationVolumeGauge() {
   host.title = fromBars
     ? "현재 30분 봉에 든 차트 청산 원의 합(바이낸스 선물" + (inBar.every((b) => b.okx) ? " + OKX" : "")
       + (inBar.some((b) => b.hl) ? " + HL 고래" : "")
+      + (inBar.every((b) => b.bybit) ? " + Bybit" : "")
       + ") -- 원과 같은 값이다. 2초마다 갱신."
     : "";
 
@@ -2570,7 +2572,8 @@ async function refreshLiquidation5mTail() {
     if (!(j && j.warmed_up && Array.isArray(j.bars) && j.bars.length)) return;
     const same = (a, b) => a.long_usd === b.long_usd && a.short_usd === b.short_usd
       && a.events === b.events && Boolean(a.partial) === Boolean(b.partial)
-      && Boolean(a.okx) === Boolean(b.okx) && JSON.stringify(a.hl || null) === JSON.stringify(b.hl || null);
+      && Boolean(a.okx) === Boolean(b.okx) && JSON.stringify(a.hl || null) === JSON.stringify(b.hl || null)
+      && JSON.stringify(a.bybit || null) === JSON.stringify(b.bybit || null);
     const out = base.slice();
     let changed = false;
     j.bars.forEach((nb) => {
@@ -3305,7 +3308,7 @@ async function refreshSupply1s() {
     const res = await fetch(`${API_SUPPLY_1S_URL}?asset=${asset}&since=${supply1sSince}&sinceOi=${oi1sSince}`
                             + `&sinceLiq=${liq1sSince}&sinceOkx=${okxSupply1sSince}`
                             + `&sinceOkxOi=${okxOi1sSince}&sinceOkxLiq=${okxLiq1sSince}`
-                            + `&sinceSpot=${spotSupply1sSince}`,
+                            + `&sinceSpot=${spotSupply1sSince}&sinceBybitLiq=${bybitLiq1sSince}`,
                             { cache: "no-cache" });
     if (!res.ok) throw new Error(`supply-1s ${res.status}`);
     const j = await res.json();
@@ -3326,6 +3329,7 @@ function resetSupply1sState() {
   okxSupply1s = new Map(); okxOi1s = new Map(); okxLiq1s = new Map(); spotSupply1s = new Map();
   supply1sSince = 0; oi1sSince = 0; liq1sSince = 0;
   okxSupply1sSince = 0; okxOi1sSince = 0; okxLiq1sSince = 0; spotSupply1sSince = 0;
+  bybitLiq1s = new Map(); bybitLiq1sSince = 0;
   supply1sMeta = { retailMaxUsd: 0, whaleMinUsd: 0, now: 0 };
   okxMeta = { now: 0, connected: false, tradeAge: null, oiAge: null, inst: "", errors: 0 };
   spotMeta = { now: 0, connected: false, tradeAge: null, errors: 0 };
@@ -3356,6 +3360,10 @@ function applySupply1s(payload) {
   (payload.okxLiq || []).forEach((r) => {
     okxLiq1s.set(r[0], [r[1], r[2], r[3], r[4]]);
     if (r[0] > okxLiq1sSince) okxLiq1sSince = r[0];
+  });
+  (payload.bybitLiq || []).forEach((r) => {
+    bybitLiq1s.set(r[0], [r[1], r[2], r[3], r[4]]);
+    if (r[0] > bybitLiq1sSince) bybitLiq1sSince = r[0];
   });
   (payload.okxOi || []).forEach((r) => {
     okxOi1s.set(r[0], r[1]);
@@ -3393,6 +3401,7 @@ function applySupply1s(payload) {
   spotSupply1s.forEach((_v, k) => { if (k < spotFloor) spotSupply1s.delete(k); });
   oi1s.forEach((_v, k) => { if (k < floor) oi1s.delete(k); });
   liq1s.forEach((_v, k) => { if (k < floor) liq1s.delete(k); });
+  bybitLiq1s.forEach((_v, k) => { if (k < floor) bybitLiq1s.delete(k); });
   supply1sVer += 1;
 }
 
@@ -3419,7 +3428,7 @@ function ensureLiveStream() {
   const q = key === "other" ? "" :
     `?supply=1&asset=${key}&since=${supply1sSince}&sinceOi=${oi1sSince}&sinceLiq=${liq1sSince}`
     + `&sinceOkx=${okxSupply1sSince}&sinceOkxOi=${okxOi1sSince}&sinceOkxLiq=${okxLiq1sSince}`
-    + `&sinceSpot=${spotSupply1sSince}`;
+    + `&sinceSpot=${spotSupply1sSince}&sinceBybitLiq=${bybitLiq1sSince}`;
   const es = new EventSource(API_STREAM_URL + q);
   liveStream = es; liveStreamAt = 0; liveStreamOpenedAt = Date.now();
   es.addEventListener("supply", (ev) => {
@@ -7764,7 +7773,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           // 2026-09-24 HL 고래 청산도 합산에 들어 있다 -- 무엇이 얼마인지 따로 적는다(추적 300지갑 한정).
           + (b.hl ? " · HL 고래 청산 " + fmtUsdCompact((b.hl.long_usd || 0) + (b.hl.short_usd || 0))
              + " (" + b.hl.n + "건 · 롱 " + fmtUsdCompact(b.hl.long_usd || 0) + " / 숏 "
-             + fmtUsdCompact(b.hl.short_usd || 0) + " · 추적 300지갑 한정)" : "");
+             + fmtUsdCompact(b.hl.short_usd || 0) + " · 추적 300지갑 한정)" : "")
+          + (b.bybit ? " · Bybit " + fmtUsdCompact((b.bybit.long_usd || 0) + (b.bybit.short_usd || 0)) + " (" + b.bybit.n + "건)" : "");
         dot.appendChild(tip);
         g.appendChild(dot);
       });

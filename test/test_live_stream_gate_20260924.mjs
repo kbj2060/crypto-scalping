@@ -17,7 +17,7 @@ class FakeES {
 const env = { activePageTab: "snapshot", activeSnapshotAsset: "eth", hidden: false, applied: 0, sit: 0 };
 const api = new Function("env", "EventSource", "Date", `
   let supply1sSince = 5, oi1sSince = 0, liq1sSince = 0, okxSupply1sSince = 0, okxOi1sSince = 0,
-      okxLiq1sSince = 0, spotSupply1sSince = 0, latestSituation = null;
+      okxLiq1sSince = 0, spotSupply1sSince = 0, bybitLiq1sSince = 0, latestSituation = null;
   const document = { get hidden() { return env.hidden; } };
   const flowOn = () => ["eth", "sol", "xrp"].includes(env.activeSnapshotAsset);   // app.js FLOW_ASSETS
   const applySupply1s = () => { env.applied++; }, repaintSupply1sPanel = () => {}, renderSituation = () => { env.sit++; };
