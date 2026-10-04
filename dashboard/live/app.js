@@ -212,7 +212,7 @@ const sub1sKey = (w, h) => `${supply1sVer}|${w}|${h}|${liqBadgeKey()}`;
 function liqBadgeKey() {
   try {
     const bu = latestMarketCtx && latestMarketCtx.burst, side = mcLiqBurstSide(bu);
-    return side ? side + Math.round(((side === "long" ? bu.long_usd_1m : bu.short_usd_1m) || 0) / 1e5) : "";
+    return side ? side + Math.round(((side === "long" ? bu.long_usd_60s : bu.short_usd_60s) || 0) / 1e5) : "";
   } catch (err) { return ""; }   // 스크립트 초기화 중(let 초기화 전) 호출 대비
 }
 let measureCtx2d = null;
@@ -4040,7 +4040,7 @@ const MC_TIPS = {
   flow: "크기별 순매수 = 테이커 주문 크기로 가른 60분 순매수를, 지난 14일 같은 시간대(UTC 시) 60분 순매수의 보통 크기(중앙값 편차)로 나눈 값(σ) — 한산한 새벽과 미국장이 같은 잣대로 보인다(기준이 아직 없으면 서버 기동 후 12~24시간 분포). 고래 ≥ $10만 · 리테일 < $1만. 30분 체결 = 거래소별 순매수(ETH).\n우리 검정: 혼자서는 셋 다 되돌림 쪽(리테일이 가장 심하다). 고래와 리테일이 갈릴 때 60분 고래 쪽이 약하게 맞았다(메이커 전제). CVD는 «설명»이지 선행지표가 아니다.",
   cross: "BTC 30분 이동과 ETH의 동행 여부 · 거래소 가격차(바이낸스 기준 — OKX 는 마크 대 마크, HL 은 미드 대 미드. 마크는 평활값이라 미드와 섞어 재면 괴리가 부풀어 보인다) · HL 프리미엄(마크 − 오라클).\n우리 검정: BTC→ETH 1분 선행 0, 바이낸스가 HL을 1초 안쪽으로 앞선다 — 30분~2시간 방향에는 못 쓴다. 괴리가 커지는 순간(거래소 장애·한쪽 청산 쏠림)을 알아채는 용도.",
   book: "미드에서 ±25/50/100bp까지 걸린 호가 합 = 그만큼 밀려면 먹어야 할 물량(한 초 스냅샷 · 취소·재보충은 모른다). 얇은 쪽 = ±25bp 호가가 지난 6시간 중 몇 분위인가.\n우리 검정: 미검정. 거래량 계열은 실현변동성에 대부분 먹혔으니 «크기·속도» 참고로만. ETH 스프레드는 거의 늘 1틱이라 벌어지면 그 자체가 이상 신호다.",
-  liq: "청산 급증 = 봇의 1분 청산 z. HL 고래 청산가 = 추적 중인 HL 상위 300주소의 실제 청산가(추정 아님)를 가격의 ~0.2% 칸(ETH $5)으로 묶은 금액 — 차트에 점선으로도 그린다. 12시간 실측 = 바이낸스 강제청산이 실제로 체결된 가격(차트 체결 기둥 안쪽 눈금).\n우리 검정: 청산 급증 뒤 역매매·추종 둘 다 엣지 0 — «청산 동반 급등에 역매매 금지» 필터만 유효. 추정 청산맵은 «위치»는 맞고 방향은 없다. HL 실측 청산가는 미검정.",
+  liq: "청산 급증 = 직전 60초 그 쪽 강제청산 합이 학습 7일 상위 0.5%(롱 $34만 · 숏 $55만) 초과(ETH 만 — SOL·XRP 는 검정 불통과). HL 고래 청산가 = 추적 중인 HL 상위 300주소의 실제 청산가(추정 아님)를 가격의 ~0.2% 칸(ETH $5)으로 묶은 금액 — 차트에 점선으로도 그린다. 12시간 실측 = 바이낸스 강제청산이 실제로 체결된 가격(차트 체결 기둥 안쪽 눈금).\n우리 검정: 청산 급증 뒤 역매매·추종 둘 다 엣지 0 — «청산 동반 급등에 역매매 금지» 필터만 유효. 추정 청산맵은 «위치»는 맞고 방향은 없다. HL 실측 청산가는 미검정.",
   when: "다음 펀딩 정산 · 가까운 옵션 만기와 max pain · 미국장 · 다음 주요 지표.\n우리 검정: 펀딩 정산 전후 드리프트는 반기마다 부호가 뒤집혀 기각. max pain 쪽 1시간 규칙(만기 1시간 전 → 08:00 UTC)만 2026년 첫 검정 통과 — 후보라 표본외 장부로 계속 잰다.",
   px: "VWAP = 거래량 가중 평균가(σ = 거래량 가중 표준편차). 기본은 하루(UTC 00시부터) · «세션 시작부터»를 켜면 지금 시장 세션 개장부터 센다(아시아 도쿄 09시 · 유럽 런던 08시 · 미국 뉴욕 09:30, 현지 시각 · 서머타임 반영 · 미국장 뒤는 다음 00시까지 미국 세션). 개장 직후 30~60분은 봉이 적어 가격에 붙어 다닌다. 볼린저 %B = (종가 − 하단) ÷ (상단 − 하단), 20봉·2σ. RSI 14 = 5분봉. 스위치로 차트에 선을 켠다.\n우리 검정: 볼린저·VWAP 셋업은 방향 엣지가 없었고 RSI·%B는 짧은 되돌림을 약하게 말한다(비용을 못 넘음). 위치 참고용.",
 };
@@ -4219,17 +4219,17 @@ function renderPaper() {
 //   그 쪽이 1분 금액이 0 이 아닌 **큰 쪽**일 때. 파일(tail_risk_interceptor 10초마다 씀)이 60초 넘게 낡았으면 급증 없음.
 //   순수 함수(test/test_mc_liq_burst_hot_20260930.py 가 본문을 떼어 돌린다).
 const LIQ_BURST_STALE_MS = 60000;
+// 🔴2026-10-04 판정을 연구(H2)와 같은 사건으로: 직전 60초 그 쪽 청산 합 > 문턱(서버 LIQ_BURST_60S_USD, 학습 7일 상위 0.5%).
+//   옛 판(봇 1분 z≥3 · hawkes)은 σ 바닥 $1 이라 조용한 30분 뒤 몇천 달러에도 켜졌다(하루 11.8번 · 발동 중앙 $1,711 · 15분 되돌림 −0.71bp).
 function mcLiqBurstHot(bu, side, nowMs = Date.now()) {
-  if (!bu || !(nowMs - Date.parse(bu.updated_at || "") <= LIQ_BURST_STALE_MS)) return false;
-  const lu = bu.long_usd_1m || 0, su = bu.short_usd_1m || 0;
-  const [z, mine, other] = side === "long" ? [bu.z_long, lu, su] : [bu.z_short, su, lu];
-  return (z || 0) >= 3 || (!!bu.hawkes_active && mine > 0 && mine >= other);
+  if (!bu || !Array.isArray(bu.thr) || !(nowMs / 1000 - Number(bu.ts || 0) <= LIQ_BURST_STALE_MS / 1000)) return false;
+  return Number((side === "long" ? bu.long_usd_60s : bu.short_usd_60s) || 0) > bu.thr[side === "long" ? 0 : 1];
 }
 // 꼬리표·툴팁이 말할 쪽: 급증인 쪽, 둘 다면 1분 금액이 큰 쪽. 없으면 null.
 function mcLiqBurstSide(bu, nowMs = Date.now()) {
   const hl = mcLiqBurstHot(bu, "long", nowMs), hs = mcLiqBurstHot(bu, "short", nowMs);
   if (!hl && !hs) return null;
-  return hs && (!hl || (bu.short_usd_1m || 0) > (bu.long_usd_1m || 0)) ? "short" : "long";
+  return hs && (!hl || bu.short_usd_60s / bu.thr[1] > bu.long_usd_60s / bu.thr[0]) ? "short" : "long";   // 둘 다면 문턱 대비 더 큰 쪽
 }
 
 // 볼린저(20, 2σ) -- {봉 시각: [하단, 중앙, 상단]}. 창 슬라이스(1h = 12봉)로는 20봉이 안 되니 전체 이력에서 센다.
@@ -4868,10 +4868,13 @@ function renderSupply1s(box = null, src = null) {
       const bu = latestMarketCtx && latestMarketCtx.burst, side = activeSnapshotAsset === "eth" ? mcLiqBurstSide(bu) : null;
       if (side) {
         const fsz = narrow ? 10.5 : 11, ff = "Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif";
-        const t1 = `${side === "long" ? "롱" : "숏"} 청산 급증 ${fmtUsdCompact((side === "long" ? bu.long_usd_1m : bu.short_usd_1m) || 0)}/1분`, t2 = " · 대개 되돌림";
+        const t1 = `${side === "long" ? "롱" : "숏"} 청산 급증 ${fmtUsdCompact((side === "long" ? bu.long_usd_60s : bu.short_usd_60s) || 0)}/60초`, t2 = " · 시장가 청산 주의";
         const bx = 6 + measureTextW("CVD · OI", `700 ${narrow ? 12 : 13}px ${ff}`) + 10, bw = measureTextW(t1, `700 ${fsz}px ${ff}`) + measureTextW(t2, `600 ${fsz}px ${ff}`) + 18, bh = fsz + 9;
         const g = document.createElementNS(NS, "g"), r = document.createElementNS(NS, "rect"), tt = document.createElementNS(NS, "title");
-        tt.textContent = "청산이 몰린 급락·급등은 대개 곧 되돌아옵니다 — 이때 시장가로 급히 닫지 마세요";
+        // 2026-10-04 문구를 근거만큼만(사용자 «청산 급증 배지 문제도 고쳐줘»): «대개 되돌아온다»는 일반 시점에서 약하다(15분 +6.6bp, CI 하한 +0.03)
+        tt.textContent = `직전 60초 ${side === "long" ? "롱" : "숏"} 청산이 큰 버스트(롱 ${fmtUsdCompact(bu.thr[0])} · 숏 ${fmtUsdCompact(bu.thr[1])} 초과, 학습 7일 상위 0.5%)입니다.\n`
+          + "이런 버스트를 만난 보유 포지션을 그 순간 시장가로 닫으면 평균 −17bp 손해였습니다(35건, 95% CI −24~−11, 수수료 포함 모의 원장).\n"
+          + "그 뒤 15분 되돌림 자체는 약합니다(+6.6bp, CI 하한 +0.03) — «되돌아온다»가 아니라 «급히 시장가로 닫지 말 것»만 근거가 있습니다.";
         r.setAttribute("x", bx); r.setAttribute("y", cvdY0 + 14 - bh + 4); r.setAttribute("width", bw); r.setAttribute("height", bh); r.setAttribute("rx", bh / 2);
         r.setAttribute("fill", "var(--warn)"); r.setAttribute("fill-opacity", ".12"); r.setAttribute("stroke", "var(--warn)"); r.setAttribute("stroke-opacity", ".55");
         g.appendChild(tt); g.appendChild(r);

@@ -435,6 +435,9 @@ def record_account_trips(payload: dict, seen: dict[str, tuple[str, str, int, int
 # tail_risk block (see its _write_liq_burst_state() docstring) -- written the instant a new
 # liquidation event arrives, not on a 10s timer, for sub-few-second "sudden liquidation" alerting.
 LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
+# 2026-10-04 청산 급증 배지 = 연구(H2)와 같은 사건: 직전 60초 그 쪽 청산 합 > 학습 7일 상위 0.5%(롱·숏). scripts/rl_1s_agent.py
+#   COINCFG["ETHUSDT"]["liq"] = log1p(USD) 12.732·13.21 의 USD 값. 옛 판(봇 z≥3, σ 바닥 $1)은 하루 11.8번·발동 중앙 $1,711 에 켜져 근거와 다른 사건이었다.
+LIQ_BURST_60S_USD = (round(math.expm1(12.732)), round(math.expm1(13.21)))   # (롱 청산, 숏 청산) ≈ $33.8만 · $54.6만
 BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
 # 2026-09-10 극점 탐지기 -- 채점은 워커가 하고 대시보드는 읽기만 한다
 # (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
@@ -3798,7 +3801,7 @@ def make_app() -> web.Application:
         d25 = np.array(depth25_ring, dtype=float) if len(depth25_ring) >= 600 else None
         sw = mp.get("sweep")
         basis_pct = mctx.pct_rank(dv["basis_bp"], hist["basis"], min_n=600)
-        burst = (load_json_cached(LIQ_BURST_STATE_PATH) or {}) if asset == "eth" else {}   # 봇 청산 급증 파일 = ETH
+        liq60 = mp.get("liq60") or {}   # 이 코인 @forceOrder 직전 60초(z×ap, 연구 원천과 같은 크기) -- 미시 루프가 매초 센다
         return {
             "available": True, "asset": asset, "ts": time.time(), "mid": mid,
             "bands_usd": list(size_bands(sym)),   # 고래·리테일 경계(코인별) -- 화면 «?» 설명이 ETH 값을 말하지 않게
@@ -3839,8 +3842,9 @@ def make_app() -> web.Application:
                          "hi": ev["mid"] * (1 + fr.SYM_K * ev["range_bp"] / 1e4), "lo": ev["mid"] * (1 - fr.SYM_K * ev["range_bp"] / 1e4),
                          "feat_bar": (card30 if asset == "eth" else card30_by.get(asset, {})).get("bar")}
                         if x.get("reach_p") is not None and ev.get("mid") and ev.get("range_bp") else None),
-            "burst": {k: burst.get(k) for k in ("updated_at", "hawkes_active", "crisis_type", "z_long", "z_short",
-                                                "long_usd_1m", "short_usd_1m", "valid_liq_stream")} if burst else None,
+            # 근거는 ETH 뿐(SOL·XRP 검정 불통과, eth_only_signals_solxrp_20261004) -- 다른 코인은 None
+            "burst": ({"long_usd_60s": liq60.get("long"), "short_usd_60s": liq60.get("short"), "thr": LIQ_BURST_60S_USD, "ts": mp.get("ts")}
+                      if asset == "eth" and liq60 else None),
             "errors": col.get("errors") or {},
         }
 
