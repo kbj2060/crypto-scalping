@@ -2,7 +2,7 @@
 """머리 칩 «실전 성적» 집계 + 알림 센터 payload 계약 (2026-10-05). 프레임워크 없이 실행한다.
 
   · 경보기 성적 = 예고 봉 중 다음 1~6봉 안 탐지(감사 replay.py 의 fut_fire 정의) · 뒤 30분이 비어 있는 봉은 안 센다
-  · 닿음 = 말한 P 평균 vs 실제 닿음 · 구간별
+  · 닿음 칩은 2026-10-05 제거 -- 옛 reach 줄이 파일에 남아 있어도 집계에 안 나온다
   · 14일 밖 줄·다른 코인 줄·깨진 줄은 안 읽는다
   · 알림 센터 = 판정 달력(날짜순) + 데몬의 PUSH_KINDS + 최근 보낸 알림(최신 먼저)
 
@@ -29,8 +29,7 @@ burst = [{"k": "burst", "a": "eth", "t": T0, "side": "long", "rev_bp": 8.0}, {"k
 s = srv.chip_score_summary(bo + reach + burst)
 # 뒤 30분이 다 있는 봉 = 0..5(6개). 예고 봉 0 → 2번 봉에서 탐지(맞음), 예고 봉 3 → 4~9 에 탐지 없음(틀림)
 assert s["prewarn"] == {"bars": 6, "warn": 2, "hits": 1, "base": 2 / 6, "since": T0}, s["prewarn"]
-assert s["reach"]["n"] == 2 and s["reach"]["hit"] == 0.5 and abs(s["reach"]["p_mean"] - 0.5) < 1e-9, s["reach"]
-assert [(b["lo"], b["n"], b["hit"]) for b in s["reach"]["bins"]] == [(0.0, 1, 0.0), (0.6, 1, 1.0)], s["reach"]["bins"]
+assert "reach" not in s, s
 assert s["burst"] == {"n": 2, "rev_mean_bp": 3.0, "rev_share": 0.5}, s["burst"]
 assert srv.chip_score_summary([]) == {"days": 14}
 

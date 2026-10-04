@@ -395,16 +395,6 @@ def chip_score_rows(now: float, asset: str) -> list[dict]:
 def chip_score_summary(rows: list[dict]) -> dict[str, Any]:
     """칩별 집계. 표본이 없으면 그 칩 키가 없다(화면은 «기록 중»)."""
     out: dict[str, Any] = {"days": CHIP_SCORE_DAYS}
-    reach = [r for r in rows if r.get("k") == "reach"]
-    if reach:
-        bins = []
-        for lo, hi in ((0.0, 0.4), (0.4, 0.6), (0.6, 1.01)):
-            b = [r for r in reach if lo <= r["p"] < hi]
-            if b:
-                bins.append({"lo": lo, "hi": min(hi, 1.0), "n": len(b), "hit": sum(r["hit"] for r in b) / len(b)})
-        out["reach"] = {"n": len(reach), "p_mean": sum(r["p"] for r in reach) / len(reach),
-                        "hit": sum(r["hit"] for r in reach) / len(reach), "bins": bins,
-                        "since": min(r["t"] for r in reach)}
     bo = [r for r in rows if r.get("k") == "bo"]
     have, det = {int(r["t"]) for r in bo}, {int(r["t"]) for r in bo if r.get("det")}
     scored = [r for r in bo if int(r["t"]) + 1800 in have]          # 뒤 30분이 다 기록된 봉만(재기동 공백은 «안 맞음»이 아니다)
@@ -3529,27 +3519,15 @@ def make_app() -> web.Application:
     async def chip_score_loop() -> None:
         """머리 칩 «실전 성적» 기록기(2026-10-05). 화면이 안 열려 있어도 돈다 -- 칩 값은 미시 루프·상황 계산·경보기 워커가
         이미 들고 있는 것을 10초마다 **읽기만** 한다(계산 0). 결과가 정해진 줄만 월별 파일에 붙인다.
-        ponytail: 대기 중(30분 닿음·15분 되돌림)은 메모리에만 -- 재기동하면 그 몇 건은 버린다. 칩 하나당 하루 수백 건이라 무시할 양."""
-        last_reach: dict[str, Any] = {}
+        ponytail: 대기 중(15분 되돌림)은 메모리에만 -- 재기동하면 그 몇 건은 버린다. 칩 하나당 하루 수백 건이라 무시할 양."""
         last_bo: dict[str, int] = {}
         burst_on: dict[str, bool] = {}
-        pend_reach: list[dict] = []
         pend_burst: list[dict] = []
         while True:
             await asyncio.sleep(10)
             now, rows = time.time(), []
             try:
-                for asset in cctx:
-                    S = cctx[asset].situation_state
-                    x, ev = S.get("ctx") or {}, (S.get("now") or {}).get("evidence") or {}
-                    fb = (card30 if asset == "eth" else card30_by.get(asset) or {}).get("bar")
-                    if x.get("reach_p") is not None and fb and ev.get("mid") and ev.get("range_bp") and last_reach.get(asset) != fb:
-                        last_reach[asset] = fb
-                        start = int(fb) + FOOTPRINT_BAR_SECONDS          # 피쳐 마지막 봉이 닫힌 시각 = 30분 창의 시작
-                        if now - start < 120:                            # 재기동 직후 묵은 봉은 창 앞부분을 놓친다 -- 안 센다
-                            d = fr.SYM_K * float(ev["range_bp"]) / 1e4   # 칩과 같은 폭(±0.5 × 직전 30분 고저폭)
-                            pend_reach.append({"a": asset, "t": start, "p": float(x["reach_p"]),
-                                               "hi": ev["mid"] * (1 + d), "lo": ev["mid"] * (1 - d)})
+                for asset in cctx:   # 2026-10-05 «30분 닿음» 칩 제거로 그 기록도 뺐다(옛 reach 줄은 집계에서 무시)
                     if asset in BREAKOUT_ASSETS:
                         try:
                             st = load_json(BREAKOUT_DETECTOR_STATE_PATH.with_name(f"{asset}_breakout_detector_state.json")) or {}
@@ -3575,12 +3553,6 @@ def make_app() -> web.Application:
                             sgn = 1.0 if b["side"] == "long" else -1.0              # 롱 청산(가격 하락) 뒤 되돌림 = 위로
                             rows.append({"k": "burst", "a": "eth", "t": int(b["t"]), "side": b["side"], "usd": round(b["usd"]),
                                          "rev_bp": round((float(mid) / b["mid0"] - 1) * 1e4 * sgn, 2)})
-                for r in [r for r in pend_reach if now >= r["t"] + 1800 + 90]:   # 마지막 봉이 닫히고 REST 에 붙을 여유
-                    pend_reach.remove(r)
-                    bars = [c for c in await load_market_history(r["a"]) if r["t"] <= int(c["time"]) < r["t"] + 1800]
-                    if len(bars) == 6:
-                        hit = max(float(c["high"]) for c in bars) >= r["hi"] or min(float(c["low"]) for c in bars) <= r["lo"]
-                        rows.append({"k": "reach", "a": r["a"], "t": r["t"], "p": round(r["p"], 4), "hit": int(hit)})
                 if rows:
                     with open(chip_score_path(now), "a", encoding="utf-8") as fh:
                         fh.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
@@ -4033,11 +4005,6 @@ def make_app() -> web.Application:
             "liq_profile": prof,
             "profile": vprof,
             "iv_rank": ({"dvol": dvy[-1], "rank365": mctx.pct_rank(dvy[-1], dvy[:-1], min_n=200), "n": len(dvy) - 1} if dvy else None),
-            # 2026-10-04 머리 칩 «30분 ±X% 닿음 P%» -- 융합 카드의 닿음 축과 같은 정의(±SYM_K × 직전 30분 폭, 닿음 모델). 방향 아님
-            "reach30": ({"p": x["reach_p"], "dist_bp": fr.SYM_K * ev["range_bp"],
-                         "hi": ev["mid"] * (1 + fr.SYM_K * ev["range_bp"] / 1e4), "lo": ev["mid"] * (1 - fr.SYM_K * ev["range_bp"] / 1e4),
-                         "feat_bar": (card30 if asset == "eth" else card30_by.get(asset, {})).get("bar")}
-                        if x.get("reach_p") is not None and ev.get("mid") and ev.get("range_bp") else None),
             # 근거는 ETH 뿐(SOL·XRP 검정 불통과, eth_only_signals_solxrp_20261004) -- 다른 코인은 None
             "burst": ({"long_usd_60s": liq60.get("long"), "short_usd_60s": liq60.get("short"), "thr": LIQ_BURST_60S_USD, "ts": mp.get("ts")}
                       if asset == "eth" and liq60 else None),

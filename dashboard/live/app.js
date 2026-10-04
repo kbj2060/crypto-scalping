@@ -4529,11 +4529,11 @@ function trendFlipLevels(footprint, candles) {
 // 2026-09-30 사용자 «30분 시나리오를 풋프린트로»(시안 A — 레짐·권장 크기 칩과 검증 꼬리표는 뺌): 30분 칸을 없애고
 //   ① 차트 머리 칩 둘(큰 방향 5표 · 융합 신호) ② 가격판 «30분 도달 선»(renderCandleSvg)으로 옮겼다.
 //   5표 표(기간·기준가·지금 대비·뒤집힘)는 추세 칩 툴팁, 역추세 보유면 칩이 주황. 서버 계산·SSE(latestSituation)는 그대로.
-//   큰 방향 = UTC 00시 일봉 종가를 7·14·28·56·90일 전과 비교한 5표(dashboard/trend_rule.py) · 융합 = 독립 4표 ≥2 + 크기 관문.
+//   큰 방향 = UTC 00시 일봉 종가를 7·14·28·56·90일 전과 비교한 5표(dashboard/trend_rule.py). 융합 칩은 2026-10-05 제거.
 function renderSituation() {
   const box = el("sitChips");
   if (!box) return;
-  const eth = activeSnapshotAsset === "eth", s = latestSituation || {}, fz = (s.read && s.read.fused) || null;
+  const eth = activeSnapshotAsset === "eth";
   const t = latestTrend && latestTrend.ok ? latestTrend : null;
   const pxf = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: v >= 100 ? 0 : 2 });
   let h = "";
@@ -4551,21 +4551,8 @@ function renderSituation() {
       + ` <span class="sit-dots">${t.votes.map((v) => `<b class="${v.up ? "u" : ""}"></b>`).join("")}</span> ${t.ups}/${t.votes.length} · ${t.age_days}일`
       + `${against.length ? " · 역추세 보유" : ""}</span>`;
   }
-  // 2026-10-04 30분 닿음 확률 칩(사용자 «30분 도달 확률도 적용» · 머리 칩 선택) -- 방향 아님, 중립색. 원천 = 시장 맥락 reach30(코인별)
-  const rc = latestMarketCtx && latestMarketCtx.available && latestMarketCtx.asset === activeSnapshotAsset ? latestMarketCtx.reach30 : null;
-  if (rc && rc.p != null && rc.dist_bp > 0) {
-    const dp = Math.max(2, (ASSET_CONFIG[activeSnapshotAsset] || {}).dp || 2), pc = (rc.dist_bp / 100).toFixed(2), P = Math.round(rc.p * 100);
-    const tip = `다음 30분 안 ${Number(rc.hi).toFixed(dp)}(+${pc}%) 또는 ${Number(rc.lo).toFixed(dp)}(−${pc}%) 중 하나에 닿을 확률 ${P}%`
-      + `\n폭 = ±0.5 × 직전 30분 고저폭 · 닿음 모델(5분봉 26피쳐, ETH 학습) · ETH TEST 2025~ AUC .78`
-      + (eth ? "" : `\n${coinUnit()}: 같은 ETH 모델 그대로 · 크기 표 대비 AUC +.06 통과(2025~)`) + "\n어느 쪽인지는 말하지 않는다 — 크기 정보"
-      + (chipScoreLine("reach") ? `\n\n${chipScoreLine("reach")}` : "");
-    h += `<span class="sit-chip q" title="${escapeHtml(tip)}">30분 ±${pc}% 닿음 ${P}%</span>`;
-  }
-  if (eth && fz) {
-    const d = fz.side > 0 ? "up" : fz.side < 0 ? "dn" : "";
-    const tail = String(fz.text || "").replace(/^[^—]*—\s*/, "");   // 서버 문장의 «대기 — » 머리를 뗀다
-    h += `<span class="sit-chip ${d || "q"}" title="${escapeHtml(`융합 신호(다음 30분) — ${tail}`)}">${d ? `융합 ${d === "up" ? "롱" : "숏"} 발동` : "융합 대기"}</span>`;
-  }
+  // 2026-10-05 «30분 ±X% 닿음»·«융합 대기/발동» 칩 제거(사용자 «둘 다 제거»): 닿음은 보정이 맞지만(실시간 85.8→85.3%)
+  //   기저 75% 위 «조금 더 움직임»뿐이고 방향·크기가 비용 수준 · 융합은 화면처럼 5분마다 평가하면 +2.5bp CI 0 포함.
   if (box._h !== h) { box._h = h; box.innerHTML = h; }
   box.hidden = !h;
 }
@@ -8618,12 +8605,6 @@ function chipScoreLine(kind) {
   const s = chipScore[activeSnapshotAsset], pc = (v) => `${Math.round(v * 100)}%`;
   if (!s) return "";
   const head = `실전 성적(최근 ${s.days}일`, few = (n) => (n < 30 ? " · 표본 적음" : "");
-  if (kind === "reach") {
-    const r = s.reach;
-    if (!r) return "실전 성적: 기록 중 — 30분이 지나야 첫 결과가 나옵니다";
-    return `${head}, ${r.n}건): 말한 확률 평균 ${pc(r.p_mean)} · 실제 닿음 ${pc(r.hit)}${few(r.n)}`
-      + r.bins.map((b) => `\n  ${Math.round(b.lo * 100)}~${Math.round(b.hi * 100)}%라고 할 때 실제 ${pc(b.hit)} (${b.n}건)`).join("");
-  }
   if (kind === "prewarn") {
     const p = s.prewarn;
     if (!p) return "실전 성적: 기록 중";
