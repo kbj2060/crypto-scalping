@@ -2960,18 +2960,12 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-10-05 뉴스 카드(사용자 «뉴스 카드를 하나 만들어서»). 왼쪽 = 기울기(1·6·12시간)·코인별·사고·출처 · 오른쪽 = 12시간 축 + 목록.
    방향색은 값에만(호재 --good · 악재 --bad · 사고 --warn), 판정은 검증 전이라 머리에 «신호 아님»을 늘 둔다. 좁으면 한 열.
-   한 화면 모드(html.fit1)면 카드 = 창 높이, 남는 높이는 목록이 갖는다. */
+   스크롤 없이 전부 보인다(사용자 «스크롤 되어 있는건 스크롤 없이») -- 카드가 내용만큼 늘고, 한 화면 모드에서도 높이를 고정하지 않는다. */
 #newsCard[hidden] { display: none; }
 #newsCard .opt-card-head { display: flex; align-items: baseline; gap: 12px; }
 #newsCard .opt-card-head .muted { font-size: 12px; }
 .news-body { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); column-gap: 32px; padding-top: 4px; }
 @media (max-width: 720px) { .news-body { grid-template-columns: minmax(0, 1fr); row-gap: 12px; } }
-html.fit1 #newsCard { display: flex; flex-direction: column; }
-html.fit1 #newsCard[hidden] { display: none; }
-html.fit1 #newsBody { flex: 1 1 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
-html.fit1 #newsBody .nw-main { display: flex; flex-direction: column; min-height: 0; }
-html.fit1 #newsBody .nw-list { flex: 1 1 0; max-height: none; }
-html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: thin; }   /* 사고 3건 + 상위 6건이면 창 높이를 넘는다 */
 .nw-tilts { display: grid; gap: 8px; }
 .nw-tilt .nw-tilt-lab .w { font-weight: 800; color: var(--text); }
 .nw-incs { display: grid; gap: 6px; }
@@ -2980,7 +2974,6 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 .nw-sec-h { font: 800 11px var(--font-sans); letter-spacing: .08em; color: var(--muted); margin-bottom: 2px; }
 .nw-row .src.multi { color: var(--option); }
 .nw-head { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; }
-.nw-head .nw-meta { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: keep-all; }
 .nw-head .nw-chips { margin-left: auto; display: flex; gap: 6px; }
 .nw-sum { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .nw-tilt { display: grid; gap: 5px; }
@@ -3005,8 +2998,7 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 .nw-main { min-width: 0; }
 .nw-lane { display: block; width: 100%; height: auto; }
 .nw-lane text { font: 600 10px var(--font-sans); fill: var(--muted); }
-.nw-list { margin-top: 6px; max-height: 520px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--option) 35%, transparent) transparent; }
+.nw-list { margin-top: 6px; }
 .nw-row { display: grid; grid-template-columns: 40px 64px 62px 44px 34px minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 5px 0;
   border-top: 1px solid var(--soft-line); font-size: 12px; font-variant-numeric: tabular-nums; }
 .nw-row .t, .nw-row .src { color: var(--muted); }
@@ -3027,7 +3019,6 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
   .nw-row .t { grid-area: t; } .nw-row .sen { grid-area: sen; } .nw-row .as { grid-area: as; } .nw-row .imp { grid-area: imp; justify-self: end; }
   .nw-row .src { grid-area: src; }
   .nw-row a { grid-area: title; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-  .nw-list { max-height: 62vh; }
 }
 .nw-top { display: grid; gap: 0; }
 .nw-top-row { display: grid; grid-template-columns: 30px 26px minmax(0, 1fr); grid-template-areas: "s i t" ". . a"; gap: 1px 8px; padding: 5px 0;

@@ -2853,8 +2853,7 @@ function renderNews() {
   const railBtn = document.querySelector('#cardRail [data-go="newsCard"]'); if (railBtn) railBtn.hidden = !show;
   if (!show) return;
   const now = p.now_ms || Date.now(), coin = String(activeSnapshotAsset || "eth").toUpperCase();
-  const judged = p.items.filter((it) => it.sentiment), empty = p.items.filter((it) => !it.sentiment && it.model),
-    waiting = p.items.length - judged.length - empty.length;   // model 'skip:empty' = 본문 없는 글(이미지·링크뿐)
+  const judged = p.items.filter((it) => it.sentiment);
   const rel = (it) => (it.relevant ?? 0) >= 0.5;
   const w = (it) => (Number(it.impact) || 0) * (it.relevant ?? 0);   // 기울기 가중 = 영향 × 관련성
   const srcs = (it) => (it.sources && it.sources.length ? it.sources : [it.source]);
@@ -2886,8 +2885,6 @@ function renderNews() {
   const top = judged.filter(rel).slice().sort((x, y) => w(y) - w(x)).slice(0, 6);
   const sw = { bullish: ["opt-good", "호재"], bearish: ["opt-bad", "악재"], neutral: ["", "중립"] };
   const tops = top.length ? `<div><div class="nw-sec-h">고영향 상위 · 12시간</div><div class="nw-top">${top.map((it) => `<div class="nw-top-row"><span class="${(sw[it.sentiment] || sw.neutral)[0]}">${(sw[it.sentiment] || sw.neutral)[1]}</span><span class="i">${Number(it.impact).toFixed(1)}</span><span class="tt" title="${escapeHtml(it.title)}">${escapeHtml(it.title.replace(/\s+/g, " ").slice(0, 120))}</span><span class="ag">${newsAgo(it.ts_ms, now)} 전 · ${escapeHtml(newsAsset(it.asset))}</span></div>`).join("")}</div></div>` : "";
-  const last = p.last_judged_ms ? `마지막 판정 ${newsAgo(p.last_judged_ms, now)} 전` : "판정 없음";
-  const note = `<div class="nw-note">${escapeHtml(p.model || "jevk5:4b")}가 제목·요약만 읽고 판정 · 가격 반응 검증 전 · 영향 0~3 · ${last}${waiting ? ` · 판정 대기 ${waiting}건` : ""}${empty.length ? ` · 본문 없는 글 ${empty.length}건 제외` : ""}</div>`;
   // 12시간 축: x = 시각, y = 영향, 색 = 감성, 크기 = 관련성, 주황 테두리 = 해킹·장애. 지금 코인 기사는 진하게.
   const W = Math.max(320, Math.round(el("newsBody")?.querySelector(".nw-main")?.clientWidth || (card.clientWidth * 0.68) || 700)), H = 150, L = 30, R = 8, T = 10, B = 18;
   const t0 = now - (p.window_h || 12) * 3600e3, x = (t) => L + (W - L - R) * (t - t0) / (now - t0), y = (v) => T + (H - T - B) * (1 - (Number(v) || 0) / 3);
@@ -2916,10 +2913,8 @@ function renderNews() {
   }).join("") || `<div class="nw-note">조건에 맞는 기사가 없다.</div>`;
   const chip = (k, on, lab) => `<button type="button" class="opt-chip-btn${on ? " on" : ""}" data-nw="${k}" aria-pressed="${on}">${lab}</button>`;
   setH("newsMeta", `12시간 ${p.items.length}건 · 판정 ${judged.length} · 관련 ${judged.filter(rel).length} · 참고, 신호 아님`);
-  const head = `<div class="nw-head"><span class="nw-meta">9개 피드 · 같은 글은 하나로 합침</span><span class="nw-chips">${chip("relevant", newsView.relevant, "관련만")}${chip("coin", newsView.coin, `${coin}+매크로`)}</span></div>`;
-  const prevList = el("newsBody")?.querySelector(".nw-list"), keepTop = prevList ? prevList.scrollTop : 0;   // setH 는 SVG 직렬화 차이로 늘 다시 그린다 -- 스크롤 보존
-  setH("newsBody", `${head}<div class="nw-sum">${tilts}${assets}${inc}${tops}${srcLine}${note}</div><div class="nw-main">${lane}<div class="nw-list">${list}</div></div>`);
-  const nextList = el("newsBody")?.querySelector(".nw-list"); if (nextList && keepTop) nextList.scrollTop = keepTop;
+  const head = `<div class="nw-head"><span class="nw-chips">${chip("relevant", newsView.relevant, "관련만")}${chip("coin", newsView.coin, `${coin}+매크로`)}</span></div>`;
+  setH("newsBody", `${head}<div class="nw-sum">${tilts}${assets}${inc}${tops}${srcLine}</div><div class="nw-main">${lane}<div class="nw-list">${list}</div></div>`);
 }
 el("newsBody")?.addEventListener("click", (e) => {
   const b = e.target.closest("[data-nw]");
@@ -3009,7 +3004,6 @@ function fitLayout() {
   const acct = el("acctCard"), opt = el("optCard");
   if (acct) acct.style.minHeight = on ? `${vh}px` : "";
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
-  const news = el("newsCard"); if (news) news.style.height = on ? `${vh}px` : "";   // 2026-10-05 뉴스 카드 = 창 높이(목록이 남는 높이를 갖는다)
   // 2026-10-01(2) Option 칸 높이 = **원래 크기로 매번 계산**(되먹임 없음). 앞 판은 넘칠 때마다 사다리를 깎는 톱니라 한 번 300 에 닿으면
   //   다시 안 커졌고(캐시에도 남음) 차트 상한만 쌓여 «전부 작아지고 바닥은 잘렸다». 이제:
   //   ① 각 칸 = 머리·꼬리(고정) + 그림(원래 높이 = 폭 × viewBox 비율) ② 원래 크기로 들어가면 상한 없음 + 사다리가 1·2줄을 채움
@@ -3068,7 +3062,6 @@ function fitApplyCached() {
   document.documentElement.classList.add("fit1");
   fitOptLadderH = FIT0.lad || fitLadderFormula();   // 지난번에 잰 값(같은 창 높이) -- 새로고침 첫 그림부터 맞는다
   ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
-  const news = el("newsCard"); if (news) news.style.height = `${innerHeight - 20}px`;
   if (fitAcctPlotH) el("acctCard")?.style.setProperty("--acctplot", `${fitAcctPlotH}px`);
 }
 function setupCardRail() {

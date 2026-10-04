@@ -840,7 +840,9 @@ def news_key(title: str) -> str:
     t = re.sub(r"https?://\S+", " ", title or "")
     t = re.sub(r"\[No Title\] - Post from [^\n]*", " ", t)                 # Truth 이미지 게시물 -- 날짜만 같은 다른 글
     t = re.sub(r"^[^:\n]{1,60}\(@\w+\):\s*", "", t.strip())
-    t = re.sub(r"^[A-Za-z][A-Za-z .'&-]{1,30}:\s*", "", t)
+    # 출처 머리말은 «전부 대문자»(COINDESK: · THE STREET:) 또는 «한 단어»(FinancialJuice:)만 -- 제목 속 콜론
+    # («There's an election next month: State of Crypto»)까지 떼면 같은 글이 안 합쳐진다(10-05 실측)
+    t = re.sub(r"^(?:[A-Z0-9][A-Z0-9 .'&-]{0,30}|[A-Za-z]+):\s*", "", t)
     t = re.sub(r"[\W_]+", "", t.lower())                                    # 한글·한자도 남긴다(«상장»≠«상장폐지»)
     return t[:80] if len(t) >= 12 else ""
 

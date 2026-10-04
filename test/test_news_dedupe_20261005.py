@@ -30,4 +30,7 @@ assert m["sources"] == ["tree", "trumpstruth"] and m["ts_ms"] == 100 and m["sent
 assert srv.news_key("DECRYPT: Trump Taps Jay Clayton") == srv.news_key("Trump taps Jay Clayton!")
 assert srv.news_key("[No Title] - Post from October 4, 2026") == ""   # 본문 없는 글은 합치지 않는다
 assert srv.news_key("Tree News: Upbit 상장 ABC(ABC) KRW 마켓") != srv.news_key("Tree News: Upbit 상장폐지 ABC(ABC) KRW 마켓")
+assert srv.news_key("COINDESK: There's an election next month: State of Crypto") == srv.news_key("There’s an election next month: State of Crypto")
+assert srv.news_key("THE STREET: Top Bitcoin Billionaires") == srv.news_key("Top Bitcoin Billionaires")
+assert srv.news_key("FinancialJuice: Iran oil minister steps down") == srv.news_key("Iran oil minister steps down")
 print("ok")
