@@ -3739,7 +3739,7 @@ def make_app() -> web.Application:
                     x["z60"] = {g: float(r60[g][-1] / past[g].std()) for g in r60}
                 # 2026-10-01 화면용: 같은 UTC 시 14일 MAD 로 나눈 값(docs/experiments/flow_z60_baseline_20261001 -- 방향성 동률,
                 #   새벽·미국장 공정). z60 은 융합·관계 문장이 검정된 정의라 그대로 둔다.
-                sc = (micro_state.get("flow_scales") or {}).get(time.gmtime(done[-1]).tm_hour)
+                sc = (micro_state.get("flow_scales") or {}).get((mref.is_weekend(done[-1]), time.gmtime(done[-1]).tm_hour))
                 if sc:
                     x["z60h"] = {g: float(r60[g][-1] / sc[g]) for g in r60}
             r30 = roll(a[:, 0], 6)

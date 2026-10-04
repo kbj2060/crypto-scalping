@@ -94,7 +94,12 @@ def oi_stats(series: list[tuple[int, float]], step_s: int = 300) -> dict[str, fl
     if grid.size > k24 and math.isfinite(grid[-1 - k24]):
         out["d24h_pct"] = float((grid[-1] / grid[-1 - k24] - 1) * 100)
     d = grid[k1:] / grid[:-k1] - 1 if grid.size > k1 else np.array([])
-    past = d[:-1][np.isfinite(d[:-1])]
+    # 2026-10-05 요일유형 분리(사용자 «주말에 너무 작게»): 7일 중 5일이 평일이라 주말 |z|≥1.5 가 평일의 1/3
+    #   (8주 실측 12.6 vs 4.0%) → 지금과 같은 요일유형(UTC 토·일 / 평일)의 과거 변화만 분포로(평일유형 14일판 9.8 vs 8.6%).
+    #   그 유형 표본이 72 미만이면 전체로.
+    wk = ((t0 + (np.arange(d.size) + k1) * step_s) // 86400 + 3) % 7 >= 5
+    same = d[:-1][np.isfinite(d[:-1]) & (wk[:-1] == wk[-1])] if d.size else np.array([])
+    past = same if same.size >= 72 else d[:-1][np.isfinite(d[:-1])]
     if d.size and math.isfinite(d[-1]) and past.size >= 72 and past.std() > 0:
         out["z1h"] = float((d[-1] - past.mean()) / past.std())
     return out
@@ -291,6 +296,14 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     assert st["oi"] == 1000.0 + 299 * 7 % 5 + 20 and st["z1h"] is not None and st["z1h"] > 3 and st["d24h_pct"] is not None, st
     holes = [(t, v) for t, v in ser if t != 299 * 300 - 12 * 300]                          # 1시간 전 칸이 비었다
     assert oi_stats(holes)["d1h_pct"] is None and oi_stats([])["oi"] is None
+    # 2026-10-05 요일유형: 평일엔 1시간 변화가 크고 주말엔 작은 7일 -- 주말 끝의 «주말치고 큰» 변화가 평일 분포에 묻히지 않는다
+    _t0, _g = 1_759_536_000 - 5 * 86400, np.random.default_rng(1)       # 월요일 00:00 UTC 부터 7일(토·일로 끝남)
+    _lv = 1000.0 + np.cumsum([_g.normal(0, 4.0 if ((_t0 + i * 300) // 86400 + 3) % 7 < 5 else 0.4) for i in range(7 * 288)])
+    _lv[-1] = _lv[-13] * 1.015                                          # 주말 마지막 봉: 1시간 +1.5%
+    _ser = [(_t0 + i * 300, float(v)) for i, v in enumerate(_lv)]
+    _z = oi_stats(_ser)["z1h"]
+    _d = _lv[12:] / _lv[:-12] - 1; _zall = (_d[-1] - _d[:-1].mean()) / _d[:-1].std()
+    assert _z > 2.5 and _zall < 1.5, (_z, _zall)                          # 주말 분포 기준이면 튀고, 전체 기준이면 평일 흔들림에 묻힌다
     assert lev_state(0.95, 1.2)["key"] == "long_crowd" and lev_state(0.05, 1.2)["key"] == "short_crowd"
     assert lev_state(0.5, -2)["key"] == "deleverage" and lev_state(0.95, 0)["key"] == "premium" and lev_state(None, 3)["key"] == "na"
     lv = hl_liq_levels([(10, 2601), (5, 2602), (-2, 2800), (3, 2710), (-1, 2500), (1, 1000)], mid=2700, bin_usd=5)

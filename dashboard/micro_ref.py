@@ -215,11 +215,19 @@ def baseline_from_tape(db_path: Path, days: int = 7, symbol: str = "ethusdt") ->
 FLOW_SCALE_DAYS = 14   # 2026-10-01 «누가 밀고 있나» 고래·중형·리테일 z 의 분모 = 같은 UTC 시 60분 순매수의 MAD
 
 
-def flow_hour_scales_from_bars(rows: list) -> dict[int, dict[str, float]]:
-    """(5분봉 시작 ts, 총 순매수, 고래, 리테일) → UTC 시별 60분(12봉) 롤링합의 1.4826·MAD.
+def is_weekend(ts: int) -> int:
+    """UTC 토·일이면 1 (1970-01-01 = 목요일 → (일수+3)%7 이 월=0)."""
+    return int((int(ts) // 86400 + 3) % 7 >= 5)
+
+
+def flow_hour_scales_from_bars(rows: list) -> dict[tuple[int, int], dict[str, float]]:
+    """(5분봉 시작 ts, 총 순매수, 고래, 리테일) → (주말 여부, UTC 시)별 60분(12봉) 롤링합의 1.4826·MAD.
     ETH 3.7년 64개 기준선 비교(docs/experiments/flow_z60_baseline_20261001): 방향성은 전부 동률,
     같은 시간대 기준만 새벽·미국장의 |z|≥1 비율을 평평하게(시간대 편차 7.1→0.4pp) 만든다.
-    시간당 표본이 7일치(84개)보다 적은 시는 뺀다 -- 호출 측이 옛 식으로 대체."""
+    2026-10-05 요일유형 분리(사용자 «주말에 너무 작게»): 14일 중 10일이 평일이라 주말 |z|≥1 이 평일의 절반
+    (고래 8주 실측 평일 44.8 · 주말 25.1%) → 평일·주말 따로 재면 39.1 · 42.0%(tmp/weekend_baseline_20261005/a5.py).
+    표본이 평일 7일치(84)·주말 3일치(36)보다 적은 칸은 뺀다 -- 호출 측이 옛 식으로 대체.
+    ponytail: dow4(같은 요일·시 4주)가 더 고르다(44/43%) -- hot 테이프가 16일만 남아(seal_to_lake HOT_KEEP_DAYS) 못 쓴다."""
     if not rows:
         return {}
     t0 = int(rows[0][0]); n = (int(rows[-1][0]) - t0) // 300 + 1
@@ -227,15 +235,17 @@ def flow_hour_scales_from_bars(rows: list) -> dict[int, dict[str, float]]:
     for t, tot, wh, rt in rows:
         a[(int(t) - t0) // 300] = (float(tot) - float(wh) - float(rt), float(wh), float(rt))
     r = np.array([np.convolve(a[:, j], np.ones(12), "valid") for j in range(3)]).T   # 끝 봉 = 인덱스 k+11
-    hour = ((t0 + (np.arange(len(r)) + 11) * 300) % 86400) // 3600
-    out: dict[int, dict[str, float]] = {}
-    for h in range(24):
-        v = r[(hour == h) & np.isfinite(r).all(axis=1)]
-        if len(v) < 84:
-            continue
-        mad = 1.4826 * np.median(np.abs(v - np.median(v, axis=0)), axis=0)
-        if (mad > 1e-9).all():
-            out[h] = dict(zip(("mid", "whale", "retail"), map(float, mad)))
+    end = t0 + (np.arange(len(r)) + 11) * 300
+    hour, wk = (end % 86400) // 3600, ((end // 86400 + 3) % 7 >= 5).astype(int)
+    out: dict[tuple[int, int], dict[str, float]] = {}
+    for w in (0, 1):
+        for h in range(24):
+            v = r[(wk == w) & (hour == h) & np.isfinite(r).all(axis=1)]
+            if len(v) < (36 if w else 84):
+                continue
+            mad = 1.4826 * np.median(np.abs(v - np.median(v, axis=0)), axis=0)
+            if (mad > 1e-9).all():
+                out[(w, h)] = dict(zip(("mid", "whale", "retail"), map(float, mad)))
     return out
 
 
@@ -290,11 +300,13 @@ def deriv_from_ring(ring: dict[int, tuple[float, float, float]], horizon_s: int,
 if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근접 판정, 버스트 판정
     # flow_hour_scales_from_bars: 8일 × 5분 · 리테일 0 이면 전 시 제외 · 셋 다 흔들리면 24시 전부 · 6일치면 표본 부족
     _rng = np.random.default_rng(0)
-    _rows = [(1_700_000_000 // 86400 * 86400 + k * 300, w + 1.0, w, 0.0) for k, w in enumerate(_rng.normal(0, 10, 8 * 288))]
+    #   2026-10-05 키 = (주말, 시): 15일(화요일 시작) = 평일 11일·주말 4일 → 48칸 · 6일치(평일 4·주말 2) → 표본 부족
+    assert is_weekend(1_700_000_000 // 86400 * 86400) == 0 and is_weekend(1_759_536_000) == 1   # 2023-11-14 화 · 2025-10-04 토
+    _rows = [(1_700_000_000 // 86400 * 86400 + k * 300, w + 1.0, w, 0.0) for k, w in enumerate(_rng.normal(0, 10, 15 * 288))]
     assert flow_hour_scales_from_bars(_rows) == {}                       # 리테일 MAD 0 → 전부 제외
     _rows = [(t, w + m + r, w, r) for (t, _, w, _), m, r in zip(_rows, _rng.normal(0, 1, len(_rows)), _rng.normal(0, 1, len(_rows)))]
     _sc = flow_hour_scales_from_bars(_rows)                               # 12봉 합의 표준편차 = √12 × 봉 표준편차
-    assert sorted(_sc) == list(range(24)) and all(15 < v["whale"] < 60 and 1.5 < v["mid"] < 6 and 1.5 < v["retail"] < 6 for v in _sc.values()), _sc
+    assert sorted(_sc) == [(w, h) for w in (0, 1) for h in range(24)] and all(15 < v["whale"] < 60 and 1.2 < v["mid"] < 7 and 1.2 < v["retail"] < 7 for v in _sc.values()), _sc   # 주말 칸은 표본 48 이라 더 흔들린다
     assert flow_hour_scales_from_bars(_rows[:6 * 288]) == {}            # 6일치 → 시당 표본 부족
     assert qi(3, 1) == 0.5 and qi(0, 0) == 0.0 and side_of(0.6, QI_SIDE_ABS) == "매수" and side_of(-0.2, QI_SIDE_ABS) == "중립"
     # 격자: bin_size 0.5, bin_lo 5200 → 가격 2600.0 부터. mid 2600.5. +매수 −매도.
