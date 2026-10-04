@@ -41,6 +41,10 @@ FEEDS = {                                                     # 이름: (url, �
     "sec": ("https://www.sec.gov/news/pressreleases.rss", 300),
 }
 TICK_S = float(os.environ.get("NEWS_RSS_TICK_S", "5"))
+# BWEnews 제목은 «출처: 내용». 상장 속보(UPBIT LISTING·Bithumb Listing)와 거래소 공지(Binance EN 등)는 수집 단계에서 버린다
+# (사용자 «BWEnews 상장 속보는 수집 단계에서 걸러줘» · 거래소 공지는 앞서 제외). Tree News·AggrNews·BWENEWS 는 남긴다.
+BWE_DROP = re.compile(r"^\s*(?:[^:]*(?:listing|上新)|(?:binance|okx|bybit|coinbase|upbit|bithumb|bitget|kucoin|gate|mexc|hyperliquid)\b[^:]*):",
+                      re.IGNORECASE)
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
 
 
@@ -104,6 +108,8 @@ def run() -> None:
                     cond[src] = {k: v for k, v in (("If-None-Match", r.headers.get("ETag")),
                                                      ("If-Modified-Since", r.headers.get("Last-Modified"))) if v}
                 items = parse_tree(body) if src == "tree" else parse(body)
+                if src == "bwenews":
+                    items = [it for it in items if not BWE_DROP.match(it[1])]
                 n = len(items)
                 new = store(con, src, items, int(time.time() * 1000), first[src])
                 if new and not first[src]:
@@ -139,6 +145,11 @@ def selftest() -> None:
     tree = json.dumps([{"_id": "1", "title": "Trump (@realDonaldTrump): hi", "source": "Twitter", "url": "https://x.com/a/1", "time": 7},
                        {"_id": "2", "title": "B", "source": "Blogs"}]).encode()
     assert parse_tree(tree) == [("https://x.com/a/1", "Trump (@realDonaldTrump): hi", "", "Twitter", 7), ("tree:2", "B", "", "Blogs", None)]
+    drop = ["UPBIT LISTING: 돌핀(POD) 신규 거래지원 안내", "Bithumb Listing: [마켓 추가", "Binance EN: Binance Futures Will Delist",
+            "OKX: OKX to list X", "Upbit 上新: 关于"]
+    keep = ["Tree News: *Citi Partners With Coinbase", "AggrNews: METAMASK RESPONDING TO SECURITY INCIDENT",
+            "BWENEWS: The near intents vulnerability has been patched", "Tree News: Binance lists nothing: denial"]
+    assert all(BWE_DROP.match(t) for t in drop) and not any(BWE_DROP.match(t) for t in keep)
     print("selftest ok")
 
 
