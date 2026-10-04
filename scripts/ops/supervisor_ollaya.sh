@@ -8,15 +8,18 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 BIN="${OLLAYA_BIN:-$HOME/.local/bin/ollaya}"
-PTXJIT=/usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.580.173.02
+command -v bwrap >/dev/null || { echo "[$(date -Iseconds)] bwrap 없음 -- apt install bubblewrap" >&2; exit 1; }
+# 리눅스용 ptxjit 를 버전 무관하게 찾는다(apt 업그레이드로 파일명이 바뀌면 가리기가 조용히 꺼져 세그폴트 반복이 된다)
+PTXJIT="$(ls /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.[0-9]*.* 2>/dev/null | head -n 1)"
+[[ -n "$PTXJIT" ]] || echo "[$(date -Iseconds)] 리눅스용 libnvidia-ptxjitcompiler 없음 -- 가리지 않고 띄운다(없으면 문제도 없다)" >&2
 if pgrep -x ollaya >/dev/null; then
   echo "[$(date -Iseconds)] ollaya 가 이미 실행 중 -- 켜지 않는다." >&2
   exit 1
 fi
-MASK=(); [[ -e "$PTXJIT" ]] && MASK=(--ro-bind /dev/null "$PTXJIT")
+MASK=(); [[ -n "$PTXJIT" ]] && MASK=(--ro-bind /dev/null "$PTXJIT")
 export OLLAYA_DEVICE=cuda OLLAYA_KEEP_ALIVE=30m
 exec "$ROOT/scripts/ops/_supervise.sh" \
   "ollaya" \
   "$ROOT/data/live/.supervisor_ollaya.lock" \
   "$ROOT/logs/supervisor/ollaya" \
-  nice -n 10 bwrap --dev-bind / / "${MASK[@]}" "$BIN" serve
+  nice -n 10 bwrap --die-with-parent --dev-bind / / "${MASK[@]}" "$BIN" serve

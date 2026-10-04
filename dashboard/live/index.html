@@ -253,6 +253,12 @@
         <div id="mcBody" class="mc-body mc-in-fp"></div>
         <div id="fpLineSwitch" class="mc-switch fp-line-switch"></div>   <!-- 2026-10-01 차트에 그리기 = 청산 밀도 범례 오른쪽(넓은 화면) -->   <!-- 2026-09-30 시장 맥락(넓은 화면은 1초 수급 아래 칸에 겹쳐 놓는다 -- renderCandleSvg) -->
       </section>
+      <!-- 2026-10-05 뉴스 카드(사용자 «뉴스 카드를 하나 만들어서» · «풋프린트 바로 아래 카드로») -- 9개 피드 + jevk5:4b 판정(제목·요약만 읽음 · 검증 전 · 신호 아님).
+           같은 글이 여러 출처로 오면 서버가 하나로 합친다(news_dedupe). app.js renderNews · /api/news -->
+      <section id="newsCard" class="panel ops-health-panel news-card" hidden>
+        <div class="ops-health-head"><div class="opt-card-head"><h3 class="card-title">뉴스</h3><span id="newsMeta" class="muted">jevk5:4b 판정 · 참고, 신호 아님</span></div></div>
+        <div id="newsBody" class="news-body"></div>
+      </section>
       <!-- 2026-09-30 Option 카드(사용자 지시 «옵션·블록 거래를 한 카드로 풋프린트 아래, 제목 Option»). -->
       <section id="optCard" class="panel ops-health-panel opt-card">
         <div class="ops-health-head"><div class="opt-card-head"><h3 class="card-title">Option</h3><span id="optCovHead" class="muted">Deribit · 참고, 신호 아님</span></div></div>
@@ -454,6 +460,7 @@
   <!-- 2026-09-30 카드 이동 레일(사용자 지시 «점만 남기고 글자는 제거»). 넓은 화면·스냅샷 탭에서만. app.js setupCardRail -->
   <nav id="cardRail" class="card-rail" aria-label="카드 이동" hidden>
     <button type="button" data-go="fpCard" aria-label="Footprint 카드로" title="Footprint"></button>
+    <button type="button" data-go="newsCard" aria-label="뉴스 카드로" title="뉴스"></button>
     <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"></button>
     <button type="button" data-go="acctCard" aria-label="계좌 카드로" title="계좌"></button>
   </nav>

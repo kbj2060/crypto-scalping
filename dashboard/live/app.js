@@ -549,6 +549,7 @@ function renderSnapshotAssetTabs() {
 async function setActiveSnapshotAsset(asset) {
   if (!SNAPSHOT_ASSET_KEYS.includes(asset) || asset === activeSnapshotAsset) return;
   activeSnapshotAsset = asset;
+  try { renderNews(); } catch (e) { console.error("news render:", e); }   // 2026-10-05 뉴스 카드의 «지금 코인» 강조·필터(예외가 코인 전환을 끊지 않게)
   chartPanEnd = null;   // 코인을 바꾸면 실시간으로
   renderSnapshotAssetTabs();
   // 🔴2026-09-30 진입 미리보기(plan·cap)는 **코인별**인데 전환 때 안 비워 XRP 탭이 최대 60초(주문 불가 코인이면
@@ -2815,6 +2816,118 @@ async function refreshMacroCalendar() {
     macroCalendarLastFetchAt = now - MACRO_CALENDAR_POLL_MS + 60 * 1000;   // 2026-09-30 실패하면 6시간 기다리지 않고 1분 뒤 다시(배포 재시작 중 실패로 옛 목록에 굳었다)
   }
 }
+// 2026-10-05 뉴스 카드(사용자 «뉴스 카드를 하나 만들어서» · «중복은 하나로») -- 9개 피드 + jevk5:4b 판정.
+//   판정은 제목·요약만 읽고 검증 전이다 → 머리에 «신호 아님» 고정, 방향색은 값에만. 12시간 창, 30초 게이트.
+//   같은 글이 여러 출처로 오면 서버(news_dedupe)가 하나로 합치고 sources 에 출처를 모은다.
+const NEWS_POLL_MS = 30 * 1000;
+const NEWS_SRC = { theblock: "Block", cointelegraph: "CT", coindesk: "CD", tree: "Tree", bwenews: "BWE",
+  financialjuice: "FJ", trumpstruth: "Truth", fed: "Fed", sec: "SEC" };
+const NEWS_SRC_FULL = { theblock: "The Block", cointelegraph: "Cointelegraph", coindesk: "CoinDesk", tree: "Tree News", bwenews: "BWEnews",
+  financialjuice: "FinancialJuice", trumpstruth: "Truth Social", fed: "Fed", sec: "SEC" };
+const NEWS_ASSETS = ["ETH", "BTC", "SOL", "XRP", "HYPE", "macro"];
+const newsAsset = (a) => (a === "macro" ? "매크로" : a === "other" ? "기타" : a || "");
+let newsLastFetchAt = 0, latestNews = null;
+const newsView = { relevant: true, coin: false };
+async function refreshNews(force) {
+  const now = Date.now();
+  if (!force && now - newsLastFetchAt < NEWS_POLL_MS) return;
+  newsLastFetchAt = now;
+  try {
+    const res = await fetch("/api/news", { cache: "no-cache" });
+    if (!res.ok) throw new Error(`news ${res.status}`);
+    latestNews = await res.json();
+    renderNews();
+  } catch (error) {
+    console.error("News fetch error:", error);
+  }
+}
+function newsAgo(ms, now) {
+  const m = Math.max(0, Math.round((now - ms) / 60000));
+  return m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ""}`;
+}
+function renderNews() {
+  const card = el("newsCard"), p = latestNews;
+  if (!card) return;
+  const show = !!(p && p.ok);
+  card.hidden = !show;
+  const railBtn = document.querySelector('#cardRail [data-go="newsCard"]'); if (railBtn) railBtn.hidden = !show;
+  if (!show) return;
+  const now = p.now_ms || Date.now(), coin = String(activeSnapshotAsset || "eth").toUpperCase();
+  const judged = p.items.filter((it) => it.sentiment), empty = p.items.filter((it) => !it.sentiment && it.model),
+    waiting = p.items.length - judged.length - empty.length;   // model 'skip:empty' = 본문 없는 글(이미지·링크뿐)
+  const rel = (it) => (it.relevant ?? 0) >= 0.5;
+  const w = (it) => (Number(it.impact) || 0) * (it.relevant ?? 0);   // 기울기 가중 = 영향 × 관련성
+  const srcs = (it) => (it.sources && it.sources.length ? it.sources : [it.source]);
+  // 기울기: 1·6·12시간, 관련 기사의 영향 가중 몫
+  const tiltOf = (h) => {
+    const xs = judged.filter((it) => it.ts_ms >= now - h * 3600e3 && rel(it)), sum = { bullish: 0, neutral: 0, bearish: 0 };
+    xs.forEach((it) => { if (it.sentiment in sum) sum[it.sentiment] += w(it) || 0.01; });
+    const tot = sum.bullish + sum.neutral + sum.bearish, pc = (k) => (tot ? 100 * sum[k] / tot : 0), cnt = (k) => xs.filter((it) => it.sentiment === k).length;
+    const bar = tot ? `<i class="b" style="width:${pc("bullish")}%"></i><i class="n" style="width:${pc("neutral")}%"></i><i class="s" style="width:${pc("bearish")}%"></i>` : "";
+    return `<div class="nw-tilt"><div class="nw-tilt-lab"><span class="w">${h}시간 · ${xs.length}건</span><span><b class="opt-good">호재 ${cnt("bullish")}</b> ${pc("bullish").toFixed(0)}% · 중립 ${cnt("neutral")} · ${pc("bearish").toFixed(0)}% <b class="opt-bad">악재 ${cnt("bearish")}</b></span></div>
+      <div class="nw-tilt-bar" role="img" aria-label="최근 ${h}시간 호재 ${pc("bullish").toFixed(0)}% · 중립 ${pc("neutral").toFixed(0)}% · 악재 ${pc("bearish").toFixed(0)}% (영향×관련성 가중)">${bar}</div></div>`;
+  };
+  const tilts = `<div><div class="nw-sec-h">기울기 · 영향×관련성 가중</div><div class="nw-tilts">${[1, 6, 12].map(tiltOf).join("")}</div></div>`;
+  // 코인별: 12시간 관련 기사 수 · 호재/악재 막대 · 최대 영향
+  const rows = NEWS_ASSETS.map((a) => {
+    const xs = judged.filter((it) => it.asset === a && rel(it)), b = xs.filter((it) => it.sentiment === "bullish").length,
+      s = xs.filter((it) => it.sentiment === "bearish").length, n = xs.length, mx = Math.max(0, ...xs.map((it) => Number(it.impact) || 0));
+    return `<span class="a${a === coin ? " on" : ""}">${newsAsset(a)}</span><span class="mini" title="호재 ${b} · 악재 ${s} · 중립 ${n - b - s}">${n ? `<i class="b" style="width:${100 * b / n}%"></i><i style="width:${100 * (n - b - s) / n}%"></i><i class="s" style="width:${100 * s / n}%"></i>` : ""}</span><span class="c">${n}건</span><span class="m">${n ? mx.toFixed(1) : "–"}</span>`;
+  }).join("");
+  const assets = `<div class="nw-assets"><span class="h">코인</span><span class="h">호재 · 악재</span><span class="h c">12시간</span><span class="h m">최대 영향</span>${rows}</div>`;
+  const incs = judged.filter((it) => (it.incident ?? 0) >= 0.8);
+  const inc = incs.length
+    ? `<div class="nw-incs">${incs.slice(0, 3).map((it) => `<div class="nw-inc"><b>해킹·장애</b> · ${newsAgo(it.ts_ms, now)} 전 — ${escapeHtml(it.title.slice(0, 110))}</div>`).join("")}${incs.length > 3 ? `<div class="nw-note">외 ${incs.length - 3}건</div>` : ""}</div>`
+    : `<div class="nw-inc none">해킹·장애 보도 없음 (12시간)</div>`;
+  const byS = {}; p.items.forEach((it) => srcs(it).forEach((s) => { byS[s] = (byS[s] || 0) + 1; }));
+  const merged = p.items.filter((it) => srcs(it).length > 1).length;
+  const srcLine = `<div class="nw-srcs">${Object.entries(byS).sort((x, y) => y[1] - x[1]).map(([s, n]) => `<span title="${NEWS_SRC_FULL[s] || escapeHtml(s)}">${NEWS_SRC[s] || escapeHtml(s)} <b>${n}</b></span>`).join("")}${merged ? `<span>· 여러 출처 합침 <b>${merged}</b></span>` : ""}</div>`;
+  // 고영향 상위: 12시간 관련 기사 중 영향×관련성 큰 순 6건
+  const top = judged.filter(rel).slice().sort((x, y) => w(y) - w(x)).slice(0, 6);
+  const sw = { bullish: ["opt-good", "호재"], bearish: ["opt-bad", "악재"], neutral: ["", "중립"] };
+  const tops = top.length ? `<div><div class="nw-sec-h">고영향 상위 · 12시간</div><div class="nw-top">${top.map((it) => `<div class="nw-top-row"><span class="${(sw[it.sentiment] || sw.neutral)[0]}">${(sw[it.sentiment] || sw.neutral)[1]}</span><span class="i">${Number(it.impact).toFixed(1)}</span><span class="tt" title="${escapeHtml(it.title)}">${escapeHtml(it.title.replace(/\s+/g, " ").slice(0, 120))}</span><span class="ag">${newsAgo(it.ts_ms, now)} 전 · ${escapeHtml(newsAsset(it.asset))}</span></div>`).join("")}</div></div>` : "";
+  const last = p.last_judged_ms ? `마지막 판정 ${newsAgo(p.last_judged_ms, now)} 전` : "판정 없음";
+  const note = `<div class="nw-note">${escapeHtml(p.model || "jevk5:4b")}가 제목·요약만 읽고 판정 · 가격 반응 검증 전 · 영향 0~3 · ${last}${waiting ? ` · 판정 대기 ${waiting}건` : ""}${empty.length ? ` · 본문 없는 글 ${empty.length}건 제외` : ""}</div>`;
+  // 12시간 축: x = 시각, y = 영향, 색 = 감성, 크기 = 관련성, 주황 테두리 = 해킹·장애. 지금 코인 기사는 진하게.
+  const W = Math.max(320, Math.round(el("newsBody")?.querySelector(".nw-main")?.clientWidth || (card.clientWidth * 0.68) || 700)), H = 150, L = 30, R = 8, T = 10, B = 18;
+  const t0 = now - (p.window_h || 12) * 3600e3, x = (t) => L + (W - L - R) * (t - t0) / (now - t0), y = (v) => T + (H - T - B) * (1 - (Number(v) || 0) / 3);
+  const grid = [0, 1, 2, 3].map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--soft-line)"/><text x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${v}</text>`).join("");
+  const ticks = [12, 9, 6, 3, 0].map((h) => `<text x="${x(now - h * 3600e3)}" y="${H - 4}" text-anchor="middle">${h ? `-${h}h` : "지금"}</text>`).join("");
+  const col = { bullish: "var(--good)", bearish: "var(--bad)", neutral: "var(--muted)" };
+  const dots = judged.filter((it) => it.ts_ms >= t0).slice().reverse().map((it) => {
+    const r = 2.2 + 3.6 * (it.relevant ?? 0), op = rel(it) ? (it.asset === coin ? 1 : 0.7) : 0.25;
+    const ring = (it.incident ?? 0) >= 0.8 ? ` stroke="var(--warn)" stroke-width="2"` : "";
+    return `<circle cx="${x(it.ts_ms).toFixed(1)}" cy="${y(it.impact).toFixed(1)}" r="${r.toFixed(1)}" fill="${col[it.sentiment] || col.neutral}" fill-opacity="${op}"${ring}><title>${escapeHtml(`${newsAgo(it.ts_ms, now)} 전 · ${srcs(it).map((s) => NEWS_SRC[s] || s).join("·")} · ${newsAsset(it.asset)} · 영향 ${Number(it.impact).toFixed(1)}\n${it.title}`)}</title></circle>`;
+  }).join("");
+  const lane = `<svg class="nw-lane" viewBox="0 0 ${W} ${H}" role="img" aria-label="최근 12시간 뉴스 영향(세로)과 감성(색)">${grid}${ticks}${dots}</svg>`;
+  // 목록: 최신부터 60건(관련만 · 이 코인+매크로 토글)
+  const list = p.items.filter((it) => (!newsView.relevant || (it.sentiment ? rel(it) : !it.model)) && (!newsView.coin || it.asset === coin || it.asset === "macro")).slice(0, 60).map((it) => {
+    const t = new Date(it.ts_ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+    const sen = it.sentiment ? ({ bullish: ["b", "호재"], bearish: ["s", "악재"], neutral: ["n", "중립"] }[it.sentiment] || ["n", escapeHtml(it.sentiment)]) : ["w", it.model ? "본문 없음" : "대기"];
+    const prob = it.sentiment ? Math.round(100 * Number(it[{ bullish: "p_bull", bearish: "p_bear", neutral: "p_neu" }[it.sentiment]] || 0)) : null;
+    const imp = Number(it.impact) || 0, bars = [1, 2, 3].map((k) => `<i class="${imp >= k - 0.5 ? "f" : ""}"></i>`).join("");
+    const tag = (it.incident ?? 0) >= 0.8 ? `<span class="tag">해킹·장애</span>` : "";
+    const href = /^https?:/.test(it.link) ? it.link : "";
+    const title = escapeHtml(it.title.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    const ss = srcs(it);
+    return `<div class="nw-row${it.sentiment && !rel(it) ? " dim" : ""}"><span class="t">${t}</span><span class="src${ss.length > 1 ? " multi" : ""}" title="${ss.map((s) => NEWS_SRC_FULL[s] || s).join(" · ")}">${ss.map((s) => NEWS_SRC[s] || escapeHtml(s)).join("·")}</span>
+      <span class="sen ${sen[0]}">${sen[1]}${prob != null ? ` ${prob}%` : ""}</span><span class="as${it.asset === coin ? " on" : ""}">${escapeHtml(newsAsset(it.asset))}</span>
+      <span class="imp" title="영향 ${imp.toFixed(1)} / 3">${bars}</span>${href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" title="${title}">${tag}${title}</a>` : `<a title="${title}">${tag}${title}</a>`}</div>`;
+  }).join("") || `<div class="nw-note">조건에 맞는 기사가 없다.</div>`;
+  const chip = (k, on, lab) => `<button type="button" class="opt-chip-btn${on ? " on" : ""}" data-nw="${k}" aria-pressed="${on}">${lab}</button>`;
+  setH("newsMeta", `12시간 ${p.items.length}건 · 판정 ${judged.length} · 관련 ${judged.filter(rel).length} · 참고, 신호 아님`);
+  const head = `<div class="nw-head"><span class="nw-meta">9개 피드 · 같은 글은 하나로 합침</span><span class="nw-chips">${chip("relevant", newsView.relevant, "관련만")}${chip("coin", newsView.coin, `${coin}+매크로`)}</span></div>`;
+  const prevList = el("newsBody")?.querySelector(".nw-list"), keepTop = prevList ? prevList.scrollTop : 0;   // setH 는 SVG 직렬화 차이로 늘 다시 그린다 -- 스크롤 보존
+  setH("newsBody", `${head}<div class="nw-sum">${tilts}${assets}${inc}${tops}${srcLine}${note}</div><div class="nw-main">${lane}<div class="nw-list">${list}</div></div>`);
+  const nextList = el("newsBody")?.querySelector(".nw-list"); if (nextList && keepTop) nextList.scrollTop = keepTop;
+}
+el("newsBody")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-nw]");
+  if (!b) return;
+  newsView[b.dataset.nw] = !newsView[b.dataset.nw];
+  renderNews();
+});
+
 // 2026-08-26 user request: only today+tomorrow, by viewer's own local calendar day (not ET) --
 // keeps the filter and the displayed toLocaleString() dates in the same frame of reference, so a
 // KST viewer never sees an event dated "tomorrow" that got excluded by an ET-anchored cutoff.
@@ -2870,7 +2983,7 @@ function cardRailSync() {
   if (rail.hidden) return;
   const y = innerHeight * 0.35;
   let cur = null;
-  rail.querySelectorAll("[data-go]").forEach((b) => { const t = el(b.dataset.go); if (t && t.getBoundingClientRect().top < y) cur = b; });
+  rail.querySelectorAll("[data-go]").forEach((b) => { const t = el(b.dataset.go); if (t && !t.hidden && t.getBoundingClientRect().top < y) cur = b; });   // 숨긴 카드(top 0)는 빼야 맨 위에서 엉뚱한 점이 켜지지 않는다
   cur = cur || rail.querySelector("[data-go]");
   rail.querySelectorAll("[data-go]").forEach((b) => { const on = b === cur; b.classList.toggle("on", on); if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); });
 }
@@ -2896,6 +3009,7 @@ function fitLayout() {
   const acct = el("acctCard"), opt = el("optCard");
   if (acct) acct.style.minHeight = on ? `${vh}px` : "";
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
+  const news = el("newsCard"); if (news) news.style.height = on ? `${vh}px` : "";   // 2026-10-05 뉴스 카드 = 창 높이(목록이 남는 높이를 갖는다)
   // 2026-10-01(2) Option 칸 높이 = **원래 크기로 매번 계산**(되먹임 없음). 앞 판은 넘칠 때마다 사다리를 깎는 톱니라 한 번 300 에 닿으면
   //   다시 안 커졌고(캐시에도 남음) 차트 상한만 쌓여 «전부 작아지고 바닥은 잘렸다». 이제:
   //   ① 각 칸 = 머리·꼬리(고정) + 그림(원래 높이 = 폭 × viewBox 비율) ② 원래 크기로 들어가면 상한 없음 + 사다리가 1·2줄을 채움
@@ -2954,6 +3068,7 @@ function fitApplyCached() {
   document.documentElement.classList.add("fit1");
   fitOptLadderH = FIT0.lad || fitLadderFormula();   // 지난번에 잰 값(같은 창 높이) -- 새로고침 첫 그림부터 맞는다
   ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
+  const news = el("newsCard"); if (news) news.style.height = `${innerHeight - 20}px`;
   if (fitAcctPlotH) el("acctCard")?.style.setProperty("--acctplot", `${fitAcctPlotH}px`);
 }
 function setupCardRail() {
@@ -8159,6 +8274,7 @@ async function tick() {
       refreshLiquidationMap();
       refreshActiveRegime();
       refreshMacroCalendar();
+      refreshNews();                 // 2026-10-05 뉴스 카드 (자체 30초 게이트)
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)

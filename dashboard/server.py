@@ -830,6 +830,63 @@ def liq_5m_payload(store: dict[int, list[float]], from_s: float, bars: int, now_
     return {"warmed_up": True, "bars": out, "error": None, "source": "dashboard-forceorder"}
 
 
+NEWS_DB = REPO_ROOT / "data" / "hot" / "news_rss.sqlite"     # 2026-10-05 뉴스 수집기(a73f7920·7cdc5e81) + jevk5:4b 판정(3625201a)
+NEWS_WINDOW_H = 12
+
+
+def news_key(title: str) -> str:
+    """중복 판정 키 -- «이름 (@핸들):»·«DECRYPT:» 같은 출처 머리말과 링크를 떼고 영숫자만 소문자로 80자.
+    본문이 12자 미만(이미지 게시물·링크뿐)이면 ""(합치지 않는다)."""
+    t = re.sub(r"https?://\S+", " ", title or "")
+    t = re.sub(r"\[No Title\] - Post from [^\n]*", " ", t)                 # Truth 이미지 게시물 -- 날짜만 같은 다른 글
+    t = re.sub(r"^[^:\n]{1,60}\(@\w+\):\s*", "", t.strip())
+    t = re.sub(r"^[A-Za-z][A-Za-z .'&-]{1,30}:\s*", "", t)
+    t = re.sub(r"[\W_]+", "", t.lower())                                    # 한글·한자도 남긴다(«상장»≠«상장폐지»)
+    return t[:80] if len(t) >= 12 else ""
+
+
+def news_dedupe(items: list[dict]) -> list[dict]:
+    """같은 글(news_key 같음)이 여러 출처로 들어오면 하나로 -- 시각 = 가장 먼저 본 것, 판정 = 판정 있는 것 중 먼저,
+    sources = 들어온 출처 전부(먼저 온 순). 입력·출력 모두 최신부터. 10-05 트럼프 글이 Tree·Truth 로 두 번 보였다."""
+    out: dict[str, dict] = {}
+    for it in sorted(items, key=lambda x: x["ts_ms"]):                 # 오래된 것부터 -- 처음 본 출처가 대표
+        k = news_key(it["title"]) or f"{it['source']}|{it['link']}"
+        hit = out.get(k)
+        if hit is None:
+            out[k] = {**it, "sources": [it["source"]]}
+            continue
+        if it["source"] not in hit["sources"]:
+            hit["sources"].append(it["source"])
+        if not hit.get("sentiment") and it.get("sentiment"):            # 대표가 판정 없으면 판정 있는 쪽 값을 쓴다
+            hit.update({f: it[f] for f in ("sentiment", "p_bull", "p_bear", "p_neu", "asset", "impact", "incident",
+                                           "relevant", "judged_ms", "model")})
+    return sorted(out.values(), key=lambda x: x["ts_ms"], reverse=True)
+
+
+def news_payload(now: float, db: Path = NEWS_DB) -> dict:
+    """최근 12시간 뉴스 + 판정(판정 없는 기사도 «판정 대기»로 포함). 경로는 수집기 모듈을 import 하지 않고 여기 적는다 --
+    import 하면 수집기를 고칠 때마다 배포 워처가 대시보드를 재시작한다. 🔴판정은 검증 전(화면 «신호 아님»).
+    없거나 실패면 items 빈 목록."""
+    since = int((now - NEWS_WINDOW_H * 3600) * 1000)
+    try:
+        rows = _read_only_rows(db, """SELECT i.source, i.link, i.title, coalesce(i.pub_ms, i.first_seen_ms), i.first_seen_ms, i.backfill,
+            j.sentiment, j.p_bull, j.p_bear, j.p_neu, j.asset, j.impact, j.incident, j.relevant, j.judged_ms, j.model
+            FROM items i LEFT JOIN judgments j ON j.source = i.source AND j.link = i.link
+            WHERE coalesce(i.pub_ms, i.first_seen_ms) >= ? ORDER BY coalesce(i.pub_ms, i.first_seen_ms) DESC LIMIT 1500""", [since])
+    except (duckdb.Error, sqlite3.Error, OSError):
+        try:   # 판정 워커가 한 번도 안 돌아 judgments 표가 없어도 기사는 보인다(전부 «대기»)
+            rows = [(*r, None, None, None, None, None, None, None, None, None, None) for r in _read_only_rows(db,
+                """SELECT source, link, title, coalesce(pub_ms, first_seen_ms), first_seen_ms, backfill FROM items
+                WHERE coalesce(pub_ms, first_seen_ms) >= ? ORDER BY coalesce(pub_ms, first_seen_ms) DESC LIMIT 1500""", [since])]
+        except (duckdb.Error, sqlite3.Error, OSError):
+            return {"ok": False, "items": [], "window_h": NEWS_WINDOW_H, "now_ms": int(now * 1000)}
+    keys = ("source", "link", "title", "ts_ms", "seen_ms", "backfill", "sentiment", "p_bull", "p_bear", "p_neu",
+            "asset", "impact", "incident", "relevant", "judged_ms", "model")   # model 'skip:empty' = 본문 없는 글(판정 안 함)
+    items = news_dedupe([dict(zip(keys, r)) for r in rows])
+    return {"ok": True, "items": items, "window_h": NEWS_WINDOW_H, "now_ms": int(now * 1000), "model": "jevk5:4b",
+            "last_judged_ms": max((it["judged_ms"] or 0 for it in items if it["sentiment"]), default=0) or None}   # skip 행 제외 -- ollaya 다운을 가리지 않게
+
+
 BYBIT_LIQ_DB = REPO_ROOT / "data" / "hot" / "bybit_liq.sqlite"     # 2026-10-03 Bybit allLiquidation 수집기(f74a185c)
 _BYBIT_LIQ_CACHE: dict[str, tuple[float, list[dict], int | None]] = {}
 
@@ -3567,6 +3624,10 @@ def make_app() -> web.Application:
             raise web.HTTPNotFound(reason="flow_off")
         payload = await swr_cached(f"chip_score_{asset}", 60.0, lambda: asyncio.to_thread(
             lambda: chip_score_summary(chip_score_rows(time.time(), asset))), max_stale=600.0)
+        return web.json_response(payload, headers=NOCACHE)
+
+    async def api_news(request: web.Request) -> web.Response:   # 2026-10-05 Option 카드 «뉴스» 줄(jevk5:4b 판정 · 신호 아님)
+        payload = await swr_cached("news", 15.0, lambda: asyncio.to_thread(news_payload, time.time()), max_stale=300.0)
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_notify_center(request: web.Request) -> web.Response:
@@ -6371,6 +6432,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/market-context", api_market_context)
     app.router.add_get("/api/chip-score", api_chip_score)
     app.router.add_get("/api/notify-center", api_notify_center)
+    app.router.add_get("/api/news", api_news)
     app.router.add_get("/api/paper-arms", api_paper_arms)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)
