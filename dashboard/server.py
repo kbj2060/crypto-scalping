@@ -3480,13 +3480,17 @@ def make_app() -> web.Application:
     # 🔴크기별 z 의 분모는 연구(30일)와 달리 **서버 링 24h** 다 -- 링이 6시간 미만이면 z 를 안 준다.
     # 방향(model.joblib)·닿음(model_reach.joblib) 두 모델 · 봉당 한 번만 예측. 둘 다 같은 26피쳐(card30_features).
     card30: dict[str, Any] = {"m": None, "err": None, "bar": None, "p": {}}
+    # 2026-10-04 SOL·XRP 도 닿음 확률(사용자 «30분 도달 확률도 적용»): ETH 모델을 그 코인 5분봉 26피쳐에 그대로 --
+    #   검정 AUC − 크기 삼분위 표 SOL +.064 · XRP +.065(eth_only_signals_solxrp_20261004). 🔴캐시는 코인별(봉 시각이 같아 ETH 값이 섞인다)
+    card30_by: dict[str, dict[str, Any]] = {}
 
-    def _card30_pred(bars: list[dict[str, Any]]) -> dict[str, float]:
+    def _card30_pred(bars: list[dict[str, Any]], asset: str = "eth") -> dict[str, float]:
         """완결 5분봉 → {"dir": 닿는다면 위 먼저, "reach": 30분 안 한쪽에 닿음} 보정 확률. 모델·피쳐가 없으면 빈 dict(카드는 표로 물러선다)."""
         if not bars or card30["err"]:
             return {}
-        if card30["bar"] == bars[-1]["time"]:
-            return card30["p"]
+        cache = card30 if asset == "eth" else card30_by.setdefault(asset, {"bar": None, "p": {}})
+        if cache["bar"] == bars[-1]["time"]:
+            return cache["p"]
         if card30["m"] is None:
             try:
                 import joblib
@@ -3503,7 +3507,7 @@ def make_app() -> web.Application:
                 row = np.array([[f[c] for c in M["cols"]]], dtype=np.float32)
                 raw = float(np.mean([m.predict_proba(row)[0, 1] for m in M["models"]]))
                 p[key] = float(1 / (1 + np.exp(-(M["k"] * lg(raw) + (1 - M["k"]) * lg(M["base"])))))
-        card30.update(bar=bars[-1]["time"], p=p)
+        cache.update(bar=bars[-1]["time"], p=p)
         return p
 
     def _flow_read_ctx(now: float, inp: dict[str, Any], asset: str = "eth") -> dict[str, Any]:
@@ -3566,7 +3570,7 @@ def make_app() -> web.Application:
             win = np.lib.stride_tricks.sliding_window_view
             rg = (win(hh, 6).max(1) - win(lo, 6).min(1)) / cc[5:]
             x["range30_pct"] = float(np.mean(rg <= rg[-1]))
-        pr = _card30_pred([c for c in day5 if int(c["time"]) < bar_start and "taker" in c]) if asset == "eth" else {}   # ETH 모델
+        pr = _card30_pred([c for c in day5 if int(c["time"]) < bar_start and "taker" in c], asset)   # ETH 모델(SOL·XRP 도 그대로 -- 검정 통과)
         x["dir_p"], x["reach_p"] = pr.get("dir"), pr.get("reach")
         mp = micro_state["payload"] if micro_state["payload"].get("available") else {}
         imb = mp.get("imb40")
@@ -3830,6 +3834,11 @@ def make_app() -> web.Application:
             "liq_profile": prof,
             "profile": vprof,
             "iv_rank": ({"dvol": dvy[-1], "rank365": mctx.pct_rank(dvy[-1], dvy[:-1], min_n=200), "n": len(dvy) - 1} if dvy else None),
+            # 2026-10-04 머리 칩 «30분 ±X% 닿음 P%» -- 융합 카드의 닿음 축과 같은 정의(±SYM_K × 직전 30분 폭, 닿음 모델). 방향 아님
+            "reach30": ({"p": x["reach_p"], "dist_bp": fr.SYM_K * ev["range_bp"],
+                         "hi": ev["mid"] * (1 + fr.SYM_K * ev["range_bp"] / 1e4), "lo": ev["mid"] * (1 - fr.SYM_K * ev["range_bp"] / 1e4),
+                         "feat_bar": (card30 if asset == "eth" else card30_by.get(asset, {})).get("bar")}
+                        if x.get("reach_p") is not None and ev.get("mid") and ev.get("range_bp") else None),
             "burst": {k: burst.get(k) for k in ("updated_at", "hawkes_active", "crisis_type", "z_long", "z_short",
                                                 "long_usd_1m", "short_usd_1m", "valid_liq_stream")} if burst else None,
             "errors": col.get("errors") or {},

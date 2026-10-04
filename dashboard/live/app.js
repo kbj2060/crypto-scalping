@@ -4143,6 +4143,7 @@ async function refreshMarketCtx() {
   if (asset !== activeSnapshotAsset) return;   // 그 사이 코인이 바뀌었다
   latestMarketCtx = got;
   renderMarketCtx();
+  renderSituation();   // 머리 칩 «30분 닿음»도 같은 응답
 }
 
 async function refreshPaper() {
@@ -4518,6 +4519,15 @@ function renderSituation() {
     h += `<span class="sit-chip ${up ? "up" : "dn"}${against.length ? " warn" : ""}" title="${escapeHtml(tip)}">${up ? "▲ 추세 롱" : "▼ 추세 숏"}`
       + ` <span class="sit-dots">${t.votes.map((v) => `<b class="${v.up ? "u" : ""}"></b>`).join("")}</span> ${t.ups}/${t.votes.length} · ${t.age_days}일`
       + `${against.length ? " · 역추세 보유" : ""}</span>`;
+  }
+  // 2026-10-04 30분 닿음 확률 칩(사용자 «30분 도달 확률도 적용» · 머리 칩 선택) -- 방향 아님, 중립색. 원천 = 시장 맥락 reach30(코인별)
+  const rc = latestMarketCtx && latestMarketCtx.available && latestMarketCtx.asset === activeSnapshotAsset ? latestMarketCtx.reach30 : null;
+  if (rc && rc.p != null && rc.dist_bp > 0) {
+    const dp = Math.max(2, (ASSET_CONFIG[activeSnapshotAsset] || {}).dp || 2), pc = (rc.dist_bp / 100).toFixed(2), P = Math.round(rc.p * 100);
+    const tip = `다음 30분 안 ${Number(rc.hi).toFixed(dp)}(+${pc}%) 또는 ${Number(rc.lo).toFixed(dp)}(−${pc}%) 중 하나에 닿을 확률 ${P}%`
+      + `\n폭 = ±0.5 × 직전 30분 고저폭 · 닿음 모델(5분봉 26피쳐, ETH 학습) · ETH TEST 2025~ AUC .78`
+      + (eth ? "" : `\n${coinUnit()}: 같은 ETH 모델 그대로 · 크기 표 대비 AUC +.06 통과(2025~)`) + "\n어느 쪽인지는 말하지 않는다 — 크기 정보";
+    h += `<span class="sit-chip q" title="${escapeHtml(tip)}">30분 ±${pc}% 닿음 ${P}%</span>`;
   }
   if (eth && fz) {
     const d = fz.side > 0 ? "up" : fz.side < 0 ? "dn" : "";
