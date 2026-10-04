@@ -5,7 +5,6 @@ import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
 import base64
-import bisect
 import concurrent.futures
 import csv
 import functools
@@ -144,7 +143,6 @@ from dashboard import situation as sit  # noqa: E402
 # 2026-09-25 «데이터 관계 읽기» -- 지지/저항 목록 아래 문장. 순수 함수 + 자체점검. 입력은 상황 읽기와 같은 원천.
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
-from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
 from dashboard import market_ctx as mctx  # noqa: E402
 # Regime overlay (bull/bear/chop probability per 5-min bar) for the Snapshot tab's liquidation-map
@@ -328,131 +326,14 @@ def load_account_trip_rows() -> list[dict]:
         return []
     keep = ("symbol", "side", "entry_time", "exit_time", "entry_price", "exit_price",
             "max_qty", "net_pnl")
-    try:
-        habits = json.loads(ACCOUNT_TRIP_HABITS_PATH.read_text())
-    except (OSError, ValueError):
-        habits = {}
     rows = []
     for line in tail:
         try:
             trip = json.loads(line)
         except ValueError:
             continue      # 마지막 줄이 쓰다 만 상태일 수 있다
-        row = {k: trip.get(k) for k in keep}
-        row.update(trip_habit(trip, habits.get(trip_key(trip))))
-        rows.append(row)
+        rows.append({k: trip.get(k) for k in keep})
     return rows
-
-
-# 2026-10-05 계좌 카드 «습관 분해»(추가 0회/≥1 · 명목 배수 ≤6/>6 · 추세 쪽/역추세). 10-05 이후 줄은 원장이 직접
-#   adds·peak_notional·equity_at_record 를 싣고, 그 전 줄은 scripts/backfill_account_trip_habits_20261005.py 가 만든 이 파일로.
-ACCOUNT_TRIP_HABITS_PATH = LIVE_DIR / "account_trip_habits.json"
-HABIT_CAP_X = 6.0     # 명목 상한 6배(avgdown_gate_notional_cap_20261004 의 보험 기준) -- 습관 분해의 경계
-
-
-def trip_habit(trip: dict, backfill: dict | None) -> dict[str, Any]:
-    """원장 줄 하나 → {adds, peak_x}. 모르면 None(화면은 «미분류»로 센다).
-
-    ponytail: 새 줄의 진입 시 자본 = 기록 시 순자산 − 이 왕복 손익. 그 사이 다른 포지션 손익·입출금은 섞인다
-    (기록은 청산 후 ≤5분). 정확히 하려면 income 누적을 서버가 들고 있어야 한다 -- 과거 줄은 그 방식(backfill)."""
-    src = trip if trip.get("peak_notional") is not None else (backfill or {})
-    eq = src.get("equity_entry")
-    if eq is None and trip.get("equity_at_record") is not None:
-        eq = float(trip["equity_at_record"]) - float(trip.get("net_pnl") or 0.0)
-    peak = src.get("peak_notional")
-    return {"adds": src.get("adds"),
-            "peak_x": round(float(peak) / float(eq), 2) if peak and eq and float(eq) > 0 else None}
-
-
-# 2026-10-05 머리 칩 «실전 성적»(사용자 «3번과 4번 모두 진행») -- 화면 칩이 말한 것을 기록하고 결과를 채워 툴팁에 낸다.
-#   reach = 30분 닿음 확률(말한 P vs 실제 닿음, 5분봉 고저) · bo = 경보기 원시 판정(예고 봉 중 30분 안 탐지 = 감사 정의)
-#   · burst = ETH 청산 급증 배지가 켜진 순간 → 15분 뒤 되돌림 bp. 월별 파일(읽는 양이 한 달 + 14일로 묶인다).
-CHIP_SCORE_DAYS = 14
-
-
-def chip_score_path(ts: float) -> Path:
-    return LIVE_DIR / f"chip_score_{datetime.fromtimestamp(ts, timezone.utc):%Y%m}.jsonl"
-
-
-def chip_score_rows(now: float, asset: str) -> list[dict]:
-    since = now - CHIP_SCORE_DAYS * 86400
-    rows = []
-    for path in sorted({chip_score_path(since), chip_score_path(now)}):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                for line in fh:
-                    try:
-                        r = json.loads(line)
-                    except ValueError:
-                        continue      # 쓰다 만 마지막 줄
-                    if r.get("a") == asset and float(r.get("t") or 0) >= since:
-                        rows.append(r)
-        except OSError:
-            continue
-    return rows
-
-
-def chip_score_summary(rows: list[dict]) -> dict[str, Any]:
-    """칩별 집계. 표본이 없으면 그 칩 키가 없다(화면은 «기록 중»)."""
-    out: dict[str, Any] = {"days": CHIP_SCORE_DAYS}
-    reach = [r for r in rows if r.get("k") == "reach"]
-    if reach:
-        bins = []
-        for lo, hi in ((0.0, 0.4), (0.4, 0.6), (0.6, 1.01)):
-            b = [r for r in reach if lo <= r["p"] < hi]
-            if b:
-                bins.append({"lo": lo, "hi": min(hi, 1.0), "n": len(b), "hit": sum(r["hit"] for r in b) / len(b)})
-        out["reach"] = {"n": len(reach), "p_mean": sum(r["p"] for r in reach) / len(reach),
-                        "hit": sum(r["hit"] for r in reach) / len(reach), "bins": bins,
-                        "since": min(r["t"] for r in reach)}
-    bo = [r for r in rows if r.get("k") == "bo"]
-    have, det = {int(r["t"]) for r in bo}, {int(r["t"]) for r in bo if r.get("det")}
-    scored = [r for r in bo if int(r["t"]) + 1800 in have]          # 뒤 30분이 다 기록된 봉만(재기동 공백은 «안 맞음»이 아니다)
-    if scored:
-        hit = lambda r: any(int(r["t"]) + 300 * j in det for j in range(1, 7))   # noqa: E731 -- 다음 1~6봉 안 탐지
-        warn = [r for r in scored if r.get("pw")]
-        out["prewarn"] = {"bars": len(scored), "warn": len(warn), "hits": sum(map(hit, warn)),
-                          "base": sum(map(hit, scored)) / len(scored), "since": min(int(r["t"]) for r in scored)}
-    burst = [r for r in rows if r.get("k") == "burst"]
-    if burst:
-        out["burst"] = {"n": len(burst), "rev_mean_bp": sum(r["rev_bp"] for r in burst) / len(burst),
-                        "rev_share": sum(r["rev_bp"] > 0 for r in burst) / len(burst)}
-    return out
-
-
-# 2026-10-05 알림 센터(종 아이콘): 판정 예정일 + 푸시 종류(데몬의 PUSH_KINDS 그대로) + 최근 보낸 알림(데몬이 쓰는 로그)
-VERDICT_CALENDAR_PATH = Path(__file__).resolve().parent / "verdict_calendar.json"
-PUSH_SENT_LOG_PATH = LIVE_DIR / "push_sent_log.jsonl"
-
-
-def notify_center_payload() -> dict[str, Any]:
-    try:
-        cal = json.loads(VERDICT_CALENDAR_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        cal = {}
-    recent = []
-    try:
-        with open(PUSH_SENT_LOG_PATH, encoding="utf-8") as fh:
-            for line in deque(fh, maxlen=30):
-                try:
-                    recent.append(json.loads(line))
-                except ValueError:
-                    continue
-    except OSError:
-        pass
-    return {"verdicts": sorted(cal.get("items") or [], key=lambda it: it.get("date") or ""),
-            "kinds": [{"key": k, **v} for k, v in PUSH_KINDS.items()], "recent": recent[::-1]}
-
-
-def annotate_trip_trend(rows: list[dict], daily: dict[str, tuple[list[float], list[int]]]) -> None:
-    """각 왕복에 진입 시 1~4주 추세 부호(+1 위 · −1 아래)를 붙인다 -- 진입 전 완결 일봉만(trend_rule 과 같은 식).
-    코인 = 심볼에서 USDT/USDC 를 뗀 것. 일봉이 모자라거나 신호가 0 이면 None."""
-    for r in rows:
-        coin = str(r.get("symbol") or "").replace("USDC", "").replace("USDT", "").lower()
-        closes, ends = daily.get(coin) or ([], [])
-        k = bisect.bisect_left(ends, int(r.get("entry_time") or 0))      # ends[k-1] < 진입
-        tp = trend_payload(closes[:k], ends[:k]) if k else {"ok": False}
-        r["trend"] = (1 if tp["signal"] > 0 else -1) if tp.get("ok") and tp["signal"] else None
 
 
 def trip_key(trip: dict) -> str:
@@ -539,12 +420,10 @@ def record_account_trips(payload: dict, seen: dict[str, tuple[str, str, int, int
     if not fresh:
         return 0
     now = datetime.now(timezone.utc).isoformat()
-    equity = (payload.get("balance") or {}).get("margin")     # 습관 분해의 «진입 시 자본» 근사(trip_habit)
     try:
         with ACCOUNT_TRIP_LEDGER_PATH.open("a") as handle:
             for trip in fresh:
-                handle.write(json.dumps({**trip, "recorded_at": now, "equity_at_record": equity},
-                                        ensure_ascii=False) + "\n")
+                handle.write(json.dumps({**trip, "recorded_at": now}, ensure_ascii=False) + "\n")
     except Exception as exc:
         print(f"account_round_trips append failed: {exc}", flush=True)
         return 0
@@ -3526,85 +3405,10 @@ def make_app() -> web.Application:
                     situation_state["now"] = {"ok": False, "reason": repr(exc)[:160]}
             await asyncio.sleep(MICRO_REF_POLL_SECONDS)
 
-    async def chip_score_loop() -> None:
-        """머리 칩 «실전 성적» 기록기(2026-10-05). 화면이 안 열려 있어도 돈다 -- 칩 값은 미시 루프·상황 계산·경보기 워커가
-        이미 들고 있는 것을 10초마다 **읽기만** 한다(계산 0). 결과가 정해진 줄만 월별 파일에 붙인다.
-        ponytail: 대기 중(30분 닿음·15분 되돌림)은 메모리에만 -- 재기동하면 그 몇 건은 버린다. 칩 하나당 하루 수백 건이라 무시할 양."""
-        last_reach: dict[str, Any] = {}
-        last_bo: dict[str, int] = {}
-        burst_on: dict[str, bool] = {}
-        pend_reach: list[dict] = []
-        pend_burst: list[dict] = []
-        while True:
-            await asyncio.sleep(10)
-            now, rows = time.time(), []
-            try:
-                for asset in cctx:
-                    S = cctx[asset].situation_state
-                    x, ev = S.get("ctx") or {}, (S.get("now") or {}).get("evidence") or {}
-                    fb = (card30 if asset == "eth" else card30_by.get(asset) or {}).get("bar")
-                    if x.get("reach_p") is not None and fb and ev.get("mid") and ev.get("range_bp") and last_reach.get(asset) != fb:
-                        last_reach[asset] = fb
-                        start = int(fb) + FOOTPRINT_BAR_SECONDS          # 피쳐 마지막 봉이 닫힌 시각 = 30분 창의 시작
-                        if now - start < 120:                            # 재기동 직후 묵은 봉은 창 앞부분을 놓친다 -- 안 센다
-                            d = fr.SYM_K * float(ev["range_bp"]) / 1e4   # 칩과 같은 폭(±0.5 × 직전 30분 고저폭)
-                            pend_reach.append({"a": asset, "t": start, "p": float(x["reach_p"]),
-                                               "hi": ev["mid"] * (1 + d), "lo": ev["mid"] * (1 - d)})
-                    if asset in BREAKOUT_ASSETS:
-                        try:
-                            st = load_json(BREAKOUT_DETECTOR_STATE_PATH.with_name(f"{asset}_breakout_detector_state.json")) or {}
-                        except (OSError, ValueError):
-                            st = {}
-                        bt = int(pd.Timestamp(st["timestamp"]).timestamp()) if st.get("ok") and st.get("timestamp") and "prewarn" in st else None
-                        if bt and last_bo.get(asset) != bt:
-                            last_bo[asset] = bt
-                            rows.append({"k": "bo", "a": asset, "t": bt, "pw": bool(st["prewarn"].get("on")),
-                                         "det": bool((st.get("detect") or {}).get("on"))})
-                if "eth" in cctx:       # 청산 급증 배지는 ETH 만(근거가 ETH 뿐)
-                    mp = cctx["eth"].micro_state["payload"]
-                    mp = mp if mp.get("available") else {}
-                    liq, mid = mp.get("liq60") or {}, mp.get("mid")
-                    for i, side in enumerate(("long", "short")):
-                        on = float(liq.get(side) or 0) > LIQ_BURST_60S_USD[i]     # 배지와 같은 판정(mcLiqBurstSide)
-                        if on and not burst_on.get(side) and mid:
-                            pend_burst.append({"side": side, "t": now, "mid0": float(mid), "usd": float(liq.get(side) or 0)})
-                        burst_on[side] = on
-                    for b in [b for b in pend_burst if now >= b["t"] + 900]:
-                        pend_burst.remove(b)
-                        if mid:
-                            sgn = 1.0 if b["side"] == "long" else -1.0              # 롱 청산(가격 하락) 뒤 되돌림 = 위로
-                            rows.append({"k": "burst", "a": "eth", "t": int(b["t"]), "side": b["side"], "usd": round(b["usd"]),
-                                         "rev_bp": round((float(mid) / b["mid0"] - 1) * 1e4 * sgn, 2)})
-                for r in [r for r in pend_reach if now >= r["t"] + 1800 + 90]:   # 마지막 봉이 닫히고 REST 에 붙을 여유
-                    pend_reach.remove(r)
-                    bars = [c for c in await load_market_history(r["a"]) if r["t"] <= int(c["time"]) < r["t"] + 1800]
-                    if len(bars) == 6:
-                        hit = max(float(c["high"]) for c in bars) >= r["hi"] or min(float(c["low"]) for c in bars) <= r["lo"]
-                        rows.append({"k": "reach", "a": r["a"], "t": r["t"], "p": round(r["p"], 4), "hit": int(hit)})
-                if rows:
-                    with open(chip_score_path(now), "a", encoding="utf-8") as fh:
-                        fh.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 -- 기록기 하나로 서버가 죽으면 안 된다
-                print(f"chip score: {type(exc).__name__}: {exc}", flush=True)
-
-    async def api_chip_score(request: web.Request) -> web.Response:
-        asset = str(request.query.get("asset") or "eth").lower()
-        if asset not in cctx:
-            raise web.HTTPNotFound(reason="flow_off")
-        payload = await swr_cached(f"chip_score_{asset}", 60.0, lambda: asyncio.to_thread(
-            lambda: chip_score_summary(chip_score_rows(time.time(), asset))), max_stale=600.0)
-        return web.json_response(payload, headers=NOCACHE)
-
-    async def api_notify_center(request: web.Request) -> web.Response:
-        return web.json_response(await asyncio.to_thread(notify_center_payload), headers=NOCACHE)
-
     async def start_micro_ref(app: web.Application) -> None:
         app["micro_ref_tasks"] = [asyncio.create_task(collect_micro_ref(app, a)) for a in cctx]
         app["micro_ref_tasks"] += [asyncio.create_task(collect_mark_price(app, a)) for a in cctx]
         app["micro_ref_tasks"].append(asyncio.create_task(collect_force_orders(app)))
-        app["micro_ref_tasks"].append(asyncio.create_task(chip_score_loop()))
 
     async def stop_micro_ref(app: web.Application) -> None:
         for t in app["micro_ref_tasks"]:
@@ -4434,24 +4238,7 @@ def make_app() -> web.Application:
         # 브라우저가 닫혀 있을 때의 보험일 뿐, 화면 요청도 이 함수를 지난다).
         if isinstance(payload, dict):
             payload["ledger"] = load_account_trip_rows()
-            daily = {}
-            for coin in {str(r.get("symbol") or "").replace("USDC", "").replace("USDT", "").lower() for r in payload["ledger"]}:
-                if coin in MARKET_SYMBOLS:
-                    try:
-                        daily[coin] = await swr_cached(f"trip_trend_1d_{coin}", 3600.0,
-                                                       functools.partial(load_daily_closes, coin), max_stale=86400.0)
-                    except Exception as exc:  # noqa: BLE001 -- 추세 칸만 «미분류»가 된다
-                        print(f"trip trend {coin}: {type(exc).__name__}: {exc}", flush=True)
-            annotate_trip_trend(payload["ledger"], daily)
         return payload
-
-    async def load_daily_closes(coin: str) -> tuple[list[float], list[int]]:
-        """완결 일봉 종가·종가 시각(ms, 봉 끝+1) 300개 -- 원장 첫 왕복(08월) 진입 전 90일 + 여유. 가중치 2, 1시간 캐시."""
-        raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
-                                       {"symbol": MARKET_SYMBOLS[coin], "interval": "1d", "limit": 300},
-                                       error_reason="trip_trend_upstream_error")
-        done = [r for r in raw if int(r[6]) < time.time() * 1000]
-        return [float(r[4]) for r in done], [int(r[6]) + 1 for r in done]
 
     async def keep_trip_ledger() -> None:
         """브라우저가 닫혀 있어도 돌아야 한다 -- 사라지는 쪽은 거래소의 7일 창이지 화면이 아니다.
@@ -6402,8 +6189,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/trend", api_trend)
     app.router.add_get("/api/market-context", api_market_context)
-    app.router.add_get("/api/chip-score", api_chip_score)
-    app.router.add_get("/api/notify-center", api_notify_center)
     app.router.add_get("/api/paper-arms", api_paper_arms)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)

@@ -14,14 +14,17 @@
 화면 숫자가 반드시 같아야 한다** — 같은 공식을 두 군데서 계산하면 언젠가 갈라지고, 그때 어느
 쪽이 맞는지 알 수 없다. (2) 부수효과로 캐시가 데워져서 폰으로 대시보드를 열 때 오히려 빨라진다.
 
-무엇을 보내는가 (2026-10-05 재배선 — PUSH_KINDS 표가 원본, 알림 센터가 그대로 보여 준다)
+무엇을 보내는가 (사용자가 고른 범위)
 ------------------------------------
-T1 즉시(소리 O)   내 포지션 위험(청산까지 5% 미만 · 명목 6배 초과) · ETH 보유 중 청산 급증.
-T2 즉시(무음)     사전등록 판정일(09:00 KST) · 보유 코인의 «전환 예고».
+T1 즉시(소리 O)   실제로 일어난 사건 — 섀도우/라이브 포지션 개시·종료, 운영 헬스 이상 전환.
+T2 즉시(무음)     드물고 강한 컨텍스트 — net_score |>=3|, 청산 버스트 발생, 세션 변동성 창 진입.
+다이제스트        변화가 있을 때만 — 발동 신호 집합/레짐/포지션 수가 직전 발송과 달라졌을 때.
 
-⚠️ 알림은 **매매 트리거가 아니다.** 문구는 서술형으로 쓴다 — 푸시로 오면 "뭔가 해야 한다"는 압력이
-생기고, 검증되지 않은 신호가 그렇게 사실상의 매매 트리거가 되는 것이 이 기능의 가장 큰 위험이다.
-그래서 화면에 근거(연구 통과·원장 재현)가 있는 것만 보낸다.
+⚠️ T2와 다이제스트는 **매매 트리거가 아니다.** 증거신호 8종은 ETH/BTC/XRP 전부에서 경제성 게이트를
+전수 실패했고(docs/homer/README.md 5.21절, memory: 증거신호 경제성 종결), 대시보드 자신도
+"probability-shift CONTEXT ONLY -- Not a trade trigger"라고 명시한다. 알림 문구가 행동을
+지시하지 않도록 일부러 서술형으로 쓴다 — 푸시로 오면 "뭔가 해야 한다"는 압력이 생기고, 검증되지
+않은 신호가 그렇게 사실상의 매매 트리거가 되는 것이 이 기능의 가장 큰 위험이다.
 
 재시작/장애 후 폭주 방지
 ------------------------
@@ -37,7 +40,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +57,9 @@ STATE_PATH = REPO_ROOT / "data" / "live" / "push_notifier_state.json"
 POLL_SECONDS = 45
 # 이보다 오래된 사건은 "지금"이 아니므로 조용히 seen 처리한다(재시작 폭주 방지 2단계).
 EVENT_MAX_AGE_SEC = 30 * 60
+# 다이제스트 최소 간격. 5분봉이라 신호 집합은 5분마다 바뀔 수 있는데, 그대로 내보내면
+# "변화가 있을 때만"이 사실상 5분 주기 알림이 된다.
+DIGEST_MIN_INTERVAL_SEC = 15 * 60
 # seen 딕셔너리가 무한히 자라지 않도록 이 나이가 지난 항목은 버린다.
 SEEN_TTL_SEC = 24 * 3600
 
@@ -70,8 +76,10 @@ def load_state() -> dict[str, Any]:
         with open(STATE_PATH, encoding="utf-8") as fh:
             state = json.load(fh)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"seen": {}, "baseline_done": False}
+        return {"seen": {}, "digest_fingerprint": None, "digest_sent_at": 0, "baseline_done": False}
     state.setdefault("seen", {})
+    state.setdefault("digest_fingerprint", None)
+    state.setdefault("digest_sent_at", 0)
     state.setdefault("baseline_done", False)
     return state
 
@@ -127,172 +135,331 @@ class Note:
 
 
 # ------------------------------------------------------------------------------------------
-# 감지기 (2026-10-05 재배선, 사용자 «푸시 알림 + 판정 예정일을 알림 아이콘 하나로»)
-#   옛 감지기 7종(증거신호 net_score · V자 · 섀도우 · 거래 · 운영 · Hawkes 청산 · 세션)과 다이제스트를 걷어냈다.
-#   켜져 있던 둘(net_score·v_rebound)이 읽던 /api/evidence-signals·/api/v-rebound-signal 이 지워져 404 → 09-24 재시작
-#   이후 발송 0건(구독 2대)이었고, 나머지는 꺼진 채였다. 지금은 근거가 있는 넷만 보낸다:
-#   판정 예정일 · 내 포지션 위험(원장 재현) · 보유 중 청산 급증(H2) · 보유 코인 전환 예고(경보기 정밀도 77.8%).
+# T1 감지기 -- 실제로 일어난 사건
 # ------------------------------------------------------------------------------------------
-CALENDAR_PATH = REPO_ROOT / "dashboard" / "verdict_calendar.json"
-SENT_LOG_PATH = REPO_ROOT / "data" / "live" / "push_sent_log.jsonl"   # 알림 센터 «최근 보낸 알림»의 원천
-KST = timezone(timedelta(hours=9))
-VERDICT_HOUR_KST = 9                       # = 판정일(UTC) 00시
-LIQ_WARN_PCT, LIQ_REARM_PCT = 5.0, 7.0     # 청산까지 거리 -- 5% 미만으로 들어설 때 한 번, 7% 밖으로 나가면 다시 무장
-EXPO_WARN_X, EXPO_REARM_X = 6.0, 5.0       # 명목 ÷ 순자산 -- 6배 = 명목 상한 보험 기준(avgdown_gate_notional_cap_20261004)
-COINS = ("eth", "sol", "xrp")
+def detect_shadow_positions(shadow: dict[str, Any]) -> list[Note]:
+    """V자반등 경제라벨 섀도우 러너의 포지션 개시/종료.
 
-# 화면(알림 센터)이 이 표를 그대로 보여 준다 -- 이름·설명이 두 군데서 갈라지지 않게 여기 하나만 둔다.
-PUSH_KINDS = {
-    "verdict": {"name": "판정 예정일", "when": "사전등록 판정일 아침 9시(KST)에 한 번"},
-    "risk": {"name": "포지션 위험", "when": f"청산까지 {LIQ_WARN_PCT:g}% 미만 · 명목이 순자산의 {EXPO_WARN_X:g}배 초과로 들어설 때 한 번"},
-    "burst_hold": {"name": "보유 중 청산 급증", "when": "ETH 보유 중 직전 60초 한쪽 청산이 학습 7일 상위 0.5%를 넘을 때 — 그 순간 시장가로 닫으면 평균 −17bp였다"},
-    "prewarn_hold": {"name": "보유 코인 전환 예고", "when": "보유 중인 코인에 «전환 예고»가 켜질 때 — 30분 안 거래대금·체결속도 급증 확률 상위 10%, 방향은 모른다"},
-}
-ENABLED_DETECTORS = set(PUSH_KINDS)
-
-
-def coin_of(symbol: Any) -> str:
-    return str(symbol or "").replace("USDC", "").replace("USDT", "").lower()
-
-
-def held_coins(account: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    out: dict[str, list[dict[str, Any]]] = {}
-    for p in (account or {}).get("positions") or []:
-        if float(p.get("qty") or 0) > 0:
-            out.setdefault(coin_of(p.get("symbol")), []).append(p)
-    return out
-
-
-def load_calendar() -> dict[str, Any]:
-    try:
-        return json.loads(CALENDAR_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-
-
-def detect_verdicts(cal: dict[str, Any], now: float) -> list[Note]:
-    """판정일 09:00 KST 부터 그날 한 번. key 에 날짜가 있어 seen 이 24시간 뒤 지워져도 다음 날은 안 나간다.
-    event_ts 를 안 단다 -- 데몬이 아침에 죽어 있다 오후에 살아나도 그날 안이면 보내야 한다."""
-    t = datetime.fromtimestamp(now, KST)
-    if t.hour < VERDICT_HOUR_KST:
-        return []
-    today = t.strftime("%Y-%m-%d")
-    return [Note(f"verdict:{it['id']}:{today}", "t2", f"판정일 · {it['title']}",
-                 f"{it.get('what', '')}\n{it.get('how', '')}".strip(), tag=f"verdict-{it['id']}",
-                 url="/dashboard/live/#notify-center")
-            for it in cal.get("items") or []
-            if it.get("date") == today and not it.get("approx") and not it.get("done")]
-
-
-def detect_risk(account: dict[str, Any], state: dict[str, Any], now: float) -> list[Note]:
-    """청산까지 거리·명목 배수가 선을 **넘어 들어설 때** 한 번. 히스테리시스(다시 무장 선)로 경계 진동을 막는다.
-    계좌를 못 읽으면(ok=False) 아무것도 바꾸지 않는다 -- «못 읽음»은 «위험 없음»이 아니다."""
-    if not (account or {}).get("ok"):
-        return []
-    fired = state.setdefault("risk_fired", {})
+    현재 유일하게 가동 중인 진입모델 섀도우다(memory: homer_entry_v2 / v_rebound_econ). 판정에는
+    1~2개월이 필요한 상태라, 알림은 '지금 뭘 하라'가 아니라 '지금 원장에 뭐가 찍혔다'를 전한다."""
     notes: list[Note] = []
-    positions = [p for ps in held_coins(account).values() for p in ps]
-    for p in positions:
-        mark, liq = float(p.get("mark_price") or 0), float(p.get("liquidation_price") or 0)
-        if mark <= 0 or liq <= 0:
+    for pos in shadow.get("open_positions") or []:
+        opened = pos.get("opened_utc")
+        if not opened:
             continue
-        d = abs(mark - liq) / mark * 100
-        k = f"liq:{p.get('symbol')}:{p.get('side')}"
-        if d < LIQ_WARN_PCT and k not in fired:
-            fired[k] = now
-            side = "롱" if p.get("side") == "LONG" else "숏"
-            notes.append(Note(f"risk:{k}:{int(now)}", "t1", f"청산까지 {d:.1f}% · {coin_of(p.get('symbol')).upper()} {side}",
-                              f"마크 {mark:,.2f} → 청산가 {liq:,.2f}. 명목을 줄이거나 증거금을 더할 자리", tag=f"risk-{k}"))
-        elif d > LIQ_REARM_PCT:
-            fired.pop(k, None)
-    for k in [k for k in fired if k.startswith("liq:") and k not in {f"liq:{p.get('symbol')}:{p.get('side')}" for p in positions}]:
-        fired.pop(k)                       # 포지션이 닫히면 다시 무장
-    eq = float((account.get("balance") or {}).get("margin") or 0)
-    tot = sum(float(p.get("notional") or 0) for p in positions)
-    x = tot / eq if eq > 0 else 0.0
-    if x > EXPO_WARN_X and "expo" not in fired:
-        fired["expo"] = now
-        notes.append(Note(f"risk:expo:{int(now)}", "t1", f"명목 {x:.1f}배 — 순자산의 {EXPO_WARN_X:g}배를 넘었다",
-                          f"명목 ${tot:,.0f} ÷ 순자산 ${eq:,.0f}. 원장 재현: 배수 4.1배 고정이면 손익은 같고 최대 낙폭 −45→−14%",
-                          tag="risk-expo"))
-    elif x < EXPO_REARM_X:
-        fired.pop("expo", None)
+        side = "롱" if str(pos.get("side", "")).lower() in ("long", "buy") else "숏"
+        entry = pos.get("entry")
+        proba = pos.get("proba")
+        detail = f"진입 {entry}" if entry is not None else ""
+        if isinstance(proba, (int, float)):
+            detail += f" · p={proba:.3f}"
+        notes.append(Note(
+            f"shadow_open:{opened}", "t1",
+            f"V자반등 섀도우 {side} 진입",
+            detail or "포지션이 열렸습니다.",
+            event_ts=parse_utc(opened),
+        ))
+    for trade in shadow.get("recent_trades") or []:
+        exit_utc = trade.get("exit_utc")
+        if not exit_utc:
+            continue
+        side = "롱" if str(trade.get("side", "")).lower() in ("long", "buy") else "숏"
+        pnl = trade.get("pnl_bp")
+        pnl_txt = f"{float(pnl):+.1f}bp" if isinstance(pnl, (int, float)) else "-"
+        reason = trade.get("reason") or ""
+        notes.append(Note(
+            f"shadow_close:{exit_utc}", "t1",
+            f"V자반등 섀도우 {side} 청산 {pnl_txt}",
+            f"사유 {reason}" if reason else "포지션이 닫혔습니다.",
+            event_ts=parse_utc(exit_utc),
+        ))
     return notes
 
 
-def detect_burst_hold(mc: dict[str, Any], account: dict[str, Any], state: dict[str, Any], now: float) -> list[Note]:
-    """대시보드 청산 급증 배지와 같은 판정(시장 맥락 burst: 직전 60초 > 학습 7일 상위 0.5%) · ETH 보유 중 · 켜지는 순간 한 번."""
-    bu = (mc or {}).get("burst") or {}
-    thr = bu.get("thr") or [None, None]
-    prev = state.setdefault("burst_on", {})
-    held = bool(held_coins(account).get("eth"))
+def detect_trades(trades: dict[str, Any]) -> list[Note]:
+    """실거래 원장(trade_journal.jsonl)의 신규 이벤트.
+
+    봇은 현재 페이퍼 모드(BINANCE_EXECUTION_ENABLED=False)라 실제 체결은 나지 않지만 원장에는
+    결정/청산이 계속 기록된다. 실행이 켜지면 같은 경로로 자동으로 실체결 알림이 된다."""
     notes: list[Note] = []
-    for i, side in enumerate(("long", "short")):
-        v = bu.get(f"{side}_usd_60s")
-        on = v is not None and thr[i] is not None and float(v) > float(thr[i])
-        if on and not prev.get(side) and held:
-            notes.append(Note(f"burst:{side}:{int(now)}", "t1",
-                              f"ETH {'롱' if side == 'long' else '숏'} 청산 급증 ${float(v) / 1e3:,.0f}k/60초 · 보유 중",
-                              "급히 시장가로 닫지 말 것 — 이런 버스트를 만난 보유 포지션을 그 순간 시장가로 닫으면 평균 −17bp(35건)",
-                              tag=f"burst-{side}"))
-        prev[side] = on
+    for row in (trades.get("rows") or [])[-20:]:
+        ts = row.get("ts") or row.get("closed_at") or row.get("opened_at")
+        event = str(row.get("event") or row.get("kind") or "")
+        trade_id = row.get("trade_id") or ts
+        if not ts or not trade_id:
+            continue
+        symbol = row.get("symbol") or row.get("asset") or ""
+        side = str(row.get("side") or "").upper()
+        pnl = row.get("pnl_pct")
+        pnl_txt = f" {float(pnl):+.2f}%" if isinstance(pnl, (int, float)) else ""
+        dry = row.get("exchange_execution_dry_run")
+        prefix = "[페이퍼] " if dry else ""
+        notes.append(Note(
+            f"trade:{trade_id}:{event}", "t1",
+            f"{prefix}{symbol} {side} {event}{pnl_txt}".strip(),
+            f"전략 {row.get('source') or '-'}",
+            url="/dashboard/live/",
+            event_ts=parse_utc(ts),
+        ))
     return notes
 
 
-def detect_prewarn_hold(bo_by_coin: dict[str, dict[str, Any]], account: dict[str, Any],
-                        state: dict[str, Any]) -> list[Note]:
-    """보유 중인 코인의 «전환 예고»(경보기 원시 판정 prewarn.on)가 꺼짐→켜짐일 때 한 번."""
-    prev = state.setdefault("prewarn_on", {})
+def detect_ops_health(ops: dict[str, Any]) -> list[Note]:
+    """운영 헬스가 정상->이상으로 넘어간 순간.
+
+    key에 상태값을 넣어 '전환'만 새 알림이 되게 한다 -- CRITICAL이 계속 유지되는 동안 같은 key가
+    반복되므로 seen에 걸려 한 번만 나간다. 회복(OK 복귀)도 같은 방식으로 한 번 알린다."""
     notes: list[Note] = []
-    for coin in held_coins(account):
-        bo = bo_by_coin.get(coin) or {}
-        if not bo.get("available", True) or "prewarn" not in bo:
-            continue                         # 못 읽은 주기는 상태를 안 바꾼다
-        on = bool((bo.get("prewarn") or {}).get("on"))
-        if on and not prev.get(coin):
-            notes.append(Note(f"prewarn:{coin}:{bo.get('timestamp')}", "t2", f"{coin.upper()} 전환 예고 · 보유 중",
-                              "30분 안 거래대금·체결속도가 함께 급증할 확률이 상위 10% — 방향은 말하지 않는다(정밀도 실측 77.8%)",
-                              tag=f"prewarn-{coin}"))
-        prev[coin] = on
+    for check in (ops.get("health") or {}).get("checks") or []:
+        status = str(check.get("status") or "").upper()
+        component = check.get("component") or "?"
+        if status in ("CRITICAL", "WARN"):
+            notes.append(Note(
+                f"ops:{component}:{status}", "t1",
+                f"운영 이상 · {component}",
+                f"{status} — {check.get('summary') or ''}".strip(),
+                url="/dashboard/live/#ops",
+            ))
+    for proc in ops.get("supervisors") or []:
+        status = str(proc.get("status") or "").upper()
+        if status and status != "RUNNING":
+            notes.append(Note(
+                f"supervisor:{proc.get('name')}:{status}", "t1",
+                f"프로세스 {status} · {proc.get('name')}",
+                "supervisor가 관리하는 프로세스가 떠 있지 않습니다.",
+                url="/dashboard/live/#ops",
+            ))
     return notes
 
 
-async def fetch_all(session, base_url: str) -> dict[str, Any]:
-    """대시보드 API 를 읽는다(화면과 같은 숫자). 하나가 죽어도 나머지는 산다 -- 실패는 빈 dict.
-    시장 맥락·경보기는 **보유 중인 코인만** 읽는다(안 쓰는 값을 45초마다 덥히지 않는다)."""
-    async def get(path: str) -> dict[str, Any]:
+# ------------------------------------------------------------------------------------------
+# T2 감지기 -- 드물고 강한 컨텍스트 (매매 트리거 아님, 모듈 docstring 참고)
+# ------------------------------------------------------------------------------------------
+NET_SCORE_THRESHOLD = 3
+
+# 2026-09-09 사용자 지정: **청산 버스트 제거**. net_score · v_rebound 만 보낸다.
+# 감지기는 지우지 않고 스위치로만 끈다 -- 되돌릴 때 이 집합에 "liq_burst" 를 다시 넣으면 된다.
+# ⚠️`ops`/`supervisor` 를 끄면 **대시보드·봇이 죽어도 알림이 오지 않는다**.
+#   운영 헬스는 deploy_watcher 의 텔레그램과 대시보드 화면으로만 확인하게 된다.
+# 2026-09-10 앵커 돌파/되돌림 감지기 제거 -- 신호 자체가 철회됐다(B라벨 재학습 AUC 0.50).
+ENABLED_DETECTORS = {"net_score", "v_rebound"}
+DIGEST_ENABLED = False
+
+
+def detect_net_score(evidence: dict[str, Any]) -> list[Note]:
+    """증거신호 합의가 |net_score| >= 3인 봉.
+
+    ⚠️ 발동 여부는 반드시 `*_last_fired_ts`(발동한 봉)로 판단해야 한다. payload의
+    `bottom_fired`/`top_fired`는 sustain window(신호별 8~72봉) 동안 계속 True이므로, 그것으로
+    key를 만들면 사건 하나에 최대 72번 알림이 나간다."""
+    net = evidence.get("net_score")
+    bar = evidence.get("latest_bar_utc")
+    if not isinstance(net, int) or abs(net) < NET_SCORE_THRESHOLD or not bar:
+        return []
+    side = "바닥측" if net > 0 else "천장측"
+    firing = []
+    for sig in evidence.get("signals") or []:
+        want = "bottom" if net > 0 else "top"
+        if sig.get(f"{want}_last_fired_ts") == bar:
+            firing.append(sig.get("name"))
+    names = " · ".join(n for n in firing if n) or "-"
+    price = evidence.get("price")
+    price_txt = f" · ETH {price:,.0f}" if isinstance(price, (int, float)) else ""
+    # 문구는 **한 줄 제목 + 한 줄 본문**으로 짧게 (2026-09-08 사용자 요청).
+    # ⚠️"참고용" 꼬리말은 남긴다 -- 알림이 사실상의 매매 트리거로 읽히는 것을 막는
+    #   모듈 docstring 의 설계 원칙이다(증거신호 8종은 경제성 게이트 전수 실패).
+    return [Note(
+        f"net_score:{bar}:{net}", "t2",
+        f"{side} {abs(net)}표{price_txt}",
+        f"{names} · 참고용",
+        tag="net-score",
+        event_ts=parse_utc(bar),
+    )]
+
+
+def detect_liq_burst(burst: dict[str, Any], state: dict[str, Any]) -> list[Note]:
+    """청산 버스트(Hawkes) 발생. 상태가 켜져 있는 동안 updated_at은 계속 갱신되므로 key는
+    'hawkes가 켜진 그 시각'으로 고정해 한 번만 나가게 한다.
+
+    🔴2026-09-09 회귀 복구: 09-07 에 넣은 이 고정이 그 뒤 시그니처가 1인자로 줄면서 사라져
+      key 가 다시 `liq_burst:{updated_at}` 이었다 -- 주석만 남고 코드는 되돌아간 상태였다.
+      켜져 있는 내내 폴링마다 새 사건이 된다(09-07 실측 9분에 9번). 지금은 알림에서 꺼져
+      있지만(ENABLED_DETECTORS), 다시 켜면 그대로 재발하므로 코드를 고쳐 둔다.
+    """
+    if not burst.get("available") or not burst.get("hawkes_active"):
+        state.pop("liq_burst_since", None)          # 꺼지면 다음 발생은 새 사건이다
+        return []
+    updated = state.setdefault("liq_burst_since", burst.get("updated_at"))
+    z_long, z_short = burst.get("z_long"), burst.get("z_short")
+    ct = str(burst.get("crisis_type") or "")
+    kind = "롱청산" if "LONG" in ct else "숏청산" if "SHORT" in ct else "청산"
+    # 큰 쪽 z 를 제목에 올리고 나머지는 본문 -- 알림 목록에서 제목만 봐도 크기가 읽힌다.
+    zs = [(abs(z), lab, z) for z, lab in ((z_long, "롱"), (z_short, "숏"))
+          if isinstance(z, (int, float))]
+    zs.sort(reverse=True)
+    head = f" z{zs[0][2]:+.1f}" if zs else ""
+    rest = " · ".join(f"{lab} z{z:+.1f}" for _, lab, z in zs[1:])
+    return [Note(
+        f"liq_burst:{updated}", "t2",
+        f"{kind} 버스트{head}",
+        f"{rest + ' · ' if rest else ''}참고용",
+        tag="liq-burst",
+        event_ts=parse_utc(updated),
+    )]
+
+
+def detect_v_rebound(v: dict[str, Any]) -> list[Note]:
+    """V자 급등락이 방향 판정을 낸 순간. tone 이 good/bad 일 때만 -- flat 은 미발동이다.
+
+    key 는 스윕 시각으로 고정한다. 그 판정이 유지되는 동안 payload 는 계속 같은 값을 주므로
+    minutes_ago 로 key 를 만들면 사건 하나에 매 폴링마다 알림이 나간다.
+    """
+    tone = v.get("tone")
+    ts = v.get("sweep_ts_utc")
+    if tone not in ("good", "bad") or not ts:
+        return []
+    up = tone == "good"
+    pr = v.get("proba_rebound")
+    price = v.get("price")
+    head = f"V자 {'반등' if up else '반락'} {'↑' if up else '↓'}"
+    if isinstance(price, (int, float)):
+        head += f" · ETH {price:,.0f}"
+    body = []
+    if isinstance(pr, (int, float)):
+        body.append(f"확률 {(pr if up else 1 - pr) * 100:.0f}%")
+    body.append("참고용")
+    return [Note(f"v_rebound:{ts}", "t2", head, " · ".join(body),
+                 tag="v-rebound", event_ts=parse_utc(ts))]
+
+
+
+def detect_session_window(alerts: dict[str, Any]) -> list[Note]:
+    """세션 개장 변동성 창 진입. 창 안에 있는 동안 매 폴링마다 active로 보이므로, key를
+    (시장, 그날 날짜)로 만들어 창당 한 번만 알린다."""
+    notes: list[Note] = []
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    active = ((alerts.get("session_volatility_alert") or {}).get("active")) or []
+    for market in active:
+        code = market.get("code")
+        notes.append(Note(
+            f"session:{code}:{today}", "t2",
+            f"{market.get('label')} 변동성 창",
+            f"개장 {market.get('minutes_from_open'):+.0f}분 — 실현변동성이 평소보다 높은 구간입니다.",
+            tag=f"session-{code}",
+        ))
+    macro = (alerts.get("macro_event_alert") or {}).get("active") or []
+    for event in macro:
+        title = event.get("title") or event.get("event") or "경제지표"
+        notes.append(Note(
+            f"macro:{title}:{today}", "t2",
+            f"경제지표 발표 임박 · {title}",
+            str(event.get("detail") or event.get("when") or ""),
+            tag="macro-event",
+        ))
+    return notes
+
+
+# ------------------------------------------------------------------------------------------
+# 다이제스트 -- "변화가 있을 때만"
+# ------------------------------------------------------------------------------------------
+def _regime_label(regime: dict[str, Any]) -> str:
+    if not regime.get("warmed_up"):
+        return "-"
+    probs = {"상승": regime.get("bull_prob"), "하락": regime.get("bear_prob"),
+             "횡보": regime.get("chop_prob")}
+    probs = {k: v for k, v in probs.items() if isinstance(v, (int, float))}
+    if not probs:
+        return "-"
+    name = max(probs, key=probs.__getitem__)
+    return f"{name} {probs[name]:.0%}"
+
+
+def _active_signals(evidence: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """지금 점등돼 있는 신호. 여기서는 sustain window 기준(`*_fired`)이 맞다 -- 다이제스트는
+    '사건이 방금 일어났다'가 아니라 '화면이 지금 이렇다'를 요약하는 것이고, 화면의 칩도 같은
+    `_active` 규칙으로 켜진다. T2의 발동 감지와는 의도적으로 다른 기준이다."""
+    bottom = [s.get("name") for s in evidence.get("signals") or [] if s.get("bottom_fired")]
+    top = [s.get("name") for s in evidence.get("signals") or [] if s.get("top_fired")]
+    return [n for n in bottom if n], [n for n in top if n]
+
+
+def build_digest(evidence: dict[str, Any], regime: dict[str, Any],
+                 shadow: dict[str, Any]) -> tuple[str, Note] | None:
+    """(fingerprint, Note)를 돌려준다. fingerprint가 직전 발송과 같으면 호출자가 버린다."""
+    if not evidence.get("warmed_up"):
+        return None
+    bottom, top = _active_signals(evidence)
+    net = evidence.get("net_score")
+    regime_txt = _regime_label(regime)
+    n_open = shadow.get("n_open") or 0
+
+    fingerprint = json.dumps(
+        {"b": sorted(bottom), "t": sorted(top), "net": net, "regime": regime_txt, "open": n_open},
+        ensure_ascii=False, sort_keys=True,
+    )
+
+    price = evidence.get("price")
+    head = f"ETH {price:,.0f}" if isinstance(price, (int, float)) else "ETH"
+    lines = [f"net {net:+d} · 레짐 {regime_txt}" if isinstance(net, int) else f"레짐 {regime_txt}"]
+    lines.append(f"↓바닥측: {', '.join(bottom) if bottom else '—'}")
+    lines.append(f"↑천장측: {', '.join(top) if top else '—'}")
+    if n_open:
+        lines.append(f"섀도우 포지션 {n_open}건 보유 중")
+    return fingerprint, Note(
+        "digest", "digest", head, "\n".join(lines),
+        tag="digest",  # 항상 같은 tag -> 이전 다이제스트를 대체하고 알림함에 쌓이지 않는다
+    )
+
+
+# ------------------------------------------------------------------------------------------
+# 루프
+# ------------------------------------------------------------------------------------------
+ENDPOINTS = {
+    "evidence": "/api/evidence-signals",
+    "regime": "/api/regime-wide24",
+    "shadow": "/api/v-rebound-econ-shadow",
+    "trades": "/api/trades",
+    "ops": "/api/ops-status",
+    "burst": "/api/liq-burst-state",
+    "alerts": "/api/session-alerts",
+    "vreb": "/api/v-rebound-signal",
+}
+
+
+async def fetch_all(session, base_url: str) -> dict[str, dict[str, Any]]:
+    """엔드포인트 하나가 죽어도 나머지는 살린다 -- 예를 들어 바이낸스 klines가 일시적으로
+    실패하면 /api/evidence-signals는 502를 내는데, 그것 때문에 운영 헬스 알림까지 멈추면 안 된다."""
+    async def one(path: str) -> dict[str, Any]:
         try:
             async with session.get(base_url + path) as resp:
-                return await resp.json() if resp.status == 200 else {}
+                if resp.status != 200:
+                    return {}
+                return await resp.json()
         except Exception:
             return {}
 
-    account = await get("/api/binance-account")
-    held = held_coins(account)
-    return {"account": account, "calendar": load_calendar(),
-            "mc_eth": await get("/api/market-context?asset=eth") if "eth" in held else {},
-            "bo": {c: await get(f"/api/breakout-detector?asset={c}") for c in held if c in COINS}}
+    results = await asyncio.gather(*(one(p) for p in ENDPOINTS.values()))
+    return dict(zip(ENDPOINTS.keys(), results))
 
 
-def collect_notes(data: dict[str, Any], state: dict[str, Any], now: float | None = None) -> list[Note]:
-    now = time.time() if now is None else now
-    acct = data.get("account") or {}
-    plan = {"verdict": lambda: detect_verdicts(data.get("calendar") or {}, now),
-            "risk": lambda: detect_risk(acct, state, now),
-            "burst_hold": lambda: detect_burst_hold(data.get("mc_eth") or {}, acct, state, now),
-            "prewarn_hold": lambda: detect_prewarn_hold(data.get("bo") or {}, acct, state)}
-    return [n for k, fn in plan.items() if k in ENABLED_DETECTORS for n in fn()]
+def collect_notes(data: dict[str, dict[str, Any]], state: dict[str, Any] | None = None) -> list[Note]:
+    """ENABLED_DETECTORS 에 든 것만 수집한다(2026-09-08 사용자 지정).
 
-
-def append_sent(note: Note, result: Any) -> None:
-    row = {"ts": datetime.now(timezone.utc).isoformat(), "kind": note.key.split(":")[0], "tier": note.tier,
-           "title": note.title, "body": note.body, "sent": (result or {}).get("sent") if isinstance(result, dict) else None}
-    try:
-        SENT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with SENT_LOG_PATH.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-    except OSError as exc:
-        log(f"보낸 알림 기록 실패: {exc!r}")
+    `state` 는 사이클 사이에 남아야 하는 감지기만 쓴다(liq_burst 의 켜진 시각 고정).
+    """
+    st = state if state is not None else {}
+    plan = (("shadow", detect_shadow_positions, "shadow", False),
+            ("trade", detect_trades, "trades", False),
+            ("ops", detect_ops_health, "ops", False),
+            ("net_score", detect_net_score, "evidence", False),
+            ("liq_burst", detect_liq_burst, "burst", True),
+            ("v_rebound", detect_v_rebound, "vreb", False),
+            ("session", detect_session_window, "alerts", False))
+    notes: list[Note] = []
+    for name, fn, src, needs_state in plan:
+        if name in ENABLED_DETECTORS:
+            notes += fn(data.get(src) or {}, st) if needs_state else fn(data.get(src) or {})
+    return notes
 
 
 async def run_cycle(session, base_url: str, state: dict[str, Any],
@@ -302,8 +469,12 @@ async def run_cycle(session, base_url: str, state: dict[str, Any],
     seen = state["seen"]
     baseline = not state["baseline_done"]
 
-    for note in collect_notes(data, state, now):
-        # 🔴2026-09-09 회귀 복구: 한 key 는 **한 번만** 보낸다(쿨다운이 아니라 seen). seen 은 나이로 정리된다.
+    for note in collect_notes(data, state):
+        # 🔴2026-09-09 회귀 복구: 한 key 는 **한 번만** 보낸다.
+        #   쿨다운 방식은 감지기가 **지속 상태**(열려 있는 포지션)를 매 사이클 다시 방출하는 걸
+        #   못 견딘다 -- 쿨다운이 지나면 같은 사건이 또 나갔다(09-07 실측 8시간 287건).
+        #   09-07 에 고쳤는데 그 뒤 되돌려져 있었다. seen 은 나이로 정리되므로(prune_seen)
+        #   무한히 자라지 않고, TTL 이 지난 뒤 같은 사건이 또 나면 그건 새 사건으로 본다.
         if note.key in seen:
             continue
         seen[note.key] = now
@@ -317,8 +488,29 @@ async def run_cycle(session, base_url: str, state: dict[str, Any],
         result = await broadcast(note.payload(), private_b64=private, subject=subject,
                                  ttl=3600 if note.tier == "t1" else 900,
                                  urgency="high" if note.tier == "t1" else "normal")
-        append_sent(note, result)
         log(f"[{note.tier}] {note.title} -> {result}")
+
+    digest = (build_digest(data.get("evidence") or {}, data.get("regime") or {},
+                           data.get("shadow") or {}) if DIGEST_ENABLED else None)
+    if digest:
+        fingerprint, note = digest
+        changed = fingerprint != state["digest_fingerprint"]
+        due = now - (state["digest_sent_at"] or 0) >= DIGEST_MIN_INTERVAL_SEC
+        if changed and due:
+            state["digest_fingerprint"] = fingerprint
+            state["digest_sent_at"] = now
+            if baseline:
+                pass
+            elif dry_run:
+                log(f"DRY [digest] {note.title} | {note.body!r}")
+            else:
+                result = await broadcast(note.payload(), private_b64=private, subject=subject,
+                                         ttl=600, urgency="low")
+                log(f"[digest] {note.title} -> {result}")
+        elif changed:
+            # 바뀌었지만 최소 간격 전 -- fingerprint를 갱신하지 않고 두면 간격이 지난 뒤
+            # 그때의 최신 상태로 나간다.
+            pass
 
     if baseline:
         state["baseline_done"] = True

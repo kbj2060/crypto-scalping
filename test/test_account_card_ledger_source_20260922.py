@@ -64,28 +64,8 @@ def main() -> int:
         got = srv.load_account_trip_rows()
         assert len(got) == 1, f"깨진 줄 하나가 원장 전체를 버리면 안 된다: {got}"
         assert set(got[0]) == {"symbol", "side", "entry_time", "exit_time", "entry_price",
-                               "exit_price", "max_qty", "net_pnl", "adds", "peak_x"}, got[0]
-        assert got[0]["adds"] is None and got[0]["peak_x"] is None, "습관 값을 모르면 None(«미분류»)"
+                               "exit_price", "max_qty", "net_pnl"}, got[0]
         checks += 2
-
-        # 2026-10-05 습관 분해: 새 줄은 원장 자체 값(자본 = 기록 시 순자산 − 손익) · 옛 줄은 backfill 파일
-        new_row = {**rows[0], "entry_time": 5, "adds": 2, "peak_notional": 900.0, "equity_at_record": 101.0}
-        srv.ACCOUNT_TRIP_HABITS_PATH = pathlib.Path(td) / "habits.json"
-        srv.ACCOUNT_TRIP_HABITS_PATH.write_text(json.dumps(
-            {"ETHUSDC|LONG|1": {"adds": 0, "peak_notional": 300.0, "equity_entry": 50.0}}))
-        with srv.ACCOUNT_TRIP_LEDGER_PATH.open("w") as fh:
-            fh.write(json.dumps(rows[0]) + "\n" + json.dumps(new_row) + "\n")
-        old_got, new_got = srv.load_account_trip_rows()
-        assert (old_got["adds"], old_got["peak_x"]) == (0, 6.0), old_got
-        assert (new_got["adds"], new_got["peak_x"]) == (2, 9.0), new_got     # 900 / (101 − 1)
-        # 추세 = 진입 **전** 완결 일봉만: 꾸준한 상승 일봉 → +1, 진입이 일봉 92개 전이면 모자라 None
-        closes = [100 * 1.01 ** i for i in range(120)]
-        ends = [(i + 1) * 1000 for i in range(120)]
-        trips = [{"symbol": "ETHUSDC", "entry_time": 120_500}, {"symbol": "ETHUSDT", "entry_time": 50_500},
-                 {"symbol": "SOLUSDC", "entry_time": 120_500}]
-        srv.annotate_trip_trend(trips, {"eth": (closes, ends)})
-        assert [t["trend"] for t in trips] == [1, None, None], trips
-        checks += 3
 
         # 꼬리만 싣는다 -- 원장은 무한히 자라는데 응답은 안 그래야 한다
         with srv.ACCOUNT_TRIP_LEDGER_PATH.open("w") as fh:

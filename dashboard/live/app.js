@@ -431,14 +431,6 @@ const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-
 const LIQUIDATION_MAP_POLL_MS = 30000;
 const REGIME_WIDE24_POLL_MS = 300000; // matches server-side cache (REGIME_WIDE24_CACHE_SECONDS)
 const MACRO_CALENDAR_POLL_MS = 6 * 3600 * 1000; // matches server-side cache (MACRO_CALENDAR_CACHE_SECONDS)
-// 2026-10-05 알림 센터 · 머리 칩 실전 성적 -- tick() 이 파일 아래 정의보다 먼저 돌아서 상태는 여기(위)에 둔다(TDZ)
-const NOTIFY_CENTER_POLL_MS = 5 * 60 * 1000;
-const NC_SEEN_KEY = "ncSeenAt";
-let notifyCenterData = null;
-let notifyCenterLastFetchAt = 0;
-const CHIP_SCORE_POLL_MS = 5 * 60 * 1000;
-const chipScore = {};
-const chipScoreFetchAt = {};
 const SESSION_ALERTS_POLL_MS = 30000; // 2026-08-27: split off evidence-signals' 5min cadence --
                                         // these badges need to feel live to someone watching a
                                         // +-30min window approach in real time, and the endpoint
@@ -1624,30 +1616,6 @@ function renderSnapshotAccount() {
   net.forEach((v, i) => { if (worstIdx < 0 || v < net[worstIdx]) worstIdx = i; });
   const rest = worstIdx >= 0 ? total - net[worstIdx] : 0;
   const chip = (v, lab) => `<span class="acct-chip"><b>${v}</b><span>${lab}</span></span>`;
-  // 2026-10-05 습관 분해(사용자 «3번 진행») -- 원장 연구 셋(추세 79왕복 · 물타기 142왕복 · 켈리 124왕복)이 같은 곳을 가리켰다:
-  //   꼬리 손실은 역추세와 «추가로 불어난 명목»에서 났다. 같은 기간·코인의 왕복을 세 축으로 갈라 건수·손익을 나란히 둔다.
-  //   값은 서버가 원장 줄에 붙인다(server.py trip_habit · annotate_trip_trend). 모르면 «미분류»로 따로 센다.
-  const habit = (() => {
-    const grp = (rows) => ({ n: rows.length, pnl: rows.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0) });
-    const dir = (t) => (t.side === "LONG" ? 1 : -1);
-    const axes = [
-      { name: "추세", tip: "진입 직전 완결 일봉의 1~4주 추세(7·14·28·56·90일 5표 — 머리 추세 칩과 같은 식)와 같은 쪽이었나",
-        known: (t) => t.trend != null, a: ["같은 쪽", (t) => t.trend === dir(t)], b: ["역추세", (t) => t.trend !== dir(t)] },
-      { name: "추가", tip: "첫 진입 뒤 180초 넘게 떨어진 증가 주문 — 물타기·불타기 모두. 180초 안 재호가·폴백은 한 번으로 센다",
-        known: (t) => t.adds != null, a: ["0회", (t) => t.adds === 0], b: ["1회 이상", (t) => t.adds > 0] },
-      { name: "배수", tip: "왕복 중 최대 명목 ÷ 진입 때 지갑. 6배 = 명목 상한 보험 기준(원장 재현: 4.1배 고정이면 손익 같고 최대 낙폭 −45→−14%)",
-        known: (t) => t.peak_x != null, a: ["6배 이하", (t) => t.peak_x <= 6], b: ["6배 초과", (t) => t.peak_x > 6] },
-    ];
-    return axes.map((ax) => {
-      const k = closed.filter(ax.known);
-      return { ...ax, A: grp(k.filter(ax.a[1])), B: grp(k.filter(ax.b[1])), unknown: closed.length - k.length };
-    });
-  })();
-  const habitCell = (lab, g) => `<span class="acct-habit-cell"><span>${lab}</span> <b class="${g.pnl < 0 ? "bad" : "good"}">${g.n ? fmtUsd(g.pnl) : "–"}</b> <em>${g.n}건</em></span>`;
-  const habitHtml = closed.length ? `<dl class="acct-habit" aria-label="습관 분해 — 같은 기간 왕복을 세 축으로 나눈 손익">
-      ${habit.map((h) => `<div class="acct-habit-row" title="${escapeHtml(h.tip + (h.unknown ? ` · 미분류 ${h.unknown}건(값을 모름)` : ""))}">
-        <dt>${h.name}</dt><dd>${habitCell(h.a[0], h.A)}${habitCell(h.b[0], h.B)}</dd></div>`).join("")}
-    </dl>` : "";
   // 기간을 적는다(사용자 지시). 원장이 원천이므로 거래소 7일 창보다 길지만, 원장이 처음
   // 돌기 시작한 날 이전은 없다 -- 그래서 여기 있는 건 **기록된 범위**지 계좌의 전체 이력이 아니다.
   const spanText = (() => {
@@ -1698,7 +1666,6 @@ function renderSnapshotAccount() {
             ? `<p class="acct-perf-note"><span class="bad">최악 1건 ${fmtUsd(net[worstIdx])}</span>
                  · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
             : ""}
-         ${habitHtml}
        </details></section>`
     : `<section class="acct-perf"><div class="acct-empty">${
         hiddenTrips > 0
@@ -2835,17 +2802,22 @@ function renderMacroCalendar(payload) {
 
 function setupPageTabs() {
   document.querySelectorAll(".page-tab").forEach((button) => button.addEventListener("click", () => {
-    const target = button.dataset.pageTab; // "ops" | "snapshot" (라이브 탭 제거 08-31 · 알림 탭 → 알림 센터 모달 10-05)
+    const target = button.dataset.pageTab; // "ops" | "snapshot" | "notify" (라이브 탭 제거, 2026-08-31)
     activePageTab = target;
     el("opsTabPanel")?.classList.toggle("hidden", target !== "ops");
     el("snapshotTabPanel")?.classList.toggle("hidden", target !== "snapshot");
+    el("notifyTabPanel")?.classList.toggle("hidden", target !== "notify");
     cardRailSync();   // 2026-09-30 카드 이동 레일도 스냅샷 탭에서만
     ofabSync();   // 2026-09-25 떠다니는 주문 버튼은 스냅샷 탭에서만 -- 떠나면 조작부를 카드로 먼저 돌려놓는다
     document.querySelectorAll(".page-tab").forEach((tab) => {
       tab.classList.toggle("active", tab === button);
       if (tab === button) tab.setAttribute("aria-current", "page"); else tab.removeAttribute("aria-current");
     });
-    if (target === "ops") {
+    if (target === "notify") {
+      // 탭을 열 때마다 다시 읽는다 -- 권한이나 구독은 다른 탭/기기에서 바뀔 수 있고,
+      // 낡은 상태를 보여주면 "켰는데 꺼졌다고 나온다"는 혼란만 만든다.
+      refreshNotifyPage();
+    } else if (target === "ops") {
       opsLastFetchAt = 0; refreshOpsStatus();
     } else if (target === "snapshot") {
       breakoutDetectorLastFetchAt = 0; refreshBreakoutDetector();
@@ -4554,8 +4526,7 @@ function renderSituation() {
     const dp = Math.max(2, (ASSET_CONFIG[activeSnapshotAsset] || {}).dp || 2), pc = (rc.dist_bp / 100).toFixed(2), P = Math.round(rc.p * 100);
     const tip = `다음 30분 안 ${Number(rc.hi).toFixed(dp)}(+${pc}%) 또는 ${Number(rc.lo).toFixed(dp)}(−${pc}%) 중 하나에 닿을 확률 ${P}%`
       + `\n폭 = ±0.5 × 직전 30분 고저폭 · 닿음 모델(5분봉 26피쳐, ETH 학습) · ETH TEST 2025~ AUC .78`
-      + (eth ? "" : `\n${coinUnit()}: 같은 ETH 모델 그대로 · 크기 표 대비 AUC +.06 통과(2025~)`) + "\n어느 쪽인지는 말하지 않는다 — 크기 정보"
-      + (chipScoreLine("reach") ? `\n\n${chipScoreLine("reach")}` : "");
+      + (eth ? "" : `\n${coinUnit()}: 같은 ETH 모델 그대로 · 크기 표 대비 AUC +.06 통과(2025~)`) + "\n어느 쪽인지는 말하지 않는다 — 크기 정보";
     h += `<span class="sit-chip q" title="${escapeHtml(tip)}">30분 ±${pc}% 닿음 ${P}%</span>`;
   }
   if (eth && fz) {
@@ -4903,8 +4874,7 @@ function renderSupply1s(box = null, src = null) {
         // 2026-10-04 문구를 근거만큼만(사용자 «청산 급증 배지 문제도 고쳐줘»): «대개 되돌아온다»는 일반 시점에서 약하다(15분 +6.6bp, CI 하한 +0.03)
         tt.textContent = `직전 60초 ${side === "long" ? "롱" : "숏"} 청산이 큰 버스트(롱 ${fmtUsdCompact(bu.thr[0])} · 숏 ${fmtUsdCompact(bu.thr[1])} 초과, 학습 7일 상위 0.5%)입니다.\n`
           + "이런 버스트를 만난 보유 포지션을 그 순간 시장가로 닫으면 평균 −17bp 손해였습니다(35건, 95% CI −24~−11, 수수료 포함 모의 원장).\n"
-          + "그 뒤 15분 되돌림 자체는 약합니다(+6.6bp, CI 하한 +0.03) — «되돌아온다»가 아니라 «급히 시장가로 닫지 말 것»만 근거가 있습니다."
-          + (chipScoreLine("burst") ? `\n\n${chipScoreLine("burst")}` : "");
+          + "그 뒤 15분 되돌림 자체는 약합니다(+6.6bp, CI 하한 +0.03) — «되돌아온다»가 아니라 «급히 시장가로 닫지 말 것»만 근거가 있습니다.";
         r.setAttribute("x", bx); r.setAttribute("y", cvdY0 + 14 - bh + 4); r.setAttribute("width", bw); r.setAttribute("height", bh); r.setAttribute("rx", bh / 2);
         r.setAttribute("fill", "var(--warn)"); r.setAttribute("fill-opacity", ".12"); r.setAttribute("stroke", "var(--warn)"); r.setAttribute("stroke-opacity", ".55");
         g.appendChild(tt); g.appendChild(r);
@@ -7380,8 +7350,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           const pp = at(meta.trend_prewarn_p), th = at(meta.trend_prewarn_thr);
           trigLines += "<br>전환 예고 (앞으로 30분 내 발동 확률)"
             + (pp == null ? "" : ` ${(pp * 100).toFixed(1)}%`)
-            + (th == null ? "" : ` / 임계 ${(th * 100).toFixed(1)}%`)
-            + (chipScoreLine("prewarn") ? `<br><span class="muted">${escapeHtml(chipScoreLine("prewarn"))}</span>` : "");
+            + (th == null ? "" : ` / 임계 ${(th * 100).toFixed(1)}%`);
         }
         if (at(sp.trend_detect)) trigLines += "<br>전환 탐지 지속 중 (거래대금·체결속도 둘 다 q90 초과)";
       }
@@ -8144,7 +8113,6 @@ async function tick() {
   tickInFlight = true;
   try {
     ensureLiveStream();              // 2026-09-24 수급·상황 밀어주기 (탭/코인/가시성 변화가 여기로 수렴)
-    refreshNotifyCenter();           // 2026-10-05 종 옆 점(판정일·새 알림) -- 탭과 무관 (자체 5분 게이트)
     // 2026-08-25 perf pass (Snapshot's 6 fetches), extended 2026-08-31 to Ops's own status poll
     // now that the Live tab (previously the 3rd, always-unconditional, tab) is gone -- each branch
     // only matters while that tab is actually visible; gating stops background fetch/compute work
@@ -8173,7 +8141,6 @@ async function tick() {
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
       refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (1초 -- 10-03, ETH 만 · 서술)
       refreshPaper();                // 2026-10-04 모의 판·맞대결·벽 신호 (10초, 모의 매매 엔진 상태)
-      refreshChipScore();            // 2026-10-05 머리 칩 실전 성적 (코인별 5분)
       ensurePriceWs();               // 2026-09-16 현재가 직결 WS (탭/코인/가시성 변화가 여기로 수렴)
       maybeFetchSnapshotChartHistory();
     }
@@ -8332,6 +8299,7 @@ function renderNotifyMain() {
   const cfg = notifyState.config;
   const sub = notifyState.subscription;
   const btn = el("notifyToggleBtn");
+  const badge = el("notifyBadge");
   const title = el("notifyStateTitle");
   const detail = el("notifyStateDetail");
   const perm = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
@@ -8349,15 +8317,19 @@ function renderNotifyMain() {
     label = "차단됨"; disabled = true;
   } else if (sub) {
     state = "good"; headline = "알림이 켜져 있습니다";
-    sub_text = "포지션 위험·보유 중 청산 급증은 소리와 함께, 판정일·전환 예고는 무음으로 옵니다."; label = "알림 끄기";
+    sub_text = "포지션 개시·청산과 운영 이상은 소리와 함께 즉시 옵니다."; label = "알림 끄기";
   } else {
     state = "neutral"; headline = "알림이 꺼져 있습니다";
     sub_text = "켜면 이 기기로 신호가 도착합니다. 창을 닫아도 옵니다."; label = "알림 켜기";
   }
 
-  if (title) { title.textContent = headline; title.dataset.tone = state; }
+  if (title) title.textContent = headline;
   if (detail) detail.textContent = sub_text;
   if (btn) { btn.textContent = label; btn.disabled = disabled; btn.classList.toggle("primary", !sub); }
+  if (badge) {
+    badge.textContent = state === "good" ? "알림 켬" : state === "bad" ? "알림 불가" : "알림 끔";
+    badge.className = `ops-badge ${state}`;
+  }
   const canTest = !!(notifyState.registration && perm === "granted");
   const localBtn = el("notifyLocalTestBtn");
   const serverBtn = el("notifyServerTestBtn");
@@ -8497,134 +8469,6 @@ async function setupNotifyPage() {
       setNotifyTestResult(`발송 요청이 실패했습니다: ${err.message}`, "bad");
     }
   });
-}
-
-// ── 알림 센터 (2026-10-05, 사용자 «글래스/다크 모드 옆 알림 아이콘 → 팝업 모달 · 판정 예정일 + 푸시 알림») ──
-// 원천 /api/notify-center = 판정 달력(dashboard/verdict_calendar.json) + 데몬이 보내는 종류(PUSH_KINDS) + 최근 보낸 알림.
-// 종 옆 점 = 판정일이 내일·오늘이거나 지났는데 아직 판정 전 · 또는 마지막으로 연 뒤 새로 보낸 알림이 있을 때.
-
-function ncDaysUntil(dateStr) {   // 판정일(UTC 날짜 00시 = 09:00 KST)까지 보는 사람 달력으로 며칠
-  const d = new Date(`${dateStr}T00:00:00Z`), t = new Date();
-  return Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(t.getFullYear(), t.getMonth(), t.getDate())) / 86400000);
-}
-
-function ncSeenAt() { try { return Number(localStorage.getItem(NC_SEEN_KEY)) || 0; } catch (e) { return 0; } }
-
-function renderNotifyCenter() {
-  const d = notifyCenterData || {};
-  const vs = d.verdicts || [], recent = d.recent || [];
-  const now = new Date(), DOW = "일월화수목금토";
-  const vBox = el("ncVerdicts");
-  if (vBox) {
-    vBox.innerHTML = vs.length ? vs.map((v) => {
-      const n = ncDaysUntil(v.date), dt = new Date(`${v.date}T00:00:00Z`);
-      const yr = dt.getFullYear() !== now.getFullYear() ? `<span>${dt.getFullYear()}년</span>` : "";   // 다른 해면 한 줄 더(좁은 칸에서 어색하게 안 꺾이게)
-      const when = v.approx ? `${dt.getMonth() + 1}월 무렵` : `${dt.getMonth() + 1}월 ${dt.getDate()}일 ${DOW[dt.getDay()]}`;
-      const tag = v.done ? "판정 끝" : v.approx ? "건수 기준" : n > 0 ? `D-${n}` : n === 0 ? "오늘" : "판정 대기";
-      const tone = v.done ? "done" : v.approx ? "" : n <= 0 ? "due" : n <= 7 ? "soon" : "";
-      return `<li class="nc-v ${tone}">
-        <div class="nc-v-when"><b>${escapeHtml(tag)}</b>${yr}<span>${escapeHtml(when)}</span></div>
-        <div class="nc-v-main">
-          <p class="nc-v-title"><strong>${escapeHtml(v.title || "")}</strong><span class="nc-kind">${escapeHtml(v.kind || "")}</span></p>
-          <p class="nc-v-what">${escapeHtml(v.what || "")}</p>
-          ${v.done ? `<p class="nc-v-done">${escapeHtml(v.done)}</p>` : ""}
-          <code class="nc-v-how" title="${escapeHtml(v.doc || "")}">${escapeHtml(v.how || "")}</code>
-        </div></li>`;
-    }).join("") : `<li class="nc-empty">예정된 판정이 없습니다.</li>`;
-  }
-  const kBox = el("ncKinds");
-  if (kBox) kBox.innerHTML = (d.kinds || []).map((k) => `<li><b>${escapeHtml(k.name)}</b><span>${escapeHtml(k.when)}</span></li>`).join("");
-  const rBox = el("ncRecent");
-  if (rBox) {
-    rBox.innerHTML = recent.length ? recent.slice(0, 12).map((r) => {
-      const t = new Date(r.ts);
-      const at = Number.isNaN(t.getTime()) ? "" : `${t.getMonth() + 1}/${t.getDate()} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
-      return `<li class="${r.tier === "t1" ? "t1" : ""}"><time>${at}</time><div><b>${escapeHtml(r.title || "")}</b>`
-        + `<span>${escapeHtml(String(r.body || "").split("\n")[0])}</span></div></li>`;
-    }).join("") : `<li class="nc-empty">아직 보낸 알림이 없습니다 — 10월 5일 재배선 뒤부터 여기 남습니다.</li>`;
-  }
-  // 종 버튼: 점과 읽히는 이름
-  const due = vs.filter((v) => !v.done && !v.approx && ncDaysUntil(v.date) <= 1);
-  const fresh = recent.filter((r) => Date.parse(r.ts) > ncSeenAt()).length;
-  const btn = el("notifyCenterBtn"), dot = el("notifyCenterDot");
-  if (dot) dot.hidden = !(due.length || fresh);
-  if (btn) {
-    const why = [due.length ? `판정 ${due.map((v) => (ncDaysUntil(v.date) > 0 ? "내일" : ncDaysUntil(v.date) === 0 ? "오늘" : "대기")).join("·")}` : "",
-      fresh ? `새 알림 ${fresh}건` : ""].filter(Boolean).join(" · ");
-    btn.setAttribute("aria-label", `알림 · 판정 예정일${why ? ` — ${why}` : ""}`);
-    btn.title = btn.getAttribute("aria-label");
-  }
-}
-
-async function refreshNotifyCenter(force) {
-  const now = Date.now();
-  if (!force && now - notifyCenterLastFetchAt < NOTIFY_CENTER_POLL_MS) return;
-  notifyCenterLastFetchAt = now;
-  try {
-    const res = await fetch("/api/notify-center", { cache: "no-cache" });
-    if (!res.ok) throw new Error(`notify center ${res.status}`);
-    notifyCenterData = await res.json();
-  } catch (error) {
-    console.error("Notify center fetch error:", error);
-    notifyCenterLastFetchAt = now - NOTIFY_CENTER_POLL_MS + 60 * 1000;   // 실패하면 1분 뒤 다시
-  }
-  renderNotifyCenter();
-}
-
-function openNotifyCenter() {
-  const dlg = el("notifyCenter");
-  if (!dlg || dlg.open) return;
-  dlg.showModal();
-  // 열 때마다 다시 읽는다 -- 권한·구독은 다른 탭/기기에서 바뀔 수 있다(옛 알림 탭과 같은 규칙)
-  refreshNotifyPage();
-  refreshNotifyCenter(true).then(() => {
-    try { localStorage.setItem(NC_SEEN_KEY, String(Date.now())); } catch (e) { /* 사생활 모드 */ }
-    renderNotifyCenter();
-  });
-}
-
-el("notifyCenterBtn")?.addEventListener("click", openNotifyCenter);
-// 바깥(backdrop) 클릭으로 닫기 -- 다이얼로그 자신이 클릭 대상이면 안쪽 내용이 아닌 바깥이다
-el("notifyCenter")?.addEventListener("click", (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
-if (location.hash === "#notify-center") openNotifyCenter();   // 푸시 알림을 누르고 들어온 경우
-
-// ── 머리 칩 «실전 성적» (2026-10-05, /api/chip-score) ─────────────────────────────
-// 칩이 말한 것을 서버가 기록하고 결과를 채운다(server.py chip_score_loop). 툴팁 끝에 한두 줄로 -- 백테스트 숫자 옆에 «실제로는».
-
-async function refreshChipScore() {
-  const a = activeSnapshotAsset, now = Date.now();
-  if (now - (chipScoreFetchAt[a] || 0) < CHIP_SCORE_POLL_MS) return;
-  chipScoreFetchAt[a] = now;
-  try {
-    const res = await fetch(`/api/chip-score?asset=${encodeURIComponent(a)}`, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`chip score ${res.status}`);
-    chipScore[a] = await res.json();
-  } catch (error) {
-    chipScoreFetchAt[a] = now - CHIP_SCORE_POLL_MS + 60 * 1000;
-  }
-}
-
-function chipScoreLine(kind) {
-  const s = chipScore[activeSnapshotAsset], pc = (v) => `${Math.round(v * 100)}%`;
-  if (!s) return "";
-  const head = `실전 성적(최근 ${s.days}일`, few = (n) => (n < 30 ? " · 표본 적음" : "");
-  if (kind === "reach") {
-    const r = s.reach;
-    if (!r) return "실전 성적: 기록 중 — 30분이 지나야 첫 결과가 나옵니다";
-    return `${head}, ${r.n}건): 말한 확률 평균 ${pc(r.p_mean)} · 실제 닿음 ${pc(r.hit)}${few(r.n)}`
-      + r.bins.map((b) => `\n  ${Math.round(b.lo * 100)}~${Math.round(b.hi * 100)}%라고 할 때 실제 ${pc(b.hit)} (${b.n}건)`).join("");
-  }
-  if (kind === "prewarn") {
-    const p = s.prewarn;
-    if (!p) return "실전 성적: 기록 중";
-    return `${head}): 예고 ${p.warn}봉 중 30분 안 탐지 ${p.hits}봉${p.warn ? ` (${pc(p.hits / p.warn)})` : ""} · 아무 때나 ${pc(p.base)}${few(p.warn)}`;
-  }
-  if (kind === "burst") {
-    const b = s.burst;
-    if (!b) return "실전 성적: 아직 0건 — 켜진 뒤 15분 되돌림을 기록합니다";
-    return `${head}, ${b.n}건): 켜진 뒤 15분 되돌림 평균 ${b.rev_mean_bp >= 0 ? "+" : ""}${b.rev_mean_bp.toFixed(1)}bp · 되돌아온 비율 ${pc(b.rev_share)}${few(b.n)}`;
-  }
-  return "";
 }
 
 // PWA 설치 -- Chrome/Edge의 기본 UI는 주소창 아이콘이라 놓치기 쉬워서 알림 페이지에도 둔다.

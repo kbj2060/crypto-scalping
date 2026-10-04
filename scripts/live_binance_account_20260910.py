@@ -20,7 +20,6 @@ from urllib.parse import urlencode
 FAPI = "https://fapi.binance.com"
 RECV_WINDOW_MS = 5000
 QTY_EPS = 1e-9
-ADD_EVENT_GAP_MS = 180_000   # 이 안의 증가 체결은 같은 «추가» 이벤트(_fold 의 adds)
 DEFAULT_TRADE_LIMIT = 1000  # Binance max; 잘리면 payload.trades_truncated=True
 
 
@@ -115,9 +114,6 @@ def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH") -> list[dict
                 "realized_pnl": 0.0,
                 "commission": 0.0,
                 "fills": 0,
-                # 2026-10-05 습관 분해(계좌 카드): 추가 = 첫 진입 이벤트 뒤의 증가 이벤트(180초 안 증가 체결은 한 이벤트 --
-                #   peg 재호가·폴백 묶음, research_eth_avgdown_gate_notional_cap_20261004 와 같은 정의) · 최대 명목 = max |net|×체결가
-                "adds": 0, "peak_notional": 0.0, "_last_inc": None,
                 "exit_time": None,
                 "exit_price": None,
                 "closed": False,
@@ -130,10 +126,6 @@ def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH") -> list[dict
         opening = net == 0.0 or (signed_qty > 0) == (net > 0)
         if opening:
             current["qty_in"] += qty; current["_in"] += price * qty
-            t_ms = int(fill["time"])
-            if current["_last_inc"] is not None and t_ms - current["_last_inc"] > ADD_EVENT_GAP_MS:
-                current["adds"] += 1
-            current["_last_inc"] = t_ms
         else:
             current["qty_out"] += qty; current["_out"] += price * qty
         net += signed_qty
@@ -146,7 +138,6 @@ def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH") -> list[dict
         if (position_side == "LONG" and net < -QTY_EPS) or (position_side == "SHORT" and net > QTY_EPS):
             truncated = True
         current["max_qty"] = max(current["max_qty"], abs(net))
-        current["peak_notional"] = max(current["peak_notional"], abs(net) * price)
         current["realized_pnl"] += float(fill["realizedPnl"])
         current["commission"] += float(fill["commission"])
         current["fills"] += 1
@@ -181,7 +172,7 @@ def _finish(trip: dict[str, Any]) -> dict[str, Any]:
         trip["pnl_check_bp"] = round((trip["realized_pnl"] - implied) / notional * 1e4, 4) if notional else None
     else:
         trip["pnl_check_bp"] = None
-    for k in ("_in", "_out", "_last_inc"):
+    for k in ("_in", "_out"):
         trip.pop(k, None)
     return trip
 
@@ -381,10 +372,6 @@ def _self_check() -> None:
     assert abs(t["entry_price"] - 2429.93) < 0.01 and t["exit_price"] == 2459.06, t
     assert (t["exit_price"] - t["entry_price"]) > 0 and t["realized_pnl"] > 0, "부호가 손익과 같아야 한다"
     assert abs(t["pnl_check_bp"]) < 1.0, t          # 항등식 오차 1bp 이내
-    # 습관 분해: 1초 간격 증가 둘은 한 이벤트(추가 0) · 최대 명목 = 3 × 2400
-    assert t["adds"] == 0 and abs(t["peak_notional"] - 7200.0) < 1e-6 and "_last_inc" not in t, t
-    later = [dict(f, time=f["time"] * 200) for f in scaled]    # 200초 간격이면 둘째 증가가 «추가»
-    assert round_trips(later)[0]["adds"] == 1
 
     # 한 체결로 숏 2 -> 롱 3 뒤집기. 쪼개지 않으면 두 거래가 한 왕복으로 뭉친다.
     flip = [

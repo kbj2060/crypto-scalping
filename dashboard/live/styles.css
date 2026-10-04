@@ -1192,6 +1192,8 @@ svg {
    진짜 상태인지 헷갈린다. 진단 블록이 이 페이지의 핵심이다: 웹푸시는 조용히 실패하므로
    (푸시 서비스 201 + 화면엔 아무것도) 어느 단계가 막혔는지 보여주지 않으면 사용자가 할 수
    있는 일이 없다. */
+.notify-panel { display: grid; gap: 10px; }
+.notify-panel h3 { margin: 0; }
 .notify-hint { margin: 0; font-size: 11px; line-height: 1.5; }
 
 .notify-main {
@@ -1256,6 +1258,23 @@ svg {
 .notify-test-result.bad { color: var(--bad); }
 .notify-test-result.warn { color: var(--accent); }
 
+.notify-tiers { display: grid; gap: 6px; }
+.notify-tier {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 10px;
+  border-left: 2px solid var(--line);
+  border-radius: 0 6px 6px 0;
+  background: rgb(var(--lift) / .02);
+}
+.notify-tier strong { font: 700 11px/1.3 var(--font-sans); }
+.notify-tier span { font: 500 11px/1.45 var(--font-sans); color: var(--muted); }
+.notify-tier.t1 { border-left-color: var(--good); }
+.notify-tier.t2 { border-left-color: var(--accent); }
+.notify-tier.digest { border-left-color: var(--line); }
+
 .notify-devices { display: grid; gap: 6px; }
 .notify-device {
   display: flex;
@@ -1273,137 +1292,13 @@ svg {
   font-style: normal; font-size: 11px; color: var(--accent); margin-left: 4px;
 }
 .notify-device-main span { font: 500 11px/1.4 var(--font-mono); }
-#notifyStateTitle[data-tone="good"] { color: var(--good); }
-#notifyStateTitle[data-tone="bad"] { color: var(--bad); }
-
-/* ── 알림 센터 (2026-10-05) — 테마 토글 옆 종 → 네이티브 <dialog>. 판정 예정일 + 푸시 알림.
-   목록은 카드가 아니라 «줄»이다(구분선) -- 카드 안에 카드를 겹치지 않는다. 점·D-day 색은 주황(주의) 하나. */
-.nc-bell { position: relative; }
-.nc-bell-icon { width: 14px; height: 14px; flex: 0 0 auto; }
-.nc-dot {
-  position: absolute; top: 3px; right: 5px;
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--warn);
-  box-shadow: 0 0 0 2px var(--bg);
-}
-.nc {
-  width: min(640px, calc(100vw - 32px));
-  max-height: min(86vh, 920px);
-  padding: 0;
-  border: 1px solid var(--glass-edge);
-  border-radius: var(--radius);
-  background: linear-gradient(180deg, var(--glass-strong), transparent 120px), var(--panel-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  color: var(--text);
-  box-shadow: 0 28px 72px rgb(var(--shadow) / 0.45), inset 0 1px 0 var(--specular);
-  overflow: hidden;
-}
-.nc[open] { display: flex; flex-direction: column; animation: ncIn .24s cubic-bezier(.2, .8, .2, 1); }
-.nc::backdrop { background: rgb(var(--shadow) / 0.42); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
-@keyframes ncIn { from { opacity: 0; transform: translateY(10px) scale(.985); } }
-@media (prefers-reduced-motion: reduce) { .nc[open] { animation: none; } }
-/* 다크 패널(0.92)은 뒤 차트가 비친다 -- 모달은 읽기 면이라 불투명하게 */
-:root:not([data-theme="light"]) .nc { background: linear-gradient(180deg, var(--glass-strong), transparent 120px), var(--bg); }
-
-.nc-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 14px 14px 12px 18px;
-  border-bottom: 1px solid var(--soft-line);
-}
-.nc-head h2 { margin: 0; font: 600 17px/1.2 var(--font-display); letter-spacing: -0.005em; }
-.nc-close {
-  display: inline-grid; place-items: center;
-  width: 32px; height: 32px; border-radius: 999px;
-  border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer;
-  transition: background .16s ease, color .16s ease;
-}
-.nc-close:hover { background: rgb(var(--lift) / .06); color: var(--text); }
-.nc-close svg { width: 16px; height: 16px; }
-.nc-body {
-  overflow-y: auto; overscroll-behavior: contain;
-  padding: 16px 18px 20px;
-  display: grid; gap: 26px;
-}
-.nc-sec { display: grid; gap: 8px; min-width: 0; }
-.nc-sec h3 { margin: 0; font: 600 14px/1.25 var(--font-display); color: var(--text); }
-.nc-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
-.nc-sub { margin: 10px 0 0; font: 700 12px/1.2 var(--font-sans); color: var(--muted); }
-.nc-verdicts, .nc-kinds, .nc-recent { list-style: none; margin: 0; padding: 0; display: grid; }
-.nc-empty { padding: 8px 0; font-size: 12px; color: var(--muted); }
-
-.nc-v {
-  display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 14px;
-  padding: 12px 10px;
-  border-top: 1px solid var(--soft-line);
-  border-radius: 10px;
-}
-.nc-v:first-child { border-top-color: transparent; }
-.nc-v-when b { display: block; font: 700 14px/1.1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
-.nc-v-when span { display: block; margin-top: 3px; font: 500 11px/1.35 var(--font-sans); color: var(--muted); white-space: nowrap; }
-.nc-v.soon .nc-v-when b, .nc-v.due .nc-v-when b { color: var(--warn); }
-.nc-v.due { background: color-mix(in srgb, var(--warn) 10%, transparent); border-top-color: transparent; }
-.nc-v.due + .nc-v { border-top-color: transparent; }
-.nc-v.done { opacity: .62; }
-.nc-v-title { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
-.nc-v-title strong { font: 600 13px/1.4 var(--font-sans); color: var(--text); }
-.nc-kind {
-  font: 600 11px/1 var(--font-sans); color: var(--muted);
-  padding: 3px 7px; border-radius: 999px; border: 1px solid var(--line);
-}
-.nc-v-what, .nc-v-done { margin: 4px 0 0; font-size: 12px; line-height: 1.55; color: var(--muted); max-width: 68ch; }
-.nc-v-done { color: var(--text); }
-.nc-v-how {
-  display: block; margin-top: 8px; padding: 6px 9px;
-  font: 500 11px/1.5 var(--font-mono); color: var(--muted);
-  background: rgb(var(--lift) / .04); border-radius: 7px;
-  overflow-wrap: anywhere; user-select: all;
-}
-
-.nc-kinds li, .nc-recent li {
-  display: grid; gap: 12px; align-items: baseline;
-  padding: 8px 0; border-top: 1px solid var(--soft-line);
-  font-size: 12px; line-height: 1.5;
-}
-.nc-kinds li { grid-template-columns: 118px minmax(0, 1fr); }
-.nc-kinds li:first-child, .nc-recent li:first-child { border-top-color: transparent; }
-.nc-kinds b, .nc-recent b { font-weight: 600; color: var(--text); }
-.nc-kinds span, .nc-recent span { color: var(--muted); }
-.nc-recent li { grid-template-columns: 74px minmax(0, 1fr); }
-.nc-recent li.nc-empty { display: block; }
-.nc-recent time { font: 600 11px/1.5 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
-.nc-recent span { display: block; }
-.nc-recent li.t1 b { color: var(--warn); }
-.nc-more { margin-top: 6px; border-top: 1px solid var(--soft-line); padding-top: 4px; }
-.nc-more > summary { cursor: pointer; padding: 8px 0; font: 600 12px/1.3 var(--font-sans); color: var(--muted); }
-.nc-more > summary:hover { color: var(--text); }
-.nc-more[open] { display: grid; gap: 10px; }
-
-@media (max-width: 720px) {
-  .nc { width: calc(100vw - 16px); max-height: 90vh; }
-  .nc-body { padding: 14px 14px 18px; }
-  .nc-v { grid-template-columns: 62px minmax(0, 1fr); gap: 10px; padding: 12px 6px; }
-  .nc-kinds li { grid-template-columns: 1fr; gap: 2px; }
-  .nc-close { width: 40px; height: 40px; }
-}
-
-/* 계좌 카드 «습관 분해»(2026-10-05) -- 같은 기간·코인의 왕복을 세 축(추세·추가·배수)으로 가른 손익. 성과 펼침 안. */
-.acct-habit { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--soft-line); display: grid; gap: 5px; }
-.acct-habit-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; align-items: baseline; }
-.acct-habit dt { font: 700 11px/1.4 var(--font-sans); color: var(--muted); }
-.acct-habit dd { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 210px)); gap: 12px; }
-.acct-habit-cell { font-size: 11.5px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.acct-habit-cell > span { color: var(--muted); }
-.acct-habit-cell b { font: 700 11.5px/1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
-.acct-habit-cell b.good { color: var(--good); }
-.acct-habit-cell b.bad { color: var(--bad); }
-.acct-habit-cell em { font-style: normal; color: var(--muted); font-size: 11px; }
 
 @media (max-width: 720px) {
   .notify-tests { grid-template-columns: 1fr; }
   /* 진단 줄은 좁은 화면에서 4열이 무너진다 -- 이름/설명을 아래로 흘린다 */
   .notify-check { grid-template-columns: 8px 1fr auto; }
   .notify-check-detail { grid-column: 2 / -1; }
+  .notify-tier { grid-template-columns: 1fr; gap: 2px; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
