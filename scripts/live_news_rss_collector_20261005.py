@@ -6,13 +6,17 @@
   응답 `age` 헤더(CDN 캐시 나이)도 남긴다: The Block 은 max-age 60 인데 age 1974 가 찍혔다(10-05).
 무엇: items = 기사 한 건(source, link, 제목, 요약, 카테고리, pub_ms, first_seen_ms, backfill) -- 첫 폴링에 이미 있던 기사는
   backfill=1(지연 통계에서 뺀다). polls = 폴링 한 번(시각, source, HTTP 상태, 기사 수, 소요 ms, age).
-저장: data/hot/news_rss.sqlite(WAL). 60초마다 조건부 GET(ETag/Last-Modified). 주문·바이낸스 호출 없음.
+저장: data/hot/news_rss.sqlite(WAL). 피드마다 주기(초)대로 조건부 GET(ETag/Last-Modified). 주문·바이낸스 호출 없음.
+10-05 속보 피드 추가(사용자 «거래소 공지와 하이퍼리퀴드 빼고»): Tree News(JSON, 트윗·Truth·뉴스 사이트 미러) · BWEnews ·
+  FinancialJuice(매크로) · Truth Social 아카이브(trumpstruth) · Fed · SEC. BWEnews 에는 «UPBIT LISTING» 같은 상장 속보가 섞여 온다
+  (원천 그대로 저장, 거르는 건 읽는 쪽에서). Tree 는 link 가 원문 url(트윗 등)이다.
   python scripts/live_news_rss_collector_20261005.py
   python scripts/live_news_rss_collector_20261005.py --selftest
 """
 from __future__ import annotations
 
 import email.utils
+import json
 import os
 import re
 import sqlite3
@@ -25,12 +29,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = Path(os.environ.get("NEWS_RSS_DB", ROOT / "data/hot/news_rss.sqlite"))
-FEEDS = {
-    "theblock": "https://www.theblock.co/rss.xml",
-    "cointelegraph": "https://cointelegraph.com/rss",
-    "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss",
+FEEDS = {                                                     # 이름: (url, 주기 초)
+    "theblock": ("https://www.theblock.co/rss.xml", 60),
+    "cointelegraph": ("https://cointelegraph.com/rss", 60),
+    "coindesk": ("https://www.coindesk.com/arc/outboundfeeds/rss", 60),
+    "tree": ("https://news.treeofalpha.com/api/news?limit=50", 15),
+    "bwenews": ("https://rss-public.bwe-ws.com/", 20),            # 10건뿐이라 짧게
+    "financialjuice": ("https://www.financialjuice.com/feed.ashx?xy=rss", 30),
+    "trumpstruth": ("https://www.trumpstruth.org/feed", 60),
+    "fed": ("https://www.federalreserve.gov/feeds/press_all.xml", 300),
+    "sec": ("https://www.sec.gov/news/pressreleases.rss", 300),
 }
-POLL_S = float(os.environ.get("NEWS_RSS_POLL_S", "60"))
+TICK_S = float(os.environ.get("NEWS_RSS_TICK_S", "5"))
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
 
 
@@ -47,6 +57,12 @@ def parse(xml: bytes) -> list[tuple]:
         cats = ",".join(c.text.strip() for c in it.findall("category") if c.text)
         out.append((link, (it.findtext("title") or "").strip(), summary, cats, pub_ms))
     return out
+
+
+def parse_tree(body: bytes) -> list[tuple]:
+    """Tree News /api/news JSON → parse() 와 같은 행. 카테고리 = 출처 종류(Twitter·Blogs·usGov)."""
+    return [(x.get("url") or f"tree:{x['_id']}", (x.get("title") or "").strip(), "", x.get("source") or "",
+             int(x["time"]) if x.get("time") else None) for x in json.loads(body)]
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -71,11 +87,14 @@ def run() -> None:
     con = connect(DB)
     cond: dict[str, dict] = {s: {} for s in FEEDS}            # 조건부 요청 헤더
     first = {s: con.execute("SELECT count(*) FROM items WHERE source=?", (s,)).fetchone()[0] == 0 for s in FEEDS}
-    print(f"수집 {', '.join(FEEDS)} → {DB} ({POLL_S:.0f}초마다)", flush=True)
+    due = {s: 0.0 for s in FEEDS}                               # 다음 폴링 시각
+    print(f"수집 {', '.join(f'{s}({e}s)' for s, (_, e) in FEEDS.items())} → {DB}", flush=True)
     while True:
-        t_loop = time.time()
-        for src, url in FEEDS.items():
+        for src, (url, every) in FEEDS.items():
             t0 = time.time()
+            if t0 < due[src]:
+                continue
+            due[src] = t0 + every
             status, n, age = 0, 0, None
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": UA, **cond[src]})
@@ -84,7 +103,7 @@ def run() -> None:
                     age = int(r.headers["Age"]) if (r.headers.get("Age") or "").isdigit() else None
                     cond[src] = {k: v for k, v in (("If-None-Match", r.headers.get("ETag")),
                                                      ("If-Modified-Since", r.headers.get("Last-Modified"))) if v}
-                items = parse(body)
+                items = parse_tree(body) if src == "tree" else parse(body)
                 n = len(items)
                 new = store(con, src, items, int(time.time() * 1000), first[src])
                 if new and not first[src]:
@@ -98,7 +117,7 @@ def run() -> None:
                 print(f"{src} 실패 {exc!r}"[:200], flush=True)
             con.execute("INSERT INTO polls VALUES(?,?,?,?,?,?)",
                         (int(t0 * 1000), src, status, n, int((time.time() - t0) * 1000), age))
-        time.sleep(max(1.0, POLL_S - (time.time() - t_loop)))
+        time.sleep(TICK_S)
 
 
 def selftest() -> None:
@@ -117,6 +136,9 @@ def selftest() -> None:
         assert store(con, "s", rows + [("https://x.co/c", "C", "", "", 5)], 9, False) == 1   # a·b 는 그대로
         assert con.execute("SELECT first_seen_ms, backfill FROM items WHERE link='https://x.co/a'").fetchone() == (1, 1)
         assert con.execute("SELECT first_seen_ms, backfill FROM items WHERE link='https://x.co/c'").fetchone() == (9, 0)
+    tree = json.dumps([{"_id": "1", "title": "Trump (@realDonaldTrump): hi", "source": "Twitter", "url": "https://x.com/a/1", "time": 7},
+                       {"_id": "2", "title": "B", "source": "Blogs"}]).encode()
+    assert parse_tree(tree) == [("https://x.com/a/1", "Trump (@realDonaldTrump): hi", "", "Twitter", 7), ("tree:2", "B", "", "Blogs", None)]
     print("selftest ok")
 
 
