@@ -4299,8 +4299,9 @@ function renderMarketCtx() {
   const usd = (v) => (v == null ? "-" : fmtUsdCompact(v));
   const tone = (v, thr = 0.5) => (v == null || Math.abs(v) < thr ? "" : v > 0 ? "mc-good" : "mc-bad");
   // 2026-10-04 고래·리테일 경계는 코인별(서버 bands_usd) -- 설명 글의 ETH 값($10만/$1만)을 바꿔 끼운다
-  const tipOf = (key) => (key === "flow" && Array.isArray(d.bands_usd)
-    ? MC_TIPS.flow.replace("고래 ≥ $10만 · 리테일 < $1만", `고래 ≥ ${fmtUsdCompact(d.bands_usd[1])} · 리테일 < ${fmtUsdCompact(d.bands_usd[0])}`) : MC_TIPS[key]);
+  //   🔴키는 «q_flow»(= flow + quad 이어 붙임)다 -- 키 이름으로 고르지 말고 글에서 바꾼다(첫 판은 "flow" 로 걸러 한 번도 안 맞았다)
+  const tipOf = (key) => (!eth && Array.isArray(d.bands_usd)
+    ? MC_TIPS[key].replace("고래 ≥ $10만 · 리테일 < $1만", `고래 ≥ ${fmtUsdCompact(d.bands_usd[1])} · 리테일 < ${fmtUsdCompact(d.bands_usd[0])}`) : MC_TIPS[key]);
   const sec = (key, title, inner) => `<div class="mc-sec"><h4><button type="button" class="mc-q" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
     + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(tipOf(key)).replace(/\n/g, "<br>")}</p>${inner}</div>`;
   const f = d.funding || {}, b = d.basis || {}, oi = d.oi || {}, ls = d.ls, fl = d.flow || {}, z = fl.z60h || fl.z60 || {},   // z60h = 같은 UTC 시 14일 기준(2026-10-01), 없으면 옛 12~24h 링
