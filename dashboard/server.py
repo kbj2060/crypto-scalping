@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+from html import unescape as html_unescape
 import sqlite3
 import statistics
 import sys
@@ -837,7 +838,7 @@ NEWS_WINDOW_H = 12
 def news_key(title: str) -> str:
     """중복 판정 키 -- «이름 (@핸들):»·«DECRYPT:» 같은 출처 머리말과 링크를 떼고 영숫자만 소문자로 80자.
     본문이 12자 미만(이미지 게시물·링크뿐)이면 ""(합치지 않는다)."""
-    t = re.sub(r"https?://\S+", " ", title or "")
+    t = re.sub(r"https?://\S+", " ", html_unescape(title or ""))           # 이미 쌓인 «&amp;» 글도 같은 키로
     t = re.sub(r"\[No Title\] - Post from [^\n]*", " ", t)                 # Truth 이미지 게시물 -- 날짜만 같은 다른 글
     t = re.sub(r"^[^:\n]{1,60}\(@\w+\):\s*", "", t.strip())
     # 출처 머리말은 «전부 대문자»(COINDESK: · THE STREET:) 또는 «한 단어»(FinancialJuice:)만 -- 제목 속 콜론
@@ -884,7 +885,7 @@ def news_payload(now: float, db: Path = NEWS_DB) -> dict:
             return {"ok": False, "items": [], "window_h": NEWS_WINDOW_H, "now_ms": int(now * 1000)}
     keys = ("source", "link", "title", "ts_ms", "seen_ms", "backfill", "sentiment", "p_bull", "p_bear", "p_neu",
             "asset", "impact", "incident", "relevant", "judged_ms", "model")   # model 'skip:empty' = 본문 없는 글(판정 안 함)
-    items = news_dedupe([dict(zip(keys, r)) for r in rows])
+    items = news_dedupe([{**dict(zip(keys, r)), "title": html_unescape(r[2] or "")} for r in rows])   # 이중 이스케이프 제목(«Fox &amp; Friends»)
     return {"ok": True, "items": items, "window_h": NEWS_WINDOW_H, "now_ms": int(now * 1000), "model": "jevk5:4b",
             "last_judged_ms": max((it["judged_ms"] or 0 for it in items if it["sentiment"]), default=0) or None}   # skip 행 제외 -- ollaya 다운을 가리지 않게
 

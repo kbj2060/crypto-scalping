@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import datetime
 import email.utils
+import html
 import json
 import os
 import re
@@ -69,15 +70,15 @@ def parse(xml: bytes) -> list[tuple]:
         if not link:
             continue
         pub_ms = pub_ms_of(it.findtext("pubDate"))
-        summary = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", it.findtext("description") or "")).strip()
+        summary = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", it.findtext("description") or ""))).strip()
         cats = ",".join(c.text.strip() for c in it.findall("category") if c.text)
-        out.append((link, (it.findtext("title") or "").strip(), summary, cats, pub_ms))
+        out.append((link, html.unescape(it.findtext("title") or "").strip(), summary, cats, pub_ms))   # 이중 이스케이프 피드(trumpstruth «&amp;»)
     return out
 
 
 def parse_tree(body: bytes) -> list[tuple]:
     """Tree News /api/news JSON → parse() 와 같은 행. 카테고리 = 출처 종류(Twitter·Blogs·usGov)."""
-    return [(x.get("url") or f"tree:{x['_id']}", (x.get("title") or "").strip(), "", x.get("source") or "",
+    return [(x.get("url") or f"tree:{x['_id']}", html.unescape(x.get("title") or "").strip(), "", x.get("source") or "",
              int(x["time"]) if x.get("time") else None) for x in json.loads(body)]
 
 
@@ -165,6 +166,7 @@ def selftest() -> None:
     tree = json.dumps([{"_id": "1", "title": "Trump (@realDonaldTrump): hi", "source": "Twitter", "url": "https://x.com/a/1", "time": 7},
                        {"_id": "2", "title": "B", "source": "Blogs"}]).encode()
     assert parse_tree(tree) == [("https://x.com/a/1", "Trump (@realDonaldTrump): hi", "", "Twitter", 7), ("tree:2", "B", "", "Blogs", None)]
+    assert parse(b"<rss><item><title>Fox &amp;amp; Friends</title><link>https://a/2</link></item></rss>")[0][1] == "Fox & Friends"
     assert pub_ms_of("garbage") is None and pub_ms_of(None) is None
     assert pub_ms_of("Sun, 04 Oct 2026 13:48:48") == pub_ms_of("Sun, 04 Oct 2026 13:48:48 +0000") == 1791121728000   # 시간대 없음 = UTC
     assert len(parse(b"<rss><item><title>X</title><link>https://a/1</link><pubDate>bad date</pubDate></item></rss>")) == 1
