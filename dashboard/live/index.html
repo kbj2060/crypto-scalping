@@ -50,7 +50,6 @@
         <nav class="page-tabs" aria-label="대시보드 탭">
           <button type="button" class="page-tab active" data-page-tab="snapshot" aria-current="page">스냅샷</button>
           <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
-          <button type="button" class="page-tab" data-page-tab="notify">알림</button>
         </nav>
         <!-- 2026-09-26 사용자 지시로 가운데 현재가·5분 변화·시계를 뺐다(가격은 차트·계좌 레일에 이미 있다). -->
         <!-- 2026-09-27 헤더 한 줄(사용자 지시) -- 원래 스냅샷 패널 첫 줄이었다. 다른 탭에서는 CSS 가 숨긴다. -->
@@ -66,6 +65,17 @@
             <span class="push-toggle-icon" aria-hidden="true">◐</span>
             <span id="themeToggleLabel">다크</span>
           </button>
+          <!-- 2026-10-05 알림 센터(사용자 «글래스/다크 모드 옆에 알림 아이콘 → 팝업 모달 · 판정 예정일 + 푸시 알림»).
+               옛 «알림» 탭의 구독·진단을 이 모달로 옮겼다(같은 기능이 두 곳이면 어느 쪽이 진짜 상태인지 헷갈린다). -->
+          <button type="button" id="notifyCenterBtn" class="push-toggle nc-bell" aria-haspopup="dialog"
+                  aria-controls="notifyCenter" title="알림 · 판정 예정일">
+            <svg class="nc-bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 9.5a6 6 0 0 1 12 0c0 4.6 1.6 6.4 2.4 7.2H3.6C4.4 15.9 6 14.1 6 9.5Z"></path>
+              <path d="M10 20a2.2 2.2 0 0 0 4 0"></path></svg>
+            <span id="notifyCenterLabel">알림</span>
+            <span id="notifyCenterDot" class="nc-dot" hidden></span>
+          </button>
         </div>
         <div class="top-right">
           <div id="topSession" class="ops-session top-session">-</div>
@@ -73,71 +83,58 @@
       </div>
     </header>
 
-    <section id="notifyTabPanel" class="ops-tab-panel hidden">
-      <div class="ops-panel-head">
-        <div>
-          <p class="eyebrow">PUSH NOTIFICATIONS</p>
-          <h2>알림</h2>
-          <p class="muted">신호를 놓치지 않도록 이 기기로 푸시를 보냅니다. 설치하면 창을 닫아도 옵니다.</p>
-        </div>
-        <div id="notifyBadge" class="ops-badge neutral">알림 -</div>
+    <!-- 2026-10-05 알림 센터. 네이티브 <dialog>(포커스 가두기·ESC·backdrop 이 표준) -- 09-16 주문 모달과 같은 선택.
+         🔴구독·진단·테스트·기기 마크업은 옛 알림 탭에서 **id 그대로** 옮겼다 -- 핸들러가 전부 el("id") 기반이다. -->
+    <dialog id="notifyCenter" class="nc" aria-labelledby="ncTitle">
+      <form method="dialog" class="nc-head">
+        <h2 id="ncTitle">알림</h2>
+        <button type="submit" class="nc-close" aria-label="닫기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+      </form>
+      <div class="nc-body">
+        <section class="nc-sec" aria-labelledby="ncVerdictTitle">
+          <h3 id="ncVerdictTitle">판정 예정일</h3>
+          <p class="nc-hint">사전등록한 가설의 판정을 처음 돌려도 되는 날입니다. 그 전엔 결과를 보지 않습니다.</p>
+          <ol id="ncVerdicts" class="nc-verdicts"><li class="nc-empty">불러오는 중…</li></ol>
+        </section>
+        <section class="nc-sec" aria-labelledby="ncPushTitle">
+          <h3 id="ncPushTitle">푸시 알림</h3>
+          <div class="notify-main">
+            <div class="notify-main-copy">
+              <strong id="notifyStateTitle">확인 중…</strong>
+              <span id="notifyStateDetail" class="muted">브라우저와 서버 상태를 읽고 있습니다.</span>
+            </div>
+            <div class="notify-actions">
+              <button type="button" id="notifyToggleBtn" class="notify-btn primary" disabled>확인 중…</button>
+              <button type="button" id="notifyInstallBtn" class="notify-btn hidden">앱으로 설치</button>
+            </div>
+          </div>
+          <h4 class="nc-sub">보내는 것</h4>
+          <ul id="ncKinds" class="nc-kinds"></ul>
+          <h4 class="nc-sub">최근 보낸 알림</h4>
+          <ol id="ncRecent" class="nc-recent"><li class="nc-empty">불러오는 중…</li></ol>
+          <details class="nc-more">
+            <summary>진단 · 테스트 · 등록된 기기</summary>
+            <p class="muted notify-hint">알림이 안 오면 여기서 어느 단계가 막혔는지 보입니다.</p>
+            <div id="notifyChecks" class="notify-checks"></div>
+            <p class="muted notify-hint">두 버튼이 서로 다른 구간을 검사합니다. 위는 되는데 아래가 안 되면
+              전달 문제이고, 위부터 안 되면 이 기기(브라우저·OS)가 알림을 막고 있는 것입니다.</p>
+            <div class="notify-tests">
+              <button type="button" id="notifyLocalTestBtn" class="notify-btn" disabled>
+                이 브라우저에서 바로 띄우기
+                <em>서버를 안 거칩니다 — 표시 자체가 되는지 확인</em>
+              </button>
+              <button type="button" id="notifyServerTestBtn" class="notify-btn" disabled>
+                서버에서 보내기
+                <em>실제 알림과 같은 경로 — 전달까지 확인</em>
+              </button>
+            </div>
+            <p id="notifyTestResult" class="notify-test-result"></p>
+            <div id="notifyDevices" class="notify-devices"><span class="muted">불러오는 중…</span></div>
+          </details>
+        </section>
       </div>
-
-      <section class="panel notify-panel">
-        <div class="notify-main">
-          <div class="notify-main-copy">
-            <strong id="notifyStateTitle">확인 중…</strong>
-            <span id="notifyStateDetail" class="muted">브라우저와 서버 상태를 읽고 있습니다.</span>
-          </div>
-          <div class="notify-actions">
-            <button type="button" id="notifyToggleBtn" class="notify-btn primary" disabled>확인 중…</button>
-            <button type="button" id="notifyInstallBtn" class="notify-btn hidden">앱으로 설치</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel notify-panel">
-        <h3>진단</h3>
-        <p class="muted notify-hint">알림이 안 오면 여기서 어느 단계가 막혔는지 보입니다.</p>
-        <div id="notifyChecks" class="notify-checks"></div>
-      </section>
-
-      <section class="panel notify-panel">
-        <h3>테스트</h3>
-        <p class="muted notify-hint">두 버튼이 서로 다른 구간을 검사합니다. 위는 되는데 아래가 안 되면
-          전달 문제이고, 위부터 안 되면 이 기기(브라우저·OS)가 알림을 막고 있는 것입니다.</p>
-        <div class="notify-tests">
-          <button type="button" id="notifyLocalTestBtn" class="notify-btn" disabled>
-            이 브라우저에서 바로 띄우기
-            <em>서버를 안 거칩니다 — 표시 자체가 되는지 확인</em>
-          </button>
-          <button type="button" id="notifyServerTestBtn" class="notify-btn" disabled>
-            서버에서 보내기
-            <em>실제 알림과 같은 경로 — 전달까지 확인</em>
-          </button>
-        </div>
-        <p id="notifyTestResult" class="notify-test-result"></p>
-      </section>
-
-      <section class="panel notify-panel">
-        <h3>무엇이 오나</h3>
-        <div class="notify-tiers">
-          <div class="notify-tier t1"><strong>즉시 · 소리</strong>
-            <span>실제로 일어난 일 — 포지션 개시·청산, 운영 이상</span></div>
-          <div class="notify-tier t2"><strong>즉시 · 무음</strong>
-            <span>드문 상황 — 증거신호 합의, 청산 버스트, 변동성 창</span></div>
-          <div class="notify-tier digest"><strong>요약</strong>
-            <span>화면이 달라졌을 때만 — 신호 집합·레짐·보유 현황</span></div>
-        </div>
-        <p class="muted notify-hint">아래 두 종류는 참고용 맥락입니다. 매매 신호가 아닙니다 —
-          증거신호는 경제성 검증을 통과하지 못했습니다.</p>
-      </section>
-
-      <section class="panel notify-panel">
-        <h3>등록된 기기</h3>
-        <div id="notifyDevices" class="notify-devices"><span class="muted">불러오는 중…</span></div>
-      </section>
-    </section>
+    </dialog>
 
     <section id="opsTabPanel" class="ops-tab-panel hidden">
       <div class="ops-panel-head">
