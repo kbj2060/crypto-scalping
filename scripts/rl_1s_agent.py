@@ -40,11 +40,28 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts import data_store as ds  # noqa: E402
 
-SYMBOL, COIN = "ETHUSDT", "ETH"
+SYMBOL = __import__("os").getenv("RL_SYMBOL", "ETHUSDT").upper()   # 2026-10-04 SOL·XRP 판(사용자 «ETH 에 있는 모의 판을 다른 코인도») -- 프로세스 하나 = 코인 하나
+COIN = SYMBOL[:-4]
+TAG = "" if SYMBOL == "ETHUSDT" else f"_{COIN.lower()}"   # 산출 파일 접미사 -- ETH 는 옛 이름 그대로(paper/ · panel.parquet)
+# 코인마다 다른 값만 여기. px = 가격 정수화 배율(호가 1틱 = 1) · unit = 주문 1단위(ETH 1개와 같은 명목 ~$2,700) ·
+#   whale/retail = 고정 경계(대시보드·테이프 수집기 SIZE_BANDS_USD 와 같은 값 -- ETH 거래량 비중 10/43/47% 에 맞춘 것) ·
+#   wall_q·pullback·liq = «학습 7일» 분위(ETH 09-20~26 · SOL·XRP 09-27~10-03, calib-coin 으로 잰다) · poi·er = 4.7년 분위(R2 검정).
+COINCFG = {
+    "ETHUSDT": dict(px=100, unit=1.0, idx_max=100_000 * 100, whale=100_000.0, retail=10_000.0,
+                    wall_q={70: 0.1002, 80: 0.1294, 90: 0.1807}, pullback=7.22, liq=(12.732, 13.21), poi=-26.68, er=14.95),
+    # wall_q·pullback·liq = calib-coin 09-27~10-04(ETH 같은 식 재현: 0.1006/0.1299/0.1811 · 12.74/13.211 · 7.2) ·
+    #   poi·er = 4.7년 같은 정의(docs/experiments/trend4_poi1h_solxrp_20261004.md, ETH −26.68·14.95 재현)
+    "SOLUSDT": dict(px=100, unit=22.0, idx_max=2_000 * 100, whale=55_000.0, retail=7_500.0,
+                    wall_q={70: 0.0766, 80: 0.0957, 90: 0.1242}, pullback=9.16, liq=(11.347, 10.995), poi=-42.96, er=21.75),
+    "XRPUSDT": dict(px=10_000, unit=1_800.0, idx_max=20 * 10_000, whale=23_000.0, retail=3_400.0,
+                    wall_q={70: 0.0894, 80: 0.1098, 90: 0.1399}, pullback=9.43, liq=(11.296, 9.866), poi=-32.54, er=16.54),
+}
+CFG = COINCFG[SYMBOL]
+PX = CFG["px"]
 FEE_BP = 0.0              # USDC 메이커 0% (maker_fill_shadow_worker.py:49-53 계정 실요율). 데이터는 USDT, 주문은 USDC
 TAKER_FEE_BP = 4.0        # USDC 테이커 (maker_fill_shadow_worker.py:54). 1 ETH 는 최우선 잔량(중앙 89 ETH)에 비해 작아 미끄러짐 0
 TAKER_FEE_BP = 4.0        # USDC 테이커 (maker_fill_shadow_worker.py:54). 1 ETH 는 최우선 잔량(중앙 89 ETH)에 비해 작아 미끄러짐 0
-UNIT = 1.0                # 주문 1단위 = 1 ETH (큐 소진 비교용)
+UNIT = CFG["unit"]        # 주문 1단위 = 1 ETH (큐 소진 비교용) -- 다른 코인은 같은 명목
 BAR = 300                 # 진입 결정 주기(초) = 5분봉
 BAR = 300                 # 진입 결정 주기(초) = 5분봉
 LAT_MS = 450              # 초 마감 -> 주문 도착: SETTLE_S 350 + 관측 계산 ~55 + 왕복 ~40
@@ -53,7 +70,7 @@ CTX_LAG = 12              # hot OI·마크·청산 flush 10초
 BANDS = (5, 10, 25, 50)
 WARMUP = 4200             # features() 의 가장 긴 창(3600) + 5분봉 + 지연
 OUT = ROOT / "data/research/rl_1s_agent_20261002"
-PANEL = __import__("os").getenv("RL_PANEL", "panel.parquet")   # 학습·평가 패널(기본 = 모의 매매 엔진과 같은 것). panel_zh = 제우스·호메로스 열 추가판
+PANEL = __import__("os").getenv("RL_PANEL", f"panel{TAG}.parquet")   # 학습·평가 패널(기본 = 모의 매매 엔진과 같은 것). panel_zh = 제우스·호메로스 열 추가판
 _BACKUP_OF = Path.home() / "backups/crypto-scalping-server/data/live/orderflow"
 ORDERFLOW = ds.ORDERFLOW if ds.ORDERFLOW.exists() else _BACKUP_OF
 SPLIT = {"train": ("2026-09-20", "2026-09-27"), "val": ("2026-09-27", "2026-09-28"), "test": ("2026-09-28", "2026-09-30")}
@@ -81,7 +98,7 @@ def bt_agg(a: np.ndarray) -> pd.DataFrame:
 class DepthBook:
     """@depth@100ms 리플레이(research_rt5_1s_panel_build_20260920.dd_file 과 같은 계산 -- selftest 가 대조).
     feed() 가 초 경계를 넘을 때 직전 초의 행을 돌려준다(그 초 마지막 메시지 이후 상태)."""
-    TICK, IDX_MAX = 100, 100_000 * 100
+    TICK, IDX_MAX = PX, CFG["idx_max"]
 
     def __init__(self, snap: dict):
         self.bid = np.zeros(self.IDX_MAX)
@@ -216,8 +233,12 @@ def build(start: str, end: str) -> pd.DataFrame:
         dd = pd.concat([d for d in ex.map(dd_hour, files("depthdiff")) if len(d)])
     bt, dd = bt[~bt.index.duplicated(keep="last")], dd[~dd.index.duplicated(keep="last")]
     tape = tape_agg(ds.read("binance", "tape", COIN, start, end))
-    ctx = ctx_agg(ds.read("binance", "oi_1s", COIN, start, end), ds.read("binance", "mark_1s", COIN, start, end),
-                  ds.read("binance", "liquidations", COIN, start, end))
+    try:
+        mark = ds.read("binance", "mark_1s", COIN, start, end)
+    except Exception as exc:  # noqa: BLE001 -- ponytail: SOL·XRP 마크는 2026-10-04 부터 수집(lake 에 없음). 규칙 판은 마크를 안 쓴다(basis·funding 피쳐만 0)
+        print(f"[build] 마크 원천 없음 -> 빈 열: {type(exc).__name__}", flush=True)
+        mark = pd.DataFrame(columns=["ts_ms", "mark", "index_px", "funding_rate"], dtype=float)
+    ctx = ctx_agg(ds.read("binance", "oi_1s", COIN, start, end), mark, ds.read("binance", "liquidations", COIN, start, end))
     return assemble(lo, hi, bt, dd, tape, ctx)
 
 
@@ -229,7 +250,7 @@ def trades_day(day: str) -> pd.DataFrame:
     """data.binance.vision 일별 aggTrades(무료 아카이브 -- API 가중치·IP 밴과 무관). sell = 테이커 매도(is_buyer_maker)."""
     t = pd.read_csv(OUT / "aggtrades" / f"{SYMBOL}-aggTrades-{day}.zip",
                     usecols=["price", "quantity", "transact_time", "is_buyer_maker"])
-    return pd.DataFrame({"ts": t.transact_time.to_numpy(np.int64), "c": np.round(t.price.to_numpy() * 100),
+    return pd.DataFrame({"ts": t.transact_time.to_numpy(np.int64), "c": np.round(t.price.to_numpy() * PX),
                          "qty": t.quantity.to_numpy(), "sell": t.is_buyer_maker.to_numpy(bool)})
 
 
@@ -253,7 +274,7 @@ def exec_hour(path: Path) -> pd.DataFrame:
     i, s, T = i[ok], s[ok], T[ok]
     if not len(s):
         return pd.DataFrame(columns=EXEC_COLS)
-    e = pd.DataFrame({"P": np.round(a["bid_px"][i] * 100), "A": np.round(a["ask_px"][i] * 100),
+    e = pd.DataFrame({"P": np.round(a["bid_px"][i] * PX), "A": np.round(a["ask_px"][i] * PX),
                       "bq": a["bid_qty"][i].astype("f8"), "aq": a["ask_qty"][i].astype("f8"),
                       "midT": (a["bid_px"][i] + a["ask_px"][i]) / 2}, index=pd.Index(s, name="sec"))
     days = sorted({pd.Timestamp(x, unit="s").strftime("%Y-%m-%d") for x in (h0, h0 + 3605)})
@@ -269,7 +290,7 @@ def exec_hour(path: Path) -> pd.DataFrame:
     return e.fillna({"sv": 0.0, "bv": 0.0, "smin": np.inf, "bmax": -np.inf})
 
 
-WHALE_USD, RETAIL_USD = 100_000.0, 10_000.0
+WHALE_USD, RETAIL_USD = CFG["whale"], CFG["retail"]
 
 
 # 움직이는 경계(10-03 tmp/whale_moving_tiers_4y.py 의 A): 고정 $100k 의 고래 거래대금 비중이 2022 19% → 2025~26 39% 로 떠서,
@@ -523,7 +544,7 @@ class Trader:
         elif a == 1:
             self.tgt = 0
         else:                                       # 시장가: 결정 순간 반대편 최우선에 즉시
-            px = (e["P"] if self.pos > 0 else e["A"]) / 100
+            px = (e["P"] if self.pos > 0 else e["A"]) / PX
             r = (self.pos * (px / e["midT"] - 1) * 1e4 - abs(self.pos) * TAKER_FEE_BP) * self.k
             self.pnl["taker"] += r
             self.n["taker_exits"] += 1
@@ -536,7 +557,7 @@ class Trader:
         """결정 시각부터 다음 초 결정 시각까지: 지정가 대기열 + 시가평가."""
         q = self.tgt - self.pos
         self.order, fc = queue_step(self.order, q, e["P"], e["A"], e["bq"], e["aq"], *w)
-        fill, px, prev = fc is not None, (fc or 0) / 100, self.pos
+        fill, px, prev = fc is not None, (fc or 0) / PX, self.pos
         h = prev * (mid1 / e["midT"] - 1) * 1e4 * self.k
         r, self.pos = step_reward(prev, q, px, e["midT"], mid1, fill)
         r *= self.k
@@ -695,6 +716,19 @@ def wall_thr() -> float:
     return float(np.quantile(np.abs(load_split("train")["X"][:, features_cols().index("imb50")]), 0.8))
 
 
+def calib_coin(start: str, end: str) -> dict:
+    """COINCFG 의 «학습 7일» 값을 이 코인 패널로 잰다(ETH 상수와 같은 정의): 벽 = 전 초 |imb50| 70/80/90분위 ·
+    청산 = 전 초 «직전 60초 청산액»(log1p USD) 99.5분위 · 되돌림 = 전 초 |5분 이동| 중앙값(bp). ETH 패널 09-20~27 로 원 상수 재현을 먼저 본다."""
+    p = pd.read_parquet(OUT / PANEL)
+    f = features(p).loc[_ts(start):_ts(end) - 1]
+    ok = (p.dd_valid.reindex(f.index) == 1) & p.mid.reindex(f.index).notna()
+    f = f[ok]
+    a = np.abs(f.imb50.to_numpy())
+    return dict(symbol=SYMBOL, rows=int(len(f)), wall_q={q: round(float(np.quantile(a, q / 100)), 4) for q in (70, 80, 90)},
+                liq=(round(float(np.quantile(f.liq_long60, 0.995)), 3), round(float(np.quantile(f.liq_short60, 0.995)), 3)),
+                pullback=round(float(np.median(np.abs(f.ret300))), 2))
+
+
 def teacher_act(A: dict, thr: float):
     """교사 규칙 = 깊은 벽 또는 고래 맞대결, 둘이 반대면 관망(10-02 규칙 평가 +77bp/일 [+16,+142], 9규칙 중 하나).
     봉 경계: 방향(없으면 관망) · 봉 중간: 보유. 피쳐만 보므로 포지션 상태와 무관."""
@@ -816,8 +850,8 @@ def features_cols() -> list[str]:
 # ── 실시간: 모의 매매하며 계속 학습 (서버) ───────────────────────────────────
 LIVE = OUT / "live"
 HOT = ROOT / "data" / "hot"
-WS = "wss://fstream.binance.com/ws/ethusdt@"     # bookTicker·depth@100ms·trade 셋 다 /ws/ (binance_ws_stream_path_table)
-WS_MARKET = "wss://fstream.binance.com/market/ws/ethusdt@"   # @aggTrade 는 /market/ws/ 에서만 온다(같은 표)
+WS = f"wss://fstream.binance.com/ws/{SYMBOL.lower()}@"     # bookTicker·depth@100ms·trade 셋 다 /ws/ (binance_ws_stream_path_table)
+WS_MARKET = f"wss://fstream.binance.com/market/ws/{SYMBOL.lower()}@"   # @aggTrade 는 /market/ws/ 에서만 온다(같은 표)
 SETTLE_S = 0.35                                 # 초 s 는 s+1+SETTLE_S 에 닫는다(depth 행은 다음 초 첫 메시지에 나온다)
 
 
@@ -945,7 +979,7 @@ class LiveFeed:
             return
         self.cnt["trade"] += 1
         with self.lock:
-            self.trades.append((int(t["T"]), round(px * 100), qty, bool(t["m"])))
+            self.trades.append((int(t["T"]), round(px * PX), qty, bool(t["m"])))
 
     def _on_agg(self, d):
         if d.get("e") == "aggTrade":
@@ -1002,15 +1036,15 @@ class LiveFeed:
         lo = s - WARMUP - 60 if self.tape.empty else s - 30     # 늦게 들어온 초까지 다시 읽는다
         rows = ds.read_rows(HOT / "binance_tape.sqlite",
                             "select ts_sec, price_bin, buy_qty, sell_qty, buy_n, sell_n, whale_buy_qty, whale_sell_qty, "
-                            "retail_buy_qty, retail_sell_qty from trade_tape_1s where symbol = 'ethusdt' and ts_sec >= ?", (lo,))
+                            "retail_buy_qty, retail_sell_qty from trade_tape_1s where symbol = ? and ts_sec >= ?", (SYMBOL.lower(), lo))
         new = pd.DataFrame(rows, columns=["ts_sec", "price_bin", "buy_qty", "sell_qty", "buy_n", "sell_n", "whale_buy_qty",
                                           "whale_sell_qty", "retail_buy_qty", "retail_sell_qty"])
         self.tape = pd.concat([self.tape[self.tape.ts_sec < lo] if len(self.tape) else self.tape, new])
         self.tape = self.tape[self.tape.ts_sec >= s - WARMUP - 60]
         ms = (s - WARMUP - 60) * 1000
         q = lambda tbl, cols: pd.DataFrame(ds.read_rows(HOT / "binance_ctx.sqlite",
-                                                        f"select {cols} from {tbl} where lower(symbol) = 'ethusdt' and ts_ms >= ?",
-                                                        (ms,)), columns=cols.split(", "))
+                                                        f"select {cols} from {tbl} where lower(symbol) = ? and ts_ms >= ?",
+                                                        (SYMBOL.lower(), ms)), columns=cols.split(", "))
         # ponytail: 맥락 표는 초당 몇 행이라 매초 창 전체를 다시 읽는다(수 ms). 느려지면 테이프처럼 증분으로.
         self.ctx_raw = dict(oi=q("oi_1s", "ts_ms, open_interest"), mark=q("mark_price_1s", "ts_ms, mark, index_px, funding_rate"),
                             liq=q("liquidations", "ts_ms, side, usd"))
@@ -1054,7 +1088,7 @@ class LiveFeed:
         T = int(time.time() * 1000)
         if b is None or T - b[0] > 2000:               # 호가가 2초 넘게 안 왔다 -> 주문 안 냄
             return dict(P=np.nan, A=np.nan, bq=np.nan, aq=np.nan, midT=np.nan, T=T)
-        return dict(P=round(b[1] * 100), A=round(b[3] * 100), bq=b[2], aq=b[4], midT=(b[1] + b[3]) / 2, T=T)
+        return dict(P=round(b[1] * PX), A=round(b[3] * PX), bq=b[2], aq=b[4], midT=(b[1] + b[3]) / 2, T=T)
 
     def window(self, T0, T1, pc, ac):
         # ponytail: T1 직전 체결이 아직 안 도착했으면 이 창에서 빠진다(수십 ms·보수적 방향). 필요하면 T1+지연까지 기다렸다 센다.
@@ -1153,8 +1187,8 @@ def live(seed: int, replay: pd.DataFrame | None = None, steps: int = 10**12, out
 
 
 # ── 모의 매매: 규칙 9판 병렬 + 매일 «활성 판» 고르기 (= 작은 진화) ──────────────────────
-PAPER = OUT / "paper"
-WALL_Q = {70: 0.1002, 80: 0.1294, 90: 0.1807}   # 학습 7일(09-20~26) |imb50| 분위 -- 서버가 데이터에 의존하지 않게 고정
+PAPER = OUT / f"paper{TAG}"
+WALL_Q = CFG["wall_q"]                          # 학습 7일(ETH 09-20~26) |imb50| 분위 -- 서버가 데이터에 의존하지 않게 고정
 TEACHER = "w80_z0.5"                            # 10-02 규칙 평가 +75bp/일 [+13,+145] (9규칙 중 하나)
 # 10-02 원장 진단(표본 안 발견 -> 실시간 판으로만 전진 검증): 추격 진입 −1.1 vs 역행 뒤 +8.3bp/건 · 진 거래 22%가 한때 +10bp ·
 #   청산 대기 9~104초 청산 체결 −2.75. 교사에 하나씩 얹은 판 3개.
@@ -1173,8 +1207,8 @@ ARMS = [f"w{q}_" + (f"z{z:g}" if z else "off") for q in WALL_Q for z in (None, 0
 #   _er       = 같은 거래를 동일위험 크기로: 직전 4시간 5분 수익 표준편차 대비 4.7년 중앙값(배 0.5~2). 🔴배포 위험모델(MAE 분위)이 아니라
 #               실현변동성 대용 -- 그 모델은 사이징 워커와 함께 09-27 에 꺼져 있다(dashboard_vol_model_removed).
 TREND_L, TREND_VOL_N, TREND_TARGET, TREND_MAX = (7, 14, 21, 28), 20, 0.50, 2.0
-POI_DOWN_BP = -26.68                            # ETH 4.7년(2022-01~2026-09) 5분 간격 1시간 수익 25분위 -- 원 연구 «Δ가격 하위 25%»
-ER_REF_BP, ER_CLIP = 14.95, (0.5, 2.0)          # 4.7년 «직전 48개 5분 수익 표준편차» 중앙값(bp)
+POI_DOWN_BP = CFG["poi"]                        # ETH -26.68 = 4.7년(2022-01~2026-09) 5분 간격 1시간 수익 25분위 -- 원 연구 «Δ가격 하위 25%»
+ER_REF_BP, ER_CLIP = CFG["er"], (0.5, 2.0)          # 4.7년 «직전 48개 5분 수익 표준편차» 중앙값(bp)
 TREND = {"day": None, "sig": 0.0, "size": 0.0}  # 엔진이 매일 일봉으로 채운다(refresh_trend). 비면 추세 판은 관망
 SWITCH_MIN_DAYS, SWITCH_T = 7, 2.5              # 교사에서 갈아타려면: 최근 ≤14일 «판 − 교사» 일 손익 차가 n≥7·t>2.5 (16판 -- 우연 1등 막으려 2.0 에서 올림)
 # 10-02 저장 10일 시험: «3일 뒤부터 최근 평균 1등»은 +34bp/일 < 고정 교사 +75 (09-23 에 w70_off 로 갈아타 −176) = 잡음 추종.
@@ -1235,8 +1269,8 @@ def arm_params(arm: str) -> tuple[float, float | None]:
     return thr, (None if z == "off" else float(z[1:]))
 
 
-PULLBACK_BP = 7.22                              # pullback 판: 직전 5분이 신호 반대로 «학습 7일 |5분 이동| 중앙값» 이상 밀렸을 때만 새 진입
-LIQ_BURST = {"liq_long60": 12.732, "liq_short60": 13.21}   # 학습 7일 «직전 60초 청산액» q99.5 (log1p USD ≈ $34만/$55만)
+PULLBACK_BP = CFG["pullback"]                   # ETH 7.22 · pullback 판: 직전 5분이 신호 반대로 «학습 7일 |5분 이동| 중앙값» 이상 밀렸을 때만 새 진입
+LIQ_BURST = dict(zip(("liq_long60", "liq_short60"), CFG["liq"]))   # 학습 7일 «직전 60초 청산액» q99.5 (log1p USD ≈ $34만/$55만)
 # 09-25 연구(liq_hunt_entry_with_liq_burst_exit): 청산 동반 급등은 안 되돌고 같은 크기 비청산 급등은 되돈다 -> «청산 실린 급등 역매매 금지».
 #   롱 청산 버스트 = 청산 실린 급락 -> 새 매수 금지, 숏 청산 버스트 = 청산 실린 급등 -> 새 매도 금지.
 
@@ -1381,7 +1415,7 @@ def pick_arm(hist: dict[str, list[float]]) -> str:
 
 def paper_backtest(days=None) -> dict:
     """저장 10일에 9판을 날짜별로 돌리고 같은 선택 규칙을 인과적으로 적용 -> 고정 교사 대비 선택의 값."""
-    p, e = pd.read_parquet(OUT / "panel.parquet"), pd.read_parquet(OUT / "exec.parquet")
+    p, e = pd.read_parquet(OUT / PANEL), pd.read_parquet(OUT / f"exec{TAG}.parquet")
     cols = features_cols()
     idx = {c: cols.index(c) for c in ("imb50", "whale_z", "retail_z", "ret300", "doi300", "liq_long60", "liq_short60")}
     days = days or [d.strftime("%Y-%m-%d") for d in pd.date_range("2026-09-20", "2026-09-29")]
@@ -1553,7 +1587,7 @@ def calib(n: int = 5000, timeout: int = 120, seed: int = 0) -> dict:
                 break
             order, fc = queue_step(order, side, *(E[c][j] for c in ("P", "A", "bq", "aq", "sv", "smin", "bv", "bmax")))
             if fc is not None:
-                rows.append((vol[i], k + 1, side * (fc / 100 / mid0 - 1) * 1e4))
+                rows.append((vol[i], k + 1, side * (fc / PX / mid0 - 1) * 1e4))
                 break
         else:
             rows.append((vol[i], np.nan, np.nan))
@@ -1790,7 +1824,7 @@ def selftest() -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["selftest", "build", "build-exec", "build-whale", "build-zh", "calib", "train", "eval", "live",
-                                    "paper", "paper-backtest"])
+                                    "paper", "paper-backtest", "calib-coin"])
     ap.add_argument("--replay-day", help="live 를 저장 패널의 이 날짜로 시험(예: 2026-09-29)")
     ap.add_argument("--start", default="2026-09-20")
     ap.add_argument("--end", default="2026-09-30")
@@ -1803,7 +1837,7 @@ def main() -> None:
     elif a.cmd == "build":
         OUT.mkdir(parents=True, exist_ok=True)
         p = build(a.start, a.end)
-        p.to_parquet(OUT / "panel.parquet")
+        p.to_parquet(OUT / f"panel{TAG}.parquet")
         print(len(p), "rows", p.notna().mean().round(3).to_string())
     elif a.cmd == "build-zh":                         # panel_zh.parquet = panel + 제우스·호메로스 (모의 매매 엔진의 panel 은 그대로)
         p = add_zeus_homer(pd.read_parquet(OUT / "panel.parquet"))
@@ -1811,12 +1845,12 @@ def main() -> None:
         z = [c for c in p.columns if c.startswith(("zs_", "hm_"))]
         print(len(z), "열 추가 · 결측률", round(float(p[z].iloc[WARMUP:].isna().mean().mean()), 4))
     elif a.cmd == "build-whale":                      # panel.parquet 에 wz·rz 열을 붙인다(aggtrades/ 에 30일 이전부터 필요)
-        p = add_whale(pd.read_parquet(OUT / "panel.parquet").drop(columns=["wz", "rz"], errors="ignore"))
-        p.to_parquet(OUT / "panel.parquet")
+        p = add_whale(pd.read_parquet(OUT / f"panel{TAG}.parquet").drop(columns=["wz", "rz"], errors="ignore"))
+        p.to_parquet(OUT / f"panel{TAG}.parquet")
         print(p[["wz", "rz"]].describe().round(3).to_string())
     elif a.cmd == "build-exec":
         e = build_exec(a.start, a.end)
-        e.to_parquet(OUT / "exec.parquet")
+        e.to_parquet(OUT / f"exec{TAG}.parquet")
         print(len(e), "rows", e.describe().T.round(3).to_string())
     elif a.cmd == "paper":
         paper()
@@ -1827,6 +1861,8 @@ def main() -> None:
         print("활성 판   ", " ".join(r["active"]))
         print(f"선택 트랙  {np.mean(r['selected']):+7.1f} | " + " ".join(f"{x:+5.0f}" for x in r["selected"]))
         print(f"고정 교사  {np.mean(r['teacher']):+7.1f}")
+    elif a.cmd == "calib-coin":                       # 예: RL_SYMBOL=SOLUSDT ... calib-coin --start 2026-09-27 --end 2026-10-04
+        print(json.dumps(calib_coin(a.start, a.end)))
     elif a.cmd == "calib":
         print(json.dumps(calib(), indent=1))
     elif a.cmd == "train":
