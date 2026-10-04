@@ -586,6 +586,7 @@ async function setActiveSnapshotAsset(asset) {
   latestChartMarkers = null; chartMarkersLastFetchAt = 0;
   // 2026-10-04 시장 맥락·추세 칩도 코인별(서버 ?asset=) -- 옛 코인 값을 새 코인 이름 아래 두지 않는다.
   latestMarketCtx = null; marketCtxLastFetchAt = 0; latestTrend = null; trendLastFetchAt = 0;
+  renderPaper();   // 모의 판은 ETH 엔진 -- 다른 코인에선 제목에 «· ETH»(배지는 머리글을 덮었다)
 
   // ⭐await보다 먼저 -- 스켈레톤은 첫 fetch가 나가기 전에 이미 화면에 올라가 있어야 한다.
   const generation = beginAssetScopeLoading();
@@ -4168,7 +4169,7 @@ const PAPER_NEW = [["trend4", "추세 4주"], ["trend4_vs", "추세 4주 ×크�
 function paperHtml(d = latestPaper) {
   const open = mcTipOpen.has("paper");
   const days = d && d.available && d.arms && d.arms["w80_z0.5_a24_mh15"] ? d.arms["w80_z0.5_a24_mh15"].days : null;
-  const head = `<h4><button type="button" class="mc-q" data-tip="paper" aria-expanded="${open}">모의 판<span aria-hidden="true">?</span></button><span class="ppm-sub">실주문 없음 · bp${days ? ` · ${days}일째` : ""}</span></h4>`
+  const head = `<h4><button type="button" class="mc-q" data-tip="paper" aria-expanded="${open}">모의 판${activeSnapshotAsset !== "eth" ? " · ETH" : ""}<span aria-hidden="true">?</span></button><span class="ppm-sub">실주문 없음 · bp${days ? ` · ${days}일째` : ""}</span></h4>`
     + `<p class="mc-tip"${open ? "" : " hidden"}>${escapeHtml(MC_TIPS.paper)}</p>`;
   if (!d || !d.available) return `<div class="mc-sec ppm">${head}<div class="ppm-empty">모의 매매 엔진 상태 없음${d && d.error ? ` (${escapeHtml(String(d.error))})` : ""}</div></div>`;
   const A = d.arms || {}, a1 = A["w80_z0.5_a24_mh15"], a2 = A["w100_z0.5_w60"], p1 = d.port;
