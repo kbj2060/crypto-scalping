@@ -448,6 +448,8 @@ PAPER_STATE_PATH = REPO_ROOT / "data" / "research" / "rl_1s_agent_20261002" / "p
 # 2026-10-04 미리보기 엔진(같은 코드, 별도 폴더) -- 정식 엔진이 신호를 쓰기 전까지만 화면이 읽는다(사용자 «둘 다 기록»)
 PAPER_PREVIEW_STATE_PATH = PAPER_STATE_PATH.parent.parent / "paper_preview" / "state.json"
 PAPER_ARMS = ("w80_z0.5_a24_mh15", "w100_z0.5_w60")   # 적응판 · 고래판 (반반 = 엔진 PORTFOLIOS["p1"])
+# 2026-10-04 «통과 신호 판»(엔진 1d3e5a32, 10-04 00:02 UTC 재시작부터): 1~4주 추세 · 크기 · 가격×OI 1시간 · 추세 필터 · 동일위험
+PAPER_NEW_ARMS = ("trend4", "trend4_vs", "poi1h", "w80_z0.5_a24_mh15_vt", "w100_z0.5_w60_vt", "w80_z0.5_a24_mh15_er", "w100_z0.5_w60_er")
 PAPER_STALE_S = 300                                    # 엔진은 1분마다 쓴다 -- 5분 넘게 안 바뀌면 멈춘 것
 MACRO_CALENDAR_MAX_AGE_MIN = 90.0          # 달력이라 분 단위 신선도가 의미 없다
 
@@ -1087,7 +1089,7 @@ def paper_arms_payload(st: Any, now: float) -> dict[str, Any]:
     age = now - float(st.get("ts") or 0)
     arms = st.get("arms") or {}
     return {"available": True, "ts": st.get("ts"), "age_s": round(age, 1), "stale": age > PAPER_STALE_S,
-            "arms": {a: arms.get(a) for a in PAPER_ARMS}, "port": (st.get("port") or {}).get("p1"),
+            "arms": {a: arms.get(a) for a in PAPER_ARMS + PAPER_NEW_ARMS}, "port": (st.get("port") or {}).get("p1"),
             "signals": st.get("signals") or {}}
 
 

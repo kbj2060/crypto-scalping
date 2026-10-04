@@ -2825,16 +2825,22 @@ body.not-eth #fpLineSwitch { display: none; }
 .ppm { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
 .ppm h4 { margin: 0 0 4px; display: flex; align-items: center; justify-content: space-between; }
 .ppm-sub { font-size: 11px; color: var(--muted); font-weight: 600; }
-.ppm-row { padding: 5px 0; border-top: 1px solid var(--soft-line); }
-.ppm-row.sum { border-top-color: var(--line); }
-.ppm-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-.ppm-name { font-size: 12px; font-weight: 700; color: var(--text); }
-.ppm-row.sum .ppm-name { font-weight: 800; }
-.ppm-line { margin-top: 3px; font-size: 11px; color: var(--muted); white-space: nowrap; }
-.ppm-line b { font: 700 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
-.ppm-tgt { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; font: 800 11px/1 var(--font-sans); padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-.ppm-tgt.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
-.ppm-tgt.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.ppm-t { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }   /* 2026-10-04 판마다 한 줄 -- 칸이 낮으면 표만 스크롤 */
+.ppm-r { display: grid; grid-template-columns: minmax(0, 1fr) 30px 32px 32px 32px; align-items: center; column-gap: 5px; padding: 1px 0; border-top: 1px solid var(--soft-line); }
+.ppm-r.h { border-top: 0; padding: 0 0 2px; font-size: 11px; color: var(--muted); }
+.ppm-r.h span:not(:first-child), .ppm-r b { text-align: right; }
+.ppm-r.h span:nth-child(2), .ppm-r .ppm-tgt { justify-self: center; }
+.ppm-r.sum { border-top-color: var(--line); }
+.ppm-r b { font: 700 11px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
+.ppm-r b.mc-good { color: var(--good); }
+.ppm-r b.mc-bad { color: var(--bad); }
+.ppm-name { font-size: 11.5px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ppm-r.sum .ppm-name { font-weight: 800; }
+.ppm-sep { display: flex; justify-content: space-between; margin-top: 3px; padding: 3px 0 1px; border-top: 1px solid var(--line); font-size: 11px; font-weight: 700; color: var(--muted); }
+.ppm-wait { padding: 6px 0; font-size: 11px; color: var(--muted); }
+.ppm-tgt { font: 800 11px/1.3 var(--font-sans); color: var(--muted); }   /* 2026-10-04 알약 테두리 -> 방향색 글자(10판이 칸 하나에 들어가게) */
+.ppm-tgt.long { color: var(--good); }
+.ppm-tgt.short { color: var(--bad); }
 .ppm-empty { flex: 1; display: grid; place-items: center; text-align: center; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; padding: 10px; margin-top: 4px; }
 .ppm-foot { margin-top: auto; padding-top: 6px; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
 

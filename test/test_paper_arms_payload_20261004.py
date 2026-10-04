@@ -9,7 +9,8 @@ def test_paper_arms_payload():
           "port": {"p1": {"cum": 1.5}}, "signals": {"bar_s": 999}}
     d = server.paper_arms_payload(st, 1100)
     assert d["available"] and not d["stale"] and d["age_s"] == 100
-    assert set(d["arms"]) == set(server.PAPER_ARMS) and d["port"] == {"cum": 1.5} and d["signals"]["bar_s"] == 999
+    assert set(d["arms"]) == set(server.PAPER_ARMS + server.PAPER_NEW_ARMS) and d["port"]
+    assert d["arms"]["trend4"] is None and "other" not in d["arms"]   # 재시작 전(새 판 없음)은 None -- 화면이 «재시작부터»로 그린다 == {"cum": 1.5} and d["signals"]["bar_s"] == 999
     assert server.paper_arms_payload(st, 1000 + server.PAPER_STALE_S + 1)["stale"] is True
 
 
