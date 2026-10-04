@@ -1,6 +1,10 @@
 {
   "_doc": "2026-10-05 알림 센터 «판정 예정일». 사전등록 판정일 목록 — 대시보드(/api/notify-center)와 푸시 데몬(scripts/live_push_notifier_20260904.py, 그날 09:00 KST 한 번)이 같이 읽는다. date = 판정을 처음 돌려도 되는 날(UTC). approx=true 는 건수 기준이라 날짜가 추정이다. 판정이 끝나면 done 에 결과 한 줄. 호가 아이디어(orderbook_strategy_ideas) 문서·스크립트는 10-05 현재 워크트리 eth-orderflow-analysis-system 에만 있다(main 미병합).",
   "items": [
+    {"id": "news_rss_lag", "date": "2026-10-06", "kind": "보고", "title": "뉴스 RSS 24시간 지연 — The Block·Cointelegraph·CoinDesk 를 속보로 쓸 수 있나",
+     "what": "10-05 01:50 KST 가동 후 새 기사(backfill=0)의 «게시 시각 → 첫 관측» 지연 중앙·p90 과 CDN age · 실패율. 중앙 수 분 이내면 속보 후보, 수십 분이면 «뉴스 요약» 용도만",
+     "how": "서버 data/hot/news_rss.sqlite — items(first_seen_ms − pub_ms, backfill=0) · polls(status, age_s)",
+     "doc": "scripts/live_news_rss_collector_20261005.py"},
     {"id": "f0a", "date": "2026-10-12", "kind": "최종", "title": "깊은 벽 F0a — 블록 통계가 매매 크기를 부풀리나",
      "what": "ETH 7일 창 «인과 풀링 / 블록» 비율 < 0.4 면 통과 — 블록 통계 +14bp 가 매매 크기의 증폭이라는 진단 확인",
      "how": "python scripts/research_orderbook_strategy_ideas_20261004.py --blockcheck --since 2026-10-04T00:00Z --end 2026-10-12T00:00Z",
