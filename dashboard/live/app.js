@@ -4080,7 +4080,7 @@ MC_TIPS.q_wall = MC_TIPS.book + "\n\n" + MC_TIPS.cross + "\n\n" + MC_TIPS.px;
 // 2026-10-04 맞대결·벽 신호·모의 판(사용자 승인 시안) -- 원천 = 모의 매매 엔진 상태(/api/paper-arms). 연구와 같은 계산을 엔진이 한 번만 한다.
 MC_TIPS.q_flow += "\n\n맞대결 = 정시마다 고래(체결 한 줄 $10만+)·리테일($1만 미만)의 60분 순매수를 자기 지난 30일과 견준 z 가 반대이고 둘 다 0.5 이상이면 고래 쪽, 다음 정시까지. 위 줄들(14일 같은 요일유형·시간대 잣대)과 잣대가 달라 가끔 엇갈린다. 4.7년 검정에서 약하게 맞았다(메이커 체결 전제).";
 MC_TIPS.q_wall += "\n\n벽 신호 = 5분봉 마감 때 ±50bp 매수·매도 잔량 불균형이 지난 24시간 상위 20% 문턱(주황 점선)을 넘는 쪽, 다음 5분. 직전 5분이 이미 그 방향으로 움직였으면 «추격 주의». 본질은 «방금 움직인 반대쪽»이라 한 방향으로 계속 가는 날엔 틀린다.";
-MC_TIPS.paper = "서버가 같은 시세로 여러 판을 동시에 돌린 모의 매매(실주문 없음). 따라 하라는 신호가 아니라 «이 규칙이 지금 무엇을 들고 있나». 적응판 = 벽 신호 + 맞대결, 새 진입 뒤 15분 보유 · 고래판 = 맞대결이면 고래 쪽 60분 · 반반 = 둘을 ½씩(서로 따로 움직여 낙폭이 준다). 숫자 = 1 ETH 명목 대비 bp, 체결은 지정가 대기열로 판정 · 최대 낙폭은 기록 시작부터. 줄에 마우스를 올리면 진입가·미실현.\n\n통과 신호 판(10-04~) = 연구에서 통과한 신호를 같은 엔진으로: 추세 4주 = 7·14·21·28일 종가 비교 부호 평균, 매일 00시 UTC(유일하게 통과한 매매 전략) · ×크기 = 같은 방향을 연 50% ÷ 20일 변동성 크기로(±2배) · 가격×OI 1h = 정시 직전 1시간이 크게 내렸을 때 OI 가 줄면 롱 · 늘면 숏, 1시간 · +추세필터 = 24시간 평균선 반대 방향은 진입 안 함 · 동일위험 = 직전 4시간 변동성에 맞춰 크기 0.5~2배(배포 위험모델이 아닌 실현변동성 대용).";
+MC_TIPS.paper = "서버가 같은 시세로 여러 판을 동시에 돌린 모의 매매(실주문 없음). 따라 하라는 신호가 아니라 «이 규칙이 지금 무엇을 들고 있나». 적응판 = 벽 신호 + 맞대결, 새 진입 뒤 15분 보유 · 고래판 = 맞대결이면 고래 쪽 60분 · 반반 = 둘을 ½씩(서로 따로 움직여 낙폭이 준다). 숫자 = 1 ETH 명목 대비 bp, 체결은 지정가 대기열로 판정 · 최대 낙폭은 기록 시작부터. 줄에 마우스를 올리면 진입가·미실현.\n\n통과 신호 판(10-04~) = 연구에서 통과한 신호를 같은 엔진으로: 추세 4주 = 7·14·21·28일 종가 비교 부호 평균, 매일 00시 UTC(유일하게 통과한 매매 전략) · ×크기 = 같은 방향을 연 50% ÷ 20일 변동성 크기로(±2배) · 가격×OI 1h = 정시 직전 1시간이 크게 내렸을 때 OI 가 줄면 롱 · 늘면 숏, 1시간(10-05 재검정: 근거가 2022~24 에만 있고 2025~ 는 불통과 — 흐린 줄, 기록만) · +추세필터 = 24시간 평균선 반대 방향은 진입 안 함 · 동일위험 = 직전 4시간 변동성에 맞춰 크기 0.5~2배(배포 위험모델이 아닌 실현변동성 대용).";
 // 시안 B 그림 부품 -- 전부 SVG 문자열. 폭은 고정(칸 격자가 줄을 맞춘다), 색은 3색 규칙(방향만 초록·빨강, 극단 구간만 주황).
 const mcGfx = {
   pct(p, w = mcGfx.gw || 130) {   // 분위 0~1 · 양끝 10% 주황 띠 · 값 없으면 빈 막대
@@ -4212,12 +4212,15 @@ const PAPER_NEW = [["trend4", "추세 4주"], ["trend4_vs", "추세 4주 ×크�
 // 2026-10-04 SOL·XRP 판별 검정(사용자 «각각 테스트 및 적용») -- 통과한 판만 진하게, 나머지는 흐리게 «기록만».
 //   추세 4주: SOL 약한 통과 · XRP 불합격 / 가격×OI: 둘 다 불합격(docs/experiments/trend4_poi1h_solxrp_20261004.md) ·
 //   맞대결: 둘 다 불합격(whale_duel_solxrp_20261004.md) -> 맞대결을 쓰는 적응판·고래판·반반과 그 변형도 미통과.
-const PAPER_COIN_OK = { sol: new Set(["trend4", "trend4_vs"]), xrp: new Set() };
+//   2026-10-05 ETH 가격×OI 1h 도 2025~ 재검정 불통과(사용자 «ETH 가격×OI 판 문제도 고쳐줘»): 정시 결정 +1.21[−1.41,+3.81] ·
+//   원 연구 5분 정의 OI↓−OI↑ +3.37[−0.32,+7.53] · 5분 판정 1시간 보유 −8.25bp/일 -- 근거(+3.5)는 2022~24 구간의 것이었다.
+const PAPER_COIN_OK = { sol: new Set(["trend4", "trend4_vs"]), xrp: new Set(),
+  eth: new Set(["w80_z0.5_a24_mh15", "w100_z0.5_w60", "p1", "trend4", "trend4_vs", "w80_z0.5_a24_mh15_vt", "w100_z0.5_w60_vt", "w80_z0.5_a24_mh15_er", "w100_z0.5_w60_er"]) };
 function paperHtml(d = latestPaper) {
-  const open = mcTipOpen.has("paper"), C = activeSnapshotAsset, ok = PAPER_COIN_OK[C];   // ok 없음 = ETH(전부 원 연구 통과)
+  const open = mcTipOpen.has("paper"), C = activeSnapshotAsset, ok = PAPER_COIN_OK[C], other = C !== "eth";
   const days = d && d.available && d.arms && d.arms["w80_z0.5_a24_mh15"] ? d.arms["w80_z0.5_a24_mh15"].days : null;
   const head = `<h4><button type="button" class="mc-q" data-tip="paper" aria-expanded="${open}">모의 판<span aria-hidden="true">?</span></button><span class="ppm-sub">실주문 없음 · bp${days ? ` · ${days}일째` : ""}</span></h4>`
-    + `<p class="mc-tip"${open ? "" : " hidden"}>${escapeHtml(MC_TIPS.paper + (ok ? `\n\n${coinUnit()} = 같은 판을 이 코인 시세·이 코인 문턱으로(주문 1단위 = ETH 1개와 같은 명목). 흐린 줄 = 이 코인 검정 불통과 — 기록만 남긴다.` : "")).replace(/\n/g, "<br>")}</p>`;
+    + `<p class="mc-tip"${open ? "" : " hidden"}>${escapeHtml(MC_TIPS.paper + (other ? `\n\n${coinUnit()} = 같은 판을 이 코인 시세·이 코인 문턱으로(주문 1단위 = ETH 1개와 같은 명목). 흐린 줄 = 이 코인 검정 불통과 — 기록만 남긴다.` : "")).replace(/\n/g, "<br>")}</p>`;
   if (!d || !d.available) return `<div class="mc-sec ppm">${head}<div class="ppm-empty">모의 매매 엔진 상태 없음${d && d.error ? ` (${escapeHtml(String(d.error))})` : ""}</div></div>`;
   const A = d.arms || {}, a1 = A["w80_z0.5_a24_mh15"], a2 = A["w100_z0.5_w60"], p1 = d.port;
   if (!a1 || !a2 || a1.cum == null) return `<div class="mc-sec ppm">${head}<div class="ppm-empty">실시간 기록 시작 전<br>엔진 재시작부터 쌓입니다</div></div>`;
@@ -4228,7 +4231,7 @@ function paperHtml(d = latestPaper) {
     return `<div class="ppm-r${sum ? " sum" : ""}${off ? " off" : ""}" title="${off ? `${coinUnit()} 검정 불통과 — 기록만 · ` : ""}${a.entry ? `진입 ${a.entry} · 미실현 ${n(a.unr)}bp` : "포지션 없음"}"><span class="ppm-name">${name}</span>`
       + `<span class="ppm-tgt ${c}">${t}</span><b class="${tone(a.pnl_today)}">${n(a.pnl_today)}</b><b class="${tone(a.cum)}">${n(a.cum)}</b><b>${n(a.mdd)}</b></div>`; };
   const fresh = PAPER_NEW.filter(([k]) => A[k] && A[k].cum != null);
-  const sep = `<div class="ppm-sep"><span>${ok ? "ETH 통과 판" : "통과 신호 판"}</span><span>${fresh.length ? `${A[fresh[0][0]].days}일째` : ""}</span></div>`;
+  const sep = `<div class="ppm-sep"><span>${other ? "ETH 통과 판" : "통과 신호 판"}</span><span>${fresh.length ? `${A[fresh[0][0]].days}일째` : ""}</span></div>`;
   const news = fresh.length ? fresh.map(([k, nm]) => row(nm, A[k], false, k)).join("")
     : `<div class="ppm-wait">10-04 00:02 UTC 엔진 재시작부터 기록</div>`;
   return `<div class="mc-sec ppm">${head}<div class="ppm-t"><div class="ppm-r h"><span></span><span>목표</span><span>오늘</span><span>누적</span><span>낙폭</span></div>`
