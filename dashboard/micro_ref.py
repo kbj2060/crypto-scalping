@@ -239,14 +239,16 @@ def flow_hour_scales_from_bars(rows: list) -> dict[int, dict[str, float]]:
     return out
 
 
-def flow_hour_scales(db_path: Path, days: int = FLOW_SCALE_DAYS, symbol: str = "ethusdt") -> dict[int, dict[str, float]]:
-    """trade_tape_1s 의 크기별 수량(2026-09-19~ 채워짐, 그 전은 NULL) -- 오늘 0시(UTC) 전 days 일. hot 은 심볼로 거른다."""
+def flow_hour_scales(db_path: Path, days: int = FLOW_SCALE_DAYS, symbol: str = "ethusdt",
+                     since_ts: int = 0) -> dict[int, dict[str, float]]:
+    """trade_tape_1s 의 크기별 수량(2026-09-19~ 채워짐, 그 전은 NULL) -- 오늘 0시(UTC) 전 days 일. hot 은 심볼로 거른다.
+    since_ts: 이보다 앞 행은 안 쓴다 -- 고래·리테일 경계가 바뀐 코인(SOL·XRP, SIZE_BANDS_SINCE)의 옛 경계 행을 섞지 않으려고."""
     from scripts.data_store import read_rows  # noqa: PLC0415
     today = int(time.time()) // 86400 * 86400
     rows = read_rows(db_path,
                      "SELECT ts_sec - ts_sec % 300 AS b, sum(buy_qty - sell_qty), sum(whale_buy_qty - whale_sell_qty), "
                      "sum(retail_buy_qty - retail_sell_qty) FROM trade_tape_1s WHERE symbol = ? AND whale_buy_qty IS NOT NULL "
-                     "AND ts_sec >= ? AND ts_sec < ? GROUP BY 1 ORDER BY 1", [symbol, today - days * 86400, today])
+                     "AND ts_sec >= ? AND ts_sec < ? GROUP BY 1 ORDER BY 1", [symbol, max(today - days * 86400, since_ts), today])
     return flow_hour_scales_from_bars(rows)
 
 

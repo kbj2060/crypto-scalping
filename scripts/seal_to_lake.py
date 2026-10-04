@@ -75,7 +75,8 @@ SPECS = [
     ("binance", "oi_1s", [(BN_CTX_REL, "oi_1s", SYM)], "ts_ms"),
     ("binance", "mark_1s", [(BN_CTX_REL, "mark_price_1s", SYM)], "ts_ms"),
     ("binance", "liquidations", [(BN_CTX_REL, "liquidations", SYM)], "ts_ms"),
-    ("binance", "oi_lsratio_5m", [(f"{L}/oi_lsratio.duckdb", f"oi_lsratio_5m{sfx(c)}", lit(c)) for c in ("eth", "btc", "sol")]
+    # 2026-10-04 XRP 는 대시보드 롱숏비 워커가 다시 쓴다(oi_lsratio.duckdb::oi_lsratio_5m_xrp) -- 옛 archive 와 날짜가 안 겹친다
+    ("binance", "oi_lsratio_5m", [(f"{L}/oi_lsratio.duckdb", f"oi_lsratio_5m{sfx(c)}", lit(c)) for c in ("eth", "btc", "sol", "xrp")]
      + [(f"{A}/oi_lsratio_{c}.duckdb", f"oi_lsratio_5m_{c}", lit(c)) for c in ("xrp", "hype")], "epoch_ms(ts)"),
     ("binance", "micro_1m", [(f"{L}/microstructure.duckdb", f"microstructure_1m{sfx(c)}", lit(c)) for c in ("eth", "btc", "sol")]
      + [(f"{A}/microstructure_{c}.duckdb", f"microstructure_1m_{c}", lit(c)) for c in ("xrp", "hype")], "epoch_ms(ts)"),

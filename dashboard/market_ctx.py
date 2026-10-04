@@ -148,7 +148,7 @@ def hl_liq_levels(rows: Iterable[tuple[float, float]], mid: float, bin_usd: floa
         side = "below" if szi > 0 else "above"
         if (side == "below") != (liq < mid):
             continue                     # 이미 넘어선 청산가(곧 사라질 행) -- 방향이 뒤집힌 건 버린다
-        k = (side, round(liq / bin_usd) * bin_usd)
+        k = (side, round(round(liq / bin_usd) * bin_usd, 10))   # 10자리: XRP 칸(0.003)의 부동소수 꼬리(1.4970000000000001)를 뗀다
         a = agg.setdefault(k, [0.0, 0])
         a[0] += abs(szi) * mid
         a[1] += 1
@@ -164,7 +164,7 @@ def liq_profile(events: Iterable[tuple[float, float, bool]], bin_usd: float = LI
     agg: dict[float, list[float]] = {}
     for px, usd, is_long in events:
         if px > 0 and usd > 0:
-            a = agg.setdefault(round(px / bin_usd) * bin_usd, [0.0, 0.0])
+            a = agg.setdefault(round(round(px / bin_usd) * bin_usd, 10), [0.0, 0.0])
             a[0 if is_long else 1] += usd
     return [[k, round(a[0]), round(a[1])] for k, a in sorted(agg.items())]
 

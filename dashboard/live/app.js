@@ -586,6 +586,7 @@ async function setActiveSnapshotAsset(asset) {
   latestChartMarkers = null; chartMarkersLastFetchAt = 0;
   // 2026-10-04 시장 맥락·추세 칩도 코인별(서버 ?asset=) -- 옛 코인 값을 새 코인 이름 아래 두지 않는다.
   latestMarketCtx = null; marketCtxLastFetchAt = 0; latestTrend = null; trendLastFetchAt = 0;
+  renderMarketCtx(); renderSituation();   // 옛 코인 카드·칩을 다음 폴링(최대 1초)까지 두지 않는다
   renderPaper();   // 모의 판은 ETH 엔진 -- 다른 코인에선 제목에 «· ETH»(배지는 머리글을 덮었다)
 
   // ⭐await보다 먼저 -- 스켈레톤은 첫 fetch가 나가기 전에 이미 화면에 올라가 있어야 한다.
@@ -4030,7 +4031,7 @@ const MC_TIPS = {
   flow: "크기별 순매수 = 테이커 주문 크기로 가른 60분 순매수를, 지난 14일 같은 시간대(UTC 시) 60분 순매수의 보통 크기(중앙값 편차)로 나눈 값(σ) — 한산한 새벽과 미국장이 같은 잣대로 보인다(기준이 아직 없으면 서버 기동 후 12~24시간 분포). 고래 ≥ $10만 · 리테일 < $1만. 30분 체결 = 거래소별 순매수(ETH).\n우리 검정: 혼자서는 셋 다 되돌림 쪽(리테일이 가장 심하다). 고래와 리테일이 갈릴 때 60분 고래 쪽이 약하게 맞았다(메이커 전제). CVD는 «설명»이지 선행지표가 아니다.",
   cross: "BTC 30분 이동과 ETH의 동행 여부 · 거래소 가격차(바이낸스 기준 — OKX 는 마크 대 마크, HL 은 미드 대 미드. 마크는 평활값이라 미드와 섞어 재면 괴리가 부풀어 보인다) · HL 프리미엄(마크 − 오라클).\n우리 검정: BTC→ETH 1분 선행 0, 바이낸스가 HL을 1초 안쪽으로 앞선다 — 30분~2시간 방향에는 못 쓴다. 괴리가 커지는 순간(거래소 장애·한쪽 청산 쏠림)을 알아채는 용도.",
   book: "미드에서 ±25/50/100bp까지 걸린 호가 합 = 그만큼 밀려면 먹어야 할 물량(한 초 스냅샷 · 취소·재보충은 모른다). 얇은 쪽 = ±25bp 호가가 지난 6시간 중 몇 분위인가.\n우리 검정: 미검정. 거래량 계열은 실현변동성에 대부분 먹혔으니 «크기·속도» 참고로만. ETH 스프레드는 거의 늘 1틱이라 벌어지면 그 자체가 이상 신호다.",
-  liq: "청산 급증 = 봇의 1분 청산 z. HL 고래 청산가 = 추적 중인 HL 상위 300주소의 실제 청산가(추정 아님)를 $5 단위로 묶은 금액 — 차트에 점선으로도 그린다. 12시간 실측 = 바이낸스 강제청산이 실제로 체결된 가격(차트 체결 기둥 안쪽 눈금).\n우리 검정: 청산 급증 뒤 역매매·추종 둘 다 엣지 0 — «청산 동반 급등에 역매매 금지» 필터만 유효. 추정 청산맵은 «위치»는 맞고 방향은 없다. HL 실측 청산가는 미검정.",
+  liq: "청산 급증 = 봇의 1분 청산 z. HL 고래 청산가 = 추적 중인 HL 상위 300주소의 실제 청산가(추정 아님)를 가격의 ~0.2% 칸(ETH $5)으로 묶은 금액 — 차트에 점선으로도 그린다. 12시간 실측 = 바이낸스 강제청산이 실제로 체결된 가격(차트 체결 기둥 안쪽 눈금).\n우리 검정: 청산 급증 뒤 역매매·추종 둘 다 엣지 0 — «청산 동반 급등에 역매매 금지» 필터만 유효. 추정 청산맵은 «위치»는 맞고 방향은 없다. HL 실측 청산가는 미검정.",
   when: "다음 펀딩 정산 · 가까운 옵션 만기와 max pain · 미국장 · 다음 주요 지표.\n우리 검정: 펀딩 정산 전후 드리프트는 반기마다 부호가 뒤집혀 기각. max pain 쪽 1시간 규칙(만기 1시간 전 → 08:00 UTC)만 2026년 첫 검정 통과 — 후보라 표본외 장부로 계속 잰다.",
   px: "VWAP = 거래량 가중 평균가(σ = 거래량 가중 표준편차). 기본은 하루(UTC 00시부터) · «세션 시작부터»를 켜면 지금 시장 세션 개장부터 센다(아시아 도쿄 09시 · 유럽 런던 08시 · 미국 뉴욕 09:30, 현지 시각 · 서머타임 반영 · 미국장 뒤는 다음 00시까지 미국 세션). 개장 직후 30~60분은 봉이 적어 가격에 붙어 다닌다. 볼린저 %B = (종가 − 하단) ÷ (상단 − 하단), 20봉·2σ. RSI 14 = 5분봉. 스위치로 차트에 선을 켠다.\n우리 검정: 볼린저·VWAP 셋업은 방향 엣지가 없었고 RSI·%B는 짧은 되돌림을 약하게 말한다(비용을 못 넘음). 위치 참고용.",
 };
@@ -4118,7 +4119,7 @@ const mcGfx = {
 };
 
 async function refreshMarketCtx() {
-  if (activePageTab !== "snapshot" || document.hidden) return;
+  if (activePageTab !== "snapshot" || document.hidden || !flowOn()) return;   // 흐름 엔진 없는 코인은 서버가 404
   const now = Date.now();
   if (now - marketCtxLastFetchAt < MARKET_CTX_POLL_MS) return;
   marketCtxLastFetchAt = now;
@@ -4282,7 +4283,9 @@ function mcPlace(svg, r, wr) {
 function renderMarketCtx() {
   const body = el("mcBody"), badge = el("mcBadge");
   if (!body) return;
-  const d = latestMarketCtx, A = activeSnapshotAsset, eth = A === "eth", U = coinUnit();   // 2026-10-04 코인별(SOL·XRP)
+  const A = activeSnapshotAsset, eth = A === "eth", U = coinUnit();   // 2026-10-04 코인별(SOL·XRP)
+  if (!flowOn()) { body.innerHTML = ""; body._mcHtml = null; return; }
+  const d = latestMarketCtx && latestMarketCtx.asset === A ? latestMarketCtx : null;   // 다른 코인 응답은 «불러오는 중»
   if (!d || !d.available) {
     body.innerHTML = `<div class="mc-note">${d && d.error ? `시장 맥락 지연 (${escapeHtml(String(d.error))})` : "불러오는 중…"}</div>`;
     body._mcHtml = null;
@@ -4295,8 +4298,11 @@ function renderMarketCtx() {
   const left = (ms) => { if (!ms) return "-"; const s = Math.max(0, (ms - Date.now()) / 1000); return s >= 3600 ? `${Math.floor(s / 3600)}시간 ${Math.floor((s % 3600) / 60)}분` : `${Math.ceil(s / 60)}분`; };
   const usd = (v) => (v == null ? "-" : fmtUsdCompact(v));
   const tone = (v, thr = 0.5) => (v == null || Math.abs(v) < thr ? "" : v > 0 ? "mc-good" : "mc-bad");
+  // 2026-10-04 고래·리테일 경계는 코인별(서버 bands_usd) -- 설명 글의 ETH 값($10만/$1만)을 바꿔 끼운다
+  const tipOf = (key) => (key === "flow" && Array.isArray(d.bands_usd)
+    ? MC_TIPS.flow.replace("고래 ≥ $10만 · 리테일 < $1만", `고래 ≥ ${fmtUsdCompact(d.bands_usd[1])} · 리테일 < ${fmtUsdCompact(d.bands_usd[0])}`) : MC_TIPS[key]);
   const sec = (key, title, inner) => `<div class="mc-sec"><h4><button type="button" class="mc-q" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
-    + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(MC_TIPS[key]).replace(/\n/g, "<br>")}</p>${inner}</div>`;
+    + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(tipOf(key)).replace(/\n/g, "<br>")}</p>${inner}</div>`;
   const f = d.funding || {}, b = d.basis || {}, oi = d.oi || {}, ls = d.ls, fl = d.flow || {}, z = fl.z60h || fl.z60 || {},   // z60h = 같은 UTC 시 14일 기준(2026-10-01), 없으면 옛 12~24h 링
     bk = d.book || {}, bu = d.burst;
   const levWarn = ["long_crowd", "short_crowd", "deleverage"].includes((d.lev || {}).key);
@@ -4400,7 +4406,7 @@ function renderMarketCtx() {
       + gRow("BTC 30분", G.sig((d.btc || {}).move_bp == null ? null : d.btc.move_bp / 20), sg((d.btc || {}).move_bp, 0, "bp"), "", btcTxt)
       + gRow("가격차 OKX", G.sig((d.venues || {}).okx_bp == null ? null : d.venues.okx_bp / 5), sg((d.venues || {}).okx_bp, 1, "bp"), "", "마크 대 마크")
       + gRow("가격차 HL", G.sig((d.venues || {}).hl_bp == null ? null : d.venues.hl_bp / 5), sg((d.venues || {}).hl_bp, 1, "bp"), "", `미드 대 미드 · HL 프리미엄 ${sg(b.hl_premium_bp, 1, "bp")}`)
-      + gRow("VWAP 거리", G.sig(vz), sg(vz, 1, "σ"), "", lv ? `${lv.name} VWAP ${n(lv.vwap, 1)}` : "")
+      + gRow("VWAP 거리", G.sig(vz), sg(vz, 1, "σ"), "", lv ? `${lv.name} VWAP ${n(lv.vwap, (ASSET_CONFIG[A] || {}).dp ?? 1)}` : "")
       + gRow("볼린저 %B", G.pct(pb), pb == null ? "-" : n(pb, 2), "", bb ? `폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%` : "")
       + gRow("RSI 14", G.pct(rsi == null ? null : rsi / 100), rsi == null ? "-" : n(rsi, 0), rsi != null && (rsi >= 70 || rsi <= 30) ? "mc-warn" : "")
       + (G.cmpW ? "" : lineSw));
@@ -6383,7 +6389,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           .forEach(([k, nm, from, col, dash, op, y]) => {
             if (y < mt || y > plotBottom) return;
             mk(lines, "line", { x1: ml, x2: ml + cw, y1: y.toFixed(1), y2: y.toFixed(1), stroke: col, "stroke-opacity": op, "stroke-dasharray": dash, "stroke-width": 1.2 },
-               `${nm} ${pf[k].toFixed(1)} (${from} 거래량 가중 평균가). 우리 검정: VWAP 되돌림·방향 모두 가짜 레벨과 같았다 — 지지·저항으로 읽지 말 것.`);
+               `${nm} ${pf[k].toFixed((ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 1)} (${from} 거래량 가중 평균가). 우리 검정: VWAP 되돌림·방향 모두 가짜 레벨과 같았다 — 지지·저항으로 읽지 말 것.`);
             if (gutOn) { fpNotes.push({ val: pf[k], label: nm.replace("앵커 VWAP·", "앵커·"), color: "var(--muted)" }); return; }
             if (y - lastY < 12) return;
             lastY = y;

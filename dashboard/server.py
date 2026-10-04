@@ -646,6 +646,8 @@ OKX_TAPE_DB_PATH = OKX_HOT_TAPE_DB     # 2026-10-01 hot SQLite(5종목 한 파�
 HL_POS_DB_PATH = REPO_ROOT / "data" / "hot" / "hl_positions.sqlite"   # 2026-10-01 4c hot(ETH 프로세스 파일)
 # 2026-09-26 SOL·XRP: 멀티코인 HL 포지션 수집기는 **Pi** 에서 돈다 -- Pi 크론이 3분마다 일관 스냅샷을 떠
 #   서버로 보낸다(replicate_trade_tape_20260922.sh, TT_VERIFY_TABLE=hl_positions).
+# 2026-09-27 05:35:35 UTC 고래·리테일 경계 전환(trade_tape_<coin>.duckdb meta size_bands_changed) -- 그 전 행은 ETH 경계($10k/$100k)
+SIZE_BANDS_SINCE = {"sol": 1790487335, "xrp": 1790487335}
 HL_POS_MULTI_DB_PATH = LIVE_DIR / "hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb"
 HL_LIQ_BY_ASSET = {"eth": HL_POS_DB_PATH, "sol": HL_POS_MULTI_DB_PATH, "xrp": HL_POS_MULTI_DB_PATH}
 OKX_CTX_DB_PATH = OKX_HOT_CTX_DB      # 2026-10-01 4b hot SQLite(종목 = inst 열, 락 없음)
@@ -3305,7 +3307,8 @@ def make_app() -> web.Application:
                         print("micro-ref baseline: 갱신 실패 (재시도 60초 뒤"
                               + (", 기존 기준선 유지)" if micro_state["baseline"] else ")"), flush=True)
                     try:   # 2026-10-01 «누가 밀고 있나» z 의 분모(UTC 시별). 실패면 있던 값 유지 → 없으면 옛 식
-                        micro_state["flow_scales"] = await asyncio.to_thread(mref.flow_hour_scales, MICRO_TAPE_DB_PATH, symbol=sym) or micro_state.get("flow_scales")
+                        micro_state["flow_scales"] = await asyncio.to_thread(mref.flow_hour_scales, MICRO_TAPE_DB_PATH, symbol=sym,
+                                                                             since_ts=SIZE_BANDS_SINCE.get(asset, 0)) or micro_state.get("flow_scales")
                     except Exception as exc:  # noqa: BLE001
                         print(f"micro-ref flow_scales: {exc!r}", flush=True)
                 if asset == "eth" and now - micro_state["liq_prev_at"] >= 10.0:   # 봇 tail_risk = ETH 만
@@ -3675,6 +3678,10 @@ def make_app() -> web.Application:
     #   (행마다 자동커밋) -- 그 쓰기 락이 _read_only_rows 의 재시도 창(5초)보다 길면 그 15초 주기 동안 ls 가 null 로 비었다.
     #   원천마다 **마지막 성공 행**을 들고 있다가 잠김·오류 때 그대로 준다(errors 에는 이유를 남긴다). ls 는 age_s 가
     #   행 시각에서 재므로 낡음이 그대로 보인다.
+    # 🔴2026-10-04 검증: market_ctx 의 묶음 폭($5·$2.5)은 ETH 가격용이라 SOL 은 칸 하나가 4%, XRP 는 가격 전체보다 넓어
+    #   HL 고래 청산가가 0·5 로 반올림됐다. 풋프린트 칸 폭 비율로 줄인다 -- 세 코인 모두 ~1.9bp, ETH 는 1배(그대로).
+    _px_scale = lambda asset: flows[asset].spec.bucket / flows["eth"].spec.bucket   # noqa: E731
+
     def _mc_collectors(asset: str = "eth") -> dict[str, Any]:
         """수집기 duckdb 를 읽기 전용으로 한 번씩. 원천 하나가 없거나 잠겨도 나머지는 산다(그 키는 마지막 성공값, 없으면 None)."""
         mc_last_good, OKX_INST, coin = cctx[asset].mc_last_good, flows[asset].spec.okx_inst, asset.upper()   # noqa: N806
@@ -3721,7 +3728,8 @@ def make_app() -> web.Application:
                              [flows[asset].spec.symbol, cut])
         except Exception:  # noqa: BLE001
             return []
-        return mctx.liq_profile([(float(p or 0), float(u or 0), side == "long") for p, u, side in rows])
+        return mctx.liq_profile([(float(p or 0), float(u or 0), side == "long") for p, u, side in rows],
+                                mctx.LIQ_PROFILE_BIN_USD * _px_scale(asset))
 
     def _mc_profile(asset: str = "eth") -> dict[str, Any]:
         sym = flows[asset].spec.symbol.lower()
@@ -3775,13 +3783,15 @@ def make_app() -> web.Application:
         # 롱숏비 행은 원천 넷 중 일부가 비는 5분이 있다(최신 행 NULL, 09-29 서버 실측) -- 칸마다 «마지막 유효값»
         lsv = lambda j, rows: next((r[j] for r in rows if r[j] is not None), None)   # noqa: E731
         # «하루 전» = 24시간 전에 **가장 가까운** 유효 행(창은 결측 여유로 25시간 -- 맨 앞 행을 쓰면 ~25시간 전이 된다, 09-29 재검증)
-        ls24 = lambda j: min(((abs(r[0] - (time.time() - 86400)), r[j]) for r in ls if r[j] is not None), default=(0, None))[1]   # noqa: E731
+        # 🔴2026-10-04 24시간±2시간 안에 행이 없으면 None -- 새로 생긴 표(XRP 10-04~)는 맨 앞 행이 몇 시간 전이라 «하루 전»이 거짓이 된다
+        ls24 = lambda j: (lambda d, v: v if d <= 7200 else None)(*min(((abs(r[0] - (time.time() - 86400)), r[j]) for r in ls if r[j] is not None), default=(1e9, None)))   # noqa: E731
         d25 = np.array(depth25_ring, dtype=float) if len(depth25_ring) >= 600 else None
         sw = mp.get("sweep")
         basis_pct = mctx.pct_rank(dv["basis_bp"], hist["basis"], min_n=600)
         burst = (load_json_cached(LIQ_BURST_STATE_PATH) or {}) if asset == "eth" else {}   # 봇 청산 급증 파일 = ETH
         return {
             "available": True, "asset": asset, "ts": time.time(), "mid": mid,
+            "bands_usd": list(size_bands(sym)),   # 고래·리테일 경계(코인별) -- 화면 «?» 설명이 ETH 값을 말하지 않게
             "funding": {"bn": dv["funding"], "bn_pct180": mctx.pct_rank(dv["funding"], fh), "next_ms": mp_state.get("next_funding_ms"),
                         "bn_at_base": dv["funding"] is not None and abs(dv["funding"] - 0.0001) < 1e-9,   # 평온장 고정값(클램프)
                         "okx": okx_fund[0] if okx_fund else None, "okx_next_ms": okx_fund[1] if okx_fund else None,
@@ -3809,7 +3819,8 @@ def make_app() -> web.Application:
                      "ask25_pct": float(np.mean(d25[:, 1] <= sw["ask"][0])) if d25 is not None and sw else None},
             # 🔴HL 청산은 **HL 마크가**로 판정된다 -- 바이낸스 미드로 가르면 거래소 차이(~9bp)만큼 가격 바로 밑 롱 청산가가
             #   «이미 넘어섰다»로 버려졌다(09-29 재검증). 금액도 HL 마크로. HL 맥락이 없을 때만 바이낸스 미드.
-            "hl_liq": mctx.hl_liq_levels(col.get("hl_pos") or [], (hl[3] if hl and hl[3] else mid)) if (mid or (hl and hl[3])) else {"below": [], "above": []},
+            "hl_liq": mctx.hl_liq_levels(col.get("hl_pos") or [], (hl[3] if hl and hl[3] else mid), mctx.HL_LIQ_BIN_USD * _px_scale(asset))
+                      if (mid or (hl and hl[3])) else {"below": [], "above": []},
             "liq_profile": prof,
             "profile": vprof,
             "iv_rank": ({"dvol": dvy[-1], "rank365": mctx.pct_rank(dvy[-1], dvy[:-1], min_n=200), "n": len(dvy) - 1} if dvy else None),
