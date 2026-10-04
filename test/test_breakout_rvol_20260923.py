@@ -17,7 +17,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from live_eth_breakout_detector_20260911 import (  # noqa: E402
-    RVOL_BASE_DAYS, RVOL_LINE_BARS, RVOL_SESSION_HI, RVOL_SESSION_LO, _rvol)
+    RVOL_BASE_DAYS, RVOL_LINE_BARS, RVOL_SESSION_HI, RVOL_SESSION_LO, RVOL_WEEKEND_MED, _rvol, session_view)
 
 BARS_PER_DAY = 288
 
@@ -81,6 +81,16 @@ def main() -> int:
 
     # ⑦ 🔴5분 계열이 되살아나면 알린다 -- 되살리려면 흡수를 먼저 다시 재야 한다
     ck(len(_rvol(frame(days, qv))) == 2, "_rvol 은 (선, 세션) 둘만 돌려준다")
+
+    # ⑧ 주말 보정(2026-10-05): 같은 0.55 가 평일엔 «적음», 주말엔 «보통·주말 평소의 ~1배»
+    wd, we = session_view(0.55, False), session_view(0.55, True)
+    ck(wd["session_label"] == "적음" and wd["session_basis"] == "all" and wd["session_weekend"] is None,
+       f"평일 0.55 = 적음, 주말 배수 없음 ({wd})")
+    ck(we["session_label"] == "보통" and we["session_basis"] == "weekend"
+       and abs(we["session_weekend"] - 0.55 / RVOL_WEEKEND_MED) < 1e-3, f"주말 0.55 = 보통·주말 기준 ({we})")
+    ck(session_view(0.30, True)["session_label"] == "적음" and session_view(1.0, True)["session_label"] == "많음",
+       "주말 경계 0.40 / 0.82")
+    ck(session_view(float("nan"), True)["session_label"] is None, "값 없으면 라벨 없음")
 
     return fail
 

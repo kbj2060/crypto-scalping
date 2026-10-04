@@ -7442,9 +7442,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴톤은 항상 neutral. warn/bad 면 «맥락»이 «신호»로 읽힌다.
     const vb = el("rvolSessionBadge");
     if (vb) {
-      const lab = rv && rv.session_label, sv = Number(rv && rv.session);
+      // 2026-10-05 주말 보정(사용자 «주말에 너무 작게»): 14일 기준선은 평일 위주라 주말이면 워커가
+      //   «주말 평소 대비» 배수(session_weekend)와 주말 경계 라벨을 준다 -- 값(session)은 그대로.
+      const lab = rv && rv.session_label, wk = rv && rv.session_basis === "weekend";
+      const sv = Number(rv && (wk ? rv.session_weekend : rv.session));
       const txt = (lab && Number.isFinite(sv))
-        ? "오늘 거래량 " + lab + " " + sv.toFixed(2) + "배" : "";
+        ? "오늘 거래량 " + lab + " " + sv.toFixed(2) + "배" + (wk ? "(주말)" : "") : "";
       // 이 함수는 현재가 틱마다 불린다 -- 바뀐 것만 쓴다(setMapBadge 와 같은 이유).
       if (vb.hidden !== !txt) vb.hidden = !txt;
       if (txt && vb.textContent !== txt) {
@@ -7452,8 +7455,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const b = Array.isArray(rv.session_bounds) ? rv.session_bounds : [0.7, 1.37];
         vb.title = "오늘(UTC 00:00~지금) 누적 거래대금 ÷ 평소 같은 시점까지의 누적"
           + " (같은 시각 최근 " + (rvolBaseDays || 14) + "일 중앙값).\n"
-          + "경계는 임의 상수가 아니라 분위입니다 -- 적음 < " + b[0] + " ≤ 보통 ≤ " + b[1]
-          + " < 많음 (ETH 5m 4.7년 분포의 q25 / q75).\n"
+          + (wk
+            ? "주말 기준: 그 «평소»의 대부분이 평일이라 주말은 보통 0.55배쯤 나옵니다(2025-01~2026-09 주말 중앙). "
+              + "그래서 주말에는 그 값(" + Number(rv.session).toFixed(2) + "배)을 0.553 으로 나눈 «주말 평소 대비»를 보이고, "
+              + "라벨은 주말 분포의 q25 / q75 로 가릅니다 -- 적음 < " + b[0] + " ≤ 보통 ≤ " + b[1] + " < 많음(나누기 전 값 기준).\n"
+            : "경계는 임의 상수가 아니라 분위입니다 -- 적음 < " + b[0] + " ≤ 보통 ≤ " + b[1]
+              + " < 많음 (ETH 5m 4.7년 분포의 q25 / q75).\n")
           + "이 경계로 가른 날의 앞 24시간 레인지 중앙값은 적음 378bp / 보통 451 / 많음 516 "
           + "으로 단조입니다.\n"
           + "🔴«오늘의 온도»이지 방향도 진입 근거도 아닙니다. 차트 선(RVOL)과 다른 값입니다 -- "

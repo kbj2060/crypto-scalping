@@ -116,7 +116,24 @@ RVOL_LINE_BARS = 12
 #   q25 0.704 · q50 0.982 · q75 1.373. 이 경계로 가른 날의 앞 24h 레인지 중앙값은
 #   적음 378bp / 보통 451 / 많음 516 으로 단조다 -- 표시에 뜻이 있다(신호는 아니다).
 RVOL_SESSION_LO, RVOL_SESSION_HI = 0.70, 1.37
+# 주말 보정(2026-10-05 사용자 «주말에 너무 작게», B안: 계산은 그대로·주말만 주말 분포로 읽는다).
+#   14일 기준선의 10일이 평일이라 주말 세션 RVOL 은 구조적으로 눌린다 -- ETH 5m 2025-01~2026-09 주말 중앙 0.553
+#   (토 0.52 · 일 0.58 · 시각별 0.46~0.65), 주말이 «적음» 65%. 주말 안 순위 정보는 그대로라(다음 24h 레인지 순위상관
+#   주말 +0.39 vs 평일 +0.19) 값은 두고 «주말 평소 대비 배수 = 값/0.553»과 주말 q25/q75 경계로 라벨만 다시 붙인다.
+#   ponytail: 상수 표다 -- 주말 수준이 2022~24 0.63 -> 2025~ 0.55 로 움직였으니 분기마다 같은 측정으로 갱신.
+RVOL_WEEKEND_MED = 0.553
+RVOL_WEEKEND_LO, RVOL_WEEKEND_HI = 0.40, 0.82
 _CACHE: dict[str, Any] = {}
+
+
+def session_view(sv: float, weekend: bool) -> dict[str, Any]:
+    """세션 RVOL -> 라벨·경계·기준. 주말이면 주말 분포 경계와 «주말 평소 대비» 배수."""
+    lo, hi = (RVOL_WEEKEND_LO, RVOL_WEEKEND_HI) if weekend else (RVOL_SESSION_LO, RVOL_SESSION_HI)
+    ok = np.isfinite(sv)
+    return {"session_label": None if not ok else "적음" if sv < lo else "많음" if sv > hi else "보통",
+            "session_bounds": [lo, hi],
+            "session_basis": "weekend" if weekend else "all",
+            "session_weekend": round(float(sv) / RVOL_WEEKEND_MED, 3) if ok and weekend else None}
 
 
 def _fetch(limit: int = FETCH_BARS) -> pd.DataFrame:
@@ -298,10 +315,8 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
                   for j in range(lo_r, i + 1)],
         "session": r3(sv),
         # 라벨은 워커가 붙인다 -- 경계가 바뀌면 화면 두 곳이 아니라 여기 한 곳만 고친다.
-        "session_label": (None if not np.isfinite(sv) else
-                          "적음" if sv < RVOL_SESSION_LO else
-                          "많음" if sv > RVOL_SESSION_HI else "보통"),
-        "session_bounds": [RVOL_SESSION_LO, RVOL_SESSION_HI],
+        # 세션은 UTC 하루라 주말 = 그 봉의 UTC 요일 토·일.
+        **session_view(sv, pd.Timestamp(d["timestamp"].iloc[i]).dayofweek >= 5),
     }
     return out
 
