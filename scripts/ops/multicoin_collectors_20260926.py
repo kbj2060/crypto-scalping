@@ -13,7 +13,7 @@ ETH 에서 이미 도는 수집기들을 코인별로 더 띄운다. 코드 쪽 
 단계(--phase):
   1  소급이 **불가능한** 것 -- 바이낸스 bookTicker·depthDiff, HL 체결·호가·포지션, OKX 호가·컨텍스트
   2  소급이 가능하거나 덜 급한 것 -- 바이낸스 래스터(보관 parquet)·체결 테이프, OKX 체결 테이프
-  3  대시보드 시장 맥락(2026-10-04, 서버) -- HL 자산 맥락만(HL_BT_CTX_ONLY=1 · 호가 .bt 는 1단계 Pi 가 모은다)
+  3  대시보드 시장 맥락·경보기(2026-10-04, 서버) -- HL 자산 맥락만(HL_BT_CTX_ONLY=1 · 호가 .bt 는 1단계 Pi 가 모은다) · 추세 전환 경보기 워커
        python scripts/ops/multicoin_collectors_20260926.py start --phase 3 --coins SOL,XRP --install-cron
 
 🔴사전점검이 실패하면 그 수집기는 **띄우지 않는다**:
@@ -58,7 +58,7 @@ COINS = ("BTC", "SOL", "XRP", "HYPE")
 # 수집기별 RSS(MB) 추정 -- 2026-09-26 이 세션 실측(x86_64, 네트워크 없이 기동 후 15초). duckdb 를 import
 # 하는 수집기는 그것만으로 ~150MB 다. 래스터는 북이 차면 도크스트링 실측 67MB 까지 는다.
 RSS_MB = {"bn_bookticker": 26, "bn_depthdiff": 26, "bn_raster": 67, "bn_tape": 155, "hl_trades": 64,
-          "hl_bbo": 151, "hl_ctx": 151, "hl_positions": 151, "okx_bbo": 37, "okx_ctx": 155, "okx_tape": 156,
+          "hl_bbo": 151, "hl_ctx": 151, "bo": 250, "hl_positions": 151, "okx_bbo": 37, "okx_ctx": 155, "okx_tape": 156,
           "tail_risk": 150}
 MEM_FLOOR_MB = 512
 DISK_FLOOR_GB = 100       # 09-16 인벤토리의 재검토선
@@ -109,6 +109,9 @@ def specs(coins: list[str], phases: set[int], tail_btc_sol: bool) -> list[dict]:
             "live_hyperliquid_book_ticker_collector_20260923.py", {"HL_BT_COIN": c, "HL_BT_CTX_ONLY": "1"},
             [_db(f"hl_ctx_{lc}", "data/hot/hl_ctx.sqlite", f"hl_asset_ctx WHERE coin = '{c}'",
                  "datetime(max(recv_ms) / 1000, 'unixepoch', 'localtime')")])
+        # 2026-10-04 추세 전환 경보기(ETH 모델을 그 코인 5분봉에 -- 검정 통과, eth_only_signals_solxrp_20261004) · 5분마다 klines 3회
+        add("bo", lc, 3, "supervisor_breakout_detector.sh", "live_eth_breakout_detector_worker_20260911.py", {"BO_SYMBOL": sym},
+            [_dir(f"bo_{lc}", "data/live", 15, 30, glob=f"{lc}_breakout_detector_state.json")])
         add("okx_bbo", lc, 1, "supervisor_okx_book_ticker.sh", "live_okx_book_ticker_collector_20260923.py",
             {"OKX_BT_INST": inst}, [_dir(f"okx_bbo_{lc}", f"{of}/okx_bookticker/{inst}")],
             eth=f"{of}/okx_bookticker/ETH-USDT-SWAP")

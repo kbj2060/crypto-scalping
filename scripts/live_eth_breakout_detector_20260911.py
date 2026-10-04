@@ -80,7 +80,7 @@ def _prewarn_models() -> tuple[list, dict] | tuple[None, None]:
         except Exception:                                  # 신뢰경계: 아티팩트 부재/손상
             _MODELS["v"] = (None, None)
     return _MODELS["v"]
-SYMBOL = "ETHUSDT"
+SYMBOL = __import__("os").getenv("BO_SYMBOL", "ETHUSDT").upper()   # 2026-10-04 SOL·XRP 도(경보기만 그 코인 검정 통과 -- ETH 모델 그대로, eth_only_signals_solxrp_20261004)
 FETCH_BARS = 4200            # z2016(7일) + 압축분위 창 + 여유
 COMPRESS = 0.70              # volexp < 0.70 = 압축(횡보) — 이 구간에서만 감시
 QWIN = 2016                  # 임계 분위를 재는 후행 창(인과)

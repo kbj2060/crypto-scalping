@@ -28,10 +28,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 import binance_ban_guard  # noqa: E402,F401 -- 2026-09-26 IP 밴 중엔 바이낸스 REST 를 안 내보낸다(공용 가드)
-from live_eth_breakout_detector_20260911 import get_signals  # noqa: E402
+from live_eth_breakout_detector_20260911 import SYMBOL, get_signals  # noqa: E402
 
-STATE = ROOT / "data" / "live" / "eth_breakout_detector_state.json"
-LOG = ROOT / "data" / "live" / "eth_breakout_detector_log.jsonl"
+_C = SYMBOL[:-4].lower()                         # 2026-10-04 코인별(BO_SYMBOL) -- ETH 는 옛 파일 이름 그대로
+STATE = ROOT / "data" / "live" / f"{_C}_breakout_detector_state.json"
+LOG = ROOT / "data" / "live" / f"{_C}_breakout_detector_log.jsonl"
 DEFAULT_INTERVAL = 300
 BAR_OFFSET = 20          # 5분봉 마감 후 몇 초 뒤에 조회할지(마감 직후 REST 반영 지연 여유)
 

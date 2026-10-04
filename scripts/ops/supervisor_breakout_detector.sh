@@ -18,15 +18,21 @@ PY="${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}"
 cd "$ROOT"
 
 RUNNER="scripts/live_eth_breakout_detector_worker_20260911.py"
-if pgrep -f "[${RUNNER:0:1}]${RUNNER:1} --loop" >/dev/null 2>&1; then
-  echo "[$(date -Iseconds)] 전환 탐지 워커: 이미 실행 중 -- supervisor를 켜지 않는다(중복 방지)." >&2
-  exit 1
-fi
+TARGET="${BO_SYMBOL:-ETHUSDT}"                  # 2026-10-04 코인별(같은 코인 둘만 막는다 -- HL 호가 수집기와 같은 방식)
+for pid in $(pgrep -f "[${RUNNER:0:1}]${RUNNER:1} --loop"); do
+  cur=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep '^BO_SYMBOL=' | cut -d= -f2)
+  if [ "${cur:-ETHUSDT}" = "$TARGET" ]; then
+    echo "[$(date -Iseconds)] 전환 탐지 워커($TARGET): 이미 실행 중(pid $pid) -- supervisor를 켜지 않는다(중복 방지)." >&2
+    exit 1
+  fi
+done
+export BO_SYMBOL="$TARGET"
+SFX=""; [ "$TARGET" != "ETHUSDT" ] && SFX="_${TARGET%USDT}"
 
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 exec "$ROOT/scripts/ops/_supervise.sh" \
-  "live_eth_breakout_detector_worker_20260911.py" \
-  "$ROOT/data/live/.supervisor_breakout_detector.lock" \
-  "$ROOT/logs/supervisor/breakout_detector" \
+  "live_eth_breakout_detector_worker_20260911.py($TARGET)" \
+  "$ROOT/data/live/.supervisor_breakout_detector${SFX}.lock" \
+  "$ROOT/logs/supervisor/breakout_detector${SFX}" \
   "$PY" -u "$ROOT/$RUNNER" --loop

@@ -75,7 +75,7 @@ from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
 #   중립 구간만 쓰면 +2.27bp. 표시 전용이고 매매 트리거가 아니다.
 # 2026-09-09 청산맵 신호 마커: 차트(72봉)와 **같은 타임스탬프 격자**로 증거신호 종수 + 이벤트
 # 트리거를 내보낸다. 신호마다 이력 창이 48봉으로 제각각이라 그대로 얹으면 정렬이 어긋난다.
-from scripts.live_eth_chart_markers_20260909 import compute_chart_markers  # noqa: E402
+from scripts.live_eth_chart_markers_20260909 import compute_chart_markers, compute_prewarn_markers  # noqa: E402
 # taker_delta_z_climax / short_term_return_z evidence-signal chips REPLACED in-place with their
 # TabPFN meta-label models' live probability (2026-08-30, user decision -- unlike V_REBOUND above,
 # these stay in the "증거 신호" row and reuse the klines/compute_signals() this endpoint already
@@ -450,6 +450,7 @@ PAPER_PREVIEW_STATE_PATH = PAPER_STATE_PATH.parent.parent / "paper_preview" / "s
 PAPER_ARMS = ("w80_z0.5_a24_mh15", "w100_z0.5_w60")   # 적응판 · 고래판 (반반 = 엔진 PORTFOLIOS["p1"])
 # 2026-10-04 «통과 신호 판»(엔진 1d3e5a32, 10-04 00:02 UTC 재시작부터): 1~4주 추세 · 크기 · 가격×OI 1시간 · 추세 필터 · 동일위험
 PAPER_NEW_ARMS = ("trend4", "trend4_vs", "poi1h", "w80_z0.5_a24_mh15_vt", "w100_z0.5_w60_vt", "w80_z0.5_a24_mh15_er", "w100_z0.5_w60_er")
+PAPER_ASSETS = ("eth", "sol", "xrp")                  # 모의 엔진이 도는 코인(scripts/rl_1s_agent.py COINCFG)
 PAPER_STALE_S = 300                                    # 엔진은 1분마다 쓴다 -- 5분 넘게 안 바뀌면 멈춘 것
 MACRO_CALENDAR_MAX_AGE_MIN = 90.0          # 달력이라 분 단위 신선도가 의미 없다
 
@@ -460,6 +461,7 @@ MACRO_CALENDAR_MAX_AGE_MIN = 90.0          # 달력이라 분 단위 신선도�
 # 2026-09-11 횡보→추세 전환 탐지기 -- 방향은 예측하지 않는다(그 축은 닫혔다). 워커가 채점한다
 # (scripts/live_eth_breakout_detector_worker_20260911.py · supervisor_breakout_detector.sh).
 BREAKOUT_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_breakout_detector_state.json"
+BREAKOUT_ASSETS = ("eth", "sol", "xrp")   # 2026-10-04 워커가 도는 코인(BO_SYMBOL) -- SOL·XRP 는 경보기만 화면에(탐지기 불통과)
 BREAKOUT_DETECTOR_MAX_AGE_MIN = 15.0       # 5분봉 3개 -- 봉 마감 +20초에 도는 워커다
 
 # 2026-09-15 **E|r| 게이트** -- 「지금 큰 움직임이 예상되는가」만 말한다(1일 지평 · 20자산).
@@ -1104,9 +1106,13 @@ def pick_paper_state(sts: list[Any], now: float) -> Any:
 
 
 async def api_paper_arms(request: web.Request) -> web.Response:
-    now = time.time()
-    st = pick_paper_state([load_json(PAPER_STATE_PATH), load_json(PAPER_PREVIEW_STATE_PATH)], now)
-    return web.json_response(paper_arms_payload(st, now), headers=NOCACHE)
+    """?asset= 코인별 엔진(2026-10-04 SOL·XRP = RL_SYMBOL 프로세스, paper_<coin>/). ETH 만 미리보기 엔진 폴백이 있다."""
+    now, asset = time.time(), str(request.query.get("asset") or "eth").lower()
+    if asset not in PAPER_ASSETS:
+        raise web.HTTPNotFound(reason="paper_off")
+    sts = ([load_json(PAPER_STATE_PATH), load_json(PAPER_PREVIEW_STATE_PATH)] if asset == "eth"
+           else [load_json(PAPER_STATE_PATH.parent.parent / f"paper_{asset}" / "state.json")])
+    return web.json_response({**paper_arms_payload(pick_paper_state(sts, now), now), "asset": asset}, headers=NOCACHE)
 
 
 def load_json(path: Path) -> Any:
@@ -1556,9 +1562,9 @@ def macro_calendar_payload() -> dict[str, Any]:
                           ts_field="generated_at", extra_missing={"events": []})
 
 
-def breakout_detector_payload() -> dict[str, Any]:
-    """횡보->추세 전환 탐지기 워커 상태."""
-    return worker_payload(BREAKOUT_DETECTOR_STATE_PATH, BREAKOUT_DETECTOR_MAX_AGE_MIN,
+def breakout_detector_payload(asset: str = "eth") -> dict[str, Any]:
+    """횡보->추세 전환 탐지기 워커 상태(코인별 파일 <coin>_breakout_detector_state.json)."""
+    return worker_payload(BREAKOUT_DETECTOR_STATE_PATH.with_name(f"{asset}_breakout_detector_state.json"), BREAKOUT_DETECTOR_MAX_AGE_MIN,
                           require_ok=True, stamp_available=True,
                           extra_missing={"history": [], "times": []})
 
@@ -4006,11 +4012,11 @@ def make_app() -> web.Application:
             cache=evidence_signal_cache,
             max_stale=0.0,
         )
-    async def load_breakout_detector() -> dict[str, Any]:
+    async def load_breakout_detector(asset: str = "eth") -> dict[str, Any]:
         """횡보→추세 전환 탐지기 -- 워커가 쓴 상태 파일을 읽기만 한다(계산 인라인 금지)."""
         return await swr_cached(
-            "breakout_detector", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(breakout_detector_payload),
+            "breakout_detector" if asset == "eth" else f"breakout_detector_{asset}", EVIDENCE_SIGNAL_CACHE_SECONDS,
+            lambda: asyncio.to_thread(breakout_detector_payload, asset),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -4021,7 +4027,13 @@ def make_app() -> web.Application:
         ⚠️극점을 여기서 인라인으로 채점하면 안 된다 -- 2026-09-10 그 인라인 호출이 TabPFN
           아티팩트(1.08GB)를 60초마다 로드해 to_thread 풀을 고갈시켰고 증거신호를 포함한 모든
           계산 엔드포인트가 멈췄다. 자세한 실측은 live_eth_chart_markers_20260909.py 주석."""
-        if (asset or "eth").lower() != "eth":
+        asset = (asset or "eth").lower()
+        if asset in BREAKOUT_ASSETS and asset != "eth":   # 2026-10-04 SOL·XRP = 경보기 구간만(그 코인 검정 통과분)
+            try:
+                return compute_prewarn_markers(asset, await load_breakout_detector(asset))
+            except Exception as exc:  # noqa: BLE001 -- 차트 렌더를 깨지 않는다
+                return {"available": False, "asset": asset, "error": f"{type(exc).__name__}: {exc}"[:160]}
+        if asset != "eth":
             return compute_chart_markers(asset)
         # 실패해도 마커 전체를 죽이지 않는다: 그 줄만 비고 나머지는 그려진다.
         try:
@@ -4847,7 +4859,10 @@ def make_app() -> web.Application:
         return {**payload, "bars": merged, "venues": venues}
 
     async def api_breakout_detector(request: web.Request) -> web.Response:
-        return web.json_response(await load_breakout_detector(),
+        asset = str(request.query.get("asset") or "eth").lower()
+        if asset not in BREAKOUT_ASSETS:
+            raise web.HTTPNotFound(reason="breakout_off")
+        return web.json_response({**await load_breakout_detector(asset), "asset": asset},
                                  headers=NOCACHE)
 
     def _heatmap_read(symbol: str, cols: int, agg: int, rows_only: bool = False) -> dict[str, Any]:

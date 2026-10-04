@@ -2821,6 +2821,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-10-04 풋프린트 «옵션 요약» 자리(#mcWall) = 모의 판 · 좁은 화면은 시장 맥락 끝(사용자 승인 시안) */
 .ppm { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
+.ppm-r.off { opacity: .45; }   /* 2026-10-04 그 코인 검정 불통과 판 = 기록만 */
 .ppm h4 { margin: 0 0 4px; display: flex; align-items: center; justify-content: space-between; }
 .ppm-sub { font-size: 11px; color: var(--muted); font-weight: 600; }
 .ppm-t { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }   /* 2026-10-04 판마다 한 줄 -- 칸이 낮으면 표만 스크롤 */

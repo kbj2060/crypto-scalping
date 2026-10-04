@@ -258,8 +258,31 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         return {"available": False, "asset": asset, "error": f"{type(e).__name__}: {e}"}
 
 
+def compute_prewarn_markers(asset: str, breakout: dict | None) -> dict[str, Any]:
+    """2026-10-04 SOL·XRP: «전환 예고»(경보기) 구간만. 그 코인 검정에서 경보기는 통과·탐지기는 불통과라
+    (docs/experiments/eth_only_signals_solxrp_20261004.md) 탐지 구간·증거 삼각형은 싣지 않는다. 격자 = 경보기 마지막 봉까지 CHART_BARS 봉."""
+    pre = (breakout or {}).get("prewarn") or {}
+    pt = pre.get("times") or []
+    if not (breakout and breakout.get("available", True) and pt):
+        return {"available": False, "asset": asset, "error": "breakout_missing"}
+    end = pd.Timestamp(pt[-1])
+    times = [(end - pd.Timedelta(minutes=5 * k)).isoformat() for k in range(CHART_BARS - 1, -1, -1)]
+    return {"spans": {"trend_prewarn": _span_from_points(times, _history_points(pre, ("warn",)))},
+            "span_meta": {"trend_prewarn_p": _value_grid(times, list(zip(pt, pre.get("probas") or []))),
+                          "trend_prewarn_thr": _value_grid(times, list(zip(pt, pre.get("thresholds") or [])))},
+            "spans_partial": [], "available": True, "asset": asset, "bars": CHART_BARS,
+            "latest_ts_utc": times[-1], "times": times, "events": []}
+
+
 if __name__ == "__main__":
     import json
+    end = pd.Timestamp("2026-10-04T10:30:00+00:00")
+    pre = {"times": [(end - pd.Timedelta(minutes=5 * k)).isoformat() for k in (2, 1, 0)],
+           "history": ["neutral", "warn", "warn"], "probas": [.1, .3, .4], "thresholds": [.2, .2, .2]}
+    m = compute_prewarn_markers("sol", {"prewarn": pre})
+    assert m["available"] and m["times"][-1] == pre["times"][-1] and len(m["times"]) == CHART_BARS
+    assert m["spans"]["trend_prewarn"][-3:] == [0, 1, 1] and m["span_meta"]["trend_prewarn_p"][-1] == .4, m["spans"]["trend_prewarn"][-3:]
+    print("prewarn markers ok")
     d = compute_chart_markers("eth")
     print(json.dumps({k: v for k, v in d.items() if k not in ("times", "ev_bottom_names",
                                                               "ev_top_names")},
