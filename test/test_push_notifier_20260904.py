@@ -3,8 +3,7 @@
 중점은 두 가지다.
 1. 손으로 구현한 RFC 8291 암호화가 맞는가 -- 틀리면 푸시 서비스는 201을 주고 브라우저만 조용히
    복호화에 실패하므로, 눈으로는 "알림이 안 온다"와 구분되지 않는다. RFC의 고정 벡터로 못박는다.
-2. sustain window 함정 -- payload의 `*_fired`는 신호별 8~72봉 동안 계속 True다. 그걸로 알림 key를
-   만들면 사건 하나에 최대 72번 발송된다. 발동 감지는 반드시 `*_last_fired_ts`를 써야 한다.
+2. 감지기(2026-10-05 재배선) -- 선을 «넘어 들어설 때» 한 번만 · 다시 무장(히스테리시스) · 보유 코인만.
 """
 from __future__ import annotations
 
@@ -79,150 +78,90 @@ class SubscriptionStoreTests(unittest.TestCase):
         self.assertEqual(webpush.load_subscriptions(self.tmp), {})
 
 
-def _evidence(latest_bar: str, *, net: int, signals: list[dict]) -> dict:
-    return {"warmed_up": True, "latest_bar_utc": latest_bar, "price": 4400.0,
-            "net_score": net, "signals": signals}
+def _acct(*positions, margin: float = 1000.0) -> dict:
+    return {"ok": True, "balance": {"margin": margin}, "positions": list(positions)}
 
 
-class SustainWindowTrapTests(unittest.TestCase):
-    """이 클래스가 이 기능의 핵심 버그를 막는다 -- 모듈 docstring 2번 참고."""
-
-    def test_key_is_stable_across_cycles_for_the_same_firing_bar(self) -> None:
-        """sustain window 동안 매 폴링마다 감지돼도 key가 같아야 seen이 중복을 막는다."""
-        signals = [{"name": "demarker_extreme", "bottom_fired": True,
-                    "bottom_last_fired_ts": "2026-09-04T01:00:00+00:00"},
-                   {"name": "orthogonal_combo", "bottom_fired": True,
-                    "bottom_last_fired_ts": "2026-09-04T01:00:00+00:00"},
-                   {"name": "liquidity_sweep", "bottom_fired": True,
-                    "bottom_last_fired_ts": "2026-09-04T01:00:00+00:00"}]
-        payload = _evidence("2026-09-04T01:00:00+00:00", net=3, signals=signals)
-        keys = {notifier.detect_net_score(payload)[0].key for _ in range(5)}
-        self.assertEqual(len(keys), 1)
-
-    def test_only_signals_firing_on_the_latest_bar_are_named(self) -> None:
-        """`bottom_fired`(sustain)가 True여도 발동봉이 과거면 이번 사건의 구성원이 아니다."""
-        signals = [{"name": "지금발동", "bottom_fired": True,
-                    "bottom_last_fired_ts": "2026-09-04T01:00:00+00:00"},
-                   {"name": "옛날발동", "bottom_fired": True,
-                    "bottom_last_fired_ts": "2026-09-04T00:10:00+00:00"},
-                   {"name": "또지금", "bottom_fired": True,
-                    "bottom_last_fired_ts": "2026-09-04T01:00:00+00:00"},
-                   {"name": "또옛날", "bottom_fired": True,
-                    "bottom_last_fired_ts": "2026-09-03T22:00:00+00:00"}]
-        note = notifier.detect_net_score(_evidence("2026-09-04T01:00:00+00:00", net=4,
-                                                   signals=signals))[0]
-        self.assertIn("지금발동", note.body)
-        self.assertIn("또지금", note.body)
-        self.assertNotIn("옛날발동", note.body)
-        self.assertNotIn("또옛날", note.body)
-
-    def test_new_firing_bar_produces_a_new_key(self) -> None:
-        signals = [{"name": "a", "bottom_fired": True, "bottom_last_fired_ts": "T1"}]
-        first = notifier.detect_net_score(_evidence("T1", net=3, signals=signals))[0]
-        second = notifier.detect_net_score(_evidence("T2", net=3, signals=signals))[0]
-        self.assertNotEqual(first.key, second.key)
-
-    def test_below_threshold_emits_nothing(self) -> None:
-        self.assertEqual(notifier.detect_net_score(_evidence("T1", net=2, signals=[])), [])
-        self.assertEqual(notifier.detect_net_score(_evidence("T1", net=-2, signals=[])), [])
-        self.assertEqual(len(notifier.detect_net_score(_evidence("T1", net=-3, signals=[]))), 1)
+def _pos(symbol="ETHUSDC", side="LONG", qty=1.0, mark=2500.0, liq=1500.0, notional=2500.0) -> dict:
+    return {"symbol": symbol, "side": side, "qty": qty, "mark_price": mark,
+            "liquidation_price": liq, "notional": notional}
 
 
 class EnabledDetectorsTests(unittest.TestCase):
-    """운영 스위치를 고정한다. 이걸 바꾸면 이 테스트가 먼저 깨져 '의도한 변경'임을 확인하게 된다.
-
-    2026-09-08 에 감지기 여럿을 끄면서 아래 RunCycleTests 가 통째로 깨졌는데 아무도 몰랐다
-    (테스트가 꺼진 감지기의 알림을 단언하고 있었다). 스위치와 테스트를 따로 두는 이유다.
-    """
+    """운영 스위치를 고정한다. 바꾸면 이 테스트가 먼저 깨져 «의도한 변경»임을 확인하게 된다.
+    2026-10-05: 켜져 있던 net_score·v_rebound 의 원천 API 가 지워져 09-24 이후 발송 0건이었다."""
 
     def test_production_switch_is_what_we_think_it_is(self) -> None:
-        # 2026-09-10 exit_advice 추가: 실계좌 포지션 청산 감시자 판정(T1, 판정 변화시 1회).
-        self.assertEqual(notifier.ENABLED_DETECTORS,
-                         {"net_score", "v_rebound", "breakout_rev", "exit_advice"})
+        self.assertEqual(notifier.ENABLED_DETECTORS, {"verdict", "risk", "burst_hold", "prewarn_hold"})
+        self.assertEqual(set(notifier.PUSH_KINDS), notifier.ENABLED_DETECTORS)   # 알림 센터 표 = 실제 발송 종류
 
-    def test_exit_advice_fires_once_per_verdict_change(self) -> None:
-        pos = {"key": "ETHUSDT:LONG:2026-09-10T01:00:00+00:00", "symbol": "ETHUSDT", "side": "LONG",
-               "verdict": "익절", "urgency": "권고", "reason": "반대 방향 극점 탐지(등급 강), 미실현 +35bp",
-               "move_bp": 35.2, "hold_bars": 7, "since_utc": "2026-09-10T02:00:00+00:00"}
-        hold = {**pos, "side": "SHORT", "verdict": "보유", "urgency": "-"}
-        adv = {"available": True, "positions": [pos, hold]}
-        notes = notifier.detect_exit_advice(adv)
-        self.assertEqual(len(notes), 1)                       # 보유는 알리지 않는다
-        self.assertEqual(notes[0].tier, "t1")
-        self.assertEqual(notes[0].key, notifier.detect_exit_advice(adv)[0].key)  # 같은 판정 = 같은 key
-        changed = {**adv, "positions": [{**pos, "verdict": "손절", "since_utc": "2026-09-10T02:05:00+00:00"}]}
-        self.assertNotEqual(notes[0].key, notifier.detect_exit_advice(changed)[0].key)
-        self.assertEqual(notifier.detect_exit_advice({**adv, "available": False}), [])
-
-    def test_liq_burst_is_off(self) -> None:
-        """2026-09-09 사용자 지정. 감지기 함수는 남아 있지만 알림으로는 안 나간다."""
-        self.assertNotIn("liq_burst", notifier.ENABLED_DETECTORS)
-        live = {"available": True, "hawkes_active": True, "crisis_type": "LONG_CRISIS",
-                "z_long": 4.2, "updated_at": "2026-09-09T00:00:00Z"}
-        self.assertEqual(notifier.collect_notes({"burst": live}, {}), [])
+    def test_calendar_file_parses_and_has_dates(self) -> None:
+        items = notifier.load_calendar().get("items") or []
+        self.assertTrue(items)
+        for it in items:
+            time.strptime(it["date"], "%Y-%m-%d")
+            self.assertTrue(it["id"] and it["title"] and it["how"])
 
 
-class SessionAndBurstDedupTests(unittest.TestCase):
-    def test_session_window_keys_once_per_market_per_day(self) -> None:
-        """창 안에 있는 동안 매 폴링마다 active로 보이므로 key가 하루 단위로 고정돼야 한다."""
-        alerts = {"session_volatility_alert": {"active": [
-            {"code": "NYSE", "label": "미국장", "minutes_from_open": 5.0}]}}
-        a = notifier.detect_session_window(alerts)[0].key
-        alerts["session_volatility_alert"]["active"][0]["minutes_from_open"] = 41.0
-        b = notifier.detect_session_window(alerts)[0].key
-        self.assertEqual(a, b)
+class DetectorTests(unittest.TestCase):
+    def test_verdict_only_on_the_day_after_9_kst(self) -> None:
+        cal = {"items": [{"id": "x", "date": "2026-11-10", "title": "T", "what": "W", "how": "H"},
+                         {"id": "y", "date": "2026-11-10", "title": "건수", "how": "H", "approx": True}]}
+        at = lambda s: time.mktime(time.strptime(s, "%Y-%m-%dT%H:%M")) - time.timezone - 9 * 3600   # noqa: E731 -- KST
+        self.assertEqual(notifier.detect_verdicts(cal, at("2026-11-10T08:59")), [])
+        notes = notifier.detect_verdicts(cal, at("2026-11-10T09:00"))
+        self.assertEqual([n.key for n in notes], ["verdict:x:2026-11-10"])     # 건수 기준(approx)은 날짜가 추정이라 안 보낸다
+        self.assertEqual(notifier.detect_verdicts(cal, at("2026-11-11T10:00")), [])
 
-    def test_liq_burst_inactive_emits_nothing(self) -> None:
-        self.assertEqual(notifier.detect_liq_burst({"available": True, "hawkes_active": False}, {}), [])
-        self.assertEqual(notifier.detect_liq_burst({"available": False}, {}), [])
-        # 꺼진 상태를 보면 다음 발생이 새 사건이 되도록 흔적을 지운다
-        st = {"liq_burst_since": "2026-09-07T07:10:00Z"}
-        notifier.detect_liq_burst({"available": True, "hawkes_active": False}, st)
-        self.assertNotIn("liq_burst_since", st)
+    def test_risk_fires_once_on_entry_and_rearms_with_hysteresis(self) -> None:
+        st: dict = {}
+        far = _acct(_pos(mark=2500, liq=1500))                       # 40%
+        near = _acct(_pos(mark=2500, liq=2400))                      # 4%
+        mid = _acct(_pos(mark=2500, liq=2360))                       # 5.6% -- 무장선(7%) 안
+        self.assertEqual(notifier.detect_risk(far, st, 1), [])
+        self.assertEqual(len(notifier.detect_risk(near, st, 2)), 1)
+        self.assertEqual(notifier.detect_risk(mid, st, 3), [])
+        self.assertEqual(notifier.detect_risk(near, st, 4), [])      # 7% 밖으로 안 나갔다 → 아직 무장 전
+        notifier.detect_risk(far, st, 5)
+        self.assertEqual(len(notifier.detect_risk(near, st, 6)), 1)  # 다시 무장된 뒤 재진입
+        self.assertEqual(notifier.detect_risk({"ok": False}, st, 7), [])
 
-    def test_liq_burst_key_is_pinned_to_the_moment_it_turned_on(self) -> None:
-        """수집기는 버스트가 켜져 있는 동안 updated_at을 계속 갱신한다. 그 필드를 key에 쓰면
-        폴링마다(45초) 새 사건이 되어 알림이 끝없이 나간다 -- 2026-09-07 실측 9분에 9번."""
-        state: dict = {}
-        burst = {"available": True, "hawkes_active": True, "crisis_type": "LONG_CRISIS",
-                 "z_long": 3.2, "updated_at": "2026-09-07T07:10:00Z"}
-        first = notifier.detect_liq_burst(burst, state)[0].key
-        for later in ("2026-09-07T07:10:45Z", "2026-09-07T07:11:30Z", "2026-09-07T07:16:00Z"):
-            burst["updated_at"] = later
-            self.assertEqual(notifier.detect_liq_burst(burst, state)[0].key, first)
+    def test_exposure_over_6x(self) -> None:
+        st: dict = {}
+        big = _acct(_pos(notional=6500.0), margin=1000.0)
+        notes = notifier.detect_risk(big, st, 1)
+        self.assertEqual([n.key.split(":")[1] for n in notes], ["expo"])
+        self.assertEqual(notifier.detect_risk(big, st, 2), [])
+        notifier.detect_risk(_acct(_pos(notional=4000.0)), st, 3)   # 5배 밑 → 다시 무장
+        self.assertEqual(len(notifier.detect_risk(big, st, 4)), 1)
 
-    def test_liq_burst_gets_a_new_key_after_it_turns_off_and_on(self) -> None:
-        """반대 방향 과교정 방지 -- 꺼졌다 다시 켜지면 그건 새 사건이고 알려야 한다."""
-        state: dict = {}
-        burst = {"available": True, "hawkes_active": True, "crisis_type": "LONG_CRISIS",
-                 "updated_at": "2026-09-07T07:10:00Z"}
-        first = notifier.detect_liq_burst(burst, state)[0].key
-        notifier.detect_liq_burst({"available": True, "hawkes_active": False}, state)   # 꺼짐
-        burst["updated_at"] = "2026-09-07T09:00:00Z"
-        self.assertNotEqual(notifier.detect_liq_burst(burst, state)[0].key, first)
+    def test_burst_needs_eth_position_and_fires_on_rising_edge(self) -> None:
+        st: dict = {}
+        mc = {"burst": {"long_usd_60s": 400_000.0, "short_usd_60s": 0.0, "thr": [338_000, 546_000]}}
+        self.assertEqual(notifier.detect_burst_hold(mc, _acct(), st, 1), [])           # 보유 없음
+        st.clear()
+        self.assertEqual(len(notifier.detect_burst_hold(mc, _acct(_pos()), st, 2)), 1)
+        self.assertEqual(notifier.detect_burst_hold(mc, _acct(_pos()), st, 3), [])      # 켜진 채 -- 다시 안 보냄
+        self.assertEqual(notifier.detect_burst_hold({}, _acct(_pos()), st, 4), [])
+
+    def test_prewarn_for_held_coin_only(self) -> None:
+        st: dict = {}
+        bo = {"sol": {"available": True, "timestamp": "T1", "prewarn": {"on": True}},
+              "eth": {"available": True, "timestamp": "T1", "prewarn": {"on": True}}}
+        notes = notifier.detect_prewarn_hold(bo, _acct(_pos(symbol="SOLUSDC")), st)
+        self.assertEqual([n.key for n in notes], ["prewarn:sol:T1"])
+        self.assertEqual(notifier.detect_prewarn_hold(bo, _acct(_pos(symbol="SOLUSDC")), st), [])
 
 
 class RunCycleTests(unittest.IsolatedAsyncioTestCase):
-    """run_cycle 자체(기준선·중복제거·경과시간·다이제스트)를 검사한다.
-
-    ⚠️운영 스위치(ENABLED_DETECTORS / DIGEST_ENABLED)와 **분리**한다. 이 테스트들이 보는 것은
-      "어떤 감지기를 켜뒀나"가 아니라 "켜진 감지기의 노트를 사이클이 어떻게 다루나"다.
-      2026-09-08 에 스위치를 좁히면서 이 클래스가 통째로 깨졌던 게 둘을 묶어둔 탓이다.
-    """
-
-    ALL = {"shadow", "trade", "ops", "net_score", "liq_burst",
-           "v_rebound", "breakout_rev", "session"}
+    """run_cycle 자체(기준선·중복제거·보낸 알림 기록)를 검사한다."""
 
     def setUp(self) -> None:
         self.sent: list[dict] = []
         self.tmpdir = Path(tempfile.mkdtemp())
-        self._orig_state = notifier.STATE_PATH
-        self._orig_broadcast = notifier.broadcast
-        self._orig_enabled = notifier.ENABLED_DETECTORS
-        self._orig_digest = notifier.DIGEST_ENABLED
-        notifier.ENABLED_DETECTORS = self.ALL
-        notifier.DIGEST_ENABLED = True
+        self._orig = (notifier.STATE_PATH, notifier.SENT_LOG_PATH, notifier.broadcast)
         notifier.STATE_PATH = self.tmpdir / "state.json"
+        notifier.SENT_LOG_PATH = self.tmpdir / "sent.jsonl"
 
         async def fake_broadcast(payload, **kwargs):
             self.sent.append(payload)
@@ -231,10 +170,7 @@ class RunCycleTests(unittest.IsolatedAsyncioTestCase):
         notifier.broadcast = fake_broadcast
 
     def tearDown(self) -> None:
-        notifier.STATE_PATH = self._orig_state
-        notifier.broadcast = self._orig_broadcast
-        notifier.ENABLED_DETECTORS = self._orig_enabled
-        notifier.DIGEST_ENABLED = self._orig_digest
+        notifier.STATE_PATH, notifier.SENT_LOG_PATH, notifier.broadcast = self._orig
 
     async def _cycle(self, state, data):
         async def fake_fetch(_session, _base):
@@ -242,101 +178,26 @@ class RunCycleTests(unittest.IsolatedAsyncioTestCase):
         orig = notifier.fetch_all
         notifier.fetch_all = fake_fetch
         try:
-            await notifier.run_cycle(None, "", state, private="k", subject="mailto:x@y.z",
-                                     dry_run=False)
+            await notifier.run_cycle(None, "", state, private="k", subject="mailto:x@y.z", dry_run=False)
         finally:
             notifier.fetch_all = orig
 
-    def _live_shadow(self):
-        """지금 막 열린 포지션 -- EVENT_MAX_AGE_SEC 안에 들어오도록 현재 시각으로 만든다."""
-        now = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
-        return {"shadow": {"open_positions": [{"side": "long", "entry": 4400.0,
-                                               "opened_utc": now, "proba": 0.71}],
-                           "recent_trades": [], "n_open": 1}}
-
     async def test_first_run_sends_nothing_and_records_baseline(self) -> None:
-        """재시작 폭주 방지 1단계. 이게 없으면 데몬을 껐다 켤 때마다 현재 상태 전부가 쏟아진다."""
+        """재시작 폭주 방지. 이게 없으면 데몬을 껐다 켤 때마다 현재 상태 전부가 쏟아진다."""
         state = notifier.load_state()
-        await self._cycle(state, self._live_shadow())
+        await self._cycle(state, {"account": _acct(_pos(liq=2450))})
         self.assertEqual(self.sent, [])
-        self.assertTrue(state["baseline_done"])
-        self.assertTrue(state["seen"])
+        self.assertTrue(state["baseline_done"] and state["seen"])
 
-    async def test_second_run_sends_new_event(self) -> None:
+    async def test_second_run_sends_and_logs_once(self) -> None:
         state = notifier.load_state()
-        await self._cycle(state, {"shadow": {"open_positions": [], "recent_trades": []}})
-        self.sent.clear()
-        await self._cycle(state, self._live_shadow())
+        await self._cycle(state, {"account": _acct(_pos())})
+        await self._cycle(state, {"account": _acct(_pos(liq=2450))})
+        await self._cycle(state, {"account": _acct(_pos(liq=2450))})
         self.assertEqual(len(self.sent), 1)
         self.assertEqual(self.sent[0]["tier"], "t1")
-        self.assertIn("진입", self.sent[0]["title"])
-
-    async def test_same_event_is_not_resent_next_cycle(self) -> None:
-        state = notifier.load_state()
-        await self._cycle(state, {"shadow": {"open_positions": [], "recent_trades": []}})
-        data = self._live_shadow()
-        await self._cycle(state, data)
-        self.sent.clear()
-        await self._cycle(state, data)
-        self.assertEqual(self.sent, [])
-
-    async def test_open_position_is_not_resent_after_the_old_cooldown_would_expire(self) -> None:
-        """이 테스트가 이번 수정의 핵심이다. 감지기는 **열려 있는 포지션**을 매 사이클 다시
-        방출하므로, 쿨다운이 지나면 같은 포지션이 또 나갔다(t1 300초 -> 사건당 최대 6~7번,
-        2026-09-07 실측 8시간 287건). seen에 있으면 시간과 무관하게 다시 보내지 않아야 한다."""
-        state = notifier.load_state()
-        await self._cycle(state, {"shadow": {"open_positions": [], "recent_trades": []}})
-        data = self._live_shadow()
-        await self._cycle(state, data)
-        self.assertEqual(len(self.sent), 1)
-        self.sent.clear()
-        # 쿨다운(300초)이 한참 지난 것처럼 seen 기록을 되돌린다. 포지션은 여전히 열려 있고
-        # opened_utc도 그대로라 감지기는 같은 노트를 또 만든다.
-        for key in state["seen"]:
-            state["seen"][key] -= 3600
-        await self._cycle(state, data)
-        self.assertEqual(self.sent, [], "열린 포지션이 쿨다운 후 재발송됐다")
-
-    async def test_stale_event_is_marked_seen_but_not_sent(self) -> None:
-        """재시작 폭주 방지 2단계 -- 6시간 전에 끝난 일은 지금 알릴 가치가 없다."""
-        state = notifier.load_state()
-        await self._cycle(state, {"shadow": {"open_positions": [], "recent_trades": []}})
-        self.sent.clear()
-        old = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() - 6 * 3600))
-        await self._cycle(state, {"shadow": {"open_positions": [
-            {"side": "long", "entry": 1.0, "opened_utc": old}], "recent_trades": []}})
-        self.assertEqual(self.sent, [])
-        self.assertIn(f"shadow_open:{old}", state["seen"])
-
-    async def test_digest_sends_on_change_then_suppresses_when_unchanged(self) -> None:
-        signals = [{"name": "demarker_extreme", "bottom_fired": True, "top_fired": False}]
-        data = {"evidence": _evidence("T1", net=1, signals=signals),
-                "regime": {"warmed_up": True, "bull_prob": 0.2, "bear_prob": 0.1, "chop_prob": 0.7},
-                "shadow": {"n_open": 0}}
-        state = notifier.load_state()
-        await self._cycle(state, data)          # 기준선
-        state["digest_sent_at"] = 0             # 최소 간격 통과시킴
-        state["digest_fingerprint"] = None
-        self.sent.clear()
-        await self._cycle(state, data)
-        self.assertEqual(len(self.sent), 1)
-        self.assertEqual(self.sent[0]["tier"], "digest")
-        self.assertIn("횡보", self.sent[0]["body"])
-        self.sent.clear()
-        state["digest_sent_at"] = 0             # 간격이 아니라 '변화 없음'으로 막히는지 확인
-        await self._cycle(state, data)
-        self.assertEqual(self.sent, [])
-
-    async def test_digest_change_within_min_interval_is_deferred_not_dropped(self) -> None:
-        """최소 간격 안의 변화는 버리지 않고, 간격이 지난 뒤 그때의 최신 상태로 나가야 한다."""
-        base = {"regime": {"warmed_up": False}, "shadow": {"n_open": 0}}
-        state = notifier.load_state()
-        state["baseline_done"] = True
-        state["digest_sent_at"] = time.time()   # 방금 보낸 상태
-        await self._cycle(state, {**base, "evidence": _evidence(
-            "T1", net=1, signals=[{"name": "a", "bottom_fired": True, "top_fired": False}])})
-        self.assertEqual(self.sent, [])
-        self.assertIsNone(state["digest_fingerprint"])  # 지문을 삼키지 않았다
+        rows = [json.loads(x) for x in notifier.SENT_LOG_PATH.read_text().splitlines()]
+        self.assertEqual([(r["kind"], r["sent"]) for r in rows], [("risk", 1)])
 
 
 if __name__ == "__main__":
