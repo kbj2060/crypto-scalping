@@ -59,6 +59,8 @@ COIN = os.getenv("HL_BT_COIN", "ETH").upper()
 BT_ROOT = Path(os.getenv("HL_BT_ROOT",
                          str(ROOT / "data" / "live" / "orderflow" / "hyperliquid_bookticker")))
 CTX_DB_ENV = os.getenv("HL_CTX_DB_PATH")
+# 2026-10-04 서버의 SOL·XRP = 맥락만(대시보드 시장 맥락). 호가 .bt 는 Pi 가 모아 서버로 보낸다 -- 같은 시각 파일을 둘이 쓰면 안 된다.
+CTX_ONLY = os.getenv("HL_BT_CTX_ONLY", "") == "1"
 
 
 def default_ctx_db(coin: str) -> Path:
@@ -172,7 +174,7 @@ async def run(coin: str, root: Path, ctx_db: Path) -> None:
         while True:
             try:
                 async with session.ws_connect(WS_URL, heartbeat=25, max_msg_size=0) as ws:
-                    for kind in ("bbo", "activeAssetCtx"):
+                    for kind in (("activeAssetCtx",) if CTX_ONLY else ("bbo", "activeAssetCtx")):
                         await ws.send_json({"method": "subscribe",
                                             "subscription": {"type": kind, "coin": coin}})
                     log.info("연결 %s (%s)", WS_URL, coin)

@@ -26,14 +26,14 @@ cd "$ROOT"
 # repo root) on sys.path[0]. Same fix as supervisor_tail_risk_btc_sol_worker.sh.
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
-export BOT_SYMBOLS="ETHUSDT,BTCUSDT,SOLUSDT"
+export BOT_SYMBOLS="ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT"
 export COLLECT_MICROSTRUCTURE="false"
 export COLLECT_TAIL_RISK="false"
 export COLLECT_OI_LSRATIO="true"
 export QUANT_OI_LSRATIO_DB_PATH="$ROOT/data/live/oi_lsratio.duckdb"
 
 exec "$ROOT/scripts/ops/_supervise.sh" \
-  "duckdb_persist_worker.py(ETH+BTC+SOL OI/long-short-ratio only)" \
+  "duckdb_persist_worker.py(ETH+BTC+SOL+XRP OI/long-short-ratio only)" \
   "$ROOT/data/live/.supervisor_oi_lsratio_worker.lock" \
   "$ROOT/logs/supervisor/oi_lsratio_worker" \
   "$PY" -u "$ROOT/scripts/duckdb_persist_worker.py"

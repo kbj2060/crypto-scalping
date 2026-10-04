@@ -2593,7 +2593,7 @@ body.order-coin-off .acct-lanes::before {
   #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="rg"]), :has([data-tip="mood"])) .opt-kv { flex: 1 1 0; max-height: 46px; align-items: center; font-size: 13.5px; }
 }
 .card-title { margin: 0 14px 0 0; font: 800 17px/1 var(--font-sans); letter-spacing: -.01em; color: var(--text); align-self: center; }
-body.not-eth #mcBody, body.not-eth #mcWhen { display: none; }
+body.not-eth #mcWhen { display: none; }   /* ⑤ = 옵션 만기 축 -- SOL·XRP 는 옵션 빼고(2026-10-04) */
 #mcWhen:empty { display: none; }
 #mcWall { display: none; }
 #mcWall.on { display: block; position: absolute; z-index: 1; overflow: hidden; }   /* 2026-09-30 가격 지형은 칸 높이에 맞춰 그린다 -- 스크롤 없음 */
@@ -2606,7 +2606,6 @@ body.not-eth #mcBody, body.not-eth #mcWhen { display: none; }
 .mc-2col .mc-switch-t { grid-column: 1 / -1; }
 #mcBody.mc-cmp .mc-2col .mc-g { grid-template-columns: 58px auto minmax(0, 1fr); gap: 6px; font-size: 11px; padding: 2px 0; }
 #mcBody.mc-cmp .mc-span { grid-column: 1 / -1; }
-body.not-eth #mcWall { display: none; }
 #mcWhen { border-top: 1px solid var(--line); margin-top: 10px; }   /* 시장 맥락은 ETH 전용 */
 #mcBody.mc-in-fp:not(.mc-cmp) { border-top: 1px solid var(--line); margin-top: 12px; }
 /* 2026-09-30 카드 이동 레일(점만, 사용자 지시): 오른쪽 가운데 고정 · 지금 보는 카드 = 채운 점. 넓은 화면(위 미디어 쿼리)에서만 보인다. */
@@ -2818,7 +2817,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-line-switch { display: none; }
 .fp-line-switch.on { display: flex; position: absolute; z-index: 2; transform: translateY(-50%); margin: 0; gap: 14px; align-items: center; font-size: 11px; white-space: nowrap; }
 .fp-line-switch .mc-switch-t { color: var(--muted); font-weight: 600; }
-body.not-eth #fpLineSwitch { display: none; }
 .fp-line-switch > .mc-switch { display: flex; flex-wrap: nowrap; gap: 14px; align-items: center; margin: 0; font-size: 11px; }
 
 /* 2026-10-04 풋프린트 «옵션 요약» 자리(#mcWall) = 모의 판 · 좁은 화면은 시장 맥락 끝(사용자 승인 시안) */

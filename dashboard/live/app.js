@@ -584,6 +584,8 @@ async function setActiveSnapshotAsset(asset) {
   regimeXrpLastFetchAt = 0;
   // 🔴2026-09-30 차트 표식(전환 예고/탐지)도 코인별이다 -- 안 비우면 ETH 사각형이 SOL 차트에 최대 60초 남았다.
   latestChartMarkers = null; chartMarkersLastFetchAt = 0;
+  // 2026-10-04 시장 맥락·추세 칩도 코인별(서버 ?asset=) -- 옛 코인 값을 새 코인 이름 아래 두지 않는다.
+  latestMarketCtx = null; marketCtxLastFetchAt = 0; latestTrend = null; trendLastFetchAt = 0;
 
   // ⭐await보다 먼저 -- 스켈레톤은 첫 fetch가 나가기 전에 이미 화면에 올라가 있어야 한다.
   const generation = beginAssetScopeLoading();
@@ -3987,12 +3989,16 @@ async function refreshTrend() {
   const now = Date.now();
   if (now - trendLastFetchAt < TREND_POLL_MS) return;
   trendLastFetchAt = now;
+  const asset = activeSnapshotAsset;
+  let got;
   try {
-    const res = await fetch(API_TREND_URL, { cache: "no-cache" });
-    latestTrend = res.ok ? await res.json() : { ok: false, reason: `HTTP ${res.status}` };
+    const res = await fetch(`${API_TREND_URL}?asset=${asset}`, { cache: "no-cache" });
+    got = res.ok ? await res.json() : { ok: false, reason: `HTTP ${res.status}` };
   } catch (error) {
-    latestTrend = { ok: false, reason: "fetch_failed" };
+    got = { ok: false, reason: "fetch_failed" };
   }
+  if (asset !== activeSnapshotAsset) return;   // 그 사이 코인이 바뀌었다
+  latestTrend = got;
   renderSituation();
 }
 
@@ -4115,12 +4121,16 @@ async function refreshMarketCtx() {
   const now = Date.now();
   if (now - marketCtxLastFetchAt < MARKET_CTX_POLL_MS) return;
   marketCtxLastFetchAt = now;
+  const asset = activeSnapshotAsset;
+  let got;
   try {
-    const res = await fetch(API_MARKET_CTX_URL, { cache: "no-cache" });
-    latestMarketCtx = res.ok ? await res.json() : { available: false, error: `HTTP ${res.status}` };
+    const res = await fetch(`${API_MARKET_CTX_URL}?asset=${asset}`, { cache: "no-cache" });
+    got = res.ok ? await res.json() : { available: false, error: `HTTP ${res.status}` };
   } catch (error) {
-    latestMarketCtx = { available: false, error: "fetch_failed" };
+    got = { available: false, error: "fetch_failed" };
   }
+  if (asset !== activeSnapshotAsset) return;   // 그 사이 코인이 바뀌었다
+  latestMarketCtx = got;
   renderMarketCtx();
 }
 
@@ -4271,7 +4281,7 @@ function mcPlace(svg, r, wr) {
 function renderMarketCtx() {
   const body = el("mcBody"), badge = el("mcBadge");
   if (!body) return;
-  const d = latestMarketCtx;
+  const d = latestMarketCtx, A = activeSnapshotAsset, eth = A === "eth", U = coinUnit();   // 2026-10-04 코인별(SOL·XRP)
   if (!d || !d.available) {
     body.innerHTML = `<div class="mc-note">${d && d.error ? `시장 맥락 지연 (${escapeHtml(String(d.error))})` : "불러오는 중…"}</div>`;
     body._mcHtml = null;
@@ -4290,9 +4300,9 @@ function renderMarketCtx() {
     bk = d.book || {}, bu = d.burst;
   const levWarn = ["long_crowd", "short_crowd", "deleverage"].includes((d.lev || {}).key);
   // 가격 위치 -- 차트와 같은 캔들 이력(서버가 봉마다 vwap/vsd 를 싣는다)
-  const full = candleHistoryByAsset.eth || [], lc = full[full.length - 1];
+  const full = candleHistoryByAsset[A] || [], lc = full[full.length - 1];
   const lvC = [...full].reverse().find((c) => mcVwapOf(c)), lv = mcVwapOf(lvC);      // 형성 중 봉(클라가 붙인다)엔 vwap 이 없다 -- 마감봉 값
-  const bb = lc ? mcBollinger(full).get(lc.time) : null, px = Number(latestLivePriceByAsset.eth || lc?.close || d.mid || 0);
+  const bb = lc ? mcBollinger(full).get(lc.time) : null, px = Number(latestLivePriceByAsset[A] || lc?.close || d.mid || 0);
   const pb = bb && bb[2] > bb[0] ? (px - bb[0]) / (bb[2] - bb[0]) : null, rsi = mcRsi(full.map((c) => +c.close));
   const vz = lv && lv.vsd > 0 ? (px - lv.vwap) / lv.vsd : null;
   // 일정 -- 옵션 만기는 옵션 카드와 같은 원천(latestGex). 🔴optData() 는 «지금 보는 코인»이라 SOL 탭에서 SOL max pain 을 ETH 가격과
@@ -4303,16 +4313,17 @@ function renderMarketCtx() {
   const macro24 = (latestMacroEvents || []).map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표", hi: e.importance === "high" }))
     .filter((e) => e.t > Date.now() && isTodayOrTomorrowLocal(e.t));   // 2026-09-30 경제 일정 카드 제거 -- 카드가 보이던 오늘·내일 전부(24시간 넘는 건 시간축 오른쪽 끝 «>»)
   const prof = d.liq_profile || [], top = prof.reduce((m, r) => (r[1] + r[2] > (m ? m[1] + m[2] : 0) ? r : m), null);
-  const sw = bk.sweep, bps = bk.bps || [25, 50, 100];
+  const sw = bk.sweep, bps = bk.bps || [25, 50, 100], sdp = Math.max(2, (ASSET_CONFIG[A] || {}).dp || 2);   // 호가 1틱 = ETH·SOL 0.01 · XRP 0.0001
   const thin = bk.bid25_pct != null && bk.ask25_pct != null && Math.min(bk.bid25_pct, bk.ask25_pct) <= 0.1
     ? (bk.ask25_pct <= bk.bid25_pct ? "위쪽(매도호가)이 얇다" : "아래쪽(매수호가)이 얇다") : null;
   const burstSide = mcLiqBurstSide(bu);
   // 2026-10-04 ② 맞대결 · ④ 벽 신호 상태 줄 + 깊은 벽 줄(원천 = 모의 엔진, 5분봉 마감 값)
-  const ps = paperSignals(), chip = (cls, txt, tip = "") => `<span class="mc-chip ${cls}"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${txt}</span>`;
+  // 맞대결·벽 신호 = ETH 모의 엔진(ETH 에서 검정) -- 다른 코인은 줄째 뺀다(2026-10-04 사용자 선택)
+  const ps = eth ? paperSignals() : null, chip = (cls, txt, tip = "") => `<span class="mc-chip ${cls}"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${txt}</span>`;
   const zTip = ps ? `30일 기준 고래 z ${sg(ps.zw, 1)} · 리테일 z ${sg(ps.zr, 1)} (정시 판정)` : "";
-  const duelLine = `<div class="mc-state"><span class="mc-k">맞대결</span>${!ps ? chip("", "엔진 대기")
+  const duelLine = !eth ? "" : `<div class="mc-state"><span class="mc-k">맞대결</span>${!ps ? chip("", "엔진 대기")
     : ps.duel ? chip(ps.duel > 0 ? "good" : "bad", `고래 ${ps.duel > 0 ? "롱" : "숏"} · 남은 ${ps.remain}분`, zTip) : chip("", "없음", zTip)}</div>`;
-  const wallLine = `<div class="mc-state"><span class="mc-k">벽 신호</span>${!ps ? chip("", "엔진 대기") : !ps.dir ? chip("", "없음")
+  const wallLine = !eth ? "" : `<div class="mc-state"><span class="mc-k">벽 신호</span>${!ps ? chip("", "엔진 대기") : !ps.dir ? chip("", "없음")
     : ps.chase ? chip("warn", `${ps.dir > 0 ? "매수" : "매도"} · 추격 주의`, `직전 5분 ${sg(ps.r5, 0, "bp")} — 이미 그 방향으로 움직였다`)
     : chip(ps.dir > 0 ? "good" : "bad", `${ps.dir > 0 ? "매수" : "매도"} 우세 · 5분`, `직전 5분 ${sg(ps.r5, 0, "bp")}`)}</div>`;
   if (badge) {
@@ -4333,7 +4344,7 @@ function renderMarketCtx() {
   const note = (s) => `<div class="mc-note">${s}</div>`;
   const qSec = (key, title, inner, extra = "") => sec(key, title, (extra ? `<div class="mc-state">상태${extra}</div>` : "") + inner);
   const levChip = ` <span class="mc-chip${levWarn ? " warn" : ""}">${escapeHtml(((d.lev || {}).label || "-").split(" —")[0])}</span>`;
-  const btcTxt = (d.btc || {}).rel === "동행" ? "ETH 같이 간다" : (d.btc || {}).rel === "단독" ? "ETH 혼자 간다" : (d.btc || {}).move_bp == null ? "수집 중" : "ETH 30분 방향 없음";
+  const btcTxt = (d.btc || {}).rel === "동행" ? `${U} 같이 간다` : (d.btc || {}).rel === "단독" ? `${U} 혼자 간다` : (d.btc || {}).move_bp == null ? "수집 중" : `${U} 30분 방향 없음`;
   const events = [
     f.next_ms ? { t: f.next_ms, nm: "펀딩 정산" } : null,
     ef ? { t: ef.exp_ms, nm: `옵션 만기 · pain ${n(ef.pain)}` } : null,
@@ -4350,7 +4361,7 @@ function renderMarketCtx() {
       + gRow("OI 1시간", G.sig(oi.z1h), `${sg(oi.z1h, 1, "σ")}`, tone(oi.z1h, 1.5), `1시간 ${sg(oi.d1h_pct, 2, "%")} · 24시간 ${sg(oi.d24h_pct, 1, "%")}`)
       + (ls ? gRow("계정 롱숏", G.ratio(ls.global, ls.global_24h), n(ls.global, 2), "", `하루 전 ${n(ls.global_24h, 2)}`)
         + gRow("탑트레이더", G.ratio(ls.top_pos, ls.top_pos_24h), n(ls.top_pos, 2), "", `하루 전 ${n(ls.top_pos_24h, 2)}`) : "")
-      + note(`정산까지 ${left(f.next_ms)} · 펀딩 OKX ${fr(f.okx)} / HL ${fr(f.hl_8h)} · OI ${n((oi.oi || 0) / 1e6, 2)}M + OKX ${n((oi.okx || 0) / 1e6, 2)}M + HL ${oi.hl == null ? "-" : n(oi.hl / 1e6, 2) + "M"} ETH`), levChip),
+      + note(`정산까지 ${left(f.next_ms)} · 펀딩 OKX ${fr(f.okx)} / HL ${fr(f.hl_8h)} · OI ${n((oi.oi || 0) / 1e6, 2)}M + OKX ${n((oi.okx || 0) / 1e6, 2)}M + HL ${oi.hl == null ? "-" : n(oi.hl / 1e6, 2) + "M"} ${U}`), levChip),
     qSec("q_flow", "② 누가 밀고 있나 · 60분", duelLine + (z.whale == null ? note("크기별 기준 쌓는 중(6시간)")
         : ["whale", "mid", "retail"].map((k2, i) => gRow(["고래", "중형", "리테일"][i], G.sig(z[k2]), sg(z[k2], 1, "σ"), tone(z[k2]))).join(""))
       + gRow("30분 CVD", G.sig(fl.cvd30_z), sg(fl.cvd30_z, 1, "σ"), tone(fl.cvd30_z))
@@ -4358,8 +4369,8 @@ function renderMarketCtx() {
       // 2026-09-30 사분면 그림 → 한 줄 네 칸(사용자 «높이를 쓸데없이 잡아먹는다»): 새 롱 · 숏 커버 · 새 숏 · 롱 정리 중 지금 칸만 채움, 작으면 전부 빈 칸.
       + gRow("가격×OI 1h", G.seg4(d.quad ? d.quad.key : null), d.quad ? ({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-" : "-",
              !d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : "",
-             `${d.quad ? d.quad.label : "-"}\n1시간 ${sg(d.move60, 0, "bp")} · OI ${sg(d.oi60, 0)} ETH${d.quad && d.quad.note ? `\n${d.quad.note}` : ""}`)
-      + note(`30분 체결 · 바이낸스 ${sg(fl.bn30, 0)} / OKX ${sg(fl.okx30, 0)} ETH`)),
+             `${d.quad ? d.quad.label : "-"}\n1시간 ${sg(d.move60, 0, "bp")} · OI ${sg(d.oi60, 0)} ${U}${d.quad && d.quad.note ? `\n${d.quad.note}` : ""}`)
+      + note(`30분 체결 · 바이낸스 ${sg(fl.bn30, 0)} / OKX ${sg(fl.okx30, 0)} ${U}`)),
     // 2026-09-30 사용자 «범례·청산 상태 글은 툴팁 안으로» -- 그림 위 호버에 두 줄. 청산 급증일 때만 판 위에 경고 한 줄을 남긴다(놓치면 안 되는 상태).
   ];
   // 2026-09-30 ④ 는 넓은 화면이면 오른쪽 칸 아랫줄 두 단(①② 아래, ③ 과 자리 바꿈) + 호가 계기 넷(변동·불균형·지속·이탈)을 여기로.
@@ -4383,7 +4394,7 @@ function renderMarketCtx() {
   const wallRow = ps ? gRow("깊은 벽", G.wall(ps.imb, ps.thr), sg(ps.imb, 2), ps.dir > 0 ? "mc-good" : ps.dir < 0 ? "mc-bad" : "",
     `±50bp 매수·매도 잔량 불균형(5분봉 마감) · 점선 = 지난 24시간 상위 20% 문턱 ±${ps.thr.toFixed(2)}`) : "";
   const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", wallLine + (sw ? G.book(sw, bps, ...(wallW ? [wallW] : [])) : note("호가 래스터 대기")) + wallRow + statRows
-      + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(2)}${bk.spread > 0.015 ? " — 평소(1틱)보다 넓다" : ""}`
+      + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(sdp)}${bk.spread > 1.5 * 10 ** -sdp ? " — 평소(1틱)보다 넓다" : ""}`
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
       + gRow("BTC 30분", G.sig((d.btc || {}).move_bp == null ? null : d.btc.move_bp / 20), sg((d.btc || {}).move_bp, 0, "bp"), "", btcTxt)
       + gRow("가격차 OKX", G.sig((d.venues || {}).okx_bp == null ? null : d.venues.okx_bp / 5), sg((d.venues || {}).okx_bp, 1, "bp"), "", "마크 대 마크")
@@ -4395,7 +4406,7 @@ function renderMarketCtx() {
   G.gw = gwKeep;
   if (G.cmpW) htmlB = [`<div class="mc-stack">${htmlB.join("")}</div>`];   // ①② 를 한 단에 위아래로
   htmlB.push(wallHtml0);
-  if (!G.cmpW) htmlB.push(paperHtml());   // 2026-10-04 좁은 화면(옵션 요약 칸 없음)은 시장 맥락 끝에 모의 판
+  if (!G.cmpW && eth) htmlB.push(paperHtml());   // 2026-10-04 좁은 화면(옵션 요약 칸 없음)은 시장 맥락 끝에 모의 판
   htmlB = htmlB.join("");
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
   const whenBox = el("mcWhen");   // 2026-10-01 휴대폰·세로 화면도 Option 카드 맨 아래(넓은 화면과 같게)
@@ -4451,7 +4462,7 @@ function keepFocus(box, render) {
 //   쌓이므로, 20% 넘게 떨어진 선 넷이 바닥에 겹치면 읽을 수 없다. 5개 전체는 카드에 거리와 함께 있다.
 function trendFlipLevels(footprint, candles) {
   const t = latestTrend;
-  if (!t || !t.ok || activeSnapshotAsset !== "eth" || !candles.length) return [];
+  if (!t || !t.ok || !candles.length) return [];
   const lo = Math.min(...candles.map((c) => c.low)), hi = Math.max(...candles.map((c) => c.high));
   return t.votes.filter((v) => Number(v.L) !== 7 && v.flip_price >= lo && v.flip_price <= hi).map((v) => ({   // 2026-10-01 7일선 제거(사용자 지시) -- 14~90일은 범위 안에 오면 그대로
     val: Number(v.flip_price), color: "var(--muted)", label: `추세${v.L}일`, priceLeft: true,
@@ -4469,16 +4480,16 @@ function renderSituation() {
   const t = latestTrend && latestTrend.ok ? latestTrend : null;
   const pxf = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: v >= 100 ? 0 : 2 });
   let h = "";
-  if (eth && t) {
-    const up = t.signal > 0, live = Number(latestLivePriceByAsset.eth || 0);
+  if (t) {   // 2026-10-04 코인별(서버 /api/trend?asset=)
+    const up = t.signal > 0, live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), U = coinUnit();
     const rows = t.votes.map((v) => {
       const d = live > 0 ? (live / v.flip_price - 1) * 100 : null, flip = live > 0 && (live > v.flip_price) !== v.up;
       return `${v.L}일 · 기준가 ${pxf(v.flip_price)} · 지금 ${d == null ? "-" : `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`} · ${v.up ? "상승" : "하락"}${flip ? " (지금 가격으로 마감하면 뒤집힘)" : ""}`;
     }).join("\n");
     const against = ((latestBinanceAccount || {}).positions || [])
-      .filter((p) => String(p.symbol || "").startsWith("ETH") && Math.abs(Number(p.qty) || 0) > 0 && (p.side === "LONG") !== up);
+      .filter((p) => String(p.symbol || "").startsWith(U) && Math.abs(Number(p.qty) || 0) > 0 && (p.side === "LONG") !== up);
     const tip = `큰 방향(1~13주) — UTC 00시 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 · ${t.age_days}일째\n${rows}`
-      + (against.length ? `\n역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유 — 원장 79왕복: 추세 쪽 +898$ vs 역추세 −468$(최악 −549$)` : "");
+      + (against.length ? `\n역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유${eth ? " — 원장 79왕복: 추세 쪽 +898$ vs 역추세 −468$(최악 −549$)" : ""}` : "");
     h += `<span class="sit-chip ${up ? "up" : "dn"}${against.length ? " warn" : ""}" title="${escapeHtml(tip)}">${up ? "▲ 추세 롱" : "▼ 추세 숏"}`
       + ` <span class="sit-dots">${t.votes.map((v) => `<b class="${v.up ? "u" : ""}"></b>`).join("")}</span> ${t.ups}/${t.votes.length} · ${t.age_days}일`
       + `${against.length ? " · 역추세 보유" : ""}</span>`;
@@ -6361,7 +6372,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
       // ③ 주간·앵커 VWAP(2026-09-30 사용자 지시, 기본 끔) -- 체결 테이프(/api/market-context profile). 지금 값 하나라 가로선.
       //   우리 검정: VWAP 되돌림·위/아래 방향 모두 가짜 레벨과 같았다 — 지지·저항 아님, 위치 참고.
-      const pf = activeSnapshotAsset === "eth" && mcLine.wvwap ? ((latestMarketCtx || {}).profile || null) : null;
+      const pf = mcLine.wvwap && (latestMarketCtx || {}).asset === activeSnapshotAsset ? latestMarketCtx.profile || null : null;
       if (pf && pf.available) {
         let lastY = -99;
         [["vwap_week", "주간 VWAP", "월 00:00 UTC 부터", "var(--ink)", "8 4", 0.55],
@@ -6379,7 +6390,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           });
       }
       // ④ HL 고래 실측 청산가 -- 추정 청산맵(배경)과 따로, 거래소가 준 실제 청산가(추적 300주소)
-      const mc = activeSnapshotAsset === "eth" && latestMarketCtx && latestMarketCtx.available ? latestMarketCtx : null;
+      const mc = latestMarketCtx && latestMarketCtx.available && latestMarketCtx.asset === activeSnapshotAsset ? latestMarketCtx : null;
       if (mc && mc.hl_liq) {
         [["below", "var(--bad)", "롱"], ["above", "var(--good)", "숏"]].forEach(([side, col, nm]) => {
           [...(mc.hl_liq[side] || [])].sort((a, c) => c.usd - a.usd).slice(0, 2).forEach((l) => {
@@ -7439,7 +7450,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     return { bs, x0, L, mx, cells };
   })();
   // 네 막대 계기 자리(그림과 호버가 같이 쓴다). 데스크톱 = 기둥 머리(체결 기둥 왼쪽 끝 ~ 오른쪽 여백), 모바일 = 풋프린트 위 한 줄.
-  const statsGeo = bookInfo && !(TRADE_W && splitR && activeSnapshotAsset === "eth") ? (() => {   // 2026-09-30 넓은 ETH 화면은 ④(#mcWall)로 옮겼다
+  const statsGeo = bookInfo && !(TRADE_W && splitR && flowOn()) ? (() => {   // 2026-09-30 넓은 화면은 ④로 옮겼다(2026-10-04 SOL·XRP 도)
     const sx = TRADE_W ? tradeX0 + 6 : ml, room = (TRADE_W ? w - mr : bookInfo.x0 - 8) - sx;
     return TRADE_W ? { sx, slotW: room / 4, labY: mt - 24, barY: mt - 20, y0: mt - 34, y1: mt - 11 }
                    : { sx, slotW: room / 4, labY: mt - 14, barY: mt - 11, y0: mt - 24, y1: mt - 2 };
@@ -7914,7 +7925,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
     // 리렌더(가격 틱)를 기다릴 이유가 없다(2bb2b2f1 이 프로파일/1초수급에 넣은 그 이유).
     // 2026-09-30 시안 Y(사용자 선택): ETH 는 오른쪽 칸 위 절반만 1초 수급, 아래 절반은 시장 맥락(#mcBody 를 그 자리에 겹쳐 놓는다).
-    const mcSplit = !!splitR && activeSnapshotAsset === "eth";
+    const mcSplit = !!splitR && flowOn();   // 2026-10-04 SOL·XRP 도 시장 맥락(코인별)
     // 2026-09-30 1초 수급 높이 = 칸 − 시장 맥락의 **실제 내용 높이**(mcNeedH, renderMarketCtx 가 잰다) -- 한 화면 모드로 칸이 줄어도 시장 맥락이 스크롤 없이 다 들어간다.
     //   아직 못 쟀으면 47% · 1초 수급은 칸의 30% 아래로는 안 줄인다.
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
