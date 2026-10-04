@@ -17,6 +17,10 @@ const quad = code.slice(code.indexOf('cachedLayer("quadLane"'), code.indexOf('ca
 ck(/stroke", "var\(--turnover\)"/.test(quad) && /r\.turn/.test(quad), "사분면 판 안에 거래대금 선(var(--turnover), r.turn)이 있다");
 ck(/fill-opacity", r\.oi == null \? "0\.06" : r\.oi >= 0 \? "0\.2" : "0\.1"/.test(quad), "칸 배경 농도: 신규 진함 · 정리 옅음 · OI 모름 가장 옅음");
 ck(!/const hgt = 26/.test(quad), "사분면 막대(높이 |Δ|)가 되살아나지 않았다");
+const cum = code.slice(code.indexOf('cachedLayer("cumLane"'), code.indexOf('cachedLayer("cumLane"') + 9000);
+ck(/const ROLL = 12/.test(cum) && /rollOn \? rollRows : cumRows/.test(cum), "누적 레인 = 직전 60분 합이 주연, 못 만들면 누적(2026-10-05 B안)");
+ck(/if \(!b\) return null;/.test(cum), "60분 합은 12봉이 다 있어야 찍는다(일부 합을 60분으로 말하지 않는다)");
+ck(/0\.32, cumRows, yc\)/.test(cum), "창 시작 누적은 흐린 선 + 제 축");
 
 console.log(fail ? `🔴 ${fail}건` : "✅ 사분면 레인 계약 OK");
 process.exit(fail ? 1 : 0);

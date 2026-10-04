@@ -7892,11 +7892,32 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
               + "|" + activeSnapshotAsset, (g) => {
   if (fpBars.length && candles.length && CUM_DRAW_H) {
     let aw = 0, am = 0, ar = 0, ao = 0;
-    const rows = laneBarsOf().map((r) => {
+    const cumRows = laneBarsOf().map((r) => {
       if (!r) return null;
       aw += r.whale; am += r.mid; ar += r.retail; ao += (r.oi || 0);
       return { t: r.t, w: aw, m: aw + am, c: aw + am + ar, oi: ao, turn: r.turn };
     });
+    // 2026-10-05 B안(사용자 선택): 진한 선·층 = **직전 60분 합**(그 봉까지 12봉) · 창 시작 누적은 흐린 선(제 축).
+    //   근거(ETH 5m 2025~): 최근 60분 가격과의 순위상관 누적 .20 → 60분 합 .72 · «가격 오르는데 선 마이너스» 34% → 15%.
+    //   창 앞 봉도 fpBars 에서 끌어 쓴다. 12봉이 다 있어야 점을 찍는다(모자라면 «모름» -- 일부 합을 60분으로 말하지 않는다).
+    const fpByT = new Map();
+    fpBars.forEach((b) => { const t = Number(b && b.time); if (!fpByT.has(t)) fpByT.set(t, b); });
+    const oiByT = new Map(oiBars.map((b) => [Number(b[0]), Number(b[1]) || 0]));
+    const ROLL = 12;
+    const rollRows = candles.map((c, i) => {
+      if (!cumRows[i]) return null;
+      let w = 0, m = 0, rt = 0, oi = 0, oiOk = true;
+      for (let k = 0; k < ROLL; k++) {
+        const t = c.time - k * 300, b = fpByT.get(t);
+        if (!b) return null;
+        const f = supplyFlowOfBar(b.levels);
+        w += f.whale; m += f.mid; rt += f.retail;
+        if (oiByT.has(t)) oi += oiByT.get(t); else oiOk = false;
+      }
+      return { t: c.time, w, m: w + m, c: w + m + rt, oi: oiOk ? oi : null, turn: cumRows[i].turn };
+    });
+    const rollOn = rollRows.filter(Boolean).length >= 2;
+    const rows = rollOn ? rollRows : cumRows;          // 60분 합을 못 만들면(재기동 직후) 옛 누적이 주연
     const have = rows.filter(Boolean);
     if (have.length >= 2) {
       // 🔴2026-10-01 눈금은 **쌓는 층 경계(고래 w · 고래+중형 m)까지** 본다 -- CVD·OI 만 보면 고래 −25k·중형 +18k 가 상쇄돼 CVD −2.3k 일 때
@@ -7933,9 +7954,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       band(() => 0, (r) => r.w, String(0.42 * fade));
       band((r) => r.w, (r) => r.m, String(0.24 * fade));
       band((r) => r.m, (r) => r.c, String(0.11 * fade));
-      const line = (val, color, width, opacity) => {
-        let d = "";
-        rows.forEach((r, i) => { if (r) d += (d ? " L" : "M") + cx(i).toFixed(1) + " " + yv(val(r)).toFixed(1); });
+      const line = (val, color, width, opacity, src = rows, Y = yv) => {
+        let d = "", pen = false;
+        src.forEach((r, i) => {
+          const v = r ? val(r) : null;
+          if (v == null) { pen = false; return; }          // 모름(60분 OI 칸 빔)은 선을 끊는다 -- 0 으로 잇지 않는다
+          d += (pen ? " L" : " M") + cx(i).toFixed(1) + " " + Y(v).toFixed(1); pen = true;
+        });
         if (!d) return;
         const path = document.createElementNS(NS, "path");
         path.setAttribute("d", d); path.setAttribute("fill", "none");
@@ -7943,6 +7968,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         path.setAttribute("stroke-opacity", opacity); path.setAttribute("stroke-linejoin", "round");
         g.appendChild(path);
       };
+      if (rollOn) {   // 흐린 창 시작 누적(제 축 -- 크기가 60분 합의 몇 배라 같은 축이면 진한 선이 눌린다)
+        const haveC = cumRows.filter(Boolean);
+        const ampC = Math.max(...haveC.map((r) => Math.max(Math.abs(r.c), Math.abs(r.oi))), 1e-9) * 1.06;
+        const yc = (v) => mid - (v / ampC) * half;
+        line((r) => r.oi, "var(--warn)", 1.4, 0.32, cumRows, yc);
+        line((r) => r.c, "var(--accent)", 1.4, 0.32, cumRows, yc);
+      }
       line((r) => r.w, "var(--bad)", 1, 0.55);      // 층 경계(농도만으로는 안 갈린다)
       line((r) => r.m, "var(--bad)", 1, 0.55);
       line((r) => r.oi, "var(--warn)", 2.4, 0.95);   // 누적 신규계약
@@ -7950,19 +7982,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const last = have[have.length - 1];
       if (!mobileChart) {   // 2026-09-30 선 끝(마지막 점)에 값(사용자 지시) -- 둘이 가까우면 위아래로 비킨다
         let li = rows.length - 1; while (li >= 0 && !rows[li]) li--;
-        const ex = cx(li) - 8, yc = yv(last.c), yo = yv(last.oi), push = Math.abs(yc - yo) < 14 ? (14 - Math.abs(yc - yo)) / 2 : 0;   // 점 왼쪽(오른쪽은 ④ 자리)
-        [[yc - (yc <= yo ? push : -push), "CVD", last.c, "var(--accent)"], [yo - (yo < yc ? push : -push), "OI", last.oi, "var(--warn)"]].forEach(([y, nm, v, col]) => {
+        const ex = cx(li) - 8, yc = yv(last.c), yo = yv(last.oi || 0), push = Math.abs(yc - yo) < 14 ? (14 - Math.abs(yc - yo)) / 2 : 0;   // 점 왼쪽(오른쪽은 ④ 자리)
+        [[yc - (yc <= yo ? push : -push), "CVD", last.c, "var(--accent)"], [yo - (yo < yc ? push : -push), "OI", last.oi, "var(--warn)"]].filter(([, , v]) => v != null).forEach(([y, nm, v, col]) => {
           const dot = document.createElementNS(NS, "circle");
           dot.setAttribute("cx", cx(li)); dot.setAttribute("cy", nm === "CVD" ? yc : yo); dot.setAttribute("r", 3); dot.setAttribute("fill", col);
           g.appendChild(dot);
           const t = document.createElementNS(NS, "text");
           t.setAttribute("x", ex); t.setAttribute("y", y + 4); t.setAttribute("text-anchor", "end"); t.setAttribute("font-size", "12"); t.setAttribute("font-weight", "700");
           t.setAttribute("fill", col); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3"); t.setAttribute("paint-order", "stroke");
-          t.textContent = `${nm} ${(v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v))}`;
+          t.textContent = `${nm}${rollOn ? " 60분" : ""} ${(v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v))}`;
           g.appendChild(t);
         });
       }
-      const sgn = (v) => (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v));
+      const sgn = (v) => (v == null ? "—" : (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v)));
       // 2026-09-28 값 칸(사용자 «라벨을 깔끔하게»): 데스크톱 = 판 오른쪽 위에 **지금 값만**(무엇인지는 왼쪽 견본이 말한다) --
       //   CVD 15 굵게 · OI · 거래대금 13, 한 칸 띄우고 고래·중형·리테일 11. 모바일 = 판 아래 한 줄(견본 없이 이름+값).
       const sgnCol = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
@@ -7994,7 +8026,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         });
         const ti = document.createElementNS(NS, "title");
         ti.textContent = "봉 칸 배경 = 사분면: 색은 델타 부호(초록 매수·빨강 매도), 진하면 OI 증가(신규 롱/숏) · 옅으면 OI 감소(정리). "
-          + "흰 선 = 창 시작부터 누적 CVD(고래·중형·리테일 면의 윤곽), 주황 = 누적 OI(같은 축), 파란 점선 = 봉별 거래대금(판 아래 40% 제 축).";
+          + (rollOn
+            ? "진한 흰 선 = 직전 60분 CVD 합(고래·중형·리테일 면의 윤곽, 0 위 = 최근 1시간 매수 우위), 진한 주황 = 직전 60분 OI 변화(같은 축). "
+              + "흐린 두 선 = 창 시작부터 누적 CVD·OI(제 축 -- 큰 사건의 흔적). 큰 봉은 60분 뒤 합에서 빠져 선이 계단처럼 움직인다 -- 그때는 칸 색을 본다. "
+            : "흰 선 = 창 시작부터 누적 CVD(고래·중형·리테일 면의 윤곽), 주황 = 누적 OI(같은 축). ")
+          + "고래·중형·리테일 값 = " + (rollOn ? "직전 60분 합" : "창 시작부터 누적") + ". 파란 점선 = 봉별 거래대금(판 아래 40% 제 축).";
         row.appendChild(ti);
         g.appendChild(row);
       } else {
