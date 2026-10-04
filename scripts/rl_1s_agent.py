@@ -512,6 +512,7 @@ class Trader:
     def __init__(self):
         self.pos, self.tgt, self.entry, self.order, self.since = 0, 0, 0.0, None, 0
         self.k = 1.0                                # 손익 배수(크기 조절 판만 바꾼다, 1 단위 체결 모델은 그대로)
+        self.k_in = 1.0                             # 지금 포지션이 진입 체결 때 받은 배수 -- 원장 bp_k·state unr (10-05 원장 bp 에 k 가 빠져 있었다)
         self.pnl = dict(hold=0.0, maker=0.0, taker=0.0)
         self.n = dict(maker_fills=0, taker_exits=0, secs=0, secs_long=0, secs_short=0)
         self.now, self.t_entry, self.closed = None, None, []   # 원장: 호출 쪽이 now(초)를 넣어 주면 끝난 거래를 closed 에 쌓는다
@@ -520,10 +521,11 @@ class Trader:
         """포지션이 prev -> self.pos 로 바뀐 체결 하나를 원장에 반영(청산 다리 기록 + 새 진입 시각)."""
         if prev:
             fee = abs(prev) * TAKER_FEE_BP if kind == "taker" else 0.0
+            bp = prev * (px / self.entry - 1) * 1e4 - fee   # bp = 1 단위(기존 의미 그대로) · bp_k = 배수 반영(손익 합과 같은 단위)
             self.closed.append(dict(side="long" if prev > 0 else "short", t_in=self.t_entry, px_in=self.entry, t_out=self.now,
-                                    px_out=px, exit=kind, bp=round(prev * (px / self.entry - 1) * 1e4 - fee, 3)))
+                                    px_out=px, exit=kind, bp=round(bp, 3), k=self.k_in, bp_k=round(bp * self.k_in, 3)))
         if self.pos and np.sign(self.pos) != np.sign(prev):
-            self.t_entry = self.now
+            self.t_entry, self.k_in = self.now, self.k
 
     def needs_decision(self, s: int) -> bool:
         return is_bar(s) or self.pos != 0
@@ -552,6 +554,10 @@ class Trader:
             self._book(prev, px, "taker")
             return r
         return 0.0
+
+    def mark(self, mid0: float, mid1: float) -> None:
+        """체결 판정 없이 시가평가만 -- paper 가 tick 사이에 빈 구간(봉 경계 관측 계산·호가 공백)을 잇는다."""
+        self.pnl["hold"] += self.pos * (mid1 / mid0 - 1) * 1e4 * self.k
 
     def tick(self, e: dict, w: tuple, mid1: float) -> float:
         """결정 시각부터 다음 초 결정 시각까지: 지정가 대기열 + 시가평가."""
@@ -1447,14 +1453,39 @@ def paper_backtest(days=None) -> dict:
     return dict(days=days, table=table, active=active, selected=track, teacher=table[TEACHER])
 
 
-def paper(out: Path = PAPER) -> None:
+def paper(out: Path = PAPER, feed=None) -> None:
     """서버 상주: LiveFeed 하나로 9판을 동시에 모의 매매(체결은 큐 모델, 실주문 없음). 매 UTC 날짜 바뀔 때 pick_arm.
-    산출: state.json(1분마다) · daily.jsonl(판별 일 손익·활성 판) · served_*.parquet(실제 먹인 패널 행, 매시)."""
+    산출: state.json(1분마다) · daily.jsonl(판별 일 손익·활성 판·기록 시간) · served_*.parquet(실제 먹인 패널 행, 매시).
+    재시작 이어받기(10-05 검증 결함): state.json 의 resume(1분마다 + SIGTERM 때)에서 같은 UTC 날이면 오늘 손익을 잇고, 날이 바뀌었으면
+    끊긴 날을 저장값으로 daily 에 쓴다(restart_cut). 열린 포지션은 이어받고 대기 주문은 버린다 -- 체결 모델이 큐 자리를 잃으므로
+    새로 서는 것과 같고, 재시작 시각에 가짜 청산을 원장에 쓰면 판이 하지 않은 거래가 된다. 장중 고점·낙폭도 잇는다.
+    feed = selftest 의 가짜 피드(기본 LiveFeed)."""
+    import signal
     import time
     out.mkdir(parents=True, exist_ok=True)
     cols = features_cols()
     idx = {c: cols.index(c) for c in ("imb50", "whale_z", "retail_z", "ret300", "doi300", "liq_long60", "liq_short60")}
     idx.update(whale_z_mv=len(cols), retail_z_mv=len(cols) + 1)    # 피쳐 뒤에 붙인다(obs_row 가 served 에 남긴 wz2·rz2)
+    feed = feed or LiveFeed()
+    feed.start()
+    s = feed.wait_ready()
+    while not is_bar(s):
+        s = feed.wait_next(s)
+    ex = feed.exec_now(s)
+    st0, rs = {}, {}
+    try:
+        st0 = json.loads((out / "state.json").read_text())
+        rs = st0.get("resume") or {}               # 10-05 전 state 에는 없다 -> 새로 시작
+    except Exception:  # noqa: BLE001  -- 없음·깨짐 = 새로 시작
+        pass
+    if rs and rs["day"] < s // 86400:              # 날이 바뀐 뒤 재시작 -> 끊긴 날을 저장값으로(그날 줄이 이미 있으면 안 쓴다)
+        dstr = str(pd.Timestamp(rs["day"] * 86400, unit="s").date())
+        lines = (out / "daily.jsonl").read_text().splitlines() if (out / "daily.jsonl").exists() else []
+        if not lines or json.loads(lines[-1])["day"] != dstr:
+            with open(out / "daily.jsonl", "a") as f:
+                f.write(json.dumps(dict(day=dstr, active=st0.get("active"), pnl={a: v["today"] for a, v in rs["arms"].items()},
+                                        fills={a: v.get("fills") for a, v in (st0.get("arms") or {}).items()},
+                                        hours=round(rs["rec_s"] / 3600, 2), restart_cut=True)) + "\n")
     hist = {a: [] for a in ARMS}
     if (out / "daily.jsonl").exists():
         for line in (out / "daily.jsonl").read_text().splitlines():
@@ -1470,21 +1501,40 @@ def paper(out: Path = PAPER) -> None:
                 policies[a].seed_logp(c5)
     except Exception as exc:  # noqa: BLE001
         print(f"[paper] 5분봉 미리 채우기 실패(vt 판은 24h 예열): {type(exc).__name__}: {exc}", flush=True)
+    # ponytail: 정지가 길어도(수 시간+) 그대로 잇는다 -- 정지 동안 움직임은 재시작 첫 호가에 한 번에 시가평가된다. 피쳐 이력(a24·er·vt 창)은 다시 예열.
+    for a, v in (rs.get("arms") or {}).items():
+        if a in traders:
+            for k, x in (v.get("pol") or {}).items():   # 보유 시계(고래 60분·poi 1시간·최소 보유 등)
+                setattr(policies[a], k, x)
+            traders[a].k = policies[a].k = v["k"]
+            if v["pos"]:
+                tr = traders[a]
+                tr.pos = tr.tgt = v["pos"]
+                tr.entry, tr.t_entry, tr.k_in = v["entry"], v["t_entry"], v["k_in"]
     phist = {k: [sum(wt * hist[a][len(hist[a]) - n + i] for a, wt in ws.items()) for i in range(n)]
              for k, ws in PORTFOLIOS.items() for n in [min(len(hist.get(a, [])) for a in ws)]}
     dd = {**{a: dd_init(hist[a]) for a in ARMS}, **{k: dd_init(v) for k, v in phist.items()}}
+    dd.update({k: v for k, v in (rs.get("dd") or {}).items() if k in dd})   # 장중 고점·낙폭(일 종가로 다시 세면 장중 낙폭이 사라진다)
     sig = {}                                       # 대시보드 신호(마지막 봉 마감 값) -- 연구와 같은 계산을 엔진이 한 번만 한다
     quoted = lambda e: e["P"] == e["P"] and e["midT"] == e["midT"]
-    feed = LiveFeed()
-    feed.start()
-    s = feed.wait_ready()
-    while not is_bar(s):
-        s = feed.wait_next(s)
-    ex = feed.exec_now(s)
-    day, day0 = s // 86400, {a: 0.0 for a in ARMS}
+    same = rs.get("day") == s // 86400
+    day, day0 = s // 86400, {a: -rs["arms"][a]["today"] if same and a in rs["arms"] else 0.0 for a in ARMS}
+    rec_s, gap, mk, stop = (rs["rec_s"] if same else 0), 0, [rs.get("mid")], []   # 오늘 기록 초 · 시가평가만 한 초 · 마지막 시가평가 mid
+
+    def remark(e):
+        """tick 사이 빈 구간을 시가평가로 잇는다(체결 판정은 안 함 = 보수적). 전엔 ① 봉 경계에서 관측 계산 뒤 호가를 다시 받아 다음 tick 이
+        거기서 시작해 계산 동안의 움직임이 빠졌고 ② 호가가 2초 넘게 묵은 초(exec_now NaN)는 tick 을 통째로 건너뛰었다.
+        10-05 검증: 10-04 10:00 정시 봉에서 원장 대비 +1.9bp 어긋남(그 시각 WS 재연결 없음 -> ① 로 추정)."""
+        if quoted(e):
+            if mk[0] is not None:
+                for tr in traders.values():
+                    tr.mark(mk[0], e["midT"])
+            mk[0] = e["midT"]
     last_state = last_served = time.time()
     last_beat = last_state - 540                   # 첫 하트비트는 1분 뒤(스트림 확인)
-    print(f"[paper] 시작 {pd.Timestamp(s, unit='s')} · 활성 {active}", flush=True)
+    signal.signal(signal.SIGTERM, lambda *_: stop.append(1))   # 재시작(handoff stop·예약 스크립트) -> 상태를 쓰고 끝낸다
+    print(f"[paper] 시작 {pd.Timestamp(s, unit='s')} · 활성 {active} · 이어받기 "
+          f"{'같은 날' if same else '날 바뀜' if rs else '없음'} 포지션 {sum(1 for t in traders.values() if t.pos)}판", flush=True)
     while True:
         if is_bar(s):
             if TREND["day"] != (s + 1) // 86400:                   # 하루 한 번(실패하면 다음 봉에 다시)
@@ -1492,6 +1542,7 @@ def paper(out: Path = PAPER) -> None:
             x = feed.obs_row(s)
             x = np.append(x, np.nan_to_num(feed.served[-1][["wz2", "rz2"]].to_numpy(float)))   # features 와 같은 규약: NaN -> 0
             ex = feed.exec_now(s)                      # 관측 계산 뒤 = 주문이 나가는 순간의 호가
+            remark(ex)
             if quoted(ex):
                 tg = {}
                 for a, tr in traders.items():
@@ -1507,6 +1558,7 @@ def paper(out: Path = PAPER) -> None:
                 with open(out / "decisions.jsonl", "a") as f:   # 봉마다 판단 근거 + 판별 목표(원장 진단용)
                     f.write(json.dumps(dict(s=s, x={c: round(float(x[i]), 4) for c, i in idx.items()}, tgt=tg)) + "\n")
         elif quoted(ex):                               # 봉 중간: 익절·청산 쫓기 제한 판만
+            remark(ex)
             for a, tr in traders.items():
                 unr = tr.pos * (ex["midT"] / tr.entry - 1) * 1e4 if tr.pos else 0.0
                 act = sec_action(a, tr.pos, tr.tgt, unr, (s + 1) % BAR)
@@ -1523,6 +1575,10 @@ def paper(out: Path = PAPER) -> None:
             for tr in traders.values():
                 tr.now = s1 + 1
                 tr.tick(ex, w, ex1["midT"])
+            mk[0] = ex1["midT"]
+        else:
+            gap += s1 - s                              # 체결 판정 없이 지나간 초(시가평가는 회복 첫 초에 remark)
+        rec_s += s1 - s
         with open(out / "trades.jsonl", "a") as f:     # 끝난 거래 원장(판별)
             for a, tr in traders.items():
                 for c in tr.closed:
@@ -1534,15 +1590,15 @@ def paper(out: Path = PAPER) -> None:
             rec = {a: tot[a] - day0[a] for a in ARMS}
             with open(out / "daily.jsonl", "a") as f:
                 f.write(json.dumps(dict(day=str(pd.Timestamp(day * 86400, unit="s").date()), active=active, pnl=rec,
-                                        fills={a: traders[a].n["maker_fills"] for a in ARMS})) + "\n")
+                                        fills={a: traders[a].n["maker_fills"] for a in ARMS}, hours=round(rec_s / 3600, 2))) + "\n")
             for a in ARMS:
                 hist[a].append(rec[a])
             for k, ws in PORTFOLIOS.items():
                 phist[k].append(sum(wt * rec[a] for a, wt in ws.items()))
-            active, day, day0 = pick_arm(hist), s // 86400, dict(tot)
+            active, day, day0, rec_s = pick_arm(hist), s // 86400, dict(tot), 0
             print(f"[paper] {rec[TEACHER]:+.1f}bp(교사) · 다음 활성 {active}", flush=True)
-        if time.time() - last_state >= 60:
-            st = dict(ts=s, active=active, arms={a: dict(pos=tr.pos, tgt=tr.tgt, pnl_today=round(tot[a] - day0[a], 2),
+        if time.time() - last_state >= 60 or stop:
+            st = dict(ts=s, active=active, gap_s=gap, arms={a: dict(pos=tr.pos, tgt=tr.tgt, pnl_today=round(tot[a] - day0[a], 2),
                                                         pnl_total=round(tot[a], 2), fills=tr.n["maker_fills"])
                                                  for a, tr in traders.items()})
             try:                                       # 화면용 덧붙임 -- 실패해도 엔진·기본 상태는 계속(로그만)
@@ -1551,8 +1607,8 @@ def paper(out: Path = PAPER) -> None:
                     cum = sum(hist[a]) + tot[a] - day0[a]
                     dd[a] = dd_step(dd[a], cum)
                     st["arms"][a].update(entry=round(tr.entry, 2) if tr.pos else None, cum=round(cum, 1), mdd=round(dd[a][1], 1),
-                                         days=len(hist[a]) + 1,
-                                         unr=round(tr.pos * (mid / tr.entry - 1) * 1e4, 2) if tr.pos and mid else None)
+                                         days=len(hist[a]) + 1, k=tr.k_in if tr.pos else None,   # unr = 배수 반영(원장 bp_k 와 같은 단위)
+                                         unr=round(tr.pos * (mid / tr.entry - 1) * 1e4 * tr.k_in, 2) if tr.pos and mid else None)
                 st["port"] = {}
                 for k, ws in PORTFOLIOS.items():
                     cum = sum(wt * st["arms"][a]["cum"] for a, wt in ws.items())
@@ -1563,9 +1619,16 @@ def paper(out: Path = PAPER) -> None:
                 st["signals"] = sig
             except Exception as exc:  # noqa: BLE001
                 print(f"[paper] 화면용 상태 계산 실패(기본 상태는 씀): {type(exc).__name__}: {exc}", flush=True)
+            st["resume"] = dict(day=day, rec_s=rec_s, mid=mk[0], dd=dd, arms={      # 재시작 이어받기(paper 시작부)
+                a: dict(today=tot[a] - day0[a], pos=tr.pos, entry=tr.entry, t_entry=tr.t_entry, k=policies[a].k, k_in=tr.k_in,
+                        pol={k: getattr(policies[a], k) for k in ("whale_hold", "hour_t", "poi_left", "entry_s", "last_ok", "held", "tp_block")})
+                for a, tr in traders.items()})
             (out / "state.tmp").write_text(json.dumps(st))
             (out / "state.tmp").replace(out / "state.json")
             last_state = time.time()
+            if stop:
+                print(f"[paper] 종료 신호 -- 상태 저장 {pd.Timestamp(s, unit='s')}", flush=True)
+                return
         if time.time() - last_beat >= 600:             # 10분마다 스트림별 메시지 수 -- 0 이면 그 스트림이 죽은 것
             print(f"[paper] {pd.Timestamp(s, unit='s')} 메시지 {feed.cnt} · 교사 오늘 {tot[TEACHER] - day0[TEACHER]:+.1f}bp "
                   f"pos {traders[TEACHER].pos}", flush=True)
@@ -1827,6 +1890,93 @@ def selftest() -> None:
     r = tk.tick(e0, (2.5, inf, 0.0, -inf), 100.02)
     assert abs(r - 2 * (100.02 / 100.00 - 1) * 1e4) < 1e-9 and abs(sum(tk.pnl.values()) - r) < 1e-9
     assert all(a in ARMS for a in ("trend4", "trend4_vs", "poi1h", "w100_z0.5_w60_vt", f"{TEACHER}_a24_mh15_er"))
+    # 10-05 기록 결함: 원장 bp_k = 진입 배수 반영(bp 는 1 단위 그대로) · 시가평가만 잇기
+    assert t1.closed[0]["k"] == 1.0 and t1.closed[0]["bp_k"] == t1.closed[0]["bp"]
+    tk = Trader(); tk.k = 2.0
+    tk.decide(2, True, e0); tk.tick(e0, (2.5, inf, 0.0, -inf), 100.02)
+    tk.k = 0.5                                              # 보유 중 배수가 바뀌어도(전환 결정) 원장은 진입 체결 때 배수
+    tk.decide(2, False, dict(P=10002.0, A=10003.0, bq=1.0, aq=1.0, midT=100.025))
+    c = tk.closed[0]
+    assert c["k"] == 2.0 and abs(c["bp_k"] - 2 * c["bp"]) < 2e-3 and abs(c["bp"] - ((100.02 / 100.00 - 1) * 1e4 - TAKER_FEE_BP)) < 1e-3
+    tk = Trader(); tk.pos, tk.k = -1, 1.5
+    tk.mark(100.0, 100.01)
+    assert abs(tk.pnl["hold"] + 1.5) < 1e-9
+    if (OUT / PANEL).exists():                              # paper() 를 가짜 피드로: 재시작 이어받기 · 장중 낙폭 · 배수 판 · 빈 구간 시가평가
+        import os
+        import signal
+        import tempfile
+        ncol, i50 = len(features_cols()), features_cols().index("imb50")
+
+        class Fake:                                         # 초 s 의 mid = m(s) · 봉 경계 관측 계산 동안 1초가 흐른다 · gaps 초는 호가 묵음
+            def __init__(self, s0, s1, m, gaps=()):
+                self.s0, self.s1, self.m, self.gaps, self.obs = s0, s1, m, set(gaps), False
+                self.served, self.cnt = [pd.Series(dict(wz2=0.0, rz2=0.0))], {}
+
+            def start(self):
+                pass
+
+            def wait_ready(self):
+                return self.s0
+
+            def wait_next(self, s):
+                if s + 1 >= self.s1:
+                    os.kill(os.getpid(), signal.SIGTERM)    # 재시작 = 종료 신호 -> 상태 저장 후 끝
+                return s + 1
+
+            def obs_row(self, s):
+                self.obs = True
+                x = np.zeros(ncol)
+                x[i50] = 0.5                                # 깊은 매수벽 -> 교사 롱
+                return x
+
+            def exec_now(self, s):
+                if s in self.gaps:
+                    return dict(P=np.nan, A=np.nan, bq=np.nan, aq=np.nan, midT=np.nan, T=s)
+                m, self.obs = self.m(s + 1 if self.obs else s), False
+                return dict(P=round((m - 0.01) * PX), A=round((m + 0.01) * PX), bq=1.0, aq=1.0, midT=m, T=s)
+
+            def window(self, T0, T1, pc, ac):
+                return (0.0, pc - 1, 0.0, ac + 1)           # 양쪽 다 뚫림 -> 지정가 즉시 체결
+
+        def boom(*a, **k):
+            raise RuntimeError("selftest: REST 금지")
+        g, D = globals(), 20_000
+        s0, fetch0, trend0 = D * 86400 + 36000 - 1, g["fetch_closes"], dict(TREND)
+        g["fetch_closes"] = boom
+        TREND.update(day=D, sig=1.0, size=1.5)              # trend4_vs = 롱 × 1.5
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                out = Path(td)
+                rd = lambda: json.loads((out / "state.json").read_text())
+                # A: 진입(1999.99) -> 봉 경계 관측 중 +1 -> 호가 묵음 5초 사이 −2 -> 1999 에서 종료 신호
+                paper(out, Fake(s0, s0 + 1000, lambda s: 2000.0 + (s > s0 + 300) - 2 * (s >= s0 + 402), gaps=range(s0 + 400, s0 + 405)))
+                st = rd()
+                a, v = st["arms"][TEACHER], st["arms"]["trend4_vs"]
+                want = (1999 / 1999.99 - 1) * 1e4               # 빈 구간 둘(+5bp·−10bp)을 다 시가평가해야 진입가→지금 mid 와 같다
+                assert a["pos"] == 1 and abs(a["pnl_today"] - want) < 0.05 and st["gap_s"] == 6, (a, want, st["gap_s"])
+                assert abs(v["pnl_today"] - 1.5 * want) < 0.08 and v["k"] == 1.5 and abs(v["unr"] - 1.5 * a["unr"]) < 0.02
+                assert abs(a["mdd"] - want) < 0.1
+                # B: 같은 날 재시작(정지 중 2002 로) -> 오늘 손익·포지션·배수·장중 낙폭을 잇는다, 가짜 청산 없음
+                paper(out, Fake(s0 + 1500, s0 + 1800, lambda s: 2002.0))
+                st = rd()
+                a, v = st["arms"][TEACHER], st["arms"]["trend4_vs"]
+                want = (2002 / 1999.99 - 1) * 1e4
+                assert a["pos"] == 1 and a["fills"] == 0 and abs(a["pnl_today"] - want) < 0.05, (a, want)
+                assert abs(v["pnl_today"] - 1.5 * want) < 0.08 and abs(a["mdd"] - (1999 / 1999.99 - 1) * 1e4) < 0.1
+                assert not (out / "daily.jsonl").exists() and not [x for x in (out / "trades.jsonl").read_text().splitlines()
+                                                                   if json.loads(x)["arm"] == TEACHER]
+                # C: 다음 날 재시작 -> 끊긴 날 = 저장값(restart_cut·기록 시간) · 새 날은 정지 중 움직임부터
+                paper(out, Fake((D + 1) * 86400 + 299, (D + 1) * 86400 + 400, lambda s: 2003.0))
+                d = [json.loads(x) for x in (out / "daily.jsonl").read_text().splitlines()]
+                assert len(d) == 1 and d[0]["restart_cut"] and abs(d[0]["pnl"][TEACHER] - want) < 0.05 and abs(d[0]["hours"] - 1300 / 3600) < 0.006, d
+                st = rd()
+                a = st["arms"][TEACHER]
+                assert a["pos"] == 1 and a["days"] == 2 and abs(a["pnl_today"] - (2003 / 2002 - 1) * 1e4) < 0.05
+                assert abs(a["cum"] - (2003 / 1999.99 - 1) * 1e4) < 0.1, a
+        finally:
+            g["fetch_closes"] = fetch0
+            TREND.clear(); TREND.update(trend0)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
     print("selftest ok")
 
 
