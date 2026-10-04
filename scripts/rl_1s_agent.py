@@ -1202,7 +1202,9 @@ ARMS = [f"w{q}_" + (f"z{z:g}" if z else "off") for q in WALL_Q for z in (None, 0
 # 10-03 추가 4판 + 움직이는 경계판 + 회전·고래 단독 4판 · 10-04 «통과했는데 모의 판에 없던 것» 7판(사용자 지시):
 #   trend4    = 1~4주 추세(7·14·21·28일 종가 부호 평균, 매일 00시 UTC 결정) -- 현물 9년 샤프 0.99·선물 4.7년 0.62(eth_tsmom_1_4w_voltarget)
 #   trend4_vs = 같은 방향 × 변동성 사이징 크기(연 50% ÷ 20일 실현변동성, ±2배) -- 대시보드 추세 칸과 같은 식, 손익 배수로 반영
-#   poi1h     = 정시마다 직전 1시간 수익 ≤ 하위 25% 이면 ΔOI 1시간 < 0 → 롱 · > 0 → 숏, 1시간 보유(price_oi_quadrant 1h +3.5bp 차)
+#   poi1h     = 5분마다 직전 1시간 수익 ≤ 하위 25% 이면 ΔOI 1시간 < 0 → 롱 · > 0 → 숏, 마지막 발동 뒤 1시간 보유(price_oi_quadrant 1h +3.5bp 차 원 연구 정의).
+#               🔴2026-10-05 정시 결정에서 5분 판정으로(사용자 «원 연구 정의로 진행 · 마이너스 포함돼도 문제없어») -- 2025~ 는 원 정의도 CI 0 포함
+#               (OI↓−OI↑ +3.37[−0.32,+7.53] · 이 판정의 매매 −8.25bp/일[−33,+17], 2022~24 +13.0) · docs/experiments/trend4_poi1h_solxrp_20261004.md §3
 #   _vt       = 24시간 SMA(5분봉 288개) 반대쪽 목표는 0(역추세 금지, czz SMA288 veto +12.1bp)
 #   _er       = 같은 거래를 동일위험 크기로: 직전 4시간 5분 수익 표준편차 대비 4.7년 중앙값(배 0.5~2). 🔴배포 위험모델(MAE 분위)이 아니라
 #               실현변동성 대용 -- 그 모델은 사이징 워커와 함께 09-27 에 꺼져 있다(dashboard_vol_model_removed).
@@ -1294,7 +1296,7 @@ class ArmPolicy:
         self.k = 1.0                                               # 크기 배수(엔진이 Trader.k 로 옮긴다)
         self.logp = deque(maxlen=288)                              # 5분봉 로그가격×1e4 (vt: 24h SMA) -- seed_logp 로 미리 채운다
         self.r5, self.o5 = deque(maxlen=48), deque(maxlen=12)       # 봉마다 ret300(er 4h 변동성 · poi 1h 수익) · doi300(poi 1h ΔOI)
-        self.hour_t = 0                                            # poi1h: 이번 시간 목표
+        self.hour_t, self.poi_left = 0, 0                          # poi1h: 목표 · 마지막 발동 뒤 남은 봉(12 = 1시간)
 
     def seed_logp(self, closes: list[float]) -> None:
         self.logp.extend(np.log(np.asarray(closes, float)) * 1e4)
@@ -1308,9 +1310,14 @@ class ArmPolicy:
             if t and t != pos:                                     # 크기는 새 진입 때만 바꾼다(보유 중 배수 고정)
                 self.k = abs(TREND["size"]) if self.arm == "trend4_vs" else 1.0
             return t
-        if (s + 1) % 3600 == 0 and len(self.r5) >= 12:            # poi1h: 정시에만 정하고 다음 정시까지 유지
-            r1h, o1h = sum(list(self.r5)[-12:]), sum(self.o5)
-            self.hour_t = (1 if o1h < 0 else -1 if o1h > 0 else 0) if r1h <= POI_DOWN_BP else 0
+        r1h, o1h = (sum(list(self.r5)[-12:]), sum(self.o5)) if len(self.r5) >= 12 else (np.inf, 0.0)
+        if r1h <= POI_DOWN_BP and np.isfinite(o1h) and o1h != 0:   # poi1h: 5분마다 판정(원 연구 정의) -- 발동하면 그 방향, 1시간 시계를 다시 건다
+            #   🔴OI 결측(NaN)은 발동 아님 -- «NaN < 0» 이 거짓이라 숏으로 읽혔다(대조 시험이 잡음, 실시간은 피쳐가 0 으로 채워 안 일어남)
+            self.hour_t, self.poi_left = (1 if o1h < 0 else -1), 12
+        elif self.poi_left > 0:
+            self.poi_left -= 1
+        else:
+            self.hour_t = 0
         return self.hour_t
 
     def bar(self, x: np.ndarray, idx: dict, s: int, pos: int, unr: float) -> int:
@@ -1794,9 +1801,11 @@ def selftest() -> None:
     assert ArmPolicy("trend4").bar(X7(), ix7, 299, 0, 0) == 0              # 일봉 없으면 관망
     po = ArmPolicy("poi1h")
     for i in range(11):
-        po.bar(X7(r5=-3.0, o5=+1.0), ix7, 300 * i + 299, 0, 0)
-    assert po.bar(X7(r5=-3.0, o5=+1.0), ix7, 3599, 0, 0) == -1           # 1h −36bp(≤ −26.68) · OI↑ -> 숏
-    assert po.bar(X7(), ix7, 3899, -1, 0) == -1                            # 다음 정시까지 유지
+        po.bar(X7(r5=-3.0, o5=+1.0), ix7, 300 * i + 899, 0, 0)            # 정시가 아닌 봉에서 시작 -- 5분 판정
+    assert po.bar(X7(r5=-3.0, o5=+1.0), ix7, 300 * 11 + 899, 0, 0) == -1  # 1h −36bp(≤ −26.68) · OI↑ -> 숏(정시 아님)
+    tt = [po.bar(X7(), ix7, 300 * k + 899, -1, 0) for k in range(12, 40)]
+    assert tt[0] == -1 and tt[-1] == 0                                     # 조건이 꺼져도 마지막 발동 뒤 1시간은 유지, 그 뒤 관망
+    assert sum(1 for v in tt if v == -1) == 3 + 12                         # 발동이 3봉 더 이어진 뒤(−33·−30·−27) 12봉 = 1시간
     po2 = ArmPolicy("poi1h")
     for i in range(12):
         t = po2.bar(X7(r5=-3.0, o5=-1.0), ix7, 300 * i + 299, 0, 0)

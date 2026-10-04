@@ -275,23 +275,24 @@ def research_vs(c: pd.Series, fund: pd.Series | None, start: str | None = None) 
 
 
 def parity_check(d: pd.DataFrame, P: pd.DataFrame, thr: float) -> None:
-    """자체점검: 벡터 구현 = 엔진 ArmPolicy 판정 (poi1h 2주 · trend4/_vs 전 기간)."""
+    """자체점검: 벡터 구현 = 엔진 ArmPolicy 판정 (poi1h 2주 · trend4/_vs 전 기간). poi1h 는 10-05 부터 5분 판정(§3)."""
     seg = d[(d.index >= "2025-03-01") & (d.index < "2025-03-15")]
     oi = oi_at_close(d)[seg.index].to_numpy()
     lp = np.log(seg.close.to_numpy()) * 1e4
     x = np.zeros(7)
     ix = {"imb50": 0, "whale_z": 1, "retail_z": 2, "ret300": 3, "doi300": 4, "liq_long60": 5, "liq_short60": 6}
     ENG.POI_DOWN_BP = thr
-    pol, eng_t = ENG.ArmPolicy("poi1h"), {}
+    # 2026-10-05 엔진 poi1h = 5분 판정 · 마지막 발동 뒤 12봉 보유(원 연구 정의). 벡터 = 발동 방향을 12봉까지 앞으로 채움.
+    pol, eng = ENG.ArmPolicy("poi1h"), []
+    r5, o5 = np.r_[np.nan, np.diff(lp)], np.r_[np.nan, (oi[1:] / oi[:-1] - 1) * 1e4]
     for j in range(1, len(seg)):
-        x[3], x[4] = lp[j] - lp[j - 1], (oi[j] / oi[j - 1] - 1) * 1e4
-        s = int((seg.index[j] + pd.Timedelta("5min")).timestamp()) - 1
-        t = pol.bar(x, ix, s, 0, 0.0)
-        if (s + 1) % 3600 == 0:
-            eng_t[seg.index[j] + pd.Timedelta("5min")] = t
-    f = poi_frame(d, thr).set_index("t").tgt
-    common = [k for k in eng_t if k in f.index and k >= seg.index[0] + pd.Timedelta("65min")]
-    assert len(common) > 300 and all(eng_t[k] == f[k] for k in common), "poi1h 벡터 구현 ≠ 엔진 ArmPolicy"
+        x[3], x[4] = r5[j], o5[j]
+        eng.append(pol.bar(x, ix, int((seg.index[j] + pd.Timedelta("5min")).timestamp()) - 1, 0, 0.0))
+    r1h, o1h = pd.Series(r5).rolling(12).sum().to_numpy()[1:], pd.Series(o5).rolling(12).sum().to_numpy()[1:]
+    trig = np.where((r1h <= thr) & np.isfinite(o1h) & (o1h != 0), np.sign(-o1h), np.nan)
+    vec = pd.Series(trig).ffill(limit=12).fillna(0).to_numpy()
+    k0 = 13                                                                # 첫 12봉 = 1시간 창 예열
+    assert len(eng) > 3000 and np.array_equal(np.array(eng[k0:]), vec[k0:]), "poi1h 벡터 구현 ≠ 엔진 ArmPolicy"
     for arm in ("trend4", "trend4_vs"):                                    # 엔진 판으로 같은 일봉을 돌려 포지션 비교
         pol, pos = ENG.ArmPolicy(arm), 0
         for day, row in P.iterrows():
