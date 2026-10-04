@@ -2914,7 +2914,9 @@ function renderNews() {
   const chip = (k, on, lab) => `<button type="button" class="opt-chip-btn${on ? " on" : ""}" data-nw="${k}" aria-pressed="${on}">${lab}</button>`;
   setH("newsMeta", `12시간 ${p.items.length}건 · 판정 ${judged.length} · 관련 ${judged.filter(rel).length} · 참고, 신호 아님`);
   const head = `<div class="nw-head"><span class="nw-chips">${chip("relevant", newsView.relevant, "관련만")}${chip("coin", newsView.coin, `${coin}+매크로`)}</span></div>`;
+  const prevList = el("newsBody")?.querySelector(".nw-list"), keepTop = prevList ? prevList.scrollTop : 0;   // setH 는 SVG 직렬화 차이로 늘 다시 그린다 -- 스크롤 보존
   setH("newsBody", `${head}<div class="nw-sum">${tilts}${assets}${inc}${tops}${srcLine}</div><div class="nw-main">${lane}<div class="nw-list">${list}</div></div>`);
+  const nextList = el("newsBody")?.querySelector(".nw-list"); if (nextList && keepTop) nextList.scrollTop = keepTop;
 }
 el("newsBody")?.addEventListener("click", (e) => {
   const b = e.target.closest("[data-nw]");

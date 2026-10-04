@@ -2998,7 +2998,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .nw-main { min-width: 0; }
 .nw-lane { display: block; width: 100%; height: auto; }
 .nw-lane text { font: 600 10px var(--font-sans); fill: var(--muted); }
-.nw-list { margin-top: 6px; }
+.nw-list { margin-top: 6px; max-height: 520px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--option) 35%, transparent) transparent; }   /* 2026-10-05 세부 목록만 스크롤(사용자 «세부 타임라인은 스크롤로 복귀») -- 왼쪽 요약은 스크롤 없음 */
 .nw-row { display: grid; grid-template-columns: 40px 64px 62px 44px 34px minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 5px 0;
   border-top: 1px solid var(--soft-line); font-size: 12px; font-variant-numeric: tabular-nums; }
 .nw-row .t, .nw-row .src { color: var(--muted); }
@@ -3019,6 +3020,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   .nw-row .t { grid-area: t; } .nw-row .sen { grid-area: sen; } .nw-row .as { grid-area: as; } .nw-row .imp { grid-area: imp; justify-self: end; }
   .nw-row .src { grid-area: src; }
   .nw-row a { grid-area: title; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .nw-list { max-height: 62vh; }
 }
 .nw-top { display: grid; gap: 0; }
 .nw-top-row { display: grid; grid-template-columns: 30px 26px minmax(0, 1fr); grid-template-areas: "s i t" ". . a"; gap: 1px 8px; padding: 5px 0;
