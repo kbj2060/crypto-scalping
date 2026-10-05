@@ -2995,10 +2995,10 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .nw-inc b { color: var(--warn); }
 .nw-inc.none { border-color: var(--soft-line); background: none; color: var(--muted); }
 .nw-note { font-size: 11px; line-height: 1.5; color: var(--muted); }
-.nw-main { min-width: 0; }
+.nw-main { min-width: 0; container-type: inline-size; }   /* 2026-10-05 목록 폭으로 줄 모양을 고른다(아래 @container) */
 .nw-lane { display: block; width: 100%; height: auto; }
 .nw-lane text { font: 600 10px var(--font-sans); fill: var(--muted); }
-.nw-list { margin-top: 6px; max-height: 520px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+.nw-list { margin-top: 6px; max-height: 520px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin;   /* 2026-10-05 좌우 스크롤 없음 -- 긴 제목은 … (사용자 지시) */
   scrollbar-color: color-mix(in srgb, var(--option) 35%, transparent) transparent; }   /* 2026-10-05 세부 목록만 스크롤(사용자 «세부 타임라인은 스크롤로 복귀») -- 왼쪽 요약은 스크롤 없음 */
 .nw-row { display: grid; grid-template-columns: 40px 64px 62px 44px 34px minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 5px 0;
   border-top: 1px solid var(--soft-line); font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -3021,6 +3021,13 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   .nw-row .src { grid-area: src; }
   .nw-row a { grid-area: title; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .nw-list { max-height: 62vh; }
+}
+/* 2026-10-05 넓은 화면이라도 목록 칸이 좁으면(721~1100px 의 두 단 배치) 고정 다섯 칸이 제목 자리를 0 까지 먹었다 -- 목록 폭 520 이하면 두 줄 모양 */
+@container (max-width: 520px) {
+  .nw-row { grid-template-columns: 40px 54px 40px minmax(0, 1fr); grid-template-areas: "t sen as imp" "src title title title"; row-gap: 2px; }
+  .nw-row .t { grid-area: t; } .nw-row .sen { grid-area: sen; } .nw-row .as { grid-area: as; } .nw-row .imp { grid-area: imp; justify-self: end; }
+  .nw-row .src { grid-area: src; }
+  .nw-row a { grid-area: title; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 }
 .nw-top { display: grid; gap: 0; }
 .nw-top-row { display: grid; grid-template-columns: 30px 26px minmax(0, 1fr); grid-template-areas: "s i t" ". . a"; gap: 1px 8px; padding: 5px 0;

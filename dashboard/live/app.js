@@ -393,7 +393,7 @@ const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype"];
 let regimeWide24LastFetchAt = 0;
 let regimeBtcLastFetchAt = 0;
 let regimeXrpLastFetchAt = 0;
-let macroCalendarLastFetchAt = 0, macroCalendarOkAt = 0;   // OkAt = 마지막으로 **받은** 시각(⑤ 시간축 아래 «일정 갱신»)
+let macroCalendarLastFetchAt = 0;
 // 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
 // 서버가 10초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
 let latestBinanceAccount = null;
@@ -2936,7 +2936,6 @@ function isTodayOrTomorrowLocal(iso) {
 function renderMacroCalendar(payload) {
   // 2026-09-30 경제 일정 카드 제거(사용자 지시) -- 시장 맥락 ⑤ 시간축이 이 값을 그린다.
   latestMacroEvents = payload && Array.isArray(payload.events) ? payload.events : [];
-  macroCalendarOkAt = Date.now();
   if (typeof renderMarketCtx === "function") renderMarketCtx();   // ⑤ 시간축을 바로 다시 그린다
 }
 
@@ -2985,7 +2984,7 @@ function cardRailSync() {
 // 2026-09-30 «한 화면 모드»(사용자 1920×1080·90%): 넓은 화면에서 카드 하나 = 창 높이 하나 -- 레일 점/스크롤이 카드 단위로 딱 맞게 넘어간다.
 //   Footprint 는 차트 상자 높이를, Option 은 행사가 사다리 높이를 «창 높이 − 카드의 나머지»로 계산한다. 계좌는 창 높이까지 늘린다.
 //   창 높이 < 900 이면 끈다(가격판이 너무 좁아진다). 켜기/끄기 = 레일 아래 단추(브라우저 기억).
-let fitOptLadderH = null, fitOptChartK = FIT0.ck || 1, renderOptionsSoon = false, fitAcctPlotH = FIT0.ap || 0;   // 2026-10-01 Option 차트 셋 높이 배율 · 계좌 성과 차트 높이(한 화면 모드, fitLayout 이 잰다)
+let fitOptLadderH = null, fitOptChartK = FIT0.ck || 1, renderOptionsSoon = false, fitAcctPlotH = FIT0.ap || 0, fitAcctZ = FIT0.az || 1;   // 2026-10-01 Option 차트 셋 높이 배율 · 계좌 성과 차트 높이(한 화면 모드, fitLayout 이 잰다)
 const optColW = () => {   // .opt-ladder 최대 폭 440 과 같게(넓게 그리면 줄어 글자가 작아진다) · 첫 렌더(칸이 아직 없음)는 카드 폭의 가운데 열 몫으로
   const s = document.querySelector('#optCard .opt-sec:has([data-tip="ladder"])');
   if (s && s.clientWidth > 240) return Math.min(640, Math.round(s.clientWidth));   // 2026-10-01 440 -> 640(사다리 열을 넓혀 막대를 길게)
@@ -3002,7 +3001,7 @@ function fitLayout() {
   const on = fitOn(), vh = innerHeight - 20;
   document.documentElement.classList.toggle("fit1", on);
   const acct = el("acctCard"), opt = el("optCard");
-  if (acct) acct.style.minHeight = on ? `${vh}px` : "";
+  if (acct) { acct.style.minHeight = on ? `${vh}px` : ""; if (!on) acct.style.zoom = ""; }
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
   // 2026-10-01(2) Option 칸 높이 = **원래 크기로 매번 계산**(되먹임 없음). 앞 판은 넘칠 때마다 사다리를 깎는 톱니라 한 번 300 에 닿으면
   //   다시 안 커졌고(캐시에도 남음) 차트 상한만 쌓여 «전부 작아지고 바닥은 잘렸다». 이제:
@@ -3045,13 +3044,26 @@ function fitLayout() {
   // 2026-10-01 계좌 카드: 한 화면 모드면 성과 차트를 펼쳐 남는 높이를 그 차트에 준다(사용자 «내 계좌도 화면에 가득»)
   const plot = on && acct && acct.offsetParent && inView(acct) ? acct.querySelector("#snapAcctPerf .acct-plot svg") : null;
   if (plot) {
+    // 2026-10-05 성과 차트를 최소(120)로 줄여도 넘치면 카드 전체를 비율로 줄인다(사용자 «비율을 줄여서 전체 화면에 딱») --
+    //   1080p 모니터의 실제 창(~950px)에서 30px 넘쳤다. 원래 크기(zoom 1)에서 재고, 같은 작업 안에서 다시 입혀 깜빡임이 없다.
+    acct.style.zoom = ""; acct.style.minHeight = `${vh}px`;
     const ab = Math.max(0, ...[...acct.children].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().bottom));
     const ar = acct.getBoundingClientRect(), aslack = Math.round(ar.top + vh - parseFloat(getComputedStyle(acct).paddingBottom || 0) - 12 - ab);   // 바닥 여유 12 = 풋프린트와 같게
-    const cur = plot.getBoundingClientRect().height;
-    if (Math.abs(aslack) > 4) { fitAcctPlotH = Math.max(120, Math.min(900, Math.round(cur + aslack))); acct.style.setProperty("--acctplot", `${fitAcctPlotH}px`); }
+    const cur = plot.getBoundingClientRect().height, want = Math.round(cur + aslack);
+    if (want >= 120) {
+      fitAcctZ = 1;
+      if (Math.abs(aslack) > 4) { fitAcctPlotH = Math.min(900, want); acct.style.setProperty("--acctplot", `${fitAcctPlotH}px`); }
+    } else {
+      fitAcctPlotH = 120; acct.style.setProperty("--acctplot", "120px");
+      // 줄인 뒤 **다시 잰다** -- 차트 상자는 120 아래로 안 줄어(축·여백) 계산으로 빼면 모자랐다(1920×960 에서 12px 넘침)
+      const ab2 = Math.max(0, ...[...acct.children].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().bottom));
+      const need = ab2 - ar.top + parseFloat(getComputedStyle(acct).paddingBottom || 0) + 12;   // 원래 크기로 필요한 카드 높이
+      fitAcctZ = Math.max(0.7, Math.floor((vh / need) * 100) / 100);
+    }
   }
+  if (on && acct && fitAcctZ < 1) { acct.style.zoom = String(fitAcctZ); acct.style.minHeight = `${Math.floor(vh / fitAcctZ)}px`; }
   if (h !== fitOptLadderH || renderOptionsSoon) { fitOptLadderH = h; renderOptionsSoon = false; if (typeof renderOptions === "function") renderOptions(); }
-  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, lad: fitOptLadderH, ck: fitOptChartK, ap: fitAcctPlotH })); } catch (e) { /* 기억은 편의 */ } }
+  if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, lad: fitOptLadderH, ck: fitOptChartK, ap: fitAcctPlotH, az: fitAcctZ })); } catch (e) { /* 기억은 편의 */ } }
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
 // 2026-10-01 ⑤ 다음 24시간(116 + 여백·선 36)이 맨 아래 전폭으로 들어와 그만큼 뺀다.
@@ -3063,6 +3075,8 @@ function fitApplyCached() {
   fitOptLadderH = FIT0.lad || fitLadderFormula();   // 지난번에 잰 값(같은 창 높이) -- 새로고침 첫 그림부터 맞는다
   ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
   if (fitAcctPlotH) el("acctCard")?.style.setProperty("--acctplot", `${fitAcctPlotH}px`);
+  const ac = el("acctCard");
+  if (ac && fitAcctZ < 1) { ac.style.zoom = String(fitAcctZ); ac.style.minHeight = `${Math.floor((innerHeight - 20) / fitAcctZ)}px`; }
 }
 function setupCardRail() {
   fitApplyCached();
@@ -4577,9 +4591,8 @@ function renderMarketCtx() {
   const whenBox = el("mcWhen");   // 2026-10-01 휴대폰·세로 화면도 Option 카드 맨 아래(넓은 화면과 같게)
   // 2026-09-30 폭: #mcWhen 은 비어 있으면 숨김(display:none)이라 첫 그림 때 clientWidth 0 → 900 으로 그려 2.3배 늘어났다(글자가 커졌다 작아짐) -- 카드 폭에서 잰다
   const whenW = whenBox ? (whenBox.clientWidth || ((el("optCard") || body).clientWidth - 48)) : body.clientWidth;   // 2026-10-01 ⑤ 는 Option 카드 맨 아래
-  const whenHtml = qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round((whenW || 900) - 8)))
-      + (ef && ef.exp_ms - Date.now() > 0 && ef.exp_ms - Date.now() < 6 * 3600e3 ? note(`max pain 규칙 창 = 만기 1시간 전부터(${left(ef.exp_ms - 3600e3)} 뒤)`) : "")
-      + note(macroCalendarOkAt ? `경제 일정 갱신 ${fmtHourMinute(macroCalendarOkAt)} · 6시간마다(실패하면 1분 뒤 다시)` : "경제 일정 불러오는 중…"));
+  // 2026-10-05 «max pain 규칙 창»·«경제 일정 갱신» 두 줄 제거(사용자 지시) -- 시간축만
+  const whenHtml = qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round((whenW || 900) - 8))));
   setH("mcWhen", whenBox ? whenHtml : "");
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
