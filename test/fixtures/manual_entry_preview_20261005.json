@@ -1,0 +1,162 @@
+{
+"ok": true,
+"plan": {
+"symbol": "ETHUSDC",
+"side": "SELL",
+"positionSide": "SHORT",
+"type": "LIMIT",
+"timeInForce": "GTX",
+"price": 2700.65,
+"quantity": 0.37,
+"notional_usdt": 999.192,
+"margin_usdt": 49.962,
+"margin_pct_of_equity": 5.0,
+"leverage": 20.0,
+"existing_notional_usdt": 0.0,
+"total_notional_usdt": 999.192,
+"effective_leverage": 1.0,
+"liq_distance_pct": 100.1,
+"cap_used_pct": 10.0,
+"fraction": 0.05,
+"capped": false,
+"available_qty": 0.37,
+"cap_room_after_usdt": 9000.82,
+"fallback_after_sec": 120.0,
+"fallback": "taker",
+"cap_notional_usdt": 10000.015,
+"notes": [],
+"blocked": null,
+"dry_run": false,
+"recommended_source": "vol_equivalent",
+"recommended_qty": 0.0,
+"projection": {
+"equity_usdt": 1000.0,
+"available_before_usdt": 1000.0,
+"before": {
+"margin_usdt": 0.0,
+"margin_used_pct": 0.0,
+"available_usdt": 1000.0,
+"notional_usdt": 0.0,
+"exposure_x": 0.0,
+"liq_pct": null
+},
+"after": {
+"margin_usdt": 49.962,
+"margin_used_pct": 5.0,
+"available_usdt": 950.038,
+"notional_usdt": 999.192,
+"exposure_x": 1.0,
+"liq_pct": 100.08
+}
+},
+"trade_plan": {
+"side": "SHORT",
+"hold": {
+"available": false,
+"reason": "atr_pct 없음"
+},
+"hold_min": 240,
+"prescription": {
+"available": false,
+"reason": "atr_pct 없음"
+},
+"size": {
+"leverage": null,
+"safe_mae_pct": null,
+"total_notional": null,
+"room_notional": 0.0
+},
+"execution": {
+"vol_bpm": 7.01,
+"cost": {
+"round_trip_bp": 5.88,
+"stop_hit_rate": 0.0457,
+"stop_extra_bp": 0.73,
+"funding_bp": -0.03,
+"funding_rate_bp_8h": 0.064,
+"funding_is_live": true,
+"total_bp": 6.58
+},
+"entry": {
+"mode": "peg_gtx",
+"expected_fill_sec": 3.0,
+"fallback_sec": 120.0,
+"maker_bp": 2.0,
+"taker_bp": 5.0,
+"note": "빠른 장일수록 메이커가 더 잘 체결됩니다"
+},
+"exit": {
+"mode": "peg_repeg",
+"deadline_sec": 85.3,
+"expected_fill_sec": 3.0
+}
+},
+"entry_split": {
+"tranches": 1,
+"spread_min": 0,
+"reason": "일괄 — 분할은 «같은 평균 노출의 작은 단일 진입»에 869일 6/6 칸 전패",
+"room_notional": 0.0,
+"rule": "추가는 상한 여유 안에서만 하면 됩니다 — 실계좌 69왕복에서 분할 자체는 건당 수익률과 무관했고(상관 −0.04), 손실을 만든 건 분할이 데려온 크기(상관 +0.51)와 보유시간이었습니다"
+},
+"exit_ladder": {
+"budget_min": 0,
+"ladder": [],
+"rebalance_band": 0.25,
+"note": "지금 크기는 어떤 보유시간 예산도 넘습니다 — 사다리대로 줄이세요"
+}
+},
+"bracket": {
+"available": false,
+"disabled": true,
+"reason": "SL/TP 끔(사용자) -- 걸지 않고 기존 것도 그대로"
+},
+"target_leverage": 20,
+"leverage_source": "manual",
+"leverage_model": null,
+"leverage_min_feasible": 10.0,
+"leverage_position_floor": null,
+"hold_planned_min": 240,
+"hold_remaining_min": 240,
+"leverage_steps": [
+1,
+2,
+3,
+4,
+5,
+6,
+7,
+8,
+10,
+15,
+20,
+25,
+30,
+50,
+75,
+100,
+125,
+150
+]
+},
+"cap": {
+"available": true,
+"cap_notional_usdt": 10000.016,
+"cap_equity_usdt": 6000.008,
+"cap_ledger_usdt": null,
+"cap_model_usdt": null,
+"margin_cap_pct": 50.0,
+"risk": {
+"available": false,
+"hold_min": 240,
+"reason": "worker_no_risk"
+},
+"equity_x": 6.0,
+"liq_floor_pct": 16.7,
+"override_x": null,
+"binding": "margin"
+},
+"recommended_qty": 0.0,
+"recommended_source": "vol_equivalent",
+"exec_enabled": true,
+"_note": "2026-10-05 render_ofab_flat_switch 고정 진입 미리보기 -- 실제 응답 모양, 돈·수량은 순자산 1000 기준 가상 값으로 축척"
+}

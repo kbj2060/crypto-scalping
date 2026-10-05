@@ -344,6 +344,9 @@
               <i class="hold-fill" aria-hidden="true"></i><span>롱 청산</span></button>
             <button type="button" id="snapExitShort" class="notify-btn short hold-fire" hidden>
               <i class="hold-fill" aria-hidden="true"></i><span>숏 청산</span></button>
+            <!-- 2026-10-05 스위칭 = 100% peg 메이커 청산 → 체결되면 반대쪽 peg 메이커 진입. 떠 있는 패널에서만 보인다. -->
+            <button type="button" id="snapSwitch" class="notify-btn hold-fire ofab-switch" hidden>
+              <i class="hold-fill" aria-hidden="true"></i><svg class="ofab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/></svg><span>스위칭</span><small id="snapSwitchTo">→ 숏</small></button>
             <!-- 2026-09-14 «지금 닫으면 얼마인가»를 누르기 **전에** 보여준다. 계좌 payload 의
                  진입가·마크가로 화면이 바로 계산한다(≈ 표시: 체결가·수수료는 빠진 근사다). -->
             <span id="snapExitNow" class="exit-now"></span>
@@ -476,6 +479,11 @@
       <div id="ofabSay" class="ofab-say" role="status" aria-live="polite" hidden></div>   <!-- 2026-10-01 꾹 눌러 추가 진입 결과(패널 안 열고) -->
       <button type="button" id="ofabToggle" class="ofab-toggle" aria-expanded="false"
               aria-controls="ofabPanel"><span id="ofabPos">주문</span></button>
+      <!-- 2026-10-05 포지션이 없으면 «주문» 대신 LONG·SHORT 두 개. 1.5초 꾹 = 바로 진입(마우스) · 짧게 = 펼치기. -->
+      <span id="ofabFlat" class="ofab-flat" hidden>
+        <button type="button" id="ofabLong" class="ofab-dir long" aria-controls="ofabPanel"><span>LONG</span><small id="ofabLongFrac">5%</small></button>
+        <button type="button" id="ofabShort" class="ofab-dir short" aria-controls="ofabPanel"><span>SHORT</span><small id="ofabShortFrac">5%</small></button>
+      </span>
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden></div>
   </div>

@@ -5769,7 +5769,7 @@ def make_app() -> web.Application:
             pass
 
     async def assemble_entry_plan(side: str, fraction: float = 1.0,
-                                  want_lev: int | None = None, asset: str = "eth"):
+                                  want_lev: int | None = None, asset: str = "eth", fresh: bool = False):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
@@ -5785,9 +5785,12 @@ def make_app() -> web.Application:
             if not sizing.get("available"):
                 return None, {}, {}, ({"error": "sizing_unavailable",
                                        "detail": sizing.get("error")}, 503)
-            account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
-                                       produce_account, max_stale=STALE_GRACE_SECONDS,
-                                       cache=binance_account_cache)   # 계좌 카드와 같은 캐시 -- 없으면 두 벌을 따로 받는다
+            # 2026-10-05 fresh=1(떠 있는 버튼 «스위칭»의 반대 진입): 방금 닫은 포지션이 30초 캐시에 남아 노출로 잡히면
+            #   증거금 50% 상한이 반대 진입을 깎는다 -- 청산(assemble_exit_plan fresh)처럼 계좌를 새로 읽는다.
+            account = (await produce_account() if fresh else
+                       await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS,
+                                        produce_account, max_stale=STALE_GRACE_SECONDS,
+                                        cache=binance_account_cache))   # 계좌 카드와 같은 캐시 -- 없으면 두 벌을 따로 받는다
             if not account.get("ok"):   # 못 읽은 계좌로 상한(합산 노출)을 계산하면 상한이 헐거워진다
                 return None, {}, {}, ({"error": "account_unavailable",
                                        "detail": f"계좌 조회 실패: {account.get('error')}"}, 503)
@@ -5968,7 +5971,8 @@ def make_app() -> web.Application:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
-                                                             query_leverage(request), query_asset(request))
+                                                             query_leverage(request), query_asset(request),
+                                                             fresh=request.query.get("fresh") == "1")
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if sltp_off(request):
@@ -6007,7 +6011,8 @@ def make_app() -> web.Application:
         # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
-                                                             query_leverage(request), query_asset(request))
+                                                             query_leverage(request), query_asset(request),
+                                                             fresh=request.query.get("fresh") == "1")
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):

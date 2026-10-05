@@ -9079,13 +9079,15 @@ function syncOrderCoinGate() {
   }
 }
 
-async function manualEntryFetch(side, kind = "entry") {
+// ov(2026-10-05 «스위칭»): 화면 게이지 대신 쓸 값 {pct, lev, sltp, fresh} -- 전량 청산(pct 100)과 반대 진입(그 포지션의 증거금 %·배수).
+async function manualEntryFetch(side, kind = "entry", ov = null) {
   if (!orderCoinOk()) {
     return { ok: false, error: "order_coin_mismatch",
              detail: `${coinUnit()} 탭에서는 주문하지 않습니다` };
   }
-  const q = `&pct=${kind === "exit" ? manualExitPct() : manualEntryPct()}`
-    + (kind === "exit" ? "" : manualLevQuery() + (manualSltpOn() ? "" : "&sltp=0"));
+  const q = `&pct=${ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct())}`
+    + (kind === "exit" ? "" : (ov?.lev ? `&lev=${ov.lev}` : manualLevQuery()) + ((ov?.sltp ?? manualSltpOn()) ? "" : "&sltp=0"))
+    + (ov?.fresh ? "&fresh=1" : "");
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
   return res.json();
 }
@@ -9171,11 +9173,11 @@ function manualExitPlanHtml(plan) {
   return parts.join("");
 }
 
-const MANUAL_BTN_IDS = ["snapEntryLong", "snapEntryShort", "snapExitLong", "snapExitShort"];
+const MANUAL_BTN_IDS = ["snapEntryLong", "snapEntryShort", "snapExitLong", "snapExitShort", "snapSwitch", "ofabLong", "ofabShort"];
 const manualButtonsDisabled = (v) =>
   MANUAL_BTN_IDS.forEach((id) => { const b = el(id); if (b) b.disabled = v; });
 
-async function manualEntryPreview(side, kind = "entry") {
+async function manualEntryPreview(side, kind = "entry", ov = null) {
   const box = el("snapEntryResult");
   if (!box || manualOrderBusy) return;   // 진행 중인 주문 표시를 덮지 않는다
   manualPreviewInFlight = true;
@@ -9184,12 +9186,12 @@ async function manualEntryPreview(side, kind = "entry") {
   box.innerHTML = entryNote("확인 중…");
   manualEntryClearConfirm();   // 다른 방향을 눌렀는데 옛 확인 버튼이 남아 있으면 안 된다
   try {
-    const data = await manualEntryFetch(side, kind);
+    const data = await manualEntryFetch(side, kind, ov);
     box.innerHTML = data.ok
       ? (kind === "exit" ? manualExitPlanHtml(data.plan || {}) : manualEntryPlanHtml(data))
       : entryNote(`실패: ${data.detail || data.error || "알 수 없음"}`, "bad");
     // 게이트가 꺼져 있으면 확인 버튼을 아예 띄우지 않는다 -- 눌러도 403 이라 헛걸음이다.
-    if (data.ok && data.exec_enabled) manualEntryArmConfirm(side, data.plan || {}, kind);
+    if (data.ok && data.exec_enabled) manualEntryArmConfirm(side, data.plan || {}, kind, ov);
   } catch (err) {
     box.innerHTML = entryNote(`실패: ${err && err.message ? err.message : err}`, "bad");
   } finally {
@@ -9332,11 +9334,12 @@ function manualEntryClearConfirm() {
   if (btn) { btn.hidden = true; btn.textContent = ""; }
 }
 
-function manualEntryArmConfirm(side, plan, kind = "entry") {
+function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   if (plan.blocked) { manualFireOnPreview = false; return; }
-  const pct = Math.round(100 * (plan.fraction ?? 1));
+  const pct = ov?.pct ?? Math.round(100 * (plan.fraction ?? 1));
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
-                         lev: manualLevEffective(), sltp: manualSltpOn() };
+                         lev: ov?.lev ?? manualLevEffective(), sltp: ov?.sltp ?? manualSltpOn(),
+                         fresh: !!ov?.fresh, sw: ov?.switch || null };
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
   //   확인했다. 미리보기가 오는 즉시 발주한다(막혔으면 위에서 이미 멈췄다).
@@ -9350,7 +9353,8 @@ function manualEntryArmConfirm(side, plan, kind = "entry") {
   const need = Math.round(100 * ((plan.risk || {}).required_fraction || 0));
   const short = kind === "exit" && need > pct ? ` ⚠한도 복귀엔 ${need}% 필요` : "";
   const base = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ${coinUnit()} `
-    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short;
+    + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short
+    + (ov?.switch ? ` → ${ov.switch.to === "LONG" ? "롱" : "숏"} 진입(스위칭)` : "");
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
   if (manualEntryTick) clearInterval(manualEntryTick);
@@ -9430,6 +9434,7 @@ async function manualEntryPollStatus() {
       manualOrderBusy = false;
       manualButtonsDisabled(false);
       manualEntryRefreshSize();   // 체결되면 포지션·상한 표시를 갱신한다
+      if (switchRun && data.state?.kind === "exit") switchAfterExit(data.state);
     }
   } catch (err) {
     box.innerHTML = entryNote(`상태 조회 실패: ${err && err.message ? err.message : err}`, "bad");
@@ -9456,7 +9461,8 @@ async function manualEntrySubmit() {
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
     const q = `&pct=${pending.pct ?? 100}`
-      + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : "") + (pending.sltp === false ? "&sltp=0" : ""));
+      + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : "") + (pending.sltp === false ? "&sltp=0" : ""))
+      + (pending.fresh ? "&fresh=1" : "");
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&asset=${pending.asset || "eth"}&confirm=1${q}`,
       { method: "POST", cache: "no-cache" });
@@ -9468,6 +9474,10 @@ async function manualEntrySubmit() {
       return;
     }
     box.innerHTML = entryNote(manualEntryStateText(data.state), "live");
+    if (pending.kind === "exit" && pending.sw) {   // 2026-10-05 스위칭: 이 청산이 전량 체결되면 반대 진입(manualEntryPollStatus)
+      switchRun = { ...pending.sw, from: pending.side };
+      ofabSay(`스위칭 — ${pending.side === "LONG" ? "롱" : "숏"} 전량 peg 청산 중 · 다 닫히면 ${pending.sw.to === "LONG" ? "롱" : "숏"} 진입`);
+    }
     setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
   } catch (err) {
     box.innerHTML = entryNote(`주문 실패: ${err && err.message ? err.message : err}`, "bad");
@@ -9540,12 +9550,12 @@ function manualHoldCancel(btn) {
   manualHoldPaint(btn, 0);
   if (manualHoldFire) { manualHoldFire = false; manualEntryClearConfirm(); }
 }
-function manualHoldStart(btn, side, kind) {
+function manualHoldStart(btn, side, kind, ov = null) {
   if (manualOrderBusy || btn.disabled) return;
   manualHoldCancel(btn);
   manualHoldFire = true;
   // 청산은 **계좌부터 새로 읽는다**(manualExitPreview) -- 닫으려는 수량이 낡으면 안 된다.
-  if (kind === "exit") manualExitPreview(side); else manualEntryPreview(side, "entry");
+  if (kind === "exit") manualExitPreview(side, ov); else manualEntryPreview(side, "entry");
   const t0 = performance.now();
   const step = () => {
     const r = Math.min(1, (performance.now() - t0) / HOLD_FIRE_MS);
@@ -9592,11 +9602,63 @@ function manualHoldStart(btn, side, kind) {
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
     btn.addEventListener(ev, () => manualHoldCancel(btn)));
 });
+// 2026-10-05 «스위칭»(사용자 지시, 떠 있는 패널에서만): 게이지와 상관없이 지금 쪽 **100% peg 메이커 청산** → 전량 체결되면
+//   **반대쪽 peg 메이커 진입**. 반대 진입 크기 = 닫은 포지션의 증거금 %(명목 ÷ 배수 ÷ 순자산)·같은 배수 → 거의 같은 수량
+//   (체결가·손익만큼 차이). 증거금 50% 상한은 서버가 그대로 걸고, 반대 진입은 계좌를 새로 읽는다(fresh=1 -- 닫은 포지션이
+//   30초 캐시에 남아 노출로 잡히면 상한이 반대 진입을 깎는다). 청산이 전량 안 채워지면(거부·오류) 반대 진입을 안 낸다.
+//   확인 규칙은 청산과 같다(마우스 0.4초 꾹 = 바로 · 터치/키보드 = 미리보기 → 확인). 120초 뒤 테이커 전환도 청산 그대로.
+let switchRun = null;
+function switchPlan(side) {
+  const p = lastExitPositions.get(side);
+  const qty = Number(p?.qty) || 0, mark = Number(p?.mark_price) || 0, lev = Number(p?.leverage) || manualLevEffective() || 0;
+  const eq = acctMarginUsed(latestBinanceAccount?.balance).equity;
+  if (!(qty > 0 && mark > 0 && lev > 0 && eq > 0)) return null;
+  const pct = Math.min(100, Math.max(0.01, Math.round(qty * mark / lev / eq * 10000) / 100));
+  return { pct: 100, switch: { to: side === "LONG" ? "SHORT" : "LONG", pct, lev, sltp: manualSltpOn() } };
+}
+function switchAfterExit(state) {
+  const run = switchRun;
+  switchRun = null;
+  const ko = (s) => (s === "LONG" ? "롱" : "숏");
+  const full = /^filled_/.test(state.phase || "") && Number(state.filled || 0) >= Number(state.quantity || 0) * 0.999;
+  if (!full) {
+    return ofabSay(escapeHtml(`스위칭 중단 — ${ko(run.from)} 청산이 다 닫히지 않아(${MANUAL_ENTRY_PHASE_KO[state.phase] || state.phase}) `
+      + `${ko(run.to)} 진입을 내지 않았습니다.`), "bad");
+  }
+  ofabWatchResult();
+  ofabSay(escapeHtml(`${ko(run.from)} 청산 완료 → ${ko(run.to)} 진입(증거금 ${run.pct}% · ${run.lev}배) — 미리보기 받는 중…`));
+  manualFireOnPreview = true;
+  manualEntryPreview(run.to, "entry", { pct: run.pct, lev: run.lev, sltp: run.sltp, fresh: true });
+}
+{
+  const btn = el("snapSwitch");
+  const held = () => (lastExitPositions.has("LONG") ? "LONG" : lastExitPositions.has("SHORT") ? "SHORT" : "");
+  const plan = (s) => {
+    const ov = s && switchPlan(s);
+    if (!ov) ofabSay(escapeHtml("스위칭 안 함 — 포지션·증거금 정보를 아직 못 읽었습니다. 잠시 뒤 다시 누르세요."), "bad");
+    return ov;
+  };
+  let touched = false;
+  btn?.addEventListener("pointerdown", (e) => {
+    touched = e.pointerType === "touch";
+    if (touched) return;
+    e.preventDefault();
+    const s = held(), ov = plan(s);
+    if (ov) manualHoldStart(btn, s, "exit", ov);
+  });
+  btn?.addEventListener("click", (e) => {
+    if (!(touched || e.detail === 0) || manualOrderBusy || btn.disabled) return;
+    touched = false;
+    const s = held(), ov = plan(s);
+    if (ov) manualExitPreview(s, ov);
+  });
+  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn?.addEventListener(ev, () => manualHoldCancel(btn)));
+}
 // 2026-09-14 사용자 요청: **청산은 강제 조회부터**. 화면 숫자가 30초(조회가 끊겼으면 그
 // 이상) 묵어 있을 수 있어서, 미리보기를 그리기 전에 계좌를 다시 받아 카드·아래 줄을 맞춘다.
 // 서버의 청산 미리보기도 같은 이유로 fresh 다(server.py api_manual_exit_preview).
 // 조회가 실패해도 미리보기는 진행한다 -- 급히 닫으려는 사람을 여기서 세우면 안 된다.
-async function manualExitPreview(side) {
+async function manualExitPreview(side, ov = null) {
   manualButtonsDisabled(true);
   try {
     binanceAccountLastFetchAt = 0;      // 클라이언트 30초 게이트 우회
@@ -9605,7 +9667,7 @@ async function manualExitPreview(side) {
   } catch (err) {
     /* 무시 -- 아래 미리보기가 서버에서 다시 읽는다 */
   }
-  return manualEntryPreview(side, "exit");
+  return manualEntryPreview(side, "exit", ov);
 }
 el("snapEntryConfirm")?.addEventListener("click", manualEntrySubmit);
 // 비율을 바꾸면 화면에 떠 있던 확인 버튼은 **다른 계획**의 것이다. 지운다.
@@ -9698,11 +9760,25 @@ function ofabPlace(x, y, save) {
   const up = ofab.y + h / 2 > innerHeight / 2;
   box.classList.toggle("up", up);
   box.classList.toggle("rightside", ofab.x + w / 2 > innerWidth / 2);
+  // 2026-10-05 말풍선 = 아래가 기본(사용자 지시). 아래 자리가 140px 안 되거나 아래로 펼친 패널과 겹치면 위로.
+  box.classList.toggle("say-up", innerHeight - ofab.y - h < 140 || (ofab.open && !up));
+  ofabClampX(el("ofabPanel"));
+  ofabClampX(el("ofabSay"));
   const panel = el("ofabPanel");
   if (panel) panel.style.maxHeight = `${Math.max(160, (up ? ofab.y : innerHeight - ofab.y - h) - 16)}px`;
   if (save) {
     try { localStorage.setItem(OFAB_POS_KEY, JSON.stringify([ofab.x, ofab.y])); } catch (e) { /* 위치 기억은 편의일 뿐 */ }
   }
+}
+
+// 패널·말풍선이 화면 옆으로 넘치면 안쪽으로 민다. 🔴좁은 화면에서 버튼이 가운데보다 약간 왼쪽이면 패널(왼쪽 정렬, 380px)이
+//   오른쪽으로 잘렸다(2026-10-05 시안 캡처에서 발견, 이전 판에도 있던 버그). 위치 규칙(.rightside)은 그대로 두고 넘친 만큼만 옮긴다.
+function ofabClampX(node) {
+  if (!node || node.hidden) return;
+  node.style.transform = "";
+  const r = node.getBoundingClientRect();
+  const dx = r.left < 8 ? 8 - r.left : r.right > innerWidth - 8 ? innerWidth - 8 - r.right : 0;
+  if (dx) node.style.transform = `translateX(${Math.round(dx)}px)`;
 }
 
 function ofabSetOpen(open) {
@@ -9718,7 +9794,7 @@ function ofabSetOpen(open) {
   ofab.open = open;
   panel.hidden = !open;
   el("ofabAway").hidden = !open;
-  el("ofabToggle")?.setAttribute("aria-expanded", String(open));
+  ["ofabToggle", "ofabLong", "ofabShort"].forEach((id) => el(id)?.setAttribute("aria-expanded", String(open)));
   // 카드에서는 range 가 칩 뒤에 숨어 있어 탭 순서에서 빠져 있다(tabindex -1). 게이지로 드러나면 넣는다.
   lanes.querySelectorAll(".chip-input").forEach((i) => { i.tabIndex = open ? 0 : -1; });
   if (open) ofabApplyDefaults();
@@ -9744,26 +9820,35 @@ function ofabSay(html, tone = "") {
   if (!b) return;
   b.className = `ofab-say${tone ? " " + tone : ""}`;
   b.innerHTML = html; b.hidden = false;
+  ofabClampX(b);
   clearTimeout(ofabSayTimer);
   ofabSayTimer = setTimeout(() => { b.hidden = true; ofabSayObs?.disconnect(); ofabSayObs = null; }, 8000);
+}
+// 카드 결과 칸이 바뀌면(미리보기 → 발주 → 체결/거부) 그 글을 말풍선으로
+function ofabWatchResult() {
+  const box = el("snapEntryResult");
+  if (!box) return;
+  ofabSayObs?.disconnect();
+  ofabSayObs = new MutationObserver(() => { const t = (box.textContent || "").trim(); if (t && !box.hidden) ofabSay(escapeHtml(t), box.querySelector(".bad") ? "bad" : ""); });
+  ofabSayObs.observe(box, { childList: true, subtree: true, characterData: true, attributes: true });
+}
+// 꾹 눌러 바로 진입(5% · SL/TP 해제, 미리보기 오는 즉시 발주). add = 지금 포지션 방향 추가 진입(물타기),
+//   아니면 2026-10-05 포지션 없음의 LONG·SHORT 버튼(사용자 지시).
+function ofabQuickEntry(side, add) {
+  const what = `${side === "LONG" ? "롱" : "숏"} 5% ${add ? "추가 " : ""}진입`;
+  ofabApplyDefaults();
+  if (manualOrderBusy || manualPreviewInFlight) return ofabSay(escapeHtml(`${what} 안 함 — 진행 중인 주문·미리보기가 있습니다.`), "bad");
+  ofabWatchResult();
+  ofabSay(escapeHtml(`${what} — 미리보기 받는 중…`));
+  clearTimeout(entrySizeDebounce);   // 기본값이 건 크기 재조회는 필요 없다(미리보기가 같은 값을 받는다)
+  manualFireOnPreview = true;
+  manualEntryPreview(side, "entry");
 }
 function ofabQuickAdd() {
   const p = snapshotAccountPosition();
   const side = Number(p?.qty) ? String(p.side || "").toUpperCase() : "";
-  ofabApplyDefaults();
-  const box = el("snapEntryResult");
-  const say = (msg) => ofabSay(escapeHtml(msg), "bad");
-  if (box) {   // 카드 결과 칸이 바뀌면(미리보기 → 발주 → 체결/거부) 그 글을 말풍선으로
-    ofabSayObs?.disconnect();
-    ofabSayObs = new MutationObserver(() => { const t = (box.textContent || "").trim(); if (t && !box.hidden) ofabSay(escapeHtml(t), box.querySelector(".bad") ? "bad" : ""); });
-    ofabSayObs.observe(box, { childList: true, subtree: true, characterData: true, attributes: true });
-  }
-  if (side === "LONG" || side === "SHORT") ofabSay(`${side === "LONG" ? "롱" : "숏"} 5% 추가 진입 — 미리보기 받는 중…`);
-  if (side !== "LONG" && side !== "SHORT") return say("추가 진입 안 함 — 열린 포지션이 없어 방향을 모릅니다.");
-  if (manualOrderBusy || manualPreviewInFlight) return say("추가 진입 안 함 — 진행 중인 주문·미리보기가 있습니다.");
-  clearTimeout(entrySizeDebounce);   // 기본값이 건 크기 재조회는 필요 없다(미리보기가 같은 값을 받는다)
-  manualFireOnPreview = true;
-  manualEntryPreview(side, "entry");
+  if (side !== "LONG" && side !== "SHORT") return ofabSay(escapeHtml("추가 진입 안 함 — 열린 포지션이 없어 방향을 모릅니다."), "bad");
+  ofabQuickEntry(side, true);
 }
 
 // 탭이 스냅샷일 때만 뜬다(주문 조작부가 사는 탭). 다른 탭으로 가면 조작부를 카드로 먼저 돌려놓는다.
@@ -9799,6 +9884,9 @@ function renderOfab() {
   const eqLive = (Number(bal.wallet) || 0) + (Number(bal.unrealized) || 0) + (pnl - (Number(p?.unrealized_pnl) || 0));
   const used = eqLive > 0 ? (m.used * k) / eqLive * 100 : m.pct;
   setT("ofabPos", qty ? `${side} ${used.toFixed(0)}% · ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : "주문");
+  // 2026-10-05 포지션이 없으면 «주문» 대신 LONG·SHORT(꾹 = 그 방향 진입 · 짧게 = 펼치기)
+  const flat = el("ofabFlat"), tg = el("ofabToggle");
+  if (flat && tg) { flat.hidden = !!qty; tg.hidden = !qty; }
   box.classList.toggle("long", side === "LONG");
   box.classList.toggle("short", side === "SHORT");
 }
@@ -9842,21 +9930,28 @@ setInterval(renderOfab, 3000);
   // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.
   [ofab.x, ofab.y] = Array.isArray(saved) ? saved : [innerWidth, innerHeight - 24];
   // 짧게 = 펼치기/접기 · 1.5초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
-  const OFAB_HOLD_MS = 1500;   // 2026-09-28 사용자 지시 0.5 -> 2초 · 2026-09-30 «너무 느리다» -> 1.5초 (styles.css .ofab-toggle.holding 채움 시간과 같이)
-  let hold = null, held = false;
-  const holdEnd = () => { if (hold) { clearTimeout(hold.t); hold = null; } tgl.classList.remove("holding"); };
-  tgl.addEventListener("pointerdown", (e) => {
-    holdEnd(); held = false;
-    // 🔴2026-09-28 사용자 지시 «모바일에서는 넣으면 안돼» -- 터치는 꾹 누르기 발주가 없다(짧게 = 펼치기만).
-    //   진입 버튼과 같은 판정(이벤트마다 pointerType) -- 터치 노트북의 마우스는 그대로 된다.
-    if (e.pointerType === "touch") return;
-    hold = { x: e.clientX, y: e.clientY, t: setTimeout(() => { hold = null; held = true; tgl.classList.remove("holding"); ofabQuickAdd(); }, OFAB_HOLD_MS) };
-    tgl.classList.add("holding");
-  });
-  tgl.addEventListener("pointermove", (e) => { if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) holdEnd(); });
-  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => tgl.addEventListener(ev, holdEnd));
-  tgl.addEventListener("contextmenu", (e) => e.preventDefault());   // 모바일 길게 누르기 메뉴
-  tgl.addEventListener("click", () => { if (held) { held = false; return; } ofabSetOpen(!ofab.open); });
+  const OFAB_HOLD_MS = 1500;   // 2026-09-28 사용자 지시 0.5 -> 2초 · 2026-09-30 «너무 느리다» -> 1.5초 (styles.css .holding 채움 시간과 같이)
+  // 같은 손짓을 세 버튼이 쓴다: «주문»(포지션 있음 = 추가 진입) · 2026-10-05 LONG·SHORT(포지션 없음 = 그 방향 진입).
+  const ofabHold = (btn, fire) => {
+    if (!btn) return;
+    let hold = null, held = false;
+    const holdEnd = () => { if (hold) { clearTimeout(hold.t); hold = null; } btn.classList.remove("holding"); };
+    btn.addEventListener("pointerdown", (e) => {
+      holdEnd(); held = false;
+      // 🔴2026-09-28 사용자 지시 «모바일에서는 넣으면 안돼» -- 터치는 꾹 누르기 발주가 없다(짧게 = 펼치기만).
+      //   진입 버튼과 같은 판정(이벤트마다 pointerType) -- 터치 노트북의 마우스는 그대로 된다.
+      if (e.pointerType === "touch" || btn.disabled) return;
+      hold = { x: e.clientX, y: e.clientY, t: setTimeout(() => { hold = null; held = true; btn.classList.remove("holding"); fire(); }, OFAB_HOLD_MS) };
+      btn.classList.add("holding");
+    });
+    btn.addEventListener("pointermove", (e) => { if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) holdEnd(); });
+    ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn.addEventListener(ev, holdEnd));
+    btn.addEventListener("contextmenu", (e) => e.preventDefault());   // 모바일 길게 누르기 메뉴
+    btn.addEventListener("click", () => { if (held) { held = false; return; } ofabSetOpen(!ofab.open); });
+  };
+  ofabHold(tgl, ofabQuickAdd);
+  ofabHold(el("ofabLong"), () => ofabQuickEntry("LONG", false));
+  ofabHold(el("ofabShort"), () => ofabQuickEntry("SHORT", false));
   el("ofabBack")?.addEventListener("click", () => ofabSetOpen(false));
   grip.addEventListener("pointerdown", (e) => {
     e.preventDefault();
@@ -10020,6 +10115,14 @@ function manualExitSyncButtons() {
   if (bs) bs.hidden = !lastExitPositions.has("SHORT");
   const hasPos = lastExitPositions.size > 0;
   row.hidden = !hasPos;
+  // 2026-10-05 스위칭 = 지금 쪽 100% peg 청산 → 반대쪽 peg 진입. 색·라벨 = 갈 쪽.
+  const sw = el("snapSwitch"), held = lastExitPositions.has("LONG") ? "LONG" : lastExitPositions.has("SHORT") ? "SHORT" : "";
+  if (sw) {
+    sw.hidden = !held;
+    sw.classList.toggle("to-short", held === "LONG");
+    sw.classList.toggle("to-long", held === "SHORT");
+    setT("snapSwitchTo", held === "LONG" ? "→ 숏" : "→ 롱");
+  }
   renderExitNow();
   // 2026-09-25 사용자 지시 «추가 진입을 드롭다운으로 만들지 말고 상시 표시» -- 09-14 물타기 접힘
   //   폐지. <details open> 은 그대로 두고(안쪽 CSS·검사가 [open] 에 걸려 있다) 제목 줄 클릭만 막는다.

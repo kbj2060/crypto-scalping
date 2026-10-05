@@ -25,7 +25,7 @@ def page(browser, touch, submits, errs, preview_delay_ms=0):
     pg = ctx.new_page()
     js, css, html = ((DASH / f).read_text("utf-8") for f in ("app.js", "styles.css", "index.html"))
     pg.on("pageerror", lambda e: errs.append(str(e)))
-    pg.route("**/api/manual-*/submit*", lambda r: (submits.append(r.request.url), r.abort()))
+    pg.route(lambda u: "/api/manual-" in u and "/submit" in u, lambda r: (submits.append(r.request.url), r.abort()))   # 10-05: 조건식(glob «*» 는 «/» 를 못 넘는다)
 
     def unblock(route):
         if preview_delay_ms:
@@ -56,6 +56,7 @@ def main() -> int:
         pg.locator("#snapEntryLong").scroll_into_view_if_needed()
         # 🔴위험은 «탭»이 아니라 **손가락이 0.4초 넘게 버튼 위에 머무는 것**이다(스크롤하다 멈춘 손가락).
         #   옛 코드는 탭이면 0.4초 전에 떼므로 원래 안 나갔다 -- 그래서 탭만 검사하면 음성 대조가 통과한다.
+        pg.locator("#snapEntryLong").scroll_into_view_if_needed()   # 2026-10-05 카드가 1000px 아래로 내려가 좌표가 화면 밖이었다
         box = pg.locator("#snapEntryLong").bounding_box()
         pt = [{"x": box["x"] + box["width"] / 2, "y": box["y"] + box["height"] / 2}]
         cdp = ctx.new_cdp_session(pg)
@@ -98,6 +99,7 @@ def main() -> int:
         # ── 마우스: 길게 누르기는 그대로 ────────────────────────────────────────
         submits, errs = [], []
         ctx, pg = page(b, False, submits, errs)
+        pg.locator("#snapEntryLong").scroll_into_view_if_needed()   # 2026-10-05 카드가 1000px 아래로 내려가 좌표가 화면 밖이었다
         box = pg.locator("#snapEntryLong").bounding_box()
         pg.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         pg.mouse.down()
@@ -111,6 +113,7 @@ def main() -> int:
         #   옛 동작은 이때 확인 버튼을 띄웠다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다.
         submits, errs = [], []
         ctx, pg = page(b, False, submits, errs, preview_delay_ms=1500)
+        pg.locator("#snapEntryLong").scroll_into_view_if_needed()   # 2026-10-05 카드가 1000px 아래로 내려가 좌표가 화면 밖이었다
         box = pg.locator("#snapEntryLong").bounding_box()
         pg.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         pg.mouse.down()

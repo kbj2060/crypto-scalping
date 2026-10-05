@@ -44,10 +44,11 @@ def run(shot):
         for state, fx in (("pos", POS), ("empty", EMPTY)):
             for w, h in ((1500, 900), (390, 844)):
                 tag = f"{state}·{w}"
+                TGL = "#ofabLong" if state == "empty" else "#ofabToggle"   # 2026-10-05 포지션 없음 = LONG·SHORT(짧게 = 펼치기)
                 pg = b.new_page(viewport={"width": w, "height": h})
                 errs, blocked = [], []
                 pg.on("pageerror", lambda e: errs.append(str(e)))
-                pg.route("**/api/manual-*/submit*", lambda r: (blocked.append(r.request.url), r.abort()))
+                pg.route(lambda u: "/api/manual-" in u and "/submit" in u, lambda r: (blocked.append(r.request.url), r.abort()))   # 10-05: glob 은 «/» 를 못 넘는다 -- 조건식
                 pg.route("**/app.js*", lambda r: r.fulfill(body=js, content_type="application/javascript"))
                 pg.route("**/styles.css*", lambda r: r.fulfill(body=css, content_type="text/css"))
                 pg.route(URL, lambda r: r.fulfill(body=html, content_type="text/html"))
@@ -84,7 +85,8 @@ def run(shot):
                 ok(bar and 0 <= bar["x"] and bar["x"] + bar["w"] <= w and 0 <= bar["y"] and bar["y"] + bar["h"] <= h,
                    f"버튼이 화면 밖/없음 {bar}")
                 label = pg.inner_text("#ofabPos")
-                ok(("LONG" in label) if state != "empty" else (label == "주문"), f"버튼 글자 «{label}»")
+                ok(("LONG" in label) if state != "empty" else (pg.is_visible("#ofabLong") and pg.is_visible("#ofabShort") and pg.is_hidden("#ofabToggle")),
+                   f"버튼 글자 «{label}» / 포지션 없음이면 LONG·SHORT")   # 2026-10-05
                 # 2026-09-26 사용자: 수량 대신 증거금 사용 % -- 계좌 카드 «증거금 사용» 타일과 **같은 값**이어야 한다.
                 if state != "empty":
                     tile = pg.evaluate("() => document.querySelector('[data-pv=\"used\"] .acct-tile-val')?.textContent.trim()")
@@ -92,11 +94,11 @@ def run(shot):
                     ok(real and f" {real} " in f" {label} ", f"버튼 증거금 %가 카드 타일과 다르다 «{label}» vs «{tile}»")
                 if shot: pg.screenshot(path=f"{shot}/ofab_{state}_{w}_closed.png")
 
-                pg.click("#ofabToggle")
+                pg.click(TGL)
                 pg.wait_for_timeout(300)
                 ok(pg.evaluate("() => !!document.querySelector('#ofabPanel .acct-lanes')"), "펼쳐도 조작부가 안 옮겨 옴")
                 ok(pg.evaluate("() => !document.getElementById('ofabAway').hidden"), "카드 자리 안내가 안 뜸")
-                ok(pg.get_attribute("#ofabToggle", "aria-expanded") == "true", "aria-expanded")
+                ok(pg.get_attribute(TGL, "aria-expanded") == "true", "aria-expanded")
                 ok(pg.evaluate("() => !!document.querySelector('#ofabPanel #snapEntryLong')"), "진입 버튼이 패널에 없음")
                 for gid in ("snapLevGauge", "snapEntryFrac", "snapExitFrac"):
                     g = pg.evaluate("""(id) => { const i = document.getElementById(id);
@@ -137,7 +139,7 @@ def run(shot):
                    "게이지 값 표시가 안 따라옴")
                 if shot: pg.screenshot(path=f"{shot}/ofab_{state}_{w}_open.png")
 
-                pg.click("#ofabToggle")
+                pg.click(TGL)
                 pg.wait_for_timeout(200)
                 ok(pg.evaluate("() => !document.querySelector('#ofabPanel .acct-lanes')"), "접어도 조작부가 안 돌아감")
                 ok(pg.evaluate("() => document.getElementById('ofabAway').hidden"), "카드 자리 안내가 안 사라짐")
@@ -154,12 +156,12 @@ def run(shot):
                 ok(g1["y"] < g0["y"] - 50 and 0 <= g1["x"] and g1["x"] + g1["w"] <= w and g1["y"] >= 0,
                    f"끌기가 안 됐거나 화면 밖 {g0} -> {g1}")
                 ok(pg.evaluate("() => !!localStorage.getItem('ofabPos')"), "위치가 기억 안 됨")
-                pg.click("#ofabToggle")
+                pg.click(TGL)
                 pg.wait_for_timeout(300)
                 pan2 = pg.evaluate(BOX, "#ofabPanel")
                 ok(pan2 and pan2["y"] >= -1 and pan2["y"] + pan2["h"] <= h + 1, f"옮긴 뒤 연 패널이 화면 밖 {pan2}")
                 if shot: pg.screenshot(path=f"{shot}/ofab_{state}_{w}_moved_open.png")
-                pg.click("#ofabToggle")
+                pg.click(TGL)
 
                 ok(not errs, f"JS 오류 {errs[:2]}")
                 ok(not blocked, f"🔴주문 제출 시도가 있었다 {blocked}")
