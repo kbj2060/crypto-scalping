@@ -73,7 +73,6 @@ OUT = ROOT / "data/research/rl_1s_agent_20261002"
 PANEL = __import__("os").getenv("RL_PANEL", f"panel{TAG}.parquet")   # 학습·평가 패널(기본 = 모의 매매 엔진과 같은 것). panel_zh = 제우스·호메로스 열 추가판
 _BACKUP_OF = Path.home() / "backups/crypto-scalping-server/data/live/orderflow"
 ORDERFLOW = ds.ORDERFLOW if ds.ORDERFLOW.exists() else _BACKUP_OF
-SEED_OF = Path(__import__("os").getenv("RL_SEED_ORDERFLOW", str(ORDERFLOW)))   # 2026-10-05 라이브 시작 이력(bookTicker·depth) 폴더 -- 없으면 웹소켓으로 WARMUP 만큼 모은다
 SPLIT = {"train": ("2026-09-20", "2026-09-27"), "val": ("2026-09-27", "2026-09-28"), "test": ("2026-09-28", "2026-09-30")}
 
 
@@ -919,8 +918,7 @@ class LiveFeed:
         now = pd.Timestamp.now(tz="UTC")
         hours = {(now - pd.Timedelta(hours=k)).strftime("%Y-%m-%dT%H") for k in (0, 1)}
         for stream, fn, dst in (("bookticker", bt_hour, self.bt), ("depthdiff", dd_hour, self.dd)):
-            seed = SEED_OF / stream / SYMBOL                   # SOL·XRP = 서버 엔진 전용 수집 폴더(아카이브는 Pi 가 1시간 늦게 복제)
-            for f in sorted(p for p in (seed.iterdir() if seed.exists() else []) if p.name[:13] in hours):
+            for f in sorted(p for p in (ORDERFLOW / stream / SYMBOL).iterdir() if p.name[:13] in hours):
                 d = fn(f)
                 dst.update({int(k): v for k, v in d.to_dict("index").items()} if len(d) else {})
         threading.Thread(target=lambda: asyncio.run(self._ws()), daemon=True).start()
