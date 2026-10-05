@@ -4250,14 +4250,18 @@ const mcGfx = {
       + [-1, 1].map((q) => `<line x1="${(c + q * thr * s).toFixed(1)}" x2="${(c + q * thr * s).toFixed(1)}" y1="2" y2="14" stroke="var(--warn)" stroke-opacity=".75" stroke-dasharray="2 2"/>`).join("")
       + `<line x1="${c}" x2="${c}" y1="2" y2="14" stroke="var(--muted)"/>${imb == null ? "" : `<rect x="${x0.toFixed(1)}" y="4" width="${Math.max(1.5, Math.abs(v) * s).toFixed(1)}" height="8" rx="2" fill="${fill}"/>`}</svg>`;
   },
-  book(sw, bps, w = mcGfx.pw || 300) {   // ±bp 매수벽 | 매도벽 거울 막대(ETH)
-    const b = sw.bid, a = sw.ask, mx = Math.max(1, ...b, ...a), c = w / 2, h = 4 + bps.length * 21;
+  book(sw, bps, w = mcGfx.pw || 300, mid = 0, dp = 2) {   // 매수벽 | 매도벽 거울 막대 -- 양 끝 = 그 벽이 닿는 가격(현재가 ±25·50·100bp, 2026-10-06 사용자 «±25 말고 가격으로»)
+    const b = sw.bid, a = sw.ask, mx = Math.max(1, ...b, ...a), c = w / 2, h = 4 + bps.length * 21, gap = mid > 0 ? 6 : 18, P = mid > 0 ? 56 : 0, Q = 46;
     const kq = (v) => (v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : String(Math.round(v)));
+    const pf = (v) => v.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
     return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="호가 벽 매수 대 매도">` + bps.map((bp, i) => {
-      const y = 4 + i * 21, bw = (c - 64) * b[i] / mx, aw = (c - 64) * a[i] / mx;   // 64 = 가장 긴 벽의 «80.4k» 글자 자리
-      return `<rect x="${(c - 18 - bw).toFixed(1)}" y="${y}" width="${bw.toFixed(1)}" height="13" rx="2" fill="var(--good)" opacity=".75"/><rect x="${c + 18}" y="${y}" width="${aw.toFixed(1)}" height="13" rx="2" fill="var(--bad)" opacity=".75"/>`
-        + `<text x="${c}" y="${y + 10}" font-size="10" fill="var(--muted)" text-anchor="middle">±${bp}</text>`
-        + `<text x="${(c - 22 - bw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + 22 + aw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)">${kq(a[i])}</text>`;
+      const y = 4 + i * 21, room = Math.max(10, c - gap - Q - P), bw = room * b[i] / mx, aw = room * a[i] / mx, lo = mid * (1 - bp / 1e4), hi = mid * (1 + bp / 1e4);
+      return `<g><title>${mid > 0 ? `현재가에서 ${pf(lo)}까지 매수호가 ${kq(b[i])} · ${pf(hi)}까지 매도호가 ${kq(a[i])} (±${bp}bp)` : `±${bp}bp`}</title>`
+        + `<rect x="${(c - gap - bw).toFixed(1)}" y="${y}" width="${bw.toFixed(1)}" height="13" rx="2" fill="var(--good)" opacity=".75"/><rect x="${c + gap}" y="${y}" width="${aw.toFixed(1)}" height="13" rx="2" fill="var(--bad)" opacity=".75"/>`
+        + `<text x="${(c - gap - 4 - bw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + gap + 4 + aw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)">${kq(a[i])}</text>`
+        + (mid > 0 ? `<text x="0" y="${y + 10}" font-size="10" fill="var(--good)">${pf(lo)}</text><text x="${w}" y="${y + 10}" font-size="10" fill="var(--bad)" text-anchor="end">${pf(hi)}</text>`
+          : `<text x="${c}" y="${y + 10}" font-size="10" fill="var(--muted)" text-anchor="middle">±${bp}</text>`)
+        + `</g>`;
     }).join("") + `</svg>`;
   },
   timeline(events, w = 900, h = 48) {   // 다음 24시간 -- 24시간 넘는 일정은 오른쪽 끝에 «>»
@@ -4574,7 +4578,7 @@ function renderMarketCtx() {
   setH("fpLineSwitch", G.cmpW ? lineSw : "");
   const wallRow = ps && PAPER_SIG_OK.wall.has(A) ? gRow("깊은 벽", G.wall(ps.imb, ps.thr), sg(ps.imb, 2), ps.dir > 0 ? "mc-good" : ps.dir < 0 ? "mc-bad" : "",
     `±50bp 매수·매도 잔량 불균형(5분봉 마감) · 점선 = 지난 24시간 상위 20% 문턱 ±${ps.thr.toFixed(2)}`) : "";
-  const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", wallLine + (sw ? G.book(sw, bps, ...(wallW ? [wallW] : [])) : note("호가 래스터 대기")) + wallRow + statRows
+  const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", wallLine + (sw ? G.book(sw, bps, wallW || undefined, Number(d.mid) || 0, (ASSET_CONFIG[A] || {}).dp ?? 2) : note("호가 래스터 대기")) + wallRow + statRows
       + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(sdp)}${bk.spread > 1.5 * 10 ** -sdp ? " — 평소(1틱)보다 넓다" : ""}`
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
       + gRow("BTC 30분", G.sig((d.btc || {}).move_bp == null ? null : d.btc.move_bp / 20), sg((d.btc || {}).move_bp, 0, "bp"), "", btcTxt)
@@ -7034,6 +7038,37 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
   }
 
+  // 2026-10-06 호가벽 ±25·±50·±100bp(사용자 선택 시안 G): 오른쪽 호가 띠 위에만 구간 경계선 + «2,698.7 · 14.7k»(경계 가격 · 현재가에서 그 가격까지 걸린
+  //   매도호가(위·빨강)·매수호가(아래·초록) 합, 코인 수량 -- ④ 벽 판과 같은 원천 latestMarketCtx.book.sweep). 캔들은 안 가린다.
+  //   ±50 = 벽 신호의 기준 폭이라 선을 굵게. 화면 밖 구간은 위·아래 끝에 겹치지 않게 쌓는다(위는 max pain 글자 아래부터).
+  //   휴대폰은 호가 띠가 56px 라 글자가 막대를 덮어 그리지 않는다.
+  let wallTagsG = null;   // 호가 띠보다 **나중에** 붙인다(함수 끝) -- 먼저 붙이면 띠 막대가 꼬리표를 덮는다
+  {
+    const mc = latestMarketCtx && latestMarketCtx.available && latestMarketCtx.asset === activeSnapshotAsset ? latestMarketCtx : null;
+    const sw = mc && mc.book && mc.book.sweep, mid = Number(currentPrice) || Number(mc && mc.mid);
+    if (isSnapshotChart && footprint && !mobileChart && BOOK_W && sw && mid > 0) {
+      const g = document.createElementNS(NS, "g");
+      g.setAttribute("pointer-events", "none");
+      const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); };
+      const qty = (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : v.toFixed(0));
+      const bx0 = w - mr - BOOK_W, bx1 = w - mr, halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
+      const dpx = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 2;   // ETH 1 · SOL 2 · XRP 4
+      let topY = mt + 22, botY = plotBottom - 2;   // 화면 밖 꼬리표가 쌓일 다음 자리
+      (mc.book.bps || [25, 50, 100]).forEach((bp, i) => [[1, sw.ask[i], "var(--bad)"], [-1, sw.bid[i], "var(--good)"]].forEach(([dir, q, col]) => {
+        if (!(q >= 0)) return;
+        const px = mid * (1 + dir * bp / 1e4), y = yAt(px), above = y < mt + 12, below = y > plotBottom;   // 2026-10-06 사용자 «±25 말고 현재가로 계산한 가격»
+        let ty;
+        if (above) { ty = topY; topY += 13; } else if (below) { ty = botY; botY -= 13; } else {
+          add("line", { x1: bx0, x2: bx1, y1: y, y2: y, stroke: col, "stroke-width": bp === 50 ? 2 : 1.2 });
+          ty = y + (dir > 0 ? -3 : 11);
+        }
+        add("text", { x: bx1 - 3, y: ty, "text-anchor": "end", "font-size": 10.5, "font-family": "var(--font-mono)", "font-weight": 800, fill: col, class: "far-lbl", ...halo },
+            `${px.toLocaleString("en-US", { minimumFractionDigits: dpx, maximumFractionDigits: dpx })} · ${qty(q)}${above ? "↑" : below ? "↓" : ""}`);
+      }));
+      wallTagsG = g;
+    }
+  }
+
   // 2026-09-30 30분 도달 선 제거(사용자 지시 -- «±0.5×30분 폭에 닿는가»는 옵션 예상 폭 띠와 같은 크기 정보라 중복).
 
   // 2026-09-28 칼시 15분: 가격판 전폭 선·창 음영 -> **옵션 괄호를 가로지르는 짧은 눈금 하나**(사용자 선택, 옵션 시안 A의 칼시 선).
@@ -8229,6 +8264,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     supply1sSubBox = null;
     subPanelCache.s1.key = subPanelCache.dens.key = "";
   }
+  if (wallTagsG) svg.appendChild(wallTagsG);   // 2026-10-06 호가벽 경계 꼬리표(위 G 블록) -- 호가 띠 위에
   // 2026-10-01 프로파일 오른쪽 끝 가격 이름과 겹치는 호가 벽 수량 글자(«11.8k»)는 숨긴다(사용자 지시) -- 층 캐시라 매번 되살린 뒤 다시 판정
   if (svg.id === "candleSvgSnapshot") {
     const far = [...svg.querySelectorAll(".far-lbl")].map((n) => n.getBoundingClientRect()).filter((r) => r.width > 0);
