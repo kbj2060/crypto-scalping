@@ -481,6 +481,9 @@
               aria-controls="ofabPanel"><span id="ofabPos">주문</span></button>
       <!-- 2026-10-05 포지션이 없으면 «주문» 대신 LONG·SHORT 두 개. 1.5초 꾹 = 바로 진입(마우스) · 짧게 = 펼치기. -->
       <span id="ofabFlat" class="ofab-flat" hidden>
+        <!-- 2026-10-06 상세 펼치기(사용자 지시): LONG 앞 아이콘 = 예전 «주문»을 누르면 나오던 패널(레버·비율·진입 버튼). 주문 경로 없음. -->
+        <button type="button" id="ofabMore" class="ofab-more" aria-controls="ofabPanel" aria-expanded="false" aria-label="주문 상세 펼치기"><svg
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
         <button type="button" id="ofabLong" class="ofab-dir long" aria-controls="ofabPanel"><span>LONG</span><small id="ofabLongFrac">5%</small></button>
         <button type="button" id="ofabShort" class="ofab-dir short" aria-controls="ofabPanel"><span>SHORT</span><small id="ofabShortFrac">5%</small></button>
       </span>

@@ -9794,7 +9794,7 @@ function ofabSetOpen(open) {
   ofab.open = open;
   panel.hidden = !open;
   el("ofabAway").hidden = !open;
-  ["ofabToggle", "ofabLong", "ofabShort"].forEach((id) => el(id)?.setAttribute("aria-expanded", String(open)));
+  ["ofabToggle", "ofabLong", "ofabShort", "ofabMore"].forEach((id) => el(id)?.setAttribute("aria-expanded", String(open)));
   // 카드에서는 range 가 칩 뒤에 숨어 있어 탭 순서에서 빠져 있다(tabindex -1). 게이지로 드러나면 넣는다.
   lanes.querySelectorAll(".chip-input").forEach((i) => { i.tabIndex = open ? 0 : -1; });
   if (open) ofabApplyDefaults();
@@ -9952,6 +9952,7 @@ setInterval(renderOfab, 3000);
   ofabHold(tgl, ofabQuickAdd);
   ofabHold(el("ofabLong"), () => ofabQuickEntry("LONG", false));
   ofabHold(el("ofabShort"), () => ofabQuickEntry("SHORT", false));
+  el("ofabMore")?.addEventListener("click", () => ofabSetOpen(!ofab.open));   // 2026-10-06 상세 펼치기(누르기만 -- 주문 없음)
   el("ofabBack")?.addEventListener("click", () => ofabSetOpen(false));
   grip.addEventListener("pointerdown", (e) => {
     e.preventDefault();

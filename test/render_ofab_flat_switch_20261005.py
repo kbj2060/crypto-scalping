@@ -120,6 +120,13 @@ def run():
         off = pg.evaluate("""() => [...document.querySelectorAll('.ofab-dir')].map((b) => { const r = b.getBoundingClientRect(),
             t = b.querySelector('span').getBoundingClientRect(); return (t.top + t.bottom) / 2 - (r.top + r.bottom) / 2; })""")
         ok(all(abs(o) <= 1.5 for o in off), f"① 글자 세로 어긋남 {off}")
+        pg.click("#ofabMore")                                    # 2026-10-06 상세 펼치기 아이콘(A) -- 펼치기만
+        pg.wait_for_timeout(400)
+        ok(pg.is_visible("#ofabPanel") and pg.get_attribute("#ofabMore", "aria-expanded") == "true" and not calls(log, "/submit"),
+           "① 상세 아이콘이 패널을 안 펼치거나 제출이 나갔다")
+        pg.click("#ofabMore")
+        pg.wait_for_timeout(300)
+        ok(pg.is_hidden("#ofabPanel"), "① 상세 아이콘 두 번째 누름에 안 접힘")
         pg.click("#ofabLong")                                    # 짧게 = 펼치기만
         pg.wait_for_timeout(500)
         # (크기 표시용 미리보기 조회는 화면이 평소에도 보낸다 -- 판정은 «제출 0»)
