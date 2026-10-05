@@ -256,7 +256,7 @@
       <!-- 2026-10-05 뉴스 카드(사용자 «뉴스 카드를 하나 만들어서» · «풋프린트 바로 아래 카드로») -- 9개 피드 + jevk5:4b 판정(제목·요약만 읽음 · 검증 전 · 신호 아님).
            같은 글이 여러 출처로 오면 서버가 하나로 합친다(news_dedupe). app.js renderNews · /api/news -->
       <section id="newsCard" class="panel ops-health-panel news-card" hidden>
-        <div class="ops-health-head"><div class="opt-card-head"><h3 class="card-title">뉴스</h3><span id="newsMeta" class="muted">jevk5:4b 판정 · 참고, 신호 아님</span></div></div>
+        <div class="ops-health-head"><div class="opt-card-head"><h3 class="card-title">News</h3><span id="newsMeta" class="muted">jevk5:4b 판정 · 참고, 신호 아님</span></div></div>
         <div id="newsBody" class="news-body"></div>
       </section>
       <!-- 2026-09-30 Option 카드(사용자 지시 «옵션·블록 거래를 한 카드로 풋프린트 아래, 제목 Option»). -->
@@ -282,7 +282,7 @@
            패널과 같은 payload 를 쓰며(app.js latestBinanceAccount) 여기선 보고 있는 코인만 접어 보인다. -->
       <section id="acctCard" class="panel ops-health-panel acct-panel">
         <div class="ops-health-head">
-          <div><h3>내 계좌</h3><p id="snapAcctBalance" class="muted">-</p></div>
+          <div class="opt-card-head"><h3 class="card-title">Account</h3><p id="snapAcctBalance" class="muted">-</p></div>   <!-- 2026-10-05 네 카드 제목 영어·머리 통일(사용자 지시) -->
           <div class="ops-health-head-tools acct-tools">
             <span id="snapAcctSummary" class="ops-health-summary">-</span>
             <!-- 2026-09-26 비평: 이 카드에서 실주문이 나가므로 «읽기 전용»은 거짓이었다. -->

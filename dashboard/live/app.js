@@ -2874,10 +2874,7 @@ function renderNews() {
     return `<span class="a${a === coin ? " on" : ""}">${newsAsset(a)}</span><span class="mini" title="호재 ${b} · 악재 ${s} · 중립 ${n - b - s}">${n ? `<i class="b" style="width:${100 * b / n}%"></i><i style="width:${100 * (n - b - s) / n}%"></i><i class="s" style="width:${100 * s / n}%"></i>` : ""}</span><span class="c">${n}건</span><span class="m">${n ? mx.toFixed(1) : "–"}</span>`;
   }).join("");
   const assets = `<div class="nw-assets"><span class="h">코인</span><span class="h">호재 · 악재</span><span class="h c">12시간</span><span class="h m">최대 영향</span>${rows}</div>`;
-  const incs = judged.filter((it) => (it.incident ?? 0) >= 0.8);
-  const inc = incs.length
-    ? `<div class="nw-incs">${incs.slice(0, 3).map((it) => `<div class="nw-inc"><b>해킹·장애</b> · ${newsAgo(it.ts_ms, now)} 전 — ${escapeHtml(it.title.slice(0, 110))}</div>`).join("")}${incs.length > 3 ? `<div class="nw-note">외 ${incs.length - 3}건</div>` : ""}</div>`
-    : `<div class="nw-inc none">해킹·장애 보도 없음 (12시간)</div>`;
+  const incs = judged.filter((it) => (it.incident ?? 0) >= 0.8);   // 2026-10-05 왼쪽 칸이 아니라 목록 맨 위에 고정(사용자 지시) -- 12시간 창 안에 있는 동안만
   const byS = {}; p.items.forEach((it) => srcs(it).forEach((s) => { byS[s] = (byS[s] || 0) + 1; }));
   const merged = p.items.filter((it) => srcs(it).length > 1).length;
   const srcLine = `<div class="nw-srcs">${Object.entries(byS).sort((x, y) => y[1] - x[1]).map(([s, n]) => `<span title="${NEWS_SRC_FULL[s] || escapeHtml(s)}">${NEWS_SRC[s] || escapeHtml(s)} <b>${n}</b></span>`).join("")}${merged ? `<span>· 여러 출처 합침 <b>${merged}</b></span>` : ""}</div>`;
@@ -2898,7 +2895,8 @@ function renderNews() {
   }).join("");
   const lane = `<svg class="nw-lane" viewBox="0 0 ${W} ${H}" role="img" aria-label="최근 12시간 뉴스 영향(세로)과 감성(색)">${grid}${ticks}${dots}</svg>`;
   // 목록: 최신부터 60건(관련만 · 이 코인+매크로 토글)
-  const list = p.items.filter((it) => (!newsView.relevant || (it.sentiment ? rel(it) : !it.model)) && (!newsView.coin || it.asset === coin || it.asset === "macro")).slice(0, 60).map((it) => {
+  const pinned = new Set(incs);
+  const list = [...incs, ...p.items.filter((it) => !pinned.has(it) && (!newsView.relevant || (it.sentiment ? rel(it) : !it.model)) && (!newsView.coin || it.asset === coin || it.asset === "macro")).slice(0, 60)].map((it) => {
     const t = new Date(it.ts_ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
     const sen = it.sentiment ? ({ bullish: ["b", "호재"], bearish: ["s", "악재"], neutral: ["n", "중립"] }[it.sentiment] || ["n", escapeHtml(it.sentiment)]) : ["w", it.model ? "본문 없음" : "대기"];
     const prob = it.sentiment ? Math.round(100 * Number(it[{ bullish: "p_bull", bearish: "p_bear", neutral: "p_neu" }[it.sentiment]] || 0)) : null;
@@ -2907,7 +2905,7 @@ function renderNews() {
     const href = /^https?:/.test(it.link) ? it.link : "";
     const title = escapeHtml(it.title.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
     const ss = srcs(it);
-    return `<div class="nw-row${it.sentiment && !rel(it) ? " dim" : ""}"><span class="t">${t}</span><span class="src${ss.length > 1 ? " multi" : ""}" title="${ss.map((s) => NEWS_SRC_FULL[s] || s).join(" · ")}">${ss.map((s) => NEWS_SRC[s] || escapeHtml(s)).join("·")}</span>
+    return `<div class="nw-row${pinned.has(it) ? " pin" : it.sentiment && !rel(it) ? " dim" : ""}"><span class="t">${t}</span><span class="src${ss.length > 1 ? " multi" : ""}" title="${ss.map((s) => NEWS_SRC_FULL[s] || s).join(" · ")}">${ss.map((s) => NEWS_SRC[s] || escapeHtml(s)).join("·")}</span>
       <span class="sen ${sen[0]}">${sen[1]}${prob != null ? ` ${prob}%` : ""}</span><span class="as${it.asset === coin ? " on" : ""}">${escapeHtml(newsAsset(it.asset))}</span>
       <span class="imp" title="영향 ${imp.toFixed(1)} / 3">${bars}</span>${href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" title="${title}">${tag}${title}</a>` : `<a title="${title}">${tag}${title}</a>`}</div>`;
   }).join("") || `<div class="nw-note">조건에 맞는 기사가 없다.</div>`;
@@ -2915,7 +2913,7 @@ function renderNews() {
   setH("newsMeta", `12시간 ${p.items.length}건 · 판정 ${judged.length} · 관련 ${judged.filter(rel).length} · 참고, 신호 아님`);
   const head = `<div class="nw-head"><span class="nw-chips">${chip("relevant", newsView.relevant, "관련만")}${chip("coin", newsView.coin, `${coin}+매크로`)}</span></div>`;
   const prevList = el("newsBody")?.querySelector(".nw-list"), keepTop = prevList ? prevList.scrollTop : 0;   // setH 는 SVG 직렬화 차이로 늘 다시 그린다 -- 스크롤 보존
-  setH("newsBody", `${head}<div class="nw-sum">${tilts}${assets}${inc}${tops}${srcLine}</div><div class="nw-main">${lane}<div class="nw-list">${list}</div></div>`);
+  setH("newsBody", `${head}<div class="nw-sum">${tilts}${assets}${tops}${srcLine}</div><div class="nw-main">${lane}<div class="nw-list">${list}</div></div>`);
   const nextList = el("newsBody")?.querySelector(".nw-list"); if (nextList && keepTop) nextList.scrollTop = keepTop;
 }
 el("newsBody")?.addEventListener("click", (e) => {

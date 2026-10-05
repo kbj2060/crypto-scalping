@@ -3029,3 +3029,26 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .nw-top-row .i { grid-area: i; font-weight: 800; color: var(--text); }
 .nw-top-row .tt { grid-area: t; color: var(--text); line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .nw-top-row .ag { grid-area: a; font-size: 11px; color: var(--muted); }
+
+/* 2026-10-05 네 카드(Footprint · News · Option · Account) 머리·한 화면 모드 통일(사용자 «제목 영어 · 간격·제목·폰트·전체화면 모두 통일»).
+   머리 = 제목(.card-title) + 같은 줄 회색 부제 12px · 안쪽 18px · 아래 1px 선. 한 화면 모드 = 카드 높이 창 높이(넘치는 Option·Account 는 최소 높이). */
+#fpCard > .ops-health-head, #newsCard > .ops-health-head, #optCard > .ops-health-head, #acctCard > .ops-health-head {
+  padding: 18px; border-bottom: 1px solid var(--soft-line); min-height: 72px; box-sizing: border-box; align-items: center; }
+@media (max-width: 720px) {   /* 좁으면 탭·버튼이 줄바꿈된다 -- 제목을 위에 붙여 네 카드가 같은 높이에서 시작 */
+  #fpCard > .ops-health-head, #newsCard > .ops-health-head, #optCard > .ops-health-head, #acctCard > .ops-health-head { align-items: flex-start; min-height: 0; }
+  #fpCard .chart-head-left { align-items: flex-start; }
+  .ops-health-head h3.card-title { align-self: flex-start; }
+}
+.ops-health-head h3.card-title { margin: 0 14px 0 0; }
+#acctCard .opt-card-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+#newsCard .opt-card-head .muted, #optCard .opt-card-head .muted, #acctCard .opt-card-head .muted { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+html.fit1 #newsCard { height: calc(100vh - 20px); display: flex; flex-direction: column; }
+html.fit1 #newsCard[hidden] { display: none; }
+html.fit1 #newsCard > .ops-health-head { flex: none; }
+html.fit1 #newsBody { flex: 1 1 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+html.fit1 #newsBody .nw-main { display: flex; flex-direction: column; min-height: 0; }
+html.fit1 #newsBody .nw-list { flex: 1 1 0; max-height: none; }
+html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+/* 해킹·장애 고정 줄 -- 옅은 주황 바탕(굵은 왼쪽 선 대신) */
+.nw-row.pin { background: color-mix(in srgb, var(--warn) 9%, transparent); border-radius: 6px; padding-left: 6px; padding-right: 6px; margin: 0 -6px; }
+.nw-row.pin + .nw-row:not(.pin) { border-top: 1px solid var(--line); }
