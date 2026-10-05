@@ -51,6 +51,8 @@ HOT_PRUNE = (
     (ROOT / "data/hot/hl_positions.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8),
     (ROOT / "data/hot/hl_positions.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8),
     (ROOT / "data/hot/binance_spot_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "binance", "spot_tape", _bn_coin, 8),
+    (ROOT / "data/hot/bybit_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "bybit", "tape", _bn_coin, HOT_KEEP_DAYS),   # 2026-10-06
+    *[(ROOT / "data/hot/bybit_ctx.sqlite", f"bybit_{t}", "ts_ms / 1000", "inst", "bybit", t, _bn_coin, 8) for t in ("oi", "mark", "funding")],
     *[(ROOT / BN_CTX_REL, t, "ts_ms / 1000", "symbol", "binance", st, _bn_coin, 8)
       for t, st in (("oi_1s", "oi_1s"), ("mark_price_1s", "mark_1s"), ("liquidations", "liquidations"))],
 )
@@ -88,6 +90,9 @@ SPECS = [
     *[("okx", s, [(OKX_CTX_REL, f"okx_{s}", "split_part(inst, '-', 1)")], "ts_ms") for s in ("oi", "mark", "funding")],
     ("okx", "liquidations", [(OKX_CTX_REL, "okx_liquidations", "'ALL'")], "ts_ms"),
     ("hl", "asset_ctx", [("data/hot/hl_ctx.sqlite", "hl_asset_ctx", "coin")], "recv_ms"),                    # 4c hot
+    # 2026-10-06 Bybit 체결 테이프·맥락(live_bybit_trade_tape_collector_20261006, 심볼 = ETHUSDT 꼴)
+    ("bybit", "tape", [("data/hot/bybit_tape.sqlite", "trade_tape_1s", SYM)], "ts_sec * 1000"),
+    *[("bybit", s, [("data/hot/bybit_ctx.sqlite", f"bybit_{s}", SYM.replace("symbol", "inst"))], "ts_ms") for s in ("oi", "mark", "funding")],
     ("hl", "positions", [("data/hot/hl_positions.sqlite", "hl_positions", "coin"),
                          (f"{L}/hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb", "hl_positions", "coin")], "ts_ms"),
     ("hl", "liquidations", [("data/hot/hl_positions.sqlite", "hl_liquidations", "coin"),
