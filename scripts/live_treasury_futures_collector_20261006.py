@@ -11,7 +11,11 @@
   coin=ZN/date=/part.parquet 로 봉인. symbol 은 «=F» 를 뗀다(lake 경로 coin= 에 «=» 가 두 번 들어가지 않게).
 cron 매시 한 번, range=5d 를 받아 덮어쓴다(마지막 봉이 미완성일 수 있어 REPLACE · 서버가 며칠 꺼져도 5일 안이면 메워진다 --
   봉인기 재봉인 8일 안이라 lake 도 따라 고쳐진다). 주문·바이낸스 호출 없음.
-  python scripts/live_treasury_futures_collector_20261006.py
+2026-10-06 매분 range=1d 를 더 돈다(사용자 «1분 데이터로 받고») -- 화면 머리 띠가 최대 ~70분 늦던 것이 ~11분(원천 지연 10분)으로.
+  호출 시간당 4 → 244번이라 Yahoo 429 가 나면 polls 에 error 로 남는다(매시 5d 가 빈 곳을 메운다). 두 cron 은 flock 하나로 겹치지 않게.
+  성공 줄은 5d 때만 찍는다(매분이면 로그가 하루 5,760줄).
+  python scripts/live_treasury_futures_collector_20261006.py              # 5d(매시)
+  python scripts/live_treasury_futures_collector_20261006.py --range 1d   # 매분
   python scripts/live_treasury_futures_collector_20261006.py --selftest
 """
 from __future__ import annotations
@@ -28,7 +32,7 @@ from scripts.data_store import ROOT, rw_connect, sqlite_init  # noqa: E402
 
 DB = Path(os.environ.get("TREASURY_FUTURES_DB", ROOT / "data/hot/treasury_futures.sqlite"))
 SYMS = ["ZT", "ZF", "ZN", "ZB"]
-URL = "https://query1.finance.yahoo.com/v8/finance/chart/{}%3DF?range=5d&interval=1m"
+URL = "https://query1.finance.yahoo.com/v8/finance/chart/{}%3DF?range={}&interval=1m"
 UA = "Mozilla/5.0"  # 전체 브라우저 UA 는 429(10-06 실측) -- 짧은 UA 만 통과
 DDL = ("CREATE TABLE IF NOT EXISTS treasury_fut_1m(ts_sec INTEGER NOT NULL, symbol TEXT NOT NULL, open REAL, high REAL, "
        "low REAL, close REAL, volume INTEGER, contract TEXT, PRIMARY KEY(symbol, ts_sec))",
@@ -46,7 +50,7 @@ def rows_of(sym: str, chart: dict) -> list[tuple]:
             if c is not None and t % 60 == 0]
 
 
-def main() -> int:
+def main(rng: str = "5d") -> int:
     sqlite_init(DB)                       # auto_vacuum·WAL 은 표보다 먼저(새 파일에서만 먹는다)
     ok = 0
     with rw_connect(DB) as con:
@@ -54,7 +58,7 @@ def main() -> int:
             con.execute(ddl)
         for sym in SYMS:
             try:
-                req = urllib.request.Request(URL.format(sym), headers={"User-Agent": UA})
+                req = urllib.request.Request(URL.format(sym, rng), headers={"User-Agent": UA})
                 rows, status = rows_of(sym, json.load(urllib.request.urlopen(req, timeout=30))), "ok"
             except Exception as e:  # 한 종목 실패가 나머지를 막지 않게 -- 다음 시간에 5일치로 다시 메운다
                 rows, status = [], f"error:{e!r}"[:200]
@@ -64,7 +68,7 @@ def main() -> int:
             con.execute("INSERT INTO polls VALUES(?,?,?,?)", (int(time.time() * 1000), sym, status, len(rows)))
             con.execute("COMMIT")
             ok += status == "ok"
-            if rows:
+            if rows and rng == "5d":
                 print(f"{time.strftime('%F %T')} {sym} {len(rows)}봉 {rows[-1][7]}")
     return 0 if ok else 1
 
@@ -83,4 +87,7 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
     else:
-        sys.exit(main())
+        rng = sys.argv[sys.argv.index("--range") + 1] if "--range" in sys.argv else "5d"
+        if rng not in ("1d", "5d"):
+            sys.exit(f"--range 는 1d 또는 5d: {rng}")
+        sys.exit(main(rng))
