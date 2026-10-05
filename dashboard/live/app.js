@@ -4568,7 +4568,7 @@ function renderMarketCtx() {
     mcGfx.th = cmp ? Math.round(Math.max(170, colW * 0.9)) : null; mcGfx.cmpW = cmp ? BW : null; }
   // 2026-10-06 거래소 합산(사용자 «바로 합산») -- 줄 호버에 무엇을 더했나. 합산이 안 될 때는 «바이낸스만»(조용히 정의가 바뀌지 않게)
   const VN = { binance: "바이낸스", okx: "OKX", hl: "HL", bybit: "Bybit" }, venTxt = (v) => (v && v.length ? v.map((k) => VN[k] || k).join("+") : "바이낸스만");
-  const oiA = oi.all || null, OI = oiA || oi, flowVen = fl.z60h_all ? venTxt(fl.venues) : "바이낸스만";
+  const oiA = oi.all && oi.all.z1h != null ? oi.all : null, OI = oiA || oi, flowVen = fl.z60h_all ? venTxt(fl.venues) : "바이낸스만";   // 합산 OI z 가 없으면(한 거래소 1시간 전 칸 빔) 바이낸스로
   const G = mcGfx, gRow = (label, vis, val, cls = "", tip = "") => `<div class="mc-g"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${label}</span>${vis}<b class="${cls}">${val}</b></div>`;
   const note = (s) => `<div class="mc-note">${s}</div>`;
   const qSec = (key, title, inner, extra = "") => sec(key, title, (extra ? `<div class="mc-state">상태${extra}</div>` : "") + inner);

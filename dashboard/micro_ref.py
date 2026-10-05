@@ -269,7 +269,13 @@ def flow_hour_scales_combos(srcs: dict[str, tuple[Path, str]], combos: list[tupl
            "sum(retail_buy_qty - retail_sell_qty) FROM trade_tape_1s WHERE symbol = ? AND whale_buy_qty IS NOT NULL "
            "AND ts_sec >= ? AND ts_sec < ? GROUP BY 1 ORDER BY 1")
     lo = max(today - days * 86400, since_ts)
-    rows = {k: (read_rows(p, sql, [s, lo, today]) if p.exists() else []) for k, (p, s) in srcs.items() if any(k in c for c in combos)}
+    def rd(p: Path, s: str) -> list:
+        try:
+            return read_rows(p, sql, [s, lo, today]) if p.exists() else []
+        except Exception as exc:  # noqa: BLE001 -- 한 거래소 실패가 다른 조합까지 멈추지 않게(그 조합만 비고 호출 측이 물러선다)
+            print(f"flow_hour_scales_combos {p.name}: {exc!r}", flush=True)
+            return []
+    rows = {k: rd(p, s) for k, (p, s) in srcs.items() if any(k in c for c in combos)}
     return {c: flow_hour_scales_from_bars(sum_venue_bars([rows[k] for k in c])) for c in combos}
 
 

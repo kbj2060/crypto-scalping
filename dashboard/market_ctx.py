@@ -124,7 +124,8 @@ def oi_series_live(series: list[tuple[int, float]], sec: int, value: float,
     return [r for r in series if r[0] < b] + [(b, value)]
 
 
-def oi_sum_series(per: dict[str, list[tuple[int, float]]], since: int, tol_s: int = 3600) -> tuple[list[tuple[int, float]], list[str]]:
+def oi_sum_series(per: dict[str, list[tuple[int, float]]], since: int, tol_s: int = 3600, step_s: int = 300,
+                  ffill: int = 2) -> tuple[list[tuple[int, float]], list[str]]:
     """거래소별 5분 OI [(봉 시각, OI)] → 합 시계열과 넣은 거래소(2026-10-06 사용자 «바로 합산»).
     창 시작(since) 부근(tol_s 안)부터 덮는 거래소만 넣는다 -- 새 거래소(Bybit 10-06~)는 7일 쌓인 뒤 저절로 합류한다
     (안 그러면 z 의 과거 분포가 그 거래소 없이 만들어져 합류 순간 «급증»으로 읽힌다). 바이낸스가 없으면 빈 결과.
@@ -132,7 +133,15 @@ def oi_sum_series(per: dict[str, list[tuple[int, float]]], since: int, tol_s: in
     use = [k for k, rows in per.items() if rows and rows[0][0] <= since + tol_s]
     if "binance" not in use:
         return [], []
-    maps = [dict(per[k]) for k in use]
+    maps = []
+    for k in use:   # 빈 5분 칸은 최대 ffill 칸까지 직전 값 -- Bybit OI 는 «값이 바뀔 때만» 행을 쓴다(빈 칸 = 안 바뀜). 더 길면 «모름»(수집기 정지)
+        m, prev = {}, None
+        for t, v in per[k]:
+            if prev is not None:
+                for j in range(1, min((t - prev[0]) // step_s, ffill + 1)):
+                    m[prev[0] + j * step_s] = prev[1]
+            m[t] = v; prev = (t, v)
+        maps.append(m)
     ts = sorted(set.intersection(*(set(m) for m in maps)))
     return [(t, sum(m[t] for m in maps)) for t in ts], use
 
@@ -341,7 +350,9 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     assert _z3 is not None and abs(_z3) < 2, _z3                                  # 하한 없으면 4.8(거짓 «급증») · 있으면 1.19
     _ss, _sv = oi_sum_series({"binance": [(0, 10.0), (300, 11.0), (600, 12.0)], "okx": [(0, 1.0), (600, 2.0)],
                               "bybit": [(300, 5.0), (600, 5.0)]}, since=0, tol_s=0)       # bybit 은 창 시작을 못 덮어 빠진다
-    assert _sv == ["binance", "okx"] and _ss == [(0, 11.0), (600, 14.0)], (_ss, _sv)          # okx 빈 칸(300)은 합에서 뺀다
+    assert _sv == ["binance", "okx"] and _ss == [(0, 11.0), (300, 12.0), (600, 14.0)], (_ss, _sv)   # okx 빈 칸(300)은 직전 값(1.0)
+    _ss, _ = oi_sum_series({"binance": [(t, 1.0) for t in range(0, 1501, 300)], "okx": [(0, 1.0), (1500, 1.0)]}, since=0, tol_s=0)
+    assert [t for t, _ in _ss] == [0, 300, 600, 1500], _ss                                    # 3칸 넘는 빈 구간(900·1200)은 «모름»
     assert oi_sum_series({"okx": [(0, 1.0)]}, since=0) == ([], [])                            # 바이낸스 없으면 합 없음
     assert lev_state(0.95, 1.2)["key"] == "long_crowd" and lev_state(0.05, 1.2)["key"] == "short_crowd"
     assert lev_state(0.5, -2)["key"] == "deleverage" and lev_state(0.95, 0)["key"] == "premium" and lev_state(None, 3)["key"] == "na"

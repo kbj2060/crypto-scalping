@@ -3747,7 +3747,8 @@ def make_app() -> web.Application:
     # 2026-10-04 SOL·XRP 도 닿음 확률(사용자 «30분 도달 확률도 적용»): ETH 모델을 그 코인 5분봉 26피쳐에 그대로 --
     #   검정 AUC − 크기 삼분위 표 SOL +.064 · XRP +.065(eth_only_signals_solxrp_20261004). 🔴캐시는 코인별(봉 시각이 같아 ETH 값이 섞인다)
     card30_by: dict[str, dict[str, Any]] = {}
-    okx_bar_net_by: dict[str, dict[int, tuple[float, ...]]] = {}   # 2026-10-06 합산 -- OKX 봉별 (순, 고래 순, 리테일 순, 매수, 매도). fr_bar_net 과 같은 갱신 규칙
+    okx_bar_net_by: dict[str, dict[int, tuple[float, ...]]] = {}
+    flow_all_hold: dict[str, dict[str, Any]] = {}   # 2026-10-06 리뷰: 봉 마감 직후 Bybit 마지막 봉이 아직 없을 때 직전 합산값 유지   # 2026-10-06 합산 -- OKX 봉별 (순, 고래 순, 리테일 순, 매수, 매도). fr_bar_net 과 같은 갱신 규칙
 
     def _card30_pred(bars: list[dict[str, Any]], asset: str = "eth") -> dict[str, float]:
         """완결 5분봉 → {"dir": 닿는다면 위 먼저, "reach": 30분 안 한쪽에 닿음} 보정 확률. 모델·피쳐가 없으면 빈 dict(카드는 표로 물러선다)."""
@@ -3827,7 +3828,13 @@ def make_app() -> web.Application:
             ven = {"okx": np.array([list(onet[b][:3]) if b in onet else nan3 for b in grid], dtype=float),
                    "bybit": np.array([[bb[b][0] - bb[b][1], bb[b][2], bb[b][3]] if b in bb else nan3 for b in grid], dtype=float)}
             hkey = (mref.is_weekend(done[-1]), time.gmtime(done[-1]).tm_hour)
-            for vs in VENUE_SETS:
+            # 봉 마감 뒤 Bybit 마지막 봉은 ~10초+캐시 20초 늦게 온다 -- 그동안 조합을 바이낸스+OKX 로 바꾸면 5분마다 값·호버가 튄다.
+            #   직전(한 봉 전) 합산값을 그대로 둔다. 다음 봉 안에도 안 오면(수집기 정지) 아래 루프가 두 거래소로 물러선다.
+            hold = flow_all_hold.get(asset)
+            late = bool(hold) and "bybit" in hold["venues"] and done[-1] not in bb and now < done[-1] + 2 * bar
+            if late:
+                x.update(hold)
+            for vs in (() if late else VENUE_SETS):
                 sca = ((micro_state.get("flow_scales_all") or {}).get(vs) or {}).get(hkey)
                 A = a + sum(ven[v] for v in vs[1:])
                 s60 = {g: roll(v, 12) for g, v in (("whale", A[:, 1]), ("mid", A[:, 0] - A[:, 1] - A[:, 2]), ("retail", A[:, 2]))}
@@ -3845,6 +3852,7 @@ def make_app() -> web.Application:
                 sell = sum(v[1] for v in fbars[lb].values()) + onet[lb][4] + (bb[lb][1] if "bybit" in vs else 0.0)
                 if sell > 0:
                     x["taker_all"] = buy / sell
+                flow_all_hold[asset] = {k: x[k] for k in ("venues", "net60_all", "z60h_all", "cvd30_all_z", "taker_all") if k in x}
                 break
         last6 = done[-6:]
         if okx_fp["first_bar"] and len(last6) == 6 and all(b > okx_fp["first_bar"] and b in okx_bars for b in last6):
@@ -4037,7 +4045,8 @@ def make_app() -> web.Application:
                 rows = _read_only_rows(path, f"""SELECT {ts} / 300000 * 300 AS b, {val}, max({ts}) FROM {tbl}
                                                 WHERE {kc} = ? AND {ts} >= ? AND {val} IS NOT NULL GROUP BY b ORDER BY b""",
                                        [key, since]) if path.exists() else []
-            except (sqlite3.Error, duckdb.Error, OSError):
+            except (sqlite3.Error, duckdb.Error, OSError) as exc:
+                print(f"mc_history oi {k}: {exc!r}", flush=True)   # 합에서 빠지고 호버가 «바이낸스만»이 된다 -- 왜인지 로그로
                 rows = []
             per[k] = [(int(b), float(v)) for b, v, _ in rows]
         # 🔴2026-10-04 symbol 조건: 수집기가 SOL·XRP 마크도 쓰기 시작해 거르지 않으면 세 코인 베이시스가 섞인다
@@ -4135,7 +4144,7 @@ def make_app() -> web.Application:
                         "hl_8h": hl[0] * 8 if hl and hl[0] is not None else None},     # HL 펀딩은 1시간 단위 -- 8시간으로 맞춘다
             "basis": {"bp": dv["basis_bp"], "d30_bp": dv["basis_d_bp"], "pct7d": basis_pct,
                       "hl_premium_bp": hl[2] * 1e4 if hl and hl[2] is not None else None},
-            "lev": mctx.lev_state(basis_pct, (oi_all or oi)["z1h"]),   # 2026-10-06 합산 OI z 가 있으면 그걸로
+            "lev": mctx.lev_state(basis_pct, oi_all["z1h"] if oi_all and oi_all.get("z1h") is not None else oi["z1h"]),   # 합산 z 가 없으면 바이낸스
             "oi": {**oi, "okx": okx_oi[0] if okx_oi else None, "hl": hl[1] if hl else None, "bybit": by_oi, "all": oi_all},
             "ls": ({"global": lsv(1, ls[::-1]), "top_pos": lsv(2, ls[::-1]), "taker": lsv(3, ls[::-1]),
                     "global_24h": ls24(1), "top_pos_24h": ls24(2), "age_s": time.time() - ls[-1][0]} if ls else None),

@@ -163,7 +163,7 @@ async def run() -> None:
     ctx, tick = ctx_conn(CTX_DB), TickerState()
     last_ms = {s: st.last_ts_ms() for s, st in stores.items()}
     ctx_buf: dict[str, list[tuple]] = {}
-    down_ms = None
+    down_ms, vtask = None, None
 
     def add_order(s: str, o: tuple | None) -> None:
         if o:
@@ -178,9 +178,14 @@ async def run() -> None:
             st.write(bufs[s].take_closed(everything=force))
         if ctx_buf:
             ctx.execute("BEGIN")
-            for t, rows in ctx_buf.items():
-                ctx.executemany(f"INSERT INTO {t} VALUES ({','.join('?' * len(rows[0]))})", rows)
-            ctx.execute("COMMIT"); ctx_buf.clear()
+            try:
+                for t, rows in ctx_buf.items():
+                    ctx.executemany(f"INSERT INTO {t} VALUES ({','.join('?' * len(rows[0]))})", rows)
+                ctx.execute("COMMIT")
+            except Exception:
+                ctx.execute("ROLLBACK")   # 열린 트랜잭션을 남기면 다음 BEGIN 이 전부 실패한다(10-06 리뷰) -- 행은 ctx_buf 에 남아 다음에 다시
+                raise
+            ctx_buf.clear()
 
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
         while True:
@@ -222,15 +227,18 @@ async def run() -> None:
                             await asyncio.to_thread(flush); t_flush = now
                         if down_ms:
                             ctx.execute("INSERT INTO gaps VALUES (?, ?, ?)", (down_ms[0], int(time.time() * 1000), down_ms[1])); down_ms = None
-                        if now - t_verify >= VERIFY_S:
-                            t_verify = now
-                            await verify_recent(session, stores)
+                        if now - t_verify >= VERIFY_S and (vtask is None or vtask.done()):
+                            t_verify = now   # 별도 태스크 -- Bybit REST 가 막혀도 WS 수신·ping·flush 가 멈추지 않는다(10-06 리뷰)
+                            vtask = asyncio.create_task(verify_recent(session, stores))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 log(f"연결 끊김, 3초 뒤 재시도: {type(exc).__name__} {exc}")
                 down_ms = down_ms or (int(time.time() * 1000), type(exc).__name__)
-            await asyncio.to_thread(flush, True)   # 열린 묶음·초를 버리지 않는다(재연결 뒤 첫 체결이 gap 을 적는다)
+            try:
+                await asyncio.to_thread(flush, True)   # 열린 묶음·초를 버리지 않는다(재연결 뒤 첫 체결이 gap 을 적는다)
+            except Exception as exc:  # noqa: BLE001 -- 여기서 죽으면 run() 이 끝난다. 행은 버퍼에 남아 다음 flush 가 다시 쓴다
+                log(f"재연결 전 쓰기 실패(다음 주기 재시도): {type(exc).__name__} {exc}")
             for b in bufs.values():
                 b.closed_before = max(b.closed_before, b.max_sec + 1)
             await asyncio.sleep(3)

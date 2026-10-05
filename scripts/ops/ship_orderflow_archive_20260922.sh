@@ -22,7 +22,8 @@ KEEP_HOURS="${KEEP_HOURS:-48}"
 DRY="${DRY_RUN:-0}"
 log() { echo "[$(date -Iseconds)] $*"; }
 
-mapfile -t FILES < <(find data/live/orderflow -type f -name '*.gz' | sort)
+# 2026-10-06 보관함(충돌 때 작은 쪽)도 후보 -- 서버 같은 경로에 같은 크기로 있으면 KEEP_HOURS 뒤 Pi 에서 지운다 · 못 보낸 건 다음 실행이 다시 보낸다
+mapfile -t FILES < <(find data/live/orderflow data/archive/orderflow_conflict -type f -name '*.gz' 2>/dev/null | sort)
 [[ ${#FILES[@]} -gt 0 ]] || { log "보낼 .gz 없음"; exit 0; }
 log "후보 ${#FILES[@]}개 ($(du -ch "${FILES[@]}" 2>/dev/null | tail -1 | cut -f1))"
 
@@ -58,8 +59,10 @@ while IFS='|' read -r _ path ssz psz; do
 done < <(grep '^CONFLICT|' <<< "$BEFORE")
 (( nconf > 0 )) && log "충돌 $nconf: 1% 안·Pi 정리 ${#DROP[@]} · Pi 가 커서 서버 교체 ${#BIGGER[@]} · Pi 가 작아 서버 보관함으로 ${#SMALLER[@]}"
 if [[ "$DRY" != "1" ]]; then
-  for a in "${SMALLER[@]}"; do mkdir -p "$(dirname "$a")" && mv -n "${a#$CA/}" "$a"; done
-  NEW+=("${SMALLER[@]}")
+  for a in "${SMALLER[@]}"; do
+    mkdir -p "$(dirname "$a")" && mv -n "${a#$CA/}" "$a" && [[ -f "$a" && ! -e "${a#$CA/}" ]] && NEW+=("$a") \
+      || log "🔴 보관함 이동 실패 -- 원본 그대로 둔다: ${a#$CA/}"
+  done
 fi
 if (( ${#BIGGER[@]} > 0 )) && [[ "$DRY" != "1" ]]; then
   printf '%s\n' "${BIGGER[@]}" | timeout 300 ssh "${SSH_O[@]}" "$SUH" "cd '$SREPO' || exit 1
