@@ -7041,12 +7041,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-10-06 호가벽 ±25·±50·±100bp(사용자 선택 시안 G): 오른쪽 호가 띠 위에만 구간 경계선 + «2,698.7 · 14.7k»(경계 가격 · 현재가에서 그 가격까지 걸린
   //   매도호가(위·빨강)·매수호가(아래·초록) 합, 코인 수량 -- ④ 벽 판과 같은 원천 latestMarketCtx.book.sweep). 캔들은 안 가린다.
   //   ±50 = 벽 신호의 기준 폭이라 선을 굵게. 화면 밖 구간은 위·아래 끝에 겹치지 않게 쌓는다(위는 max pain 글자 아래부터).
-  //   휴대폰은 호가 띠가 56px 라 글자가 막대를 덮어 그리지 않는다.
+  //   휴대폰은 호가 띠가 56px 라 선만 그린다(글자가 막대를 덮는다, 2026-10-06 사용자 «휴대폰에서도 선 보이게»).
   let wallTagsG = null;   // 호가 띠보다 **나중에** 붙인다(함수 끝) -- 먼저 붙이면 띠 막대가 꼬리표를 덮는다
   {
     const mc = latestMarketCtx && latestMarketCtx.available && latestMarketCtx.asset === activeSnapshotAsset ? latestMarketCtx : null;
     const sw = mc && mc.book && mc.book.sweep, mid = Number(currentPrice) || Number(mc && mc.mid);
-    if (isSnapshotChart && footprint && !mobileChart && BOOK_W && sw && mid > 0) {
+    if (isSnapshotChart && footprint && BOOK_W && sw && mid > 0) {   // 2026-10-06 휴대폰도(사용자 지시) -- 띠가 56px 라 선만, 글자·화면 밖 꼬리표는 데스크톱만
       const g = document.createElementNS(NS, "g");
       g.setAttribute("pointer-events", "none");
       const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); };
@@ -7058,9 +7058,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (!(q >= 0)) return;
         const px = mid * (1 + dir * bp / 1e4), y = yAt(px), above = y < mt + 12, below = y > plotBottom;   // 2026-10-06 사용자 «±25 말고 현재가로 계산한 가격»
         let ty;
+        if ((above || below) && mobileChart) return;
         if (above) { ty = topY; topY += 13; } else if (below) { ty = botY; botY -= 13; } else {
           add("line", { x1: bx0, x2: bx1, y1: y, y2: y, stroke: col, "stroke-width": bp === 50 ? 2 : 1.2 });
           ty = y + (dir > 0 ? -3 : 11);
+          if (mobileChart) return;
         }
         add("text", { x: bx1 - 3, y: ty, "text-anchor": "end", "font-size": 10.5, "font-family": "var(--font-mono)", "font-weight": 800, fill: col, class: "far-lbl", ...halo },
             `${px.toLocaleString("en-US", { minimumFractionDigits: dpx, maximumFractionDigits: dpx })} · ${qty(q)}${above ? "↑" : below ? "↓" : ""}`);
