@@ -17,6 +17,12 @@ if pgrep -x ollaya >/dev/null; then
   exit 1
 fi
 MASK=(); [[ -n "$PTXJIT" ]] && MASK=(--ro-bind /dev/null "$PTXJIT")
+# 같은 패키지(libnvidia-compute-580)의 NVVM 도 가린다(2026-10-05) -- 러너가 WSL 드라이버(616, JIT=libnvidia-gpucomp) 와 함께
+#   리눅스 580 의 libnvidia-nvvm70.so.4 를 읽고 있었고, 연속 질의 중 «CUDA illegal memory access» 로 WSL GPU 전체가 고장나
+#   라이브 봇 TiDE 까지 죽었다(04:30, 서버 강제 재시작). 봇은 이 파일을 안 읽는다. 원인 «후보» 차단이다(재현 확인 전).
+for f in /usr/lib/x86_64-linux-gnu/libnvidia-nvvm70.so.[0-9]* /usr/lib/x86_64-linux-gnu/libnvidia-nvvm.so.[0-9]*.*; do
+  [[ -f "$f" && ! -L "$f" ]] && MASK+=(--ro-bind /dev/null "$f")
+done
 export OLLAYA_DEVICE=cuda OLLAYA_KEEP_ALIVE=30m
 exec "$ROOT/scripts/ops/_supervise.sh" \
   "ollaya" \
