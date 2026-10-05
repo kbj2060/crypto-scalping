@@ -7417,6 +7417,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   // Candlestick Tooltip Support. regimeByTsForChart/isSnapshotChart computed once near the top of
   // this function (shared with the ribbon drawn above) -- same ETH-only guard applies here.
+  let laneTip = () => "";   // 풋프린트 아래 리본·차트 두 개의 그 봉 값(아래 레인 블록이 채운다 -- 핸들러가 먼저 붙으므로 let)
   if (isSnapshotChart) svg.onmouseenter = () => { chartHoverActive = true; };
   svg.onmousemove = (evt) => {
     if (isSnapshotChart) chartHoverActive = true;   // enter 를 놓친 경우(재렌더 직후)도 잡는다
@@ -7541,7 +7542,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       시가: ${fmtNum(c.open, Math.max(2, pxDp()))}<br>
       고가: ${fmtNum(c.high, Math.max(2, pxDp()))}<br>
       저가: ${fmtNum(c.low, Math.max(2, pxDp()))}<br>
-      종가: ${fmtNum(c.close, Math.max(2, pxDp()))}${regimeLine}${volLine}${trigLines}
+      종가: ${fmtNum(c.close, Math.max(2, pxDp()))}${regimeLine}${volLine}${trigLines}${isSnapshotChart ? laneTip(idx) : ""}
     `);
   };
   svg.onmouseleave = () => {
@@ -7558,17 +7559,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     priceBadgeText.style.display = "none";
   };
 
-  // ── ① 사분면 행 — 델타 × OI (거래대금은 선) ────────────────────────────────
-  // 봉 하나가 «누가 무엇을 했나»를 말한다. 델타 부호 × OI 부호가 네 사분면이다:
-  //     델타+ · OI+ = 신규 롱    델타+ · OI− = 숏 정리
-  //     델타− · OI+ = 신규 숏    델타− · OI− = 롱 정리
-  // 🔴농도 상한 0.58 은 **대비 계산에서 나온 수**다. --ink 글자가 채운 면 위에서 4.5:1 을
-  //   지키는 한계가 0.60 이고(실측 bad 4.52 · good 4.51), 그 아래라야 글자 색을 하나로
-  //   통일할 수 있다. 더 올리면 밝은 막대에서 글자가 안 읽힌다.
-  // 🔴농도는 |OI| 의 **크기**만 말한다 -- 부호가 안 남아 «신규 숏»과 «롱 정리»가 같은
-  //   빨강이 된다. 그래서 OI 가 증가한 봉에만 막대 위에 주황 캡을 얹는다(3px, 사분면 복구).
-  // 🔴막대 최소 높이 26px 은 해석 글자가 들어갈 자리다 -- 그만큼 «높이=|Δ|» 가 0에서
-  //   시작하지 않는다. 정확한 값은 막대 아래 숫자가 말한다.
+  // 사분면 리본·차트 두 개(풋프린트 아래)는 아래 «풋프린트 아래 = 사분면 리본 + 차트 둘» 블록이 그린다.
   // ── RVOL (2026-09-23, 사용자 「거래대금 대신 rvol 은 어때?」) ─────────────────────
   // 원시 USD 는 «많은 건가»를 사용자가 스스로 판단해야 한다. RVOL 은 «평소의 n 배»라 읽힌다.
   // 실측(ETH 5m 4.7년, 앞 30분 레인지 상위25%): 거래대금 z288 .6535 -> RVOL 14일 .7055.
@@ -7814,10 +7805,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       }
     });
   });
-  // 2026-09-28 사분면·누적 두 레인이 같은 봉별 값을 쓴다 -- 렌더마다 한 번만 만든다(층 캐시가 둘 다 맞으면 안 만든다).
-  //   봉 찾기는 Map 이다(예전 find 는 봉 수의 제곱). 같은 시각이 둘이면 **앞의 것**(find 와 같은 결과).
-  //   🔴«OI 모름»과 «ΔOI 0» 을 가른다(2026-09-25) -- 없는 봉은 oi = null(«신규 롱/숏» 이라는 없는 사실을 안 찍는다).
-  let laneBars = null;
+  // ── 풋프린트 아래 = 사분면 리본 + 차트 둘 (2026-10-06 사용자 선택 A) ─────────────────────────
+  // «사분면은 글자만 살려서 레짐처럼 리본, 차트는 OI·CVD 하나 / 고래·중형·리테일·거래대금 하나».
+  //   리본: 색 = 델타 부호 · 신규(OI↑) = 꽉 찬 칸 · 정리(OI↓) = 테두리 칸 · OI 모름 = 흐린 칸(이름도 «매수/매도 우위»로 유보).
+  //   ① CVD·OI 60분 합(같은 코인 축) ② 고래 굵은 선·중형 옅은 선·리테일 점선(60분 합) + 거래대금 옅은 막대(제 축, 바닥 = 0).
+  //   60분 합 = 그 봉까지 12봉, 다 있어야 점(10-05 B안 규약 그대로 -- 일부 합을 60분으로 말하지 않는다).
+  //   봉별 Δ/OI 숫자 줄·창 시작 누적 흐린 선은 뺐다 -- 봉 호버 툴팁(laneTip)이 그 봉 값을 글자로 말한다.
+  // 🔴OI 모름(null)과 ΔOI 0 을 가른다(2026-09-25) -- 없는 봉에 «신규 롱/숏» 이라는 없는 사실을 안 찍는다.
+  const QNAME = (d, o) => (o == null ? (d >= 0 ? "매수 우위" : "매도 우위")
+                                     : d >= 0 ? (o >= 0 ? "신규 롱" : "숏 정리") : (o >= 0 ? "신규 숏" : "롱 정리"));
+  const sgnQ = (v) => (v == null ? "—" : (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v)));
+  let laneBars = null, laneRoll = null;
   const laneBarsOf = () => laneBars || (laneBars = (() => {
     const byT = new Map();
     fpBars.forEach((b) => { const t = Number(b && b.time); if (!byT.has(t)) byT.set(t, b); });
@@ -7832,274 +7830,95 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
                oi: oiByTs.has(c.time) ? (Number(oiByTs.get(c.time)) || 0) : null };
     });
   })());
-  cachedLayer("quadLane", objToken(fpBars) + "|" + objToken(oiBars)
-              + "|" + activeSnapshotAsset, (g) => {
-  if (fpBars.length && candles.length && QUAD_H) {
-    const QB = quadY + QUAD_H;                       // 판 바닥
-    const rows = laneBarsOf();
-    const have = rows.filter(Boolean);
-    if (have.length) {
-      // 2026-09-23 사용자 지시로 이 행의 **선을 뺐다**. RVOL 은 누적 CVD 아래 제 레인으로
-      // 갔고(누적 CVD 레인 안), 여기 남기면 1시간 RVOL 이 한 카드에 두 번 그려진다.
-      // 이 행의 주인공은 막대(델타 x OI)다. 봉별 «평소 대비»는 막대 툴팁이 그대로 답한다.
-      const TXT = mobileChart ? 10 : 12;
-      // 🔴OI 를 모르면 칸 이름을 **유보한다** -- 사분면은 델타 x OI 라 한 축이 없으면 칸이 없다.
-      const QNAME = (d, o) => (o == null ? (d >= 0 ? "매수 우위" : "매도 우위")
-                                         : d >= 0 ? (o >= 0 ? "신규 롱" : "숏 정리")
-                                                  : (o >= 0 ? "신규 숏" : "롱 정리"));
-      const put = (el) => { g.appendChild(el); return el; };
-      // 막대 **안**의 해석은 --ink 하나로 통일한다(채운 면 위라 부호색을 쓰면 대비가 깨진다).
-      // 막대 **아래**의 숫자는 어두운 배경이라 부호색을 쓸 수 있다(2026-09-22 사용자 지시).
-      const mkText = (x, y, txt, anchor, weight, color) => {
-        const t = document.createElementNS(NS, "text");
-        t.setAttribute("x", x); t.setAttribute("y", y);
-        t.setAttribute("font-size", TXT); t.setAttribute("fill", color || "var(--ink)");
-        if (anchor) t.setAttribute("text-anchor", anchor);
-        if (weight) t.setAttribute("font-weight", weight);
-        t.textContent = txt;
-        return put(t);
-      };
-      const base = document.createElementNS(NS, "line");
-      base.setAttribute("x1", ml); base.setAttribute("x2", ml + cw);
-      base.setAttribute("y1", QB); base.setAttribute("y2", QB);
-      base.setAttribute("stroke", "var(--line)");
-      put(base);
-      // ── 2026-09-28 시안 E(사용자 선택): 막대 대신 **봉 칸 배경을 사분면 색**으로 칠하고 이름은 칸 위에 --
-      //   그 위에 누적 CVD·OI(cumLane, 이제 주연)와 봉별 **거래대금 선**이 올라간다. 신규(OI 증가) 칸은 진하게, 정리 칸은 옅게.
-      //   OI 모름이면 가장 옅게(칸 이름도 «매수/매도 우위»로 유보 -- QNAME).
-      const slotW = cw / candles.length;
-      const tMax = Math.max(...have.map((r) => r.turn), 1e-9);
-      rows.forEach((r, i) => {
-        if (!r) return;
-        const rect = document.createElementNS(NS, "rect");
-        rect.setAttribute("x", ml + i * slotW + 0.5); rect.setAttribute("y", quadY);
-        rect.setAttribute("width", Math.max(1, slotW - 1)); rect.setAttribute("height", QUAD_H);
-        rect.setAttribute("fill", r.delta >= 0 ? "var(--good)" : "var(--bad)");
-        rect.setAttribute("fill-opacity", r.oi == null ? "0.06" : r.oi >= 0 ? "0.2" : "0.1");
-        const tip = document.createElementNS(NS, "title");
-        tip.textContent = fmtDateTick(r.t * 1000) + " " + QNAME(r.delta, r.oi)
-          + " · 델타 " + (r.delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.delta)) + " " + coinUnit()
-          + " (고래 " + (r.whale >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.whale))
-          + " · 중형 " + (r.mid >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.mid))
-          + " · 리테일 " + (r.retail >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.retail)) + ")"
-          + " · 신규계약 " + (r.oi == null ? "모름"
-              : (r.oi >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.oi)) + " " + coinUnit())
-          + " · 거래대금 " + fmtUsdCompact(r.turn);
-        rect.appendChild(tip);
-        put(rect);
-        if (QUAD_TEXT_OK) mkText(ml + (i + 0.5) * slotW, quadY + TXT + 2, QNAME(r.delta, r.oi), "middle", "700",
-                                 r.delta >= 0 ? "var(--good)" : "var(--bad)");
-      });
-      // 거래대금 선 -- 판 아래쪽 40% 에 제 축(0 = 판 바닥). 누적 CVD·OI 와 **다른 축**이라 세로 위치를 서로 비교하지 않는다.
-      {
-        const ty = (v) => QB - 4 - (v / tMax) * QUAD_H * 0.4;
-        let d = "";
-        rows.forEach((r, i) => { if (r) d += (d ? " L" : "M") + (ml + (i + 0.5) * slotW).toFixed(1) + " " + ty(r.turn).toFixed(1); });
-        const pl = document.createElementNS(NS, "path");
-        pl.setAttribute("d", d); pl.setAttribute("fill", "none"); pl.setAttribute("stroke", "var(--turnover)");
-        pl.setAttribute("stroke-width", "1.8"); pl.setAttribute("stroke-dasharray", "5 3"); pl.setAttribute("stroke-linejoin", "round");
-        const pt = document.createElementNS(NS, "title");
-        pt.textContent = "거래대금 — 봉마다 체결 금액(USD, 풋프린트 셀 합). 판 아래쪽 40% 에 제 축으로 그렸다(0 = 판 바닥) — "
-          + "누적 CVD·OI 선과 세로 위치를 비교하지 마세요.";
-        pl.appendChild(pt);
-        put(pl);
-        const lastT = have[have.length - 1];
-        if (mobileChart) {
-        const tv = document.createElementNS(NS, "text");
-        tv.setAttribute("x", w - 2); tv.setAttribute("y", QB - 6); tv.setAttribute("text-anchor", "end");
-        tv.setAttribute("font-size", mobileChart ? "10" : "12"); tv.setAttribute("fill", "var(--turnover)");
-        tv.textContent = "거래대금 " + fmtUsdCompact(lastT.turn);
-        put(tv);
-        }
-      }
-      if (QUAD_TEXT_OK) {
-        const sgnCol = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
-        rows.forEach((r, i) => {
-          if (!r) return;
-          const cx = xAt(i) + bw / 2;
-          mkText(cx, QB + TXT + 2, "Δ" + (r.delta >= 0 ? "+" : "-")
-                 + fmtFootprintQty(Math.abs(r.delta)), "middle", "700", sgnCol(r.delta));
-          mkText(cx, QB + TXT * 2 + 5,
-                 r.oi == null ? "OI —" : "OI" + (r.oi >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(r.oi)),
-                 "middle", null, r.oi == null ? "var(--muted)" : sgnCol(r.oi));
-        });
-      }
-      // 2026-09-30 왼쪽 판 범례(선 견본·칸 농도) 제거(사용자 지시) -- 이름은 판 안 값 줄(cumLane)의 글자 색이 말한다.
-    }
-  }
-  });
-
-  // ── ② 누적 행 — 고래/중형/리테일 스택, 그 윤곽이 CVD ───────────────────────
-  // 🔴**항등식이다**: 누적고래 + 누적중형 + 누적리테일 = CVD (실측 오차 0.0000 ETH).
-  //   그래서 스택의 맨 위 윤곽을 그리면 그게 곧 CVD 선이고, 선을 하나도 더 안 쓴다.
-  //   바로 위 1초 차트가 똑같은 그림이라 눈이 아래로 그대로 이어진다.
-  // 🔴누적 OI 도 **같은 ETH 축**이다. 둘 다 ETH 이고 실측 진폭도 같은 자릿수라(CVD 31k vs
-  //   OI 9.8k) 축을 나눌 이유가 없다 -- 나누면 세로 위치에 뜻이 없어진다.
-  // 🔴기준점은 **창 시작**이다. 창(1h/2h/4h)을 바꾸면 기준점도 같이 옮겨간다.
-  // 🔴RVOL 이 이 레인 안으로 들어왔으므로 **캐시 키에도** 들어가야 한다 -- 안 넣으면
-  //   RVOL 만 갱신됐을 때 옛 노드가 그대로 재사용된다(사분면에서 같은 버그를 이미 겪었다).
-  cachedLayer("cumLane", objToken(fpBars) + "|" + objToken(oiBars) + "|" + chartWindowBars
-              + "|" + activeSnapshotAsset, (g) => {
-  if (fpBars.length && candles.length && CUM_DRAW_H) {
-    let aw = 0, am = 0, ar = 0, ao = 0;
-    const cumRows = laneBarsOf().map((r) => {
-      if (!r) return null;
-      aw += r.whale; am += r.mid; ar += r.retail; ao += (r.oi || 0);
-      return { t: r.t, w: aw, m: aw + am, c: aw + am + ar, oi: ao, turn: r.turn };
-    });
-    // 2026-10-05 B안(사용자 선택): 진한 선·층 = **직전 60분 합**(그 봉까지 12봉) · 창 시작 누적은 흐린 선(제 축).
-    //   근거(ETH 5m 2025~): 최근 60분 가격과의 순위상관 누적 .20 → 60분 합 .72 · «가격 오르는데 선 마이너스» 34% → 15%.
-    //   창 앞 봉도 fpBars 에서 끌어 쓴다. 12봉이 다 있어야 점을 찍는다(모자라면 «모름» -- 일부 합을 60분으로 말하지 않는다).
-    const fpByT = new Map();
+  const laneRollOf = () => laneRoll || (laneRoll = (() => {   // 창 앞 봉도 fpBars 에서 끌어 쓴다
+    const rows = laneBarsOf(), fpByT = new Map();
     fpBars.forEach((b) => { const t = Number(b && b.time); if (!fpByT.has(t)) fpByT.set(t, b); });
     const oiByT = new Map(oiBars.map((b) => [Number(b[0]), Number(b[1]) || 0]));
-    const ROLL = 12;
-    const rollRows = candles.map((c, i) => {
-      if (!cumRows[i]) return null;
-      let w = 0, m = 0, rt = 0, oi = 0, oiOk = true;
-      for (let k = 0; k < ROLL; k++) {
+    return candles.map((c, i) => {
+      if (!rows[i]) return null;
+      let w_ = 0, m = 0, rt = 0, oi = 0, ok = true;
+      for (let k = 0; k < 12; k++) {
         const t = c.time - k * 300, b = fpByT.get(t);
         if (!b) return null;
-        const f = supplyFlowOfBar(b.levels);
-        w += f.whale; m += f.mid; rt += f.retail;
-        if (oiByT.has(t)) oi += oiByT.get(t); else oiOk = false;
+        const f = supplyFlowOfBar(b.levels); w_ += f.whale; m += f.mid; rt += f.retail;
+        if (oiByT.has(t)) oi += oiByT.get(t); else ok = false;
       }
-      return { t: c.time, w, m: w + m, c: w + m + rt, oi: oiOk ? oi : null, turn: cumRows[i].turn };
+      return { w: w_, m, r: rt, c: w_ + m + rt, oi: ok ? oi : null };
     });
-    const rollOn = rollRows.filter(Boolean).length >= 2;
-    const rows = rollOn ? rollRows : cumRows;          // 60분 합을 못 만들면(재기동 직후) 옛 누적이 주연
-    const have = rows.filter(Boolean);
-    if (have.length >= 2) {
-      // 🔴2026-10-01 눈금은 **쌓는 층 경계(고래 w · 고래+중형 m)까지** 본다 -- CVD·OI 만 보면 고래 −25k·중형 +18k 가 상쇄돼 CVD −2.3k 일 때
-      //   눈금이 작아져 고래 층이 레인 바닥을 뚫고 레짐 줄까지 내려왔다(사용자 신고).
-      const amp = Math.max(...have.map((r) => Math.max(Math.abs(r.w), Math.abs(r.m), Math.abs(r.c), Math.abs(r.oi))), 1e-9) * 1.06;
-      // 합친 판: 맨 위 RVOL 띠(~20px) 아래로만 그린다 -- 파란 거래량 선과 섞이지 않게.
-      // 2026-09-28 시안 E: 합친 판에서 누적이 **주연**이다(막대가 사라짐) -- 위 칸 이름 줄(~20px)만 비우고 판을 다 쓴다.
-      const mid = LANE_MERGE ? cumY + 20 + (CUM_DRAW_H - 20) / 2 : cumY + CUM_H / 2;
-      const half = LANE_MERGE ? (CUM_DRAW_H - 20) / 2 - 4 : CUM_H / 2 - 6;
-      const yv = (v) => mid - (v / amp) * half;
-      const cx = (i) => xAt(i) + bw / 2;
-      const zero = document.createElementNS(NS, "line");
-      zero.setAttribute("x1", ml); zero.setAttribute("x2", ml + cw);
-      zero.setAttribute("y1", mid); zero.setAttribute("y2", mid);
-      zero.setAttribute("stroke", "var(--line)");
-      g.appendChild(zero);
-      // 쌓기이지 겹치기가 아니다 -- 겹쳐 그리면 가려진 층의 두께를 눈으로 못 잰다.
-      const band = (lo, hi, op) => {
-        let d = "";
-        rows.forEach((r, i) => { if (r) d += (d ? " L" : "M") + cx(i).toFixed(1) + " " + yv(lo(r)).toFixed(1); });
-        for (let i = rows.length - 1; i >= 0; i--) {
-          if (rows[i]) d += " L" + cx(i).toFixed(1) + " " + yv(hi(rows[i])).toFixed(1);
-        }
-        if (!d) return;
-        const last = have[have.length - 1];
-        const path = document.createElementNS(NS, "path");
-        path.setAttribute("d", d + " Z");
-        path.setAttribute("fill", hi(last) - lo(last) < 0 ? "var(--bad)" : "var(--good)");
-        path.setAttribute("fill-opacity", op); path.setAttribute("stroke", "none");
-        g.appendChild(path);
-      };
-      // 합친 판(데스크톱)에서는 막대가 주연이다 -- 누적은 옅은 배경(사용자 선택 A).
-      const fade = 1;   // 2026-09-28 시안 E -- 옅게 깔던 것(1/3)을 되돌렸다
-      band(() => 0, (r) => r.w, String(0.42 * fade));
-      band((r) => r.w, (r) => r.m, String(0.24 * fade));
-      band((r) => r.m, (r) => r.c, String(0.11 * fade));
-      const line = (val, color, width, opacity, src = rows, Y = yv) => {
-        let d = "", pen = false;
-        src.forEach((r, i) => {
-          const v = r ? val(r) : null;
-          if (v == null) { pen = false; return; }          // 모름(60분 OI 칸 빔)은 선을 끊는다 -- 0 으로 잇지 않는다
-          d += (pen ? " L" : " M") + cx(i).toFixed(1) + " " + Y(v).toFixed(1); pen = true;
-        });
-        if (!d) return;
-        const path = document.createElementNS(NS, "path");
-        path.setAttribute("d", d); path.setAttribute("fill", "none");
-        path.setAttribute("stroke", color); path.setAttribute("stroke-width", width);
-        path.setAttribute("stroke-opacity", opacity); path.setAttribute("stroke-linejoin", "round");
-        g.appendChild(path);
-      };
-      if (rollOn) {   // 흐린 창 시작 누적(제 축 -- 크기가 60분 합의 몇 배라 같은 축이면 진한 선이 눌린다)
-        const haveC = cumRows.filter(Boolean);
-        const ampC = Math.max(...haveC.map((r) => Math.max(Math.abs(r.c), Math.abs(r.oi))), 1e-9) * 1.06;
-        const yc = (v) => mid - (v / ampC) * half;
-        line((r) => r.oi, "var(--warn)", 1.4, 0.32, cumRows, yc);
-        line((r) => r.c, "var(--accent)", 1.4, 0.32, cumRows, yc);
-      }
-      line((r) => r.w, "var(--bad)", 1, 0.55);      // 층 경계(농도만으로는 안 갈린다)
-      line((r) => r.m, "var(--bad)", 1, 0.55);
-      line((r) => r.oi, "var(--warn)", 2.4, 0.95);   // 누적 신규계약
-      line((r) => r.c, "var(--accent)", 2.6, 1);     // = CVD (스택의 윤곽)
-      const last = have[have.length - 1];
-      if (!mobileChart) {   // 2026-09-30 선 끝(마지막 점)에 값(사용자 지시) -- 둘이 가까우면 위아래로 비킨다
-        let li = rows.length - 1; while (li >= 0 && !rows[li]) li--;
-        const ex = cx(li) - 8, yc = yv(last.c), yo = yv(last.oi || 0), push = Math.abs(yc - yo) < 14 ? (14 - Math.abs(yc - yo)) / 2 : 0;   // 점 왼쪽(오른쪽은 ④ 자리)
-        [[yc - (yc <= yo ? push : -push), "CVD", last.c, "var(--accent)"], [yo - (yo < yc ? push : -push), "OI", last.oi, "var(--warn)"]].filter(([, , v]) => v != null).forEach(([y, nm, v, col]) => {
-          const dot = document.createElementNS(NS, "circle");
-          dot.setAttribute("cx", cx(li)); dot.setAttribute("cy", nm === "CVD" ? yc : yo); dot.setAttribute("r", 3); dot.setAttribute("fill", col);
-          g.appendChild(dot);
-          const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", ex); t.setAttribute("y", y + 4); t.setAttribute("text-anchor", "end"); t.setAttribute("font-size", "12"); t.setAttribute("font-weight", "700");
-          t.setAttribute("fill", col); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3"); t.setAttribute("paint-order", "stroke");
-          t.textContent = `${nm}${rollOn ? " 60분" : ""} ${(v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v))}`;
-          g.appendChild(t);
-        });
-      }
-      const sgn = (v) => (v == null ? "—" : (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v)));
-      // 2026-09-28 값 칸(사용자 «라벨을 깔끔하게»): 데스크톱 = 판 오른쪽 위에 **지금 값만**(무엇인지는 왼쪽 견본이 말한다) --
-      //   CVD 15 굵게 · OI · 거래대금 13, 한 칸 띄우고 고래·중형·리테일 11. 모바일 = 판 아래 한 줄(견본 없이 이름+값).
-      const sgnCol = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
-      // 2026-09-28 크기 12 하나로 통일 · **왼쪽 정렬**(사용자 지시) -- 이름 칸 폭을 맞춰 값이 한 세로줄에 선다.
-      const vals = [["CVD", sgn(last.c), sgnCol(last.c), 12, "700"],
-                    ["OI", sgn(last.oi), "var(--warn)", 12, "700"],
-                    ["거래대금", fmtUsdCompact(last.turn), "var(--turnover)", 12, "700"],
-                    null,
-                    ["고래", sgn(last.w), sgnCol(last.w), 12, null],
-                    ["중형", sgn(last.m - last.w), sgnCol(last.m - last.w), 12, null],
-                    ["리테일", sgn(last.c - last.m), sgnCol(last.c - last.m), 12, null]];
-      if (!mobileChart) {
-        // 2026-09-30 값은 판 **안** 한 줄(사용자 «사분면 데이터 표시는 차트 안에 텍스트로») -- 이름 색 = 선 색(범례를 겸한다).
-        //   칸 배경(진함 신규 · 옅음 정리)은 줄 툴팁이 말한다. 오른쪽 값 칸·지지/저항 줄은 비웠다(지지/저항 → 시장 맥락 ③ 가격 지형).
-        const row = document.createElementNS(NS, "text");
-        row.setAttribute("x", ml + 6); row.setAttribute("y", cumY + 34); row.setAttribute("font-size", "12");
-        row.setAttribute("stroke", "var(--chart-bg)"); row.setAttribute("stroke-width", "3"); row.setAttribute("paint-order", "stroke");
-        row.setAttribute("style", "font-variant-numeric: tabular-nums");
-        const nameCol = { CVD: "var(--accent)", OI: "var(--warn)", "거래대금": "var(--turnover)" };
-        vals.filter(Boolean).filter((v) => v[0] !== "CVD" && v[0] !== "OI").forEach((v, k) => {   // CVD·OI 는 선 끝 값
-          const n = document.createElementNS(NS, "tspan");
-          n.setAttribute("fill", nameCol[v[0]] || "var(--muted)"); n.setAttribute("font-weight", "700");
-          if (k) n.setAttribute("dx", k === 1 ? "18" : "12");
-          n.textContent = v[0] + " ";
-          const t = document.createElementNS(NS, "tspan");
-          t.setAttribute("fill", v[2]); if (v[4]) t.setAttribute("font-weight", v[4]);
-          t.textContent = v[1];
-          row.append(n, t);
-        });
-        const ti = document.createElementNS(NS, "title");
-        ti.textContent = "봉 칸 배경 = 사분면: 색은 델타 부호(초록 매수·빨강 매도), 진하면 OI 증가(신규 롱/숏) · 옅으면 OI 감소(정리). "
-          + (rollOn
-            ? "진한 흰 선 = 직전 60분 CVD 합(고래·중형·리테일 면의 윤곽, 0 위 = 최근 1시간 매수 우위), 진한 주황 = 직전 60분 OI 변화(같은 축). "
-              + "흐린 두 선 = 창 시작부터 누적 CVD·OI(제 축 -- 큰 사건의 흔적). 큰 봉은 60분 뒤 합에서 빠져 선이 계단처럼 움직인다 -- 그때는 칸 색을 본다. "
-            : "흰 선 = 창 시작부터 누적 CVD(고래·중형·리테일 면의 윤곽), 주황 = 누적 OI(같은 축). ")
-          + "고래·중형·리테일 값 = " + (rollOn ? "직전 60분 합" : "창 시작부터 누적") + ". 파란 점선 = 봉별 거래대금(판 아래 40% 제 축).";
-        row.appendChild(ti);
-        g.appendChild(row);
-      } else {
-        let rowX = 3;
-        vals.filter(Boolean).filter((v) => v[0] !== "거래대금").forEach((v, k) => {
-          const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", rowX); t.setAttribute("y", cumBottom + 11);
-          t.setAttribute("font-size", k === 0 ? 11 : 10); t.setAttribute("fill", v[2]);
-          if (k === 0) t.setAttribute("font-weight", "700");
-          t.textContent = v[0] + " " + v[1];
-          g.appendChild(t);
-          let adv = 0;
-          try { adv = t.getComputedTextLength(); } catch (_) { adv = t.textContent.length * 6.2; }
-          rowX += (adv > 0 ? adv : t.textContent.length * 6.2) + 8;
-        });
-      }
+  })());
+  laneTip = (i) => {
+    if (!fpBars.length) return "";
+    const r = laneBarsOf()[i], q = laneRollOf()[i], col = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
+    if (!r) return "<br><br>풋프린트 없음";
+    return `<br><br><b style="color:${col(r.delta)}">${QNAME(r.delta, r.oi)}</b> · 델타 ${sgnQ(r.delta)} · 신규계약 ${r.oi == null ? "모름" : sgnQ(r.oi)} ${coinUnit()}`
+      + `<br>이 봉: 고래 ${sgnQ(r.whale)} · 중형 ${sgnQ(r.mid)} · 리테일 ${sgnQ(r.retail)} · <span style="color:var(--turnover)">거래대금 ${fmtUsdCompact(r.turn)}</span>`
+      + (q ? `<br>60분 합: CVD ${sgnQ(q.c)} · <span style="color:var(--warn)">OI ${sgnQ(q.oi)}</span> · 고래 ${sgnQ(q.w)} · 중형 ${sgnQ(q.m)} · 리테일 ${sgnQ(q.r)}`
+           : "<br>60분 합: 모름 (앞 12봉 중 빈 봉)");
+  };
+  cachedLayer("quadLane", objToken(fpBars) + "|" + objToken(oiBars) + "|" + activeSnapshotAsset, (g) => {
+    if (!(fpBars.length && candles.length && QUAD_H)) return;
+    const rows = laneBarsOf(), have = rows.filter(Boolean);
+    if (!have.length) return;
+    const mk = (tag, at, parent = g) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); parent.appendChild(e); return e; };
+    const txt = (x, y, s, at = {}) => { const t = mk("text", Object.assign({ x, y, "font-size": mobileChart ? 10 : 12 }, at)); t.textContent = s; return t; };
+    const halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
+    const top = quadY, bot = h - mb - 4, RIB = mobileChart ? 14 : 22, GAP = mobileChart ? 4 : 8;
+    const cx = (i) => xAt(i) + bw / 2, slotW = cw / candles.length;
+    const chartTop = top + RIB + GAP, cH = (bot - chartTop - GAP) / 2;
+    const c1 = [chartTop, chartTop + cH], c2 = [chartTop + cH + GAP, bot];
+    rows.forEach((r, i) => {
+      if (!r) return;
+      const col = r.delta >= 0 ? "var(--good)" : "var(--bad)", fresh = r.oi != null && r.oi >= 0;
+      const x = ml + i * slotW + 1, wd = Math.max(1, slotW - 2);
+      const rc = mk("rect", { x, y: top, width: wd, height: RIB, rx: 3, fill: col,
+                              "fill-opacity": r.oi == null ? 0.12 : fresh ? 0.85 : 0.14 });
+      if (r.oi != null && !fresh) { rc.setAttribute("stroke", col); rc.setAttribute("stroke-width", 1.2); rc.setAttribute("stroke-opacity", 0.8); }
+      if (slotW >= (mobileChart ? 40 : 52)) txt(x + wd / 2, top + RIB / 2 + (mobileChart ? 3.5 : 4.5), QNAME(r.delta, r.oi),
+        { "text-anchor": "middle", "font-weight": 700, "font-size": mobileChart ? 9 : 12, fill: fresh ? "var(--on-fill)" : col, "pointer-events": "none" });
+    });
+    if (!mobileChart) txt(ml - 6, top + RIB / 2 + 3, "사분면", { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });
+    const R = laneRollOf();
+    let li = R.length - 1; while (li >= 0 && !R[li]) li--;
+    if (li < 0) return;                               // 재기동 직후 -- 60분 합을 아직 못 만든다
+    const last = R[li];
+    const frame = ([y0, y1], vals) => {               // 0 선 가운데, 진폭은 보이는 값의 최대
+      const amp = Math.max(...vals.filter((v) => v != null).map(Math.abs), 1e-9) * 1.08, mid = (y0 + y1) / 2, half = (y1 - y0) / 2 - 2;
+      mk("line", { x1: ml, x2: ml + cw, y1: mid, y2: mid, stroke: "var(--line)" });
+      return (v) => mid - (v / amp) * half;
+    };
+    const path = (val, Y, at) => {                    // 모름은 선을 끊는다 -- 0 으로 잇지 않는다
+      let d = "", pen = false;
+      R.forEach((r, i) => { const v = r ? val(r) : null; if (v == null) { pen = false; return; } d += (pen ? " L" : " M") + cx(i).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
+      if (d) mk("path", Object.assign({ d, fill: "none", "stroke-linejoin": "round" }, at));
+    };
+    const endTags = (tags, Y) => {                    // 선 끝 점 왼쪽에 값(오른쪽은 ④ 자리) -- 가까우면 13px 씩 비킨다
+      const ys = [];
+      tags.filter((t) => t[1] != null).sort((a, b) => Y(a[1]) - Y(b[1])).forEach(([nm, v, col]) => {
+        let y = Y(v) + 4; if (ys.length && y - ys[ys.length - 1] < 13) y = ys[ys.length - 1] + 13; ys.push(y);
+        mk("circle", { cx: cx(li), cy: Y(v), r: 2.6, fill: col });
+        txt(cx(li) - 7, y, nm + " " + sgnQ(v), Object.assign({ "text-anchor": "end", "font-weight": 700, fill: col }, halo));
+      });
+    };
+    {   // ① CVD · OI
+      const Y = frame(c1, R.flatMap((r) => (r ? [r.c, r.oi] : [])));
+      if (!mobileChart) txt(ml + 6, c1[0] + 12, "CVD · OI  (60분 합, 같은 축)", Object.assign({ fill: "var(--muted)", "font-weight": 700 }, halo));
+      path((r) => r.c, Y, { stroke: "var(--accent)", "stroke-width": 2.4 });
+      path((r) => r.oi, Y, { stroke: "var(--warn)", "stroke-width": 2.2 });
+      endTags([["CVD 60분", last.c, "var(--accent)"], ["OI 60분", last.oi, "var(--warn)"]], Y);
     }
-  }
-  }, LANE_MERGE ? "quadLane" : null);   // 합친 판: 사분면 막대 **뒤에**
+    {   // ② 고래 · 중형 · 리테일 + 거래대금(제 축 -- 세로 위치를 선과 비교하지 않는다)
+      const tMax = Math.max(...have.map((r) => r.turn), 1e-9), ty = (v) => c2[1] - 1 - (v / tMax) * (c2[1] - c2[0]) * 0.9;
+      rows.forEach((r, i) => { if (r) mk("rect", { x: xAt(i) + 2, y: ty(r.turn), width: Math.max(1, slotW - 4),
+        height: Math.max(1, c2[1] - 1 - ty(r.turn)), fill: "var(--turnover)", "fill-opacity": 0.16 }); });
+      const Y = frame(c2, R.flatMap((r) => (r ? [r.w, r.m, r.r] : [])));
+      path((r) => r.r, Y, { stroke: "var(--muted)", "stroke-width": 1.4, "stroke-dasharray": "3 3" });
+      path((r) => r.m, Y, { stroke: "var(--ink)", "stroke-opacity": 0.55, "stroke-width": 1.6 });
+      path((r) => r.w, Y, { stroke: "var(--ink)", "stroke-width": 2.4 });
+      endTags([["고래", last.w, "var(--ink)"], ["중형", last.m, "var(--muted)"], ["리테일", last.r, "var(--muted)"]], Y);
+      if (!mobileChart) txt(ml + 6, c2[0] + 12, "거래대금 " + fmtUsdCompact(have[have.length - 1].turn)
+        + "  ·  굵은 선 고래 · 옅은 선 중형 · 점선 리테일 (60분 합)", Object.assign({ fill: "var(--turnover)", "font-weight": 700 }, halo));
+    }
+  });
 
   // 2026-09-30 지지·저항 글자 줄은 시장 맥락 ③ 가격 지형으로 옮겼다(사용자 지시) -- mcGfx.terrain 이 srLevelsLive() 를 그린다.
 
