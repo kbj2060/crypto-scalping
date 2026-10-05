@@ -77,6 +77,9 @@ def quad_1h(move_bp: float | None, doi: float | None, p75: float | None) -> dict
     return {"key": "up_dn", "label": "상승 + OI↓ · 숏 커버", "note": "미측정 · 서술"}
 
 
+OI_Z_MAD_SCALE = 1.55
+
+
 def oi_stats(series: list[tuple[int, float]], step_s: int = 300) -> dict[str, float | None]:
     """5분 격자 OI [(봉 시각, OI)] → 1시간·24시간 변화율(%)과 1시간 변화의 z(과거 1시간 변화들 대비).
     격자에 구멍이 있으면 그 칸은 NaN 으로 두어 변화가 구멍을 건너뛰지 않게 한다."""
@@ -100,8 +103,15 @@ def oi_stats(series: list[tuple[int, float]], step_s: int = 300) -> dict[str, fl
     wk = ((t0 + (np.arange(d.size) + k1) * step_s) // 86400 + 3) % 7 >= 5
     same = d[:-1][np.isfinite(d[:-1]) & (wk[:-1] == wk[-1])] if d.size else np.array([])
     past = same if same.size >= 72 else d[:-1][np.isfinite(d[:-1])]
-    if d.size and math.isfinite(d[-1]) and past.size >= 72 and past.std() > 0:
-        out["z1h"] = float((d[-1] - past.mean()) / past.std())
+    # 2026-10-06 평균·표준편차 -> 중앙값·MAD(사용자 «저번 주 같은 요일에 이벤트가 있었으면 이번 주는 작게 나오나?» -> «그렇게 해줘»).
+    #   7일 창에 큰 급변(상위 0.1%)이 끼면 표준편차가 부풀어 같은 크기 변화의 |z|≥1.5 가 ETH 99→54% · SOL 97→38% · XRP 94→30%
+    #   (2025-01~2026-09, 같은 크기 = 상위 1~5% 변화). MAD 는 84 · 80 · 69% 로 덜 눌린다.
+    #   MAD z 는 꼬리가 두꺼워 같은 문턱이면 2배 자주 뜬다 -> 배율 OI_Z_MAD_SCALE 로 전체 빈도(|z|≥1.5 ~10% · z≥1 ~10% · z≤-1.5 ~5%)를
+    #   옛 식과 맞춘다(문턱별·코인별·기간별 1.48~1.68, 2025~ 세 코인 평균). scratchpad oi_z_robust.py.
+    med = float(np.median(past)) if past.size else 0.0
+    mad = 1.4826 * float(np.median(np.abs(past - med))) if past.size else 0.0
+    if d.size and math.isfinite(d[-1]) and past.size >= 72 and mad > 0:
+        out["z1h"] = float((d[-1] - med) / (OI_Z_MAD_SCALE * mad))
     return out
 
 
@@ -304,6 +314,13 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     _z = oi_stats(_ser)["z1h"]
     _d = _lv[12:] / _lv[:-12] - 1; _zall = (_d[-1] - _d[:-1].mean()) / _d[:-1].std()
     assert _z > 2.5 and _zall < 1.5, (_z, _zall)                          # 주말 분포 기준이면 튀고, 전체 기준이면 평일 흔들림에 묻힌다
+    # 2026-10-06 7일 창에 큰 급변 하나(창 안 한 시간 +8%)가 끼어도 그 뒤 «평소의 3배 급증»은 계속 급증으로 잡힌다(평균·표준편차는 묻힌다)
+    _g2 = np.random.default_rng(2); _lv2 = 1000.0 * np.cumprod(1 + _g2.normal(0, 0.0005, 7 * 288))
+    _lv2[1000:1012] *= np.linspace(1.0, 1.08, 12); _lv2[1012:] *= 1.08          # 창 중간의 큰 급변
+    _lv2[-1] = _lv2[-13] * 1.006                                                  # 마지막: 1시간 +0.6%(평소 σ≈0.17% 의 ~3.5배)
+    _s2 = [(_t0 + i * 300, float(v)) for i, v in enumerate(_lv2)]
+    _d2 = _lv2[12:] / _lv2[:-12] - 1; _zstd = (_d2[-1] - _d2[:-1].mean()) / _d2[:-1].std()
+    assert oi_stats(_s2)["z1h"] > 1.5 and _zstd < oi_stats(_s2)["z1h"], (oi_stats(_s2)["z1h"], _zstd)
     assert lev_state(0.95, 1.2)["key"] == "long_crowd" and lev_state(0.05, 1.2)["key"] == "short_crowd"
     assert lev_state(0.5, -2)["key"] == "deleverage" and lev_state(0.95, 0)["key"] == "premium" and lev_state(None, 3)["key"] == "na"
     lv = hl_liq_levels([(10, 2601), (5, 2602), (-2, 2800), (3, 2710), (-1, 2500), (1, 1000)], mid=2700, bin_usd=5)
