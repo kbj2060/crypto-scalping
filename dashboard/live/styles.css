@@ -1180,7 +1180,7 @@ svg {
 .push-toggle:disabled { opacity: .55; cursor: default; }
 .push-toggle[data-state="blocked"] { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
 
-.push-toggle-icon { font-size: 12px; line-height: 1; }
+.ptg-icon { width: 14px; height: 14px; flex: 0 0 auto; }   /* 테마·알림 버튼 공용 선 아이콘(2026-10-06) */
 
 @media (max-width: 720px) {
   /* 모바일에서는 .topbar가 1열이 되므로 우측 셀도 가운데 정렬로 맞춘다. */
@@ -1279,7 +1279,6 @@ svg {
 /* ── 알림 센터 (2026-10-05) — 테마 토글 옆 종 → 네이티브 <dialog>. 판정 예정일 + 푸시 알림.
    목록은 카드가 아니라 «줄»이다(구분선) -- 카드 안에 카드를 겹치지 않는다. 점·D-day 색은 주황(주의) 하나. */
 .nc-bell { position: relative; }
-.nc-bell-icon { width: 14px; height: 14px; flex: 0 0 auto; }
 .nc-dot {
   position: absolute; top: 3px; right: 5px;
   width: 7px; height: 7px; border-radius: 50%;
@@ -2071,7 +2070,7 @@ svg {
     justify-content: center;
     order: 3;
   }
-  #themeToggle { order: 2; }
+  #themeToggle, #notifyCenterBtn { order: 2; }   /* 2026-10-06 두 버튼 같은 순서 규칙(전엔 테마만 2 라 모바일에서 알림이 앞으로 갔다) */
 
   /* 손가락 목표는 44px 가 하한이다(애플 HIG). 알약 버튼들이 30~34px 였다. */
   .asset-tab { height: 38px; }
@@ -2778,7 +2777,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-09-27 손가락 목표: 창 탭·코인 탭·테마도 40px(27~32px 였다). 위 .chart-mode-tabs .asset-tab 과 같은 무게라 파일 끝에 둔다. */
 @media (pointer: coarse) {
-  .asset-tabs .asset-tab, .theme-toggle { min-height: 40px; }
+  .asset-tabs .asset-tab, .snap-head .push-toggle { min-height: 40px; }   /* 2026-10-06 알림 버튼도(전엔 테마만 40, 알림 32) */
 }
 
 
@@ -3164,3 +3163,14 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 .mc-news-g .mini { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--soft-line); }
 .mc-news-g .mini i { display: block; height: 100%; background: color-mix(in srgb, var(--muted) 45%, transparent); }
 .mc-news-g .mini .b { background: var(--good); } .mc-news-g .mini .s { background: var(--bad); }
+
+/* 2026-10-06 헤더 테마·알림 버튼 통일 + 모바일(사용자 «알림 버튼을 글래스 버튼처럼 통일 · 모바일 최적화»):
+   ≤720px 는 둘 다 40px 원형 아이콘 버튼 -- 글자는 화면에서만 숨긴다(스크린리더 이름은 그대로: 테마 = «다크/글래스», 알림 = aria-label). */
+@media (max-width: 720px) {
+  .snap-head { gap: 8px; }
+  .snap-head .push-toggle { width: 40px; height: 40px; min-height: 40px; padding: 0; justify-content: center; }
+  .snap-head .push-toggle .ptg-icon { width: 18px; height: 18px; }
+  .snap-head .push-toggle > span:not(.nc-dot) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .snap-head .nc-dot { top: 7px; right: 8px; }
+}
