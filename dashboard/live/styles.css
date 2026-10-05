@@ -2677,8 +2677,10 @@ body.order-coin-off .acct-lanes::before {
    #optBody · #optRow 는 display:contents 라 그 안 칸들이 이 격자의 직접 칸이 된다(렌더러는 그대로). */
 @media (min-width: 721px) {   /* 2026-10-01 세로 화면(721~1099)도 격자 -- 열 배치만 아래 미디어에서 바꾼다 */
   /* 2026-10-01 배치(사용자 지시): 위 = 지금·실현감마 | 사다리(넓게) | 블록 거래·심리 · 아래 한 줄 = 만기 | 순매수 흐름(2026-10-02 감마 곡선 제거 → 흐름이 두 칸) · 맨 아래 ⑤ */
-  #optCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) minmax(0, 1.15fr); column-gap: 28px;
-    grid-template-areas: "head head head" "cov cov cov" "move ladder blk" "gamma ladder mood" "lane flow flow" "when when when"; }
+  /* 2026-10-05 만기·순매수 흐름을 카드 폭 절반씩(사용자 지시): 위 세 칸 비율(1 : 1.45 : 1.15)은 그대로 두고 사다리 열을 0.8 + 0.65 로 쪼갠다 --
+     만기 = 1 + 0.8, 흐름 = 0.65 + 1.15 → 둘 다 1.8fr + 칸 사이 하나 = 정확히 반 */
+  #optCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr) minmax(0, .65fr) minmax(0, 1.15fr); column-gap: 28px;
+    grid-template-areas: "head head head head" "cov cov cov cov" "move ladder ladder blk" "gamma ladder ladder mood" "lane lane flow flow" "when when when when"; }
   #optCard > #mcWhen { grid-area: when; }   /* 2026-10-01 ⑤ 다음 24시간 = 맨 아래 전폭(풋프린트에서 옮김) */
   #optCard > .ops-health-head { grid-area: head; }
   #optCard #optBody, #optCard #optRow { display: contents; }
@@ -2728,6 +2730,7 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
   html.fit1 #optCard { align-content: start; }
   html.fit1 #optCard .opt-sec:has([data-tip="mood"]) .opt-kv { max-height: none; }   /* 2026-10-01 심리 세 줄이 셋째 줄(블록 거래 높이)을 고르게 나눠 채운다 */
   /* 2026-10-01 계좌: 성과 차트를 늘 펼치고(접기 숨김) 남는 높이를 fitLayout 이 --acctplot 으로 준다 */
+  html.fit1 #acctCard > :not(.ops-health-head) { zoom: var(--acctz, 1); }   /* 2026-10-05 넘치면 본문만 비율로(제목 줄은 다른 카드와 같게) -- app.js fitLayout 이 --acctz */
   html.fit1 #acctCard .acct-perf-more { display: none; }
   html.fit1 #acctCard .acct-perf-fold > summary { pointer-events: none; }
   html.fit1 #snapAcctPerf .acct-plot svg { height: var(--acctplot, 240px); max-height: none; }   /* 2026-10-01 줄을 위로 -- 남는 칸을 app.js fitLayout 이 재서 사다리에 준다 */   /* 고정 -- 일정 받기 전 안내 줄로 174px 였다가 113px 로 줄며 차트가 늘었다 */
@@ -2954,8 +2957,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-10-01 세로 화면(태블릿·세로 모니터 721~1099): 두 열 -- 왼쪽 지금·실현감마·심리 | 오른쪽 사다리, 그 아래 블록 거래 전폭, 차트 둘 */
 @media (min-width: 721px) and (max-width: 1099px) {
-  #optCard { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); column-gap: 22px;
-    grid-template-areas: "head head" "cov cov" "move ladder" "gamma ladder" "mood ladder" "blk blk" "lane flow" "when when"; }
+  #optCard { grid-template-columns: minmax(0, 1fr) minmax(0, .1fr) minmax(0, .55fr) minmax(0, .55fr); column-gap: 22px;   /* 위 1 : 1.2 그대로 · 아래 1.1 : 1.1 반반 */
+    grid-template-areas: "head head head head" "cov cov cov cov" "move ladder ladder ladder" "gamma ladder ladder ladder" "mood ladder ladder ladder" "blk blk blk blk" "lane lane flow flow" "when when when when"; }
 }
 
 /* 2026-10-05 뉴스 카드(사용자 «뉴스 카드를 하나 만들어서»). 왼쪽 = 기울기(1·6·12시간)·코인별·사고·출처 · 오른쪽 = 12시간 축 + 목록.
@@ -2976,6 +2979,11 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .nw-head { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; }
 .nw-head .nw-chips { margin-left: auto; display: flex; gap: 6px; }
 .nw-sum { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+/* 2026-10-05 왼쪽 요약을 카드 높이에 맞게 늘린다(사용자 지시) -- 남는 높이를 기울기·코인 게이지·고영향 상위가 나눠 갖고 줄 사이가 고르게 벌어진다.
+   좁은 화면(한 열)은 높이가 내용만큼이라 그대로다. 출처 줄은 바닥에 붙는다. */
+.nw-sum > div:not(.nw-srcs):not(.nw-assets) { flex: 1 1 auto; display: flex; flex-direction: column; }
+.nw-sum .nw-tilts, .nw-sum .nw-top { flex: 1 1 auto; align-content: space-evenly; }
+.nw-sum > .nw-assets { flex: 1 1 auto; align-content: space-evenly; }
 .nw-tilt { display: grid; gap: 5px; }
 .nw-tilt-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--soft-line); }
 .nw-tilt-bar i { display: block; height: 100%; }

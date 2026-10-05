@@ -3001,7 +3001,7 @@ function fitLayout() {
   const on = fitOn(), vh = innerHeight - 20;
   document.documentElement.classList.toggle("fit1", on);
   const acct = el("acctCard"), opt = el("optCard");
-  if (acct) { acct.style.minHeight = on ? `${vh}px` : ""; if (!on) acct.style.zoom = ""; }
+  if (acct) { acct.style.minHeight = on ? `${vh}px` : ""; if (!on) acct.style.removeProperty("--acctz"); }
   if (opt) opt.style.minHeight = on ? `${vh}px` : "";
   // 2026-10-01(2) Option 칸 높이 = **원래 크기로 매번 계산**(되먹임 없음). 앞 판은 넘칠 때마다 사다리를 깎는 톱니라 한 번 300 에 닿으면
   //   다시 안 커졌고(캐시에도 남음) 차트 상한만 쌓여 «전부 작아지고 바닥은 잘렸다». 이제:
@@ -3046,7 +3046,7 @@ function fitLayout() {
   if (plot) {
     // 2026-10-05 성과 차트를 최소(120)로 줄여도 넘치면 카드 전체를 비율로 줄인다(사용자 «비율을 줄여서 전체 화면에 딱») --
     //   1080p 모니터의 실제 창(~950px)에서 30px 넘쳤다. 원래 크기(zoom 1)에서 재고, 같은 작업 안에서 다시 입혀 깜빡임이 없다.
-    acct.style.zoom = ""; acct.style.minHeight = `${vh}px`;
+    acct.style.removeProperty("--acctz"); acct.style.minHeight = `${vh}px`;
     const ab = Math.max(0, ...[...acct.children].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().bottom));
     const ar = acct.getBoundingClientRect(), aslack = Math.round(ar.top + vh - parseFloat(getComputedStyle(acct).paddingBottom || 0) - 12 - ab);   // 바닥 여유 12 = 풋프린트와 같게
     const cur = plot.getBoundingClientRect().height, want = Math.round(cur + aslack);
@@ -3058,10 +3058,12 @@ function fitLayout() {
       // 줄인 뒤 **다시 잰다** -- 차트 상자는 120 아래로 안 줄어(축·여백) 계산으로 빼면 모자랐다(1920×960 에서 12px 넘침)
       const ab2 = Math.max(0, ...[...acct.children].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().bottom));
       const need = ab2 - ar.top + parseFloat(getComputedStyle(acct).paddingBottom || 0) + 12;   // 원래 크기로 필요한 카드 높이
-      fitAcctZ = Math.max(0.7, Math.floor((vh / need) * 100) / 100);
+      // 2026-10-05(2) 머리(제목 줄)는 안 줄인다 -- 카드째 줄이면 «Account» 글자만 다른 카드 제목보다 작아졌다(사용자 «account 글자가 안맞아»)
+      const hd = acct.querySelector(":scope > .ops-health-head"), fixed = need - (ab2 - (hd ? hd.getBoundingClientRect().bottom : ar.top));
+      fitAcctZ = Math.max(0.7, Math.floor(((vh - fixed) / (need - fixed)) * 100) / 100);
     }
   }
-  if (on && acct && fitAcctZ < 1) { acct.style.zoom = String(fitAcctZ); acct.style.minHeight = `${Math.floor(vh / fitAcctZ)}px`; }
+  if (on && acct && fitAcctZ < 1) acct.style.setProperty("--acctz", String(fitAcctZ));   // 본문만 줄인다(CSS html.fit1 #acctCard > :not(.ops-health-head))
   if (h !== fitOptLadderH || renderOptionsSoon) { fitOptLadderH = h; renderOptionsSoon = false; if (typeof renderOptions === "function") renderOptions(); }
   if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, lad: fitOptLadderH, ck: fitOptChartK, ap: fitAcctPlotH, az: fitAcctZ })); } catch (e) { /* 기억은 편의 */ } }
 }
@@ -3076,7 +3078,7 @@ function fitApplyCached() {
   ["acctCard", "optCard"].forEach((id) => { const c = el(id); if (c) c.style.minHeight = `${innerHeight - 20}px`; });
   if (fitAcctPlotH) el("acctCard")?.style.setProperty("--acctplot", `${fitAcctPlotH}px`);
   const ac = el("acctCard");
-  if (ac && fitAcctZ < 1) { ac.style.zoom = String(fitAcctZ); ac.style.minHeight = `${Math.floor((innerHeight - 20) / fitAcctZ)}px`; }
+  if (ac && fitAcctZ < 1) ac.style.setProperty("--acctz", String(fitAcctZ));
 }
 function setupCardRail() {
   fitApplyCached();
