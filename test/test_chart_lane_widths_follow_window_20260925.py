@@ -79,18 +79,4 @@ def test_server_liq_history_uses_the_shared_window_parser():
     assert 'f"liq5m_hist_{asset}_{bars}"' in code, "캐시 키에 bars 가 없으면 창을 바꿔도 옛 폭이 나온다"
 
 
-def test_regime_workers_cover_the_window():
-    """레짐 이력은 워커가 자른다 -- 창보다 짧으면 «모름»이 «횡보»로 읽힌다(리본 규약)."""
-    files = sorted((ROOT / "scripts").glob("live_regime_*.py"))
-    assert files, "레짐 워커를 못 찾았다"
-    for f in files:
-        m = re.search(r"^HISTORY_BARS_RETURNED = (\d+)", f.read_text(encoding="utf-8"), re.M)
-        assert m, f"{f.name}: HISTORY_BARS_RETURNED 가 없다"
-        assert int(m.group(1)) >= window_max(), f"{f.name}: {m.group(1)}봉 < 창 {window_max()}봉"
-
-
-def test_ribbon_tells_unknown_apart_from_chop():
-    """워커를 늘려도 콜드스타트·결손은 남는다 -- 화면이 둘을 갈라 말해야 한다."""
-    code = strip_js_comments(APP)
-    assert "regimeFromTs" in code
-    assert "레짐 모름" in APP, "리본/툴팁이 «모름»을 말하지 않는다"
+# 2026-10-06 레짐 리본·워커 제거(사용자 지시) -- 레짐 이력 길이·«모름» 표시 검사 두 개도 같이 뺐다.

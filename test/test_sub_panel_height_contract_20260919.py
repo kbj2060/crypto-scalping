@@ -42,7 +42,9 @@ def test_heights_match_between_js_and_css():
 
     # 🔴가격 플롯(ch)은 «나머지»다. 이 계약은 그 나머지가 얼마로 남는지를 고정한다 --
     #   상자만 줄이거나 레인만 키우면 캔들이 **조용히** 눌린다(그게 이 검사의 이유다).
-    mt_top, mb, price_plot = 12, 70, 400
+    # 2026-10-06 풋프린트 레짐·전환 리본 두 줄 제거 -- 하단 여백 70 -> 28, 빈 42px 는 가격 플롯으로(400 -> 442).
+    mt_top, price_plot = 12, 442
+    mb = _num(r'mb = svg\.id === "candleSvgSnapshot" \? (\d+)', JS, "풋프린트 하단 여백")
 
     css_svg = _num(r"#candleSvgSnapshot \{ height: (\d+)px; \}", CSS, "SVG 높이")
     css_box = _num(r"\.candle-container \{ height: (\d+)px; \}", CSS, "컨테이너 높이")

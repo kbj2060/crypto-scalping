@@ -2,9 +2,6 @@ const API_EVENTS_URL = "/api/events";
 const API_OPS_STATUS_URL = "/api/ops-status";
 const API_BINANCE_ACCOUNT_URL = "/api/binance-account";
 const API_LIQUIDATION_MAP_URL = "/api/liquidation-map";
-const API_REGIME_WIDE24_URL = "/api/regime-wide24";
-const API_REGIME_BTC_URL = "/api/regime-btc";
-const API_REGIME_XRP_URL = "/api/regime-xrp";
 const API_MACRO_CALENDAR_URL = "/api/macro-calendar";
 const API_LIQUIDATION_5M_URL = "/api/liquidation-5m-signal";
 // 2026-09-11 사용자 "청산맵 차트에 매 5분봉 청산 데이터를 추가" -- 게이지는 현재 봉 하나만
@@ -377,9 +374,6 @@ let latestLiqBurstState = null;
 // lastSnapshotHistoryFetchAt tracks the candle history this panel's chart needs (activeSnapshotAsset,
 // see below), independently of activeChartAsset (the Live tab's own, separate coin selector).
 let latestLiquidationMap = null;
-let latestRegimeWide24 = null;
-let latestRegimeBtc = null;
-let latestRegimeXrp = null;
 let liquidationMapLastFetchAt = 0;
 // Snapshot tab's own coin selector (2026-08-31, BTC then XRP then SOL then HYPE added) -- deliberately separate from
 // activeChartAsset (the Live tab's chart asset, which the Snapshot tab has never followed -- see
@@ -390,9 +384,6 @@ let liquidationMapLastFetchAt = 0;
 // section 6.4 for why: those are trained-model or trading_bot.py-sourced, not a symbol swap away).
 let activeSnapshotAsset = "eth";
 const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype"];
-let regimeWide24LastFetchAt = 0;
-let regimeBtcLastFetchAt = 0;
-let regimeXrpLastFetchAt = 0;
 let macroCalendarLastFetchAt = 0;
 // 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
 // 서버가 10초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
@@ -429,7 +420,6 @@ const LIQUIDATION_5M_POLL_MS = 60000; // matches server's own 60s cache + the 1-
 //   클라 폴링 60초 → 최악 ~120초 묵은 청산선). 절반으로 물으면 최악 지연이 생성주기+30초로
 //   묶인다. 비용은 분당 33ms 요청 하나다(실측 p95 33ms · 50KB).
 const LIQUIDATION_MAP_POLL_MS = 30000;
-const REGIME_WIDE24_POLL_MS = 300000; // matches server-side cache (REGIME_WIDE24_CACHE_SECONDS)
 const MACRO_CALENDAR_POLL_MS = 6 * 3600 * 1000; // matches server-side cache (MACRO_CALENDAR_CACHE_SECONDS)
 // 2026-10-05 알림 센터 · 머리 칩 실전 성적 -- tick() 이 파일 아래 정의보다 먼저 돌아서 상태는 여기(위)에 둔다(TDZ)
 const NOTIFY_CENTER_POLL_MS = 5 * 60 * 1000;
@@ -586,11 +576,6 @@ async function setActiveSnapshotAsset(asset) {
   liquidation5mLastFetchAt = 0;
   liquidationMapLastFetchAt = 0;
   lastSnapshotHistoryFetchAt = 0;
-  // 레짐 리본도 코인별 모델이다. tick()이 이제 **활성 코인 것만** 가져오므로(refreshActiveRegime),
-  // 전환 시엔 새 코인의 게이트를 열어 즉시 한 번 받아온다.
-  regimeWide24LastFetchAt = 0;
-  regimeBtcLastFetchAt = 0;
-  regimeXrpLastFetchAt = 0;
   // 🔴2026-09-30 차트 표식(전환 예고/탐지)도 코인별이다 -- 안 비우면 ETH 사각형이 SOL 차트에 최대 60초 남았다.
   latestChartMarkers = null; chartMarkersLastFetchAt = 0;
   // 2026-10-04 시장 맥락·추세 칩도 코인별(서버 ?asset=) -- 옛 코인 값을 새 코인 이름 아래 두지 않는다.
@@ -622,7 +607,6 @@ async function setActiveSnapshotAsset(asset) {
       refreshLiquidation5mSignal(),
       refreshLiquidationMap(),
       maybeFetchSnapshotChartHistory(),
-      refreshActiveRegime(),
     ]),
   ]);
   if (latestMainState) render(latestMainState, latestCompactState);
@@ -631,7 +615,7 @@ async function setActiveSnapshotAsset(asset) {
 /* 테마 토글 (2026-09-16). 다크 = 현행 화면, 라이트 = 애플 «Liquid Glass».
    첫 페인트는 index.html 의 인라인 스크립트가 이미 입혔다 -- 여기서는 «바꾸기」만 한다.
    ⭐색을 하드코딩한 사본을 만들지 않는다: 차트는 SVG 속성에 `var(--good)` 를 그대로 넣고
-   브라우저가 실시간으로 푼다. 다만 `cssVar()` 게터로 읽는 곳(레짐 색)은 다시 그려야 반영된다. */
+   브라우저가 실시간으로 푼다. 다만 `cssVar()` 로 읽는 곳은 다시 그려야 반영된다. */
 const THEME_KEY = "dashTheme";
 function currentTheme() {
   return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
@@ -2721,74 +2705,7 @@ async function refreshLiquidationMap() {
   scheduleSnapshotChartRender();
 }
 
-// wide24 HMM regime overlay (2026-08-26) for the Snapshot chart -- CONFIRMED research artifact,
-// see scripts/live_regime_wide24_signal_20260826.py docstring for why it's independent of whatever
-// regime model the live bot itself routes on.
-async function refreshRegimeWide24() {
-  const now = Date.now();
-  if (now - regimeWide24LastFetchAt < REGIME_WIDE24_POLL_MS) return;
-  regimeWide24LastFetchAt = now;
-  try {
-    const res = await fetch(API_REGIME_WIDE24_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`regime wide24 ${res.status}`);
-    latestRegimeWide24 = await res.json();
-  } catch (error) {
-    console.error("Regime wide24 fetch error:", error);
-    latestRegimeWide24 = { warmed_up: false, error: "fetch_failed", history: [] };
-  }
-  scheduleSnapshotChartRender();
-}
-
-// BTC regime overlay (2026-09-02). Separate endpoint and separate state from latestRegimeWide24
-// because they are two different trained models on two different assets -- the 2026-08-31 bug this
-// replaces was exactly one variable being reused for both (ETH's ribbon drawn over BTC candles).
-// Same poll interval, which matches the server-side cache TTL for both endpoints.
-async function refreshRegimeBtc() {
-  const now = Date.now();
-  if (now - regimeBtcLastFetchAt < REGIME_WIDE24_POLL_MS) return;
-  regimeBtcLastFetchAt = now;
-  try {
-    const res = await fetch(API_REGIME_BTC_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`regime btc ${res.status}`);
-    latestRegimeBtc = await res.json();
-  } catch (error) {
-    console.error("Regime BTC fetch error:", error);
-    latestRegimeBtc = { warmed_up: false, error: "fetch_failed", history: [] };
-  }
-  scheduleSnapshotChartRender();
-}
-
-// XRP regime overlay (2026-09-03). BTC판과 같은 구조 -- 자산마다 **별도 상태 변수**를 쓴다.
-// 하나를 공유하면 2026-08-31의 "ETH 리본이 BTC 캔들 위에 그려지던" 버그가 그대로 재현된다.
-async function refreshRegimeXrp() {
-  const now = Date.now();
-  if (now - regimeXrpLastFetchAt < REGIME_WIDE24_POLL_MS) return;
-  regimeXrpLastFetchAt = now;
-  try {
-    const res = await fetch(API_REGIME_XRP_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`regime xrp ${res.status}`);
-    latestRegimeXrp = await res.json();
-  } catch (error) {
-    console.error("Regime XRP fetch error:", error);
-    latestRegimeXrp = { warmed_up: false, error: "fetch_failed", history: [] };
-  }
-  scheduleSnapshotChartRender();
-}
-
-// ⭐2026-09-03: ETH가 아닌 코인의 수급흐름/리테일수급/청산캐스케이드를 **그 코인 자신의**
-// 실시간 수집기에서 가져온다. XRP/HYPE는 전용 워커가 microstructure까지 모으고
-// (supervisor_xrp_worker.sh), tail_risk는 COIN_CONFIG에 5코인 전부 있다.
-// ETH는 봇 state(dashboard_state.json)를 그대로 쓰므로 여기서 가져오지 않는다.
-// 2026-09-03: 레짐 리본은 renderCandleSvg()의 REGIME_SOURCE_BY_ASSET가 **활성 코인 것 하나만**
-// 그린다. 그런데 tick()은 매 사이클 3개(ETH/BTC/XRP)를 전부 받아오고 2개는 그대로 버렸다 --
-// 코인이 늘수록 그대로 늘어나는 낭비라 활성 코인 것만 받도록 좁혔다. 자산별 상태 변수를
-// 공유하지 않는 구조(refreshRegimeBtc/Xrp 주석의 2026-08-31 버그)는 그대로 유지한다.
-function refreshActiveRegime() {
-  if (activeSnapshotAsset === "eth") return refreshRegimeWide24();
-  if (activeSnapshotAsset === "btc") return refreshRegimeBtc();
-  if (activeSnapshotAsset === "xrp") return refreshRegimeXrp();
-  return Promise.resolve();   // SOL/HYPE: 학습된 레짐 모델이 아직 없다
-}
+// 2026-10-06 레짐 리본·계산 제거(사용자 «레짐 리본 제거해주고 리소스도 줄이게 레짐 계산도 제거해줘») -- 서버 regime 워커도 껐다.
 
 // Macro/corporate event calendar (2026-08-26) -- see scripts/live_macro_calendar_20260826.py for
 // sources/caveats. Purely informational (same tier as the evidence-signal list below it) -- not a
@@ -2965,9 +2882,6 @@ function setupPageTabs() {
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
       liquidationMapLastFetchAt = 0; refreshLiquidationMap();
-      regimeWide24LastFetchAt = 0; refreshRegimeWide24();
-      regimeBtcLastFetchAt = 0; refreshRegimeBtc();
-      regimeXrpLastFetchAt = 0; refreshRegimeXrp();
       macroCalendarLastFetchAt = 0; refreshMacroCalendar();
       sessionAlertsLastFetchAt = 0; refreshSessionAlerts();
       lastSnapshotHistoryFetchAt = 0; maybeFetchSnapshotChartHistory();
@@ -5375,20 +5289,8 @@ function renderSnapshotChart() {
     densityHistory, latestLiquidation5mHist, footprint);
 }
 
-// wide24/GBM3 regime overlay -- drawn as a ribbon INSIDE renderCandleSvg() itself (2026-08-26,
-// moved in from a standalone strip below the chart per user request: "레짐 그래프를 청산맵 안에
-// 넣을 순 없어?"). Dominant-class color (not a 3-way blend) matches the categorical tone convention
-// the evidence-signal strips use elsewhere; opacity scales with confidence so an uncertain reading
-// fades rather than asserting a false-confident color.
 // 토큰을 복사하지 않고 읽는다 -- 하드코딩 사본은 2026-09-12 에 두 번 따로 고쳐야 했다.
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const REGIME_DOMINANT_COLOR = { get bull() { return cssVar("--good"); },
-                                get bear() { return cssVar("--bad"); },
-                                get chop() { return cssVar("--muted"); } };
-function regimeDominant(r) {
-  return r.bull_prob >= r.bear_prob && r.bull_prob >= r.chop_prob ? "bull"
-    : r.bear_prob >= r.chop_prob ? "bear" : "chop";
-}
 
 function fmtDateTick(ts) {
   const d = new Date(ts);
@@ -5604,7 +5506,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const ml = (mobileChart ? (footprint ? 4 : 44) : footprint ? 36 - CENTER_NUDGE : 45) + CENTER_NUDGE + TRADE_L,
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
-        mtTop = 12, mt = mtTop + SUB_TOTAL, mb = 70;
+        mtTop = 12, mt = mtTop + SUB_TOTAL, mb = svg.id === "candleSvgSnapshot" ? 28 : 70;   // 2026-10-06 풋프린트는 레짐·전환 리본 두 줄(+28~+64)이 빠져 x축 글자(+21)까지만 -- 빈 42px 는 가격 플롯에
   // 2026-09-21 사용자 요청: 「차트가 너무 많다 -- 레인을 한 덩어리로」 + 「가격 플롯을 키워라」.
   //   레인 5종(거래대금·델타/CVD·OI·수급·청산)이 각자 6px 간격으로 떨어져 있어 **다섯 장의
   //   그림**으로 읽혔다. 간격 6->3, 높이를 서로 가깝게 맞춰 한 블록으로 읽히게 한다:
@@ -5814,76 +5716,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     return g;
   };
 
-  // Regime ribbon (2026-08-26, moved in from the old standalone regimeWide24Strip row below the
-  // chart per user request: "레짐 그래프를 청산맵 안에 넣을 순 없어?") -- drawn in this same svg/loop
-  // so alignment with the candle columns above it is guaranteed by construction (same xAt/bw, no
-  // second element to keep in sync), and the hover crosshair can sweep through it directly. Only on
-  // the Snapshot tab's chart (svg id "candleSvgSnapshot"); latestRegimeWide24 is an ETH-only trained
-  // model (see docs/eth_dashboard_multicoin_expansion_design_20260831.md -- no BTC regime classifier
-  // exists yet), so it must only ever be drawn when the Snapshot tab's own coin switcher is on ETH --
-  // 2026-08-31 fix: this used to key off svg.id alone, so picking BTC in the Snapshot tab silently
-  // overlaid ETH's bull/bear/chop ribbon on BTC candles (found while building that coin switcher).
   const isSnapshotChart = svg.id === "candleSvgSnapshot";
-  // 2026-09-02: BTC now has its own trained regime classifier, so the ribbon is no longer ETH-only.
-  // Each asset reads its OWN endpoint's state -- never share one variable across assets, which is
-  // precisely the 2026-08-31 bug this structure replaces (ETH's ribbon drawn over BTC candles).
-  // Assets with no classifier still fall through to the "unsupported" grey band below.
-  // 2026-09-03: XRP도 자체 분류기(S96_K9)를 갖게 돼 추가. 분류기 없는 자산은 아래 회색 밴드로 폴백.
-  const REGIME_SOURCE_BY_ASSET = { eth: () => latestRegimeWide24, btc: () => latestRegimeBtc,
-    xrp: () => latestRegimeXrp };
-  const regimeSource = isSnapshotChart ? (REGIME_SOURCE_BY_ASSET[activeSnapshotAsset] || null) : null;
-  const latestRegimeForChart = regimeSource ? regimeSource() : null;
-  const regimeByTsForChart = latestRegimeForChart && latestRegimeForChart.warmed_up
-    ? new Map((latestRegimeForChart.history || []).map((r) => [Math.floor(r.ts_ms / 1000), r]))
-    : null;
-  // 이력이 시작되는 시각. 리본·툴팁이 «모름»과 «횡보»를 가르는 데 쓴다 -- 호버마다 다시 세지
-  // 않도록 여기서 한 번만 구한다(2026-09-25).
-  const regimeFromTs = regimeByTsForChart && regimeByTsForChart.size
-    ? Math.min(...regimeByTsForChart.keys()) : null;
-  // 2026-08-27 user report: ribbon "turns black" and stops updating for stretches -- tracing the
-  // draw loop below, it never paints an invalid color (regimeDominant() only ever returns one of
-  // the 3 REGIME_DOMINANT_COLOR keys); what actually happens is this block draws literally nothing
-  // whenever latestRegimeWide24.warmed_up is false (backend regime compute degrades to that instead
-  // of raising, per load_regime_wide24()'s own docstring), so the ribbon's row just shows the dark
-  // chart background underneath -- indistinguishable from "black" at a glance, and easy to mistake
-  // for a frozen/broken ribbon rather than "no fresh reading available for this window". Flagging
-  // that state explicitly below instead of silently drawing nothing.
-  const regimeRibbonWaiting = Boolean(regimeSource) && !regimeByTsForChart;
-  // 2026-08-31: distinct from regimeRibbonWaiting above -- BTC (or any future non-ETH Snapshot coin)
-  // has no trained regime classifier at all, a permanent gap, not a transient "still warming up"
-  // one. Kept as its own flag (rather than folding into regimeRibbonWaiting) so the flat band's own
-  // tooltip can say so honestly instead of implying an auto-retry that will never resolve anything --
-  // see eth-dashboard-btc-regime-classifier-not-trained-todo-20260831 memory for the follow-up
-  // (swap this placeholder out once a real BTC regime classifier is trained).
-  const regimeRibbonUnsupported = isSnapshotChart && !regimeSource;
-  // 리본 높이 20. 2026-09-11 바닥 레인이 h-mb+28 로 들어오면서 리본은 +28 -> **+50** 으로 내려갔다.
-  // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 baseline +21 · 바닥 레인 +28~+43 · 레짐 리본 +50~+70.
-  // h=400/mb=74 기준 리본이 396 에서 끝나 SVG 바닥까지 4px 여유.
-  // ── 네 줄(천장·바닥·레짐·변동성)은 **같은 모양**을 쓴다 ────────────────────────────
-  // 2026-09-16 사용자 "레짐과 변동성 모두 바닥과 천장처럼". 그전까지 레인(15px·트랙 있음)과
-  // 리본(20px·트랙 없음)이 따로 자랐다. 치수를 여기 한 곳에서 정하고 네 줄이 받아쓴다 --
-  // 각자 들고 있으면 한쪽만 고쳐져 또 어긋난다(이 파일에서 반복된 실패다).
-  const LANE_H = 15;
-  // 라운딩은 얇은 막대를 지운다: 모바일 34봉이면 bw≈6.8px 인데 rx=1.5 면 평평한 폭이 3.8px 다.
-  const laneRx = bw >= 9 ? "1.5" : "0";
-  const laneW = Math.max(bw, mobileChart ? 3.5 : 2.5);
-  const laneX0 = xAt(0), laneX1 = xAt(Math.max(candles.length - 1, 0)) + bw;
-  // 배경 트랙 -- 값이 없는 구간도 «줄이 거기 있다»를 보이게 한다(레인이 원래 하던 일).
-  const drawLaneTrack = (y, into) => {
-    const track = document.createElementNS(NS, "rect");
-    track.setAttribute("x", laneX0); track.setAttribute("y", y);
-    track.setAttribute("width", Math.max(laneX1 - laneX0, 1));
-    track.setAttribute("height", LANE_H);
-    track.setAttribute("rx", "1.5");
-    track.setAttribute("fill", "var(--muted)");
-    track.setAttribute("fill-opacity", "0.18");
-    (into || svg).appendChild(track);   // 층 캐시가 목적지를 넘긴다
-    return track;
-  };
-  const REGIME_RIBBON_Y = h - mb + 28, REGIME_RIBBON_H = LANE_H;
-  // 변동성 전망 리본 -- 레짐 바로 아래, 같은 두께. ETH 전용 모델이라 다른 코인에선 안 그린다.
-  // 방향 없는 두 신호의 구간 줄. 이름을 왼쪽 여백에 적는 것까지 레짐 리본과 같은 규약이다.
-  const TREND_ROW_Y = h - mb + 49;
   // 변동성 값은 이제 카드가 보여준다. 차트에는 **툴팁용 지도**만 남긴다(리본은 내렸다).
   // 2026-09-21 변동성 전망(24h) 제거 -- 워커 중지로 데이터가 끊긴다. 그리기 분기는 그대로
   // 두고 지도만 비운다(diff 를 좁힌다).
@@ -6113,88 +5946,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   });
 
   });
-  // 레짐 리본은 워커 주기(300초)에만 바뀐다 -- 봉당 rect+title 이라 48봉이면 96 노드다.
-  cachedLayer("regime", objToken(latestRegimeForChart) + ":"
-    + regimeRibbonWaiting + ":" + regimeRibbonUnsupported, (g) => {
-  if (regimeByTsForChart) {
-    drawLaneTrack(REGIME_RIBBON_Y, g);   // 천장·바닥과 같은 트랙 (2026-09-16)
-    // 🔴2026-09-25 «모름»과 «횡보»가 같은 그림이었다. 아래 규약이 «칸 없음 = 횡보»인데,
-    //   워커 이력이 창보다 짧으면(HISTORY_BARS_RETURNED) 그 앞 봉도 똑같이 칸이 없다.
-    //   12시간 창에서 앞 24봉이 실제로 그랬다 -- 데이터가 없는 구간이 «횡보였다»로 읽혔다.
-    //   이력이 시작되기 **전** 구간에만 흐린 띠를 깔아 둘을 가른다(안쪽 결손은 워커가 안 만든다).
-    const oldest = regimeFromTs == null ? [] : candles.filter((c) => c.time < regimeFromTs);
-    if (oldest.length) {
-      const j = candles.indexOf(oldest[oldest.length - 1]);
-      const un = document.createElementNS(NS, "rect");
-      un.setAttribute("x", xAt(0)); un.setAttribute("y", REGIME_RIBBON_Y);
-      un.setAttribute("width", Math.max(1, xAt(j) + laneW - xAt(0)));
-      un.setAttribute("height", REGIME_RIBBON_H); un.setAttribute("rx", laneRx);
-      un.setAttribute("fill", "var(--muted)"); un.setAttribute("fill-opacity", "0.14");
-      const ut = document.createElementNS(NS, "title");
-      ut.textContent = `레짐 모름 -- 워커 이력(${regimeByTsForChart.size}봉)이 이 창보다 짧다.`
-        + " 빈 칸이 아니라 «안 잰 구간»이다(빈 칸은 횡보를 뜻한다).";
-      un.appendChild(ut);
-      g.appendChild(un);
-    }
-    candles.forEach((c, i) => {
-      const r = regimeByTsForChart.get(c.time);
-      if (!r) return;
-      // 2026-09-16 사용자 "회색칸을 제거해야해. chop 은 그냥 백그라운드로": 횡보는 **안 그린다**.
-      // 회색 칸을 채우면 «신호가 있다»처럼 읽히는데 횡보는 오히려 «아무것도 아니다»다.
-      // 빈 트랙이 그 뜻을 그대로 말한다 -- 칸이 없는 구간 = 횡보. (값은 툴팁으로 계속 읽힌다)
-      if (regimeDominant(r) === "chop") return;
-      const rect = document.createElementNS(NS, "rect");
-      rect.setAttribute("x", xAt(i)); rect.setAttribute("y", REGIME_RIBBON_Y);
-      rect.setAttribute("width", laneW); rect.setAttribute("height", REGIME_RIBBON_H);
-      rect.setAttribute("rx", laneRx);
-      rect.setAttribute("fill", REGIME_DOMINANT_COLOR[regimeDominant(r)]);
-      rect.setAttribute("fill-opacity", (0.55 + 0.45 * clamp01(r.confidence)).toFixed(2));
-      const title = document.createElementNS(NS, "title");
-      const pct = (v) => Math.round(v * 100);
-      title.textContent = `레짐: 강세${pct(r.bull_prob)}% 약세${pct(r.bear_prob)}% 횡보${pct(r.chop_prob)}% (신뢰도${pct(r.confidence)}%)`;
-      rect.appendChild(title);
-      g.appendChild(rect);
-    });
-    const ribbonLabel = document.createElementNS(NS, "text");
-    ribbonLabel.setAttribute("x", ml - 6);
-    // 리본이 두꺼워졌으니 바닥 정렬(H-1) 대신 세로 중앙 (font-size 9 -> baseline +3)
-    ribbonLabel.setAttribute("y", REGIME_RIBBON_Y + REGIME_RIBBON_H / 2 + 3);
-    ribbonLabel.setAttribute("text-anchor", "end");
-    ribbonLabel.setAttribute("font-size", "9");
-    ribbonLabel.setAttribute("fill", "var(--muted)");
-    ribbonLabel.textContent = "레짐";
-    g.appendChild(ribbonLabel);
-  } else if ((regimeRibbonWaiting || regimeRibbonUnsupported) && candles.length) {
-    // Flat gray placeholder instead of silently drawing nothing, so the row still reads as
-    // intentional -- but the two causes get different wording (regimeRibbonWaiting: transient,
-    // auto-retries; regimeRibbonUnsupported: this coin has no trained regime model at all yet, see
-    // regimeRibbonUnsupported's own definition above) so a permanent gap never reads as "any
-    // second now".
-    const waitRect = document.createElementNS(NS, "rect");
-    waitRect.setAttribute("x", xAt(0)); waitRect.setAttribute("y", REGIME_RIBBON_Y);
-    waitRect.setAttribute("width", xAt(candles.length - 1) + bw - xAt(0)); waitRect.setAttribute("height", REGIME_RIBBON_H);
-    waitRect.setAttribute("rx", "1.5");
-    waitRect.setAttribute("fill", "var(--muted)");
-    waitRect.setAttribute("fill-opacity", "0.18");
-    const waitTitle = document.createElementNS(NS, "title");
-    waitTitle.textContent = regimeRibbonUnsupported
-      // ⚠️지원 목록을 하드코딩하지 않는다 -- "(ETH 전용 모델)"이 박혀 있어 BTC·XRP 분류기를
-      // 붙인 뒤에도 낡은 문구가 남았다. 실제 소스맵에서 만든다.
-      ? `레짐: 이 코인용 레짐분류기가 아직 없음 (${Object.keys(REGIME_SOURCE_BY_ASSET).map((a) => a.toUpperCase()).join("·")} 지원) -- 추후 학습 예정`
-      : "레짐: 웜업 중이거나 일시적으로 갱신 실패 -- 다음 5분 주기에 자동 재시도됩니다";
-    waitRect.appendChild(waitTitle);
-    g.appendChild(waitRect);
-    const waitLabel = document.createElementNS(NS, "text");
-    waitLabel.setAttribute("x", ml - 6);
-    waitLabel.setAttribute("y", REGIME_RIBBON_Y + REGIME_RIBBON_H - 1);
-    waitLabel.setAttribute("text-anchor", "end");
-    waitLabel.setAttribute("font-size", "9");
-    waitLabel.setAttribute("fill", "var(--muted)");
-    waitLabel.textContent = regimeRibbonUnsupported ? "레짐 (미지원)" : "레짐";
-    g.appendChild(waitLabel);
-  }
-
-  });
 
   // ── 변동성 전망 리본 (2026-09-11, 칩을 대체) ────────────────────────────────────
   // 사용자: "변동성 전망도 청산맵 아래 레짐과 같은 스타일로 주황색으로 칠하고 칩은 제거".
@@ -6403,6 +6154,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 이웃끼리 겹친다 -- 라벨을 버리지 않고 **겹치면 한 줄씩 내린다**(값은 다 보여야 한다).
     const deltaBoxes = [];
     const deltaFont = bw >= 34 ? 11 : 9;
+    // 2026-10-06 전환 예고 «켜진 첫 봉»만 델타 아래 «전환예고 N%»(사용자 선택 C) -- 한 번 켜지면 ~1시간 이어져 나머지 봉은 안 찍는다.
+    const pwFirst = new Map();   // 봉 시각 -> 그때 30분 안 탐지 확률
+    if (isSnapshotChart && latestChartMarkers && latestChartMarkers.available !== false) {
+      const cmx = latestChartMarkers, pw = (cmx.spans || {}).trend_prewarn || [], pp = (cmx.span_meta || {}).trend_prewarn_p || [];
+      (cmx.times || []).forEach((t, k) => { if (pw[k] && !(k && pw[k - 1])) pwFirst.set(Math.floor(Date.parse(t) / 1000), pp[k]); });
+    }
     const pocPts = [];    // 2026-09-19 사용자 요청: 봉별 POC 를 선으로 잇는다.
     barRows.forEach((rows, i) => {
       const c = candles[i], x = xAt(i);
@@ -6507,6 +6264,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         dTxt.appendChild(dTitle);
         svg.appendChild(dTxt);
         deltaCache.set(c.time, { sig: dSig, n: dTxt });
+        }
+        if (pwFirst.has(c.time)) {
+          const pv = pwFirst.get(c.time), lab = "전환예고" + (pv != null ? ` ${Math.round(pv * 100)}%` : "");
+          const py = Math.min(plotBottom - 3, dY + deltaFont + 4);
+          const pt = document.createElementNS(NS, "text");
+          Object.entries({ x: cxD, y: py, "text-anchor": "middle", "font-size": deltaFont, "font-weight": 700, fill: "var(--warn)",
+                           stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" }).forEach(([k, v]) => pt.setAttribute(k, v));
+          pt.textContent = lab;
+          const tt = document.createElementNS(NS, "title");
+          tt.textContent = "전환 예고가 이 봉에서 처음 켜졌다(앞으로 30분 안 전환 탐지 확률" + (pv != null ? ` ${(pv * 100).toFixed(1)}%` : "") + ") -- 켜져 있는 동안의 나머지 봉은 표시 안 함";
+          pt.appendChild(tt); svg.appendChild(pt);
         }
       }
     });
@@ -6916,84 +6684,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 진하기로 보여주던 것인데(2026-09-09 C안), 증거신호가 화면에서 빠지면서 빈 줄만 남았다.
     // 방향 이벤트는 아래 **봉 밀착 삼각형** 하나로 말한다 -- 같은 것을 두 문법으로 말하지 않는다.
 
-    // ── 방향 없는 신호는 구간으로 (2026-09-16) ──────────────────────────────────
-    // 추세 전환·변동폭 게이트는 **천장/바닥을 말하지 않는다**. 그래서 방향 색(초록/빨강)을
-    // 쓰지 않고 앰버/주황 계열만 쓰며, 삼각형(순간)이 아니라 **막대 길이**(구간)로 그린다 --
-    // 지속 시간이 이 둘의 정보 대부분이라 점으로 찍으면 그게 사라진다.
-    // 예고는 **현재 상태만** 아는 값이라(워커가 이력을 안 남긴다) 서버가 spans_partial 로
-    // 알려주고, 여기서는 점선 테두리로 «과거는 모른다»를 표시한다.
-    const spans = cm.spans || {};
-    const partial = new Set(cm.spans_partial || []);
-    const spanRows = [
-      // 왼쪽 여백은 45px 뿐이다 -- 이름은 기존 규약(레짐·변동성·청산)처럼 두 글자로 줄인다.
-      // 긴 이름을 넣었더니 "변동폭 게이트"가 "폭 게이트"로 잘렸다(2026-09-16 렌더 확인).
-      { y: TREND_ROW_Y, label: "전환", items: [
-        { key: "trend_prewarn", name: "전환 예고", color: "var(--warn)", opacity: 0.30 },
-        { key: "trend_detect", name: "전환 탐지", color: "var(--warn)", opacity: 0.95 }] },
-      // 2026-09-20 «게이트» 줄을 걷어냈다(사용자 지시). 값 자체는 카드
-      //   (evrGateIndicatorItem)에 남아 있다 -- 지운 건 차트 줄 하나다.
-    ];
-    // 구간 줄은 cm(60초 폴링)에만 달려 있다. 🔴아래 **이벤트 삼각형은 캐시하지 않는다** --
-    // y 가 그 봉의 고가/저가에서 나오므로 진행 중인 봉에서 틱마다 움직인다.
-    cachedLayer("spans", objToken(cm), (lg) => {
-    spanRows.forEach((row) => {
-      drawLaneTrack(row.y, lg);
-      const lbl = document.createElementNS(NS, "text");
-      lbl.setAttribute("x", ml - 6); lbl.setAttribute("y", row.y + LANE_H / 2 + 3);
-      lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "9");
-      lbl.setAttribute("fill", "var(--muted)");
-      lbl.textContent = row.label;
-      lg.appendChild(lbl);
-      row.items.forEach((item) => {
-        const raw = Array.isArray(spans[item.key]) ? spans[item.key] : [];
-        // 🔴인덱스로 맞추면 안 된다. 서버 격자는 72봉인데 **풋프린트는 12봉**이라 길이가 다르다
-        //   -- 첫 판은 길이 검사에 걸려 풋프린트에서 구간이 영영 안 보였다. 시각으로 맞춘다
-        //   (삼각형이 idxByEpoch 로 하는 것과 같은 방법이고, 한 칸 밀기도 같이 막힌다).
-        const onByTs = new Map();
-        (cm.times || []).forEach((t, k) => {
-          const sec = Math.floor(Date.parse(t) / 1000);
-          if (Number.isFinite(sec)) onByTs.set(sec, raw[k] ? 1 : 0);
-        });
-        const arr = candles.map((c) => onByTs.get(c.time) || 0);
-        let i = 0;
-        while (i < arr.length) {
-          if (!arr[i]) { i += 1; continue; }
-          let j = i;
-          while (j + 1 < arr.length && arr[j + 1]) j += 1;   // 이어진 봉을 한 구간으로
-          const x0 = xAt(i), x1 = xAt(j) + bw;
-          const rect = document.createElementNS(NS, "rect");
-          rect.setAttribute("x", x0); rect.setAttribute("y", row.y);
-          rect.setAttribute("width", Math.max(x1 - x0, 2));
-          rect.setAttribute("height", LANE_H); rect.setAttribute("rx", laneRx);
-          rect.setAttribute("fill", item.color);
-          rect.setAttribute("fill-opacity", String(item.opacity));
-          if (partial.has(item.key)) {
-            rect.setAttribute("stroke", item.color);
-            rect.setAttribute("stroke-dasharray", "3,2");
-            rect.setAttribute("stroke-opacity", "0.9");
-          }
-          const ti = document.createElementNS(NS, "title");
-          const span = (j - i + 1) * CHART_CANDLE_MIN;
-          ti.textContent = item.name + " · " + fmtDateTick(candles[i].time * 1000)
-            + "부터 " + span + "분"
-            + (partial.has(item.key) ? " (현재 상태만 압니다 — 과거 이력이 없습니다)" : "");
-          rect.appendChild(ti);
-          lg.appendChild(rect);
-          // 구간이 충분히 넓을 때만 이름을 넣는다 -- 좁은 칸의 글자는 읽히지 않고 더럽기만 하다.
-          if (x1 - x0 >= 64) {
-            const t = document.createElementNS(NS, "text");
-            t.setAttribute("x", x0 + 6); t.setAttribute("y", row.y + LANE_H / 2 + 3.5);
-            t.setAttribute("font-size", "9"); t.setAttribute("font-weight", "bold");
-            t.setAttribute("fill", inkOnFill());
-            t.textContent = item.name;
-            lg.appendChild(t);
-          }
-          i = j + 1;
-        }
-      });
-    });
-
-    });
+    // 2026-10-06 전환 예고·탐지 구간 줄(전환 리본) 제거(사용자 지시) -- 예고는 «켜진 첫 봉»만 풋프린트 델타 아래 «전환예고 N%»(pwFirst).
 
     // 이벤트 트리거 -- 매매 저널과 **같은 삼각형 문법**을 쓰고 `markerCounts` 를 공유해
     // 같은 봉에서 저널 마커와 겹치지 않게 한다(스택 25px). 저널보다 한 치수 작게(±5) 그려
@@ -7410,13 +7101,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   hoverGroup.setAttribute("class", "hover-layer");
   svg.appendChild(hoverGroup);
 
-  // y2 reaches through the regime ribbon on the Snapshot chart so hovering visibly crosses both
+  // 십자선은 풋프린트 위에서 레인 바닥까지 걸친다(2026-10-06 레짐·전환 리본 줄 제거).
   // (2026-08-26, "레짐 그래프도 십자선에 걸쳤으면 좋겠어") -- plain candle chart baseline otherwise.
   const vLine = document.createElementNS(NS, "line");
   vLine.setAttribute("x1", 0); vLine.setAttribute("x2", 0);
   vLine.setAttribute("y1", mt);
   // 십자선은 아래 줄들까지 걸친다 -- 호버한 봉이 어느 구간에 속하는지 눈으로 잇게.
-  vLine.setAttribute("y2", TREND_ROW_Y + LANE_H);   // 마지막 줄까지 (게이트 제거 후)
+  vLine.setAttribute("y2", h - mb);   // 레인 바닥까지(2026-10-06 아래 리본 줄 제거)
   vLine.setAttribute("stroke", "var(--hover-line)");
   vLine.setAttribute("stroke-dasharray", "4,4");
   vLine.style.display = "none";
@@ -7459,8 +7150,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   priceBadgeText.style.pointerEvents = "none";
   hoverGroup.appendChild(priceBadgeText);
 
-  // Candlestick Tooltip Support. regimeByTsForChart/isSnapshotChart computed once near the top of
-  // this function (shared with the ribbon drawn above) -- same ETH-only guard applies here.
+  // Candlestick Tooltip Support.
   let laneTip = () => "";   // 풋프린트 아래 리본·차트 두 개의 그 봉 값(아래 레인 블록이 채운다 -- 핸들러가 먼저 붙으므로 let)
   if (isSnapshotChart) svg.onmouseenter = () => { chartHoverActive = true; };
   svg.onmousemove = (evt) => {
@@ -7542,13 +7232,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     vLine.setAttribute("x2", tx);
     vLine.style.display = "block";
 
-    const r = regimeByTsForChart ? regimeByTsForChart.get(c.time) : null;
-    // 🔴«값이 없으면 줄을 안 만든다»가 여기서는 거짓말이 된다 -- 리본은 빈 칸을 «횡보»로 쓰므로
-    //   모르는 봉도 횡보로 읽힌다. 이력 시작 전이면 그렇게 적는다(2026-09-25).
-    const regimeKnown = regimeFromTs != null && c.time >= regimeFromTs;
-    const regimeLine = r
-      ? `<br>레짐: ${regimeDominant(r) === "bull" ? "강세" : regimeDominant(r) === "bear" ? "약세" : "횡보"} ${Math.round(Math.max(r.bull_prob, r.bear_prob, r.chop_prob) * 100)}%`
-      : (regimeByTsForChart && !regimeKnown ? "<br>레짐: 모름 (워커 이력 밖)" : "");
     // 2026-09-16: 툴팁이 **그 봉에 표시된 모든 것**을 말한다. 그전에는 시각·OHLC·레짐뿐이라
     // 변동성 리본도, 새로 붙인 트리거 표시도 «왜 떴는지»를 화면에서 물어볼 데가 없었다.
     // 원칙: 값이 없는 항목은 줄 자체를 안 만든다(빈 줄은 «0» 으로 오독된다).
@@ -7586,7 +7269,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       시가: ${fmtNum(c.open, Math.max(2, pxDp()))}<br>
       고가: ${fmtNum(c.high, Math.max(2, pxDp()))}<br>
       저가: ${fmtNum(c.low, Math.max(2, pxDp()))}<br>
-      종가: ${fmtNum(c.close, Math.max(2, pxDp()))}${regimeLine}${volLine}${trigLines}${isSnapshotChart ? laneTip(idx) : ""}
+      종가: ${fmtNum(c.close, Math.max(2, pxDp()))}${volLine}${trigLines}${isSnapshotChart ? laneTip(idx) : ""}
     `);
   };
   svg.onmouseleave = () => {
@@ -7604,56 +7287,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   };
 
   // 사분면 리본·차트 두 개(풋프린트 아래)는 아래 «풋프린트 아래 = 사분면 리본 + 차트 둘» 블록이 그린다.
-  // ── RVOL (2026-09-23, 사용자 「거래대금 대신 rvol 은 어때?」) ─────────────────────
-  // 원시 USD 는 «많은 건가»를 사용자가 스스로 판단해야 한다. RVOL 은 «평소의 n 배»라 읽힌다.
-  // 실측(ETH 5m 4.7년, 앞 30분 레인지 상위25%): 거래대금 z288 .6535 -> RVOL 14일 .7055.
-  // 🔴값은 **워커가 준다**(scripts/live_eth_breakout_detector_20260911.py::_rvol) -- 기준선이
-  //   7일 이상 필요한데 클라도 서버 evidence 캐시(5.2일)도 그만큼을 못 갖는다.
-  // 🔴그 워커는 ETHUSDT **전용**이다. 다른 코인이면 RVOL 이 아니라 원래 거래대금으로 돌아간다.
-  // 🔴**캐시 키 밖에 두면 안 된다.** quadLane 은 fpBars|oiBars 로만 키를 만들고 있었는데,
-  //   RVOL 은 그 둘과 무관하게 도착하므로 키에 안 넣으면 «거래대금»으로 그린 노드가 그대로
-  //   재사용된다. 서명은 **값 기반**이다 -- objToken 은 WeakMap 신원이라 폴링마다 새 객체가
-  //   되어 매번 무효화되고(캐시가 무의미해진다), 값은 5분봉 하나당 한 번만 바뀐다.
-  // 2026-09-28 사분면 위 «거래량 60분» 띠를 없앴다(사용자 지시) -- RVOL 은 카드 상단 «오늘 거래량» 배지로만 남는다.
-  //   봉별 활발함은 사분면 판 안의 **거래대금 선**이 말한다(원시 USD, 코인 공통).
-  let rvolBaseDays = null;
-  {
-    const rv = (latestBreakoutDetector && latestBreakoutDetector.asset === activeSnapshotAsset)
-      ? latestBreakoutDetector.rvol : null;
-    if (rv) rvolBaseDays = Number(rv.base_days) || null;
-    // ── 세션 누적 RVOL -> 카드 상단 배지 (2026-09-23 사용자 지시) ─────────────────
-    // 라벨(적음/보통/많음)은 **워커가 붙인다** -- 경계(q25 0.70 / q75 1.37)가 바뀌면
-    // 화면 두 곳이 아니라 거기 한 곳만 고친다.
-    // 🔴톤은 항상 neutral. warn/bad 면 «맥락»이 «신호»로 읽힌다.
-    const vb = el("rvolSessionBadge");
-    if (vb) {
-      // 2026-10-05 주말 보정(사용자 «주말에 너무 작게»): 14일 기준선은 평일 위주라 주말이면 워커가
-      //   «주말 평소 대비» 배수(session_weekend)와 주말 경계 라벨을 준다 -- 값(session)은 그대로.
-      const lab = rv && rv.session_label, wk = rv && rv.session_basis === "weekend";
-      const sv = Number(rv && (wk ? rv.session_weekend : rv.session));
-      const txt = (lab && Number.isFinite(sv))
-        ? "오늘 거래량 " + lab + " " + sv.toFixed(2) + "배" + (wk ? "(주말)" : "") : "";
-      // 이 함수는 현재가 틱마다 불린다 -- 바뀐 것만 쓴다(setMapBadge 와 같은 이유).
-      if (vb.hidden !== !txt) vb.hidden = !txt;
-      if (txt && vb.textContent !== txt) {
-        vb.textContent = txt;
-        const b = Array.isArray(rv.session_bounds) ? rv.session_bounds : [0.7, 1.37];
-        vb.title = "오늘(UTC 00:00~지금) 누적 거래대금 ÷ 평소 같은 시점까지의 누적"
-          + " (같은 시각 최근 " + (rvolBaseDays || 14) + "일 중앙값).\n"
-          + (wk
-            ? "주말 기준: 그 «평소»의 대부분이 평일이라 주말은 보통 0.55배쯤 나옵니다(2025-01~2026-09 주말 중앙). "
-              + "그래서 주말에는 그 값(" + Number(rv.session).toFixed(2) + "배)을 0.553 으로 나눈 «주말 평소 대비»를 보이고, "
-              + "라벨은 주말 분포의 q25 / q75 로 가릅니다 -- 적음 < " + b[0] + " ≤ 보통 ≤ " + b[1] + " < 많음(나누기 전 값 기준).\n"
-            : "경계는 임의 상수가 아니라 분위입니다 -- 적음 < " + b[0] + " ≤ 보통 ≤ " + b[1]
-              + " < 많음 (ETH 5m 4.7년 분포의 q25 / q75).\n")
-          + "이 경계로 가른 날의 앞 24시간 레인지 중앙값은 적음 378bp / 보통 451 / 많음 516 "
-          + "으로 단조입니다.\n"
-          + "🔴«오늘의 온도»이지 방향도 진입 근거도 아닙니다. 차트 선(RVOL)과 다른 값입니다 -- "
-          + "이쪽은 하루 누적이라 지금 봉 하나의 크기와 무관하고, 그래서 현재 봉 폭을 통제해도 "
-          + "변별력이 남습니다(봉폭 십분위 안 AUC .5810, 5분 봉 RVOL 은 .4767).";
-      }
-    }
-  }
+  // 오늘 거래량(세션 누적 RVOL)은 2026-10-06 카드 머리 칩에서 고래·중형·리테일 차트의 거래대금 괄호로 옮겼다(rvolTxt) --
+  //   값·라벨(적음/보통/많음, q25 0.70 / q75 1.37)·주말 기준은 워커(live_eth_breakout_detector_20260911.py::_rvol)가 준다.
   // ── 실시간 호가 띠 (2026-09-27 사용자 지시) ─────────────────────────────────────────
   // 서버가 준 **마지막 1초** 호가 열(부호: +매수 / −매도)을 풋프린트와 같은 가격축에 가로 막대로 그린다.
   //   길이 = √(수량/창 안 최대) -- 비례로 두면 제일 큰 벽 하나에 나머지가 선이 됐다(시안). 창 안 상위 10% 는 진하게 + 수량.
@@ -7899,7 +7534,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       + (q ? `<br>60분 합: CVD ${sgnQ(q.c)} · <span style="color:var(--warn)">OI ${sgnQ(q.oi)}</span> · 고래 ${sgnQ(q.w)} · 중형 ${sgnQ(q.m)} · 리테일 ${sgnQ(q.r)}`
            : "<br>60분 합: 모름 (앞 12봉 중 빈 봉)");
   };
-  cachedLayer("quadLane", objToken(fpBars) + "|" + objToken(oiBars) + "|" + activeSnapshotAsset, (g) => {
+  cachedLayer("quadLane", objToken(fpBars) + "|" + objToken(oiBars) + "|" + activeSnapshotAsset + "|" + ((latestBreakoutDetector && latestBreakoutDetector.rvol && latestBreakoutDetector.rvol.session) || ""), (g) => {
     if (!(fpBars.length && candles.length && QUAD_H)) return;
     const rows = laneBarsOf(), have = rows.filter(Boolean);
     if (!have.length) return;
@@ -7932,6 +7567,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const STY = { c: ["CVD", "var(--ink)", 1.8, 0.9, null], oi: ["OI", "var(--warn)", 1.8, 0.95, null],
                   w: ["고래", "var(--ink)", 2.4, 0.95, null], m: ["중형", "var(--ink)", 1.7, 0.75, "6 3"], r: ["리테일", "var(--ink)", 1.5, 0.6, "2 3"] };
     const vcol = (k, v) => (k === "c" || k === "oi" ? STY[k][1] : v >= 0 ? "var(--good)" : "var(--bad)");
+    const rvolTxt = () => {   // 오늘 거래량(세션 누적 RVOL, 라벨·주말 기준은 워커) -- 2026-10-06 카드 머리 칩을 거래대금 괄호로(사용자 지시)
+      const rv = latestBreakoutDetector && latestBreakoutDetector.asset === activeSnapshotAsset ? latestBreakoutDetector.rvol : null;
+      const lab = rv && rv.session_label, wk = rv && rv.session_basis === "weekend", sv = Number(rv && (wk ? rv.session_weekend : rv.session));
+      return lab && Number.isFinite(sv) ? ` (${lab} ${sv.toFixed(2)}배${wk ? " · 주말" : ""})` : "";
+    };
     const lineAt = (k) => Object.assign({ stroke: STY[k][1], "stroke-width": STY[k][2], "stroke-opacity": STY[k][3] },
                                         STY[k][4] ? { "stroke-dasharray": STY[k][4] } : {});
     const frame = ([y0, y1], keys) => {               // 범례 줄 아래 판 · 0선 가운데 · 진폭 = 보이는 값의 최대
@@ -7950,7 +7590,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       let x = ml + 6;
       list.forEach(([k, val, col]) => {
         const nm = mobileChart ? "" : (k === "turn" ? "거래대금" : STY[k][0]) + " ";
-        const wd = 18 + (nm ? measureTextW(nm, `600 ${fs}px ${FF}`) : 0) + measureTextW(val, `700 ${fs}px ${FF}`);
+        const rv = k === "turn" ? rvolTxt() : "";
+        const wd = 18 + (nm ? measureTextW(nm, `600 ${fs}px ${FF}`) : 0) + measureTextW(val, `700 ${fs}px ${FF}`) + (rv ? measureTextW(rv, `600 ${fs}px ${FF}`) : 0);
         if (x + wd > ml + cw - 4) { x = Infinity; return; }
         const yb = y0 + 15;
         if (k === "turn") mk("line", { x1: x, x2: x + 12, y1: yb - fs / 3, y2: yb - fs / 3, stroke: "var(--turnover)", "stroke-width": 1.6 });
@@ -7959,6 +7600,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const a = document.createElementNS(NS, "tspan"); a.setAttribute("fill", "var(--muted)"); a.setAttribute("font-weight", "600"); a.textContent = nm;
         const b = document.createElementNS(NS, "tspan"); b.setAttribute("fill", col); b.setAttribute("font-weight", "700"); b.textContent = val;
         t.append(a, b);
+        if (rv) {
+          const c = document.createElementNS(NS, "tspan"); c.setAttribute("fill", "var(--muted)"); c.setAttribute("font-weight", "600"); c.textContent = rv; t.append(c);
+          const tt = document.createElementNS(NS, "title");
+          tt.textContent = "괄호 = 오늘 거래량: 오늘(UTC 00:00~지금) 누적 거래대금 ÷ 최근 14일 같은 시점까지 누적의 중앙값. "
+            + "라벨 경계는 분위(적음 < 0.70 ≤ 보통 ≤ 1.37 < 많음, ETH 4.7년 q25/q75) · 주말은 주말 평소 대비. «오늘의 온도»이지 방향·진입 근거가 아니다.";
+          t.append(tt);
+        }
         x += wd + (mobileChart ? 8 : 14);
       });
     };
@@ -8081,7 +7729,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-09-30 1초 수급 높이 = 칸 − 시장 맥락의 **실제 내용 높이**(mcNeedH, renderMarketCtx 가 잰다) -- 한 화면 모드로 칸이 줄어도 시장 맥락이 스크롤 없이 다 들어간다.
     //   아직 못 쟀으면 47% · 1초 수급은 칸의 30% 아래로는 안 줄인다.
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
-    const floorY = Math.min(hAll - 2, TREND_ROW_Y + LANE_H);
+    const floorY = hAll - 2;   // 2026-10-06 리본 줄이 빠져 칸 바닥 = 상자 바닥
     const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
     const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? s1Avail - mcNeedH - 16 : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
@@ -8244,7 +7892,6 @@ async function tick() {
       refreshLiquidation5mSignal();
       refreshLiquidation5mTail();    // 2026-09-25 청산 원 최신 2봉 (자체 2초 게이트)
       refreshLiquidationMap();
-      refreshActiveRegime();
       refreshMacroCalendar();
       refreshNews();                 // 2026-10-05 뉴스 카드 (자체 30초 게이트)
       refreshSessionAlerts();
