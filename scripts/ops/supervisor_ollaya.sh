@@ -10,7 +10,8 @@ cd "$ROOT"
 BIN="${OLLAYA_BIN:-$HOME/.local/bin/ollaya}"
 command -v bwrap >/dev/null || { echo "[$(date -Iseconds)] bwrap 없음 -- apt install bubblewrap" >&2; exit 1; }
 # 리눅스용 ptxjit 를 버전 무관하게 찾는다(apt 업그레이드로 파일명이 바뀌면 가리기가 조용히 꺼져 세그폴트 반복이 된다)
-PTXJIT="$(ls /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.[0-9]*.* 2>/dev/null | head -n 1)"
+PTXJIT="$(readlink -f /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1 2>/dev/null)"     # 링크가 가리키는 실제 파일(두 버전 공존 시에도 쓰이는 쪽)
+[[ -f "$PTXJIT" ]] || PTXJIT="$(ls /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.[0-9]*.* 2>/dev/null | head -n 1)"
 [[ -n "$PTXJIT" ]] || echo "[$(date -Iseconds)] 리눅스용 libnvidia-ptxjitcompiler 없음 -- 가리지 않고 띄운다(없으면 문제도 없다)" >&2
 if pgrep -x ollaya >/dev/null; then
   echo "[$(date -Iseconds)] ollaya 가 이미 실행 중 -- 켜지 않는다." >&2

@@ -110,6 +110,7 @@ def oi_stats(series: list[tuple[int, float]], step_s: int = 300) -> dict[str, fl
     #   옛 식과 맞춘다(문턱별·코인별·기간별 1.48~1.68, 2025~ 세 코인 평균). scratchpad oi_z_robust.py.
     med = float(np.median(past)) if past.size else 0.0
     mad = 1.4826 * float(np.median(np.abs(past - med))) if past.size else 0.0
+    mad = max(mad, 0.25 * float(past.std())) if past.size else mad   # 하한: OI 피드가 일부(30~49%) 멈춰 0 변화가 쌓이면 MAD 만 0 근처로 줄어 |z| 가 폭증 -- 정상 분포에선 거의 안 걸린다
     if d.size and math.isfinite(d[-1]) and past.size >= 72 and mad > 0:
         out["z1h"] = float((d[-1] - med) / (OI_Z_MAD_SCALE * mad))
     return out
@@ -321,6 +322,10 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     _s2 = [(_t0 + i * 300, float(v)) for i, v in enumerate(_lv2)]
     _d2 = _lv2[12:] / _lv2[:-12] - 1; _zstd = (_d2[-1] - _d2[:-1].mean()) / _d2[:-1].std()
     assert oi_stats(_s2)["z1h"] > 1.5 and _zstd < oi_stats(_s2)["z1h"], (oi_stats(_s2)["z1h"], _zstd)
+    _g3 = np.random.default_rng(2); _lv3 = 1000.0 * np.cumprod(1 + _g3.normal(0, 0.0005, 7 * 288))
+    _lv3[-295:-1] = _lv3[-296]; _lv3[-1] = _lv3[-13] * 1.0005                    # 피드 일부 멈춤: 같은 요일유형 1시간 변화의 49% 가 0
+    _z3 = oi_stats([(_t0 + i * 300, float(v)) for i, v in enumerate(_lv3)])["z1h"]
+    assert _z3 is not None and abs(_z3) < 2, _z3                                  # 하한 없으면 4.8(거짓 «급증») · 있으면 1.19
     assert lev_state(0.95, 1.2)["key"] == "long_crowd" and lev_state(0.05, 1.2)["key"] == "short_crowd"
     assert lev_state(0.5, -2)["key"] == "deleverage" and lev_state(0.95, 0)["key"] == "premium" and lev_state(None, 3)["key"] == "na"
     lv = hl_liq_levels([(10, 2601), (5, 2602), (-2, 2800), (3, 2710), (-1, 2500), (1, 1000)], mid=2700, bin_usd=5)

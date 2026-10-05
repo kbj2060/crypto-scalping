@@ -117,6 +117,9 @@ def judge_batch(con: sqlite3.Connection, batch: list[tuple], ask=None) -> bool:
             ans = ask(text)
         except Exception as exc:  # noqa: BLE001 -- 원인은 카나리로 가른다
             code = getattr(exc, "code", None)
+            if isinstance(exc, TimeoutError) or "timed out" in str(exc):   # 긴 글 시간 초과는 부하 탓일 수 있다 -- 넘기지 않고 다음 바퀴로
+                print(f"판정 시간 초과 {source} {link}"[:200], flush=True)
+                return False
             if code in SKIP_CODES:
                 print(f"판정 거부 {code} {source} {link}"[:200], flush=True)
                 skip(con, source, link, f"http{code}")
@@ -196,7 +199,14 @@ def selftest() -> None:
             if text == CANARY:
                 return ans
             raise urllib.error.HTTPError(URL, 500, "tokenizer", None, None)
-        assert judge_batch(con, pending(con, now), poison) and pending(con, now) == []
+        con.execute("INSERT INTO items VALUES('s','slow','Slow long article here','', '', ?, ?, 0)", (now, now))
+        def slow(text):
+            if text == CANARY:
+                return ans
+            raise TimeoutError("timed out")
+        assert not judge_batch(con, [r for r in pending(con, now) if r[1] == "slow"], slow)   # 시간 초과 = 남긴다(카나리가 돼도)
+        assert judge_batch(con, [r for r in pending(con, now) if r[1] == "late"], poison)
+        assert [r[1] for r in pending(con, now)] == ["slow"]
         assert con.execute("SELECT model FROM judgments WHERE link='late'").fetchone()[0] == "skip:error"
     print("selftest ok")
 

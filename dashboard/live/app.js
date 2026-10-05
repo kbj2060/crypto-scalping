@@ -2895,8 +2895,8 @@ function renderNews() {
   }).join("");
   const lane = `<svg class="nw-lane" viewBox="0 0 ${W} ${H}" role="img" aria-label="최근 12시간 뉴스 영향(세로)과 감성(색)">${grid}${ticks}${dots}</svg>`;
   // 목록: 최신부터 60건(관련만 · 이 코인+매크로 토글)
-  const pinned = new Set(incs);
-  const list = [...incs, ...p.items.filter((it) => !pinned.has(it) && (!newsView.relevant || (it.sentiment ? rel(it) : !it.model)) && (!newsView.coin || it.asset === coin || it.asset === "macro")).slice(0, 60)].map((it) => {
+  const pins = incs.slice(0, 5), pinned = new Set(pins);   // 상한 5 -- 검증 전 모델이 incident 를 남발해도 목록이 고정 줄로 덮이지 않게(나머지는 시간순 자리)
+  const list = [...pins, ...p.items.filter((it) => !pinned.has(it) && (!newsView.relevant || (it.sentiment ? rel(it) : !it.model)) && (!newsView.coin || it.asset === coin || it.asset === "macro")).slice(0, 60)].map((it) => {
     const t = new Date(it.ts_ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
     const sen = it.sentiment ? ({ bullish: ["b", "호재"], bearish: ["s", "악재"], neutral: ["n", "중립"] }[it.sentiment] || ["n", escapeHtml(it.sentiment)]) : ["w", it.model ? "본문 없음" : "대기"];
     const prob = it.sentiment ? Math.round(100 * Number(it[{ bullish: "p_bull", bearish: "p_bear", neutral: "p_neu" }[it.sentiment]] || 0)) : null;
