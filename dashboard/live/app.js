@@ -7815,7 +7815,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ── 풋프린트 아래 = 사분면 리본 + 차트 둘 (2026-10-06 사용자 선택 A) ─────────────────────────
   // «사분면은 글자만 살려서 레짐처럼 리본, 차트는 OI·CVD 하나 / 고래·중형·리테일·거래대금 하나».
   //   리본: 색 = 델타 부호 · 신규(OI↑) = 꽉 찬 칸 · 정리(OI↓) = 테두리 칸 · OI 모름 = 흐린 칸(이름도 «매수/매도 우위»로 유보).
-  //   ① CVD·OI 60분 합(같은 코인 축) ② 고래 굵은 선·중형 옅은 선·리테일 점선(60분 합) + 거래대금 옅은 막대(제 축, 바닥 = 0).
+  //   ① CVD·OI 60분 합(같은 코인 축) ② 고래·중형·리테일 60분 합 + 거래대금 가는 기둥(제 축, 바닥 = 0) -- 그리는 문법은 아래 «차트 둘» 주석.
   //   60분 합 = 그 봉까지 12봉, 다 있어야 점(10-05 B안 규약 그대로 -- 일부 합을 60분으로 말하지 않는다).
   //   봉별 Δ/OI 숫자 줄·창 시작 누적 흐린 선은 뺐다 -- 봉 호버 툴팁(laneTip)이 그 봉 값을 글자로 말한다.
   // 🔴OI 모름(null)과 ΔOI 0 을 가른다(2026-09-25) -- 없는 봉에 «신규 롱/숏» 이라는 없는 사실을 안 찍는다.
@@ -7868,7 +7868,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     if (!have.length) return;
     const mk = (tag, at, parent = g) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); parent.appendChild(e); return e; };
     const txt = (x, y, s, at = {}) => { const t = mk("text", Object.assign({ x, y, "font-size": mobileChart ? 10 : 12 }, at)); t.textContent = s; return t; };
-    const halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
     const top = quadY, bot = h - mb - 4, RIB = mobileChart ? 14 : 22, GAP = mobileChart ? 4 : 8;
     const cx = (i) => xAt(i) + bw / 2, slotW = cw / candles.length;
     const chartTop = top + RIB + GAP, cH = (bot - chartTop - GAP) / 2;
@@ -7888,42 +7887,58 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     let li = R.length - 1; while (li >= 0 && !R[li]) li--;
     if (li < 0) return;                               // 재기동 직후 -- 60분 합을 아직 못 만든다
     const last = R[li];
-    const frame = ([y0, y1], vals) => {               // 0 선 가운데, 진폭은 보이는 값의 최대
-      const amp = Math.max(...vals.filter((v) => v != null).map(Math.abs), 1e-9) * 1.08, mid = (y0 + y1) / 2, half = (y1 - y0) / 2 - 2;
-      mk("line", { x1: ml, x2: ml + cw, y1: mid, y2: mid, stroke: "var(--line)" });
+    // 2026-10-06 차트 둘 = 위 1초 수급 차트와 같은 문법(사용자 선택 A «투박해 -- 통일성·글자·폰트», 제목은 뺀다):
+    //   선 어휘 CVD 잉크 1.8 · OI 주황 1.8 · 고래 잉크 2.4 실선 · 중형 1.7 파선 · 리테일 1.5 점선 · 0선 잉크 18% ·
+    //   차트 위 한 줄 범례 «견본 선 · 이름(흐림) · 값(부호색 / 선 색)» 12px · 숫자 tabular · 모바일은 이름 없이 견본 + 값.
+    const FF = "Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif", fs = mobileChart ? 10 : 12, HEAD = mobileChart ? 16 : 20;
+    const STY = { c: ["CVD", "var(--ink)", 1.8, 0.9, null], oi: ["OI", "var(--warn)", 1.8, 0.95, null],
+                  w: ["고래", "var(--ink)", 2.4, 0.95, null], m: ["중형", "var(--ink)", 1.7, 0.75, "6 3"], r: ["리테일", "var(--ink)", 1.5, 0.6, "2 3"] };
+    const vcol = (k, v) => (k === "c" || k === "oi" ? STY[k][1] : v >= 0 ? "var(--good)" : "var(--bad)");
+    const lineAt = (k) => Object.assign({ stroke: STY[k][1], "stroke-width": STY[k][2], "stroke-opacity": STY[k][3] },
+                                        STY[k][4] ? { "stroke-dasharray": STY[k][4] } : {});
+    const frame = ([y0, y1], keys) => {               // 범례 줄 아래 판 · 0선 가운데 · 진폭 = 보이는 값의 최대
+      const amp = Math.max(...R.flatMap((r) => (r ? keys.map((k) => r[k]) : [])).filter((v) => v != null).map(Math.abs), 1e-9) * 1.06;
+      const lo = y0 + HEAD, mid = (lo + y1) / 2, half = (y1 - lo) / 2 - 3;
+      mk("line", { x1: ml, x2: ml + cw, y1: mid, y2: mid, stroke: "var(--ink)", "stroke-opacity": 0.18 });
       return (v) => mid - (v / amp) * half;
     };
-    const path = (val, Y, at) => {                    // 모름은 선을 끊는다 -- 0 으로 잇지 않는다
+    const path = (k, Y) => {                          // 모름은 선을 끊는다 -- 0 으로 잇지 않는다
       let d = "", pen = false;
-      R.forEach((r, i) => { const v = r ? val(r) : null; if (v == null) { pen = false; return; } d += (pen ? " L" : " M") + cx(i).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
-      if (d) mk("path", Object.assign({ d, fill: "none", "stroke-linejoin": "round" }, at));
+      R.forEach((r, i) => { const v = r ? r[k] : null; if (v == null) { pen = false; return; } d += (pen ? " L" : " M") + cx(i).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
+      if (d) mk("path", Object.assign({ d, fill: "none", "stroke-linejoin": "round" }, lineAt(k)));
+      if (last[k] != null) mk("circle", { cx: cx(li), cy: Y(last[k]), r: 2.4, fill: STY[k][1], "fill-opacity": STY[k][3] });
     };
-    const endTags = (tags, Y) => {                    // 선 끝 점 왼쪽에 값(오른쪽은 ④ 자리) -- 가까우면 13px 씩 비킨다
-      const ys = [];
-      tags.filter((t) => t[1] != null).sort((a, b) => Y(a[1]) - Y(b[1])).forEach(([nm, v, col]) => {
-        let y = Y(v) + 4; if (ys.length && y - ys[ys.length - 1] < 13) y = ys[ys.length - 1] + 13; ys.push(y);
-        mk("circle", { cx: cx(li), cy: Y(v), r: 2.6, fill: col });
-        txt(cx(li) - 7, y, nm + " " + sgnQ(v), Object.assign({ "text-anchor": "end", "font-weight": 700, fill: col }, halo));
+    const legend = (y0, list) => {                    // [키, 값 글자, 값 색] -- 폭이 모자라면 뒤 항목부터 안 그린다
+      let x = ml + 6;
+      list.forEach(([k, val, col]) => {
+        const nm = mobileChart ? "" : (k === "turn" ? "거래대금" : STY[k][0]) + " ";
+        const wd = 18 + (nm ? measureTextW(nm, `600 ${fs}px ${FF}`) : 0) + measureTextW(val, `700 ${fs}px ${FF}`);
+        if (x + wd > ml + cw - 4) { x = Infinity; return; }
+        const yb = y0 + 15;
+        if (k === "turn") mk("rect", { x: x + 3, y: yb - 9, width: 6, height: 9, rx: 1, fill: "var(--turnover)", "fill-opacity": 0.6 });
+        else mk("line", Object.assign({ x1: x, x2: x + 12, y1: yb - fs / 3, y2: yb - fs / 3 }, lineAt(k)));
+        const t = txt(x + 18, yb, "", { "font-size": fs, style: "font-variant-numeric: tabular-nums" });
+        const a = document.createElementNS(NS, "tspan"); a.setAttribute("fill", "var(--muted)"); a.setAttribute("font-weight", "600"); a.textContent = nm;
+        const b = document.createElementNS(NS, "tspan"); b.setAttribute("fill", col); b.setAttribute("font-weight", "700"); b.textContent = val;
+        t.append(a, b);
+        x += wd + (mobileChart ? 8 : 14);
       });
     };
-    {   // ① CVD · OI
-      const Y = frame(c1, R.flatMap((r) => (r ? [r.c, r.oi] : [])));
-      if (!mobileChart) txt(ml + 6, c1[0] + 12, "CVD · OI  (60분 합, 같은 축)", Object.assign({ fill: "var(--muted)", "font-weight": 700 }, halo));
-      path((r) => r.c, Y, { stroke: "var(--accent)", "stroke-width": 2.4 });
-      path((r) => r.oi, Y, { stroke: "var(--warn)", "stroke-width": 2.2 });
-      endTags([["CVD 60분", last.c, "var(--accent)"], ["OI 60분", last.oi, "var(--warn)"]], Y);
+    {   // ① CVD · OI (60분 합, 같은 코인 축)
+      const Y = frame(c1, ["c", "oi"]);
+      path("c", Y); path("oi", Y);
+      legend(c1[0], [["c", sgnQ(last.c), vcol("c", last.c)], ["oi", sgnQ(last.oi), vcol("oi", last.oi)]]);
+      if (!mobileChart) txt(ml + cw - 6, c1[0] + 15, "60분 합 · 같은 축", { "text-anchor": "end", "font-size": fs - 1, fill: "var(--muted)" });
     }
-    {   // ② 고래 · 중형 · 리테일 + 거래대금(제 축 -- 세로 위치를 선과 비교하지 않는다)
-      const tMax = Math.max(...have.map((r) => r.turn), 1e-9), ty = (v) => c2[1] - 1 - (v / tMax) * (c2[1] - c2[0]) * 0.9;
-      rows.forEach((r, i) => { if (r) mk("rect", { x: xAt(i) + 2, y: ty(r.turn), width: Math.max(1, slotW - 4),
-        height: Math.max(1, c2[1] - 1 - ty(r.turn)), fill: "var(--turnover)", "fill-opacity": 0.16 }); });
-      const Y = frame(c2, R.flatMap((r) => (r ? [r.w, r.m, r.r] : [])));
-      path((r) => r.r, Y, { stroke: "var(--muted)", "stroke-width": 1.4, "stroke-dasharray": "3 3" });
-      path((r) => r.m, Y, { stroke: "var(--ink)", "stroke-opacity": 0.55, "stroke-width": 1.6 });
-      path((r) => r.w, Y, { stroke: "var(--ink)", "stroke-width": 2.4 });
-      endTags([["고래", last.w, "var(--ink)"], ["중형", last.m, "var(--muted)"], ["리테일", last.r, "var(--muted)"]], Y);
-      if (!mobileChart) txt(ml + 6, c2[0] + 12, "거래대금 " + fmtUsdCompact(have[have.length - 1].turn)
-        + "  ·  굵은 선 고래 · 옅은 선 중형 · 점선 리테일 (60분 합)", Object.assign({ fill: "var(--turnover)", "font-weight": 700 }, halo));
+    {   // ② 고래 · 중형 · 리테일 + 거래대금(봉마다 가는 기둥, 제 축 -- 세로 위치를 선과 비교하지 않는다)
+      mk("line", { x1: ml, x2: ml + cw, y1: c2[0] - GAP / 2, y2: c2[0] - GAP / 2, stroke: "var(--line)" });
+      const tMax = Math.max(...have.map((r) => r.turn), 1e-9), ty = (v) => c2[1] - (v / tMax) * (c2[1] - c2[0] - HEAD) * 0.32;
+      rows.forEach((r, i) => { if (r) mk("rect", { x: cx(i) - 1, y: ty(r.turn), width: 2, height: Math.max(1, c2[1] - ty(r.turn)), rx: 1,
+                                                    fill: "var(--turnover)", "fill-opacity": 0.55 }); });
+      const Y = frame(c2, ["w", "m", "r"]);
+      path("r", Y); path("m", Y); path("w", Y);
+      legend(c2[0], [["w", sgnQ(last.w), vcol("w", last.w)], ["m", sgnQ(last.m), vcol("m", last.m)], ["r", sgnQ(last.r), vcol("r", last.r)],
+                     ["turn", fmtUsdCompact(have[have.length - 1].turn), "var(--turnover)"]]);
     }
   });
 
