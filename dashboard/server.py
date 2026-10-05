@@ -761,12 +761,12 @@ from scripts.live_okx_trade_tape_collector_20260923 import (  # noqa: E402
     INSTRUMENTS_URL as OKX_INSTRUMENTS_URL, OKX_HOT_CTX_DB, OKX_HOT_TAPE_DB)
 OKX_TAPE_DB_PATH = OKX_HOT_TAPE_DB     # 2026-10-01 hot SQLite(5종목 한 파일, 락 없음) -- 쿼리가 종목으로 거른다
 HL_POS_DB_PATH = REPO_ROOT / "data" / "hot" / "hl_positions.sqlite"   # 2026-10-01 4c hot(ETH 프로세스 파일)
-# 2026-09-26 SOL·XRP: 멀티코인 HL 포지션 수집기는 **Pi** 에서 돈다 -- Pi 크론이 3분마다 일관 스냅샷을 떠
-#   서버로 보낸다(replicate_trade_tape_20260922.sh, TT_VERIFY_TABLE=hl_positions).
 # 2026-09-27 05:35:35 UTC 고래·리테일 경계 전환(trade_tape_<coin>.duckdb meta size_bands_changed) -- 그 전 행은 ETH 경계($10k/$100k)
 SIZE_BANDS_SINCE = {"sol": 1790487335, "xrp": 1790487335}
-HL_POS_MULTI_DB_PATH = LIVE_DIR / "hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb"
-HL_LIQ_BY_ASSET = {"eth": HL_POS_DB_PATH, "sol": HL_POS_MULTI_DB_PATH, "xrp": HL_POS_MULTI_DB_PATH}
+# 2026-10-06 SOL·XRP HL 체결·호가·포지션을 Pi -> 서버(ETH 와 같은 설계, 사용자 «SOL·XRP 모두 이더리움과 동일한 설계»).
+#   포지션 = 서버 hot(HL_POS_COINS=SOL,XRP 프로세스 파일). Pi 복제본(…btc_sol_xrp_hype.from_pi.duckdb)은 BTC·HYPE 만 계속 쓰고 봉인기 원천으로만 남는다.
+HL_POS_SOLXRP_DB_PATH = REPO_ROOT / "data" / "hot" / "hl_positions_sol_xrp.sqlite"
+HL_LIQ_BY_ASSET = {"eth": HL_POS_DB_PATH, "sol": HL_POS_SOLXRP_DB_PATH, "xrp": HL_POS_SOLXRP_DB_PATH}
 OKX_CTX_DB_PATH = OKX_HOT_CTX_DB      # 2026-10-01 4b hot SQLite(종목 = inst 열, 락 없음)
 # OKX 청산은 ETH 맥락 수집기 하나가 전 종목(instType=SWAP)을 받아 여기에 쌓는다 -- 코인별 맥락 DB 에는 0건(09-27 실측).
 OKX_LIQ_DB_PATH = OKX_CTX_DB_PATH
@@ -4031,7 +4031,7 @@ def make_app() -> web.Application:
     def _mc_collectors(asset: str = "eth") -> dict[str, Any]:
         """수집기 duckdb 를 읽기 전용으로 한 번씩. 원천 하나가 없거나 잠겨도 나머지는 산다(그 키는 마지막 성공값, 없으면 None)."""
         mc_last_good, OKX_INST, coin = cctx[asset].mc_last_good, flows[asset].spec.okx_inst, asset.upper()   # noqa: N806
-        # 롱숏비 표는 코인마다 따로(oi_lsratio_collector: ETH = oi_lsratio_5m, 나머지 = _<coin>) · HL 고래는 ETH = 서버 hot, SOL·XRP = Pi 복제
+        # 롱숏비 표는 코인마다 따로(oi_lsratio_collector: ETH = oi_lsratio_5m, 나머지 = _<coin>) · HL 고래는 ETH·SOL·XRP 모두 서버 hot(2026-10-06 SOL·XRP 서버 이전)
         ls_table = "oi_lsratio_5m" if asset == "eth" else f"oi_lsratio_5m_{asset}"
         out: dict[str, Any] = {"errors": {}}
         def q(key: str, path: Path, sql: str, params: list) -> None:

@@ -50,6 +50,8 @@ HOT_PRUNE = (
     (ROOT / "data/hot/hl_ctx.sqlite", "hl_asset_ctx", "recv_ms / 1000", "coin", "hl", "asset_ctx", str, 8),
     (ROOT / "data/hot/hl_positions.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8),
     (ROOT / "data/hot/hl_positions.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8),
+    (ROOT / "data/hot/hl_positions_sol_xrp.sqlite", "hl_positions", "ts_ms / 1000", "coin", "hl", "positions", str, 8),        # 2026-10-06 SOL·XRP 서버 이전
+    (ROOT / "data/hot/hl_positions_sol_xrp.sqlite", "hl_liquidations", "detected_ms / 1000", "coin", "hl", "liquidations", str, 8),
     (ROOT / "data/hot/binance_spot_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "binance", "spot_tape", _bn_coin, 8),
     (ROOT / "data/hot/bybit_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "bybit", "tape", _bn_coin, HOT_KEEP_DAYS),   # 2026-10-06
     *[(ROOT / "data/hot/bybit_ctx.sqlite", f"bybit_{t}", "ts_ms / 1000", "inst", "bybit", t, _bn_coin, 8) for t in ("oi", "mark", "funding")],
@@ -97,8 +99,10 @@ SPECS = [
     # 2026-10-06 미 국채선물 1분봉(live_treasury_futures_collector_20261006, Yahoo · symbol = ZT·ZF·ZN·ZB). polls 는 딸린 표라 lake 로 안 간다
     ("cme", "treasury_fut_1m", [("data/hot/treasury_futures.sqlite", "treasury_fut_1m", "symbol")], "ts_sec * 1000"),
     ("hl", "positions", [("data/hot/hl_positions.sqlite", "hl_positions", "coin"),
+                         ("data/hot/hl_positions_sol_xrp.sqlite", "hl_positions", "coin"),     # 2026-10-06 SOL·XRP 서버 hot
                          (f"{L}/hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb", "hl_positions", "coin")], "ts_ms"),
     ("hl", "liquidations", [("data/hot/hl_positions.sqlite", "hl_liquidations", "coin"),
+                            ("data/hot/hl_positions_sol_xrp.sqlite", "hl_liquidations", "coin"),
                             (f"{L}/hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb", "hl_liquidations", "coin")],
      "detected_ms"),
     ("deribit", "option_trades", [(f"{L}/deribit_options.duckdb", "option_trades", DERIBIT)], "ts_ms"),
