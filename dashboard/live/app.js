@@ -2800,41 +2800,46 @@ async function refreshTreasury() {
   renderFpStrip();
 }
 const TREASURY_NM = { ZT: "2년", ZF: "5년", ZN: "10년", ZB: "30년" };
+// 2026-10-06(2) 칸 맞춤(사용자 «금리 차트는 호가 프로파일까지 · 뉴스는 수급 차트 너비에»): 금리 = 풋프린트 왼쪽 ~ 호가 프로파일 오른쪽 끝,
+//   뉴스 = 오른쪽 칸(1초 수급·시장 맥락)과 같은 x·폭. 두 좌표는 mcPlace 가 차트 칸을 놓을 때 준다(fpStripGeo, 카드 기준 px).
+let fpStripGeo = null;
 function renderFpStrip() {
-  const box = el("fpStrip");
-  if (!box) return;
+  const box = el("fpStrip"), card = el("fpCard");
+  if (!box || !card) return;
   const T = latestTreasury && latestTreasury.ok ? latestTreasury.symbols : null, p = latestNews && latestNews.ok ? latestNews : null;
   if (!T && !p) { box.hidden = true; return; }
+  box.hidden = false;
+  const g = fpStripGeo, padL = 14, sx = box.getBoundingClientRect().left - card.getBoundingClientRect().left + padL;
+  const leftW = g ? Math.max(200, g.lEnd - sx) : 520, gap = g ? Math.max(12, g.rX - g.lEnd) : 16, rightW = g ? g.rW : 520;
   const hm = (ts) => { const d = new Date(ts * 1000), today = new Date().toDateString() === d.toDateString();
     return (today ? "" : `${d.getMonth() + 1}-${d.getDate()} `) + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-  let lastTs = 0;
+  const SW = Math.max(40, Math.floor((leftW - 3 * 18) / 4) - 134), SH = 36;   // 미니 차트 = 칸 폭 − 이름(52)·값(70) 열 − 간격
   const rate = (k) => {
     const v = T && T[k], b = v ? v.bars : [];
-    if (b.length < 2) return `<div class="fps-rate"><div class="fps-rh"><b>${k}</b><span>${TREASURY_NM[k]}</span></div><div class="fps-rv"><span class="muted">—</span></div></div>`;
-    const W = 118, H = 22, t0 = b[0][0], t1 = b[b.length - 1][0], lo = Math.min(...b.map((x) => x[1])), hi = Math.max(...b.map((x) => x[1])), rg = hi - lo || 1e-9;
-    const X = (t) => 2 + (t - t0) / Math.max(1, t1 - t0) * (W - 6), Y = (y) => 2 + (hi - y) / rg * (H - 4);
+    const name = (em) => `<div class="fps-rn"><div><b>${k}</b> <span>${TREASURY_NM[k]}</span></div>${em}</div>`;
+    if (b.length < 2) return `<div class="fps-rate">${name("")}<span></span><div class="fps-rv"><span class="muted">—</span></div></div>`;
+    const t0 = b[0][0], t1 = b[b.length - 1][0], lo = Math.min(...b.map((x) => x[1])), hi = Math.max(...b.map((x) => x[1])), rg = hi - lo || 1e-9;
+    const X = (t) => 2 + (t - t0) / Math.max(1, t1 - t0) * (SW - 6), Y = (y) => 3 + (hi - y) / rg * (SH - 6);
     const d = b.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)} ${Y(x[1]).toFixed(1)}`).join(" ");
     const last = b[b.length - 1], chg = (last[1] / b[0][1] - 1) * 100, up = chg < 0;   // 가격↓ = 금리↑
-    lastTs = Math.max(lastTs, last[0]);
-    return `<div class="fps-rate" title="${escapeHtml(v.contract || k)} · ${hm(t0)}~${hm(t1)} 가격 · 가격↓ = 금리↑ · CME 무료 시세 약 10분 지연, 매시 수집">`
-      + `<div class="fps-rh"><b>${k}</b><span>${TREASURY_NM[k]}</span><em class="${up ? "u" : ""}">금리${up ? "↑" : "↓"}</em></div>`
-      + `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${d}" fill="none" stroke="var(--text)" stroke-opacity=".85" stroke-width="1.3" stroke-linejoin="round"/>`
+    return `<div class="fps-rate" title="${escapeHtml(v.contract || k)} · ${hm(t0)}~${hm(t1)} 가격 · 가격↓ = 금리↑ · CME 무료 시세 약 10분 지연">`
+      + name(`<em class="${up ? "u" : ""}">금리${up ? "↑" : "↓"}</em>`)
+      + `<svg width="${SW}" height="${SH}" viewBox="0 0 ${SW} ${SH}" aria-hidden="true"><path d="${d}" fill="none" stroke="var(--text)" stroke-opacity=".85" stroke-width="1.3" stroke-linejoin="round"/>`
       + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.2" fill="var(--text)"/></svg>`
       + `<div class="fps-rv"><span>${last[1].toFixed(3)}</span><span class="c">${chg >= 0 ? "+" : "−"}${Math.abs(chg).toFixed(2)}%</span></div></div>`;
   };
-  const rates = ["ZT", "ZF", "ZN", "ZB"].map(rate).join("");
   const gauges = p ? ["ETH", "BTC", "macro"].map((a) => {
     const { b, s, n } = newsAssetCounts(p, a);
-    return `<div class="fps-gi"><span class="a">${newsAsset(a)}</span><span class="c">${n}건</span>`
-      + `<span class="mini" title="12시간 관련 기사 · 호재 ${b} · 악재 ${s} · 중립 ${n - b - s}">${n ? `<i class="b" style="width:${100 * b / n}%"></i><i style="width:${100 * (n - b - s) / n}%"></i><i class="s" style="width:${100 * s / n}%"></i>` : ""}</span></div>`;
+    return `<span class="a">${newsAsset(a)}</span><span class="mini" title="12시간 관련 기사 · 호재 ${b} · 악재 ${s} · 중립 ${n - b - s}">${n ? `<i class="b" style="width:${100 * b / n}%"></i><i style="width:${100 * (n - b - s) / n}%"></i><i class="s" style="width:${100 * s / n}%"></i>` : ""}</span><span class="c">${n}건</span>`;
   }).join("") : "";
-  const html = rates + `<i class="fps-sep" aria-hidden="true"></i>`
-    + (p ? `<div class="fps-tilt" title="최근 1시간 관련 기사(관련성 0.5 이상)의 호재·중립·악재 몫 -- 기사마다 영향×관련성으로 가중(뉴스 카드 «기울기»와 같은 계산) · jevk5 판정 · 신호 아님"><div class="fps-gh">뉴스 기울기 · 영향×관련성 가중</div>${newsTiltHtml(p, 1)}</div>`
-         + `<div class="fps-g"><div class="fps-gh">코인별 관련 기사 · 12시간</div><div class="fps-gr">${gauges}</div></div>` : `<div class="muted">뉴스 대기</div><div></div>`)
-    + `<div class="fps-src">${lastTs ? `국채선물 ${hm(lastTs)} 기준 · 약 10분 지연` : "국채선물 대기"}</div>`;
+  const news = p ? `<div class="fps-tilt" title="최근 1시간 관련 기사(관련성 0.5 이상)의 호재·중립·악재 몫 -- 기사마다 영향×관련성으로 가중(뉴스 카드 «기울기»와 같은 계산) · jevk5 판정 · 신호 아님"><div class="fps-gh">뉴스 기울기 · 영향×관련성 가중</div>${newsTiltHtml(p, 1)}</div>`
+      + `<div class="fps-g"><span class="fps-gh">코인별 관련 기사 · 12시간</span>${gauges}</div>` : `<div class="muted">뉴스 대기</div>`;
+  const html = `<div class="fps-rates">${["ZT", "ZF", "ZN", "ZB"].map(rate).join("")}</div><i class="fps-sep" aria-hidden="true"></i><div class="fps-news">${news}</div>`;
+  const cols = `${leftW}px ${gap}px ${rightW}px`;
+  if (box.style.gridTemplateColumns !== cols) box.style.gridTemplateColumns = cols;
   if (box._h !== html) { box._h = html; box.innerHTML = html; }
-  box.hidden = false;
 }
+
 function newsAgo(ms, now) {
   const m = Math.max(0, Math.round((now - ms) / 60000));
   return m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ""}`;
@@ -4469,6 +4474,11 @@ function mcPlace(svg, r, wr) {
   if (r) {
     const a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
     pos = { left: `${Math.round(a.left - c.left + r.x)}px`, top: `${Math.round(a.top - c.top + r.y)}px`, width: `${Math.round(r.w)}px`, height: `${Math.max(0, Math.round(r.h))}px` };
+  }
+  { // 2026-10-06 머리 띠 칸 맞춤 -- 금리 = 호가 프로파일 오른쪽 끝까지 · 뉴스 = 오른쪽 칸(r)과 같은 x·폭
+    const a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
+    const geo = r && wr ? { lEnd: Math.round(a.left - c.left + wr.x + wr.w), rX: Math.round(a.left - c.left + r.x), rW: Math.round(r.w) } : null;
+    if (JSON.stringify(geo) !== JSON.stringify(fpStripGeo)) { fpStripGeo = geo; renderFpStrip(); }
   }
   // 🔴cssText 로 통째로 쓰면 renderMarketCtx 가 못 박은 gridTemplateColumns 가 지워진다 -- 위치 네 값만 쓴다
   Object.entries(pos).forEach(([k, v]) => { if (body.style[k] !== v) body.style[k] = v; });
