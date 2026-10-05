@@ -3114,8 +3114,7 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 
 /* 2026-10-06 넓은 화면 모의 판 칸 = 서랍 둘(모의 판 · 지지/저항), 하나만 열린다 -- 칸 높이는 풋프린트가 정한다(사용자 지시) */
 .wdr-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; padding-top: 6px; }
-.wdr { display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--soft-line); }
-.wdr:first-child { border-top: 0; }
+.wdr { display: flex; flex-direction: column; min-height: 0; }   /* 2026-10-06 서랍 사이 경계선 제거(사용자 지시) */
 .wdr.open { flex: 1; }
 .wdr-h { display: flex; align-items: center; gap: 8px; }
 .wdr-tg { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 7px 0; border: 0; background: none; cursor: pointer; text-align: left;

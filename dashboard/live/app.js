@@ -6060,6 +6060,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // Grid & Y-Axis Ticks
   axisTicks(yMin, yMax, 6).forEach(t => {
     const y = yAt(t);
+    if (y < mt || y > plotBottom) return;   // 2026-10-06 눈금이 범위 밖으로 나오면 레인·모의 판 칸을 가로지르는 선이 됐다(사용자 신고)
     const line = document.createElementNS(NS, "line");
     line.setAttribute("x1", ml - TRADE_L); line.setAttribute("x2", w - mr);
     line.setAttribute("y1", y); line.setAttribute("y2", y);
