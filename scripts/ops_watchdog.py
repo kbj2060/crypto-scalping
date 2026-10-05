@@ -814,6 +814,10 @@ def run_once(dry_run: bool) -> list[Check]:
                                      "oi_1s WHERE symbol = 'ethusdt'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 5, 10),
         check_duckdb_table_freshness("hot_binance_mark_1s_eth", ROOT / "data" / "hot" / "binance_ctx.sqlite",
                                      "mark_price_1s WHERE symbol = 'ethusdt'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 5, 10),
+        # 2026-10-06: 미 국채선물 수집기(매시 17분 cron). 주말·휴장엔 봉이 안 늘어나므로 봉이 아니라 «성공한 호출» 시각을 본다 --
+        #   한 번 건너뛰면 warn, 세 번이면 critical. cron 줄을 지우면 이 줄도 지운다.
+        check_duckdb_table_freshness("hot_treasury_futures_poll", ROOT / "data" / "hot" / "treasury_futures.sqlite",
+                                     "polls WHERE status = 'ok'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 130, 250),
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
         *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
         *check_multicoin_collectors(),

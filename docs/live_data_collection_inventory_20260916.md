@@ -50,6 +50,7 @@
 | 청산 자석 | 1분 | ETH | `liq_magnet_history.duckdb` | 08-25 | 31,715행 | `@reboot` supervisor |
 | Deribit GEX · 옵션체인 | 매시 | ETH | `deribit_gex.duckdb` | ~63일 전 | 요약 1,518 / 체인 1,341,043행 | crontab `0 * * * *` |
 | altdata | 매일 01:00 | — | `data/research/altdata.duckdb` | — | 1.0MB | crontab `0 1 * * *` |
+| 미 국채선물 1분봉(Yahoo, ~10분 지연) | 매시 | ZT·ZF·ZN·ZB | hot `treasury_futures.sqlite` 8일 → lake `cme/treasury_fut_1m` | 10-06 | ~5.5천행/일 | crontab `17 * * * *` |
 
 OI/롱숏비율을 우리가 직접 모으는 이유: 바이낸스 `openInterestHist` 계열은 `period` 와 무관하게
 **항상 500포인트만** 준다(5m 면 ~1.7일). 그 창은 달력과 함께 자라지 않으므로 지금부터 모으는 수밖에 없다.
