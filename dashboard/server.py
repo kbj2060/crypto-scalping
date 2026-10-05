@@ -4102,12 +4102,12 @@ def make_app() -> web.Application:
         # 🔴2026-09-30 OI 격자는 5분 캐시(최대 30분 낡음)인데 다른 줄은 라이브라 «지금 OI»·1시간 변화·z(와 lev 라벨)가 캐시 나이만큼
         #   낡았다. 끝 칸을 라이브 OI(oi_1s, 사분면 oi60 과 같은 원천)로 바꾼다 -- 기준(1시간 전 칸·과거 분포)은 격자 그대로.
         oi = mctx.oi_stats(mctx.oi_series_live(hist["oi"], max(oi_1s), oi_1s[max(oi_1s)]) if oi_1s else hist["oi"])
-        okx_oi, hl = one("okx_oi"), one("hl_ctx")
+        okx_oi, hl, by_oi = one("okx_oi"), one("hl_ctx"), (one("by_oi") or [None])[0]   # one() 은 행(튜플) -- Bybit 는 값 하나로 푼다
         # 2026-10-06 합산 OI(사용자 «바로 합산») -- 7일 합 격자 끝에 거래소별 최신값의 합. 넣은 거래소 중 하나라도 최신값이 없으면 합산 안 함.
         now_s = int(time.time())
         oi_ser, oi_ven = mctx.oi_sum_series(hist.get("oi_per") or {}, since=(now_s - 7 * 86400) // 300 * 300)
         latest = {"binance": oi_1s[max(oi_1s)] if oi_1s else None, "okx": okx_oi[0] if okx_oi else None,
-                  "hl": hl[1] if hl else None, "bybit": one("by_oi")}
+                  "hl": hl[1] if hl else None, "bybit": by_oi}
         oi_all = None
         if oi_ser and all(latest.get(k) for k in oi_ven):
             oi_all = {**mctx.oi_stats(mctx.oi_series_live(oi_ser, now_s, sum(float(latest[k]) for k in oi_ven))), "venues": oi_ven,
@@ -4136,7 +4136,7 @@ def make_app() -> web.Application:
             "basis": {"bp": dv["basis_bp"], "d30_bp": dv["basis_d_bp"], "pct7d": basis_pct,
                       "hl_premium_bp": hl[2] * 1e4 if hl and hl[2] is not None else None},
             "lev": mctx.lev_state(basis_pct, (oi_all or oi)["z1h"]),   # 2026-10-06 합산 OI z 가 있으면 그걸로
-            "oi": {**oi, "okx": okx_oi[0] if okx_oi else None, "hl": hl[1] if hl else None, "bybit": one("by_oi"), "all": oi_all},
+            "oi": {**oi, "okx": okx_oi[0] if okx_oi else None, "hl": hl[1] if hl else None, "bybit": by_oi, "all": oi_all},
             "ls": ({"global": lsv(1, ls[::-1]), "top_pos": lsv(2, ls[::-1]), "taker": lsv(3, ls[::-1]),
                     "global_24h": ls24(1), "top_pos_24h": ls24(2), "age_s": time.time() - ls[-1][0]} if ls else None),
             "quad": mctx.quad_1h(x.get("move60"), oi_all["d1h"] if oi_all and oi_all.get("d1h") is not None else x.get("oi60"), x.get("move60_p75")),
