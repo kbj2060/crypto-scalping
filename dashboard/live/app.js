@@ -2760,9 +2760,80 @@ async function refreshNews(force) {
     if (!res.ok) throw new Error(`news ${res.status}`);
     latestNews = await res.json();
     renderNews();
+    renderFpStrip();
   } catch (error) {
     console.error("News fetch error:", error);
   }
+}
+// 2026-10-06 뉴스 카드 «기울기»·코인 줄과 풋프린트 머리 띠가 같은 계산을 쓴다(사본을 두면 한쪽만 고쳐진다).
+const newsRel = (it) => (it.relevant ?? 0) >= 0.5;
+function newsTiltHtml(p, h) {   // 최근 h시간 관련 기사의 호재·중립·악재 몫 -- 기사마다 영향 × 관련성 가중
+  const now = p.now_ms || Date.now(), sum = { bullish: 0, neutral: 0, bearish: 0 };
+  const xs = p.items.filter((it) => it.sentiment && it.ts_ms >= now - h * 3600e3 && newsRel(it));
+  xs.forEach((it) => { if (it.sentiment in sum) sum[it.sentiment] += (Number(it.impact) || 0) * (it.relevant ?? 0) || 0.01; });
+  const tot = sum.bullish + sum.neutral + sum.bearish, pc = (k) => (tot ? 100 * sum[k] / tot : 0), cnt = (k) => xs.filter((it) => it.sentiment === k).length;
+  const bar = tot ? `<i class="b" style="width:${pc("bullish")}%"></i><i class="n" style="width:${pc("neutral")}%"></i><i class="s" style="width:${pc("bearish")}%"></i>` : "";
+  return `<div class="nw-tilt"><div class="nw-tilt-lab"><span class="w">${h}시간 · ${xs.length}건</span><span><b class="opt-good">호재 ${cnt("bullish")}</b> ${pc("bullish").toFixed(0)}% · 중립 ${cnt("neutral")} · ${pc("bearish").toFixed(0)}% <b class="opt-bad">악재 ${cnt("bearish")}</b></span></div>
+      <div class="nw-tilt-bar" role="img" aria-label="최근 ${h}시간 호재 ${pc("bullish").toFixed(0)}% · 중립 ${pc("neutral").toFixed(0)}% · 악재 ${pc("bearish").toFixed(0)}% (영향×관련성 가중)">${bar}</div></div>`;
+}
+function newsAssetCounts(p, a) {   // 12시간 창(서버 NEWS_WINDOW_H) 안 그 코인의 판정된 관련 기사 -- 호재·악재 수 · 전체 · 최대 영향
+  const xs = p.items.filter((it) => it.sentiment && it.asset === a && newsRel(it));
+  return { b: xs.filter((it) => it.sentiment === "bullish").length, s: xs.filter((it) => it.sentiment === "bearish").length,
+           n: xs.length, mx: Math.max(0, ...xs.map((it) => Number(it.impact) || 0)) };
+}
+
+// ── 풋프린트 카드 머리 띠 (2026-10-06 사용자 선택 C) -- 미 국채선물 4종 · 뉴스 기울기 1시간 · ETH/BTC/매크로 게이지(가로) ──
+//   넓은 화면(2단)에서만 보인다(styles.css .fp-strip). 한 화면 모드는 카드가 세로 flex 라 띠 높이만큼 차트 칸이 줄고 카드 높이는 그대로다.
+//   국채선물 값은 가격(금리 아님, 가격↓ = 금리↑) · CME 무료 시세 ~10분 지연 + 매시 수집 -- 실시간 신호가 아니라 «오늘 금리 흐름»의 지도.
+let latestTreasury = null, treasuryLastFetchAt = 0;
+async function refreshTreasury() {
+  const now = Date.now();
+  if (now - treasuryLastFetchAt < 60000) return;
+  treasuryLastFetchAt = now;
+  try {
+    const res = await fetch("/api/treasury-futures", { cache: "no-cache" });
+    if (!res.ok) throw new Error(`treasury ${res.status}`);
+    latestTreasury = await res.json();
+  } catch (error) {
+    console.error("Treasury fetch error:", error);
+  }
+  renderFpStrip();
+}
+const TREASURY_NM = { ZT: "2년", ZF: "5년", ZN: "10년", ZB: "30년" };
+function renderFpStrip() {
+  const box = el("fpStrip");
+  if (!box) return;
+  const T = latestTreasury && latestTreasury.ok ? latestTreasury.symbols : null, p = latestNews && latestNews.ok ? latestNews : null;
+  if (!T && !p) { box.hidden = true; return; }
+  const hm = (ts) => { const d = new Date(ts * 1000), today = new Date().toDateString() === d.toDateString();
+    return (today ? "" : `${d.getMonth() + 1}-${d.getDate()} `) + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  let lastTs = 0;
+  const rate = (k) => {
+    const v = T && T[k], b = v ? v.bars : [];
+    if (b.length < 2) return `<div class="fps-rate"><div class="fps-rh"><b>${k}</b><span>${TREASURY_NM[k]}</span></div><div class="fps-rv"><span class="muted">—</span></div></div>`;
+    const W = 118, H = 22, t0 = b[0][0], t1 = b[b.length - 1][0], lo = Math.min(...b.map((x) => x[1])), hi = Math.max(...b.map((x) => x[1])), rg = hi - lo || 1e-9;
+    const X = (t) => 2 + (t - t0) / Math.max(1, t1 - t0) * (W - 6), Y = (y) => 2 + (hi - y) / rg * (H - 4);
+    const d = b.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)} ${Y(x[1]).toFixed(1)}`).join(" ");
+    const last = b[b.length - 1], chg = (last[1] / b[0][1] - 1) * 100, up = chg < 0;   // 가격↓ = 금리↑
+    lastTs = Math.max(lastTs, last[0]);
+    return `<div class="fps-rate" title="${escapeHtml(v.contract || k)} · ${hm(t0)}~${hm(t1)} 가격 · 가격↓ = 금리↑ · CME 무료 시세 약 10분 지연, 매시 수집">`
+      + `<div class="fps-rh"><b>${k}</b><span>${TREASURY_NM[k]}</span><em class="${up ? "u" : ""}">금리${up ? "↑" : "↓"}</em></div>`
+      + `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${d}" fill="none" stroke="var(--text)" stroke-opacity=".85" stroke-width="1.3" stroke-linejoin="round"/>`
+      + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.2" fill="var(--text)"/></svg>`
+      + `<div class="fps-rv"><span>${last[1].toFixed(3)}</span><span class="c">${chg >= 0 ? "+" : "−"}${Math.abs(chg).toFixed(2)}%</span></div></div>`;
+  };
+  const rates = ["ZT", "ZF", "ZN", "ZB"].map(rate).join("");
+  const gauges = p ? ["ETH", "BTC", "macro"].map((a) => {
+    const { b, s, n } = newsAssetCounts(p, a);
+    return `<div class="fps-gi"><span class="a">${newsAsset(a)}</span><span class="c">${n}건</span>`
+      + `<span class="mini" title="12시간 관련 기사 · 호재 ${b} · 악재 ${s} · 중립 ${n - b - s}">${n ? `<i class="b" style="width:${100 * b / n}%"></i><i style="width:${100 * (n - b - s) / n}%"></i><i class="s" style="width:${100 * s / n}%"></i>` : ""}</span></div>`;
+  }).join("") : "";
+  const html = rates + `<i class="fps-sep" aria-hidden="true"></i>`
+    + (p ? `<div class="fps-tilt" title="최근 1시간 관련 기사(관련성 0.5 이상)의 호재·중립·악재 몫 -- 기사마다 영향×관련성으로 가중(뉴스 카드 «기울기»와 같은 계산) · jevk5 판정 · 신호 아님"><div class="fps-gh">뉴스 기울기 · 영향×관련성 가중</div>${newsTiltHtml(p, 1)}</div>`
+         + `<div class="fps-g"><div class="fps-gh">코인별 관련 기사 · 12시간</div><div class="fps-gr">${gauges}</div></div>` : `<div class="muted">뉴스 대기</div><div></div>`)
+    + `<div class="fps-src">${lastTs ? `국채선물 ${hm(lastTs)} 기준 · 약 10분 지연` : "국채선물 대기"}</div>`;
+  if (box._h !== html) { box._h = html; box.innerHTML = html; }
+  box.hidden = false;
 }
 function newsAgo(ms, now) {
   const m = Math.max(0, Math.round((now - ms) / 60000));
@@ -2781,19 +2852,11 @@ function renderNews() {
   const w = (it) => (Number(it.impact) || 0) * (it.relevant ?? 0);   // 기울기 가중 = 영향 × 관련성
   const srcs = (it) => (it.sources && it.sources.length ? it.sources : [it.source]);
   // 기울기: 1·6·12시간, 관련 기사의 영향 가중 몫
-  const tiltOf = (h) => {
-    const xs = judged.filter((it) => it.ts_ms >= now - h * 3600e3 && rel(it)), sum = { bullish: 0, neutral: 0, bearish: 0 };
-    xs.forEach((it) => { if (it.sentiment in sum) sum[it.sentiment] += w(it) || 0.01; });
-    const tot = sum.bullish + sum.neutral + sum.bearish, pc = (k) => (tot ? 100 * sum[k] / tot : 0), cnt = (k) => xs.filter((it) => it.sentiment === k).length;
-    const bar = tot ? `<i class="b" style="width:${pc("bullish")}%"></i><i class="n" style="width:${pc("neutral")}%"></i><i class="s" style="width:${pc("bearish")}%"></i>` : "";
-    return `<div class="nw-tilt"><div class="nw-tilt-lab"><span class="w">${h}시간 · ${xs.length}건</span><span><b class="opt-good">호재 ${cnt("bullish")}</b> ${pc("bullish").toFixed(0)}% · 중립 ${cnt("neutral")} · ${pc("bearish").toFixed(0)}% <b class="opt-bad">악재 ${cnt("bearish")}</b></span></div>
-      <div class="nw-tilt-bar" role="img" aria-label="최근 ${h}시간 호재 ${pc("bullish").toFixed(0)}% · 중립 ${pc("neutral").toFixed(0)}% · 악재 ${pc("bearish").toFixed(0)}% (영향×관련성 가중)">${bar}</div></div>`;
-  };
+  const tiltOf = (h) => newsTiltHtml(p, h);
   const tilts = `<div><div class="nw-sec-h">기울기 · 영향×관련성 가중</div><div class="nw-tilts">${[1, 6, 12].map(tiltOf).join("")}</div></div>`;
   // 코인별: 12시간 관련 기사 수 · 호재/악재 막대 · 최대 영향
   const rows = NEWS_ASSETS.map((a) => {
-    const xs = judged.filter((it) => it.asset === a && rel(it)), b = xs.filter((it) => it.sentiment === "bullish").length,
-      s = xs.filter((it) => it.sentiment === "bearish").length, n = xs.length, mx = Math.max(0, ...xs.map((it) => Number(it.impact) || 0));
+    const { b, s, n, mx } = newsAssetCounts(p, a);
     return `<span class="a${a === coin ? " on" : ""}">${newsAsset(a)}</span><span class="mini" title="호재 ${b} · 악재 ${s} · 중립 ${n - b - s}">${n ? `<i class="b" style="width:${100 * b / n}%"></i><i style="width:${100 * (n - b - s) / n}%"></i><i class="s" style="width:${100 * s / n}%"></i>` : ""}</span><span class="c">${n}건</span><span class="m">${n ? mx.toFixed(1) : "–"}</span>`;
   }).join("");
   const assets = `<div class="nw-assets"><span class="h">코인</span><span class="h">호재 · 악재</span><span class="h c">12시간</span><span class="h m">최대 영향</span>${rows}</div>`;
@@ -7894,6 +7957,7 @@ async function tick() {
       refreshLiquidationMap();
       refreshMacroCalendar();
       refreshNews();                 // 2026-10-05 뉴스 카드 (자체 30초 게이트)
+      refreshTreasury();             // 2026-10-06 풋프린트 머리 띠 국채선물 (자체 60초 게이트)
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)

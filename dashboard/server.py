@@ -866,6 +866,28 @@ def news_dedupe(items: list[dict]) -> list[dict]:
     return sorted(out.values(), key=lambda x: x["ts_ms"], reverse=True)
 
 
+TREASURY_DB = REPO_ROOT / "data" / "hot" / "treasury_futures.sqlite"   # 2026-10-06 미 국채선물 수집기(live_treasury_futures_collector_20261006, 매시 cron)
+
+
+def treasury_payload(db: Path = TREASURY_DB, hours: float = 12.0) -> dict:
+    """미 국채선물 ZT·ZF·ZN·ZB 의 **마지막 봉 기준** 12시간 종가(5분 경계 봉 + 마지막 봉) -- 풋프린트 카드 머리 띠(2026-10-06).
+    값은 가격(금리 아님)이고 CME 무료 시세라 ~10분 지연 + 매시 수집이다. 마지막 봉 기준으로 자르는 이유: 주말·휴장엔 봉이 안 늘어
+    «지금부터 12시간»이면 띠가 비었다. 없거나 실패면 ok False."""
+    try:
+        rows = _read_only_rows(db, """SELECT symbol, ts_sec, close, contract FROM treasury_fut_1m
+                                      WHERE close IS NOT NULL AND ts_sec >= (SELECT max(ts_sec) FROM treasury_fut_1m) - ?
+                                      ORDER BY symbol, ts_sec""", [int(hours * 3600)])
+    except (duckdb.Error, sqlite3.Error, OSError):
+        return {"ok": False, "symbols": {}}
+    out: dict[str, dict] = {}
+    for sym, ts, close, contract in rows:
+        out.setdefault(sym, {"contract": contract, "bars": []})["bars"].append([int(ts), float(close)])
+    for v in out.values():
+        b = v["bars"]
+        v["bars"] = [x for i, x in enumerate(b) if x[0] % 300 == 0 or i == len(b) - 1]
+    return {"ok": bool(out), "symbols": out}
+
+
 def news_payload(now: float, db: Path = NEWS_DB) -> dict:
     """최근 12시간 뉴스 + 판정(판정 없는 기사도 «판정 대기»로 포함). 경로는 수집기 모듈을 import 하지 않고 여기 적는다 --
     import 하면 수집기를 고칠 때마다 배포 워처가 대시보드를 재시작한다. 🔴판정은 검증 전(화면 «신호 아님»).
@@ -3660,6 +3682,10 @@ def make_app() -> web.Application:
 
     async def api_news(request: web.Request) -> web.Response:   # 2026-10-05 Option 카드 «뉴스» 줄(jevk5:4b 판정 · 신호 아님)
         payload = await swr_cached("news", 15.0, lambda: asyncio.to_thread(news_payload, time.time()), max_stale=300.0)
+        return web.json_response(payload, headers=NOCACHE)
+
+    async def api_treasury_futures(request: web.Request) -> web.Response:   # 2026-10-06 풋프린트 카드 머리 띠(국채선물 4종)
+        payload = await swr_cached("treasury", 60.0, lambda: asyncio.to_thread(treasury_payload), max_stale=600.0)
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_notify_center(request: web.Request) -> web.Response:
@@ -6544,6 +6570,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/chip-score", api_chip_score)
     app.router.add_get("/api/notify-center", api_notify_center)
     app.router.add_get("/api/news", api_news)
+    app.router.add_get("/api/treasury-futures", api_treasury_futures)
     app.router.add_get("/api/paper-arms", api_paper_arms)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)
