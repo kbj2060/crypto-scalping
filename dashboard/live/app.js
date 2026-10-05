@@ -2760,7 +2760,7 @@ async function refreshNews(force) {
     if (!res.ok) throw new Error(`news ${res.status}`);
     latestNews = await res.json();
     renderNews();
-    renderFpStrip();
+    renderMarketCtx();   // ④ 아래 ⑤ 뉴스
   } catch (error) {
     console.error("News fetch error:", error);
   }
@@ -2800,43 +2800,36 @@ async function refreshTreasury() {
   renderFpStrip();
 }
 const TREASURY_NM = { ZT: "2년", ZF: "5년", ZN: "10년", ZB: "30년" };
-// 2026-10-06(2) 칸 맞춤(사용자 «금리 차트는 호가 프로파일까지 · 뉴스는 수급 차트 너비에»): 금리 = 풋프린트 왼쪽 ~ 호가 프로파일 오른쪽 끝,
-//   뉴스 = 오른쪽 칸(1초 수급·시장 맥락)과 같은 x·폭. 두 좌표는 mcPlace 가 차트 칸을 놓을 때 준다(fpStripGeo, 카드 기준 px).
-let fpStripGeo = null;
+// 2026-10-06(3) 띠 = 금리 4종만, 전폭(사용자 «뉴스는 ⑤ 로 옮기고 그 자리를 국채선물로 가득») · 차트 아래 마지막 봉 시각.
+//   🔴금리 화살표 = 국채 가격 차트의 **최근 1시간** 움직임의 반대(사용자 선택 A + «차트와 반대로»): 12시간 첫 봉 대비로 붙였더니
+//   차트 끝은 반등(가격↑)하는데 «금리↑»가 떠 거꾸로 읽혔다. 화살표·변화율 둘 다 1시간 기준이고 12시간 변화는 호버에.
 function renderFpStrip() {
-  const box = el("fpStrip"), card = el("fpCard");
-  if (!box || !card) return;
-  const T = latestTreasury && latestTreasury.ok ? latestTreasury.symbols : null, p = latestNews && latestNews.ok ? latestNews : null;
-  if (!T && !p) { box.hidden = true; return; }
+  const box = el("fpStrip");
+  if (!box) return;
+  const T = latestTreasury && latestTreasury.ok ? latestTreasury.symbols : null;
+  if (!T) { box.hidden = true; return; }
   box.hidden = false;
-  const g = fpStripGeo, padL = 14, sx = box.getBoundingClientRect().left - card.getBoundingClientRect().left + padL;
-  const leftW = g ? Math.max(200, g.lEnd - sx) : 520, gap = g ? Math.max(12, g.rX - g.lEnd) : 16, rightW = g ? g.rW : 520;
   const hm = (ts) => { const d = new Date(ts * 1000), today = new Date().toDateString() === d.toDateString();
     return (today ? "" : `${d.getMonth() + 1}-${d.getDate()} `) + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-  const SW = Math.max(40, Math.floor((leftW - 3 * 18) / 4) - 134), SH = 36;   // 미니 차트 = 칸 폭 − 이름(52)·값(70) 열 − 간격
+  const cellW = Math.floor(((box.clientWidth || 1800) - 28 - 3 * 24) / 4), SW = Math.max(60, cellW - 96 - 92 - 16), SH = 30;
+  const dir = (chg) => `<em class="${chg < 0 ? "u" : ""}">금리${chg < 0 ? "↑" : "↓"}</em>`;   // 가격↓ = 금리↑
   const rate = (k) => {
-    const v = T && T[k], b = v ? v.bars : [];
-    const name = (em) => `<div class="fps-rn"><div><b>${k}</b> <span>${TREASURY_NM[k]}</span></div>${em}</div>`;
-    if (b.length < 2) return `<div class="fps-rate">${name("")}<span></span><div class="fps-rv"><span class="muted">—</span></div></div>`;
+    const v = T[k], b = v ? v.bars : [];
+    const nm = `<b>${k}</b> <span>${TREASURY_NM[k]}</span>`;
+    if (b.length < 2) return `<div class="fps-rate"><div class="fps-rn"><div>${nm}</div></div><span></span><div class="fps-rv"><span class="muted">—</span></div></div>`;
     const t0 = b[0][0], t1 = b[b.length - 1][0], lo = Math.min(...b.map((x) => x[1])), hi = Math.max(...b.map((x) => x[1])), rg = hi - lo || 1e-9;
     const X = (t) => 2 + (t - t0) / Math.max(1, t1 - t0) * (SW - 6), Y = (y) => 3 + (hi - y) / rg * (SH - 6);
     const d = b.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)} ${Y(x[1]).toFixed(1)}`).join(" ");
-    const last = b[b.length - 1], chg = (last[1] / b[0][1] - 1) * 100, up = chg < 0;   // 가격↓ = 금리↑
-    return `<div class="fps-rate" title="${escapeHtml(v.contract || k)} · ${hm(t0)}~${hm(t1)} 가격 · 가격↓ = 금리↑ · CME 무료 시세 약 10분 지연">`
-      + name(`<em class="${up ? "u" : ""}">금리${up ? "↑" : "↓"}</em>`)
-      + `<svg width="${SW}" height="${SH}" viewBox="0 0 ${SW} ${SH}" aria-hidden="true"><path d="${d}" fill="none" stroke="var(--text)" stroke-opacity=".85" stroke-width="1.3" stroke-linejoin="round"/>`
-      + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.2" fill="var(--text)"/></svg>`
-      + `<div class="fps-rv"><span>${last[1].toFixed(3)}</span><span class="c">${chg >= 0 ? "+" : "−"}${Math.abs(chg).toFixed(2)}%</span></div></div>`;
+    const last = b[b.length - 1], chg = (last[1] / b[0][1] - 1) * 100;
+    const h1 = b.find((x) => x[0] >= t1 - 3600) || b[0], chg1 = (last[1] / h1[1] - 1) * 100;
+    const lab = `<span class="w">1시간</span> ${dir(chg1)}`;
+    return `<div class="fps-rate" title="${escapeHtml(v.contract || k)} · ${hm(t0)}~${hm(t1)} 가격(가격↓ = 금리↑) · 12시간 첫 봉 대비 ${chg >= 0 ? "+" : "−"}${Math.abs(chg).toFixed(2)}% · 1시간 ${chg1 >= 0 ? "+" : "−"}${Math.abs(chg1).toFixed(2)}% · CME 무료 시세 약 10분 지연">`
+      + `<div class="fps-rn"><div>${nm}</div><div class="fps-lab">${lab}</div></div>`
+      + `<div class="fps-ch"><svg width="${SW}" height="${SH}" viewBox="0 0 ${SW} ${SH}" aria-hidden="true"><path d="${d}" fill="none" stroke="var(--text)" stroke-opacity=".85" stroke-width="1.3" stroke-linejoin="round"/>`
+      + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.2" fill="var(--text)"/></svg><div class="fps-t"><span>${hm(t0)}</span><span>마지막 ${hm(t1)}</span></div></div>`
+      + `<div class="fps-rv"><span>${last[1].toFixed(3)}</span><span class="c">1시간 ${chg1 >= 0 ? "+" : "−"}${Math.abs(chg1).toFixed(2)}%</span></div></div>`;
   };
-  const gauges = p ? ["ETH", "BTC", "macro"].map((a) => {
-    const { b, s, n } = newsAssetCounts(p, a);
-    return `<span class="a">${newsAsset(a)}</span><span class="mini" title="12시간 관련 기사 · 호재 ${b} · 악재 ${s} · 중립 ${n - b - s}">${n ? `<i class="b" style="width:${100 * b / n}%"></i><i style="width:${100 * (n - b - s) / n}%"></i><i class="s" style="width:${100 * s / n}%"></i>` : ""}</span><span class="c">${n}건</span>`;
-  }).join("") : "";
-  const news = p ? `<div class="fps-tilt" title="최근 1시간 관련 기사(관련성 0.5 이상)의 호재·중립·악재 몫 -- 기사마다 영향×관련성으로 가중(뉴스 카드 «기울기»와 같은 계산) · jevk5 판정 · 신호 아님"><div class="fps-gh">뉴스 기울기 · 영향×관련성 가중</div>${newsTiltHtml(p, 1)}</div>`
-      + `<div class="fps-g"><span class="fps-gh">코인별 관련 기사 · 12시간</span>${gauges}</div>` : `<div class="muted">뉴스 대기</div>`;
-  const html = `<div class="fps-rates">${["ZT", "ZF", "ZN", "ZB"].map(rate).join("")}</div><i class="fps-sep" aria-hidden="true"></i><div class="fps-news">${news}</div>`;
-  const cols = `${leftW}px ${gap}px ${rightW}px`;
-  if (box.style.gridTemplateColumns !== cols) box.style.gridTemplateColumns = cols;
+  const html = `<div class="fps-rates">${["ZT", "ZF", "ZN", "ZB"].map(rate).join("")}</div>`;
   if (box._h !== html) { box._h = html; box.innerHTML = html; }
 }
 
@@ -4188,7 +4181,9 @@ const MC_TIPS = {
 MC_TIPS.q_lev = MC_TIPS.lev + "\n\n" + MC_TIPS.ls;
 MC_TIPS.q_flow = MC_TIPS.flow + "\n\n" + MC_TIPS.quad;
 MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
-MC_TIPS.q_wall = MC_TIPS.book + "\n\n" + MC_TIPS.cross + "\n\n" + MC_TIPS.px;
+MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위치(VWAP·%B·RSI) 줄 제거 -- 설명도 벽만
+MC_TIPS.q_news = "뉴스 기울기 = 최근 1시간 관련 기사(관련성 0.5 이상)의 호재·중립·악재 몫, 기사마다 영향×관련성으로 가중(뉴스 카드와 같은 계산).\n"
+  + "코인별 = 12시간 안 그 코인·매크로 관련 기사의 호재·중립·악재 건수.\n판정은 jevk5:4b 모델(검증 전) — 방향 신호로 쓰지 않는다. 기사 목록은 뉴스 카드.";
 // 2026-10-04 맞대결·벽 신호·모의 판(사용자 승인 시안) -- 원천 = 모의 매매 엔진 상태(/api/paper-arms). 연구와 같은 계산을 엔진이 한 번만 한다.
 MC_TIPS.q_flow += "\n\n맞대결 = 정시마다 고래(체결 한 줄 $10만+)·리테일($1만 미만)의 60분 순매수를 자기 지난 30일과 견준 z 가 반대이고 둘 다 0.5 이상이면 고래 쪽, 다음 정시까지. 위 줄들(14일 같은 요일유형·시간대 잣대·거래소 합산)과 잣대가 달라 가끔 엇갈린다 — 맞대결은 바이낸스만 — 합산판(+OKX·+Bybit)은 10-06 검정에서 바이낸스판보다 약해 불통과(2025~ 건당 +7.8 vs +7.1 · +3.8bp, docs/experiments/whale_duel_multivenue_20261006.md). 4.7년 검정에서 약하게 맞았다(메이커 체결 전제).";
 MC_TIPS.q_wall += "\n\n벽 신호 = 5분봉 마감 때 ±50bp 매수·매도 잔량 불균형이 지난 24시간 상위 20% 문턱(주황 점선)을 넘는 쪽, 다음 5분. 직전 5분이 이미 그 방향으로 움직였으면 «추격 주의». 본질은 «방금 움직인 반대쪽»이라 한 방향으로 계속 가는 날엔 틀린다.";
@@ -4426,19 +4421,6 @@ function mcBollinger(full, n = 20, k = 2) {
   return out;
 }
 
-// RSI(14, 와일더). 값이 모자라면 null.
-function mcRsi(closes, n = 14) {
-  if (closes.length <= n) return null;
-  let up = 0, dn = 0;
-  for (let i = 1; i <= n; i++) { const d = closes[i] - closes[i - 1]; if (d > 0) up += d; else dn -= d; }
-  up /= n; dn /= n;
-  for (let i = n + 1; i < closes.length; i++) {
-    const d = closes[i] - closes[i - 1];
-    up = (up * (n - 1) + Math.max(d, 0)) / n; dn = (dn * (n - 1) + Math.max(-d, 0)) / n;
-  }
-  return dn === 0 ? 100 : 100 - 100 / (1 + up / dn);
-}
-
 // 다음 미국장 개장·마감(뉴욕 09:30~16:00, 평일). 서머타임은 브라우저의 시간대 표로 가린다 -- 13:30/14:30 UTC 중 뉴욕 09:30 인 쪽.
 function mcUsSession(nowMs = Date.now()) {
   const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", weekday: "short", hour: "2-digit", minute: "2-digit" });
@@ -4475,11 +4457,6 @@ function mcPlace(svg, r, wr) {
     const a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
     pos = { left: `${Math.round(a.left - c.left + r.x)}px`, top: `${Math.round(a.top - c.top + r.y)}px`, width: `${Math.round(r.w)}px`, height: `${Math.max(0, Math.round(r.h))}px` };
   }
-  { // 2026-10-06 머리 띠 칸 맞춤 -- 금리 = 호가 프로파일 오른쪽 끝까지 · 뉴스 = 오른쪽 칸(r)과 같은 x·폭
-    const a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
-    const geo = r && wr ? { lEnd: Math.round(a.left - c.left + wr.x + wr.w), rX: Math.round(a.left - c.left + r.x), rW: Math.round(r.w) } : null;
-    if (JSON.stringify(geo) !== JSON.stringify(fpStripGeo)) { fpStripGeo = geo; renderFpStrip(); }
-  }
   // 🔴cssText 로 통째로 쓰면 renderMarketCtx 가 못 박은 gridTemplateColumns 가 지워진다 -- 위치 네 값만 쓴다
   Object.entries(pos).forEach(([k, v]) => { if (body.style[k] !== v) body.style[k] = v; });
   if (body.classList.contains("mc-cmp") !== !!r) { body.classList.toggle("mc-cmp", !!r); body._mcHtml = null; renderMarketCtx(); }
@@ -4514,10 +4491,7 @@ function renderMarketCtx() {
   const levWarn = ["long_crowd", "short_crowd", "deleverage"].includes((d.lev || {}).key);
   // 가격 위치 -- 차트와 같은 캔들 이력(서버가 봉마다 vwap/vsd 를 싣는다)
   const full = candleHistoryByAsset[A] || [], lc = full[full.length - 1];
-  const lvC = [...full].reverse().find((c) => mcVwapOf(c)), lv = mcVwapOf(lvC);      // 형성 중 봉(클라가 붙인다)엔 vwap 이 없다 -- 마감봉 값
-  const bb = lc ? mcBollinger(full).get(lc.time) : null, px = Number(latestLivePriceByAsset[A] || lc?.close || d.mid || 0);
-  const pb = bb && bb[2] > bb[0] ? (px - bb[0]) / (bb[2] - bb[0]) : null, rsi = mcRsi(full.map((c) => +c.close));
-  const vz = lv && lv.vsd > 0 ? (px - lv.vwap) / lv.vsd : null;
+  const px = Number(latestLivePriceByAsset[A] || lc?.close || d.mid || 0);
   // 일정 -- 옵션 만기는 옵션 카드와 같은 원천(latestGex). 🔴optData() 는 «지금 보는 코인»이라 SOL 탭에서 SOL max pain 을 ETH 가격과
   //   견줬다(09-29 재검증) -- 이 카드는 ETH 전용이므로 ETH 를 직접 읽는다.
   const gEth = latestGex && latestGex.available ? (latestGex.currencies || {}).ETH : null, o = gEth && gEth.options;
@@ -4560,7 +4534,6 @@ function renderMarketCtx() {
   const note = (s) => `<div class="mc-note">${s}</div>`;
   const qSec = (key, title, inner, extra = "") => sec(key, title, (extra ? `<div class="mc-state">상태${extra}</div>` : "") + inner);
   const levChip = ` <span class="mc-chip${levWarn ? " warn" : ""}">${escapeHtml(((d.lev || {}).label || "-").split(" —")[0])}</span>`;
-  const btcTxt = (d.btc || {}).rel === "동행" ? `${U} 같이 간다` : (d.btc || {}).rel === "단독" ? `${U} 혼자 간다` : (d.btc || {}).move_bp == null ? "수집 중" : `${U} 30분 방향 없음`;
   const events = [
     f.next_ms ? { t: f.next_ms, nm: "펀딩 정산" } : null,
     ef ? { t: ef.exp_ms, nm: `옵션 만기 · pain ${n(ef.pain)}` } : null,
@@ -4616,16 +4589,17 @@ function renderMarketCtx() {
   const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", wallLine + (sw ? G.book(sw, bps, wallW || undefined, Number(d.mid) || 0, (ASSET_CONFIG[A] || {}).dp ?? 2) : note("호가 래스터 대기")) + wallRow + statRows
       + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(sdp)}${bk.spread > 1.5 * 10 ** -sdp ? " — 평소(1틱)보다 넓다" : ""}`
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
-      + gRow("BTC 30분", G.sig((d.btc || {}).move_bp == null ? null : d.btc.move_bp / 20), sg((d.btc || {}).move_bp, 0, "bp"), "", btcTxt)
-      + gRow("가격차 OKX", G.sig((d.venues || {}).okx_bp == null ? null : d.venues.okx_bp / 5), sg((d.venues || {}).okx_bp, 1, "bp"), "", "마크 대 마크")
-      + gRow("가격차 HL", G.sig((d.venues || {}).hl_bp == null ? null : d.venues.hl_bp / 5), sg((d.venues || {}).hl_bp, 1, "bp"), "", `미드 대 미드 · HL 프리미엄 ${sg(b.hl_premium_bp, 1, "bp")}`)
-      + gRow("VWAP 거리", G.sig(vz), sg(vz, 1, "σ"), "", lv ? `${lv.name} VWAP ${n(lv.vwap, (ASSET_CONFIG[A] || {}).dp ?? 1)}` : "")
-      + gRow("볼린저 %B", G.pct(pb), pb == null ? "-" : n(pb, 2), "", bb ? `폭 ${n((bb[2] - bb[0]) / bb[1] * 100, 2)}%` : "")
-      + gRow("RSI 14", G.pct(rsi == null ? null : rsi / 100), rsi == null ? "-" : n(rsi, 0), rsi != null && (rsi >= 70 || rsi <= 30) ? "mc-warn" : "")
       + (G.cmpW ? "" : lineSw));
+  // 2026-10-06 ④ 의 BTC 30분·가격차 OKX/HL·VWAP 거리·볼린저 %B·RSI 14 를 지우고 그 자리에 ⑤ 뉴스(사용자 지시) --
+  //   뉴스 카드 «기울기»와 같은 1시간 영향×관련성 가중 막대 + ETH/BTC/매크로 12시간 관련 기사 막대(같은 계산 newsTiltHtml·newsAssetCounts).
+  const np = latestNews && latestNews.ok ? latestNews : null;
+  const newsHtml0 = qSec("q_news", "⑤ 뉴스", np ? newsTiltHtml(np, 1) + `<div class="mc-news-g"><span class="h">코인별 관련 기사 · 12시간</span>`
+      + ["ETH", "BTC", "macro"].map((a) => { const { b: nb, s: ns, n: nn } = newsAssetCounts(np, a);
+          return `<span class="a">${newsAsset(a)}</span><span class="mini" title="호재 ${nb} · 악재 ${ns} · 중립 ${nn - nb - ns}">${nn ? `<i class="b" style="width:${100 * nb / nn}%"></i><i style="width:${100 * (nn - nb - ns) / nn}%"></i><i class="s" style="width:${100 * ns / nn}%"></i>` : ""}</span><span class="c">${nn}건</span>`; }).join("")
+      + `</div>` : note("뉴스 대기"));
   G.gw = gwKeep;
   if (G.cmpW) htmlB = [`<div class="mc-stack">${htmlB.join("")}</div>`];   // ①② 를 한 단에 위아래로
-  htmlB.push(wallHtml0);
+  htmlB.push(G.cmpW ? `<div class="mc-stack">${wallHtml0}${newsHtml0}</div>` : wallHtml0 + newsHtml0);
   if (!G.cmpW) htmlB.push(paperHtml());   // 2026-10-04 좁은 화면(옵션 요약 칸 없음)은 시장 맥락 끝에 모의 판
   htmlB = htmlB.join("");
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.

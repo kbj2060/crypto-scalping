@@ -1,5 +1,5 @@
 /* 시장 맥락 카드·차트 겹침의 순수 함수 (2026-09-29). 실행: node test/<이 파일>
- * app.js 에서 함수 본문을 떼어 **실제로 돌린다** -- 미국장 시각 · 볼린저 · RSI. (패턴 판정은 09-30 표식과 함께 제거) */
+ * app.js 에서 함수 본문을 떼어 **실제로 돌린다** -- 미국장 시각 · 볼린저. (패턴 판정은 09-30 표식과 함께 제거 · RSI 는 10-06 ④ 줄 제거와 함께 삭제) */
 import fs from "node:fs";
 import assert from "node:assert/strict";
 
@@ -11,7 +11,6 @@ const take = (name) => {
 };
 const mcUsSession = eval(`(${take("mcUsSession")})`);
 const mcBollinger = eval(`(${take("mcBollinger")})`);
-const mcRsi = eval(`(${take("mcRsi")})`);
 const mcLine = { vsess: false };                                  // mcVwapOf 가 읽는 스위치 -- 직접 eval 이라 이 바인딩을 본다
 const mcVwapOf = eval(`(${take("mcVwapOf")})`);
 
@@ -59,10 +58,6 @@ assert.deepEqual(us("2026-12-01T12:00:00Z"), ["2026-12-01T14:30", false]);   // 
 const cs = Array.from({ length: 25 }, (_, i) => ({ time: i, close: 100 }));
 const bb = mcBollinger(cs);
 assert.equal(bb.has(18), false); assert.deepEqual(bb.get(19), [100, 100, 100]);
-// ── RSI: 계속 오르면 100, 계속 내리면 0, 모자라면 null ──
-assert.equal(mcRsi(Array.from({ length: 30 }, (_, i) => 100 + i)), 100);
-assert.equal(mcRsi(Array.from({ length: 30 }, (_, i) => 100 - i)), 0);
-assert.equal(mcRsi([1, 2, 3]), null);
 console.log("market ctx patterns ok");
 
 // ── 청산 원 툴팁 거래소별(2026-10-03): 바이낸스 = 합 − 나머지 · 0원 거래소는 줄을 안 쓴다 · 합산 목록 ──
