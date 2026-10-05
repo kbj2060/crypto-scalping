@@ -35,7 +35,7 @@ FEEDS = {                                                     # 이름: (url, �
     "theblock": ("https://www.theblock.co/rss.xml", 60),
     "cointelegraph": ("https://cointelegraph.com/rss", 60),
     "coindesk": ("https://www.coindesk.com/arc/outboundfeeds/rss", 60),
-    "tree": ("https://news.treeofalpha.com/api/news?limit=50", 15),
+    "tree": ("https://news.treeofalpha.com/api/news?limit=50", 30),   # 15초는 429(10-05 6시간 1,234회 중 17회) -- 받은 시각 중앙 19초 → ~25초
     "bwenews": ("https://rss-public.bwe-ws.com/", 20),            # 10건뿐이라 짧게
     "financialjuice": ("https://www.financialjuice.com/feed.ashx?xy=rss", 60),   # 30초는 429(10-05 1시간 12번)
     "trumpstruth": ("https://www.trumpstruth.org/feed", 60),
