@@ -2703,7 +2703,7 @@ body.order-coin-off .acct-lanes::before {
 body.not-eth #mcWhen { display: none; }   /* ⑤ = 옵션 만기 축 -- SOL·XRP 는 옵션 빼고(2026-10-04) */
 #mcWhen:empty { display: none; }
 #mcWall { display: none; }
-#mcWall.on { display: block; position: absolute; z-index: 1; overflow: hidden; }   /* 2026-09-30 가격 지형은 칸 높이에 맞춰 그린다 -- 스크롤 없음 */
+#mcWall.on { display: flex; flex-direction: column; position: absolute; z-index: 1; overflow: hidden; }   /* 2026-09-30 가격 지형은 칸 높이에 맞춰 그린다 -- 스크롤 없음 */
 #mcWall .mc-sec { border-top: 0; padding-top: 8px; }   /* 2026-10-01 ④(#mcBody .mc-sec 윗여백 8)와 같은 여백 -- ③·④ 제목이 같은 높이 */
 .mc-sec.mc-2col { column-count: 2; column-gap: 18px; }   /* 2026-09-30 ④ 두 단 -- 스크롤 없이 */
 .mc-sec.mc-2col > h4, .mc-sec.mc-2col > .mc-tip { column-span: all; }
@@ -3111,3 +3111,28 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 /* 해킹·장애 고정 줄 -- 옅은 주황 바탕(굵은 왼쪽 선 대신) */
 .nw-row.pin { background: color-mix(in srgb, var(--warn) 9%, transparent); border-radius: 6px; padding-left: 6px; padding-right: 6px; margin: 0 -6px; }
 .nw-row.pin + .nw-row:not(.pin) { border-top: 1px solid var(--line); }
+
+/* 2026-10-06 넓은 화면 모의 판 칸 = 서랍 둘(모의 판 · 지지/저항), 하나만 열린다 -- 칸 높이는 풋프린트가 정한다(사용자 지시) */
+.wdr-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; padding-top: 6px; }
+.wdr { display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--soft-line); }
+.wdr:first-child { border-top: 0; }
+.wdr.open { flex: 1; }
+.wdr-h { display: flex; align-items: center; gap: 8px; }
+.wdr-tg { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 7px 0; border: 0; background: none; cursor: pointer; text-align: left;
+  color: var(--text); font: 700 12px/1.2 var(--font-sans); letter-spacing: .02em; }
+.wdr-tg svg { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  transform: rotate(-90deg); transition: transform .2s cubic-bezier(.2, .7, .2, 1); }
+.wdr.open .wdr-tg svg { transform: none; }
+.wdr-tg:hover svg { stroke: var(--text); }
+.wdr-tg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.wdr-t { flex: none; }
+.wdr-s { margin-left: auto; min-width: 0; font: 600 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.wdr-s b { font: 700 11px/1.2 var(--font-mono); color: var(--text); }
+.wdr-s b.mc-good { color: var(--good); }
+.wdr-s b.mc-bad { color: var(--bad); }
+.wdr-b { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+#mcWall .wdr-b > .ppm { padding-top: 0; flex: 1; min-height: 0; height: auto; }
+#mcWall .wdr-sr { padding: 2px 0 0; overflow-y: auto; scrollbar-width: thin; }
+#mcWall .wdr-sr .liq-level-row { grid-template-columns: 40px 62px minmax(0, 1fr) 48px; gap: 6px; padding: 4px 2px; font-size: 11px; }
+#mcWall .wdr-sr .liq-level-bar-track { height: 6px; }
+@media (prefers-reduced-motion: reduce) { .wdr-tg svg { transition: none; } }

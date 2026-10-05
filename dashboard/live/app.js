@@ -2506,11 +2506,17 @@ function renderLiquidationMapPanel() {
   //   🔴서술이다 -- 청산 밀집은 추정이고 지지·저항 반등을 예측하지 않는다(벽 반등률 0.509, 09-20).
   // 2026-09-28(2차) 모바일·세로 화면은 **예전 게이지 행**으로 되돌렸다(사용자 지시) -- 이름 · 가격 · 강도 막대 · 거리 %.
   const sr = srLevelsLive();
+  if (wallDrawer === "sr") renderPaper();   // 2026-10-06 넓은 화면 모의 판 칸의 지지/저항 서랍(열려 있을 때만)
   if (!srGaugeMode()) { setH("liquidationMapList", ""); return; }
   if (!sr || (!sr.res.length && !sr.sup.length)) {
     setH("liquidationMapList", `<p class="muted" style="padding:16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
     return;
   }
+  setH("liquidationMapList", srRowsHtml(sr));
+}
+
+// 지지·저항 게이지 행(이름 · 가격 · 강도 막대 · 거리 %, 가운데 현재가 줄) -- 모바일 목록과 2026-10-06 넓은 화면 모의 판 칸 서랍이 같이 쓴다.
+function srRowsHtml(sr) {
   const row = (lv, tag, cls) => {
     const pct = Math.round((lv.weight_pct || 0) * 100), dist = (lv.price - sr.cur) / sr.cur * 100;
     return `<div class="liq-level-row ${cls}"><span class="liq-level-tag">${tag}</span>`
@@ -2520,8 +2526,8 @@ function renderLiquidationMapPanel() {
   };
   const cur = `<div class="liq-level-row liq-current"><span class="liq-level-tag">현재가</span>`
     + `<span class="liq-level-price">${fmtNum(sr.cur, 2)}</span><div class="liq-level-bar-track"></div><span class="liq-level-dist">-</span></div>`;
-  setH("liquidationMapList", [...sr.res.map((lv, i) => row(lv, "저항" + (i + 1), "liq-resistance")).reverse(), cur,
-                              ...sr.sup.map((lv, i) => row(lv, "지지" + (i + 1), "liq-support"))].join(""));
+  return [...sr.res.map((lv, i) => row(lv, "저항" + (i + 1), "liq-resistance")).reverse(), cur,
+          ...sr.sup.map((lv, i) => row(lv, "지지" + (i + 1), "liq-support"))].join("");
 }
 
 
@@ -4344,10 +4350,10 @@ const PAPER_NEW = [["trend4", "추세 4주"], ["trend4_vs", "추세 4주 ×크�
 //   전체 OI↓−OI↑ +3.55[+1.10,+6.02] · 2025~ +3.37[−0.32,+7.53](CI 0 포함, 사용자 수용) · 엔진 판도 5분 판정으로(rl_1s_agent poi1h).
 const PAPER_COIN_OK = { sol: new Set(["trend4", "trend4_vs"]), xrp: new Set(),
   eth: new Set(["w80_z0.5_a24_mh15", "w100_z0.5_w60", "p1", "trend4", "trend4_vs", "poi1h", "w80_z0.5_a24_mh15_vt", "w100_z0.5_w60_vt", "w80_z0.5_a24_mh15_er", "w100_z0.5_w60_er"]) };
-function paperHtml(d = latestPaper) {
+function paperHtml(d = latestPaper, bare = false) {   // bare = 서랍 안(제목 줄은 서랍 머리가 그린다)
   const open = mcTipOpen.has("paper"), C = activeSnapshotAsset, ok = PAPER_COIN_OK[C], other = C !== "eth";
   const days = d && d.available && d.arms && d.arms["w80_z0.5_a24_mh15"] ? d.arms["w80_z0.5_a24_mh15"].days : null;
-  const head = `<h4><button type="button" class="mc-q" data-tip="paper" aria-expanded="${open}">모의 판<span aria-hidden="true">?</span></button><span class="ppm-sub">실주문 없음 · bp${days ? ` · ${days}일째` : ""}</span></h4>`
+  const head = (bare ? "" : `<h4><button type="button" class="mc-q" data-tip="paper" aria-expanded="${open}">모의 판<span aria-hidden="true">?</span></button><span class="ppm-sub">실주문 없음 · bp${days ? ` · ${days}일째` : ""}</span></h4>`)
     + `<p class="mc-tip"${open ? "" : " hidden"}>${escapeHtml(MC_TIPS.paper + (other ? `\n\n${coinUnit()} = 같은 판을 이 코인 시세·이 코인 문턱으로(주문 1단위 = ETH 1개와 같은 명목). 흐린 줄 = 이 코인 검정 불통과 — 기록만 남긴다.` : "")).replace(/\n/g, "<br>")}</p>`;
   if (!d || !d.available) return `<div class="mc-sec ppm">${head}<div class="ppm-empty">모의 매매 엔진 상태 없음${d && d.error ? ` (${escapeHtml(String(d.error))})` : ""}</div></div>`;
   const A = d.arms || {}, a1 = A["w80_z0.5_a24_mh15"], a2 = A["w100_z0.5_w60"], p1 = d.port;
@@ -4367,9 +4373,44 @@ function paperHtml(d = latestPaper) {
     + `${d.stale ? `<div class="ppm-foot"><span class="mc-warn">엔진 멈춤 ${Math.round(d.age_s / 60)}분</span></div>` : ""}</div>`;
 }
 
+// ── 2026-10-06 넓은 화면 모의 판 칸(#mcWall) = 서랍 둘: 모의 판 · 지지/저항 (사용자 «드로우로 올리고 내리게 · 둘 중 하나만 열려 카드 높이가 안 움직이게») ──
+//   칸 높이는 풋프린트가 정한다(mcPlace) -- 열린 서랍이 남은 높이를 다 쓰고, 닫힌 서랍은 머리 한 줄(+ 요약, 사용자 선택 B). 머리를 누르면 그 서랍이 열리고(열린 걸 누르면 다른 쪽).
+let wallDrawer = (() => { try { return localStorage.getItem("wallDrawer") === "sr" ? "sr" : "paper"; } catch (_) { return "paper"; } })();
+function wallDrawerHtml() {
+  const d = latestPaper, A = d && d.available ? d.arms || {} : {}, sr = srLevelsLive();
+  const n = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}`);
+  const tn = (v) => (v > 0 ? "mc-good" : v < 0 ? "mc-bad" : "");
+  const days = A["w80_z0.5_a24_mh15"] ? A["w80_z0.5_a24_mh15"].days : null;
+  const pSum = [["적응", A["w80_z0.5_a24_mh15"]], ["고래", A["w100_z0.5_w60"]], ["반반", d && d.port]].filter(([, a]) => a && a.cum != null)
+    .map(([nm, a]) => `${nm} <b class="${tn(a.cum)}">${n(a.cum)}</b>`).join(" · ");
+  const px = (lv) => fmtNum(lv.price, (ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 2);
+  const sSum = sr ? [sr.res[0] && `저항 <b class="mc-bad">${px(sr.res[0])}</b>`, sr.sup[0] && `지지 <b class="mc-good">${px(sr.sup[0])}</b>`].filter(Boolean).join(" · ") : "";
+  const chev = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
+  const sec = (k, title, sub, summary, body, extra = "") => {
+    const open = wallDrawer === k;
+    return `<section class="wdr${open ? " open" : ""}"><div class="wdr-h"><button type="button" class="wdr-tg" data-wdr="${k}" aria-expanded="${open}">${chev}<span class="wdr-t">${title}</span>`
+      + (open ? `<span class="wdr-s">${sub}</span>` : summary ? `<span class="wdr-s">${summary}</span>` : "") + `</button>${open ? extra : ""}</div>`
+      + (open ? `<div class="wdr-b">${body}</div>` : "") + `</section>`;
+  };
+  const srBody = sr && (sr.res.length || sr.sup.length) ? `<div class="liq-level-list wdr-sr">${srRowsHtml(sr)}</div>`
+    : `<div class="ppm-empty">${latestLiquidationMap && latestLiquidationMap.warmed_up ? "추정 가능한 밀집 구간이 아직 없습니다" : "청산맵 데이터 수집 중"}</div>`;
+  return `<div class="wdr-wrap">`
+    + sec("paper", "모의 판", `실주문 없음 · bp${days ? ` · ${days}일째` : ""}`, pSum, paperHtml(d, true),
+          `<button type="button" class="mc-q" data-tip="paper" aria-expanded="${mcTipOpen.has("paper")}" aria-label="모의 판 설명"><span aria-hidden="true">?</span></button>`)
+    + sec("sr", "지지 · 저항", "청산맵 밀집 · 가까운 3개씩", sSum, srBody) + `</div>`;
+}
+el("mcWall")?.addEventListener("click", (e) => {
+  const b = e.target.closest(".wdr-tg");
+  if (!b) return;
+  wallDrawer = b.dataset.wdr === wallDrawer ? (wallDrawer === "sr" ? "paper" : "sr") : b.dataset.wdr;
+  try { localStorage.setItem("wallDrawer", wallDrawer); } catch (_) { /* 기억은 편의 */ }
+  renderPaper();
+  el("mcWall").querySelector(`.wdr-tg[data-wdr="${wallDrawer}"]`)?.focus();
+});
+
 function renderPaper() {
   const wall = el("mcWall"), body = el("mcBody");
-  if (wall) { const html = paperHtml(); if (wall._ppm !== html) { wall._ppm = html; keepFocus(wall, () => { wall.innerHTML = html; }); } }
+  if (wall) { const html = wallDrawerHtml(); if (wall._ppm !== html) { wall._ppm = html; keepFocus(wall, () => { wall.innerHTML = html; }); } }
   if (body) body._mcHtml = null;   // 좁은 화면은 시장 맥락 끝에 같이 그린다 · ②④ 상태 줄도 다시
 }
 
@@ -4625,7 +4666,7 @@ function renderMarketCtx() {
   const k = b.dataset.tip, open = !mcTipOpen.has(k);
   if (open) mcTipOpen.add(k); else mcTipOpen.delete(k);
   b.setAttribute("aria-expanded", String(open));
-  const tip = b.closest(".mc-sec")?.querySelector(".mc-tip");
+  const tip = (b.closest(".wdr") || b.closest(".mc-sec"))?.querySelector(".mc-tip");
   if (tip) tip.hidden = !open;
   el("mcBody")._mcHtml = null;         // 다음 그리기에서 펼침 상태를 반영한다
 }));
@@ -7053,26 +7094,21 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   {
     const mc = latestMarketCtx && latestMarketCtx.available && latestMarketCtx.asset === activeSnapshotAsset ? latestMarketCtx : null;
     const sw = mc && mc.book && mc.book.sweep, mid = Number(currentPrice) || Number(mc && mc.mid);
-    if (isSnapshotChart && footprint && BOOK_W && sw && mid > 0) {   // 2026-10-06 휴대폰도(사용자 지시) -- 띠가 56px 라 선만, 글자·화면 밖 꼬리표는 데스크톱만
+    if (isSnapshotChart && footprint && BOOK_W && sw && mid > 0) {   // 2026-10-06 휴대폰도(사용자 지시) -- 띠가 56px 라 선만, 글자는 데스크톱만
       const g = document.createElementNS(NS, "g");
       g.setAttribute("pointer-events", "none");
       const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); };
       const qty = (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : v.toFixed(0));
       const bx0 = w - mr - BOOK_W, bx1 = w - mr, halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
       const dpx = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 2;   // ETH 1 · SOL 2 · XRP 4
-      let topY = mt + 22, botY = plotBottom - 2;   // 화면 밖 꼬리표가 쌓일 다음 자리
       (mc.book.bps || [25, 50, 100]).forEach((bp, i) => [[1, sw.ask[i], "var(--bad)"], [-1, sw.bid[i], "var(--good)"]].forEach(([dir, q, col]) => {
         if (!(q >= 0)) return;
-        const px = mid * (1 + dir * bp / 1e4), y = yAt(px), above = y < mt + 12, below = y > plotBottom;   // 2026-10-06 사용자 «±25 말고 현재가로 계산한 가격»
-        let ty;
-        if ((above || below) && mobileChart) return;
-        if (above) { ty = topY; topY += 13; } else if (below) { ty = botY; botY -= 13; } else {
-          add("line", { x1: bx0, x2: bx1, y1: y, y2: y, stroke: col, "stroke-width": bp === 50 ? 2 : 1.2 });
-          ty = y + (dir > 0 ? -3 : 11);
-          if (mobileChart) return;
-        }
-        add("text", { x: bx1 - 3, y: ty, "text-anchor": "end", "font-size": 10.5, "font-family": "var(--font-mono)", "font-weight": 800, fill: col, class: "far-lbl", ...halo },
-            `${px.toLocaleString("en-US", { minimumFractionDigits: dpx, maximumFractionDigits: dpx })} · ${qty(q)}${above ? "↑" : below ? "↓" : ""}`);
+        const px = mid * (1 + dir * bp / 1e4), y = yAt(px);   // 2026-10-06 사용자 «±25 말고 현재가로 계산한 가격»
+        if (y < mt || y > plotBottom) return;   // 2026-10-06 화면 밖 벽은 안 적는다(사용자 «호가벽 데이터를 직접 보면 돼») -- 옛 ↑↓ 쌓기 제거
+        add("line", { x1: bx0, x2: bx1, y1: y, y2: y, stroke: col, "stroke-width": bp === 50 ? 2 : 1.2 });
+        if (mobileChart) return;
+        add("text", { x: bx1 - 3, y: y + (dir > 0 ? -3 : 11), "text-anchor": "end", "font-size": 10.5, "font-family": "var(--font-mono)", "font-weight": 800, fill: col, class: "far-lbl", ...halo },
+            `${px.toLocaleString("en-US", { minimumFractionDigits: dpx, maximumFractionDigits: dpx })} · ${qty(q)}`);
       }));
       wallTagsG = g;
     }
@@ -7815,7 +7851,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ── 풋프린트 아래 = 사분면 리본 + 차트 둘 (2026-10-06 사용자 선택 A) ─────────────────────────
   // «사분면은 글자만 살려서 레짐처럼 리본, 차트는 OI·CVD 하나 / 고래·중형·리테일·거래대금 하나».
   //   리본: 색 = 델타 부호 · 신규(OI↑) = 꽉 찬 칸 · 정리(OI↓) = 테두리 칸 · OI 모름 = 흐린 칸(이름도 «매수/매도 우위»로 유보).
-  //   ① CVD·OI 60분 합(같은 코인 축) ② 고래·중형·리테일 60분 합 + 거래대금 가는 기둥(제 축, 바닥 = 0) -- 그리는 문법은 아래 «차트 둘» 주석.
+  //   ① CVD·OI 60분 합(같은 코인 축) ② 고래·중형·리테일 60분 합 + 거래대금 꺾은선 + 옅은 면(제 축, 바닥 = 0) -- 그리는 문법은 아래 «차트 둘» 주석.
   //   60분 합 = 그 봉까지 12봉, 다 있어야 점(10-05 B안 규약 그대로 -- 일부 합을 60분으로 말하지 않는다).
   //   봉별 Δ/OI 숫자 줄·창 시작 누적 흐린 선은 뺐다 -- 봉 호버 툴팁(laneTip)이 그 봉 값을 글자로 말한다.
   // 🔴OI 모름(null)과 ΔOI 0 을 가른다(2026-09-25) -- 없는 봉에 «신규 롱/숏» 이라는 없는 사실을 안 찍는다.
@@ -7890,6 +7926,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-10-06 차트 둘 = 위 1초 수급 차트와 같은 문법(사용자 선택 A «투박해 -- 통일성·글자·폰트», 제목은 뺀다):
     //   선 어휘 CVD 잉크 1.8 · OI 주황 1.8 · 고래 잉크 2.4 실선 · 중형 1.7 파선 · 리테일 1.5 점선 · 0선 잉크 18% ·
     //   차트 위 한 줄 범례 «견본 선 · 이름(흐림) · 값(부호색 / 선 색)» 12px · 숫자 tabular · 모바일은 이름 없이 견본 + 값.
+    //   거래대금 = 파란 꺾은선 + 옅은 면, 판 아래 45% 제 축(10-06 사용자 선택 C).
     const FF = "Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif", fs = mobileChart ? 10 : 12, HEAD = mobileChart ? 16 : 20;
     const STY = { c: ["CVD", "var(--ink)", 1.8, 0.9, null], oi: ["OI", "var(--warn)", 1.8, 0.95, null],
                   w: ["고래", "var(--ink)", 2.4, 0.95, null], m: ["중형", "var(--ink)", 1.7, 0.75, "6 3"], r: ["리테일", "var(--ink)", 1.5, 0.6, "2 3"] };
@@ -7915,7 +7952,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const wd = 18 + (nm ? measureTextW(nm, `600 ${fs}px ${FF}`) : 0) + measureTextW(val, `700 ${fs}px ${FF}`);
         if (x + wd > ml + cw - 4) { x = Infinity; return; }
         const yb = y0 + 15;
-        if (k === "turn") mk("rect", { x: x + 3, y: yb - 9, width: 6, height: 9, rx: 1, fill: "var(--turnover)", "fill-opacity": 0.6 });
+        if (k === "turn") mk("line", { x1: x, x2: x + 12, y1: yb - fs / 3, y2: yb - fs / 3, stroke: "var(--turnover)", "stroke-width": 1.6 });
         else mk("line", Object.assign({ x1: x, x2: x + 12, y1: yb - fs / 3, y2: yb - fs / 3 }, lineAt(k)));
         const t = txt(x + 18, yb, "", { "font-size": fs, style: "font-variant-numeric: tabular-nums" });
         const a = document.createElementNS(NS, "tspan"); a.setAttribute("fill", "var(--muted)"); a.setAttribute("font-weight", "600"); a.textContent = nm;
@@ -7930,11 +7967,22 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       legend(c1[0], [["c", sgnQ(last.c), vcol("c", last.c)], ["oi", sgnQ(last.oi), vcol("oi", last.oi)]]);
       if (!mobileChart) txt(ml + cw - 6, c1[0] + 15, "60분 합 · 같은 축", { "text-anchor": "end", "font-size": fs - 1, fill: "var(--muted)" });
     }
-    {   // ② 고래 · 중형 · 리테일 + 거래대금(봉마다 가는 기둥, 제 축 -- 세로 위치를 선과 비교하지 않는다)
+    {   // ② 고래 · 중형 · 리테일 + 거래대금(제 축 -- 세로 위치를 선과 비교하지 않는다)
       mk("line", { x1: ml, x2: ml + cw, y1: c2[0] - GAP / 2, y2: c2[0] - GAP / 2, stroke: "var(--line)" });
-      const tMax = Math.max(...have.map((r) => r.turn), 1e-9), ty = (v) => c2[1] - (v / tMax) * (c2[1] - c2[0] - HEAD) * 0.32;
-      rows.forEach((r, i) => { if (r) mk("rect", { x: cx(i) - 1, y: ty(r.turn), width: 2, height: Math.max(1, c2[1] - ty(r.turn)), rx: 1,
-                                                    fill: "var(--turnover)", "fill-opacity": 0.55 }); });
+      const tMax = Math.max(...have.map((r) => r.turn), 1e-9), ty = (v) => c2[1] - 2 - (v / tMax) * (c2[1] - c2[0] - HEAD) * 0.45;
+      {   // 2026-10-06 거래대금 = 꺾은선 + 옅은 면(사용자 선택 C, 가는 기둥 대체) -- 빈 봉에서 끊고 이어 그린다(면은 첫·끝 점 사이)
+        let d = "", pen = false, x0 = null, x1 = null;
+        rows.forEach((r, i) => {
+          if (!r) { pen = false; return; }
+          d += (pen ? " L" : " M") + cx(i).toFixed(1) + " " + ty(r.turn).toFixed(1);
+          if (x0 == null) x0 = cx(i);
+          x1 = cx(i); pen = true;
+        });
+        if (d) {
+          mk("path", { d: d + ` L${x1.toFixed(1)} ${c2[1]} L${x0.toFixed(1)} ${c2[1]} Z`, fill: "var(--turnover)", "fill-opacity": 0.1 });
+          mk("path", { d, fill: "none", stroke: "var(--turnover)", "stroke-width": 1.6, "stroke-opacity": 0.9, "stroke-linejoin": "round" });
+        }
+      }
       const Y = frame(c2, ["w", "m", "r"]);
       path("r", Y); path("m", Y); path("w", Y);
       legend(c2[0], [["w", sgnQ(last.w), vcol("w", last.w)], ["m", sgnQ(last.m), vcol("m", last.m)], ["r", sgnQ(last.r), vcol("r", last.r)],
