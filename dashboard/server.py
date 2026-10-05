@@ -891,6 +891,27 @@ def news_payload(now: float, db: Path = NEWS_DB) -> dict:
 
 
 BYBIT_LIQ_DB = REPO_ROOT / "data" / "hot" / "bybit_liq.sqlite"     # 2026-10-03 Bybit allLiquidation 수집기(f74a185c)
+BYBIT_TAPE_DB = REPO_ROOT / "data" / "hot" / "bybit_tape.sqlite"   # 2026-10-06 Bybit 체결 테이프(live_bybit_trade_tape_collector_20261006)
+BYBIT_CTX_DB = REPO_ROOT / "data" / "hot" / "bybit_ctx.sqlite"     # 같은 수집기의 OI·마크·펀딩
+VENUE_SETS = (("binance", "okx", "bybit"), ("binance", "okx"))       # 합산 조합(앞이 우선 -- 창·기준선이 다 있을 때만)
+
+
+def bybit_bars(symbol: str, t0: int, t1: int, db: Path = BYBIT_TAPE_DB) -> dict[int, tuple[float, float, float, float]]:
+    """[t0, t1) Bybit 5분봉 → {봉: (매수, 매도, 고래 순, 리테일 순)} 코인 수량(2026-10-06 사용자 «바로 합산»).
+    끊김(gaps)이 걸친 봉은 뺀다 -- 빈 봉은 «모름»이지 0 이 아니다. t1 은 닫힌 지 10초 넘은 봉 경계로 부른다(수집기 5초 flush).
+    DB 를 읽으니 이벤트 루프 밖(to_thread)에서 부른다."""
+    if not db.exists():
+        return {}
+    try:
+        rows = _read_only_rows(db, """SELECT ts_sec - ts_sec % 300, sum(buy_qty), sum(sell_qty), sum(whale_buy_qty - whale_sell_qty),
+                                             sum(retail_buy_qty - retail_sell_qty) FROM trade_tape_1s
+                                      WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY 1""", [symbol, t0, t1])
+        gaps = _read_only_rows(db, "SELECT from_ms, to_ms FROM gaps WHERE symbol = ? AND from_ms < ? AND to_ms > ?",
+                               [symbol, t1 * 1000, t0 * 1000])
+    except (sqlite3.Error, OSError):
+        return {}
+    return {int(b): (float(bu), float(se), float(w or 0.0), float(rt or 0.0)) for b, bu, se, w, rt in rows
+            if not any(f < (int(b) + 300) * 1000 and t > int(b) * 1000 for f, t in gaps)}
 _BYBIT_LIQ_CACHE: dict[str, tuple[float, list[dict], int | None]] = {}
 
 
@@ -3491,6 +3512,14 @@ def make_app() -> web.Application:
                                                                              since_ts=SIZE_BANDS_SINCE.get(asset, 0)) or micro_state.get("flow_scales")
                     except Exception as exc:  # noqa: BLE001
                         print(f"micro-ref flow_scales: {exc!r}", flush=True)
+                    try:   # 2026-10-06 거래소 합산판 분모(사용자 «바로 합산») -- 조합마다. Bybit 칸은 표본이 쌓이는 대로(10-06~) 채워진다
+                        srcs = {"binance": (MICRO_TAPE_DB_PATH, sym), "okx": (F.spec.okx_tape_db, F.spec.okx_inst),
+                                "bybit": (BYBIT_TAPE_DB, F.spec.symbol)}
+                        got_all = await asyncio.to_thread(mref.flow_hour_scales_combos, srcs, list(VENUE_SETS),
+                                                          since_ts=SIZE_BANDS_SINCE.get(asset, 0))
+                        micro_state["flow_scales_all"] = {k: v or (micro_state.get("flow_scales_all") or {}).get(k, {}) for k, v in got_all.items()}
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"micro-ref flow_scales_all: {exc!r}", flush=True)
                 if asset == "eth" and now - micro_state["liq_prev_at"] >= 10.0:   # 봇 tail_risk = ETH 만
                     micro_state["liq_prev_at"] = now
                     micro_state["liq_prev"] = await asyncio.to_thread(mref.liq_prev_minute, LIVE_DIR / "tail_risk.duckdb")
@@ -3718,6 +3747,7 @@ def make_app() -> web.Application:
     # 2026-10-04 SOL·XRP 도 닿음 확률(사용자 «30분 도달 확률도 적용»): ETH 모델을 그 코인 5분봉 26피쳐에 그대로 --
     #   검정 AUC − 크기 삼분위 표 SOL +.064 · XRP +.065(eth_only_signals_solxrp_20261004). 🔴캐시는 코인별(봉 시각이 같아 ETH 값이 섞인다)
     card30_by: dict[str, dict[str, Any]] = {}
+    okx_bar_net_by: dict[str, dict[int, tuple[float, ...]]] = {}   # 2026-10-06 합산 -- OKX 봉별 (순, 고래 순, 리테일 순, 매수, 매도). fr_bar_net 과 같은 갱신 규칙
 
     def _card30_pred(bars: list[dict[str, Any]], asset: str = "eth") -> dict[str, float]:
         """완결 5분봉 → {"dir": 닿는다면 위 먼저, "reach": 30분 안 한쪽에 닿음} 보정 확률. 모델·피쳐가 없으면 빈 dict(카드는 표로 물러선다)."""
@@ -3782,6 +3812,40 @@ def make_app() -> web.Application:
             p30 = r30[:-1][np.isfinite(r30[:-1])]
             if np.isfinite(r30[-1]) and len(p30) >= 72 and p30.std() > 0:
                 x["cvd30_z"] = float(r30[-1] / p30.std())
+            # 2026-10-06 거래소 합산(사용자 «바로 합산»): 같은 격자에 OKX·Bybit 봉을 더해 60분 크기별 합·σ · 30분 CVD σ · 테이커 비율.
+            #   σ 분모 = 같은 조합의 14일 기준선(flow_scales_all). 조합은 VENUE_SETS 앞부터 -- 60분 창과 기준선 칸이 다 있는 첫 조합.
+            #   한 거래소라도 빈 봉은 그 합을 «모름»(NaN)으로 둔다. 판정(z60·맞대결·융합)은 바이낸스 그대로다(바이낸스로 검정됐다).
+            ofb, onet, bb = okx_fp["first_bar"], okx_bar_net_by.setdefault(asset, {}), situation_state.get("bybit_bars") or {}
+            for b in grid:
+                if ofb and b > ofb and b in okx_bars and (b not in onet or b >= bar_start - 2 * bar):
+                    cells = okx_bars[b].values()
+                    onet[b] = (sum(v[0] - v[1] for v in cells), sum(v[2] - v[3] for v in cells), sum(v[4] - v[5] for v in cells),
+                               sum(v[0] for v in cells), sum(v[1] for v in cells))
+            for b in [b for b in onet if b not in okx_bars]:
+                del onet[b]
+            nan3 = [np.nan] * 3
+            ven = {"okx": np.array([list(onet[b][:3]) if b in onet else nan3 for b in grid], dtype=float),
+                   "bybit": np.array([[bb[b][0] - bb[b][1], bb[b][2], bb[b][3]] if b in bb else nan3 for b in grid], dtype=float)}
+            hkey = (mref.is_weekend(done[-1]), time.gmtime(done[-1]).tm_hour)
+            for vs in VENUE_SETS:
+                sca = ((micro_state.get("flow_scales_all") or {}).get(vs) or {}).get(hkey)
+                A = a + sum(ven[v] for v in vs[1:])
+                s60 = {g: roll(v, 12) for g, v in (("whale", A[:, 1]), ("mid", A[:, 0] - A[:, 1] - A[:, 2]), ("retail", A[:, 2]))}
+                if not sca or not all(np.isfinite(q[-1]) for q in s60.values()):
+                    continue
+                x["venues"] = list(vs)
+                x["net60_all"] = {g: float(q[-1]) for g, q in s60.items()}
+                x["z60h_all"] = {g: float(s60[g][-1] / sca[g]) for g in s60}
+                r30a = roll(A[:, 0], 6)
+                p30a = r30a[:-1][np.isfinite(r30a[:-1])]
+                if np.isfinite(r30a[-1]) and len(p30a) >= 72 and p30a.std() > 0:
+                    x["cvd30_all_z"] = float(r30a[-1] / p30a.std())
+                lb = done[-1]   # 테이커 매수÷매도 = 마지막 닫힌 봉, 같은 조합(바이낸스 API 비율 대신 체결 테이프로 직접)
+                buy = sum(v[0] for v in fbars[lb].values()) + onet[lb][3] + (bb[lb][0] if "bybit" in vs else 0.0)
+                sell = sum(v[1] for v in fbars[lb].values()) + onet[lb][4] + (bb[lb][1] if "bybit" in vs else 0.0)
+                if sell > 0:
+                    x["taker_all"] = buy / sell
+                break
         last6 = done[-6:]
         if okx_fp["first_bar"] and len(last6) == 6 and all(b > okx_fp["first_bar"] and b in okx_bars for b in last6):
             x["okx30"] = float(sum(v[0] - v[1] for b in last6 for v in okx_bars[b].values()))
@@ -3873,6 +3937,9 @@ def make_app() -> web.Application:
         except Exception:  # noqa: BLE001
             situation_state["book"] = {}
         inp = await asyncio.to_thread(_situation_inputs, now, asset)
+        situation_state["bybit_bars"] = await swr_cached(   # 2026-10-06 합산 -- 26시간(풋프린트 링 288봉 + 여유), 닫힌 지 10초 넘은 봉까지
+            f"bybit_bars_{asset}", 20.0, lambda: asyncio.to_thread(bybit_bars, flows[asset].spec.symbol, int(now) - 26 * 3600,
+                                                                   int(now - 10) // 300 * 300), max_stale=120.0)
         # 슈미트 트리거의 «이전 레짐». classify 는 순수 함수라 상태를 여기서 들고 넘긴다.
         # 재기동 직후엔 0(중립)에서 시작한다 -- 추세로 들어가려면 ENTER 를 넘어야 한다.
         inp["prev_dir"] = (situation_state.get("now") or {}).get("dir") or 0
@@ -3943,6 +4010,7 @@ def make_app() -> web.Application:
         q("okx_fund", OKX_CTX_DB_PATH, "SELECT funding_rate, funding_time FROM okx_funding WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
         q("okx_mark", OKX_CTX_DB_PATH, "SELECT mark_px, ts_ms FROM okx_mark WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
         q("okx_oi", OKX_CTX_DB_PATH, "SELECT oi_base FROM okx_oi WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [OKX_INST])
+        q("by_oi", BYBIT_CTX_DB, "SELECT oi_base FROM bybit_oi WHERE inst = ? ORDER BY ts_ms DESC LIMIT 1", [flows[asset].spec.symbol])
         q("hl_ctx", HL_CTX_DB_PATH, "SELECT funding, open_interest, premium, mark_px, mid_px, recv_ms FROM hl_asset_ctx WHERE coin = ? ORDER BY recv_ms DESC LIMIT 1", [coin])
         # 마지막으로 **다 돈** 바퀴의 포지션(바퀴 행과 포지션이 한 트랜잭션으로 들어온다 -- 수집기 write())
         q("hl_pos", HL_LIQ_BY_ASSET[asset], "SELECT szi, liq_px FROM hl_positions WHERE coin = ? AND ts_ms >= (SELECT max(ts_ms) FROM hl_cycles)", [coin])
@@ -3959,10 +4027,23 @@ def make_app() -> web.Application:
         for t, v in raw:
             last5[int(t) // 300000 * 300] = float(v)
         oi = sorted(last5.items())
+        # 2026-10-06 합산 OI(사용자 «바로 합산») -- OKX·HL·Bybit 도 같은 5분 끝값 격자로(market_ctx.oi_sum_series 가 덮는 거래소만 더한다)
+        per = {"binance": oi}
+        # 5분 끝값은 SQL 안에서 접는다(SQLite 는 max() 와 함께 쓴 맨 열이 그 최대 행의 값) -- 파이썬 행 루프는 HL 7일 59만 행에 수십 초였다(10-06 서버 실측, SQL 0.2초)
+        for k, path, tbl, ts, val, kc, key in (("okx", OKX_CTX_DB_PATH, "okx_oi", "ts_ms", "oi_base", "inst", flows[asset].spec.okx_inst),
+                                               ("hl", HL_CTX_DB_PATH, "hl_asset_ctx", "recv_ms", "open_interest", "coin", asset.upper()),
+                                               ("bybit", BYBIT_CTX_DB, "bybit_oi", "ts_ms", "oi_base", "inst", flows[asset].spec.symbol)):
+            try:
+                rows = _read_only_rows(path, f"""SELECT {ts} / 300000 * 300 AS b, {val}, max({ts}) FROM {tbl}
+                                                WHERE {kc} = ? AND {ts} >= ? AND {val} IS NOT NULL GROUP BY b ORDER BY b""",
+                                       [key, since]) if path.exists() else []
+            except (sqlite3.Error, duckdb.Error, OSError):
+                rows = []
+            per[k] = [(int(b), float(v)) for b, v, _ in rows]
         # 🔴2026-10-04 symbol 조건: 수집기가 SOL·XRP 마크도 쓰기 시작해 거르지 않으면 세 코인 베이시스가 섞인다
         basis = own_db_rows(MARK_PRICE_DB_PATH, f"""SELECT (mark - index_px) / index_px * 1e4 FROM {MARK_PRICE_TABLE}
                                                   WHERE symbol = ? AND ts_ms >= ? AND index_px > 0 AND ts_ms % 60000 < 1000""", [sym, since])
-        return {"oi": [(int(t), float(v)) for t, v in oi], "basis": [float(b[0]) for b in basis]}
+        return {"oi": [(int(t), float(v)) for t, v in oi], "oi_per": per, "basis": [float(b[0]) for b in basis]}
 
     def _mc_liq_profile(asset: str = "eth") -> list[list[float]]:
         """ETH 실측 청산(바이낸스 forceOrder 체결가) 12시간 → 가격 묶음. 파일 꼬리만 읽는다.
@@ -4022,6 +4103,17 @@ def make_app() -> web.Application:
         #   낡았다. 끝 칸을 라이브 OI(oi_1s, 사분면 oi60 과 같은 원천)로 바꾼다 -- 기준(1시간 전 칸·과거 분포)은 격자 그대로.
         oi = mctx.oi_stats(mctx.oi_series_live(hist["oi"], max(oi_1s), oi_1s[max(oi_1s)]) if oi_1s else hist["oi"])
         okx_oi, hl = one("okx_oi"), one("hl_ctx")
+        # 2026-10-06 합산 OI(사용자 «바로 합산») -- 7일 합 격자 끝에 거래소별 최신값의 합. 넣은 거래소 중 하나라도 최신값이 없으면 합산 안 함.
+        now_s = int(time.time())
+        oi_ser, oi_ven = mctx.oi_sum_series(hist.get("oi_per") or {}, since=(now_s - 7 * 86400) // 300 * 300)
+        latest = {"binance": oi_1s[max(oi_1s)] if oi_1s else None, "okx": okx_oi[0] if okx_oi else None,
+                  "hl": hl[1] if hl else None, "bybit": one("by_oi")}
+        oi_all = None
+        if oi_ser and all(latest.get(k) for k in oi_ven):
+            oi_all = {**mctx.oi_stats(mctx.oi_series_live(oi_ser, now_s, sum(float(latest[k]) for k in oi_ven))), "venues": oi_ven,
+                      "by_venue": {k: (oi["d1h_pct"] if k == "binance" else mctx.oi_stats((hist.get("oi_per") or {}).get(k) or [])["d1h_pct"])
+                                   for k in oi_ven}}
+            oi_all["d1h"] = oi_all["oi"] * (1 - 1 / (1 + oi_all["d1h_pct"] / 100)) if oi_all.get("d1h_pct") is not None else None
         okx_mark, okx_fund = one("okx_mark"), one("okx_fund")
         bp = lambda a, b: (a / b - 1) * 1e4 if a and b else None   # noqa: E731
         ls = col.get("ls") or []
@@ -4043,13 +4135,15 @@ def make_app() -> web.Application:
                         "hl_8h": hl[0] * 8 if hl and hl[0] is not None else None},     # HL 펀딩은 1시간 단위 -- 8시간으로 맞춘다
             "basis": {"bp": dv["basis_bp"], "d30_bp": dv["basis_d_bp"], "pct7d": basis_pct,
                       "hl_premium_bp": hl[2] * 1e4 if hl and hl[2] is not None else None},
-            "lev": mctx.lev_state(basis_pct, oi["z1h"]),
-            "oi": {**oi, "okx": okx_oi[0] if okx_oi else None, "hl": hl[1] if hl else None},
+            "lev": mctx.lev_state(basis_pct, (oi_all or oi)["z1h"]),   # 2026-10-06 합산 OI z 가 있으면 그걸로
+            "oi": {**oi, "okx": okx_oi[0] if okx_oi else None, "hl": hl[1] if hl else None, "bybit": one("by_oi"), "all": oi_all},
             "ls": ({"global": lsv(1, ls[::-1]), "top_pos": lsv(2, ls[::-1]), "taker": lsv(3, ls[::-1]),
                     "global_24h": ls24(1), "top_pos_24h": ls24(2), "age_s": time.time() - ls[-1][0]} if ls else None),
-            "quad": mctx.quad_1h(x.get("move60"), x.get("oi60"), x.get("move60_p75")),
+            "quad": mctx.quad_1h(x.get("move60"), oi_all["d1h"] if oi_all and oi_all.get("d1h") is not None else x.get("oi60"), x.get("move60_p75")),
             "move60": x.get("move60"), "oi60": x.get("oi60"),
             "flow": {"z60": x.get("z60"), "z60h": x.get("z60h"), "net60": x.get("net60"), "cvd30_z": x.get("cvd30_z"),
+                     "venues": x.get("venues"), "z60h_all": x.get("z60h_all"), "net60_all": x.get("net60_all"),
+                     "cvd30_all_z": x.get("cvd30_all_z"), "taker_all": x.get("taker_all"),
                      "bn30": ev.get("cvd"), "okx30": x.get("okx30")},
             "btc": {"move_bp": ev.get("btc_move_bp"), "rel": ev.get("btc_rel")},
             # 🔴같은 종류끼리만 잰다: 바이낸스 마크는 평활값이라 체결 미드보다 ~10bp 늦게 따라올 때가 있다(09-29 실측 HL 미드−BN 미드 8.9bp 를

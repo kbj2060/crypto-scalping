@@ -6,9 +6,10 @@
 무엇: 공개 WS 하나(`publicTrade` + `tickers`, 5코인 18KB/s · 2026-10-06 서버 60초 실측)로
   · 체결 → data/hot/bybit_tape.sqlite `trade_tape_1s`(바이낸스·OKX 테이프와 **같은 표·같은 칸 뜻**)
   · tickers → data/hot/bybit_ctx.sqlite `bybit_oi`(값이 바뀔 때) · `bybit_mark`(종목당 1초 1점) · `bybit_funding`(바뀔 때)
-⭐묶는 단위 = (seq, 방향, 가격). Bybit `seq` 는 테이커 주문 하나의 모든 체결이 같은 값이다(실측 5코인 전부 같은 seq 안
-  시각 동일). 가격까지 묶으면 바이낸스 aggTrade · OKX `trades` 와 **같은 단위**(한 주문의 한 가격)가 된다 -- 크기 구간
-  (고래·리테일)이 세 거래소에서 같은 뜻이 되려면 이게 맞아야 한다. 경계·가격빈은 바이낸스 수집기에서 import 한다.
+⭐묶는 단위 = 연속된 (체결 시각 ms, 방향, 가격). 테이커 주문 하나의 체결은 시각이 같다(실측 5코인 전부 같은 seq 안 시각 동일)
+  -- 가격까지 묶으면 바이낸스 aggTrade · OKX `trades` 와 **같은 단위**(한 주문의 한 가격)가 된다. `seq` 대신 시각을 쓰는 이유는
+  과거 일별 덤프(public.bybit.com/trading)에 seq 가 없어서다 -- 검정(맞대결 합산판, 2026-10-06)과 라이브가 같은 규칙이어야 한다.
+  경계·가격빈은 바이낸스 수집기에서 import 한다.
 🔴`S` 는 **테이커** 방향이다(Buy = 테이커 매수) -- 뒤집지 않는다. `v` 는 기초자산 수량(USDT 선형은 계약 = 코인 1개).
 🔴청산은 따로 돈다(live_bybit_liquidation_collector_20261003.py) -- 여기서 받지 않는다.
 ponytail: REST 복구 없음 -- Bybit 최근 체결 REST 는 1000건뿐이라 분 단위 재구성이 안 된다. 끊긴 구간은 gaps 에 적고
@@ -45,14 +46,14 @@ MARK_EVERY_MS = 1000           # ponytail: 마크는 종목당 1초 1점(tickers
 
 
 class OrderGrouper:
-    """체결 → (seq, 방향, 가격) 묶음. 다른 키가 오면 앞 묶음을 닫는다(같은 주문의 체결은 연달아 온다).
+    """체결 → (시각 ms, 방향, 가격) 묶음. 다른 키가 오면 앞 묶음을 닫는다(같은 주문의 체결은 연달아 온다).
     메시지 경계를 넘는 묶음도 이어 붙는다 -- 닫는 건 «다른 키» 또는 `flush()`(1초 넘게 조용할 때)."""
 
     def __init__(self) -> None:
         self.key, self.ts, self.qty, self.n, self.last = None, 0, 0.0, 0, 0.0
 
-    def add(self, seq, sell: bool, px: float, qty: float, ts_ms: int) -> tuple | None:
-        k, done = (seq, sell, px), None
+    def add(self, sell: bool, px: float, qty: float, ts_ms: int) -> tuple | None:
+        k, done = (ts_ms, sell, px), None
         if k != self.key:
             done = self.flush()
             self.key, self.ts, self.qty, self.n = k, ts_ms, 0.0, 0
@@ -157,7 +158,7 @@ async def run() -> None:
     groups = {s: OrderGrouper() for s in SYMBOLS}
     for s, st in stores.items():
         with st._connect() as con:
-            for k, v in ((f"max_unit:{s}", "taker_order_price_level"), (f"source:{s}", "bybit v5 publicTrade grouped by (seq, side, price)")):
+            for k, v in ((f"max_unit:{s}", "taker_order_price_level"), (f"source:{s}", "bybit v5 publicTrade grouped by consecutive (T ms, side, price)")):
                 con.execute("DELETE FROM meta WHERE key = ?", [k]); con.execute("INSERT INTO meta VALUES (?, ?)", [k, v])
     ctx, tick = ctx_conn(CTX_DB), TickerState()
     last_ms = {s: st.last_ts_ms() for s, st in stores.items()}
@@ -208,7 +209,7 @@ async def run() -> None:
                                     if s in first:          # 연결 뒤 첫 체결 -- 그 앞은 «모름»
                                         first.discard(s)
                                         stores[s].record_gap(last_ms[s] or ts // 60_000 * 60_000, ts, "ws_reconnect" if last_ms[s] else "startup")
-                                    add_order(s, groups[s].add(seq, sell, px, qty, ts))
+                                    add_order(s, groups[s].add(sell, px, qty, ts))
                                     last_ms[s] = ts
                             elif topic.startswith("tickers."):
                                 for t, rows in tick.rows(msg).items():
@@ -236,11 +237,11 @@ async def run() -> None:
 
 
 def selftest() -> None:
-    # 묶기: 같은 (seq, 방향, 가격)만 한 주문 · 메시지 경계를 넘어도 이어진다
+    # 묶기: 연속된 같은 (시각, 방향, 가격)만 한 주문 · 메시지 경계를 넘어도 이어진다
     g, out = OrderGrouper(), []
-    for seq, sell, px, q, ts in [(1, False, 100.0, 1, 10), (1, False, 100.0, 2, 10), (1, False, 100.5, 3, 10),
-                                 (2, True, 100.5, 4, 11), (3, True, 100.5, 5, 12)]:
-        o = g.add(seq, sell, px, q, ts)
+    for sell, px, q, ts in [(False, 100.0, 1, 10), (False, 100.0, 2, 10), (False, 100.5, 3, 10),
+                            (True, 100.5, 4, 11), (True, 100.5, 5, 12)]:
+        o = g.add(sell, px, q, ts)
         if o:
             out.append(o)
     out.append(g.flush())

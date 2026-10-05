@@ -124,6 +124,19 @@ def oi_series_live(series: list[tuple[int, float]], sec: int, value: float,
     return [r for r in series if r[0] < b] + [(b, value)]
 
 
+def oi_sum_series(per: dict[str, list[tuple[int, float]]], since: int, tol_s: int = 3600) -> tuple[list[tuple[int, float]], list[str]]:
+    """거래소별 5분 OI [(봉 시각, OI)] → 합 시계열과 넣은 거래소(2026-10-06 사용자 «바로 합산»).
+    창 시작(since) 부근(tol_s 안)부터 덮는 거래소만 넣는다 -- 새 거래소(Bybit 10-06~)는 7일 쌓인 뒤 저절로 합류한다
+    (안 그러면 z 의 과거 분포가 그 거래소 없이 만들어져 합류 순간 «급증»으로 읽힌다). 바이낸스가 없으면 빈 결과.
+    한 거래소라도 빈 칸은 합에서 뺀다 -- oi_stats 가 구멍 칸을 NaN 으로 두어 변화가 구멍을 건너뛰지 않는다."""
+    use = [k for k, rows in per.items() if rows and rows[0][0] <= since + tol_s]
+    if "binance" not in use:
+        return [], []
+    maps = [dict(per[k]) for k in use]
+    ts = sorted(set.intersection(*(set(m) for m in maps)))
+    return [(t, sum(m[t] for m in maps)) for t in ts], use
+
+
 def ring_at(ring: dict, sec: int, fallback, tol_s: int = 2):
     """2026-09-30: 초별 링(sec→값)에서 sec 에 가장 가까운 값(±tol_s초). 없으면 fallback(지금 값).
     거래소 간 가격차를 **같은 순간**끼리 재려고 -- 30초 묵은 HL/OKX 표본을 바이낸스 «지금»과 견주면
@@ -326,6 +339,10 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     _lv3[-295:-1] = _lv3[-296]; _lv3[-1] = _lv3[-13] * 1.0005                    # 피드 일부 멈춤: 같은 요일유형 1시간 변화의 49% 가 0
     _z3 = oi_stats([(_t0 + i * 300, float(v)) for i, v in enumerate(_lv3)])["z1h"]
     assert _z3 is not None and abs(_z3) < 2, _z3                                  # 하한 없으면 4.8(거짓 «급증») · 있으면 1.19
+    _ss, _sv = oi_sum_series({"binance": [(0, 10.0), (300, 11.0), (600, 12.0)], "okx": [(0, 1.0), (600, 2.0)],
+                              "bybit": [(300, 5.0), (600, 5.0)]}, since=0, tol_s=0)       # bybit 은 창 시작을 못 덮어 빠진다
+    assert _sv == ["binance", "okx"] and _ss == [(0, 11.0), (600, 14.0)], (_ss, _sv)          # okx 빈 칸(300)은 합에서 뺀다
+    assert oi_sum_series({"okx": [(0, 1.0)]}, since=0) == ([], [])                            # 바이낸스 없으면 합 없음
     assert lev_state(0.95, 1.2)["key"] == "long_crowd" and lev_state(0.05, 1.2)["key"] == "short_crowd"
     assert lev_state(0.5, -2)["key"] == "deleverage" and lev_state(0.95, 0)["key"] == "premium" and lev_state(None, 3)["key"] == "na"
     lv = hl_liq_levels([(10, 2601), (5, 2602), (-2, 2800), (3, 2710), (-1, 2500), (1, 1000)], mid=2700, bin_usd=5)

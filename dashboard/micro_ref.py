@@ -249,6 +249,30 @@ def flow_hour_scales_from_bars(rows: list) -> dict[tuple[int, int], dict[str, fl
     return out
 
 
+def sum_venue_bars(per: list[list]) -> list[tuple]:
+    """거래소별 [(5분봉, 총, 고래, 리테일)] → 모든 거래소에 있는 봉만 더한 같은 모양(2026-10-06 합산 기준선).
+    한 거래소라도 빈 봉은 뺀다 -- 그 봉의 합은 «모름»이다(flow_hour_scales_from_bars 가 NaN 칸으로 둔다)."""
+    if not per:
+        return []
+    maps = [{int(b): (float(t), float(w), float(r)) for b, t, w, r in rows} for rows in per]
+    common = sorted(set.intersection(*(set(m) for m in maps)))
+    return [(b, *(sum(m[b][j] for m in maps) for j in range(3))) for b in common]
+
+
+def flow_hour_scales_combos(srcs: dict[str, tuple[Path, str]], combos: list[tuple[str, ...]], days: int = FLOW_SCALE_DAYS,
+                            since_ts: int = 0) -> dict[tuple[str, ...], dict[tuple[int, int], dict[str, float]]]:
+    """거래소 조합마다 5분봉 합으로 같은 기준선(2026-10-06 사용자 «바로 합산»). 표·칸 뜻은 세 테이프가 같다.
+    거래소마다 한 번만 읽는다. 표본이 모자란 칸(새 거래소 Bybit 10-06~)은 비어 있다 -- 호출 측이 다음 조합으로 물러선다."""
+    from scripts.data_store import read_rows  # noqa: PLC0415
+    today = int(time.time()) // 86400 * 86400
+    sql = ("SELECT ts_sec - ts_sec % 300 AS b, sum(buy_qty - sell_qty), sum(whale_buy_qty - whale_sell_qty), "
+           "sum(retail_buy_qty - retail_sell_qty) FROM trade_tape_1s WHERE symbol = ? AND whale_buy_qty IS NOT NULL "
+           "AND ts_sec >= ? AND ts_sec < ? GROUP BY 1 ORDER BY 1")
+    lo = max(today - days * 86400, since_ts)
+    rows = {k: (read_rows(p, sql, [s, lo, today]) if p.exists() else []) for k, (p, s) in srcs.items() if any(k in c for c in combos)}
+    return {c: flow_hour_scales_from_bars(sum_venue_bars([rows[k] for k in c])) for c in combos}
+
+
 def flow_hour_scales(db_path: Path, days: int = FLOW_SCALE_DAYS, symbol: str = "ethusdt",
                      since_ts: int = 0) -> dict[int, dict[str, float]]:
     """trade_tape_1s 의 크기별 수량(2026-09-19~ 채워짐, 그 전은 NULL) -- 오늘 0시(UTC) 전 days 일. hot 은 심볼로 거른다.
@@ -308,6 +332,9 @@ if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근�
     _sc = flow_hour_scales_from_bars(_rows)                               # 12봉 합의 표준편차 = √12 × 봉 표준편차
     assert sorted(_sc) == [(w, h) for w in (0, 1) for h in range(24)] and all(15 < v["whale"] < 60 and 1.2 < v["mid"] < 7 and 1.2 < v["retail"] < 7 for v in _sc.values()), _sc   # 주말 칸은 표본 48 이라 더 흔들린다
     assert flow_hour_scales_from_bars(_rows[:6 * 288]) == {}            # 6일치 → 시당 표본 부족
+    # 거래소 합: 공통 봉만, 칸끼리 더한다(한쪽에만 있는 봉 600 은 «모름»)
+    assert sum_venue_bars([[(0, 1, 2, 3), (300, 1, 1, 1), (600, 9, 9, 9)], [(0, 10, 20, 30), (300, -1, 0, 0)]]) == [(0, 11, 22, 33), (300, 0, 1, 1)]
+    assert sum_venue_bars([]) == []
     assert qi(3, 1) == 0.5 and qi(0, 0) == 0.0 and side_of(0.6, QI_SIDE_ABS) == "매수" and side_of(-0.2, QI_SIDE_ABS) == "중립"
     # 격자: bin_size 0.5, bin_lo 5200 → 가격 2600.0 부터. mid 2600.5. +매수 −매도.
     q = np.zeros((3, 8), np.float32)
