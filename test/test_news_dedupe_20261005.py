@@ -34,4 +34,6 @@ assert srv.news_key("COINDESK: There's an election next month: State of Crypto")
 assert srv.news_key("THE STREET: Top Bitcoin Billionaires") == srv.news_key("Top Bitcoin Billionaires")
 assert srv.news_key("FinancialJuice: Iran oil minister steps down") == srv.news_key("Iran oil minister steps down")
 assert srv.news_key("Donald J. Trump (@realDonaldTrump): Sad to see that Fox & Friends (Sunday)") == srv.news_key("Sad to see that Fox &amp; Friends (Sunday)")
+assert srv.news_key("Powell: rates will stay higher for longer") != srv.news_key("Waller: rates will stay higher for longer")   # 발언자가 다르면 다른 글
+assert srv.news_key("Tree News: Citi partners with Coinbase") == srv.news_key("Citi partners with Coinbase")
 print("ok")

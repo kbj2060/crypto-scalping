@@ -918,7 +918,8 @@ class LiveFeed:
         now = pd.Timestamp.now(tz="UTC")
         hours = {(now - pd.Timedelta(hours=k)).strftime("%Y-%m-%dT%H") for k in (0, 1)}
         for stream, fn, dst in (("bookticker", bt_hour, self.bt), ("depthdiff", dd_hour, self.dd)):
-            for f in sorted(p for p in (ORDERFLOW / stream / SYMBOL).iterdir() if p.name[:13] in hours):
+            seed = ORDERFLOW / stream / SYMBOL                 # 2026-10-06 폴더가 없으면(새 코인·수집기 정지) 크래시 루프 대신 웹소켓으로 WARMUP 만큼 모은다
+            for f in sorted(p for p in (seed.iterdir() if seed.is_dir() else []) if p.name[:13] in hours):
                 d = fn(f)
                 dst.update({int(k): v for k, v in d.to_dict("index").items()} if len(d) else {})
         threading.Thread(target=lambda: asyncio.run(self._ws()), daemon=True).start()
