@@ -10,6 +10,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PY="${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}"
 cd "$ROOT"
 export RL_SYMBOL="${COIN}USDT" PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+# SOL·XRP 시작 이력 = 서버 엔진 전용 호가 수집 폴더(BT_ROOT/DD_ROOT, crontab 의 supervisor_book_ticker·depth_diff SOL·XRP 줄).
+#   아카이브 폴더(data/live/orderflow)의 SOL·XRP 는 Pi 가 1시간 늦게 복제한 것이라 «직전 70분»을 못 채운다 -- 없으면 웹소켓 워밍업 ~63분.
+[ "$COIN" = ETH ] || export RL_SEED_ORDERFLOW="$ROOT/data/live/orderflow_engine"
 exec "$ROOT/scripts/ops/_supervise.sh" \
   "rl_paper_${COIN}" \
   "$ROOT/data/live/.supervisor_rl_paper_${COIN}.lock" \
