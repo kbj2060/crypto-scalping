@@ -1965,14 +1965,16 @@ function fmtUsd(value) {
   return `${n >= 0 ? "" : "-"}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: Math.abs(n) < 10 ? 4 : 2 })}`;
 }
 
-async function refreshBinanceAccount() {
+async function refreshBinanceAccount(force = false) {
   // ops 탭(refreshOpsStatus)과 스냅샷 탭(tick) 양쪽에서 부르므로 자체 게이트를 둔다.
+  // force = 주문 체결 직후(2026-10-06 사용자 «완료되면 플로팅 버튼에 바로») -- 게이트·서버 캐시(10초)를 건너뛰고 떠 있는 버튼을 바로 다시 그린다.
   const now = Date.now();
-  if (now - binanceAccountLastFetchAt < BINANCE_ACCOUNT_POLL_MS) return;
+  if (!force && now - binanceAccountLastFetchAt < BINANCE_ACCOUNT_POLL_MS) return;
   binanceAccountLastFetchAt = now;
   try {
-    const res = await fetch(API_BINANCE_ACCOUNT_URL, { cache: "no-cache" });
+    const res = await fetch(API_BINANCE_ACCOUNT_URL + (force ? "?fresh=1" : ""), { cache: "no-cache" });
     renderBinanceAccount(await res.json());
+    if (force) renderOfab();
   } catch (error) {
     console.error("Binance account fetch error:", error);
     renderBinanceAccount({ ok: false, error: "대시보드 서버에 연결하지 못했습니다." });
@@ -9057,6 +9059,7 @@ async function manualEntryPollStatus() {
       manualOrderBusy = false;
       manualButtonsDisabled(false);
       manualEntryRefreshSize();   // 체결되면 포지션·상한 표시를 갱신한다
+      refreshBinanceAccount(true);   // 떠 있는 버튼·계좌 카드도 바로(서버 캐시 10초를 건너뛴다)
       if (switchRun && data.state?.kind === "exit") switchAfterExit(data.state);
     }
   } catch (err) {

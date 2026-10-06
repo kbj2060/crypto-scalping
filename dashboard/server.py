@@ -5684,7 +5684,15 @@ def make_app() -> web.Application:
 
     async def api_binance_account(request: web.Request) -> web.Response:
         """실계좌 잔고/포지션/왕복거래(진입·청산 시각). 키에 Futures 읽기 권한이 없으면
-        ok=false + hint로 내려가고, 프런트는 그 문구를 그대로 보여준다."""
+        ok=false + hint로 내려가고, 프런트는 그 문구를 그대로 보여준다.
+        `?fresh=1` = 캐시를 건너뛰고 지금 다시 조회(2026-10-06 사용자 «주문이 완료되면 플로팅 버튼 계좌 조회를 바로») --
+        주문 체결 직후 화면이 한 번 부른다. 1초 안에 이미 새로 받은 값이 있으면 그걸 준다(연달아 눌려도 거래소는 한 번)."""
+        if request.query.get("fresh") == "1":
+            async with swr_locks.setdefault("binance_account", asyncio.Lock()):
+                if time.monotonic() - binance_account_cache.get("ts", 0.0) > 1.0:
+                    binance_account_cache["payload"] = await _timed_produce("binance_account", produce_account)
+                    binance_account_cache["ts"] = time.monotonic()
+            return web.json_response(binance_account_cache["payload"], headers=NOCACHE)
         payload = await swr_cached(
             "binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
             cache=binance_account_cache,
