@@ -9417,7 +9417,7 @@ function ofabSetOpen(open) {
   ofab.open = open;
   panel.hidden = !open;
   el("ofabAway").hidden = !open;
-  ["ofabToggle", "ofabLong", "ofabShort", "ofabMore"].forEach((id) => el(id)?.setAttribute("aria-expanded", String(open)));
+  ["ofabToggle", "ofabMore"].forEach((id) => el(id)?.setAttribute("aria-expanded", String(open)));   // 2026-10-06 LONG·SHORT 는 더 이상 창을 열지 않는다(마우스)
   // 카드에서는 range 가 칩 뒤에 숨어 있어 탭 순서에서 빠져 있다(tabindex -1). 게이지로 드러나면 넣는다.
   lanes.querySelectorAll(".chip-input").forEach((i) => { i.tabIndex = open ? 0 : -1; });
   if (open) ofabApplyDefaults();
@@ -9555,12 +9555,13 @@ setInterval(renderOfab, 3000);
   // 짧게 = 펼치기/접기 · 1.5초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
   const OFAB_HOLD_MS = 1500;   // 2026-09-28 사용자 지시 0.5 -> 2초 · 2026-09-30 «너무 느리다» -> 1.5초 (styles.css .holding 채움 시간과 같이)
   // 같은 손짓을 세 버튼이 쓴다: «주문»(포지션 있음 = 추가 진입) · 2026-10-05 LONG·SHORT(포지션 없음 = 그 방향 진입).
-  const ofabHold = (btn, fire) => {
+  // onTap = 짧게 눌렀을 때(기본 = 펼치기/접기). 인자 = 그 누름의 pointerType(터치는 꾹 발주가 없으니 호출 측이 갈라 쓴다).
+  const ofabHold = (btn, fire, onTap = () => ofabSetOpen(!ofab.open)) => {
     if (!btn) return;
-    let hold = null, held = false;
+    let hold = null, held = false, ptype = "mouse";
     const holdEnd = () => { if (hold) { clearTimeout(hold.t); hold = null; } btn.classList.remove("holding"); };
     btn.addEventListener("pointerdown", (e) => {
-      holdEnd(); held = false;
+      holdEnd(); held = false; ptype = e.pointerType || "mouse";
       // 🔴2026-09-28 사용자 지시 «모바일에서는 넣으면 안돼» -- 터치는 꾹 누르기 발주가 없다(짧게 = 펼치기만).
       //   진입 버튼과 같은 판정(이벤트마다 pointerType) -- 터치 노트북의 마우스는 그대로 된다.
       if (e.pointerType === "touch" || btn.disabled) return;
@@ -9570,11 +9571,16 @@ setInterval(renderOfab, 3000);
     btn.addEventListener("pointermove", (e) => { if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) holdEnd(); });
     ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn.addEventListener(ev, holdEnd));
     btn.addEventListener("contextmenu", (e) => e.preventDefault());   // 모바일 길게 누르기 메뉴
-    btn.addEventListener("click", () => { if (held) { held = false; return; } ofabSetOpen(!ofab.open); });
+    btn.addEventListener("click", () => { if (held) { held = false; return; } onTap(ptype); });
   };
+  // 2026-10-06 사용자 «LONG 누른 뒤 다른 창이 떠서 또 눌러야 한다»: 실측(주문 차단 하네스) 1.5초 꾹은 이미 창 없이 발주(미리보기 1.51초·제출 1.68초) --
+  //   두 번 누르게 된 건 1.5초 전에 떼서 «짧게 = 펼치기»로 갔을 때다. 마우스는 짧게 눌러도 창을 열지 않고 꾹 누르라고 말한다(상세는 옆 펼치기 버튼).
+  //   🔴터치는 꾹 발주가 없으므로(09-28 «모바일에서는 넣으면 안돼») 짧게 = 펼치기 그대로 -- 안 그러면 휴대폰에서 주문할 길이 없어진다.
+  const dirTap = (side) => (ptype) => (ptype === "touch" ? ofabSetOpen(!ofab.open)
+    : ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} 5% 진입은 1.5초 꾹 누르세요 — 상세 주문은 옆 펼치기 버튼`)));
   ofabHold(tgl, ofabQuickAdd);
-  ofabHold(el("ofabLong"), () => ofabQuickEntry("LONG", false));
-  ofabHold(el("ofabShort"), () => ofabQuickEntry("SHORT", false));
+  ofabHold(el("ofabLong"), () => ofabQuickEntry("LONG", false), dirTap("LONG"));
+  ofabHold(el("ofabShort"), () => ofabQuickEntry("SHORT", false), dirTap("SHORT"));
   el("ofabMore")?.addEventListener("click", () => ofabSetOpen(!ofab.open));   // 2026-10-06 상세 펼치기(누르기만 -- 주문 없음)
   el("ofabBack")?.addEventListener("click", () => ofabSetOpen(false));
   grip.addEventListener("pointerdown", (e) => {

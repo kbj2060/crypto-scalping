@@ -2926,15 +2926,16 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   border-radius: 999px; border: 1px solid; background: transparent; cursor: pointer;
   font-family: var(--font-mono); font-size: 13px; font-weight: 800; letter-spacing: .02em; white-space: nowrap;
   -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
-  background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat;
-  background-position: 0 100%; background-size: 0% 3px;
+  /* 2026-10-06 누르는 동안 알약 전체가 방향색으로 왼쪽→오른쪽 차오른다(사용자 «버튼 전체가 차오름») -- 다 차면 발주. 떼면 바로 비운다(전이 없음). */
+  background-image: linear-gradient(color-mix(in srgb, currentColor 26%, transparent), color-mix(in srgb, currentColor 26%, transparent));
+  background-repeat: no-repeat; background-position: 0 0; background-size: 0% 100%;
 }
 .ofab-dir small { font-size: 11px; font-weight: 600; color: var(--muted); }
 .ofab-dir.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 .ofab-dir.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .ofab-dir.long:hover { border-color: var(--good); }
 .ofab-dir.short:hover { border-color: var(--bad); }
-.ofab-dir.holding { background-size: 100% 3px; transition: background-size 1.5s linear; }
+.ofab-dir.holding { background-size: 100% 100%; transition: background-size 1.5s linear; }   /* = OFAB_HOLD_MS */
 .ofab-dir:focus-visible, .ofab-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 2026-10-06 상세 펼치기 아이콘 -- 손잡이와 같은 무채색·같은 크기(색은 방향이 아니므로). 펼친 동안 밝아지고 옅은 바닥. */
 .ofab-more {
