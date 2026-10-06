@@ -2951,7 +2951,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab.up .ofab-more[aria-expanded="true"] svg { transform: none; }
 @media (prefers-reduced-motion: reduce) { .ofab-more svg { transition: none; } }
 @media (pointer: coarse) { .ofab-dir { min-height: 44px; } }
-@media (prefers-reduced-motion: reduce) { .ofab-dir.holding { transition: none; } }
+/* 2026-10-07 «움직임 줄이기»에서도 채움은 1.5초에 걸쳐 차오른다(사용자 «주문은 들어가는데 애니메이션이 안 나온다» → «둘 다 적용») -- 장식이 아니라
+   «주문까지 남은 시간» 타이머다. transition: none 이면 누르는 순간 꽉 차 보여 언제 나가는지 알 수 없었다(실측 0.1초에 100%). */
 
 /* 2026-10-05 스위칭 -- 청산(채움)과 모양을 가른다: 아웃라인 + 교차 화살표, 색 = **갈 쪽**. 떠 있는 패널에서만. */
 #snapSwitch { display: none; }
