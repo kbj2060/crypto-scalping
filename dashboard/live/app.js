@@ -9512,8 +9512,15 @@ function renderOfab() {
   const bal = latestBinanceAccount?.balance || {}, m = acctMarginUsed(bal), live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
   const k = qty && live > 0 && ofabPnlRef.price > 0 ? live / ofabPnlRef.price : 1;
   const eqLive = (Number(bal.wallet) || 0) + (Number(bal.unrealized) || 0) + (pnl - (Number(p?.unrealized_pnl) || 0));
-  const used = eqLive > 0 ? (m.used * k) / eqLive * 100 : m.pct;
+  // 🔴2026-10-06 사용자 «실제 계좌와 다르다 -- 진입 비율이 23% 가 아니야»: 계좌 전체 사용 증거금(거래소 totalInitialMargin)은 **미체결 주문이 묶은
+  //   증거금까지** 센다(실측 $616.78 = 포지션 $262.73 + 앱에서 건 주문 ~$354 → 23% vs 포지션 10%). 버튼 = **이 포지션의 증거금**(명목 ÷ 레버리지,
+  //   같은 3초 시세로 민다) ÷ 순자산. 계좌 전체(주문 포함)는 호버로.
+  const posIm = Math.abs(Number(p?.notional) || 0) * k / (Number(p?.leverage) || 1);
+  const used = eqLive > 0 ? posIm / eqLive * 100 : m.pct, acctUsed = eqLive > 0 ? (m.used * k) / eqLive * 100 : m.pct;
   setT("ofabPos", qty ? `${side} ${used.toFixed(0)}% · ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : "주문");
+  const tg0 = el("ofabToggle");
+  if (tg0) tg0.title = qty ? `포지션 증거금 ${used.toFixed(1)}% (명목 ÷ ${Number(p?.leverage) || 1}배 ÷ 순자산) · 계좌 전체 사용 증거금 ${acctUsed.toFixed(1)}%`
+    + (acctUsed - used > 1 ? " — 차이는 미체결 주문이 묶은 증거금" : "") : "";
   // 2026-10-05 포지션이 없으면 «주문» 대신 LONG·SHORT(꾹 = 그 방향 진입 · 짧게 = 펼치기)
   const flat = el("ofabFlat"), tg = el("ofabToggle");
   if (flat && tg) { flat.hidden = !!qty; tg.hidden = !qty; }
