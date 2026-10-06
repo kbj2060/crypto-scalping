@@ -869,7 +869,7 @@ def news_dedupe(items: list[dict]) -> list[dict]:
 TREASURY_DB = REPO_ROOT / "data" / "hot" / "treasury_futures.sqlite"   # 2026-10-06 미 국채선물 수집기(live_treasury_futures_collector_20261006, 매시 cron)
 
 
-def treasury_payload(db: Path = TREASURY_DB, hours: float = 12.0) -> dict:
+def treasury_payload(db: Path = TREASURY_DB, hours: float = 12.0, show_h: float = 1.0) -> dict:
     """미 국채선물 ZT·ZF·ZN·ZB 의 **마지막 봉 기준** 12시간 종가(5분 경계 봉 + 마지막 봉) -- 풋프린트 카드 머리 띠(2026-10-06).
     값은 가격(금리 아님)이고 CME 무료 시세라 ~10분 지연 + 매시 수집이다. 마지막 봉 기준으로 자르는 이유: 주말·휴장엔 봉이 안 늘어
     «지금부터 12시간»이면 띠가 비었다. 없거나 실패면 ok False."""
@@ -884,7 +884,10 @@ def treasury_payload(db: Path = TREASURY_DB, hours: float = 12.0) -> dict:
         out.setdefault(sym, {"contract": contract, "bars": []})["bars"].append([int(ts), float(close)])
     for v in out.values():
         b = v["bars"]
-        v["bars"] = [x for i, x in enumerate(b) if x[0] % 300 == 0 or i == len(b) - 1]
+        # 2026-10-06 사용자 «금리 차트 4개 이전 1시간만 · 급변 포착»: 화면 = 마지막 봉 기준 최근 1시간 **1분봉 그대로**(5분으로 솎으면 12점뿐이라
+        #   급변이 뭉개진다). 12시간 변화는 호버 한 줄로만 남긴다.
+        v["chg12_pct"] = (b[-1][1] / b[0][1] - 1) * 100
+        v["bars"] = [x for x in b if x[0] >= b[-1][0] - show_h * 3600]
     return {"ok": bool(out), "symbols": out}
 
 

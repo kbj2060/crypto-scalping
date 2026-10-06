@@ -2802,6 +2802,8 @@ async function refreshTreasury() {
   renderFpStrip();
 }
 const TREASURY_NM = { ZT: "2년", ZF: "5년", ZN: "10년", ZB: "30년" };
+// 최소 호가 단위(CME: ZT 1/256 · ZF 1/128 · ZN 1/64 · ZB 1/32). 1시간 차트의 세로 폭이 4틱보다 좁아지지 않게 -- 꽉 맞추면 1틱 흔들림도 급락처럼 보인다.
+const TREASURY_TICK = { ZT: 1 / 256, ZF: 1 / 128, ZN: 1 / 64, ZB: 1 / 32 };
 // 2026-10-06(3) 띠 = 금리 4종만, 전폭(사용자 «뉴스는 ⑤ 로 옮기고 그 자리를 국채선물로 가득») · 차트 아래 마지막 봉 시각.
 //   🔴금리 화살표 = 국채 가격 차트의 **최근 1시간** 움직임의 반대(사용자 선택 A + «차트와 반대로»): 12시간 첫 봉 대비로 붙였더니
 //   차트 끝은 반등(가격↑)하는데 «금리↑»가 떠 거꾸로 읽혔다. 화살표·변화율 둘 다 1시간 기준이고 12시간 변화는 호버에.
@@ -2819,10 +2821,12 @@ function renderFpStrip() {
     const v = T[k], b = v ? v.bars : [];
     const nm = `<b>${k}</b> <span>${TREASURY_NM[k]}</span>`;
     if (b.length < 2) return `<div class="fps-rate"><div class="fps-rn"><div>${nm}</div></div><span></span><div class="fps-rv"><span class="muted">—</span></div></div>`;
-    const t0 = b[0][0], t1 = b[b.length - 1][0], lo = Math.min(...b.map((x) => x[1])), hi = Math.max(...b.map((x) => x[1])), rg = hi - lo || 1e-9;
+    // 2026-10-06 차트 = 최근 1시간 1분봉(사용자 «급변 포착», 서버 treasury_payload). 세로 폭은 최소 4틱 -- 가운데 정렬로 넓힌다.
+    const t0 = b[0][0], t1 = b[b.length - 1][0], lo0 = Math.min(...b.map((x) => x[1])), hi0 = Math.max(...b.map((x) => x[1]));
+    const pad = Math.max(0, 4 * (TREASURY_TICK[k] || 0) - (hi0 - lo0)) / 2, lo = lo0 - pad, hi = hi0 + pad, rg = hi - lo || 1e-9;
     const X = (t) => 2 + (t - t0) / Math.max(1, t1 - t0) * (SW - 6), Y = (y) => 3 + (hi - y) / rg * (SH - 6);
     const d = b.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)} ${Y(x[1]).toFixed(1)}`).join(" ");
-    const last = b[b.length - 1], chg = (last[1] / b[0][1] - 1) * 100;
+    const last = b[b.length - 1], chg = Number.isFinite(v.chg12_pct) ? v.chg12_pct : (last[1] / b[0][1] - 1) * 100;
     const h1 = b.find((x) => x[0] >= t1 - 3600) || b[0], chg1 = (last[1] / h1[1] - 1) * 100;
     const lab = `<span class="w">1시간</span> ${dir(chg1)}`;
     return `<div class="fps-rate" title="${escapeHtml(v.contract || k)} · ${hm(t0)}~${hm(t1)} 가격(가격↓ = 금리↑) · 12시간 첫 봉 대비 ${chg >= 0 ? "+" : "−"}${Math.abs(chg).toFixed(2)}% · 1시간 ${chg1 >= 0 ? "+" : "−"}${Math.abs(chg1).toFixed(2)}% · CME 무료 시세 약 10분 지연">`
