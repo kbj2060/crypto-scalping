@@ -8,7 +8,7 @@
   backfill=1(지연 통계에서 뺀다). polls = 폴링 한 번(시각, source, HTTP 상태, 기사 수, 소요 ms, age).
 저장: data/hot/news_rss.sqlite(WAL). 피드마다 주기(초)대로 조건부 GET(ETag/Last-Modified). 주문·바이낸스 호출 없음.
 10-05 속보 피드 추가(사용자 «거래소 공지와 하이퍼리퀴드 빼고»): Tree News(JSON, 트윗·Truth·뉴스 사이트 미러) · BWEnews ·
-  FinancialJuice(매크로) · Truth Social 아카이브(trumpstruth) · Fed · SEC. BWEnews 에는 «UPBIT LISTING» 같은 상장 속보가 섞여 온다
+  FinancialJuice(매크로) · Fed · SEC. (Truth Social 아카이브 trumpstruth 는 10-06 뺐다 -- 35시간 실측 게시 후 중앙 31분·p90 1.8시간, 같은 글을 Tree 가 ~20초에 미러.) BWEnews 에는 «UPBIT LISTING» 같은 상장 속보가 섞여 온다
   (원천 그대로 저장, 거르는 건 읽는 쪽에서). Tree 는 link 가 원문 url(트윗 등)이다.
   python scripts/live_news_rss_collector_20261005.py
   python scripts/live_news_rss_collector_20261005.py --selftest
@@ -38,7 +38,6 @@ FEEDS = {                                                     # 이름: (url, �
     "tree": ("https://news.treeofalpha.com/api/news?limit=50", 30),   # 15초는 429(10-05 6시간 1,234회 중 17회) -- 받은 시각 중앙 19초 → ~25초
     "bwenews": ("https://rss-public.bwe-ws.com/", 20),            # 10건뿐이라 짧게
     "financialjuice": ("https://www.financialjuice.com/feed.ashx?xy=rss", 60),   # 30초는 429(10-05 1시간 12번)
-    "trumpstruth": ("https://www.trumpstruth.org/feed", 60),
     "fed": ("https://www.federalreserve.gov/feeds/press_all.xml", 300),
     "sec": ("https://www.sec.gov/news/pressreleases.rss", 300),
 }
