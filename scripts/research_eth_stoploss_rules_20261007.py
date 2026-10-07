@@ -31,7 +31,14 @@ R 크기 바꾼 원장(같은 날 3차, 사용자 «크기 ∝ 직전 24h 변동
    E·Q 는 바뀐 수량으로 다시 판정(발동 지점이 크기에 달림). 판정: «규칙 − S0» 총손익 일 클러스터 95% CI · 최악 왕복 · 왕복순 누적 MDD.
    «쓸 만한 손절» = 총손익 CI 하한 > −20%×|S0 총손익|(비열등) 그리고 최악·MDD 가 S0 보다 작음. 여럿이면 최악이 가장 작은 것.
    시장 대조: 크기∝σ 기계(S0)에 F300·500·700·1000·1500 · V1·1.5·2·3 · 보유 12h·6h(시간 청산) → «판 − S0» 일 샤프 차 CI · 최악 · 10% 한도 1단위.
-실행: python scripts/research_eth_stoploss_rules_20261007.py --tape | --ledger | --combo | --resized | --selftest   산출 tmp/stoploss_rules_20261007/
+FE 원장 첫 진입만(같은 날 4차, 사용자 «이 규칙에 따라 내 원장에서 최초 진입만 가져다가» -- 결과 보기 전 고정):
+   왕복마다 첫 체결의 시각·방향·가격만 쓰고 나머지는 규칙으로 다시 만든다. 1분할 = 순자산(왕복 시작 지갑) × u, 4분할(0·−44·−88·−132bp 지정가),
+   물타기 체결 분부터 판정 · 같은 분이면 물타기 → 손절 → 익절 순(보수) · 체결 판정은 USDT 1분봉 고저.
+   판: A_cap  손절 −3σ24 · u = min(m·0.303, 0.10/손절손실) [주] · A_raw  같은 손절 · u = m·0.303(한도 없음)
+       B      손절 −300bp · u = 0.10/손절손실(−300) 고정 · N0  A_raw 크기·손절 없음(참고).  m = 대시보드 권장 배수(vol_mult, 정규화 없음).
+   청산: X1(주) 평단 +20bp 지정가 익절 · 24h 시간 청산(원 기계) · X2(보조) 익절 없음 · 사용자의 실제 왕복 끝 시각 종가(열린 왕복 = 지금) · 둘 다 손절 우선.
+   비용: 물타기·익절 0bp · 손절·시간 청산·X2 청산 테이커 5bp. 판정: A_cap − 실제, A_cap − B 총손익 일 클러스터 95% CI · 최악 왕복 · 왕복순 MDD.
+실행: python scripts/research_eth_stoploss_rules_20261007.py --tape | --ledger | --combo | --resized | --first-entry | --selftest   산출 tmp/stoploss_rules_20261007/
 """
 from __future__ import annotations
 
@@ -229,6 +236,96 @@ def ledger_combo() -> dict:
     return out
 
 
+U_BASE = 0.10 / ((4 * 3 * 157.394 * 0.76576 * np.sqrt(6) - 264) / 1e4 + 4 * STOP_FEE / 1e4)   # 배수 1 인 날 손절 손실 = 10%
+
+
+def ladder_loss(S: float) -> float:
+    """4분할(0·44·88·132bp)이 다 찬 채 첫 진입가 −S bp 에서 손절할 때 손실(1분할 명목 대비) + 테이커 수수료."""
+    return (4 * S - 264) / 1e4 + 4 * STOP_FEE / 1e4
+
+
+def first_entry_sim(kt, kh, kl, kc, t0, p0, s, S, tp, t_end):
+    """첫 진입 뒤 규칙대로. 반환 (1분할 명목 대비 손익 비율, 분할 수, 종류 1 익절 2 시간/끝 3 손절).
+    S = 손절 bp(None = 없음) · tp = 익절 bp(None = 없음) · t_end = 이 시각 이후 첫 분 종가에 정리."""
+    q, cost = 1.0, p0
+    j0 = np.searchsorted(kt, t0 // 60_000 * 60_000 + 60_000)
+    for j in range(j0, len(kt)):
+        while q < 4:
+            lvl = p0 * (1 - s * 44 * q / 1e4)
+            if (s > 0 and kl[j] <= lvl) or (s < 0 and kh[j] >= lvl):
+                cost += lvl; q += 1
+            else:
+                break
+        if S is not None:
+            stop = p0 * (1 - s * S / 1e4)
+            if (s > 0 and kl[j] <= stop) or (s < 0 and kh[j] >= stop):
+                gap = (s > 0 and kh[j] < stop) or (s < 0 and kl[j] > stop)
+                px = kc[j] if gap else stop
+                return s * (px * q - cost) / p0 - q * px / p0 * STOP_FEE / 1e4, q, 3
+        if tp is not None:
+            tgt = cost / q * (1 + s * tp / 1e4)
+            if (s > 0 and kh[j] >= tgt) or (s < 0 and kl[j] <= tgt):
+                return s * (tgt * q - cost) / p0, q, 1
+        if kt[j] + 60_000 >= t_end or j == len(kt) - 1:
+            return s * (kc[j] * q - cost) / p0 - q * kc[j] / p0 * STOP_FEE / 1e4, q, 2
+    return 0.0, q, 2
+
+
+def run_first_entry() -> dict:
+    rng = np.random.default_rng(SEED)
+    f = AG.tag_events(AG.load_fills())
+    inc = pd.DataFrame([json.loads(x) for x in open(AG.OUT / "income_full.jsonl")])
+    wt, wc, _ = AG.flows_wallet(inc)
+    k = AG.load_k1m(pd.Timestamp(int(f.time.min()), unit="ms").strftime("%Y-%m-%d"), pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d"))
+    kt, kh, kl, kc = (k[x].to_numpy() for x in ("t", "h", "l", "c"))
+    b5 = k.assign(b=k.t // 300_000 * 300_000).groupby("b").c.last()
+    r5 = np.diff(np.log(b5.to_numpy()), prepend=np.nan) * 1e4
+    sig_t, sig_v = b5.index.to_numpy(), np.sqrt(pd.Series(r5 ** 2).rolling(288, min_periods=280).sum().to_numpy())
+    actual = pd.read_csv(OUT / "ledger_trips.csv").set_index("trip").actual
+    rows = []
+    for tr, g in f.groupby("trip"):
+        g = g.sort_values(["time", "id"])
+        s, t0, p0 = int(g.sgn.iloc[0]), int(g.time.iloc[0]), float(g.price.iloc[0])
+        qs = np.cumsum(np.where(g.inc, g.qty, -g.qty))
+        t_user = int(kt[-1]) + 60_000 if qs[-1] > 1e-6 else int(g.time.iloc[-1])
+        E0 = float(wc[np.searchsorted(wt, t0, side="right") - 1])
+        sd = float(sig_v[min(np.searchsorted(sig_t, t0 // 300_000 * 300_000 - 300_000), len(sig_v) - 1)])
+        if not np.isfinite(sd):
+            continue
+        m = float(vol_mult(np.array([sd]))[0])
+        arms = {"A_cap": (3 * sd, min(m * U_BASE, 0.10 / ladder_loss(3 * sd))), "A_raw": (3 * sd, m * U_BASE),
+                "B": (300.0, 0.10 / ladder_loss(300.0)), "N0": (None, m * U_BASE)}
+        row = {"trip": int(tr), "start": pd.Timestamp(t0, unit="ms").isoformat(), "side": s, "E0": E0, "sig24": sd, "m": m,
+               "day": t0 // 86_400_000, "actual": float(actual.get(tr, np.nan)), "open": bool(qs[-1] > 1e-6)}
+        for xname, tp, tend in (("X1", 20.0, t0 + 86_400_000), ("X2", None, t_user)):
+            for a, (S, u) in arms.items():
+                r, q, kind = first_entry_sim(kt, kh, kl, kc, t0, p0, s, S, tp, tend)
+                row[f"{a}_{xname}"] = E0 * u * r
+                row[f"{a}_{xname}_kind"] = kind
+                row[f"{a}_{xname}_maxnot_x"] = u * q
+        rows.append(row)
+    T = pd.DataFrame(rows).sort_values("start").reset_index(drop=True)
+    T.to_csv(OUT / "first_entry_trips.csv", index=False)
+    days = T.day.to_numpy(); ud = np.unique(days)
+    def ci(d):
+        per = pd.Series(d).groupby(days).sum().reindex(ud).to_numpy()
+        bs = per[rng.integers(0, len(ud), (4000, len(ud)))].sum(1)
+        return [float(d.sum()), float(np.quantile(bs, .025)), float(np.quantile(bs, .975))]
+    def summ(x):
+        eq = np.cumsum(x)
+        return dict(total=float(x.sum()), worst=float(x.min()), mdd=float((eq - np.maximum.accumulate(eq)).min()),
+                    win=float((x > 0).mean()))
+    out = {"n": int(len(T)), "u_base": U_BASE, "actual": summ(T.actual.to_numpy())}
+    for xname in ("X1", "X2"):
+        for a in ("A_cap", "A_raw", "B", "N0"):
+            col = f"{a}_{xname}"; x = T[col].to_numpy(); kd = T[f"{col}_kind"].to_numpy()
+            out[col] = summ(x) | dict(stops=int((kd == 3).sum()), tps=int((kd == 1).sum()), max_notional_x=float(T[f"{col}_maxnot_x"].max()),
+                                      vs_actual=ci(x - T.actual.to_numpy()))
+            if a != "B":
+                out[col]["vs_B"] = ci(x - T[f"B_{xname}"].to_numpy())
+    return out
+
+
 # ── 원장 ─────────────────────────────────────────────────────────────────────────
 def trip_cf(g, s, kt, kh, kl, kc, kind, v, E0, sg, is_open):
     """한 왕복을 분 단위로: 그 분의 체결을 반영 → 그 분 불리 극값으로 손절 판정. 반환 (손익$, 손절가, 손절 시각)."""
@@ -396,12 +493,18 @@ def selftest() -> None:
     # T6: 롱 @100, 1분봉 2000개 → 첫 체결 뒤 6시간(360분째 봉 마감)의 종가에 정리
     _, px5, t5 = trip_cf(g, 1, kt, kc + .01, kc - .01, kc, "T", 6, 1000.0, 100.0, True)
     assert t5 == 359 * 60_000 and px5 == kc[359], (t5, px5)
+    # 첫 진입 기계: 롱 100, 내려가며 4분할 → −3% 손절 / 기본 단위 = 배수 1 인 날 정확히 10%
+    kt6 = np.arange(0, 3000) * 60_000; kc6 = np.linspace(100, 95, 3000)
+    r6, q6, k6 = first_entry_sim(kt6, kc6 + .001, kc6 - .001, kc6, 0, 100.0, 1, 300.0, 20.0, 10 ** 12)
+    assert k6 == 3 and q6 == 4 and abs(r6 + ladder_loss(300.0)) < 1e-3, (r6, q6, k6)
+    s1 = 157.394 * 0.76576 * np.sqrt(6)
+    assert abs(U_BASE * ladder_loss(3 * s1) - 0.10) < 1e-12 and abs(vol_mult(np.array([s1]))[0] - 1) < 1e-12
     print("selftest ok")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    for m in ("--tape", "--ledger", "--combo", "--resized", "--selftest"):
+    for m in ("--tape", "--ledger", "--combo", "--resized", "--first-entry", "--selftest"):
         ap.add_argument(m, action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -414,6 +517,8 @@ def main() -> int:
     if a.resized:
         r = {"ledger": run_ledger(resize=True), "tape": run_resized_tape()}
         json.dump(r, open(OUT / "resized_result.json", "w"), ensure_ascii=False, indent=1, default=str)
+    if a.first_entry:
+        r = run_first_entry(); json.dump(r, open(OUT / "first_entry_result.json", "w"), ensure_ascii=False, indent=1)
     if a.combo:
         r = {"tape": run_combo(), "ledger": ledger_combo()}
         json.dump(r, open(OUT / "combo_result.json", "w"), ensure_ascii=False, indent=1)
