@@ -3213,24 +3213,21 @@ function liqMapKnownUntilSec(map) {
 
 function nearestLiquidationLevel() {
   // 게이지·서랍·가격 지형과 **같은 목록**(srLevelsLive: 현재가 쪽 · 아직 안 쓸린 · 가까운 순)의 첫 칸.
+  // 2026-10-07 사용자 «가까운 지지1과 저항1은 보이게»: 더 가까운 한쪽만 그리던 것(08-24)을 **양쪽 다** 그린다 --
+  //   현재가가 둘 사이 중간을 오가면 지지선이 나타났다 사라졌다 했다. 이름표 겹침은 priceLabels 가 피한다.
   const sr = srLevelsLive(1);
   if (!sr) return [];
-  const candidates = [
-    { lv: sr.sup[0], color: "var(--liq-support)", tag: "지지1", side: "support" },
-    { lv: sr.res[0], color: "var(--liq-resistance)", tag: "저항1", side: "resistance" },
-  ]
-    .filter((c) => c.lv);
-  if (!candidates.length) return [];
-  candidates.sort((a, b) => Math.abs(a.lv.price - sr.cur) - Math.abs(b.lv.price - sr.cur));
-  const nearest = candidates[0];
-  return [{
-    val: nearest.lv.price,
-    color: nearest.color,
-    label: nearest.tag,
+  return [
+    { lv: sr.sup[0], color: "var(--liq-support)", tag: "지지1" },
+    { lv: sr.res[0], color: "var(--liq-resistance)", tag: "저항1" },
+  ].filter((c) => c.lv).map((c) => ({
+    val: c.lv.price,
+    color: c.color,
+    label: c.tag,
     priceLeft: true,   // 2026-09-26 사용자 지시: 지지/저항 가격은 오른쪽 배지가 아니라 왼쪽 이름 옆에
     dashed: true,
-    width: Math.max(1, Math.min(4, Math.round(1 + (nearest.lv.weight_pct || 0) * 3))),
-  }];
+    width: Math.max(1, Math.min(4, Math.round(1 + (c.lv.weight_pct || 0) * 3))),
+  }));
 }
 
 
