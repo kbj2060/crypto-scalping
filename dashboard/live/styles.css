@@ -1768,6 +1768,42 @@ svg {
 .vol-mult.hi { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 .vol-mult.hi > b { color: var(--warn); }
 .vol-mult[hidden] { display: none; }
+/* 2026-10-08 4분할 규칙 진입(사용자 A안 «거리 자») -- app.js renderRuleGauge. 시안 캡처와 같은 값. */
+.rq-mode { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--soft-line); border-radius: 999px; }
+.rq-mode[hidden] { display: none; }
+.rq-mode button { all: unset; cursor: pointer; padding: 4px 10px; border-radius: 999px; font: 600 11.5px/1 var(--font-sans); color: var(--muted); }
+.rq-mode button[aria-pressed="true"] { background: rgb(var(--lift) / .10); color: var(--ink); }
+.rq-mode button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#snapEntryBox.entry-rule [data-for="snapEntryFrac"], #snapEntryBox.entry-rule #snapEntryFracVal { display: none; }
+.rq { margin: 10px 0 2px; padding: 12px 14px; border: 1px solid var(--soft-line); border-radius: var(--radius-sm); background: var(--glass); }
+.rq[hidden] { display: none; }
+.rq-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font: 600 11.5px/1.4 var(--font-sans); color: var(--muted); }
+.rq-head b { font: 700 12.5px/1 var(--font-mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.rq-head .rq-risk b { color: var(--bad); }
+.rq-cut { margin: 8px 0 0; font: 600 11.5px/1.45 var(--font-sans); color: var(--warn); }
+.rq-cut b { color: var(--ink); }
+.rq-ruler { position: relative; height: 84px; margin: 22px 4px 0; }
+.rq-axis { position: absolute; left: 0; right: 0; top: 30px; height: 2px; background: rgb(var(--lift) / .12); border-radius: 2px; }
+.rq-zone { position: absolute; top: 26px; height: 10px; border-radius: 3px; }
+.rq-zone.long { background: color-mix(in srgb, var(--good) 22%, transparent); }
+.rq-zone.short { background: color-mix(in srgb, var(--bad) 22%, transparent); }
+.rq-t { position: absolute; top: 22px; width: 2px; height: 18px; margin-left: -1px; border-radius: 2px; background: var(--ink); }
+.rq-t.fill { background: var(--neutral); opacity: .75; }
+.rq-t.stop { height: 26px; top: 18px; width: 3px; margin-left: -1.5px; background: var(--warn); }
+.rq-t.liq { height: 30px; top: 16px; width: 3px; margin-left: -1.5px; background: var(--bad); }
+.rq-t.now { height: 34px; top: 14px; background: var(--accent); }
+.rq-lab { position: absolute; transform: translateX(-50%); left: clamp(34px, var(--x), calc(100% - 34px)); white-space: nowrap;
+  font: 600 10.5px/1.25 var(--font-sans); color: var(--muted); text-align: center; }
+.rq-lab b { display: block; font: 700 11px/1.2 var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums; }
+.rq-lab.up { top: -14px; } .rq-lab.dn { top: 50px; }
+.rq-lab.stop b { color: var(--warn); } .rq-lab.liq b { color: var(--bad); }
+.rq-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font: 600 10.5px/1.4 var(--font-sans); color: var(--muted); }
+.rq-key i { display: inline-block; width: 10px; height: 8px; margin-right: 5px; border-radius: 2px; }
+.rq-key i.z { background: color-mix(in srgb, var(--neutral) 30%, transparent); }
+.rq-key i.s { width: 3px; height: 10px; background: var(--warn); } .rq-key i.q { width: 3px; height: 10px; background: var(--bad); }
+#snapEntryBox.entry-rule .entry-hold .notify-btn { flex: 1 1 0; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+.notify-btn small.rq-sub { display: block; font: 600 10.5px/1.2 var(--font-sans); opacity: .85; }
+.ofab-dir small.rq-ofab { display: block; font: 600 9.5px/1.15 var(--font-sans); opacity: .9; white-space: nowrap; }
 /* 진입 한 줄: 레버·비율·버튼·보유가 한 행에 들어간다. 좁으면 감싸되 왼쪽 정렬을 지킨다. */
 .manual-entry-row.entry-line { justify-content: flex-start; row-gap: 6px; }
 .manual-entry-row.entry-line .entry-cap { flex: 0 0 auto; }

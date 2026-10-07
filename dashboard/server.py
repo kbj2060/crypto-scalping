@@ -196,9 +196,9 @@ import scripts.binance_ban_guard as ban_guard  # noqa: E402 -- requests 도 전�
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, bracket_action, bracket_keep_farther_sl, bracket_key, bracket_merge, bracket_rekey, build_bracket_plan, build_entry_plan, build_exit_plan,
-    exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position)
+    build_rule_ladder, exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position)
 from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
-    clear_bracket, place_bracket, run_entry, run_exit)
+    clear_bracket, place_bracket, place_ladder, run_entry, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
@@ -3376,6 +3376,7 @@ def make_app() -> web.Application:
     cctx = {a: _coin_ctx() for a in flows}
     _ce = cctx["eth"]   # ETH 전용 소비자(미시 참고 API · 30분 카드 · SSE)는 옛 이름 그대로
     micro_state, mp_state, situation_state = _ce.micro_state, _ce.mp_state, _ce.situation_state
+    app["situation_eth"] = situation_state   # 2026-10-08 같은 dict 손잡이 -- 오프라인 시험이 권장 배수(vol_mult)를 심는다(test_rule_entry_e2e)
     # (ts_ms, side, qty, price, usd) -- side "long" = 롱 포지션 청산(SELL). 코인별(1초 수급의 청산 레인).
     liq_events_by: dict[str, deque] = {a: deque(maxlen=5000) for a in COIN_CONFIG}
     liq_events = liq_events_by["eth"]           # ETH 전용 소비자(미시 참고)는 옛 이름 그대로
@@ -5812,11 +5813,18 @@ def make_app() -> web.Application:
             state["bracket"] = await place_bracket(binance_session(), b, plan["symbol"], pside)
         except Exception as exc:  # noqa: BLE001 -- 결과 칸은 반드시 채운다(화면 폴링이 이걸 기다린다)
             state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
+        if plan.get("rule"):   # 2026-10-08 4분할 규칙: 비상 스탑(= 3σ 손절)을 건 **뒤** 2~4분할 -- place_bracket 이 우리 옛 주문을 먼저 지운다
+            try:
+                state["ladder"] = await place_ladder(binance_session(), plan["rule"], plan["symbol"], pside)
+            except Exception as exc:  # noqa: BLE001
+                state["ladder"] = {"placed": 0, "legs": [], "reason": f"{type(exc).__name__}: {exc}"}
         st = bracket_load()
         st[bracket_key(plan["symbol"], pside)] = {"symbol": plan["symbol"], "side": pside, "sl_price": b.get("sl_price"),
                      "sl_level": b.get("sl_level"),   # 5분봉 종가 판정은 USDT 레벨로(bracket_sl_hit)
                      "tp_price": b.get("tp_price"), "backstop_price": b.get("backstop_price"),
-                     "armed_at": time.time(), "placed": state["bracket"]}
+                     "armed_at": time.time(), "placed": state["bracket"],
+                     # 규칙 포지션 표시 -- 직접 물타기를 막고(분할이 걸려 있다) 포지션이 사라지면 분할도 같이 지운다(cancel_bracket)
+                     **({"rule": True, "ladder": state.get("ladder")} if plan.get("rule") else {})}
         bracket_save(st)
 
     async def bracket_tick() -> None:
@@ -5912,7 +5920,8 @@ def make_app() -> web.Application:
             pass
 
     async def assemble_entry_plan(side: str, fraction: float = 1.0,
-                                  want_lev: int | None = None, asset: str = "eth", fresh: bool = False):
+                                  want_lev: int | None = None, asset: str = "eth", fresh: bool = False,
+                                  rule: bool = False):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
@@ -6045,6 +6054,27 @@ def make_app() -> web.Application:
                 rec_qty = (entry_notional(equity, risk["safe_mae_pct"])
                            ["total_notional"] / price_ref)
                 rec_src = "risk_model"
+            ladder = None
+            if rule:   # 2026-10-08 4분할 규칙(사용자 A안) -- 1분할은 아래 기존 peg 진입 그대로, 크기만 규칙이 정한다
+                if asset != "eth":
+                    return None, {}, {}, ({"error": "rule_eth_only", "detail": "4분할 규칙은 ETH 에서만 검정됐습니다"}, 400)
+                if positions:
+                    return None, {}, {}, ({"error": "rule_needs_flat",
+                                           "detail": "포지션이 열려 있으면 4분할 규칙 진입을 쓸 수 없습니다(청산가 계산이 «포지션 없음» 전제)"}, 400)
+                vm = situation_state.get("vol_mult") or {}
+                if not vm or time.time() - float(vm.get("bar") or 0) > 900:
+                    return None, {}, {}, ({"error": "rule_no_vol", "detail": "권장 배수(직전 24h 변동성)가 없거나 15분 넘게 묵었습니다"}, 503)
+                if not margin_lev:
+                    return None, {}, {}, ({"error": "rule_no_leverage", "detail": "레버리지를 알 수 없습니다"}, 400)
+                peg = float(book["bidPrice"]) if side == "LONG" else float(book["askPrice"])
+                margin_cap = (equity * margin_lev * SIZING_MARGIN_CAP_PCT / 100.0
+                              if SIZING_MARGIN_CAP_PCT > 0 and margin_lev and equity > 0 else None)
+                ladder = build_rule_ladder(side=side, equity=equity, price=peg, sigma24_bp=float(vm["sigma_bp"]) * math.sqrt(6),
+                                           mult=float(vm["mult"]), cap_notional=margin_cap, filters=filters)
+                if not ladder.get("available"):
+                    return None, {}, {}, ({"error": "rule_blocked", "detail": ladder.get("blocked"), "rule": ladder}, 400)
+                # 1분할 = 증거금 비율로 환산(build_entry_plan 의 fraction_of_equity 경로) -- 같은 함수·같은 반올림
+                fraction = min(1.0, ladder["tranches"][0]["qty"] * peg / (equity * margin_lev))
             plan = build_entry_plan(
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 recommended_qty=rec_qty,
@@ -6057,6 +6087,9 @@ def make_app() -> web.Application:
                            "model": "위험모델 상한"}.get(who, "상한"))
             plan["recommended_source"] = rec_src
             plan["recommended_qty"] = round(rec_qty, 8)
+            if ladder:
+                ladder["tranches"][0]["qty"] = plan["quantity"]      # 실제로 나갈 1분할(반올림 뒤) -- 화면도 이 값
+                plan["rule"] = ladder
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)
             # 2026-09-13 «지금 상황» 플랜: 보유시간 권고·집행·분할·예산 사다리. 상한은 적용된 실효 배수.
             plan["trade_plan"] = plan_now(
@@ -6077,6 +6110,12 @@ def make_app() -> web.Application:
             if same:
                 plan["bracket"] = bracket_keep_farther_sl(
                     plan["bracket"], bracket_load().get(bracket_key(symbol, side)), side)
+                if bracket_load().get(bracket_key(symbol, side), {}).get("rule") and not plan.get("blocked"):
+                    plan["blocked"] = "4분할 규칙 포지션입니다 -- 분할 지정가가 이미 걸려 있어 직접 물타기는 막았습니다"
+            if ladder:   # 익절 없음 · 손절 = 3σ 를 비상 스탑(Algo STOP_MARKET closePosition)으로 · 5분봉 SL 감시 없음(sl_price None)
+                plan["bracket"] = {"available": True, "rule": True, "position_side": side, "tp_price": None,
+                                   "sl_price": None, "sl_level": None, "backstop_price": ladder["stop_price"],
+                                   "sl_name": "3σ 손절", "reason": None}
             # 게이지가 값을 주면 그걸 쓰고, «자동»이면 모델 추천을 쓴다. 어느 쪽인지 남긴다 --
             # 안 남기면 나중에 «왜 30배로 걸렸지»를 못 푼다.
             plan["target_leverage"] = want_lev or _lv.get("setting")
@@ -6115,15 +6154,40 @@ def make_app() -> web.Application:
                                       "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
-                                                             fresh=request.query.get("fresh") == "1")
+                                                             fresh=request.query.get("fresh") == "1",
+                                                             rule=request.query.get("mode") == "rule")
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
-        if sltp_off(request):
+        if sltp_off(request) and not plan.get("rule"):
             plan["bracket"] = dict(SLTP_OFF_BRACKET)
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
                                   "recommended_qty": plan.get("recommended_qty"),
                                   "recommended_source": plan.get("recommended_source"),
                                   "exec_enabled": exec_enabled()},
+                                 headers=NOCACHE)
+
+    async def api_manual_entry_rule_gauge(request: web.Request) -> web.Response:
+        """4분할 규칙 게이지(화면 «거리 자», 2026-10-08). 🔴주문·거래소 직접 호출 없음 -- 계좌 캐시(화면과 같은 swr)·
+        권장 배수(situation_state)·1분 캔들 종가·심볼 필터(캐시)만 읽는다. 실제 주문 크기는 제출 순간 호가로 assemble_entry_plan 이
+        같은 함수(build_rule_ladder)로 다시 계산한다 -- 여기 값은 «거의 같은 미리보기»."""
+        lev = query_leverage(request) or 20
+        symbol = MANUAL_EXEC_SYMBOLS["eth"]
+        vm = situation_state.get("vol_mult") or {}
+        candles = situation_state.get("candles") or []
+        if not vm or not candles or time.time() - float(vm.get("bar") or 0) > 900:
+            return web.json_response({"ok": False, "error": "rule_no_vol", "detail": "권장 배수가 없거나 묵었습니다"}, headers=NOCACHE)
+        account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
+                                   max_stale=STALE_GRACE_SECONDS, cache=binance_account_cache)
+        if not account.get("ok"):
+            return web.json_response({"ok": False, "error": "account_unavailable"}, headers=NOCACHE)
+        equity = float((account.get("balance") or {}).get("margin") or 0.0)
+        filters = await load_filters(binance_session(), symbol)
+        price = float(candles[-1]["close"])
+        cap = equity * lev * SIZING_MARGIN_CAP_PCT / 100.0 if SIZING_MARGIN_CAP_PCT > 0 and equity > 0 else None
+        out = {side.lower(): build_rule_ladder(side=side, equity=equity, price=price, sigma24_bp=float(vm["sigma_bp"]) * math.sqrt(6),
+                                               mult=float(vm["mult"]), cap_notional=cap, filters=filters) for side in ("LONG", "SHORT")}
+        flat = not [p for p in (account.get("positions") or []) if p.get("symbol") == symbol]
+        return web.json_response({"ok": True, "flat": flat, "lev": lev, "price": price, "equity": round(equity, 2), **out},
                                  headers=NOCACHE)
 
     async def api_manual_entry_submit(request: web.Request) -> web.Response:
@@ -6155,13 +6219,14 @@ def make_app() -> web.Application:
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
-                                                             fresh=request.query.get("fresh") == "1")
+                                                             fresh=request.query.get("fresh") == "1",
+                                                             rule=request.query.get("mode") == "rule")
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
-        if sltp_off(request):
+        if sltp_off(request) and not plan.get("rule"):   # 규칙 진입의 3σ 손절은 끌 수 없다(규칙의 일부)
             plan["bracket"] = dict(SLTP_OFF_BRACKET)
         manual_entry_state.clear()
         manual_entry_state.update(phase="submitting", side=side, plan=plan, asset=query_asset(request),
@@ -6595,6 +6660,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/binance-account", api_binance_account)
     app.router.add_get("/api/manual-entry/preview", api_manual_entry_preview)
+    app.router.add_get("/api/manual-entry/rule-gauge", api_manual_entry_rule_gauge)
     app.router.add_post("/api/manual-entry/submit", api_manual_entry_submit)
     app.router.add_get("/api/manual-entry/status", api_manual_entry_status)
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)

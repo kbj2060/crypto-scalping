@@ -8458,6 +8458,11 @@ function manualEntryPlanHtml(data) {
       <span>내 돈 ${escapeHtml(won(plan.margin_usdt || 0))} USDT${
         plan.leverage ? ` = 명목 ${escapeHtml(won(plan.notional_usdt))} ÷ ${plan.leverage}배` : ""}</span>
     </div>`];
+  if (plan.rule) {   // 2026-10-08 4분할 규칙: 체결 뒤 걸릴 것 -- 지정가 3개·3σ 손절·손절 시 손실
+    const r = plan.rule;
+    parts.push(`<p class="entry-note">4분할 규칙 · 1분할 체결 뒤 지정가 ${r.tranches.slice(1).map((t) => `${escapeHtml(String(t.price))}×${escapeHtml(String(t.qty))}`).join(" · ")}
+      · 3σ 손절 ${escapeHtml(String(r.stop_price))} · 다 찬 채 손절 시 −$${escapeHtml(won(r.loss_usd))} (순자산 ${escapeHtml(String(r.loss_pct))}%)</p>`);
+  }
 
   // 2026-09-16 사용자 요청: 「롱 진입을 누르면 드롭다운으로 나오던 내용 제거 -- 이미 모달 안에
   //   내용이 있어」. 여기 있던 「진입 후 계좌」 타일 넷(청산까지·증거금 사용·계좌 노출·상한
@@ -8720,7 +8725,8 @@ async function manualEntryFetch(side, kind = "entry", ov = null) {
   }
   const q = `&pct=${ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct())}`
     + (kind === "exit" ? "" : (ov?.lev ? `&lev=${ov.lev}` : manualLevQuery()) + ((ov?.sltp ?? manualSltpOn()) ? "" : "&sltp=0"))
-    + (ov?.fresh ? "&fresh=1" : "");
+    + (ov?.fresh ? "&fresh=1" : "")
+    + (kind === "entry" && (ov?.rule ?? entryRuleOn()) ? "&mode=rule" : "");
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
   return res.json();
 }
@@ -8972,7 +8978,8 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   const pct = ov?.pct ?? Math.round(100 * (plan.fraction ?? 1));
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
                          lev: ov?.lev ?? manualLevEffective(), sltp: ov?.sltp ?? manualSltpOn(),
-                         fresh: !!ov?.fresh, sw: ov?.switch || null };
+                         fresh: !!ov?.fresh, sw: ov?.switch || null,
+                         rule: kind === "entry" && !!plan.rule };   // 2026-10-08 서버가 규칙 계획을 줬을 때만 -- 본 것이 나간다
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
   //   확인했다. 미리보기가 오는 즉시 발주한다(막혔으면 위에서 이미 멈췄다).
@@ -9026,7 +9033,7 @@ function manualEntryStateText(state) {
   const filledQty = Number(state?.filled || 0);
   if (br && (br.tp || br.backstop)) {
     const leg = (name, x) => !x ? "" : x.placed ? `${name} ${x.price} 걸림` : `🔴${name} 실패 (${x.error || "?"})`;
-    rows.push([leg("TP", br.tp), leg("비상 스탑", br.backstop)].filter(Boolean).join(" · "));
+    rows.push([leg("TP", br.tp), leg(state?.plan?.rule ? "3σ 손절" : "비상 스탑", br.backstop)].filter(Boolean).join(" · "));
   } else if (br && br.disabled) {
     rows.push("SL/TP 끔 — 걸지 않았습니다(기존 SL/TP 는 그대로)");
   } else if (state?.trigger === "bracket_sl") {
@@ -9035,6 +9042,15 @@ function manualEntryStateText(state) {
     rows.push("TP/SL 거는 중…");
   } else if (br) {
     rows.push(`🔴TP/SL 을 못 걸었습니다 (${br?.reason || "시도 기록 없음"})`);
+  }
+  // 2026-10-08 4분할 규칙: 2~4분할 지정가 결과 -- 하나라도 못 걸면 크게 말한다(규칙이 반쯤만 걸린 상태)
+  const ld = state?.ladder;
+  if (ld && Array.isArray(ld.legs)) {
+    const bad = ld.legs.filter((x) => !x.placed);
+    rows.push(bad.length ? `🔴분할 지정가 ${ld.placed}/${ld.legs.length} 만 걸림 (${bad.map((x) => `${x.leg}분할 ${x.error || "?"}`).join(" · ")})`
+      : `분할 지정가 ${ld.legs.map((x) => x.price).join(" · ")} 걸림`);
+  } else if (ld && ld.reason) {
+    rows.push(`🔴분할 지정가 못 걸었습니다 (${ld.reason})`);
   }
   // 2026-09-15 진입도 리페그한다. 쫓아간 횟수는 «의도한 가격보다 높게 들어갔을 수 있다»는
   // 뜻이라 숨기지 않는다 -- 청산과 달리 진입은 안 사도 되는 선택지가 있었기 때문이다.
@@ -9096,7 +9112,8 @@ async function manualEntrySubmit() {
   try {
     const q = `&pct=${pending.pct ?? 100}`
       + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : "") + (pending.sltp === false ? "&sltp=0" : ""))
-      + (pending.fresh ? "&fresh=1" : "");
+      + (pending.fresh ? "&fresh=1" : "")
+      + (pending.rule ? "&mode=rule" : "");
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&asset=${pending.asset || "eth"}&confirm=1${q}`,
       { method: "POST", cache: "no-cache" });
@@ -9592,6 +9609,99 @@ function renderVolMult() {
   n.addEventListener("mouseleave", hideTooltip); n.addEventListener("blur", hideTooltip);
 });
 setInterval(renderVolMult, 3000);
+
+// ── 2026-10-08 4분할 규칙 진입(사용자 «크기∝σ + 3σ + 4분할, 노출 맞춤 · A안») ──────────────────────────────────────
+//   주문 경로는 그대로다 -- 미리보기·제출에 mode=rule 만 붙고(manualEntryFetch·manualEntrySubmit), 서버 assemble_entry_plan 이
+//   같은 함수(build_rule_ladder)로 크기·지정가·손절을 다시 계산한다. 여기 «거리 자»는 /api/manual-entry/rule-gauge(주문 없음)의 미리보기.
+//   근거·한계: scripts/research_eth_stoploss_rules_20261007.py (노출 맞춤은 사후 배율 · 청산가가 손절선보다 먼저면 크기 자동 축소).
+// 🔴var·function 으로 둔다 -- manualEntryFetch(파일 앞쪽)가 로드 중 불려도 정의 전 접근(TDZ)으로 스크립트가 멈추지 않게.
+var entryRuleMode = null, ruleGauge = null;
+function entryRuleOn() {
+  if (entryRuleMode === null) { try { entryRuleMode = localStorage.getItem("entryMode") === "rule"; } catch (_) { entryRuleMode = false; } }
+  return entryRuleMode && activeSnapshotAsset === "eth";
+}
+async function refreshRuleGauge() {
+  if (!entryRuleOn()) { ruleGauge = null; renderRuleGauge(); return; }
+  try {
+    const r = await fetch(`/api/manual-entry/rule-gauge?lev=${manualLevEffective() || MANUAL_LEV_AUTO}`, { cache: "no-cache" });
+    ruleGauge = await r.json();
+  } catch (e) { ruleGauge = { ok: false, detail: String(e && e.message ? e.message : e) }; }
+  renderRuleGauge();
+}
+const RULE_BIND = { cap: (g) => `증거금 50% 상한(${g.lev}배 설정 = 순자산 ${(g.lev / 2).toFixed(0)}배)`, liq: () => "청산가가 손절선보다 먼저 와서" };
+function ruleRulerHtml(g) {
+  const L = g.long, S = g.short, P = g.price;
+  const R = Math.max(L.liq_pct, S.liq_pct, L.stop_pct, S.stop_pct) * 1.18, pos = (d) => 50 + d / R * 50;
+  const fx = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const t = (cls, d) => `<i class="rq-t ${cls}" style="left:${pos(d)}%"></i>`;
+  const lab = (cls, d, top, bot) => `<span class="rq-lab ${cls}" style="--x:${pos(d)}%">${top}<b>${bot}</b></span>`;
+  const fills = [0.44, 0.88, 1.32].map((d) => t("fill", -d) + t("fill", d)).join("");
+  return `<div class="rq-ruler" role="img" aria-label="현재가 기준 4분할·3σ 손절·청산가 거리 — 롱 손절 ${fx(L.stop_price)}, 청산 ${fx(L.liq_price)} · 숏 손절 ${fx(S.stop_price)}, 청산 ${fx(S.liq_price)}">
+    <div class="rq-axis"></div>
+    <span class="rq-zone long" style="left:${pos(-1.32)}%;width:${pos(0) - pos(-1.32)}%"></span>
+    <span class="rq-zone short" style="left:${pos(0)}%;width:${pos(1.32) - pos(0)}%"></span>
+    ${fills}${t("now", 0)}${t("stop", -L.stop_pct)}${t("stop", S.stop_pct)}${t("liq", -L.liq_pct)}${t("liq", S.liq_pct)}
+    ${lab("up", 0, "지금", fx(P))}
+    ${lab("dn stop", -L.stop_pct, `손절 −${L.stop_pct.toFixed(1)}%`, fx(L.stop_price))}${lab("dn stop", S.stop_pct, `손절 +${S.stop_pct.toFixed(1)}%`, fx(S.stop_price))}
+    ${lab("up liq", -L.liq_pct, `청산 −${L.liq_pct.toFixed(1)}%`, fx(L.liq_price))}${lab("up liq", S.liq_pct, `청산 +${S.liq_pct.toFixed(1)}%`, fx(S.liq_price))}
+  </div><div class="rq-key"><span>왼쪽 = 롱(아래로) · 오른쪽 = 숏(위로)</span><span><i class="z"></i>4분할 ±0.44·0.88·1.32%</span><span><i class="s"></i>3σ 손절</span><span><i class="q"></i>거래소 청산가(추정)</span></div>`;
+}
+function renderRuleGauge() {
+  const on = entryRuleOn();
+  const box = el("snapEntryBox"), gauge = el("snapRuleGauge"), mode = el("snapEntryMode");
+  if (mode) {
+    mode.hidden = activeSnapshotAsset !== "eth";
+    mode.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.mode === "rule") === on)));
+  }
+  box?.classList.toggle("entry-rule", on);
+  setT("snapEntryFracCap", on ? "진입" : "진입비율");
+  const g = on ? ruleGauge : null;
+  const L = g?.ok ? g.long : null, S = g?.ok ? g.short : null;
+  for (const [id, side, d] of [["snapEntryLong", "롱", L], ["snapEntryShort", "숏", S]]) {   // 꾹 누르기·확인 절차는 그대로 -- 이름표만
+    const b = el(id); if (!b) continue;
+    const span = b.querySelector("span"); if (span) span.textContent = on ? `${side} 4분할 진입` : `${side} 진입`;
+    let sub = b.querySelector("small.rq-sub");
+    if (on && d && d.available) {
+      if (!sub) { sub = document.createElement("small"); sub.className = "rq-sub"; b.appendChild(sub); }
+      sub.textContent = `4개 주문 + 손절 ${Number(d.stop_price).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
+    } else if (sub) sub.remove();
+  }
+  for (const [id, d, sgn, base] of [["ofabLong", L, "−", "LONG"], ["ofabShort", S, "+", "SHORT"]]) {
+    const b = el(id); if (!b) continue;
+    const small = b.querySelector("small:not(.rq-ofab)"); if (small) small.textContent = on && d ? `4분할 ×${d.mult.toFixed(2)}` : "5%";
+    let ex = b.querySelector("small.rq-ofab");
+    if (on && d && d.available) {
+      if (!ex) { ex = document.createElement("small"); ex.className = "rq-ofab"; b.appendChild(ex); }
+      ex.textContent = `손절 ${sgn}${d.stop_pct.toFixed(1)}% · −${Math.round(d.loss_pct)}%`;
+    } else if (ex) ex.remove();
+    b.title = on ? `1.5초 꾹 = ${base === "LONG" ? "롱" : "숏"} 4분할 규칙 진입(1분할 + 지정가 3개 + 3σ 손절)` : `1.5초 꾹 = ${base === "LONG" ? "롱" : "숏"} 5% 진입`;
+  }
+  if (!gauge) return;
+  gauge.hidden = !on;
+  if (!on) return;
+  if (!g) { gauge.innerHTML = `<p class="rq-cut">규칙 계산 중…</p>`; return; }
+  if (!g.ok) { gauge.innerHTML = `<p class="rq-cut">규칙 계산 불가 — ${escapeHtml(g.detail || g.error || "알 수 없음")}</p>`; return; }
+  const usd = (v) => "$" + Math.round(v).toLocaleString("en-US");
+  const t0 = L.tranches[0], per = t0.qty * t0.price;
+  const head = `<div class="rq-head"><span>권장 배수 <b>×${L.mult.toFixed(2)}</b></span><span>하루 변동성 <b>${Math.round(L.sigma24_bp)}bp</b></span>
+    <span>1분할 <b>${usd(per)}</b> (${t0.qty.toFixed(3)} ETH)</span><span>4분할 합 <b>${L.total_x.toFixed(1)}배</b></span>
+    <span class="rq-risk">손절 시 <b>−${usd(L.loss_usd)} · 순자산 ${Math.round(L.loss_pct)}%</b></span></div>`;
+  const cut = L.binding !== "rule" ? `<p class="rq-cut">규칙 크기 ${L.rule_x.toFixed(1)}배 → <b>${L.total_x.toFixed(1)}배로 줄임</b> · ${escapeHtml(RULE_BIND[L.binding](g))}</p>` : "";
+  const warn = !g.flat ? `<p class="rq-cut">포지션이 열려 있어 규칙 진입은 막힙니다 — 청산가 계산이 «포지션 없음» 전제입니다</p>`
+    : (L.blocked || S.blocked) ? `<p class="rq-cut">${escapeHtml(L.blocked || S.blocked)}</p>` : "";
+  gauge.innerHTML = head + ruleRulerHtml(g) + cut + warn;
+}
+el("snapEntryMode")?.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-mode]"); if (!b) return;
+  const want = b.dataset.mode === "rule";
+  if (want === entryRuleOn()) return;
+  entryRuleMode = want;
+  try { localStorage.setItem("entryMode", want ? "rule" : "direct"); } catch (_) {}
+  manualEntryClearConfirm();             // 다른 방식으로 본 미리보기의 확인 창은 닫는다
+  ruleGauge = null; renderRuleGauge(); refreshRuleGauge();
+});
+renderRuleGauge(); refreshRuleGauge();
+setInterval(refreshRuleGauge, 10000);
 
 (() => {
   const grip = el("ofabGrip"), tgl = el("ofabToggle");

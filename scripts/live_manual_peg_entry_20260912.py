@@ -288,6 +288,73 @@ def build_bracket_plan(*, position_side: str, support_levels: list[float],
     }
 
 
+# ── 4분할 규칙 진입 (2026-10-08, 사용자 «크기∝σ + 3σ + 4분할, 노출 맞춤으로 진입 로직 자동화 · A안») ──────────
+# 근거: scripts/research_eth_stoploss_rules_20261007.py --first-entry (원장 첫 진입 152개 재현, 노출 맞춤 +$2,824 vs 실제 +$515).
+#   1분할 = 순자산 × RULE_UNIT_X × m (m = 대시보드 권장 배수) · 첫 진입가에서 0·44·88·132bp 에 같은 크기 ·
+#   손절 = 첫 진입가 ∓ 3 × σ24(하루 척도) · 익절 없음(청산은 사용자).
+# 🔴노출 맞춤판은 m 이 ~0.9 를 넘으면 거래소 청산가가 손절선보다 먼저 온다(10-07 검토) -- 사용자 선택 «크기 자동 축소»로
+#   «청산가가 손절선보다 RULE_LIQ_BUFFER 더 멀리» 되는 합계까지 줄이고, 증거금 상한(cap_notional)도 같이 건다. 셋 중 작은 값.
+RULE_LADDER_BP = (0.0, 44.0, 88.0, 132.0)
+RULE_STOP_SIGMA = 3.0
+RULE_UNIT_X = 0.303 * 10.26      # 배수 1 인 날 손절 손실 10% 크기(0.303) × 노출 맞춤 배율(10.26, 10-07 연구 사후 값)
+RULE_LIQ_MMR = 0.02              # 청산가 추정용 유지증거금률(이 계좌 실측 역산 1.98%, 10-07)
+RULE_LIQ_BUFFER = 0.005          # 청산가를 손절선보다 0.5% 더 멀리
+RULE_STOP_FEE = 0.0005           # 손절 테이커 5bp(손실 표시용)
+
+
+def build_rule_ladder(*, side: str, equity: float, price: float, sigma24_bp: float, mult: float,
+                      cap_notional: float | None, filters: dict[str, float]) -> dict[str, Any]:
+    """4분할 규칙 진입 계획. **순수 함수**. price = 1분할 진입가(롱 bid·숏 ask peg), sigma24_bp = 하루 척도 σ(bp).
+    반환 tranches[0] 이 지금 나갈 1분할, [1:] 이 걸어 둘 지정가. 크기는 셋 중 작은 값 -- binding 이 무엇이 묶었는지 말한다."""
+    if side not in ("LONG", "SHORT"):
+        raise ValueError(f"side must be LONG/SHORT, got {side!r}")
+    if not (equity > 0 and price > 0 and sigma24_bp > 0 and mult > 0):
+        return {"available": False, "blocked": "순자산·가격·변동성 중 없는 값이 있습니다", "side": side}
+    s = 1 if side == "LONG" else -1
+    tick, step = filters["tick"], filters["step"]
+    stop_d = RULE_STOP_SIGMA * sigma24_bp / 1e4
+    avg_off = sum(RULE_LADDER_BP) / len(RULE_LADDER_BP) / 1e4
+    # 청산가(교차, 이 포지션뿐) = 평단·(N−E)/(N(1−mmr)) [롱] -- 그게 «손절가 × (1 − 여유)» 아래가 되는 최대 합계 N
+    stop_over_avg = (1 - s * stop_d) * (1 - s * RULE_LIQ_BUFFER) / (1 - s * avg_off)
+    liq_den = (1 - (1 - RULE_LIQ_MMR) * stop_over_avg) if s > 0 else ((1 + RULE_LIQ_MMR) * stop_over_avg - 1)
+    sizes = {"rule": len(RULE_LADDER_BP) * RULE_UNIT_X * mult * equity,
+             "liq": equity / liq_den if liq_den > 0 else float("inf"),
+             "cap": cap_notional if cap_notional else float("inf")}
+    binding = min(sizes, key=sizes.get)
+    per = sizes[binding] / len(RULE_LADDER_BP)
+    tranches = []
+    for bp in RULE_LADDER_BP:
+        raw = price * (1 - s * bp / 1e4)
+        px = round(_floor_to(raw, tick) if s > 0 else _ceil_to(raw, tick), 8)     # 메이커 쪽(롱 아래·숏 위)으로
+        tranches.append({"offset_bp": bp, "price": px, "qty": round(_floor_to(per / px, step), 8)})
+    raw_stop = price * (1 - s * stop_d)
+    stop = round(_floor_to(raw_stop, tick) if s > 0 else _ceil_to(raw_stop, tick), 8)   # 먼 쪽으로(먼저 안 걸리게)
+    q = sum(t["qty"] for t in tranches)
+    cost = sum(t["qty"] * t["price"] for t in tranches)
+    loss = s * (cost - q * stop) + RULE_STOP_FEE * q * stop
+    liq = ((cost - equity) / (q * (1 - RULE_LIQ_MMR)) if s > 0 else (cost + equity) / (q * (1 + RULE_LIQ_MMR))) if q > 0 else 0.0
+    blocked = None
+    small = [t for t in tranches if t["qty"] < filters["min_qty"] or t["qty"] <= 0
+             or (filters["min_notional"] and t["qty"] * t["price"] < filters["min_notional"])]
+    if small:
+        blocked = "1분할이 거래소 최소 수량·명목보다 작습니다"
+    elif s * (liq - stop) >= 0:
+        blocked = "청산가가 손절선보다 가깝습니다"                 # 크기 축소 뒤에도(반올림 등) -- 걸면 안 된다
+    return {
+        "available": blocked is None, "blocked": blocked, "side": side,
+        "mult": round(mult, 4), "sigma24_bp": round(sigma24_bp, 2),
+        "stop_price": stop, "stop_pct": round(100 * stop_d, 2),
+        "tranches": tranches, "total_qty": round(q, 8), "total_notional": round(cost, 2),
+        "total_x": round(cost / equity, 2), "binding": binding,
+        "rule_x": round(sizes["rule"] / equity, 2),
+        "liq_x": round(sizes["liq"] / equity, 2) if sizes["liq"] < float("inf") else None,
+        "cap_x": round(sizes["cap"] / equity, 2) if sizes["cap"] < float("inf") else None,
+        "loss_usd": round(loss, 2), "loss_pct": round(100 * loss / equity, 1),
+        "liq_price": round(liq, 2), "liq_pct": round(100 * s * (price - liq) / price, 2),
+        "equity": round(equity, 2), "ref_price": round(price, 8),
+    }
+
+
 def bracket_keep_farther_sl(new: dict, prev: dict | None, position_side: str) -> dict:
     """추가 진입(물타기)의 새 계획에 이전 무장의 SL 을 합친다 -- **SL 은 멀어질 때만 바뀐다**, TP 는 새 값
     (2026-09-27 사용자 지시). 계획은 매번 «지금 가격» 기준 레벨을 골라서, 숏 물타기(가격이 오른 뒤)는

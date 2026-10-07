@@ -108,6 +108,7 @@ async def ensure_leverage(session, symbol: str, target: int, key: str, secret: s
 #   state 에만 있어 재시작하면 흔적이 없었다. 조건부 주문은 이제 `/fapi/v1/algoOrder` 로만 간다.
 # 우리가 건 주문만 고른다 -- 사용자는 앱에서도 지정가 청산을 건다(09-24 aos_… 실측). 측면 글자까지 붙인다.
 TP_TAG, SL_TAG = "dbtp", "dbsl"
+LADDER_TAG = "dbld"          # 2026-10-08 4분할 규칙 진입의 2~4분할 지정가 -- 포지션이 사라지면 같이 지운다(남으면 새 포지션이 열린다)
 
 
 def bracket_tag(tag: str, pside: str) -> str:
@@ -119,13 +120,14 @@ async def cancel_bracket(session, symbol: str, pside: str, key: str, secret: str
     """이 측면에 **우리가 건** TP 지정가와 비상 스탑을 지운다. 목록을 못 읽으면 그 사실을 돌려준다
     (못 지웠는데 «지웠다»로 넘어가면 닫힌 포지션 위에 주문이 남는다)."""
     tp_pre, sl_pre = bracket_tag(TP_TAG, pside), bracket_tag(SL_TAG, pside)
+    ours = (tp_pre, bracket_tag(LADDER_TAG, pside))       # 지정가: 익절 + 규칙 진입 2~4분할
     n, errors = 0, []
     opens = await signed(session, "GET", "/fapi/v1/openOrders", {"symbol": symbol},
                          key, secret, offset)
     if not isinstance(opens, list):
         errors.append(f"openOrders: {opens.get('__error__') if isinstance(opens, dict) else opens}")
     for o in opens if isinstance(opens, list) else []:
-        if str(o.get("clientOrderId") or "").startswith(tp_pre):
+        if str(o.get("clientOrderId") or "").startswith(ours):
             r = await signed(session, "DELETE", "/fapi/v1/order",
                              {"symbol": symbol, "orderId": o.get("orderId")}, key, secret, offset)
             n, errors = (n + 1, errors) if "__error__" not in r else (n, errors + [r["__error__"]])
@@ -192,6 +194,26 @@ async def place_bracket(session, bracket: dict, symbol: str, pside: str) -> dict
                            "algo_id": r.get("algoId"), "error": r.get("__error__")}
     out["placed"] = all(v.get("placed") for k, v in out.items() if k in ("tp", "backstop"))
     return out
+
+
+async def place_ladder(session, rule: dict, symbol: str, pside: str) -> dict:
+    """4분할 규칙 진입의 2~4분할을 지정가(GTX)로 건다 -- 1분할 체결 **뒤**, 비상 스탑을 건 **뒤**에 부른다
+    (place_bracket 이 시작할 때 우리 옛 주문을 지우므로 순서가 바뀌면 방금 건 분할이 지워진다).
+    🔴실패해도 1분할을 되돌리지 않는다 -- 다리마다 결과를 돌려 화면이 «몇 개 걸렸나»를 말하게 한다."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        return {"placed": 0, "legs": [], "reason": "API 키가 없습니다"}
+    offset = await _clock_offset(session)
+    stamp, legs = int(time.time() * 1000), []
+    for i, t in enumerate(rule.get("tranches", [])[1:], start=2):
+        r = await signed(session, "POST", "/fapi/v1/order",
+                         {"symbol": symbol, "side": "BUY" if pside == "LONG" else "SELL", "positionSide": pside,
+                          "type": "LIMIT", "timeInForce": "GTX", "price": t["price"], "quantity": t["qty"],
+                          "newClientOrderId": f"{bracket_tag(LADDER_TAG, pside)}{stamp}{i}"},
+                         key, secret, offset)
+        legs.append({"leg": i, "price": t["price"], "qty": t["qty"], "placed": "__error__" not in r,
+                     "order_id": r.get("orderId"), "error": r.get("__error__")})
+    return {"placed": sum(lg["placed"] for lg in legs), "legs": legs}
 
 
 async def run_entry(session, plan: dict, state: dict) -> dict:
