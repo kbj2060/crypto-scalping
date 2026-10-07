@@ -2909,8 +2909,17 @@ function renderNews() {
   setH("newsMeta", `12시간 ${p.items.length}건 · 판정 ${judged.length} · 관련 ${judged.filter(rel).length} · 참고, 신호 아님`);
   const head = `<div class="nw-head"><span class="nw-chips">${chip("relevant", newsView.relevant, "관련만")}${chip("coin", newsView.coin, `${coin}+매크로`)}</span></div>`;
   const prevList = el("newsBody")?.querySelector(".nw-list"), keepTop = prevList ? prevList.scrollTop : 0;   // setH 는 SVG 직렬화 차이로 늘 다시 그린다 -- 스크롤 보존
+  // 2026-10-07 ⑤ 다음 24시간은 목록 아래(같은 폭, 사용자 지시) -- innerHTML 교체에 같이 지워지지 않게 카드로 잠깐 빼 두었다가 새 .nw-main 끝에 다시 붙인다(내용·클릭 핸들러는 노드에 그대로).
+  const when = el("mcWhen");
+  if (when && el("newsBody").contains(when)) card.appendChild(when);
   setH("newsBody", `${head}<div class="nw-sum">${tilts}${assets}${tops}${srcLine}</div><div class="nw-main">${lane}<div class="nw-list">${list}</div></div>`);
+  if (when) { el("newsBody").querySelector(".nw-main")?.appendChild(when); nwWhenFit(); }
   const nextList = el("newsBody")?.querySelector(".nw-list"); if (nextList && keepTop) nextList.scrollTop = keepTop;
+}
+// 2026-10-07 뉴스 카드 크기 유지: 목록 최대 높이에서 ⑤ 의 **실제** 높이를 뺀다(휴대폰은 일정 목록이라 행 수에 따라 높이가 바뀐다). 0 이면(안 그려짐) CSS 기본값 128px.
+function nwWhenFit() {
+  const w = el("mcWhen"), m = w && w.parentElement;
+  if (m && m.classList.contains("nw-main") && w.offsetHeight) m.style.setProperty("--nw-when-h", `${w.offsetHeight + (parseFloat(getComputedStyle(w).marginTop) || 0)}px`);
 }
 el("newsBody")?.addEventListener("click", (e) => {
   const b = e.target.closest("[data-nw]");
@@ -3061,8 +3070,8 @@ function fitLayout() {
   if (on) { try { localStorage.setItem("fitCache", JSON.stringify({ vh: innerHeight, mc: mcNeedH, lad: fitOptLadderH, ck: fitOptChartK, ap: fitAcctPlotH, az: fitAcctZ })); } catch (e) { /* 기억은 편의 */ } }
 }
 // Option 격자: 머리·커버 줄(~130) 아래 여섯 줄 중 사다리가 넷(칸 머리·칩 ~70 을 빼고) -- 측정 없이 창 높이로.
-// 2026-10-01 ⑤ 다음 24시간(116 + 여백·선 36)이 맨 아래 전폭으로 들어와 그만큼 뺀다.
-function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((innerHeight - 20 - 130 - 152) * 4) / 6 - 70))); }
+// 2026-10-07 ⑤ 다음 24시간이 뉴스 카드로 가서(사용자 지시) 예전에 빼던 152(116 + 여백·선 36)를 사다리에 돌려준다.
+function fitLadderFormula() { return Math.max(300, Math.min(900, Math.round(((innerHeight - 20 - 130) * 4) / 6 - 70))); }
 // 첫 렌더 전에 모드 클래스와 최소 높이를 바로 입힌다 -- 데이터가 오기 전에 상자 높이가 이미 맞아 있다
 function fitApplyCached() {
   if (!fitOn()) return;
@@ -4607,10 +4616,11 @@ function renderMarketCtx() {
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
   const whenBox = el("mcWhen");   // 2026-10-01 휴대폰·세로 화면도 Option 카드 맨 아래(넓은 화면과 같게)
   // 2026-09-30 폭: #mcWhen 은 비어 있으면 숨김(display:none)이라 첫 그림 때 clientWidth 0 → 900 으로 그려 2.3배 늘어났다(글자가 커졌다 작아짐) -- 카드 폭에서 잰다
-  const whenW = whenBox ? (whenBox.clientWidth || ((el("optCard") || body).clientWidth - 48)) : body.clientWidth;   // 2026-10-01 ⑤ 는 Option 카드 맨 아래
+  const whenW = whenBox ? (whenBox.clientWidth || el("newsBody")?.querySelector(".nw-main")?.clientWidth || 700) : body.clientWidth;   // 2026-10-07 ⑤ 는 뉴스 목록 아래(같은 폭)
   // 2026-10-05 «max pain 규칙 창»·«경제 일정 갱신» 두 줄 제거(사용자 지시) -- 시간축만
   const whenHtml = qSec("when", "⑤ 다음 24시간", G.timeline(events, Math.max(320, Math.round((whenW || 900) - 8))));
   setH("mcWhen", whenBox ? whenHtml : "");
+  nwWhenFit();
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
   body._mcHtml = htmlB;

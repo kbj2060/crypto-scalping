@@ -258,6 +258,7 @@
       <section id="newsCard" class="panel ops-health-panel news-card" hidden>
         <div class="ops-health-head"><div class="opt-card-head"><h3 class="card-title">News</h3><span id="newsMeta" class="muted">jevk5:4b 판정 · 참고, 신호 아님</span></div></div>
         <div id="newsBody" class="news-body"></div>
+        <div id="mcWhen" class="mc-when" data-eth-only></div>   <!-- 2026-10-07 ⑤ 다음 24시간 = 뉴스 목록 바로 아래·같은 폭(사용자 지시) -- renderNews 가 매번 .nw-main 끝으로 옮긴다. 여기는 뉴스가 그려지기 전 대기 자리 -->
       </section>
       <!-- 2026-09-30 Option 카드(사용자 지시 «옵션·블록 거래를 한 카드로 풋프린트 아래, 제목 Option»). -->
       <section id="optCard" class="panel ops-health-panel opt-card">
@@ -270,7 +271,6 @@
           <div id="optBlkBody" class="opt-lane-body opt-blk-col"></div>
           <div id="optFlowBody" class="opt-lane-body"></div>
         </div>
-        <div id="mcWhen" class="mc-when" data-eth-only></div>   <!-- 2026-10-01 ⑤ 다음 24시간 = Option 카드 맨 아래 전폭(사용자 «옵션으로 내려줘», 넓은 화면) -->
         <!-- 2026-09-30 옵션 카드를 이 카드 오른쪽 칸으로 흡수(사용자 «하나의 카드가 되게», 시안 승인) -- 넓은 화면은 오른쪽 380px 칸,
              좁으면 맨 아래. 칸 = 커버 경고 · 예상 폭 · 딜러 감마 · 행사가 사다리 · 감마 곡선 · 심리(참고 · 신호 아님). app.js renderOptions. -->
               </section>

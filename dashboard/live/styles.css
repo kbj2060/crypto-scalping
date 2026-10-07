@@ -2688,8 +2688,7 @@ body.order-coin-off .acct-lanes::before {
   /* 2026-10-05 만기·순매수 흐름을 카드 폭 절반씩(사용자 지시): 위 세 칸 비율(1 : 1.45 : 1.15)은 그대로 두고 사다리 열을 0.8 + 0.65 로 쪼갠다 --
      만기 = 1 + 0.8, 흐름 = 0.65 + 1.15 → 둘 다 1.8fr + 칸 사이 하나 = 정확히 반 */
   #optCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr) minmax(0, .65fr) minmax(0, 1.15fr); column-gap: 28px;
-    grid-template-areas: "head head head head" "cov cov cov cov" "move ladder ladder blk" "gamma ladder ladder mood" "lane lane flow flow" "when when when when"; }
-  #optCard > #mcWhen { grid-area: when; }   /* 2026-10-01 ⑤ 다음 24시간 = 맨 아래 전폭(풋프린트에서 옮김) */
+    grid-template-areas: "head head head head" "cov cov cov cov" "move ladder ladder blk" "gamma ladder ladder mood" "lane lane flow flow"; }   /* 2026-10-07 ⑤ 줄은 뉴스 카드로 갔다 */
   #optCard > .ops-health-head { grid-area: head; }
   #optCard #optBody, #optCard #optRow { display: contents; }
   #optCard .opt-cov, #optCard #optBody > .opt-note { grid-area: cov; margin-bottom: 10px; }
@@ -3017,7 +3016,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 /* 2026-10-01 세로 화면(태블릿·세로 모니터 721~1099): 두 열 -- 왼쪽 지금·실현감마·심리 | 오른쪽 사다리, 그 아래 블록 거래 전폭, 차트 둘 */
 @media (min-width: 721px) and (max-width: 1099px) {
   #optCard { grid-template-columns: minmax(0, 1fr) minmax(0, .1fr) minmax(0, .55fr) minmax(0, .55fr); column-gap: 22px;   /* 위 1 : 1.2 그대로 · 아래 1.1 : 1.1 반반 */
-    grid-template-areas: "head head head head" "cov cov cov cov" "move ladder ladder ladder" "gamma ladder ladder ladder" "mood ladder ladder ladder" "blk blk blk blk" "lane lane flow flow" "when when when when"; }
+    grid-template-areas: "head head head head" "cov cov cov cov" "move ladder ladder ladder" "gamma ladder ladder ladder" "mood ladder ladder ladder" "blk blk blk blk" "lane lane flow flow"; }   /* 2026-10-07 ⑤ 줄은 뉴스 카드로 갔다 */
 }
 
 /* 2026-10-05 뉴스 카드(사용자 «뉴스 카드를 하나 만들어서»). 왼쪽 = 기울기(1·6·12시간)·코인별·사고·출처 · 오른쪽 = 12시간 축 + 목록.
@@ -3206,3 +3205,10 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
   #chartPan .chart-pan-map { flex: 1 1 auto; min-width: 0; width: auto; }
   #snapshotAssetTabs { flex: 1 1 0; display: grid; }
 }
+
+/* 2026-10-07 ⑤ 다음 24시간 = 뉴스 목록 바로 아래·같은 폭(사용자 «뉴스 리스트 바닥을 올려서 그 아래 · 카드 크기 유지», impeccable).
+   한 화면 모드(html.fit1)는 목록이 flex 1 이라 ⑤(116px 고정) 만큼 목록 바닥이 저절로 올라간다. 그 밖은 목록 최대 높이에서 ⑤ 몫을 뺀다. */
+.nw-main > #mcWhen { flex: none; }
+.nw-main:has(> #mcWhen:not(:empty)) .nw-list { max-height: calc(520px - var(--nw-when-h, 128px)); }
+@media (max-width: 720px) { .nw-main:has(> #mcWhen:not(:empty)) .nw-list { max-height: calc(62vh - var(--nw-when-h, 128px)); } }
+html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
