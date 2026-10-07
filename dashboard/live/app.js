@@ -2455,7 +2455,13 @@ function srLevelsLive(n = 3) {
   if (!map || !map.warmed_up) return null;
   const cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || map.current_price || 0);
   if (!(cur > 0)) return null;
-  const pick = (levels, below) => (levels || []).filter((lv) => (below ? lv.price < cur : lv.price > cur)).slice(0, n);
+  // 2026-10-07 «게이지 지지1 ≠ 풋프린트 지지1»(사용자): 여기는 쓸림 필터가 없어 청산맵 마지막 봉 뒤 가격이 이미 지나간 레벨을
+  //   남겼다(급락 저점 2,587 아래로 뚫린 2,600·2,592·2,590 이 게이지 지지1~3, 풋프린트는 2,579). 풋프린트와 같은 규칙으로 하나로.
+  const since = liqMapKnownUntilSec(map);
+  const candles = candleHistoryByAsset[activeSnapshotAsset] || [];
+  const pick = (levels, below) => (levels || []).filter((lv) => Number(lv.price) > 0
+    && (below ? lv.price < cur : lv.price > cur)
+    && liqSweepIdx(candles, since, Number(lv.price)) < 0).slice(0, n);
   return { cur, res: pick(map.resistance_levels, false), sup: pick(map.support_levels, true) };
 }
 
@@ -3206,23 +3212,16 @@ function liqMapKnownUntilSec(map) {
 }
 
 function nearestLiquidationLevel() {
-  const map = latestLiquidationMap;
-  if (!map || !map.warmed_up) return [];
-  const liveCurrentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || map.current_price || 0);
-  if (!(liveCurrentPrice > 0)) return [];
-  const since = liqMapKnownUntilSec(map);
-  const candles = candleHistoryByAsset[activeSnapshotAsset] || [];
-  // 목록은 가까운 순이다 -- 현재가 쪽에 있고 **아직 안 쓸린** 첫 레벨을 고른다.
-  const pick = (levels, below) => (levels || []).find((lv) => Number(lv.price) > 0
-    && (below ? lv.price < liveCurrentPrice : lv.price > liveCurrentPrice)
-    && liqSweepIdx(candles, since, Number(lv.price)) < 0);
+  // 게이지·서랍·가격 지형과 **같은 목록**(srLevelsLive: 현재가 쪽 · 아직 안 쓸린 · 가까운 순)의 첫 칸.
+  const sr = srLevelsLive(1);
+  if (!sr) return [];
   const candidates = [
-    { lv: pick(map.support_levels, true), color: "var(--liq-support)", tag: "지지1", side: "support" },
-    { lv: pick(map.resistance_levels, false), color: "var(--liq-resistance)", tag: "저항1", side: "resistance" },
+    { lv: sr.sup[0], color: "var(--liq-support)", tag: "지지1", side: "support" },
+    { lv: sr.res[0], color: "var(--liq-resistance)", tag: "저항1", side: "resistance" },
   ]
     .filter((c) => c.lv);
   if (!candidates.length) return [];
-  candidates.sort((a, b) => Math.abs(a.lv.price - liveCurrentPrice) - Math.abs(b.lv.price - liveCurrentPrice));
+  candidates.sort((a, b) => Math.abs(a.lv.price - sr.cur) - Math.abs(b.lv.price - sr.cur));
   const nearest = candidates[0];
   return [{
     val: nearest.lv.price,
