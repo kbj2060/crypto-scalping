@@ -1953,6 +1953,12 @@ svg {
 /* .entry-tiles / .entry-arrow 는 진입 미리보기 타일과 함께 나갔다(2026-09-16) -- 참조 0. */
 .entry-was { font: 600 11px/1 var(--font-sans); color: var(--muted); }
 .acct-rail.entry-rail { position: relative; overflow: visible; }
+/* 2026-10-07 계좌 노출 레일 눈금 = 기준 4.1배(34.17%) · 경보 6배(50%) -- app.js EXPO_BASE/EXPO_ALARM/EXPO_CAP(12) 와 같은 값. */
+.acct-tile[data-pv="expo"] .acct-rail { position: relative; overflow: visible; }
+.acct-tile[data-pv="expo"] .acct-rail::before, .acct-tile[data-pv="expo"] .acct-rail::after {
+  content: ""; position: absolute; top: -3px; bottom: -3px; width: 1px; pointer-events: none; }
+.acct-tile[data-pv="expo"] .acct-rail::before { left: 34.17%; background: var(--muted); }
+.acct-tile[data-pv="expo"] .acct-rail::after { left: 50%; background: var(--bad); }
 /* 2026-09-20 계좌 카드가 «진입 미리보기»를 그릴 때(09-16 에 지웠다가 되살림). 🔴실제 계좌인
    척하면 안 되므로 테두리를 점선으로 바꿔 한눈에 가른다 -- 위의 라벨 한 줄과 두 겹이다. */
 .acct-tiles.preview .acct-tile { border-style: dashed;

@@ -1420,6 +1420,14 @@ function pvText(node, txt) {
 //    값을 만들면 «카드와 타일이 서로 다른 순간을 말하는» 상태가 생긴다.
 // 🔴노드를 갈아치우지 않고 제자리에서 고친다. setH 로 다시 그리면 새 노드가 최종값으로
 //    태어나 CSS transition 이 안 걸린다 -- 애니메이션이 목적이므로 이 구조가 조건이다.
+// 2026-10-07 계좌 노출(명목 ÷ 순자산) 기준 = 실원장 연구(사용자 «남은 기능 진행»). 옛 «15배 넘으면 빨강·30배 만재»는 근거가 없었다.
+//   4.1배 = 켈리 재현(144왕복)에서 배수를 고정했으면 손익은 같고 최대 낙폭 −45→−14% 였던 중앙 배수 ·
+//   6배 = 물타기 명목 상한(10-04 검토: 최대 평가손 감소 유의·청산거리 0.5→9.8%, 꼬리 손실은 명목이 불어난 물타기에서). 경보만 -- 주문은 막지 않는다.
+//   레일 만재 12배 → 눈금 4.1(34%)·6(50%)은 styles.css [data-pv="expo"] 가 그린다(값을 바꾸면 거기도).
+const EXPO_BASE = 4.1, EXPO_ALARM = 6, EXPO_CAP = 12;
+const expoTone = (x) => (x > EXPO_ALARM ? "bad" : x > EXPO_BASE ? "warn" : "good");
+const EXPO_NOTE = "\n기준 4.1배 = 실원장 144왕복에서 배수를 4.1배로 고정했으면 손익은 같고 최대 낙폭 −45→−14%."
+  + "\n6배 넘으면 빨강 = 물타기로 명목이 불어난 구간(원장의 꼬리 손실이 여기서 났다). 경보만 — 주문은 막지 않습니다.";
 function applyAcctPreview(pos, mark, equity) {
   const root = el("snapAcctPosition");
   const pv = entryProjPreview;
@@ -1435,7 +1443,7 @@ function applyAcctPreview(pos, mark, equity) {
   }
 
   const a = pv.after, plan = pv.__plan || {};
-  const LIQ_FULL = 10, EXPO_CAP = 30;
+  const LIQ_FULL = 10;
   const long = pos.side === "LONG";
   // 타일 셋: 값·색·막대·유령눈금(지금 자리)
   // 🔴2026-09-22 시안 B. 전에는 이 패처가 **사실을 덮어썼다** -- manualEntryRefreshSize 가
@@ -1466,7 +1474,7 @@ function applyAcctPreview(pos, mark, equity) {
   setTile("used", `${Number(a.margin_used_pct).toFixed(0)}%`,
           a.margin_used_pct > 80 ? "bad" : a.margin_used_pct > 60 ? "warn" : "good",
           a.margin_used_pct / 100);
-  setTile("expo", `${Number(a.exposure_x).toFixed(1)}배`, a.exposure_x > 15 ? "bad" : "warn",
+  setTile("expo", `${Number(a.exposure_x).toFixed(1)}배`, expoTone(a.exposure_x),
           a.exposure_x / EXPO_CAP);
 
   // 포지션 카드: 수량·레버리지·평단·청산가·손잡이. 평단은 **체결가 가중평균**이다.
@@ -1690,7 +1698,6 @@ function renderSnapshotAccount() {
           ? `최근 ${acctSpanDays}일에 닫힌 왕복이 없습니다 — 이 밖에 <b>${hiddenTrips}건</b> 있습니다.`
           : "닫힌 왕복이 아직 없습니다."}</div></section>`;
 
-  const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
   const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
   // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
   // ⭐여기서는 **항상 실제 계좌**를 그린다. 진입 미리보기는 렌더가 아니라 applyAcctPreview 가
@@ -1782,9 +1789,9 @@ function renderSnapshotAccount() {
                  `지금 비율(${fracPct}%)로 나가는 명목입니다. 눈금은 실제 상한 ${fmtUsd(realCap)} 기준.\n`
                  + `🔴거래소 현재 설정은 ${exLev}배입니다 -- 주문 직전에 ${tgtLev}배로 바꿔서 냅니다`
                  + `(ensure_leverage). 그래서 증거금은 «바꾼 뒤» 기준입니다.`)}
-          ${tile("expo", "노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
+          ${tile("expo", "노출", `${expo.toFixed(1)}배`, expoTone(expo), expo / EXPO_CAP,
                  `명목 ${fmtUsd(notional)} ÷ 순자산 ${fmtUsd(equity)}\n`
-                 + `🔴레버리지를 바꿔도 이 값은 안 바뀝니다 -- 명목을 정하는 건 비율과 천장입니다.`)}
+                 + `🔴레버리지를 바꿔도 이 값은 안 바뀝니다 -- 명목을 정하는 건 비율과 천장입니다.` + EXPO_NOTE)}
           ${/* 증거금 게이지를 **타일로 흡수**했다 -- 라벨+값+막대는 .acct-tile 과 같은 물건이라
                 별도 부품을 둘 이유가 없다. 눈금 전체 = 이 배수에서 쓸 수 있는 최대 증거금. */ ""}
           ${tile("margin", "증거금", `${fmtUsd(marginAt)}`, overTone,
@@ -1837,9 +1844,9 @@ function renderSnapshotAccount() {
              usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100,
              `사용 ${fmtUsd(usedMargin)} ÷ 순자산 ${fmtUsd(equity)}\n= 명목 ${
                fmtUsd(pos.notional)} ÷ 레버리지 ${pos.leverage}배`)}
-      ${tile("expo", "계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
+      ${tile("expo", "계좌 노출", `${expo.toFixed(1)}배`, expoTone(expo), expo / EXPO_CAP,
              `명목 ${fmtUsd(pos.notional)} ÷ 순자산 ${fmtUsd(equity)}\n포지션 레버리지(${
-               pos.leverage}배)와 다른 값입니다 — 증거금을 계좌의 일부만 썼기 때문입니다.`)}
+               pos.leverage}배)와 다른 값입니다 — 증거금을 계좌의 일부만 썼기 때문입니다.` + EXPO_NOTE)}
       ${tile("upnl", "미실현", usd2(upnl), upnl >= 0 ? "good" : "bad", Math.min(1, Math.abs(upnlPct) / 5),
              `거래소가 준 미실현 손익입니다. 막대는 순자산 대비 ±5% 를 만재로 봅니다.`)}
       ${(() => {
