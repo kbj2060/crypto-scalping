@@ -4177,7 +4177,7 @@ function mcVwapOf(c) {
 }
 const MC_TIPS = {
   lev: "펀딩 = 8시간마다 롱과 숏이 주고받는 이자(양수면 롱이 낸다). 바이낸스는 평온할 때 0.01%에 붙어 거의 안 움직여서 «비싸게 들고 있나»는 베이시스(선물 마크 − 현물 인덱스)의 7일 분위로 본다. OI = 열린 계약 수(바이낸스+OKX+HL 합 · Bybit 는 7일 쌓인 뒤 합류 — 줄에 마우스를 올리면 거래소별), z = 1시간 변화가 지난 7일 중 같은 요일유형(평일끼리·주말끼리) 시간들에 견줘 얼마나 튀었나 — 주말이 평일 잣대에 눌리지 않는다.\n우리 검정: 극단 펀딩 뒤 가격 방향은 없었다(표본 충분). 그래도 넣은 이유 — 청산 연쇄는 쏠린 쪽에서 나고, 상태 줄은 그 쏠림을 말한다. 방향 신호로 쓰지 않는다.",
-  ls: "바이낸스 5분 통계: 계정 롱숏비(롱 계정 수 ÷ 숏 계정 수) · 탑트레이더 포지션 비율 · 테이커 매수 ÷ 매도. 괄호 = 하루 전.\n우리 검정: 30분 방향 모델에 넣으면 오히려 조금 나빠졌고 학술 근거도 없다. 군중이 어느 쪽에 몰렸나를 눈으로 보는 용도.",
+  ls: "바이낸스 5분 통계: 계정 롱숏비(롱 계정 수 ÷ 숏 계정 수) · 탑트레이더 포지션 비율 · 테이커 매수 ÷ 매도. 괄호 = 하루 전.\n우리 검정: 30분 방향 모델에 넣으면 오히려 조금 나빠졌고 학술 근거도 없다. 군중이 어느 쪽에 몰렸나를 눈으로 보는 용도.\n2026-10-08 판정에 넣음: «개인 롱/숏 쏠림» = 계정 롱숏 24h +25% 이상(숏 −20% 이하) 이면서 탑트레이더 포지션 비율은 ±5% 안 — 개인이 몰리고 큰손은 안 따라옴(2025~ 약 5.6% 시간). 방향 신호 아님: 2022~26 «하락 뒤 개인 롱 쏠림» 뒤 24시간 수익 차이 0(2025~ 16건 +54bp[−129,+288] · 2022-24 28건) — 쏠린 쪽의 청산 연쇄 위험을 보는 용도.",
   quad: "1시간 가격 이동 × OI 변화. 이동이 하루 1시간 이동의 상위 25% 안일 때만 판정한다.\n우리 검정(4.7년): 하락 + OI↑(새 숏 유입) 뒤 1시간은 더 내렸고, 하락 + OI↓(롱 정리) 뒤는 되돌렸다 — 숏을 «언제 거두나»의 근거. 상승 쪽 두 칸은 아직 안 쟀다. 차트 아래 사분면(5분 델타 × OI)은 방향 정보가 0으로 나온 서술용이다.",
   flow: "크기별 순매수 = 테이커 주문 크기로 가른 60분 순매수(바이낸스+OKX 합 · Bybit 는 기준선이 쌓이면 합류 — 줄 호버에 거래소)를, 지난 14일 중 같은 요일유형(평일끼리·주말끼리)·같은 시간대(UTC 시) 60분 순매수의 보통 크기(중앙값 편차)로 나눈 값(σ) — 한산한 새벽·미국장·주말이 같은 잣대로 보인다(기준이 아직 없으면 서버 기동 후 12~24시간 분포). 고래 ≥ $10만 · 리테일 < $1만. 30분 CVD·테이커 매수÷매도·가격×OI 도 같은 합산. 30분 체결 = 거래소별 순매수(ETH). 합산이 안 될 때(거래소 봉이 비면)는 바이낸스만 — 줄 호버에 «바이낸스만».\n우리 검정: 혼자서는 셋 다 되돌림 쪽(리테일이 가장 심하다). 고래와 리테일이 갈릴 때 60분 고래 쪽이 약하게 맞았다(메이커 전제). CVD는 «설명»이지 선행지표가 아니다.",
   cross: "BTC 30분 이동과 ETH의 동행 여부 · 거래소 가격차(바이낸스 기준 — OKX 는 마크 대 마크, HL 은 미드 대 미드. 마크는 평활값이라 미드와 섞어 재면 괴리가 부풀어 보인다) · HL 프리미엄(마크 − 오라클).\n우리 검정: BTC→ETH 1분 선행 0, 바이낸스가 HL을 1초 안쪽으로 앞선다 — 30분~2시간 방향에는 못 쓴다. 괴리가 커지는 순간(거래소 장애·한쪽 청산 쏠림)을 알아채는 용도.",
@@ -4211,6 +4211,15 @@ const mcGfx = {
     return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="7" width="${w - 8}" height="2" fill="rgb(var(--lift) / .1)"/>`
       + [-2, 2].map((q) => `<line x1="${c + q * s}" x2="${c + q * s}" y1="3" y2="13" stroke="var(--line)" stroke-dasharray="2 2"/>`).join("")
       + `<line x1="${c}" x2="${c}" y1="2" y2="14" stroke="var(--muted)"/>${zv == null ? "" : `<rect x="${x0.toFixed(1)}" y="4" width="${Math.max(1.5, Math.abs(v) * s).toFixed(1)}" height="8" rx="2" fill="${fill}"/>`}</svg>`;
+  },
+  // 2026-10-08 매수·매도 발산(사용자 «가운데에서 왼쪽 = 매도가 많고 오른쪽 = 매수가 많게») -- buy = 매수 비중 0~1 · 가운데 50% ·
+  //   양끝 = 25%·75%(그 밖은 끝에 붙인다) · 점선 = 40%·60% · 10%p 안쪽은 회색(균형).
+  split(buy, w = mcGfx.gw || 130) {
+    const c = w / 2, s = (w / 2 - 4) / 0.25, v = buy == null ? 0 : Math.max(-0.25, Math.min(0.25, buy - 0.5)), x0 = v >= 0 ? c : c + v * s;
+    const fill = buy == null || Math.abs(buy - 0.5) < 0.1 ? "var(--muted)" : v > 0 ? "var(--good)" : "var(--bad)";
+    return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="7" width="${w - 8}" height="2" fill="rgb(var(--lift) / .1)"/>`
+      + [-0.1, 0.1].map((q) => `<line x1="${c + q * s}" x2="${c + q * s}" y1="3" y2="13" stroke="var(--line)" stroke-dasharray="2 2"/>`).join("")
+      + `<line x1="${c}" x2="${c}" y1="2" y2="14" stroke="var(--muted)"/>${buy == null ? "" : `<rect x="${x0.toFixed(1)}" y="4" width="${Math.max(1.5, Math.abs(v) * s).toFixed(1)}" height="8" rx="2" fill="${fill}"/>`}</svg>`;
   },
   ratio(now, prev, w = mcGfx.gw || 130, lo = 0.5, hi = 4) {   // 로그 눈금 · 1 가운데 · 빈 점 = 하루 전
     if (now == null) return mcGfx.pct(null, w);
@@ -4498,7 +4507,8 @@ function renderMarketCtx() {
     + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(tipOf(key)).replace(/\n/g, "<br>")}</p>${inner}</div>`;
   const f = d.funding || {}, b = d.basis || {}, oi = d.oi || {}, ls = d.ls, fl = d.flow || {}, z = fl.z60h_all || fl.z60h || fl.z60 || {},   // z60h = 같은 UTC 시 14일 기준(2026-10-01) · 10-05 요일유형(평일/주말) 분리, 없으면 옛 12~24h 링
     bk = d.book || {}, bu = d.burst;
-  const levWarn = ["long_crowd", "short_crowd", "deleverage"].includes((d.lev || {}).key);
+  const levWarn = ["long_crowd", "short_crowd", "deleverage", "acct_long", "acct_short"].includes((d.lev || {}).key);
+  const acctHot = ["acct_long", "acct_short"].includes((d.lev || {}).key) || /계정도/.test((d.lev || {}).label || "");   // 2026-10-08 판정에 쓰였으면 줄도 주황
   // 가격 위치 -- 차트와 같은 캔들 이력(서버가 봉마다 vwap/vsd 를 싣는다)
   const full = candleHistoryByAsset[A] || [], lc = full[full.length - 1];
   const px = Number(latestLivePriceByAsset[A] || lc?.close || d.mid || 0);
@@ -4559,7 +4569,9 @@ function renderMarketCtx() {
       + gRow("베이시스 분위", G.pct(b.pct7d), `${sg(b.bp, 1, "bp")}`, "", `마크−인덱스 · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위 · 30분 ${sg(b.d30_bp, 1, "bp")}`)
       + gRow("OI 1시간", G.sig(OI.z1h), `${sg(OI.z1h, 1, "σ")}`, tone(OI.z1h, 1.5), `${oiA ? venTxt(oiA.venues) : "바이낸스만"} · 1시간 ${sg(OI.d1h_pct, 2, "%")} · 24시간 ${sg(OI.d24h_pct, 1, "%")}`
           + (oiA ? `\n${Object.entries(oiA.by_venue || {}).map(([k, v]) => `${VN[k] || k} ${sg(v, 2, "%")}`).join(" · ")}` : ""))
-      + (ls ? gRow("계정 롱숏", G.ratio(ls.global, ls.global_24h), n(ls.global, 2), "", `하루 전 ${n(ls.global_24h, 2)}`)
+      + (ls ? gRow("계정 롱숏", G.ratio(ls.global, ls.global_24h), n(ls.global, 2), acctHot ? "mc-warn" : "",
+                   `하루 전 ${n(ls.global_24h, 2)}${ls.global_24h ? ` · 24h ${sg((ls.global / ls.global_24h - 1) * 100, 0, "%")}` : ""}`
+                   + "\n판정 «개인 쏠림» = 24h +25% 이상(숏 쪽 −20% 이하) 그리고 탑트레이더 ±5% 안(큰손은 그대로)")
         + gRow("탑트레이더", G.ratio(ls.top_pos, ls.top_pos_24h), n(ls.top_pos, 2), "", `하루 전 ${n(ls.top_pos_24h, 2)}`) : "")
       + note(`정산까지 ${left(f.next_ms)} · 펀딩 OKX ${fr(f.okx)} / HL ${fr(f.hl_8h)} · OI ${n((oi.oi || 0) / 1e6, 2)}M + OKX ${n((oi.okx || 0) / 1e6, 2)}M + HL ${oi.hl == null ? "-" : n(oi.hl / 1e6, 2) + "M"} ${U}`), levChip),
     qSec("q_flow", "② 누가 밀고 있나 · 60분", duelLine + (z.whale == null ? note("크기별 기준 쌓는 중(6시간)")
@@ -4568,7 +4580,11 @@ function renderMarketCtx() {
       + gRow("30분 CVD", G.sig(fl.cvd30_all_z ?? fl.cvd30_z), sg(fl.cvd30_all_z ?? fl.cvd30_z, 1, "σ"), tone(fl.cvd30_all_z ?? fl.cvd30_z),
              fl.cvd30_all_z != null ? flowVen : "바이낸스만")
       + ((fl.taker_all ?? (ls && ls.taker)) != null ? (() => { const tk = fl.taker_all ?? ls.taker;
-          return gRow("테이커 매수÷매도", G.ratio(tk, null), n(tk, 2), tone(tk - 1, 0.1), fl.taker_all != null ? `${flowVen} · 마지막 5분봉 체결` : "바이낸스 API"); })() : "")
+          const buy = tk / (1 + tk), sell = 1 - buy;   // 매수 ÷ 매도 → 매수 비중(2026-10-08 발산 게이지: 왼쪽 매도 · 오른쪽 매수)
+          return gRow("시장가 매수·매도", G.split(buy), Math.abs(buy - 0.5) < 0.005 ? "균형" : buy > 0.5 ? `매수 ${Math.round(buy * 100)}%` : `매도 ${Math.round(sell * 100)}%`,
+                      Math.abs(buy - 0.5) < 0.1 ? "" : buy > 0.5 ? "mc-good" : "mc-bad",
+                      `${fl.taker_all != null ? `${flowVen} · 마지막 5분봉 체결` : "바이낸스 API"} · 매수 ${Math.round(buy * 100)}% · 매도 ${Math.round(sell * 100)}% (매수÷매도 ${n(tk, 2)})`
+                      + "\n가운데 = 균형 · 왼쪽 = 매도 우세 · 오른쪽 = 매수 우세 · 끝 = 75% · 점선 = 60%. 방향 예측력은 없다(체결 방향은 가격의 그림자, 09-25·09-28 검정)."); })() : "")
       // 2026-09-30 사분면 그림 → 한 줄 네 칸(사용자 «높이를 쓸데없이 잡아먹는다»): 새 롱 · 숏 커버 · 새 숏 · 롱 정리 중 지금 칸만 채움, 작으면 전부 빈 칸.
       + gRow("가격×OI 1h", G.seg4(d.quad ? d.quad.key : null), d.quad ? ({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-" : "-",
              !d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : "",

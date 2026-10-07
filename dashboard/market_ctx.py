@@ -156,18 +156,42 @@ def ring_at(ring: dict, sec: int, fallback, tol_s: int = 2):
     return fallback
 
 
-def lev_state(basis_pct: float | None, oi_z: float | None) -> dict[str, str]:
+# 2026-10-08 계정 롱숏 쏠림(사용자 «계정 롱숏도 레버리지 과열 판정에»): 롱 계정 ÷ 숏 계정 24h 변화가 크고 탑트레이더 포지션 비율은 그대로
+#   = 개인이 몰리고 큰손은 안 따라옴. 2025~ 메트릭 실측 빈도: +25%·탑 ±5% = 5.6% 시간. 숏 쪽은 −20%(비율이라 대칭 아님).
+#   🔴방향 신호 아님 -- 2022~26 «하락 뒤 개인 롱 쏠림» 사건 뒤 24h 수익 차이 0(2025~ 16건 +54bp[−129,+288] · 2022-24 28건).
+ACCT_LONG_D, ACCT_SHORT_D, ACCT_TOP_FLAT = 0.25, -0.20, 0.05
+
+
+def acct_crowd(ls: dict | None) -> tuple[str | None, str]:
+    """(롱/숏/None, «계정 롱숏 24h +28% · 큰손 그대로»). 값이 하나라도 없으면 None -- «모름»을 «쏠림 없음»처럼 말하지 않게 문구는 비운다."""
+    try:
+        d = ls["global"] / ls["global_24h"] - 1
+        t = ls["top_pos"] / ls["top_pos_24h"] - 1
+    except (TypeError, KeyError, ZeroDivisionError):
+        return None, ""
+    txt = f"계정 롱숏 24h {d * 100:+.0f}% · 큰손 {'그대로' if abs(t) < ACCT_TOP_FLAT else f'{t * 100:+.0f}%'}"
+    if abs(t) >= ACCT_TOP_FLAT:
+        return None, txt
+    return ("long" if d >= ACCT_LONG_D else "short" if d <= ACCT_SHORT_D else None), txt
+
+
+def lev_state(basis_pct: float | None, oi_z: float | None, ls: dict | None = None) -> dict[str, str]:
     """레버리지 상태 한 줄. 🔴바이낸스 펀딩은 평온장에서 0.01% 에 클램프돼 거의 안 움직인다(2025~26 실측 최댓값 = 0.01%)
-    -- 그래서 «비싸게 들고 있나»는 펀딩이 아니라 베이시스(마크−인덱스)의 7일 분위로 본다. 방향 신호 아님(극단 펀딩 검정 0/10)."""
+    -- 그래서 «비싸게 들고 있나»는 펀딩이 아니라 베이시스(마크−인덱스)의 7일 분위로 본다. 방향 신호 아님(극단 펀딩 검정 0/10).
+    우선순위: 돈이 몰림(베이시스+OI) > OI 급감 > 개인 쏠림(계정 수, 2026-10-08) > 프리미엄·할인 > 보통."""
     hot = oi_z is not None and oi_z >= 1.0
+    acct, acct_txt = acct_crowd(ls)
+    acct_state = ({"key": f"acct_{acct}", "label": f"개인 {'롱' if acct == 'long' else '숏'} 쏠림 — {acct_txt}"} if acct else None)
     if basis_pct is None:
-        return {"key": "na", "label": "베이시스 이력 쌓는 중"}
+        return acct_state or {"key": "na", "label": "베이시스 이력 쌓는 중"}
     if basis_pct >= 0.9 and hot:
-        return {"key": "long_crowd", "label": "롱 쏠림 — 프리미엄 높고 OI 급증"}
+        return {"key": "long_crowd", "label": "롱 쏠림 — 프리미엄 높고 OI 급증" + (" · 계정도 롱" if acct == "long" else "")}
     if basis_pct <= 0.1 and hot:
-        return {"key": "short_crowd", "label": "숏 쏠림 — 할인 깊고 OI 급증"}
+        return {"key": "short_crowd", "label": "숏 쏠림 — 할인 깊고 OI 급증" + (" · 계정도 숏" if acct == "short" else "")}
     if oi_z is not None and oi_z <= -1.5:
         return {"key": "deleverage", "label": "레버리지 빠지는 중 — OI 급감"}
+    if acct_state:
+        return acct_state
     if basis_pct >= 0.9:
         return {"key": "premium", "label": "선물 프리미엄 높음"}
     if basis_pct <= 0.1:
@@ -356,6 +380,15 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     assert oi_sum_series({"okx": [(0, 1.0)]}, since=0) == ([], [])                            # 바이낸스 없으면 합 없음
     assert lev_state(0.95, 1.2)["key"] == "long_crowd" and lev_state(0.05, 1.2)["key"] == "short_crowd"
     assert lev_state(0.5, -2)["key"] == "deleverage" and lev_state(0.95, 0)["key"] == "premium" and lev_state(None, 3)["key"] == "na"
+    _ls = lambda g, g24, t, t24: {"global": g, "global_24h": g24, "top_pos": t, "top_pos_24h": t24}  # noqa: E731
+    _now = _ls(3.41, 2.66, 1.60, 1.64)                                                       # 10-08 02:40 KST 실값: +28% · 탑 −2%
+    assert lev_state(0.49, -0.9, _now) == {"key": "acct_long", "label": "개인 롱 쏠림 — 계정 롱숏 24h +28% · 큰손 그대로"}, lev_state(0.49, -0.9, _now)
+    assert lev_state(0.5, 0, _ls(2.0, 2.6, 1.6, 1.6))["key"] == "acct_short"                   # −23%
+    assert lev_state(0.5, 0, _ls(3.4, 2.66, 1.8, 1.6))["key"] == "normal"                      # 큰손도 +12% → 개인 쏠림 아님
+    assert lev_state(0.5, 0, _ls(3.3, 2.66, 1.6, 1.6))["key"] == "normal"                      # +24% < 25%
+    assert lev_state(0.95, 1.2, _now)["label"].endswith("· 계정도 롱") and lev_state(0.5, -2, _now)["key"] == "deleverage"   # 우선순위
+    assert lev_state(None, 0, _now)["key"] == "acct_long" and lev_state(0.5, 0, None)["key"] == "normal"
+    assert lev_state(0.5, 0, _ls(3.4, None, 1.6, 1.6))["key"] == "normal" and acct_crowd({"global": 1, "global_24h": 0})[0] is None
     lv = hl_liq_levels([(10, 2601), (5, 2602), (-2, 2800), (3, 2710), (-1, 2500), (1, 1000)], mid=2700, bin_usd=5)
     assert [l["px"] for l in lv["below"]] == [2600.0] and lv["below"][0]["usd"] == 15 * 2700 and lv["below"][0]["n"] == 2, lv
     assert [l["px"] for l in lv["above"]] == [2800.0], lv   # 롱인데 청산가가 위(2710) · 숏인데 아래(2500) · 너무 먼 1000 은 버린다

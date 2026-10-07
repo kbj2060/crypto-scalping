@@ -4167,6 +4167,8 @@ def make_app() -> web.Application:
         d25 = np.array(depth25_ring, dtype=float) if len(depth25_ring) >= 600 else None
         sw = mp.get("sweep")
         basis_pct = mctx.pct_rank(dv["basis_bp"], hist["basis"], min_n=600)
+        ls_d = ({"global": lsv(1, ls[::-1]), "top_pos": lsv(2, ls[::-1]), "taker": lsv(3, ls[::-1]),
+                 "global_24h": ls24(1), "top_pos_24h": ls24(2), "age_s": time.time() - ls[-1][0]} if ls else None)
         liq60 = mp.get("liq60") or {}   # 이 코인 @forceOrder 직전 60초(z×ap, 연구 원천과 같은 크기) -- 미시 루프가 매초 센다
         return {
             "available": True, "asset": asset, "ts": time.time(), "mid": mid,
@@ -4177,10 +4179,9 @@ def make_app() -> web.Application:
                         "hl_8h": hl[0] * 8 if hl and hl[0] is not None else None},     # HL 펀딩은 1시간 단위 -- 8시간으로 맞춘다
             "basis": {"bp": dv["basis_bp"], "d30_bp": dv["basis_d_bp"], "pct7d": basis_pct,
                       "hl_premium_bp": hl[2] * 1e4 if hl and hl[2] is not None else None},
-            "lev": mctx.lev_state(basis_pct, oi_all["z1h"] if oi_all and oi_all.get("z1h") is not None else oi["z1h"]),   # 합산 z 가 없으면 바이낸스
+            "lev": mctx.lev_state(basis_pct, oi_all["z1h"] if oi_all and oi_all.get("z1h") is not None else oi["z1h"], ls_d),   # 합산 z 가 없으면 바이낸스 · ls = 개인 쏠림(10-08)
             "oi": {**oi, "okx": okx_oi[0] if okx_oi else None, "hl": hl[1] if hl else None, "bybit": by_oi, "all": oi_all},
-            "ls": ({"global": lsv(1, ls[::-1]), "top_pos": lsv(2, ls[::-1]), "taker": lsv(3, ls[::-1]),
-                    "global_24h": ls24(1), "top_pos_24h": ls24(2), "age_s": time.time() - ls[-1][0]} if ls else None),
+            "ls": ls_d,
             "quad": mctx.quad_1h(x.get("move60"), oi_all["d1h"] if oi_all and oi_all.get("d1h") is not None else x.get("oi60"), x.get("move60_p75")),
             "move60": x.get("move60"), "oi60": x.get("oi60"),
             "flow": {"z60": x.get("z60"), "z60h": x.get("z60h"), "net60": x.get("net60"), "cvd30_z": x.get("cvd30_z"),
