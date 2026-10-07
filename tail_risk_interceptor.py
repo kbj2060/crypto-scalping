@@ -245,13 +245,16 @@ class TailRiskInterceptor:
     # ── 통계 연산 ─────────────────────────────────────────────────────────────
 
     def _recalculate_stats(self) -> None:
-        """인메모리 버퍼(Numpy)를 통한 Z-Score 통계 갱신"""
-        if len(self._history_long) > 0:
-            self.mu_long = float(np.mean(self._history_long))
-            self.sigma_long = float(np.std(self._history_long) + 1e-6)
-            
-            self.mu_short = float(np.mean(self._history_short))
-            self.sigma_short = float(np.std(self._history_short) + 1e-6)
+        """인메모리 버퍼(Numpy)를 통한 Z-Score 통계 갱신.
+        2026-10-07 마지막 표본은 기준선에서 뺀다 -- z 를 매기는 1분 롤링 합([t-60, t], 10초마다)은 늘 방금 넣은
+        분과 겹친다. 넣은 채로 두면 급증이 제 기준선에 섞여 다음 1분 내내 z 가 눌리고 sqrt(N-1)≈5.4 에 묶였다."""
+        if len(self._history_long) > 1:
+            hl, hs = list(self._history_long)[:-1], list(self._history_short)[:-1]
+            self.mu_long = float(np.mean(hl))
+            self.sigma_long = float(np.std(hl) + 1e-6)
+
+            self.mu_short = float(np.mean(hs))
+            self.sigma_short = float(np.std(hs) + 1e-6)
 
     def _aggregate_1m(self) -> tuple[float, float]:
         """최근 1분간의 청산 금액 집계"""
