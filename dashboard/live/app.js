@@ -7617,7 +7617,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // ── 풋프린트 아래 = 사분면 리본 + 차트 둘 (2026-10-06 사용자 선택 A) ─────────────────────────
   // «사분면은 글자만 살려서 레짐처럼 리본, 차트는 OI·CVD 하나 / 고래·중형·리테일·거래대금 하나».
   //   리본: 색 = 델타 부호 · 신규(OI↑) = 꽉 찬 칸 · 정리(OI↓) = 테두리 칸 · OI 모름 = 흐린 칸(이름도 «매수/매도 우위»로 유보).
-  //   ① CVD·OI 60분 합(같은 코인 축) ② 고래·중형·리테일 60분 합 + 거래대금 꺾은선 + 옅은 면(제 축, 바닥 = 0) -- 그리는 문법은 아래 «차트 둘» 주석.
+  //   ① CVD·OI ② 고래·중형·리테일 -- 60분 합을 줄마다 각자 축으로(10-08) + ② 에 거래대금 꺾은선 + 옅은 면(제 축, 바닥 = 0) -- 문법은 아래 «차트 둘» 주석.
   //   60분 합 = 그 봉까지 12봉, 다 있어야 점(10-05 B안 규약 그대로 -- 일부 합을 60분으로 말하지 않는다).
   //   봉별 Δ/OI 숫자 줄·창 시작 누적 흐린 선은 뺐다 -- 봉 호버 툴팁(laneTip)이 그 봉 값을 글자로 말한다.
   // 🔴OI 모름(null)과 ΔOI 0 을 가른다(2026-09-25) -- 없는 봉에 «신규 롱/숏» 이라는 없는 사실을 안 찍는다.
@@ -7688,15 +7688,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const R = laneRollOf();
     let li = R.length - 1; while (li >= 0 && !R[li]) li--;
     if (li < 0) return;                               // 재기동 직후 -- 60분 합을 아직 못 만든다
-    const last = R[li];
-    // 2026-10-06 차트 둘 = 위 1초 수급 차트와 같은 문법(사용자 선택 A «투박해 -- 통일성·글자·폰트», 제목은 뺀다):
-    //   선 어휘 CVD 잉크 1.8 · OI 주황 1.8 · 고래 잉크 2.4 실선 · 중형 1.7 파선 · 리테일 1.5 점선 · 0선 잉크 18% ·
-    //   차트 위 한 줄 범례 «견본 선 · 이름(흐림) · 값(부호색 / 선 색)» 12px · 숫자 tabular · 모바일은 이름 없이 견본 + 값.
-    //   거래대금 = 파란 꺾은선 + 옅은 면, 판 아래 45% 제 축(10-06 사용자 선택 C).
+    // 2026-10-08 차트 둘 = «줄마다 각자 축» 스파크(사용자 시안 2 선택 «낙폭이 잘 안보여 · 일자 선 같다»). 60분 합은 12봉 중 11봉이 겹쳐
+    //   천천히 움직이는데 같은 축에 겹쳐 그리면 큰 값 하나가 축을 다 먹어 나머지가 일자가 됐다 → 값마다 한 줄 · 자기 범위로 꽉 채움 ·
+    //   내리는 구간 빨강 / 오르는 구간 초록 · 오른쪽 = 지금 값 + 창 첫 점 대비 변화(▼/▲). 줄끼리 높이는 비교하지 않는다(숫자로 비교).
+    //   거래대금 = 파란 꺾은선 + 옅은 면, 판 아래 45% 제 축(10-06 사용자 선택 C) · 범례 한 줄(데스크톱만 -- 휴대폰은 줄 높이를 지킨다).
     const FF = "Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif", fs = mobileChart ? 10 : 12, HEAD = mobileChart ? 16 : 20;
     const STY = { c: ["CVD", "var(--ink)", 1.8, 0.9, null], oi: ["OI", "var(--warn)", 1.8, 0.95, null],
                   w: ["고래", "var(--ink)", 2.4, 0.95, null], m: ["중형", "var(--ink)", 1.7, 0.75, "6 3"], r: ["리테일", "var(--ink)", 1.5, 0.6, "2 3"] };
-    const vcol = (k, v) => (k === "c" || k === "oi" ? STY[k][1] : v >= 0 ? "var(--good)" : "var(--bad)");
     const rvolTxt = () => {   // 오늘 거래량(세션 누적 RVOL, 라벨·주말 기준은 워커) -- 2026-10-06 카드 머리 칩을 거래대금 괄호로(사용자 지시)
       const rv = latestBreakoutDetector && latestBreakoutDetector.asset === activeSnapshotAsset ? latestBreakoutDetector.rvol : null;
       const lab = rv && rv.session_label, wk = rv && rv.session_basis === "weekend", sv = Number(rv && (wk ? rv.session_weekend : rv.session));
@@ -7704,18 +7702,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     };
     const lineAt = (k) => Object.assign({ stroke: STY[k][1], "stroke-width": STY[k][2], "stroke-opacity": STY[k][3] },
                                         STY[k][4] ? { "stroke-dasharray": STY[k][4] } : {});
-    const frame = ([y0, y1], keys) => {               // 범례 줄 아래 판 · 0선 가운데 · 진폭 = 보이는 값의 최대
-      const amp = Math.max(...R.flatMap((r) => (r ? keys.map((k) => r[k]) : [])).filter((v) => v != null).map(Math.abs), 1e-9) * 1.06;
-      const lo = y0 + HEAD, mid = (lo + y1) / 2, half = (y1 - lo) / 2 - 3;
-      mk("line", { x1: ml, x2: ml + cw, y1: mid, y2: mid, stroke: "var(--ink)", "stroke-opacity": 0.18 });
-      return (v) => mid - (v / amp) * half;
-    };
-    const path = (k, Y) => {                          // 모름은 선을 끊는다 -- 0 으로 잇지 않는다
-      let d = "", pen = false;
-      R.forEach((r, i) => { const v = r ? r[k] : null; if (v == null) { pen = false; return; } d += (pen ? " L" : " M") + cx(i).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
-      if (d) mk("path", Object.assign({ d, fill: "none", "stroke-linejoin": "round" }, lineAt(k)));
-      if (last[k] != null) mk("circle", { cx: cx(li), cy: Y(last[k]), r: 2.4, fill: STY[k][1], "fill-opacity": STY[k][3] });
-    };
     const legend = (y0, list) => {                    // [키, 값 글자, 값 색] -- 폭이 모자라면 뒤 항목부터 안 그린다
       let x = ml + 6;
       list.forEach(([k, val, col]) => {
@@ -7740,13 +7726,35 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         x += wd + (mobileChart ? 8 : 14);
       });
     };
-    {   // ① CVD · OI (60분 합, 같은 코인 축)
-      const Y = frame(c1, ["c", "oi"]);
-      path("c", Y); path("oi", Y);
-      legend(c1[0], [["c", sgnQ(last.c), vcol("c", last.c)], ["oi", sgnQ(last.oi), vcol("oi", last.oi)]]);
-      if (!mobileChart) txt(ml + cw - 6, c1[0] + 15, "60분 합 · 같은 축", { "text-anchor": "end", "font-size": fs - 1, fill: "var(--muted)" });
-    }
-    {   // ② 고래 · 중형 · 리테일 + 거래대금(제 축 -- 세로 위치를 선과 비교하지 않는다)
+    const NAME = { c: "CVD", oi: "OI", w: "고래", m: "중형", r: "리테일" };
+    const spark = ([y0, y1], keys) => {
+      const hh = (y1 - y0 - 2) / keys.length;
+      keys.forEach((k, j) => {
+        const top = y0 + 2 + j * hh, bt = top + hh - 3, vals = R.map((r) => (r ? r[k] : null)), ok = vals.filter((v) => v != null);
+        if (j) mk("line", { x1: ml, x2: ml + cw, y1: top - 1, y2: top - 1, stroke: "var(--ink)", "stroke-opacity": 0.08 });
+        if (!ok.length) return;
+        const lo = Math.min(...ok), hi = Math.max(...ok), span = Math.max(hi - lo, 1e-9), Y = (v) => bt - ((v - lo) / span) * (bt - top - 1);
+        if (lo < 0 && hi > 0) mk("line", { x1: ml, x2: ml + cw, y1: Y(0), y2: Y(0), stroke: "var(--ink)", "stroke-opacity": 0.18, "stroke-dasharray": "2 3" });
+        let prev = null;
+        vals.forEach((v, i) => {                      // 모름은 선을 끊는다 -- 0 으로 잇지 않는다
+          if (v == null) { prev = null; return; }
+          if (prev) mk("line", { x1: cx(prev.i).toFixed(1), x2: cx(i).toFixed(1), y1: Y(prev.v).toFixed(1), y2: Y(v).toFixed(1),
+            stroke: v < prev.v ? "var(--bad)" : v > prev.v ? "var(--good)" : "var(--ink)", "stroke-width": k === "c" || k === "w" ? 2.2 : 1.7, "stroke-linecap": "round" });
+          prev = { i, v };
+        });
+        // 칩은 왼쪽(가장 오래된 봉 위) -- x 가 위 캔들과 맞춰져 있어 오른쪽에 두면 최근 구간을 가린다(휴대폰에서 5봉)
+        const now = ok[ok.length - 1], d = now - ok[0], ym = (top + bt) / 2;
+        const parts = [[NAME[k] + " ", "var(--muted)", 600], [sgnQ(now), "var(--text)", 700], [` ${d < 0 ? "▼" : "▲"}${sgnQ(Math.abs(d)).slice(1)}`, d < 0 ? "var(--bad)" : "var(--good)", 700]];
+        const wd = parts.reduce((a, [x, , wt]) => a + measureTextW(x, `${wt} ${fs - 1}px ${FF}`), 12), ph = Math.min(fs + 4, hh);
+        mk("rect", { x: ml + 2, y: ym - ph / 2, width: wd, height: ph, rx: ph / 2, fill: "var(--chart-bg)", "fill-opacity": 0.85 });
+        const t = txt(ml + 8, ym + (fs - 1) * 0.36, "", { "font-size": fs - 1, style: "font-variant-numeric: tabular-nums" });
+        parts.forEach(([x, col, wt]) => { const sp = document.createElementNS(NS, "tspan"); sp.setAttribute("fill", col); sp.setAttribute("font-weight", wt); sp.textContent = x; t.append(sp); });
+        const tt = document.createElementNS(NS, "title"); tt.textContent = `${NAME[k]} 60분 합 ${sgnQ(now)} · 이 창 첫 점 대비 ${sgnQ(d)} · 줄마다 각자 축`;
+        t.append(tt);
+      });
+    };
+    spark(c1, ["c", "oi"]);                           // ① CVD · OI (60분 합)
+    {   // ② 고래 · 중형 · 리테일(60분 합) + 거래대금(제 축 -- 세로 위치를 선과 비교하지 않는다)
       mk("line", { x1: ml, x2: ml + cw, y1: c2[0] - GAP / 2, y2: c2[0] - GAP / 2, stroke: "var(--line)" });
       const tMax = Math.max(...have.map((r) => r.turn), 1e-9), ty = (v) => c2[1] - 2 - (v / tMax) * (c2[1] - c2[0] - HEAD) * 0.45;
       {   // 2026-10-06 거래대금 = 꺾은선 + 옅은 면(사용자 선택 C, 가는 기둥 대체) -- 빈 봉에서 끊고 이어 그린다(면은 첫·끝 점 사이)
@@ -7762,10 +7770,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           mk("path", { d, fill: "none", stroke: "var(--turnover)", "stroke-width": 1.6, "stroke-opacity": 0.9, "stroke-linejoin": "round" });
         }
       }
-      const Y = frame(c2, ["w", "m", "r"]);
-      path("r", Y); path("m", Y); path("w", Y);
-      legend(c2[0], [["w", sgnQ(last.w), vcol("w", last.w)], ["m", sgnQ(last.m), vcol("m", last.m)], ["r", sgnQ(last.r), vcol("r", last.r)],
-                     ["turn", fmtUsdCompact(have[have.length - 1].turn), "var(--turnover)"]]);
+      if (!mobileChart) {
+        legend(c2[0], [["turn", fmtUsdCompact(have[have.length - 1].turn), "var(--turnover)"]]);
+        txt(ml + cw - 6, c2[0] + 15, "60분 합 · 줄마다 각자 축 · 내림 빨강 · 오름 초록", { "text-anchor": "end", "font-size": fs - 1, fill: "var(--muted)" });
+      }
+      spark([c2[0] + (mobileChart ? 0 : HEAD - 4), c2[1]], ["w", "m", "r"]);
     }
   });
 
