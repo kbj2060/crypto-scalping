@@ -25,7 +25,13 @@ C 조합(같은 날 2차, 사용자 «그 조합으로 돌려줘» -- 결과 보
    판정: TEST 일 샤프 차(판 − B1) 일 블록 95% CI 가 0 배제 양수 = «B1 보다 낫다» · AUX 같은 부호 = 보조. 함께: 판 − B0.
    보고: 건당·최악·CVaR1%·MDD(정규화 단위) · «최악 손실 ≤ 순자산 10%» 가 되는 평균 1단위 명목(순자산 배수).
    원장(보조): S1 = 왕복 F300 반사실 × 진입 시 크기 배수(왕복 평균 1 정규화) vs F300 · 실제 -- 총액·최악·왕복순 누적 MDD · 일 클러스터 CI.
-실행: python scripts/research_eth_stoploss_rules_20261007.py --tape | --ledger | --combo | --selftest   산출 tmp/stoploss_rules_20261007/
+R 크기 바꾼 원장(같은 날 3차, 사용자 «크기 ∝ 직전 24h 변동성으로 원장 리플레이 크기를 바꾸고 손절 라인을 다시» -- 결과 보기 전 고정):
+   왕복마다 진입 시 배수 w = vol_mult(σ24, 첫 체결 직전 닫힌 5분봉까지) / 왕복 평균(σ 없는 왕복은 1) → 그 왕복 **모든 체결 수량·수수료 × w**.
+   기준 = 크기만 바꾸고 손절 없음(S0). 손절 후보 = 앞의 F·A·V·E·Q + 넓은 선 F700·F1000·V2·V3·E50 + 시간 청산 T24·T48(첫 체결 뒤 N시간 종가).
+   E·Q 는 바뀐 수량으로 다시 판정(발동 지점이 크기에 달림). 판정: «규칙 − S0» 총손익 일 클러스터 95% CI · 최악 왕복 · 왕복순 누적 MDD.
+   «쓸 만한 손절» = 총손익 CI 하한 > −20%×|S0 총손익|(비열등) 그리고 최악·MDD 가 S0 보다 작음. 여럿이면 최악이 가장 작은 것.
+   시장 대조: 크기∝σ 기계(S0)에 F300·500·700·1000·1500 · V1·1.5·2·3 · 보유 12h·6h(시간 청산) → «판 − S0» 일 샤프 차 CI · 최악 · 10% 한도 1단위.
+실행: python scripts/research_eth_stoploss_rules_20261007.py --tape | --ledger | --combo | --resized | --selftest   산출 tmp/stoploss_rules_20261007/
 """
 from __future__ import annotations
 
@@ -239,6 +245,10 @@ def trip_cf(g, s, kt, kh, kl, kc, kind, v, E0, sg, is_open):
                 q = cost_q = 0.0
         if kind is None or q < 1e-9:
             continue
+        if kind == "T":                              # 첫 체결 뒤 v 시간이 지난 분의 종가에 정리
+            if kt[j] + 60_000 - T[0] >= v * 3_600_000:
+                return cash + s * q * kc[j] - STOP_FEE / 1e4 * q * kc[j], float(kc[j]), int(kt[j])
+            continue
         avg = cost_q / q
         if kind == "F":
             stop = first * (1 - s * v / 1e4)
@@ -260,7 +270,7 @@ def trip_cf(g, s, kt, kh, kl, kc, kind, v, E0, sg, is_open):
     return cash + (s * q * kc[-1] if is_open and q > 1e-9 else 0.0), None, None
 
 
-def run_ledger() -> dict:
+def run_ledger(resize: bool = False) -> dict:
     rng = np.random.default_rng(SEED)
     f = AG.tag_events(AG.load_fills())
     inc = pd.DataFrame([json.loads(x) for x in open(AG.OUT / "income_full.jsonl")])
@@ -273,20 +283,29 @@ def run_ledger() -> dict:
     sig_t, sig_v = b5.index.to_numpy(), np.sqrt(pd.Series(r5 ** 2).rolling(288, min_periods=280).sum().to_numpy())
     rules = [("actual", None, 0)] + [(f"F{v}", "F", v) for v in (100, 150, 200, 300, 500)] + [(f"A{v}", "A", v) for v in (100, 200)] \
         + [(f"V{v}", "V", v) for v in (0.5, 0.75, 1.0, 1.5)] + [(f"E{v}", "E", v) for v in (5, 10, 20, 30)] + [(f"Q{v}", "Q", v) for v in (3, 5)]
+    sig_at = lambda ts: float(sig_v[min(np.searchsorted(sig_t, ts // 300_000 * 300_000 - 300_000), len(sig_v) - 1)])  # noqa: E731
+    W = {}
+    if resize:
+        rules += [("F700", "F", 700), ("F1000", "F", 1000), ("V2.0", "V", 2.0), ("V3.0", "V", 3.0), ("E50", "E", 50), ("T24", "T", 24), ("T48", "T", 48)]
+        raw = {tr: vol_mult(np.array([sig_at(int(g.time.min()))]))[0] for tr, g in f.groupby("trip")}
+        norm = np.nanmean(list(raw.values()))
+        W = {tr: (1.0 if np.isnan(v) else v / norm) for tr, v in raw.items()}
     trips = []
     for tr, g in f.groupby("trip"):
         g = g.sort_values(["time", "id"])
+        if resize:
+            g = g.assign(qty=g.qty * W[tr], commission=g.commission * W[tr])
         s = int(g.sgn.iloc[0]); ts = int(g.time.iloc[0])
         qs = np.cumsum(np.where(g.inc, g.qty, -g.qty))
         is_open = qs[-1] > 1e-6
         te = int(kt[-1]) if is_open else int(g.time.iloc[-1])
         E0 = float(wc[np.searchsorted(wt, ts, side="right") - 1])
-        si = np.searchsorted(sig_t, ts // 300_000 * 300_000 - 300_000)
-        sg = float(sig_v[min(si, len(sig_v) - 1)])
+        sg = sig_at(ts)
         a, bix = np.searchsorted(kt, ts // 60_000 * 60_000), np.searchsorted(kt, te, side="right")
         row = {"trip": int(tr), "symbol": g.symbol.iloc[0], "side": "LONG" if s > 0 else "SHORT", "start": pd.Timestamp(ts, unit="ms").isoformat(),
                "open": bool(is_open), "E0": E0, "sig24": sg, "first_px": float(g.price.iloc[0]), "n_fills": int(len(g)),
-               "n_adds": int(g.ev.max()), "max_notional": float((qs * g.price.to_numpy()).max()), "day": ts // 86_400_000}
+               "n_adds": int(g.ev.max()), "max_notional": float((qs * g.price.to_numpy()).max()), "day": ts // 86_400_000,
+               "w": W.get(tr, 1.0)}
         row["max_lev"] = row["max_notional"] / E0 if E0 > 0 else None
         for name, kind, v in rules:
             pnl, px, ht = trip_cf(g, s, kt[a:bix], kh[a:bix], kl[a:bix], kc[a:bix], kind, v, E0, sg, is_open)
@@ -295,7 +314,7 @@ def run_ledger() -> dict:
                 row[f"{name}_px"] = px; row[f"{name}_hit"] = None if ht is None else pd.Timestamp(ht, unit="ms").isoformat()
         trips.append(row)
     T = pd.DataFrame(trips)
-    T.to_csv(OUT / "ledger_trips.csv", index=False)
+    T.to_csv(OUT / ("ledger_trips_resized.csv" if resize else "ledger_trips.csv"), index=False)
     out = {"n_trips": int(len(T)), "first": T.start.min(), "actual_total": float(T.actual.sum()), "actual_worst": float(T.actual.min()),
            "open": T[T.open].to_dict("records"), "rules": {}}
     days = T.day.to_numpy(); ud = np.unique(days)
@@ -304,10 +323,43 @@ def run_ledger() -> dict:
         per_day = pd.Series(d).groupby(days).sum().reindex(ud).to_numpy()
         bs = per_day[rng.integers(0, len(ud), (4000, len(ud)))].sum(1)
         hit = T[f"{name}_hit"].notna()
+        eq = np.cumsum(T.sort_values("start")[name].to_numpy())
         out["rules"][name] = dict(total=float(T[name].sum()), diff=float(d.sum()), ci=[float(np.quantile(bs, .025)), float(np.quantile(bs, .975))],
                                   worst=float(T[name].min()), n_hit=int(hit.sum()), hit_actual=float(T.actual[hit].sum()),
-                                  hit_cf=float(T[name][hit].sum()))
+                                  hit_cf=float(T[name][hit].sum()), mdd=float((eq - np.maximum.accumulate(eq)).min()))
+    eq = np.cumsum(T.sort_values("start").actual.to_numpy())
+    out["actual_mdd"] = float((eq - np.maximum.accumulate(eq)).min())
+    if resize:
+        out["w_range"] = [float(T.w.min()), float(T.w.max())]
     return out
+
+
+def run_resized_tape() -> dict:
+    """크기∝σ 기계(S0)에 넓은 손절·짧은 보유를 붙인다 -- «판 − S0»."""
+    rng = np.random.default_rng(SEED)
+    h1, l1, c1, ei, side, sg, day, per, tdec = tape_inputs()
+    n = len(ei); D_, T_, vm = np.full(n, D0), np.full(n, TP0), vol_mult(sg)
+    arms = {"S0": (0, np.zeros(n), HOLD)} | {f"S0+F{v}": (1, np.full(n, float(v)), HOLD) for v in (300, 500, 700, 1000, 1500)} \
+        | {f"S0+V{m}": (1, sg * m, HOLD) for m in (1.0, 1.5, 2.0, 3.0)} | {"S0+H12": (0, np.zeros(n), 720), "S0+H6": (0, np.zeros(n), 360)}
+    res, daily = {}, {}
+    for name, (mode, S, H) in arms.items():
+        pnl, q, xi, kind = sim_stop(h1, l1, c1, ei, side, 3, H, mode, S, D_, T_)
+        sel = sequential(ei, xi)
+        net = pnl - np.where(kind == 3, STOP_FEE * q, 0.0)
+        res[name] = {}
+        for p in ("TEST", "AUX"):
+            m = sel & (per == p)
+            x = net[m] * vm[m] / vm[m].mean()
+            d = pd.Series(x).groupby(day[m]).sum(); daily[(name, p)] = d
+            eq = np.cumsum(x); qq = np.quantile(x, 0.01)
+            res[name][p] = dict(n=int(m.sum()), per_trade=float(x.mean()), stop_rate=float((kind[m] == 3).mean()), worst=float(x.min()),
+                                cvar1=float(x[x <= qq].mean()), sharpe=day_sharpe(d), mdd=float((eq - np.maximum.accumulate(eq)).min()),
+                                unit_x_for_10pct=float(0.10 / (-x.min() / 1e4)) if x.min() < 0 else None)
+    for name in arms:
+        for p in ("TEST", "AUX"):
+            if name != "S0":
+                res[name][p]["sharpe_diff_vs_S0"] = boot_diff(daily[(name, p)], daily[("S0", p)], rng)
+    return res
 
 
 def selftest() -> None:
@@ -341,12 +393,15 @@ def selftest() -> None:
     # 숏 대칭: 숏 1개 @100, F200 → 102
     _, px4, _ = trip_cf(g, -1, kt, np.linspace(100, 103, 2000) + .01, np.linspace(100, 103, 2000) - .01, np.linspace(100, 103, 2000), "F", 200, 1000., 100., True)
     assert abs(px4 - 102.0) < 1e-9, px4
+    # T6: 롱 @100, 1분봉 2000개 → 첫 체결 뒤 6시간(360분째 봉 마감)의 종가에 정리
+    _, px5, t5 = trip_cf(g, 1, kt, kc + .01, kc - .01, kc, "T", 6, 1000.0, 100.0, True)
+    assert t5 == 359 * 60_000 and px5 == kc[359], (t5, px5)
     print("selftest ok")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    for m in ("--tape", "--ledger", "--combo", "--selftest"):
+    for m in ("--tape", "--ledger", "--combo", "--resized", "--selftest"):
         ap.add_argument(m, action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -356,6 +411,9 @@ def main() -> int:
         r = run_tape(); json.dump(r, open(OUT / "tape_result.json", "w"), ensure_ascii=False, indent=1)
     if a.ledger:
         r = run_ledger(); json.dump(r, open(OUT / "ledger_result.json", "w"), ensure_ascii=False, indent=1, default=str)
+    if a.resized:
+        r = {"ledger": run_ledger(resize=True), "tape": run_resized_tape()}
+        json.dump(r, open(OUT / "resized_result.json", "w"), ensure_ascii=False, indent=1, default=str)
     if a.combo:
         r = {"tape": run_combo(), "ledger": ledger_combo()}
         json.dump(r, open(OUT / "combo_result.json", "w"), ensure_ascii=False, indent=1)
