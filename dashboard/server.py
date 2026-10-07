@@ -3962,6 +3962,9 @@ def make_app() -> web.Application:
             situation_state["candles_day"] = await load_5m_day(int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS, asset)
         except Exception as exc:  # noqa: BLE001 -- 없으면 카드 캐시(짧다)로 물러선다
             print(f"flow-read 5m day: {exc!r}", flush=True)
+        if asset == "eth":   # 권장 배수(ETH 에서만 검정) -- 완결 봉 289개가 이어져야 값이 있다(없으면 None = 화면 «—»)
+            situation_state["vol_mult"] = fr.vol_size_mult(
+                [c for c in situation_state.get("candles_day") or [] if int(c["time"]) < int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS])
         # 2026-09-24 max_stale 30: 둘 다 duckdb 읽기라 회당 0.4~0.5초(서버 로그)인데 블로킹이면 5초마다
         #   1초 루프가 그만큼 멈췄다(실측 slow tick oi5m+liq5m=1.00~1.25s). 입력이 5분봉이라 몇 초
         #   묵은 값으로 충분하다. 30초를 넘기면(읽기가 계속 실패) 다시 기다린다.
@@ -4234,7 +4237,7 @@ def make_app() -> web.Application:
     def situation_payload() -> dict[str, Any]:
         return {"now": situation_state["now"], "computed_at": situation_state["computed_at"],
                 "streams": {"fo": dict(fo_state), "mp": dict(mp_state)},
-                "read": situation_state.get("read")}
+                "read": situation_state.get("read"), "vol_mult": situation_state.get("vol_mult")}
 
     async def api_situation(request: web.Request) -> web.Response:
         return web.json_response(situation_payload(), headers=NOCACHE)

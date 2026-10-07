@@ -1054,6 +1054,8 @@ svg {
 .chart-tooltip.visible {
   opacity: 1;
 }
+/* 2026-10-07 권장 배수 풀이 -- 차트 툴팁은 한 줄(nowrap)이지만 이 풀이는 문장이라 폭을 묶고 접는다(모바일 390px 에서 오른쪽이 잘렸다). */
+.chart-tooltip .vm-tip { white-space: normal; width: min(380px, calc(100vw - 32px)); line-height: 1.55; word-break: keep-all; }
 
 .chart-tooltip b {
   /* 🔴툴팁은 **두 테마 모두 어두운 판**이다(차트 위 대비 때문). 그래서 여기 글자색만은
@@ -1759,6 +1761,13 @@ svg {
   color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent);
 }
 .chip-val { font-size: 11px; color: var(--muted); min-width: 34px; }
+.vol-mult { display: inline-flex; align-items: baseline; gap: 5px; min-height: 24px; padding: 4px 8px; border: 1px solid var(--soft-line);
+  border-radius: 7px; background: var(--glass); cursor: help; white-space: nowrap; }
+.vol-mult > span { font: 600 11px/1 var(--font-sans); color: var(--muted); }
+.vol-mult > b { font: 700 11.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+.vol-mult.hi { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.vol-mult.hi > b { color: var(--warn); }
+.vol-mult[hidden] { display: none; }
 /* 진입 한 줄: 레버·비율·버튼·보유가 한 행에 들어간다. 좁으면 감싸되 왼쪽 정렬을 지킨다. */
 .manual-entry-row.entry-line { justify-content: flex-start; row-gap: 6px; }
 .manual-entry-row.entry-line .entry-cap { flex: 0 0 auto; }
@@ -2931,6 +2940,11 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   background-repeat: no-repeat; background-position: 0 0; background-size: 0% 100%;
 }
 .ofab-dir small { font-size: 11px; font-weight: 600; color: var(--muted); }
+/* 2026-10-07 권장 배수(크기 ∝ 직전 24h 변동성) -- 방향이 없는 크기라 무채색. 1.5배 이상만 주황(«오늘은 크게 들어가도 되는 날» = 눈여겨볼 것). */
+.ofab-vm { align-self: center; padding: 0 4px; font: 600 11.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); cursor: help; white-space: nowrap; }
+.ofab-vm.hi { color: var(--warn); }
+.ofab-vm[hidden] { display: none; }
+.ofab-vm:focus-visible, .vol-mult:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 7px; }
 .ofab-dir.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 .ofab-dir.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .ofab-dir.long:hover { border-color: var(--good); }

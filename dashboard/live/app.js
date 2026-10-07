@@ -9551,6 +9551,44 @@ function ofabLivePnl(p, qty, side) {
 }
 setInterval(renderOfab, 3000);
 
+// 2026-10-07 권장 배수(사용자 «사전등록하고 대시보드에 권장 배수») -- 진입 크기 ∝ 직전 24h 변동성. 서버 /api/situation 의 vol_mult
+//   (dashboard/flow_read.vol_size_mult, 사전등록 식과 오차 3e-14). ETH 에서만 검정했으므로 다른 코인에선 숨긴다. 서술이다 -- 비율 칩을 바꾸지 않는다.
+function volMultTip(v) {
+  const m = Number(v.mult), s = Number(v.sigma_bp);
+  return `<div class="vm-tip"><b>권장 크기 ×${m.toFixed(2)}</b>평소(2025년 이후 보통 날)의 ${m.toFixed(2)}배`
+    + `<br>직전 24시간 변동성 ${s.toFixed(0)}bp(4시간 척도) · 1배 기준 121bp · 범위 ×0.33~×3.9`
+    + `<br>변동성이 클 때 크게, 작을 때 작게: 조용한 장의 44bp 역행은 추세의 시작이라 물타기가 물린다`
+    + `<br>(핑퐁 물타기 재현 4.7년: 낮은 3분위 건당 −15bp · 높은 3분위 +14bp · 실원장 최대 낙폭 −$549 → −$204)`
+    + `<br>사후 발견 · 전진 검정 중(1차 판정 2027-04) · 크게 들어갈 땐 명목 상한(순자산 6배)과 함께</div>`;
+}
+function renderVolMult() {
+  const v = activeSnapshotAsset === "eth" ? latestSituation?.vol_mult : null;
+  const m = Number(v?.mult), ok = Number.isFinite(m);
+  for (const id of ["snapVolMult", "ofabVolMult"]) {
+    const n = el(id);
+    if (!n) continue;
+    n.hidden = !ok;
+    if (!ok) continue;
+    const t = n.querySelector("b") || n, txt = `×${m.toFixed(1)}`;
+    if (t.textContent !== txt) t.textContent = txt;
+    n.classList.toggle("hi", m >= 1.5);
+    n.dataset.tip = volMultTip(v);
+    n.setAttribute("aria-label", `권장 크기 ${m.toFixed(2)}배 — 직전 24시간 변동성 기준, 사후 발견·전진 검정 중`);
+  }
+}
+["snapVolMult", "ofabVolMult"].forEach((id) => {
+  const n = el(id);
+  if (!n) return;
+  const on = () => {
+    const r = n.getBoundingClientRect(), t = el("chartTooltip");   // 🔴.chart-tooltip 은 position:absolute(문서 좌표) -- 스크롤을 더한다
+    showTooltip(r.left + scrollX, r.bottom - 10 + scrollY, n.dataset.tip || "");
+    if (t && r.bottom + 5 + t.offsetHeight > innerHeight) t.style.top = `${scrollY + Math.max(4, r.top - t.offsetHeight - 6)}px`;   // 떠 있는 버튼은 화면 바닥 -- 아래 자리가 없으면 위로
+  };
+  n.addEventListener("mouseenter", on); n.addEventListener("focus", on);
+  n.addEventListener("mouseleave", hideTooltip); n.addEventListener("blur", hideTooltip);
+});
+setInterval(renderVolMult, 3000);
+
 (() => {
   const grip = el("ofabGrip"), tgl = el("ofabToggle");
   if (!grip || !tgl) return;

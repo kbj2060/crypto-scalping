@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261007-ofab-hold">
+  <link rel="stylesheet" href="styles.css?v=20261007-volmult">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -420,6 +420,9 @@
               <button type="button" class="chip" data-v="50">50%</button>
             </div>
             <b id="snapEntryFracVal" class="chip-val">25%</b>
+            <!-- 2026-10-07 권장 배수(사용자 «사전등록하고 대시보드에 권장 배수»): 크기 ∝ 직전 24h 변동성 · ETH 만 · 서술이다(칩 값을 바꾸지 않는다).
+                 사후 발견 → 전진 판정 docs/experiments/eth_pingpong_vol_sizing_fwd_prereg_20261007.md. 풀이는 호버·포커스(app.js renderVolMult). -->
+            <span id="snapVolMult" class="vol-mult" tabindex="0" hidden><span>권장</span><b>×1.0</b></span>
             <!-- 2026-09-28 SL/TP 켜기/끄기(사용자 지시). 끄면 이번 진입에 TP·비상 스탑을 안 걸고 SL 감시도 안 무장하며,
                  물타기면 이미 걸린 SL/TP 를 그대로 둔다(갱신 안 함). 브라우저에 기억한다. -->
             <label class="lev-auto sltp-toggle" for="snapSltp" title="끄면 이번 진입에 SL/TP 를 걸지 않고, 이미 걸린 SL/TP 도 갱신하지 않습니다">
@@ -484,13 +487,14 @@
         <!-- 2026-10-06 상세 펼치기(사용자 지시): LONG 앞 아이콘 = 예전 «주문»을 누르면 나오던 패널(레버·비율·진입 버튼). 주문 경로 없음. -->
         <button type="button" id="ofabMore" class="ofab-more" aria-controls="ofabPanel" aria-expanded="false" aria-label="주문 상세 펼치기"><svg
           viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+        <span id="ofabVolMult" class="ofab-vm" tabindex="0" hidden>×1.0</span>   <!-- 2026-10-07 권장 배수(위 진입 레인과 같은 값) -->
         <button type="button" id="ofabLong" class="ofab-dir long" title="1.5초 꾹 = 롱 5% 진입"><span>LONG</span><small id="ofabLongFrac">5%</small></button>
         <button type="button" id="ofabShort" class="ofab-dir short" title="1.5초 꾹 = 숏 5% 진입"><span>SHORT</span><small id="ofabShortFrac">5%</small></button>
       </span>
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden></div>
   </div>
-  <script src="./app.js?v=20261007-ofab-hold"></script>
+  <script src="./app.js?v=20261007-volmult"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
