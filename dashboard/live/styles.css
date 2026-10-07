@@ -3176,3 +3176,19 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .snap-head .nc-dot { top: 7px; right: 8px; }
 }
+
+/* 2026-10-07 모바일 전체 폭(사용자 «모바일에서 전체 화면 최적화 — 오른쪽으로 빈 공간», impeccable adapt).
+   ① 카드 머리의 안쪽 18px 을 걷는다 -- 패널 12px 위에 한 겹 더라 머리만 39px 에서 시작하고 본문(차트)과 어긋났다.
+   ② 머리 조작부를 줄 폭에 늘린다 -- 창 탭(146px)·이동 미니맵(176px 고정)·코인 탭이 제 글자 폭만 차지해 오른쪽이 비었다.
+      탭은 1fr 등폭 그리드라 늘려도 미끄러지는 조각(--seg-n 폭)이 그대로 맞는다. */
+@media (max-width: 720px) {
+  #fpCard > .ops-health-head, #newsCard > .ops-health-head, #optCard > .ops-health-head, #acctCard > .ops-health-head {
+    padding: 4px 0 12px; }
+  #fpCard .chart-head-left { width: 100%; row-gap: 8px; }
+  #fpCard .chart-head-left > .card-title { align-self: center; }
+  #chartWindowTabs { flex: 1 1 0; display: grid; }
+  #chartPan { flex: 1 1 100%; display: flex; }
+  #chartPan[hidden] { display: none; }
+  #chartPan .chart-pan-map { flex: 1 1 auto; min-width: 0; width: auto; }
+  #snapshotAssetTabs { flex: 1 1 0; display: grid; }
+}

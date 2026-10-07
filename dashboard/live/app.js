@@ -5236,7 +5236,7 @@ function renderChartPan() {
   const line = hist.map((c, i) => `${i ? "L" : "M"}${X(i + 0.5).toFixed(1)} ${Y(c.close).toFixed(1)}`).join("");
   const t = (c) => fmtHourMinute(c.time * 1000), end = hist[Math.max(0, e - 1)];
   const focused = box.contains(document.activeElement) && document.activeElement.classList.contains("chart-pan-map");
-  box.innerHTML = `<svg class="chart-pan-map" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="slider" tabindex="0"`
+  box.innerHTML = `<svg class="chart-pan-map" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" preserveAspectRatio="none" role="slider" tabindex="0"`
     + ` aria-label="12시간 안에서 차트 창 위치 — 방향키로 이동" aria-valuemin="${chartWindowBars}" aria-valuemax="${n}" aria-valuenow="${e}"`
     + ` aria-valuetext="${t(hist[s])}부터 ${t(end)}까지">`
     + `<rect class="pan-win" x="${X(s).toFixed(1)}" y="0.5" width="${Math.max(3, X(e) - X(s)).toFixed(1)}" height="${H - 1}" rx="4"/>`
