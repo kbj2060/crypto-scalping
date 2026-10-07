@@ -3643,7 +3643,7 @@ const OPT_TIPS = {
   rg: "실현 감마 국면(2026-10-02, 딜러 감마를 대신한다): 직전 12시간 ETH 5분 종가 수익률의 1차 자기상관. 음수 = 움직임이 곧 되돌아가는 장(롱감마형 — 누가 헤지하든 결과가 «누름»), 양수 = 이어지는 장(숏감마형 — «키움»). 딜러가 누구인지 가정하지 않고 효과를 가격에서 직접 잰다.\n왜 바꿨나: Deribit 은 누가 딜러인지 공개하지 않는다. 체결 기반·블록만·RFQ·관행·뒤집은 관행 등 여섯 가정 모두 검증에서 일관된 지지가 없었고(체결 기반은 종목-시점의 7.9% 에서 «딜러 포지션 > 미결제»), 업계(Glassnode·Amberdata)도 같은 가정을 검증 없이 쓴다.\n분위 = 2021~24 ETHUSDT 5분(정시 표본 35,051개) 중 위치. 국면 = 하위 1/3(−0.077 이하) 되돌림 쪽 · 상위 1/3(+0.012 이상) 추세 쪽.\n우리 검정(손대지 않은 2025-01~2026-09): 다음 4시간 실현 변동성 ÷ 평소 예측(HAR) = 되돌림 쪽 0.94배 · 보통 0.99배 · 추세 쪽 1.02배 — 크기 정보로 약하게 맞는다. 🔴국면은 오래 안 간다(지금 값이 다음 4시간 값을 거의 예측 못 함) · 큰 움직임의 1시간 되돌림 차이(56% vs 52%)는 확정 못 함 — «되돌림 장이니 역매매»로 쓰지 말 것. 체결 기반 딜러 감마와 같은 조건으로 맞붙이면 정확도는 구분 불가였지만, 가정이 없고 우연 점검에서 더 강했다(p .002 vs .07). ETH 만 검증.",
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 시각은 모두 KST. 규모 = 콜+풋 미결제 × 지수 = 명목 달러(실제 옵션 값어치인 프리미엄은 그 0.2% 안팎). max pain = 만기에 보유자에게 줄 내재가치 합이 가장 작은 결제가(프리미엄 무시 · 누가 보유했는지 모른 채 미결제만으로 계산). 차트·사다리의 max pain 선은 늘 «가까운 만기» 하나이고, 그 만기 미결제는 보통 전체의 2% 안팎이다(라벨에 비중). P/C = 풋÷콜 미결제 수량 — 심리 지표가 아니다: 풋 매도는 강세·풋 매수는 헤지일 수 있고, 정의마다 값이 크게 다르다(가까운 만기 1.5 · 7일 1.0 · 전 만기 0.6 · 프리미엄 0.2).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기».",
   mood: "리버설·버터플라이는 «7일 고정만기»로 잰다: 만기마다 외가격 옵션의 델타로 보간해 정확히 델타 ±0.25 의 IV 를 구하고, 7일 양옆 두 만기를 시간으로 보간한다(30일 값은 괄호). 2026-10-01 까지는 가까운 만기(늘 24시간 미만) 최근접 행사가로 쟀는데 실제 델타가 0.15~0.31 이고 1시간에 평균 3.6pt 흔들려 잡음이었다(7일 고정만기는 0.58pt). 단위 pt = IV %포인트(가격 % 아님), IV 는 Deribit 평가값(mark_iv).\n25Δ 리스크 리버설 = 델타 +0.25 콜 IV − 델타 −0.25 풋 IV(지금가에서 위아래 비슷한 거리). 음수로 깊으면(−5pt 쯤 아래) 하락 방어 풋 수요 = 공포 · 양수면 상승 콜에 웃돈 · ±1pt 안은 중립.\n버터플라이 = (25Δ 콜 IV + 25Δ 풋 IV)/2 − ATM IV = 스마일이 휜 정도. 클수록 «방향은 몰라도 크게 튈» 꼬리에 값이 붙음. 작은 양수가 평상시.\n기간 구조 = 7·30·60일 고정만기 ATM IV(연율 %, 양옆 만기의 총분산 보간). 가까운 일간 만기는 남은 시간에 미국장이 드느냐에 따라 7일 대비 0.71~0.92배로 출렁여 뺐다(만기별 값은 «옵션 만기» 시간축 선). 뒤로 갈수록 높으면 정상(콘탱고) · 앞이 더 높으면(역전) «지금 당장» 큰 움직임을 값에 넣는 스트레스(급락·이벤트 직전). IV 41 ≈ 하루 1σ ±2.1%(41/√365).\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중. 예측력 모름 → 매매 신호 말고 «분위기가 바뀌었나»(리버설 급락·기간 구조 역전) 확인용.\n기간 구조 기울기 = 고정만기 ATM IV 의 1일−7일 · 7일−30일. 1일이 7일보다 높으면 «역전»(주황). ✅검증: 역전이면 다음 24시간 실현 변동성이 DVOL 예상의 약 1.38배(45일, DVOL·최근 실현 통제 후에도 남음 · 겹치지 않는 하루 1표본 33일로는 경계선). 7일−30일도 같은 방향.\nATM 호가 폭 = 7일 근처 만기 ATM 옵션 매도−매수 호가를 IV 포인트로 — 넓으면 마켓메이커가 위험을 피한다. ⏳검정 불가(과거 호가 없음) — 10-01부터 쌓는 중, 나중에 검증.\n옵션 선도 − 지수 = 같은 스냅샷의 Deribit 가까운 만기 선도가와 Deribit 지수 차(bp). 대개 ±3bp 안이고 10분 변화 SD 1.9bp — 그 정도는 잡음. ⏳검정 불가(과거 Deribit 지수 없음, 09-28부터 쌓는 중) — «콜 수요면 +» 같은 해석은 아직 근거가 없다, 나중에 검증.\n(2026-10-02 의미 검증 뒤 남긴 옵션 정보 — 크기·국면만 말하고 방향은 말하지 않는다. 뺀 줄(검증 결과): 옵션 내재 폭(DVOL 과 동률) · 위험중립 왜도·첨도(왜도는 반대 방향, 늘 음수·늘 3 초과) · 변동성 순매수(이후 24h 예측력 없음) · 블록 요청자(순베가 = 블록 몫과 중복 · 순델타 방향 정보 없음) · O/S(높을수록 오히려 조용) · 정산 창(07~08 UTC 는 평소의 0.8배로 조용 · 미결제 크기와 무관) · 이벤트 예상 폭(공식이 0 으로 잘림).)",
-  ladder: "행사가 사다리: 세로 = 행사가(지수 ±6%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.",
+  ladder: "행사가 사다리: 세로 = 행사가(지수 ±6%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.\n청록 선 = 가까운 만기 전에 한 번이라도 닿을 확률 50%(실선)·25%·10%(점선), 옅은 띠 = 50% 안쪽. Deribit 행사가별 IV 로 역산한 위험중립 확률이고 «닿음 ≈ 2×그 가격을 넘어 끝날 확률» 근사다(ETH·BTC). 주황 실선 = 내 청산가, 초록·빨강 점선 = 내 지정가 매수·매도. 참고 표시 — 방향 신호가 아니다.",
   blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자). 줄 머리 = 다리 구조로 분류한 전략 이름(Deribit 자체 구조 코드와 313/313 일치) · «+ 선물 헤지» = 같은 블록에 선물 다리가 붙음(보통 델타 중립 패키지) · 델타/베가 롱·숏 = 요청자 쪽 순델타·순베가 부호(체결 IV 로 계산, 총량의 10% 미만이면 중립). 단일 다리 블록은 다른 곳 헤지의 일부일 수 있어 의도를 모른다. 신규/청산·신원은 모른다. 금액 = 다리별 명목 합(스프레드면 두 다리가 다 더해진다).\n우리 검정 없음 — 참고로만.",
   lane: "옵션 만기(지금 ~ +120시간, 블록 거래는 가운데 «블록 거래» 칸): 시각 KST. 막대 = 다가올 만기 규모(콜+풋 미결제 × 지수 = 명목 달러) · pain = max pain(그 만기 미결제만으로 계산) · P/C = 풋÷콜 미결제 수량(심리 지표 아님) · 청록 선 = 만기별 ATM IV(가까운 만기는 남은 시간이 짧아 시간대에 따라 출렁인다).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
   flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 테이커 체결 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 테이커가 롱으로 얼마나 기울었나».\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). «신규 약 N%» = 그 시간 새로 열린 계약의 비율(체결량 V · 미결제 변화 ΔOI 로 (V+ΔOI)/2V, 매수·매도 양쪽 몫 기준) — 이 비율은 정확하지만 테이커와 메이커 중 누가 열었는지는 모른다(테이커 몫은 약 70% 만 확정). 예: 순매수가 0 근처여도 미결제가 크게 늘면 롱과 숏이 양쪽으로 새로 쌓인 것. «강제청산» = 테이커가 강제청산된 체결(Deribit 표시, 매시 history 로 대조). 만기로 사라지는 계약은 미결제 변화에서 뺀다. 검정 전 — 참고.",
@@ -3746,9 +3746,70 @@ function optAsOf(o) {
 const optHead = (o) => `<span class="opt-cov-h" role="status">Deribit · 참고, 신호 아님${optAsOf(o)}</span>`;
 let optLadderScope = (() => { try { return localStorage.getItem("optLadder") || "week"; } catch (e) { return "week"; } })();
 // 범위 칩 -- 사다리가 비거나 «만기 교체 중»일 때도 보여야 다른 범위로 옮길 수 있다(2026-09-30 검증)
-function optLadderChips() {
+// 2026-10-08 닿음 등고선(사용자 시안 3 선택): 가까운 만기 행사가별 IV 스마일(서버 /api/opt-smile) → «만기 전 한 번이라도 닿을 확률».
+//   위에서 끝날 확률 = N(d2)(σ = 그 가격의 스마일 IV · 고정 행사가) · 닿음 ≈ 2×min(위, 아래)(반사 원리 근사). 위험중립 · 참고, 신호 아님.
+let latestSmile = {};
+function optNcdf(z) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z)), d = 0.3989423 * Math.exp(-z * z / 2);
+  const q = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return z > 0 ? 1 - q : q;
+}
+function optTouchModel(cur, px) {
+  const s = latestSmile[cur], T = s && s.ok ? (s.exp_ms - Date.now()) / 31536e6 : 0;
+  if (!(T > 0) || !(px > 0)) return null;
+  const sig = (p) => { const x = Math.max(-s.xlim, Math.min(s.xlim, Math.log(p / s.S))); return Math.max(0.05, s.coef[0] * x * x + s.coef[1] * x + s.coef[2]); };
+  const up = (p) => { const v = sig(p); return optNcdf((Math.log(px / p) - 0.5 * v * v * T) / (v * Math.sqrt(T))); };
+  const touch = (p) => Math.min(1, 2 * Math.min(up(p), 1 - up(p)));
+  const at = (t, a, b) => { for (let i = 0; i < 50; i++) { const c = (a + b) / 2; if ((touch(a) - t) * (touch(c) - t) <= 0) b = c; else a = c; } return (a + b) / 2; };
+  return { exp_ms: s.exp_ms, touch, level: (t, above) => (above ? at(t, px * 1.0001, px * 1.25) : at(t, px * 0.75, px * 0.9999)) };
+}
+// 내 청산가(포지션) · 내 지정가(미체결 LIMIT). 계좌를 못 읽었으면(open_orders === null) 지정가는 안 그린다 -- «모름»이지 «없음»이 아니다.
+function optMyLevels(cur, lo, hi) {
+  const a = latestBinanceAccount;
+  if (!a || !a.ok) return [];
+  const mine = (sym) => sym === `${cur}USDT` || sym === `${cur}USDC`;
+  const out = (a.positions || []).filter((p) => mine(p.symbol) && p.liquidation_price > 0).map((p) => ({ p: p.liquidation_price, kind: "liq", t: "청산" }));
+  (a.open_orders || []).filter((o) => mine(o.symbol) && o.price > 0)
+    .forEach((o) => out.push({ p: o.price, kind: o.side === "BUY" ? "buy" : "sell", t: o.side === "BUY" ? "매수" : "매도" }));
+  return out.filter((r) => r.p >= lo && r.p <= hi);
+}
+const optPct = (v) => (v < 0.01 ? "<1%" : v > 0.99 ? ">99%" : `${Math.round(v * 100)}%`);
+const optPx1 = (v) => (v >= 100 ? v.toLocaleString("en-US", { maximumFractionDigits: 1 }) : optQ(v));
+// 막대 뒤: 닿음 50%(실선)·25%·10%(점선) 위아래 + 50% 안쪽 옅은 띠 + 오른쪽 끝 값 표식
+function optTouchBack(m, Y, W, lo, hi) {
+  if (!m) return "";
+  const ln = [[0.5, 0.95, ""], [0.25, 0.6, "6 4"], [0.1, 0.38, "6 4"]].map(([t, op, dash]) => ({ t, op, dash, a: m.level(t, true), b: m.level(t, false) }));
+  const inR = (p) => p >= lo && p <= hi;
+  let s = `<rect x="30" y="${Y(Math.min(ln[0].a, hi)).toFixed(1)}" width="${W - 34}" height="${(Y(Math.max(ln[0].b, lo)) - Y(Math.min(ln[0].a, hi))).toFixed(1)}" fill="var(--option)" fill-opacity=".07"/>`;
+  ln.forEach(({ t, op, dash, a, b }) => [a, b].filter(inR).forEach((p) => {
+    const txt = `${Math.round(t * 100)}% ${optQ(p)}`, w = txt.length * 6.2 + 12, y = Y(p);
+    s += `<line x1="30" x2="${W - 4}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--option)" stroke-opacity="${op}" stroke-width="1.1"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`
+      + `<rect x="${(W - 4 - w).toFixed(1)}" y="${(y - 8).toFixed(1)}" width="${w.toFixed(1)}" height="15" rx="7.5" fill="var(--chart-bg)" fill-opacity=".9"/>`
+      + `<text x="${W - 9}" y="${(y + 3.5).toFixed(1)}" font-size="10" font-weight="800" font-family="var(--font-mono)" fill="var(--option)" fill-opacity="${Math.max(op, 0.7)}" text-anchor="end">${txt}</text>`;
+  }));
+  return s;
+}
+// 막대 앞: 내 선(청산 주황 실선 · 매수 초록/매도 빨강 점선) + 한 칩에 묶은 «닿음 %»(가까운 가격끼리 겹치지 않게)
+function optTouchFront(m, lv, Y, W, y0, y1, px) {
+  if (!m || !lv.length) return "";
+  const col = { liq: "var(--warn)", buy: "var(--good)", sell: "var(--bad)" };
+  let s = lv.map((r) => `<line x1="30" x2="${W - 4}" y1="${Y(r.p).toFixed(1)}" y2="${Y(r.p).toFixed(1)}" stroke="${col[r.kind]}" stroke-width="${r.kind === "liq" ? 1.6 : 1.4}"${r.kind === "liq" ? "" : ' stroke-dasharray="5 3"'}/>`).join("");
+  const rows = [...lv].sort((a, b) => Math.abs(a.p - px) - Math.abs(b.p - px)).slice(0, 4).sort((a, b) => b.p - a.p);
+  const ch = 6 + rows.length * 14, cw = 180, cx = 34, hiY = Y(rows[0].p), loY = Y(rows[rows.length - 1].p);
+  const below = rows.every((r) => r.p < px);
+  const cy = Math.max(y0, Math.min(y1 - ch, below ? hiY - ch - 6 : loY + 6));
+  s += `<rect x="${cx}" y="${cy.toFixed(1)}" width="${cw}" height="${ch}" rx="7" fill="var(--chart-bg)" fill-opacity=".94" stroke="var(--line)"/>`
+    + `<line x1="${cx + 10}" x2="${cx + 10}" y1="${(below ? cy + ch : cy).toFixed(1)}" y2="${(below ? hiY - 1 : loY + 1).toFixed(1)}" stroke="var(--line)"/>`;
+  rows.forEach((r, i) => {
+    const y = cy + 15 + i * 14;
+    s += `<text x="${cx + 9}" y="${y.toFixed(1)}" font-size="10.5" font-weight="700" font-family="var(--font-mono)" fill="${col[r.kind]}">${r.t} ${optPx1(r.p)}</text>`
+      + `<text x="${cx + cw - 9}" y="${y.toFixed(1)}" font-size="10.5" font-weight="800" font-family="var(--font-mono)" fill="${r.kind === "liq" ? "var(--warn)" : "var(--text)"}" text-anchor="end">닿음 ${optPct(m.touch(r.p))}</text>`;
+  });
+  return s;
+}
+function optLadderChips(legend = "") {
   const chip = (k, t) => `<button type="button" class="opt-chip-btn${optLadderScope === k ? " on" : ""}" data-scope="${k}" aria-pressed="${optLadderScope === k}">${t}</button>`;
-  return `<div class="opt-chips">${chip("front", "가까운 만기")}${chip("week", "7일 안")}${chip("all", "전 만기")}</div>`;
+  return `<div class="opt-chips">${chip("front", "가까운 만기")}${chip("week", "7일 안")}${chip("all", "전 만기")}${legend ? `<span class="opt-lane-legend opt-touch-legend">${legend}</span>` : ""}</div>`;
 }
 function optLadderSvg(o, W, Hfit = null) {
   const st = o.strikes || {}, rows = st[optLadderScope] || [];
@@ -3767,6 +3828,8 @@ function optLadderSvg(o, W, Hfit = null) {
   let s = `<text x="${mid - 6}" y="12" font-size="10" font-weight="700" fill="var(--bad)" text-anchor="end">← 풋</text>`
     + `<text x="${mid + 6}" y="12" font-size="10" font-weight="700" fill="var(--good)">콜 →</text>`
     + `<line x1="${mid}" x2="${mid}" y1="${y0 - 4}" y2="${y1}" stroke="var(--line)"/>`;
+  const cur = optData().cur, tm = optTouchModel(cur, px);   // 2026-10-08 닿음 등고선 -- 막대 뒤에 먼저 깐다
+  s += optTouchBack(tm, Y, W, lo, hi);
   vis.forEach(([k, c, p]) => {
     const y = Y(k), pw = (half * p) / mx, cwid = (half * c) / mx;
     s += `<g><title>${optQ(k)} · 콜 ${optUsd(c)} · 풋 ${optUsd(p)}</title>`
@@ -3789,7 +3852,8 @@ function optLadderSvg(o, W, Hfit = null) {
     s += `<line x1="30" x2="${gx - 4}" y1="${Y(f.pain).toFixed(1)}" y2="${Y(f.pain).toFixed(1)}" stroke="var(--warn)" stroke-dasharray="2 4"/>`
       + `<text x="32" y="${(Y(f.pain) + (f.pain < px ? 12 : -4)).toFixed(1)}" font-size="9.5" font-weight="700" fill="var(--warn)">max pain ${optQ(f.pain)}${f.oi_share == null ? "" : ` · 미결제 ${Math.round(f.oi_share * 100)}%`}</text>`;
   }
-  return optLadderChips()
+  s += optTouchFront(tm, tm ? optMyLevels(cur, lo, hi) : [], Y, W, y0, y1, px);
+  return optLadderChips(tm ? `<b class="opt-c">선</b> ${optKst(tm.exp_ms)} 만기 전 닿을 확률 50·25·10% · 옵션가 역산 · 참고` : "")
     + `<svg class="opt-ladder" viewBox="0 0 ${W} ${H}" role="img" aria-label="행사가별 콜·풋 미결제">${s}</svg>`;
 }
 
@@ -4003,6 +4067,13 @@ async function refreshGex() {
     const res = await fetch("/api/gex", { cache: "no-cache" });
     if (!res.ok) throw new Error(`gex ${res.status}`);
     latestGex = await res.json();
+    const cur = optData().cur;   // 2026-10-08 닿음 등고선용 스마일(ETH·BTC) -- 실패하면 등고선만 빠진다
+    if (cur === "ETH" || cur === "BTC") {
+      try {
+        const sm = await fetch(`/api/opt-smile?asset=${cur.toLowerCase()}`, { cache: "no-cache" });
+        if (sm.ok) latestSmile[cur] = await sm.json();
+      } catch (e) { latestSmile[cur] = null; }
+    }
     renderOptions();
   } catch (error) {
     // 2026-09-30 검증: 한 번 실패로 null 을 넣으면 카드가 다음 폴링(60초)까지 통째로 사라졌다 -- 직전 값을 두고 오류만 싣는다

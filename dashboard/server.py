@@ -1790,6 +1790,43 @@ def breakout_detector_payload(asset: str = "eth") -> dict[str, Any]:
 
 
 KALSHI_ETH15M_URL = "https://api.elections.kalshi.com/trade-api/v2/markets"
+# 2026-10-08 Option 카드 «닿음 등고선»(사용자 시안 3 선택): 가까운 만기 행사가별 IV. 수집기 상태 파일엔 ATM·25Δ 세 점뿐인데,
+#   짧은 만기는 날개 IV 가 가팔라 세 점 근사가 꼬리를 절반으로 낮춘다(10% 등고선 2,521 vs 행사가별 2,506 · 청산가 닿음 8% vs 16%).
+DERIBIT_BOOK_URL = "https://www.deribit.com/api/v2/public/get_book_summary_by_currency"
+SMILE_XLIM = 0.08   # ln(K/S) ±8% 안 행사가로 2차 스마일을 맞춘다(사다리 범위 ±6% 를 덮는다)
+_MON = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), 1)}
+
+
+def front_smile(rows: list[dict], now_ms: float) -> dict[str, Any]:
+    """Deribit 옵션 요약 → 가까운 만기(5분 넘게 남은 첫 만기)의 IV 스마일 σ(x) = c0·x² + c1·x + c2, x = ln(K/S). 순수 함수.
+    같은 행사가 콜·풋 mark_iv 는 평균. 행사가 5개 미만이거나 맞춘 곡선이 범위 안에서 0.03~5 밖이면 ok=False."""
+    by_exp: dict[int, list[tuple[float, float, float]]] = {}
+    for r in rows:
+        try:
+            _, d, k, _cp = str(r["instrument_name"]).split("-")
+            exp = int(datetime(2000 + int(d[-2:]), _MON[d[-5:-2]], int(d[:-5]), 8, tzinfo=timezone.utc).timestamp() * 1000)
+            iv, s = float(r.get("mark_iv") or 0) / 100, float(r.get("underlying_price") or 0)
+        except (KeyError, ValueError, TypeError):
+            continue
+        if exp > now_ms + 300_000 and iv > 0 and s > 0:
+            by_exp.setdefault(exp, []).append((float(k), iv, s))
+    if not by_exp:
+        return {"ok": False, "reason": "no_expiry"}
+    exp = min(by_exp)
+    pts = by_exp[exp]
+    S = float(np.median([p[2] for p in pts]))
+    ivk: dict[float, list[float]] = {}
+    for k, iv, _ in pts:
+        if abs(math.log(k / S)) <= SMILE_XLIM:
+            ivk.setdefault(k, []).append(iv)
+    if len(ivk) < 5:
+        return {"ok": False, "reason": "few_strikes", "exp_ms": exp}
+    xs = np.log(np.array(sorted(ivk)) / S)
+    coef = np.polyfit(xs, [sum(v) / len(v) for _, v in sorted(ivk.items())], 2)
+    grid = np.polyval(coef, np.linspace(-SMILE_XLIM, SMILE_XLIM, 33))
+    if not (grid.min() > 0.03 and grid.max() < 5):
+        return {"ok": False, "reason": "bad_fit", "exp_ms": exp}
+    return {"ok": True, "exp_ms": exp, "S": S, "coef": [float(c) for c in coef], "xlim": SMILE_XLIM, "n": len(ivk)}
 
 
 def kalshi_pick(markets: list[dict], now: float) -> dict[str, Any]:
@@ -5530,6 +5567,23 @@ def make_app() -> web.Application:
         payload = await swr_cached("kalshi", 1.0, kalshi_payload, max_stale=5.0)
         return web.json_response(payload, headers=NOCACHE)
 
+    async def opt_smile_payload(cur: str) -> dict[str, Any]:
+        try:
+            j = await fetch_binance_json(DERIBIT_BOOK_URL, {"currency": cur, "kind": "option"}, timeout=6.0)
+        except (asyncio.TimeoutError, ClientError, ValueError):
+            j = None
+        if not j or not isinstance(j.get("result"), list):
+            return {"ok": False, "reason": "deribit_unavailable"}
+        return {**front_smile(j["result"], time.time() * 1000), "fetched_ts": time.time()}
+
+    async def api_opt_smile(request: web.Request) -> web.Response:
+        # 2026-10-08 닿음 등고선. 캐시 60초 = 브라우저 몇 개든 Deribit 공개 API 는 분당 1회(키 없음 · 바이낸스 IP 한도와 무관).
+        cur = {"eth": "ETH", "btc": "BTC"}.get(request.query.get("asset", "eth").lower())
+        if not cur:
+            return web.json_response({"ok": False, "reason": "eth_btc_only"}, headers=NOCACHE)   # SOL·XRP 는 USDC 선형옵션(만기 표기 다름)
+        payload = await swr_cached(f"opt_smile_{cur}", 60.0, lambda: opt_smile_payload(cur), max_stale=STALE_GRACE_SECONDS)
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_chart_markers(request: web.Request) -> web.Response:
         payload = await load_chart_markers(request.query.get("asset", "eth"))
         return web.json_response(payload, headers=NOCACHE)
@@ -6567,6 +6621,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
     app.router.add_get("/api/gex", api_gex)
     app.router.add_get("/api/kalshi", api_kalshi)
+    app.router.add_get("/api/opt-smile", api_opt_smile)
     app.router.add_get("/api/flow/heatmap", api_flow_heatmap)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)

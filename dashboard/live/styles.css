@@ -2855,7 +2855,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .opt-lane-legend { word-break: keep-all; }   /* 한국어는 어절 단위로 꺾는다(«아/님» 방지) */
 
 /* 2026-09-28 행사가 사다리(1-B) · 옵션 순매수 흐름(2-A) */
-.opt-chips { display: flex; gap: 6px; margin: 2px 0 6px; }
+.opt-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 6px; }
+.opt-touch-legend { margin-left: 4px; font-size: 11px; }   /* 2026-10-08 닿음 등고선 범례 -- 좁으면 칩 아래 줄로 */
 .opt-chip-btn { min-height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--soft-line); background: none;
   color: var(--muted); font: 600 11.5px/1 var(--font-sans); cursor: pointer; }
 .opt-chip-btn.on { color: var(--option); border-color: color-mix(in srgb, var(--option) 60%, transparent); background: color-mix(in srgb, var(--option) 12%, transparent); }

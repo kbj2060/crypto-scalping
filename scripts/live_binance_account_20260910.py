@@ -326,6 +326,19 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
     for position in positions:
         position["entry_at"] = open_entry.get((position["symbol"], position["side"])) or position["updated_at"]
 
+    # 2026-10-08 Option 카드 «닿음 등고선»이 내 지정가 선을 그린다(사용자 «지정가 매수가 터치되면 청산가는»).
+    #   심볼별 1회(무게 1, 심볼 없는 호출은 무게 40). 못 읽으면 None -- «없음»이 아니라 «모름»(화면은 선을 안 그린다).
+    open_orders: list[dict[str, Any]] | None = []
+    for symbol in symbols:
+        rows = await _get(session, "/fapi/v1/openOrders", {"symbol": symbol}, key, secret, offset)
+        if isinstance(rows, dict):
+            open_orders = None
+            break
+        open_orders.extend({"symbol": o["symbol"], "side": o["side"], "price": float(o["price"]),
+                            "qty": float(o["origQty"]) - float(o.get("executedQty") or 0),
+                            "reduce_only": bool(o.get("reduceOnly"))}
+                           for o in rows if o.get("type") == "LIMIT")
+
     chosen, listed = pick_balance(balance, quote_asset)
     return {
         "ok": True,
@@ -338,6 +351,7 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
         "multi_assets_margin": bool(balance.get("multiAssetsMargin")),
         "assets": listed,
         "positions": positions,
+        "open_orders": open_orders,
         "leverage_by_symbol": leverage_by_symbol,
         "trades": trips,
         "trades_truncated": truncated,
