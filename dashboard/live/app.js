@@ -2455,7 +2455,13 @@ function srLevelsLive(n = 3) {
   if (!map || !map.warmed_up) return null;
   const cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || map.current_price || 0);
   if (!(cur > 0)) return null;
-  const pick = (levels, below) => (levels || []).filter((lv) => (below ? lv.price < cur : lv.price > cur)).slice(0, n);
+  // 2026-10-07 «게이지 지지1 ≠ 풋프린트 지지1»(사용자): 여기는 쓸림 필터가 없어 청산맵 마지막 봉 뒤 가격이 이미 지나간 레벨을
+  //   남겼다(급락 저점 2,587 아래로 뚫린 2,600·2,592·2,590 이 게이지 지지1~3, 풋프린트는 2,579). 풋프린트와 같은 규칙으로 하나로.
+  const since = liqMapKnownUntilSec(map);
+  const candles = candleHistoryByAsset[activeSnapshotAsset] || [];
+  const pick = (levels, below) => (levels || []).filter((lv) => Number(lv.price) > 0
+    && (below ? lv.price < cur : lv.price > cur)
+    && liqSweepIdx(candles, since, Number(lv.price)) < 0).slice(0, n);
   return { cur, res: pick(map.resistance_levels, false), sup: pick(map.support_levels, true) };
 }
 
@@ -3206,32 +3212,22 @@ function liqMapKnownUntilSec(map) {
 }
 
 function nearestLiquidationLevel() {
-  const map = latestLiquidationMap;
-  if (!map || !map.warmed_up) return [];
-  const liveCurrentPrice = Number(latestLivePriceByAsset[activeSnapshotAsset] || map.current_price || 0);
-  if (!(liveCurrentPrice > 0)) return [];
-  const since = liqMapKnownUntilSec(map);
-  const candles = candleHistoryByAsset[activeSnapshotAsset] || [];
-  // 목록은 가까운 순이다 -- 현재가 쪽에 있고 **아직 안 쓸린** 첫 레벨을 고른다.
-  const pick = (levels, below) => (levels || []).find((lv) => Number(lv.price) > 0
-    && (below ? lv.price < liveCurrentPrice : lv.price > liveCurrentPrice)
-    && liqSweepIdx(candles, since, Number(lv.price)) < 0);
-  const candidates = [
-    { lv: pick(map.support_levels, true), color: "var(--liq-support)", tag: "지지1", side: "support" },
-    { lv: pick(map.resistance_levels, false), color: "var(--liq-resistance)", tag: "저항1", side: "resistance" },
-  ]
-    .filter((c) => c.lv);
-  if (!candidates.length) return [];
-  candidates.sort((a, b) => Math.abs(a.lv.price - liveCurrentPrice) - Math.abs(b.lv.price - liveCurrentPrice));
-  const nearest = candidates[0];
-  return [{
-    val: nearest.lv.price,
-    color: nearest.color,
-    label: nearest.tag,
+  // 게이지·서랍·가격 지형과 **같은 목록**(srLevelsLive: 현재가 쪽 · 아직 안 쓸린 · 가까운 순)의 첫 칸.
+  // 2026-10-07 사용자 «가까운 지지1과 저항1은 보이게»: 더 가까운 한쪽만 그리던 것(08-24)을 **양쪽 다** 그린다 --
+  //   현재가가 둘 사이 중간을 오가면 지지선이 나타났다 사라졌다 했다. 이름표 겹침은 priceLabels 가 피한다.
+  const sr = srLevelsLive(1);
+  if (!sr) return [];
+  return [
+    { lv: sr.sup[0], color: "var(--liq-support)", tag: "지지1" },
+    { lv: sr.res[0], color: "var(--liq-resistance)", tag: "저항1" },
+  ].filter((c) => c.lv).map((c) => ({
+    val: c.lv.price,
+    color: c.color,
+    label: c.tag,
     priceLeft: true,   // 2026-09-26 사용자 지시: 지지/저항 가격은 오른쪽 배지가 아니라 왼쪽 이름 옆에
     dashed: true,
-    width: Math.max(1, Math.min(4, Math.round(1 + (nearest.lv.weight_pct || 0) * 3))),
-  }];
+    width: Math.max(1, Math.min(4, Math.round(1 + (c.lv.weight_pct || 0) * 3))),
+  }));
 }
 
 
@@ -5240,7 +5236,7 @@ function renderChartPan() {
   const line = hist.map((c, i) => `${i ? "L" : "M"}${X(i + 0.5).toFixed(1)} ${Y(c.close).toFixed(1)}`).join("");
   const t = (c) => fmtHourMinute(c.time * 1000), end = hist[Math.max(0, e - 1)];
   const focused = box.contains(document.activeElement) && document.activeElement.classList.contains("chart-pan-map");
-  box.innerHTML = `<svg class="chart-pan-map" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="slider" tabindex="0"`
+  box.innerHTML = `<svg class="chart-pan-map" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" preserveAspectRatio="none" role="slider" tabindex="0"`
     + ` aria-label="12시간 안에서 차트 창 위치 — 방향키로 이동" aria-valuemin="${chartWindowBars}" aria-valuemax="${n}" aria-valuenow="${e}"`
     + ` aria-valuetext="${t(hist[s])}부터 ${t(end)}까지">`
     + `<rect class="pan-win" x="${X(s).toFixed(1)}" y="0.5" width="${Math.max(3, X(e) - X(s)).toFixed(1)}" height="${H - 1}" rx="4"/>`
