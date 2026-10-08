@@ -23,6 +23,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 HIST_DIR = ROOT / "data" / "footprint_daily"
 SYMBOL, COIN, TAPE_BUCKET = "ETHUSDT", "ETH", 0.1
+HOT_SYM = SYMBOL.lower()     # 🔴hot 의 trade_tape_1s·oi_1s 는 소문자(ethusdt), liquidations 만 대문자(10-08 배포 직후 실측 -- 대문자로 물으면 빈 결과)
 MAX_CELL_DAYS = 400          # 한 요청에 칸을 줄 최대 일수(확대 상태에선 화면이 ~100일을 넘지 않는다)
 TODAY_TTL = 30.0
 CTX_DAYS = 45                # OI·청산을 hot/lake 에서 읽는 깊이(그 전 OI 는 소급본, 청산은 수집 시작 이후뿐)
@@ -88,7 +89,7 @@ def tape_rows_by_day(read_lake: Callable, read_hot: Callable, start: date, today
     if missing:
         t0 = int(datetime.fromisoformat(missing[0]).replace(tzinfo=timezone.utc).timestamp())
         hot = read_hot("SELECT ts_sec, price_bin, buy_qty, sell_qty FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ?",
-                       [SYMBOL, t0])
+                       [HOT_SYM, t0])
         if hot:
             h = pd.DataFrame(hot, columns=["ts_sec", "price_bin", "buy_qty", "sell_qty"])
             h["day"] = pd.to_datetime(h.ts_sec, unit="s").dt.strftime("%Y-%m-%d")
@@ -125,7 +126,7 @@ def oi_liq_by_day(read_lake: Callable, read_ctx: Callable, start: date, today: d
     first_hot = max([start] + [date.fromisoformat(d) + timedelta(days=1) for d in lake_oi])   # 봉인 안 된 날만 hot 에서
     since = int(datetime.combine(first_hot, datetime.min.time(), timezone.utc).timestamp() * 1000)
     for ts, v in read_ctx("SELECT ts_ms, open_interest FROM oi_1s WHERE symbol = ? AND ts_ms >= ? ORDER BY ts_ms",
-                          [SYMBOL, since]) or []:
+                          [HOT_SYM, since]) or []:
         if (d := _ms_day(ts)) not in lake_oi:
             oi[d] = float(v)                      # 시간순이라 마지막 값이 남는다
     for ts, sd, usd in read_ctx("SELECT ts_ms, side, usd FROM liquidations WHERE symbol = ? AND ts_ms >= ?",

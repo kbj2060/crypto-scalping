@@ -4537,7 +4537,7 @@ def make_app() -> web.Application:
             def _oi_usd() -> float | None:            # 현재 OI(바이낸스, 계약 = 코인) × 가격. hot 에 없는 코인(BTC·HYPE)은 None -> 비율 단위
                 try:
                     r = read_rows(BINANCE_CTX_DB, "SELECT open_interest FROM oi_1s WHERE symbol = ? ORDER BY ts_ms DESC LIMIT 1",
-                                  [COIN_CONFIG[asset]["binance_symbol"]])
+                                  [COIN_CONFIG[asset]["binance_symbol"].lower()])   # oi_1s 심볼은 소문자
                 except Exception:  # noqa: BLE001
                     return None
                 return float(r[0][0]) * current_price if r and r[0][0] else None
