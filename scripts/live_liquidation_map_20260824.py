@@ -573,3 +573,70 @@ def compute_event_driven_levels(df: pd.DataFrame, current_price: float) -> dict:
         "bin_width": round(current_price * BIN_WIDTH_PCT, 4),
         "heatmap_bins": heatmap_bins,
     }
+
+
+# 2026-10-08 사용자 «풋프린트/청산맵 토글 → 코인글래스 청산맵처럼(레버리지별 막대 + 누적 롱/숏 곡선)».
+# 위 모델과 **같은 가정**(봉 = 가상 진입, 거래량×최근성 가중, 이미 넘은 청산가는 버림, 롱 = 중간가·숏 = 종가 진입)을
+# 레버리지 구간별로 합치지 않고 남긴다. 값 = 가중 거래량 × 진입가($) -- «추정 청산 규모», 실측 포지션이 아니다.
+TIER_GROUPS = (("10", (10,)), ("20~25", (20, 25)), ("50", (50,)), ("75~100", (75, 100)))
+
+
+def compute_tier_profile(df: pd.DataFrame, current_price: float, oi_usd: float | None = None) -> dict | None:
+    """{bin_width, lo(첫 칸 번호), current_price, unit, tiers: [{name, values[]}]} -- values[k] = 칸 lo+k 의 값.
+    칸 가격 = 번호 × bin_width. 롱 청산은 현재가 아래, 숏 청산은 위에만 남는다(생존 필터). 없으면 None.
+    규모: 모델 가중치 자체는 «거래대금×최근성»이라 달러로 읽으면 실제 청산 규모로 오해된다 -- oi_usd(현재 OI 달러)가 있으면
+    모든 칸 합 = 2×OI(계약마다 롱·숏 한 쪽씩)가 되게 맞춘다(unit "oi_usd", 양쪽 비대칭은 모델 그대로). 없으면 합 = 1(unit "share")."""
+    common = _prepare_common(df, current_price)
+    if common is None:
+        return None
+    d = df.reset_index(drop=True)
+    mid = (d["high"].to_numpy(dtype="float64") + d["low"].to_numpy(dtype="float64")) / 2.0
+    close, bw = common["close"], common["bin_width"]
+    w = common["base_weight"] / len(LEVERAGE_TIERS)
+    per: list[tuple[str, np.ndarray, np.ndarray]] = []
+    for name, levs in TIER_GROUPS:
+        ks, vs = [], []
+        for lev in levs:
+            long_liq = mid * (1.0 - 1.0 / lev + MAINTENANCE_MARGIN_RATE)
+            short_liq = close * (1.0 + 1.0 / lev - MAINTENANCE_MARGIN_RATE)
+            for entry, liq, alive in ((mid, long_liq, common["future_min_low"] > long_liq),
+                                      (close, short_liq, common["future_max_high"] < short_liq)):
+                m = alive & (liq > 0)
+                ks.append(np.round(liq[m] / bw).astype("int64")); vs.append((w * entry)[m])
+        per.append((name, np.concatenate(ks), np.concatenate(vs)))
+    allk = np.concatenate([k for _, k, _ in per])
+    if not len(allk):
+        return None
+    lo, n = int(allk.min()), int(allk.max() - allk.min() + 1)
+    total = float(sum(v.sum() for _, _, v in per))
+    if not (total > 0):
+        return None
+    scale, unit = (2.0 * oi_usd / total, "oi_usd") if oi_usd and oi_usd > 0 else (1.0 / total, "share")
+    tiers = []
+    for name, k, v in per:
+        arr = np.zeros(n)
+        np.add.at(arr, k - lo, v * scale)
+        tiers.append({"name": name, "values": np.round(arr, 2 if unit == "oi_usd" else 8).tolist()})
+    return {"bin_width": round(bw, 6), "lo": lo, "current_price": float(current_price), "tiers": tiers, "unit": unit,
+            "oi_usd": round(oi_usd, 0) if unit == "oi_usd" else None,
+            "basis": "추정(지난 1시간봉들 = 가상 진입 · 거래량×최근성 가중) -- 실측 포지션 아님"}
+
+
+if __name__ == "__main__":
+    # 자체점검: 값 합 = 생존 위치의 가중$ 합 · 롱은 현재가 아래 · 숏은 위 · 구간 넷
+    ts = pd.date_range("2026-10-01", periods=30, freq="1h", tz="UTC")
+    px0 = 100 + np.sin(np.arange(30) / 3.0)
+    df_ = pd.DataFrame({"timestamp": ts, "high": px0 + 0.3, "low": px0 - 0.3, "close": px0, "volume": np.full(30, 10.0)})
+    cp = float(px0[-1])
+    tp = compute_tier_profile(df_, cp)
+    assert tp is not None and [t["name"] for t in tp["tiers"]] == ["10", "20~25", "50", "75~100"]
+    for t in tp["tiers"]:
+        for k, v in enumerate(t["values"]):
+            if v > 0:
+                p = (tp["lo"] + k) * tp["bin_width"]
+                assert abs(p - cp) > tp["bin_width"], (t["name"], p, cp)   # 현재가 칸에는 살아 있는 청산가가 없다
+    assert compute_tier_profile(df_.head(5), cp) is None
+    assert tp["unit"] == "share" and abs(sum(sum(t["values"]) for t in tp["tiers"]) - 1) < 1e-5
+    t2 = compute_tier_profile(df_, cp, oi_usd=1e9)
+    assert t2["unit"] == "oi_usd" and abs(sum(sum(t["values"]) for t in t2["tiers"]) - 2e9) < 1e3
+    print("selftest OK -- 레버리지 구간 넷 · 현재가 칸 비어 있음 · 짧은 입력 None · 단위(share 합 1 · oi_usd 합 2×OI)")

@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261008-spark">
+  <link rel="stylesheet" href="styles.css?v=20261008-fpd">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -213,6 +213,12 @@
               <button type="button" class="asset-tab" data-bars="48">4h</button>
               <button type="button" class="asset-tab" data-bars="144">12h</button>
             </div>
+            <!-- 2026-10-08 일봉 풋프린트(사용자 «스윙용 일봉 · 최대치 · 확대/축소 · 델타·거래대금·OI·청산»). 구간 탭과 떨어진
+                 한 칸 묶음 -- 같은 세그먼트에 넣으면 «1D = 24시간 구간»으로 읽힌다(09-19 «따로따로»). fp_daily.js -->
+            <div id="fpDailyTabs" class="asset-tabs chart-mode-tabs fp-daily-tabs" aria-label="일봉 보기">
+              <button type="button" id="fpDailyBtn" class="asset-tab" aria-pressed="false"
+                      title="일봉 풋프린트(스윙) — 2020년부터 · 휠·두 손가락 = 확대/축소 · 끌기 = 이동 · 더블클릭 = 최근 30일 · ETH 만">일봉</button>
+            </div>
             <div id="chartPan" class="chart-pan" hidden></div>   <!-- 2026-10-01 창 이동 미니맵(12시간) · app.js renderChartPan -->
             <div id="snapshotAssetTabs" class="asset-tabs chart-mode-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
               <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
@@ -231,6 +237,11 @@
             <!-- 2026-09-21 청산맵 모드 제거(사용자 결정). 풋프린트가 유일한 차트다 --
                  청산 밀도 히트맵·S/R 레벨 목록·최근접 레벨 선이 전부 풋프린트에서 나온다.
                  아래 liqMapBadge 는 청산맵 «데이터» 상태 배지라 그대로 둔다. -->
+            <!-- 2026-10-08 풋프린트/청산맵 토글(사용자 «시간 탭에서 오른쪽 위 토글 → 풋프린트 자리에 코인글래스 청산맵처럼»). liq_profile.js -->
+            <div id="fpViewTabs" class="asset-tabs chart-mode-tabs fp-view-tabs" aria-label="차트 보기">
+              <button type="button" class="asset-tab active" data-view="fp" aria-pressed="true">풋프린트</button>
+              <button type="button" class="asset-tab" data-view="liq" aria-pressed="false">청산맵</button>
+            </div>
             <span id="liqMapBadge" class="ops-badge neutral">-</span>
           </div>
         </div>
@@ -247,6 +258,32 @@
         <div class="chart-container candle-container">
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet" role="img"
             aria-label="ETH 5분봉 차트 — 풋프린트·수급(CVD)·호가 프로파일·청산·사분면"></svg>
+        </div>
+        <div id="liqProfile" class="liq-profile" hidden>   <!-- 2026-10-08 청산맵(레버리지별 · 누적 롱/숏) -- liq_profile.js -->
+          <div id="liqProfileLegend" class="lqp-legend"></div>
+          <canvas id="liqProfileCanvas" class="lqp-canvas" role="img"
+                  aria-label="추정 청산맵 — 가격대별 레버리지 구간 막대와 현재가 기준 누적 롱·숏 청산 곡선"></canvas>
+          <p id="liqProfileStatus" class="fpd-status muted" role="status"></p>
+          <p class="fpd-note muted">추정 · 지난 24시간 1시간봉을 가상 진입으로 본 모델(레버리지 10·20~25·50·75~100배, 이미 넘은 청산가는 뺌) · 실측 포지션이 아님 ·
+            막대 = 그 가격의 추정 청산 규모(왼쪽 축) · 선 = 현재가에서 그 가격까지 누적(오른쪽 축, 빨강 롱 · 초록 숏) ·
+            규모 = 지금 바이낸스 OI(달러)를 추정 분포 비율로 나눈 값(OI 가 없는 코인은 전체 중 %)</p>
+        </div>
+        <div id="fpDaily" class="fp-daily" hidden>   <!-- 2026-10-08 일봉 풋프린트 -- fp_daily.js (5분 차트·아래 칸들은 .fp-daily-on 동안 숨는다) -->
+          <div class="fpd-head">
+            <div id="fpDailyLegend" class="fpd-legend" aria-live="polite"></div>
+            <div id="fpDailyTools" class="fpd-tools" role="group" aria-label="일봉 보기 범위">
+              <button type="button" data-view="out" aria-label="축소" title="축소"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6h7"/></svg></button>
+              <button type="button" data-view="in" aria-label="확대" title="확대"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6h7M6 2.5v7"/></svg></button>
+              <button type="button" data-view="30">30일</button>
+              <button type="button" data-view="180">6개월</button>
+              <button type="button" data-view="all">전체</button>
+            </div>
+          </div>
+          <canvas id="fpDailyCanvas" class="fpd-canvas" tabindex="0" role="img"
+                  aria-label="ETH 일봉 풋프린트 — 가격 칸별 매수·매도와 델타·거래대금·OI·청산. 화살표 = 이동 · +/− = 확대/축소 · Home = 전체 · End = 최근 30일"></canvas>
+          <p id="fpDailyStatus" class="fpd-status muted" role="status"></p>
+          <p class="fpd-note muted">날짜 = UTC 자정(KST 09:00) · 칸 = 공격자 매도(왼쪽) / 매수(오른쪽), 진할수록 한쪽 우세 · 주황 테두리 = 그날 가장 많이 거래된 가격 ·
+            청산 = 바이낸스 강제주문(위 숏 · 아래 롱, 2026-09-20 수집 시작) · OI = 막대 전일 대비 · 선 수준(2022-01 부터) · 빗금 = 모름 · 서술이지 신호가 아님</p>
         </div>
         <div id="liquidationMapList" class="liq-level-list"></div>
         <div id="mcWall" class="mc-body mc-wall"></div>   <!-- 2026-09-30 ④ 벽·교차·위치 = 호가/체결 프로파일 아래(넓은 화면) -->
@@ -494,7 +531,9 @@
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden></div>
   </div>
-  <script src="./app.js?v=20261008-spark"></script>
+  <script src="./app.js?v=20261008-fpd"></script>
+  <script src="./fp_daily.js?v=20261008-fpd"></script>
+  <script src="./liq_profile.js?v=20261008-fpd"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

@@ -20,7 +20,7 @@ import statistics
 import sys
 import time
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -137,7 +137,7 @@ from scripts.live_liquidation_direction_signal_20260825 import compute_liquidati
 # robustness). compute_liquidation_levels()/compute_heatmap_history() are unchanged and still
 # importable (other research scripts still use them as the close-only reference) -- only this
 # dashboard entry point moved.
-from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history  # noqa: E402
+from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history, compute_tier_profile  # noqa: E402
 # 2026-09-20 «미시 참고» 카드의 계산부(순수 함수 + 자체점검). 서버는 값을 모아 넣기만 한다.
 from dashboard import micro_ref as mref  # noqa: E402
 # 2026-09-21 «상황 읽기 · 30분» -- 사용자가 고른 트레이더 읽기를 규칙으로. 순수 함수 + 자체점검.
@@ -148,6 +148,9 @@ from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
 from dashboard import market_ctx as mctx  # noqa: E402
+# 2026-10-08 일봉 풋프린트(사용자 «최대치 · 확대/축소 · 델타·거래대금·OI·청산») -- aggTrades 소급본 + lake/hot 테이프.
+from dashboard import footprint_daily as fpd  # noqa: E402
+from scripts import data_store  # noqa: E402
 # Regime overlay (bull/bear/chop probability per 5-min bar) for the Snapshot tab's liquidation-map
 # chart. 2026-08-26: swapped from the wide24 HMM+linear-calibration model to an independently
 # trained HistGradientBoostingClassifier (OOS balanced_accuracy 0.9189 vs wide24's 0.7691) -- see
@@ -4530,6 +4533,17 @@ def make_app() -> web.Application:
             payload["heatmap_history"] = await asyncio.to_thread(
                 compute_spliced_heatmap_history, df, current_price, LIQUIDATION_MAP_LOOKBACK_HOURS, LIQUIDATION_MAP_DISPLAY_HOURS
             )
+            # 2026-10-08 풋프린트/청산맵 토글의 레버리지별 청산맵(코인글래스 모양) -- 같은 창·같은 가정, 구간별로 나눠 둔 것
+            def _oi_usd() -> float | None:            # 현재 OI(바이낸스, 계약 = 코인) × 가격. hot 에 없는 코인(BTC·HYPE)은 None -> 비율 단위
+                try:
+                    r = read_rows(BINANCE_CTX_DB, "SELECT open_interest FROM oi_1s WHERE symbol = ? ORDER BY ts_ms DESC LIMIT 1",
+                                  [COIN_CONFIG[asset]["binance_symbol"]])
+                except Exception:  # noqa: BLE001
+                    return None
+                return float(r[0][0]) * current_price if r and r[0][0] else None
+            oi_usd = await asyncio.to_thread(_oi_usd)
+            payload["tier_profile"] = await asyncio.to_thread(
+                compute_tier_profile, df.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), current_price, oi_usd)
             payload["generated_at"] = datetime.now(timezone.utc).isoformat()
             return payload
 
@@ -4848,6 +4862,54 @@ def make_app() -> web.Application:
             raise web.HTTPBadRequest(reason="unsupported_market_history_asset")
         candles = await load_market_history(asset)
         return web.json_response({"asset": asset, "candles": candles}, headers=NOCACHE)
+
+    def _fpd_lake(stream: str, start, end, cols: str):
+        try:
+            return data_store.read("binance", stream, fpd.COIN, start and start.isoformat(), end and end.isoformat(), columns=cols)
+        except Exception:  # noqa: BLE001 -- lake 가 아직 없는 날/스트림(duckdb IOException 등)은 «없음»
+            return None
+
+    def _fpd_rows(db: Path):
+        def run(sql: str, params: list):
+            try:
+                return read_rows(db, sql, params)
+            except Exception:  # noqa: BLE001 -- hot 파일이 없거나 잠깐 못 열면 빈 결과(그날은 «모름»)
+                return []
+        return run
+
+    fp_daily = fpd.DailyFootprint(_fpd_lake, _fpd_rows(HOT_TAPE_DB), _fpd_rows(BINANCE_CTX_DB))
+
+    def _iso_day(v: str | None) -> str | None:
+        """신뢰경계: 'YYYY-MM-DD' 만 통과."""
+        if v is None:
+            return None
+        try:
+            return date.fromisoformat(v).isoformat()
+        except ValueError:
+            raise web.HTTPBadRequest(reason="bad_date") from None
+
+    async def api_footprint_daily(request: web.Request) -> web.Response:
+        """일봉 요약 전체(열 묶음). ?since=YYYY-MM-DD 면 그날부터만(화면의 1분 갱신용)."""
+        since = _iso_day(request.query.get("since"))
+        full = await swr_cached("fp_daily_days", 30.0, lambda: asyncio.to_thread(fp_daily.days_payload, time.time()),
+                                max_stale=600.0)
+        if since:
+            keep = [i for i, d in enumerate(full["cols"]["d"]) if d >= since]
+            full = {**full, "cols": {k: [v[i] for i in keep] for k, v in full["cols"].items()}}
+        return web.json_response(full, headers=NOCACHE)
+
+    async def api_footprint_daily_cells(request: web.Request) -> web.Response:
+        """보이는 날들의 가격 칸. ?from=&to=(YYYY-MM-DD, 400일 미만) · ?row=행 달러(1~500)."""
+        frm, to = _iso_day(request.query.get("from")), _iso_day(request.query.get("to"))
+        if not frm or not to:
+            raise web.HTTPBadRequest(reason="from_to")
+        row = fpd.parse_row(request.query.get("row"))
+        try:
+            payload = await swr_cached(f"fp_daily_cells_{frm}_{to}_{row}", 30.0,
+                                       lambda: asyncio.to_thread(fp_daily.cells_payload, time.time(), frm, to, row), max_stale=600.0)
+        except ValueError:
+            raise web.HTTPBadRequest(reason="range") from None
+        return web.json_response(payload, headers=NOCACHE)
 
     async def api_footprint(request: web.Request) -> web.Response:
         """가격레벨별 매수/매도 체결량. 레벨은
@@ -6614,6 +6676,8 @@ def make_app() -> web.Application:
     app.router.add_get("/api/stream", api_stream)
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/footprint", api_footprint)
+    app.router.add_get("/api/footprint-daily", api_footprint_daily)
+    app.router.add_get("/api/footprint-daily/cells", api_footprint_daily_cells)
     app.router.add_get("/api/supply-profile", api_supply_profile)
     app.router.add_get("/api/supply-1s", api_supply_1s)
     app.router.add_get("/api/oi-5m", api_oi_5m)

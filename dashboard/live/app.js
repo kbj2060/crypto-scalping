@@ -5377,6 +5377,8 @@ function setupChartPan() {
 }
 let chartPanForce = false;   // 창 이동은 호버 중에도 바로 그린다(호버 보류에 막히면 끌어도 안 움직인다)
 function renderSnapshotChart() {
+  // 2026-10-08 일봉 풋프린트(fp_daily.js)·청산맵(liq_profile.js)이 카드를 차지하는 동안은 5분 차트를 안 그린다
+  if ((window.fpDailyActive && window.fpDailyActive()) || (window.fpLiqActive && window.fpLiqActive())) return;
   renderChartPan();
   if (chartHoverActive && !chartPanForce) { chartRenderDeferred = true; return; }
   chartPanForce = false;
