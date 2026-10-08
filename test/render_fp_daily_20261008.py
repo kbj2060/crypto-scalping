@@ -6,10 +6,10 @@
 서버 페이지(터널 127.0.0.1:18787) 위에 로컬 index.html·app.js·styles.css·fp_daily.js 를 덮는다(render_opt_touch_contours 와 같은 방식).
 /api/footprint-daily* 는 배포 전이라 로컬 dashboard.footprint_daily 가 소급본(data/footprint_daily) + lake 백업으로 답한다.
 🔴주문 제출(`/api/manual-*/submit|execute|cancel`)은 브라우저 안에서 막는다 -- 막힌 요청이 있으면 실패.
-검사(1920·390): 켜면 5분 차트 숨김·캔버스 그림 · 기본 30일 · 넓은 화면 = 가격 칸 요청 · 휠 확대·끌기 이동이 그림을 바꾼다 ·
+검사(1920·390): 켜도 5분 차트 상자·아래 칸은 그대로(가격 플롯 사각형 window.fpPlotBox 위에만 겹침, 오차 ≤1px) · 기본 30일 · 넓은 화면 = 가격 칸 요청 · 휠 확대·끌기 이동이 그림을 바꾼다 ·
 «전체» = 2020년부터 · 레인 호버 툴팁 · 끄면 5분 차트 복귀 · JS 오류 0.
 같은 하네스로 «풋프린트/청산맵» 토글(liq_profile.js)도 본다 -- /api/liquidation-map 은 서버 응답에 tier_profile 을 로컬 계산으로 덧붙인다
-(공개 아카이브 1시간봉 최근 24개, scripts.live_liquidation_map_20260824.compute_tier_profile). 토글 → 5분 차트 숨김·범례·툴팁 · 되돌리기 · 일봉이 이기기.
+(공개 아카이브 1시간봉 최근 24개, scripts.live_liquidation_map_20260824.compute_tier_profile). 토글 → 플롯 위에만 겹침·범례·툴팁 · 휠 확대·끌기·더블클릭 복원이 그림을 바꿈 · 되돌리기 · 일봉이 이기기.
 """
 import argparse, hashlib, json, pathlib, sys, time
 from urllib.parse import parse_qs, urlparse
@@ -22,6 +22,10 @@ from scripts.live_liquidation_map_20260824 import compute_tier_profile  # noqa: 
 
 DASH = HERE.parent / "dashboard" / "live"
 URL = "http://127.0.0.1:18787/dashboard/live/"
+OVERLAY = """(id) => { const o = document.getElementById(id), b = window.fpPlotBox, svg = document.getElementById('candleSvgSnapshot');
+              if (!o || !b) return null; const r = svg.getBoundingClientRect(), q = o.getBoundingClientRect();
+              return { dx: q.left - (r.left + b.x), dy: q.top - (r.top + b.y), dw: q.width - b.w, dh: q.height - b.h,
+              mc: !!document.getElementById('mcBody') && getComputedStyle(document.getElementById('mcBody')).display !== 'none' }; }"""
 TIP = "() => { const t = document.getElementById('chartTooltip'); return t && t.classList.contains('visible') ? t.textContent : null; }"
 
 
@@ -120,8 +124,11 @@ def run(shot):
             box = pg.evaluate("() => document.getElementById('fpDailyCanvas').getBoundingClientRect().toJSON()")
             print(tag, st, "캔버스", round(box["width"]), "×", round(box["height"]), flush=True)
             if not (st["on"] and st["cls"] and st["pressed"] == "true"): fails.append(f"[{tag}] 켜짐 상태 {st}")
-            if st["candle"] != "none": fails.append(f"[{tag}] 5분 차트가 안 숨었다")
-            if box["width"] < 300 or box["height"] < 400: fails.append(f"[{tag}] 캔버스 크기 {box}")
+            if st["candle"] == "none": fails.append(f"[{tag}] 5분 차트 상자가 숨었다(플롯 위에만 겹쳐야 함)")
+            ov = pg.evaluate(OVERLAY, "fpDaily")
+            print(tag, "일봉 상자 vs 플롯 사각형", ov, flush=True)
+            if not ov or max(abs(ov[k]) for k in ("dx", "dy", "dw", "dh")) > 1 or not ov["mc"]: fails.append(f"[{tag}] 일봉 상자가 플롯 사각형과 다름/아래 칸 숨음 {ov}")
+            if box["width"] < (300 if w >= 1000 else 200) or box["height"] < 200: fails.append(f"[{tag}] 캔버스 크기 {box}")
             if days["cols"]["d"][-1] not in st["legend"]: fails.append(f"[{tag}] 범례에 마지막 날 없음 {st['legend']!r}")
             canvas_hash = lambda: hashlib.md5(pg.locator("#fpDailyCanvas").screenshot()).hexdigest()  # noqa: E731
 
@@ -167,7 +174,9 @@ def run(shot):
               status: document.getElementById('liqProfileStatus').textContent,
               box: document.getElementById('liqProfileCanvas').getBoundingClientRect().toJSON() })""")
             print(tag, "청산맵", {k: v for k, v in lq.items() if k != "box"}, round(lq["box"]["width"]), "×", round(lq["box"]["height"]), flush=True)
-            if not lq["on"] or lq["candle"] != "none" or lq["hidden"]: fails.append(f"[{tag}] 청산맵 토글 상태 {lq}")
+            if not lq["on"] or lq["candle"] == "none" or lq["hidden"]: fails.append(f"[{tag}] 청산맵 토글 상태 {lq}")
+            ov2 = pg.evaluate(OVERLAY, "liqProfile")
+            if not ov2 or max(abs(ov2[k]) for k in ("dx", "dy", "dw", "dh")) > 1 or not ov2["mc"]: fails.append(f"[{tag}] 청산맵 상자가 플롯 사각형과 다름/아래 칸 숨음 {ov2}")
             if "누적 롱 청산" not in lq["legend"] or "75~100배" not in lq["legend"]: fails.append(f"[{tag}] 청산맵 범례 {lq['legend']!r}")
             pg.locator("#liqProfile").scroll_into_view_if_needed()
             lb = pg.evaluate("() => document.getElementById('liqProfileCanvas').getBoundingClientRect().toJSON()")
@@ -175,6 +184,20 @@ def run(shot):
             ltip = pg.evaluate(TIP)
             print(tag, "청산맵 툴팁", ltip, flush=True)
             if not ltip or "추정" not in ltip: fails.append(f"[{tag}] 청산맵 툴팁 {ltip!r}")
+            lhash = lambda: hashlib.md5(pg.locator("#liqProfileCanvas").screenshot()).hexdigest()  # noqa: E731
+            lx, ly = lb["x"] + lb["width"] * 0.55, lb["y"] + lb["height"] * 0.5
+            pg.mouse.move(lx, ly); pg.wait_for_timeout(200); l0 = lhash()
+            for _ in range(4):
+                pg.mouse.wheel(0, -240); pg.wait_for_timeout(80)
+            pg.wait_for_timeout(400); l1 = lhash()
+            if l1 == l0: fails.append(f"[{tag}] 청산맵 휠 확대가 그림을 안 바꿨다")
+            if shot:
+                pg.locator("#liqProfile").screenshot(path=str(pathlib.Path(shot) / f"liq_zoom_{w}.png"))
+            pg.mouse.down(); pg.mouse.move(lx + 160, ly, steps=6); pg.mouse.up(); pg.wait_for_timeout(400)
+            if lhash() == l1: fails.append(f"[{tag}] 청산맵 끌기 이동이 그림을 안 바꿨다")
+            pg.mouse.dblclick(lx, ly); pg.wait_for_timeout(400)
+            leg2 = pg.inner_text("#liqProfileLegend")
+            print(tag, "청산맵 확대·이동·복원 후 범례", leg2.replace("\n", " "), flush=True)
             if shot:
                 pg.locator("#liqProfile").screenshot(path=str(pathlib.Path(shot) / f"liq_{w}.png"))
             pg.mouse.move(5, 5)

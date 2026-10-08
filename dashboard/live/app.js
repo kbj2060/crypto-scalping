@@ -5377,8 +5377,6 @@ function setupChartPan() {
 }
 let chartPanForce = false;   // 창 이동은 호버 중에도 바로 그린다(호버 보류에 막히면 끌어도 안 움직인다)
 function renderSnapshotChart() {
-  // 2026-10-08 일봉 풋프린트(fp_daily.js)·청산맵(liq_profile.js)이 카드를 차지하는 동안은 5분 차트를 안 그린다
-  if ((window.fpDailyActive && window.fpDailyActive()) || (window.fpLiqActive && window.fpLiqActive())) return;
   renderChartPan();
   if (chartHoverActive && !chartPanForce) { chartRenderDeferred = true; return; }
   chartPanForce = false;
@@ -5726,6 +5724,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H - 2 * ROW_H;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
+  // 2026-10-08 일봉 풋프린트·청산맵은 이 사각형(가격 플롯 + 체결·호가 띠) **위에만** 겹친다(사용자 «풋프린트 차트만 바뀌게») --
+  //   viewBox = 상자 픽셀이라 좌표 그대로 쓴다(fp_daily.js fpPlaceOverlay). 아래 레인·오른쪽 칸은 그대로 그려진다.
+  //   모바일은 플롯 왼쪽에 체결 기둥(TRADE_L)이 따로 있고 오른쪽 여백(mr)에 글자가 걸려 둘 다 덮는다(안 덮으면 5분 셀·글자가 비친다).
+  if (svg.id === "candleSvgSnapshot") window.fpPlotBox = { x: ml - TRADE_L, y: mt, w: w - ml + TRADE_L, h: ch };
   // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). OI·청산 레인은 플롯 바로 아래 그대로다.
   // 2026-09-22 위아래를 뒤집었다(사용자 지시): **프로파일이 먼저, 1초 수급이 그 아래**.
   // 🔴청산밀도 범례는 프로파일을 **따라 올라가지 않는다**. 그건 풋프린트(가격 플롯)의 배경을

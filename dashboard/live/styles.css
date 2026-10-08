@@ -3220,12 +3220,11 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fp-daily-tabs::before { opacity: 0; transition: opacity .2s ease; }
 .fp-daily-tabs:has(.asset-tab.active)::before { opacity: 1; }
 .fp-daily-tabs .asset-tab:disabled { opacity: .45; cursor: not-allowed; }
-#fpCard.fp-daily-on .candle-container, #fpCard.fp-daily-on #fpStrip, #fpCard.fp-daily-on #liquidationMapList,
-#fpCard.fp-daily-on #mcWall, #fpCard.fp-daily-on #mcBody, #fpCard.fp-daily-on #fpLineSwitch,
-#fpCard.fp-daily-on #chartPan, #fpCard.fp-daily-on #sitChips, #fpCard.fp-daily-on #optChip { display: none !important; }
-#fpCard.fp-daily-on #chartWindowTabs { opacity: .55; }
-.fp-daily { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.fp-daily[hidden] { display: none; }
+/* 일봉·청산맵 상자 = 5분 차트 상자 안 가격 플롯 사각형 위에만 겹친다(사용자 «풋프린트 차트만 바뀌게»). 위치·크기는
+   fp_daily.js fpPlaceOverlay 가 window.fpPlotBox(app.js renderCandleSvg)로 매번 맞춘다. 아래 레인·오른쪽 칸은 그대로 보인다. */
+.fp-overlay { position: absolute; left: 0; top: 12px; z-index: 3; display: flex; flex-direction: column; gap: 6px;
+  padding: 6px 8px 4px; box-sizing: border-box; border-radius: 10px; background: var(--chart-bg); }
+.fp-overlay[hidden] { display: none; }
 .fpd-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
 .fpd-legend { min-height: 18px; color: var(--text); font: 12px/1.5 var(--font-mono); font-variant-numeric: tabular-nums; }
 .fpd-date { font: 700 12px/1.5 var(--font-sans); margin-right: 2px; }
@@ -3241,17 +3240,15 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
   font: 600 11px/1 var(--font-sans); cursor: pointer; transition: border-color .15s ease, background-color .15s ease; }
 .fpd-tools button:hover { border-color: var(--hover-line); background: rgb(var(--lift) / .08); }
 .fpd-tools svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
-.fpd-tools button:focus-visible, .fpd-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.fpd-canvas { display: block; width: 100%; height: clamp(540px, 64vh, 780px); border-radius: 10px; background: var(--chart-bg);
-  cursor: crosshair; touch-action: pan-y; }
-.fpd-canvas.panning { cursor: grabbing; }
+.fpd-tools button:focus-visible, .fpd-canvas:focus-visible, .lqp-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fpd-canvas, .lqp-canvas { display: block; flex: 1 1 0; min-height: 0; width: 100%; cursor: crosshair; touch-action: pan-y; }
+.fpd-canvas.panning, .lqp-canvas.panning { cursor: grabbing; }
 .fpd-status { margin: 0; font-size: 12px; }
 .fpd-status:empty { display: none; }
 .fpd-note { margin: 0; font-size: 11px; line-height: 1.5; }
 @media (max-width: 720px) {
-  .fpd-canvas { height: 500px; }
-  .fpd-tools button { min-height: 36px; }
-  .fpd-tag { display: block; margin-left: 0; }
+  .fpd-tools button { min-height: 32px; min-width: 32px; padding: 0 8px; }
+  .fpd-tag, .fp-overlay .fpd-note { display: none; }
 }
 @media (pointer: coarse) { .fpd-tools button { min-height: 40px; min-width: 40px; } }
 @media (prefers-reduced-motion: reduce) { .fp-daily-tabs::before, .fpd-tools button { transition: none; } }
@@ -3261,16 +3258,10 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 :root { --lev10: var(--book-depth); --lev25: #8b93f0; --lev50: #e6c45c; --lev100: var(--warn); }
 [data-theme="light"] { --lev25: #4a52b8; --lev50: #9a7a12; }
 #fpViewTabs { --seg-n: 2; }
-#fpCard.fp-liq-on .candle-container { display: none; }
 #fpCard.fp-daily-on #fpViewTabs, #fpCard.fp-daily-on #liqProfile { display: none !important; }
-.liq-profile { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.liq-profile[hidden] { display: none; }
-.lqp-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; color: var(--text); font: 600 11px/1.5 var(--font-sans); }
+.lqp-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text); font: 600 11px/1.5 var(--font-sans); }
 .lqp-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .lqp-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 .lqp-long, .lqp-short { height: 2px; width: 14px; border-radius: 1px; }
 .lqp-long { background: var(--bad); } .lqp-short { background: var(--good); }
 .lqp-t0 { background: var(--lev10); } .lqp-t1 { background: var(--lev25); } .lqp-t2 { background: var(--lev50); } .lqp-t3 { background: var(--lev100); }
-.lqp-canvas { display: block; width: 100%; height: clamp(400px, 48vh, 600px); border-radius: 10px; background: var(--chart-bg); cursor: crosshair; }
-@media (max-width: 720px) { .lqp-canvas { height: 380px; } }
-#fpCard.fp-liq-on #fpLineSwitch, #fpCard.fp-liq-on #mcWall, #fpCard.fp-liq-on #mcBody, #fpCard.fp-liq-on #chartPan { display: none !important; }   /* 5분 차트 위에 겹쳐 두던 칸들 */

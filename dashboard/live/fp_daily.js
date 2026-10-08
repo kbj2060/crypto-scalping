@@ -1,6 +1,7 @@
 // 일봉 풋프린트 (2026-10-08, 사용자 «일봉 풋프린트를 최대치로 · 축소/확대 · 델타·거래대금·OI·청산 · 30일 이상 · 4시간봉 없이»).
 // 서버 /api/footprint-daily(일 요약 전체) + /api/footprint-daily/cells(보이는 날의 가격 칸). ETH 만.
 // 캔버스로 그린다 -- 최대 ~2,500일을 끌고 확대해야 해서 SVG 요소 수만 개를 프레임마다 갈아 끼울 수 없다.
+// 자리 = 5분 차트의 가격 플롯 사각형 위(placeOverlay) -- 아래 레인·오른쪽 칸은 그대로 둔다(사용자 «풋프린트 차트만 바뀌게»).
 // 확대 단계: 봉 폭 ≥ CELL_MIN_PX 면 가격 칸(왼쪽 매도 · 오른쪽 매수), 그 아래는 캔들, 아주 좁으면 고저 선.
 // 날짜 = UTC 자정(KST 09:00) -- 바이낸스 일봉 경계. 서술이지 신호가 아니다(볼륨 프로파일 규칙 5종 불합격, 10-04).
 // 🔴CI 문법 검사(esprima)가 `?.(`·`?.[`·숫자 구분자를 못 읽는다 -- 쓰지 말 것(09-30 배포 워처 정지 사고).
@@ -99,8 +100,25 @@
     S.i0 = Math.max(-S.span * 0.6, Math.min(S.i0, S.n - S.span * 0.4));
   }
 
+  // 일봉·청산맵 상자를 5분 차트의 가격 플롯 사각형(app.js renderCandleSvg 가 window.fpPlotBox 로 남김) 위에 놓는다.
+  //   viewBox = 상자 픽셀이라 좌표 그대로, 상자 안에서 svg 가 시작하는 자리(margin-top 12)만 더한다 -- 🔴SVG 에는 offsetTop 이
+  //   없어(undefined → NaN) 화면 좌표 차로 잰다. 사각형이 아직 없으면 svg 전체.
+  function placeOverlay(el) {
+    var svg = $("candleSvgSnapshot"), b = window.fpPlotBox;
+    if (!el || !svg || !el.parentElement) return;
+    var r = svg.getBoundingClientRect(), pr = el.parentElement.getBoundingClientRect();
+    var ox = r.left - pr.left - el.parentElement.clientLeft, oy = r.top - pr.top - el.parentElement.clientTop;
+    var x = ox + (b ? b.x : 0), y = oy + (b ? b.y : 0), w = b ? b.w : r.width, h = b ? b.h : r.height;
+    var st = el.style, px_ = function (v) { return Math.round(v) + "px"; };
+    if (st.left !== px_(x) || st.top !== px_(y) || st.width !== px_(w) || st.height !== px_(h)) {
+      st.left = px_(x); st.top = px_(y); st.width = px_(w); st.height = px_(h);
+    }
+  }
+  window.fpPlaceOverlay = placeOverlay;         // liq_profile.js 도 같은 자리에 놓는다
+
   function draw() {
     S.raf = 0;
+    if (S.on) placeOverlay($("fpDaily"));
     var cv = $("fpDailyCanvas");
     if (!S.on || !cv || !S.D || !cv.clientWidth) return;
     var dpr = window.devicePixelRatio || 1, G = layout(cv);
@@ -426,11 +444,11 @@
     var card = $("fpCard"), btn = $("fpDailyBtn"), box = $("fpDaily"), status = $("fpDailyStatus");
     if (card) card.classList.toggle("fp-daily-on", on);
     if (btn) { btn.classList.toggle("active", on); btn.setAttribute("aria-pressed", String(on)); }
-    if (box) box.hidden = !on;
+    if (box) { box.hidden = !on; if (on) placeOverlay(box); }
     try { localStorage.setItem("fpDailyOn", on ? "1" : "0"); } catch (e) { /* 저장 못 해도 동작 */ }
     clearInterval(S.timer);
     tipHide();
-    if (!on) { if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender(); return; }
+    if (!on) return;
     if (!S.D) {
       if (status) status.textContent = "일봉 불러오는 중…";
       try {
@@ -468,6 +486,7 @@
     });
     bindCanvas(cv);
     new ResizeObserver(redraw).observe(cv);
+    setInterval(function () { if (S.on) placeOverlay($("fpDaily")); }, 500);   // 5분 차트 배치가 바뀌면(창 탭·폭) 따라간다
     // ETH 전용 -- 코인을 바꾸면 끄고 버튼을 잠근다(app.js 의 activeSnapshotAsset 을 1초마다 본다)
     setInterval(function () {
       var ok = ethOn();
@@ -480,7 +499,7 @@
     if (saved === "1") setOn(true);
   }
 
-  window.fpDailyActive = function () { return S.on; };   // app.js renderSnapshotChart 가 5분 차트 그리기를 건너뛴다
+  window.fpDailyActive = function () { return S.on; };   // 시험 하네스가 켜짐을 읽는다
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();
