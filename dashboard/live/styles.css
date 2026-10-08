@@ -3261,7 +3261,9 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 :root { --lev10: var(--book-depth); --lev25: #8b93f0; --lev50: #e6c45c; --lev100: var(--warn); }
 [data-theme="light"] { --lev25: #4a52b8; --lev50: #9a7a12; }
 #fpViewTabs { --seg-n: 2; }
-#fpCard.fp-daily-on #fpViewTabs, #fpCard.fp-daily-on #liqProfile { display: none !important; }
+/* 10-09 사용자 «1d 일 때도 풋프린트/청산맵 토글은 항상»: 두 축이 독립 -- 시간(1h…12h·1d) × 보기(풋프린트·청산맵).
+   청산맵을 고르면 시간과 상관없이 청산맵(일봉은 그 아래 숨김), 풋프린트면 1d = 일봉 · 1h…12h = 5분 풋프린트 */
+#fpCard.fp-liq-on #fpDaily { display: none !important; }
 .lqp-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text); font: 600 11px/1.5 var(--font-sans); }
 .lqp-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .lqp-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }

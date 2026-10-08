@@ -249,8 +249,18 @@ def run(shot):
             if shot:
                 pg.locator("#liqProfile").screenshot(path=str(pathlib.Path(shot) / f"liq_{w}.png"))
             pg.mouse.move(5, 5)
-            pg.click("#fpDailyBtn"); pg.wait_for_timeout(1500)        # 일봉이 이긴다
-            if pg.evaluate("() => getComputedStyle(document.getElementById('liqProfile')).display") != "none": fails.append(f"[{tag}] 일봉 켜도 청산맵이 남음")
+            # 10-09 두 축 독립: 청산맵을 고른 채 1d → 청산맵 그대로 + 토글 보임 · 풋프린트 → 일봉
+            VIS = """() => { const d = id => { const e = document.getElementById(id); return getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0; };
+                      return { liq: d('liqProfile'), daily: d('fpDaily'), toggle: d('fpViewTabs'), on: window.fpDailyActive() }; }"""
+            pg.click("#fpDailyBtn"); pg.wait_for_timeout(1500)
+            v1 = pg.evaluate(VIS)
+            if v1 != {"liq": True, "daily": False, "toggle": True, "on": True}: fails.append(f"[{tag}] 청산맵 + 1d: 청산맵·토글이 보여야 함 {v1}")
+            pg.click("#fpViewTabs [data-view='fp']"); pg.wait_for_timeout(1500)
+            v2 = pg.evaluate(VIS)
+            if v2 != {"liq": False, "daily": True, "toggle": True, "on": True}: fails.append(f"[{tag}] 1d + 풋프린트: 일봉이 보여야 함 {v2}")
+            if shot:
+                pg.locator("#fpCard .chart-head-left").screenshot(path=str(pathlib.Path(shot) / f"tabs_1d_toggle_{w}.png"))
+            pg.click("#fpViewTabs [data-view='liq']"); pg.wait_for_timeout(800)
             pg.click("#fpDailyBtn"); pg.wait_for_timeout(800)
             pg.click("#fpViewTabs [data-view='fp']"); pg.wait_for_timeout(1500)
             if pg.evaluate("() => getComputedStyle(document.querySelector('#fpCard .candle-container')).display") == "none": fails.append(f"[{tag}] 풋프린트로 못 돌아옴")
