@@ -141,9 +141,9 @@ def walks(k1, tps, period, rng):
             if np.isfinite(sig):
                 r = run_trade(c, h, l, i, s, tp, sig)
                 vm = float(np.clip(sig / np.sqrt(6) / VOLM_MED, 0.25, 3.0) / VOLM_REF)
-                rows.append([p, tp["L"], vm] + [v for S in STOPS for v in r[S]])
+                rows.append([p, tp["L"], vm, s, sig] + [v for S in STOPS for v in r[S]])
             i += tp["hold"] + 1 + int(rng.exponential(gap))
-    cols = ["path", "Lu", "vm"] + [f"{k}_{S}" for S in STOPS for k in ("f", "m", "fill", "ls")]
+    cols = ["path", "Lu", "vm", "side", "sig"] + [f"{k}_{S}" for S in STOPS for k in ("f", "m", "fill", "ls")]
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -188,6 +188,8 @@ def main() -> int:
         kelly_scan(); return 0
     if "--stops" in sys.argv:
         stop_scan(); return 0
+    if "--compare" in sys.argv:
+        compare(); return 0
     OUT.mkdir(parents=True, exist_ok=True)
     tps = templates()
     k1 = A.load_k1m("2021-12-25", "2026-10-07")
@@ -267,6 +269,53 @@ def stop_scan() -> dict:
     return out
 
 
+def committed_L(D: pd.DataFrame, cap: float = 10.0) -> np.ndarray:
+    """커밋된 대시보드 규칙(5cbcc38b live_manual_peg_entry.build_rule_ladder)의 4분할 합계 배수:
+    min(4 × 0.303 × 10.26 × 권장 배수, 청산가가 3σ 손절선보다 0.5% 바깥인 최대, 증거금 50% × 20배 = 10)."""
+    sd, off, buf, mmr = 3 * D.sig.to_numpy() / 1e4, 0.0066, 0.005, 0.02
+    lo = 1 - (1 - mmr) * (1 - sd) * (1 - buf) / (1 - off)
+    sh = (1 + mmr) * (1 + sd) * (1 + buf) / (1 + off) - 1
+    den = np.where(D.side.to_numpy() > 0, lo, sh)
+    liq = np.where(den > 0, 1 / np.maximum(den, 1e-12), np.inf)
+    return np.minimum(np.minimum(4 * 0.303 * 10.26 * D.vm.to_numpy(), liq), cap)
+
+
+def compare() -> dict:
+    """사후 비교(사용자 «지금 커밋된 진입크기·분할매수와 비교»): 같은 경로에서 커밋 규칙 vs 권고.
+    모양 두 가지 — 원장 틀(내 실제 물타기) · 4분할 틀(0/44/88/132bp 같은 크기, 보유시간만 원장)."""
+    tps = templates()
+    k1 = None
+    out = {}
+    for geo in ("ledger", "ladder4"):
+        for per, rng_p in PERIODS.items():
+            fp = OUT / f"trades_{geo}_{per}.parquet"
+            if geo == "ledger":
+                D = pd.read_parquet(OUT / f"trades_{per}.parquet")
+            elif fp.exists():
+                D = pd.read_parquet(fp)
+            else:
+                k1 = k1 if k1 is not None else A.load_k1m("2021-12-25", "2026-10-07")
+                lad = [{**t, "dist": np.array([0.0, -44, -88, -132]), "w": np.full(4, 0.25), "dt": np.zeros(4)} for t in tps]
+                D = walks(k1, lad, rng_p, np.random.default_rng(SEED + 7 + (0 if per == "main" else 1)))
+                D.to_parquet(fp)
+            arms = {"커밋(3σ·노출맞춤·상한10)": ("S2", committed_L(D)), "커밋+상한6": ("S2", committed_L(D, 6.0)),
+                    "권고 1.5배·5%": ("S5", np.full(len(D), 1.5)), "권고 2배·5%": ("S5", np.full(len(D), 2.0)),
+                    "권고 1.5배·3σ": ("S2", np.full(len(D), 1.5))}
+            for a in (0, 5, 10, 15):
+                for name, (S, lev) in arms.items():
+                    stopped = (D[f"f_{S}"] != D.f_S0).to_numpy()
+                    E = D.assign(**{f"f_{S}": D[f"f_{S}"] + a / 1e4 * np.where(stopped, 0.0, D[f"fill_{S}"])})
+                    r = evaluate(E, lev, S, 0.0)
+                    ls = lev * D[f"ls_{S}"].to_numpy() if S != "S0" else np.full(len(D), np.nan)
+                    r["med_stop_loss"] = float(np.nanmedian(ls)); r["p90_stop_loss"] = float(np.nanquantile(ls, 0.9))
+                    out[f"{geo}|{per}|a{a}|{name}"] = r
+                    print(f"{geo:7s} {per} α{a:2d} {name:20s} 중앙 {r['med_mult']:6.2f} p10 {r['p10_mult']:5.2f} 파산 {r['p_ruin']:.3f} "
+                          f"DD50 {r['p_dd50']:.2f} 중앙MDD {r['med_mdd']:+.2f} L중앙 {r['med_lev']:4.1f} p90 {r['p90_lev']:4.1f} "
+                          f"손절손실 중앙 {r['med_stop_loss']:.0%} p90 {r['p90_stop_loss']:.0%}", flush=True)
+    json.dump(out, open(OUT / "compare_committed.json", "w"), indent=1, ensure_ascii=False)
+    return out
+
+
 def selftest() -> None:
     # 롱 틀: 0bp 50% + −100bp 50%, 보유 4분. 가격 100 → 98.6(저가 98.5) → 99 → 101 → 101
     tp = {"dist": np.array([0.0, -100.0]), "w": np.array([0.5, 0.5]), "dt": np.array([0, 1]), "hold": 4, "L": 1}
@@ -297,3 +346,4 @@ def selftest() -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
