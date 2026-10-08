@@ -281,7 +281,8 @@ def flows_wallet(income: pd.DataFrame):
         np.where(inc.incomeType.to_numpy() == "TRANSFER", inc.income.to_numpy(), 0.0)
 
 
-def replay(f: pd.DataFrame, wallet_t, wallet_cum, *, block_ev: set | None = None, cap_k: float | None = None):
+def replay(f: pd.DataFrame, wallet_t, wallet_cum, *, block_ev: set | None = None, cap_k: float | None = None,
+           scale: dict | None = None):
     """체결 순서대로 실제/반사실 포지션을 같이 굴린다. 반환: 체결별 상태 배열 + 왕복별 손익."""
     block_ev = block_ev or set()
     n = len(f)
@@ -300,7 +301,7 @@ def replay(f: pd.DataFrame, wallet_t, wallet_cum, *, block_ev: set | None = None
         q_a, q_c = qa.get(k, 0.0), qc.get(k, 0.0)
         rate = CM[i] / (px * Q[i]) if Q[i] > 0 else 0.0
         if INC[i]:
-            keep = 0.0 if (tr, EV[i]) in block_ev else Q[i]
+            keep = 0.0 if (tr, EV[i]) in block_ev else Q[i] * (scale or {}).get(tr, 1.0)   # scale: 왕복별 크기 배수
             if cap_k is not None and keep > 0:
                 w = wallet_cum[np.searchsorted(wallet_t, T[i], side="right") - 1] + (cum_c - cum_a)
                 unrl = sum(qc[kk] * (px - ac.get(kk, px)) * (1 if kk[1] == "LONG" else -1) for kk in qc)
@@ -375,8 +376,8 @@ def _ci(x: np.ndarray) -> tuple[float, float]:
     return float(np.quantile(x, 0.025)), float(np.quantile(x, 0.975))
 
 
-def evaluate(f, trips, path_args, block, cap):
-    st, cum, ta, tc = replay(f, path_args[1], path_args[2], block_ev=block, cap_k=cap)
+def evaluate(f, trips, path_args, block, cap, scale=None):
+    st, cum, ta, tc = replay(f, path_args[1], path_args[2], block_ev=block, cap_k=cap, scale=scale)
     mp = minute_path(f, st, cum, *path_args)
     last_trip = {k: f[(f.symbol == k[0]) & (f.positionSide == k[1])].trip.max() for k in STREAMS}
     last_trip = {k: (-1 if pd.isna(v) else int(v)) for k, v in last_trip.items()}
