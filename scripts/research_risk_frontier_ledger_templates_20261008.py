@@ -22,7 +22,7 @@
   선택 규칙: 주(2025~, α5)에서 P(파산) ≤ 1% 이고 P(MDD ≥ 50%) ≤ 10% 인 것 중 중앙 1년 로그성장 최대.
   강건성: 같은 설정을 보조 기간·α 0/10/20 에 그대로 보고(재선택 금지).
 
-실행: python scripts/research_risk_frontier_ledger_templates_20261008.py [--selftest | --kelly(사후 보조, 보수 α 레버 탐색)]
+실행: python scripts/research_risk_frontier_ledger_templates_20261008.py [--selftest | --kelly(사후 보조, 보수 α 레버 탐색) | --stops(3회차 손절 폭)]
 산출: tmp/risk_frontier_20261008/report.json
 """
 from __future__ import annotations
@@ -45,7 +45,7 @@ SEED, P_PATHS, YEAR_MIN = 20261008, 400, 365 * 1440
 COST, MMR, TRADES_YR = 3.0, 0.005, 834
 PERIODS = {"main": ("2025-01-01", "2026-09-30"), "aux": ("2022-01-01", "2024-12-31")}
 ALPHAS = (0.0, 5.0, 10.0, 20.0)
-STOPS = ("S0", "S1", "S2")
+STOPS = ("S0", "S1", "S2", "S5", "S8", "S12", "F2", "F4")   # F2/F4 = −2/−4% (3회차 사후 경계 확인)   # S5/S8/S12 = 첫 진입가 −5/−8/−12% (3회차 추가, 같은 시드라 S0~S2 불변)
 VOLM_MED, VOLM_REF = 157.3941696083474, 0.7657638410664205
 
 
@@ -74,7 +74,7 @@ def run_trade(c, h, l, i0, s, tp, sig):
     p0 = px[0]
     res = {}
     for S in STOPS:
-        stop_bp = {"S0": np.inf, "S1": 300.0, "S2": 3 * sig}[S]
+        stop_bp = {"S0": np.inf, "S1": 300.0, "S2": 3 * sig, "S5": 500.0, "S8": 800.0, "S12": 1200.0, "F2": 200.0, "F4": 400.0}[S]
         lots, j_prev = [(p0, tp["w"][0], 0)], 0
         stop_lvl = p0 * (1 - s * stop_bp / 1e4) if np.isfinite(stop_bp) else None
         if stop_lvl is not None:                               # 손절 분(첫 진입 기준 고정선)
@@ -186,6 +186,8 @@ def main() -> int:
         selftest(); return 0
     if "--kelly" in sys.argv:
         kelly_scan(); return 0
+    if "--stops" in sys.argv:
+        stop_scan(); return 0
     OUT.mkdir(parents=True, exist_ok=True)
     tps = templates()
     k1 = A.load_k1m("2021-12-25", "2026-10-07")
@@ -233,6 +235,35 @@ def kelly_scan() -> dict:
                                   "dd50_le10_opt": max(ok, key=lambda L: r[L]["med_mult"]) if ok else None, "grid": r}
             print(per, a, {k: v for k, v in out[f"{per}_a{a}"].items() if k != "grid"}, flush=True)
     json.dump(out, open(OUT / "kelly_scan.json", "w"), indent=1)
+    return out
+
+
+def stop_scan() -> dict:
+    """3회차(사전 고정): 손절 폭 S0·S1(3%)·S5·S8·S12·S2(3σ) × 고정 L × α 5/10/15(손절 왕복 α 없음).
+    판정 = 각 (기간, α) 칸에서 DD50≤10% 최적 L 의 중앙 1년 배수가 가장 큰 손절 — 칸 6개 중 다수."""
+    Ls = np.round(np.arange(0.25, 4.01, 0.25), 2)
+    out, wins = {}, {}
+    for per in PERIODS:
+        D = pd.read_parquet(OUT / f"trades_{per}.parquet")
+        for a in (5, 10, 15):
+            cell = {}
+            for S in ("S0", "F2", "S1", "F4", "S5", "S8", "S12", "S2"):
+                stopped = (D[f"f_{S}"] != D.f_S0).to_numpy()
+                E = D.assign(**{f"f_{S}": D[f"f_{S}"] + a / 1e4 * np.where(stopped, 0.0, D[f"fill_{S}"])})
+                r = {float(L): evaluate(E, np.full(len(E), L), S, 0.0) for L in Ls}
+                ok = [L for L in r if r[L]["p_dd50"] <= 0.10]
+                Lc = max(ok, key=lambda L: r[L]["med_mult"]) if ok else None
+                cell[S] = {"stopped_frac": float(stopped.mean()), "L_dd10": Lc,
+                           **({k: r[Lc][k] for k in ("med_mult", "p10_mult", "p_dd50", "med_mdd")} if Lc else {}),
+                           "at_L1.5": {k: r[1.5][k] for k in ("med_mult", "p10_mult", "p_dd50", "med_mdd")}}
+                print(f"{per} α{a:2d} {S:4s} 손절률 {stopped.mean():.3f} | DD50≤10% 최적 L {Lc} 중앙 {cell[S].get('med_mult', 0):.2f} "
+                      f"p10 {cell[S].get('p10_mult', 0):.2f} | L1.5 중앙 {r[1.5]['med_mult']:.2f} p10 {r[1.5]['p10_mult']:.2f} "
+                      f"DD50 {r[1.5]['p_dd50']:.2f}", flush=True)
+            best = max(cell, key=lambda S: cell[S].get("med_mult", 0)); wins[best] = wins.get(best, 0) + 1
+            out[f"{per}_a{a}"] = {"cells": cell, "best": best}
+    out["wins"] = wins
+    print("칸별 최고 손절", wins)
+    json.dump(out, open(OUT / "stop_scan.json", "w"), indent=1)
     return out
 
 

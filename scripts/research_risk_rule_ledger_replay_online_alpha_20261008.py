@@ -33,10 +33,11 @@ STOP, TAKER = 0.03, 4e-4
 KELLY_FRAC, L_MAX, WARM_N, WARM_L = 0.5, 2.25, 50, 0.5
 
 
-def trip_stats(g: pd.DataFrame, k1: pd.DataFrame, stop: bool, t_end: int | None = None) -> tuple[float, float, float]:
+def trip_stats(g: pd.DataFrame, k1: pd.DataFrame, stop: bool, t_end: int | None = None,
+               stop_pct: float = STOP) -> tuple[float, float, float]:
     """한 왕복 체결 g(시간순) → (손익$, 최대 명목$, MAE$). stop 이면 첫 진입가 −3% 에서 남은 물량 청산.
     t_end: 열린 왕복의 평가 끝 분(그 분 종가로 남은 물량 평가)."""
-    s = float(g.sgn.iloc[0]); p0 = float(g.price.iloc[0]); lvl = p0 * (1 - s * STOP)
+    s = float(g.sgn.iloc[0]); p0 = float(g.price.iloc[0]); lvl = p0 * (1 - s * stop_pct)
     a, b = int(g.time.min()) // 60_000 * 60_000 + 60_000, int(t_end if t_end is not None else g.time.max())
     k = k1[(k1.t >= a) & (k1.t <= max(b, a))]
     adv = (k.l if s > 0 else k.h).to_numpy()
@@ -135,6 +136,33 @@ def part_a() -> dict:
     return out
 
 
+def ledger_stop_scan() -> dict:
+    """3회차: 원장 왕복에 손절 폭 3·5·8·12% — 고정 L 1.5/2/4 복리와 걸린 왕복."""
+    f = A.tag_events(A.load_fills())
+    st = pd.read_csv(ROOT / "tmp/behavioral_risk_20261008/trip_states.csv").set_index("trip")
+    k1 = A.load_k1m("2026-07-25", "2026-10-07")
+    out = {}
+    for sp in (None, 0.03, 0.05, 0.08, 0.12):
+        rows = []
+        for tr, g in f.groupby("trip"):
+            g = g.sort_values(["time", "id"])
+            te = None if st.loc[tr, "closed"] else int(st.loc[tr, "t1"])
+            p, _, m = trip_stats(g, k1, sp is not None, te, sp or STOP)
+            p0, n0, _ = trip_stats(g, k1, False, te)          # 용량 = 원래 왕복 최대 명목(손절로 덜 찬 사다리도 같은 용량)
+            rows.append({"t0": st.loc[tr, "t0"], "t1": st.loc[tr, "t1"], "r": p / n0, "mae": m / n0, "pnl": p, "pnl0": p0})
+        X = pd.DataFrame(rows).sort_values("t0").reset_index(drop=True)
+        hit = X.pnl != X.pnl0
+        key = "none" if sp is None else f"{sp:.0%}"
+        out[key] = {"stopped": int(hit.sum()), "recovered_after": int((X.pnl0[hit] > X.pnl[hit]).sum()),
+                    "delta_usd_actual_size": float((X.pnl - X.pnl0).sum()),
+                    **{f"K{L:g}": compound(X, lambda h, L=L: L) for L in (1.5, 2.0, 4.0)}}
+        o = out[key]
+        print(f"손절 {key:5s} 걸림 {o['stopped']} (그 뒤 더 나았던 {o['recovered_after']}) 실제크기 Δ$ {o['delta_usd_actual_size']:+.0f} | "
+              + " | ".join(f"K{L:g} {o[f'K{L:g}']['mult']:.3f}/{o[f'K{L:g}']['mdd']:+.3f}" for L in (1.5, 2.0, 4.0)), flush=True)
+    json.dump(out, open(OUT / "ledger_stop_scan.json", "w"), indent=1)
+    return out
+
+
 def part_b() -> dict:
     out = {}
     for per in F.PERIODS:
@@ -185,6 +213,8 @@ def selftest() -> None:
 def main() -> int:
     if "--selftest" in sys.argv:
         selftest(); return 0
+    if "--stops" in sys.argv:
+        ledger_stop_scan(); return 0
     OUT.mkdir(parents=True, exist_ok=True)
     rep = {"A_ledger": part_a()}
     if "--a-only" not in sys.argv:
