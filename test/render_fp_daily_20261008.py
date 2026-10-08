@@ -6,10 +6,10 @@
 서버 페이지(터널 127.0.0.1:18787) 위에 로컬 index.html·app.js·styles.css·fp_daily.js 를 덮는다(render_opt_touch_contours 와 같은 방식).
 /api/footprint-daily* 는 배포 전이라 로컬 dashboard.footprint_daily 가 소급본(data/footprint_daily) + lake 백업으로 답한다.
 🔴주문 제출(`/api/manual-*/submit|execute|cancel`)은 브라우저 안에서 막는다 -- 막힌 요청이 있으면 실패.
-검사(1920·390): 켜도 5분 차트 상자·아래 칸은 그대로(가격 플롯 사각형 window.fpPlotBox 위에만 겹침, 오차 ≤1px) · 기본 30일 · 넓은 화면 = 가격 칸 요청 · 휠 확대·끌기 이동이 그림을 바꾼다 ·
+검사(1920·390): 켜면 교체 영역(window.fpRegion, 풋프린트~모의 판·지지/저항) 위에 겹치고(오차 ≤1px) 모의 판·지지/저항은 가려지며 시장 맥락은 남는다 · 기본 30일 · 넓은 화면 = 가격 칸 요청 · 휠 확대·끌기 이동이 그림을 바꾼다 ·
 «전체» = 2020년부터 · 레인 호버 툴팁 · 끄면 5분 차트 복귀 · JS 오류 0.
 같은 하네스로 «풋프린트/청산맵» 토글(liq_profile.js)도 본다 -- /api/liquidation-map 은 서버 응답에 tier_profile 을 로컬 계산으로 덧붙인다
-(공개 아카이브 1시간봉 최근 24개, scripts.live_liquidation_map_20260824.compute_tier_profile). 토글 → 플롯 위에만 겹침·범례·툴팁 · 휠 확대·끌기·더블클릭 복원이 그림을 바꿈 · 되돌리기 · 일봉이 이기기.
+(공개 아카이브 1시간봉 최근 24개, scripts.live_liquidation_map_20260824.compute_tier_profile). 토글 → 교체 영역 위·범례·툴팁 · 1·7·30일 버튼 · 휠 확대·끌기·더블클릭 복원이 그림을 바꿈 · 되돌리기 · 일봉이 이기기.
 """
 import argparse, hashlib, json, pathlib, sys, time
 from urllib.parse import parse_qs, urlparse
@@ -22,10 +22,19 @@ from scripts.live_liquidation_map_20260824 import compute_tier_profile  # noqa: 
 
 DASH = HERE.parent / "dashboard" / "live"
 URL = "http://127.0.0.1:18787/dashboard/live/"
-OVERLAY = """(id) => { const o = document.getElementById(id), b = window.fpPlotBox, svg = document.getElementById('candleSvgSnapshot');
-              if (!o || !b) return null; const r = svg.getBoundingClientRect(), q = o.getBoundingClientRect();
-              return { dx: q.left - (r.left + b.x), dy: q.top - (r.top + b.y), dw: q.width - b.w, dh: q.height - b.h,
-              mc: !!document.getElementById('mcBody') && getComputedStyle(document.getElementById('mcBody')).display !== 'none' }; }"""
+# 교체 영역(window.fpRegion = svg 왼쪽 위 (0,0)~(w,h)) 위에 겹치는가 + 모의 판·지지/저항이 가려졌나(넓은 화면 = #mcWall 덮음 ·
+#   좁은 화면 = #liquidationMapList·#mcBody > .ppm 숨김) + 남아야 할 칸(시장 맥락 #mcBody)은 보이는가
+OVERLAY = """(id) => { const o = document.getElementById(id), g = window.fpRegion, svg = document.getElementById('candleSvgSnapshot');
+              if (!o || !g) return null; const r = svg.getBoundingClientRect(), q = o.getBoundingClientRect();
+              const vis = (s) => { const e = document.querySelector(s); if (!e) return false; const c = getComputedStyle(e);
+                                   return c.display !== 'none' && c.visibility !== 'hidden' && e.getBoundingClientRect().height > 0; };
+              return { dx: q.left - r.left, dy: q.top - r.top, dw: q.width - g.w, dh: q.height - g.h, split: g.split,
+                       mc: vis('#mcBody'), wall: vis('#mcWall'), sr: vis('#liquidationMapList'), ppm: vis('#mcBody > .ppm') }; }"""
+
+
+def covered(ov) -> bool:
+    """모의 판·지지/저항이 안 보이고 시장 맥락은 보인다."""
+    return bool(ov) and ov["mc"] and not ov["wall"] and not (not ov["split"] and (ov["sr"] or ov["ppm"]))
 TIP = "() => { const t = document.getElementById('chartTooltip'); return t && t.classList.contains('visible') ? t.textContent : null; }"
 
 
@@ -40,12 +49,12 @@ def provider():
     return f, f.days_payload(time.time())
 
 
-def tier_profile():
-    """공개 아카이브(data.binance.vision, REST 아님) ETHUSDT 1시간봉 최근 이틀 → 24개."""
+def tier_profiles():
+    """공개 아카이브(data.binance.vision, REST 아님) ETHUSDT 1시간봉 → {1·7·30일: tier_profile} (서버 /api/liquidation-map/tiers 와 같은 창)."""
     import io, urllib.request, zipfile
     import pandas as pd
     rows = []
-    for back in range(1, 5):
+    for back in range(1, 36):
         d = (pd.Timestamp.utcnow() - pd.Timedelta(days=back)).strftime("%Y-%m-%d")
         try:
             raw = urllib.request.urlopen(f"https://data.binance.vision/data/futures/um/daily/klines/ETHUSDT/1h/ETHUSDT-1h-{d}.zip", timeout=30).read()
@@ -53,15 +62,15 @@ def tier_profile():
             continue
         txt = zipfile.ZipFile(io.BytesIO(raw)).read(f"ETHUSDT-1h-{d}.csv").decode()
         rows += [r.split(",") for r in txt.splitlines() if r[:1].isdigit()]
-        if len(rows) >= 48:
+        if len(rows) >= 30 * 24:
             break
     df = pd.DataFrame({"timestamp": pd.to_datetime([int(r[0]) for r in rows], unit="ms", utc=True),
                        "high": [float(r[2]) for r in rows], "low": [float(r[3]) for r in rows],
-                       "close": [float(r[4]) for r in rows], "volume": [float(r[5]) for r in rows]}).sort_values("timestamp").tail(24)
+                       "close": [float(r[4]) for r in rows], "volume": [float(r[5]) for r in rows]}).sort_values("timestamp")
     oi = data_store.read("binance", "oi_1s", "ETH", (pd.Timestamp.utcnow() - pd.Timedelta(days=3)).strftime("%Y-%m-%d"), None,
                          columns="ts_ms, open_interest").sort_values("ts_ms")
     cp = float(df.close.iloc[-1])
-    return compute_tier_profile(df.reset_index(drop=True), cp, float(oi.open_interest.iloc[-1]) * cp)   # 서버처럼 OI 달러로 단위
+    return {d: compute_tier_profile(df.tail(d * 24).reset_index(drop=True), cp, float(oi.open_interest.iloc[-1]) * cp) for d in (1, 7, 30)}   # 서버처럼 OI 달러
 
 
 def run(shot):
@@ -70,8 +79,13 @@ def run(shot):
     f, days = provider()
     print("일 수", len(days["cols"]["d"]), days["cols"]["d"][0], "~", days["cols"]["d"][-1], "소급 끝", days["hist_until"], flush=True)
     fails, blocked, errs, cells_hits = [], [], [], []
-    tp = tier_profile()
-    print("청산맵 tier_profile", tp and (tp["current_price"], [t["name"] for t in tp["tiers"]], len(tp["tiers"][0]["values"])), flush=True)
+    tps = tier_profiles(); tp = tps[1]
+    print("청산맵 tier_profile", tp and (tp["current_price"], [t["name"] for t in tp["tiers"]], {d: len(t["tiers"][0]["values"]) for d, t in tps.items()}), flush=True)
+    tier_hits, heat_hits = [], []
+
+    def tiers(route):
+        d = int(parse_qs(urlparse(route.request.url).query)["days"][0]); tier_hits.append(d)
+        route.fulfill(body=json.dumps({"days": d, "tier_profile": tps[d]}), content_type="application/json")
 
     def liqmap(route):
         r = route.fetch()
@@ -84,7 +98,11 @@ def run(shot):
     def api(route):
         u = urlparse(route.request.url)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
-        if u.path.endswith("/cells"):
+        if u.path.endswith("/heat"):
+            body = fpd.heat_payload(time.time(), q["from"], q["to"], fpd.parse_row(q.get("row")), None,
+                                    hist_dir=pathlib.Path("/home/kbj20/crypto-scalping/data/footprint_daily"))
+            heat_hits.append(q["from"])
+        elif u.path.endswith("/cells"):
             body = f.cells_payload(time.time(), q["from"], q["to"], fpd.parse_row(q.get("row")))
             cells_hits.append((q["from"], q["to"], q.get("row"), len(body["cells"])))
         else:
@@ -107,8 +125,9 @@ def run(shot):
             pg.route(URL, lambda r: r.fulfill(body=files["index.html"], content_type="text/html"))
             pg.route("**/api/footprint-daily**", api)
             pg.route("**/api/liquidation-map*", liqmap)
+            pg.route("**/api/liquidation-map/tiers*", tiers)
             pg.route("**/liq_profile.js*", lambda r: r.fulfill(body=files["liq_profile.js"], content_type="application/javascript"))
-            pg.add_init_script("try { localStorage.setItem('fpDailyOn', '0'); localStorage.setItem('fpView', 'fp'); } catch (e) {}")
+            pg.add_init_script("try { localStorage.setItem('fpDailyOn', '0'); localStorage.setItem('fpView', 'fp'); localStorage.setItem('liqDays', '1'); } catch (e) {}")
             pg.goto(URL, wait_until="load", timeout=60000)
             pg.wait_for_timeout(8000)
             tag = str(w)
@@ -126,8 +145,8 @@ def run(shot):
             if not (st["on"] and st["cls"] and st["pressed"] == "true"): fails.append(f"[{tag}] 켜짐 상태 {st}")
             if st["candle"] == "none": fails.append(f"[{tag}] 5분 차트 상자가 숨었다(플롯 위에만 겹쳐야 함)")
             ov = pg.evaluate(OVERLAY, "fpDaily")
-            print(tag, "일봉 상자 vs 플롯 사각형", ov, flush=True)
-            if not ov or max(abs(ov[k]) for k in ("dx", "dy", "dw", "dh")) > 1 or not ov["mc"]: fails.append(f"[{tag}] 일봉 상자가 플롯 사각형과 다름/아래 칸 숨음 {ov}")
+            print(tag, "일봉 상자 vs 교체 영역", ov, flush=True)
+            if not ov or max(abs(ov[k]) for k in ("dx", "dy", "dw", "dh")) > 1 or not covered(ov): fails.append(f"[{tag}] 일봉 상자 ≠ 교체 영역/모의 판·지지저항 노출/시장 맥락 숨음 {ov}")
             if box["width"] < (300 if w >= 1000 else 200) or box["height"] < 200: fails.append(f"[{tag}] 캔버스 크기 {box}")
             if days["cols"]["d"][-1] not in st["legend"]: fails.append(f"[{tag}] 범례에 마지막 날 없음 {st['legend']!r}")
             canvas_hash = lambda: hashlib.md5(pg.locator("#fpDailyCanvas").screenshot()).hexdigest()  # noqa: E731
@@ -165,8 +184,10 @@ def run(shot):
             shot_("hover")
             pg.mouse.move(5, 5)
             pg.click("#fpDailyBtn"); pg.wait_for_timeout(1500)
-            back = pg.evaluate("() => [window.fpDailyActive(), getComputedStyle(document.querySelector('#fpCard .candle-container')).display, document.getElementById('fpDaily').hidden]")
-            if back[0] or back[1] == "none" or not back[2]: fails.append(f"[{tag}] 끄고 5분 차트 복귀 실패 {back}")
+            back = pg.evaluate("() => [window.fpDailyActive(), getComputedStyle(document.querySelector('#fpCard .candle-container')).display, document.getElementById('fpDaily').hidden, document.getElementById('candleSvgSnapshot').style.clipPath]")
+            if back[0] or back[1] == "none" or not back[2] or back[3]: fails.append(f"[{tag}] 끄고 5분 차트 복귀 실패 {back}")
+            ovb = pg.evaluate(OVERLAY, "fpDaily")
+            if ovb["split"] and not ovb["wall"] or not ovb["split"] and not (ovb["sr"] and ovb["ppm"]): fails.append(f"[{tag}] 끈 뒤 모의 판·지지저항이 안 돌아옴 {ovb}")
             # ── 풋프린트/청산맵 토글 ──
             pg.click("#fpViewTabs [data-view='liq']"); pg.wait_for_timeout(2500)
             lq = pg.evaluate("""() => ({ on: window.fpLiqActive(), candle: getComputedStyle(document.querySelector('#fpCard .candle-container')).display,
@@ -176,7 +197,15 @@ def run(shot):
             print(tag, "청산맵", {k: v for k, v in lq.items() if k != "box"}, round(lq["box"]["width"]), "×", round(lq["box"]["height"]), flush=True)
             if not lq["on"] or lq["candle"] == "none" or lq["hidden"]: fails.append(f"[{tag}] 청산맵 토글 상태 {lq}")
             ov2 = pg.evaluate(OVERLAY, "liqProfile")
-            if not ov2 or max(abs(ov2[k]) for k in ("dx", "dy", "dw", "dh")) > 1 or not ov2["mc"]: fails.append(f"[{tag}] 청산맵 상자가 플롯 사각형과 다름/아래 칸 숨음 {ov2}")
+            if not ov2 or max(abs(ov2[k]) for k in ("dx", "dy", "dw", "dh")) > 1 or not covered(ov2): fails.append(f"[{tag}] 청산맵 상자 ≠ 교체 영역/모의 판·지지저항 노출 {ov2}")
+            for d in ("7", "30", "1"):                      # 기간 버튼: 7·30일은 /tiers 를 부르고 그림이 바뀐다
+                hb = hashlib.md5(pg.locator("#liqProfileCanvas").screenshot()).hexdigest()
+                pg.click(f"#liqProfileTools [data-days='{d}']"); pg.wait_for_timeout(1500)
+                pressed = pg.get_attribute(f"#liqProfileTools [data-days='{d}']", "aria-pressed")
+                if pressed != "true" or hashlib.md5(pg.locator("#liqProfileCanvas").screenshot()).hexdigest() == hb:
+                    fails.append(f"[{tag}] 청산맵 {d}일 버튼이 그림을 안 바꿈(pressed={pressed})")
+                if shot:
+                    pg.locator("#liqProfile").screenshot(path=str(pathlib.Path(shot) / f"liq{d}d_{w}.png"))
             if "누적 롱 청산" not in lq["legend"] or "75~100배" not in lq["legend"]: fails.append(f"[{tag}] 청산맵 범례 {lq['legend']!r}")
             pg.locator("#liqProfile").scroll_into_view_if_needed()
             lb = pg.evaluate("() => document.getElementById('liqProfileCanvas').getBoundingClientRect().toJSON()")
@@ -208,7 +237,9 @@ def run(shot):
             if pg.evaluate("() => getComputedStyle(document.querySelector('#fpCard .candle-container')).display") == "none": fails.append(f"[{tag}] 풋프린트로 못 돌아옴")
             pg.close()
         b.close()
-    print("가격 칸 요청", cells_hits[:6], "…", len(cells_hits), "회")
+    print("가격 칸 요청", cells_hits[:6], "…", len(cells_hits), "회 · 히트맵 요청", len(heat_hits), "회 · 청산맵 기간 요청", tier_hits)
+    if not heat_hits: fails.append("일봉 히트맵을 안 불렀다")
+    if not {7, 30} <= set(tier_hits): fails.append(f"7·30일 청산맵을 안 불렀다 {tier_hits}")
     if blocked: fails.append(f"막힌 주문 요청 {blocked}")
     if errs: fails.append(f"JS 오류 {errs[:3]}")
     print("FAIL" if fails else "PASS", *fails, sep="\n")

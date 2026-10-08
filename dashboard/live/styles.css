@@ -3220,13 +3220,17 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fp-daily-tabs::before { opacity: 0; transition: opacity .2s ease; }
 .fp-daily-tabs:has(.asset-tab.active)::before { opacity: 1; }
 .fp-daily-tabs .asset-tab:disabled { opacity: .45; cursor: not-allowed; }
-/* 일봉·청산맵 상자 = 5분 차트 상자 안 가격 플롯 사각형 위에만 겹친다(사용자 «풋프린트 차트만 바뀌게»). 위치·크기는
-   fp_daily.js fpPlaceOverlay 가 window.fpPlotBox(app.js renderCandleSvg)로 매번 맞춘다. 아래 레인·오른쪽 칸은 그대로 보인다. */
-.fp-overlay { position: absolute; left: 0; top: 12px; z-index: 3; display: flex; flex-direction: column; gap: 6px;
-  padding: 6px 8px 4px; box-sizing: border-box; border-radius: 10px; background: var(--chart-bg); }
+/* 일봉·청산맵 = 5분 차트의 교체 영역(window.fpRegion: 넓은 화면 왼쪽 열 전체 · 좁은 화면 풋프린트~5분 레인) 위.
+   🔴배경을 깔지 않는다(사용자 «시간봉과 스타일 통일 · 너무 검정») -- 아래 5분 그림은 svg 에 구멍(clip-path)을 내 숨기므로
+   카드의 실제 유리 배경이 그대로 비친다. 위치·구멍은 fp_daily.js fpPlaceOverlay·fpAltSet 이 맞춘다. */
+.fp-overlay { position: absolute; left: 0; top: 12px; z-index: 3; display: flex; flex-direction: column; gap: 8px;
+  padding: 2px 0 0; box-sizing: border-box; background: none; }
 .fp-overlay[hidden] { display: none; }
+#fpCard.fp-alt-on.fp-alt-wide #mcWall, #fpCard.fp-alt-on.fp-alt-wide #fpLineSwitch { visibility: hidden; }   /* 왼쪽 열에 겹쳐 두던 칸(모의 판·지지/저항 · 차트에 그리기) */
+/* 좁은 화면(10-08 사용자 «넓은 화면처럼»): 모의 판·지지/저항은 1초 수급 아래로 흩어져 있어 덮을 수 없다 -- 일봉·청산맵을 보는 동안 숨긴다 */
+#fpCard.fp-alt-on:not(.fp-alt-wide) #liquidationMapList, #fpCard.fp-alt-on:not(.fp-alt-wide) #mcBody > .ppm { display: none; }
 .fpd-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
-.fpd-legend { min-height: 18px; color: var(--text); font: 12px/1.5 var(--font-mono); font-variant-numeric: tabular-nums; }
+.fpd-legend { min-height: 18px; color: var(--text); font: 600 12px/1.5 var(--font-sans); font-variant-numeric: tabular-nums; }
 .fpd-date { font: 700 12px/1.5 var(--font-sans); margin-right: 2px; }
 .fpd-k { margin: 0 4px 0 10px; color: var(--muted); font: 11px/1.5 var(--font-sans); }
 .fpd-v { white-space: nowrap; }
@@ -3239,7 +3243,9 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
   border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--lift) / .04); color: var(--text);
   font: 600 11px/1 var(--font-sans); cursor: pointer; transition: border-color .15s ease, background-color .15s ease; }
 .fpd-tools button:hover { border-color: var(--hover-line); background: rgb(var(--lift) / .08); }
+.fpd-tools button[aria-pressed="true"] { border-color: var(--hover-line); background: rgb(var(--lift) / .12); }
 .fpd-tools svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.fpd-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--line); }
 .fpd-tools button:focus-visible, .fpd-canvas:focus-visible, .lqp-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .fpd-canvas, .lqp-canvas { display: block; flex: 1 1 0; min-height: 0; width: 100%; cursor: crosshair; touch-action: pan-y; }
 .fpd-canvas.panning, .lqp-canvas.panning { cursor: grabbing; }

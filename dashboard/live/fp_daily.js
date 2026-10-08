@@ -1,13 +1,16 @@
 // 일봉 풋프린트 (2026-10-08, 사용자 «일봉 풋프린트를 최대치로 · 축소/확대 · 델타·거래대금·OI·청산 · 30일 이상 · 4시간봉 없이»).
 // 서버 /api/footprint-daily(일 요약 전체) + /api/footprint-daily/cells(보이는 날의 가격 칸). ETH 만.
 // 캔버스로 그린다 -- 최대 ~2,500일을 끌고 확대해야 해서 SVG 요소 수만 개를 프레임마다 갈아 끼울 수 없다.
-// 자리 = 5분 차트의 가격 플롯 사각형 위(placeOverlay) -- 아래 레인·오른쪽 칸은 그대로 둔다(사용자 «풋프린트 차트만 바뀌게»).
+// 자리 = 5분 차트의 교체 영역(window.fpRegion) 위, 배경 없이(placeOverlay) -- 넓은 화면은 왼쪽 열(풋프린트~모의 판·지지/저항),
+//   오른쪽 1초 수급·시장 맥락 칸은 그대로(사용자 «풋프린트부 차트부터 모의 판+지지·저항까지 대체 · 시간봉과 스타일 통일»).
 // 확대 단계: 봉 폭 ≥ CELL_MIN_PX 면 가격 칸(왼쪽 매도 · 오른쪽 매수), 그 아래는 캔들, 아주 좁으면 고저 선.
 // 날짜 = UTC 자정(KST 09:00) -- 바이낸스 일봉 경계. 서술이지 신호가 아니다(볼륨 프로파일 규칙 5종 불합격, 10-04).
 // 🔴CI 문법 검사(esprima)가 `?.(`·`?.[`·숫자 구분자를 못 읽는다 -- 쓰지 말 것(09-30 배포 워처 정지 사고).
 (function () {
   "use strict";
-  var DAYS_URL = "/api/footprint-daily", CELLS_URL = "/api/footprint-daily/cells";
+  var DAYS_URL = "/api/footprint-daily", CELLS_URL = "/api/footprint-daily/cells", HEAT_URL = "/api/footprint-daily/heat";
+  var HEAT_CLIP_PCT = 0.90;    // 5분 차트 청산 밀도와 같은 기준(양수 밀도의 90분위 = 가장 진한 색)
+  var HEAT_LINE_MIN = 0.7;     // 이 진하기 이상만 줄로 그린다(시안 A)
   var DEFAULT_SPAN = 30, MIN_SPAN = 7, TEXT_MIN_PX = 104, ROW_PX = 11;
   var cellMinPx = function (G) { return G.narrow ? 24 : 34; };   // 이 폭부터 가격 칸(휴대폰은 7~12일 확대에서)
   var ROW_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500];
@@ -15,6 +18,7 @@
   var LANES = [["delta", "델타"], ["turn", "거래대금"], ["oi", "OI"], ["liq", "청산"]];
 
   var S = { on: false, D: null, n: 0, i0: 0, span: DEFAULT_SPAN, cells: new Map(), want: null, loading: false,
+            heat: new Map(), heatWant: null, heatLoading: false, heatT: 0, heatOn: true,
             hover: null, timer: 0, raf: 0, drag: null, pinch: null, fetchT: 0, view: null };
   var $ = function (id) { return document.getElementById(id); };
   var css = function (n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
@@ -57,6 +61,56 @@
     return ROW_STEPS[ROW_STEPS.length - 1];
   }
 
+  // ── 청산 히트맵(하루 한 열 = 그날 마감의 추정 청산 밀도 · 7일 창 · 라이브 청산맵과 같은 계산) ──────────────
+  function scheduleHeat(row, a, b) {
+    var w = S.heatWant;
+    if (w && w.row === row && w.a === a && w.b === b) return;
+    S.heatWant = { row: row, a: a, b: b };
+    clearTimeout(S.heatT);
+    S.heatT = setTimeout(fetchHeat, 160);
+  }
+  async function fetchHeat() {
+    var w = S.heatWant;
+    if (!w || S.heatLoading) return;
+    var miss = [];
+    for (var i = w.a; i <= w.b; i++) if (!S.heat.has(w.row + "|" + S.D.d[i])) miss.push(i);
+    if (!miss.length) return;
+    S.heatLoading = true;
+    try {
+      var r = await fetch(HEAT_URL + "?from=" + S.D.d[miss[0]] + "&to=" + S.D.d[miss[miss.length - 1]] + "&row=" + w.row, { cache: "no-store" });
+      if (r.ok) {
+        var p = await r.json();
+        miss.forEach(function (j) { S.heat.set(w.row + "|" + S.D.d[j], p.heat[S.D.d[j]] || null); });
+      }
+    } catch (e) { /* 다음 그리기 때 다시 묻는다 */ }
+    S.heatLoading = false;
+    redraw();
+    if (S.heatWant !== w) fetchHeat();
+  }
+  // 표현 = 시안 A «레벨 줄»(사용자 선택 10-08): 날마다 강한 밀집(90분위 기준 0.7 이상)만 그 가격에 가는 띠로 -- 캔들을 덮지 않는다.
+  function drawHeat(g, G, a, b, row, xOf, bw, yOf) {
+    if (typeof densityColor !== "function") return;               // app.js 전역(5분 차트와 같은 색표·테마)
+    var vals = [], i, k, h;
+    for (i = a; i <= b; i++) { h = S.heat.get(row + "|" + S.D.d[i]); if (h) h[1].forEach(function (v) { if (v > 0) vals.push(v); }); }
+    if (!vals.length) return;
+    vals.sort(function (x, y) { return x - y; });
+    var clip = vals[Math.min(vals.length - 1, Math.floor(vals.length * HEAT_CLIP_PCT))] || 1;
+    g.save(); g.beginPath(); g.rect(G.L, G.top, G.plotW, G.priceH); g.clip();   // 가격 칸 안에서만(레인으로 안 샌다)
+    g.globalAlpha = 0.95;
+    for (i = a; i <= b; i++) {
+      h = S.heat.get(row + "|" + S.D.d[i]);
+      if (!h) continue;
+      var x0 = Math.floor(xOf(i) - bw / 2), x1 = Math.ceil(xOf(i) + bw / 2);
+      for (k = 0; k < h[1].length; k++) {
+        var t = Math.min(1, h[1][k] / clip);
+        if (!(t >= HEAT_LINE_MIN)) continue;
+        var top = yOf(h[0] + (k + 1) * row), bot = yOf(h[0] + k * row), th = Math.max(2, Math.min(4, (bot - top) * 0.5));
+        g.fillStyle = densityColor(t); g.fillRect(x0, (top + bot) / 2 - th / 2, x1 - x0, th);
+      }
+    }
+    g.restore();
+  }
+
   function scheduleCells(row, a, b) {
     var w = S.want;
     if (w && w.row === row && w.a === a && w.b === b) return;
@@ -87,7 +141,7 @@
   // ── 그리기 ─────────────────────────────────────────────────────────────────────────
   function layout(cv) {
     var W = cv.clientWidth, H = cv.clientHeight, narrow = W < 560;
-    var L = 8, R = narrow ? 50 : 64, axisH = 18, gap = 6;
+    var L = 8, R = narrow ? 52 : 66, axisH = 26, gap = 8;
     var laneH = Math.round((H - axisH) * (narrow ? 0.095 : 0.1));
     var priceH = H - axisH - LANES.length * (laneH + gap) - 6;
     var lanes = {}, y = 6 + priceH + gap;
@@ -100,21 +154,37 @@
     S.i0 = Math.max(-S.span * 0.6, Math.min(S.i0, S.n - S.span * 0.4));
   }
 
-  // 일봉·청산맵 상자를 5분 차트의 가격 플롯 사각형(app.js renderCandleSvg 가 window.fpPlotBox 로 남김) 위에 놓는다.
-  //   viewBox = 상자 픽셀이라 좌표 그대로, 상자 안에서 svg 가 시작하는 자리(margin-top 12)만 더한다 -- 🔴SVG 에는 offsetTop 이
-  //   없어(undefined → NaN) 화면 좌표 차로 잰다. 사각형이 아직 없으면 svg 전체.
+  // 일봉·청산맵 = 5분 차트의 «교체 영역»(app.js renderCandleSvg 가 window.fpRegion 으로 남김 -- 넓은 화면은 왼쪽 열 전체:
+  //   풋프린트·레인·모의 판·지지/저항, 좁은 화면은 풋프린트~5분 레인) 위에 **배경 없이** 놓는다(사용자 «시간봉과 스타일 통일 · 너무 검정»).
+  //   아래 5분 그림은 svg 에 그 영역만큼 구멍(clip-path evenodd)을 내 숨긴다 -- 카드의 실제 배경이 그대로 비친다.
+  //   viewBox = 상자 픽셀이라 좌표 그대로. 🔴SVG 에는 offsetTop 이 없어(undefined → NaN) 화면 좌표 차로 잰다.
+  var ALT = { daily: false, liq: false };
+  function syncHole() {
+    var svg = $("candleSvgSnapshot"), card = $("fpCard"), g = window.fpRegion, on = ALT.daily || ALT.liq;
+    if (card) { card.classList.toggle("fp-alt-on", on); card.classList.toggle("fp-alt-wide", !!(on && g && g.split)); }
+    if (!svg) return;
+    var clip = "";
+    if (on) {
+      var W = svg.clientWidth || svg.getBoundingClientRect().width, H = svg.clientHeight || svg.getBoundingClientRect().height;
+      var w = g ? g.w : W, h = g ? g.h : H, p = function (x, y) { return Math.round(x) + "px " + Math.round(y) + "px"; };
+      clip = "polygon(evenodd, " + [p(0, 0), p(W, 0), p(W, H), p(0, H), p(0, 0), p(w, 0), p(w, h), p(0, h)].join(", ") + ")";
+    }
+    if (svg.style.clipPath !== clip) svg.style.clipPath = clip;
+  }
   function placeOverlay(el) {
-    var svg = $("candleSvgSnapshot"), b = window.fpPlotBox;
+    var svg = $("candleSvgSnapshot"), g = window.fpRegion;
+    syncHole();
     if (!el || !svg || !el.parentElement) return;
     var r = svg.getBoundingClientRect(), pr = el.parentElement.getBoundingClientRect();
-    var ox = r.left - pr.left - el.parentElement.clientLeft, oy = r.top - pr.top - el.parentElement.clientTop;
-    var x = ox + (b ? b.x : 0), y = oy + (b ? b.y : 0), w = b ? b.w : r.width, h = b ? b.h : r.height;
+    var x = r.left - pr.left - el.parentElement.clientLeft, y = r.top - pr.top - el.parentElement.clientTop;
+    var w = g ? g.w : r.width, h = g ? g.h : r.height;
     var st = el.style, px_ = function (v) { return Math.round(v) + "px"; };
     if (st.left !== px_(x) || st.top !== px_(y) || st.width !== px_(w) || st.height !== px_(h)) {
       st.left = px_(x); st.top = px_(y); st.width = px_(w); st.height = px_(h);
     }
   }
   window.fpPlaceOverlay = placeOverlay;         // liq_profile.js 도 같은 자리에 놓는다
+  window.fpAltSet = function (kind, on) { ALT[kind] = !!on; syncHole(); };
 
   function draw() {
     S.raf = 0;
@@ -141,13 +211,16 @@
     var yOf = function (p) { return G.top + (hi - p) / (hi - lo) * G.priceH; };
     var cellMode = bw >= cellMinPx(G), row = rowFor(lo, hi, G.priceH);
     if (cellMode) scheduleCells(row, a, b);
+    if (S.heatOn) scheduleHeat(row, a, b);
     S.view = { G: G, a: a, b: b, lo: lo, hi: hi, bw: bw, row: row, cellMode: cellMode };
 
     g.save();
     g.beginPath(); g.rect(G.L, 0, G.plotW, G.H); g.clip();
     var step = niceStep((hi - lo) / Math.max(3, G.priceH / 60)), p, y;
-    g.strokeStyle = C.soft; g.lineWidth = 1;
+    g.strokeStyle = C.line; g.globalAlpha = 0.82; g.lineWidth = 1;      // 5분 차트 .chart-grid 와 같은 격자
     for (p = Math.ceil(lo / step) * step; p <= hi; p += step) { y = Math.round(yOf(p)) + 0.5; g.beginPath(); g.moveTo(G.L, y); g.lineTo(G.L + G.plotW, y); g.stroke(); }
+    g.globalAlpha = 1;
+    if (S.heatOn) drawHeat(g, G, a, b, row, xOf, bw, yOf);               // 봉 아래 배경
     for (i = a; i <= b; i++) {
       var x = xOf(i), up = D.c[i] >= D.o[i], col = up ? C.good : C.bad;
       var cell = cellMode ? S.cells.get(row + "|" + D.d[i]) : null;
@@ -176,12 +249,11 @@
     }
     g.restore();
     var last = D.c[S.n - 1], lastY = last >= lo && last <= hi ? yOf(last) : -99;
-    g.fillStyle = C.muted; g.font = "10px " + C.mono; g.textAlign = "left"; g.textBaseline = "middle";
-    for (p = Math.ceil(lo / step) * step; p <= hi; p += step) if (Math.abs(yOf(p) - lastY) > 12) g.fillText(px(p), G.L + G.plotW + 6, yOf(p));
-    if (last >= lo && last <= hi) {
-      y = yOf(last);
-      g.fillStyle = C.text; g.fillRect(G.L + G.plotW + 2, y - 8, G.R - 4, 16);
-      g.fillStyle = C.bg; g.fillText(px(last), G.L + G.plotW + 6, y);
+    g.font = "600 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "middle";
+    for (p = Math.ceil(lo / step) * step; p <= hi; p += step) if (Math.abs(yOf(p) - lastY) > 14) halo(g, C, px(p), G.L + G.plotW + 6, yOf(p), C.muted);
+    if (last >= lo && last <= hi) {                // 현재가 = 5분 차트처럼 상자 없이 굵은 숫자 + 바탕 외곽선
+      g.font = "700 13px " + C.sans;
+      halo(g, C, px(last), G.L + G.plotW + 6, yOf(last), C.text);
     }
     drawDates(g, C, G, a, b, xOf, bw);
     legend(S.hover ? S.hover.i : S.n - 1);
@@ -210,7 +282,7 @@
       g.globalAlpha = 1;
       if (k === poc) { g.strokeStyle = C.warn; g.lineWidth = 1; g.strokeRect(cx - room, yTop + 0.5, room * 2, h - 1); }
       if (txt) {
-        g.font = "9px " + C.mono; g.textBaseline = "middle"; g.fillStyle = C.text;
+        g.font = "600 10px " + C.sans; g.textBaseline = "middle"; g.fillStyle = C.text;
         g.textAlign = "right"; g.fillText(qty(sell[k]), cx - 3, yTop + h / 2);
         g.textAlign = "left"; g.fillText(qty(buy[k]), cx + 3, yTop + h / 2);
       }
@@ -279,13 +351,10 @@
         g.stroke(); g.globalAlpha = 1;
       }
       if (k !== "turn") { g.strokeStyle = C.line; g.beginPath(); g.moveTo(G.L, Math.round(mid) + 0.5); g.lineTo(G.L + G.plotW, Math.round(mid) + 0.5); g.stroke(); }
-      g.font = "600 10px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";
-      var tw = g.measureText(name).width + 10;
-      g.fillStyle = C.bg; g.globalAlpha = 0.9;
-      g.font = "10px " + C.mono; var vt = laneText(k, hi), vw = g.measureText(vt).width;
-      g.fillRect(G.L + 2, y + 2, tw + vw + 8, 14); g.globalAlpha = 1;
-      g.font = "600 10px " + C.sans; g.fillStyle = C.muted; g.fillText(name, G.L + 5, y + 4);
-      g.font = "10px " + C.mono; g.fillStyle = C.text; g.fillText(vt, G.L + 5 + tw, y + 4);
+      g.font = "700 12px " + C.sans; g.textAlign = "left"; g.textBaseline = "top";      // 레인 이름표 = 5분 차트 글자(굵게 · 바탕 외곽선)
+      var tw = g.measureText(name).width + 8;
+      halo(g, C, name, G.L + 4, y + 4, C.muted);
+      halo(g, C, laneText(k, hi), G.L + 4 + tw, y + 4, C.text);
     });
   }
 
@@ -298,8 +367,7 @@
 
   function drawDates(g, C, G, a, b, xOf, bw) {
     var D = S.D, every = bw >= 42 ? "d" : bw >= 7 ? "w" : bw >= 1.2 ? "m" : "y", lastX = -1e9;
-    g.fillStyle = C.muted; g.font = "10px " + C.mono; g.textAlign = "center"; g.textBaseline = "top";
-    g.strokeStyle = C.soft; g.lineWidth = 1;
+    g.font = "700 " + (G.narrow ? 12 : 13) + "px " + C.sans; g.textAlign = "center"; g.textBaseline = "top";   // 5분 차트 x축과 같은 글자
     for (var i = a; i <= b; i++) {
       var d = D.d[i], prev = i > 0 ? D.d[i - 1] : "", lab = null;
       if (every === "d") lab = d.slice(5).replace("-", "/");
@@ -308,10 +376,16 @@
       else lab = d.slice(0, 4) !== prev.slice(0, 4) ? d.slice(0, 4) : null;
       if (!lab) continue;
       var x = xOf(i);
-      if (x - lastX < 46 || x < G.L + 12 || x > G.L + G.plotW - 12) continue;
-      g.fillText(lab, x, G.axisY + 4); lastX = x;
-      g.beginPath(); g.moveTo(Math.round(x) + 0.5, G.axisY); g.lineTo(Math.round(x) + 0.5, G.axisY + 3); g.stroke();
+      if (x - lastX < 52 || x < G.L + 16 || x > G.L + G.plotW - 16) continue;
+      g.fillStyle = C.muted; g.fillText(lab, x, G.axisY + 8); lastX = x;
+      g.strokeStyle = C.line; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(Math.round(x) + 0.5, G.axisY); g.lineTo(Math.round(x) + 0.5, G.axisY + 5); g.stroke();
     }
+  }
+
+  function halo(g, C, txt, x, y, col) {   // 5분 차트 글자 규약: stroke var(--chart-bg) 3px · paint-order stroke
+    g.lineWidth = 3; g.lineJoin = "round"; g.strokeStyle = C.bg; g.strokeText(txt, x, y);
+    g.fillStyle = col; g.fillText(txt, x, y);
   }
 
   function niceStep(raw) {
@@ -444,6 +518,7 @@
     var card = $("fpCard"), btn = $("fpDailyBtn"), box = $("fpDaily"), status = $("fpDailyStatus");
     if (card) card.classList.toggle("fp-daily-on", on);
     if (btn) { btn.classList.toggle("active", on); btn.setAttribute("aria-pressed", String(on)); }
+    window.fpAltSet("daily", on);
     if (box) { box.hidden = !on; if (on) placeOverlay(box); }
     try { localStorage.setItem("fpDailyOn", on ? "1" : "0"); } catch (e) { /* 저장 못 해도 동작 */ }
     clearInterval(S.timer);
@@ -476,6 +551,17 @@
     document.querySelectorAll("#chartWindowTabs .asset-tab").forEach(function (b) {
       b.addEventListener("click", function () { if (S.on) setOn(false); });
     });
+    var hb = document.querySelector("#fpDailyTools [data-heat]");
+    try { S.heatOn = localStorage.getItem("fpDailyHeat") !== "0"; } catch (e) { /* 기본 켬 */ }
+    if (hb) {
+      hb.setAttribute("aria-pressed", String(S.heatOn)); hb.classList.toggle("active", S.heatOn);
+      hb.addEventListener("click", function () {
+        S.heatOn = !S.heatOn;
+        hb.setAttribute("aria-pressed", String(S.heatOn)); hb.classList.toggle("active", S.heatOn);
+        try { localStorage.setItem("fpDailyHeat", S.heatOn ? "1" : "0"); } catch (e) { /* 저장 못 해도 동작 */ }
+        redraw();
+      });
+    }
     document.querySelectorAll("#fpDailyTools [data-view]").forEach(function (b) {
       b.addEventListener("click", function () {
         var v = b.dataset.view;

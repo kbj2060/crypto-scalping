@@ -5728,6 +5728,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   viewBox = 상자 픽셀이라 좌표 그대로 쓴다(fp_daily.js fpPlaceOverlay). 아래 레인·오른쪽 칸은 그대로 그려진다.
   //   모바일은 플롯 왼쪽에 체결 기둥(TRADE_L)이 따로 있고 오른쪽 여백(mr)에 글자가 걸려 둘 다 덮는다(안 덮으면 5분 셀·글자가 비친다).
   if (svg.id === "candleSvgSnapshot") window.fpPlotBox = { x: ml - TRADE_L, y: mt, w: w - ml + TRADE_L, h: ch };
+  // 2026-10-08 사용자 «풋프린트부 차트부터 모의 판+지지·저항까지 일봉·청산맵으로 대체»: 교체 영역 = 왼쪽 열 전체(0,0)~(w,h).
+  //   넓은 화면(split)은 오른쪽 1초 수급 칸이 남고, 좁은 화면은 아래 1초 수급 패널(h 밑)이 남는다. split 이면 왼쪽 아래 #mcWall(모의 판·지지/저항)도 덮인다.
+  if (svg.id === "candleSvgSnapshot") window.fpRegion = { w: w, h: h, W: wAll, H: hAll, split: !!splitR };
   // 수급 두 패널은 **가격 플롯 위**다(위 mt 주석). OI·청산 레인은 플롯 바로 아래 그대로다.
   // 2026-09-22 위아래를 뒤집었다(사용자 지시): **프로파일이 먼저, 1초 수급이 그 아래**.
   // 🔴청산밀도 범례는 프로파일을 **따라 올라가지 않는다**. 그건 풋프린트(가격 플롯)의 배경을

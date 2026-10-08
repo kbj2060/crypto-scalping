@@ -434,7 +434,15 @@ def notify_center_payload() -> dict[str, Any]:
                     continue
     except OSError:
         pass
-    return {"verdicts": sorted(cal.get("items") or [], key=lambda it: it.get("date") or ""),
+    items = cal.get("items") or []
+    try:   # 2026-10-08 청산지도 전진 점수: 기록기(scripts/live_liqmap_scorer_20261008.py)가 쓰는 요약을 그 판정 항목에 붙인다
+        st = json.loads((LIVE_DIR / "liqmap_score_status.json").read_text(encoding="utf-8"))
+        for it in items:
+            if it.get("id") == "liqmap_fwd" and not it.get("done"):
+                it["what"] = f"{it.get('what', '')} · 지금 누적 {st.get('n_fwd', 0)}시간({st.get('days_fwd', 0)}일)"
+    except (OSError, ValueError):
+        pass
+    return {"verdicts": sorted(items, key=lambda it: it.get("date") or ""),
             "kinds": [{"key": k, **v} for k, v in PUSH_KINDS.items()], "recent": recent[::-1]}
 
 
@@ -4489,6 +4497,51 @@ def make_app() -> web.Application:
             lambda: asyncio.to_thread(compute_liquidation_direction_signal, coin=asset),
         )
 
+    async def liq_klines_df(asset: str, limit: int) -> pd.DataFrame:
+        """청산맵 입력 1시간봉(진행 중인 봉은 버린다)."""
+        raw = await fetch_binance_json(
+            "https://fapi.binance.com/fapi/v1/klines",
+            {
+                "symbol": COIN_CONFIG[asset]["binance_symbol"],
+                "interval": LIQUIDATION_MAP_INTERVAL,
+                "limit": limit,
+            },
+            error_reason="liquidation_map_upstream_error",
+        )
+        cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
+                "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
+        df = pd.DataFrame(raw, columns=cols)
+        for c in ("high", "low", "close", "volume"):
+            df[c] = df[c].astype("float64")
+        df["close_time"] = df["close_time"].astype("int64")
+        df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+        df = df.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+        now_ms = int(time.time() * 1000)
+        if len(df) and int(df.iloc[-1]["close_time"]) >= now_ms:
+            df = df.iloc[:-1].reset_index(drop=True)  # drop the still-forming bar
+        return df
+
+    def liq_oi_usd(asset: str, current_price: float) -> float | None:
+        """현재 OI(바이낸스, 계약 = 코인) × 가격. hot 에 없는 코인(BTC·HYPE)은 None -> 청산맵 비율 단위."""
+        try:
+            r = read_rows(BINANCE_CTX_DB, "SELECT open_interest FROM oi_1s WHERE symbol = ? ORDER BY ts_ms DESC LIMIT 1",
+                          [COIN_CONFIG[asset]["binance_symbol"].lower()])   # oi_1s 심볼은 소문자
+        except Exception:  # noqa: BLE001
+            return None
+        return float(r[0][0]) * current_price if r and r[0][0] else None
+
+    async def load_liquidation_tiers(asset: str, days: int) -> dict[str, Any]:
+        """2026-10-08 청산맵 보기 기간 1·7·30일(사용자 (나), 코인글래스처럼) -- 같은 모델(compute_tier_profile)을 창만 늘려 돌린다.
+        1일은 /api/liquidation-map 의 tier_profile 과 같은 값. 최근성 반감기(240h)는 모듈 상수 그대로."""
+        async def produce() -> dict[str, Any]:
+            df = (await liq_klines_df(asset, days * 24 + 2)).tail(days * 24).reset_index(drop=True)
+            cp = float(df["close"].iloc[-1]) if len(df) else 0.0
+            oi_usd = await asyncio.to_thread(liq_oi_usd, asset, cp)
+            tp = await asyncio.to_thread(compute_tier_profile, df, cp, oi_usd)
+            return {"days": days, "tier_profile": tp, "generated_at": datetime.now(timezone.utc).isoformat()}
+        return await swr_cached(f"liquidation_tiers:{asset}:{days}", LIQUIDATION_MAP_CACHE_SECONDS, produce,
+                                max_stale=STALE_GRACE_SECONDS)
+
     async def load_liquidation_map(asset: str = "eth") -> dict[str, Any]:
         """Snapshot-tab liquidation map (estimated support/resistance) -- see
         scripts/live_liquidation_map_20260824.py docstring for the estimation methodology and its
@@ -4501,27 +4554,7 @@ def make_app() -> web.Application:
         constants (see design doc section 5) -- BTC's map uses the same constants, unvalidated for
         BTC's own liquidity/volatility."""
         async def produce() -> dict[str, Any]:
-            raw = await fetch_binance_json(
-                "https://fapi.binance.com/fapi/v1/klines",
-                {
-                    "symbol": COIN_CONFIG[asset]["binance_symbol"],
-                    "interval": LIQUIDATION_MAP_INTERVAL,
-                    "limit": LIQUIDATION_MAP_FETCH_LIMIT,
-                },
-                error_reason="liquidation_map_upstream_error",
-            )
-            cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
-                    "quote_volume", "trades", "taker_buy_base", "taker_buy_quote", "ignore"]
-            df = pd.DataFrame(raw, columns=cols)
-            for c in ("high", "low", "close", "volume"):
-                df[c] = df[c].astype("float64")
-            df["close_time"] = df["close_time"].astype("int64")
-            df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
-            df = df.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
-            now_ms = int(time.time() * 1000)
-            if len(df) and int(df.iloc[-1]["close_time"]) >= now_ms:
-                df = df.iloc[:-1].reset_index(drop=True)  # drop the still-forming bar
-
+            df = await liq_klines_df(asset, LIQUIDATION_MAP_FETCH_LIMIT)
             current_price = float(df["close"].iloc[-1]) if len(df) else 0.0
             payload = await asyncio.to_thread(
                 compute_spliced_levels, df.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), current_price
@@ -4534,14 +4567,7 @@ def make_app() -> web.Application:
                 compute_spliced_heatmap_history, df, current_price, LIQUIDATION_MAP_LOOKBACK_HOURS, LIQUIDATION_MAP_DISPLAY_HOURS
             )
             # 2026-10-08 풋프린트/청산맵 토글의 레버리지별 청산맵(코인글래스 모양) -- 같은 창·같은 가정, 구간별로 나눠 둔 것
-            def _oi_usd() -> float | None:            # 현재 OI(바이낸스, 계약 = 코인) × 가격. hot 에 없는 코인(BTC·HYPE)은 None -> 비율 단위
-                try:
-                    r = read_rows(BINANCE_CTX_DB, "SELECT open_interest FROM oi_1s WHERE symbol = ? ORDER BY ts_ms DESC LIMIT 1",
-                                  [COIN_CONFIG[asset]["binance_symbol"].lower()])   # oi_1s 심볼은 소문자
-                except Exception:  # noqa: BLE001
-                    return None
-                return float(r[0][0]) * current_price if r and r[0][0] else None
-            oi_usd = await asyncio.to_thread(_oi_usd)
+            oi_usd = await asyncio.to_thread(liq_oi_usd, asset, current_price)
             payload["tier_profile"] = await asyncio.to_thread(
                 compute_tier_profile, df.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), current_price, oi_usd)
             payload["generated_at"] = datetime.now(timezone.utc).isoformat()
@@ -4907,6 +4933,29 @@ def make_app() -> web.Application:
         try:
             payload = await swr_cached(f"fp_daily_cells_{frm}_{to}_{row}", 30.0,
                                        lambda: asyncio.to_thread(fp_daily.cells_payload, time.time(), frm, to, row), max_stale=600.0)
+        except ValueError:
+            raise web.HTTPBadRequest(reason="range") from None
+        return web.json_response(payload, headers=NOCACHE)
+
+    async def api_footprint_daily_heat(request: web.Request) -> web.Response:
+        """일봉 청산 히트맵(하루 한 열 = 그날 마감의 추정 청산 밀도, 7일 창). ?from&to&row 는 cells 와 같다.
+        소급본 뒤 날(오늘 포함)은 최근 1시간봉 500개(10분 캐시)로 계산한다."""
+        frm, to = _iso_day(request.query.get("from")), _iso_day(request.query.get("to"))
+        if not frm or not to:
+            raise web.HTTPBadRequest(reason="from_to")
+        row = fpd.parse_row(request.query.get("row"))
+
+        async def k1h():
+            return await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                            {"symbol": fpd.SYMBOL, "interval": "1h", "limit": 500},
+                                            error_reason="fp_daily_heat_klines")
+        try:
+            raw = await swr_cached("fp_daily_k1h", 600.0, k1h, max_stale=3600.0)
+        except Exception:  # noqa: BLE001 -- 1시간봉을 못 받아도 소급본 날은 그린다
+            raw = None
+        try:
+            payload = await swr_cached(f"fp_daily_heat_{frm}_{to}_{row}", 300.0,
+                                       lambda: asyncio.to_thread(fpd.heat_payload, time.time(), frm, to, row, raw), max_stale=1800.0)
         except ValueError:
             raise web.HTTPBadRequest(reason="range") from None
         return web.json_response(payload, headers=NOCACHE)
@@ -5676,6 +5725,14 @@ def make_app() -> web.Application:
                 status=web.HTTPBadGateway.status_code,
                 headers=NOCACHE,
             )
+        return web.json_response(payload, headers=NOCACHE)
+
+    async def api_liquidation_tiers(request: web.Request) -> web.Response:
+        days = int(request.query.get("days", "1")) if request.query.get("days", "1") in ("1", "7", "30") else 1
+        try:
+            payload = await load_liquidation_tiers(_query_coin_asset(request), days)
+        except web.HTTPBadGateway:
+            return web.json_response({"error": "liquidation_map_upstream_error"}, status=web.HTTPBadGateway.status_code, headers=NOCACHE)
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_regime_wide24(request: web.Request) -> web.Response:
@@ -6678,6 +6735,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/footprint", api_footprint)
     app.router.add_get("/api/footprint-daily", api_footprint_daily)
     app.router.add_get("/api/footprint-daily/cells", api_footprint_daily_cells)
+    app.router.add_get("/api/footprint-daily/heat", api_footprint_daily_heat)
     app.router.add_get("/api/supply-profile", api_supply_profile)
     app.router.add_get("/api/supply-1s", api_supply_1s)
     app.router.add_get("/api/oi-5m", api_oi_5m)
@@ -6691,6 +6749,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
     app.router.add_get("/api/liquidation-direction-signal", api_liquidation_direction_signal)
     app.router.add_get("/api/liquidation-map", api_liquidation_map)
+    app.router.add_get("/api/liquidation-map/tiers", api_liquidation_tiers)
     app.router.add_get("/api/regime-wide24", api_regime_wide24)
     app.router.add_get("/api/regime-btc", api_regime_btc)
     app.router.add_get("/api/regime-xrp", api_regime_xrp)

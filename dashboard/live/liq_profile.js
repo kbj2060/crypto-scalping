@@ -1,14 +1,15 @@
 // 풋프린트/청산맵 토글의 «청산맵» (2026-10-08, 사용자 «시간 탭에서 오른쪽 위 토글 → 풋프린트 자리에 코인글래스 청산맵처럼»
 //   · «청산맵도 일봉처럼 확대/축소 · 풋프린트 차트만 바뀌게»).
-// 원천 = app.js 가 60초마다 받는 /api/liquidation-map 의 tier_profile(같은 24시간 추정 모델을 레버리지 구간별로 남긴 것).
+// 원천 = 1일: app.js 가 60초마다 받는 /api/liquidation-map 의 tier_profile · 7·30일: /api/liquidation-map/tiers?days= (같은 추정 모델, 입력 1시간봉 창만 다름).
 // x = 가격 · 막대 = 그 가격의 추정 청산 규모(레버리지 구간 쌓기, 왼쪽 축) · 선 = 현재가에서 그 가격까지 누적(빨강 롱 · 초록 숏, 오른쪽 축).
-// 자리 = 5분 차트의 가격 플롯 사각형 위(fp_daily.js fpPlaceOverlay). 확대 = 가격축(휠·두 손가락·키보드), 끌기 = 이동, 더블클릭 = 전체.
+// 자리 = 5분 차트의 교체 영역 위, 배경 없이(fp_daily.js fpPlaceOverlay · fpAltSet). 확대 = 가격축(휠·두 손가락·키보드), 끌기 = 이동, 더블클릭 = 전체.
 // 추정이지 실측 포지션이 아니다(scripts/live_liquidation_map_20260824.py 머리말). 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
 (function () {
   "use strict";
   var TIER_VARS = ["--lev10", "--lev25", "--lev50", "--lev100"];
   var MAX_RANGE = 0.15, BAR_PX = 4, MIN_BINS = 24;
-  var S = { on: false, map: null, price: 0, raf: 0, hover: null, view: null, vlo: null, vhi: null, drag: null, pinch: null };
+  var S = { on: false, map: null, price: 0, raf: 0, hover: null, view: null, vlo: null, vhi: null, drag: null, pinch: null,
+            days: 1, ext: {}, extT: {} };   // days = 보기 기간(1·7·30일). 1일은 app.js 가 받는 지도를 그대로, 7·30일은 /api/liquidation-map/tiers
   var $ = function (id) { return document.getElementById(id); };
   var css = function (n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
   var tipShow = function (x, y, h) { if (typeof showTooltip === "function") showTooltip(x, y, h); };   // app.js 전역
@@ -21,11 +22,36 @@
     return a >= 1e9 ? "$" + (a / 1e9).toFixed(2) + "B" : a >= 1e6 ? "$" + (a / 1e6).toFixed(1) + "M" : a >= 1e3 ? "$" + (a / 1e3).toFixed(0) + "k" : "$" + a.toFixed(0);
   }
   function fmtPx(p) { return p >= 1000 ? p.toFixed(0) : p >= 10 ? p.toFixed(2) : p.toFixed(4); }
-  function curMap() { return typeof latestLiquidationMap === "undefined" ? null : latestLiquidationMap; }      // app.js 전역
+  function curMap() {
+    var a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset;
+    if (S.days > 1) return S.ext[a + "|" + S.days] || null;
+    return typeof latestLiquidationMap === "undefined" ? null : latestLiquidationMap;      // app.js 전역
+  }
+  function fetchExt() {                       // 7·30일: 켜져 있을 때 60초마다(서버도 60초 캐시)
+    var a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset, key = a + "|" + S.days, now = Date.now();
+    if (!S.on || S.days === 1 || now - (S.extT[key] || 0) < 60000) return;
+    S.extT[key] = now;
+    fetch("/api/liquidation-map/tiers?asset=" + encodeURIComponent(a) + "&days=" + S.days, { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.tier_profile) { S.ext[key] = j; redraw(); } })
+      .catch(function () { S.extT[key] = 0; });
+  }
+  function setDays(d) {
+    S.days = d; S.vlo = S.vhi = null;
+    document.querySelectorAll("#liqProfileTools [data-days]").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(Number(b.dataset.days) === d));
+    });
+    try { localStorage.setItem("liqDays", String(d)); } catch (e) { /* 저장 못 해도 동작 */ }
+    fetchExt(); redraw();
+  }
   function livePrice(tp) {
     var a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset;
     var p = typeof latestLivePriceByAsset === "undefined" ? 0 : Number(latestLivePriceByAsset[a] || 0);
     return p > 0 ? p : tp.current_price;
+  }
+  function halo(g, C, txt, x, y, col) {   // 5분 차트 글자 규약: stroke var(--chart-bg) 3px · paint-order stroke
+    g.lineWidth = 3; g.lineJoin = "round"; g.strokeStyle = C.bg; g.strokeText(txt, x, y);
+    g.fillStyle = col; g.fillText(txt, x, y);
   }
   function niceStep(raw) {
     var p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
@@ -91,7 +117,7 @@
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
     if (!tp) {
-      if (status) status.textContent = map && map.warmed_up === false ? "청산맵 데이터 수집 중" : "청산맵을 기다리는 중…";
+      if (status) status.textContent = map && map.warmed_up === false ? "청산맵 데이터 수집 중" : "청산맵(" + S.days + "일)을 기다리는 중…";
       S.view = null; return;
     }
     var cp = livePrice(tp), rng = autoRange(tp, cp);
@@ -99,10 +125,10 @@
     if (status) status.textContent = "";
     UNIT = tp.unit || "oi_usd";
     var lo = S.vlo != null ? S.vlo : rng[0], hi = S.vhi != null ? S.vhi : rng[1];
-    var L = narrow ? 44 : 58, R = narrow ? 48 : 62, top = 18, axisH = 22;
+    var L = narrow ? 60 : 68, R = narrow ? 54 : 68, top = 22, axisH = 28;
     var plotW = W - L - R, plotH = H - top - axisH, sh = shape(tp, cp, plotW, lo, hi);
     var C = { tiers: TIER_VARS.map(css), good: css("--good"), bad: css("--bad"), text: css("--text"), muted: css("--muted"),
-              soft: css("--soft-line"), line: css("--line"), bg: css("--chart-bg"), mono: css("--font-mono") || "monospace" };
+              soft: css("--soft-line"), line: css("--line"), bg: css("--chart-bg"), sans: css("--font-sans") || "sans-serif" };
     var maxBar = Math.max.apply(null, sh.tot) || 1, maxCum = Math.max.apply(null, sh.cum) || 1;
     var xOf = function (p) { return L + (p - lo) / (hi - lo) * plotW; };
     var gwPx = sh.gw / (hi - lo) * plotW, gx = function (k) { return xOf(sh.lo + k * sh.gw); };
@@ -113,7 +139,7 @@
     g.save(); g.beginPath(); g.rect(L, 0, plotW, H); g.clip();
     var sb = niceStep(maxBar / 4), sc = niceStep(maxCum / 4), v, y, i, t;
     g.lineWidth = 1;
-    for (v = 0; v <= maxBar / 0.92; v += sb) { y = Math.round(yBar(v)) + 0.5; g.strokeStyle = C.soft; g.beginPath(); g.moveTo(L, y); g.lineTo(L + plotW, y); g.stroke(); }
+    for (v = 0; v <= maxBar / 0.92; v += sb) { y = Math.round(yBar(v)) + 0.5; g.strokeStyle = C.line; g.globalAlpha = 0.82; g.beginPath(); g.moveTo(L, y); g.lineTo(L + plotW, y); g.stroke(); g.globalAlpha = 1; }   // 5분 차트 .chart-grid
     // 누적 면·선 -- 현재가 칸을 경계로 왼쪽(롱)·오른쪽(숏)
     var cIdx = sh.cpAbs / sh.grp - Math.floor(sh.lo / sh.gw);
     var side = function (left) { var out = []; for (var k = 0; k < sh.m; k++) if (left ? k <= cIdx : k >= Math.floor(cIdx)) out.push(k); return out; };
@@ -151,24 +177,23 @@
       g.beginPath(); g.moveTo(hx, top); g.lineTo(hx, base); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
     }
     g.restore();
-    g.font = "10px " + C.mono; g.textBaseline = "middle"; g.fillStyle = C.muted;      // 축 글자(플롯 밖)
+    g.font = "600 12px " + C.sans; g.textBaseline = "middle";      // 축 글자(플롯 밖) = 5분 차트 글자(굵게 · 바탕 외곽선)
     g.textAlign = "right";
-    for (v = 0; v <= maxBar / 0.92; v += sb) g.fillText(usd(v), L - 6, yBar(v));
+    for (v = 0; v <= maxBar / 0.92; v += sb) halo(g, C, usd(v), L - 6, yBar(v), C.muted);
     g.textAlign = "left";
-    for (v = 0; v <= maxCum / 0.92; v += sc) g.fillText(usd(v), L + plotW + 6, yCum(v));
+    for (v = 0; v <= maxCum / 0.92; v += sc) halo(g, C, usd(v), L + plotW + 6, yCum(v), C.muted);
     var lab = "현재가 " + fmtPx(cp) + (xc < L ? " (왼쪽 밖)" : xc > L + plotW ? " (오른쪽 밖)" : "");
-    g.font = "600 11px " + C.mono;
-    var lw = g.measureText(lab).width + 12, lx = Math.max(L, Math.min(xc - lw / 2, L + plotW - lw));
-    g.fillStyle = C.text; g.fillRect(lx, 1, lw, 15);
-    g.fillStyle = C.bg; g.textAlign = "left"; g.fillText(lab, lx + 6, 9);
-    g.font = "10px " + C.mono; g.fillStyle = C.muted; g.textAlign = "center"; g.textBaseline = "top";   // 가격 축
-    var ps = niceStep((hi - lo) / Math.max(2, plotW / 90));
-    g.strokeStyle = C.soft;
+    g.font = "700 13px " + C.sans; g.textAlign = "center";           // 현재가 = 상자 없이 굵은 숫자(5분 차트와 같은 규약)
+    var lw = g.measureText(lab).width, lx = Math.max(L + lw / 2, Math.min(xc, L + plotW - lw / 2));
+    halo(g, C, lab, lx, 10, C.text);
+    g.font = "700 " + (narrow ? 12 : 13) + "px " + C.sans; g.textAlign = "center"; g.textBaseline = "top";   // 가격 축 = 5분 차트 x축 글자
+    var ps = niceStep((hi - lo) / Math.max(2, plotW / 96));
+    g.strokeStyle = C.line;
     for (var p = Math.ceil(lo / ps) * ps; p <= hi; p += ps) {
       var x = xOf(p);
-      if (x < L + 16 || x > L + plotW - 16 || Math.abs(x - xc) < 34) continue;
-      g.fillText(fmtPx(p), x, base + 6);
-      g.beginPath(); g.moveTo(Math.round(x) + 0.5, base); g.lineTo(Math.round(x) + 0.5, base + 4); g.stroke();
+      if (x < L + 18 || x > L + plotW - 18 || Math.abs(x - xc) < 40) continue;
+      g.fillStyle = C.muted; g.fillText(fmtPx(p), x, base + 8);
+      g.beginPath(); g.moveTo(Math.round(x) + 0.5, base); g.lineTo(Math.round(x) + 0.5, base + 5); g.stroke();
     }
     g.strokeStyle = C.line; g.beginPath(); g.moveTo(L, base + 0.5); g.lineTo(L + plotW, base + 0.5); g.stroke();
     legend(tp, sh);
@@ -284,6 +309,7 @@
 
   function setView(view) {
     S.on = view === "liq";
+    if (typeof window.fpAltSet === "function") window.fpAltSet("liq", S.on);
     var card = $("fpCard"), box = $("liqProfile");
     if (card) card.classList.toggle("fp-liq-on", S.on);
     if (box) box.hidden = !S.on;
@@ -293,7 +319,7 @@
     });
     try { localStorage.setItem("fpView", view); } catch (e) { /* 저장 못 해도 동작 */ }
     tipHide();
-    if (S.on) redraw();
+    if (S.on) { fetchExt(); redraw(); }
   }
 
   function init() {
@@ -301,6 +327,9 @@
     if (!cv) return;
     document.querySelectorAll("#fpViewTabs .asset-tab").forEach(function (b) {
       b.addEventListener("click", function () { setView(b.dataset.view); });
+    });
+    document.querySelectorAll("#liqProfileTools [data-days]").forEach(function (b) {
+      b.addEventListener("click", function () { setDays(Number(b.dataset.days)); });
     });
     document.querySelectorAll("#liqProfileTools [data-view]").forEach(function (b) {
       b.addEventListener("click", function () {
@@ -313,12 +342,16 @@
     new ResizeObserver(redraw).observe(cv);
     setInterval(function () {                       // 새 청산맵(60초)·현재가(1초)·5분 차트 배치가 바뀌면 다시 그린다(보던 범위는 유지)
       if (!S.on) return;
+      fetchExt();
       var m = curMap(), tp = m && m.tier_profile, p = tp ? livePrice(tp) : 0;
       if (m !== S.map || p !== S.price) { S.map = m; S.price = p; redraw(); }
       if (typeof window.fpPlaceOverlay === "function") window.fpPlaceOverlay($("liqProfile"));
     }, 1000);
     var saved = null;
     try { saved = localStorage.getItem("fpView"); } catch (e) { /* 없음 */ }
+    var d = 1;
+    try { d = Number(localStorage.getItem("liqDays")) || 1; } catch (e) { /* 기본 1일 */ }
+    setDays(d === 7 || d === 30 ? d : 1);
     setView(saved === "liq" ? "liq" : "fp");
   }
 

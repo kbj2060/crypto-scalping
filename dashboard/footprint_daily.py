@@ -232,6 +232,87 @@ class DailyFootprint:
         return {"row": row, "cells": out}
 
 
+HEAT_LOOKBACK_H = 168     # 일봉 청산 히트맵 입력 창(7일 1시간봉) -- 라이브 5분 화면은 24h, 일봉 한 칸이 24h 라 7일로
+
+
+def heat_for_day(k1h: pd.DataFrame, d: date) -> list[tuple[float, float]]:
+    """그날 UTC 마감 시점의 추정 청산 밀도 [(칸 가격, w 0~1)] -- 라이브 청산맵과 같은 함수(compute_spliced_levels).
+    k1h: timestamp(봉 시작, UTC)·high·low·close·volume. 마감 뒤 봉은 안 본다(인과). 20봉 미만이면 []."""
+    from scripts.live_liquidation_map_20260824 import compute_spliced_levels
+    end = pd.Timestamp(d, tz="UTC") + pd.Timedelta(days=1)
+    win = k1h[(k1h.timestamp < end) & (k1h.timestamp >= end - pd.Timedelta(hours=HEAT_LOOKBACK_H))]
+    if len(win) < 20:
+        return []
+    res = compute_spliced_levels(win.reset_index(drop=True), float(win.close.iloc[-1]))
+    return [(float(b["price"]), float(b["weight_pct"])) for b in res.get("heatmap_bins") or [] if b["weight_pct"] > 0]
+
+
+def rebin_heat(price: np.ndarray, w: np.ndarray, row: int) -> list:
+    """히트맵 칸 → row 달러 칸, 칸 안 최대값(0~1 척도 유지). [첫 칸 하한, [w…]]."""
+    if not len(price):
+        return [0, []]
+    k = np.floor_divide(price, row).astype(np.int64)
+    lo, n = int(k.min()), int(k.max() - k.min() + 1)
+    out = np.zeros(n)
+    np.maximum.at(out, k - lo, w)
+    return [lo * row, np.round(out, 3).tolist()]
+
+
+_heat: dict[str, Any] = {"mtime": None, "by": {}, "until": None, "recent": {}}
+
+
+def load_heat(hist_dir: Path = HIST_DIR) -> tuple[dict, str | None]:
+    """히트맵 소급본(scripts/build_eth_liq_heat_daily_20261008.py) -> (날짜 -> (price[], w[]), 마지막 날)."""
+    f = hist_dir / f"{SYMBOL}_liqheat.parquet"
+    if not f.exists():
+        return {}, None
+    with _lock:
+        if _heat["mtime"] != f.stat().st_mtime:
+            h = pd.read_parquet(f)
+            h["day"] = h.day.map(_ds)
+            _heat.update(mtime=f.stat().st_mtime, until=h.day.max(),
+                         by={d: (g.price.to_numpy(float), g.w.to_numpy(float)) for d, g in h.groupby("day", sort=False)})
+        return _heat["by"], _heat["until"]
+
+
+def klines_1h(raw: list | None, now: float) -> pd.DataFrame | None:
+    """바이낸스 /fapi/v1/klines(1h) 원시 행 -> 마감된 봉만(timestamp·high·low·close·volume)."""
+    if not raw:
+        return None
+    k = pd.DataFrame({"timestamp": pd.to_datetime([int(r[0]) for r in raw], unit="ms", utc=True),
+                      "high": [float(r[2]) for r in raw], "low": [float(r[3]) for r in raw],
+                      "close": [float(r[4]) for r in raw], "volume": [float(r[5]) for r in raw],
+                      "close_ms": [int(r[6]) for r in raw]})
+    return k[k.close_ms < now * 1000].drop(columns="close_ms").reset_index(drop=True)
+
+
+def heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None = None, hist_dir: Path = HIST_DIR) -> dict:
+    """보이는 날들의 청산 히트맵(row 달러 칸, 칸 안 최대 w). 소급본 뒤 날(오늘 포함)은 raw_1h 로 계산 -- 닫힌 날은 캐시.
+    ponytail: raw_1h 는 최근 500봉(~20일)이라 소급본이 그보다 오래되면 사이 날은 «모름» -- 빌더를 다시 돌리면 된다."""
+    by, until = load_heat(hist_dir)
+    d0, d1 = date.fromisoformat(frm), date.fromisoformat(to)
+    if d1 < d0 or (d1 - d0).days > 4000:
+        raise ValueError("range")
+    today = datetime.fromtimestamp(now, timezone.utc).date()
+    k = None
+    out = {}
+    for d in pd.date_range(d0, min(d1, today)).date:
+        key = _ds(d)
+        c = by.get(key)
+        if c is None and (until is None or key > until):
+            c = _heat["recent"].get(key) if d < today else None
+            if c is None:
+                k = k if k is not None else klines_1h(raw_1h, now)
+                if k is not None and len(k):
+                    pw = heat_for_day(k, d)
+                    c = (np.array([p for p, _ in pw]), np.array([w for _, w in pw]))
+                    if d < today:
+                        _heat["recent"][key] = c
+        if c is not None and len(c[0]):
+            out[key] = rebin_heat(c[0], c[1], row)
+    return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H, "until": until}
+
+
 def parse_row(v: str | None) -> int:
     """화면이 고르는 행 크기($). 신뢰경계 — 정수 1~500 만."""
     try:
