@@ -163,6 +163,54 @@ def ledger_stop_scan() -> dict:
     return out
 
 
+def ledger_committed() -> dict:
+    """사용자 «내 원장 기준 맞아?» — 실제 왕복(진입 시각·방향·물타기·청산 시각) 그대로, 크기·손절만 바꾼 직접 재생.
+    커밋 규칙(5cbcc38b build_rule_ladder): L = min(12.4×권장배수, 청산안전, 10) · 손절 첫 진입가 ∓3σ24 (진입 직전 마감 5분봉 288개).
+    권고: L 1.5/2 · 손절 5%. 용량 = 원래 왕복 최대 명목(사다리가 덜 차도 같은 용량)."""
+    f = A.tag_events(A.load_fills())
+    st = pd.read_csv(ROOT / "tmp/behavioral_risk_20261008/trip_states.csv").set_index("trip")
+    k1 = A.load_k1m("2026-07-25", "2026-10-07")
+    b = k1.assign(b=k1.t // 300_000).groupby("b").c.last()
+    sg = F.sigma_day(b.to_numpy()); bt = b.index.to_numpy()
+    arms = {"실제": None, "커밋": "c", "커밋+상한6": "c6", "권고1.5·5%": (1.5, 0.05), "권고2·5%": (2.0, 0.05), "권고1.5·손절없음": (1.5, None)}
+    rows = []
+    for tr, g in f.groupby("trip"):
+        g = g.sort_values(["time", "id"])
+        te = None if st.loc[tr, "closed"] else int(st.loc[tr, "t1"])
+        i = np.searchsorted(bt, int(g.time.min()) // 300_000, "left") - 1          # 진입 직전 마감 5분봉
+        sig = float(sg[i]); vm = float(np.clip(sig / np.sqrt(6) / F.VOLM_MED, 0.25, 3.0) / F.VOLM_REF)
+        p0, n0, m0 = trip_stats(g, k1, False, te)
+        side = pd.DataFrame({"sig": [sig], "vm": [vm], "side": [float(g.sgn.iloc[0])]})
+        pc, _, mc = trip_stats(g, k1, True, te, 3 * sig / 1e4)
+        p5, _, m5 = trip_stats(g, k1, True, te, 0.05)
+        rows.append({"t0": st.loc[tr, "t0"], "t1": st.loc[tr, "t1"], "E0": st.loc[tr, "E0"], "n0": n0, "sig": sig,
+                     "Lact": n0 / st.loc[tr, "E0"], "Lc": F.committed_L(side)[0], "Lc6": F.committed_L(side, 6.0)[0],
+                     "p0": p0, "m0": m0, "pc": pc, "mc": mc, "p5": p5, "m5": m5})
+    T = pd.DataFrame(rows).sort_values("t0").reset_index(drop=True)
+    out = {}
+    for name, arm in arms.items():
+        if arm is None:
+            pcol, mcol, Ls = "p0", "m0", T.Lact.to_numpy()
+        elif arm in ("c", "c6"):
+            pcol, mcol, Ls = "pc", "mc", T[{"c": "Lc", "c6": "Lc6"}[arm]].to_numpy()
+        else:
+            pcol, mcol = ("p5", "m5") if arm[1] else ("p0", "m0")
+            Ls = np.full(len(T), arm[0])
+        X = T.assign(r=T[pcol] / T.n0, mae=T[mcol] / T.n0)
+        it = iter(Ls.tolist())
+        res = compound(X, lambda h, it=it: next(it))
+        hit = (T[pcol] != T.p0).to_numpy()
+        out[name] = {**res, "stops": int(hit.sum()), "L_med": float(np.median(Ls)), "L_max": float(np.max(Ls)),
+                     "worst_trip_pct": float(np.min(Ls * X.mae.to_numpy())),
+                     "stop_losses_pct": [round(float(x) * 100, 1) for x in (Ls * X.r.to_numpy())[hit]]}
+        o_ = out[name]
+        print(f"{name:14s} 67일 배수 {o_['mult']:.3f}  MDD {o_['mdd']:+.3f}  L 중앙 {o_['L_med']:.1f} 최대 {o_['L_max']:.1f}  "
+              f"손절 {o_['stops']}회 {o_['stop_losses_pct']}  왕복 중 최악 평가손 {o_['worst_trip_pct']:+.1%}", flush=True)
+    print("σ24 중앙", round(float(T.sig.median())), "bp · 커밋 3σ 손절 폭 중앙", round(float(3 * T.sig.median() / 100), 1), "%")
+    json.dump(out, open(OUT / "ledger_committed.json", "w"), indent=1, ensure_ascii=False)
+    return out
+
+
 def part_b() -> dict:
     out = {}
     for per in F.PERIODS:
@@ -215,6 +263,8 @@ def main() -> int:
         selftest(); return 0
     if "--stops" in sys.argv:
         ledger_stop_scan(); return 0
+    if "--committed" in sys.argv:
+        ledger_committed(); return 0
     OUT.mkdir(parents=True, exist_ok=True)
     rep = {"A_ledger": part_a()}
     if "--a-only" not in sys.argv:
