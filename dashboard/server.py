@@ -4497,8 +4497,8 @@ def make_app() -> web.Application:
             lambda: asyncio.to_thread(compute_liquidation_direction_signal, coin=asset),
         )
 
-    async def liq_klines_df(asset: str, limit: int) -> pd.DataFrame:
-        """청산맵 입력 1시간봉(진행 중인 봉은 버린다)."""
+    async def liq_klines_df(asset: str, limit: int, keep_forming: bool = False) -> pd.DataFrame:
+        """청산맵 입력 1시간봉. 진행 중인 봉은 버린다 -- keep_forming=True 면 남긴다(지금까지의 고·저·거래량 = 1분마다 바뀌는 막대)."""
         raw = await fetch_binance_json(
             "https://fapi.binance.com/fapi/v1/klines",
             {
@@ -4517,7 +4517,7 @@ def make_app() -> web.Application:
         df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
         df = df.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
         now_ms = int(time.time() * 1000)
-        if len(df) and int(df.iloc[-1]["close_time"]) >= now_ms:
+        if not keep_forming and len(df) and int(df.iloc[-1]["close_time"]) >= now_ms:
             df = df.iloc[:-1].reset_index(drop=True)  # drop the still-forming bar
         return df
 
@@ -4534,7 +4534,7 @@ def make_app() -> web.Application:
         """2026-10-08 청산맵 보기 기간 1·7·30일(사용자 (나), 코인글래스처럼) -- 같은 모델(compute_tier_profile)을 창만 늘려 돌린다.
         1일은 /api/liquidation-map 의 tier_profile 과 같은 값. 최근성 반감기(240h)는 모듈 상수 그대로."""
         async def produce() -> dict[str, Any]:
-            df = (await liq_klines_df(asset, days * 24 + 2)).tail(days * 24).reset_index(drop=True)
+            df = (await liq_klines_df(asset, days * 24 + 2, keep_forming=True)).tail(days * 24).reset_index(drop=True)
             cp = float(df["close"].iloc[-1]) if len(df) else 0.0
             oi_usd = await asyncio.to_thread(liq_oi_usd, asset, cp)
             tp = await asyncio.to_thread(compute_tier_profile, df, cp, oi_usd)
@@ -4554,7 +4554,9 @@ def make_app() -> web.Application:
         constants (see design doc section 5) -- BTC's map uses the same constants, unvalidated for
         BTC's own liquidity/volatility."""
         async def produce() -> dict[str, Any]:
-            df = await liq_klines_df(asset, LIQUIDATION_MAP_FETCH_LIMIT)
+            df_live = await liq_klines_df(asset, LIQUIDATION_MAP_FETCH_LIMIT, keep_forming=True)
+            forming = bool(len(df_live)) and int(df_live.iloc[-1]["close_time"]) >= int(time.time() * 1000)
+            df = df_live.iloc[:-1].reset_index(drop=True) if forming else df_live   # 레벨·히스토리 = 닫힌 봉만(검증된 규약)
             current_price = float(df["close"].iloc[-1]) if len(df) else 0.0
             payload = await asyncio.to_thread(
                 compute_spliced_levels, df.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), current_price
@@ -4566,10 +4568,13 @@ def make_app() -> web.Application:
             payload["heatmap_history"] = await asyncio.to_thread(
                 compute_spliced_heatmap_history, df, current_price, LIQUIDATION_MAP_LOOKBACK_HOURS, LIQUIDATION_MAP_DISPLAY_HOURS
             )
-            # 2026-10-08 풋프린트/청산맵 토글의 레버리지별 청산맵(코인글래스 모양) -- 같은 창·같은 가정, 구간별로 나눠 둔 것
-            oi_usd = await asyncio.to_thread(liq_oi_usd, asset, current_price)
+            # 2026-10-08 풋프린트/청산맵 토글의 레버리지별 청산맵(코인글래스 모양) -- 같은 창·같은 가정, 구간별로 나눠 둔 것.
+            # 10-09 사용자 «1분마다 업데이트»: 형성 중인 봉까지 넣는다(이번 시간 고·저가 지난 청산가는 바로 빠지고 막대가 캐시 60초마다 바뀐다).
+            #   기준가 = 형성 봉 종가(지금 가격). 전진 점수 기록기(live_liqmap_scorer)는 닫힌 봉 지도를 잰다 -- 화면과 1시간 안쪽만 다르다.
+            live_px = float(df_live["close"].iloc[-1]) if len(df_live) else current_price
+            oi_usd = await asyncio.to_thread(liq_oi_usd, asset, live_px)
             payload["tier_profile"] = await asyncio.to_thread(
-                compute_tier_profile, df.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), current_price, oi_usd)
+                compute_tier_profile, df_live.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), live_px, oi_usd)
             payload["generated_at"] = datetime.now(timezone.utc).isoformat()
             return payload
 

@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261008-hbox">
+  <link rel="stylesheet" href="styles.css?v=20261009-lqlive">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -275,7 +275,7 @@
             <canvas id="liqProfileCanvas" class="lqp-canvas" tabindex="0" role="img"
                     aria-label="추정 청산맵 — 가격대별 레버리지 구간 막대와 현재가 기준 누적 롱·숏 청산 곡선. 휠·두 손가락 = 확대/축소 · 끌기·화살표 = 이동 · 더블클릭·Home = 전체"></canvas>
             <p id="liqProfileStatus" class="fpd-status muted" role="status"></p>
-            <p class="fpd-note muted">추정 · 고른 기간(1·7·30일)의 1시간봉을 가상 진입으로 본 모델(최근 봉일수록 무겁게)(레버리지 10·20~25·50·75~100배, 이미 넘은 청산가는 뺌) · 실측 포지션이 아님 ·
+            <p class="fpd-note muted">추정 · 고른 기간(1·7·30일)의 1시간봉(지금 형성 중인 봉 포함 · 1분마다 갱신)을 가상 진입으로 본 모델(최근 봉일수록 무겁게)(레버리지 10·20~25·50·75~100배, 이미 넘은 청산가는 뺌) · 실측 포지션이 아님 ·
               막대 = 그 가격의 추정 청산 규모(왼쪽 축) · 선 = 현재가에서 그 가격까지 누적(오른쪽 축, 빨강 롱 · 초록 숏) ·
               규모 = 지금 바이낸스 OI(달러)를 추정 분포 비율로 나눈 값(OI 가 없는 코인은 전체 중 %)</p>
           </div>
@@ -544,9 +544,9 @@
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden></div>
   </div>
-  <script src="./app.js?v=20261008-hbox"></script>
-  <script src="./fp_daily.js?v=20261008-hbox"></script>
-  <script src="./liq_profile.js?v=20261008-hbox"></script>
+  <script src="./app.js?v=20261009-lqlive"></script>
+  <script src="./fp_daily.js?v=20261009-lqlive"></script>
+  <script src="./liq_profile.js?v=20261009-lqlive"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
