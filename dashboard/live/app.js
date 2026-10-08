@@ -686,8 +686,10 @@ function renderChartWindowTabs() {
   const host = document.getElementById("chartWindowTabs");
   const tabs = [...document.querySelectorAll("#chartWindowTabs .asset-tab")];
   let idx = 0;
+  // 2026-10-09 다섯째 칸 1d(#fpDailyBtn, data-bars 없음) = 일봉 풋프린트. 켜져 있으면 선택 칸이 거기 가고 시간 칸은 꺼진다(fp_daily.js 가 이 함수를 다시 부른다)
+  const daily = typeof window.fpDailyActive === "function" && window.fpDailyActive();
   tabs.forEach((btn, k) => {
-    const on = Number(btn.dataset.bars) === chartWindowBars;
+    const on = btn.id === "fpDailyBtn" ? daily : !daily && Number(btn.dataset.bars) === chartWindowBars;
     btn.classList.toggle("active", on);
     if (on) idx = k;
   });

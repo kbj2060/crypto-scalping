@@ -35,6 +35,9 @@ OVERLAY = """(id) => { const o = document.getElementById(id), g = window.fpRegio
 def covered(ov) -> bool:
     """모의 판·지지/저항이 안 보이고 시장 맥락은 보인다."""
     return bool(ov) and ov["mc"] and not ov["wall"] and not (not ov["split"] and (ov["sr"] or ov["ppm"]))
+TABS = """() => { const h = document.getElementById('chartWindowTabs');
+              return { i: h.style.getPropertyValue('--i'), n: h.style.getPropertyValue('--seg-n'),
+                       on: [...h.querySelectorAll('.asset-tab')].filter(b => b.classList.contains('active')).map(b => b.textContent.trim()) }; }"""
 TIP = "() => { const t = document.getElementById('chartTooltip'); return t && t.classList.contains('visible') ? t.textContent : null; }"
 
 
@@ -142,6 +145,12 @@ def run(shot):
             pg.locator("#fpDaily").scroll_into_view_if_needed()
             box = pg.evaluate("() => document.getElementById('fpDailyCanvas').getBoundingClientRect().toJSON()")
             print(tag, st, "캔버스", round(box["width"]), "×", round(box["height"]), flush=True)
+            tb = pg.evaluate(TABS)
+            print(tag, "시간 탭", tb, flush=True)
+            if tb != {"i": "4", "n": "5", "on": ["1d"]}: fails.append(f"[{tag}] 1d 를 눌렀는데 선택 칸이 1d 가 아님 {tb}")
+            if shot:
+                pathlib.Path(shot).mkdir(parents=True, exist_ok=True)
+                pg.locator("#fpCard .chart-head-left").screenshot(path=str(pathlib.Path(shot) / f"tabs_1d_{w}.png"))
             if not (st["on"] and st["cls"] and st["pressed"] == "true"): fails.append(f"[{tag}] 켜짐 상태 {st}")
             if st["candle"] == "none": fails.append(f"[{tag}] 5분 차트 상자가 숨었다(플롯 위에만 겹쳐야 함)")
             ov = pg.evaluate(OVERLAY, "fpDaily")
@@ -186,6 +195,16 @@ def run(shot):
             pg.click("#fpDailyBtn"); pg.wait_for_timeout(1500)
             back = pg.evaluate("() => [window.fpDailyActive(), getComputedStyle(document.querySelector('#fpCard .candle-container')).display, document.getElementById('fpDaily').hidden, document.getElementById('candleSvgSnapshot').style.clipPath]")
             if back[0] or back[1] == "none" or not back[2] or back[3]: fails.append(f"[{tag}] 끄고 5분 차트 복귀 실패 {back}")
+            tb2 = pg.evaluate(TABS)
+            if "1d" in tb2["on"] or len(tb2["on"]) != 1 or tb2["i"] == "4": fails.append(f"[{tag}] 1d 를 끈 뒤 선택 칸이 시간 칸으로 안 돌아옴 {tb2}")
+            pg.click("#chartWindowTabs [data-bars='24']"); pg.wait_for_timeout(600)
+            pg.click("#fpDailyBtn"); pg.wait_for_timeout(1500)
+            pg.click("#chartWindowTabs [data-bars='24']"); pg.wait_for_timeout(1200)   # 지금 고른 시간 칸을 다시 눌러도 일봉이 꺼지고 그 칸으로
+            tb3 = pg.evaluate(TABS)
+            if pg.evaluate("() => window.fpDailyActive()") or tb3 != {"i": "1", "n": "5", "on": ["2h"]}: fails.append(f"[{tag}] 1d → 같은 시간 칸 복귀 실패 {tb3}")
+            if shot:
+                pg.locator("#fpCard .chart-head-left").screenshot(path=str(pathlib.Path(shot) / f"tabs_2h_{w}.png"))
+            pg.click("#chartWindowTabs [data-bars='12']"); pg.wait_for_timeout(600)
             ovb = pg.evaluate(OVERLAY, "fpDaily")
             if ovb["split"] and not ovb["wall"] or not ovb["split"] and not (ovb["sr"] and ovb["ppm"]): fails.append(f"[{tag}] 끈 뒤 모의 판·지지저항이 안 돌아옴 {ovb}")
             # ── 풋프린트/청산맵 토글 ──

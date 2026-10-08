@@ -2384,7 +2384,7 @@ svg {
 }
 /* 폴백값. 실제 칸 수와 선택 위치는 renderChartWindowTabs() 가 인라인으로 넣는다 --
    여기 숫자를 버튼 수와 맞춰 두는 걸 잊으면 선택 칸이 어긋난다(2026-09-23 실제로 그랬다). */
-#chartWindowTabs { --seg-n: 4; }   /* 1h · 2h · 4h · 12h */
+#chartWindowTabs { --seg-n: 5; }   /* 1h · 2h · 4h · 12h · 1d(일봉) */
 #chartModeTabs { --seg-n: 2; }     /* 청산맵 · 풋프린트 */
 #snapshotAssetTabs { --seg-n: 3; }   /* ETH · SOL · XRP(서버가 켠 코인) -- 실제 값은 renderSnapshotAssetTabs */
 /* 선택 칸. 테두리도 그림자도 없다 -- 참조 이미지처럼 «조금 더 밝은 면» 하나다.
@@ -3216,10 +3216,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 
 /* 2026-10-08 일봉 풋프린트(사용자 «스윙용 일봉 · 최대치 · 확대/축소»). 버튼 = 한 칸 세그먼트(눌렸을 때만 선택 면) ·
    켜지면 카드의 5분 차트와 그 아래 칸들을 숨기고 캔버스 하나(fp_daily.js)가 차지한다. 색은 기존 방향색·거래대금 파랑뿐. */
-.fp-daily-tabs { --seg-n: 1; }
-.fp-daily-tabs::before { opacity: 0; transition: opacity .2s ease; }
-.fp-daily-tabs:has(.asset-tab.active)::before { opacity: 1; }
-.fp-daily-tabs .asset-tab:disabled { opacity: .45; cursor: not-allowed; }
+#fpDailyBtn:disabled { opacity: .45; cursor: not-allowed; }   /* ETH 밖 코인 */
 /* 일봉·청산맵 = 5분 차트의 교체 영역(window.fpRegion: 넓은 화면 왼쪽 열 전체 · 좁은 화면 풋프린트~5분 레인) 위.
    🔴배경을 깔지 않는다(사용자 «시간봉과 스타일 통일 · 너무 검정») -- 아래 5분 그림은 svg 에 구멍(clip-path)을 내 숨기므로
    카드의 실제 유리 배경이 그대로 비친다. 위치·구멍은 fp_daily.js fpPlaceOverlay·fpAltSet 이 맞춘다. */
@@ -3257,7 +3254,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
   .fpd-tag, .fp-overlay .fpd-note { display: none; }
 }
 @media (pointer: coarse) { .fpd-tools button { min-height: 40px; min-width: 40px; } }
-@media (prefers-reduced-motion: reduce) { .fp-daily-tabs::before, .fpd-tools button { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .fpd-tools button { transition: none; } }
 
 /* 2026-10-08 풋프린트/청산맵 토글 · 청산맵(코인글래스 모양). 레버리지 색 = 낮은 배수 차갑게 → 높은 배수 따뜻하게.
    10배·75~100배는 기존 토큰(호가 깊이 하늘 · 경고 주황), 사이 둘만 이 차트 몫으로 둔다(거래대금 파랑은 전용이라 안 씀). */

@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261009-lqlive">
+  <link rel="stylesheet" href="styles.css?v=20261009-tf1d">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -212,12 +212,10 @@
               <button type="button" class="asset-tab" data-bars="24">2h</button>
               <button type="button" class="asset-tab" data-bars="48">4h</button>
               <button type="button" class="asset-tab" data-bars="144">12h</button>
-            </div>
-            <!-- 2026-10-08 일봉 풋프린트(사용자 «스윙용 일봉 · 최대치 · 확대/축소 · 델타·거래대금·OI·청산»). 구간 탭과 떨어진
-                 한 칸 묶음 -- 같은 세그먼트에 넣으면 «1D = 24시간 구간»으로 읽힌다(09-19 «따로따로»). fp_daily.js -->
-            <div id="fpDailyTabs" class="asset-tabs chart-mode-tabs fp-daily-tabs" aria-label="일봉 보기">
+              <!-- 2026-10-09 일봉 = 같은 세그먼트 다섯째 칸(사용자 «1h/2h/4h/12h/1d 처럼 안으로»). 5분 창이 아니라 일봉 풋프린트로
+                   바꾸는 칸이라 data-bars 가 없다 -- app.js 구간 핸들러는 무시하고 fp_daily.js 가 켠다. 선택 칸 = renderChartWindowTabs -->
               <button type="button" id="fpDailyBtn" class="asset-tab" aria-pressed="false"
-                      title="일봉 풋프린트(스윙) — 2020년부터 · 휠·두 손가락 = 확대/축소 · 끌기 = 이동 · 더블클릭 = 최근 30일 · ETH 만">일봉</button>
+                      title="일봉 풋프린트(스윙) — 2020년부터 · 휠·두 손가락 = 확대/축소 · 끌기 = 이동 · 더블클릭 = 최근 30일 · ETH 만">1d</button>
             </div>
             <div id="chartPan" class="chart-pan" hidden></div>   <!-- 2026-10-01 창 이동 미니맵(12시간) · app.js renderChartPan -->
             <div id="snapshotAssetTabs" class="asset-tabs chart-mode-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
@@ -544,9 +542,9 @@
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden></div>
   </div>
-  <script src="./app.js?v=20261009-lqlive"></script>
-  <script src="./fp_daily.js?v=20261009-lqlive"></script>
-  <script src="./liq_profile.js?v=20261009-lqlive"></script>
+  <script src="./app.js?v=20261009-tf1d"></script>
+  <script src="./fp_daily.js?v=20261009-tf1d"></script>
+  <script src="./liq_profile.js?v=20261009-tf1d"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

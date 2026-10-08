@@ -550,7 +550,8 @@
     S.on = on;
     var card = $("fpCard"), btn = $("fpDailyBtn"), box = $("fpDaily"), status = $("fpDailyStatus");
     if (card) card.classList.toggle("fp-daily-on", on);
-    if (btn) { btn.classList.toggle("active", on); btn.setAttribute("aria-pressed", String(on)); }
+    if (btn) btn.setAttribute("aria-pressed", String(on));
+    if (typeof renderChartWindowTabs === "function") renderChartWindowTabs();   // 선택 칸 = 1d ↔ 시간 칸(app.js)
     window.fpAltSet("daily", on);
     if (box) { box.hidden = !on; if (on) placeOverlay(box); }
     try { localStorage.setItem("fpDailyOn", on ? "1" : "0"); } catch (e) { /* 저장 못 해도 동작 */ }
@@ -564,7 +565,7 @@
         setView(DEFAULT_SPAN);
         if (status) status.textContent = "";
       } catch (e) {
-        if (status) status.textContent = "일봉을 못 받았습니다(" + e.message + ") · 일봉 버튼을 다시 누르면 재시도";
+        if (status) status.textContent = "일봉을 못 받았습니다(" + e.message + ") · 1d 를 다시 누르면 재시도";
         S.D = null; S.n = 0;
         return;
       }
@@ -580,8 +581,8 @@
     if (!btn || !cv) return;
     btn.dataset.title = btn.title;
     btn.addEventListener("click", function () { setOn(!S.on); });
-    // 구간 탭(1h…12h)을 누르면 5분 화면으로 돌아간다
-    document.querySelectorAll("#chartWindowTabs .asset-tab").forEach(function (b) {
+    // 구간 탭(1h…12h)을 누르면 5분 화면으로 돌아간다 -- 🔴1d 도 같은 묶음 안이라 [data-bars] 로만(안 그러면 1d 가 켜자마자 꺼진다)
+    document.querySelectorAll("#chartWindowTabs .asset-tab[data-bars]").forEach(function (b) {
       b.addEventListener("click", function () { if (S.on) setOn(false); });
     });
     var hb = document.querySelector("#fpDailyTools [data-heat]");
