@@ -9,8 +9,8 @@
 (function () {
   "use strict";
   var DAYS_URL = "/api/footprint-daily", CELLS_URL = "/api/footprint-daily/cells", HEAT_URL = "/api/footprint-daily/heat";
-  var HEAT_CLIP_PCT = 0.90;    // 5분 차트 청산 밀도와 같은 기준(양수 밀도의 90분위 = 가장 진한 색)
-  var HEAT_LINE_MIN = 0.7;     // 이 진하기 이상만 줄로 그린다(시안 A)
+  var HEAT_CLIP_PCT = 0.98;    // 양수 밀도의 98분위 = 가장 진한 색(진한 곳만 떠오르게)
+  var HEAT_BOX_MIN_PX = 10;    // 봉 폭이 이보다 좁으면 테두리를 그리지 않는다(금액 글자는 칸 안에 들어갈 때만)
   var DEFAULT_SPAN = 30, MIN_SPAN = 7, TEXT_MIN_PX = 104, ROW_PX = 11;
   var cellMinPx = function (G) { return G.narrow ? 24 : 34; };   // 이 폭부터 가격 칸(휴대폰은 7~12일 확대에서)
   var ROW_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500];
@@ -87,26 +87,50 @@
     redraw();
     if (S.heatWant !== w) fetchHeat();
   }
-  // 표현 = 시안 A «레벨 줄»(사용자 선택 10-08): 날마다 강한 밀집(90분위 기준 0.7 이상)만 그 가격에 가는 띠로 -- 캔들을 덮지 않는다.
-  function drawHeat(g, G, a, b, row, xOf, bw, yOf) {
+  // 표현 = 사용자 선택(10-08): 진하기에 비례한 투명도(약한 곳은 배경에 녹는다 · 98분위 = 가장 진한 색) +
+  //   날마다 그날 종가 위(숏 청산)·아래(롱 청산)에서 몫이 가장 큰 칸 2개씩 굵은 테두리(초록 숏 · 빨강 롱 = 청산맵과 같은 색) +
+  //   그 안에 금액 = 몫 × 2 × 그날 OI 달러(청산맵 tier_profile 의 2×OI 규모와 같은 뜻 · OI 없는 날은 %). 추정이지 실측 포지션이 아니다.
+  function drawHeat(g, G, C, a, b, row, xOf, bw, yOf) {
     if (typeof densityColor !== "function") return;               // app.js 전역(5분 차트와 같은 색표·테마)
-    var vals = [], i, k, h;
+    var vals = [], i, k, h, t;
     for (i = a; i <= b; i++) { h = S.heat.get(row + "|" + S.D.d[i]); if (h) h[1].forEach(function (v) { if (v > 0) vals.push(v); }); }
     if (!vals.length) return;
     vals.sort(function (x, y) { return x - y; });
     var clip = vals[Math.min(vals.length - 1, Math.floor(vals.length * HEAT_CLIP_PCT))] || 1;
     g.save(); g.beginPath(); g.rect(G.L, G.top, G.plotW, G.priceH); g.clip();   // 가격 칸 안에서만(레인으로 안 샌다)
-    g.globalAlpha = 0.95;
     for (i = a; i <= b; i++) {
       h = S.heat.get(row + "|" + S.D.d[i]);
       if (!h) continue;
       var x0 = Math.floor(xOf(i) - bw / 2), x1 = Math.ceil(xOf(i) + bw / 2);
       for (k = 0; k < h[1].length; k++) {
-        var t = Math.min(1, h[1][k] / clip);
-        if (!(t >= HEAT_LINE_MIN)) continue;
-        var top = yOf(h[0] + (k + 1) * row), bot = yOf(h[0] + k * row), th = Math.max(2, Math.min(4, (bot - top) * 0.5));
-        g.fillStyle = densityColor(t); g.fillRect(x0, (top + bot) / 2 - th / 2, x1 - x0, th);
+        t = Math.min(1, h[1][k] / clip);
+        if (!(t > 0)) continue;                                  // 밀도 0 은 안 칠한다(배경이 비친다 -- 5분 차트 규약)
+        var top = Math.floor(yOf(h[0] + (k + 1) * row)), bot = Math.ceil(yOf(h[0] + k * row));
+        g.globalAlpha = 0.85 * Math.pow(t, 2.5); g.fillStyle = densityColor(t); g.fillRect(x0, top, x1 - x0, Math.max(1, bot - top));
       }
+    }
+    g.globalAlpha = 1;
+    if (bw >= HEAT_BOX_MIN_PX) for (i = a; i <= b; i++) {
+      h = S.heat.get(row + "|" + S.D.d[i]);
+      if (!h || !h[2]) continue;
+      var cl = S.D.c[i], oiUsd = S.D.oi[i] != null ? S.D.oi[i] * cl : null, bx0 = Math.floor(xOf(i) - bw / 2) + 1, bxw = Math.ceil(bw) - 2;
+      [true, false].forEach(function (up) {                       // 위(숏) 2 · 아래(롱) 2
+        var ks = [];
+        for (var j = 0; j < h[2].length; j++) if (h[2][j] > 0 && (h[0] + (j + 0.5) * row >= cl) === up) ks.push(j);
+        ks.sort(function (x, y) { return h[2][y] - h[2][x]; });
+        ks.slice(0, 2).forEach(function (j) {
+          var yT = Math.floor(yOf(h[0] + (j + 1) * row)), yB = Math.ceil(yOf(h[0] + j * row));
+          g.strokeStyle = up ? C.good : C.bad; g.lineWidth = 2;
+          g.strokeRect(bx0 + 1, yT + 1, bxw - 2, Math.max(2, yB - yT - 2));
+          var fs = Math.min(10, Math.floor(yB - yT - 2));          // 글자 크기 = 칸 높이에 맞춰 8~10px
+          if (fs >= 8) {
+            var v = h[2][j] * 2 * oiUsd, txt = !oiUsd ? (h[2][j] * 100).toFixed(1) + "%"     // 칸 폭이 좁아 «$»·소수 없이(툴팁 아님)
+              : v >= 1e9 ? (v / 1e9).toFixed(1) + "B" : v >= 1e6 ? Math.round(v / 1e6) + "M" : Math.round(v / 1e3) + "k";
+            g.font = "700 " + fs + "px " + C.sans; g.textAlign = "center"; g.textBaseline = "middle";
+            if (g.measureText(txt).width <= bxw - 6) halo(g, C, txt, bx0 + bxw / 2, (yT + yB) / 2, C.text);
+          }
+        });
+      });
     }
     g.restore();
   }
@@ -220,7 +244,7 @@
     g.strokeStyle = C.line; g.globalAlpha = 0.82; g.lineWidth = 1;      // 5분 차트 .chart-grid 와 같은 격자
     for (p = Math.ceil(lo / step) * step; p <= hi; p += step) { y = Math.round(yOf(p)) + 0.5; g.beginPath(); g.moveTo(G.L, y); g.lineTo(G.L + G.plotW, y); g.stroke(); }
     g.globalAlpha = 1;
-    if (S.heatOn) drawHeat(g, G, a, b, row, xOf, bw, yOf);               // 봉 아래 배경
+    if (S.heatOn) drawHeat(g, G, C, a, b, row, xOf, bw, yOf);            // 봉 아래 배경
     for (i = a; i <= b; i++) {
       var x = xOf(i), up = D.c[i] >= D.o[i], col = up ? C.good : C.bad;
       var cell = cellMode ? S.cells.get(row + "|" + D.d[i]) : null;
@@ -501,6 +525,15 @@
           var bq = cell[1][k], sq = cell[2][k], lo = cell[0] + k * v.row;
           html = "<b>" + D.d[i] + " · $" + px(lo) + "–" + px(lo + v.row) + "</b><br>매수 " + qty(bq) + " ETH · 매도 " + qty(sq) +
                  ' ETH<br>차 <span class="' + (bq >= sq ? "fpd-pos" : "fpd-neg") + '">' + (bq >= sq ? "+" : "−") + qty(Math.abs(bq - sq)) + "</span> · 행 $" + v.row;
+        }
+      }
+      var hh = S.heatOn ? S.heat.get(v.row + "|" + D.d[i]) : null;      // 히트맵 칸 = 추정 청산 금액(테두리 칸이 좁아 글자가 안 들어갈 때도 여기서 읽힌다)
+      if (hh && hh[2]) {
+        var hk = Math.floor(p / v.row) - Math.floor(hh[0] / v.row);
+        if (hk >= 0 && hk < hh[2].length && hh[2][hk] > 0) {
+          var hlo = hh[0] + hk * v.row, oiU = D.oi[i] != null ? D.oi[i] * D.c[i] : null, up = hlo + v.row / 2 >= D.c[i];
+          html = (html ? html + "<br>" : "<b>" + D.d[i] + " · $" + px(hlo) + "–" + px(hlo + v.row) + "</b><br>") +
+                 "추정 " + (up ? "숏" : "롱") + " 청산 " + (oiU ? usd(hh[2][hk] * 2 * oiU) : (hh[2][hk] * 100).toFixed(1) + "% (OI 없음)") + " · 그날 마감 지도";
         }
       }
     } else {

@@ -3,7 +3,7 @@
 하루 한 열 = 그날 UTC 마감 시점의 «살아 있는 추정 청산 밀도» -- dashboard.footprint_daily.heat_for_day
 (= 라이브 청산맵과 같은 compute_spliced_levels, 입력 창 HEAT_LOOKBACK_H=168 · 마감 뒤 봉은 안 봄).
 원천: data.binance.vision USDⓈ-M 1시간봉(2019-12~, 월 파일 · 아직 월 파일이 없는 달은 일 파일). 바이낸스 REST 아님.
-산출: data/footprint_daily/ETHUSDT_liqheat.parquet  day(date) · price(칸 가운데) · w(0~1)
+산출: data/footprint_daily/ETHUSDT_liqheat.parquet  day(date) · price(칸 가운데) · w(0~1, 쪽마다 최대 대비) · s(지도 전체 중 몫, 합 1)
 실행: python scripts/build_eth_liq_heat_daily_20261008.py [--selftest]
 """
 from __future__ import annotations
@@ -66,9 +66,9 @@ def build(k: pd.DataFrame) -> pd.DataFrame:
     rows, d = [], date(2020, 1, 1)
     end = (k.timestamp.max() + pd.Timedelta(hours=1)).date()      # 마감된 마지막 날까지
     while d < end:
-        rows += [(d, p, w) for p, w in heat_for_day(k, d)]
+        rows += [(d, p, w, s) for p, w, s in heat_for_day(k, d)]
         d += timedelta(days=1)
-    return pd.DataFrame(rows, columns=["day", "price", "w"])
+    return pd.DataFrame(rows, columns=["day", "price", "w", "s"])
 
 
 def selftest() -> None:
@@ -80,7 +80,12 @@ def selftest() -> None:
     k2 = k.copy()
     k2.loc[k2.timestamp >= pd.Timestamp("2026-01-09", tz="UTC"), ["high", "low", "close"]] *= 1.5   # 마감 뒤 봉을 바꿔도
     assert a and heat_for_day(k2, date(2026, 1, 8)) == a, "마감 뒤 봉을 봤다(미래참조)"
-    assert all(0 < w <= 1 for _, w in a)
+    assert all(0 < w <= 1 and s > 0 for _, w, s in a) and abs(sum(s for *_, s in a) - 1) < 1e-9   # 몫 합 = 1
+    from scripts.live_liquidation_map_20260824 import compute_spliced_levels       # w = 라이브 heatmap_bins 그대로
+    end = pd.Timestamp("2026-01-09", tz="UTC")
+    win = k[(k.timestamp < end) & (k.timestamp >= end - pd.Timedelta(hours=HEAT_LOOKBACK_H))].reset_index(drop=True)
+    ref = compute_spliced_levels(win, float(win.close.iloc[-1]))["heatmap_bins"]
+    assert [(b["price"], b["weight_pct"]) for b in ref if b["weight_pct"] > 0] == [(p, w) for p, w, _ in a]
     assert heat_for_day(k, date(2025, 12, 31)) == []         # 창에 봉이 없으면 없음
     print(f"selftest OK -- 마감 뒤 봉 무시(인과) · w 0~1 · 창 {HEAT_LOOKBACK_H}h")
 

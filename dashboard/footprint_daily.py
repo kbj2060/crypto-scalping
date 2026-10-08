@@ -235,34 +235,55 @@ class DailyFootprint:
 HEAT_LOOKBACK_H = 168     # 일봉 청산 히트맵 입력 창(7일 1시간봉) -- 라이브 5분 화면은 24h, 일봉 한 칸이 24h 라 7일로
 
 
-def heat_for_day(k1h: pd.DataFrame, d: date) -> list[tuple[float, float]]:
-    """그날 UTC 마감 시점의 추정 청산 밀도 [(칸 가격, w 0~1)] -- 라이브 청산맵과 같은 함수(compute_spliced_levels).
+def heat_for_day(k1h: pd.DataFrame, d: date) -> list[tuple[float, float, float]]:
+    """그날 UTC 마감 시점의 추정 청산 밀도 [(칸 가격, w 0~1, s)] -- 라이브 청산맵과 같은 계산(compute_spliced_levels 의 heatmap_bins:
+    현재가 아래 = (고+저)/2 진입 · 위 = 종가 진입, w = 쪽마다 최대값 대비). s = 그 칸이 지도 전체(두 쪽 합)에서 차지하는 몫
+    -- 화면이 «s × 2 × 그날 OI 달러»로 금액을 낸다(청산맵 tier_profile 의 2×OI 규모와 같은 뜻).
     k1h: timestamp(봉 시작, UTC)·high·low·close·volume. 마감 뒤 봉은 안 본다(인과). 20봉 미만이면 []."""
-    from scripts.live_liquidation_map_20260824 import compute_spliced_levels
+    from scripts import live_liquidation_map_20260824 as lm
     end = pd.Timestamp(d, tz="UTC") + pd.Timedelta(days=1)
-    win = k1h[(k1h.timestamp < end) & (k1h.timestamp >= end - pd.Timedelta(hours=HEAT_LOOKBACK_H))]
+    win = k1h[(k1h.timestamp < end) & (k1h.timestamp >= end - pd.Timedelta(hours=HEAT_LOOKBACK_H))].reset_index(drop=True)
     if len(win) < 20:
         return []
-    res = compute_spliced_levels(win.reset_index(drop=True), float(win.close.iloc[-1]))
-    return [(float(b["price"]), float(b["weight_pct"])) for b in res.get("heatmap_bins") or [] if b["weight_pct"] > 0]
+    cp = float(win.close.iloc[-1])
+    common = lm._prepare_common(win, cp)
+    if common is None:
+        return []
+    bm = lm._bins_from_common(common, (win.high.to_numpy(float) + win.low.to_numpy(float)) / 2.0)
+    bc = lm._bins_from_common(common, None)
+    if bm is None or bc is None:
+        return []
+    bw = common["bin_width"]
+    sides = [{b: w for b, w in bm.items() if b * bw < cp}, {b: w for b, w in bc.items() if b * bw >= cp}]
+    tot = sum(sum(x.values()) for x in sides)
+    out = []
+    for side in sides:
+        mx = max(side.values(), default=0.0)
+        if mx > 0:
+            out += [(round(b * bw, 4), round(w / mx, 4), w / tot) for b, w in side.items() if w > 0]
+    return sorted(out)
 
 
-def rebin_heat(price: np.ndarray, w: np.ndarray, row: int) -> list:
-    """히트맵 칸 → row 달러 칸, 칸 안 최대값(0~1 척도 유지). [첫 칸 하한, [w…]]."""
+def rebin_heat(price: np.ndarray, w: np.ndarray, row: int, s: np.ndarray | None = None) -> list:
+    """히트맵 칸 → row 달러 칸. [첫 칸 하한, [칸 안 최대 w…], [칸 안 몫 합 s…]] (s 가 없으면 둘째 목록까지)."""
     if not len(price):
-        return [0, []]
+        return [0, []] if s is None else [0, [], []]
     k = np.floor_divide(price, row).astype(np.int64)
     lo, n = int(k.min()), int(k.max() - k.min() + 1)
     out = np.zeros(n)
     np.maximum.at(out, k - lo, w)
-    return [lo * row, np.round(out, 3).tolist()]
+    if s is None:
+        return [lo * row, np.round(out, 3).tolist()]
+    sm = np.zeros(n)
+    np.add.at(sm, k - lo, s)
+    return [lo * row, np.round(out, 3).tolist(), [float(f"{v:.4g}") for v in sm]]
 
 
 _heat: dict[str, Any] = {"mtime": None, "by": {}, "until": None, "recent": {}}
 
 
 def load_heat(hist_dir: Path = HIST_DIR) -> tuple[dict, str | None]:
-    """히트맵 소급본(scripts/build_eth_liq_heat_daily_20261008.py) -> (날짜 -> (price[], w[]), 마지막 날)."""
+    """히트맵 소급본(scripts/build_eth_liq_heat_daily_20261008.py) -> (날짜 -> (price[], w[], s[] | None), 마지막 날)."""
     f = hist_dir / f"{SYMBOL}_liqheat.parquet"
     if not f.exists():
         return {}, None
@@ -271,7 +292,8 @@ def load_heat(hist_dir: Path = HIST_DIR) -> tuple[dict, str | None]:
             h = pd.read_parquet(f)
             h["day"] = h.day.map(_ds)
             _heat.update(mtime=f.stat().st_mtime, until=h.day.max(),
-                         by={d: (g.price.to_numpy(float), g.w.to_numpy(float)) for d, g in h.groupby("day", sort=False)})
+                         by={d: (g.price.to_numpy(float), g.w.to_numpy(float), g.s.to_numpy(float) if "s" in g else None)
+                             for d, g in h.groupby("day", sort=False)})
         return _heat["by"], _heat["until"]
 
 
@@ -305,11 +327,11 @@ def heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None = 
                 k = k if k is not None else klines_1h(raw_1h, now)
                 if k is not None and len(k):
                     pw = heat_for_day(k, d)
-                    c = (np.array([p for p, _ in pw]), np.array([w for _, w in pw]))
+                    c = (np.array([x[0] for x in pw]), np.array([x[1] for x in pw]), np.array([x[2] for x in pw]))
                     if d < today:
                         _heat["recent"][key] = c
         if c is not None and len(c[0]):
-            out[key] = rebin_heat(c[0], c[1], row)
+            out[key] = rebin_heat(c[0], c[1], row, c[2])
     return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H, "until": until}
 
 

@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261008-lqd">
+  <link rel="stylesheet" href="styles.css?v=20261008-hbox">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -288,13 +288,13 @@
                 <button type="button" data-view="30">30일</button>
                 <button type="button" data-view="180">6개월</button>
                 <button type="button" data-view="all">전체</button>
-                <button type="button" data-heat aria-pressed="true" title="청산 히트맵 — 날마다 그날 마감의 추정 청산 밀집(진한 곳만 줄로 · 7일 1시간봉 · 라이브 청산맵과 같은 계산)">히트맵</button>
+                <button type="button" data-heat aria-pressed="true" title="청산 히트맵 — 날마다 그날 마감의 추정 청산 밀도(7일 1시간봉 · 라이브 청산맵과 같은 계산) · 테두리 = 위·아래 가장 큰 칸 2개씩과 그 금액">히트맵</button>
               </div>
             </div>
             <canvas id="fpDailyCanvas" class="fpd-canvas" tabindex="0" role="img"
                     aria-label="ETH 일봉 풋프린트 — 가격 칸별 매수·매도와 델타·거래대금·OI·청산. 화살표 = 이동 · +/− = 확대/축소 · Home = 전체 · End = 최근 30일"></canvas>
             <p id="fpDailyStatus" class="fpd-status muted" role="status"></p>
-            <p class="fpd-note muted">날짜 = UTC 자정(KST 09:00) · 칸 = 공격자 매도(왼쪽) / 매수(오른쪽), 진할수록 한쪽 우세 · 주황 테두리 = 그날 가장 많이 거래된 가격 · 파란 줄 = 그날 마감의 추정 청산 밀집(진한 곳만 · 7일 창 · 라이브 청산맵과 같은 계산) ·
+            <p class="fpd-note muted">날짜 = UTC 자정(KST 09:00) · 칸 = 공격자 매도(왼쪽) / 매수(오른쪽), 진할수록 한쪽 우세 · 주황 테두리 = 그날 가장 많이 거래된 가격 · 파란 칸 = 그날 마감의 추정 청산 밀도(진할수록 많음 · 7일 창 · 라이브 청산맵과 같은 계산) · 테두리 = 그날 종가 위(초록, 숏)·아래(빨강, 롱) 가장 큰 칸 2개씩, 금액 = 그 칸 몫 × 2 × 그날 OI(OI 없는 날은 %) ·
               청산 = 바이낸스 강제주문(위 숏 · 아래 롱, 2026-09-20 수집 시작) · OI = 막대 전일 대비 · 선 수준(2022-01 부터) · 빗금 = 모름 · 서술이지 신호가 아님</p>
           </div>
         </div>
@@ -544,9 +544,9 @@
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden></div>
   </div>
-  <script src="./app.js?v=20261008-lqd"></script>
-  <script src="./fp_daily.js?v=20261008-lqd"></script>
-  <script src="./liq_profile.js?v=20261008-lqd"></script>
+  <script src="./app.js?v=20261008-hbox"></script>
+  <script src="./fp_daily.js?v=20261008-hbox"></script>
+  <script src="./liq_profile.js?v=20261008-hbox"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>
