@@ -3223,6 +3223,12 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
   #fpCard .chart-head-left { width: 100%; row-gap: 8px; }
   #fpCard .chart-head-left > .card-title { align-self: center; }
   #chartWindowTabs, #liqDaysTabs { flex: 1 1 0; display: grid; }
+  /* 2026-10-10 머리 첫 줄 = 보기 토글 + 창 탭(사용자 «모바일 최적화»): 제목까지 셋이 한 줄에 끼여 창 탭 칸이 ~40px 로 눌리고
+     선택 조각이 오른쪽 끝에서 잘렸다. 제목은 화면에서만 숨기고(토글이 «풋프린트/청산맵»을 이미 말한다) 탭 글자 여백을 줄인다. */
+  #fpCard .chart-head-left > .card-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #fpViewTabs { flex: 0 0 auto; }
+  #fpViewTabs .asset-tab { padding-left: 12px; padding-right: 12px; }
+  #chartWindowTabs .asset-tab, #liqDaysTabs .asset-tab { padding-left: 2px; padding-right: 2px; }
   #chartPan { flex: 1 1 100%; display: flex; }
   #chartPan[hidden] { display: none; }
   #chartPan .chart-pan-map { flex: 1 1 auto; min-width: 0; width: auto; }

@@ -7327,6 +7327,17 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       } catch (e) { /* 측정 불가(비렌더) -- 그대로 둔다 */ }
     }
     if (p.marker) svg.appendChild(line);   // 배지 위에 -- 위 주석 참조
+    // 2026-10-10 휴대폰 풋프린트 현재가(사용자 «모바일 차트에 현재가가 안 보인다»): 가격축이 없어 아래 한 줄에만 있었다 --
+    //   데스크톱처럼 굵은 숫자를 호가 띠 오른쪽 끝에(바탕색 외곽선으로 막대 위에서도 읽힘). 빠른 갱신(updateLivePriceFast)이 따라 옮긴다.
+    let mobNow = null;
+    if (mobileChart && footprint && p.label === "현재" && isSnapshotChart) {
+      mobNow = document.createElementNS(NS, "text");
+      Object.entries({ x: xRR - 2, y: labelY + 4, "text-anchor": "end", "font-size": 13, "font-weight": 800, fill: p.color,
+                       stroke: "var(--chart-bg)", "stroke-width": 4, "paint-order": "stroke", "pointer-events": "none",
+                       style: "font-variant-numeric: tabular-nums" }).forEach(([k, v]) => mobNow.setAttribute(k, v));
+      mobNow.textContent = fmtNum(p.val, pxDp());
+      svg.appendChild(mobNow);
+    }
 
     // 현재가 줄만 표식을 단다 -- 틱마다 **이 세 요소만** 옮기려는 것이다(전체 재렌더는 1초).
     // 표식이 없으면 빠른 갱신이 어느 줄을 움직여야 하는지 알 수 없다.
@@ -7335,6 +7346,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       rect.dataset.live = "box";
       pTxt.dataset.live = "text";
       if (txt) txt.dataset.live = "label";
+      if (mobNow) { mobNow.dataset.live = "label"; mobNow.dataset.withPrice = "num"; }
       if (tagBg) tagBg.dataset.live = "labelbg";
       if (priceLeft && txt) txt.dataset.withPrice = gutOn ? "num" : "1";   // 빠른 갱신이 글자 속 가격도 바꾼다(num = 숫자만)
     }
@@ -7348,7 +7360,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴**이름 있는 것만** 싣는다(현재·진입·지지n·저항n). 청산맵이 얹는 익명 레벨까지 넣으면
     //   줄이 넘쳐 넘침 가드가 뒤쪽을 자르는데, 하필 그 뒤쪽이 «지지1» 처럼 이름 있는 것이었다
     //   (실측). 익명 레벨은 플롯 안의 선·꺾쇠가 이미 «어느 행인가»를 말한다.
-    priceLabels.filter((p) => p.label).forEach((p) => {
+    // 2026-10-10 풋프린트는 현재가가 차트 안(호가 띠 끝)에 있어 줄에서 뺀다 -- 그 자리로 지지·저항이 덜 잘린다.
+    priceLabels.filter((p) => p.label && !(footprint && p.label === "현재")).forEach((p) => {
       if (x > w - 30) return;
       const t = document.createElementNS(NS, "text");
       t.setAttribute("x", x); t.setAttribute("y", rowY);
@@ -8122,6 +8135,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     subPanelCache.s1.key = subPanelCache.dens.key = "";
   }
   if (wallTagsG) svg.appendChild(wallTagsG);   // 2026-10-06 호가벽 경계 꼬리표(위 G 블록) -- 호가 띠 위에
+  { const mn = mobileChart && svg.id === "candleSvgSnapshot" ? svg.querySelector('[data-live="label"][data-with-price="num"]') : null;
+    if (mn && !mn.classList.contains("far-lbl")) svg.appendChild(mn); }   // 2026-10-10 휴대폰 현재가 숫자 = 호가 띠(◌ 표식) 위 맨 앞
   // 2026-10-01 프로파일 오른쪽 끝 가격 이름과 겹치는 호가 벽 수량 글자(«11.8k»)는 숨긴다(사용자 지시) -- 층 캐시라 매번 되살린 뒤 다시 판정
   if (svg.id === "candleSvgSnapshot") {
     const far = [...svg.querySelectorAll(".far-lbl")].map((n) => n.getBoundingClientRect()).filter((r) => r.width > 0);
