@@ -1764,7 +1764,10 @@ svg {
 /* 2026-10-09 권고 규칙 칩: 고르면 진입비율 묶음을 숨긴다(크기를 서버 규칙이 정한다 -- 고를 수 없는 것을 보이지 않는다) */
 .rule-box { display: inline-flex; align-items: center; gap: 8px; }
 .rule-box[hidden] { display: none; }
-.entry-line.rule-on .frac-part { display: none !important; }
+.entry-line.rule-on .frac-part, .entry-line.rule-on #snapEntryFrac, .entry-line.rule-on .sltp-toggle, .entry-line.rule-on #snapVolMult { display: none !important; }
+/* ↑ 2026-10-09 자동이면 진입비율 게이지(떠다니는 패널은 칩 대신 range 를 드러낸다)·SL/TP 체크도 숨긴다 -- 크기·손절·익절을 규칙이 정해 바꿔도 안 먹는다 */
+.ofab-panel #snapRuleBox .chipset { display: flex; }      /* 패널은 칩을 감추고 range 를 쓰지만 이 칩은 range 껍데기가 아니다(숨은 입력) -- 모드가 보여야 한다 */
+.ofab-panel .entry-line > #snapRuleBox { order: 4; flex-basis: 100%; }
 .vol-mult { display: inline-flex; align-items: baseline; gap: 5px; min-height: 24px; padding: 4px 8px; border: 1px solid var(--soft-line);
   border-radius: 7px; background: var(--glass); cursor: help; white-space: nowrap; }
 .vol-mult > span { font: 600 11px/1 var(--font-sans); color: var(--muted); }

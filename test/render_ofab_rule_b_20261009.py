@@ -68,6 +68,21 @@ with sync_playwright() as p:
         if st1["card"] != "1.5" or st1["store"] != "1.5" or not st1["l"].startswith("첫 $") or "손절" not in st1["s"] or not st1["two"] or st1["pressed"] != "false,true,false" or not st1["ruleOn"]:
             fails.append(f"[{w}] 자동 상태 {st1}")
         pg.screenshot(path=str(OUT / f"b_auto_{w}.png"), clip=pg.evaluate("() => { const r = document.getElementById('ofabFlat').getBoundingClientRect(); return {x: Math.max(0, r.x - 60), y: Math.max(0, r.y - 60), width: Math.min(innerWidth - Math.max(0, r.x - 60), r.width + 120), height: r.height + 76}; }"))
+        # 펼친 패널: 자동이면 진입비율 게이지·SL/TP 숨김 + «크기» 칩 보임(10-09 사용자 «진입비율 게이지가 왔다갔다 된다»)
+        VIS = """() => { const v = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+                  return { frac: v(document.getElementById('snapEntryFrac')), sltp: v(document.querySelector('.sltp-toggle')),
+                           rule: v(document.querySelector('#snapRuleBox .chipset')), inPanel: !!document.querySelector('#ofabPanel #snapRuleBox'),
+                           vm: v(document.getElementById('snapVolMult')) }; }"""
+        pg.click("#ofabMore"); pg.wait_for_timeout(700)
+        pv1 = pg.evaluate(VIS)
+        print(w, "패널(자동)", pv1)
+        if pv1 != {"frac": False, "sltp": False, "rule": True, "inPanel": True, "vm": False}: fails.append(f"[{w}] 자동 패널 {pv1}")
+        pg.locator("#ofabPanel").screenshot(path=str(OUT / f"b_panel_auto_{w}.png"))
+        pg.click("#ofabPanel #snapRuleBox .chip[data-v='0']"); pg.wait_for_timeout(500)
+        pv2 = pg.evaluate(VIS)
+        if not (pv2["frac"] and pv2["sltp"] and pv2["rule"]): fails.append(f"[{w}] 직접 패널 {pv2}")
+        pg.click("#ofabPanel #snapRuleBox .chip[data-v='1.5']"); pg.wait_for_timeout(400)
+        pg.click("#ofabMore"); pg.wait_for_timeout(500)
         if w > 500:   # 마우스 1.5초 꾹 = 미리보기 → 제출(가짜) 에 rule=1.5
             n1 = len(log)
             bb = pg.evaluate("() => document.getElementById('ofabLong').getBoundingClientRect().toJSON()")
