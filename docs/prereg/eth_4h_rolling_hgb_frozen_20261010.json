@@ -195,5 +195,23 @@
     "5": 2
    }
   }
+ },
+ "H_fund_funding_hour_residual": {
+  "frozen_kst": "2026-10-10 08:15",
+  "rule": "시각 h∈{00,08,16} UTC: 첫 30분 f30 − (b0 + b1·테이커 불균형30) = 잔차, |잔차| > 0.5σ30 이면 잔차 반대로 4h 보유",
+  "flow_coef": {
+   "ETHUSDT": [
+    2.547,
+    264.279
+   ],
+   "BTCUSDT": [
+    1.627,
+    175.668
+   ]
+  },
+  "evidence_in_sample": "2022~26 잔차 β(1σ당) ETH 00시 −8.3·08/16시 −7.2·그 외 +0.7 · BTC −8.4/−4.0/−0.5 — 결과를 보고 세운 가설",
+  "literature": "직접 근거 없음 · 00시 거래량·변동 급증(Hansen 외 2021) · 펀딩 시각 스프레드·역선택 증가(Ruan·Streltsov) · 개장 모멘텀 보고(Shen 외 2022, Kim·Hansen 2026)는 반대 부호",
+  "recorder": "scripts/live_eth_direction_forward_recorder_20261010.py --record 를 00:31·08:31·16:31 UTC (서버 cron 미등록)",
+  "verdict": "2026-10-10 이후 기록 ≥180일 · ETH·BTC 각 잔차 결정 4h 손익 4bp 후 일 부트스트랩 95% CI 하한 > 0 · 그 전엔 --status 만"
  }
 }
