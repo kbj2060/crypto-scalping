@@ -767,7 +767,7 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--portfolio"
 
 def forward_status():
     """전진 사전등록 상태 — 결과는 보지 않고(판정 전 금지) 동결 이후 쌓인 일수와 판정 가능일만."""
-    days = sorted(p.name[13:23] for p in (BV / "panel_daily").glob("ETHUSDT-5m-*.parquet"))
+    days = sorted(p.name[11:21] for p in (BV / "panel_daily").glob("ETHUSDT-5m-*.parquet"))
     fwd = [d for d in days if d >= "2026-09-15"]
     first = pd.Timestamp("2026-09-15") + pd.Timedelta(days=180)
     print(f"동결 이후 ETH 5분 일 파일 {len(fwd)}일({fwd[0] if fwd else '-'} ~ {fwd[-1] if fwd else '-'}) · 판정 조건 ≥180일 → 가장 이른 판정 {first.date()} · "
