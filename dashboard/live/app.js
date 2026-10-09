@@ -4978,7 +4978,10 @@ function renderSupply1s(box = null, src = null) {
   //   화면에서 플롯이 344px = **+32%** 가 되고, 범례는 아래에서 플롯 위로 얹는다.
   //   🔴데스크톱은 그대로 둔다 -- 폭이 남는 화면에서 글자를 데이터 위에 올릴 이유가 없다.
   // 2026-09-28 다섯 줄 거울 막대 -- 왼쪽 칸에 줄 이름·누적값(범례 박스를 대체), 오른쪽은 얇은 여백만.
-  const ml = 100, mr = 8;   // 2026-09-30 두 줄 선 차트: 왼쪽 칸 = 선 견본 + 값(«선물 +2.4k»), 줄 이름은 줄 위 머리 띠
+  // 2026-10-10 휴대폰(사용자 «모바일 최적화»): 왼쪽 칸(100px)이 348px 폭의 1/3 이라 선이 오른쪽 2/3 에 눌렸다 --
+  //   좁은 폭에서는 견본·값을 줄 머리 띠(이름 아래 한 줄)로 올리고 선이 전체 폭을 쓴다.
+  const compact = narrow && isMobileChartMode();   // 넓은 화면 2단의 오른쪽 칸(좁은 상자)은 그대로
+  const ml = compact ? 8 : 100, mr = 8;   // 2026-09-30 두 줄 선 차트: 왼쪽 칸 = 선 견본 + 값(«선물 +2.4k»), 줄 이름은 줄 위 머리 띠
   const cw = w - ml - mr;
   const flowTop = mt, flowH = h - mb - flowTop;
   // 🔴이 줄이 없어서 HTML 의 고정 viewBox(1200) 가 그대로 남아 있었다. 폭을 부모에서 받도록
@@ -5092,7 +5095,7 @@ function renderSupply1s(box = null, src = null) {
     prevSec = x;
   });
   // 줄 틀: 0선 · 구분선 · 왼쪽 칸에 이름 + 값 목록([글자, 색, 선 모양 견본]).
-  const HEAD = 18;   // 줄 이름 머리 띠 -- 이름(«고래 · 중형 · 리테일»)이 왼쪽 칸보다 길어 선과 겹쳤다(09-30 1920 실측)
+  const HEAD = compact ? 38 : 18;   // 줄 이름 머리 띠 -- 이름(«고래 · 중형 · 리테일»)이 왼쪽 칸보다 길어 선과 겹쳤다(09-30 1920 실측) · 휴대폰은 견본 줄까지
   const laneFrame = (k, name, items) => {
     const y0 = flowTop + k * laneH, zc = y0 + HEAD + (laneH - HEAD) / 2;
     const zl = document.createElementNS(NS, "line");
@@ -5107,6 +5110,30 @@ function renderSupply1s(box = null, src = null) {
     }
     const fs = narrow ? 11 : 12, gap = fs + 9;
     label(6, y0 + 14, name, "var(--text)", null, narrow ? 12 : 13).setAttribute("font-weight", "700");
+    if (compact) {   // 이름 아래 한 줄: 견본 + 값을 가로로(넘치면 거기서 멈춘다 -- 잘린 글자를 남기지 않는다)
+      let x = 6;
+      items.forEach(([txt, col, sw]) => {
+        if (x > w - 24) return;
+        const yy = y0 + 31;
+        let sm = null;
+        if (sw) {
+          sm = document.createElementNS(NS, "line");
+          sm.setAttribute("x1", x); sm.setAttribute("x2", x + 12); sm.setAttribute("y1", yy - fs / 3); sm.setAttribute("y2", yy - fs / 3);
+          sm.setAttribute("stroke", sw.color); sm.setAttribute("stroke-width", Math.min(2.4, sw.width));
+          sm.setAttribute("stroke-opacity", sw.op); if (sw.dash) sm.setAttribute("stroke-dasharray", sw.dash);
+          svg.appendChild(sm);
+        }
+        const t = label(x + (sw ? 16 : 0), yy, txt, col, null, fs);
+        t.setAttribute("font-weight", "700");
+        let tw = 0;
+        try { tw = t.getComputedTextLength(); } catch (e) { /* 비렌더 */ }
+        if (!(tw > 0)) tw = txt.length * fs * 0.62;
+        const end = x + (sw ? 16 : 0) + tw;
+        if (end > w - 4) { t.remove(); if (sm) sm.remove(); x = w; return; }
+        x = end + 12;
+      });
+      return { y0, zc, hh: (laneH - HEAD) / 2 - 4 };
+    }
     let y = zc - (items.length * gap) / 2 + fs - gap;
     items.forEach(([txt, col, sw]) => {
       y += gap;

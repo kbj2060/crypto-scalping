@@ -2279,6 +2279,10 @@ svg {
 @media (max-width: 720px) {
   #candleSvgSnapshot { height: 1082px; }
   .candle-container { height: 1094px; }
+  /* 2026-10-10 휴대폰 청산맵(사용자 «너무 길어 핸드폰으로 보기 불편»): 청산맵은 교체 영역(풋프린트~레인 706px)을 통째로 덮어
+     세로로 길었다 -- 청산맵일 때만 상자를 242px 줄여 교체 영역이 ~464px 가 되게 한다(아래 1초 수급은 그대로). 일봉은 그대로. */
+  #fpCard.fp-liq-on #candleSvgSnapshot { height: 840px; }
+  #fpCard.fp-liq-on .candle-container { height: 852px; }
 }
 /* 2026-09-19 히트맵 그림을 걷어내고(사용자 지시) 프로파일이 그 수치를 직접 그린다 --
    상자가 844 -> 706 으로 돌아왔다. SUB_TOTAL 306 = 8 + 190(프로파일) + 8 + 100(1초 수급).
@@ -3220,7 +3224,8 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 @media (max-width: 720px) {
   #fpCard > .ops-health-head, #newsCard > .ops-health-head, #optCard > .ops-health-head, #acctCard > .ops-health-head {
     padding: 4px 0 12px; }
-  #fpCard .chart-head-left { width: 100%; row-gap: 8px; }
+  #fpCard > .ops-health-head { padding-bottom: 6px; }   /* 2026-10-10 차트 머리 압축(사용자 «모바일 최적화») -- 차트가 위로 */
+  #fpCard .chart-head-left { width: 100%; row-gap: 6px; }
   #fpCard .chart-head-left > .card-title { align-self: center; }
   #chartWindowTabs, #liqDaysTabs { flex: 1 1 0; display: grid; }
   /* 2026-10-10 머리 첫 줄 = 보기 토글 + 창 탭(사용자 «모바일 최적화»): 제목까지 셋이 한 줄에 끼여 창 탭 칸이 ~40px 로 눌리고
