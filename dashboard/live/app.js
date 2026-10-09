@@ -7690,7 +7690,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       t.setAttribute("text-anchor", anchor); t.setAttribute("fill", fill); t.textContent = str;
       g.appendChild(t);
     };
-    if (TRADE_W) head(x0, "start", "var(--muted)", "호가 →");   // 2026-10-10 «← 체결» 자리는 [체결 | 포지션] 토글(풋프린트 블록이 매번 그린다)
+    if (TRADE_W) {   // 2026-10-10 ETH 는 «← 체결» 자리가 [체결 | 포지션] 토글(풋프린트 블록이 매번 그린다) · SOL·XRP 는 글자 그대로
+      if (activeSnapshotAsset !== "eth") head(x0 - 6, "end", "var(--amber)", "← 체결");
+      head(x0, "start", "var(--muted)", "호가 →");
+    }
     else { head(x0, "start", "var(--muted)", "호가"); if (TRADE_L) head(ml - 2, "end", "var(--amber)", "체결"); }
     // 2026-09-28 호가 요약 네 숫자 = **막대 계기 넷**(사용자 선택 시안 A) -- 데스크톱은 체결·호가 기둥 머리, 모바일은 풋프린트 위 한 줄.
     //   변동 0→100 채움(높으면 주황) · 불균형 가운데 0 에서 초록(매수 호가 두꺼움)/빨강 · 지속·이탈 0→100 채움.

@@ -219,8 +219,8 @@ def run(shot):
             if not ov2 or max(abs(ov2[k]) for k in ("dx", "dy", "dw", "dh")) > 1 or not covered(ov2): fails.append(f"[{tag}] 청산맵 상자 ≠ 교체 영역/모의 판·지지저항 노출 {ov2}")
             for d in ("7", "30", "1"):                      # 기간 버튼: 7·30일은 /tiers 를 부르고 그림이 바뀐다
                 hb = hashlib.md5(pg.locator("#liqProfileCanvas").screenshot()).hexdigest()
-                pg.click(f"#liqProfileTools [data-days='{d}']"); pg.wait_for_timeout(1500)
-                pressed = pg.get_attribute(f"#liqProfileTools [data-days='{d}']", "aria-pressed")
+                pg.click(f"#liqDaysTabs [data-days='{d}']"); pg.wait_for_timeout(1500)
+                pressed = pg.get_attribute(f"#liqDaysTabs [data-days='{d}']", "aria-pressed")
                 if pressed != "true" or hashlib.md5(pg.locator("#liqProfileCanvas").screenshot()).hexdigest() == hb:
                     fails.append(f"[{tag}] 청산맵 {d}일 버튼이 그림을 안 바꿈(pressed={pressed})")
                 if shot:
@@ -249,20 +249,27 @@ def run(shot):
             if shot:
                 pg.locator("#liqProfile").screenshot(path=str(pathlib.Path(shot) / f"liq_{w}.png"))
             pg.mouse.move(5, 5)
-            # 10-09 두 축 독립: 청산맵을 고른 채 1d → 청산맵 그대로 + 토글 보임 · 풋프린트 → 일봉
+            # 10-10 사용자 «토글을 창 탭 왼쪽 · 풋프린트면 1h…1d, 청산맵이면 그 자리에 1d·7d·30d»: 청산맵이면 창 탭 숨김·기간 탭 보임
             VIS = """() => { const d = id => { const e = document.getElementById(id); return getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0; };
-                      return { liq: d('liqProfile'), daily: d('fpDaily'), toggle: d('fpViewTabs'), on: window.fpDailyActive() }; }"""
-            pg.click("#fpDailyBtn"); pg.wait_for_timeout(1500)
-            v1 = pg.evaluate(VIS)
-            if v1 != {"liq": True, "daily": False, "toggle": True, "on": True}: fails.append(f"[{tag}] 청산맵 + 1d: 청산맵·토글이 보여야 함 {v1}")
-            pg.click("#fpViewTabs [data-view='fp']"); pg.wait_for_timeout(1500)
-            v2 = pg.evaluate(VIS)
-            if v2 != {"liq": False, "daily": True, "toggle": True, "on": True}: fails.append(f"[{tag}] 1d + 풋프린트: 일봉이 보여야 함 {v2}")
+                      const v = document.querySelector('#fpViewTabs').getBoundingClientRect(), t = document.querySelector('#fpCard .chart-head-left').getBoundingClientRect();
+                      return { liq: d('liqProfile'), daily: d('fpDaily'), win: d('chartWindowTabs'), days: d('liqDaysTabs'), on: window.fpDailyActive(), left: v.left - t.left < 200 }; }"""
+            v0 = pg.evaluate(VIS)
+            if not (v0["liq"] and not v0["win"] and v0["days"] and v0["left"]): fails.append(f"[{tag}] 청산맵: 창 탭 숨김·기간 탭 보임·토글 왼쪽이어야 함 {v0}")
             if shot:
-                pg.locator("#fpCard .chart-head-left").screenshot(path=str(pathlib.Path(shot) / f"tabs_1d_toggle_{w}.png"))
-            pg.click("#fpViewTabs [data-view='liq']"); pg.wait_for_timeout(800)
-            pg.click("#fpDailyBtn"); pg.wait_for_timeout(800)
+                pg.locator("#fpCard .chart-head-left").screenshot(path=str(pathlib.Path(shot) / f"tabs_liq_{w}.png"))
+            pg.click("#fpViewTabs [data-view='fp']"); pg.wait_for_timeout(1200)
+            v1 = pg.evaluate(VIS)
+            if not (not v1["liq"] and v1["win"] and not v1["days"]): fails.append(f"[{tag}] 풋프린트: 창 탭 보임·기간 탭 숨김이어야 함 {v1}")
+            pg.click("#fpDailyBtn"); pg.wait_for_timeout(1500)
+            pg.click("#fpViewTabs [data-view='liq']"); pg.wait_for_timeout(1200)
+            v2 = pg.evaluate(VIS)
+            if not (v2["liq"] and not v2["daily"] and v2["days"] and v2["on"]): fails.append(f"[{tag}] 1d 고른 채 청산맵: 청산맵·기간 탭 {v2}")
             pg.click("#fpViewTabs [data-view='fp']"); pg.wait_for_timeout(1500)
+            v3 = pg.evaluate(VIS)
+            if v3 != {**v3, "liq": False, "daily": True, "win": True, "days": False, "on": True}: fails.append(f"[{tag}] 풋프린트로 오면 일봉·창 탭 {v3}")
+            if shot:
+                pg.locator("#fpCard .chart-head-left").screenshot(path=str(pathlib.Path(shot) / f"tabs_fp1d_{w}.png"))
+            pg.click("#chartWindowTabs [data-bars='12']"); pg.wait_for_timeout(1200)
             if pg.evaluate("() => getComputedStyle(document.querySelector('#fpCard .candle-container')).display") == "none": fails.append(f"[{tag}] 풋프린트로 못 돌아옴")
             pg.close()
         b.close()

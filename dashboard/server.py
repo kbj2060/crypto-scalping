@@ -4560,6 +4560,14 @@ def make_app() -> web.Application:
     POS_OI_HIST_URL = "https://fapi.binance.com/futures/data/openInterestHist"
     pos_books: dict[str, dict] = {}
     pos_locks: dict[str, asyncio.Lock] = {}
+    pos_seed_fail: dict[str, float] = {}     # 첫 30일 적재 실패 시각 -- 60초 안엔 다시 안 부른다(매초 26쪽 REST 반복 방지, 10-10 검토)
+    POS_SEED_BACKOFF_S = 60
+
+    def pos_build(bars: list[tuple[int, float, float, float, float]]) -> "pprof.Book":
+        book = pprof.Book()
+        for b in bars:
+            book.push(*b)
+        return book
 
     async def pos_bars_rest(asset: str, start_s: int, end_s: int) -> list[tuple[int, float, float, float, float]]:
         """닫힌 5분봉 [start_s, end_s) 의 (시각, 고, 저, 거래량, 봉 끝 OI). OI 이력은 바이낸스가 30일만 준다."""
@@ -4594,10 +4602,15 @@ def make_app() -> web.Application:
             now = int(time.time()); cur = now // 300 * 300                  # 형성 중인 봉 시작
             st = pos_books.get(asset)
             if st is None:
-                bars = await pos_bars_rest(asset, cur - 30 * 86400 + 300, cur)
-                book = pprof.Book()
-                for b in bars:
-                    book.push(*b)
+                if now - pos_seed_fail.get(asset, 0.0) < POS_SEED_BACKOFF_S:
+                    raise web.HTTPServiceUnavailable(reason="position_profile_seed_backoff")
+                try:
+                    bars = await pos_bars_rest(asset, cur - 30 * 86400 + 300, cur)
+                except Exception as exc:  # noqa: BLE001 -- 시간초과·연결 오류·응답 모양까지 전부 백오프(HTTPException 만 잡으면 500 으로 샜다)
+                    pos_seed_fail[asset] = now
+                    print(f"position profile seed failed (retry in {POS_SEED_BACKOFF_S}s): {exc!r}", flush=True)
+                    raise web.HTTPBadGateway(reason="position_profile_upstream_error") from exc
+                book = await asyncio.to_thread(pos_build, bars)                  # 8,640 걸음 ~0.5초 -- 이벤트 루프 밖에서
                 st = pos_books[asset] = {"book": book, "last": bars[-1][0] if bars else cur - 300, "tried": now}
             elif cur - st["last"] > 300 and now - st["tried"] >= 60:
                 st["tried"] = now
@@ -4605,8 +4618,8 @@ def make_app() -> web.Application:
                     for b in await pos_bars_rest(asset, st["last"] + 300, cur):
                         if b[0] > st["last"]:
                             st["book"].push(*b); st["last"] = b[0]
-                except web.HTTPException:
-                    pass                                                      # 다음 분에 다시 -- 형성 봉 임시 걸음이 그 사이를 덮는다
+                except Exception as exc:  # noqa: BLE001 -- 다음 분에 다시(형성 봉 임시 걸음이 그 사이를 덮는다)
+                    print(f"position profile advance failed (retry next minute): {exc!r}", flush=True)
             return st
 
     def pos_forming(asset: str, since_s: int) -> tuple[tuple | None, float | None]:

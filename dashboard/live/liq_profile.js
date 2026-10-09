@@ -38,8 +38,9 @@
   }
   function setDays(d) {
     S.days = d; S.vlo = S.vhi = null;
-    document.querySelectorAll("#liqProfileTools [data-days]").forEach(function (b) {
-      b.setAttribute("aria-pressed", String(Number(b.dataset.days) === d));
+    document.querySelectorAll("#liqDaysTabs [data-days]").forEach(function (b) {   // 2026-10-10 창 탭 자리로 옮김(사용자)
+      var on = Number(b.dataset.days) === d;
+      b.setAttribute("aria-pressed", String(on)); b.classList.toggle("active", on);
     });
     try { localStorage.setItem("liqDays", String(d)); } catch (e) { /* 저장 못 해도 동작 */ }
     fetchExt(); redraw();
@@ -336,6 +337,9 @@
     var card = $("fpCard"), box = $("liqProfile");
     if (card) card.classList.toggle("fp-liq-on", S.on);
     if (box) box.hidden = !S.on;
+    var wt = $("chartWindowTabs"), dt = $("liqDaysTabs");   // 2026-10-10 보기에 따라 오른쪽 탭: 풋프린트 = 창(1h…1d) · 청산맵 = 기간(1d·7d·30d)
+    if (wt) wt.hidden = S.on;
+    if (dt) dt.hidden = !S.on;
     document.querySelectorAll("#fpViewTabs .asset-tab").forEach(function (b) {
       var on = b.dataset.view === view;
       b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on));
@@ -351,7 +355,7 @@
     document.querySelectorAll("#fpViewTabs .asset-tab").forEach(function (b) {
       b.addEventListener("click", function () { setView(b.dataset.view); });
     });
-    document.querySelectorAll("#liqProfileTools [data-days]").forEach(function (b) {
+    document.querySelectorAll("#liqDaysTabs [data-days]").forEach(function (b) {
       b.addEventListener("click", function () { setDays(Number(b.dataset.days)); });
     });
     document.querySelectorAll("#liqProfileTools [data-view]").forEach(function (b) {

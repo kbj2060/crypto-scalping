@@ -3222,7 +3222,7 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
     padding: 4px 0 12px; }
   #fpCard .chart-head-left { width: 100%; row-gap: 8px; }
   #fpCard .chart-head-left > .card-title { align-self: center; }
-  #chartWindowTabs { flex: 1 1 0; display: grid; }
+  #chartWindowTabs, #liqDaysTabs { flex: 1 1 0; display: grid; }
   #chartPan { flex: 1 1 100%; display: flex; }
   #chartPan[hidden] { display: none; }
   #chartPan .chart-pan-map { flex: 1 1 auto; min-width: 0; width: auto; }
@@ -3283,6 +3283,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 :root { --lev10: var(--book-depth); --lev25: #8b93f0; --lev50: #e6c45c; --lev100: var(--warn); }
 [data-theme="light"] { --lev25: #4a52b8; --lev50: #9a7a12; }
 #fpViewTabs { --seg-n: 2; }
+#liqDaysTabs { --seg-n: 3; }   /* 2026-10-10 청산맵 기간(1d·7d·30d) -- 청산맵일 때 창 탭 자리 */
+#chartWindowTabs[hidden], #liqDaysTabs[hidden] { display: none !important; }
 /* 10-09 사용자 «1d 일 때도 풋프린트/청산맵 토글은 항상»: 두 축이 독립 -- 시간(1h…12h·1d) × 보기(풋프린트·청산맵).
    청산맵을 고르면 시간과 상관없이 청산맵(일봉은 그 아래 숨김), 풋프린트면 1d = 일봉 · 1h…12h = 5분 풋프린트 */
 #fpCard.fp-liq-on #fpDaily { display: none !important; }
