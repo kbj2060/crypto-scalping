@@ -605,3 +605,119 @@ def pooled(syms=("ETH", "BTC", "SOL"), window=365):
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--pooled":
     pooled()
+
+
+def plot_equity():
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+    font_manager.fontManager.addfont("/mnt/c/Windows/Fonts/malgun.ttf"); plt.rcParams["font.family"] = "Malgun Gothic"; plt.rcParams["axes.unicode_minus"] = False
+    fig, ax = plt.subplots(figsize=(11, 4.6))
+    for sym, path, panel in (("ETH", f"{OUT}/pred_전체+개장·365일_4h.npy", panel_path("ETH")), ("BTC 재현", f"{OUT}/pred_BTC_365_4h.npy", panel_path("BTC"))):
+        if not (os.path.exists(path) and os.path.exists(panel)):
+            continue
+        F = pd.read_parquet(panel, columns=["ts", "y_4h"]); y = F.y_4h.to_numpy(); ts = F.ts.to_numpy(); P = np.load(path); pred = P[:, 0]
+        sq = pd.Series(pred)
+        for q, ls in ((0.1, "-"), (0.2, "--")):
+            lo, hi = sq.shift(1).expanding(8640).quantile(q).to_numpy(), sq.shift(1).expanding(8640).quantile(1 - q).to_numpy()
+            idx = np.arange(0, len(y), 48); s = np.where(pred[idx] >= hi[idx], 1, np.where(pred[idx] <= lo[idx], -1, 0))
+            m = (ts[idx] >= np.datetime64("2025-01-01")) & (s != 0) & np.isfinite(y[idx])
+            for cost, a in ((4.0, 1.0), (8.0, .45)):
+                g = pd.Series(s[m] * y[idx][m] - cost, index=pd.to_datetime(ts[idx][m])).cumsum() / 100
+                ax.plot(g.index, g.values, ls, alpha=a, color="C0" if sym == "ETH" else "C3", label=f"{sym} 상·하위 {int(q*100)}% · 비용 {cost:g}bp")
+    ax.axhline(0, color="k", lw=.6); ax.set_ylabel("누적 수익(%, 1배 노출 · 4시간 보유 합)"); ax.set_title("4시간 방향 모델 — 매달 재학습(최근 365일) · 2025-01~2026-09 표본 밖")
+    ax.legend(fontsize=8, ncol=2); fig.tight_layout(); fig.savefig(f"{OUT}/equity.png", dpi=130); print(f"{OUT}/equity.png")
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--plot":
+    plot_equity()
+
+
+def seeds_and_importance():
+    """최종 후보(ETH · 전체+개장 · 365일 · 월별) 시드 1·2 재현 + 순열 중요도(2025-07·2026-03 두 달 모델, 그 달 시험)."""
+    from sklearn.ensemble import HistGradientBoostingRegressor
+    F = pd.read_parquet(panel_path("ETH")); FC = feat_cols(F); nm, h = "4h", 48
+    out = {}
+    for sd in (1, 2):
+        pred, lo, hi = wf_monthly(F, FC, nm, h, 365, seeds=(sd,))
+        r = phase_eval(F, pred, lo, hi, nm, h); out[f"seed{sd}"] = {k: v for k, v in r.items() if "phase0" not in k}
+        print("시드", sd, json.dumps(out[f"seed{sd}"]), flush=True)
+    y = F[f"y_{nm}"].to_numpy(); ts = F.ts.to_numpy(); X = F[FC].to_numpy(dtype=np.float32); imp = []
+    for m0 in ("2025-07-01", "2026-03-01"):
+        m0 = pd.Timestamp(m0); cut = np.datetime64(m0) - np.timedelta64(5 * h, "m")
+        tr = (ts < cut) & (ts >= cut - np.timedelta64(365, "D")) & np.isfinite(y)
+        te = (ts >= np.datetime64(m0)) & (ts < np.datetime64(m0 + pd.DateOffset(months=3))) & np.isfinite(y)
+        mdl = HistGradientBoostingRegressor(max_iter=300, learning_rate=0.04, max_leaf_nodes=31, min_samples_leaf=1000, l2_regularization=1.0,
+                                            random_state=0).fit(X[tr][::2], y[tr][::2])
+        Xt, yt = X[te][::2], y[te][::2]; base = ic(mdl.predict(Xt), yt); rng = np.random.default_rng(0); d = {}
+        for j, c in enumerate(FC):
+            Xp = Xt.copy(); Xp[:, j] = rng.permutation(Xp[:, j]); d[c] = base - ic(mdl.predict(Xp), yt)
+        imp.append(pd.Series(d)); print("기준 IC", m0.date(), round(base, 4), flush=True)
+    I = pd.concat(imp, axis=1).mean(1)
+    out["perm_top20"] = I.sort_values(ascending=False).head(20).round(4).to_dict()
+    out["perm_family"] = I.groupby(lambda c: c[0]).sum().round(4).to_dict()
+    print("중요도 상위:", out["perm_top20"], "\n묶음:", out["perm_family"], flush=True)
+    json.dump(out, open(f"{OUT}/seeds_importance.json", "w"), ensure_ascii=False, indent=1, default=str)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--seedsimp":
+    seeds_and_importance()
+
+
+def final_model():
+    """최종 모델(07:30 고정): ETH · 전체 피쳐(+개장) · 최근 365일 · 매달 재학습(정화 4h) · HGB 시드 0·1·2 평균 · 4h 보유.
+    신호 = 예측이 과거 예측 분포(확장, 30일 예열)의 상위 q 면 롱 · 하위 q 면 숏. q = 0.2(사전) · 0.1(참고).
+    채점 = 위상 8개를 1/8 씩 든 포트폴리오의 일 손익(일 블록 CI) · 비용 1.4/4/8bp."""
+    F = pd.read_parquet(panel_path("ETH")); FC = feat_cols(F); nm, h = "4h", 48
+    pred, lo, hi = wf_monthly(F, FC, nm, h, 365, seeds=(0, 1, 2))
+    np.save(f"{OUT}/pred_FINAL_eth_4h.npy", np.c_[pred, lo, hi])
+    y = F[f"y_{nm}"].to_numpy(); ts = F.ts.to_numpy(); sq = pd.Series(pred); out = {"features": FC, "ic": round(ic(pred[ts >= np.datetime64("2025-01-01")], y[ts >= np.datetime64("2025-01-01")]), 4)}
+    for q in (0.2, 0.1):
+        l_, h_ = sq.shift(1).expanding(8640).quantile(q).to_numpy(), sq.shift(1).expanding(8640).quantile(1 - q).to_numpy()
+        for cost in (1.4, 4.0, 8.0):
+            rows = []
+            for off in range(0, 48, 6):
+                idx = np.arange(off, len(y), 48); s = np.where(pred[idx] >= h_[idx], 1, np.where(pred[idx] <= l_[idx], -1, 0))
+                m = (ts[idx] >= np.datetime64("2025-01-01")) & (s != 0) & np.isfinite(y[idx])
+                rows.append(pd.Series(s[m] * y[idx][m] - cost, index=pd.to_datetime(ts[idx][m])))
+            g = pd.concat(rows) / 8; d = g.groupby(g.index.floor("D")).sum()
+            d = d.reindex(pd.date_range(d.index.min(), d.index.max(), freq="D"), fill_value=0.0)
+            bs = [d.sample(len(d), replace=True, random_state=i).mean() for i in range(1000)]
+            yr = d.groupby(d.index.year).sum()
+            out[f"q{q}_c{cost}"] = {"day_mean_bp": round(float(d.mean()), 2), "ci": [round(float(np.quantile(bs, .025)), 2), round(float(np.quantile(bs, .975)), 2)],
+                                    "sharpe_ann": round(float(d.mean() / d.std() * np.sqrt(365)), 2), "by_year_bp": {int(k): int(v) for k, v in yr.items()},
+                                    "max_dd_bp": int((d.cumsum() - d.cumsum().cummax()).min()), "trades_per_day": round(float(sum(len(r) for r in rows) / 8 / len(d)), 2)}
+            print(f"q{q} 비용{cost}", json.dumps(out[f"q{q}_c{cost}"]), flush=True)
+    print("IC", out["ic"])
+    json.dump(out, open(f"{OUT}/final_model.json", "w"), ensure_ascii=False, indent=1, default=str)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--finalmodel":
+    final_model()
+
+
+def freeze():
+    """전진 사전등록용 동결(07:58): 2026-09-14 까지 최근 365일로 학습한 시드 0·1·2 HGB + 피쳐 목록 + 문턱 + 판정 규칙.
+    판정(사전 고정): 동결 이후 새로 쌓인 데이터(2026-09-15~)에서, 위상 8개 1/8 포트폴리오 · 상·하위 20% · 비용 4bp · 일 블록 95% CI 하한 > 0
+    이고 6개월(≥180일) 이상 쌓였을 때만 «통과». 그 전엔 건수·날짜만 보고 결과를 들여다보지 않는다. 매달 재학습은 하지 않는다(동결 모델 그대로)."""
+    import hashlib, joblib
+    from sklearn.ensemble import HistGradientBoostingRegressor
+    F = pd.read_parquet(panel_path("ETH")); FC = feat_cols(F); y = F.y_4h.to_numpy(); ts = F.ts.to_numpy()
+    cut = ts.max() - np.timedelta64(240, "m"); tr = (ts < cut) & (ts >= cut - np.timedelta64(365, "D")) & np.isfinite(y)
+    X = F[FC].to_numpy(dtype=np.float32)
+    models = [HistGradientBoostingRegressor(max_iter=300, learning_rate=0.04, max_leaf_nodes=31, min_samples_leaf=1000, l2_regularization=1.0,
+                                            random_state=s).fit(X[tr][::2], y[tr][::2]) for s in (0, 1, 2)]
+    oos = np.load(f"{OUT}/pred_FINAL_eth_4h.npy")[:, 0]; oos = oos[np.isfinite(oos)]
+    spec = {"frozen_at_kst": "2026-10-10 07:58", "train_window": [str(ts[tr].min()), str(ts[tr].max())], "n_train": int(tr.sum()),
+            "features": FC, "target": "y_4h = ln(close[k+48]/close[k]) bp, 결정 = 5분봉 k 마감", "thresholds_q20_q80": [float(np.quantile(oos, .2)), float(np.quantile(oos, .8))],
+            "hold": "4h", "cost_bp": 4.0, "verdict_rule": freeze.__doc__.split("판정(사전 고정): ")[1].strip(),
+            "panel_sha256": hashlib.sha256(open(panel_path("ETH"), "rb").read()).hexdigest()[:16],
+            "backtest_2025_26": json.load(open(f"{OUT}/final_model.json"))["q0.2_c4.0"],
+            "caveats": ["2023~24 같은 방법 불통과(4bp 일 −5.5)", "BTC 재현 매매 0", "수익 37% 가 급락 5일", "2026 4bp 합 ≈ 0"]}
+    joblib.dump({"models": models, "features": FC}, f"{OUT}/FROZEN_eth_4h_models.joblib")
+    json.dump(spec, open(f"{OUT}/FROZEN_eth_4h_spec.json", "w"), ensure_ascii=False, indent=1, default=str)
+    print(json.dumps({k: v for k, v in spec.items() if k != "features"}, ensure_ascii=False, default=str))
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--freeze":
+    freeze()
