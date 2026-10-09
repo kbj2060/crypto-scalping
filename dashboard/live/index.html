@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261009-view2">
+  <link rel="stylesheet" href="styles.css?v=20261009-ofabB">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -459,15 +459,26 @@
             <!-- 2026-09-25 비율 = 순자산 대비 이번 주문 증거금(10% = 순자산의 10%). 상한 넘으면 진입 불가.
                  사용자 지시: 레버리지 다음 줄에 «진입비율» 이름표로. -->
             <span class="entry-break" aria-hidden="true"></span>
-            <span class="entry-cap">진입비율</span>
+            <!-- 2026-10-09 권고 규칙(사용자 «방향만 정하면 크기·레버리지·손절 자동»): 왕복 최대 명목 = 순자산 × 1.5/2 · 첫 진입 75% ·
+                 물타기는 남은 여유 안에서 · 손절 첫 진입가 ∓5%(물타기해도 안 물러남). 고르면 진입비율은 숨긴다. ETH 만(서버 400). -->
+            <span id="snapRuleBox" class="rule-box">
+              <span class="entry-cap">크기</span>
+              <input type="hidden" id="snapRule" value="0">
+              <div class="chipset" data-for="snapRule" role="group" aria-label="진입 크기 규칙">
+                <button type="button" class="chip" data-v="0" title="진입비율 칩으로 직접 고릅니다">직접</button>
+                <button type="button" class="chip" data-v="1.5" title="권고 규칙 — 왕복 최대 명목 = 순자산 × 1.5 · 첫 진입은 그 75% · 물타기는 남은 여유 안에서 · 손절 첫 진입가 ∓5%(실원장 67일 재생: 순자산 ×1.49 · MDD −6%)">권고 1.5배</button>
+                <button type="button" class="chip" data-v="2" title="권고 규칙 — 왕복 최대 명목 = 순자산 × 2 · 첫 진입은 그 75% · 물타기는 남은 여유 안에서 · 손절 첫 진입가 ∓5%(실원장 67일 재생: 순자산 ×1.70 · MDD −8%)">2배</button>
+              </div>
+            </span>
+            <span class="entry-cap frac-part">진입비율</span>
             <input type="range" id="snapEntryFrac" min="5" max="100" step="5" value="25"
                    aria-label="진입 증거금 (순자산 대비 %)" class="chip-input" tabindex="-1">
-            <div class="chipset" data-for="snapEntryFrac" role="group" aria-label="진입 비율">
+            <div class="chipset frac-part" data-for="snapEntryFrac" role="group" aria-label="진입 비율">
               <button type="button" class="chip" data-v="10">10%</button>
               <button type="button" class="chip" data-v="25">25%</button>
               <button type="button" class="chip" data-v="50">50%</button>
             </div>
-            <b id="snapEntryFracVal" class="chip-val">25%</b>
+            <b id="snapEntryFracVal" class="chip-val frac-part">25%</b>
             <!-- 2026-10-07 권장 배수(사용자 «사전등록하고 대시보드에 권장 배수»): 크기 ∝ 직전 24h 변동성 · ETH 만 · 서술이다(칩 값을 바꾸지 않는다).
                  사후 발견 → 전진 판정 docs/experiments/eth_pingpong_vol_sizing_fwd_prereg_20261007.md. 풀이는 호버·포커스(app.js renderVolMult). -->
             <span id="snapVolMult" class="vol-mult" tabindex="0" hidden><span>권장</span><b>×1.0</b></span>
@@ -532,6 +543,12 @@
               aria-controls="ofabPanel"><span id="ofabPos">주문</span></button>
       <!-- 2026-10-05 포지션이 없으면 «주문» 대신 LONG·SHORT 두 개. 1.5초 꾹 = 바로 진입(마우스) · 짧게 = 펼치기. -->
       <span id="ofabFlat" class="ofab-flat" hidden>
+        <!-- 2026-10-09 B안(사용자 선택): 위 띠 = 진입 크기 규칙(계좌 카드 «크기» 칩 #snapRule 과 같은 값) · 자동이면 버튼 안에 첫 진입 금액·손절가 -->
+        <span id="ofabRule" class="ofab-rule" role="group" aria-label="진입 크기" hidden>
+          <button type="button" data-v="0" aria-pressed="false">직접</button>
+          <button type="button" data-v="1.5" aria-pressed="false" title="권고 규칙 — 왕복 최대 명목 = 순자산 × 1.5 · 첫 진입 75% · 물타기는 남은 여유 · 손절 첫 진입가 ∓5%">자동 1.5×</button>
+          <button type="button" data-v="2" aria-pressed="false" title="권고 규칙 — 왕복 최대 명목 = 순자산 × 2 · 첫 진입 75% · 물타기는 남은 여유 · 손절 첫 진입가 ∓5%">2×</button>
+        </span>
         <!-- 2026-10-06 상세 펼치기(사용자 지시): LONG 앞 아이콘 = 예전 «주문»을 누르면 나오던 패널(레버·비율·진입 버튼). 주문 경로 없음. -->
         <button type="button" id="ofabMore" class="ofab-more" aria-controls="ofabPanel" aria-expanded="false" aria-label="주문 상세 펼치기"><svg
           viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
@@ -542,9 +559,9 @@
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden></div>
   </div>
-  <script src="./app.js?v=20261009-view2"></script>
-  <script src="./fp_daily.js?v=20261009-view2"></script>
-  <script src="./liq_profile.js?v=20261009-view2"></script>
+  <script src="./app.js?v=20261009-ofabB"></script>
+  <script src="./fp_daily.js?v=20261009-ofabB"></script>
+  <script src="./liq_profile.js?v=20261009-ofabB"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

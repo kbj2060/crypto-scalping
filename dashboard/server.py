@@ -199,7 +199,8 @@ import scripts.binance_ban_guard as ban_guard  # noqa: E402 -- requests 도 전�
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, bracket_action, bracket_keep_farther_sl, bracket_key, bracket_merge, bracket_rekey, build_bracket_plan, build_entry_plan, build_exit_plan,
-    exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position)
+    exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
+    REC_RULE_LEVELS, rec_rule_bracket, rec_rule_size)   # 2026-10-09 권고 규칙 진입
 from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
     clear_bracket, place_bracket, run_entry, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
@@ -5994,6 +5995,7 @@ def make_app() -> web.Application:
         st[bracket_key(plan["symbol"], pside)] = {"symbol": plan["symbol"], "side": pside, "sl_price": b.get("sl_price"),
                      "sl_level": b.get("sl_level"),   # 5분봉 종가 판정은 USDT 레벨로(bracket_sl_hit)
                      "tp_price": b.get("tp_price"), "backstop_price": b.get("backstop_price"),
+                     "rule": bool(b.get("rule")), "sl_name": b.get("sl_name"),   # 2026-10-09 권고 규칙 손절 = 물타기해도 유지
                      "armed_at": time.time(), "placed": state["bracket"]}
         bracket_save(st)
 
@@ -6090,7 +6092,8 @@ def make_app() -> web.Application:
             pass
 
     async def assemble_entry_plan(side: str, fraction: float = 1.0,
-                                  want_lev: int | None = None, asset: str = "eth", fresh: bool = False):
+                                  want_lev: int | None = None, asset: str = "eth", fresh: bool = False,
+                                  rule_l: float | None = None):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
@@ -6223,6 +6226,17 @@ def make_app() -> web.Application:
                 rec_qty = (entry_notional(equity, risk["safe_mae_pct"])
                            ["total_notional"] / price_ref)
                 rec_src = "risk_model"
+            # 2026-10-09 권고 규칙(사용자 «방향만 정하면 크기·레버리지·손절 자동»): 상한 = L × 순자산(계좌 전체 명목),
+            #   첫 진입 = 그 75% · 물타기 = 남은 여유 -- 기존 상한(증거금 50% 등)과 작은 쪽. 손절은 아래 bracket 에서 ∓5%.
+            rule = None
+            if rule_l:
+                if asset != "eth":
+                    return None, {}, {}, ({"error": "rule_eth_only", "detail": "권고 규칙은 ETH 원장으로만 검정했습니다"}, 400)
+                rule = rec_rule_size(rule_l=rule_l, equity=equity, existing_notional=exposure,
+                                     order_leverage=float(margin_lev or 0.0))
+                if not cap_notional or rule["cap_notional"] <= cap_notional:
+                    cap_notional, who = rule["cap_notional"], "rule"
+                fraction = rule["fraction"]
             plan = build_entry_plan(
                 side=side, best_bid=float(book["bidPrice"]), best_ask=float(book["askPrice"]),
                 recommended_qty=rec_qty,
@@ -6232,7 +6246,8 @@ def make_app() -> web.Application:
                 # 2026-09-25 사용자 지시: 비율 = 순자산 대비 증거금, 상한 넘으면 진입 불가
                 fraction_of_equity=True, order_leverage=margin_lev or 0.0,
                 cap_label={"margin": f"증거금 상한 {SIZING_MARGIN_CAP_PCT:g}%",
-                           "model": "위험모델 상한"}.get(who, "상한"))
+                           "model": "위험모델 상한",
+                           "rule": f"권고 상한(순자산 {rule_l or 0:g}배)"}.get(who, "상한"))
             plan["recommended_source"] = rec_src
             plan["recommended_qty"] = round(rec_qty, 8)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)
@@ -6252,7 +6267,20 @@ def make_app() -> web.Application:
             # 2026-09-25 청산맵 TP/SL(사용자 지시) -- 고정 3% 손절을 대신한다. 진입 시점 레벨로 고정.
             plan["bracket"] = await bracket_for(side, book, filters, asset)
             # 2026-09-27 물타기면 SL 은 멀어질 때만 바꾼다(사용자 지시) -- 미리보기에도 실제로 걸릴 SL 이 보이게 여기서 합친다.
-            if same:
+            if rule:
+                # 손절 = 첫 진입가 ∓5% · 물타기면 이미 무장된 규칙 손절을 그대로(물러나지 않는다). 규칙 밖에서 연 포지션에
+                #   처음 거는 거면 기준 = 평단(첫 진입가를 모른다 -- 화면에 «평단»으로 적는다).
+                b0 = plan["bracket"]
+                basis = float(b0.get("basis") or 0.0) or 1.0   # ponytail: 청산맵을 못 읽어 basis 가 없으면 1(USDC/USDT 수 bp 오차)
+                prev = bracket_load().get(bracket_key(symbol, side)) if same else None
+                anchor, kind = ((float(same[0].get("entry_price") or 0.0), "평단") if same
+                                else (float(book["bidPrice"] if side == "LONG" else book["askPrice"]), "첫 진입가"))
+                plan["bracket"] = rec_rule_bracket(b0, position_side=side, anchor_price=anchor or float(book["bidPrice"]),
+                                                   basis=basis, filters=filters, prev=prev, anchor_kind=kind)
+                plan["rule"] = {"l": rule_l, "cap_notional": round(rule["cap_notional"], 2), "first": rule["first"],
+                                "room": round(rule["room"], 2), "target_notional": round(rule["target_notional"], 2),
+                                "sl_price": plan["bracket"].get("sl_price"), "sl_name": plan["bracket"].get("sl_name")}
+            elif same:
                 plan["bracket"] = bracket_keep_farther_sl(
                     plan["bracket"], bracket_load().get(bracket_key(symbol, side)), side)
             # 게이지가 값을 주면 그걸 쓰고, «자동»이면 모델 추천을 쓴다. 어느 쪽인지 남긴다 --
@@ -6291,12 +6319,16 @@ def make_app() -> web.Application:
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
+        rule_l = query_rule(request)
+        if rule_l == "bad":
+            return web.json_response({"ok": False, "error": "bad_rule",
+                                      "detail": f"권고 규칙 배수는 {'·'.join(f'{x:g}' for x in REC_RULE_LEVELS)} 중 하나여야 합니다"}, status=400)
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
-                                                             fresh=request.query.get("fresh") == "1")
+                                                             fresh=request.query.get("fresh") == "1", rule_l=rule_l)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
-        if sltp_off(request):
+        if sltp_off(request) and not plan.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(보험)
             plan["bracket"] = dict(SLTP_OFF_BRACKET)
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
                                   "recommended_qty": plan.get("recommended_qty"),
@@ -6331,15 +6363,19 @@ def make_app() -> web.Application:
                                       "state": manual_entry_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
+        rule_l = query_rule(request)
+        if rule_l == "bad":
+            return web.json_response({"ok": False, "error": "bad_rule",
+                                      "detail": f"권고 규칙 배수는 {'·'.join(f'{x:g}' for x in REC_RULE_LEVELS)} 중 하나여야 합니다"}, status=400)
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
-                                                             fresh=request.query.get("fresh") == "1")
+                                                             fresh=request.query.get("fresh") == "1", rule_l=rule_l)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
-        if sltp_off(request):
+        if sltp_off(request) and not plan.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(보험)
             plan["bracket"] = dict(SLTP_OFF_BRACKET)
         manual_entry_state.clear()
         manual_entry_state.update(phase="submitting", side=side, plan=plan, asset=query_asset(request),
@@ -6440,6 +6476,17 @@ def make_app() -> web.Application:
         except (TypeError, ValueError):
             return None
         return v if 1 <= v <= EXCHANGE_MAX_LEVERAGE else None
+
+    def query_rule(request: web.Request) -> float | None | str:
+        """권고 규칙 L(1.5·2). 없으면 None(직접 모드). 이상하면 "bad" -- 호출부가 400(직접 모드로 조용히 떨어지면 더 크게 들어간다)."""
+        raw = request.query.get("rule")
+        if raw in (None, ""):
+            return None
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            return "bad"
+        return v if v in REC_RULE_LEVELS else "bad"
 
     def query_fraction(request: web.Request) -> float | None:
         """쿼리의 비율(%)을 0<f<=1 로 바꾼다. 진입 분할과 부분 청산이 **같은 함수**를 쓴다.

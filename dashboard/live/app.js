@@ -8544,11 +8544,16 @@ function manualEntryPlanHtml(data) {
   const plan = data.plan || {};
   const cap = data.cap || {};
   const dir = plan.positionSide === "LONG" ? "롱" : "숏";
+  const rl = plan.rule;   // 2026-10-09 권고 규칙 -- 무엇이 크기·손절을 정했는지 머리 바로 아래에 한 줄
+  const ruleNote = rl ? entryNote(`권고 규칙 ${rl.l}배 — 상한 ${won(rl.cap_notional)} USDT(순자산 × ${rl.l}) · 이번 `
+    + `${rl.first ? "첫 진입 = 상한의 75%" : `물타기 = 남은 여유 ${won(rl.room)} USDT`} · 손절 ${rl.sl_name || ""} ${rl.sl_price ? Number(rl.sl_price).toLocaleString() : "-"}`
+    + ` (SL/TP 체크와 무관하게 걸고, 물타기해도 안 물러납니다)`) : "";
   const parts = [`<div class="entry-head"><b>${dir} ${escapeHtml(String(plan.quantity))} ${coinUnit()}</b>
       <span>@ ${escapeHtml(Number(plan.price).toLocaleString())}</span>
       <span>내 돈 ${escapeHtml(won(plan.margin_usdt || 0))} USDT${
         plan.leverage ? ` = 명목 ${escapeHtml(won(plan.notional_usdt))} ÷ ${plan.leverage}배` : ""}</span>
     </div>`];
+  if (ruleNote) parts.push(ruleNote);
 
   // 2026-09-16 사용자 요청: 「롱 진입을 누르면 드롭다운으로 나오던 내용 제거 -- 이미 모달 안에
   //   내용이 있어」. 여기 있던 「진입 후 계좌」 타일 넷(청산까지·증거금 사용·계좌 노출·상한
@@ -8804,6 +8809,30 @@ function syncOrderCoinGate() {
 }
 
 // ov(2026-10-05 «스위칭»): 화면 게이지 대신 쓸 값 {pct, lev, sltp, fresh} -- 전량 청산(pct 100)과 반대 진입(그 포지션의 증거금 %·배수).
+// 2026-10-09 권고 규칙(index.html #snapRule): "1.5"·"2" 면 서버가 크기·손절을 정한다(rule=). ETH 만 -- 다른 코인은 "직접".
+function manualRule() {
+  const v = el("snapRule")?.value || "0";
+  return activeSnapshotAsset === "eth" && v !== "0" ? v : "";
+}
+function renderRuleBox() {
+  const box = el("snapRuleBox"), r = manualRule();
+  if (box) box.hidden = activeSnapshotAsset !== "eth";
+  el("snapRuleBox")?.closest(".entry-line")?.classList.toggle("rule-on", !!r);
+}
+el("snapRule")?.addEventListener("input", () => {
+  try { localStorage.setItem("entryRule", el("snapRule").value); } catch (e) { /* 저장 못 해도 동작 */ }
+  renderRuleBox();
+  manualEntryRefreshSize();
+  if (typeof renderOfab === "function") renderOfab();
+});
+(() => {
+  let v = "0";
+  try { v = localStorage.getItem("entryRule") || "0"; } catch (e) { /* 기본 직접 */ }
+  const inp = el("snapRule");
+  if (inp && ["0", "1.5", "2"].includes(v)) inp.value = v;
+  renderRuleBox();
+})();
+
 async function manualEntryFetch(side, kind = "entry", ov = null) {
   if (!orderCoinOk()) {
     return { ok: false, error: "order_coin_mismatch",
@@ -8811,6 +8840,7 @@ async function manualEntryFetch(side, kind = "entry", ov = null) {
   }
   const q = `&pct=${ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct())}`
     + (kind === "exit" ? "" : (ov?.lev ? `&lev=${ov.lev}` : manualLevQuery()) + ((ov?.sltp ?? manualSltpOn()) ? "" : "&sltp=0"))
+    + (kind === "exit" ? "" : ((ov?.rule ?? manualRule()) ? `&rule=${ov?.rule ?? manualRule()}` : ""))
     + (ov?.fresh ? "&fresh=1" : "");
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
   return res.json();
@@ -8959,6 +8989,7 @@ function setEntryProjPreview(plan) {
 async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
   if (!line) return;
+  renderRuleBox();   // 코인을 바꾸면 규칙 칩도(ETH 만)
   // 🔴2026-09-13: 실패하면 배지를 **반드시 바꾼다**. 예전엔 조기 return 해서 배지가 HTML
   //   초기값("미리보기 전용")이나 마지막 성공값에 굳었다 -- 화면이 "게이트가 꺼져 있다"고
   //   말했지만 실제로는 "사이징 워커가 죽어 미리보기가 503"이었다(재부팅 후 실장애).
@@ -9063,6 +9094,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   const pct = ov?.pct ?? Math.round(100 * (plan.fraction ?? 1));
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
                          lev: ov?.lev ?? manualLevEffective(), sltp: ov?.sltp ?? manualSltpOn(),
+                         rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
                          fresh: !!ov?.fresh, sw: ov?.switch || null };
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
@@ -9187,6 +9219,7 @@ async function manualEntrySubmit() {
   try {
     const q = `&pct=${pending.pct ?? 100}`
       + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : "") + (pending.sltp === false ? "&sltp=0" : ""))
+      + (pending.kind !== "exit" && pending.rule ? `&rule=${pending.rule}` : "")
       + (pending.fresh ? "&fresh=1" : "");
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&asset=${pending.asset || "eth"}&confirm=1${q}`,
@@ -9560,7 +9593,8 @@ function ofabWatchResult() {
 // 꾹 눌러 바로 진입(5% · SL/TP 해제, 미리보기 오는 즉시 발주). add = 지금 포지션 방향 추가 진입(물타기),
 //   아니면 2026-10-05 포지션 없음의 LONG·SHORT 버튼(사용자 지시).
 function ofabQuickEntry(side, add) {
-  const what = `${side === "LONG" ? "롱" : "숏"} 5% ${add ? "추가 " : ""}진입`;
+  const r = manualRule();   // 2026-10-09 자동이면 크기·손절은 서버 규칙(5% 비율·SL/TP 끔은 무시된다)
+  const what = `${side === "LONG" ? "롱" : "숏"} ${r ? `자동 ${r}×` : "5%"} ${add ? "추가 " : ""}진입`;
   ofabApplyDefaults();
   if (manualOrderBusy || manualPreviewInFlight) return ofabSay(escapeHtml(`${what} 안 함 — 진행 중인 주문·미리보기가 있습니다.`), "bad");
   ofabWatchResult();
@@ -9621,6 +9655,36 @@ function renderOfab() {
   if (flat && tg) { flat.hidden = !!qty; tg.hidden = !qty; }
   box.classList.toggle("long", side === "LONG");
   box.classList.toggle("short", side === "SHORT");
+  renderOfabRule(bal, live);
+}
+// 2026-10-09 B안(사용자 선택): 위 띠 = #snapRule 과 같은 값 · 자동이면 버튼 안에 «첫 $ · 손절 가격».
+//   숫자는 서버 규칙(live_manual_peg_entry rec_rule_size·rec_rule_bracket)과 같은 식으로 여기서 3초마다 -- 첫 = 0.75 × L × 순자산,
+//   손절 = 지금 가격 ∓5%. 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
+function renderOfabRule(bal, live) {
+  const r = manualRule(), L = Number(r), eth = activeSnapshotAsset === "eth";
+  const strip = el("ofabRule");
+  if (strip) {
+    strip.hidden = !eth;
+    const v = el("snapRule")?.value || "0";
+    strip.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  }
+  const vm = el("ofabVolMult");
+  if (vm && r) vm.hidden = true;            // 자동이면 크기는 규칙이 정한다 -- 권장 배수는 카드 진입 줄에만
+  const eq = Number(bal?.margin) || 0;
+  for (const [id, side] of [["ofabLong", "LONG"], ["ofabShort", "SHORT"]]) {
+    const b = el(id), sm = b?.querySelector("small");
+    if (!b || !sm) continue;
+    b.classList.toggle("two", !!r);
+    const dir = side === "LONG" ? "롱" : "숏";
+    if (r && eq > 0 && live > 0) {
+      const sl = live * (side === "LONG" ? 0.95 : 1.05);
+      setT(sm.id || id + "Frac", `첫 $${Math.round(0.75 * L * eq).toLocaleString()} · 손절 ${Math.round(sl).toLocaleString()}`);
+      b.title = `1.5초 꾹 = ${dir} 자동 ${r}× 진입 — 왕복 상한 순자산 × ${r}, 첫 진입 그 75%, 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}5%`;
+    } else {
+      setT(sm.id || id + "Frac", "5%");
+      b.title = `1.5초 꾹 = ${dir} 5% 진입`;
+    }
+  }
 }
 // 🔴2026-09-26 사용자 지시 «미실현손익 3초 갱신». 계좌 조회는 30초라 그 사이 숫자가 멈춰 있었다. 거래소를 3초마다
 //   부르는 대신 **거래소 값 + 그 뒤 시세 변화 × 수량**으로 민다. 기준 시세는 계좌 스냅샷이 바뀐 순간의 실시간 시세라
@@ -9724,11 +9788,18 @@ setInterval(renderVolMult, 3000);
   //   두 번 누르게 된 건 1.5초 전에 떼서 «짧게 = 펼치기»로 갔을 때다. 마우스는 짧게 눌러도 창을 열지 않고 꾹 누르라고 말한다(상세는 옆 펼치기 버튼).
   //   🔴터치는 꾹 발주가 없으므로(09-28 «모바일에서는 넣으면 안돼») 짧게 = 펼치기 그대로 -- 안 그러면 휴대폰에서 주문할 길이 없어진다.
   const dirTap = (side) => (ptype) => (ptype === "touch" ? ofabSetOpen(!ofab.open)
-    : ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} 5% 진입은 1.5초 꾹 누르세요 — 상세 주문은 옆 펼치기 버튼`)));
+    : ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${manualRule() ? `자동 ${manualRule()}×` : "5%"} 진입은 1.5초 꾹 누르세요 — 상세 주문은 옆 펼치기 버튼`)));
   ofabHold(tgl, ofabQuickAdd);
   ofabHold(el("ofabLong"), () => ofabQuickEntry("LONG", false), dirTap("LONG"));
   ofabHold(el("ofabShort"), () => ofabQuickEntry("SHORT", false), dirTap("SHORT"));
   el("ofabMore")?.addEventListener("click", () => ofabSetOpen(!ofab.open));   // 2026-10-06 상세 펼치기(누르기만 -- 주문 없음)
+  el("ofabRule")?.addEventListener("click", (e) => {   // 2026-10-09 B안 띠 -- 카드 «크기» 칩과 같은 입력을 바꾼다(주문 없음)
+    const b = e.target.closest("button[data-v]"), inp = el("snapRule");
+    if (!b || !inp || inp.value === b.dataset.v) return;
+    inp.value = b.dataset.v;
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    renderOfab();
+  });
   el("ofabBack")?.addEventListener("click", () => ofabSetOpen(false));
   grip.addEventListener("pointerdown", (e) => {
     e.preventDefault();

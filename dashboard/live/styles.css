@@ -1761,6 +1761,10 @@ svg {
   color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent);
 }
 .chip-val { font-size: 11px; color: var(--muted); min-width: 34px; }
+/* 2026-10-09 권고 규칙 칩: 고르면 진입비율 묶음을 숨긴다(크기를 서버 규칙이 정한다 -- 고를 수 없는 것을 보이지 않는다) */
+.rule-box { display: inline-flex; align-items: center; gap: 8px; }
+.rule-box[hidden] { display: none; }
+.entry-line.rule-on .frac-part { display: none !important; }
 .vol-mult { display: inline-flex; align-items: baseline; gap: 5px; min-height: 24px; padding: 4px 8px; border: 1px solid var(--soft-line);
   border-radius: 7px; background: var(--glass); cursor: help; white-space: nowrap; }
 .vol-mult > span { font: 600 11px/1 var(--font-sans); color: var(--muted); }
@@ -2940,6 +2944,19 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   background-repeat: no-repeat; background-position: 0 0; background-size: 0% 100%;
 }
 .ofab-dir small { font-size: 11px; font-weight: 600; color: var(--muted); }
+/* 2026-10-09 B안: 자동이면 버튼 안 두 줄(방향 · «첫 $ · 손절 가격») + 알약 위 띠(직접 · 자동 1.5× · 2×) */
+.ofab-flat { position: relative; }
+.ofab-dir.two { flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding-top: 6px; padding-bottom: 6px; }
+.ofab-dir.two small { font: 600 10.5px/1.2 var(--font-sans); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.ofab-rule { position: absolute; left: 0; bottom: calc(100% + 6px); display: flex; gap: 2px; padding: 2px; border-radius: 999px;
+  background: color-mix(in srgb, var(--chart-bg, #171b23) 96%, transparent); border: 1px solid var(--line); box-shadow: 0 6px 18px rgb(var(--shadow) / .3); }   /* 뒤 글자가 비치지 않게 */
+.ofab-rule[hidden] { display: none; }
+.ofab-rule button { min-height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: none; color: var(--muted);
+  font: 700 11px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
+.ofab-rule button:hover { color: var(--text); }
+.ofab-rule button[aria-pressed="true"] { background: rgb(var(--lift) / .14); color: var(--text); }
+.ofab-rule button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (pointer: coarse) { .ofab-rule button { min-height: 36px; } }
 /* 2026-10-07 권장 배수(크기 ∝ 직전 24h 변동성) -- 방향이 없는 크기라 무채색. 1.5배 이상만 주황(«오늘은 크게 들어가도 되는 날» = 눈여겨볼 것). */
 .ofab-vm { align-self: center; padding: 0 4px; font: 600 11.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); cursor: help; white-space: nowrap; }
 .ofab-vm.hi { color: var(--warn); }
