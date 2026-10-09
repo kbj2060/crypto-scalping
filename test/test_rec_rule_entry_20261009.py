@@ -182,8 +182,7 @@ class ManualModeTest(unittest.TestCase):
     큰 기존 포지션이 있어도 상한으로 안 막히고, SL/TP 는 안 걸리고, rule=c 는 400."""
 
     def test_defaults_are_manual(self) -> None:
-        self.assertFalse(server.MANUAL_RULES_ENABLED)
-        self.assertEqual(server.SIZING_MARGIN_CAP_PCT, 0.0)
+        self.assertEqual(server.SIZING_MARGIN_CAP_PCT, 0.0)   # 1번 배포(10-09)에도 증거금 상한은 꺼진 채
 
         async def fake_account(*_a, **_k):
             return account([long_pos(1.2, 2500.0)], equity=300.0)      # 명목 3,000 = 순자산 10배(옛 50% 상한이 꽉 찬 상태)
@@ -192,6 +191,7 @@ class ManualModeTest(unittest.TestCase):
             with mock.patch.object(server, "fetch_account", fake_account), \
                  mock.patch.object(server, "produce_account", fake_account, create=True), \
                  mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(server, "MANUAL_RULES_ENABLED", False), \
                  mock.patch.object(server, "place_bracket", mock.AsyncMock(side_effect=AssertionError("주문 금지"))):
                 c = TestClient(TestServer(offline_app(server)))
                 await c.start_server()

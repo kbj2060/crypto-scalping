@@ -8742,7 +8742,7 @@ function manualLevEffective() {
 //   서버가 sltp=0 을 받으면 계획의 bracket 을 «끔»으로 바꾼다(주문·감시 파일 둘 다 안 건드림). 선택은 브라우저에 기억한다.
 // 2026-10-09 사용자 «주문·물타기·청산 규칙 모두 제거해 수동으로, 규칙 확정되면 다시 적용»: 자동 규칙 칩·SL/TP 토글을 숨기고 보내지 않는다.
 //   되돌리기 = true + server.py MANUAL_RULES_ENABLED = True.
-const MANUAL_RULES = false;
+const MANUAL_RULES = true;   // 2026-10-09 사용자 «1번(재생 크기식)으로 배포» -- 자동 칩·SL/TP 토글 복귀
 const manualSltpOn = () => MANUAL_RULES && el("snapSltp")?.checked !== false;
 if (!MANUAL_RULES) { const t = el("snapSltp")?.closest("label"); if (t) t.style.display = "none"; }
 const manualLevQuery = () => {
