@@ -9726,7 +9726,7 @@ function renderVolMult() {
   for (const id of ["snapVolMult", "ofabVolMult"]) {
     const n = el(id);
     if (!n) continue;
-    n.hidden = !ok;
+    n.hidden = !ok || (id === "ofabVolMult" && !!manualRule());   // 2026-10-09 자동(권고 규칙)이면 떠다니는 버튼엔 안 띄운다 -- renderOfabRule 과 같은 규칙(안 맞추면 3초마다 깜빡인다)
     if (!ok) continue;
     const t = n.querySelector("b") || n, txt = `×${m.toFixed(1)}`;
     if (t.textContent !== txt) t.textContent = txt;
