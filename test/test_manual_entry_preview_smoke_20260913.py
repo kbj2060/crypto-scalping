@@ -497,7 +497,8 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             finally:
                 await client.close()
 
-        with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels", levels):
+        with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels", levels), \
+             mock.patch.object(server, "MANUAL_RULES_ENABLED", True):   # 2026-10-09 수동 모드 기본 꺼짐 -- 켠 판을 시험한다
             asyncio.run(exercise())
 
         async def no_levels() -> None:
@@ -512,7 +513,8 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 await client.close()
 
         with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels",
-                                                 lambda _d, _p: {"warmed_up": True}):
+                                                 lambda _d, _p: {"warmed_up": True}), \
+             mock.patch.object(server, "MANUAL_RULES_ENABLED", True):
             asyncio.run(no_levels())
 
     def test_entry_and_exit_share_one_horizon_and_one_cap(self) -> None:

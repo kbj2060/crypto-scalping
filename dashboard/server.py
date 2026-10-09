@@ -1991,7 +1991,12 @@ SIMPLE_SIZING = {"available": True, "cap": {}, "risk_mae": {}, "vol_equivalent_q
 #   «최소 청산 비율»에 넣으면 틀린 처방이 된다. 0 = 끔.
 # ponytail: 계좌 전체 명목을 이 심볼 레버리지 하나로 나눈다(다른 심볼 다리는 자기 레버리지를 쓴다) --
 #   봇이 실주문을 내기 시작하면 balance.initial_margin 으로 바꾼다.
-SIZING_MARGIN_CAP_PCT = 50.0
+# 🔴2026-10-09 사용자 지시 «수량 제한 때문에 진입 불가 -- 주문·물타기·청산 규칙을 모두 제거해 수동으로, 규칙 확정되면 다시 적용»:
+#   증거금 상한 해제(되돌리기 = 50.0). 크기는 진입비율 게이지(순자산 × 비율 × 레버리지)뿐이고, 넘치면 거래소가 거부한다.
+SIZING_MARGIN_CAP_PCT = 0.0
+# 같은 지시: 자동 규칙(rule=c 크기·물타기·손절)과 진입 때 자동 SL/TP(청산맵 익절·비상 스탑·SL 감시 무장)를 끈다.
+#   이미 무장된 측면의 감시(포지션 사라지면 우리 주문 정리)는 그대로 돈다. 되돌리기 = True(app.js MANUAL_RULES 도 같이).
+MANUAL_RULES_ENABLED = False
 # 🔴상한 무시 스위치 (2026-09-20 사용자 지시 «우리 사이징 코드는 잠깐 꺼줘»).
 # 세 상한(원장·순자산·위험모델)을 **전부 건너뛰고** 「순자산 × 이 배수」 하나만 기준으로 쓴다.
 # 🔴상한을 «없애는» 게 아니다. 진입 비율 슬라이더의 100% 가 **상한 명목에 대한 비율**이라
@@ -5971,7 +5976,7 @@ def make_app() -> web.Application:
 
     def sltp_off(request: web.Request) -> bool:
         """2026-09-28 화면 «SL/TP» 체크 해제(사용자 지시) -- 이번 진입에 SL/TP 를 걸지도, 기존 것을 갱신하지도 않는다."""
-        return request.query.get("sltp") == "0"
+        return not MANUAL_RULES_ENABLED or request.query.get("sltp") == "0"   # 2026-10-09 수동 모드면 항상 끔
 
     SLTP_OFF_BRACKET = {"available": False, "disabled": True, "reason": "SL/TP 끔(사용자) -- 걸지 않고 기존 것도 그대로"}
 
@@ -6335,7 +6340,7 @@ def make_app() -> web.Application:
         rule_l = query_rule(request)
         if rule_l == "bad":
             return web.json_response({"ok": False, "error": "bad_rule",
-                                      "detail": "자동 규칙 값은 c 하나뿐입니다"}, status=400)
+                                      "detail": "자동 규칙이 꺼져 있습니다(수동 모드)" if not MANUAL_RULES_ENABLED else "자동 규칙 값은 c 하나뿐입니다"}, status=400)
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
                                                              fresh=request.query.get("fresh") == "1", rule_l=rule_l)
@@ -6379,7 +6384,7 @@ def make_app() -> web.Application:
         rule_l = query_rule(request)
         if rule_l == "bad":
             return web.json_response({"ok": False, "error": "bad_rule",
-                                      "detail": "자동 규칙 값은 c 하나뿐입니다"}, status=400)
+                                      "detail": "자동 규칙이 꺼져 있습니다(수동 모드)" if not MANUAL_RULES_ENABLED else "자동 규칙 값은 c 하나뿐입니다"}, status=400)
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
                                                              fresh=request.query.get("fresh") == "1", rule_l=rule_l)
@@ -6495,7 +6500,7 @@ def make_app() -> web.Application:
         raw = request.query.get("rule")
         if raw in (None, ""):
             return None
-        return "c" if raw == "c" else "bad"
+        return "c" if raw == "c" and MANUAL_RULES_ENABLED else "bad"   # 꺼져 있으면 400(직접 모드로 조용히 떨어지지 않는다)
 
     def query_fraction(request: web.Request) -> float | None:
         """쿼리의 비율(%)을 0<f<=1 로 바꾼다. 진입 분할과 부분 청산이 **같은 함수**를 쓴다.

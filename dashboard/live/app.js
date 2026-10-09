@@ -8740,7 +8740,11 @@ function manualLevEffective() {
 }
 // 2026-09-28 SL/TP 체크(사용자 지시) -- 해제면 진입에 TP·비상 스탑을 안 걸고 SL 감시도 안 무장, 물타기면 기존 SL/TP 를 그대로 둔다.
 //   서버가 sltp=0 을 받으면 계획의 bracket 을 «끔»으로 바꾼다(주문·감시 파일 둘 다 안 건드림). 선택은 브라우저에 기억한다.
-const manualSltpOn = () => el("snapSltp")?.checked !== false;
+// 2026-10-09 사용자 «주문·물타기·청산 규칙 모두 제거해 수동으로, 규칙 확정되면 다시 적용»: 자동 규칙 칩·SL/TP 토글을 숨기고 보내지 않는다.
+//   되돌리기 = true + server.py MANUAL_RULES_ENABLED = True.
+const MANUAL_RULES = false;
+const manualSltpOn = () => MANUAL_RULES && el("snapSltp")?.checked !== false;
+if (!MANUAL_RULES) { const t = el("snapSltp")?.closest("label"); if (t) t.style.display = "none"; }
 const manualLevQuery = () => {
   const v = manualLevEffective();
   return v ? `&lev=${v}` : "";
@@ -8811,7 +8815,7 @@ function syncOrderCoinGate() {
 // ov(2026-10-05 «스위칭»): 화면 게이지 대신 쓸 값 {pct, lev, sltp, fresh} -- 전량 청산(pct 100)과 반대 진입(그 포지션의 증거금 %·배수).
 // 2026-10-09 자동 규칙(index.html #snapRule "1"): 서버가 재생 크기식으로 크기·손절을 정한다(rule=c). ETH 만 -- 다른 코인은 "직접".
 function manualRule() {
-  return activeSnapshotAsset === "eth" && (el("snapRule")?.value || "0") === "1" ? "c" : "";
+  return MANUAL_RULES && activeSnapshotAsset === "eth" && (el("snapRule")?.value || "0") === "1" ? "c" : "";
 }
 // 서버 live_manual_peg_entry.commit_rule_l 과 같은 식(화면 표시용 -- 실제 크기·손절은 누를 때 서버 미리보기가 정한다)
 function commitRuleL(side, sigmaBp4h, vm) {
@@ -8821,7 +8825,7 @@ function commitRuleL(side, sigmaBp4h, vm) {
 }
 function renderRuleBox() {
   const box = el("snapRuleBox"), r = manualRule();
-  if (box) box.hidden = activeSnapshotAsset !== "eth";
+  if (box) box.hidden = !MANUAL_RULES || activeSnapshotAsset !== "eth";
   el("snapRuleBox")?.closest(".entry-line")?.classList.toggle("rule-on", !!r);
 }
 el("snapRule")?.addEventListener("input", () => {
@@ -9669,7 +9673,7 @@ function renderOfabRule(bal, live) {
   const r = manualRule(), eth = activeSnapshotAsset === "eth", vmx = latestSituation?.vol_mult;
   const strip = el("ofabRule");
   if (strip) {
-    strip.hidden = !eth;
+    strip.hidden = !MANUAL_RULES || !eth;
     const v = el("snapRule")?.value || "0";
     strip.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
   }

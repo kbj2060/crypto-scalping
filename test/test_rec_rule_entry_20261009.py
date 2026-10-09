@@ -55,6 +55,7 @@ class RecRuleEntryTest(unittest.TestCase):
                  mock.patch.object(server, "produce_account", fake_account, create=True), \
                  mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
                  mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0), \
+                 mock.patch.object(server, "MANUAL_RULES_ENABLED", True), \
                  mock.patch.object(server, "place_bracket", boom), \
                  mock.patch.object(server, "margin_type", mock.AsyncMock(return_value=mtype)):
                 if armed is not None:
@@ -174,6 +175,39 @@ class RecRuleEntryTest(unittest.TestCase):
             self.assertAlmostEqual(fired[0]["notional_usdt"], 0.75 * 1000 * L, delta=2.6)
             self.assertEqual(fired[0]["bracket"]["sl_price"], 2312.5)
         self._run(account([]), fn)
+
+
+class ManualModeTest(unittest.TestCase):
+    """2026-10-09 «규칙 모두 제거해 수동으로»: 커밋 기본값(MANUAL_RULES_ENABLED False · 증거금 상한 0) 그대로 --
+    큰 기존 포지션이 있어도 상한으로 안 막히고, SL/TP 는 안 걸리고, rule=c 는 400."""
+
+    def test_defaults_are_manual(self) -> None:
+        self.assertFalse(server.MANUAL_RULES_ENABLED)
+        self.assertEqual(server.SIZING_MARGIN_CAP_PCT, 0.0)
+
+        async def fake_account(*_a, **_k):
+            return account([long_pos(1.2, 2500.0)], equity=300.0)      # 명목 3,000 = 순자산 10배(옛 50% 상한이 꽉 찬 상태)
+
+        async def exercise() -> None:
+            with mock.patch.object(server, "fetch_account", fake_account), \
+                 mock.patch.object(server, "produce_account", fake_account, create=True), \
+                 mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(server, "place_bracket", mock.AsyncMock(side_effect=AssertionError("주문 금지"))):
+                c = TestClient(TestServer(offline_app(server)))
+                await c.start_server()
+                try:
+                    p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=25")).json())["plan"]
+                    self.assertIsNone(p["blocked"], p)
+                    self.assertIsNone(p["cap_notional_usdt"])
+                    self.assertAlmostEqual(p["notional_usdt"], 300 * 0.25 * 20, delta=3.0)   # 순자산 × 비율 × 레버리지
+                    self.assertTrue(p["bracket"].get("disabled"), p["bracket"])            # sltp 를 안 보내도 끔
+                    r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")
+                    self.assertEqual(r.status, 400)
+                finally:
+                    await c.close()
+
+        with _isolated_dirs():
+            asyncio.run(exercise())
 
 
 if __name__ == "__main__":
