@@ -776,3 +776,36 @@ def forward_status():
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--forward-status":
     forward_status()
+
+
+def coin_replication():
+    """권고 규칙(일봉 추세 5표 + UTC 00:00 개장 되돌림 k=.5·4h, 변동성 역수 비중) 을 파라미터 그대로 20코인에. 2022~2026 연도별 샤프. 08:00 고정."""
+    O = pd.read_parquet(f"{OUT}/open_panel.parquet").dropna(subset=["f30", "rv1d"])
+    res, daily = {}, {}
+    for sym in sorted(O.sym.unique()):
+        p = load_panel(sym); c_ = p.close.ffill().to_numpy()
+        d = pd.Series(c_, index=p.timestamp).resample("1D", label="left").last(); dv = d.to_numpy()
+        votes = np.mean([np.sign(dv - np.r_[np.full(L, np.nan), dv[:-L]]) for L in (7, 14, 28, 56, 90)], axis=0)
+        pos = np.where(np.abs(votes) >= .5, np.sign(votes), 0.0)
+        ret = np.r_[np.log(dv[1:] / dv[:-1]) * 1e4, np.nan]
+        tr = pd.Series(pos * ret - np.abs(np.diff(np.r_[0, pos])) * 4, index=d.index + pd.Timedelta("1D"))
+        E = O[O.sym == sym]; so = np.where(E.f30.abs() > .5 * E.rv1d * np.sqrt(6), -np.sign(E.f30), 0)
+        op = pd.Series(np.where(so != 0, so * E.n4 - 4, 0.0), index=pd.to_datetime(E.day.to_numpy()))
+        B = pd.DataFrame({"tr": tr, "op": op}).reindex(pd.date_range("2022-04-01", "2026-09-12", freq="D")).fillna(0.0)
+        sd = B.rolling(90, min_periods=60).std().shift(1); W = (sd.mean(1).to_numpy()[:, None] / sd).clip(upper=3.0)
+        x = ((B * W).sum(1) / 2)[W.notna().all(1)]
+        daily[sym] = x / x[x.index < "2023-01-01"].std()                               # 코인 간 동일 위험(2022 변동으로 고정)
+        res[sym] = {Y: round(float(x[x.index.year == Y].mean() / x[x.index.year == Y].std() * np.sqrt(365)), 2) for Y in range(2022, 2027)}
+        res[sym]["all"] = round(float(x.mean() / x.std() * np.sqrt(365)), 2)
+        print(sym, res[sym], flush=True)
+    D = pd.DataFrame(daily).fillna(0.0); M = D.mean(1)
+    res["20코인 평균 포트폴리오"] = {Y: round(float(M[M.index.year == Y].mean() / M[M.index.year == Y].std() * np.sqrt(365)), 2) for Y in range(2022, 2027)}
+    res["20코인 평균 포트폴리오"]["all"] = round(float(M.mean() / M.std() * np.sqrt(365)), 2)
+    pos_years = {s: sum(v[Y] > 0 for Y in range(2022, 2027)) for s, v in res.items() if s != "20코인 평균 포트폴리오"}
+    res["플러스 해 수 분포"] = pd.Series(pos_years).value_counts().sort_index().to_dict()
+    print("20코인 평균", res["20코인 평균 포트폴리오"], "| 코인별 플러스 해 수 분포", res["플러스 해 수 분포"], flush=True)
+    json.dump(res, open(f"{OUT}/coin_replication.json", "w"), ensure_ascii=False, indent=1, default=str)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--coins":
+    coin_replication()
