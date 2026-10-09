@@ -329,7 +329,8 @@ def commit_rule_l(*, position_side: str, sigma24_bp: float, vol_mult: float) -> 
     return {"l": float(cands[who]), "stop_pct": sd, "binding": who}
 
 
-def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, order_leverage: float) -> dict[str, Any]:
+def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, order_leverage: float,
+                  first: bool | None = None) -> dict[str, Any]:
     """규칙 크기. **순수 함수**. 상한 = rule_l × 순자산(계좌 전체 명목 -- 교차 마진이라 다른 포지션도 같은 잔고).
     첫 진입(기존 명목 0) = 상한의 75%, 물타기 = 남은 여유 전부. build_entry_plan(fraction_of_equity=True)에 넘길
     cap_notional·fraction 을 돌려준다 -- 잘라 넣기는 그 함수가 한다(room = cap − existing)."""
@@ -338,7 +339,9 @@ def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, ord
     if not (equity > 0 and order_leverage > 0):
         return {"cap_notional": 0.0, "fraction": 1.0, "first": existing_notional <= 0, "room": 0.0, "target_notional": 0.0}
     cap = rule_l * equity
-    first = existing_notional <= 0
+    # 2026-10-10 검증: «첫 진입» = 이 방향 포지션 없음(호출부가 준다). 계좌 전체 명목(반대 다리·다른 심볼)으로 정하면 숏 $300 만
+    #   있어도 롱 첫 진입이 75% 가 아니라 남은 여유 전부(98%)가 됐다. 여유(room)는 그대로 계좌 전체로 잰다.
+    first = existing_notional <= 0 if first is None else first
     want = cap * REC_FIRST_SHARE if first else max(0.0, cap - existing_notional)
     return {"cap_notional": cap, "first": first, "room": max(0.0, cap - existing_notional),
             "target_notional": min(want, max(0.0, cap - existing_notional)),
@@ -870,6 +873,8 @@ def _self_check_rec_rule() -> None:
     assert abs(p["notional_usdt"] - 0.75 * c["l"] * 2000.0) < 2500 * f["step"] + 0.01, p["notional_usdt"]
     r2 = rec_rule_size(rule_l=c["l"], equity=2000.0, existing_notional=c["l"] * 2000.0 * 0.75, order_leverage=20)
     assert not r2["first"] and abs(r2["target_notional"] - c["l"] * 2000.0 * 0.25) < 1e-6        # 물타기 = 남은 25%
+    ro = rec_rule_size(rule_l=c["l"], equity=2000.0, existing_notional=300.0, order_leverage=20, first=True)   # 반대 다리만 있음
+    assert ro["first"] and abs(ro["target_notional"] - 0.75 * c["l"] * 2000.0) < 1e-6
     r3 = rec_rule_size(rule_l=2.0, equity=2000.0, existing_notional=4000.0, order_leverage=20)
     p3 = build_entry_plan(side="LONG", best_bid=2400.0, best_ask=2400.01, recommended_qty=0.0, cap_notional=r3["cap_notional"],
                           filters=f, existing_notional=4000.0, equity=2000.0, fraction=r3["fraction"], fraction_of_equity=True, order_leverage=20)

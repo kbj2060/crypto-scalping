@@ -151,6 +151,16 @@ class RecRuleEntryTest(unittest.TestCase):
             self.assertIn("평단", p["rule"]["sl_name"])
         self._run(account([long_pos(0.3, 2600.0)]), fn)
 
+    def test_opposite_leg_does_not_turn_first_entry_into_add(self) -> None:
+        short = {**long_pos(0.12, 2500.0), "side": "SHORT"}                         # 반대 다리 명목 300
+
+        async def fn(c):
+            p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")).json())["plan"]
+            self.assertTrue(p["rule"]["first"], p["rule"])
+            self.assertAlmostEqual(p["notional_usdt"], 0.75 * 1000 * L, delta=2.6)       # 남은 여유 전부(5,917)가 아니라 75%
+            self.assertIn("첫 진입가", p["rule"]["sl_name"])
+        self._run(account([short]), fn)
+
     def test_full_cap_blocks_add(self) -> None:
         async def fn(c):
             p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")).json())["plan"]

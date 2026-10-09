@@ -6344,7 +6344,7 @@ def make_app() -> web.Application:
                                                       if mt == "isolated" else "마진 방식을 못 읽어 자동 진입을 막습니다(교차 확인 필요)")}, 409)
                 cr = commit_rule_l(position_side=side, sigma24_bp=float(vm["sigma_bp"]) * math.sqrt(6), vol_mult=float(vm["mult"]))
                 rule = rec_rule_size(rule_l=cr["l"], equity=equity, existing_notional=exposure,
-                                     order_leverage=float(margin_lev or 0.0))
+                                     order_leverage=float(margin_lev or 0.0), first=not same)   # 첫 진입 = 이 방향 포지션 없음
                 cap_notional, who = rule["cap_notional"], "rule"
                 fraction = rule["fraction"]
             plan = build_entry_plan(
