@@ -721,3 +721,45 @@ def freeze():
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--freeze":
     freeze()
+
+
+def portfolio3():
+    """세 부품 위험 맞춤 결합(08:00 고정): ① 4h HGB(2023~24 = 방법 홀드아웃 시드 0, 2025~26 = 최종 시드 3) ② 일봉 추세 5표
+    ③ UTC 개장 되돌림(|첫 30분| > 0.5σ 반대·4h). 비용 4bp. 가중 = 직전 90일 일 표준편차 역수(전날까지, 60일 예열 후 시작, 부품별 상한 3배)."""
+    F = pd.read_parquet(panel_path("ETH")); y = F.y_4h.to_numpy(); ts = F.ts.to_numpy()
+    ph = np.load(f"{OUT}/pred_holdout_2023_24_4h.npy"); pf = np.load(f"{OUT}/pred_FINAL_eth_4h.npy")[:, 0]
+    pred = np.where(ts < np.datetime64("2025-01-01"), np.r_[ph, np.full(len(F) - len(ph), np.nan)], pf)
+    sq = pd.Series(pred); lo, hi = sq.shift(1).expanding(8640).quantile(.2).to_numpy(), sq.shift(1).expanding(8640).quantile(.8).to_numpy()
+    rows = []
+    for off in range(0, 48, 6):
+        idx = np.arange(off, len(y), 48); s = np.where(pred[idx] >= hi[idx], 1, np.where(pred[idx] <= lo[idx], -1, 0))
+        m = (s != 0) & np.isfinite(y[idx]); rows.append(pd.Series(s[m] * y[idx][m] - 4, index=pd.to_datetime(ts[idx][m])))
+    g = pd.concat(rows) / 8; hgb = g.groupby(g.index.floor("D")).sum()
+    T = F.ts + pd.Timedelta("5min"); m0 = ((T.dt.hour == 0) & (T.dt.minute == 0)).to_numpy()
+    pos = np.where(np.abs(F.P_trend5[m0]) >= .5, np.sign(F.P_trend5[m0]), 0.0)
+    trend = pd.Series(pos * F.y_1d[m0].to_numpy() - np.abs(np.diff(np.r_[0, pos])) * 4, index=(F.ts[m0] + pd.Timedelta("5min")).dt.floor("D").to_numpy())
+    O = pd.read_parquet(f"{OUT}/open_panel.parquet"); E = O[O.sym == "ETH"].dropna(subset=["f30", "n4", "rv1d"])
+    so = np.where(E.f30.abs() > 0.5 * E.rv1d * np.sqrt(6), -np.sign(E.f30), 0)
+    openf = pd.Series(np.where(so != 0, so * E.n4 - 4, 0.0), index=pd.to_datetime(E.day.to_numpy()))
+    idx = pd.date_range("2023-01-01", "2026-09-12", freq="D")
+    P = pd.DataFrame({"4h HGB": hgb, "일봉 추세": trend, "UTC 개장 되돌림": openf}).reindex(idx).fillna(0.0)
+    sd = P.rolling(90, min_periods=60).std().shift(1)
+    W = (sd.mean(1).to_numpy()[:, None] / sd).clip(upper=3.0)                       # 평균 변동 대비 역수, 상한 3
+    P["결합(위험 맞춤)"] = (P.iloc[:, :3] * W).sum(1) / 3
+    P = P[W.notna().all(1)]
+    out = {"corr": P.iloc[:, :3].corr().round(3).to_dict()}
+    for c in P.columns:
+        x = P[c]; r = {}
+        for Y in (2023, 2024, 2025, 2026):
+            v = x[x.index.year == Y]; r[Y] = round(float(v.mean() / v.std() * np.sqrt(365)), 2)
+        eq = x.cumsum(); bs = [x.sample(len(x), replace=True, random_state=i).mean() for i in range(1000)]
+        out[c] = {"yearly_sharpe": r, "sharpe_all": round(float(x.mean() / x.std() * np.sqrt(365)), 2), "day_mean_bp": round(float(x.mean()), 2),
+                  "ci": [round(float(np.quantile(bs, .025)), 2), round(float(np.quantile(bs, .975)), 2)], "mdd_bp": int((eq - eq.cummax()).min())}
+        print(f"{c:14s}", json.dumps(out[c], ensure_ascii=False), flush=True)
+    print("상관", P.iloc[:, :3].corr().round(3).to_dict())
+    json.dump(out, open(f"{OUT}/portfolio3.json", "w"), ensure_ascii=False, indent=1, default=str)
+    P.to_parquet(f"{OUT}/portfolio3_daily.parquet")
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--portfolio":
+    portfolio3()
