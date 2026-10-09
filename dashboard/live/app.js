@@ -6234,7 +6234,13 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         label(anchor - 4, mt + 14, P ? "포지션 데이터 없음" : "포지션 불러오는 중…", "var(--muted)");
       } else {
         const rows = new Map();
-        W.vals.forEach((q, j) => { const k = Math.floor((W.lo + j + 0.5) * P.bw / rowSize); rows.set(k, (rows.get(k) || 0) + q); });
+        W.vals.forEach((q, j) => {   // $bw 칸을 걸치는 행마다 겹친 길이만큼 나눈다(행이 칸보다 잘면 한 줄씩 비던 것, 10-10 배포 후)
+          const p0 = (W.lo + j) * P.bw, p1 = p0 + P.bw;
+          for (let k = Math.floor(p0 / rowSize); k * rowSize < p1; k++) {
+            const ov = Math.min(p1, (k + 1) * rowSize) - Math.max(p0, k * rowSize);
+            if (ov > 0) rows.set(k, (rows.get(k) || 0) + q * ov / P.bw);
+          }
+        });
         const vis = (k) => (k + 1) * rowSize > yMin && k * rowSize < yMax;
         let mxq = 0; rows.forEach((q, k) => { if (vis(k) && q > mxq) mxq = q; });
         rows.forEach((q, k) => {
