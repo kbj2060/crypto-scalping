@@ -27,9 +27,9 @@
     if (S.days > 1) return S.ext[a + "|" + S.days] || null;
     return typeof latestLiquidationMap === "undefined" ? null : latestLiquidationMap;      // app.js 전역
   }
-  function fetchExt() {                       // 7·30일: 켜져 있을 때 60초마다(서버도 60초 캐시)
+  function fetchExt() {                       // 7·30일: 켜져 있을 때 5분마다 = 새 진입 반영(서버도 5분 캐시, 10-10 사용자 «새 체결은 5분마다»)
     var a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset, key = a + "|" + S.days, now = Date.now();
-    if (!S.on || S.days === 1 || now - (S.extT[key] || 0) < 60000) return;
+    if (!S.on || S.days === 1 || now - (S.extT[key] || 0) < 300000) return;
     S.extT[key] = now;
     fetch("/api/liquidation-map/tiers?asset=" + encodeURIComponent(a) + "&days=" + S.days, { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -43,6 +43,29 @@
     });
     try { localStorage.setItem("liqDays", String(d)); } catch (e) { /* 저장 못 해도 동작 */ }
     fetchExt(); redraw();
+  }
+  // 2026-10-10 사용자 «현재가가 청산가를 넘어가면 바로 막대 제거 -- 매초»: 지도가 만들어진 뒤 가격이 지나간 범위(1초 현재가 + 그 뒤 5분봉 고·저)
+  //   안의 칸을 0 으로 -- 서버 생존 필터(그 뒤 봉 고·저)와 같은 규칙을 지도 사이 시간에 브라우저에서 이어 붙인다(서버 호출 0).
+  //   새 지도가 오면(1일 60초 · 7·30일 5분) 서버가 같은 범위를 이미 걸러 낸 상태라 범위를 그 기준가로 다시 시작한다.
+  function sweep(m, tp) {
+    var w = S.sweep, cp = tp.current_price, p = livePrice(tp);
+    if (!w || w.tp !== tp) w = S.sweep = { tp: tp, lo: cp, hi: cp, out: null, key: "" };
+    var lo = Math.min(w.lo, p), hi = Math.max(w.hi, p), a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset;
+    var gen = Date.parse(m.generated_at || "") / 1000, cs = typeof candleHistoryByAsset === "undefined" ? null : candleHistoryByAsset[a];
+    if (gen > 0 && cs) for (var i = cs.length - 1; i >= 0 && cs[i].time + 300 > gen; i--) { lo = Math.min(lo, cs[i].low); hi = Math.max(hi, cs[i].high); }
+    w.lo = lo; w.hi = hi;
+    return w;
+  }
+  function liveTp(m) {
+    var tp = m && m.tier_profile;
+    if (!tp) return tp;
+    var w = sweep(m, tp), bw = tp.bin_width, k0 = Math.ceil(w.lo / bw - 0.5), k1 = Math.floor(w.hi / bw + 0.5), key = k0 + "|" + k1;
+    if (w.key === key) return w.out;
+    w.key = key;
+    w.out = Object.assign({}, tp, { tiers: tp.tiers.map(function (t) {
+      return { name: t.name, values: t.values.map(function (v, i) { var k = tp.lo + i; return k >= k0 && k <= k1 ? 0 : v; }) };
+    }) });
+    return w.out;
   }
   function livePrice(tp) {
     var a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset;
@@ -110,7 +133,7 @@
     if (typeof window.fpPlaceOverlay === "function") window.fpPlaceOverlay($("liqProfile"));
     var cv = $("liqProfileCanvas"), status = $("liqProfileStatus");
     if (!cv || !cv.clientWidth) return;
-    var map = curMap(), tp = map && map.tier_profile;
+    var map = curMap(), tp = liveTp(map);
     var W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1, narrow = W < 560;
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     var g = cv.getContext("2d");
@@ -343,8 +366,8 @@
     setInterval(function () {                       // 새 청산맵(60초)·현재가(1초)·5분 차트 배치가 바뀌면 다시 그린다(보던 범위는 유지)
       if (!S.on) return;
       fetchExt();
-      var m = curMap(), tp = m && m.tier_profile, p = tp ? livePrice(tp) : 0;
-      if (m !== S.map || p !== S.price) { S.map = m; S.price = p; redraw(); }
+      var m = curMap(), tp = m && m.tier_profile, p = tp ? livePrice(tp) : 0, sw = liveTp(m);
+      if (m !== S.map || p !== S.price || sw !== S.sw) { S.map = m; S.price = p; S.sw = sw; redraw(); }
       if (typeof window.fpPlaceOverlay === "function") window.fpPlaceOverlay($("liqProfile"));
     }, 1000);
     var saved = null;

@@ -4547,7 +4547,8 @@ def make_app() -> web.Application:
             oi_usd = await asyncio.to_thread(liq_oi_usd, asset, cp)
             tp = await asyncio.to_thread(compute_tier_profile, df, cp, oi_usd)
             return {"days": days, "tier_profile": tp, "generated_at": datetime.now(timezone.utc).isoformat()}
-        return await swr_cached(f"liquidation_tiers:{asset}:{days}", LIQUIDATION_MAP_CACHE_SECONDS, produce,
+        # 2026-10-10 사용자 «새 체결 막대 추가는 5분마다(지나간 청산가 제거는 화면이 매초)»: 300초. 계산 0.4~0.8ms · klines 무게 2~5(1분 한도 2400).
+        return await swr_cached(f"liquidation_tiers:{asset}:{days}", 300, produce,
                                 max_stale=STALE_GRACE_SECONDS)
 
     async def load_liquidation_map(asset: str = "eth") -> dict[str, Any]:
