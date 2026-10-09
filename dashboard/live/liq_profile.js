@@ -27,9 +27,9 @@
     if (S.days > 1) return S.ext[a + "|" + S.days] || null;
     return typeof latestLiquidationMap === "undefined" ? null : latestLiquidationMap;      // app.js 전역
   }
-  function fetchExt() {                       // 7·30일: 켜져 있을 때 5분마다 = 새 진입 반영(서버도 5분 캐시, 10-10 사용자 «새 체결은 5분마다»)
+  function fetchExt() {                       // 7·30일: 켜져 있을 때 60초마다(서버도 60초 캐시) -- 새 진입 반영 1분(10-10 사용자 유지)
     var a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset, key = a + "|" + S.days, now = Date.now();
-    if (!S.on || S.days === 1 || now - (S.extT[key] || 0) < 300000) return;
+    if (!S.on || S.days === 1 || now - (S.extT[key] || 0) < 60000) return;
     S.extT[key] = now;
     fetch("/api/liquidation-map/tiers?asset=" + encodeURIComponent(a) + "&days=" + S.days, { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -46,7 +46,7 @@
   }
   // 2026-10-10 사용자 «현재가가 청산가를 넘어가면 바로 막대 제거 -- 매초»: 지도가 만들어진 뒤 가격이 지나간 범위(1초 현재가 + 그 뒤 5분봉 고·저)
   //   안의 칸을 0 으로 -- 서버 생존 필터(그 뒤 봉 고·저)와 같은 규칙을 지도 사이 시간에 브라우저에서 이어 붙인다(서버 호출 0).
-  //   새 지도가 오면(1일 60초 · 7·30일 5분) 서버가 같은 범위를 이미 걸러 낸 상태라 범위를 그 기준가로 다시 시작한다.
+  //   새 지도가 오면(1·7·30일 60초) 서버가 같은 범위를 이미 걸러 낸 상태라 범위를 그 기준가로 다시 시작한다.
   function sweep(m, tp) {
     var w = S.sweep, cp = tp.current_price, p = livePrice(tp);
     if (!w || w.tp !== tp) w = S.sweep = { tp: tp, lo: cp, hi: cp, out: null, key: "" };
