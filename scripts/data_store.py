@@ -136,10 +136,12 @@ def orderflow_files(stream: str, symbol: str, start: str | None = None, end: str
 
 def read_bt(path: Path) -> np.ndarray:
     """BTKR bookTicker 시각 파일(.bt 또는 .bt.gz) -> ts_ms·bid_px·bid_qty·ask_px·ask_qty 배열.
-    쓰는 중인 파일의 잘린 마지막 행은 버린다."""
+    쓰는 중인 파일의 잘린 마지막 행은 버린다. 0 으로 채워진 행(ts_ms=0·가격 0)도 버린다 -- 2026-10-05T02 파일 끝에 127행이
+    있었고, 시각 0 이 섞이면 초 격자를 1970년부터 펼쳐 15GB 를 먹고 WSL 을 죽였다(10-10)."""
     with (gzip.open if path.suffix == ".gz" else open)(path, "rb") as fh:
         raw = fh.read()
     if raw[:4] != b"BTKR":
         raise ValueError(f"not a BTKR file: {path}")
     body = raw[BT_HEADER_BYTES:]
-    return np.frombuffer(body[: len(body) - len(body) % BT_DTYPE.itemsize], dtype=BT_DTYPE)
+    a = np.frombuffer(body[: len(body) - len(body) % BT_DTYPE.itemsize], dtype=BT_DTYPE)
+    return a[a["ts_ms"] > 0]
