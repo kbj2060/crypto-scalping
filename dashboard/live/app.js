@@ -317,6 +317,35 @@ function repaintSupply1sPanel() {
 }
 
 const API_OI_5M_URL = "/api/oi-5m";
+// 2026-10-10 풋프린트 체결 기둥 «포지션» 보기(사용자 «체결 | 포지션 토글 · A + C 미니맵 · 1초») -- /api/position-profile.
+//   최근 1·7·30일에 열려 아직 남은 계약(추정 · 롱=숏 · 회전+나이 가중 닫기, dashboard/position_profile.py). 지도로만, 신호 아님.
+const API_POSITION_PROFILE_URL = "/api/position-profile";
+let latestPositionProfile = null, posProfileFetchAt = 0, posProfileInflight = false;
+let fpColMode = (() => { try { return localStorage.getItem("fpCol") === "pos" ? "pos" : "trade"; } catch (e) { return "trade"; } })();
+let fpPosWin = (() => { try { const v = Number(localStorage.getItem("fpPosWin")); return v === 1 || v === 30 ? v : 7; } catch (e) { return 7; } })();
+function setFpCol(mode, win) {
+  if (mode) fpColMode = mode;
+  if (win) fpPosWin = win;
+  try { localStorage.setItem("fpCol", fpColMode); localStorage.setItem("fpPosWin", String(fpPosWin)); } catch (e) { /* 저장 못 해도 동작 */ }
+  if (fpColMode === "pos") { posProfileFetchAt = 0; refreshPositionProfile(); }
+  hideTooltip(); chartPanForce = true; scheduleSnapshotChartRender();
+}
+async function refreshPositionProfile() {   // 포지션 보기일 때만 1초(서버도 1초 캐시)
+  if (fpColMode !== "pos" || activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  const now = Date.now();
+  if (posProfileInflight || now - posProfileFetchAt < 900) return;   // 900: 1초 루프 흔들림에 한 번씩 건너뛰지 않게
+  posProfileFetchAt = now; posProfileInflight = true;
+  try {
+    const r = await fetch(`${API_POSITION_PROFILE_URL}?asset=eth`, { cache: "no-store" });
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.win) {
+        if (!latestPositionProfile) chartPanForce = true;   // 첫 도착은 호버 중에도 바로(토글을 누른 손이 차트 위에 있다)
+        latestPositionProfile = j; scheduleSnapshotChartRender();
+      }
+    }
+  } catch (e) { /* 다음 초에 다시 */ } finally { posProfileInflight = false; }
+}
 const OI_5M_POLL_MS = 15000;
 // 2026-09-21 상황 읽기 · 30분 -- 2026-09-30 카드는 없애고 차트 머리 칩(#sitChips)·가격판 30분 도달 선으로 옮겼다. 서버가 5초마다 계산해 둔 것을 받는다.
 const API_SITUATION_URL = "/api/situation";
@@ -5727,6 +5756,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const tradeX0 = ml + cw + TAG_W;   // 체결 기둥 왼쪽 끝(꼬리표 칸 뒤)
   fpProfileSpan = TRADE_W ? [tradeX0, w - mr] : null;   // 아래 옵션 줄 가운데 칸이 이 폭·x 를 따른다(optRowCols)
   let tradeInfo = null;       // 체결 행(호버가 읽는다) -- 풋프린트 블록이 채운다
+  let posInfo = null;         // 2026-10-10 포지션 행(호버가 읽는다) -- 포지션 보기일 때 체결 대신
   let fpRowSize = 0;          // 풋프린트 행 크기($) -- 호가 띠가 같은 행으로 묶는다(2026-09-28)
   const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H - 2 * ROW_H;
@@ -6156,7 +6186,99 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   «여기서 얼마나 거래됐나 vs 지금 얼마나 걸려 있나»를 한 줄에서 맞댄다. 모바일: 가격 글자와 캔들 사이 띠(TRADE_L), 캔들 왼쪽 끝에서 **왼쪽으로**(호가 띠의 거울).
     //   막대 = 행 총 체결(매수+매도) · 안쪽부터 고래·중형·리테일 농담 · POC(최다 체결) 행은 테두리.
     //   🔴체결 합산에는 방향이 없다(누가 사면 누가 판다) -- 지지·저항으로 읽지 않는다. 방향은 봉별 델타가 말한다.
-    {
+    // ── 체결 | 포지션 토글 (2026-10-10 사용자 «체결/호가 프로파일 바로 위에 체결과 포지션 토글» · 시안 A + C 미니맵) ──────────
+    //   포지션 = 최근 1·7·30일에 열려 아직 남은 계약(추정 · 롱=숏). 체결 기둥과 같은 자리·같은 행·같은 바닥선에서 왼쪽으로.
+    //   풋프린트 가격 폭이 좁아 대부분이 화면 밖이다 -- 위·아래 끝에 «화면 밖 몫», 기둥 왼쪽 10px 에 창 전체 미니맵 + 보이는 범위 괄호.
+    //   🔴지도다. 덩어리 저항·재방문·고통 지수는 매매 검정 불통과(= VWAP 평균회귀 재표현, 2026-10-09).
+    const posOn = !!(TRADE_W && fpColMode === "pos" && activeSnapshotAsset === "eth");
+    if (TRADE_W && activeSnapshotAsset === "eth") {
+      const gT = document.createElementNS(NS, "g");
+      const seg = (xr, labels, active, fill, on) => {   // 오른쪽 끝 xr 에서 왼쪽으로 쌓는 작은 분절 버튼 -> 왼쪽 끝 x
+        let cx = xr;
+        labels.slice().reverse().forEach(([lab, val]) => {
+          const wd = lab.length * 10 + 12, act = val === active;
+          const r = document.createElementNS(NS, "rect");
+          r.setAttribute("x", cx - wd); r.setAttribute("y", mt - 15); r.setAttribute("width", wd); r.setAttribute("height", 14); r.setAttribute("rx", 4);
+          r.setAttribute("fill", act ? fill : "var(--chart-bg)"); r.setAttribute("stroke", "var(--line)");
+          const t = document.createElementNS(NS, "text");
+          t.setAttribute("x", cx - wd / 2); t.setAttribute("y", mt - 4.5); t.setAttribute("text-anchor", "middle"); t.setAttribute("font-size", "10");
+          t.setAttribute("font-weight", act ? "800" : "600"); t.setAttribute("fill", act ? "var(--on-fill)" : "var(--muted)"); t.textContent = lab;
+          const b = document.createElementNS(NS, "g");
+          b.setAttribute("role", "button"); b.setAttribute("aria-pressed", String(act)); b.style.cursor = "pointer";
+          b.appendChild(r); b.appendChild(t);
+          b.addEventListener("pointerdown", (e) => e.stopPropagation());
+          b.addEventListener("click", (e) => { e.stopPropagation(); on(val); });
+          gT.appendChild(b); cx -= wd + 2;
+        });
+        return cx;
+      };
+      const ex = seg(tradeX0 + TRADE_W - 2, [["체결", "trade"], ["포지션", "pos"]], fpColMode, posOn ? "var(--position)" : "var(--amber)", (v) => setFpCol(v));
+      if (posOn) seg(ex - 6, [["1d", 1], ["7d", 7], ["30d", 30]], fpPosWin, "var(--muted)", (v) => setFpCol(null, v));
+      svg.appendChild(gT);
+    }
+    if (posOn) {
+      const P = latestPositionProfile, W = P && P.win && P.win[String(fpPosWin)];
+      const anchor = tradeX0 + TRADE_W + 4, Lw = TRADE_W - 10, g = document.createElementNS(NS, "g");
+      const rect = (x, y, wd, ht, fill, op) => {
+        const r = document.createElementNS(NS, "rect");
+        r.setAttribute("x", x); r.setAttribute("y", y); r.setAttribute("width", Math.max(0, wd)); r.setAttribute("height", Math.max(1, ht));
+        r.setAttribute("fill", fill); r.setAttribute("fill-opacity", op); g.appendChild(r); return r;
+      };
+      const label = (x, y, str, fill) => {
+        const t = document.createElementNS(NS, "text");
+        t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("text-anchor", "end"); t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "700");
+        t.setAttribute("fill", fill); t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3");
+        t.textContent = str; g.appendChild(t);
+      };
+      if (!W || !(W.tot > 0)) {
+        label(anchor - 4, mt + 14, P ? "포지션 데이터 없음" : "포지션 불러오는 중…", "var(--muted)");
+      } else {
+        const rows = new Map();
+        W.vals.forEach((q, j) => { const k = Math.floor((W.lo + j + 0.5) * P.bw / rowSize); rows.set(k, (rows.get(k) || 0) + q); });
+        const vis = (k) => (k + 1) * rowSize > yMin && k * rowSize < yMax;
+        let mxq = 0; rows.forEach((q, k) => { if (vis(k) && q > mxq) mxq = q; });
+        rows.forEach((q, k) => {
+          if (!vis(k) || !(mxq > 0)) return;
+          const yTop = Math.max(mt, yAt((k + 1) * rowSize)), yBot = Math.min(plotBottom, yAt(k * rowSize));
+          if (yBot - yTop < 1) return;
+          const wd = Lw * q / mxq;
+          rect(anchor - wd, yTop + 0.5, wd, yBot - yTop - 1, "var(--position)", 0.9);
+        });
+        let above = 0, below = 0;
+        W.vals.forEach((q, j) => { const p = (W.lo + j + 0.5) * P.bw; if (p > yMax) above += q; else if (p < yMin) below += q; });
+        const pct = (x) => Math.round(100 * x / W.tot) + "%";
+        if (above / W.tot >= 0.01) label(anchor - 4, mt + 12, "↑ 화면 위 " + pct(above), "var(--muted)");
+        if (below / W.tot >= 0.01) label(anchor - 4, plotBottom - 4, "↓ 화면 아래 " + pct(below), "var(--muted)");
+        if (W.avg && currentPrice > 0) {
+          const dv = (W.avg / currentPrice - 1) * 100, avTxt = "평균 진입 " + W.avg.toFixed(pxDp()) + " (" + (dv >= 0 ? "+" : "") + dv.toFixed(1) + "%)";
+          if (W.avg < yMax && W.avg > yMin) {
+            const ya = yAt(W.avg), l = document.createElementNS(NS, "line");
+            l.setAttribute("x1", tradeX0 + 28); l.setAttribute("x2", anchor); l.setAttribute("y1", ya); l.setAttribute("y2", ya);
+            l.setAttribute("stroke", "var(--position)"); l.setAttribute("stroke-dasharray", "4 3"); l.setAttribute("stroke-width", "1.4"); g.appendChild(l);
+            label(anchor - 4, ya - 4, avTxt, "var(--position)");
+          } else label(anchor - 4, W.avg > yMax ? mt + 25 : plotBottom - 17, (W.avg > yMax ? "↑ " : "↓ ") + avTxt, "var(--position)");
+        }
+        // 미니맵(시안 C): 기둥 왼쪽 16px 뒤 10px 띠 = 이 창 전체 분포 · 테두리 = 지금 보이는 가격 범위 · 가로선 = 현재가
+        const lo = W.lo * P.bw, hi = (W.lo + W.vals.length) * P.bw, mmX = tradeX0 + 16, mmW = 10, H = plotBottom - mt;
+        if (hi > lo) {
+          const my = (p) => plotBottom - (p - lo) / (hi - lo) * H, vmax = Math.max(...W.vals), bh = Math.max(1, H / W.vals.length);
+          W.vals.forEach((q, j) => { if (q > 0) rect(mmX + mmW - mmW * q / vmax, my(lo + (j + 1) * P.bw), mmW * q / vmax, bh, "var(--position)", 0.75); });
+          const b0 = my(Math.min(hi, yMax)), b1 = my(Math.max(lo, yMin));
+          if (b1 > b0) { const fr = rect(mmX - 1.5, b0, mmW + 3, b1 - b0, "none", 1); fr.setAttribute("stroke", "var(--ink)"); fr.setAttribute("stroke-width", "1.2"); }
+          if (currentPrice > lo && currentPrice < hi) {
+            const yc = my(currentPrice), l2 = document.createElementNS(NS, "line");
+            l2.setAttribute("x1", mmX - 3); l2.setAttribute("x2", mmX + mmW + 3); l2.setAttribute("y1", yc); l2.setAttribute("y2", yc);
+            l2.setAttribute("stroke", "var(--ink)"); l2.setAttribute("stroke-width", "1.5"); g.appendChild(l2);
+          }
+          posInfo = { rows, rowSize, tot: W.tot, win: fpPosWin, x0: tradeX0 + 28, x1: anchor, mm: { x0: mmX - 3, x1: mmX + mmW + 3, my, lo, hi, W, bw: P.bw }, hours: W.hours };
+        }
+      }
+      const ln = document.createElementNS(NS, "line");
+      ln.setAttribute("x1", anchor + 1); ln.setAttribute("x2", anchor + 1); ln.setAttribute("y1", mt); ln.setAttribute("y2", plotBottom);
+      ln.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ln);
+      svg.appendChild(g);
+    }
+    if (!posOn) {
       const tr = new Map();   // 행 키 -> [총, 고래, 리테일, 매수, 매도]
       candles.forEach((c) => (footprint.byTime.get(c.time) || []).forEach((l) => {
         const k = Math.floor(l[0] / rowSize), a = tr.get(k) || [0, 0, 0, 0, 0];
@@ -7347,6 +7469,29 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       showTooltip(evt.pageX, evt.pageY, statTipHtml(STAT_KEYS[Math.floor((mx - statsGeo.sx) / statsGeo.slotW)], sm));
       return;
     }
+    // 2026-10-10 포지션 보기: 기둥 위면 그 가격 행 · 미니맵 위면 그 높이의 가격 칸.
+    if (posInfo && mx > posInfo.mm.x0 && mx < posInfo.x1 + 2) {
+      vLine.style.display = "none";
+      const fq = (q) => (q >= 1000 ? (q / 1000).toFixed(1) + "k" : q >= 10 ? q.toFixed(0) : q.toFixed(1)), dp = pxDp();
+      let lo, hi, q;
+      if (mx <= posInfo.mm.x1) {                             // 미니맵: 화면 밖까지 창 전체
+        const m = posInfo.mm, p = m.lo + (plotBottom - my) / (plotBottom - mt) * (m.hi - m.lo), j = Math.floor(p / m.bw) - m.W.lo;
+        const span = Math.max(1, Math.round(rowSize / m.bw)), j0 = Math.max(0, j - Math.floor(span / 2));
+        q = m.W.vals.slice(j0, j0 + span).reduce((a, b) => a + b, 0); lo = (m.W.lo + j0) * m.bw; hi = lo + span * m.bw;
+      } else {
+        const k = Math.floor((yMax - ((my - mt) * ySpan) / ch) / posInfo.rowSize); q = posInfo.rows.get(k) || 0; lo = k * posInfo.rowSize; hi = lo + posInfo.rowSize;
+      }
+      if (!(q > 0)) { hideTooltip(); return; }
+      const mid = (lo + hi) / 2, up = mid > currentPrice;
+      showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))">`
+        + `<span style="color:var(--position);font-weight:700">남은 계약 ${fq(q)} ${coinUnit()}</span> · ${lo.toFixed(dp)}–${hi.toFixed(dp)}`
+        + ` · 최근 ${posInfo.win}일 중 ${(100 * q / posInfo.tot).toFixed(1)}%`
+        + `<br>한쪽 금액 ≈ $${(q * mid / 1e6).toFixed(1)}M (롱 ${fq(q)} + 숏 ${fq(q)} · 계약 하나 = 롱 1 + 숏 1)`
+        + `<br>지금 상태: <span style="font-weight:700">${up ? "롱 물림 · 숏 수익" : "롱 수익 · 숏 물림"}</span> (현재가 ${up ? "위" : "아래"} ${(Math.abs(mid / currentPrice - 1) * 100).toFixed(1)}%)`
+        + (posInfo.hours < posInfo.win * 24 - 1 ? `<br>창 실제 범위 ${posInfo.hours}시간(서버 기록이 아직 덜 참)` : "")
+        + `<br><span style="opacity:.7">추정(5분 OI·거래량 · 손바뀜 + 새 포지션 먼저 닫힘) · 실측 아님 · 지도로만, 저항·지지 신호 아님</span></div>`);
+      return;
+    }
     // 2026-09-28 체결 기둥 위면 그 가격 행의 체결 풀이(데스크톱 기둥 · 모바일 왼쪽 띠).
     if (tradeInfo && mx > tradeInfo.x0 && mx < tradeInfo.x1 + 2) {
       vLine.style.display = "none";
@@ -7539,7 +7684,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       t.setAttribute("text-anchor", anchor); t.setAttribute("fill", fill); t.textContent = str;
       g.appendChild(t);
     };
-    if (TRADE_W) { head(x0 - 6, "end", "var(--amber)", "← 체결"); head(x0, "start", "var(--muted)", "호가 →"); }
+    if (TRADE_W) head(x0, "start", "var(--muted)", "호가 →");   // 2026-10-10 «← 체결» 자리는 [체결 | 포지션] 토글(풋프린트 블록이 매번 그린다)
     else { head(x0, "start", "var(--muted)", "호가"); if (TRADE_L) head(ml - 2, "end", "var(--amber)", "체결"); }
     // 2026-09-28 호가 요약 네 숫자 = **막대 계기 넷**(사용자 선택 시안 A) -- 데스크톱은 체결·호가 기둥 머리, 모바일은 풋프린트 위 한 줄.
     //   변동 0→100 채움(높으면 주황) · 불균형 가운데 0 에서 초록(매수 호가 두꺼움)/빨강 · 지속·이탈 0→100 채움.
@@ -8065,6 +8210,7 @@ async function tick() {
       refreshKalshi();               // 2026-09-28 칼시 15분 확률 (1초, ETH 만 · 참고 · 신호 아님)
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
+      refreshPositionProfile();      // 2026-10-10 체결 기둥 «포지션» 보기 (켤 때만 1초)
       refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
       refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (1초 -- 10-03, ETH 만 · 서술)

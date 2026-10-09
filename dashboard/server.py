@@ -140,6 +140,7 @@ from scripts.live_liquidation_direction_signal_20260825 import compute_liquidati
 from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history, compute_tier_profile  # noqa: E402
 # 2026-09-20 «미시 참고» 카드의 계산부(순수 함수 + 자체점검). 서버는 값을 모아 넣기만 한다.
 from dashboard import micro_ref as mref  # noqa: E402
+from dashboard import position_profile as pprof  # noqa: E402
 # 2026-09-21 «상황 읽기 · 30분» -- 사용자가 고른 트레이더 읽기를 규칙으로. 순수 함수 + 자체점검.
 from dashboard import situation as sit  # noqa: E402
 # 2026-09-25 «데이터 관계 읽기» -- 지지/저항 목록 아래 문장. 순수 함수 + 자체점검. 입력은 상황 읽기와 같은 원천.
@@ -259,6 +260,8 @@ LIQUIDATION_MAP_FETCH_LIMIT = 48  # 24h window + buffer for occasional dropped/d
 # 5분이었던 것이 1분이 된다. 비용은 실측 0.35초/회(대시보드 최고는 evidence_signal 8.22초)라
 # 분당 0.6% 듀티다. 더 줄이는 건 낭비다 -- 입력이 안 바뀐다.
 LIQUIDATION_MAP_CACHE_SECONDS = 60
+# 2026-10-10 포지션 프로파일(풋프린트 «포지션» 보기) 1초 -- REST 는 처음 30일 한 번 + 새 5분봉이 닫힐 때만, 형성 봉은 흐름 엔진 메모리.
+POSITION_PROFILE_CACHE_SECONDS = 1.0
 # 2026-08-26: a full recompute (15-day fetch + FeatureEngineer + HMM filter) takes ~10-20s, and the
 # HMM itself is sticky (0.90) so regime rarely flips bar-to-bar -- a 5-min cache doesn't meaningfully
 # stale the reading. See live_regime_wide24_signal_20260826.py's module docstring.
@@ -4550,6 +4553,79 @@ def make_app() -> web.Application:
         return await swr_cached(f"liquidation_tiers:{asset}:{days}", LIQUIDATION_MAP_CACHE_SECONDS, produce,
                                 max_stale=STALE_GRACE_SECONDS)
 
+    # ── 포지션 프로파일 (2026-10-10, 사용자 «체결 기둥 위 [체결 | 포지션] 토글 · A + C 미니맵 · 1초») ──────────────
+    #   dashboard/position_profile.py 의 Book 을 코인마다 하나 들고 있다. 처음 한 번 30일(바이낸스 OI 이력 한도)을 REST 로 채우고,
+    #   그 뒤엔 새 5분봉이 닫혔을 때만 그 봉을 REST 로 받아 민다(OI 이력은 늦게 붙으므로 1분에 한 번만 묻는다).
+    #   형성 중인 봉은 흐름 엔진 메모리(풋프린트 칸 거래량·고저 + 1초 OI)로 매초 임시 한 걸음 -- 상태는 안 바꾼다.
+    POS_OI_HIST_URL = "https://fapi.binance.com/futures/data/openInterestHist"
+    pos_books: dict[str, dict] = {}
+    pos_locks: dict[str, asyncio.Lock] = {}
+
+    async def pos_bars_rest(asset: str, start_s: int, end_s: int) -> list[tuple[int, float, float, float, float]]:
+        """닫힌 5분봉 [start_s, end_s) 의 (시각, 고, 저, 거래량, 봉 끝 OI). OI 이력은 바이낸스가 30일만 준다."""
+        sym, step = COIN_CONFIG[asset]["binance_symbol"], 300_000
+        oi: dict[int, float] = {}
+        t = start_s * 1000
+        while t < end_s * 1000:
+            rows = await fetch_binance_json(POS_OI_HIST_URL, {"symbol": sym, "period": "5m", "limit": 500, "startTime": t,
+                                                              "endTime": min(t + 499 * step, end_s * 1000)},
+                                            error_reason="position_profile_upstream_error")
+            for r in rows or []:
+                oi[int(r["timestamp"]) // 1000] = float(r["sumOpenInterest"])
+            t += 500 * step
+        out: list[tuple[int, float, float, float, float]] = []
+        t = start_s * 1000
+        while t < end_s * 1000:
+            rows = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                            {"symbol": sym, "interval": "5m", "limit": 1500, "startTime": t, "endTime": end_s * 1000 - 1},
+                                            error_reason="position_profile_upstream_error")
+            if not rows:
+                break
+            for r in rows:
+                b = int(r[0]) // 1000
+                o = oi.get(b + 300)                     # 봉 끝 스냅샷
+                if b < end_s and o is not None:
+                    out.append((b, float(r[2]), float(r[3]), float(r[5]), o))
+            t = int(rows[-1][0]) + step
+        return out
+
+    async def pos_ensure(asset: str) -> dict:
+        async with pos_locks.setdefault(asset, asyncio.Lock()):
+            now = int(time.time()); cur = now // 300 * 300                  # 형성 중인 봉 시작
+            st = pos_books.get(asset)
+            if st is None:
+                bars = await pos_bars_rest(asset, cur - 30 * 86400 + 300, cur)
+                book = pprof.Book()
+                for b in bars:
+                    book.push(*b)
+                st = pos_books[asset] = {"book": book, "last": bars[-1][0] if bars else cur - 300, "tried": now}
+            elif cur - st["last"] > 300 and now - st["tried"] >= 60:
+                st["tried"] = now
+                try:
+                    for b in await pos_bars_rest(asset, st["last"] + 300, cur):
+                        if b[0] > st["last"]:
+                            st["book"].push(*b); st["last"] = b[0]
+                except web.HTTPException:
+                    pass                                                      # 다음 분에 다시 -- 형성 봉 임시 걸음이 그 사이를 덮는다
+            return st
+
+    def pos_forming(asset: str, since_s: int) -> tuple[tuple | None, float | None]:
+        """since_s 이후(마지막으로 민 봉 다음부터 지금까지)를 한 덩어리 임시 봉으로: (시각, 고, 저, 거래량, 지금 OI), 마지막 체결가."""
+        f = flows.get(asset)
+        if f is None:
+            return None, None
+        st, bk = f.footprint_state, f.spec.bucket
+        ks, v = [], 0.0
+        for b, cells in list(st["bars"].items()):
+            if b >= since_s:
+                for k, c in cells.items():
+                    ks.append(k); v += c[0] + c[1]
+        px = next((float(c[6]) for _, c in sorted(list(st["sec"].items()), reverse=True) if c[6]), None)
+        oi = f.oi_1s[max(f.oi_1s)] if f.oi_1s else None
+        if not ks or oi is None:
+            return None, px
+        return (int(time.time()) // 300 * 300, (max(ks) + 0.5) * bk, (min(ks) - 0.5) * bk, v, float(oi)), px
+
     async def load_liquidation_map(asset: str = "eth") -> dict[str, Any]:
         """Snapshot-tab liquidation map (estimated support/resistance) -- see
         scripts/live_liquidation_map_20260824.py docstring for the estimation methodology and its
@@ -5740,6 +5816,22 @@ def make_app() -> web.Application:
             )
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_position_profile(request: web.Request) -> web.Response:
+        """최근 1·7·30일에 열려 아직 남은 계약의 가격 분포(추정, 롱=숏) -- 풋프린트 체결 기둥의 «포지션» 보기. 1초 캐시."""
+        asset = _query_coin_asset(request)
+        if asset not in flows:
+            raise web.HTTPNotFound(reason="flow_off")
+
+        async def produce() -> dict[str, Any]:
+            st = await pos_ensure(asset)
+            forming, px = pos_forming(asset, st["last"] + 300)
+            return pprof.payload(st["book"], int(time.time()), px, forming)     # 3~5ms -- 상태와 같은 루프에서(밀기와 엇갈리지 않게)
+        try:
+            payload = await swr_cached(f"position_profile:{asset}", POSITION_PROFILE_CACHE_SECONDS, produce, max_stale=STALE_GRACE_SECONDS)
+        except web.HTTPException:
+            return web.json_response({"error": "position_profile_upstream_error"}, status=web.HTTPBadGateway.status_code, headers=NOCACHE)
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_liquidation_tiers(request: web.Request) -> web.Response:
         days = int(request.query.get("days", "1")) if request.query.get("days", "1") in ("1", "7", "30") else 1
         try:
@@ -6817,6 +6909,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/liquidation-direction-signal", api_liquidation_direction_signal)
     app.router.add_get("/api/liquidation-map", api_liquidation_map)
     app.router.add_get("/api/liquidation-map/tiers", api_liquidation_tiers)
+    app.router.add_get("/api/position-profile", api_position_profile)
     app.router.add_get("/api/regime-wide24", api_regime_wide24)
     app.router.add_get("/api/regime-btc", api_regime_btc)
     app.router.add_get("/api/regime-xrp", api_regime_xrp)
