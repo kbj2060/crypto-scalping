@@ -5863,6 +5863,19 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   };
 
   const isSnapshotChart = svg.id === "candleSvgSnapshot";
+  // 가격 플롯 클립(네이티브 clipPath) -- 시장 맥락 선·풋프린트 칸이 같이 쓴다. 2026-10-10 세로 끌기(사용자 «풋프린트도 위아래»)로 칸이
+  //   사분면·레인 줄까지 넘쳐 겹쳐서 칸·델타·POC 선도 여기에 자른다.
+  const plotClip = isSnapshotChart ? (() => {
+    const clipId = (svg.id || "chart") + "-mcclip";
+    let cr = svg.querySelector("clipPath#" + clipId + " rect");
+    if (!cr) {
+      const defs = document.createElementNS(NS, "defs"), cp = document.createElementNS(NS, "clipPath");
+      cp.setAttribute("id", clipId); cr = document.createElementNS(NS, "rect");
+      cp.appendChild(cr); defs.appendChild(cp); svg.appendChild(defs);
+    }
+    cr.setAttribute("x", ml); cr.setAttribute("y", mt); cr.setAttribute("width", cw); cr.setAttribute("height", ch);   // 창·폭이 바뀌면 따라간다
+    return `url(#${clipId})`;
+  })() : null;
   // 변동성 값은 이제 카드가 보여준다. 차트에는 **툴팁용 지도**만 남긴다(리본은 내렸다).
   // 2026-09-21 변동성 전망(24h) 제거 -- 워커 중지로 데이터가 끊긴다. 그리기 분기는 그대로
   // 두고 지도만 비운다(diff 를 좁힌다).
@@ -6327,6 +6340,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       const reuse = !!prev && prev.geom === geomSig && prev.levels === levelsRef && prev.i === i
         && prev.o === c.open && prev.h === c.high && prev.l === c.low && prev.c === c.close;
       barG = reuse ? prev.g : document.createElementNS(NS, "g");
+      if (plotClip) barG.setAttribute("clip-path", plotClip);
       svg.appendChild(barG);
       if (!reuse) {
         barCache.set(c.time, { geom: geomSig, levels: levelsRef, i,
@@ -6408,6 +6422,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         dTitle.textContent = fmtDateTick(c.time * 1000) + " 델타 " + delta.toFixed(1)
           + " · 매수 " + buyTot.toFixed(1) + " / 매도 " + sellTot.toFixed(1);
         dTxt.appendChild(dTitle);
+        if (plotClip) dTxt.setAttribute("clip-path", plotClip);
         svg.appendChild(dTxt);
         deltaCache.set(c.time, { sig: dSig, n: dTxt });
         }
@@ -6454,6 +6469,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           const t = document.createElementNS(NS, "title");
           t.textContent = "봉별 POC(최대 체결 가격)의 이동. 체결이 몰린 값이지 지지·저항이 아니다.";
           ln.appendChild(t);
+          if (plotClip) ln.setAttribute("clip-path", plotClip);
           svg.appendChild(ln);
         }
         seg = [];
@@ -6470,14 +6486,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   ④ HL 고래 실측 청산가 점선 (⑤ 12시간 실측 청산 눈금은 09-30 제거). 전부 서술 -- 뜻과 우리 검정은 각 <title>.
     //   선(③④)은 옵션 선과 같이 격자 바로 위(셀 아래)에, 표식(①②⑤)은 셀 위에. 가격 플롯 밖은 네이티브 clipPath 로 자른다.
     if (isSnapshotChart) {
-      const clipId = (svg.id || "chart") + "-mcclip";
-      let cr = svg.querySelector("clipPath#" + clipId + " rect");
-      if (!cr) {
-        const defs = document.createElementNS(NS, "defs"), cp = document.createElementNS(NS, "clipPath");
-        cp.setAttribute("id", clipId); cr = document.createElementNS(NS, "rect");
-        cp.appendChild(cr); defs.appendChild(cp); svg.appendChild(defs);
-      }
-      cr.setAttribute("x", ml); cr.setAttribute("y", mt); cr.setAttribute("width", cw); cr.setAttribute("height", ch);   // 창·폭이 바뀌면 따라간다
       const mk = (parent, tag, attrs, text) => {
         const e = document.createElementNS(NS, tag);
         Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
@@ -6486,7 +6494,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         return e;
       };
       const lines = document.createElementNS(NS, "g");
-      lines.setAttribute("clip-path", `url(#${clipId})`);
+      lines.setAttribute("clip-path", plotClip);
       const cx = (i) => (xAt(i) + bw / 2).toFixed(1);
       const pl = (pts, attrs, tip) => { if (pts.length > 1) mk(lines, "polyline", { points: pts.join(" "), fill: "none", ...attrs }, tip); };
       // ③ VWAP ±σ -- 서버가 봉마다 두 벌(하루 · 시장 세션)을 싣고 mcVwapOf 가 스위치대로 고른다. 기준이 다시 시작하는 곳(seg)에서 선을 끊는다.
