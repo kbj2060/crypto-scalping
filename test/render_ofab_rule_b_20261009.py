@@ -5,8 +5,8 @@
 
 🔴주문 0: /api/manual- 전부 조건식(predicate) 가로채기 · 누르기 전 가짜 제출로 가로채기 선검사(아니면 즉시 중단) · 전후 실서버 마지막 주문 번호 대조.
 🔴실계좌에 포지션이 있으면 30초 재조회가 «포지션 없음» 상태를 되살린다 -- 타이머를 멈추고 시작한다.
-검사(1920·390): 직접 = «5%» · 띠 «자동 1.5×» → 카드 #snapRule·localStorage 동기화 · 버튼 «첫 $ · 손절 가격» 두 줄 · 진입 줄 rule-on ·
-  (1920) 마우스 1.5초 꾹 → 미리보기·제출(가짜)에 rule=1.5 · 띠 «직접» → «5%» 복귀.
+검사(1920·390): 직접 = «5%» · 띠 «자동» → 카드 #snapRule·localStorage 동기화 · 버튼 «첫 $ · 손절 가격» 두 줄 · 진입 줄 rule-on ·
+  (1920) 마우스 1.5초 꾹 → 미리보기·제출(가짜)에 rule=c · 띠 «직접» → «5%» 복귀.
 """
 import json, pathlib, sys, urllib.request
 from urllib.parse import parse_qs, urlparse
@@ -30,8 +30,8 @@ def manual(route):
     q = {k: v[0] for k, v in parse_qs(urlparse(u).query).items()}
     body = json.loads(json.dumps(PREVIEW)); body["exec_enabled"] = True
     if q.get("rule"):
-        body["plan"]["rule"] = {"l": float(q["rule"]), "cap_notional": 3000.0, "first": True, "room": 3000.0, "target_notional": 2250.0,
-                                "sl_price": 2300.0, "sl_name": "첫 진입가 −5%"}
+        body["plan"]["rule"] = {"l": 6.2, "binding": "노출 맞춤", "cap_notional": 3000.0, "first": True, "room": 3000.0, "target_notional": 2250.0,
+                                "sl_price": 2300.0, "sl_name": "첫 진입가 −7.5%(3σ)"}
     route.fulfill(body=json.dumps(body), content_type="application/json")
 EMPTY = """() => {
   for (let i = 1; i < 99999; i++) window.clearInterval(i);   // 실계좌 재조회가 비운 포지션을 되살리지 않게(테스트 인공물 방지)
@@ -58,14 +58,14 @@ with sync_playwright() as p:
         st0 = pg.evaluate("() => ({ strip: !document.getElementById('ofabRule').hidden, l: document.getElementById('ofabLongFrac').textContent, two: document.getElementById('ofabLong').classList.contains('two') })")
         if not st0["strip"] or st0["l"] != "5%" or st0["two"]: fails.append(f"[{w}] 직접 상태 {st0}")
         pg.screenshot(path=str(OUT / f"b_direct_{w}.png"), clip=pg.evaluate("() => { const r = document.getElementById('ofabFlat').getBoundingClientRect(); return {x: Math.max(0, r.x - 60), y: Math.max(0, r.y - 60), width: Math.min(innerWidth - Math.max(0, r.x - 60), r.width + 120), height: r.height + 76}; }"))
-        pg.click("#ofabRule [data-v='1.5']"); pg.wait_for_timeout(500)
+        pg.click("#ofabRule [data-v='1']"); pg.wait_for_timeout(500)
         st1 = pg.evaluate("""() => ({ card: document.getElementById('snapRule').value, store: localStorage.getItem('entryRule'),
             l: document.getElementById('ofabLongFrac').textContent, s: document.getElementById('ofabShortFrac').textContent,
             two: document.getElementById('ofabLong').classList.contains('two'),
             pressed: [...document.querySelectorAll('#ofabRule button')].map(b => b.getAttribute('aria-pressed')).join(','),
             ruleOn: document.getElementById('snapRuleBox').closest('.entry-line').classList.contains('rule-on') })""")
-        print(w, "자동 1.5×", st1)
-        if st1["card"] != "1.5" or st1["store"] != "1.5" or not st1["l"].startswith("첫 $") or "손절" not in st1["s"] or not st1["two"] or st1["pressed"] != "false,true,false" or not st1["ruleOn"]:
+        print(w, "자동", st1)
+        if st1["card"] != "1" or st1["store"] != "1" or not st1["l"].startswith("첫 $") or "손절" not in st1["s"] or not st1["two"] or st1["pressed"] != "false,true" or not st1["ruleOn"]:
             fails.append(f"[{w}] 자동 상태 {st1}")
         pg.screenshot(path=str(OUT / f"b_auto_{w}.png"), clip=pg.evaluate("() => { const r = document.getElementById('ofabFlat').getBoundingClientRect(); return {x: Math.max(0, r.x - 60), y: Math.max(0, r.y - 60), width: Math.min(innerWidth - Math.max(0, r.x - 60), r.width + 120), height: r.height + 76}; }"))
         # 펼친 패널: 자동이면 진입비율 게이지·SL/TP 숨김 + «크기» 칩 보임(10-09 사용자 «진입비율 게이지가 왔다갔다 된다»)
@@ -81,16 +81,16 @@ with sync_playwright() as p:
         pg.click("#ofabPanel #snapRuleBox .chip[data-v='0']"); pg.wait_for_timeout(500)
         pv2 = pg.evaluate(VIS)
         if not (pv2["frac"] and pv2["sltp"] and pv2["rule"]): fails.append(f"[{w}] 직접 패널 {pv2}")
-        pg.click("#ofabPanel #snapRuleBox .chip[data-v='1.5']"); pg.wait_for_timeout(400)
+        pg.click("#ofabPanel #snapRuleBox .chip[data-v='1']"); pg.wait_for_timeout(400)
         pg.click("#ofabMore"); pg.wait_for_timeout(500)
-        if w > 500:   # 마우스 1.5초 꾹 = 미리보기 → 제출(가짜) 에 rule=1.5
+        if w > 500:   # 마우스 1.5초 꾹 = 미리보기 → 제출(가짜) 에 rule=c
             n1 = len(log)
             bb = pg.evaluate("() => document.getElementById('ofabLong').getBoundingClientRect().toJSON()")
             pg.mouse.move(bb["x"] + bb["width"] / 2, bb["y"] + bb["height"] / 2); pg.mouse.down(); pg.wait_for_timeout(1900); pg.mouse.up(); pg.wait_for_timeout(1500)
             new = [u for _, u in log[n1:]]
             pv = [u for u in new if "/manual-entry/preview" in u and "side=LONG" in u]; sb = [u for u in new if "/manual-entry/submit" in u]
             print(w, "꾹 → 미리보기", len(pv), "제출(가짜)", len(sb), sb[:1])
-            if not sb or "rule=1.5" not in sb[0] or not any("rule=1.5" in u for u in pv): fails.append(f"[{w}] 꾹 진입에 rule 없음 {new}")
+            if not sb or "rule=c" not in sb[0] or not any("rule=c" in u for u in pv): fails.append(f"[{w}] 꾹 진입에 rule 없음 {new}")
         pg.click("#ofabRule [data-v='0']"); pg.wait_for_timeout(300)
         if pg.evaluate("() => document.getElementById('ofabLongFrac').textContent") != "5%": fails.append(f"[{w}] 직접으로 못 돌아옴")
         pg.close()

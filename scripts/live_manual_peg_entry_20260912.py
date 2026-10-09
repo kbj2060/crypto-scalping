@@ -302,23 +302,41 @@ def bracket_keep_farther_sl(new: dict, prev: dict | None, position_side: str) ->
             "backstop_price": prev["backstop_price"], "sl_name": "이전 SL 유지", "sl_pct": None}
 
 
-# ── 2026-10-09 권고 규칙 진입(사용자 «방향만 정하면 크기·레버리지·손절 자동») ─────────────────────────
-# 근거: 리스크 연구 10-08(실원장 153왕복 재생 · 4.7년 시뮬) -- 왕복 최대 명목을 순자산 × L(1.5~2) 로 고정하고
-#   첫 진입가 ∓5% 에서 전량 손절: 67일 원장 L1.5 = 순자산 ×1.49 · MDD −6% (실제 매매 −83.5%, 4분할 규칙 구현판 −64.7%).
-#   첫 진입 = 상한의 75% -- 원장 «첫 1분 체결 ÷ 왕복 최대 명목» 중앙값 0.753(물타기 없는 왕복 47%). 물타기는 직접, 남은 25% 안에서.
-REC_RULE_LEVELS = (1.5, 2.0)      # 화면 칩 = 허용 L 값(신뢰경계 -- 이 밖은 서버가 400)
+# ── 2026-10-09 자동 규칙 진입(사용자 «방향만 정하면 크기·레버리지·손절 자동» → «인용하신 재생(×15.2)으로 넣어줘») ─────────
+# 재생 = research_risk_rule_ledger_replay_online_alpha_20261008 --committed «커밋» 팔(= 5cbcc38b build_rule_ladder 의 크기식):
+#   왕복 최대 명목 = 순자산 × L, L = min(4 × 0.303 × 10.26 × 권장배수, 청산가가 3σ 손절선보다 0.5% 바깥인 최대 배수(MMR 2%·평단 여유 0.66%), 10)
+#   손절 = 첫 진입가 ∓3σ24(진입 직전 마감 5분봉 288개) · 물타기 = 직접(재생은 사용자 실제 물타기 모양) · 익절 없음.
+#   67일 원장: 순자산 ×15.2 · MDD −37%(사후 · 사용자 진입 선택 몫 포함). 🔴교차 마진 전제 -- 격리면 손절 전에 청산된다.
+#   첫 진입 = 상한의 75%(원장 «첫 1분 체결 ÷ 왕복 최대 명목» 중앙 0.753). 물타기는 남은 여유만.
+COMMIT_UNIT_X = 4 * 0.303 * 10.26
+COMMIT_CAP_X = 10.0
+COMMIT_MMR, COMMIT_AVG_OFF, COMMIT_LIQ_BUF, COMMIT_STOP_SIG = 0.02, 0.0066, 0.005, 3.0
 REC_FIRST_SHARE = 0.75
-REC_STOP_PCT = 0.05
+
+
+def commit_rule_l(*, position_side: str, sigma24_bp: float, vol_mult: float) -> dict[str, Any]:
+    """재생 규칙의 배수 L 과 손절 폭. **순수 함수** -- research committed_L 과 같은 식."""
+    if not (sigma24_bp > 0 and vol_mult > 0):
+        raise ValueError(f"bad sigma/vol_mult: {sigma24_bp} {vol_mult}")
+    sd = COMMIT_STOP_SIG * sigma24_bp / 1e4
+    if position_side == "LONG":
+        den = 1 - (1 - COMMIT_MMR) * (1 - sd) * (1 - COMMIT_LIQ_BUF) / (1 - COMMIT_AVG_OFF)
+    else:
+        den = (1 + COMMIT_MMR) * (1 + sd) * (1 + COMMIT_LIQ_BUF) / (1 + COMMIT_AVG_OFF) - 1
+    liq = 1 / den if den > 0 else float("inf")
+    cands = {"노출 맞춤": COMMIT_UNIT_X * vol_mult, "청산 안전": liq, "상한": COMMIT_CAP_X}
+    who = min(cands, key=cands.get)
+    return {"l": float(cands[who]), "stop_pct": sd, "binding": who}
 
 
 def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, order_leverage: float) -> dict[str, Any]:
-    """권고 규칙의 크기. **순수 함수**. 상한 = rule_l × 순자산(계좌 전체 명목에 건다 -- 교차 마진이라 다른 포지션도 같은 잔고).
+    """규칙 크기. **순수 함수**. 상한 = rule_l × 순자산(계좌 전체 명목 -- 교차 마진이라 다른 포지션도 같은 잔고).
     첫 진입(기존 명목 0) = 상한의 75%, 물타기 = 남은 여유 전부. build_entry_plan(fraction_of_equity=True)에 넘길
     cap_notional·fraction 을 돌려준다 -- 잘라 넣기는 그 함수가 한다(room = cap − existing)."""
-    if rule_l not in REC_RULE_LEVELS:
-        raise ValueError(f"rule_l must be one of {REC_RULE_LEVELS}, got {rule_l!r}")
+    if not (0.0 < float(rule_l) <= COMMIT_CAP_X):
+        raise ValueError(f"rule_l must be in (0, {COMMIT_CAP_X}], got {rule_l!r}")
     if not (equity > 0 and order_leverage > 0):
-        return {"cap_notional": 0.0, "fraction": 1.0, "first": existing_notional <= 0, "room": 0.0}
+        return {"cap_notional": 0.0, "fraction": 1.0, "first": existing_notional <= 0, "room": 0.0, "target_notional": 0.0}
     cap = rule_l * equity
     first = existing_notional <= 0
     want = cap * REC_FIRST_SHARE if first else max(0.0, cap - existing_notional)
@@ -327,25 +345,24 @@ def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, ord
             "fraction": min(1.0, max(1e-9, want / (equity * order_leverage)))}
 
 
-def rec_rule_bracket(b: dict, *, position_side: str, anchor_price: float, basis: float,
+def rec_rule_bracket(b: dict, *, position_side: str, anchor_price: float, basis: float, stop_pct: float,
                      filters: dict[str, float], prev: dict | None = None, anchor_kind: str = "첫 진입가") -> dict:
-    """청산맵 계획 b 의 SL 을 «기준가 ∓5%» 로 바꾼다(TP 는 청산맵 그대로). **순수 함수**.
-    prev = 이미 무장된 이 측면의 상태 -- 있으면 그 SL·비상 스탑을 **그대로** 둔다(물타기해도 손절선이 안 물러난다).
-    anchor_price 는 주문 심볼 가격, basis = 주문 심볼/USDT -- sl_level 은 감시(bracket_sl_hit)가 쓰는 USDT 값."""
+    """규칙 손절 = «기준가 ∓stop_pct» 에 거래소 스탑(닿는 즉시 -- 재생과 같은 판정) · 익절 없음(재생에 없다). **순수 함수**.
+    prev = 이미 무장된 이 측면의 규칙 상태 -- 있으면 그 손절을 **그대로** 둔다(물타기해도 손절선이 안 물러난다).
+    anchor_price 는 주문 심볼 가격, basis = 주문 심볼/USDT -- sl_level 은 5분봉 감시(bracket_sl_hit)가 쓰는 USDT 값(보조)."""
     if prev and prev.get("sl_price") and prev.get("backstop_price") and prev.get("rule"):
-        return {**b, "available": True, "sl_price": prev["sl_price"], "sl_level": prev.get("sl_level"),
+        return {**b, "available": True, "tp_price": None, "sl_price": prev["sl_price"], "sl_level": prev.get("sl_level"),
                 "backstop_price": prev["backstop_price"], "sl_name": prev.get("sl_name") or "규칙 손절 유지",
                 "sl_pct": None, "rule": True}
-    if not (anchor_price > 0 and basis > 0):
-        raise ValueError(f"bad anchor/basis: {anchor_price} {basis}")
+    if not (anchor_price > 0 and basis > 0 and 0 < stop_pct < 1):
+        raise ValueError(f"bad anchor/basis/stop: {anchor_price} {basis} {stop_pct}")
     tick = filters.get("tick") or 0.01
     long_side = position_side == "LONG"
-    sl = round(round(anchor_price * (1 - REC_STOP_PCT if long_side else 1 + REC_STOP_PCT) / tick) * tick, 8)
-    bs = (round(math.floor(sl * (1 - BACKSTOP_PCT) / tick + 1e-9) * tick, 8) if long_side
-          else round(math.ceil(sl * (1 + BACKSTOP_PCT) / tick - 1e-9) * tick, 8))
-    return {**b, "available": True, "sl_price": sl, "sl_level": round(sl / basis, 4), "backstop_price": bs,
-            "sl_pct": -100 * REC_STOP_PCT if long_side else 100 * REC_STOP_PCT,
-            "sl_name": f"{anchor_kind} {'−' if long_side else '+'}{100 * REC_STOP_PCT:g}%", "rule": True}
+    sl = (round(math.floor(anchor_price * (1 - stop_pct) / tick + 1e-9) * tick, 8) if long_side
+          else round(math.ceil(anchor_price * (1 + stop_pct) / tick - 1e-9) * tick, 8))
+    return {**b, "available": True, "tp_price": None, "sl_price": sl, "sl_level": round(sl / basis, 4), "backstop_price": sl,
+            "sl_pct": round(-100 * stop_pct if long_side else 100 * stop_pct, 2),
+            "sl_name": f"{anchor_kind} {'−' if long_side else '+'}{100 * stop_pct:.1f}%(3σ)", "rule": True}
 
 
 def bracket_sl_hit(position_side: str, last_bar: tuple[float, float] | None, armed: dict) -> bool:
@@ -834,40 +851,47 @@ def _self_check() -> None:
 
 
 def _self_check_rec_rule() -> None:
-    """권고 규칙(2026-10-09) -- _self_check 앞에 돈다(그 함수의 옛 bracket_sl_hit 검사는 main 에서도 이미 깨져 있다)."""
+    """자동 규칙(2026-10-09) -- _self_check 앞에 돈다(그 함수의 옛 bracket_sl_hit 검사는 main 에서도 이미 깨져 있다)."""
     f = {"tick": 0.01, "step": 0.001, "min_qty": 0.001, "min_notional": 20.0}
-    # ── 권고 규칙(2026-10-09) ──
-    r = rec_rule_size(rule_l=1.5, equity=2000.0, existing_notional=0.0, order_leverage=20)
-    assert r["first"] and r["cap_notional"] == 3000.0 and abs(r["target_notional"] - 2250.0) < 1e-6
+    # ── 자동 규칙(2026-10-09, 재생 ×15.2 크기식) ──
+    c = commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=0.5)
+    assert c["binding"] == "노출 맞춤" and abs(c["l"] - 0.5 * 4 * 0.303 * 10.26) < 1e-9 and abs(c["stop_pct"] - 0.075) < 1e-12
+    assert commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=1.0)["binding"] == "상한"   # 12.4 > 10
+    hi = commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=3.0)
+    assert hi["binding"] in ("청산 안전", "상한") and hi["l"] <= 10.0
+    liq = commit_rule_l(position_side="SHORT", sigma24_bp=600.0, vol_mult=3.0)          # 넓은 손절 → 청산 안전이 묶는다
+    assert liq["binding"] == "청산 안전" and liq["l"] < 10.0
+    sd = liq["stop_pct"]; L = liq["l"]                                                   # 청산가가 손절선보다 0.5% 바깥(평단 여유 포함)
+    assert abs((1 + 0.02) * (1 + sd) * (1 + 0.005) / (1 + 0.0066) - 1 - 1 / L) < 1e-9
+    r = rec_rule_size(rule_l=c["l"], equity=2000.0, existing_notional=0.0, order_leverage=20)
+    assert r["first"] and abs(r["target_notional"] - 0.75 * c["l"] * 2000.0) < 1e-6
     p = build_entry_plan(side="LONG", best_bid=2500.0, best_ask=2500.01, recommended_qty=0.0, cap_notional=r["cap_notional"],
                          filters=f, equity=2000.0, fraction=r["fraction"], fraction_of_equity=True, order_leverage=20)
-    assert abs(p["notional_usdt"] - 2250.0) < 2500 * f["step"] + 0.01, p["notional_usdt"]          # 상한의 75%
-    r2 = rec_rule_size(rule_l=1.5, equity=2000.0, existing_notional=2250.0, order_leverage=20)
-    p2 = build_entry_plan(side="LONG", best_bid=2400.0, best_ask=2400.01, recommended_qty=0.0, cap_notional=r2["cap_notional"],
-                          filters=f, existing_notional=2250.0, equity=2000.0, fraction=r2["fraction"], fraction_of_equity=True, order_leverage=20)
-    assert not r2["first"] and abs(p2["notional_usdt"] - 750.0) < 2400 * f["step"] + 0.01, p2["notional_usdt"]   # 물타기 = 남은 25% 만
+    assert abs(p["notional_usdt"] - 0.75 * c["l"] * 2000.0) < 2500 * f["step"] + 0.01, p["notional_usdt"]
+    r2 = rec_rule_size(rule_l=c["l"], equity=2000.0, existing_notional=c["l"] * 2000.0 * 0.75, order_leverage=20)
+    assert not r2["first"] and abs(r2["target_notional"] - c["l"] * 2000.0 * 0.25) < 1e-6        # 물타기 = 남은 25%
     r3 = rec_rule_size(rule_l=2.0, equity=2000.0, existing_notional=4000.0, order_leverage=20)
     p3 = build_entry_plan(side="LONG", best_bid=2400.0, best_ask=2400.01, recommended_qty=0.0, cap_notional=r3["cap_notional"],
                           filters=f, existing_notional=4000.0, equity=2000.0, fraction=r3["fraction"], fraction_of_equity=True, order_leverage=20)
-    assert p3["blocked"], p3                                                               # 상한이 찼으면 막는다
-    for bad in (1.0, 3.0, 2.5):
+    assert p3["blocked"], p3                                                                      # 상한이 찼으면 막는다
+    for bad in (0.0, -1.0, 10.5):
         try:
             rec_rule_size(rule_l=bad, equity=2000.0, existing_notional=0.0, order_leverage=20)
         except ValueError:
             pass
         else:
             raise AssertionError(f"막았어야 한다: rule_l={bad}")
-    rb = rec_rule_bracket({"tp_price": 2600.0}, position_side="LONG", anchor_price=2500.0, basis=1.0, filters=f)
-    assert rb["sl_price"] == 2375.0 and rb["backstop_price"] < 2375.0 and rb["tp_price"] == 2600.0 and rb["rule"]
-    rs = rec_rule_bracket({}, position_side="SHORT", anchor_price=2500.0, basis=1.0, filters=f)
-    assert rs["sl_price"] == 2625.0 and rs["backstop_price"] > 2625.0
-    kept = rec_rule_bracket({"tp_price": 2550.0}, position_side="LONG", anchor_price=2300.0, basis=1.0, filters=f,
-                            prev={"sl_price": 2375.0, "sl_level": 2375.0, "backstop_price": 2363.0, "rule": True})
-    assert kept["sl_price"] == 2375.0 and kept["backstop_price"] == 2363.0 and kept["tp_price"] == 2550.0   # 물타기해도 손절선 그대로
-    fresh = rec_rule_bracket({}, position_side="LONG", anchor_price=2300.0, basis=1.0, filters=f,
-                             prev={"sl_price": 2400.0, "backstop_price": 2390.0})                         # 규칙 아닌 이전 SL 은 안 물려받는다
-    assert fresh["sl_price"] == 2185.0
-    print("권고 규칙 통과 — 첫 진입 75% · 물타기 = 남은 여유 · 상한 막음 · L 검증 · ∓5% · 물타기해도 손절선 유지 · 규칙 아닌 SL 안 물려받음")
+    rb = rec_rule_bracket({"tp_price": 2600.0}, position_side="LONG", anchor_price=2500.0, basis=1.0, stop_pct=0.075, filters=f)
+    assert rb["sl_price"] == 2312.5 and rb["backstop_price"] == 2312.5 and rb["tp_price"] is None and rb["rule"]   # 스탑 = 손절선 그대로 · 익절 없음
+    rs = rec_rule_bracket({}, position_side="SHORT", anchor_price=2500.0, basis=1.0, stop_pct=0.075, filters=f)
+    assert rs["sl_price"] == 2687.5 and rs["backstop_price"] == 2687.5
+    kept = rec_rule_bracket({"tp_price": 2550.0}, position_side="LONG", anchor_price=2300.0, basis=1.0, stop_pct=0.09, filters=f,
+                            prev={"sl_price": 2312.5, "sl_level": 2312.5, "backstop_price": 2312.5, "rule": True})
+    assert kept["sl_price"] == 2312.5 and kept["tp_price"] is None                                   # 물타기해도 손절선 그대로
+    fresh = rec_rule_bracket({}, position_side="LONG", anchor_price=2300.0, basis=1.0, stop_pct=0.075, filters=f,
+                             prev={"sl_price": 2400.0, "backstop_price": 2390.0})                    # 규칙 아닌 이전 SL 은 안 물려받는다
+    assert fresh["sl_price"] == 2127.5
+    print("자동 규칙 통과 — 재생 크기식(노출 맞춤·청산 안전·상한 10) · 3σ 손절 · 첫 75% · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 
 if __name__ == "__main__":

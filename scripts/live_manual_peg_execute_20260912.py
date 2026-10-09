@@ -67,6 +67,19 @@ def executed_qty(order: dict) -> float:
     return float(order.get("executedQty") or 0.0)
 
 
+async def margin_type(session, symbol: str) -> str | None:
+    """심볼의 마진 방식 "cross"·"isolated"(헤지 두 다리가 섞이면 isolated). 못 읽으면 None -- 읽기만(주문 없음).
+    2026-10-09 자동 규칙은 교차 전제다(격리 20배는 청산 −4.6% 가 3σ 손절보다 안쪽 -- 실사고: 롱 0.893 청산 2,384 > 손절 2,376)."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        return None
+    r = await signed(session, "GET", "/fapi/v2/positionRisk", {"symbol": symbol}, key, secret, await _clock_offset(session))
+    if not isinstance(r, list) or not r:
+        return None
+    kinds = {str(p.get("marginType") or "").lower() for p in r}
+    return "cross" if kinds == {"cross"} else "isolated" if "isolated" in kinds else None
+
+
 async def current_leverage(session, symbol: str, key: str, secret: str, offset: int) -> int | None:
     """지금 걸린 심볼 레버리지. 못 읽으면 None -- 그때는 «모른다»이지 «맞다»가 아니다."""
     r = await signed(session, "GET", "/fapi/v2/positionRisk", {"symbol": symbol},

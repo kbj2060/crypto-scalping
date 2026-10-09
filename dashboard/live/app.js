@@ -8545,9 +8545,9 @@ function manualEntryPlanHtml(data) {
   const cap = data.cap || {};
   const dir = plan.positionSide === "LONG" ? "롱" : "숏";
   const rl = plan.rule;   // 2026-10-09 권고 규칙 -- 무엇이 크기·손절을 정했는지 머리 바로 아래에 한 줄
-  const ruleNote = rl ? entryNote(`권고 규칙 ${rl.l}배 — 상한 ${won(rl.cap_notional)} USDT(순자산 × ${rl.l}) · 이번 `
+  const ruleNote = rl ? entryNote(`자동 규칙 — 상한 ${won(rl.cap_notional)} USDT(순자산 × ${rl.l}, ${rl.binding}) · 이번 `
     + `${rl.first ? "첫 진입 = 상한의 75%" : `물타기 = 남은 여유 ${won(rl.room)} USDT`} · 손절 ${rl.sl_name || ""} ${rl.sl_price ? Number(rl.sl_price).toLocaleString() : "-"}`
-    + ` (SL/TP 체크와 무관하게 걸고, 물타기해도 안 물러납니다)`) : "";
+    + ` 거래소 스탑(물타기해도 안 물러남) · 익절 없음 · 교차 마진에서만`) : "";
   const parts = [`<div class="entry-head"><b>${dir} ${escapeHtml(String(plan.quantity))} ${coinUnit()}</b>
       <span>@ ${escapeHtml(Number(plan.price).toLocaleString())}</span>
       <span>내 돈 ${escapeHtml(won(plan.margin_usdt || 0))} USDT${
@@ -8809,10 +8809,15 @@ function syncOrderCoinGate() {
 }
 
 // ov(2026-10-05 «스위칭»): 화면 게이지 대신 쓸 값 {pct, lev, sltp, fresh} -- 전량 청산(pct 100)과 반대 진입(그 포지션의 증거금 %·배수).
-// 2026-10-09 권고 규칙(index.html #snapRule): "1.5"·"2" 면 서버가 크기·손절을 정한다(rule=). ETH 만 -- 다른 코인은 "직접".
+// 2026-10-09 자동 규칙(index.html #snapRule "1"): 서버가 재생 크기식으로 크기·손절을 정한다(rule=c). ETH 만 -- 다른 코인은 "직접".
 function manualRule() {
-  const v = el("snapRule")?.value || "0";
-  return activeSnapshotAsset === "eth" && v !== "0" ? v : "";
+  return activeSnapshotAsset === "eth" && (el("snapRule")?.value || "0") === "1" ? "c" : "";
+}
+// 서버 live_manual_peg_entry.commit_rule_l 과 같은 식(화면 표시용 -- 실제 크기·손절은 누를 때 서버 미리보기가 정한다)
+function commitRuleL(side, sigmaBp4h, vm) {
+  const sd = 3 * sigmaBp4h * Math.sqrt(6) / 1e4;
+  const den = side === "LONG" ? 1 - 0.98 * (1 - sd) * 0.995 / (1 - 0.0066) : 1.02 * (1 + sd) * 1.005 / 1.0066 - 1;
+  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, 10), sd };
 }
 function renderRuleBox() {
   const box = el("snapRuleBox"), r = manualRule();
@@ -8829,7 +8834,7 @@ el("snapRule")?.addEventListener("input", () => {
   let v = "0";
   try { v = localStorage.getItem("entryRule") || "0"; } catch (e) { /* 기본 직접 */ }
   const inp = el("snapRule");
-  if (inp && ["0", "1.5", "2"].includes(v)) inp.value = v;
+  if (inp) inp.value = v === "1" ? "1" : "0";   // 옛 «권고 1.5/2» 저장값은 «직접»으로(모르는 사이 10배 규칙으로 넘어가지 않게)
   renderRuleBox();
 })();
 
@@ -9004,7 +9009,7 @@ async function manualEntryRefreshSize() {
       line.className = "entry-note bad";
       const why = data.detail === "worker_stale" ? "크기 워커 정지"
         : data.error === "sizing_unavailable" ? "크기 데이터 없음"
-        : (data.error || "알 수 없음");
+        : (data.detail || data.error || "알 수 없음");   // 2026-10-09 자동 규칙의 막힘(격리 마진·변동성 없음)은 서버 문장 그대로
       line.hidden = false;
       line.textContent = `크기 확인 실패 — ${why}`;
       setEntryProjPreview(null);   // 🔴옛 투영을 남기지 않는다
@@ -9594,7 +9599,7 @@ function ofabWatchResult() {
 //   아니면 2026-10-05 포지션 없음의 LONG·SHORT 버튼(사용자 지시).
 function ofabQuickEntry(side, add) {
   const r = manualRule();   // 2026-10-09 자동이면 크기·손절은 서버 규칙(5% 비율·SL/TP 끔은 무시된다)
-  const what = `${side === "LONG" ? "롱" : "숏"} ${r ? `자동 ${r}×` : "5%"} ${add ? "추가 " : ""}진입`;
+  const what = `${side === "LONG" ? "롱" : "숏"} ${r ? "자동" : "5%"} ${add ? "추가 " : ""}진입`;
   ofabApplyDefaults();
   if (manualOrderBusy || manualPreviewInFlight) return ofabSay(escapeHtml(`${what} 안 함 — 진행 중인 주문·미리보기가 있습니다.`), "bad");
   ofabWatchResult();
@@ -9661,7 +9666,7 @@ function renderOfab() {
 //   숫자는 서버 규칙(live_manual_peg_entry rec_rule_size·rec_rule_bracket)과 같은 식으로 여기서 3초마다 -- 첫 = 0.75 × L × 순자산,
 //   손절 = 지금 가격 ∓5%. 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
 function renderOfabRule(bal, live) {
-  const r = manualRule(), L = Number(r), eth = activeSnapshotAsset === "eth";
+  const r = manualRule(), eth = activeSnapshotAsset === "eth", vmx = latestSituation?.vol_mult;
   const strip = el("ofabRule");
   if (strip) {
     strip.hidden = !eth;
@@ -9676,10 +9681,14 @@ function renderOfabRule(bal, live) {
     if (!b || !sm) continue;
     b.classList.toggle("two", !!r);
     const dir = side === "LONG" ? "롱" : "숏";
-    if (r && eq > 0 && live > 0) {
-      const sl = live * (side === "LONG" ? 0.95 : 1.05);
-      setT(sm.id || id + "Frac", `첫 $${Math.round(0.75 * L * eq).toLocaleString()} · 손절 ${Math.round(sl).toLocaleString()}`);
-      b.title = `1.5초 꾹 = ${dir} 자동 ${r}× 진입 — 왕복 상한 순자산 × ${r}, 첫 진입 그 75%, 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}5%`;
+    const cr = r && vmx?.mult && vmx?.sigma_bp ? commitRuleL(side, Number(vmx.sigma_bp), Number(vmx.mult)) : null;
+    if (cr && eq > 0 && live > 0) {
+      const sl = live * (side === "LONG" ? 1 - cr.sd : 1 + cr.sd);
+      setT(sm.id || id + "Frac", `첫 $${Math.round(0.75 * cr.l * eq).toLocaleString()} · 손절 ${Math.round(sl).toLocaleString()}`);
+      b.title = `1.5초 꾹 = ${dir} 자동 진입 — 왕복 상한 순자산 × ${cr.l.toFixed(1)}(첫 진입 그 75%), 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}${(100 * cr.sd).toFixed(1)}%(3σ, 거래소 스탑), 익절 없음`;
+    } else if (r) {
+      setT(sm.id || id + "Frac", "자동 — 변동성 대기");
+      b.title = `${dir} 자동 진입 — 권장 배수(직전 24시간 변동성)가 아직 없습니다`;
     } else {
       setT(sm.id || id + "Frac", "5%");
       b.title = `1.5초 꾹 = ${dir} 5% 진입`;
@@ -9788,7 +9797,7 @@ setInterval(renderVolMult, 3000);
   //   두 번 누르게 된 건 1.5초 전에 떼서 «짧게 = 펼치기»로 갔을 때다. 마우스는 짧게 눌러도 창을 열지 않고 꾹 누르라고 말한다(상세는 옆 펼치기 버튼).
   //   🔴터치는 꾹 발주가 없으므로(09-28 «모바일에서는 넣으면 안돼») 짧게 = 펼치기 그대로 -- 안 그러면 휴대폰에서 주문할 길이 없어진다.
   const dirTap = (side) => (ptype) => (ptype === "touch" ? ofabSetOpen(!ofab.open)
-    : ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${manualRule() ? `자동 ${manualRule()}×` : "5%"} 진입은 1.5초 꾹 누르세요 — 상세 주문은 옆 펼치기 버튼`)));
+    : ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} ${manualRule() ? "자동" : "5%"} 진입은 1.5초 꾹 누르세요 — 상세 주문은 옆 펼치기 버튼`)));
   ofabHold(tgl, ofabQuickAdd);
   ofabHold(el("ofabLong"), () => ofabQuickEntry("LONG", false), dirTap("LONG"));
   ofabHold(el("ofabShort"), () => ofabQuickEntry("SHORT", false), dirTap("SHORT"));
