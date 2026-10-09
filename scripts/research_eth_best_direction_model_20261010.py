@@ -811,12 +811,12 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--coins":
     coin_replication()
 
 
-def execution_realism(W=5, fee_m=0.0, fee_t=4.0, vol_gate=False):
+def execution_realism(W=5, fee_m=0.0, fee_t=4.0, vol_gate=False, hold="pred_holdout_2023_24_4h_seed3.npy", save=None):
     """4h HGB(2023~24 방법 홀드아웃 + 2025~26 최종) 현실 실행: 결정 직전 1분 종가에 지정가, W 분 안 관통해야 체결(메이커 fee_m),
     아니면 W 분 뒤 종가로 시장가(fee_t). 진입·청산 모두. 위상 8 분산. vol_gate = 직전 1일 변동 ≥ 과거 확장 67분위일 때만."""
     import research_eth_liqmap_5m_direction_20261010 as LQ5
     F = pd.read_parquet(panel_path("ETH"), columns=["ts", "P_rv1d"]); ts = F.ts.to_numpy()
-    ph = np.load(f"{OUT}/pred_holdout_2023_24_4h.npy"); pf = np.load(f"{OUT}/pred_FINAL_eth_4h.npy")[:, 0]
+    ph = np.load(f"{OUT}/{hold}"); pf = np.load(f"{OUT}/pred_FINAL_eth_4h.npy")[:, 0]                # 홀드아웃 기본 = 시드 3(최종과 같은 조건)
     pred = np.where(ts < np.datetime64("2025-01-01"), np.r_[ph, np.full(len(F) - len(ph), np.nan)], pf); sq = pd.Series(pred)
     lo, hi = sq.shift(1).expanding(8640).quantile(.2).to_numpy(), sq.shift(1).expanding(8640).quantile(.8).to_numpy()
     gate = F.P_rv1d.to_numpy() >= F.P_rv1d.shift(1).expanding(288 * 90).quantile(2 / 3).to_numpy()
@@ -843,9 +843,12 @@ def execution_realism(W=5, fee_m=0.0, fee_t=4.0, vol_gate=False):
     out = {"W": W, "fee_m": fee_m, "fee_t": fee_t, "vol_gate": vol_gate, "yearly_sharpe": {int(Y): round(float(x.mean() / x.std() * np.sqrt(365)), 2) for Y, x in d.groupby(d.index.year)},
            "sharpe": round(float(d.mean() / d.std() * np.sqrt(365)), 2), "day_bp": round(float(d.mean()), 2), "ci": [round(float(x), 2) for x in bs]}
     print(json.dumps(out, ensure_ascii=False), flush=True)
+    if save:
+        d.to_frame("pnl").to_parquet(f"{OUT}/{save}")
     return out
 
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--exec":
-    res = [execution_realism(), execution_realism(fee_m=1.0), execution_realism(vol_gate=True)]
+    res = [execution_realism(save="hgb_exec_daily_seed3.parquet"), execution_realism(fee_m=1.0), execution_realism(vol_gate=True),
+           execution_realism(hold="pred_holdout_2023_24_4h.npy")]
     json.dump(res, open(f"{OUT}/execution_realism.json", "w"), ensure_ascii=False, indent=1)
