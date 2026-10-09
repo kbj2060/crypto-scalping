@@ -76,6 +76,8 @@ let latestFootprint = null;
 //   chartPanEnd = 창 오른쪽 끝 봉의 시각(초) · null = 실시간(최신 봉을 따라간다). 과거로 옮기면 그 시각에 고정된다.
 const CHART_PAN_BARS = 144;
 let chartPanEnd = null;
+// 2026-10-09 세로 이동(사용자 «모든 차트에서 마우스로 위아래로도»): 가격축을 이만큼(가격 단위) 올린다 · 0 = 자동 축. «최신으로»가 함께 0 으로.
+let chartPanY = 0, chartYPerPx = 0;
 let footprintLastFetchAt = 0;
 // ── 창 토글 (2026-09-19 사용자 요청: 1h/2h/4h) ─────────────────────────────
 // 풋프린트와 수급 프로파일이 **같은 창**을 쓴다. 한 카드 안의 위아래 두 그림이 서로 다른
@@ -540,7 +542,7 @@ async function setActiveSnapshotAsset(asset) {
   if (!SNAPSHOT_ASSET_KEYS.includes(asset) || asset === activeSnapshotAsset) return;
   activeSnapshotAsset = asset;
   try { renderNews(); } catch (e) { console.error("news render:", e); }   // 2026-10-05 뉴스 카드의 «지금 코인» 강조·필터(예외가 코인 전환을 끊지 않게)
-  chartPanEnd = null;   // 코인을 바꾸면 실시간으로
+  chartPanEnd = null; chartPanY = 0;   // 코인을 바꾸면 실시간으로
   renderSnapshotAssetTabs();
   // 🔴2026-09-30 진입 미리보기(plan·cap)는 **코인별**인데 전환 때 안 비워 XRP 탭이 최대 60초(주문 불가 코인이면
   //   계속) ETH 계획(~$2,676)을 «지금 설정으로 넣으면»에 그렸다. 비우고 새 코인 것을 바로 받는다.
@@ -5300,6 +5302,7 @@ function chartPanTo(endIdx) {
   chartPanForce = true;
   scheduleSnapshotChartRender();
 }
+function chartPanReset() { chartPanEnd = null; chartPanY = 0; chartPanForce = true; scheduleSnapshotChartRender(); }   // 최신 봉 · 자동 축(호버 중에도 바로)
 const chartPanBy = (n) => chartPanTo(chartPanEndIndex(candleHistoryByAsset[activeSnapshotAsset] || []) - n);   // n>0 = 과거로
 // 헤더 미니맵: 12시간 종가 선 + 지금 창(밝은 띠). 누르거나 끌면 그 자리로 · 방향키 1봉(Shift 6봉).
 let chartPanKey = "";
@@ -5310,7 +5313,7 @@ function renderChartPan() {
   if (!full.length || !flowOn()) { box.hidden = true; chartPanKey = ""; return; }
   box.hidden = false;
   const hist = full.slice(-CHART_PAN_BARS), n = hist.length, off = full.length - n;
-  const e = chartPanEndIndex(full) - off, s = Math.max(0, e - chartWindowBars), live = chartPanEnd == null;
+  const e = chartPanEndIndex(full) - off, s = Math.max(0, e - chartWindowBars), live = chartPanEnd == null && !chartPanY;
   const key = `${n}|${s}|${e}|${live}|${hist[n - 1].close}|${hist[0].time}`;
   if (key === chartPanKey) return;
   chartPanKey = key;
@@ -5324,7 +5327,7 @@ function renderChartPan() {
     + ` aria-valuetext="${t(hist[s])}부터 ${t(end)}까지">`
     + `<rect class="pan-win" x="${X(s).toFixed(1)}" y="0.5" width="${Math.max(3, X(e) - X(s)).toFixed(1)}" height="${H - 1}" rx="4"/>`
     + `<path class="pan-line" d="${line}"/></svg>`
-    + `<span class="chart-pan-when">${t(hist[s])}–${live ? "지금" : t(end)}</span>`
+    + `<span class="chart-pan-when">${t(hist[s])}–${chartPanEnd == null ? "지금" : t(end)}</span>`
     + (live ? `<span class="chart-pan-live" title="최신 봉을 따라간다">실시간</span>`
             : `<button type="button" class="chart-pan-now" title="최신 봉으로 돌아가기 (더블클릭도 같다)">최신으로</button>`);
   if (focused) box.querySelector(".chart-pan-map")?.focus();
@@ -5343,10 +5346,10 @@ function setupChartPan() {
     const up = () => { box.removeEventListener("pointermove", go); box.removeEventListener("pointerup", up); box.removeEventListener("pointercancel", up); };
     box.addEventListener("pointermove", go); box.addEventListener("pointerup", up); box.addEventListener("pointercancel", up);
   });
-  box.addEventListener("click", (ev) => { if (ev.target.closest(".chart-pan-now")) { chartPanEnd = null; scheduleSnapshotChartRender(); } });
+  box.addEventListener("click", (ev) => { if (ev.target.closest(".chart-pan-now")) chartPanReset(); });
   box.addEventListener("keydown", (ev) => {
     const d = { ArrowLeft: 1, ArrowRight: -1 }[ev.key];
-    if (ev.key === "End") { ev.preventDefault(); chartPanEnd = null; scheduleSnapshotChartRender(); return; }
+    if (ev.key === "End") { ev.preventDefault(); chartPanReset(); return; }
     if (!d) return;
     ev.preventDefault(); chartPanBy(d * (ev.shiftKey ? 6 : 1));
   });
@@ -5362,20 +5365,22 @@ function setupChartPan() {
   }, { passive: false });
   let drag = null;
   svg.addEventListener("pointerdown", (ev) => {
-    if (!canPan() || ev.button !== 0 || ev.pointerType === "touch") return;
+    if (ev.button !== 0 || ev.pointerType === "touch") return;   // 세로 이동은 창 크기와 무관하게 늘 된다(가로만 canPan)
     const slot = Math.max(4, (svg.getBoundingClientRect().width * 0.67 - 300) / chartWindowBars);
-    drag = { x: ev.clientX, end: chartPanEndIndex(full()), slot, moved: false, id: ev.pointerId };
+    drag = { x: ev.clientX, y: ev.clientY, end: chartPanEndIndex(full()), py: chartPanY, k: chartYPerPx, slot, moved: false, id: ev.pointerId };
   });
   svg.addEventListener("pointermove", (ev) => {
     if (!drag || !(ev.buttons & 1)) { drag = null; return; }
-    const dx = ev.clientX - drag.x;
-    if (!drag.moved && Math.abs(dx) < 5) return;
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
     if (!drag.moved) { drag.moved = true; svg.setPointerCapture(drag.id); svg.classList.add("panning"); }
-    chartPanTo(drag.end - dx / drag.slot);   // 오른쪽으로 끌면 과거가 보인다
+    if (drag.k) { chartPanY = drag.py + dy * drag.k; chartPanForce = true; }   // 아래로 끌면 위쪽 가격이 보인다
+    if (canPan()) chartPanTo(drag.end - dx / drag.slot);   // 오른쪽으로 끌면 과거가 보인다
+    if (chartPanForce) scheduleSnapshotChartRender();
   });
   const stop = () => { drag = null; svg.classList.remove("panning"); };
   svg.addEventListener("pointerup", stop); svg.addEventListener("pointercancel", stop);
-  svg.addEventListener("dblclick", () => { if (chartPanEnd != null) { chartPanEnd = null; scheduleSnapshotChartRender(); } });
+  svg.addEventListener("dblclick", () => { if (chartPanEnd != null || chartPanY) chartPanReset(); });
 }
 let chartPanForce = false;   // 창 이동은 호버 중에도 바로 그린다(호버 보류에 막히면 끌어도 안 움직인다)
 function renderSnapshotChart() {
@@ -5803,7 +5808,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     if (q > 0) half = Math.ceil(half / (2 * q)) * 2 * q;
     yMin = c - half; yMax = c + half;
   }
+  if (svg.id === "candleSvgSnapshot" && chartPanY) { yMin += chartPanY; yMax += chartPanY; }   // 2026-10-09 세로 끌기
   const ySpan = Math.max(yMax - yMin, 1e-5); // Prevent division by zero
+  if (svg.id === "candleSvgSnapshot") chartYPerPx = ySpan / Math.max(1, ch);
 
   // 2026-09-21 청산 밀도는 **전체폭**이다 -- 체결 봉 뒤로 지나간다(사용자 요청).
   //   한때 풋프린트만 왼쪽 게이트로 뺐는데, 그건 «알파를 낮춰 겹치기»가 척도를 눌러 버린

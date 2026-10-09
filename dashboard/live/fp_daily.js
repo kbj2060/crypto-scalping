@@ -21,7 +21,7 @@
 
   var S = { on: false, D: null, n: 0, i0: 0, span: DEFAULT_SPAN, cells: new Map(), want: null, loading: false,
             heat: new Map(), heatWant: null, heatLoading: false, heatT: 0, heatOn: true,
-            hover: null, timer: 0, raf: 0, drag: null, pinch: null, fetchT: 0, view: null };
+            hover: null, timer: 0, raf: 0, drag: null, pinch: null, fetchT: 0, view: null, yOff: 0 };   // yOff = 세로 끌기(가격 단위, 10-09)
   var $ = function (id) { return document.getElementById(id); };
   var css = function (n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
   var tipShow = function (x, y, h) { if (typeof showTooltip === "function") showTooltip(x, y, h); };   // app.js 전역
@@ -234,6 +234,7 @@
     var lo = Infinity, hi = -Infinity, i;
     for (i = a; i <= b; i++) { lo = Math.min(lo, D.l[i]); hi = Math.max(hi, D.h[i]); }
     var pad = (hi - lo) * 0.05 || 1; lo = Math.max(0, lo - pad); hi += pad;
+    lo += S.yOff; hi += S.yOff;
     var yOf = function (p) { return G.top + (hi - p) / (hi - lo) * G.priceH; };
     var cellMode = bw >= cellMinPx(G), row = rowFor(lo, hi, G.priceH);
     if (cellMode) scheduleCells(row, a, b);
@@ -242,6 +243,7 @@
 
     g.save();
     g.beginPath(); g.rect(G.L, 0, G.plotW, G.H); g.clip();
+    g.save(); g.beginPath(); g.rect(G.L, G.top, G.plotW, G.priceH); g.clip();   // 가격 칸만 -- 세로로 끌면 봉이 레인으로 넘친다(10-09)
     var step = niceStep((hi - lo) / Math.max(3, G.priceH / 60)), p, y;
     g.strokeStyle = C.line; g.globalAlpha = 0.82; g.lineWidth = 1;      // 5분 차트 .chart-grid 와 같은 격자
     for (p = Math.ceil(lo / step) * step; p <= hi; p += step) { y = Math.round(yOf(p)) + 0.5; g.beginPath(); g.moveTo(G.L, y); g.lineTo(G.L + G.plotW, y); g.stroke(); }
@@ -265,6 +267,7 @@
         g.strokeRect(x - bw * 0.47, yOf(D.h[i]) - 2, bw * 0.94, yOf(D.l[i]) - yOf(D.h[i]) + 4); g.setLineDash([]);
       }
     }
+    g.restore();
     drawLanes(g, C, G, a, b, xOf, bw);
     if (S.hover && S.hover.i >= a && S.hover.i <= b) {          // 호버 십자선
       g.strokeStyle = C.muted; g.globalAlpha = 0.55; g.lineWidth = 1; g.setLineDash([2, 3]);
@@ -480,7 +483,7 @@
   }
   function setView(span) {
     S.span = span === "all" ? S.n + 2 : span;
-    S.i0 = S.n - S.span + 1.5; clampView(); redraw();
+    S.i0 = S.n - S.span + 1.5; S.yOff = 0; clampView(); redraw();   // 최신 날 · 자동 축
   }
   function panBy(dxPx) { S.i0 -= dxPx / (layout($("fpDailyCanvas")).plotW / S.span); clampView(); redraw(); }
 
@@ -492,13 +495,15 @@
     }, { passive: false });
     cv.addEventListener("pointerdown", function (e) {
       if (e.pointerType === "touch" || e.button !== 0) return;
-      S.drag = { x: e.clientX, i0: S.i0, moved: false, id: e.pointerId };
+      var v = S.view;
+      S.drag = { x: e.clientX, y: e.clientY, i0: S.i0, yOff: S.yOff, k: v ? (v.hi - v.lo) / v.G.priceH : 0, moved: false, id: e.pointerId };
     });
     cv.addEventListener("pointermove", function (e) {
       if (S.drag && (e.buttons & 1)) {
-        var dx = e.clientX - S.drag.x;
-        if (!S.drag.moved && Math.abs(dx) < 4) return;
+        var dx = e.clientX - S.drag.x, dy = e.clientY - S.drag.y;
+        if (!S.drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
         if (!S.drag.moved) { S.drag.moved = true; cv.setPointerCapture(S.drag.id); cv.classList.add("panning"); tipHide(); }
+        if (S.drag.k) S.yOff = S.drag.yOff + dy * S.drag.k;   // 아래로 끌면 위쪽 가격(5분 차트와 같다)
         S.i0 = S.drag.i0 - dx / (layout(cv).plotW / S.span); clampView(); redraw();
         return;
       }
