@@ -10,6 +10,7 @@
   "use strict";
   var DAYS_URL = "/api/footprint-daily", CELLS_URL = "/api/footprint-daily/cells", HEAT_URL = "/api/footprint-daily/heat";
   var HEAT_CLIP_PCT = 0.98;    // 양수 밀도의 98분위 = 가장 진한 색(진한 곳만 떠오르게)
+  var HEAT_BOX_ROW = 25;      // 2026-10-10 위·아래 2칸 순위는 늘 $25 칸으로 고른다(사용자 A) -- 화면 칸 크기로 고르면 확대/축소마다 이웃 칸이 합쳐져 1·2등이 바뀌었다
   var HEAT_BOX_MIN_PX = 10;    // 봉 폭이 이보다 좁으면 테두리를 그리지 않는다(금액 글자는 칸 안에 들어갈 때만)
   var DEFAULT_SPAN = 30, MIN_SPAN = 7, TEXT_MIN_PX = 104, ROW_PX = 11;
   var cellMinPx = function (G) { return G.narrow ? 24 : 34; };   // 이 폭부터 가격 칸(휴대폰은 7~12일 확대에서)
@@ -74,17 +75,20 @@
   async function fetchHeat() {
     var w = S.heatWant;
     if (!w || S.heatLoading) return;
-    var miss = [];
-    for (var i = w.a; i <= w.b; i++) if (!S.heat.has(w.row + "|" + S.D.d[i])) miss.push(i);
-    if (!miss.length) return;
     S.heatLoading = true;
-    try {
-      var r = await fetch(HEAT_URL + "?from=" + S.D.d[miss[0]] + "&to=" + S.D.d[miss[miss.length - 1]] + "&row=" + w.row, { cache: "no-store" });
-      if (r.ok) {
-        var p = await r.json();
-        miss.forEach(function (j) { S.heat.set(w.row + "|" + S.D.d[j], p.heat[S.D.d[j]] || null); });
-      }
-    } catch (e) { /* 다음 그리기 때 다시 묻는다 */ }
+    var rows = w.row === HEAT_BOX_ROW ? [w.row] : [w.row, HEAT_BOX_ROW];   // 화면 칸 + 테두리 순위용 고정 칸
+    for (var q = 0; q < rows.length; q++) {
+      var row = rows[q], miss = [];
+      for (var i = w.a; i <= w.b; i++) if (!S.heat.has(row + "|" + S.D.d[i])) miss.push(i);
+      if (!miss.length) continue;
+      try {
+        var r = await fetch(HEAT_URL + "?from=" + S.D.d[miss[0]] + "&to=" + S.D.d[miss[miss.length - 1]] + "&row=" + row, { cache: "no-store" });
+        if (r.ok) {
+          var p = await r.json();
+          miss.forEach(function (j) { S.heat.set(row + "|" + S.D.d[j], p.heat[S.D.d[j]] || null); });
+        }
+      } catch (e) { /* 다음 그리기 때 다시 묻는다 */ }
+    }
     S.heatLoading = false;
     redraw();
     if (S.heatWant !== w) fetchHeat();
@@ -112,6 +116,7 @@
       }
     }
     g.globalAlpha = 1;
+    row = HEAT_BOX_ROW;                                           // 테두리 = 고정 칸(화면 칸이 $10 이면 2~3칸을 묶은 높이로 그린다)
     if (bw >= HEAT_BOX_MIN_PX) for (i = a; i <= b; i++) {
       h = S.heat.get(row + "|" + S.D.d[i]);
       if (!h || !h[2]) continue;
