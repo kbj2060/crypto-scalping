@@ -15,7 +15,9 @@
   var cellMinPx = function (G) { return G.narrow ? 24 : 34; };   // 이 폭부터 가격 칸(휴대폰은 7~12일 확대에서)
   var ROW_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500];
   var REFRESH_MS = 60000;
-  var LANES = [["delta", "델타"], ["turn", "거래대금"], ["oi", "OI"], ["liq", "청산"]];
+  var LANES = [["delta", "델타"], ["turn", "거래대금"], ["oi", "OI"], ["liq", "청산"], ["lmap", "추정 청산"]];
+  // 2026-10-09 «추정 청산» 레인(사용자 «그 봉의 위·아래에 청산이 얼마나 쌓였나» · 시안 B): 그날 마감 7일 지도의 남은 청산 몫을
+  //   고점 위(초록) · 봉 안(회색) · 저점 아래(빨강) 세 칸 100% 막대로 + 총액(2 × OI 달러) 가는 선. 🔴세 몫 합 = 늘 2 × OI -- 정보는 비율과 OI 크기.
 
   var S = { on: false, D: null, n: 0, i0: 0, span: DEFAULT_SPAN, cells: new Map(), want: null, loading: false,
             heat: new Map(), heatWant: null, heatLoading: false, heatT: 0, heatOn: true,
@@ -235,7 +237,7 @@
     var yOf = function (p) { return G.top + (hi - p) / (hi - lo) * G.priceH; };
     var cellMode = bw >= cellMinPx(G), row = rowFor(lo, hi, G.priceH);
     if (cellMode) scheduleCells(row, a, b);
-    if (S.heatOn) scheduleHeat(row, a, b);
+    scheduleHeat(row, a, b);   // 히트맵을 꺼도 받는다 -- «추정 청산 위·아래» 레인이 같은 데이터를 쓴다(그리기만 켜기/끄기)
     S.view = { G: G, a: a, b: b, lo: lo, hi: hi, bw: bw, row: row, cellMode: cellMode };
 
     g.save();
@@ -320,12 +322,28 @@
     if (k === "delta") return D.bv[i] - D.sv[i];
     if (k === "turn") return D.bv[i] + D.sv[i];
     if (k === "oi") return i > 0 && D.oi[i] != null && D.oi[i - 1] != null ? D.oi[i] / D.oi[i - 1] - 1 : null;
+    if (k === "lmap") {   // [고점 위 몫, 저점 아래 몫, 2×OI 달러 | null, 봉 안 몫] -- 히트맵(보이는 날·지금 행 크기)이 있어야 안다
+      //   10-09 사용자 «종가가 아니라 고점 위·저점 아래»: 그날 가격이 한 번도 안 닿은 레벨만 위/아래로 센다(봉 안 = 따로).
+      //   봉 안 몫은 2025~ 중앙 6%(90분위 17%) -- 같은 1시간봉 안 청산·마지막 봉 같은 판정 빈틈과 그날 새로 생긴 포지션이 섞여 있다.
+      var row = S.view && S.view.row, h = row ? S.heat.get(row + "|" + D.d[i]) : null;
+      if (!h || !h[2]) return null;
+      var up = 0, dn = 0, inr = 0;
+      for (var j = 0; j < h[2].length; j++) {
+        var pc = h[0] + (j + 0.5) * row;
+        if (pc > D.h[i]) up += h[2][j]; else if (pc < D.l[i]) dn += h[2][j]; else inr += h[2][j];
+      }
+      return [up, dn, D.oi[i] != null ? 2 * D.oi[i] * D.c[i] : null, inr];
+    }
     return D.ll[i] == null ? null : [D.ll[i], D.ls[i]];
   }
 
   function laneText(k, i) {
     var v = laneVal(k, i), D = S.D;
     if (v == null) return k === "liq" ? "모름(수집 전)" : k === "oi" ? (D.oi[i] == null ? "모름(2022-01 전)" : qty(D.oi[i]) + " ETH") : "모름";
+    if (k === "lmap") {
+      var sh = (v[0] + v[1] + v[3]) || 1, pu = 100 * v[0] / sh, pd = 100 * v[1] / sh, pm = 100 * v[3] / sh;
+      return "고점 위 " + pu.toFixed(0) + "% · 봉 안 " + pm.toFixed(0) + "% · 저점 아래 " + pd.toFixed(0) + "%" + (v[2] ? " · 합 " + usd(v[2]) : " (OI 모름)");
+    }
     return k === "liq" ? "롱 " + usd(v[0]) + " · 숏 " + usd(v[1]) : k === "oi" ? pct(v) + " · " + qty(D.oi[i]) + " ETH"
       : k === "turn" ? usd(v) : sgnUsd(v);
   }
@@ -341,6 +359,7 @@
         v = laneVal(k, i);
         if (k === "oi" && D.oi[i] != null) { oiLo = Math.min(oiLo, D.oi[i]); oiHi = Math.max(oiHi, D.oi[i]); }
         if (v == null) continue;
+        if (k === "lmap") { mx = 1; continue; }   // 100% 막대 -- 크기 축이 없다
         mx = Math.max(mx, k === "liq" ? Math.max(v[0], v[1]) : Math.abs(v));
       }
       var mid = k === "turn" ? y + h : y + h / 2, unk = null;
@@ -350,6 +369,14 @@
         if (v == null) { if (unk == null) unk = i; continue; }       // 모름 = 빗금
         if (unk != null) { hatch(g, C, xOf(unk) - bw / 2, y + 1, (i - unk) * bw, h - 1); unk = null; }
         if (!mx) continue;
+        if (k === "lmap") {
+          var tt = (v[0] + v[1] + v[3]) || 1, fu = v[0] / tt, fm = v[3] / tt, fd = v[1] / tt, top = y + 2, hb = h - 4;
+          g.globalAlpha = 0.85; g.fillStyle = C.good; g.fillRect(x - w / 2, top, w, hb * fu);                      // 고점 위 = 숏 청산
+          g.fillStyle = C.muted; g.globalAlpha = 0.45; g.fillRect(x - w / 2, top + hb * fu, w, hb * fm);           // 봉 안
+          g.globalAlpha = 0.85; g.fillStyle = C.bad; g.fillRect(x - w / 2, top + hb * (fu + fm), w, hb * fd);      // 저점 아래 = 롱 청산
+          g.globalAlpha = 1;
+          continue;
+        }
         if (k === "liq") {
           var hs = (h / 2 - 1) * v[1] / mx, hl = (h / 2 - 1) * v[0] / mx;
           g.fillStyle = C.good; g.fillRect(x - w / 2, mid - hs, w, hs);      // 숏 청산(강제 매수) = 위
@@ -363,6 +390,15 @@
         }
       }
       if (unk != null) hatch(g, C, xOf(unk) - bw / 2, y + 1, (b - unk + 1) * bw, h - 1);
+      if (k === "lmap") {                                                 // 총액(2×OI 달러) = 가는 선(레인 안 제 축)
+        var tLo = Infinity, tHi = -Infinity, vv;
+        for (i = a; i <= b; i++) { vv = laneVal(k, i); if (vv && vv[2]) { tLo = Math.min(tLo, vv[2]); tHi = Math.max(tHi, vv[2]); } }
+        if (tHi > tLo) {
+          g.strokeStyle = C.text; g.globalAlpha = 0.55; g.lineWidth = 1.2; g.beginPath(); var pn = false;
+          for (i = a; i <= b; i++) { vv = laneVal(k, i); if (!vv || !vv[2]) { pn = false; continue; } var yt = y + h - 3 - (vv[2] - tLo) / (tHi - tLo) * (h - 6); if (pn) g.lineTo(xOf(i), yt); else g.moveTo(xOf(i), yt); pn = true; }
+          g.stroke(); g.globalAlpha = 1;
+        }
+      }
       if (k === "oi" && oiHi > oiLo) {                  // OI 수준 = 가는 선(레인 안 제 축) · 막대 = 전일 대비
         g.strokeStyle = C.text; g.globalAlpha = 0.45; g.lineWidth = 1.2; g.beginPath();
         var pen = false;
@@ -538,7 +574,7 @@
       }
     } else {
       html = "<b>" + D.d[i] + "</b><br>델타 " + laneText("delta", i) + " · 거래대금 " + laneText("turn", i) +
-             "<br>OI " + laneText("oi", i) + "<br>청산 " + laneText("liq", i);
+             "<br>OI " + laneText("oi", i) + "<br>청산 " + laneText("liq", i) + "<br>추정 청산(그날 마감 7일 지도) " + laneText("lmap", i);
     }
     if (html) tipShow(e.pageX, e.pageY, html); else tipHide();
     redraw();
