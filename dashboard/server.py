@@ -4570,16 +4570,14 @@ def make_app() -> web.Application:
         return book
 
     async def pos_bars_rest(asset: str, start_s: int, end_s: int) -> list[tuple[int, float, float, float, float]]:
-        """닫힌 5분봉 [start_s, end_s) 의 (시각, 고, 저, 거래량, 봉 끝 OI). OI 이력은 바이낸스가 30일만 준다."""
+        """닫힌 5분봉 [start_s, end_s) 의 (시각, 고, 저, 거래량, 봉 끝 OI). OI 이력은 바이낸스가 30일만 준다. 파싱은 pprof(자체점검)."""
         sym, step = COIN_CONFIG[asset]["binance_symbol"], 300_000
         oi: dict[int, float] = {}
         t = start_s * 1000
         while t < end_s * 1000:
-            rows = await fetch_binance_json(POS_OI_HIST_URL, {"symbol": sym, "period": "5m", "limit": 500, "startTime": t,
-                                                              "endTime": min(t + 499 * step, end_s * 1000)},
-                                            error_reason="position_profile_upstream_error")
-            for r in rows or []:
-                oi[int(r["timestamp"]) // 1000] = float(r["sumOpenInterest"])
+            oi.update(pprof.oi_hist_map(await fetch_binance_json(
+                POS_OI_HIST_URL, {"symbol": sym, "period": "5m", "limit": 500, "startTime": t, "endTime": min(t + 499 * step, end_s * 1000)},
+                error_reason="position_profile_upstream_error")))
             t += 500 * step
         out: list[tuple[int, float, float, float, float]] = []
         t = start_s * 1000
@@ -4589,13 +4587,17 @@ def make_app() -> web.Application:
                                             error_reason="position_profile_upstream_error")
             if not rows:
                 break
-            for r in rows:
-                b = int(r[0]) // 1000
-                o = oi.get(b + 300)                     # 봉 끝 스냅샷
-                if b < end_s and o is not None:
-                    out.append((b, float(r[2]), float(r[3]), float(r[5]), o))
+            out += pprof.bars_from_klines(rows, oi, end_s)
             t = int(rows[-1][0]) + step
         return out
+
+    def pos_offset(asset: str, st: dict) -> None:
+        """OI 이력(sumOpenInterest)과 1초 OI(/openInterest)는 수준이 ~1,900 ETH 다르다(10-10 실측, 표준편차 38) --
+        마지막으로 민 봉 끝에서 둘의 차를 재 두고, 형성 봉 OI = 지금 1초 OI + 그 차 로 이력 눈금에 맞춘다(섞으면 매초 가짜 ±1,900 ETH)."""
+        f = flows.get(asset)
+        live = pprof.live_at(f.oi_1s, st["last"] + 300) if f is not None else None
+        if live is not None and st["book"].oi is not None:
+            st["off"] = st["book"].oi - live
 
     async def pos_ensure(asset: str) -> dict:
         async with pos_locks.setdefault(asset, asyncio.Lock()):
@@ -4611,33 +4613,32 @@ def make_app() -> web.Application:
                     print(f"position profile seed failed (retry in {POS_SEED_BACKOFF_S}s): {exc!r}", flush=True)
                     raise web.HTTPBadGateway(reason="position_profile_upstream_error") from exc
                 book = await asyncio.to_thread(pos_build, bars)                  # 8,640 걸음 ~0.5초 -- 이벤트 루프 밖에서
-                st = pos_books[asset] = {"book": book, "last": bars[-1][0] if bars else cur - 300, "tried": now}
+                st = pos_books[asset] = {"book": book, "last": bars[-1][0] if bars else cur - 300, "tried": now, "off": None}
+                pos_offset(asset, st)
             elif cur - st["last"] > 300 and now - st["tried"] >= 60:
                 st["tried"] = now
                 try:
                     for b in await pos_bars_rest(asset, st["last"] + 300, cur):
                         if b[0] > st["last"]:
                             st["book"].push(*b); st["last"] = b[0]
+                    pos_offset(asset, st)
                 except Exception as exc:  # noqa: BLE001 -- 다음 분에 다시(형성 봉 임시 걸음이 그 사이를 덮는다)
                     print(f"position profile advance failed (retry next minute): {exc!r}", flush=True)
+            elif st["off"] is None:
+                pos_offset(asset, st)                                         # 재시작 직후 1초 OI 가 아직 비었던 경우
             return st
 
-    def pos_forming(asset: str, since_s: int) -> tuple[tuple | None, float | None]:
-        """since_s 이후(마지막으로 민 봉 다음부터 지금까지)를 한 덩어리 임시 봉으로: (시각, 고, 저, 거래량, 지금 OI), 마지막 체결가."""
+    def pos_forming(asset: str, st: dict) -> tuple[tuple | None, float | None]:
+        """마지막으로 민 봉 다음부터 지금까지를 한 덩어리 임시 봉으로: (시각, 고, 저, 거래량, 이력 눈금 OI), 마지막 체결가.
+        1초 OI 와 이력의 차(off)를 아직 모르면 형성 봉을 얹지 않는다(닫힌 봉만 -- 섞어서 가짜 변화를 만들지 않게)."""
         f = flows.get(asset)
         if f is None:
             return None, None
-        st, bk = f.footprint_state, f.spec.bucket
-        ks, v = [], 0.0
-        for b, cells in list(st["bars"].items()):
-            if b >= since_s:
-                for k, c in cells.items():
-                    ks.append(k); v += c[0] + c[1]
-        px = next((float(c[6]) for _, c in sorted(list(st["sec"].items()), reverse=True) if c[6]), None)
-        oi = f.oi_1s[max(f.oi_1s)] if f.oi_1s else None
-        if not ks or oi is None:
+        px = next((float(c[6]) for _, c in sorted(list(f.footprint_state["sec"].items()), reverse=True) if c[6]), None)
+        hlv = pprof.forming_from_cells(f.footprint_state["bars"], st["last"] + 300, f.spec.bucket)
+        if hlv is None or not f.oi_1s or st.get("off") is None:
             return None, px
-        return (int(time.time()) // 300 * 300, (max(ks) + 0.5) * bk, (min(ks) - 0.5) * bk, v, float(oi)), px
+        return (int(time.time()) // 300 * 300, hlv[0], hlv[1], hlv[2], float(f.oi_1s[max(f.oi_1s)]) + st["off"]), px
 
     async def load_liquidation_map(asset: str = "eth") -> dict[str, Any]:
         """Snapshot-tab liquidation map (estimated support/resistance) -- see
@@ -5834,13 +5835,16 @@ def make_app() -> web.Application:
         asset = _query_coin_asset(request)
         if asset not in flows:
             raise web.HTTPNotFound(reason="flow_off")
+        q = request.query.get("days")                                    # 화면이 고른 창 하나만(없으면 셋 다) -- 매초 30일 칸 배정·전송을 아낀다
+        wins = (int(q),) if q in ("1", "7", "30") else pprof.WINDOWS
 
         async def produce() -> dict[str, Any]:
             st = await pos_ensure(asset)
-            forming, px = pos_forming(asset, st["last"] + 300)
-            return pprof.payload(st["book"], int(time.time()), px, forming)     # 3~5ms -- 상태와 같은 루프에서(밀기와 엇갈리지 않게)
+            forming, px = pos_forming(asset, st)
+            return pprof.payload(st["book"], int(time.time()), px, forming, windows=wins)   # 1~4ms -- 상태와 같은 루프에서(밀기와 엇갈리지 않게)
         try:
-            payload = await swr_cached(f"position_profile:{asset}", POSITION_PROFILE_CACHE_SECONDS, produce, max_stale=STALE_GRACE_SECONDS)
+            payload = await swr_cached(f"position_profile:{asset}:{','.join(map(str, wins))}", POSITION_PROFILE_CACHE_SECONDS, produce,
+                                       max_stale=STALE_GRACE_SECONDS)
         except web.HTTPException:
             return web.json_response({"error": "position_profile_upstream_error"}, status=web.HTTPBadGateway.status_code, headers=NOCACHE)
         return web.json_response(payload, headers=NOCACHE)

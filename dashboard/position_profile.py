@@ -75,10 +75,44 @@ def bins(h: np.ndarray, l: np.ndarray, x: np.ndarray, bw: float = 1.0) -> tuple[
     return lo, out
 
 
-def payload(book: Book, now_s: int, price: float, forming=None, bw: float = 1.0) -> dict:
+def oi_hist_map(rows) -> dict[int, float]:
+    """openInterestHist 응답 → {스탬프(초): OI}. 스탬프 T = T 시점 스냅샷(서버 1초 OI 와 5분 변화 상관 .998, 10-10 실측) → 봉 b 끝 = b+300."""
+    return {int(r["timestamp"]) // 1000: float(r["sumOpenInterest"]) for r in rows or []}
+
+
+def bars_from_klines(rows, oi: dict[int, float], end_s: int) -> list[tuple[int, float, float, float, float]]:
+    """klines 응답 + OI 이력 → 닫힌 5분봉 (시각, 고, 저, 거래량, 봉 끝 OI). 끝 스냅샷이 없는 봉은 뺀다(다음 증분에서 다시)."""
+    out = []
+    for r in rows or []:
+        b = int(r[0]) // 1000
+        o = oi.get(b + 300)
+        if b < end_s and o is not None:
+            out.append((b, float(r[2]), float(r[3]), float(r[5]), o))
+    return out
+
+
+def forming_from_cells(bars: dict, since_s: int, bucket: float) -> tuple[float, float, float] | None:
+    """흐름 엔진 풋프린트 칸 {봉 시작: {가격 버킷: [매수, 매도, …]}} 에서 since_s 이후 (고, 저, 거래량). 비면 None."""
+    ks, v = [], 0.0
+    for b, cells in list(bars.items()):
+        if b >= since_s:
+            for k, c in list(cells.items()):
+                ks.append(k); v += c[0] + c[1]
+    if not ks:
+        return None
+    return (max(ks) + 0.5) * bucket, (min(ks) - 0.5) * bucket, v
+
+
+def live_at(oi_1s: dict[int, float], t: int, tol: int = 30) -> float | None:
+    """1초 OI {초: 값} 에서 t 이하 가장 가까운 값(tol 초 안). 없으면 None."""
+    ks = [k for k in list(oi_1s) if t - tol <= k <= t]
+    return oi_1s[max(ks)] if ks else None
+
+
+def payload(book: Book, now_s: int, price: float, forming=None, bw: float = 1.0, windows=WINDOWS) -> dict:
     t, h, l, x = book.snapshot(forming)
     win = {}
-    for d in WINDOWS:
+    for d in windows:
         m = t >= now_s - d * 86400
         lo, vals = bins(h[m], l[m], x[m], bw)
         tot = float(vals.sum())
@@ -112,4 +146,13 @@ if __name__ == "__main__":
         c.push(i * 300, px[i] + 2, px[i] - 2, v[i], oi[i])
     assert np.allclose(c.x, L[1:], rtol=1e-9, atol=1e-6), "연구 루프와 다름"
     p = payload(b, n * 300, float(px[-1])); assert set(p["win"]) == {"1", "7", "30"} and p["win"]["30"]["hours"] == 720.0
-    print("selftest OK -- 합 = OI · 칸 합 보존 · 형성 봉 무해 · 30일 접힘 · 연구 루프 재현")
+    assert set(payload(b, n * 300, float(px[-1]), windows=(7,))["win"]) == {"7"}
+    # 서버 조각: OI 스탬프 = 봉 끝 · 끝 스냅샷 없는 봉 빠짐 · 형성 칸 고저·거래량 · 1초 OI 허용 오차
+    oi = oi_hist_map([{"timestamp": 600_000, "sumOpenInterest": "10"}, {"timestamp": 900_000, "sumOpenInterest": "12"}])
+    assert oi == {600: 10.0, 900: 12.0}
+    kl = [[300_000, "0", "101", "99", "100", "5"], [600_000, "0", "102", "98", "100", "7"], [900_000, "0", "1", "1", "1", "1"]]
+    assert bars_from_klines(kl, oi, 900) == [(300, 101.0, 99.0, 5.0, 10.0), (600, 102.0, 98.0, 7.0, 12.0)]
+    assert forming_from_cells({0: {200: [1, 2]}, 300: {198: [3, 0], 205: [0, 4]}}, 300, 0.5) == (102.75, 98.75, 7.0)
+    assert forming_from_cells({0: {200: [1, 2]}}, 300, 0.5) is None
+    assert live_at({100: 1.0, 125: 2.0, 140: 3.0}, 130) == 2.0 and live_at({100: 1.0}, 200) is None
+    print("selftest OK -- 합 = OI · 칸 합 보존 · 형성 봉 무해 · 30일 접힘 · 연구 루프 재현 · 창 고르기 · 서버 조각(OI 스탬프·봉·형성 칸·1초 OI)")

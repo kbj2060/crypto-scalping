@@ -323,6 +323,42 @@ const API_POSITION_PROFILE_URL = "/api/position-profile";
 let latestPositionProfile = null, posProfileFetchAt = 0, posProfileInflight = false;
 let fpColMode = (() => { try { return localStorage.getItem("fpCol") === "pos" ? "pos" : "trade"; } catch (e) { return "trade"; } })();
 let fpPosWin = (() => { try { const v = Number(localStorage.getItem("fpPosWin")); return v === 1 || v === 30 ? v : 7; } catch (e) { return 7; } })();
+// 토글은 SVG 가 아니라 **HTML 버튼**을 차트 위 같은 자리에 띄운다(10-10 검토): 차트는 매초 통째로 다시 그려져서
+//   SVG 버튼이면 포커스가 사라지고 누르는 순간 교체되면 키 입력이 빠졌다. 이 상자는 한 번 만들고 자리·상태만 바꾼다.
+function fpColTogEl(svg) {
+  let el = document.getElementById("fpColTog");
+  if (el || !svg.parentElement) return el;
+  el = document.createElement("div");
+  el.id = "fpColTog"; el.className = "fp-col-tog"; el.setAttribute("role", "toolbar"); el.setAttribute("aria-label", "체결 기둥 보기");
+  el.innerHTML = '<span class="fp-col-seg fp-col-win" role="group" aria-label="포지션 기간">'
+    + '<button type="button" data-win="1">1d</button><button type="button" data-win="7">7d</button><button type="button" data-win="30">30d</button></span>'
+    + '<span class="fp-col-seg" role="group" aria-label="체결 또는 포지션">'
+    + '<button type="button" data-col="trade">체결</button><button type="button" data-col="pos">포지션</button></span>';
+  el.addEventListener("pointerdown", (e) => e.stopPropagation());   // 차트 끌기로 번지지 않게
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    e.stopPropagation();
+    if (b.dataset.col) setFpCol(b.dataset.col); else setFpCol(null, Number(b.dataset.win));
+  });
+  svg.parentElement.appendChild(el);
+  return el;
+}
+function placeFpColTog(svg, xr, yTop, show) {   // xr·yTop = viewBox 좌표(체결 기둥 오른쪽 끝 · 머리 줄 위)
+  const el = fpColTogEl(svg);
+  if (!el) return;
+  if (el.hidden !== !show) el.hidden = !show;
+  if (!show) return;
+  el.classList.toggle("pos", fpColMode === "pos");
+  el.querySelectorAll("[data-col]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.col === fpColMode)));
+  el.querySelectorAll("[data-win]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.win) === fpPosWin)));
+  el.querySelector(".fp-col-win").hidden = fpColMode !== "pos";
+  const m = svg.getScreenCTM(), pr = el.parentElement.getBoundingClientRect();
+  if (!m) return;
+  const L = Math.round(m.a * xr + m.e - pr.left) + "px", T = Math.round(m.d * yTop + m.f - pr.top) + "px";
+  if (el.style.left !== L) el.style.left = L;
+  if (el.style.top !== T) el.style.top = T;
+}
 function setFpCol(mode, win) {
   if (mode) fpColMode = mode;
   if (win) fpPosWin = win;
@@ -336,11 +372,12 @@ async function refreshPositionProfile() {   // 포지션 보기일 때만 1초(�
   if (posProfileInflight || now - posProfileFetchAt < 900) return;   // 900: 1초 루프 흔들림에 한 번씩 건너뛰지 않게
   posProfileFetchAt = now; posProfileInflight = true;
   try {
-    const r = await fetch(`${API_POSITION_PROFILE_URL}?asset=eth`, { cache: "no-store" });
+    const win = fpPosWin;   // 고른 창 하나만 받는다(서버가 매초 세 창을 다 계산·전송하던 것, 10-10 검토)
+    const r = await fetch(`${API_POSITION_PROFILE_URL}?asset=eth&days=${win}`, { cache: "no-store" });
     if (r.ok) {
       const j = await r.json();
-      if (j && j.win) {
-        if (!latestPositionProfile) chartPanForce = true;   // 첫 도착은 호버 중에도 바로(토글을 누른 손이 차트 위에 있다)
+      if (j && j.win && j.win[String(fpPosWin)]) {   // 그사이 창을 바꿨으면 버린다
+        if (!latestPositionProfile || !latestPositionProfile.win[String(fpPosWin)]) chartPanForce = true;   // 첫 도착은 호버 중에도 바로(토글을 누른 손이 차트 위에 있다)
         latestPositionProfile = j; scheduleSnapshotChartRender();
       }
     }
@@ -6218,31 +6255,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   풋프린트 가격 폭이 좁아 대부분이 화면 밖이다 -- 위·아래 끝에 «화면 밖 몫», 기둥 왼쪽 10px 에 창 전체 미니맵 + 보이는 범위 괄호.
     //   🔴지도다. 덩어리 저항·재방문·고통 지수는 매매 검정 불통과(= VWAP 평균회귀 재표현, 2026-10-09).
     const posOn = !!(TRADE_W && fpColMode === "pos" && activeSnapshotAsset === "eth");
-    if (TRADE_W && activeSnapshotAsset === "eth") {
-      const gT = document.createElementNS(NS, "g");
-      const seg = (xr, labels, active, fill, on) => {   // 오른쪽 끝 xr 에서 왼쪽으로 쌓는 작은 분절 버튼 -> 왼쪽 끝 x
-        let cx = xr;
-        labels.slice().reverse().forEach(([lab, val]) => {
-          const wd = lab.length * 10 + 12, act = val === active;
-          const r = document.createElementNS(NS, "rect");
-          r.setAttribute("x", cx - wd); r.setAttribute("y", mt - 15); r.setAttribute("width", wd); r.setAttribute("height", 14); r.setAttribute("rx", 4);
-          r.setAttribute("fill", act ? fill : "var(--chart-bg)"); r.setAttribute("stroke", "var(--line)");
-          const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", cx - wd / 2); t.setAttribute("y", mt - 4.5); t.setAttribute("text-anchor", "middle"); t.setAttribute("font-size", "10");
-          t.setAttribute("font-weight", act ? "800" : "600"); t.setAttribute("fill", act ? "var(--on-fill)" : "var(--muted)"); t.textContent = lab;
-          const b = document.createElementNS(NS, "g");
-          b.setAttribute("role", "button"); b.setAttribute("aria-pressed", String(act)); b.style.cursor = "pointer";
-          b.appendChild(r); b.appendChild(t);
-          b.addEventListener("pointerdown", (e) => e.stopPropagation());
-          b.addEventListener("click", (e) => { e.stopPropagation(); on(val); });
-          gT.appendChild(b); cx -= wd + 2;
-        });
-        return cx;
-      };
-      const ex = seg(tradeX0 + TRADE_W - 2, [["체결", "trade"], ["포지션", "pos"]], fpColMode, posOn ? "var(--position)" : "var(--amber)", (v) => setFpCol(v));
-      if (posOn) seg(ex - 6, [["1d", 1], ["7d", 7], ["30d", 30]], fpPosWin, "var(--muted)", (v) => setFpCol(null, v));
-      svg.appendChild(gT);
-    }
+    placeFpColTog(svg, tradeX0 + TRADE_W - 2, mt - 16, !!(TRADE_W && activeSnapshotAsset === "eth"
+      && !(typeof window.fpLiqActive === "function" && window.fpLiqActive())
+      && !(typeof window.fpDailyActive === "function" && window.fpDailyActive())));   // 청산맵·일봉이 덮을 땐 숨김
     if (posOn) {
       const P = latestPositionProfile, W = P && P.win && P.win[String(fpPosWin)];
       const anchor = tradeX0 + TRADE_W + 4, Lw = TRADE_W - 10, g = document.createElementNS(NS, "g");
@@ -6258,7 +6273,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         t.textContent = str; g.appendChild(t);
       };
       if (!W || !(W.tot > 0)) {
-        label(anchor - 4, mt + 14, P ? "포지션 데이터 없음" : "포지션 불러오는 중…", "var(--muted)");
+        label(anchor - 4, mt + 14, P && P.win && P.win[String(fpPosWin)] ? "포지션 데이터 없음" : "포지션 불러오는 중…", "var(--muted)");
       } else {
         const rows = new Map();
         W.vals.forEach((q, j) => {   // $bw 칸을 걸치는 행마다 겹친 길이만큼 나눈다(행이 칸보다 잘면 한 줄씩 비던 것, 10-10 배포 후)
