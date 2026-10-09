@@ -809,3 +809,43 @@ def coin_replication():
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--coins":
     coin_replication()
+
+
+def execution_realism(W=5, fee_m=0.0, fee_t=4.0, vol_gate=False):
+    """4h HGB(2023~24 방법 홀드아웃 + 2025~26 최종) 현실 실행: 결정 직전 1분 종가에 지정가, W 분 안 관통해야 체결(메이커 fee_m),
+    아니면 W 분 뒤 종가로 시장가(fee_t). 진입·청산 모두. 위상 8 분산. vol_gate = 직전 1일 변동 ≥ 과거 확장 67분위일 때만."""
+    import research_eth_liqmap_5m_direction_20261010 as LQ5
+    F = pd.read_parquet(panel_path("ETH"), columns=["ts", "P_rv1d"]); ts = F.ts.to_numpy()
+    ph = np.load(f"{OUT}/pred_holdout_2023_24_4h.npy"); pf = np.load(f"{OUT}/pred_FINAL_eth_4h.npy")[:, 0]
+    pred = np.where(ts < np.datetime64("2025-01-01"), np.r_[ph, np.full(len(F) - len(ph), np.nan)], pf); sq = pd.Series(pred)
+    lo, hi = sq.shift(1).expanding(8640).quantile(.2).to_numpy(), sq.shift(1).expanding(8640).quantile(.8).to_numpy()
+    gate = F.P_rv1d.to_numpy() >= F.P_rv1d.shift(1).expanding(288 * 90).quantile(2 / 3).to_numpy()
+    k = LQ5.load_1m(); t1 = k.t.to_numpy(); h1, l1, c1 = k.h.to_numpy(), k.l.to_numpy(), k.c.to_numpy()
+
+    def leg(T, side):
+        i = np.searchsorted(t1, T); P = c1[i - 1]
+        f = (l1[i:i + W] < P).any() if side > 0 else (h1[i:i + W] > P).any()
+        return (P, fee_m) if f else (c1[i + W - 1], fee_t)
+    rows = []
+    for off in range(0, 48, 6):
+        idx = np.arange(off, len(ts), 48); idx = idx[(ts[idx] >= np.datetime64("2023-02-01")) & (idx + 48 < len(ts))]
+        for j in idx:
+            if not np.isfinite(pred[j]) or (vol_gate and not gate[j]):
+                continue
+            s = 1 if pred[j] >= hi[j] else (-1 if pred[j] <= lo[j] else 0)
+            if s:
+                T0 = int((ts[j] + np.timedelta64(5, "m")).astype("datetime64[ms]").astype(np.int64))
+                pe, ce = leg(T0, s); px, cx = leg(T0 + 14_400_000, -s)
+                rows.append((pd.Timestamp(T0, unit="ms").floor("D"), (s * np.log(px / pe) * 1e4 - ce - cx) / 8))
+    d = pd.Series([r[1] for r in rows], index=[r[0] for r in rows]).groupby(level=0).sum()
+    d = d.reindex(pd.date_range("2023-02-01", "2026-09-13", freq="D"), fill_value=0.0)
+    bs = np.quantile([d.sample(len(d), replace=True, random_state=i).mean() for i in range(500)], [.025, .975])
+    out = {"W": W, "fee_m": fee_m, "fee_t": fee_t, "vol_gate": vol_gate, "yearly_sharpe": {int(Y): round(float(x.mean() / x.std() * np.sqrt(365)), 2) for Y, x in d.groupby(d.index.year)},
+           "sharpe": round(float(d.mean() / d.std() * np.sqrt(365)), 2), "day_bp": round(float(d.mean()), 2), "ci": [round(float(x), 2) for x in bs]}
+    print(json.dumps(out, ensure_ascii=False), flush=True)
+    return out
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--exec":
+    res = [execution_realism(), execution_realism(fee_m=1.0), execution_realism(vol_gate=True)]
+    json.dump(res, open(f"{OUT}/execution_realism.json", "w"), ensure_ascii=False, indent=1)
