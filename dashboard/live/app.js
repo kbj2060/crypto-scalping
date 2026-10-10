@@ -8767,6 +8767,19 @@ const won = (x) => Number(x).toLocaleString(undefined, { maximumFractionDigits: 
 // 2026-09-16 진입 미리보기의 타일 넷을 없애면서 entryTile/entryVal/ENTRY_* 도 함께 나갔다
 // -- 그 블록 전용 헬퍼였다. 같은 숫자는 위 계좌 카드가 그린다(applyAcctPreview).
 
+// 2026-10-10 주문은 ETHUSDC · 화면 시세는 ETHUSDT(같은 시각 USDT 가 중앙 1.93bp 비싸다) -- 숏 진입·롱 청산 지정가가 화면 가격보다
+//   싸 보여 «손해 쪽에 걸렸다»로 읽히던 착시를 막는다. 값은 서버 미리보기가 이미 준 지정가(plan.price/reference_price) -- REST 를 늘리지 않는다.
+function execQuoteBp(px, ref) {
+  return px > 0 && ref > 0 ? (px - ref) / ref * 1e4 : null;
+}
+function execQuoteHtml(plan) {
+  const px = Number(plan?.price ?? plan?.reference_price), sym = String(plan?.symbol || "");
+  const bp = execQuoteBp(px, Number(latestLivePriceByAsset[activeSnapshotAsset] || 0));
+  if (bp == null || !/USDC$/.test(sym)) return "";   // USDT 심볼(옛 포지션 청산)이면 차이가 없다
+  const book = plan.side === "BUY" ? "매수호가" : "매도호가";
+  return `<div class="entry-quote">${escapeHtml(sym)} 최우선 ${book} <b>${escapeHtml(px.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}</b>`
+    + ` · 화면(USDT) 대비 <b>${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp</b></div>`;
+}
 function manualEntryPlanHtml(data) {
   const plan = data.plan || {};
   const cap = data.cap || {};
@@ -8779,7 +8792,7 @@ function manualEntryPlanHtml(data) {
       <span>@ ${escapeHtml(Number(plan.price).toLocaleString())}</span>
       <span>내 돈 ${escapeHtml(won(plan.margin_usdt || 0))} USDT${
         plan.leverage ? ` = 명목 ${escapeHtml(won(plan.notional_usdt))} ÷ ${plan.leverage}배` : ""}</span>
-    </div>`];
+    </div>` + execQuoteHtml(plan)];
   if (ruleNote) parts.push(ruleNote);
 
   // 2026-09-16 사용자 요청: 「롱 진입을 누르면 드롭다운으로 나오던 내용 제거 -- 이미 모달 안에
@@ -9075,20 +9088,20 @@ el("snapRule")?.addEventListener("input", () => {
   renderRuleBox();
 })();
 
-// 2026-10-10 진입 체결 방식(#snapExec): follow = 현행 따라가기 · wait60/wait15 = 최우선 호가에 한 번 걸고 그 시간 뒤 잔량 시장가(서버 run_entry_wait).
+// 2026-10-10 진입 체결 방식(#snapExec, 칩은 숫자 값만 맞춘다): 0 = 현행 따라가기 · 60/15 = 최우선 호가에 한 번 걸고 그 분 뒤 잔량 시장가(서버 run_entry_wait).
 //   제출에만 붙는다(미리보기 계획은 같다). 선택은 브라우저에 기억한다. 청산·스위칭의 반대 진입은 따라가기 그대로.
 function manualExecQuery() {
-  const m = /^wait(15|60)$/.exec(el("snapExec")?.value || "");
+  const m = /^(15|60)$/.exec(el("snapExec")?.value || "");
   return m ? `&mode=wait&wait_min=${m[1]}` : "";
 }
 el("snapExec")?.addEventListener("input", () => {
   try { localStorage.setItem("entryExec", el("snapExec").value); } catch (e) { /* 저장 못 해도 동작 */ }
 });
 (() => {
-  let v = "follow";
-  try { v = localStorage.getItem("entryExec") || "follow"; } catch (e) { /* 기본 따라가기 */ }
+  let v = "0";
+  try { v = localStorage.getItem("entryExec") || "0"; } catch (e) { /* 기본 따라가기 */ }
   const inp = el("snapExec");
-  if (inp) inp.value = /^(follow|wait60|wait15)$/.test(v) ? v : "follow";
+  if (inp) inp.value = /^(15|60)$/.test(v) ? v : "0";
 })();
 
 async function manualEntryFetch(side, kind = "entry", ov = null) {
@@ -9139,7 +9152,7 @@ function manualExitPlanHtml(plan) {
     : "";
   const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ${coinUnit()} 청산</b>${of}`
     + `<span>${Number(plan.price ?? plan.reference_price).toFixed(2)}`
-    + `${plan.type === "MARKET" ? " 근처" : ""} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>`];
+    + `${plan.type === "MARKET" ? " 근처" : ""} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>` + execQuoteHtml(plan)];
   // 🔴미리보기 카드의 주인공은 «지금 닫으면 순손익 얼마»다(2026-09-14, 사용자 요청).
   // 여기서는 plan.type 을 알므로 고변동 시장가 전환이면 테이커 5.0bp 로 바꿔 계산한다.
   const upnl = Number(plan.unrealized_pnl);
@@ -9244,6 +9257,7 @@ function setEntryProjPreview(plan) {
   }
 }
 
+let execQuote = null;   // 2026-10-10 떠 있는 버튼용 주문 심볼 호가(크기 미리보기 LONG = 매수호가 · SHORT = 매도호가)
 async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
   if (!line) return;
@@ -9297,6 +9311,9 @@ async function manualEntryRefreshSize() {
     line.className = "entry-note" + (ovX && !blockText ? " bad" : "");
     line.textContent = blockText
       || (ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "") || capNote;
+    const refNow = Number(latestLivePriceByAsset[asset] || 0);   // 미리보기가 온 그 순간의 USDT -- 차이(bp)는 그때 잰다(값이 60초 묵어도 차이는 거의 안 변한다)
+    execQuote = /USDC$/.test(String(plan.symbol || "")) && plan.price > 0 && planShort.price > 0 && refNow > 0
+      ? { asset, sym: plan.symbol, bid: Number(plan.price), ask: Number(planShort.price), ref: refNow, at: Date.now() } : null;
     lastEntryCap = cap && cap.available ? cap : null;
     lastEntryPlan = plan && !plan.blocked ? plan : null;
     setEntryProjPreview(plan);
@@ -9545,9 +9562,9 @@ function renderManualWait(w) {
   } else {
     t = `기다리기 끝 — ${manualEntryStateText(w).replace(/\n/g, " · ")}`
       + (w.taker_reason ? ` (${w.taker_reason})` : "") + (w.cancel_reason ? ` (${w.cancel_reason})` : "");
-    tone = /^(error|taker_failed|rejected)$/.test(ph) ? "bad" : "live";
+    tone = /^(error|taker_failed|rejected)$/.test(ph) ? "bad" : "";   // 끝난 결과는 흐리게 -- 주황(주의)은 거래소에 걸려 있는 동안만
   }
-  txt.className = `entry-note ${tone}`;
+  txt.className = `entry-note${tone ? " " + tone : ""}`;
   txt.textContent = t;
   ["snapWaitCancel", "snapWaitMarket"].forEach((id) => { const b = el(id); if (b) b.disabled = !!w.action; });
 }
@@ -10001,6 +10018,17 @@ function renderOfabRule(bal, live) {
     strip.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
     const rr = strip.querySelector(".rule-risk");
     if (rr) rr.hidden = v !== "1";
+  }
+  const qn = el("ofabQuote"), q = execQuote && execQuote.asset === activeSnapshotAsset && Date.now() - execQuote.at < 3 * 60e3 ? execQuote : null;
+  if (qn) {
+    qn.hidden = !q;
+    if (q) {
+      const bp = execQuoteBp((q.bid + q.ask) / 2, q.ref), txt = `${q.sym.replace(/^[A-Z]+?(?=USDC$)/, "")} ${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp`;
+      if (qn.textContent !== txt) qn.textContent = txt;
+      qn.title = `주문은 ${q.sym} — 최우선 매수 ${q.bid.toFixed(2)} · 매도 ${q.ask.toFixed(2)}, 화면(USDT) ${q.ref.toFixed(2)} 대비 ${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp`
+        + ` (${Math.round((Date.now() - q.at) / 1000)}초 전 미리보기). 숏 진입·롱 청산 지정가가 화면 가격보다 싸 보이는 건 이 차이 때문입니다`;
+      qn.setAttribute("aria-label", qn.title);
+    }
   }
   const vm = el("ofabVolMult");
   if (vm && r) vm.hidden = true;            // 자동이면 크기는 규칙이 정한다 -- 권장 배수는 카드 진입 줄에만

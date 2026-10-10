@@ -2974,7 +2974,15 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-rule { position: absolute; left: 0; bottom: calc(100% + 6px); display: flex; gap: 2px; padding: 2px; border-radius: 999px;
   background: color-mix(in srgb, var(--chart-bg, #171b23) 96%, transparent); border: 1px solid var(--line); box-shadow: 0 6px 18px rgb(var(--shadow) / .3); }   /* 뒤 글자가 비치지 않게 */
 .ofab-rule[hidden] { display: none; }
+.ofab.rightside .ofab-rule { left: auto; right: 0; }   /* 2026-10-10 띠가 길어졌다(7.5%·USDC) -- 오른쪽에 붙은 버튼이면 오른쪽 끝을 맞춰 화면 밖으로 안 나가게 */
 .ofab-rule .rule-risk { align-self: center; padding: 0 10px 0 4px; font-size: 10.5px; }
+/* 2026-10-10 주문 심볼 호가 -- 화면은 USDT, 주문은 USDC. 미리보기 머리 바로 아래 한 줄 · 떠 있는 띠 끝 작은 글자(무채색: 방향이 아니라 «어디서 체결되나») */
+.ofab-quote { align-self: center; padding: 0 10px 0 4px; font: 600 10.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted);
+  white-space: nowrap; cursor: help; border-left: 1px solid var(--soft-line); }
+.ofab-quote[hidden] { display: none; }
+.ofab-quote:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.entry-quote { margin-top: -4px; font: 600 11px/1.3 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; }
+.entry-quote b { font: 600 11px/1 var(--font-mono); color: var(--text); }
 .ofab-rule button { min-height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: none; color: var(--muted);
   font: 700 11px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
 .ofab-rule button:hover { color: var(--text); }

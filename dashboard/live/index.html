@@ -497,11 +497,11 @@
             <span class="entry-break" aria-hidden="true"></span>
             <span id="snapExecBox" class="rule-box exec-box">
               <span class="entry-cap">체결</span>
-              <input type="hidden" id="snapExec" value="follow">
+              <input type="hidden" id="snapExec" value="0">
               <div class="chipset" data-for="snapExec" role="group" aria-label="진입 체결 방식">
-                <button type="button" class="chip" data-v="follow" title="따라가기 — 앞지르면 3초마다 새 호가로 다시 걸고, 120초 뒤 남은 수량은 시장가">따라가기</button>
-                <button type="button" class="chip" data-v="wait60" title="60분 대기 — 최우선 호가에 한 번 걸고 앞질러도 그대로 둡니다. 60분 뒤 남은 수량은 시장가(원장 재생 +0.5bp/명목). 대기 중 취소·지금 시장가 가능, 청산은 막지 않습니다">60분 대기</button>
-                <button type="button" class="chip" data-v="wait15" title="15분 대기 — 최우선 호가에 한 번 걸고 앞질러도 그대로, 15분 뒤 남은 수량은 시장가">15분 대기</button>
+                <button type="button" class="chip" data-v="0" title="따라가기 — 앞지르면 3초마다 새 호가로 다시 걸고, 120초 뒤 남은 수량은 시장가">따라가기</button>
+                <button type="button" class="chip" data-v="60" title="60분 대기 — 최우선 호가에 한 번 걸고 앞질러도 그대로 둡니다. 60분 뒤 남은 수량은 시장가(원장 재생 +0.5bp/명목). 대기 중 취소·지금 시장가 가능, 청산은 막지 않습니다">60분 대기</button>
+                <button type="button" class="chip" data-v="15" title="15분 대기 — 최우선 호가에 한 번 걸고 앞질러도 그대로, 15분 뒤 남은 수량은 시장가">15분 대기</button>
               </div>
             </span>
           </div>
@@ -573,6 +573,7 @@
           <button type="button" data-v="0" aria-pressed="false">직접</button>
           <button type="button" data-v="1" aria-pressed="false" title="자동 규칙(동일위험) — 손절에 닿으면 순자산 −7.5% · 첫 진입 = 순자산 × min(7.5% ÷ 손절폭, 청산 안전, 10)의 75% · 손절 첫 진입가 ∓3σ · 익절 없음 · 교차 마진에서만">자동</button>
           <span class="rule-risk">손절 시 순자산 −7.5%</span>
+          <span id="ofabQuote" class="ofab-quote" tabindex="0" hidden></span>   <!-- 2026-10-10 주문 심볼(USDC) vs 화면(USDT) 차 -->
         </span>
         <!-- 2026-10-06 상세 펼치기(사용자 지시): LONG 앞 아이콘 = 예전 «주문»을 누르면 나오던 패널(레버·비율·진입 버튼). 주문 경로 없음. -->
         <button type="button" id="ofabMore" class="ofab-more" aria-controls="ofabPanel" aria-expanded="false" aria-label="주문 상세 펼치기"><svg
