@@ -6115,6 +6115,39 @@ def make_app() -> web.Application:
                      "armed_at": time.time(), "placed": state["bracket"]}
         bracket_save(st)
 
+    async def exit_then_switch(plan: dict, state: dict, sw: dict, asset: str) -> None:
+        """스위칭(2026-10-10 서버로 옮김): 전량 청산이 **다 닫힌 뒤에만** 반대 진입. 진입 계획·게이트·규칙 검사는 진입 버튼과 같은
+        assemble_entry_plan(fresh=True). 막히면 주문 없이 사유를 state["switch"] 에 남긴다 -- 진입으로 넘어가도 «스위칭에서 왔다»는 남는다."""
+        try:
+            await run_exit(binance_session(), plan, state)
+            info = state["switch"]
+            if not (state.get("phase") in ("filled_maker", "filled_taker")
+                    and float(state.get("filled") or 0.0) >= float(state.get("quantity") or 0.0) * 0.999):
+                info.update(phase="aborted", error=f"청산이 다 닫히지 않아({state.get('phase')}) 반대 진입을 내지 않았습니다")
+                return
+            info = {**info, "phase": "entry", "exit": {k: state.get(k) for k in ("phase", "filled", "quantity", "done_at")}}
+            state.clear()       # 🔴await 없이 바로 진입 상태로 -- 사이에 다른 주문이 already_working 검사를 빠져나가지 않게
+            state.update(phase="submitting", side=sw["to"], asset=asset, switch=info,
+                         started_at=datetime.now(timezone.utc).isoformat())
+            why = None if exec_enabled() else "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"
+            if not why:
+                plan2, _, _, err = await assemble_entry_plan(sw["to"], sw["frac"], sw["lev"], asset, fresh=True, rule_l=sw["rule"])
+                why = (err[0].get("detail") or err[0].get("error")) if err else plan2.get("blocked")
+            if why:
+                state.update(phase="error", error=f"스위칭 반대 진입 막힘 — {why}", done_at=datetime.now(timezone.utc).isoformat())
+                info.update(phase="aborted", error=str(why))
+                return
+            if sw["sltp_off"] and not plan2.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(진입 submit 과 같다)
+                plan2["bracket"] = dict(SLTP_OFF_BRACKET)
+            state["plan"] = plan2
+            info["plan"] = {k: plan2.get(k) for k in ("quantity", "notional_usdt", "price", "target_leverage")}
+            await entry_then_bracket(plan2, state)
+            ok = str(state.get("phase") or "").startswith("filled")
+            info.update(phase="done" if ok else "aborted", error=None if ok else state.get("error") or state.get("phase"))
+        except Exception as exc:  # noqa: BLE001 -- 사유를 남긴다(화면 폴링이 «진행 중»에 멈추지 않게)
+            state.update(phase="error", error=f"스위칭 오류 {type(exc).__name__}: {exc}")
+            (state.get("switch") or {}).update(phase="aborted", error=str(exc))
+
     async def bracket_tick() -> None:
         """무장된 측면마다: 포지션이 사라졌으면(TP·비상 스탑·수동 청산) 남은 우리 주문을 지우고 내린다.
         SL 을 넘었으면 **메이커 추격 청산**(청산 버튼과 같은 run_exit)을 돌린다."""
@@ -6591,12 +6624,12 @@ def make_app() -> web.Application:
         a = str(request.query.get("asset") or "eth").lower()
         return a if a in MANUAL_EXEC_SYMBOLS else None
 
-    def query_leverage(request: web.Request) -> int | None:
+    def query_leverage(request: web.Request, key: str = "lev") -> int | None:
         """화면 게이지가 고른 거래소 레버리지. 없으면 None -- 그때는 **모델 추천**을 쓴다.
 
         범위를 벗어나면 조용히 자르지 않고 None 을 돌려 모델값으로 떨어뜨린다.
         (자르면 «10 을 눌렀는데 1 이 걸림» 같은 일이 생긴다.)"""
-        raw = request.query.get("lev")
+        raw = request.query.get(key)
         if raw in (None, ""):
             return None
         try:
@@ -6605,18 +6638,18 @@ def make_app() -> web.Application:
             return None
         return v if 1 <= v <= EXCHANGE_MAX_LEVERAGE else None
 
-    def query_rule(request: web.Request) -> str | None:
+    def query_rule(request: web.Request, key: str = "rule") -> str | None:
         """자동 규칙 = "c"(재생 크기식). 없으면 None(직접 모드). 그 밖이면 "bad" -- 호출부가 400(직접 모드로 조용히 떨어지지 않는다)."""
-        raw = request.query.get("rule")
+        raw = request.query.get(key)
         if raw in (None, ""):
             return None
         return "c" if raw == "c" and MANUAL_RULES_ENABLED else "bad"   # 꺼져 있으면 400(직접 모드로 조용히 떨어지지 않는다)
 
-    def query_fraction(request: web.Request) -> float | None:
+    def query_fraction(request: web.Request, key: str = "pct") -> float | None:
         """쿼리의 비율(%)을 0<f<=1 로 바꾼다. 진입 분할과 부분 청산이 **같은 함수**를 쓴다.
         이상하면 None -- 호출부가 400 을 낸다.
         **조용히 1.0 으로 떨어뜨리지 않는다**: 일부만 하려던 요청이 전량이 되면 안 된다."""
-        raw = request.query.get("pct")
+        raw = request.query.get(key)
         if raw in (None, ""):
             return 1.0
         try:
@@ -6763,6 +6796,16 @@ def make_app() -> web.Application:
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "청산 비율은 0 초과 100 이하여야 합니다"}, status=400)
+        # 2026-10-10 «스위칭» = 전량 청산 + 반대 진입을 **서버가 한 작업으로**(옛 판은 브라우저 3초 폴링이 이어 줘서 화면이 꺼지면
+        #   반대 진입이 안 나갔다 -- 10-10 10:51 숏 2.563 청산 뒤 롱 미도착). 반대 진입 값 = 클라이언트가 보내던 그대로(sw_*).
+        sw, to = None, (request.query.get("switch_to") or "").upper()
+        if to:
+            sw_frac, sw_rule = query_fraction(request, "sw_pct"), query_rule(request, "sw_rule")
+            if to != ("SHORT" if side == "LONG" else "LONG") or frac != 1.0 or sw_frac is None or sw_rule == "bad":
+                return web.json_response({"ok": False, "error": "bad_switch",
+                                          "detail": "스위칭은 전량(100%) 청산 + 반대 방향 진입만 됩니다"}, status=400)
+            sw = {"to": to, "frac": sw_frac, "lev": query_leverage(request, "sw_lev"), "rule": sw_rule,
+                  "sltp_off": not MANUAL_RULES_ENABLED or request.query.get("sw_sltp") == "0"}   # sltp_off() 와 같은 규칙
         if not exec_enabled():
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
@@ -6781,8 +6824,11 @@ def make_app() -> web.Application:
         manual_entry_state.clear()
         manual_entry_state.update(phase="submitting", kind="exit", side=side, plan=plan, asset=query_asset(request),
                                   started_at=datetime.now(timezone.utc).isoformat())
+        if sw:
+            manual_entry_state["switch"] = {"from": side, "to": sw["to"], "phase": "exit"}
         refresh_tasks["manual_entry"] = asyncio.create_task(
-            run_exit(binance_session(), plan, manual_entry_state))
+            exit_then_switch(plan, manual_entry_state, sw, query_asset(request)) if sw
+            else run_exit(binance_session(), plan, manual_entry_state))
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
                                  headers=NOCACHE)
 

@@ -9376,6 +9376,11 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
 function manualEntryStateText(state) {
   const phase = state?.phase || "idle";
   const rows = [MANUAL_ENTRY_PHASE_KO[phase] || phase];
+  const sw = state?.switch, ko = (s) => (s === "LONG" ? "롱" : "숏");   // 2026-10-10 서버 스위칭(진입으로 넘어가도 남는다)
+  if (sw) {
+    rows.unshift(sw.phase === "aborted" ? `🔴스위칭 중단 — ${sw.error || "?"}`
+      : `스위칭 ${ko(sw.from)} → ${ko(sw.to)} · ${{ exit: "전량 청산 중 — 다 닫히면 서버가 반대 진입", entry: "청산 완료 → 반대 진입 중", done: "완료" }[sw.phase] || sw.phase}`);
+  }
   if (state?.quantity !== undefined) {
     rows.push(`체결 ${Number(state.filled || 0)} / ${Number(state.quantity)} ${(ASSET_CONFIG[state.asset] || {}).label || coinUnit()}` +
       (state.taker_qty ? ` (테이커 ${Number(state.taker_qty)})` : ""));
@@ -9420,14 +9425,14 @@ async function manualEntryPollStatus() {
     // 진입이 끝나도 TP/SL 은 그 **뒤에** 걸린다 -- 체결이 있는데 결과가 아직 없으면 한 번 더 본다.
     const bracketPending = data.state?.kind !== "exit" && Number(data.state?.filled || 0) > 0
       && !data.state?.bracket;
-    if (phase === "submitting" || phase === "working" || bracketPending) {
+    const switching = /^(exit|entry)$/.test(data.state?.switch?.phase || "");   // 2026-10-10 스위칭은 서버가 잇는다 -- 끝날 때까지 본다
+    if (phase === "submitting" || phase === "working" || bracketPending || switching) {
       setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
     } else {
       manualOrderBusy = false;
       manualButtonsDisabled(false);
       manualEntryRefreshSize();   // 체결되면 포지션·상한 표시를 갱신한다
       refreshBinanceAccount(true);   // 떠 있는 버튼·계좌 카드도 바로(서버 캐시 10초를 건너뛴다)
-      if (switchRun && data.state?.kind === "exit") switchAfterExit(data.state);
     }
   } catch (err) {
     box.innerHTML = entryNote(`상태 조회 실패: ${err && err.message ? err.message : err}`, "bad");
@@ -9456,7 +9461,11 @@ async function manualEntrySubmit() {
     const q = `&pct=${pending.pct ?? 100}`
       + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : "") + (pending.sltp === false ? "&sltp=0" : ""))
       + (pending.kind !== "exit" && pending.rule ? `&rule=${pending.rule}` : "")
-      + (pending.fresh ? "&fresh=1" : "");
+      + (pending.fresh ? "&fresh=1" : "")
+      // 2026-10-10 스위칭 = 서버 한 작업(청산 다 닫히면 서버가 반대 진입) -- 화면이 꺼져도 이어진다
+      + (pending.kind === "exit" && pending.sw ? `&switch_to=${pending.sw.to}&sw_pct=${pending.sw.pct}`
+        + (pending.sw.lev ? `&sw_lev=${pending.sw.lev}` : "") + (pending.sw.sltp ? "" : "&sw_sltp=0")
+        + (pending.sw.rule ? `&sw_rule=${pending.sw.rule}` : "") : "");
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&asset=${pending.asset || "eth"}&confirm=1${q}`,
       { method: "POST", cache: "no-cache" });
@@ -9468,10 +9477,7 @@ async function manualEntrySubmit() {
       return;
     }
     box.innerHTML = entryNote(manualEntryStateText(data.state), "live");
-    if (pending.kind === "exit" && pending.sw) {   // 2026-10-05 스위칭: 이 청산이 전량 체결되면 반대 진입(manualEntryPollStatus)
-      switchRun = { ...pending.sw, from: pending.side };
-      ofabSay(`스위칭 — ${pending.side === "LONG" ? "롱" : "숏"} 전량 peg 청산 중 · 다 닫히면 ${pending.sw.to === "LONG" ? "롱" : "숏"} 진입`);
-    }
+    if (pending.kind === "exit" && pending.sw) ofabWatchResult();   // 말풍선이 서버 스위칭 상태(결과 칸)를 따라 말한다
     setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
   } catch (err) {
     box.innerHTML = entryNote(`주문 실패: ${err && err.message ? err.message : err}`, "bad");
@@ -9601,28 +9607,14 @@ function manualHoldStart(btn, side, kind, ov = null) {
 //   (체결가·손익만큼 차이). 증거금 50% 상한은 서버가 그대로 걸고, 반대 진입은 계좌를 새로 읽는다(fresh=1 -- 닫은 포지션이
 //   30초 캐시에 남아 노출로 잡히면 상한이 반대 진입을 깎는다). 청산이 전량 안 채워지면(거부·오류) 반대 진입을 안 낸다.
 //   확인 규칙은 청산과 같다(마우스 0.4초 꾹 = 바로 · 터치/키보드 = 미리보기 → 확인). 120초 뒤 테이커 전환도 청산 그대로.
-let switchRun = null;
+// 🔴2026-10-10 청산 → 반대 진입 연결은 **서버**(server.py exit_then_switch)가 한다 -- 브라우저 폴링이 잇던 판은 화면이 꺼지면 반대 진입이 안 나갔다.
 function switchPlan(side) {
   const p = lastExitPositions.get(side);
   const qty = Number(p?.qty) || 0, mark = Number(p?.mark_price) || 0, lev = Number(p?.leverage) || manualLevEffective() || 0;
   const eq = acctMarginUsed(latestBinanceAccount?.balance).equity;
   if (!(qty > 0 && mark > 0 && lev > 0 && eq > 0)) return null;
   const pct = Math.min(100, Math.max(0.01, Math.round(qty * mark / lev / eq * 10000) / 100));
-  return { pct: 100, switch: { to: side === "LONG" ? "SHORT" : "LONG", pct, lev, sltp: manualSltpOn() } };
-}
-function switchAfterExit(state) {
-  const run = switchRun;
-  switchRun = null;
-  const ko = (s) => (s === "LONG" ? "롱" : "숏");
-  const full = /^filled_/.test(state.phase || "") && Number(state.filled || 0) >= Number(state.quantity || 0) * 0.999;
-  if (!full) {
-    return ofabSay(escapeHtml(`스위칭 중단 — ${ko(run.from)} 청산이 다 닫히지 않아(${MANUAL_ENTRY_PHASE_KO[state.phase] || state.phase}) `
-      + `${ko(run.to)} 진입을 내지 않았습니다.`), "bad");
-  }
-  ofabWatchResult();
-  ofabSay(escapeHtml(`${ko(run.from)} 청산 완료 → ${ko(run.to)} 진입(증거금 ${run.pct}% · ${run.lev}배) — 미리보기 받는 중…`));
-  manualFireOnPreview = true;
-  manualEntryPreview(run.to, "entry", { pct: run.pct, lev: run.lev, sltp: run.sltp, fresh: true });
+  return { pct: 100, switch: { to: side === "LONG" ? "SHORT" : "LONG", pct, lev, sltp: manualSltpOn(), rule: manualRule() } };
 }
 {
   const btn = el("snapSwitch");
