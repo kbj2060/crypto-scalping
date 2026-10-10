@@ -2,7 +2,7 @@
 
 규칙: 왕복 최대 명목 = 순자산 × L, L = min(12.4 × 권장배수, 청산 안전, 10) · 첫 진입 = 그 75% · 물타기 = 남은 여유 ·
 손절 = 첫 진입가 ∓3σ24 거래소 스탑(물타기해도 유지) · 익절 없음 · SL/TP 체크를 꺼도 건다 · rule=c 밖이면 400 · 변동성 없으면 503 · ETH 만.
-심는 값: 권장배수 0.5 · σ(4h) 250/√6 → σ24 250bp → 손절 7.5% · L = 0.5 × 12.4344 = 6.2172(노출 맞춤이 묶음).
+심는 값: 권장배수 0.5 · σ(4h) 250/√6 → σ24 250bp → 손절 7.5% · L = 0.075 ÷ 7.5% = 1.0(2026-10-10 동일위험이 묶음).
 네트워크·계좌는 test_manual_entry_preview_smoke 의 격리 틀(_isolated_dirs: 바이낸스 GET 가짜 응답)을 쓰고,
 run_entry·place_bracket 은 갈아끼워 주문 경로가 절대 바깥으로 못 나가게 한다.
 실행: python -m pytest -q test/test_rec_rule_entry_20261009.py
@@ -28,7 +28,7 @@ from dashboard import server  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 
 SYM = server.MANUAL_EXEC_SYMBOLS["eth"]
-L = 0.5 * 4 * 0.303 * 10.26          # 6.2172
+L = 0.075 / 0.075                    # 2026-10-10 동일위험: 손절 시 순자산 7.5% ÷ 손절폭 7.5% = 1.0
 VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.5}
 
 
@@ -78,7 +78,8 @@ class RecRuleEntryTest(unittest.TestCase):
             self.assertTrue(j.get("ok"), j)
             p = j["plan"]
             self.assertTrue(p["rule"]["first"], p["rule"])
-            self.assertEqual(p["rule"]["binding"], "노출 맞춤")
+            self.assertEqual(p["rule"]["binding"], "동일위험")
+            self.assertEqual(p["rule"]["loss_at_stop_pct"], 7.5)
             self.assertAlmostEqual(p["rule"]["cap_notional"], 1000 * L, delta=0.01)
             self.assertAlmostEqual(p["notional_usdt"], 0.75 * 1000 * L, delta=2.6)       # 순자산 1000 × L × 0.75
             self.assertEqual(p["bracket"]["sl_price"], 2312.5)                           # 2500.00 × (1 − 7.5%)
@@ -152,20 +153,31 @@ class RecRuleEntryTest(unittest.TestCase):
         self._run(account([long_pos(0.3, 2600.0)]), fn)
 
     def test_opposite_leg_does_not_turn_first_entry_into_add(self) -> None:
-        short = {**long_pos(0.12, 2500.0), "side": "SHORT"}                         # 반대 다리 명목 300
+        short = {**long_pos(0.04, 2500.0), "side": "SHORT"}                         # 반대 다리 명목 100(상한 1000 의 여유 900 ≥ 첫 750)
 
         async def fn(c):
             p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")).json())["plan"]
             self.assertTrue(p["rule"]["first"], p["rule"])
-            self.assertAlmostEqual(p["notional_usdt"], 0.75 * 1000 * L, delta=2.6)       # 남은 여유 전부(5,917)가 아니라 75%
+            self.assertAlmostEqual(p["notional_usdt"], 0.75 * 1000 * L, delta=2.6)       # 남은 여유 전부(900)가 아니라 75%
             self.assertIn("첫 진입가", p["rule"]["sl_name"])
         self._run(account([short]), fn)
+
+    def test_add_after_full_then_drop_keeps_loss_at_stop(self) -> None:
+        """다 찬 뒤(명목 1000 = 0.4 ETH @2500) 2400 으로 빠지면 명목 여유 40 이 다시 생기지만, 손절(2312.5)에서 이미 75 를 잃으니 0."""
+        armed = {f"{SYM}:LONG": {"symbol": SYM, "side": "LONG", "sl_price": 2312.5, "sl_level": 2312.5,
+                                 "backstop_price": 2312.5, "rule": True, "sl_name": "첫 진입가 −7.5%(3σ)", "armed_at": 0, "placed": {}}}
+        pos = {**long_pos(0.4, 2500.0), "mark_price": 2400.0, "notional": 960.0}
+
+        async def fn(c):
+            p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")).json())["plan"]
+            self.assertLess(p["notional_usdt"], 1.0, p["rule"])                                   # 위험 여유 0 → 사실상 0(막힘)
+        self._run(account([pos]), fn, armed=armed)
 
     def test_full_cap_blocks_add(self) -> None:
         async def fn(c):
             p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")).json())["plan"]
             self.assertTrue(p["blocked"], p)
-        self._run(account([long_pos(2.5, 2500.0)]), fn)                           # 명목 6250 > 상한 6217
+        self._run(account([long_pos(0.42, 2500.0)]), fn)                          # 명목 1050 > 상한 1000
 
     def test_submit_carries_rule_without_sending_orders(self) -> None:
         fired = []

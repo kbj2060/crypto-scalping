@@ -1767,6 +1767,9 @@ svg {
 .rule-box { display: inline-flex; align-items: center; gap: 8px; }
 .rule-box[hidden] { display: none; }
 .entry-line.rule-on .frac-part, .entry-line.rule-on #snapEntryFrac, .entry-line.rule-on .sltp-toggle, .entry-line.rule-on #snapVolMult { display: none !important; }
+/* 2026-10-10 동일위험 -- 자동이면 크기 칩 옆에 «손절 시 순자산 −7.5%»(크기를 정하는 단 하나의 약속) */
+.rule-risk { font: 600 11px/1 var(--font-sans); font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.entry-line:not(.rule-on) .rule-risk, .rule-risk[hidden] { display: none; }
 /* ↑ 2026-10-09 자동이면 진입비율 게이지(떠다니는 패널은 칩 대신 range 를 드러낸다)·SL/TP 체크도 숨긴다 -- 크기·손절·익절을 규칙이 정해 바꿔도 안 먹는다 */
 .ofab-panel #snapRuleBox .chipset { display: flex; }      /* 패널은 칩을 감추고 range 를 쓰지만 이 칩은 range 껍데기가 아니다(숨은 입력) -- 모드가 보여야 한다 */
 .ofab-panel .entry-line > #snapRuleBox { order: 4; flex-basis: 100%; }
@@ -2960,6 +2963,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-rule { position: absolute; left: 0; bottom: calc(100% + 6px); display: flex; gap: 2px; padding: 2px; border-radius: 999px;
   background: color-mix(in srgb, var(--chart-bg, #171b23) 96%, transparent); border: 1px solid var(--line); box-shadow: 0 6px 18px rgb(var(--shadow) / .3); }   /* 뒤 글자가 비치지 않게 */
 .ofab-rule[hidden] { display: none; }
+.ofab-rule .rule-risk { align-self: center; padding: 0 10px 0 4px; font-size: 10.5px; }
 .ofab-rule button { min-height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: none; color: var(--muted);
   font: 700 11px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
 .ofab-rule button:hover { color: var(--text); }

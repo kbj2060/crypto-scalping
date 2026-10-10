@@ -304,33 +304,36 @@ def bracket_keep_farther_sl(new: dict, prev: dict | None, position_side: str) ->
 
 # ── 2026-10-09 자동 규칙 진입(사용자 «방향만 정하면 크기·레버리지·손절 자동» → «인용하신 재생(×15.2)으로 넣어줘») ─────────
 # 재생 = research_risk_rule_ledger_replay_online_alpha_20261008 --committed «커밋» 팔(= 5cbcc38b build_rule_ladder 의 크기식):
-#   왕복 최대 명목 = 순자산 × L, L = min(4 × 0.303 × 10.26 × 권장배수, 청산가가 3σ 손절선보다 0.5% 바깥인 최대 배수(MMR 2%·평단 여유 0.66%), 10)
+#   왕복 최대 명목 = 순자산 × L, L = min(~~4 × 0.303 × 10.26 × 권장배수~~ → 10-10 RULE_LOSS_AT_STOP ÷ 손절폭, 청산가가 3σ 손절선보다 0.5% 바깥인 최대 배수(MMR 2%·평단 여유 0.66%), 10)
 #   손절 = 첫 진입가 ∓3σ24(진입 직전 마감 5분봉 288개) · 물타기 = 직접(재생은 사용자 실제 물타기 모양) · 익절 없음.
 #   67일 원장: 순자산 ×15.2 · MDD −37%(사후 · 사용자 진입 선택 몫 포함). 🔴교차 마진 전제 -- 격리면 손절 전에 청산된다.
 #   첫 진입 = 상한의 75%(원장 «첫 1분 체결 ÷ 왕복 최대 명목» 중앙 0.753). 물타기는 남은 여유만.
-COMMIT_UNIT_X = 4 * 0.303 * 10.26
+# 🔴2026-10-10 크기식 교체 «동일위험»: L = min(b ÷ 손절폭, 청산 안전, 10), b = 손절 시 순자산 손실. 근거: 원장 154왕복 재생·4.7년 모의에서
+#   꼬리를 줄인 건 크기 자체를 줄이는 도구뿐 -- 손절 시 7.5%(=1.5배+−5% 상당)는 원장 ×1.58·MDD −7%, 옛 식(4×0.303×10.26×권장배수)은
+#   손절 1회에 순자산 69~82%(docs/experiments/ledger_risk_ops_manual_20261010.md). 손절선·첫 75%·물타기 = 남은 여유는 그대로.
+RULE_LOSS_AT_STOP = 0.075
 COMMIT_CAP_X = 10.0
 COMMIT_MMR, COMMIT_AVG_OFF, COMMIT_LIQ_BUF, COMMIT_STOP_SIG = 0.02, 0.0066, 0.005, 3.0
 REC_FIRST_SHARE = 0.75
 
 
-def commit_rule_l(*, position_side: str, sigma24_bp: float, vol_mult: float) -> dict[str, Any]:
-    """재생 규칙의 배수 L 과 손절 폭. **순수 함수** -- research committed_L 과 같은 식."""
-    if not (sigma24_bp > 0 and vol_mult > 0):
-        raise ValueError(f"bad sigma/vol_mult: {sigma24_bp} {vol_mult}")
+def commit_rule_l(*, position_side: str, sigma24_bp: float) -> dict[str, Any]:
+    """자동 규칙의 배수 L 과 손절 폭. **순수 함수**. L = min(RULE_LOSS_AT_STOP ÷ 손절폭, 청산 안전, 10)."""
+    if not sigma24_bp > 0:
+        raise ValueError(f"bad sigma: {sigma24_bp}")
     sd = COMMIT_STOP_SIG * sigma24_bp / 1e4
     if position_side == "LONG":
         den = 1 - (1 - COMMIT_MMR) * (1 - sd) * (1 - COMMIT_LIQ_BUF) / (1 - COMMIT_AVG_OFF)
     else:
         den = (1 + COMMIT_MMR) * (1 + sd) * (1 + COMMIT_LIQ_BUF) / (1 + COMMIT_AVG_OFF) - 1
     liq = 1 / den if den > 0 else float("inf")
-    cands = {"노출 맞춤": COMMIT_UNIT_X * vol_mult, "청산 안전": liq, "상한": COMMIT_CAP_X}
+    cands = {"동일위험": RULE_LOSS_AT_STOP / sd, "청산 안전": liq, "상한": COMMIT_CAP_X}
     who = min(cands, key=cands.get)
     return {"l": float(cands[who]), "stop_pct": sd, "binding": who}
 
 
 def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, order_leverage: float,
-                  first: bool | None = None) -> dict[str, Any]:
+                  first: bool | None = None, risk_used: float = 0.0, add_stop_frac: float | None = None) -> dict[str, Any]:
     """규칙 크기. **순수 함수**. 상한 = rule_l × 순자산(계좌 전체 명목 -- 교차 마진이라 다른 포지션도 같은 잔고).
     첫 진입(기존 명목 0) = 상한의 75%, 물타기 = 남은 여유 전부. build_entry_plan(fraction_of_equity=True)에 넘길
     cap_notional·fraction 을 돌려준다 -- 잘라 넣기는 그 함수가 한다(room = cap − existing)."""
@@ -343,6 +346,10 @@ def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, ord
     #   있어도 롱 첫 진입이 75% 가 아니라 남은 여유 전부(98%)가 됐다. 여유(room)는 그대로 계좌 전체로 잰다.
     first = existing_notional <= 0 if first is None else first
     want = cap * REC_FIRST_SHARE if first else max(0.0, cap - existing_notional)
+    # 2026-10-10 동일위험 지킴: 이번 주문이 손절선까지 잃을 몫 ≤ (b × 순자산 − 이미 든 포지션이 손절에서 잃을 몫). 평단보다 싸게 물타면 거의 안 묶고,
+    #   다 찬 뒤 더 빠져 또 넣거나(명목 여유가 시세로 다시 생김)·위에서 불타기·손절선 너머면(add_stop_frac ≤ 0 → 0) 묶는다.
+    if add_stop_frac is not None:
+        want = min(want, max(0.0, RULE_LOSS_AT_STOP * equity - risk_used) / add_stop_frac if add_stop_frac > 0 else 0.0)
     return {"cap_notional": cap, "first": first, "room": max(0.0, cap - existing_notional),
             "target_notional": min(want, max(0.0, cap - existing_notional)),
             "fraction": min(1.0, max(1e-9, want / (equity * order_leverage)))}
@@ -857,15 +864,33 @@ def _self_check_rec_rule() -> None:
     """자동 규칙(2026-10-09) -- _self_check 앞에 돈다(그 함수의 옛 bracket_sl_hit 검사는 main 에서도 이미 깨져 있다)."""
     f = {"tick": 0.01, "step": 0.001, "min_qty": 0.001, "min_notional": 20.0}
     # ── 자동 규칙(2026-10-09, 재생 ×15.2 크기식) ──
-    c = commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=0.5)
-    assert c["binding"] == "노출 맞춤" and abs(c["l"] - 0.5 * 4 * 0.303 * 10.26) < 1e-9 and abs(c["stop_pct"] - 0.075) < 1e-12
-    assert commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=1.0)["binding"] == "상한"   # 12.4 > 10
-    hi = commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=3.0)
-    assert hi["binding"] in ("청산 안전", "상한") and hi["l"] <= 10.0
-    liq = commit_rule_l(position_side="SHORT", sigma24_bp=600.0, vol_mult=3.0)          # 넓은 손절 → 청산 안전이 묶는다
-    assert liq["binding"] == "청산 안전" and liq["l"] < 10.0
+    c = commit_rule_l(position_side="LONG", sigma24_bp=250.0)                          # 손절 7.5% → L = 0.075/0.075 = 1
+    assert c["binding"] == "동일위험" and abs(c["l"] - 1.0) < 1e-12 and abs(c["stop_pct"] - 0.075) < 1e-12
+    assert commit_rule_l(position_side="LONG", sigma24_bp=20.0)["binding"] == "상한"      # 0.075/0.006 = 12.5 > 10
+    for sig in (30.0, 120.0, 250.0, 600.0):
+        for side in ("LONG", "SHORT"):
+            k = commit_rule_l(position_side=side, sigma24_bp=sig)
+            assert k["l"] <= 10.0 and k["l"] * k["stop_pct"] <= RULE_LOSS_AT_STOP + 1e-12, k   # 상한 명목이 손절에서 잃는 몫 ≤ b
+    liq = {"stop_pct": 0.18, "l": 1 / ((1 + 0.02) * 1.18 * 1.005 / 1.0066 - 1)}            # 청산 안전 식(이제 b/sd 가 먼저 묶는다)
     sd = liq["stop_pct"]; L = liq["l"]                                                   # 청산가가 손절선보다 0.5% 바깥(평단 여유 포함)
     assert abs((1 + 0.02) * (1 + sd) * (1 + 0.005) / (1 + 0.0066) - 1 - 1 / L) < 1e-9
+    # ── 손절 시 손실 ≤ b × 순자산(+수수료) -- 물타기·다 찬 뒤 또 넣기·불타기 전부(서버 assemble_entry_plan 과 같은 입력) ──
+    eq, stop = 2000.0, 0.075
+    for path in ([2500, 2450, 2400, 2350, 2320], [2500, 2500, 2400, 2340], [2500, 2600, 2700], [2500, 2310]):
+        L0 = commit_rule_l(position_side="LONG", sigma24_bp=250.0)["l"]
+        sl = path[0] * (1 - stop)
+        q = cost = 0.0
+        for px in path:
+            used = q * max(0.0, cost / q - sl) if q else 0.0
+            rr = rec_rule_size(rule_l=L0, equity=eq, existing_notional=q * px, order_leverage=20, first=q == 0,
+                               risk_used=used, add_stop_frac=(px - sl) / px)
+            add = rr["target_notional"] / px
+            q, cost = q + add, cost + add * px
+        loss = q * (cost / q - sl)
+        assert loss <= RULE_LOSS_AT_STOP * eq * (1 + 1e-9), (path, loss)                  # 수수료(메이커 0bp·테이커 4bp)는 이 위에 얹힌다
+    beyond = rec_rule_size(rule_l=1.0, equity=eq, existing_notional=1000.0, order_leverage=20, first=False,
+                           risk_used=50.0, add_stop_frac=-0.01)
+    assert beyond["target_notional"] == 0.0                                                # 손절선 너머 물타기 = 0
     r = rec_rule_size(rule_l=c["l"], equity=2000.0, existing_notional=0.0, order_leverage=20)
     assert r["first"] and abs(r["target_notional"] - 0.75 * c["l"] * 2000.0) < 1e-6
     p = build_entry_plan(side="LONG", best_bid=2500.0, best_ask=2500.01, recommended_qty=0.0, cap_notional=r["cap_notional"],
@@ -896,7 +921,7 @@ def _self_check_rec_rule() -> None:
     fresh = rec_rule_bracket({}, position_side="LONG", anchor_price=2300.0, basis=1.0, stop_pct=0.075, filters=f,
                              prev={"sl_price": 2400.0, "backstop_price": 2390.0})                    # 규칙 아닌 이전 SL 은 안 물려받는다
     assert fresh["sl_price"] == 2127.5
-    print("자동 규칙 통과 — 재생 크기식(노출 맞춤·청산 안전·상한 10) · 3σ 손절 · 첫 75% · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
+    print("자동 규칙 통과 — 동일위험 크기식(b/손절폭·청산 안전·상한 10) · 손절 시 손실 ≤ 7.5% · 3σ 손절 · 첫 75% · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 
 if __name__ == "__main__":
