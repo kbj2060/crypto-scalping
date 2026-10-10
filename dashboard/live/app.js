@@ -1045,6 +1045,11 @@ function mergeFormingCandle(prev, next, nowS, barMin = CHART_CANDLE_MIN) {
     b.high = Math.max(b.high, a.high);
     b.low = Math.min(b.low, a.low);
   }
+  // 🔴2026-10-11 사용자 «PC에서 진행 중인 봉이 실제 봉과 달라». ETH 서버는 마감봉만, 그것도 닫힌 뒤 ~50초에 준다(서버 실측).
+  //   통째로 갈아 끼우면 라이브가 만든 형성 봉(·아직 안 온 직전 봉)이 버려지고 updateSnapshotCandleLive 가 **지금 가격으로**
+  //   새 봉을 다시 열었다 -- 마감 +60초 재시도·5분 폴링마다 시가·고저가 그 순간 값으로 리셋(시뮬 시가 오차 최대 $4.55).
+  //   서버 마지막 봉보다 새 라이브 봉은 이어 붙인다(test/test_forming_candle_vs_exchange_20261011.py).
+  if (b && Array.isArray(prev)) return next.concat(prev.filter((c) => c.time > b.time));
   return next;
 }
 
@@ -3317,6 +3322,14 @@ function nearestLiquidationLevel() {
 // every 5s by the call below) kept moving, which read as the whole chart being stuck/shifted by one
 // bar. Same bucket math as updateChart(): extend the last candle's high/low/close in place while
 // still inside its 5-min bucket, or push a fresh one once the live tick crosses into a new bucket.
+// 체결 하나 = 형성 봉 한 번 갱신(2026-10-11). 렌더 틱(400ms)에서만 반영하면 그 사이 고저를 놓치고, 봉 시각을 SSE 시각(1초 묵음)으로
+//   갈라 경계의 첫 체결이 직전 봉에 들어갔다. 바이낸스 @trade 가 거래소 봉의 원천이라 체결가·체결 시각을 그대로 쓴다.
+function noteLiveTrade(asset, price, tsMs) {
+  latestLivePriceByAsset[asset] = price;
+  latestLivePriceTsByAsset[asset] = new Date(tsMs).toISOString();
+  if (asset === activeSnapshotAsset) updateSnapshotCandleLive();
+}
+
 function updateSnapshotCandleLive() {
   const candles = candleHistoryByAsset[activeSnapshotAsset];
   if (!Array.isArray(candles) || !candles.length) return;
@@ -3529,7 +3542,7 @@ function ensurePriceWs() {
         if (d.e !== "trade") return;
         const price = Number(d.p);
         if (!(price > 0)) return;   // 바이낸스가 p:"0" 을 섞어 보낸다(실측 0.3%)
-        latestLivePriceByAsset[priceWsAsset] = price;
+        noteLiveTrade(priceWsAsset, price, Number(d.T));
         updateLivePriceFast(price);
         const qty = Number(d.q);
         if (qty > 0 && FLOW_ASSETS.has(priceWsAsset) && priceWsAsset === activeSnapshotAsset) {

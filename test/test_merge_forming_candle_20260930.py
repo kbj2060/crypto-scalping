@@ -35,7 +35,7 @@ def test_closed_bar_and_new_bar_untouched():
     # 마감된 봉(now 가 봉 끝을 지남)은 서버 값 그대로
     out = merge([c(T, 1.3, 0.7)], [c(T, 1.1, 0.9)], T + 300)
     assert out[-1]["high"] == 1.1 and out[-1]["low"] == 0.9
-    # 시각이 다르면(ETH: 서버는 마감봉만) 손대지 않는다
+    # 🔴2026-10-11 ETH(서버는 마감봉만): 서버보다 새 라이브 봉은 버리지 않고 이어 붙인다 -- 버리면 지금 가격으로 다시 열려 시가·고저가 리셋됐다
     out = merge([c(T, 1.3, 0.7)], [c(T - 300, 1.1, 0.9)], T + 100)
-    assert out[-1]["high"] == 1.1
+    assert [o["time"] for o in out] == [T - 300, T] and out[0]["high"] == 1.1 and out[-1]["high"] == 1.3
     assert merge(None, [], T) == []
