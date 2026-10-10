@@ -7,7 +7,7 @@
   로컬 파일·가짜 응답만 준다 · 바깥 호스트는 abort · WebSocket(바이낸스 직결)도 가짜로 막는다 · 누르기 전 가짜 제출로
   가로채기 선검사(아니면 즉시 중단). 터널(18787)이 없어 «실서버 마지막 주문 번호 전후 대조»는 할 수 없다 -- 대신 실서버로의
   경로 자체가 없다(요청 로그에 dash.local 밖 0건을 검사).
-검사(1920·390): ② 자동 칩 옆·떠 있는 띠 «손절 시 순자산 −7.5%» ③ «60분 대기» 칩 → 제출에 mode=wait&wait_min=60 · 대기 상자·
+검사(1920·390): ② 자동 칩 옆·떠 있는 띠 «손절 시 순자산 −15%»(10-11 총명목 3배·첫 진입가 −5%) · 변동성 없이도 버튼 «첫 $·손절» · 자동 미리보기 줄 · 칩 툴팁 메이커 권장 ③ «60분 대기» 칩 → 제출에 mode=wait&wait_min=60 · 대기 상자·
   떠 있는 «대기» 표식 · 취소 = action=cancel 한 번 · 지금 시장가 = 두 번 눌러야 action=market ④ 진입·청산 미리보기와 떠 있는 띠에
   USDC 호가·USDT 대비 bp ① 스위칭 확인 → 청산 제출에 switch_to·sw_* · 서버 스위칭 상태(청산 중 → 완료)를 결과 칸이 말한다.
 """
@@ -46,8 +46,8 @@ def preview(q, kind):
         p.update(position_side=side, quantity=2.563, position_qty=2.563, remaining_qty=0, fraction=1.0, reference_price=p["price"],
                  notional_usdt=round(2.563 * p["price"], 2), unrealized_pnl=-3.2, exit_move_pct=-0.1, fallback_after_sec=60, vol_bpm=10)
     if q.get("rule"):
-        p["rule"] = {"l": 1.0, "binding": "동일위험", "cap_notional": 1000.0, "first": True, "room": 1000.0, "target_notional": 750.0,
-                     "loss_at_stop_pct": 7.5, "sl_price": 2312.4, "sl_name": "첫 진입가 −7.5%(3σ)"}
+        p["rule"] = {"l": 3.0, "binding": "동일위험", "stop_pct": 5.0, "cap_notional": 3000.0, "first": True, "room": 3000.0, "target_notional": 2250.0,
+                     "loss_at_stop_pct": 15.0, "sl_price": 2374.9, "sl_name": "첫 진입가 −5%"}
     return body
 
 
@@ -116,21 +116,30 @@ with sync_playwright() as p:
             print("🔴가로채기 실패 -- 중단"); sys.exit(2)
         pg.evaluate(SETUP()); pg.evaluate("() => manualEntryRefreshSize()"); pg.wait_for_timeout(800)
 
-        # ② 자동 규칙 «손절 시 순자산 −7.5%» + ④ 떠 있는 띠 USDC 호가
+        # ② 자동 규칙 «손절 시 순자산 −15%» + ④ 떠 있는 띠 USDC 호가 (권장 배수 vol_mult 없음 -- /api/situation 503)
         pg.evaluate("() => { const i = document.getElementById('snapRule'); i.value = '1'; i.dispatchEvent(new Event('input', {bubbles: true})); renderOfab(); }")
         pg.wait_for_timeout(600)
         st = pg.evaluate("""() => { const v = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
             const card = document.querySelector('#snapRuleBox .rule-risk'), strip = document.querySelector('#ofabRule .rule-risk'), q = document.getElementById('ofabQuote');
             const sr = document.getElementById('ofabRule').getBoundingClientRect();
-            return { card: v(card) && card.textContent, strip: v(strip) && strip.textContent, quote: v(q) && q.textContent, stripRight: sr.right, vw: innerWidth }; }""")
+            return { card: v(card) && card.textContent, strip: v(strip) && strip.textContent, quote: v(q) && q.textContent, stripRight: sr.right, vw: innerWidth,
+                     btn: document.getElementById('ofabLong').querySelector('small').textContent,
+                     tips: [document.querySelector("#snapRuleBox .chip[data-v='1']").title, document.querySelector("#ofabRule button[data-v='1']").title] }; }""")
         print(w, "자동 규칙·띠", st)
-        if st["card"] != "손절 시 순자산 −7.5%" or st["strip"] != "손절 시 순자산 −7.5%": fails.append(f"[{w}] 7.5% 문구 {st}")
+        if st["card"] != "손절 시 순자산 −15%" or st["strip"] != "손절 시 순자산 −15%": fails.append(f"[{w}] 15% 문구 {st}")
+        if st["btn"] != "첫 $2,250 · 손절 2,375": fails.append(f"[{w}] 버튼 첫 $·손절(σ 없이) {st['btn']!r}")   # 0.75 × 3 × 1000 · 2500.40 × 0.95
+        if not all("메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수" in t and "∓5%" in t for t in st["tips"]): fails.append(f"[{w}] 칩 툴팁 {st['tips']}")
         if not (st["quote"] or "").startswith("USDC −"): fails.append(f"[{w}] 띠 USDC 호가 {st}")
         if st["stripRight"] > st["vw"] + 0.5: fails.append(f"[{w}] 띠가 화면 밖 {st}")
         pg.screenshot(path=str(OUT / f"ofab_flat_auto_{w}.png"), clip=pg.evaluate(
             "() => { const r = document.getElementById('ofab').getBoundingClientRect(); return {x: Math.max(0, r.x - 20), y: Math.max(0, r.y - 60), width: Math.min(innerWidth - Math.max(0, r.x - 20), r.width + 40), height: r.height + 80}; }"))
         pg.locator("#snapRuleBox").scroll_into_view_if_needed()
         pg.locator(".manual-entry-row.entry-line").screenshot(path=str(OUT / f"card_entry_line_auto_{w}.png"))
+        pg.focus("#snapEntryLong"); pg.keyboard.press("Enter"); pg.wait_for_timeout(900)          # 자동 미리보기 줄(제출 안 함)
+        rn = pg.evaluate("() => document.getElementById('snapEntryResult').textContent")
+        print(w, "자동 미리보기", rn[:160])
+        if "순자산 × 3" not in rn or "첫 진입가 −5%" not in rn or "첫 진입 = 상한의 75%" not in rn: fails.append(f"[{w}] 자동 미리보기 줄 {rn[:200]!r}")
+        pg.locator("#snapEntryResult").screenshot(path=str(OUT / f"entry_preview_auto_{w}.png"))
         pg.evaluate("() => { const i = document.getElementById('snapRule'); i.value = '0'; i.dispatchEvent(new Event('input', {bubbles: true})); }")
 
         # ③ 60분 대기 → 진입 미리보기(④ USDC 줄) → 확인 → 제출에 mode=wait

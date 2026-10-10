@@ -29,7 +29,7 @@ SUBMIT = "/api/manual-exit/submit?side=SHORT&pct=100&confirm=1&switch_to=LONG&sw
 
 
 class SwitchServerTest(unittest.TestCase):
-    def _run(self, fn, exit_phase: str = "filled_maker", exit_frac: float = 1.0, vm: bool = True, fill_entry: bool = False) -> dict:
+    def _run(self, fn, exit_phase: str = "filled_maker", exit_frac: float = 1.0, mtype: str = "cross", fill_entry: bool = False) -> dict:
         acct = account([dict(SHORT)])
         rec: dict = {"exits": [], "entries": [], "placed": []}
 
@@ -64,9 +64,9 @@ class SwitchServerTest(unittest.TestCase):
                  mock.patch.object(server, "run_exit", fake_exit), \
                  mock.patch.object(server, "run_entry", fake_entry), \
                  mock.patch.object(server, "place_bracket", fake_place if fill_entry else mock.AsyncMock(side_effect=AssertionError("주문 금지"))), \
-                 mock.patch.object(server, "margin_type", mock.AsyncMock(return_value="cross")):
+                 mock.patch.object(server, "margin_type", mock.AsyncMock(return_value=mtype)):
                 app = offline_app(server)
-                app["situation_eth"]["vol_mult"] = ({"sigma_bp": 100.0, "mult": 1.0, "bar": time.time()} if vm else None)
+                app["situation_eth"]["vol_mult"] = {"sigma_bp": 100.0, "mult": 1.0, "bar": time.time()}
                 client = TestClient(TestServer(app))
                 await client.start_server()
                 try:
@@ -124,9 +124,9 @@ class SwitchServerTest(unittest.TestCase):
             self.assertEqual(rec["entries"], [])
             self.assertEqual(st["phase"], "error")
             self.assertEqual(st["switch"]["phase"], "aborted")
-            self.assertIn("권장 배수", st["switch"]["error"])                           # rule_vol_unavailable 의 사유 그대로
-            self.assertIn("권장 배수", st["error"])
-        self._run(fn, vm=False)
+            self.assertIn("격리 마진", st["switch"]["error"])                           # rule_not_cross 의 사유 그대로(10-11 σ 검사는 없어졌다)
+            self.assertIn("격리 마진", st["error"])
+        self._run(fn, mtype="isolated")
 
     def test_d_client_gone_server_completes(self) -> None:
         async def fn(c, rec):

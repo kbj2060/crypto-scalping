@@ -6394,23 +6394,20 @@ def make_app() -> web.Application:
                 rec_src = "risk_model"
             # 2026-10-09 권고 규칙(사용자 «방향만 정하면 크기·레버리지·손절 자동»): 상한 = L × 순자산(계좌 전체 명목),
             #   첫 진입 = 그 75% · 물타기 = 남은 여유 -- 기존 상한(증거금 50% 등)과 작은 쪽. 손절은 아래 bracket 에서 ∓5%.
-            # 2026-10-09 자동 규칙(사용자 «인용하신 재생(×15.2)으로 넣어줘») → 10-10 L = min(0.075 ÷ 손절폭(동일위험), 청산 안전, 10) · 손절 3σ24 ·
+            # 2026-10-09 자동 규칙(사용자 «인용하신 재생(×15.2)으로 넣어줘») → 10-10 L = min(0.075 ÷ 손절폭(동일위험), 청산 안전, 10) · 손절 3σ24 → 10-11 총명목 3배 · 손절 ∓5% ·
             #   첫 진입 75% · 물타기 = 남은 여유. 상한은 이 규칙 하나 -- 증거금 50% 상한은 자동 모드에서 뺀다(20배면 같은 10배라 겹칠 뿐).
             rule = cr = None
             if rule_l:
                 if asset != "eth":
                     return None, {}, {}, ({"error": "rule_eth_only", "detail": "자동 규칙은 ETH 원장으로만 검정했습니다"}, 400)
-                vm = situation_state.get("vol_mult") or {}
-                if not (vm.get("sigma_bp") and vm.get("mult")) or time.time() - float(vm.get("bar") or 0) > 15 * 60:
-                    return None, {}, {}, ({"error": "rule_vol_unavailable",
-                                           "detail": "권장 배수(직전 24시간 변동성)가 없거나 15분 넘게 묵었습니다 -- 자동 진입을 막습니다"}, 503)
-                mt = await margin_type(binance_session(), symbol)   # 교차 전제 -- 격리면 손절(3σ) 전에 청산된다(10-09 실사고)
+                # 2026-10-11 손절 = 첫 진입가 ∓5% 고정(σ 안 씀) -- 옛 «권장 배수 없거나 묵음 → 503» 검사는 뺐다.
+                mt = await margin_type(binance_session(), symbol)   # 교차 전제 -- 격리면 손절(−5%) 전에 청산된다(10-09 실사고)
                 if mt != "cross":
                     return None, {}, {}, ({"error": "rule_not_cross",
                                            "detail": ("격리 마진이라 자동 진입을 막습니다 -- 손절보다 청산이 먼저 옵니다. 포지션·주문을 정리하고 바이낸스에서 교차로 바꾸세요"
                                                       if mt == "isolated" else "마진 방식을 못 읽어 자동 진입을 막습니다(교차 확인 필요)")}, 409)
-                cr = commit_rule_l(position_side=side, sigma24_bp=float(vm["sigma_bp"]) * math.sqrt(6))   # 2026-10-10 동일위험 L = 0.075 ÷ 손절폭
-                # 손절 = 첫 진입가 ∓3σ · 물타기면 이미 무장된 규칙 손절을 그대로(물러나지 않는다). 규칙 밖에서 연 포지션에
+                cr = commit_rule_l(position_side=side)   # 2026-10-11 L = 0.15 ÷ 0.05 = 3(총명목 3배)
+                # 손절 = 첫 진입가 ∓5% · 물타기면 이미 무장된 규칙 손절을 그대로(물러나지 않는다). 규칙 밖에서 연 포지션에
                 #   처음 거는 거면 기준 = 평단(첫 진입가를 모른다 -- 화면에 «평단»으로 적는다). 크기가 손절선을 알아야 해서 여기서 먼저 정한다.
                 b0 = await bracket_for(side, book, filters, asset)
                 basis = float(b0.get("basis") or 0.0) or 1.0   # ponytail: 청산맵을 못 읽어 basis 가 없으면 1(USDC/USDT 수 bp 오차)
@@ -6461,7 +6458,7 @@ def make_app() -> web.Application:
             # 2026-09-27 물타기면 SL 은 멀어질 때만 바꾼다(사용자 지시) -- 미리보기에도 실제로 걸릴 SL 이 보이게 여기서 합친다.
             if rule:
                 plan["rule"] = {"l": round(cr["l"], 3), "binding": cr["binding"], "stop_pct": round(100 * cr["stop_pct"], 2),
-                                "vol_mult": round(float(vm["mult"]), 3), "cap_notional": round(rule["cap_notional"], 2), "first": rule["first"],
+                                "cap_notional": round(rule["cap_notional"], 2), "first": rule["first"],
                                 "room": round(rule["room"], 2), "target_notional": round(rule["target_notional"], 2),
                                 "loss_at_stop_pct": round(100 * RULE_LOSS_AT_STOP, 2),
                                 "sl_price": plan["bracket"].get("sl_price"), "sl_name": plan["bracket"].get("sl_name")}

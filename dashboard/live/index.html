@@ -473,16 +473,16 @@
             <!-- 2026-09-25 비율 = 순자산 대비 이번 주문 증거금(10% = 순자산의 10%). 상한 넘으면 진입 불가.
                  사용자 지시: 레버리지 다음 줄에 «진입비율» 이름표로. -->
             <span class="entry-break" aria-hidden="true"></span>
-            <!-- 2026-10-09 자동 규칙(사용자 «방향만 정하면 크기·레버리지·손절 자동» → «재생 ×15.2 로» → 10-10 동일위험): 왕복 최대 명목 = 순자산 × min(7.5% ÷ 손절폭, 청산 안전, 10) ·
-                 첫 진입 75% · 물타기는 남은 여유 · 손절 첫 진입가 ∓3σ(거래소 스탑, 물타기해도 안 물러남) · 익절 없음. 고르면 진입비율·SL/TP 숨김. ETH 만. -->
+            <!-- 2026-10-09 자동 규칙(사용자 «방향만 정하면 크기·레버리지·손절 자동» → «재생 ×15.2 로» → 10-10 동일위험 → 10-11 총명목 3배): 왕복 최대 명목 = 순자산 × 3(= 15% ÷ 손절 5%) ·
+                 첫 진입 75% · 물타기는 남은 여유 · 손절 첫 진입가 ∓5%(거래소 스탑, 물타기해도 안 물러남) · 익절 없음. 고르면 진입비율·SL/TP 숨김. ETH 만. -->
             <span id="snapRuleBox" class="rule-box">
               <span class="entry-cap">크기</span>
               <input type="hidden" id="snapRule" value="0">
               <div class="chipset" data-for="snapRule" role="group" aria-label="진입 크기 규칙">
                 <button type="button" class="chip" data-v="0" title="진입비율 칩으로 직접 고릅니다">직접</button>
-                <button type="button" class="chip" data-v="1" title="자동 규칙(동일위험) — 손절에 닿으면 순자산 −7.5%가 되게 크기를 정합니다: 왕복 최대 명목 = 순자산 × min(7.5% ÷ 손절폭, 청산 안전, 10) · 첫 진입 75% · 물타기는 남은 여유(손절 시 손실 7.5% 안에서) · 손절 첫 진입가 ∓3σ(닿으면 거래소 스탑) · 익절 없음 · 🔴교차 마진에서만(격리면 손절 전에 청산)">자동</button>
+                <button type="button" class="chip" data-v="1" title="자동 규칙(총명목 3배) — 왕복 최대 명목 = 순자산 × 3 · 첫 진입 75% · 물타기는 남은 여유(손절 시 손실 15% 안에서) · 손절 첫 진입가 ∓5%(닿으면 거래소 스탑, 물타기해도 안 물러남) → 손절에 닿으면 순자산 −15% · 익절 없음 · 🔴교차 마진에서만(격리면 손절 전에 청산)&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동</button>
               </div>
-              <span class="rule-risk" aria-live="off">손절 시 순자산 −7.5%</span>
+              <span class="rule-risk" aria-live="off">손절 시 순자산 −15%</span>
             </span>
             <span class="entry-cap frac-part">진입비율</span>
             <input type="range" id="snapEntryFrac" min="5" max="100" step="5" value="25"
@@ -581,8 +581,8 @@
         <!-- 2026-10-09 B안(사용자 선택): 위 띠 = 진입 크기 규칙(계좌 카드 «크기» 칩 #snapRule 과 같은 값) · 자동이면 버튼 안에 첫 진입 금액·손절가 -->
         <span id="ofabRule" class="ofab-rule" role="group" aria-label="진입 크기" hidden>
           <button type="button" data-v="0" aria-pressed="false">직접</button>
-          <button type="button" data-v="1" aria-pressed="false" title="자동 규칙(동일위험) — 손절에 닿으면 순자산 −7.5% · 첫 진입 = 순자산 × min(7.5% ÷ 손절폭, 청산 안전, 10)의 75% · 손절 첫 진입가 ∓3σ · 익절 없음 · 교차 마진에서만">자동</button>
-          <span class="rule-risk">손절 시 순자산 −7.5%</span>
+          <button type="button" data-v="1" aria-pressed="false" title="자동 규칙(총명목 3배) — 첫 진입 = 순자산 × 3 의 75% · 손절 첫 진입가 ∓5% → 손절에 닿으면 순자산 −15% · 익절 없음 · 교차 마진에서만&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동</button>
+          <span class="rule-risk">손절 시 순자산 −15%</span>
           <span id="ofabQuote" class="ofab-quote" tabindex="0" hidden></span>   <!-- 2026-10-10 주문 심볼(USDC) vs 화면(USDT) 차 -->
         </span>
         <!-- 2026-10-06 상세 펼치기(사용자 지시): LONG 앞 아이콘 = 예전 «주문»을 누르면 나오던 패널(레버·비율·진입 버튼). 주문 경로 없음. -->
