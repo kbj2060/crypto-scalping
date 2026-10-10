@@ -7,7 +7,7 @@
   로컬 파일·가짜 응답만 준다 · 바깥 호스트는 abort · WebSocket(바이낸스 직결)도 가짜로 막는다 · 누르기 전 가짜 제출로
   가로채기 선검사(아니면 즉시 중단). 터널(18787)이 없어 «실서버 마지막 주문 번호 전후 대조»는 할 수 없다 -- 대신 실서버로의
   경로 자체가 없다(요청 로그에 dash.local 밖 0건을 검사).
-검사(1920·390): ② 자동 칩 옆·떠 있는 띠 «손절 시 순자산 −15%»(10-11 총명목 3배·첫 진입가 −5%) · 변동성 없이도 버튼 «첫 $·손절» · 자동 미리보기 줄 · 칩 툴팁 메이커 권장 ③ «60분 대기» 칩 → 제출에 mode=wait&wait_min=60 · 대기 상자·
+검사(1920·390·375): ② 자동 칩 옆·떠 있는 띠 «손절 시 순자산 −15%»(10-11 총명목 3배·첫 진입가 −5%) · 변동성 없이도 버튼 «첫 $·손절» · 자동 미리보기 줄 · 칩 툴팁 메이커 권장 ③ «60분 대기» 칩 → 제출에 mode=wait&wait_min=60 · 대기 상자·
   떠 있는 «대기» 표식 · 취소 = action=cancel 한 번 · 지금 시장가 = 두 번 눌러야 action=market ④ 진입·청산 미리보기와 떠 있는 띠에
   USDC 호가·USDT 대비 bp ① 스위칭 확인 → 청산 제출에 switch_to·sw_* · 서버 스위칭 상태(청산 중 → 완료)를 결과 칸이 말한다.
 """
@@ -99,7 +99,7 @@ SETUP = lambda: f"""() => {{
 
 with sync_playwright() as p:
     b = p.chromium.launch()
-    for w, h in ((1920, 1080), (390, 844)):
+    for w, h in ((1920, 1080), (390, 844), (375, 812)):
         S.update(positions=[], status={"phase": "idle"}, wait={"phase": "idle"})
         ctx = b.new_context(viewport={"width": w, "height": h}, device_scale_factor=2, has_touch=w < 500)
         pg = ctx.new_page()
@@ -121,8 +121,8 @@ with sync_playwright() as p:
         pg.wait_for_timeout(600)
         st = pg.evaluate("""() => { const v = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
             const card = document.querySelector('#snapRuleBox .rule-risk'), strip = document.querySelector('#ofabRule .rule-risk'), q = document.getElementById('ofabQuote');
-            const sr = document.getElementById('ofabRule').getBoundingClientRect();
-            return { card: v(card) && card.textContent, strip: v(strip) && strip.textContent, quote: v(q) && q.textContent, stripRight: sr.right, vw: innerWidth,
+            const sr = document.getElementById('ofabRule').getBoundingClientRect(), br = document.querySelector('#ofab .ofab-bar').getBoundingClientRect();
+            return { card: v(card) && card.textContent, strip: v(strip) && strip.textContent, quote: v(q) && q.textContent, stripRight: sr.right, stripLeft: sr.left, barLeft: br.left, barRight: br.right, vw: innerWidth, sw: document.documentElement.scrollWidth,
                      btn: document.getElementById('ofabLong').querySelector('small').textContent,
                      tips: [document.querySelector("#snapRuleBox .chip[data-v='1']").title, document.querySelector("#ofabRule button[data-v='1']").title] }; }""")
         print(w, "자동 규칙·띠", st)
@@ -130,7 +130,9 @@ with sync_playwright() as p:
         if st["btn"] != "첫 $2,250 · 손절 2,375": fails.append(f"[{w}] 버튼 첫 $·손절(σ 없이) {st['btn']!r}")   # 0.75 × 3 × 1000 · 2500.40 × 0.95
         if not all("메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수" in t and "∓5%" in t for t in st["tips"]): fails.append(f"[{w}] 칩 툴팁 {st['tips']}")
         if not (st["quote"] or "").startswith("USDC −"): fails.append(f"[{w}] 띠 USDC 호가 {st}")
-        if st["stripRight"] > st["vw"] + 0.5: fails.append(f"[{w}] 띠가 화면 밖 {st}")
+        if st["stripRight"] > st["vw"] + 0.5 or st["stripLeft"] < -0.5: fails.append(f"[{w}] 띠가 화면 밖 {st}")
+        if st["barRight"] > st["vw"] + 0.5 or st["barLeft"] < -0.5: fails.append(f"[{w}] 버튼 줄이 화면 밖(SHORT 잘림) {st}")   # 2026-10-11 자동 «첫 $·손절» 415px
+        if st["sw"] > st["vw"]: fails.append(f"[{w}] 가로 스크롤 {st['sw']} > {st['vw']}")
         pg.screenshot(path=str(OUT / f"ofab_flat_auto_{w}.png"), clip=pg.evaluate(
             "() => { const r = document.getElementById('ofab').getBoundingClientRect(); return {x: Math.max(0, r.x - 20), y: Math.max(0, r.y - 60), width: Math.min(innerWidth - Math.max(0, r.x - 20), r.width + 40), height: r.height + 80}; }"))
         pg.locator("#snapRuleBox").scroll_into_view_if_needed()

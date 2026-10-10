@@ -10101,7 +10101,12 @@ function renderOfabRule(bal, live) {
     const cr = r ? commitRuleL(side) : null;
     if (cr && eq > 0 && live > 0) {
       const sl = live * (side === "LONG" ? 1 - cr.sd : 1 + cr.sd);
-      setT(sm.id || id + "Frac", `첫 $${Math.round(0.75 * cr.l * eq).toLocaleString()} · 손절 ${Math.round(sl).toLocaleString()}`);
+      // 2026-10-11 두 조각(첫 $ · 손절)을 따로 감싼다 -- 좁은 화면(styles.css ≤480px)은 «·»를 숨기고 두 줄로 쌓아 버튼 줄이 화면 안에 든다
+      const first = `첫 $${Math.round(0.75 * cr.l * eq).toLocaleString()}`, stop = `손절 ${Math.round(sl).toLocaleString()}`;
+      if (sm.textContent !== `${first} · ${stop}`) {
+        const part = (t, c) => Object.assign(document.createElement("span"), { textContent: t, className: c || "" });
+        sm.replaceChildren(part(first), part(" · ", "sep"), part(stop));
+      }
       b.title = `1.5초 꾹 = ${dir} 자동 진입 — 손절 시 순자산 −${+(100 * RULE_LOSS_AT_STOP).toFixed(1)}%: 왕복 상한 순자산 × ${cr.l.toFixed(2)}(첫 진입 그 75%), 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}${+(100 * cr.sd).toFixed(1)}%(거래소 스탑), 익절 없음`;
     } else if (r) {
       setT(sm.id || id + "Frac", "자동 — 잔고 대기");
