@@ -120,29 +120,30 @@ def build(sym="ETH"):
             F[f"S_imb{nm}"] = rsum(2 * stb - sv, k) / rsum(sv, k)
         F["S_imb_minus_perp1h"] = F.S_imb1h - F.T_imb1h
         F["S_vol_share"] = rsum(sv, 12) / (rsum(sv, 12) + rsum(v, 12))
-    # ── 마이크로구조 aggfeat (2024-01~) ──
-    A = pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(str(BV / f"aggfeat/{sym}USDT_*.parquet")))]).sort_index()
-    A = A[~A.index.duplicated()].reindex(ts.to_numpy())
-    for col in A.columns:
-        F[f"M_{col[3:]}"] = A[col].to_numpy()
-    F["M_meansz"] = np.log(F.M_meansz)
-    for col in ("bigimb", "smlimb", "cntimb", "kyle", "vpin", "signac"):
-        F[f"M_{col}_1h"] = pd.Series(F[f"M_{col}"]).rolling(12, min_periods=6).mean().to_numpy()
-    F["M_whale_minus_retail_1h"] = F.M_bigimb_1h - F.M_smlimb_1h
-    trip = (np.corrcoef(np.nan_to_num(F.M_cvd), np.nan_to_num(r1))[0, 1], np.corrcoef(np.nan_to_num(F.M_cvd[:-1]), np.nan_to_num(r1[1:]))[0, 1])
-    print("트립와이어 aggfeat cvd ↔ 같은 봉 / 다음 봉 수익:", np.round(trip, 3))
-    assert trip[0] > 0.2 and abs(trip[1]) < 0.1, "aggfeat 시각 규약이 봉 시작이 아님 — 중단"
+    # ── 마이크로구조 aggfeat (2024-01~) ── 원천 없는 코인(XRP 등)은 M·D 묶음 생략(10-10 09:15)
+    if glob.glob(str(BV / f"aggfeat/{sym}USDT_*.parquet")):
+      A = pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(str(BV / f"aggfeat/{sym}USDT_*.parquet")))]).sort_index()
+      A = A[~A.index.duplicated()].reindex(ts.to_numpy())
+      for col in A.columns:
+          F[f"M_{col[3:]}"] = A[col].to_numpy()
+      F["M_meansz"] = np.log(F.M_meansz)
+      for col in ("bigimb", "smlimb", "cntimb", "kyle", "vpin", "signac"):
+          F[f"M_{col}_1h"] = pd.Series(F[f"M_{col}"]).rolling(12, min_periods=6).mean().to_numpy()
+      F["M_whale_minus_retail_1h"] = F.M_bigimb_1h - F.M_smlimb_1h
+      trip = (np.corrcoef(np.nan_to_num(F.M_cvd), np.nan_to_num(r1))[0, 1], np.corrcoef(np.nan_to_num(F.M_cvd[:-1]), np.nan_to_num(r1[1:]))[0, 1])
+      print("트립와이어 aggfeat cvd ↔ 같은 봉 / 다음 봉 수익:", np.round(trip, 3))
+      assert trip[0] > 0.2 and abs(trip[1]) < 0.1, "aggfeat 시각 규약이 봉 시작이 아님 — 중단"
     # ── 호가 깊이(bookDepth, 2024-01~) ──
-    Bk = pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(str(BV / f"{sym}USDT_bookDepth_*.parquet")))]).sort_index()
-    Bk = Bk[~Bk.index.duplicated()]
-    T_ = (ts + pd.Timedelta("5min")).to_numpy()
-    bi = np.searchsorted(Bk.index.to_numpy(), T_, "right") - 1
-    fresh = (bi >= 0) & (T_ - Bk.index.to_numpy()[np.maximum(bi, 0)] <= np.timedelta64(5, "m"))
-    for k in (1, 2, 5):
-        bid, ask = Bk[f"n-{k}"].to_numpy()[np.maximum(bi, 0)], Bk[f"n{k}"].to_numpy()[np.maximum(bi, 0)]
-        F[f"D_imb{k}"] = np.where(fresh, (bid - ask) / (bid + ask), np.nan)
-    F["D_imb1_d1h"] = F.D_imb1 - lag(F.D_imb1.to_numpy(), 12)
-    F["D_depth1_z"] = rz(np.log(np.where(fresh, Bk["n-1"].to_numpy()[np.maximum(bi, 0)] + Bk["n1"].to_numpy()[np.maximum(bi, 0)], np.nan)))
+      Bk = pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(str(BV / f"{sym}USDT_bookDepth_*.parquet")))]).sort_index()
+      Bk = Bk[~Bk.index.duplicated()]
+      T_ = (ts + pd.Timedelta("5min")).to_numpy()
+      bi = np.searchsorted(Bk.index.to_numpy(), T_, "right") - 1
+      fresh = (bi >= 0) & (T_ - Bk.index.to_numpy()[np.maximum(bi, 0)] <= np.timedelta64(5, "m"))
+      for k in (1, 2, 5):
+          bid, ask = Bk[f"n-{k}"].to_numpy()[np.maximum(bi, 0)], Bk[f"n{k}"].to_numpy()[np.maximum(bi, 0)]
+          F[f"D_imb{k}"] = np.where(fresh, (bid - ask) / (bid + ask), np.nan)
+      F["D_imb1_d1h"] = F.D_imb1 - lag(F.D_imb1.to_numpy(), 12)
+      F["D_depth1_z"] = rz(np.log(np.where(fresh, Bk["n-1"].to_numpy()[np.maximum(bi, 0)] + Bk["n1"].to_numpy()[np.maximum(bi, 0)], np.nan)))
     # ── 교차 자산(BTC·20코인 폭) ──
     rets12, rets288 = [], []
     ref = "BTC" if sym != "BTC" else "ETH"                                          # 교차 기준 자산(BTC 대상이면 ETH)
