@@ -6948,6 +6948,24 @@ def make_app() -> web.Application:
                                  action_reason="사용자 취소" if action == "cancel" else None)
         return web.json_response({"ok": True, "wait": manual_wait_state}, headers=NOCACHE)
 
+    async def api_manual_entry_cancel(request: web.Request) -> web.Response:
+        """2026-10-11 «따라가기» 진입(peg 지정가 · 120초 뒤 잔량 시장가)의 **대기 취소**. 진입과 같은 방어: POST + confirm=1 + 게이트.
+        집행 루프(fill_maker)가 다음 조회(≤3초)에 걸린 GTX 를 취소 확인 뒤 멈추고 잔량은 시장가로 넘기지 않는다 -- 든 몫은 그대로,
+        그 몫의 손절·TP 는 진입 종료 경로(entry_then_bracket)가 건다. 확인 못 하면 «거래소에서 직접 확인» 오류로 멈춘다(fill_maker).
+        🔴진입에만: 청산 취소는 남은 포지션을 그대로 두는 것이라 안 받는다. 스위칭 반대 진입은 시장가라 기다리는 구간이 없다."""
+        if request.query.get("confirm") != "1":
+            return web.json_response({"ok": False, "error": "confirm_required", "detail": "confirm=1 이 필요합니다"}, status=400)
+        if not exec_enabled():
+            return web.json_response({"ok": False, "error": "exec_disabled",
+                                      "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"}, status=403)
+        st = manual_entry_state
+        if (st.get("phase") not in ("working", "submitting") or st.get("kind") == "exit" or st.get("switch")
+                or (st.get("plan") or {}).get("type") == "MARKET"):
+            return web.json_response({"ok": False, "error": "no_entry", "detail": "기다리는 따라가기 진입이 없습니다",
+                                      "state": st}, status=409)
+        st.update(action="cancel", action_at=datetime.now(timezone.utc).isoformat(), action_reason="사용자 취소")
+        return web.json_response({"ok": True, "state": st}, headers=NOCACHE)
+
     async def wait_cleanup() -> None:
         """재시작 직후 한 번: 죽은 대기 작업이 남긴 GTX(표식 dbwt)를 지운다. 기록은 상태 칸에 -- 화면이 «재시작으로 취소»를 말한다.
         ponytail: 복구(이어서 기다리기) 대신 정리 -- 배포·재시작 때 대기 주문은 사라진다(이미 든 몫·손절은 그대로)."""
@@ -7125,6 +7143,7 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-entry/submit", api_manual_entry_submit)
     app.router.add_get("/api/manual-entry/status", api_manual_entry_status)
     app.router.add_post("/api/manual-entry/wait-action", api_manual_wait_action)
+    app.router.add_post("/api/manual-entry/cancel", api_manual_entry_cancel)
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)

@@ -9528,7 +9528,7 @@ function manualEntryStateText(state) {
     rows.push("SL/TP 끔 — 걸지 않았습니다(기존 SL/TP 는 그대로)");
   } else if (state?.trigger === "bracket_sl") {
     rows.push("SL 이탈 — 메이커 추격 청산");
-  } else if (filledQty > 0 && state?.kind !== "exit" && !br && /^filled|failed|error|rejected/.test(state?.phase || "")) {
+  } else if (filledQty > 0 && state?.kind !== "exit" && !br && /^filled|failed|error|rejected|cancelled/.test(state?.phase || "")) {
     rows.push("TP/SL 거는 중…");
   } else if (br) {
     rows.push(`🔴TP/SL 을 못 걸었습니다 (${br?.reason || "시도 기록 없음"})`);
@@ -9546,13 +9546,45 @@ function manualEntryStateText(state) {
   return rows.join("\n");
 }
 
+// 2026-10-11 «따라가기» 진입이 거래소에 걸려 있는 동안(peg · 120초 뒤 잔량 시장가) «대기 취소» -- 기다리기 상자(#snapWait)와 같은 줄 문법.
+//   취소는 남은 수량을 안 사는 쪽이라 위험을 줄이지만, 노리던 진입을 버리는 것이라 «지금 시장가»처럼 두 번(5초 무장).
+//   청산·스위칭은 안 붙인다(서버도 409) -- 청산 취소는 포지션을 그대로 두는 것이다.
+let entryCancelArmT = 0, entryCancelArmed = false, entryCancelLive = false;
+const entryCancelableP = (st) => /^(working|submitting)$/.test(st?.phase || "") && st?.kind !== "exit" && !st?.switch && st?.plan?.type !== "MARKET";
+function entryResultHtml(st, tone) {
+  entryCancelLive = entryCancelableP(st);
+  el("ofabWait")?.toggleAttribute("hidden", !(entryCancelLive || manualWaitLive));
+  if (!entryCancelLive) { entryCancelArmed = false; return entryNote(manualEntryStateText(st), tone); }
+  const label = st.action ? "취소 요청됨 — 3초 안에 처리" : entryCancelArmed ? "한 번 더 = 대기 취소(남은 수량 안 삼)" : "대기 취소";
+  return entryNote(manualEntryStateText(st), tone)
+    + `<div class="manual-entry-row wait-acts"><button type="button" class="notify-btn${entryCancelArmed && !st.action ? " arm" : ""}"`
+    + ` data-entry-cancel${st.action ? " disabled" : ""}>${label}</button></div>`;
+}
+el("snapEntryResult")?.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-entry-cancel]");
+  if (!b || b.disabled) return;
+  if (!entryCancelArmed) {
+    entryCancelArmed = true; b.classList.add("arm"); b.textContent = "한 번 더 = 대기 취소(남은 수량 안 삼)";
+    clearTimeout(entryCancelArmT);
+    entryCancelArmT = setTimeout(() => { entryCancelArmed = false; const x = el("snapEntryResult")?.querySelector("[data-entry-cancel]");
+      if (x && !x.disabled) { x.classList.remove("arm"); x.textContent = "대기 취소"; } }, 5000);
+    return;
+  }
+  clearTimeout(entryCancelArmT); entryCancelArmed = false;
+  b.disabled = true; b.classList.remove("arm"); b.textContent = "취소 요청 중…";
+  try {
+    const r = await (await fetch("/api/manual-entry/cancel?confirm=1", { method: "POST", cache: "no-cache" })).json();
+    b.textContent = r.ok ? "취소 요청됨 — 3초 안에 처리" : `취소 못 함: ${r.detail || r.error}`;   // 끝났으면(409) 다음 조회가 결과를 그린다
+  } catch (err) { b.disabled = false; b.textContent = "대기 취소"; }
+});
+
 async function manualEntryPollStatus() {
   const box = el("snapEntryResult");
   if (!box) return;
   try {
     const res = await fetch("/api/manual-entry/status", { cache: "no-cache" });
     const data = await res.json();
-    box.innerHTML = entryNote(manualEntryStateText(data.state),
+    box.innerHTML = entryResultHtml(data.state,
       /^(error|taker_failed|rejected)$/.test(data.state?.phase || "") ? "bad" : "live");
     const phase = data.state?.phase;
     // 진입이 끝나도 TP/SL 은 그 **뒤에** 걸린다 -- 체결이 있는데 결과가 아직 없으면 한 번 더 본다.
@@ -9616,7 +9648,7 @@ async function manualEntrySubmit() {
       manualWaitPoll();
       return;
     }
-    box.innerHTML = entryNote(manualEntryStateText(data.state), "live");
+    box.innerHTML = entryResultHtml(data.state, "live");
     if (pending.kind === "exit" && pending.sw) ofabWatchResult();   // 말풍선이 서버 스위칭 상태(결과 칸)를 따라 말한다
     setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
   } catch (err) {
@@ -9636,7 +9668,7 @@ function renderManualWait(w) {
   const live = waitLiveP(w), ph = w?.phase || "idle";
   const recent = Date.now() - Date.parse(w?.done_at || "") < 10 * 60e3;   // 끝난 결과는 10분만 남긴다
   box.hidden = ph === "idle" || (!live && !recent);
-  el("ofabWait")?.toggleAttribute("hidden", !live);
+  el("ofabWait")?.toggleAttribute("hidden", !live && !entryCancelLive);   // 따라가기 진입 대기 중에도(대기 취소 버튼으로 데려간다)
   if (acts) acts.hidden = !live;
   if (box.hidden) return;
   const ko = w.side === "LONG" ? "롱" : "숏", unit = (ASSET_CONFIG[w.asset] || {}).label || coinUnit();
@@ -9696,7 +9728,7 @@ el("snapWaitMarket")?.addEventListener("click", () => {
   clearTimeout(manualWaitArmT); b.classList.remove("arm"); b.textContent = "지금 시장가";
   manualWaitAction("market");
 });
-el("ofabWait")?.addEventListener("click", () => { if (!ofab.open) ofabSetOpen(true); el("snapWait")?.scrollIntoView({ block: "nearest" }); });
+el("ofabWait")?.addEventListener("click", () => { if (!ofab.open) ofabSetOpen(true); el(entryCancelLive ? "snapEntryResult" : "snapWait")?.scrollIntoView({ block: "nearest" }); });
 setTimeout(manualWaitPoll, 1500);   // 새로고침·재접속 뒤에도 걸린 대기 주문을 다시 보인다
 
 // 2026-09-16 애플식 슬라이더(사용자 요청). 트랙을 직접 칠하면 브라우저의 accent-color
@@ -10030,7 +10062,7 @@ function ofabWatchResult() {
   const box = el("snapEntryResult");
   if (!box) return;
   ofabSayObs?.disconnect();
-  ofabSayObs = new MutationObserver(() => { const t = (box.textContent || "").trim(); if (t && !box.hidden) ofabSay(escapeHtml(t), box.querySelector(".bad") ? "bad" : ""); });
+  ofabSayObs = new MutationObserver(() => { const t = ([...box.querySelectorAll(".entry-note")].map((n) => n.textContent).join(" ") || box.textContent || "").trim();   /* 버튼 글자(대기 취소)는 빼고 */ if (t && !box.hidden) ofabSay(escapeHtml(t), box.querySelector(".bad") ? "bad" : ""); });
   ofabSayObs.observe(box, { childList: true, subtree: true, characterData: true, attributes: true });
 }
 // 꾹 눌러 바로 진입(5% · SL/TP 해제, 미리보기 오는 즉시 발주). add = 지금 포지션 방향 추가 진입(물타기),

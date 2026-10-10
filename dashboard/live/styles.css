@@ -1788,7 +1788,8 @@ svg {
 .manual-wait .entry-note.live { border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent); font-variant-numeric: tabular-nums; }
 .manual-wait .wait-acts { justify-content: flex-start; gap: 8px; margin: 0; }
 .manual-wait .wait-acts[hidden] { display: none; }
-#snapWaitMarket.arm { border-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--amber); }
+#snapWaitMarket.arm, #snapEntryResult [data-entry-cancel].arm { border-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--amber); }
+.manual-entry-result .wait-acts { justify-content: flex-start; margin: 8px 0 0; }   /* 2026-10-11 따라가기 진입 «대기 취소» -- 기다리기 상자와 같은 줄 */
 .vol-mult { display: inline-flex; align-items: baseline; gap: 5px; min-height: 24px; padding: 4px 8px; border: 1px solid var(--soft-line);
   border-radius: 7px; background: var(--glass); cursor: help; white-space: nowrap; }
 .vol-mult > span { font: 600 11px/1 var(--font-sans); color: var(--muted); }

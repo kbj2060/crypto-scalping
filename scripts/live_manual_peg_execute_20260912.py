@@ -279,6 +279,9 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
         state.update(phase="filled_maker", taker_qty=0.0)
         state.update(done_at=now_iso())
         return state
+    if state.get("action") == "cancel":   # 2026-10-11 대기 취소 -- 잔량은 시장가로 안 넘긴다(든 몫은 그대로, 손절은 호출부가 건다)
+        state.update(phase="cancelled", taker_qty=0.0, cancel_reason=state.get("action_reason") or "사용자 취소", done_at=now_iso())
+        return state
 
     taker = await signed(session, "POST", "/fapi/v1/order",
                          {**common, "type": "MARKET", "quantity": remaining},
@@ -373,7 +376,10 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
     """
     side = str(common["side"])          # BUY/SELL -- 포지션 방향이 아니다(maker_price 주석)
     done, repegs = 0.0, 0
-    while time.monotonic() < deadline and round(total - done, 8) > 0 and repegs <= REPEG_MAX:
+    # 2026-10-11 밖에서 state["action"] = "cancel"(진입 «대기 취소», 서버가 진입에만 넣는다)이면 다음 조회(≤3초)에 걸린 주문을
+    #   취소 **확인** 뒤 멈춘다(다시 걸지 않는다) -- 잔량 처리는 호출부(run_entry: 시장가 없이 cancelled).
+    cancel = lambda: state.get("action") == "cancel"   # noqa: E731
+    while time.monotonic() < deadline and round(total - done, 8) > 0 and repegs <= REPEG_MAX and not cancel():
         remaining = round(total - done, 8)
         order = await signed(session, "POST", "/fapi/v1/order",
                              {**common, "type": "LIMIT", "timeInForce": "GTX",
@@ -392,7 +398,7 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
         oid = order.get("orderId")
         state.update(order_id=oid, limit_price=price)
         this_filled, status, need_repeg = 0.0, "", False
-        while time.monotonic() < deadline:
+        while time.monotonic() < deadline and not cancel():
             await asyncio.sleep(POLL_SEC)
             cur = await signed(session, "GET", "/fapi/v1/order",
                                {**common, "orderId": oid}, key, secret, offset)
