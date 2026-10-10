@@ -349,6 +349,25 @@
     "psr_0.5": 0.924
    },
    "note": "09:11 확정: BTC·SOL HGB 도 시드 3 평균(ETH 와 같은 조건). 이 값이 주 기준."
+  },
+  "monthly_block_bootstrap_sharpe_ci": {
+   "ETH": [
+    0.55,
+    2.54
+   ],
+   "BTC": [
+    0.15,
+    2.47
+   ],
+   "SOL": [
+    0.1,
+    2.43
+   ],
+   "3asset": [
+    0.56,
+    2.91
+   ],
+   "p_sharpe_gt1_3asset": 0.898
   }
  }
 }
