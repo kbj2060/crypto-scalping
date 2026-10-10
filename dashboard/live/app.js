@@ -9099,18 +9099,25 @@ function manualRule() {
 }
 // 서버 live_manual_peg_entry.commit_rule_l 과 같은 식(화면 표시용 -- 실제 크기·손절은 누를 때 서버 미리보기가 정한다)
 // 2026-10-10 동일위험: L = min(손절 시 순자산 손실 b ÷ 손절폭, 청산 안전, 10) -- 옛 «12.4 × 권장배수»는 손절 1회에 순자산 69~82%(원장 재생)
-// 2026-10-11 사용자 결정: 총명목 3배 + 첫 진입가 −5% 손절 → L = 0.15 ÷ 0.05 = 3(둘 중 하나만 바꾸면 L 이 달라진다)
-const RULE_LOSS_AT_STOP = 0.15;   // = live_manual_peg_entry.RULE_LOSS_AT_STOP (test_rule_size_parity 가 대조)
-const RULE_STOP_PCT = 0.05;       // = live_manual_peg_entry.RULE_STOP_PCT
-function commitRuleL(side) {
-  const sd = RULE_STOP_PCT;
+// 2026-10-11 사용자 최종 «×15.2 + −3% 스톱»: L = min(12.4 × 권장배수, 청산 안전(손절 거리 max(3σ24, 3%)), 10) · 손절 첫 진입가 ∓3% 고정
+const RULE_STOP_PCT = 0.03;       // = live_manual_peg_entry.RULE_STOP_PCT (test_rule_size_parity 가 대조)
+function commitRuleL(side, sigmaBp4h, vm) {
+  const sd = Math.max(3 * sigmaBp4h * Math.sqrt(6) / 1e4, RULE_STOP_PCT);   // 청산 안전용 거리
   const den = side === "LONG" ? 1 - 0.98 * (1 - sd) * 0.995 / (1 - 0.0066) : 1.02 * (1 + sd) * 1.005 / 1.0066 - 1;
-  return { l: Math.min(RULE_LOSS_AT_STOP / sd, den > 0 ? 1 / den : Infinity, 10), sd };
+  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, 10), sd: RULE_STOP_PCT };
+}
+// «손절 시 순자산 −X%» = 지금 L × 3%(두 방향 중 큰 쪽) -- 권장 배수가 없으면 손절 거리만
+function ruleRiskText() {
+  const v = latestSituation?.vol_mult;
+  if (!(v?.mult && v?.sigma_bp)) return `손절 첫 진입가 −${100 * RULE_STOP_PCT}%`;
+  const l = Math.max(...["LONG", "SHORT"].map((s) => commitRuleL(s, Number(v.sigma_bp), Number(v.mult)).l));
+  return `손절 시 순자산 −${Math.round(100 * l * RULE_STOP_PCT)}%`;
 }
 function renderRuleBox() {
   const box = el("snapRuleBox"), r = manualRule();
   if (box) box.hidden = !MANUAL_RULES || activeSnapshotAsset !== "eth";
-  document.querySelectorAll(".rule-risk").forEach((n) => { n.textContent = `손절 시 순자산 −${+(100 * RULE_LOSS_AT_STOP).toFixed(1)}%`; });
+  const t = ruleRiskText();
+  document.querySelectorAll(".rule-risk").forEach((n) => { if (n.textContent !== t) n.textContent = t; });
   el("snapRuleBox")?.closest(".entry-line")?.classList.toggle("rule-on", !!r);
 }
 el("snapRule")?.addEventListener("input", () => {
@@ -10068,9 +10075,9 @@ function renderOfab() {
 }
 // 2026-10-09 B안(사용자 선택): 위 띠 = #snapRule 과 같은 값 · 자동이면 버튼 안에 «첫 $ · 손절 가격».
 //   숫자는 서버 규칙(live_manual_peg_entry rec_rule_size·rec_rule_bracket)과 같은 식으로 여기서 3초마다 -- 첫 = 0.75 × L × 순자산,
-//   손절 = 지금 가격 ∓5%(10-11 L = 0.15 ÷ 0.05 = 3). 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
+//   손절 = 지금 가격 ∓3%(10-11 L = min(12.4 × 권장배수, 청산 안전, 10)). 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
 function renderOfabRule(bal, live) {
-  const r = manualRule(), eth = activeSnapshotAsset === "eth";
+  const r = manualRule(), eth = activeSnapshotAsset === "eth", vmx = latestSituation?.vol_mult;
   const strip = el("ofabRule");
   if (strip) {
     strip.hidden = !MANUAL_RULES || !eth;
@@ -10078,6 +10085,7 @@ function renderOfabRule(bal, live) {
     strip.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
     const rr = strip.querySelector(".rule-risk");
     if (rr) rr.hidden = v !== "1";
+    if (v === "1") renderRuleBox();            // «−X%»는 권장 배수가 바뀌면 같이 바뀐다(3초)
   }
   const qn = el("ofabQuote"), q = execQuote && execQuote.asset === activeSnapshotAsset && Date.now() - execQuote.at < 3 * 60e3 ? execQuote : null;
   if (qn) {
@@ -10098,7 +10106,7 @@ function renderOfabRule(bal, live) {
     if (!b || !sm) continue;
     b.classList.toggle("two", !!r);
     const dir = side === "LONG" ? "롱" : "숏";
-    const cr = r ? commitRuleL(side) : null;
+    const cr = r && vmx?.mult && vmx?.sigma_bp ? commitRuleL(side, Number(vmx.sigma_bp), Number(vmx.mult)) : null;
     if (cr && eq > 0 && live > 0) {
       const sl = live * (side === "LONG" ? 1 - cr.sd : 1 + cr.sd);
       // 2026-10-11 두 조각(첫 $ · 손절)을 따로 감싼다 -- 좁은 화면(styles.css ≤480px)은 «·»를 숨기고 두 줄로 쌓아 버튼 줄이 화면 안에 든다
@@ -10107,10 +10115,10 @@ function renderOfabRule(bal, live) {
         const part = (t, c) => Object.assign(document.createElement("span"), { textContent: t, className: c || "" });
         sm.replaceChildren(part(first), part(" · ", "sep"), part(stop));
       }
-      b.title = `1.5초 꾹 = ${dir} 자동 진입 — 손절 시 순자산 −${+(100 * RULE_LOSS_AT_STOP).toFixed(1)}%: 왕복 상한 순자산 × ${cr.l.toFixed(2)}(첫 진입 그 75%), 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}${+(100 * cr.sd).toFixed(1)}%(거래소 스탑), 익절 없음`;
+      b.title = `1.5초 꾹 = ${dir} 자동 진입 — 손절 시 순자산 −${Math.round(100 * cr.l * cr.sd)}%: 왕복 상한 순자산 × ${cr.l.toFixed(2)}(첫 진입 그 75%), 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}${100 * cr.sd}%(거래소 스탑), 익절 없음`;
     } else if (r) {
-      setT(sm.id || id + "Frac", "자동 — 잔고 대기");
-      b.title = `${dir} 자동 진입 — 잔고·시세를 아직 못 읽었습니다`;
+      setT(sm.id || id + "Frac", "자동 — 변동성 대기");
+      b.title = `${dir} 자동 진입 — 권장 배수(직전 24시간 변동성)나 잔고가 아직 없습니다`;
     } else {
       setT(sm.id || id + "Frac", "5%");
       b.title = `1.5초 꾹 = ${dir} 5% 진입`;
