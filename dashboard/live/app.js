@@ -6406,7 +6406,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const SHADES = footprintShades();
     const shade = (v, max) => SHADES[Math.min(3, Math.floor((max > 0 ? v / max : 0) * 4))];
     const fontPx = Math.min(9, Math.max(6, rowPx - 3));
-    const half = Math.max(2, bw / 2 - 0.5);
+    // 2026-10-10 사용자 «체결 박스 옆에 5분봉을 같이» → 시안 C(매도 | 5분봉 | 매수): 채운 몸통·심지를 두 칸 사이에.
+    //   옆 캔들은 칸 폭에서 떼어 낸다(봉 사이 간격은 그대로) -- 폭 = 봉 칸의 14%(3~8px) + 틈 2px. 셀을 안 그리는 얇은 봉(bw<14)은 옛 테두리.
+    //   (시안 때 쓴 "L"·"R" 분기는 남겨 둔다 -- 위치만 다른 같은 그림이다.)
+    const FPC = bw >= 14 ? "C" : "";
+    const fpcW = FPC ? Math.max(3, Math.min(8, (cw / candles.length) * 0.14)) : 0, fpcGap = FPC ? 2 : 0;
+    const half = Math.max(2, (bw - fpcW - fpcGap) / 2 - 0.5);
     // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
     // 숫자를 욱여넣으면 옆 칸을 침범해서 둘 다 못 읽는다. 값은 눌러서 툴팁으로 본다.
     const showQty = half >= 18;
@@ -6438,7 +6443,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   의존해서(deltaBoxes) 중간 봉 하나만 바뀌어도 뒤쪽이 전부 틀어진다 -- 그 사슬을
     //   캐시에 들이면 조용히 어긋난다. 둘 다 노드 하나뿐이라 매번 만들어도 싸다.
     const geomSig = [w, h, mt, ch, ml, cw, bw, yMin, yMax, candles.length, rowSize, rowPx,
-                     maxBuy, maxSell, half, fontPx, showQty, drawCells, INK_OPACITY].join("|");
+                     maxBuy, maxSell, half, fontPx, showQty, drawCells, INK_OPACITY, FPC].join("|");
     const barCache = renderCandleSvg._barCache || (renderCandleSvg._barCache = new Map());
     // 델타 라벨은 봉 그룹 **밖**이라 따로 둔다(위 🔴주석: 충돌회피 사슬 때문).
     const deltaCache = renderCandleSvg._deltaCache || (renderCandleSvg._deltaCache = new Map());
@@ -6519,12 +6524,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const yTop = yAt((key + 1) * rowSize);
         if (yTop + rowPx < mt || yTop > mt + ch) return;   // 창 밖 행은 건너뛴다
         const price = key * rowSize + rowSize / 2;
-        drawCell(x, yTop, cell[1], cell[0], maxSell, "var(--bad)", x - 2, price);          // 왼쪽 = 매도
-        drawCell(x + bw / 2 + 0.5, yTop, cell[0], cell[1], maxBuy, "var(--good)", x + bw, price); // 오른쪽 = 매수
+        const sx = x + (FPC === "L" ? fpcW + fpcGap : 0);                                 // 매도 칸 왼쪽 끝
+        const bx = sx + half + 1 + (FPC === "C" ? fpcW + fpcGap : 0);                     // 매수 칸 왼쪽 끝
+        drawCell(sx, yTop, cell[1], cell[0], maxSell, "var(--bad)", sx - 2, price);          // 왼쪽 = 매도
+        drawCell(bx, yTop, cell[0], cell[1], maxBuy, "var(--good)", bx + half + 2, price); // 오른쪽 = 매수
         if (key === pocKey) {   // POC -- 그 봉에서 가장 많이 거래된 가격 행
           const poc = document.createElementNS(NS, "rect");
-          poc.setAttribute("x", x); poc.setAttribute("y", yTop);
-          poc.setAttribute("width", bw); poc.setAttribute("height", rowPx);
+          poc.setAttribute("x", sx); poc.setAttribute("y", yTop);
+          poc.setAttribute("width", bx + half - sx); poc.setAttribute("height", rowPx);
           poc.setAttribute("fill", "none"); poc.setAttribute("stroke", "var(--amber)");
           poc.setAttribute("stroke-opacity", "0.85");
           const pocTitle = document.createElementNS(NS, "title");
@@ -6537,6 +6544,20 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       // 캔들은 테두리로만 남긴다 -- 셀을 덮지 않으면서 시가/종가/꼬리를 잃지 않으려는 것.
     // (POC 선은 이 forEach 가 끝난 뒤 한 번에 긋는다 -- 아래 pocPts 블록)
       const isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
+      if (FPC) {   // 옆 5분봉: 채운 몸통 + 심지(칸을 덮지 않는 자리)
+        const cx0 = FPC === "L" ? x : FPC === "R" ? x + bw - fpcW : x + half + 1 + fpcGap / 2, cxm = cx0 + fpcW / 2;
+        const wk = document.createElementNS(NS, "line");
+        wk.setAttribute("x1", cxm); wk.setAttribute("x2", cxm);
+        wk.setAttribute("y1", yAt(c.high)); wk.setAttribute("y2", yAt(c.low));
+        wk.setAttribute("stroke", color); wk.setAttribute("stroke-width", "1");
+        barG.appendChild(wk);
+        const yT = yAt(Math.max(c.open, c.close)), yB = yAt(Math.min(c.open, c.close));
+        const bd = document.createElementNS(NS, "rect");
+        bd.setAttribute("x", cx0); bd.setAttribute("y", yT);
+        bd.setAttribute("width", fpcW); bd.setAttribute("height", Math.max(yB - yT, 1));
+        bd.setAttribute("fill", color); bd.setAttribute("rx", fpcW >= 5 ? 1 : 0);
+        barG.appendChild(bd);
+      } else {
       const wick = document.createElementNS(NS, "line");
       wick.setAttribute("x1", x + bw / 2); wick.setAttribute("x2", x + bw / 2);
       wick.setAttribute("y1", yAt(c.high)); wick.setAttribute("y2", yAt(c.low));
@@ -6549,6 +6570,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       body.setAttribute("fill", "none"); body.setAttribute("stroke", color);
       body.setAttribute("stroke-opacity", "0.6");
       barG.appendChild(body);
+      }
       }   // ← if (!reuse)
 
       // 봉 델타(매수-매도). 2026-09-16 사용자 요청으로 **플롯 맨 위 -> 그 봉 바로 아래**로
