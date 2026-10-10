@@ -854,14 +854,14 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--exec":
     json.dump(res, open(f"{OUT}/execution_realism.json", "w"), ensure_ascii=False, indent=1)
 
 
-def replicate_combo(sym="SOL"):
+def replicate_combo(sym="SOL", seeds=(0,)):
     """독립 복제(09:00 고정, 선택에 안 쓴 자산): 같은 방법 전부를 sym 에 — 4h HGB(전체 피쳐·365일·월별·시드 0, 2023~2026) 를
     5분봉 지정가 근사(다음 5분봉 안 관통해야 체결, 아니면 그 봉 종가 시장가 4bp)로 + 일봉 추세 5표 + UTC 개장 되돌림 → 위험 맞춤 결합."""
     if not os.path.exists(panel_path(sym)):
         build(sym); add_open_feats(sym)
     F = pd.read_parquet(panel_path(sym)); FC = feat_cols(F); ts = F.ts.to_numpy()
-    pred, _, _ = wf_monthly(F, FC, "4h", 48, 365, seeds=(0,), start="2023-01-01")
-    np.save(f"{OUT}/pred_{sym}_combo_4h.npy", pred)
+    pred, _, _ = wf_monthly(F, FC, "4h", 48, 365, seeds=seeds, start="2023-01-01")
+    np.save(f"{OUT}/pred_{sym}_combo_4h{'_seed3' if len(seeds) == 3 else ''}.npy", pred)
     sq = pd.Series(pred); lo, hi = sq.shift(1).expanding(8640).quantile(.2).to_numpy(), sq.shift(1).expanding(8640).quantile(.8).to_numpy()
     b = load_panel(sym); t5 = (b.timestamp.astype("int64") // 10**6).to_numpy(); h5, l5, c5 = b.high.to_numpy(), b.low.to_numpy(), b.close.ffill().to_numpy()
 
@@ -892,8 +892,8 @@ def replicate_combo(sym="SOL"):
         x = B[c]; out[c] = {"yearly": {int(Y): round(float(v.mean() / v.std() * np.sqrt(365)), 2) for Y, v in x.groupby(x.index.year)},
                             "sharpe": round(float(x.mean() / x.std() * np.sqrt(365)), 2), "corr_hgb": round(float(x.corr(B["4h HGB"])), 3)}
         print(sym, c, json.dumps(out[c], ensure_ascii=False), flush=True)
-    json.dump(out, open(f"{OUT}/replicate_combo_{sym}.json", "w"), ensure_ascii=False, indent=1)
+    json.dump(out, open(f"{OUT}/replicate_combo_{sym}{'_seed3' if len(seeds) == 3 else ''}.json", "w"), ensure_ascii=False, indent=1)
 
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--repcombo":
-    replicate_combo(sys.argv[2])
+    replicate_combo(sys.argv[2], seeds=(0, 1, 2) if "--seed3" in sys.argv else (0,))
