@@ -1039,11 +1039,15 @@ function axisTicks(min, max, targetTicks = 4) {
 //   고가=max·저가=min 으로 합친다(종가는 바로 뒤 updateSnapshotCandleLive 가 최신 라이브가로 덮는다).
 //   마감된 봉은 서버 값 그대로. 순수 함수(test/test_merge_forming_candle_20260930.py 가 본문을 떼어 돌린다).
 function mergeFormingCandle(prev, next, nowS, barMin = CHART_CANDLE_MIN) {
-  const a = Array.isArray(prev) && prev.length ? prev[prev.length - 1] : null;
   const b = next.length ? next[next.length - 1] : null;
-  if (a && b && a.time === b.time && nowS < b.time + barMin * 60) {
+  // 2026-10-11 ETH·BTC 도 형성 봉을 partial 로 준다(«닫히기 전에 찍은 값», 서버 캐시로 최대 60초 묵음 -- 그새 닫힌 봉일 수도 있다).
+  //   같은 시각의 라이브 봉과 **시각으로** 짝짓는다(마지막끼리가 아니라): 시가 = 서버(REST 시가가 참) · 고저 = 합집합 · 종가 = 라이브(더 새다,
+  //   지금 봉이면 바로 뒤 updateSnapshotCandleLive 가 최신가로 덮는다). 새로 연 화면(prev 없음)은 partial 이 곧 씨앗이다.
+  const a = b && Array.isArray(prev) ? prev.find((c) => c.time === b.time) : null;
+  if (a && (b.partial || nowS < b.time + barMin * 60)) {
     b.high = Math.max(b.high, a.high);
     b.low = Math.min(b.low, a.low);
+    if (b.partial) b.close = a.close;
   }
   // 🔴2026-10-11 사용자 «PC에서 진행 중인 봉이 실제 봉과 달라». ETH 서버는 마감봉만, 그것도 닫힌 뒤 ~50초에 준다(서버 실측).
   //   통째로 갈아 끼우면 라이브가 만든 형성 봉(·아직 안 온 직전 봉)이 버려지고 updateSnapshotCandleLive 가 **지금 가격으로**

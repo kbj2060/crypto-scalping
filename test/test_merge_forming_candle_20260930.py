@@ -39,3 +39,14 @@ def test_closed_bar_and_new_bar_untouched():
     out = merge([c(T, 1.3, 0.7)], [c(T - 300, 1.1, 0.9)], T + 100)
     assert [o["time"] for o in out] == [T - 300, T] and out[0]["high"] == 1.1 and out[-1]["high"] == 1.3
     assert merge(None, [], T) == []
+
+
+def test_partial_bar_seeds_and_merges_by_time():
+    # 2026-10-11 ETH 서버도 형성 봉을 partial 로 준다. 새로 연 화면(prev 없음) = partial 이 씨앗(시가 = 서버)
+    p = dict(c(T, 1.2, 0.8, 1.1), open=0.95, partial=True)
+    assert merge([], [c(T - 300, 2, 0.5), p], T + 100)[-1] == p
+    # 캐시가 묵어 그새 닫힌 봉의 partial: 라이브가 만든 그 봉(prev[-2])과 시각으로 짝지어 고저 합집합·종가 라이브 · 지금 봉은 이어 붙임
+    live = [c(T - 300, 2, 0.5), dict(c(T, 1.3, 0.7, 1.25), open=1.0), c(T + 300, 1.4, 1.2)]
+    out = merge(live, [c(T - 300, 2, 0.5), dict(p)], T + 320)
+    assert [o["time"] for o in out] == [T - 300, T, T + 300]
+    assert (out[1]["open"], out[1]["high"], out[1]["low"], out[1]["close"]) == (0.95, 1.3, 0.7, 1.25)

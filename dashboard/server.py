@@ -648,6 +648,19 @@ def exec_asset_of(symbol: str) -> str | None:
         if symbol in (sym, MARKET_SYMBOLS.get(a)):
             return a
     return None
+
+
+def forming_kline(raw: list, now_ms: float, bar_s: int = 300) -> dict[str, Any] | None:
+    """REST klines 마지막 행이 **형성 중**이면(시각으로: 시작 + 봉길이 > 지금) 그 봉을 partial 캔들로, 아니면 None.
+    🔴행 수로 가르지 않는다 -- 바이낸스는 새 봉 행을 경계 ~5초 뒤에 붙여 그 사이 마지막 행은 방금 닫힌 봉이다.
+    2026-10-11 사용자 «새로고침하면 최신 5분봉이 사라져»: 마감봉만 주면 새로 연 화면이 형성 봉 시가·앞부분 고저를 알 길이 없었다."""
+    if not raw:
+        return None
+    r = raw[-1]
+    t = int(r[0]) // 1000
+    if t + bar_s <= now_ms / 1000:
+        return None
+    return {"time": t, "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "partial": True}
 # 대시보드가 **보여줄** 코인 (2026-09-16 사용자 요청 "나머지 코인은 리소스 먹지 않게 비활성").
 # 실측으로 본 실제 절약: 엔드포인트별 코인 계산은 요청이 와야 도는 on-demand(swr_cached, 콜드
 # 0.05초)라 안 쓰면 안 돈다. **무조건 도는 건 SSE 루프의 시세 팬아웃 하나뿐**이었다 --
@@ -3378,6 +3391,7 @@ def make_app() -> web.Application:
                     "close": float(row[4]),
                     **veto.get(int(row[0]) // 1000, {}),
                     **vwap.get(int(row[0]) // 1000, {}),
+                    **({"partial": True} if int(row[6]) >= now_ms else {}),   # 2026-10-11 형성 봉 표시(ETH 와 같은 뜻)
                 }
                 for row in rows[-200:]                # ETH 와 같은 200봉(16.6시간)
             ]
@@ -4393,6 +4407,8 @@ def make_app() -> web.Application:
             now_ms = int(time.time() * 1000)
             if len(df) and int(df.iloc[-1]["close_time"]) >= now_ms:
                 df = df.iloc[:-1].reset_index(drop=True)  # drop the still-forming bar
+            # 2026-10-11 형성 봉은 프레임(마감봉 전용 -- veto·상황 계산)에서 빼되 따로 들고 있다가 /api/market-history 만 덧붙인다.
+            forming = {"eth": forming_kline(raw, now_ms), "btc": None}
 
             # BTC 레그 -- 차트의 BTC 캔들용. 실패해도 ETH 캔들은 떠야 하므로 잡아서 로그만 남긴다
             # (2026-09-16 이전엔 smt_divergence 의 교차자산 레그를 겸했다).
@@ -4417,6 +4433,7 @@ def make_app() -> web.Application:
                     bdf["close_time"] = bdf["close_time"].astype("int64")
                     bdf["timestamp"] = pd.to_datetime(bdf["open_time"].astype("int64"), unit="ms", utc=True)
                     bdf = bdf.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+                    forming["btc"] = forming_kline(braw, now_ms)
                     if len(bdf) and int(bdf.iloc[-1]["close_time"]) >= now_ms:
                         bdf = bdf.iloc[:-1].reset_index(drop=True)
                     btc_df = bdf[["timestamp", "open", "high", "low", "close"]]
@@ -4430,6 +4447,7 @@ def make_app() -> web.Application:
                 btc_df,
                 None,
             )
+            evidence_signal_cache["forming"] = forming
             return {"available": True, "bars": int(len(df)),
                     "btc_bars": int(len(btc_df)) if btc_df is not None else 0}
 
@@ -4992,6 +5010,12 @@ def make_app() -> web.Application:
         if asset not in MARKET_SYMBOLS:
             raise web.HTTPBadRequest(reason="unsupported_market_history_asset")
         candles = await load_market_history(asset)
+        # 2026-10-11 ETH·BTC 는 마감봉만 오므로 형성 봉(partial, 프레임과 같은 60초 캐시)을 덧붙인다 -- 새로 연 화면이 그 봉의 시가·고저를
+        #   씨앗으로 쓰고 라이브 체결로 잇는다(app.js mergeFormingCandle). 캐시가 묵어 그새 닫힌 봉이어도 그 봉이 아직 마감봉에 없으면
+        #   붙인다(빈칸보다 낫다) -- partial = «닫히기 전에 찍은 값»이라 마감봉으로 쓰면 안 된다는 뜻. 내부 소비자(상황·30분 카드)는 그대로 마감봉만.
+        f = (evidence_signal_cache.get("forming") or {}).get(asset) if asset in ("eth", "btc") else None
+        if f and candles and f["time"] > candles[-1]["time"]:
+            candles = [*candles, f]
         return web.json_response({"asset": asset, "candles": candles}, headers=NOCACHE)
 
     def _fpd_lake(stream: str, start, end, cols: str):
