@@ -80,6 +80,34 @@ async def margin_type(session, symbol: str) -> str | None:
     return "cross" if kinds == {"cross"} else "isolated" if "isolated" in kinds else None
 
 
+# 2026-10-10 주문 심볼의 계정 실수수료율. 🔴**화면에 보이는 «예상 비용» 표시 전용**이다 --
+# 크기·손절(7.5% 동일위험)·지평 권고·연구 판정은 표준 USDT-M 상수를 그대로 쓴다(사용자 정책:
+# 경제성은 표준 수수료 기준, USDC 0% 는 «기간 한정» 프로모션). 가중치 20 이라 봇과 공유하는
+# IP 예산을 아끼려고 성공 1시간 · 실패 5분 캐시(실패해도 매 미리보기마다 재호출하지 않는다).
+STD_FEE_BP = (2.0, 5.0)      # 표준 USDT-M 메이커·테이커(bp) -- 조회도 못 하고 지난 값도 없을 때
+FEE_TTL_SEC, FEE_RETRY_SEC = 3600.0, 300.0
+_fee_cache: dict[str, tuple[float, float, float, str]] = {}   # 심볼 → (조회 시각, 메이커, 테이커, 출처)
+
+
+async def commission_bp(session, symbol: str) -> dict:
+    """{"symbol","maker_bp","taker_bp","source"} -- source: live(1시간 안 조회) · stale(조회 실패,
+    마지막 성공값) · fallback(성공 이력 없음, 표준 2/5bp «추정»). 예외를 던지지 않는다."""
+    now = time.time()
+    hit = _fee_cache.get(symbol)
+    if hit and now - hit[0] < (FEE_TTL_SEC if hit[3] == "live" else FEE_RETRY_SEC):
+        return {"symbol": symbol, "maker_bp": hit[1], "taker_bp": hit[2], "source": hit[3]}
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    r = (await signed(session, "GET", "/fapi/v1/commissionRate", {"symbol": symbol}, key, secret,
+                      await _clock_offset(session)) if key and secret else None)
+    try:
+        mk, tk, src = round(float(r["makerCommissionRate"]) * 1e4, 4), round(float(r["takerCommissionRate"]) * 1e4, 4), "live"
+    except (TypeError, KeyError, ValueError):
+        last = hit if hit and hit[3] != "fallback" else None
+        mk, tk, src = (last[1], last[2], "stale") if last else (*STD_FEE_BP, "fallback")
+    _fee_cache[symbol] = (now, mk, tk, src)
+    return {"symbol": symbol, "maker_bp": mk, "taker_bp": tk, "source": src}
+
+
 async def current_leverage(session, symbol: str, key: str, secret: str, offset: int) -> int | None:
     """지금 걸린 심볼 레버리지. 못 읽으면 None -- 그때는 «모른다»이지 «맞다»가 아니다."""
     r = await signed(session, "GET", "/fapi/v2/positionRisk", {"symbol": symbol},

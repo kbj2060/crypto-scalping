@@ -8780,6 +8780,20 @@ function execQuoteHtml(plan) {
   return `<div class="entry-quote">${escapeHtml(sym)} 최우선 ${book} <b>${escapeHtml(px.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}</b>`
     + ` · 화면(USDT) 대비 <b>${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp</b></div>`;
 }
+// 2026-10-10 주문 심볼의 계정 실수수료율(서버 commissionRate, 1시간 캐시) -- plan.trade_plan.execution.cost.fee.
+//   🔴«이번 주문이 낼 예상 비용» 표시 전용. 크기·손절·판정은 서버가 표준 수수료(2/5bp) 상수로 계산한다(사용자 정책).
+function planFee(plan) {
+  return ((((plan || {}).trade_plan || {}).execution || {}).cost || {}).fee || null;
+}
+function feeLine(plan) {
+  const f = planFee(plan), rt = (((plan.trade_plan || {}).execution || {}).cost || {}).round_trip_bp;
+  if (!f) return "";
+  const bp = (v) => `${+Number(v).toFixed(2)}bp`;
+  return `수수료 ${f.source === "fallback" ? "추정(요율 조회 실패 · 표준)" : f.symbol || ""} 메이커 ${bp(f.maker_bp)} · 테이커 ${bp(f.taker_bp)}`
+    + (rt != null ? ` · 정상 왕복 약 ${bp(rt)}` : "")
+    + (f.source === "stale" ? " · 지난 조회값" : "")
+    + (f.promo ? ` · ${String(f.symbol || "").slice(-4)} 프로모션 요율(기간 한정)` : "");
+}
 function manualEntryPlanHtml(data) {
   const plan = data.plan || {};
   const cap = data.cap || {};
@@ -8827,6 +8841,7 @@ function manualEntryPlanHtml(data) {
   // 모달 위쪽(보유 예정·레버리지·「지금 넣으면」)이 이미 같은 말을 한다.
   // 🔴plan.notes 만은 버리지 않는다 -- «수량을 왜 깎았나»라서 위가 말해주지 않는다.
   (plan.notes || []).forEach((n) => parts.push(entryNote(`⚠ ${n}`)));
+  if (feeLine(plan)) parts.push(entryNote(feeLine(plan)));
   parts.push(`<div class="entry-note${plan.dry_run ? "" : " live"}">${
     plan.dry_run ? "미리보기 전용 — 주문은 나가지 않습니다."
                  : "확인 버튼을 누르면 실제 주문이 나갑니다."} · ${(() => {
@@ -8920,7 +8935,7 @@ function tradePlanLines(tp, targetLev) {
   }
   const ex = (tp.execution || {}).entry || {};
   if (ex.expected_fill_sec != null) {
-    out.push(`기대 체결 ${ex.expected_fill_sec}초 (메이커 ${ex.maker_bp}bp · 폴백 테이커 ${ex.taker_bp}bp) — ${ex.note}`);
+    out.push(`기대 체결 ${ex.expected_fill_sec}초 (메이커 우선 · 미체결분 테이커) — ${ex.note}`);   // 요율은 feeLine 한 곳에서
   }
   const sp = tp.entry_split || {};
   if (sp.rule) out.push(`${sp.tranches === 1 ? "일괄" : sp.tranches + "분할"} — ${sp.rule}`);
@@ -9154,9 +9169,11 @@ function manualExitPlanHtml(plan) {
     + `<span>${Number(plan.price ?? plan.reference_price).toFixed(2)}`
     + `${plan.type === "MARKET" ? " 근처" : ""} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>` + execQuoteHtml(plan)];
   // 🔴미리보기 카드의 주인공은 «지금 닫으면 순손익 얼마»다(2026-09-14, 사용자 요청).
-  // 여기서는 plan.type 을 알므로 고변동 시장가 전환이면 테이커 5.0bp 로 바꿔 계산한다.
-  const upnl = Number(plan.unrealized_pnl);
-  const feeBp = plan.type === "MARKET" ? EXIT_FEE_BP_TAKER : EXIT_FEE_BP_PEG;
+  // 여기서는 plan.type 을 알므로 고변동 시장가 전환이면 테이커 요율로 바꿔 계산한다.
+  // 2026-10-10 요율은 청산할 포지션 심볼의 계정 실요율(없으면 표준 2/5bp) -- peg 는 실측 3.0 에서 표준 메이커 2.0 을 실요율로 바꾼 값.
+  const upnl = Number(plan.unrealized_pnl), pf = planFee(plan);
+  const feeBp = +(plan.type === "MARKET" ? (pf ? pf.taker_bp : EXIT_FEE_BP_TAKER)
+    : (pf ? EXIT_FEE_BP_PEG - 2.0 + pf.maker_bp : EXIT_FEE_BP_PEG)).toFixed(2);
   const fee = (Number(plan.notional_usdt) || 0) * feeBp / 10000;
   if (Number.isFinite(upnl)) {
     const gross = upnl * (plan.fraction ?? 1);
@@ -9191,6 +9208,7 @@ function manualExitPlanHtml(plan) {
   parts.push(entryDetailHtml([
     ...(r && !(r.required_fraction > 0) ? [escapeHtml(riskLine(r))] : []),
     ...tradePlanLines(plan.trade_plan, plan.target_leverage).map(escapeHtml),
+    escapeHtml(feeLine(plan)),
   ]));
   parts.push(`<div class="entry-cap">${plan.dry_run
     ? "미리보기 전용 — 주문은 나가지 않습니다."

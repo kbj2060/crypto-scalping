@@ -240,23 +240,34 @@ def expected_fill_sec(vol_bpm: float | None) -> float | None:
 
 
 def execution_plan(vol_bpm: float | None, hold_min: int = 240, side: str = "LONG",
-                   funding_bp_8h: float | None = None) -> dict:
+                   funding_bp_8h: float | None = None, fees: dict | None = None) -> dict:
     fill = expected_fill_sec(vol_bpm)
     market = vol_bpm is not None and vol_bpm >= EXIT_TAKER_VOL_BPM
     fund = funding_cost_bp(hold_min, side, funding_bp_8h)
+    p = stop_hit_rate(hold_min, side)
+    # 2026-10-10 `fees` = 주문 심볼의 계정 실요율(commission_bp). 🔴**화면 표시용 예상 비용만** 바꾼다 --
+    # ROUND_TRIP_COST_BP·STOP_EXTRA_COST_BP 는 USDT-M 표준 요율(2/5bp)로 잰 값이고, 지평 권고·크기·
+    # 손익분기(recommend_hold·prescribe)는 그 표준 상수를 그대로 쓴다(사용자 정책: 판정은 표준 수수료).
+    # 여기서는 수수료 차이만 더한다: 정상 왕복 = 두 다리 메이커, 손절 = 청산 다리가 메이커 대신 테이커.
+    mk, tk = (fees["maker_bp"], fees["taker_bp"]) if fees else (MAKER_BP, TAKER_BP)
+    d_rt, d_stop = 2 * (mk - MAKER_BP), (tk - TAKER_BP) - (mk - MAKER_BP)
     return {
         "vol_bpm": round(vol_bpm, 2) if vol_bpm is not None else None,
         # 비용을 한 줄로 합치지 않는다 -- 어느 조각이 큰지 보여야 지평 선택이 설명된다.
-        "cost": {"round_trip_bp": ROUND_TRIP_COST_BP,
-                 "stop_hit_rate": stop_hit_rate(hold_min, side),
-                 "stop_extra_bp": round(stop_hit_rate(hold_min, side) * STOP_EXTRA_COST_BP, 2),
+        "cost": {"round_trip_bp": round(ROUND_TRIP_COST_BP + d_rt, 2),
+                 "stop_hit_rate": p,
+                 "stop_extra_bp": round(p * (STOP_EXTRA_COST_BP + d_stop), 2),
                  "funding_bp": round(fund, 2),
                  "funding_rate_bp_8h": round(FUNDING_BP_8H_FALLBACK if funding_bp_8h is None
                                              else float(funding_bp_8h), 3),
                  "funding_is_live": funding_bp_8h is not None,
-                 "total_bp": round(expected_cost_bp(hold_min, side, funding_bp_8h), 2)},
+                 "total_bp": round(expected_cost_bp(hold_min, side, funding_bp_8h) + d_rt + p * d_stop, 2),
+                 "fee": {"symbol": (fees or {}).get("symbol"), "maker_bp": mk, "taker_bp": tk,
+                         "source": (fees or {}).get("source", "fallback"),
+                         # 표준보다 싸면 프로모션(기간 한정) -- 추정값(fallback)은 표준 그대로라 해당 없음
+                         "promo": mk < MAKER_BP - 1e-9 or tk < TAKER_BP - 1e-9}},
         "entry": {"mode": "peg_gtx", "expected_fill_sec": round(fill, 1) if fill else None,
-                  "fallback_sec": FALLBACK_SEC, "maker_bp": MAKER_BP, "taker_bp": TAKER_BP,
+                  "fallback_sec": FALLBACK_SEC, "maker_bp": mk, "taker_bp": tk,
                   "note": ("저변동은 체결이 느리고 미체결이 몰립니다 — 진입 미체결은 무해하니 기다립니다"
                            if fill and fill > 10 else "빠른 장일수록 메이커가 더 잘 체결됩니다")},
         "exit": {"mode": "market" if market else "peg_repeg",
@@ -536,7 +547,7 @@ def plan_now(*, side: str, equity: float, existing_notional: float, unrealized_p
              risk_table: dict, vol_bpm: float | None, cap_x: float,
              atr_pct: float | None = None, hold_min: int | None = None,
              policy_cap_x: float | None = None,
-             funding_bp_8h: float | None = None) -> dict:
+             funding_bp_8h: float | None = None, fees: dict | None = None) -> dict:
     """한 번에 넷: 보유시간 권고 · 크기(그 보유시간의 허용 배수) · 집행 · 분할.
 
     🔴`hold_min` 이 오면 **처방도 그 지평을 쓴다**. 예전에는 처방이 독자적으로 다시 골라
@@ -556,7 +567,7 @@ def plan_now(*, side: str, equity: float, existing_notional: float, unrealized_p
                  "total_notional": round(equity * L, 2) if L else None,
                  "room_notional": round(room, 2)},
         "execution": execution_plan(vol_bpm, hold_min=H, side=side,
-                                    funding_bp_8h=funding_bp_8h),
+                                    funding_bp_8h=funding_bp_8h, fees=fees),   # fees = 표시용만
         "entry_split": {
             # 🔴k 는 자유 변수가 아니다(2026-09-13 실측) -- 아래 prescribe 주석 참조.
             "tranches": 1, "spread_min": 0,

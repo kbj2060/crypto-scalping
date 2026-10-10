@@ -203,7 +203,7 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
     RULE_LOSS_AT_STOP, commit_rule_l, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식)
 from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
-    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, margin_type, place_bracket, run_entry, run_entry_wait, run_exit)
+    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_bracket, run_entry, run_entry_wait, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
@@ -6450,7 +6450,8 @@ def make_app() -> web.Application:
                 cap_x=(cap_notional / equity) if cap_notional and equity > 0 else SIZING_CAP_EQUITY_X,
                 atr_pct=sizing.get("atr_pct"), hold_min=hold_min,
                 policy_cap_x=policy_cap_x,
-                funding_bp_8h=await funding_now(symbol))
+                funding_bp_8h=await funding_now(symbol),
+                fees=await commission_bp(binance_session(), symbol))   # 표시용 예상 비용만 -- 크기·손절은 표준 상수
             # 집행기는 계획 dict 하나만 받는다. 처방 깊숙이 손을 넣게 하지 않고 여기서 꺼내 준다.
             _rx = (plan["trade_plan"] or {}).get("prescription") or {}
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
@@ -6797,7 +6798,8 @@ def make_app() -> web.Application:
                 risk_table=sz.get("risk_mae") or {}, vol_bpm=vol_bpm,
                 cap_x=eff_x, atr_pct=sz.get("atr_pct"), hold_min=hold_min,
                 policy_cap_x=policy_cap_x or SIZING_CAP_EQUITY_X,
-                funding_bp_8h=await funding_now(symbol))
+                funding_bp_8h=await funding_now(symbol),
+                fees=await commission_bp(binance_session(), symbol))   # 청산은 실제 포지션 심볼의 요율
         except Exception as exc:  # noqa: BLE001 -- 여기서 터져도 주문은 아직 안 나갔다
             return None, ({"error": f"{type(exc).__name__}: {exc}"}, 502)
         return plan, None
