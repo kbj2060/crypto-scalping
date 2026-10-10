@@ -6129,7 +6129,7 @@ def make_app() -> web.Application:
         bracket_save(st)
 
     async def exit_then_switch(plan: dict, state: dict, sw: dict, asset: str) -> None:
-        """스위칭(2026-10-10 서버로 옮김): 전량 청산이 **다 닫힌 뒤에만** 반대 진입. 진입 계획·게이트·규칙 검사는 진입 버튼과 같은
+        """스위칭(2026-10-10 서버로 옮김): 전량 청산이 **다 닫힌 뒤에만** 반대 진입. 10-10 부터 두 다리 다 시장가(즉시 체결). 진입 계획·게이트·규칙 검사는 진입 버튼과 같은
         assemble_entry_plan(fresh=True). 막히면 주문 없이 사유를 state["switch"] 에 남긴다 -- 진입으로 넘어가도 «스위칭에서 왔다»는 남는다."""
         try:
             await run_exit(binance_session(), plan, state)
@@ -6152,6 +6152,7 @@ def make_app() -> web.Application:
                 return
             if sw["sltp_off"] and not plan2.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(진입 submit 과 같다)
                 plan2["bracket"] = dict(SLTP_OFF_BRACKET)
+            plan2["type"] = "MARKET"   # 2026-10-10 스위칭 = 즉시 체결 -- run_entry 가 지정가 없이 시장가로 낸다
             state["plan"] = plan2
             info["plan"] = {k: plan2.get(k) for k in ("quantity", "notional_usdt", "price", "target_leverage")}
             await entry_then_bracket(plan2, state)
@@ -6704,7 +6705,7 @@ def make_app() -> web.Application:
         return pct / 100.0 if 0.0 < pct <= 100.0 else None
 
     async def assemble_exit_plan(position_side: str, fraction: float = 1.0,
-                                 fresh: bool = False, asset: str = "eth"):
+                                 fresh: bool = False, asset: str = "eth", market: bool = False):
         """청산 계획 조립. 진입과 같은 이유로 **여기 한 곳뿐**이다.
 
         수량은 반드시 **방금 읽은 포지션**에서 온다 -- 헤지 모드라 reduceOnly 를 못 써서
@@ -6743,6 +6744,11 @@ def make_app() -> web.Application:
                 entry_price=float(position.get("entry_price") or 0.0),
                 mark_price=float(position.get("mark_price") or 0.0),
                 vol_bpm=vol_bpm, fraction=fraction)
+            if market and plan["type"] != "MARKET":   # 2026-10-10 «즉시»(청산 칩·스위칭) -- run_exit 의 시장가 분기로 간다
+                plan.pop("timeInForce", None)
+                plan.pop("price", None)
+                plan.update(type="MARKET", repeg=False,
+                            market_reason="즉시 체결 — 지정가를 걸지 않고 바로 시장가로 닫습니다(테이커 수수료)")
             plan["unrealized_pnl"] = position.get("unrealized_pnl")
             if leftover:                      # 같은 방향이 다른 심볼에도 열려 있다
                 plan["other_symbol_open"] = leftover
@@ -6821,7 +6827,10 @@ def make_app() -> web.Application:
         # 사람이 버튼을 눌러야만 오는 경로라 호출이 잦지 않고, 30초 캐시로 그리면 화면이
         # 「2.754 닫는다」고 말한 뒤 submit(이미 fresh)이 다른 수량을 내보낼 수 있다.
         # 미리보기와 실주문이 **같은 수량을 보는 것**이 이 화면의 존재 이유다.
-        plan, error = await assemble_exit_plan(side, frac, fresh=True, asset=query_asset(request))
+        ex = request.query.get("exec", "limit")   # 2026-10-10 청산 체결 방식: limit(현행 peg) · market(즉시)
+        if ex not in ("limit", "market"):
+            return web.json_response({"ok": False, "error": "bad_exec", "detail": "exec 는 limit 또는 market"}, status=400)
+        plan, error = await assemble_exit_plan(side, frac, fresh=True, asset=query_asset(request), market=ex == "market")
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "exec_enabled": exec_enabled()},
@@ -6844,6 +6853,9 @@ def make_app() -> web.Application:
                                       "detail": "청산 비율은 0 초과 100 이하여야 합니다"}, status=400)
         # 2026-10-10 «스위칭» = 전량 청산 + 반대 진입을 **서버가 한 작업으로**(옛 판은 브라우저 3초 폴링이 이어 줘서 화면이 꺼지면
         #   반대 진입이 안 나갔다 -- 10-10 10:51 숏 2.563 청산 뒤 롱 미도착). 반대 진입 값 = 클라이언트가 보내던 그대로(sw_*).
+        ex = request.query.get("exec", "limit")   # 2026-10-10 청산 체결 방식: limit(현행 peg) · market(즉시)
+        if ex not in ("limit", "market"):
+            return web.json_response({"ok": False, "error": "bad_exec", "detail": "exec 는 limit 또는 market"}, status=400)
         sw, to = None, (request.query.get("switch_to") or "").upper()
         if to:
             sw_frac, sw_rule = query_fraction(request, "sw_pct"), query_rule(request, "sw_rule")
@@ -6865,7 +6877,9 @@ def make_app() -> web.Application:
                                       "detail": "기다리는 진입 주문이 있어 스위칭을 막습니다 — 먼저 취소하세요(그냥 청산은 됩니다)"}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 포지션도 다시 읽으므로 미리보기 이후에 포지션이
         # 줄었으면 그만큼 줄어든 수량이 나간다(프런트가 계산한 수량을 받지 않는 이유).
-        plan, error = await assemble_exit_plan(side, frac, fresh=True, asset=query_asset(request))
+        # 2026-10-10 사용자 결정: 스위칭은 즉시 체결(청산·반대 진입 둘 다 시장가) -- 떨어지는 장에서 매도 지정가가 따라가기만 했다.
+        plan, error = await assemble_exit_plan(side, frac, fresh=True, asset=query_asset(request),
+                                               market=bool(sw) or ex == "market")
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):

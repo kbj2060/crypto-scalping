@@ -262,10 +262,13 @@ async def run_entry(session, plan: dict, state: dict) -> dict:
     # 2026-09-15: 진입도 청산과 **같은 루프**를 쓴다. 걸어두기만 하면 호가가 달아났을 때
     # 미체결로 남고(섀도우 static: 저변동 14.4% · 고변동 7.6%) 그 다리는 120초 뒤 시장가라
     # 평균 8.75~11.5bp 다 -- 체결 다리 1.98bp 의 네댓 배.
-    done, price, repegs, err = await fill_maker(
-        session, common=common, price=float(plan["price"]), total=total,
-        deadline=time.monotonic() + FALLBACK_SEC, state=state,
-        key=key, secret=secret, offset=offset)
+    if plan.get("type") == "MARKET":   # 2026-10-10 스위칭 반대 진입 = 즉시 체결 -- 지정가 없이 아래 시장가 다리로 바로
+        done, price, repegs, err = 0.0, float(plan["price"]), 0, None
+    else:
+        done, price, repegs, err = await fill_maker(
+            session, common=common, price=float(plan["price"]), total=total,
+            deadline=time.monotonic() + FALLBACK_SEC, state=state,
+            key=key, secret=secret, offset=offset)
     state.update(filled=done, repegs=repegs, limit_price=price)
     if err is not None:
         state.update(phase=err["phase"], error=err["error"], done_at=now_iso())
@@ -555,7 +558,8 @@ async def run_exit(session, plan: dict, state: dict) -> dict:
             state.update(phase="taker_failed", taker_qty=0.0, error=taker["__error__"],
                          done_at=now_iso())
             return state
-        state.update(phase="filled_taker", taker_qty=total, filled=total,
+        done = executed_qty(taker) or total   # 응답이 체결량을 주면 그것(스위칭이 «다 닫혔나»를 이 값으로 본다), ACK 면 전량
+        state.update(phase="filled_taker", taker_qty=done, filled=done,
                      taker_order_id=taker.get("orderId"), done_at=now_iso())
         return state
 

@@ -9118,6 +9118,19 @@ el("snapExec")?.addEventListener("input", () => {
   const inp = el("snapExec");
   if (inp) inp.value = /^(15|60)$/.test(v) ? v : "0";
 })();
+// 2026-10-10 청산 체결 방식(#snapExitExec): 0 = 지정가(현행 peg, 기본) · 1 = 즉시(시장가). 스위칭은 칩과 무관하게 늘 즉시(서버가 강제).
+//   미리보기·제출 둘 다 &exec=market 을 실어 미리보기 비용(테이커)과 실제 주문이 같다.
+const manualExitMarket = () => el("snapExitExec")?.value === "1";
+const exitExecQuery = (ov) => (ov?.switch || manualExitMarket() ? "&exec=market" : "");
+el("snapExitExec")?.addEventListener("input", () => {
+  try { localStorage.setItem("exitExec", el("snapExitExec").value); } catch (e) { /* 저장 못 해도 동작 */ }
+});
+(() => {
+  let v = "0";
+  try { v = localStorage.getItem("exitExec") || "0"; } catch (e) { /* 기본 지정가 */ }
+  const inp = el("snapExitExec");
+  if (inp) inp.value = v === "1" ? "1" : "0";
+})();
 
 async function manualEntryFetch(side, kind = "entry", ov = null) {
   if (!orderCoinOk()) {
@@ -9126,7 +9139,7 @@ async function manualEntryFetch(side, kind = "entry", ov = null) {
   }
   const q = `&pct=${ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct())}`
     + (kind === "exit" ? "" : (ov?.lev ? `&lev=${ov.lev}` : manualLevQuery()) + ((ov?.sltp ?? manualSltpOn()) ? "" : "&sltp=0"))
-    + (kind === "exit" ? "" : ((ov?.rule ?? manualRule()) ? `&rule=${ov?.rule ?? manualRule()}` : ""))
+    + (kind === "exit" ? exitExecQuery(ov) : ((ov?.rule ?? manualRule()) ? `&rule=${ov?.rule ?? manualRule()}` : ""))
     + (ov?.fresh ? "&fresh=1" : "");
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
   return res.json();
@@ -9390,7 +9403,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
                          lev: ov?.lev ?? manualLevEffective(), sltp: ov?.sltp ?? manualSltpOn(),
                          rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
                          fresh: !!ov?.fresh, sw: ov?.switch || null,
-                         exec: kind === "exit" ? "" : manualExecQuery() };
+                         exec: kind === "exit" ? exitExecQuery(ov) : manualExecQuery() };
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
   //   확인했다. 미리보기가 오는 즉시 발주한다(막혔으면 위에서 이미 멈췄다).
@@ -9405,7 +9418,10 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   const short = kind === "exit" && need > pct ? ` ⚠한도 복귀엔 ${need}% 필요` : "";
   const base = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ${coinUnit()} `
     + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short
-    + (ov?.switch ? ` → ${ov.switch.to === "LONG" ? "롱" : "숏"} 진입(스위칭 · 손절 걸림)` : "");
+    + (ov?.switch ? ` → ${ov.switch.to === "LONG" ? "롱" : "숏"} 진입(스위칭 · 손절 걸림)` : "")
+    // 2026-10-10 즉시 체결(스위칭은 늘) -- 테이커 요율을 확인 버튼에 적는다(실요율, 못 읽었으면 표준 5bp)
+    + (kind === "exit" && plan.type === "MARKET"
+      ? ` · 즉시 체결(시장가, 테이커 ${+Number(planFee(plan)?.taker_bp ?? EXIT_FEE_BP_TAKER).toFixed(2)}bp)` : "");
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
   if (manualEntryTick) clearInterval(manualEntryTick);
@@ -9741,6 +9757,7 @@ function manualHoldStart(btn, side, kind, ov = null) {
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
     btn.addEventListener(ev, () => manualHoldCancel(btn)));
 });
+// 🔴2026-10-10 사용자 결정 «스위칭은 즉시 체결 기본»: 아래 peg 설명은 옛 판 -- 이제 청산·반대 진입 둘 다 시장가(서버 exec=market 강제).
 // 2026-10-05 «스위칭»(사용자 지시, 떠 있는 패널에서만): 게이지와 상관없이 지금 쪽 **100% peg 메이커 청산** → 전량 체결되면
 //   **반대쪽 peg 메이커 진입**. 반대 진입 크기 = 닫은 포지션의 증거금 %(명목 ÷ 배수 ÷ 순자산)·같은 배수 → 거의 같은 수량
 //   (체결가·손익만큼 차이). 증거금 50% 상한은 서버가 그대로 걸고, 반대 진입은 계좌를 새로 읽는다(fresh=1 -- 닫은 포지션이

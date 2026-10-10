@@ -392,12 +392,22 @@
               <button type="button" class="chip" data-v="100">100%</button>
             </div>
             <b id="snapExitFracVal" class="chip-val">100%</b>
+            <!-- 2026-10-10 청산 체결 방식(사용자 «청산은 선택지로»): 지정가(현행 peg -- 호가를 따라 다시 걸고 변동성 연동 15~120초 뒤 잔량 시장가) ·
+                 즉시(시장가). 진입의 «체결» 칩과 같은 숨은 입력 칩, 브라우저에 기억. 스위칭은 이 칩과 무관하게 늘 즉시. -->
+            <span id="snapExitExecBox" class="rule-box exec-box">
+              <span class="entry-cap">체결</span>
+              <input type="hidden" id="snapExitExec" value="0">
+              <div class="chipset" data-for="snapExitExec" role="group" aria-label="청산 체결 방식">
+                <button type="button" class="chip" data-v="0" title="지정가 — 최우선 호가에 메이커로 걸고 호가를 따라 다시 겁니다. 변동성에 따라 15~120초 뒤 남은 수량은 시장가">지정가</button>
+                <button type="button" class="chip" data-v="1" title="즉시 — 지정가를 걸지 않고 바로 시장가로 닫습니다(테이커 수수료)">즉시</button>
+              </div>
+            </span>
             <button type="button" id="snapExitLong" class="notify-btn long hold-fire" hidden>
               <i class="hold-fill" aria-hidden="true"></i><span>롱 청산</span></button>
             <button type="button" id="snapExitShort" class="notify-btn short hold-fire" hidden>
               <i class="hold-fill" aria-hidden="true"></i><span>숏 청산</span></button>
-            <!-- 2026-10-05 스위칭 = 100% peg 메이커 청산 → 체결되면 반대쪽 peg 메이커 진입. 떠 있는 패널에서만 보인다. -->
-            <button type="button" id="snapSwitch" class="notify-btn hold-fire ofab-switch" title="100% 메이커 청산 → 다 닫히면 서버가 반대 진입 · 반대 진입엔 SL/TP 체크와 무관하게 손절이 걸립니다" hidden>
+            <!-- 2026-10-05 스위칭 = 100% 청산 → 다 닫히면 반대 진입. 떠 있는 패널에서만 보인다. 2026-10-10 두 다리 다 즉시 체결(시장가, 사용자 결정). -->
+            <button type="button" id="snapSwitch" class="notify-btn hold-fire ofab-switch" title="즉시 체결(시장가, 테이커) — 100% 청산 → 다 닫히면 서버가 반대 진입도 시장가로 · 반대 진입엔 SL/TP 체크와 무관하게 손절이 걸립니다" hidden>
               <i class="hold-fill" aria-hidden="true"></i><svg class="ofab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/></svg><span>스위칭</span><small id="snapSwitchTo">→ 숏</small></button>
             <!-- 2026-09-14 «지금 닫으면 얼마인가»를 누르기 **전에** 보여준다. 계좌 payload 의
                  진입가·마크가로 화면이 바로 계산한다(≈ 표시: 체결가·수수료는 빠진 근사다). -->

@@ -1777,6 +1777,11 @@ svg {
 .ofab-panel #snapExecBox .chipset { display: flex; }
 .ofab-panel .entry-line > #snapExecBox { order: 7; flex-basis: 100%; }
 .ofab-panel .entry-line > .entry-break:has(+ #snapExecBox) { order: 6; }
+/* 2026-10-10 청산 체결 방식(지정가 · 즉시) -- 같은 숨은 입력 칩. 패널에서도 칩 그대로, 게이지 아래 한 줄. */
+.ofab-panel #snapExitExecBox .chipset { display: flex; }
+.ofab-panel .exit-row > #snapExitExecBox { flex-basis: 100%; justify-content: center; }
+/* 확인 버튼 글자가 길다(스위칭 + «즉시 체결(시장가, 테이커 4bp)») -- 알약 공통 nowrap 이면 390 패널에서 양끝이 잘렸다. 줄을 넘긴다. */
+#snapEntryConfirm { white-space: normal; line-height: 1.35; text-align: center; }
 /* 기다리는 진입 -- 상태 한 줄 + 취소·지금 시장가. 주문이 거래소에 걸려 있다는 사실이 «주의»라 주황 테두리(방향색 아님). */
 .manual-wait { display: grid; gap: 8px; margin: 8px 0 0; }
 .manual-wait[hidden] { display: none; }
