@@ -395,6 +395,109 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
     return done, price, repegs, None
 
 
+# ── 진입 «기다리기»(2026-10-10) ─────────────────────────────────────────────────
+# 원장 진입 의도 362건 재생: «따라가지 않고 60분 → 잔량 시장가»가 현행(3초 리페그·120초)보다 +$64 [+33,+99](명목당 +0.5bp).
+# 미체결 포기는 안 된다 -- 놓친 주문이 이긴 주문이라(research_ledger_entry_patience_20261010) 마감엔 반드시 시장가.
+WAIT_TAG = "dbwt"          # 이 표식의 GTX 만 «기다리기 주문»으로 알아본다 -- 서버 재시작 때 고아 정리(cancel_wait_orphans)
+WAIT_CHOICES_MIN = (15, 60)
+
+
+async def run_entry_wait(session, plan: dict, state: dict, wait_sec: float, on_fill=None) -> dict:
+    """GTX 최우선 호가에 **한 번** 걸고 앞질러도 다시 걸지 않는다(처음 -5022 로 못 걸리면 새 호가로 다시 거는 것만).
+    wait_sec 가 지나면 잔량 시장가. 밖에서 state["action"] = "cancel"(잔량 버림) | "market"(지금 잔량 시장가) 을 넣으면
+    다음 조회(≤3초)에 따른다. 거래소에서 사람이 취소했으면(앱) 그것도 «취소»다 -- 몰래 시장가로 채우지 않는다.
+    on_fill: 첫 체결을 본 순간 한 번(서버가 손절을 바로 건다 -- 60분 동안 무방비로 두지 않는다)."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        state.update(phase="error", error="API 키가 없습니다", done_at=now_iso())
+        return state
+    offset = await _clock_offset(session)
+    pside = plan["positionSide"]
+    common = {"symbol": plan["symbol"], "side": plan["side"], "positionSide": pside}
+    state["leverage"] = await ensure_leverage(session, plan["symbol"], int(plan.get("target_leverage") or 0),
+                                              key, secret, offset)
+    total, price = float(plan["quantity"]), float(plan["price"])
+    state.update(phase="working", mode="wait", filled=0.0, limit_price=price, quantity=total, repegs=0,
+                 deadline_sec=wait_sec, wait_until=datetime.fromtimestamp(time.time() + wait_sec, timezone.utc).isoformat())
+    deadline = time.monotonic() + wait_sec
+    while True:
+        cid = f"{WAIT_TAG}{pside[:1]}{int(time.time() * 1000)}"
+        order = await signed(session, "POST", "/fapi/v1/order",
+                             {**common, "type": "LIMIT", "timeInForce": "GTX", "price": round(price, 8),
+                              "quantity": total, "newClientOrderId": cid}, key, secret, offset)
+        if "__error__" not in order:
+            break
+        if not (is_post_only_reject(order["__error__"]) and state["repegs"] < REPEG_MAX and not state.get("action")):
+            state.update(phase="rejected", error=order["__error__"], done_at=now_iso())
+            return state
+        price, _, _ = await maker_price(session, common["side"], common["symbol"])
+        state.update(repegs=state["repegs"] + 1, limit_price=price)
+    oid = order.get("orderId")
+    state.update(order_id=oid, client_order_id=cid, limit_price=price)
+    filled, status = 0.0, ""
+    while time.monotonic() < deadline and not state.get("action"):
+        await asyncio.sleep(POLL_SEC)
+        cur = await signed(session, "GET", "/fapi/v1/order", {**common, "orderId": oid}, key, secret, offset)
+        if "__error__" in cur:
+            continue        # 조회 실패는 재시도 -- 주문은 거래소에 살아 있다
+        filled, status = executed_qty(cur), str(cur.get("status") or "")
+        state["filled"] = filled
+        if filled > 0 and on_fill is not None:
+            await on_fill()
+            on_fill = None
+        if status in TERMINAL:
+            break
+    outside_cancel = status in TERMINAL and status != "FILLED"
+    if status not in TERMINAL:
+        confirmed = await ensure_closed(session, common, oid, key, secret, offset)
+        if confirmed is None:
+            state.update(phase="error", done_at=now_iso(),
+                         error=f"주문 {oid} 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요")
+            return state
+        filled = confirmed
+    state["filled"] = round(filled, 8)
+    remaining = round(total - filled, 8)
+    if remaining <= 0:
+        state.update(phase="filled_maker", taker_qty=0.0, done_at=now_iso())
+        return state
+    if state.get("action") == "cancel" or outside_cancel:
+        state.update(phase="cancelled", taker_qty=0.0, done_at=now_iso(),
+                     cancel_reason=state.get("action_reason") or ("사용자 취소" if state.get("action") else f"거래소에서 {status}"))
+        return state
+    taker = await signed(session, "POST", "/fapi/v1/order", {**common, "type": "MARKET", "quantity": remaining},
+                         key, secret, offset)
+    if "__error__" in taker:
+        state.update(phase="taker_failed", taker_qty=0.0, error=taker["__error__"], done_at=now_iso())
+        return state
+    state.update(phase="filled_taker", taker_qty=executed_qty(taker) or remaining,
+                 filled=round(filled + (executed_qty(taker) or remaining), 8), taker_order_id=taker.get("orderId"),
+                 taker_reason="지금 시장가(사용자)" if state.get("action") == "market" else "대기 마감", done_at=now_iso())
+    return state
+
+
+async def cancel_wait_orphans(session, symbols: list[str]) -> dict:
+    """서버 재시작 때: 기다리기 표식(WAIT_TAG) 주문이 거래소에 남아 있으면 지운다 -- 그 주문을 지켜보던 작업은 죽었다(고아).
+    목록을 못 읽으면 그 사실을 돌려준다(못 지웠는데 «없다»로 넘어가면 안 된다)."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        return {"cancelled": [], "errors": ["API 키가 없습니다"]}
+    offset = await _clock_offset(session)
+    done, errors = [], []
+    for symbol in symbols:
+        opens = await signed(session, "GET", "/fapi/v1/openOrders", {"symbol": symbol}, key, secret, offset)
+        if not isinstance(opens, list):
+            errors.append(f"{symbol} openOrders: {opens.get('__error__') if isinstance(opens, dict) else opens}")
+            continue
+        for o in opens:
+            if str(o.get("clientOrderId") or "").startswith(WAIT_TAG):
+                r = await signed(session, "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": o.get("orderId")},
+                                 key, secret, offset)
+                (errors.append(r["__error__"]) if "__error__" in r else
+                 done.append({"symbol": symbol, "order_id": o.get("orderId"), "side": o.get("positionSide"),
+                              "filled": executed_qty(o), "qty": float(o.get("origQty") or 0.0)}))
+    return {"cancelled": done, "errors": errors}
+
+
 async def run_exit(session, plan: dict, state: dict) -> dict:
     """메이커로 포지션을 닫는다. **진입과 달리 리페그한다.**
 
@@ -554,6 +657,10 @@ def _self_check() -> None:
     calm = build_exit_plan(position_side="LONG", position_qty=2.0, best_bid=2470.00,
                            best_ask=2470.01, filters=f, vol_bpm=None)
     assert calm["fallback_after_sec"] == exit_deadline_sec(None) == 120.0
+    # ── 기다리기(2026-10-10): 앞지름 판정을 아예 안 본다(따라가지 않음) · 거는 주문엔 고아 정리용 표식 ──
+    _w = _i.getsource(run_entry_wait)
+    assert "drifted(" not in _w and "fill_maker(" not in _w, "기다리기가 호가를 따라간다"
+    assert "newClientOrderId" in _w and "WAIT_TAG" in _w
     print("통과 21/21 — 집행 보조 함수 + 손절 주문 형태 + 청산 리페그 판정 + 변동성 마감 계약 유지")
 
 

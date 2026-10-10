@@ -1773,6 +1773,17 @@ svg {
 /* ↑ 2026-10-09 자동이면 진입비율 게이지(떠다니는 패널은 칩 대신 range 를 드러낸다)·SL/TP 체크도 숨긴다 -- 크기·손절·익절을 규칙이 정해 바꿔도 안 먹는다 */
 .ofab-panel #snapRuleBox .chipset { display: flex; }      /* 패널은 칩을 감추고 range 를 쓰지만 이 칩은 range 껍데기가 아니다(숨은 입력) -- 모드가 보여야 한다 */
 .ofab-panel .entry-line > #snapRuleBox { order: 4; flex-basis: 100%; }
+/* 2026-10-10 진입 체결 방식(따라가기 · 60/15분 대기) -- 크기 칩과 같은 숨은 입력 칩. 패널에서도 칩 그대로(맨 아래 줄). */
+.ofab-panel #snapExecBox .chipset { display: flex; }
+.ofab-panel .entry-line > #snapExecBox { order: 7; flex-basis: 100%; }
+.ofab-panel .entry-line > .entry-break:has(+ #snapExecBox) { order: 6; }
+/* 기다리는 진입 -- 상태 한 줄 + 취소·지금 시장가. 주문이 거래소에 걸려 있다는 사실이 «주의»라 주황 테두리(방향색 아님). */
+.manual-wait { display: grid; gap: 8px; margin: 8px 0 0; }
+.manual-wait[hidden] { display: none; }
+.manual-wait .entry-note.live { border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent); font-variant-numeric: tabular-nums; }
+.manual-wait .wait-acts { justify-content: flex-start; gap: 8px; margin: 0; }
+.manual-wait .wait-acts[hidden] { display: none; }
+#snapWaitMarket.arm { border-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--amber); }
 .vol-mult { display: inline-flex; align-items: baseline; gap: 5px; min-height: 24px; padding: 4px 8px; border: 1px solid var(--soft-line);
   border-radius: 7px; background: var(--glass); cursor: help; white-space: nowrap; }
 .vol-mult > span { font: 600 11px/1 var(--font-sans); color: var(--muted); }
@@ -2990,6 +3001,12 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-more:hover, .ofab-more[aria-expanded="true"] { color: var(--text); }
 .ofab-more[aria-expanded="true"] { background: rgb(var(--lift) / 0.08); }
 @media (pointer: coarse) { .ofab-more { width: 44px; height: 44px; } }
+/* 2026-10-10 기다리는 진입 표식 -- 접힌 막대에서도 «거래소에 걸린 주문이 있다»가 보이게(60분 동안 잊지 않게) */
+.ofab-wait { min-height: 28px; padding: 0 9px; border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent); border-radius: 999px;
+  background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber); font: 700 11px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
+.ofab-wait[hidden] { display: none; }
+.ofab-wait:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (pointer: coarse) { .ofab-wait { min-height: 36px; } }
 /* 화살표 = 패널이 열릴 쪽(사용자 선택 A). 위로 여는 자리(.up)면 위를 보고, 펼친 동안은 뒤집힌다. */
 .ofab.up .ofab-more svg, .ofab-more[aria-expanded="true"] svg { transform: rotate(180deg); }
 .ofab.up .ofab-more[aria-expanded="true"] svg { transform: none; }

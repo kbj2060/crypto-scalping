@@ -8816,8 +8816,11 @@ function manualEntryPlanHtml(data) {
   (plan.notes || []).forEach((n) => parts.push(entryNote(`⚠ ${n}`)));
   parts.push(`<div class="entry-note${plan.dry_run ? "" : " live"}">${
     plan.dry_run ? "미리보기 전용 — 주문은 나가지 않습니다."
-                 : "확인 버튼을 누르면 실제 주문이 나갑니다."} · peg 지정가(메이커), 미체결 ${
-    plan.fallback_after_sec}초 후 테이커 전환</div>`);
+                 : "확인 버튼을 누르면 실제 주문이 나갑니다."} · ${(() => {
+    const w = /wait_min=(\d+)/.exec(manualExecQuery());   // 2026-10-10 체결 방식이 «대기»면 그 약속을 말한다
+    return w ? `최우선 호가에 한 번 걸고 따라가지 않음, ${w[1]}분 뒤 남은 수량 시장가(대기 중 취소·지금 시장가)`
+      : `peg 지정가(메이커), 미체결 ${plan.fallback_after_sec}초 후 테이커 전환`;
+  })()}</div>`);
   return parts.join("");
 }
 
@@ -9072,6 +9075,22 @@ el("snapRule")?.addEventListener("input", () => {
   renderRuleBox();
 })();
 
+// 2026-10-10 진입 체결 방식(#snapExec): follow = 현행 따라가기 · wait60/wait15 = 최우선 호가에 한 번 걸고 그 시간 뒤 잔량 시장가(서버 run_entry_wait).
+//   제출에만 붙는다(미리보기 계획은 같다). 선택은 브라우저에 기억한다. 청산·스위칭의 반대 진입은 따라가기 그대로.
+function manualExecQuery() {
+  const m = /^wait(15|60)$/.exec(el("snapExec")?.value || "");
+  return m ? `&mode=wait&wait_min=${m[1]}` : "";
+}
+el("snapExec")?.addEventListener("input", () => {
+  try { localStorage.setItem("entryExec", el("snapExec").value); } catch (e) { /* 저장 못 해도 동작 */ }
+});
+(() => {
+  let v = "follow";
+  try { v = localStorage.getItem("entryExec") || "follow"; } catch (e) { /* 기본 따라가기 */ }
+  const inp = el("snapExec");
+  if (inp) inp.value = /^(follow|wait60|wait15)$/.test(v) ? v : "follow";
+})();
+
 async function manualEntryFetch(side, kind = "entry", ov = null) {
   if (!orderCoinOk()) {
     return { ok: false, error: "order_coin_mismatch",
@@ -9315,6 +9334,7 @@ const MANUAL_ENTRY_PHASE_KO = {
   filled_maker: "✅ 전량 메이커 체결 (peg)",
   filled_taker: "✅ 체결 — 일부/전부 테이커 전환",
   rejected: "거부됨 — post-only 가 테이커가 될 상황이라 거절했습니다(주문 안 나감)",
+  cancelled: "대기 취소 — 남은 수량은 사지 않았습니다(시장가 없음)",
   taker_failed: "🔴 테이커 전환 실패",
   error: "🔴 오류",
   idle: "대기",
@@ -9334,7 +9354,8 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
                          lev: ov?.lev ?? manualLevEffective(), sltp: ov?.sltp ?? manualSltpOn(),
                          rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
-                         fresh: !!ov?.fresh, sw: ov?.switch || null };
+                         fresh: !!ov?.fresh, sw: ov?.switch || null,
+                         exec: kind === "exit" ? "" : manualExecQuery() };
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
   //   확인했다. 미리보기가 오는 즉시 발주한다(막혔으면 위에서 이미 멈췄다).
@@ -9405,7 +9426,7 @@ function manualEntryStateText(state) {
   }
   // 2026-09-15 진입도 리페그한다. 쫓아간 횟수는 «의도한 가격보다 높게 들어갔을 수 있다»는
   // 뜻이라 숨기지 않는다 -- 청산과 달리 진입은 안 사도 되는 선택지가 있었기 때문이다.
-  if (Number(state?.repegs || 0) > 0) {
+  if (Number(state?.repegs || 0) > 0 && state?.mode !== "wait") {   // 기다리기의 repegs = 처음 -5022 로 다시 건 횟수(따라간 게 아니다)
     rows.push(`리페그 ${Number(state.repegs)}회 — 호가를 따라갔습니다` +
       (state.limit_price ? ` (현재 지정가 ${state.limit_price})` : ""));
   }
@@ -9464,7 +9485,7 @@ async function manualEntrySubmit() {
     const q = `&pct=${pending.pct ?? 100}`
       + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : "") + (pending.sltp === false ? "&sltp=0" : ""))
       + (pending.kind !== "exit" && pending.rule ? `&rule=${pending.rule}` : "")
-      + (pending.fresh ? "&fresh=1" : "")
+      + (pending.fresh ? "&fresh=1" : "") + (pending.exec || "")
       // 2026-10-10 스위칭 = 서버 한 작업(청산 다 닫히면 서버가 반대 진입) -- 화면이 꺼져도 이어진다
       + (pending.kind === "exit" && pending.sw ? `&switch_to=${pending.sw.to}&sw_pct=${pending.sw.pct}`
         + (pending.sw.lev ? `&sw_lev=${pending.sw.lev}` : "") + (pending.sw.sltp ? "" : "&sw_sltp=0")
@@ -9479,6 +9500,13 @@ async function manualEntrySubmit() {
       manualButtonsDisabled(false);
       return;
     }
+    if (data.wait) {   // 2026-10-10 기다리기 -- 주문 칸을 잡지 않는다(대기 중에도 청산·다른 버튼). 상태는 아래 #snapWait 가 말한다.
+      manualOrderBusy = false;
+      manualButtonsDisabled(false);
+      box.innerHTML = entryNote("기다리기 — 최우선 호가에 걸어 두었습니다. 아래에서 취소·지금 시장가", "live");
+      manualWaitPoll();
+      return;
+    }
     box.innerHTML = entryNote(manualEntryStateText(data.state), "live");
     if (pending.kind === "exit" && pending.sw) ofabWatchResult();   // 말풍선이 서버 스위칭 상태(결과 칸)를 따라 말한다
     setTimeout(manualEntryPollStatus, STATUS_POLL_MS);
@@ -9488,6 +9516,79 @@ async function manualEntrySubmit() {
     manualButtonsDisabled(false);
   }
 }
+
+// ── 2026-10-10 기다리는 진입 ─────────────────────────────────────────────────────────
+// 서버 별도 칸(/api/manual-entry/status 의 wait). 진행 중이면 3초마다 다시 본다 -- 페이지를 새로 열어도 첫 조회가 다시 잇는다.
+let manualWaitTimer = 0, manualWaitLive = false, manualWaitArmT = 0;
+const waitLiveP = (w) => /^(working|submitting)$/.test(w?.phase || "");
+function renderManualWait(w) {
+  const box = el("snapWait"), txt = el("snapWaitText"), acts = el("snapWaitActs");
+  if (!box || !txt) return;
+  const live = waitLiveP(w), ph = w?.phase || "idle";
+  const recent = Date.now() - Date.parse(w?.done_at || "") < 10 * 60e3;   // 끝난 결과는 10분만 남긴다
+  box.hidden = ph === "idle" || (!live && !recent);
+  el("ofabWait")?.toggleAttribute("hidden", !live);
+  if (acts) acts.hidden = !live;
+  if (box.hidden) return;
+  const ko = w.side === "LONG" ? "롱" : "숏", unit = (ASSET_CONFIG[w.asset] || {}).label || coinUnit();
+  let t, tone = "live";
+  if (ph === "restart_cancelled") {
+    const n = (w.cancelled || []).length, errs = (w.errors || []).join(" · ");
+    t = `서버 재시작 — 기다리던 진입 주문 ${n}건을 거래소에서 취소했습니다(이미 든 몫·손절은 그대로)` + (errs ? ` · 🔴정리 실패: ${errs}` : "");
+    tone = errs ? "bad" : "live";
+  } else if (live) {
+    const left = Math.max(0, Math.ceil((Date.parse(w.wait_until || "") - Date.now()) / 60e3));
+    t = `기다리기 ${ko} ${Number(w.filled || 0)} / ${Number(w.quantity ?? w.plan?.quantity ?? 0)} ${unit}`
+      + (w.limit_price ? ` · 지정가 ${w.limit_price} (따라가지 않음)` : "")
+      + (Number.isFinite(left) && w.wait_until ? ` · ${left}분 뒤 남은 수량 시장가` : "")
+      + (w.action ? ` · ${w.action === "cancel" ? "취소" : "지금 시장가"} 요청됨 — 3초 안에 처리` : "");
+  } else {
+    t = `기다리기 끝 — ${manualEntryStateText(w).replace(/\n/g, " · ")}`
+      + (w.taker_reason ? ` (${w.taker_reason})` : "") + (w.cancel_reason ? ` (${w.cancel_reason})` : "");
+    tone = /^(error|taker_failed|rejected)$/.test(ph) ? "bad" : "live";
+  }
+  txt.className = `entry-note ${tone}`;
+  txt.textContent = t;
+  ["snapWaitCancel", "snapWaitMarket"].forEach((id) => { const b = el(id); if (b) b.disabled = !!w.action; });
+}
+async function manualWaitPoll() {
+  clearTimeout(manualWaitTimer);
+  let w = null;
+  try {
+    w = (await (await fetch("/api/manual-entry/status", { cache: "no-cache" })).json()).wait || null;
+  } catch (e) {
+    manualWaitTimer = setTimeout(manualWaitPoll, 10000);   // 조회 실패 -- 표시는 그대로 두고 늦게 다시
+    return;
+  }
+  renderManualWait(w);
+  const live = waitLiveP(w);
+  if (manualWaitLive && !live) { refreshBinanceAccount(true); manualEntryRefreshSize(); }   // 방금 끝났다 -- 포지션 다시
+  manualWaitLive = live;
+  if (live) manualWaitTimer = setTimeout(manualWaitPoll, STATUS_POLL_MS);
+}
+async function manualWaitAction(action) {
+  ["snapWaitCancel", "snapWaitMarket"].forEach((id) => { const b = el(id); if (b) b.disabled = true; });
+  try {
+    const r = await (await fetch(`/api/manual-entry/wait-action?action=${action}&confirm=1`, { method: "POST", cache: "no-cache" })).json();
+    if (!r.ok) { const t = el("snapWaitText"); if (t) { t.className = "entry-note bad"; t.textContent = `요청 실패: ${r.detail || r.error}`; } }
+  } catch (e) { /* 아래 조회가 실제 상태를 다시 그린다 */ }
+  manualWaitPoll();
+}
+el("snapWaitCancel")?.addEventListener("click", () => manualWaitAction("cancel"));   // 위험을 줄이는 쪽 -- 한 번에
+// «지금 시장가»는 테이커 주문이라 두 번: 첫 클릭 = 5초 무장(글자가 바뀐다) · 그 안에 한 번 더 = 전송
+el("snapWaitMarket")?.addEventListener("click", () => {
+  const b = el("snapWaitMarket");
+  if (!b.classList.contains("arm")) {
+    b.classList.add("arm"); b.textContent = "한 번 더 = 남은 수량 시장가";
+    clearTimeout(manualWaitArmT);
+    manualWaitArmT = setTimeout(() => { b.classList.remove("arm"); b.textContent = "지금 시장가"; }, 5000);
+    return;
+  }
+  clearTimeout(manualWaitArmT); b.classList.remove("arm"); b.textContent = "지금 시장가";
+  manualWaitAction("market");
+});
+el("ofabWait")?.addEventListener("click", () => { if (!ofab.open) ofabSetOpen(true); el("snapWait")?.scrollIntoView({ block: "nearest" }); });
+setTimeout(manualWaitPoll, 1500);   // 새로고침·재접속 뒤에도 걸린 대기 주문을 다시 보인다
 
 // 2026-09-16 애플식 슬라이더(사용자 요청). 트랙을 직접 칠하면 브라우저의 accent-color
 // 자동 채움이 사라지므로, 채움 지점을 --fill 로 넘겨 트랙 그라디언트가 읽게 한다.

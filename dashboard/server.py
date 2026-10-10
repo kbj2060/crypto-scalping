@@ -203,7 +203,7 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
     RULE_LOSS_AT_STOP, commit_rule_l, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식)
 from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
-    clear_bracket, margin_type, place_bracket, run_entry, run_exit)
+    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, margin_type, place_bracket, run_entry, run_entry_wait, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
@@ -3034,6 +3034,8 @@ def make_app() -> web.Application:
     account_trip_state: dict[str, Any] = {"last_at": 0.0, "seen": load_account_trip_keys()}
     # 진행 중인 수동 주문 하나. 동시에 둘을 두지 않는다 -- 겹치면 단건 상한의 뜻이 흐려진다.
     manual_entry_state: dict[str, Any] = {"phase": "idle"}
+    # 2026-10-10 진입 «기다리기»(최대 60분)는 **따로** 둔다 -- 위 칸을 60분 잡으면 그동안 청산·SL 감시가 막힌다.
+    manual_wait_state: dict[str, Any] = {"phase": "idle"}
     evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None, "frames": None}
     # 2026-08-31: 자산별로 키를 나눈다(원래는 공유 슬롯 하나였다) -- ETH 요청과 BTC 요청이
     # 서로의 캐시를 밀어내지 않게. 2026-09-12 부터 그 dict/Lock 은 swr_cached 가 f"...:{asset}"
@@ -6090,11 +6092,22 @@ def make_app() -> web.Application:
 
     SLTP_OFF_BRACKET = {"available": False, "disabled": True, "reason": "SL/TP 끔(사용자) -- 걸지 않고 기존 것도 그대로"}
 
-    async def entry_then_bracket(plan: dict, state: dict) -> None:
-        """진입 → 체결이 있으면(부분 포함, 모든 종료 경로) TP·비상 스탑을 걸고 감시를 무장한다."""
-        await run_entry(binance_session(), plan, state)
-        if not float(state.get("filled") or 0.0) > 0:
-            return
+    async def entry_then_bracket(plan: dict, state: dict, wait_sec: float | None = None) -> None:
+        """진입 → 체결이 있으면(부분 포함, 모든 종료 경로) TP·비상 스탑을 걸고 감시를 무장한다.
+        wait_sec(2026-10-10 «기다리기»)면 첫 체결을 본 순간 한 번 더 건다 -- 60분 동안 든 몫을 무방비로 두지 않는다."""
+        if wait_sec:
+            async def first_fill() -> None:
+                try:
+                    await arm_bracket(plan, state)
+                except Exception as exc:  # noqa: BLE001 -- 대기는 계속(마감 때 다시 건다)
+                    state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
+            await run_entry_wait(binance_session(), plan, state, wait_sec, on_fill=first_fill)
+        else:
+            await run_entry(binance_session(), plan, state)
+        if float(state.get("filled") or 0.0) > 0:
+            await arm_bracket(plan, state)
+
+    async def arm_bracket(plan: dict, state: dict) -> None:
         b, pside = plan.get("bracket") or {}, plan["positionSide"]
         if b.get("disabled"):
             # 🔴주문도, 감시 파일(manual_bracket_state.json)도 건드리지 않는다 -- 물타기면 기존 SL/TP·감시가 그대로 남는다.
@@ -6177,6 +6190,9 @@ def make_app() -> web.Application:
                 print(f"bracket {pside}: 5분봉 못 읽음 {type(exc).__name__}: {exc}", flush=True)
             act = bracket_action(b, pside, account.get("positions") or [], bool(account.get("ok")),
                                  acct_ts, last_bar)
+            if act in ("clear", "fire") and wait_pending() and manual_wait_state.get("side") == pside:
+                # 2026-10-10 손절·청산으로 포지션이 닫히는데 같은 쪽 대기 진입이 걸려 있으면 그것도 거둔다(나중에 체결돼 손절 없이 다시 열리지 않게)
+                manual_wait_state.update(action="cancel", action_reason="포지션이 닫힘(손절·청산) — 같은 쪽 대기 진입 취소")
             if act == "clear":
                 st.pop(key)
                 changed = True
@@ -6521,6 +6537,16 @@ def make_app() -> web.Application:
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
+        # 2026-10-10 실행 «기다리기»(mode=wait&wait_min=15|60): 앞질러도 안 따라가고 마감 뒤 잔량 시장가. 없으면 현행 «따라가기».
+        wait_min = None
+        if request.query.get("mode") == "wait":
+            try:
+                wait_min = int(request.query.get("wait_min") or 0)
+            except ValueError:
+                wait_min = 0
+            if wait_min not in WAIT_CHOICES_MIN:
+                return web.json_response({"ok": False, "error": "bad_wait",
+                                          "detail": f"기다리기는 {'·'.join(map(str, WAIT_CHOICES_MIN))}분만 됩니다"}, status=400)
         if not exec_enabled():
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
@@ -6528,6 +6554,10 @@ def make_app() -> web.Application:
         if manual_entry_state.get("phase") in ("working", "submitting"):
             return web.json_response({"ok": False, "error": "already_working",
                                       "state": manual_entry_state}, status=409)
+        if wait_pending():   # 대기 몫은 아직 명목에 안 잡힌다 -- 그 위에 또 넣으면 상한이 두 번 쓰인다
+            return web.json_response({"ok": False, "error": "wait_pending",
+                                      "detail": "기다리는 진입 주문이 있습니다 — 취소하거나 체결된 뒤에 넣으세요(청산은 됩니다)",
+                                      "wait": manual_wait_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
         rule_l = query_rule(request)
@@ -6544,6 +6574,14 @@ def make_app() -> web.Application:
                                      status=400)
         if sltp_off(request) and not plan.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(보험)
             plan["bracket"] = dict(SLTP_OFF_BRACKET)
+        if wait_min:
+            manual_wait_state.clear()
+            manual_wait_state.update(phase="submitting", mode="wait", wait_min=wait_min, side=side, plan=plan,
+                                     asset=query_asset(request), started_at=datetime.now(timezone.utc).isoformat())
+            refresh_tasks["manual_wait"] = asyncio.create_task(
+                entry_then_bracket(plan, manual_wait_state, wait_sec=wait_min * 60.0))
+            return web.json_response({"ok": True, "plan": plan, "state": manual_wait_state, "wait": True},
+                                     headers=NOCACHE)
         manual_entry_state.clear()
         manual_entry_state.update(phase="submitting", side=side, plan=plan, asset=query_asset(request),
                                   started_at=datetime.now(timezone.utc).isoformat())
@@ -6819,6 +6857,9 @@ def make_app() -> web.Application:
         if manual_entry_state.get("phase") in ("working", "submitting"):
             return web.json_response({"ok": False, "error": "already_working",
                                       "state": manual_entry_state}, status=409)
+        if sw and wait_pending():
+            return web.json_response({"ok": False, "error": "wait_pending",
+                                      "detail": "기다리는 진입 주문이 있어 스위칭을 막습니다 — 먼저 취소하세요(그냥 청산은 됩니다)"}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 포지션도 다시 읽으므로 미리보기 이후에 포지션이
         # 줄었으면 그만큼 줄어든 수량이 나간다(프런트가 계산한 수량을 받지 않는 이유).
         plan, error = await assemble_exit_plan(side, frac, fresh=True, asset=query_asset(request))
@@ -6841,9 +6882,46 @@ def make_app() -> web.Application:
     async def api_manual_entry_status(request: web.Request) -> web.Response:
         """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
         보여준다. 주문은 최대 하나만 동시에 둔다."""
-        return web.json_response({"ok": True, "state": manual_entry_state,
+        return web.json_response({"ok": True, "state": manual_entry_state, "wait": manual_wait_state,
                                   "exec_enabled": exec_enabled(), "bracket_armed": bracket_load()},
                                  headers=NOCACHE)
+
+    def wait_pending() -> bool:
+        return manual_wait_state.get("phase") in ("working", "submitting")
+
+    async def api_manual_wait_action(request: web.Request) -> web.Response:
+        """기다리는 진입에 «취소»(잔량 버림 -- 시장가 없음) 또는 «지금 시장가». 진입과 같은 방어: POST + confirm=1 + 게이트.
+        집행 루프가 다음 조회(≤3초)에 따른다(run_entry_wait)."""
+        action = request.query.get("action")
+        if action not in ("cancel", "market") or request.query.get("confirm") != "1":
+            return web.json_response({"ok": False, "error": "bad_action",
+                                      "detail": "action=cancel|market 과 confirm=1 이 필요합니다"}, status=400)
+        if not exec_enabled():
+            return web.json_response({"ok": False, "error": "exec_disabled",
+                                      "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"}, status=403)
+        if not wait_pending():
+            return web.json_response({"ok": False, "error": "no_wait", "detail": "기다리는 진입 주문이 없습니다",
+                                      "wait": manual_wait_state}, status=409)
+        manual_wait_state.update(action=action, action_at=datetime.now(timezone.utc).isoformat(),
+                                 action_reason="사용자 취소" if action == "cancel" else None)
+        return web.json_response({"ok": True, "wait": manual_wait_state}, headers=NOCACHE)
+
+    async def wait_cleanup() -> None:
+        """재시작 직후 한 번: 죽은 대기 작업이 남긴 GTX(표식 dbwt)를 지운다. 기록은 상태 칸에 -- 화면이 «재시작으로 취소»를 말한다.
+        ponytail: 복구(이어서 기다리기) 대신 정리 -- 배포·재시작 때 대기 주문은 사라진다(이미 든 몫·손절은 그대로)."""
+        try:
+            r = await cancel_wait_orphans(binance_session(), sorted(set(MANUAL_EXEC_SYMBOLS.values())))
+        except Exception as exc:  # noqa: BLE001 -- 기동은 막지 않는다, 대신 남긴다
+            r = {"cancelled": [], "errors": [f"{type(exc).__name__}: {exc}"]}
+        if r["cancelled"] or r["errors"]:
+            manual_wait_state.clear()
+            manual_wait_state.update(phase="restart_cancelled", mode="wait", cancelled=r["cancelled"], errors=r["errors"],
+                                     done_at=datetime.now(timezone.utc).isoformat())
+        print(f"wait cleanup: {r}", flush=True)
+
+    async def start_wait_cleanup(app: web.Application) -> None:
+        if exec_enabled():
+            refresh_tasks["wait_cleanup"] = asyncio.create_task(wait_cleanup())
 
     async def api_ops_status(request: web.Request) -> web.Response:
         ops_dir = LIVE_DIR / "ops_watchdog"
@@ -7004,6 +7082,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/manual-entry/preview", api_manual_entry_preview)
     app.router.add_post("/api/manual-entry/submit", api_manual_entry_submit)
     app.router.add_get("/api/manual-entry/status", api_manual_entry_status)
+    app.router.add_post("/api/manual-entry/wait-action", api_manual_wait_action)
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
@@ -7025,6 +7104,7 @@ def make_app() -> web.Application:
     app.on_startup.append(start_flows)
     app.on_startup.append(start_micro_ref)
     app.on_startup.append(start_bracket_watcher)
+    app.on_startup.append(start_wait_cleanup)
     app.on_cleanup.append(stop_bracket_watcher)
     app.on_cleanup.append(stop_micro_ref)
     app.on_cleanup.append(stop_flows)
