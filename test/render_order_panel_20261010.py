@@ -188,7 +188,7 @@ with sync_playwright() as p:
         pg.click("#snapEntryConfirm"); pg.wait_for_timeout(800)
         xs = submits(n4, "/manual-exit/submit")
         print(w, "스위칭 제출", xs[:1])
-        if not xs or not all(k in xs[0] for k in ("switch_to=LONG", "sw_pct=", "sw_lev=20", "pct=100")): fails.append(f"[{w}] 스위칭 제출 {xs}")
+        if not xs or not all(k in xs[0] for k in ("switch_to=LONG", "sw_pct=", "sw_lev=20", "pct=100")) or "sw_sltp" in xs[0]: fails.append(f"[{w}] 스위칭 제출 {xs}")
         if submits(n4, "/manual-entry/submit"): fails.append(f"[{w}] 브라우저가 반대 진입을 직접 냈다")
         pg.wait_for_timeout(3300)
         t1 = pg.evaluate("() => document.getElementById('snapEntryResult').textContent")

@@ -9387,7 +9387,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   const short = kind === "exit" && need > pct ? ` ⚠한도 복귀엔 ${need}% 필요` : "";
   const base = `확인: ${side === "LONG" ? "롱" : "숏"} ${plan.quantity} ${coinUnit()} `
     + (kind === "exit" ? (pct < 100 ? `청산 (${pct}%)` : "전량 청산") : "주문") + short
-    + (ov?.switch ? ` → ${ov.switch.to === "LONG" ? "롱" : "숏"} 진입(스위칭)` : "");
+    + (ov?.switch ? ` → ${ov.switch.to === "LONG" ? "롱" : "숏"} 진입(스위칭 · 손절 걸림)` : "");
   btn.hidden = false;
   if (manualEntryTimer) clearTimeout(manualEntryTimer);
   if (manualEntryTick) clearInterval(manualEntryTick);
@@ -9505,7 +9505,7 @@ async function manualEntrySubmit() {
       + (pending.fresh ? "&fresh=1" : "") + (pending.exec || "")
       // 2026-10-10 스위칭 = 서버 한 작업(청산 다 닫히면 서버가 반대 진입) -- 화면이 꺼져도 이어진다
       + (pending.kind === "exit" && pending.sw ? `&switch_to=${pending.sw.to}&sw_pct=${pending.sw.pct}`
-        + (pending.sw.lev ? `&sw_lev=${pending.sw.lev}` : "") + (pending.sw.sltp ? "" : "&sw_sltp=0")
+        + (pending.sw.lev ? `&sw_lev=${pending.sw.lev}` : "")
         + (pending.sw.rule ? `&sw_rule=${pending.sw.rule}` : "") : "");
     const res = await fetch(
       `/api/manual-${pending.kind || "entry"}/submit?side=${pending.side}&asset=${pending.asset || "eth"}&confirm=1${q}`,
@@ -9735,7 +9735,8 @@ function switchPlan(side) {
   const eq = acctMarginUsed(latestBinanceAccount?.balance).equity;
   if (!(qty > 0 && mark > 0 && lev > 0 && eq > 0)) return null;
   const pct = Math.min(100, Math.max(0.01, Math.round(qty * mark / lev / eq * 10000) / 100));
-  return { pct: 100, switch: { to: side === "LONG" ? "SHORT" : "LONG", pct, lev, sltp: manualSltpOn(), rule: manualRule() } };
+  // 2026-10-10 사용자 결정: 반대 진입엔 SL/TP 체크와 무관하게 손절이 걸린다(서버가 강제) -- sltp 를 보내지 않는다
+  return { pct: 100, switch: { to: side === "LONG" ? "SHORT" : "LONG", pct, lev, rule: manualRule() } };
 }
 {
   const btn = el("snapSwitch");

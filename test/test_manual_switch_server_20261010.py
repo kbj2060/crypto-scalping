@@ -29,9 +29,9 @@ SUBMIT = "/api/manual-exit/submit?side=SHORT&pct=100&confirm=1&switch_to=LONG&sw
 
 
 class SwitchServerTest(unittest.TestCase):
-    def _run(self, fn, exit_phase: str = "filled_maker", exit_frac: float = 1.0, vm: bool = True) -> dict:
+    def _run(self, fn, exit_phase: str = "filled_maker", exit_frac: float = 1.0, vm: bool = True, fill_entry: bool = False) -> dict:
         acct = account([dict(SHORT)])
-        rec: dict = {"exits": [], "entries": []}
+        rec: dict = {"exits": [], "entries": [], "placed": []}
 
         async def fake_account(*_a, **_k):
             return acct
@@ -47,8 +47,12 @@ class SwitchServerTest(unittest.TestCase):
 
         async def fake_entry(_s, plan, state):
             rec["entries"].append(plan)
-            state.update(phase="filled_maker", quantity=plan["quantity"], filled=0.0)
+            state.update(phase="filled_maker", quantity=plan["quantity"], filled=plan["quantity"] if fill_entry else 0.0)
             return state
+
+        async def fake_place(_s, bracket, symbol, pside):             # 가짜 -- 거래소로 안 간다
+            rec["placed"].append((pside, bracket.get("sl_price"), bracket.get("backstop_price")))
+            return {"placed": True, "backstop": {"placed": True, "price": bracket.get("backstop_price")}}
 
         async def exercise() -> None:
             rec["release"] = asyncio.Event()
@@ -59,7 +63,7 @@ class SwitchServerTest(unittest.TestCase):
                  mock.patch.object(server, "exec_enabled", lambda: True), \
                  mock.patch.object(server, "run_exit", fake_exit), \
                  mock.patch.object(server, "run_entry", fake_entry), \
-                 mock.patch.object(server, "place_bracket", mock.AsyncMock(side_effect=AssertionError("주문 금지"))), \
+                 mock.patch.object(server, "place_bracket", fake_place if fill_entry else mock.AsyncMock(side_effect=AssertionError("주문 금지"))), \
                  mock.patch.object(server, "margin_type", mock.AsyncMock(return_value="cross")):
                 app = offline_app(server)
                 app["situation_eth"]["vol_mult"] = ({"sigma_bp": 100.0, "mult": 1.0, "bar": time.time()} if vm else None)
@@ -96,7 +100,7 @@ class SwitchServerTest(unittest.TestCase):
             p = rec["entries"][0]
             self.assertEqual((p["positionSide"], p["side"]), ("LONG", "BUY"))
             self.assertAlmostEqual(p["notional_usdt"], 1000 * 0.10 * 20, delta=3.0)    # 증거금 10% × 20배
-            self.assertTrue(p["bracket"].get("disabled"))                               # sw_sltp=0
+            self.assertFalse(p["bracket"].get("disabled"), p["bracket"])                 # sw_sltp=0 이어도 손절(10-10 사용자 결정)
             self.assertEqual(st["switch"]["phase"], "done")
             self.assertEqual(st["switch"]["from"], "SHORT")
             self.assertEqual(st["switch"]["exit"]["phase"], "filled_maker")              # 진입으로 넘어가도 «스위칭에서 왔다»가 남는다
@@ -132,6 +136,19 @@ class SwitchServerTest(unittest.TestCase):
             self.assertEqual(len(rec["exits"]), 1)
             self.assertEqual(len(rec["entries"]), 1)
         self._run(fn)
+
+    def test_direct_mode_switch_entry_gets_stop_even_with_sltp_off(self) -> None:
+        """2026-10-10 사용자 결정: 직접 모드 스위칭 반대 진입엔 SL/TP 체크(sw_sltp=0)와 무관하게 손절을 건다."""
+        async def fn(c, rec):
+            self.assertTrue((await (await c.post(SUBMIT)).json())["ok"])          # SUBMIT 에 sw_sltp=0 이 들어 있다
+            st = await self._settle(rec, c)
+            self.assertEqual(len(rec["entries"]), 1)
+            self.assertEqual(len(rec["placed"]), 1, "반대 진입 체결 뒤 손절·비상 스탑이 걸려야 한다")
+            pside, sl, backstop = rec["placed"][0]
+            self.assertEqual(pside, "LONG")
+            self.assertTrue(sl and backstop, rec["placed"])
+            self.assertTrue(st["bracket"]["placed"], st["bracket"])
+        self._run(fn, fill_entry=True)
 
     def test_bad_switch_rejected(self) -> None:
         async def fn(c, rec):

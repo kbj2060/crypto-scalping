@@ -6849,7 +6849,8 @@ def make_app() -> web.Application:
                 return web.json_response({"ok": False, "error": "bad_switch",
                                           "detail": "스위칭은 전량(100%) 청산 + 반대 방향 진입만 됩니다"}, status=400)
             sw = {"to": to, "frac": sw_frac, "lev": query_leverage(request, "sw_lev"), "rule": sw_rule,
-                  "sltp_off": not MANUAL_RULES_ENABLED or request.query.get("sw_sltp") == "0"}   # sltp_off() 와 같은 규칙
+                  # 2026-10-10 사용자 결정: 스위칭 반대 진입은 SL/TP 체크와 무관하게 손절을 건다(끄는 건 수동 모드뿐) -- sw_sltp 는 받지 않는다
+                  "sltp_off": not MANUAL_RULES_ENABLED}
         if not exec_enabled():
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
