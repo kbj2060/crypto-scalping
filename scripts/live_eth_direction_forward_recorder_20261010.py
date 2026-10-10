@@ -1,4 +1,4 @@
-"""ETH·BTC 방향 후보(일봉 추세 5표 + UTC 00:00 개장 되돌림) 전진 기록기 — 결정만 남기고 결과는 판정일 전까지 계산하지 않는다 (2026-10-10).
+"""ETH·BTC·SOL 방향 후보(일봉 추세 5표 + UTC 00:00 개장 되돌림) 전진 기록기 — 결정만 남기고 결과는 판정일 전까지 계산하지 않는다 (2026-10-10).
 사전등록: docs/prereg/eth_4h_rolling_hgb_frozen_20261010.json «portfolio2_recommended» — 판정 = 2026-09-15 이후 ≥180일, 4bp, 일 평균 CI 하한 > 0.
 
 실행(서버 cron 후보, 미등록): 매일 00:31 UTC `python scripts/live_eth_direction_forward_recorder_20261010.py --record`
@@ -13,9 +13,9 @@ import json, os, sys, time, urllib.request
 import numpy as np
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "live", "eth_direction_forward.jsonl")
-SYMS = ("ETHUSDT", "BTCUSDT")
+SYMS = ("ETHUSDT", "BTCUSDT", "SOLUSDT")                                          # 10-10 09:05 최종 3자산 모델에 맞춰 SOL 추가
 VERDICT_FROM = "2027-03-14"
-FLOW_COEF = {"ETHUSDT": (2.547, 264.279), "BTCUSDT": (1.627, 175.668)}           # f30(bp) = b0 + b1·imb30, 2022-01~2026-09 펀딩 시각 적합
+FLOW_COEF = {"ETHUSDT": (2.547, 264.279), "BTCUSDT": (1.627, 175.668), "SOLUSDT": (5.711, 411.739)}           # f30(bp) = b0 + b1·imb30, 2022-01~2026-09 펀딩 시각 적합
 
 
 def klines(sym, interval, limit):
