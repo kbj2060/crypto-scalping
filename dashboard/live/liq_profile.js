@@ -53,14 +53,19 @@
     if (!w || w.tp !== tp) w = S.sweep = { tp: tp, lo: cp, hi: cp, out: null, key: "" };
     var lo = Math.min(w.lo, p), hi = Math.max(w.hi, p), a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset;
     var gen = Date.parse(m.generated_at || "") / 1000, cs = typeof candleHistoryByAsset === "undefined" ? null : candleHistoryByAsset[a];
-    if (gen > 0 && cs) for (var i = cs.length - 1; i >= 0 && cs[i].time + 300 > gen; i--) { lo = Math.min(lo, cs[i].low); hi = Math.max(hi, cs[i].high); }
+    // 🔴2026-10-11 지도 «뒤»에 시작한 봉만(time >= gen). 지도 시각을 품은 형성 5분봉(time+300 > gen)까지 넣었더니 그 봉의 지도 «앞» 고·저 --
+    //   서버가 이미 칸 안 청산가 단위로 걸러 남긴 칸(일부 남은 칸)을 매 갱신마다 다시 통째 0 으로 만들었다(사용자 «업데이트해도 안 채워짐»).
+    //   ponytail: 그 봉의 지도 뒤 몫은 1초 현재가 표본(청산맵 켜져 있을 때)만 본다 -- 빠뜨린 건 다음 지도(60초)가 거른다.
+    if (gen > 0 && cs) for (var i = cs.length - 1; i >= 0 && cs[i].time >= gen; i--) { lo = Math.min(lo, cs[i].low); hi = Math.max(hi, cs[i].high); }
     w.lo = lo; w.hi = hi;
     return w;
   }
   function liveTp(m) {
     var tp = m && m.tier_profile;
     if (!tp) return tp;
-    var w = sweep(m, tp), bw = tp.bin_width, k0 = Math.ceil(w.lo / bw - 0.5), k1 = Math.floor(w.hi / bw + 0.5), key = k0 + "|" + k1;
+    // 칸 k = 가격 k×bw 를 «가운데»로 한 칸(서버 np.round). 가격이 그 가운데를 지났을 때만 0 -- 5분 차트 밀도 층의 끊기(liqSweepIdx, 칸 가운데)와 같은 규칙.
+    //   🔴2026-10-11 전엔 칸 가장자리만 스쳐도 0(ceil(lo/bw−0.5)) → 풋프린트엔 연한 파랑이 남은 칸이 청산맵에선 «추정 청산 없음»(사용자).
+    var w = sweep(m, tp), bw = tp.bin_width, k0 = Math.ceil(w.lo / bw), k1 = Math.floor(w.hi / bw), key = k0 + "|" + k1;
     if (w.key === key) return w.out;
     w.key = key;
     w.out = Object.assign({}, tp, { tiers: tp.tiers.map(function (t) {
@@ -383,6 +388,7 @@
   }
 
   window.fpLiqActive = function () { return S.on; };   // 시험 하네스가 켜짐을 읽는다
+  window.fpLiqTp = function () { return liveTp(curMap()); };   // 시험 하네스가 화면 막대 값(지나간 칸 지운 뒤)을 읽는다
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();
