@@ -3293,6 +3293,19 @@ function liqSweepIdx(candles, sinceSec, price) {
   }
   return -1;
 }
+// 2026-10-12 사용자 시안 A «현재가에서 풋프린트 청산 데이터 위/아래로 얼마나 가까운지»: 밀도 층 마지막 열에서
+//   **보이는** 칸(t = 무게/clip ≥ 0.25) 중 안 쓸린 것의 가장 가까운 가장자리(칸 중심 ∓ 반 칸 = 가격이 처음 닿는 곳).
+//   지지1/저항1(가장 진한 봉우리)이 아니라 «빈 구간이 어디서 끝나나»다. swept = 밀도 층이 끊은 칸(densitySweep).
+function liqBandEdges(bins, clip, binWidth, price, swept) {
+  let up = null, dn = null;
+  for (const b of bins || []) {
+    if (!(clip > 0) || !(b.weightPct / clip >= 0.25) || swept.has(b.price)) continue;
+    const lo = b.price - binWidth / 2, hi = b.price + binWidth / 2;
+    if (lo > price && (up === null || lo < up)) up = lo;
+    if (hi < price && (dn === null || hi > dn)) dn = hi;
+  }
+  return { up, dn };
+}
 // 2026-10-11 이력 스냅샷 ts = 그 지도를 아는 5분 경계(닫힌 5분봉까지). 레벨(support/resistance_levels)은 여전히 닫힌 1시간봉만 --
 //   그래서 레벨이 아는 끝 = 마지막 스냅샷이 든 시간의 시작. 밀도 층은 스냅샷 ts 자체를 쓴다(아래 densitySweep).
 function liqMapKnownUntilSec(map) {
@@ -7202,6 +7215,35 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     svg.appendChild(t);
   }
 
+  // 2026-10-12 시안 A «가격축 자»: 플롯 오른쪽 끝에 현재가 → 위·아래 첫 청산 띠 가장자리 괄호 + 거리($·%). 가까운 쪽 진하게.
+  //   화면 밖이면 플롯 끝까지만 긋고 끝 눈금을 뺀다(거리 숫자는 그대로).
+  if (lastSnap && currentPrice > 0) {
+    const edges = liqBandEdges(lastSnap.bins, densityClip, densityBinWidth, currentPrice, densitySweep);
+    const dU = edges.up === null ? Infinity : edges.up - currentPrice, dD = edges.dn === null ? Infinity : currentPrice - edges.dn;
+    const bx = ml + cw - 6, cy = yAt(currentPrice);
+    [[true, edges.up, dU], [false, edges.dn, dD]].forEach(([isUp, edge, d]) => {
+      if (edge === null) return;
+      const near = isUp ? dU <= dD : dD < dU, col = isUp ? "var(--liq-resistance)" : "var(--liq-support)";
+      const yRaw = yAt(edge), ye = Math.max(mt, Math.min(plotBottom, yRaw)), pct = (d / currentPrice) * 100;
+      const g = document.createElementNS(NS, "g");
+      const seg = (x1, y1, x2, y2, sw) => { const l = document.createElementNS(NS, "line");
+        Object.entries({ x1, y1, x2, y2, stroke: col, "stroke-width": sw }).forEach(([k, v]) => l.setAttribute(k, v)); g.appendChild(l); };
+      seg(bx, cy, bx, ye, near ? 2.5 : 1.5);
+      if (ye === yRaw) seg(bx - 7, ye, bx + 4, ye, 2);
+      const t = document.createElementNS(NS, "text");
+      const ty = isUp ? Math.min(cy - 8, (cy + ye) / 2 + 4) : Math.max(cy + 16, (cy + ye) / 2 + 4);
+      Object.entries({ x: mobileChart ? bx + 5 : bx - 10, y: ty, "text-anchor": mobileChart ? "start" : "end",
+        "font-size": mobileChart ? 10 : 11.5, "font-weight": near ? 700 : 600,
+        fill: near ? col : `color-mix(in srgb, ${col} 62%, transparent)`, stroke: "var(--chart-bg)", "stroke-width": 3,
+        "paint-order": "stroke", "stroke-linejoin": "round", style: "font-variant-numeric: tabular-nums" }).forEach(([k, v]) => t.setAttribute(k, v));
+      const sign = isUp ? "+" : "−";
+      t.textContent = mobileChart ? `${sign}${pct.toFixed(2)}%` : `${sign}${fmtNum(d, pxDp())} · ${pct.toFixed(2)}%`;
+      const ti = document.createElementNS(NS, "title");
+      ti.textContent = `${isUp ? "위" : "아래"} 첫 청산 띠 ${fmtNum(edge, pxDp())} 까지 ${sign}${fmtNum(d, pxDp())} (${pct.toFixed(2)}%)`;
+      t.appendChild(ti); g.appendChild(t);
+      svg.appendChild(g);
+    });
+  }
   const lblStay = (q) => !!q.note && /^(5분|1시간) ±|^VWAP/.test(q.label || "");   // 2026-10-01 플롯 오른쪽 끝에 남는 이름(옵션 예상 폭 둘 · VWAP — 사용자 지시)
   // 2026-09-30 꼬리표 칸: 겹침 선 이름(fpNotes)을 가격 꼬리표와 한 줄에 세워 겹침 회피를 **함께** 다시 돈다.
   if (gutOn && fpNotes.length) {
