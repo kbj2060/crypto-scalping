@@ -113,6 +113,8 @@ def recommended_action(component: str) -> str:
     # 2026-10-12 trading_bot.py(trading-bot.service) 은퇴 -- 봇 전용 검사(프로세스·결정 스냅샷·heartbeat·
     #   파이프라인·파이프라인 계약·시장 데이터 소스·실행 안전 계약)를 함께 지웠다. dashboard_state 는
     #   이제 scripts/ops/supervisor_market_data_worker.sh 가 쓴다.
+    if component == "market_data_sources":
+        return "tail -n 50 logs/supervisor/market_data_worker/*.log; scripts/ops/triage.sh"
     if component == "dashboard_state":
         return "scripts/ops/triage.sh"
     if component in {"runtime_resources", "watchdog_storage"}:
@@ -187,6 +189,53 @@ def check_gex_state() -> Check:
 
 
 _DUCKDB_CHECK_CACHE: dict[str, tuple[float, Check]] = {}
+
+
+def check_data_sources(micro_db: Path) -> Check:
+    """ETH 스트림 연결 상태(2026-10-12 복구). 봇 은퇴로 dashboard_state.json 의 microstructure·tail_risk
+    블록이 사라져 같은 판정을 원천에서 다시 읽는다 -- 미시구조는 수집기가 매 분 microstructure_1m 에
+    남기는 연결 칸, 청산은 요격기가 10초마다 쓰는 liq_burst_state.json(핸드셰이크 ws_connected 가 아니라
+    실메시지 기준 valid_liq_stream -- 2026-07-30 77일 거짓 정상 사고). 판정 규칙은 옛 검사 그대로.
+    duckdb 는 신선도 검사와 같은 TTL 캐시를 쓴다(writer 락 경합 최소화)."""
+    hit = _DUCKDB_CHECK_CACHE.get("market_data_sources")
+    if hit is not None and (time.monotonic() - hit[0]) < _duckdb_check_ttl(5):
+        return hit[1]
+    tail, error = load_json(LIVE / "liq_burst_state.json")
+    if error:
+        return Check("market_data_sources", "BLOCKED", "liquidation stream state cannot be read", {"error": error})
+    try:
+        con = duckdb.connect(str(micro_db), read_only=True)
+        try:
+            row = con.execute("select ts, depth_connected, trade_connected, poll_connected, data_stale, trade_age_sec "
+                              "from microstructure_1m order by ts desc limit 1").fetchone()
+        finally:
+            con.close()
+    except duckdb.Error as exc:      # 대개 writer 락 충돌 -- WARN 이라 120초 디바운스를 탄다(신선도 검사와 같은 판단)
+        return Check("market_data_sources", "WARN", "microstructure connection state cannot be read",
+                     {"error": f"{type(exc).__name__}: {exc}"})
+    if row is None:
+        return Check("market_data_sources", "BLOCKED", "microstructure_1m has no rows", {"path": str(micro_db)})
+    _, depth, trade, poll, stale, trade_age = row
+    tail_age = age_minutes(tail.get("updated_at"))
+    sources = {
+        "depth_websocket": depth, "trade_websocket": trade, "rest_poll": poll,
+        "liquidation_websocket": bool(tail.get("ws_connected")) and bool(tail.get("valid_liq_stream"))
+                                 and tail_age is not None and tail_age <= 2.0,
+    }
+    failed = [name for name, connected in sources.items() if connected is not True]
+    core_failed = any(sources[name] is not True for name in ("depth_websocket", "rest_poll"))
+    if core_failed or len(failed) >= 2:
+        status = "CRITICAL"
+    elif stale:
+        status = "CRITICAL" if trade_age is None or trade_age >= 600.0 else "WARN"
+    else:
+        status = "WARN" if failed else "OK"
+    check = Check("market_data_sources", status, "ETH stream connectivity", {
+        "sources": sources, "failed": failed, "data_stale": stale, "trade_age_sec": trade_age,
+        "microstructure_ts": str(row[0]), "liq_state_age_minutes": tail_age, "liq_ws_age_sec": tail.get("ws_age_sec"),
+    })
+    _DUCKDB_CHECK_CACHE["market_data_sources"] = (time.monotonic(), check)
+    return check
 
 
 def _duckdb_check_ttl(warn_minutes: float) -> float:
@@ -602,7 +651,7 @@ def run_once(dry_run: bool) -> list[Check]:
     checks = [
         # 2026-10-12 봇 은퇴: trading_bot_process·decision_snapshot·heartbeat·data_pipeline·pipeline_contract·
         #   market_data_sources·execution_contract 제거(봇만 쓰던 파일들). 되살리려면 그 함수들(git 이력)과 이 줄을 함께.
-        check_dashboard(), check_runtime_resources(),
+        check_dashboard(), check_data_sources(micro_db), check_runtime_resources(),
         check_watchdog_storage(), check_raster_archive(),
         # 2026-10-01 lake 봉인(scripts/seal_to_lake.py, 매일 11:05 KST cron) -- 대표로 ETH 테이프의 가장 최근 일별 파일.
         #   하루 한 번 쓰므로 warn 26h · critical 50h. cron 을 끄면 이 줄도 지운다.
@@ -619,6 +668,8 @@ def run_once(dry_run: bool) -> list[Check]:
         # ⚠️`microstructure_1m_{btc,sol}` 은 **안 지웠다** -- 같은 플래그에 안 묶여 있고 실제로
         #   계속 쓰이고 있다(05:20 확인). 둘을 한 덩어리로 보면 살아있는 검사를 죽인다.
         # 러너 정지 + @reboot 제거 + 이 줄 삭제가 **한 쌍**이다.
+        # 2026-10-12: ETH 도 표 신선도를 직접 본다 -- 전엔 봇 state 연결 칸·orderbook_l2_eth 가 간접으로 잡았다.
+        check_duckdb_table_freshness("duckdb_microstructure_1m_eth", micro_db, "microstructure_1m", "ts", 5, 10),
         check_duckdb_table_freshness("duckdb_microstructure_1m_btc", micro_db, "microstructure_1m_btc", "ts", 5, 10),
         check_duckdb_table_freshness("duckdb_microstructure_1m_sol", micro_db, "microstructure_1m_sol", "ts", 5, 10),
         check_duckdb_table_freshness("duckdb_tail_risk_1m_eth", tail_db, "tail_risk_1m", "ts", 5, 10),
