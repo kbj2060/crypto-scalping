@@ -7232,7 +7232,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (ye === yRaw) seg(bx - 7, ye, bx + 4, ye, 2);
       const t = document.createElementNS(NS, "text");
       const ty = isUp ? Math.min(cy - 8, (cy + ye) / 2 + 4) : Math.max(cy + 16, (cy + ye) / 2 + 4);
-      Object.entries({ x: mobileChart ? bx + 5 : bx - 10, y: ty, "text-anchor": mobileChart ? "start" : "end",
+      // 2026-10-12 사용자 «거리 텍스트를 풋프린트 차트 안이 아니라 체결/포지션 프로파일 쪽으로»: 글자만 프로파일 칸 왼쪽 끝(데스크톱 = 플롯 오른쪽 기둥 · 휴대폰 = 플롯 왼쪽 기둥).
+      Object.entries({ x: mobileChart ? ml - TRADE_L + 2 : tradeX0 + 4, y: ty, "text-anchor": "start",
         "font-size": mobileChart ? 10 : 11.5, "font-weight": near ? 700 : 600,
         fill: near ? col : `color-mix(in srgb, ${col} 62%, transparent)`, stroke: "var(--chart-bg)", "stroke-width": 3,
         "paint-order": "stroke", "stroke-linejoin": "round", style: "font-variant-numeric: tabular-nums" }).forEach(([k, v]) => t.setAttribute(k, v));
