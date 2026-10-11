@@ -694,6 +694,10 @@ def run_once(dry_run: bool) -> list[Check]:
                 # advances normally since retrying it every cycle would never help.
                 "last_notified_at_kst": previous.get("last_notified_at_kst") if sent is False else iso_now(),
             }
+    # 2026-10-12: 이번 회차에 검사하지 않은 구성요소는 state 에서 지운다. 은퇴한 러너·검사(tau1·zeus·fire_cont·
+    #   봇 등)의 마지막 CRITICAL 이 26개나 화석으로 남아 있었다. 다시 등재되면 새 구성요소처럼 처음부터 센다.
+    for gone in set(stored) - {c.component for c in checks}:
+        del stored[gone]
     observed_at = iso_now()
     snapshot = {"schema_version": "ops_watchdog.health.v1", "updated_at_kst": observed_at, "checks": [asdict(c) for c in effective_checks]}
     append_jsonl(HISTORY / f"watchdog_{now_kst():%Y%m%d}.jsonl", snapshot)
