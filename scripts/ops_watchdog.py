@@ -8,7 +8,6 @@ import json
 import os
 import shutil
 import sqlite3
-import subprocess
 import time
 import urllib.request
 
@@ -111,9 +110,10 @@ def retain_history(days: int = 30) -> None:
 def recommended_action(component: str) -> str:
     # 2026-08-03: migrated to systemd (scripts/ops/systemd/*.service) -- journalctl
     # replaces the old logs/supervisor/*.log tail, which no longer receives output.
-    if component in {"trading_bot_process", "trading_bot_heartbeat", "decision_snapshot", "data_pipeline", "pipeline_contract"}:
-        return "scripts/ops/botctl.sh status; journalctl -u trading-bot.service -n 100 --no-pager"
-    if component in {"market_data_sources", "dashboard_state", "execution_contract"}:
+    # 2026-10-12 trading_bot.py(trading-bot.service) 은퇴 -- 봇 전용 검사(프로세스·결정 스냅샷·heartbeat·
+    #   파이프라인·파이프라인 계약·시장 데이터 소스·실행 안전 계약)를 함께 지웠다. dashboard_state 는
+    #   이제 scripts/ops/supervisor_market_data_worker.sh 가 쓴다.
+    if component == "dashboard_state":
         return "scripts/ops/triage.sh"
     if component in {"runtime_resources", "watchdog_storage"}:
         return "scripts/ops/triage.sh; df -h ."
@@ -146,25 +146,6 @@ def load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return (data, None) if isinstance(data, dict) else (None, "json_not_object")
 
 
-def tail_jsonl(path: Path) -> tuple[dict[str, Any] | None, str | None]:
-    try:
-        with path.open("rb") as fh:
-            fh.seek(max(0, path.stat().st_size - 65536))
-            lines = fh.read().decode("utf-8", errors="replace").splitlines()
-    except FileNotFoundError:
-        return None, "missing"
-    except OSError as exc:
-        return None, f"read_error:{type(exc).__name__}"
-    for line in reversed(lines):
-        if line.strip():
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                return None, "invalid_tail_jsonl"
-            return (data, None) if isinstance(data, dict) else (None, "tail_not_object")
-    return None, "empty"
-
-
 def stale_status(age: float | None, warn: float, critical: float) -> str:
     if age is None:
         return "BLOCKED"
@@ -173,71 +154,6 @@ def stale_status(age: float | None, warn: float, critical: float) -> str:
     if age >= warn:
         return "WARN"
     return "OK"
-
-
-def process_args() -> str:
-    try:
-        return subprocess.check_output(["ps", "-eo", "args="], text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-
-
-def check_process(component: str, signature: str, required: bool = True) -> Check:
-    found = signature in process_args()
-    if found:
-        return Check(component, "OK", "registered process is present", {"signature": signature})
-    status = "CRITICAL" if required else "WARN"
-    return Check(component, status, "registered process is absent", {"signature": signature})
-
-
-def check_snapshot() -> Check:
-    path = LIVE / "decision_feature_snapshot.jsonl"
-    row, error = tail_jsonl(path)
-    if error:
-        return Check("decision_snapshot", "BLOCKED", "decision snapshot cannot be read", {"path": str(path), "error": error})
-    values = row.get("values") if isinstance(row, dict) else None
-    market_ts = values.get("timestamp") if isinstance(values, dict) else None
-    # The market bar timestamp belongs to the completed bar and is therefore
-    # expected to trail the write that records its decision.  Measure the
-    # artifact's creation time for liveness; retain market_ts as diagnostics.
-    created_at = row.get("created_at") if isinstance(row, dict) else None
-    age = age_minutes(created_at)
-    return Check("decision_snapshot", stale_status(age, 12, 18), "market snapshot freshness", {
-        "path": str(path), "market_ts": market_ts, "created_at": created_at,
-        "age_minutes": age, "warn_minutes": 12, "critical_minutes": 18,
-    })
-
-
-def check_heartbeat() -> Check:
-    path = LIVE / "trading_bot_decision_heartbeat.json"
-    state, error = load_json(path)
-    if error:
-        return Check("trading_bot_heartbeat", "BLOCKED", "decision heartbeat cannot be read", {"path": str(path), "error": error})
-    recorded = state.get("recorded_at_kst")
-    age = age_minutes(recorded)
-    return Check("trading_bot_heartbeat", stale_status(age, 6, 10), "decision heartbeat freshness", {
-        "recorded_at_kst": recorded, "decision_bar_ts": state.get("decision_bar_ts"), "age_minutes": age,
-        "warn_minutes": 6, "critical_minutes": 10,
-    })
-
-
-def check_pipeline() -> Check:
-    path = LIVE / "data_pipeline_health.json"
-    state, error = load_json(path)
-    if error:
-        return Check("data_pipeline", "BLOCKED", "pipeline health cannot be read", {"path": str(path), "error": error})
-    raw_eth = state.get("raw_eth") if isinstance(state.get("raw_eth"), dict) else {}
-    last_ts = raw_eth.get("last_ts")
-    age = age_minutes(last_ts)
-    freshness = stale_status(age, 12, 18)
-    reported = str(state.get("status", "OK")).upper()
-    status = freshness if SEVERITY[freshness] >= SEVERITY.get(reported, 1) else reported
-    if status not in SEVERITY:
-        status = "WARN"
-    return Check("data_pipeline", status, "pipeline report and raw ETH freshness", {
-        "reported_status": reported, "raw_eth_last_ts": last_ts, "age_minutes": age,
-        "warnings": state.get("warnings", []), "warn_minutes": 12, "critical_minutes": 18,
-    })
 
 
 def check_dashboard() -> Check:
@@ -267,71 +183,6 @@ def check_gex_state() -> Check:
     age = age_minutes_utc_naive(stamp)
     return Check("deribit_gex_state", stale_status(age, 30, 60), "options collector summary freshness", {
         "generated_at": stamp, "age_minutes": age, "warn_minutes": 30, "critical_minutes": 60,
-    })
-
-
-def check_pipeline_contract() -> Check:
-    path = LIVE / "data_pipeline_health.json"
-    state, error = load_json(path)
-    if error:
-        return Check("pipeline_contract", "BLOCKED", "pipeline contract cannot be read", {"path": str(path), "error": error})
-    ai = state.get("ai") if isinstance(state.get("ai"), dict) else {}
-    groups = ai.get("groups") if isinstance(ai.get("groups"), list) else []
-    errors = ai.get("errors") if isinstance(ai.get("errors"), list) else []
-    missing = ai.get("missing_cols") if isinstance(ai.get("missing_cols"), list) else []
-    nonfinite = ai.get("nonfinite_cols") if isinstance(ai.get("nonfinite_cols"), list) else []
-    valid = (
-        state.get("pipeline_stage") == "final_governor_success"
-        and groups == ["tide", "dlinear", "patchtst"]
-        and not errors and not missing and not nonfinite
-        and state.get("signal_align_ok") is True
-    )
-    return Check(
-        "pipeline_contract",
-        "OK" if valid else "BLOCKED",
-        "pipeline AI and bar contract" if valid else "pipeline AI or bar contract mismatch",
-        {
-            "pipeline_stage": state.get("pipeline_stage"), "ai_groups": groups,
-            "ai_errors": errors, "missing_cols": missing, "nonfinite_cols": nonfinite,
-            "signal_align_ok": state.get("signal_align_ok"),
-        },
-    )
-
-
-def check_data_sources() -> Check:
-    path = LIVE / "dashboard_state.json"
-    state, error = load_json(path)
-    if error:
-        return Check("market_data_sources", "BLOCKED", "market data state cannot be read", {"path": str(path), "error": error})
-    micro = state.get("microstructure") if isinstance(state.get("microstructure"), dict) else {}
-    tail = state.get("tail_risk") if isinstance(state.get("tail_risk"), dict) else {}
-    sources = {
-        "depth_websocket": micro.get("depth_connected"),
-        "trade_websocket": micro.get("trade_connected"),
-        "rest_poll": micro.get("poll_connected"),
-        "liquidation_websocket": tail.get("ws_connected"),
-    }
-    failed = [name for name, connected in sources.items() if connected is not True]
-    stale = bool(micro.get("data_stale"))
-    try:
-        trade_age = max(0.0, float(micro.get("trade_age_sec")))
-    except (TypeError, ValueError):
-        trade_age = None
-    # Depth and REST polling are the core price/contract feeds. A lone stale
-    # trade-flow stream is significant, but short exchange stream gaps must not
-    # page as CRITICAL. WARN debounce absorbs brief gaps; sustained loss escalates.
-    core_failed = any(sources[name] is not True for name in ("depth_websocket", "rest_poll"))
-    if core_failed or len(failed) >= 2:
-        status = "CRITICAL"
-    elif stale:
-        status = "CRITICAL" if trade_age is None or trade_age >= 600.0 else "WARN"
-    elif failed:
-        status = "WARN"
-    else:
-        status = "OK"
-    return Check("market_data_sources", status, "market source connectivity", {
-        "sources": sources, "data_stale": stale, "failed_sources": failed,
-        "trade_age_sec": trade_age, "trade_critical_after_sec": 600,
     })
 
 
@@ -647,19 +498,6 @@ def check_watchdog_storage() -> Check:
     })
 
 
-def check_execution_contract() -> Check:
-    path = LIVE / "dashboard_state.json"
-    state, error = load_json(path)
-    if error:
-        return Check("execution_contract", "BLOCKED", "execution contract cannot be read", {"path": str(path), "error": error})
-    account = state.get("account") if isinstance(state.get("account"), dict) else {}
-    alert = state.get("execution_alert") if isinstance(state.get("execution_alert"), dict) else {}
-    valid = account.get("enabled") is False and account.get("testnet") is True and alert.get("status") == "disabled"
-    return Check("execution_contract", "OK" if valid else "BLOCKED", "shadow execution safety contract", {
-        "account_enabled": account.get("enabled"), "testnet": account.get("testnet"), "execution_alert_status": alert.get("status"),
-    })
-
-
 def init_db(path: Path) -> None:
     with sqlite3.connect(path) as con:
         con.execute("""CREATE TABLE IF NOT EXISTS incidents (
@@ -762,9 +600,9 @@ def run_once(dry_run: bool) -> list[Check]:
     tail_btc_sol_db = LIVE / "tail_risk_btc_sol.duckdb"
     altdata_db = RESEARCH / "altdata.duckdb"
     checks = [
-        check_process("trading_bot_process", "trading_bot.py"),
-        check_snapshot(), check_heartbeat(), check_pipeline(), check_pipeline_contract(),
-        check_data_sources(), check_dashboard(), check_execution_contract(), check_runtime_resources(),
+        # 2026-10-12 봇 은퇴: trading_bot_process·decision_snapshot·heartbeat·data_pipeline·pipeline_contract·
+        #   market_data_sources·execution_contract 제거(봇만 쓰던 파일들). 되살리려면 그 함수들(git 이력)과 이 줄을 함께.
+        check_dashboard(), check_runtime_resources(),
         check_watchdog_storage(), check_raster_archive(),
         # 2026-10-01 lake 봉인(scripts/seal_to_lake.py, 매일 11:05 KST cron) -- 대표로 ETH 테이프의 가장 최근 일별 파일.
         #   하루 한 번 쓰므로 warn 26h · critical 50h. cron 을 끄면 이 줄도 지운다.
@@ -774,7 +612,7 @@ def run_once(dry_run: bool) -> list[Check]:
         # dashboard-reported connectivity flags, neither of which catches a process that stays
         # alive but silently stops persisting rows -- exactly the failure mode found in this
         # session's dev-collector audit. These read the tables directly instead.
-        check_duckdb_table_freshness("duckdb_orderbook_l2_eth", micro_db, "orderbook_decision_snapshots", "timestamp_kst", 15, 30),
+        # 2026-10-12 은퇴: duckdb_orderbook_l2_eth -- 봇 결정 루프 안의 recorder 만 쓰던 표(봇 은퇴와 한 쌍).
         # 2026-09-19 은퇴: duckdb_orderbook_l2_{btc,sol} (2줄). BTC/SOL 결정 루프를 껐더니
         # (.env SHADOW_ASSETS_ENABLE=False) 이 두 테이블에 쓰던 orderbook recorder 도 함께
         # 멈췄다 -- 실측: 봇이 05:18 에 OFF 로 기동한 뒤 최신 행이 05:10 에서 안 늘어난다.
