@@ -1,6 +1,6 @@
 // 풋프린트/청산맵 토글의 «청산맵» (2026-10-08, 사용자 «시간 탭에서 오른쪽 위 토글 → 풋프린트 자리에 코인글래스 청산맵처럼»
 //   · «청산맵도 일봉처럼 확대/축소 · 풋프린트 차트만 바뀌게»).
-// 원천 = 1일: app.js 가 60초마다 받는 /api/liquidation-map 의 tier_profile · 7·30일: /api/liquidation-map/tiers?days= (같은 추정 모델, 입력 1시간봉 창만 다름).
+// 원천 = 1일: app.js 가 60초마다 받는 /api/liquidation-map 의 tier_profile(10-11 부터 5분 경계 창 = 5분 차트 밀도 층 마지막 열과 같은 칸) · 7·30일: /api/liquidation-map/tiers?days= (같은 추정 모델, 입력 1시간봉 창만 다름).
 // x = 가격 · 막대 = 그 가격의 추정 청산 규모(레버리지 구간 쌓기, 왼쪽 축) · 선 = 현재가에서 그 가격까지 누적(빨강 롱 · 초록 숏, 오른쪽 축).
 // 자리 = 5분 차트의 교체 영역 위, 배경 없이(fp_daily.js fpPlaceOverlay · fpAltSet). 확대 = 가격축(휠·두 손가락·키보드), 끌기 = 이동, 더블클릭 = 전체.
 // 추정이지 실측 포지션이 아니다(scripts/live_liquidation_map_20260824.py 머리말). 🔴CI esprima: `?.(`·`?.[`·숫자 구분자 금지.
@@ -52,7 +52,9 @@
     var w = S.sweep, cp = tp.current_price, p = livePrice(tp);
     if (!w || w.tp !== tp) w = S.sweep = { tp: tp, lo: cp, hi: cp, out: null, key: "" };
     var lo = Math.min(w.lo, p), hi = Math.max(w.hi, p), a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset;
-    var gen = Date.parse(m.generated_at || "") / 1000, cs = typeof candleHistoryByAsset === "undefined" ? null : candleHistoryByAsset[a];
+    // 2026-10-11 1일 지도 = 마지막 닫힌 5분봉 끝(known_until)까지의 데이터 -- 그 뒤 봉 = 형성 5분봉부터라 지도 뒤 고·저를 빠짐없이 본다.
+    //   7·30일(형성 1시간봉 포함)은 known_until 이 없어 generated_at.
+    var gen = Date.parse(tp.known_until || m.generated_at || "") / 1000, cs = typeof candleHistoryByAsset === "undefined" ? null : candleHistoryByAsset[a];
     // 🔴2026-10-11 지도 «뒤»에 시작한 봉만(time >= gen). 지도 시각을 품은 형성 5분봉(time+300 > gen)까지 넣었더니 그 봉의 지도 «앞» 고·저 --
     //   서버가 이미 칸 안 청산가 단위로 걸러 남긴 칸(일부 남은 칸)을 매 갱신마다 다시 통째 0 으로 만들었다(사용자 «업데이트해도 안 채워짐»).
     //   ponytail: 그 봉의 지도 뒤 몫은 1초 현재가 표본(청산맵 켜져 있을 때)만 본다 -- 빠뜨린 건 다음 지도(60초)가 거른다.

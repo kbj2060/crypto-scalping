@@ -400,24 +400,32 @@ def compute_spliced_heatmap_history(df: pd.DataFrame, current_price: float, look
     n = len(d)
     if n < lookback_hours + 2:
         return []
-    mid_price_full = (d["high"].to_numpy(dtype="float64") + d["low"].to_numpy(dtype="float64")) / 2.0
-
     start_i = max(lookback_hours - 1, n - display_hours - 3)
     raws = []
     for i in range(start_i, n):
-        start = max(0, i - lookback_hours + 1)
-        window = d.iloc[start: i + 1]
-        common = _prepare_common(window, current_price)
-        if common is None:
-            continue
-        bins_mid = _bins_from_common(common, mid_price_full[start: i + 1])
-        bins_close = _bins_from_common(common, None)
-        if bins_mid is None and bins_close is None:
-            continue
-        bin_width = common["bin_width"]
-        support_bins = {b: w for b, w in (bins_mid or {}).items() if b * bin_width < current_price}
-        resistance_bins = {b: w for b, w in (bins_close or {}).items() if b * bin_width > current_price}
-        raws.append((d["timestamp"].iloc[i], support_bins, resistance_bins, bin_width))
+        raw = _spliced_raw(d.iloc[max(0, i - lookback_hours + 1): i + 1], current_price)
+        if raw is not None:
+            raws.append((d["timestamp"].iloc[i], *raw))
+    return _spliced_history(raws)
+
+
+def _spliced_raw(window: pd.DataFrame, current_price: float) -> tuple[dict, dict, float] | None:
+    """창 하나의 정규화 전 (지지 칸, 저항 칸, bin_width) -- 지지 = (고+저)/2 진입 패스의 현재가 아래, 저항 = 종가 패스의 위."""
+    common = _prepare_common(window, current_price)
+    if common is None:
+        return None
+    w = window.reset_index(drop=True)
+    bins_mid = _bins_from_common(common, (w["high"].to_numpy(dtype="float64") + w["low"].to_numpy(dtype="float64")) / 2.0)
+    bins_close = _bins_from_common(common, None)
+    if bins_mid is None and bins_close is None:
+        return None
+    bw = common["bin_width"]
+    return ({b: v for b, v in (bins_mid or {}).items() if b * bw < current_price},
+            {b: v for b, v in (bins_close or {}).items() if b * bw > current_price}, bw)
+
+
+def _spliced_history(raws: list) -> list[dict]:
+    """[(ts, 지지 칸, 저항 칸, bin_width)] -> [{"ts_utc", "bins"}] -- 쪽마다 이력 전체의 최대로 정규화."""
     if not raws:
         return []
     global_max_support = max((max(s.values()) for _, s, _, _ in raws if s), default=0.0)
@@ -439,6 +447,73 @@ def compute_spliced_heatmap_history(df: pd.DataFrame, current_price: float, look
         }
         for ts, support_bins, resistance_bins, bin_width in raws
     ]
+
+
+_BAR_COLS = ("high", "low", "close", "volume")
+
+
+def _bar_arrays(df: pd.DataFrame) -> tuple[np.ndarray, dict]:
+    """(시작 시각 초[], 열 배열) -- 오름차순 가정(liq_klines_df 가 정렬한다)."""
+    t = pd.to_datetime(df["timestamp"], utc=True).dt.tz_localize(None).to_numpy().astype("datetime64[s]").astype("int64")
+    return t, {c: df[c].to_numpy(dtype="float64") for c in _BAR_COLS}
+
+
+def _window_at(h: tuple, m: tuple, t: int, lookback_hours: int) -> pd.DataFrame:
+    """경계 t(초)에 알 수 있던 입력 창: 시작 < floor_hour(t) 인 1시간봉 + 그 시간의 닫힌 5분봉 [floor_hour(t), t) 을 묶은 부분봉 한 줄
+    (고 max · 저 min · 마지막 종가 · 거래량 합, 시각 = floor_hour(t)). 부분봉 포함 lookback_hours 줄. 판다스로 거르면 경계 144개에 100ms 넘었다."""
+    (h_t, H), (m_t, M) = h, m
+    hour = t // 3600 * 3600
+    p0, p1 = (int(x) for x in np.searchsorted(m_t, [hour, t]))
+    i1 = int(np.searchsorted(h_t, hour))
+    i0 = max(0, i1 - lookback_hours + (1 if p1 > p0 else 0))
+    ts, w = h_t[i0:i1], {c: H[c][i0:i1] for c in _BAR_COLS}
+    if p1 > p0:
+        ts = np.append(ts, hour)
+        w = {"high": np.append(w["high"], M["high"][p0:p1].max()), "low": np.append(w["low"], M["low"][p0:p1].min()),
+             "close": np.append(w["close"], M["close"][p1 - 1]), "volume": np.append(w["volume"], M["volume"][p0:p1].sum())}
+    return pd.DataFrame({"timestamp": pd.to_datetime(ts, unit="s", utc=True), **w})
+
+
+def latest_window_5m(df_1h: pd.DataFrame, df_5m: pd.DataFrame, lookback_hours: int) -> tuple[pd.DataFrame, pd.Timestamp] | None:
+    """compute_spliced_heatmap_history_5m 의 **마지막 열**과 같은 입력 창과 그 경계(마지막 닫힌 5분봉 끝) -- 청산맵 막대(compute_tier_profile)가
+    같은 기준가로 이 창을 쓰면 같은 시점 같은 칸이 된다(2026-10-11 사용자 «둘 다 5분봉 기준»)."""
+    if df_1h is None or df_5m is None or not len(df_5m):
+        return None
+    m = _bar_arrays(df_5m)
+    t_last = int(m[0][-1]) + 300
+    return _window_at(_bar_arrays(df_1h), m, t_last, lookback_hours), pd.Timestamp(t_last, unit="s", tz="UTC")
+
+
+def compute_spliced_heatmap_history_5m(df_1h: pd.DataFrame, df_5m: pd.DataFrame, current_price: float,
+                                       lookback_hours: int, n_snapshots: int, memo: dict | None = None) -> list[dict]:
+    """2026-10-11 사용자 «1시간마다가 아니라 5분봉이 닫힐 때마다» -- compute_spliced_heatmap_history 를 5분 경계마다.
+    df_5m 의 마지막 닫힌 5분봉 끝 t_last 부터 5분씩 거슬러 n_snapshots 개. 경계 t 의 스냅샷 = **t 에 알 수 있던 지도**:
+    t 전에 닫힌 1시간봉(시작 < floor_hour(t)) + 그 시간의 부분봉(같은 시간의 닫힌 5분봉 [floor_hour(t), t) 를 고 max·저 min·
+    마지막 종가·거래량 합으로 묶은 한 줄, 시각 = floor_hour(t)) -- _window_at. 창은 부분봉 포함 lookback_hours 줄.
+    청산맵 막대는 마지막 경계의 같은 창(latest_window_5m)을 쓴다. ts_utc = t 이고 화면은 그 열을 t 봉부터 그린다.
+    정시 t 는 부분봉이 없어 compute_spliced_heatmap_history 의 ts=t-1h 스냅샷과 같은 창이다 -- 그쪽 ts 는 봉 «시작»인데
+    그 봉 끝(t)까지 담아 화면에서 한 시간 이르게 그려졌다(봉 안 미래참조). 정규화·가격 격자(current_price 고정)는 같다.
+    memo: 호출 사이에 들고 다니는 dict(코인마다 하나) -- (t, current_price) -> 정규화 전 칸. 닫힌 봉만 보므로 t 의 칸은 안 바뀐다.
+    마지막 경계(t_last)는 저장하지 않는다(경계 직후 받은 봉의 거래량이 덜 붙었을 수 있어 다음 호출이 다시 센다)."""
+    if df_1h is None or df_5m is None or not len(df_5m) or not (current_price > 0):
+        return []
+    h, m = _bar_arrays(df_1h), _bar_arrays(df_5m)
+    t_last = int(m[0][-1]) + 300
+    raws = []
+    for t in range(t_last - (n_snapshots - 1) * 300, t_last + 1, 300):
+        key = (t, current_price)
+        if memo is not None and key in memo:
+            raw = memo[key]
+        else:
+            raw = _spliced_raw(_window_at(h, m, t, lookback_hours), current_price)
+            if memo is not None and t < t_last:
+                memo[key] = raw
+        if raw is not None:
+            raws.append((pd.Timestamp(t, unit="s", tz="UTC"), *raw))
+    if memo is not None:   # 창 밖으로 밀려난 경계·옛 기준가는 버린다
+        for k in [k for k in memo if k[1] != current_price or k[0] < t_last - (n_snapshots - 1) * 300]:
+            del memo[k]
+    return _spliced_history(raws)
 
 
 EVENT_DRIVEN_BREAK_TOLERANCE_PCT = 0.005  # close-based break trigger
@@ -640,3 +715,48 @@ if __name__ == "__main__":
     t2 = compute_tier_profile(df_, cp, oi_usd=1e9)
     assert t2["unit"] == "oi_usd" and abs(sum(sum(t["values"]) for t in t2["tiers"]) - 2e9) < 1e3
     print("selftest OK -- 레버리지 구간 넷 · 현재가 칸 비어 있음 · 짧은 입력 None · 단위(share 합 1 · oi_usd 합 2×OI)")
+
+    # 자체점검 2 (2026-10-11 5분 경계 이력): 합성 5분봉 40시간 -> 1시간봉은 그 묶음
+    rng = np.random.default_rng(7)
+    t5 = pd.date_range("2026-10-01", periods=40 * 12, freq="5min", tz="UTC")
+    c5 = 100 * np.exp(np.cumsum(rng.normal(0, 0.002, len(t5))))
+    m5 = pd.DataFrame({"timestamp": t5, "close": c5, "high": c5 * (1 + rng.uniform(0, 0.002, len(t5))),
+                       "low": c5 * (1 - rng.uniform(0, 0.002, len(t5))), "volume": rng.uniform(1, 10, len(t5))})
+    g = m5.groupby(m5["timestamp"].dt.floor("h"))
+    h1 = pd.DataFrame({"high": g["high"].max(), "low": g["low"].min(), "close": g["close"].last(), "volume": g["volume"].sum()}).reset_index()
+    cut = 37 * 12 + 5                               # 마지막 닫힌 5분봉 = 37시간 20분째 -> t_last = 37:25
+    m5c, h1c = m5.iloc[:cut], h1.iloc[:37]          # 그 시각에 닫힌 것만
+    cp5 = float(h1c["close"].iloc[-1])
+    hist = compute_spliced_heatmap_history_5m(h1c, m5c, cp5, 24, 144)
+    t_last5 = m5c["timestamp"].iloc[-1] + pd.Timedelta(minutes=5)
+    # (c) 5분 경계마다 하나, 마지막 = t_last
+    assert len(hist) == 144 and hist[-1]["ts_utc"] == t_last5.isoformat()
+    assert all(pd.Timestamp(b["ts_utc"]) - pd.Timestamp(a["ts_utc"]) == pd.Timedelta(minutes=5) for a, b in zip(hist, hist[1:]))
+    # (a) 정시 t 의 창(정규화 전) = 옛 compute_spliced_heatmap_history 의 ts=t-1h 창
+    ha, ma = _bar_arrays(h1c), _bar_arrays(m5c)
+    old_ts = list(h1c["timestamp"])
+    for hr in (30, 33, 36):
+        t = int(pd.Timestamp(old_ts[hr]).timestamp()) + 3600
+        assert _spliced_raw(_window_at(ha, ma, t, 24), cp5) == _spliced_raw(h1c.iloc[hr - 23: hr + 1], cp5), hr
+    assert pd.Timestamp(old_ts[36]).isoformat() in {s["ts_utc"] for s in compute_spliced_heatmap_history(h1c, cp5, 24, 8)}
+    # (b) t 의 칸은 t 뒤 데이터를 바꿔도 그대로(미래참조 없음): 뒤 봉을 크게 흔든 판과 memo(정규화 전 칸)로 비교
+    shaken = m5.copy()
+    shaken.loc[cut:, ["high", "low", "close", "volume"]] *= 1.5
+    gs = shaken.groupby(shaken["timestamp"].dt.floor("h"))
+    h1s = pd.DataFrame({"high": gs["high"].max(), "low": gs["low"].min(), "close": gs["close"].last(), "volume": gs["volume"].sum()}).reset_index()
+    memo_a, memo_b = {}, {}
+    compute_spliced_heatmap_history_5m(h1c, m5c, cp5, 24, 144, memo_a)
+    compute_spliced_heatmap_history_5m(h1s, shaken, cp5, 24, 144 + len(m5) - cut, memo_b)   # 같은 첫 경계부터
+    shared = [k for k in memo_a if k in memo_b]
+    assert len(shared) == 143 and all(memo_a[k] == memo_b[k] for k in shared)
+    assert any(memo_b[k] != memo_a.get(k) for k in memo_b if k[0] > shared[-1][0] + 300)   # 대조: 흔든 뒤 경계는 실제로 달라졌다
+    # (d) 청산맵 막대 = 마지막 열과 같은 창·같은 격자 -> 같은 칸, 값 비례(막대 = 가중×진입가 $ · 열 = 쪽별 비율)
+    win, t_end = latest_window_5m(h1c, m5c, 24)
+    assert t_end == t_last5 and len(win) == 24
+    sup, res, _ = _spliced_raw(win, cp5)
+    tp5 = compute_tier_profile(win, cp5)
+    col = {**sup, **res}
+    bar = {tp5["lo"] + i: v for i, v in enumerate(np.sum([t["values"] for t in tp5["tiers"]], axis=0)) if v > 0}
+    assert set(bar) == set(col), (len(bar), len(col))
+    assert np.corrcoef([bar[k] for k in col], [col[k] for k in col])[0, 1] > 0.999
+    print("selftest 2 OK -- 5분 경계 144개 · 정시 창 = 옛 t-1h 창 · 미래 흔들어도 지난 경계 불변 · 막대 = 마지막 열 같은 칸·비례 값")

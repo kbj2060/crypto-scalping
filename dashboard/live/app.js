@@ -3293,10 +3293,12 @@ function liqSweepIdx(candles, sinceSec, price) {
   }
   return -1;
 }
+// 2026-10-11 이력 스냅샷 ts = 그 지도를 아는 5분 경계(닫힌 5분봉까지). 레벨(support/resistance_levels)은 여전히 닫힌 1시간봉만 --
+//   그래서 레벨이 아는 끝 = 마지막 스냅샷이 든 시간의 시작. 밀도 층은 스냅샷 ts 자체를 쓴다(아래 densitySweep).
 function liqMapKnownUntilSec(map) {
   const h = (map && map.heatmap_history) || [];
   const t = h.length ? Date.parse(h[h.length - 1].ts_utc) : NaN;
-  return Number.isFinite(t) ? Math.floor(t / 1000) + 3600 : Infinity;   // 모르면 아무것도 안 지운다
+  return Number.isFinite(t) ? Math.floor(t / 3600e3) * 3600 : Infinity;   // 모르면 아무것도 안 지운다
 }
 
 function nearestLiquidationLevel() {
@@ -6068,12 +6070,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴키에 **모드**를 넣는다. 불투명도가 모드마다 다른데(풋프린트 0.25 / 청산맵 0.85)
   //   baseGeomSig 에는 모드가 없어서, 기하가 우연히 같으면 옛 불투명도 층을 그대로
   //   재사용한다. 캐시가 «맞는 그림»을 돌려주는지는 키가 정한다.
-  // B: 마지막 스냅샷이 모르는 구간(ts+1h 이후)에 가격이 지나간 칸 -> 그 봉 가운데서 끊고 뒤는 «쓸림»(t=0)으로.
+  // B: 마지막 스냅샷이 모르는 구간(ts 이후 -- 10-11 전엔 ts+1h)에 가격이 지나간 칸 -> 그 봉 가운데서 끊고 뒤는 «쓸림»(t=0)으로.
   //   앞 스냅샷들은 자기 시간봉까지 이미 반영돼 있다. 키에 넣어야 틱으로 새로 쓸릴 때 층이 다시 그려진다.
   const densitySweep = new Map();
   const lastSnap = sortedDensityHistory[sortedDensityHistory.length - 1];
   if (lastSnap) {
-    const since = Math.floor((lastSnap.tsMs || 0) / 1000) + 3600;
+    const since = Math.floor((lastSnap.tsMs || 0) / 1000);   // 2026-10-11 스냅샷 ts = 아는 시각(5분 경계) -- 그 뒤 봉 = 형성 5분봉뿐
     (lastSnap.bins || []).forEach((b) => {
       if (!(b.weightPct > 0)) return;
       const i = liqSweepIdx(candles, since, b.price);
@@ -6082,6 +6084,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   }
   if (sortedDensityHistory.length) cachedLayer("density",
       objToken(densityHistory) + ":" + densityClip + ":" + [...densitySweep].join(","), (g) => {
+  g.setAttribute("shape-rendering", "crispEdges");   // 2026-10-11 열이 5분봉마다 -- 붙은 칸 사이 안티앨리어싱 틈이 봉마다 세로 줄무늬로 보였다
   const densityPriceUnion = Array.from(new Set(sortedDensityHistory.flatMap(snap => (snap.bins || []).map(b => b.price))));
   sortedDensityHistory.forEach((snap, si) => {
     const xStartIdx = densityBoundaryIdx[si];

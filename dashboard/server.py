@@ -137,7 +137,7 @@ from scripts.live_liquidation_direction_signal_20260825 import compute_liquidati
 # robustness). compute_liquidation_levels()/compute_heatmap_history() are unchanged and still
 # importable (other research scripts still use them as the close-only reference) -- only this
 # dashboard entry point moved.
-from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history, compute_tier_profile  # noqa: E402
+from scripts.live_liquidation_map_20260824 import compute_spliced_levels, compute_spliced_heatmap_history_5m, compute_tier_profile, latest_window_5m  # noqa: E402
 # 2026-09-20 «미시 참고» 카드의 계산부(순수 함수 + 자체점검). 서버는 값을 모아 넣기만 한다.
 from dashboard import micro_ref as mref  # noqa: E402
 from dashboard import position_profile as pprof  # noqa: E402
@@ -281,12 +281,11 @@ MACRO_CALENDAR_CACHE_SECONDS = 6 * 3600  # calendar dates change at most once/da
 # minute (tail_risk_interceptor.py's insert cadence), so this mostly tightens worst-case staleness
 # rather than surfacing meaningfully new data every second.
 LIQUIDATION_5M_SIGNAL_CACHE_SECONDS = 1
-LIQUIDATION_MAP_DISPLAY_HOURS = 8  # 2026-09-23 6 -> 8 (짝: SNAPSHOT_CHART_MAX_CANDLES=96) # 2026-08-25 user request: density-history snapshot count for the
-                                    # chart's time-varying heatmap overlay (see compute_heatmap_
-                                    # history() docstring) -- matches the Snapshot-tab chart's own
-                                    # visible-candle window (4h->6h same day, "4시간은 너무 작다")
-                                    # (dashboard/live/app.js's SNAPSHOT_CHART_MAX_CANDLES) so every
-                                    # column the chart can show has a real snapshot behind it.
+# 2026-10-11 밀도 이력·청산맵 막대 = 5분 경계마다(사용자 «5분봉이 닫힐 때마다» · «둘 다 5분봉 기준»). 스냅샷 144 = 풋프린트 12h 창(144봉).
+#   5분봉은 그 첫 경계가 든 시간의 시작부터 필요 -> 144 + 12 + 여유.
+LIQUIDATION_MAP_HISTORY_SNAPSHOTS = 144
+LIQUIDATION_MAP_5M_FETCH_LIMIT = 170
+#   옛 LIQUIDATION_MAP_DISPLAY_HOURS(8, 1시간 스냅샷 수 = 8+3)를 대신한다.
 
 # The 6 model-internal indicators (microstructure/tail_risk) only ever have their LATEST reading
 # persisted by trading_bot.py -- no history is stored anywhere. Rather than touch the live bot
@@ -4528,13 +4527,13 @@ def make_app() -> web.Application:
             lambda: asyncio.to_thread(compute_liquidation_direction_signal, coin=asset),
         )
 
-    async def liq_klines_df(asset: str, limit: int, keep_forming: bool = False) -> pd.DataFrame:
-        """청산맵 입력 1시간봉. 진행 중인 봉은 버린다 -- keep_forming=True 면 남긴다(지금까지의 고·저·거래량 = 1분마다 바뀌는 막대)."""
+    async def liq_klines_df(asset: str, limit: int, keep_forming: bool = False, interval: str = LIQUIDATION_MAP_INTERVAL) -> pd.DataFrame:
+        """청산맵 입력 봉(기본 1시간, 10-11 부터 5분봉도). 진행 중인 봉은 버린다 -- keep_forming=True 면 남긴다(7·30일 막대)."""
         raw = await fetch_binance_json(
             "https://fapi.binance.com/fapi/v1/klines",
             {
                 "symbol": COIN_CONFIG[asset]["binance_symbol"],
-                "interval": LIQUIDATION_MAP_INTERVAL,
+                "interval": interval,
                 "limit": limit,
             },
             error_reason="liquidation_map_upstream_error",
@@ -4563,7 +4562,7 @@ def make_app() -> web.Application:
 
     async def load_liquidation_tiers(asset: str, days: int) -> dict[str, Any]:
         """2026-10-08 청산맵 보기 기간 1·7·30일(사용자 (나), 코인글래스처럼) -- 같은 모델(compute_tier_profile)을 창만 늘려 돌린다.
-        1일은 /api/liquidation-map 의 tier_profile 과 같은 값. 최근성 반감기(240h)는 모듈 상수 그대로."""
+        1일 막대는 /api/liquidation-map 의 tier_profile(10-11 부터 5분 경계 창) -- 이 엔드포인트는 7·30일용. 최근성 반감기(240h)는 모듈 상수 그대로."""
         async def produce() -> dict[str, Any]:
             df = (await liq_klines_df(asset, days * 24 + 2, keep_forming=True)).tail(days * 24).reset_index(drop=True)
             cp = float(df["close"].iloc[-1]) if len(df) else 0.0
@@ -4660,6 +4659,8 @@ def make_app() -> web.Application:
             return None, px
         return (int(time.time()) // 300 * 300, hlv[0], hlv[1], hlv[2], float(f.oi_1s[max(f.oi_1s)]) + st["off"]), px
 
+    liq_hist_memo: dict[str, dict] = {}   # 코인 -> compute_spliced_heatmap_history_5m 의 memo
+
     async def load_liquidation_map(asset: str = "eth") -> dict[str, Any]:
         """Snapshot-tab liquidation map (estimated support/resistance) -- see
         scripts/live_liquidation_map_20260824.py docstring for the estimation methodology and its
@@ -4672,27 +4673,31 @@ def make_app() -> web.Application:
         constants (see design doc section 5) -- BTC's map uses the same constants, unvalidated for
         BTC's own liquidity/volatility."""
         async def produce() -> dict[str, Any]:
-            df_live = await liq_klines_df(asset, LIQUIDATION_MAP_FETCH_LIMIT, keep_forming=True)
-            forming = bool(len(df_live)) and int(df_live.iloc[-1]["close_time"]) >= int(time.time() * 1000)
-            df = df_live.iloc[:-1].reset_index(drop=True) if forming else df_live   # 레벨·히스토리 = 닫힌 봉만(검증된 규약)
+            df = await liq_klines_df(asset, LIQUIDATION_MAP_FETCH_LIMIT)   # 레벨 = 닫힌 1시간봉만(검증된 규약)
+            df_5m = await liq_klines_df(asset, LIQUIDATION_MAP_5M_FETCH_LIMIT, interval="5m")
             current_price = float(df["close"].iloc[-1]) if len(df) else 0.0
             payload = await asyncio.to_thread(
                 compute_spliced_levels, df.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), current_price
             )
-            # Full df (not the LIQUIDATION_MAP_LOOKBACK_HOURS-trimmed tail above) -- the earliest
-            # snapshot in the history still needs its own full LIQUIDATION_MAP_LOOKBACK_HOURS window,
-            # so compute_spliced_heatmap_history() needs lookback+display+slack hours of input, not
-            # just the single latest snapshot's lookback (see LIQUIDATION_MAP_FETCH_LIMIT's comment).
+            # 2026-10-11 밀도 이력 = 5분 경계마다 «그 시각에 알 수 있던 지도»(닫힌 1시간봉 + 이번 시간의 닫힌 5분봉 부분봉).
+            #   옛 1시간 스냅샷은 ts = 봉 시작인데 그 봉 끝까지 담아 한 시간 이르게 그려졌다. 기준가(격자)는 위 레벨과 같다.
+            #   첫 스냅샷도 꽉 찬 24시간 창이 필요해 df 전체(48봉)를 넘긴다. memo = 매시 기준가가 바뀌기 전까지 지난 경계 재사용.
             payload["heatmap_history"] = await asyncio.to_thread(
-                compute_spliced_heatmap_history, df, current_price, LIQUIDATION_MAP_LOOKBACK_HOURS, LIQUIDATION_MAP_DISPLAY_HOURS
-            )
-            # 2026-10-08 풋프린트/청산맵 토글의 레버리지별 청산맵(코인글래스 모양) -- 같은 창·같은 가정, 구간별로 나눠 둔 것.
-            # 10-09 사용자 «1분마다 업데이트»: 형성 중인 봉까지 넣는다(이번 시간 고·저가 지난 청산가는 바로 빠지고 막대가 캐시 60초마다 바뀐다).
-            #   기준가 = 형성 봉 종가(지금 가격). 전진 점수 기록기(live_liqmap_scorer)는 닫힌 봉 지도를 잰다 -- 화면과 1시간 안쪽만 다르다.
-            live_px = float(df_live["close"].iloc[-1]) if len(df_live) else current_price
-            oi_usd = await asyncio.to_thread(liq_oi_usd, asset, live_px)
-            payload["tier_profile"] = await asyncio.to_thread(
-                compute_tier_profile, df_live.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), live_px, oi_usd)
+                compute_spliced_heatmap_history_5m, df, df_5m, current_price, LIQUIDATION_MAP_LOOKBACK_HOURS,
+                LIQUIDATION_MAP_HISTORY_SNAPSHOTS, liq_hist_memo.setdefault(asset, {}))
+            # 2026-10-08 풋프린트/청산맵 토글의 레버리지별 청산맵(코인글래스 모양) -- 같은 가정, 구간별로 나눠 둔 것.
+            # 10-11 사용자 «둘 다 5분봉 기준»: 밀도 이력의 **마지막 열과 같은 창·같은 기준가(격자)** -- 같은 시점이면 같은 칸, 값은 비례
+            #   (막대 = 가중 거래량×진입가 $ · 열 = 쪽별 비율). 5분마다 바뀐다(옛: 형성 1시간봉을 매분). current_price 는 창 끝(마지막 닫힌
+            #   5분봉 종가) -- 화면의 «지나간 칸 지우기»가 known_until 이후 가격 범위를 이 값에서 시작한다. 전진 점수 기록기는 따로다.
+            win = latest_window_5m(df, df_5m, LIQUIDATION_MAP_LOOKBACK_HOURS)
+            tp = None
+            if win is not None and len(win[0]):
+                end_px = float(win[0]["close"].iloc[-1])
+                oi_usd = await asyncio.to_thread(liq_oi_usd, asset, end_px)
+                tp = await asyncio.to_thread(compute_tier_profile, win[0], current_price, oi_usd)
+                if tp is not None:
+                    tp.update(current_price=end_px, known_until=win[1].isoformat())
+            payload["tier_profile"] = tp
             payload["generated_at"] = datetime.now(timezone.utc).isoformat()
             return payload
 
