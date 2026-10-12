@@ -111,17 +111,17 @@ def detect(b5, up_e, up_f, dn_e, dn_f):
     return pd.DataFrame(rows, columns=["k", "s", "E", "F"])
 
 
-def label(ev, b5, k1):
-    """1분 경로로 뚫음/튕김. 결정 = 봉 k 끝 → 첫 분 = 그 끝 시각의 1분."""
+def label(ev, b5, k1, step=M1, hold=HOLD):
+    """step(기본 1분) 경로로 뚫음/튕김. 결정 = 봉 k 끝 → 첫 칸 = 그 끝 시각의 칸. 다른 코인 확인 검정은 5분 경로(step=M5)."""
     t0 = int(k1.t.iloc[0])
     h, l = k1.h.to_numpy(), k1.l.to_numpy()
     c = b5.close.to_numpy()[ev.k]
     H = np.abs(ev.F - ev.E) + MARGIN * ev.E
     thr, back = ev.E + ev.s * H, ev.E - ev.s * H
-    j0 = ((b5.t.to_numpy()[ev.k] + M5 - t0) // M1).astype(np.int64)
+    j0 = ((b5.t.to_numpy()[ev.k] + M5 - t0) // step).astype(np.int64)
     up, dn = np.where(ev.s > 0, thr, back), np.where(ev.s > 0, back, thr)
     decided = (c >= up) | (c <= dn)
-    res = np.array([-3 if dd else first_touch(h, l, int(j), float(u), float(d), HOLD) for j, u, d, dd in zip(j0, up, dn, decided)])
+    res = np.array([-3 if dd else first_touch(h, l, int(j), float(u), float(d), hold) for j, u, d, dd in zip(j0, up, dn, decided)])
     y = np.where(res >= 0, np.where(ev.s > 0, res, 1 - res), np.nan)        # 1 = 뚫음(향하는 쪽 먼저)
     return ev.assign(c=c, H=H, thr=thr, back=back, res=res, y=y, p0=np.clip((c - back) / (thr - back), 0, 1),
                      gain_bp=np.abs(thr - c) / c * 1e4, loss_bp=np.abs(c - back) / c * 1e4)
@@ -204,9 +204,9 @@ def join_tape(b5, f):
     return f
 
 
-def join_book(b5, ev):
+def join_book(b5, ev, bk=None):
     """봉 k 끝 1초 전까지의 마지막 bookDepth 스냅샷(±1·2% 누적 명목). 위 사건이면 벽 쪽 = 매도호가(n1·n2)."""
-    bk = daily_parquets(f"{BV}/ETHUSDT_bookDepth_*.parquet").sort_index()
+    bk = (daily_parquets(f"{BV}/ETHUSDT_bookDepth_*.parquet") if bk is None else bk).sort_index()
     bt = bk.index.values.astype("datetime64[ms]").astype("int64")
     tq = b5.t.to_numpy()[ev.k] + M5 - 1000
     i = np.searchsorted(bt, tq, side="right") - 1
@@ -256,7 +256,8 @@ def finish(ev, b5, f):
     for col in f.columns:
         ev[col] = f[col].to_numpy()[k]
     for col in SIGNED:
-        ev[col] = ev[col] * ev.s
+        if col in ev:                                                       # 다른 코인 확인 검정은 base_frame 피쳐만
+            ev[col] = ev[col] * ev.s
     cs = ev.sig.to_numpy()
     ev["h_sig"] = np.log1p(ev.H / ev.E) / cs
     ev["band_sig"] = np.log1p(np.abs(ev.F - ev.E) / ev.E) / cs
