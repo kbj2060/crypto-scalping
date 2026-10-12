@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import time
 import urllib.request
 
@@ -135,6 +136,10 @@ def recommended_action(component: str) -> str:
         # 다시 띄우는 것도 같은 스크립트다(supervisor 가 중복을 막아 이미 돌면 건너뛴다).
         return ("python scripts/ops/multicoin_collectors_20260926.py check; "
                 "python scripts/ops/multicoin_collectors_20260926.py resume")
+    if component.startswith("pi_"):
+        # Pi 수집 노드 -- 같은 스크립트를 Pi 에서 돌린다(재기동도 resume).
+        return ("ssh pi@192.168.1.131 'cd ~/crypto-scalping && ~/miniforge3/envs/quant_ai/bin/python "
+                "scripts/ops/multicoin_collectors_20260926.py check'")
     return "scripts/ops/triage.sh"
 
 
@@ -466,6 +471,49 @@ def check_multicoin_collectors() -> list[Check]:
     return sorted(out, key=lambda ch: ch.component)
 
 
+# ── Pi 수집 노드 (2026-10-12) ───────────────────────────────────────────────────────────────
+# 1단계 BTC·SOL·XRP·HYPE 수집기는 Pi(`collector`)에서 도는데 이 감시기는 서버 매니페스트만 봤다 -- Pi 가
+# 통째로 죽어도 아무도 몰랐다. ssh 한 번으로 Pi 매니페스트의 신선도를 받아온다(scripts/ops/remote_fresh_probe.py,
+# DB 안 엶·mtime). ssh 실패 = pi_reachable BLOCKED 라 노드째 죽음도 잡는다. PI_COLLECTOR_SSH="" 면 끈다.
+PI_SSH = os.getenv("PI_COLLECTOR_SSH", "pi@192.168.1.131")
+PI_ROOT = os.getenv("PI_COLLECTOR_ROOT", "~/crypto-scalping")
+PI_TTL_S = 120.0                 # 감시기는 30초 주기 -- Pi 에 매번 ssh 할 이유가 없다
+_PI_CACHE: list[Any] = [-1e9, []]
+
+
+def pi_checks_from_rows(rows: list[dict] | None, error: str | None) -> list[Check]:
+    if rows is None:
+        return [Check("pi_reachable", "BLOCKED", "Pi collector node unreachable", {"host": PI_SSH, "error": error})]
+    out = [Check("pi_reachable", "OK", "Pi collector node reachable", {"host": PI_SSH, "entries": len(rows)})]
+    for r in rows:
+        if r.get("grace"):
+            continue
+        out.append(Check(f"pi_{r['name']}", stale_status(r.get("age_minutes"), r["warn"], r["critical"]),
+                         "Pi collector file freshness", {"host": PI_SSH, **r}))
+    return sorted(out, key=lambda ch: ch.component)
+
+
+def check_pi_collectors() -> list[Check]:
+    if not PI_SSH:
+        return []
+    if time.monotonic() - _PI_CACHE[0] < PI_TTL_S:
+        return _PI_CACHE[1]
+    rows, error = None, None
+    try:
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", PI_SSH, f"cd {PI_ROOT} && python3 - ."],
+                           input=(ROOT / "scripts" / "ops" / "remote_fresh_probe.py").read_text(encoding="utf-8"),
+                           capture_output=True, text=True, timeout=25)
+        if r.returncode == 0:
+            rows = json.loads(r.stdout)
+        else:
+            error = f"ssh rc={r.returncode}: {r.stderr.strip()[-200:]}"
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        error = f"{type(exc).__name__}: {exc}"[:200]
+    checks = pi_checks_from_rows(rows, error)
+    _PI_CACHE[:] = [time.monotonic(), checks]
+    return checks
+
+
 def check_runtime_resources() -> Check:
     usage = shutil.disk_usage(ROOT)
     free_gib = usage.free / (1024 ** 3)
@@ -710,6 +758,7 @@ def run_once(dry_run: bool) -> list[Check]:
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
         *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
         *check_multicoin_collectors(),
+        *check_pi_collectors(),
     ]
     state = load_state(state_path)
     stored = state.setdefault("checks", {})

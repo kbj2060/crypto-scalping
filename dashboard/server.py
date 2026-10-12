@@ -7007,8 +7007,9 @@ def make_app() -> web.Application:
             # these run under systemd now (previously bash _supervise.sh), and matching
             # the old bash wrapper's argv left this permanently reporting STOPPED after
             # the migration even though everything was healthy.
+            # 2026-10-12 trading_bot 은퇴(f7ea55d3) -- 그 수집 몫을 넘겨받은 시장 데이터 워커를 대신 본다.
             "supervisors": supervised_processes([
-                ("trading_bot", "trading_bot.py"),
+                ("market_data_worker", "duckdb_persist_worker.py"),
                 ("ops_watchdog", "ops_watchdog.py"),
             ]),
         }
