@@ -1354,13 +1354,17 @@ def pick_paper_state(sts: list[Any], now: float) -> Any:
 
 # 2026-10-13 «체결 버블»(사용자 «Bookmap 같은 1초 체결 버블 · 청산맵 크기로 배포») -- 1초 × 가격 칸 체결(매수·매도·고래 몫).
 #   원천 = 체결 테이프 hot SQLite(수집기가 5초마다 완결된 초를 쓴다 → 화면 지연 ≈5초). 배경 호가는 기존 /api/flow/heatmap.
-BUBBLE_WINDOWS = (180, 300, 600)
+BUBBLE_MAX_SEC = 1800                                    # 화면이 확대·이동으로 오갈 수 있는 최대 과거(30분)
 _bubble_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
-def bubble_tape_payload(symbol: str, sec: int, db: Path = HOT_TAPE_DB, now: float | None = None) -> dict[str, Any]:
+def bubble_tape_payload(symbol: str, sec: int, db: Path = HOT_TAPE_DB, now: float | None = None,
+                        since: int | None = None) -> dict[str, Any]:
+    """since 를 주면 ts_sec > since 인 행만(화면이 30분치를 한 번 받은 뒤 새 초만 덧붙인다)."""
     end = int(now if now is not None else time.time())
     lo = end - sec - 5                                    # 수집기 지연(5초)만큼 더 받아 창 끝이 비지 않게
+    if since is not None:
+        lo = max(lo, since + 1)
     rows = _read_only_rows(db, """SELECT ts_sec, price_bin, buy_qty, sell_qty,
                                          coalesce(whale_buy_qty, 0) + coalesce(whale_sell_qty, 0)
                                   FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? ORDER BY ts_sec""", [symbol, lo])
@@ -1373,11 +1377,17 @@ async def api_bubble_tape(request: web.Request) -> web.Response:
     asset = str(request.query.get("asset") or "eth").lower()
     symbol = f"{asset}usdt"
     try:
-        sec = int(request.query.get("sec", "180"))
+        sec = int(request.query.get("sec", str(BUBBLE_MAX_SEC)))
+        since = int(request.query["since"]) if request.query.get("since") else None
     except ValueError:
-        raise web.HTTPBadRequest(reason="bad_sec") from None
-    if symbol not in TAPE_BUCKETS or sec not in BUBBLE_WINDOWS:
+        raise web.HTTPBadRequest(reason="bad_sec_or_since") from None
+    if symbol not in TAPE_BUCKETS or not 10 <= sec <= BUBBLE_MAX_SEC:
         raise web.HTTPBadRequest(reason="unsupported_asset_or_window")
+    if since is not None:                                  # 덧붙이기 = 몇 초치라 캐시 없이 바로 읽는다
+        try:
+            return web.json_response(await asyncio.to_thread(bubble_tape_payload, symbol, sec, since=since), headers=NOCACHE)
+        except (sqlite3.Error, duckdb.Error, OSError) as exc:
+            return web.json_response({"error": type(exc).__name__, "rows": []}, status=503, headers=NOCACHE)
     key, now = f"{symbol}|{sec}", time.time()
     hit = _bubble_cache.get(key)
     if hit is None or now - hit[0] >= 1.0:                 # 1초 캐시 -- 탭이 몇 개든 읽기는 초당 한 번

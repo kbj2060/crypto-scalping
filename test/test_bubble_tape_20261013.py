@@ -23,3 +23,5 @@ def test_window_and_whale_sum(tmp_path):
     p = bubble_tape_payload("ethusdt", 180, db=db, now=1000)
     assert p["bucket"] == 0.1 and p["end"] == 1000 and p["lo"] == 1000 - 185
     assert p["rows"] == [[990, 40001, 2.0, 1.0, 1.5]]
+    assert bubble_tape_payload("ethusdt", 180, db=db, now=1000, since=990)["rows"] == []      # 덧붙이기 = since 초과만
+    assert len(bubble_tape_payload("ethusdt", 180, db=db, now=1000, since=989)["rows"]) == 1

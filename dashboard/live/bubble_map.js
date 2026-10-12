@@ -1,14 +1,18 @@
 // 2026-10-13 체결 버블(사용자 «web.bookmap.com 같은 체결 버블 차트» · 시안 승인 «이 차트들을 청산맵 차트 사이즈로 해서 배포해줘»).
 // 자리 = 청산맵과 같은 5분 차트 교체 영역(fp_daily.js fpPlaceOverlay · fpAltSet). 보기 토글은 liq_profile.js setView 가 «fpview» 이벤트로 알린다.
+// 원천 = 바이낸스 USDT 선물만(다른 거래소 체결은 안 섞는다).
 // 배경 = 호가 래스터(/api/flow/heatmap, 작음 파랑 → 노랑 → 큼 빨강) · 흰 선 = 현재가(래스터 mid) ·
-// 버블 = 1초 체결 테이프(/api/bubble-tape, 수집기가 5초마다 써서 ~5초 늦다): $2.5만 미만 점 · 그 이상 원(넓이 ∝ 금액) · $10만+ 고리·금액.
+// 버블 = 1초 체결 테이프(/api/bubble-tape, 수집기가 5초마다 써서 ~5초 늦다): $2.5만 미만 점 · 그 이상 원(넓이 ∝ 금액) · 큰 체결 고리·금액.
 // 아래 막대 = 구간별 거래대금(매수 | 매도).
-// ponytail: 확대·이동·툴팁 없음(창 3/5/10분 탭만) -- 필요하면 liq_profile.js bindCanvas 를 옮겨 온다.
+// 2026-10-13 사용자 «3·5·10분으로 나누지 말고 진짜 차트처럼 확대/축소해서 왔다 갔다»: 시간축 확대(20초~30분)·끌기 이동(최근 30분 안).
+//   테이프 = 30분치 한 번 받고 매초 새 초만 덧붙임(since) · 래스터 = 최근 5분 안이면 1초 해상도(2초마다), 아니면 30분 2초 해상도(10초마다).
+//   오른쪽 끝이 «지금»이면 따라간다(실시간), 끌어서 과거를 보면 그 자리에 멈춘다.
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var css = function (n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
-  var S = { on: false, sec: 180, tape: null, heat: null, heatT: 0, busyT: false, busyH: false, raf: 0 };
-  var HEAT_Q = { 180: [180, 1], 300: [300, 1], 600: [600, 1] };   // 창 → 래스터 (cols, agg 초)
+  var MAX = 1800, MIN_SPAN = 20, DEF_SPAN = 180;
+  var S = { on: false, span: DEF_SPAN, back: 0, asset: "", rows: [], bucket: 0, end: 0, none: false, full: false,
+            fine: null, coarse: null, fineT: 0, coarseT: 0, busyT: false, busyF: false, busyC: false, raf: 0, view: null, drag: null, pinch: null };
   var STOPS = [0, 0.2, 0.4, 0.55, 0.68, 0.84, 1];                   // --bbm-h0..6 위치
 
   function asset() { return typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset; }
@@ -26,32 +30,47 @@
     }
     return out;
   }
+  function resetData(a) { S.asset = a; S.rows = []; S.end = 0; S.none = false; S.full = false; S.fine = S.coarse = null; S.fineT = S.coarseT = 0; }
 
   function fetchTape() {
-    var a = asset(), sec = S.sec;
-    if (!S.on || S.busyT || document.hidden) return;
+    var a = asset();
+    if (a !== S.asset) resetData(a);
+    if (!S.on || S.busyT || document.hidden || S.none) return;
+    var last = S.rows.length ? S.rows[S.rows.length - 1][0] : 0, since = S.full && last ? last - 10 : null;   // 마지막 10초는 다시 받는다(늦게 쓰인 초)
     S.busyT = true;
-    fetch("/api/bubble-tape?asset=" + encodeURIComponent(a) + "&sec=" + sec, { cache: "no-store" })
+    fetch("/api/bubble-tape?asset=" + encodeURIComponent(a) + "&sec=" + MAX + (since != null ? "&since=" + since : ""), { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : r.status === 400 ? { rows: [], none: true } : null; })
-      .then(function (j) { if (j) { j.asset = a; j.sec = sec; S.tape = j; redraw(); } })
+      .then(function (j) {
+        if (!j || a !== S.asset) return;
+        if (j.none) { S.none = true; redraw(); return; }
+        var keep = since != null ? S.rows.filter(function (r) { return r[0] <= since; }) : [];
+        var lo = j.end - MAX - 5;
+        S.rows = keep.concat(j.rows).filter(function (r) { return r[0] >= lo; });
+        S.bucket = j.bucket; S.end = j.end; S.full = true; redraw();
+      })
       .catch(function () { /* 다음 초에 다시 */ })
       .then(function () { S.busyT = false; });
   }
-  function fetchHeat() {
-    var a = asset(), sec = S.sec, q = HEAT_Q[sec], now = Date.now();
-    if (!S.on || S.busyH || document.hidden || now - S.heatT < (sec === 600 ? 5000 : sec === 300 ? 3000 : 2000)) return;   // 10분 래스터 = 1회 ~210KB
-    S.busyH = true; S.heatT = now;
-    fetch("/api/flow/heatmap?symbol=" + encodeURIComponent(a + "usdt") + "&cols=" + q[0] + "&agg=" + q[1], { cache: "no-store" })
+  function fetchHeat(kind) {                // fine = 최근 300초 1초 해상도 · coarse = 최근 30분 2초 해상도
+    var a = asset(), now = Date.now(), fine = kind === "fine", busy = fine ? "busyF" : "busyC", tk = fine ? "fineT" : "coarseT";
+    if (!S.on || S[busy] || document.hidden || now - S[tk] < (fine ? 2000 : 10000)) return;
+    S[busy] = true; S[tk] = now;
+    fetch("/api/flow/heatmap?symbol=" + encodeURIComponent(a + "usdt") + (fine ? "&cols=300&agg=1" : "&cols=900&agg=2"), { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : r.status === 400 ? { none: true } : null; })
       .then(function (j) {
-        if (!j) return;
-        S.heat = j.none || !j.qty_i8 ? { asset: a, none: true }
-          : { asset: a, sec: sec, t0: j.t0_ms / 1000, dt: j.dt_s, cols: j.cols, bs: j.bin_size, blo: j.bin_lo, nb: j.n_bins,
+        if (!j || a !== S.asset) return;
+        S[kind] = j.none || !j.qty_i8 ? { none: true }
+          : { t0: j.t0_ms / 1000, dt: j.dt_s, cols: j.cols, bs: j.bin_size, blo: j.bin_lo, nb: j.n_bins,
               q: new Int8Array(buf(j.qty_i8)), mid: new Float32Array(buf(j.mid_b64)) };
         redraw();
       })
-      .catch(function () { S.heatT = 0; })
-      .then(function () { S.busyH = false; });
+      .catch(function () { S[tk] = 0; })
+      .then(function () { S[busy] = false; });
+  }
+  function needFine() { return S.back + S.span <= 290; }   // 보는 창이 최근 5분 안
+  function poll() {
+    fetchTape();
+    if (needFine()) fetchHeat("fine"); else fetchHeat("coarse");
   }
 
   function draw() {
@@ -65,12 +84,13 @@
     var g = cv.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    var a = asset(), T = S.tape && S.tape.asset === a && S.tape.sec === S.sec ? S.tape : null;
-    var M = S.heat && S.heat.asset === a && !S.heat.none && S.heat.sec === S.sec ? S.heat : null;
-    var WIN = S.sec, tEnd = T ? T.end : 0, t0 = tEnd - WIN, rows = [], mids = [], lo = Infinity, hi = -Infinity;
-    if (T) T.rows.forEach(function (r) {
-      if (r[0] < t0) return;
-      var p = r[1] * T.bucket;
+    S.view = null;
+    var WIN = S.span, tEnd = S.end - S.back, t0 = tEnd - WIN, rows = [], mids = [], lo = Infinity, hi = -Infinity, bk = S.bucket;
+    var F = S.fine && !S.fine.none ? S.fine : null, Cc = S.coarse && !S.coarse.none ? S.coarse : null;
+    var M = F && F.t0 <= t0 ? F : Cc || F;                                // 보는 창을 다 덮는 래스터 하나만(해상도 섞으면 이음매가 보인다)
+    S.rows.forEach(function (r) {
+      if (r[0] < t0 || r[0] > tEnd) return;
+      var p = r[1] * bk;
       rows.push({ t: r[0], p: p, b: r[2] * p, s: r[3] * p, u: (r[2] + r[3]) * p });
       if (p < lo) lo = p; if (p > hi) hi = p;
     });
@@ -79,19 +99,19 @@
       if (tc + M.dt <= t0 || tc > tEnd || !(m > 0)) continue;
       mids.push([tc, m]); if (m < lo) lo = m; if (m > hi) hi = m;
     }
-    if (st) st.textContent = !T ? (S.tape && S.tape.none ? "이 코인은 1초 체결 테이프를 모으지 않습니다" : "체결 버블을 기다리는 중…")
-      : !rows.length ? "최근 " + WIN / 60 + "분 체결이 없습니다" : "";
-    if (!rows.length) return;
-    var last = mids.length ? mids[mids.length - 1][1] : rows[rows.length - 1].p;
+    if (st) st.textContent = S.none ? "이 코인은 1초 체결 테이프를 모으지 않습니다" : !S.full ? "체결 버블을 기다리는 중…"
+      : !rows.length ? "이 구간에 체결이 없습니다" : "";
+    if (!rows.length && !mids.length) return;
+    var liveRow = S.rows[S.rows.length - 1], last = (M && M.mid[M.cols - 1] > 0) ? M.mid[M.cols - 1] : liveRow ? liveRow[1] * bk : (lo + hi) / 2;
     var pad = Math.max((hi - lo) * 0.35, last * 0.0002), minW = Math.max(M ? M.bs * 14 : 0, last * 0.0018);
     lo -= pad; hi += pad;
     if (hi - lo < minW) { var cm = (hi + lo) / 2; lo = cm - minW / 2; hi = cm + minW / 2; }   // 래스터 칸이 두꺼워지지 않게
-
     // 2026-10-13 사용자 «청산맵과 같은 디자인 규칙 · 청산맵 막대 차트 가로·세로에 맞게 채워»: 플롯 상자 = liq_profile.js 와 같은 여백
     //   (좌 68/60 · 우 68/54 · 위 22 · 아래 축 28). 상자 안 위 80% = 호가 히트맵 + 버블, 아래 20% = 거래 막대. 축 글자 = 플롯 밖 · 굵게 · 바탕 외곽선.
     var L0 = narrow ? 60 : 68, R0 = narrow ? 54 : 68, top = 22, axisH = 28, GAP = 6;
     var PW = W - L0 - R0, IH = H - top - axisH, VH = Math.round(IH * 0.2), PH = IH - VH - GAP, base = top + IH, vy0 = base - VH;
     var X = function (t) { return L0 + (t - t0) / WIN * PW; }, Y = function (p) { return top + PH - (p - lo) / (hi - lo) * PH; };
+    S.view = { t0: t0, L: L0, PW: PW };
     var C = { bg: css("--chart-bg"), text: css("--text"), muted: css("--muted"), line: css("--line"), good: css("--good"), bad: css("--bad") };
     var heatBg = rgb("--bbm-bg"), price = rgb("--bbm-price"), good = C.good, bad = C.bad;
     var sans = css("--font-sans") || "sans-serif";
@@ -163,12 +183,12 @@
       var y = Y(p); if (y < top + 6 || y > top + PH - 6 || Math.abs(y - ly) < 14) continue;
       halo(p.toFixed(dec), L0 - 6, y, C.muted);
     }
-    g.font = "700 12px " + sans; halo(fmtPx(last), L0 - 6, ly, C.text);                 // 가격 축 위 현재가(굵게)
+    if (ly >= top && ly <= top + PH) { g.font = "700 12px " + sans; halo(fmtPx(last), L0 - 6, ly, C.text); }   // 가격 축 위 현재가(굵게)
     g.font = "600 12px " + sans; g.textAlign = "left";                                  // 거래대금 축(오른쪽)
     for (var gv2 = vs; gv2 <= vtop + 1e-9; gv2 += vs) halo(usd(gv2), L0 + PW + 6, yV(gv2), C.muted);
     halo(BK + "초 합", L0 + PW + 6, base - 8, C.muted);
     g.font = "700 13px " + sans; g.textAlign = "center";                               // 현재가 = 상자 없이 굵은 숫자(청산맵과 같은 규약)
-    halo("현재가 " + fmtPx(last), L0 + PW / 2, 10, C.text);
+    halo("현재가 " + fmtPx(last) + (S.back ? " · 지난 구간(더블클릭 = 실시간)" : ""), L0 + PW / 2, 10, C.text);
 
     var ev = [30, 60, 120, 300, 600].filter(function (s) { return s >= WIN / Math.max(2, PW / 70); })[0] || 600;   // 시간 축 = 5분 차트 x축 글자
     g.font = "700 " + (narrow ? 12 : 13) + "px " + sans; g.textAlign = "center"; g.textBaseline = "top"; g.strokeStyle = C.line;
@@ -183,22 +203,86 @@
 
   function redraw() { if (!S.raf) S.raf = requestAnimationFrame(draw); }
 
-  function setSec(sec) {
-    S.sec = HEAT_Q[sec] ? sec : 180; S.heatT = 0;
-    document.querySelectorAll("#bubbleWinTabs [data-sec]").forEach(function (b) {
-      var on = Number(b.dataset.sec) === S.sec;
-      b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on));
-    });
-    try { localStorage.setItem("bubbleSec", String(S.sec)); } catch (e) { /* 저장 못 해도 동작 */ }
-    fetchTape(); fetchHeat(); redraw();
+  function setView(span, back) {             // span = 보이는 초 · back = 오른쪽 끝이 «지금»에서 몇 초 전
+    S.span = Math.max(MIN_SPAN, Math.min(MAX, span));
+    S.back = Math.max(0, Math.min(MAX - S.span, back));
+    if (S.back < 1) S.back = 0;                                          // 끝에 닿으면 다시 실시간으로 따라간다
+    var lv = document.querySelector('#bubbleMapTools [data-view="live"]');
+    if (lv) lv.setAttribute("aria-pressed", String(S.back === 0 && S.span === DEF_SPAN));
+    poll(); redraw();
   }
+  function timeAt(clientX) {
+    var v = S.view, r = $("bubbleMapCanvas").getBoundingClientRect();
+    return v ? v.t0 + (clientX - r.left - v.L) / v.PW * S.span : 0;
+  }
+  function zoomAt(t, f) {                    // t 를 제자리에 두고 시간축만 늘이고 줄인다
+    var v = S.view; if (!v) return;
+    var span = Math.max(MIN_SPAN, Math.min(MAX, S.span * f)), frac = (t - v.t0) / S.span;
+    setView(span, S.end - (t - frac * span + span));
+  }
+  function panPx(dx, back0) { var v = S.view; if (v) setView(S.span, (back0 == null ? S.back : back0) + dx / v.PW * S.span); }
+  function resetView() { setView(DEF_SPAN, 0); }
+
+  function bindCanvas(cv) {                  // liq_profile.js bindCanvas 와 같은 조작(축만 시간)
+    cv.addEventListener("wheel", function (e) {
+      if (!S.view) return;
+      e.preventDefault();
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) panPx(e.deltaX || e.deltaY);
+      else zoomAt(timeAt(e.clientX), Math.exp(e.deltaY * 0.0015));
+    }, { passive: false });
+    cv.addEventListener("pointerdown", function (e) {
+      if (e.pointerType === "touch" || e.button !== 0 || !S.view) return;
+      S.drag = { x: e.clientX, back: S.back, moved: false, id: e.pointerId };
+    });
+    cv.addEventListener("pointermove", function (e) {
+      if (!S.drag || !(e.buttons & 1)) return;
+      var dx = e.clientX - S.drag.x;
+      if (!S.drag.moved && Math.abs(dx) < 4) return;
+      if (!S.drag.moved) { S.drag.moved = true; cv.setPointerCapture(S.drag.id); cv.classList.add("panning"); }
+      panPx(dx, S.drag.back);
+    });
+    var stop = function () { S.drag = null; cv.classList.remove("panning"); };
+    cv.addEventListener("pointerup", stop); cv.addEventListener("pointercancel", stop);
+    cv.addEventListener("dblclick", resetView);
+    cv.addEventListener("touchstart", function (e) {         // 한 손가락 = 이동 · 두 손가락 = 확대
+      if (!S.view) return;
+      if (e.touches.length === 2) {
+        var p = e.touches[0], q = e.touches[1];
+        S.pinch = { d: Math.max(20, Math.abs(p.clientX - q.clientX)), span: S.span, at: timeAt((p.clientX + q.clientX) / 2) };
+        S.drag = null;
+      } else if (e.touches.length === 1) S.drag = { x: e.touches[0].clientX, back: S.back, moved: false };
+    }, { passive: true });
+    cv.addEventListener("touchmove", function (e) {
+      if (S.pinch && e.touches.length === 2) {
+        e.preventDefault();
+        var f = S.pinch.d / Math.max(20, Math.abs(e.touches[0].clientX - e.touches[1].clientX));
+        zoomAt(S.pinch.at, S.pinch.span * f / S.span);
+      } else if (S.drag && e.touches.length === 1) {
+        var dx = e.touches[0].clientX - S.drag.x;
+        if (!S.drag.moved && Math.abs(dx) < 6) return;
+        e.preventDefault(); S.drag.moved = true;
+        panPx(dx, S.drag.back);
+      }
+    }, { passive: false });
+    cv.addEventListener("touchend", function () { S.pinch = null; S.drag = null; });
+    cv.addEventListener("keydown", function (e) {
+      var v = S.view, k = e.key;
+      if (!v) return;
+      if (k === "ArrowLeft" || k === "ArrowRight") panPx((k === "ArrowLeft" ? 0.2 : -0.2) * v.PW);
+      else if (k === "+" || k === "=") zoomAt(v.t0 + S.span / 2, 0.8);
+      else if (k === "-" || k === "_") zoomAt(v.t0 + S.span / 2, 1.25);
+      else if (k === "Home" || k === "End") resetView();
+      else return;
+      e.preventDefault();
+    });
+  }
+
   function setOn(on) {
     S.on = on;
     if (typeof window.fpAltSet === "function") window.fpAltSet("bubble", on);
-    var box = $("bubbleMap"), wt = $("bubbleWinTabs");
+    var box = $("bubbleMap");
     if (box) box.hidden = !on;
-    if (wt) wt.hidden = !on;
-    if (on) { S.heatT = 0; fetchTape(); fetchHeat(); redraw(); }
+    if (on) { S.fineT = S.coarseT = 0; poll(); redraw(); }
   }
 
   window.addEventListener("fpview", function (e) { setOn(e.detail === "bubble"); });
@@ -206,16 +290,18 @@
   function init() {
     var cv = $("bubbleMapCanvas");
     if (!cv) return;
-    document.querySelectorAll("#bubbleWinTabs [data-sec]").forEach(function (b) {
-      b.addEventListener("click", function () { setSec(Number(b.dataset.sec)); });
+    document.querySelectorAll("#bubbleMapTools [data-view]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var v = S.view, mid = v ? v.t0 + S.span / 2 : 0;
+        if (b.dataset.view === "live") resetView();
+        else if (v) zoomAt(mid, b.dataset.view === "in" ? 0.6 : 1.6);
+      });
     });
-    var sv = 180;
-    try { sv = Number(localStorage.getItem("bubbleSec")) || 180; } catch (e) { /* 기본 3분 */ }
-    setSec(sv);
+    bindCanvas(cv);
     new ResizeObserver(redraw).observe(cv);
-    setInterval(function () {                     // 테이프 1초 · 래스터 2초(5분 3초 · 10분 5초) · 코인 탭·5분 차트 배치가 바뀌어도 따라간다
+    setInterval(function () {                     // 테이프 매초 덧붙임 · 래스터 2초(최근 5분 안) / 10초(그 밖) · 코인 탭·5분 차트 배치도 따라간다
       if (!S.on) return;
-      fetchTape(); fetchHeat(); redraw();
+      poll(); redraw();
     }, 1000);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
