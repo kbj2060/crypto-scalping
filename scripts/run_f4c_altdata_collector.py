@@ -11,6 +11,7 @@ WS-D의 D4 수집 건강 감시에 추후 편입 예정.
 from __future__ import annotations
 
 import json
+import sys
 import time
 
 import ccxt
@@ -86,33 +87,49 @@ def collect_funding_spread(con):
             print(f"funding_spread {asset} FAILED: {exc}")
 
 
-def collect_binance_announcements(con):
-    try:
+def _announcement_articles(pages: int) -> list[tuple[dict, str]]:
+    # 2026-10-12: catalog/list/query 가 publishDate=None 만 줘서 publish_time_utc 가 전부 NULL 이었다
+    # (H-ANNOUNCE 검정 불가). article/list/query 는 catalogs[].articles[].releaseDate(ms) 를 준다.
+    out = []
+    for page in range(1, pages + 1):
         r = requests.get(
-            "https://www.binance.com/bapi/composite/v1/public/cms/article/catalog/list/query",
-            params={"catalogId": "48", "pageNo": 1, "pageSize": 20},
+            "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query",
+            params={"type": 1, "catalogId": "48", "pageNo": page, "pageSize": 20},
             timeout=15,
             headers={"User-Agent": "Mozilla/5.0"},
         )
         r.raise_for_status()
-        articles = r.json().get("data", {}).get("articles", [])
+        for cat in r.json().get("data", {}).get("catalogs", []):
+            out += [(a, str(cat.get("catalogName") or "")) for a in cat.get("articles", [])]
+        time.sleep(0.5)
+    return out
+
+
+def collect_binance_announcements(con, pages: int = 1):
+    try:
         now = pd.Timestamp.now(tz="UTC")
-        n = 0
-        for art in articles:
+        n = fixed = 0
+        for art, catalog in _announcement_articles(pages):
             aid = str(art.get("code") or art.get("id"))
-            exists = con.execute(
-                "SELECT COUNT(*) FROM binance_announcements WHERE announcement_id = ?", [aid]
-            ).fetchone()[0]
-            if exists:
-                continue
             pub_ts = art.get("releaseDate") or art.get("publishDate")
             pub_dt = pd.to_datetime(pub_ts, unit="ms", utc=True) if pub_ts else None
+            row = con.execute(
+                "SELECT publish_time_utc FROM binance_announcements WHERE announcement_id = ?", [aid]
+            ).fetchone()
+            if row is not None:
+                if row[0] is None and pub_dt is not None:  # 옛 NULL 행 채우기
+                    con.execute(
+                        "UPDATE binance_announcements SET publish_time_utc = ? WHERE announcement_id = ?",
+                        [pub_dt, aid],
+                    )
+                    fixed += 1
+                continue
             con.execute(
                 "INSERT INTO binance_announcements VALUES (?,?,?,?,?)",
-                [now, aid, str(art.get("title", "")), str(art.get("catalogName", "") or ""), pub_dt],
+                [now, aid, str(art.get("title", "")), catalog, pub_dt],
             )
             n += 1
-        print(f"binance_announcements: {n} new")
+        print(f"binance_announcements: {n} new, {fixed} publish_time filled")
     except Exception as exc:
         print(f"binance_announcements FAILED (non-fatal, endpoint may have changed): {exc}")
 
@@ -129,7 +146,9 @@ def main():
     except Exception as exc:
         print("funding_spread FAILED:", exc)
     try:
-        collect_binance_announcements(con)
+        # 1회 백필: --ann-pages 10 (평소 cron 은 1쪽 = 20건)
+        pages = int(sys.argv[sys.argv.index("--ann-pages") + 1]) if "--ann-pages" in sys.argv else 1
+        collect_binance_announcements(con, pages)
     except Exception as exc:
         print("announcements FAILED:", exc)
     con.close()

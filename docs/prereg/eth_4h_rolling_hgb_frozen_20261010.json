@@ -1,0 +1,444 @@
+{
+ "frozen_at_kst": "2026-10-10 07:58",
+ "train_window": [
+  "2025-09-14T19:55:00.000000000",
+  "2026-09-14T19:50:00.000000000"
+ ],
+ "n_train": 105120,
+ "features": [
+  "P_r5m",
+  "P_r15m",
+  "P_r1h",
+  "P_r4h",
+  "P_r1d",
+  "P_r7d",
+  "P_r28d",
+  "P_rv1h",
+  "P_rv1d",
+  "P_vratio",
+  "P_rsi14",
+  "P_pctb",
+  "P_pos1d",
+  "P_veto_z",
+  "P_ac144",
+  "P_trend5",
+  "T_imb5m",
+  "T_imb15m",
+  "T_imb1h",
+  "T_imb4h",
+  "T_cvd1h_z",
+  "T_vol_z",
+  "T_trades_z",
+  "T_size",
+  "O_doi5m",
+  "O_doi1h",
+  "O_doi4h",
+  "O_doi1d",
+  "O_doi1h_z",
+  "O_doi1h_x_r",
+  "O_toppos",
+  "O_toppos_d1h",
+  "O_toppos_z",
+  "O_topacct",
+  "O_topacct_d1h",
+  "O_topacct_z",
+  "O_glob",
+  "O_glob_d1h",
+  "O_glob_z",
+  "O_takerls",
+  "O_takerls_d1h",
+  "O_takerls_z",
+  "O_top_minus_glob",
+  "B_prem",
+  "B_prem_d1h",
+  "B_prem_8h",
+  "B_prem_z",
+  "S_lead5m",
+  "S_imb5m",
+  "S_lead15m",
+  "S_imb15m",
+  "S_lead1h",
+  "S_imb1h",
+  "S_imb_minus_perp1h",
+  "S_vol_share",
+  "M_cvd",
+  "M_bigimb",
+  "M_smlimb",
+  "M_cntimb",
+  "M_ntrade",
+  "M_bigshare",
+  "M_meansz",
+  "M_signac",
+  "M_runlen",
+  "M_kyle",
+  "M_range",
+  "M_vpin",
+  "M_bigimb_1h",
+  "M_smlimb_1h",
+  "M_cntimb_1h",
+  "M_kyle_1h",
+  "M_vpin_1h",
+  "M_signac_1h",
+  "M_whale_minus_retail_1h",
+  "D_imb1",
+  "D_imb2",
+  "D_imb5",
+  "D_imb1_d1h",
+  "D_depth1_z",
+  "X_btc_r5m",
+  "X_btc_r15m",
+  "X_btc_r1h",
+  "X_btc_r4h",
+  "X_btc_imb1h",
+  "X_btc_doi1h",
+  "X_breadth1h",
+  "X_breadth1d",
+  "X_eth_rel1h",
+  "X_eth_rel1d",
+  "X_eth_rank1d",
+  "X_disp1h",
+  "C_hsin",
+  "C_hcos",
+  "C_dow",
+  "C_to_funding",
+  "C_weekend",
+  "U_eth_since_open",
+  "U_eth_f30_day",
+  "U_btc_since_open",
+  "U_btc_f30_day",
+  "U_min_since_open"
+ ],
+ "target": "y_4h = ln(close[k+48]/close[k]) bp, 결정 = 5분봉 k 마감",
+ "thresholds_q20_q80": [
+  -39.67493543591719,
+  37.65414899745559
+ ],
+ "hold": "4h",
+ "cost_bp": 4.0,
+ "verdict_rule": "동결 이후 새로 쌓인 데이터(2026-09-15~)에서, 위상 8개 1/8 포트폴리오 · 상·하위 20% · 비용 4bp · 일 블록 95% CI 하한 > 0\n    이고 6개월(≥180일) 이상 쌓였을 때만 «통과». 그 전엔 건수·날짜만 보고 결과를 들여다보지 않는다. 매달 재학습은 하지 않는다(동결 모델 그대로).",
+ "panel_sha256": "732aed479e6413ff",
+ "backtest_2025_26": {
+  "day_mean_bp": 20.48,
+  "ci": [
+   3.72,
+   37.1
+  ],
+  "sharpe_ann": 1.89,
+  "by_year_bp": {
+   "2025": 11659,
+   "2026": 466
+  },
+  "max_dd_bp": -3164,
+  "trades_per_day": 2.27
+ },
+ "caveats": [
+  "2023~24 같은 방법 불통과(4bp 일 −5.5)",
+  "BTC 재현 매매 0",
+  "수익 37% 가 급락 5일",
+  "2026 4bp 합 ≈ 0"
+ ],
+ "portfolio3": {
+  "rule": "① 동결 4h HGB(q.2·4h 보유·위상 8 분산) ② 일봉 추세 5표(|표|≥.5, 00:00 UTC, 1일 보유) ③ UTC 00:00 첫 30분 |수익| > 0.5σ(직전 1일 5분 변동×√6) 이면 반대, 4h 보유 — 가중 = 직전 90일 일 표준편차 역수(상한 3배)",
+  "backtest_2023_26": {
+   "yearly_sharpe": {
+    "2023": -0.72,
+    "2024": 1.65,
+    "2025": 1.53,
+    "2026": 1.81
+   },
+   "sharpe_all": 1.19,
+   "day_mean_bp": 6.54,
+   "ci": [
+    0.42,
+    12.43
+   ],
+   "mdd_bp": -1594
+  },
+  "verdict": "2026-09-15 이후 ≥180일 · 결합 일 평균 일 부트스트랩 95% CI 하한 > 0 · 비용 4bp"
+ },
+ "portfolio2_recommended": {
+  "rule": "② 일봉 추세 5표 + ③ UTC 00:00 개장 되돌림, 위험 맞춤(직전 90일 일 표준편차 역수, 상한 3배), 비용 4bp — ML 없음",
+  "backtest_eth_2023_26": "🔴 08:05 정정: 이전 값(샤프 1.12, 2023 +1.20)은 가중치 예열로 2023-05~ 만 센 것 — 아래 2022-06~ 전체 기간 값으로 대체",
+  "replication_btc_2023_26": "위 BTC 행으로 대체(2022-06~ 전체)",
+  "verdict": "2026-09-15 이후 ≥180일 · ETH·BTC 각각 일 평균 부트스트랩 95% CI 하한 > 0 · 비용 4bp · 그 전엔 결과 보지 말 것",
+  "caveat": "UTC 00시는 24시각 사후 스캔에서 고름(20코인 부호 일치로 보강) · 2025 년 개장 되돌림 음수",
+  "backtest_full_2022_06_2026_09": {
+   "ETH": {
+    "2022": -0.05,
+    "2023": 0.13,
+    "2024": 1.96,
+    "2025": -0.02,
+    "2026": 1.99,
+    "all": 0.71
+   },
+   "BTC": {
+    "2022": 0.37,
+    "2023": 0.94,
+    "2024": 1.39,
+    "2025": 0.17,
+    "2026": 2.17,
+    "all": 0.95
+   },
+   "20coin_avg": {
+    "2022": -0.34,
+    "2023": 0.64,
+    "2024": 1.09,
+    "2025": -1.0,
+    "2026": 1.87,
+    "all": 0.33
+   },
+   "coins_positive_years_dist": {
+    "1": 2,
+    "2": 6,
+    "3": 8,
+    "4": 2,
+    "5": 2
+   }
+  }
+ },
+ "H_fund_funding_hour_residual": {
+  "frozen_kst": "2026-10-10 08:15",
+  "rule": "시각 h∈{00,08,16} UTC: 첫 30분 f30 − (b0 + b1·테이커 불균형30) = 잔차, |잔차| > 0.5σ30 이면 잔차 반대로 4h 보유",
+  "flow_coef": {
+   "ETHUSDT": [
+    2.547,
+    264.279
+   ],
+   "BTCUSDT": [
+    1.627,
+    175.668
+   ]
+  },
+  "evidence_in_sample": "2022~26 잔차 β(1σ당) ETH 00시 −8.3·08/16시 −7.2·그 외 +0.7 · BTC −8.4/−4.0/−0.5 — 결과를 보고 세운 가설",
+  "literature": "직접 근거 없음 · 00시 거래량·변동 급증(Hansen 외 2021) · 펀딩 시각 스프레드·역선택 증가(Ruan·Streltsov) · 개장 모멘텀 보고(Shen 외 2022, Kim·Hansen 2026)는 반대 부호",
+  "recorder": "scripts/live_eth_direction_forward_recorder_20261010.py --record 를 00:31·08:31·16:31 UTC (서버 cron 미등록)",
+  "verdict": "2026-10-10 이후 기록 ≥180일 · ETH·BTC 각 잔차 결정 4h 손익 4bp 후 일 부트스트랩 95% CI 하한 > 0 · 그 전엔 --status 만",
+  "in_sample_trading": "표본 내에서도 매매 음수: ETH 전체 샤프 −0.20 · BTC −0.29 (00시 건당 +5.0/+1.9bp, 08·16시 −2~−5bp, 4bp 후) → 매매 후보 아님, 메커니즘 관찰용 기록"
+ },
+ "FINAL_combo_realistic_execution": {
+  "frozen_kst": "2026-10-10 08:40",
+  "rule": "① 동결 4h HGB(q.2·4h·위상 8 분산) 를 지정가 실행(결정 직전 1분 종가, 5분 안 관통해야 체결, 아니면 시장가 4bp · USDC 메이커 0%) ② 일봉 추세 5표 ③ UTC 00:00 개장 되돌림 — 직전 90일 일 표준편차 역수 비중(상한 3배)",
+  "backtest_2023_05_2026_09": {
+   "yearly_sharpe": {
+    "2023(5~12월)": -0.1,
+    "2024": 2.03,
+    "2025": 1.84,
+    "2026": 2.14
+   },
+   "sharpe": 1.68,
+   "day_bp": 9.1,
+   "ci": [
+    3.7,
+    15.3
+   ],
+   "mdd_bp": -1459
+  },
+  "deflated_sharpe": {
+   "N50_sd0.8": 0.396,
+   "N100_sd0.8": 0.261,
+   "N50_sd0.6": 0.72
+  },
+  "caveats": [
+   "4h HGB 우위는 2025 국면(고변동일 많음) 몫이 큼 · 2023~24 홀드아웃 본전",
+   "메이커 수수료 1bp 면 HGB 샤프 1.16→0.67",
+   "개장 되돌림 00시·4h 는 사후 선택 · 20코인 평균 0.33",
+   "DSR < 0.95 → 검증 아님"
+  ],
+  "verdict": "2026-10-10 이후 ≥180일 전진 · 결합 일 평균 일 부트스트랩 95% CI 하한 > 0 · 판정 전엔 --forward-status / recorder --status 만",
+  "backtest_2023_05_2026_09_seed3_holdout": {
+   "yearly_sharpe": {
+    "2023(5~12월)": 0.14,
+    "2024": 1.59,
+    "2025": 1.81,
+    "2026": 2.13
+   },
+   "sharpe": 1.56,
+   "day_bp": 8.4,
+   "ci": [
+    3.1,
+    14.5
+   ],
+   "mdd_bp": -1468,
+   "deflated_sharpe": {
+    "N50": 0.312,
+    "N100": 0.193
+   },
+   "note": "08:50 갱신: 2023~24 HGB 홀드아웃을 최종과 같은 시드 3 평균으로 재학습(시드 1판의 2024 +0.55 는 시드 운 → −0.19). 이 값이 주 기준."
+  }
+ },
+ "FINAL_3asset": {
+  "frozen_kst": "2026-10-10 09:03",
+  "rule": "ETH·BTC·SOL 각각 [4h HGB(전체 피쳐·최근 365일·매달 재학습) 지정가 실행 + 일봉 추세 5표 + UTC 00:00 개장 되돌림] 위험 맞춤 결합 → 세 자산 동일 위험 평균",
+  "backtest_2023_05_2026_09": {
+   "yearly_sharpe": {
+    "2023(5~12월)": 1.74,
+    "2024": 1.92,
+    "2025": 1.55,
+    "2026": 1.58
+   },
+   "sharpe": 1.7,
+   "psr_gt0": 0.9991,
+   "positive_months": "25/41"
+  },
+  "replication": {
+   "BTC": {
+    "sharpe": 1.23,
+    "yearly": [
+     0.81,
+     1.55,
+     1.58,
+     0.59
+    ],
+    "psr_gt0": 0.9888
+   },
+   "SOL": {
+    "sharpe": 1.21,
+    "yearly": [
+     2.63,
+     1.52,
+     -0.03,
+     1.08
+    ],
+    "psr_gt0": 0.9859
+   },
+   "note": "ETH 에서 정한 방법 그대로(HGB·추세 부품은 완전 독립). 개장 되돌림 00시 선택엔 20코인 부호 확인에 BTC·SOL 이 들어감 · BTC·SOL HGB 는 시드 1·5분봉 지정가 근사"
+  },
+  "verdict": "2026-10-10 이후 ≥180일 · 3자산 결합 일 평균 일 부트스트랩 95% CI 하한 > 0 · 4bp(시장가 몫)·USDC 메이커 0% · 판정 전엔 상태만",
+  "backtest_seed3_all_assets": {
+   "3asset": {
+    "yearly": {
+     "2023": 1.57,
+     "2024": 2.05,
+     "2025": 1.65,
+     "2026": 1.63
+    },
+    "sharpe": 1.75,
+    "psr0": 0.9994,
+    "pos_months": "27/41",
+    "corr": [
+     [
+      1.0,
+      0.513,
+      0.418
+     ],
+     [
+      0.513,
+      1.0,
+      0.45
+     ],
+     [
+      0.418,
+      0.45,
+      1.0
+     ]
+    ]
+   },
+   "ETH": {
+    "sharpe": 1.56,
+    "psr0": 0.9981,
+    "psr_0.5": 0.975
+   },
+   "BTC": {
+    "sharpe": 1.32,
+    "psr0": 0.993,
+    "psr_0.5": 0.937
+   },
+   "SOL": {
+    "sharpe": 1.29,
+    "psr0": 0.9903,
+    "psr_0.5": 0.924
+   },
+   "note": "09:11 확정: BTC·SOL HGB 도 시드 3 평균(ETH 와 같은 조건). 이 값이 주 기준."
+  },
+  "monthly_block_bootstrap_sharpe_ci": {
+   "ETH": [
+    0.55,
+    2.54
+   ],
+   "BTC": [
+    0.15,
+    2.47
+   ],
+   "SOL": [
+    0.1,
+    2.43
+   ],
+   "3asset": [
+    0.56,
+    2.91
+   ],
+   "p_sharpe_gt1_3asset": 0.898
+  },
+  "replication_no_micro_depth": {
+   "XRP": {
+    "hgb": 0.24,
+    "combo": 0.22,
+    "combo_yearly": [
+     0.49,
+     1.63,
+     -1.68,
+     0.67
+    ]
+   },
+   "BNB": {
+    "hgb": -0.62,
+    "combo": -0.07,
+    "combo_yearly": [
+     -1.11,
+     -0.04,
+     -0.16,
+     0.89
+    ]
+   },
+   "note": "09:35 추가: 마이크로구조·호가 깊이 원천 없는 코인(묶음 생략)에선 재현 안 됨 — 적용 범위 = 원천이 다 있는 ETH·BTC·SOL. 피쳐 부재 탓인지 자산 성질 탓인지 미분리."
+  },
+  "ablation_no_micro_depth_65feat": {
+   "ETH": {
+    "hgb": 0.94,
+    "combo": 1.47,
+    "combo_yearly": [
+     -0.19,
+     1.72,
+     1.4,
+     2.47
+    ]
+   },
+   "BTC": {
+    "hgb": 0.47,
+    "combo": 1.22,
+    "combo_yearly": [
+     0.81,
+     1.64,
+     0.97,
+     1.16
+    ],
+    "full_feat_combo": 1.23
+   },
+   "SOL": {
+    "hgb": 0.94,
+    "combo": 1.4,
+    "combo_yearly": [
+     2.63,
+     1.89,
+     0.41,
+     0.7
+    ],
+    "full_feat_combo": 1.21
+   },
+   "note": "10-10 09:50 사후 대조(시드 1, 5분봉 지정가 근사): XRP·BNB 와 같은 65피쳐(마이크로·깊이·베이시스·현물 뺌)로도 ETH·BTC·SOL 결합 유지 → XRP·BNB 실패는 피쳐 부재가 아니라 자산 성질. 마이크로·깊이 묶음은 증분 ≈0(SOL 은 빼면 오히려 나음). 동결 사양은 바꾸지 않음(사후 발견)."
+  },
+  "dsr_3asset": {
+   "T_days": 1231,
+   "sr_ann": 1.75,
+   "grid": {
+    "N100_sd0.5": 0.817,
+    "N300_sd0.5": 0.714,
+    "N1000_sd0.5": 0.593,
+    "N100_sd0.3": 0.967,
+    "N30_sd1.0": 0.278,
+    "N100_sd1.0": 0.076
+   },
+   "note": "시도 간 연 SR 분산 가정에 민감. 결합 수준 시도들(복제·제거·스트레스)의 퍼짐 ≈ 연 0.5 → DSR 0.6~0.8. 퍼짐 1.0 이면 0.3 미만. 저장 JSON 159개 SR 표준편차 5.2 는 짧은 창·건당 값이 섞여 쓸 수 없음. 결론: 과거 데이터만으론 '최고'를 증명 못 함 → 전진 판정이 결정."
+  }
+ }
+}
