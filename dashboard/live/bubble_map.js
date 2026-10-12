@@ -162,6 +162,37 @@
     });
     g.restore();
 
+    // 2026-10-13 사용자 «지지와 저항 라인을 체결 버블 차트에 라인선 추가»: 풋프린트·게이지와 같은 목록(app.js srLevelsLive: 청산맵 레벨 ·
+    //   아직 안 쓸린 · 가까운 순 3개씩) · 같은 규약(점선 · 지지 --liq-support / 저항 --liq-resistance · 굵기 ∝ weight_pct · 이름표 왼쪽).
+    //   세로 범위가 좁아 밖에 있는 지지1·저항1은 플롯 아래·위 끝에 «이름 가격 ↓/↑ 거리%» 만 붙인다. 🔴서술 -- 반등을 예측하지 않는다.
+    var sr = typeof srLevelsLive === "function" ? srLevelsLive(3) : null;
+    if (sr) {
+      var srCol = { sup: css("--liq-support"), res: css("--liq-resistance") }, edge = [];
+      var srTxt = function (txt, x, y, col) { g.lineWidth = 4; g.lineJoin = "round"; g.strokeStyle = rgb("--bbm-bg", 0.9); g.strokeText(txt, x, y); g.fillStyle = col; g.fillText(txt, x, y); };   // 히트맵 위 글자 = 버블 금액과 같은 어두운 외곽선
+      var srLine = function (yy, col, w) {
+        g.save(); g.beginPath(); g.rect(L0, top, PW, PH); g.clip();
+        g.strokeStyle = col; g.lineWidth = w; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(L0, yy); g.lineTo(L0 + PW, yy); g.stroke();
+        g.restore();
+      };
+      g.font = "700 11px " + sans; g.textBaseline = "middle"; g.textAlign = "left";
+      ["res", "sup"].forEach(function (side) {
+        sr[side].forEach(function (lv, i) {
+          var pv = Number(lv.price), tag = (side === "sup" ? "지지" : "저항") + (i + 1);
+          if (!(pv > 0)) return;
+          if (pv < lo || pv > hi) { if (!i) edge.push({ side: side, tag: tag, p: pv }); return; }
+          var yy = Math.round(Y(pv)) + 0.5;
+          srLine(yy, srCol[side], Math.max(1, Math.min(4, Math.round(1 + (lv.weight_pct || 0) * 3))));
+          srTxt(tag + " " + fmtPx(pv), L0 + 6, yy - 9, srCol[side]);
+        });
+      });
+      edge.forEach(function (e) {
+        var d = (e.p / last - 1) * 100, txt = e.tag + " " + fmtPx(e.p) + (e.side === "res" ? " ↑ " : " ↓ ") + (d > 0 ? "+" : "") + d.toFixed(2) + "%";
+        var ye = e.side === "res" ? top + 1.5 : top + PH - 1.5;                // 화면 밖 = 그 쪽 끝에 같은 색 점선 + 거리
+        srLine(ye, srCol[e.side], 2);
+        srTxt(txt, L0 + 6, e.side === "res" ? top + 13 : top + PH - 13, srCol[e.side]);
+      });
+    }
+
     var BK = Math.max(1, Math.round(WIN / (narrow ? 30 : 60))), nb = Math.ceil(WIN / BK), vb = [], vmax = 1;   // 거래 막대
     for (var i = 0; i < nb; i++) vb.push([0, 0]);
     rows.forEach(function (x) { var b = vb[Math.min(nb - 1, Math.floor((x.t - t0) / BK))]; b[0] += x.b; b[1] += x.s; });
