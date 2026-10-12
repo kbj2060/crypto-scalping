@@ -2330,8 +2330,8 @@ svg {
   .candle-container { height: 1094px; }
   /* 2026-10-10 휴대폰 청산맵(사용자 «너무 길어 핸드폰으로 보기 불편»): 청산맵은 교체 영역(풋프린트~레인 706px)을 통째로 덮어
      세로로 길었다 -- 청산맵일 때만 상자를 242px 줄여 교체 영역이 ~464px 가 되게 한다(아래 1초 수급은 그대로). 일봉은 그대로. */
-  #fpCard.fp-liq-on #candleSvgSnapshot { height: 840px; }
-  #fpCard.fp-liq-on .candle-container { height: 852px; }
+  #fpCard.fp-liq-on #candleSvgSnapshot, #fpCard.fp-bbm-on #candleSvgSnapshot { height: 840px; }   /* 10-13 체결 버블도 청산맵 크기 */
+  #fpCard.fp-liq-on .candle-container, #fpCard.fp-bbm-on .candle-container { height: 852px; }
 }
 /* 2026-09-19 히트맵 그림을 걷어내고(사용자 지시) 프로파일이 그 수치를 직접 그린다 --
    상자가 844 -> 706 으로 돌아왔다. SUB_TOTAL 306 = 8 + 190(프로파일) + 8 + 100(1초 수급).
@@ -3363,7 +3363,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
    10배·75~100배는 기존 토큰(호가 깊이 하늘 · 경고 주황), 사이 둘만 이 차트 몫으로 둔다(거래대금 파랑은 전용이라 안 씀). */
 :root { --lev10: var(--book-depth); --lev25: #8b93f0; --lev50: #e6c45c; --lev100: var(--warn); }
 [data-theme="light"] { --lev25: #4a52b8; --lev50: #9a7a12; }
-#fpViewTabs { --seg-n: 2; }
+#fpViewTabs { --seg-n: 3; }
+#bubbleWinTabs { --seg-n: 3; }
 #liqDaysTabs { --seg-n: 3; }
 /* 2026-10-10 체결 기둥 [1d 7d 30d] [체결 | 포지션] -- 차트 위에 띄운 HTML 버튼(app.js placeFpColTog). 오른쪽 끝을 기둥 오른쪽에 맞춘다 */
 .fp-col-tog { position: absolute; transform: translateX(-100%); display: flex; gap: 6px; z-index: 2; width: max-content; white-space: nowrap; }
@@ -3376,13 +3377,25 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fp-col-tog.pos [data-col][aria-pressed="true"] { background: var(--position); }
 .fp-col-tog [data-win][aria-pressed="true"] { background: var(--muted); }
 .fp-col-tog button:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }   /* 2026-10-10 청산맵 기간(1d·7d·30d) -- 청산맵일 때 창 탭 자리 */
-#chartWindowTabs[hidden], #liqDaysTabs[hidden] { display: none !important; }
+#chartWindowTabs[hidden], #liqDaysTabs[hidden], #bubbleWinTabs[hidden] { display: none !important; }
 /* 10-09 사용자 «1d 일 때도 풋프린트/청산맵 토글은 항상»: 두 축이 독립 -- 시간(1h…12h·1d) × 보기(풋프린트·청산맵).
    청산맵을 고르면 시간과 상관없이 청산맵(일봉은 그 아래 숨김), 풋프린트면 1d = 일봉 · 1h…12h = 5분 풋프린트 */
-#fpCard.fp-liq-on #fpDaily { display: none !important; }
+#fpCard.fp-liq-on #fpDaily, #fpCard.fp-bbm-on #fpDaily { display: none !important; }
 .lqp-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text); font: 600 11px/1.5 var(--font-sans); }
 .lqp-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .lqp-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 .lqp-long, .lqp-short { height: 2px; width: 14px; border-radius: 1px; }
 .lqp-long { background: var(--bad); } .lqp-short { background: var(--good); }
 .lqp-t0 { background: var(--lev10); } .lqp-t1 { background: var(--lev25); } .lqp-t2 { background: var(--lev50); } .lqp-t3 { background: var(--lev100); }
+
+/* 2026-10-13 체결 버블(bubble_map.js · 사용자 «Bookmap 처럼 큰 건 빨강 · 중간 노랑 · 작은 건 파랑»). 히트맵 램프는 이 차트 전용 --
+   플롯 바탕을 어둡게 고정해야 파랑→노랑→빨강이 읽힌다(밝은 테마에서도 같은 바탕). 값 = "r g b" (캔버스가 보간한다). */
+:root { --bbm-bg: 14 30 44; --bbm-price: 255 255 255;
+  --bbm-h0: 18 40 58; --bbm-h1: 24 92 138; --bbm-h2: 60 140 190; --bbm-h3: 150 175 190; --bbm-h4: 226 196 64; --bbm-h5: 232 128 48; --bbm-h6: 214 58 44; }
+.bbm-canvas { cursor: default; }
+.bbm-sw-heat { display: inline-block; width: 40px; height: 10px; border-radius: 2px;
+  background: linear-gradient(90deg, rgb(var(--bbm-h1)), rgb(var(--bbm-h2)), rgb(var(--bbm-h3)), rgb(var(--bbm-h4)), rgb(var(--bbm-h5)), rgb(var(--bbm-h6))); }
+.bbm-sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box; }
+.bbm-b { background: color-mix(in srgb, var(--good) 70%, transparent); }
+.bbm-s { background: color-mix(in srgb, var(--bad) 70%, transparent); }
+.bbm-w { border: 1.5px solid var(--text); }

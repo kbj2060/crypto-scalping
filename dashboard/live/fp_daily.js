@@ -189,9 +189,9 @@
   //   풋프린트·레인·모의 판·지지/저항, 좁은 화면은 풋프린트~5분 레인) 위에 **배경 없이** 놓는다(사용자 «시간봉과 스타일 통일 · 너무 검정»).
   //   아래 5분 그림은 svg 에 그 영역만큼 구멍(clip-path evenodd)을 내 숨긴다 -- 카드의 실제 배경이 그대로 비친다.
   //   viewBox = 상자 픽셀이라 좌표 그대로. 🔴SVG 에는 offsetTop 이 없어(undefined → NaN) 화면 좌표 차로 잰다.
-  var ALT = { daily: false, liq: false };
+  var ALT = { daily: false, liq: false, bubble: false };   // 2026-10-13 bubble = 체결 버블(bubble_map.js)
   function syncHole() {
-    var svg = $("candleSvgSnapshot"), card = $("fpCard"), g = window.fpRegion, on = ALT.daily || ALT.liq;
+    var svg = $("candleSvgSnapshot"), card = $("fpCard"), g = window.fpRegion, on = ALT.daily || ALT.liq || ALT.bubble;
     if (card) { card.classList.toggle("fp-alt-on", on); card.classList.toggle("fp-alt-wide", !!(on && g && g.split)); }
     if (!svg) return;
     var clip = "";

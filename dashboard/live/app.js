@@ -6376,6 +6376,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const posOn = !!(TRADE_W && fpColMode === "pos" && activeSnapshotAsset === "eth");
     placeFpColTog(svg, tradeX0 + TRADE_W - 2, mt - 16, !!(TRADE_W && activeSnapshotAsset === "eth"
       && !(typeof window.fpLiqActive === "function" && window.fpLiqActive())
+      && !(typeof window.fpBubbleActive === "function" && window.fpBubbleActive())
       && !(typeof window.fpDailyActive === "function" && window.fpDailyActive())));   // 청산맵·일봉이 덮을 땐 숨김
     if (posOn) {
       const P = latestPositionProfile, W = P && P.win && P.win[String(fpPosWin)];

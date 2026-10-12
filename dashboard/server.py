@@ -1352,6 +1352,43 @@ def pick_paper_state(sts: list[Any], now: float) -> Any:
     return sts[0]
 
 
+# 2026-10-13 «체결 버블»(사용자 «Bookmap 같은 1초 체결 버블 · 청산맵 크기로 배포») -- 1초 × 가격 칸 체결(매수·매도·고래 몫).
+#   원천 = 체결 테이프 hot SQLite(수집기가 5초마다 완결된 초를 쓴다 → 화면 지연 ≈5초). 배경 호가는 기존 /api/flow/heatmap.
+BUBBLE_WINDOWS = (180, 300, 600)
+_bubble_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def bubble_tape_payload(symbol: str, sec: int, db: Path = HOT_TAPE_DB, now: float | None = None) -> dict[str, Any]:
+    end = int(now if now is not None else time.time())
+    lo = end - sec - 5                                    # 수집기 지연(5초)만큼 더 받아 창 끝이 비지 않게
+    rows = _read_only_rows(db, """SELECT ts_sec, price_bin, buy_qty, sell_qty,
+                                         coalesce(whale_buy_qty, 0) + coalesce(whale_sell_qty, 0)
+                                  FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? ORDER BY ts_sec""", [symbol, lo])
+    return {"symbol": symbol, "bucket": TAPE_BUCKETS[symbol], "lo": lo, "end": end,
+            "rows": [[int(t), int(b), round(float(x or 0), 6), round(float(y or 0), 6), round(float(w or 0), 6)]
+                     for t, b, x, y, w in rows]}
+
+
+async def api_bubble_tape(request: web.Request) -> web.Response:
+    asset = str(request.query.get("asset") or "eth").lower()
+    symbol = f"{asset}usdt"
+    try:
+        sec = int(request.query.get("sec", "180"))
+    except ValueError:
+        raise web.HTTPBadRequest(reason="bad_sec") from None
+    if symbol not in TAPE_BUCKETS or sec not in BUBBLE_WINDOWS:
+        raise web.HTTPBadRequest(reason="unsupported_asset_or_window")
+    key, now = f"{symbol}|{sec}", time.time()
+    hit = _bubble_cache.get(key)
+    if hit is None or now - hit[0] >= 1.0:                 # 1초 캐시 -- 탭이 몇 개든 읽기는 초당 한 번
+        try:
+            hit = (now, await asyncio.to_thread(bubble_tape_payload, symbol, sec))
+        except (sqlite3.Error, duckdb.Error, OSError) as exc:
+            return web.json_response({"error": type(exc).__name__, "rows": []}, status=503, headers=NOCACHE)
+        _bubble_cache[key] = hit
+    return web.json_response(hit[1], headers=NOCACHE)
+
+
 async def api_paper_arms(request: web.Request) -> web.Response:
     """?asset= 코인별 엔진(2026-10-04 SOL·XRP = RL_SYMBOL 프로세스, paper_<coin>/). ETH 만 미리보기 엔진 폴백이 있다."""
     now, asset = time.time(), str(request.query.get("asset") or "eth").lower()
@@ -7117,6 +7154,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/kalshi", api_kalshi)
     app.router.add_get("/api/opt-smile", api_opt_smile)
     app.router.add_get("/api/flow/heatmap", api_flow_heatmap)
+    app.router.add_get("/api/bubble-tape", api_bubble_tape)   # 2026-10-13 체결 버블(bubble_map.js)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
     app.router.add_get("/api/liquidation-direction-signal", api_liquidation_direction_signal)
