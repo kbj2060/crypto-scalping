@@ -108,7 +108,7 @@
     if (hi - lo < minW) { var cm = (hi + lo) / 2; lo = cm - minW / 2; hi = cm + minW / 2; }   // 래스터 칸이 두꺼워지지 않게
     // 2026-10-13 사용자 «청산맵과 같은 디자인 규칙 · 청산맵 막대 차트 가로·세로에 맞게 채워»: 플롯 상자 = liq_profile.js 와 같은 여백
     //   (좌 68/60 · 우 68/54 · 위 22 · 아래 축 28). 상자 안 위 80% = 호가 히트맵 + 버블, 아래 20% = 거래 막대. 축 글자 = 플롯 밖 · 굵게 · 바탕 외곽선.
-    var L0 = narrow ? 60 : 68, R0 = narrow ? 54 : 68, top = 22, axisH = 28, GAP = 6;
+    var L0 = narrow ? 0 : 68, R0 = narrow ? 0 : 68, top = 22, axisH = 28, GAP = 6;   // 2026-10-13 휴대폰 = 좌우 꽉(사용자)
     var PW = W - L0 - R0, IH = H - top - axisH, VH = Math.round(IH * 0.2), PH = IH - VH - GAP, base = top + IH, vy0 = base - VH;
     var X = function (t) { return L0 + (t - t0) / WIN * PW; }, Y = function (p) { return top + PH - (p - lo) / (hi - lo) * PH; };
     S.view = { t0: t0, L: L0, PW: PW };
@@ -209,6 +209,7 @@
     g.globalAlpha = 1;
 
     var ly = Y(last), ps = nice((hi - lo) / Math.max(3, PH / 70)), dec = Math.max(0, -Math.floor(Math.log(ps) / Math.LN10 + 1e-9));
+    if (!narrow) {                                                                     // 휴대폰 = 오른쪽 라벨 없음 · 위 «현재가»만(사용자 2026-10-13)
     g.font = "600 12px " + sans; g.textBaseline = "middle"; g.textAlign = "left";    // 가격 축 = 오른쪽(2026-10-13 사용자 «오른쪽에 가격 라벨 되돌려»)
     for (var p = Math.ceil(lo / ps) * ps; p <= hi; p += ps) {
       var y = Y(p); if (y < top + 6 || y > top + PH - 6 || Math.abs(y - ly) < 14) continue;
@@ -224,6 +225,7 @@
     g.font = "600 12px " + sans; g.textAlign = "left";                                  // 거래대금 축(오른쪽, 아래 칸)
     for (var gv2 = vs; gv2 <= vtop + 1e-9; gv2 += vs) halo(usd(gv2), L0 + PW + 6, yV(gv2), C.muted);
     halo(BK + "초 합", L0 + PW + 6, base - 8, C.muted);
+    }
     g.font = "700 13px " + sans; g.textAlign = "center";                               // 현재가 = 상자 없이 굵은 숫자(청산맵과 같은 규약)
     halo("현재가 " + fmtPx(last) + (S.back ? " · 지난 구간(더블클릭 = 실시간)" : ""), L0 + PW / 2, 10, C.text);
 
