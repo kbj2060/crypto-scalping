@@ -60,7 +60,7 @@
     if (typeof window.fpPlaceOverlay === "function") window.fpPlaceOverlay($("bubbleMap"));
     var cv = $("bubbleMapCanvas"), st = $("bubbleMapStatus");
     if (!cv || !cv.clientWidth || !cv.clientHeight) return;
-    var W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1, narrow = W < 600;
+    var W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1, narrow = W < 560;   // 청산맵과 같은 기준
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     var g = cv.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -87,22 +87,28 @@
     lo -= pad; hi += pad;
     if (hi - lo < minW) { var cm = (hi + lo) / 2; lo = cm - minW / 2; hi = cm + minW / 2; }   // 래스터 칸이 두꺼워지지 않게
 
-    var R = narrow ? 74 : 76, B = 20, VH = Math.round((H - B) * 0.2), GAP = 6, PW = W - R, PH = H - B - VH - GAP, vy0 = PH + GAP;
-    var X = function (t) { return (t - t0) / WIN * PW; }, Y = function (p) { return PH - (p - lo) / (hi - lo) * PH; };
-    var bg = rgb("--bbm-bg"), price = rgb("--bbm-price"), good = css("--good"), bad = css("--bad"), muted = css("--muted");
-    var sans = css("--font-sans") || "sans-serif", mono = css("--font-mono") || "monospace";
-    g.fillStyle = bg; g.fillRect(0, 0, PW, PH); g.fillRect(0, vy0, PW, VH);
+    // 2026-10-13 사용자 «청산맵과 같은 디자인 규칙 · 청산맵 막대 차트 가로·세로에 맞게 채워»: 플롯 상자 = liq_profile.js 와 같은 여백
+    //   (좌 68/60 · 우 68/54 · 위 22 · 아래 축 28). 상자 안 위 80% = 호가 히트맵 + 버블, 아래 20% = 거래 막대. 축 글자 = 플롯 밖 · 굵게 · 바탕 외곽선.
+    var L0 = narrow ? 60 : 68, R0 = narrow ? 54 : 68, top = 22, axisH = 28, GAP = 6;
+    var PW = W - L0 - R0, IH = H - top - axisH, VH = Math.round(IH * 0.2), PH = IH - VH - GAP, base = top + IH, vy0 = base - VH;
+    var X = function (t) { return L0 + (t - t0) / WIN * PW; }, Y = function (p) { return top + PH - (p - lo) / (hi - lo) * PH; };
+    var C = { bg: css("--chart-bg"), text: css("--text"), muted: css("--muted"), line: css("--line"), good: css("--good"), bad: css("--bad") };
+    var heatBg = rgb("--bbm-bg"), price = rgb("--bbm-price"), good = C.good, bad = C.bad;
+    var sans = css("--font-sans") || "sans-serif";
+    var halo = function (txt, x, y, col) { g.lineWidth = 3; g.lineJoin = "round"; g.strokeStyle = C.bg; g.strokeText(txt, x, y); g.fillStyle = col; g.fillText(txt, x, y); };
+    var nice = function (raw) { var e = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10)), m = raw / e; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * e; };
 
-    g.save(); g.beginPath(); g.rect(0, 0, PW, PH); g.clip();
+    g.save(); g.beginPath(); g.rect(L0, top, PW, PH); g.clip();
+    g.fillStyle = heatBg; g.fillRect(L0, top, PW, PH);                // 히트맵 램프가 읽히는 어두운 바탕(가격 칸만)
     if (M) {                                                             // 호가 래스터
-      var L = lut(), colW = M.dt / WIN * PW, rowH = M.bs / (hi - lo) * PH;
+      var LUT = lut(), colW = M.dt / WIN * PW, rowH = M.bs / (hi - lo) * PH;
       for (var c2 = 0; c2 < M.cols; c2++) {
         var tc2 = M.t0 + c2 * M.dt;
         if (tc2 + M.dt <= t0 || tc2 > tEnd) continue;
         for (var j = 0; j < M.nb; j++) {
           var v = M.q[c2 * M.nb + j]; if (!v) continue;
           var pj = (M.blo + j) * M.bs; if (pj < lo - M.bs || pj > hi + M.bs) continue;
-          g.fillStyle = L[Math.min(127, Math.abs(v))]; g.fillRect(X(tc2), Y(pj + M.bs / 2), colW + 0.6, rowH + 0.6);
+          g.fillStyle = LUT[Math.min(127, Math.abs(v))]; g.fillRect(X(tc2), Y(pj + M.bs / 2), colW + 0.6, rowH + 0.6);
         }
       }
     }
@@ -125,51 +131,56 @@
       }
     });
     g.globalAlpha = 1;
-    g.font = "800 " + (narrow ? 10.5 : 12) + "px " + sans; g.textBaseline = "middle";
+    g.font = "800 " + (narrow ? 10.5 : 12) + "px " + sans; g.textBaseline = "middle"; g.textAlign = "left";
     var placed = [];
     labels.sort(function (p, q) { return q.u - p.u; }).slice(0, WIN > 180 ? 10 : 40).forEach(function (Lb) {   // 금액 글자 -- 긴 창은 상위 10 · 겹치면 작은 쪽 생략
       var txt = usd(Lb.u), w = g.measureText(txt).width, tx = Lb.x + Lb.r + 5;
-      if (tx + w > PW - 4) tx = Lb.x - Lb.r - 5 - w;
+      if (tx + w > L0 + PW - 4) tx = Lb.x - Lb.r - 5 - w;
       if (placed.some(function (p) { return Math.abs(p.y - Lb.y) < 14 && Math.abs(p.x - tx) < w + 6; })) return;
       placed.push({ x: tx, y: Lb.y });
       g.lineWidth = 4; g.strokeStyle = rgb("--bbm-bg", 0.9); g.strokeText(txt, tx, Lb.y); g.fillStyle = price; g.fillText(txt, tx, Lb.y);
     });
     g.restore();
 
-    var ly = Y(last), raw = (hi - lo) / (narrow ? 6 : 9), e = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));   // 가격축
-    var step = [1, 2, 5, 10].filter(function (s) { return s * e >= raw; })[0] * e, dec = Math.max(0, -Math.floor(Math.log(step) / Math.LN10 + 1e-9));
-    g.fillStyle = muted; g.font = "600 " + (narrow ? 10.5 : 11.5) + "px " + mono; g.textBaseline = "middle";
-    for (var p = Math.ceil(lo / step) * step; p <= hi; p += step) {
-      var y = Y(p); if (y < 8 || y > PH - 6 || Math.abs(y - ly) < 14) continue;
-      g.fillText(p.toFixed(dec), PW + 8, y);
-    }
-    var lab = fmtPx(last); g.font = "800 " + (narrow ? 11.5 : 14) + "px " + sans;
-    var bw = Math.min(R - 4, g.measureText(lab).width + 12);
-    g.fillStyle = price; g.beginPath();
-    if (g.roundRect) g.roundRect(PW + 2, ly - 11, bw, 22, 6); else g.rect(PW + 2, ly - 11, bw, 22);
-    g.fill(); g.fillStyle = bg; g.fillText(lab, PW + 8, ly + 1);
-
     var BK = Math.max(1, Math.round(WIN / (narrow ? 30 : 60))), nb = Math.ceil(WIN / BK), vb = [], vmax = 1;   // 거래 막대
     for (var i = 0; i < nb; i++) vb.push([0, 0]);
     rows.forEach(function (x) { var b = vb[Math.min(nb - 1, Math.floor((x.t - t0) / BK))]; b[0] += x.b; b[1] += x.s; });
     vb.forEach(function (b) { vmax = Math.max(vmax, b[0], b[1]); });
-    var bw2 = PW / nb, hw = Math.max(1, bw2 / 2 - 1);
+    var vs = nice(vmax / 2), vtop = vs * Math.ceil(vmax / vs), yV = function (val) { return base - val / vtop * (VH - 2); };
+    g.lineWidth = 1; g.strokeStyle = C.line; g.globalAlpha = 0.82;      // 5분 차트 .chart-grid
+    for (var gv = vs; gv <= vtop + 1e-9; gv += vs) { var gy = Math.round(yV(gv)) + 0.5; g.beginPath(); g.moveTo(L0, gy); g.lineTo(L0 + PW, gy); g.stroke(); }
+    g.globalAlpha = 1;
+    var bw2 = PW / nb, hw = Math.max(1, bw2 * 0.39);
     vb.forEach(function (b, i2) {
-      var x = i2 * bw2, hb = b[0] / vmax * (VH - 4), hs = b[1] / vmax * (VH - 4);
-      g.fillStyle = good; g.fillRect(x + 1, vy0 + VH - hb, hw, hb); g.fillStyle = bad; g.fillRect(x + 1 + hw, vy0 + VH - hs, hw, hs);
+      var x = L0 + i2 * bw2 + bw2 * 0.11, hb = base - yV(b[0]), hs = base - yV(b[1]);
+      g.globalAlpha = 0.86; g.fillStyle = good; g.fillRect(x, base - hb, hw, hb); g.fillStyle = bad; g.fillRect(x + hw, base - hs, hw, hs);
     });
-    g.fillStyle = muted; g.font = "600 10px " + mono; g.textBaseline = "top";
-    g.fillText(usd(vmax), PW + 8, vy0); g.fillText(BK + "초", PW + 8, vy0 + 14);
+    g.globalAlpha = 1;
 
-    var ev = [30, 60, 120, 300, 600].filter(function (s) { return s >= WIN / (narrow ? 3 : 6); })[0] || 600;   // 시간축
-    g.font = "600 10.5px " + mono; g.strokeStyle = rgb("--bbm-price", 0.18); g.lineWidth = 1;
-    for (var s = Math.ceil(t0 / ev) * ev; s < tEnd; s += ev) {
-      var xs = X(s); if (xs < 20 || xs > PW - 30) continue;
-      g.setLineDash([3, 4]); g.beginPath(); g.moveTo(xs, 0); g.lineTo(xs, vy0 + VH); g.stroke(); g.setLineDash([]);
-      var hm = new Date(s * 1000).toTimeString().slice(0, ev < 60 ? 8 : 5);
-      g.fillText(hm, xs - g.measureText(hm).width / 2, vy0 + VH + 4);
+    var ly = Y(last), ps = nice((hi - lo) / Math.max(3, PH / 70)), dec = Math.max(0, -Math.floor(Math.log(ps) / Math.LN10 + 1e-9));
+    g.font = "600 12px " + sans; g.textBaseline = "middle"; g.textAlign = "right";   // 가격 축(왼쪽 = 청산맵 막대 축 자리)
+    for (var p = Math.ceil(lo / ps) * ps; p <= hi; p += ps) {
+      var y = Y(p); if (y < top + 6 || y > top + PH - 6 || Math.abs(y - ly) < 14) continue;
+      halo(p.toFixed(dec), L0 - 6, y, C.muted);
     }
+    g.font = "700 12px " + sans; halo(fmtPx(last), L0 - 6, ly, C.text);                 // 가격 축 위 현재가(굵게)
+    g.font = "600 12px " + sans; g.textAlign = "left";                                  // 거래대금 축(오른쪽)
+    for (var gv2 = vs; gv2 <= vtop + 1e-9; gv2 += vs) halo(usd(gv2), L0 + PW + 6, yV(gv2), C.muted);
+    halo(BK + "초 합", L0 + PW + 6, base - 8, C.muted);
+    g.font = "700 13px " + sans; g.textAlign = "center";                               // 현재가 = 상자 없이 굵은 숫자(청산맵과 같은 규약)
+    halo("현재가 " + fmtPx(last), L0 + PW / 2, 10, C.text);
+
+    var ev = [30, 60, 120, 300, 600].filter(function (s) { return s >= WIN / Math.max(2, PW / 70); })[0] || 600;   // 시간 축 = 5분 차트 x축 글자
+    g.font = "700 " + (narrow ? 12 : 13) + "px " + sans; g.textAlign = "center"; g.textBaseline = "top"; g.strokeStyle = C.line;
+    for (var s = Math.ceil(t0 / ev) * ev; s < tEnd; s += ev) {
+      var xs = X(s); if (xs < L0 + 24 || xs > L0 + PW - 24) continue;
+      g.fillStyle = C.muted; g.fillText(new Date(s * 1000).toTimeString().slice(0, ev < 60 ? 8 : 5), xs, base + 8);
+      g.beginPath(); g.moveTo(Math.round(xs) + 0.5, base); g.lineTo(Math.round(xs) + 0.5, base + 5); g.stroke();
+      g.globalAlpha = 0.35; g.setLineDash([3, 4]); g.beginPath(); g.moveTo(Math.round(xs) + 0.5, top); g.lineTo(Math.round(xs) + 0.5, base); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+    }
+    g.strokeStyle = C.line; g.beginPath(); g.moveTo(L0, base + 0.5); g.lineTo(L0 + PW, base + 0.5); g.stroke();
   }
+
   function redraw() { if (!S.raf) S.raf = requestAnimationFrame(draw); }
 
   function setSec(sec) {
