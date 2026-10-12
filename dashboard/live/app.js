@@ -1358,6 +1358,83 @@ let acctSpanDays = (() => {
   } catch (e) { return 7; }
 })();
 
+// 2026-10-12 «내 실력 거울»(사용자 «7번») -- 같은 코인 원장 **전체**(기간 칩과 무관 · 1주는 표본이 너무 작다)로 사실만 비춘다.
+//   실력 = 왕복 순손익 ÷ (최대 수량 × 진입가) bp · 범위 = 청산일 묶음 부트스트랩 95%.
+//   버티는 배수 = 켈리(평균 ÷ 분산)를 범위 **하한** 실력으로 잰 것 -- 평균 실력 켈리는 표본 운에 기댄다.
+//   1년 위험 = 원장 왕복을 실제 빈도(연 환산 건수)로 1년치 재표집, 노출 배수 고정 · 파산 = 순자산 ≤10% · 반토막 = 고점 대비 −50% 를 한 번이라도.
+//   ponytail: 재표집은 관측 최악보다 나쁜 왕복을 만들지 못한다 -- 실제 위험은 이보다 크다(툴팁에 적음). 꼬리는 연구의 4.7년 원장 모양 엔진이 본다.
+//   경고가 아니라 거울이다: 크기 상한은 사용자 선택(2026-09-25 해제)이라 막지 않고, 넘친 쪽만 주황으로 «눈여겨볼 곳»을 말한다.
+const ACCT_MIRROR_X = [3, 6, 9, 12, 15];
+let acctMirrorCache = { key: "", m: null };
+function acctMirrorStats(trips) {
+  const rows = trips.map((t) => ({ r: (Number(t.net_pnl) || 0) / ((Number(t.max_qty) || 0) * (Number(t.entry_price) || 0)),
+                                  day: Math.floor((Number(t.exit_time) || 0) / 86400000), x: Number(t.peak_x) }))
+    .filter((v) => Number.isFinite(v.r));
+  if (rows.length < 30) return null;
+  let s = 0x2f6b9d;                                            // 고정 시드 -- 렌더마다 숫자가 흔들리지 않게
+  const rnd = () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const r = rows.map((v) => v.r), n = r.length;
+  const mean = r.reduce((a, b) => a + b, 0) / n, varr = r.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
+  const byDay = Object.values(rows.reduce((g, v) => ((g[v.day] = g[v.day] || []).push(v.r), g), {}));
+  const boots = Array.from({ length: 600 }, () => {
+    let sum = 0, k = 0;
+    for (let i = 0; i < byDay.length; i++) { const d = byDay[(rnd() * byDay.length) | 0]; for (const x of d) { sum += x; k++; } }
+    return sum / k;
+  }).sort((a, b) => a - b);
+  const lo = boots[Math.floor(0.025 * boots.length)], hi = boots[Math.floor(0.975 * boots.length)];
+  const spanDays = Math.max(1, (Math.max(...trips.map((t) => Number(t.exit_time) || 0)) - Math.min(...trips.map((t) => Number(t.entry_time) || Infinity))) / 86400000);
+  const perYear = Math.round(n / spanDays * 365);
+  const risk = ACCT_MIRROR_X.map((L) => {
+    let ruin = 0, half = 0; const P = 500;
+    for (let p = 0; p < P; p++) {
+      let e = 1, peak = 1, ruined = false, hit = false;
+      for (let i = 0; i < perYear; i++) {
+        e *= 1 + L * r[(rnd() * n) | 0];
+        if (e <= 0.1) { ruined = true; break; }
+        if (e > peak) peak = e; else if (e <= 0.5 * peak) hit = true;
+      }
+      ruin += ruined; half += ruined || hit;
+    }
+    return { L, ruin: ruin / P, half: half / P };
+  });
+  const usual = rows.map((v) => v.x).filter(Number.isFinite).sort((a, b) => a - b);
+  return { mean, lo, hi, keepX: lo > 0 ? lo / varr : 0, kellyX: mean / varr, perYear, risk,
+           usualX: usual.length ? usual[Math.floor(usual.length / 2)] : null };
+}
+function acctMirrorHtml(trips, nowX) {
+  const key = `${trips.length}:${trips.length ? trips[trips.length - 1].exit_time : 0}`;
+  if (acctMirrorCache.key !== key) acctMirrorCache = { key, m: acctMirrorStats(trips) };
+  const m = acctMirrorCache.m;
+  if (!m) return "";
+  const bp = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 1e4).toFixed(0)}`;
+  const x = (v) => `${v < 10 ? v.toFixed(1) : v.toFixed(0)}배`;
+  const here = nowX != null && nowX > 0 ? { v: nowX, lab: "지금" } : (m.usualX ? { v: m.usualX, lab: "평소" } : null);
+  const MAX = 20, pos = (v) => `${(Math.min(v, MAX) / MAX * 100).toFixed(1)}%`;
+  const over = here && here.v > m.keepX;
+  const rail = `<div class="acct-mirror-rail" role="img" aria-label="실력이 버티는 배수 ${x(m.keepX)}${here ? ` · ${here.lab} ${x(here.v)}` : ""}">
+      <span class="acct-mirror-keep" style="width:${pos(m.keepX)}"></span>
+      ${here ? `<span class="acct-mirror-now${over ? " over" : ""}" style="left:${pos(here.v)}"></span>` : ""}
+      <span class="acct-mirror-tick" style="left:${pos(m.keepX)}"></span>
+    </div>
+    <div class="acct-mirror-scale"><span>0</span><span>${MAX}배${m.kellyX > MAX ? " →" : ""}</span></div>`;
+  const nearest = here ? ACCT_MIRROR_X.reduce((a, b) => (Math.abs(b - here.v) < Math.abs(a - here.v) ? b : a)) : null;
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  const strip = `<table class="acct-mirror-risk"><thead><tr><th scope="col"><span class="sr-only">노출</span></th>${
+      m.risk.map((k) => `<th scope="col"${k.L === nearest ? ' class="here"' : ""}>${k.L}배</th>`).join("")}</tr></thead><tbody>
+      <tr><th scope="row">파산</th>${m.risk.map((k) => `<td class="${k.ruin >= 0.1 ? "bad" : ""}${k.L === nearest ? " here" : ""}">${pct(k.ruin)}</td>`).join("")}</tr>
+      <tr><th scope="row">반토막</th>${m.risk.map((k) => `<td class="${k.half >= 0.5 ? "warn" : ""}${k.L === nearest ? " here" : ""}">${pct(k.half)}</td>`).join("")}</tr>
+    </tbody></table>`;
+  return `<dl class="acct-mirror" aria-label="내 실력 거울 — 원장 전체로 잰 건당 실력과 노출 배수별 1년 위험">
+      <div class="acct-mirror-row" title="왕복 순손익 ÷ 최대 명목(수수료 포함). 범위 = 청산일을 묶어 다시 뽑은 95% 범위 — 하한이 0 위면 실력이 우연만은 아니라는 뜻입니다.">
+        <dt>실력</dt><dd><b class="${m.mean >= 0 ? "good" : "bad"}">${bp(m.mean)}bp</b><em>건당 · 범위 ${bp(m.lo)} ~ ${bp(m.hi)}</em></dd></div>
+      <div class="acct-mirror-row" title="켈리 배수 = 실력 ÷ 왕복 손익 분산. 범위 하한 실력으로 잰 값을 «버티는 배수»로 씁니다(평균 실력이면 ${x(m.kellyX)}). 이보다 크게 걸면 성장보다 낙폭이 먼저 커집니다.">
+        <dt>배수</dt><dd class="acct-mirror-x"><span><b>${x(m.keepX)}</b><em>실력이 버티는</em></span>${
+          here ? `<span><b class="${over ? "warn" : ""}">${x(here.v)}</b><em>${here.lab === "지금" ? "지금 포지션" : "평소(중앙)"}</em></span>` : ""}${rail}</dd></div>
+      <div class="acct-mirror-row" title="원장 왕복을 실제 빈도(연 ${m.perYear}건)로 1년치 다시 뽑아 노출 배수를 고정했을 때. 파산 = 순자산 10% 이하, 반토막 = 고점 대비 −50% 를 한 번이라도. 관측한 최악보다 나쁜 왕복은 만들지 못하므로 실제 위험은 이보다 큽니다.">
+        <dt>1년</dt><dd>${strip}</dd></div>
+    </dl>`;
+}
+
 function acctPerfSvg(net, meta) {
   if (!net.length) return "";
   // 2026-09-11 사용자 "높이를 가득 채워줘" -- 칸을 꽉 채우려면 비균일 확대를 피할 수 없다.
@@ -1712,6 +1789,7 @@ function renderSnapshotAccount() {
       ${habit.map((h) => `<div class="acct-habit-row" title="${escapeHtml(h.tip + (h.unknown ? ` · 미분류 ${h.unknown}건(값을 모름)` : ""))}">
         <dt>${h.name}</dt><dd>${habitCell(h.a[0], h.A)}${habitCell(h.b[0], h.B)}</dd></div>`).join("")}
     </dl>` : "";
+  const mirrorHtml = acctMirrorHtml(allClosed, pos && equity > 0 ? Math.abs(Number(pos.notional) || 0) / equity : null);
   // 기간을 적는다(사용자 지시). 원장이 원천이므로 거래소 7일 창보다 길지만, 원장이 처음
   // 돌기 시작한 날 이전은 없다 -- 그래서 여기 있는 건 **기록된 범위**지 계좌의 전체 이력이 아니다.
   const spanText = (() => {
@@ -1763,6 +1841,7 @@ function renderSnapshotAccount() {
                  · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
             : ""}
          ${habitHtml}
+         ${mirrorHtml}
        </details></section>`
     : `<section class="acct-perf"><div class="acct-empty">${
         hiddenTrips > 0
