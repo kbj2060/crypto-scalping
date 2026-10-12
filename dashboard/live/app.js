@@ -6450,7 +6450,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   옆 캔들은 칸 폭에서 떼어 낸다(봉 사이 간격은 그대로) -- 폭 = 봉 칸의 14%(3~8px) + 틈 2px. 셀을 안 그리는 얇은 봉(bw<14)은 옛 테두리.
     //   (시안 때 쓴 "L"·"R" 분기는 남겨 둔다 -- 위치만 다른 같은 그림이다.)
     const FPC = bw >= 14 ? "C" : "";
-    const fpcW = FPC ? Math.max(3, Math.min(8, (cw / candles.length) * 0.14)) : 0, fpcGap = FPC ? 2 : 0;
+    // 2026-10-12 사용자 «모바일에서는 5분봉에 있는 체결박스들만 모두 제거 · 데스크탑은 수정하지 마»(실데이터 시안 B):
+    //   휴대폰은 칸(매도·매수·불균형·POC 테두리)을 안 그리고, 비는 자리만큼 옆 5분봉을 칸 폭의 60% 로 키워 가운데에 둔다.
+    //   델타·POC 선·밀도 층은 그대로(칸이 아니다). 데스크탑(isMobileChartMode 거짓)은 한 줄도 안 바뀐다.
+    const MOB = isMobileChartMode();
+    const fpcW = FPC ? (MOB ? Math.max(3, bw * 0.6) : Math.max(3, Math.min(8, (cw / candles.length) * 0.14))) : 0, fpcGap = FPC ? 2 : 0;
     const half = Math.max(2, (bw - fpcW - fpcGap) / 2 - 0.5);
     // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
     // 숫자를 욱여넣으면 옆 칸을 침범해서 둘 다 못 읽는다. 값은 눌러서 툴팁으로 본다.
@@ -6462,7 +6466,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   것은 «그리기»뿐이다. 캔들(심지·몸통)은 이 블록 뒤에서 어차피 그려진다.
     //   기준을 창(chartWindowBars)이 아니라 **봉 폭**으로 잡는다 -- 모바일·좁은 창에서도
     //   같은 규칙이 되고, 창 상수가 늘어도 따라온다. 48봉 bw≈26 ✓ · 144봉 bw≈9 ✗.
-    const drawCells = bw >= 14;
+    const drawCells = bw >= 14 && !MOB;
     // 라이트는 셀 배경이 밝아 글자를 거의 불투명하게 올려야 읽힌다(다크는 현행 0.82).
     const INK_OPACITY =
       document.documentElement.getAttribute("data-theme") === "light" ? "0.95" : "0.82";
@@ -6585,7 +6589,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // (POC 선은 이 forEach 가 끝난 뒤 한 번에 긋는다 -- 아래 pocPts 블록)
       const isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
       if (FPC) {   // 옆 5분봉: 채운 몸통 + 심지(칸을 덮지 않는 자리)
-        const cx0 = FPC === "L" ? x : FPC === "R" ? x + bw - fpcW : x + half + 1 + fpcGap / 2, cxm = cx0 + fpcW / 2;
+        const cx0 = MOB ? x + (bw - fpcW) / 2 : FPC === "L" ? x : FPC === "R" ? x + bw - fpcW : x + half + 1 + fpcGap / 2, cxm = cx0 + fpcW / 2;
         const wk = document.createElementNS(NS, "line");
         wk.setAttribute("x1", cxm); wk.setAttribute("x2", cxm);
         wk.setAttribute("y1", yAt(c.high)); wk.setAttribute("y2", yAt(c.low));

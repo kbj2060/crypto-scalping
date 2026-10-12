@@ -6,7 +6,7 @@
 서버 칸 키 = round(가격/버킷) = 버킷 **중심**이다. 화면이 floor(중심/행)으로 행 [k, k+1] 에 넣어 칸이 반 버킷($0.25) 위로 그려졌다.
 검사(1920 · 1h/2h/4h · 조용한 실데이터 사본 test/fixtures/fp_eth_quiet_20261010.json + 변동 큰 합성 봉 6개($15·31칸 → 행 > 버킷)):
   봉마다 캔들 심지 위끝(고가)이 맨 위 칸 안, 아래끝(저가)이 맨 아래 칸 안(±0.75px) · 형성 봉 포함(가짜 WS 체결로 그 봉 버킷 안 고저).
-  체결 기둥 툴팁의 행 범위가 버킷 경계(.25/.75)에서 끊긴다 · 호가 띠(floor 격자 원천) 줄이 체결 기둥 줄과 같다. 390 폭 한 장. JS 오류 0 · 바깥 호스트 요청은 전부 abort.
+  체결 기둥 툴팁의 행 범위가 버킷 경계(.25/.75)에서 끊긴다 · 호가 띠(floor 격자 원천) 줄이 체결 기둥 줄과 같다. JS 오류 0 · 바깥 호스트 요청은 전부 abort.
 """
 import argparse, copy, json, pathlib, random, re, sys, time
 from urllib.parse import urlparse
@@ -144,7 +144,7 @@ with sync_playwright() as p:
     b = p.chromium.launch()
     run(1920, 1080, False, (12, 24, 48), "1920_quiet", b)
     run(1920, 1080, True, (12, 24, 48), "1920_volatile", b)
-    run(390, 844, False, (12,), "390_quiet", b)
+    # 390 폭은 뺐다 -- 2026-10-12 휴대폰은 체결 칸을 안 그린다(사용자 시안 B). 휴대폰 화면은 test/render_fp_mobile_no_boxes_20261012.py 가 지킨다.
     b.close()
 out = [u for u in log if not u.startswith(ORIGIN)]
 print("바깥 호스트 요청(전부 abort)", len(out), "· JS 오류", errs[:3])
