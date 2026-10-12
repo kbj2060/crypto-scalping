@@ -1359,18 +1359,38 @@ _bubble_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def bubble_tape_payload(symbol: str, sec: int, db: Path = HOT_TAPE_DB, now: float | None = None,
-                        since: int | None = None) -> dict[str, Any]:
-    """since 를 주면 ts_sec > since 인 행만(화면이 30분치를 한 번 받은 뒤 새 초만 덧붙인다)."""
+                        since: int | None = None, okx_db: Path | None = None, bybit_db: Path | None = None) -> dict[str, Any]:
+    """since 를 주면 ts_sec > since 인 행만(화면이 30분치를 한 번 받은 뒤 새 초만 덧붙인다).
+    2026-10-13 사용자 «합산으로 진행»: 바이낸스 + OKX + Bybit USDT 선물 체결을 (초, 가격칸)마다 더한다.
+      세 테이프 모두 1초 × 같은 칸 폭(TAPE_BUCKETS = OKX BUCKETS = Bybit 수집기 _bn.BUCKETS) · 수량 = 기초자산(OKX 는 수집기가 ctVal 곱함).
+      바이낸스는 실패하면 던지고(503), OKX·Bybit 은 없거나 읽기 실패면 빼고 «venues» 에 안 넣는다(차트 전체가 비지 않게).
+      🔴합산은 실제 체결 총량 -- MM 헤지가 다른 거래소에 다시 찍힌 몫이 섞여 «새 수요»로는 부풀 수 있다."""
     end = int(now if now is not None else time.time())
     lo = end - sec - 5                                    # 수집기 지연(5초)만큼 더 받아 창 끝이 비지 않게
     if since is not None:
         lo = max(lo, since + 1)
-    rows = _read_only_rows(db, """SELECT ts_sec, price_bin, buy_qty, sell_qty,
-                                         coalesce(whale_buy_qty, 0) + coalesce(whale_sell_qty, 0)
-                                  FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ? ORDER BY ts_sec""", [symbol, lo])
-    return {"symbol": symbol, "bucket": TAPE_BUCKETS[symbol], "lo": lo, "end": end,
-            "rows": [[int(t), int(b), round(float(x or 0), 6), round(float(y or 0), 6), round(float(w or 0), 6)]
-                     for t, b, x, y, w in rows]}
+    q = """SELECT ts_sec, price_bin, buy_qty, sell_qty, coalesce(whale_buy_qty, 0) + coalesce(whale_sell_qty, 0)
+           FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ?"""
+    base = symbol[:-4].upper()
+    srcs = [("binance", db, symbol), ("okx", okx_db if okx_db is not None else OKX_TAPE_DB_PATH, f"{base}-USDT-SWAP"),
+            ("bybit", bybit_db if bybit_db is not None else BYBIT_TAPE_DB, f"{base}USDT")]
+    acc: dict[tuple[int, int], list[float]] = {}
+    venues = []
+    for name, path, key in srcs:
+        if name != "binance" and not Path(path).exists():
+            continue
+        try:
+            got = _read_only_rows(path, q, [key, lo])
+        except (sqlite3.Error, duckdb.Error, OSError):
+            if name == "binance":
+                raise
+            continue
+        venues.append(name)
+        for t, b, x, y, w in got:
+            a = acc.setdefault((int(t), int(b)), [0.0, 0.0, 0.0])
+            a[0] += float(x or 0); a[1] += float(y or 0); a[2] += float(w or 0)
+    return {"symbol": symbol, "bucket": TAPE_BUCKETS[symbol], "lo": lo, "end": end, "venues": venues,
+            "rows": [[t, b, round(v[0], 6), round(v[1], 6), round(v[2], 6)] for (t, b), v in sorted(acc.items())]}
 
 
 async def api_bubble_tape(request: web.Request) -> web.Response:

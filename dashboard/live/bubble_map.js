@@ -1,6 +1,6 @@
 // 2026-10-13 체결 버블(사용자 «web.bookmap.com 같은 체결 버블 차트» · 시안 승인 «이 차트들을 청산맵 차트 사이즈로 해서 배포해줘»).
 // 자리 = 청산맵과 같은 5분 차트 교체 영역(fp_daily.js fpPlaceOverlay · fpAltSet). 보기 토글은 liq_profile.js setView 가 «fpview» 이벤트로 알린다.
-// 원천 = 바이낸스 USDT 선물만(다른 거래소 체결은 안 섞는다).
+// 원천(2026-10-13 사용자 «합산으로 진행») = 체결은 바이낸스 + OKX + Bybit USDT 선물 합산(서버 bubble_tape_payload) · 배경 호가는 바이낸스만.
 // 배경 = 호가 래스터(/api/flow/heatmap, 작음 파랑 → 노랑 → 큼 빨강) · 흰 선 = 현재가(래스터 mid) ·
 // 버블 = 1초 체결 테이프(/api/bubble-tape, 수집기가 5초마다 써서 ~5초 늦다): $2.5만 미만 점 · 그 이상 원(넓이 ∝ 금액) · 큰 체결 고리·금액.
 // 아래 막대 = 구간별 거래대금(매수 | 매도).
@@ -36,7 +36,7 @@
     var a = asset();
     if (a !== S.asset) resetData(a);
     if (!S.on || S.busyT || document.hidden || S.none) return;
-    var last = S.rows.length ? S.rows[S.rows.length - 1][0] : 0, since = S.full && last ? last - 10 : null;   // 마지막 10초는 다시 받는다(늦게 쓰인 초)
+    var last = S.rows.length ? S.rows[S.rows.length - 1][0] : 0, since = S.full && last ? last - 15 : null;   // 마지막 15초는 다시 받는다(거래소마다 늦게 쓰인 초)
     S.busyT = true;
     fetch("/api/bubble-tape?asset=" + encodeURIComponent(a) + "&sec=" + MAX + (since != null ? "&since=" + since : ""), { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : r.status === 400 ? { rows: [], none: true } : null; })
@@ -209,13 +209,19 @@
     g.globalAlpha = 1;
 
     var ly = Y(last), ps = nice((hi - lo) / Math.max(3, PH / 70)), dec = Math.max(0, -Math.floor(Math.log(ps) / Math.LN10 + 1e-9));
-    g.font = "600 12px " + sans; g.textBaseline = "middle"; g.textAlign = "right";   // 가격 축(왼쪽 = 청산맵 막대 축 자리)
+    g.font = "600 12px " + sans; g.textBaseline = "middle"; g.textAlign = "left";    // 가격 축 = 오른쪽(2026-10-13 사용자 «오른쪽에 가격 라벨 되돌려»)
     for (var p = Math.ceil(lo / ps) * ps; p <= hi; p += ps) {
       var y = Y(p); if (y < top + 6 || y > top + PH - 6 || Math.abs(y - ly) < 14) continue;
-      halo(p.toFixed(dec), L0 - 6, y, C.muted);
+      halo(p.toFixed(dec), L0 + PW + 6, y, C.muted);
     }
-    if (ly >= top && ly <= top + PH) { g.font = "700 12px " + sans; halo(fmtPx(last), L0 - 6, ly, C.text); }   // 가격 축 위 현재가(굵게)
-    g.font = "600 12px " + sans; g.textAlign = "left";                                  // 거래대금 축(오른쪽)
+    if (ly >= top && ly <= top + PH) {                                                 // 현재가 = 오른쪽 흰 상자(시안 그대로)
+      var lab = fmtPx(last); g.font = "800 " + (narrow ? 11.5 : 13) + "px " + sans;
+      var bw = Math.min(R0 - 4, g.measureText(lab).width + 12);
+      g.fillStyle = price; g.beginPath();
+      if (g.roundRect) g.roundRect(L0 + PW + 2, ly - 11, bw, 22, 6); else g.rect(L0 + PW + 2, ly - 11, bw, 22);
+      g.fill(); g.fillStyle = heatBg; g.fillText(lab, L0 + PW + 8, ly + 1);
+    }
+    g.font = "600 12px " + sans; g.textAlign = "left";                                  // 거래대금 축(오른쪽, 아래 칸)
     for (var gv2 = vs; gv2 <= vtop + 1e-9; gv2 += vs) halo(usd(gv2), L0 + PW + 6, yV(gv2), C.muted);
     halo(BK + "초 합", L0 + PW + 6, base - 8, C.muted);
     g.font = "700 13px " + sans; g.textAlign = "center";                               // 현재가 = 상자 없이 굵은 숫자(청산맵과 같은 규약)
