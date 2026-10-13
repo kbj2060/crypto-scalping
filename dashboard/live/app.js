@@ -2656,7 +2656,7 @@ function renderLiquidationMapPanel() {
   //   🔴서술이다 -- 청산 밀집은 추정이고 지지·저항 반등을 예측하지 않는다(벽 반등률 0.509, 09-20).
   // 2026-09-28(2차) 모바일·세로 화면은 **예전 게이지 행**으로 되돌렸다(사용자 지시) -- 이름 · 가격 · 강도 막대 · 거리 %.
   const sr = srLevelsLive();
-  if (wallDrawer === "sr") renderPaper();   // 2026-10-06 넓은 화면 모의 판 칸의 지지/저항 서랍(열려 있을 때만)
+  renderPaper();   // 넓은 화면 프로파일 아래 지지/저항 칸(#mcWall)
   if (!srGaugeMode()) { setH("liquidationMapList", ""); return; }
   if (!sr || (!sr.res.length && !sr.sup.length)) {
     setH("liquidationMapList", `<p class="muted" style="padding:16px;">추정 가능한 밀집 구간이 아직 없습니다.</p>`);
@@ -4623,31 +4623,13 @@ function paperHtml(d = latestPaper, bare = false) {   // bare = 서랍 안(제�
 
 // ── 2026-10-06 넓은 화면 모의 판 칸(#mcWall) = 서랍 둘: 모의 판 · 지지/저항 (사용자 «드로우로 올리고 내리게 · 둘 중 하나만 열려 카드 높이가 안 움직이게») ──
 //   칸 높이는 풋프린트가 정한다(mcPlace) -- 열린 서랍이 남은 높이를 다 쓰고, 닫힌 서랍은 머리 한 줄(+ 요약, 사용자 선택 B). 머리를 누르면 그 서랍이 열리고(열린 걸 누르면 다른 쪽).
-// 2026-10-13 사용자(아티팩트 댓글) «모의판은 제거» -- 서랍은 지지/저항 하나(머리를 누르면 접고 편다). 엔진·기록은 계속(10-20 심사 여부, 판정 달력 paper_review).
-let wallDrawer = "sr";
-function wallDrawerHtml() {
+function wallDrawerHtml() {   // 2026-10-13 아티팩트 댓글 «라벨 지우고 숫자·게이지만»: 머리·줄 이름 없이 가격 · 강도 게이지 · 거리 %(CSS #mcWall .wdr-sr)
   const sr = srLevelsLive();
-  const px = (lv) => fmtNum(lv.price, (ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 2);
-  const sSum = sr ? [sr.res[0] && `저항 <b class="mc-bad">${px(sr.res[0])}</b>`, sr.sup[0] && `지지 <b class="mc-good">${px(sr.sup[0])}</b>`].filter(Boolean).join(" · ") : "";
-  const chev = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
-  const sec = (k, title, sub, summary, body, extra = "") => {
-    const open = wallDrawer === k;
-    return `<section class="wdr${open ? " open" : ""}"><div class="wdr-h"><button type="button" class="wdr-tg" data-wdr="${k}" aria-expanded="${open}">${chev}<span class="wdr-t">${title}</span>`
-      + (open ? `<span class="wdr-s">${sub}</span>` : summary ? `<span class="wdr-s">${summary}</span>` : "") + `</button>${open ? extra : ""}</div>`
-      + (open ? `<div class="wdr-b">${body}</div>` : "") + `</section>`;
-  };
-  const srBody = sr && (sr.res.length || sr.sup.length) ? `<div class="liq-level-list wdr-sr">${srRowsHtml(sr)}</div>`
-    : `<div class="ppm-empty">${latestLiquidationMap && latestLiquidationMap.warmed_up ? "추정 가능한 밀집 구간이 아직 없습니다" : "청산맵 데이터 수집 중"}</div>`;
-  return `<div class="wdr-wrap">`
-    + sec("sr", "지지 · 저항", "청산맵 밀집 · 가까운 3개씩", sSum, srBody) + `</div>`;
+  return `<div class="wdr-wrap"><section class="wdr open" aria-label="지지 · 저항(청산맵 밀집 · 가까운 3개씩)"><div class="wdr-b">`
+    + (sr && (sr.res.length || sr.sup.length) ? `<div class="liq-level-list wdr-sr">${srRowsHtml(sr)}</div>`
+      : `<div class="ppm-empty">${latestLiquidationMap && latestLiquidationMap.warmed_up ? "추정 가능한 밀집 구간이 아직 없습니다" : "청산맵 데이터 수집 중"}</div>`)
+    + `</div></section></div>`;
 }
-el("mcWall")?.addEventListener("click", (e) => {
-  const b = e.target.closest(".wdr-tg");
-  if (!b) return;
-  wallDrawer = wallDrawer === "sr" ? "" : "sr";   // 2026-10-13 서랍 하나 -- 접기/펴기
-  renderPaper();
-  el("mcWall").querySelector(`.wdr-tg[data-wdr="${wallDrawer}"]`)?.focus();
-});
 
 function renderPaper() {
   const wall = el("mcWall"), body = el("mcBody");
