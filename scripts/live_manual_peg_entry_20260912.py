@@ -318,7 +318,7 @@ RULE_STOP_PCT = 0.03
 COMMIT_UNIT_X = 4 * 0.303 * 10.26
 COMMIT_CAP_X = 10.0
 COMMIT_MMR, COMMIT_AVG_OFF, COMMIT_LIQ_BUF, COMMIT_STOP_SIG = 0.02, 0.0066, 0.005, 3.0
-REC_FIRST_SHARE = 0.75
+REC_FIRST_SHARE = 1 / 3   # 🔴2026-10-14 사용자 «첫 1/3 → −0.75%에 2/3»: 0.75 → 1/3. 실원장 168왕복 재생(상한 9배·손절 −3%) -- 손절 1회 25.1→22.9%·MDD −70→−62%, 기대값 차 CI 0 포함(scratchpad split_entry.py)
 # 🔴2026-10-13 사용자 «레버리지 20배 → 10배»: 거래소 레버리지 X 에서 계좌 명목 L × 순자산을 열려면 증거금 L/X × 순자산이 든다.
 #   L = 10 · X = 10 이면 순자산 100% 라 물타기 막판 주문을 거래소가 증거금 부족으로 거부한다(평가손·수수료 몫 여유 없음).
 #   그래서 실효 L = min(L, 이 비율 × X) -- X = 20 이면 18 이라 기존 L ≤ 10 그대로, X = 10 이면 9.
@@ -343,7 +343,7 @@ def commit_rule_l(*, position_side: str, sigma24_bp: float, vol_mult: float) -> 
 def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, order_leverage: float,
                   first: bool | None = None, risk_used: float = 0.0, add_stop_frac: float | None = None) -> dict[str, Any]:
     """규칙 크기. **순수 함수**. 상한 = rule_l × 순자산(계좌 전체 명목 -- 교차 마진이라 다른 포지션도 같은 잔고).
-    첫 진입(기존 명목 0) = 상한의 75%, 물타기 = 남은 여유 전부. build_entry_plan(fraction_of_equity=True)에 넘길
+    첫 진입(기존 명목 0) = 상한 × REC_FIRST_SHARE(10-14 부터 1/3), 물타기 = 남은 여유 전부. build_entry_plan(fraction_of_equity=True)에 넘길
     cap_notional·fraction 을 돌려준다 -- 잘라 넣기는 그 함수가 한다(room = cap − existing)."""
     if not (0.0 < float(rule_l) <= COMMIT_CAP_X):
         raise ValueError(f"rule_l must be in (0, {COMMIT_CAP_X}], got {rule_l!r}")
@@ -904,21 +904,21 @@ def _self_check_rec_rule() -> None:
                            risk_used=50.0, add_stop_frac=-0.01)
     assert beyond["target_notional"] == 0.0                                                # 손절선 너머 물타기 = 0
     r = rec_rule_size(rule_l=c["l"], equity=2000.0, existing_notional=0.0, order_leverage=20)
-    assert r["first"] and abs(r["target_notional"] - 0.75 * c["l"] * 2000.0) < 1e-6
+    assert r["first"] and abs(r["target_notional"] - REC_FIRST_SHARE * c["l"] * 2000.0) < 1e-6
     p = build_entry_plan(side="LONG", best_bid=2500.0, best_ask=2500.01, recommended_qty=0.0, cap_notional=r["cap_notional"],
                          filters=f, equity=2000.0, fraction=r["fraction"], fraction_of_equity=True, order_leverage=20)
-    assert abs(p["notional_usdt"] - 0.75 * c["l"] * 2000.0) < 2500 * f["step"] + 0.01, p["notional_usdt"]
-    r2 = rec_rule_size(rule_l=c["l"], equity=2000.0, existing_notional=c["l"] * 2000.0 * 0.75, order_leverage=20)
-    assert not r2["first"] and abs(r2["target_notional"] - c["l"] * 2000.0 * 0.25) < 1e-6        # 물타기 = 남은 25%
+    assert abs(p["notional_usdt"] - REC_FIRST_SHARE * c["l"] * 2000.0) < 2500 * f["step"] + 0.01, p["notional_usdt"]
+    r2 = rec_rule_size(rule_l=c["l"], equity=2000.0, existing_notional=c["l"] * 2000.0 * REC_FIRST_SHARE, order_leverage=20)
+    assert not r2["first"] and abs(r2["target_notional"] - c["l"] * 2000.0 * (1 - REC_FIRST_SHARE)) < 1e-6        # 물타기 = 남은 2/3
     ro = rec_rule_size(rule_l=c["l"], equity=2000.0, existing_notional=300.0, order_leverage=20, first=True)   # 반대 다리만 있음
-    assert ro["first"] and abs(ro["target_notional"] - 0.75 * c["l"] * 2000.0) < 1e-6
+    assert ro["first"] and abs(ro["target_notional"] - REC_FIRST_SHARE * c["l"] * 2000.0) < 1e-6
     r3 = rec_rule_size(rule_l=2.0, equity=2000.0, existing_notional=4000.0, order_leverage=20)
     p3 = build_entry_plan(side="LONG", best_bid=2400.0, best_ask=2400.01, recommended_qty=0.0, cap_notional=r3["cap_notional"],
                           filters=f, existing_notional=4000.0, equity=2000.0, fraction=r3["fraction"], fraction_of_equity=True, order_leverage=20)
     assert p3["blocked"], p3                                                                      # 상한이 찼으면 막는다
     # 2026-10-13 레버리지 10배: 실효 L = 0.9 × 10 = 9 -- 다 채워도 증거금 90%(거래소 거부 없음) · 20배면 그대로
     r10 = rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=0.0, order_leverage=10)
-    assert r10["l_eff"] == 9.0 and r10["cap_notional"] == 18000.0 and abs(r10["target_notional"] - 0.75 * 18000.0) < 1e-6
+    assert r10["l_eff"] == 9.0 and r10["cap_notional"] == 18000.0 and abs(r10["target_notional"] - REC_FIRST_SHARE * 18000.0) < 1e-6
     full = rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=13500.0, order_leverage=10)
     assert full["target_notional"] + 13500.0 <= 0.9 * 10 * 2000.0 + 1e-6 and full["fraction"] <= 0.9
     assert rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=0.0, order_leverage=20)["l_eff"] == 10.0
@@ -942,7 +942,7 @@ def _self_check_rec_rule() -> None:
     fresh = rec_rule_bracket({}, position_side="LONG", anchor_price=2300.0, basis=1.0, stop_pct=RULE_STOP_PCT, filters=f,
                              prev={"sl_price": 2400.0, "backstop_price": 2390.0})                    # 규칙 아닌 이전 SL 은 안 물려받는다
     assert fresh["sl_price"] == 2231.0
-    print("자동 규칙 통과 — 재생 ×15.2 크기식(12.4×권장배수·청산 안전 max(3σ,3%)·상한 10) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×3% · 첫 진입가 −3% 손절 · 첫 75% · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
+    print("자동 규칙 통과 — 재생 ×15.2 크기식(12.4×권장배수·청산 안전 max(3σ,3%)·상한 10) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×3% · 첫 진입가 −3% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 
 if __name__ == "__main__":

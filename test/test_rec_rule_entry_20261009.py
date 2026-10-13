@@ -1,6 +1,6 @@
 """자동 규칙 진입(2026-10-09, 재생 ×15.2 크기식) -- 서버 경로를 끝까지 지나게 하고 숫자를 고정한다. 🔴실주문 0.
 
-규칙(2026-10-11 «×15.2 + −3% 스톱»): 왕복 최대 명목 = 순자산 × L, L = min(12.4 × 권장배수, 청산 안전, 10) · 첫 진입 = 그 75% ·
+규칙(2026-10-11 «×15.2 + −3% 스톱»): 왕복 최대 명목 = 순자산 × L, L = min(12.4 × 권장배수, 청산 안전, 10) · 첫 진입 = 그 1/3(10-14, 옛 75%) ·
 물타기 = 남은 여유(손절 시 손실 L×3% 안) · 손절 = 첫 진입가 ∓3% 거래소 스탑(물타기해도 유지) · 익절 없음 · SL/TP 체크를 꺼도 건다 ·
 rule=c 밖이면 400 · 변동성 없거나 15분 묵으면 503 · ETH 만. 심는 값: 권장배수 0.5 · σ24 250bp → L = 12.435 × 0.5 = 6.218(노출 맞춤).
 네트워크·계좌는 test_manual_entry_preview_smoke 의 격리 틀(_isolated_dirs: 바이낸스 GET 가짜 응답)을 쓰고,
@@ -25,6 +25,7 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from offline_app import offline_app  # noqa: E402
 
 from dashboard import server  # noqa: E402
+from scripts.live_manual_peg_entry_20260912 import REC_FIRST_SHARE  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 
 SYM = server.MANUAL_EXEC_SYMBOLS["eth"]
@@ -83,7 +84,7 @@ class RecRuleEntryTest(unittest.TestCase):
             self.assertEqual(p["rule"]["stop_pct"], 3.0)
             self.assertAlmostEqual(p["rule"]["l"], L, places=3)
             self.assertAlmostEqual(p["rule"]["cap_notional"], 1000 * L, delta=0.01)
-            self.assertAlmostEqual(p["notional_usdt"], 0.75 * 1000 * L, delta=2.6)       # 순자산 1000 × L × 0.75
+            self.assertAlmostEqual(p["notional_usdt"], REC_FIRST_SHARE * 1000 * L, delta=2.6)       # 순자산 1000 × L × 첫 몫(10-14 부터 1/3)
             self.assertEqual(p["bracket"]["sl_price"], 2425.0)                           # 2500.00 × (1 − 3%)
             self.assertEqual(p["bracket"]["backstop_price"], 2425.0)                     # 거래소 스탑 = 손절선(닿는 즉시)
             self.assertIsNone(p["bracket"]["tp_price"])                                  # 익절 없음
@@ -102,7 +103,7 @@ class RecRuleEntryTest(unittest.TestCase):
             self.assertAlmostEqual(p["rule"]["l"], 4.5, places=6)
             self.assertEqual(p["rule"]["binding"], "레버리지 증거금")
             self.assertAlmostEqual(p["rule"]["loss_at_stop_pct"], 100 * 4.5 * 0.03, delta=0.01)
-            self.assertAlmostEqual(p["notional_usdt"], 0.75 * 1000 * 4.5, delta=2.6)
+            self.assertAlmostEqual(p["notional_usdt"], REC_FIRST_SHARE * 1000 * 4.5, delta=2.6)
             j10 = await (await c.get("/api/manual-entry/preview?side=LONG&lev=10&rule=c")).json()
             self.assertAlmostEqual(j10["plan"]["rule"]["l"], L, places=3)              # L ≈ 6.2 < 9 -- 10배에선 안 묶인다
         self._run(account([]), fn)
@@ -153,7 +154,7 @@ class RecRuleEntryTest(unittest.TestCase):
         armed = {f"{SYM}:LONG": {"symbol": SYM, "side": "LONG", "sl_price": 2425.0, "sl_level": 2425.0,
                                  "backstop_price": 2425.0, "rule": True, "sl_name": "첫 진입가 −3%",
                                  "armed_at": 0, "placed": {}}}
-        qty = round(0.75 * 1000 * L / 2500.0, 3)
+        qty = round(REC_FIRST_SHARE * 1000 * L / 2500.0, 3)
 
         async def fn(c):
             p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")).json())["plan"]
@@ -176,7 +177,7 @@ class RecRuleEntryTest(unittest.TestCase):
         async def fn(c):
             p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")).json())["plan"]
             self.assertTrue(p["rule"]["first"], p["rule"])
-            self.assertAlmostEqual(p["notional_usdt"], 0.75 * 1000 * L, delta=2.6)       # 남은 여유 전부(6118)가 아니라 75%
+            self.assertAlmostEqual(p["notional_usdt"], REC_FIRST_SHARE * 1000 * L, delta=2.6)       # 남은 여유 전부(6118)가 아니라 첫 몫(10-14 부터 1/3)
             self.assertIn("첫 진입가", p["rule"]["sl_name"])
         self._run(account([short]), fn)
 
@@ -212,7 +213,7 @@ class RecRuleEntryTest(unittest.TestCase):
                 await asyncio.sleep(0.05)
             self.assertEqual(len(fired), 1)
             self.assertAlmostEqual(fired[0]["rule"]["l"], round(L, 3), delta=1e-3)
-            self.assertAlmostEqual(fired[0]["notional_usdt"], 0.75 * 1000 * L, delta=2.6)
+            self.assertAlmostEqual(fired[0]["notional_usdt"], REC_FIRST_SHARE * 1000 * L, delta=2.6)
             self.assertEqual(fired[0]["bracket"]["sl_price"], 2425.0)
         self._run(account([]), fn)
 

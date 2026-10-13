@@ -142,7 +142,7 @@ with sync_playwright() as p:
         pg.focus("#snapEntryLong"); pg.keyboard.press("Enter"); pg.wait_for_timeout(900)          # 자동 미리보기 줄(제출 안 함)
         rn = pg.evaluate("() => document.getElementById('snapEntryResult').textContent")
         print(w, "자동 미리보기", rn[:160])
-        if "순자산 × 5.695" not in rn or "첫 진입가 −3%" not in rn or "첫 진입 = 상한의 75%" not in rn: fails.append(f"[{w}] 자동 미리보기 줄 {rn[:200]!r}")
+        if "순자산 × 5.695" not in rn or "첫 진입가 −3%" not in rn or "첫 진입 = 상한의 1/3" not in rn: fails.append(f"[{w}] 자동 미리보기 줄 {rn[:200]!r}")
         pg.locator("#snapEntryResult").screenshot(path=str(OUT / f"entry_preview_auto_{w}.png"))
         pg.evaluate("() => { const i = document.getElementById('snapRule'); i.value = '0'; i.dispatchEvent(new Event('input', {bubbles: true})); }")
 

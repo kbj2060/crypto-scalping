@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261014-xyz2">
+  <link rel="stylesheet" href="styles.css?v=20261014-first13">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -497,13 +497,13 @@
                  사용자 지시: 레버리지 다음 줄에 «진입비율» 이름표로. -->
             <span class="entry-break" aria-hidden="true"></span>
             <!-- 2026-10-09 자동 규칙(사용자 «방향만 정하면 크기·레버리지·손절 자동» → «재생 ×15.2 로» → 10-10 동일위험 → 10-11 재생 식 복원 + −3% 스톱): 왕복 최대 명목 = 순자산 × min(12.4 × 권장 배수, 청산 안전, 10) ·
-                 첫 진입 75% · 물타기는 남은 여유(손절 시 손실 L×3% 안) · 손절 첫 진입가 ∓3%(거래소 스탑, 물타기해도 안 물러남) · 익절 없음. 고르면 진입비율·SL/TP 숨김. ETH 만. -->
+                 첫 진입 1/3 · 물타기는 남은 여유(손절 시 손실 L×3% 안 · 권장 첫 진입가 ∓0.75%) · 손절 첫 진입가 ∓3%(거래소 스탑, 물타기해도 안 물러남) · 익절 없음. 고르면 진입비율·SL/TP 숨김. ETH 만. -->
             <span id="snapRuleBox" class="rule-box">
               <span class="entry-cap">크기</span>
               <input type="hidden" id="snapRule" value="0">
               <div class="chipset" data-for="snapRule" role="group" aria-label="진입 크기 규칙">
                 <button type="button" class="chip" data-v="0" title="진입비율 칩으로 직접 고릅니다">직접</button>
-                <button type="button" class="chip" data-v="1" title="자동 규칙 — 크기 = 원장 재생 ×15.2 식(변동성 클수록 크게, 4~10배): 왕복 최대 명목 = 순자산 × min(12.4 × 권장 배수, 청산 안전, 10) · 첫 진입 75% · 물타기는 남은 여유(손절 시 손실 L×3% 안에서) · 손절 첫 진입가 ∓3%(닿으면 거래소 스탑, 물타기해도 안 물러남) → 손절에 닿으면 순자산 −L×3% · 익절 없음 · 🔴교차 마진에서만(격리면 손절 전에 청산)&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동</button>
+                <button type="button" class="chip" data-v="1" title="자동 규칙 — 크기 = 원장 재생 ×15.2 식(변동성 클수록 크게, 4~10배): 왕복 최대 명목 = 순자산 × min(12.4 × 권장 배수, 청산 안전, 10) · 첫 진입 1/3 · 물타기는 남은 여유(손절 시 손실 L×3% 안에서 · 권장 첫 진입가 ∓0.75%) · 손절 첫 진입가 ∓3%(닿으면 거래소 스탑, 물타기해도 안 물러남) → 손절에 닿으면 순자산 −L×3% · 익절 없음 · 🔴교차 마진에서만(격리면 손절 전에 청산)&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동</button>
               </div>
               <span class="rule-risk" aria-live="off">손절 첫 진입가 −3%</span>
             </span>
@@ -604,7 +604,7 @@
         <!-- 2026-10-09 B안(사용자 선택): 위 띠 = 진입 크기 규칙(계좌 카드 «크기» 칩 #snapRule 과 같은 값) · 자동이면 버튼 안에 첫 진입 금액·손절가 -->
         <span id="ofabRule" class="ofab-rule" role="group" aria-label="진입 크기" hidden>
           <button type="button" data-v="0" aria-pressed="false">직접</button>
-          <button type="button" data-v="1" aria-pressed="false" title="자동 규칙 — 크기 = 원장 재생 ×15.2 식(변동성 클수록 크게, 4~10배): 첫 진입 = 순자산 × L의 75% · 손절 첫 진입가 ∓3% → 손절에 닿으면 순자산 −L×3% · 익절 없음 · 교차 마진에서만&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동</button>
+          <button type="button" data-v="1" aria-pressed="false" title="자동 규칙 — 크기 = 원장 재생 ×15.2 식(변동성 클수록 크게, 4~10배): 첫 진입 = 순자산 × L의 1/3 · 손절 첫 진입가 ∓3% → 손절에 닿으면 순자산 −L×3% · 익절 없음 · 교차 마진에서만&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동</button>
           <span class="rule-risk">손절 첫 진입가 −3%</span>
           <span id="ofabQuote" class="ofab-quote" tabindex="0" hidden></span>   <!-- 2026-10-10 주문 심볼(USDC) vs 화면(USDT) 차 -->
         </span>
@@ -618,10 +618,10 @@
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden></div>
   </div>
-  <script src="./app.js?v=20261014-xyz2"></script>
+  <script src="./app.js?v=20261014-first13"></script>
   <script src="./fp_daily.js?v=20261010-fpc"></script>
   <script src="./liq_profile.js?v=20261011-liq5m"></script>
-  <script src="./bubble_map.js?v=20261014-xyz2"></script>
+  <script src="./bubble_map.js?v=20261014-first13"></script>
   <div id="chartTooltip" class="chart-tooltip"></div>
 </body>
 </html>

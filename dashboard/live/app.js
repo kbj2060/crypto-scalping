@@ -8559,7 +8559,7 @@ function manualEntryPlanHtml(data) {
   const dir = plan.positionSide === "LONG" ? "롱" : "숏";
   const rl = plan.rule;   // 2026-10-09 권고 규칙 -- 무엇이 크기·손절을 정했는지 머리 바로 아래에 한 줄
   const ruleNote = rl ? entryNote(`자동 규칙 — 상한 ${won(rl.cap_notional)} USDT(순자산 × ${rl.l}, ${rl.binding}) · 이번 `
-    + `${rl.first ? "첫 진입 = 상한의 75%" : `물타기 = 남은 여유 ${won(rl.room)} USDT`} · 손절 ${rl.sl_name || ""} ${rl.sl_price ? Number(rl.sl_price).toLocaleString() : "-"}`
+    + `${rl.first ? "첫 진입 = 상한의 1/3" : `물타기 = 남은 여유 ${won(rl.room)} USDT`} · 손절 ${rl.sl_name || ""} ${rl.sl_price ? Number(rl.sl_price).toLocaleString() : "-"}`
     + ` 거래소 스탑(물타기해도 안 물러남) · 익절 없음 · 교차 마진에서만`) : "";
   const parts = [`<div class="entry-head"><b>${dir} ${escapeHtml(String(plan.quantity))} ${coinUnit()}</b>
       <span>@ ${escapeHtml(Number(plan.price).toLocaleString())}</span>
@@ -8838,6 +8838,7 @@ function manualRule() {
 // 2026-10-10 동일위험: L = min(손절 시 순자산 손실 b ÷ 손절폭, 청산 안전, 10) -- 옛 «12.4 × 권장배수»는 손절 1회에 순자산 69~82%(원장 재생)
 // 2026-10-11 사용자 최종 «×15.2 + −3% 스톱»: L = min(12.4 × 권장배수, 청산 안전(손절 거리 max(3σ24, 3%)), 10) · 손절 첫 진입가 ∓3% 고정
 const RULE_STOP_PCT = 0.03;       // = live_manual_peg_entry.RULE_STOP_PCT (test_rule_size_parity 가 대조)
+const REC_FIRST_SHARE = 1 / 3;    // = live_manual_peg_entry.REC_FIRST_SHARE -- 첫 진입 = 상한의 1/3(10-14 사용자 «첫 1/3 → −0.75%에 2/3»)
 function commitRuleL(side, sigmaBp4h, vm) {
   const sd = Math.max(3 * sigmaBp4h * Math.sqrt(6) / 1e4, RULE_STOP_PCT);   // 청산 안전용 거리
   const den = side === "LONG" ? 1 - 0.98 * (1 - sd) * 0.995 / (1 - 0.0066) : 1.02 * (1 + sd) * 1.005 / 1.0066 - 1;
@@ -9838,7 +9839,7 @@ function renderOfab() {
   renderOfabRule(bal, live);
 }
 // 2026-10-09 B안(사용자 선택): 위 띠 = #snapRule 과 같은 값 · 자동이면 버튼 안에 «첫 $ · 손절 가격».
-//   숫자는 서버 규칙(live_manual_peg_entry rec_rule_size·rec_rule_bracket)과 같은 식으로 여기서 3초마다 -- 첫 = 0.75 × L × 순자산,
+//   숫자는 서버 규칙(live_manual_peg_entry rec_rule_size·rec_rule_bracket)과 같은 식으로 여기서 3초마다 -- 첫 = REC_FIRST_SHARE(1/3) × 실효 L × 순자산,
 //   손절 = 지금 가격 ∓3%(10-11 L = min(12.4 × 권장배수, 청산 안전, 10)). 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
 function renderOfabRule(bal, live) {
   const r = manualRule(), eth = activeSnapshotAsset === "eth", vmx = latestSituation?.vol_mult;
@@ -9874,12 +9875,13 @@ function renderOfabRule(bal, live) {
     if (cr && eq > 0 && live > 0) {
       const sl = live * (side === "LONG" ? 1 - cr.sd : 1 + cr.sd);
       // 2026-10-11 두 조각(첫 $ · 손절)을 따로 감싼다 -- 좁은 화면(styles.css ≤480px)은 «·»를 숨기고 두 줄로 쌓아 버튼 줄이 화면 안에 든다
-      const first = `첫 $${Math.round(0.75 * cr.l * eq).toLocaleString()}`, stop = `손절 ${Math.round(sl).toLocaleString()}`;
+      const lev = Number(manualLevEffective()) || 0, lEff = lev > 0 ? Math.min(cr.l, 0.9 * lev) : cr.l;   // 서버 rec_rule_size 와 같은 실효 L
+      const first = `첫 $${Math.round(REC_FIRST_SHARE * lEff * eq).toLocaleString()}`, stop = `손절 ${Math.round(sl).toLocaleString()}`;
       if (sm.textContent !== `${first} · ${stop}`) {
         const part = (t, c) => Object.assign(document.createElement("span"), { textContent: t, className: c || "" });
         sm.replaceChildren(part(first), part(" · ", "sep"), part(stop));
       }
-      b.title = `1.5초 꾹 = ${dir} 자동 진입 — 손절 시 순자산 −${Math.round(100 * cr.l * cr.sd)}%: 왕복 상한 순자산 × ${cr.l.toFixed(2)}(첫 진입 그 75%), 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}${100 * cr.sd}%(거래소 스탑), 익절 없음`;
+      b.title = `1.5초 꾹 = ${dir} 자동 진입 — 손절 시 순자산 −${Math.round(100 * lEff * cr.sd)}%: 왕복 상한 순자산 × ${lEff.toFixed(2)}(첫 진입 그 1/3 · 물타기 권장 첫 진입가 ${side === "LONG" ? "−" : "+"}0.75%에 나머지), 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}${100 * cr.sd}%(거래소 스탑), 익절 없음`;
     } else if (r) {
       setT(sm.id || id + "Frac", "자동 — 변동성 대기");
       b.title = `${dir} 자동 진입 — 권장 배수(직전 24시간 변동성)나 잔고가 아직 없습니다`;
