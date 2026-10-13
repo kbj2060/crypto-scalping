@@ -11,8 +11,11 @@
   var $ = function (id) { return document.getElementById(id); };
   var css = function (n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
   var MAX = 1800, MIN_SPAN = 20, DEF_SPAN = 180, MINI_SPAN = 90;   // 미니 = 최근 90초(2026-10-13 사용자 «좀 더 확대»)
-  var S = { on: false, span: DEF_SPAN, back: 0, asset: "", rows: [], bucket: 0, end: 0, none: false, full: false,
-            fine: null, coarse: null, fineT: 0, coarseT: 0, busyT: false, busyF: false, busyC: false, raf: 0, view: null, drag: null, pinch: null };
+  // 보기 상태 -- 큰 오버레이(VM)와 시장 맥락 미니(VN, 2026-10-13 사용자 «미니에서도 확대 축소 실시간»)가 따로 확대·이동한다. 데이터(S)는 함께 쓴다.
+  var VM = { span: DEF_SPAN, back: 0, def: DEF_SPAN, geo: null, drag: null, pinch: null, main: true };
+  var VN = { span: MINI_SPAN, back: 0, def: MINI_SPAN, geo: null, drag: null, pinch: null, main: false };
+  var S = { on: false, asset: "", rows: [], bucket: 0, end: 0, none: false, full: false,
+            fine: null, coarse: null, fineT: 0, coarseT: 0, busyT: false, busyF: false, busyC: false, raf: 0 };
   var STOPS = [0, 0.2, 0.4, 0.55, 0.68, 0.84, 1];                   // --bbm-h0..6 위치
 
   function asset() { return typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset; }
@@ -72,9 +75,9 @@
   function live() { return S.on || !!miniCv(); }
   function poll() {   // 래스터: 최근 5분 안을 보면(오버레이) 또는 미니가 보이면 1초 해상도 · 오버레이가 그보다 넓으면 30분판도
     fetchTape();
-    var ovFine = S.back + S.span <= 290;
-    if (!S.on || ovFine || miniCv()) fetchHeat("fine");
-    if (S.on && !ovFine) fetchHeat("coarse");
+    var m = !!miniCv(), fine = function (V) { return V.back + V.span <= 290; };
+    if ((S.on && fine(VM)) || (m && fine(VN)) || (!S.on && !m)) fetchHeat("fine");
+    if ((S.on && !fine(VM)) || (m && !fine(VN))) fetchHeat("coarse");
   }
 
   function draw() {
@@ -84,7 +87,7 @@
       drawInto($("bubbleMapCanvas"), $("bubbleMapStatus"), false);
     }
     var m = miniCv();
-    if (m) drawInto(m, null, true);
+    if (m) { if (!m.__bbm) { m.__bbm = true; bindCanvas(m, VN); } drawInto(m, null, true); }
   }
   function drawInto(cv, st, mini) {   // mini = 시장 맥락 아래 줄: 최근 3분 실시간 · 휴대폰과 같은 좌우 꽉(라벨 없이 위 현재가만)
     if (!cv || !cv.clientWidth || !cv.clientHeight) return;
@@ -93,8 +96,9 @@
     var g = cv.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    if (!mini) S.view = null;
-    var span = mini ? MINI_SPAN : S.span, back = mini ? 0 : S.back;
+    var V = mini ? VN : VM;
+    V.geo = null;
+    var span = V.span, back = V.back;
     var WIN = span, tEnd = S.end - back, t0 = tEnd - WIN, rows = [], mids = [], lo = Infinity, hi = -Infinity, bk = S.bucket;
     var F = S.fine && !S.fine.none ? S.fine : null, Cc = S.coarse && !S.coarse.none ? S.coarse : null;
     var fineOk = F && F.t0 <= t0 && F.t0 + F.cols * F.dt >= tEnd - 10;   // 보는 창 양 끝을 다 덮어야(낡은 1초판이면 오른쪽 끝이 비고 현재가가 묵는다)
@@ -122,7 +126,7 @@
     var L0 = narrow ? 0 : 68, R0 = narrow ? 0 : 68, top = 22, axisH = 28, GAP = 6;   // 2026-10-13 휴대폰 = 좌우 꽉(사용자)
     var PW = W - L0 - R0, IH = H - top - axisH, VH = Math.round(IH * 0.2), PH = IH - VH - GAP, base = top + IH, vy0 = base - VH;
     var X = function (t) { return L0 + (t - t0) / WIN * PW; }, Y = function (p) { return top + PH - (p - lo) / (hi - lo) * PH; };
-    if (!mini) S.view = { t0: t0, L: L0, PW: PW };
+    V.geo = { t0: t0, L: L0, PW: PW, cv: cv };
     var C = { bg: css("--chart-bg"), text: css("--text"), muted: css("--muted"), line: css("--line"), good: css("--good"), bad: css("--bad") };
     var heatBg = rgb("--bbm-bg"), price = rgb("--bbm-price"), good = C.good, bad = C.bad;
     var sans = css("--font-sans") || "sans-serif";
@@ -238,7 +242,8 @@
     halo(BK + "초 합", L0 + PW + 6, base - 8, C.muted);
     }
     g.font = "700 13px " + sans; g.textAlign = "center";                               // 현재가 = 상자 없이 굵은 숫자(청산맵과 같은 규약)
-    halo("현재가 " + fmtPx(last) + (back ? " · 지난 구간(더블클릭 = 실시간)" : ""), L0 + PW / 2, 10, C.text);
+    if (!mini) halo("현재가 " + fmtPx(last) + (back ? " · 지난 구간(더블클릭 = 실시간)" : ""), L0 + PW / 2, 10, C.text);
+    else if (back) { g.font = "700 11px " + sans; halo("지난 구간 · 더블클릭 = 실시간", L0 + PW / 2, 10, C.text); }   // 미니 = 현재가 글자 없음(사용자)
 
     var ev = [30, 60, 120, 300, 600].filter(function (s) { return s >= WIN / Math.max(2, PW / 70); })[0] || 600;   // 시간 축 = 5분 차트 x축 글자
     g.font = "700 " + (narrow ? 12 : 13) + "px " + sans; g.textAlign = "center"; g.textBaseline = "top"; g.strokeStyle = C.line;
@@ -253,75 +258,75 @@
 
   function redraw() { if (!S.raf) S.raf = requestAnimationFrame(draw); }
 
-  function setView(span, back) {             // span = 보이는 초 · back = 오른쪽 끝이 «지금»에서 몇 초 전
-    S.span = Math.max(MIN_SPAN, Math.min(MAX, span));
-    S.back = Math.max(0, Math.min(MAX - S.span, back));
-    if (S.back < 1) S.back = 0;                                          // 끝에 닿으면 다시 실시간으로 따라간다
-    var lv = document.querySelector('#bubbleMapTools [data-view="live"]');
-    if (lv) lv.setAttribute("aria-pressed", String(S.back === 0 && S.span === DEF_SPAN));
+  function setView(V, span, back) {          // span = 보이는 초 · back = 오른쪽 끝이 «지금»에서 몇 초 전
+    V.span = Math.max(MIN_SPAN, Math.min(MAX, span));
+    V.back = Math.max(0, Math.min(MAX - V.span, back));
+    if (V.back < 1) V.back = 0;                                          // 끝에 닿으면 다시 실시간으로 따라간다
+    if (V.main) { var lv = document.querySelector('#bubbleMapTools [data-view="live"]'); if (lv) lv.setAttribute("aria-pressed", String(V.back === 0 && V.span === DEF_SPAN)); }
     poll(); redraw();
   }
-  function timeAt(clientX) {
-    var v = S.view, r = $("bubbleMapCanvas").getBoundingClientRect();
-    return v ? v.t0 + (clientX - r.left - v.L) / v.PW * S.span : 0;
+  function timeAt(V, clientX) {
+    var v = V.geo; if (!v) return 0;
+    var r = v.cv.getBoundingClientRect();
+    return v.t0 + (clientX - r.left - v.L) / v.PW * V.span;
   }
-  function zoomAt(t, f) {                    // t 를 제자리에 두고 시간축만 늘이고 줄인다
-    var v = S.view; if (!v) return;
-    var span = Math.max(MIN_SPAN, Math.min(MAX, S.span * f)), frac = (t - v.t0) / S.span;
-    setView(span, S.end - (t - frac * span + span));
+  function zoomAt(V, t, f) {                 // t 를 제자리에 두고 시간축만 늘이고 줄인다
+    var v = V.geo; if (!v) return;
+    var span = Math.max(MIN_SPAN, Math.min(MAX, V.span * f)), frac = (t - v.t0) / V.span;
+    setView(V, span, S.end - (t - frac * span + span));
   }
-  function panPx(dx, back0) { var v = S.view; if (v) setView(S.span, (back0 == null ? S.back : back0) + dx / v.PW * S.span); }
-  function resetView() { setView(DEF_SPAN, 0); }
+  function panPx(V, dx, back0) { var v = V.geo; if (v) setView(V, V.span, (back0 == null ? V.back : back0) + dx / v.PW * V.span); }
+  function resetView(V) { setView(V, V.def, 0); }
 
-  function bindCanvas(cv) {                  // liq_profile.js bindCanvas 와 같은 조작(축만 시간)
+  function bindCanvas(cv, V) {               // liq_profile.js bindCanvas 와 같은 조작(축만 시간) -- V = 그 캔버스의 보기 상태
     cv.addEventListener("wheel", function (e) {
-      if (!S.view) return;
+      if (!V.geo) return;
       e.preventDefault();
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) panPx(e.deltaX || e.deltaY);
-      else zoomAt(timeAt(e.clientX), Math.exp(e.deltaY * 0.0015));
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) panPx(V, e.deltaX || e.deltaY);
+      else zoomAt(V, timeAt(V, e.clientX), Math.exp(e.deltaY * 0.0015));
     }, { passive: false });
     cv.addEventListener("pointerdown", function (e) {
-      if (e.pointerType === "touch" || e.button !== 0 || !S.view) return;
-      S.drag = { x: e.clientX, back: S.back, moved: false, id: e.pointerId };
+      if (e.pointerType === "touch" || e.button !== 0 || !V.geo) return;
+      V.drag = { x: e.clientX, back: V.back, moved: false, id: e.pointerId };
     });
     cv.addEventListener("pointermove", function (e) {
-      if (!S.drag || !(e.buttons & 1)) return;
-      var dx = e.clientX - S.drag.x;
-      if (!S.drag.moved && Math.abs(dx) < 4) return;
-      if (!S.drag.moved) { S.drag.moved = true; cv.setPointerCapture(S.drag.id); cv.classList.add("panning"); }
-      panPx(dx, S.drag.back);
+      if (!V.drag || !(e.buttons & 1)) return;
+      var dx = e.clientX - V.drag.x;
+      if (!V.drag.moved && Math.abs(dx) < 4) return;
+      if (!V.drag.moved) { V.drag.moved = true; cv.setPointerCapture(V.drag.id); cv.classList.add("panning"); }
+      panPx(V, dx, V.drag.back);
     });
-    var stop = function () { S.drag = null; cv.classList.remove("panning"); };
+    var stop = function () { V.drag = null; cv.classList.remove("panning"); };
     cv.addEventListener("pointerup", stop); cv.addEventListener("pointercancel", stop);
-    cv.addEventListener("dblclick", resetView);
+    cv.addEventListener("dblclick", function () { resetView(V); });
     cv.addEventListener("touchstart", function (e) {         // 한 손가락 = 이동 · 두 손가락 = 확대
-      if (!S.view) return;
+      if (!V.geo) return;
       if (e.touches.length === 2) {
         var p = e.touches[0], q = e.touches[1];
-        S.pinch = { d: Math.max(20, Math.abs(p.clientX - q.clientX)), span: S.span, at: timeAt((p.clientX + q.clientX) / 2) };
-        S.drag = null;
-      } else if (e.touches.length === 1) S.drag = { x: e.touches[0].clientX, back: S.back, moved: false };
+        V.pinch = { d: Math.max(20, Math.abs(p.clientX - q.clientX)), span: V.span, at: timeAt(V, (p.clientX + q.clientX) / 2) };
+        V.drag = null;
+      } else if (e.touches.length === 1) V.drag = { x: e.touches[0].clientX, back: V.back, moved: false };
     }, { passive: true });
     cv.addEventListener("touchmove", function (e) {
-      if (S.pinch && e.touches.length === 2) {
+      if (V.pinch && e.touches.length === 2) {
         e.preventDefault();
-        var f = S.pinch.d / Math.max(20, Math.abs(e.touches[0].clientX - e.touches[1].clientX));
-        zoomAt(S.pinch.at, S.pinch.span * f / S.span);
-      } else if (S.drag && e.touches.length === 1) {
-        var dx = e.touches[0].clientX - S.drag.x;
-        if (!S.drag.moved && Math.abs(dx) < 6) return;
-        e.preventDefault(); S.drag.moved = true;
-        panPx(dx, S.drag.back);
+        var f = V.pinch.d / Math.max(20, Math.abs(e.touches[0].clientX - e.touches[1].clientX));
+        zoomAt(V, V.pinch.at, V.pinch.span * f / V.span);
+      } else if (V.drag && e.touches.length === 1) {
+        var dx = e.touches[0].clientX - V.drag.x;
+        if (!V.drag.moved && Math.abs(dx) < 6) return;
+        e.preventDefault(); V.drag.moved = true;
+        panPx(V, dx, V.drag.back);
       }
     }, { passive: false });
-    cv.addEventListener("touchend", function () { S.pinch = null; S.drag = null; });
+    cv.addEventListener("touchend", function () { V.pinch = null; V.drag = null; });
     cv.addEventListener("keydown", function (e) {
-      var v = S.view, k = e.key;
+      var v = V.geo, k = e.key;
       if (!v) return;
-      if (k === "ArrowLeft" || k === "ArrowRight") panPx((k === "ArrowLeft" ? 0.2 : -0.2) * v.PW);
-      else if (k === "+" || k === "=") zoomAt(v.t0 + S.span / 2, 0.8);
-      else if (k === "-" || k === "_") zoomAt(v.t0 + S.span / 2, 1.25);
-      else if (k === "Home" || k === "End") resetView();
+      if (k === "ArrowLeft" || k === "ArrowRight") panPx(V, (k === "ArrowLeft" ? 0.2 : -0.2) * v.PW);
+      else if (k === "+" || k === "=") zoomAt(V, v.t0 + V.span / 2, 0.8);
+      else if (k === "-" || k === "_") zoomAt(V, v.t0 + V.span / 2, 1.25);
+      else if (k === "Home" || k === "End") resetView(V);
       else return;
       e.preventDefault();
     });
@@ -342,12 +347,12 @@
     if (!cv) return;
     document.querySelectorAll("#bubbleMapTools [data-view]").forEach(function (b) {
       b.addEventListener("click", function () {
-        var v = S.view, mid = v ? v.t0 + S.span / 2 : 0;
-        if (b.dataset.view === "live") resetView();
-        else if (v) zoomAt(mid, b.dataset.view === "in" ? 0.6 : 1.6);
+        var v = VM.geo, mid = v ? v.t0 + VM.span / 2 : 0;
+        if (b.dataset.view === "live") resetView(VM);
+        else if (v) zoomAt(VM, mid, b.dataset.view === "in" ? 0.6 : 1.6);
       });
     });
-    bindCanvas(cv);
+    bindCanvas(cv, VM);
     new ResizeObserver(redraw).observe(cv);
     setInterval(function () {                     // 테이프 매초 덧붙임 · 래스터 2초(최근 5분 안) / 10초(그 밖) · 코인 탭·5분 차트 배치도 따라간다
       if (!live()) return;

@@ -4686,7 +4686,7 @@ function mcUsSession(nowMs = Date.now()) {
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
 const MC_BUBBLE_K = 0.8;   // 체결 버블 높이 = 1초 수급 칸(차트 둘) × 이 값 -- 2026-10-13 0.5(차트 한 개) → 0.8(사용자 «수급 줄이고 버블 키워»)
 let mcBubbleEl = null;   // 2026-10-13 시장 맥락 아래 줄 체결 버블 미니 -- 판을 다시 그려도 같은 캔버스를 다시 붙인다
-const mcBubbleCanvas = () => mcBubbleEl || (mcBubbleEl = Object.assign(document.createElement("canvas"), { id: "mcBubble", className: "mc-bubble" }));
+const mcBubbleCanvas = () => mcBubbleEl || (mcBubbleEl = Object.assign(document.createElement("canvas"), { id: "mcBubble", className: "mc-bubble", tabIndex: 0, title: "체결 버블(최근 90초 · 실시간) · 휠·두 손가락 = 시간 확대/축소 · 끌기·화살표 = 이동 · 더블클릭·Home = 실시간" }));
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 function mcPlace(svg, r, wr) {
   const body = el("mcBody"), card = el("fpCard"), wall = el("mcWall");
