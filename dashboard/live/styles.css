@@ -3250,10 +3250,10 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 #mcWall .wdr-b > .ppm { padding-top: 0; flex: 1; min-height: 0; height: auto; }
 #mcWall .wdr-sr { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 0; overflow: hidden; }   /* 2026-10-06 줄이 칸 높이를 나눠 갖는다 -- 22px 고정이면 216px 칸에서 5px 넘쳐 스크롤이 생겼다 */
 #mcWall .wdr-sr .liq-level-row { flex: 1 1 0; min-height: 0; grid-template-columns: 40px 62px minmax(0, 1fr) 48px; gap: 6px; padding: 0 2px; font-size: 11px; }
-/* 2026-10-13 아티팩트 댓글 «라벨 지우고 오른쪽 숫자 키워 · 숫자와 게이지만»: 이름(저항1·현재가…) 칸을 빼고 거리 %를 키운다(색이 저항/지지를 말한다) */
+/* 2026-10-13 아티팩트 댓글 «라벨 지우고 숫자·게이지만» → «퍼센트도 제거»: 이름·거리 % 칸을 빼고 가격 · 강도 게이지만(색이 저항/지지를 말한다) */
 #mcWall .wdr-sr .liq-level-tag { display: none; }
-#mcWall .wdr-sr .liq-level-row { grid-template-columns: 64px minmax(0, 1fr) 64px; }
-#mcWall .wdr-sr .liq-level-dist { font-size: 14px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+#mcWall .wdr-sr .liq-level-row { grid-template-columns: 64px minmax(0, 1fr); }
+#mcWall .wdr-sr .liq-level-dist { display: none; }   /* 2026-10-13 사용자 «게이지 오른쪽 퍼센트도 제거» -- 가격 · 강도 게이지만 */
 #mcWall .wdr-sr .liq-level-bar-track { height: 6px; }
 @media (prefers-reduced-motion: reduce) { .wdr-tg svg { transition: none; } }
 
