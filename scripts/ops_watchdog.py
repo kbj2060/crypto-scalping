@@ -755,6 +755,9 @@ def run_once(dry_run: bool) -> list[Check]:
         #   한 번 건너뛰면 warn, 세 번이면 critical. cron 줄을 지우면 이 줄도 지운다.
         check_duckdb_table_freshness("hot_treasury_futures_poll", ROOT / "data" / "hot" / "treasury_futures.sqlite",
                                      "polls WHERE status = 'ok'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 130, 250),
+        # 2026-10-14: 나스닥100 무기한(HL xyz:XYZ100, 24시간 거래) 초당 가격. 죽으면 «⑥ 나스닥» 칸이 «끊김». 수집기를 은퇴시키면 이 줄도 지운다.
+        check_duckdb_table_freshness("hot_hl_xyz100_ctx", ROOT / "data" / "hot" / "hl_xyz.sqlite",
+                                     "hl_xyz_ctx_1s", "datetime(max(recv_sec), 'unixepoch', 'localtime')", 5, 10),
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
         *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
         *check_multicoin_collectors(),

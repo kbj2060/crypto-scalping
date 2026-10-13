@@ -9,7 +9,8 @@ PY="${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}"
 cd "$ROOT"
 
 RUNNER="scripts/live_xyz100_collector_20261014.py"
-if pgrep -f "[l]${RUNNER#scripts/l}" >/dev/null; then
+# 실제 실행 형태(-u …/RUNNER)만 센다 -- 이름만 쓰면 파일명을 담은 ssh·grep 셸에도 걸려 켜지지 않았다(10-14).
+if pgrep -f "[-]u .*/${RUNNER}" >/dev/null; then
   echo "[$(date -Iseconds)] XYZ100 수집기가 이미 실행 중 -- 켜지 않는다." >&2
   exit 1
 fi
