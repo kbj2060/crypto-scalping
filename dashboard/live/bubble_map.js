@@ -35,7 +35,7 @@
   function fetchTape() {
     var a = asset();
     if (a !== S.asset) resetData(a);
-    if (!S.on || S.busyT || document.hidden || S.none) return;
+    if (!live() || S.busyT || document.hidden || S.none) return;
     var last = S.rows.length ? S.rows[S.rows.length - 1][0] : 0, since = S.full && last ? last - 15 : null;   // 마지막 15초는 다시 받는다(거래소마다 늦게 쓰인 초)
     S.busyT = true;
     fetch("/api/bubble-tape?asset=" + encodeURIComponent(a) + "&sec=" + MAX + (since != null ? "&since=" + since : ""), { cache: "no-store" })
@@ -53,7 +53,7 @@
   }
   function fetchHeat(kind) {                // fine = 최근 300초 1초 해상도 · coarse = 최근 30분 2초 해상도
     var a = asset(), now = Date.now(), fine = kind === "fine", busy = fine ? "busyF" : "busyC", tk = fine ? "fineT" : "coarseT";
-    if (!S.on || S[busy] || document.hidden || now - S[tk] < (fine ? 2000 : 10000)) return;
+    if (!live() || S[busy] || document.hidden || now - S[tk] < (fine ? 2000 : 10000)) return;
     S[busy] = true; S[tk] = now;
     fetch("/api/flow/heatmap?symbol=" + encodeURIComponent(a + "usdt") + (fine ? "&cols=300&agg=1" : "&cols=900&agg=2"), { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : r.status === 400 ? { none: true } : null; })
@@ -67,7 +67,10 @@
       .catch(function () { S[tk] = 0; })
       .then(function () { S[busy] = false; });
   }
-  function needFine() { return S.back + S.span <= 290; }   // 보는 창이 최근 5분 안
+  // 2026-10-13 시장 맥락 아래 줄 미니(#mcBubble, app.js 가 넓은 화면에서 붙인다) -- 보이면 오버레이가 꺼져 있어도 받는다 · 최근 3분 고정
+  function miniCv() { var c = $("mcBubble"); return c && c.offsetParent !== null && c.clientWidth ? c : null; }
+  function live() { return S.on || !!miniCv(); }
+  function needFine() { return !S.on || S.back + S.span <= 290; }   // 보는 창이 최근 5분 안(미니는 늘 3분)
   function poll() {
     fetchTape();
     if (needFine()) fetchHeat("fine"); else fetchHeat("coarse");
@@ -75,17 +78,23 @@
 
   function draw() {
     S.raf = 0;
-    if (!S.on) return;
-    if (typeof window.fpPlaceOverlay === "function") window.fpPlaceOverlay($("bubbleMap"));
-    var cv = $("bubbleMapCanvas"), st = $("bubbleMapStatus");
+    if (S.on) {
+      if (typeof window.fpPlaceOverlay === "function") window.fpPlaceOverlay($("bubbleMap"));
+      drawInto($("bubbleMapCanvas"), $("bubbleMapStatus"), false);
+    }
+    var m = miniCv();
+    if (m) drawInto(m, null, true);
+  }
+  function drawInto(cv, st, mini) {   // mini = 시장 맥락 아래 줄: 최근 3분 실시간 · 휴대폰과 같은 좌우 꽉(라벨 없이 위 현재가만)
     if (!cv || !cv.clientWidth || !cv.clientHeight) return;
-    var W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1, narrow = W < 560;   // 청산맵과 같은 기준
+    var W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1, narrow = mini || W < 560;   // 청산맵과 같은 기준
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     var g = cv.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    S.view = null;
-    var WIN = S.span, tEnd = S.end - S.back, t0 = tEnd - WIN, rows = [], mids = [], lo = Infinity, hi = -Infinity, bk = S.bucket;
+    if (!mini) S.view = null;
+    var span = mini ? DEF_SPAN : S.span, back = mini ? 0 : S.back;
+    var WIN = span, tEnd = S.end - back, t0 = tEnd - WIN, rows = [], mids = [], lo = Infinity, hi = -Infinity, bk = S.bucket;
     var F = S.fine && !S.fine.none ? S.fine : null, Cc = S.coarse && !S.coarse.none ? S.coarse : null;
     var M = F && F.t0 <= t0 ? F : Cc || F;                                // 보는 창을 다 덮는 래스터 하나만(해상도 섞으면 이음매가 보인다)
     S.rows.forEach(function (r) {
@@ -111,7 +120,7 @@
     var L0 = narrow ? 0 : 68, R0 = narrow ? 0 : 68, top = 22, axisH = 28, GAP = 6;   // 2026-10-13 휴대폰 = 좌우 꽉(사용자)
     var PW = W - L0 - R0, IH = H - top - axisH, VH = Math.round(IH * 0.2), PH = IH - VH - GAP, base = top + IH, vy0 = base - VH;
     var X = function (t) { return L0 + (t - t0) / WIN * PW; }, Y = function (p) { return top + PH - (p - lo) / (hi - lo) * PH; };
-    S.view = { t0: t0, L: L0, PW: PW };
+    if (!mini) S.view = { t0: t0, L: L0, PW: PW };
     var C = { bg: css("--chart-bg"), text: css("--text"), muted: css("--muted"), line: css("--line"), good: css("--good"), bad: css("--bad") };
     var heatBg = rgb("--bbm-bg"), price = rgb("--bbm-price"), good = C.good, bad = C.bad;
     var sans = css("--font-sans") || "sans-serif";
@@ -227,7 +236,7 @@
     halo(BK + "초 합", L0 + PW + 6, base - 8, C.muted);
     }
     g.font = "700 13px " + sans; g.textAlign = "center";                               // 현재가 = 상자 없이 굵은 숫자(청산맵과 같은 규약)
-    halo("현재가 " + fmtPx(last) + (S.back ? " · 지난 구간(더블클릭 = 실시간)" : ""), L0 + PW / 2, 10, C.text);
+    halo("현재가 " + fmtPx(last) + (back ? " · 지난 구간(더블클릭 = 실시간)" : ""), L0 + PW / 2, 10, C.text);
 
     var ev = [30, 60, 120, 300, 600].filter(function (s) { return s >= WIN / Math.max(2, PW / 70); })[0] || 600;   // 시간 축 = 5분 차트 x축 글자
     g.font = "700 " + (narrow ? 12 : 13) + "px " + sans; g.textAlign = "center"; g.textBaseline = "top"; g.strokeStyle = C.line;
@@ -339,7 +348,7 @@
     bindCanvas(cv);
     new ResizeObserver(redraw).observe(cv);
     setInterval(function () {                     // 테이프 매초 덧붙임 · 래스터 2초(최근 5분 안) / 10초(그 밖) · 코인 탭·5분 차트 배치도 따라간다
-      if (!S.on) return;
+      if (!live()) return;
       poll(); redraw();
     }, 1000);
   }

@@ -4695,6 +4695,8 @@ function mcUsSession(nowMs = Date.now()) {
 
 // 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
+let mcBubbleEl = null;   // 2026-10-13 시장 맥락 아래 줄 체결 버블 미니 -- 판을 다시 그려도 같은 캔버스를 다시 붙인다
+const mcBubbleCanvas = () => mcBubbleEl || (mcBubbleEl = Object.assign(document.createElement("canvas"), { id: "mcBubble", className: "mc-bubble" }));
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 function mcPlace(svg, r, wr) {
   const body = el("mcBody"), card = el("fpCard"), wall = el("mcWall");
@@ -4778,7 +4780,7 @@ function renderMarketCtx() {
   //   그림 없는 부값(OKX/HL 펀딩·OI 합계·거래소별 30분 체결·스프레드·12시간 청산 최다·청산 급증)은 판마다 흐린 한 줄로 남긴다.
   // 2026-09-30 사용자 «카드 너비 100% 안을 내용 크기를 키워 채워» -- 판 폭(격자 auto-fit 300px 칸)에서 그림 폭을 정한다.
   { const cmp = body.classList.contains("mc-cmp"), gap = cmp ? 14 : 22;   // 2026-09-30 시안 Y: 풋프린트 1초 수급 아래 칸(~420px)에 2열 압축
-    const BW = body.clientWidth || 1200, cols = cmp ? 2 : Math.max(1, Math.min(4, Math.floor((BW + 22) / 322)))   /* 판은 넷 -- auto-fit 이 빈 칸을 접어 넷이 폭을 나눠 가진다 */, colW = Math.floor((BW - (cols - 1) * gap) / cols);
+    const BW = body.clientWidth || 1200, cols = cmp ? 1 : Math.max(1, Math.min(4, Math.floor((BW + 22) / 322)))   /* 판은 넷 -- auto-fit 이 빈 칸을 접어 넷이 폭을 나눠 가진다 */, colW = Math.floor((BW - (cols - 1) * gap) / cols);
     body.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;   // 🔴auto-fit 은 전폭 줄(⑤)이 있으면 빈 칸을 못 접어 5칸이 됐다 -- 계산과 같은 칸 수로 못 박는다
     mcGfx.pw = Math.min(colW, 560); mcGfx.gw = cmp ? Math.max(48, colW - 64 - 46 - 12) : Math.max(110, Math.min(300, colW - 96 - 90 - 16));
     mcGfx.qw = cmp ? Math.max(70, Math.min(100, Math.round(colW * 0.42))) : Math.max(96, Math.min(150, Math.round(colW * 0.3)));
@@ -4854,8 +4856,34 @@ function renderMarketCtx() {
           return `<span class="a">${newsAsset(a)}</span><span class="mini" title="호재 ${nb} · 악재 ${ns} · 중립 ${nn - nb - ns}">${nn ? `<i class="b" style="width:${100 * nb / nn}%"></i><i style="width:${100 * (nn - nb - ns) / nn}%"></i><i class="s" style="width:${100 * ns / nn}%"></i>` : ""}</span><span class="c">${nn}건</span>`; }).join("")
       + `</div>` : note("뉴스 대기"));
   G.gw = gwKeep;
-  if (G.cmpW) htmlB = [`<div class="mc-stack">${htmlB.join("")}</div>`];   // ①② 를 한 단에 위아래로
-  htmlB.push(G.cmpW ? `<div class="mc-stack">${wallHtml0}${newsHtml0}</div>` : wallHtml0 + newsHtml0);
+  // 2026-10-13 시안(아티팩트 댓글 «4개 판을 함축해 가로 1줄 · 나머지 1줄에 체결 버블»): 넓은 화면은 판마다 상태 칩 + 값 셋만 한 줄로,
+  //   아래 줄은 체결 버블 미니(bubble_map.js 가 #mcBubble 에 최근 3분을 그린다). 판 설명(?)은 그대로. 자세한 그림은 좁은 화면·이전 판에.
+  if (G.cmpW) {
+    const kv = (k, v, cls = "", tip = "") => `<div class="mc-kv"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span><b class="${cls}">${v}</b></div>`;
+    const tile = (key, title, chipHtml, rows) => sec(key, title, `<div class="mc-state">${chipHtml}</div>${rows}`);
+    const duelChip = !PAPER_SIG_OK.duel.has(A) ? chip("", "검정 밖") : !ps ? chip("", "엔진 대기")
+      : ps.duel ? chip(ps.duel > 0 ? "good" : "bad", `고래 ${ps.duel > 0 ? "롱" : "숏"} · ${ps.remain}분`, zTip) : chip("", "맞대결 없음", zTip);
+    const wallChip = !PAPER_SIG_OK.wall.has(A) ? chip("", "검정 밖") : !ps ? chip("", "엔진 대기") : !ps.dir ? chip("", "벽 신호 없음")
+      : ps.chase ? chip("warn", `${ps.dir > 0 ? "매수" : "매도"} · 추격 주의`) : chip(ps.dir > 0 ? "good" : "bad", `${ps.dir > 0 ? "매수" : "매도"} 우세`);
+    const st = (k) => { const v = hsm ? statFrac(k, hsm) : null; return v == null ? "-" : k === "obi" ? `${v > 0 ? "+" : ""}${v.toFixed(2)}` : `${Math.round(v * 100)}%`; };
+    const nx = np ? np.items.filter((it) => it.sentiment && it.ts_ms >= (np.now_ms || Date.now()) - 3600e3 && newsRel(it)) : [];
+    const nc = (k) => nx.filter((it) => it.sentiment === k).length, ethN = np ? newsAssetCounts(np, "ETH") : null;
+    htmlB = [`<div class="mc-strip">`
+      + tile("q_lev", "① 레버리지 과열?", levChip.trim(),
+          kv("펀딩 분위", f.bn_at_base ? "기본값" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`, "", `바이낸스 예상 ${fr(f.bn)}`)
+          + kv("베이시스", sg(b.bp, 1, "bp"), "", `7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`)
+          + kv("OI 1시간", sg(OI.z1h, 1, "σ"), tone(OI.z1h, 1.5), `${oiA ? venTxt(oiA.venues) : "바이낸스만"} · 1시간 ${sg(OI.d1h_pct, 2, "%")}`))
+      + tile("q_flow", "② 누가 밀고 있나", duelChip,
+          (z.whale == null ? kv("크기별", "기준 쌓는 중") : kv("고래", sg(z.whale, 1, "σ"), tone(z.whale)) + kv("리테일", sg(z.retail, 1, "σ"), tone(z.retail)))
+          + kv("30분 CVD", sg(fl.cvd30_all_z ?? fl.cvd30_z, 1, "σ"), tone(fl.cvd30_all_z ?? fl.cvd30_z)))
+      + tile("q_wall", "④ 벽 · 교차 · 위치", wallChip,
+          kv("깊은 벽", ps && PAPER_SIG_OK.wall.has(A) ? sg(ps.imb, 2) : "-", ps && ps.dir > 0 ? "mc-good" : ps && ps.dir < 0 ? "mc-bad" : "")
+          + kv("불균형", st("obi")) + kv("이탈", st("leave")))
+      + tile("q_news", "⑤ 뉴스", chip("", np ? `1시간 ${nx.length}건` : "뉴스 대기"),
+          kv("호재", String(nc("bullish")), "mc-good") + kv("악재", String(nc("bearish")), "mc-bad")
+          + kv("ETH 12시간", ethN ? `${ethN.n}건` : "-"))
+      + `</div>`];
+  } else htmlB.push(wallHtml0 + newsHtml0);
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)
   htmlB = htmlB.join("");
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
@@ -4869,7 +4897,7 @@ function renderMarketCtx() {
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
   body._mcHtml = htmlB;
-  keepFocus(body, () => { body.innerHTML = htmlB; });
+  keepFocus(body, () => { body.innerHTML = htmlB; if (G.cmpW) body.appendChild(mcBubbleCanvas()); });
   if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
     const top = body.getBoundingClientRect().top, need = Math.ceil(Math.max(0, ...[...body.children].map((k) => k.getBoundingClientRect().bottom - top)) + 6);
     if (need > 40 && Math.abs(need - mcNeedH) > 4) {
