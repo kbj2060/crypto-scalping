@@ -4615,14 +4615,10 @@ function paperHtml(d = latestPaper, bare = false) {   // bare = 서랍 안(제�
 
 // ── 2026-10-06 넓은 화면 모의 판 칸(#mcWall) = 서랍 둘: 모의 판 · 지지/저항 (사용자 «드로우로 올리고 내리게 · 둘 중 하나만 열려 카드 높이가 안 움직이게») ──
 //   칸 높이는 풋프린트가 정한다(mcPlace) -- 열린 서랍이 남은 높이를 다 쓰고, 닫힌 서랍은 머리 한 줄(+ 요약, 사용자 선택 B). 머리를 누르면 그 서랍이 열리고(열린 걸 누르면 다른 쪽).
-let wallDrawer = (() => { try { return localStorage.getItem("wallDrawer") === "sr" ? "sr" : "paper"; } catch (_) { return "paper"; } })();
+// 2026-10-13 사용자(아티팩트 댓글) «모의판은 제거» -- 서랍은 지지/저항 하나(머리를 누르면 접고 편다). 엔진·기록은 계속(10-20 심사 여부, 판정 달력 paper_review).
+let wallDrawer = "sr";
 function wallDrawerHtml() {
-  const d = latestPaper, A = d && d.available ? d.arms || {} : {}, sr = srLevelsLive();
-  const n = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}`);
-  const tn = (v) => (v > 0 ? "mc-good" : v < 0 ? "mc-bad" : "");
-  const days = A["w80_z0.5_a24_mh15"] ? A["w80_z0.5_a24_mh15"].days : null;
-  const pSum = [["적응", A["w80_z0.5_a24_mh15"]], ["고래", A["w100_z0.5_w60"]], ["반반", d && d.port]].filter(([, a]) => a && a.cum != null)
-    .map(([nm, a]) => `${nm} <b class="${tn(a.cum)}">${n(a.cum)}</b>`).join(" · ");
+  const sr = srLevelsLive();
   const px = (lv) => fmtNum(lv.price, (ASSET_CONFIG[activeSnapshotAsset] || {}).dp ?? 2);
   const sSum = sr ? [sr.res[0] && `저항 <b class="mc-bad">${px(sr.res[0])}</b>`, sr.sup[0] && `지지 <b class="mc-good">${px(sr.sup[0])}</b>`].filter(Boolean).join(" · ") : "";
   const chev = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
@@ -4635,15 +4631,12 @@ function wallDrawerHtml() {
   const srBody = sr && (sr.res.length || sr.sup.length) ? `<div class="liq-level-list wdr-sr">${srRowsHtml(sr)}</div>`
     : `<div class="ppm-empty">${latestLiquidationMap && latestLiquidationMap.warmed_up ? "추정 가능한 밀집 구간이 아직 없습니다" : "청산맵 데이터 수집 중"}</div>`;
   return `<div class="wdr-wrap">`
-    + sec("paper", "모의 판", `실주문 없음 · bp${days ? ` · ${days}일째` : ""}`, pSum, paperHtml(d, true),
-          `<button type="button" class="mc-q" data-tip="paper" aria-expanded="${mcTipOpen.has("paper")}" aria-label="모의 판 설명"><span aria-hidden="true">?</span></button>`)
     + sec("sr", "지지 · 저항", "청산맵 밀집 · 가까운 3개씩", sSum, srBody) + `</div>`;
 }
 el("mcWall")?.addEventListener("click", (e) => {
   const b = e.target.closest(".wdr-tg");
   if (!b) return;
-  wallDrawer = b.dataset.wdr === wallDrawer ? (wallDrawer === "sr" ? "paper" : "sr") : b.dataset.wdr;
-  try { localStorage.setItem("wallDrawer", wallDrawer); } catch (_) { /* 기억은 편의 */ }
+  wallDrawer = wallDrawer === "sr" ? "" : "sr";   // 2026-10-13 서랍 하나 -- 접기/펴기
   renderPaper();
   el("mcWall").querySelector(`.wdr-tg[data-wdr="${wallDrawer}"]`)?.focus();
 });
@@ -4863,7 +4856,7 @@ function renderMarketCtx() {
   G.gw = gwKeep;
   if (G.cmpW) htmlB = [`<div class="mc-stack">${htmlB.join("")}</div>`];   // ①② 를 한 단에 위아래로
   htmlB.push(G.cmpW ? `<div class="mc-stack">${wallHtml0}${newsHtml0}</div>` : wallHtml0 + newsHtml0);
-  if (!G.cmpW) htmlB.push(paperHtml());   // 2026-10-04 좁은 화면(옵션 요약 칸 없음)은 시장 맥락 끝에 모의 판
+  // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)
   htmlB = htmlB.join("");
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
   const whenBox = el("mcWhen");   // 2026-10-01 휴대폰·세로 화면도 Option 카드 맨 아래(넓은 화면과 같게)
