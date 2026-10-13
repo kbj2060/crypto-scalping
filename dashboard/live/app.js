@@ -4504,17 +4504,17 @@ const mcGfx = {
       + [-1, 1].map((q) => `<line x1="${(c + q * thr * s).toFixed(1)}" x2="${(c + q * thr * s).toFixed(1)}" y1="2" y2="14" stroke="var(--warn)" stroke-opacity=".75" stroke-dasharray="2 2"/>`).join("")
       + `<line x1="${c}" x2="${c}" y1="2" y2="14" stroke="var(--muted)"/>${imb == null ? "" : `<rect x="${x0.toFixed(1)}" y="4" width="${Math.max(1.5, Math.abs(v) * s).toFixed(1)}" height="8" rx="2" fill="${fill}"/>`}</svg>`;
   },
-  book(sw, bps, w = mcGfx.pw || 300, mid = 0, dp = 2) {   // 매수벽 | 매도벽 거울 막대 -- 양 끝 = 그 벽이 닿는 가격(현재가 ±25·50·100bp, 2026-10-06 사용자 «±25 말고 가격으로»)
-    const b = sw.bid, a = sw.ask, mx = Math.max(1, ...b, ...a), c = w / 2, h = 4 + bps.length * 21, gap = mid > 0 ? 6 : 18, P = mid > 0 ? 56 : 0, Q = 46;
+  book(sw, bps, w = mcGfx.pw || 300, mid = 0, dp = 2, rh = 21, fs = 10, bh = 13) {   // rh·fs·bh = 줄 간격·글자·막대 두께(2026-10-13 요약 줄은 크게)   // 매수벽 | 매도벽 거울 막대 -- 양 끝 = 그 벽이 닿는 가격(현재가 ±25·50·100bp, 2026-10-06 사용자 «±25 말고 가격으로»)
+    const b = sw.bid, a = sw.ask, mx = Math.max(1, ...b, ...a), c = w / 2, h = 4 + bps.length * rh, gap = mid > 0 ? 6 : 18, P = mid > 0 ? 56 : 0, Q = 46;
     const kq = (v) => (v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : String(Math.round(v)));
     const pf = (v) => v.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
     return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="호가 벽 매수 대 매도">` + bps.map((bp, i) => {
-      const y = 4 + i * 21, room = Math.max(10, c - gap - Q - P), bw = room * b[i] / mx, aw = room * a[i] / mx, lo = mid * (1 - bp / 1e4), hi = mid * (1 + bp / 1e4);
+      const y = 4 + i * rh, ty = y + Math.round(bh / 2 + fs * 0.36), room = Math.max(10, c - gap - Q - P), bw = room * b[i] / mx, aw = room * a[i] / mx, lo = mid * (1 - bp / 1e4), hi = mid * (1 + bp / 1e4);
       return `<g><title>${mid > 0 ? `현재가에서 ${pf(lo)}까지 매수호가 ${kq(b[i])} · ${pf(hi)}까지 매도호가 ${kq(a[i])} (±${bp}bp)` : `±${bp}bp`}</title>`
-        + `<rect x="${(c - gap - bw).toFixed(1)}" y="${y}" width="${bw.toFixed(1)}" height="13" rx="2" fill="var(--good)" opacity=".75"/><rect x="${c + gap}" y="${y}" width="${aw.toFixed(1)}" height="13" rx="2" fill="var(--bad)" opacity=".75"/>`
-        + `<text x="${(c - gap - 4 - bw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + gap + 4 + aw).toFixed(1)}" y="${y + 10}" font-size="10" fill="var(--text)">${kq(a[i])}</text>`
-        + (mid > 0 ? `<text x="0" y="${y + 10}" font-size="10" fill="var(--good)">${pf(lo)}</text><text x="${w}" y="${y + 10}" font-size="10" fill="var(--bad)" text-anchor="end">${pf(hi)}</text>`
-          : `<text x="${c}" y="${y + 10}" font-size="10" fill="var(--muted)" text-anchor="middle">±${bp}</text>`)
+        + `<rect x="${(c - gap - bw).toFixed(1)}" y="${y}" width="${bw.toFixed(1)}" height="${bh}" rx="2" fill="var(--good)" opacity=".75"/><rect x="${c + gap}" y="${y}" width="${aw.toFixed(1)}" height="${bh}" rx="2" fill="var(--bad)" opacity=".75"/>`
+        + `<text x="${(c - gap - 4 - bw).toFixed(1)}" y="${ty}" font-size="${fs}" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + gap + 4 + aw).toFixed(1)}" y="${ty}" font-size="${fs}" fill="var(--text)">${kq(a[i])}</text>`
+        + (mid > 0 ? `<text x="0" y="${ty}" font-size="${fs}" fill="var(--good)">${pf(lo)}</text><text x="${w}" y="${ty}" font-size="${fs}" fill="var(--bad)" text-anchor="end">${pf(hi)}</text>`
+          : `<text x="${c}" y="${ty}" font-size="${fs}" fill="var(--muted)" text-anchor="middle">±${bp}</text>`)
         + `</g>`;
     }).join("") + `</svg>`;
   },
@@ -4890,17 +4890,17 @@ function renderMarketCtx() {
           gk("펀딩", G.pct(f.bn_at_base ? null : f.bn_pct180, gv), f.bn_at_base ? "펀딩 기본값(0.01%)" : `펀딩 분위 ${Math.round((f.bn_pct180 ?? 0) * 100)}% · 바이낸스 예상 ${fr(f.bn)}`,
              f.bn_at_base ? "기본" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`)
           + gk("베이시스", G.pct(b.pct7d, gv), `베이시스 ${sg(b.bp, 1, "bp")} · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`, sg(b.bp, 1, "bp"))
-          + gk("OI", G.sig(OI.z1h, gv), `OI 1시간 ${sg(OI.z1h, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d1h_pct, 2, "%")}`, sg(OI.z1h, 1, "σ"), tone(OI.z1h, 1.5)))
+          + gk("OI", G.sig(OI.z1h, gv), `OI 1시간 ${sg(OI.z1h, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d1h_pct, 2, "%")}`, sg(OI.z1h, 1, "σ"), tone(OI.z1h, 1.5))
+          + gk("CVD", G.sig(cvd, gv), `30분 CVD ${sg(cvd, 1, "σ")}`, sg(cvd, 1, "σ"), tone(cvd)))   // 2026-10-13 사용자 «cvd 를 레버리지 과열로» -- ①② 가 4줄씩
       + tile("q_flow", "② 누가 밀고 있나", duelChip,
           gk("고래", G.sig(z.whale, gv), `고래 ${sg(z.whale, 1, "σ")} · ${flowVen}`, sg(z.whale, 1, "σ"), tone(z.whale))
           + gk("중형", G.sig(z.mid, gv), `중형 ${sg(z.mid, 1, "σ")}`, sg(z.mid, 1, "σ"), tone(z.mid))
           + gk("리테일", G.sig(z.retail, gv), `리테일 ${sg(z.retail, 1, "σ")}`, sg(z.retail, 1, "σ"), tone(z.retail))
-          + gk("CVD", G.sig(cvd, gv), `30분 CVD ${sg(cvd, 1, "σ")}`, sg(cvd, 1, "σ"), tone(cvd))
           + gk("가격×OI", G.seg4(d.quad ? d.quad.key : null, gv), d.quad ? `${({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-"} · ${d.quad.label} · 1시간 ${sg(d.move60, 0, "bp")}` : "가격×OI 1시간 -",
                d.quad ? ({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-" : "-",
                !d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : ""))
       + tile("q_wall", "④ 벽 · 교차 · 위치", wallChip,
-          (sw ? G.book(sw, bps, Math.floor(unit * 1.6), Number(d.mid) || 0, (ASSET_CONFIG[A] || {}).dp ?? 2) : "")
+          (sw ? G.book(sw, bps, Math.floor(unit * 1.6), Number(d.mid) || 0, (ASSET_CONFIG[A] || {}).dp ?? 2, 30, 11.5, 16) : "")   // 10-13 «벽 내용 상하 간격 넓히고 크게»
           + gk("깊은 벽", ps && PAPER_SIG_OK.wall.has(A) ? G.wall(ps.imb, ps.thr, gwWall) : G.pct(null, gwWall), ps ? `깊은 벽 ${sg(ps.imb, 2)} · 문턱 ±${ps.thr.toFixed(2)}` : ""), " mc-wide-t")
       + tile("q_news", "⑤ 뉴스", np ? chip("", `1시간 ${nx.length}건`) : chip("", "뉴스 대기"),
           gk("1시간", tri(nc("bullish"), nc("neutral"), nc("bearish")), `1시간 ${nx.length}건 · 호재 ${nc("bullish")} · 중립 ${nc("neutral")} · 악재 ${nc("bearish")}`)
