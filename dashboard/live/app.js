@@ -4703,6 +4703,7 @@ function mcUsSession(nowMs = Date.now()) {
 
 // 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
+const MC_BUBBLE_K = 0.8;   // 체결 버블 높이 = 1초 수급 칸(차트 둘) × 이 값 -- 2026-10-13 0.5(차트 한 개) → 0.8(사용자 «수급 줄이고 버블 키워»)
 let mcBubbleEl = null;   // 2026-10-13 시장 맥락 아래 줄 체결 버블 미니 -- 판을 다시 그려도 같은 캔버스를 다시 붙인다
 const mcBubbleCanvas = () => mcBubbleEl || (mcBubbleEl = Object.assign(document.createElement("canvas"), { id: "mcBubble", className: "mc-bubble" }));
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
@@ -8342,14 +8343,14 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
     const floorY = hAll - 2;   // 2026-10-06 리본 줄이 빠져 칸 바닥 = 상자 바닥
     const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
-    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? Math.round((s1Avail - mcNeedH - 16 - 8) * 2 / 3) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? Math.round((s1Avail - mcNeedH - 16 - 8) / (1 + MC_BUBBLE_K)) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
         const on = mcSplit && SUB_LEGEND_H > 0, a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
         fs.classList.toggle("on", on);
         if (on) { fs.style.left = `${Math.round(a.left - c.left + ml + 290)}px`; fs.style.top = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`; }
       } }
-    if (mcSplit && mcBubbleEl) { const bh = `${Math.max(120, Math.round(s1H / 2))}px`; if (mcBubbleEl.style.height !== bh) mcBubbleEl.style.height = bh; }   // 2026-10-13 체결 버블 = 수급 차트 한 개 높이(사용자)
+    if (mcSplit && mcBubbleEl) { const bh = `${Math.max(120, Math.round(s1H * MC_BUBBLE_K))}px`; if (mcBubbleEl.style.height !== bh) mcBubbleEl.style.height = bh; }   // 2026-10-13 체결 버블 = 수급 차트 한 개 높이(사용자)
     mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: floorY - (sub1sY + s1H + 12) } : null,
             mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
               return { x: ml + cw + 4, y, w: TAG_W + TRADE_W + BOOK_W - 8, h: floorY - y }; })() : null);
