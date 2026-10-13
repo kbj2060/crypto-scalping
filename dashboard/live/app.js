@@ -7742,7 +7742,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-10-14 사용자 «타임프레임마다 그 창의 단순 합산값도 60분 합 바로 옆에» -- 창 = 지금 보이는 봉 전부(1시간 창이면 60분 합과 같아 생략)
     const winMin = rows.length * 5, winLab = winMin >= 1440 ? `${+(winMin / 1440).toFixed(1)}일` : `${+(winMin / 60).toFixed(1)}시간`, showWin = winMin > 60;
     const wX = valX, hX = showWin ? valX - 50 : valX;   // 넓은 화면: 오른쪽 끝 = 창 합 · 그 왼쪽 50px = 60분 합
-    const usd = (v) => (Math.abs(v) >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : fmtUsdCompact(v));   // 대금은 짧게($24.3M · $3.37B) -- 두 칸이 겹치지 않게
+    const usd = (v) => (Math.abs(v) >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : Math.abs(v) >= 1e8 ? `$${Math.round(v / 1e6)}M` : Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : fmtUsdCompact(v));   // $673M · $24.3M -- 7자 넘지 않게   // 대금은 짧게($24.3M · $3.37B) -- 두 칸이 겹치지 않게
     if (wideVal) {
       txt(hX, top + RIB / 2 + 3, "60분", { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });
       if (showWin) txt(wX, top + RIB / 2 + 3, `${winLab} 합`, { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });
