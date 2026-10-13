@@ -123,7 +123,7 @@ def book_frame_vision():
 
 
 def liq_5m(coin):
-    """5분 청산 합(L = 롱 청산 · S = 숏 청산), 유효 칸만. tail_risk(1분 합) 08-17~09-18 + liquidations(건별) 09-26~."""
+    """5분 청산 합(L = 롱 청산 · S = 숏 청산), 유효 칸만. tail_risk(1분 합, 5분 중 4분 이상 유효) 08-17~09-18 + liquidations(건별, 앞뒤 1시간 안 기록 있는 칸) 09-26~."""
     fs = sorted(glob.glob(f"{LAKE}/tail_risk_1m/coin={coin}/date=*/*.parquet"))
     tr = pd.concat([pd.read_parquet(f, columns=["ts", "long_usd_1m", "short_usd_1m", "valid_liq_stream", "ws_stale"]) for f in fs])
     tr = tr[tr.valid_liq_stream & ~tr.ws_stale.astype(bool)].copy()
@@ -137,6 +137,11 @@ def liq_5m(coin):
     lq["b"] = lq.ts_ms // M5 * M5
     g = lq.pivot_table(index="b", columns="side", values="usd", aggfunc="sum").reindex(grid).fillna(0.0)
     x = pd.DataFrame({"L": g["long"], "S": g["short"]}, index=grid)
+    # 10-14 검토: 이 구간엔 유효성 표시가 없다 -- 앞뒤 1시간 안에 청산 기록이 하나도 없는 칸(수집 시작 전·수집기 공백)은 «모름»으로 뺀다.
+    #   ponytail: 진짜로 1시간 넘게 조용한 칸도 빠진다(보수 쪽). 수집기 heartbeat 표가 생기면 그걸로 바꾼다.
+    et = np.sort(lq.ts_ms.to_numpy()); pos_ = np.searchsorted(et, grid + M5 // 2)
+    near = np.minimum(np.abs(et[np.clip(pos_, 0, len(et) - 1)] - (grid + M5 // 2)), np.abs(et[np.clip(pos_ - 1, 0, len(et) - 1)] - (grid + M5 // 2)))
+    x = x[near <= 3_600_000]
     x = pd.concat([a, x[~x.index.isin(a.index)]]).sort_index()
     for c in ("L", "S"):                                                     # 유효 칸만 이은 직전 2016칸 90분위
         x[c + "q"] = x[c] / x[c].shift(1).rolling(2016, min_periods=500).quantile(0.9).replace(0, np.nan)

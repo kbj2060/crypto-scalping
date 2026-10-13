@@ -134,7 +134,10 @@ def analyses(F):
     ph = pd.Series(np.where(ch >= 0.25, "인상기", np.where(ch <= -0.25, "인하기", "동결기")), index=F.index)[ch.notna()]
     r = np.log(F.eth).diff().reindex(ph.index)
     grp = (ph != ph.shift()).cumsum()
+    ex = ~((r.index >= "2020-03-01") & (r.index < "2020-04-01"))             # 10-14 검토: 인하기 순위가 2020-03 한 달(03-12 −59%)에 기댄다
     rep["fed_phase"] = {p: dict(days=int((ph == p).sum()), eth_ann_pct=round(float(r[ph == p].mean() * 252 * 100), 1),
+                                eth_ann_ex_2020_03_pct=round(float(r[(ph == p) & ex].mean() * 252 * 100), 1),
+                                eth_median_ann_pct=round(float(r[ph == p].median() * 252 * 100), 1),
                                 eth_vol_ann_pct=round(float(r[ph == p].std() * np.sqrt(252) * 100), 1),
                                 spans=[f"{g.index[0]:%Y-%m}~{g.index[-1]:%Y-%m}" for _, g in ph[ph == p].groupby(grp[ph == p]) if len(g) >= 40])
                         for p in ("인상기", "동결기", "인하기")}

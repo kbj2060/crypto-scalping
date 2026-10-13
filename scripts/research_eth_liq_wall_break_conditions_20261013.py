@@ -165,7 +165,8 @@ def join_panels(b5, f):
     p = pd.concat([pd.read_parquet(f"{BV}/panel/ETHUSDT.parquet"), daily_parquets(f"{BV}/panel_daily/ETHUSDT-5m-*.parquet")])
     p["t"] = pd.to_datetime(p.timestamp).astype("int64") // 10**6
     p = b5[["t"]].merge(p.drop_duplicates("t"), on="t", how="left")
-    lag = lambda x: x.shift(1)                                               # OI·metrics 는 k−1 (스탬프 규약 2024-03-04 전환)
+    sw = (pd.to_datetime(b5.t, unit="ms") >= "2024-03-04").to_numpy()     # 🔴10-14 검토: 전환 전 행 t = 봉 t−1 흐름이라 shift 1 이면 2봉 묵음 → 전환 뒤만 한 행 늦춰 두 시기 모두 «1봉 묵은 값»
+    lag = lambda x: pd.Series(np.where(sw, x.shift(1), x), index=x.index)   # noqa: E731
     oi = np.log(lag(p.sum_open_interest))
     for n, nm in ((3, "doi15"), (12, "doi1h"), (48, "doi4h"), (288, "doi24h")):
         f[nm] = oi - oi.shift(n)
@@ -211,7 +212,8 @@ def join_book(b5, ev, bk=None):
     tq = b5.t.to_numpy()[ev.k] + M5 - 1000
     i = np.searchsorted(bt, tq, side="right") - 1
     i30 = np.searchsorted(bt, tq - 30 * M1, side="right") - 1
-    ok = (i >= 0) & (i30 >= 0) & (tq - bt[np.clip(i, 0, None)] <= 2 * M1)
+    ok = ((i >= 0) & (i30 >= 0) & (tq - bt[np.clip(i, 0, None)] <= 2 * M1)
+          & (np.abs(tq - 30 * M1 - bt[np.clip(i30, 0, None)]) <= 2 * M1))      # 10-14 검토: 30분 전 스냅샷도 신선해야(공백이면 몇 시간 전과 비교하게 됨)
     g = lambda col, ii: np.where(ok, bk[col].to_numpy()[np.clip(ii, 0, None)], np.nan)
     up = ev.s.to_numpy() > 0
     a1, b1, a2, b2, a1o, b1o = g("n1", i), g("n-1", i), g("n2", i), g("n-2", i), g("n1", i30), g("n-1", i30)
@@ -365,9 +367,9 @@ def conditions(ev, feats):
     return t.sort_values("real_RECENT_z", key=np.abs, ascending=False)
 
 
-def wall_specific(ev, feats, nb=500):
-    """같은 조건이 청산벽에서 위약 선보다 더 세게 작동하나: (실제 Q5−Q1) − (위약 Q5−Q1), RECENT 같은 날 묶음 부트."""
-    rec = ev[ev.split.isin(["VAL", "TEST"])]
+def wall_specific(ev, feats, nb=500, splits=("VAL", "TEST")):
+    """같은 조건이 청산벽에서 위약 선보다 더 세게 작동하나: (실제 Q5−Q1) − (위약 Q5−Q1), splits(기본 RECENT) 같은 날 묶음 부트."""
+    rec = ev[ev.split.isin(list(splits))]
     days = np.sort(rec.day.unique())
     rows = []
     for col in feats:
@@ -438,6 +440,20 @@ def test():
     rep["pass"], rep["bonf"] = cond[cond["pass"]].feat.tolist(), cond[cond.bonf].feat.tolist()
     ws = wall_specific(ev, [c for c in rep["pass"] if c not in MASS])
     ws.to_csv(f"{OUT}/wall_specific.csv", index=False)
+    # 10-14 검토: 문서의 «2022~24 청산벽 전용» 서술을 짝지은 (실제 − 위약) CI 로 -- DEV 와 RECENT 둘 다
+    dev_feats = ["rvol", "rtrades", "rng_sig", "band_sig", "bigimb", "cvd30", "dlt4h"]
+    rep["wall_specific_dev"] = wall_specific(ev, dev_feats, splits=("DEV",)).round(4).to_dict("records")
+    rep["wall_specific_recent_dev_feats"] = wall_specific(ev, dev_feats).round(4).to_dict("records")
+    # 10-14 검토: 표본 밖으로 뺀 사건(닿은 봉 안에서 결정 · 4시간 미결)이 거래량과 함께 늘어나는지 -- 결론의 범위를 적기 위해
+    R = raw.copy(); R["split"] = split_of(R.t); R = R[R.split != ""]
+    R["per"] = np.where(R.split == "DEV", "DEV", "RECENT")
+    R["rq"] = R.groupby(["kind", "per"]).rvol.transform(lambda x: pd.qcut(x.rank(method="first"), 5, labels=False))
+    dec = R.res == -3
+    R["dec_break"] = (dec & (R.s * (R.c - R.thr) >= 0)).astype(float)
+    R["dec_reject"] = (dec & (R.s * (R.c - R.thr) < 0)).astype(float)
+    R["unres"] = (R.res == -2).astype(float)
+    rep["excluded_by_rvol"] = {f"{k}|{pe}": g.groupby("rq")[["dec_break", "dec_reject", "unres"]].mean().round(3).to_dict("list")
+                               for (k, pe), g in R.groupby(["kind", "per"])}
     feats_pl = [c for c in feats if c not in MASS]
     rep["model_real"] = models(ev, feats, "real")
     rep["model_real_no_mass"] = models(ev, feats_pl, "real")
@@ -461,8 +477,9 @@ def rt():
     ev = ev[ev.y.notna() & (ev.t >= pd.Timestamp("2026-07-19").value // 10**6)].copy()
     tr = pd.read_parquet(TAIL)
     tr = tr[tr.valid_liq_stream & ~tr.ws_stale]
-    g = tr.groupby(tr.t // M5 * M5)[["long_usd_1m", "short_usd_1m"]].sum()
-    full = pd.DataFrame(index=np.arange(g.index.min(), g.index.max() + 1, M5)).join(g).fillna(0.0)
+    g = tr.groupby(tr.t // M5 * M5).agg(long_usd_1m=("long_usd_1m", "sum"), short_usd_1m=("short_usd_1m", "sum"), nm=("t", "size"))
+    g = g[g.nm == 5].drop(columns="nm")                                       # 10-14 검토: 5분이 다 유효한 칸만 -- 빈 칸을 0(«안 터짐»)으로 섞지 않는다
+    full = pd.DataFrame(index=np.arange(g.index.min(), g.index.max() + 1, M5)).join(g)   # 무효 칸 = NaN(사건 merge 뒤 fuel NaN → 제외)
     L, S = full.long_usd_1m, full.short_usd_1m
     q90 = lambda x: x.shift(1).rolling(2016, min_periods=500).quantile(0.9)
     feat = pd.DataFrame({"t": full.index, "L": L.values, "S": S.values, "L1h": L.rolling(12).sum().values, "S1h": S.rolling(12).sum().values,
@@ -472,7 +489,8 @@ def rt():
     ev["fuel"] = np.log1p(np.where(up, ev.S, ev.L))                         # 향하는 쪽으로 밀리는 포지션의 청산
     ev["counter"] = np.log1p(np.where(up, ev.L, ev.S))
     ev["fuel1h"] = np.log1p(np.where(up, ev.S1h, ev.L1h))
-    ev["fuel_hot"] = (np.where(up, ev.Sq, ev.Lq) >= 1).astype(float)
+    q = np.where(up, ev.Sq, ev.Lq)
+    ev["fuel_hot"] = np.where(np.isnan(q), np.nan, (q >= 1) * 1.0)           # 무효 칸·기준선 예열 전 = NaN(0 으로 섞지 않는다)
     ev["r"] = ev.y - ev.p0
     rep = {}
     for kind in ("real", "placebo"):
@@ -484,7 +502,7 @@ def rt():
             rep[kind][col] = q_effect(dd, col, cuts) if len(np.unique(cuts)) == 4 else "분위 겹침"
         # 사후 통제(결과 본 뒤): 기하 오프셋 로지스틱에 닿은 봉 거래량·폭·델타·모멘텀을 같이 넣어도 hot 이 남나 · 기간 반분
         import statsmodels.api as sm
-        dd = d.dropna(subset=["rvol", "rng_sig", "dlt", "r15", "r1h", "h_sig"])
+        dd = d.dropna(subset=["fuel_hot", "rvol", "rng_sig", "dlt", "r15", "r1h", "h_sig"])   # 무효 청산 칸(NaN) 제외
         off = np.log(dd.p0.clip(.02, .98) / (1 - dd.p0.clip(.02, .98)))
         grp = {"groups": pd.factorize(dd.day)[0]}
         for nm, cols in (("hot_only", ["fuel_hot"]), ("hot_ctrl", ["fuel_hot", "rvol", "rng_sig", "dlt", "r15", "r1h", "h_sig"])):

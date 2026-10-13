@@ -11,8 +11,9 @@
 - ETH = 바이낸스 USDT-M 1분봉(→5분) 2022-01~10-11 · 일 장기 = 현물 일봉 2017~ · FRED NASDAQCOM.
 사전 고정(결과 보기 전)
 - 5분 수익 = 봉 끝 종가 로그 차(bp). 비교는 두 종목 다 «살아 있는» 봉만(CFD 거래량 > 0).
-- 금리 발작 = 30년물 5분 |수익| ≥ 4 × 직전 20거래일 같은 종목 5분 수익 표준편차(현재 봉 제외). 방향 s = −sign(채권 수익) (+1 = 금리↑).
-  기준선 = 같은 «요일·UTC 5분 칸»의 발작 아닌 봉(시간대 변동성 맞춤). 구간: 예전 2024-01~2026-06 · 요즘 2026-07~10-11.
+- 금리 발작 = 30년물 5분 |수익| ≥ 4 × 직전 5,400 활동 봉(달력 ~33일 ≈ 23거래일) 같은 종목 5분 수익 표준편차(현재 봉 제외). 방향 s = −sign(채권 수익) (+1 = 금리↑).
+  🔴10-14 검토 반영: 앞 봉이 살아 있는 봉만(휴장·주말 재개장 갭 제외) · 기준선 = **같은 구간** 안 «요일·뉴욕 시각 5분 칸»의 발작 아닌 봉 ·
+  사건 평균과 함께 날 단위 평균·하루 첫 발작만(몰린 날 가중 제거) · 회귀·CI 는 날 군집. 구간: 예전 2024-01~2026-06 · 요즘 2026-07~10-11.
   보는 것: ①같은 봉 |ETH| 배수(발작/기준선) ②s×ETH(금리↑ 에 ETH↓ 면 음수) 같은 봉·이후 1h/2h 누적 ③나스닥 통제 회귀 ETH ~ NQ + 채권(발작 봉).
 - 나스닥↔ETH: 일·주(2017~ FRED, ETH = UTC 종가 · 2024~ 는 나스닥 마감 16:00 ET 시각의 ETH 가격) · 5분(2024~) 월별·세션별(정규장 09:30–16:00 ET / 그 외)·큰 하락/상승 봉·선행 지연(±3봉).
 🔴Yahoo·Dukascopy 원본은 tmp/eth_macro5m_20261013/ 에만, 해석만 한다(실행 안 함).
@@ -110,7 +111,8 @@ def panel():
     et = ts.tz_convert("America/New_York")
     P["ts"], P["et_min"] = ts, et.hour * 60 + et.minute
     P["cash"] = (P.et_min >= 570) & (P.et_min < 960) & (et.dayofweek < 5)
-    P["slot"] = ts.dayofweek * 288 + ts.hour * 12 + ts.minute // 5
+    P["slot"] = et.dayofweek * 288 + P.et_min // 5                           # 10-14 검토: 뉴욕 시각 칸(UTC 칸은 서머타임에 08:30 발표 봉과 07:30 봉을 섞었다)
+    P["bond_prev_live"] = P.bond_live.shift(1, fill_value=False)             # 앞 봉이 죽어 있으면 이 봉 수익에 휴장 갭이 통째로 든다
     P["day"] = ts.floor("D")
     return P
 
@@ -143,6 +145,18 @@ def slope(x, y):
 
 
 # ── 나스닥 ↔ ETH ─────────────────────────────────────────────────────────
+def updown_ci(s, block, nb=1000):
+    """(하락일 민감도 − 상승일 민감도) 연속 블록 부트 95% CI -- 10-14 검토: 점추정만 굵게 적었다."""
+    x, y = s.ndx.to_numpy(), s.eth.to_numpy()
+    n = len(x); k = int(np.ceil(n / block)); rng = np.random.default_rng(7); out = []
+    for _ in range(nb):
+        idx = (rng.integers(0, n - block + 1, k)[:, None] + np.arange(block)).ravel()[:n]
+        xx, yy = x[idx], y[idx]; d, u = xx < 0, xx > 0
+        if d.sum() > 5 and u.sum() > 5:
+            out.append(np.polyfit(xx[d], yy[d], 1)[0] - np.polyfit(xx[u], yy[u], 1)[0])
+    return [round(float(v), 2) for v in np.quantile(out, [.025, .975])]
+
+
 def nasdaq_daily():
     import research_eth_rates_correlation_20261013 as RC
     F = RC.frame()
@@ -155,7 +169,7 @@ def nasdaq_daily():
             s = D[D.index >= a]
             dn, up = s[s.ndx < 0], s[s.ndx > 0]
             out[nm][pn] = dict(n=len(s), r=round(float(s.eth.corr(s.ndx)), 3), ci=RC.block_ci(s.ndx, s.eth, blk), beta=slope(s.ndx, s.eth),
-                               beta_down=slope(dn.ndx, dn.eth), beta_up=slope(up.ndx, up.eth))
+                               beta_down=slope(dn.ndx, dn.eth), beta_up=slope(up.ndx, up.eth), down_minus_up_ci=updown_ci(s, 10 if rule is None else 4))
         out[nm]["by_year"] = {int(y): round(float(g.eth.corr(g.ndx)), 3) for y, g in D.groupby(D.index.year)}
     Dd = RC.changes(F)
     return out, Dd.eth.rolling(90, min_periods=60).corr(Dd.ndx)
@@ -194,8 +208,8 @@ def nasdaq_5m(P):
 
 # ── 금리 발작 ───────────────────────────────────────────────────────────
 def spasms(P, mult=4.0):
-    B = P[P.bond_live & P.r_bond.notna()].copy()
-    sd = B.r_bond.shift(1).rolling(20 * 270, min_periods=5 * 270).std()        # 직전 ~20거래일(활동 봉 ~270/일)
+    B = P[P.bond_live & P.bond_prev_live & P.r_bond.notna()].copy()           # 휴장 갭 봉 제외(10-14 검토: 18:00 ET 발작 53건이 전부 갭이었다)
+    sd = B.r_bond.shift(1).rolling(20 * 270, min_periods=5 * 270).std()        # 직전 5,400 활동 봉 ≈ 23거래일(하루 활동 봉 중앙 237)
     B["z"] = B.r_bond / sd
     B["spasm"] = B.z.abs() >= mult
     B["s"] = -np.sign(B.r_bond)                                               # +1 = 금리↑(채권 가격↓)
@@ -203,37 +217,56 @@ def spasms(P, mult=4.0):
 
 
 def spasm_study(P, B):
+    import statsmodels.api as sm
     pos = pd.Series(np.arange(len(P)), index=P.index)
     r_eth, r_nq = P.r_eth.to_numpy(), P.r_nq.to_numpy()
-    base_abs = P[~P.index.isin(B.index[B.spasm])].groupby("slot").r_eth.apply(lambda x: x.abs().mean())
+    rec_cut = pd.Timestamp(RECENT).value // 10**6
     ev = B[B.spasm].copy()
     ii = pos.reindex(ev.index).to_numpy()
     ev["eth0"], ev["nq0"] = r_eth[ii], r_nq[ii]
     for h, nm in ((12, "1h"), (24, "2h")):
         ev[f"eth_{nm}"] = [np.nansum(r_eth[i + 1:i + 1 + h]) for i in ii]
     ev["eth_pre30"] = [np.nansum(r_eth[max(0, i - 6):i]) for i in ii]
-    ev["base_abs"] = P.slot.reindex(ev.index).map(base_abs).to_numpy()
+    ev["recent"] = ev.index >= rec_cut
+    calm = ~P.index.isin(ev.index)
+    for rc in (False, True):                                                   # 기준선 = 같은 구간 · 같은 뉴욕 시각 칸
+        per = (P.index >= rec_cut) == rc
+        base = P[per & calm].groupby("slot").r_eth.apply(lambda x: x.abs().mean())
+        m = ev.recent == rc
+        ev.loc[m, "base_abs"] = P.slot.reindex(ev.index[m]).map(base).to_numpy()
     ev["et_hhmm"] = [f"{int(m) // 60:02d}:{int(m) % 60:02d}" for m in P.et_min.reindex(ev.index)]
-    ev["recent"] = ev.index >= pd.Timestamp(RECENT).value // 10**6
+    ev["day"] = P.day.reindex(ev.index).to_numpy()
     out = {}
     for nm, g, months in (("예전 2024-01~2026-06", ev[~ev.recent], 30.0), ("요즘 2026-07~10-11", ev[ev.recent], 3.35)):
-        days = P.day.reindex(g.index).to_numpy()
+        g = g.dropna(subset=["eth0", "base_abs"])
+        days = g.day.to_numpy()
         sg = g.s.to_numpy()
-        row = dict(n=len(g), per_month=round(len(g) / months, 1), abs_eth_bp=round(float(g.eth0.abs().mean()), 1), base_abs_bp=round(float(g.base_abs.mean()), 1),
+        se0, s1h, s2h = sg * g.eth0, sg * g.eth_1h, sg * g.eth_2h
+        dm = pd.DataFrame({"d": days, "e0": se0, "e2": s2h}).groupby("d").mean()          # 날 단위(몰린 날 가중 제거)
+        first = g.sort_index().groupby("day").head(1)
+        f0 = first.s * first.eth0
+        dsum = pd.DataFrame({"d": days, "a": g.eth0.abs(), "b": g.base_abs}).groupby("d").sum().to_numpy()
+        bs = dsum[np.random.default_rng(7).integers(0, len(dsum), (2000, len(dsum)))].sum(1)
+        row = dict(n=len(g), days=int(len(dm)), per_month=round(len(g) / months, 1),
+                   abs_eth_bp=round(float(g.eth0.abs().mean()), 1), base_abs_bp=round(float(g.base_abs.mean()), 1),
                    abs_ratio=round(float(g.eth0.abs().mean() / g.base_abs.mean()), 2),
-                   signed_eth0_bp=round(float((sg * g.eth0).mean()), 1), signed_eth0_ci=day_boot_mean(sg * g.eth0, days),
-                   share_eth_against=round(float((sg * g.eth0 < 0).mean()), 3), signed_nq0_bp=round(float((sg * g.nq0).mean()), 1),
-                   signed_eth_1h=round(float((sg * g.eth_1h).mean()), 1), signed_eth_1h_ci=day_boot_mean(sg * g.eth_1h, days),
-                   signed_eth_2h=round(float((sg * g.eth_2h).mean()), 1), signed_eth_2h_ci=day_boot_mean(sg * g.eth_2h, days),
+                   abs_ratio_ci_day=[round(float(v), 2) for v in np.quantile(bs[:, 0] / bs[:, 1], [.025, .975])],
+                   signed_eth0_bp=round(float(se0.mean()), 1), signed_eth0_ci=day_boot_mean(se0, days),
+                   share_eth_against=round(float((se0 < 0).mean()), 3), signed_nq0_bp=round(float((sg * g.nq0).mean()), 1),
+                   day_level=dict(eth0_bp=round(float(dm.e0.mean()), 1), share_days_against=round(float((dm.e0 < 0).mean()), 3),
+                                  eth2h_bp=round(float(dm.e2.mean()), 1), share_days_2h_neg=round(float((dm.e2 < 0).mean()), 3)),
+                   first_per_day=dict(eth0_bp=round(float(f0.mean()), 1), share_against=round(float((f0 < 0).mean()), 3),
+                                      eth0_in_sigma=round(float((f0 / first.base_abs).mean()), 2)),
+                   signed_eth_1h=round(float(s1h.mean()), 1), signed_eth_1h_ci=day_boot_mean(s1h, days),
+                   signed_eth_2h=round(float(s2h.mean()), 1), signed_eth_2h_ci=day_boot_mean(s2h, days),
                    signed_pre30=round(float((sg * g.eth_pre30).mean()), 1), top_times_et=g.et_hhmm.value_counts().head(6).to_dict())
-        if len(g) > 5:
-            bs = np.random.default_rng(7).integers(0, len(g), (2000, len(g)))
-            row["abs_ratio_ci"] = [round(float(v), 2) for v in np.quantile(g.eth0.abs().to_numpy()[bs].mean(1) / g.base_abs.to_numpy()[bs].mean(1), [.025, .975])]
-        if len(g) >= 15:                                                      # 나스닥 통제: ETH0 ~ NQ0 + 채권0 (OLS t)
-            X = np.c_[np.ones(len(g)), g.nq0.fillna(0), g.r_bond]
-            b = np.linalg.lstsq(X, g.eth0.to_numpy(), rcond=None)[0]
-            se = np.sqrt(np.diag(np.linalg.inv(X.T @ X)) * (g.eth0.to_numpy() - X @ b).var(ddof=3))
-            row["reg_eth_on_nq_bond"] = dict(b_nq=round(float(b[1]), 2), t_nq=round(float(b[1] / se[1]), 1), b_bond=round(float(b[2]), 2), t_bond=round(float(b[2] / se[2]), 1))
+        if len(g) >= 15:                                                      # 나스닥 통제: ETH0 ~ NQ0 + 채권0 · 날 군집 표준오차
+            X = sm.add_constant(np.c_[g.nq0.fillna(0), g.r_bond])
+            mdl = sm.OLS(g.eth0.to_numpy(), X).fit(cov_type="cluster", cov_kwds={"groups": pd.factorize(days)[0]})
+            ci = mdl.conf_int()
+            row["reg_eth_on_nq_bond_cluster"] = dict(b_nq=round(float(mdl.params[1]), 2), t_nq=round(float(mdl.tvalues[1]), 1),
+                                                     b_bond=round(float(mdl.params[2]), 2), t_bond=round(float(mdl.tvalues[2]), 1),
+                                                     b_bond_ci=[round(float(ci[2][0]), 2), round(float(ci[2][1]), 2)])
         out[nm] = row
     return out, ev
 

@@ -189,12 +189,12 @@ def combo():
         pred = np.full(len(y), np.nan); pred[:len(old)] = old
         for M in ("2026-09-01", "2026-10-01"):
             te, p = month_preds(A["ts"], A["X"], y, M)
-            if M == "2026-09-01":                                              # 재학습 루프 = 원본? 원본처럼 08-23~ 체결·호가를 비우면 캐시와 같아야 한다
-                Xo = A["X"].copy()
-                Xo[np.ix_((A["ts"] >= "2026-08-23").to_numpy(), np.array([c[0] in "MD" for c in A["cols"]]))] = np.nan
-                _, po = month_preds(A["ts"], Xo, y, M)
+            if M == "2026-09-01":   # 재학습 루프 = 원본? -- 원본 패널 그대로 넣으면 캐시와 같아야 한다(10-14 검토: 비우기로 흉내 내면 6행 어긋나 24bp 차가 났다)
+                pd_, bv_ = BL.PANEL_DIR, BD.BV; BL.PANEL_DIR, BD.BV = str(ORIG_PANELS) + "/", BV0   # 원본 패널 + 원본 원천(load 가 길이를 대조한다)
+                O = BL.load(sym); BL.PANEL_DIR, BD.BV = pd_, bv_
+                to, po = month_preds(O["ts"], O["X"], BL.label(O["c"]), M)
                 ov = te < len(old)
-                rep["pred_check"][sym] = dict(n=int(ov.sum()), max_abs_orig_condition=float(np.nanmax(np.abs(po[ov] - old[te[ov]]))),
+                rep["pred_check"][sym] = dict(n=int(ov.sum()), max_abs_orig_panel=float(np.nanmax(np.abs(po - old[to]))),
                                               max_abs_filled=float(np.nanmax(np.abs(p[ov] - old[te[ov]]))))
             pred[te] = p
         if sym == "ETH":                                                       # 지정가 체결 = 1분봉(원 사양), 패널 첫 봉 기준 분 인덱스
@@ -248,14 +248,39 @@ def trend():
 
 
 # ── σ 사이징 ─────────────────────────────────────────────────────────────
+def pingpong_trades_with_kind(PP, k):
+    """PP.trades 와 같은 거래 + 청산 종류(1 익절 · 2 시간)·단위 수 -- 비용 계산용(10-14 검토: 비용 표를 스크래치가 아니라 여기서)."""
+    from research_eth_pingpong_levers_20261007 import D0, HOLD, NADD, TP0, sequential, sim
+    C = PP.candidates(k); b = PP.to_5m(k); t5 = b.t.to_numpy()
+    r2 = pd.Series((np.diff(np.log(b.c.to_numpy()), prepend=np.nan) * 1e4) ** 2); sig = np.sqrt(r2.rolling(288).sum().to_numpy() / 6)
+    t1 = k.t.to_numpy(); tdec = C.t.to_numpy("int64") + 60_000; ei = np.searchsorted(t1, tdec)
+    bi = np.searchsorted(t5, tdec // 300_000 * 300_000 - 300_000)
+    ok = (ei + HOLD < len(t1)) & (bi < len(t5)) & np.isfinite(sig[np.minimum(bi, len(t5) - 1)])
+    C, ei, bi, tdec = C[ok].reset_index(drop=True), ei[ok], bi[ok], tdec[ok]
+    n = len(C)
+    pnl, q, xi, _, kind = sim(k.h.to_numpy(), k.l.to_numpy(), k.c.to_numpy(), ei, -C.d.to_numpy(np.int64), np.full(n, D0), np.full(n, TP0), NADD, HOLD)
+    sel = sequential(ei, xi, np.ones(n, bool))
+    return pd.DataFrame({"t": tdec, "day": tdec // 86_400_000, "pnl": pnl, "q": q, "kind": kind, "mult": PP.size_mult(sig[bi])})[sel].reset_index(drop=True)
+
+
 def pingpong():
     import prereg_eth_pingpong_vol_sizing_fwd_20261007 as PP
     k = eth_1m()[["t", "h", "l", "c", "v", "tb"]]
     T = PP.trades(k, PP.candidates(k))
+    TK = pingpong_trades_with_kind(PP, k)
+    assert np.allclose(TK.pnl.to_numpy(), T.pnl.to_numpy()), "판정 함수 trades() 와 거래가 다르다"
+    sh = lambda x: float(x.mean() / x.std() * np.sqrt(365))   # noqa: E731
+    cost = {"maker0": 4.0 + np.where(TK.kind == 2, 4.0 * TK.q, 0.0),        # 진입 시장가 · 물타기·익절 지정가 0 · 시간청산 시장가
+            "taker_tp": 4.0 + 4.0 * TK.q}                                      # 익절도 시장가(민감도)
     rep = {}
     for nm, lo in (("2022~", "2022-01-01"), ("2025~", "2025-01-01"), ("2026~", "2026-01-01"), ("동결 10-08~", "2026-10-08")):
         sub = T[T.t >= pd.Timestamp(lo).value // 10**6].reset_index(drop=True)
         rep[nm] = PP.verdict(sub, 0) if sub.day.nunique() >= 3 else {"n": len(sub), "days": int(sub.day.nunique())}
+        m = (TK.t >= pd.Timestamp(lo).value // 10**6).to_numpy(); tk = TK[m]; w = tk.mult / tk.mult.mean()
+        for cn, cv in cost.items():   # 비용 후 일 샤프(고정 · σ 비례, 같은 평균 노출)
+            net = tk.pnl - cv[m]
+            rep[nm][f"net_{cn}"] = dict(sharpe_equal=sh(net.groupby(tk.day).sum()), sharpe_weighted=sh((net * w).groupby(tk.day).sum()),
+                                        sum_bp_equal=float(net.sum()), sum_bp_weighted=float((net * w).sum())) if tk.day.nunique() >= 3 else None
         rep[nm]["sum_bp_equal"] = float(sub.pnl.sum())
         rep[nm]["sum_bp_weighted"] = float((sub.pnl * sub.mult / sub.mult.mean()).sum()) if len(sub) else 0.0
         print(nm, json.dumps(rep[nm], ensure_ascii=False, default=float), flush=True)
