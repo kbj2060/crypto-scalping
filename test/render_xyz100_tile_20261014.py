@@ -8,6 +8,8 @@
 🔴GET 이 아닌 요청(주문 포함)은 브라우저 안에서 전부 막는다 -- 막힌 요청이 있으면 실패.
 세 상태(live = 실데이터 · stale = 초 가격 120초 묵음(수집기 끊김) · none = ok False) × 1920·390:
   1920 = ⑥ 칸 세 칸(나스닥 · 5년 · 10년) · 나스닥 값 live «±N.NN%» / stale·none «끊김» · 390 = 칸 없음(넓은 화면 전용) · JS 오류 0.
+10-14 급변 칩(/api/macro-spikes, 배포 전이라 가짜 응답): live = 서버 hot 실측 급변 3건(나스닥 +0.345% 7.3배 · 5년 −0.053% · 10년 +0.105%)을
+  몇 분 전으로 옮김(10년도 금리↑로 바꿔 «5·10년» 합침 확인) → 칩 2개 · 제목 줄 한 줄(칩이 잘리지 않음, 1700·1920) · stale = 이벤트 없음(칩 0) · none = ok False(칩 0).
 """
 import argparse, json, pathlib, time, urllib.request
 
@@ -32,7 +34,13 @@ def xyz_payload():
 PROBE = """() => {
   const cells = [...document.querySelectorAll('#mcBody .mc-rate-g.n3 .mc-gk')];
   return { n: cells.length, names: cells.map((c) => (c.querySelector('span') || {}).textContent), nq: cells[0] ? (cells[0].querySelector('b') || {}).textContent || '' : null,
-           title: (document.querySelector('#mcBody .mc-rate') || {}).textContent?.slice(0, 20) || '' };
+           title: (document.querySelector('#mcBody .mc-rate') || {}).textContent?.slice(0, 20) || '',
+           chips: [...document.querySelectorAll('#mcBody .mc-rate .mc-spk .mc-chip')].map((c, i) => (i ? '' : (document.querySelector('#mcBody .mc-spk i') || {}).textContent || '') + c.textContent),
+           clipped: (() => { const h = document.querySelector('#mcBody .mc-rate h4'); if (!h) return null; const r = h.getBoundingClientRect();
+             return [...h.querySelectorAll('.mc-chip')].some((c) => c.getBoundingClientRect().right > r.right + 0.5) })(),
+           ofab: (() => { const f = document.getElementById('ofab'), cs = [...document.querySelectorAll('#mcBody .mc-spk .mc-chip')]; if (!f || !cs.length) return false;
+             const q = f.getBoundingClientRect(); return cs.some((c) => { const r = c.getBoundingClientRect(); return r.left < q.right && r.right > q.left && r.top < q.bottom && r.bottom > q.top; }) })(),
+           h4h: Math.round((document.querySelector('#mcBody .mc-rate h4') || { getBoundingClientRect: () => ({ height: 0 }) }).getBoundingClientRect().height) };
 }"""
 
 
@@ -53,11 +61,21 @@ def run(shot):
             route.fulfill(body=json.dumps({"ok": True, "coin": "xyz:XYZ100", "full": not since, "bars": b,
                                            "live": {**live, "recv_sec": int(time.time()) - age}}), content_type="application/json")
         return api
+
+    def spk_for(case):
+        def api(route):
+            if case == "none":
+                return route.fulfill(body=json.dumps({"ok": False, "symbols": {}}), content_type="application/json")
+            t = int(time.time()) // 300 * 300
+            ev = {"NQ": [[t - 600, 7.33, 0.345]], "ZF": [[t - 1500, -4.1, -0.053]], "ZN": [[t - 1200, -4.86, -0.105]]} if case == "live" else {}
+            route.fulfill(body=json.dumps({"ok": True, "z": 4.0, "now_sec": int(time.time()),
+                                           "symbols": {k: {"events": ev.get(k, []), "n": 1600} for k in ("ZF", "ZN", "NQ")}}), content_type="application/json")
+        return api
     shot = pathlib.Path(shot); shot.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
         br = p.chromium.launch()
         for case in ("live", "stale", "none"):
-            for w, h in ((1920, 1080), (390, 844)):
+            for w, h in ((1920, 1080), (1700, 950), (390, 844)) if case == "live" else ((1920, 1080), (390, 844)):
                 pg = br.new_page(viewport={"width": w, "height": h}, device_scale_factor=2 if w < 500 else 1)
                 pg.on("pageerror", lambda e, c=case, w=w: errs.append(f"{c}{w}: {e}"))
                 pg.route("**/*", lambda r: (blocked.append(r.request.url), r.abort()) if r.request.method != "GET" else r.fallback())
@@ -65,6 +83,7 @@ def run(shot):
                 pg.route("**/styles.css*", lambda r: r.fulfill(body=css, content_type="text/css"))
                 pg.route(URL, lambda r: r.fulfill(body=html, content_type="text/html"))
                 pg.route("**/api/xyz100*", api_for(case))
+                pg.route("**/api/macro-spikes*", spk_for(case))
                 pg.goto(URL, wait_until="load", timeout=60000)
                 pg.wait_for_timeout(14000)
                 got = pg.evaluate(PROBE)
@@ -74,8 +93,12 @@ def run(shot):
                     if got["n"] != 3 or got["names"][:1] != ["나스닥"]: fails.append(f"[{tag}] ⑥ 칸 {got}")
                     ok_val = re.fullmatch(r"[+−]\d+\.\d\d%", got["nq"] or "") if case == "live" else got["nq"] == "끊김"
                     if not ok_val: fails.append(f"[{tag}] 나스닥 값 {got['nq']!r}")
+                    want = ["급변나스닥 +0.34%", "5·10년 금리↑"] if case == "live" else []   # 5년·10년 같은 쪽 → 한 칩 · 최근 것부터
+                    if [c.split(" · ")[0] for c in got["chips"]] != want: fails.append(f"[{tag}] 칩 {got['chips']}")
+                    if got["ofab"]: fails.append(f"[{tag}] 칩이 주문 플로팅 버튼 아래")
+                    if got["clipped"] or got["h4h"] > 26: fails.append(f"[{tag}] 제목 줄 잘림/두 줄 {got['clipped']} {got['h4h']}px")
                     if pg.locator("#mcBody").count():
-                        pg.locator("#mcBody").screenshot(path=str(shot / f"tile_{case}.png"))
+                        pg.locator("#mcBody").screenshot(path=str(shot / f"tile_{case}_{w}.png"))
                 elif got["n"]: fails.append(f"[{tag}] 휴대폰에 ⑥ 칸 {got['n']}")
                 pg.close()
         br.close()

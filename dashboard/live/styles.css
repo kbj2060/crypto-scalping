@@ -3244,3 +3244,9 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mc-bubble { display: block; width: 100%; height: 200px; margin-bottom: 6px; cursor: crosshair; touch-action: pan-y; }   /* 10-13 미니도 확대·이동(bubble_map.js VN) */
 .mc-bubble.panning { cursor: grabbing; }
 .mc-bubble:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }   /* 높이 = 수급 차트 한 개(renderCandleSvg 가 덮어쓴다) */
+/* 2026-10-14 «⑥» 제목 바로 옆 급변 칩(5년·10년·나스닥) -- 줄을 늘리지 않게 제목과 한 줄 · 오른쪽 끝은 주문 플로팅 버튼(#ofab)이 덮어 왼쪽 정렬 */
+#mcBody.mc-cmp .mc-rate h4 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#mcBody.mc-cmp .mc-spk { display: flex; gap: 4px; min-width: 0; overflow: hidden; }
+#mcBody.mc-cmp .mc-rate h4 .mc-q { flex: none; white-space: nowrap; }
+#mcBody.mc-cmp .mc-spk .mc-chip { white-space: nowrap; flex: none; }
+#mcBody.mc-cmp .mc-spk i { font: 600 11px/1 var(--font-sans, inherit); font-style: normal; color: var(--muted); align-self: center; }

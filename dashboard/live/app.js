@@ -2554,6 +2554,41 @@ function xyzSpark(w, h, min = 60) {   // 최근 min 분 1분봉 종가 + 지금 
     + `<path d="${pts.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round"/>`
     + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${col}"/></svg>`;
 }
+// 2026-10-14 사용자 «5년·10년·나스닥 급변하면 칩 알림» -- 서버 /api/macro-spikes(10-13 연구 정의: 5분 수익이 직전 활동 봉 표준편차의 4배 이상).
+//   «⑥» 제목 줄 오른쪽 칩. 봉이 끝나고 SPIKE_SHOW_MIN 분 동안 보인다(국채선물은 ~10분 늦게 도착하므로 처음 보일 때 이미 10분 전).
+let macroSpk = null, macroSpkAt = 0, macroSpkSkew = 0;
+const SPIKE_SHOW_MIN = 40, SPIKE_NM = { ZF: "5년", ZN: "10년", NQ: "나스닥" };
+async function refreshMacroSpikes() {
+  const now = Date.now();
+  if (now - macroSpkAt < 30000 || !el("mcBody")?.classList.contains("mc-cmp")) return;
+  macroSpkAt = now;
+  try {
+    const res = await fetch("/api/macro-spikes", { cache: "no-cache" });
+    if (!res.ok) throw new Error(`macro-spikes ${res.status}`);
+    macroSpk = await res.json();
+    if (Number.isFinite(macroSpk.now_sec)) macroSpkSkew = macroSpk.now_sec - Date.now() / 1000;
+  } catch (error) {
+    console.error("Macro spikes fetch error:", error);
+  }
+}
+function macroSpikeChips(chip) {   // 종목마다 가장 최근 급변 1개 · 5년·10년이 같은 쪽이면 한 칩. 색 = 가격 방향(국채 가격↓ = 금리↑ · 나스닥↓ = ETH 에 불리) -- 차트 선 색과 같다
+  const S = macroSpk && macroSpk.ok ? macroSpk.symbols || {} : null;
+  if (!S) return "";
+  const now = Date.now() / 1000 + macroSpkSkew;
+  const last = (k) => ((S[k] || {}).events || []).filter((x) => x[0] + 300 >= now - SPIKE_SHOW_MIN * 60).pop();
+  const ago = (e) => Math.max(0, Math.round((now - e[0] - 300) / 60));
+  const tipOf = (k, e) => `${SPIKE_NM[k]} ${new Date(e[0] * 1000).toTimeString().slice(0, 5)} 5분봉 ${e[2] >= 0 ? "+" : "−"}${Math.abs(e[2]).toFixed(2)}% = 평소 변동의 ${Math.abs(e[1]).toFixed(1)}배(기준 4배)`
+    + (k === "NQ" ? " · 실시간" : " · CME 무료 시세라 약 10분 늦게 보인다");
+  const NOTE = "\n요즘(08-11~10-11) 이런 봉에서 ETH 는 같은 5분 안에 같은 쪽으로 움직였다 -- 국채 가격↓(금리↑)·나스닥↓ 이면 ETH↓(5년물 기준 84%). 미리 알려 주지는 않는다(동시).";
+  const out = [], nq = last("NQ"), rs = ["ZF", "ZN"].map((k) => [k, last(k)]).filter(([, e]) => e);
+  if (nq) out.push([ago(nq), chip(nq[2] < 0 ? "bad" : "good", `나스닥 ${nq[2] >= 0 ? "+" : "−"}${Math.abs(nq[2]).toFixed(2)}% · ${ago(nq)}분`, tipOf("NQ", nq) + NOTE)]);
+  const same = rs.length === 2 && Math.sign(rs[0][1][2]) === Math.sign(rs[1][1][2]);
+  (same ? [rs] : rs.map((r) => [r])).forEach((g) => {
+    const e = g[0][1], a = Math.min(...g.map(([, x]) => ago(x)));
+    out.push([a, chip(e[2] < 0 ? "bad" : "good", `${g.map(([k]) => SPIKE_NM[k].replace("년", "")).join("·")}년 금리${e[2] < 0 ? "↑" : "↓"} · ${a}분`, g.map(([k, x]) => tipOf(k, x)).join("\n") + NOTE)]);
+  });
+  return out.length ? `<i>급변</i>${out.sort((x, y) => x[0] - y[0]).map((x) => x[1]).join("")}` : "";   // 최근 것부터 -- 좁으면 오래된 쪽이 잘린다
+}
 const XYZ_TIP = "나스닥100 실시간 — Hyperliquid xyz:XYZ100 무기한(CME 나스닥 선물과 5분 상관 0.98, 지연 없음)\n"
   + "참고 · 신호 아님: 나스닥은 ETH 보다 먼저 움직이지 않는다 — 같은 5분 안에서 같이 움직인다(요즘 상관 0.4). 주말엔 CME 가 쉬어 거의 안 움직인다.";
 
@@ -4458,7 +4493,7 @@ function renderMarketCtx() {
           + asset12("ETH", "ETH") + asset12("BTC", "BTC") + asset12("macro", "매크로"))
       + `</div>`
       + sec("q_rate", "⑥ 나스닥 · 금리 · 1시간", `<div class="mc-rate-g n3">` + nqCell() + ["ZF", "ZN"].map((k) => { const r = treasury1h(k);
-          return gk(`${TREASURY_NM[k]}`, spark(k, rateW, 26), r ? `${k} ${r.last.toFixed(3)} · 1시간 ${r.chg1 >= 0 ? "+" : "−"}${Math.abs(r.chg1).toFixed(2)}% → 금리 ${r.chg1 <= 0 ? "↑" : "↓"} (CME 약 10분 지연)` : ""); }).join("") + `</div>`).replace('class="mc-sec"', 'class="mc-sec mc-rate"')];
+          return gk(`${TREASURY_NM[k]}`, spark(k, rateW, 26), r ? `${k} ${r.last.toFixed(3)} · 1시간 ${r.chg1 >= 0 ? "+" : "−"}${Math.abs(r.chg1).toFixed(2)}% → 금리 ${r.chg1 <= 0 ? "↑" : "↓"} (CME 약 10분 지연)` : ""); }).join("") + `</div>`).replace('class="mc-sec"', 'class="mc-sec mc-rate"').replace("</h4>", `<span class="mc-spk">${macroSpikeChips(chip)}</span></h4>`)];
   } else htmlB.push(wallHtml0 + newsHtml0);
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)
   htmlB = htmlB.join("");
@@ -7992,6 +8027,7 @@ async function tick() {
       refreshNews();                 // 2026-10-05 뉴스 카드 (자체 30초 게이트)
       refreshTreasury();             // 2026-10-06 풋프린트 머리 띠 국채선물 (자체 60초 게이트)
       refreshXyz();                  // 2026-10-14 나스닥100 실시간(XYZ100, 자체 1초 게이트)
+      refreshMacroSpikes();          // 2026-10-14 «⑥» 급변 칩(자체 30초 게이트)
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)

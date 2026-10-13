@@ -21,6 +21,7 @@ import sys
 import time
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
 
@@ -972,6 +973,60 @@ def xyz100_payload(since: int = 0, db: Path = XYZ_DB, hours: float = 24.0) -> di
         lv = {"recv_sec": int(t), "px": None if px is None else float(px), "oracle": None if ora is None else float(ora)}
     return {"ok": bool(rows or lv), "coin": XYZ_COIN, "full": not since, "bars": [[int(t), float(c)] for t, c in rows], "live": lv,
             "now_sec": int(time.time())}   # 화면이 «끊김»·1시간 창을 서버 시계로 잰다(브라우저 시계가 틀려도, 10-14 검토)
+
+
+SPIKE_Z, SPIKE_BASE, SPIKE_MIN = 4.0, 5400, 288   # 10-13 연구 «금리 발작» 정의: 5분 수익이 직전 활동 봉(최대 5,400개) 표준편차의 4배
+
+
+def spikes_5m(rows: list, keep_s: int = 3600) -> dict:
+    """1분봉 [(ts_sec, 종가)](시각 오름차순) → 5분봉 급변 -- 2026-10-14 사용자 «5년·10년·나스닥 급변하면 칩».
+    5분봉 = 그 5분 마지막 1분 종가 · 완결 봉만(그 뒤 분이 들어온 봉) · 앞 5분봉이 없으면(휴장 갭) 그 봉 수익은 뺀다.
+    events = 마지막 데이터 기준 keep_s 초 안에 끝난 |z|≥4 봉 [[봉 시작 초, z, 등락 %]].
+    ponytail: 기준 = hot 8일치(연구는 23거래일) -- 수집기가 10-06·10-14 시작이라 더 긴 기록이 아직 없다. 길어지면 lake 를 붙인다."""
+    if not rows:
+        return {"events": [], "n": 0}
+    last: dict[int, float] = {}
+    for t, c in rows:
+        last[int(t) // 300 * 300] = float(c)
+    max_t = int(rows[-1][0])
+    bs = sorted(b for b in last if b + 300 <= max_t)
+    rets = [(b, math.log(last[b] / last[a]) * 1e4) for a, b in zip(bs, bs[1:]) if b - a == 300 and last[a] > 0 and last[b] > 0]
+    events = []
+    for i in range(len(rets) - 1, -1, -1):
+        b, r = rets[i]
+        if b + 300 < max_t - keep_s:
+            break
+        base = [x for _, x in rets[max(0, i - SPIKE_BASE):i]]
+        sd = statistics.stdev(base) if len(base) >= SPIKE_MIN else 0.0
+        if sd > 0 and abs(r / sd) >= SPIKE_Z:
+            events.append([b, round(r / sd, 2), round(math.expm1(r / 1e4) * 100, 3)])
+    return {"events": events[::-1], "n": len(rets)}
+
+
+_NY = ZoneInfo("America/New_York")
+
+
+def _cme_open(ts: int) -> bool:
+    """CME 주가지수 선물 개장(뉴욕 시각 일 18:00 ~ 금 17:00, 매일 17:00~18:00 쉼). 공휴일 단축은 무시(그날 봉이 조금 더 남을 뿐)."""
+    d = datetime.fromtimestamp(ts, _NY)
+    return not (d.hour == 17 or d.weekday() == 5 or (d.weekday() == 6 and d.hour < 18) or (d.weekday() == 4 and d.hour >= 17))
+
+
+def macro_spikes_payload() -> dict:
+    """국채선물 5년(ZF)·10년(ZN, CME 무료 시세 ~10분 지연) + 나스닥100(HL xyz:XYZ100, 실시간) 5분 급변. 원천이 없거나 실패한 종목은 빠진다."""
+    out: dict[str, dict] = {}
+    q = """SELECT ts_sec, close FROM {t} WHERE {k} = ? AND close IS NOT NULL
+           AND ts_sec >= (SELECT max(ts_sec) FROM {t} WHERE {k} = ?) - 8 * 86400 ORDER BY ts_sec"""
+    for nm, db, t, k, key in (("ZF", TREASURY_DB, "treasury_fut_1m", "symbol", "ZF"), ("ZN", TREASURY_DB, "treasury_fut_1m", "symbol", "ZN"),
+                              ("NQ", XYZ_DB, "hl_xyz_1m", "coin", XYZ_COIN)):
+        try:
+            rows = _read_only_rows(db, q.format(t=t, k=k), [key, key])
+            if nm == "NQ":   # HL 무기한은 주말·CME 휴장에도 거래돼 조용한 봉이 기준을 낮춘다(실측 하루 7번) -- 연구(CME 선물)처럼 개장 시간 봉만
+                rows = [r for r in rows if _cme_open(int(r[0]))]
+            out[nm] = spikes_5m(rows)
+        except (duckdb.Error, sqlite3.Error, OSError):
+            continue
+    return {"ok": bool(out), "z": SPIKE_Z, "symbols": out, "now_sec": int(time.time())}
 
 
 def news_payload(now: float, db: Path = NEWS_DB) -> dict:
@@ -3895,6 +3950,10 @@ def make_app() -> web.Application:
             since = 0
         payload = await (asyncio.to_thread(xyz100_payload, since) if since
                          else swr_cached("xyz100", 5.0, lambda: asyncio.to_thread(xyz100_payload), max_stale=60.0))
+        return web.json_response(payload, headers=NOCACHE)
+
+    async def api_macro_spikes(request: web.Request) -> web.Response:   # 2026-10-14 «⑥ 나스닥 · 금리» 급변 칩(5년·10년·나스닥 5분 |z|≥4)
+        payload = await swr_cached("macro_spikes", 30.0, lambda: asyncio.to_thread(macro_spikes_payload), max_stale=120.0)
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_notify_center(request: web.Request) -> web.Response:
@@ -7276,6 +7335,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/news", api_news)
     app.router.add_get("/api/treasury-futures", api_treasury_futures)
     app.router.add_get("/api/xyz100", api_xyz100)
+    app.router.add_get("/api/macro-spikes", api_macro_spikes)
     app.router.add_get("/api/paper-arms", api_paper_arms)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)
