@@ -15,7 +15,7 @@
 
 지키는 계약:
   · 카드는 payload.trades 가 아니라 payload.ledger 를 그린다
-  · 카드는 심볼이 아니라 **코인**으로 거른다(USDT/USDC 둘 다)
+  · 카드는 심볼로 거르지 않는다(2026-10-14 개편 뒤 계좌 전체 -- 옛 판은 코인으로 걸렀다)
   · load_account_trip_rows 는 표시용 필드만 주고, 깨진 줄·없는 파일에 안 죽는다
   · 헤지 스트림의 측면은 positionSide 가 정한다
   · 잘린 스트림은 truncated_open 이 서고 그 심볼이 trades_truncated 에 들어간다
@@ -135,16 +135,15 @@ def main() -> int:
 
     # ── 3. 카드: 원천과 필터 ──────────────────────────────────────────────────
     js = (ROOT / "dashboard" / "live" / "app.js").read_text(encoding="utf-8")
-    perf = js[js.index("// 오른쪽 성과"):js.index("const wins = net.filter")]
-    assert "latestBinanceAccount.ledger" in perf, "카드는 서버 원장을 그린다"
-    assert "latestBinanceAccount.trades" not in perf, \
+    perf = js[js.index("function renderSnapshotAccount"):][:9000]
+    assert "(A.ledger || [])" in perf and "const A = latestBinanceAccount" in perf, "카드는 서버 원장을 그린다"
+    assert "A.trades" not in perf and "latestBinanceAccount.trades" not in perf, \
         "거래소 payload 의 trades 는 7일 창이라 유령 왕복이 섞인다"
     checks += 2
-    assert re.search(r"replace\(/USD\[TC\]\$/", perf), \
-        "심볼이 아니라 코인으로 거른다 -- USDT/USDC 를 한 코인으로 본다"
-    assert "ASSET_CONFIG[activeSnapshotAsset]?.symbol ===" not in perf
-    assert "t.symbol === symbol" not in perf, "심볼 동등 비교로 돌아가면 한쪽 심볼이 사라진다"
-    checks += 3
+    # 2026-10-14 카드 개편(사용자 시안 C): 오늘 성과·달력·자산 곡선은 **계좌 전체**(모든 코인·USDT/USDC)라 심볼 필터 자체가 없다 --
+    #   심볼 하나로 거르는 코드가 다시 생기면 한쪽 심볼이 통째로 사라진다(09-22 사고).
+    assert not re.search(r"ledger[^\n]*\.filter\(\(t\) => [^\n]*symbol ===", perf), "심볼 동등 비교로 거르면 한쪽 심볼이 사라진다"
+    checks += 1
 
     print(f"통과 {checks}/{checks} — 계좌 카드 원장 원천 계약 유지")
     return 0

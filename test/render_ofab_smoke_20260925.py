@@ -87,17 +87,12 @@ def run(shot):
                 label = pg.inner_text("#ofabPos")
                 ok(("LONG" in label) if state != "empty" else (pg.is_visible("#ofabLong") and pg.is_visible("#ofabShort") and pg.is_hidden("#ofabToggle")),
                    f"버튼 글자 «{label}» / 포지션 없음이면 LONG·SHORT")   # 2026-10-05
-                # 2026-09-26 사용자: 수량 대신 증거금 사용 % -- 계좌 카드 «증거금 사용» 타일과 **같은 값**이어야 한다.
-                if state != "empty":
-                    tile = pg.evaluate("() => document.querySelector('[data-pv=\"used\"] .acct-tile-val')?.textContent.trim()")
-                    real = (tile or "").split("→")[0].strip()      # 타일 뒤의 «→ 25%» 는 진입 미리보기(가정값)다
-                    ok(real and f" {real} " in f" {label} ", f"버튼 증거금 %가 카드 타일과 다르다 «{label}» vs «{tile}»")
+                # 2026-10-14 카드 «증거금 사용» 타일 대조는 카드 개편(타일 없음)으로 뺐다.
                 if shot: pg.screenshot(path=f"{shot}/ofab_{state}_{w}_closed.png")
 
                 pg.click(TGL)
                 pg.wait_for_timeout(300)
                 ok(pg.evaluate("() => !!document.querySelector('#ofabPanel .acct-lanes')"), "펼쳐도 조작부가 안 옮겨 옴")
-                ok(pg.evaluate("() => !document.getElementById('ofabAway').hidden"), "카드 자리 안내가 안 뜸")
                 ok(pg.get_attribute(TGL, "aria-expanded") == "true", "aria-expanded")
                 ok(pg.evaluate("() => !!document.querySelector('#ofabPanel #snapEntryLong')"), "진입 버튼이 패널에 없음")
                 for gid in ("snapLevGauge", "snapEntryFrac", "snapExitFrac"):

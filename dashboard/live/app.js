@@ -612,7 +612,7 @@ async function setActiveSnapshotAsset(asset) {
   renderSnapshotAssetTabs();
   // 🔴2026-09-30 진입 미리보기(plan·cap)는 **코인별**인데 전환 때 안 비워 XRP 탭이 최대 60초(주문 불가 코인이면
   //   계속) ETH 계획(~$2,676)을 «지금 설정으로 넣으면»에 그렸다. 비우고 새 코인 것을 바로 받는다.
-  lastEntryPlan = null; lastEntryCap = null; setEntryProjPreview(null);
+  lastEntryPlan = null; setEntryProjPreview(null);
   manualEntryRefreshSize();
   // 계좌 payload 는 전 코인의 포지션을 담고 있어 재요청 없이 다시 그리기만 하면 된다.
   renderSnapshotAccount();
@@ -1327,366 +1327,124 @@ function snapshotAccountPosition() {
   return null;
 }
 
-// 스냅샷 탭 청산맵 바로 위 요약. ops 탭 패널의 축약판이라 payload 를 공유한다(추가 요청 없음).
-// 「내 계좌」 시각 요약 (2026-09-11, 사용자 요청 "텍스트 말고 그래프나 그림으로 보면 바로
-// 알 수 있게끔" -> 목업 3안 x 2회 뒤 "C와 E를 잘 섞어서").
-//   왼쪽(C안) 큰 숫자 셋(청산까지·미실현·증거금) + 노출 막대 + 포지션 한 줄
-//   오른쪽(E안) 왕복 손익 막대 + 누적선 + 최악 한 건 강조
-// ⭐이 배치를 고른 이유: 실측에서 **승률 58%(7/12)인데 실현 -$287** 이고 그 손실이 사실상
-//   **한 건(-$536, 나머지 11건 합 +$249)** 이었다. 숫자 나열로는 절대 안 보이는 사실이라
-//   오른쪽 막대에 그 한 건을 명시적으로 짚어준다.
-// 색 규약 §2 준수 -- good/bad/warn/neutral 넷만 쓴다(5번째 색 없음).
-// 목업: scripts/plot_account_panel_mockup_ce_20260911.py · docs/charts/account_panel_mockup_ce_20260911.png
-function acctRiskTone(liqPct) {
-  return liqPct < 3 ? "bad" : liqPct < 6 ? "warn" : "good";
+// ── Account 카드 = 오늘 성과 + 과거 기록 (2026-10-14 사용자 시안 C · «주문은 플로팅 버튼이라 카드에서 주문은 최소화») ──
+//   위 = 포지션 한 줄(+ 진입 미리보기 한 마디) · 오늘 띠(손익 · 0~24시 흐름 · 오늘 닫힌 거래)
+//   아래 = 손익 달력(한 달씩) | 자산 곡선 + 낙폭 + 기간 성적. 주문 조작부(.acct-lanes)는 DOM 에 남아 #ofab 가 옮겨 쓴다(카드 안에서는 CSS 로 숨김).
+//   원천: 원장(latestBinanceAccount.ledger, 모든 코인 · 서버 꼬리 400왕복) + 잔고·포지션 + 서버 «0시 순자산»(day_start).
+const ACCT_SPANS = [["오늘", 0], ["1주", 7], ["1개월", 30], ["전체", -1]];   // 일수 · 0 = 오늘 0시부터 · -1 = 원장 전체
+const ACCT_DAY = 86400000, ACCT_KST = 9 * 3600000;
+let acctSpanIdx = (() => { try { const raw = localStorage.getItem("acctSpanIdx"), v = Number(raw); return raw !== null && raw !== "" && v >= 0 && v < ACCT_SPANS.length ? v : 2; } catch (e) { return 2; } })();   // 🔴Number(null) = 0 = «오늘» 함정(옛 acctSpanDays 와 같은 것) -- 저장값이 없으면 1개월
+let acctCalBack = 0;   // 달력: 0 = 이번 달, 1 = 지난달 …
+const acctKey = (ms) => new Date(ms + ACCT_KST).toISOString().slice(0, 10);   // KST 날짜(서버 day_start 와 같은 경계)
+const acctDay0 = (key) => Date.parse(key + "T00:00:00+09:00");
+const acctHm = (ms) => new Date(ms + ACCT_KST).toISOString().slice(11, 16);
+const acctMd = (ms) => { const d = new Date(ms + ACCT_KST); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`; };
+const acctSu = (v) => `${v >= 0 ? "+" : "−"}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: Math.abs(v) < 100 ? 2 : 0 })}`;
+const acctSuc = (v) => { const a = Math.abs(v); return `${v >= 0 ? "+" : "−"}$${a >= 1000 ? (a / 1000).toFixed(1) + "k" : a.toFixed(0)}`; };
+const acctTone = (v) => (v > 0 ? "good" : v < 0 ? "bad" : "neutral");
+const acctDur = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m}분` : m < 1440 ? `${Math.floor(m / 60)}시간 ${String(m % 60).padStart(2, "0")}분` : `${(m / 1440).toFixed(1)}일`; };
+const acctCoin = (s) => String(s || "").replace(/USD[TC]$/, "");
+const acctPx = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function acctTripTip(t) {
+  const dir = t.side === "LONG" ? 1 : -1;
+  return `${acctMd(t.exit_time)} ${acctHm(t.entry_time)}→${acctHm(t.exit_time)} (${acctDur(t.exit_time - t.entry_time)})\n`
+    + `${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} ${t.max_qty} · ${acctPx(t.entry_price)} → ${acctPx(t.exit_price)}\n`
+    + `추가 ${t.adds ?? "?"}회 · 최대 ${t.peak_x ?? "?"}배 · ${t.trend == null ? "추세 ?" : t.trend === dir ? "추세 쪽" : "역추세"}\n손익 ${acctSu(Number(t.net_pnl) || 0)}`;
 }
 
-// 닫힌 왕복 손익 막대 + 누적선. 데이터가 없으면 빈 문자열(자리 자체를 안 만든다).
-// ── 계좌 차트 기간 (2026-09-22 사용자 «1주일치만 보여주고 내가 늘려서 더 볼 수 있게») ──
-//   기본 1주. 원장은 계속 쌓이므로 전체를 그리면 최근 며칠이 몇 픽셀로 눌린다.
-//   0 = 전체. 저장은 chartWindowBars 와 같은 방식이다(화이트리스트로 되읽어 쓰레기값 차단).
-const ACCT_SPANS = [[7, "1주"], [30, "1개월"], [0, "전체"]];
-let acctSpanDays = (() => {
-  try {
-    // 🔴저장값이 없으면 getItem 은 null 이고 Number(null) 은 **0** 이다. 0 이 «전체»라
-    //   화이트리스트를 통과해서, 처음 열면 기본이 1주가 아니라 전체가 됐다(실측).
-    //   chartWindowBars 패턴에는 0 이 유효값이 아니라 이 함정이 없었다 -- 그대로 베끼면 안 된다.
-    const raw = localStorage.getItem("acctSpanDays");
-    if (raw === null || raw === "") return 7;
-    const v = Number(raw);
-    return ACCT_SPANS.some(([d]) => d === v) ? v : 7;
-  } catch (e) { return 7; }
-})();
-
-// 2026-10-12 «내 실력 거울»(사용자 «7번») -- 같은 코인 원장 **전체**(기간 칩과 무관 · 1주는 표본이 너무 작다)로 사실만 비춘다.
-//   실력 = 왕복 순손익 ÷ (최대 수량 × 진입가) bp · 범위 = 청산일 묶음 부트스트랩 95%.
-//   버티는 배수 = 켈리(평균 ÷ 분산)를 범위 **하한** 실력으로 잰 것 -- 평균 실력 켈리는 표본 운에 기댄다.
-//   1년 위험 = 원장 왕복을 실제 빈도(연 환산 건수)로 1년치 재표집, 노출 배수 고정 · 파산 = 순자산 ≤10% · 반토막 = 고점 대비 −50% 를 한 번이라도.
-//   ponytail: 재표집은 관측 최악보다 나쁜 왕복을 만들지 못한다 -- 실제 위험은 이보다 크다(툴팁에 적음). 꼬리는 연구의 4.7년 원장 모양 엔진이 본다.
-//   경고가 아니라 거울이다: 크기 상한은 사용자 선택(2026-09-25 해제)이라 막지 않고, 넘친 쪽만 주황으로 «눈여겨볼 곳»을 말한다.
-const ACCT_MIRROR_X = [3, 6, 9, 12, 15];
-let acctMirrorCache = { key: "", m: null };
-function acctMirrorStats(trips) {
-  const rows = trips.map((t) => ({ r: (Number(t.net_pnl) || 0) / ((Number(t.max_qty) || 0) * (Number(t.entry_price) || 0)),
-                                  day: Math.floor((Number(t.exit_time) || 0) / 86400000), x: Number(t.peak_x) }))
-    .filter((v) => Number.isFinite(v.r));
-  if (rows.length < 30) return null;
-  let s = 0x2f6b9d;                                            // 고정 시드 -- 렌더마다 숫자가 흔들리지 않게
-  const rnd = () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-  const r = rows.map((v) => v.r), n = r.length;
-  const mean = r.reduce((a, b) => a + b, 0) / n, varr = r.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
-  const byDay = Object.values(rows.reduce((g, v) => ((g[v.day] = g[v.day] || []).push(v.r), g), {}));
-  const boots = Array.from({ length: 600 }, () => {
-    let sum = 0, k = 0;
-    for (let i = 0; i < byDay.length; i++) { const d = byDay[(rnd() * byDay.length) | 0]; for (const x of d) { sum += x; k++; } }
-    return sum / k;
-  }).sort((a, b) => a - b);
-  const lo = boots[Math.floor(0.025 * boots.length)], hi = boots[Math.floor(0.975 * boots.length)];
-  const spanDays = Math.max(1, (Math.max(...trips.map((t) => Number(t.exit_time) || 0)) - Math.min(...trips.map((t) => Number(t.entry_time) || Infinity))) / 86400000);
-  const perYear = Math.round(n / spanDays * 365);
-  const risk = ACCT_MIRROR_X.map((L) => {
-    let ruin = 0, half = 0; const P = 500;
-    for (let p = 0; p < P; p++) {
-      let e = 1, peak = 1, ruined = false, hit = false;
-      for (let i = 0; i < perYear; i++) {
-        e *= 1 + L * r[(rnd() * n) | 0];
-        if (e <= 0.1) { ruined = true; break; }
-        if (e > peak) peak = e; else if (e <= 0.5 * peak) hit = true;
-      }
-      ruin += ruined; half += ruined || hit;
-    }
-    return { L, ruin: ruin / P, half: half / P };
-  });
-  const usual = rows.map((v) => v.x).filter(Number.isFinite).sort((a, b) => a - b);
-  return { mean, lo, hi, keepX: lo > 0 ? lo / varr : 0, kellyX: mean / varr, perYear, risk,
-           usualX: usual.length ? usual[Math.floor(usual.length / 2)] : null };
-}
-function acctMirrorHtml(trips, nowX) {
-  const key = `${trips.length}:${trips.length ? trips[trips.length - 1].exit_time : 0}`;
-  if (acctMirrorCache.key !== key) acctMirrorCache = { key, m: acctMirrorStats(trips) };
-  const m = acctMirrorCache.m;
-  if (!m) return "";
-  const bp = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 1e4).toFixed(0)}`;
-  const x = (v) => `${v < 10 ? v.toFixed(1) : v.toFixed(0)}배`;
-  const here = nowX != null && nowX > 0 ? { v: nowX, lab: "지금" } : (m.usualX ? { v: m.usualX, lab: "평소" } : null);
-  const MAX = 20, pos = (v) => `${(Math.min(v, MAX) / MAX * 100).toFixed(1)}%`;
-  const over = here && here.v > m.keepX;
-  const rail = `<div class="acct-mirror-rail" role="img" aria-label="실력이 버티는 배수 ${x(m.keepX)}${here ? ` · ${here.lab} ${x(here.v)}` : ""}">
-      <span class="acct-mirror-keep" style="width:${pos(m.keepX)}"></span>
-      ${here ? `<span class="acct-mirror-now${over ? " over" : ""}" style="left:${pos(here.v)}"></span>` : ""}
-      <span class="acct-mirror-tick" style="left:${pos(m.keepX)}"></span>
-    </div>
-    <div class="acct-mirror-scale"><span>0</span><span>${MAX}배${m.kellyX > MAX ? " →" : ""}</span></div>`;
-  const nearest = here ? ACCT_MIRROR_X.reduce((a, b) => (Math.abs(b - here.v) < Math.abs(a - here.v) ? b : a)) : null;
-  const pct = (v) => `${Math.round(v * 100)}%`;
-  const strip = `<table class="acct-mirror-risk"><thead><tr><th scope="col"><span class="sr-only">노출</span></th>${
-      m.risk.map((k) => `<th scope="col"${k.L === nearest ? ' class="here"' : ""}>${k.L}배</th>`).join("")}</tr></thead><tbody>
-      <tr><th scope="row">파산</th>${m.risk.map((k) => `<td class="${k.ruin >= 0.1 ? "bad" : ""}${k.L === nearest ? " here" : ""}">${pct(k.ruin)}</td>`).join("")}</tr>
-      <tr><th scope="row">반토막</th>${m.risk.map((k) => `<td class="${k.half >= 0.5 ? "warn" : ""}${k.L === nearest ? " here" : ""}">${pct(k.half)}</td>`).join("")}</tr>
-    </tbody></table>`;
-  return `<dl class="acct-mirror" aria-label="내 실력 거울 — 원장 전체로 잰 건당 실력과 노출 배수별 1년 위험">
-      <div class="acct-mirror-row" title="왕복 순손익 ÷ 최대 명목(수수료 포함). 범위 = 청산일을 묶어 다시 뽑은 95% 범위 — 하한이 0 위면 실력이 우연만은 아니라는 뜻입니다.">
-        <dt>실력</dt><dd><b class="${m.mean >= 0 ? "good" : "bad"}">${bp(m.mean)}bp</b><em>건당 · 범위 ${bp(m.lo)} ~ ${bp(m.hi)}</em></dd></div>
-      <div class="acct-mirror-row" title="켈리 배수 = 실력 ÷ 왕복 손익 분산. 범위 하한 실력으로 잰 값을 «버티는 배수»로 씁니다(평균 실력이면 ${x(m.kellyX)}). 이보다 크게 걸면 성장보다 낙폭이 먼저 커집니다.">
-        <dt>배수</dt><dd class="acct-mirror-x"><span><b>${x(m.keepX)}</b><em>실력이 버티는</em></span>${
-          here ? `<span><b class="${over ? "warn" : ""}">${x(here.v)}</b><em>${here.lab === "지금" ? "지금 포지션" : "평소(중앙)"}</em></span>` : ""}${rail}</dd></div>
-      <div class="acct-mirror-row" title="원장 왕복을 실제 빈도(연 ${m.perYear}건)로 1년치 다시 뽑아 노출 배수를 고정했을 때. 파산 = 순자산 10% 이하, 반토막 = 고점 대비 −50% 를 한 번이라도. 관측한 최악보다 나쁜 왕복은 만들지 못하므로 실제 위험은 이보다 큽니다.">
-        <dt>1년</dt><dd>${strip}</dd></div>
-    </dl>`;
-}
-
-function acctPerfSvg(net, meta) {
-  if (!net.length) return "";
-  // 2026-09-11 사용자 "높이를 가득 채워줘" -- 칸을 꽉 채우려면 비균일 확대를 피할 수 없다.
-  // 🔴그래서 **확대에 걸리면 안 되는 것들은 확대를 끈다**: 선 두께는 vector-effect 로 고정하고,
-  //   끝점은 원 대신 **길이 0 짜리 둥근 캡 선**으로 그린다(캡은 stroke 라 늘어나지 않아 정원이다).
-  //   막대 모서리 4px 만 세로로 살짝 늘어나는데, 24px 막대에선 눈에 띄지 않는다.
-  const W = 320, H = 104, zero = H * 0.54, padX = 3, padY = 8;
-  let cum = 0;
-  const cums = net.map((v) => (cum += v));
-  // 🔴막대와 누적선이 **같은 축**을 쓴다(둘 다 USD). 그러니 상한도 둘을 함께 봐야 한다 --
-  //   옛 판은 건당 최대값만 봐서 누적선이 SVG 밖으로 잘려 나갈 수 있었다.
-  const peak = Math.max(...net.map(Math.abs), ...cums.map(Math.abs), 1e-9);
-  const bw = (W - padX * 2) / net.length;
-  const sc = (H / 2 - padY) / peak;
-  // 2026-09-25 사용자 «막대 높이를 키워줘» -- 누적과 같은 축이면 누적이 커질수록 건당 막대가 납작해진다
-  //   (실측 누적 $884 에 건당 대부분 $10 대라 몇 픽셀). 눈금 숫자가 없는 차트라 막대는 **자기 최대값**
-  //   으로 칸을 채우고, 크기는 툴팁 숫자가 말한다. 누적선은 위 공동 축 그대로.
-  const scBar = Math.min(zero - padY, H - zero - padY) * 0.95 / Math.max(...net.map(Math.abs), 1e-9);
-  const xAt = (i) => padX + i * bw;
-  const yAt = (v) => zero - v * sc;
-  // 막대: 24px 상한 · 인접 막대 사이 2px 표면 간격(테두리를 그리지 않는다)
-  const bwFill = Math.min(24, Math.max(1.5, bw - 2));
-  const bars = net.map((v, i) => {
-    const x = xAt(i) + (bw - bwFill) / 2;
-    const h = Math.max(Math.abs(v) * scBar, 1);
-    const r = Math.min(4, bwFill / 2, h);          // 바깥 끝만 둥글고 **기준선 쪽은 각지게**
-    const up = v >= 0;
-    const tip = up ? zero - h : zero + h;
-    const d = up
-      ? `M${x} ${zero}V${tip + r}Q${x} ${tip} ${x + r} ${tip}H${x + bwFill - r}Q${x + bwFill} ${tip} ${x + bwFill} ${tip + r}V${zero}Z`
-      : `M${x} ${zero}V${tip - r}Q${x} ${tip} ${x + r} ${tip}H${x + bwFill - r}Q${x + bwFill} ${tip} ${x + bwFill} ${tip - r}V${zero}Z`;
-    return `<path d="${d}" fill="var(--${up ? "good" : "bad"})" opacity="0.9"></path>`;
-  }).join("");
-  // 누적선 아래 워시 -- 계열 색이 아니라 중립 잉크다(누적은 손익 방향이 아니라 '합계'다).
-  const line = cums.map((c, i) => `${(xAt(i) + bw / 2).toFixed(1)},${yAt(c).toFixed(1)}`);
-  const area = `M${xAt(0) + bw / 2} ${zero}L${line.join("L")}L${xAt(net.length - 1) + bw / 2} ${zero}Z`;
-  const lastX = xAt(net.length - 1) + bw / 2, lastY = yAt(cums[net.length - 1]);
-  // 값은 점마다 찍지 않는다 -- 끝점 하나만 점으로 표시하고 숫자는 위 칩과 툴팁이 가진다.
-  // 히트 영역은 막대가 아니라 **칸 전체 높이**다(얇은 막대를 정조준하게 만들지 않는다).
-  // 키보드로도 같은 내용이 나와야 하므로 tabindex 를 준다 -- 툴팁이 값의 유일한 통로가 되면 안 된다.
-  const hits = net.map((v, i) => {
-    const m = (meta && meta[i]) || {};
-    // 2026-09-25 사용자 «몇 일에 얼마를 벌었거나 잃었다» -- 첫 줄이 곧 그 문장이다.
-    const head = `<b class="${v < 0 ? "bad" : "good"}">${escapeHtml(m.day || `${i + 1}번째 왕복`)}`
-      + ` ${escapeHtml(fmtUsd(Math.abs(v)))} ${v < 0 ? "잃음" : "벌었음"}</b>`;
-    const rows = [
-      `${m.when || ""}${m.side ? " · " + m.side : ""}${m.venue ? " · " + m.venue : ""}`,
-      m.qty ? `수량 ${Number(m.qty.toFixed(3))} ETH · ${fmtUsd(m.notional)}` : "",
-      m.entry && m.exit ? `진입 ${fmtUsd(m.entry)} → 청산 ${fmtUsd(m.exit)}` : "",
-      `누적 ${fmtUsd(cums[i])}`,
-    ].filter(Boolean);
-    // 머리줄의 <b> 만 우리가 넣은 마크업이고 나머지는 이스케이프한다.
-    const html = [head, ...rows.map(escapeHtml)].join("<br>");
-    // 2026-09-26 비평: 막대마다 tabindex 0 이라 탭 정지가 28개였고 읽어 줄 이름도 없었다 -- 최근 막대 하나만
-    //   탭 순서에 두고(좌우 방향키로 옮긴다, bindAcctChartTip) 머리줄을 이름으로 준다.
-    const name = `${m.day || `${i + 1}번째 왕복`} ${fmtUsd(Math.abs(v))} ${v < 0 ? "잃음" : "벌었음"}`;
-    return `<rect x="${xAt(i).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H}" `
-      + `fill="transparent" role="img" aria-label="${escapeHtml(name)}" `
-      + `tabindex="${i === net.length - 1 ? 0 : -1}" data-tip="${escapeHtml(html)}"></rect>`;
-  }).join("");
-  // 길이 0 + round cap = 지름이 stroke-width 인 정원. non-scaling 이라 늘어나지 않는다.
-  const dot = (w, color, op) => `<line x1="${lastX.toFixed(1)}" y1="${lastY.toFixed(1)}" `
-    + `x2="${lastX.toFixed(1)}" y2="${lastY.toFixed(1)}" stroke="${color}" stroke-width="${w}" `
-    + `stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="${op}"></line>`;
-  return `<svg class="acct-perf-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" `
-    + `aria-label="닫힌 왕복 ${net.length}건의 건당 손익 막대와 누적 손익 선">`
-    + `<path d="${area}" fill="var(--ink)" opacity="0.08"></path>`
-    + bars
-    + `<line x1="${padX}" y1="${zero}" x2="${W - padX}" y2="${zero}" stroke="var(--soft-line)" `
-    + `stroke-width="1" vector-effect="non-scaling-stroke"></line>`
-    + `<polyline points="${line.join(" ")}" fill="none" stroke="var(--ink)" stroke-width="2" `
-    + `stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" opacity="0.72"></polyline>`
-    + dot(12, "var(--panel-strong)", "1")      // 2px 표면 링
-    + dot(8, "var(--ink)", "0.9")              // 끝점 8px
-    + hits
-    + `</svg>`;
-}
-
-// 계좌 차트 툴팁. 🔴카드는 30초마다 innerHTML 로 통째로 다시 그려진다 -- 막대마다 리스너를
-// 달면 매번 새로 달아야 하고 옛 것이 샌다. 컨테이너(#snapAcctPosition)는 안 바뀌므로 위임한다.
-let acctPerfOpen = (() => { try { return localStorage.getItem("acctPerfOpen") === "1"; } catch (e) { return false; } })();
-function bindAcctChartTip() {
-  // 🔴2026-09-25 툴팁이 **안 떴다** -- 차트는 #snapAcctPerf 로 옮겨갔는데 위임 호스트가 옛 칸
-  //   (#snapAcctPosition)에 남아 있어 이벤트가 닿지 않았다(플레이라이트 호버로 확인).
-  const host = el("snapAcctPerf");
-  if (!host || host.dataset.tipBound) return;
-  host.dataset.tipBound = "1";
-  // 펼침 기억 -- toggle 은 버블링하지 않으므로 캡처로 받는다. 카드는 30초마다 다시 그려지므로 상태를 들고 있어야 한다.
-  host.addEventListener("toggle", (e) => {
-    if (!e.target.classList?.contains("acct-perf-fold")) return;
-    acctPerfOpen = e.target.open;
-    try { localStorage.setItem("acctPerfOpen", acctPerfOpen ? "1" : "0"); } catch (err) { /* 저장 못 해도 동작은 같다 */ }
-  }, true);
-  const tipOf = (t) => (t && t.closest ? t.closest(".acct-plot") : null)?.querySelector(".acct-tip");
-  const show = (target, clientX) => {
-    const tip = tipOf(target);
-    if (!tip || !target.dataset.tip) return;
-    tip.innerHTML = target.dataset.tip;
-    tip.hidden = false;
-    const box = tip.parentElement.getBoundingClientRect();
-    const r = target.getBoundingClientRect();
-    const x = (clientX === null || clientX === undefined ? r.left + r.width / 2 : clientX) - box.left;
-    tip.style.left = `${Math.max(0, Math.min(box.width - tip.offsetWidth, x - tip.offsetWidth / 2))}px`;
-  };
-  const hide = (target) => { const tip = tipOf(target); if (tip) tip.hidden = true; };
-  host.addEventListener("mousemove", (e) => {
-    if (e.target.dataset && e.target.dataset.tip) show(e.target, e.clientX);
-  });
-  host.addEventListener("mouseout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
-  host.addEventListener("focusin", (e) => { if (e.target.dataset && e.target.dataset.tip) show(e.target, null); });
-  host.addEventListener("focusout", (e) => { if (e.target.dataset && e.target.dataset.tip) hide(e.target); });
-  // 막대 사이는 좌우 방향키로 옮긴다(탭 정지는 하나 -- 위 acctPerfSvg 주석).
-  host.addEventListener("keydown", (e) => {
-    if (!e.target.dataset?.tip || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
-    const next = e.key === "ArrowLeft" ? e.target.previousElementSibling : e.target.nextElementSibling;
-    if (!next?.dataset?.tip) return;
-    e.preventDefault();
-    e.target.tabIndex = -1; next.tabIndex = 0; next.focus();
-  });
-}
-
-// 값이 바뀐 노드만 짧게 강조한다. 막대는 CSS transition 으로 미끄러지지만 글자는 즉시
-// 바뀌므로 눈이 놓친다 -- 그 한 곳만 메운다. 값이 같으면 아무것도 안 한다(폴링 떨림 방지).
-function pvText(node, txt) {
-  if (!node || node.textContent === txt) return;
-  node.textContent = txt;
-  node.classList.remove("pv-bump");
-  void (node.offsetWidth ?? 0);      // 리플로우 -- 같은 클래스를 다시 붙여도 애니메이션이 재시작된다
-  node.classList.add("pv-bump");
-}
-
-// 2026-09-20 계좌 카드 미리보기를 **되살렸다**(사용자 요청). 09-16 에 이걸 지우고 진입
-// 블록 안에 「지금 넣으면」 4행(#entryProj)을 따로 뒀는데, 09-20 에 진입이 모달에서
-// 카드 안으로 나오면서 그 4행이 **바로 위 계좌 카드와 같은 자리에서 같은 말**을 하게 됐다.
-// 사용자: 「4가지를 굳이 또 게이지를 만들어서 보여줄 필요가 없어」. 아래 코드는 5e8fe121 에서
-// 지운 것을 그대로 되돌린 것이다 -- 새로 쓰지 않았다.
-//
-// 🔴여기가 미리보기를 입히는 **유일한 곳**이다. 렌더는 항상 실제 계좌만 그린다 -- 두 곳에서
-//    값을 만들면 «카드와 타일이 서로 다른 순간을 말하는» 상태가 생긴다.
-// 🔴노드를 갈아치우지 않고 제자리에서 고친다. setH 로 다시 그리면 새 노드가 최종값으로
-//    태어나 CSS transition 이 안 걸린다 -- 애니메이션이 목적이므로 이 구조가 조건이다.
-function applyAcctPreview(pos, mark, equity) {
-  const root = el("snapAcctPosition");
-  const pv = entryProjPreview;
-  if (!root) return;
-  const q = (k) => root.querySelector(`[data-pv="${k}"]`);
-  root.querySelectorAll(".acct-tiles").forEach((n) => n.classList.toggle("preview", !!pv));
-  const cap = root.querySelector(".acct-pv-cap");
-  if (cap) cap.hidden = !pv;
-  if (!pv) {
-    root.querySelectorAll(".acct-rail u, .acct-gauge u").forEach((u) => u.remove());
-    root.querySelectorAll("u.pv-after").forEach((u) => u.remove());
-    return;
-  }
-
-  const a = pv.after, plan = pv.__plan || {};
-  const LIQ_FULL = 10, EXPO_CAP = 30;
-  const long = pos.side === "LONG";
-  // 타일 셋: 값·색·막대·유령눈금(지금 자리)
-  // 🔴2026-09-22 시안 B. 전에는 이 패처가 **사실을 덮어썼다** -- manualEntryRefreshSize 가
-  //   setInterval 로 계속 돌아 큰 숫자 셋이 상시로 «25% 더 넣었다면»의 값이었고, 실제 계좌는
-  //   유령 눈금으로만 남았다. 포지션을 들고 있는 사람이 화면에서 제일 큰 글씨로 «자기가 하지
-  //   않은 거래»의 결과를 본다. 이제 **사실은 그대로 두고 «→ 가정»을 뒤에 붙인다** --
-  //   막대도 사실 폭을 지키고, 움직이는 건 가정 자리의 유령 눈금뿐이다.
-  const pvAfter = (node, txt, tone) => {
-    if (!node) return;
-    let u = node.querySelector("u.pv-after");
-    if (!u) { u = document.createElement("u"); node.appendChild(u); }
-    u.className = `pv-after${tone ? ` ${tone}` : ""}`;
-    pvText(u, `→ ${txt}`);   // 값이 같으면 안 건드리고(폴링 떨림), 바뀔 때만 반짝인다
-  };
-  const setTile = (k, txt, tone, fill) => {
-    const t = q(k); if (!t) return;
-    pvAfter(t.querySelector(".acct-tile-val"), txt, tone);
-    const rail = t.querySelector(".acct-rail");
-    if (rail) {
-      rail.classList.add("entry-rail");
-      let u = rail.querySelector("u");
-      if (!u) { u = document.createElement("u"); rail.appendChild(u); }
-      u.style.left = `${clamp01(fill) * 100}%`;
-      u.title = "지금 설정으로 넣으면 여기";
-    }
-  };
-  setTile("liq", `${Number(a.liq_pct).toFixed(2)}%`, acctRiskTone(a.liq_pct), a.liq_pct / LIQ_FULL);
-  setTile("used", `${Number(a.margin_used_pct).toFixed(0)}%`,
-          a.margin_used_pct > 80 ? "bad" : a.margin_used_pct > 60 ? "warn" : "good",
-          a.margin_used_pct / 100);
-  setTile("expo", `${Number(a.exposure_x).toFixed(1)}배`, a.exposure_x > 15 ? "bad" : "warn",
-          a.exposure_x / EXPO_CAP);
-
-  // 포지션 카드: 수량·레버리지·평단·청산가·손잡이. 평단은 **체결가 가중평균**이다.
-  const addQty = Number(plan.quantity) || 0, addPx = Number(plan.price) || 0;
-  const haveQty = Number(pos.qty) || 0, havePx = Number(pos.entry_price) || 0;
-  const newQty = haveQty + addQty;
-  const newEntry = newQty > 0 ? (haveQty * havePx + addQty * addPx) / newQty : havePx;
-  // 청산가는 거래소가 준 **거리(%)** 에서 되돌린다 -- 근사식보다 실측에 앵커된 값이다.
-  const newLiq = mark > 0 ? mark * (1 + (long ? -1 : 1) * Number(a.liq_pct) / 100) : 0;
-  pvAfter(q("qty"), `~${newQty.toFixed(3)}`);
-  const tg = q("tag");
-  if (tg && plan.target_leverage && String(plan.target_leverage) !== String(pos.leverage)) {
-    pvAfter(tg, `×${plan.target_leverage}`);
-  }
-  pvAfter(q("liqpx"), `~${fmtUsd(newLiq)}`, "bad");
-  // 🔴평단은 **추측치**다. 체결가를 peg 호가로 가정한 가중평균이라 실제 체결(부분체결·
-  //   테이커 폴백·슬리피지)에 따라 달라진다. `~` 와 툴팁으로 그 사실을 남긴다.
-  const ep = q("entrypx");
-  if (ep) {
-    pvAfter(ep, `~${fmtUsd(newEntry)}`);
-    ep.title = `추측치 — 지금 ${fmtUsd(havePx)} (${haveQty.toFixed(3)} ${coinUnit()})에`
-      + ` ${addQty.toFixed(3)} ${coinUnit()} 를 ${fmtUsd(addPx)}(peg 호가)에 더한 가중평균입니다.`
-      + `\n실제 체결가가 다르면(부분체결·테이커 폴백) 평단도 달라집니다.`;
-  }
-  // 🔴손잡이는 **지금 내 자리**다 -- 옮기면 사실이 사라진다. 대신 «넣으면 여기»를 같은 레일에
-  //   유령 눈금으로 하나 더 세운다(시안 B). 청산선이 어느 쪽으로 얼마나 끌려오는지를 숫자가
-  //   아니라 거리로 보여주는 게 이 카드에서 실수가 나는 지점이다.
-  const gauge = root.querySelector(".acct-gauge");
-  if (gauge) {
-    const span = Math.abs(newEntry - newLiq) * 2;
-    const at = clamp01(span > 0 ? Math.abs(mark - newLiq) / span : 0) * 100;
-    let g = gauge.querySelector("u");
-    if (!g) { g = document.createElement("u"); gauge.appendChild(g); }
-    g.className = "acct-gauge-pv";
-    g.style.left = `${at.toFixed(1)}%`;
-    // 🔴유령 손잡이에는 라벨을 안 붙인다. 투영 청산가는 바로 아래 범례가 이미
-    //   «청산 $2,197.56 → ~$2,197.01» 로 말한다 -- 같은 말을 두 번 하면서, 접힌 눈금에서
-    //   진입은 **항상 50%** 라 진입 라벨과 겹친다(스캘핑에선 현재≈진입이 기본 상태다).
-    g.title = `지금 설정으로 넣으면 손잡이가 여기로 옵니다 (청산 ~${fmtUsd(newLiq)})`;
-  }
-}
-
-let entryProjPreview = null;
-let lastAcctPos = null;   // 패처가 쓰는 마지막 렌더 문맥(포지션·마크가·순자산)
-let entryProjKey = "";
-// 2026-09-22 아티팩트 댓글 «포지션이 없으면 카드가 안 보이는데 없어도 max 수치를».
-//   미리보기(/api/manual-entry/preview)가 이미 받아오는 cap 을 그대로 들고 있는다 --
-//   새 엔드포인트도 새 폴링도 없다. 포지션이 없을 때 이 값으로 타일을 채운다.
-let lastEntryCap = null;
-// 2026-09-22 (2)(3): 타일·게이지가 «지금 칩 설정»을 따라야 하므로 cap 만으로는 모자란다.
-//   cap 은 천장이라 비율·배수에 안 움직인다(실측). 움직이는 건 plan.projection 이다.
-let lastEntryPlan = null;
-
-// 🔴위임으로 한 번만 붙인다. 이 차트는 계좌 폴링마다 통째로 다시 그려지므로 노드에
-//   직접 붙이면 렌더할 때마다 다시 붙여야 하고, 한 번 빠뜨리면 조용히 안 먹는다.
+// 기간 칩·달 넘김 -- 카드는 폴링마다 통째로 다시 그려지므로 위임으로 한 번만 붙인다.
 document.addEventListener("click", (e) => {
-  const b = e.target.closest(".acct-span-pick .chip");
-  if (!b) return;
-  const d = Number(b.dataset.days);
-  if (!ACCT_SPANS.some(([x]) => x === d) || d === acctSpanDays) return;
-  acctSpanDays = d;
-  try { localStorage.setItem("acctSpanDays", String(d)); } catch (err) { /* 사파리 프라이빗 */ }
-  renderSnapshotAccount();
+  const s = e.target.closest("#acctCard [data-acct-span]"), m = e.target.closest("#acctCard [data-acct-month]");
+  if (s) { acctSpanIdx = Number(s.dataset.acctSpan); try { localStorage.setItem("acctSpanIdx", String(acctSpanIdx)); } catch (err) { /* 기억은 편의 */ } renderSnapshotAccount(); }
+  if (m) { acctCalBack = Math.max(0, acctCalBack + Number(m.dataset.acctMonth)); renderSnapshotAccount(); }
 });
+
+// 오늘 0~24시: 닫힌 왕복 = 그 시각 막대(손익만큼) · 누적 = 계단선 · 지금 포지션 = 빗금 막대
+function acctTodaySvg(tT, unreal, hasPos, t0, now, w, h) {
+  const x0 = 6, x1 = w - 6, y0 = 8, y1 = h - 16, X = (t) => x0 + Math.max(0, Math.min(1, (t - t0) / ACCT_DAY)) * (x1 - x0);
+  let c = 0; const cum = tT.map((t) => { const a = c; c += Number(t.net_pnl) || 0; return [a, c]; });
+  const vals = [0, ...cum.flat(), c + unreal], lo = Math.min(...vals), hi = Math.max(...vals), Y = (v) => y1 - (v - lo) / Math.max(1e-9, hi - lo) * (y1 - y0);
+  let s = `<svg class="acct-today-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="오늘 0~24시 손익 흐름">`
+    + `<rect x="${X(now)}" y="${y0}" width="${Math.max(0, x1 - X(now))}" height="${y1 - y0}" fill="var(--ink)" fill-opacity=".03"/>`
+    + `<line x1="${x0}" x2="${x1}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--ink)" stroke-opacity=".22"/>`;
+  [0, 6, 12, 18, 24].forEach((hr) => { s += `<text x="${x0 + hr / 24 * (x1 - x0)}" y="${h - 3}" font-size="10" fill="var(--muted)" text-anchor="${hr ? hr === 24 ? "end" : "middle" : "start"}">${hr}시</text>`; });
+  let d = `M${x0} ${Y(0)}`;
+  tT.forEach((t, i) => { const x = X(t.exit_time), [a, b] = cum[i]; d += ` H${x.toFixed(1)} V${Y(b).toFixed(1)}`;
+    s += `<rect x="${(x - 4).toFixed(1)}" y="${Math.min(Y(a), Y(b)).toFixed(1)}" width="8" height="${Math.max(1.5, Math.abs(Y(a) - Y(b))).toFixed(1)}" rx="1.5" fill="var(--${b >= a ? "good" : "bad"})"><title>${escapeHtml(acctTripTip(t))}</title></rect>`; });
+  s += `<path d="${d} H${X(now).toFixed(1)}" fill="none" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.4"/>`;
+  if (hasPos) s += `<rect x="${(X(now) - 4).toFixed(1)}" y="${Math.min(Y(c), Y(c + unreal)).toFixed(1)}" width="8" height="${Math.max(1.5, Math.abs(Y(c + unreal) - Y(c))).toFixed(1)}" rx="1.5" fill="var(--${unreal >= 0 ? "good" : "bad"})" fill-opacity=".3" stroke="var(--${unreal >= 0 ? "good" : "bad"})" stroke-dasharray="2 2"><title>지금 미실현 ${acctSu(unreal)} (닫히기 전)</title></rect>`;
+  return s + `<line x1="${X(now)}" x2="${X(now)}" y1="${y0}" y2="${y1}" stroke="var(--ink)" stroke-opacity=".4" stroke-dasharray="2 3"/></svg>`;
+}
+
+// 손익 달력 한 달(월요일 시작 · 맨 오른쪽 = 주 합). 색 진하기 = √(|그날 손익| ÷ 원장 최대)
+function acctCalendar(days, ym, todayKey) {
+  const maxAbs = Math.max(1e-9, ...[...days.values()].map((o) => Math.abs(o.pnl)));
+  const first = acctDay0(ym + "-01"), dim = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate(), lead = (new Date(first + ACCT_KST).getUTCDay() + 6) % 7;
+  let h = ["월", "화", "수", "목", "금", "토", "일", "주"].map((d) => `<span class="dow">${d}</span>`).join(""), wk = 0, col = 0, mo = 0, wd = 0, ld = 0;
+  const pad = () => { h += `<span class="d out"></span>`; col++; };
+  for (let i = 0; i < lead; i++) pad();
+  for (let d = 1; d <= dim; d++) {
+    const key = `${ym}-${String(d).padStart(2, "0")}`, o = days.get(key);
+    if (o) { wk += o.pnl; mo += o.pnl; if (o.pnl > 0) wd++; else ld++; }
+    const a = o ? Math.round((0.1 + 0.6 * Math.sqrt(Math.abs(o.pnl) / maxAbs)) * 100) : 0;
+    const tip = o ? `${key} · ${o.n}건 ${acctSu(o.pnl)}\n` + o.trips.map((t) => `${acctHm(t.exit_time)} ${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} ${acctSu(Number(t.net_pnl) || 0)}`).join("\n") : "";
+    h += `<span class="d${key === todayKey ? " today" : ""}"${o ? ` style="background:color-mix(in srgb, var(--${o.pnl >= 0 ? "good" : "bad"}) ${a}%, transparent)" title="${escapeHtml(tip)}"` : ""}><i>${d}</i>${o ? `<b>${acctSuc(o.pnl)}</b>` : ""}</span>`;
+    col++;
+    if (col === 7 || d === dim) { while (col < 7) pad(); h += `<span class="wk ${acctTone(wk)}">${wk ? acctSuc(wk) : ""}</span>`; wk = 0; col = 0; }
+  }
+  return { html: `<div class="acct-cal">${h}</div>`, mo, wd, ld };
+}
+
+// 자산 곡선(누적 실현 계단) + 아래 «직전 최고점 대비 낙폭» + 최악 3건 표시
+function acctCurveSvg(a, unreal, hasPos, now, w, h) {
+  const ml = 54, mr = 10, top = 10, mid = Math.round(h * 0.66), bot = h - 18;
+  const ts = a[0].entry_time, X = (t) => ml + (t - ts) / Math.max(1, now - ts) * (w - ml - mr);
+  let c = 0, peak = 0; const pts = a.map((t) => { c += Number(t.net_pnl) || 0; peak = Math.max(peak, c); return { t: t.exit_time, c, dd: c - peak, trip: t }; });
+  const endC = c + unreal, lo = Math.min(0, ...pts.map((p) => p.c), endC), hi = Math.max(0, ...pts.map((p) => p.c), endC);
+  const Y = (v) => mid - (v - lo) / Math.max(1e-9, hi - lo) * (mid - top);
+  const ddMin = Math.min(-1e-9, ...pts.map((p) => p.dd)), YD = (v) => mid + 16 + (v / ddMin) * (bot - mid - 16);
+  let s = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="누적 실현 손익과 최고점 대비 낙폭">`;
+  [lo, 0, hi].forEach((v) => { s += `<line x1="${ml}" x2="${w - mr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--ink)" stroke-opacity="${v === 0 ? 0.22 : 0.07}"/><text x="${ml - 6}" y="${Y(v) + 4}" font-size="10" fill="var(--muted)" text-anchor="end">${acctSuc(v)}</text>`; });
+  let d = `M${ml} ${Y(0)}`, dd = `M${ml} ${YD(0)}`;
+  pts.forEach((p) => { d += ` H${X(p.t).toFixed(1)} V${Y(p.c).toFixed(1)}`; dd += ` H${X(p.t).toFixed(1)} V${YD(p.dd).toFixed(1)}`; });
+  d += ` H${X(now).toFixed(1)}`; dd += ` H${X(now).toFixed(1)}`;
+  s += `<path d="${d} V${Y(0)} H${ml} Z" fill="var(--ink)" fill-opacity=".05"/><path d="${d}" fill="none" stroke="var(--ink)" stroke-opacity=".85" stroke-width="1.6"/>`;
+  if (hasPos) s += `<line x1="${X(now)}" x2="${X(now)}" y1="${Y(c)}" y2="${Y(endC)}" stroke="var(--${unreal >= 0 ? "good" : "bad"})" stroke-width="3" stroke-dasharray="3 2"><title>지금 미실현 ${acctSu(unreal)}</title></line>`;
+  s += `<text x="${ml}" y="${mid + 12}" font-size="10" fill="var(--muted)">낙폭(직전 최고점 대비)</text><path d="${dd} V${YD(0)} H${ml} Z" fill="var(--bad)" fill-opacity=".2"/><path d="${dd}" fill="none" stroke="var(--bad)" stroke-opacity=".7"/>`
+    + `<text x="${ml - 6}" y="${YD(ddMin) + 4}" font-size="10" fill="var(--bad)" text-anchor="end">${acctSuc(ddMin)}</text>`;
+  const labX = [];   // 이름표끼리 90px 안이면 둘째부터는 동그라미만(호버로 값)
+  a.slice().sort((x, y) => x.net_pnl - y.net_pnl).slice(0, 3).filter((t) => t.net_pnl < 0).forEach((t) => {
+    const p = pts.find((q) => q.trip === t), x = X(t.exit_time), rx = x > w - 110, room = labX.every((q) => Math.abs(q - x) > 90);
+    if (room) labX.push(x);
+    s += `<circle cx="${x}" cy="${Y(p.c)}" r="5" fill="none" stroke="var(--bad)" stroke-width="1.6"><title>${escapeHtml(acctTripTip(t))}</title></circle>`
+      + (room ? `<text x="${x + (rx ? -8 : 8)}" y="${Y(p.c) + (rx ? -8 : 4)}" font-size="10.5" fill="var(--bad)" text-anchor="${rx ? "end" : "start"}">${acctMd(t.exit_time)} ${acctSuc(t.net_pnl)}</text>` : "");
+  });
+  pts.forEach((p) => { s += `<rect x="${(X(p.t) - 3).toFixed(1)}" y="${top}" width="6" height="${mid - top}" fill="transparent"><title>${escapeHtml(acctTripTip(p.trip) + "\n누적 " + acctSu(p.c))}</title></rect>`; });
+  const tk = now - ts > 20 * ACCT_DAY ? 7 * ACCT_DAY : ACCT_DAY;
+  for (let t = acctDay0(acctKey(ts)) + tk; t < now; t += tk) s += `<text x="${X(t)}" y="${h - 3}" font-size="10" fill="var(--muted)" text-anchor="middle">${acctMd(t)}</text>`;
+  return s + "</svg>";
+}
+
+function acctStatsHtml(a) {
+  const sum = (r) => r.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
+  const W = a.filter((t) => t.net_pnl > 0), L = a.filter((t) => t.net_pnl <= 0), tot = sum(a);
+  const aw = W.length ? sum(W) / W.length : 0, al = L.length ? sum(L) / L.length : 0;
+  let c = 0, pk = 0, mdd = 0; a.forEach((t) => { c += Number(t.net_pnl) || 0; pk = Math.max(pk, c); mdd = Math.min(mdd, c - pk); });
+  const worst = a.reduce((x, t) => (t.net_pnl < x.net_pnl ? t : x)), lossSum = sum(L), last = a[a.length - 1];
+  let st = 0; for (let i = a.length - 1; i >= 0 && (a[i].net_pnl > 0) === (last.net_pnl > 0); i--) st++;
+  const row = (k, v, tone, tip) => `<div class="acct-stat"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span><b class="${tone || ""}">${v}</b></div>`;
+  return row("누적 실현", acctSu(tot), acctTone(tot)) + row("왕복 · 승률", `${a.length} · ${Math.round(W.length / a.length * 100)}%`)
+    + row("평균 이익/손실", `${acctSuc(aw)} / ${acctSuc(al)}`) + row("손익비", al ? (aw / Math.abs(al)).toFixed(2) : "—", "", "평균 이익 ÷ |평균 손실|")
+    + row("건당 기대값", acctSu(tot / a.length), acctTone(tot)) + row("최대 낙폭", acctSu(mdd), "bad", "누적 실현의 직전 최고점 대비 가장 깊은 골")
+    + row("최악 1건", `${acctSu(worst.net_pnl)} (${acctMd(worst.exit_time)})`, worst.net_pnl < 0 ? "bad" : "")
+    + row("최악 1건 비중", lossSum < 0 && worst.net_pnl < 0 ? `${Math.round(worst.net_pnl / lossSum * 100)}%` : "—", "warn", "모든 손실 합에서 최악 1건이 차지하는 비율 — 꼬리 한 번이 결과를 정한다")
+    + row("지금 연속", `${last.net_pnl > 0 ? "승" : "패"} ${st}`, last.net_pnl > 0 ? "good" : "bad");
+}
+
+// 2026-09-22 진입 미리보기(/api/manual-entry/preview)가 받아 둔 계획 -- 카드 포지션 줄의 «넣으면 →» 한 마디가 읽는다.
+let entryProjPreview = null;
+let entryProjKey = "";
+let lastEntryPlan = null;
 
 function renderSnapshotAccount() {
   syncOrderCoinGate();
@@ -1696,362 +1454,93 @@ function renderSnapshotAccount() {
     if (summary) { summary.textContent = "데이터 없음"; summary.className = "ops-health-summary neutral"; }
     setT("snapAcctBalance", "-");
     setH("snapAcctPosition", '<p class="muted">계좌를 불러오지 못했습니다.</p>');
+    setH("snapAcctPerf", "");
     return;
   }
-  const b = latestBinanceAccount.balance || {};
-  const wallet = Number(b.wallet) || 0;
-  const upnl = Number(b.unrealized) || 0;
-  const equity = wallet + upnl;
-  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 가용 ${fmtUsd(b.available)}${balanceAssetNote()}`);
-  const pos = snapshotAccountPosition();
-  const others = (latestBinanceAccount.positions || []).length - (pos ? 1 : 0);
+  const A = latestBinanceAccount, b = A.balance || {}, wallet = Number(b.wallet) || 0;
+  const positions = (A.positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
+  const unreal = positions.reduce((x, p) => x + (Number(p.unrealized_pnl) || 0), 0), equity = wallet + unreal;
+  const mine = snapshotAccountPosition();
+  setT("snapAcctBalance", `지갑 ${fmtUsd(wallet)} · 순자산 ${fmtUsd(equity)} · 가용 ${fmtUsd(b.available)}${balanceAssetNote()}`);
   if (summary) {
-    summary.textContent = pos ? (pos.side === "LONG" ? "롱 보유" : "숏 보유") : "포지션 없음";
-    summary.className = `ops-health-summary ${pos ? (pos.side === "LONG" ? "good" : "bad") : "neutral"}`;
+    summary.textContent = mine ? (mine.side === "LONG" ? "롱 보유" : "숏 보유") : "포지션 없음";
+    summary.className = `ops-health-summary ${mine ? (mine.side === "LONG" ? "good" : "bad") : "neutral"}`;
   }
+  const now = Date.now(), todayKey = acctKey(now), t0 = acctDay0(todayKey);
+  const T = (A.ledger || []).filter((t) => Number(t.exit_time) > 0).slice().sort((x, y) => x.exit_time - y.exit_time);
+  const tT = T.filter((t) => t.exit_time >= t0), real = tT.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
+  // 오늘 시작 순자산: 서버가 0시 뒤 15분 안에 잰 값이 있으면 그것(펀딩·수수료까지 «계좌가 실제로 변한 만큼»), 없으면 «지갑 − 오늘 실현» 추정
+  const ds = A.day_start && A.day_start.date === todayKey && Number(A.day_start.late_s) <= 900 ? Number(A.day_start.equity) : null;
+  const start = ds != null ? ds : wallet - real, net = ds != null ? equity - ds : real + unreal, pct = start > 0 ? net / start : null;
+  const startTip = ds != null ? `0시 ${Math.round(A.day_start.late_s / 60)}분에 잰 순자산 ${fmtUsd(ds)} 기준(입출금이 있으면 섞임)`
+    : "0시 순자산 기록이 없어 «지갑 − 오늘 실현»으로 추정(펀딩·입출금 섞임)";
 
-  // ── 히어로: 숫자 하나가 헤드라인이다 ─────────────────────────────────────────
-  // 옛 판은 같은 크기 숫자 셋을 나란히 둬서 무엇부터 볼지 알 수 없었다. 순자산을 키우고
-  // 나머지는 타일로 내린다. 미실현은 색 글씨가 아니라 **알약**이라 흑백으로 봐도 읽힌다.
-  const upnlPct = wallet > 0 ? upnl / wallet * 100 : 0;
-  const dTone = upnl > 0 ? "good" : upnl < 0 ? "bad" : "neutral";
-  const hero = `<div class="acct-hero">
-      <span class="acct-eyebrow">순자산</span>
-      <div class="acct-figure">${fmtUsd(equity)}</div>
-      <span class="acct-delta ${dTone}">${upnl > 0 ? "▲" : upnl < 0 ? "▼" : "–"} ${fmtUsd(upnl)}
-        <i>${upnlPct >= 0 ? "+" : ""}${upnlPct.toFixed(2)}%</i></span>
-    </div>`;
+  // ── 포지션 한 줄 + 진입 미리보기 한 마디(주문 조작부는 플로팅 버튼) ──
+  const pj = (entryProjPreview || (lastEntryPlan && lastEntryPlan.projection) || {}).after;
+  const pvNote = pj && Number(pj.notional_usdt) > 0
+    ? `<span class="acct-pv" title="플로팅 버튼의 지금 설정(비율·배수)으로 넣으면 — 실제 포지션 아님">넣으면 → 청산까지 <b>${Number(pj.liq_pct).toFixed(1)}%</b> · 노출 <b>${Number(pj.exposure_x).toFixed(1)}배</b></span>` : "";
+  const posLine = positions.length ? positions.map((p) => {
+    const long = p.side === "LONG", mk = Number(p.mark_price) || 0, liq = Number(p.liquidation_price) || 0;
+    const liqD = mk > 0 && liq > 0 ? (long ? mk - liq : liq - mk) / mk * 100 : null;
+    const oo = (A.open_orders || []).filter((o) => o.symbol === p.symbol);
+    return `<div class="acct-posline"><span class="acct-side ${long ? "good" : "bad"}">${long ? "롱" : "숏"} ×${Number(p.leverage) || "?"}</span>
+      <span>${escapeHtml(p.symbol)} <b>${Number(p.qty)}</b></span><span>진입 <b>${acctPx(p.entry_price)}</b> → <b>${acctPx(mk)}</b></span>
+      ${liqD != null ? `<span>청산 <b>${acctPx(liq)}</b> <em class="${liqD < 3 ? "bad" : liqD < 6 ? "warn" : ""}">(${liqD.toFixed(1)}% 남음)</em></span>` : ""}
+      <span>노출 <b>${equity > 0 ? (Math.abs(Number(p.notional) || 0) / equity).toFixed(1) : "—"}배</b></span>
+      <span>미실현 <b class="${acctTone(Number(p.unrealized_pnl))}">${acctSu(Number(p.unrealized_pnl) || 0)}</b></span>
+      ${p.entry_at ? `<span>보유 <b>${acctDur(now - Date.parse(p.entry_at))}</b></span>` : ""}
+      ${oo.length ? `<span>걸린 주문 ${oo.map((o) => `${o.side === "BUY" ? "매수" : "매도"} ${acctPx(o.price)}×${o.qty}`).join(", ")}</span>` : ""}
+      ${p === mine ? pvNote : ""}</div>`;
+  }).join("") : `<div class="acct-posline"><span class="acct-side neutral">포지션 없음</span>${pvNote}</div>`;
 
-  // 오른쪽 성과 -- 보고 있는 코인의 닫힌 왕복.
-  // 🔴원천은 거래소 payload(trades)가 아니라 **서버 원장(ledger)** 이다. userTrades 는 7일
-  //   롤링이라 창 앞에서 열린 포지션은 진입 체결이 사라지고, 폴딩이 포지션 한가운데서 시작해
-  //   유령 왕복을 만든다(2026-09-22 실측: ETHUSDT 8건 중 3건이 유령·6건이 항등식 불일치,
-  //   승률 50% 로 표시됐지만 실제는 80%). 원장은 항등식·겹침을 통과한 것만 담고 창이 지나도
-  //   남는다. server.py load_account_trip_rows() 참조.
-  // 🔴심볼이 아니라 **코인**으로 거른다. 같은 ETH 를 두 심볼로 거래한다 -- 대시보드 수동 주문은
-  //   ETHUSDC, 급할 때는 바이낸스에서 직접 ETHUSDT. 심볼 하나로 거르면 한쪽이 통째로 사라진다
-  //   (실제로 최근 19왕복 +$577 이 화면에 없었다). 바로 위 snapshotAccountPosition() 은 이미
-  //   exec_symbol 을 보는데 여기만 ASSET_CONFIG 를 하드코딩하고 있었다.
-  const base = (ASSET_CONFIG[activeSnapshotAsset]?.symbol || `${activeSnapshotAsset.toUpperCase()}USDT`)
-    .replace(/USD[TC]$/, "");
-  // 원장은 오래된 것부터 붙지만 정렬을 믿지 않는다 -- 거꾸로면 누적선이 시간을 거꾸로 달린다.
-  const allClosed = (latestBinanceAccount.ledger || [])
-    .filter((t) => String(t.symbol || "").replace(/USD[TC]$/, "") === base)
-    .slice().sort((x, y) => (Number(x.exit_time) || 0) - (Number(y.exit_time) || 0));
-  // 🔴자르기 **전** 건수를 들고 있어야 «밖에 더 있다»를 말할 수 있다. 그 숫자가 없으면
-  //   1주 창이 비었을 때 «거래가 없다»인지 «창이 좁다»인지 구분이 안 된다.
-  const cutoff = acctSpanDays > 0 ? Date.now() - acctSpanDays * 86400000 : 0;
-  const closed = cutoff ? allClosed.filter((t) => (Number(t.exit_time) || 0) >= cutoff) : allClosed;
-  const hiddenTrips = allClosed.length - closed.length;
-  const net = closed.map((t) => Number(t.net_pnl) || 0);
-  // 툴팁이 "날짜와 크기 등"을 보여줘야 하므로(사용자 지시) 라벨 문자열이 아니라 원장을 넘긴다.
-  const netMeta = closed.map((t) => {
-    const d = new Date(Number(t.exit_time) || 0);
-    const qty = Number(t.max_qty) || 0, px = Number(t.exit_price) || 0;
-    return {
-      when: Number.isNaN(d.getTime()) ? "" : `${d.getMonth() + 1}/${d.getDate()} `
-        + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
-      day: Number.isNaN(d.getTime()) ? "" : `${d.getMonth() + 1}월 ${d.getDate()}일`,
-      side: t.side === "LONG" ? "롱" : "숏", qty, notional: qty * px,
-      entry: Number(t.entry_price) || 0, exit: px,
-      // 한 코인을 두 심볼로 거래하므로(USDC=대시보드 수동, USDT=바이낸스 직접) 어느 쪽이었는지
-      // 툴팁이 말해 준다. 이게 없으면 원장에서 두 경로가 구분 불가능해진다.
-      venue: String(t.symbol || "").replace(/^.*?(USD[TC])$/, "$1"),
-    };
-  });
-  const wins = net.filter((v) => v > 0).length;
-  const total = net.reduce((x, y) => x + y, 0);
-  let worstIdx = -1;
-  net.forEach((v, i) => { if (worstIdx < 0 || v < net[worstIdx]) worstIdx = i; });
-  const rest = worstIdx >= 0 ? total - net[worstIdx] : 0;
-  const chip = (v, lab) => `<span class="acct-chip"><b>${v}</b><span>${lab}</span></span>`;
-  // 2026-10-05 습관 분해(사용자 «3번 진행») -- 원장 연구 셋(추세 79왕복 · 물타기 142왕복 · 켈리 124왕복)이 같은 곳을 가리켰다:
-  //   꼬리 손실은 역추세와 «추가로 불어난 명목»에서 났다. 같은 기간·코인의 왕복을 세 축으로 갈라 건수·손익을 나란히 둔다.
-  //   값은 서버가 원장 줄에 붙인다(server.py trip_habit · annotate_trip_trend). 모르면 «미분류»로 따로 센다.
-  const habit = (() => {
-    const grp = (rows) => ({ n: rows.length, pnl: rows.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0) });
-    const dir = (t) => (t.side === "LONG" ? 1 : -1);
-    const axes = [
-      { name: "추세", tip: "진입 직전 완결 일봉의 1~4주 추세(7·14·28·56·90일 5표 — 머리 추세 칩과 같은 식)와 같은 쪽이었나",
-        known: (t) => t.trend != null, a: ["같은 쪽", (t) => t.trend === dir(t)], b: ["역추세", (t) => t.trend !== dir(t)] },
-      { name: "추가", tip: "첫 진입 뒤 180초 넘게 떨어진 증가 주문 — 물타기·불타기 모두. 180초 안 재호가·폴백은 한 번으로 센다",
-        known: (t) => t.adds != null, a: ["0회", (t) => t.adds === 0], b: ["1회 이상", (t) => t.adds > 0] },
-      { name: "배수", tip: "왕복 중 최대 명목 ÷ 진입 때 지갑. 6배 = 명목 상한 보험 기준(원장 재현: 4.1배 고정이면 손익 같고 최대 낙폭 −45→−14%)",
-        known: (t) => t.peak_x != null, a: ["6배 이하", (t) => t.peak_x <= 6], b: ["6배 초과", (t) => t.peak_x > 6] },
-    ];
-    return axes.map((ax) => {
-      const k = closed.filter(ax.known);
-      return { ...ax, A: grp(k.filter(ax.a[1])), B: grp(k.filter(ax.b[1])), unknown: closed.length - k.length };
-    });
-  })();
-  const habitCell = (lab, g) => `<span class="acct-habit-cell"><span>${lab}</span> <b class="${g.pnl < 0 ? "bad" : "good"}">${g.n ? fmtUsd(g.pnl) : "–"}</b> <em>${g.n}건</em></span>`;
-  const habitHtml = closed.length ? `<dl class="acct-habit" aria-label="습관 분해 — 같은 기간 왕복을 세 축으로 나눈 손익">
-      ${habit.map((h) => `<div class="acct-habit-row" title="${escapeHtml(h.tip + (h.unknown ? ` · 미분류 ${h.unknown}건(값을 모름)` : ""))}">
-        <dt>${h.name}</dt><dd>${habitCell(h.a[0], h.A)}${habitCell(h.b[0], h.B)}</dd></div>`).join("")}
-    </dl>` : "";
-  const mirrorHtml = acctMirrorHtml(allClosed, pos && equity > 0 ? Math.abs(Number(pos.notional) || 0) / equity : null);
-  // 기간을 적는다(사용자 지시). 원장이 원천이므로 거래소 7일 창보다 길지만, 원장이 처음
-  // 돌기 시작한 날 이전은 없다 -- 그래서 여기 있는 건 **기록된 범위**지 계좌의 전체 이력이 아니다.
-  const spanText = (() => {
-    if (!closed.length) return "";
-    const a = new Date(Number(closed[0].exit_time) || 0);
-    const b = new Date(Number(closed[closed.length - 1].exit_time) || 0);
-    if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return "";
-    const sameMonth = a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
-    const thisMonth = b.getMonth() === new Date().getMonth() && b.getFullYear() === new Date().getFullYear();
-    const range = sameMonth ? `${a.getMonth() + 1}월 ${a.getDate()}일~${b.getDate()}일`
-      : `${a.getMonth() + 1}월 ${a.getDate()}일~${b.getMonth() + 1}월 ${b.getDate()}일`;
-    return (sameMonth && thisMonth ? "이번 달 · " : "") + range;
-  })();
-  // 계열이 둘(건당 막대 · 누적선)이므로 범례를 항상 둔다. 적록 2색형에서 이익/손실 색 차이가
-  // ΔE 6.3 이라 **색만으로는 부족**하다 -- 영선 위/아래 위치와 이 범례가 보조 부호다.
-  // 글씨는 계열 색을 입지 않는다(규약): 색은 옆의 견본이 지고 글자는 muted 잉크다.
-  const legend = `<div class="acct-legend">
-      <span><i class="sw good"></i>이익</span>
-      <span><i class="sw bad"></i>손실</span>
-      <span><i class="sw ln"></i>누적</span>
-    </div>`;
-  const perf = net.length
-    // 🔴2026-09-26 비평: 회고 차트(≈330px)가 주문 조작부와 시장 사이를 막아 시장이 y≈1150 에서야 시작했다.
-    //   기본은 **한 줄 요약**(왕복·승률·누적)만, 차트는 펼쳐서 본다. 펼침 상태는 기억한다(acctPerfOpen).
-    ? `<section class="acct-perf"><details class="acct-perf-fold"${acctPerfOpen || document.documentElement.classList.contains("fit1") ? " open" : ""}>
-         <summary class="acct-chips">
-           ${chip(net.length, "왕복")}
-           ${chip(`${Math.round(wins / net.length * 100)}%`, "승률")}
-           ${chip(`<span class="${total < 0 ? "bad" : "good"}">${fmtUsd(total)}</span>`, "누적")}
-           <span class="acct-perf-more" aria-hidden="true"></span>
-         </summary>
-         <figure class="acct-plot">
-           <div class="acct-plot-head">${legend}
-             <span class="acct-span-wrap">
-             ${spanText ? `<span class="acct-span" title="대시보드가 쌓아 둔 원장의 범위입니다 — 거래소 조회는 7일치만 주므로 그 앞은 여기에만 남습니다. 바이낸스에서 직접 낸 주문도 함께 들어 있습니다.">${escapeHtml(spanText)}</span>` : ""}
-             <div class="chipset acct-span-pick" role="group" aria-label="차트 기간">
-               ${ACCT_SPANS.map(([d, lab]) => `<button type="button" class="chip${
-                 d === acctSpanDays ? " on" : ""}" data-days="${d}" aria-pressed="${d === acctSpanDays}"${
-                 d > 0 && hiddenTrips > 0 ? ` title="이 밖에 ${hiddenTrips}건 더 있습니다"` : ""
-               }>${lab}</button>`).join("")}
-             </div>
-           </span>
-           </div>
-           ${acctPerfSvg(net, netMeta)}
-           <div class="acct-tip" hidden></div>
-         </figure>
-         ${worstIdx >= 0 && net[worstIdx] < 0 && net.length > 1
-            ? `<p class="acct-perf-note"><span class="bad">최악 1건 ${fmtUsd(net[worstIdx])}</span>
-                 · <span class="${rest < 0 ? "bad" : "good"}">나머지 ${net.length - 1}건 ${fmtUsd(rest)}</span></p>`
-            : ""}
-         ${habitHtml}
-         ${mirrorHtml}
-       </details></section>`
-    : `<section class="acct-perf"><div class="acct-empty">${
-        hiddenTrips > 0
-          ? `최근 ${acctSpanDays}일에 닫힌 왕복이 없습니다 — 이 밖에 <b>${hiddenTrips}건</b> 있습니다.`
-          : "닫힌 왕복이 아직 없습니다."}</div></section>`;
-
-  const EXPO_CAP = 30;   // 막대 상한. 이 계좌 실측이 23배라 30을 만재로 둔다
-  const LIQ_FULL = 10;   // 청산까지 10% 를 만재로 본다(그 이상은 사실상 안전)
-  // 타일: 라벨·값·레일이 셋 다 같은 모양이라 눈이 세로로 훑힌다(옛 판은 숫자 셋 + 별도 막대).
-  // ⭐여기서는 **항상 실제 계좌**를 그린다. 진입 미리보기는 렌더가 아니라 applyAcctPreview 가
-  //   **같은 노드를 제자리에서** 고친다 -- 노드를 갈아치우면 transition 이 안 걸린다.
-  //   `data-pv` 가 그 손잡이다.
-  // 🔴2026-09-22 «포지션 없음» 분기도 같은 헬퍼를 쓰므로 그 분기보다 **위**에 있어야 한다.
-  const tile = (key, lab, val, tone, fill, title) => `<div class="acct-tile" data-pv="${key}"${
-      title ? ` title="${escapeHtml(title)}"` : ""}>
-      <span class="acct-tile-lab">${lab}</span>
-      <b class="acct-tile-val ${tone}">${val}</b>
-      <span class="acct-rail"><i class="${tone}" style="width:${clamp01(fill) * 100}%"></i></span>
-    </div>`;
-
-  const otherNote = others > 0
-    ? `<p class="acct-foot">다른 코인에 ${others}종목을 더 보유 중입니다 — 운영 관리 탭에서 전부 볼 수 있습니다.</p>`
-    : "";
-  if (!pos) {
-    // ── 포지션이 없어도 «지금 설정으로 넣으면» 을 그린다 (2026-09-22 아티팩트 댓글) ──
-    // 요청 셋: ①평단가 게이지도 항상 ②레버·비율을 바꾸면 값이 따라 움직이게 ③이 배수에서
-    // 증거금으로 얼마까지 되는지.
-    // 🔴실측이 설계를 갈랐다(lev 5/10/20/50 × pct 25/100 스윕):
-    //   **비율은 전부 움직이고(증거금 151->604 · 노출 1.5->6.0 · 청산 66.7->16.7%),
-    //     레버리지는 서버 응답을 하나도 안 움직인다.** want_lev 는 plan.target_leverage
-    //     표시에만 쓰이고, 증거금은 «거래소 실제 설정»(leverage_by_symbol, 지금 20배)으로
-    //     계산되기 때문이다. 그래서 천장(cap)이 아니라 **projection** 을 읽고, 배수 축은
-    //     여기서 직접 나눈다 -- 주문 직전 ensure_leverage(target_leverage) 가 실제로
-    //     거래소 배수를 바꾸므로(live_manual_peg_execute_20260912.py:168) 거짓이 아니다.
-    //   청산 거리는 교차증거금이라 배수가 아니라 **노출**이 정한다(실측 1/노출).
-    const pl = lastEntryPlan, cp = lastEntryCap;
-    const pj = pl && pl.projection && pl.projection.after;
-    const tgtLev = Number(pl && pl.target_leverage) || 0;
-    const exLev = Number(pl && pl.leverage) || 0;          // 거래소 현재 설정
-    const notional = Number(pj && pj.notional_usdt) || 0;
-    const marginAt = tgtLev > 0 ? notional / tgtLev : 0;   // 그 배수로 바꾼 뒤의 증거금
-    const avail = Number(b.available) || 0;
-    const liqPct = Number(pj && pj.liq_pct) || 0;
-    const capNotional = Number(cp && cp.cap_notional_usdt) || 0;
-    const expo = Number(pj && pj.exposure_x) || 0;
-    const fracPct = Math.round((Number(pl && pl.fraction) || 0) * 100);
-    const BIND = { equity: "순자산", ledger: "원장 중앙", model: "위험 모델", survival: "생존", margin: "증거금 50%" };
-    let body;
-    if (pj && notional > 0) {
-      // ③ 이 배수에서 증거금이 감당하는 명목 vs 정책 천장 -- 작은 쪽이 진짜 상한이다.
-      const capN = capNotional;
-      const byMargin = avail * (tgtLev || 1);
-      const realCap = capN > 0 ? Math.min(capN, byMargin) : byMargin;
-      const marginBinds = capN > 0 && byMargin < capN;
-      const room = `<p class="acct-foot">레버 ${tgtLev}배 → 가용 ${fmtUsd(avail)} 로 `
-        + `<b>${fmtUsd(byMargin)}</b> 까지 · 정책 천장 ${fmtUsd(capN)}`
-        + `${cp && cp.binding ? ` (${BIND[cp.binding] || cp.binding})` : ""}`
-        + ` → <b class="${marginBinds ? "warn" : ""}">실제 상한 ${fmtUsd(realCap)}</b>`
-        + `${marginBinds ? " — 이 배수에서는 <b>증거금이 먼저 막습니다</b>" : ""}</p>`;
-      // ① 게이지 = **증거금** (2026-09-22 3차 지시: 「머리줄도 빼주고 증거금은 진입할 때
-      //   max 치를 게이지에 보여주고 진입비율에 맞는 증거금을 표시해줘」).
-      //   눈금 전체 = 이 배수에서 **쓸 수 있는 최대 증거금**, 채움 = 지금 비율의 증거금.
-      //   🔴최대 = min(정책천장/배수, 가용) 이다. 둘 중 작은 쪽이 진짜 한계라 -- 레버가
-      //     낮으면 가용이, 높으면 정책 천장이 먼저 막는다(실측 lev5 \$2,015 vs lev20 \$604).
-      //   🔴평단·청산은 뺐다(2차 지시). peg 호가라 현재가와 같은 수였다.
-      const marginMax = tgtLev > 0 ? Math.min(capNotional / tgtLev, avail) : avail;
-      const overTone = marginAt > avail ? "bad" : marginAt / Math.max(marginMax, 1e-9) > 0.8 ? "warn" : "good";
-      // ── 척추 레일 (2026-09-22 시안 B, 사용자 «B 안이랑 디자인이 너무 다른데») ──
-      //   보유 중과 **같은 문법**을 쓴다. 다만 포지션이 없으면 측면이 안 정해져서 «청산이
-      //   어디»에 답이 **둘**이다 -- 한쪽만 그리면 거짓말이므로 양쪽을 다 그린다:
-      //     롱 청산(아래) ←── 진입(현재가) ──→ 숏 청산(위)
-      //   거리는 양쪽이 같다(liq_pct). 교차증거금이라 배수가 아니라 노출이 정하는 값이고,
-      //   비율을 올리면 양쪽이 동시에 안쪽으로 좁혀 온다 -- 그게 이 레일이 보여주는 것이다.
-      const px = Number(pl && pl.price) || 0;
-      const loLiq = px * (1 - liqPct / 100), hiLiq = px * (1 + liqPct / 100);
-      const spine = px > 0 && liqPct > 0 ? `<div class="acct-pos spine proj">
-             <div class="acct-gauge" title="포지션이 없으면 측면이 안 정해집니다 -- 지금 설정으로 넣었을 때 롱이면 아래, 숏이면 위 이 가격에서 청산됩니다. 거리는 양쪽이 같습니다(노출의 역수).">
-               <span class="acct-gauge-track"></span>
-               <span class="acct-gauge-entry"></span>
-               <span class="acct-gauge-now" style="left:50%">진입 ~${fmtUsd(px)}</span>
-             </div>
-             <div class="acct-gauge-legend">
-               <span class="bad" style="left:0">롱 청산 ~${fmtUsd(loLiq)}</span>
-               <span class="bad" style="left:100%">숏 청산 ~${fmtUsd(hiLiq)}</span>
-             </div>
-           </div>` : "";
-      body = `<div class="acct-pv-cap entry-cap">지금 설정으로 넣으면 — 레버 ${tgtLev}배 · 비율 ${fracPct}% (포지션 아님)</div>
-        ${spine}
-        <div class="acct-tiles">
-          ${tile("liq", "청산까지", `${liqPct.toFixed(1)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
-                 `넣은 뒤의 청산 거리입니다.\n교차증거금이라 **레버리지가 아니라 노출**이 정합니다`
-                 + ` -- 지금 노출 ${expo.toFixed(1)}배의 역수(${(100 / Math.max(expo, 1e-9)).toFixed(1)}%)입니다.`
-                 + `\n비율을 올리면 노출이 커지고 이 값이 줄어듭니다.`)}
-          ${tile("used", "명목", `${fmtUsd(notional)}`, "warn",
-                 realCap > 0 ? notional / realCap : 0,
-                 `지금 비율(${fracPct}%)로 나가는 명목입니다. 눈금은 실제 상한 ${fmtUsd(realCap)} 기준.\n`
-                 + `🔴거래소 현재 설정은 ${exLev}배입니다 -- 주문 직전에 ${tgtLev}배로 바꿔서 냅니다`
-                 + `(ensure_leverage). 그래서 증거금은 «바꾼 뒤» 기준입니다.`)}
-          ${tile("expo", "노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
-                 `명목 ${fmtUsd(notional)} ÷ 순자산 ${fmtUsd(equity)}\n`
-                 + `🔴레버리지를 바꿔도 이 값은 안 바뀝니다 -- 명목을 정하는 건 비율과 천장입니다.`)}
-          ${/* 증거금 게이지를 **타일로 흡수**했다 -- 라벨+값+막대는 .acct-tile 과 같은 물건이라
-                별도 부품을 둘 이유가 없다. 눈금 전체 = 이 배수에서 쓸 수 있는 최대 증거금. */ ""}
-          ${tile("margin", "증거금", `${fmtUsd(marginAt)}`, overTone,
-                 marginMax > 0 ? marginAt / marginMax : 0,
-                 `지금 비율의 증거금입니다. 눈금 전체는 이 배수에서 쓸 수 있는 최대\n`
-                 + `= min(정책천장 ÷ ${tgtLev}배, 가용 ${fmtUsd(avail)}) = ${fmtUsd(marginMax)}.`)}
-          ${tile("room", "상한 여유", `${fmtUsd(Math.max(0, realCap - notional))}`,
-                 notional / Math.max(realCap, 1e-9) > 0.9 ? "warn" : "good",
-                 realCap > 0 ? 1 - notional / realCap : 0,
-                 `실제 상한 ${fmtUsd(realCap)} 에서 지금 명목 ${fmtUsd(notional)} 을 뺀 값입니다.\n`
-                 + `${marginBinds ? "이 배수에서는 증거금이 먼저 막습니다." : "정책 천장이 먼저 막습니다."}`)}
-        </div>${room}`;
-    } else {
-      body = `<div class="acct-empty">${ASSET_CONFIG[activeSnapshotAsset]?.label
-        || activeSnapshotAsset.toUpperCase()}에 열린 포지션이 없습니다.${
-        pl === null ? " (크기 워커가 값을 내면 여기에 «지금 넣으면»이 뜹니다)" : ""}</div>`;
-    }
-    setH("snapAcctPosition", `<div class="acct-card">
-        <div class="acct-spine-top">${hero}</div>${body}
-      </div>${otherNote}`);
-    setH("snapAcctPerf", perf);
-    bindAcctChartTip();
-    // 🔴패처(applyAcctPreview)는 «실제 포지션» 타일을 제자리에서 고치는 물건이다. 포지션이
-    //   없을 때 그게 돌면 방금 그린 투영 값을 덮는다 -- 문맥을 비워 전체 재렌더로 보낸다.
-    lastAcctPos = null;
-    return;
-  }
-
-  const mark = Number(pos.mark_price) || 0, liq = Number(pos.liquidation_price) || 0;
-  const entry = Number(pos.entry_price) || 0;
-  const liqPct = mark > 0 ? Math.abs(mark - liq) / mark * 100 : 0;
-  // 🔴2026-09-11 정정(사용자 지적). b.margin 은 바이낸스 totalMarginBalance = **순자산**
-  //   (지갑+미실현)이지 사용 증거금이 아니다. 그걸 쓰던 탓에 "증거금 사용"이 98.6% 로 떴다
-  //   -- 실제는 39.6%. 이 값은 정의상 거의 항상 100% 근처라 **아무것도 재고 있지 않았다**.
-  //   이제 수집기가 initial_margin(totalInitialMargin)을 그대로 싣는다. 옛 상태파일을 만나면
-  //   순자산−가용으로 되짚는다(바이낸스 정의상 같은 값이고, 실측으로 368.60 일치 확인).
-  // equity 는 이 함수 앞쪽(991행)에서 이미 선언돼 있다 -- 같은 식(wallet + upnl)이고
-  // wallet/upnl 이 const 라 값이 바뀔 수 없으므로 그대로 쓴다. 여기서 다시 const 로
-  // 선언하면 **같은 스코프 중복 선언**이라 app.js 전체가 SyntaxError 로 죽는다(2026-09-11 실장애).
-  const { used: usedMargin, pct: usedPct } = acctMarginUsed(b);
-  // 노출은 **계좌 전체** 기준이다(명목 ÷ 순자산). 포지션 레버리지(×30)와 다른 값이라
-  //   같은 "배"를 써서 혼동이 났다 -- 라벨을 「계좌 노출」로 바꾸고 명목을 툴팁에 적는다.
-  const expo = equity > 0 ? (Number(pos.notional) || 0) / equity : 0;
-  const pvCap = `<div class="acct-pv-cap entry-cap" hidden>큰 숫자는 <b>지금 내 계좌</b> · 주황 <u class="pv-after">→</u> 와 점선 눈금은 <b>지금 설정으로 넣었을 때</b></div>`;
-  const tiles = `<div class="acct-tiles">
-      ${tile("liq", "청산까지", `${liqPct.toFixed(2)}%`, acctRiskTone(liqPct), liqPct / LIQ_FULL,
-             `마크 ${fmtUsd(mark)} → 청산 ${fmtUsd(liq)}\n교차증거금이라 1/레버리지(${
-               (100 / (Number(pos.leverage) || 1)).toFixed(2)}%)가 아니라 지갑 전체가 버팁니다.`)}
-      ${tile("used", "증거금 사용", `${usedPct.toFixed(0)}%`,
-             usedPct > 80 ? "bad" : usedPct > 60 ? "warn" : "good", usedPct / 100,
-             `사용 ${fmtUsd(usedMargin)} ÷ 순자산 ${fmtUsd(equity)}\n= 명목 ${
-               fmtUsd(pos.notional)} ÷ 레버리지 ${pos.leverage}배`)}
-      ${tile("expo", "계좌 노출", `${expo.toFixed(1)}배`, expo > 15 ? "bad" : "warn", expo / EXPO_CAP,
-             `명목 ${fmtUsd(pos.notional)} ÷ 순자산 ${fmtUsd(equity)}\n포지션 레버리지(${
-               pos.leverage}배)와 다른 값입니다 — 증거금을 계좌의 일부만 썼기 때문입니다.`)}
-      ${tile("upnl", "미실현", usd2(upnl), upnl >= 0 ? "good" : "bad", Math.min(1, Math.abs(upnlPct) / 5),
-             `거래소가 준 미실현 손익입니다. 막대는 순자산 대비 ±5% 를 만재로 봅니다.`)}
-      ${(() => {
-        // 🔴시안 B: «지금 닫으면»이 청산을 누르기 직전 유일하게 중요한 숫자인데 레인 안 작은
-        //   글씨였다. 같은 식(exitNetUsd)을 써야 레인과 타일이 어긋나지 않는다.
-        const e = exitNetUsd(pos, 100);
-        return tile("close", "지금 닫으면", e.net === null ? "—" : usd2(e.net),
-                    (e.net || 0) >= 0 ? "good" : "bad", Math.min(1, Math.abs(e.net || 0) / (equity * 0.05 || 1)),
-                    `전량 청산 시 지갑이 늘어나는 금액입니다.\n미실현 ${usd2(e.gross || 0)} − 청산 수수료 ≈$${
-                      e.fee.toFixed(2)} (peg 실측 ${EXIT_FEE_BP_PEG}bp)\n진입 수수료는 이미 빠졌으므로 다시 빼지 않습니다.`);
-      })()}
-    </div>`;
-
-  // ⭐청산 거리 게이지 -- 롱/숏 모두 **왼쪽 끝이 청산**이 되도록 접는다.
-  //   0 = 청산가 · 0.5 = 진입가 · 1 = 진입에서 청산 거리만큼 이익 난 가격.
-  //   측면마다 부등호를 뒤집지 않아도 되고, 눈은 "왼쪽에 가까울수록 위험"만 기억하면 된다.
-  const span = Math.abs(entry - liq) * 2;
-  const safe = span > 0 ? clamp01(Math.abs(mark - liq) / span) : 0;
-  const sideTone = pos.side === "LONG" ? "good" : "bad";
-  // 🔴2026-09-22 시안 B: 레일이 이 카드의 척추다. 머리줄(심볼·측면·수량)은 순자산 옆으로
-  //   올려 한 줄이 되고, 게이지는 카드 전폭을 가로지른다. data-pv 훅은 **하나도 안 옮겼다**
-  //   -- applyAcctPreview 는 한 줄도 안 고친다.
-  const posHead = `<div class="acct-pos-head">
-        <b>${escapeHtml(pos.symbol)}</b>
-        <span class="acct-tag ${sideTone}" data-pv="tag">${pos.side === "LONG" ? "롱" : "숏"} ×${escapeHtml(pos.leverage)}</span>
-        <span class="acct-pos-qty" data-pv="qty">${escapeHtml(pos.qty)}</span>
-      </div>`;
-  const position = `<div class="acct-pos spine" data-side="${pos.side === "LONG" ? "long" : "short"}">
-      <div class="acct-gauge" title="왼쪽 끝이 청산가, 가운데 눈금이 진입가입니다. 손잡이가 왼쪽에 붙을수록 위험합니다.">
-        <span class="acct-gauge-track"></span>
-        <span class="acct-gauge-entry"></span>
-        <span class="acct-gauge-knob" data-pv="knob" style="left:${(safe * 100).toFixed(1)}%"></span>
-        <span class="acct-gauge-now" style="left:${(safe * 100).toFixed(1)}%">현재 ${fmtUsd(mark)}</span>
+  // SVG 는 칸의 실제 폭(·한 화면 모드면 fitLayout 이 준 높이)으로 1:1 로 그린다 -- 고정 viewBox 를 늘리면 글자가 커지거나 가운데로 찌그러진다.
+  const narrowCard = matchMedia("(max-width: 900px)").matches;
+  const posW = (el("snapAcctPosition").clientWidth || 1200) - 32, perfW = (el("snapAcctPerf").clientWidth || 1200) - 36;
+  const todayW = Math.max(280, Math.round(narrowCard ? posW : (posW - 40) * 1.2 / 3.2));
+  const curveW = Math.max(300, Math.round(narrowCard ? perfW : (perfW - 20) / 2));
+  const curveH = document.documentElement.classList.contains("fit1") && fitAcctPlotH > 0 ? fitAcctPlotH : 280;
+  // ── 오늘 띠 ──
+  const wins = tT.filter((t) => t.net_pnl > 0).length;
+  const dow = "일월화수목금토"[new Date(now + ACCT_KST).getUTCDay()];
+  const trips = tT.length ? tT.map((t) => `<li title="${escapeHtml(acctTripTip(t))}"><time>${acctHm(t.exit_time)}</time><span>${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} · ${acctDur(t.exit_time - t.entry_time)}${t.adds ? ` · 추가 ${t.adds}회` : ""}${t.peak_x > 6 ? ` · <em class="warn">${t.peak_x}배</em>` : ""}</span><b class="${acctTone(t.net_pnl)}">${acctSu(Number(t.net_pnl) || 0)}</b></li>`).join("")
+    : `<li class="muted">닫힌 거래 없음</li>`;
+  const todayHtml = `<div class="acct-today">
+      <div class="acct-today-hero">
+        <span class="acct-eyebrow">오늘 손익 · ${todayKey.slice(5).replace("-", "/")}(${dow})</span>
+        <div class="acct-figure ${acctTone(net)}" title="${escapeHtml(startTip)}">${acctSu(net)}</div>
+        <span class="acct-today-pct ${acctTone(net)}">${pct == null ? "—" : `${pct >= 0 ? "+" : "−"}${Math.abs(pct * 100).toFixed(1)}%`} <span class="muted">· 시작 ${fmtUsd(start)} → 지금 ${fmtUsd(equity)}</span></span>
+        <dl class="acct-today-kv"><dt>실현 · ${tT.length}건${tT.length ? ` (승 ${wins} 패 ${tT.length - wins})` : ""}</dt><dd class="${acctTone(real)}">${acctSu(real)}</dd>
+          <dt>미실현${positions.length ? ` · ${positions.map((p) => `${p.side === "LONG" ? "롱" : "숏"} ${Number(p.qty)}`).join(", ")}` : ""}</dt><dd class="${acctTone(unreal)}">${acctSu(unreal)}</dd></dl>
       </div>
-      <div class="acct-gauge-legend">
-        <span class="bad" data-pv="liqpx" style="left:0">청산 ${fmtUsd(liq)}</span>
-        <span data-pv="entrypx" style="left:50%">진입 ${fmtUsd(entry)}</span>
-      </div>
+      <div class="acct-today-flow">${acctTodaySvg(tT, unreal, positions.length > 0, t0, now, todayW, 120)}</div>
+      <div class="acct-today-trips"><span class="acct-eyebrow">오늘 닫힌 거래</span><ol>${trips}</ol></div>
     </div>`;
+  setH("snapAcctPosition", posLine + todayHtml);
 
-  // 시안 B 구성: 척추(순자산+포지션 한 줄 → 전폭 레일) → KPI 5칸 → [index.html 의 두 레인]
-  //   → 자산 곡선. 곡선은 «역사»라 조작보다 아래가 맞다(사용자 선택 2026-09-22).
-  setH("snapAcctPosition", `<div class="acct-card">
-      <div class="acct-spine-top">${hero}${posHead}</div>
-      ${pvCap}
-      ${position}
-      ${tiles}
-    </div>${otherNote}`);
-  setH("snapAcctPerf", perf);
-  bindAcctChartTip();
-  // 🔴계좌 폴링이 카드를 다시 그리면 미리보기가 지워진다 -- 렌더 직후 곧바로 다시 입힌다.
-  //   (이 경로는 노드가 새로 생겨서 애니메이션은 안 걸린다. 값이 맞는 게 먼저다.)
-  lastAcctPos = { pos, mark, equity };
-  applyAcctPreview(pos, mark, equity);
+  // ── 아래: 달력 | 자산 곡선 ──
+  const days = new Map();
+  T.forEach((t) => { const k = acctKey(t.exit_time), o = days.get(k) || { pnl: 0, n: 0, trips: [] }; o.pnl += Number(t.net_pnl) || 0; o.n++; o.trips.push(t); days.set(k, o); });
+  const ym = (() => { const d = new Date(t0 + ACCT_KST); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - acctCalBack); return d.toISOString().slice(0, 7); })();
+  const oldest = T.length ? acctKey(T[0].exit_time).slice(0, 7) : ym;
+  const cal = acctCalendar(days, ym, todayKey);
+  const calHtml = `<div class="acct-cal-box">
+      <div class="acct-cal-head"><button type="button" class="chip" data-acct-month="1" ${ym <= oldest ? "disabled" : ""} aria-label="지난달">‹</button>
+        <b>${ym.slice(0, 4)}년 ${+ym.slice(5)}월</b><button type="button" class="chip" data-acct-month="-1" ${acctCalBack ? "" : "disabled"} aria-label="다음 달">›</button>
+        <span class="muted">이익일 ${cal.wd} · 손실일 ${cal.ld} · <b class="${acctTone(cal.mo)}">${acctSu(cal.mo)}</b></span></div>
+      ${cal.html}
+      ${T.length && ym <= oldest ? `<p class="acct-foot muted">원장은 ${acctMd(T[0].exit_time)}부터입니다(서버 꼬리 최근 400왕복).</p>` : ""}
+    </div>`;
+  const spanDays = ACCT_SPANS[acctSpanIdx][1];
+  const from = spanDays === 0 ? t0 : spanDays > 0 ? now - spanDays * ACCT_DAY : 0;
+  const a = T.filter((t) => t.exit_time >= from);
+  const plot = spanDays === 0 ? acctTodaySvg(tT, unreal, positions.length > 0, t0, now, curveW, curveH)
+    : a.length ? acctCurveSvg(a, unreal, positions.length > 0, now, curveW, curveH) : `<p class="acct-empty">이 기간에 닫힌 왕복이 없습니다.</p>`;
+  const curveHtml = `<div class="acct-curve-box">
+      <div class="chipset" role="group" aria-label="자산 곡선 기간">${ACCT_SPANS.map(([lab], i) => `<button type="button" class="chip${i === acctSpanIdx ? " on" : ""}" data-acct-span="${i}" aria-pressed="${i === acctSpanIdx}">${lab}</button>`).join("")}</div>
+      <div class="acct-plot">${plot}</div>
+      ${a.length ? `<div class="acct-stats">${acctStatsHtml(a)}</div>` : ""}
+    </div>`;
+  setH("snapAcctPerf", `<div class="acct-hist">${calHtml}${curveHtml}</div>`);
 }
 
 
@@ -8936,7 +8425,7 @@ const MANUAL_ENTRY_REFRESH_MS = 60000;
 const won = (x) => Number(x).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
 // 2026-09-16 진입 미리보기의 타일 넷을 없애면서 entryTile/entryVal/ENTRY_* 도 함께 나갔다
-// -- 그 블록 전용 헬퍼였다. 같은 숫자는 위 계좌 카드가 그린다(applyAcctPreview).
+// -- 그 블록 전용 헬퍼였다. 같은 숫자는 계좌 카드 포지션 줄의 «넣으면 →» 한 마디가 그린다(2026-10-14 카드 개편).
 
 // 2026-10-10 주문은 ETHUSDC · 화면 시세는 ETHUSDT(같은 시각 USDT 가 중앙 1.93bp 비싸다) -- 숏 진입·롱 청산 지정가가 화면 가격보다
 //   싸 보여 «손해 쪽에 걸렸다»로 읽히던 착시를 막는다. 값은 서버 미리보기가 이미 준 지정가(plan.price/reference_price) -- REST 를 늘리지 않는다.
@@ -9461,12 +8950,7 @@ function setEntryProjPreview(plan) {
   // 🔴끌 때는 **통째로 다시 그린다**. 제자리 수정은 실제 값을 덮어쓴 뒤라 «지우기»만으로는
   //    복구가 안 된다(2026-09-15 테스트에서 실제로 미리보기 값이 굳었다). 렌더는 항상
   //    실제 계좌를 그리므로 재그리기가 곧 복구다.
-  const ctx = lastAcctPos;
-  if (on && ctx && el("snapAcctPosition")?.querySelector(".acct-tiles")) {
-    applyAcctPreview(ctx.pos, ctx.mark, ctx.equity);
-  } else {
-    renderSnapshotAccount();
-  }
+  renderSnapshotAccount();   // 2026-10-14 카드 포지션 줄의 «넣으면 →» 한 마디만 바뀐다(타일·제자리 패처는 카드 개편으로 없어짐)
 }
 
 let execQuote = null;   // 2026-10-10 떠 있는 버튼용 주문 심볼 호가(크기 미리보기 LONG = 매수호가 · SHORT = 매도호가)
@@ -9526,7 +9010,6 @@ async function manualEntryRefreshSize() {
     const refNow = Number(latestLivePriceByAsset[asset] || 0);   // 미리보기가 온 그 순간의 USDT -- 차이(bp)는 그때 잰다(값이 60초 묵어도 차이는 거의 안 변한다)
     execQuote = /USDC$/.test(String(plan.symbol || "")) && plan.price > 0 && planShort.price > 0 && refNow > 0
       ? { asset, sym: plan.symbol, bid: Number(plan.price), ask: Number(planShort.price), ref: refNow, at: Date.now() } : null;
-    lastEntryCap = cap && cap.available ? cap : null;
     lastEntryPlan = plan && !plan.blocked ? plan : null;
     setEntryProjPreview(plan);
     // 2026-09-25 «보유 N시간 · 역행 · 최대 N배» 줄은 뺐다(사용자 지시). 레버 게이지는 그대로 맞춘다.
