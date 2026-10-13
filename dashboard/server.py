@@ -351,6 +351,37 @@ def load_account_trip_rows() -> list[dict]:
     return rows
 
 
+# 2026-10-14 계좌 카드 «오늘 손익»의 기준 = 오늘(KST) 첫 계좌 조회의 순자산(지갑 + 미실현). 원장 루프(300초)·화면(10초)이 이 함수를 지난다.
+ACCOUNT_DAY_START_PATH = LIVE_DIR / "account_day_start.json"
+KST_TZ = timezone(timedelta(hours=9))
+
+
+def account_day_start(payload: dict, now: float | None = None, path: Path = ACCOUNT_DAY_START_PATH) -> dict | None:
+    """날이 바뀐 뒤 첫 조회가 {date, equity, wallet, ts, late_s}를 남기고, 같은 날엔 그대로 돌려준다.
+
+    ponytail: 입출금이 섞인다. late_s(0시 뒤 몇 초에 잰 값인가)가 크면 화면이 «지갑 − 오늘 실현» 추정으로 돌아간다."""
+    bal = payload.get("balance") if isinstance(payload, dict) and payload.get("ok") else None
+    try:
+        wallet = float(bal["wallet"])
+        equity = wallet + float(bal.get("unrealized") or 0.0)
+    except (KeyError, TypeError, ValueError):
+        return None
+    now = time.time() if now is None else now
+    kst = datetime.fromtimestamp(now, KST_TZ)
+    day = kst.strftime("%Y-%m-%d")
+    try:
+        cur = json.loads(path.read_text())
+    except (OSError, ValueError):
+        cur = {}
+    if cur.get("date") != day:
+        midnight = kst.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        cur = {"date": day, "equity": equity, "wallet": wallet, "ts": now, "late_s": round(now - midnight)}
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cur))
+        tmp.replace(path)
+    return cur
+
+
 # 2026-10-05 계좌 카드 «습관 분해»(추가 0회/≥1 · 명목 배수 ≤6/>6 · 추세 쪽/역추세). 10-05 이후 줄은 원장이 직접
 #   adds·peak_notional·equity_at_record 를 싣고, 그 전 줄은 scripts/backfill_account_trip_habits_20261005.py 가 만든 이 파일로.
 ACCOUNT_TRIP_HABITS_PATH = LIVE_DIR / "account_trip_habits.json"
@@ -4915,6 +4946,10 @@ def make_app() -> web.Application:
                     except Exception as exc:  # noqa: BLE001 -- 추세 칸만 «미분류»가 된다
                         print(f"trip trend {coin}: {type(exc).__name__}: {exc}", flush=True)
             annotate_trip_trend(payload["ledger"], daily)
+            try:
+                payload["day_start"] = account_day_start(payload)
+            except OSError as exc:   # 기록 실패는 화면 추정으로 돌아갈 뿐 -- 계좌 응답을 막지 않는다
+                print(f"account_day_start: {type(exc).__name__}: {exc}", flush=True)
         return payload
 
     async def load_daily_closes(coin: str) -> tuple[list[float], list[int]]:

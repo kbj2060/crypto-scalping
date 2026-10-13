@@ -1,8 +1,5 @@
-"""진입 미리보기는 계좌 카드 노드를 **제자리에서** 고친다(applyAcctPreview) -- 렌더와
-패처가 `data-pv` 로만 만난다. 손잡이 이름이 한쪽에서 바뀌면 querySelector 가 null 을
-돌려주고 패처는 조용히 아무것도 안 한다(`if (!t) return;`). 에러도 안 난다 --
-그래서 이 드리프트는 사람이 화면을 봐야만 발견된다. 이 검사가 그 자리를 지킨다.
-"""
+"""진입 미리보기 → 계좌 카드. 2026-10-14 카드 개편 뒤로는 포지션 줄의 «넣으면 →» 한 마디가 미리보기를 보여 준다
+(옛 타일·data-pv 제자리 패처는 카드에서 주문 정보를 줄이며 없어졌다)."""
 import re
 from pathlib import Path
 
@@ -12,27 +9,13 @@ HTML = (ROOT / "dashboard/live/index.html").read_text(encoding="utf-8")
 CSS = (ROOT / "dashboard/live/styles.css").read_text(encoding="utf-8")
 
 
-def test_every_queried_handle_is_emitted():
-    emitted = set(re.findall(r'data-pv="([a-z]+)"', JS)) | set(re.findall(r'\$\{tile\("(\w+)"', JS))
-    queried = set(re.findall(r'q\("(\w+)"\)', JS)) | set(re.findall(r'setTile\("(\w+)"', JS))
-    assert queried, "패처가 손잡이를 안 읽는다 — applyAcctPreview 가 사라졌나?"
-    assert queried <= emitted, f"렌더가 안 내는 손잡이를 읽는다: {sorted(queried - emitted)}"
-    # 2026-09-30: 미리보기가 **일부러** 안 고치는 손잡이 -- knob(«지금 내 자리», 유령 눈금을 따로 세운다) ·
-    #   margin/room(포지션 없음 레인의 타일 -- 값 자체가 이미 «지금 설정으로 넣으면»이다) · upnl(진입 순간 미실현은 안 바뀐다).
-    #   새 손잡이가 여기 없이 생기면 여전히 실패한다.
-    intentionally_unpatched = {"knob", "margin", "room", "upnl"}
-    assert intentionally_unpatched <= emitted, f"예외 목록이 낡았다: {sorted(intentionally_unpatched - emitted)}"
-    assert emitted - intentionally_unpatched <= queried, f"아무도 안 읽는 손잡이가 남았다: {sorted(emitted - intentionally_unpatched - queried)}"
-    # 타일 키가 실제로 속성으로 나가는지 -- tile() 이 data-pv 를 안 붙이면 위 교집합이 거짓이 된다.
-    assert 'class="acct-tile" data-pv="${key}"' in JS
-
-
-def test_preview_classes_have_styles():
-    """패처가 붙이는 클래스·삽입하는 노드에 스타일이 없으면 «실제 계좌인 척»하게 된다."""
-    assert ".acct-tiles.preview .acct-tile" in CSS, "미리보기 점선 테두리가 없다"
-    assert ".acct-rail.entry-rail u" in CSS, "유령 눈금 스타일이 없다"
-    assert ".acct-rail i, .acct-rail u, .acct-gauge-knob" in CSS, "transition 대상에 유령 눈금이 빠졌다"
-    assert 'class="acct-pv-cap' in JS, "«실제 계좌 아님» 라벨이 없다"
+def test_card_shows_preview_one_liner():
+    """2026-10-14 카드 개편(사용자 시안 C): 타일·제자리 패처(applyAcctPreview)는 없어지고, 진입 미리보기는
+    포지션 줄의 «넣으면 →» 한 마디로만 남는다 -- 미리보기가 바뀌면 카드를 다시 그려야 그 한 마디가 따라온다."""
+    assert "applyAcctPreview" not in JS, "카드 개편 뒤 남은 옛 패처"
+    assert 'class="acct-pv"' in JS and "entryProjPreview ||" in JS, "포지션 줄 «넣으면 →» 미리보기가 없다"
+    body = JS[JS.index("function setEntryProjPreview"):][:2500]
+    assert "renderSnapshotAccount();" in body, "미리보기가 바뀌어도 카드를 다시 안 그린다"
 
 
 def test_entry_proj_block_is_gone():
