@@ -6440,7 +6440,7 @@ def make_app() -> web.Application:
                 binding = []          # 단순 규칙(사용자 지시): 원장·순자산 6배·모델 상한 없음 -- 증거금 50% 만
             # 증거금 상한. 레버리지는 주문이 실제로 걸 값 -- «자동»이면 처방(plan_now→prescribe)과
             #   **같은 입력**으로 같은 함수를 부른다(그래야 target_leverage 와 같은 값이다).
-            #   화면은 «자동»이어도 20배를 보낸다(app.js MANUAL_LEV_AUTO) -- 이 경로는 lev 없는 요청뿐.
+            #   화면은 «자동»이어도 10배를 보낸다(app.js MANUAL_LEV_AUTO, 2026-10-13 20→10) -- 이 경로는 lev 없는 요청뿐.
             margin_lev = want_lev or (leverage_setting(
                 cap_notional=equity * policy_cap_x, equity=equity, existing_notional=exposure,
                 current_notional=exposure).get("setting") if policy_cap_x else None) or leverage
@@ -6523,6 +6523,8 @@ def make_app() -> web.Application:
                                      order_leverage=float(margin_lev or 0.0), first=not same,   # 첫 진입 = 이 방향 포지션 없음
                                      risk_used=q_same * max(0.0, sgn * (anchor - sl)) if same else 0.0,   # 이미 든 몫이 손절에서 잃을 돈
                                      add_stop_frac=sgn * (p_in - sl) / p_in)
+                if rule["l_eff"] < cr["l"]:   # 2026-10-13 레버리지가 L 을 묶음(증거금 90%) -- 화면·손절 손실 한도가 실제 배수를 말하게
+                    cr = {**cr, "l": rule["l_eff"], "binding": "레버리지 증거금"}
                 cap_notional, who = rule["cap_notional"], "rule"
                 fraction = rule["fraction"]
             plan = build_entry_plan(

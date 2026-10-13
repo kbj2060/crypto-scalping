@@ -93,6 +93,20 @@ class RecRuleEntryTest(unittest.TestCase):
             self.assertAlmostEqual(j2["plan"]["bracket"]["sl_price"], 2575.02, delta=0.011)   # 매도호가 2500.01 × 1.03 올림
         self._run(account([]), fn)
 
+    def test_low_exchange_leverage_binds_rule_l(self) -> None:
+        """2026-10-13 레버리지 20→10: 거래소 레버리지 X 면 실효 L ≤ 0.9X (증거금 90%). 5배면 4.5 < L 이라 묶인다."""
+        async def fn(c):
+            j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=5&rule=c")).json()
+            self.assertTrue(j.get("ok"), j)
+            p = j["plan"]
+            self.assertAlmostEqual(p["rule"]["l"], 4.5, places=6)
+            self.assertEqual(p["rule"]["binding"], "레버리지 증거금")
+            self.assertAlmostEqual(p["rule"]["loss_at_stop_pct"], 100 * 4.5 * 0.03, delta=0.01)
+            self.assertAlmostEqual(p["notional_usdt"], 0.75 * 1000 * 4.5, delta=2.6)
+            j10 = await (await c.get("/api/manual-entry/preview?side=LONG&lev=10&rule=c")).json()
+            self.assertAlmostEqual(j10["plan"]["rule"]["l"], L, places=3)              # L ≈ 6.2 < 9 -- 10배에선 안 묶인다
+        self._run(account([]), fn)
+
     def test_bad_rule_is_rejected_not_ignored(self) -> None:
         async def fn(c):
             for bad in ("1.5", "2", "x", "C"):

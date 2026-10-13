@@ -9162,10 +9162,10 @@ function manualLevValue() {
 //    없으면 기존 값 그대로가 맞다 -- 같은 값이면 설정 자체가 안 바뀌어 거부될 수도 없다.
 //    (position_floor = 명목/순자산 과는 다른 값이다. 여기서 고정하는 건 «거래소에 걸린
 //     설정»이고, 포지션이 그 설정으로 이미 열려 있으므로 언제나 바닥 위에 있다.)
-// ② **신규 진입의 «자동»은 모델 추천이 아니라 20배 고정**이다.
+// ② **신규 진입의 «자동»은 모델 추천이 아니라 고정값**이다(2026-10-13 사용자 «청산 잦을 것 같아 10배로» 20→10).
 // 🔴세 경로 -- 미리보기 쿼리 · 실주문 pending · 게이지 표시 -- 가 **이 한 함수**를 본다.
 //   따로 두면 «미리보기는 20배인데 주문은 모델값»이 된다.
-const MANUAL_LEV_AUTO = 20;
+const MANUAL_LEV_AUTO = 10;
 const manualLevLocked = () => {
   const v = Number(snapshotAccountPosition()?.leverage) || 0;
   return v > 0 ? v : null;
@@ -9206,7 +9206,7 @@ function renderLevGauge(plan) {
   // 그 값을 정확히 나타내지도 못한다. 값은 아래 꼬리표가 숫자로 말한다.
   g.hidden = !!locked;
   el("snapLevAuto")?.closest(".lev-auto")?.toggleAttribute("hidden", !!locked);
-  // 자동이면 20배로 스냅한다. 손으로 만지는 중이면 안 건드린다.
+  // 자동이면 MANUAL_LEV_AUTO(10배)로 스냅한다. 손으로 만지는 중이면 안 건드린다.
   if (!locked && manualLevAuto()) {
     g.value = String(MANUAL_LEV_AUTO);
     syncRangeFill(g);       // 프로그램이 바꾼 값은 input 이벤트가 없다

@@ -319,6 +319,10 @@ COMMIT_UNIT_X = 4 * 0.303 * 10.26
 COMMIT_CAP_X = 10.0
 COMMIT_MMR, COMMIT_AVG_OFF, COMMIT_LIQ_BUF, COMMIT_STOP_SIG = 0.02, 0.0066, 0.005, 3.0
 REC_FIRST_SHARE = 0.75
+# 🔴2026-10-13 사용자 «레버리지 20배 → 10배»: 거래소 레버리지 X 에서 계좌 명목 L × 순자산을 열려면 증거금 L/X × 순자산이 든다.
+#   L = 10 · X = 10 이면 순자산 100% 라 물타기 막판 주문을 거래소가 증거금 부족으로 거부한다(평가손·수수료 몫 여유 없음).
+#   그래서 실효 L = min(L, 이 비율 × X) -- X = 20 이면 18 이라 기존 L ≤ 10 그대로, X = 10 이면 9.
+RULE_MARGIN_MAX = 0.9
 
 
 def commit_rule_l(*, position_side: str, sigma24_bp: float, vol_mult: float) -> dict[str, Any]:
@@ -345,7 +349,8 @@ def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, ord
         raise ValueError(f"rule_l must be in (0, {COMMIT_CAP_X}], got {rule_l!r}")
     if not (equity > 0 and order_leverage > 0):
         return {"cap_notional": 0.0, "fraction": 1.0, "first": existing_notional <= 0, "room": 0.0, "target_notional": 0.0}
-    cap = rule_l * equity
+    l_eff = min(float(rule_l), RULE_MARGIN_MAX * float(order_leverage))
+    cap = l_eff * equity
     # 2026-10-10 검증: «첫 진입» = 이 방향 포지션 없음(호출부가 준다). 계좌 전체 명목(반대 다리·다른 심볼)으로 정하면 숏 $300 만
     #   있어도 롱 첫 진입이 75% 가 아니라 남은 여유 전부(98%)가 됐다. 여유(room)는 그대로 계좌 전체로 잰다.
     first = existing_notional <= 0 if first is None else first
@@ -353,8 +358,8 @@ def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, ord
     # 2026-10-10 동일위험 지킴(10-11 b = 이 진입의 L × 손절 3%): 이번 주문이 손절선까지 잃을 몫 ≤ (b × 순자산 − 이미 든 포지션이 손절에서 잃을 몫). 평단보다 싸게 물타면 거의 안 묶고,
     #   다 찬 뒤 더 빠져 또 넣거나(명목 여유가 시세로 다시 생김)·위에서 불타기·손절선 너머면(add_stop_frac ≤ 0 → 0) 묶는다.
     if add_stop_frac is not None:
-        want = min(want, max(0.0, rule_l * RULE_STOP_PCT * equity - risk_used) / add_stop_frac if add_stop_frac > 0 else 0.0)
-    return {"cap_notional": cap, "first": first, "room": max(0.0, cap - existing_notional),
+        want = min(want, max(0.0, l_eff * RULE_STOP_PCT * equity - risk_used) / add_stop_frac if add_stop_frac > 0 else 0.0)
+    return {"cap_notional": cap, "l_eff": l_eff, "first": first, "room": max(0.0, cap - existing_notional),
             "target_notional": min(want, max(0.0, cap - existing_notional)),
             "fraction": min(1.0, max(1e-9, want / (equity * order_leverage)))}
 
@@ -911,6 +916,12 @@ def _self_check_rec_rule() -> None:
     p3 = build_entry_plan(side="LONG", best_bid=2400.0, best_ask=2400.01, recommended_qty=0.0, cap_notional=r3["cap_notional"],
                           filters=f, existing_notional=4000.0, equity=2000.0, fraction=r3["fraction"], fraction_of_equity=True, order_leverage=20)
     assert p3["blocked"], p3                                                                      # 상한이 찼으면 막는다
+    # 2026-10-13 레버리지 10배: 실효 L = 0.9 × 10 = 9 -- 다 채워도 증거금 90%(거래소 거부 없음) · 20배면 그대로
+    r10 = rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=0.0, order_leverage=10)
+    assert r10["l_eff"] == 9.0 and r10["cap_notional"] == 18000.0 and abs(r10["target_notional"] - 0.75 * 18000.0) < 1e-6
+    full = rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=13500.0, order_leverage=10)
+    assert full["target_notional"] + 13500.0 <= 0.9 * 10 * 2000.0 + 1e-6 and full["fraction"] <= 0.9
+    assert rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=0.0, order_leverage=20)["l_eff"] == 10.0
     for bad in (0.0, -1.0, 10.5):
         try:
             rec_rule_size(rule_l=bad, equity=2000.0, existing_notional=0.0, order_leverage=20)
