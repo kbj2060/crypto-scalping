@@ -8560,6 +8560,7 @@ function manualEntryPlanHtml(data) {
   const rl = plan.rule;   // 2026-10-09 권고 규칙 -- 무엇이 크기·손절을 정했는지 머리 바로 아래에 한 줄
   const ruleNote = rl ? entryNote(`자동 규칙 — 상한 ${won(rl.cap_notional)} USDT(순자산 × ${rl.l}, ${rl.binding}) · 이번 `
     + `${rl.first ? "첫 진입 = 상한의 1/3" : `물타기 = 남은 여유 ${won(rl.room)} USDT`} · 손절 ${rl.sl_name || ""} ${rl.sl_price ? Number(rl.sl_price).toLocaleString() : "-"}`
+    + (rl.first && rl.add ? ` · 체결되면 물타기 지정가 ${Number(rl.add.price).toLocaleString()} × ${rl.add.qty} 자동(첫 진입가 ${plan.positionSide === "LONG" ? "−" : "+"}0.75%)` : "")
     + ` 거래소 스탑(물타기해도 안 물러남) · 익절 없음 · 교차 마진에서만`) : "";
   const parts = [`<div class="entry-head"><b>${dir} ${escapeHtml(String(plan.quantity))} ${coinUnit()}</b>
       <span>@ ${escapeHtml(Number(plan.price).toLocaleString())}</span>
@@ -9239,6 +9240,12 @@ function manualEntryStateText(state) {
   } else if (br) {
     rows.push(`🔴TP/SL 을 못 걸었습니다 (${br?.reason || "시도 기록 없음"})`);
   }
+  // 2026-10-14 자동 물타기 지정가(첫 진입가 ∓0.75%) -- 포지션이 닫히면 서버 감시 루프가 지운다
+  const ad = state?.add_order;
+  if (ad && state?.kind !== "exit") {
+    rows.push(ad.pending ? "물타기 지정가 거는 중…" : ad.placed ? `물타기 지정가 ${Number(ad.price).toLocaleString()} × ${ad.qty} 걸림(포지션 닫히면 자동 취소)`
+      : `🔴물타기 지정가 못 걸었습니다 (${ad.error || ad.reason || "?"}) — 필요하면 손으로`);
+  }
   // 2026-09-15 진입도 리페그한다. 쫓아간 횟수는 «의도한 가격보다 높게 들어갔을 수 있다»는
   // 뜻이라 숨기지 않는다 -- 청산과 달리 진입은 안 사도 되는 선택지가 있었기 때문이다.
   if (Number(state?.repegs || 0) > 0 && state?.mode !== "wait") {   // 기다리기의 repegs = 처음 -5022 로 다시 건 횟수(따라간 게 아니다)
@@ -9295,7 +9302,7 @@ async function manualEntryPollStatus() {
     const phase = data.state?.phase;
     // 진입이 끝나도 TP/SL 은 그 **뒤에** 걸린다 -- 체결이 있는데 결과가 아직 없으면 한 번 더 본다.
     const bracketPending = data.state?.kind !== "exit" && Number(data.state?.filled || 0) > 0
-      && !data.state?.bracket;
+      && (!data.state?.bracket || data.state?.add_order?.pending);
     const switching = /^(exit|entry)$/.test(data.state?.switch?.phase || "");   // 2026-10-10 스위칭은 서버가 잇는다 -- 끝날 때까지 본다
     if (phase === "submitting" || phase === "working" || bracketPending || switching) {
       setTimeout(manualEntryPollStatus, STATUS_POLL_MS);

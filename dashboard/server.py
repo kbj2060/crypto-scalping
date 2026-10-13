@@ -202,9 +202,9 @@ from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, bracket_action, bracket_keep_farther_sl, bracket_key, bracket_merge, bracket_rekey, build_bracket_plan, build_entry_plan, build_exit_plan,
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
-    commit_rule_l, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식)
+    commit_rule_l, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
-    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_bracket, run_entry, run_entry_wait, run_exit)
+    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_add_order, place_bracket, run_entry, run_entry_wait, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
@@ -2191,6 +2191,8 @@ SIZING_MARGIN_CAP_PCT = 0.0
 #   이미 무장된 측면의 감시(포지션 사라지면 우리 주문 정리)는 그대로 돈다. 되돌리기 = True(app.js MANUAL_RULES 도 같이).
 # 🔴2026-10-09 사용자 «1번(재생 크기식)으로 배포»: 다시 켬. 증거금 50% 상한은 꺼진 채(자동 모드는 원래 규칙 상한 하나 · 직접 모드는 게이지만).
 MANUAL_RULES_ENABLED = True
+# 2026-10-14 사용자 «−0.75% 물타기 지정가도 자동으로»: 자동 규칙 첫 진입이 체결되면 첫 진입가 ∓0.75% 에 남은 여유 지정가를 건다. 되돌리기 = False.
+REC_AUTO_ADD = True
 # 🔴상한 무시 스위치 (2026-09-20 사용자 지시 «우리 사이징 코드는 잠깐 꺼줘»).
 # 세 상한(원장·순자산·위험모델)을 **전부 건너뛰고** 「순자산 × 이 배수」 하나만 기준으로 쓴다.
 # 🔴상한을 «없애는» 게 아니다. 진입 비율 슬라이더의 100% 가 **상한 명목에 대한 비율**이라
@@ -6340,17 +6342,46 @@ def make_app() -> web.Application:
         if not b.get("available"):
             state["bracket"] = {"placed": False, "reason": b.get("reason") or "청산맵 레벨 없음"}
             return
+        if REC_AUTO_ADD and (plan.get("rule") or {}).get("first"):
+            state["add_order"] = {"placed": False, "pending": True}   # 화면 폴링이 물타기 지정가 결과까지 기다리게(손절 먼저 건 뒤 arm_rule_add)
         try:
             state["bracket"] = await place_bracket(binance_session(), b, plan["symbol"], pside)
         except Exception as exc:  # noqa: BLE001 -- 결과 칸은 반드시 채운다(화면 폴링이 이걸 기다린다)
             state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
+        add = await arm_rule_add(plan, state)
         st = bracket_load()
         st[bracket_key(plan["symbol"], pside)] = {"symbol": plan["symbol"], "side": pside, "sl_price": b.get("sl_price"),
                      "sl_level": b.get("sl_level"),   # 5분봉 종가 판정은 USDT 레벨로(bracket_sl_hit)
                      "tp_price": b.get("tp_price"), "backstop_price": b.get("backstop_price"),
                      "rule": bool(b.get("rule")), "sl_name": b.get("sl_name"),   # 2026-10-09 권고 규칙 손절 = 물타기해도 유지
-                     "armed_at": time.time(), "placed": state["bracket"]}
+                     "armed_at": time.time(), "placed": state["bracket"], "add_order": add}
         bracket_save(st)
+
+    async def arm_rule_add(plan: dict, state: dict) -> dict | None:
+        """2026-10-14 사용자 «−0.75% 물타기 지정가도 자동으로»: 자동 규칙 **첫 진입**이 체결되면(손절을 건 바로 뒤) 첫 진입가 ∓0.75% 에
+        남은 여유를 지정가로 건다. 크기 = 실제 체결 수량으로 다시 잰 rec_rule_add_order(수동 물타기와 같은 손실 한도).
+        지우기 = cancel_bracket(ADD_TAG): 포지션이 닫히면(감시 루프 clear) · 손으로 물타기·새 진입(place_bracket 이 먼저 지운다).
+        ponytail: 포지션을 손으로 닫고 감시 루프가 지우기 전(≤ 계좌 조회 주기) 그 가격에 닿으면 다시 열린다 -- 그때도 «포지션 전량» 손절 스탑이 같이 남아 있다."""
+        r = plan.get("rule") or {}
+        filled = float(state.get("filled") or 0.0)
+        if not (REC_AUTO_ADD and r.get("first") and filled > 0 and (plan.get("bracket") or {}).get("sl_price")):
+            return None
+        if not ((state.get("bracket") or {}).get("backstop") or {}).get("placed"):
+            # 🔴손절 스탑이 안 걸렸으면 크기를 늘리지 않는다 -- 무방비 포지션을 키우는 게 가장 비싼 실패다(시험에서 가짜 place_bracket 이 실패해도 여기서 멈춘다)
+            state["add_order"] = {"placed": False, "reason": "손절 스탑이 안 걸려 물타기 지정가를 걸지 않았습니다"}
+            return state["add_order"]
+        try:
+            spec = rec_rule_add_order(position_side=plan["positionSide"], sl_price=float(plan["bracket"]["sl_price"]),
+                                      stop_pct=float(r["stop_pct"]) / 100.0, l_eff=float(r["l"]), cap_notional=float(r["cap_notional"]),
+                                      room_before=float(r["room"]), filled_qty=filled, order_leverage=float(r.get("lev") or 0.0),
+                                      filters=r.get("filters") or {"tick": 0.01, "step": 0.001})
+            if not spec:
+                state["add_order"] = {"placed": False, "reason": "남은 여유가 없거나 최소 주문보다 작습니다"}
+                return state["add_order"]
+            state["add_order"] = await place_add_order(binance_session(), plan["symbol"], plan["positionSide"], spec["price"], spec["qty"])
+        except Exception as exc:  # noqa: BLE001 -- 진입·손절은 이미 됐다, 결과 칸만 채운다
+            state["add_order"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return state["add_order"]
 
     async def exit_then_switch(plan: dict, state: dict, sw: dict, asset: str) -> None:
         """스위칭(2026-10-10 서버로 옮김): 전량 청산이 **다 닫힌 뒤에만** 반대 진입. 10-10 부터 두 다리 다 시장가(즉시 체결). 진입 계획·게이트·규칙 검사는 진입 버튼과 같은
@@ -6691,7 +6722,15 @@ def make_app() -> web.Application:
                                 "vol_mult": round(float(vm["mult"]), 3), "cap_notional": round(rule["cap_notional"], 2), "first": rule["first"],
                                 "room": round(rule["room"], 2), "target_notional": round(rule["target_notional"], 2),
                                 "loss_at_stop_pct": round(100 * cr["l"] * cr["stop_pct"], 2),   # 손절 시 손실 한도 = L × 3%
-                                "sl_price": plan["bracket"].get("sl_price"), "sl_name": plan["bracket"].get("sl_name")}
+                                "sl_price": plan["bracket"].get("sl_price"), "sl_name": plan["bracket"].get("sl_name"),
+                                # 2026-10-14 자동 물타기 지정가(첫 진입일 때만) -- 체결 뒤 arm_rule_add 가 실제 체결 수량으로 다시 계산해 건다
+                                "lev": float(margin_lev or 0.0),
+                                "filters": {k: float(filters.get(k) or 0.0) for k in ("tick", "step", "min_qty", "min_notional")}}
+                if rule["first"] and REC_AUTO_ADD and plan.get("quantity") and plan["bracket"].get("sl_price"):
+                    plan["rule"]["add"] = rec_rule_add_order(
+                        position_side=side, sl_price=float(plan["bracket"]["sl_price"]), stop_pct=cr["stop_pct"], l_eff=float(cr["l"]),
+                        cap_notional=rule["cap_notional"], room_before=rule["room"], filled_qty=float(plan["quantity"]),
+                        order_leverage=float(margin_lev or 0.0), filters=plan["rule"]["filters"])
             elif same:
                 plan["bracket"] = bracket_keep_farther_sl(
                     plan["bracket"], bracket_load().get(bracket_key(symbol, side)), side)

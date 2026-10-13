@@ -364,6 +364,31 @@ def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, ord
             "fraction": min(1.0, max(1e-9, want / (equity * order_leverage)))}
 
 
+# 🔴2026-10-14 사용자 «−0.75% 물타기 지정가도 자동으로»: 첫 진입이 체결되면 첫 진입가 ∓REC_ADD_DIST 에 남은 여유를 지정가로 미리 건다.
+#   기준가 = 손절선에서 거꾸로 푼 첫 진입가(손절과 같은 기준) · 크기 = 수동 물타기와 같은 rec_rule_size(남은 여유 · 손절 시 손실 L×손절폭 안).
+REC_ADD_DIST = 0.0075
+
+
+def rec_rule_add_order(*, position_side: str, sl_price: float, stop_pct: float, l_eff: float, cap_notional: float,
+                       room_before: float, filled_qty: float, order_leverage: float, filters: dict[str, float]) -> dict | None:
+    """첫 진입 직후 자동 물타기 지정가 {price, qty, notional, anchor}. **순수 함수**. 너무 작거나 여유가 없으면 None.
+    room_before = 첫 진입 **전** 상한 여유(계좌 전체 명목 기준) · filled_qty = 첫 진입 체결 수량."""
+    if not (sl_price > 0 and 0 < stop_pct < 1 and l_eff > 0 and cap_notional > 0 and filled_qty > 0):
+        return None
+    long_side = position_side == "LONG"
+    anchor = sl_price / (1 - stop_pct) if long_side else sl_price / (1 + stop_pct)
+    px = round(_floor_to(anchor * (1 - REC_ADD_DIST), filters["tick"]) if long_side
+               else _ceil_to(anchor * (1 + REC_ADD_DIST), filters["tick"]), 8)
+    sgn = 1.0 if long_side else -1.0
+    r = rec_rule_size(rule_l=l_eff, equity=cap_notional / l_eff, existing_notional=cap_notional - room_before + filled_qty * anchor,
+                      order_leverage=order_leverage, first=False, risk_used=filled_qty * sgn * (anchor - sl_price),
+                      add_stop_frac=sgn * (px - sl_price) / px)
+    qty = round(_floor_to(r["target_notional"] / px, filters["step"]), 8)
+    if qty <= 0 or qty < filters.get("min_qty", 0.0) or qty * px < filters.get("min_notional", 0.0):
+        return None
+    return {"price": px, "qty": qty, "notional": round(qty * px, 2), "anchor": round(anchor, 8)}
+
+
 def rec_rule_bracket(b: dict, *, position_side: str, anchor_price: float, basis: float, stop_pct: float,
                      filters: dict[str, float], prev: dict | None = None, anchor_kind: str = "첫 진입가") -> dict:
     """규칙 손절 = «기준가 ∓stop_pct» 에 거래소 스탑(닿는 즉시 -- 재생과 같은 판정) · 익절 없음(재생에 없다). **순수 함수**.
@@ -942,6 +967,18 @@ def _self_check_rec_rule() -> None:
     fresh = rec_rule_bracket({}, position_side="LONG", anchor_price=2300.0, basis=1.0, stop_pct=RULE_STOP_PCT, filters=f,
                              prev={"sl_price": 2400.0, "backstop_price": 2390.0})                    # 규칙 아닌 이전 SL 은 안 물려받는다
     assert fresh["sl_price"] == 2231.0
+    # 2026-10-14 자동 물타기 지정가: 롱 2,500 첫 진입(상한 9배 × 순자산 2000 = 18000 의 1/3) → 2,481.25 에 남은 2/3(손절 2,425 에서 손실 ≤ 9 × 3% × 2000)
+    f2 = {"tick": 0.01, "step": 0.001, "min_qty": 0.001, "min_notional": 5.0}
+    ad = rec_rule_add_order(position_side="LONG", sl_price=2425.0, stop_pct=0.03, l_eff=9.0, cap_notional=18000.0, room_before=18000.0,
+                            filled_qty=2.4, order_leverage=10, filters=f2)
+    assert ad and ad["price"] == 2481.25 and abs(ad["notional"] - 12000.0) < 3.0, ad
+    loss = 2.4 * (2500 - 2425) + ad["qty"] * (ad["price"] - 2425)
+    assert loss <= 9 * 0.03 * 2000 * (1 + 1e-9), loss
+    sd = rec_rule_add_order(position_side="SHORT", sl_price=2575.0, stop_pct=0.03, l_eff=9.0, cap_notional=18000.0, room_before=18000.0,
+                            filled_qty=2.4, order_leverage=10, filters=f2)
+    assert sd and sd["price"] == 2518.75 and abs(sd["notional"] - 12000.0) < 3.0, sd
+    assert rec_rule_add_order(position_side="LONG", sl_price=2425.0, stop_pct=0.03, l_eff=9.0, cap_notional=18000.0, room_before=6000.0,
+                              filled_qty=2.4, order_leverage=10, filters=f2) is None                  # 다른 포지션이 여유를 다 먹음
     print("자동 규칙 통과 — 재생 ×15.2 크기식(12.4×권장배수·청산 안전 max(3σ,3%)·상한 10) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×3% · 첫 진입가 −3% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 

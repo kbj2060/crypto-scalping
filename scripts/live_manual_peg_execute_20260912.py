@@ -149,6 +149,7 @@ async def ensure_leverage(session, symbol: str, target: int, key: str, secret: s
 #   state 에만 있어 재시작하면 흔적이 없었다. 조건부 주문은 이제 `/fapi/v1/algoOrder` 로만 간다.
 # 우리가 건 주문만 고른다 -- 사용자는 앱에서도 지정가 청산을 건다(09-24 aos_… 실측). 측면 글자까지 붙인다.
 TP_TAG, SL_TAG = "dbtp", "dbsl"
+ADD_TAG = "dbad"   # 2026-10-14 자동 물타기 지정가 -- cancel_bracket 이 TP 와 함께 지운다(포지션 닫힘·손으로 물타기·새 진입)
 
 
 def bracket_tag(tag: str, pside: str) -> str:
@@ -159,14 +160,14 @@ async def cancel_bracket(session, symbol: str, pside: str, key: str, secret: str
                          offset: int) -> dict:
     """이 측면에 **우리가 건** TP 지정가와 비상 스탑을 지운다. 목록을 못 읽으면 그 사실을 돌려준다
     (못 지웠는데 «지웠다»로 넘어가면 닫힌 포지션 위에 주문이 남는다)."""
-    tp_pre, sl_pre = bracket_tag(TP_TAG, pside), bracket_tag(SL_TAG, pside)
+    tp_pre, sl_pre, add_pre = bracket_tag(TP_TAG, pside), bracket_tag(SL_TAG, pside), bracket_tag(ADD_TAG, pside)
     n, errors = 0, []
     opens = await signed(session, "GET", "/fapi/v1/openOrders", {"symbol": symbol},
                          key, secret, offset)
     if not isinstance(opens, list):
         errors.append(f"openOrders: {opens.get('__error__') if isinstance(opens, dict) else opens}")
     for o in opens if isinstance(opens, list) else []:
-        if str(o.get("clientOrderId") or "").startswith(tp_pre):
+        if str(o.get("clientOrderId") or "").startswith((tp_pre, add_pre)):
             r = await signed(session, "DELETE", "/fapi/v1/order",
                              {"symbol": symbol, "orderId": o.get("orderId")}, key, secret, offset)
             n, errors = (n + 1, errors) if "__error__" not in r else (n, errors + [r["__error__"]])
@@ -188,6 +189,20 @@ async def clear_bracket(session, symbol: str, pside: str) -> dict:
     if not (key and secret):
         return {"cancelled": 0, "errors": ["API 키가 없습니다"]}
     return await cancel_bracket(session, symbol, pside, key, secret, await _clock_offset(session))
+
+
+async def place_add_order(session, symbol: str, pside: str, price: float, qty: float) -> dict:
+    """자동 물타기 지정가(2026-10-14). GTC -- 이미 그 아래로 내려가 있으면 그 자리에서 체결(테이커)되는 게 «−0.75% 에 산다»의 뜻에 맞다.
+    🔴실패해도 진입·손절은 그대로(결과를 돌려 화면이 말한다). 지우기는 cancel_bracket(ADD_TAG)."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        return {"placed": False, "reason": "API 키가 없습니다"}
+    r = await signed(session, "POST", "/fapi/v1/order",
+                     {"symbol": symbol, "side": "BUY" if pside == "LONG" else "SELL", "positionSide": pside,
+                      "type": "LIMIT", "timeInForce": "GTC", "price": price, "quantity": qty,
+                      "newClientOrderId": f"{bracket_tag(ADD_TAG, pside)}{int(time.time() * 1000)}"},
+                     key, secret, await _clock_offset(session))
+    return {"placed": "__error__" not in r, "price": price, "qty": qty, "order_id": r.get("orderId"), "error": r.get("__error__")}
 
 
 async def place_bracket(session, bracket: dict, symbol: str, pside: str) -> dict:
