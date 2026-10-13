@@ -2,7 +2,7 @@
 
 규칙(2026-10-11 «×15.2 + −3% 스톱»): 왕복 최대 명목 = 순자산 × L, L = min(12.4 × 권장배수, 청산 안전, 10) · 첫 진입 = 그 1/3(10-14, 옛 75%) ·
 물타기 = 남은 여유(손절 시 손실 L×3% 안) · 손절 = 첫 진입가 ∓3% 거래소 스탑(물타기해도 유지) · 익절 없음 · SL/TP 체크를 꺼도 건다 ·
-rule=c 밖이면 400 · 변동성 없거나 15분 묵으면 503 · ETH 만. 심는 값: 권장배수 0.5 · σ24 250bp → L = 12.435 × 0.5 = 6.218(노출 맞춤).
+rule=c 밖이면 400 · 변동성 없거나 15분 묵으면 503 · ETH 만. 심는 값: 권장배수 0.45 · σ24 250bp → L = 12.435 × 0.45 = 5.596(노출 맞춤 · 10-14 상한 6 아래).
 네트워크·계좌는 test_manual_entry_preview_smoke 의 격리 틀(_isolated_dirs: 바이낸스 GET 가짜 응답)을 쓰고,
 run_entry·place_bracket 은 갈아끼워 주문 경로가 절대 바깥으로 못 나가게 한다.
 실행: python -m pytest -q test/test_rec_rule_entry_20261009.py
@@ -29,8 +29,8 @@ from scripts.live_manual_peg_entry_20260912 import REC_FIRST_SHARE  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 
 SYM = server.MANUAL_EXEC_SYMBOLS["eth"]
-L = 4 * 0.303 * 10.26 * 0.5          # 2026-10-11 재생 식 복원: 12.435 × 권장배수 0.5 = 6.218(청산 안전 10.6·상한 10 이 안 묶음)
-VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.5}
+L = 4 * 0.303 * 10.26 * 0.45         # 12.435 × 권장배수 0.45 = 5.596(청산 안전 10.6·상한 6 이 안 묶음 -- 10-14 상한 10→6)
+VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.45}   # 10-14 상한 6 아래(5.596)로 -- «노출 맞춤» 경로를 그대로 시험
 
 
 def account(positions: list[dict], equity: float = 1000.0) -> dict:

@@ -8843,7 +8843,7 @@ const REC_FIRST_SHARE = 1 / 3;    // = live_manual_peg_entry.REC_FIRST_SHARE -- 
 function commitRuleL(side, sigmaBp4h, vm) {
   const sd = Math.max(3 * sigmaBp4h * Math.sqrt(6) / 1e4, RULE_STOP_PCT);   // 청산 안전용 거리
   const den = side === "LONG" ? 1 - 0.98 * (1 - sd) * 0.995 / (1 - 0.0066) : 1.02 * (1 + sd) * 1.005 / 1.0066 - 1;
-  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, 10), sd: RULE_STOP_PCT };
+  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, 6), sd: RULE_STOP_PCT };   // 상한 6 = live_manual_peg_entry.COMMIT_CAP_X(10-14, 옛 10)
 }
 // «손절 시 순자산 −X%» = 지금 L × 3%(두 방향 중 큰 쪽) -- 권장 배수가 없으면 손절 거리만
 function ruleRiskText() {

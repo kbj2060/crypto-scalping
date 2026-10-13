@@ -25,8 +25,8 @@ from scripts.live_manual_peg_entry_20260912 import REC_ADD_DIST, REC_FIRST_SHARE
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 
 SYM = server.MANUAL_EXEC_SYMBOLS["eth"]
-L = 4 * 0.303 * 10.26 * 0.5          # 12.435 × 권장배수 0.5 = 6.218
-VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.5}
+L = 4 * 0.303 * 10.26 * 0.45         # 12.435 × 권장배수 0.45 = 5.596(청산 안전 10.6·상한 6 이 안 묶음 -- 10-14 상한 10→6)
+VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.45}   # 10-14 상한 6 아래(5.596)로 -- «노출 맞춤» 경로를 그대로 시험
 ACCT = {"ok": True, "balance": {"margin": 1000.0, "initial_margin": 0.0, "available": 1000.0, "unrealized": 0.0},
         "positions": [], "leverage_by_symbol": {SYM: 20.0}, "trips": []}
 

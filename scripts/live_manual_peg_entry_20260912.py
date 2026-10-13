@@ -316,7 +316,7 @@ def bracket_keep_farther_sl(new: dict, prev: dict | None, position_side: str) ->
 #   청산가가 −3% 손절선보다 0.5% 바깥이어야 한다(기존 계약). 손절 시 손실 한도 = 그 진입의 L × 3%(물타기 상한, rec_rule_size).
 RULE_STOP_PCT = 0.03
 COMMIT_UNIT_X = 4 * 0.303 * 10.26
-COMMIT_CAP_X = 10.0
+COMMIT_CAP_X = 6.0   # 🔴2026-10-14 사용자 «상한 6배로»: 10 → 6. 실원장 168왕복 재생(첫 1/3→−0.75% 2/3·손절 −3%) -- 복리 ×1.64→×1.57 · MDD −51→−36% · 손절 1회 −23→−15% · 하위 5% ×0.38→×0.60
 COMMIT_MMR, COMMIT_AVG_OFF, COMMIT_LIQ_BUF, COMMIT_STOP_SIG = 0.02, 0.0066, 0.005, 3.0
 REC_FIRST_SHARE = 1 / 3   # 🔴2026-10-14 사용자 «첫 1/3 → −0.75%에 2/3»: 0.75 → 1/3. 실원장 168왕복 재생(상한 9배·손절 −3%) -- 손절 1회 25.1→22.9%·MDD −70→−62%, 기대값 차 CI 0 포함(scratchpad split_entry.py)
 # 🔴2026-10-13 사용자 «레버리지 20배 → 10배»: 거래소 레버리지 X 에서 계좌 명목 L × 순자산을 열려면 증거금 L/X × 순자산이 든다.
@@ -942,11 +942,12 @@ def _self_check_rec_rule() -> None:
                           filters=f, existing_notional=4000.0, equity=2000.0, fraction=r3["fraction"], fraction_of_equity=True, order_leverage=20)
     assert p3["blocked"], p3                                                                      # 상한이 찼으면 막는다
     # 2026-10-13 레버리지 10배: 실효 L = 0.9 × 10 = 9 -- 다 채워도 증거금 90%(거래소 거부 없음) · 20배면 그대로
-    r10 = rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=0.0, order_leverage=10)
-    assert r10["l_eff"] == 9.0 and r10["cap_notional"] == 18000.0 and abs(r10["target_notional"] - REC_FIRST_SHARE * 18000.0) < 1e-6
-    full = rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=13500.0, order_leverage=10)
-    assert full["target_notional"] + 13500.0 <= 0.9 * 10 * 2000.0 + 1e-6 and full["fraction"] <= 0.9
-    assert rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=0.0, order_leverage=20)["l_eff"] == 10.0
+    # 10-14 상한 6: 레버리지 5배면 실효 L = 0.9 × 5 = 4.5 가 묶는다(증거금 90%) · 10배면 상한 6 그대로
+    r10 = rec_rule_size(rule_l=6.0, equity=2000.0, existing_notional=0.0, order_leverage=5)
+    assert r10["l_eff"] == 4.5 and r10["cap_notional"] == 9000.0 and abs(r10["target_notional"] - REC_FIRST_SHARE * 9000.0) < 1e-6
+    full = rec_rule_size(rule_l=6.0, equity=2000.0, existing_notional=6750.0, order_leverage=5)
+    assert full["target_notional"] + 6750.0 <= 0.9 * 5 * 2000.0 + 1e-6 and full["fraction"] <= 0.9
+    assert rec_rule_size(rule_l=6.0, equity=2000.0, existing_notional=0.0, order_leverage=10)["l_eff"] == 6.0
     z0 = rec_rule_size(rule_l=6.0, equity=0.0, existing_notional=0.0, order_leverage=10)   # 잔고 조회 실패(순자산 0) -- 조기 반환도 l_eff 를 싣는다
     assert z0["l_eff"] == 6.0 and z0["cap_notional"] == 0.0
     for bad in (0.0, -1.0, 10.5):
@@ -967,19 +968,19 @@ def _self_check_rec_rule() -> None:
     fresh = rec_rule_bracket({}, position_side="LONG", anchor_price=2300.0, basis=1.0, stop_pct=RULE_STOP_PCT, filters=f,
                              prev={"sl_price": 2400.0, "backstop_price": 2390.0})                    # 규칙 아닌 이전 SL 은 안 물려받는다
     assert fresh["sl_price"] == 2231.0
-    # 2026-10-14 자동 물타기 지정가: 롱 2,500 첫 진입(상한 9배 × 순자산 2000 = 18000 의 1/3) → 2,481.25 에 남은 2/3(손절 2,425 에서 손실 ≤ 9 × 3% × 2000)
+    # 2026-10-14 자동 물타기 지정가: 롱 2,500 첫 진입(상한 6배 × 순자산 2000 = 12000 의 1/3) → 2,481.25 에 남은 2/3(손절 2,425 에서 손실 ≤ 6 × 3% × 2000)
     f2 = {"tick": 0.01, "step": 0.001, "min_qty": 0.001, "min_notional": 5.0}
-    ad = rec_rule_add_order(position_side="LONG", sl_price=2425.0, stop_pct=0.03, l_eff=9.0, cap_notional=18000.0, room_before=18000.0,
-                            filled_qty=2.4, order_leverage=10, filters=f2)
-    assert ad and ad["price"] == 2481.25 and abs(ad["notional"] - 12000.0) < 3.0, ad
-    loss = 2.4 * (2500 - 2425) + ad["qty"] * (ad["price"] - 2425)
-    assert loss <= 9 * 0.03 * 2000 * (1 + 1e-9), loss
-    sd = rec_rule_add_order(position_side="SHORT", sl_price=2575.0, stop_pct=0.03, l_eff=9.0, cap_notional=18000.0, room_before=18000.0,
-                            filled_qty=2.4, order_leverage=10, filters=f2)
-    assert sd and sd["price"] == 2518.75 and abs(sd["notional"] - 12000.0) < 3.0, sd
-    assert rec_rule_add_order(position_side="LONG", sl_price=2425.0, stop_pct=0.03, l_eff=9.0, cap_notional=18000.0, room_before=6000.0,
-                              filled_qty=2.4, order_leverage=10, filters=f2) is None                  # 다른 포지션이 여유를 다 먹음
-    print("자동 규칙 통과 — 재생 ×15.2 크기식(12.4×권장배수·청산 안전 max(3σ,3%)·상한 10) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×3% · 첫 진입가 −3% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
+    ad = rec_rule_add_order(position_side="LONG", sl_price=2425.0, stop_pct=0.03, l_eff=6.0, cap_notional=12000.0, room_before=12000.0,
+                            filled_qty=1.6, order_leverage=10, filters=f2)
+    assert ad and ad["price"] == 2481.25 and abs(ad["notional"] - 8000.0) < 3.0, ad
+    loss = 1.6 * (2500 - 2425) + ad["qty"] * (ad["price"] - 2425)
+    assert loss <= 6 * 0.03 * 2000 * (1 + 1e-9), loss
+    sd = rec_rule_add_order(position_side="SHORT", sl_price=2575.0, stop_pct=0.03, l_eff=6.0, cap_notional=12000.0, room_before=12000.0,
+                            filled_qty=1.6, order_leverage=10, filters=f2)
+    assert sd and sd["price"] == 2518.75 and abs(sd["notional"] - 8000.0) < 3.0, sd
+    assert rec_rule_add_order(position_side="LONG", sl_price=2425.0, stop_pct=0.03, l_eff=6.0, cap_notional=12000.0, room_before=4000.0,
+                              filled_qty=1.6, order_leverage=10, filters=f2) is None                  # 다른 포지션이 여유를 다 먹음
+    print("자동 규칙 통과 — 재생 ×15.2 크기식(12.4×권장배수·청산 안전 max(3σ,3%)·상한 6) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×3% · 첫 진입가 −3% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 
 if __name__ == "__main__":
