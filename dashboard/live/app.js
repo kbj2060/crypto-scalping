@@ -2966,6 +2966,12 @@ async function refreshTreasury() {
   renderFpStrip();
 }
 const TREASURY_NM = { ZT: "2년", ZF: "5년", ZN: "10년", ZB: "30년" };
+function treasury1h(k) {   // 마지막 가격 · 1시간 변화율(%) -- 머리 띠와 같은 계산. 없으면 null
+  const v = latestTreasury && latestTreasury.ok ? (latestTreasury.symbols || {})[k] : null, b = v ? v.bars : [];
+  if (!b || b.length < 2) return null;
+  const last = b[b.length - 1], h1 = b.find((x) => x[0] >= last[0] - 3600) || b[0];
+  return { last: last[1], chg1: (last[1] / h1[1] - 1) * 100 };
+}
 // 최소 호가 단위(CME: ZT 1/256 · ZF 1/128 · ZN 1/64 · ZB 1/32). 1시간 차트의 세로 폭이 4틱보다 좁아지지 않게 -- 꽉 맞추면 1틱 흔들림도 급락처럼 보인다.
 const TREASURY_TICK = { ZT: 1 / 256, ZF: 1 / 128, ZN: 1 / 64, ZB: 1 / 32 };
 // 2026-10-06(3) 띠 = 금리 4종만, 전폭(사용자 «뉴스는 ⑤ 로 옮기고 그 자리를 국채선물로 가득») · 차트 아래 마지막 봉 시각.
@@ -2975,7 +2981,8 @@ function renderFpStrip() {
   const box = el("fpStrip");
   if (!box) return;
   const T = latestTreasury && latestTreasury.ok ? latestTreasury.symbols : null;
-  if (!T) { box.hidden = true; return; }
+  // 2026-10-13 시안(아티팩트 댓글 «금리도 5년 10년 것만 아래 4개 판에»): 넓은 화면 금리는 시장 맥락 한 줄의 ⑥ 금리로 옮겼다 -- 머리 띠는 끈다
+  if (!T || el("mcBody")?.classList.contains("mc-cmp")) { box.hidden = true; return; }
   box.hidden = false;
   const hm = (ts) => { const d = new Date(ts * 1000), today = new Date().toDateString() === d.toDateString();
     return (today ? "" : `${d.getMonth() + 1}-${d.getDate()} `) + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
@@ -4444,6 +4451,7 @@ const MC_TIPS = {
 MC_TIPS.q_lev = MC_TIPS.lev + "\n\n" + MC_TIPS.ls;
 MC_TIPS.q_flow = MC_TIPS.flow + "\n\n" + MC_TIPS.quad;
 MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
+MC_TIPS.q_rate = "미 국채선물 5년(ZF)·10년(ZN) 최근 1시간 가격 변화. 가격↓ = 금리↑. CME 무료 시세라 약 10분 늦다(매분 수집).\n«오늘 금리 흐름»을 보는 지도이고 매매 신호로 검정하지 않았다. 2년·30년·1시간 그림은 2026-10-13 판에서 뺐다(사용자 «5년 10년 것만»).";
 MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위치(VWAP·%B·RSI) 줄 제거 -- 설명도 벽만
 MC_TIPS.q_news = "뉴스 기울기 = 최근 1시간 관련 기사(관련성 0.5 이상)의 호재·중립·악재 몫, 기사마다 영향×관련성으로 가중(뉴스 카드와 같은 계산).\n"
   + "코인별 = 12시간 안 그 코인·매크로 관련 기사의 호재·중립·악재 건수.\n판정은 jevk5:4b 모델(검증 전) — 방향 신호로 쓰지 않는다. 기사 목록은 뉴스 카드.";
@@ -4717,7 +4725,7 @@ function mcPlace(svg, r, wr) {
   }
   // 🔴cssText 로 통째로 쓰면 renderMarketCtx 가 못 박은 gridTemplateColumns 가 지워진다 -- 위치 네 값만 쓴다
   Object.entries(pos).forEach(([k, v]) => { if (body.style[k] !== v) body.style[k] = v; });
-  if (body.classList.contains("mc-cmp") !== !!r) { body.classList.toggle("mc-cmp", !!r); body._mcHtml = null; renderMarketCtx(); }
+  if (body.classList.contains("mc-cmp") !== !!r) { body.classList.toggle("mc-cmp", !!r); body._mcHtml = null; renderMarketCtx(); renderFpStrip(); }   // 10-13 넓은 화면이면 머리 띠(금리)를 끈다
 }
 
 function renderMarketCtx() {
@@ -4882,6 +4890,10 @@ function renderMarketCtx() {
       + tile("q_news", "⑤ 뉴스", chip("", np ? `1시간 ${nx.length}건` : "뉴스 대기"),
           kv("호재", String(nc("bullish")), "mc-good") + kv("악재", String(nc("bearish")), "mc-bad")
           + kv("ETH 12시간", ethN ? `${ethN.n}건` : "-"))
+      + tile("q_rate", "⑥ 금리 · 1시간", chip("", "CME · 10분 지연"),
+          ["ZF", "ZN"].map((k) => { const r = treasury1h(k);
+            return kv(TREASURY_NM[k], r ? `${r.chg1 <= 0 ? "↑" : "↓"} ${Math.abs(r.chg1).toFixed(2)}%` : "-",   // 제목이 «금리» -- 화살표 = 금리 방향
+                      "", r ? `${k} ${r.last.toFixed(3)} · 1시간 ${r.chg1 >= 0 ? "+" : "−"}${Math.abs(r.chg1).toFixed(2)}% (가격↓ = 금리↑)` : ""); }).join(""))
       + `</div>`];
   } else htmlB.push(wallHtml0 + newsHtml0);
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)

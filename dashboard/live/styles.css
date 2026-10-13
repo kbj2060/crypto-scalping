@@ -3400,7 +3400,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 
 /* 2026-10-13 시안(아티팩트 댓글 «4개 판을 함축해 가로 1줄 · 나머지 1줄에 체결 버블»): 넓은 화면 시장 맥락 = 요약 한 줄 + 체결 버블 미니.
    판마다 제목 · 상태 칩 · 값 셋. 값 줄은 이름 왼쪽 · 숫자 오른쪽(표 숫자). 미니 차트 높이는 고정 -- 남는 높이는 위 1초 수급이 가져간다(mcNeedH). */
-#mcBody.mc-cmp .mc-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 14px; }
+#mcBody.mc-cmp .mc-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0 12px; }   /* 10-13 ⑥ 금리 추가 → 5칸 */
 #mcBody.mc-cmp .mc-strip .mc-sec { padding: 6px 0 4px; display: block; }
 #mcBody.mc-cmp .mc-strip h4 { margin: 0 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #mcBody.mc-cmp .mc-strip .mc-state { margin: 0 0 5px; min-height: 20px; }
