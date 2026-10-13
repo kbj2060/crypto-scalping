@@ -6523,7 +6523,7 @@ def make_app() -> web.Application:
                                      order_leverage=float(margin_lev or 0.0), first=not same,   # 첫 진입 = 이 방향 포지션 없음
                                      risk_used=q_same * max(0.0, sgn * (anchor - sl)) if same else 0.0,   # 이미 든 몫이 손절에서 잃을 돈
                                      add_stop_frac=sgn * (p_in - sl) / p_in)
-                if rule["l_eff"] < cr["l"]:   # 2026-10-13 레버리지가 L 을 묶음(증거금 90%) -- 화면·손절 손실 한도가 실제 배수를 말하게
+                if rule.get("l_eff", cr["l"]) < cr["l"]:   # 2026-10-13 레버리지가 L 을 묶음(증거금 90%) -- 화면·손절 손실 한도가 실제 배수를 말하게
                     cr = {**cr, "l": rule["l_eff"], "binding": "레버리지 증거금"}
                 cap_notional, who = rule["cap_notional"], "rule"
                 fraction = rule["fraction"]

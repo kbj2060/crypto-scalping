@@ -70,10 +70,11 @@
   // 2026-10-13 시장 맥락 아래 줄 미니(#mcBubble, app.js 가 넓은 화면에서 붙인다) -- 보이면 오버레이가 꺼져 있어도 받는다 · 최근 3분 고정
   function miniCv() { var c = $("mcBubble"); return c && c.offsetParent !== null && c.clientWidth ? c : null; }
   function live() { return S.on || !!miniCv(); }
-  function needFine() { return !S.on || S.back + S.span <= 290; }   // 보는 창이 최근 5분 안(미니는 늘 3분)
-  function poll() {
+  function poll() {   // 래스터: 최근 5분 안을 보면(오버레이) 또는 미니가 보이면 1초 해상도 · 오버레이가 그보다 넓으면 30분판도
     fetchTape();
-    if (needFine()) fetchHeat("fine"); else fetchHeat("coarse");
+    var ovFine = S.back + S.span <= 290;
+    if (!S.on || ovFine || miniCv()) fetchHeat("fine");
+    if (S.on && !ovFine) fetchHeat("coarse");
   }
 
   function draw() {
@@ -96,7 +97,8 @@
     var span = mini ? DEF_SPAN : S.span, back = mini ? 0 : S.back;
     var WIN = span, tEnd = S.end - back, t0 = tEnd - WIN, rows = [], mids = [], lo = Infinity, hi = -Infinity, bk = S.bucket;
     var F = S.fine && !S.fine.none ? S.fine : null, Cc = S.coarse && !S.coarse.none ? S.coarse : null;
-    var M = F && F.t0 <= t0 ? F : Cc || F;                                // 보는 창을 다 덮는 래스터 하나만(해상도 섞으면 이음매가 보인다)
+    var fineOk = F && F.t0 <= t0 && F.t0 + F.cols * F.dt >= tEnd - 10;   // 보는 창 양 끝을 다 덮어야(낡은 1초판이면 오른쪽 끝이 비고 현재가가 묵는다)
+    var M = fineOk ? F : Cc || F;                                        // 보는 창을 다 덮는 래스터 하나만(해상도 섞으면 이음매가 보인다)
     S.rows.forEach(function (r) {
       if (r[0] < t0 || r[0] > tEnd) return;
       var p = r[1] * bk;

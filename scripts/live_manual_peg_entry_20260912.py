@@ -348,7 +348,7 @@ def rec_rule_size(*, rule_l: float, equity: float, existing_notional: float, ord
     if not (0.0 < float(rule_l) <= COMMIT_CAP_X):
         raise ValueError(f"rule_l must be in (0, {COMMIT_CAP_X}], got {rule_l!r}")
     if not (equity > 0 and order_leverage > 0):
-        return {"cap_notional": 0.0, "fraction": 1.0, "first": existing_notional <= 0, "room": 0.0, "target_notional": 0.0}
+        return {"cap_notional": 0.0, "l_eff": float(rule_l), "fraction": 1.0, "first": existing_notional <= 0, "room": 0.0, "target_notional": 0.0}   # l_eff: 서버가 읽는다(없으면 KeyError 502)
     l_eff = min(float(rule_l), RULE_MARGIN_MAX * float(order_leverage))
     cap = l_eff * equity
     # 2026-10-10 검증: «첫 진입» = 이 방향 포지션 없음(호출부가 준다). 계좌 전체 명목(반대 다리·다른 심볼)으로 정하면 숏 $300 만
@@ -922,6 +922,8 @@ def _self_check_rec_rule() -> None:
     full = rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=13500.0, order_leverage=10)
     assert full["target_notional"] + 13500.0 <= 0.9 * 10 * 2000.0 + 1e-6 and full["fraction"] <= 0.9
     assert rec_rule_size(rule_l=10.0, equity=2000.0, existing_notional=0.0, order_leverage=20)["l_eff"] == 10.0
+    z0 = rec_rule_size(rule_l=6.0, equity=0.0, existing_notional=0.0, order_leverage=10)   # 잔고 조회 실패(순자산 0) -- 조기 반환도 l_eff 를 싣는다
+    assert z0["l_eff"] == 6.0 and z0["cap_notional"] == 0.0
     for bad in (0.0, -1.0, 10.5):
         try:
             rec_rule_size(rule_l=bad, equity=2000.0, existing_notional=0.0, order_leverage=20)

@@ -4632,9 +4632,8 @@ function wallDrawerHtml() {   // 2026-10-13 아티팩트 댓글 «라벨 지우�
 }
 
 function renderPaper() {
-  const wall = el("mcWall"), body = el("mcBody");
+  const wall = el("mcWall");   // 2026-10-13 모의 판이 #mcBody 에서 빠져 강제 다시 그리기(_mcHtml = null)는 뺐다 -- renderMarketCtx 가 내용 비교로 바뀜을 잡는다
   if (wall) { const html = wallDrawerHtml(); if (wall._ppm !== html) { wall._ppm = html; keepFocus(wall, () => { wall.innerHTML = html; }); } }
-  if (body) body._mcHtml = null;   // 좁은 화면은 시장 맥락 끝에 같이 그린다 · ②④ 상태 줄도 다시
 }
 
 // 🔴2026-09-30 청산 «급증»은 **쪽마다** 판정한다. 옛 판은 `z>=3 || hawkes_active` 를 롱·숏 막대에 똑같이 걸어
@@ -9311,7 +9310,8 @@ function commitRuleL(side, sigmaBp4h, vm) {
 function ruleRiskText() {
   const v = latestSituation?.vol_mult;
   if (!(v?.mult && v?.sigma_bp)) return `손절 첫 진입가 −${100 * RULE_STOP_PCT}%`;
-  const l = Math.max(...["LONG", "SHORT"].map((s) => commitRuleL(s, Number(v.sigma_bp), Number(v.mult)).l));
+  const lev = Number(manualLevEffective()) || 0;   // 2026-10-13 서버 rec_rule_size 와 같은 상한: 실효 L ≤ 0.9 × 거래소 레버리지
+  const l = Math.max(...["LONG", "SHORT"].map((s) => commitRuleL(s, Number(v.sigma_bp), Number(v.mult)).l).map((x) => (lev > 0 ? Math.min(x, 0.9 * lev) : x)));
   return `손절 시 순자산 −${Math.round(100 * l * RULE_STOP_PCT)}%`;
 }
 function renderRuleBox() {
