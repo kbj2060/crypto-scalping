@@ -4867,33 +4867,55 @@ function renderMarketCtx() {
   // 2026-10-13 시안(아티팩트 댓글 «4개 판을 함축해 가로 1줄 · 나머지 1줄에 체결 버블»): 넓은 화면은 판마다 상태 칩 + 값 셋만 한 줄로,
   //   아래 줄은 체결 버블 미니(bubble_map.js 가 #mcBubble 에 최근 3분을 그린다). 판 설명(?)은 그대로. 자세한 그림은 좁은 화면·이전 판에.
   if (G.cmpW) {
-    const kv = (k, v, cls = "", tip = "") => `<div class="mc-kv"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span><b class="${cls}">${v}</b></div>`;
-    const tile = (key, title, chipHtml, rows) => sec(key, title, `<div class="mc-state">${chipHtml}</div>${rows}`);
+    // 2026-10-13 사용자 «글자 말고 모두 게이지나 그래프로» -- 줄 = 짧은 이름 + 그림, 숫자는 호버(title). 상태 칩(①②④)만 글자로 남긴다.
+    const gw = Math.max(40, Math.floor((G.cmpW - 4 * 12) / 5) - 48);   // 칸 폭 − 이름(44px) − 간격
+    const gk = (k, vis, tip = "") => `<div class="mc-gk"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span>${vis}</div>`;
+    const stack = (parts) => {   // 비율 막대: [[값, 색], …] -- 합 0 이면 빈 막대
+      const tot = parts.reduce((t, [v]) => t + v, 0);
+      let x = 4;
+      return `<svg class="mc-svg" width="${gw}" height="16" viewBox="0 0 ${gw} 16" aria-hidden="true"><rect x="4" y="5" width="${gw - 8}" height="6" rx="3" fill="rgb(var(--lift) / .1)"/>`
+        + (tot ? parts.map(([v, col]) => { const w = (gw - 8) * v / tot, r = `<rect x="${x.toFixed(1)}" y="5" width="${w.toFixed(1)}" height="6" fill="${col}"/>`; x += w; return r; }).join("") : "") + `</svg>`;
+    };
+    const spark = (k) => {   // 국채선물 1시간 1분봉 -- 가격↓ = 금리↑ 이라 금리 오름이면 빨강
+      const v = latestTreasury && latestTreasury.ok ? (latestTreasury.symbols || {})[k] : null, b0 = v ? v.bars : [], r = treasury1h(k);
+      if (!b0 || b0.length < 2 || !r) return mcGfx.pct(null, gw);
+      const t1 = b0[b0.length - 1][0], bb = b0.filter((x) => x[0] >= t1 - 3600), t0 = bb[0][0];
+      const lo0 = Math.min(...bb.map((x) => x[1])), hi0 = Math.max(...bb.map((x) => x[1])), pad = Math.max(0, 4 * (TREASURY_TICK[k] || 0) - (hi0 - lo0)) / 2;
+      const lo = lo0 - pad, rg = (hi0 + pad - lo) || 1e-9, X = (t) => 3 + (t - t0) / Math.max(1, t1 - t0) * (gw - 8), Y = (y) => 2 + (1 - (y - lo) / rg) * 12;
+      const col = Math.abs(r.chg1) < 0.005 ? "var(--muted)" : r.chg1 < 0 ? "var(--bad)" : "var(--good)", last = bb[bb.length - 1];
+      return `<svg class="mc-svg" width="${gw}" height="16" viewBox="0 0 ${gw} 16" aria-hidden="true"><path d="${bb.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)} ${Y(x[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="${col}" stroke-width="1.4" stroke-linejoin="round"/>`
+        + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.2" fill="${col}"/></svg>`;
+    };
+    const tile = (key, title, chipHtml, rows) => sec(key, title, `<div class="mc-state">${chipHtml}</div>` + rows);   // 칩 없는 칸도 같은 줄 높이(그림 줄이 다섯 칸 나란히)
     const duelChip = !PAPER_SIG_OK.duel.has(A) ? chip("", "검정 밖") : !ps ? chip("", "엔진 대기")
       : ps.duel ? chip(ps.duel > 0 ? "good" : "bad", `고래 ${ps.duel > 0 ? "롱" : "숏"} · ${ps.remain}분`, zTip) : chip("", "맞대결 없음", zTip);
     const wallChip = !PAPER_SIG_OK.wall.has(A) ? chip("", "검정 밖") : !ps ? chip("", "엔진 대기") : !ps.dir ? chip("", "벽 신호 없음")
       : ps.chase ? chip("warn", `${ps.dir > 0 ? "매수" : "매도"} · 추격 주의`) : chip(ps.dir > 0 ? "good" : "bad", `${ps.dir > 0 ? "매수" : "매도"} 우세`);
-    const st = (k) => { const v = hsm ? statFrac(k, hsm) : null; return v == null ? "-" : k === "obi" ? `${v > 0 ? "+" : ""}${v.toFixed(2)}` : `${Math.round(v * 100)}%`; };
+    const stv = (k) => (hsm ? statFrac(k, hsm) : null);
     const nx = np ? np.items.filter((it) => it.sentiment && it.ts_ms >= (np.now_ms || Date.now()) - 3600e3 && newsRel(it)) : [];
-    const nc = (k) => nx.filter((it) => it.sentiment === k).length, ethN = np ? newsAssetCounts(np, "ETH") : null;
+    const nc = (k) => nx.filter((it) => it.sentiment === k).length;
+    const tri = (b0, n0, s0) => stack([[b0, "var(--good)"], [n0, "rgb(var(--lift) / .35)"], [s0, "var(--bad)"]]);
+    const asset12 = (a2, nm) => { if (!np) return gk(nm, stack([])); const q = newsAssetCounts(np, a2);
+      return gk(nm, tri(q.b, q.n - q.b - q.s, q.s), `${nm} 12시간 ${q.n}건 · 호재 ${q.b} · 악재 ${q.s}`); };
+    const cvd = fl.cvd30_all_z ?? fl.cvd30_z, obi = stv("obi"), lvp = stv("leave");
     htmlB = [`<div class="mc-strip">`
       + tile("q_lev", "① 레버리지 과열?", levChip.trim(),
-          kv("펀딩 분위", f.bn_at_base ? "기본값" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`, "", `바이낸스 예상 ${fr(f.bn)}`)
-          + kv("베이시스", sg(b.bp, 1, "bp"), "", `7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`)
-          + kv("OI 1시간", sg(OI.z1h, 1, "σ"), tone(OI.z1h, 1.5), `${oiA ? venTxt(oiA.venues) : "바이낸스만"} · 1시간 ${sg(OI.d1h_pct, 2, "%")}`))
+          gk("펀딩", G.pct(f.bn_at_base ? null : f.bn_pct180, gw), f.bn_at_base ? "펀딩 기본값(0.01%)" : `펀딩 분위 ${Math.round((f.bn_pct180 ?? 0) * 100)}% · 바이낸스 예상 ${fr(f.bn)}`)
+          + gk("베이시스", G.pct(b.pct7d, gw), `베이시스 ${sg(b.bp, 1, "bp")} · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`)
+          + gk("OI", G.sig(OI.z1h, gw), `OI 1시간 ${sg(OI.z1h, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d1h_pct, 2, "%")}`))
       + tile("q_flow", "② 누가 밀고 있나", duelChip,
-          (z.whale == null ? kv("크기별", "기준 쌓는 중") : kv("고래", sg(z.whale, 1, "σ"), tone(z.whale)) + kv("리테일", sg(z.retail, 1, "σ"), tone(z.retail)))
-          + kv("30분 CVD", sg(fl.cvd30_all_z ?? fl.cvd30_z, 1, "σ"), tone(fl.cvd30_all_z ?? fl.cvd30_z)))
+          gk("고래", G.sig(z.whale, gw), `고래 ${sg(z.whale, 1, "σ")} · ${flowVen}`) + gk("리테일", G.sig(z.retail, gw), `리테일 ${sg(z.retail, 1, "σ")}`)
+          + gk("CVD", G.sig(cvd, gw), `30분 CVD ${sg(cvd, 1, "σ")}`))
       + tile("q_wall", "④ 벽 · 교차 · 위치", wallChip,
-          kv("깊은 벽", ps && PAPER_SIG_OK.wall.has(A) ? sg(ps.imb, 2) : "-", ps && ps.dir > 0 ? "mc-good" : ps && ps.dir < 0 ? "mc-bad" : "")
-          + kv("불균형", st("obi")) + kv("이탈", st("leave")))
-      + tile("q_news", "⑤ 뉴스", chip("", np ? `1시간 ${nx.length}건` : "뉴스 대기"),
-          kv("호재", String(nc("bullish")), "mc-good") + kv("악재", String(nc("bearish")), "mc-bad")
-          + kv("ETH 12시간", ethN ? `${ethN.n}건` : "-"))
-      + tile("q_rate", "⑥ 금리 · 1시간", chip("", "CME · 10분 지연"),
+          gk("깊은 벽", ps && PAPER_SIG_OK.wall.has(A) ? G.wall(ps.imb, ps.thr, gw) : G.pct(null, gw), ps ? `깊은 벽 ${sg(ps.imb, 2)} · 문턱 ±${ps.thr.toFixed(2)}` : "")
+          + gk("불균형", G.sig(obi == null ? null : obi * 3, gw), obi == null ? "" : `호가 불균형 ${obi > 0 ? "+" : ""}${obi.toFixed(2)}`)
+          + gk("이탈", G.pct(lvp, gw), lvp == null ? "" : `호가 이탈 ${Math.round(lvp * 100)}%`))
+      + tile("q_news", "⑤ 뉴스", "",
+          gk("1시간", tri(nc("bullish"), nc("neutral"), nc("bearish")), `1시간 ${nx.length}건 · 호재 ${nc("bullish")} · 중립 ${nc("neutral")} · 악재 ${nc("bearish")}`)
+          + asset12("ETH", "ETH") + asset12("macro", "매크로"))
+      + tile("q_rate", "⑥ 금리 · 1시간", "",
           ["ZF", "ZN"].map((k) => { const r = treasury1h(k);
-            return kv(TREASURY_NM[k], r ? `${r.chg1 <= 0 ? "↑" : "↓"} ${Math.abs(r.chg1).toFixed(2)}%` : "-",   // 제목이 «금리» -- 화살표 = 금리 방향
-                      "", r ? `${k} ${r.last.toFixed(3)} · 1시간 ${r.chg1 >= 0 ? "+" : "−"}${Math.abs(r.chg1).toFixed(2)}% (가격↓ = 금리↑)` : ""); }).join(""))
+            return gk(TREASURY_NM[k], spark(k), r ? `${k} ${r.last.toFixed(3)} · 1시간 ${r.chg1 >= 0 ? "+" : "−"}${Math.abs(r.chg1).toFixed(2)}% → 금리 ${r.chg1 <= 0 ? "↑" : "↓"} (CME 약 10분 지연)` : ""); }).join(""))
       + `</div>`];
   } else htmlB.push(wallHtml0 + newsHtml0);
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)
