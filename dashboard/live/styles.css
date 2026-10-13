@@ -2829,6 +2829,12 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
 .topbar { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 20px; }
 .topbar > .snap-head { padding: 0; align-items: center; justify-content: flex-end; }   /* 코인 탭이 차트 카드로 가서(09-27) 테마만 남는다 -- 오른쪽 */
 body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
+/* 2026-10-13 아티팩트 댓글 «이걸 중앙배치 · 다크와 알림을 이 자리에»: 넓은 화면은 세션(아시아·유럽·미국)이 가운데, 다크·알림이 오른쪽 끝 */
+@media (min-width: 721px) {
+  .topbar { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .topbar > .top-right { grid-column: 2; grid-row: 1; justify-content: center; }
+  .topbar > .snap-head { grid-column: 3; grid-row: 1; }
+}
 @media (max-width: 720px) {
   /* 2026-09-27 모바일 최적화: 세션과 테마를 한 줄에(전엔 테마 혼자 한 줄). 1줄 = 페이지 탭, 2줄 = 세션 | 테마. */
   .topbar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
