@@ -2708,8 +2708,9 @@ function fitLayout() {
     const cur = plot.getBoundingClientRect().height, want = Math.round(cur + aslack);
     if (want >= 120) {
       fitAcctZ = 1;
-      if (Math.abs(aslack) > 4) { fitAcctPlotH = Math.min(900, want); acct.style.setProperty("--acctplot", `${fitAcctPlotH}px`); }
+      if (Math.abs(aslack) > 4) { fitAcctPlotH = Math.min(900, want); acct.style.setProperty("--acctplot", `${fitAcctPlotH}px`); setTimeout(renderSnapshotAccount, 0); }   // 2026-10-14 곡선은 이 높이로 1:1 로 다시 그린다(안 그러면 다음 계좌 조회까지 칸 가운데에 작게)
     } else {
+      if (fitAcctPlotH !== 120) setTimeout(renderSnapshotAccount, 0);
       fitAcctPlotH = 120; acct.style.setProperty("--acctplot", "120px");
       // 줄인 뒤 **다시 잰다** -- 차트 상자는 120 아래로 안 줄어(축·여백) 계산으로 빼면 모자랐다(1920×960 에서 12px 넘침)
       const ab2 = Math.max(0, ...[...acct.children].filter((k) => k.offsetParent).map((k) => k.getBoundingClientRect().bottom));
