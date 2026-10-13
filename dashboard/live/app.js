@@ -3010,6 +3010,64 @@ function renderFpStrip() {
   if (box._h !== html) { box._h = html; box.innerHTML = html; }
 }
 
+// ── 나스닥100 실시간 (2026-10-14 사용자 «XYZ100 실시간 차트») -- Hyperliquid xyz:XYZ100 무기한(NQ 선물 5분 상관 .98, 지연 없음) ──
+//   서버 /api/xyz100 = 1분봉 종가 24시간 + 마지막 초 가격(수집기 live_xyz100_collector_20261014). 1초마다 꼬리(since)만 받는다.
+//   화면 = 넓은 화면 시장 맥락 «⑥ 나스닥 · 금리 · 1시간» 첫 칸(사용자 시안 A 선택, 10-14).
+//   🔴참고 · 신호 아님 -- 나스닥은 ETH 를 앞서지 않는다(10-13 5분봉: 같은 봉 상관 .40, 앞뒤 1~3봉 ≈0). 쓸모 = «이 움직임이 나스닥과 함께인가».
+let xyzBars = [], xyzLive = null, xyzLastFetchAt = 0, xyzSkew = 0, xyzBusy = false;   // xyzSkew = 서버 시계 − 브라우저 시계(초)
+const xyzClock = () => Date.now() / 1000 + xyzSkew;   // 모든 나이·창 계산은 서버 시계로(브라우저 시계가 틀려도 «끊김»이 맞게)
+async function refreshXyz() {
+  const now = Date.now();
+  if (xyzBusy || now - xyzLastFetchAt < 1000) return;
+  if (!el("mcBody")?.classList.contains("mc-cmp")) return;   // 칸은 넓은 화면 시장 맥락 한 줄에만 있다 -- 좁은 화면·휴대폰은 받지 않는다
+  xyzLastFetchAt = now; xyzBusy = true;   // 응답이 1초 넘게 걸려도 겹치지 않게(늦은 옛 응답이 새 봉을 잘라내지 않게)
+  try {
+    const since = xyzBars.length ? xyzBars[xyzBars.length - 1][0] - 60 : 0;   // 마지막 두 봉(진행 중 봉 + 막 닫힌 봉)부터
+    const res = await fetch(`/api/xyz100${since ? `?since=${since}` : ""}`, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`xyz100 ${res.status}`);
+    const p = await res.json();
+    if (Number.isFinite(p.now_sec)) xyzSkew = p.now_sec - Date.now() / 1000;
+    if (!p.ok) { xyzLive = null; return; }
+    if (p.full || !xyzBars.length) xyzBars = p.bars;
+    else if (p.bars.length) {
+      const t0 = p.bars[0][0], cut = p.bars[p.bars.length - 1][0] - 86400;
+      xyzBars = xyzBars.filter((b) => b[0] < t0 && b[0] >= cut).concat(p.bars);
+    }
+    xyzLive = p.live;
+  } catch (error) {
+    console.error("XYZ100 fetch error:", error);
+  } finally {
+    xyzBusy = false;
+  }
+  // 그리기는 시장 맥락 1초 렌더(refreshMarketCtx)가 한다 -- 여기서 또 부르면 1초에 두 번 통째로 다시 그린다
+}
+function xyzPriceAt(t) {   // 시각 t(초)의 가격 = t 전에 끝난 마지막 1분봉 종가(봉 시작 + 60 ≤ t). 없거나 5분 넘게 묵었으면 null(«1시간»이 몇 시간이 되지 않게)
+  let lo = 0, hi = xyzBars.length - 1, at = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (xyzBars[m][0] + 60 <= t) { at = m; lo = m + 1; } else hi = m - 1; }
+  return at < 0 || t - (xyzBars[at][0] + 60) > 300 ? null : xyzBars[at][1];
+}
+function xyzNow() {   // 지금 가격 -- 초 가격이 30초 넘게 묵었으면(수집기 끊김) null
+  return xyzLive && xyzLive.px && xyzClock() - xyzLive.recv_sec < 30 ? xyzLive.px : null;
+}
+function xyzRet(t0, t1) {   // [t0, t1] 수익률(%) -- t1 이 지금 이후면 초 가격을 끝으로 쓴다(진행 중 봉)
+  const a = xyzPriceAt(t0), b = t1 >= xyzClock() - 1 ? xyzNow() : xyzPriceAt(t1);
+  return a && b ? (b / a - 1) * 100 : null;
+}
+const xyzPct = (v, d = 2) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(d)}%`);
+function xyzSpark(w, h, min = 60) {   // 최근 min 분 1분봉 종가 + 지금 점. 색 = 그 창 등락(작으면 흐림) · 점선 = 창 첫 값
+  const t1 = xyzClock(), bb = xyzBars.filter((b) => b[0] + 60 >= t1 - min * 60 && b[0] + 60 <= t1), live = xyzNow();   // 진행 중 봉 제외(끝이 미래 x 로 튀지 않게)
+  const pts = bb.map((b) => [b[0] + 60, b[1]]).concat(live ? [[t1, live]] : []);
+  if (pts.length < 2) return `<svg class="mc-svg" width="${w}" height="${h}" aria-hidden="true"></svg>`;
+  const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])), rg = (hi - lo) || 1e-9, a = pts[0][0];
+  const X = (t) => 3 + (t - a) / Math.max(1, t1 - a) * (w - 8), Y = (v) => 3 + (1 - (v - lo) / rg) * (h - 6), last = pts[pts.length - 1];
+  const chg = (last[1] / pts[0][1] - 1) * 100, col = Math.abs(chg) < 0.02 ? "var(--muted)" : chg > 0 ? "var(--good)" : "var(--bad)";
+  return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="width:${w}px;height:${h}px" aria-hidden="true"><line x1="3" x2="${w - 3}" y1="${Y(pts[0][1]).toFixed(1)}" y2="${Y(pts[0][1]).toFixed(1)}" stroke="var(--line)" stroke-dasharray="2 3"/>`
+    + `<path d="${pts.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round"/>`
+    + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${col}"/></svg>`;
+}
+const XYZ_TIP = "나스닥100 실시간 — Hyperliquid xyz:XYZ100 무기한(CME 나스닥 선물과 5분 상관 0.98, 지연 없음)\n"
+  + "참고 · 신호 아님: 나스닥은 ETH 보다 먼저 움직이지 않는다 — 같은 5분 안에서 같이 움직인다(요즘 상관 0.4). 주말엔 CME 가 쉬어 거의 안 움직인다.";
+
 function newsAgo(ms, now) {
   const m = Math.max(0, Math.round((now - ms) / 60000));
   return m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ""}`;
@@ -4451,7 +4509,7 @@ const MC_TIPS = {
 MC_TIPS.q_lev = MC_TIPS.lev + "\n\n" + MC_TIPS.ls;
 MC_TIPS.q_flow = MC_TIPS.flow + "\n\n" + MC_TIPS.quad;
 MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
-MC_TIPS.q_rate = "미 국채선물 5년(ZF)·10년(ZN) 최근 1시간 가격 변화. 가격↓ = 금리↑. CME 무료 시세라 약 10분 늦다(매분 수집).\n«오늘 금리 흐름»을 보는 지도이고 매매 신호로 검정하지 않았다. 2년·30년·1시간 그림은 2026-10-13 판에서 뺐다(사용자 «5년 10년 것만»).";
+MC_TIPS.q_rate = "나스닥 = 나스닥100 실시간(Hyperliquid xyz:XYZ100 무기한, CME 나스닥 선물과 5분 상관 0.98, 지연 없음) 최근 1시간 · 값 = 1시간 등락. 나스닥은 ETH 보다 먼저 움직이지 않는다 -- 같은 5분 안에서 같이 움직인다(요즘 상관 0.4, 10-13 연구). 요즘 금리 급변 때 ETH 가 반대로 움직이는 것도 나스닥을 거친 것이다. 주말엔 거의 안 움직인다. 수집기가 끊기면 «끊김».\n미 국채선물 5년(ZF)·10년(ZN) 최근 1시간 가격 변화. 가격↓ = 금리↑. CME 무료 시세라 약 10분 늦다(매분 수집).\n«오늘 금리 흐름»을 보는 지도이고 매매 신호로 검정하지 않았다. 2년·30년·1시간 그림은 2026-10-13 판에서 뺐다(사용자 «5년 10년 것만»).";
 MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위치(VWAP·%B·RSI) 줄 제거 -- 설명도 벽만
 MC_TIPS.q_news = "뉴스 기울기 = 최근 1시간 관련 기사(관련성 0.5 이상)의 호재·중립·악재 몫, 기사마다 영향×관련성으로 가중(뉴스 카드와 같은 계산).\n"
   + "코인별 = 12시간 안 그 코인·매크로 관련 기사의 호재·중립·악재 건수.\n판정은 jevk5:4b 모델(검증 전) — 방향 신호로 쓰지 않는다. 기사 목록은 뉴스 카드.";
@@ -4884,7 +4942,10 @@ function renderMarketCtx() {
     const tri = (b0, n0, s0) => stack([[b0, "var(--good)"], [n0, "rgb(var(--lift) / .35)"], [s0, "var(--bad)"]]);
     const asset12 = (a2, nm) => { if (!np) return gk(nm, stack([])); const q = newsAssetCounts(np, a2);
       return gk(nm, tri(q.b, q.n - q.b - q.s, q.s), `${nm} 12시간 ${q.n}건 · 호재 ${q.b} · 악재 ${q.s}`); };
-    const cvd = fl.cvd30_all_z ?? fl.cvd30_z, rateW = Math.max(80, Math.floor((G.cmpW - 12) / 2) - 48);
+    const cvd = fl.cvd30_all_z ?? fl.cvd30_z, cellW = Math.floor((G.cmpW - 24) / 3), rateW = Math.max(50, cellW - 48);   // 2026-10-14 세 칸(나스닥 · 5년 · 10년, 사용자 시안 A)
+    const nqCell = () => { const t = xyzClock(), r1 = xyzRet(t - 3600, t), px = xyzNow();   // 나스닥 실시간 1시간
+      return gk("나스닥", xyzSpark(Math.max(40, cellW - 106), 26), `${XYZ_TIP}\n지금 ${px ? px.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "끊김"} · 1시간 ${xyzPct(r1)}`,
+                px ? xyzPct(r1) : "끊김", r1 == null ? "" : r1 >= 0 ? "mc-good" : "mc-bad"); };
     htmlB = [`<div class="mc-strip">`
       + tile("q_lev", "① 레버리지 과열?", levChip.trim(),
           gk("펀딩", G.pct(f.bn_at_base ? null : f.bn_pct180, gv), f.bn_at_base ? "펀딩 기본값(0.01%)" : `펀딩 분위 ${Math.round((f.bn_pct180 ?? 0) * 100)}% · 바이낸스 예상 ${fr(f.bn)}`,
@@ -4906,7 +4967,7 @@ function renderMarketCtx() {
           gk("1시간", tri(nc("bullish"), nc("neutral"), nc("bearish")), `1시간 ${nx.length}건 · 호재 ${nc("bullish")} · 중립 ${nc("neutral")} · 악재 ${nc("bearish")}`)
           + asset12("ETH", "ETH") + asset12("BTC", "BTC") + asset12("macro", "매크로"))
       + `</div>`
-      + sec("q_rate", "⑥ 금리 · 1시간", `<div class="mc-rate-g">` + ["ZF", "ZN"].map((k) => { const r = treasury1h(k);
+      + sec("q_rate", "⑥ 나스닥 · 금리 · 1시간", `<div class="mc-rate-g n3">` + nqCell() + ["ZF", "ZN"].map((k) => { const r = treasury1h(k);
           return gk(`${TREASURY_NM[k]}`, spark(k, rateW, 26), r ? `${k} ${r.last.toFixed(3)} · 1시간 ${r.chg1 >= 0 ? "+" : "−"}${Math.abs(r.chg1).toFixed(2)}% → 금리 ${r.chg1 <= 0 ? "↑" : "↓"} (CME 약 10분 지연)` : ""); }).join("") + `</div>`).replace('class="mc-sec"', 'class="mc-sec mc-rate"')];
   } else htmlB.push(wallHtml0 + newsHtml0);
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)
@@ -8438,6 +8499,7 @@ async function tick() {
       refreshMacroCalendar();
       refreshNews();                 // 2026-10-05 뉴스 카드 (자체 30초 게이트)
       refreshTreasury();             // 2026-10-06 풋프린트 머리 띠 국채선물 (자체 60초 게이트)
+      refreshXyz();                  // 2026-10-14 나스닥100 실시간(XYZ100, 자체 1초 게이트)
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)

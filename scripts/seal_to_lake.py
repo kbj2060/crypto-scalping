@@ -56,6 +56,9 @@ HOT_PRUNE = (
     (ROOT / "data/hot/bybit_tape.sqlite", "trade_tape_1s", "ts_sec", "symbol", "bybit", "tape", _bn_coin, HOT_KEEP_DAYS),   # 2026-10-06
     *[(ROOT / "data/hot/bybit_ctx.sqlite", f"bybit_{t}", "ts_ms / 1000", "inst", "bybit", t, _bn_coin, 8) for t in ("oi", "mark", "funding")],
     (ROOT / "data/hot/treasury_futures.sqlite", "treasury_fut_1m", "ts_sec", "symbol", "cme", "treasury_fut_1m", str, 8),   # 2026-10-06
+    # 2026-10-14 나스닥100 무기한(live_xyz100_collector_20261014) -- coin «xyz:XYZ100» 의 «:» 는 lake 경로에서 «_» (SPECS 와 같은 변환)
+    *[(ROOT / "data/hot/hl_xyz.sqlite", t, ts, "coin", "hl", st, lambda c: c.replace(":", "_"), 8)
+      for t, ts, st in (("hl_xyz_1m", "ts_sec", "xyz_1m"), ("hl_xyz_ctx_1s", "recv_sec", "xyz_ctx_1s"))],
     *[(ROOT / BN_CTX_REL, t, "ts_ms / 1000", "symbol", "binance", st, _bn_coin, 8)
       for t, st in (("oi_1s", "oi_1s"), ("mark_price_1s", "mark_1s"), ("liquidations", "liquidations"))],
 )
@@ -98,6 +101,9 @@ SPECS = [
     *[("bybit", s, [("data/hot/bybit_ctx.sqlite", f"bybit_{s}", SYM.replace("symbol", "inst"))], "ts_ms") for s in ("oi", "mark", "funding")],
     # 2026-10-06 미 국채선물 1분봉(live_treasury_futures_collector_20261006, Yahoo · symbol = ZT·ZF·ZN·ZB). polls 는 딸린 표라 lake 로 안 간다
     ("cme", "treasury_fut_1m", [("data/hot/treasury_futures.sqlite", "treasury_fut_1m", "symbol")], "ts_sec * 1000"),
+    # 2026-10-14 나스닥100 무기한 1분봉·초당 가격(live_xyz100_collector_20261014). ctx 의 시각은 받은 시각(recv_sec)
+    ("hl", "xyz_1m", [("data/hot/hl_xyz.sqlite", "hl_xyz_1m", "replace(coin, ':', '_')")], "ts_sec * 1000"),
+    ("hl", "xyz_ctx_1s", [("data/hot/hl_xyz.sqlite", "hl_xyz_ctx_1s", "replace(coin, ':', '_')")], "recv_sec * 1000"),
     ("hl", "positions", [("data/hot/hl_positions.sqlite", "hl_positions", "coin"),
                          ("data/hot/hl_positions_sol_xrp.sqlite", "hl_positions", "coin"),     # 2026-10-06 SOL·XRP 서버 hot
                          (f"{L}/hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb", "hl_positions", "coin")], "ts_ms"),

@@ -918,6 +918,31 @@ def treasury_payload(db: Path = TREASURY_DB, hours: float = 12.0, show_h: float 
     return {"ok": bool(out), "symbols": out}
 
 
+XYZ_DB = REPO_ROOT / "data" / "hot" / "hl_xyz.sqlite"   # 2026-10-14 나스닥100 무기한 수집기(live_xyz100_collector_20261014, 상주 웹소켓)
+XYZ_COIN = "xyz:XYZ100"
+
+
+def xyz100_payload(since: int = 0, db: Path = XYZ_DB, hours: float = 24.0) -> dict:
+    """Hyperliquid xyz:XYZ100(나스닥100 추종 무기한, 지연 없음) 1분봉 종가 + 마지막 초 가격 -- 2026-10-14 사용자 «XYZ100 실시간 차트».
+    bars = [[1분봉 시작 초, 종가]] -- 마지막 저장 봉 기준 hours 시간, since(초)가 있으면 그 봉부터만(화면이 1초마다 꼬리만 받는다).
+    live = 수집기가 받은 마지막 activeAssetCtx(mid 우선 · recv_sec = 받은 시각). 없거나 실패면 ok False."""
+    try:
+        rows = _read_only_rows(db, """SELECT ts_sec, close FROM hl_xyz_1m WHERE coin = ? AND close IS NOT NULL
+                                      AND ts_sec >= max(?, (SELECT max(ts_sec) FROM hl_xyz_1m WHERE coin = ?) - ?) ORDER BY ts_sec""",
+                               [XYZ_COIN, int(since), XYZ_COIN, int(hours * 3600)])
+        live = _read_only_rows(db, "SELECT recv_sec, mid, mark, oracle FROM hl_xyz_ctx_1s WHERE coin = ? ORDER BY recv_sec DESC LIMIT 1",
+                               [XYZ_COIN])
+    except (duckdb.Error, sqlite3.Error, OSError, OverflowError):
+        return {"ok": False, "bars": [], "live": None, "now_sec": int(time.time())}
+    lv = None
+    if live:
+        t, mid, mark, ora = live[0]
+        px = mid if mid is not None else mark
+        lv = {"recv_sec": int(t), "px": None if px is None else float(px), "oracle": None if ora is None else float(ora)}
+    return {"ok": bool(rows or lv), "coin": XYZ_COIN, "full": not since, "bars": [[int(t), float(c)] for t, c in rows], "live": lv,
+            "now_sec": int(time.time())}   # 화면이 «끊김»·1시간 창을 서버 시계로 잰다(브라우저 시계가 틀려도, 10-14 검토)
+
+
 def news_payload(now: float, db: Path = NEWS_DB) -> dict:
     """최근 12시간 뉴스 + 판정(판정 없는 기사도 «판정 대기»로 포함). 경로는 수집기 모듈을 import 하지 않고 여기 적는다 --
     import 하면 수집기를 고칠 때마다 배포 워처가 대시보드를 재시작한다. 🔴판정은 검증 전(화면 «신호 아님»).
@@ -3830,6 +3855,15 @@ def make_app() -> web.Application:
 
     async def api_treasury_futures(request: web.Request) -> web.Response:   # 2026-10-06 풋프린트 카드 머리 띠(국채선물 4종)
         payload = await swr_cached("treasury", 60.0, lambda: asyncio.to_thread(treasury_payload), max_stale=600.0)
+        return web.json_response(payload, headers=NOCACHE)
+
+    async def api_xyz100(request: web.Request) -> web.Response:   # 2026-10-14 나스닥100 실시간(Hyperliquid xyz:XYZ100) -- 화면이 1초마다 꼬리(since)만 묻는다
+        try:
+            since = min(max(0, int(request.query.get("since") or 0)), 2**40)   # 엉터리 큰 값이 SQLite OverflowError(500) 를 내지 않게
+        except ValueError:
+            since = 0
+        payload = await (asyncio.to_thread(xyz100_payload, since) if since
+                         else swr_cached("xyz100", 5.0, lambda: asyncio.to_thread(xyz100_payload), max_stale=60.0))
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_notify_center(request: web.Request) -> web.Response:
@@ -7206,6 +7240,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/notify-center", api_notify_center)
     app.router.add_get("/api/news", api_news)
     app.router.add_get("/api/treasury-futures", api_treasury_futures)
+    app.router.add_get("/api/xyz100", api_xyz100)
     app.router.add_get("/api/paper-arms", api_paper_arms)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)
