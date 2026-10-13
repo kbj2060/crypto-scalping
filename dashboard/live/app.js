@@ -8165,10 +8165,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
                                 fill: one ? "var(--turnover)" : v >= 0 ? "var(--good)" : "var(--bad)", "fill-opacity": one ? 0.55 : 0.85 });
         const tt = document.createElementNS(NS, "title"); tt.textContent = `${nm} ${one ? fmtUsdCompact(v) : sgnQ(v) + " " + coinUnit()} (이 봉)`; rc.append(tt);
       });
-      if (!mobileChart) txt(ml - 6, y0 + LH / 2 + 3, nm === "신규계약" ? "OI" : nm === "거래대금" ? "대금" : nm, { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });   // 왼쪽 여백 ≈30px -- «사분면»과 같은 9px · 긴 이름은 줄임(전체 이름 = 막대·값 호버)
+      const short = nm === "신규계약" ? "OI" : nm === "거래대금" ? "대금" : nm;   // 긴 이름은 줄임(전체 이름 = 막대·값 호버)
+      if (!mobileChart && !wideVal) txt(ml - 6, y0 + LH / 2 + 3, short, { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });   // 왼쪽 여백 ≈30px -- «사분면»과 같은 9px
       const val = rk ? (li >= 0 ? R[li][rk] : null) : (have.length ? have[have.length - 1].turn : null);
       const vs = val == null ? "—" : rk ? sgnQ(val) : fmtUsdCompact(val);
       const vc = !rk ? "var(--turnover)" : val == null ? "var(--muted)" : val >= 0 ? "var(--good)" : "var(--bad)";
+      if (wideVal) txt(ml + cw + 10, y0 + LH / 2 + 4, short, { "font-size": 10, fill: "var(--muted)" });   // 10-14 사용자 «라벨을 값의 왼쪽으로»·«좌우 양끝 정렬» -- 값 칸 왼끝 = 이름, 오른끝 = 값
       const label = mobileChart ? `${nm} ${vs}` : vs;
       if (!wideVal) mk("rect", { x: valX - 3, y: y0 + LH / 2 - (fs + 4) / 2, width: measureTextW(label, `700 ${fs + 1}px sans-serif`) + 10, height: fs + 4, rx: (fs + 4) / 2, fill: "var(--chart-bg)", "fill-opacity": 0.85 });
       const vt = txt(wideVal ? valX : valX + 2, y0 + LH / 2 + 4, label, { "text-anchor": wideVal ? "end" : "start", "font-size": fs + 1, "font-weight": 700, fill: vc, style: "font-variant-numeric: tabular-nums" });
