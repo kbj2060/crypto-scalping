@@ -4853,9 +4853,10 @@ function renderMarketCtx() {
     // 2026-10-13 아티팩트 댓글(정리 3차): 오른쪽 칸 = 1초 수급 → 체결 버블(수급 차트 한 개 높이, renderCandleSvg 가 맞춘다) →
     //   요약 한 줄 ①②④⑤(폭 1 : 1 : 1.6 : 1 -- ④ 는 호가 벽 막대) → 금리 줄(5년·10년 긴 스파크라인, «수급차트와 같은 너비»).
     //   칸마다 그림 줄은 칸 높이에 고르게 펼친다(.mc-rows) -- 줄 수가 달라도 빈 데 없이 찬다. 불균형·이탈은 뺐다(사용자).
-    const unit = (G.cmpW - 3 * 12) / 4.6, gw = Math.max(40, Math.floor(unit) - 48), gwWall = Math.max(60, Math.floor(unit * 1.6) - 48);
-    const gk = (k, vis, tip = "") => `<div class="mc-gk"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span>${vis}</div>`;
-    const stack = (parts, w = gw) => {   // 비율 막대: [[값, 색], …] -- 합 0 이면 빈 막대
+    const unit = (G.cmpW - 3 * 12) / 4.8, gw = Math.max(40, Math.floor(unit * 1.2) - 48), gwWall = Math.max(60, Math.floor(unit * 1.6) - 48), gwNews = Math.max(36, Math.floor(unit * 0.8) - 48);   // 폭 1.2 : 1.2 : 1.6 : 0.8 (값이 붙는 ①② 를 넓게)
+    const gk = (k, vis, tip = "", val = null, cls = "") => `<div class="mc-gk${val == null ? "" : " v"}"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span>${vis}${val == null ? "" : `<b class="${cls}">${val}</b>`}</div>`;   // val = 오른쪽 값(2026-10-13 사용자 «라벨 되돌려»)
+    const gv = Math.max(36, gw - 46);   // 값이 붙는 줄의 그림 폭
+    const stack = (parts, w = gwNews) => {   // 비율 막대: [[값, 색], …] -- 합 0 이면 빈 막대
       const tot = parts.reduce((t, [v]) => t + v, 0);
       let x = 4;
       return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true"><rect x="4" y="5" width="${w - 8}" height="6" rx="3" fill="rgb(var(--lift) / .1)"/>`
@@ -4885,14 +4886,18 @@ function renderMarketCtx() {
     const cvd = fl.cvd30_all_z ?? fl.cvd30_z, rateW = Math.max(80, Math.floor((G.cmpW - 12) / 2) - 48);
     htmlB = [`<div class="mc-strip">`
       + tile("q_lev", "① 레버리지 과열?", levChip.trim(),
-          gk("펀딩", G.pct(f.bn_at_base ? null : f.bn_pct180, gw), f.bn_at_base ? "펀딩 기본값(0.01%)" : `펀딩 분위 ${Math.round((f.bn_pct180 ?? 0) * 100)}% · 바이낸스 예상 ${fr(f.bn)}`)
-          + gk("베이시스", G.pct(b.pct7d, gw), `베이시스 ${sg(b.bp, 1, "bp")} · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`)
-          + gk("OI", G.sig(OI.z1h, gw), `OI 1시간 ${sg(OI.z1h, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d1h_pct, 2, "%")}`))
+          gk("펀딩", G.pct(f.bn_at_base ? null : f.bn_pct180, gv), f.bn_at_base ? "펀딩 기본값(0.01%)" : `펀딩 분위 ${Math.round((f.bn_pct180 ?? 0) * 100)}% · 바이낸스 예상 ${fr(f.bn)}`,
+             f.bn_at_base ? "기본" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`)
+          + gk("베이시스", G.pct(b.pct7d, gv), `베이시스 ${sg(b.bp, 1, "bp")} · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`, sg(b.bp, 1, "bp"))
+          + gk("OI", G.sig(OI.z1h, gv), `OI 1시간 ${sg(OI.z1h, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d1h_pct, 2, "%")}`, sg(OI.z1h, 1, "σ"), tone(OI.z1h, 1.5)))
       + tile("q_flow", "② 누가 밀고 있나", duelChip,
-          gk("고래", G.sig(z.whale, gw), `고래 ${sg(z.whale, 1, "σ")} · ${flowVen}`) + gk("중형", G.sig(z.mid, gw), `중형 ${sg(z.mid, 1, "σ")}`)
-          + gk("리테일", G.sig(z.retail, gw), `리테일 ${sg(z.retail, 1, "σ")}`)
-          + gk("CVD", G.sig(cvd, gw), `30분 CVD ${sg(cvd, 1, "σ")}`)
-          + gk("가격×OI", G.seg4(d.quad ? d.quad.key : null, gw), d.quad ? `${({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-"} · ${d.quad.label} · 1시간 ${sg(d.move60, 0, "bp")}` : "가격×OI 1시간 -"))
+          gk("고래", G.sig(z.whale, gv), `고래 ${sg(z.whale, 1, "σ")} · ${flowVen}`, sg(z.whale, 1, "σ"), tone(z.whale))
+          + gk("중형", G.sig(z.mid, gv), `중형 ${sg(z.mid, 1, "σ")}`, sg(z.mid, 1, "σ"), tone(z.mid))
+          + gk("리테일", G.sig(z.retail, gv), `리테일 ${sg(z.retail, 1, "σ")}`, sg(z.retail, 1, "σ"), tone(z.retail))
+          + gk("CVD", G.sig(cvd, gv), `30분 CVD ${sg(cvd, 1, "σ")}`, sg(cvd, 1, "σ"), tone(cvd))
+          + gk("가격×OI", G.seg4(d.quad ? d.quad.key : null, gv), d.quad ? `${({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-"} · ${d.quad.label} · 1시간 ${sg(d.move60, 0, "bp")}` : "가격×OI 1시간 -",
+               d.quad ? ({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-" : "-",
+               !d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : ""))
       + tile("q_wall", "④ 벽 · 교차 · 위치", wallChip,
           (sw ? G.book(sw, bps, Math.floor(unit * 1.6), Number(d.mid) || 0, (ASSET_CONFIG[A] || {}).dp ?? 2) : "")
           + gk("깊은 벽", ps && PAPER_SIG_OK.wall.has(A) ? G.wall(ps.imb, ps.thr, gwWall) : G.pct(null, gwWall), ps ? `깊은 벽 ${sg(ps.imb, 2)} · 문턱 ±${ps.thr.toFixed(2)}` : ""), " mc-wide-t")

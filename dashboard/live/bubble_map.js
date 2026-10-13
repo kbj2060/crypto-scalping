@@ -10,7 +10,7 @@
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var css = function (n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
-  var MAX = 1800, MIN_SPAN = 20, DEF_SPAN = 180;
+  var MAX = 1800, MIN_SPAN = 20, DEF_SPAN = 180, MINI_SPAN = 90;   // 미니 = 최근 90초(2026-10-13 사용자 «좀 더 확대»)
   var S = { on: false, span: DEF_SPAN, back: 0, asset: "", rows: [], bucket: 0, end: 0, none: false, full: false,
             fine: null, coarse: null, fineT: 0, coarseT: 0, busyT: false, busyF: false, busyC: false, raf: 0, view: null, drag: null, pinch: null };
   var STOPS = [0, 0.2, 0.4, 0.55, 0.68, 0.84, 1];                   // --bbm-h0..6 위치
@@ -94,7 +94,7 @@
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
     if (!mini) S.view = null;
-    var span = mini ? DEF_SPAN : S.span, back = mini ? 0 : S.back;
+    var span = mini ? MINI_SPAN : S.span, back = mini ? 0 : S.back;
     var WIN = span, tEnd = S.end - back, t0 = tEnd - WIN, rows = [], mids = [], lo = Infinity, hi = -Infinity, bk = S.bucket;
     var F = S.fine && !S.fine.none ? S.fine : null, Cc = S.coarse && !S.coarse.none ? S.coarse : null;
     var fineOk = F && F.t0 <= t0 && F.t0 + F.cols * F.dt >= tEnd - 10;   // 보는 창 양 끝을 다 덮어야(낡은 1초판이면 오른쪽 끝이 비고 현재가가 묵는다)

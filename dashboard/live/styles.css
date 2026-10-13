@@ -3410,7 +3410,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 
 /* 2026-10-13 시안(아티팩트 댓글 «4개 판을 함축해 가로 1줄 · 나머지 1줄에 체결 버블»): 넓은 화면 시장 맥락 = 요약 한 줄 + 체결 버블 미니.
    판마다 제목 · 상태 칩 · 값 셋. 값 줄은 이름 왼쪽 · 숫자 오른쪽(표 숫자). 미니 차트 높이는 고정 -- 남는 높이는 위 1초 수급이 가져간다(mcNeedH). */
-#mcBody.mc-cmp .mc-strip { display: grid; grid-template-columns: 1fr 1fr 1.6fr 1fr; gap: 0 12px; align-items: stretch; }   /* 10-13 ①②④⑤ -- ④ = 호가 벽 막대 폭 */
+#mcBody.mc-cmp .mc-strip { display: grid; grid-template-columns: 1.2fr 1.2fr 1.6fr 0.8fr; gap: 0 12px; align-items: stretch; }   /* 10-13 ①②④⑤ -- ④ = 호가 벽 막대 · ①② = 값 붙은 줄이라 넓게 */
 #mcBody.mc-cmp .mc-strip .mc-sec { padding: 6px 0 4px; display: flex; flex-direction: column; min-width: 0; }
 #mcBody.mc-cmp .mc-rows { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly; gap: 2px; }   /* 줄 수가 달라도 칸 높이에 고르게 -- 빈 데 없이 */
 #mcBody.mc-cmp .mc-rate { padding: 8px 0 2px; border-top: 1px solid var(--soft-line); }
@@ -3421,4 +3421,6 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 #mcBody.mc-cmp .mc-strip .mc-chip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .mc-gk { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 4px; font-size: 11px; height: 22px; }   /* 10-13 이름 + 그림(숫자는 호버) */
 .mc-gk > span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-gk.v { grid-template-columns: 44px minmax(0, 1fr) auto; }   /* 10-13 «라벨 되돌려»: 이름 · 그림 · 값 */
+.mc-gk > b { font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; min-width: 40px; }
 .mc-bubble { display: block; width: 100%; height: 200px; margin-bottom: 6px; }   /* 높이 = 수급 차트 한 개(renderCandleSvg 가 덮어쓴다) */
