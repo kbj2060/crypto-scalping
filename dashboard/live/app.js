@@ -4856,7 +4856,7 @@ function renderMarketCtx() {
     // 2026-10-13 사용자 «라벨은 게이지 위 or 아래로»: 이름표는 그림 아래 작은 글씨(CSS .mc-strip .mc-gk) -- 그림이 칸 폭을 다 쓴다
     const unit = (G.cmpW - 3 * 12) / 4.8, gw = Math.max(40, Math.floor(unit * 1.2) - 4), gwWall = Math.max(60, Math.floor(unit * 1.6) - 4), gwNews = Math.max(36, Math.floor(unit * 0.8) - 4);   // 폭 1.2 : 1.2 : 1.6 : 0.8 (값이 붙는 ①② 를 넓게)
     const gk = (k, vis, tip = "", val = null, cls = "") => `<div class="mc-gk${val == null ? "" : " v"}"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span>${vis}${val == null ? "" : `<b class="${cls}">${val}</b>`}</div>`;   // val = 오른쪽 값(2026-10-13 사용자 «라벨 되돌려»)
-    const gv = Math.max(36, gw - 46);   // 값이 붙는 줄의 그림 폭
+    const gv = gw;   // 2026-10-13 «값도 게이지 아래로» -- 값이 아래 줄로 가서 그림은 칸 폭 전체
     const stack = (parts, w = gwNews) => {   // 비율 막대: [[값, 색], …] -- 합 0 이면 빈 막대
       const tot = parts.reduce((t, [v]) => t + v, 0);
       let x = 4;
