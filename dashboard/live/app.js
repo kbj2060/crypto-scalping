@@ -4853,7 +4853,8 @@ function renderMarketCtx() {
     // 2026-10-13 아티팩트 댓글(정리 3차): 오른쪽 칸 = 1초 수급 → 체결 버블(수급 차트 한 개 높이, renderCandleSvg 가 맞춘다) →
     //   요약 한 줄 ①②④⑤(폭 1 : 1 : 1.6 : 1 -- ④ 는 호가 벽 막대) → 금리 줄(5년·10년 긴 스파크라인, «수급차트와 같은 너비»).
     //   칸마다 그림 줄은 칸 높이에 고르게 펼친다(.mc-rows) -- 줄 수가 달라도 빈 데 없이 찬다. 불균형·이탈은 뺐다(사용자).
-    const unit = (G.cmpW - 3 * 12) / 4.8, gw = Math.max(40, Math.floor(unit * 1.2) - 48), gwWall = Math.max(60, Math.floor(unit * 1.6) - 48), gwNews = Math.max(36, Math.floor(unit * 0.8) - 48);   // 폭 1.2 : 1.2 : 1.6 : 0.8 (값이 붙는 ①② 를 넓게)
+    // 2026-10-13 사용자 «라벨은 게이지 위 or 아래로»: 이름표는 그림 아래 작은 글씨(CSS .mc-strip .mc-gk) -- 그림이 칸 폭을 다 쓴다
+    const unit = (G.cmpW - 3 * 12) / 4.8, gw = Math.max(40, Math.floor(unit * 1.2) - 4), gwWall = Math.max(60, Math.floor(unit * 1.6) - 4), gwNews = Math.max(36, Math.floor(unit * 0.8) - 4);   // 폭 1.2 : 1.2 : 1.6 : 0.8 (값이 붙는 ①② 를 넓게)
     const gk = (k, vis, tip = "", val = null, cls = "") => `<div class="mc-gk${val == null ? "" : " v"}"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span>${vis}${val == null ? "" : `<b class="${cls}">${val}</b>`}</div>`;   // val = 오른쪽 값(2026-10-13 사용자 «라벨 되돌려»)
     const gv = Math.max(36, gw - 46);   // 값이 붙는 줄의 그림 폭
     const stack = (parts, w = gwNews) => {   // 비율 막대: [[값, 색], …] -- 합 0 이면 빈 막대
