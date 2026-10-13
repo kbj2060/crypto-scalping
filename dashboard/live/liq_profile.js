@@ -342,11 +342,12 @@
     S.on = view === "liq";
     if (typeof window.fpAltSet === "function") window.fpAltSet("liq", S.on);
     var card = $("fpCard"), box = $("liqProfile");
-    if (card) card.classList.toggle("fp-liq-on", S.on);
+    if (card) { card.classList.toggle("fp-liq-on", S.on); card.classList.toggle("fp-bbm-on", view === "bubble"); }
     if (box) box.hidden = !S.on;
     var wt = $("chartWindowTabs"), dt = $("liqDaysTabs");   // 2026-10-10 보기에 따라 오른쪽 탭: 풋프린트 = 창(1h…1d) · 청산맵 = 기간(1d·7d·30d)
-    if (wt) wt.hidden = S.on;
+    if (wt) wt.hidden = view !== "fp";                       // 2026-10-13 체결 버블 = 창 탭 없음(차트 안에서 확대·이동, bubble_map.js)
     if (dt) dt.hidden = !S.on;
+    window.dispatchEvent(new CustomEvent("fpview", { detail: view }));
     document.querySelectorAll("#fpViewTabs .asset-tab").forEach(function (b) {
       var on = b.dataset.view === view;
       b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on));
@@ -386,7 +387,7 @@
     var d = 1;
     try { d = Number(localStorage.getItem("liqDays")) || 1; } catch (e) { /* 기본 1일 */ }
     setDays(d === 7 || d === 30 ? d : 1);
-    setView(saved === "liq" ? "liq" : "fp");
+    setView(saved === "liq" || saved === "bubble" ? saved : "fp");
   }
 
   window.fpLiqActive = function () { return S.on; };   // 시험 하네스가 켜짐을 읽는다

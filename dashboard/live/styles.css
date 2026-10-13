@@ -2330,8 +2330,8 @@ svg {
   .candle-container { height: 1094px; }
   /* 2026-10-10 휴대폰 청산맵(사용자 «너무 길어 핸드폰으로 보기 불편»): 청산맵은 교체 영역(풋프린트~레인 706px)을 통째로 덮어
      세로로 길었다 -- 청산맵일 때만 상자를 242px 줄여 교체 영역이 ~464px 가 되게 한다(아래 1초 수급은 그대로). 일봉은 그대로. */
-  #fpCard.fp-liq-on #candleSvgSnapshot { height: 840px; }
-  #fpCard.fp-liq-on .candle-container { height: 852px; }
+  #fpCard.fp-liq-on #candleSvgSnapshot, #fpCard.fp-bbm-on #candleSvgSnapshot { height: 840px; }   /* 10-13 체결 버블도 청산맵 크기 */
+  #fpCard.fp-liq-on .candle-container, #fpCard.fp-bbm-on .candle-container { height: 852px; }
 }
 /* 2026-09-19 히트맵 그림을 걷어내고(사용자 지시) 프로파일이 그 수치를 직접 그린다 --
    상자가 844 -> 706 으로 돌아왔다. SUB_TOTAL 306 = 8 + 190(프로파일) + 8 + 100(1초 수급).
@@ -2717,7 +2717,7 @@ body.order-coin-off .acct-lanes::before {
    ≥1700px 인 이유: 풋프린트 칸이 1,000px 밑으로 가면 셀 숫자가 안 들어간다(1440 창이면 776px 였다). */
 @media (min-width: 1700px) and (orientation: landscape) {
   .app { max-width: none; }
-  #candleSvgSnapshot { --fp-split: 0.33; height: 872px; }   /* 2026-09-30 0.25 -> 0.33: 오른쪽 칸(1초 수급 40% + 시장 맥락 ①②③)이 스크롤 없이 들어가게 */   /* 2026-09-30 0.38 -> 0.25(사용자 «수급 차트 폭 1/3 줄여», 풋프린트 셀 숫자·사분면 글자 자리) */
+  #candleSvgSnapshot { --fp-split: 0.37; height: 872px; }   /* 2026-10-13 0.33 -> 0.37(사용자 «이 너비 줄이고 오른쪽 키워») · 2026-09-30 0.25 -> 0.33: 오른쪽 칸(1초 수급 40% + 시장 맥락 ①②③)이 스크롤 없이 들어가게 */   /* 2026-09-30 0.38 -> 0.25(사용자 «수급 차트 폭 1/3 줄여», 풋프린트 셀 숫자·사분면 글자 자리) */
   .candle-container { height: 884px; }
   .liq-map-panel { position: relative; }
   /* 풋프린트 아래 카드는 한 줄 너비에 세 칸(사용자 «최대한 너비 하나에 모두»): 내 계좌 | 30분 시나리오 | 신호·특화 신호·경제 일정.
@@ -2829,6 +2829,12 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
 .topbar { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 20px; }
 .topbar > .snap-head { padding: 0; align-items: center; justify-content: flex-end; }   /* 코인 탭이 차트 카드로 가서(09-27) 테마만 남는다 -- 오른쪽 */
 body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
+/* 2026-10-13 아티팩트 댓글 «이걸 중앙배치 · 다크와 알림을 이 자리에»: 넓은 화면은 세션(아시아·유럽·미국)이 가운데, 다크·알림이 오른쪽 끝 */
+@media (min-width: 1200px) {   /* 721~1199px 은 가운데 세션이 좌우를 눌러 겹친다(리뷰) -- 옛 배치 그대로 */
+  .topbar { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .topbar > .top-right { grid-column: 2; grid-row: 1; justify-content: center; }
+  .topbar > .snap-head { grid-column: 3; grid-row: 1; }
+}
 @media (max-width: 720px) {
   /* 2026-09-27 모바일 최적화: 세션과 테마를 한 줄에(전엔 테마 혼자 한 줄). 1줄 = 페이지 탭, 2줄 = 세션 | 테마. */
   .topbar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
@@ -3244,6 +3250,10 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 #mcWall .wdr-b > .ppm { padding-top: 0; flex: 1; min-height: 0; height: auto; }
 #mcWall .wdr-sr { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 0; overflow: hidden; }   /* 2026-10-06 줄이 칸 높이를 나눠 갖는다 -- 22px 고정이면 216px 칸에서 5px 넘쳐 스크롤이 생겼다 */
 #mcWall .wdr-sr .liq-level-row { flex: 1 1 0; min-height: 0; grid-template-columns: 40px 62px minmax(0, 1fr) 48px; gap: 6px; padding: 0 2px; font-size: 11px; }
+/* 2026-10-13 아티팩트 댓글 «라벨 지우고 숫자·게이지만» → «퍼센트도 제거»: 이름·거리 % 칸을 빼고 가격 · 강도 게이지만(색이 저항/지지를 말한다) */
+#mcWall .wdr-sr .liq-level-tag { display: none; }
+#mcWall .wdr-sr .liq-level-row { grid-template-columns: 64px minmax(0, 1fr); }
+#mcWall .wdr-sr .liq-level-dist { display: none; }   /* 2026-10-13 사용자 «게이지 오른쪽 퍼센트도 제거» -- 가격 · 강도 게이지만 */
 #mcWall .wdr-sr .liq-level-bar-track { height: 6px; }
 @media (prefers-reduced-motion: reduce) { .wdr-tg svg { transition: none; } }
 
@@ -3363,7 +3373,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
    10배·75~100배는 기존 토큰(호가 깊이 하늘 · 경고 주황), 사이 둘만 이 차트 몫으로 둔다(거래대금 파랑은 전용이라 안 씀). */
 :root { --lev10: var(--book-depth); --lev25: #8b93f0; --lev50: #e6c45c; --lev100: var(--warn); }
 [data-theme="light"] { --lev25: #4a52b8; --lev50: #9a7a12; }
-#fpViewTabs { --seg-n: 2; }
+#fpViewTabs { --seg-n: 3; }
 #liqDaysTabs { --seg-n: 3; }
 /* 2026-10-10 체결 기둥 [1d 7d 30d] [체결 | 포지션] -- 차트 위에 띄운 HTML 버튼(app.js placeFpColTog). 오른쪽 끝을 기둥 오른쪽에 맞춘다 */
 .fp-col-tog { position: absolute; transform: translateX(-100%); display: flex; gap: 6px; z-index: 2; width: max-content; white-space: nowrap; }
@@ -3379,10 +3389,46 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 #chartWindowTabs[hidden], #liqDaysTabs[hidden] { display: none !important; }
 /* 10-09 사용자 «1d 일 때도 풋프린트/청산맵 토글은 항상»: 두 축이 독립 -- 시간(1h…12h·1d) × 보기(풋프린트·청산맵).
    청산맵을 고르면 시간과 상관없이 청산맵(일봉은 그 아래 숨김), 풋프린트면 1d = 일봉 · 1h…12h = 5분 풋프린트 */
-#fpCard.fp-liq-on #fpDaily { display: none !important; }
+#fpCard.fp-liq-on #fpDaily, #fpCard.fp-bbm-on #fpDaily { display: none !important; }
 .lqp-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text); font: 600 11px/1.5 var(--font-sans); }
 .lqp-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .lqp-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 .lqp-long, .lqp-short { height: 2px; width: 14px; border-radius: 1px; }
 .lqp-long { background: var(--bad); } .lqp-short { background: var(--good); }
 .lqp-t0 { background: var(--lev10); } .lqp-t1 { background: var(--lev25); } .lqp-t2 { background: var(--lev50); } .lqp-t3 { background: var(--lev100); }
+
+/* 2026-10-13 체결 버블(bubble_map.js · 사용자 «Bookmap 처럼 큰 건 빨강 · 중간 노랑 · 작은 건 파랑»). 히트맵 램프는 이 차트 전용 --
+   플롯 바탕을 어둡게 고정해야 파랑→노랑→빨강이 읽힌다(밝은 테마에서도 같은 바탕). 값 = "r g b" (캔버스가 보간한다). */
+:root { --bbm-bg: 14 30 44; --bbm-price: 255 255 255;
+  --bbm-h0: 18 40 58; --bbm-h1: 24 92 138; --bbm-h2: 60 140 190; --bbm-h3: 150 175 190; --bbm-h4: 226 196 64; --bbm-h5: 232 128 48; --bbm-h6: 214 58 44; }
+.bbm-sw-heat { display: inline-block; width: 40px; height: 10px; border-radius: 2px;
+  background: linear-gradient(90deg, rgb(var(--bbm-h1)), rgb(var(--bbm-h2)), rgb(var(--bbm-h3)), rgb(var(--bbm-h4)), rgb(var(--bbm-h5)), rgb(var(--bbm-h6))); }
+.bbm-sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box; }
+.bbm-b { background: color-mix(in srgb, var(--good) 70%, transparent); }
+.bbm-s { background: color-mix(in srgb, var(--bad) 70%, transparent); }
+.bbm-w { border: 1.5px solid var(--text); }
+
+/* 2026-10-13 시안(아티팩트 댓글 «4개 판을 함축해 가로 1줄 · 나머지 1줄에 체결 버블»): 넓은 화면 시장 맥락 = 요약 한 줄 + 체결 버블 미니.
+   판마다 제목 · 상태 칩 · 값 셋. 값 줄은 이름 왼쪽 · 숫자 오른쪽(표 숫자). 미니 차트 높이는 고정 -- 남는 높이는 위 1초 수급이 가져간다(mcNeedH). */
+#mcBody.mc-cmp .mc-strip { display: grid; grid-template-columns: 1.2fr 1.2fr 1.6fr 0.8fr; gap: 0 12px; align-items: stretch; }   /* 10-13 ①②④⑤ -- ④ = 호가 벽 막대 · ①② = 값 붙은 줄이라 넓게 */
+#mcBody.mc-cmp .mc-strip .mc-sec { padding: 6px 0 4px; display: flex; flex-direction: column; min-width: 0; }
+#mcBody.mc-cmp .mc-rows { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly; gap: 2px; }   /* 줄 수가 달라도 칸 높이에 고르게 -- 빈 데 없이 */
+#mcBody.mc-cmp .mc-rate { padding: 8px 0 2px; border-top: 1px solid var(--soft-line); }
+#mcBody.mc-cmp .mc-rate-g { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+#mcBody.mc-cmp .mc-rate .mc-gk { height: 30px; }
+/* 2026-10-13 사용자 «라벨은 게이지 위 or 아래로»: 요약 줄은 그림(+값) 한 줄, 이름표는 그 아래 작은 글씨 */
+#mcBody.mc-cmp .mc-strip .mc-gk { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; height: auto; row-gap: 0; }
+#mcBody.mc-cmp .mc-strip .mc-gk.v { grid-template-columns: minmax(0, 1fr) auto; }
+#mcBody.mc-cmp .mc-strip .mc-gk > .mc-svg { grid-row: 1; grid-column: 1 / -1; }   /* 그림 = 첫 줄 전체 */
+#mcBody.mc-cmp .mc-strip .mc-gk > span { grid-row: 2; grid-column: 1; font-size: 10px; line-height: 1.3; padding-left: 4px; }
+#mcBody.mc-cmp .mc-strip .mc-gk > b { grid-row: 2; grid-column: 2; font-size: 11px; line-height: 1.3; min-width: 0; padding-right: 4px; }   /* 10-13 «값도 게이지 아래로»: 이름 왼쪽 · 값 오른쪽 */
+#mcBody.mc-cmp .mc-strip h4 { margin: 0 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#mcBody.mc-cmp .mc-strip .mc-state { margin: 0 0 5px; min-height: 20px; }
+#mcBody.mc-cmp .mc-strip .mc-chip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.mc-gk { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 4px; font-size: 11px; height: 22px; }   /* 10-13 이름 + 그림(숫자는 호버) */
+.mc-gk > span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-gk.v { grid-template-columns: 44px minmax(0, 1fr) auto; }   /* 10-13 «라벨 되돌려»: 이름 · 그림 · 값 */
+.mc-gk > b { font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; min-width: 40px; }
+.mc-bubble { display: block; width: 100%; height: 200px; margin-bottom: 6px; cursor: crosshair; touch-action: pan-y; }   /* 10-13 미니도 확대·이동(bubble_map.js VN) */
+.mc-bubble.panning { cursor: grabbing; }
+.mc-bubble:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }   /* 높이 = 수급 차트 한 개(renderCandleSvg 가 덮어쓴다) */

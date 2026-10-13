@@ -1352,6 +1352,73 @@ def pick_paper_state(sts: list[Any], now: float) -> Any:
     return sts[0]
 
 
+# 2026-10-13 «체결 버블»(사용자 «Bookmap 같은 1초 체결 버블 · 청산맵 크기로 배포») -- 1초 × 가격 칸 체결(매수·매도·고래 몫).
+#   원천 = 체결 테이프 hot SQLite(수집기가 5초마다 완결된 초를 쓴다 → 화면 지연 ≈5초). 배경 호가는 기존 /api/flow/heatmap.
+BUBBLE_MAX_SEC = 1800                                    # 화면이 확대·이동으로 오갈 수 있는 최대 과거(30분)
+_bubble_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def bubble_tape_payload(symbol: str, sec: int, db: Path = HOT_TAPE_DB, now: float | None = None,
+                        since: int | None = None, okx_db: Path | None = None, bybit_db: Path | None = None) -> dict[str, Any]:
+    """since 를 주면 ts_sec > since 인 행만(화면이 30분치를 한 번 받은 뒤 새 초만 덧붙인다).
+    2026-10-13 사용자 «합산으로 진행»: 바이낸스 + OKX + Bybit USDT 선물 체결을 (초, 가격칸)마다 더한다.
+      세 테이프 모두 1초 × 같은 칸 폭(TAPE_BUCKETS = OKX BUCKETS = Bybit 수집기 _bn.BUCKETS) · 수량 = 기초자산(OKX 는 수집기가 ctVal 곱함).
+      바이낸스는 실패하면 던지고(503), OKX·Bybit 은 없거나 읽기 실패면 빼고 «venues» 에 안 넣는다(차트 전체가 비지 않게).
+      🔴합산은 실제 체결 총량 -- MM 헤지가 다른 거래소에 다시 찍힌 몫이 섞여 «새 수요»로는 부풀 수 있다."""
+    end = int(now if now is not None else time.time())
+    lo = end - sec - 5                                    # 수집기 지연(5초)만큼 더 받아 창 끝이 비지 않게
+    if since is not None:
+        lo = max(lo, since + 1)
+    q = """SELECT ts_sec, price_bin, buy_qty, sell_qty, coalesce(whale_buy_qty, 0) + coalesce(whale_sell_qty, 0)
+           FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ?"""
+    base = symbol[:-4].upper()
+    srcs = [("binance", db, symbol), ("okx", okx_db if okx_db is not None else OKX_TAPE_DB_PATH, f"{base}-USDT-SWAP"),
+            ("bybit", bybit_db if bybit_db is not None else BYBIT_TAPE_DB, f"{base}USDT")]
+    acc: dict[tuple[int, int], list[float]] = {}
+    venues = []
+    for name, path, key in srcs:
+        if name != "binance" and not Path(path).exists():
+            continue
+        try:
+            got = _read_only_rows(path, q, [key, lo])
+        except (sqlite3.Error, duckdb.Error, OSError):
+            if name == "binance":
+                raise
+            continue
+        venues.append(name)
+        for t, b, x, y, w in got:
+            a = acc.setdefault((int(t), int(b)), [0.0, 0.0, 0.0])
+            a[0] += float(x or 0); a[1] += float(y or 0); a[2] += float(w or 0)
+    return {"symbol": symbol, "bucket": TAPE_BUCKETS[symbol], "lo": lo, "end": end, "venues": venues,
+            "rows": [[t, b, round(v[0], 6), round(v[1], 6), round(v[2], 6)] for (t, b), v in sorted(acc.items())]}
+
+
+async def api_bubble_tape(request: web.Request) -> web.Response:
+    asset = str(request.query.get("asset") or "eth").lower()
+    symbol = f"{asset}usdt"
+    try:
+        sec = int(request.query.get("sec", str(BUBBLE_MAX_SEC)))
+        since = int(request.query["since"]) if request.query.get("since") else None
+    except ValueError:
+        raise web.HTTPBadRequest(reason="bad_sec_or_since") from None
+    if symbol not in TAPE_BUCKETS or not 10 <= sec <= BUBBLE_MAX_SEC:
+        raise web.HTTPBadRequest(reason="unsupported_asset_or_window")
+    if since is not None:                                  # 덧붙이기 = 몇 초치라 캐시 없이 바로 읽는다
+        try:
+            return web.json_response(await asyncio.to_thread(bubble_tape_payload, symbol, sec, since=since), headers=NOCACHE)
+        except (sqlite3.Error, duckdb.Error, OSError) as exc:
+            return web.json_response({"error": type(exc).__name__, "rows": []}, status=503, headers=NOCACHE)
+    key, now = f"{symbol}|{sec}", time.time()
+    hit = _bubble_cache.get(key)
+    if hit is None or now - hit[0] >= 1.0:                 # 1초 캐시 -- 탭이 몇 개든 읽기는 초당 한 번
+        try:
+            hit = (now, await asyncio.to_thread(bubble_tape_payload, symbol, sec))
+        except (sqlite3.Error, duckdb.Error, OSError) as exc:
+            return web.json_response({"error": type(exc).__name__, "rows": []}, status=503, headers=NOCACHE)
+        _bubble_cache[key] = hit
+    return web.json_response(hit[1], headers=NOCACHE)
+
+
 async def api_paper_arms(request: web.Request) -> web.Response:
     """?asset= 코인별 엔진(2026-10-04 SOL·XRP = RL_SYMBOL 프로세스, paper_<coin>/). ETH 만 미리보기 엔진 폴백이 있다."""
     now, asset = time.time(), str(request.query.get("asset") or "eth").lower()
@@ -6373,7 +6440,7 @@ def make_app() -> web.Application:
                 binding = []          # 단순 규칙(사용자 지시): 원장·순자산 6배·모델 상한 없음 -- 증거금 50% 만
             # 증거금 상한. 레버리지는 주문이 실제로 걸 값 -- «자동»이면 처방(plan_now→prescribe)과
             #   **같은 입력**으로 같은 함수를 부른다(그래야 target_leverage 와 같은 값이다).
-            #   화면은 «자동»이어도 20배를 보낸다(app.js MANUAL_LEV_AUTO) -- 이 경로는 lev 없는 요청뿐.
+            #   화면은 «자동»이어도 10배를 보낸다(app.js MANUAL_LEV_AUTO, 2026-10-13 20→10) -- 이 경로는 lev 없는 요청뿐.
             margin_lev = want_lev or (leverage_setting(
                 cap_notional=equity * policy_cap_x, equity=equity, existing_notional=exposure,
                 current_notional=exposure).get("setting") if policy_cap_x else None) or leverage
@@ -6456,6 +6523,8 @@ def make_app() -> web.Application:
                                      order_leverage=float(margin_lev or 0.0), first=not same,   # 첫 진입 = 이 방향 포지션 없음
                                      risk_used=q_same * max(0.0, sgn * (anchor - sl)) if same else 0.0,   # 이미 든 몫이 손절에서 잃을 돈
                                      add_stop_frac=sgn * (p_in - sl) / p_in)
+                if rule.get("l_eff", cr["l"]) < cr["l"]:   # 2026-10-13 레버리지가 L 을 묶음(증거금 90%) -- 화면·손절 손실 한도가 실제 배수를 말하게
+                    cr = {**cr, "l": rule["l_eff"], "binding": "레버리지 증거금"}
                 cap_notional, who = rule["cap_notional"], "rule"
                 fraction = rule["fraction"]
             plan = build_entry_plan(
@@ -7117,6 +7186,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/kalshi", api_kalshi)
     app.router.add_get("/api/opt-smile", api_opt_smile)
     app.router.add_get("/api/flow/heatmap", api_flow_heatmap)
+    app.router.add_get("/api/bubble-tape", api_bubble_tape)   # 2026-10-13 체결 버블(bubble_map.js)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
     app.router.add_get("/api/liquidation-direction-signal", api_liquidation_direction_signal)

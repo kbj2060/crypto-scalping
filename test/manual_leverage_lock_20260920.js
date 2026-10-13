@@ -1,4 +1,4 @@
-// 추가 진입(물타기) 레버리지 고정 + 자동 20배 검증 (2026-09-20).
+// 추가 진입(물타기) 레버리지 고정 + 자동 고정 배수(2026-10-13 20→10) 검증 (2026-09-20).
 // 🔴여기는 실주문 경로다. 미리보기 쿼리와 실주문이 **같은 값**을 써야 한다 -- 따로 두면
 // «화면은 20배인데 주문은 모델값»이 된다(이 저장소가 여러 번 겪은 파리티 사고의 모양).
 //   node test/manual_leverage_lock_20260920.js
@@ -31,13 +31,13 @@ const eq = (label, got, want) => {
 eq("포지션 ×3 · 자동 · 게이지 50", run({ posLev: 3, auto: true, gauge: 50 }), [3, "&lev=3"]);
 eq("포지션 ×3 · 수동 · 게이지 50", run({ posLev: 3, auto: false, gauge: 50 }), [3, "&lev=3"]);
 eq("포지션 ×7 · 수동 · 게이지 5 ", run({ posLev: 7, auto: false, gauge: 5 }), [7, "&lev=7"]);
-// 신규 진입: 자동은 20배, 수동은 게이지(5단위).
-eq("신규 · 자동             ", run({ posLev: 0, auto: true, gauge: 5 }), [20, "&lev=20"]);
+// 신규 진입: 자동은 10배(2026-10-13 20→10), 수동은 게이지(5단위).
+eq("신규 · 자동             ", run({ posLev: 0, auto: true, gauge: 5 }), [10, "&lev=10"]);
 eq("신규 · 수동 게이지 35   ", run({ posLev: 0, auto: false, gauge: 35 }), [35, "&lev=35"]);
 eq("신규 · 수동 게이지 37   ", run({ posLev: 0, auto: false, gauge: 37 }), [35, "&lev=35"]);
 
 // 실주문 pending 과 미리보기 쿼리가 같은 함수를 보는가(정적).
-if (!/lev: manualLevEffective\(\)/.test(src)) {
+if (!/lev: (ov\?\.lev \?\? )?manualLevEffective\(\)/.test(src)) {   // 10-13: 재시도 덮어쓰기(ov.lev) 뒤에 같은 함수
   console.log("🔴 실주문 pending 이 manualLevEffective 를 안 쓴다 -- 미리보기와 어긋난다"); ok = false;
 } else console.log("✅ 실주문 pending 도 manualLevEffective");
 if (/manualLevAuto\(\) \? (null|"")/.test(src)) {
