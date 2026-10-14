@@ -465,9 +465,10 @@ def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
         if out.get(side, {}).get("armed_at") != armed_at:
             continue
         if side in mine:
-            # 2026-10-15 감시 틱이 도는 사이 «손절 해제»가 들어오면 그 표시를 지우지 않는다(틱은 해제 전 사본을 들고 있다)
+            # 2026-10-15 sl_off(«손절 해제»·«다시 켜기»)는 저장본이 주인이다 -- 틱은 버튼 전 사본을 들고 있어 그대로 쓰면 해제나 다시 켜기를 되돌린다
             off = out.get(side, {}).get("sl_off")
-            out[side] = {**mine[side], "sl_off": off} if off and not mine[side].get("sl_off") else mine[side]
+            m = {k: v for k, v in mine[side].items() if k != "sl_off"}
+            out[side] = {**m, "sl_off": off} if off else m
         else:
             out.pop(side)
     return out
@@ -997,6 +998,8 @@ def _self_check_rec_rule() -> None:
     assert bracket_action(arm, "LONG", [], True, 100.0, (100.0, 2390.0)) == "clear"
     merged = bracket_merge({"k": {"armed_at": 5.0, "sl_off": {"at": 9.0}}}, {"k": {"armed_at": 5.0, "retry_after": 1}}, {"k": 5.0})
     assert merged["k"]["sl_off"] == {"at": 9.0} and merged["k"]["retry_after"] == 1, merged
+    merged = bracket_merge({"k": {"armed_at": 5.0}}, {"k": {"armed_at": 5.0, "sl_off": {"at": 9.0}, "retry_after": 1}}, {"k": 5.0})
+    assert "sl_off" not in merged["k"] and merged["k"]["retry_after"] == 1, merged   # «다시 켜기» 뒤 틱의 옛 사본이 해제를 되살리지 않는다
     print("자동 규칙 통과 — 권장 B(12.4×권장배수·청산 안전 max(3σ,5%)·상한 3) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×5% · 첫 진입가 −5% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 

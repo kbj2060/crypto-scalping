@@ -206,6 +206,36 @@ async def place_add_order(session, symbol: str, pside: str, price: float, qty: f
     return {"placed": "__error__" not in r, "price": price, "qty": qty, "order_id": r.get("orderId"), "error": r.get("__error__")}
 
 
+async def _post_stop(session, symbol: str, pside: str, price: float, key: str, secret: str, offset: int, stamp: int) -> dict:
+    """비상 스탑 = Algo STOP_MARKET closePosition(마크가 기준). place_bracket · place_stop 이 같이 쓴다."""
+    r = await signed(session, "POST", "/fapi/v1/algoOrder",
+                     {"algoType": "CONDITIONAL", "symbol": symbol, "side": "SELL" if pside == "LONG" else "BUY",
+                      "positionSide": pside, "type": "STOP_MARKET",
+                      "triggerPrice": price, "closePosition": "true",
+                      "workingType": "MARK_PRICE",
+                      "clientAlgoId": f"{bracket_tag(SL_TAG, pside)}{stamp}"},
+                     key, secret, offset)
+    return {"placed": "__error__" not in r, "price": price, "algo_id": r.get("algoId"), "error": r.get("__error__")}
+
+
+async def place_stop(session, symbol: str, pside: str, price: float) -> dict:
+    """2026-10-15 «손절 다시 켜기» -- 비상 스탑만 다시 건다. place_bracket 은 TP·자동 물타기까지 지우고 다시 걸어서 못 쓴다.
+    남아 있는 우리 스탑은 먼저 지운다(두 개 걸리지 않게). 포지션이 없거나 스탑을 못 걸면 placed=False -- 🔴호출 쪽은 그때 아무것도 안 바꾼다."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        return {"placed": False, "error": "API 키가 없습니다"}
+    offset = await _clock_offset(session)
+    pos = await signed(session, "GET", "/fapi/v2/positionRisk", {"symbol": symbol}, key, secret, offset)
+    if not isinstance(pos, list):
+        return {"placed": False, "error": f"포지션 조회 실패: {pos.get('__error__') if isinstance(pos, dict) else pos}"}
+    if not any(p.get("positionSide") == pside and abs(float(p.get("positionAmt") or 0.0)) > 0 for p in pos):
+        return {"placed": False, "error": "포지션 없음"}
+    cl = await cancel_bracket(session, symbol, pside, key, secret, offset, only_sl=True)
+    if cl.get("errors"):
+        return {"placed": False, "error": f"남은 스탑 정리 실패: {'; '.join(map(str, cl['errors']))}"}
+    return await _post_stop(session, symbol, pside, price, key, secret, offset, int(time.time() * 1000))
+
+
 async def place_bracket(session, bracket: dict, symbol: str, pside: str) -> dict:
     """체결 뒤 TP 지정가(GTX, 포지션 **전량**)와 비상 스탑(Algo STOP_MARKET, closePosition)을 건다.
     물타기면 우리 옛 주문을 지우고 새 레벨·새 수량으로 다시 건다.
@@ -238,15 +268,7 @@ async def place_bracket(session, bracket: dict, symbol: str, pside: str) -> dict
         out["tp"] = {"placed": "__error__" not in r, "price": bracket["tp_price"],
                      "order_id": r.get("orderId"), "error": r.get("__error__")}
     if bracket.get("backstop_price"):
-        r = await signed(session, "POST", "/fapi/v1/algoOrder",
-                         {"algoType": "CONDITIONAL", "symbol": symbol, "side": close_side,
-                          "positionSide": pside, "type": "STOP_MARKET",
-                          "triggerPrice": bracket["backstop_price"], "closePosition": "true",
-                          "workingType": "MARK_PRICE",
-                          "clientAlgoId": f"{bracket_tag(SL_TAG, pside)}{stamp}"},
-                         key, secret, offset)
-        out["backstop"] = {"placed": "__error__" not in r, "price": bracket["backstop_price"],
-                           "algo_id": r.get("algoId"), "error": r.get("__error__")}
+        out["backstop"] = await _post_stop(session, symbol, pside, bracket["backstop_price"], key, secret, offset, stamp)
     out["placed"] = all(v.get("placed") for k, v in out.items() if k in ("tp", "backstop"))
     return out
 

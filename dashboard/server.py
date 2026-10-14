@@ -204,7 +204,7 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
     commit_rule_l, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
-    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_add_order, place_bracket, run_entry, run_entry_wait, run_exit)
+    WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_add_order, place_bracket, place_stop, run_entry, run_entry_wait, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).
 from scripts.live_eth_risk_sizing_policy_20260913 import (  # noqa: E402
@@ -7207,6 +7207,41 @@ def make_app() -> web.Application:
         print(f"bracket {side}: 손절 해제(사용자) 거래소 스탑 {r.get('cancelled')}개 취소 · 5분봉 감시 끔", flush=True)
         return web.json_response({"ok": True, "sl_off": st[key]["sl_off"]}, headers=NOCACHE)
 
+    async def api_manual_bracket_rearm(request: web.Request) -> web.Response:
+        """2026-10-15 사용자 «손절 버튼은 다시 누르면 다시 손절을 켜도록». «손절 해제»의 반대: 거래소 비상 스탑(backstop_price)을 다시 걸고
+        sl_off 를 지워 5분봉 종가 감시를 다시 켠다. 🔴거래소 스탑을 못 걸면 아무것도 안 바꾼다(감시만 켜진 반쪽 상태를 만들지 않는다).
+        마크가가 이미 스탑 너머면 거래소가 거부한다(-2021) -- 그대로 실패로 돌려준다. 방어는 해제와 같다."""
+        if request.query.get("confirm") != "1":
+            return web.json_response({"ok": False, "error": "confirm_required", "detail": "confirm=1 이 필요합니다"}, status=400)
+        if not exec_enabled():
+            return web.json_response({"ok": False, "error": "exec_disabled",
+                                      "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"}, status=403)
+        side, symbol = request.query.get("side"), request.query.get("symbol")
+        if side not in ("LONG", "SHORT") or symbol not in set(MANUAL_EXEC_SYMBOLS.values()):
+            return web.json_response({"ok": False, "error": "bad_side", "detail": "side=LONG|SHORT · symbol 이 필요합니다"}, status=400)
+        key = bracket_key(symbol, side)
+        b = bracket_load().get(key)
+        if not b:
+            return web.json_response({"ok": False, "error": "not_armed", "detail": "서버가 무장한 손절이 없습니다"}, status=409)
+        if not b.get("sl_off"):
+            return web.json_response({"ok": True, "already": True}, headers=NOCACHE)
+        price = b.get("backstop_price") or b.get("sl_price")
+        if not price:
+            return web.json_response({"ok": False, "error": "no_price", "detail": "다시 걸 손절가가 기록에 없습니다"}, status=409)
+        r = await place_stop(binance_session(), symbol, side, float(price))
+        if not r.get("placed"):
+            return web.json_response({"ok": False, "error": "place_failed",
+                                      "detail": f"손절 다시 켜기 실패 — 손절은 꺼진 그대로입니다: {r.get('error')}"}, status=502)
+        st = bracket_load()
+        if key not in st or st[key].get("armed_at") != b.get("armed_at"):
+            return web.json_response({"ok": False, "error": "rearmed",
+                                      "detail": "그 사이 새로 무장됐습니다 — 다시 확인하세요"}, status=409)
+        st[key].pop("sl_off", None)
+        st[key]["placed"] = {**(st[key].get("placed") or {}), "backstop": r}
+        bracket_save(st)
+        print(f"bracket {side}: 손절 다시 켬(사용자) 거래소 스탑 {price} · 5분봉 감시 켬", flush=True)
+        return web.json_response({"ok": True, "backstop": r}, headers=NOCACHE)
+
     async def api_manual_entry_status(request: web.Request) -> web.Response:
         """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
         보여준다. 주문은 최대 하나만 동시에 둔다."""
@@ -7435,6 +7470,7 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-entry/wait-action", api_manual_wait_action)
     app.router.add_post("/api/manual-entry/cancel", api_manual_entry_cancel)
     app.router.add_post("/api/manual-bracket/disarm", api_manual_bracket_disarm)
+    app.router.add_post("/api/manual-bracket/rearm", api_manual_bracket_rearm)
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)

@@ -2873,7 +2873,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-wait[hidden] { display: none; }
 .ofab-wait:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (pointer: coarse) { .ofab-wait { min-height: 36px; } }
-/* 2026-10-15 서버 무장 손절 -- 데스크탑 = 알약 안 칩(시안 B) · 휴대폰(≤720px) = 패널 맨 위 칸(시안 C). 같은 [data-sl-off] 핸들러. */
+/* 2026-10-15 서버 무장 손절 -- 데스크탑 = 알약 안 칩(시안 B) · 휴대폰(≤720px) = 패널 맨 위 칸(시안 C). 같은 [data-sl-act] 핸들러(해제 ↔ 다시 켜기). */
 .ofab-sl { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px 0 8px; margin-right: 2px;
   border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted);
   font: 700 11px/1 var(--font-mono); white-space: nowrap; cursor: pointer; }
@@ -2882,7 +2882,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-sl.arm, .ofab-slp-btn.arm { border-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--amber);
   background: color-mix(in srgb, var(--amber) 12%, transparent); }
 .ofab-sl.arm, .ofab-sl.off { font-family: var(--font-sans); }
-.ofab-sl.off { border-style: dashed; border-color: color-mix(in srgb, var(--amber) 60%, transparent); color: var(--amber); cursor: default; }
+.ofab-sl.off { border-style: dashed; border-color: color-mix(in srgb, var(--amber) 60%, transparent); color: var(--amber); }
 .ofab-sl:focus-visible, .ofab-slp-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ofab-sl[hidden], .ofab-slp[hidden] { display: none; }
 .ofab-slp { padding: 12px 14px; border-bottom: 1px solid var(--soft-line); font: 12px/1.35 var(--font-sans); color: var(--muted); }

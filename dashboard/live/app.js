@@ -9277,8 +9277,8 @@ function manualEntryStateText(state) {
 
 // 2026-10-15 사용자 «손절 해제 버튼»(10-14 사고: 바이낸스에서 스탑만 지웠는데 서버 5분봉 종가 감시가 청산했다).
 //   서버가 무장한 손절(/api/binance-account 의 bracket_armed)을 **플로팅 버튼**에 보이고(사용자 «계좌카드 말고 플로팅 버튼 안에»),
-//   두 번 눌러(5초 무장) 거래소 스탑 + 서버 감시를 함께 끈다. 데스크탑 = 알약 안 칩(#ofabSl, 시안 B) · 휴대폰 = 패널 맨 위 칸(#ofabSlPanel, 시안 C).
-//   둘 다 같은 data-sl-off 핸들러 -- 어느 쪽을 보일지는 CSS(720px)가 고른다. 자동 물타기 지정가는 남고, 다시 진입·규칙 물타기하면 손절이 다시 걸린다.
+//   두 번 눌러(5초 무장) 거래소 스탑 + 서버 감시를 함께 끄고, 꺼진 뒤 다시 두 번 누르면 다시 켠다(/rearm). 데스크탑 = 알약 안 칩(#ofabSl, 시안 B) · 휴대폰 = 패널 맨 위 칸(#ofabSlPanel, 시안 C).
+//   둘 다 같은 data-sl-act 핸들러 -- 어느 쪽을 보일지는 CSS(720px)가 고른다. 자동 물타기 지정가는 남고, 다시 진입·규칙 물타기하면 손절이 다시 걸린다.
 let slOffArmedKey = null, slOffArmT = 0, slOffBusyKey = null;
 const SL_OFF_TIP = "거래소의 손절 스탑과 서버의 5분봉 종가 손절을 함께 끕니다. 자동 물타기 지정가는 남고, 다시 진입·물타기하면 손절이 다시 걸립니다";
 const SL_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>';
@@ -9288,45 +9288,53 @@ function renderOfabSl(p) {
   if (!chip || !box) return;
   const k = p && Number(p.qty) ? `${p.symbol}:${String(p.side).toUpperCase()}` : null;
   const ba = k ? (latestBinanceAccount?.bracket_armed || {})[k] : null;
-  chip.hidden = box.hidden = !ba || !(ba.sl_off || ba.sl_price);
+  chip.hidden = box.hidden = !ba || !ba.sl_price;
   if (chip.hidden) return;
-  const off = !!ba.sl_off, armed = slOffArmedKey === k, busy = slOffBusyKey === k, px = off ? "" : acctPx(ba.sl_price);
+  // 2026-10-15 사용자 «다시 누르면 다시 손절을 켜도록» -- 꺼진 상태도 같은 두 번 누름으로 켠다(act = 누르면 할 일).
+  const off = !!ba.sl_off, act = off ? "on" : "off", armed = slOffArmedKey === `${act}:${k}`, busy = slOffBusyKey === k, px = acctPx(ba.sl_price);
   const mk = Number(p.mark_price) || 0, dist = mk > 0 && !off ? Math.abs(mk - ba.sl_price) / mk * 100 : null;
-  const tone = off ? " off" : busy || armed ? " arm" : "";
-  chip.className = `ofab-sl${tone}`;
-  chip.disabled = busy;   // «없음»은 눌러도 아무 일 없다(data-sl-off 빈 값) -- disabled 면 툴팁이 안 뜬다
-  chip.dataset.slOff = off ? "" : k;
-  chip.title = off ? `손절 없음 — 해제함. ${SL_OFF_TIP}` : `손절 ${px}${ba.sl_name ? ` · ${ba.sl_name}` : ""} — 두 번 누르면 해제. ${SL_OFF_TIP}`;
-  chip.setAttribute("aria-label", off ? "손절 없음(해제함)" : armed ? "한 번 더 누르면 손절 해제" : `손절 ${px} — 해제하려면 두 번 누르기`);
-  chip.innerHTML = off ? `${SL_ICO_OFF}<span>손절 없음</span>` : busy ? `${SL_ICO}<span>해제 중…</span>` : armed ? `${SL_ICO}<span>한 번 더 = 해제</span>` : `${SL_ICO}<span>${px}</span>`;
+  const hot = busy || armed;
+  const word = off ? "켜기" : "해제";
+  chip.className = `ofab-sl${hot ? " arm" : off ? " off" : ""}`;
+  chip.disabled = busy;
+  chip.dataset.slAct = act; chip.dataset.slKey = k;
+  chip.title = off ? `손절 없음 — 두 번 누르면 손절 ${px} 를 다시 켭니다(거래소 스탑 + 서버 5분봉 감시)`
+    : `손절 ${px}${ba.sl_name ? ` · ${ba.sl_name}` : ""} — 두 번 누르면 해제. ${SL_OFF_TIP}`;
+  chip.setAttribute("aria-label", armed ? `한 번 더 누르면 손절 ${word}` : off ? `손절 없음 — 다시 켜려면 두 번 누르기` : `손절 ${px} — 해제하려면 두 번 누르기`);
+  chip.innerHTML = busy ? `${off ? SL_ICO_OFF : SL_ICO}<span>${off ? "켜는 중…" : "해제 중…"}</span>`
+    : armed ? `${off ? SL_ICO_OFF : SL_ICO}<span>한 번 더 = ${word}</span>`
+    : off ? `${SL_ICO_OFF}<span>손절 없음</span>` : `${SL_ICO}<span>${px}</span>`;
   box.className = `ofab-slp${off ? " off" : ""}`;
+  const btn = `<button type="button" class="ofab-slp-btn${hot ? " arm" : ""}" data-sl-act="${act}" data-sl-key="${escapeHtml(k)}"`
+    + ` title="${escapeHtml(off ? "거래소 스탑과 서버 5분봉 감시를 다시 켭니다" : SL_OFF_TIP)}"${busy ? " disabled" : ""}>`
+    + `${busy ? (off ? "켜는 중…" : "해제 중…") : armed ? `한 번 더 누르면 둘 다 ${off ? "켜기" : "해제"}` : off ? `손절 ${px} 다시 켜기` : "손절 해제"}</button>`;
   box.innerHTML = off
     ? `<div class="ofab-slp-head">${SL_ICO_OFF}<span>손절</span><b>없음</b><em>해제함</em></div>`
-      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑 꺼짐</span><span><i></i>서버 5분봉 감시 꺼짐</span></div>`
-      + `<p>다시 진입하면 손절이 다시 걸립니다.</p>`
+      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑 꺼짐</span><span><i></i>서버 5분봉 감시 꺼짐</span></div>` + btn
     : `<div class="ofab-slp-head">${SL_ICO}<span>손절</span><b>${px}</b>${ba.sl_name ? `<span>${escapeHtml(ba.sl_name)}</span>` : ""}${dist != null ? `<em>지금가 −${dist.toFixed(1)}%</em>` : ""}</div>`
-      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑</span><span><i></i>서버 5분봉 감시</span></div>`
-      + `<button type="button" class="ofab-slp-btn${busy || armed ? " arm" : ""}" data-sl-off="${escapeHtml(k)}" title="${escapeHtml(SL_OFF_TIP)}"${busy ? " disabled" : ""}>${busy ? "해제 중…" : armed ? "한 번 더 누르면 둘 다 해제" : "손절 해제"}</button>`;
+      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑</span><span><i></i>서버 5분봉 감시</span></div>` + btn;
 }
 document.addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-sl-off]");
-  if (!b || b.disabled || !b.dataset.slOff) return;
-  const k = b.dataset.slOff, [symbol, side] = k.split(":"), redraw = () => renderOfabSl(snapshotAccountPosition());
-  if (slOffArmedKey !== k) {
-    slOffArmedKey = k; redraw();
+  const b = e.target.closest("[data-sl-act]");
+  if (!b || b.disabled || !b.dataset.slKey) return;
+  const k = b.dataset.slKey, act = b.dataset.slAct, [symbol, side] = k.split(":"), redraw = () => renderOfabSl(snapshotAccountPosition());
+  if (slOffArmedKey !== `${act}:${k}`) {
+    slOffArmedKey = `${act}:${k}`; redraw();
     clearTimeout(slOffArmT);
     slOffArmT = setTimeout(() => { slOffArmedKey = null; redraw(); }, 5000);
     return;
   }
   clearTimeout(slOffArmT); slOffArmedKey = null; slOffBusyKey = k; redraw();
+  const what = act === "on" ? "손절 다시 켜기" : "손절 해제";
   try {
-    const r = await (await fetch(`/api/manual-bracket/disarm?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(symbol)}&confirm=1`,
+    const r = await (await fetch(`/api/manual-bracket/${act === "on" ? "rearm" : "disarm"}?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(symbol)}&confirm=1`,
       { method: "POST", cache: "no-cache" })).json();
-    ofabSay(r.ok ? "손절 해제 — 거래소 스탑·서버 5분봉 감시 둘 다 꺼짐" : escapeHtml(`손절 해제 못 함: ${r.detail || r.error}`), r.ok ? "" : "bad");
+    ofabSay(r.ok ? (act === "on" ? "손절 다시 켬 — 거래소 스탑·서버 5분봉 감시 둘 다 켜짐" : "손절 해제 — 거래소 스탑·서버 5분봉 감시 둘 다 꺼짐")
+      : escapeHtml(`${what} 못 함: ${r.detail || r.error}`), r.ok ? "" : "bad");
   } catch (err) {
-    ofabSay(escapeHtml(`손절 해제 못 함: ${err && err.message ? err.message : err}`), "bad");
+    ofabSay(escapeHtml(`${what} 못 함: ${err && err.message ? err.message : err}`), "bad");
   } finally {
-    slOffBusyKey = null;
+    slOffBusyKey = null; redraw();   // 계좌를 다시 못 읽어도 «…중»이 남지 않게
     refreshBinanceAccount(true);
   }
 });

@@ -6,7 +6,7 @@
 서버 페이지에 로컬 app.js·styles.css·index.html 을 덮는다. 🔴해제 POST 는 브라우저 안에서 **가짜 응답**으로 받고
 그 밖의 GET 아닌 /api 요청은 전부 막는다(막힌 게 있으면 실패). 무장 손절은 픽스처로 심는다(라이브 포지션 유무와 무관).
 검사: 카드에 손절 줄 없음 · 1500폭 = 알약 칩 보임·패널 칸 숨김 · 390폭 = 칩 숨김·패널 맨 위 칸 보임 ·
-  한 번 누름 = POST 0 + «한 번 더» · 두 번째 = POST 1(side·symbol·confirm) · sl_off 면 «손절 없음» · 포지션 없으면 둘 다 숨김 · JS 오류 0.
+  한 번 누름 = POST 0 + «한 번 더» · 두 번째 = POST 1(side·symbol·confirm) · sl_off 면 «손절 없음» · 꺼진 뒤 두 번 = /rearm · 포지션 없으면 둘 다 숨김 · JS 오류 0.
 """
 import argparse, json, pathlib, sys
 
@@ -39,7 +39,7 @@ def run(shot):
             def api(r):
                 if r.request.method == "GET":
                     return r.continue_()
-                if "/api/manual-bracket/disarm" in r.request.url:
+                if "/api/manual-bracket/disarm" in r.request.url or "/api/manual-bracket/rearm" in r.request.url:
                     disarm.append(r.request.url)
                     return r.fulfill(body=json.dumps({"ok": True}), content_type="application/json")
                 blocked.append(r.request.url); r.abort()
@@ -65,7 +65,7 @@ def run(shot):
                 pg.click("#ofabToggle"); pg.wait_for_timeout(300)
                 ok(pg.evaluate(VIS, "#ofabSlPanel"), "휴대폰 패널에 손절 칸이 없다")
                 ok(pg.evaluate("() => document.getElementById('ofabPanel').firstElementChild.id === 'ofabSlPanel'"), "손절 칸이 패널 맨 위가 아니다")
-                tgt = "#ofabSlPanel [data-sl-off]"
+                tgt = "#ofabSlPanel [data-sl-act]"
             if not mob:
                 ok(not pg.evaluate(VIS, "#ofabSlPanel"), "데스크탑 패널에 휴대폰용 칸이 보인다")
             if shot: pg.screenshot(path=f"{shot}/sl_{w}_idle.png")
@@ -78,9 +78,12 @@ def run(shot):
             pg.evaluate(FIX, True); pg.wait_for_timeout(150)
             off_txt = pg.inner_text("#ofabSl" if not mob else "#ofabSlPanel")
             ok("없음" in off_txt, f"해제 후 글자 {off_txt!r}")
-            if not mob:
-                pg.click("#ofabSl"); pg.wait_for_timeout(150)
-                ok(len(disarm) == 1, "«손절 없음» 칩을 누르니 요청이 또 나갔다")
+            # 2026-10-15 꺼진 뒤 두 번 누르면 다시 켠다(/rearm) -- 한 번은 요청 0
+            pg.click(tgt); pg.wait_for_timeout(150)
+            ok(len(disarm) == 1 and "켜기" in pg.inner_text(tgt), f"꺼진 상태 첫 누름 {disarm} {pg.inner_text(tgt)!r}")
+            pg.click(tgt); pg.wait_for_timeout(400)
+            ok(len(disarm) == 2 and "/rearm?" in disarm[1] and "confirm=1" in disarm[1], f"다시 켜기 요청 {disarm}")
+            ok("중…" not in pg.inner_text(tgt), f"요청이 끝났는데 «…중»이 남음 {pg.inner_text(tgt)!r}")
             if shot: pg.screenshot(path=f"{shot}/sl_{w}_off.png")
             pg.evaluate("() => { latestBinanceAccount.positions = []; renderOfab(); }")
             ok(not pg.evaluate(VIS, "#ofabSl") and not pg.evaluate(VIS, "#ofabSlPanel"), "포지션이 없는데 손절 표시가 남았다")

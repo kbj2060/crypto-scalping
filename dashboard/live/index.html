@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261015-slfab">
+  <link rel="stylesheet" href="styles.css?v=20261015-slon">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -599,7 +599,7 @@
       <button type="button" id="ofabWait" class="ofab-wait" aria-controls="ofabPanel" hidden>대기</button>   <!-- 2026-10-10 기다리는 진입이 있으면(누르면 펼침) -->
       <button type="button" id="ofabToggle" class="ofab-toggle" aria-expanded="false"
               aria-controls="ofabPanel"><span id="ofabPos">주문</span></button>
-      <!-- 2026-10-15 서버 무장 손절(두 번 누르면 거래소 스탑 + 서버 5분봉 감시 해제) -- 데스크탑 시안 B. 휴대폰은 패널 맨 위 #ofabSlPanel(시안 C). -->
+      <!-- 2026-10-15 서버 무장 손절(두 번 누르면 거래소 스탑 + 서버 5분봉 감시 해제 · 꺼진 뒤 두 번 = 다시 켜기) -- 데스크탑 시안 B. 휴대폰은 패널 맨 위 #ofabSlPanel(시안 C). -->
       <button type="button" id="ofabSl" class="ofab-sl" hidden></button>
       <!-- 2026-10-05 포지션이 없으면 «주문» 대신 LONG·SHORT 두 개. 1.5초 꾹 = 바로 진입(마우스) · 짧게 = 펼치기. -->
       <span id="ofabFlat" class="ofab-flat" hidden>
@@ -620,7 +620,7 @@
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden><div id="ofabSlPanel" class="ofab-slp" hidden></div></div>
   </div>
-  <script src="./app.js?v=20261015-slfab"></script>
+  <script src="./app.js?v=20261015-slon"></script>
   <script src="./fp_daily.js?v=20261010-fpc"></script>
   <script src="./liq_profile.js?v=20261011-liq5m"></script>
   <script src="./bubble_map.js?v=20261014-winsum2"></script>
