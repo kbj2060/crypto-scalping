@@ -8853,12 +8853,13 @@ function manualRule() {
 // 서버 live_manual_peg_entry.commit_rule_l 과 같은 식(화면 표시용 -- 실제 크기·손절은 누를 때 서버 미리보기가 정한다)
 // 2026-10-10 동일위험: L = min(손절 시 순자산 손실 b ÷ 손절폭, 청산 안전, 10) -- 옛 «12.4 × 권장배수»는 손절 1회에 순자산 69~82%(원장 재생)
 // 2026-10-11 사용자 최종 «×15.2 + −3% 스톱»: L = min(12.4 × 권장배수, 청산 안전(손절 거리 max(3σ24, 3%)), 10) · 손절 첫 진입가 ∓3% 고정
-const RULE_STOP_PCT = 0.03;       // = live_manual_peg_entry.RULE_STOP_PCT (test_rule_size_parity 가 대조)
+// 2026-10-14 사용자 «권장 B»: 상한 6 → 3배 · 손절 ∓3% → ∓5%(첫 1/3 · ∓0.75% 물타기 그대로)
+const RULE_STOP_PCT = 0.05;       // = live_manual_peg_entry.RULE_STOP_PCT (test_rule_size_parity 가 대조)
 const REC_FIRST_SHARE = 1 / 3;    // = live_manual_peg_entry.REC_FIRST_SHARE -- 첫 진입 = 상한의 1/3(10-14 사용자 «첫 1/3 → −0.75%에 2/3»)
 function commitRuleL(side, sigmaBp4h, vm) {
   const sd = Math.max(3 * sigmaBp4h * Math.sqrt(6) / 1e4, RULE_STOP_PCT);   // 청산 안전용 거리
   const den = side === "LONG" ? 1 - 0.98 * (1 - sd) * 0.995 / (1 - 0.0066) : 1.02 * (1 + sd) * 1.005 / 1.0066 - 1;
-  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, 6), sd: RULE_STOP_PCT };   // 상한 6 = live_manual_peg_entry.COMMIT_CAP_X(10-14, 옛 10)
+  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, 3), sd: RULE_STOP_PCT };   // 상한 3 = live_manual_peg_entry.COMMIT_CAP_X(10-14 권장 B, 옛 6 · 10)
 }
 // «손절 시 순자산 −X%» = 지금 L × 3%(두 방향 중 큰 쪽) -- 권장 배수가 없으면 손절 거리만
 function ruleRiskText() {
@@ -9862,7 +9863,7 @@ function renderOfab() {
 }
 // 2026-10-09 B안(사용자 선택): 위 띠 = #snapRule 과 같은 값 · 자동이면 버튼 안에 «첫 $ · 손절 가격».
 //   숫자는 서버 규칙(live_manual_peg_entry rec_rule_size·rec_rule_bracket)과 같은 식으로 여기서 3초마다 -- 첫 = REC_FIRST_SHARE(1/3) × 실효 L × 순자산,
-//   손절 = 지금 가격 ∓3%(10-11 L = min(12.4 × 권장배수, 청산 안전, 10)). 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
+//   손절 = 지금 가격 ∓RULE_STOP_PCT(10-14 권장 B: L = min(12.4 × 권장배수, 청산 안전, 3) · ∓5%). 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
 function renderOfabRule(bal, live) {
   const r = manualRule(), eth = activeSnapshotAsset === "eth", vmx = latestSituation?.vol_mult;
   const strip = el("ofabRule");
@@ -9945,7 +9946,7 @@ function volMultTip(v) {
     + `<br>직전 24시간 변동성 ${s.toFixed(0)}bp(4시간 척도) · 1배 기준 121bp · 범위 ×0.33~×3.9`
     + `<br>변동성이 클 때 크게, 작을 때 작게: 조용한 장의 44bp 역행은 추세의 시작이라 물타기가 물린다`
     + `<br>(핑퐁 물타기 재현 4.7년: 낮은 3분위 건당 −15bp · 높은 3분위 +14bp · 실원장 최대 낙폭 −$549 → −$204)`
-    + `<br>사후 발견 · 전진 검정 중(1차 판정 2027-04) · 크게 들어갈 땐 명목 상한(순자산 6배)과 함께</div>`;
+    + `<br>사후 발견 · 전진 검정 중(1차 판정 2027-04) · 크게 들어갈 땐 명목 상한(자동 규칙 순자산 3배)과 함께</div>`;
 }
 function renderVolMult() {
   const v = activeSnapshotAsset === "eth" ? latestSituation?.vol_mult : null;

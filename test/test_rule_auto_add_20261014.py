@@ -21,12 +21,12 @@ from offline_app import offline_app  # noqa: E402
 
 from dashboard import server  # noqa: E402
 from scripts import live_manual_peg_execute_20260912 as ex  # noqa: E402
-from scripts.live_manual_peg_entry_20260912 import REC_ADD_DIST, REC_FIRST_SHARE  # noqa: E402
+from scripts.live_manual_peg_entry_20260912 import REC_ADD_DIST, REC_FIRST_SHARE, RULE_STOP_PCT  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 
 SYM = server.MANUAL_EXEC_SYMBOLS["eth"]
-L = 4 * 0.303 * 10.26 * 0.45         # 12.435 × 권장배수 0.45 = 5.596(청산 안전 10.6·상한 6 이 안 묶음 -- 10-14 상한 10→6)
-VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.45}   # 10-14 상한 6 아래(5.596)로 -- «노출 맞춤» 경로를 그대로 시험
+L = 3.0                               # 10-14 권장 B: 12.435 × 권장배수 0.45 = 5.596 > 상한 3 → L = 3
+VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.45}
 ACCT = {"ok": True, "balance": {"margin": 1000.0, "initial_margin": 0.0, "available": 1000.0, "unrealized": 0.0},
         "positions": [], "leverage_by_symbol": {SYM: 20.0}, "trips": []}
 
@@ -67,7 +67,7 @@ class AutoAddTest(unittest.TestCase):
             p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")).json())["plan"]
             r = p["rule"]
             self.assertTrue(r["first"])
-            anchor = r["sl_price"] / 0.97
+            anchor = r["sl_price"] / (1 - RULE_STOP_PCT)
             self.assertAlmostEqual(r["add"]["price"], math.floor(anchor * (1 - REC_ADD_DIST) / 0.01 + 1e-9) * 0.01, places=6)
             self.assertAlmostEqual(r["add"]["notional"], (1 - REC_FIRST_SHARE) * 1000 * L, delta=6.0)   # 남은 2/3
         self._run(fn)
@@ -101,7 +101,7 @@ class AutoAddTest(unittest.TestCase):
                 st = (await (await c.get("/api/manual-entry/status")).json())["state"]
             self.assertEqual([k[0] for k in calls], ["bracket", "add"], calls)          # 손절 먼저, 물타기 지정가 한 번
             sl = calls[0][1]
-            self.assertAlmostEqual(calls[1][1], math.floor(sl / 0.97 * (1 - REC_ADD_DIST) / 0.01 + 1e-9) * 0.01, places=6)
+            self.assertAlmostEqual(calls[1][1], math.floor(sl / (1 - RULE_STOP_PCT) * (1 - REC_ADD_DIST) / 0.01 + 1e-9) * 0.01, places=6)
             self.assertAlmostEqual(calls[1][1] * calls[1][2], (1 - REC_FIRST_SHARE) * 1000 * L, delta=6.0)
             self.assertTrue(st["add_order"]["placed"], st)
             armed = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))
