@@ -1490,7 +1490,6 @@ function renderSnapshotAccount() {
       <span>미실현 <b class="${acctTone(Number(p.unrealized_pnl))}">${acctSu(Number(p.unrealized_pnl) || 0)}</b></span>
       ${p.entry_at ? `<span>보유 <b>${acctDur(now - Date.parse(p.entry_at))}</b></span>` : ""}
       ${oo.length ? `<span>걸린 주문 ${oo.map((o) => `${o.side === "BUY" ? "매수" : "매도"} ${acctPx(o.price)}×${o.qty}`).join(", ")}</span>` : ""}
-      ${acctStopHtml(A, p)}
       ${p === mine ? pvNote : ""}</div>`;
   }).join("") : `<div class="acct-posline"><span class="acct-side neutral">포지션 없음</span>${pvNote}</div>`;
 
@@ -9277,42 +9276,55 @@ function manualEntryStateText(state) {
 }
 
 // 2026-10-15 사용자 «손절 해제 버튼»(10-14 사고: 바이낸스에서 스탑만 지웠는데 서버 5분봉 종가 감시가 청산했다).
-//   서버가 무장한 손절(/api/binance-account 의 bracket_armed)을 포지션 줄에 보이고, 두 번 눌러(5초 무장) 거래소 스탑 + 서버 감시를 함께 끈다.
-//   자동 물타기 지정가는 남는다 · 다시 진입·규칙 물타기하면 손절이 다시 걸린다. 확인 방식은 «대기 취소»와 같다.
+//   서버가 무장한 손절(/api/binance-account 의 bracket_armed)을 **플로팅 버튼**에 보이고(사용자 «계좌카드 말고 플로팅 버튼 안에»),
+//   두 번 눌러(5초 무장) 거래소 스탑 + 서버 감시를 함께 끈다. 데스크탑 = 알약 안 칩(#ofabSl, 시안 B) · 휴대폰 = 패널 맨 위 칸(#ofabSlPanel, 시안 C).
+//   둘 다 같은 data-sl-off 핸들러 -- 어느 쪽을 보일지는 CSS(720px)가 고른다. 자동 물타기 지정가는 남고, 다시 진입·규칙 물타기하면 손절이 다시 걸린다.
 let slOffArmedKey = null, slOffArmT = 0, slOffBusyKey = null;
-const slOffMsg = {};   // 키 → {text, tone, until} -- 계좌 카드가 다시 그려져도 결과 문구를 잠깐 남긴다
 const SL_OFF_TIP = "거래소의 손절 스탑과 서버의 5분봉 종가 손절을 함께 끕니다. 자동 물타기 지정가는 남고, 다시 진입·물타기하면 손절이 다시 걸립니다";
-function acctStopHtml(A, p) {
-  const k = `${p.symbol}:${p.side}`, ba = (A.bracket_armed || {})[k], m = slOffMsg[k];
-  const note = m && Date.now() < m.until ? ` <em class="${m.tone}">${escapeHtml(m.text)}</em>` : "";
-  if (!ba) return note ? `<span>${note}</span>` : "";
-  if (ba.sl_off) return `<span title="${escapeHtml(SL_OFF_TIP)}"><em class="warn">손절 없음 · 해제함</em>${note}</span>`;
-  if (!ba.sl_price) return note ? `<span>${note}</span>` : "";
-  const armed = slOffArmedKey === k, busy = slOffBusyKey === k;
-  const label = busy ? "해제 중…" : armed ? "한 번 더 = 손절 해제" : "손절 해제";
-  return `<span class="acct-sl">손절 <b>${acctPx(ba.sl_price)}</b>${ba.sl_name ? ` ${escapeHtml(ba.sl_name)}` : ""}`
-    + ` <button type="button" class="notify-btn small${armed && !busy ? " arm" : ""}" data-sl-off="${escapeHtml(k)}" title="${escapeHtml(SL_OFF_TIP)}"${busy ? " disabled" : ""}>${label}</button>${note}</span>`;
+const SL_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>';
+const SL_ICO_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m2 2 20 20"/><path d="M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 7.67 8.94a1 1 0 0 0 .67.01c2.35-.82 4.48-1.97 5.9-3.71"/><path d="M9.309 3.652A12.252 12.252 0 0 0 11.24 2.28a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1v7a9.784 9.784 0 0 1-.08 1.264"/></svg>';
+function renderOfabSl(p) {
+  const chip = el("ofabSl"), box = el("ofabSlPanel");
+  if (!chip || !box) return;
+  const k = p && Number(p.qty) ? `${p.symbol}:${String(p.side).toUpperCase()}` : null;
+  const ba = k ? (latestBinanceAccount?.bracket_armed || {})[k] : null;
+  chip.hidden = box.hidden = !ba || !(ba.sl_off || ba.sl_price);
+  if (chip.hidden) return;
+  const off = !!ba.sl_off, armed = slOffArmedKey === k, busy = slOffBusyKey === k, px = off ? "" : acctPx(ba.sl_price);
+  const mk = Number(p.mark_price) || 0, dist = mk > 0 && !off ? Math.abs(mk - ba.sl_price) / mk * 100 : null;
+  const tone = off ? " off" : busy || armed ? " arm" : "";
+  chip.className = `ofab-sl${tone}`;
+  chip.disabled = busy;   // «없음»은 눌러도 아무 일 없다(data-sl-off 빈 값) -- disabled 면 툴팁이 안 뜬다
+  chip.dataset.slOff = off ? "" : k;
+  chip.title = off ? `손절 없음 — 해제함. ${SL_OFF_TIP}` : `손절 ${px}${ba.sl_name ? ` · ${ba.sl_name}` : ""} — 두 번 누르면 해제. ${SL_OFF_TIP}`;
+  chip.setAttribute("aria-label", off ? "손절 없음(해제함)" : armed ? "한 번 더 누르면 손절 해제" : `손절 ${px} — 해제하려면 두 번 누르기`);
+  chip.innerHTML = off ? `${SL_ICO_OFF}<span>손절 없음</span>` : busy ? `${SL_ICO}<span>해제 중…</span>` : armed ? `${SL_ICO}<span>한 번 더 = 해제</span>` : `${SL_ICO}<span>${px}</span>`;
+  box.className = `ofab-slp${off ? " off" : ""}`;
+  box.innerHTML = off
+    ? `<div class="ofab-slp-head">${SL_ICO_OFF}<span>손절</span><b>없음</b><em>해제함</em></div>`
+      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑 꺼짐</span><span><i></i>서버 5분봉 감시 꺼짐</span></div>`
+      + `<p>다시 진입하면 손절이 다시 걸립니다.</p>`
+    : `<div class="ofab-slp-head">${SL_ICO}<span>손절</span><b>${px}</b>${ba.sl_name ? `<span>${escapeHtml(ba.sl_name)}</span>` : ""}${dist != null ? `<em>지금가 −${dist.toFixed(1)}%</em>` : ""}</div>`
+      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑</span><span><i></i>서버 5분봉 감시</span></div>`
+      + `<button type="button" class="ofab-slp-btn${busy || armed ? " arm" : ""}" data-sl-off="${escapeHtml(k)}" title="${escapeHtml(SL_OFF_TIP)}"${busy ? " disabled" : ""}>${busy ? "해제 중…" : armed ? "한 번 더 누르면 둘 다 해제" : "손절 해제"}</button>`;
 }
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-sl-off]");
-  if (!b || b.disabled) return;
-  const k = b.dataset.slOff, [symbol, side] = k.split(":");
+  if (!b || b.disabled || !b.dataset.slOff) return;
+  const k = b.dataset.slOff, [symbol, side] = k.split(":"), redraw = () => renderOfabSl(snapshotAccountPosition());
   if (slOffArmedKey !== k) {
-    slOffArmedKey = k; b.classList.add("arm"); b.textContent = "한 번 더 = 손절 해제";
+    slOffArmedKey = k; redraw();
     clearTimeout(slOffArmT);
-    slOffArmT = setTimeout(() => { slOffArmedKey = null; const x = document.querySelector(`[data-sl-off="${CSS.escape(k)}"]`);
-      if (x && !x.disabled) { x.classList.remove("arm"); x.textContent = "손절 해제"; } }, 5000);
+    slOffArmT = setTimeout(() => { slOffArmedKey = null; redraw(); }, 5000);
     return;
   }
-  clearTimeout(slOffArmT); slOffArmedKey = null; slOffBusyKey = k;
-  b.disabled = true; b.classList.remove("arm"); b.textContent = "해제 중…";
+  clearTimeout(slOffArmT); slOffArmedKey = null; slOffBusyKey = k; redraw();
   try {
     const r = await (await fetch(`/api/manual-bracket/disarm?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(symbol)}&confirm=1`,
       { method: "POST", cache: "no-cache" })).json();
-    slOffMsg[k] = r.ok ? { text: "거래소 스탑·서버 감시 해제됨", tone: "warn", until: Date.now() + 15000 }
-      : { text: `손절 해제 못 함: ${r.detail || r.error}`, tone: "bad", until: Date.now() + 30000 };
+    ofabSay(r.ok ? "손절 해제 — 거래소 스탑·서버 5분봉 감시 둘 다 꺼짐" : escapeHtml(`손절 해제 못 함: ${r.detail || r.error}`), r.ok ? "" : "bad");
   } catch (err) {
-    slOffMsg[k] = { text: `손절 해제 못 함: ${err && err.message ? err.message : err}`, tone: "bad", until: Date.now() + 30000 };
+    ofabSay(escapeHtml(`손절 해제 못 함: ${err && err.message ? err.message : err}`), "bad");
   } finally {
     slOffBusyKey = null;
     refreshBinanceAccount(true);
@@ -9903,6 +9915,7 @@ function renderOfab() {
   if (flat && tg) { flat.hidden = !!qty; tg.hidden = !qty; }
   box.classList.toggle("long", side === "LONG");
   box.classList.toggle("short", side === "SHORT");
+  renderOfabSl(p);
   renderOfabRule(bal, live);
 }
 // 2026-10-09 B안(사용자 선택): 위 띠 = #snapRule 과 같은 값 · 자동이면 버튼 안에 «첫 $ · 손절 가격».

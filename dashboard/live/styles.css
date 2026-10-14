@@ -1491,8 +1491,6 @@ svg {
 .acct-posline em { font-style: normal; }
 .acct-side { font: 700 12px/1 var(--font-sans); padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, currentColor 16%, transparent); }
 .acct-side.neutral { color: var(--muted); }
-.acct-sl { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }   /* 2026-10-15 서버 무장 손절 + «손절 해제» */
-.acct-sl .notify-btn { align-self: center; }
 .acct-pv { margin-left: auto; border-left: 1px solid var(--soft-line); padding-left: 12px; }
 .acct-today { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; align-items: start;
   padding: 14px 16px; border-radius: var(--radius-sm); background: var(--glass); }
@@ -1654,7 +1652,7 @@ svg {
 .manual-wait .entry-note.live { border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent); font-variant-numeric: tabular-nums; }
 .manual-wait .wait-acts { justify-content: flex-start; gap: 8px; margin: 0; }
 .manual-wait .wait-acts[hidden] { display: none; }
-#snapWaitMarket.arm, #snapEntryResult [data-entry-cancel].arm, #snapAcctPosition [data-sl-off].arm { border-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--amber); }
+#snapWaitMarket.arm, #snapEntryResult [data-entry-cancel].arm { border-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--amber); }
 .manual-entry-result .wait-acts { justify-content: flex-start; margin: 8px 0 0; }   /* 2026-10-11 따라가기 진입 «대기 취소» -- 기다리기 상자와 같은 줄 */
 .vol-mult { display: inline-flex; align-items: baseline; gap: 5px; min-height: 24px; padding: 4px 8px; border: 1px solid var(--soft-line);
   border-radius: 7px; background: var(--glass); cursor: help; white-space: nowrap; }
@@ -2875,6 +2873,34 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-wait[hidden] { display: none; }
 .ofab-wait:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (pointer: coarse) { .ofab-wait { min-height: 36px; } }
+/* 2026-10-15 서버 무장 손절 -- 데스크탑 = 알약 안 칩(시안 B) · 휴대폰(≤720px) = 패널 맨 위 칸(시안 C). 같은 [data-sl-off] 핸들러. */
+.ofab-sl { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px 0 8px; margin-right: 2px;
+  border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted);
+  font: 700 11px/1 var(--font-mono); white-space: nowrap; cursor: pointer; }
+.ofab-sl svg, .ofab-slp-head svg { width: 13px; height: 13px; flex: none; }
+.ofab-sl:hover { border-color: var(--hover-line); color: var(--text); }
+.ofab-sl.arm, .ofab-slp-btn.arm { border-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 12%, transparent); }
+.ofab-sl.arm, .ofab-sl.off { font-family: var(--font-sans); }
+.ofab-sl.off { border-style: dashed; border-color: color-mix(in srgb, var(--amber) 60%, transparent); color: var(--amber); cursor: default; }
+.ofab-sl:focus-visible, .ofab-slp-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ofab-sl[hidden], .ofab-slp[hidden] { display: none; }
+.ofab-slp { padding: 12px 14px; border-bottom: 1px solid var(--soft-line); font: 12px/1.35 var(--font-sans); color: var(--muted); }
+.ofab-slp-head { display: flex; align-items: center; gap: 8px; }
+.ofab-slp-head svg { width: 14px; height: 14px; color: var(--text); }
+.ofab-slp-head b { font: 700 15px/1 var(--font-mono); color: var(--text); }
+.ofab-slp-head em { font: 600 12px/1 var(--font-mono); font-style: normal; margin-left: auto; }
+.ofab-slp-layers { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 10px; }
+.ofab-slp-layers span { display: inline-flex; align-items: center; gap: 6px; }
+.ofab-slp-layers i { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+.ofab-slp p { margin: 0; }
+.ofab-slp-btn { width: 100%; min-height: 44px; border-radius: 10px; border: 1px solid var(--line); background: transparent;
+  color: var(--text); font: 600 13px/1 var(--font-sans); cursor: pointer; }
+.ofab-slp.off .ofab-slp-head svg, .ofab-slp.off .ofab-slp-head b { color: var(--amber); }
+.ofab-slp.off .ofab-slp-layers i { background: transparent; border: 1px solid var(--amber); }
+@media (pointer: coarse) { .ofab-sl { min-height: 36px; } }
+@media (max-width: 720px) { .ofab-sl { display: none !important; } }
+@media (min-width: 721px) { .ofab-slp { display: none !important; } }
 /* 화살표 = 패널이 열릴 쪽(사용자 선택 A). 위로 여는 자리(.up)면 위를 보고, 펼친 동안은 뒤집힌다. */
 .ofab.up .ofab-more svg, .ofab-more[aria-expanded="true"] svg { transform: rotate(180deg); }
 .ofab.up .ofab-more[aria-expanded="true"] svg { transform: none; }
