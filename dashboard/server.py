@@ -3882,6 +3882,7 @@ def make_app() -> web.Application:
                     raise
                 except Exception as exc:  # noqa: BLE001
                     situation_state["now"] = {"ok": False, "reason": repr(exc)[:160]}
+                    print(f"situation {asset}: {exc!r}"[:240], flush=True)   # 2026-10-15 재기동 직후 원인이 로그에 안 남았다
             await asyncio.sleep(MICRO_REF_POLL_SECONDS)
 
     async def chip_score_loop() -> None:
@@ -4220,11 +4221,8 @@ def make_app() -> web.Application:
         loop = asyncio.get_running_loop()
         situation_state, sym = cctx[asset].situation_state, flows[asset].spec.symbol.lower()
         # 느린 입력은 캐시로 (캔들 60초 · 5분봉 하루 60초 · 호가 요약 5초)
-        situation_state["candles"] = await load_market_history(asset)
-        try:
-            situation_state["btc_candles"] = await load_market_history("btc")   # 같은 캐시 프레임에서 자른다
-        except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
-            situation_state["btc_candles"] = None
+        # 🔴2026-10-15 5분봉 하루 + 권장 배수를 **캔들 기록보다 먼저**: 재기동 직후 load_market_history 가 예외를 내면 이 회차가 통째로 멈춰
+        #   권장 배수가 몇 분간 None 이었고 자동 진입이 «권장 배수 없음»으로 막혔다(00:57 재기동 뒤 ~3분 실측). 배수는 5분봉 300개만 있으면 된다.
         try:
             situation_state["candles_day"] = await load_5m_day(int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS, asset)
         except Exception as exc:  # noqa: BLE001 -- 없으면 카드 캐시(짧다)로 물러선다
@@ -4232,6 +4230,11 @@ def make_app() -> web.Application:
         if asset == "eth":   # 권장 배수(ETH 에서만 검정) -- 완결 봉 289개가 이어져야 값이 있다(없으면 None = 화면 «—»)
             situation_state["vol_mult"] = fr.vol_size_mult(
                 [c for c in situation_state.get("candles_day") or [] if int(c["time"]) < int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS])
+        situation_state["candles"] = await load_market_history(asset)
+        try:
+            situation_state["btc_candles"] = await load_market_history("btc")   # 같은 캐시 프레임에서 자른다
+        except Exception:  # noqa: BLE001 -- BTC 가 없으면 그 라벨만 빠진다
+            situation_state["btc_candles"] = None
         # 2026-09-24 max_stale 30: 둘 다 duckdb 읽기라 회당 0.4~0.5초(서버 로그)인데 블로킹이면 5초마다
         #   1초 루프가 그만큼 멈췄다(실측 slow tick oi5m+liq5m=1.00~1.25s). 입력이 5분봉이라 몇 초
         #   묵은 값으로 충분하다. 30초를 넘기면(읽기가 계속 실패) 다시 기다린다.
