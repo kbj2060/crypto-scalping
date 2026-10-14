@@ -436,6 +436,8 @@ def bracket_action(armed: dict, position_side: str, positions: list[dict], accou
                and abs(float(p.get("qty") or 0.0)) > 0 for p in positions or [])
     if account_ok and not held and account_ts > float(armed["armed_at"]) + 5:
         return "clear"
+    if armed.get("sl_off"):   # 2026-10-15 «손절 해제» 버튼: 5분봉 종가 손절도 끈다(닫히면 남은 물타기 정리는 계속)
+        return "hold"
     return "fire" if bracket_sl_hit(position_side, last_bar, armed) else "hold"
 
 
@@ -463,7 +465,9 @@ def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
         if out.get(side, {}).get("armed_at") != armed_at:
             continue
         if side in mine:
-            out[side] = mine[side]
+            # 2026-10-15 감시 틱이 도는 사이 «손절 해제»가 들어오면 그 표시를 지우지 않는다(틱은 해제 전 사본을 들고 있다)
+            off = out.get(side, {}).get("sl_off")
+            out[side] = {**mine[side], "sl_off": off} if off and not mine[side].get("sl_off") else mine[side]
         else:
             out.pop(side)
     return out
@@ -985,6 +989,14 @@ def _self_check_rec_rule() -> None:
     assert sd and sd["price"] == 2518.75 and abs(sd["notional"] - 4000.0) < 3.0, sd
     assert rec_rule_add_order(position_side="LONG", sl_price=2375.0, stop_pct=0.05, l_eff=3.0, cap_notional=6000.0, room_before=2000.0,
                               filled_qty=0.8, order_leverage=10, filters=f2) is None                  # 다른 포지션이 여유를 다 먹음
+    # 2026-10-15 «손절 해제»: sl_off 면 SL 이탈이어도 hold · 포지션이 사라지면 여전히 clear · 감시 틱 병합이 표시를 안 지운다
+    arm = {"symbol": "ETHUSDC", "armed_at": 0.0, "sl_level": 2400.0, "sl_off": {"at": 1.0}}
+    pos = [{"symbol": "ETHUSDC", "side": "LONG", "qty": 1.0}]
+    assert bracket_action(arm, "LONG", pos, True, 100.0, (100.0, 2390.0)) == "hold"
+    assert bracket_action({**arm, "sl_off": None}, "LONG", pos, True, 100.0, (100.0, 2390.0)) == "fire"
+    assert bracket_action(arm, "LONG", [], True, 100.0, (100.0, 2390.0)) == "clear"
+    merged = bracket_merge({"k": {"armed_at": 5.0, "sl_off": {"at": 9.0}}}, {"k": {"armed_at": 5.0, "retry_after": 1}}, {"k": 5.0})
+    assert merged["k"]["sl_off"] == {"at": 9.0} and merged["k"]["retry_after"] == 1, merged
     print("자동 규칙 통과 — 권장 B(12.4×권장배수·청산 안전 max(3σ,5%)·상한 3) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×5% · 첫 진입가 −5% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 

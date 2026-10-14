@@ -157,13 +157,14 @@ def bracket_tag(tag: str, pside: str) -> str:
 
 
 async def cancel_bracket(session, symbol: str, pside: str, key: str, secret: str,
-                         offset: int) -> dict:
+                         offset: int, *, only_sl: bool = False) -> dict:
     """이 측면에 **우리가 건** TP 지정가와 비상 스탑을 지운다. 목록을 못 읽으면 그 사실을 돌려준다
-    (못 지웠는데 «지웠다»로 넘어가면 닫힌 포지션 위에 주문이 남는다)."""
+    (못 지웠는데 «지웠다»로 넘어가면 닫힌 포지션 위에 주문이 남는다).
+    only_sl(2026-10-15 «손절 해제» 버튼) = 비상 스탑(SL_TAG algo)만 -- 자동 물타기·TP 지정가는 그대로 둔다."""
     tp_pre, sl_pre, add_pre = bracket_tag(TP_TAG, pside), bracket_tag(SL_TAG, pside), bracket_tag(ADD_TAG, pside)
     n, errors = 0, []
-    opens = await signed(session, "GET", "/fapi/v1/openOrders", {"symbol": symbol},
-                         key, secret, offset)
+    opens = [] if only_sl else await signed(session, "GET", "/fapi/v1/openOrders", {"symbol": symbol},
+                                            key, secret, offset)
     if not isinstance(opens, list):
         errors.append(f"openOrders: {opens.get('__error__') if isinstance(opens, dict) else opens}")
     for o in opens if isinstance(opens, list) else []:
@@ -183,12 +184,12 @@ async def cancel_bracket(session, symbol: str, pside: str, key: str, secret: str
     return {"cancelled": n, "errors": errors}
 
 
-async def clear_bracket(session, symbol: str, pside: str) -> dict:
-    """cancel_bracket 을 키·시계보정까지 스스로 챙겨 부른다(서버 감시 루프용)."""
+async def clear_bracket(session, symbol: str, pside: str, *, only_sl: bool = False) -> dict:
+    """cancel_bracket 을 키·시계보정까지 스스로 챙겨 부른다(서버 감시 루프 · «손절 해제» 버튼)."""
     key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
     if not (key and secret):
         return {"cancelled": 0, "errors": ["API 키가 없습니다"]}
-    return await cancel_bracket(session, symbol, pside, key, secret, await _clock_offset(session))
+    return await cancel_bracket(session, symbol, pside, key, secret, await _clock_offset(session), only_sl=only_sl)
 
 
 async def place_add_order(session, symbol: str, pside: str, price: float, qty: float) -> dict:

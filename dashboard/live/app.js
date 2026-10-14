@@ -1490,6 +1490,7 @@ function renderSnapshotAccount() {
       <span>미실현 <b class="${acctTone(Number(p.unrealized_pnl))}">${acctSu(Number(p.unrealized_pnl) || 0)}</b></span>
       ${p.entry_at ? `<span>보유 <b>${acctDur(now - Date.parse(p.entry_at))}</b></span>` : ""}
       ${oo.length ? `<span>걸린 주문 ${oo.map((o) => `${o.side === "BUY" ? "매수" : "매도"} ${acctPx(o.price)}×${o.qty}`).join(", ")}</span>` : ""}
+      ${acctStopHtml(A, p)}
       ${p === mine ? pvNote : ""}</div>`;
   }).join("") : `<div class="acct-posline"><span class="acct-side neutral">포지션 없음</span>${pvNote}</div>`;
 
@@ -9274,6 +9275,49 @@ function manualEntryStateText(state) {
   if (state?.error) rows.push(`사유: ${state.error}`);
   return rows.join("\n");
 }
+
+// 2026-10-15 사용자 «손절 해제 버튼»(10-14 사고: 바이낸스에서 스탑만 지웠는데 서버 5분봉 종가 감시가 청산했다).
+//   서버가 무장한 손절(/api/binance-account 의 bracket_armed)을 포지션 줄에 보이고, 두 번 눌러(5초 무장) 거래소 스탑 + 서버 감시를 함께 끈다.
+//   자동 물타기 지정가는 남는다 · 다시 진입·규칙 물타기하면 손절이 다시 걸린다. 확인 방식은 «대기 취소»와 같다.
+let slOffArmedKey = null, slOffArmT = 0, slOffBusyKey = null;
+const slOffMsg = {};   // 키 → {text, tone, until} -- 계좌 카드가 다시 그려져도 결과 문구를 잠깐 남긴다
+const SL_OFF_TIP = "거래소의 손절 스탑과 서버의 5분봉 종가 손절을 함께 끕니다. 자동 물타기 지정가는 남고, 다시 진입·물타기하면 손절이 다시 걸립니다";
+function acctStopHtml(A, p) {
+  const k = `${p.symbol}:${p.side}`, ba = (A.bracket_armed || {})[k], m = slOffMsg[k];
+  const note = m && Date.now() < m.until ? ` <em class="${m.tone}">${escapeHtml(m.text)}</em>` : "";
+  if (!ba) return note ? `<span>${note}</span>` : "";
+  if (ba.sl_off) return `<span title="${escapeHtml(SL_OFF_TIP)}"><em class="warn">손절 없음 · 해제함</em>${note}</span>`;
+  if (!ba.sl_price) return note ? `<span>${note}</span>` : "";
+  const armed = slOffArmedKey === k, busy = slOffBusyKey === k;
+  const label = busy ? "해제 중…" : armed ? "한 번 더 = 손절 해제" : "손절 해제";
+  return `<span class="acct-sl">손절 <b>${acctPx(ba.sl_price)}</b>${ba.sl_name ? ` ${escapeHtml(ba.sl_name)}` : ""}`
+    + ` <button type="button" class="notify-btn small${armed && !busy ? " arm" : ""}" data-sl-off="${escapeHtml(k)}" title="${escapeHtml(SL_OFF_TIP)}"${busy ? " disabled" : ""}>${label}</button>${note}</span>`;
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-sl-off]");
+  if (!b || b.disabled) return;
+  const k = b.dataset.slOff, [symbol, side] = k.split(":");
+  if (slOffArmedKey !== k) {
+    slOffArmedKey = k; b.classList.add("arm"); b.textContent = "한 번 더 = 손절 해제";
+    clearTimeout(slOffArmT);
+    slOffArmT = setTimeout(() => { slOffArmedKey = null; const x = document.querySelector(`[data-sl-off="${CSS.escape(k)}"]`);
+      if (x && !x.disabled) { x.classList.remove("arm"); x.textContent = "손절 해제"; } }, 5000);
+    return;
+  }
+  clearTimeout(slOffArmT); slOffArmedKey = null; slOffBusyKey = k;
+  b.disabled = true; b.classList.remove("arm"); b.textContent = "해제 중…";
+  try {
+    const r = await (await fetch(`/api/manual-bracket/disarm?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(symbol)}&confirm=1`,
+      { method: "POST", cache: "no-cache" })).json();
+    slOffMsg[k] = r.ok ? { text: "거래소 스탑·서버 감시 해제됨", tone: "warn", until: Date.now() + 15000 }
+      : { text: `손절 해제 못 함: ${r.detail || r.error}`, tone: "bad", until: Date.now() + 30000 };
+  } catch (err) {
+    slOffMsg[k] = { text: `손절 해제 못 함: ${err && err.message ? err.message : err}`, tone: "bad", until: Date.now() + 30000 };
+  } finally {
+    slOffBusyKey = null;
+    refreshBinanceAccount(true);
+  }
+});
 
 // 2026-10-11 «따라가기» 진입이 거래소에 걸려 있는 동안(peg · 120초 뒤 잔량 시장가) «대기 취소» -- 기다리기 상자(#snapWait)와 같은 줄 문법.
 //   취소는 남은 수량을 안 사는 쪽이라 위험을 줄이지만, 노리던 진입을 버리는 것이라 «지금 시장가»처럼 두 번(5초 무장).

@@ -6221,13 +6221,21 @@ def make_app() -> web.Application:
                 if time.monotonic() - binance_account_cache.get("ts", 0.0) > 1.0:
                     binance_account_cache["payload"] = await _timed_produce("binance_account", produce_account)
                     binance_account_cache["ts"] = time.monotonic()
-            return web.json_response(binance_account_cache["payload"], headers=NOCACHE)
+            return web.json_response(with_bracket(binance_account_cache["payload"]), headers=NOCACHE)
         payload = await swr_cached(
             "binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
             cache=binance_account_cache,
             max_stale=STALE_GRACE_SECONDS,
         )
-        return web.json_response(payload, headers=NOCACHE)
+        return web.json_response(with_bracket(payload), headers=NOCACHE)
+
+    def with_bracket(payload: Any) -> Any:
+        """2026-10-15 계좌 카드가 «서버가 무장한 손절»을 보여 주도록(10-14 사고: 바이낸스에서 스탑만 지웠는데 5분봉 종가 감시가 청산) --
+        무장 파일의 화면용 몇 칸만 얹는다(캐시된 계좌 payload 는 건드리지 않는다)."""
+        if not isinstance(payload, dict):
+            return payload
+        armed = {k: {f: v.get(f) for f in ("sl_price", "sl_name", "sl_off", "rule")} for k, v in bracket_load().items()}
+        return {**payload, "bracket_armed": armed}
 
     def effective_cap(sizing: dict[str, Any], equity: float,
                       safe_mae_pct: float | None) -> tuple[float | None, str | None, dict]:
@@ -6457,6 +6465,8 @@ def make_app() -> web.Application:
                 continue
             if (act != "fire" or manual_entry_state.get("phase") in ("working", "submitting")
                     or time.time() < float(b.get("retry_after") or 0)):
+                continue
+            if (bracket_load().get(key) or {}).get("sl_off"):   # 2026-10-15 위 await 사이 «손절 해제»가 들어왔으면 쏘지 않는다
                 continue
             plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth")
             if err and err[0].get("error") == "no_position":     # 이미 닫혔다 -- 정리하고 내린다
@@ -7162,6 +7172,38 @@ def make_app() -> web.Application:
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
                                  headers=NOCACHE)
 
+    async def api_manual_bracket_disarm(request: web.Request) -> web.Response:
+        """2026-10-15 사용자 «손절 해제 버튼»(10-14 사고: 바이낸스에서 스탑만 지웠는데 서버 5분봉 종가 감시가 청산했다).
+        이 측면의 **우리** 비상 스탑(dbsl algo)을 거래소에서 지우고, 무장에 sl_off 를 남겨 감시가 손절을 쏘지 않게 한다.
+        자동 물타기 지정가·TP 는 그대로 두고, 포지션이 닫히면 감시가 평소처럼 정리한다. 다시 무장(새 진입·규칙 물타기)하면 손절이 다시 걸린다.
+        🔴거래소 취소가 실패하면 아무것도 안 바꾼다 -- 한 겹만 풀린 상태를 만들지 않는다. 방어는 진입과 같다: POST + confirm=1 + 게이트."""
+        if request.query.get("confirm") != "1":
+            return web.json_response({"ok": False, "error": "confirm_required", "detail": "confirm=1 이 필요합니다"}, status=400)
+        if not exec_enabled():
+            return web.json_response({"ok": False, "error": "exec_disabled",
+                                      "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"}, status=403)
+        side, symbol = request.query.get("side"), request.query.get("symbol")
+        if side not in ("LONG", "SHORT") or symbol not in set(MANUAL_EXEC_SYMBOLS.values()):
+            return web.json_response({"ok": False, "error": "bad_side", "detail": "side=LONG|SHORT · symbol 이 필요합니다"}, status=400)
+        key = bracket_key(symbol, side)
+        b = bracket_load().get(key)
+        if not b:
+            return web.json_response({"ok": False, "error": "not_armed", "detail": "서버가 무장한 손절이 없습니다"}, status=409)
+        if b.get("sl_off"):
+            return web.json_response({"ok": True, "sl_off": b["sl_off"], "already": True}, headers=NOCACHE)
+        r = await clear_bracket(binance_session(), symbol, side, only_sl=True)
+        if r.get("errors"):
+            return web.json_response({"ok": False, "error": "cancel_failed",
+                                      "detail": f"거래소 손절 취소 실패 — 손절은 그대로입니다: {'; '.join(map(str, r['errors']))}"}, status=502)
+        st = bracket_load()
+        if key not in st or st[key].get("armed_at") != b.get("armed_at"):
+            return web.json_response({"ok": False, "error": "rearmed",
+                                      "detail": "그 사이 새로 무장됐습니다 — 다시 확인하세요"}, status=409)
+        st[key]["sl_off"] = {"at": time.time(), "cancelled": int(r.get("cancelled") or 0)}
+        bracket_save(st)
+        print(f"bracket {side}: 손절 해제(사용자) 거래소 스탑 {r.get('cancelled')}개 취소 · 5분봉 감시 끔", flush=True)
+        return web.json_response({"ok": True, "sl_off": st[key]["sl_off"]}, headers=NOCACHE)
+
     async def api_manual_entry_status(request: web.Request) -> web.Response:
         """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
         보여준다. 주문은 최대 하나만 동시에 둔다."""
@@ -7389,6 +7431,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/manual-entry/status", api_manual_entry_status)
     app.router.add_post("/api/manual-entry/wait-action", api_manual_wait_action)
     app.router.add_post("/api/manual-entry/cancel", api_manual_entry_cancel)
+    app.router.add_post("/api/manual-bracket/disarm", api_manual_bracket_disarm)
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
