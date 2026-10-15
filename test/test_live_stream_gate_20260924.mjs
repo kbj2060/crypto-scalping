@@ -14,13 +14,13 @@ class FakeES {
   close() { this.closed = true; }
   emit(ev, data) { this.h[ev]({ data: JSON.stringify(data) }); }
 }
-const env = { activePageTab: "snapshot", activeSnapshotAsset: "eth", hidden: false, applied: 0, sit: 0 };
+const env = { activePageTab: "snapshot", activeSnapshotAsset: "eth", hidden: false, applied: 0 };
 const api = new Function("env", "EventSource", "Date", `
   let supply1sSince = 5, oi1sSince = 0, liq1sSince = 0, okxSupply1sSince = 0, okxOi1sSince = 0,
       okxLiq1sSince = 0, spotSupply1sSince = 0, bybitLiq1sSince = 0, latestSituation = null;
   const document = { get hidden() { return env.hidden; } };
   const flowOn = () => ["eth", "sol", "xrp"].includes(env.activeSnapshotAsset);   // app.js FLOW_ASSETS
-  const applySupply1s = () => { env.applied++; }, repaintSupply1sPanel = () => {}, renderSituation = () => { env.sit++; };
+  const applySupply1s = () => { env.applied++; }, repaintSupply1sPanel = () => {};
   Object.defineProperty(globalThis, "activePageTab", { get: () => env.activePageTab, configurable: true });
   Object.defineProperty(globalThis, "activeSnapshotAsset", { get: () => env.activeSnapshotAsset, configurable: true });
   ${src.slice(i, j)}
@@ -32,7 +32,7 @@ assert.match(opened[0].url, /^\/api\/stream\?supply=1&asset=eth&since=5&/);
 assert.equal(api.liveStreamOn(), false, "메시지 전엔 폴링을 쉬면 안 된다");
 opened[0].emit("supply", { seconds: [] });
 assert.equal(api.liveStreamOn(), true); assert.equal(env.applied, 1);
-opened[0].emit("situation", { computed_at: 1 }); assert.equal(env.sit, 1);
+opened[0].emit("situation", { computed_at: 1 });   // 값만 받아 둔다(vol_mult) -- 2026-10-15 머리 칩 제거로 그리기 없음
 now += 3500; assert.equal(api.liveStreamOn(), false, "3초 조용하면 폴링이 대신한다");
 now += 7000; api.ensureLiveStream();                        // 10.5초 침묵 -> 새로 연다
 assert.ok(opened[0].closed); assert.equal(opened.length, 2);

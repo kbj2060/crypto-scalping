@@ -209,20 +209,22 @@
       });
     }
 
-    var BK = Math.max(1, Math.round(WIN / (narrow ? 30 : 60))), nb = Math.ceil(WIN / BK), vb = [], vmax = 1;   // 거래 막대
+    // 2026-10-15 사용자 «지난 거래량 막대가 매초 위아래로 흔들림»: 묶음 경계를 화면 왼쪽 끝(t0, 매초 움직임) 대신 시계 정각(BK 배수)에 고정 -- 지난 막대 값은 그대로, 왼쪽으로 미끄러지기만
+    var BK = Math.max(1, Math.round(WIN / (narrow ? 30 : 60))), k0 = Math.floor(t0 / BK), nb = Math.floor(tEnd / BK) - k0 + 1, vb = [], vmax = 1;   // 거래 막대
     for (var i = 0; i < nb; i++) vb.push([0, 0]);
-    rows.forEach(function (x) { var b = vb[Math.min(nb - 1, Math.floor((x.t - t0) / BK))]; b[0] += x.b; b[1] += x.s; });
+    rows.forEach(function (x) { var b = vb[Math.min(nb - 1, Math.max(0, Math.floor(x.t / BK) - k0))]; b[0] += x.b; b[1] += x.s; });
     vb.forEach(function (b) { vmax = Math.max(vmax, b[0], b[1]); });
     var vs = nice(vmax / 2), vtop = vs * Math.ceil(vmax / vs), yV = function (val) { return base - val / vtop * (VH - 2); };
     g.lineWidth = 1; g.strokeStyle = C.line; g.globalAlpha = 0.82;      // 5분 차트 .chart-grid
     for (var gv = vs; gv <= vtop + 1e-9; gv += vs) { var gy = Math.round(yV(gv)) + 0.5; g.beginPath(); g.moveTo(L0, gy); g.lineTo(L0 + PW, gy); g.stroke(); }
     g.globalAlpha = 1;
-    var bw2 = PW / nb, hw = Math.max(1, bw2 * 0.39);
+    var bw2 = PW * BK / WIN, hw = Math.max(1, bw2 * 0.39);
+    g.save(); g.beginPath(); g.rect(L0, vy0, PW, VH + 1); g.clip();                  // 양 끝 막대는 화면 경계에서 잘림
     vb.forEach(function (b, i2) {
-      var x = L0 + i2 * bw2 + bw2 * 0.11, hb = base - yV(b[0]), hs = base - yV(b[1]);
+      var x = X((k0 + i2) * BK) + bw2 * 0.11, hb = base - yV(b[0]), hs = base - yV(b[1]);
       g.globalAlpha = 0.86; g.fillStyle = good; g.fillRect(x, base - hb, hw, hb); g.fillStyle = bad; g.fillRect(x + hw, base - hs, hw, hs);
     });
-    g.globalAlpha = 1;
+    g.restore(); g.globalAlpha = 1;
 
     var ly = Y(last), ps = nice((hi - lo) / Math.max(3, PH / 70)), dec = Math.max(0, -Math.floor(Math.log(ps) / Math.LN10 + 1e-9));
     if (!narrow) {                                                                     // 휴대폰 = 오른쪽 라벨 없음 · 위 «현재가»만(사용자 2026-10-13)

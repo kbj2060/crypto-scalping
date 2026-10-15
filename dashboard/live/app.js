@@ -654,7 +654,7 @@ async function setActiveSnapshotAsset(asset) {
   latestMarketCtx = null; marketCtxLastFetchAt = 0; latestTrend = null; trendLastFetchAt = 0;
   latestPaper = null; paperLastFetchAt = 0;   // 2026-10-04 모의 엔진도 코인별(paper_<coin>/)
   latestBreakoutDetector = null; breakoutDetectorLastFetchAt = 0;   // 경보기·RVOL 배지도 코인별
-  renderMarketCtx(); renderSituation();   // 옛 코인 카드·칩을 다음 폴링(최대 1초)까지 두지 않는다
+  renderMarketCtx();   // 옛 코인 카드를 다음 폴링(최대 1초)까지 두지 않는다
   renderPaper();
 
   // ⭐await보다 먼저 -- 스켈레톤은 첫 fetch가 나가기 전에 이미 화면에 올라가 있어야 한다.
@@ -3398,7 +3398,6 @@ function ensureLiveStream() {
     if (es !== liveStream) return;
     liveStreamAt = Date.now();
     try { latestSituation = JSON.parse(ev.data); } catch (e) { return; }
-    renderSituation();
   });
   // 🔴브라우저 자동 재연결은 **처음 URL(옛 커서)** 로 붙는다 -- 닫고 5초 뒤 현재 커서로 연다
   //   (막힌 환경에서 틱마다 실패를 반복하지 않게. 그동안은 폴링이 받는다).
@@ -3970,7 +3969,6 @@ async function refreshSituation() {
     console.error("Situation fetch error:", error);
     latestSituation = { now: { ok: false, reason: "fetch_failed" } };
   }
-  renderSituation();
 }
 
 async function refreshTrend() {
@@ -3988,7 +3986,6 @@ async function refreshTrend() {
   }
   if (asset !== activeSnapshotAsset) return;   // 그 사이 코인이 바뀌었다
   latestTrend = got;
-  renderSituation();
 }
 
 // 2026-10-15 ⑤ 예측 판 «4h 방향»(ETH, /api/dir4h = scripts/live_eth_dir4h_20261015 · 서버 5분 캐시) -- 참고용
@@ -4059,7 +4056,6 @@ async function refreshDirSig() {
     const res = await fetch("/api/dir-signals", { cache: "no-cache" });
     if (res.ok) latestDirSig = await res.json();
   } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
-  renderSituation();
 }
 
 // ── 시장 맥락 (2026-09-29, ETH) ───────────────────────────────────────────
@@ -4207,7 +4203,6 @@ async function refreshMarketCtx() {
   if (asset !== activeSnapshotAsset) return;   // 그 사이 코인이 바뀌었다
   latestMarketCtx = got;
   renderMarketCtx();
-  renderSituation();   // 머리 칩 «30분 닿음»도 같은 응답
 }
 
 async function refreshPaper() {
@@ -4616,10 +4611,7 @@ function trendFlipLevels(footprint, candles) {
     dashed: true, width: 1, marker: !!footprint }));
 }
 
-// 2026-09-30 사용자 «30분 시나리오를 풋프린트로»(시안 A — 레짐·권장 크기 칩과 검증 꼬리표는 뺌): 30분 칸을 없애고
-//   ① 차트 머리 칩 둘(큰 방향 5표 · 융합 신호) ② 가격판 «30분 도달 선»(renderCandleSvg)으로 옮겼다.
-//   5표 표(기간·기준가·지금 대비·뒤집힘)는 추세 칩 툴팁, 역추세 보유면 칩이 주황. 서버 계산·SSE(latestSituation)는 그대로.
-//   큰 방향 = UTC 00시 일봉 종가를 7·14·28·56·90일 전과 비교한 5표(dashboard/trend_rule.py). 융합 칩은 2026-10-05 제거.
+// 2026-10-15 사용자 «풋프린트 카드의 추세와 예측 칩 제거»: 머리 칩(#sitChips·renderSituation)을 지웠다 -- 같은 값은 시장 맥락 ⑤ 예측 줄에 있다(latestTrend·latestDirSig).
 // 2026-10-14 아티팩트 댓글 «풋프린트 상단이 청산맵·체결 버블 상단과 크기가 안 맞아 -- 통일»: 넓은 화면 풋프린트의 그래프 상단을 그 둘(캔버스 위 여백 22)과
 //   같은 높이로 내리고(FP_TOP_ALIGN), 청산 밀도 범례를 .lqp-legend 와 같은 11px·카드 왼쪽 17px 로 둔다.
 const FP_TOP_ALIGN = 26;
@@ -4630,51 +4622,6 @@ function fpLegendGeom(svg) {   // {x0: SVG 좌표의 범례 시작, w: 범례 �
   const c = el("fpCard")?.getBoundingClientRect(), a = svg.getBoundingClientRect();
   const x0 = c ? 17 - (a.left - c.left) : 0;
   return { x0, w: measureTextW("청산 밀도", FP_LEG_FONT) + 10 + measureTextW("낮음", FP_LEG_FONT) + 6 + 160 + 6 + measureTextW("높음", FP_LEG_FONT) };
-}
-
-function renderSituation() {
-  const box = el("sitChips");
-  if (!box) return;
-  const eth = activeSnapshotAsset === "eth";
-  const t = latestTrend && latestTrend.ok ? latestTrend : null;
-  const ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
-  const pxf = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: v >= 100 ? 0 : 2 });
-  const cls = (s) => (s > 0 ? "up" : s < 0 ? "dn" : "flat");
-  const word = (s) => (s > 0 ? "▲ 상승" : s < 0 ? "▼ 하락" : "의견 없음");
-  const zf = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
-  const seg = (c, tip, hz, mid, tail) => `<span class="ds-seg ${c}" title="${escapeHtml(tip)}"><span class="ds-hz">${hz}</span>${mid}<span class="ds-run">${tail}</span></span>`;
-  // 일 단위 신호(z ≥ +1 상승 · ≤ −1 하락 · 사이 의견 없음): 판정 · 최근 21일 상태 띠 · 지속 일수(의견 없음이면 z)
-  const dsSeg = (g, hz, tip) => {
-    if (!g || !g.ok) return seg("flat", `${tip}\n데이터 대기${g && g.reason ? ` (${g.reason})` : ""}`, hz, "<b>-</b>", "");
-    const k = Number(ds.k) || 1, st = (v) => (v >= k ? 1 : v <= -k ? -1 : 0);
-    const strip = `<span class="ds-strip" aria-hidden="true">${g.hist.map((h) => `<i class="${cls(st(h[1]))}"></i>`).join("")}</span>`;
-    return seg(cls(g.state), `${tip}\n지금 ${zf(g.v)} (${g.date} UTC 종가) · ${g.state ? `${g.run}일째` : "문턱 ±1 안"}\n띠 = 최근 ${g.hist.length}일 상태`,
-      hz, `<b>${word(g.state)}</b>${strip}`, g.state ? `${g.run}일째` : zf(g.v));
-  };
-  const cb = dsSeg(ds.cb, "7일 예측", "코인베이스 프리미엄 7일 변화 — 미국 현물 매수세 (BTC 기준, 모든 코인 같은 값)\nz = 코인베이스 BTC ÷ 바이낸스 BTC 의 7일 평균이 한 주 동안 바뀐 양 ÷ 1년 표준편차\nz ≥ +1 → 향후 7일 상승 · z ≤ −1 → 하락 · 그 사이 예측 안 함\n2024~26 보류 1회 채점: BTC 59% · ETH 65% · 알트 56% (예측한 날 28%)\n참고용 — 전진 판정 전");
-  let now = "";
-  if (t) {   // 2026-10-04 코인별(서버 /api/trend?asset=)
-    const up = t.signal > 0, live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), U = coinUnit();
-    const rows = t.votes.map((v) => {
-      const d = live > 0 ? (live / v.flip_price - 1) * 100 : null, flip = live > 0 && (live > v.flip_price) !== v.up;
-      return `${v.L}일 · 기준가 ${pxf(v.flip_price)} · 지금 ${d == null ? "-" : `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`} · ${v.up ? "상승" : "하락"}${flip ? " (지금 가격으로 마감하면 뒤집힘)" : ""}`;
-    }).join("\n");
-    const against = ((latestBinanceAccount || {}).positions || [])
-      .filter((p) => String(p.symbol || "").startsWith(U) && Math.abs(Number(p.qty) || 0) > 0 && (p.side === "LONG") !== up);
-    const tip = `지금 추세 — 예측 아님, 지난 7~90일 «되돌아본» 상태(미래 방향 적중 48~58%, 돈은 손익 비대칭에서) · UTC 00시 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 · ${t.age_days}일째\n${rows}`
-      + (against.length ? `\n역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유${eth ? " — 원장 79왕복: 추세 쪽 +898$ vs 역추세 −468$(최악 −549$)" : ""}` : "");
-    now = seg(`${up ? "up" : "dn"}${against.length ? " warn" : ""}`, tip, "지금 추세",
-      `<b>${up ? "▲ 상승" : "▼ 하락"}</b><span class="sit-dots" aria-label="5표 중 상승 ${t.ups}">${t.votes.map((v) => `<b class="${v.up ? "u" : ""}"></b>`).join("")}</span>`,
-      `${t.age_days}일째${against.length ? " · 역추세 보유" : ""}`);
-  }
-  const z91 = dsSeg(ds.z91, "4~13주 예측", "달러·유동성 점수 Z91 — 달러 약세 + 연준 순유동성 증가\nZ = 달러지수 91일 변화(−) + 순유동성(연준 자산 − 역레포 − 재무부 계좌) 91일 변화, 각 2년 표준편차로 나눔 · 발표 지연만큼 늦춰 씀\nZ ≥ +1 → 4~13주 상승 · Z ≤ −1 → 하락 · 그 사이 예측 안 함\n2018~26 56일: BTC 70% · ETH 75% (고른 기간 성적 — 고를 때 안 본 2013~17 은 52~59%)\n참고용 — 전진 판정 2027-06 이후");
-  // 2026-10-15 옵션 칩 자리 → 지평 사다리(사용자 시안 C + 추세 칩 합침). 옛 «30분 닿음»·«융합» 칩은 2026-10-05 제거.
-  // 2026-10-15(2) 사용자 «예측과 추세를 구분»: 추세 5표는 7~90일 «되돌아본» 상태라 예측이 아니다 → 왼쪽 따로 알약 «지금 추세»,
-  //   예측 둘(앞으로 7일 · 4~13주)은 오른쪽 알약 «N 예측».
-  const h = (now ? `<span class="ds-c ds-now" role="group" aria-label="지금 추세">${now}</span>` : "")
-    + `<span class="ds-c" role="group" aria-label="방향 예측">${cb}${z91}</span>`;
-  if (box._h !== h) { box._h = h; box.innerHTML = h; }
-  box.hidden = false;
 }
 
 // ── 풋프린트 증분 (2026-09-20) ──────────────────────────────────────────
