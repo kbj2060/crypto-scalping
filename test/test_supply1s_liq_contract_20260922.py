@@ -114,7 +114,7 @@ def test_one_pane_uses_the_whole_drawing_area():
     """그리기 영역(flowH) 전부를 누적 스택이 쓴다.
 
     2026-09-28 범례가 모든 폭에서 플롯 **안 박스**로 들어가고 위 제목 줄도 없어졌다 -- 여백은
-    위 mt(6) + 바닥 시각 꼬리표 한 줄 mb(16) 뿐이다. 1단 상자 386(400 − 네 숫자 줄 14)이면 364.
+    위 mt(6) + 바닥 mb(4) 뿐이다(2026-10-16 시각 꼬리표가 첫 줄 머리 띠로 올라가 16 → 4). 1단 상자 386(400 − 네 숫자 줄 14)이면 376.
 
     🔴이 산수가 어긋나면 SVG 는 잘라주지 않는다 -- 넘치면 옆 패널을 침범하고, 모자라면
       빈 띠가 생긴다. 캔들 상자 높이 계약(styles.css)과 이 파일이 갈라져 있어 한쪽만
@@ -125,8 +125,8 @@ def test_one_pane_uses_the_whole_drawing_area():
     mt, mb = (int(g) for g in m.groups())
     sub_h = int(re.search(r"SUB_1S_H = subOn \? (\d+)", JS).group(1))
     stats = int(re.search(r"const STATS_ROW_H = subOn && !splitR \? (\d+)", JS).group(1))
-    assert sub_h - stats - mt - mb == 364, f"1단 그리기 영역이 {sub_h - stats - mt - mb}px 다(400-14-6-16=364 이어야)"
-    assert mb >= 14, "바닥 시각 꼬리표(h-3) 자리가 없다"
+    assert sub_h - stats - mt - mb == 376, f"1단 그리기 영역이 {sub_h - stats - mt - mb}px 다(400-14-6-4=376 이어야)"
+    assert "const ty = cvdY0 + 14" in JS and "axisY" not in JS, "시각 꼬리표가 머리 띠(cvdY0 + 14)가 아닌 바닥에 있다 -- mb 4 로는 자리가 없다"
     assert "const NL = 2, laneH = flowH / NL;" in JS, "두 줄이 그리기 영역(flowH)을 정확히 나눠 쓰지 않는다"
     body = JS[JS.index("function renderSupply1s"):JS.index("const STAT_KEYS = ")]
     assert "tMax" not in body and "barMax" not in body, \

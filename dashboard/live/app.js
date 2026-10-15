@@ -4793,7 +4793,8 @@ function renderSupply1s(box = null, src = null) {
   const narrow = w < 760;   // 모바일이든 좁은 상자든 여백 규칙은 같다
   // 2026-09-28 모든 폭에서 범례는 플롯 **안 박스 셋**(사용자 «거래소 3 · 크기별 3 · 신규 2»)이고 위 제목 줄도 없앴다 --
   //   mt 는 위 여백만, mb 는 바닥 시각 꼬리표(h-3) 한 줄이다. (09-27 모바일 박스가 모든 폭으로 넓어진 것)
-  const mt = 6, mb = 16;
+  // 2026-10-15 아티팩트 댓글 «봉 시작·끝 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 시각 꼬리표가 첫 줄(CVD · OI) 머리 띠로 올라가 바닥 줄(16)이 빈다 → 4
+  const mt = 6, mb = 4;
   // mr 은 오른쪽 꼬리표(고래/리테일/신규계약 + 값)가 앉는 자리다. 64 면 «신규계약 +0.4k»
   // 가 약 4px 넘친다(2026-09-19 계산) -- 72 로 두면 셋 다 들어가고 선은 8px 만 짧아진다.
   // 2026-09-22 꼬리표 글자를 키우면서 자리도 넓혔다(사용자 «많이 키워줘»).
@@ -4987,6 +4988,7 @@ function renderSupply1s(box = null, src = null) {
     if (spotOn) items.push(["현물 " + sgn(spotAcc), "var(--spot)", { color: "var(--spot)", width: 1.6, op: 0.95 }]);
     items.push(["OI " + (oiEnd == null ? "—" : sgn(oiEnd)), "var(--warn)", { color: "var(--warn)", width: 1.8, op: 0.95 }]);
     const { y0: cvdY0, zc, hh } = laneFrame(0, "CVD · OI", items);
+    let headEnd = 6 + measureTextW("CVD · OI", `700 ${narrow ? 12 : 13}px Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif`) + 10;   // 머리 띠의 시각 꼬리표는 이름(·청산 급증 배지) 뒤부터
     { // 2026-10-04 청산 급증 배지(사용자 지시 -- 계좌 카드 말고 이 차트). 판정 = 시장 맥락과 같은 mcLiqBurstSide.
       const bu = latestMarketCtx && latestMarketCtx.burst, side = activeSnapshotAsset === "eth" ? mcLiqBurstSide(bu) : null;
       if (side) {
@@ -5001,11 +5003,19 @@ function renderSupply1s(box = null, src = null) {
           + (chipScoreLine("burst") ? `\n\n${chipScoreLine("burst")}` : "");
         r.setAttribute("x", bx); r.setAttribute("y", cvdY0 + 14 - bh + 4); r.setAttribute("width", bw); r.setAttribute("height", bh); r.setAttribute("rx", bh / 2);
         r.setAttribute("fill", "var(--warn)"); r.setAttribute("fill-opacity", ".12"); r.setAttribute("stroke", "var(--warn)"); r.setAttribute("stroke-opacity", ".55");
-        g.appendChild(tt); g.appendChild(r);
+        g.appendChild(tt); g.appendChild(r); headEnd = bx + bw + 10;
         const tx = label(bx + 9, cvdY0 + 14, t1, "var(--warn)", null, fsz, g); tx.setAttribute("font-weight", "700");
         const ts = document.createElementNS(NS, "tspan"); ts.setAttribute("fill", "var(--muted)"); ts.setAttribute("font-weight", "600"); ts.textContent = t2; tx.appendChild(ts);
         svg.appendChild(g);
       }
+    }
+    { // 시각 꼬리표 = 머리 띠(봉 시작 · 끝 · 지금). 이름·배지와 겹치면 시작 꼬리표를 그 뒤로 민다
+      const hhmm = (t) => { const dd = new Date(t * 1000);
+        return String(dd.getHours()).padStart(2, "0") + ":" + String(dd.getMinutes()).padStart(2, "0"); };
+      const ty = cvdY0 + 14, t0 = hhmm(first) + " 봉 시작", x0 = Math.max(ml, headEnd), x0End = x0 + measureTextW(t0, `500 10px ${"Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif"}`) + 8;
+      label(x0, ty, t0, "var(--muted)");
+      label(ml + cw, ty, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
+      if (!narrow && now - first < SUPPLY_1S_SEGMENT * 0.82 && xAt(now) + 4 > x0End) label(xAt(now) + 4, ty, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
     }
     const csOf = (rows) => Math.max(1e-9, ...rows.map((r) => Math.abs(r.v)));
     if (cvdRows.length >= 2) line(pathOf(cvdRows, scaled(cvdRows, zc, hh, csOf(cvdRows))), "var(--ink)", 1.8, 0.9);
@@ -5071,15 +5081,6 @@ function renderSupply1s(box = null, src = null) {
 
   // 위 제목 줄은 없다(2026-09-28). 🔴스트림이 죽었을 때만 빨간 경고 -- 나이가 없으면 «죽었다»와 «조용하다»가 구별 안 된다.
   if (S.stale) label(ml + 4, flowTop + 12, S.label + (S.age ? "  ·  " + S.age : ""), "var(--bad, #e05260)");
-
-  const hhmm = (t) => { const dd = new Date(t * 1000);
-    return String(dd.getHours()).padStart(2, "0") + ":" + String(dd.getMinutes()).padStart(2, "0"); };
-  const axisY = h - 3;
-  label(ml, axisY, hhmm(first) + " 봉 시작", "var(--muted)");
-  label(ml + cw, axisY, hhmm(first + SUPPLY_1S_SEGMENT), "var(--muted)", "end");
-  if (!narrow && now - first < SUPPLY_1S_SEGMENT * 0.82) {
-    label(xAt(now) + 4, axisY, "지금 (" + (now - first) + "초 경과)", "var(--muted)");
-  }
 }
 
 // 2026-09-28 호가 요약 네 막대 계기(사용자 선택 시안 A) -- 막대마다 «이 값이 정확히 무엇인가»를 툴팁으로(사용자 지시).
@@ -7877,14 +7878,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         fs.classList.toggle("on", on);
         if (on) { const lg = fpLegendGeom(svg); fs.style.left = `${Math.round(a.left - c.left + lg.x0 + lg.w + 28)}px`; fs.style.top = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`; }
       } }
-    if (mcSplit && mcBubbleEl) { const bh = `${Math.max(120, Math.round(s1H * MC_BUBBLE_K))}px`; if (mcBubbleEl.style.height !== bh) mcBubbleEl.style.height = bh; }   // 2026-10-13 체결 버블 = 수급 차트 한 개 높이(사용자)
-    mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: floorY - (sub1sY + s1H + 12) } : null,
+    // 2026-10-15 아티팩트 댓글 «봉 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 수급 바닥 시각 줄(12px, renderSupply1s mb 16→4)을 버블에 넘긴다
+    const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give;
+    if (mcSplit && mcBubbleEl) { const bh = `${Math.max(120, Math.round(s1H * MC_BUBBLE_K) + s1Give)}px`; if (mcBubbleEl.style.height !== bh) mcBubbleEl.style.height = bh; }   // 2026-10-13 체결 버블 = 수급 차트 한 개 높이(사용자)
+    mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16, h: floorY - (sub1sY + s1Hd + 12) } : null,
             mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
               return { x: ml + cw + 4 + LANE_VAL_W, y, w: TAG_W + TRADE_W + BOOK_W - 8 - LANE_VAL_W, h: floorY - y }; })() : null);   // 10-13 왼쪽 LANE_VAL_W = 레인 값 칸
     supply1sSubBox = {
-      svg: subSvg("s1", subX, sub1sY, subW, s1H, sub1sKey(subW, s1H),
-                  (g) => renderSupply1s({ svg: g, w: subW, h: s1H })),
-      w: subW, h: s1H };
+      svg: subSvg("s1", subX, sub1sY, subW, s1Hd, sub1sKey(subW, s1Hd),
+                  (g) => renderSupply1s({ svg: g, w: subW, h: s1Hd })),
+      w: subW, h: s1Hd };
 
     // ── 청산 밀도 범례 (2026-09-21 아티팩트 댓글) ────────────────────────────
     // 전에는 헤더 행의 HTML(#liqDensityLegend)이었다. 밀도가 풋프린트의 **배경**이 된
