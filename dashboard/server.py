@@ -147,6 +147,7 @@ from dashboard import situation as sit  # noqa: E402
 # 2026-09-25 «데이터 관계 읽기» -- 지지/저항 목록 아래 문장. 순수 함수 + 자체점검. 입력은 상황 읽기와 같은 원천.
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
+from dashboard.dir_signals import dir_signals_payload  # noqa: E402 -- 풋프린트 머리 지평 사다리(2026-10-15)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
 from dashboard import market_ctx as mctx  # noqa: E402
@@ -4531,6 +4532,14 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_dir_signals(request: web.Request) -> web.Response:   # 2026-10-15 지평 사다리 7일·4~13주(코인 무관, BTC 기준)
+        """일 단위 신호 둘(dashboard/dir_signals.py) -- 하루 한 번 바뀌므로 1시간 캐시 · 원천 실패 땐 하루까지 묵은 값."""
+        try:
+            payload = await swr_cached("dir_signals", 3600.0, lambda: asyncio.to_thread(dir_signals_payload), max_stale=86400.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return web.json_response(payload, headers=NOCACHE)
+
     # 수급 커서 = 목록 키 -> 쿼리 이름. 클라(refreshSupply1s)와 같은 규칙: 받은 행의 최대 초.
     SUPPLY_CURSORS = (("seconds", "since"), ("oi", "sinceOi"), ("liq", "sinceLiq"), ("okx", "sinceOkx"),
                       ("okxOi", "sinceOkxOi"), ("okxLiq", "sinceOkxLiq"), ("spot", "sinceSpot"),
@@ -7448,6 +7457,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/micro-ref", api_micro_ref)
     app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/trend", api_trend)
+    app.router.add_get("/api/dir-signals", api_dir_signals)
     app.router.add_get("/api/market-context", api_market_context)
     app.router.add_get("/api/chip-score", api_chip_score)
     app.router.add_get("/api/notify-center", api_notify_center)

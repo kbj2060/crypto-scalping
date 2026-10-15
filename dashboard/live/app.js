@@ -396,6 +396,10 @@ const API_TREND_URL = "/api/trend";
 const TREND_POLL_MS = 60000;
 let latestTrend = null;
 let trendLastFetchAt = 0;
+// 2026-10-15 지평 사다리의 일 단위 신호 둘(/api/dir-signals, dashboard/dir_signals.py) -- 코인 무관(BTC 기준), 서버 1시간 캐시
+const DIR_SIG_POLL_MS = 600000;
+let latestDirSig = null;
+let dirSigLastFetchAt = 0;
 let latestOi5m = null;
 let oi5mLastFetchAt = 0;
 const GEX_POLL_MS = 60000;           // 2026-09-28 체인 10분 · 블록 20초(옵션 카드) -- 1분 폴링
@@ -3758,14 +3762,13 @@ function optInfoParts(o, g, kv) {
   return { move: move.join(""), mood: mood.join("") };
 }
 function renderOptions() {
-  const body = el("optBody"), chip = el("optChip");
+  const body = el("optBody");
   if (!body) return;
   const { cur, g, o, blocks } = optData();
   const row = el("optRow"), laneBody = el("optLaneBody"), blkBody = el("optBlkBody"), flowBody = el("optFlowBody");
   if (row) row.hidden = !o;
   optRowCols();
   if (!o) {
-    if (chip) chip.hidden = true;
     body.innerHTML = `<div class="opt-note">${!cur ? "Deribit 옵션은 ETH·BTC·SOL·XRP 만 수집합니다"
       : latestGex && latestGex.error ? `옵션 수집 지연 (${escapeHtml(latestGex.error)})` : "옵션 불러오는 중…"}</div>`;
     return;
@@ -3776,14 +3779,6 @@ function renderOptions() {
   const sExp = f && hrs > 0 ? optSigma(o, hrs * 3600) : null;
   const vrp = optIv(o) != null && o.rv7 != null ? optIv(o) - o.rv7 : null;   // 2026-09-30 DVOL 없는 SOL·XRP 는 30일 ATM IV(예상 폭과 같은 대체) -- 전엔 늘 «-»
   const pm = (v) => (v == null ? "-" : `±${optQ(v)}$`);
-  if (chip) {
-    chip.hidden = !f;
-    if (f) {
-      chip.textContent = `옵션 · 만기 ${optKst(f.exp_ms)} (${hrs.toFixed(0)}h) · ${optUsd(f.call_oi_usd + f.put_oi_usd)} · 24h ${pm(s1d)}`;
-      chip.classList.toggle("soon", hrs < 3);
-      chip.title = OPT_TIPS.exp;
-    }
-  }
   const kv = (k, v, cls = "") => `<div class="opt-kv"><span>${k}</span><b class="${cls}">${v}</b></div>`;
   const info = optInfoParts(o, g, kv);   // 2026-10-02 옵션 정보 → 예상 폭·심리에 나눠 넣는다
   // 칸 제목을 누르면(휴대폰 포함 -- 호버가 없다) 정의·읽는 법·우리 검정 결과가 제목 아래에 펼쳐진다. 펼침은 다시 그려도 유지.
@@ -3993,6 +3988,18 @@ async function refreshTrend() {
   }
   if (asset !== activeSnapshotAsset) return;   // 그 사이 코인이 바뀌었다
   latestTrend = got;
+  renderSituation();
+}
+
+async function refreshDirSig() {
+  if (activePageTab !== "snapshot" || document.hidden) return;
+  const now = Date.now();
+  if (now - dirSigLastFetchAt < DIR_SIG_POLL_MS) return;
+  dirSigLastFetchAt = now;
+  try {
+    const res = await fetch("/api/dir-signals", { cache: "no-cache" });
+    if (res.ok) latestDirSig = await res.json();
+  } catch (error) { /* 다음 주기에 다시 -- 받아 둔 값은 그대로 */ }
   renderSituation();
 }
 
@@ -4569,8 +4576,21 @@ function renderSituation() {
   if (!box) return;
   const eth = activeSnapshotAsset === "eth";
   const t = latestTrend && latestTrend.ok ? latestTrend : null;
+  const ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
   const pxf = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: v >= 100 ? 0 : 2 });
-  let h = "";
+  const cls = (s) => (s > 0 ? "up" : s < 0 ? "dn" : "flat");
+  const word = (s) => (s > 0 ? "▲ 상승" : s < 0 ? "▼ 하락" : "의견 없음");
+  const zf = (v) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
+  const seg = (c, tip, hz, mid, tail) => `<span class="ds-seg ${c}" title="${escapeHtml(tip)}"><span class="ds-hz">${hz}</span>${mid}<span class="ds-run">${tail}</span></span>`;
+  // 일 단위 신호(z ≥ +1 상승 · ≤ −1 하락 · 사이 의견 없음): 판정 · 최근 21일 상태 띠 · 지속 일수(의견 없음이면 z)
+  const dsSeg = (g, hz, tip) => {
+    if (!g || !g.ok) return seg("flat", `${tip}\n데이터 대기${g && g.reason ? ` (${g.reason})` : ""}`, hz, "<b>-</b>", "");
+    const k = Number(ds.k) || 1, st = (v) => (v >= k ? 1 : v <= -k ? -1 : 0);
+    const strip = `<span class="ds-strip" aria-hidden="true">${g.hist.map((h) => `<i class="${cls(st(h[1]))}"></i>`).join("")}</span>`;
+    return seg(cls(g.state), `${tip}\n지금 ${zf(g.v)} (${g.date} UTC 종가) · ${g.state ? `${g.run}일째` : "문턱 ±1 안"}\n띠 = 최근 ${g.hist.length}일 상태`,
+      hz, `<b>${word(g.state)}</b>${strip}`, g.state ? `${g.run}일째` : zf(g.v));
+  };
+  let h = dsSeg(ds.cb, "7일", "코인베이스 프리미엄 7일 변화 — 미국 현물 매수세 (BTC 기준, 모든 코인 같은 값)\nz = 코인베이스 BTC ÷ 바이낸스 BTC 의 7일 평균이 한 주 동안 바뀐 양 ÷ 1년 표준편차\nz ≥ +1 → 향후 7일 상승 · z ≤ −1 → 하락 · 그 사이 예측 안 함\n2024~26 보류 1회 채점: BTC 59% · ETH 65% · 알트 56% (예측한 날 28%)\n참고용 — 전진 판정 전");
   if (t) {   // 2026-10-04 코인별(서버 /api/trend?asset=)
     const up = t.signal > 0, live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), U = coinUnit();
     const rows = t.votes.map((v) => {
@@ -4581,14 +4601,15 @@ function renderSituation() {
       .filter((p) => String(p.symbol || "").startsWith(U) && Math.abs(Number(p.qty) || 0) > 0 && (p.side === "LONG") !== up);
     const tip = `큰 방향(1~13주) — UTC 00시 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 · ${t.age_days}일째\n${rows}`
       + (against.length ? `\n역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유${eth ? " — 원장 79왕복: 추세 쪽 +898$ vs 역추세 −468$(최악 −549$)" : ""}` : "");
-    h += `<span class="sit-chip ${up ? "up" : "dn"}${against.length ? " warn" : ""}" title="${escapeHtml(tip)}">${up ? "▲ 추세 롱" : "▼ 추세 숏"}`
-      + ` <span class="sit-dots">${t.votes.map((v) => `<b class="${v.up ? "u" : ""}"></b>`).join("")}</span> ${t.ups}/${t.votes.length} · ${t.age_days}일`
-      + `${against.length ? " · 역추세 보유" : ""}</span>`;
+    h += seg(`${up ? "up" : "dn"}${against.length ? " warn" : ""}`, tip, "1~13주",
+      `<b>${up ? "▲ 상승" : "▼ 하락"}</b><span class="sit-dots" aria-label="5표 중 상승 ${t.ups}">${t.votes.map((v) => `<b class="${v.up ? "u" : ""}"></b>`).join("")}</span>`,
+      `${t.age_days}일째${against.length ? " · 역추세 보유" : ""}`);
   }
-  // 2026-10-05 «30분 ±X% 닿음»·«융합 대기/발동» 칩 제거(사용자 «둘 다 제거»): 닿음은 보정이 맞지만(실시간 85.8→85.3%)
-  //   기저 75% 위 «조금 더 움직임»뿐이고 방향·크기가 비용 수준 · 융합은 화면처럼 5분마다 평가하면 +2.5bp CI 0 포함.
+  h += dsSeg(ds.z91, "4~13주", "달러·유동성 점수 Z91 — 달러 약세 + 연준 순유동성 증가\nZ = 달러지수 91일 변화(−) + 순유동성(연준 자산 − 역레포 − 재무부 계좌) 91일 변화, 각 2년 표준편차로 나눔 · 발표 지연만큼 늦춰 씀\nZ ≥ +1 → 4~13주 상승 · Z ≤ −1 → 하락 · 그 사이 예측 안 함\n2018~26 56일: BTC 70% · ETH 75% (고른 기간 성적 — 고를 때 안 본 2013~17 은 52~59%)\n참고용 — 전진 판정 2027-06 이후");
+  h = `<span class="ds-c" role="group" aria-label="방향 신호 · 지평 사다리">${h}</span>`;
+  // 2026-10-15 옵션 칩 자리 → 지평 사다리(사용자 시안 C + 추세 칩 합침). 옛 «30분 닿음»·«융합» 칩은 2026-10-05 제거.
   if (box._h !== h) { box._h = h; box.innerHTML = h; }
-  box.hidden = !h;
+  box.hidden = false;
 }
 
 // ── 풋프린트 증분 (2026-09-20) ──────────────────────────────────────────
@@ -8053,6 +8074,7 @@ async function tick() {
       refreshPositionProfile();      // 2026-10-10 체결 기둥 «포지션» 보기 (켤 때만 1초)
       refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
+      refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
       refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (1초 -- 10-03, ETH 만 · 서술)
       refreshPaper();                // 2026-10-04 모의 판·맞대결·벽 신호 (10초, 모의 매매 엔진 상태)
       refreshChipScore();            // 2026-10-05 머리 칩 실전 성적 (코인별 5분)
