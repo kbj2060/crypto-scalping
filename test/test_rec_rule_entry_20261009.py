@@ -95,6 +95,20 @@ class RecRuleEntryTest(unittest.TestCase):
             self.assertAlmostEqual(j2["plan"]["bracket"]["sl_price"], 2625.02, delta=0.011)   # 매도호가 2500.01 × 1.05 올림
         self._run(account([]), fn)
 
+    def test_hold_mode_caps_at_1_5(self) -> None:
+        """2026-10-16 «보유 1.5×» = rule=h -- 같은 식에 상한만 1.5. 손절·첫 1/3 그대로 · 모르는 값은 400."""
+        async def fn(c):
+            j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=h")).json()
+            self.assertTrue(j.get("ok"), j)
+            p = j["plan"]
+            self.assertAlmostEqual(p["rule"]["l"], 1.5, places=3)
+            self.assertEqual(p["rule"]["binding"], "상한")
+            self.assertAlmostEqual(p["rule"]["cap_notional"], 1000 * 1.5, delta=0.01)
+            self.assertAlmostEqual(p["notional_usdt"], REC_FIRST_SHARE * 1000 * 1.5, delta=2.6)
+            self.assertEqual(p["bracket"]["sl_price"], 2375.0)
+            self.assertEqual((await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=x")).status, 400)
+        self._run(account([]), fn)
+
     def test_low_exchange_leverage_binds_rule_l(self) -> None:
         """2026-10-13 레버리지 20→10: 거래소 레버리지 X 면 실효 L ≤ 0.9X (증거금 90%). 10-14 상한 3 이면 3배에서 2.7 < 3 이라 묶인다."""
         async def fn(c):

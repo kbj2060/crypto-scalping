@@ -14,20 +14,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.live_manual_peg_entry_20260912 import RULE_STOP_PCT, commit_rule_l  # noqa: E402
+from scripts.live_manual_peg_entry_20260912 import COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, commit_rule_l  # noqa: E402
 
 
 class RuleSizeParityTest(unittest.TestCase):
     def test_client_matches_server(self) -> None:
         js = (ROOT / "dashboard/live/app.js").read_text("utf-8")
         src = re.search(r"const RULE_STOP_PCT = [\s\S]*?\nfunction commitRuleL[\s\S]*?\n}\n", js).group(0)
-        grid = [(side, s4, vm) for side in ("LONG", "SHORT") for s4 in (5.0, 20.0, 55.21, 102.06, 250.0, 400.0) for vm in (0.2, 0.458, 1.0, 3.0)]
-        out = subprocess.run(["node", "-e", src + f"console.log(JSON.stringify({json.dumps(grid)}.map(([s, v, m]) => commitRuleL(s, v, m))))"],
+        grid = [(side, s4, vm, cap) for side in ("LONG", "SHORT") for s4 in (5.0, 20.0, 55.21, 102.06, 250.0, 400.0) for vm in (0.05, 0.2, 0.458, 1.0, 3.0)
+                for cap in (COMMIT_CAP_X, HOLD_CAP_X)]   # 10-16 «보유 1.5×»(rule=h)도 같은 식
+        out = subprocess.run(["node", "-e", src + f"console.log(JSON.stringify({json.dumps(grid)}.map(([s, v, m, c]) => commitRuleL(s, v, m, c))))"],
                              capture_output=True, text=True, check=True).stdout
-        for (side, s4, vm), c in zip(grid, json.loads(out)):
-            py = commit_rule_l(position_side=side, sigma24_bp=s4 * 6 ** 0.5, vol_mult=vm)     # 서버: σ24 = σ(4h) × √6
-            self.assertAlmostEqual(c["l"], py["l"], places=9, msg=(side, s4, vm))
-            self.assertAlmostEqual(c["sd"], py["stop_pct"], places=12, msg=(side, s4, vm))
+        for (side, s4, vm, cap), c in zip(grid, json.loads(out)):
+            py = commit_rule_l(position_side=side, sigma24_bp=s4 * 6 ** 0.5, vol_mult=vm, cap=cap)     # 서버: σ24 = σ(4h) × √6
+            self.assertAlmostEqual(c["l"], py["l"], places=9, msg=(side, s4, vm, cap))
+            self.assertAlmostEqual(c["sd"], py["stop_pct"], places=12, msg=(side, s4, vm, cap))
         today = commit_rule_l(position_side="LONG", sigma24_bp=55.21 * 6 ** 0.5, vol_mult=0.458)
         self.assertAlmostEqual(today["l"], 3.0, delta=1e-12)                           # 10-11 값(12.435 × 0.458 = 5.695)이 10-14 상한 3 에 묶인다
         self.assertEqual(today["stop_pct"], 0.05)

@@ -320,6 +320,7 @@ def bracket_keep_farther_sl(new: dict, prev: dict | None, position_side: str) ->
 RULE_STOP_PCT = 0.05
 COMMIT_UNIT_X = 4 * 0.303 * 10.26
 COMMIT_CAP_X = 3.0   # 🔴2026-10-14 사용자 «권장 B»: 6 → 3(위 RULE_STOP_PCT 주석). 옛: «상한 6배로» 10 → 6. 실원장 168왕복 재생(첫 1/3→−0.75% 2/3·손절 −3%) -- 복리 ×1.64→×1.57 · MDD −51→−36% · 손절 1회 −23→−15% · 하위 5% ×0.38→×0.60
+HOLD_CAP_X = 1.5     # 2026-10-16 사용자 «보유 1.5×»(추세 보유형): 4.5년 백테스트 -- 3×는 2022~24 −58%·MDD −87%, 1~1.5×는 같은 샤프(≈1.45)에 MDD −28~−40%(사후 권고)
 COMMIT_MMR, COMMIT_AVG_OFF, COMMIT_LIQ_BUF, COMMIT_STOP_SIG = 0.02, 0.0066, 0.005, 3.0
 REC_FIRST_SHARE = 1 / 3   # 🔴2026-10-14 사용자 «첫 1/3 → −0.75%에 2/3»: 0.75 → 1/3. 실원장 168왕복 재생(상한 9배·손절 −3%) -- 손절 1회 25.1→22.9%·MDD −70→−62%, 기대값 차 CI 0 포함(scratchpad split_entry.py)
 # 🔴2026-10-13 사용자 «레버리지 20배 → 10배»: 거래소 레버리지 X 에서 계좌 명목 L × 순자산을 열려면 증거금 L/X × 순자산이 든다.
@@ -328,8 +329,11 @@ REC_FIRST_SHARE = 1 / 3   # 🔴2026-10-14 사용자 «첫 1/3 → −0.75%에 2
 RULE_MARGIN_MAX = 0.9
 
 
-def commit_rule_l(*, position_side: str, sigma24_bp: float, vol_mult: float) -> dict[str, Any]:
-    """재생 규칙의 배수 L 과 손절 폭. **순수 함수**. L = min(COMMIT_UNIT_X × 권장배수, 청산 안전(max(3σ24, RULE_STOP_PCT)), COMMIT_CAP_X) · 손절 RULE_STOP_PCT."""
+def commit_rule_l(*, position_side: str, sigma24_bp: float, vol_mult: float, cap: float = COMMIT_CAP_X) -> dict[str, Any]:
+    """재생 규칙의 배수 L 과 손절 폭. **순수 함수**. L = min(COMMIT_UNIT_X × 권장배수, 청산 안전(max(3σ24, RULE_STOP_PCT)), cap) · 손절 RULE_STOP_PCT.
+    cap = COMMIT_CAP_X(자동 3×) 또는 HOLD_CAP_X(보유 1.5×) -- 그 밖은 거절."""
+    if cap not in (COMMIT_CAP_X, HOLD_CAP_X):
+        raise ValueError(f"bad cap: {cap!r}")
     if not (sigma24_bp > 0 and vol_mult > 0):
         raise ValueError(f"bad sigma/vol_mult: {sigma24_bp} {vol_mult}")
     sd = max(COMMIT_STOP_SIG * sigma24_bp / 1e4, RULE_STOP_PCT)   # 청산 안전용 거리(넓은 쪽)
@@ -338,7 +342,7 @@ def commit_rule_l(*, position_side: str, sigma24_bp: float, vol_mult: float) -> 
     else:
         den = (1 + COMMIT_MMR) * (1 + sd) * (1 + COMMIT_LIQ_BUF) / (1 + COMMIT_AVG_OFF) - 1
     liq = 1 / den if den > 0 else float("inf")
-    cands = {"노출 맞춤": COMMIT_UNIT_X * vol_mult, "청산 안전": liq, "상한": COMMIT_CAP_X}
+    cands = {"노출 맞춤": COMMIT_UNIT_X * vol_mult, "청산 안전": liq, "상한": cap}
     who = min(cands, key=cands.get)
     return {"l": float(cands[who]), "stop_pct": RULE_STOP_PCT, "binding": who}
 
@@ -911,6 +915,8 @@ def _self_check_rec_rule() -> None:
     low = commit_rule_l(position_side="LONG", sigma24_bp=55.21 * 6 ** 0.5, vol_mult=0.2)          # 식 자체는 그대로: 12.435 × 0.2 = 2.487 < 3
     assert low["binding"] == "노출 맞춤" and abs(low["l"] - 2.487) < 1e-3, low
     assert commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=1.0)["binding"] == "상한"   # 12.4 > 3
+    h = commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=1.0, cap=HOLD_CAP_X)          # 보유 1.5×(10-16)
+    assert h["l"] == 1.5 and h["binding"] == "상한", h
     wide = commit_rule_l(position_side="SHORT", sigma24_bp=1200.0, vol_mult=3.0)                       # 아주 넓은 3σ24(36%) → 청산 안전이 묶는다
     assert wide["binding"] == "청산 안전" and wide["l"] < 3.0 and wide["stop_pct"] == 0.05, wide
     # ── 청산가가 −3% 손절선보다 0.5% 바깥(조용한 날 3σ24 < 3% 포함) -- 교차 마진 청산가 = E(1 ∓ 1/L)/(1 ∓ MMR), 평단 E = 첫 진입가 ∓0.66% ──

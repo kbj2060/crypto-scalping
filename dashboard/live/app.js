@@ -3993,6 +3993,69 @@ async function refreshTrend() {
   latestTrend = got;
 }
 
+// 2026-10-16 사용자 «같이 해서 시안» → «배포»(시안 ①): 칸별 아이스버그(/api/iceberg = scripts/live_eth_iceberg_20261016, 30초 · ETH 만).
+//   표시 전용 -- 신호·알림 아님. 연구 28일 23건 15분 +7.6bp[2.6,15.0] → 전진 150건이면 판정(research_eth_dom_levels_absorption_20261016 --judge).
+let latestIceberg = null, icebergLastFetchAt = 0;
+async function refreshIceberg() {
+  renderIceChip();
+  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  const now = Date.now();
+  if (now - icebergLastFetchAt < 30000) return;
+  icebergLastFetchAt = now;
+  try {
+    const res = await fetch("/api/iceberg", { cache: "no-cache" });
+    latestIceberg = res.ok ? await res.json() : { ok: false, reason: `HTTP ${res.status}` };
+  } catch (error) {
+    latestIceberg = { ok: false, reason: "fetch_failed" };
+  }
+  renderIceChip();
+}
+function renderIceChip() {
+  const c = el("iceChip"), g = latestIceberg;
+  if (!c) return;
+  const hide = activeSnapshotAsset !== "eth" || !g;
+  if (c.hidden !== hide) c.hidden = hide;
+  if (hide) return;
+  const stale = !g.ok || g.age_s > 120, n = g.ok ? `${g.n}/${g.target}` : "-", st = stale ? "아이스버그 · 멈춤" : "아이스버그 · 검증 중";
+  setT("iceChipN", n); setT("iceChipSt", st);
+  c.classList.toggle("stale", stale);
+  c.title = `칸별 아이스버그 — 같은 $0.1 칸에서 30초 동안 보이던 잔량의 2배 넘게 체결됐는데 칸이 버티고 다시 채워짐.\n`
+    + `연구 28일 23건 · 15분 +7.6bp[2.6, 15.0] — 전진 검증 중(2026-10-16~, ${g.ok ? g.target : 150}건 모이면 판정). 신호·알림 아님.\n`
+    + `풋프린트 육각형 = 최근 24시간 사건(초록 = 숨은 매수 · 빨강 = 숨은 매도)${stale ? `\n🔴탐지기 ${g.ok ? `${Math.round(g.age_s)}초째 응답 없음` : `불러오기 실패: ${g.reason}`}` : ""}`;
+}
+// 풋프린트 위 육각형(renderCandleSvg 끝에서) -- 창 가운데 시각 · 그 칸 가격. 이름표는 가장 최근 하나만.
+function iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS) {
+  const ev = latestIceberg?.ok ? latestIceberg.events : [];
+  const bar = candles[1].time - candles[0].time, t1 = candles[candles.length - 1].time + bar;
+  const hits = ev.filter((e) => e.t_end - 15 >= candles[0].time && e.t_end - 15 < t1 && e.px >= yMin && e.px <= yMax);
+  if (!hits.length) return;
+  const g = document.createElementNS(NS, "g");
+  g.setAttribute("class", "ice-marks");
+  hits.forEach((e, j) => {
+    const t = e.t_end - 15, i = candles.findLastIndex((c) => c.time <= t);
+    const x = xAt(i) + Math.min(1, (t - candles[i].time) / bar) * bw, y = yAt(e.px), buy = e.side === 1;
+    const m = document.createElementNS(NS, "g");
+    m.setAttribute("class", `ice-mk ${buy ? "buy" : "sell"}`);
+    m.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)})`);
+    const hex = document.createElementNS(NS, "path");
+    hex.setAttribute("d", "M0 -6.5 5.6 -3.25v6.5L0 6.5-5.6 3.25v-6.5z");
+    m.appendChild(hex);
+    const word = `숨은 ${buy ? "매수" : "매도"} ${(e.vol / Math.max(e.max, 1e-9)).toFixed(1)}×`;
+    if (j === hits.length - 1) {
+      const lb = document.createElementNS(NS, "text");
+      lb.setAttribute("x", "10"); lb.setAttribute("y", "3.5");
+      lb.textContent = `${word} · 검증 중`;
+      m.appendChild(lb);
+    }
+    const tip = document.createElementNS(NS, "title");
+    tip.textContent = `${fmtHourMinute(t * 1000)} ${word} — ${e.px.toFixed(1)} 칸 · 30초 체결 ${e.vol.toFixed(1)} ETH = 보이던 최대 잔량 ${e.max.toFixed(1)} 의 ${(e.vol / Math.max(e.max, 1e-9)).toFixed(1)}배 · 칸 버팀`
+      + " · 전진 검증 중(신호 아님)";
+    m.appendChild(tip);
+    g.appendChild(m);
+  });
+  svg.appendChild(g);
+}
+
 // 2026-10-15 ⑤ 예측 판 «4h 방향»(ETH, /api/dir4h = scripts/live_eth_dir4h_20261015 · 서버 5분 캐시) -- 참고용
 let latestDir4h = null, dir4hLastFetchAt = 0;
 async function refreshDir4h() {
@@ -7958,6 +8021,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     supply1sSubBox = null;
     subPanelCache.s1.key = subPanelCache.dens.key = "";
   }
+  if (footprint && svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth" && candles.length > 1) iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS);   // 2026-10-16 시안 ①
   if (wallTagsG) svg.appendChild(wallTagsG);   // 2026-10-06 호가벽 경계 꼬리표(위 G 블록) -- 호가 띠 위에
   { const mn = mobileChart && svg.id === "candleSvgSnapshot" ? svg.querySelector('[data-live="label"][data-with-price="num"]') : null;
     if (mn && !mn.classList.contains("far-lbl")) svg.appendChild(mn); }   // 2026-10-10 휴대폰 현재가 숫자 = 호가 띠(◌ 표식) 위 맨 앞
@@ -8063,6 +8127,7 @@ async function tick() {
       refreshPositionProfile();      // 2026-10-10 체결 기둥 «포지션» 보기 (켤 때만 1초)
       refreshSituation();            // 2026-09-21 상황 읽기 · 30분 (5초, ETH 만)
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
+      refreshIceberg();              // 2026-10-16 풋프린트 칸별 아이스버그 (30초, ETH · 검증 중 · 신호 아님)
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
       refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH · 서버 5분 캐시)
@@ -8869,26 +8934,29 @@ function syncOrderCoinGate() {
 
 // ov(2026-10-05 «스위칭»): 화면 게이지 대신 쓸 값 {pct, lev, sltp, fresh} -- 전량 청산(pct 100)과 반대 진입(그 포지션의 증거금 %·배수).
 // 2026-10-09 자동 규칙(index.html #snapRule "1"): 서버가 재생 크기식으로 크기·손절을 정한다(rule=c). ETH 만 -- 다른 코인은 "직접".
+// 2026-10-16 "h" = «보유 1.5×»(rule=h) -- 같은 식에 상한만 1.5(서버 HOLD_CAP_X). 옛 «권고 1.5/2» 저장값과 겹치지 않게 숫자가 아니다.
 function manualRule() {
-  return MANUAL_RULES && activeSnapshotAsset === "eth" && (el("snapRule")?.value || "0") === "1" ? "c" : "";
+  const v = el("snapRule")?.value || "0";
+  return MANUAL_RULES && activeSnapshotAsset === "eth" ? ({ 1: "c", h: "h" }[v] || "") : "";
 }
+const ruleCap = () => (el("snapRule")?.value === "h" ? 1.5 : 3);   // = live_manual_peg_entry HOLD_CAP_X / COMMIT_CAP_X
 // 서버 live_manual_peg_entry.commit_rule_l 과 같은 식(화면 표시용 -- 실제 크기·손절은 누를 때 서버 미리보기가 정한다)
 // 2026-10-10 동일위험: L = min(손절 시 순자산 손실 b ÷ 손절폭, 청산 안전, 10) -- 옛 «12.4 × 권장배수»는 손절 1회에 순자산 69~82%(원장 재생)
 // 2026-10-11 사용자 최종 «×15.2 + −3% 스톱»: L = min(12.4 × 권장배수, 청산 안전(손절 거리 max(3σ24, 3%)), 10) · 손절 첫 진입가 ∓3% 고정
 // 2026-10-14 사용자 «권장 B»: 상한 6 → 3배 · 손절 ∓3% → ∓5%(첫 1/3 · ∓0.75% 물타기 그대로)
 const RULE_STOP_PCT = 0.05;       // = live_manual_peg_entry.RULE_STOP_PCT (test_rule_size_parity 가 대조)
 const REC_FIRST_SHARE = 1 / 3;    // = live_manual_peg_entry.REC_FIRST_SHARE -- 첫 진입 = 상한의 1/3(10-14 사용자 «첫 1/3 → −0.75%에 2/3»)
-function commitRuleL(side, sigmaBp4h, vm) {
+function commitRuleL(side, sigmaBp4h, vm, cap = 3) {
   const sd = Math.max(3 * sigmaBp4h * Math.sqrt(6) / 1e4, RULE_STOP_PCT);   // 청산 안전용 거리
   const den = side === "LONG" ? 1 - 0.98 * (1 - sd) * 0.995 / (1 - 0.0066) : 1.02 * (1 + sd) * 1.005 / 1.0066 - 1;
-  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, 3), sd: RULE_STOP_PCT };   // 상한 3 = live_manual_peg_entry.COMMIT_CAP_X(10-14 권장 B, 옛 6 · 10)
+  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, cap), sd: RULE_STOP_PCT };   // 상한 3 = live_manual_peg_entry.COMMIT_CAP_X(10-14 권장 B, 옛 6 · 10)
 }
 // «손절 시 순자산 −X%» = 지금 L × 3%(두 방향 중 큰 쪽) -- 권장 배수가 없으면 손절 거리만
 function ruleRiskText() {
   const v = latestSituation?.vol_mult;
   if (!(v?.mult && v?.sigma_bp)) return `손절 첫 진입가 −${100 * RULE_STOP_PCT}%`;
   const lev = Number(manualLevEffective()) || 0;   // 2026-10-13 서버 rec_rule_size 와 같은 상한: 실효 L ≤ 0.9 × 거래소 레버리지
-  const l = Math.max(...["LONG", "SHORT"].map((s) => commitRuleL(s, Number(v.sigma_bp), Number(v.mult)).l).map((x) => (lev > 0 ? Math.min(x, 0.9 * lev) : x)));
+  const l = Math.max(...["LONG", "SHORT"].map((s) => commitRuleL(s, Number(v.sigma_bp), Number(v.mult), ruleCap()).l).map((x) => (lev > 0 ? Math.min(x, 0.9 * lev) : x)));
   return `손절 시 순자산 −${Math.round(100 * l * RULE_STOP_PCT)}%`;
 }
 function renderRuleBox() {
@@ -8908,7 +8976,7 @@ el("snapRule")?.addEventListener("input", () => {
   let v = "0";
   try { v = localStorage.getItem("entryRule") || "0"; } catch (e) { /* 기본 직접 */ }
   const inp = el("snapRule");
-  if (inp) inp.value = v === "1" ? "1" : "0";   // 옛 «권고 1.5/2» 저장값은 «직접»으로(모르는 사이 10배 규칙으로 넘어가지 않게)
+  if (inp) inp.value = v === "1" || v === "h" ? v : "0";   // 옛 «권고 1.5/2» 저장값은 «직접»으로(모르는 사이 10배 규칙으로 넘어가지 않게)
   renderRuleBox();
 })();
 
@@ -9761,7 +9829,7 @@ function syncChipset(box) {
   box.classList.toggle("off", !!inp.disabled);
   let hit = false;
   box.querySelectorAll(".chip").forEach((c) => {
-    const on = Number(c.dataset.v) === Number(inp.value);
+    const on = c.dataset.v === inp.value || Number(c.dataset.v) === Number(inp.value);   // 2026-10-16 "h"(보유 1.5×) = 숫자 아님
     hit = hit || on;
     c.classList.toggle("on", on);
     // 2026-09-26 비평: 선택이 색으로만 보였다(스크린리더 무음) · 잠긴(«자동») 칩이 키보드로는 눌렸다.
@@ -9963,8 +10031,8 @@ function renderOfabRule(bal, live) {
     const v = el("snapRule")?.value || "0";
     strip.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
     const rr = strip.querySelector(".rule-risk");
-    if (rr) rr.hidden = v !== "1";
-    if (v === "1") renderRuleBox();            // «−X%»는 권장 배수가 바뀌면 같이 바뀐다(3초)
+    if (rr) rr.hidden = v === "0";
+    if (v !== "0") renderRuleBox();            // «−X%»는 권장 배수가 바뀌면 같이 바뀐다(3초)
   }
   const qn = el("ofabQuote"), q = execQuote && execQuote.asset === activeSnapshotAsset && Date.now() - execQuote.at < 3 * 60e3 ? execQuote : null;
   if (qn) {
@@ -9985,7 +10053,7 @@ function renderOfabRule(bal, live) {
     if (!b || !sm) continue;
     b.classList.toggle("two", !!r);
     const dir = side === "LONG" ? "롱" : "숏";
-    const cr = r && vmx?.mult && vmx?.sigma_bp ? commitRuleL(side, Number(vmx.sigma_bp), Number(vmx.mult)) : null;
+    const cr = r && vmx?.mult && vmx?.sigma_bp ? commitRuleL(side, Number(vmx.sigma_bp), Number(vmx.mult), ruleCap()) : null;
     if (cr && eq > 0 && live > 0) {
       const sl = live * (side === "LONG" ? 1 - cr.sd : 1 + cr.sd);
       // 2026-10-11 두 조각(첫 $ · 손절)을 따로 감싼다 -- 좁은 화면(styles.css ≤480px)은 «·»를 숨기고 두 줄로 쌓아 버튼 줄이 화면 안에 든다
@@ -10003,6 +10071,36 @@ function renderOfabRule(bal, live) {
       setT(sm.id || id + "Frac", "5%");
       b.title = `1.5초 꾹 = ${dir} 5% 진입`;
     }
+  }
+  ofabTrendTags();
+}
+// 2026-10-16 사용자 «같이 해서 시안» → «배포»(시안 ③, ETH 만): 일봉 추세(latestTrend 5표)와 반대 버튼 = 점선 «역추세» ·
+//   추세 쪽 버튼 = 직전 30초 추세 반대 테이커 순흐름이 최근 1시간 30초 창들의 90분위 이상이면 «지정가 자리»(창 10개 미만이면 대기).
+//   근거: 실원장 79왕복 추세 쪽 +898$ · 역추세 −468$(최악 −549$ 포함) · 반대 흐름 뒤 1~5분 되돌림(IC −.03) -- 수익 신호 아님, 지정가 걸 순간 표시.
+function ofabTrendTags() {
+  const t = latestTrend?.ok && activeSnapshotAsset === "eth" ? latestTrend : null, up = !!t && t.signal > 0;
+  let now30 = 0, q90 = Infinity, last = 0;
+  if (t) {
+    for (const k of supply1s.keys()) if (k > last) last = k;
+    const net = (e) => { let x = 0; for (let k = e - 29; k <= e; k++) { const r = supply1s.get(k); if (r) x += r[4] - r[5]; } return up ? -x : x; };
+    now30 = net(last);
+    const hist = [];
+    for (let e = last - 30; e > last - 3600; e -= 30) if (supply1s.has(e) && supply1s.has(e - 29)) hist.push(net(e));
+    hist.sort((a, b) => a - b);
+    if (hist.length >= 10) q90 = hist[Math.floor(hist.length * 0.9)];
+  }
+  const on = now30 > 0 && now30 >= q90;
+  for (const [id, side] of [["ofabLong", "LONG"], ["ofabShort", "SHORT"]]) {
+    const b = el(id), tag = b?.querySelector(".ofab-tag");
+    if (!b || !tag) continue;
+    const ct = !!t && up !== (side === "LONG"), mk = !!t && !ct;
+    b.classList.toggle("ct", ct);
+    tag.hidden = !t;
+    tag.className = `ofab-tag ${ct ? "ct" : "mk"}${mk && on ? " on" : ""}`;
+    const txt = ct ? "역추세" : on ? "지정가 자리" : "지정가 대기";
+    if (tag.textContent !== txt) tag.textContent = txt;
+    if (ct) b.title += `\n\n⚠ 역추세 — 일봉 추세 ${up ? "▲ 상승" : "▼ 하락"} ${t.ups}/${t.votes.length}표의 반대. 실원장 79왕복: 추세 쪽 +898$ · 역추세 −468$(최악 −549$ 가 여기서)`;
+    else if (mk) b.title += `\n\n지정가 ${on ? "자리" : "대기"} — 직전 30초 ${up ? "매도" : "매수"} 쏠림 ${now30.toFixed(0)} (최근 1시간 90분위 ${isFinite(q90) ? q90.toFixed(0) : "-"}). 추세 쪽 진입을 지정가로 걸기 좋은 순간 · 1~5분 되돌림(IC −.03) 근거, 수익 신호 아님`;
   }
 }
 // 🔴2026-09-26 사용자 지시 «미실현손익 3초 갱신». 계좌 조회는 30초라 그 사이 숫자가 멈춰 있었다. 거래소를 3초마다

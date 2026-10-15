@@ -65,7 +65,7 @@ with sync_playwright() as p:
             pressed: [...document.querySelectorAll('#ofabRule button')].map(b => b.getAttribute('aria-pressed')).join(','),
             ruleOn: document.getElementById('snapRuleBox').closest('.entry-line').classList.contains('rule-on') })""")
         print(w, "자동", st1)
-        if st1["card"] != "1" or st1["store"] != "1" or not st1["l"].startswith("첫 $") or "손절" not in st1["s"] or not st1["two"] or st1["pressed"] != "false,true" or not st1["ruleOn"]:
+        if st1["card"] != "1" or st1["store"] != "1" or not st1["l"].startswith("첫 $") or "손절" not in st1["s"] or not st1["two"] or st1["pressed"] != "false,true,false" or not st1["ruleOn"]:
             fails.append(f"[{w}] 자동 상태 {st1}")
         pg.screenshot(path=str(OUT / f"b_auto_{w}.png"), clip=pg.evaluate("() => { const r = document.getElementById('ofabFlat').getBoundingClientRect(); return {x: Math.max(0, r.x - 60), y: Math.max(0, r.y - 60), width: Math.min(innerWidth - Math.max(0, r.x - 60), r.width + 120), height: r.height + 76}; }"))
         # 펼친 패널: 자동이면 진입비율 게이지·SL/TP 숨김 + «크기» 칩 보임(10-09 사용자 «진입비율 게이지가 왔다갔다 된다»)

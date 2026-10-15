@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261016-trendA">
+  <link rel="stylesheet" href="styles.css?v=20261016-iceA">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -230,6 +230,10 @@
               <button type="button" class="asset-tab" data-days="7" aria-pressed="false" title="지난 7일 1시간봉으로 추정">7d</button>
               <button type="button" class="asset-tab" data-days="30" aria-pressed="false" title="지난 30일 1시간봉으로 추정">30d</button>
             </div>
+            <!-- 2026-10-16 시안 ①: 칸별 아이스버그 전진 검증 건수(app.js renderIceChip) -- 신호·알림 아님 -->
+            <span id="iceChip" class="ice-chip" tabindex="0" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 20.5 7.25v9.5L12 21.5 3.5 16.75v-9.5z"/><path d="M8 12h8" stroke-linecap="round"/></svg><span
+              id="iceChipSt">아이스버그 · 검증 중</span><b id="iceChipN">-</b></span>
             <div id="chartPan" class="chart-pan" hidden></div>   <!-- 2026-10-01 창 이동 미니맵(12시간) · app.js renderChartPan -->
             <div id="snapshotAssetTabs" class="asset-tabs chart-mode-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
               <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
@@ -502,6 +506,7 @@
               <div class="chipset" data-for="snapRule" role="group" aria-label="진입 크기 규칙">
                 <button type="button" class="chip" data-v="0" title="진입비율 칩으로 직접 고릅니다">직접</button>
                 <button type="button" class="chip" data-v="1" title="자동 규칙(권장 B) — 왕복 최대 명목 = 순자산 × 3배(12.4 × 권장 배수가 3보다 작은 날만 그 값) · 첫 진입 1/3 · 물타기는 남은 여유(손절 시 손실 L×5% 안에서 · 권장 첫 진입가 ∓0.75%) · 손절 첫 진입가 ∓5%(닿으면 거래소 스탑, 물타기해도 안 물러남) → 손절에 닿으면 순자산 약 −14%(최대 L×5% = 15%) · 익절 없음 · 🔴교차 마진에서만(격리면 손절 전에 청산)&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동</button>
+                <button type="button" class="chip" data-v="h" title="보유 1.5× — 자동과 같은 규칙에 상한만 1.5배(첫 진입 1/3 · 물타기 권장 첫 진입가 ∓0.75% · 손절 첫 진입가 ∓5% → 손절에 닿으면 순자산 약 −7.5%) · 익절 없음 · 🔴교차 마진에서만&#10;일봉 추세 방향으로 들고 가는 크기 — 4.5년 백테스트: 3×는 2022~24 −58%·낙폭 −87%, 1~1.5×는 같은 샤프(≈1.45)에 낙폭 −28~−40%(사후 권고)">보유 1.5×</button>
               </div>
               <span class="rule-risk" aria-live="off">손절 첫 진입가 −5%</span>
             </span>
@@ -604,7 +609,8 @@
         <!-- 2026-10-09 B안(사용자 선택): 위 띠 = 진입 크기 규칙(계좌 카드 «크기» 칩 #snapRule 과 같은 값) · 자동이면 버튼 안에 첫 진입 금액·손절가 -->
         <span id="ofabRule" class="ofab-rule" role="group" aria-label="진입 크기" hidden>
           <button type="button" data-v="0" aria-pressed="false">직접</button>
-          <button type="button" data-v="1" aria-pressed="false" title="자동 규칙(권장 B) — 왕복 최대 명목 = 순자산 × 3배 · 첫 진입 = 그 1/3 · 손절 첫 진입가 ∓5% → 손절에 닿으면 순자산 약 −14%(최대 L×5% = 15%) · 익절 없음 · 교차 마진에서만&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동</button>
+          <button type="button" data-v="1" aria-pressed="false" title="자동 규칙(권장 B) — 왕복 최대 명목 = 순자산 × 3배 · 첫 진입 = 그 1/3 · 손절 첫 진입가 ∓5% → 손절에 닿으면 순자산 약 −14%(최대 L×5% = 15%) · 익절 없음 · 교차 마진에서만&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동 3×</button>
+          <button type="button" data-v="h" aria-pressed="false" title="보유 1.5× — 자동과 같은 규칙에 상한만 1.5배(첫 진입 1/3 · 물타기 권장 첫 진입가 ∓0.75% · 손절 첫 진입가 ∓5% → 손절에 닿으면 순자산 약 −7.5%) · 익절 없음 · 🔴교차 마진에서만&#10;일봉 추세 방향으로 들고 가는 크기 — 4.5년 백테스트: 3×는 2022~24 −58%·낙폭 −87%, 1~1.5×는 같은 샤프(≈1.45)에 낙폭 −28~−40%(사후 권고)">보유 1.5×</button>
           <span class="rule-risk">손절 첫 진입가 −5%</span>
           <span id="ofabQuote" class="ofab-quote" tabindex="0" hidden></span>   <!-- 2026-10-10 주문 심볼(USDC) vs 화면(USDT) 차 -->
         </span>
@@ -612,13 +618,13 @@
         <button type="button" id="ofabMore" class="ofab-more" aria-controls="ofabPanel" aria-expanded="false" aria-label="주문 상세 펼치기"><svg
           viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
         <span id="ofabVolMult" class="ofab-vm" tabindex="0" hidden>×1.0</span>   <!-- 2026-10-07 권장 배수(위 진입 레인과 같은 값) -->
-        <button type="button" id="ofabLong" class="ofab-dir long" title="1.5초 꾹 = 롱 5% 진입"><span>LONG</span><small id="ofabLongFrac">5%</small></button>
-        <button type="button" id="ofabShort" class="ofab-dir short" title="1.5초 꾹 = 숏 5% 진입"><span>SHORT</span><small id="ofabShortFrac">5%</small></button>
+        <button type="button" id="ofabLong" class="ofab-dir long" title="1.5초 꾹 = 롱 5% 진입"><span>LONG</span><small id="ofabLongFrac">5%</small><i class="ofab-tag" hidden></i></button>
+        <button type="button" id="ofabShort" class="ofab-dir short" title="1.5초 꾹 = 숏 5% 진입"><span>SHORT</span><small id="ofabShortFrac">5%</small><i class="ofab-tag" hidden></i></button>
       </span>
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden><div id="ofabSlPanel" class="ofab-slp" hidden></div></div>
   </div>
-  <script src="./app.js?v=20261016-s1head"></script>
+  <script src="./app.js?v=20261016-iceA"></script>
   <script src="./fp_daily.js?v=20261010-fpc"></script>
   <script src="./liq_profile.js?v=20261015-align"></script>
   <script src="./bubble_map.js?v=20261016-minitop"></script>

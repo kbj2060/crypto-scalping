@@ -203,7 +203,7 @@ from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, bracket_action, bracket_keep_farther_sl, bracket_key, bracket_merge, bracket_rekey, build_bracket_plan, build_entry_plan, build_exit_plan,
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
-    commit_rule_l, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
+    COMMIT_CAP_X, HOLD_CAP_X, commit_rule_l, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
     WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_add_order, place_bracket, place_stop, run_entry, run_entry_wait, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
@@ -4567,6 +4567,26 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_iceberg(request: web.Request) -> web.Response:   # 2026-10-16 시안 ① 풋프린트 칸별 아이스버그(ETH, 표시 전용)
+        """scripts/live_eth_iceberg_20261016 이 쓴 파일만 읽는다 -- 최근 24h 사건 + 전진 건수(«검증 중 n/150»). 신호·알림 아님."""
+        def produce() -> dict[str, Any]:
+            d = LIVE_DIR / "iceberg"
+            try:
+                st = json.loads((d / "eth_state.json").read_text())
+            except (OSError, ValueError):
+                return {"ok": False, "reason": "no_state"}
+            cut, ev = time.time() - 86400, []
+            try:
+                for ln in (d / "eth_events.jsonl").read_text().splitlines():
+                    e = json.loads(ln)
+                    if e["t_end"] >= cut:
+                        ev.append(e)
+            except FileNotFoundError:
+                pass
+            return {"ok": True, "n": st["n_forward"], "target": st["target"], "age_s": round(time.time() - st["updated_at"], 1),
+                    "valid": st["valid"], "events": ev}
+        return web.json_response(await asyncio.to_thread(produce), headers=NOCACHE)
+
     vol4h_art: dict = {}
 
     async def api_vol_forecast(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, 표시 전용)
@@ -6760,7 +6780,7 @@ def make_app() -> web.Application:
                                            "detail": ("격리 마진이라 자동 진입을 막습니다 -- 손절보다 청산이 먼저 옵니다. 포지션·주문을 정리하고 바이낸스에서 교차로 바꾸세요"
                                                       if mt == "isolated" else "마진 방식을 못 읽어 자동 진입을 막습니다(교차 확인 필요)")}, 409)
                 cr = commit_rule_l(position_side=side, sigma24_bp=float(vm["sigma_bp"]) * math.sqrt(6),   # 2026-10-11 재생 ×15.2 식 복원
-                                   vol_mult=float(vm["mult"]))
+                                   vol_mult=float(vm["mult"]), cap=HOLD_CAP_X if rule_l == "h" else COMMIT_CAP_X)   # 10-16 «보유 1.5×» = rule=h
                 # 손절 = 첫 진입가 ∓3% · 물타기면 이미 무장된 규칙 손절을 그대로(물러나지 않는다). 규칙 밖에서 연 포지션에
                 #   처음 거는 거면 기준 = 평단(첫 진입가를 모른다 -- 화면에 «평단»으로 적는다). 크기가 손절선을 알아야 해서 여기서 먼저 정한다.
                 b0 = await bracket_for(side, book, filters, asset)
@@ -7046,11 +7066,11 @@ def make_app() -> web.Application:
         return v if 1 <= v <= EXCHANGE_MAX_LEVERAGE else None
 
     def query_rule(request: web.Request, key: str = "rule") -> str | None:
-        """자동 규칙 = "c"(재생 크기식). 없으면 None(직접 모드). 그 밖이면 "bad" -- 호출부가 400(직접 모드로 조용히 떨어지지 않는다)."""
+        """자동 규칙 = "c"(재생 크기식, 상한 3×) · "h"(같은 식, 상한 1.5× -- 10-16 추세 보유형). 없으면 None(직접 모드). 그 밖이면 "bad" -- 호출부가 400(직접 모드로 조용히 떨어지지 않는다)."""
         raw = request.query.get(key)
         if raw in (None, ""):
             return None
-        return "c" if raw == "c" and MANUAL_RULES_ENABLED else "bad"   # 꺼져 있으면 400(직접 모드로 조용히 떨어지지 않는다)
+        return raw if raw in ("c", "h") and MANUAL_RULES_ENABLED else "bad"   # 꺼져 있으면 400(직접 모드로 조용히 떨어지지 않는다)
 
     def query_fraction(request: web.Request, key: str = "pct") -> float | None:
         """쿼리의 비율(%)을 0<f<=1 로 바꾼다. 진입 분할과 부분 청산이 **같은 함수**를 쓴다.
@@ -7533,6 +7553,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/dir-signals", api_dir_signals)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)
+    app.router.add_get("/api/iceberg", api_iceberg)
     app.router.add_get("/api/market-context", api_market_context)
     app.router.add_get("/api/chip-score", api_chip_score)
     app.router.add_get("/api/notify-center", api_notify_center)

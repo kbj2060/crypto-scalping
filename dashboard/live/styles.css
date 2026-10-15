@@ -2838,6 +2838,24 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-vm[hidden] { display: none; }
 .ofab-vm:focus-visible, .vol-mult:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 7px; }
 .ofab-dir.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+/* 2026-10-16 시안 ③(app.js ofabTrendTags): 일봉 추세 반대 버튼 = 주황 점선 + «역추세» · 추세 쪽 = «지정가 자리/대기» 꼬리표(알약 윗변에 걸침) */
+.ofab-dir { position: relative; }
+.ofab-dir.ct { border-style: dashed; border-color: color-mix(in srgb, var(--amber) 75%, transparent); }
+.ofab-tag { position: absolute; top: -9px; display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 999px;
+  background: var(--bg); font: 700 10px/1.3 var(--font-sans); font-style: normal; letter-spacing: 0; pointer-events: none; white-space: nowrap; }
+.ofab-tag[hidden] { display: none; }
+.ofab-tag.ct { right: 6px; border: 1px solid color-mix(in srgb, var(--amber) 60%, transparent); color: var(--amber); }
+.ofab-tag.mk { left: 8px; border: 1px solid var(--line); color: var(--muted); }
+.ofab-tag.mk::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .6; }
+.ofab-tag.mk.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 60%, transparent); }
+.ofab-tag.mk.on::before { opacity: 1; animation: ofab-mk 1.6s ease-out infinite; }
+@keyframes ofab-mk { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 45%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
+@media (prefers-reduced-motion: reduce) { .ofab-tag.mk.on::before { animation: none; } }
+/* 보유 1.5× 로 띠가 길어졌다(자동이면 «손절 시 순자산 −X%»까지 390 화면에서 374px) -- 휴대폰은 300px 안에서 둘째 줄로 접는다 */
+@media (max-width: 480px) {
+  .ofab-rule { flex-wrap: wrap; max-width: min(calc(100vw - 24px), 300px); border-radius: 14px; }
+  .ofab-rule .rule-risk, .ofab-rule .ofab-quote { padding: 4px 10px; }
+}
 .ofab-dir.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .ofab-dir.long:hover { border-color: var(--good); }
 .ofab-dir.short:hover { border-color: var(--bad); }
@@ -3279,3 +3297,17 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fc-cnt { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 2px; }
 .fc-tl { display: flex; gap: 2px; } .fc-tl i { flex: 1; font: 700 10px/16px var(--font-mono); font-style: normal; text-align: center; border-radius: 3px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
 .fc-tl i.u { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
+
+/* 2026-10-16 시안 ①: 칸별 아이스버그 -- 머리 칩(전진 검증 건수) + 풋프린트 육각형(app.js iceMarks). 신호가 아니라 무채색 칩 · 표식만 방향색. */
+.ice-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--muted); font: 600 11.5px/1 var(--font-sans); white-space: nowrap; cursor: help; }
+.ice-chip[hidden] { display: none; }
+.ice-chip svg { width: 13px; height: 13px; flex: none; }
+.ice-chip b { font: 600 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
+.ice-chip.stale { border-style: dashed; }
+.ice-chip.stale b { color: var(--muted); }
+.ice-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ice-mk.buy { color: var(--good); }
+.ice-mk.sell { color: var(--bad); }
+.ice-mk path { fill: color-mix(in srgb, currentColor 25%, transparent); stroke: currentColor; stroke-width: 1.4; }
+.ice-mk text { fill: currentColor; font: 700 10.5px/1 var(--font-sans); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
