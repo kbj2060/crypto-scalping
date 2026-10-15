@@ -1,0 +1,43 @@
+{
+ "name": "ETH 칸별 DOM 아이스버그 → 15분 받아낸 쪽 이동 (전진 사전등록)",
+ "frozen_at_utc": "2026-10-16",
+ "forward_from_utc": "2026-10-16T00:00:00Z",
+ "definition": {
+  "bucket": "$0.1 반올림 칸 = round(가격×10) (테이프 price_bin 과 같은 규약, 실측 일치 85~91%)",
+  "window": "30초 창(ts_sec//30), 창 시작 mid 칸 기준 ±30칸 매수·매도 잔량 시작/최소/최대/끝 · 최저 최우선 매수·최고 최우선 매도",
+  "big_trade": "최우선 매수(롱 쪽)/매도(숏 쪽)에서 2칸 안 칸 중 그 창 테이커 반대 체결 최대 칸, 체결량 ≥ 직전 2,880창(24h) 창별 최대 칸 체결량 95분위(1,000창 이상)",
+  "held": "롱: 창 안 최우선 매수 최저 ≥ 칸 가격 − 0.05 · 숏: 최우선 매도 최고 ≤ 칸 가격 + 0.05",
+  "refill": "체결량 ≥ 시작 잔량(>0) 이고 끝 잔량 ≥ 시작 잔량 × 0.5",
+  "iceberg": "held & refill & 체결량 ≥ 창 안 최대 표시 잔량 × 2",
+  "valid": "그 창 depthdiff 동기화(U/u/pu) 끊김 없음"
+ },
+ "outcome": "r15 = 쪽 부호 × (창 끝 + 900초 시각 창 시작 mid / 창 끝 시각 창 시작 mid − 1) × 1e4 bp (연구 1초 mid 판과 상관 1.0, 아이스버그 평균 7.61 = 7.61)",
+ "judge": {
+  "when": "전진 아이스버그 ≥ 150건",
+  "primary": "r15 평균 > 1.41bp(메이커 왕복) 이고 UTC 일 블록 부트스트랩 2000 의 95% CI 하한 > 0",
+  "secondary": "15분 안 칸 뚫림(칸 가격 ∓ 0.15 넘음) 비율 < 같은 기간 뚫린 큰 체결의 비율",
+  "interim": "판정 전엔 --status(건수만) · --judge --force 는 위반으로 looks.json 에 기록"
+ },
+ "in_sample_research": {
+  "period": "2026-09-16 ~ 10-13 19:00 UTC",
+  "big_trades": 2437,
+  "absorb": 121,
+  "iceberg": 23,
+  "iceberg_r15_bp": [
+   7.605,
+   [
+    2.555,
+    15.038
+   ]
+  ],
+  "iceberg_broke15": 0.652,
+  "broken_big_broke15": 0.937,
+  "caveat": "12통계 중 하나 · 23건 → 다중비교 감안 후보"
+ },
+ "data": "depthdiff ETHUSDT(서버 data/live/orderflow) + 서버 lake binance/tape coin=ETH(봉인된 날만) → 로컬 tmp/dom_iceberg_forward 로 읽어 옴",
+ "how": "python scripts/research_eth_dom_levels_absorption_20261016.py --status | --judge",
+ "code_sha256": {
+  "scripts/research_eth_dom_levels_absorption_20261016.py": "919b441250997858152c4458466aa824f6947894734ad4ddb37f975ac8c54048",
+  "scripts/research_eth_dom_playbook_20261016.py": "1eb34ea44da5ce2e3cf011c6848f22cca1a35542cdf0a6c42c9136b577a8cce3"
+ }
+}
