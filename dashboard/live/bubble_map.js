@@ -123,7 +123,8 @@
     if (hi - lo < minW) { var cm = (hi + lo) / 2; lo = cm - minW / 2; hi = cm + minW / 2; }   // 래스터 칸이 두꺼워지지 않게
     // 2026-10-13 사용자 «청산맵과 같은 디자인 규칙 · 청산맵 막대 차트 가로·세로에 맞게 채워»: 플롯 상자 = liq_profile.js 와 같은 여백
     //   (좌 68/60 · 우 68/54 · 위 22 · 아래 축 28). 상자 안 위 80% = 호가 히트맵 + 버블, 아래 20% = 거래 막대. 축 글자 = 플롯 밖 · 굵게 · 바탕 외곽선.
-    var L0 = narrow ? 0 : 68, R0 = narrow ? 0 : 68, top = 22, axisH = 28, GAP = 6;   // 2026-10-13 휴대폰 = 좌우 꽉(사용자)
+    // 2026-10-15 아티팩트 댓글 «체결 버블도 풋프린트처럼 배치 통일»: 왼쪽 여백 68 → 1 -- 플롯 왼쪽 끝 = 범례 첫 글자(카드 왼쪽 18px) = 풋프린트 플롯 왼쪽 끝. 왼쪽 여백엔 그리는 게 없었다(가격·거래대금 축은 오른쪽)
+    var L0 = narrow ? 0 : 1, R0 = narrow ? 0 : 68, top = 22, axisH = 28, GAP = 6;   // 2026-10-13 휴대폰 = 좌우 꽉(사용자)
     var PW = W - L0 - R0, IH = H - top - axisH, VH = Math.round(IH * 0.2), PH = IH - VH - GAP, base = top + IH, vy0 = base - VH;
     var X = function (t) { return L0 + (t - t0) / WIN * PW; }, Y = function (p) { return top + PH - (p - lo) / (hi - lo) * PH; };
     V.geo = { t0: t0, L: L0, PW: PW, cv: cv };

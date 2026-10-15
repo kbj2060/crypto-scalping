@@ -4620,6 +4620,18 @@ function trendFlipLevels(footprint, candles) {
 //   ① 차트 머리 칩 둘(큰 방향 5표 · 융합 신호) ② 가격판 «30분 도달 선»(renderCandleSvg)으로 옮겼다.
 //   5표 표(기간·기준가·지금 대비·뒤집힘)는 추세 칩 툴팁, 역추세 보유면 칩이 주황. 서버 계산·SSE(latestSituation)는 그대로.
 //   큰 방향 = UTC 00시 일봉 종가를 7·14·28·56·90일 전과 비교한 5표(dashboard/trend_rule.py). 융합 칩은 2026-10-05 제거.
+// 2026-10-14 아티팩트 댓글 «풋프린트 상단이 청산맵·체결 버블 상단과 크기가 안 맞아 -- 통일»: 넓은 화면 풋프린트의 그래프 상단을 그 둘(캔버스 위 여백 22)과
+//   같은 높이로 내리고(FP_TOP_ALIGN), 청산 밀도 범례를 .lqp-legend 와 같은 11px·카드 왼쪽 17px 로 둔다.
+const FP_TOP_ALIGN = 26;
+// 2026-10-15 아티팩트 댓글 «풋프린트를 크기 그대로 왼쪽 ‹청산 밀도› 글자 위치까지 옮기고 그만큼 오른쪽 정보를 크게»: 넓은 화면 왼쪽 여백 36 → 1, 오른쪽 칸 +35.
+const FP_LEFT_SHIFT = 35;
+const FP_LEG_FONT = `600 11px ${"Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif"}`;
+function fpLegendGeom(svg) {   // {x0: SVG 좌표의 범례 시작, w: 범례 폭}
+  const c = el("fpCard")?.getBoundingClientRect(), a = svg.getBoundingClientRect();
+  const x0 = c ? 17 - (a.left - c.left) : 0;
+  return { x0, w: measureTextW("청산 밀도", FP_LEG_FONT) + 10 + measureTextW("낮음", FP_LEG_FONT) + 6 + 160 + 6 + measureTextW("높음", FP_LEG_FONT) };
+}
+
 function renderSituation() {
   const box = el("sitChips");
   if (!box) return;
@@ -5492,7 +5504,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   아래 본문은 전부 `w` 를 «플롯 폭»으로 쓰므로 한 줄도 안 바뀐다.
   const splitR = subOn ? Number(getComputedStyle(svg).getPropertyValue("--fp-split")) || 0 : 0;
   const SPLIT_GAP = 20;
-  const subW = splitR ? Math.round((wAll - SPLIT_GAP) * splitR) : wAll;
+  const subW = splitR ? Math.round((wAll - SPLIT_GAP) * splitR) + FP_LEFT_SHIFT : wAll;   // 10-15 풋프린트를 왼쪽으로 옮긴 만큼 오른쪽 칸을 넓힌다(플롯 폭은 그대로 -- 아래 ml 도 같은 만큼 줄인다)
   const w = splitR ? wAll - SPLIT_GAP - subW : wAll, subX = splitR ? w + SPLIT_GAP : 0;
   // 🔴SUB_TOTAL(아래)은 styles.css 의 #candleSvgSnapshot 높이와 **같이** 움직여야 한다 -- 상자가 작으면 가격 플롯이 눌린다
   //   (test_sub_panel_height_contract 가 두 파일을 대조한다). 1초 수급 400 = 가격 플롯과 같은 높이(2026-09-22 사용자 «너무 작아서»).
@@ -5552,10 +5564,10 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const TRADE_L = footprint && mobileChart ? 50 : 0;
   // 2026-09-28 모바일 풋프린트는 왼쪽 가격 글자를 없앴다(사용자 «차트가 너무 작다») -- 값은 플롯 아래 한 줄이 갖는다. 여백 44 -> 4.
   // 2026-09-30 풋프린트(데스크톱)는 가격 글자를 오른쪽 꼬리표 칸(TAG_W)으로 옮겨 왼쪽 여백 71 -> 36(레짐·전환 줄 이름 자리만, 사용자 «풋프린트를 왼쪽으로»).
-  const ml = (mobileChart ? (footprint ? 4 : 44) : footprint ? 36 - CENTER_NUDGE : 45) + CENTER_NUDGE + TRADE_L,
+  const ml = (mobileChart ? (footprint ? 4 : 44) : footprint ? 36 - CENTER_NUDGE : 45) + CENTER_NUDGE + TRADE_L - (splitR ? FP_LEFT_SHIFT : 0),
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
-        mtTop = 12, mt = mtTop + SUB_TOTAL, mb = svg.id === "candleSvgSnapshot" ? 28 : 70;   // 2026-10-06 풋프린트는 레짐·전환 리본 두 줄(+28~+64)이 빠져 x축 글자(+21)까지만 -- 빈 42px 는 가격 플롯에
+        mtTop = 12, mt = mtTop + SUB_TOTAL + (splitR && svg.id === "candleSvgSnapshot" ? FP_TOP_ALIGN : 0), mb = svg.id === "candleSvgSnapshot" ? 28 : 70;   // 2026-10-06 풋프린트는 레짐·전환 리본 두 줄(+28~+64)이 빠져 x축 글자(+21)까지만 -- 빈 42px 는 가격 플롯에
   // 2026-09-21 사용자 요청: 「차트가 너무 많다 -- 레인을 한 덩어리로」 + 「가격 플롯을 키워라」.
   //   레인 5종(거래대금·델타/CVD·OI·수급·청산)이 각자 6px 간격으로 떨어져 있어 **다섯 장의
   //   그림**으로 읽혔다. 간격 6->3, 높이를 서로 가깝게 맞춰 한 블록으로 읽히게 한다:
@@ -7758,7 +7770,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (slotW >= (mobileChart ? 40 : 52)) txt(x + wd / 2, top + RIB / 2 + (mobileChart ? 3.5 : 4.5), QNAME(r.delta, r.oi),
         { "text-anchor": "middle", "font-weight": 700, "font-size": mobileChart ? 9 : 12, fill: fresh ? "var(--on-fill)" : col, "pointer-events": "none" });
     });
-    if (!mobileChart) txt(ml - 6, top + RIB / 2 + 3, "사분면", { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });
     // 2026-10-13 사용자 시안 1 «봉별 막대 레인»(60분 합 선은 12봉 중 11봉이 겹쳐 «이번 봉에 누가 밀었나»가 안 보였다):
     //   사분면 아래 한 줄 = 한 지표, 봉마다 0선 위(초록)·아래(빨강) 막대 -- 거래대금만 파랑 한 방향. 줄마다 자기 크기로 채운다(줄끼리 높이 비교 금지).
     //   이름표 = 왼쪽 여백 · 값 = 오른쪽(60분 합, 거래대금은 이 봉). 넓은 화면은 지지/저항 칸(#mcWall)을 LANE_VAL_W 만큼 밀어 그 사이에 값 칸을 둔다.
@@ -7907,7 +7918,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       if (fs && card) {
         const on = mcSplit && SUB_LEGEND_H > 0, a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
         fs.classList.toggle("on", on);
-        if (on) { fs.style.left = `${Math.round(a.left - c.left + ml + 290)}px`; fs.style.top = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`; }
+        if (on) { const lg = fpLegendGeom(svg); fs.style.left = `${Math.round(a.left - c.left + lg.x0 + lg.w + 28)}px`; fs.style.top = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`; }
       } }
     if (mcSplit && mcBubbleEl) { const bh = `${Math.max(120, Math.round(s1H * MC_BUBBLE_K))}px`; if (mcBubbleEl.style.height !== bh) mcBubbleEl.style.height = bh; }   // 2026-10-13 체결 버블 = 수급 차트 한 개 높이(사용자)
     mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16, h: floorY - (sub1sY + s1H + 12) } : null,
@@ -7925,8 +7936,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 🔴그라디언트는 densityStops() 에서 바로 만든다 -- 사본을 두면 히트맵과 어긋나도
     //   아무도 모른다(2026-09-12 에 실제로 겪었다).
     if (SUB_LEGEND_H && (densityHistory || []).length) {
+      const lgG = splitR ? fpLegendGeom(svg) : null;   // 넓은 화면 = 청산맵·체결 버블 범례와 같은 자리·글씨
       const lg = subSvg("dens", 0, subLegendY, w, SUB_LEGEND_H,
-                        "dens|" + w + "|" + SUB_LEGEND_H, (g) => {
+                        "dens|" + w + "|" + SUB_LEGEND_H + "|" + (lgG ? Math.round(lgG.x0) : ""), (g) => {
         const stops = densityStops();
         const defs = document.createElementNS(NS, "defs");
         const grad = document.createElementNS(NS, "linearGradient");
@@ -7939,23 +7951,24 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         });
         defs.appendChild(grad); g.appendChild(defs);
         const yMid = SUB_LEGEND_H / 2;
-        let x = ml;
+        let x = lgG ? lgG.x0 : ml;
         const txt = (tx, str) => {
           const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", tx); t.setAttribute("y", yMid + 3);
-          t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)");
+          t.setAttribute("x", tx); t.setAttribute("y", yMid + (lgG ? 4 : 3));
+          if (lgG) { t.setAttribute("font-size", "11"); t.setAttribute("font-weight", "600"); t.setAttribute("fill", "var(--text)"); }
+          else { t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)"); }
           t.textContent = str; g.appendChild(t);
-          return str.length * 6.2;
+          return lgG ? measureTextW(str, FP_LEG_FONT) : str.length * 6.2;
         };
         x += txt(x, "청산 밀도") + 10;
-        x += txt(x, "낮음") + 4;
+        x += txt(x, "낮음") + (lgG ? 6 : 4);
         const bar = document.createElementNS(NS, "rect");
         bar.setAttribute("x", x); bar.setAttribute("y", yMid - 3);
         bar.setAttribute("width", 160); bar.setAttribute("height", 6);
         bar.setAttribute("rx", "1");
         bar.setAttribute("fill", "url(#liqDensLegendGrad)");
         g.appendChild(bar);
-        x += 164;
+        x += lgG ? 166 : 164;
         txt(x, "높음");
         const tip = document.createElementNS(NS, "title");
         tip.textContent = "아래 풋프린트 차트의 **배경 띠** 색입니다 -- 그 가격대에 쌓인"

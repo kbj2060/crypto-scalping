@@ -156,7 +156,8 @@
     if (status) status.textContent = "";
     UNIT = tp.unit || "oi_usd";
     var lo = S.vlo != null ? S.vlo : rng[0], hi = S.vhi != null ? S.vhi : rng[1];
-    var L = narrow ? 60 : 68, R = narrow ? 54 : 68, top = 22, axisH = 28;
+    // 2026-10-15 사용자 «청산맵도 풋프린트·체결 버블처럼 맞춰»: 넓은 화면 왼쪽 여백 68 → 1(플롯 왼쪽 끝 = 범례 첫 글자) · 칸별 금액 축 글자는 플롯 안 왼쪽, 눈금선 바로 위
+    var L = narrow ? 60 : 1, R = narrow ? 54 : 68, top = 22, axisH = 28;
     var plotW = W - L - R, plotH = H - top - axisH, sh = shape(tp, cp, plotW, lo, hi);
     var C = { tiers: TIER_VARS.map(css), good: css("--good"), bad: css("--bad"), text: css("--text"), muted: css("--muted"),
               soft: css("--soft-line"), line: css("--line"), bg: css("--chart-bg"), sans: css("--font-sans") || "sans-serif" };
@@ -209,8 +210,8 @@
     }
     g.restore();
     g.font = "600 12px " + C.sans; g.textBaseline = "middle";      // 축 글자(플롯 밖) = 5분 차트 글자(굵게 · 바탕 외곽선)
-    g.textAlign = "right";
-    for (v = 0; v <= maxBar / 0.92; v += sb) halo(g, C, usd(v), L - 6, yBar(v), C.muted);
+    g.textAlign = narrow ? "right" : "left";
+    for (v = 0; v <= maxBar / 0.92; v += sb) halo(g, C, usd(v), narrow ? L - 6 : L + 4, yBar(v) - (narrow ? 0 : 8), C.muted);
     g.textAlign = "left";
     for (v = 0; v <= maxCum / 0.92; v += sc) halo(g, C, usd(v), L + plotW + 6, yCum(v), C.muted);
     var lab = "현재가 " + fmtPx(cp) + (xc < L ? " (왼쪽 밖)" : xc > L + plotW ? " (오른쪽 밖)" : "");
