@@ -4566,9 +4566,10 @@ def make_app() -> web.Application:
         """4시간 변동성 GBM(scripts/live_eth_sizing_vol_model_20260912) -- 5분봉 31일(평소 = 30일 예측 중앙값) · 5분 캐시.
         9-27 에 끈 사이징 워커와 별개: 주문 크기·상한에는 쓰지 않는다."""
         async def produce() -> dict[str, Any]:
-            if "art" not in vol4h_art:
-                from scripts.live_eth_sizing_vol_model_20260912 import load_model
-                vol4h_art["art"] = await asyncio.to_thread(load_model)
+            from scripts.live_eth_sizing_vol_model_20260912 import ARTIFACT, load_model
+            mt = ARTIFACT.stat().st_mtime if ARTIFACT.exists() else None   # 매달 재학습(cron)으로 바뀌면 다시 읽는다
+            if vol4h_art.get("mtime") != mt:
+                vol4h_art.update(mtime=mt, art=await asyncio.to_thread(load_model))
             if vol4h_art["art"] is None:
                 return {"ok": False, "reason": "artifact_missing"}
             rows, end = [], None

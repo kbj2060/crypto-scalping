@@ -112,7 +112,7 @@ def dir_signals_payload(fred_key: str | None = None, now: float | None = None) -
     return out
 
 
-VOL_P = (-1.4950, 5.1671)   # 확대 확률 상수 -- 10-15 긴 데이터 모델의 2025-09~2026-10 표본외 예측으로 적합(십분위 보정 오차 ≤3.5pp) · 재학습하면 다시 적합
+VOL_P = (-1.4950, 5.1671)   # 확대 확률 상수 기본값(아티팩트 expand_logit 이 없을 때) -- 10-15 긴 데이터 모델의 2025-09~2026-10 표본외 예측으로 적합(십분위 보정 오차 ≤3.5pp) · 재학습하면 다시 적합
 
 
 def vol4h_from_klines(rows: list, art: dict, now_ms: float) -> dict:
@@ -127,12 +127,13 @@ def vol4h_from_klines(rows: list, art: dict, now_ms: float) -> dict:
     X = svm.build_features(pd.Series(ts), c, col(7), col(8), col(2), col(3)).iloc[svm.WARMUP:]
     X = X[np.isfinite(X.to_numpy(float)).all(1)]
     p = svm.predict_vol(art["models"], X.tail(30 * 288))
+    a0, a1 = art.get("expand_logit") or VOL_P   # 매달 재학습 때 표본외로 다시 맞춘 상수(아티팩트에 있으면 그것)
     pred, ref, rv48 = float(p[-1]), float(np.median(p)), float(np.exp(X["rv48"].iloc[-1]))
     s4 = pred * np.sqrt(svm.HOLD)
     return {"ok": True, "asof_ms": int(rows[-1][6]) + 1, "px": float(c[-1]), "sig4h_pct": round(100 * s4, 3),
             "sig4h_usd": round(float(c[-1]) * s4, 2), "lvl": round(pred / ref, 3), "x_now": round(pred / rv48, 3),
-            "p_expand": round(float(1 / (1 + np.exp(-(VOL_P[0] + VOL_P[1] * np.log(pred / rv48))))), 3),
-            "ref_days": round(len(p) / 288, 1)}
+            "p_expand": round(float(1 / (1 + np.exp(-(a0 + a1 * np.log(pred / rv48))))), 3),
+            "ref_days": round(len(p) / 288, 1), "model_train_end": art.get("train_end")}
 
 
 def selftest() -> None:

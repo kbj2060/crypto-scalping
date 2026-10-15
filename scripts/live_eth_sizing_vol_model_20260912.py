@@ -35,6 +35,7 @@ GBM 은 같은 일을 ~0.001초에 한다. 재보고 안 쓰기로 한 것이지
 
 학습: python scripts/live_eth_sizing_vol_model_20260912.py --train
 검증: 같은 파일 --verify (배포된 아티팩트를 그 기계의 데이터로 표본외 재검)
+매달: 같은 파일 --monthly (2026-10-15 서버 cron -- data/live/vol_panel 이어 받기 + 지난 판 표본외로 확대 확률 상수 + 전 기간 재학습)
 점검: python scripts/live_eth_sizing_vol_model_20260912.py
 """
 from __future__ import annotations
@@ -203,6 +204,76 @@ def verify() -> int:
     return 0
 
 
+LONG = ROOT / "data" / "live" / "vol_panel" / "ETHUSDT_5m.parquet"   # 2026-10-15 긴 5분봉(2021-12~) -- 매달 vision 으로 이어 받는다
+EXPAND_LABEL = 1.3                                                  # 확대 = 다음 4h 실현변동 ≥ 직전 4h × 1.3
+
+
+def _vision_day(d: str) -> pd.DataFrame | None:
+    """data.binance.vision 선물 5분봉 하루(정적 아카이브 -- REST 아님). 없으면 None."""
+    import io, urllib.request, zipfile
+    try:
+        with urllib.request.urlopen(f"https://data.binance.vision/data/futures/um/daily/klines/ETHUSDT/5m/ETHUSDT-5m-{d}.zip", timeout=60) as r:
+            z = zipfile.ZipFile(io.BytesIO(r.read())); txt = z.read(z.namelist()[0]).decode()
+    except Exception:
+        return None
+    k = pd.read_csv(io.StringIO(txt))
+    if "open_time" not in k.columns:
+        k = pd.read_csv(io.StringIO(txt), header=None, names=["open_time", "open", "high", "low", "close", "volume", "close_time",
+                                                             "quote_volume", "count", "taker_buy_volume", "taker_buy_quote_volume", "ignore"])
+    return pd.DataFrame({"timestamp": pd.to_datetime(k.open_time, unit="ms"), "close": k.close.astype(float), "high": k.high.astype(float),
+                         "low": k.low.astype(float), "quote_volume": k.quote_volume.astype(float), "trades": k["count"].astype(float)})
+
+
+def fit_expand_logit(pred: np.ndarray, rv48: np.ndarray, y: np.ndarray) -> tuple[float, float]:
+    """P(y ≥ 1.3·rv48) = sigmoid(a + b·ln(pred/rv48)) -- 표본외 예측으로만 부를 것(학습 예측이면 과신)."""
+    from sklearn.linear_model import LogisticRegression
+    x = np.log(pred / rv48).reshape(-1, 1)
+    lab = (y / rv48 >= EXPAND_LABEL).astype(int)
+    m = LogisticRegression(C=1e6).fit(x, lab)
+    return float(m.intercept_[0]), float(m.coef_[0][0])
+
+
+def monthly() -> int:
+    """매달 1일 cron: LONG 을 어제까지 이어 받고 → 지난 판으로 최근 30일 표본외 예측 → 확대 확률 상수 적합
+    → 전 기간 재학습 → 아티팩트 교체(지난 판은 .prev). 학습 설정·피쳐는 train() 과 같다."""
+    import joblib
+    from concurrent.futures import ThreadPoolExecutor
+    from sklearn.ensemble import HistGradientBoostingRegressor
+    d = pd.read_parquet(LONG)
+    y0 = pd.Timestamp.utcnow().tz_localize(None).normalize() - pd.Timedelta("1D")
+    days = [x.strftime("%Y-%m-%d") for x in pd.date_range(d.timestamp.max().normalize() + pd.Timedelta("1D"), y0)]
+    with ThreadPoolExecutor(8) as ex:
+        add = [x for x in ex.map(_vision_day, days) if x is not None]
+    d = pd.concat([d] + add).drop_duplicates("timestamp", keep="last").sort_values("timestamp").reset_index(drop=True)
+    d.to_parquet(LONG)
+    print(f"긴 5분봉 {len(d):,}행 ~{d.timestamp.max()} (+{len(add)}/{len(days)}일)", flush=True)
+    X = build_features(d["timestamp"], d["close"].to_numpy(float), d["quote_volume"].to_numpy(float),
+                       d["trades"].to_numpy(float), d["high"].to_numpy(float), d["low"].to_numpy(float))
+    lr = np.diff(np.log(np.maximum(d["close"].to_numpy(float), 1e-12)), prepend=0.0)
+    y = pd.Series(lr).rolling(HOLD, min_periods=HOLD).std().shift(-HOLD).to_numpy()
+    ok = np.isfinite(y) & (y > 0) & np.isfinite(X.to_numpy(float)).all(1)
+    ts = d["timestamp"].to_numpy()
+    old = load_model()
+    logit = None
+    if old is not None:   # 지난 판의 학습 끝 이후 = 표본외
+        te = ok & (ts > np.datetime64(pd.Timestamp(old["train_end"]) + pd.Timedelta("1D")))
+        if te.sum() >= 5000:
+            logit = fit_expand_logit(predict_vol(old["models"], X[te]), np.exp(X["rv48"].to_numpy())[te], y[te])
+            print(f"확대 확률 상수 {logit} · 표본외 {int(te.sum()):,}행", flush=True)
+    A = np.nan_to_num(X.to_numpy(float), nan=0.0, posinf=0.0, neginf=0.0)
+    models = [HistGradientBoostingRegressor(max_iter=300, learning_rate=0.06, max_depth=6, random_state=int(s)).fit(A[ok], np.log(y[ok]))
+              for s in SEEDS]
+    art = {"models": models, "features": FEATURES, "ref_pred": float(np.median(predict_vol(models, X[ok]))), "seeds": list(SEEDS),
+           "train_end": str(pd.Timestamp(ts[ok].max()).date()), "hold_bars": HOLD, "n_train": int(ok.sum()),
+           "train_start": str(pd.Timestamp(ts[ok].min()).date()),
+           "expand_logit": logit or (old or {}).get("expand_logit") or [-1.4950, 5.1671]}
+    if ARTIFACT.exists():
+        ARTIFACT.replace(ARTIFACT.with_suffix(".joblib.prev"))
+    joblib.dump(art, ARTIFACT)
+    print("저장", {k: v for k, v in art.items() if k != "models"}, flush=True)
+    return 0
+
+
 def _self_check() -> None:
     """네트워크·아티팩트 없이 도는 계약 검사."""
     n = 900
@@ -246,10 +317,20 @@ def _self_check() -> None:
     p = predict_vol([_Stub(np.log(0.001)), _Stub(np.log(0.004))], X.iloc[-3:])
     assert np.allclose(p, 0.002), f"로그평균(기하평균)이 아니다: {p}"
 
-    print("통과 9/9 — 피쳐 계약(22열) · 인과성 · 로그스케일 · 기하평균 · 가격기하 범위")
+    # 2026-10-15 확대 확률 적합: 알려진 상수로 만든 라벨을 다시 맞혀야 한다
+    rng2 = np.random.default_rng(1)
+    rv = np.exp(rng2.normal(-6.5, 0.3, 40000)); xr = rng2.normal(0, 0.3, 40000)
+    pr = rv * np.exp(xr); lab_p = 1 / (1 + np.exp(-(-1.5 + 5.0 * xr)))
+    yy = rv * np.where(rng2.random(40000) < lab_p, 1.5, 1.0)          # 라벨 = y ≥ 1.3·rv48
+    a_, b_ = fit_expand_logit(pr, rv, yy)
+    assert abs(a_ + 1.5) < 0.1 and abs(b_ - 5.0) < 0.3, (a_, b_)
+
+    print("통과 10/10 — 피쳐 계약(22열) · 인과성 · 로그스케일 · 기하평균 · 가격기하 범위 · 확대 확률 적합")
 
 
 if __name__ == "__main__":
+    if "--monthly" in sys.argv:
+        raise SystemExit(monthly())
     if "--train" in sys.argv:
         raise SystemExit(train())
     if "--verify" in sys.argv:
