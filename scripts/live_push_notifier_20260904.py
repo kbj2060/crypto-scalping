@@ -319,6 +319,9 @@ async def run_cycle(session, base_url: str, state: dict[str, Any],
                                  urgency="high" if note.tier == "t1" else "normal")
         append_sent(note, result)
         log(f"[{note.tier}] {note.title} -> {result}")
+        if isinstance(result, dict) and not any(result.values()):
+            # 🔴10-07 마지막 구독이 410 으로 정리된 뒤 9일간 모든 알림이 «sent 0» 으로 조용히 사라졌다 -- 크게 남긴다
+            log("⚠️구독 0대 -- 이 알림은 아무 기기에도 안 갔다(대시보드 알림 센터에서 다시 켜야 한다)")
 
     if baseline:
         state["baseline_done"] = True

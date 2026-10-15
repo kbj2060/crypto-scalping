@@ -914,7 +914,8 @@ class LiveFeed:
         import asyncio
         import threading
         ensure_aggtrades()                             # 고래 z 의 30일 이력 = 아카이브(어제까지) + 이 프로세스가 받은 라이브 분
-        self.wbase = whale_raw()
+        today = pd.Timestamp.now(tz="UTC").normalize()   # z 는 30일 창 -- 아카이브 전체(계속 늘어남)를 매 기동 파싱하지 않게 62일만
+        self.wbase = whale_raw({(today - pd.Timedelta(days=k)).strftime("%Y-%m-%d") for k in range(1, 63)})
         now = pd.Timestamp.now(tz="UTC")
         hours = {(now - pd.Timedelta(hours=k)).strftime("%Y-%m-%dT%H") for k in (0, 1)}
         for stream, fn, dst in (("bookticker", bt_hour, self.bt), ("depthdiff", dd_hour, self.dd)):

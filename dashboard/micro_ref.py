@@ -123,8 +123,9 @@ def sr_context(levels: dict[str, Any] | None, mid: float, imb40: float | None) -
     out: dict[str, Any] = {"sup": None, "res": None, "sup_bp": None, "res_bp": None, "near": "없음", "deep_wall": None}
     if not levels or not (mid > 0):
         return out
-    s = (levels.get("support_levels") or [None])[0]
-    r = (levels.get("resistance_levels") or [None])[0]
+    # 지도는 닫힌 1h 종가로 갈랐다 -- 지금가가 이미 넘은 레벨은 뺀다(화면 srLevelsLive 와 같은 규칙)
+    s = next((lv for lv in levels.get("support_levels") or [] if float(lv["price"]) < mid), None)
+    r = next((lv for lv in levels.get("resistance_levels") or [] if float(lv["price"]) > mid), None)
     if s:
         out["sup"] = float(s["price"]); out["sup_bp"] = (mid - out["sup"]) / mid * 1e4
     if r:

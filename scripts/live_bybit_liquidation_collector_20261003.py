@@ -49,9 +49,13 @@ def connect(path: Path) -> sqlite3.Connection:
 
 def write(con: sqlite3.Connection, rows: list[tuple], gaps: list[tuple] = ()) -> None:
     con.execute("BEGIN")
-    con.executemany("INSERT INTO bybit_liquidations VALUES (?, ?, ?, ?, ?, ?)", rows)
-    con.executemany("INSERT INTO gaps VALUES (?, ?, ?)", list(gaps))
-    con.execute("COMMIT")
+    try:
+        con.executemany("INSERT INTO bybit_liquidations VALUES (?, ?, ?, ?, ?, ?)", rows)
+        con.executemany("INSERT INTO gaps VALUES (?, ?, ?)", list(gaps))
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")   # 열린 트랜잭션을 남기면 다음 BEGIN 이 전부 실패한다(Bybit 테이프 수집기와 같은 규약)
+        raise
 
 
 async def run() -> None:
@@ -85,7 +89,10 @@ async def run() -> None:
             raise
         except Exception as exc:  # noqa: BLE001 -- 다시 붙는다(끊긴 구간은 gaps 에)
             if buf:
-                write(con, buf); buf = []
+                try:
+                    write(con, buf); buf = []
+                except Exception as e2:  # noqa: BLE001 -- 여기서 새면 run() 이 끝난다. 행은 들고 다음 연결에서 다시 쓴다
+                    print(f"잔여 {len(buf)}건 기록 보류: {e2!r}", flush=True)
             down = down or (int(time.time() * 1000), f"{type(exc).__name__}: {exc}"[:160])
             print(f"끊김 {exc!r} -- {backoff:.0f}초 뒤 재접속", flush=True)
             await asyncio.sleep(backoff); backoff = min(backoff * 2, 60.0)

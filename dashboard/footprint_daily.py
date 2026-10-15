@@ -243,7 +243,7 @@ def heat_for_day(k1h: pd.DataFrame, d: date) -> list[tuple[float, float, float]]
     from scripts import live_liquidation_map_20260824 as lm
     end = pd.Timestamp(d, tz="UTC") + pd.Timedelta(days=1)
     win = k1h[(k1h.timestamp < end) & (k1h.timestamp >= end - pd.Timedelta(hours=HEAT_LOOKBACK_H))].reset_index(drop=True)
-    if len(win) < 20:
+    if len(win) < 20 or win.timestamp.iloc[0] > end - pd.Timedelta(hours=HEAT_LOOKBACK_H - 2):   # 500봉 밖으로 밀린 날 = 짧은 창으로 조용히 그리지 않는다
         return []
     cp = float(win.close.iloc[-1])
     common = lm._prepare_common(win, cp)
@@ -328,7 +328,7 @@ def heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None = 
                 if k is not None and len(k):
                     pw = heat_for_day(k, d)
                     c = (np.array([x[0] for x in pw]), np.array([x[1] for x in pw]), np.array([x[2] for x in pw]))
-                    if d < today:
+                    if d < today and k.timestamp.iloc[-1] >= pd.Timestamp(d, tz="UTC") + pd.Timedelta(hours=23):   # 그날 마지막 봉까지 있을 때만 굳힌다
                         _heat["recent"][key] = c
         if c is not None and len(c[0]):
             out[key] = rebin_heat(c[0], c[1], row, c[2])

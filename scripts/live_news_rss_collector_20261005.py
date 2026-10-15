@@ -110,7 +110,10 @@ def run() -> None:
     pruned = 0.0
     while True:
         if time.time() - pruned > 3600:                         # polls 는 하루 ~2만 행 -- 7일만 둔다(items 는 그대로)
-            con.execute("DELETE FROM polls WHERE ts_ms < ?", (int((time.time() - POLLS_KEEP_S) * 1000),))
+            try:      # 🔴잠김에 죽으면 크래시 루프다(10-08 20:00~20:30 기동 직후 이 줄에서 12번) -- 다음 시간에 다시
+                con.execute("DELETE FROM polls WHERE ts_ms < ?", (int((time.time() - POLLS_KEEP_S) * 1000),))
+            except sqlite3.OperationalError as exc:
+                print(f"polls 정리 보류 {exc!r}", flush=True)
             pruned = time.time()
         for src, (url, every) in FEEDS.items():
             t0 = time.time()
@@ -123,13 +126,14 @@ def run() -> None:
                 with urllib.request.urlopen(req, timeout=20) as r:
                     status, body = r.status, r.read()
                     age = int(r.headers["Age"]) if (r.headers.get("Age") or "").isdigit() else None
-                    cond[src] = {k: v for k, v in (("If-None-Match", r.headers.get("ETag")),
-                                                     ("If-Modified-Since", r.headers.get("Last-Modified"))) if v}
+                    new_cond = {k: v for k, v in (("If-None-Match", r.headers.get("ETag")),
+                                                    ("If-Modified-Since", r.headers.get("Last-Modified"))) if v}
                 items = parse_tree(body) if src == "tree" else parse(body)
                 if src == "bwenews":
                     items = [it for it in items if not BWE_DROP.match(it[1])]
                 n = len(items)
                 new = store(con, src, items, int(time.time() * 1000), first[src])
+                cond[src] = new_cond      # 🔴저장 뒤에만 -- 먼저 바꾸면 저장 실패(잠김) 뒤 다음 폴링이 304 라 그 기사를 영영 못 받는다
                 if new and not first[src]:
                     print(f"{time.strftime('%H:%M:%S')} {src} 새 기사 {new}", flush=True)
                 first[src] = False
@@ -141,8 +145,11 @@ def run() -> None:
                     print(f"{src} HTTP {exc.code}", flush=True)
             except Exception as exc:  # noqa: BLE001 -- 한 사이트 실패가 나머지를 막지 않게 -- polls 에 status 0 으로 남는다
                 print(f"{src} 실패 {exc!r}"[:200], flush=True)
-            con.execute("INSERT INTO polls VALUES(?,?,?,?,?,?)",
-                        (int(t0 * 1000), src, status, n, int((time.time() - t0) * 1000), age))
+            try:
+                con.execute("INSERT INTO polls VALUES(?,?,?,?,?,?)",
+                            (int(t0 * 1000), src, status, n, int((time.time() - t0) * 1000), age))
+            except sqlite3.OperationalError as exc:   # 폴링 기록 한 줄 때문에 수집기가 죽지 않게
+                print(f"{src} polls 기록 실패 {exc!r}", flush=True)
         time.sleep(TICK_S)
 
 

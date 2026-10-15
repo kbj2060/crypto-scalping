@@ -189,11 +189,15 @@ def _finish(trip: dict[str, Any]) -> dict[str, Any]:
 async def _get(session, path: str, params: dict[str, Any], key: str, secret: str, offset_ms: int = 0) -> Any:
     """Signed GET. Returns the decoded JSON, or {"__error__": ...} rather than raising -- a revoked
     key or a futures-disabled key must degrade the panel, never take the whole dashboard down."""
+    from scripts import binance_ban_guard as ban_guard   # aiohttp 라 requests 전역 가드 밖 -- 밴 중 10초 계좌 폴링이 밴을 늘리지 않게(10-16 감사)
+    if ban_guard.ban_remaining() > 0:
+        return {"__error__": f"binance IP ban: {ban_guard.ban_remaining():.0f}s left -- request not sent"}
     url = f"{FAPI}{path}?{_sign(params, secret, offset_ms)}"
     try:
         async with session.get(url, headers={"X-MBX-APIKEY": key}) as response:
             payload = await response.json()
             if response.status != 200:
+                ban_guard.note(response.status, str(payload), response.headers.get("Retry-After"))
                 # 🔴코드를 버리면 안 된다. 2026-09-20 에 이것 때문에 리페그가 죽었다 --
                 #   호출부가 "5022" 를 찾는데 문자열은 "400 Due to ..." 였다.
                 code = payload.get("code")

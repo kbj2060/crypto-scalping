@@ -3227,6 +3227,8 @@ def make_app() -> web.Application:
     account_trip_state: dict[str, Any] = {"last_at": 0.0, "seen": load_account_trip_keys()}
     # 진행 중인 수동 주문 하나. 동시에 둘을 두지 않는다 -- 겹치면 단건 상한의 뜻이 흐려진다.
     manual_entry_state: dict[str, Any] = {"phase": "idle"}
+    # 2026-10-16 접수 검사 ~ 상태 점유 사이 await(계획 조립 0.5~2초) 동안 두 번째 접수(폰+데스크탑)가 검사를 빠져나가 두 번 나갔다
+    manual_order_lock = asyncio.Lock()
     # 2026-10-10 진입 «기다리기»(최대 60분)는 **따로** 둔다 -- 위 칸을 60분 잡으면 그동안 청산·SL 감시가 막힌다.
     manual_wait_state: dict[str, Any] = {"phase": "idle"}
     evidence_signal_cache: dict[str, Any] = {"ts": 0.0, "payload": None, "frames": None}
@@ -3412,12 +3414,15 @@ def make_app() -> web.Application:
         }, etag
 
     async def fetch_market_ticker(session: ClientSession, asset: str, symbol: str) -> tuple[str, dict[str, Any] | None]:
+        if ban_guard.ban_remaining() > 0:   # 공용 가드(fetch_binance_json 과 같다) -- 1초×3코인이 밴 중에도 나가 해제를 늦췄다(주문·손절과 같은 IP)
+            return asset, None
         try:
             async with session.get(
                 "https://fapi.binance.com/fapi/v1/ticker/price",
                 params={"symbol": symbol},
             ) as response:
                 if response.status != web.HTTPOk.status_code:
+                    ban_guard.note(response.status, await response.text(), response.headers.get("Retry-After"))
                     return asset, None
                 payload = await response.json()
         except (asyncio.TimeoutError, OSError, ValueError):
@@ -3997,13 +4002,15 @@ def make_app() -> web.Application:
                 liq_map[ts // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS] = (float(r.get("long_usd") or 0), float(r.get("short_usd") or 0))
         except Exception:  # noqa: BLE001 -- 청산 이력이 없으면 «모름»으로 간다
             pass
-        candles = {int(c["time"]): c for c in (situation_state.get("candles") or [])}
+        candles = {int(c["time"]): c for c in (situation_state.get("candles") or []) if not c.get("partial")}   # 형성 중에 찍힌 봉(SOL·XRP 60초 캐시)은 마감봉 아님
         bars = []
+        veto_prev = None   # 방금 닫힌 봉이 60초 캔들 캐시에 아직 없으면 직전 봉 veto 를 잇는다(히스테리시스 상태 -- 없으면 None→0 으로 «추세정렬» 표가 늘 빠졌다, 10-16 로그 0.9%)
         want = [b for b in sorted(fbars) if b < bar_start][-(2 * sit.WINDOW + 1):]
         for b in want:
             cells = fbars[b]
             buy = sum(v[0] for v in cells.values()); sell = sum(v[1] for v in cells.values())
             c = candles.get(b)
+            veto_prev = (c or {}).get("veto", veto_prev)
             prices = [k * FOOTPRINT_BUCKET for k in cells]
             bars.append({"time": b,
                          "high": float(c["high"]) if c else (max(prices) if prices else None),
@@ -4012,7 +4019,7 @@ def make_app() -> web.Application:
                          "delta": buy - sell,
                          "oi_delta": oi_map.get(b), "liq_long": liq_map.get(b, (0, 0))[0], "liq_short": liq_map.get(b, (0, 0))[1],
                          # 추세 veto(2026-09-22) -- load_market_history 가 이미 봉마다 붙여 준다.
-                         "veto": (c or {}).get("veto")})
+                         "veto": veto_prev})
         # 종가가 캔들 캐시에 없으면(60초 캐시 지연, 또는 캐시 자체가 없는 dev) 초 링의 마지막 체결가로,
         # 그것도 없으면 그 봉 풋프린트의 **VWAP** 으로 메운다 -- 되돌림/지속 판정에 종가 근사는 충분하고,
         # 봉이 비어서 엔진이 통째로 «완결 봉 부족»으로 멈추는 것보다 낫다.
@@ -5336,9 +5343,11 @@ def make_app() -> web.Application:
         row = fpd.parse_row(request.query.get("row"))
 
         async def k1h():
-            return await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
-                                            {"symbol": fpd.SYMBOL, "interval": "1h", "limit": 500},
-                                            error_reason="fp_daily_heat_klines")
+            raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                           {"symbol": fpd.SYMBOL, "interval": "1h", "limit": 500},
+                                           error_reason="fp_daily_heat_klines")
+            now_ms = time.time() * 1000
+            return [r for r in raw if int(r[6]) < now_ms] if isinstance(raw, list) else raw   # 형성 봉은 «받은 시각»에 뺀다 -- 캐시가 1시간 묵으면 그때 형성 중이던 봉이 마감봉으로 셈됐다
         try:
             raw = await swr_cached("fp_daily_k1h", 600.0, k1h, max_stale=3600.0)
         except Exception:  # noqa: BLE001 -- 1시간봉을 못 받아도 소급본 날은 그린다
@@ -6394,11 +6403,19 @@ def make_app() -> web.Application:
                     await arm_bracket(plan, state)
                 except Exception as exc:  # noqa: BLE001 -- 대기는 계속(마감 때 다시 건다)
                     state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
-            await run_entry_wait(binance_session(), plan, state, wait_sec, on_fill=first_fill)
+            await settle(run_entry_wait(binance_session(), plan, state, wait_sec, on_fill=first_fill), state)
         else:
-            await run_entry(binance_session(), plan, state)
+            await settle(run_entry(binance_session(), plan, state), state)
         if float(state.get("filled") or 0.0) > 0:
             await arm_bracket(plan, state)
+
+    async def settle(coro, state: dict) -> None:
+        """집행 예외가 새면 phase 가 working 에 영영 묶인다 -- 모든 접수가 409, 서버 손절 감시도 쏘지 않는다(10-16 감사)."""
+        try:
+            await coro
+        except Exception as exc:  # noqa: BLE001
+            state.update(phase="error", error=f"집행 오류 {type(exc).__name__}: {exc} — 거래소에서 직접 확인하세요",
+                         done_at=datetime.now(timezone.utc).isoformat())
 
     async def arm_bracket(plan: dict, state: dict) -> None:
         b, pside = plan.get("bracket") or {}, plan["positionSide"]
@@ -6517,21 +6534,29 @@ def make_app() -> web.Application:
                 # 2026-10-10 손절·청산으로 포지션이 닫히는데 같은 쪽 대기 진입이 걸려 있으면 그것도 거둔다(나중에 체결돼 손절 없이 다시 열리지 않게)
                 manual_wait_state.update(action="cancel", action_reason="포지션이 닫힘(손절·청산) — 같은 쪽 대기 진입 취소")
             if act == "clear":
-                st.pop(key)
+                if time.time() < float(b.get("retry_after") or 0):
+                    continue
+                r = await clear_bracket(binance_session(), b["symbol"], pside)
+                print(f"bracket {pside}: 포지션 없음 -> 정리 {r}", flush=True)
+                if r.get("errors"):   # 🔴못 지운 물타기 지정가(dbad)가 남으면 손절 없이 다시 열린다 -- 무장을 남겨 30초 뒤 다시 지운다
+                    b["retry_after"] = time.time() + 30
+                else:
+                    st.pop(key)
                 changed = True
-                print(f"bracket {pside}: 포지션 없음 -> 정리 "
-                      f"{await clear_bracket(binance_session(), b['symbol'], pside)}", flush=True)
                 continue
             if (act != "fire" or manual_entry_state.get("phase") in ("working", "submitting")
                     or time.time() < float(b.get("retry_after") or 0)):
                 continue
-            if (bracket_load().get(key) or {}).get("sl_off"):   # 2026-10-15 위 await 사이 «손절 해제»가 들어왔으면 쏘지 않는다
-                continue
             plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth")
-            if err and err[0].get("error") == "no_position":     # 이미 닫혔다 -- 정리하고 내린다
-                st.pop(key)
+            # 🔴검사는 조립(await) **뒤**에 -- 그 사이 «손절 해제»나 사용자 청산이 들어오면 쏘지 않는다(남의 상태를 clear 하고 두 번 청산하지 않게)
+            if (bracket_load().get(key) or {}).get("sl_off"):
+                continue
+            if manual_order_lock.locked() or manual_entry_state.get("phase") in ("working", "submitting"):
+                continue
+            if err and err[0].get("error") == "no_position":     # 이미 닫혔다 -- 정리하고 내린다(못 지웠으면 다음 틱 «clear» 가 다시)
+                if not (await clear_bracket(binance_session(), b["symbol"], pside)).get("errors"):
+                    st.pop(key)
                 changed = True
-                await clear_bracket(binance_session(), b["symbol"], pside)
                 continue
             if err or plan.get("blocked"):
                 # 🔴조회 실패는 «닫혔다»가 아니다 -- 비상 스탑을 두고 30초 뒤 다시 본다.
@@ -6543,12 +6568,13 @@ def make_app() -> web.Application:
             manual_entry_state.update(phase="submitting", kind="exit", trigger="bracket_sl",
                                       side=pside, plan=plan,
                                       started_at=datetime.now(timezone.utc).isoformat())
-            await run_exit(binance_session(), plan, manual_entry_state)
+            await settle(run_exit(binance_session(), plan, manual_entry_state), manual_entry_state)
             # 🔴다 닫혔을 때만 비상 스탑을 지운다 -- 청산이 실패했는데 지우면 무방비가 된다.
             if manual_entry_state.get("phase") in ("filled_maker", "filled_taker"):
                 manual_entry_state["bracket_cleanup"] = await clear_bracket(
                     binance_session(), b["symbol"], pside)
-                st.pop(key)
+                if not manual_entry_state["bracket_cleanup"].get("errors"):   # 못 지웠으면 남겨 둔다 -- 다음 틱 «clear» 가 다시 지운다
+                    st.pop(key)
             else:
                 b["retry_after"] = time.time() + 30
                 b["last_error"] = manual_entry_state.get("error")
@@ -7227,7 +7253,7 @@ def make_app() -> web.Application:
             manual_entry_state["switch"] = {"from": side, "to": sw["to"], "phase": "exit"}
         refresh_tasks["manual_entry"] = asyncio.create_task(
             exit_then_switch(plan, manual_entry_state, sw, query_asset(request)) if sw
-            else run_exit(binance_session(), plan, manual_entry_state))
+            else settle(run_exit(binance_session(), plan, manual_entry_state), manual_entry_state))
         return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
                                  headers=NOCACHE)
 
@@ -7524,14 +7550,20 @@ def make_app() -> web.Application:
     app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/binance-account", api_binance_account)
     app.router.add_get("/api/manual-entry/preview", api_manual_entry_preview)
-    app.router.add_post("/api/manual-entry/submit", api_manual_entry_submit)
+    async def busy_or(handler, request: web.Request) -> web.Response:
+        if manual_order_lock.locked():
+            return web.json_response({"ok": False, "error": "already_working", "state": manual_entry_state}, status=409)
+        async with manual_order_lock:
+            return await handler(request)
+
+    app.router.add_post("/api/manual-entry/submit", lambda r: busy_or(api_manual_entry_submit, r))
     app.router.add_get("/api/manual-entry/status", api_manual_entry_status)
     app.router.add_post("/api/manual-entry/wait-action", api_manual_wait_action)
     app.router.add_post("/api/manual-entry/cancel", api_manual_entry_cancel)
     app.router.add_post("/api/manual-bracket/disarm", api_manual_bracket_disarm)
     app.router.add_post("/api/manual-bracket/rearm", api_manual_bracket_rearm)
     app.router.add_get("/api/manual-exit/preview", api_manual_exit_preview)
-    app.router.add_post("/api/manual-exit/submit", api_manual_exit_submit)
+    app.router.add_post("/api/manual-exit/submit", lambda r: busy_or(api_manual_exit_submit, r))
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)
     app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
@@ -7577,6 +7609,7 @@ def main() -> None:
         host=args.host,
         port=args.port,
         print=None,
+        shutdown_timeout=2.0,   # SSE(/api/events·/api/stream)는 안 끝나는 핸들러라 기본 60초를 통째로 기다려 SIGTERM «행» → SIGKILL(on_cleanup 못 돎)
     )
 
 

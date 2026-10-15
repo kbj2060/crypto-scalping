@@ -267,9 +267,11 @@ def monthly() -> int:
            "train_end": str(pd.Timestamp(ts[ok].max()).date()), "hold_bars": HOLD, "n_train": int(ok.sum()),
            "train_start": str(pd.Timestamp(ts[ok].min()).date()),
            "expand_logit": logit or (old or {}).get("expand_logit") or [-1.4950, 5.1671]}
+    tmp = ARTIFACT.with_suffix(".tmp")
+    joblib.dump(art, tmp)   # 다 쓴 뒤 교체 -- 쓰다 죽어도 지난 판이 남게
     if ARTIFACT.exists():
         ARTIFACT.replace(ARTIFACT.with_suffix(".joblib.prev"))
-    joblib.dump(art, ARTIFACT)
+    tmp.replace(ARTIFACT)
     print("저장", {k: v for k, v in art.items() if k != "models"}, flush=True)
     return 0
 

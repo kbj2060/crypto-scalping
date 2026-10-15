@@ -93,8 +93,9 @@ class HourFile:
 
     def write(self, ts_ms: int, line: str) -> None:
         key = datetime.fromtimestamp(ts_ms / 1000, timezone.utc).strftime("%Y-%m-%dT%H")
-        if key != self.hour:
-            self.close(compress=True)
+        if key != self.hour or self.fh is None:   # 재접속(close 후 같은 시) 이면 이어쓰기 -- 없으면 None.write 로 그 시 끝까지 재접속 루프(10-05 ETH 498회)
+            if key != self.hour:
+                self.close(compress=True)
             path = self.dir / f"{key}.jsonl"
             new = not path.exists()
             self.fh = open(path, "a")

@@ -547,6 +547,7 @@ class OrderflowRasterCollector:
         url = _SNAPSHOT_URL.format(SYMBOL=self.symbol.upper())
         async with aiohttp.ClientSession() as s:
             async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                r.raise_for_status()   # 429/418 본문이 lastUpdateId=0 스냅샷으로 병합돼 매 이벤트 재요청(10-07 HYPE 220회)
                 return await r.json(content_type=None)
 
     def _merge_snapshot(self, snap: dict) -> int:
@@ -583,7 +584,6 @@ class OrderflowRasterCollector:
             try:
                 async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
                     logger.info("depth WS 연결: %s", url)
-                    delay = 3.0
                     self._synced = False
                     need_snapshot = True
                     while self._running:
@@ -605,12 +605,15 @@ class OrderflowRasterCollector:
                         if what == "resnapshot":
                             logger.warning("시퀀스 단절(last_u=%s U=%s pu=%s) — 재동기",
                                            self._last_u, ev.get("U"), ev.get("pu"))
+                            if not self._synced:   # 방금 받은 스냅샷이 스트림보다 낡았다 -- 바로 다시 받지 말고 물러난다(IP 공유: 주문 경로)
+                                raise RuntimeError("snapshot older than stream")
                             self._synced = False
                             need_snapshot = True
                             continue
                         self._apply(ev)
                         self._last_u = int(ev["u"])
                         self._synced = True
+                        delay = 3.0   # 동기된 뒤에만 물러남 초기화
                         self._last_event_ts = time.time()
             except Exception as e:
                 if self._running:

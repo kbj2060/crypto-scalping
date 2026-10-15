@@ -1192,6 +1192,11 @@ function connectDashboardEvents() {
   };
   events.onerror = () => {
     if (!document.hidden) console.warn("Dashboard event connection interrupted; reconnecting.");
+    // 🔴HTTP 오류 응답(터널 502·배포 재시작)에는 브라우저가 재연결하지 않고 CLOSED 로 굳는다 -- 그러면 render() 가 영영 멈춘다
+    if (events.readyState === EventSource.CLOSED && dashboardEvents === events) {
+      dashboardEvents = null;
+      setTimeout(() => { if (!document.hidden) connectDashboardEvents(); }, 5000);
+    }
   };
 }
 
@@ -4645,10 +4650,11 @@ function fpLegendGeom(svg) {   // {x0: SVG 좌표의 범례 시작, w: 범례 �
 let footprintBars = new Map();          // 봉시각 -> 서버가 준 봉 객체(그대로)
 let footprintCacheKey = "";             // 코인|창 -- 달라지면 캐시를 버리고 전량부터
 
+let footprintInFlight = false;   // 터널이 멎으면 400ms 폴링이 쌓였다가 순서 없이 풀려 옛 응답(전량 포함)이 형성 봉을 되돌렸다
 async function refreshFootprint() {
   if (!flowOn()) return;   // 흐름 엔진이 있는 코인만
   const now = Date.now();
-  if (now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
+  if (footprintInFlight || now - footprintLastFetchAt < FOOTPRINT_POLL_MS) return;
   footprintLastFetchAt = now;
   const key = `${activeSnapshotAsset}|${CHART_PAN_BARS}`;   // 창과 무관하게 12시간 -- 창 이동은 받아 둔 것에서 고른다
   if (key !== footprintCacheKey) { footprintBars = new Map(); footprintCacheKey = key; }
@@ -4665,6 +4671,7 @@ async function refreshFootprint() {
     newest = 0;
   }
   const since = newest ? newest - barSec : 0;   // 0 = 전량
+  footprintInFlight = true;
   try {
     const res = await fetch(`${API_FOOTPRINT_URL}?asset=${activeSnapshotAsset}&bars=${CHART_PAN_BARS}&since=${since}`,
                             { cache: "no-cache" });
@@ -4689,6 +4696,8 @@ async function refreshFootprint() {
     //   직전 값을 그대로 둔다. 진짜로 정체되면 위 «전량 재수신» 자가복구가 잡는다.
     // 🔴캐시는 **안 버린다**. 한 번의 네트워크 실패로 12.5KB 를 다시 받을 이유가 없다 --
     //   다음 성공 폴링이 꼬리 두 봉만 얹으면 그대로 이어진다.
+  } finally {
+    footprintInFlight = false;
   }
   scheduleSnapshotChartRender();
 }
@@ -8308,7 +8317,16 @@ async function refreshNotifyPage() {
   } catch (e) { notifyState.registration = null; notifyState.subscription = null; }
   try {
     notifyState.devices = (await (await fetch("/api/push/devices", { cache: "no-cache" })).json()).devices || [];
-  } catch (e) { notifyState.devices = []; }
+    // 🔴브라우저는 구독 중인데 서버 목록에 없으면(410 정리·파일 유실) 다시 등록한다 -- 10-07 뒤 모든 푸시가 0대로 갔다
+    const sub = notifyState.subscription;
+    if (sub && !notifyState.devices.some((d) => d.endpoint_tail === sub.endpoint.slice(-12))) {
+      await fetch("/api/push/subscribe", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscription: sub.toJSON(), label: navigator.userAgent.slice(0, 80) }),
+      });
+      notifyState.devices = (await (await fetch("/api/push/devices", { cache: "no-cache" })).json()).devices || [];
+    }
+  } catch (e) { notifyState.devices = notifyState.devices || []; }
   renderNotifyChecks(); renderNotifyMain(); renderNotifyDevices();
 }
 
@@ -9033,7 +9051,10 @@ async function manualEntryPreview(side, kind = "entry", ov = null) {
   box.innerHTML = entryNote("확인 중…");
   manualEntryClearConfirm();   // 다른 방향을 눌렀는데 옛 확인 버튼이 남아 있으면 안 된다
   try {
+    const asset = activeSnapshotAsset;
     const data = await manualEntryFetch(side, kind, ov);
+    // 🔴응답 전에 코인 탭을 바꾸면 옛 코인 계획이 새 코인 이름으로 무장됐다(길게 누르기면 바로 발주)
+    if (asset !== activeSnapshotAsset) throw new Error("미리보기 중 코인을 바꿨습니다 — 다시 누르세요(주문 안 나감)");
     box.innerHTML = data.ok
       ? (kind === "exit" ? manualExitPlanHtml(data.plan || {}) : manualEntryPlanHtml(data))
       : entryNote(`실패: ${data.detail || data.error || "알 수 없음"}`, "bad");
@@ -9183,7 +9204,7 @@ function manualEntryClearConfirm() {
 
 function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   if (plan.blocked) { manualFireOnPreview = false; return; }
-  const pct = ov?.pct ?? Math.round(100 * (plan.fraction ?? 1));
+  const pct = ov?.pct ?? Math.max(1, Math.round(100 * (plan.fraction ?? 1)));   // 규칙 물타기 몫이 0.5% 미만이면 0 → 서버 400(규칙 모드는 pct 를 안 쓴다)
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
                          lev: ov?.lev ?? manualLevEffective(), sltp: ov?.sltp ?? manualSltpOn(),
                          rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
@@ -9315,7 +9336,7 @@ function renderOfabSl(p) {
   box.innerHTML = off
     ? `<div class="ofab-slp-head">${SL_ICO_OFF}<span>손절</span><b>없음</b><em>해제함</em></div>`
       + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑 꺼짐</span><span><i></i>서버 5분봉 감시 꺼짐</span></div>` + btn
-    : `<div class="ofab-slp-head">${SL_ICO}<span>손절</span><b>${px}</b>${ba.sl_name ? `<span>${escapeHtml(ba.sl_name)}</span>` : ""}${dist != null ? `<em>지금가 −${dist.toFixed(1)}%</em>` : ""}</div>`
+    : `<div class="ofab-slp-head">${SL_ICO}<span>손절</span><b>${px}</b>${ba.sl_name ? `<span>${escapeHtml(ba.sl_name)}</span>` : ""}${dist != null ? `<em>지금가 ${ba.sl_price > mk ? "+" : "−"}${dist.toFixed(1)}%</em>` : ""}</div>`
       + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑</span><span><i></i>서버 5분봉 감시</span></div>` + btn;
 }
 document.addEventListener("click", async (e) => {
@@ -9689,6 +9710,7 @@ function switchPlan(side) {
 // 서버의 청산 미리보기도 같은 이유로 fresh 다(server.py api_manual_exit_preview).
 // 조회가 실패해도 미리보기는 진행한다 -- 급히 닫으려는 사람을 여기서 세우면 안 된다.
 async function manualExitPreview(side, ov = null) {
+  manualEntryClearConfirm();   // 🔴옛 확인(다른 방향·진입)이 계좌 조회 동안 남아 있으면 0.4초 길게 누르기 타이머가 그걸 낸다(10-16 감사)
   manualButtonsDisabled(true);
   try {
     binanceAccountLastFetchAt = 0;      // 클라이언트 30초 게이트 우회
@@ -9989,7 +10011,7 @@ function renderOfabRule(bal, live) {
 // 🔴2026-09-30 사용자 «플로팅 버튼 미실현이 실제와 안 맞는다»: 기준 시세를 «계좌 스냅샷이 브라우저에 도착한 순간»으로 잡았는데,
 //   거래소 손익은 서버가 조회한 시각(generated_at) 값이고 서버 캐시 때문에 도착까지 30초 넘게 늦다(실측 33.8초).
 //   그 사이 움직임이 통째로 빠져 숏 1.6 ETH 면 $2 움직임에 $3 틀렸다. 기준 = generated_at 초의 시세(1초 수급 칸의 마지막가).
-const ofabPnlRef = { acct: null, price: 0 };
+const ofabPnlRef = { acct: null, price: 0, asset: null };
 function ofabPriceAt(sec) {                     // 그 초(없으면 5초 안 직전 초)의 마지막 체결가 -- 1초 수급 칸 [.., 가격]
   for (let s = sec; s > sec - 5; s -= 1) { const r = supply1s.get(s); if (r && r[6] > 0) return r[6]; }
   return 0;
@@ -9998,8 +10020,9 @@ function ofabLivePnl(p, qty, side) {
   const base = Number(p?.unrealized_pnl) || 0;
   const live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
   if (!qty || !(live > 0)) return base;
-  if (ofabPnlRef.acct !== latestBinanceAccount) {
+  if (ofabPnlRef.acct !== latestBinanceAccount || ofabPnlRef.asset !== activeSnapshotAsset) {   // 탭을 바꾸면 다른 코인 기준가로 셈했다
     ofabPnlRef.acct = latestBinanceAccount;
+    ofabPnlRef.asset = activeSnapshotAsset;
     const g = Math.floor(Date.parse(latestBinanceAccount?.generated_at || "") / 1000);
     ofabPnlRef.price = (Number.isFinite(g) && ofabPriceAt(g)) || live;   // 기록이 없는 코인·재연결 직후는 옛 방식
   }

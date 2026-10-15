@@ -33,7 +33,9 @@ if [[ -d "$(dirname "$DEST")" ]]; then
   for dir in data/live data/ensemble data/lake data/hot_backup; do
     [[ -d "$ROOT/$dir" ]] || continue
     mkdir -p "$DEST/$dir"
-    rsync -a --exclude '*.tmp' --exclude '.snap_*' "$ROOT/$dir/" "$DEST/$dir/"
+    # 🔴*.wal 은 보내지 않는다(아래 dev 사본과 같은 이유) -- --delete 가 없어 원본이 체크포인트로 지운 옛 wal 이
+    #   새 본체 옆에 남고, 그 사본을 열면 옛 wal 이 **조용히 재생돼 행이 중복**된다(2026-10-16 D: 에 16개 실측·재현).
+    rsync -a --exclude '*.tmp' --exclude '*.wal' --exclude '.snap_*' "$ROOT/$dir/" "$DEST/$dir/"
   done
   echo "[$(date -Iseconds)] backup done"
 else

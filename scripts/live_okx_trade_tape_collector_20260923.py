@@ -118,6 +118,14 @@ FLUSH_SECONDS = 5.0
 VERIFY_SECONDS = 300.0
 VERIFY_TOLERANCE = 1e-4
 RECV_TIMEOUT = 25.0      # 이 시간 조용하면 "ping" 을 보낸다(OKX 는 30초 무응답이면 끊는다)
+# 🔴세션은 WS 때문에 ClientTimeout(total=None) = 시한 없음이다. REST 하나가 반쯤 열린 연결에 걸리면 verify_recent 를
+#   기다리는 WS 수신 루프가 영원히 멈춘다(맥락·호가 수집기도 assert_ct_val 로 같은 길) -- REST 호출마다 시한을 단다.
+REST_TIMEOUT_S = 20.0
+
+
+def _rest_timeout():
+    from aiohttp import ClientTimeout
+    return ClientTimeout(total=REST_TIMEOUT_S)
 
 
 class OkxTapeBuffer(TapeBuffer):
@@ -160,7 +168,7 @@ async def assert_ct_val(session, inst: str, expected: float) -> None:
     ⭐단 **REST 가 안 될 때는 통과시킨다** -- 「다르다는 증거」가 있을 때만 멈춘다. 거래소
       API 가 잠깐 죽었다고 수집기가 안 뜨면 그 시간은 영구 손실이다."""
     try:
-        async with session.get(INSTRUMENTS_URL, headers=HTTP_HEADERS,
+        async with session.get(INSTRUMENTS_URL, headers=HTTP_HEADERS, timeout=_rest_timeout(),
                                params={"instType": "SWAP", "instId": inst}) as r:
             body = await r.json()
         got = float(body["data"][0]["ctVal"])
@@ -195,7 +203,7 @@ async def verify_recent(store, session, inst: str) -> None:
             break
         anchor = left[0]
         try:
-            async with session.get(HISTORY_CANDLES_URL, headers=HTTP_HEADERS,
+            async with session.get(HISTORY_CANDLES_URL, headers=HTTP_HEADERS, timeout=_rest_timeout(),
                                    params={"instId": inst, "bar": "1m", "limit": "100",
                                            "after": str((anchor + 60) * 1000)}) as r:
                 if r.status != 200:
@@ -250,7 +258,7 @@ def okx_minute_fetcher(session, inst: str, bucket: float, ct_val: float):
     넘기면 같은 ms 의 체결이 경계에서 빠져 2026-09-24 실측 −9.4% 였다(tradeId 로는 연속 1,853건,
     1분봉 volCcy 와 오차 0). 요청 한도 20회/2초 -- 사이에 0.12초 쉰다."""
     async def get(url: str, params: dict) -> list:
-        async with session.get(url, headers=HTTP_HEADERS, params=params) as r:
+        async with session.get(url, headers=HTTP_HEADERS, params=params, timeout=_rest_timeout()) as r:
             r.raise_for_status()
             body = await r.json()
         if str(body.get("code")) != "0":

@@ -38,6 +38,7 @@ import asyncio
 import json
 import os
 import math
+import threading
 import time
 from datetime import datetime, timezone
 import sys
@@ -272,6 +273,9 @@ def chain_poll() -> None:
 #   붙이기는 끝에만 하고 지우기는 잠금 안에서 «쓴 만큼 앞에서»만 하므로 그 사이 들어온 체결은 남는다.
 _BUF: list[tuple] = []
 _BUF_LOCK = asyncio.Lock()
+# 🔴write()(WS flush)와 reconcile()(체인 루프)은 다른 스레드에서 같은 파일에 트랜잭션을 연다 -- 같은 trade_id 를 둘이 넣으면
+#   늦게 커밋하는 쪽이 PK 충돌로 통째로 롤백된다(10-05~ «대조 실패: Duplicate key» ~7%). DB 구간만 이 잠금으로 줄 세운다.
+_DB_LOCK = threading.Lock()
 
 
 async def flush_buf() -> tuple[int, int, int]:
@@ -348,22 +352,23 @@ def reconcile() -> dict:
     liq = [(r[11], r[1]) for r in rows if r[11]]
     fut: list[tuple] = []
     rfq: list[tuple] = []
-    con = _connect()
-    try:
-        con.begin()
-        if rows:
-            con.executemany(f"INSERT OR IGNORE INTO option_trades VALUES ({','.join('?' * len(COLS))})", rows)
-        if liq:
-            con.executemany("UPDATE option_trades SET liquidation = ? WHERE trade_id = ? AND liquidation IS NULL", liq)
-        con.commit()
-        need = con.execute("""SELECT block_trade_id, min(ts_ms), any_value(instrument_name) FROM option_trades
-                              WHERE is_block AND ts_ms >= ? GROUP BY 1
-                              HAVING max(block_trade_leg_count) > count(*)
-                                 AND block_trade_id NOT IN (SELECT block_trade_id FROM block_future_legs)""",
-                           [since]).fetchall()
-        last_rfq = dict(con.execute("SELECT api, max(ts_ms) FROM block_rfq_trades GROUP BY 1").fetchall())
-    finally:
-        con.close()
+    with _DB_LOCK:
+        con = _connect()
+        try:
+            con.begin()
+            if rows:
+                con.executemany(f"INSERT OR IGNORE INTO option_trades VALUES ({','.join('?' * len(COLS))})", rows)
+            if liq:
+                con.executemany("UPDATE option_trades SET liquidation = ? WHERE trade_id = ? AND liquidation IS NULL", liq)
+            con.commit()
+            need = con.execute("""SELECT block_trade_id, min(ts_ms), any_value(instrument_name) FROM option_trades
+                                  WHERE is_block AND ts_ms >= ? GROUP BY 1
+                                  HAVING max(block_trade_leg_count) > count(*)
+                                     AND block_trade_id NOT IN (SELECT block_trade_id FROM block_future_legs)""",
+                               [since]).fetchall()
+            last_rfq = dict(con.execute("SELECT api, max(ts_ms) FROM block_rfq_trades GROUP BY 1").fetchall())
+        finally:
+            con.close()
     for bid, ts, inst in need:
         base = API_PUB if now - ts < 20 * 3600 * 1000 else HIST
         for x in _get(base, "get_last_trades_by_currency_and_time", currency=FUT_API[coin_of(inst)], kind="future",
@@ -387,16 +392,17 @@ def reconcile() -> dict:
         except Exception as e:           # RFQ 목록이 없는 통화(USDC 등)는 건너뛴다
             print(f"  RFQ {api} 건너뜀: {type(e).__name__}: {str(e)[:80]}", flush=True)
     if fut or rfq:
-        con = _connect()
-        try:
-            con.begin()
-            if fut:
-                con.executemany("INSERT OR IGNORE INTO block_future_legs VALUES (?,?,?,?,?,?,?,?)", fut)
-            if rfq:
-                con.executemany("INSERT OR IGNORE INTO block_rfq_trades VALUES (?,?,?,?,?,?,?,?,?,?,?)", rfq)
-            con.commit()
-        finally:
-            con.close()
+        with _DB_LOCK:
+            con = _connect()
+            try:
+                con.begin()
+                if fut:
+                    con.executemany("INSERT OR IGNORE INTO block_future_legs VALUES (?,?,?,?,?,?,?,?)", fut)
+                if rfq:
+                    con.executemany("INSERT OR IGNORE INTO block_rfq_trades VALUES (?,?,?,?,?,?,?,?,?,?,?)", rfq)
+                con.commit()
+            finally:
+                con.close()
     return {"체결": len(rows), "강제청산": len(liq), "헤지 다리": len(fut), "RFQ": len(rfq)}
 
 
@@ -474,6 +480,11 @@ def last_ts() -> dict:
 
 def write(rows: list[tuple], gaps: list[tuple] | None = None) -> int:
     """행을 넣고(중복 무시) 상태 JSON 을 새로 쓴다. 넣은 새 행 수를 돌려준다."""
+    with _DB_LOCK:                       # reconcile() 과 트랜잭션이 겹치지 않게(_DB_LOCK 주석)
+        return _write(rows, gaps)
+
+
+def _write(rows: list[tuple], gaps: list[tuple] | None) -> int:
     con = _connect()
     try:
         before = con.execute("SELECT count(*) FROM option_trades").fetchone()[0]

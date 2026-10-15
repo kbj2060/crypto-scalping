@@ -209,7 +209,8 @@ class TailRiskInterceptor:
         import duckdb
         try:
             ws_stale, ws_age_sec, valid_liq_stream = self._stream_health()
-            con = duckdb.connect(_DB_PATH)
+            from scripts.live_trade_tape_collector_20260916 import duckdb_connect_retry
+            con = duckdb_connect_retry(_DB_PATH)   # 감시기 읽기 잠금에 그 분 행을 버리지 않게
             con.execute(
                 f"""
                 INSERT INTO {self._table} (

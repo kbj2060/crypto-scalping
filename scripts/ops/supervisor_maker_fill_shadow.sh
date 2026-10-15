@@ -30,9 +30,13 @@ case "$MAKER_SHADOW_SYMBOL" in
 esac
 export MAKER_SHADOW_DB_PATH="$ROOT/data/live/maker_fill_shadow${SFX}.duckdb"
 
-if pgrep -af "[m]aker_fill_shadow_worker.py" | grep -q "MAKER_SHADOW_SYMBOL=$MAKER_SHADOW_SYMBOL" 2>/dev/null; then
-  echo "[$(date -Iseconds)] $MAKER_SHADOW_SYMBOL 섀도우가 이미 실행 중 -- 켜지 않는다." >&2; exit 1
-fi
+# 2026-10-16: 명령줄(pgrep -a)에는 MAKER_SHADOW_SYMBOL= 이 없어 옛 검사는 한 번도 안 걸렸다 -- 환경에서 읽는다(다른 수집기 래퍼와 같은 방식).
+for pid in $(pgrep -f "[m]aker_fill_shadow_worker.py"); do
+  sym=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep '^MAKER_SHADOW_SYMBOL=' | cut -d= -f2)
+  if [ "${sym:-ETHUSDT}" = "$MAKER_SHADOW_SYMBOL" ]; then
+    echo "[$(date -Iseconds)] $MAKER_SHADOW_SYMBOL 섀도우가 이미 실행 중(pid $pid) -- 켜지 않는다." >&2; exit 1
+  fi
+done
 
 exec "$ROOT/scripts/ops/_supervise.sh" \
   "maker_fill_shadow_worker.py($MAKER_SHADOW_SYMBOL peg-maker fill shadow)" \

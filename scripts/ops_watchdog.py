@@ -115,7 +115,7 @@ def recommended_action(component: str) -> str:
     #   파이프라인·파이프라인 계약·시장 데이터 소스·실행 안전 계약)를 함께 지웠다. dashboard_state 는
     #   이제 scripts/ops/supervisor_market_data_worker.sh 가 쓴다.
     if component == "market_data_sources":
-        return "tail -n 50 logs/supervisor/market_data_worker/*.log; scripts/ops/triage.sh"
+        return "ls -t logs/supervisor/market_data_worker_*.log | head -1 | xargs tail -n 50; scripts/ops/triage.sh"
     if component == "dashboard_state":
         return "scripts/ops/triage.sh"
     if component in {"runtime_resources", "watchdog_storage"}:
@@ -131,7 +131,7 @@ def recommended_action(component: str) -> str:
                 "nohup setsid bash scripts/ops/supervisor_trade_tape.sh "
                 ">> logs/supervisor/trade_tape_manual.log 2>&1 < /dev/null &")
     if component.startswith("duckdb_"):
-        return "scripts/ops/botctl.sh status; journalctl -u trading-bot.service -n 100 --no-pager"
+        return "ps -eo pid,args | grep -v handoff_jobs | grep -E 'duckdb_persist_worker|_supervise.sh'; scripts/ops/triage.sh"
     if component.startswith("multicoin_"):
         # 다시 띄우는 것도 같은 스크립트다(supervisor 가 중복을 막아 이미 돌면 건너뛴다).
         return ("python scripts/ops/multicoin_collectors_20260926.py check; "
@@ -758,6 +758,15 @@ def run_once(dry_run: bool) -> list[Check]:
         # 2026-10-14: 나스닥100 무기한(HL xyz:XYZ100, 24시간 거래) 초당 가격. 죽으면 «⑥ 나스닥» 칸이 «끊김». 수집기를 은퇴시키면 이 줄도 지운다.
         check_duckdb_table_freshness("hot_hl_xyz100_ctx", ROOT / "data" / "hot" / "hl_xyz.sqlite",
                                      "hl_xyz_ctx_1s", "datetime(max(recv_sec), 'unixepoch', 'localtime')", 5, 10),
+        # 2026-10-16: ETH 원본 수집기(소급 불가) -- 다코인 매니페스트는 BTC·SOL·XRP·HYPE 복제본만 봐서 ETH 는 아무도 안 봤다.
+        #   멈추지 않고 «살아서 안 쓰는» 수집기는 _supervise.sh 도 못 잡는다. 임계는 매니페스트의 같은 종류 값 그대로.
+        #   수집기를 은퇴시키면 이 줄도 지운다.
+        check_file_dir_freshness("eth_raster", LIVE / "orderflow" / "raster" / "ETHUSDT", "*.f32", 5, 15),
+        check_file_dir_freshness("eth_bookticker", LIVE / "orderflow" / "bookticker" / "ETHUSDT", "*", 5, 15),
+        check_file_dir_freshness("eth_depthdiff", LIVE / "orderflow" / "depthdiff" / "ETHUSDT", "*", 5, 15),
+        check_file_dir_freshness("eth_hl_trades", LIVE / "orderflow" / "hyperliquid" / "ETH", "*", 15, 60),
+        check_file_dir_freshness("eth_hl_bbo", LIVE / "orderflow" / "hyperliquid_bookticker" / "ETH", "*", 5, 15),
+        check_file_dir_freshness("eth_okx_bbo", LIVE / "orderflow" / "okx_bookticker" / "ETH-USDT-SWAP", "*", 5, 15),
         # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
         *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
         *check_multicoin_collectors(),

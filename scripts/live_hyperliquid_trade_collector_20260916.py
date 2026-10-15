@@ -93,6 +93,13 @@ def parse(msg: dict) -> list[tuple]:
     return out
 
 
+def new_rows(rows: list[tuple], cut: int, latest: int) -> tuple[list[tuple], int]:
+    """이번 연결 시작 전 최신 시각(cut) 이하는 버린다 -- 재구독 스냅샷 중복. (남은 행, 갱신된 최신 시각).
+    ponytail: 끊긴 사이 cut 과 같은 ms 의 새 체결도 버린다(드묾) -- 정확히 하려면 tid 집합."""
+    rows = [r for r in rows if r[1] > cut]
+    return rows, max([latest] + [r[1] for r in rows])
+
+
 _last_db: Path | None = None
 
 
@@ -101,7 +108,9 @@ def write(rows: list[tuple], gap: tuple | None = None) -> None:
     import duckdb
     DB = db_path()
     if _last_db is not None and _last_db != DB:
-        _gzip_done(_last_db)      # 날짜가 넘어갔다 -- 어제 파일은 이제 안 바뀐다
+        # 날짜가 넘어갔다 -- 🔴어제가 아니라 3일 전 파일을 압축한다: 포지션 수집기 universe 가 최근 3개 날짜(48h)를
+        #   .duckdb 로 읽는데, 어제를 바로 압축하면 UTC 자정 직후엔 오늘 몇 시간치만 남았다(10-15 10:35 XRP 1위 $0M)
+        _gzip_done(db_path(time.time() - 3 * 86400))
     _last_db = DB
     DB.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(DB))
@@ -125,6 +134,7 @@ async def run() -> None:
     buf: list[tuple] = []
     last = time.time()
     down: tuple[int, str] | None = None   # (끊긴 시각, 이유) -- 다시 붙으면 그때 공백으로 적는다
+    resume_ms = 0     # 받은 체결의 최신 시각 -- 재구독 스냅샷(최근 ~25건)이 이미 적은 체결을 다시 보낸다(10-14 중복 220건)
     while True:
         try:
             async with websockets.connect(WS, ping_interval=20, ping_timeout=20) as ws:
@@ -141,19 +151,32 @@ async def run() -> None:
                     except Exception as e2:
                         print(f"  gap 기록 실패: {e2}", flush=True)
                     down = None
+                cut = resume_ms
                 while True:
-                    buf += parse(json.loads(await ws.recv()))
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), 30)
+                    except asyncio.TimeoutError:   # 조용한 코인(XRP)은 서버가 «Inactive» 로 끊는다(10-06~ 305번) -- HL 호가 수집기와 같은 ping
+                        await ws.send(json.dumps({"method": "ping"}))
+                        continue
+                    rows, resume_ms = new_rows(parse(json.loads(raw)), cut, resume_ms)
+                    buf += rows
                     if len(buf) >= FLUSH_N or (buf and time.time() - last >= FLUSH_SEC):
-                        await asyncio.to_thread(write, buf); print(f"  +{len(buf)}행", flush=True); buf, last = [], time.time()
+                        try:
+                            await asyncio.to_thread(write, buf)
+                        except Exception as e2:   # 읽는 쪽(포지션 수집기 universe) 락 -- 연결은 살리고 버퍼는 다음 주기에(10-15 42행 유실)
+                            print(f"  기록 보류 {len(buf)}행: {e2}", flush=True); last = time.time()
+                            continue
+                        print(f"  +{len(buf)}행", flush=True); buf, last = [], time.time()
         except Exception as e:
             # 구멍은 **메운다고 되는 게 아니라 기록하는 것**이다 -- 체결 테이프 수집기와 같은 규약.
             print(f"WS 끊김: {type(e).__name__}: {e} — 5초 후 재연결", flush=True)
             down = down or (int(time.time() * 1000), type(e).__name__)
             try:
                 await asyncio.to_thread(write, buf)
-            except Exception as e2:
-                print(f"  잔여 {len(buf)}행 기록 실패: {e2}", flush=True)
-            buf = []
+                buf = []
+            except Exception as e2:   # 버리지 않고 다음 연결에서 다시 쓴다(HL 체결은 소급 불가)
+                print(f"  잔여 {len(buf)}행 기록 보류: {e2}", flush=True)
+                del buf[:-200_000]
             await asyncio.sleep(5)
 
 
@@ -168,6 +191,10 @@ def _selftest() -> None:
     assert r[0][0] == "ETH" and r[0][2] == 137993694461296
     assert r[0][7] == "0xaa" and r[0][8] == "0xbb", "주소는 소문자로 정규화한다"
     assert parse({"channel": "l2Book", "data": {}}) == []
+    # 재구독 스냅샷: cut(이전 연결 최신 시각) 이하는 버리고 최신 시각은 앞으로만
+    snap = [("ETH", 90, 1), ("ETH", 100, 2), ("ETH", 101, 3)]
+    assert new_rows(snap, 100, 100) == ([("ETH", 101, 3)], 101), "스냅샷 중복을 못 걸렀다"
+    assert new_rows([], 100, 101) == ([], 101) and new_rows(snap, 0, 0)[1] == 101
     print("selftest ok")
 
 

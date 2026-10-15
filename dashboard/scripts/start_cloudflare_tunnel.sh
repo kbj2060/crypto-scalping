@@ -11,15 +11,12 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
-PY="${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}"
 PORT="${DASHBOARD_PORT:-8787}"
-HOST="${DASHBOARD_HOST:-127.0.0.1}"
 TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
 ORIGIN_URL="${CLOUDFLARE_TUNNEL_ORIGIN_URL:-http://127.0.0.1:$PORT}"
 LOG="$ROOT/data/live/cloudflare_named_tunnel.log"
 ERR="$ROOT/data/live/cloudflare_named_tunnel.err"
 PID="$ROOT/data/live/cloudflare_named_tunnel.pid"
-SERVER_PID="$ROOT/data/live/cloudflare_named_tunnel.server.pid"
 TOKEN_FILE="$ROOT/data/live/cloudflare_named_tunnel.token"
 CLOUDFLARED="${CLOUDFLARED_BIN:-}"
 
@@ -61,15 +58,10 @@ if is_tunnel_process "$existing_pid"; then
 fi
 rm -f "$PID"
 
-if ! curl -fsS "http://127.0.0.1:$PORT/dashboard/live/" >/dev/null 2>&1; then
-  cd "$ROOT"
-  "$PY" dashboard/server.py --host "$HOST" --port "$PORT" >>"$LOG" 2>>"$ERR" &
-  echo "$!" > "$SERVER_PID"
-  for _ in {1..40}; do
-    curl -fsS "http://127.0.0.1:$PORT/dashboard/live/" >/dev/null 2>&1 && break
-    sleep 0.5
-  done
-fi
+# 🔴2026-10-16: 여기서 대시보드가 안 응답하면 server.py 를 **직접** 띄웠다. 부팅 때 대시보드는 콜드 기동
+#   중이라(분 단위) 매번 이 길을 탔고, supervise_server.sh 의 자식과 포트를 다퉈 이긴 쪽이 **감독 없이**
+#   서빙했다(10-15 pid 1468, 감독은 8시간 «port already in use»). 대시보드는 supervise_server.sh 만 띄운다 --
+#   원본이 아직 안 떴으면 cloudflared 는 502 를 주다가 뜨면 그대로 붙는다.
 
 cd "$ROOT"
 umask 077

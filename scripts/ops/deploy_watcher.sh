@@ -54,7 +54,10 @@ HEALTH_CHECK_WAIT_SECONDS=60
 # below and that supervisor have to agree on which port "the dashboard" means.
 DASHBOARD_PORT="${DASHBOARD_PORT:-8787}"
 DASHBOARD_SIGTERM_GRACE_SECONDS=6   # then SIGKILL; see restart_dashboard()
-DASHBOARD_HEALTH_RETRIES=6          # x5s = 30s past the shared health window, for a slow respawn
+DASHBOARD_HEALTH_RETRIES=36         # x5s = 180s past the shared health window -- 2026-10-15 콜드 기동 3분 반 실측(옛 6=30초라 회귀 판정 -> 다음 사이클이 새 프로세스를 또 죽였다)
+# 재기동까지 마친 SHA. 헬스체크만 실패하고(롤백은 dirty 라 거부) 끝난 다음 사이클이 **이미 새 코드로 뜬
+# 프로세스를 또 죽이지 않게** 한다(2026-10-05 00:35 실측). 새 SHA 면 값이 달라 평소대로 재기동한다.
+RESTARTED_SHA_FILE="$STATE_DIR/restarted_sha"
 
 mkdir -p "$STATE_DIR"
 
@@ -371,10 +374,14 @@ if [[ ${#UNITS_TO_RESTART[@]} -eq 0 && "$dashboard_changed" == "0" ]]; then
   exit 0
 fi
 
-if ! restart_units; then
+if [[ "$(cat "$RESTARTED_SHA_FILE" 2>/dev/null)" == "$REMOTE_SHA" ]]; then
+  log "already restarted onto ${REMOTE_SHA:0:8} by an earlier cycle -- re-checking health only"
+  dashboard_pid_before=""
+elif ! restart_units; then
   send_telegram "⛔ [DEPLOY] pulled ${REMOTE_SHA:0:8} but sudo restart failed -- see scripts/ops/systemd/deploy_watcher_sudoers. Services still running old code, will retry next poll."
   exit 1
 fi
+echo "$REMOTE_SHA" > "$RESTARTED_SHA_FILE"
 
 sleep "$HEALTH_CHECK_WAIT_SECONDS"
 
@@ -420,7 +427,8 @@ fi
 
 if [[ "$healthy" == "1" ]]; then
   echo "$REMOTE_SHA" > "$LAST_DEPLOYED_SHA_FILE"
-  send_telegram "🟢 [DEPLOY] ${REMOTE_SHA:0:8} deployed OK. Restarted: ${!UNITS_TO_RESTART[*]:-dashboard}"
+  # 🔴`${!arr[*]:-x}` 는 «값»의 간접 확장이라 늘 x 를 찍고, 유닛 둘이면 «1 1: invalid variable name» 으로 죽는다.
+  send_telegram "🟢 [DEPLOY] ${REMOTE_SHA:0:8} deployed OK. Restarted: ${!UNITS_TO_RESTART[*]} $([[ "$dashboard_changed" == "1" ]] && echo dashboard)"
   log "deploy OK"
   exit 0
 fi
@@ -435,6 +443,7 @@ if ! working_tree_clean; then
   exit 1
 fi
 git reset --hard "$PRE_RUN_SHA" >/dev/null 2>&1
+rm -f "$RESTARTED_SHA_FILE"   # 옛 코드로 되돌려 재기동했다 -- 같은 SHA 재시도는 다시 재기동해야 한다
 restart_units
 echo "$PRE_RUN_SHA" > "$LAST_DEPLOYED_SHA_FILE"
 send_telegram "🟠 [DEPLOY] auto-rolled back to ${PRE_RUN_SHA:0:8} after ${REMOTE_SHA:0:8} failed its post-deploy health check."

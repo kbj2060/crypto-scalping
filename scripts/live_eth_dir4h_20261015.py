@@ -162,6 +162,8 @@ def vision_update(end_day: str, days: int = 480, workers: int = 8) -> dict[str, 
     for sym in ["ETH"] + COINS:
         f = PANEL / f"{sym}USDT.parquet"
         old = pd.read_parquet(f) if f.exists() else None
+        if old is not None and len(old) and old.timestamp.min() > pd.Timestamp(end_day) - pd.Timedelta(days=days - 2):
+            old = None   # 잘린 패널(10-15 --parity days=45 가 480일 → 45일로 잘랐다) -- 처음부터 다시 받는다
         start = (old.timestamp.max().normalize() + pd.Timedelta("1D")) if old is not None and len(old) else pd.Timestamp(end_day) - pd.Timedelta(days=days)
         dates = [x.strftime("%Y-%m-%d") for x in pd.date_range(start, end_day, freq="D")]
         with ThreadPoolExecutor(workers) as ex:
@@ -181,7 +183,7 @@ def train(frames: dict[str, pd.DataFrame], month: pd.Timestamp, seeds=(0, 1, 2))
     cut = np.datetime64(month) - np.timedelta64(5 * H, "m")
     tr = (ts < cut) & (ts >= cut - np.timedelta64(365, "D")) & np.isfinite(y)
     X = F[FEATS].to_numpy(dtype=np.float32)
-    if tr.sum() < 20000:
+    if tr.sum() < 100_000:   # 365일 = 105,120행 -- 짧은 패널로 조용히 학습하지 않게
         raise ValueError(f"학습 행 부족 {int(tr.sum())}")
     models, pt = [], []
     for s in seeds:
@@ -252,10 +254,10 @@ def _merge(old: pd.DataFrame | None, new: pd.DataFrame, keep_days: float) -> pd.
     return df[df.timestamp >= df.timestamp.max() - pd.Timedelta(days=keep_days)].reset_index(drop=True)
 
 
-def rest_frames(now_ms: int | None = None, others_n: int = 300) -> dict[str, pd.DataFrame]:
+def rest_frames(now_ms: int | None = None, others_n: int = 340) -> dict[str, pd.DataFrame]:
     """REST → vision 형식 frames. 첫 호출 = ETH 31일(klines 9천·metrics 5종) 받기, 다음부터 꼬리만 이어 붙인다(_CACHE)."""
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
-    first = "ETH_k" not in _CACHE
+    first = "ETH_k" not in _CACHE or pd.Timestamp(now_ms, unit="ms") - _CACHE["ETH_k"].timestamp.max() > pd.Timedelta(hours=20)   # 꼬리 300봉=25h -- 그보다 오래 안 불리면 구멍 대신 처음부터
     _CACHE["ETH_k"] = _merge(_CACHE.get("ETH_k"), _klines("ETH", 9000 if first else 300, now_ms), 32)
     met = {}
     for ep, (col, _, _) in METRIC_EP.items():
@@ -336,7 +338,7 @@ def parity() -> None:
     dc = daily_closes(now_ms)
     R = build_features(rest_frames(now_ms, others_n=900), dc).set_index("ts")   # 다른 코인 3일 -- 어제 하루 전부의 1일 수익이 차도록
     y0 = (pd.Timestamp(now_ms, unit="ms").normalize() - pd.Timedelta("1D"))
-    V = build_features(vision_update(str(y0.date()), days=45), dc).set_index("ts")
+    V = build_features(vision_update(str(y0.date())), dc).set_index("ts")
     idx = R.index.intersection(V.index)
     idx = idx[(idx >= y0) & (idx < y0 + pd.Timedelta("1D"))]
     rep = {}
@@ -359,7 +361,11 @@ if __name__ == "__main__":
         frames = vision_update(str((pd.Timestamp.utcnow().tz_localize(None).normalize() - pd.Timedelta("1D")).date()))
         art = train(frames, month)
         ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(art, ARTIFACT)
+        tmp = ARTIFACT.with_suffix(".tmp")
+        joblib.dump(art, tmp)   # 다 쓴 뒤 교체 -- 쓰다 죽어도 지난 판이 남게
+        if ARTIFACT.exists():
+            ARTIFACT.replace(ARTIFACT.with_suffix(".joblib.prev"))
+        tmp.replace(ARTIFACT)
         print("학습", {k: v for k, v in art.items() if k != "models"})
     elif "--parity" in a:
         parity()

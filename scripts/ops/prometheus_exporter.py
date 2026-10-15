@@ -26,7 +26,8 @@ OUT = LIVE / "ops_watchdog"
 STATUS_VALUE = {"OK": 1.0, "WARN": 0.5, "CRITICAL": 0.0, "BLOCKED": 0.0}
 # 2026-09-04: tau1-shadow(은퇴) / btc-multislot-shadow(제거)를 뺐다. 안 도는 유닛의 메트릭을
 # 계속 내보내면 대시보드와 알림에 영구 "down"이 남는다.
-SYSTEMD_UNITS = ["trading-bot", "ops-watchdog"]
+# 2026-10-16: trading-bot 도 뺐다(10-12 은퇴) -- CoreSystemdUnitDown 이 30분마다 거짓 critical 텔레그램을 보내고 있었다.
+SYSTEMD_UNITS = ["ops-watchdog"]
 
 
 def load_json(path: Path) -> Any:

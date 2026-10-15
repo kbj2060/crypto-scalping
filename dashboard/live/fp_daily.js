@@ -616,6 +616,8 @@
         return;
       }
     } else redraw();
+    if (!S.on) return;   // 첫 일봉을 받는 사이 껐다(켰다) -- 그 사이 setOn 이 이미 타이머를 맡았다
+    clearInterval(S.timer);
     S.timer = setInterval(async function () {
       if (!S.on) return;
       try { await loadDays(S.D.d[Math.max(0, S.n - 2)]); redraw(); } catch (e) { /* 다음 주기 */ }

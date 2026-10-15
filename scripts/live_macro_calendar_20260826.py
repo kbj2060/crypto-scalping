@@ -595,6 +595,8 @@ def compute_macro_calendar_from_env() -> dict:
     """워커용 무인자 진입점(2026-09-14). 키를 환경에서 읽는 것 말고는
     compute_macro_calendar() 와 완전히 같다 -- 대시보드가 쓰던 os.getenv 3개를 그대로 옮겼다."""
     import os as _os
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env")   # 🔴워커(live_signal_worker)는 .env 를 안 읽는다 -- 09-14 워커 이전 뒤 FRED·Finnhub 키가 비어 CPI·NFP 등이 조용히 빠졌다
     return compute_macro_calendar(_os.getenv("FRED_API_KEY"), _os.getenv("EIA_API_KEY"),
                                   _os.getenv("FINNHUB_API_KEY"))
 

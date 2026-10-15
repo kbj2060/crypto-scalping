@@ -56,8 +56,8 @@ class MicrostructureScanner:
         self._asks: list[tuple[float, float]] = []
         self._ob_lock = asyncio.Lock()
 
-        self._trades: deque[tuple[int, bool, float]] = deque(maxlen=6_000)
-        self._trade_notional_qty: deque[tuple[int, float, float]] = deque(maxlen=6_000)  # (ts_ms, notional_usd, qty)
+        self._trades: deque[tuple[int, bool, float]] = deque(maxlen=50_000)
+        self._trade_notional_qty: deque[tuple[int, float, float]] = deque(maxlen=50_000)  # (ts_ms, notional_usd, qty)
         self._trade_lock = asyncio.Lock()
 
         # ── 💡 MFT 연산용 60분 메모리 버퍼 (새로 추가됨) ─────────────────
@@ -230,7 +230,8 @@ class MicrostructureScanner:
     def _db_insert(self, bucket_ts: datetime, sig: dict) -> None:
         import duckdb
         try:
-            con = duckdb.connect(self._db_path)
+            from scripts.live_trade_tape_collector_20260916 import duckdb_connect_retry
+            con = duckdb_connect_retry(self._db_path)   # 감시기·대시보드 읽기 잠금에 그 분 행을 버리지 않게(10-15 16회)
             valid_taker_flow = bool(sig.get("valid_taker_flow", False))
             valid_nif = bool(sig.get("valid_nif", False))
             con.execute(f"""
@@ -441,7 +442,8 @@ class MicrostructureScanner:
                                 self._oi_hist.append(oi)
                             if mark > 0:
                                 self._price_hist.append(mark)
-                    await self._poll_recent_agg_trades(session)
+                    if time.time() - self._trade_last_msg_ts > 30.0:   # WS 가 멎었을 때만 -- 늘 돌면 WS 체결과 겹쳐 모든 체결을 두 번 센다(10-14 실측 1.94배)
+                        await self._poll_recent_agg_trades(session)
                     self._poll_last_msg_ts = time.time()
             except Exception as e:
                 self._poll_connected = False

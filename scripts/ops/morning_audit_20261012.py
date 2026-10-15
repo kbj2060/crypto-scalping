@@ -245,7 +245,11 @@ def main() -> None:
     msg = f"🌅 <b>아침 운영 감사 {W.now_kst():%m-%d}</b>{'' if isinstance(text, str) else ' (Claude 없이 요약)'}\n" + html.escape(body)
     print(msg)
     if "--dry-run" not in a:
-        print("telegram:", W.send_telegram(msg[:4000]))
+        ok = W.send_telegram(msg[:4000])
+        if ok is False:   # 10-15 아침 보고(스톱 없음 경보)가 일시 실패로 사라졌다 -- 한 번 더
+            time.sleep(30)
+            ok = W.send_telegram(msg[:4000])
+        print("telegram:", ok)
 
 
 def selftest() -> None:

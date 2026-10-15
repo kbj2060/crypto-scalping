@@ -32,6 +32,7 @@ from typing import Any
 # 서명·시계보정은 계좌 조회 모듈 것을 그대로 쓴다. 밑줄 이름을 건너 쓰는 건 보기 나쁘지만
 # HMAC 서명과 /fapi/v1/time 앵커를 **두 벌로 두는 것보다 낫다** -- 어긋나면 한쪽만 조용히
 # -1021 로 실패한다(2026-09-10 WSL 시계 1초 드리프트 전례).
+from scripts import binance_ban_guard as ban_guard
 from scripts.live_binance_account_20260910 import _clock_offset, _sign
 
 FAPI = "https://fapi.binance.com"
@@ -53,6 +54,8 @@ async def signed(session, method: str, path: str, params: dict, key: str, secret
         async with session.request(method, url, headers={"X-MBX-APIKEY": key}) as response:
             payload = await response.json()
             if response.status != 200:
+                # 418/429 는 기록만 한다(다른 경로가 물러나게) -- 주문·취소는 막지 않는다: 손절 청산을 가짜 밴 기록으로 멈추면 더 위험하다
+                ban_guard.note(response.status, str(payload), response.headers.get("Retry-After"))
                 # 🔴코드를 버리면 안 된다. 2026-09-20 에 이것 때문에 리페그가 죽었다 --
                 #   호출부가 "5022" 를 찾는데 문자열은 "400 Due to ..." 였다.
                 code = payload.get("code")
@@ -419,15 +422,25 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
     cancel = lambda: state.get("action") == "cancel"   # noqa: E731
     while time.monotonic() < deadline and round(total - done, 8) > 0 and repegs <= REPEG_MAX and not cancel():
         remaining = round(total - done, 8)
+        cid = f"{PEG_TAG}{str(common['positionSide'])[:1]}{int(time.time() * 1000)}"
         order = await signed(session, "POST", "/fapi/v1/order",
                              {**common, "type": "LIMIT", "timeInForce": "GTX",
-                              "price": round(price, 8), "quantity": remaining},
+                              "price": round(price, 8), "quantity": remaining, "newClientOrderId": cid},
                              key, secret, offset)
+        if "__error__" in order and not order["__error__"][:1].isdigit():
+            # 🔴네트워크·시간초과 = 나갔는지 모른다 -- 거부로 치면 살아 있는 GTX 가 손절 없이 체결된다. 표식으로 찾아 본다
+            found = await signed(session, "GET", "/fapi/v1/order",
+                                 {"symbol": common["symbol"], "origClientOrderId": cid}, key, secret, offset)
+            if "__error__" not in found and found.get("orderId"):
+                order = found
         if "__error__" in order:
             # -5022 = «지금 걸면 테이커가 된다». 실패가 아니라 호가가 움직였다는 뜻이라
             # 새 호가로 다시 건다. 그 외 오류는 그대로 멈춘다 -- 몰래 테이커로 바꾸지 않는다.
             if is_post_only_reject(order["__error__"]) and repegs < REPEG_MAX:
-                price, _, _ = await maker_price(session, side, common["symbol"])
+                try:
+                    price, _, _ = await maker_price(session, side, common["symbol"])
+                except Exception as exc:  # noqa: BLE001 -- 걸린 주문 없음 -- 예외로 새면 phase 가 working 에 영영 묶인다(접수·손절 감시 정지)
+                    return done, price, repegs, {"phase": "rejected", "error": f"호가 조회 실패 {type(exc).__name__}: {exc}"}
                 repegs += 1
                 state.update(repegs=repegs, limit_price=price)
                 continue
@@ -447,7 +460,10 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
             state["filled"] = round(done + this_filled, 8)
             if status in TERMINAL:
                 break
-            price_now, bid, ask = await maker_price(session, side, common["symbol"])
+            try:
+                price_now, bid, ask = await maker_price(session, side, common["symbol"])
+            except Exception:  # noqa: BLE001 -- 호가 조회 실패 = 앞지름 모름, 주문은 살아 있다 -- 다음 조회에(주문 조회 실패와 같은 취급)
+                continue
             if drifted(side, price, bid, ask):
                 need_repeg, price = True, price_now
                 break
@@ -456,7 +472,7 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
             confirmed = await ensure_closed(session, common, oid, key, secret, offset)
             if confirmed is None:
                 # 살아 있는지 아닌지를 모르는 채로 **또 걸면 안 된다**. 멈추고 사람에게 넘긴다.
-                return done, price, repegs, {
+                return round(done + this_filled, 8), price, repegs, {   # 마지막에 본 체결량(하한) -- 빼면 부분 체결에 손절이 안 걸린다
                     "phase": "error",
                     "error": f"주문 {oid} 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요"}
             this_filled = confirmed
@@ -473,6 +489,7 @@ async def fill_maker(session, *, common: dict, price: float, total: float, deadl
 # ── 진입 «기다리기»(2026-10-10) ─────────────────────────────────────────────────
 # 원장 진입 의도 362건 재생: «따라가지 않고 60분 → 잔량 시장가»가 현행(3초 리페그·120초)보다 +$64 [+33,+99](명목당 +0.5bp).
 # 미체결 포기는 안 된다 -- 놓친 주문이 이긴 주문이라(research_ledger_entry_patience_20261010) 마감엔 반드시 시장가.
+PEG_TAG = "dbpg"           # 2026-10-16 따라가기(fill_maker) GTX 표식 -- 모호한 POST 조회 · 재시작 고아 정리(cancel_wait_orphans)
 WAIT_TAG = "dbwt"          # 이 표식의 GTX 만 «기다리기 주문»으로 알아본다 -- 서버 재시작 때 고아 정리(cancel_wait_orphans)
 WAIT_CHOICES_MIN = (15, 60)
 
@@ -505,7 +522,11 @@ async def run_entry_wait(session, plan: dict, state: dict, wait_sec: float, on_f
         if not (is_post_only_reject(order["__error__"]) and state["repegs"] < REPEG_MAX and not state.get("action")):
             state.update(phase="rejected", error=order["__error__"], done_at=now_iso())
             return state
-        price, _, _ = await maker_price(session, common["side"], common["symbol"])
+        try:
+            price, _, _ = await maker_price(session, common["side"], common["symbol"])
+        except Exception as exc:  # noqa: BLE001 -- 걸린 주문 없음 -- 예외로 새면 «기다리기»가 working 에 영영 묶인다
+            state.update(phase="rejected", error=f"호가 조회 실패 {type(exc).__name__}: {exc}", done_at=now_iso())
+            return state
         state.update(repegs=state["repegs"] + 1, limit_price=price)
     oid = order.get("orderId")
     state.update(order_id=oid, client_order_id=cid, limit_price=price)
@@ -564,7 +585,7 @@ async def cancel_wait_orphans(session, symbols: list[str]) -> dict:
             errors.append(f"{symbol} openOrders: {opens.get('__error__') if isinstance(opens, dict) else opens}")
             continue
         for o in opens:
-            if str(o.get("clientOrderId") or "").startswith(WAIT_TAG):
+            if str(o.get("clientOrderId") or "").startswith((WAIT_TAG, PEG_TAG)):
                 r = await signed(session, "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": o.get("orderId")},
                                  key, secret, offset)
                 (errors.append(r["__error__"]) if "__error__" in r else
@@ -659,7 +680,7 @@ def _self_check() -> None:
     # 🔴옛 3% 손절 경로는 -4120 으로 죽어 있었다 -- /fapi/v1/order 로 조건부 주문을 다시 보내지 않는다.
     import inspect as _i
     assert "STOP_MARKET" not in _i.getsource(run_entry)
-    assert "/fapi/v1/algoOrder" in _i.getsource(place_bracket)
+    assert "/fapi/v1/algoOrder" in _i.getsource(_post_stop) and "_post_stop(" in _i.getsource(place_bracket)   # 스탑 POST 는 _post_stop 으로 옮겨졌다
 
     # ── 리페그 루프 공유 (2026-09-15) ────────────────────────────────────────
     # 진입과 청산이 **같은 함수**를 쓴다. 한쪽만 고쳐지는 걸 막는 검사다.

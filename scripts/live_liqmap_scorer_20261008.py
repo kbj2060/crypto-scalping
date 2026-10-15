@@ -65,8 +65,10 @@ def hot_liqs(t0: int, t1: int) -> pd.DataFrame:
         _q("okx_ctx.sqlite", "SELECT ts_ms, pos_side AS side, sz_base AS qty FROM okx_liquidations WHERE inst_id='ETH-USDT-SWAP' AND ts_ms>=? AND ts_ms<?", a).assign(venue="okx"),
         _q("bybit_liq.sqlite", "SELECT ts_ms, side, qty FROM bybit_liquidations WHERE symbol='ETHUSDT' AND ts_ms>=? AND ts_ms<?", a).assign(venue="bybit"),
     ], ignore_index=True)
+    d["ts_ms"] = d.ts_ms.astype("int64")   # 세 거래소 다 0건이면 object 열 -> merge_asof MergeError(10-10 22:07)
     d["side"] = d.side.map({"long": "long", "short": "short", "Buy": "long", "Sell": "short"})   # Bybit Buy = 롱 청산
     m = _q("binance_ctx.sqlite", "SELECT ts_ms, mark FROM mark_price_1s WHERE symbol='ethusdt' AND ts_ms>=? AND ts_ms<?", (t0 - 5000, t1))
+    m["ts_ms"] = m.ts_ms.astype("int64")
     d = pd.merge_asof(d.dropna(subset=["side"]).sort_values("ts_ms"), m.sort_values("ts_ms"), on="ts_ms", direction="backward", tolerance=5000)
     d = d.dropna(subset=["mark"])
     d["usd"] = d.qty * d.mark
