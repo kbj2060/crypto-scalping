@@ -1,0 +1,26 @@
+{
+  "name": "달러·유동성 점수 Z 중·장기 방향 규칙",
+  "frozen": "2026-10-15",
+  "script": "scripts/research_trend_mid_long_20261015.py --fetch --liq",
+  "spec": {
+    "dollar": "FRED DTWEXBGS, 발표 지연 10일",
+    "net_liquidity": "WALCL/1e3 - RRPONTSYD - WTREGEN/1e3 (십억 달러), 지연 2/1/2일",
+    "score": "Z = a/std730(a) + b/std730(b), a = -ln(DXY_t/DXY_t-91), b = ln(NL_t/NL_t-91)",
+    "decision": "일 종가(UTC) 기준 Z>=k 상승, Z<=-k 하락, 사이 = 예측 보류",
+    "k": {"default": 1.0, "high_conviction": 1.5},
+    "horizons_days": {"mid": 28, "long": [56, 91]},
+    "assets": ["BTC", "ETH", "alts pooled"]
+  },
+  "in_sample_2018_2026": {
+    "k1.0": {"cov": 53, "h28": {"BTC": 61.8, "ETH": 67.5, "ALT": 59.1}, "h56": {"BTC": 69.9, "ETH": 75.4, "ALT": 65.4}, "h91": {"BTC": 69.5, "ETH": 76.2, "ALT": 64.9}},
+    "k1.5": {"cov": 34, "h28": {"BTC": 66.7, "ETH": 73.7, "ALT": 64.3}, "h56": {"BTC": 75.5, "ETH": 81.4, "ALT": 70.7}, "h91": {"BTC": 74.0, "ETH": 80.8, "ALT": 68.6}},
+    "presample_2013_2017_k1.5": {"h56": {"BTC": 61.5, "ETH": 55.7, "ALT": 66.1}},
+    "circular_shift_null_p_k1.0": "<=0.01 (all h, all asset groups)"
+  },
+  "forward_judgment": {
+    "data": "2026-10-15 이후 결정일만",
+    "when": "k=1.0 결정일 >= 180일 그리고 그 결정의 56일 라벨이 모두 확정된 뒤 (빨라도 2027-06)",
+    "pass": "ETH·BTC 56일 적중률 각각 >= 60% 그리고 56일 블록 부트스트랩 95% 하한 > 50%",
+    "rule": "판정 전 결과 열람 금지(건수만 확인)"
+  }
+}
