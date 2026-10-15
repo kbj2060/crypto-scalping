@@ -454,6 +454,9 @@ def _f32_to_parquet(src: Path, dst: Path) -> None:
     mtmp.replace(mdst)
 
 
+_ARCHIVE_VIEW_DONE = False   # 뷰는 글롭이라 새 parquet 을 저절로 덮는다 -- 프로세스당 한 번이면 된다
+
+
 def _ensure_archive_db() -> None:
     """연구용 duckdb. **데이터를 복사하지 않고** parquet 글롭 위에 뷰만 얹는다 --
     `SELECT * FROM book` 이 바로 된다. 복사하면 디스크가 두 배가 되고 둘이 갈릴 수 있다.
@@ -503,10 +506,15 @@ def _archive_then_unlink(p: Path, symbol: str) -> None:
         try:
             _f32_to_parquet(p, dst)            # 1 (내부에서 .part -> replace)
             after, how = dst.stat().st_size, "parquet"
+            global _ARCHIVE_VIEW_DONE
             try:
-                _ensure_archive_db()
+                if not _ARCHIVE_VIEW_DONE:
+                    _ensure_archive_db()
+                    _ARCHIVE_VIEW_DONE = True
             except Exception as exc:  # noqa: BLE001 -- 뷰는 언제든 다시 만들 수 있다
-                logger.warning("보관 뷰 갱신 실패: %s (parquet 은 정상)", exc)
+                # 🔴2026-10-16 5코인 수집기가 매시 :32 에 같은 orderbook.duckdb 를 쓰기로 열어 진 넷이 매시 경고를 냈다 --
+                #   잠금 충돌 = 형제가 같은 뷰를 만드는 중이다(정의가 같다). 다음 시간에 다시 해 본다.
+                (logger.info if "lock" in str(exc).lower() else logger.warning)("보관 뷰 갱신 보류: %s (parquet 은 정상)", exc)
         except Exception as exc:  # noqa: BLE001 -- 3 의 폴백
             logger.warning("parquet 변환 실패 %s: %s — gzip 으로 보관한다", p.name, exc)
             dst_dir.mkdir(parents=True, exist_ok=True)
