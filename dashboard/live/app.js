@@ -4013,6 +4013,17 @@ async function refreshVol4h() {
   } catch (error) { /* 다음 주기 */ }
 }
 
+// 2026-10-16 사용자 «지금 추세만 이것만 봐서는 이해하기 어려워» → 시안 A: 점 다섯 개에 기간 이름(7·14·28·56·90)을 붙이고 위/아래 개수를 말로.
+//   표 = 매일 UTC 00시(KST 09시) 일봉 종가가 N일 전 종가(ref_now)보다 높으면 ↑(dashboard/trend_rule.py).
+function fcTrendCell(t, cell) {
+  const up = t.signal > 0, n = t.votes.length, ups = t.ups;
+  const px = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  const tags = `<span class="fc-tl">${t.votes.map((x) => `<i class="${x.up ? "u" : ""}" title="${x.L}일 전 종가 ${px(x.ref_now)}보다 ${x.up ? "높게" : "낮게"} 마감">${x.L}</i>`).join("")}</span>`;
+  return cell("지금 추세", `${up ? "up" : "dn"} now`, `${up ? "▲ 상승" : "▼ 하락"} <small class="fc-cnt">${ups}:${n - ups}</small>`, "",
+    `지금 추세 — 예측 아님. 매일 09시(KST) 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 중 다수 · ${t.age_days}일째 같은 방향`,
+    tags + `<span class="sub">일 전 종가보다 위 ${ups} · 아래 ${n - ups}</span><span class="sub">${t.age_days}일째 · 매일 09시 마감</span>`).replace('<span class="sub"></span>', "");
+}
+
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분 칼시(10-15) → 4h 예측(+변동성) → 7일 → 4~13주. sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
@@ -4036,9 +4047,8 @@ function fcRowHtml(sec) {
   const kCell = kn ? cell("15분 · 칼시", kn.pct >= 55 ? "up" : kn.pct <= 45 ? "dn" : "flat", kn.pct >= 55 ? `▲ 위 ${kn.pct}%` : kn.pct <= 45 ? `▼ 아래 ${100 - kn.pct}%` : `비등 ${kn.pct}%`,
       `${Number(kn.k.strike).toFixed(1)} · ${Math.floor(kLeft / 60)}:${String(kLeft % 60).padStart(2, "0")}`, `${kTip}\n기준가 ${Number(kn.k.strike).toFixed(2)} · 창 마감까지 ${Math.floor(kLeft / 60)}분 ${kLeft % 60}초`)
     : cell("15분 · 칼시", "flat", "-", eth ? "창 대기" : "ETH 전용", kTip);
-  const dots = t ? `<span class="fc-dots" aria-label="5표 중 상승 ${t.ups}">${t.votes.map((x) => `<i class="${x.up ? "u" : ""}"></i>`).join("")}</span>` : "";
   return sec("q_fc", "⑤ 예측 · 지금에서 멀리", `<div class="fc-row">`
-    + (t ? cell("지금 추세", `${t.signal > 0 ? "up" : "dn"} now`, t.signal > 0 ? "▲ 상승" : "▼ 하락", `${dots} ${t.age_days}일째`, "지금 추세 — 예측 아님(지난 7~90일 종가 대비 5표)")
+    + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
     + kCell
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, volLine)

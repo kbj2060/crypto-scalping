@@ -3269,10 +3269,13 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fc-c > b { font-size: 15px; font-weight: 800; color: var(--fc); line-height: 1.25; }
 .fc-c.now > b { font-size: 13px; }
 .fc-c .sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.fc-dots { display: inline-flex; gap: 2px; vertical-align: -1px; } .fc-dots i { width: 7px; height: 7px; border-radius: 2px; background: var(--bad); } .fc-dots i.u { background: var(--good); }
 @media (max-width: 720px) {
   .fc-row { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
   .fc-c:nth-child(3) { border-left: none; }
 }
 .mc-state .mc-q1 { margin-left: auto; flex: none; }   /* 2026-10-15 ①②④ 제목 대신 상태 줄 끝 «?» */
 .fc-c .sub.fc-vol { color: var(--warn); font-weight: 700; }
+/* 2026-10-16 «지금 추세» 시안 A: 기간 이름 붙은 표 */
+.fc-cnt { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 2px; }
+.fc-tl { display: flex; gap: 2px; } .fc-tl i { flex: 1; font: 700 10px/16px var(--font-mono); font-style: normal; text-align: center; border-radius: 3px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
+.fc-tl i.u { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
