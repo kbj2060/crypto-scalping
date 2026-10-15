@@ -4016,7 +4016,7 @@ async function refreshVol4h() {
   } catch (error) { /* 다음 주기 */ }
 }
 
-// ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 4h 예측(+변동성) → 7일 → 4~13주. sec = renderMarketCtx 의 판 틀(? 설명).
+// ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분 칼시(10-15) → 4h 예측(+변동성) → 7일 → 4~13주. sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
   const eth = activeSnapshotAsset === "eth", v = eth && latestVol4h && latestVol4h.ok ? latestVol4h : null;
@@ -4024,20 +4024,26 @@ function fcRowHtml(sec) {
   const zf = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(2)}`;
   const cell = (hz, c, main, sub, tip, extra = "") => `<div class="fc-c ${c}" title="${escapeHtml(tip)}"><span class="hz">${hz}</span><b>${main}</b><span class="sub">${sub}</span>${extra}</div>`;
   const sig = (g, hz, nm) => (!g || !g.ok ? cell(hz, "flat", "-", "데이터 대기", nm)
-    : cell(hz, cls(g.state), word(g.state), `${nm.split(" ")[0]} ${zf(g.v)} · ${g.state ? `${g.run}일째` : "문턱 ±1 안"}`, `${nm} · ${g.date} UTC 종가`));
+    : cell(hz, cls(g.state), word(g.state), `${nm.split(" ")[0]} ${zf(g.v)}${g.state ? ` · ${g.run}일째` : ""}`, `${nm} · ${g.date} UTC 종가 · |값| ≥ 1 일 때만 방향`));
   const vTip = v ? `4시간 1σ ±${v.sig4h_pct.toFixed(2)}% (±$${v.sig4h_usd.toFixed(0)}) · 최근 ${v.ref_days}일 평소의 ${v.lvl.toFixed(2)}배 · 직전 4시간의 ${v.x_now.toFixed(2)}배 · 더 커질 확률 ${Math.round(v.p_expand * 100)}%` : "";
-  const volLine = v ? `<span class="sub fc-vol" title="${escapeHtml(vTip)}">변동 ±${v.sig4h_pct.toFixed(2)}% · 평소 ${v.lvl.toFixed(2)}배</span>` : `<span class="sub">변동 ${eth ? "불러오는 중" : "ETH 전용"}</span>`;
+  const volLine = v ? `<span class="sub fc-vol" title="${escapeHtml(vTip)}">σ ±${v.sig4h_pct.toFixed(2)}% · ×${v.lvl.toFixed(2)}</span>` : `<span class="sub">변동 ${eth ? "불러오는 중" : "ETH 전용"}</span>`;
   const g4 = eth && latestDir4h && latestDir4h.ok ? latestDir4h : null, old4 = g4 && Date.now() - g4.decided_at_ms > 15 * 60e3;
   const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(11, 16);
   const d4Tip = g4 ? `4h 방향 예측 — 매달 재학습 HGB(ETH 65피쳐, 최근 365일) · ${g4.model_month} 모델(학습 ${g4.train_window[0].slice(0, 10)}~${g4.train_window[1].slice(0, 10)})\n`
       + `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(1)}bp · 상승 문턱 ≥ +${g4.hi.toFixed(1)} · 하락 문턱 ≤ ${g4.lo.toFixed(1)} (학습 예측 상·하위 20%) · ${kst(g4.decided_at_ms)} KST 마감 5분봉\n`
       + `2025~26 IC .06 · 2023~24 검증 불통과 · 참고용(전진 판정 전)${g4.nan_feats.length ? `\n🔴빈 피쳐 ${g4.nan_feats.length}: ${g4.nan_feats.join(", ")}` : ""}\n${vTip}`
     : `4h 방향 예측(ETH 전용) — ${eth ? (latestDir4h && latestDir4h.reason ? `불러오기 실패: ${latestDir4h.reason}` : "불러오는 중") : "ETH 에서만 계산"}\n${vTip}`;
-  const d4Sub = g4 ? `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(0)}bp · 문턱 ${g4.lo.toFixed(0)}/+${g4.hi.toFixed(0)}${old4 ? " · 지연" : ""}` : (eth ? "불러오는 중" : "ETH 전용");
+  const d4Sub = g4 ? `예측 ${g4.pred_bp >= 0 ? "+" : "−"}${Math.abs(g4.pred_bp).toFixed(0)}bp${old4 ? " · 지연" : ""}` : (eth ? "불러오는 중" : "ETH 전용");   // 문턱은 툴팁
+  const kn = kalshiNow(), kLeft = kn ? Math.max(0, Math.round(kn.k.close_ts - Date.now() / 1000)) : 0;
+  const kTip = "칼시(미국 규제 예측시장) 15분 ETH 위/아래 — 창 마감 때 기준가보다 위일 확률 · 55~45% 사이는 비등\n참고 · 신호 아님(확률은 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침)";
+  const kCell = kn ? cell("15분 · 칼시", kn.pct >= 55 ? "up" : kn.pct <= 45 ? "dn" : "flat", kn.pct >= 55 ? `▲ 위 ${kn.pct}%` : kn.pct <= 45 ? `▼ 아래 ${100 - kn.pct}%` : `비등 ${kn.pct}%`,
+      `${Number(kn.k.strike).toFixed(1)} · ${Math.floor(kLeft / 60)}:${String(kLeft % 60).padStart(2, "0")}`, `${kTip}\n기준가 ${Number(kn.k.strike).toFixed(2)} · 창 마감까지 ${Math.floor(kLeft / 60)}분 ${kLeft % 60}초`)
+    : cell("15분 · 칼시", "flat", "-", eth ? "창 대기" : "ETH 전용", kTip);
   const dots = t ? `<span class="fc-dots" aria-label="5표 중 상승 ${t.ups}">${t.votes.map((x) => `<i class="${x.up ? "u" : ""}"></i>`).join("")}</span>` : "";
   return sec("q_fc", "⑤ 예측 · 지금에서 멀리", `<div class="fc-row">`
-    + (t ? cell("지금 추세", `${t.signal > 0 ? "up" : "dn"} now`, t.signal > 0 ? "▲ 상승" : "▼ 하락", `${dots} ${t.age_days}일째 · 예측 아님`, "지금 추세 — 예측 아님(지난 7~90일 종가 대비 5표)")
+    + (t ? cell("지금 추세", `${t.signal > 0 ? "up" : "dn"} now`, t.signal > 0 ? "▲ 상승" : "▼ 하락", `${dots} ${t.age_days}일째`, "지금 추세 — 예측 아님(지난 7~90일 종가 대비 5표)")
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
+    + kCell
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, volLine)
     + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)")
     + sig(ds.z91, "4~13주 예측", "Z 달러·유동성 91일")
@@ -4097,7 +4103,8 @@ MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
 MC_TIPS.q_rate = "나스닥 = 나스닥100 실시간(Hyperliquid xyz:XYZ100 무기한, CME 나스닥 선물과 5분 상관 0.98, 지연 없음) 최근 1시간 · 값 = 1시간 등락. 나스닥은 ETH 보다 먼저 움직이지 않는다 -- 같은 5분 안에서 같이 움직인다(요즘 상관 0.4, 10-13 연구). 요즘 금리 급변 때 ETH 가 반대로 움직이는 것도 나스닥을 거친 것이다. 주말엔 거의 안 움직인다. 수집기가 끊기면 «끊김».\n미 국채선물 5년(ZF)·10년(ZN) 최근 1시간 가격 변화. 가격↓ = 금리↑. CME 무료 시세라 약 10분 늦다(매분 수집).\n«오늘 금리 흐름»을 보는 지도이고 매매 신호로 검정하지 않았다. 2년·30년·1시간 그림은 2026-10-13 판에서 뺐다(사용자 «5년 10년 것만»).";
 MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위치(VWAP·%B·RSI) 줄 제거 -- 설명도 벽만
 MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아니다(지난 7·14·28·56·90일 종가 대비 5표, 미래 적중 48~58%).\n"
-  + "4h 예측 = 매달 재학습 HGB(ETH, 확신 상위 20% 만) — 실시간 입력 준비 중 · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
+  + "15분 · 칼시 = 미국 예측시장 15분 ETH 위/아래 확률(55~45% 비등) — 참고, 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침.\n"
+  + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 학습 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
   + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65%.\n"
   + "4~13주 예측 = 달러·유동성 Z91(|Z|≥1 만) · 2018~26 56일 BTC 70% · ETH 75%(고른 기간 성적).\n"
   + "변동성 = 4시간 실현변동성 GBM(ETH 22피쳐) · 순위상관 .79 · 확대 AUC .82 · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀).\n"
@@ -6888,11 +6895,9 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     });
   }
 
-  // 2026-09-28 옵션 가격축 표시(사용자 선택 A+C, 기본 켜짐 · 옵션 카드의 «가격축 표시»로 끔): 예상 폭 띠(DVOL 1σ 5분·1시간) ·
+  // 2026-09-28 옵션 가격축 표시(사용자 선택 A+C, 기본 켜짐 · 옵션 카드의 «가격축 표시»로 끔): (10-15 예상 폭 띠 제거) ·
   //   max pain(가까운 만기)(2026-10-02 감마 플립 선 제거). 격자 바로 위(셀 아래)에 깔아 셀 숫자를 덮지 않는다.
   //   🔴행사가 자석·핀닝은 우리 검정에서 없었다 -- 그래서 흐린 점선 + 글자이고 굵은 벽처럼 그리지 않는다.
-  const optBx = ml + cw - 3;   // 옵션 괄호·칼시 눈금이 같이 쓰는 x -- 형성 중 봉 오른쪽 끝(플롯 경계)에 걸친다
-  let optLab5Y = null;         // 5분 글자 y -- 칼시 글자가 가까우면 한 줄 비켜 선다
   if (isSnapshotChart && footprint) {   // 2026-09-29 상시 표시(사용자 지시 «체크박스 제거»)
     const { o } = optData();
     if (o && optIv(o)) {
@@ -6904,33 +6909,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (text != null) e.textContent = text;
         og.appendChild(e);
       };
-      const px = Number(currentPrice) || o.index, fs = mobileChart ? 10 : 11, cy = (y) => Math.max(mt, Math.min(plotBottom, y));
-      // 2026-09-28 사용자 «현재가를 따라 움직이면 정보가 안 된다 -- 고정해야»: 띠는 **봉 시가에 고정**한다.
-      //   5분 띠 = 이번 5분봉 시가 ± 5분 1σ (다음 봉까지 고정) · 1시간 띠 = 이번 정시(KST) 첫 봉 시가 ± 1시간 1σ.
-      //   폭(σ)도 그 봉이 열릴 때 값으로 얼린다(DVOL 이 10분마다 바뀌어도 봉 중간에 띠가 흔들리지 않게).
-      //   그래서 «가격이 띠를 벗어났다 = 옵션시장이 예상한 것보다 큰 움직임»으로 읽힌다. 띠는 그 봉(정시 봉)부터 오른쪽만 칠한다.
-      const last = candles[candles.length - 1], hourT = Math.floor(last.time / 3600) * 3600;
-      const hi = Math.max(0, candles.findIndex((c) => c.time >= hourT));
-      const memo = renderCandleSvg._optBand || (renderCandleSvg._optBand = {});
-      if (memo.t5 !== last.time || memo.cur !== activeSnapshotAsset) Object.assign(memo, { t5: last.time, s5: optSigma(o, 300), cur: activeSnapshotAsset });
-      if (memo.t1 !== hourT || memo.cur1 !== activeSnapshotAsset) Object.assign(memo, { t1: hourT, s1h: optSigma(o, 3600), cur1: activeSnapshotAsset });
-      const s5 = memo.s5, s1h = memo.s1h, o5 = Number(last.open) || px, o1 = Number(candles[hi].open) || px;
-      // 2026-09-28 사용자 선택(옵션 시안 B의 괄호): 가격판 전폭 띠 두 장 -> **형성 중 봉 바로 오른쪽 괄호 하나**.
-      //   바깥 옅은 세로줄+꺾쇠 = 1시간(정시 봉 시가 ± 1σ) · 안쪽 진한 막대 = 5분(이번 봉 시가 ± 1σ). 고정 규칙은 위와 같다.
-      //   괄호는 플롯 오른쪽 끝에 걸치고 글자는 바깥쪽(데스크톱 오른쪽 · 모바일은 호가 띠라 안쪽 왼쪽)에 바탕색 외곽선으로.
-      const bx = optBx, a1r = yAt(o1 + s1h), b1r = yAt(o1 - s1h), a1 = cy(a1r), b1 = cy(b1r), a5 = cy(yAt(o5 + s5)), b5 = cy(yAt(o5 - s5));
-      const side = mobileChart ? -1 : 1, lx = bx + side * 8, anchor = mobileChart ? "end" : "start";
-      const halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
-      add("line", { x1: bx, x2: bx, y1: a1, y2: b1, stroke: "var(--option)", "stroke-opacity": 0.55, "stroke-width": 1.5 });
-      [[a1r, a1], [b1r, b1]].forEach(([r, y]) => { if (r >= mt && r <= plotBottom) add("line", { x1: bx - 5, x2: bx + 5, y1: y, y2: y, stroke: "var(--option)", "stroke-opacity": 0.55, "stroke-width": 1.5 }); });
-      add("rect", { x: bx - 3, y: a5, width: 6, height: Math.max(1, b5 - a5), rx: 2, fill: "var(--option)" });
-      optLab5Y = a5 + 4;
-      if (gutOn) {   // 2026-09-30 꼬리표 칸으로(괄호 옆 글자가 꼬리표와 겹친다)
-        fpNotes.push({ val: o5 + s5, label: `5분 ±${optQ(s5)}`, color: "var(--option)", noPrice: true });
-        fpNotes.push({ val: o1 + s1h, label: `1시간 ±${optQ(s1h)}`, color: "var(--option)", noPrice: true });
-      } else add("text", { x: lx, y: a5 + 4, "font-size": fs, "font-weight": 700, fill: "var(--option)", "text-anchor": anchor, ...halo }, `5분 ±${optQ(s5)}`);
-      if (!gutOn && a1 < a5 - fs - 2) add("text", { x: lx, y: a1 + (a1r < mt ? fs : 4), "font-size": fs, "font-weight": 600, fill: "var(--option)", "text-anchor": anchor, ...halo },
-          `1시간 ±${optQ(s1h)}${a1r < mt ? "↑" : ""}`);
+      const px = Number(currentPrice) || o.index, fs = mobileChart ? 10 : 11;
+      // 2026-10-15 사용자 «5분·1시간 변동성 폭은 계산과 프론트에서 제거» -- 괄호·꼬리표·글자 삭제, max pain 만 남긴다.
       const f = optFront(o);
       if (f) {
         const y = yAt(f.pain), lab = `max pain ${optQ(f.pain)} · ${optKst(f.exp_ms)} KST 만기${f.oi_share == null ? "" : `(전체 미결제의 ${Math.round(f.oi_share * 100)}%)`}`;
@@ -6980,26 +6960,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   // 2026-09-30 30분 도달 선 제거(사용자 지시 -- «±0.5×30분 폭에 닿는가»는 옵션 예상 폭 띠와 같은 크기 정보라 중복).
 
-  // 2026-09-28 칼시 15분: 가격판 전폭 선·창 음영 -> **옵션 괄호를 가로지르는 짧은 눈금 하나**(사용자 선택, 옵션 시안 A의 칼시 선).
-  //   글자 «칼시 아래 72% · 11:00»는 괄호 글자와 같은 쪽에. 참고 · 신호 아님(확률은 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침).
-  const kn = isSnapshotChart && footprint ? kalshiNow() : null;
-  if (kn) {
-    const fs = mobileChart ? 10 : 11, yr = yAt(kn.k.strike), ys = Math.max(mt + 2, Math.min(plotBottom - 2, yr));
-    const left = Math.max(0, Math.round(kn.k.close_ts - Date.now() / 1000));
-    const tick = document.createElementNS(NS, "line");
-    Object.entries({ x1: optBx - 12, x2: optBx + 12, y1: ys, y2: ys, stroke: kn.color, "stroke-width": 2.2, "stroke-linecap": "round",
-                     "pointer-events": "none" }).forEach(([k, v]) => tick.setAttribute(k, v));
-    const t = document.createElementNS(NS, "text");
-    // 글자는 옵션 괄호 글자와 같은 쪽(데스크톱 = 괄호 바깥 오른쪽, 셀을 안 덮는다 · 모바일 = 오른쪽이 호가 띠라 안쪽 왼쪽).
-    const ty = optLab5Y != null && Math.abs(ys + 4 - optLab5Y) < fs + 3 ? optLab5Y + fs + 3 : ys + 4;
-    Object.entries({ x: optBx + (mobileChart ? -16 : 16), y: ty, "font-size": fs, "font-weight": 700, fill: kn.color,
-                     "text-anchor": mobileChart ? "end" : "start", "pointer-events": "none",
-                     stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke", style: "font-variant-numeric: tabular-nums" })
-      .forEach(([k, v]) => t.setAttribute(k, v));
-    t.textContent = `칼시 ${kn.word} · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}${yr < mt ? " ↑" : yr > plotBottom ? " ↓" : ""}`;
-    svg.appendChild(tick);
-    svg.appendChild(t);
-  }
+  // 2026-10-15 칼시 15분 눈금은 가격판에서 빼고 ⑤ 예측 줄 «15분 · 칼시» 칸으로(사용자 지시) -- fcRowHtml.
 
   // 2026-10-12 시안 A «가격축 자»: 플롯 오른쪽 끝에 현재가 → 위·아래 첫 청산 띠 가장자리 괄호 + 거리($·%). 가까운 쪽 진하게.
   //   화면 밖이면 플롯 끝까지만 긋고 끝 눈금을 뺀다(거리 숫자는 그대로).
@@ -7031,7 +6992,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       svg.appendChild(g);
     });
   }
-  const lblStay = (q) => !!q.note && /^(5분|1시간) ±|^VWAP/.test(q.label || "");   // 2026-10-01 플롯 오른쪽 끝에 남는 이름(옵션 예상 폭 둘 · VWAP — 사용자 지시)
+  const lblStay = (q) => !!q.note && /^VWAP/.test(q.label || "");   // 2026-10-01 플롯 오른쪽 끝에 남는 이름(VWAP — 사용자 지시 · 10-15 옵션 예상 폭 둘 제거)
   // 2026-09-30 꼬리표 칸: 겹침 선 이름(fpNotes)을 가격 꼬리표와 한 줄에 세워 겹침 회피를 **함께** 다시 돈다.
   if (gutOn && fpNotes.length) {
     fpNotes.forEach((n) => {
@@ -7042,7 +7003,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       priceLabels.push(n);
     });
     priceLabels.forEach((p) => { delete p.adjustedY; });
-    // 2026-10-01 두 줄로 나눠 겹침을 따로 돈다: 5분·1시간 폭 = 플롯 안 오른쪽 끝(그대로) · 나머지 = 호가 프로파일 오른쪽 끝(사용자 지시)
+    // 2026-10-01 두 줄로 나눠 겹침을 따로 돈다: VWAP = 플롯 안 오른쪽 끝(그대로) · 나머지 = 호가 프로파일 오른쪽 끝(사용자 지시)
     declutterTagY(priceLabels.filter((q) => lblStay(q)), mt + 9, plotBottom - 9, 19);
     declutterTagY(priceLabels.filter((q) => !lblStay(q)), mt + 9, plotBottom - 9, 19);
   }
@@ -7051,7 +7012,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const xOf = (q) => (lblStay(q) ? xR : xRR);   // B = 체결 기둥 왼쪽 위에 띄움 · A/C = 플롯 안 오른쪽 끝에 오른쪽 정렬
   // 2026-09-30 약어 → 짧은 이름(사용자 «약어가 너무 많아 이해가 힘들다»): 이름은 그대로, 가격만 호버로 뺀다.
   const CODE = (nm) => nm.replace("앵커·전일고", "앵커 전일고").replace("앵커·전일저", "앵커 전일저")
-    .replace(/^5분 ±.*/, "5분 폭").replace(/^1시간 ±.*/, "1시간 폭").replace(/^HL (롱|숏).*/, "HL $1청산");
+    .replace(/^HL (롱|숏).*/, "HL $1청산");
   priceLabels.forEach(p => {
     const labelYRaw = p.adjustedY !== undefined ? p.adjustedY : p.realY;
     if (p.note) {   // 겹침 선 이름 -- 선은 제자리에 이미 있다. 칸 안 글자 + 지시선만.

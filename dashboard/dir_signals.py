@@ -7,7 +7,7 @@
   |값| ≥ 1 만 방향, 사이는 «의견 없음». 둘 다 전진 판정 전 참고용(docs/prereg/*_20261015.json).
 
   vol4h: 4시간 변동성 예측(ETH, 화면 표시 전용 -- 주문 크기에는 안 쓴다) = scripts/live_eth_sizing_vol_model_20260912
-        GBM 22피쳐 8시드. 평소 = 최근 30일 예측 중앙값 · 확대 확률 = sigmoid(−1.6560 + 6.1834·ln(예측/직전 4시간)).
+        GBM 22피쳐 8시드. 평소 = 최근 30일 예측 중앙값 · 확대 확률 = sigmoid(−1.4950 + 5.1671·ln(예측/직전 4시간)).
 
 UTC 일봉 완결분만 쓴다. FRED 는 발표 지연만큼 밀어 그날 알 수 있던 값만 쓴다(연구와 같은 지연).
 
@@ -112,7 +112,7 @@ def dir_signals_payload(fred_key: str | None = None, now: float | None = None) -
     return out
 
 
-VOL_P = (-1.6560, 6.1834)   # 확대 확률 상수(TRAIN 적합, 09-21) -- 모델을 재학습하면 다시 적합
+VOL_P = (-1.4950, 5.1671)   # 확대 확률 상수 -- 10-15 긴 데이터 모델의 2025-09~2026-10 표본외 예측으로 적합(십분위 보정 오차 ≤3.5pp) · 재학습하면 다시 적합
 
 
 def vol4h_from_klines(rows: list, art: dict, now_ms: float) -> dict:
