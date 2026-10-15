@@ -6,7 +6,7 @@
 서버 페이지(터널 127.0.0.1:18787) 위에 로컬 app.js·styles.css·index.html 을 덮는다(render_xyz100_tile_20261014.py 와 같은 방식).
 /api/dir-signals 는 로컬 dashboard/dir_signals.py 로 지금 계산한 값(live)과 원천 실패(down: 두 신호 ok False)를 준다.
 🔴GET 이 아닌 요청(주문 포함)은 브라우저 안에서 전부 막는다 -- 막힌 요청이 있으면 실패.
-검사(1920·1700·390): #optChip 없음 · 1920 은 코인 탭과 같은 줄 · 사다리 한 개에 칸 셋, 지평 «7일 · 1~13주 · 4~13주» 순서 · 일 단위 칸 판정이 응답과 같음
+검사(1920·1700·390): #optChip 없음 · 1920 은 코인 탭과 같은 줄 · 알약 둘 = «지금 추세»(따로) | «7일 예측 · 4~13주 예측» · 일 단위 칸 판정이 응답과 같음
   · 머리 줄 밖으로 안 넘침 · 페이지 가로 스크롤 없음 · 휴대폰 칸 높이 ≥40px · JS 오류 0 · down 이면 일 단위 칸은 «-».
 """
 import argparse, json, pathlib, sys
@@ -20,7 +20,7 @@ PROBE = """() => {
   const box = document.getElementById('sitChips'), head = box && box.closest('.ops-health-head');
   const segs = box ? [...box.querySelectorAll('.ds-seg')] : [];
   const hr = head ? head.getBoundingClientRect() : null;
-  return { opt: !!document.getElementById('optChip'), ladders: box ? box.querySelectorAll('.ds-c').length : 0,
+  return { opt: !!document.getElementById('optChip'), ladders: box ? box.querySelectorAll('.ds-c').length : 0, nowPill: box ? box.querySelectorAll('.ds-now .ds-seg').length : 0,
            hz: segs.map((s) => (s.querySelector('.ds-hz') || {}).textContent),
            verdict: segs.map((s) => (s.querySelector(':scope > b') || {}).textContent),
            over: hr ? segs.some((s) => s.getBoundingClientRect().right > hr.right + 0.5) : null,
@@ -65,8 +65,8 @@ def run(shot):
                 tag = f"{case}·{w}"
                 print(tag, json.dumps(got, ensure_ascii=False), flush=True)
                 if got["opt"]: fails.append(f"[{tag}] 옵션 칩이 남아 있음")
-                if got["ladders"] != 1 or got["hz"] != ["7일", "1~13주", "4~13주"]: fails.append(f"[{tag}] 칸 {got['hz']}")
-                elif [got["verdict"][0], got["verdict"][2]] != want: fails.append(f"[{tag}] 판정 {got['verdict']} ≠ {want}")
+                if got["ladders"] != 2 or got["nowPill"] != 1 or got["hz"] != ["지금 추세", "7일 예측", "4~13주 예측"]: fails.append(f"[{tag}] 칸 {got['hz']} 알약 {got['ladders']}")
+                elif got["verdict"][1:] != want: fails.append(f"[{tag}] 판정 {got['verdict']} ≠ {want}")
                 if got["over"]: fails.append(f"[{tag}] 머리 줄 밖으로 넘침")
                 if w >= 1920 and not got["row1"]: fails.append(f"[{tag}] 1920 에서 사다리가 둘째 줄로 내려감 ({got['wpx']}px)")
                 if got["hscroll"]: fails.append(f"[{tag}] 가로 스크롤")

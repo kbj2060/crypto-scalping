@@ -4590,7 +4590,8 @@ function renderSituation() {
     return seg(cls(g.state), `${tip}\n지금 ${zf(g.v)} (${g.date} UTC 종가) · ${g.state ? `${g.run}일째` : "문턱 ±1 안"}\n띠 = 최근 ${g.hist.length}일 상태`,
       hz, `<b>${word(g.state)}</b>${strip}`, g.state ? `${g.run}일째` : zf(g.v));
   };
-  let h = dsSeg(ds.cb, "7일", "코인베이스 프리미엄 7일 변화 — 미국 현물 매수세 (BTC 기준, 모든 코인 같은 값)\nz = 코인베이스 BTC ÷ 바이낸스 BTC 의 7일 평균이 한 주 동안 바뀐 양 ÷ 1년 표준편차\nz ≥ +1 → 향후 7일 상승 · z ≤ −1 → 하락 · 그 사이 예측 안 함\n2024~26 보류 1회 채점: BTC 59% · ETH 65% · 알트 56% (예측한 날 28%)\n참고용 — 전진 판정 전");
+  const cb = dsSeg(ds.cb, "7일 예측", "코인베이스 프리미엄 7일 변화 — 미국 현물 매수세 (BTC 기준, 모든 코인 같은 값)\nz = 코인베이스 BTC ÷ 바이낸스 BTC 의 7일 평균이 한 주 동안 바뀐 양 ÷ 1년 표준편차\nz ≥ +1 → 향후 7일 상승 · z ≤ −1 → 하락 · 그 사이 예측 안 함\n2024~26 보류 1회 채점: BTC 59% · ETH 65% · 알트 56% (예측한 날 28%)\n참고용 — 전진 판정 전");
+  let now = "";
   if (t) {   // 2026-10-04 코인별(서버 /api/trend?asset=)
     const up = t.signal > 0, live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), U = coinUnit();
     const rows = t.votes.map((v) => {
@@ -4599,15 +4600,18 @@ function renderSituation() {
     }).join("\n");
     const against = ((latestBinanceAccount || {}).positions || [])
       .filter((p) => String(p.symbol || "").startsWith(U) && Math.abs(Number(p.qty) || 0) > 0 && (p.side === "LONG") !== up);
-    const tip = `큰 방향(1~13주) — UTC 00시 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 · ${t.age_days}일째\n${rows}`
+    const tip = `지금 추세 — 예측 아님, 지난 7~90일 «되돌아본» 상태(미래 방향 적중 48~58%, 돈은 손익 비대칭에서) · UTC 00시 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 · ${t.age_days}일째\n${rows}`
       + (against.length ? `\n역추세 ${against.map((p) => (p.side === "LONG" ? "롱" : "숏")).join("·")} 보유${eth ? " — 원장 79왕복: 추세 쪽 +898$ vs 역추세 −468$(최악 −549$)" : ""}` : "");
-    h += seg(`${up ? "up" : "dn"}${against.length ? " warn" : ""}`, tip, "1~13주",
+    now = seg(`${up ? "up" : "dn"}${against.length ? " warn" : ""}`, tip, "지금 추세",
       `<b>${up ? "▲ 상승" : "▼ 하락"}</b><span class="sit-dots" aria-label="5표 중 상승 ${t.ups}">${t.votes.map((v) => `<b class="${v.up ? "u" : ""}"></b>`).join("")}</span>`,
       `${t.age_days}일째${against.length ? " · 역추세 보유" : ""}`);
   }
-  h += dsSeg(ds.z91, "4~13주", "달러·유동성 점수 Z91 — 달러 약세 + 연준 순유동성 증가\nZ = 달러지수 91일 변화(−) + 순유동성(연준 자산 − 역레포 − 재무부 계좌) 91일 변화, 각 2년 표준편차로 나눔 · 발표 지연만큼 늦춰 씀\nZ ≥ +1 → 4~13주 상승 · Z ≤ −1 → 하락 · 그 사이 예측 안 함\n2018~26 56일: BTC 70% · ETH 75% (고른 기간 성적 — 고를 때 안 본 2013~17 은 52~59%)\n참고용 — 전진 판정 2027-06 이후");
-  h = `<span class="ds-c" role="group" aria-label="방향 신호 · 지평 사다리">${h}</span>`;
+  const z91 = dsSeg(ds.z91, "4~13주 예측", "달러·유동성 점수 Z91 — 달러 약세 + 연준 순유동성 증가\nZ = 달러지수 91일 변화(−) + 순유동성(연준 자산 − 역레포 − 재무부 계좌) 91일 변화, 각 2년 표준편차로 나눔 · 발표 지연만큼 늦춰 씀\nZ ≥ +1 → 4~13주 상승 · Z ≤ −1 → 하락 · 그 사이 예측 안 함\n2018~26 56일: BTC 70% · ETH 75% (고른 기간 성적 — 고를 때 안 본 2013~17 은 52~59%)\n참고용 — 전진 판정 2027-06 이후");
   // 2026-10-15 옵션 칩 자리 → 지평 사다리(사용자 시안 C + 추세 칩 합침). 옛 «30분 닿음»·«융합» 칩은 2026-10-05 제거.
+  // 2026-10-15(2) 사용자 «예측과 추세를 구분»: 추세 5표는 7~90일 «되돌아본» 상태라 예측이 아니다 → 왼쪽 따로 알약 «지금 추세»,
+  //   예측 둘(앞으로 7일 · 4~13주)은 오른쪽 알약 «N 예측».
+  const h = (now ? `<span class="ds-c ds-now" role="group" aria-label="지금 추세">${now}</span>` : "")
+    + `<span class="ds-c" role="group" aria-label="방향 예측">${cb}${z91}</span>`;
   if (box._h !== h) { box._h = h; box.innerHTML = h; }
   box.hidden = false;
 }

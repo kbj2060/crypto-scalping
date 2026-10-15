@@ -2628,7 +2628,7 @@ html.fit1 #snapshotTabPanel > .panel { scroll-margin-top: 10px; }
 @media (prefers-reduced-motion: reduce) { .card-rail button { transition: none; } }
 /* 2026-10-15 지평 사다리(사용자 시안 C): 옵션 칩 자리 · 한 알약 안 세 칸 = 7일 코인베이스 · 1~13주 추세 5표 · 4~13주 유동성.
    칸마다 지평 · 판정 · 상태 띠(일 단위 신호 = 최근 21일, 추세 = 5표) · 지속 일수. 방향색은 판정 글자·옅은 바탕, 역추세 보유는 주황 */
-.sit-chips { display: inline-flex; align-items: center; min-width: 0; }
+.sit-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
 .sit-chips[hidden] { display: none; }
 .ds-c { display: inline-flex; align-items: stretch; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; min-height: 26px; }
 .ds-seg { --ds: var(--muted); display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; white-space: nowrap; cursor: help; }
