@@ -147,7 +147,7 @@ from dashboard import situation as sit  # noqa: E402
 # 2026-09-25 «데이터 관계 읽기» -- 지지/저항 목록 아래 문장. 순수 함수 + 자체점검. 입력은 상황 읽기와 같은 원천.
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
-from dashboard.dir_signals import dir_signals_payload  # noqa: E402 -- 풋프린트 머리 지평 사다리(2026-10-15)
+from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
 from dashboard import market_ctx as mctx  # noqa: E402
@@ -4540,6 +4540,32 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    vol4h_art: dict = {}
+
+    async def api_vol_forecast(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, 표시 전용)
+        """4시간 변동성 GBM(scripts/live_eth_sizing_vol_model_20260912) -- 5분봉 31일(평소 = 30일 예측 중앙값) · 5분 캐시.
+        9-27 에 끈 사이징 워커와 별개: 주문 크기·상한에는 쓰지 않는다."""
+        async def produce() -> dict[str, Any]:
+            if "art" not in vol4h_art:
+                from scripts.live_eth_sizing_vol_model_20260912 import load_model
+                vol4h_art["art"] = await asyncio.to_thread(load_model)
+            if vol4h_art["art"] is None:
+                return {"ok": False, "reason": "artifact_missing"}
+            rows, end = [], None
+            for _ in range(10):   # 1000봉 × 10 = 34일(30일 기준 + 400봉 예열)
+                q = {"symbol": "ETHUSDT", "interval": "5m", "limit": 1000, **({"endTime": end} if end else {})}
+                got = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines", q, error_reason="vol_upstream_error")
+                if not got:
+                    break
+                rows = got + rows
+                end = int(got[0][0]) - 1
+            return await asyncio.to_thread(vol4h_from_klines, rows, vol4h_art["art"], time.time() * 1000)
+        try:
+            payload = await swr_cached("vol4h", 300.0, produce, max_stale=1800.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return web.json_response(payload, headers=NOCACHE)
+
     # 수급 커서 = 목록 키 -> 쿼리 이름. 클라(refreshSupply1s)와 같은 규칙: 받은 행의 최대 초.
     SUPPLY_CURSORS = (("seconds", "since"), ("oi", "sinceOi"), ("liq", "sinceLiq"), ("okx", "sinceOkx"),
                       ("okxOi", "sinceOkxOi"), ("okxLiq", "sinceOkxLiq"), ("spot", "sinceSpot"),
@@ -7458,6 +7484,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/trend", api_trend)
     app.router.add_get("/api/dir-signals", api_dir_signals)
+    app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/market-context", api_market_context)
     app.router.add_get("/api/chip-score", api_chip_score)
     app.router.add_get("/api/notify-center", api_notify_center)

@@ -7,6 +7,9 @@
 /api/dir-signals 는 로컬 dashboard/dir_signals.py 로 지금 계산한 값(live)과 원천 실패(down: 두 신호 ok False)를 준다.
 🔴GET 이 아닌 요청(주문 포함)은 브라우저 안에서 전부 막는다 -- 막힌 요청이 있으면 실패.
 검사(1920·1700·390): #optChip 없음 · 1920 은 코인 탭과 같은 줄 · 알약 둘 = «지금 추세»(따로) | «7일 예측 · 4~13주 예측» · 일 단위 칸 판정이 응답과 같음
+  · ⑤ 예측 판(10-15 시안 B): ⑤ 뉴스 판 없음 · 칸 «지금 추세 · 4h 예측 · 7일 예측 · 4~13주 예측» · 1920 판 줄 ①②④ 셋 · 4h 칸 변동성 줄
+    (/api/vol-forecast 는 가짜 응답 -- 모델 아티팩트가 서버에만 있다) · 1920 이상 시장 맥락 칸 안 스크롤 없음
+    (1700 은 1초 수급 30% 하한 때문에 칸 안 스크롤 수십 px -- 기존 설계 허용)
   · 머리 줄 밖으로 안 넘침 · 페이지 가로 스크롤 없음 · 휴대폰 칸 높이 ≥40px · JS 오류 0 · down 이면 일 단위 칸은 «-».
 """
 import argparse, json, pathlib, sys
@@ -27,8 +30,18 @@ PROBE = """() => {
            row1: (() => { const a = document.getElementById('snapshotAssetTabs'); if (!a || !box) return null; const r = a.getBoundingClientRect(), b = box.getBoundingClientRect();
              return b.top < r.bottom && b.bottom > r.top; })(), wpx: box ? Math.round(box.getBoundingClientRect().width) : 0,
            hscroll: document.documentElement.scrollWidth > window.innerWidth + 1,
+           fc: (() => { const b = document.getElementById('mcBody'); if (!b) return null; const fc = b.querySelector('.mc-fc');
+             const titles = [...b.querySelectorAll('.mc-sec h4')].map((h) => h.innerText.replace(/\\?/g, '').trim());
+             return { news: titles.some((t) => /⑤ 뉴스/.test(t)), strip: b.querySelectorAll('.mc-strip > .mc-sec').length,
+                      hz: fc ? [...fc.querySelectorAll('.fc-c .hz')].map((h) => h.textContent) : null,
+                      vol: fc ? [...fc.querySelectorAll('.fc-c')][1].innerText.split('\\n').slice(2).join(' ') : null,
+                      clipped: b.classList.contains('mc-cmp') && b.scrollHeight > b.clientHeight + 2,
+                      over: fc ? [...fc.querySelectorAll('.fc-c')].some((c) => c.scrollWidth > c.clientWidth + 1) : null }; })(),
            minH: segs.length ? Math.round(Math.min(...segs.map((s) => s.getBoundingClientRect().height))) : 0 };
 }"""
+
+
+VOL = {"ok": True, "asof_ms": 0, "px": 2365.65, "sig4h_pct": 1.324, "sig4h_usd": 31.33, "lvl": 1.492, "x_now": 1.35, "p_expand": 0.55, "ref_days": 30.0}   # 10-15 서버 실측
 
 
 def run(shot):
@@ -59,6 +72,7 @@ def run(shot):
                 pg.route("**/styles.css*", lambda r: r.fulfill(body=css, content_type="text/css"))
                 pg.route(URL, lambda r: r.fulfill(body=html, content_type="text/html"))
                 pg.route("**/api/dir-signals*", api_for(json.dumps(body)))
+                pg.route("**/api/vol-forecast*", api_for(json.dumps(VOL if case == "live" else {"ok": False, "reason": "artifact_missing"})))
                 pg.goto(URL, wait_until="load", timeout=60000)
                 pg.wait_for_timeout(12000)
                 got = pg.evaluate(PROBE)
@@ -69,6 +83,16 @@ def run(shot):
                 elif got["verdict"][1:] != want: fails.append(f"[{tag}] 판정 {got['verdict']} ≠ {want}")
                 if got["over"]: fails.append(f"[{tag}] 머리 줄 밖으로 넘침")
                 if w >= 1920 and not got["row1"]: fails.append(f"[{tag}] 1920 에서 사다리가 둘째 줄로 내려감 ({got['wpx']}px)")
+                fc = got["fc"] or {}
+                if fc.get("news"): fails.append(f"[{tag}] ⑤ 뉴스 판이 남아 있음")
+                if fc.get("hz") != ["지금 추세", "4h 예측 · 방향 준비 중", "7일 예측", "4~13주 예측"]: fails.append(f"[{tag}] 예측 칸 {fc.get('hz')}")
+                if w > 500 and fc.get("strip") != 3: fails.append(f"[{tag}] 판 줄 {fc.get('strip')}칸")
+                want_vol = "변동 ±1.32% (±$31) 평소의 1.49배 · 확대 55%" if case == "live" else "변동 불러오는 중"
+                if fc.get("vol") != want_vol: fails.append(f"[{tag}] 변동성 줄 {fc.get('vol')!r}")
+                if (fc.get("clipped") and w >= 1920) or fc.get("over"): fails.append(f"[{tag}] 예측 판 잘림 {fc}")
+                if pg.locator(".mc-fc").count():
+                    pg.add_style_tag(content="#ofab { visibility: hidden !important; }")
+                    pg.locator(".mc-fc").screenshot(path=str(shot / f"fc_{case}_{w}.png"))
                 if got["hscroll"]: fails.append(f"[{tag}] 가로 스크롤")
                 if w < 500 and got["minH"] < 40: fails.append(f"[{tag}] 터치 칸 {got['minH']}px < 40")
                 pg.locator("#sitChips").locator("xpath=ancestor::div[contains(@class,'ops-health-head')][1]").screenshot(path=str(shot / f"ladder_{case}_{w}.png"))

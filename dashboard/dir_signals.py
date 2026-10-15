@@ -6,6 +6,9 @@
         Z = z(−Δ91 ln DTWEXBGS) + z(Δ91 ln(WALCL − RRP − TGA)), z = ÷ 직전 730일 표준편차
   |값| ≥ 1 만 방향, 사이는 «의견 없음». 둘 다 전진 판정 전 참고용(docs/prereg/*_20261015.json).
 
+  vol4h: 4시간 변동성 예측(ETH, 화면 표시 전용 -- 주문 크기에는 안 쓴다) = scripts/live_eth_sizing_vol_model_20260912
+        GBM 22피쳐 8시드. 평소 = 최근 30일 예측 중앙값 · 확대 확률 = sigmoid(−1.6560 + 6.1834·ln(예측/직전 4시간)).
+
 UTC 일봉 완결분만 쓴다. FRED 는 발표 지연만큼 밀어 그날 알 수 있던 값만 쓴다(연구와 같은 지연).
 
     python dashboard/dir_signals.py --selftest
@@ -109,6 +112,29 @@ def dir_signals_payload(fred_key: str | None = None, now: float | None = None) -
     return out
 
 
+VOL_P = (-1.6560, 6.1834)   # 확대 확률 상수(TRAIN 적합, 09-21) -- 모델을 재학습하면 다시 적합
+
+
+def vol4h_from_klines(rows: list, art: dict, now_ms: float) -> dict:
+    """바이낸스 5분 klines(완결봉만 남김, 시간순) → 4시간 변동성 예측. art = load_model() 결과."""
+    from scripts import live_eth_sizing_vol_model_20260912 as svm
+    rows = [r for r in rows if int(r[6]) < now_ms]
+    if len(rows) < svm.WARMUP + 288:
+        return {"ok": False, "reason": f"봉 부족({len(rows)})"}
+    ts = pd.to_datetime([int(r[0]) for r in rows], unit="ms")
+    col = lambda i: np.array([float(r[i]) for r in rows])
+    c = col(4)
+    X = svm.build_features(pd.Series(ts), c, col(7), col(8), col(2), col(3)).iloc[svm.WARMUP:]
+    X = X[np.isfinite(X.to_numpy(float)).all(1)]
+    p = svm.predict_vol(art["models"], X.tail(30 * 288))
+    pred, ref, rv48 = float(p[-1]), float(np.median(p)), float(np.exp(X["rv48"].iloc[-1]))
+    s4 = pred * np.sqrt(svm.HOLD)
+    return {"ok": True, "asof_ms": int(rows[-1][6]) + 1, "px": float(c[-1]), "sig4h_pct": round(100 * s4, 3),
+            "sig4h_usd": round(float(c[-1]) * s4, 2), "lvl": round(pred / ref, 3), "x_now": round(pred / rv48, 3),
+            "p_expand": round(float(1 / (1 + np.exp(-(VOL_P[0] + VOL_P[1] * np.log(pred / rv48))))), 3),
+            "ref_days": round(len(p) / 288, 1)}
+
+
 def selftest() -> None:
     idx = pd.date_range("2018-01-01", periods=1500)
     rng = np.random.default_rng(0)
@@ -125,11 +151,22 @@ def selftest() -> None:
     assert _sig(pd.Series([1.3, 0.4], pd.date_range("2026-10-01", periods=2)))["state"] == 0
     a = asof(pd.Series([1.0, 2.0], pd.to_datetime(["2026-10-01", "2026-10-08"])), pd.date_range("2026-10-01", "2026-10-20"), 10)
     assert np.isnan(a.loc["2026-10-10"]) and a.loc["2026-10-11"] == 1.0 and a.loc["2026-10-18"] == 2.0
+    # vol4h: 형성 중 봉은 버리고, 상수 예측이면 평소 대비 1배
+    class _M:
+        def predict(self, A):
+            return np.full(len(A), np.log(0.002))
+    t0 = 1_700_000_000_000
+    rows = [[t0 + i * 300_000, 0, 101 + (i % 7), 99 - (i % 5), 100 + np.sin(i / 9), 0, t0 + i * 300_000 + 299_999, 1e6 + i, 500 + i % 11]
+            for i in range(9000)]
+    v = vol4h_from_klines(rows, {"models": [_M()]}, now_ms=rows[-1][6] - 1)   # 마지막 봉은 아직 형성 중
+    assert v["ok"] and v["lvl"] == 1.0 and v["asof_ms"] == rows[-2][6] + 1, v
+    assert abs(v["sig4h_pct"] - 100 * 0.002 * np.sqrt(48)) < 1e-3, v
     print("dir_signals selftest ok")
 
 
 if __name__ == "__main__":
     import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))   # scripts.* 임포트
     if "--selftest" in sys.argv:
         selftest()
     else:
