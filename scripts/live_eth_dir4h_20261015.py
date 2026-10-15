@@ -252,7 +252,7 @@ def _merge(old: pd.DataFrame | None, new: pd.DataFrame, keep_days: float) -> pd.
     return df[df.timestamp >= df.timestamp.max() - pd.Timedelta(days=keep_days)].reset_index(drop=True)
 
 
-def rest_frames(now_ms: int | None = None) -> dict[str, pd.DataFrame]:
+def rest_frames(now_ms: int | None = None, others_n: int = 300) -> dict[str, pd.DataFrame]:
     """REST → vision 형식 frames. 첫 호출 = ETH 31일(klines 9천·metrics 5종) 받기, 다음부터 꼬리만 이어 붙인다(_CACHE)."""
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
     first = "ETH_k" not in _CACHE
@@ -266,9 +266,9 @@ def rest_frames(now_ms: int | None = None) -> dict[str, pd.DataFrame]:
         eth = eth.merge(m, on="timestamp", how="left")
     frames = {"ETH": eth}
     for sym in COINS:   # 교차 = 1일 수익(288봉)·BTC 4h·OI 1h 면 충분
-        k = _klines(sym, 300, now_ms)
+        k = _klines(sym, others_n, now_ms)
         if sym == "BTC":
-            k = k.merge(_metric("BTC", "openInterestHist", 0.2), on="timestamp", how="left")
+            k = k.merge(_metric("BTC", "openInterestHist", others_n / 288 + 0.1), on="timestamp", how="left")
         frames[sym] = k
     for f in frames.values():
         for c in MCOLS:
@@ -333,9 +333,10 @@ def selftest() -> None:
 def parity() -> None:
     """(서버) 같은 봉을 REST 경로와 vision 경로로 만들어 피쳐 대조 -- 어제 UTC 하루."""
     now_ms = int(time.time() * 1000)
-    R = build_features(rest_frames(now_ms), daily_closes(now_ms)).set_index("ts")
+    dc = daily_closes(now_ms)
+    R = build_features(rest_frames(now_ms, others_n=900), dc).set_index("ts")   # 다른 코인 3일 -- 어제 하루 전부의 1일 수익이 차도록
     y0 = (pd.Timestamp(now_ms, unit="ms").normalize() - pd.Timedelta("1D"))
-    V = build_features(vision_update(str(y0.date()), days=45)).set_index("ts")
+    V = build_features(vision_update(str(y0.date()), days=45), dc).set_index("ts")
     idx = R.index.intersection(V.index)
     idx = idx[(idx >= y0) & (idx < y0 + pd.Timedelta("1D"))]
     rep = {}
