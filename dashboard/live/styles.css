@@ -3258,7 +3258,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 #mcBody.mc-cmp .mc-rate { padding: 8px 0 2px; border-top: 1px solid var(--soft-line); }
 #mcBody.mc-cmp .mc-rate-g { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
 #mcBody.mc-cmp .mc-rate-g.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }   /* 2026-10-14 나스닥 실시간 · 5년 · 10년(사용자 시안 A) */
-#mcBody.mc-cmp .mc-rate .mc-gk { height: 30px; }
+#mcBody.mc-cmp .mc-rate .mc-gk { height: 44px; }   /* 10-15 그래프 40px */
 /* 2026-10-13 사용자 «라벨은 게이지 위 or 아래로»: 요약 줄은 그림(+값) 한 줄, 이름표는 그 아래 작은 글씨 */
 #mcBody.mc-cmp .mc-strip .mc-gk { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; height: auto; row-gap: 0; }
 #mcBody.mc-cmp .mc-strip .mc-gk.v { grid-template-columns: minmax(0, 1fr) auto; }
@@ -3293,9 +3293,10 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fc-c > b { font-size: 15px; font-weight: 800; color: var(--fc); line-height: 1.25; }
 .fc-c.now > b { font-size: 13px; }
 .fc-c .sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.fc-vol { font-weight: 700; color: var(--warn); }
 .fc-dots { display: inline-flex; gap: 2px; vertical-align: -1px; } .fc-dots i { width: 7px; height: 7px; border-radius: 2px; background: var(--bad); } .fc-dots i.u { background: var(--good); }
 @media (max-width: 720px) {
   .fc-row { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
   .fc-c:nth-child(3) { border-left: none; }
 }
+.mc-state .mc-q1 { margin-left: auto; flex: none; }   /* 2026-10-15 ①②④ 제목 대신 상태 줄 끝 «?» */
+.fc-c .sub.fc-vol { color: var(--warn); font-weight: 700; }

@@ -4540,6 +4540,26 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    dir4h_art: dict = {"mtime": None, "art": None}
+
+    async def api_dir4h(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 방향»(ETH, scripts/live_eth_dir4h_20261015)
+        """매달 재학습 HGB(65피쳐) -- 바이낸스 REST 를 vision 형식으로(첫 호출 ETH 31일, 다음부터 꼬리만) · 5분 캐시.
+        아티팩트(data/live/eth_dir4h_model.joblib)는 매달 cron 이 바꾼다 -- 바뀌면 다시 읽는다."""
+        def produce_sync() -> dict[str, Any]:
+            from scripts import live_eth_dir4h_20261015 as d4
+            if not d4.ARTIFACT.exists():
+                return {"ok": False, "reason": "artifact_missing"}
+            mt = d4.ARTIFACT.stat().st_mtime
+            if dir4h_art["mtime"] != mt:
+                import joblib
+                dir4h_art.update(mtime=mt, art=joblib.load(d4.ARTIFACT))
+            return d4.live_payload(dir4h_art["art"])
+        try:
+            payload = await swr_cached("dir4h", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+        return web.json_response(payload, headers=NOCACHE)
+
     vol4h_art: dict = {}
 
     async def api_vol_forecast(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, 표시 전용)
@@ -7485,6 +7505,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/trend", api_trend)
     app.router.add_get("/api/dir-signals", api_dir_signals)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
+    app.router.add_get("/api/dir4h", api_dir4h)
     app.router.add_get("/api/market-context", api_market_context)
     app.router.add_get("/api/chip-score", api_chip_score)
     app.router.add_get("/api/notify-center", api_notify_center)

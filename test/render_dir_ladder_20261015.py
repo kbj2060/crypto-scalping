@@ -9,10 +9,10 @@
 검사(1920·1700·390): #optChip 없음 · 1920 은 코인 탭과 같은 줄 · 알약 둘 = «지금 추세»(따로) | «7일 예측 · 4~13주 예측» · 일 단위 칸 판정이 응답과 같음
   · ⑤ 예측 판(10-15 시안 B): ⑤ 뉴스 판 없음 · 칸 «지금 추세 · 4h 예측 · 7일 예측 · 4~13주 예측» · 1920 판 줄 ①②④ 셋 · 4h 칸 변동성 줄
     (/api/vol-forecast 는 가짜 응답 -- 모델 아티팩트가 서버에만 있다) · 1920 이상 시장 맥락 칸 안 스크롤 없음
-    (1700 은 1초 수급 30% 하한 때문에 칸 안 스크롤 수십 px -- 기존 설계 허용)
+    (10-15 1초 수급 하한 30 → 22% 로 1700 도 스크롤 없음) · 4h 칸 = 방향(가짜 /api/dir4h) + 변동성 · ①②④ 제목 없음(«?» 는 상태 줄) · ⑥ 그래프 40px
   · 머리 줄 밖으로 안 넘침 · 페이지 가로 스크롤 없음 · 휴대폰 칸 높이 ≥40px · JS 오류 0 · down 이면 일 단위 칸은 «-».
 """
-import argparse, json, pathlib, sys
+import argparse, json, pathlib, sys, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -34,13 +34,18 @@ PROBE = """() => {
              const titles = [...b.querySelectorAll('.mc-sec h4')].map((h) => h.innerText.replace(/\\?/g, '').trim());
              return { news: titles.some((t) => /⑤ 뉴스/.test(t)), strip: b.querySelectorAll('.mc-strip > .mc-sec').length,
                       hz: fc ? [...fc.querySelectorAll('.fc-c .hz')].map((h) => h.textContent) : null,
-                      vol: fc ? [...fc.querySelectorAll('.fc-c')][1].innerText.split('\\n').slice(2).join(' ') : null,
+                      vol: fc ? [...fc.querySelectorAll('.fc-c')][1].innerText.split('\\n').slice(3).join(' ') : null,
                       clipped: b.classList.contains('mc-cmp') && b.scrollHeight > b.clientHeight + 2,
-                      over: fc ? [...fc.querySelectorAll('.fc-c')].some((c) => c.scrollWidth > c.clientWidth + 1) : null }; })(),
+                      over: fc ? [...fc.querySelectorAll('.fc-c')].some((c) => c.scrollWidth > c.clientWidth + 1) : null,
+                      d4: fc ? ((fc.querySelectorAll('.fc-c')[1] || {}).querySelector('b') || {}).textContent : null,
+                      stripH4: b.querySelectorAll('.mc-strip > .mc-sec h4').length, q1: b.querySelectorAll('.mc-strip .mc-q1').length,
+                      rateH: [...b.querySelectorAll('.mc-rate .mc-svg')].map((g) => Math.round(g.getBoundingClientRect().height)) }; })(),
            minH: segs.length ? Math.round(Math.min(...segs.map((s) => s.getBoundingClientRect().height))) : 0 };
 }"""
 
 
+D4 = {"ok": True, "decided_at_ms": 0, "pred_bp": -45.2, "lo": -41.4, "hi": 36.2, "signal": -1, "model_month": "2026-10-01",
+      "train_window": ["2025-10-01 00:00:00", "2026-09-30 19:55:00"], "nan_feats": [], "hist": []}   # decided_at 는 요청 때 지금으로
 VOL = {"ok": True, "asof_ms": 0, "px": 2365.65, "sig4h_pct": 1.324, "sig4h_usd": 31.33, "lvl": 1.492, "x_now": 1.35, "p_expand": 0.55, "ref_days": 30.0}   # 10-15 서버 실측
 
 
@@ -73,6 +78,7 @@ def run(shot):
                 pg.route(URL, lambda r: r.fulfill(body=html, content_type="text/html"))
                 pg.route("**/api/dir-signals*", api_for(json.dumps(body)))
                 pg.route("**/api/vol-forecast*", api_for(json.dumps(VOL if case == "live" else {"ok": False, "reason": "artifact_missing"})))
+                pg.route("**/api/dir4h*", api_for(json.dumps({**D4, "decided_at_ms": int(time.time() * 1000) - 60_000} if case == "live" else {"ok": False, "reason": "artifact_missing"})))
                 pg.goto(URL, wait_until="load", timeout=60000)
                 pg.wait_for_timeout(12000)
                 got = pg.evaluate(PROBE)
@@ -85,11 +91,14 @@ def run(shot):
                 if w >= 1920 and not got["row1"]: fails.append(f"[{tag}] 1920 에서 사다리가 둘째 줄로 내려감 ({got['wpx']}px)")
                 fc = got["fc"] or {}
                 if fc.get("news"): fails.append(f"[{tag}] ⑤ 뉴스 판이 남아 있음")
-                if fc.get("hz") != ["지금 추세", "4h 예측 · 방향 준비 중", "7일 예측", "4~13주 예측"]: fails.append(f"[{tag}] 예측 칸 {fc.get('hz')}")
+                if fc.get("hz") != ["지금 추세", "4h 예측", "7일 예측", "4~13주 예측"]: fails.append(f"[{tag}] 예측 칸 {fc.get('hz')}")
                 if w > 500 and fc.get("strip") != 3: fails.append(f"[{tag}] 판 줄 {fc.get('strip')}칸")
-                want_vol = "변동 ±1.32% (±$31) 평소의 1.49배 · 확대 55%" if case == "live" else "변동 불러오는 중"
+                want_vol = "변동 ±1.32% · 평소 1.49배" if case == "live" else "변동 불러오는 중"
                 if fc.get("vol") != want_vol: fails.append(f"[{tag}] 변동성 줄 {fc.get('vol')!r}")
-                if (fc.get("clipped") and w >= 1920) or fc.get("over"): fails.append(f"[{tag}] 예측 판 잘림 {fc}")
+                if fc.get("d4") != ("▼ 하락" if case == "live" else "-"): fails.append(f"[{tag}] 4h 판정 {fc.get('d4')!r}")
+                if w > 500 and (fc.get("stripH4") or fc.get("q1") != 3): fails.append(f"[{tag}] ①②④ 제목 {fc.get('stripH4')} · ? {fc.get('q1')}")
+                if w > 500 and fc.get("rateH") and min(fc["rateH"]) < 40: fails.append(f"[{tag}] ⑥ 그래프 {fc.get('rateH')}")
+                if fc.get("clipped") or fc.get("over"): fails.append(f"[{tag}] 예측 판 잘림 {fc}")
                 if pg.locator(".mc-fc").count():
                     pg.add_style_tag(content="#ofab { visibility: hidden !important; }")
                     pg.locator(".mc-fc").screenshot(path=str(shot / f"fc_{case}_{w}.png"))

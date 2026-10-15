@@ -3991,6 +3991,18 @@ async function refreshTrend() {
   renderSituation();
 }
 
+// 2026-10-15 ⑤ 예측 판 «4h 방향»(ETH, /api/dir4h = scripts/live_eth_dir4h_20261015 · 서버 5분 캐시) -- 참고용
+let latestDir4h = null, dir4hLastFetchAt = 0;
+async function refreshDir4h() {
+  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  const now = Date.now();
+  if (now - dir4hLastFetchAt < 120000) return;
+  dir4hLastFetchAt = now;
+  try {
+    const res = await fetch("/api/dir4h", { cache: "no-cache" });
+    if (res.ok) latestDir4h = await res.json();
+  } catch (error) { /* 다음 주기 */ }
+}
 // 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, /api/vol-forecast · 서버 5분 캐시) -- 표시 전용
 let latestVol4h = null, vol4hLastFetchAt = 0;
 async function refreshVol4h() {
@@ -4014,13 +4026,19 @@ function fcRowHtml(sec) {
   const sig = (g, hz, nm) => (!g || !g.ok ? cell(hz, "flat", "-", "데이터 대기", nm)
     : cell(hz, cls(g.state), word(g.state), `${nm.split(" ")[0]} ${zf(g.v)} · ${g.state ? `${g.run}일째` : "문턱 ±1 안"}`, `${nm} · ${g.date} UTC 종가`));
   const vTip = v ? `4시간 1σ ±${v.sig4h_pct.toFixed(2)}% (±$${v.sig4h_usd.toFixed(0)}) · 최근 ${v.ref_days}일 평소의 ${v.lvl.toFixed(2)}배 · 직전 4시간의 ${v.x_now.toFixed(2)}배 · 더 커질 확률 ${Math.round(v.p_expand * 100)}%` : "";
-  const volSub = v ? `<span class="fc-vol">변동 ±${v.sig4h_pct.toFixed(2)}% (±$${v.sig4h_usd.toFixed(0)})</span>` : eth ? "변동 불러오는 중" : "ETH 전용";
-  const volLine = v ? `<span class="sub" title="${escapeHtml(vTip)}">평소의 ${v.lvl.toFixed(2)}배 · 확대 ${Math.round(v.p_expand * 100)}%</span>` : "";
+  const volLine = v ? `<span class="sub fc-vol" title="${escapeHtml(vTip)}">변동 ±${v.sig4h_pct.toFixed(2)}% · 평소 ${v.lvl.toFixed(2)}배</span>` : `<span class="sub">변동 ${eth ? "불러오는 중" : "ETH 전용"}</span>`;
+  const g4 = eth && latestDir4h && latestDir4h.ok ? latestDir4h : null, old4 = g4 && Date.now() - g4.decided_at_ms > 15 * 60e3;
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(11, 16);
+  const d4Tip = g4 ? `4h 방향 예측 — 매달 재학습 HGB(ETH 65피쳐, 최근 365일) · ${g4.model_month} 모델(학습 ${g4.train_window[0].slice(0, 10)}~${g4.train_window[1].slice(0, 10)})\n`
+      + `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(1)}bp · 상승 문턱 ≥ +${g4.hi.toFixed(1)} · 하락 문턱 ≤ ${g4.lo.toFixed(1)} (학습 예측 상·하위 20%) · ${kst(g4.decided_at_ms)} KST 마감 5분봉\n`
+      + `2025~26 IC .06 · 2023~24 검증 불통과 · 참고용(전진 판정 전)${g4.nan_feats.length ? `\n🔴빈 피쳐 ${g4.nan_feats.length}: ${g4.nan_feats.join(", ")}` : ""}\n${vTip}`
+    : `4h 방향 예측(ETH 전용) — ${eth ? (latestDir4h && latestDir4h.reason ? `불러오기 실패: ${latestDir4h.reason}` : "불러오는 중") : "ETH 에서만 계산"}\n${vTip}`;
+  const d4Sub = g4 ? `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(0)}bp · 문턱 ${g4.lo.toFixed(0)}/+${g4.hi.toFixed(0)}${old4 ? " · 지연" : ""}` : (eth ? "불러오는 중" : "ETH 전용");
   const dots = t ? `<span class="fc-dots" aria-label="5표 중 상승 ${t.ups}">${t.votes.map((x) => `<i class="${x.up ? "u" : ""}"></i>`).join("")}</span>` : "";
   return sec("q_fc", "⑤ 예측 · 지금에서 멀리", `<div class="fc-row">`
     + (t ? cell("지금 추세", `${t.signal > 0 ? "up" : "dn"} now`, t.signal > 0 ? "▲ 상승" : "▼ 하락", `${dots} ${t.age_days}일째 · 예측 아님`, "지금 추세 — 예측 아님(지난 7~90일 종가 대비 5표)")
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
-    + cell("4h 예측 · 방향 준비 중", "flat", "변동성", volSub, `4h 방향 예측 — 매달 재학습 HGB(ETH) · 실시간 입력 파이프라인 준비 중\n${vTip || "4h 변동성 예측(ETH 전용)"}`, volLine)
+    + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, volLine)
     + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)")
     + sig(ds.z91, "4~13주 예측", "Z 달러·유동성 91일")
     + `</div>`).replace('class="mc-sec"', 'class="mc-sec mc-fc"');
@@ -4492,14 +4510,18 @@ function renderMarketCtx() {
         + `<path d="${bb.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)} ${Y(x[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round"/>`
         + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${col}"/></svg>`;
     };
-    const tile = (key, title, chipHtml, rows, cls = "") => sec(key, title, `<div class="mc-state">${chipHtml || ""}</div><div class="mc-rows">${rows}</div>`).replace('class="mc-sec"', `class="mc-sec${cls}"`);
+    // 2026-10-15 사용자 «①②④ 제목 제거»: 판 이름은 «?» 의 title·aria 로만 -- 설명 펼침은 그대로(핸들러가 .mc-sec 안 .mc-tip 을 찾는다)
+    const tile = (key, title, chipHtml, rows, cls = "") => `<div class="mc-sec${cls}" aria-label="${escapeHtml(title)}"><div class="mc-state">${chipHtml || ""}`
+      + `<button type="button" class="mc-q mc-q1" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}" title="${escapeHtml(title)} — 설명" aria-label="${escapeHtml(title)} 설명"><span aria-hidden="true">?</span></button></div>`
+      + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(tipOf(key)).replace(/\n/g, "<br>")}</p><div class="mc-rows">${rows}</div></div>`;
     const duelChip = !PAPER_SIG_OK.duel.has(A) ? chip("", "검정 밖") : !ps ? chip("", "엔진 대기")
       : ps.duel ? chip(ps.duel > 0 ? "good" : "bad", `고래 ${ps.duel > 0 ? "롱" : "숏"} · ${ps.remain}분`, zTip) : chip("", "맞대결 없음", zTip);
     const wallChip = !PAPER_SIG_OK.wall.has(A) ? chip("", "검정 밖") : !ps ? chip("", "엔진 대기") : !ps.dir ? chip("", "벽 신호 없음")
       : ps.chase ? chip("warn", `${ps.dir > 0 ? "매수" : "매도"} · 추격 주의`) : chip(ps.dir > 0 ? "good" : "bad", `${ps.dir > 0 ? "매수" : "매도"} 우세`);
+    const RATE_H = 40;   // 2026-10-15 사용자 «나스닥·금리 차트 잘 보이게» 26 → 40px
     const cvd = fl.cvd30_all_z ?? fl.cvd30_z, cellW = Math.floor((G.cmpW - 24) / 3), rateW = Math.max(50, cellW - 48);   // 2026-10-14 세 칸(나스닥 · 5년 · 10년, 사용자 시안 A)
     const nqCell = () => { const t = xyzClock(), r1 = xyzRet(t - 3600, t), px = xyzNow();   // 나스닥 실시간 1시간
-      return gk("나스닥", xyzSpark(Math.max(40, cellW - 106), 26), `${XYZ_TIP}\n지금 ${px ? px.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "끊김"} · 1시간 ${xyzPct(r1)}`,
+      return gk("나스닥", xyzSpark(Math.max(40, cellW - 106), RATE_H), `${XYZ_TIP}\n지금 ${px ? px.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "끊김"} · 1시간 ${xyzPct(r1)}`,
                 px ? xyzPct(r1) : "끊김", r1 == null ? "" : r1 >= 0 ? "mc-good" : "mc-bad"); };
     htmlB = [`<div class="mc-strip">`
       + tile("q_lev", "① 레버리지 과열?", levChip.trim(),
@@ -4520,7 +4542,7 @@ function renderMarketCtx() {
           + gk("깊은 벽", ps && PAPER_SIG_OK.wall.has(A) ? G.wall(ps.imb, ps.thr, gwWall) : G.pct(null, gwWall), ps ? `깊은 벽 ${sg(ps.imb, 2)} · 문턱 ±${ps.thr.toFixed(2)}` : ""), " mc-wide-t")
       + `</div>` + fcHtml
       + sec("q_rate", "⑥ 나스닥 · 금리 · 1시간", `<div class="mc-rate-g n3">` + nqCell() + ["ZF", "ZN"].map((k) => { const r = treasury1h(k);
-          return gk(`${TREASURY_NM[k]}`, spark(k, rateW, 26), r ? `${k} ${r.last.toFixed(3)} · 1시간 ${r.chg1 >= 0 ? "+" : "−"}${Math.abs(r.chg1).toFixed(2)}% → 금리 ${r.chg1 <= 0 ? "↑" : "↓"} (CME 약 10분 지연)` : ""); }).join("") + `</div>`).replace('class="mc-sec"', 'class="mc-sec mc-rate"').replace("</h4>", `<span class="mc-spk">${macroSpikeChips(chip)}</span></h4>`)];
+          return gk(`${TREASURY_NM[k]}`, spark(k, rateW, RATE_H), r ? `${k} ${r.last.toFixed(3)} · 1시간 ${r.chg1 >= 0 ? "+" : "−"}${Math.abs(r.chg1).toFixed(2)}% → 금리 ${r.chg1 <= 0 ? "↑" : "↓"} (CME 약 10분 지연)` : ""); }).join("") + `</div>`).replace('class="mc-sec"', 'class="mc-sec mc-rate"').replace("</h4>", `<span class="mc-spk">${macroSpikeChips(chip)}</span></h4>`)];
   } else htmlB.push(wallHtml0 + fcHtml);
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)
   htmlB = htmlB.join("");
@@ -7915,11 +7937,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-09-30 시안 Y(사용자 선택): ETH 는 오른쪽 칸 위 절반만 1초 수급, 아래 절반은 시장 맥락(#mcBody 를 그 자리에 겹쳐 놓는다).
     const mcSplit = !!splitR && flowOn();   // 2026-10-04 SOL·XRP 도 시장 맥락(코인별)
     // 2026-09-30 1초 수급 높이 = 칸 − 시장 맥락의 **실제 내용 높이**(mcNeedH, renderMarketCtx 가 잰다) -- 한 화면 모드로 칸이 줄어도 시장 맥락이 스크롤 없이 다 들어간다.
-    //   아직 못 쟀으면 47% · 1초 수급은 칸의 30% 아래로는 안 줄인다.
+    //   아직 못 쟀으면 47% · 1초 수급은 칸의 22% 아래로는 안 줄인다(2026-10-15 30 → 22%: ⑤ 예측 줄·⑥ 그래프 키운 몫, 사용자 «모자라면 수급 차트 높이를 줄여»).
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
     const floorY = hAll - 2;   // 2026-10-06 리본 줄이 빠져 칸 바닥 = 상자 바닥
     const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
-    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? Math.round((s1Avail - mcNeedH - 16 - 8) / (1 + MC_BUBBLE_K)) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round((s1Avail - mcNeedH - 16 - 8) / (1 + MC_BUBBLE_K)) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
         const on = mcSplit && SUB_LEGEND_H > 0, a = svg.getBoundingClientRect(), c = card.getBoundingClientRect();
@@ -8100,6 +8122,7 @@ async function tick() {
       refreshTrend();                // 2026-09-28 30분 카드 추세 칸 (60초, 일봉)
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
+      refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH · 서버 5분 캐시)
       refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (1초 -- 10-03, ETH 만 · 서술)
       refreshPaper();                // 2026-10-04 모의 판·맞대결·벽 신호 (10초, 모의 매매 엔진 상태)
       refreshChipScore();            // 2026-10-05 머리 칩 실전 성적 (코인별 5분)
