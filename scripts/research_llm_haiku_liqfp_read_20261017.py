@@ -245,7 +245,7 @@ def check(f: dict, tr: dict) -> bool | None:
             v = w[f["what"].replace("_sign", "")]
             return ("buy" if v > 0 else "sell") == f["value"]
         if f["what"] == "price_vs_value_area":
-            return (w["price_vs_value_area"] or "").split("_")[0] == f["value"]
+            return (w["price_vs_value_area"] or "").split("_")[0] == str(f["value"]).split("_")[0]   # «inside» · «inside_value_area» 둘 다(요약 원문 표기)
         if f["what"] == "pattern":
             return any(m["kind"] == f["value"] and m["at"] == f.get("at") for m in w["pattern_marks"])
     except (KeyError, TypeError, ValueError):
