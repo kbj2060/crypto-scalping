@@ -136,6 +136,22 @@ def vol4h_from_klines(rows: list, art: dict, now_ms: float) -> dict:
             "ref_days": round(len(p) / 288, 1), "model_train_end": art.get("train_end")}
 
 
+def open_rev_from_klines(daily: list, m5: list, now_ms: float) -> dict:
+    """2026-10-16 ⑤ 종합의 «09시 개장 되돌림»(ETH) -- 전진 기록기 decide() 그대로(같은 정의 = 화면 = 기록).
+    daily/m5 = 바이낸스 klines 행(형성 봉 포함 가능 -- 닫힌 봉만 쓴다). 오늘 00:30 UTC 전이면 «대기»(open_pos 0, 오늘 진입·청산 시각만)."""
+    from scripts.live_eth_direction_forward_recorder_20261010 import decide
+    day0 = int(now_ms) // 86_400_000 * 86_400_000
+    entry, exit_ = day0 + 1_800_000, day0 + 16_200_000                        # 00:30 · 04:30 UTC
+    if now_ms < entry:
+        return {"ok": True, "pending": True, "date": time.strftime("%Y-%m-%d", time.gmtime(day0 / 1000)), "open_pos": 0,
+                "entry_ms": entry, "exit_due_ms": exit_}
+    d_closed = [k for k in daily if int(k[6]) < now_ms]                           # 어제까지(오늘 일봉은 형성 중)
+    m_closed = [k for k in m5 if int(k[6]) < now_ms]
+    d = decide(d_closed, m_closed, now_ms, "ETHUSDT", 0)
+    return {"ok": True, "pending": False, **{k: d[k] for k in ("date", "f30_bp", "sigma30_bp", "open_pos", "entry_px", "exit_due_ms")},
+            "entry_ms": entry}
+
+
 def selftest() -> None:
     idx = pd.date_range("2018-01-01", periods=1500)
     rng = np.random.default_rng(0)
@@ -162,6 +178,14 @@ def selftest() -> None:
     v = vol4h_from_klines(rows, {"models": [_M()]}, now_ms=rows[-1][6] - 1)   # 마지막 봉은 아직 형성 중
     assert v["ok"] and v["lvl"] == 1.0 and v["asof_ms"] == rows[-2][6] + 1, v
     assert abs(v["sig4h_pct"] - 100 * 0.002 * np.sqrt(48)) < 1e-3, v
+    # open_rev: 00:30 전 = 대기 · 뒤 = 기록기 decide 와 같은 값(첫 30분 +40bp ≫ 0.5σ → 숏)
+    day0 = 1_792_108_800_000                                                    # 2026-10-16 00:00 UTC
+    dly = [[day0 - (92 - i) * 86_400_000, 0, 0, 0, 2000 + i, 0, day0 - (91 - i) * 86_400_000 - 1] for i in range(92)]
+    m5 = [[day0 - (300 - i) * 300_000, 0, 0, 0, 2400 * (1 + 1e-4 * np.sin(i)), 0, day0 - (299 - i) * 300_000 - 1] for i in range(300)]
+    m5 += [[day0 + j * 300_000, 0, 0, 0, m5[-1][4] * (1.004 if j == 5 else 1.002), 0, day0 + (j + 1) * 300_000 - 1] for j in range(6)]
+    assert open_rev_from_klines(dly, m5, day0 + 1_700_000)["pending"]
+    o = open_rev_from_klines(dly, m5, day0 + 1_860_000)
+    assert o["open_pos"] == -1 and o["entry_ms"] == day0 + 1_800_000 and o["exit_due_ms"] == day0 + 16_200_000 and o["f30_bp"] > 30, o
     print("dir_signals selftest ok")
 
 

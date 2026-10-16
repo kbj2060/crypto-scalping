@@ -40,10 +40,12 @@ def first(m):
 
 
 def hedge(hh, ll, cc, p0, x, mode, par, coin):
-    """롱·숏 각 수량 1/p0. 다리별로 체결가를 적고 손익을 따로 셈. 반환 (총손익 명목비, 청산 수수료 bp, 종류, 최저 평가, 갇힌 분)."""
+    """롱·숏 각 수량 1/p0. 다리별로 체결가를 적고 손익을 따로 셈. 반환 (총손익 명목비, 청산 수수료 bp, 종류, 최저 평가, 갇힌 분, 보유 분).
+    10-16 리뷰 수정: ① 보유 분 = 진입부터(옛 순차 복리는 ±x 닿은 뒤부터 센 «갇힌 분»을 써 거래 수가 부풀었다)
+    ② 닿은 1분봉 k 안에서 손절선(FADE)·목표선(BRK)까지 간 것도 인정 -- 같은 방향 연속 경로라 ±x 를 먼저 지난다. P0 복귀는 순서 불명이라 k+1 부터."""
     up, dn = first(hh >= p0 * (1 + x)), first(ll <= p0 * (1 - x))
     if up == dn == BIG:
-        return 0.0, 2 * TAKER, 'flat', 0.0, 0
+        return 0.0, 2 * TAKER, 'flat', 0.0, 0, len(hh)
     w = 1 if (up < dn or (up == dn and coin)) else -1             # 같은 1분봉에 둘 다 닿으면 동전
     k = min(up, dn); px = p0 * (1 + w * x)
     h2, l2 = hh[k + 1:], ll[k + 1:]
@@ -51,6 +53,8 @@ def hedge(hh, ll, cc, p0, x, mode, par, coin):
         stop = par
         be = first(l2 <= p0) if w == 1 else first(h2 >= p0)
         st = BIG if stop is None else (first(h2 >= p0 * (1 + stop)) if w == 1 else first(l2 <= p0 * (1 - stop)))
+        if stop is not None and (hh[k] >= p0 * (1 + stop) if w == 1 else ll[k] <= p0 * (1 - stop)):
+            st, be = -1, BIG                                     # 닿은 봉 안에서 이미 손절선
         if st < BIG and st <= be:
             ex, fee, kind, e = p0 * (1 + w * stop), TAKER, 'stop', st
         elif be < BIG:
@@ -59,12 +63,14 @@ def hedge(hh, ll, cc, p0, x, mode, par, coin):
             ex, fee, kind, e = cc[-1], TAKER, 'time', len(h2) - 1
         win_leg = w * (px - p0) / p0                             # 이긴 다리: P0 → px
         lose_leg = -w * (ex - p0) / p0                           # 진 다리: P0 → ex
-        worst = x - w * ((h2[:e + 1].max() if w == 1 else l2[:e + 1].min()) - p0) / p0 if len(h2) else x
-        return win_leg + lose_leg, fee, kind, min(worst, 0.0), e + 1
+        worst = x - stop if e < 0 else (x - w * ((h2[:e + 1].max() if w == 1 else l2[:e + 1].min()) - p0) / p0 if len(h2) else x)
+        return win_leg + lose_leg, fee, kind, min(worst, 0.0), e + 1, k + 2 + e
     tpk = par                                                    # BRK: 진 다리 −x 손절, 이긴 다리(w) 보유
     tp = p0 * (1 + w * x * (1 + tpk))
     hit = first(h2 >= tp) if w == 1 else first(l2 <= tp)
     st = first(l2 <= p0) if w == 1 else first(h2 >= p0)
+    if hh[k] >= tp if w == 1 else ll[k] <= tp:
+        hit, st = -1, BIG                                        # 닿은 봉 안에서 이미 목표선
     if st < BIG and st <= hit:
         ex, fee, kind, e = p0, TAKER, 'stop', st
     elif hit < BIG:
@@ -73,8 +79,8 @@ def hedge(hh, ll, cc, p0, x, mode, par, coin):
         ex, fee, kind, e = cc[-1], TAKER, 'time', len(h2) - 1
     lose_leg = -w * (px - p0) / p0
     win_leg = w * (ex - p0) / p0
-    worst = w * ((l2[:e + 1].min() if w == 1 else h2[:e + 1].max()) - px) / p0 if len(h2) else 0.0
-    return win_leg + lose_leg, TAKER + fee, kind, min(worst, 0.0), e + 1
+    worst = 0.0 if e < 0 else (w * ((l2[:e + 1].min() if w == 1 else h2[:e + 1].max()) - px) / p0 if len(h2) else 0.0)
+    return win_leg + lose_leg, TAKER + fee, kind, min(worst, 0.0), e + 1, k + 2 + e
 
 
 def single(hh, ll, cc, p0, x, mode, par, coin):
@@ -93,6 +99,10 @@ def single(hh, ll, cc, p0, x, mode, par, coin):
         tgt, stp, efee = p0 * (1 + d * x * (1 + par)), p0, TAKER
     a = first(h2 >= tgt) if d == 1 else first(l2 <= tgt)
     b = BIG if stp is None else (first(l2 <= stp) if d == 1 else first(h2 >= stp))
+    if mode == 'fade' and stp is not None and (ll[k] <= stp if d == 1 else hh[k] >= stp):
+        a, b = BIG, -1                                           # 체결 봉 안에서 이미 손절선(진입가를 지나 같은 방향으로 계속)
+    if mode == 'brk' and (hh[k] >= tgt if d == 1 else ll[k] <= tgt):
+        a, b = -1, BIG                                           # 체결 봉 안에서 이미 목표선
     if b < BIG and b <= a:
         ex, fee = stp, TAKER
     elif a < BIG:
@@ -134,9 +144,16 @@ def selftest():
     assert kind == 'stop' and abs(g + 0.02) < 1e-12 and f == TAKER
     g2, *_ = hedge(hh, ll, cc, p0, 0.01, 'brk', 1, False)       # BRK: 숏 −1% 컷, 롱 102 익절 → 합 +1%
     assert abs(g2 - 0.01) < 1e-12 and abs(single(hh, ll, cc, p0, 0.01, 'brk', 1, False)[0] - g2) < 1e-12
+    # 닿은 봉(0) 안에서 +1% 를 지나 +3% 까지 → 진 다리(숏) 그 봉에서 손절: +1% − 3% = −2% · 보유 1분 · 단일도 같음
+    hh = np.array([103.2, 102.0]); ll = np.array([100.1, 101.0]); cc = ll
+    g, f, kind, w_, trap, hold = hedge(hh, ll, cc, p0, 0.01, 'fade', 0.03, False)
+    assert kind == 'stop' and abs(g + 0.02) < 1e-12 and hold == 1, (g, kind, hold)
+    assert abs(single(hh, ll, cc, p0, 0.01, 'fade', 0.03, False)[0] - g) < 1e-12
+    g, *_ = hedge(hh, ll, cc, p0, 0.01, 'brk', 1, False)        # BRK: 같은 봉에서 목표 102 → 숏 −1% + 롱 +2% = +1%
+    assert abs(g - 0.01) < 1e-12 and abs(single(hh, ll, cc, p0, 0.01, 'brk', 1, False)[0] - g) < 1e-12
     # 아무것도 안 닿음 → 0, 두 다리 시간 청산
     g, f, kind, *_ = hedge(np.full(5, 100.2), np.full(5, 99.8), np.full(5, 100.0), p0, 0.01, 'fade', 0.03, False)
-    assert g == 0 and f == 2 * TAKER and kind == 'flat'
+    assert g == 0 and f == 2 * TAKER and kind == 'flat' and _[-1] == 5
     log('selftest OK')
 
 
@@ -223,16 +240,16 @@ def main():
             i = r.i; hh, ll, cc = h1m[i + 1:i + 1 + H], l1m[i + 1:i + 1 + H], c1m[i + 1:i + 1 + H]
             p0 = c1m[i]; coin = bool(rng.random() < 0.5)
             for name, mode, x, par in variants():
-                g, f, kind, worst, trap = hedge(hh, ll, cc, p0, x, mode, par, coin)
+                g, f, kind, worst, trap, hold = hedge(hh, ll, cc, p0, x, mode, par, coin)
                 gs, fs, entered = single(hh, ll, cc, p0, x, mode, par, coin)
                 assert abs(g - gs) < 1e-12, (name, r.ts, g, gs)      # 헷지 = 등가 단일
-                rows.append((tag, r.per, r.ts, name, g * 1e4, f, fs, kind, worst * 1e4, trap))
+                rows.append((tag, r.per, r.ts, name, g * 1e4, f, fs, kind, worst * 1e4, trap, hold))
             if tag == 'wall':
                 for x in XS:
                     for st in STOPS:
                         g, f, kind, hold = direct(hh, ll, cc, p0, r.s, x, st)
                         rows.append((tag, r.per, r.ts, f'DIR x{x*100:g}% stop{"없음" if st is None else f"{st*100:g}%"}',
-                                     g * 1e4, f, f, kind, np.nan, hold))
+                                     g * 1e4, f, f, kind, np.nan, 0, hold))
 
     run_events(cand, 'wall')
     log('[벽] 완료')
@@ -244,7 +261,7 @@ def main():
             ii = np.sort(ii[(t1[ii] // 60000) % 5 == 4][:m])          # 5분봉 종가 분만
             run_events(pd.DataFrame({'i': ii, 'per': p, 'ts': pd.to_datetime(t1[ii], unit='ms'), 's': 0}), f'rand{seed}')
     log('[무작위] 완료')
-    R = pd.DataFrame(rows, columns=['tag', 'per', 'ts', 'name', 'gross', 'fee_close', 'fee_single', 'kind', 'worst', 'trap'])
+    R = pd.DataFrame(rows, columns=['tag', 'per', 'ts', 'name', 'gross', 'fee_close', 'fee_single', 'kind', 'worst', 'trap', 'hold'])
     R.to_parquet(OUT / 'events.parquet')
     summarize(R)
     ledger(t1, h1m, l1m, c1m)
@@ -295,7 +312,7 @@ def summarize(R):
                 if r.ts < busy:
                     continue
                 eq *= 1 + r.net4 / 1e4; peak = max(peak, eq); mdd = min(mdd, eq / peak - 1); cnt += 1
-                busy = r.ts + pd.Timedelta(minutes=5 + (r.trap if r.trap > 0 else H))   # flat 이면 72h 묶임
+                busy = r.ts + pd.Timedelta(minutes=5 + r.hold)   # 진입부터 청산까지(flat = 72h)
             yrs = (w.ts.max() - w.ts.min()).days / 365.25
             res[p] = (eq ** (1 / yrs) - 1, mdd, cnt)
         log(f"{name:24s} 2025~ 연{res['main'][0]*100:+7.1f}% MDD{res['main'][1]*100:6.1f}% ({res['main'][2]}건) | "

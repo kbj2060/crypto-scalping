@@ -3293,6 +3293,38 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 }
 .mc-state .mc-q1 { margin-left: auto; flex: none; }   /* 2026-10-15 ①②④ 제목 대신 상태 줄 끝 «?» */
 .fc-c .sub.fc-vol { color: var(--warn); font-weight: 700; }
+/* 2026-10-16 시안 ②③ ⑤ 제목 줄 오른쪽 «종합»(세 부품 칩) · ④ 4h 문턱 눈금. 좁으면 종합이 제목 아래 줄로 */
+.mc-fc > h4 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.fc-sum { --fs: var(--muted); margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; cursor: help; }
+.fc-sum.up { --fs: var(--good); } .fc-sum.dn { --fs: var(--bad); }
+.fc-sum b { font-size: 12px; font-weight: 800; color: var(--fs); }
+.fc-sum small { font: 700 10.5px/1 var(--font-mono); color: var(--fs); margin-right: 2px; }
+.fc-sum i { font: 700 10px/16px var(--font-mono); font-style: normal; padding: 0 5px; border-radius: 3px; color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.fc-sum i.up { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
+.fc-sum i.dn { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
+.d4g { position: relative; display: block; height: 4px; margin: 3px 4px 2px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 18%, transparent); }
+.d4g .z { position: absolute; top: 0; bottom: 0; }
+.d4g .z.dn { left: 0; border-radius: 2px 0 0 2px; background: color-mix(in srgb, var(--bad) 45%, transparent); }
+.d4g .z.up { right: 0; border-radius: 0 2px 2px 0; background: color-mix(in srgb, var(--good) 45%, transparent); }
+.d4g u { position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: var(--text); transform: translate(-50%, -50%); }
+.d4g u.ago { width: 7px; height: 7px; background: none; border: 1.5px solid var(--muted); box-sizing: border-box; }
+/* 2026-10-16 박스 유지 확률(시안): 30분·1시간·4시간 · 막대 = 확률, 세로 눈금 = 평소 · 주황 = 평소의 3/4 밑(깨질 쪽). 초록·빨강(방향)은 안 쓴다 */
+.bx-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bx-c { --bx: var(--text); display: flex; flex-direction: column; gap: 3px; padding: 0 8px 2px; min-width: 0; cursor: help; }
+.bx-c + .bx-c { border-left: 1px dashed var(--soft-line); }
+.bx-c.brk { --bx: var(--warn); }
+.bx-c .hz { font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.bx-c > b { font-size: 15px; font-weight: 800; line-height: 1.25; color: var(--bx); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bx-c > b small { margin-left: 5px; font-size: 10.5px; font-weight: 700; color: var(--bx); opacity: .85; }
+.bx-c:not(.brk):not(.hold) > b small { color: var(--muted); opacity: 1; }
+.bx-bar { position: relative; height: 4px; margin: 2px 0 1px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 20%, transparent); }
+.bx-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--bx); opacity: .8; }
+.bx-bar u { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--text); transform: translateX(-50%); }
+#mcBody.mc-cmp .bx-c .sub { display: none; }   /* 넓은 화면 한 판 높이 고정(1700 스크롤 방지) -- 평소는 막대 눈금, 띠 가격은 툴팁 */
+#mcBody.mc-cmp .bx-c { gap: 1px; }
+.bx-hw { display: none; } #mcBody.mc-cmp .bx-hw { display: inline; }
+#mcBody.mc-cmp .bx-bar { margin: 1px 0 0; }
+.bx-c .sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 /* 2026-10-16 «지금 추세» 시안 A: 기간 이름 붙은 표 */
 .fc-cnt { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 2px; }
 .fc-tl { display: flex; gap: 2px; } .fc-tl i { flex: 1; font: 700 10px/16px var(--font-mono); font-style: normal; text-align: center; border-radius: 3px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }

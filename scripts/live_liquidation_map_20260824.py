@@ -100,6 +100,12 @@ def _sub_bars(ts_sec: np.ndarray, m5: tuple | None) -> tuple | None:
         k = (m_t[a[i]:b[i]] - ts_sec[i]) // 300
         for c in out:
             out[c][i, k] = M[c][a[i]:b[i]]
+    # 10-16 리뷰: 5분봉이 일부만 있는 시간(예: fetch 한도 가장자리)은 있는 칸만으로 몫을 내 편향됐다(급락 봉 0.152 → 0.326).
+    #   기대 칸 수 = min(12, (마지막 5분봉 끝 − 봉 시작)/300) -- 형성 중 부분봉은 그때까지 닫힌 칸 수. 모자라면 그 줄은 옛 규약(몫 1).
+    exp = np.clip((int(m_t[-1]) + 300 - ts_sec) // 300, 0, 12)
+    short = np.isfinite(out["low"]).sum(1) < exp
+    for c in out:
+        out[c][short] = np.nan
     return out["high"], out["low"], np.nan_to_num(out["volume"])
 
 
@@ -844,3 +850,12 @@ if __name__ == "__main__":
     assert set(bar5) == set(col5) and np.corrcoef([bar5[k] for k in col5], [col5[k] for k in col5])[0, 1] > 0.999
     assert col5 != col, "합성 5분봉에서 자기 봉 판정이 아무 칸도 안 바꿨다(검사 무력)"
     print("selftest 3b OK -- 5분봉 판정판 이력 마지막 열 = 막대 같은 칸·비례 · 옛 판과 다름")
+    # 10-16 리뷰: 5분봉이 일부 빠진 시간은 옛 규약(몫 1) -- 있는 칸만으로 낸 편향된 몫을 쓰지 않는다
+    m5gap = m5x.drop(index=[2, 3])                                   # 급락 시간의 앞 5분봉 둘이 빠짐(12 → 10)
+    cgap = _prepare_common(h1x, 100.6, _bar_arrays(m5gap))
+    assert (_own_bar_alive(cgap, midx, midx * (1 - 1 / 100 + MAINTENANCE_MARGIN_RATE), True) == 1).all()
+    # 형성 중 부분봉(앞 5칸만 닫힘)은 그 5칸으로 판정 -- 모자란 게 아니다
+    m5part = m5x.head(5)
+    cpart = _prepare_common(h1x, 100.6, _bar_arrays(m5part))
+    assert cpart["sub"] is not None and np.isfinite(cpart["sub"][1][-1, :5]).all()
+    print("selftest 3c OK -- 5분봉 빠진 시간 = 옛 규약 · 부분봉은 닫힌 칸까지로 판정")
