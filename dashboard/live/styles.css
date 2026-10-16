@@ -3293,6 +3293,23 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 }
 .mc-state .mc-q1 { margin-left: auto; flex: none; }   /* 2026-10-15 ①②④ 제목 대신 상태 줄 끝 «?» */
 .fc-c .sub.fc-vol { color: var(--warn); font-weight: 700; }
+/* 2026-10-16 박스 유지 확률(시안): 30분·1시간·4시간 · 막대 = 확률, 세로 눈금 = 평소 · 주황 = 평소의 3/4 밑(깨질 쪽). 초록·빨강(방향)은 안 쓴다 */
+.bx-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bx-c { --bx: var(--text); display: flex; flex-direction: column; gap: 3px; padding: 0 8px 2px; min-width: 0; cursor: help; }
+.bx-c + .bx-c { border-left: 1px dashed var(--soft-line); }
+.bx-c.brk { --bx: var(--warn); }
+.bx-c .hz { font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.bx-c > b { font-size: 15px; font-weight: 800; line-height: 1.25; color: var(--bx); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bx-c > b small { margin-left: 5px; font-size: 10.5px; font-weight: 700; color: var(--bx); opacity: .85; }
+.bx-c:not(.brk):not(.hold) > b small { color: var(--muted); opacity: 1; }
+.bx-bar { position: relative; height: 4px; margin: 2px 0 1px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 20%, transparent); }
+.bx-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--bx); opacity: .8; }
+.bx-bar u { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--text); transform: translateX(-50%); }
+#mcBody.mc-cmp .bx-c .sub { display: none; }   /* 넓은 화면 한 판 높이 고정(1700 스크롤 방지) -- 평소는 막대 눈금, 띠 가격은 툴팁 */
+#mcBody.mc-cmp .bx-c { gap: 1px; }
+.bx-hw { display: none; } #mcBody.mc-cmp .bx-hw { display: inline; }
+#mcBody.mc-cmp .bx-bar { margin: 1px 0 0; }
+.bx-c .sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 /* 2026-10-16 «지금 추세» 시안 A: 기간 이름 붙은 표 */
 .fc-cnt { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 2px; }
 .fc-tl { display: flex; gap: 2px; } .fc-tl i { flex: 1; font: 700 10px/16px var(--font-mono); font-style: normal; text-align: center; border-radius: 3px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }

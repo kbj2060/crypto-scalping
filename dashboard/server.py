@@ -148,6 +148,7 @@ from dashboard import situation as sit  # noqa: E402
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
 from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
+from dashboard.box_hold import payload as box_hold_payload  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
 from dashboard import market_ctx as mctx  # noqa: E402
@@ -4616,6 +4617,16 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_box_hold(request: web.Request) -> web.Response:   # 2026-10-16 박스 유지 확률(ETH, 표시 전용 · 방향 아님)
+        """지금가 ± 지난 30분·1h·4h 고저폭 절반을 다음 같은 시간 안 안 벗어날 확률(dashboard/box_hold.py) -- 닫힌 1분봉 1500개 · 1분 캐시."""
+        async def produce() -> dict[str, Any]:
+            return await asyncio.to_thread(box_hold_payload, await liq_klines_df("eth", 1500, interval="1m"))
+        try:
+            payload = await swr_cached("box_hold", 60.0, produce, max_stale=600.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+        return web.json_response(payload, headers=NOCACHE)
+
     # 수급 커서 = 목록 키 -> 쿼리 이름. 클라(refreshSupply1s)와 같은 규칙: 받은 행의 최대 초.
     SUPPLY_CURSORS = (("seconds", "since"), ("oi", "sinceOi"), ("liq", "sinceLiq"), ("okx", "sinceOkx"),
                       ("okxOi", "sinceOkxOi"), ("okxLiq", "sinceOkxLiq"), ("spot", "sinceSpot"),
@@ -7555,6 +7566,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/dir-signals", api_dir_signals)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)
+    app.router.add_get("/api/box-hold", api_box_hold)
     app.router.add_get("/api/iceberg", api_iceberg)
     app.router.add_get("/api/market-context", api_market_context)
     app.router.add_get("/api/chip-score", api_chip_score)
