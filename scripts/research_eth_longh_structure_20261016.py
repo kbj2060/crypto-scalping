@@ -77,6 +77,8 @@ def load_eth_1m() -> dict:
     m = m[m.t >= t0].set_index("t")
     t1 = (int(m.index.max()) // 86_400_000 + 1) * 86_400_000
     m = m.reindex(np.arange(t0, t1, 60_000))
+    ok = m.c.notna().to_numpy(); iv = np.flatnonzero(ok)
+    assert ok[iv[0]:iv[-1] + 1].all(), "1분봉 빈칸 -- 아래 ffill 이 빈 구간을 «평평·거래량 0» 연속 시간으로 만든다(10-16 리뷰)"
     c = m.c.ffill()
     return dict(t=m.index.to_numpy().astype("datetime64[ms]"), c=c.to_numpy(float), h=m.h.fillna(c).to_numpy(float),
                 l=m.l.fillna(c).to_numpy(float), v=m.v.fillna(0).to_numpy(float), tb=m.tb.fillna(0).to_numpy(float),
@@ -490,6 +492,7 @@ def strat_diff_cat(y, g, blk, cat, seed=7):
 # ───────────────────────────── F3 사분면 ─────────────────────────────
 def oi_known(t, oi_raw):
     """봉 τ 에 쓰는 OI = 봉 τ 시작 스냅샷. 2024-03-04 전 행 τ = τ 스냅샷 · 그 뒤 행 τ = τ+5분 → 행 τ−1."""
+    oi_raw = np.where(oi_raw > 0, oi_raw, np.nan)   # 10-16 리뷰: OI ≤ 0 행(208개)이 ΔOI −1 → «OI↓»로 잘못 들어갔다
     return np.where(t >= OI_SWITCH, np.r_[np.nan, oi_raw[:-1]], oi_raw)
 
 
