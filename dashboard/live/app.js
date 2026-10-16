@@ -2705,26 +2705,24 @@ function renderMacroCalendar(payload) {
 
 
 // 2026-10-16 펜 메모(3차 «화살표대로 순서»): 넓은 화면(≥1200) 스냅샷 = 맨 위 [세션(왼쪽) | 코인 탭(가운데) | 경보·다크·알림(오른쪽)] ·
-//   스냅샷/운영 관리 = 풋프린트 카드 머리 «Footprint» 제목 앞. 운영 관리 화면(풋프린트 카드 없음) = 탭은 맨 위 왼쪽, 세션 가운데.
+//   스냅샷/운영 관리 = 맨 위 제일 왼쪽(10-17 펜 메모 «카드 머리에서 대시보드 최상단 제일 왼쪽으로», 세션은 그 오른쪽). 운영 관리 화면 = 탭은 맨 위 왼쪽, 세션 가운데.
 //   좁은 화면은 옛 자리 그대로(탭 = 맨 위 첫 줄 · 코인 = 카드 머리 · 세션 = CSS 배치).
 const PAGE_TABS_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1200px)") : null;
 function placeTopLeft() {
   const nav = document.querySelector(".page-tabs"), top = document.querySelector(".topbar"), slot = el("topLeftSlot"), mid = el("topCenterSlot");
-  const coins = el("snapshotAssetTabs"), home = el("coinHome"), sess = document.querySelector(".top-right"), title = document.querySelector("#fpCard .card-title");
+  const coins = el("snapshotAssetTabs"), home = el("coinHome"), sess = document.querySelector(".top-right");
   if (!nav || !top || !slot || !mid) return;
   const wide = !!(PAGE_TABS_WIDE && PAGE_TABS_WIDE.matches), snap = activePageTab === "snapshot";
   const coinsHome = () => { if (coins && home && coins.previousElementSibling !== home) home.after(coins); };
   const sessHome = () => { if (sess && sess.parentElement !== top) top.appendChild(sess); };
   if (wide && snap) {
+    if (slot.firstElementChild !== nav) slot.prepend(nav);
     if (sess && sess.parentElement !== slot) slot.appendChild(sess);
     if (coins && coins.parentElement !== mid) mid.appendChild(coins);
-    if (title && nav.nextElementSibling !== title) title.before(nav);
-    nav.classList.add("in-card");
   } else {
     coinsHome(); sessHome();
     if (wide) { if (nav.parentElement !== slot) slot.appendChild(nav); }
     else if (nav.parentElement !== top) slot.after(nav);
-    nav.classList.remove("in-card");
   }
 }
 if (PAGE_TABS_WIDE && PAGE_TABS_WIDE.addEventListener) PAGE_TABS_WIDE.addEventListener("change", placeTopLeft);   // 🔴CI 검사기(esprima)는 ?.( 를 못 읽는다

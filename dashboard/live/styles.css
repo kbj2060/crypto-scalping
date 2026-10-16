@@ -2933,7 +2933,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .top-left-slot:empty { display: none; }
 .top-center-slot { display: flex; align-items: center; justify-content: center; }
 .top-center-slot:empty { display: none; }
-.page-tabs.in-card { margin-right: 14px; }   /* 펜 메모(3차): 카드 머리 «Footprint» 제목 앞 */
 .top-left-slot > .top-right { display: flex; justify-content: flex-start; }
 @media (min-width: 1200px) {
   .topbar > .top-left-slot { grid-column: 1; grid-row: 1; justify-self: start; }
