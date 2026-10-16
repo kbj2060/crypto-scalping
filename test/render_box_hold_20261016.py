@@ -20,7 +20,7 @@ PROBE = """() => {
   const sec = [...document.querySelectorAll('#mcBody .mc-sec')].find((s) => s.querySelector('.bx-row'));
   const cells = sec ? [...sec.querySelectorAll('.bx-c')] : [];
   return { found: !!sec, n: cells.length, hz: cells.map((c) => c.querySelector('.hz').textContent),
-           val: cells.map((c) => (c.querySelector('b').firstChild || {}).textContent), brk: cells.map((c) => c.classList.contains('brk')),
+           val: cells.map((c) => (c.querySelector('b').firstChild || {}).textContent), brk: cells.map((c) => c.classList.contains('brk') || c.classList.contains('out')),   // 실시간 가격이 이미 띠 밖이면 «벗어남»이 앞선다
            over: cells.some((c) => [...c.children].some((e) => e.scrollWidth > e.clientWidth + 1)),
            hscroll: document.documentElement.scrollWidth > window.innerWidth + 1,
            tags: [...document.querySelectorAll('svg text')].filter((t) => /^1h 박스/.test(t.textContent)).length,
@@ -50,7 +50,7 @@ def run(shot):
     assert live["ok"], live
     brk = json.loads(json.dumps(live))
     for s in brk["scales"].values():
-        s["p"] = round(s["base"] * 0.5, 4)
+        s["p"] = round(s["q20"] * 0.8, 4)            # 학습 예측 하위 20% 밑 = «깨질 쪽»(10-16 리뷰 뒤 문턱)
     fails, blocked, errs = [], [], []
     shot = pathlib.Path(shot); shot.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:

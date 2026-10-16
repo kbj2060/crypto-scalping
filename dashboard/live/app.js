@@ -4068,32 +4068,57 @@ async function refreshDir4h() {
     if (res.ok) latestDir4h = await res.json();
   } catch (error) { /* 다음 주기 */ }
 }
+// 2026-10-16 시안 ②③ 09시 개장 되돌림(ETH, /api/open-rev = scripts/live_eth_direction_forward_recorder_20261010.decide · 서버 5분 캐시)
+let latestOpenRev = null, openRevLastFetchAt = 0;
+async function refreshOpenRev() {
+  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  const now = Date.now();
+  if (now - openRevLastFetchAt < 120000) return;
+  openRevLastFetchAt = now;
+  try {
+    const res = await fetch("/api/open-rev", { cache: "no-cache" });
+    if (res.ok) latestOpenRev = await res.json();
+  } catch (error) { /* 다음 주기 */ }
+}
 // 2026-10-16 사용자 «①부터 재검증하고 시안»: 박스 유지 확률(ETH, /api/box-hold = dashboard/box_hold.py · 서버 1분 캐시) -- 방향 아님.
 //   박스 = 지금가 ± 지난 W분 고저폭의 절반 · 값 = 다음 W분 동안 한 번도 안 벗어날 확률(2022~24 학습, 2025·2026 보정 오차 ≤6pp).
 let latestBoxHold = null, boxHoldLastFetchAt = 0;
 const BOX_ON_CHART = true;    // 2026-10-16 사용자 «B로 배포» -- 1시간 박스 두 선을 풋프린트 가격판에(데스크톱 꼬리표 칸)
+const BOX_STALE_MS = 180e3;   // 10-16 리뷰: 기준가가 3분 넘게 묵으면 «지연»·차트 선 숨김(30분 박스는 3분 뒤 9%가 이미 깨져 있다)
 async function refreshBoxHold() {
   if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
   const now = Date.now();
-  if (now - boxHoldLastFetchAt < 60000) return;
+  if (now - boxHoldLastFetchAt < 20000) return;   // 서버 15초 캐시와 맞춤(옛 60초 + 60초 캐시 = 박스 중심이 평균 2~3분 묵었다)
   boxHoldLastFetchAt = now;
   try {
     const res = await fetch("/api/box-hold", { cache: "no-cache" });
     if (res.ok) latestBoxHold = await res.json();
-  } catch (error) { /* 다음 주기 */ }
+  } catch (error) { /* 다음 주기 -- 묵으면 BOX_STALE_MS 가 «지연»으로 드러낸다 */ }
 }
 const BOX_NM = { "30m": "30분", "1h": "1시간", "4h": "4시간" };
+// 상태: 묵음(stale) · 이미 벗어남(out, 실시간 가격이 띠 밖) · 깨질 쪽(brk, 학습 예측 하위 20%) · 머물 쪽(hold, 상위 20%) · 보통
+function boxState(b, s) {
+  const live = Number(latestLivePriceByAsset.eth || 0);
+  if (Date.now() - b.asof_ms > BOX_STALE_MS) return ["stale", "지연"];
+  if (live > 0 && (live > s.up || live < s.dn)) return ["out", "벗어남"];
+  const lo = s.q20 != null ? s.q20 : s.base * 0.75, hi = s.q80 != null ? s.q80 : s.base * 1.33;
+  return s.p < lo ? ["brk", "깨질 쪽"] : s.p > hi ? ["hold", "머물 쪽"] : ["", "보통"];
+}
 function boxRowHtml(sec) {
-  const eth = activeSnapshotAsset === "eth", b = eth && latestBoxHold && latestBoxHold.ok ? latestBoxHold : null;
+  const eth = activeSnapshotAsset === "eth", raw = eth ? latestBoxHold : null, b = raw && raw.ok ? raw : null;
   const cells = Object.keys(BOX_NM).map((k) => {
     const s = b && b.scales[k];
-    if (!s || !s.ok) return `<div class="bx-c"><span class="hz">${BOX_NM[k]}</span><b>-</b><span class="sub">${b ? "계산 불가" : eth ? "불러오는 중" : "ETH 전용"}</span></div>`;
-    const p = Math.round(s.p * 100), base = Math.round(s.base * 100), r = s.p / s.base, half = (s.up - s.dn) / 2;
-    const tone = r < 0.75 ? "brk" : r > 1.33 ? "hold" : "";   // 평소의 3/4 밑 = 깨질 쪽(주황 경보) · 4/3 위 = 머물 쪽
-    const tip = `${BOX_NM[k]} 박스 = 지금가 ${b.px.toFixed(2)} ± 지난 ${BOX_NM[k]} 고저폭의 절반 $${half.toFixed(1)}(${s.half_pct.toFixed(2)}%)\n`
-      + `${s.dn.toFixed(1)} ~ ${s.up.toFixed(1)} 을 다음 ${BOX_NM[k]} 동안 한 번도 안 벗어날 확률 ${p}% · 평소 ${base}%\n방향 정보 아님 — 어느 쪽으로 깨질지는 모른다`;
+    if (!s || !s.ok) {
+      const why = !eth ? "ETH 전용" : raw && !raw.ok ? "계산 불가" : b ? "계산 불가" : "불러오는 중";   // 10-16 리뷰: ok false 를 «불러오는 중»으로 숨기던 것
+      return `<div class="bx-c"${raw && raw.reason ? ` title="${escapeHtml(String(raw.reason))}"` : ""}><span class="hz">${BOX_NM[k]}</span><b>-</b><span class="sub">${why}</span></div>`;
+    }
+    const p = Math.round(s.p * 100), base = Math.round(s.base * 100), half = (s.up - s.dn) / 2, [tone, word] = boxState(b, s);
+    const ageMin = Math.round((Date.now() - b.asof_ms) / 60e3);
+    const tip = `${BOX_NM[k]} 박스 = 기준가 ${b.px.toFixed(2)}(${ageMin}분 전) ± 지난 ${BOX_NM[k]} 고저폭의 절반 $${half.toFixed(1)}(${s.half_pct.toFixed(2)}%)\n`
+      + `${s.dn.toFixed(1)} ~ ${s.up.toFixed(1)} 을 다음 ${BOX_NM[k]} 동안 한 번도 안 벗어날 확률 ${p}% · 평소 ${base}%\n`
+      + `«깨질 쪽» < ${Math.round((s.q20 || 0) * 100)}% · «머물 쪽» > ${Math.round((s.q80 || 0) * 100)}% (학습 기간 예측의 하위·상위 20%)\n방향 정보 아님 — 어느 쪽으로 깨질지는 모른다`;
     return `<div class="bx-c ${tone}" title="${escapeHtml(tip)}"><span class="hz">${BOX_NM[k]}</span>`
-      + `<b>${p}%<small>${tone === "brk" ? "깨질 쪽" : tone === "hold" ? "머물 쪽" : "보통"}<span class="bx-hw"> · ±$${half.toFixed(1)}</span></small></b>`
+      + `<b>${p}%<small>${word}<span class="bx-hw"> · ±$${half.toFixed(1)}</span></small></b>`
       + `<span class="bx-bar" aria-hidden="true"><i style="width:${Math.min(100, p)}%"></i><u style="left:${Math.min(100, base)}%"></u></span>`
       + `<span class="sub">평소 ${base}% · ±$${half.toFixed(1)}</span></div>`;   // 넓은 화면(.mc-cmp)은 숨기고 ±$ 를 값 옆(.bx-hw)으로 -- 띠 가격은 툴팁
   });
@@ -4140,7 +4165,37 @@ function fcRowHtml(sec) {
       + `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(1)}bp · 상승 문턱 ≥ +${g4.hi.toFixed(1)} · 하락 문턱 ≤ ${g4.lo.toFixed(1)} (학습 예측 상·하위 20%) · ${kst(g4.decided_at_ms)} KST 마감 5분봉\n`
       + `2025~26 IC .06 · 2023~24 검증 불통과 · 참고용(전진 판정 전)${g4.nan_feats.length ? `\n🔴빈 피쳐 ${g4.nan_feats.length}: ${g4.nan_feats.join(", ")}` : ""}\n${vTip}`
     : `4h 방향 예측(ETH 전용) — ${eth ? (latestDir4h && latestDir4h.reason ? `불러오기 실패: ${latestDir4h.reason}` : "불러오는 중") : "ETH 에서만 계산"}\n${vTip}`;
-  const d4Sub = g4 ? `예측 ${g4.pred_bp >= 0 ? "+" : "−"}${Math.abs(g4.pred_bp).toFixed(0)}bp${old4 ? " · 지연" : ""}` : (eth ? "불러오는 중" : "ETH 전용");   // 문턱은 툴팁
+  // 2026-10-16 시안 ④: 다음 문턱까지 거리 + 문턱 눈금(왼쪽 색 = 숏 문턱 밖 · 오른쪽 색 = 롱 문턱 밖 · ● 지금 · ○ 1시간 전)
+  const sgn = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(0)}`;
+  // 칸 이름이 «4h 예측»이라 «예측» 글자는 뺀다(1700 폭에서 넘쳤다) · 신호 중이면 거리 대신 «신호»
+  const d4Next = !g4 ? "" : g4.pred_bp >= g4.hi || g4.pred_bp <= g4.lo ? " · 신호"
+    : g4.pred_bp >= 0 ? ` · 롱까지 ${(g4.hi - g4.pred_bp).toFixed(0)}` : ` · 숏까지 ${(g4.pred_bp - g4.lo).toFixed(0)}`;
+  const d4Sub = g4 ? (old4 ? `${sgn(g4.pred_bp)}bp · 지연` : `${sgn(g4.pred_bp)}bp${d4Next}`) : (eth ? "불러오는 중" : "ETH 전용");
+  const d4Gauge = (() => {
+    if (!g4) return "";
+    const R = Math.max(Math.abs(g4.lo), Math.abs(g4.hi)) * 1.6, X = (bp) => Math.max(0, Math.min(100, 50 + bp / R * 50)).toFixed(1);
+    const ago = (g4.hist || []).filter((h) => h[0] <= g4.decided_at_ms - 3600e3 + 150e3).pop();
+    return `<span class="d4g" aria-hidden="true"><i class="z dn" style="width:${X(g4.lo)}%"></i><i class="z up" style="left:${X(g4.hi)}%"></i>`
+      + (ago ? `<u class="ago" style="left:${X(ago[1])}%"></u>` : "") + `<u style="left:${X(g4.pred_bp)}%"></u></span>`;
+  })();
+  // 2026-10-16 시안 ②③: 종합 = 사전등록 portfolio3 세 부품의 «지금 자리» -- 4h HGB 신호 · 일봉 추세(|5표 평균| ≥ .5, 즉 4:1 이상) ·
+  //   09시(UTC 00시) 개장 되돌림(첫 30분 |수익| > 0.5σ 면 반대, 00:30~04:30 UTC 만). 🔴공식 가중(직전 90일 일 변동 역수)은 실시간에 없어 같은 가중.
+  const orv = eth && latestOpenRev && latestOpenRev.ok ? latestOpenRev : null, nowMs = Date.now();
+  const orvOn = orv && nowMs >= orv.entry_ms && nowMs < orv.exit_due_ms;
+  const parts = [
+    ["4h", g4 && !old4 ? g4.signal : null, g4 ? `4h 모델 ${word(g4.signal)} (예측 ${sgn(g4.pred_bp)}bp, 문턱 ${g4.lo.toFixed(0)} / +${g4.hi.toFixed(0)})` : "4h 모델 -"],
+    ["추세", t ? (Math.abs(t.signal) >= 0.5 ? Math.sign(t.signal) : 0) : null,
+      t ? `일봉 추세 5표 ${t.ups}:${t.votes.length - t.ups} — 4:1 이상일 때만 방향(사전등록 규칙) · 하루 보유` : "일봉 추세 -"],
+    ["09시", orv ? (orvOn ? orv.open_pos : 0) : null,
+      !orv ? "09시 개장 되돌림 -" : nowMs < orv.entry_ms ? `09시 개장 되돌림 — 오늘 ${kst(orv.entry_ms)} KST 에 판정`
+        : `09시 개장 되돌림 — ${orv.date} 첫 30분 ${orv.f30_bp >= 0 ? "+" : ""}${orv.f30_bp.toFixed(1)}bp vs 문턱 ±${(0.5 * orv.sigma30_bp).toFixed(1)}bp → ${orv.open_pos ? (orv.open_pos > 0 ? "롱" : "숏") : "해당 없음"}${orv.open_pos ? (orvOn ? ` · ${kst(orv.exit_due_ms)} KST 까지` : " · 끝남") : ""}`],
+  ];
+  const net = parts.reduce((a, p) => a + (p[1] || 0), 0), agree = parts.filter((p) => p[1] && Math.sign(p[1]) === Math.sign(net)).length;
+  const pw = (s) => (s == null ? "-" : s > 0 ? "▲" : s < 0 ? "▼" : "·");
+  const sumTip = `종합 — 사전등록(10-10) 세 부품의 지금 자리, 같은 가중으로 더함(공식 판정은 직전 90일 변동 역수 가중)\n${parts.map((p) => p[2]).join("\n")}\n`
+    + "2023~26 결합 샤프 1.56(3자산 1.75) · 과거에서 고른 조합 — 전진 판정 2027-03-14 이후 · 참고용";
+  const fcSum = `<span class="fc-sum ${cls(net)}" title="${escapeHtml(sumTip)}">종합 <b>${net > 0 ? "▲ 롱 쪽" : net < 0 ? "▼ 숏 쪽" : "중립"}</b>`
+    + `${net ? `<small>${agree}/3</small>` : ""}${parts.map((p) => `<i class="${p[1] ? cls(p[1]) : ""}">${p[0]} ${pw(p[1])}</i>`).join("")}</span>`;
   const kn = kalshiNow(), kLeft = kn ? Math.max(0, Math.round(kn.k.close_ts - Date.now() / 1000)) : 0;
   const kTip = "칼시(미국 규제 예측시장) 15분 ETH 위/아래 — 창 마감 때 기준가보다 위일 확률 · 55~45% 사이는 비등\n참고 · 신호 아님(확률은 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침)";
   const kCell = kn ? cell("15분 · 칼시", kn.pct >= 55 ? "up" : kn.pct <= 45 ? "dn" : "flat", kn.pct >= 55 ? `▲ 위 ${kn.pct}%` : kn.pct <= 45 ? `▼ 아래 ${100 - kn.pct}%` : `비등 ${kn.pct}%`,
@@ -4150,10 +4205,10 @@ function fcRowHtml(sec) {
     + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
     + kCell
-    + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, volLine)
+    + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge + volLine)
     + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)")
     + sig(ds.z91, "4~13주 예측", "Z 달러·유동성 91일")
-    + `</div>`).replace('class="mc-sec"', 'class="mc-sec mc-fc"');
+    + `</div>`).replace('class="mc-sec"', 'class="mc-sec mc-fc"').replace("</h4>", `${eth ? fcSum : ""}</h4>`);
 }
 
 async function refreshDirSig() {
@@ -4215,8 +4270,8 @@ MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아
   + "변동성 = 4시간 실현변동성 GBM(ETH 22피쳐) · 순위상관 .79 · 확대 AUC .82 · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀).\n"
   + "셋 다 참고용 — 전진 판정 전."
 MC_TIPS.q_box = "박스 = 지금가 ± 지난 30분·1시간·4시간 고저폭의 절반. 값 = 다음 같은 시간 동안 그 띠를 한 번도 안 벗어날 확률(1분봉 고가·저가 기준) · 막대 눈금 = 평소(2022~24 평균 26~29%).\n"
-  + "주황 «깨질 쪽» = 평소의 3/4 밑 · «머물 쪽» = 평소의 4/3 위 · 그 사이 «보통». 방향 정보는 없다 — 어느 쪽으로 깨질지는 모른다.\n"
-  + "우리 검정(ETH 4.7년, 2022~24 학습 · 2025·2026 따로 채점): AUC .75~.78 · 보정 오차 10분위 최대 3~6pp · 하위 10% 유지 3~5% ↔ 상위 10% 61~71%. "
+  + "주황 «깨질 쪽» = 학습 기간(2022~24) 예측의 하위 20% 밑 · «머물 쪽» = 상위 20% 위 · 그 사이 «보통» · «벗어남» = 지금가가 이미 띠 밖 · «지연» = 기준가가 3분 넘게 묵음(차트 선도 숨김). 방향 정보는 없다 — 어느 쪽으로 깨질지는 모른다.\n"
+  + "우리 검정(ETH 4.7년, 2022~24 학습 · 2025·2026 따로 채점): AUC .75~.78 · 보정 오차 10분위 최대 3~6.4pp · 하위 10% 유지 3~5% ↔ 상위 10% 61~71%. "
   + "대부분은 «변동성 대비 띠 거리»(기하)이고, 최근 1시간/24시간 변동성 비 · 시각 · 주말이 +.02~.04 를 더한다. 24시간 박스는 보정이 나빠 뺐다.";
 // 2026-10-04 맞대결·벽 신호·모의 판(사용자 승인 시안) -- 원천 = 모의 매매 엔진 상태(/api/paper-arms). 연구와 같은 계산을 엔진이 한 번만 한다.
 MC_TIPS.q_flow += "\n\n맞대결 = 정시마다 고래(체결 한 줄 $10만+)·리테일($1만 미만)의 60분 순매수를 자기 지난 30일과 견준 z 가 반대이고 둘 다 0.5 이상이면 고래 쪽, 다음 정시까지. 위 줄들(14일 같은 요일유형·시간대 잣대·거래소 합산)과 잣대가 달라 가끔 엇갈린다 — 맞대결은 바이낸스만 — 합산판(+OKX·+Bybit)은 10-06 검정에서 바이낸스판보다 약해 불통과(2025~ 건당 +7.8 vs +7.1 · +3.8bp, docs/experiments/whale_duel_multivenue_20261006.md). 4.7년 검정에서 약하게 맞았다(메이커 체결 전제).";
@@ -7007,19 +7062,27 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     }
   }
 
-  // 2026-10-16 시안 B: 1시간 박스 두 선(지금가 ± 지난 1시간 고저폭 절반) -- 방향 아님, max pain 처럼 흐린 점선 + 꼬리표 칸
-  const bx1 = BOX_ON_CHART && isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestBoxHold && latestBoxHold.ok ? latestBoxHold.scales["1h"] : null;
+  // 2026-10-16 시안 B: 1시간 박스 두 선(기준가 ± 지난 1시간 고저폭 절반) -- 방향 아님, max pain 처럼 흐린 점선 + 꼬리표 칸.
+  //   10-16 리뷰: 묵은 박스(3분↑)는 안 그림 · 화면 밖 경계도 꼬리표(↑↓) · 휴대폰(꼬리표 칸 없음)은 선 오른쪽 끝에 짧은 글자.
+  const bxAll = BOX_ON_CHART && isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestBoxHold && latestBoxHold.ok ? latestBoxHold : null;
+  const bx1 = bxAll && Date.now() - bxAll.asof_ms <= BOX_STALE_MS ? bxAll.scales["1h"] : null;
   if (bx1 && bx1.ok) {
-    const g = document.createElementNS(NS, "g"), p = Math.round(bx1.p * 100);
+    const g = document.createElementNS(NS, "g"), p = Math.round(bx1.p * 100), [tone] = boxState(bxAll, bx1);
+    const col = tone === "brk" ? "var(--warn)" : "var(--muted)", fs = mobileChart ? 10 : 11;
     g.setAttribute("pointer-events", "none");
     for (const [v, side] of [[bx1.up, "위"], [bx1.dn, "아래"]]) {
-      const y = yAt(v);
+      const y = yAt(v), title = `1시간 박스 ${side} ${v.toFixed(1)} -- 다음 1시간 안 벗어날 확률 ${p}%(평소 ${Math.round(bx1.base * 100)}%) · 방향 아님`;
+      if (gutOn) fpNotes.push({ val: v, label: `1h 박스 ${p}%`, color: col, title });   // 화면 밖이어도 꼬리표 칸이 위·아래 끝에 쌓는다(max pain 과 같다)
       if (y < mt || y > plotBottom) continue;
       const ln = document.createElementNS(NS, "line");
       Object.entries({ x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--text)", "stroke-opacity": 0.4, "stroke-dasharray": "7 5" }).forEach(([k, x]) => ln.setAttribute(k, x));
       g.appendChild(ln);
-      if (gutOn) fpNotes.push({ val: v, label: `1h 박스 ${p}%`, color: bx1.p / bx1.base < 0.75 ? "var(--warn)" : "var(--muted)",
-                                title: `1시간 박스 ${side} ${v.toFixed(1)} -- 다음 1시간 안 벗어날 확률 ${p}%(평소 ${Math.round(bx1.base * 100)}%) · 방향 아님` });
+      if (!gutOn) {
+        const t = document.createElementNS(NS, "text");
+        Object.entries({ x: ml + cw - 4, y: side === "위" ? y - 4 : y + fs + 2, "font-size": fs, "font-weight": 700, fill: col, "text-anchor": "end" }).forEach(([k, x]) => t.setAttribute(k, x));
+        t.textContent = `1h 박스 ${p}%`;
+        g.appendChild(t);
+      }
     }
     svg.appendChild(g);
   }
@@ -8184,6 +8247,7 @@ async function tick() {
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
       refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH · 서버 5분 캐시)
       refreshBoxHold();              // 2026-10-16 박스 유지 확률 (1분, ETH · 방향 아님)
+      refreshOpenRev();              // 2026-10-16 ⑤ 종합의 09시 개장 되돌림 (2분, ETH)
       refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (1초 -- 10-03, ETH 만 · 서술)
       refreshPaper();                // 2026-10-04 모의 판·맞대결·벽 신호 (10초, 모의 매매 엔진 상태)
       refreshChipScore();            // 2026-10-05 머리 칩 실전 성적 (코인별 5분)

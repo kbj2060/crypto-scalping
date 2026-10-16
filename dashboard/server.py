@@ -147,7 +147,7 @@ from dashboard import situation as sit  # noqa: E402
 # 2026-09-25 «데이터 관계 읽기» -- 지지/저항 목록 아래 문장. 순수 함수 + 자체점검. 입력은 상황 읽기와 같은 원천.
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
-from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
+from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_rev_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
 from dashboard.box_hold import payload as box_hold_payload  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
@@ -4617,12 +4617,27 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_open_rev(request: web.Request) -> web.Response:   # 2026-10-16 ⑤ 종합의 09시 개장 되돌림(ETH, 전진 기록기 decide 그대로)
+        """일봉 93 · 5분봉 600(오늘 00:25 봉 + 그 전 290개 -- 23:59 UTC 에 불러도 닿게 24h + 24.2h ≈ 580) → open_rev_from_klines · 2분 캐시.
+        00:30 UTC 전엔 «대기»."""
+        async def produce() -> dict[str, Any]:
+            q = lambda iv, n: {"symbol": "ETHUSDT", "interval": iv, "limit": n}
+            daily = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines", q("1d", 93), error_reason="open_rev_upstream_error")
+            m5 = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines", q("5m", 600), error_reason="open_rev_upstream_error")
+            return await asyncio.to_thread(open_rev_from_klines, daily, m5, time.time() * 1000)
+        try:
+            payload = await swr_cached("open_rev", 120.0, produce, max_stale=900.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_box_hold(request: web.Request) -> web.Response:   # 2026-10-16 박스 유지 확률(ETH, 표시 전용 · 방향 아님)
-        """지금가 ± 지난 30분·1h·4h 고저폭 절반을 다음 같은 시간 안 안 벗어날 확률(dashboard/box_hold.py) -- 닫힌 1분봉 1500개 · 1분 캐시."""
+        """지금가 ± 지난 30분·1h·4h 고저폭 절반을 다음 같은 시간 안 안 벗어날 확률(dashboard/box_hold.py) -- 닫힌 1분봉 1500개 · 15초 캐시.
+        10-16 리뷰: 60초 캐시 + 60초 폴링이면 박스 중심가가 평균 2~3분 묵었다(30분 박스는 3분 뒤 9%가 이미 깨져 있음) → 15초 · 묵은 값은 1분까지만."""
         async def produce() -> dict[str, Any]:
             return await asyncio.to_thread(box_hold_payload, await liq_klines_df("eth", 1500, interval="1m"))
         try:
-            payload = await swr_cached("box_hold", 60.0, produce, max_stale=600.0)
+            payload = await swr_cached("box_hold", 15.0, produce, max_stale=60.0)
         except Exception as exc:  # noqa: BLE001
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)
@@ -7567,6 +7582,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)
     app.router.add_get("/api/box-hold", api_box_hold)
+    app.router.add_get("/api/open-rev", api_open_rev)
     app.router.add_get("/api/iceberg", api_iceberg)
     app.router.add_get("/api/market-context", api_market_context)
     app.router.add_get("/api/chip-score", api_chip_score)

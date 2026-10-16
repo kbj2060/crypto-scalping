@@ -1,9 +1,10 @@
 """박스 유지 확률 (2026-10-16 사용자 «①부터 재검증하고 시안») -- 지금가 ± 0.5×(지난 W분 고저폭) 띠를 다음 W분 안 안 벗어날 확률.
 
 근거 scripts/research_eth_range_hold_multiscale_20261016.py(1분봉 4.7년): 2022~24 학습 로지스틱, 2025·2026 따로 채점 —
-AUC 30분 .77/.77 · 1h .77/.76 · 4h .78/.77, 보정 오차 10분위 최대 3~6pp, 하위·상위 10% 유지 3~5% → 61~71%.
+AUC 30분 .77/.77 · 1h .77/.76 · 4h .78/.77, 보정 오차 10분위 최대 3~6.4pp(1h 2026 5.1 · 4h 2025 6.4), 하위·상위 10% 유지 3~5% → 61~71%.
 기하(변동성 대비 띠 거리) 하나가 AUC .74 — 나머지(최근 1h/24h 변동성 비 · 시각 · 주말 · 창폭)가 +.02~.04.
-🔴방향 정보가 아니다(어느 쪽으로 깨질지는 모른다) · 24h 창은 횡보 보정 오차 8~10pp 라 뺐다.
+🔴방향 정보가 아니다(어느 쪽으로 깨질지는 모른다) · 24h 창은 횡보 구간 보정 오차 8~10pp 라 뺐다(전체 상태로는 4h 와 비슷한 5~6pp).
+계수 재현: python scripts/research_eth_range_hold_multiscale_20261016.py --fit-coef
 """
 import json
 from pathlib import Path
@@ -38,6 +39,7 @@ def payload(k1m: pd.DataFrame) -> dict:
         cf = COEF[name]
         z = cf["intercept"] + sum(cf["coef"][k] * v for k, v in x.items())
         out["scales"][name] = {"ok": True, "p": round(float(1 / (1 + np.exp(-z))), 4), "base": round(cf["train_base"], 4),
+                               "q20": round(cf["q20"], 4), "q80": round(cf["q80"], 4),   # 화면 «깨질 쪽»(< q20) · «머물 쪽»(> q80) 문턱 = 학습 예측 분위
                                "up": round(px + 0.5 * rng, 2), "dn": round(px - 0.5 * rng, 2), "half_pct": round(0.5 * rng / px * 100, 3),
                                "until_ms": out["asof_ms"] + W * 60_000}
     return out

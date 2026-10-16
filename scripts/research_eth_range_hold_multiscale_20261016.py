@@ -155,9 +155,27 @@ def selftest():
     log('selftest OK')
 
 
+def fit_coef(D, path):
+    """서빙 계수(dashboard/box_hold_coef_20261016.json) -- «all» 상태 · F 특징 · 2022~24 학습 + 학습 예측 확률 20·80분위(화면 «깨질/머물 쪽» 문턱).
+    10-16 리뷰: 처음엔 일회성 코드로 맞췄고, «평소 3/4 밑» 문턱이 시간의 46~48% 켜져 경보 구실을 못 했다 → 분위 문턱."""
+    out = {}
+    for s in ('30m', '1h', '4h'):
+        tr = D[(D.scale == s) & (D.ts < '2025-01-01')]
+        m = LogisticRegression(C=1.0, max_iter=1000).fit(tr[FEATS['F 기하+α']], tr.hold)
+        p = m.predict_proba(tr[FEATS['F 기하+α']])[:, 1]
+        out[s] = {'intercept': float(m.intercept_[0]), 'coef': dict(zip(FEATS['F 기하+α'], map(float, m.coef_[0]))),
+                  'train_base': float(tr.hold.mean()), 'q20': float(np.quantile(p, .2)), 'q80': float(np.quantile(p, .8)),
+                  'train': ['2022-01-01', '2024-12-31'], 'n': int(len(tr))}
+    Path(path).write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    log(json.dumps({s: {k: round(v, 4) for k, v in o.items() if k in ('train_base', 'q20', 'q80')} for s, o in out.items()}))
+
+
 if __name__ == '__main__':
     selftest()
     if '--selftest' in sys.argv:
+        sys.exit()
+    if '--fit-coef' in sys.argv:          # decisions.parquet(앞 실행 산출) → 서빙 계수
+        fit_coef(pd.read_parquet(OUT / 'decisions.parquet'), WT / 'dashboard/box_hold_coef_20261016.json')
         sys.exit()
     OUT.mkdir(parents=True, exist_ok=True)
     D = build(load_1m())

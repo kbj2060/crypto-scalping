@@ -27,13 +27,18 @@ from dashboard import server  # noqa: E402
 from dashboard.box_hold import payload  # noqa: E402
 
 
-def rows(now: float) -> list:
+NOW = time.time()   # 10-16 리뷰: rows() 를 두 번 부를 때 분이 넘어가면 asof 가 갈렸다 -- 한 번만 고정
+
+
+def rows(now: float = NOW) -> list:
     rng = np.random.default_rng(5)
     t_form = int(now) // 60 * 60 * 1000                       # 형성 1분봉 시작
     t = t_form - np.arange(1499, -1, -1) * 60_000
     c = 2400 * np.exp(np.cumsum(rng.normal(0, 6e-4, 1500)))
     h, l = c * (1 + rng.uniform(0, 4e-4, 1500)), c * (1 - rng.uniform(0, 4e-4, 1500))
-    return [[int(t[i]), c[i], h[i], l[i], c[i], 10.0, int(t[i]) + 59_999] + [0] * 5 for i in range(1500)]
+    out = [[int(t[i]), c[i], h[i], l[i], c[i], 10.0, int(t[i]) + 59_999] + [0] * 5 for i in range(1500)]
+    out[-1][6] = int(now * 1000) + 600_000                       # 형성 봉은 시험이 몇 분 걸려도 늘 «아직 형성 중»
+    return out
 
 
 class FakeResp:
@@ -50,7 +55,7 @@ class FakeSession:
     def get(self, url, params=None, timeout=None):
         assert url == "https://fapi.binance.com/fapi/v1/klines", url      # 그 밖의 바깥 요청은 실패
         FakeSession.calls.append(dict(params))
-        return FakeResp(rows(time.time())[-int(params["limit"]):])
+        return FakeResp(rows()[-int(params["limit"]):])
     async def close(self): self.closed = True
 
 
@@ -73,9 +78,9 @@ class BoxHoldServerTest(unittest.TestCase):
         self.assertTrue(p["ok"], p)
         self.assertEqual(set(p["scales"]), {"30m", "1h", "4h"})
         self.assertEqual(FakeSession.calls[0], {"symbol": "ETHUSDT", "interval": "1m", "limit": 1500})
-        self.assertEqual((n1, n2), (1, 1), "두 번째 호출은 1분 캐시")
+        self.assertEqual((n1, n2), (1, 1), "두 번째 호출은 15초 캐시 안")
         self.assertEqual(p2, p)
-        raw = rows(time.time())[:-1]                                   # 형성 봉 제외 = 서버가 본 봉
+        raw = rows()[:-1]                                   # 형성 봉 제외 = 서버가 본 봉
         d = pd.DataFrame({"timestamp": pd.to_datetime([r[0] for r in raw], unit="ms", utc=True),
                           "high": [r[2] for r in raw], "low": [r[3] for r in raw], "close": [r[4] for r in raw]})
         want = payload(d)
@@ -83,6 +88,7 @@ class BoxHoldServerTest(unittest.TestCase):
         for k, s in p["scales"].items():
             self.assertAlmostEqual(s["p"], want["scales"][k]["p"], places=4)
             self.assertTrue(0 < s["p"] < 1 and s["dn"] < p["px"] < s["up"])
+            self.assertTrue(0 < s["q20"] < s["base"] < s["q80"] < 1, s)   # 화면 «깨질/머물 쪽» 문턱
 
 
 if __name__ == "__main__":

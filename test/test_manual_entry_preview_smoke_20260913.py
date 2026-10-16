@@ -474,7 +474,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         #   레벨을 고정값으로 심으면 시세 쪽에 따라 전부 «지나간 레벨»이 된다. 시세 기준 ±3%/±6%/±9%.
         seen = {}
 
-        def levels(_df, price):
+        def levels(_df, price, *_a):   # 2026-10-16 서버가 df_5m 을 셋째 인자로 넘긴다
             seen["p"] = price
             return {"warmed_up": True,
                     "support_levels": [{"price": price * 0.97}, {"price": price * 0.94}, {"price": price * 0.91}],
@@ -513,7 +513,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 await client.close()
 
         with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels",
-                                                 lambda _d, _p: {"warmed_up": True}), \
+                                                 lambda _d, _p, *_a: {"warmed_up": True}), \
              mock.patch.object(server, "MANUAL_RULES_ENABLED", True):
             asyncio.run(no_levels())
 
