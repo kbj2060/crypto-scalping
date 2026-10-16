@@ -2475,12 +2475,15 @@ const TREASURY_TICK = { ZT: 1 / 256, ZF: 1 / 128, ZN: 1 / 64, ZB: 1 / 32 };
 // 2026-10-06(3) 띠 = 금리 4종만, 전폭(사용자 «뉴스는 ⑤ 로 옮기고 그 자리를 국채선물로 가득») · 차트 아래 마지막 봉 시각.
 //   🔴금리 화살표 = 국채 가격 차트의 **최근 1시간** 움직임의 반대(사용자 선택 A + «차트와 반대로»): 12시간 첫 봉 대비로 붙였더니
 //   차트 끝은 반등(가격↑)하는데 «금리↑»가 떠 거꾸로 읽혔다. 화살표·변화율 둘 다 1시간 기준이고 12시간 변화는 호버에.
+let mcPlaced = false;   // 넓은/좁은 배치(mc-cmp)가 한 번이라도 정해졌나 -- 그 전엔 머리 띠(renderFpStrip)를 띄우지 않는다
 function renderFpStrip() {
   const box = el("fpStrip");
   if (!box) return;
   const T = latestTreasury && latestTreasury.ok ? latestTreasury.symbols : null;
   // 2026-10-13 시안(아티팩트 댓글 «금리도 5년 10년 것만 아래 4개 판에»): 넓은 화면 금리는 시장 맥락 한 줄의 ⑥ 금리로 옮겼다 -- 머리 띠는 끈다
-  if (!T || el("mcBody")?.classList.contains("mc-cmp")) { box.hidden = true; return; }
+  // 2026-10-17 사용자 «새로고침하면 옛 국채 차트가 잠깐 보였다 사라진다»: mc-cmp 는 첫 차트 배치(mcPlace) 때 정해지는데 국채 응답이 더 빨리 오면
+  //   그 사이(실측 0.15초+) 띠가 64px 로 떴다 꺼졌다 -- 배치가 한 번 정해지기 전엔 띄우지 않는다(mcPlace 가 처음 정할 때 다시 부른다).
+  if (!T || !mcPlaced || el("mcBody")?.classList.contains("mc-cmp")) { box.hidden = true; return; }
   box.hidden = false;
   const hm = (ts) => { const d = new Date(ts * 1000), today = new Date().toDateString() === d.toDateString();
     return (today ? "" : `${d.getMonth() + 1}-${d.getDate()} `) + `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
@@ -4557,7 +4560,8 @@ function mcPlace(svg, r, wr) {
   }
   // 🔴cssText 로 통째로 쓰면 renderMarketCtx 가 못 박은 gridTemplateColumns 가 지워진다 -- 위치 네 값만 쓴다
   Object.entries(pos).forEach(([k, v]) => { if (body.style[k] !== v) body.style[k] = v; });
-  if (body.classList.contains("mc-cmp") !== !!r) { body.classList.toggle("mc-cmp", !!r); body._mcHtml = null; renderMarketCtx(); renderFpStrip(); }   // 10-13 넓은 화면이면 머리 띠(금리)를 끈다
+  if (body.classList.contains("mc-cmp") !== !!r) { body.classList.toggle("mc-cmp", !!r); body._mcHtml = null; renderMarketCtx(); mcPlaced = true; renderFpStrip(); }   // 10-13 넓은 화면이면 머리 띠(금리)를 끈다
+  else if (!mcPlaced) { mcPlaced = true; renderFpStrip(); }
 }
 
 function renderMarketCtx() {
