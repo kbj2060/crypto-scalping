@@ -87,7 +87,54 @@ def _empty(reason: str, bars_used: int = 0) -> dict:
     }
 
 
-def _prepare_common(df: pd.DataFrame, current_price: float) -> dict | None:
+def _sub_bars(ts_sec: np.ndarray, m5: tuple | None) -> tuple | None:
+    """창의 1시간봉마다 그 시간 5분봉 (고, 저, 거래량) 행렬 (n, 12) -- 없는 칸은 고·저 NaN·거래량 0.
+    m5 = _bar_arrays(5분봉) 을 창이 알 수 있던 시각까지 자른 것(자르는 건 호출부 책임 -- 미래 5분봉이 섞이면 미래참조)."""
+    if m5 is None or not len(m5[0]):
+        return None
+    m_t, M = m5
+    n = len(ts_sec)
+    out = {c: np.full((n, 12), np.nan) for c in ("high", "low", "volume")}
+    a, b = np.searchsorted(m_t, ts_sec), np.searchsorted(m_t, ts_sec + 3600)
+    for i in range(n):
+        k = (m_t[a[i]:b[i]] - ts_sec[i]) // 300
+        for c in out:
+            out[c][i, k] = M[c][a[i]:b[i]]
+    return out["high"], out["low"], np.nan_to_num(out["volume"])
+
+
+def _own_bar_alive(common: dict, entry_px: np.ndarray, liq: np.ndarray, long: bool) -> np.ndarray:
+    """2026-10-16 사용자 «5분봉으로 같은 봉 순서 판정» -- 봉 i 자신의 청산가가 그 봉 안에서 이미 쓸렸는지.
+    future_min_low/max_high 는 «i 뒤 봉»만 봐서, 10-15 02시 급락 봉(고 2417·저 2313)의 (고+저)/2=2365 진입 100·75·50배 롱
+    (2354·2346·2330)이 그 봉 저가가 이미 지났는데도 거래량 5.5배로 지지 최대 밝기로 11시간 남았다.
+    가정: 그 봉의 진입은 진입가를 지나간 5분봉들에서 5분봉 거래량 비례로 일어남. 반환 = 그중 같은 시간 안 «그 뒤 5분봉»이 청산가에
+    닿지 않은 몫(0~1). 5분봉 없는 봉(또는 진입가를 지난 5분봉 거래량 0)은 1 = 옛 규약."""
+    sub = common.get("sub")
+    if sub is None:
+        return np.ones(len(liq))
+    H5, L5, V5 = sub
+    e = entry_px[:, None]
+    touch = (L5 <= e) & (H5 >= e)                                  # NaN 칸은 False
+    if long:
+        x = np.where(np.isnan(L5), np.inf, L5)
+        after = np.c_[np.minimum.accumulate(x[:, ::-1], axis=1)[:, ::-1][:, 1:], np.full(len(x), np.inf)]
+        ok = after > liq[:, None]
+    else:
+        x = np.where(np.isnan(H5), -np.inf, H5)
+        after = np.c_[np.maximum.accumulate(x[:, ::-1], axis=1)[:, ::-1][:, 1:], np.full(len(x), -np.inf)]
+        ok = after < liq[:, None]
+    wv = V5 * touch
+    den = wv.sum(1)
+    return np.where(den > 0, (wv * ok).sum(1) / np.where(den > 0, den, 1.0), 1.0)
+
+
+def _m5_until(m5: tuple, t: int) -> tuple:
+    """_bar_arrays(5분봉) 중 시각 t(초) 전에 시작한(= t 까지 닫힌) 것만."""
+    p = int(np.searchsorted(m5[0], t))
+    return m5[0][:p], {c: v[:p] for c, v in m5[1].items()}
+
+
+def _prepare_common(df: pd.DataFrame, current_price: float, m5: tuple | None = None) -> dict | None:
     """The weighting/survival-filter arithmetic shared by every compute_raw_bins() call regardless
     of which entry-price array is used -- split out 2026-08-26 so compute_spliced_levels()/
     compute_spliced_heatmap_history() can run their mid-priced and close-priced passes over the
@@ -121,6 +168,7 @@ def _prepare_common(df: pd.DataFrame, current_price: float) -> dict | None:
         "future_min_low": future_min_low, "future_max_high": future_max_high,
         "bin_width": max(current_price * BIN_WIDTH_PCT, 1e-9),
         "close": d["close"].to_numpy(dtype="float64"),
+        "sub": _sub_bars(ts.dt.tz_localize(None).to_numpy().astype("datetime64[s]").astype("int64"), m5),
     }
 
 
@@ -152,8 +200,9 @@ def _bins_from_common(common: dict, entry_price: np.ndarray | None) -> dict | No
     for lev in LEVERAGE_TIERS:
         long_liq = entry_px * (1.0 - 1.0 / lev + MAINTENANCE_MARGIN_RATE)
         short_liq = entry_px * (1.0 + 1.0 / lev - MAINTENANCE_MARGIN_RATE)
-        add(long_liq, per_tier_weight, future_min_low > long_liq)
-        add(short_liq, per_tier_weight, future_max_high < short_liq)
+        fl, fs = _own_bar_alive(common, entry_px, long_liq, True), _own_bar_alive(common, entry_px, short_liq, False)
+        add(long_liq, per_tier_weight * fl, (future_min_low > long_liq) & (fl > 0))
+        add(short_liq, per_tier_weight * fs, (future_max_high < short_liq) & (fs > 0))
 
     if not bins or not (max(bins.values()) > 0):  # all-zero-volume window (degenerate, no raise)
         return None
@@ -249,7 +298,7 @@ def compute_liquidation_levels(df: pd.DataFrame, current_price: float) -> dict:
     }
 
 
-def compute_spliced_levels(df: pd.DataFrame, current_price: float) -> dict:
+def compute_spliced_levels(df: pd.DataFrame, current_price: float, df_5m: pd.DataFrame | None = None) -> dict:
     """Support/resistance levels spliced from two independent pricing passes, 2026-08-26 --
     support_levels come entirely from a (high+low)/2-priced pass, resistance_levels entirely from
     the original close-priced pass (identical to compute_liquidation_levels()'s resistance side).
@@ -273,7 +322,7 @@ def compute_spliced_levels(df: pd.DataFrame, current_price: float) -> dict:
     caller). heatmap_bins is spliced the same way: the support half from the mid pass, the
     resistance half from the close pass, each normalized against its own side's max weight."""
     n_fallback = 0 if df is None else int(len(df))
-    common = _prepare_common(df, current_price)
+    common = _prepare_common(df, current_price, _bar_arrays(df_5m) if df_5m is not None and len(df_5m) else None)
     if common is None:
         reason = "insufficient_data" if (df is None or len(df) < 20 or not (current_price > 0)) else "no_surviving_levels"
         return _empty(reason, n_fallback)
@@ -409,9 +458,10 @@ def compute_spliced_heatmap_history(df: pd.DataFrame, current_price: float, look
     return _spliced_history(raws)
 
 
-def _spliced_raw(window: pd.DataFrame, current_price: float) -> tuple[dict, dict, float] | None:
-    """창 하나의 정규화 전 (지지 칸, 저항 칸, bin_width) -- 지지 = (고+저)/2 진입 패스의 현재가 아래, 저항 = 종가 패스의 위."""
-    common = _prepare_common(window, current_price)
+def _spliced_raw(window: pd.DataFrame, current_price: float, m5: tuple | None = None) -> tuple[dict, dict, float] | None:
+    """창 하나의 정규화 전 (지지 칸, 저항 칸, bin_width) -- 지지 = (고+저)/2 진입 패스의 현재가 아래, 저항 = 종가 패스의 위.
+    m5 = 창 끝까지 닫힌 5분봉 _bar_arrays (자기 봉 안 쓸림 판정, _own_bar_alive) -- None 이면 옛 규약."""
+    common = _prepare_common(window, current_price, m5)
     if common is None:
         return None
     w = window.reset_index(drop=True)
@@ -505,7 +555,7 @@ def compute_spliced_heatmap_history_5m(df_1h: pd.DataFrame, df_5m: pd.DataFrame,
         if memo is not None and key in memo:
             raw = memo[key]
         else:
-            raw = _spliced_raw(_window_at(h, m, t, lookback_hours), current_price)
+            raw = _spliced_raw(_window_at(h, m, t, lookback_hours), current_price, _m5_until(m, t))
             if memo is not None and t < t_last:
                 memo[key] = raw
         if raw is not None:
@@ -656,12 +706,13 @@ def compute_event_driven_levels(df: pd.DataFrame, current_price: float) -> dict:
 TIER_GROUPS = (("10", (10,)), ("20~25", (20, 25)), ("50", (50,)), ("75~100", (75, 100)))
 
 
-def compute_tier_profile(df: pd.DataFrame, current_price: float, oi_usd: float | None = None) -> dict | None:
+def compute_tier_profile(df: pd.DataFrame, current_price: float, oi_usd: float | None = None,
+                         df_5m: pd.DataFrame | None = None) -> dict | None:
     """{bin_width, lo(첫 칸 번호), current_price, unit, tiers: [{name, values[]}]} -- values[k] = 칸 lo+k 의 값.
     칸 가격 = 번호 × bin_width. 롱 청산은 현재가 아래, 숏 청산은 위에만 남는다(생존 필터). 없으면 None.
     규모: 모델 가중치 자체는 «거래대금×최근성»이라 달러로 읽으면 실제 청산 규모로 오해된다 -- oi_usd(현재 OI 달러)가 있으면
     모든 칸 합 = 2×OI(계약마다 롱·숏 한 쪽씩)가 되게 맞춘다(unit "oi_usd", 양쪽 비대칭은 모델 그대로). 없으면 합 = 1(unit "share")."""
-    common = _prepare_common(df, current_price)
+    common = _prepare_common(df, current_price, _bar_arrays(df_5m) if df_5m is not None and len(df_5m) else None)
     if common is None:
         return None
     d = df.reset_index(drop=True)
@@ -674,10 +725,10 @@ def compute_tier_profile(df: pd.DataFrame, current_price: float, oi_usd: float |
         for lev in levs:
             long_liq = mid * (1.0 - 1.0 / lev + MAINTENANCE_MARGIN_RATE)
             short_liq = close * (1.0 + 1.0 / lev - MAINTENANCE_MARGIN_RATE)
-            for entry, liq, alive in ((mid, long_liq, common["future_min_low"] > long_liq),
-                                      (close, short_liq, common["future_max_high"] < short_liq)):
-                m = alive & (liq > 0)
-                ks.append(np.round(liq[m] / bw).astype("int64")); vs.append((w * entry)[m])
+            for entry, liq, alive, own in ((mid, long_liq, common["future_min_low"] > long_liq, _own_bar_alive(common, mid, long_liq, True)),
+                                           (close, short_liq, common["future_max_high"] < short_liq, _own_bar_alive(common, close, short_liq, False))):
+                m = alive & (liq > 0) & (own > 0)
+                ks.append(np.round(liq[m] / bw).astype("int64")); vs.append((w * own * entry)[m])
         per.append((name, np.concatenate(ks), np.concatenate(vs)))
     allk = np.concatenate([k for _, k, _ in per])
     if not len(allk):
@@ -760,3 +811,36 @@ if __name__ == "__main__":
     assert set(bar) == set(col), (len(bar), len(col))
     assert np.corrcoef([bar[k] for k in col], [col[k] for k in col])[0, 1] > 0.999
     print("selftest 2 OK -- 5분 경계 144개 · 정시 창 = 옛 t-1h 창 · 미래 흔들어도 지난 경계 불변 · 막대 = 마지막 열 같은 칸·비례 값")
+
+    # 자체점검 3 (2026-10-16 자기 봉 안 쓸림, _own_bar_alive): 앞 20시간 평탄 102 · 마지막 시간 = 102 → 급락 97 → 회복 100.6
+    #   진입가(고+저)/2 = 99.6 를 지난 5분봉 = 4(내려가며, 거래량 30)·8(올라오며, 10). 100배 롱 청산 99.1 은 4 뒤 저가 97 에 쓸림 → 몫 10/40.
+    #   10배 롱 청산 90.1 은 안 닿음 → 1. 5분봉 안 주면 옛 규약(1).
+    t0 = pd.Timestamp("2026-10-01", tz="UTC")
+    hi5 = [102.2] * 4 + [101.8, 99.0, 98.0, 98.5, 100.0, 100.8, 100.8, 100.8]
+    lo5 = [101.8] * 4 + [99.0, 97.0, 97.5, 97.8, 99.0, 100.4, 100.4, 100.4]
+    v5 = [1, 1, 1, 1, 30, 50, 5, 5, 10, 1, 1, 1]
+    m5x = pd.DataFrame({"timestamp": t0 + pd.Timedelta(hours=20) + pd.to_timedelta(np.arange(12) * 5, "min"),
+                        "high": hi5, "low": lo5, "close": [102] * 4 + [99.2, 97.5, 98, 98.2, 100.5, 100.6, 100.6, 100.6], "volume": v5})
+    h1x = pd.DataFrame({"timestamp": pd.date_range(t0, periods=21, freq="1h", tz="UTC"),
+                        "high": [102.2] * 20 + [102.2], "low": [101.8] * 20 + [97.0], "close": [102.0] * 20 + [100.6], "volume": [10.0] * 20 + [100.0]})
+    midx = ((h1x.high + h1x.low) / 2).to_numpy()
+    cmx = _prepare_common(h1x, 100.6, _bar_arrays(m5x))
+    f100 = _own_bar_alive(cmx, midx, midx * (1 - 1 / 100 + MAINTENANCE_MARGIN_RATE), True)
+    f10 = _own_bar_alive(cmx, midx, midx * (1 - 1 / 10 + MAINTENANCE_MARGIN_RATE), True)
+    assert abs(f100[-1] - 10 / 40) < 1e-12 and f10[-1] == 1.0 and (f100[:-1] == 1).all(), (f100[-1], f10[-1])   # 앞 20시간은 5분봉 없음 → 1
+    assert (_own_bar_alive(_prepare_common(h1x, 100.6), midx, midx * 0.995, True) == 1).all()
+    # 지도 칸도 그만큼 줄었다: 100배 롱 칸 무게 = 옛 무게 × 0.25
+    b_new, b_old = (_bins_from_common(c, midx) for c in (cmx, _prepare_common(h1x, 100.6)))
+    k100 = int(np.round(midx[-1] * (1 - 1 / 100 + MAINTENANCE_MARGIN_RATE) / cmx["bin_width"]))
+    assert abs(b_new[k100] / b_old[k100] - 0.25) < 1e-9, (b_new[k100], b_old[k100])
+    # 미래 5분봉이 자기 봉 판정에 섞이지 않는다: 이력 경계 t 에선 t 전에 닫힌 5분봉만(_m5_until)
+    assert len(_m5_until(_bar_arrays(m5x), int((t0 + pd.Timedelta(hours=20, minutes=25)).timestamp()))[0]) == 5
+    print("selftest 3 OK -- 자기 봉 안 쓸림: 100배 롱 몫 0.25 · 안 닿은 10배 1 · 5분봉 없으면 옛 규약 · 칸 무게 비례 · t 뒤 5분봉 제외")
+    # 서버 실제 경로 파리티: 이력 마지막 열(5분봉 판정) == 청산맵 막대(df_5m 판정) 같은 칸·비례 값
+    sup5, res5, _ = _spliced_raw(win, cp5, _m5_until(ma, int(t_end.timestamp())))
+    tp55 = compute_tier_profile(win, cp5, df_5m=m5c)
+    col5 = {**sup5, **res5}
+    bar5 = {tp55["lo"] + i: v for i, v in enumerate(np.sum([t["values"] for t in tp55["tiers"]], axis=0)) if v > 0}
+    assert set(bar5) == set(col5) and np.corrcoef([bar5[k] for k in col5], [col5[k] for k in col5])[0, 1] > 0.999
+    assert col5 != col, "합성 5분봉에서 자기 봉 판정이 아무 칸도 안 바꿨다(검사 무력)"
+    print("selftest 3b OK -- 5분봉 판정판 이력 마지막 열 = 막대 같은 칸·비례 · 옛 판과 다름")

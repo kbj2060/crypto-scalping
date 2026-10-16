@@ -285,8 +285,10 @@ MACRO_CALENDAR_CACHE_SECONDS = 6 * 3600  # calendar dates change at most once/da
 LIQUIDATION_5M_SIGNAL_CACHE_SECONDS = 1
 # 2026-10-11 밀도 이력·청산맵 막대 = 5분 경계마다(사용자 «5분봉이 닫힐 때마다» · «둘 다 5분봉 기준»). 스냅샷 144 = 풋프린트 12h 창(144봉).
 #   5분봉은 그 첫 경계가 든 시간의 시작부터 필요 -> 144 + 12 + 여유.
+#   2026-10-16 자기 봉 안 쓸림 판정(_own_bar_alive)은 창 24시간봉 전부의 5분봉이 필요 -> 첫 경계 창 시작(12h + 24h 전)까지
+#   = 144 + 24×12 + 12 + 여유 = 460 (fapi klines 가중 limit<500 = 2 그대로). 모자라면 그 봉만 옛 규약(자기 봉 안 봄)으로 돌아간다.
 LIQUIDATION_MAP_HISTORY_SNAPSHOTS = 144
-LIQUIDATION_MAP_5M_FETCH_LIMIT = 170
+LIQUIDATION_MAP_5M_FETCH_LIMIT = 460
 #   옛 LIQUIDATION_MAP_DISPLAY_HOURS(8, 1시간 스냅샷 수 = 8+3)를 대신한다.
 
 # The 6 model-internal indicators (microstructure/tail_risk) only ever have their LATEST reading
@@ -4956,8 +4958,8 @@ def make_app() -> web.Application:
             df_5m = await liq_klines_df(asset, LIQUIDATION_MAP_5M_FETCH_LIMIT, interval="5m")
             current_price = float(df["close"].iloc[-1]) if len(df) else 0.0
             payload = await asyncio.to_thread(
-                compute_spliced_levels, df.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), current_price
-            )
+                compute_spliced_levels, df.tail(LIQUIDATION_MAP_LOOKBACK_HOURS).reset_index(drop=True), current_price, df_5m
+            )   # df_5m = 자기 봉 안 쓸림 판정(10-16) -- 닫힌 5분봉만이라 닫힌 1시간봉 창에 미래 없음
             # 2026-10-11 밀도 이력 = 5분 경계마다 «그 시각에 알 수 있던 지도»(닫힌 1시간봉 + 이번 시간의 닫힌 5분봉 부분봉).
             #   옛 1시간 스냅샷은 ts = 봉 시작인데 그 봉 끝까지 담아 한 시간 이르게 그려졌다. 기준가(격자)는 위 레벨과 같다.
             #   첫 스냅샷도 꽉 찬 24시간 창이 필요해 df 전체(48봉)를 넘긴다. memo = 매시 기준가가 바뀌기 전까지 지난 경계 재사용.
@@ -4973,7 +4975,7 @@ def make_app() -> web.Application:
             if win is not None and len(win[0]):
                 end_px = float(win[0]["close"].iloc[-1])
                 oi_usd = await asyncio.to_thread(liq_oi_usd, asset, end_px)
-                tp = await asyncio.to_thread(compute_tier_profile, win[0], current_price, oi_usd)
+                tp = await asyncio.to_thread(compute_tier_profile, win[0], current_price, oi_usd, df_5m)
                 if tp is not None:
                     tp.update(current_price=end_px, known_until=win[1].isoformat())
             payload["tier_profile"] = tp
