@@ -4133,13 +4133,16 @@ function boxState(b, s) {
   const lo = s.q20 != null ? s.q20 : s.base * 0.75, hi = s.q80 != null ? s.q80 : s.base * 1.33;
   return s.p < lo ? ["brk", "깨질 쪽"] : s.p > hi ? ["hold", "머물 쪽"] : ["", "보통"];
 }
+// 2026-10-17 사용자 «? 설명 단추 되살려»(제목은 없앤 채): ①②④ 처럼 «?» 만 -- 키보드로도 펼친다(#mcBody 클릭 처리기가 .mc-sec 안 .mc-tip 을 연다)
+const mcTipBtn = (key, name) => `<button type="button" class="mc-q mc-q1" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}" title="${name} — 설명" aria-label="${name} 설명"><span aria-hidden="true">?</span></button>`;
+const mcTipP = (key) => `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(MC_TIPS[key]).replace(/\n/g, "<br>")}</p>`;
 function boxTip(b, k, s) {
   const p = Math.round(s.p * 100), base = Math.round(s.base * 100), half = (s.up - s.dn) / 2, ageMin = Math.round((Date.now() - b.asof_ms) / 60e3);
   return `${BOX_NM[k]} 박스 = 기준가 ${b.px.toFixed(2)}(${ageMin}분 전) ± 지난 ${BOX_NM[k]} 고저폭의 절반 $${half.toFixed(1)}(${s.half_pct.toFixed(2)}%)\n`
     + `${s.dn.toFixed(1)} ~ ${s.up.toFixed(1)} 을 다음 ${BOX_NM[k]} 동안 한 번도 안 벗어날 확률 ${p}% · 평소 ${base}%\n`
     + `«깨질 쪽» < ${Math.round((s.q20 || 0) * 100)}% · «머물 쪽» > ${Math.round((s.q80 || 0) * 100)}% (학습 기간 예측의 하위·상위 20%)\n방향 정보 아님 — 어느 쪽으로 깨질지는 모른다`;
 }
-// 2026-10-17 펜 메모 «타이틀 제거 · 박스 유지는 2번 범위 막대»: 칸마다 가격 범위 + 범위 막대(세 칸 같은 가격 눈금 · 흰 눈금 = 지금가) + «다음 N 이 안에 머물 확률».
+// 2026-10-17 펜 메모 «타이틀 제거 · 박스 유지는 2번 범위 막대»: 칸마다 가격 범위 + 범위 막대(세 칸 같은 가격 눈금 · 세로 눈금 = 지금가) + «다음 N 이 안에 머물 확률».
 function boxRowHtml() {
   const eth = activeSnapshotAsset === "eth", raw = eth ? latestBoxHold : null, b = raw && raw.ok ? raw : null;
   const ok = b ? Object.keys(BOX_NM).map((k) => b.scales[k]).filter((s) => s && s.ok) : [];
@@ -4158,7 +4161,7 @@ function boxRowHtml() {
       + `<span class="bx-rng" aria-hidden="true"><i style="left:${X(s.dn)}%;width:${(X(s.up) - X(s.dn)).toFixed(1)}%"></i>${live ? `<u style="left:${X(live)}%"></u>` : ""}</span>`
       + `<div class="bx-p">다음 ${BOX_NM[k]} 이 안에 머물 확률 <b>${p}%</b><span> · 평소 ${base}% · ${word}</span></div></div>`;
   });
-  return `<div class="mc-sec mc-fc mc-bx" title="${escapeHtml(MC_TIPS.q_box)}"><div class="bx-row">${cells.join("")}</div></div>`;
+  return `<div class="mc-sec mc-fc mc-bx">${mcTipP("q_box")}<div class="bx-row">${cells.join("")}${mcTipBtn("q_box", "박스 유지 확률")}</div></div>`;
 }
 // 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, /api/vol-forecast · 서버 5분 캐시) -- 표시 전용
 let latestVol4h = null, vol4hLastFetchAt = 0;
@@ -4238,7 +4241,7 @@ function fcRowHtml(sec) {
       `${Number(kn.k.strike).toFixed(1)} · ${Math.floor(kLeft / 60)}:${String(kLeft % 60).padStart(2, "0")}`, `${kTip}\n기준가 ${Number(kn.k.strike).toFixed(2)} · 창 마감까지 ${Math.floor(kLeft / 60)}분 ${kLeft % 60}초`)
     : cell("15분 · 칼시", "flat", "-", eth ? "창 대기" : "ETH 전용", kTip);
   // 2026-10-17 펜 메모 «타이틀 제거 · 예측은 지금 유지»: 제목 단추(⑤ 예측 · 지금에서 멀리 ?)를 빼고 종합 칩만 머리에 -- 설명은 머리 툴팁
-  return `<div class="mc-sec mc-fc">${eth ? `<h4 title="${escapeHtml(MC_TIPS.q_fc)}">${fcSum}</h4>` : ""}<div class="fc-row">`
+  return `<div class="mc-sec mc-fc"><h4>${eth ? fcSum : ""}${mcTipBtn("q_fc", "⑤ 예측 · 지금에서 멀리")}</h4>${mcTipP("q_fc")}<div class="fc-row">`
     + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
     + kCell
@@ -4306,7 +4309,7 @@ MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아
   + "4~13주 예측 = 달러·유동성 Z91(|Z|≥1 만) · 2018~26 56일 BTC 70% · ETH 75%(고른 기간 성적).\n"
   + "변동성 = 4시간 실현변동성 GBM(ETH 22피쳐) · 순위상관 .79 · 확대 AUC .82 · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀).\n"
   + "셋 다 참고용 — 전진 판정 전."
-MC_TIPS.q_box = "박스 = 지금가 ± 지난 30분·1시간·4시간 고저폭의 절반. 값 = 다음 같은 시간 동안 그 띠를 한 번도 안 벗어날 확률(1분봉 고가·저가 기준) · 평소 = 2022~24 평균 26~29%. 막대 = 세 박스를 같은 가격 눈금에, 흰 눈금 = 지금가 · 차트 오른쪽 호가 띠 위 점선 = 박스 경계(가격 · 확률).\n"
+MC_TIPS.q_box = "박스 = 지금가 ± 지난 30분·1시간·4시간 고저폭의 절반. 값 = 다음 같은 시간 동안 그 띠를 한 번도 안 벗어날 확률(1분봉 고가·저가 기준) · 평소 = 2022~24 평균 26~29%. 막대 = 세 박스를 같은 가격 눈금에, 세로 눈금 = 지금가 · 차트 오른쪽 호가 띠 위 점선 = 박스 경계(가격 · 확률).\n"
   + "주황 «깨질 쪽» = 학습 기간(2022~24) 예측의 하위 20% 밑 · «머물 쪽» = 상위 20% 위 · 그 사이 «보통» · «벗어남» = 지금가가 이미 띠 밖 · «지연» = 기준가가 3분 넘게 묵음(차트 선도 숨김). 방향 정보는 없다 — 어느 쪽으로 깨질지는 모른다.\n"
   + "우리 검정(ETH 4.7년, 2022~24 학습 · 2025·2026 따로 채점): AUC .75~.78 · 보정 오차 10분위 최대 3~6.4pp · 하위 10% 유지 3~5% ↔ 상위 10% 61~71%. "
   + "대부분은 «변동성 대비 띠 거리»(기하)이고, 최근 1시간/24시간 변동성 비 · 시각 · 주말이 +.02~.04 를 더한다. 24시간 박스는 보정이 나빠 뺐다.";
