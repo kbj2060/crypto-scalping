@@ -32,8 +32,8 @@ def live_payload():
     import pandas as pd
     from dashboard.box_hold import payload
     k = json.load(urllib.request.urlopen("https://fapi.binance.com/fapi/v1/klines?symbol=ETHUSDT&interval=1m&limit=1500", timeout=20))
-    d = pd.DataFrame(k).iloc[:-1, :5]            # 형성 중 봉 제외
-    d.columns = ["t", "o", "high", "low", "close"]
+    d = pd.DataFrame(k).iloc[:-1, [0, 1, 2, 3, 4, 5, 9]]            # 형성 중 봉 제외 · 10-16 HGB 는 거래량·테이커 매수도 쓴다
+    d.columns = ["t", "o", "high", "low", "close", "volume", "taker_buy_base"]
     d = d.astype(float); d["timestamp"] = pd.to_datetime(d.t, unit="ms", utc=True)
     return payload(d)
 

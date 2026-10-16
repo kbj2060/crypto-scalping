@@ -4635,7 +4635,12 @@ def make_app() -> web.Application:
         """지금가 ± 지난 30분·1h·4h 고저폭 절반을 다음 같은 시간 안 안 벗어날 확률(dashboard/box_hold.py) -- 닫힌 1분봉 1500개 · 15초 캐시.
         10-16 리뷰: 60초 캐시 + 60초 폴링이면 박스 중심가가 평균 2~3분 묵었다(30분 박스는 3분 뒤 9%가 이미 깨져 있음) → 15초 · 묵은 값은 1분까지만."""
         async def produce() -> dict[str, Any]:
-            return await asyncio.to_thread(box_hold_payload, await liq_klines_df("eth", 1500, interval="1m"))
+            k1m = await liq_klines_df("eth", 1500, interval="1m")
+            try:   # 10-16 HGB: 예정 발표 칸(다음 W분 안 CPI·고용·FOMC 등) = 거시 일정 워커 상태 -- 못 읽으면 «발표 없음»으로
+                events = (await load_macro_calendar()).get("events")
+            except Exception:  # noqa: BLE001
+                events = None
+            return await asyncio.to_thread(box_hold_payload, k1m, events)
         try:
             payload = await swr_cached("box_hold", 15.0, produce, max_stale=60.0)
         except Exception as exc:  # noqa: BLE001
