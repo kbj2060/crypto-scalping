@@ -36,7 +36,8 @@ def rows(now: float = NOW) -> list:
     t = t_form - np.arange(1499, -1, -1) * 60_000
     c = 2400 * np.exp(np.cumsum(rng.normal(0, 6e-4, 1500)))
     h, l = c * (1 + rng.uniform(0, 4e-4, 1500)), c * (1 - rng.uniform(0, 4e-4, 1500))
-    out = [[int(t[i]), c[i], h[i], l[i], c[i], 10.0, int(t[i]) + 59_999] + [0] * 5 for i in range(1500)]
+    v = rng.uniform(5, 50, 1500)
+    out = [[int(t[i]), c[i], h[i], l[i], c[i], v[i], int(t[i]) + 59_999, 0, 0, v[i] * rng.uniform(.3, .7), 0, 0] for i in range(1500)]
     out[-1][6] = int(now * 1000) + 600_000                       # 형성 봉은 시험이 몇 분 걸려도 늘 «아직 형성 중»
     return out
 
@@ -66,7 +67,8 @@ class BoxHoldServerTest(unittest.TestCase):
                 live, dash = Path(tmp) / "live", Path(tmp) / "dashboard"
                 live.mkdir(); dash.mkdir()
                 with mock.patch.object(server, "ClientSession", FakeSession), mock.patch.object(server, "LIVE_DIR", live), \
-                     mock.patch.object(server, "DASHBOARD_DIR", dash):
+                     mock.patch.object(server, "DASHBOARD_DIR", dash), \
+                     mock.patch.object(server, "MACRO_CALENDAR_STATE_PATH", live / "macro_calendar_state.json"):   # 개발 PC 의 진짜 일정 파일을 읽지 않게
                     async with TestClient(TestServer(offline_app(server))) as c:
                         r1 = await c.get("/api/box-hold")
                         n1 = len(FakeSession.calls)
@@ -76,14 +78,16 @@ class BoxHoldServerTest(unittest.TestCase):
         st, p, n1, n2, p2 = asyncio.run(go())
         self.assertEqual(st, 200, p)
         self.assertTrue(p["ok"], p)
+        self.assertEqual(p["model"], "hgb-20261016")
         self.assertEqual(set(p["scales"]), {"30m", "1h", "4h"})
         self.assertEqual(FakeSession.calls[0], {"symbol": "ETHUSDT", "interval": "1m", "limit": 1500})
         self.assertEqual((n1, n2), (1, 1), "두 번째 호출은 15초 캐시 안")
         self.assertEqual(p2, p)
         raw = rows()[:-1]                                   # 형성 봉 제외 = 서버가 본 봉
         d = pd.DataFrame({"timestamp": pd.to_datetime([r[0] for r in raw], unit="ms", utc=True),
-                          "high": [r[2] for r in raw], "low": [r[3] for r in raw], "close": [r[4] for r in raw]})
-        want = payload(d)
+                          "high": [r[2] for r in raw], "low": [r[3] for r in raw], "close": [r[4] for r in raw],
+                          "volume": [r[5] for r in raw], "taker_buy_base": [r[9] for r in raw]})
+        want = payload(d, [])                               # 일정 파일 없음 = 발표 칸 0
         self.assertEqual(p["asof_ms"], want["asof_ms"])
         for k, s in p["scales"].items():
             self.assertAlmostEqual(s["p"], want["scales"][k]["p"], places=4)

@@ -162,6 +162,8 @@ def features(D: pd.DataFrame, K: pd.DataFrame) -> pd.DataFrame:
     tr = t < pd.Timestamp("2025-01-01").value // 10**6
     prof = pd.Series(r2[tr]).groupby(how[tr]).mean().reindex(range(168)).to_numpy()
     prof = prof / np.nanmean(r2[tr])
+    global PROF
+    PROF = prof
     pm = prof[how]
     for nm, W in SCALES.items():
         m = (D.scale == nm).to_numpy()
@@ -298,6 +300,26 @@ def evaluate_lean(D: pd.DataFrame, X: pd.DataFrame) -> dict:
     return rep
 
 
+def export(D: pd.DataFrame, X: pd.DataFrame, path: Path) -> None:
+    """서빙 묶음(dashboard/box_hold_hgb_20261016.joblib) -- 검증과 같은 2022~24 학습. 30분·1h = HGB(F+V+R+Q+S+M, 7일 칸 뺌), 4h = HGB(F 6칸).
+    q20·q80 = 학습 예측 분위(화면 «깨질/머물 쪽» 문턱) · prof = 요일×시각 평균 변동(S 칸, 학습 구간)."""
+    import joblib
+    A = pd.concat([D[["scale", "ts", "hold"] + F_BASE], X], axis=1).replace([np.inf, -np.inf], np.nan)
+    lean = F_BASE + [c for c in X.columns if c[:2] in ("V_", "R_", "Q_", "S_", "M_") and c not in ("V_lsig7d", "Q_volz")]
+    out = {"prof": PROF.tolist(), "train": ["2022-01-01", "2024-12-31"], "scales": {}}
+    for nm in SCALES:
+        cols = lean if nm != "4h" else F_BASE
+        tr = A[(A.scale == nm) & (A.ts < "2025-01-01")].dropna(subset=lean)
+        m = HistGradientBoostingClassifier(max_iter=400, learning_rate=0.05, max_leaf_nodes=31, min_samples_leaf=500,
+                                           l2_regularization=1.0, random_state=0).fit(tr[cols], tr.hold)
+        p = m.predict_proba(tr[cols])[:, 1]
+        out["scales"][nm] = {"model": m, "cols": cols, "train_base": float(tr.hold.mean()), "n": int(len(tr)),
+                             "q20": float(np.quantile(p, .2)), "q80": float(np.quantile(p, .8))}
+        log(f"[{nm}] 칸 {len(cols)} · 학습 {len(tr):,} · 기저 {tr.hold.mean():.3f} · q20 {np.quantile(p, .2):.3f} q80 {np.quantile(p, .8):.3f}")
+    joblib.dump(out, path, compress=3)
+    log(f"→ {path} ({path.stat().st_size / 1e6:.2f} MB)")
+
+
 def selftest():
     t0 = pd.Timestamp("2026-03-11").value // 10**6
     ev = np.array([t0 + 13 * 3600_000 + 30 * 60_000], dtype=np.int64)            # 2026-03-11 13:30 UTC (= 08:30 EDT? 3월 8일 이후 EDT → 12:30 UTC)
@@ -334,6 +356,11 @@ if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     D = pd.read_parquet(DEC)
     D = D[D.scale.isin(list(SCALES))].reset_index(drop=True)
+    if "--export" in sys.argv:                     # 특징을 다시 만들어(PROF 필요) 서빙 묶음을 쓴다
+        K = load_1m()
+        X = features(D, K)
+        export(D, X, ROOT / "dashboard/box_hold_hgb_20261016.joblib")
+        sys.exit()
     if "--lean" in sys.argv:
         rep = evaluate_lean(D, pd.read_parquet(OUT / "features.parquet"))
         (OUT / "report_lean.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
