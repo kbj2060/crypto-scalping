@@ -47,6 +47,9 @@
     <h1 class="sr-only">인공지능 트레이딩 대시보드</h1>
     <header class="top">
       <div class="topbar">
+        <!-- 2026-10-16 펜 메모(3차): 넓은 화면 스냅샷 = 세션(아시아·유럽·미국) 왼쪽 · 운영 관리 화면 = 탭 (app.js placeTopLeft) · 좁은 화면은 비어 숨김 -->
+        <div id="topLeftSlot" class="top-left-slot"></div>
+        <div id="topCenterSlot" class="top-center-slot"></div>   <!-- 2026-10-16 펜 메모(3차): 넓은 화면 스냅샷 = 코인 탭(맨 위 가운데) -->
         <nav class="page-tabs" aria-label="대시보드 탭">
           <button type="button" class="page-tab active" data-page-tab="snapshot" aria-current="page">스냅샷</button>
           <button type="button" class="page-tab" data-page-tab="ops">운영 관리</button>
@@ -96,6 +99,11 @@
           stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
       </form>
       <div class="nc-body">
+        <!-- 2026-10-16 아티팩트 댓글 «아이스버그 검증은 알림창 안으로 · 풋프린트 머리에서는 제거» -->
+        <section class="nc-sec" aria-labelledby="ncIceTitle">
+          <h3 id="ncIceTitle">전진 검증 중</h3>
+          <div id="ncIce" class="nc-ice"><p class="nc-empty">불러오는 중…</p></div>
+        </section>
         <section class="nc-sec" aria-labelledby="ncVerdictTitle">
           <h3 id="ncVerdictTitle">판정 예정일</h3>
           <p class="nc-hint">사전등록한 가설의 판정을 처음 돌려도 되는 날입니다. 그 전엔 결과를 보지 않습니다.</p>
@@ -188,6 +196,7 @@
       <!-- 2026-09-30 시장 맥락 카드 제거 -- 판 넷·24시간은 Footprint 카드 안(넓은 화면 = 1초 수급 아래 칸, 사용자 선택 시안 Y). -->
 
       <section id="fpCard" class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
+        <div id="fpLineSwitch" class="mc-switch fp-line-switch"></div>   <!-- 2026-10-16 펜 메모: 차트 바로 위 줄 오른쪽(VWAP·세션·볼린저·주간 앵커) -->
         <!-- 2026-09-19 2열 배치를 되돌렸다(사용자 지시 "지지·저항 게이지를 이전 위치로").
              오른쪽 열에는 청산 레벨 목록만 남아 있었는데, 그게 제자리(차트 바로 아래
              전체 폭)로 돌아오면 열이 빈다 -- 그래서 열 자체를 없앴다. 카드 안 순서는
@@ -230,11 +239,11 @@
               <button type="button" class="asset-tab" data-days="7" aria-pressed="false" title="지난 7일 1시간봉으로 추정">7d</button>
               <button type="button" class="asset-tab" data-days="30" aria-pressed="false" title="지난 30일 1시간봉으로 추정">30d</button>
             </div>
-            <!-- 2026-10-16 시안 ①: 칸별 아이스버그 전진 검증 건수(app.js renderIceChip) -- 신호·알림 아님 -->
-            <span id="iceChip" class="ice-chip" tabindex="0" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 20.5 7.25v9.5L12 21.5 3.5 16.75v-9.5z"/><path d="M8 12h8" stroke-linecap="round"/></svg><span
-              id="iceChipSt">아이스버그 · 검증 중</span><b id="iceChipN">-</b></span>
+            <!-- 2026-10-16 펜 메모 «나스닥·금리를 이전처럼 풋프린트 카드 상단으로»: 넓은 화면은 여기(1h…1d 오른쪽) · 좁은 화면은 시장 맥락 ⑥ 그대로 -->
+            <div id="fpRates" class="fp-rates" hidden></div>
+            <span id="fpPanHome" hidden></span>   <!-- 2026-10-16 넓은 화면은 #chartPan 을 차트 위 줄 가운데로 옮겼다가 좁아지면 여기로 되돌린다 -->
             <div id="chartPan" class="chart-pan" hidden></div>   <!-- 2026-10-01 창 이동 미니맵(12시간) · app.js renderChartPan -->
+            <span id="coinHome" hidden></span>   <!-- 2026-10-16 넓은 화면은 코인 탭을 맨 위 왼쪽으로 옮겼다가 좁아지면 여기로 되돌린다 -->
             <div id="snapshotAssetTabs" class="asset-tabs chart-mode-tabs" aria-label="스냅샷 코인 선택" title="코인 전환 적용: 캔들·시장이력 · 청산맵(청산 밀도 히트맵·S/R 레벨) · 청산 방향압력 · 레짐 리본(ETH/BTC/XRP) · GEX. ETH 고정(코인을 바꿔도 ETH 값입니다 — 해당 카드에 «ETH 전용» 배지가 붙습니다): 변동성 수준 · 추세 전환 탐지기 · 추세 전환 경보기 · 상황 읽기 30분. 비ETH 에서는 아예 빠지는 것: 풋프린트 셀 · 수급 프로파일 · 1초 수급 · OI 신규계약 레인 · 호가 히트맵(체결 테이프와 래스터를 ETH 만 수집합니다). HYPE 는 바이낸스 현물 상장이 없어 현물 기반 지표가 제한됩니다.">
               <button type="button" class="asset-tab active" data-asset="eth">ETH</button>
               <button type="button" class="asset-tab" data-asset="btc">BTC</button>
@@ -328,7 +337,7 @@
         <div id="liquidationMapList" class="liq-level-list"></div>
         <div id="mcWall" class="mc-body mc-wall"></div>   <!-- 2026-09-30 ④ 벽·교차·위치 = 호가/체결 프로파일 아래(넓은 화면) -->
         <div id="mcBody" class="mc-body mc-in-fp"></div>
-        <div id="fpLineSwitch" class="mc-switch fp-line-switch"></div>   <!-- 2026-10-01 차트에 그리기 = 청산 밀도 범례 오른쪽(넓은 화면) -->   <!-- 2026-09-30 시장 맥락(넓은 화면은 1초 수급 아래 칸에 겹쳐 놓는다 -- renderCandleSvg) -->
+          <!-- 2026-09-30 시장 맥락(넓은 화면은 1초 수급 아래 칸에 겹쳐 놓는다 -- renderCandleSvg) -->
       </section>
       <!-- 2026-10-05 뉴스 카드(사용자 «뉴스 카드를 하나 만들어서» · «풋프린트 바로 아래 카드로») -- 9개 피드 + jevk5:4b 판정(제목·요약만 읽음 · 검증 전 · 신호 아님).
            같은 글이 여러 출처로 오면 서버가 하나로 합친다(news_dedupe). app.js renderNews · /api/news -->

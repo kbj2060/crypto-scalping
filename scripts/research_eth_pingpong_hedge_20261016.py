@@ -63,7 +63,7 @@ def hedge(hh, ll, cc, p0, x, mode, par, coin):
             ex, fee, kind, e = cc[-1], TAKER, 'time', len(h2) - 1
         win_leg = w * (px - p0) / p0                             # 이긴 다리: P0 → px
         lose_leg = -w * (ex - p0) / p0                           # 진 다리: P0 → ex
-        worst = x - stop if e < 0 else (x - w * ((h2[:e + 1].max() if w == 1 else l2[:e + 1].min()) - p0) / p0 if len(h2) else x)
+        worst = x - stop if (kind == 'stop' and e < 0) else (x - w * ((h2[:e + 1].max() if w == 1 else l2[:e + 1].min()) - p0) / p0 if len(h2) else x)   # e<0 = 닿은 봉 손절(시간 청산의 빈 h2 도 −1 이라 kind 로 가른다)
         return win_leg + lose_leg, fee, kind, min(worst, 0.0), e + 1, k + 2 + e
     tpk = par                                                    # BRK: 진 다리 −x 손절, 이긴 다리(w) 보유
     tp = p0 * (1 + w * x * (1 + tpk))
@@ -79,7 +79,7 @@ def hedge(hh, ll, cc, p0, x, mode, par, coin):
         ex, fee, kind, e = cc[-1], TAKER, 'time', len(h2) - 1
     lose_leg = -w * (px - p0) / p0
     win_leg = w * (ex - p0) / p0
-    worst = 0.0 if e < 0 else (w * ((l2[:e + 1].min() if w == 1 else h2[:e + 1].max()) - px) / p0 if len(h2) else 0.0)
+    worst = 0.0 if (kind == 'tp' and e < 0) or not len(h2) else w * ((l2[:e + 1].min() if w == 1 else h2[:e + 1].max()) - px) / p0
     return win_leg + lose_leg, TAKER + fee, kind, min(worst, 0.0), e + 1, k + 2 + e
 
 
@@ -151,6 +151,9 @@ def selftest():
     assert abs(single(hh, ll, cc, p0, 0.01, 'fade', 0.03, False)[0] - g) < 1e-12
     g, *_ = hedge(hh, ll, cc, p0, 0.01, 'brk', 1, False)        # BRK: 같은 봉에서 목표 102 → 숏 −1% + 롱 +2% = +1%
     assert abs(g - 0.01) < 1e-12 and abs(single(hh, ll, cc, p0, 0.01, 'brk', 1, False)[0] - g) < 1e-12
+    # 마지막 봉에서 ±x 에 닿고 손절 없음 → 빈 h2 시간 청산(10-16 재실행이 여기서 죽었다)
+    g, f, kind, *_ = hedge(np.array([100.2, 101.5]), np.array([99.8, 100.4]), np.array([100.0, 101.2]), p0, 0.01, 'fade', None, False)
+    assert kind == 'time' and abs(g - (0.01 - 0.012)) < 1e-12, (g, kind)
     # 아무것도 안 닿음 → 0, 두 다리 시간 청산
     g, f, kind, *_ = hedge(np.full(5, 100.2), np.full(5, 99.8), np.full(5, 100.0), p0, 0.01, 'fade', 0.03, False)
     assert g == 0 and f == 2 * TAKER and kind == 'flat' and _[-1] == 5

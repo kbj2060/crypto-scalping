@@ -2926,7 +2926,28 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-10-01 «차트에 그리기» = 풋프린트 청산 밀도 범례 오른쪽 한 줄(넓은 화면) -- 자리는 app.js renderCandleSvg 가 준다(세로 가운데 맞춤) */
 .fp-line-switch { display: none; }
-.fp-line-switch.on { display: flex; position: absolute; z-index: 2; transform: translateY(-50%); margin: 0; gap: 14px; align-items: center; font-size: 11px; white-space: nowrap; }
+.fp-line-switch.on { display: flex; position: absolute; z-index: 2; transform: translateY(-50%); margin: 0; gap: 14px; align-items: center; font-size: 11px; white-space: nowrap; }   /* 2026-10-16 펜 메모: 차트 위 줄 오른쪽 끝(right = JS) */
+.chart-pan.inrow { position: absolute; z-index: 2; transform: translate(-50%, -50%); margin: 0; }   /* 2026-10-16 펜 메모: 차트 위 줄 가운데 */
+/* 2026-10-16 펜 메모(2차): 넓은 화면 맨 위 왼쪽 칸 = [코인 탭 | 스냅샷·운영 관리] (app.js placeTopLeft) · 비면 숨김 */
+.top-left-slot { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.top-left-slot:empty { display: none; }
+.top-center-slot { display: flex; align-items: center; justify-content: center; }
+.top-center-slot:empty { display: none; }
+.page-tabs.in-card { margin-right: 14px; }   /* 펜 메모(3차): 카드 머리 «Footprint» 제목 앞 */
+.top-left-slot > .top-right { display: flex; justify-content: flex-start; }
+@media (min-width: 1200px) {
+  .topbar > .top-left-slot { grid-column: 1; grid-row: 1; justify-self: start; }
+  .topbar > .top-center-slot { grid-column: 2; grid-row: 1; justify-self: center; }
+}
+/* 2026-10-16 펜 메모 «나스닥·금리를 이전처럼 풋프린트 카드 상단으로»: 머리 한 줄(1h…1d 오른쪽) -- 그림 22px · 값 · 툴팁 · 급변 칩 그대로 */
+.fp-rates { display: flex; flex: 1 1 0; align-items: center; gap: 12px; min-width: 0; font-size: 11px; white-space: nowrap; }
+.fp-rates .fr-i { flex: 1 1 auto; min-width: 0; } .fp-rates .fr-i .mc-svg { flex: 1 1 auto; }
+#fpCard .ops-health-head > .chart-head-left { flex: 1 1 auto; }   /* 펜 메모(4차): 나스닥·금리가 카드 오른쪽 끝까지 */
+.fp-rates .fr-t { font-weight: 700; color: var(--muted); cursor: help; }
+.fp-rates .fr-i { display: inline-flex; align-items: center; gap: 5px; cursor: help; }
+.fp-rates .fr-k { font-weight: 700; color: var(--muted); }
+.fp-rates b { font: 700 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.fp-rates .mc-svg { display: block; }
 .fp-line-switch .mc-switch-t { color: var(--muted); font-weight: 600; }
 .fp-line-switch > .mc-switch { display: flex; flex-wrap: nowrap; gap: 14px; align-items: center; margin: 0; font-size: 11px; }
 
@@ -3309,22 +3330,17 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .d4g u { position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: var(--text); transform: translate(-50%, -50%); }
 .d4g u.ago { width: 7px; height: 7px; background: none; border: 1.5px solid var(--muted); box-sizing: border-box; }
 /* 2026-10-16 박스 유지 확률(시안): 30분·1시간·4시간 · 막대 = 확률, 세로 눈금 = 평소 · 주황 = 평소의 3/4 밑(깨질 쪽). 초록·빨강(방향)은 안 쓴다 */
-.bx-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bx-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); font-variant-numeric: tabular-nums; }   /* 2026-10-17 펜 메모: 시안 2 범위 막대 */
 .bx-c { --bx: var(--text); display: flex; flex-direction: column; gap: 3px; padding: 0 8px 2px; min-width: 0; cursor: help; }
 .bx-c + .bx-c { border-left: 1px dashed var(--soft-line); }
-.bx-c.brk { --bx: var(--warn); }
-.bx-c .hz { font-size: 10.5px; font-weight: 700; color: var(--muted); white-space: nowrap; }
-.bx-c > b { font-size: 15px; font-weight: 800; line-height: 1.25; color: var(--bx); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.bx-c > b small { margin-left: 5px; font-size: 10.5px; font-weight: 700; color: var(--bx); opacity: .85; }
-.bx-c:not(.brk):not(.hold) > b small { color: var(--muted); opacity: 1; }
-.bx-bar { position: relative; height: 4px; margin: 2px 0 1px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 20%, transparent); }
-.bx-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--bx); opacity: .8; }
-.bx-bar u { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--text); transform: translateX(-50%); }
-#mcBody.mc-cmp .bx-c .sub { display: none; }   /* 넓은 화면 한 판 높이 고정(1700 스크롤 방지) -- 평소는 막대 눈금, 띠 가격은 툴팁 */
-#mcBody.mc-cmp .bx-c { gap: 1px; }
-.bx-hw { display: none; } #mcBody.mc-cmp .bx-hw { display: inline; }
-#mcBody.mc-cmp .bx-bar { margin: 1px 0 0; }
-.bx-c .sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.bx-c.brk, .bx-c.out { --bx: var(--warn); } .bx-c.stale { opacity: .6; }
+.bx-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; font-size: 12px; }
+.bx-h b { font-size: 10.5px; color: var(--muted); } .bx-h span { font-weight: 800; color: var(--bx); white-space: nowrap; } .bx-h small { font-size: 10px; color: var(--muted); }
+.bx-rng { position: relative; display: block; height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.bx-rng i { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: color-mix(in srgb, var(--bx) 38%, transparent); }
+.bx-rng u { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--text); }
+.bx-p { font-size: 11px; color: var(--muted); } .bx-p b { font-size: 13px; font-weight: 800; color: var(--bx); } .bx-p span { white-space: nowrap; }
+@media (max-width: 720px) { .bx-row { grid-template-columns: minmax(0, 1fr); row-gap: 8px; } .bx-c + .bx-c { border-left: none; } }
 /* 2026-10-16 «지금 추세» 시안 A: 기간 이름 붙은 표 */
 .fc-cnt { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 2px; }
 .fc-tl { display: flex; gap: 2px; } .fc-tl i { flex: 1; font: 700 10px/16px var(--font-mono); font-style: normal; text-align: center; border-radius: 3px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
@@ -3343,3 +3359,15 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .ice-mk.sell { color: var(--bad); }
 .ice-mk path { fill: color-mix(in srgb, currentColor 25%, transparent); stroke: currentColor; stroke-width: 1.4; }
 .ice-mk text { fill: currentColor; font: 700 10.5px/1 var(--font-sans); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+
+/* 2026-10-16 알림 센터 «전진 검증 중»(옛 풋프린트 머리 아이스버그 칩) */
+.nc-ice { display: grid; gap: 6px; }
+.nc-ice-row { display: flex; align-items: baseline; gap: 8px; }
+.nc-ice-row strong { font-size: 13px; }
+.nc-ice-st { font-size: 11px; font-weight: 700; color: var(--muted); }
+.nc-ice-row b { margin-left: auto; font: 700 13px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.nc-ice-bar { position: relative; display: block; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 20%, transparent); overflow: hidden; }
+.nc-ice-bar i { position: absolute; inset: 0 auto 0 0; background: var(--text); opacity: .7; }
+.nc-ice.stale .nc-ice-st, .nc-ice-bad { color: var(--warn); }
+}
+}
