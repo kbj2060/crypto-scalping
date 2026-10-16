@@ -4033,6 +4033,7 @@ async function refreshIceberg() {
   try {
     const res = await fetch("/api/iceberg", { cache: "no-cache" });
     latestIceberg = res.ok ? await res.json() : { ok: false, reason: `HTTP ${res.status}` };
+    latestIceberg._at = Date.now();   // 10-17 리뷰: 받아오기가 멈추면(SOL·운영 탭·숨은 창) 마지막 값이 «검증 중»으로 남던 것
   } catch (error) {
     latestIceberg = { ok: false, reason: "fetch_failed" };
   }
@@ -4043,13 +4044,15 @@ function renderIceChip() {
   const c = el("ncIce"), g = latestIceberg;
   if (!c) return;
   if (!g) { c.innerHTML = '<p class="nc-empty">불러오는 중… (스냅샷 · ETH 에서 30초마다)</p>'; return; }
-  const stale = !g.ok || g.age_s > 120, n = g.ok ? g.n : 0, target = g.ok ? g.target : 150, pct = Math.min(100, Math.round(n / target * 100));
+  const age = g.ok ? g.age_s + (Date.now() - (g._at || Date.now())) / 1000 : 0;
+  const stale = !g.ok || age > 120, n = g.ok ? g.n : 0, target = g.ok ? g.target : 150, pct = Math.min(100, Math.round(n / target * 100));
   c.classList.toggle("stale", stale);
-  c.innerHTML = `<div class="nc-ice-row"><strong>칸별 아이스버그</strong><span class="nc-ice-st">${stale ? "멈춤" : "검증 중"}</span><b>${n}/${target}</b></div>`
+  const html = `<div class="nc-ice-row"><strong>칸별 아이스버그</strong><span class="nc-ice-st">${stale ? "멈춤" : "검증 중"}</span><b>${n}/${target}</b></div>`
     + `<span class="nc-ice-bar" aria-hidden="true"><i style="width:${pct}%"></i></span>`
     + `<p class="nc-hint">같은 $0.1 칸에서 30초 동안 보이던 잔량의 2배 넘게 체결됐는데 칸이 버티고 다시 채워진 사건. 연구 28일 23건 · 15분 +7.6bp[2.6, 15.0] — `
     + `2026-10-16부터 ${target}건 모이면 판정합니다. 신호·알림 아님 · 풋프린트 육각형 = 최근 24시간 사건(초록 = 숨은 매수 · 빨강 = 숨은 매도).</p>`
-    + (stale ? `<p class="nc-hint nc-ice-bad">${escapeHtml(g.ok ? `탐지기 ${Math.round(g.age_s)}초째 응답 없음` : `불러오기 실패: ${g.reason}`)}</p>` : "");
+    + (stale ? `<p class="nc-hint nc-ice-bad">${escapeHtml(g.ok ? `탐지기 ${Math.round(age)}초째 응답 없음` : `불러오기 실패: ${g.reason}`)}</p>` : "");
+  if (c.innerHTML !== html) c.innerHTML = html;
 }
 // 풋프린트 위 육각형(renderCandleSvg 끝에서) -- 창 가운데 시각 · 그 칸 가격. 이름표는 가장 최근 하나만.
 function iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS) {
@@ -4568,12 +4571,14 @@ function renderMarketCtx() {
   const body = el("mcBody"), badge = el("mcBadge");
   if (!body) return;
   const A = activeSnapshotAsset, eth = A === "eth", U = coinUnit();   // 2026-10-04 코인별(SOL·XRP)
-  if (!flowOn()) { body.innerHTML = ""; body._mcHtml = null; return; }
+  const ratesOff = () => { const f = el("fpRates"); if (f && !f.hidden) { f.hidden = true; f.innerHTML = ""; } };   // 10-17 리뷰: 아래 두 return 에서 머리 칸이 마지막 값으로 멈춰 있었다
+  if (!flowOn()) { body.innerHTML = ""; body._mcHtml = null; ratesOff(); return; }
   const d = latestMarketCtx && latestMarketCtx.asset === A ? latestMarketCtx : null;   // 다른 코인 응답은 «불러오는 중»
   if (!d || !d.available) {
     body.innerHTML = `<div class="mc-note">${d && d.error ? `시장 맥락 지연 (${escapeHtml(String(d.error))})` : "불러오는 중…"}</div>`;
     body._mcHtml = null;
     if (badge) { badge.textContent = d && d.error ? "지연" : "-"; badge.className = "ops-badge neutral"; }   // 옛 «쏠림» 배지가 남지 않게
+    ratesOff();
     return;
   }
   const n = (v, dp = 0) => (v == null || !Number.isFinite(+v) ? "-" : (+v).toLocaleString("en-US", { maximumFractionDigits: dp, minimumFractionDigits: dp }));
@@ -4725,11 +4730,7 @@ function renderMarketCtx() {
       : ps.duel ? chip(ps.duel > 0 ? "good" : "bad", `고래 ${ps.duel > 0 ? "롱" : "숏"} · ${ps.remain}분`, zTip) : chip("", "맞대결 없음", zTip);
     const wallChip = !PAPER_SIG_OK.wall.has(A) ? chip("", "검정 밖") : !ps ? chip("", "엔진 대기") : !ps.dir ? chip("", "벽 신호 없음")
       : ps.chase ? chip("warn", `${ps.dir > 0 ? "매수" : "매도"} · 추격 주의`) : chip(ps.dir > 0 ? "good" : "bad", `${ps.dir > 0 ? "매수" : "매도"} 우세`);
-    const RATE_H = 40;   // 2026-10-15 사용자 «나스닥·금리 차트 잘 보이게» 26 → 40px
-    const cvd = fl.cvd30_all_z ?? fl.cvd30_z, cellW = Math.floor((G.cmpW - 24) / 3), rateW = Math.max(50, cellW - 48);   // 2026-10-14 세 칸(나스닥 · 5년 · 10년, 사용자 시안 A)
-    const nqCell = () => { const t = xyzClock(), r1 = xyzRet(t - 3600, t), px = xyzNow();   // 나스닥 실시간 1시간
-      return gk("나스닥", xyzSpark(Math.max(40, cellW - 106), RATE_H), `${XYZ_TIP}\n지금 ${px ? px.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "끊김"} · 1시간 ${xyzPct(r1)}`,
-                px ? xyzPct(r1) : "끊김", r1 == null ? "" : r1 >= 0 ? "mc-good" : "mc-bad"); };
+    const cvd = fl.cvd30_all_z ?? fl.cvd30_z;
     htmlB = [`<div class="mc-strip">`
       + tile("q_lev", "① 레버리지 과열?", levChip.trim(),
           gk("펀딩", G.pct(f.bn_at_base ? null : f.bn_pct180, gv), f.bn_at_base ? "펀딩 기본값(0.01%)" : `펀딩 분위 ${Math.round((f.bn_pct180 ?? 0) * 100)}% · 바이낸스 예상 ${fr(f.bn)}`,
@@ -4759,7 +4760,7 @@ function renderMarketCtx() {
       + ["ZF", "ZN"].map((k) => `<span class="fr-i" title="${escapeHtml(rt(k))}"><span class="fr-k">${TREASURY_NM[k]}</span>${spark(k, rw, RH)}</span>`).join("")
       + `<span class="mc-spk">${macroSpikeChips(chip)}</span>`);
     el("fpRates") && (el("fpRates").hidden = false);
-  } else { htmlB.push(wallHtml0 + fcHtml); if (el("fpRates")) { el("fpRates").hidden = true; el("fpRates").innerHTML = ""; } }
+  } else { htmlB.push(wallHtml0 + fcHtml); ratesOff(); }
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)
   htmlB = htmlB.join("");
   // 2026-09-30 ⑤ 다음 24시간은 좁은 칸(mc-cmp)이면 풋프린트 차트 **아래 전폭**(#mcWhen, 사용자 지시) -- 아니면 판 넷 아래 전폭 그대로.
@@ -7112,8 +7113,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   10-16 리뷰: 묵은 박스(3분↑)는 안 그림 · 화면 밖 경계도 꼬리표(↑↓) · 휴대폰(꼬리표 칸 없음)은 선 오른쪽 끝에 짧은 글자.
   // 2026-10-17 펜 메모 «오른쪽 프로파일의 호가창 데이터(벽 꼬리표) 대신 박스 유지 -- 라인만, 배포본처럼 라인에 가격·확률»: ETH 는 호가벽 꼬리표 대신
   //   30분·1시간·4시간 박스 경계선 + «가격 · 30분 6%»(아래 boxColG). 호가 띠 막대는 그대로. SOL·XRP 는 박스 모델이 없어 벽 꼬리표 그대로. 벽 수량은 ④ 판에 있다.
-  const boxCol = !!(BOOK_W && isSnapshotChart && footprint && activeSnapshotAsset === "eth");
   const bxAll = BOX_ON_CHART && isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestBoxHold && latestBoxHold.ok ? latestBoxHold : null;
+  const boxCol = !!(BOOK_W && bxAll && Date.now() - bxAll.asof_ms <= BOX_STALE_MS);   // 10-17 리뷰: 박스가 없거나 묵으면 벽 꼬리표를 그대로(빈 띠 방지)
   const bx1 = bxAll && Date.now() - bxAll.asof_ms <= BOX_STALE_MS ? bxAll.scales["1h"] : null;
   if (bx1 && bx1.ok) {
     const g = document.createElementNS(NS, "g"), p = Math.round(bx1.p * 100), [tone] = boxState(bxAll, bx1);
@@ -7121,7 +7122,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     g.setAttribute("pointer-events", "none");
     for (const [v, side] of [[bx1.up, "위"], [bx1.dn, "아래"]]) {
       const y = yAt(v), title = `1시간 박스 ${side} ${v.toFixed(1)} -- 다음 1시간 안 벗어날 확률 ${p}%(평소 ${Math.round(bx1.base * 100)}%) · 방향 아님`;
-      if (gutOn && !boxCol) fpNotes.push({ val: v, label: `1h 박스 ${p}%`, color: col, title });   // 10-17 호가 띠 위 박스 경계선과 중복 -- 화면 밖이어도 꼬리표 칸이 위·아래 끝에 쌓는다(max pain 과 같다)
+      if (gutOn && (!boxCol || y < mt || y > plotBottom)) fpNotes.push({ val: v, label: `1h 박스 ${p}%`, color: col, title });   // 10-17 호가 띠 위 박스 경계선과 중복 -- 화면 밖이어도 꼬리표 칸이 위·아래 끝에 쌓는다(max pain 과 같다)
       if (y < mt || y > plotBottom) continue;
       const ln = document.createElementNS(NS, "line");
       Object.entries({ x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--text)", "stroke-opacity": 0.4, "stroke-dasharray": "7 5" }).forEach(([k, x]) => ln.setAttribute(k, x));
@@ -7756,10 +7757,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-10-17 박스 경계선(호가벽 꼬리표 자리, 같은 문법): 호가 띠 위에 위·아래 두 선 + «2,466.3 · 30분 6%» -- 확률 = 다음 그 시간 동안 이 박스 안에 머물 확률.
   //   주황 = «깨질 쪽»(학습 예측 하위 20%) 또는 이미 벗어남 · 굵기 30분 < 1시간 < 4시간 · 묵은 값(3분↑)은 안 그림 · 화면 밖은 안 적음 · 휴대폰은 선만.
   let boxColG = null;
-  if (boxCol && bxAll && Date.now() - bxAll.asof_ms <= BOX_STALE_MS) {
+  if (boxCol) {
     const g = document.createElementNS(NS, "g"), bx0 = w - mr - BOOK_W, bx1 = w - mr, halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
     const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); };
     g.setAttribute("pointer-events", "none");
+    const labs = [];   // 10-17 리뷰: 30분·1시간 경계가 같거나 가까우면(1시간 고저가 최근 30분 안, 실측 24%) 글자가 겹친다 -- 같은 쪽 12px 안은 한 줄로
     Object.keys(BOX_NM).forEach((k, i) => {
       const sc = bxAll.scales[k];
       if (!sc || !sc.ok) return;
@@ -7768,11 +7770,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         const y = yAt(v);
         if (y < mt || y > plotBottom) return;
         add("line", { x1: bx0, x2: bx1, y1: y, y2: y, stroke: col, "stroke-opacity": 0.85, "stroke-width": 1 + 0.5 * i, "stroke-dasharray": "5 3" });
-        if (mobileChart) return;
-        add("text", { x: bx1 - 3, y: y + (dir > 0 ? -3 : 11), "text-anchor": "end", "font-size": 10.5, "font-family": "var(--font-mono)", "font-weight": 800, fill: col, class: "far-lbl", ...halo },
-            `${v.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} · ${BOX_NM[k]} ${p}%`);
+        const near = labs.find((l) => l.dir === dir && Math.abs(l.y - y) < 12);
+        if (near) { near.txt += ` · ${BOX_NM[k]} ${p}%`; if (col === "var(--warn)") near.col = col; }
+        else labs.push({ dir, y, col, txt: `${v.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} · ${BOX_NM[k]} ${p}%` });
       });
     });
+    if (!mobileChart) labs.forEach((l) => add("text", { x: bx1 - 3, y: l.y + (l.dir > 0 ? -3 : 11), "text-anchor": "end", "font-size": 10.5, "font-family": "var(--font-mono)", "font-weight": 800, fill: l.col, class: "far-lbl", ...halo }, l.txt));
     boxColG = g;
   }
   // 네 막대 계기 자리(그림과 호버가 같이 쓴다). 데스크톱 = 기둥 머리(체결 기둥 왼쪽 끝 ~ 오른쪽 여백), 모바일 = 풋프린트 위 한 줄.
@@ -8117,7 +8120,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       g.setAttribute("x", x); g.setAttribute("y", y);
       g.setAttribute("width", wid); g.setAttribute("height", hgt);
       svg.appendChild(g);
-      if (!hit) { draw(g); slotState.key = key; }
+      if (!hit) { g.replaceChildren(); draw(g); slotState.key = key; }   // 10-17: 키가 바뀌어 다시 그릴 때 옛 그림을 비운다(범례는 스스로 안 비워 폭·코인 바꿀 때마다 쌓였다 -- 중복 id)
       return g;
     };
     // 2026-09-19 히트맵도 같은 캐시를 쓴다 -- 래스터는 3초마다 새 열이 오는데 캔들 전체
