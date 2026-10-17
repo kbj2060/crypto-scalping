@@ -1278,8 +1278,20 @@ function renderOpsStatus(payload) {
         <small>${ageText}</small>
       </div>
     </article>`;
-  }).join(""));
+  }).join("") + opsOkToggleHtml(checks.filter((c) => opsTone(c.status) === "good").length));
 }
+// 2026-10-17 휴대폰(≤720)만 보이는 «정상 N개 보기» -- 정상 줄은 CSS 가 접고, 펼침은 목록의 show-ok 클래스(30초 재그리기에도 유지)
+function opsOkToggleHtml(n) {
+  const open = !!el("opsHealthList")?.classList.contains("show-ok");
+  return n ? `<button type="button" class="ops-ok-toggle" aria-expanded="${open}">정상 ${n}개 ${open ? "접기" : "보기"}</button>` : "";
+}
+document.addEventListener("click", (e) => {
+  const b = e.target instanceof Element ? e.target.closest(".ops-ok-toggle") : null;
+  if (!b) return;
+  const open = b.parentElement.classList.toggle("show-ok");
+  b.setAttribute("aria-expanded", String(open));
+  b.textContent = b.textContent.replace(/보기|접기/, open ? "접기" : "보기");
+});
 
 // 잔고가 «어느 자산 지갑»의 것인지, 그리고 화면이 안 쓰는 지갑에 돈이 남아 있는지.
 // 🔴단일자산 담보 모드에서 최상위 합계는 USDT 전용이라, 서버가 수동 주문 심볼의 담보 자산
@@ -4371,7 +4383,7 @@ const mcGfx = {
       return `<g><title>${mid > 0 ? `현재가에서 ${pf(lo)}까지 매수호가 ${kq(b[i])} · ${pf(hi)}까지 매도호가 ${kq(a[i])} (±${bp}bp)` : `±${bp}bp`}</title>`
         + `<rect x="${(c - gap - bw).toFixed(1)}" y="${y}" width="${bw.toFixed(1)}" height="${bh}" rx="2" fill="var(--good)" opacity=".75"/><rect x="${c + gap}" y="${y}" width="${aw.toFixed(1)}" height="${bh}" rx="2" fill="var(--bad)" opacity=".75"/>`
         + `<text x="${(c - gap - 4 - bw).toFixed(1)}" y="${ty}" font-size="${fs}" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + gap + 4 + aw).toFixed(1)}" y="${ty}" font-size="${fs}" fill="var(--text)">${kq(a[i])}</text>`
-        + (mid > 0 ? `<text x="0" y="${ty}" font-size="${fs}" fill="var(--good)">${pf(lo)}</text><text x="${w}" y="${ty}" font-size="${fs}" fill="var(--bad)" text-anchor="end">${pf(hi)}</text>`
+        + (mid > 0 ? `<text x="0" y="${ty}" font-size="${fs}" fill="var(--good)">${pf(lo)}</text><text x="${w - 1}" y="${ty}" font-size="${fs}" fill="var(--bad)" text-anchor="end">${pf(hi)}</text>`
           : `<text x="${c}" y="${ty}" font-size="${fs}" fill="var(--muted)" text-anchor="middle">±${bp}</text>`)
         + `</g>`;
     }).join("") + `</svg>`;
