@@ -7,7 +7,7 @@
 /api/box-hold 는 로컬 dashboard/box_hold.py 로 지금 바이낸스 1분봉에서 계산한 값(live)과 «깨질 쪽» 상태(brk: 확률을 평소의 절반으로).
 시안 A = 시장 맥락 판 ⑤ 아래 «박스 유지 확률» 줄만 · B(배포판, 10-16) = A + 풋프린트 가격판에 1시간 박스 두 선(BOX_ON_CHART = true) · A 는 끈 판.
 🔴GET 이 아닌 요청(주문 포함)은 브라우저 안에서 전부 막는다 -- 막힌 요청이 있으면 실패.
-검사(1920·390): 칸 셋(30분·1시간·4시간) · 값 = 응답 확률 · brk 이면 주황 칸(.brk) · 칸 글자 안 넘침 · 가로 스크롤 없음 · JS 오류 0 · B 1920 은 «1h 박스» 꼬리표 둘.
+검사(1920·390): 칸 셋(30분·1시간·4시간) · 값 = 응답 확률 · brk 이면 주황 칸(.brk) · 칸 글자 안 넘침 · 가로 스크롤 없음 · JS 오류 0 · B 1920 은 호가 띠 위 박스 경계선 글자 ≥2(10-17, 화면 안 경계만) · A 는 0.
 """
 import argparse, json, pathlib, sys, urllib.request
 
@@ -19,11 +19,11 @@ URL = "http://127.0.0.1:18787/dashboard/live/"
 PROBE = """() => {
   const sec = [...document.querySelectorAll('#mcBody .mc-sec')].find((s) => s.querySelector('.bx-row'));
   const cells = sec ? [...sec.querySelectorAll('.bx-c')] : [];
-  return { found: !!sec, n: cells.length, hz: cells.map((c) => c.querySelector('.hz').textContent),
-           val: cells.map((c) => (c.querySelector('b').firstChild || {}).textContent), brk: cells.map((c) => c.classList.contains('brk') || c.classList.contains('out')),   // 실시간 가격이 이미 띠 밖이면 «벗어남»이 앞선다
+  return { found: !!sec, n: cells.length, hz: cells.map((c) => c.querySelector('.bx-h b').textContent),   // 10-17 펜 메모: 칸 = 가격 범위 + 범위 막대 + «다음 N 이 안에 머물 확률 X%»
+           val: cells.map((c) => (c.querySelector('.bx-p b') || {}).textContent), brk: cells.map((c) => c.classList.contains('brk') || c.classList.contains('out')),   // 실시간 가격이 이미 띠 밖이면 «벗어남»이 앞선다
            over: cells.some((c) => [...c.children].some((e) => e.scrollWidth > e.clientWidth + 1)),
            hscroll: document.documentElement.scrollWidth > window.innerWidth + 1,
-           tags: [...document.querySelectorAll('svg text')].filter((t) => /^1h 박스/.test(t.textContent)).length,
+           tags: [...document.querySelectorAll('svg text')].filter((t) => /· (30분|1시간|4시간) \\d+%$/.test(t.textContent)).length,   // 10-17 호가 띠 위 박스 경계선 «가격 · 30분 6%»
            rect: sec ? (() => { const r = sec.getBoundingClientRect(); return [r.x, r.y + window.scrollY, r.width, r.height]; })() : null };
 }"""
 
@@ -73,7 +73,7 @@ def run(shot):
                     pr = pg.evaluate(PROBE)
                     want = [f"{round(body['scales'][k]['p'] * 100)}%" for k in ("30m", "1h", "4h")]
                     ok = pr["found"] and pr["n"] == 3 and pr["val"] == want and not pr["over"] and not pr["hscroll"] \
-                        and (all(pr["brk"]) if case == "brk" else True) and (pr["tags"] == 2 if variant == "B" and w == 1920 else True)
+                        and (all(pr["brk"]) if case == "brk" else True) and (pr["tags"] >= 2 if variant == "B" and w == 1920 else pr["tags"] == 0 if variant == "A" else True)
                     print(tag, "OK" if ok else "FAIL", pr)
                     if not ok:
                         fails.append(tag)
