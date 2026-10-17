@@ -31,6 +31,7 @@ def main() -> int:
     sys.modules.setdefault("duckdb", types.ModuleType("duckdb"))  # 조회 경로를 안 타므로 스텁으로 족하다
     spec = importlib.util.spec_from_file_location("dash_srv", ROOT / "dashboard" / "server.py")
     m = importlib.util.module_from_spec(spec)
+    sys.modules["dash_srv"] = m   # server.py 의 @dataclass 가 제 모듈을 sys.modules 에서 찾는다(없으면 로드 실패)
     spec.loader.exec_module(m)
 
     def trip(entry: int, side: str = "LONG", closed: bool = True, **extra) -> dict:
@@ -83,6 +84,10 @@ def main() -> int:
         assert len(after) == 3, f"깨진 줄 때문에 원장을 버렸다: {after}"
         assert record(payload(trip(4000)), after) == 1, "깨진 줄 뒤에도 계속 적을 수 있다"
 
+        # 2026-10-17: 잘린 스트림(truncated_open)은 항등식이 우연히 맞아도 안 적는다 -- 적히면 겹침 가드가 진짜 왕복을 영구히 막는다
+        assert record(payload(trip(5000, pnl_check_bp=0.0095, truncated_open=True)), after) == 0, "잘린 스트림 조각 기록 금지"
+        assert record(payload(trip(5000)), after) == 1, "같은 자리의 진짜 왕복은 그 뒤에 적힌다"
+
     # ── 단건 상한 (2026-09-12) ────────────────────────────────────────────────
     # 왕복이 SIZING_CAP_MIN_TRIPS 미만이면 상한을 **만들지 않는다** -- 3건짜리 중앙값은
     # 표본 하나에 휘둘리고, 그걸로 크기를 자르면 결과선택 편향이다.
@@ -114,7 +119,7 @@ def main() -> int:
             fh.write("{절반만 쓰다 죽은 줄\n")
         assert m.sizing_cap()["trips"] == 11, m.sizing_cap()
 
-    print("통과 13/13 — 왕복 원장 + 단건 상한 계약 유지")
+    print("통과 15/15 — 왕복 원장 + 단건 상한 계약 유지")
     return 0
 
 

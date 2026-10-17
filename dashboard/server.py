@@ -562,6 +562,13 @@ def record_account_trips(payload: dict, seen: dict[str, tuple[str, str, int, int
     for trip in payload.get("trades") or []:
         if not trip.get("closed") or trip_key(trip) in seen:
             continue
+        # 🔴2026-10-17 실계좌 대조: 7일 창이 열린 롱 한가운데서 시작하면 그 (심볼, 측면) 스트림 **전체**의 0 교차가 어긋난다
+        #   (_fold 가 스트림 모든 왕복에 truncated_open 을 단다). 어긋난 조각 중 항등식을 우연히 통과한 것(0.0095bp)이 적혔고,
+        #   창이 평탄해진 뒤 나온 진짜 왕복은 아래 겹침 가드에 막혀 영영 못 들어왔다(10-10 −$27.36 · 10-12 −$3.56, 달력이 거래소보다 +$30.92).
+        #   잘린 스트림은 안 적는다 -- 진짜 왕복은 창 시작이 평탄 구간을 지날 때(청산 뒤 7일 안) 다시 접혀 들어온다.
+        if trip.get("truncated_open"):
+            print(f"account_round_trips: 잘린 체결 스트림이라 건너뜀 {trip_key(trip)}", flush=True)
+            continue
         if overlaps_recorded(trip, seen):
             print(f"account_round_trips: 겹침으로 건너뜀 {trip_key(trip)} "
                   f"(절단된 체결 스트림의 조각으로 보인다)", flush=True)
