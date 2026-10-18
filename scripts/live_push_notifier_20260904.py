@@ -17,7 +17,7 @@
 무엇을 보내는가 (2026-10-05 재배선 — PUSH_KINDS 표가 원본, 알림 센터가 그대로 보여 준다)
 ------------------------------------
 T1 즉시(소리 O)   내 포지션 위험(청산까지 5% 미만 · 명목 6배 초과) · ETH 보유 중 청산 급증.
-T2 즉시(무음)     사전등록 판정일(09:00 KST) · 보유 코인의 «전환 예고».
+T2 즉시(무음)     사전등록 판정일(09:00 KST).
 
 ⚠️ 알림은 **매매 트리거가 아니다.** 문구는 서술형으로 쓴다 — 푸시로 오면 "뭔가 해야 한다"는 압력이
 생기고, 검증되지 않은 신호가 그렇게 사실상의 매매 트리거가 되는 것이 이 기능의 가장 큰 위험이다.
@@ -131,7 +131,9 @@ class Note:
 #   옛 감지기 7종(증거신호 net_score · V자 · 섀도우 · 거래 · 운영 · Hawkes 청산 · 세션)과 다이제스트를 걷어냈다.
 #   켜져 있던 둘(net_score·v_rebound)이 읽던 /api/evidence-signals·/api/v-rebound-signal 이 지워져 404 → 09-24 재시작
 #   이후 발송 0건(구독 2대)이었고, 나머지는 꺼진 채였다. 지금은 근거가 있는 넷만 보낸다:
-#   판정 예정일 · 내 포지션 위험(원장 재현) · 보유 중 청산 급증(H2) · 보유 코인 전환 예고(경보기 정밀도 77.8%).
+#   판정 예정일 · 내 포지션 위험(원장 재현) · 보유 중 청산 급증(H2).
+#   🔴2026-10-18 «보유 코인 전환 예고» 제거 -- 재검증에서 예고가 급증 «뒤»에 켜졌다(켜진 첫 봉 85% 가 30분 안 탐지 이미 발동,
+#   scripts/research_eth_prewarn_lagging_verify_20261018.py). 워커는 RVOL 전용이 됐다.
 # ------------------------------------------------------------------------------------------
 CALENDAR_PATH = REPO_ROOT / "dashboard" / "verdict_calendar.json"
 SENT_LOG_PATH = REPO_ROOT / "data" / "live" / "push_sent_log.jsonl"   # 알림 센터 «최근 보낸 알림»의 원천
@@ -139,14 +141,12 @@ KST = timezone(timedelta(hours=9))
 VERDICT_HOUR_KST = 9                       # = 판정일(UTC) 00시
 LIQ_WARN_PCT, LIQ_REARM_PCT = 5.0, 7.0     # 청산까지 거리 -- 5% 미만으로 들어설 때 한 번, 7% 밖으로 나가면 다시 무장
 EXPO_WARN_X, EXPO_REARM_X = 6.0, 5.0       # 명목 ÷ 순자산 -- 6배 = 명목 상한 보험 기준(avgdown_gate_notional_cap_20261004)
-COINS = ("eth", "sol", "xrp")
 
 # 화면(알림 센터)이 이 표를 그대로 보여 준다 -- 이름·설명이 두 군데서 갈라지지 않게 여기 하나만 둔다.
 PUSH_KINDS = {
     "verdict": {"name": "판정 예정일", "when": "사전등록 판정일 아침 9시(KST)에 한 번"},
     "risk": {"name": "포지션 위험", "when": f"청산까지 {LIQ_WARN_PCT:g}% 미만 · 명목이 순자산의 {EXPO_WARN_X:g}배 초과로 들어설 때 한 번"},
     "burst_hold": {"name": "보유 중 청산 급증", "when": "ETH 보유 중 직전 60초 한쪽 청산이 학습 7일 상위 0.5%를 넘을 때 — 그 순간 시장가로 닫으면 평균 −17bp였다"},
-    "prewarn_hold": {"name": "보유 코인 전환 예고", "when": "보유 중인 코인에 «전환 예고»가 켜질 때 — 30분 안 거래대금·체결속도 급증 확률 상위 10%, 방향은 모른다"},
 }
 ENABLED_DETECTORS = set(PUSH_KINDS)
 
@@ -239,27 +239,9 @@ def detect_burst_hold(mc: dict[str, Any], account: dict[str, Any], state: dict[s
     return notes
 
 
-def detect_prewarn_hold(bo_by_coin: dict[str, dict[str, Any]], account: dict[str, Any],
-                        state: dict[str, Any]) -> list[Note]:
-    """보유 중인 코인의 «전환 예고»(경보기 원시 판정 prewarn.on)가 꺼짐→켜짐일 때 한 번."""
-    prev = state.setdefault("prewarn_on", {})
-    notes: list[Note] = []
-    for coin in held_coins(account):
-        bo = bo_by_coin.get(coin) or {}
-        if not bo.get("available", True) or "prewarn" not in bo:
-            continue                         # 못 읽은 주기는 상태를 안 바꾼다
-        on = bool((bo.get("prewarn") or {}).get("on"))
-        if on and not prev.get(coin):
-            notes.append(Note(f"prewarn:{coin}:{bo.get('timestamp')}", "t2", f"{coin.upper()} 전환 예고 · 보유 중",
-                              "30분 안 거래대금·체결속도가 함께 급증할 확률이 상위 10% — 방향은 말하지 않는다(정밀도 실측 77.8%)",
-                              tag=f"prewarn-{coin}"))
-        prev[coin] = on
-    return notes
-
-
 async def fetch_all(session, base_url: str) -> dict[str, Any]:
     """대시보드 API 를 읽는다(화면과 같은 숫자). 하나가 죽어도 나머지는 산다 -- 실패는 빈 dict.
-    시장 맥락·경보기는 **보유 중인 코인만** 읽는다(안 쓰는 값을 45초마다 덥히지 않는다)."""
+    시장 맥락은 **보유 중인 ETH 만** 읽는다(안 쓰는 값을 45초마다 덥히지 않는다)."""
     async def get(path: str) -> dict[str, Any]:
         try:
             async with session.get(base_url + path) as resp:
@@ -270,8 +252,7 @@ async def fetch_all(session, base_url: str) -> dict[str, Any]:
     account = await get("/api/binance-account")
     held = held_coins(account)
     return {"account": account, "calendar": load_calendar(),
-            "mc_eth": await get("/api/market-context?asset=eth") if "eth" in held else {},
-            "bo": {c: await get(f"/api/breakout-detector?asset={c}") for c in held if c in COINS}}
+            "mc_eth": await get("/api/market-context?asset=eth") if "eth" in held else {}}
 
 
 def collect_notes(data: dict[str, Any], state: dict[str, Any], now: float | None = None) -> list[Note]:
@@ -279,8 +260,7 @@ def collect_notes(data: dict[str, Any], state: dict[str, Any], now: float | None
     acct = data.get("account") or {}
     plan = {"verdict": lambda: detect_verdicts(data.get("calendar") or {}, now),
             "risk": lambda: detect_risk(acct, state, now),
-            "burst_hold": lambda: detect_burst_hold(data.get("mc_eth") or {}, acct, state, now),
-            "prewarn_hold": lambda: detect_prewarn_hold(data.get("bo") or {}, acct, state)}
+            "burst_hold": lambda: detect_burst_hold(data.get("mc_eth") or {}, acct, state, now)}
     return [n for k, fn in plan.items() if k in ENABLED_DETECTORS for n in fn()]
 
 

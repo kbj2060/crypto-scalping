@@ -78,7 +78,7 @@ from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
 #   중립 구간만 쓰면 +2.27bp. 표시 전용이고 매매 트리거가 아니다.
 # 2026-09-09 청산맵 신호 마커: 차트(72봉)와 **같은 타임스탬프 격자**로 증거신호 종수 + 이벤트
 # 트리거를 내보낸다. 신호마다 이력 창이 48봉으로 제각각이라 그대로 얹으면 정렬이 어긋난다.
-from scripts.live_eth_chart_markers_20260909 import compute_chart_markers, compute_prewarn_markers  # noqa: E402
+from scripts.live_eth_chart_markers_20260909 import compute_chart_markers  # noqa: E402
 # taker_delta_z_climax / short_term_return_z evidence-signal chips REPLACED in-place with their
 # TabPFN meta-label models' live probability (2026-08-30, user decision -- unlike V_REBOUND above,
 # these stay in the "증거 신호" row and reuse the klines/compute_signals() this endpoint already
@@ -437,15 +437,7 @@ def chip_score_rows(now: float, asset: str) -> list[dict]:
 
 def chip_score_summary(rows: list[dict]) -> dict[str, Any]:
     """칩별 집계. 표본이 없으면 그 칩 키가 없다(화면은 «기록 중»)."""
-    out: dict[str, Any] = {"days": CHIP_SCORE_DAYS}
-    bo = [r for r in rows if r.get("k") == "bo"]
-    have, det = {int(r["t"]) for r in bo}, {int(r["t"]) for r in bo if r.get("det")}
-    scored = [r for r in bo if int(r["t"]) + 1800 in have]          # 뒤 30분이 다 기록된 봉만(재기동 공백은 «안 맞음»이 아니다)
-    if scored:
-        hit = lambda r: any(int(r["t"]) + 300 * j in det for j in range(1, 7))   # noqa: E731 -- 다음 1~6봉 안 탐지
-        warn = [r for r in scored if r.get("pw")]
-        out["prewarn"] = {"bars": len(scored), "warn": len(warn), "hits": sum(map(hit, warn)),
-                          "base": sum(map(hit, scored)) / len(scored), "since": min(int(r["t"]) for r in scored)}
+    out: dict[str, Any] = {"days": CHIP_SCORE_DAYS}   # 2026-10-18 경보기(bo) 성적 제거 -- 옛 bo 줄이 파일에 남아 있어도 안 읽는다
     burst = [r for r in rows if r.get("k") == "burst"]
     if burst:
         out["burst"] = {"n": len(burst), "rev_mean_bp": sum(r["rev_bp"] for r in burst) / len(burst),
@@ -633,7 +625,7 @@ MACRO_CALENDAR_MAX_AGE_MIN = 90.0          # 달력이라 분 단위 신선도�
 # 2026-09-11 횡보→추세 전환 탐지기 -- 방향은 예측하지 않는다(그 축은 닫혔다). 워커가 채점한다
 # (scripts/live_eth_breakout_detector_worker_20260911.py · supervisor_breakout_detector.sh).
 BREAKOUT_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_breakout_detector_state.json"
-BREAKOUT_ASSETS = ("eth", "sol", "xrp")   # 2026-10-04 워커가 도는 코인(BO_SYMBOL) -- SOL·XRP 는 경보기만 화면에(탐지기 불통과)
+BREAKOUT_ASSETS = ("eth", "sol", "xrp")   # 워커가 도는 코인(BO_SYMBOL) -- 2026-10-18 부터 RVOL 전용
 BREAKOUT_DETECTOR_MAX_AGE_MIN = 15.0       # 5분봉 3개 -- 봉 마감 +20초에 도는 워커다
 
 # 2026-09-15 **E|r| 게이트** -- 「지금 큰 움직임이 예상되는가」만 말한다(1일 지평 · 20자산).
@@ -1999,7 +1991,7 @@ def macro_calendar_payload() -> dict[str, Any]:
 
 
 def breakout_detector_payload(asset: str = "eth") -> dict[str, Any]:
-    """횡보->추세 전환 탐지기 워커 상태(코인별 파일 <coin>_breakout_detector_state.json)."""
+    """코인별 RVOL 워커 상태(<coin>_breakout_detector_state.json · 2026-10-18 전환 예고·탐지 제거)."""
     return worker_payload(BREAKOUT_DETECTOR_STATE_PATH.with_name(f"{asset}_breakout_detector_state.json"), BREAKOUT_DETECTOR_MAX_AGE_MIN,
                           require_ok=True, stamp_available=True,
                           extra_missing={"history": [], "times": []})
@@ -3902,27 +3894,16 @@ def make_app() -> web.Application:
             await asyncio.sleep(MICRO_REF_POLL_SECONDS)
 
     async def chip_score_loop() -> None:
-        """머리 칩 «실전 성적» 기록기(2026-10-05). 화면이 안 열려 있어도 돈다 -- 칩 값은 미시 루프·상황 계산·경보기 워커가
+        """머리 칩 «실전 성적» 기록기(2026-10-05). 화면이 안 열려 있어도 돈다 -- 칩 값은 미시 루프·상황 계산이
         이미 들고 있는 것을 10초마다 **읽기만** 한다(계산 0). 결과가 정해진 줄만 월별 파일에 붙인다.
         ponytail: 대기 중(15분 되돌림)은 메모리에만 -- 재기동하면 그 몇 건은 버린다. 칩 하나당 하루 수백 건이라 무시할 양."""
-        last_bo: dict[str, int] = {}
         burst_on: dict[str, bool] = {}
         pend_burst: list[dict] = []
         while True:
             await asyncio.sleep(10)
             now, rows = time.time(), []
             try:
-                for asset in cctx:   # 2026-10-05 «30분 닿음» 칩 제거로 그 기록도 뺐다(옛 reach 줄은 집계에서 무시)
-                    if asset in BREAKOUT_ASSETS:
-                        try:
-                            st = load_json(BREAKOUT_DETECTOR_STATE_PATH.with_name(f"{asset}_breakout_detector_state.json")) or {}
-                        except (OSError, ValueError):
-                            st = {}
-                        bt = int(pd.Timestamp(st["timestamp"]).timestamp()) if st.get("ok") and st.get("timestamp") and "prewarn" in st else None
-                        if bt and last_bo.get(asset) != bt:
-                            last_bo[asset] = bt
-                            rows.append({"k": "bo", "a": asset, "t": bt, "pw": bool(st["prewarn"].get("on")),
-                                         "det": bool((st.get("detect") or {}).get("on"))})
+                # 2026-10-05 «30분 닿음» · 2026-10-18 경보기(전환 예고·탐지) 기록 제거 -- 옛 reach·bo 줄은 집계에서 무시
                 if "eth" in cctx:       # 청산 급증 배지는 ETH 만(근거가 ETH 뿐)
                     mp = cctx["eth"].micro_state["payload"]
                     mp = mp if mp.get("available") else {}
@@ -4800,21 +4781,11 @@ def make_app() -> web.Application:
           아티팩트(1.08GB)를 60초마다 로드해 to_thread 풀을 고갈시켰고 증거신호를 포함한 모든
           계산 엔드포인트가 멈췄다. 자세한 실측은 live_eth_chart_markers_20260909.py 주석."""
         asset = (asset or "eth").lower()
-        if asset in BREAKOUT_ASSETS and asset != "eth":   # 2026-10-04 SOL·XRP = 경보기 구간만(그 코인 검정 통과분)
-            try:
-                return compute_prewarn_markers(asset, await load_breakout_detector(asset))
-            except Exception as exc:  # noqa: BLE001 -- 차트 렌더를 깨지 않는다
-                return {"available": False, "asset": asset, "error": f"{type(exc).__name__}: {exc}"[:160]}
-        if asset != "eth":
+        if asset != "eth":     # 2026-10-18 SOL·XRP 예고 구간 제거(전환 예고·탐지 내림) -- 다른 코인은 unsupported
             return compute_chart_markers(asset)
-        # 실패해도 마커 전체를 죽이지 않는다: 그 줄만 비고 나머지는 그려진다.
-        try:
-            bo = await load_breakout_detector()
-        except Exception:  # noqa: BLE001
-            bo = None
         return await swr_cached(
             "chart_markers", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_chart_markers, "eth", None, None, bo, None),
+            lambda: asyncio.to_thread(compute_chart_markers, "eth", None, None, None, None),
             max_stale=STALE_GRACE_SECONDS,
         )
 

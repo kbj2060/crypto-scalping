@@ -88,67 +88,6 @@ def _merge_history(out: dict[str, dict], payload: dict | None, kind: str, label:
         out[key].setdefault("events", []).append(ev)
 
 
-def _span_from_points(times: list[str], points: list[tuple[str, bool]]) -> list[int]:
-    """(시각, 활성) 점들을 차트 격자의 봉별 0/1 로 접는다. 한 봉에 여러 점이 들어오면 OR.
-
-    왜 점이 아니라 구간인가: 추세 전환(지속 N분)과 변동폭 게이트(24시간 창)는 **상태**다.
-    삼각형으로 찍으면 «언제부터 언제까지»가 사라지는데 그게 이 둘의 정보 대부분이다."""
-    out = [0] * len(times)
-    if not times:
-        return out
-    step = pd.Timedelta(minutes=5)
-    t0 = pd.Timestamp(times[0])
-    for ts_, on in points:
-        if not on:
-            continue
-        try:
-            t = pd.Timestamp(str(ts_).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            continue
-        t = (t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC"))
-        # 봉 격자에 내림 정렬한다 -- 워커 주기가 5분 격자와 안 맞기 때문이다(게이트는 60초).
-        k = int((t - t0) // step)
-        if 0 <= k < len(times):
-            out[k] = 1
-    return out
-
-
-def _value_grid(times: list[str], points: list[tuple[str, Any]]) -> list[Any]:
-    """(시각, 값) 을 차트 격자에 얹는다. 값이 없는 봉은 None -- «0» 과 «모름» 을 구분한다."""
-    out: list[Any] = [None] * len(times)
-    if not times:
-        return out
-    step = pd.Timedelta(minutes=5)
-    t0 = pd.Timestamp(times[0])
-    for ts_, v in points:
-        if v is None:
-            continue
-        try:
-            t = pd.Timestamp(str(ts_).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            continue
-        t = (t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC"))
-        k = int((t - t0) // step)
-        if 0 <= k < len(times):
-            out[k] = v
-    return out
-
-
-def _history_points(payload: dict | None, active_tones=("bad", "warn")) -> list[tuple[str, bool]]:
-    """(history, times) 를 가진 페이로드를 점 목록으로. 모양이 다르면 조용히 빈 목록."""
-    if not isinstance(payload, dict):
-        return []
-    hist, times = payload.get("history") or [], payload.get("times") or []
-    if hist and isinstance(hist[0], dict):          # 게이트 이력: [{ts, eth_fired, ...}, ...]
-        # 🔴**ETH 자신의 발동만** 센다. n_fired(20자산 합계)로 칠하면 다른 자산이 터진 구간이
-        #   ETH 차트에 색으로 남는다. eth_fired 가 없는 옛 이력은 건너뛴다(모르면 안 칠한다).
-        return [(h.get("ts"), bool(h.get("eth_fired")))
-                for h in hist if isinstance(h, dict) and "eth_fired" in h]
-    if not times or len(times) != len(hist):
-        return []
-    return [(t, str(v) in active_tones) for v, t in zip(hist, times)]
-
-
 def _onset_only(grid: dict[str, dict], times: list[str]) -> list[dict]:
     """연속 봉으로 이어지는 같은 (kind, side) 이벤트는 **첫 봉만** 남긴다.
 
@@ -174,7 +113,7 @@ def _onset_only(grid: dict[str, dict], times: list[str]) -> list[dict]:
 
 
 def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
-                          extreme: dict | None = None, breakout: dict | None = None,
+                          extreme: dict | None = None, breakout: dict | None = None,  # breakout: 2026-10-18 부터 안 씀(호출 파리티)
                           evr_gate: dict | None = None) -> dict[str, Any]:
     # 2026-09-21 V자·극점·E|r| 게이트가 대시보드에서 내려갔다 -- 인자는 호출 파리티를 위해
     # 남기지만 **항상 None 이다**(server.py 가 그렇게 부른다). 되살리려면 그 워커를 켜고
@@ -224,25 +163,8 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         #     측면은 그대로다. 등급을 되살리려면 워커가 등급 이력을 내보내야 한다(다른 세션 파일).
         # 2026-09-21: 극점·V자 레인 제거(신호 자체가 내려갔다).
 
-        # ── 방향 없는 신호는 **구간**이다 (2026-09-16) ────────────────────────────────
-        # 추세 전환·변동폭 게이트는 천장/바닥을 말하지 않는다(각 스크립트에 명시). 방향 레인에
-        # 넣지 않고 0/1 구간으로 따로 내보낸다 -- 화면에서 초록/빨강을 쓰지 않으려는 것이다.
-        # 탐지기 이력은 이미 **지속 구간**이다(_sustain 으로 만든다) -- 발동 봉 하나가 아니라
-        # 그 신호가 살아 있는 창 전체가 bad 다. 구간 그림과 의미가 정확히 맞는다.
-        # 예고도 자기 이력을 갖고 있다(prewarn.history, warn/neutral · 같은 times 격자).
-        pre = (breakout or {}).get("prewarn") or {}
-        spans = {"trend_detect": _span_from_points(times, _history_points(breakout)),
-                 "trend_prewarn": _span_from_points(times, _history_points(pre, ("warn",)))}
-        # 게이트만 이력이 이제 막 쌓이기 시작한다(2026-09-16 워커에 추가). 그 전 구간은 «발동
-        # 안 함»이 아니라 **모름**이라, 이력이 아직 없으면 지금 상태만 마지막 봉에 찍고 그
-        # 사실을 spans_partial 로 밝힌다.
-        # 툴팁이 그 봉의 **숫자**로 답할 수 있게 값 격자도 같이 보낸다(0/1 만으로는 «왜»를
-        # 말할 수 없다). 값이 없는 봉은 None 이다 -- 0 으로 채우면 «발동 0배»처럼 읽힌다.
-        pre_times = pre.get("times") or []
-        span_meta = {
-            "trend_prewarn_p": _value_grid(times, list(zip(pre_times, pre.get("probas") or []))),
-            "trend_prewarn_thr": _value_grid(times, list(zip(pre_times, pre.get("thresholds") or []))),
-        }
+        # 2026-10-18 전환 예고·탐지 구간 제거(사용자 지시, 워커는 RVOL 전용) -- spans/span_meta 는 빈 칸으로 둔다(화면 계약 유지).
+        spans, span_meta = {}, {}
         return {
             "spans": spans, "span_meta": span_meta,
             "spans_partial": [],
@@ -258,31 +180,8 @@ def compute_chart_markers(asset: str = "eth", v_rebound: dict | None = None,
         return {"available": False, "asset": asset, "error": f"{type(e).__name__}: {e}"}
 
 
-def compute_prewarn_markers(asset: str, breakout: dict | None) -> dict[str, Any]:
-    """2026-10-04 SOL·XRP: «전환 예고»(경보기) 구간만. 그 코인 검정에서 경보기는 통과·탐지기는 불통과라
-    (docs/experiments/eth_only_signals_solxrp_20261004.md) 탐지 구간·증거 삼각형은 싣지 않는다. 격자 = 경보기 마지막 봉까지 CHART_BARS 봉."""
-    pre = (breakout or {}).get("prewarn") or {}
-    pt = pre.get("times") or []
-    if not (breakout and breakout.get("available", True) and pt):
-        return {"available": False, "asset": asset, "error": "breakout_missing"}
-    end = pd.Timestamp(pt[-1])
-    times = [(end - pd.Timedelta(minutes=5 * k)).isoformat() for k in range(CHART_BARS - 1, -1, -1)]
-    return {"spans": {"trend_prewarn": _span_from_points(times, _history_points(pre, ("warn",)))},
-            "span_meta": {"trend_prewarn_p": _value_grid(times, list(zip(pt, pre.get("probas") or []))),
-                          "trend_prewarn_thr": _value_grid(times, list(zip(pt, pre.get("thresholds") or [])))},
-            "spans_partial": [], "available": True, "asset": asset, "bars": CHART_BARS,
-            "latest_ts_utc": times[-1], "times": times, "events": []}
-
-
 if __name__ == "__main__":
     import json
-    end = pd.Timestamp("2026-10-04T10:30:00+00:00")
-    pre = {"times": [(end - pd.Timedelta(minutes=5 * k)).isoformat() for k in (2, 1, 0)],
-           "history": ["neutral", "warn", "warn"], "probas": [.1, .3, .4], "thresholds": [.2, .2, .2]}
-    m = compute_prewarn_markers("sol", {"prewarn": pre})
-    assert m["available"] and m["times"][-1] == pre["times"][-1] and len(m["times"]) == CHART_BARS
-    assert m["spans"]["trend_prewarn"][-3:] == [0, 1, 1] and m["span_meta"]["trend_prewarn_p"][-1] == .4, m["spans"]["trend_prewarn"][-3:]
-    print("prewarn markers ok")
     d = compute_chart_markers("eth")
     print(json.dumps({k: v for k, v in d.items() if k not in ("times", "ev_bottom_names",
                                                               "ev_top_names")},
