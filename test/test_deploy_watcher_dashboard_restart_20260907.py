@@ -72,6 +72,10 @@ class DashboardRestartDecisionTests(unittest.TestCase):
             with self.subTest(mod=mod):
                 self.assertEqual(1, self._restart_decision(f"scripts/{mod}.py"))
 
+    def test_lazy_scripts_import_restarts(self) -> None:
+        """2026-10-20: 함수 안(들여쓴) `from scripts.X import` 도 재시작을 건다 -- server.py 가 sizing_vol_model 을 지연 import 한다."""
+        self.assertEqual(1, self._restart_decision("scripts/live_eth_sizing_vol_model_20260912.py"))
+
     def test_dashboard_path_still_restarts(self) -> None:
         self.assertEqual(1, self._restart_decision("dashboard/live/app.js"))
 

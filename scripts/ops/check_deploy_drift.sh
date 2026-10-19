@@ -52,7 +52,7 @@ git status --short | grep -E "^( M|M |\?\?)" \
   | grep -E "dashboard/|scripts/live_|live/execution/|trading_bot" \
   | grep -vE "\.bak|\.backup|_backup_|\.orig$|\.pre_|\.save$|~$" || echo "(none)"
 echo "--- CONFLICT_MARKERS ---"
-grep -rl "<<<<<<< \|>>>>>>> Stashed\|Updated upstream" dashboard/live/ scripts/live_*.py live/execution/ 2>/dev/null || echo "(none)"
+grep -rl "<<<<<<< \|>>>>>>> Stashed\|Updated upstream" dashboard/live/ dashboard/*.py scripts/live_*.py live/execution/ 2>/dev/null || echo "(none)"
 echo "--- UNTRACKED_SCRIPTS ---"
 # 2026-09-04: 워처는 merge-first 라 미추적 파일 자체는 배포를 막지 않지만, **같은 경로를 커밋하면** 머지가
 # 거부되고 폴백 stash 의 pop 이 "already exists" 로 실패한다. 개수와 앞 5개를 알려 커밋을 재촉한다.

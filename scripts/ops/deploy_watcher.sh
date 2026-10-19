@@ -240,8 +240,10 @@ affects '^live/execution/' && dashboard_changed=1
 dashboard_imports_changed() {
   local mods pat hits
   # 2026-10-19: server.py 만이 아니라 dashboard/*.py 전부 -- 수집기 공장(coin_flow.py)·계좌·주문(orders.py)이 옮겨 가며 그 import 도 따라갔다.
-  mods="$(grep -hoE '^(from|import) scripts\.[A-Za-z0-9_]+' "$ROOT"/dashboard/*.py 2>/dev/null \
-          | sed -E 's/^(from|import) scripts\.//' | sort -u | paste -sd'|' -)"
+  # 2026-10-20: 들여쓴 지연 import(함수 안 `from scripts.X import ...`)도 센다 -- 안 그러면 sizing_vol_model·
+  #   orderflow_raster 처럼 함수 안에서만 부르는 모듈을 고쳐도 대시보드가 옛 코드를 든 채 돈다.
+  mods="$(grep -hoE '^[[:space:]]*(from|import) scripts\.[A-Za-z0-9_]+' "$ROOT"/dashboard/*.py 2>/dev/null \
+          | sed -E 's/^[[:space:]]*(from|import) scripts\.//' | sort -u | paste -sd'|' -)"
   [[ -n "$mods" ]] || return 1
   pat="^scripts/(${mods})\.py$"
   hits="$(echo "$changed_files" | grep -E "$pat" | paste -sd' ' -)"
