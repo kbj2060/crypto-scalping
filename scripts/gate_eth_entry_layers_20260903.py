@@ -40,7 +40,7 @@ gate_config.json (경로는 저장소 루트 기준):
   features      {"cols": [...] | "cols_from_model_card": "model_card.json",
                  "stacked": [{"col": "x_pct", "source_col": "x_pct_oof_source"}], "frame": "bar_features.parquet"}
   scoring_parity{"backtest": {"module":..., "fn":..., "style": "from_fill_bar"|"post_fill"},
-                 "live": {"adapter": "eth_limit_fade_shadow_v1"} | {"module":..., "fn":...},
+                 "live": {"module":..., "fn":...},
                  "n_paths": 300, "horizon_bars": 24}
   controls      {"report": "controls.json", "dsr": 0.99, "pbo": 0.04, "extra_passed": [...]}
   selection     {"keep_frac": 0.2037, "labels": ["y", "@recon"]}     # @recon = L2가 쓴 1분 재구성 라벨
@@ -61,7 +61,7 @@ import re
 import sys
 import time
 import warnings
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 warnings.filterwarnings("ignore")
@@ -380,59 +380,13 @@ def gate_L2(cfg, kl, kl1=None, out_dir=None, **_):
 
 
 # ----------------------------------------------------------------------------- L2P 채점 파리티
-def _live_eth_limit_fade_shadow_v1(side, e, a, H, L, C, post_hl, ex):
-    """섀도우 러너 `manage()`를 합성 경로 하나에 대해 돌려 raw move를 돌려준다(비용 0·명목 1)."""
-    mod = importlib.import_module("live_eth_entry_limit_fade_shadow_runner_20260903")
-    mod.log = lambda m: None
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    p = {"sd": int(side), "atr_abs": a * e, "atr_pct": a, "entry": e, "limit": e,
-         "stop": e - side * ex["sl_atr"] * a * e, "best": e, "armed": False, "bars_held": 0,
-         "horizon": len(C) - 1, "cost_roundtrip": 0.0, "notional": 1.0,
-         "entry_bar_utc": base.isoformat(), "placed_bar_utc": (base - timedelta(minutes=5)).isoformat(),
-         "signal": "synthetic", "side": "bottom" if side > 0 else "top", "arm": 1,
-         "post_fill_high": float(post_hl[0]), "post_fill_low": float(post_hl[1])}
-    s = {"positions": [p], "ledger": [], "skipped": 0}
-    bars = [{"timestamp_utc": (base + timedelta(minutes=5 * k)).isoformat(),
-             "open": float(C[k]), "high": float(H[k]), "low": float(L[k]), "close": float(C[k])}
-            for k in range(1, len(C))]
-    mod.manage(s, bars, {"exit": {"sl_atr": ex["sl_atr"], "arm_atr": ex["arm_atr"], "trail_atr": ex["trail_atr"]}})
-    if not s["ledger"]:
-        raise RuntimeError("라이브 채점기가 포지션을 닫지 않았다")
-    return s["ledger"][-1]["pnl_bp"] / 1e4
-
-
-def _live_eth_v_rebound_econ_shadow(side, e, a, H, L, C, post_hl, ex):
-    """경제라벨 섀도우 러너 `manage()`를 합성 경로 하나에 돌려 raw move를 돌려준다(비용 되돌림, 명목 1).
-    시장가(다음 봉 시가) 진입이라 체결 봉 전체가 우리 것 -> 백테스트 style은 from_fill_bar 여야 한다.
-    창 끝까지 안 닫히면 sim_exit과 같이 마지막 종가 청산으로 친다."""
-    mod = importlib.import_module("live_eth_v_rebound_econ_shadow_runner_20260902")
-    mod.log = lambda m: None
-    mod.BRACKET = {"sl_atr": float(ex["sl_atr"]), "arm_atr": float(ex["arm_atr"]), "trail_atr": float(ex["trail_atr"])}
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    atr_abs = float(a) * float(e); sgn = 1.0 if side > 0 else -1.0
-    p = {"entry_utc": base.isoformat(), "side": "long" if side > 0 else "short", "entry": float(e), "atr": atr_abs,
-         "stop": float(e) - sgn * float(ex["sl_atr"]) * atr_abs, "best": float(e), "armed": False, "bars_held": 0,
-         "last_bar_utc": None, "proba": 1.0, "opened_utc": base.isoformat()}
-    s = {"positions": [p], "ledger": [], "consec_loss": 0}
-    bars = [{"timestamp_utc": (base + timedelta(minutes=5 * k)).isoformat(),
-             "open": float(C[k]), "high": float(H[k]), "low": float(L[k]), "close": float(C[k])} for k in range(len(C))]
-    mod.manage(s, bars)
-    if s["ledger"]:
-        return (s["ledger"][-1]["pnl_bp"] + float(mod.COST_BP)) / 1e4
-    return sgn * (float(C[-1]) - float(e)) / float(e)
-
-
-LIVE_ADAPTERS = {"eth_limit_fade_shadow_v1": _live_eth_limit_fade_shadow_v1,
-                 "eth_v_rebound_econ_shadow": _live_eth_v_rebound_econ_shadow}
-
-
 def gate_L2P(cfg, seed=0, **_):
     P = cfg.get("scoring_parity")
     if not P:
         return _res("L2P", "SKIP", "scoring_parity 미선언 -- 라이브/섀도우 채점기가 생기면 반드시 건다")
     bt = _import(P["backtest"]["module"], P["backtest"]["fn"]); style = P["backtest"].get("style", "post_fill")
     lv = P["live"]
-    live = LIVE_ADAPTERS[lv["adapter"]] if "adapter" in lv else _import(lv["module"], lv["fn"])
+    live = _import(lv["module"], lv["fn"])
     ex = cfg["label"]["exit"]; n_paths = int(P.get("n_paths", 300)); hz = int(P.get("horizon_bars", 24))
     r = np.random.default_rng(int(seed)); diffs = []
     for _ in range(n_paths):
