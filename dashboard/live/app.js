@@ -79,15 +79,14 @@ let footprintLastFetchAt = 0;
 // 구간을 말하면 읽는 사람이 속는다 -- 그래서 토글도 하나다.
 // 서버 링은 24시간(288봉)이라 4h 도 이미 쌓여 있는 데이터다. 더 긴 창을 안 주는 건 값이
 // 없어서가 아니라, 48봉이면 풋프린트 셀이 25px 라 숫자가 이미 안 들어가서다.
-const CHART_WINDOW_BARS = [12, 24, 48, 144];   // 5분봉 기준 1h · 2h · 4h · 12h
+// 2026-10-20 사용자 «1h 만 남기고 휠로 축소하면 체결 박스 없이 일반 캔들, 확대하거나 1h 를 누르면 풋프린트»:
+//   버튼은 1h(+1d 일봉) 하나 · 이 배열은 휠 단계(1h → 2h → 3h → 4h → 6h → 8h → 12h). 1h 만 풋프린트, 넓히면 캔들(fpZoomed).
+//   새로 열면 늘 1h(줌은 저장 안 함 -- 열자마자 캔들이면 «풋프린트가 사라졌다»로 읽힌다).
+const CHART_WINDOW_BARS = [12, 24, 36, 48, 72, 96, 144];   // 5분봉 기준
 // 🔴12h(144봉)에서는 봉이 ~9px 라 셀 숫자가 안 들어간다 -- showQty(half >= 18)가 꺼져
 //   색 농담만 남는 «시간축 볼륨 프로파일»이 된다. 4h 에서도 이미 그렇다(봉 26px).
-let chartWindowBars = (() => {
-  try {
-    const saved = Number(localStorage.getItem("chartWindowBars"));
-    return CHART_WINDOW_BARS.includes(saved) ? saved : CHART_WINDOW_BARS[0];
-  } catch (e) { return CHART_WINDOW_BARS[0]; }
-})();
+let chartWindowBars = CHART_WINDOW_BARS[0];
+const fpZoomed = () => chartWindowBars > CHART_WINDOW_BARS[0];   // 넓힌 창 = 체결 박스 없이 캔들
 const API_FOOTPRINT_URL = "/api/footprint";
 // 🔴여기 있던 "차트 자체가 5초마다 다시 그려진다"는 **틀린 주석**이었다(실제는 20초였다).
 // 서버는 WS 로 계속 누적하므로 **이 폴링 간격이 곧 셀의 지연**이다.
@@ -717,29 +716,39 @@ function setupChartModeTabs() {
 }
 
 
+// 창 바꾸기(1h 버튼 · 휠 줌 공용). 오른쪽 끝(chartPanEnd)은 그대로 -- 넓히면 왼쪽(과거)으로 늘어난다.
+function setChartWindow(bars) {
+  if (!CHART_WINDOW_BARS.includes(bars) || bars === chartWindowBars) return;
+  chartWindowBars = bars;
+  renderChartWindowTabs();
+  chartPanForce = true;
+  scheduleSnapshotChartRender();   // 데이터가 오기 전에도 이미 있는 봉으로 바로 넓힌다(누른·굴린 티)
+  // 폴링 간격(0.4초/5초)을 기다리지 않고 바로 받는다 -- 누른 티가 나야 한다.
+  footprintLastFetchAt = 0;
+  flowHeatmapLastFetchAt = 0;
+  // 🔴2026-09-25 청산 이력도 이제 창 폭을 들고 간다 -- 여기 안 넣으면 토글을 눌러도
+  //   다음 폴링까지 옛 폭으로 남는다(위 셋과 같은 이유).
+  liquidation5mLastFetchAt = 0;
+  refreshFootprint();
+  refreshFlowHeatmap();
+  refreshLiquidation5mSignal();
+  refreshGex();
+}
+const chartZoomBy = (n) => {   // n>0 = 넓게(축소) · 끝에 닿으면 false(휠을 페이지에 돌려준다)
+  const i = CHART_WINDOW_BARS.indexOf(chartWindowBars), j = Math.max(0, Math.min(CHART_WINDOW_BARS.length - 1, (i < 0 ? 0 : i) + n));
+  if (j === i) return false;
+  setChartWindow(CHART_WINDOW_BARS[j]);
+  return true;
+};
+
 function setupChartWindowTabs() {
   document.querySelectorAll("#chartWindowTabs .asset-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const bars = Number(btn.dataset.bars);
-      if (!CHART_WINDOW_BARS.includes(bars) || bars === chartWindowBars) return;
-      chartWindowBars = bars;
-      try { localStorage.setItem("chartWindowBars", String(bars)); } catch (e) { /* 저장 못 해도 동작은 한다 */ }
-      renderChartWindowTabs();
-      // 폴링 간격(0.4초/5초)을 기다리지 않고 바로 받는다 -- 누른 티가 나야 한다.
-      footprintLastFetchAt = 0;
-      flowHeatmapLastFetchAt = 0;
-      // 🔴2026-09-25 청산 이력도 이제 창 폭을 들고 간다 -- 여기 안 넣으면 토글을 눌러도
-      //   다음 폴링까지 옛 폭으로 남는다(위 셋과 같은 이유).
-      liquidation5mLastFetchAt = 0;
-      refreshFootprint();
-      refreshFlowHeatmap();
-      refreshLiquidation5mSignal();
-      refreshGex();
+      if (btn.dataset.bars) setChartWindow(Number(btn.dataset.bars));
     });
   });
   renderChartWindowTabs();
 }
-
 function renderChartWindowTabs() {
   const host = document.getElementById("chartWindowTabs");
   const tabs = [...document.querySelectorAll("#chartWindowTabs .asset-tab")];
@@ -759,6 +768,13 @@ function renderChartWindowTabs() {
   if (host) {
     host.style.setProperty("--seg-n", String(tabs.length));
     host.style.setProperty("--i", String(idx));
+    host.classList.toggle("zoomed", !daily && fpZoomed());   // 넓힌 창 = 어느 칸도 켜지 않는다(1h 를 누르면 풋프린트로)
+  }
+  const note = el("fpZoomNote");
+  if (note) {
+    const on = !daily && fpZoomed();
+    note.hidden = !on;
+    if (on) note.textContent = `${chartWindowBars / 12}시간 · 캔들`;
   }
 }
 
@@ -1147,6 +1163,7 @@ const ACCT_SPANS = [["오늘", 0], ["1주", 7], ["1개월", 30], ["전체", -1]]
 const ACCT_DAY = 86400000, ACCT_KST = 9 * 3600000;
 let acctSpanIdx = (() => { try { const raw = localStorage.getItem("acctSpanIdx"), v = Number(raw); return raw !== null && raw !== "" && v >= 0 && v < ACCT_SPANS.length ? v : 2; } catch (e) { return 2; } })();   // 🔴Number(null) = 0 = «오늘» 함정(옛 acctSpanDays 와 같은 것) -- 저장값이 없으면 1개월
 let acctCalBack = 0;   // 달력: 0 = 이번 달, 1 = 지난달 …
+let acctSelDay = null;   // 2026-10-20 사용자 «달력에서 날을 누르면 위 0~24시 차트로 그날 손익»: KST 날짜 키 · null = 오늘
 const acctKey = (ms) => new Date(ms + ACCT_KST).toISOString().slice(0, 10);   // KST 날짜(서버 day_start 와 같은 경계)
 const acctDay0 = (key) => Date.parse(key + "T00:00:00+09:00");
 const acctHm = (ms) => new Date(ms + ACCT_KST).toISOString().slice(11, 16);
@@ -1167,6 +1184,12 @@ function acctTripTip(t) {
 // 기간 칩·달 넘김 -- 카드는 폴링마다 통째로 다시 그려지므로 위임으로 한 번만 붙인다.
 document.addEventListener("click", (e) => {
   const s = e.target.closest("#acctCard [data-acct-span]"), m = e.target.closest("#acctCard [data-acct-month]");
+  const dy = e.target.closest("#acctCard [data-acct-day]"), back = e.target.closest("#acctCard [data-acct-today]");
+  if (dy || back) {   // 같은 날을 다시 누르거나 오늘을 누르면 오늘로
+    const k = dy ? dy.dataset.acctDay : null;
+    acctSelDay = !k || k === acctSelDay || k === acctKey(Date.now()) ? null : k;
+    renderSnapshotAccount();
+  }
   if (s) { acctSpanIdx = Number(s.dataset.acctSpan); try { localStorage.setItem("acctSpanIdx", String(acctSpanIdx)); } catch (err) { /* 기억은 편의 */ } renderSnapshotAccount(); }
   if (m) { acctCalBack = Math.max(0, acctCalBack + Number(m.dataset.acctMonth)); renderSnapshotAccount(); }
 });
@@ -1189,7 +1212,7 @@ function acctTodaySvg(tT, unreal, hasPos, t0, now, w, h) {
 }
 
 // 손익 달력 한 달(월요일 시작 · 맨 오른쪽 = 주 합). 색 진하기 = √(|그날 손익| ÷ 원장 최대)
-function acctCalendar(days, ym, todayKey) {
+function acctCalendar(days, ym, todayKey, selKey) {
   const maxAbs = Math.max(1e-9, ...[...days.values()].map((o) => Math.abs(o.pnl)));
   const first = acctDay0(ym + "-01"), dim = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate(), lead = (new Date(first + ACCT_KST).getUTCDay() + 6) % 7;
   let h = ["월", "화", "수", "목", "금", "토", "일", "주"].map((d) => `<span class="dow">${d}</span>`).join(""), wk = 0, col = 0, mo = 0, wd = 0, ld = 0;
@@ -1200,7 +1223,10 @@ function acctCalendar(days, ym, todayKey) {
     if (o) { wk += o.pnl; mo += o.pnl; if (o.pnl > 0) wd++; else ld++; }
     const a = o ? Math.round((0.1 + 0.6 * Math.sqrt(Math.abs(o.pnl) / maxAbs)) * 100) : 0;
     const tip = o ? `${key} · ${o.n}건 ${acctSu(o.pnl)}\n` + o.trips.map((t) => `${acctHm(t.exit_time)} ${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} ${acctSu(Number(t.net_pnl) || 0)}`).join("\n") : "";
-    h += `<span class="d${key === todayKey ? " today" : ""}"${o ? ` style="background:color-mix(in srgb, var(--${o.pnl >= 0 ? "good" : "bad"}) ${a}%, transparent)" title="${escapeHtml(tip)}"` : ""}><i>${d}</i>${o ? `<b>${acctSuc(o.pnl)}</b>` : ""}</span>`;
+    // 오늘까지의 날 = 누르면 위 띠가 그날 0~24시로(미래 날은 그냥 칸)
+    const tag = key <= todayKey ? "button" : "span", sel = key === selKey;
+    h += `<${tag} class="d${key === todayKey ? " today" : ""}${sel ? " sel" : ""}"${tag === "button" ? ` type="button" data-acct-day="${key}" aria-pressed="${sel}" aria-label="${key} ${o ? `${o.n}건 ${acctSu(o.pnl)}` : "거래 없음"} — 위 차트에 그날 보기"` : ""}`
+      + `${o ? ` style="background:color-mix(in srgb, var(--${o.pnl >= 0 ? "good" : "bad"}) ${a}%, transparent)" title="${escapeHtml(tip)}"` : ""}><i>${d}</i>${o ? `<b>${acctSuc(o.pnl)}</b>` : ""}</${tag}>`;
     col++;
     if (col === 7 || d === dim) { while (col < 7) pad(); h += `<span class="wk ${acctTone(wk)}">${wk ? acctSuc(wk) : ""}</span>`; wk = 0; col = 0; }
   }
@@ -1311,14 +1337,26 @@ function renderSnapshotAccount() {
   const todayW = Math.max(280, Math.round(narrowCard ? posW : (posW - 40) * 1.2 / 3.2));
   const curveW = Math.max(300, Math.round(narrowCard ? perfW : (perfW - 20) / 2));
   const curveH = document.documentElement.classList.contains("fit1") && fitAcctPlotH > 0 ? fitAcctPlotH : 280;
-  // ── 오늘 띠 ──
-  const wins = tT.filter((t) => t.net_pnl > 0).length;
-  const dow = "일월화수목금토"[new Date(now + ACCT_KST).getUTCDay()];
-  const trips = tT.length ? tT.map((t) => `<li title="${escapeHtml(acctTripTip(t))}"><time>${acctHm(t.exit_time)}</time><span>${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} · ${acctDur(t.exit_time - t.entry_time)}${t.adds ? ` · 추가 ${t.adds}회` : ""}${t.peak_x > 6 ? ` · <em class="warn">${t.peak_x}배</em>` : ""}</span><b class="${acctTone(t.net_pnl)}">${acctSu(Number(t.net_pnl) || 0)}</b></li>`).join("")
+  // ── 오늘 띠(달력에서 고른 날이면 그날 0~24시 -- 실현만, 그날 미실현·펀딩은 원장에 없다) ──
+  const selKey = acctSelDay && acctSelDay < todayKey ? acctSelDay : null, s0 = selKey ? acctDay0(selKey) : t0;
+  const vT = selKey ? T.filter((t) => t.exit_time >= s0 && t.exit_time < s0 + ACCT_DAY) : tT, vReal = vT.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
+  const wins = vT.filter((t) => t.net_pnl > 0).length;
+  const dow = "일월화수목금토"[new Date(s0 + ACCT_KST).getUTCDay()];
+  const trips = vT.length ? vT.map((t) => `<li title="${escapeHtml(acctTripTip(t))}"><time>${acctHm(t.exit_time)}</time><span>${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} · ${acctDur(t.exit_time - t.entry_time)}${t.adds ? ` · 추가 ${t.adds}회` : ""}${t.peak_x > 6 ? ` · <em class="warn">${t.peak_x}배</em>` : ""}</span><b class="${acctTone(t.net_pnl)}">${acctSu(Number(t.net_pnl) || 0)}</b></li>`).join("")
     : `<li class="muted">닫힌 거래 없음</li>`;
-  const todayHtml = `<div class="acct-today">
+  const dayLab = `${(selKey || todayKey).slice(5).replace("-", "/")}(${dow})`;
+  const todayHtml = selKey ? `<div class="acct-today acct-today-past">
       <div class="acct-today-hero">
-        <span class="acct-eyebrow">오늘 손익 · ${todayKey.slice(5).replace("-", "/")}(${dow})</span>
+        <span class="acct-day-head"><span class="acct-eyebrow">손익 · ${dayLab}</span><span class="chipset"><button type="button" class="chip" data-acct-today>오늘로</button></span></span>
+        <div class="acct-figure ${acctTone(vReal)}">${acctSu(vReal)}</div>
+        <span class="acct-today-pct"><span class="muted">그날 닫힌 거래의 실현 손익 · 그날 미실현·펀딩은 빠짐</span></span>
+        <dl class="acct-today-kv"><dt>실현 · ${vT.length}건${vT.length ? ` (승 ${wins} 패 ${vT.length - wins})` : ""}</dt><dd class="${acctTone(vReal)}">${acctSu(vReal)}</dd></dl>
+      </div>
+      <div class="acct-today-flow">${acctTodaySvg(vT, 0, false, s0, s0 + ACCT_DAY, todayW, 120)}</div>
+      <div class="acct-today-trips"><span class="acct-eyebrow">그날 닫힌 거래</span><ol>${trips}</ol></div>
+    </div>` : `<div class="acct-today">
+      <div class="acct-today-hero">
+        <span class="acct-eyebrow">오늘 손익 · ${dayLab}</span>
         <div class="acct-figure ${acctTone(net)}" title="${escapeHtml(startTip)}">${acctSu(net)}</div>
         <span class="acct-today-pct ${acctTone(net)}">${pct == null ? "—" : `${pct >= 0 ? "+" : "−"}${Math.abs(pct * 100).toFixed(1)}%`} <span class="muted">· 시작 ${fmtUsd(start)} → 지금 ${fmtUsd(equity)}</span></span>
         <dl class="acct-today-kv"><dt>실현 · ${tT.length}건${tT.length ? ` (승 ${wins} 패 ${tT.length - wins})` : ""}</dt><dd class="${acctTone(real)}">${acctSu(real)}</dd>
@@ -1334,7 +1372,7 @@ function renderSnapshotAccount() {
   T.forEach((t) => { const k = acctKey(t.exit_time), o = days.get(k) || { pnl: 0, n: 0, trips: [] }; o.pnl += Number(t.net_pnl) || 0; o.n++; o.trips.push(t); days.set(k, o); });
   const ym = (() => { const d = new Date(t0 + ACCT_KST); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - acctCalBack); return d.toISOString().slice(0, 7); })();
   const oldest = T.length ? acctKey(T[0].exit_time).slice(0, 7) : ym;
-  const cal = acctCalendar(days, ym, todayKey);
+  const cal = acctCalendar(days, ym, todayKey, selKey);
   const calHtml = `<div class="acct-cal-box">
       <div class="acct-cal-head"><button type="button" class="chip" data-acct-month="1" ${ym <= oldest ? "disabled" : ""} aria-label="지난달">‹</button>
         <b>${ym.slice(0, 4)}년 ${+ym.slice(5)}월</b><button type="button" class="chip" data-acct-month="-1" ${acctCalBack ? "" : "disabled"} aria-label="다음 달">›</button>
@@ -4760,15 +4798,27 @@ function setupChartPan() {
     if (!d) return;
     ev.preventDefault(); chartPanBy(d * (ev.shiftKey ? 6 : 1));
   });
-  // 차트 위: 휠(세로·가로 모두) 40px = 1봉 · 끌기 = 봉 폭만큼 · 더블클릭 = 최신으로. 12h 창(움직일 곳 없음)이면 휠을 페이지에 돌려준다.
+  // 차트 위 휠(2026-10-20 사용자): **세로 = 줌** -- 아래로 = 넓게(체결 박스 없이 캔들) · 위로 = 좁게(1h 에서 풋프린트), 한 단 = 60px.
+  //   끝 단(1h·12h)에서 더 굴리면 휠을 페이지에 돌려준다(스크롤이 막히지 않게). **가로 휠(트랙패드 옆으로) = 이동** 40px = 1봉.
+  //   끌기 = 봉 폭만큼 · 더블클릭 = 최신으로 · 방향키(미니맵) = 이동은 그대로.
   const canPan = () => flowOn() && Math.min(full().length, CHART_PAN_BARS) > chartWindowBars;
-  let acc = 0;
+  let acc = 0, zacc = 0;
   svg.addEventListener("wheel", (ev) => {
-    if (!canPan() || ev.ctrlKey) return;
+    if (!flowOn() || ev.ctrlKey) return;
+    if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) {
+      if (!canPan()) return;
+      ev.preventDefault();
+      acc += ev.deltaX;
+      const steps = Math.trunc(acc / 40);
+      if (steps) { acc -= steps * 40; chartPanBy(-steps); }   // 오른쪽으로 = 최신 쪽
+      return;
+    }
+    const i = CHART_WINDOW_BARS.indexOf(chartWindowBars);
+    if ((ev.deltaY > 0 && i >= CHART_WINDOW_BARS.length - 1) || (ev.deltaY < 0 && i <= 0)) { zacc = 0; return; }   // 끝 단 = 페이지 스크롤
     ev.preventDefault();
-    acc += Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : ev.deltaY;
-    const steps = Math.trunc(acc / 40);
-    if (steps) { acc -= steps * 40; chartPanBy(-steps); }   // 아래로·오른쪽으로 = 최신 쪽
+    zacc += ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY;   // 줄 단위(파이어폭스) 휠도 픽셀로
+    const steps = Math.trunc(zacc / 60);
+    if (steps) { zacc -= steps * 60; chartZoomBy(Math.sign(steps)); }   // 한 번에 한 단씩(빠른 휠에 1h→12h 로 튀지 않게)
   }, { passive: false });
   let drag = null;
   svg.addEventListener("pointerdown", (ev) => {
@@ -5662,11 +5712,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-10-10 사용자 «체결 박스 옆에 5분봉을 같이» → 시안 C(매도 | 5분봉 | 매수): 채운 몸통·심지를 두 칸 사이에.
     //   옆 캔들은 칸 폭에서 떼어 낸다(봉 사이 간격은 그대로) -- 폭 = 봉 칸의 14%(3~8px) + 틈 2px. 셀을 안 그리는 얇은 봉(bw<14)은 옛 테두리.
     //   (시안 때 쓴 "L"·"R" 분기는 남겨 둔다 -- 위치만 다른 같은 그림이다.)
-    const FPC = bw >= 14 ? "C" : "";
+    const FPC = bw >= 14 || fpZoomed() ? "C" : "";
     // 2026-10-12 사용자 «모바일에서는 5분봉에 있는 체결박스들만 모두 제거 · 데스크탑은 수정하지 마»(실데이터 시안 B):
     //   휴대폰은 칸(매도·매수·불균형·POC 테두리)을 안 그리고, 비는 자리만큼 옆 5분봉을 칸 폭의 60% 로 키워 가운데에 둔다.
     //   델타·POC 선·밀도 층은 그대로(칸이 아니다). 데스크탑(isMobileChartMode 거짓)은 한 줄도 안 바뀐다.
-    const MOB = isMobileChartMode();
+    // 2026-10-20 넓힌 창(fpZoomed, 휠로 2h~12h)도 같은 그림: 체결 박스 없이 가운데 채운 캔들 · 델타·POC 선은 그대로.
+    const MOB = isMobileChartMode() || fpZoomed();
     const fpcW = FPC ? (MOB ? Math.max(3, bw * 0.6) : Math.max(3, Math.min(8, (cw / candles.length) * 0.14))) : 0, fpcGap = FPC ? 2 : 0;
     const half = Math.max(2, (bw - fpcW - fpcGap) / 2 - 0.5);
     // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
@@ -5700,7 +5751,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   의존해서(deltaBoxes) 중간 봉 하나만 바뀌어도 뒤쪽이 전부 틀어진다 -- 그 사슬을
     //   캐시에 들이면 조용히 어긋난다. 둘 다 노드 하나뿐이라 매번 만들어도 싸다.
     const geomSig = [w, h, mt, ch, ml, cw, bw, yMin, yMax, candles.length, rowSize, rowPx,
-                     maxBuy, maxSell, half, fontPx, showQty, drawCells, INK_OPACITY, FPC].join("|");
+                     maxBuy, maxSell, half, fontPx, showQty, drawCells, INK_OPACITY, FPC, MOB].join("|");
     const barCache = renderCandleSvg._barCache || (renderCandleSvg._barCache = new Map());
     // 델타 라벨은 봉 그룹 **밖**이라 따로 둔다(위 🔴주석: 충돌회피 사슬 때문).
     const deltaCache = renderCandleSvg._deltaCache || (renderCandleSvg._deltaCache = new Map());
@@ -5745,6 +5796,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 이웃끼리 겹친다 -- 라벨을 버리지 않고 **겹치면 한 줄씩 내린다**(값은 다 보여야 한다).
     const deltaBoxes = [];
     const deltaFont = bw >= 34 ? 11 : 9;
+    // 2026-10-20 사용자 «어느 순간까지는 델타가 보이다가 아예 겹치는 구간부터는 델타를 제거»: 자리는 늘 다 계산하고(아래 사슬),
+    //   그리기는 봉 루프 뒤로 미룬다 -- 제자리(봉 바로 아래)에 못 앉고 밀려난 라벨이 많으면(DELTA_CROWD 초과) 그 창은 델타를 통째로 안 그린다.
+    //   일부만 지우면 «어느 봉은 델타가 없나»로 읽히니 전부 아니면 전무. 값은 봉 호버 툴팁에 그대로 있다.
+    const DELTA_CROWD = 0.3;   // 실측(10-20 1920·1700): 2h .12~.17 · 3h .17 · 4h .23~.27 · 6h .39~.42 · 12h .55~.58 → 4h 까지 보이고 6h 부터 뺀다
+    const deltaDraws = [];
+    let deltaBumped = 0;
     const pocPts = [];    // 2026-09-19 사용자 요청: 봉별 POC 를 선으로 잇는다.
     barRows.forEach((rows, i) => {
       const c = candles[i], x = xAt(i);
@@ -5838,7 +5895,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         // 글자 폭 근사(굵은 숫자 ~0.62em) 로 상자를 만들고, 겹치면 아래로 한 줄씩 민다.
         const label = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
         const halfW = label.length * deltaFont * 0.34 + 2;
-        const cxD = x + bw / 2;
+        const cxD = x + bw / 2, dY0 = dY;
         for (let guard = 0; guard < 6; guard++) {
           const hit = deltaBoxes.some((b) =>
             Math.abs(b.y - dY) < deltaFont + 1 && cxD + halfW > b.x1 && cxD - halfW < b.x2);
@@ -5846,15 +5903,16 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           dY += deltaFont + 2;
         }
         deltaBoxes.push({ x1: cxD - halfW, x2: cxD + halfW, y: dY });
+        if (dY !== dY0) deltaBumped++;
         // 🔴여기까지의 **산수는 늘 돈다** -- dY 는 앞선 봉들의 충돌회피 결과에 달려 있어서
         //   건너뛰면 사슬이 끊긴다. 캐시하는 것은 «만들어진 노드»뿐이다.
         // ⭐그래서 키가 사슬 해시를 들 필요가 없다: dY 가 **이미 그 사슬의 결과**다.
         //   아래 다섯이 이 노드의 입력 전부이므로, 같으면 노드도 같다.
         const dSig = deltaFont + "|" + cxD + "|" + dY + "|" + label + "|" + c.time
                      + "|" + buyTot.toFixed(1) + "|" + sellTot.toFixed(1);
+        deltaDraws.push(() => {
         const dPrev = deltaCache.get(c.time);
-        if (dPrev && dPrev.sig === dSig) { svg.appendChild(dPrev.n); }
-        else {
+        if (dPrev && dPrev.sig === dSig) { svg.appendChild(dPrev.n); return; }
         const dTxt = document.createElementNS(NS, "text");
         dTxt.setAttribute("x", cxD); dTxt.setAttribute("y", dY);
         dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", String(deltaFont));
@@ -5868,9 +5926,11 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         if (plotClip) dTxt.setAttribute("clip-path", plotClip);
         svg.appendChild(dTxt);
         deltaCache.set(c.time, { sig: dSig, n: dTxt });
-        }
+        });
       }
     });
+    renderCandleSvg._deltaStats = { n: deltaDraws.length, bumped: deltaBumped, bars: candles.length };   // 시험·진단용
+    if (deltaDraws.length && deltaBumped / deltaDraws.length <= DELTA_CROWD) deltaDraws.forEach((f) => f());
 
     // 창 밖으로 나간 봉의 캐시는 버린다 -- 안 그러면 탭을 켜둔 채로 며칠이면 노드가 쌓인다.
     // 🔴호출부가 하나뿐이라(renderSnapshotChart) 캐시를 함수에 달아도 안전하다. 두 번째
