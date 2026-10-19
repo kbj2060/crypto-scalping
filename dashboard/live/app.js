@@ -4193,7 +4193,7 @@ function fcRowHtml(sec) {
   const g4 = eth && latestDir4h && latestDir4h.ok ? latestDir4h : null, old4 = g4 && Date.now() - g4.decided_at_ms > 15 * 60e3;
   const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(11, 16);
   const d4Tip = g4 ? `4h 방향 예측 — 매달 재학습 HGB(ETH 65피쳐, 최근 365일) · ${g4.model_month} 모델(학습 ${g4.train_window[0].slice(0, 10)}~${g4.train_window[1].slice(0, 10)})\n`
-      + `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(1)}bp · 상승 문턱 ≥ +${g4.hi.toFixed(1)} · 하락 문턱 ≤ ${g4.lo.toFixed(1)} (학습 예측 상·하위 20%) · ${kst(g4.decided_at_ms)} KST 마감 5분봉\n`
+      + `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(1)}bp · 상승 문턱 ≥ +${g4.hi.toFixed(1)} · 하락 문턱 ≤ ${g4.lo.toFixed(1)} (과거 표본 밖 예측 상·하위 20%) · ${kst(g4.decided_at_ms)} KST 마감 5분봉\n`
       + `2025~26 IC .06 · 2023~24 검증 불통과 · 참고용(전진 판정 전)${g4.nan_feats.length ? `\n🔴빈 피쳐 ${g4.nan_feats.length}: ${g4.nan_feats.join(", ")}` : ""}\n${vTip}`
     : `4h 방향 예측(ETH 전용) — ${eth ? (latestDir4h && latestDir4h.reason ? `불러오기 실패: ${latestDir4h.reason}` : "불러오는 중") : "ETH 에서만 계산"}\n${vTip}`;
   // 2026-10-16 시안 ④: 다음 문턱까지 거리 + 문턱 눈금(왼쪽 색 = 숏 문턱 밖 · 오른쪽 색 = 롱 문턱 밖 · ● 지금 · ○ 1시간 전)
@@ -4296,7 +4296,7 @@ MC_TIPS.q_rate = "나스닥 = 나스닥100 실시간(Hyperliquid xyz:XYZ100 무�
 MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위치(VWAP·%B·RSI) 줄 제거 -- 설명도 벽만
 MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아니다(지난 7·14·28·56·90일 종가 대비 5표, 미래 적중 48~58%).\n"
   + "15분 · 칼시 = 미국 예측시장 15분 ETH 위/아래 확률(55~45% 비등) — 참고, 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침.\n"
-  + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 학습 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
+  + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 과거 표본 밖 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
   + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65%.\n"
   + "4~13주 예측 = 달러·유동성 Z91(|Z|≥1 만) · 2018~26 56일 BTC 70% · ETH 75%(고른 기간 성적).\n"
   + "변동성 = 4시간 실현변동성 GBM(ETH 22피쳐) · 순위상관 .79 · 확대 AUC .82 · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀).\n"

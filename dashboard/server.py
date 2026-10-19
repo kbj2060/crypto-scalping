@@ -7609,7 +7609,8 @@ def make_app() -> web.Application:
     # actually loads. The explicit /dashboard/live[/] routes above already serve the page
     # itself, and nothing fetches a listing, so this only removes the enumeration.
     app.router.add_static("/dashboard/live/", DASHBOARD_DIR, show_index=False)
-    app.router.add_static("/data/live/", LIVE_DIR, show_index=False)
+    # 2026-10-19 보안: /data/live/ 정적 서빙 제거 -- 인증 없이 공개 호스트에서 터널 토큰·계좌 원장·푸시 구독이
+    #   그대로 내려받혔다(HEAD 200 실측). 프런트·sw.js·스크립트·시험 어디도 이 URL 을 안 쓴다. 다시 열지 말 것.
     # start_http_session FIRST: every klines fetch below it needs the pooled session to exist.
     # stop_http_session LAST for the mirror-image reason.
     app.on_startup.append(start_http_session)
