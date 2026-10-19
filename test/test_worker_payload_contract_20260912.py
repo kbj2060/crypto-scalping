@@ -7,8 +7,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-src = (ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
-chunk = src[src.index("def worker_payload("):src.index("def extreme_detector_payload()")]
+src = (ROOT / "dashboard" / "worker_state.py").read_text(encoding="utf-8")   # 2026-10-19 server.py 에서 옮겨 갔다(파일 끝 함수)
+chunk = src[src.index("def worker_payload("):]
 
 STATE: dict = {}
 now = datetime.now(timezone.utc)

@@ -151,6 +151,7 @@ class WaitServerTest(unittest.TestCase):
         from aiohttp.test_utils import TestClient, TestServer
         from offline_app import offline_app
         from dashboard import server
+        from dashboard import orders
         from test_manual_entry_preview_smoke_20260913 import _isolated_dirs
         from test_rec_rule_entry_20261009 import account, long_pos
         acct = account([long_pos(0.2, 2500.0)])
@@ -173,14 +174,14 @@ class WaitServerTest(unittest.TestCase):
             return acct
 
         async def exercise():
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "produce_account", fake_account, create=True), \
-                 mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
-                 mock.patch.object(server, "exec_enabled", lambda: True), \
-                 mock.patch.object(server, "run_entry_wait", fake_wait), \
-                 mock.patch.object(server, "run_exit", fake_exit), \
-                 mock.patch.object(server, "run_entry", mock.AsyncMock(side_effect=AssertionError("따라가기로 새면 안 된다"))), \
-                 mock.patch.object(server, "place_bracket", mock.AsyncMock(side_effect=AssertionError("주문 금지"))):
+            with mock.patch.object(orders, "fetch_account", fake_account), \
+                 mock.patch.object(orders, "produce_account", fake_account, create=True), \
+                 mock.patch.object(orders, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(orders, "exec_enabled", lambda: True), \
+                 mock.patch.object(orders, "run_entry_wait", fake_wait), \
+                 mock.patch.object(orders, "run_exit", fake_exit), \
+                 mock.patch.object(orders, "run_entry", mock.AsyncMock(side_effect=AssertionError("따라가기로 새면 안 된다"))), \
+                 mock.patch.object(orders, "place_bracket", mock.AsyncMock(side_effect=AssertionError("주문 금지"))):
                 c = TestClient(TestServer(offline_app(server)))
                 await c.start_server()
                 try:
@@ -216,6 +217,7 @@ class WaitServerTest(unittest.TestCase):
         """재시작 기동 훅이 고아 정리를 부르고 결과를 상태 칸(wait)에 남긴다 -- 화면이 «재시작으로 취소»를 말할 수 있게."""
         from aiohttp.test_utils import TestClient, TestServer
         from dashboard import server
+        from dashboard import orders
         from test_manual_entry_preview_smoke_20260913 import _isolated_dirs
         called = []
 
@@ -224,8 +226,8 @@ class WaitServerTest(unittest.TestCase):
             return {"cancelled": [{"symbol": "ETHUSDC", "order_id": 1, "side": "LONG", "filled": 0.0, "qty": 1.0}], "errors": []}
 
         async def exercise():
-            with mock.patch.object(server, "exec_enabled", lambda: True), \
-                 mock.patch.object(server, "cancel_wait_orphans", fake_cleanup):
+            with mock.patch.object(orders, "exec_enabled", lambda: True), \
+                 mock.patch.object(orders, "cancel_wait_orphans", fake_cleanup):
                 app = server.make_app()
                 keep = {"start_http_session", "start_wait_cleanup", "stop_http_session"}
                 for sig in (app.on_startup, app.on_cleanup):
@@ -239,7 +241,7 @@ class WaitServerTest(unittest.TestCase):
                     self.assertEqual(w["cancelled"][0]["order_id"], 1)
                 finally:
                     await c.close()
-            self.assertIn(server.MANUAL_EXEC_SYMBOLS["eth"], called[0])   # 주문 심볼(서버 .env 는 ETHUSDC)
+            self.assertIn(orders.MANUAL_EXEC_SYMBOLS["eth"], called[0])   # 주문 심볼(서버 .env 는 ETHUSDC)
 
         with _isolated_dirs():
             asyncio.run(exercise())

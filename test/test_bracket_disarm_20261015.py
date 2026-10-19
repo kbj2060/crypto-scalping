@@ -19,10 +19,11 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from offline_app import offline_app  # noqa: E402
 
 from dashboard import server  # noqa: E402
+from dashboard import orders  # noqa: E402
 from live.execution import live_manual_peg_execute_20260912 as ex  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 
-SYM = server.MANUAL_EXEC_SYMBOLS["eth"]
+SYM = orders.MANUAL_EXEC_SYMBOLS["eth"]
 KEY = f"{SYM}:LONG"
 ARMED = {KEY: {"symbol": SYM, "side": "LONG", "sl_price": 2306.98, "sl_level": 2309.25, "backstop_price": 2306.98, "rule": True,
                "sl_name": "첫 진입가 −5%", "armed_at": 1000.0, "placed": {"placed": True},
@@ -36,13 +37,13 @@ async def _boom(*_a, **_k):
 class DisarmTest(unittest.TestCase):
     def _run(self, fn, armed=ARMED, clear=None, enabled=True, stop=None) -> None:
         async def exercise() -> None:
-            with mock.patch.object(server, "exec_enabled", lambda: enabled), \
-                 mock.patch.object(server, "clear_bracket", clear or _boom), \
-                 mock.patch.object(server, "place_stop", stop or _boom), \
-                 mock.patch.object(server, "place_bracket", _boom), \
-                 mock.patch.object(server, "place_add_order", _boom), \
-                 mock.patch.object(server, "run_entry", _boom), \
-                 mock.patch.object(server, "run_exit", _boom):
+            with mock.patch.object(orders, "exec_enabled", lambda: enabled), \
+                 mock.patch.object(orders, "clear_bracket", clear or _boom), \
+                 mock.patch.object(orders, "place_stop", stop or _boom), \
+                 mock.patch.object(orders, "place_bracket", _boom), \
+                 mock.patch.object(orders, "place_add_order", _boom), \
+                 mock.patch.object(orders, "run_entry", _boom), \
+                 mock.patch.object(orders, "run_exit", _boom):
                 if armed is not None:
                     (server.LIVE_DIR / "manual_bracket_state.json").write_text(json.dumps(armed), "utf-8")
                 client = TestClient(TestServer(offline_app(server)))

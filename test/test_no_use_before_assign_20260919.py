@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGETS = [
     ROOT / "dashboard" / "server.py",
     ROOT / "dashboard" / "coin_flow.py",   # 2026-10-19 footprint_add 등 수집기 공장이 옮겨 갔다
+    ROOT / "dashboard" / "orders.py",      # 2026-10-19 계좌·주문 핸들러(register 안 클로저)가 옮겨 갔다
     ROOT / "scripts" / "live_trade_tape_collector_20260916.py",
 ]
 

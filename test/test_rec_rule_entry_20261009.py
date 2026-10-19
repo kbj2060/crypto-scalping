@@ -25,10 +25,11 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from offline_app import offline_app  # noqa: E402
 
 from dashboard import server  # noqa: E402
+from dashboard import orders  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import REC_FIRST_SHARE  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 
-SYM = server.MANUAL_EXEC_SYMBOLS["eth"]
+SYM = orders.MANUAL_EXEC_SYMBOLS["eth"]
 L = 3.0                               # 10-14 권장 B: 12.435 × 권장배수 0.45 = 5.596 > 상한 3 → 상한이 묶는다(청산 안전 10.6)
 STOP = 0.05                           # 10-14 권장 B 손절 ∓5%
 VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.45}
@@ -53,13 +54,13 @@ class RecRuleEntryTest(unittest.TestCase):
             raise AssertionError("주문 경로가 불렸다 -- 시험에서 실주문 금지")
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "produce_account", fake_account, create=True), \
-                 mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
-                 mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0), \
-                 mock.patch.object(server, "MANUAL_RULES_ENABLED", True), \
-                 mock.patch.object(server, "place_bracket", boom), \
-                 mock.patch.object(server, "margin_type", mock.AsyncMock(return_value=mtype)):
+            with mock.patch.object(orders, "fetch_account", fake_account), \
+                 mock.patch.object(orders, "produce_account", fake_account, create=True), \
+                 mock.patch.object(orders, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(orders, "SIZING_MARGIN_CAP_PCT", 50.0), \
+                 mock.patch.object(orders, "MANUAL_RULES_ENABLED", True), \
+                 mock.patch.object(orders, "place_bracket", boom), \
+                 mock.patch.object(orders, "margin_type", mock.AsyncMock(return_value=mtype)):
                 if armed is not None:
                     (server.LIVE_DIR / "manual_bracket_state.json").write_text(json.dumps(armed), "utf-8")
                 app = offline_app(server)
@@ -129,8 +130,8 @@ class RecRuleEntryTest(unittest.TestCase):
                 r = await c.get(f"/api/manual-entry/preview?side=LONG&lev=20&rule={bad}")
                 self.assertEqual(r.status, 400, bad)
                 self.assertEqual((await r.json())["error"], "bad_rule")
-                with mock.patch.object(server, "exec_enabled", lambda: True), \
-                     mock.patch.object(server, "run_entry", mock.AsyncMock(side_effect=AssertionError("실주문 금지"))):
+                with mock.patch.object(orders, "exec_enabled", lambda: True), \
+                     mock.patch.object(orders, "run_entry", mock.AsyncMock(side_effect=AssertionError("실주문 금지"))):
                     r = await c.post(f"/api/manual-entry/submit?side=LONG&confirm=1&lev=20&rule={bad}")
                 self.assertEqual(r.status, 400, bad)                                # 게이트가 열려 있어도 400(직접 모드로 안 떨어진다)
             r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c&asset=sol")
@@ -222,7 +223,7 @@ class RecRuleEntryTest(unittest.TestCase):
             return state
 
         async def fn(c):
-            with mock.patch.object(server, "exec_enabled", lambda: True), mock.patch.object(server, "run_entry", never_run):
+            with mock.patch.object(orders, "exec_enabled", lambda: True), mock.patch.object(orders, "run_entry", never_run):
                 body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&rule=c")).json()
                 self.assertTrue(body.get("ok"), body)
                 await asyncio.sleep(0.05)
@@ -238,17 +239,17 @@ class ManualModeTest(unittest.TestCase):
     큰 기존 포지션이 있어도 상한으로 안 막히고, SL/TP 는 안 걸리고, rule=c 는 400."""
 
     def test_defaults_are_manual(self) -> None:
-        self.assertEqual(server.SIZING_MARGIN_CAP_PCT, 0.0)   # 1번 배포(10-09)에도 증거금 상한은 꺼진 채
+        self.assertEqual(orders.SIZING_MARGIN_CAP_PCT, 0.0)   # 1번 배포(10-09)에도 증거금 상한은 꺼진 채
 
         async def fake_account(*_a, **_k):
             return account([long_pos(1.2, 2500.0)], equity=300.0)      # 명목 3,000 = 순자산 10배(옛 50% 상한이 꽉 찬 상태)
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "produce_account", fake_account, create=True), \
-                 mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
-                 mock.patch.object(server, "MANUAL_RULES_ENABLED", False), \
-                 mock.patch.object(server, "place_bracket", mock.AsyncMock(side_effect=AssertionError("주문 금지"))):
+            with mock.patch.object(orders, "fetch_account", fake_account), \
+                 mock.patch.object(orders, "produce_account", fake_account, create=True), \
+                 mock.patch.object(orders, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(orders, "MANUAL_RULES_ENABLED", False), \
+                 mock.patch.object(orders, "place_bracket", mock.AsyncMock(side_effect=AssertionError("주문 금지"))):
                 c = TestClient(TestServer(offline_app(server)))
                 await c.start_server()
                 try:

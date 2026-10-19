@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 code = lambda p, c: "\n".join(l for l in (ROOT / p).read_text(encoding="utf-8").splitlines() if not l.strip().startswith(c))
-SRV, JS = code("dashboard/server.py", "#"), code("dashboard/live/app.js", "//")
+SRV, JS = code("dashboard/server.py", "#") + "\n" + code("dashboard/orders.py", "#"), code("dashboard/live/app.js", "//")  # 2026-10-19 주문 핸들러가 orders.py 로 옮겨 갔다
 
 
 def fn(src, name):

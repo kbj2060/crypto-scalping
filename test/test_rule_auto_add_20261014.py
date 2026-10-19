@@ -20,11 +20,12 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from offline_app import offline_app  # noqa: E402
 
 from dashboard import server  # noqa: E402
+from dashboard import orders  # noqa: E402
 from live.execution import live_manual_peg_execute_20260912 as ex  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import REC_ADD_DIST, REC_FIRST_SHARE, RULE_STOP_PCT  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 
-SYM = server.MANUAL_EXEC_SYMBOLS["eth"]
+SYM = orders.MANUAL_EXEC_SYMBOLS["eth"]
 L = 3.0                               # 10-14 권장 B: 12.435 × 권장배수 0.45 = 5.596 > 상한 3 → L = 3
 VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.45}
 ACCT = {"ok": True, "balance": {"margin": 1000.0, "initial_margin": 0.0, "available": 1000.0, "unrealized": 0.0},
@@ -41,15 +42,15 @@ class AutoAddTest(unittest.TestCase):
             return ACCT
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "produce_account", fake_account, create=True), \
-                 mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
-                 mock.patch.object(server, "MANUAL_RULES_ENABLED", True), \
-                 mock.patch.object(server, "REC_AUTO_ADD", True), \
-                 mock.patch.object(server, "place_bracket", _boom), \
-                 mock.patch.object(server, "place_add_order", _boom), \
-                 mock.patch.object(server, "run_entry", _boom), \
-                 mock.patch.object(server, "margin_type", mock.AsyncMock(return_value="cross")):
+            with mock.patch.object(orders, "fetch_account", fake_account), \
+                 mock.patch.object(orders, "produce_account", fake_account, create=True), \
+                 mock.patch.object(orders, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(orders, "MANUAL_RULES_ENABLED", True), \
+                 mock.patch.object(orders, "REC_AUTO_ADD", True), \
+                 mock.patch.object(orders, "place_bracket", _boom), \
+                 mock.patch.object(orders, "place_add_order", _boom), \
+                 mock.patch.object(orders, "run_entry", _boom), \
+                 mock.patch.object(orders, "margin_type", mock.AsyncMock(return_value="cross")):
                 app = offline_app(server)
                 app["situation_eth"]["vol_mult"] = {"bar": time.time(), **VM}
                 client = TestClient(TestServer(app))
@@ -88,10 +89,10 @@ class AutoAddTest(unittest.TestCase):
             return {"placed": True, "price": price, "qty": qty, "order_id": 1}
 
         async def fn(c):
-            with mock.patch.object(server, "exec_enabled", lambda: True), \
-                 mock.patch.object(server, "run_entry", fake_entry), \
-                 mock.patch.object(server, "place_bracket", fake_bracket), \
-                 mock.patch.object(server, "place_add_order", fake_add):
+            with mock.patch.object(orders, "exec_enabled", lambda: True), \
+                 mock.patch.object(orders, "run_entry", fake_entry), \
+                 mock.patch.object(orders, "place_bracket", fake_bracket), \
+                 mock.patch.object(orders, "place_add_order", fake_add):
                 body = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&rule=c")).json()
                 self.assertTrue(body.get("ok"), body)
                 for _ in range(50):
@@ -118,8 +119,8 @@ class AutoAddTest(unittest.TestCase):
             return {"placed": False, "backstop": {"placed": False, "error": "-4120"}}
 
         async def fn(c):
-            with mock.patch.object(server, "exec_enabled", lambda: True), mock.patch.object(server, "run_entry", fake_entry), \
-                 mock.patch.object(server, "place_bracket", failed_bracket):          # place_add_order 는 _boom 그대로 -- 불리면 실패
+            with mock.patch.object(orders, "exec_enabled", lambda: True), mock.patch.object(orders, "run_entry", fake_entry), \
+                 mock.patch.object(orders, "place_bracket", failed_bracket):          # place_add_order 는 _boom 그대로 -- 불리면 실패
                 self.assertTrue((await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&lev=20&rule=c")).json()).get("ok"))
                 for _ in range(50):
                     await asyncio.sleep(0.02)

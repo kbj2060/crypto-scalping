@@ -66,6 +66,7 @@ class DashboardRestartDecisionTests(unittest.TestCase):
         src = "\n".join(p.read_text() for p in DASHBOARD_PY)
         mods = sorted(set(re.findall(r"^(?:from|import) scripts\.([A-Za-z0-9_]+)", src, re.M)))
         self.assertIn("live_okx_trade_tape_collector_20260923", mods, "coin_flow.py 의 import 를 못 봤다")
+        self.assertIn("live_manual_peg_entry_20260912", mods, "orders.py 의 import 를 못 봤다")
         self.assertGreater(len(mods), 5, "import 파싱이 깨졌다")
         for mod in mods:
             with self.subTest(mod=mod):
