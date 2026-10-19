@@ -11,7 +11,8 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-server = (ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
+# 2026-10-19 수집기 공장(footprint_backfill·FOOTPRINT_* 상수)은 dashboard/coin_flow.py 로 옮겼다 -- 두 파일을 같이 본다.
+server = "\n".join((ROOT / "dashboard" / f).read_text(encoding="utf-8") for f in ("server.py", "coin_flow.py"))
 appjs = (ROOT / "dashboard" / "live" / "app.js").read_text(encoding="utf-8")
 
 

@@ -14,6 +14,7 @@ import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dashboard.server as srv  # noqa: E402
+import dashboard.coin_flow as cf  # noqa: E402
 
 BAR = 300
 T0 = 1_790_000_100            # 봉 경계
@@ -51,7 +52,7 @@ def test_non_eth_restores_from_tape_not_rest(tmp_path, monkeypatch):
                ("xrpusdt", T0 + 5, 15364, 3.0, 0.0, 3.0, 0.0, 0.0, 0.0),              # 진행 봉
                ("xrpusdt", T0 + 60, 15365, 4.0, 1.0, 0.0, 0.0, 4.0, 1.0),             # = WS 첫 초 -> 빠져야 한다
                ("xrpusdt", T0 + 70, 15365, 9.0, 9.0, 0.0, 0.0, 0.0, 0.0)])            # WS 이후 -> 빠져야 한다
-    monkeypatch.setattr(srv, "HOT_TAPE_DB", db)
+    monkeypatch.setattr(cf, "HOT_TAPE_DB", db)                                        # make_coin_flow 는 coin_flow 의 이름을 본다
     monkeypatch.setattr(srv.time, "time", lambda: T0 + 70.0)                          # 창 계산의 «지금»
 
     async def rest_must_not_be_called(*a, **k):
