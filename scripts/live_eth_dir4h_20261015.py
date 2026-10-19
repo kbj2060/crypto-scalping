@@ -2,7 +2,11 @@
 
 모델 = research_eth_best_direction_model_20261010 의 «--nomd» 판(65피쳐: 가격 P · 체결 T · OI·롱숏 O · 교차 X · 시간 C · 개장 U).
   마이크로(M)·깊이(D)·베이시스(B)·현물(S) 묶음은 실시간 원천이 없어 뺐다 — 연구에서 같은 65피쳐로 ETH 결합 1.47(전체 1.56).
-  매달 1일 재학습: 학습 창 = 직전 365일(정화 4h), HGB 시드 0·1·2 평균, 문턱 = 학습 예측 20/80 분위.
+  매달 1일 재학습: 학습 창 = 직전 365일(정화 4h), HGB 1개(early_stopping=False -- 결정적), 문턱 = 과거 표본 밖 예측 20/80 분위(연구 final_model 규칙).
+  🔴10-19 B2(research_eth_dir4h_early_stop_20261019): 옛 early_stopping='auto' 는 무작위 10% 검증(근접 중복 행)이라 늘 300회·시드 의존
+  (같은 달 시드 간 예측 차 최대 80bp) → 끄고 1개. 2025~ 옛 판 대비 +4.1bp/일 [−1.7,+9.6] = «나쁘지 않음», 이득은 결정성.
+  🔴10-19 리뷰: 옛 문턱 = 학습 행 in-sample 예측 분위(더 넓다 -- 신호 36% vs 47%). 손익 차는 0(−0.3bp/일 [−4.8,+4.3],
+  research_eth_dir4h_reverify_20261019). 달마다 한쪽 쏠림(2026-02 롱 65%·03 숏 55%)은 문턱이 아니라 예측 자체의 달별 치우침이다.
   예측 ≥ 상위 문턱 → 상승 · ≤ 하위 문턱 → 하락 · 사이 → 보류. 결정 = 5분봉 마감, 보유 4h. 참고용(전진 판정 전).
 
 학습과 실시간이 같은 `build_features` 하나를 쓴다. 입력은 둘 다 data.binance.vision 패널 형식이다:
@@ -27,6 +31,9 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = ROOT / "data" / "live" / "eth_dir4h_model.joblib"
+# 표본 밖 예측 기록 시작 = research_eth_dir4h_early_stop_20261019 의 B2(지금 HGB 설정) 월별 표본 밖 예측(2023-01~2026-09-14, 같은 65피쳐·365일)
+#   -- 10-19 첫 판(옛 early_stopping auto·시드 0, replicate_combo nomd)을 B2 로 교체. 이후 달은 매달 지난 판 예측이 이어 붙는다(art["oos"]).
+OOS_SEED = ROOT / "data" / "live" / "eth_dir4h_oos_seed.parquet"
 PANEL = ROOT / "data" / "live" / "dir4h_panel"          # 코인별 vision 패널(최근 480일 = 학습 365 + 추세 5표 90 + 여유, 매달 이어 받기)
 COINS = ["ADA", "APT", "ARB", "ATOM", "AVAX", "BNB", "BTC", "DOGE", "DOT", "FIL", "INJ", "LINK", "LTC", "NEAR", "OP", "SOL", "SUI", "TRX", "XRP"]
 MCOLS = ["sum_open_interest", "count_toptrader_long_short_ratio", "sum_toptrader_long_short_ratio",
@@ -40,7 +47,7 @@ FEATS = ["P_r5m", "P_r15m", "P_r1h", "P_r4h", "P_r1d", "P_r7d", "P_r28d", "P_rv1
          "C_hsin", "C_hcos", "C_dow", "C_to_funding", "C_weekend", "U_eth_since_open", "U_eth_f30_day", "U_btc_since_open",
          "U_btc_f30_day", "U_min_since_open"]   # 연구 feat_cols 순서(M·D·B·S 뺌) -- 모델 입력 순서 계약
 H = 48
-HGB = dict(max_iter=300, learning_rate=0.04, max_leaf_nodes=31, min_samples_leaf=1000, l2_regularization=1.0)
+HGB = dict(max_iter=300, learning_rate=0.04, max_leaf_nodes=31, min_samples_leaf=1000, l2_regularization=1.0, early_stopping=False)
 
 
 # ── 연구 스크립트와 같은 보조 함수 ────────────────────────────────────────
@@ -162,10 +169,8 @@ def vision_update(end_day: str, days: int = 480, workers: int = 8) -> dict[str, 
     for sym in ["ETH"] + COINS:
         f = PANEL / f"{sym}USDT.parquet"
         old = pd.read_parquet(f) if f.exists() else None
-        if old is not None and len(old) and old.timestamp.min() > pd.Timestamp(end_day) - pd.Timedelta(days=days - 2):
-            old = None   # 잘린 패널(10-15 --parity days=45 가 480일 → 45일로 잘랐다) -- 처음부터 다시 받는다
-        start = (old.timestamp.max().normalize() + pd.Timedelta("1D")) if old is not None and len(old) else pd.Timestamp(end_day) - pd.Timedelta(days=days)
-        dates = [x.strftime("%Y-%m-%d") for x in pd.date_range(start, end_day, freq="D")]
+        have = set(old.timestamp.dt.normalize()) if old is not None else set()   # 10-19: 빠진 날은 어디든 다시 받는다(옛: 마지막 날 뒤만 -- 구멍이 영영 남았다)
+        dates = [x.strftime("%Y-%m-%d") for x in pd.date_range(pd.Timestamp(end_day) - pd.Timedelta(days=days), end_day, freq="D") if x not in have]
         with ThreadPoolExecutor(workers) as ex:
             parts = [x for x in ex.map(lambda dd: day(f"{sym}USDT", dd), dates) if x is not None]
         df = pd.concat(([old] if old is not None else []) + parts).drop_duplicates("timestamp", keep="last").sort_values("timestamp")
@@ -176,21 +181,51 @@ def vision_update(end_day: str, days: int = 480, workers: int = 8) -> dict[str, 
     return out
 
 
-def train(frames: dict[str, pd.DataFrame], month: pd.Timestamp, seeds=(0, 1, 2)) -> dict:
+def thresholds(oos: pd.DataFrame) -> tuple[float, float]:
+    """연구 final_model 규칙 = 과거 표본 밖 예측의 확장 20/80 분위(예열 8640행).
+    ponytail: 달 안에서는 고정(연구는 봉마다 확장) -- 3년치 분포에 한 달을 더해도 분위가 거의 안 움직인다."""
+    if len(oos) < 8640:
+        raise ValueError(f"표본 밖 예측 {len(oos)}행 < 8640 -- {OOS_SEED} 가 있어야 한다")
+    lo, hi = np.quantile(oos.pred.to_numpy(float), [0.2, 0.8])
+    return float(lo), float(hi)
+
+
+def train(frames: dict[str, pd.DataFrame], month: pd.Timestamp, seeds=(0,), prev: dict | None = None) -> dict:
+    """prev = 지금 배포 판 -- 같은 HGB 설정이면 그 판이 자기 달(학습에 안 쓴 행)에 낸 예측을 표본 밖 기록에 이어 붙인다.
+    설정이 다르면(옛 판) 그 기록·예측은 다른 모델 것이라 버리고 OOS_SEED 부터 다시 시작한다."""
     from sklearn.ensemble import HistGradientBoostingRegressor
+    cut = np.datetime64(month) - np.timedelta64(5 * H, "m")
+    w0, w1 = pd.Timestamp(cut) - pd.Timedelta(days=365), pd.Timestamp(cut)
+    for sym, f in frames.items():   # 10-19: 빠진 날(앞·중간·끝)이 있으면 앞채움 종가로 조용히 학습하지 않게(100k 행 검사로는 안 잡힌다)
+        g = pd.concat([pd.Series([w0]), f.timestamp[(f.timestamp >= w0) & (f.timestamp < w1)], pd.Series([w1])]).diff().max()
+        if g > pd.Timedelta("1h"):
+            raise ValueError(f"{sym} 학습 창 구멍 {g} -- vision_update 를 다시 돌린다")
     F = build_features(frames)
     ts, y = F.ts.to_numpy(), F.y_4h.to_numpy()
-    cut = np.datetime64(month) - np.timedelta64(5 * H, "m")
     tr = (ts < cut) & (ts >= cut - np.timedelta64(365, "D")) & np.isfinite(y)
     X = F[FEATS].to_numpy(dtype=np.float32)
     if tr.sum() < 100_000:   # 365일 = 105,120행 -- 짧은 패널로 조용히 학습하지 않게
         raise ValueError(f"학습 행 부족 {int(tr.sum())}")
-    models, pt = [], []
-    for s in seeds:
-        m = HistGradientBoostingRegressor(random_state=s, **HGB).fit(X[tr][::2], y[tr][::2])
-        models.append(m); pt.append(m.predict(X[tr][::7]))
-    lo, hi = np.quantile(np.mean(pt, 0), [0.2, 0.8])
-    return {"models": models, "features": FEATS, "lo": float(lo), "hi": float(hi), "month": str(month.date()),
+    # 결정성 문: 시드만 다른 두 판의 예측이 같아야 한다(sklearn 이 바뀌어 무작위가 다시 생기면 여기서 멈춘다 -- 1만 행 넘게 써서 'auto' 조건을 재현)
+    Xs, ys = X[tr][::2][:12_000], y[tr][::2][:12_000]
+    if not np.array_equal(*[HistGradientBoostingRegressor(random_state=s, **HGB).fit(Xs, ys).predict(Xs[:2000]) for s in (0, 1)]):
+        raise ValueError("HGB 가 시드에 따라 다른 예측을 낸다 -- early_stopping·max_features 등 무작위 설정 확인")
+    models = [HistGradientBoostingRegressor(random_state=s, **HGB).fit(X[tr][::2], y[tr][::2]) for s in seeds]
+    if prev is not None and prev.get("hgb") != HGB:
+        prev = None   # 다른 설정의 판(10-19 이전 = early_stopping auto) -- 그 표본 밖 기록은 이 모델 분포가 아니다
+    oos = prev.get("oos") if prev is not None else None
+    oos = pd.read_parquet(OOS_SEED) if oos is None else oos
+    new = (ts >= np.datetime64(pd.Timestamp(prev["month"]))) & (ts < np.datetime64(month)) if prev is not None else np.zeros(len(ts), bool)
+    if new.any():   # 같은 달 재실행이면 이어 붙일 행 없음
+        oos = pd.concat([oos, pd.DataFrame({"ts": ts[new], "pred": predict(prev, F[new]).astype(np.float32)})])
+    oos = oos[oos.ts < month].drop_duplicates("ts", keep="first").sort_values("ts").reset_index(drop=True)
+    lo, hi = thresholds(oos)
+    # 품질 문 -- «지난 판보다 나은가»는 재학습 때 잴 수 없다(이웃 달 모델끼리 예측 상관 −.02~.37, 10-19 실측).
+    #   그래서 망가진 학습(상수 예측·단위 사고)만 막는다: 학습 행 예측 폭이 표본 밖 기록 폭의 0.5~3배(정상 1.1~1.7).
+    k = float(np.mean([m.predict(X[tr][::7]) for m in models], 0).std() / oos.pred.std())
+    if not 0.5 <= k <= 3.0:
+        raise ValueError(f"새 모델 예측 폭 = 표본 밖 기록의 {k:.2f}배 -- 교체 안 함")
+    return {"models": models, "features": FEATS, "hgb": dict(HGB), "lo": lo, "hi": hi, "month": str(month.date()), "oos": oos, "spread_ratio": round(k, 3),
             "train_window": [str(pd.Timestamp(ts[tr].min())), str(pd.Timestamp(ts[tr].max()))], "n_train": int(tr.sum()), "seeds": list(seeds)}
 
 
@@ -359,14 +394,14 @@ if __name__ == "__main__":
         import joblib
         month = pd.Timestamp(a[a.index("--month") + 1]) if "--month" in a else pd.Timestamp.utcnow().tz_localize(None).normalize().replace(day=1)
         frames = vision_update(str((pd.Timestamp.utcnow().tz_localize(None).normalize() - pd.Timedelta("1D")).date()))
-        art = train(frames, month)
+        art = train(frames, month, prev=joblib.load(ARTIFACT) if ARTIFACT.exists() else None)
         ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
         tmp = ARTIFACT.with_suffix(".tmp")
         joblib.dump(art, tmp)   # 다 쓴 뒤 교체 -- 쓰다 죽어도 지난 판이 남게
-        if ARTIFACT.exists():
-            ARTIFACT.replace(ARTIFACT.with_suffix(".joblib.prev"))
+        if ARTIFACT.exists():   # 10-19: 지난 판은 교체 시각 이름으로 전부 남긴다(옛 .prev 하나는 같은 달 재실행에 덮였다)
+            ARTIFACT.replace(ARTIFACT.with_suffix(f".{pd.Timestamp.utcnow():%Y%m%dT%H%M}.joblib"))
         tmp.replace(ARTIFACT)
-        print("학습", {k: v for k, v in art.items() if k != "models"})
+        print("학습", {k: v for k, v in art.items() if k not in ("models", "oos")}, "표본 밖 기록", len(art["oos"]))
     elif "--parity" in a:
         parity()
     else:

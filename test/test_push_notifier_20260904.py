@@ -92,7 +92,7 @@ class EnabledDetectorsTests(unittest.TestCase):
     2026-10-05: 켜져 있던 net_score·v_rebound 의 원천 API 가 지워져 09-24 이후 발송 0건이었다."""
 
     def test_production_switch_is_what_we_think_it_is(self) -> None:
-        self.assertEqual(notifier.ENABLED_DETECTORS, {"verdict", "risk", "burst_hold", "prewarn_hold"})
+        self.assertEqual(notifier.ENABLED_DETECTORS, {"verdict", "risk", "burst_hold"})   # 2026-10-18 prewarn_hold 제거
         self.assertEqual(set(notifier.PUSH_KINDS), notifier.ENABLED_DETECTORS)   # 알림 센터 표 = 실제 발송 종류
 
     def test_calendar_file_parses_and_has_dates(self) -> None:
@@ -143,14 +143,6 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(len(notifier.detect_burst_hold(mc, _acct(_pos()), st, 2)), 1)
         self.assertEqual(notifier.detect_burst_hold(mc, _acct(_pos()), st, 3), [])      # 켜진 채 -- 다시 안 보냄
         self.assertEqual(notifier.detect_burst_hold({}, _acct(_pos()), st, 4), [])
-
-    def test_prewarn_for_held_coin_only(self) -> None:
-        st: dict = {}
-        bo = {"sol": {"available": True, "timestamp": "T1", "prewarn": {"on": True}},
-              "eth": {"available": True, "timestamp": "T1", "prewarn": {"on": True}}}
-        notes = notifier.detect_prewarn_hold(bo, _acct(_pos(symbol="SOLUSDC")), st)
-        self.assertEqual([n.key for n in notes], ["prewarn:sol:T1"])
-        self.assertEqual(notifier.detect_prewarn_hold(bo, _acct(_pos(symbol="SOLUSDC")), st), [])
 
 
 class RunCycleTests(unittest.IsolatedAsyncioTestCase):

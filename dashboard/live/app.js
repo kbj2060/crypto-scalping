@@ -426,7 +426,7 @@ let latestKalshi = null;
 let kalshiLastFetchAt = 0;
 let latestFlowHeatmap = null;
 let flowHeatmapLastFetchAt = 0;
-// 2026-09-11 추세 전환 탐지기. 방향은 예측하지 않는다 -- «전환이 왔다»만 말한다.
+// 코인별 RVOL 워커(2026-09-11 추세 전환 탐지기 → 2026-10-18 RVOL 전용, 예고·탐지 제거).
 // 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
 let latestBreakoutDetector = null;
 let breakoutDetectorLastFetchAt = 0;
@@ -648,12 +648,12 @@ async function setActiveSnapshotAsset(asset) {
   liquidation5mLastFetchAt = 0;
   liquidationMapLastFetchAt = 0;
   lastSnapshotHistoryFetchAt = 0;
-  // 🔴2026-09-30 차트 표식(전환 예고/탐지)도 코인별이다 -- 안 비우면 ETH 사각형이 SOL 차트에 최대 60초 남았다.
+  // 🔴2026-09-30 차트 표식도 코인별이다 -- 안 비우면 ETH 사각형이 SOL 차트에 최대 60초 남았다.
   latestChartMarkers = null; chartMarkersLastFetchAt = 0;
   // 2026-10-04 시장 맥락·추세 칩도 코인별(서버 ?asset=) -- 옛 코인 값을 새 코인 이름 아래 두지 않는다.
   latestMarketCtx = null; marketCtxLastFetchAt = 0; latestTrend = null; trendLastFetchAt = 0;
   latestPaper = null; paperLastFetchAt = 0;   // 2026-10-04 모의 엔진도 코인별(paper_<coin>/)
-  latestBreakoutDetector = null; breakoutDetectorLastFetchAt = 0;   // 경보기·RVOL 배지도 코인별
+  latestBreakoutDetector = null; breakoutDetectorLastFetchAt = 0;   // RVOL 배지도 코인별(2026-10-18 경보기 제거)
   renderMarketCtx();   // 옛 코인 카드를 다음 폴링(최대 1초)까지 두지 않는다
   renderPaper();
 
@@ -1278,8 +1278,20 @@ function renderOpsStatus(payload) {
         <small>${ageText}</small>
       </div>
     </article>`;
-  }).join(""));
+  }).join("") + opsOkToggleHtml(checks.filter((c) => opsTone(c.status) === "good").length));
 }
+// 2026-10-17 휴대폰(≤720)만 보이는 «정상 N개 보기» -- 정상 줄은 CSS 가 접고, 펼침은 목록의 show-ok 클래스(30초 재그리기에도 유지)
+function opsOkToggleHtml(n) {
+  const open = !!el("opsHealthList")?.classList.contains("show-ok");
+  return n ? `<button type="button" class="ops-ok-toggle" aria-expanded="${open}">정상 ${n}개 ${open ? "접기" : "보기"}</button>` : "";
+}
+document.addEventListener("click", (e) => {
+  const b = e.target instanceof Element ? e.target.closest(".ops-ok-toggle") : null;
+  if (!b) return;
+  const open = b.parentElement.classList.toggle("show-ok");
+  b.setAttribute("aria-expanded", String(open));
+  b.textContent = b.textContent.replace(/보기|접기/, open ? "접기" : "보기");
+});
 
 // 잔고가 «어느 자산 지갑»의 것인지, 그리고 화면이 안 쓰는 지갑에 돈이 남아 있는지.
 // 🔴단일자산 담보 모드에서 최상위 합계는 USDT 전용이라, 서버가 수동 주문 심볼의 담보 자산
@@ -1805,8 +1817,6 @@ const STRIP_BAR_LABEL_BY_TONE = {
   extreme_detector: { good: "바닥 발동", bad: "천장 발동", neutral: "미발동" },
   // 2026-09-15 E|r| 게이트. 축이 하나(발동 여부)다 — **방향 축이 없다**.
   evr_gate: { bad: "발동", neutral: "미발동" },
-  // 2026-09-11 경보기(예고 모델). 축이 하나(warn/neutral)라 §5-4 문제 없음.
-  breakout_prewarn: { warn: "전환 예고", neutral: "미발동" },
   // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
   // 통일한 의미가 없다.
   // 2026-09-08: 라벨을 **모델의 주장**에 맞춘다(사용자 지적). V자는 되돌림(반전) 콜,
@@ -1939,29 +1949,12 @@ function toggleEntryDetail(btn) {
 // indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
 // 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
 const MODEL_INDICATOR_MEANING = {
-  // 2026-09-09 극점 탐지기. ⚠️키는 subText 문자열이다(규약 §5-1).
-  breakout_prewarn: {
-    "전환 예고": "앞으로 30분 안에 거래대금·체결속도가 함께 급증할 확률이 상위 10%에 들었어요 — 방향은 말하지 않습니다.",
-    "미발동": "앞으로 30분 안에 거래량 급증이 올 확률이 평소 수준이에요.",
-    "웜업": "예고 모델이 아직 첫 계산을 끝내지 않았어요.",
-    "데이터 없음": "예고 모델이 값을 내지 못하고 있어요.",
-    "오류": "시세를 읽지 못해 이번 봉을 채점하지 못했어요.",
-  },
-
+  // 2026-10-18 경보기(전환 예고) 항목 제거 -- 재검증에서 급증 «뒤»에 켜졌다(scripts/research_eth_prewarn_lagging_verify_20261018.py).
   // ⚠️키는 subText 문자열이다(규약 §5-1) -- 라벨을 바꾸면 여기도 같이 바꾼다.
 };
 
 const MODEL_INDICATOR_DETAIL = {
-  // 2026-09-30 탐지기 카드 제거(사용자 결정) -- 경보기만 남는다. 숫자는 재생 검증(tmp/bd_verify_20260930/replay.py).
-  breakout_prewarn:
-    "앞으로 30분 안에 **거래대금·체결속도가 함께 급증하는가**(둘 다 z288 이 후행 2016봉 q90 이상 -- 옛 «탐지기» 조건)를 "
-    + "HGB 5시드가 확률로 냅니다. 확률이 후행 q90 을 넘으면 켜집니다(하루 약 29회).\n\n"
-    + "[재생 검증 2026-09-30] 켜졌을 때 실제로 30분 안에 급증이 온 비율(기저 23%): "
-    + "2025-09~12 78.8% · 2026-01~03 78.3% · 04~09-10 76.4% · **배포 후 09-11~28 77.8%** -- 주장(78.5%)이 유지됩니다. "
-    + "모델 없이 «거래대금 z + 체결속도 z» 상위 10% 는 68~73% 라 모델이 5~8%p 더 맞힙니다.\n\n"
-    + "⚠️방향은 말하지 않습니다. 급증 봉의 방향으로 1시간 이어진 비율은 45~49%(동전 이하)이고, "
-    + "«큰 이동이 온다»로 읽으면 거래량 없이 «봉 가격폭 상위»를 보는 쪽이 앞 1시간 이탈을 더 잘 잡았습니다(5개 구간 모두). "
-    + "그래서 «곧 거래가 몰린다 -- 새 진입·지정가 대기는 조심»의 참고로만 씁니다."
+  // 2026-10-18 경보기 항목 제거(전환 예고·탐지 내림).
 };
 
 // 2026-08-30 (user request): "학습 horizon을 배지로" -- each signal's own validated forward-
@@ -1978,8 +1971,7 @@ const MODEL_INDICATOR_DETAIL = {
 // its INPUT lookback, not its evaluation horizon, which is 1시간 like its 6 scorecard siblings).
 const SIGNAL_HORIZON = {
   // -- model indicators --
-  // 2026-09-11 경보기(예고 모델). 옛 «경보 2시간» 은 자명한 대리 타깃 값이라 교체했다.
-  breakout_prewarn: { text: "예고 = 30분", title: "앞으로 30분 이내에 거래대금·체결속도가 **함께** 급증할(둘 다 후행 q90 이상) 확률이다(HGB 5시드 동결, 33피쳐). 임계는 확률의 후행 2016봉 q90 이라 인과적이다. 재생 검증: 배포 후(09-11~28) 정밀도 77.8% · 기저 23%. ⚠️방향도 «큰 이동»도 말하지 않는다 -- «거래가 몰린다»만." },
+  // 2026-10-18 경보기(예고 30분) 배지 제거.
 };
 
 // 2026-09-06: `progress`(예 "26/30봉")를 주면 배지 문구에 덧붙인다. 새 배지를 만들지 않는 이유는
@@ -4201,7 +4193,7 @@ function fcRowHtml(sec) {
   const g4 = eth && latestDir4h && latestDir4h.ok ? latestDir4h : null, old4 = g4 && Date.now() - g4.decided_at_ms > 15 * 60e3;
   const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(11, 16);
   const d4Tip = g4 ? `4h 방향 예측 — 매달 재학습 HGB(ETH 65피쳐, 최근 365일) · ${g4.model_month} 모델(학습 ${g4.train_window[0].slice(0, 10)}~${g4.train_window[1].slice(0, 10)})\n`
-      + `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(1)}bp · 상승 문턱 ≥ +${g4.hi.toFixed(1)} · 하락 문턱 ≤ ${g4.lo.toFixed(1)} (학습 예측 상·하위 20%) · ${kst(g4.decided_at_ms)} KST 마감 5분봉\n`
+      + `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(1)}bp · 상승 문턱 ≥ +${g4.hi.toFixed(1)} · 하락 문턱 ≤ ${g4.lo.toFixed(1)} (과거 표본 밖 예측 상·하위 20%) · ${kst(g4.decided_at_ms)} KST 마감 5분봉\n`
       + `2025~26 IC .06 · 2023~24 검증 불통과 · 참고용(전진 판정 전)${g4.nan_feats.length ? `\n🔴빈 피쳐 ${g4.nan_feats.length}: ${g4.nan_feats.join(", ")}` : ""}\n${vTip}`
     : `4h 방향 예측(ETH 전용) — ${eth ? (latestDir4h && latestDir4h.reason ? `불러오기 실패: ${latestDir4h.reason}` : "불러오는 중") : "ETH 에서만 계산"}\n${vTip}`;
   // 2026-10-16 시안 ④: 다음 문턱까지 거리 + 문턱 눈금(왼쪽 색 = 숏 문턱 밖 · 오른쪽 색 = 롱 문턱 밖 · ● 지금 · ○ 1시간 전)
@@ -4304,7 +4296,7 @@ MC_TIPS.q_rate = "나스닥 = 나스닥100 실시간(Hyperliquid xyz:XYZ100 무�
 MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위치(VWAP·%B·RSI) 줄 제거 -- 설명도 벽만
 MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아니다(지난 7·14·28·56·90일 종가 대비 5표, 미래 적중 48~58%).\n"
   + "15분 · 칼시 = 미국 예측시장 15분 ETH 위/아래 확률(55~45% 비등) — 참고, 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침.\n"
-  + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 학습 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
+  + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 과거 표본 밖 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
   + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65%.\n"
   + "4~13주 예측 = 달러·유동성 Z91(|Z|≥1 만) · 2018~26 56일 BTC 70% · ETH 75%(고른 기간 성적).\n"
   + "변동성 = 4시간 실현변동성 GBM(ETH 22피쳐) · 순위상관 .79 · 확대 AUC .82 · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀).\n"
@@ -4371,7 +4363,7 @@ const mcGfx = {
       return `<g><title>${mid > 0 ? `현재가에서 ${pf(lo)}까지 매수호가 ${kq(b[i])} · ${pf(hi)}까지 매도호가 ${kq(a[i])} (±${bp}bp)` : `±${bp}bp`}</title>`
         + `<rect x="${(c - gap - bw).toFixed(1)}" y="${y}" width="${bw.toFixed(1)}" height="${bh}" rx="2" fill="var(--good)" opacity=".75"/><rect x="${c + gap}" y="${y}" width="${aw.toFixed(1)}" height="${bh}" rx="2" fill="var(--bad)" opacity=".75"/>`
         + `<text x="${(c - gap - 4 - bw).toFixed(1)}" y="${ty}" font-size="${fs}" fill="var(--text)" text-anchor="end">${kq(b[i])}</text><text x="${(c + gap + 4 + aw).toFixed(1)}" y="${ty}" font-size="${fs}" fill="var(--text)">${kq(a[i])}</text>`
-        + (mid > 0 ? `<text x="0" y="${ty}" font-size="${fs}" fill="var(--good)">${pf(lo)}</text><text x="${w}" y="${ty}" font-size="${fs}" fill="var(--bad)" text-anchor="end">${pf(hi)}</text>`
+        + (mid > 0 ? `<text x="0" y="${ty}" font-size="${fs}" fill="var(--good)">${pf(lo)}</text><text x="${w - 1}" y="${ty}" font-size="${fs}" fill="var(--bad)" text-anchor="end">${pf(hi)}</text>`
           : `<text x="${c}" y="${ty}" font-size="${fs}" fill="var(--muted)" text-anchor="middle">±${bp}</text>`)
         + `</g>`;
     }).join("") + `</svg>`;
@@ -6501,12 +6493,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 이웃끼리 겹친다 -- 라벨을 버리지 않고 **겹치면 한 줄씩 내린다**(값은 다 보여야 한다).
     const deltaBoxes = [];
     const deltaFont = bw >= 34 ? 11 : 9;
-    // 2026-10-06 전환 예고 «켜진 첫 봉»만 델타 아래 «전환예고 N%»(사용자 선택 C) -- 한 번 켜지면 ~1시간 이어져 나머지 봉은 안 찍는다.
-    const pwFirst = new Map();   // 봉 시각 -> 그때 30분 안 탐지 확률
-    if (isSnapshotChart && latestChartMarkers && latestChartMarkers.available !== false) {
-      const cmx = latestChartMarkers, pw = (cmx.spans || {}).trend_prewarn || [], pp = (cmx.span_meta || {}).trend_prewarn_p || [];
-      (cmx.times || []).forEach((t, k) => { if (pw[k] && !(k && pw[k - 1])) pwFirst.set(Math.floor(Date.parse(t) / 1000), pp[k]); });
-    }
     const pocPts = [];    // 2026-09-19 사용자 요청: 봉별 POC 를 선으로 잇는다.
     barRows.forEach((rows, i) => {
       const c = candles[i], x = xAt(i);
@@ -6630,17 +6616,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (plotClip) dTxt.setAttribute("clip-path", plotClip);
         svg.appendChild(dTxt);
         deltaCache.set(c.time, { sig: dSig, n: dTxt });
-        }
-        if (pwFirst.has(c.time)) {
-          const pv = pwFirst.get(c.time), lab = "전환예고" + (pv != null ? ` ${Math.round(pv * 100)}%` : "");
-          const py = Math.min(plotBottom - 3, dY + deltaFont + 4);
-          const pt = document.createElementNS(NS, "text");
-          Object.entries({ x: cxD, y: py, "text-anchor": "middle", "font-size": deltaFont, "font-weight": 700, fill: "var(--warn)",
-                           stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" }).forEach(([k, v]) => pt.setAttribute(k, v));
-          pt.textContent = lab;
-          const tt = document.createElementNS(NS, "title");
-          tt.textContent = "전환 예고가 이 봉에서 처음 켜졌다(앞으로 30분 안 전환 탐지 확률" + (pv != null ? ` ${(pv * 100).toFixed(1)}%` : "") + ") -- 켜져 있는 동안의 나머지 봉은 표시 안 함";
-          pt.appendChild(tt); svg.appendChild(pt);
         }
       }
     });
@@ -7043,7 +7018,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 진하기로 보여주던 것인데(2026-09-09 C안), 증거신호가 화면에서 빠지면서 빈 줄만 남았다.
     // 방향 이벤트는 아래 **봉 밀착 삼각형** 하나로 말한다 -- 같은 것을 두 문법으로 말하지 않는다.
 
-    // 2026-10-06 전환 예고·탐지 구간 줄(전환 리본) 제거(사용자 지시) -- 예고는 «켜진 첫 봉»만 풋프린트 델타 아래 «전환예고 N%»(pwFirst).
+    // 2026-10-06 전환 예고·탐지 구간 줄(전환 리본) 제거 · 2026-10-18 델타 아래 «전환예고 N%»·툴팁 줄까지 제거(사용자 지시, 워커는 RVOL 전용).
 
     // 이벤트 트리거 -- 매매 저널과 **같은 삼각형 문법**을 쓰고 `markerCounts` 를 공유해
     // 같은 봉에서 저널 마커와 겹치지 않게 한다(스택 25px). 저널보다 한 치수 작게(±5) 그려
@@ -7651,7 +7626,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     const cmNow = latestChartMarkers;
     let trigLines = "";
     if (isSnapshotChart && cmNow && cmNow.available) {
-      const k = (cmNow.times || []).findIndex((t) => Math.floor(Date.parse(t) / 1000) === c.time);
       (cmNow.events || []).forEach((ev) => {
         if (Math.floor(Date.parse(ev.t) / 1000) !== c.time) return;
         trigLines += `<br>${ev.side === "bottom" ? "▲" : "▼"} ${ev.label}`
@@ -7659,18 +7633,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           + (ev.p != null ? ` · 확률 ${(Number(ev.p) * 100).toFixed(0)}%` : "")
           + (ev.demoted ? " · 손실가중 헤드가 컷 미달로 강등" : "");
       });
-      if (k >= 0) {
-        const sp = cmNow.spans || {}, meta = cmNow.span_meta || {};
-        const at = (arr) => (Array.isArray(arr) ? arr[k] : undefined);
-        if (at(sp.trend_prewarn)) {
-          const pp = at(meta.trend_prewarn_p), th = at(meta.trend_prewarn_thr);
-          trigLines += "<br>전환 예고 (앞으로 30분 내 발동 확률)"
-            + (pp == null ? "" : ` ${(pp * 100).toFixed(1)}%`)
-            + (th == null ? "" : ` / 임계 ${(th * 100).toFixed(1)}%`)
-            + (chipScoreLine("prewarn") ? `<br><span class="muted">${escapeHtml(chipScoreLine("prewarn"))}</span>` : "");
-        }
-        if (at(sp.trend_detect)) trigLines += "<br>전환 탐지 지속 중 (거래대금·체결속도 둘 다 q90 초과)";
-      }
     }
     showTooltip(evt.pageX, evt.pageY, `
       <b>${fmtDateTick(c.time * 1000)}</b><br>
@@ -8519,7 +8481,7 @@ function renderNotifyMain() {
     label = "차단됨"; disabled = true;
   } else if (sub) {
     state = "good"; headline = "알림이 켜져 있습니다";
-    sub_text = "포지션 위험·보유 중 청산 급증은 소리와 함께, 판정일·전환 예고는 무음으로 옵니다."; label = "알림 끄기";
+    sub_text = "포지션 위험·보유 중 청산 급증은 소리와 함께, 판정일은 무음으로 옵니다."; label = "알림 끄기";
   } else {
     state = "neutral"; headline = "알림이 꺼져 있습니다";
     sub_text = "켜면 이 기기로 신호가 도착합니다. 창을 닫아도 옵니다."; label = "알림 켜기";
@@ -8787,11 +8749,6 @@ function chipScoreLine(kind) {
   const s = chipScore[activeSnapshotAsset], pc = (v) => `${Math.round(v * 100)}%`;
   if (!s) return "";
   const head = `실전 성적(최근 ${s.days}일`, few = (n) => (n < 30 ? " · 표본 적음" : "");
-  if (kind === "prewarn") {
-    const p = s.prewarn;
-    if (!p) return "실전 성적: 기록 중";
-    return `${head}): 예고 ${p.warn}봉 중 30분 안 탐지 ${p.hits}봉${p.warn ? ` (${pc(p.hits / p.warn)})` : ""} · 아무 때나 ${pc(p.base)}${few(p.warn)}`;
-  }
   if (kind === "burst") {
     const b = s.burst;
     if (!b) return "실전 성적: 아직 0건 — 켜진 뒤 15분 되돌림을 기록합니다";
