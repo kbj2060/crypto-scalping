@@ -86,21 +86,6 @@ def save_state(state: dict[str, Any]) -> None:
     tmp.replace(STATE_PATH)
 
 
-def parse_utc(value: Any) -> float | None:
-    """ISO8601 -> epoch seconds. 이 저장소의 시각 필드는 'Z' 접미사와 '+00:00'이 섞여 있고
-    타임존이 아예 없는 것도 있다(그 경우 UTC로 읽는다)."""
-    if not value:
-        return None
-    try:
-        text = str(value).replace("Z", "+00:00")
-        dt = datetime.fromisoformat(text)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.timestamp()
-    except (ValueError, TypeError):
-        return None
-
-
 # ------------------------------------------------------------------------------------------
 # 알림 한 건
 # ------------------------------------------------------------------------------------------
