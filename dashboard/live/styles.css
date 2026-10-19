@@ -359,82 +359,10 @@ body {
 .ops-health-row.good .ops-health-status-badge { color: var(--on-fill); background: var(--good); border-color: transparent; }
 .ops-health-row.warn .ops-health-status-badge { color: var(--on-fill); background: var(--amber); border-color: transparent; }
 .ops-health-row.bad .ops-health-status-badge { color: var(--on-fill); background: var(--bad); border-color: transparent; }
-/* 2026-08-27 (user request): fixed absolute size for the model-indicator badges specifically
-   (미발동/상승압력/주의/안정/... -- see the badge-text values app.js's classifyIndicators() feeds
-   into this span) -- was sized purely by content/padding before, so "안정" and "BOTTOM 발동" made
-   visibly different-size pills in the same column. NOT applied to #opsHealthList (Ops-tab
-   checklist, longer free-text statuses) -- still out of scope, different content shape. width is
-   fixed (not max-width) so text wraps to a second line instead of stretching the pill; the
-   text-align centers both a short one-line label and a wrapped two-line one.
-   2026-08-30: #snapSpecializedSignalList (특화 감지기, reuses renderModelIndicatorList's same
-   markup -- see that function's targetId param) missed this list when it was added, so its "대기"
-   badge rendered smaller than every other panel's badges -- same rule now applies here too.
-   2026-08-31: #evidenceSignalList dropped out of this selector -- that list's rows no longer render
-   a .ops-health-status-badge at all (see .meter-col below, which now renders unconditionally for
-   every row, fired or not). #snapSpecializedSignalList stays in this selector -- V자 급등락 still
-   falls back to the plain badge while idle (no it.proba yet), unlike evidence signals. */
-/* 2026-09-06: #snapSpecializedSignalList 도 이 선택자에서 빠졌다 -- 그 목록은 이제 상태와 무관하게
-   .meter-col 만 그린다(renderModelIndicatorList 의 forceMeter). 그 전에는 V자 급등락이 확률이 없는
-   동안에만 이 알약으로 떨어지고 지속 규칙·B2 는 늘 알약이라, 한 목록 안에서 행마다·상태마다 모양이
-   달랐다 -- #evidenceSignalList 가 2026-08-31 에 같은 이유로 빠진 것과 같은 정리다. */
-#snapModelIndicatorList .ops-health-status-badge {
-  width: 64px;
-  text-align: center;
-}
-/* Inline probability meter (2026-08-31, 9th pass -- see
-   eth_dashboard_evidence_signal_tp_price_display_20260831 memory for the full redesign history:
-   crammed badge -> badge+<small> -> probability ring ("옵션 B" of a 4-way mockup) -> user decided
-   the ring itself "생각보다 별로" -> this inline meter bar ("옵션 A" of the same mockup), first laid
-   out horizontally (gauge left, state+price stacked right) -> user asked for the gauge to sit
-   BETWEEN the state text and price instead, matching the mockup's own vertical layout exactly (see
-   .meter-col below: state, then gauge, then price, top to bottom). Renamed evidence-meter-* ->
-   meter-* in this same pass since renderModelIndicatorList now reuses it too (V자 급등락's
-   probability, via it.proba) -- no longer evidence-signal-specific.
-   - Renders unconditionally for every EVIDENCE-signal row, fired or not -- no model_proba means an
-     empty (0%) bar with the neutral/warn state text, not a differently-shaped fallback pill (keeps
-     that list's columns lined up, "오와 열이 안맞아"/"너비를 맞춰줘" from the ring era). Not forced
-     for renderModelIndicatorList's other (non-evidence) rows -- most of those have no probability
-     concept at all, so they keep the plain .ops-health-status-badge pill; nothing to align against
-     since V자 급등락 is currently the only row in its own list.
-   - .meter-col has a fixed WIDTH (not max-width, same technique the old fixed-64px badge used) +
-     justify-items:end, so state/gauge/price all right-align to the same column regardless of which
-     line is longest in a given row.
-   - warn (혼재)/neutral (not fired) color variants alongside good/bad. */
-.meter-col { display: grid; gap: 4px; justify-items: end; width: 92px; }
-.meter-state { font: 800 11.5px/1.2 var(--font-sans); white-space: nowrap; }
-.meter-state.good { color: var(--good); }
-.meter-state.bad { color: var(--bad); }
-.meter-state.warn { color: var(--amber); }
-.meter-state.neutral { color: var(--muted); }
-.meter-gauge { display: flex; align-items: center; gap: 5px; }
-.meter-track { width: 36px; height: 4px; border-radius: 2px; background: rgb(var(--lift) / 0.08); overflow: hidden; }
-.meter-fill { display: block; height: 100%; border-radius: 2px; }
-.meter-fill.good { background: var(--good); }
-.meter-fill.bad { background: var(--bad); }
-.meter-fill.warn { background: var(--amber); }
-.meter-fill.neutral { background: var(--muted); }
-.meter-pct { font: 700 11px/1 var(--font-mono); color: var(--muted); min-width: 26px; text-align: right; }
-.meter-price { font: 700 11px/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
 
 /* **강조** 가 실제 굵기로 나온다(2026-09-16). color 는 «자세히» 블록을 위한 것이다 --
-   .signal-detail 본문만 muted(라이트 85,92,108 · 다크 139,145,166)라 색이 실제로 올라가고,
-   .signal-meaning 은 이미 --text 라 굵기 400->700 만 걸린다. 실측으로 확인. */
-.signal-meaning b, .signal-detail b { font-weight: 700; color: var(--text); }
-/* Always-visible "지금 이게 무슨 뜻인지" line -- unlike .signal-detail below, this never needs a
-   click; it only renders when there's something actionable to say (elevated/firing state). Border
-   color follows the row's tone (good/warn/bad) so danger reads as danger without extra text. */
-.signal-meaning {
-  margin: 4px 0 0;
-  padding: 8px 10px;
-  border-left: 2px solid var(--line);
-  background: rgb(var(--lift) / 0.025);
-  border-radius: 0 6px 6px 0;
-  color: var(--text);
-  font: 11px/1.55 var(--font-sans);
-}
-.ops-health-row.good .signal-meaning { border-left-color: var(--good); }
-.ops-health-row.warn .signal-meaning { border-left-color: var(--amber); }
-.ops-health-row.bad .signal-meaning { border-left-color: var(--bad); }
+   .signal-detail 본문만 muted(라이트 85,92,108 · 다크 139,145,166)라 색이 실제로 올라간다. 실측으로 확인. */
+.signal-detail b { font-weight: 700; color: var(--text); }
 
 /* 2026-08-25: .ops-health-row.warn is shared markup between the Ops tab's health checklist and the
    Snapshot tab's model-indicator/evidence-signal rows (renderOpsStatus/renderModelIndicatorList/
@@ -444,7 +372,6 @@ body {
    only inside #snapshotTabPanel via ID specificity rather than editing the shared base rules. */
 #snapshotTabPanel .ops-health-row.warn .ops-health-dot { background: var(--warn); }
 #snapshotTabPanel .ops-health-row.warn .ops-health-status-badge { background: var(--warn); }
-#snapshotTabPanel .ops-health-row.warn .signal-meaning { border-left-color: var(--warn); }
 
 /* Per-signal "자세히" expandable detail (model indicators + evidence signals, Snapshot tab).
    Collapsed by default to keep the live-status view compact; open/closed state is tracked in JS
@@ -476,69 +403,6 @@ body {
   overflow-wrap: anywhere;
 }
 .signal-detail.open { display: block; }
-
-/* Evidence-signal activity strips (Snapshot tab) -- scoped to .evidence-row so this doesn't
-   change the plain ops-health-row look used by the health-check panel. */
-
-.evidence-strip-wrap { margin-top: 4px; }
-
-/* 2026-08-26 (user request): dropped the old 320px cap -- it left the strip stopping well short
-   of its row's status badge (.ops-health-status-badge, e.g. "미발동"/"BOTTOM 발동"), even though
-   .ops-health-info (its parent, the row's middle 1fr grid column) had the room to go all the way
-   to the badge column. Applies to both consumers of this class (evidence-signal AND
-   model-indicator panels, both via toneStripSvg()) -- width:100% now fully governs. */
-/* 2026-08-31: went 20px (original) -> 10px (matching the axis row, too short) -> 20px (reverted,
-   too tall) -> settled on 15px, the midpoint, per explicit user request each step. */
-/* 2026-08-31: went 20px (original) -> 10px (matching the axis row, too short) -> 20px (reverted,
-   too tall) -> settled on 15px, the midpoint, per explicit user request each step.
-   2026-09-10: 20px 로 올렸다가 사용자 지시로 되돌림 -- 키울 대상은 이 패널 띠가 아니라
-   청산맵 차트 **안**의 증거신호 레인(app.js LANE_H)이었다. */
-.evidence-strip { display: block; width: 100%; height: 15px; }
-/* 2026-08-31 user request: a persistent time axis under the strip (design candidate "01 눈금 축")
-   so roughly-when is visible without hovering -- see stripAxisHtml() in app.js, 5 evenly spaced
-   ticks. Matches .evidence-strip-caption's font/color so the two read as one family; smaller
-   size since these are secondary to the caption's 바닥/천장 last-fired text above it. */
-.evidence-strip-axis { display: flex; justify-content: space-between; margin-top: 4px; color: var(--muted); font: 11px/1 var(--font-mono); letter-spacing: 0.02em; opacity: 0.75; }
-.evidence-bar { transition: fill 0.4s ease, opacity 0.4s ease; }
-.evidence-bar-live { animation: statusPulse 1.5s ease-in-out infinite; }
-/* 2026-08-27 (user request): the "now" marker (accent-colored outline on the last/rightmost bar)
-   is removed entirely -- first its blink (nowMarkerBlink), then this turn the static outline
-   itself too. Position alone no longer gets any special styling; .evidence-strip-live below is now
-   the only visual signal tied to the last bar, and only while genuinely live/firing.
-   .evidence-bar-provisional below used to borrow this rule's stroke color for its dashed outline
-   (it never set its own) -- that dashed line is gone along with it, fill-opacity is what's left.
-   2026-08-31 (user request): this bar (the still-forming, not-yet-confirmed segment -- see
-   toneStripSvg's merge guard, it never merges into the confirmed segment before it even when the
-   tone matches) now ALWAYS pulses, not just while actively firing -- previously a neutral/idle
-   forming bar (the common case) just sat there as a small static gray block visually detached from
-   the rest of the strip, which read as a rendering glitch rather than "this one's still live".
-   Independent of .evidence-strip-live below (that stays tone-gated, an extra amplified whole-gauge
-   cue only while something's genuinely firing) -- the two can overlap (slightly different periods,
-   1.4s vs this rule's 1.4s coincide here but .evidence-bar-live is 1.5s) without conflicting, same
-   as they already did before this change whenever the forming bar's own tone was non-neutral. */
-.evidence-bar-provisional { fill-opacity: 0.6; animation: statusPulse 1.4s ease-in-out infinite; }
-/* 2026-08-27 (user request): whole-gauge blink, reserved for "this signal's still-forming bar is
-   both provisional AND currently firing (non-neutral)" -- see toneStripSvg's liveFiring param,
-   set by evidenceStripSvg from the provisional liveTone. An extra amplified cue (the WHOLE strip
-   pulses, not just the one bar) layered on top of .evidence-bar-provisional's own always-on pulse
-   above, only while something's genuinely firing -- a fully confirmed render (including every
-   model-indicator strip, which never sets liveFiring) stays static. */
-.evidence-strip-live { animation: statusPulse 1.4s ease-in-out infinite; }
-/* Model indicators (#snapModelIndicatorList) have no in-progress bar at all -- their "now" bar is
-   just the latest CONFIRMED sample, same as every bar to its left -- so .evidence-bar-live's
-   confirmed-and-firing pulse (still used by evidence signals, untouched above) doesn't apply here. */
-#snapModelIndicatorList .evidence-bar-live {
-  animation: none;
-}
-/* 2026-08-25: caption is now a 2-part row -- 바닥/천장 last-fired text on the left, the hover/
-   current-time label (.strip-time-now) on the right, "그래프 가장 오른쪽 끝" per user request.
-   flex-wrap so a narrow column drops the time to its own line instead of clipping it. */
-
-/* Model indicators have no 바닥/천장 caption -- their hover/current-time label instead shares the
-   "자세히" toggle's own line, right-aligned against it. */
-.strip-time-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; margin-top: 4px; }
-.strip-time-row .detail-toggle { margin-top: 0; }
-.strip-time-now { font: 11px/1 var(--font-mono); color: var(--muted); letter-spacing: 0.02em; white-space: nowrap; }
 
 /* Liquidation map panel (2026-08-24) -- price-ladder list, resistance above the current-price row,
    support below, matching how the chart overlay's lines read top-to-bottom. */
@@ -579,38 +443,10 @@ body {
 }
 
 /* 2026-08-27: the liq-burst alert banner (removed) used to sit right below this panel's header,
-   visually separating the header's divider line from the gauge underneath. Now that the banner's
-   info lives inline in the gauge tag (see .liq-vol-gauge-live below), that divider reads as an
-   orphaned line with nothing between it and the gauge -- scoped override, not touching the base
+   visually separating the header's divider line from what sat underneath. Without it the divider
+   reads as an orphaned line -- scoped override, not touching the base
    .ops-health-head rule shared by 5 other panel headers. */
 .liq-map-panel .ops-health-head { border-bottom: none; }
-
-/* Liquidation long/short volume gauge (2026-08-27, recreated) -- proportional split bar, long=red
-   (--bad)/short=green(--good), real $ labels alongside so relative size isn't the only cue. */
-.liq-vol-gauge { padding: 8px 18px 10px; font: 600 12px/1.3 var(--font-mono); }
-.liq-vol-gauge-tag { display: block; margin-bottom: 6px; color: var(--muted); }
-.liq-vol-gauge-window { font-weight: 400; }
-.liq-vol-gauge-live { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; color: var(--bad); font-weight: 700; }
-.liq-vol-gauge-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bad); animation: statusPulse 1.1s ease-in-out infinite; }
-.liq-vol-gauge-track {
-  display: flex;
-  height: 10px;
-  border-radius: 5px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--neutral) 10%, transparent);
-}
-/* 2026-09-06: 새로고침 직후 0%로 그려둔 막대가 데이터 도착 시 실제 비율로 **움직이도록** 전이를 준다
-   (renderLiquidationVolumeGauge 는 innerHTML 을 갈아끼우지 않고 width 만 바꾼다). */
-.liq-vol-gauge-fill { height: 100%; transition: width 600ms cubic-bezier(0.22, 1, 0.36, 1); }
-@media (prefers-reduced-motion: reduce) { .liq-vol-gauge-fill { transition: none; } }
-.liq-vol-gauge-fill.long { background: var(--bad); }
-.liq-vol-gauge-fill.short { background: var(--good); }
-.liq-vol-gauge-labels { display: flex; justify-content: space-between; margin-top: 4px; }
-.liq-vol-gauge-label.long { color: var(--bad); }
-.liq-vol-gauge-label.short { color: var(--good); }
-@media (max-width: 720px) {
-  .liq-vol-gauge { padding: 8px 12px 10px; font-size: 11px; }
-}
 
 @media (max-width: 720px) {
   .ops-health-list { grid-template-columns: 1fr; }
@@ -640,15 +476,6 @@ body {
   .ops-health-meta small { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
   .ops-health-head { flex-direction: column; align-items: flex-start; }
   .ops-health-head-tools { width: 100%; justify-content: space-between; }
-}
-
-@keyframes rangePulseGood {
-  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 20%, transparent); }
-  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--good) 8%, transparent); }
-}
-@keyframes rangePulseBad {
-  0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 20%, transparent); }
-  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--bad) 8%, transparent); }
 }
 
 .top-session {
@@ -722,45 +549,6 @@ body {
 .warn, .hold { color: var(--amber); }
 .muted { color: var(--muted); }
 
-/* "고래 포지션" is a bounded transform of "수급 흐름" (whale_position_score is reconstructable
-   from nif_whale + oi_delta_pct alone -- see hexa_pulse_formula.py::reconstruct_whale_position_score),
-   not an independent signal. Flagged only on the Snapshot tab's card, not the Live tab's. */
-.derived-tag {
-  display: inline-block;
-  text-transform: none;
-  letter-spacing: 0.01em;
-  font: 700 11px/1.6 var(--font-mono);
-  color: var(--muted);
-  background: color-mix(in srgb, var(--neutral) 8%, transparent);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 1px 7px;
-  vertical-align: middle;
-  cursor: help;
-}
-
-/* 2026-08-30 (user request): "이 신호의 학습 horizon을 배지로" -- this signal's own
-   train/backtest/prediction time window (e.g. "30분", "1시간"), distinct from .derived-tag's
-   "where this number comes from" lineage note. Accent-colored (not muted) so it reads as a
-   distinct fact about the signal, not a footnote. Same pill shape/size as .derived-tag for visual
-   consistency -- see horizonBadgeHtml()/SIGNAL_HORIZON in app.js. */
-.horizon-badge {
-  display: inline-block;
-  text-transform: none;
-  letter-spacing: 0.01em;
-  font: 700 11px/1.6 var(--font-mono);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 999px;
-  padding: 1px 7px;
-  vertical-align: middle;
-  cursor: help;
-}
-/* 2026-09-01: 저ATR 경고를 .meter-col(우측 확률열)에서 이 제목줄의 horizon-badge 옆으로 이동
-   (사용자 요청 -- 이전엔 우측에 쌓여있어 오버플로우 소동이 있었음, eth_dashboard_low_atr_warning_
-   overflow_fix_20260901 메모리 참고). 같은 pill 모양/크기를 그대로 쓰고 색만 warn 계열로. */
-
 .asset-tabs {
   display: inline-flex;
   align-items: center;
@@ -823,24 +611,6 @@ body {
     justify-content: flex-end;
   }
 }
-.chart-mode-tabs { padding: 3px; }
-.chart-mode-tabs .asset-tab { min-width: 56px; height: 24px; font-size: 11px; }
-
- .charts{
-  margin-bottom: var(--card-gap);
-}
-
-.charts {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--card-gap);
-  align-items: stretch;
-}
-
-.charts > .panel {
-  width: 100%;
-  min-width: 0;
-}
 
 .chart-container {
   width: 100%;
@@ -882,24 +652,8 @@ svg {
   display: block;
 }
 
-.charts > .panel > svg {
-  height: 280px;
-}
-
-#candleSvg, #equitySvg, #pnlSvg, #exposureSvg {
-  background: var(--chart-bg);
-  border-radius: 8px;
-  border: none;
-}
-
 .line { fill: none; stroke: var(--accent); stroke-width: 2.5; }
 .chart-grid { stroke: var(--line); stroke-width: 1; opacity: 0.82; }
-
-@media (max-width: 960px) {
-  .charts { grid-template-columns: 1fr; }
-  
-  
-}
 
 @media (max-width: 720px) {
   :root {
@@ -909,8 +663,6 @@ svg {
   body {
     overflow-x: hidden;
   }
-
-  
 
   .app {
     width: 100%;
@@ -949,12 +701,6 @@ svg {
     font-size: 15px;
   }
 
-  
-
-  
-
-  
-
   /* 2026-08-31 모바일 최적화 -- 스냅샷 탭 헤더(.ops-panel-head, 코인탭+세션경보+EVIDENCE 배지가
      한 줄 flex)가 코인탭 5개(BTC/SOL/XRP/HYPE 확장 이후 최소폭 5x48px=240px) + 배지들을 375px
      폭에 다 못 담아 오른쪽으로 넘치던 문제 -- .chart-panel-head와 같은 처리(세로 스택)로 통일.
@@ -966,58 +712,6 @@ svg {
     gap: 10px;
   }
 
-  .asset-tabs {
-    width: 100%;
-  }
-
-  .asset-tab {
-    flex: 1;
-  }
-
-  
-
-  
-
-  
-
-  
-
-  
-
-  
-
-  #candleSvg {
-    cursor: grab;
-    touch-action: none;
-    user-select: none;
-  }
-
-  #candleSvg:active {
-    cursor: grabbing;
-  }
-
-  
-
-  .charts {
-    gap: 12px;
-  }
-
-  .charts > .panel > svg {
-    height: 210px;
-  }
-
-  
-
-  
-
-  
-
-  
-
-  
-
-  
-
   .chart-tooltip {
     max-width: calc(100vw - 24px);
     white-space: normal;
@@ -1027,12 +721,6 @@ svg {
 @media (max-width: 420px) {
   .app {
     padding: 8px;
-  }
-
-  
-
-  .charts > .panel > svg {
-    height: 190px;
   }
 }
 
@@ -1072,13 +760,6 @@ svg {
 
 .chart-tooltip span {
   color: var(--muted);
-}
-
-.hover-line {
-  stroke: var(--hover-line);
-  stroke-width: 1;
-  stroke-dasharray: 4,4;
-  pointer-events: none;
 }
 
 /* 익절가 도달 배지 (2026-09-03) -- horizon-badge 기본형에 색만 바꾼 modifier.
@@ -1410,7 +1091,6 @@ svg {
      3분의 2다. 폭이 아니라 **높이**가 병목이라 min-height와 세로 패딩만 올린다(가로로 더
      키우면 코인탭 5개가 375px를 다시 넘친다 -- 2026-08-31에 고친 그 헤더다). */
   .page-tab { min-height: 40px; padding: 11px 13px; }
-  .asset-tab { height: 40px; }
   .notify-btn { min-height: 40px; }
 
   /* 최소 글씨. 실측에서 9~10px가 38곳 있었다. 9.5px는 모바일에서 사실상 안 읽힌다.
@@ -1419,7 +1099,6 @@ svg {
   .eyebrow { font-size: 11px; }
   .notify-check-mark,
   .notify-device-main span,
-  .meter-pct,
   .ops-health-status-badge,
   .detail-toggle { font-size: 11px; }
 
@@ -1461,8 +1140,6 @@ svg {
    그대로 차트의 여백 역할을 한다. */
 .acct-plot { position: relative; margin: 0; padding: 0; min-height: 0; display: grid;
   grid-template-rows: auto 1fr; gap: 4px; }
-
-
 
 /* 2026-09-26 비평(Casey): 손가락은 24px 칩을 자주 놓친다 -- 거친 포인터에서만 칩·탭을 40px 로. */
 @media (pointer: coarse) {
@@ -1534,23 +1211,6 @@ svg {
 }
 
 /* 2026-09-12 수동 진입(미리보기). 버튼/배지는 기존 .notify-btn/.ops-readonly 를 그대로 쓴다. */
-/* ── 2026-09-22 시안 B ──────────────────────────────────────────────────────
-   «사실 / 가정 / 조작» 셋이 같은 무게로 섞여 있던 것을 가른다.
-   🔴가정은 **사실을 덮지 않는다**. 전에는 applyAcctPreview 가 타일 값을 통째로 갈아서,
-     포지션을 들고 있어도 큰 숫자가 상시로 «더 넣었다면»이었다. 이제 사실 뒤에 «→ 가정»이
-     붙고, 가정만 점선 밑줄이다 -- 색이 아니라 **형태**로 갈려야 저시력에서도 산다. */
-.pv-after {
-  display: inline-block; margin-left: 7px; text-decoration: none;
-  /* 🔴em 으로 두면 레일 범례(11px)에서 6.8px 가 되어 안 읽힌다. 절대 크기로 못 박는다. */
-  font: 700 11.5px/1 var(--font-mono); color: var(--amber);
-  border-bottom: 1.5px dashed currentColor; padding-bottom: 1px;
-  vertical-align: baseline; white-space: nowrap;
-}
-
-.pv-after.bad { color: var(--bad); }
-.pv-after.good { color: var(--good); }
-.pv-after.warn { color: var(--amber); }
-
 /* 두 레인. 닫기가 왼쪽 -- 들고 있을 때 제일 급한 동작이다(09-14·09-20 과 같은 이유). */
 .acct-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--soft-line);
   margin: 12px -18px 0; }
@@ -1712,7 +1372,6 @@ svg {
   border-radius: inherit;
   pointer-events: none;
 }
-#snapEntryHoldHint { align-self: center; }
 
 /* 2026-09-14 보유 예정 / 레버리지 / 진입 비율 세 행의 **왼쪽 끝을 맞춘다**. .actions 의
    가운데정렬 아래에서는 라벨 길이가 제각각이라 시작점이 들쑥날쑥했다. 라벨 열 폭을 고정하면
@@ -1726,7 +1385,7 @@ svg {
    넘긴다(app.js syncRangeFill). 색은 --accent 를 쓴다: 녹색은 «롱/이익」이라는 뜻을 이미
    가진 색이라 **숏 진입 비율**과 **청산 비율**에 붙으면 거짓말을 한다(2026-09-14).
    손잡이는 두 테마 모두 흰색이다 -- 애플도 다크에서 흰 손잡이를 쓴다. */
-:is(.exit-frac, .ofab-panel) input[type="range"] {
+.ofab-panel input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 132px;
@@ -1736,19 +1395,19 @@ svg {
   background: transparent;
   cursor: pointer;
 }
-:is(.exit-frac, .ofab-panel) input[type="range"]::-webkit-slider-runnable-track {
+.ofab-panel input[type="range"]::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 999px;
   background: linear-gradient(to right,
     var(--accent) 0 var(--fill, 50%), rgb(var(--lift) / 0.16) var(--fill, 50%) 100%);
 }
-:is(.exit-frac, .ofab-panel) input[type="range"]::-moz-range-track {
+.ofab-panel input[type="range"]::-moz-range-track {
   height: 4px; border-radius: 999px; background: rgb(var(--lift) / 0.16);
 }
-:is(.exit-frac, .ofab-panel) input[type="range"]::-moz-range-progress {
+.ofab-panel input[type="range"]::-moz-range-progress {
   height: 4px; border-radius: 999px; background: var(--accent);
 }
-:is(.exit-frac, .ofab-panel) input[type="range"]::-webkit-slider-thumb {
+.ofab-panel input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 20px;
@@ -1760,23 +1419,23 @@ svg {
   box-shadow: 0 1px 1px rgb(var(--shadow) / 0.18), 0 3px 8px rgb(var(--shadow) / 0.24);
   transition: transform .14s cubic-bezier(.22,.68,0,1.01), box-shadow .14s ease;
 }
-:is(.exit-frac, .ofab-panel) input[type="range"]::-moz-range-thumb {
+.ofab-panel input[type="range"]::-moz-range-thumb {
   width: 20px; height: 20px; border-radius: 50%;
   border: 0.5px solid rgb(var(--shadow) / 0.22);
   background: #fff;
   box-shadow: 0 1px 1px rgb(var(--shadow) / 0.18), 0 3px 8px rgb(var(--shadow) / 0.24);
 }
 /* 누르면 살짝 커진다 -- iOS 의 «잡았다» 피드백. */
-:is(.exit-frac, .ofab-panel) input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.14); }
-:is(.exit-frac, .ofab-panel) input[type="range"]:focus-visible::-webkit-slider-thumb {
+.ofab-panel input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.14); }
+.ofab-panel input[type="range"]:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent);
 }
-:is(.exit-frac, .ofab-panel) input[type="range"]:focus { outline: none; }
+.ofab-panel input[type="range"]:focus { outline: none; }
 /* 자동(모델) 일 때 레버리지 슬라이더는 disabled 다 -- 만질 수 없다는 걸 보이게 한다. */
-:is(.exit-frac, .ofab-panel) input[type="range"]:disabled { cursor: default; opacity: .55; }
-:is(.exit-frac, .ofab-panel) input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
+.ofab-panel input[type="range"]:disabled { cursor: default; opacity: .55; }
+.ofab-panel input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
 @media (prefers-reduced-motion: reduce) {
-  :is(.exit-frac, .ofab-panel) input[type="range"]::-webkit-slider-thumb { transition: none; }
+  .ofab-panel input[type="range"]::-webkit-slider-thumb { transition: none; }
 }
 
 /* 계좌 강제 새로고침. 아이콘 하나라 .notify-btn 을 쓰지 않고 최소 스타일만 준다.
@@ -1826,8 +1485,6 @@ svg {
 .exit-now .exit-net.good, .entry-note .exit-net.good { color: var(--good); }
 .exit-now .exit-net.bad, .entry-note .exit-net.bad { color: var(--bad); }
 .entry-note .exit-net { margin-left: 2px; }
-.notify-btn.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
-.notify-btn.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .notify-btn.long:hover:not(:disabled) { border-color: var(--good); }
 /* 2026-09-26 상한 여유가 없는 쪽 -- 누를 수는 있되(사유가 뜬다) 흐리게 «지금은 못 들어간다»를 보인다. */
 .notify-btn[aria-disabled="true"] { opacity: .45; }
@@ -1851,22 +1508,10 @@ svg {
 /* .entry-tiles / .entry-arrow 는 진입 미리보기 타일과 함께 나갔다(2026-09-16) -- 참조 0. */
 .entry-was { font: 600 11px/1 var(--font-sans); color: var(--muted); }
 
-/* 글자는 즉시 바뀌어 눈이 놓친다 -- 바뀐 값만 짧게 밝힌다(막대는 transition 이 맡는다). */
-@keyframes pvBump { 0% { opacity: .35; } 100% { opacity: 1; } }
-.pv-bump { animation: pvBump .28s ease-out; }
-@media (prefers-reduced-motion: reduce) {
-
-  .pv-bump { animation: none; }
-}
-
 .entry-note { font: 600 11px/1.55 var(--font-sans); padding: 8px 10px; border-radius: 8px;
   background: var(--glass); border: 1px solid var(--soft-line); color: var(--muted); }
 .entry-note.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
 .entry-note.live { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, transparent); }
-/* 2026-09-15 사이징 권고 → 상한 → 주문 사슬. .entry-note 는 본문이 muted 라 숫자만 되살린다. */
-#snapEntryChain { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 7px; }
-#snapEntryChain b { font: 700 13px/1.35 var(--font-mono); color: var(--text); }
-#snapEntryChain b.dim { color: var(--muted); font-weight: 600; }
 
 /* 2026-09-13 레버리지 게이지의 «자동» 체크박스. 게이지와 같은 줄에 두되 폭을 안 먹게. */
 .lev-auto { display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
@@ -1926,8 +1571,6 @@ svg {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
-/* 계기 트랙도 같은 이유 -- 흰 위의 흰 8% 는 «채워진 양」을 못 읽는다. */
-[data-theme="light"] .meter-track { background: rgb(var(--lift) / 0.14); }
 
 /* ── 모바일 (2026-09-16) ─────────────────────────────────────────────────────
    폭 390 에서 실측한 결함만 고친다. 데스크톱은 안 건드린다. */
@@ -2048,7 +1691,6 @@ svg {
   font: 700 11px/1 var(--font-sans);
   color: var(--muted);
 }
-.chart-mode-tabs .asset-tab { height: 28px; font-size: 11px; }
 
 /* 활성 표시도 하나로. .asset-tab 만 그라디언트+글로우라 혼자 튀었다. */
 /* 🔴활성 표시를 통일하며 넣은 `box-shadow: none` 이 **림(윗면 광택)을 지웠다** --
@@ -2084,7 +1726,6 @@ svg {
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
   color: var(--text);
 }
-.asset-tab:hover:not(.active) { border-color: transparent; }
 
 /* 상태를 «색으로 채우는» 배지는 채움이 곧 의미다 -- 위 프리미티브의 배경만 덮는다. */
 .ops-badge.good, .ops-badge.warn, .ops-badge.bad,
@@ -2183,7 +1824,6 @@ svg {
    토글과 같은 hover 를 쓴다. */
 .asset-tab:hover:not(.active) { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 /* 차트 모드 탭(청산맵/풋프린트)도 같은 클래스라 함께 따라온다 -- 치수만 맞춘다. */
-.chart-mode-tabs { padding: 0; }
 .chart-mode-tabs .asset-tab { min-width: 0; height: auto; padding: 7px 11px; font-size: 11px; }
 .page-tab { padding: 7px 11px; }
 
@@ -2265,7 +1905,6 @@ svg {
 /* 폴백값. 실제 칸 수와 선택 위치는 renderChartWindowTabs() 가 인라인으로 넣는다 --
    여기 숫자를 버튼 수와 맞춰 두는 걸 잊으면 선택 칸이 어긋난다(2026-09-23 실제로 그랬다). */
 #chartWindowTabs { --seg-n: 5; }   /* 1h · 2h · 4h · 12h · 1d(일봉) */
-#chartModeTabs { --seg-n: 2; }     /* 청산맵 · 풋프린트 */
 #snapshotAssetTabs { --seg-n: 3; }   /* ETH · SOL · XRP(서버가 켠 코인) -- 실제 값은 renderSnapshotAssetTabs */
 /* 선택 칸. 테두리도 그림자도 없다 -- 참조 이미지처럼 «조금 더 밝은 면» 하나다.
    이동은 transform 뿐이라 리플로우가 없고, 칸이 등폭이라 제 폭의 100% 씩 옮기면 맞는다. */
@@ -2571,7 +2210,7 @@ body.order-coin-off .acct-lanes::before {
     grid-template-areas: "head head head head" "cov cov cov cov" "move ladder ladder blk" "gamma ladder ladder mood" "lane lane flow flow"; }   /* 2026-10-07 ⑤ 줄은 뉴스 카드로 갔다 */
   #optCard > .ops-health-head { grid-area: head; }
   #optCard #optBody, #optCard #optRow { display: contents; }
-  #optCard .opt-cov, #optCard #optBody > .opt-note { grid-area: cov; margin-bottom: 10px; }
+  #optCard #optBody > .opt-note { grid-area: cov; margin-bottom: 10px; }
   #optCard .opt-sec:has([data-tip="move"]) { grid-area: move; } #optCard .opt-sec:has([data-tip="rg"]) { grid-area: gamma; }
   #optCard .opt-sec:has([data-tip="mood"]) { grid-area: mood; } #optCard .opt-sec:has([data-tip="ladder"]) { grid-area: ladder; }
   #optCard #optLaneBody { grid-area: lane; } #optCard #optFlowBody { grid-area: flow; } #optCard #optBlkBody { grid-area: blk; }
@@ -2592,14 +2231,6 @@ body.not-eth #mcWhen { display: none; }   /* ⑤ = 옵션 만기 축 -- SOL·XRP
 #mcWall { display: none; }
 #mcWall.on { display: flex; flex-direction: column; position: absolute; z-index: 1; overflow: hidden; }   /* 2026-09-30 가격 지형은 칸 높이에 맞춰 그린다 -- 스크롤 없음 */
 #mcWall .mc-sec { border-top: 0; padding-top: 8px; }   /* 2026-10-01 ④(#mcBody .mc-sec 윗여백 8)와 같은 여백 -- ③·④ 제목이 같은 높이 */
-.mc-sec.mc-2col { column-count: 2; column-gap: 18px; }   /* 2026-09-30 ④ 두 단 -- 스크롤 없이 */
-.mc-sec.mc-2col > h4, .mc-sec.mc-2col > .mc-tip { column-span: all; }
-.mc-2col .mc-g, .mc-2col .mc-svg, .mc-2col .mc-note, .mc-2col .mc-switch { break-inside: avoid; }
-/* 2026-10-01 차트에 그리기 = 제목 한 줄 + 체크 넷을 2×2 격자로(사용자 «잘 정렬») -- 줄바꿈으로 한 칸만 떨어지던 것 */
-.mc-2col .mc-switch { display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 5px 18px; font-size: 11px; }
-.mc-2col .mc-switch-t { grid-column: 1 / -1; }
-#mcBody.mc-cmp .mc-2col .mc-g { grid-template-columns: 58px auto minmax(0, 1fr); gap: 6px; font-size: 11px; padding: 2px 0; }
-#mcBody.mc-cmp .mc-span { grid-column: 1 / -1; }
 #mcWhen { border-top: 1px solid var(--line); margin-top: 10px; }   /* 시장 맥락은 ETH 전용 */
 #mcBody.mc-in-fp:not(.mc-cmp) { border-top: 1px solid var(--line); margin-top: 12px; }
 /* 2026-09-30 카드 이동 레일(점만, 사용자 지시): 오른쪽 가운데 고정 · 지금 보는 카드 = 채운 점. 넓은 화면(위 미디어 쿼리)에서만 보인다. */
@@ -2707,11 +2338,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 /* 2026-09-30 옵션을 풋프린트 카드 안으로(사용자 «하나의 카드») -- 좁은 화면은 한 열로 맨 아래, 넓은 화면은 오른쪽 칸(위 ≥1700 규칙). */
 .liq-map-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
 .liq-map-panel > * { grid-column: 1; min-width: 0; }
-/* 2026-09-29 옵션 카드 맨 위 체결 기반 커버 줄(사용자 지시) -- 커버 부족이면 경고 톤 */
-.opt-cov { font-size: 12px; line-height: 1.5; padding: 7px 10px; margin: 0 0 10px; border-radius: 8px; word-break: keep-all;
-  border: 1px solid var(--soft-line); color: var(--muted); font-variant-numeric: tabular-nums; }
-.opt-cov.warn { color: var(--text); border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
-.opt-cov b { color: var(--text); }
 /* 2026-10-01 제목 옆 한 줄(2026-10-02 커버 % 제거 -- 수집 시각만) */
 .opt-cov-h { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: keep-all; }
 /* 2026-09-29 휴대폰 블록 거래 요약 한 줄 + 펼치기 목록(사용자 선택 C) */
@@ -2760,11 +2386,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .mc-chip.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 50%, transparent); }
 .mc-chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
 .mc-k { color: var(--text); font-weight: 700; }   /* 2026-10-04 상태 줄 이름(맞대결·벽 신호) */
-.mc-quad { display: flex; gap: 12px; align-items: center; margin: 6px 0 2px; }
-.mc-quad b { font-size: 12px; }
-.mc-quad > div { min-width: 0; word-break: keep-all; }
 .mc-tlrow { font-size: 12px; padding: 2px 0; } .mc-tlrow i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 6px; } .mc-tlrow span { color: var(--muted); }
-.mc-terrain { cursor: help; }
 .mc-state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin: -2px 0 6px; }
 @media (max-width: 720px) { .mc-body { grid-template-columns: minmax(0, 1fr); } }
 .mc-sec { border-top: 1px solid var(--soft-line); padding: 10px 0 8px; min-width: 0; }
@@ -2776,9 +2398,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .mc-q:hover span, .mc-q[aria-expanded="true"] span { color: var(--text); background: rgb(var(--lift) / .08); }
 .mc-q:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .mc-tip { margin: 2px 0 8px; font-size: 11.5px; line-height: 1.55; color: var(--muted); }
-.mc-kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 2px 0; font-size: 12.5px; }
-.mc-kv > span { color: var(--muted); flex: 0 1 auto; min-width: 0; }
-.mc-kv > b { font-family: var(--font-sans); font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); text-align: right; }
 .mc-note { font-size: 11px; color: var(--muted); opacity: .85; margin-top: 3px; line-height: 1.4; }
 .mc-switch { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
 .mc-switch label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
@@ -2968,31 +2587,9 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-line-switch > .mc-switch { display: flex; flex-wrap: nowrap; gap: 14px; align-items: center; margin: 0; font-size: 11px; }
 
 /* 2026-10-04 풋프린트 «옵션 요약» 자리(#mcWall) = 모의 판 · 좁은 화면은 시장 맥락 끝(사용자 승인 시안) */
-.ppm { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
-.ppm-r.off { opacity: .45; }   /* 2026-10-04 그 코인 검정 불통과 판 = 기록만 */
-.ppm h4 { margin: 0 0 4px; display: flex; align-items: center; justify-content: space-between; }
-.ppm-sub { font-size: 11px; color: var(--muted); font-weight: 600; }
-.ppm-t { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }   /* 2026-10-04 판마다 한 줄 -- 칸이 낮으면 표만 스크롤 */
-.ppm-r { display: grid; grid-template-columns: minmax(0, 1fr) 30px 32px 32px 32px; align-items: center; column-gap: 5px; padding: 1px 0; border-top: 1px solid var(--soft-line); }
-.ppm-r.h { border-top: 0; padding: 0 0 2px; font-size: 11px; color: var(--muted); }
-.ppm-r.h span:not(:first-child), .ppm-r b { text-align: right; }
-.ppm-r.h span:nth-child(2), .ppm-r .ppm-tgt { justify-self: center; }
-.ppm-r.sum { border-top-color: var(--line); }
-.ppm-r b { font: 700 11px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
-.ppm-r b.mc-good { color: var(--good); }
-.ppm-r b.mc-bad { color: var(--bad); }
-.ppm-name { font-size: 11.5px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ppm-r.sum .ppm-name { font-weight: 800; }
-.ppm-sep { display: flex; justify-content: space-between; margin-top: 3px; padding: 3px 0 1px; border-top: 1px solid var(--line); font-size: 11px; font-weight: 700; color: var(--muted); }
-.ppm-wait { padding: 6px 0; font-size: 11px; color: var(--muted); }
-.ppm-tgt { font: 800 11px/1.3 var(--font-sans); color: var(--muted); }   /* 2026-10-04 알약 테두리 -> 방향색 글자(10판이 칸 하나에 들어가게) */
-.ppm-tgt.long { color: var(--good); }
-.ppm-tgt.short { color: var(--bad); }
 .ppm-empty { flex: 1; display: grid; place-items: center; text-align: center; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; padding: 10px; margin-top: 4px; }
-.ppm-foot { margin-top: auto; padding-top: 6px; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
 
 /* 2026-10-01 바닥 맞춤(전환 리본 바닥): 짧은 단·④가 칸 높이를 고르게 나눠 채운다(내용 높이는 그대로 재므로 되먹임 없음) */
-#mcBody.mc-cmp > .mc-stack { display: flex; flex-direction: column; justify-content: space-between; }
 #mcBody.mc-cmp > .mc-sec { display: flex; flex-direction: column; justify-content: space-between; }
 
 /* 2026-10-01 세로 화면(태블릿·세로 모니터 721~1099): 두 열 -- 왼쪽 지금·실현감마·심리 | 오른쪽 사다리, 그 아래 블록 거래 전폭, 차트 둘 */
@@ -3011,7 +2608,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 @media (max-width: 720px) { .news-body { grid-template-columns: minmax(0, 1fr); row-gap: 12px; } }
 .nw-tilts { display: grid; gap: 8px; }
 .nw-tilt .nw-tilt-lab .w { font-weight: 800; color: var(--text); }
-.nw-incs { display: grid; gap: 6px; }
 .nw-srcs { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .nw-srcs b { color: var(--text); font-weight: 700; }
 .nw-sec-h { font: 800 11px var(--font-sans); letter-spacing: .08em; color: var(--muted); margin-bottom: 2px; }
@@ -3038,10 +2634,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .nw-assets .mini i { display: block; height: 100%; }
 .nw-assets .mini .b { background: var(--good); } .nw-assets .mini .s { background: var(--bad); }
 .nw-assets .c { color: var(--muted); text-align: right; } .nw-assets .m { text-align: right; font-weight: 700; }
-.nw-inc { font-size: 12px; line-height: 1.45; padding: 7px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
-  background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--text); word-break: keep-all; }
-.nw-inc b { color: var(--warn); }
-.nw-inc.none { border-color: var(--soft-line); background: none; color: var(--muted); }
 .nw-note { font-size: 11px; line-height: 1.5; color: var(--muted); }
 .nw-main { min-width: 0; container-type: inline-size; }   /* 2026-10-05 목록 폭으로 줄 모양을 고른다(아래 @container) */
 .nw-lane { display: block; width: 100%; height: auto; }
@@ -3112,21 +2704,7 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 .wdr-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; padding-top: 6px; }
 .wdr { display: flex; flex-direction: column; min-height: 0; }   /* 2026-10-06 서랍 사이 경계선 제거(사용자 지시) */
 .wdr.open { flex: 1; }
-.wdr-h { display: flex; align-items: center; gap: 8px; }
-.wdr-tg { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 7px 0; border: 0; background: none; cursor: pointer; text-align: left;
-  color: var(--text); font: 700 12px/1.2 var(--font-sans); letter-spacing: .02em; }
-.wdr-tg svg { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-  transform: rotate(-90deg); transition: transform .2s cubic-bezier(.2, .7, .2, 1); }
-.wdr.open .wdr-tg svg { transform: none; }
-.wdr-tg:hover svg { stroke: var(--text); }
-.wdr-tg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.wdr-t { flex: none; }
-.wdr-s { margin-left: auto; min-width: 0; font: 600 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.wdr-s b { font: 700 11px/1.2 var(--font-mono); color: var(--text); }
-.wdr-s b.mc-good { color: var(--good); }
-.wdr-s b.mc-bad { color: var(--bad); }
 .wdr-b { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-#mcWall .wdr-b > .ppm { padding-top: 0; flex: 1; min-height: 0; height: auto; }
 #mcWall .wdr-sr { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 0; overflow: hidden; }   /* 2026-10-06 줄이 칸 높이를 나눠 갖는다 -- 22px 고정이면 216px 칸에서 5px 넘쳐 스크롤이 생겼다 */
 #mcWall .wdr-sr .liq-level-row { flex: 1 1 0; min-height: 0; grid-template-columns: 40px 62px minmax(0, 1fr) 48px; gap: 6px; padding: 0 2px; font-size: 11px; }
 /* 2026-10-13 아티팩트 댓글 «라벨 지우고 숫자·게이지만» → «퍼센트도 제거»: 이름·거리 % 칸을 빼고 가격 · 강도 게이지만(색이 저항/지지를 말한다) */
@@ -3134,7 +2712,6 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
 #mcWall .wdr-sr .liq-level-row { grid-template-columns: 64px minmax(0, 1fr); }
 #mcWall .wdr-sr .liq-level-dist { display: none; }   /* 2026-10-13 사용자 «게이지 오른쪽 퍼센트도 제거» -- 가격 · 강도 게이지만 */
 #mcWall .wdr-sr .liq-level-bar-track { height: 6px; }
-@media (prefers-reduced-motion: reduce) { .wdr-tg svg { transition: none; } }
 
 /* 2026-10-06 풋프린트 카드 머리 띠(사용자 선택 C) -- 미 국채선물 4종 · 뉴스 기울기 1시간 · ETH/BTC/매크로. 넓은 화면(2단)만.
    한 화면 모드는 #fpCard 가 세로 flex 라 띠(flex: none)만큼 차트 칸이 줄어 카드 높이가 그대로다. */
@@ -3215,7 +2792,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fp-overlay[hidden] { display: none; }
 #fpCard.fp-alt-on.fp-alt-wide #mcWall, #fpCard.fp-alt-on.fp-alt-wide #fpLineSwitch, #fpCard.fp-alt-on.fp-alt-wide #chartPan { visibility: hidden; }   /* 왼쪽 열에 겹쳐 두던 칸(모의 판·지지/저항 · 차트에 그리기) */
 /* 좁은 화면(10-08 사용자 «넓은 화면처럼»): 모의 판·지지/저항은 1초 수급 아래로 흩어져 있어 덮을 수 없다 -- 일봉·청산맵을 보는 동안 숨긴다 */
-#fpCard.fp-alt-on:not(.fp-alt-wide) #liquidationMapList, #fpCard.fp-alt-on:not(.fp-alt-wide) #mcBody > .ppm { display: none; }
+#fpCard.fp-alt-on:not(.fp-alt-wide) #liquidationMapList { display: none; }
 .fpd-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
 .fpd-legend { min-height: 18px; color: var(--text); font: 600 12px/1.5 var(--font-sans); font-variant-numeric: tabular-nums; }
 .fpd-date { font: 700 12px/1.5 var(--font-sans); margin-right: 2px; }
@@ -3232,7 +2809,6 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fpd-tools button:hover { border-color: var(--hover-line); background: rgb(var(--lift) / .08); }
 .fpd-tools button[aria-pressed="true"] { border-color: var(--hover-line); background: rgb(var(--lift) / .12); }
 .fpd-tools svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
-.fpd-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--line); }
 .fpd-tools button:focus-visible, .fpd-canvas:focus-visible, .lqp-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .fpd-canvas, .lqp-canvas { display: block; flex: 1 1 0; min-height: 0; width: 100%; cursor: crosshair; touch-action: pan-y; }
 .fpd-canvas.panning, .lqp-canvas.panning { cursor: grabbing; }
@@ -3290,10 +2866,6 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 #mcBody.mc-cmp .mc-strip { display: grid; grid-template-columns: 1.2fr 1.2fr 1.6fr; gap: 0 12px; align-items: stretch; }   /* 10-13 ①②④ -- ④ = 호가 벽 막대 · ①② = 값 붙은 줄이라 넓게 · 10-15 ⑤ 뉴스 → 아래 ⑤ 예측 줄 */
 #mcBody.mc-cmp .mc-strip .mc-sec { padding: 6px 0 4px; display: flex; flex-direction: column; min-width: 0; }
 #mcBody.mc-cmp .mc-rows { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly; gap: 2px; }   /* 줄 수가 달라도 칸 높이에 고르게 -- 빈 데 없이 */
-#mcBody.mc-cmp .mc-rate { padding: 8px 0 2px; border-top: 1px solid var(--soft-line); }
-#mcBody.mc-cmp .mc-rate-g { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
-#mcBody.mc-cmp .mc-rate-g.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }   /* 2026-10-14 나스닥 실시간 · 5년 · 10년(사용자 시안 A) */
-#mcBody.mc-cmp .mc-rate .mc-gk { height: 44px; }   /* 10-15 그래프 40px */
 /* 2026-10-13 사용자 «라벨은 게이지 위 or 아래로»: 요약 줄은 그림(+값) 한 줄, 이름표는 그 아래 작은 글씨 */
 #mcBody.mc-cmp .mc-strip .mc-gk { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; height: auto; row-gap: 0; }
 #mcBody.mc-cmp .mc-strip .mc-gk.v { grid-template-columns: minmax(0, 1fr) auto; }
@@ -3310,12 +2882,6 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mc-bubble { display: block; width: 100%; height: 200px; margin-bottom: 6px; cursor: crosshair; touch-action: pan-y; }   /* 10-13 미니도 확대·이동(bubble_map.js VN) */
 .mc-bubble.panning { cursor: grabbing; }
 .mc-bubble:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }   /* 높이 = 수급 차트 한 개(renderCandleSvg 가 덮어쓴다) */
-/* 2026-10-14 «⑥» 제목 바로 옆 급변 칩(5년·10년·나스닥) -- 줄을 늘리지 않게 제목과 한 줄 · 오른쪽 끝은 주문 플로팅 버튼(#ofab)이 덮어 왼쪽 정렬 */
-#mcBody.mc-cmp .mc-rate h4 { display: flex; align-items: center; gap: 8px; min-width: 0; }
-#mcBody.mc-cmp .mc-spk { display: flex; gap: 4px; min-width: 0; overflow: hidden; }
-#mcBody.mc-cmp .mc-rate h4 .mc-q { flex: none; white-space: nowrap; }
-#mcBody.mc-cmp .mc-spk .mc-chip { white-space: nowrap; flex: none; }
-#mcBody.mc-cmp .mc-spk i { font: 600 11px/1 var(--font-sans, inherit); font-style: normal; color: var(--muted); align-self: center; }
 
 /* 2026-10-15 ⑤ 예측 줄(사용자 시안 B): 지금 추세 → 4h(+변동성) → 7일 → 4~13주. 가로 선 = 시간축, 칸 = 지평. 휴대폰은 2×2 */
 .mc-fc { border-top: 1px solid var(--soft-line); padding-top: 8px; }

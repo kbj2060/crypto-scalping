@@ -15,27 +15,23 @@ const API_SESSION_ALERTS_URL = "/api/session-alerts";
 // tick() 은 게이트 확인만 하는 디스패처라(각 refresh 가 `now - last < gate` 로 즉시 반환)
 // 이 값을 반으로 줄여도 늘어나는 요청은 풋프린트 하나뿐이다.
 const POLL_MS = 500;
-// 코인별 실시간 지표 폴링(2026-09-03). 서버 캐시가 20초이므로 그보다 자주 때릴 이유가 없다.
-const MODEL_INDICATOR_POLL_MS = 20000;
 const CANDLE_HISTORY_POLL_MS = 300000;
-const MICRO_HISTORY_MAX = 48; // matches MODEL_INDICATOR_HISTORY_MAX in server.py (4h @ 5min samples)
 // Kept post-Live-tab-removal solely as the SSE ticker payload's asset allowlist (see
 // applyDashboardEvent()) -- eth/btc still need their live price tracked for the Snapshot tab's own
 // coin switcher (activeSnapshotAsset), sol is tracked too for parity even though nothing reads it.
-// 2026-09-26 dp = 화면 가격 소수 자릿수, qtyScale = 수량 눈금 배율(ETH=1 기준, 대략 ETH가격/코인가격).
+// 2026-09-26 dp = 화면 가격 소수 자릿수.
 //   🔴데이터 심볼은 전부 USDT 시장이다(주문만 USDC -- 사용자 규칙).
 const ASSET_CONFIG = {
-  eth: { label: "ETH", symbol: "ETHUSDT", dp: 1, qtyScale: 1 },
-  sol: { label: "SOL", symbol: "SOLUSDT", dp: 2, qtyScale: 20 },
-  btc: { label: "BTC", symbol: "BTCUSDT", dp: 0, qtyScale: 0.03 },
-  xrp: { label: "XRP", symbol: "XRPUSDT", dp: 4, qtyScale: 2000 },
+  eth: { label: "ETH", symbol: "ETHUSDT", dp: 1 },
+  sol: { label: "SOL", symbol: "SOLUSDT", dp: 2 },
+  btc: { label: "BTC", symbol: "BTCUSDT", dp: 0 },
+  xrp: { label: "XRP", symbol: "XRPUSDT", dp: 4 },
 };
 // 풋프린트·1초 수급·OI·호가 히트맵을 서버가 실시간으로 만드는 코인(server.py FLOW_SPECS 와 같은 목록).
 const FLOW_ASSETS = new Set(["eth", "sol", "xrp"]);
 const flowOn = () => FLOW_ASSETS.has(activeSnapshotAsset);
 const coinUnit = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).label || String(activeSnapshotAsset).toUpperCase();
 const pxDp = () => { const d = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp; return Number.isFinite(d) ? d : 1; };
-const qtyScale = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).qtyScale || 1;
 
 const el = (id) => document.getElementById(id);
 // 2026-09-30 한 화면 모드 크기 기억(사용자 «새로고침마다 흩어졌다가 맞춰진다»): 마지막으로 맞춘 차트·사다리·시장 맥락 높이를 창 높이와 함께 저장하고,
@@ -52,7 +48,6 @@ const setT = (id, txt) => {
 const setH = (id, html) => { const target = el(id); if (target && target.innerHTML !== html) target.innerHTML = html; };
 
 let latestMainState = null;
-let latestCompactState = null;
 let tickInFlight = false;
 let latestLivePriceByAsset = {};
 let latestLivePriceTsByAsset = {};
@@ -163,7 +158,7 @@ let supply1sSince = 0;
 let supply1sLastFetchAt = 0;
 let supply1sInFlight = false;   // 0.25초 타이머라 응답이 늦으면 겹친다 -- 겹치면 커서가 꼬인다
 // 초 -> 그 초의 미결제약정(ETH). 같은 응답에 얹혀 온다(별도 폴링을 하나 더 두지 않는다).
-// ⚠️바이낸스가 OI 를 3~7초에 한 번만 갱신한다(서버 OI_1S_URL 주석의 실측) -- 점이 초마다
+// ⚠️바이낸스가 OI 를 3~7초에 한 번만 갱신한다(실측) -- 점이 초마다
 //   있지 않은 게 정상이다. 창 시작을 0으로 두고 «그 뒤로 몇 계약이 새로 생겼나»를 그린다.
 let oi1s = new Map();
 let oi1sSince = 0;
@@ -432,17 +427,10 @@ let latestBreakoutDetector = null;
 let breakoutDetectorLastFetchAt = 0;
 const API_BREAKOUT_DETECTOR_URL = "/api/breakout-detector";
 const BREAKOUT_DETECTOR_POLL_MS = 60000;
-// Long/short liquidation volume gauge (recreated 2026-08-27, see renderLiquidationVolumeGauge()) --
-// backend (scripts/live_liquidation_5m_signal_20260825.py) never stopped running, only this
-// frontend consumer had been removed.
-let latestLiquidation5m = null;
 let latestLiquidation5mHist = [];
 let liquidation5mLastFetchAt = 0;
-// Sudden-liquidation alert (2026-08-27). 2026-09-24 1초 폴링을 걷어냈다 -- 받는 쪽 게이지
-// (#liqVolumeGauge)가 HTML 에 없어 분당 55건을 받아 버리고 있었다. 게이지를 되살리면 폴링도 되살린다.
-let latestLiqBurstState = null;
 // Liquidation map (Snapshot tab, 2026-08-24) -- estimated support/resistance, own fetch/render
-// cycle same as latestVRebound above (computed dashboard-side, not part of trading_bot.py state).
+// cycle (computed dashboard-side, not part of trading_bot.py state).
 // lastSnapshotHistoryFetchAt tracks the candle history this panel's chart needs (activeSnapshotAsset,
 // see below), independently of activeChartAsset (the Live tab's own, separate coin selector).
 let latestLiquidationMap = null;
@@ -470,7 +458,6 @@ const BINANCE_ACCOUNT_POLL_MS = 10000;   // 2026-10-02 30 -> 10초(사용자 지
 let sessionAlertsLastFetchAt = 0;
 let lastSnapshotHistoryFetchAt = 0;
 let lastSnapshotChartRenderAt = 0;
-let lastModelIndicatorHtmlByTarget = {};
 let activePageTab = "snapshot"; // "ops" | "snapshot" (라이브 탭 제거, 2026-08-31) -- must match index.html's default active tab (data-page-tab="snapshot" carries the initial "active" class)
 // 2026-09-21 🔴**불리언 래치를 시각으로 바꿨다.** `isScrolling = true` 를 걸고 150ms
 // setTimeout 으로만 풀면, 배경 탭·가려진 창에서 그 타이머가 안 와 **영구히 true** 로 남는다.
@@ -641,7 +628,6 @@ async function setActiveSnapshotAsset(asset) {
   footprintLive = { barStart: 0, since: Infinity, bucket: 0, cells: new Map(),
                     orderQty: 0, orderAt: null, orderLastMs: 0, orderLastTid: -1 };
   latestFlowHeatmap = null; flowHeatmapLastFetchAt = 0;
-  latestLiquidation5m = null;
   latestLiquidation5mHist = [];
   latestOi5m = null; oi5mLastFetchAt = 0;
   latestLiquidationMap = null;
@@ -669,7 +655,7 @@ async function setActiveSnapshotAsset(asset) {
     Promise.all(work)
       .catch((error) => console.error(`코인 전환 중 ${scope} 갱신 실패:`, error))
       .then(() => {
-        if (latestMainState) render(latestMainState, latestCompactState);
+        if (latestMainState) render(latestMainState);
         endAssetScopeLoading(scope, generation);
       });
 
@@ -681,13 +667,13 @@ async function setActiveSnapshotAsset(asset) {
       maybeFetchSnapshotChartHistory(),
     ]),
   ]);
-  if (latestMainState) render(latestMainState, latestCompactState);
+  if (latestMainState) render(latestMainState);
 }
 
 /* 테마 토글 (2026-09-16). 다크 = 현행 화면, 라이트 = 애플 «Liquid Glass».
    첫 페인트는 index.html 의 인라인 스크립트가 이미 입혔다 -- 여기서는 «바꾸기」만 한다.
    ⭐색을 하드코딩한 사본을 만들지 않는다: 차트는 SVG 속성에 `var(--good)` 를 그대로 넣고
-   브라우저가 실시간으로 푼다. 다만 `cssVar()` 로 읽는 곳은 다시 그려야 반영된다. */
+   브라우저가 실시간으로 푼다. 다만 getComputedStyle 로 읽는 곳은 다시 그려야 반영된다. */
 const THEME_KEY = "dashTheme";
 function currentTheme() {
   return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
@@ -717,7 +703,7 @@ function setupThemeToggle() {
     try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* 저장 못 해도 동작은 한다 */ }
     // 게터로 토큰을 읽는 곳(레짐 색 등)은 다시 그려야 새 팔레트가 들어간다.
     renderSnapshotChart();
-    if (latestMainState) render(latestMainState, latestCompactState);
+    if (latestMainState) render(latestMainState);
   });
 }
 
@@ -815,36 +801,7 @@ function fmtTs(v) {
   return `${mo}-${dd} ${hh}:${mm}:${ss}`;
 }
 
-function fmtShortTs(v) {
-  if (!v) return "-";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) {
-    const s = String(v);
-    return s.length > 16 ? s.slice(0, 16) : s;
-  }
-  const mo = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${mo}-${dd} ${hh}:${mm}`;
-}
-
-// Model-indicator strip-time label only (2026-08-25 user request: "시-분-초만 표시") -- unlike
-// fmtShortTs, no date, seconds included since these bars can be sub-minute apart (client-tracked
-// indicators record the real push time, not a clock-aligned bar).
-function fmtTimeOnly(v) {
-  if (!v) return "-";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "-";
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
-}
-
-// Evidence-signal strip axis only (2026-08-31 user request: "시와 분만 표시") -- unlike fmtTimeOnly,
-// no seconds; unlike fmtShortTs, no date either. Ticks stay short enough to fit 5 across a narrow
-// strip without wrapping.
+// Hour:minute only (2026-08-31 user request: "시와 분만 표시").
 function fmtHourMinute(v) {
   if (!v) return "-";
   const d = new Date(v);
@@ -866,160 +823,6 @@ function buildSessionHtml(sess) {
     `<span class="session-item ${sUsOn ? "on" : "off"}"><span class="session-led ${sUsOn ? "on" : "off"}"></span>미국</span>`,
   ].join("");
 }
-
-
-
-// nif_retail: same _compute_nif_and_taker() split as nif_whale above, retail (small-size) leg
-// instead of whale leg. Added 2026-08-25 after a same-day IC screen found real (non-noise) short-
-// horizon direction information here -- see MODEL_INDICATOR_DETAIL.retail_flow for the numbers.
-
-// 2026-09-11 청산 규모 칩 제거(중복 지표). 대체 칩 없이 자리를 비운다 -- 헬퍼도 함께 제거됨.
-
-
-// 2026-08-27: replaces toxRead/toxHint (독성/toxicity chip removed -- shadow_toxicity_score was
-// independently confirmed uninformative on both direction and volatility-framing axes, see
-// eth_model_indicator_volatility_framing_screen_20260825 memory). sig here is the raw
-// latestBasisLiquidation payload (server-computed, not part of classifyIndicators' micro/tail
-// inputs -- same "own fetch cycle" category as latestVRebound, see that variable's own comment).
-
-// Sudden-liquidation alert banner (2026-08-27) -- reads liq_burst_state.json (event-triggered, see
-// tail_risk_interceptor.py::_write_liq_burst_state()), a faster/more prominent sibling to the
-// liq_cascade model-indicator tile below (which reads the same hawkes/z-score concept but via the
-// 10s-cadence dashboard_state.json path). Shown only while hawkes_active -- an alert that's always
-// visible isn't an alert. (선례로 들던 실행경보 배너는 2026-09-20 은퇴했다 -- 규칙만 남는다.)
-// Liquidation long/short volume gauge -- recreated 2026-08-27 at user request. This is the bar
-// chart half of the original renderLiquidationCascadeGauge() (2026-08-25): proportional split bar,
-// long=red(--bad)/short=green(--good), with real $ labels alongside so a "$5 vs $2" split doesn't
-// read as visually skewed as a "$500 vs $2" one would (2026-08-25 design note, preserved). The
-// magnet (price/direction/strength) and energy/recommendation sub-parts that used to live in the
-// same gauge were NOT recreated -- user confirmed the magnet was redundant with the chart line
-// (liquidationMagnetLevel(), itself removed 2026-08-31 per user request) and never asked for
-// energy/recommendation back. Always renders a row (never disappears) per 2026-08-27 request, with
-// a quiet state for warming-up/no-liquidation.
-// Data: /api/liquidation-5m-signal (scripts/live_liquidation_5m_signal_20260825.py, BAR_MINUTES=30
-// as of this same request -- server.py imports that module, so a dashboard-server restart is
-// needed for the window change, NOT trading_bot.py; this data has nothing to do with that process).
-//
-// 2026-08-27 follow-up: user asked for this to reflect a detected cascade immediately rather than
-// waiting for the current (still-forming) minute to close and land in tail_risk_1m -- but the $
-// totals below CANNOT safely fold in liq_burst_state.json's long_usd_1m/short_usd_1m to get there.
-// Those share a field name with tail_risk_1m's columns but not a definition: tail_risk_1m stores
-// one DISCRETE non-overlapping bucket per completed minute (see this function's data-source comment
-// above, and live_liquidation_5m_signal_20260825.py's own docstring on why that matters), while
-// liq_burst_state.json's version is a continuously-SLIDING trailing-60s value that overlaps
-// whatever's already in the most recent completed bucket -- adding it on top would double-count.
-// Instead: a live "감지중" cue sourced from latestLiqBurstState (already polled every ~1s for the
-// alert banner above, no new fetch here) that flags "something's happening right now" without
-// touching the $ math -- correct-by-construction rather than an approximate merge.
-// 2026-09-06 (사용자 요청): 새로고침 직후엔 "집계 중..." 텍스트만 뜨고 게이지 자체가 없다가, 데이터가
-// 오면 완성된 막대가 **툭 나타났다**. 대신 **처음부터 롱 0 · 숏 0 짜리 빈 게이지를 그려두고**, 값이
-// 도착하면 너비만 바꿔 CSS transition 으로 움직이게 한다. 그래서 innerHTML 을 매번 갈아끼우지 않고
-// (그러면 새 엘리먼트가 최종 너비로 태어나 애니메이션이 없다) **한 번 만든 뒤 제자리 갱신**한다.
-function liquidationVolumeGaugeSkeletonHtml() {
-  return `<div class="liq-vol-gauge">
-      <span class="liq-vol-gauge-tag">청산 규모 <span class="liq-vol-gauge-window">(최근 30분 누적)</span><span class="liq-vol-gauge-live-slot"></span></span>
-      <div class="liq-vol-gauge-track">
-        <div class="liq-vol-gauge-fill long" style="width:0%"></div>
-        <div class="liq-vol-gauge-fill short" style="width:0%"></div>
-      </div>
-      <div class="liq-vol-gauge-labels">
-        <span class="liq-vol-gauge-label long">롱 $0</span>
-        <span class="liq-vol-gauge-label short">숏 $0</span>
-      </div>
-    </div>`;
-}
-
-function liquidationVolumeLiveCueHtml() {
-  const burst = latestLiqBurstState;
-  if (!(burst && burst.available && burst.hawkes_active)) return "";
-  // 2026-08-27: 독립 배너였던 것을 이 한 줄로 접었다(renderLiqBurstAlert 제거). 측면은 crisis_type
-  // 라벨이 아니라 양쪽 실측 최댓값으로 고른다 -- 그 라벨은 낡을 수 있다.
-  const bLong = Number(burst.long_usd_1m || 0);
-  const bShort = Number(burst.short_usd_1m || 0);
-  const bUsd = Math.max(bLong, bShort);
-  const bSide = bShort > bLong ? "숏청산" : "롱청산";
-  const bPct = Math.round(clamp01(Number(burst.hawkes_decay_level) || 0) * 100);
-  const detail = bUsd > 0 ? ` · ${bSide} ${fmtUsdCompact(bUsd)} · 에너지${bPct}%` : ` · 에너지${bPct}%`;
-  return `<span class="liq-vol-gauge-live"><span class="liq-vol-gauge-live-dot" aria-hidden="true"></span>지금 감지중${detail}</span>`;
-}
-
-function renderLiquidationVolumeGauge() {
-  const host = el("liqVolumeGauge");
-  if (!host) return;
-  const fresh = !host.querySelector(".liq-vol-gauge-track");
-  if (fresh) host.innerHTML = liquidationVolumeGaugeSkeletonHtml();
-
-  // 🔴2026-09-25 게이지를 **차트의 청산 원에서 계산한다**. 전에는 봇 DB(tail_risk_1m)의 30분 합을 60초마다
-  //   받았는데 ①1~3분 늦었고 ②봇이 청산을 l(마지막 체결 조각)로 세어 ~6배 작았다(24h $6.2M vs $38.0M).
-  //   청산 원은 대시보드 자체 @forceOrder(z = 주문 누적 체결량)로 2초마다 갱신되므로, 현재 30분 봉에 든
-  //   원들을 더하면 **원과 게이지가 정의상 같은 값**이 되고 새 요청도 없다.
-  //   30분 경계는 서버 게이지(_bar_start)와 같다: UTC 분 // 30.
-  const liqBars = Array.isArray(latestLiquidation5mHist) ? latestLiquidation5mHist : [];
-  const barStart = Math.floor(Date.now() / 1000 / 1800) * 1800;
-  const inBar = liqBars.filter((b) => Date.parse(b.ts) / 1000 >= barStart);
-  const fromBars = inBar.length > 0;
-  const liq5m = latestLiquidation5m;
-  const warmed = fromBars || !!(liq5m && liq5m.warmed_up);
-  const longUsd = fromBars ? inBar.reduce((s, b) => s + (Number(b.long_usd) || 0), 0)
-    : (warmed ? Number(liq5m.long_usd_5m || 0) : 0);        // 청산 원이 아직 없을 때만 서버 게이지
-  const shortUsd = fromBars ? inBar.reduce((s, b) => s + (Number(b.short_usd) || 0), 0)
-    : (warmed ? Number(liq5m.short_usd_5m || 0) : 0);
-  const total = longUsd + shortUsd;
-  host.title = fromBars
-    ? "현재 30분 봉에 든 차트 청산 원의 합(바이낸스 선물" + (inBar.every((b) => b.okx) ? " + OKX" : "")
-      + (inBar.some((b) => b.hl) ? " + HL 고래" : "")
-      + (inBar.every((b) => b.bybit) ? " + Bybit" : "")
-      + ") -- 원과 같은 값이다. 2초마다 갱신."
-    : "";
-
-  const win = host.querySelector(".liq-vol-gauge-window");
-  if (win) win.textContent = warmed ? "(최근 30분 누적)" : "(최근 30분 누적) · 웜업";
-  const cue = host.querySelector(".liq-vol-gauge-live-slot");
-  if (cue) {
-    const html = liquidationVolumeLiveCueHtml();
-    if (cue.innerHTML !== html) cue.innerHTML = html;
-  }
-  const longEl = host.querySelector(".liq-vol-gauge-label.long");
-  const shortEl = host.querySelector(".liq-vol-gauge-label.short");
-  if (longEl) longEl.textContent = `롱 ${fmtUsdCompact(longUsd)}`;
-  if (shortEl) shortEl.textContent = `숏 ${fmtUsdCompact(shortUsd)}`;
-
-  const apply = () => {
-    const fillLong = host.querySelector(".liq-vol-gauge-fill.long");
-    const fillShort = host.querySelector(".liq-vol-gauge-fill.short");
-    if (fillLong) fillLong.style.width = total > 0 ? `${(longUsd / total) * 100}%` : "0%";
-    if (fillShort) fillShort.style.width = total > 0 ? `${(shortUsd / total) * 100}%` : "0%";
-  };
-  // 스켈레톤을 방금 만든 프레임에서 바로 최종 너비를 주면 브라우저가 중간 상태를 못 보고 즉시 그린다
-  // (transition 없음). 다음 프레임에 적용해 0% -> 실제값 전이가 실제로 보이게 한다.
-  if (fresh && typeof requestAnimationFrame === "function") requestAnimationFrame(apply);
-  else apply();
-}
-
-// 7th model-internal indicator -- 2026-08-25, user asked for a dedicated "청산 캐스케이드" tile
-// rather than folding this into 꼬리 리스크's text. Distinct focus from that indicator: 꼬리
-// 리스크's aftershock_prob is a forward-looking blended probability of MORE shock still to come;
-// this is the raw "is a cascade actually happening right now" state straight from
-// tail_risk_interceptor.py's own 3-stage design (detector/discriminator/decay-timer) -- which side,
-// and how much of the initial energy is left. z>=2.0 threshold for the 주의 tier reuses the exact
-// value tail_risk_interceptor.py's own status_line() already uses for "급증⚠️", not a new number.
-
-
-
-// Single source of truth for the 3 model-internal indicators' tone/read-text classification --
-// called both on the live state (render(), every tick) and on server-provided history samples
-// (seedModelIndicatorHistory(), once at page load) so there is exactly one copy of these
-// thresholds, not a live copy and a history copy that could quietly drift apart.
-// 2026-08-30 (user request): risk(꼬리 리스크)/whale_intent(고래 포지션) removed from this
-// dashboard -- risk's aftershock_prob tested NULL at all 5 evaluated horizons (5m/15m/1h direction,
-// 1h/4h volatility, see eth_liquidation_shadow_aftershock_prob_signal_check_rejected_20260827),
-// and whale_intent was already flagged in this file as a non-independent transform of
-// whale+OI-delta (formula comment above EVIDENCE_SIGNAL_KO) plus itself failed direction-IC at
-// all 4 tested horizons (worst of the 3 flow signals, one near-pass cell sign-flipped VAL vs
-// TRAIN -- eth_whale_position_vs_retail_flow_direction_ic_20260825). liq_cascade's own underlying
-// hawkes state stays wired up regardless (still gates the separate liq-burst-state alert banner)
-// -- only removing risk/whale_intent's own chip surfaces here.
-
 
 function niceStep(span, targetTicks = 4) {
   const rough = span / Math.max(targetTicks, 1);
@@ -1168,7 +971,6 @@ function applyDashboardEvent(payload) {
   });
   if (payload?.state?.state) {
     latestMainState = payload.state.state;
-    latestCompactState = payload.state.compactState || null;
   }
   // 🔴차트는 **상태(state)가 바뀐 푸시**에서만 다시 그려졌다. 시세만 오는 푸시(대부분)에서는
   //   아무것도 안 그려서, 현재가 선과 진행 중인 봉이 상태 변경 주기(실측 5초)에 묶여 멈춰
@@ -1176,7 +978,7 @@ function applyDashboardEvent(payload) {
   //   스로틀은 같은 상수를 쓰므로 아래 render() 경로와 겹쳐도 두 번 그리지 않는다.
   maybeRenderSnapshotChartNow();
   if (!latestMainState || isScrolling() || !payload?.state?.state) return;
-  render(latestMainState, latestCompactState, { stateChanged: true });
+  render(latestMainState, null, { stateChanged: true });
 }
 
 function connectDashboardEvents() {
@@ -1216,17 +1018,6 @@ function opsTone(status) {
 
 function opsLabel(value) {
   return ({ trading_bot: "트레이딩 봇", ops_watchdog: "Ops Watchdog", trading_bot_process: "트레이딩 봇 프로세스", decision_snapshot: "의사결정 스냅샷", trading_bot_heartbeat: "봇 heartbeat", data_pipeline: "데이터 파이프라인", pipeline_contract: "파이프라인 계약", market_data_sources: "시장 데이터 소스", dashboard_state: "대시보드 상태", execution_contract: "실행 안전 계약", runtime_resources: "시스템 자원", watchdog_storage: "watchdog 저장소" })[value] || String(value || "알 수 없음");
-}
-
-// 칩 설명문은 처음부터 **강조** 문법으로 쓰여 있었는데 그대로 찍혀 별표가 보였다(사용자 지적).
-// 🔴이스케이프를 **먼저** 하고 그 결과에서만 별표를 태그로 바꾼다 -- 순서를 뒤집으면 본문의
-//   < & 가 태그가 되어 그대로 주입된다. 별표는 이스케이프 대상이 아니라 순서만 지키면 안전하다.
-function emphasizeHtml(value) {
-  return escapeHtml(value).replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "<b>$1</b>");
-}
-// title= 같은 속성에는 태그를 넣을 수 없다 -- 거기서는 별표만 걷어낸다.
-function plainEmphasis(value) {
-  return String(value ?? "").replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "$1");
 }
 
 function escapeHtml(value) {
@@ -1668,269 +1459,13 @@ async function refreshOpsStatus() {
   }
 }
 
-
-// 2026-08-25: hover-time -- times[i] (oldest-to-newest, parallel to tones) is optional; a bar with
-// no known time just renders without the hover handlers, no error. NOT shown on the graph itself
-// (tried that first, user asked to move it off) -- instead read by showStripBarTime/hideStripBarTime
-// below, which write into a .strip-time-now label that each row template places on its OWN line
-// (model indicators: the "자세히" line; evidence signals: the 바닥/천장 caption line).
-// key (2026-08-31, optional): signal identity for hover -- stashed on the <svg> root as data-key so
-// showStripBarTime() can look up STRIP_BAR_LABEL_BY_TONE[key][tone] without threading it through
-// every <rect>. Omitted, hover falls back to time-only (unchanged old behavior).
-// 2026-08-31 user request ("병합 세그먼트로 바꿔줘"): merge consecutive same-tone bars into one
-// wider rect instead of drawing every raw 5-min bar -- segment WIDTH now carries duration (design
-// candidate "02 병합 세그먼트"), paired with the persistent time axis below it (stripAxisHtml,
-// unchanged by this). Height briefly shrunk 20->10 to match .evidence-strip-axis's compact row, but
-// the user found that too short to read and asked it back to the original 20 -- no room for
-// in-segment text either way, so hover (unchanged mechanism, resolves to the whole segment's
-// tone/start~end range) still carries the exact label+time, same tradeoff this dashboard's other
-// compact chips already make.
-// calls (2026-09-08, optional): 봉별 **판정 단어**. 톤이 방향만 담는 신호(돌파/되돌림)에서
-// 같은 ↓ 가 "돌파"일 수도 "되돌림"일 수도 있어, 톤만으로는 세그먼트도 라벨도 구분이 안 된다.
-// 넘기지 않는 호출부는 callList[i] 가 undefined 라 "" 로 떨어져 동작이 그대로다.
-function toneStripSvg(tones, times, provisionalLast, liveFiring, key, calls) {
-  const list = Array.isArray(tones) ? tones : [];
-  const timeList = Array.isArray(times) ? times : [];
-  const callList = Array.isArray(calls) ? calls : [];
-  const n = Math.max(list.length, 1);
-  const w = 240, h = 15, gap = 1.5;
-  const bw = Math.max((w - gap * (n - 1)) / n, 1);
-
-  // Group consecutive equal tones into segments. The still-forming provisional bar (always the last
-  // array entry, see evidenceStripSvg's liveTone param) never merges into the segment before it even
-  // when its tone happens to match -- keeps evidence-bar-provisional's softened fill scoped to only
-  // the genuinely-unconfirmed portion instead of bleeding across a whole merged block.
-  // 🔴2026-09-10 (user report, twice: "연속으로 같은 신호가 나왔는데 게이지가 하나로 안 합쳐진다"
-  // -> "아직도 게이지 칸이 끊겨서 나온다"): the 2026-09-01 rawFire boundary is GONE. Two reasons.
-  // (1) It read rawFire as an EVENT column, but all 8 raw columns are LEVEL (threshold) conditions
-  //     -- `dem <= 0.10`, `kalman_dev_z <= -2.0`, ... (live_evidence_signal_dashboard_20260823.py::
-  //     compute_signals) with no edge detection or dedup -- so they stay true on EVERY bar the
-  //     condition holds. Measured over 224,353 bars: 30.9% of fire bars had the previous bar firing
-  //     too (demarker_extreme 69.5%, runs up to 24 bars = 2h), each split into its own 1-bar cell.
-  // (2) Worse, the tone is bottom-wins (see evidenceStripSvg) so a TOP-side fire inside a lit
-  //     BOTTOM window broke the strip with **no visible reason at all** -- same green on both
-  //     sides of the break. taker_delta_z_climax 2026-09-09 23:25 / 00:35 were exactly this.
-  // Segments now merge purely on what the eye can see (tone + call). Every boundary therefore has
-  // a visible cause, and 혼재(both sides lit) is its own warn tone rather than hiding under 바닥.
-  // Re-fire timing still lives in the caption/hover, which read the same segments.
-  const segments = [];
-  for (let i = 0; i < n; i++) {
-    const tone = list[i] || "neutral";
-    const isProvisionalBar = !!(provisionalLast && i === n - 1);
-    const call = callList[i] || "";
-    const prev = segments[segments.length - 1];
-    if (prev && prev.tone === tone && prev.call === call && !isProvisionalBar) {
-      prev.end = i;
-    } else {
-      segments.push({ tone, call, start: i, end: i, isProvisional: isProvisionalBar });
-    }
-  }
-
-  const bars = segments.map((seg) => {
-    const tone = seg.tone;
-    // 2026-08-25: this mapping originally had no "warn" branch at all (fell into the generic gray
-    // fallback below), then briefly used --amber (yellow) to match .signal-chip.warn's color at the
-    // time -- user then asked for the whole Snapshot tab's 주의 color to be yellow-free and unified
-    // on --warn (orange) instead, so this now matches that.
-    const fill = tone === "good" ? "var(--good)" : tone === "bad" ? "var(--bad)" : tone === "warn" ? "var(--warn)" : "rgba(203,209,227,0.16)";
-    const isLastSeg = seg.end === n - 1;
-    // 2026-08-27 (user request): the last/rightmost bar used to always get a distinct outline
-    // (evidence-bar-now, blinking at first, then static) just for being the "now" position --
-    // removed entirely, position alone isn't a meaningful signal on its own. evidence-bar-live
-    // (tone-colored pulse) still applies when the last segment is actively firing; the whole-gauge
-    // evidence-strip-live blink (see toneStripSvg's return) is the only thing marking "now" at all,
-    // and only while genuinely live/provisional.
-    let cls = "evidence-bar";
-    if (isLastSeg && tone !== "neutral") cls += " evidence-bar-live";
-    // 2026-08-26: when the caller appends a still-forming bar (see evidenceStripSvg's liveTone
-    // param), that bar lands here as its own segment (see the merge guard above) -- this class marks
-    // it as "not yet confirmed" (softened fill, see .evidence-bar-provisional), same honesty-signal
-    // requirement as the provisional badge/chip dots elsewhere (see renderEvidenceSignalsProvisional).
-    if (seg.isProvisional) cls += " evidence-bar-provisional";
-    const count = seg.end - seg.start + 1;
-    const x = (seg.start * (bw + gap)).toFixed(1);
-    const segWidth = (count * bw + (count - 1) * gap).toFixed(1);
-    // data-t/data-t-end carry the segment's START/END bar times (plain ISO strings, safe unescaped
-    // in an HTML attribute) -- read back + formatted at hover time (showStripBarTime) so
-    // fmtShortTs/fmtTimeOnly/fmtHourMinute runs once per hover instead of once per bar per render.
-    // data-t-end (2026-08-31): "그 한 칸의 시작과 끝 시간" -- a 1-bar segment has start===end, shown
-    // as a single time rather than a redundant "11:35~11:35" range (see showStripBarTime). data-tone
-    // carries the segment's tone so hover can resolve its label -- the fill color alone isn't
-    // readable back from the DOM.
-    const t = timeList[seg.start];
-    const tEnd = timeList[seg.end];
-    const callAttr = seg.call ? ` data-call="${escapeHtml(seg.call)}"` : "";
-    const hoverAttrs = t ? ` data-t="${t}" data-t-end="${tEnd || t}" data-tone="${tone}"${callAttr} onmouseenter="showStripBarTime(this)" onmouseleave="hideStripBarTime(this)"` : "";
-    return `<rect class="${cls}" x="${x}" y="0" width="${segWidth}" height="${h}" rx="2" fill="${fill}"${hoverAttrs}/>`;
-  });
-  // 2026-08-27 (user request): the whole gauge blinks, but only while it's showing a genuinely
-  // in-progress reading -- the still-forming bar (liveFiring, from evidenceStripSvg's liveTone) is
-  // both provisional AND currently non-neutral. A provisional-but-neutral forming bar (most common
-  // case) or a fully confirmed render (model indicators always, evidence signals between polls)
-  // stays static -- blink is reserved for "something is actively firing right now, not yet final".
-  const keyAttr = key ? ` data-key="${key}"` : "";
-  return `<svg class="evidence-strip${liveFiring ? " evidence-strip-live" : ""}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"${keyAttr}>${bars.join("")}</svg>`;
-}
-
-
-// 2026-08-31 user request: a persistent time axis under each history strip, instead of only
-// revealing a bar's time on hover -- 5 evenly spaced ticks (first/quarter/half/three-quarter/last,
-// deduped for short arrays) so "roughly when" is visible without any interaction; hover (see
-// showStripBarTime) still gives the exact bar's time + label (unaffected by this -- the user asked
-// only for the persistent axis to change). timeFmtKind: model indicators use "time" (HH:MM:SS,
-// fmtTimeOnly); evidence signals use "hm" (HH:MM only, fmtHourMinute -- 2026-08-31 user request:
-// "증거신호에서... 시와 분만 표시", dropping fmtShortTs's date since 5 ticks that close together
-// almost never cross midnight); anything else falls back to fmtShortTs (MM-DD HH:MM).
-function stripAxisHtml(times, timeFmtKind) {
-  const list = (Array.isArray(times) ? times : []).filter(Boolean);
-  const n = list.length;
-  if (n < 2) return "";
-  const fmt = timeFmtKind === "time" ? fmtTimeOnly : timeFmtKind === "hm" ? fmtHourMinute : fmtShortTs;
-  const idxs = [...new Set([0, Math.round((n - 1) / 4), Math.round((n - 1) / 2), Math.round((n - 1) * 3 / 4), n - 1])];
-  const labels = idxs.map((i) => `<span>${escapeHtml(fmt(list[i]))}</span>`).join("");
-  return `<div class="evidence-strip-axis">${labels}</div>`;
-}
-
-// tone -> label vocabulary per signal "shape", for hover only (2026-08-31 user request: "커서를
-// 막대 배열에 올리면 라벨도 그 커서에 맞는 라벨과 시간을 표시"). Each model-indicator key has its
-// own wording (mirrors that signal's own live subText function -- directionalCaution/
-// liqDirectionSubText/basisLiquiditySubText/liqCascadeHint/vReboundSubText above); all 8 evidence
-// signals share one vocabulary under the "evidence" key (matches evidenceSideLabel). Deliberately
-// separate from MODEL_INDICATOR_MEANING (keyed by the exact CURRENT subText, including states a
-// single past tone can't reconstruct -- "웜업" 같은 운영 상태
-// qualifier, which isn't stored per history bar, only tone is).
-// 2026-09-10 사용자 요청: "V자 급등락과 앵커 돌파/되돌림도 증거신호 라벨처럼 익절 가격을 확률
-// 아래에, 같은 포맷으로". 증거신호의 `익절 {가격}` (renderEvidenceSignals) 과 같은 문자열을
-// 같은 자리(.meter-price, 규약 §3의 "확률이 아닌 수치")에 놓는다. 세 카드가 이제 한 포맷이다.
-// ⚠️세 신호의 목표가는 **각자 자기 라벨**에서 온다 -- 증거신호 K×ATR 터치(intrabar), V자
-//   1.5×ATR 빠른 다리(종가), 돌파/되돌림 ±0.8×ATR 배리어(intrabar). 같은 포맷이라고 같은
-//   규약이 아니다. 컨벤션을 신호 간에 옮기지 않는다(CLAUDE.md 배리어 컨벤션 항목).
-// 🔴2026-09-11 사용자 지적 "급락인데 익절이 현재가 위에 있다". 계산은 맞다 -- 익절가는 라벨
-//   그대로 **발동봉의 극점**에서 1.5×ATR 이다. 발동봉이 크면 그 목표를 같은 봉이 이미 지나쳐
-//   버려서, 앞으로 갈 자리처럼 보이던 숫자가 실제로는 뒤에 있다. 실측: 발동봉 레인지가 ATR 의
-//   2~3배면 38.6%, 6배 이상이면 **86.6%** 가 발동봉 종가에서 이미 도달해 있다(전체 7.65%).
-//   숫자를 숨기지 않고 **이미 지났다고 말한다** -- 라벨 목표 자체는 그 값이 맞기 때문이다.
-
-const STRIP_BAR_LABEL_BY_TONE = {
-  // 2026-09-09 극점 탐지기. 이 칩은 **사건의 측면**을 말하는 자리라 증거신호 어휘를 쓴다
-  // (규약 §1: 특화감지기의 롱/숏은 포지션 방향일 때다). 축이 하나뿐이라 §5-4 문제 없음.
-  extreme_detector: { good: "바닥 발동", bad: "천장 발동", neutral: "미발동" },
-  // 2026-09-15 E|r| 게이트. 축이 하나(발동 여부)다 — **방향 축이 없다**.
-  evr_gate: { bad: "발동", neutral: "미발동" },
-  // 2026-09-06: 배지 어휘와 같은 말을 쓴다 -- 띠에 커서를 올렸을 때와 배지가 다른 단어를 쓰면
-  // 통일한 의미가 없다.
-  // 2026-09-08: 라벨을 **모델의 주장**에 맞춘다(사용자 지적). V자는 되돌림(반전) 콜,
-  // 앵커 방향은 지속 콜이다 -- 같은 바닥 앵커에서 하나는 롱, 하나는 숏이 나오는데
-  // 기존 "롱 발동/숏 보유" 어휘로는 **왜 반대인지**가 화면에 없었다.
-  // 2026-09-11 "되돌림" 폐기(사용자 지적). 라벨의 giveback(되돌림)은 **20% 이하로 억제돼야
-  // 하는 조건**이라, 발동을 "되돌림"이라 부르면 같은 단어가 한 칩에서 정반대 두 뜻이 된다.
-  // 칩 이름(V자 급등락)·툴팁과 같은 어휘로 통일한다.
-  v_rebound: { good: "급등", bad: "급락", flat: "미발동", neutral: "데이터 없음" },
-  // 2026-09-08: 라벨은 지속/되돌림 **이진**인데 러너가 지속 쪽만 진입해 화면에 지속만 떴다
-  // (사용자 지적). 되돌림 우세·지속 약함도 상태로 노출한다 -- 둘 다 진입은 안 한다(회색).
-  liq_pressure: { good: "롱압박↑", bad: "숏압박↑", neutral: "안정" },
-  liq_cascade: { good: "안정", warn: "주의", bad: "위험" },
-  // 2026-09-11 청산 방향압력 -> 청산 규모(사용자 지시). 색은 표시 규약 그대로 측면을 가리킨다.
-  // 2026-09-11 청산 규모 -> 청산 위험. 방향 신호가 아니라 위험도 어휘(안정/주의/위험)를 쓴다.
-  whale: { good: "롱 진입", bad: "숏 진입", neutral: "중립" },
-  retail_flow: { good: "롱 진입", bad: "숏 진입", neutral: "중립" },
-  evidence: { good: "바닥 발동", bad: "천장 발동", warn: "혼재 발동", neutral: "미발동" },
-};
-
-// data-fmt on .strip-time-now: "time" (model indicators) -> HH:MM:SS, "hm" (evidence signals,
-// 2026-08-31 user request) -> HH:MM only, anything else -> MM-DD HH:MM fallback. Shared by
-// showStripBarTime and lastSegmentRangeLabel below so both read the exact same format for a given
-// row.
-function stripTimeFmtByKind(kind) {
-  return kind === "time" ? fmtTimeOnly : kind === "hm" ? fmtHourMinute : fmtShortTs;
-}
-
-// 2026-08-31 user request: default (non-hover) caption shows the LAST segment's own start~end time
-// range + label (replaces the old plain "latest analysis time" default) -- "평소에는 마지막 칸의
-// 시작과 끝 시간과 그 라벨의 정보를 보여주고 있어줘". Walks backward from the last bar while the
-// tone stays the same, mirroring toneStripSvg's own segment-merge grouping (the still-forming
-// provisional bar is always its own 1-wide segment there too, so no special-casing needed here --
-// walking backward from index n-1 can only ever include OTHER already-confirmed bars).
-// 2026-09-08: 띠 캡션의 라벨은 <주장> <방향> 두 축이다. 톤 사전이 방향(또는 단일 어휘)을 주고,
-// 봉별 판정 단어(call)가 있으면 그 앞에 붙인다 -- "되돌림 ↓". 방향이 없는 톤(warn/neutral)은
-// 그 자체가 완결된 상태어("혼재 보유"/"미발동")라 단어를 덧붙이지 않는다.
-function stripBarLabel(key, tone, call) {
-  const base = (STRIP_BAR_LABEL_BY_TONE[key] || {})[tone] || "";
-  if (!base || !call || (tone !== "good" && tone !== "bad")) return base;
-  return `${call} ${base}`;
-}
-
-function lastSegmentRangeLabel(tones, times, key, timeFmtKind, calls) {
-  const list = Array.isArray(tones) ? tones : [];
-  const timeList = Array.isArray(times) ? times : [];
-  const callList = Array.isArray(calls) ? calls : [];
-  const n = list.length;
-  if (n === 0) return "-";
-  const lastTone = list[n - 1] || "neutral";
-  const lastCall = callList[n - 1] || "";
-  let start = n - 1;
-  // 2026-09-10: the rawFire stop is gone with toneStripSvg's (see there) -- this walk mirrors the
-  // strip's grouping exactly, so caption and strip can never disagree about where a segment began.
-  while (start > 0 && list[start - 1] === lastTone && (callList[start - 1] || "") === lastCall) start--;
-  const fmt = stripTimeFmtByKind(timeFmtKind);
-  const barLabel = stripBarLabel(key, lastTone, lastCall);
-  const rangeText = start === n - 1 ? fmt(timeList[n - 1]) : `${fmt(timeList[start])}~${fmt(timeList[n - 1])}`;
-  return barLabel ? `${barLabel} · ${rangeText}` : rangeText;
-}
-
-// .strip-time-now (rendered by each row template, NOT inside the strip) defaults to the last
-// segment's own range+label (data-default, set once at render time via lastSegmentRangeLabel above)
-// and switches to the HOVERED segment's own start~end range + label while the cursor is over the
-// strip -- 2026-08-25 user request for the original time-only version ("지금 현재 시간을
-// 표시해주고, 마우스를 올리면... 시간을 표시"), extended 2026-08-31 ("막대 한칸을 hover 하면 그 한
-// 칸의 시작과 끝 시간과 그 라벨의 정보를 보여줘") to a full range+label on both hover and default.
-// data-t/data-t-end on each <rect> (see toneStripSvg) are that segment's own start/end bar times.
-function showStripBarTime(rectEl) {
-  const startIso = rectEl.getAttribute("data-t");
-  if (!startIso) return;
-  const endIso = rectEl.getAttribute("data-t-end") || startIso;
-  const label = rectEl.closest(".ops-health-info")?.querySelector(".strip-time-now");
-  if (!label) return;
-  const fmt = stripTimeFmtByKind(label.getAttribute("data-fmt"));
-  const key = rectEl.closest("svg")?.getAttribute("data-key");
-  const tone = rectEl.getAttribute("data-tone");
-  const barLabel = key && tone ? stripBarLabel(key, tone, rectEl.getAttribute("data-call") || "") : null;
-  const rangeText = startIso === endIso ? fmt(startIso) : `${fmt(startIso)}~${fmt(endIso)}`;
-  label.textContent = barLabel ? `${barLabel} · ${rangeText}` : rangeText;
-}
-
-function hideStripBarTime(rectEl) {
-  const label = rectEl.closest(".ops-health-info")?.querySelector(".strip-time-now");
-  if (label) label.textContent = label.getAttribute("data-default") || "-";
-}
-
-// Same row/strip UI as renderEvidenceSignals(), but for the model-internal indicators -- and (as of
-// 2026-08-30) reused a second time for the growing "특화 감지기" list of event-triggered detectors
-// (see the two separate renderModelIndicatorList(items, targetId) call sites in render() below,
-// each with its own target element id and its own memoized-html slot in lastModelIndicatorHtmlByTarget).
-// All these panels LOOK identical on purpose (same ops-health-row/-strip markup) -- the caption on every
-// row is what tells them apart, because the underlying history is NOT the same kind of window:
-// evidence-signal strips are recomputed server-side from real historical klines (always full,
-// survives a refresh); this list's strips are an in-memory tally that starts empty on page load
-// and grows only while the tab stays open (trading_bot doesn't persist a time series for these
-// fields, only the latest reading -- same limitation the Live tab's sparklines already had).
 // Shared open/closed state for the per-signal "자세히" detail toggles (model indicators AND
 // evidence signals use the same key space, prefixed "model:"/"evidence:" to avoid collisions).
 // Kept outside any render function so it survives every re-render -- these lists are rebuilt via
 // innerHTML replacement on every tick/poll, so without this a user's open detail panel would snap
 // shut a few seconds after they opened it.
 const detailOpenKeys = new Set();
-function toggleSignalDetail(btn, key) {
-  const row = btn.closest(".ops-health-row");
-  const detail = row ? row.querySelector(".signal-detail") : null;
-  const open = detailOpenKeys.has(key) ? (detailOpenKeys.delete(key), false) : (detailOpenKeys.add(key), true);
-  if (detail) detail.classList.toggle("open", open);
-  btn.textContent = open ? "접기 ▴" : "자세히 ▾";
-  btn.setAttribute("aria-expanded", String(open));
-}
-
-// 진입/청산 미리보기 카드의 «자세히». 기존 toggleSignalDetail 은 .ops-health-row 안에서만
-// 동작해서(closest) 이 카드에는 못 쓴다. 여기서는 버튼 **바로 다음 형제**를 연다.
+// 진입/청산 미리보기 카드의 «자세히». 버튼 **바로 다음 형제**를 연다.
 // 열림 상태를 detailOpenKeys 에 남겨, 미리보기를 다시 띄워도 사용자의 선택이 유지된다.
 function toggleEntryDetail(btn) {
   const detail = btn.nextElementSibling;
@@ -1939,143 +1474,6 @@ function toggleEntryDetail(btn) {
   if (detail) detail.classList.toggle("open", open);
   btn.textContent = open ? "접기 ▴" : "자세히 ▾";
   btn.setAttribute("aria-expanded", String(open));
-}
-
-// Full-detail Korean explanations for the 6 model-internal indicators (formula + live threshold +
-// what it means for a trader) -- shown only when the user clicks "자세히" next to each tile, so
-// the default compact view stays uncluttered. Sourced from microstructure_scanner.py /
-// tail_risk_interceptor.py verbatim, not re-derived.
-// Always-visible "지금 이게 무슨 뜻인지" line, indexed by the exact subText string each
-// indicator currently shows -- no click required (2026-08-24 사용자 요청: 발동되면 의미를 바로
-// 볼 수 있게). The deeper formula/기준 stays behind "자세히" in MODEL_INDICATOR_DETAIL below.
-const MODEL_INDICATOR_MEANING = {
-  // 2026-10-18 경보기(전환 예고) 항목 제거 -- 재검증에서 급증 «뒤»에 켜졌다(scripts/research_eth_prewarn_lagging_verify_20261018.py).
-  // ⚠️키는 subText 문자열이다(규약 §5-1) -- 라벨을 바꾸면 여기도 같이 바꾼다.
-};
-
-const MODEL_INDICATOR_DETAIL = {
-  // 2026-10-18 경보기 항목 제거(전환 예고·탐지 내림).
-};
-
-// 2026-08-30 (user request): "학습 horizon을 배지로" -- each signal's own validated forward-
-// looking prediction/detection window, shown as a small badge next to its name (see
-// horizonBadgeHtml() below, used by both renderModelIndicatorList and renderEvidenceSignals).
-// Covers the model-indicator keys in one lookup.
-// (2026-09-16 증거신호 칩이 내려가면서 EVIDENCE_STRIP_CHIP_IDS 는 사라졌다 -- 이 주석이
-//  없는 상수를 계속 가리키고 있었다. 2026-09-20 정정.)
-// "상태" (not a number) marks signals whose live formula is a continuous current-state gauge with
-// no fixed forward horizon baked in -- forcing a number onto those would overstate what they
-// actually claim; each entry's title cites the specific research this is grounded in (verified
-// against each script's own docstring/detail text above and this repo's evidence-signal scorecard
-// methodology, not guessed from the signal's name -- e.g. "15분 급변"/short_term_return_z names
-// its INPUT lookback, not its evaluation horizon, which is 1시간 like its 6 scorecard siblings).
-const SIGNAL_HORIZON = {
-  // -- model indicators --
-  // 2026-10-18 경보기(예고 30분) 배지 제거.
-};
-
-// 2026-09-06: `progress`(예 "26/30봉")를 주면 배지 문구에 덧붙인다. 새 배지를 만들지 않는 이유는
-// 제목줄이 이미 최대 3개 배지를 달고 있고 이 열은 과거에 오버플로 사고가 있었기 때문이다
-// (eth_dashboard_low_atr_warning_overflow_fix_20260901). 인자를 안 주면 기존 동작 그대로다.
-function horizonBadgeHtml(key, progress, extraTitle) {
-  const h = SIGNAL_HORIZON[key];
-  if (!h) return "";
-  const text = progress ? `${h.text} · ${progress}` : h.text;
-  let title = progress ? `${h.title}\n\n지금 이 발동은 그 창의 ${progress}째입니다.` : h.title;
-  if (extraTitle) title += `\n\n${extraTitle}`;
-  return ` <span class="horizon-badge" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
-}
-
-
-// ⭐2026-09-03: ETH가 아닌 코인은 **그 코인 자신의** 실시간 수집기 값으로 대체한다.
-// 데이터가 없으면 ethOnlyIndicator로 폴백해 "미지원"으로 정직하게 표시한다.
-//
-// ⚠️표시를 ETH와 **똑같이** 맞추는 게 중요하다. 첫 판에서는 subText에 숫자를 직접 넣었는데
-// (`유입 0.552 · 방금`), ETH는 `directionalCaution()`이 만드는 **"롱 진입"/"숏 진입"/"중립"**
-// 어휘를 쓰고 `MODEL_INDICATOR_MEANING[key][subText]`가 **그 문자열로 조회**된다. 자유 문구를
-// 넣으면 (a) 칩 문구가 ETH와 달라 보이고 (b) 의미 설명이 사전에 안 걸려 사라진다.
-// 그래서 subText/valueText/톤스트립을 전부 ETH와 같은 함수·같은 모양으로 만든다.
-// 숫자와 경과시간은 `liveText`(ETH의 청산캐스케이드가 쓰는 자리)와 툴팁으로 뺀다.
-
-// 2026-09-06 (사용자 신고 "V자 급등락의 미발동만 흰색"): 서버가 주는 V자 톤 **"flat"**(방향 없음)은
-// CSS에 대응 규칙이 없다(.meter-state / .signal-chip / .ops-health-row 전부 good·bad·warn·neutral 뿐).
-// 클래스는 붙지만 색 규칙이 없어 글자색이 상속돼 흰색으로 떴다 -- 같은 뜻인 다른 감지기의 `미발동`은
-// 전부 회색이다. 스트립 SVG는 이미 flat 을 neutral 과 같은 회색으로 칠하고 있었으니(toneStripSvg 의
-// fill 폴백) 배지·행·칩만 법칙에서 벗어나 있었다. 여기서 한 번에 정규화한다.
-function toneClass(tone) { return tone === "flat" ? "neutral" : (tone || "neutral"); }
-
-function renderModelIndicatorList(items, targetId = "snapModelIndicatorList", { forceMeter = false } = {}) {
-  // 2026-08-25: perf pass -- render() drives this on every SSE push (~2.5s), but the underlying
-  // model_indicator_history only advances once per MODEL_INDICATOR_SAMPLE_SECONDS (300s server-
-  // side), so most calls were rebuilding ~500 DOM nodes (9 rows x up to 48 sparkline rects each)
-  // for identical output. Chip-element side effects below still run every call (cheap, and their
-  // inputs -- it.tone/it.subText -- are also embedded in the html string, so if the string is
-  // unchanged those writes are redundant-but-harmless); only the expensive setH() innerHTML
-  // rebuild is skipped when nothing actually changed.
-  const html = items.map((it) => {
-    const tone = toneClass(it.tone);                 // flat -> neutral (위 주석)
-    const derivedTag = it.derivedTag
-      ? ` <span class="derived-tag" title="${escapeHtml(it.derivedTitle || "")}">${escapeHtml(it.derivedTag)}</span>`
-      : "";
-    const detailKey = `model:${it.key}`;
-    const isOpen = detailOpenKeys.has(detailKey);
-    const detailText = MODEL_INDICATOR_DETAIL[it.key] || "";
-    const meaningText = (MODEL_INDICATOR_MEANING[it.key] || {})[it.subText] || "";
-    // 2026-09-16 사용자 요청 «설명 칸 2개를 1개로». 뜻(고정)과 지금 숫자(liveText)가 같은 `.signal-meaning`
-    // 문단으로 **연달아 두 개** 그려지고 있었다 -- 같은 칸이 두 줄로 쪼개져 보인다. 한 문단으로 합친다.
-    // liveText 를 쓰는 다른 칩(수급흐름·청산캐스케이드)도 같은 규칙을 따른다 -- 칸 모양은 하나여야 한다.
-    const meaningLine = [meaningText, it.liveText].filter(Boolean).join(" · ");
-    const times = it.times || [];
-    // 2026-08-31 user request: default caption shows the LAST segment's own range+label, not just
-    // "지금 시간" -- see lastSegmentRangeLabel().
-    const defaultRangeText = lastSegmentRangeLabel(it.history, times, it.key, "time", it.callHistory);
-    // 2026-08-31: optional `it.proba` (0-1) opts an item into the same inline probability meter
-    // renderEvidenceSignals() uses (see .meter-col in styles.css) -- state text, then the meter bar,
-    // stacked vertically ("천장 발동과 익절 사이" layout the user picked). Items with no proba concept
-    // (수급 흐름/청산 캐스케이드/베이시스 청산압박/청산 방향압력, all categorical-only) keep the plain
-    // .ops-health-status-badge pill, unchanged -- there's no probability to gauge for those.
-    // 2026-09-06 (사용자 요청 "스타일까지 통일"): forceMeter 목록(특화감지기)은 증거신호 목록과
-    // 같은 규칙 -- **상태와 무관하게 항상 .meter-col**을 그린다. 그 전에는 확률이 있을 때만
-    // meter-col이고 없으면 64px 알약으로 떨어져, 같은 행이 상태에 따라 모양이 바뀌고 세 행이
-    // 서로 다른 모양이었다(증거신호 목록이 2026-08-31에 같은 이유로 이미 고쳐진 문제다).
-    // 게이지 줄은 **확률 개념이 있는 행만**(probaSlot) -- 확률이 아닌 값을 % 게이지로 그리면
-    // 다른 뜻이 같은 그림으로 보인다. 확률이 아닌 수치는 meter-price 자리(meterNote)에 적는다.
-    const gaugeHtml = (it.probaSlot || it.proba != null)
-      ? `<div class="meter-gauge">
-          <span class="meter-track"><span class="meter-fill ${tone}" style="width:${clamp01(it.proba || 0) * 100}%"></span></span>
-          <span class="meter-pct">${it.proba != null ? `${Math.round(clamp01(it.proba) * 100)}%` : "-"}</span>
-        </div>`
-      : "";
-    const metaHtml = (forceMeter || it.proba != null)
-      ? `<div class="meter-col">
-          <span class="meter-state ${tone}"${it.stateTitle ? ` title="${escapeHtml(plainEmphasis(it.stateTitle))}"` : ""}>${escapeHtml(it.subText || "-")}</span>
-          ${gaugeHtml}
-          ${it.meterNote ? `<span class="meter-price" title="${escapeHtml(it.meterNoteTitle || "")}">${escapeHtml(it.meterNote)}</span>` : ""}
-        </div>`
-      : `<span class="ops-health-status-badge">${escapeHtml(it.subText || "-")}</span>`;
-    return `<article class="ops-health-row ${tone}">
-      <span class="ops-health-dot" aria-hidden="true"></span>
-      <div class="ops-health-info">
-        <strong>${escapeHtml(it.label)}${horizonBadgeHtml(it.key)}${derivedTag}</strong>
-        ${meaningLine ? `<p class="signal-meaning"${it.liveTitle ? ` title="${escapeHtml(plainEmphasis(it.liveTitle))}"` : ""}>${emphasizeHtml(meaningLine)}</p>` : ""}
-        <div class="evidence-strip-wrap">
-          ${toneStripSvg(it.history, times, false, false, it.key, it.callHistory)}
-          ${stripAxisHtml(times, "time")}
-        </div>
-        <div class="strip-time-row">
-          <button type="button" class="detail-toggle" aria-expanded="${isOpen}" onclick="toggleSignalDetail(this, '${detailKey}')">${isOpen ? "접기 ▴" : "자세히 ▾"}</button>
-          <span class="strip-time-now" data-fmt="time" data-default="${escapeHtml(defaultRangeText)}">${escapeHtml(defaultRangeText)}</span>
-        </div>
-        <div class="signal-detail${isOpen ? " open" : ""}">${emphasizeHtml(detailText)}</div>
-      </div>
-      <div class="ops-health-meta">
-        ${metaHtml}
-      </div>
-    </article>`;
-  }).join("");
-  if (html === lastModelIndicatorHtmlByTarget[targetId]) return;
-  lastModelIndicatorHtmlByTarget[targetId] = html;
-  setH(targetId, html);
 }
 
 // Renders the Snapshot tab's liquidation-map list as a price ladder: resistance levels (farthest
@@ -2321,7 +1719,6 @@ async function refreshLiquidation5mSignal() {
     if (!res.ok) throw new Error(`liquidation 5m signal ${res.status}`);
     const j = await res.json();
     if (asset !== activeSnapshotAsset) return;
-    latestLiquidation5m = j;
     try {
       // 🔴2026-09-25 폭을 보낸다. 안 보내면 서버가 96 봉으로 답해 12시간 창에서 앞 48봉에
       //   청산 원이 사라졌다 -- 화면에서는 «청산이 없었다»로 읽힌다(실제로는 모름).
@@ -2334,13 +1731,10 @@ async function refreshLiquidation5mSignal() {
     } catch (e) { if (asset === activeSnapshotAsset) latestLiquidation5mHist = []; }
   } catch (error) {
     console.error("Liquidation 5m signal fetch error:", error);
-    if (asset === activeSnapshotAsset) latestLiquidation5m = { warmed_up: false, error: "fetch_failed" };
   }
 }
 
-// Unlike latestVRebound (picked up by the next state-driven render() pass), the liquidation map
-// has no such host -- it self-triggers both the panel list and the snapshot chart right after a
-// fetch resolves, same pattern as refreshEvidenceSignals().
+// The liquidation map self-triggers the panel list and the snapshot chart right after a fetch resolves.
 async function refreshLiquidationMap() {
   const now = Date.now();
   if (now - liquidationMapLastFetchAt < LIQUIDATION_MAP_POLL_MS) return;
@@ -3795,7 +3189,7 @@ function renderOptions() {
       : latestGex && latestGex.error ? `옵션 수집 지연 (${escapeHtml(latestGex.error)})` : "옵션 불러오는 중…"}</div>`;
     return;
   }
-  const px = optPx(o), f = optFront(o), hrs = f ? (f.exp_ms - Date.now()) / 3.6e6 : null;
+  const f = optFront(o), hrs = f ? (f.exp_ms - Date.now()) / 3.6e6 : null;
   const s1d = optSigma(o, 86400), s5 = optSigma(o, 300);
   // 2026-09-29 사용자 지시: 예상 폭은 전부 DVOL 하나로(만기별 ATM IV 는 이력이 09-28 부터라 검정 불가였다).
   const sExp = f && hrs > 0 ? optSigma(o, hrs * 3600) : null;
@@ -4308,7 +3702,6 @@ MC_TIPS.q_box = "박스 = 지금가 ± 지난 30분·1시간·4시간 고저폭�
 // 2026-10-04 맞대결·벽 신호·모의 판(사용자 승인 시안) -- 원천 = 모의 매매 엔진 상태(/api/paper-arms). 연구와 같은 계산을 엔진이 한 번만 한다.
 MC_TIPS.q_flow += "\n\n맞대결 = 정시마다 고래(체결 한 줄 $10만+)·리테일($1만 미만)의 60분 순매수를 자기 지난 30일과 견준 z 가 반대이고 둘 다 0.5 이상이면 고래 쪽, 다음 정시까지. 위 줄들(14일 같은 요일유형·시간대 잣대·거래소 합산)과 잣대가 달라 가끔 엇갈린다 — 맞대결은 바이낸스만 — 합산판(+OKX·+Bybit)은 10-06 검정에서 바이낸스판보다 약해 불통과(2025~ 건당 +7.8 vs +7.1 · +3.8bp, docs/experiments/whale_duel_multivenue_20261006.md). 4.7년 검정에서 약하게 맞았다(메이커 체결 전제).";
 MC_TIPS.q_wall += "\n\n벽 신호 = 5분봉 마감 때 ±50bp 매수·매도 잔량 불균형이 지난 24시간 상위 20% 문턱(주황 점선)을 넘는 쪽, 다음 5분. 직전 5분이 이미 그 방향으로 움직였으면 «추격 주의». 본질은 «방금 움직인 반대쪽»이라 한 방향으로 계속 가는 날엔 틀린다.";
-MC_TIPS.paper = "서버가 같은 시세로 여러 판을 동시에 돌린 모의 매매(실주문 없음). 따라 하라는 신호가 아니라 «이 규칙이 지금 무엇을 들고 있나». 적응판 = 벽 신호 + 맞대결, 새 진입 뒤 15분 보유 · 고래판 = 맞대결이면 고래 쪽 60분 · 반반 = 둘을 ½씩(서로 따로 움직여 낙폭이 준다). 숫자 = 1 ETH 명목 대비 bp, 체결은 지정가 대기열로 판정 · 최대 낙폭은 기록 시작부터. 줄에 마우스를 올리면 진입가·미실현.\n\n통과 신호 판(10-04~) = 연구에서 통과한 신호를 같은 엔진으로: 추세 4주 = 7·14·21·28일 종가 비교 부호 평균, 매일 00시 UTC(유일하게 통과한 매매 전략) · ×크기 = 같은 방향을 연 50% ÷ 20일 변동성 크기로(±2배) · 가격×OI 1h = 5분마다, 직전 1시간이 크게 내렸으면(하위 25%) OI 가 줄면 롱 · 늘면 숏, 마지막 발동 뒤 1시간 보유(원 연구 정의 · 10-05~. 근거는 2022~24 가 강하고 2025~ 는 신뢰구간이 0 을 포함) · +추세필터 = 24시간 평균선 반대 방향은 진입 안 함 · 동일위험 = 직전 4시간 변동성에 맞춰 크기 0.5~2배(배포 위험모델이 아닌 실현변동성 대용).";
 // 시안 B 그림 부품 -- 전부 SVG 문자열. 폭은 고정(칸 격자가 줄을 맞춘다), 색은 3색 규칙(방향만 초록·빨강, 극단 구간만 주황).
 const mcGfx = {
   pct(p, w = mcGfx.gw || 130) {   // 분위 0~1 · 양끝 10% 주황 띠 · 값 없으면 빈 막대
@@ -4434,42 +3827,6 @@ function paperSignals(d = latestPaper, nowS = Date.now() / 1000) {
            imb: sg.imb50, thr: sg.thr, dir, chase: dir !== 0 && sg.r5 * dir > 0, r5: sg.r5 };
 }
 
-// 2026-10-04 풋프린트 «옵션 요약» 자리 = 모의 판(사용자 지시 -- 옵션 숫자는 머리 칩·Option 카드에 그대로 있다). 좁은 화면은 시장 맥락 끝.
-// 2026-10-04 «통과 신호 판» 7개 추가(사용자 «표시해줘») -- 칸 높이가 풋프린트에 묶여 있어(#mcWall overflow hidden) 판마다 한 줄 표로.
-//   기존 3판도 같은 표 줄(목표 · 오늘 · 누적 · 낙폭). 칸이 낮으면 표만 안에서 스크롤.
-const PAPER_NEW = [["trend4", "추세 4주"], ["trend4_vs", "추세 4주 ×크기"], ["poi1h", "가격×OI 1h"],
-  ["w80_z0.5_a24_mh15_vt", "적응판 +추세필터"], ["w100_z0.5_w60_vt", "고래판 +추세필터"],
-  ["w80_z0.5_a24_mh15_er", "적응판 동일위험"], ["w100_z0.5_w60_er", "고래판 동일위험"]];
-// 2026-10-04 SOL·XRP 판별 검정(사용자 «각각 테스트 및 적용») -- 통과한 판만 진하게, 나머지는 흐리게 «기록만».
-//   추세 4주: SOL 약한 통과 · XRP 불합격 / 가격×OI: 둘 다 불합격(docs/experiments/trend4_poi1h_solxrp_20261004.md) ·
-//   맞대결: 둘 다 불합격(whale_duel_solxrp_20261004.md) -> 맞대결을 쓰는 적응판·고래판·반반과 그 변형도 미통과.
-//   2026-10-05 ETH 가격×OI 1h = 원 연구 정의(5분 판정)로 바꿔 다시 진하게(사용자 «원 연구 정의로 진행 · 마이너스 포함돼도 문제없어») --
-//   전체 OI↓−OI↑ +3.55[+1.10,+6.02] · 2025~ +3.37[−0.32,+7.53](CI 0 포함, 사용자 수용) · 엔진 판도 5분 판정으로(rl_1s_agent poi1h).
-const PAPER_COIN_OK = { sol: new Set(["trend4", "trend4_vs"]), xrp: new Set(),
-  eth: new Set(["w80_z0.5_a24_mh15", "w100_z0.5_w60", "p1", "trend4", "trend4_vs", "poi1h", "w80_z0.5_a24_mh15_vt", "w100_z0.5_w60_vt", "w80_z0.5_a24_mh15_er", "w100_z0.5_w60_er"]) };
-function paperHtml(d = latestPaper, bare = false) {   // bare = 서랍 안(제목 줄은 서랍 머리가 그린다)
-  const open = mcTipOpen.has("paper"), C = activeSnapshotAsset, ok = PAPER_COIN_OK[C], other = C !== "eth";
-  const days = d && d.available && d.arms && d.arms["w80_z0.5_a24_mh15"] ? d.arms["w80_z0.5_a24_mh15"].days : null;
-  const head = (bare ? "" : `<h4><button type="button" class="mc-q" data-tip="paper" aria-expanded="${open}">모의 판<span aria-hidden="true">?</span></button><span class="ppm-sub">실주문 없음 · bp${days ? ` · ${days}일째` : ""}</span></h4>`)
-    + `<p class="mc-tip"${open ? "" : " hidden"}>${escapeHtml(MC_TIPS.paper + (other ? `\n\n${coinUnit()} = 같은 판을 이 코인 시세·이 코인 문턱으로(주문 1단위 = ETH 1개와 같은 명목). 흐린 줄 = 이 코인 검정 불통과 — 기록만 남긴다.` : "")).replace(/\n/g, "<br>")}</p>`;
-  if (!d || !d.available) return `<div class="mc-sec ppm">${head}<div class="ppm-empty">모의 매매 엔진 상태 없음${d && d.error ? ` (${escapeHtml(String(d.error))})` : ""}</div></div>`;
-  const A = d.arms || {}, a1 = A["w80_z0.5_a24_mh15"], a2 = A["w100_z0.5_w60"], p1 = d.port;
-  if (!a1 || !a2 || a1.cum == null) return `<div class="mc-sec ppm">${head}<div class="ppm-empty">실시간 기록 시작 전<br>엔진 재시작부터 쌓입니다</div></div>`;
-  const n = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}`);
-  const tone = (v) => (v > 0 ? "mc-good" : v < 0 ? "mc-bad" : "");
-  const tgt = (pos) => (pos > 0 ? ["long", pos >= 1 ? "롱" : "롱 ½"] : pos < 0 ? ["short", pos <= -1 ? "숏" : "숏 ½"] : ["", "관망"]);
-  const row = (name, a, sum, key) => { const [c, t] = tgt(a.pos || 0), off = !!ok && !ok.has(key);
-    return `<div class="ppm-r${sum ? " sum" : ""}${off ? " off" : ""}" title="${off ? `${coinUnit()} 검정 불통과 — 기록만 · ` : ""}${a.entry ? `진입 ${a.entry} · 미실현 ${n(a.unr)}bp` : "포지션 없음"}"><span class="ppm-name">${name}</span>`
-      + `<span class="ppm-tgt ${c}">${t}</span><b class="${tone(a.pnl_today)}">${n(a.pnl_today)}</b><b class="${tone(a.cum)}">${n(a.cum)}</b><b>${n(a.mdd)}</b></div>`; };
-  const fresh = PAPER_NEW.filter(([k]) => A[k] && A[k].cum != null);
-  const sep = `<div class="ppm-sep"><span>${other ? "ETH 통과 판" : "통과 신호 판"}</span><span>${fresh.length ? `${A[fresh[0][0]].days}일째` : ""}</span></div>`;
-  const news = fresh.length ? fresh.map(([k, nm]) => row(nm, A[k], false, k)).join("")
-    : `<div class="ppm-wait">10-04 00:02 UTC 엔진 재시작부터 기록</div>`;
-  return `<div class="mc-sec ppm">${head}<div class="ppm-t"><div class="ppm-r h"><span></span><span>목표</span><span>오늘</span><span>누적</span><span>낙폭</span></div>`
-    + `${row("적응판", a1, false, "w80_z0.5_a24_mh15")}${row("고래판", a2, false, "w100_z0.5_w60")}${p1 ? row("반반", p1, true, "p1") : ""}${sep}${news}</div>`
-    + `${d.stale ? `<div class="ppm-foot"><span class="mc-warn">엔진 멈춤 ${Math.round(d.age_s / 60)}분</span></div>` : ""}</div>`;
-}
-
 // ── 2026-10-06 넓은 화면 모의 판 칸(#mcWall) = 서랍 둘: 모의 판 · 지지/저항 (사용자 «드로우로 올리고 내리게 · 둘 중 하나만 열려 카드 높이가 안 움직이게») ──
 //   칸 높이는 풋프린트가 정한다(mcPlace) -- 열린 서랍이 남은 높이를 다 쓰고, 닫힌 서랍은 머리 한 줄(+ 요약, 사용자 선택 B). 머리를 누르면 그 서랍이 열리고(열린 걸 누르면 다른 쪽).
 function wallDrawerHtml() {   // 2026-10-13 아티팩트 댓글 «라벨 지우고 숫자·게이지만»: 머리·줄 이름 없이 가격 · 강도 게이지 · 거리 %(CSS #mcWall .wdr-sr)
@@ -4561,7 +3918,7 @@ function mcPlace(svg, r, wr) {
 }
 
 function renderMarketCtx() {
-  const body = el("mcBody"), badge = el("mcBadge");
+  const body = el("mcBody");
   if (!body) return;
   const A = activeSnapshotAsset, eth = A === "eth", U = coinUnit();   // 2026-10-04 코인별(SOL·XRP)
   const ratesOff = () => { const f = el("fpRates"); if (f && !f.hidden) { f.hidden = true; f.innerHTML = ""; } };   // 10-17 리뷰: 아래 두 return 에서 머리 칸이 마지막 값으로 멈춰 있었다
@@ -4570,7 +3927,6 @@ function renderMarketCtx() {
   if (!d || !d.available) {
     body.innerHTML = `<div class="mc-note">${d && d.error ? `시장 맥락 지연 (${escapeHtml(String(d.error))})` : "불러오는 중…"}</div>`;
     body._mcHtml = null;
-    if (badge) { badge.textContent = d && d.error ? "지연" : "-"; badge.className = "ops-badge neutral"; }   // 옛 «쏠림» 배지가 남지 않게
     ratesOff();
     return;
   }
@@ -4578,7 +3934,6 @@ function renderMarketCtx() {
   const sg = (v, dp = 1, u = "") => (v == null || !Number.isFinite(+v) ? "-" : `${+v >= 0 ? "+" : "−"}${n(Math.abs(v), dp)}${u}`);
   const fr = (v) => (v == null ? "-" : `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(4)}%`);
   const left = (ms) => { if (!ms) return "-"; const s = Math.max(0, (ms - Date.now()) / 1000); return s >= 3600 ? `${Math.floor(s / 3600)}시간 ${Math.floor((s % 3600) / 60)}분` : `${Math.ceil(s / 60)}분`; };
-  const usd = (v) => (v == null ? "-" : fmtUsdCompact(v));
   const tone = (v, thr = 0.5) => (v == null || Math.abs(v) < thr ? "" : v > 0 ? "mc-good" : "mc-bad");
   // 2026-10-04 고래·리테일 경계는 코인별(서버 bands_usd) -- 설명 글의 ETH 값($10만/$1만)을 바꿔 끼운다
   //   🔴키는 «q_flow»(= flow + quad 이어 붙임)다 -- 키 이름으로 고르지 말고 글에서 바꾼다(첫 판은 "flow" 로 걸러 한 번도 안 맞았다)
@@ -4587,11 +3942,8 @@ function renderMarketCtx() {
   const sec = (key, title, inner) => `<div class="mc-sec"><h4><button type="button" class="mc-q" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
     + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(tipOf(key)).replace(/\n/g, "<br>")}</p>${inner}</div>`;
   const f = d.funding || {}, b = d.basis || {}, oi = d.oi || {}, ls = d.ls, fl = d.flow || {}, z = fl.z60h_all || fl.z60h || fl.z60 || {},   // z60h = 같은 UTC 시 14일 기준(2026-10-01) · 10-05 요일유형(평일/주말) 분리, 없으면 옛 12~24h 링
-    bk = d.book || {}, bu = d.burst;
+    bk = d.book || {};
   const levWarn = ["long_crowd", "short_crowd", "deleverage"].includes((d.lev || {}).key);
-  // 가격 위치 -- 차트와 같은 캔들 이력(서버가 봉마다 vwap/vsd 를 싣는다)
-  const full = candleHistoryByAsset[A] || [], lc = full[full.length - 1];
-  const px = Number(latestLivePriceByAsset[A] || lc?.close || d.mid || 0);
   // 일정 -- 옵션 만기는 옵션 카드와 같은 원천(latestGex). 🔴optData() 는 «지금 보는 코인»이라 SOL 탭에서 SOL max pain 을 ETH 가격과
   //   견줬다(09-29 재검증) -- 이 카드는 ETH 전용이므로 ETH 를 직접 읽는다.
   const gEth = latestGex && latestGex.available ? (latestGex.currencies || {}).ETH : null, o = gEth && gEth.options;
@@ -4599,11 +3951,9 @@ function renderMarketCtx() {
   // 2026-09-30 사용자 «주요 경제 일정이 왜 24시간 축에 없나» -- 전에는 «다음 high 하나»만 실었다. 경제 일정 카드와 같은 원천의 24시간 안 전부.
   const macro24 = (latestMacroEvents || []).map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표", hi: e.importance === "high" }))
     .filter((e) => e.t > Date.now() && isTodayOrTomorrowLocal(e.t));   // 2026-09-30 경제 일정 카드 제거 -- 카드가 보이던 오늘·내일 전부(24시간 넘는 건 시간축 오른쪽 끝 «>»)
-  const prof = d.liq_profile || [], top = prof.reduce((m, r) => (r[1] + r[2] > (m ? m[1] + m[2] : 0) ? r : m), null);
   const sw = bk.sweep, bps = bk.bps || [25, 50, 100], sdp = Math.max(2, (ASSET_CONFIG[A] || {}).dp || 2);   // 호가 1틱 = ETH·SOL 0.01 · XRP 0.0001
   const thin = bk.bid25_pct != null && bk.ask25_pct != null && Math.min(bk.bid25_pct, bk.ask25_pct) <= 0.1
     ? (bk.ask25_pct <= bk.bid25_pct ? "위쪽(매도호가)이 얇다" : "아래쪽(매수호가)이 얇다") : null;
-  const burstSide = mcLiqBurstSide(bu);
   // 2026-10-04 ② 맞대결 · ④ 벽 신호 상태 줄 + 깊은 벽 줄(원천 = 모의 엔진, 5분봉 마감 값)
   // 맞대결·벽 신호 = 그 코인 모의 엔진의 마지막 봉 값. 줄은 그 코인에서 검정을 통과한 것만(PAPER_SIG_OK, 2026-10-04 사용자 «각각 테스트 및 적용»)
   const ps = latestPaper && latestPaper.asset === A ? paperSignals() : null, chip = (cls, txt, tip = "") => `<span class="mc-chip ${cls}"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${txt}</span>`;
@@ -4613,10 +3963,6 @@ function renderMarketCtx() {
   const wallLine = !PAPER_SIG_OK.wall.has(A) ? "" : `<div class="mc-state"><span class="mc-k">벽 신호</span>${!ps ? chip("", "엔진 대기") : !ps.dir ? chip("", "없음")
     : ps.chase ? chip("warn", `${ps.dir > 0 ? "매수" : "매도"} · 추격 주의`, `직전 5분 ${sg(ps.r5, 0, "bp")} — 이미 그 방향으로 움직였다`)
     : chip(ps.dir > 0 ? "good" : "bad", `${ps.dir > 0 ? "매수" : "매도"} 우세 · 5분`, `직전 5분 ${sg(ps.r5, 0, "bp")}`)}</div>`;
-  if (badge) {
-    badge.textContent = (d.lev || {}).label || "-";
-    badge.className = `ops-badge ${levWarn ? "warn" : "neutral"}`;
-  }
   // ── 2026-09-30 시안 B(사용자 선택 «글자가 너무 많다 → 그릴 수 있는 건 그림으로»): 질문 네 판 + 다음 24시간 ──
   //   분위 = 0~100 게이지(양끝 10% 주황) · σ = 0 가운데 막대(±2σ 점선) · 비율 = 1 가운데 로그 눈금(빈 점 = 하루 전).
   //   그림 없는 부값(OKX/HL 펀딩·OI 합계·거래소별 30분 체결·스프레드·12시간 청산 최다·청산 급증)은 판마다 흐린 한 줄로 남긴다.
@@ -4968,25 +4314,13 @@ function supplyFlowOfBar(levels) {
 // ⭐2026-09-28 사용자 «고래/중형/리테일이 매초 어떻게 거래하는지 5분 내내» -- 누적 한 판을 **다섯 줄 거울 막대**로 바꿨다
 //   (CVD · 고래 · 중형 · 리테일 · 신규 OI). 위 «초별 원값은 꼬리가 무겁다(260배)»는 **√ 눈금 + 줄마다 제 최대**로 접는다 --
 //   대신 «같은 높이 = 같은 수량»은 줄 안에서만 성립한다(줄끼리 크기는 왼쪽 숫자). 누적은 줄마다 흰 선으로 남는다.
-function renderSupply1s(box = null, src = null) {
-  // src 가 오면 그 출처로 그린다(OKX 레인). 없으면 바이낸스 전역이다. 칸 구조가 같으므로
-  // **수식은 한 줄도 안 바뀐다** -- 바뀌는 건 어느 Map 을 읽느냐뿐이다.
-  const S = src || mergedSupplySrc();
-  // box 가 오면 그 중첩 <svg> 에 그린다(캔들 SVG 안). 없으면 옛 독립 컨테이너를 찾는다.
-  const svg = box ? box.svg : el("supply1sSvg");
+function renderSupply1s(box) {
+  const S = mergedSupplySrc();
+  const svg = box.svg;
   if (!svg) return;
   const NS = "http://www.w3.org/2000/svg";
-  // 🔴폭을 1200 으로 고정했더니 컨테이너(1318)를 못 채워 **이 차트만 좁게** 그려졌다
-  //   (2026-09-19 실측: 캔들·프로파일 1318 vs 여기 1240). viewBox 를 부모에서 받아야
-  //   세 차트의 그려지는 폭이 같아진다. 여백도 캔들 차트와 같은 값(45/112)을 쓴다.
-  const parentW = box ? 0 : (svg.parentElement ? svg.parentElement.clientWidth : 0);
-  // 2026-09-19 가격선 띠를 뺐다(사용자 지시) -- 바로 아래 풋프린트 캔들이 같은 가격을
-  // 이미 보여준다. 그만큼 높이를 돌려줘서 패널이 짧아지고 누적선이 커진다(240 -> 150).
-  // 🔴모바일에서 폭을 1200 으로 잡으면 뷰박스가 8:1 이 되어 158px 상자 안에서 **42px 로**
-  //   줄어든다(meet). 10px 글자가 3px 가 된다 -- 캔들 차트가 쓰는 규약(모바일은 실제 폭)을
-  //   여기서도 쓴다. 여백도 좁은 화면에 맞춰 줄인다(45/112 는 336px 폭의 47% 다).
-  const w = box ? box.w : (parentW > 0 ? Math.max(parentW, 320) : 1200);
-  const h = box ? box.h : 150;
+  const w = box.w;
+  const h = box.h;
   // 2026-09-22 모바일(사용자 «프로파일처럼 라벨을 차트 아래에 일자로»): 범례가 플롯 안에서
   //   바닥 한 줄로 내려온다. 시각 꼬리표(h-3)와 같은 줄에 둘 수 없으니 그 아래 한 줄을 더 판다.
   //   400px 패널에서 14px 은 선이 3.5% 짧아지는 대가다.
@@ -5181,7 +4515,7 @@ function renderSupply1s(box = null, src = null) {
   let acc = 0;
   const cvdRows = inSeg.map((x) => { const c = cellOf(x); acc += c[4] - c[5]; return { s: x, v: acc }; });
   let spotAcc = 0;
-  const spotRows = src ? null : [...spotSupply1s.keys()].filter((x) => x >= first && x <= now).sort((a, b) => a - b)
+  const spotRows = [...spotSupply1s.keys()].filter((x) => x >= first && x <= now).sort((a, b) => a - b)
     .map((x) => { const c = spotSupply1s.get(x); spotAcc += (c[4] || 0) - (c[5] || 0); return { s: x, v: spotAcc }; });
   const spotOn = !!(spotRows && spotRows.length >= 2);
   const oiEnd = oiRows.length ? oiRows[oiRows.length - 1].v : null;
@@ -5334,20 +4668,9 @@ function approachAt(hm, price, rowSize) {
   return best;
 }
 
-// Snapshot tab's own candlestick chart -- same renderCandleSvg() the Live tab uses, always ETH, no
-// bot position context (entryPrice=0, journal=[]), with the liquidation map drawn as a density
-// profile strip plus a single line for the nearest support/resistance level (2026-08-24: the full
-// 12-line overlay was removed for clutter, see nearestLiquidationLevel/liquidationDensityHistory
-// above; the level list below the chart is still the place to read every level's exact price) and
-// the long/short averaged evidence-signal TP lines (see evidenceSignalTpLevels above; the
-// liquidation magnet line that used to live here too was removed 2026-08-31 per user request).
-// Called both right after its two 5-min data sources (candles, liquidation map) refresh, AND every
-// ~5s from render() (see updateSnapshotCandleLive() above and the call site in render()) so the
-// candle body and the current-price line stay in sync instead of only one of them moving.
-// NOTE: on mobile, pan/zoom (visibleCandleWindow) reads the same module-level mobileChartView the
-// Live chart's gestures write to -- shares the same window index, not independently interactive.
-// Not wired up to setupMobileCandleGestures() (that's hardcoded to #candleSvg); acceptable since
-// this chart is read-only reference, not something a user pinches/pans on its own.
+// Snapshot tab's candlestick chart (renderCandleSvg) with the liquidation-map density profile.
+// Called right after its 5-min data sources refresh AND from render(), so the candle body and the
+// current-price line move together.
 // 차트 위에 커서가 있는 동안은 다시 그리지 않는다. 다시 그리기는 svg 를 통째로 비우므로
 // (renderCandleSvg 의 innerHTML = "") **읽고 있던 툴팁·십자선이 사라진다**. 20초 주기일 땐
 // 드물어서 안 보였지만 2.5초로 당긴 순간 «호버할 때마다 깜빡임»이 된다.
@@ -5506,12 +4829,9 @@ function renderSnapshotChart() {
   // 2026-09-11 8번째 인자 = 봉별 청산 레인. **이 줄이 빠져 있어 레인이 통째로 안 그려졌다**
   //   (liqBars 기본값 [] -> peak 0 -> 블록 전체 skip, 오류도 안 남). 치환 대상 문자열을
   //   확인 없이 바꾸려다 조용히 실패했던 자리다.
-  renderCandleSvg(svg, candles, [], entryPrice, currentPrice, riskLevels,
+  renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels,
     densityHistory, latestLiquidation5mHist, footprint);
 }
-
-// 토큰을 복사하지 않고 읽는다 -- 하드코딩 사본은 2026-09-12 에 두 번 따로 고쳐야 했다.
-const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 function fmtDateTick(ts) {
   const d = new Date(ts);
@@ -5603,7 +4923,7 @@ function declutterTagY(labels, lo, hi, gap) {
 }
 
 
-function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = [], footprint = null) {
+function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = [], densityHistory = [], liqBars = [], footprint = null) {
   const parentW = svg.parentElement ? svg.parentElement.clientWidth : 0;
   // 2026-09-18 부모가 아니라 **SVG 자신의** 높이를 본다. 부모는 마진 12px 를 포함하므로
   // (styles.css .chart-container 412px) 그 값으로 viewBox 를 잡으면 모바일에서 meet 축소 +
@@ -5616,37 +4936,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 하한은 «아직 레이아웃 전»(parentW/H = 0)일 때의 폴백이다.
   const wAll = parentW > 0 ? Math.max(parentW, 320) : 1200;
   const hAll = parentH > 0 ? Math.max(parentH, 260) : 400;   // 상자 전체(viewBox). 본문의 `h` 는 아래(모바일은 풋프린트 영역만)
-  // 하단/상단 여백 안의 것들(x축 눈금·라벨·레짐 리본·증거신호 레인)은 전부 `mt` / `h - mb`
-  // 상대 오프셋이다 -- 여백을 늘리면 통째로 따라 움직인다.
-  // 2026-09-10 mb 40 -> 56 (레짐 리본 20px 확보).
-  // 2026-09-11 사용자 요청 "증거신호 레인을 청산맵 밖으로": 레인이 플롯 **위에 겹쳐** 그려져
-  //   캔들을 가리던 것을 여백으로 뺐다. mt 20 -> 22(천장 레인 자리), mb 56 -> 74(바닥 레인
-  //   자리). 레인이 플롯에서 30px 를 돌려주므로 실제 캔들 영역 손실은 324 -> 304 로 20px 뿐이다.
-  // 2026-09-11 mb 74 -> 92: 봉별 청산 레인 18px. 레인은 **플롯 밖**이다 -- 09-11 사용자 요청
-  //   "증거신호 레인을 청산맵 밖으로"와 같은 원칙으로 캔들을 가리지 않는다.
-  // 2026-09-11 mb 92 -> 112: 청산 레인을 레짐 리본 높이(20px)만큼 키웠다(사용자 요청).
-  //   레인 18 -> 38px. 여백도 같이 20px 늘려야 리본과 안 겹친다.
-  //   대가: 캔들 영역 ch 가 286 -> 266 으로 20px 줄어든다.
-  // 2026-09-11 mb 112 -> 134: 변동성 전망 리본 20px(사용자 요청 "레짐과 같은 스타일로").
-  //   칩을 없애고 리본으로 옮긴 것이라 화면의 정보량은 그대로다.
-  // 2026-09-11(2차) mb 134 -> 140: 레짐과 변동성 리본 사이 간격 2 -> 6px(사용자 요청).
-  //   대가: 캔들 영역 ch 가 266 -> 238(데스크톱), 126 -> 98(모바일 최소높이)로 줄어든다.
-  // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 바닥 레인 +28~+43 · 레짐 +50~+70 ·
-  //   변동성 +76~+96 · 청산 레인 +100~+138.
-  // 2026-09-16 청산 레인을 **차트 안 하단 패널**로 옮겼다(사용자 요청). 그전까지는 하단 여백에
-  //   떠 있어서(+100~+138) 차트 밖 부속처럼 보였다. 패널은 가격 플롯 바로 아래·x축 바로 위에
-  //   앉고, 여백은 그 레인이 쓰던 40px 를 돌려받는다(mb 140 -> 100).
-  //   결과: 가격 플롯 238 -> 226(데스크톱), 98 -> 98(모바일 최소높이, 패널을 34 로 줄여 상쇄).
-  // ⚠️`ch` 는 이제 **가격 플롯 높이**다. yAt() 이 이 값을 쓰므로, 「플롯 바닥」을 뜻하던
-  //   `h - mb` 는 더 이상 가격 영역의 바닥이 아니다 -- 그 자리들은 전부 plotBottom 으로 바꿨다.
-  //   (여백 안의 것들 -- x축 눈금·라벨·레짐/변동성 리본·증거신호 레인 -- 은 그대로 h - mb 기준)
-  // 2026-09-16 줄 배치: 천장 레인이 위 여백에서 빠져 mt 를 22 -> 12 로 줄이고(플롯이 그만큼
-  // 커진다), 아래는 바닥 레인 자리를 회수한 뒤 구간 2줄(추세 전환·변동폭 게이트)을 붙였다.
-  // 하단 여백 순서: 눈금 +0~+5 · x축 라벨 +21 · 레짐 +28~+43 · 변동성 +49~+64 ·
-  //                 추세 전환 +49~+64
-  // 2026-09-20 «게이트» 줄 제거(사용자 지시) -> mb 91 -> 70. 그 21px 는 바로 아래 새로
-  //   들어온 수급 리본(15 + 간격 6)이 그대로 받는다 -- 가격 플롯 높이는 변하지 않는다.
-  // (2026-09-16 변동성 리본이 카드로 빠지면서 한 줄 21px 를 가격 플롯에 돌려줬다)
   // 2026-09-16 모바일 ml 34 -> 44: 좌측 가격선 라벨이 `ml - 5` 에서 **왼쪽으로** 뻗는데
   //   «저항1↑»(5글자 ~31px)가 x=-2 까지 나가 잘렸다. 차트 폭은 288 -> 278 로 10px 준다.
   // ── 수급 두 패널을 이 SVG 안에 담는다 (2026-09-19 사용자 지시 "svg 안으로") ──────
@@ -5723,7 +5012,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   // 2026-09-28 모바일 체결 띠(사용자 «호가처럼 풋프린트 왼쪽 축으로»): 가격 글자와 캔들 사이 50px. ml 이 «플롯 왼쪽»이라 그만큼 민다.
   const TRADE_L = footprint && mobileChart ? 50 : 0;
   // 2026-09-28 모바일 풋프린트는 왼쪽 가격 글자를 없앴다(사용자 «차트가 너무 작다») -- 값은 플롯 아래 한 줄이 갖는다. 여백 44 -> 4.
-  // 2026-09-30 풋프린트(데스크톱)는 가격 글자를 오른쪽 꼬리표 칸(TAG_W)으로 옮겨 왼쪽 여백 71 -> 36(레짐·전환 줄 이름 자리만, 사용자 «풋프린트를 왼쪽으로»).
+  // 2026-09-30 풋프린트(데스크톱)는 왼쪽 여백 71 -> 36(사용자 «풋프린트를 왼쪽으로»).
   const ml = (mobileChart ? (footprint ? 4 : 44) : footprint ? 36 - CENTER_NUDGE : 45) + CENTER_NUDGE + TRADE_L - (splitR ? FP_LEFT_SHIFT : 0),
         // 2026-09-27 풋프린트는 가격 배지를 전부 왼쪽 글자로 옮겼다(사용자 «호가가 잘 보이게») -- 오른쪽은 호가 띠가 쓴다.
         mr = (mobileChart ? 10 : footprint ? 34 : 112) - CENTER_NUDGE,
@@ -5734,7 +5023,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   데스크톱 168 -> 111px. 그 57px 과 상자 증가분을 전부 가격 플롯이 가져간다(205 -> 400).
   // ⭐다섯 레인은 전부 «높이=해상도» 노브다 -- OI·청산은 대칭 이분(half = H/2 - 1), 수급은
   //   SMID 기준, 거래대금은 단극이다. 안에 고정 크기 요소가 없어 높이만 바꾸면 되고 좌표
-  //   계산은 한 줄도 안 건드린다. LANE_H(15)는 **다른 것**이다(레짐 리본·구간 줄, 하단 여백).
+  //   계산은 한 줄도 안 건드린다.
   // 🔴DCVD 는 24 아래로 내리지 말 것 -- 15 에서 작은 델타 막대가 0.7px 였다(기존 주석).
   // OI 신규계약 레인 -- 청산 레인 **바로 위**(사용자 지시). 별도 패널이 아니라 이 SVG 안의
   // 서브플롯이라야 캔들과 x축(봉)이 구성상 같아진다(레짐 리본이 같은 이유로 여기 있다).
@@ -5807,9 +5096,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   //   이름·가격은 마우스를 올리면. 현재가는 상자 없이 **숫자만** 크게(바탕 외곽선).
   const LBL = "C";
   const LANE_VAL_W = 144;   // 10-14 «창 합» 칸 추가로 96 → 144 --   // 2026-10-13 풋프린트 아래 레인 값 칸(넓은 화면) -- 지지/저항 칸(#mcWall)을 그만큼 오른쪽으로 밀고 좁힌다(사용자 «지지·저항 살리고 너비 줄여»)
-  const TAG_W = 0;   // 2026-09-30 120 -> 100(사용자 «호가/체결 프로파일을 더 왼쪽으로»)
-  const cw = w - ml - mr - BOOK_W - TRADE_W - TAG_W;
-  const tradeX0 = ml + cw + TAG_W;   // 체결 기둥 왼쪽 끝(꼬리표 칸 뒤)
+  const cw = w - ml - mr - BOOK_W - TRADE_W;
+  const tradeX0 = ml + cw;   // 체결 기둥 왼쪽 끝
   fpProfileSpan = TRADE_W ? [tradeX0, w - mr] : null;   // 아래 옵션 줄 가운데 칸이 이 폭·x 를 따른다(optRowCols)
   let tradeInfo = null;       // 체결 행(호버가 읽는다) -- 풋프린트 블록이 채운다
   let posInfo = null;         // 2026-10-10 포지션 행(호버가 읽는다) -- 포지션 보기일 때 체결 대신
@@ -5818,10 +5106,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   const ch = h - mt - mb - QUAD_H - QUAD_TXT - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
             - PRICE_ROW_H - 2 * ROW_H;
   const plotBottom = mt + ch;                      // 가격 플롯의 바닥
-  // 2026-10-08 일봉 풋프린트·청산맵은 이 사각형(가격 플롯 + 체결·호가 띠) **위에만** 겹친다(사용자 «풋프린트 차트만 바뀌게») --
-  //   viewBox = 상자 픽셀이라 좌표 그대로 쓴다(fp_daily.js fpPlaceOverlay). 아래 레인·오른쪽 칸은 그대로 그려진다.
-  //   모바일은 플롯 왼쪽에 체결 기둥(TRADE_L)이 따로 있고 오른쪽 여백(mr)에 글자가 걸려 둘 다 덮는다(안 덮으면 5분 셀·글자가 비친다).
-  if (svg.id === "candleSvgSnapshot") window.fpPlotBox = { x: ml - TRADE_L, y: mt, w: w - ml + TRADE_L, h: ch };
   // 2026-10-08 사용자 «풋프린트부 차트부터 모의 판+지지·저항까지 일봉·청산맵으로 대체»: 교체 영역 = 왼쪽 열 전체(0,0)~(w,h).
   //   넓은 화면(split)은 오른쪽 1초 수급 칸이 남고, 좁은 화면은 아래 1초 수급 패널(h 밑)이 남는다. split 이면 왼쪽 아래 #mcWall(모의 판·지지/저항)도 덮인다.
   if (svg.id === "candleSvgSnapshot") window.fpRegion = { w: w, h: h, W: wAll, H: hAll, split: !!splitR };
@@ -5913,11 +5197,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
 
   // ── 계층 캐시 (2026-09-20) ────────────────────────────────────────────────
   // 봉 셀은 이미 봉별로 캐시한다. 남은 것은 **가격 플롯 바깥의 층들**이다 -- 격자·x눈금·
-  // 레짐 리본·구간 줄·OI 레인·청산 레인·청산밀도 히트맵. 이들도 매 렌더 새로 만들고 있었다.
+  // OI 레인·청산 레인·청산밀도 히트맵. 이들도 매 렌더 새로 만들고 있었다.
   // 실측(틱 스트림, 셀 캐시가 다 맞은 정상 상태에서 만들어지는 노드):
   //     풋프린트 4h  372개/렌더 (rect 114 · title 160 · text 70)
   //     청산맵  1h  574개/렌더 (rect 301 -- 밀도 히트맵이 압도적)
-  // 그런데 이 층들의 **입력은 15~300초마다** 바뀐다(레짐 300s · 청산맵 60s · OI 15s).
+  // 그런데 이 층들의 **입력은 15~60초마다** 바뀐다(청산맵 60s · OI 15s).
   //
   // 🔴키는 «기하 + 봉 시각 + 그 층의 데이터 신원» 셋이다. 기하를 빼면 축이 움직여도 낡은
   //   픽셀이 남고, 봉 시각을 빼면 봉이 한 칸 밀려도 그대로 남는다.
@@ -5963,10 +5247,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     cr.setAttribute("x", ml); cr.setAttribute("y", mt); cr.setAttribute("width", cw); cr.setAttribute("height", ch);   // 창·폭이 바뀌면 따라간다
     return `url(#${clipId})`;
   })() : null;
-  // 변동성 값은 이제 카드가 보여준다. 차트에는 **툴팁용 지도**만 남긴다(리본은 내렸다).
-  // 2026-09-21 변동성 전망(24h) 제거 -- 워커 중지로 데이터가 끊긴다. 그리기 분기는 그대로
-  // 두고 지도만 비운다(diff 를 좁힌다).
-  const volMapOn = false;
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
@@ -6193,34 +5473,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   });
 
   });
-
-  // ── 변동성 전망 리본 (2026-09-11, 칩을 대체) ────────────────────────────────────
-  // 사용자: "변동성 전망도 청산맵 아래 레짐과 같은 스타일로 주황색으로 칠하고 칩은 제거".
-  // 🔴이 신호는 **시간봉**이다(피쳐가 resample("1h")). 캔들은 5분이라 시각으로 접어 칠한다 --
-  //   한 시간이 12개 봉에 같은 색으로 깔린다. 청산 레인의 5분 키와 혼동하면 안 된다.
-  // ⭐등급을 색 하나로 뭉개지 않는다: 「위험」 홀드아웃 정밀도 0.793 vs 「주의」 0.161 이라
-  //   같은 주황으로 칠하면 16% 짜리가 79% 처럼 보인다. 진하기로 셋을 가른다.
-  // 변동성 시각->값 매핑. 리본과 **툴팁이 같은 지도를 쓴다** -- 따로 만들면 화면의 두 곳이
-  // 다른 값을 말하는 날이 온다(이 파일에서 반복된 실패).
-  const volByHour = new Map();
-  if (volMapOn) {
-    const vf = null;   // 2026-09-21 제거 (volMapOn=false 라 이 분기는 안 돈다)
-    const grades = Array.isArray(vf.grades) ? vf.grades : [];
-    const probas = Array.isArray(vf.probas) ? vf.probas : [];
-    (vf.times || []).forEach((iso, i) => {
-      const t = Date.parse(iso);
-      if (!Number.isFinite(t)) return;
-      volByHour.set(Math.floor(t / 1000), { grade: grades[i] || null, p: probas[i], tone: (vf.history || [])[i] });
-    });
-  }
-  // 2026-09-16 **변동성 리본을 차트에서 내렸다**(카드로 옮김). 중복이어서가 아니라 **해상도**
-  // 때문이다 -- 리본은 1시간 격자·24시간 지평인데 차트는 5분봉이라 12봉이 한 색이고, 풋프린트
-  // (1시간 창)에서는 값이 **하나**다. 실측: 최근 48시간 중 29시간이 연속 '안정'.
-  // ⚠️버리는 게 아니다. 09-14 정면비교에서 셋 중 **유일하게 «확장»을 보는** 지표이고
-  //   (현재변동성과 ρ −0.817) 게이트와도 중복이 아니다(상관 −0.389 · 상위10% 겹침 0.7%).
-  //   다만 그 우위는 **24시간에서만** 실재한다(1h AUC .612 vs 공짜 대조군 .611 동률,
-  //   4h .593 vs .720 더 나쁨, 24h .812 vs .625 진짜). 24시간 판단은 카드 한 줄이 맞는 자리다.
-
 
   // Candles -- 풋프린트 모드(ETH)면 몸통 대신 «가격 행별 공격적 매수/매도 체결량» 셀을 그리고,
   // 캔들은 얇은 테두리로만 남긴다(2026-09-15, TradingView 볼륨 풋프린트 '매수 및 매도' 유형).
@@ -6799,50 +6051,8 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   });
   }
 
-  // Trade Markers
   // Track markers per candle to avoid overlap
   const markerCounts = { top: {}, bottom: {} };
-
-  (journal || []).forEach(t => {
-    const ts = new Date(t.ts || t.closed_at).getTime() / 1000;
-    const idx = candles.findIndex(c => c.time <= ts && ts < c.time + 300);
-    if (idx === -1) return;
-    
-    const x = xAt(idx) + bw/2;
-    const kind = String(t.kind || "").toUpperCase();
-    const side = String(t.side || "").toUpperCase();
-    const isEntry = kind.includes("OPEN") || kind.includes("ENTRY");
-    
-    const candle = candles[idx];
-    const isLong = side === "LONG";
-    const isBuy = (isLong && isEntry) || (!isLong && !isEntry);
-    
-    const sideKey = isBuy ? "bottom" : "top";
-    const count = markerCounts[sideKey][idx] || 0;
-    markerCounts[sideKey][idx] = count + 1;
-    
-    // Position based on Candle High/Low with stacking offset
-    const stackOffset = count * 25; // 25px per additional marker
-    const basePrice = isBuy ? candle.low : candle.high;
-    const baseLineY = yAt(basePrice);
-    const mY = isBuy ? baseLineY + 12 + stackOffset : baseLineY - 12 - stackOffset; 
-    const lY = isBuy ? mY + 15 : mY - 10;            
-    
-    const marker = document.createElementNS(NS, "polygon");
-    const pts = isBuy ? "0,-6 -6,6 6,6" : "0,6 -6,-6 6,-6";
-    marker.setAttribute("points", pts);
-    marker.setAttribute("transform", `translate(${x},${mY})`);
-    marker.setAttribute("fill", isLong ? "var(--good)" : "var(--bad)");
-    marker.setAttribute("stroke", "var(--chart-bg)"); marker.setAttribute("stroke-width", "1");
-    svg.appendChild(marker);
-
-    const lbl = document.createElementNS(NS, "text");
-    lbl.setAttribute("x", x); lbl.setAttribute("y", lY);
-    lbl.setAttribute("text-anchor", "middle"); lbl.setAttribute("font-size", "10");
-    lbl.setAttribute("font-weight", "bold"); lbl.setAttribute("fill", isLong ? "var(--good)" : "var(--bad)");
-    lbl.textContent = isEntry ? "진입" : "청산";
-    svg.appendChild(lbl);
-  });
 
   // ── 추세 veto (2026-09-22, 사용자 요청 「풋프린트에 그려줘」) ─────────────────────────
   // SMA144(12h) ± 1.0×ATR144 히스테리시스. 밴드를 벗어날 때만 허용 측면이 바뀌고, 안이면
@@ -6998,27 +6208,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 격자 정합은 **UTC epoch** 로 맞춘다(문자열 포맷 비교는 tz 표기 차이로 조용히 어긋난다).
     const idxByEpoch = new Map();
     candles.forEach((c, i) => idxByEpoch.set(c.time, i));
-    // 2026-09-09 모바일 신고("천장·바닥 게이지가 잘 안 보이고 청산 밀도에 가려진다"):
-    //   원인 둘. (1) 레인은 히트맵 **위에** 그려지지만 히트맵이 fill-opacity 0.85 비리디스
-    //   밴드라 반투명 레인이 대비로 지워진다. (2) 모바일 기본 34봉에서 bw≈6.8px 인데
-    //   rx=1.5 라운딩이 그 폭을 먹어 점처럼 보인다(최대 축소 72봉이면 bw 3.2px).
-    //   → 레인마다 **불투명 트랙**을 깔아 히트맵을 끊고, 모바일에선 높이를 키우고 라운딩을
-    //     빼고 최소 폭을 보장하고 불투명도 하한을 올린다.
-    // 2026-09-10 데스크톱 6 / 모바일 9 -> 20(레짐 리본과 동일)으로 키웠다가, 2026-09-11
-    // 사용자 지시로 **15** 로 낮췄다. 모바일이 데스크톱보다 컸던 건 2026-09-09 가시성
-    // 신고("천장·바닥 게이지가 잘 안 보이고 청산 밀도에 가려진다") 때문인데 15 면 그 이유가
-    // 해소되므로 한 값으로 통일한다.
-    // ⚠️레인은 플롯 **위에 겹쳐** 그린다(레짐 리본과 달리 하단 여백 밖이 아니다). 그래서
-    //   높이가 곧 캔들을 가리는 면적이다 -- 상·하 15px 씩이면 데스크톱 플롯 324 중
-    //   30px(9%), 모바일 184 중 16%. 20 일 때는 12%/22% 였다.
-    // 2026-09-11: 플롯 **안**(top: mt+3 / bottom: h-mb-3-LANE_H)에서 여백 **밖**으로 옮겼다.
-    //   천장은 플롯 위, 바닥은 x축 라벨 아래 -- 위/아래 공간 은유는 그대로 유지한다.
-    const laneFill = { top: "var(--bad)", bottom: "var(--good)" };
-    // 2026-09-16 사용자 지시로 **천장·바닥 레인을 제거**했다. 그 레인은 증거신호 종수를
-    // 진하기로 보여주던 것인데(2026-09-09 C안), 증거신호가 화면에서 빠지면서 빈 줄만 남았다.
-    // 방향 이벤트는 아래 **봉 밀착 삼각형** 하나로 말한다 -- 같은 것을 두 문법으로 말하지 않는다.
-
-    // 2026-10-06 전환 예고·탐지 구간 줄(전환 리본) 제거 · 2026-10-18 델타 아래 «전환예고 N%»·툴팁 줄까지 제거(사용자 지시, 워커는 RVOL 전용).
 
     // 이벤트 트리거 -- 매매 저널과 **같은 삼각형 문법**을 쓰고 `markerCounts` 를 공유해
     // 같은 봉에서 저널 마커와 겹치지 않게 한다(스택 25px). 저널보다 한 치수 작게(±5) 그려
@@ -7450,8 +6639,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
   }
 
   // 2026-09-09 사용자 요청: 청산 밀도 가이드를 **차트 위(패널 HTML)** 로 옮겼다.
-  //   기존에는 SVG 안 오른쪽 위 인셋(backing 이 y=0..34)이라, 같은 자리에 새로 생긴
-  //   증거신호 **천장 레인**(당시 y=mt+3, 2026-09-11 에 mt-3-LANE_H 로 이동)을 덮었다.
+  //   기존에는 SVG 안 오른쪽 위 인셋(backing 이 y=0..34)이라 그때의 증거신호 **천장 레인**을 덮었다.
   //   차트 높이를 잃으므로(모바일 -8%) 아예 SVG 밖으로 뺀다.
   //   렌더는 캔들 SVG 안, 프로파일 바닥글 바로 아래 줄이다(2026-09-21 아티팩트 댓글).
 
@@ -7618,11 +6806,6 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-09-16: 툴팁이 **그 봉에 표시된 모든 것**을 말한다. 그전에는 시각·OHLC·레짐뿐이라
     // 변동성 리본도, 새로 붙인 트리거 표시도 «왜 떴는지»를 화면에서 물어볼 데가 없었다.
     // 원칙: 값이 없는 항목은 줄 자체를 안 만든다(빈 줄은 «0» 으로 오독된다).
-    const vv = volByHour.get(Math.floor(c.time / 3600) * 3600);
-    const volLine = vv
-      ? `<br>변동성: ${vv.grade || (vv.tone === "warn" ? "주의" : "안정")}`
-        + (vv.p == null ? "" : ` · 확장 확률 ${(Number(vv.p) * 100).toFixed(1)}%`)
-      : "";
     const cmNow = latestChartMarkers;
     let trigLines = "";
     if (isSnapshotChart && cmNow && cmNow.available) {
@@ -7639,7 +6822,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
       시가: ${fmtNum(c.open, Math.max(2, pxDp()))}<br>
       고가: ${fmtNum(c.high, Math.max(2, pxDp()))}<br>
       저가: ${fmtNum(c.low, Math.max(2, pxDp()))}<br>
-      종가: ${fmtNum(c.close, Math.max(2, pxDp()))}${volLine}${trigLines}${isSnapshotChart ? laneTip(idx) : ""}
+      종가: ${fmtNum(c.close, Math.max(2, pxDp()))}${trigLines}${isSnapshotChart ? laneTip(idx) : ""}
     `);
   };
   svg.onmouseleave = () => {
@@ -8123,7 +7306,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     if (mcSplit && mcBubbleEl) { const bh = `${Math.max(120, Math.round(s1H * MC_BUBBLE_K) + s1Give)}px`; if (mcBubbleEl.style.height !== bh) mcBubbleEl.style.height = bh; }   // 2026-10-13 체결 버블 = 수급 차트 한 개 높이(사용자)
     mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16, h: floorY - (sub1sY + s1Hd + 12) } : null,
             mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
-              return { x: ml + cw + 4 + LANE_VAL_W, y, w: TAG_W + TRADE_W + BOOK_W - 8 - LANE_VAL_W, h: floorY - y }; })() : null);   // 10-13 왼쪽 LANE_VAL_W = 레인 값 칸
+              return { x: ml + cw + 4 + LANE_VAL_W, y, w: TRADE_W + BOOK_W - 8 - LANE_VAL_W, h: floorY - y }; })() : null);   // 10-13 왼쪽 LANE_VAL_W = 레인 값 칸
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1Hd, sub1sKey(subW, s1Hd),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1Hd })),
@@ -8215,42 +7398,20 @@ function render(state, compactState = null, { stateChanged = true } = {}) {
 
   const sessionHtml = buildSessionHtml(sess);
   setH("topSession", sessionHtml);
-  
-  // 2026-08-25: perf pass -- this whole block (gauge + chart + model-indicator list) only paints
-  // anything the user can see while the Snapshot tab is active (snapshotTabPanel is display:none
-  // otherwise), so it's gated the same way as tick()'s Snapshot-only fetches above. Data
-  // accumulation (pushToneHistory calls above this block, liqDirTone derivation)
-  // stays unconditional -- only the paint work below is skipped, so history strips have no gap when
-  // the user switches back to Snapshot.
+
+  // 그리기는 스냅샷 탭이 보일 때만(아니면 snapshotTabPanel 이 display:none).
   if (activePageTab === "snapshot") {
-    renderLiquidationVolumeGauge();
     renderOfab();                  // 2026-09-25 떠다니는 주문 버튼 글자(포지션·손익)
 
-    // Bug found 2026-08-25: renderSnapshotChart() (candles + S/R line + the old liquidationMagnetLevel(),
-    // removed 2026-08-31) used to be called ONLY from the two data-fetch functions that feed it, each
-    // gated to a 5-minute interval (maybeFetchSnapshotChartHistory/refreshLiquidationMap) -- a
-    // reasonable cadence for candles/the liquidation map, since neither source changes faster than
-    // that. But the current-price line reads latestLivePriceByAsset, which updates on every SSE tick
-    // (this render() call itself) -- so it could sit stale for up to 5 minutes after a real change, or
-    // simply never have painted yet if the chart's first 5-min-gated render happened before a live
-    // price had arrived. Throttled to SNAPSHOT_CHART_RENDER_MIN_INTERVAL_MS, same pattern the Live
-    // tab's own chart uses for its own frequent-tick redraws (own constant since 2026-08-25 -- see its
-    // definition for why Snapshot can afford a coarser interval) -- cheap since renderSnapshotChart()
-    // only redraws from already-cached data, no network fetch of its own.
+    // 현재가 선은 SSE 틱마다 바뀌는 latestLivePriceByAsset 을 읽는다 -- 5분 주기 데이터 갱신만
+    // 기다리지 않고 여기서도 다시 그린다(chartRenderGateMs() 스로틀, 캐시된 데이터만 다시 그림).
     const nowForSnapshotChart = Date.now();
     if (nowForSnapshotChart - lastSnapshotChartRenderAt >= chartRenderGateMs()) {
       lastSnapshotChartRenderAt = nowForSnapshotChart;
       updateSnapshotCandleLive();
       renderSnapshotChart();
       /* (아래 목록 갱신은 이 경로에만 있다 -- 시세 푸시용 경로는 maybeRenderSnapshotChartNow) */
-      // 2026-08-27: same bug/fix as renderSnapshotChart() above, one component down -- the
-      // liq-level-list panel (renderLiquidationMapPanel()) has its own live-price re-filter
-      // (liveRedistanced()) that's supposed to drop an already-crossed level immediately, but the
-      // function itself was only ever called from refreshLiquidationMap()'s 5-minute-gated fetch,
-      // so the filter never got to re-run against a fresher price in between. User report: a
-      // broken resistance-1 disappeared from the chart right away but stayed in this list for
-      // several minutes. Piggybacking on the same throttle as the chart -- cheap, no fetch, and
-      // both now redraw from the same latestLiquidationMap + latestLivePriceByAsset[activeSnapshotAsset] snapshot.
+      // 지지/저항 목록도 이미 지나간 레벨을 현재가로 다시 거른다 -- 차트와 같은 스로틀·같은 스냅샷.
       renderLiquidationMapPanel();
     }
 
@@ -8314,13 +7475,6 @@ async function tick() {
     tickInFlight = false;
   }
 }
-
-// One-time seed of the Snapshot tab's model-indicator strips from the dashboard server's own
-// history buffer (populated server-side every 5 min regardless of whether any browser tab is
-// open -- see /api/model-indicator-history in dashboard/server.py). Awaited BEFORE the live SSE
-// connection starts so no live tick can race ahead and populate toneHistory first: if that raced,
-// the "already has data" guard below would (correctly, but uselessly) skip seeding, leaving the
-// strip looking exactly as un-warmed-up as before this feature existed.
 
 (async () => {
   connectDashboardEvents();
@@ -8824,7 +7978,6 @@ function feeLine(plan) {
 }
 function manualEntryPlanHtml(data) {
   const plan = data.plan || {};
-  const cap = data.cap || {};
   const dir = plan.positionSide === "LONG" ? "롱" : "숏";
   const rl = plan.rule;   // 2026-10-09 권고 규칙 -- 무엇이 크기·손절을 정했는지 머리 바로 아래에 한 줄
   const ruleNote = rl ? entryNote(`자동 규칙 — 상한 ${won(rl.cap_notional)} USDT(순자산 × ${rl.l}, ${rl.binding}) · 이번 `
@@ -8903,8 +8056,6 @@ function tradePlanLines(tp, targetLev) {
   // ⭐처방: 세 값을 한 줄로. 이게 «이번 진입을 어떻게 하라»의 전부다.
   const rx = tp.prescription;
   if (rx && rx.available) {
-    const hb = Object.entries(rx.hold_by_acc || {})
-      .map(([a, m]) => `${Math.round(100 * Number(a))}%→${m}분`).join(" ");
     // 🔴손절이 있으면 청산거리는 **도달 못 하는 선**이다. 위험 지표를 손절 기준으로 바꾼다
     // (2026-09-13): 손절당 계좌 손실과 «연속 몇 번 견디나»가 실제로 계좌를 정한다.
     const sr = rx.stop_risk || {};
@@ -9972,11 +9123,6 @@ el("snapAcctRefresh")?.addEventListener("click", async () => {
     btn.classList.remove("spin");
     setTimeout(() => { btn.disabled = false; }, 3000);   // 연타로 거래소 한도를 때리지 않게
   }
-});
-
-el("snapHold")?.addEventListener("change", () => {
-  manualEntryClearConfirm();          // 보유시간이 바뀌면 크기가 바뀐다 -- 다른 계획이다
-  manualEntryRefreshSize();
 });
 
 // 2026-09-20 시안 B: 슬라이더를 칩으로 갈았다(사용자 선택). 🔴입력 자체는 **지우지 않고
