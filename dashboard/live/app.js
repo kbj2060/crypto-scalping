@@ -84,15 +84,14 @@ let footprintLastFetchAt = 0;
 // 구간을 말하면 읽는 사람이 속는다 -- 그래서 토글도 하나다.
 // 서버 링은 24시간(288봉)이라 4h 도 이미 쌓여 있는 데이터다. 더 긴 창을 안 주는 건 값이
 // 없어서가 아니라, 48봉이면 풋프린트 셀이 25px 라 숫자가 이미 안 들어가서다.
-const CHART_WINDOW_BARS = [12, 24, 48, 144];   // 5분봉 기준 1h · 2h · 4h · 12h
+// 2026-10-20 사용자 «1h 만 남기고 휠로 축소하면 체결 박스 없이 일반 캔들, 확대하거나 1h 를 누르면 풋프린트»:
+//   버튼은 1h(+1d 일봉) 하나 · 이 배열은 휠 단계(1h → 2h → 3h → 4h → 6h → 8h → 12h). 1h 만 풋프린트, 넓히면 캔들(fpZoomed).
+//   새로 열면 늘 1h(줌은 저장 안 함 -- 열자마자 캔들이면 «풋프린트가 사라졌다»로 읽힌다).
+const CHART_WINDOW_BARS = [12, 24, 36, 48, 72, 96, 144];   // 5분봉 기준
 // 🔴12h(144봉)에서는 봉이 ~9px 라 셀 숫자가 안 들어간다 -- showQty(half >= 18)가 꺼져
 //   색 농담만 남는 «시간축 볼륨 프로파일»이 된다. 4h 에서도 이미 그렇다(봉 26px).
-let chartWindowBars = (() => {
-  try {
-    const saved = Number(localStorage.getItem("chartWindowBars"));
-    return CHART_WINDOW_BARS.includes(saved) ? saved : CHART_WINDOW_BARS[0];
-  } catch (e) { return CHART_WINDOW_BARS[0]; }
-})();
+let chartWindowBars = CHART_WINDOW_BARS[0];
+const fpZoomed = () => chartWindowBars > CHART_WINDOW_BARS[0];   // 넓힌 창 = 체결 박스 없이 캔들
 const API_FOOTPRINT_URL = "/api/footprint";
 // 🔴여기 있던 "차트 자체가 5초마다 다시 그려진다"는 **틀린 주석**이었다(실제는 20초였다).
 // 서버는 WS 로 계속 누적하므로 **이 폴링 간격이 곧 셀의 지연**이다.
@@ -731,29 +730,39 @@ function setupChartModeTabs() {
 }
 
 
+// 창 바꾸기(1h 버튼 · 휠 줌 공용). 오른쪽 끝(chartPanEnd)은 그대로 -- 넓히면 왼쪽(과거)으로 늘어난다.
+function setChartWindow(bars) {
+  if (!CHART_WINDOW_BARS.includes(bars) || bars === chartWindowBars) return;
+  chartWindowBars = bars;
+  renderChartWindowTabs();
+  chartPanForce = true;
+  scheduleSnapshotChartRender();   // 데이터가 오기 전에도 이미 있는 봉으로 바로 넓힌다(누른·굴린 티)
+  // 폴링 간격(0.4초/5초)을 기다리지 않고 바로 받는다 -- 누른 티가 나야 한다.
+  footprintLastFetchAt = 0;
+  flowHeatmapLastFetchAt = 0;
+  // 🔴2026-09-25 청산 이력도 이제 창 폭을 들고 간다 -- 여기 안 넣으면 토글을 눌러도
+  //   다음 폴링까지 옛 폭으로 남는다(위 셋과 같은 이유).
+  liquidation5mLastFetchAt = 0;
+  refreshFootprint();
+  refreshFlowHeatmap();
+  refreshLiquidation5mSignal();
+  refreshGex();
+}
+const chartZoomBy = (n) => {   // n>0 = 넓게(축소) · 끝에 닿으면 false(휠을 페이지에 돌려준다)
+  const i = CHART_WINDOW_BARS.indexOf(chartWindowBars), j = Math.max(0, Math.min(CHART_WINDOW_BARS.length - 1, (i < 0 ? 0 : i) + n));
+  if (j === i) return false;
+  setChartWindow(CHART_WINDOW_BARS[j]);
+  return true;
+};
+
 function setupChartWindowTabs() {
   document.querySelectorAll("#chartWindowTabs .asset-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const bars = Number(btn.dataset.bars);
-      if (!CHART_WINDOW_BARS.includes(bars) || bars === chartWindowBars) return;
-      chartWindowBars = bars;
-      try { localStorage.setItem("chartWindowBars", String(bars)); } catch (e) { /* 저장 못 해도 동작은 한다 */ }
-      renderChartWindowTabs();
-      // 폴링 간격(0.4초/5초)을 기다리지 않고 바로 받는다 -- 누른 티가 나야 한다.
-      footprintLastFetchAt = 0;
-      flowHeatmapLastFetchAt = 0;
-      // 🔴2026-09-25 청산 이력도 이제 창 폭을 들고 간다 -- 여기 안 넣으면 토글을 눌러도
-      //   다음 폴링까지 옛 폭으로 남는다(위 셋과 같은 이유).
-      liquidation5mLastFetchAt = 0;
-      refreshFootprint();
-      refreshFlowHeatmap();
-      refreshLiquidation5mSignal();
-      refreshGex();
+      if (btn.dataset.bars) setChartWindow(Number(btn.dataset.bars));
     });
   });
   renderChartWindowTabs();
 }
-
 function renderChartWindowTabs() {
   const host = document.getElementById("chartWindowTabs");
   const tabs = [...document.querySelectorAll("#chartWindowTabs .asset-tab")];
@@ -773,6 +782,13 @@ function renderChartWindowTabs() {
   if (host) {
     host.style.setProperty("--seg-n", String(tabs.length));
     host.style.setProperty("--i", String(idx));
+    host.classList.toggle("zoomed", !daily && fpZoomed());   // 넓힌 창 = 어느 칸도 켜지 않는다(1h 를 누르면 풋프린트로)
+  }
+  const note = el("fpZoomNote");
+  if (note) {
+    const on = !daily && fpZoomed();
+    note.hidden = !on;
+    if (on) note.textContent = `${chartWindowBars / 12}시간 · 캔들`;
   }
 }
 
@@ -5459,15 +5475,27 @@ function setupChartPan() {
     if (!d) return;
     ev.preventDefault(); chartPanBy(d * (ev.shiftKey ? 6 : 1));
   });
-  // 차트 위: 휠(세로·가로 모두) 40px = 1봉 · 끌기 = 봉 폭만큼 · 더블클릭 = 최신으로. 12h 창(움직일 곳 없음)이면 휠을 페이지에 돌려준다.
+  // 차트 위 휠(2026-10-20 사용자): **세로 = 줌** -- 아래로 = 넓게(체결 박스 없이 캔들) · 위로 = 좁게(1h 에서 풋프린트), 한 단 = 60px.
+  //   끝 단(1h·12h)에서 더 굴리면 휠을 페이지에 돌려준다(스크롤이 막히지 않게). **가로 휠(트랙패드 옆으로) = 이동** 40px = 1봉.
+  //   끌기 = 봉 폭만큼 · 더블클릭 = 최신으로 · 방향키(미니맵) = 이동은 그대로.
   const canPan = () => flowOn() && Math.min(full().length, CHART_PAN_BARS) > chartWindowBars;
-  let acc = 0;
+  let acc = 0, zacc = 0;
   svg.addEventListener("wheel", (ev) => {
-    if (!canPan() || ev.ctrlKey) return;
+    if (!flowOn() || ev.ctrlKey) return;
+    if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) {
+      if (!canPan()) return;
+      ev.preventDefault();
+      acc += ev.deltaX;
+      const steps = Math.trunc(acc / 40);
+      if (steps) { acc -= steps * 40; chartPanBy(-steps); }   // 오른쪽으로 = 최신 쪽
+      return;
+    }
+    const i = CHART_WINDOW_BARS.indexOf(chartWindowBars);
+    if ((ev.deltaY > 0 && i >= CHART_WINDOW_BARS.length - 1) || (ev.deltaY < 0 && i <= 0)) { zacc = 0; return; }   // 끝 단 = 페이지 스크롤
     ev.preventDefault();
-    acc += Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : ev.deltaY;
-    const steps = Math.trunc(acc / 40);
-    if (steps) { acc -= steps * 40; chartPanBy(-steps); }   // 아래로·오른쪽으로 = 최신 쪽
+    zacc += ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY;   // 줄 단위(파이어폭스) 휠도 픽셀로
+    const steps = Math.trunc(zacc / 60);
+    if (steps) { zacc -= steps * 60; chartZoomBy(Math.sign(steps)); }   // 한 번에 한 단씩(빠른 휠에 1h→12h 로 튀지 않게)
   }, { passive: false });
   let drag = null;
   svg.addEventListener("pointerdown", (ev) => {
@@ -6432,11 +6460,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 2026-10-10 사용자 «체결 박스 옆에 5분봉을 같이» → 시안 C(매도 | 5분봉 | 매수): 채운 몸통·심지를 두 칸 사이에.
     //   옆 캔들은 칸 폭에서 떼어 낸다(봉 사이 간격은 그대로) -- 폭 = 봉 칸의 14%(3~8px) + 틈 2px. 셀을 안 그리는 얇은 봉(bw<14)은 옛 테두리.
     //   (시안 때 쓴 "L"·"R" 분기는 남겨 둔다 -- 위치만 다른 같은 그림이다.)
-    const FPC = bw >= 14 ? "C" : "";
+    const FPC = bw >= 14 || fpZoomed() ? "C" : "";
     // 2026-10-12 사용자 «모바일에서는 5분봉에 있는 체결박스들만 모두 제거 · 데스크탑은 수정하지 마»(실데이터 시안 B):
     //   휴대폰은 칸(매도·매수·불균형·POC 테두리)을 안 그리고, 비는 자리만큼 옆 5분봉을 칸 폭의 60% 로 키워 가운데에 둔다.
     //   델타·POC 선·밀도 층은 그대로(칸이 아니다). 데스크탑(isMobileChartMode 거짓)은 한 줄도 안 바뀐다.
-    const MOB = isMobileChartMode();
+    // 2026-10-20 넓힌 창(fpZoomed, 휠로 2h~12h)도 같은 그림: 체결 박스 없이 가운데 채운 캔들 · 델타·POC 선은 그대로.
+    const MOB = isMobileChartMode() || fpZoomed();
     const fpcW = FPC ? (MOB ? Math.max(3, bw * 0.6) : Math.max(3, Math.min(8, (cw / candles.length) * 0.14))) : 0, fpcGap = FPC ? 2 : 0;
     const half = Math.max(2, (bw - fpcW - fpcGap) / 2 - 0.5);
     // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
@@ -6470,7 +6499,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     //   의존해서(deltaBoxes) 중간 봉 하나만 바뀌어도 뒤쪽이 전부 틀어진다 -- 그 사슬을
     //   캐시에 들이면 조용히 어긋난다. 둘 다 노드 하나뿐이라 매번 만들어도 싸다.
     const geomSig = [w, h, mt, ch, ml, cw, bw, yMin, yMax, candles.length, rowSize, rowPx,
-                     maxBuy, maxSell, half, fontPx, showQty, drawCells, INK_OPACITY, FPC].join("|");
+                     maxBuy, maxSell, half, fontPx, showQty, drawCells, INK_OPACITY, FPC, MOB].join("|");
     const barCache = renderCandleSvg._barCache || (renderCandleSvg._barCache = new Map());
     // 델타 라벨은 봉 그룹 **밖**이라 따로 둔다(위 🔴주석: 충돌회피 사슬 때문).
     const deltaCache = renderCandleSvg._deltaCache || (renderCandleSvg._deltaCache = new Map());
