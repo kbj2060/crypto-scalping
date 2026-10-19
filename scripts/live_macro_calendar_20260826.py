@@ -133,7 +133,6 @@ EIA_HOUR_ET, EIA_MINUTE_ET = 10, 30
 FED_CALENDAR_URL = "https://www.federalreserve.gov/newsevents/{year}-{month}.htm"
 FED_CALENDAR_MONTHS = 2  # current month plus next month covers the 21-day event horizon
 
-EIA_URL = "https://api.eia.gov/v2/petroleum/stoc/wstk/data/"  # ping-only, confirms key validity
 FINNHUB_EARNINGS_URL = "https://finnhub.io/api/v1/calendar/earnings"
 EARNINGS_WATCHLIST = {"NVDA": "엔비디아"}  # extend here to widen coverage
 

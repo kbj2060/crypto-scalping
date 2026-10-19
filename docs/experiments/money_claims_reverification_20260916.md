@@ -96,7 +96,7 @@ E\|r\|백분위↔명목 스피어만 **−0.426**(동일). 일군집 CI95: 전�
 ## ③ 집행(비용) — 유효. 단 수치와 표본을 정정한다
 
 ### 배포 실측
-`scripts/live_manual_peg_execute_20260912.py` 의 `fill_maker()` 안에 `REPEG_MAX` 리페그 루프가 있고
+`live/execution/live_manual_peg_execute_20260912.py`(2026-10-19 이동) 의 `fill_maker()` 안에 `REPEG_MAX` 리페그 루프가 있고
 `run_entry()`(148행)가 그것을 호출한다 ✅ — **리페그는 실재한다**(수동 peg 집행 경로).
 자동매매 봇은 별도 `trading_bot_modules/binance_execution.py` 를 쓴다.
 

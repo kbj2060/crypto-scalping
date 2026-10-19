@@ -48,6 +48,7 @@ class DashboardRestartDecisionTests(unittest.TestCase):
             self.fn,
             'd=0',
             "affects '^dashboard/' && d=1",
+            "affects '^live/execution/' && d=1",
             'dashboard_imports_changed && d=1',
             'echo "$d"',
         ])
@@ -70,6 +71,11 @@ class DashboardRestartDecisionTests(unittest.TestCase):
 
     def test_dashboard_path_still_restarts(self) -> None:
         self.assertEqual(1, self._restart_decision("dashboard/live/app.js"))
+
+    def test_execution_path_restarts(self) -> None:
+        """2026-10-19: server.py 가 import 하는 실주문 코드는 live/execution/ 에 있다 -- 워처 규칙과 같은지 확인."""
+        self.assertIn("affects '^live/execution/' && dashboard_changed=1", WATCHER.read_text())
+        self.assertEqual(1, self._restart_decision("live/execution/live_manual_peg_execute_20260912.py"))
 
     def test_unimported_script_does_not_restart(self) -> None:
         """과교정 방지 -- 대시보드가 안 쓰는 파일로 라이브 대시보드를 내리면 안 된다."""

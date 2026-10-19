@@ -32,7 +32,6 @@ RESEARCH = ROOT / "data" / "research"
 OUT = LIVE / "ops_watchdog"
 HISTORY = OUT / "history"
 KST = ZoneInfo("Asia/Seoul")
-SEVERITY = {"OK": 0, "WARN": 1, "CRITICAL": 2, "BLOCKED": 3}
 
 
 @dataclass
@@ -120,11 +119,6 @@ def recommended_action(component: str) -> str:
         return "scripts/ops/triage.sh"
     if component in {"runtime_resources", "watchdog_storage"}:
         return "scripts/ops/triage.sh; df -h ."
-    if component.startswith("shadow_"):
-        # 섀도우 러너는 systemd가 아니라 scripts/ops/supervisor_*.sh + crontab @reboot로 뜬다.
-        # pgrep/pkill 패턴은 자기 handoff 잡 명령줄에도 매칭되므로 grep -v로 걸러서 본다(2026-09-05).
-        return ("ps -eo pid,args | grep -v handoff_jobs | grep -E 'live_.*shadow.*runner'; "
-                "ls -l data/live/*shadow*state*.json")
     if component == "duckdb_trade_tape_eth":
         # supervisor 가 중복 실행 가드를 갖고 있어 그냥 다시 켜도 안전하다(이미 돌면 스스로 exit 1).
         return ("ps -eo pid,args | grep -v handoff_jobs | grep live_trade_tape_collector; "
@@ -390,35 +384,7 @@ def _check_duckdb_table_freshness_uncached(component: str, db_path: Path, table:
 # v3 0건 · v4 2건뿐이었다(나머지는 백필) -- 사전등록 판정선 436건 대비 사실상 0이라 잃은 누적은
 # 없고, 포기한 것은 앞으로의 누적(현 속도로 ~267일)이다. 원장은 보존했다.
 # 러너 정지 + crontab @reboot 제거 + 이 줄 삭제가 **한 쌍**이다(위 09-14 사고 참조).
-# 표가 비어도 안전하다 -- 아래 소비처가 제너레이터 언패킹이라 0줄이면 검사를 안 만든다.
-SHADOW_RUNNERS: tuple[tuple[str, str], ...] = ()
-
-
-def check_shadow_runner(component: str, filename: str, warn_minutes: float = 15,
-                        critical_minutes: float = 30) -> Check:
-    """섀도우 원장의 쓰기 신선도. 러너가 5분 봉마다 쓰므로 warn 15분(3주기)·critical 30분(6주기)."""
-    path = LIVE / filename
-    state, error = load_json(path)
-    if error:
-        return Check(component, "BLOCKED", "shadow ledger cannot be read", {"path": str(path), "error": error})
-    try:
-        write_age = max(0.0, (now_kst() - datetime.fromtimestamp(path.stat().st_mtime, KST)).total_seconds() / 60.0)
-    except OSError as exc:
-        return Check(component, "BLOCKED", "shadow ledger stat failed", {"path": str(path), "error": type(exc).__name__})
-    decided = state.get("last_decided_bar_utc")
-    decided_age = age_minutes_utc_naive(decided)
-    age = write_age if decided_age is None else max(write_age, decided_age)
-    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
-    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
-    pending = state.get("pending") if isinstance(state.get("pending"), list) else []
-    return Check(component, stale_status(age, warn_minutes, critical_minutes), "shadow runner ledger freshness", {
-        "path": str(path), "age_minutes": round(age, 1), "write_age_minutes": round(write_age, 1),
-        "last_decided_bar_utc": decided,
-        "decided_age_minutes": (None if decided_age is None else round(decided_age, 1)),
-        "closed_trades": len(ledger), "open_positions": len(positions), "pending": len(pending),
-        "started_utc": state.get("started_utc"), "rule": state.get("rule"),
-        "warn_minutes": warn_minutes, "critical_minutes": critical_minutes,
-    })
+# 2026-10-19: 빈 표(SHADOW_RUNNERS)와 check_shadow_runner 를 지웠다 -- 위 기록은 사고 사례로만 남긴다.
 
 
 # ── 다코인 수집기 (2026-09-26) ─────────────────────────────────────────────────────────────
@@ -694,7 +660,6 @@ def run_once(dry_run: bool) -> list[Check]:
     micro_db = LIVE / "microstructure.duckdb"
     tape_db = ROOT / "data" / "hot" / "binance_tape.sqlite"   # 2026-10-01 hot 사본(WAL) -- 수집기 DuckDB 커밋을 따라 쓴다
     tail_db = LIVE / "tail_risk.duckdb"
-    tail_btc_sol_db = LIVE / "tail_risk_btc_sol.duckdb"
     altdata_db = RESEARCH / "altdata.duckdb"
     checks = [
         # 2026-10-12 봇 은퇴: trading_bot_process·decision_snapshot·heartbeat·data_pipeline·pipeline_contract·
@@ -770,8 +735,6 @@ def run_once(dry_run: bool) -> list[Check]:
         # 2026-10-16: ETH 칸별 아이스버그 탐지기(scripts/live_eth_iceberg_20261016.py, 2초마다 상태 파일). 죽으면 풋프린트 «아이스버그» 칩이 «멈춤».
         #   탐지기를 은퇴시키면 이 줄도 지운다.
         check_file_dir_freshness("eth_iceberg", LIVE / "iceberg", "eth_state.json", 2, 10),
-        # 2026-09-06: 섀도우 러너 7종의 원장 쓰기 신선도(SHADOW_RUNNERS 주석 참고).
-        *(check_shadow_runner(component, filename) for component, filename in SHADOW_RUNNERS),
         *check_multicoin_collectors(),
         *check_pi_collectors(),
     ]

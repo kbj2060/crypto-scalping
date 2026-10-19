@@ -58,10 +58,6 @@ ROOT = Path(__file__).resolve().parents[1]
 HOT_TAPE_DB = ROOT / "data" / "hot" / "binance_tape.sqlite"
 
 
-def default_db(symbol: str) -> Path:
-    return HOT_TAPE_DB
-
-
 # 가격빈. 자산마다 틱과 가격대가 달라 한 값을 못 쓴다 -- 대략 «가격의 0.4bp» 로 맞췄다.
 BUCKETS = {"ethusdt": 0.1, "btcusdt": 1.0, "solusdt": 0.01, "xrpusdt": 0.0001, "hypeusdt": 0.001}
 WS_URL = "wss://fstream.binance.com/ws/{symbol}@trade"

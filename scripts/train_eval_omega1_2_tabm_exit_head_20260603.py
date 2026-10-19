@@ -204,20 +204,6 @@ def _fit_binary_tabm(
     return payload
 
 
-@torch.no_grad()
-def _predict_binary_tabm(payload: dict[str, Any], x: pd.DataFrame, *, device: torch.device) -> np.ndarray:
-    model = ExitTabMClassifier(int(payload["n_features"]), int(payload["n_classes"]), cfg=CFG).to(device)
-    model.load_state_dict(payload["state_dict"])
-    model.eval()
-    x_np = _standardize_apply(x, payload["scaler"])
-    out: list[np.ndarray] = []
-    for start in range(0, len(x_np), 8192):
-        xb = torch.from_numpy(x_np[start : start + 8192]).to(device)
-        probs = torch.softmax(model(xb), dim=-1).mean(dim=1)
-        out.append(probs.detach().cpu().numpy())
-    return np.concatenate(out, axis=0).astype(np.float64)
-
-
 def _route_probs(frame: pd.DataFrame) -> np.ndarray:
     values = frame[hard.ROUTE_COLS].to_numpy(dtype=np.float64)
     if not np.isfinite(values).all():
@@ -244,18 +230,6 @@ def _fit_exit_heads(x: pd.DataFrame, y: np.ndarray, frame: pd.DataFrame, *, seed
             "best_validation_loss": float(payload["best_validation_loss"]),
         }
     return {"models": models, "summaries": summaries}
-
-
-def _routed_exit_prob(models: dict[str, dict[str, Any]], x: pd.DataFrame, frame: pd.DataFrame, *, device: torch.device) -> np.ndarray:
-    route = hard._route_id(frame)
-    out = np.zeros(len(frame), dtype=np.float64)
-    for idx, expert in enumerate(hard.EXPERT_NAMES):
-        mask = route == idx
-        if not bool(mask.any()):
-            continue
-        prob = _predict_binary_tabm(models[expert], x.loc[mask].reset_index(drop=True), device=device)
-        out[mask] = prob[:, 1]
-    return out
 
 
 def _load_exit_heads(models: dict[str, dict[str, Any]], *, device: torch.device) -> dict[str, tuple[ExitTabMClassifier, dict[str, Any]]]:

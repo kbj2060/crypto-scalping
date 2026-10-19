@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, ParamSpec, TypeVar
+from typing import Callable, ParamSpec, TypeVar
 
 
 P = ParamSpec("P")

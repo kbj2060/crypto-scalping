@@ -126,14 +126,6 @@ def read(venue: str, stream: str, coin: str = "*", start: str | None = None, end
     return con.sql(q + (" where " + " and ".join(where) if where else "")).df()
 
 
-def orderflow_files(stream: str, symbol: str, start: str | None = None, end: str | None = None) -> list[Path]:
-    """호가 원시 시각 파일. stream = bookticker·depthdiff·raster·okx_bookticker·hyperliquid_bookticker,
-    symbol = 디렉터리 이름(ETHUSDT · ETH-USDT-SWAP · ETH). start/end = 'YYYY-MM-DDTHH' 접두 비교(UTC)."""
-    d = ORDERFLOW / stream / symbol
-    return sorted(p for p in d.iterdir()
-                  if p.is_file() and (start is None or p.name[:13] >= start) and (end is None or p.name[:13] < end))
-
-
 def read_bt(path: Path) -> np.ndarray:
     """BTKR bookTicker 시각 파일(.bt 또는 .bt.gz) -> ts_ms·bid_px·bid_qty·ask_px·ask_qty 배열.
     쓰는 중인 파일의 잘린 마지막 행은 버린다."""

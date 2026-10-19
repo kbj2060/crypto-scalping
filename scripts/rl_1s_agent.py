@@ -785,69 +785,6 @@ def evaluate_dir(d: Path, seed: int = 0, splits=("val", "test")) -> dict:
     return out
 
 
-def train_bcrl(seed: int, ckpts=(0, 100_000, 300_000, 1_000_000), lr: float = 1e-5) -> Path:
-    """교사 규칙 행동 모방(BC)으로 정책·가치를 맞춘 뒤 낮은 학습률 PPO 로 미세조정. ckpts 마다 저장 -> «진화가 개선하나» 곡선.
-    BC: 교사를 학습구간에 순차로 돌려 (관측, 행동, 이후 할인 손익)을 모은다. 봉 경계 결정은 1% 남짓이라 가중치로 균형."""
-    import torch
-    from stable_baselines3 import PPO
-    from stable_baselines3.common.callbacks import BaseCallback
-    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-    torch.manual_seed(seed)
-    A = load_split("train")
-    Env, tch = make_env_cls(), teacher_act(A, wall_thr())
-    env = Env(A, seq=True)
-    o, _ = env.reset()
-    O, act, bar, rew, done = [], [], [], [], False
-    while not done:
-        b = is_bar(env.s0 + env.t)
-        a = tch(o, env.t, b)
-        O.append(o), act.append(a), bar.append(b)
-        o, r, done, *_ = env.step(a)
-        rew.append(r)
-    O, act, bar = np.array(O, np.float32), np.array(act), np.array(bar)
-    G, g = np.zeros(len(rew)), 0.0
-    for i in range(len(rew) - 1, -1, -1):                       # 이후 할인 손익(γ .999, PPO 와 같은 값) -> 가치망 목표
-        g = rew[i] + 0.999 * g
-        G[i] = g
-    w = np.where(bar, (~bar).sum() / max(bar.sum(), 1), 1.0)
-    venv = VecNormalize(DummyVecEnv([lambda i=i: Env(A, seed=seed * 100 + i) for i in range(8)]),
-                        norm_obs=True, norm_reward=False, clip_obs=10.0)
-    venv.obs_rms.mean, venv.obs_rms.var, venv.obs_rms.count = O.mean(0).astype(np.float64), O.var(0).astype(np.float64), len(O)
-    model = PPO("MlpPolicy", venv, learning_rate=lr, n_steps=2048, batch_size=256, gamma=0.999, gae_lambda=0.95,
-                clip_range=0.1, ent_coef=0.001, seed=seed, verbose=0, device="cpu")
-    pol = model.policy
-    On = torch.as_tensor(np.clip((O - venv.obs_rms.mean) / np.sqrt(venv.obs_rms.var + 1e-8), -10, 10), dtype=torch.float32)
-    At, Wt, Gt = torch.as_tensor(act), torch.as_tensor(w, dtype=torch.float32), torch.as_tensor(G, dtype=torch.float32)
-    opt = torch.optim.Adam(pol.parameters(), lr=1e-3)
-    rng = np.random.default_rng(seed)
-    for ep in range(30):
-        for idx in np.array_split(rng.permutation(len(O)), max(len(O) // 4096, 1)):
-            dist = pol.get_distribution(On[idx])
-            loss = -(Wt[idx] * dist.log_prob(At[idx])).mean() / Wt[idx].mean() \
-                + 0.5 * ((pol.predict_values(On[idx]).squeeze(-1) - Gt[idx]) ** 2).mean() / 100.0
-            opt.zero_grad(), loss.backward(), opt.step()
-    with torch.no_grad():
-        pred = pol.get_distribution(On).distribution.probs.argmax(-1).numpy()
-    print(f"BC 학습구간 일치: 봉 경계 {np.mean(pred[bar] == act[bar]):.3f} · 봉 중간 {np.mean(pred[~bar] == act[~bar]):.3f}", flush=True)
-    root = model_dir(seed).with_name(model_dir(seed).name + "_bcrl")
-
-    def save(n):
-        d = root / f"ckpt{n}"
-        d.mkdir(parents=True, exist_ok=True)
-        model.save(d / "ppo.zip")
-        venv.save(d / "vecnormalize.pkl")
-
-    class Ckpt(BaseCallback):
-        def _on_step(self):
-            for n in ckpts:
-                if n and self.num_timesteps - self.model.n_envs < n <= self.num_timesteps:
-                    save(n)
-            return True
-    save(0)
-    model.learn(total_timesteps=max(ckpts), callback=Ckpt())
-    return root
-
-
 def features_cols() -> list[str]:
     p = pd.read_parquet(OUT / PANEL).iloc[:WARMUP + 10]
     return list(features(p).columns)

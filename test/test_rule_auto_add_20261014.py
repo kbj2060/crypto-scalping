@@ -20,7 +20,7 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from offline_app import offline_app  # noqa: E402
 
 from dashboard import server  # noqa: E402
-from scripts import live_manual_peg_execute_20260912 as ex  # noqa: E402
+from live.execution import live_manual_peg_execute_20260912 as ex  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import REC_ADD_DIST, REC_FIRST_SHARE, RULE_STOP_PCT  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 

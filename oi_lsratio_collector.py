@@ -64,9 +64,7 @@ class OiLsRatioCollector:
         # itself only ever has ~500 points total (see module docstring).
         self.fetch_limit = int(os.getenv("OI_FETCH_LIMIT", "12"))
 
-        self._last_stored_ts_ms: int | None = None
         self._last_poll_ok_sources = 0
-        self._last_poll_ts = 0.0
 
     # -- DuckDB --------------------------------------------------------------------------------
 
@@ -106,7 +104,6 @@ class OiLsRatioCollector:
             con.execute(f"ALTER TABLE {self._table} ADD COLUMN IF NOT EXISTS {col} DOUBLE")
         row = con.execute(f"SELECT MAX(ts) FROM {self._table}").fetchone()
         if row and row[0] is not None:
-            self._last_stored_ts_ms = int(row[0].timestamp() * 1000)
             logger.info("oi_lsratio(%s) bootstrap: resuming after ts=%s", self._api_symbol, row[0])
         else:
             logger.info("oi_lsratio(%s) bootstrap: empty table, starting fresh", self._api_symbol)
@@ -172,7 +169,6 @@ class OiLsRatioCollector:
                 merged,
             )
             con.close()
-            self._last_stored_ts_ms = max(int(r["ts"].timestamp() * 1000) for r in rows)
         except Exception as e:
             logger.error("oi_lsratio(%s) DB upsert error: %s", self._api_symbol, e, exc_info=True)
 
@@ -279,7 +275,6 @@ class OiLsRatioCollector:
 
                 loop = asyncio.get_running_loop()
                 rows = await loop.run_in_executor(None, self._poll_once_blocking)
-                self._last_poll_ts = time.time()
                 if rows:
                     await loop.run_in_executor(None, self._db_upsert_rows, rows)
                 logger.info(
@@ -304,10 +299,3 @@ class OiLsRatioCollector:
         self._running = False
         if self._poll_task and not self._poll_task.done():
             self._poll_task.cancel()
-
-    def status_line(self) -> str:
-        if not self.enabled:
-            return f"[oi_lsratio {self._api_symbol}] disabled"
-        age = time.time() - self._last_poll_ts if self._last_poll_ts else None
-        age_txt = f"{age:.0f}s ago" if age is not None else "never"
-        return f"[oi_lsratio {self._api_symbol}] last_poll={age_txt} sources_ok={self._last_poll_ok_sources}/5"

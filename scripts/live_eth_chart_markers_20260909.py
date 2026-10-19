@@ -37,57 +37,6 @@ def _iso(t) -> str:
     return pd.Timestamp(t).tz_localize("UTC").isoformat()
 
 
-def _merge_history(out: dict[str, dict], payload: dict | None, kind: str, label: str) -> None:
-    """다른 신호의 이력 띠를 같은 격자에 얹는다. 없으면 조용히 건너뛴다.
-
-    톤 규약(대시보드 §2): good = 롱 기대 = **바닥 쪽**, bad = 숏 기대 = **천장 쪽**.
-    flat/neutral 은 마커를 만들지 않는다.
-    ⚠️신호마다 이력 필드 모양이 다르다 -- v_rebound 는 (history, times) 를 같이 주지만
-      돌파/되돌림은 `tone_history` + `latest_ts_utc` 뿐이라 5분 간격으로 시각을 되짚어야 한다.
-      여기서 흡수하지 않으면 화면과 격자가 한 칸씩 어긋난다."""
-    if not isinstance(payload, dict):
-        return
-    tones = payload.get("history") or payload.get("tone_history") or []
-    times = payload.get("times") or []
-    if not tones:
-        return
-    if not times:
-        end = payload.get("latest_ts_utc")
-        if not end:
-            return
-        t1 = pd.Timestamp(str(end).replace("Z", "+00:00"))
-        if t1.tzinfo is None:
-            t1 = t1.tz_localize("UTC")
-        times = [(t1 - pd.Timedelta(minutes=5 * (len(tones) - 1 - i))).isoformat()
-                 for i in range(len(tones))]
-    # 봉별 등급이 있으면 같이 싣는다(극점). 화면이 강/중/약을 다르게 그릴 수 있어야 한다 --
-    # 없으면 None 이고, 그때는 화면이 전부 같은 무게로 그린다(옛 동작).
-    grades = payload.get("grades") or []
-    if len(grades) != len(tones):
-        grades = [None] * len(tones)
-    probas = payload.get("probas") or []
-    if len(probas) != len(tones):
-        probas = [None] * len(tones)
-    demoted = payload.get("demoted") or []
-    if len(demoted) != len(tones):
-        demoted = [False] * len(tones)
-    for tone, t, grade, proba, dem in zip(tones, times, grades, probas, demoted):
-        if tone not in ("good", "bad"):
-            continue
-        ts_ = pd.Timestamp(str(t).replace("Z", "+00:00"))
-        key = (ts_ if ts_.tzinfo else ts_.tz_localize("UTC")).tz_convert("UTC").isoformat()
-        if key not in out:
-            continue
-        ev = {"kind": kind, "label": label, "side": "bottom" if tone == "good" else "top"}
-        if grade:
-            ev["grade"] = grade
-        if proba is not None:
-            ev["p"] = proba
-        if dem:
-            ev["demoted"] = True      # 강 -> 약 강등(손실가중 헤드가 컷을 못 넘음)
-        out[key].setdefault("events", []).append(ev)
-
-
 def _onset_only(grid: dict[str, dict], times: list[str]) -> list[dict]:
     """연속 봉으로 이어지는 같은 (kind, side) 이벤트는 **첫 봉만** 남긴다.
 

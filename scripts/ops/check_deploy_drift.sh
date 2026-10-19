@@ -49,15 +49,15 @@ echo "--- DIRTY_LIVE_FILES ---"
 # 백업/스냅샷 잔재는 서빙 코드가 아니므로 제외 -- 안 그러면 매번 늑대소년이 된다
 # (.bak* / .backup* / *_backup_* / *.orig / *.pre_* 등, 2026-09-01 오탐으로 확인)
 git status --short | grep -E "^( M|M |\?\?)" \
-  | grep -E "dashboard/|scripts/live_|trading_bot" \
+  | grep -E "dashboard/|scripts/live_|live/execution/|trading_bot" \
   | grep -vE "\.bak|\.backup|_backup_|\.orig$|\.pre_|\.save$|~$" || echo "(none)"
 echo "--- CONFLICT_MARKERS ---"
-grep -rl "<<<<<<< \|>>>>>>> Stashed\|Updated upstream" dashboard/live/ scripts/live_*.py 2>/dev/null || echo "(none)"
+grep -rl "<<<<<<< \|>>>>>>> Stashed\|Updated upstream" dashboard/live/ scripts/live_*.py live/execution/ 2>/dev/null || echo "(none)"
 echo "--- UNTRACKED_SCRIPTS ---"
 # 2026-09-04: 워처는 merge-first 라 미추적 파일 자체는 배포를 막지 않지만, **같은 경로를 커밋하면** 머지가
 # 거부되고 폴백 stash 의 pop 이 "already exists" 로 실패한다. 개수와 앞 5개를 알려 커밋을 재촉한다.
-git status --porcelain --untracked-files=all | grep -E "^\?\? (scripts/.*\.(py|sh)|[^/]+\.py)$" | cut -c4- | sed -n "1,5p"
-echo "UNTRACKED_SCRIPT_COUNT=$(git status --porcelain --untracked-files=all | grep -cE "^\?\? (scripts/.*\.(py|sh)|[^/]+\.py)$")"
+git status --porcelain --untracked-files=all | grep -E "^\?\? (scripts/.*\.(py|sh)|live/.*\.py|[^/]+\.py)$" | cut -c4- | sed -n "1,5p"
+echo "UNTRACKED_SCRIPT_COUNT=$(git status --porcelain --untracked-files=all | grep -cE "^\?\? (scripts/.*\.(py|sh)|live/.*\.py|[^/]+\.py)$")"
 ' 2>&1 >/dev/null)"
 
 for _ in $(seq 1 30); do

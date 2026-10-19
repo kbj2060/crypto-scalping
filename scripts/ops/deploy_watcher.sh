@@ -218,6 +218,9 @@ affects '^scripts/ops/prometheus_exporter\.py$' && UNITS_TO_RESTART[prometheus-e
 # 섀도우를 조용히 되살린다. 되살리려면 sudo systemctl enable --now 로 명시적으로 한다.
 dashboard_changed=0
 affects '^dashboard/' && dashboard_changed=1
+# 2026-10-19: 실주문 코드(live/execution/)는 server.py 가 `from live.execution...` 로 import 한다 --
+#   아래 import 감지는 `scripts.` 만 보므로 경로로 직접 건다(안 걸면 대시보드가 옛 주문 코드를 메모리에 든다).
+affects '^live/execution/' && dashboard_changed=1
 # ⭐2026-09-07: 대시보드가 **import하는 scripts/ 모듈**도 재시작 대상이다. 그 전까지 이 조건은
 # `^dashboard/` 하나뿐이어서, dashboard/server.py가 import하는 `scripts/live_*.py`를 고쳐 배포하면
 # 워처가 머지하고 last_deployed_sha를 갱신하고 `deploy OK`까지 찍은 뒤 **대시보드를 재시작하지

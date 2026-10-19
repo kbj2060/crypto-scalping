@@ -58,8 +58,7 @@ COINS = ("BTC", "SOL", "XRP", "HYPE")
 # 수집기별 RSS(MB) 추정 -- 2026-09-26 이 세션 실측(x86_64, 네트워크 없이 기동 후 15초). duckdb 를 import
 # 하는 수집기는 그것만으로 ~150MB 다. 래스터는 북이 차면 도크스트링 실측 67MB 까지 는다.
 RSS_MB = {"bn_bookticker": 26, "bn_depthdiff": 26, "bn_raster": 67, "bn_tape": 155, "hl_trades": 64,
-          "hl_bbo": 151, "hl_ctx": 151, "bo": 250, "hl_positions": 151, "okx_bbo": 37, "okx_ctx": 155, "okx_tape": 156,
-          "tail_risk": 150}
+          "hl_bbo": 151, "hl_ctx": 151, "bo": 250, "hl_positions": 151, "okx_bbo": 37, "okx_ctx": 155, "okx_tape": 156}
 MEM_FLOOR_MB = 512
 DISK_FLOOR_GB = 100       # 09-16 인벤토리의 재검토선
 ETH_RASTER_BIN = 0.5      # ETH 래스터의 현재 빈 폭(OF_BIN_SIZE 기본값). 다른 코인은 같은 상대 폭으로 맞춘다
@@ -75,7 +74,7 @@ def _db(name: str, path: str, table: str, ts: str, warn: float = 5, critical: fl
             "warn": warn, "critical": critical}
 
 
-def specs(coins: list[str], phases: set[int], tail_btc_sol: bool) -> list[dict]:
+def specs(coins: list[str], phases: set[int]) -> list[dict]:
     """띄울 수집기 목록. `env` 는 supervisor 에 넘기는 값, `match` 는 이미 도는지 판별할 값이다."""
     out: list[dict] = []
 
@@ -138,13 +137,6 @@ def specs(coins: list[str], phases: set[int], tail_btc_sol: bool) -> list[dict]:
         "live_hyperliquid_positions_collector_20260924.py", {"HL_POS_COINS": ",".join(coins)},
         [_db(f"hl_positions_{tag}", f"data/live/hyperliquid_positions_{tag}.duckdb", "hl_cycles",
              "to_timestamp(ts_ms / 1000)", 30, 60)], grace=30)
-    if tail_btc_sol and 1 in phases and {"BTC", "SOL"} & set(coins):
-        # 🔴서버 전용: 기존 파일(tail_risk_btc_sol.duckdb, 09-19 정지)이 서버에 있다. 다른 호스트에서
-        #   띄우면 같은 이름의 새 파일이 생겨 이력이 두 곳으로 갈린다. supervisor 가 BTC·SOL 을 함께 켠다.
-        add("tail_risk", "btc_sol", 1, "supervisor_tail_risk_btc_sol_worker.sh", "duckdb_persist_worker.py", {},
-            [_db(f"tail_risk_{c.lower()}", "data/live/tail_risk_btc_sol.duckdb", f"tail_risk_1m_{c.lower()}", "ts")
-             for c in ("BTC", "SOL")])
-        out[-1]["match"] = {"BOT_SYMBOLS": "BTCUSDT,SOLUSDT", "COLLECT_TAIL_RISK": "true"}
     return out
 
 
@@ -303,7 +295,7 @@ def cmd_plan_or_start(a, start: bool) -> int:
         print(f"🔴 모르는 코인 {bad} -- 이 스크립트는 {COINS} 만 안다(OKX 계약 단위·빈 폭 표가 그 넷뿐이다)")
         return 2
     phases = {1, 2} if a.phase == "all" else {int(a.phase)}
-    todo = specs(coins, phases, a.tail_risk_btc_sol)
+    todo = specs(coins, phases)
     py = os.getenv("PYTHON_BIN") or sys.executable
     print(f"호스트 {socket.gethostname()} · 파이썬 {py} · 코인 {coins} · 단계 {sorted(phases)}")
 
@@ -486,8 +478,6 @@ def main() -> int:
         p = sub.add_parser(name)
         p.add_argument("--coins", default=",".join(COINS))
         p.add_argument("--phase", choices=("1", "2", "3", "all"), default="1")
-        p.add_argument("--tail-risk-btc-sol", action="store_true",
-                       help="서버 전용: 09-19 에 멈춘 BTC·SOL 청산(forceOrder) 1분 수집 워커를 되살린다")
         if name == "start":
             p.add_argument("--install-cron", action="store_true")
             p.add_argument("--force", action="store_true", help="메모리 부족 경고를 무시한다")

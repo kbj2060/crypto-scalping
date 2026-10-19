@@ -50,7 +50,6 @@ class TailRiskInterceptor:
 
     외부 인터페이스:
         start() / stop()
-        intercept(action, pos, kelly, current_price, prev_price) -> (action, kelly, reason)
         status_line() -> str
     """
 
@@ -95,10 +94,8 @@ class TailRiskInterceptor:
 
         # ── 퀀트 파라미터 ──────────────────────────────────────────────
         self.z_threshold = float(os.getenv("TR_Z_THRESHOLD", "3.5"))
-        self.lai_threshold = float(os.getenv("TR_LAI_THRESHOLD", "300_000_000")) 
         self.hawkes_beta = float(os.getenv("TR_HAWKES_BETA", "0.005")) # 약 4~5분 뒤 에너지가 25% 이하로 감소하는 속도
         self.hawkes_release_ratio = float(os.getenv("TR_HAWKES_RELEASE_RATIO", "0.35"))
-        self.hawkes_sniper_ratio = float(os.getenv("TR_HAWKES_SNIPER_RATIO", "0.55"))
         # 2026-08-27: 청산 $ 흐름은 대부분의 분(分)이 정확히 $0인 성긴(zero-inflated) 분포라, 조용한
         # 구간이 몇 분만 지속돼도 30분 롤링 mu/sigma 자체가 거의 0으로 붕괴한다(서버 실측: 13분 조용 후
         # mu_long=0.000000/sigma_long=0.000001까지 관측). 그 상태에서 지극히 평범한 청산 하나만 들어와도
@@ -115,9 +112,6 @@ class TailRiskInterceptor:
         self.hawkes_min_trigger_usd = float(os.getenv(
             "TR_HAWKES_MIN_TRIGGER_USD", "10000" if self.symbol == "ethusdt" else "0"
         ))
-        self.liq_cluster_window_sec = int(float(os.getenv("TR_LIQ_CLUSTER_WINDOW_SEC", "1800")))
-        self.liq_cluster_bucket_pct = float(os.getenv("TR_LIQ_CLUSTER_BUCKET_PCT", "0.001"))
-        self.dsac_intercept_enabled = os.getenv("TR_DSAC_INTERCEPT_ENABLE", "false").strip().lower() in ("1", "true", "yes", "on")
         self._ws_connected = False
         self._ws_connected_since = 0.0
         self._ws_last_msg_ts = 0.0
@@ -206,7 +200,6 @@ class TailRiskInterceptor:
         return ws_stale, ws_age_sec, valid_liq_stream
 
     def _db_insert(self, bucket_ts: datetime, long_1m: float, short_1m: float, liq_event_count_1m: int = 0) -> None:
-        import duckdb
         try:
             ws_stale, ws_age_sec, valid_liq_stream = self._stream_health()
             from scripts.live_trade_tape_collector_20260916 import duckdb_connect_retry
@@ -282,64 +275,6 @@ class TailRiskInterceptor:
             if usd > 0:
                 cnt += 1
         return int(cnt)
-
-    def _compute_liq_cluster(self, current_price: float) -> dict[str, float | int]:
-        """최근 청산 분포 기반 자석 방향 추정."""
-        if current_price <= 0:
-            return {
-                "liq_cluster_direction": 0,
-                "liq_cluster_strength": 0.0,
-                "distance_to_cluster_pct": 1.0,
-                "liq_cluster_price": 0.0,
-            }
-        now_ms = int(time.time() * 1000)
-        cutoff = now_ms - int(self.liq_cluster_window_sec * 1000)
-        step = max(current_price * self.liq_cluster_bucket_pct, current_price * 0.0005)
-        above_short: dict[float, float] = {}
-        below_long: dict[float, float] = {}
-        total = 0.0
-        for ts, side, usd, price in reversed(self._liq_events):
-            if ts < cutoff:
-                break
-            if usd <= 0 or price <= 0:
-                continue
-            total += usd
-            bucket = round(price / step) * step
-            if side == "BUY" and price > current_price:
-                above_short[bucket] = above_short.get(bucket, 0.0) + usd
-            elif side == "SELL" and price < current_price:
-                below_long[bucket] = below_long.get(bucket, 0.0) + usd
-
-        best_up_price, best_up_usd = (0.0, 0.0)
-        if above_short:
-            best_up_price, best_up_usd = max(above_short.items(), key=lambda x: x[1])
-        best_dn_price, best_dn_usd = (0.0, 0.0)
-        if below_long:
-            best_dn_price, best_dn_usd = max(below_long.items(), key=lambda x: x[1])
-
-        if best_up_usd <= 0 and best_dn_usd <= 0:
-            return {
-                "liq_cluster_direction": 0,
-                "liq_cluster_strength": 0.0,
-                "distance_to_cluster_pct": 1.0,
-                "liq_cluster_price": 0.0,
-            }
-        if best_up_usd >= best_dn_usd:
-            direction = 1
-            cluster_price = best_up_price
-            cluster_usd = best_up_usd
-        else:
-            direction = -1
-            cluster_price = best_dn_price
-            cluster_usd = best_dn_usd
-        strength = float(np.clip(cluster_usd / max(total, 1e-8), 0.0, 1.0))
-        dist = abs(cluster_price - current_price) / max(current_price, 1e-8)
-        return {
-            "liq_cluster_direction": int(direction),
-            "liq_cluster_strength": float(strength),
-            "distance_to_cluster_pct": float(dist),
-            "liq_cluster_price": float(cluster_price),
-        }
 
     def _compute_shadow_aftershock(self, long_1m: float, short_1m: float) -> dict[str, float | str]:
         """
@@ -529,46 +464,6 @@ class TailRiskInterceptor:
             except Exception as e:
                 logger.error("🚨 사후 요격기(_agg_loop) 치명적 에러 발생: %s", e, exc_info=True)
 
-    # ── 🚀 메인 요격 알고리즘 (3-Stage Rocket) ───────────────────────────────
-
-    def intercept(
-        self,
-        action: int,
-        pos: str | None,
-        kelly: float,
-        current_price: float,
-        prev_price: float
-    ) -> tuple[int, float, str]:
-        """
-        DSAC 결정을 가로채어 위험을 관리하거나 스퀴즈 알파를 창출합니다.
-        
-        Returns:
-            (수정된 action, 수정된 kelly, 요격 사유)
-        """
-        if not self.dsac_intercept_enabled:
-            return action, kelly, ""
-        if not self.enabled or not self.is_warmed_up:
-            return action, kelly, ""
-
-        long_1m, short_1m = self._aggregate_1m()
-        z_long = (long_1m - self.mu_long) / max(self.sigma_long, 1.0)
-        z_short = (short_1m - self.mu_short) / max(self.sigma_short, 1.0)
-        dominant_liq = long_1m if z_long >= z_short else short_1m
-        price_change_pct = (current_price - prev_price) / max(abs(prev_price), 1e-8) if prev_price > 0 else 0.0
-        lai = dominant_liq / max(abs(price_change_pct), 0.0001)
-
-        # 여진 진행 구간에서는 진입 차단
-        if self._hawkes_active:
-            return 0, 0.0, "HAWKES_ACTIVE_HOLD"
-
-        # 감쇠 후 역추세 스나이핑
-        if self._hawkes_decay_level >= self.hawkes_sniper_ratio and lai >= self.lai_threshold:
-            if self._crisis_type == "LONG_CRISIS":
-                return 1, min(float(kelly) * 1.3, 1.0), "HAWKES_DECAY_SNIPER_LONG"
-            if self._crisis_type == "SHORT_CRISIS":
-                return 2, min(float(kelly) * 1.3, 1.0), "HAWKES_DECAY_SNIPER_SHORT"
-        return action, kelly, ""
-
     # ── 시작 / 정지 / 모니터링 ───────────────────────────────────────────────
 
     def start(self) -> None:
@@ -625,17 +520,14 @@ class TailRiskInterceptor:
         if shadow_bucket == "high":
             shadow_txt = "HOLD 권고"
             dir_txt = "HOLD 유리"
-            dir_tag = "[HOLD]"
             reason_txt = "여진확률 높음 + 변동 충격 지속"
         elif shadow_bucket == "watch":
             shadow_txt = "보수적 진입"
             dir_txt = "추세추종 소규모 유리"
-            dir_tag = "[LONG/SHORT]"
             reason_txt = "여진 감시 구간(비중 축소)"
         else:
             shadow_txt = "정상 운용"
             dir_txt = "기존 신호 추종 유리"
-            dir_tag = "[LONG/SHORT]"
             reason_txt = "여진 위험 낮음"
 
         return (
@@ -649,32 +541,3 @@ class TailRiskInterceptor:
             f"│ SHDW  D:{shadow_txt} | p={shadow_prob:.2f} ({shadow_bucket}) | half-life={shadow_hl:.1f}m | hawkes={self._hawkes_decay_level:.2f}\n"
             "└────────────────────────────────────────────────────"
         )
-
-    def get_playbook_signal(self, price_change_pct: float = 0.0, current_price: float = 0.0) -> dict[str, float | str]:
-        """
-        플레이북 라우팅용 경량 신호 스냅샷.
-        """
-        long_1m, short_1m = self._aggregate_1m()
-        z_long = (long_1m - self.mu_long) / max(self.sigma_long, 1.0)
-        z_short = (short_1m - self.mu_short) / max(self.sigma_short, 1.0)
-        dominant_liq = long_1m if z_long >= z_short else short_1m
-        lai = dominant_liq / max(abs(float(price_change_pct)), 0.0001)
-        ws_stale, ws_age_sec, valid_liq_stream = self._stream_health()
-        out = {
-            "z_long": float(z_long),
-            "z_short": float(z_short),
-            "lai": float(lai),
-            "long_usd_1m": float(long_1m),
-            "short_usd_1m": float(short_1m),
-            "liq_event_count_1m": int(self._count_liq_events_1m()),
-            "ws_connected": bool(self._ws_connected),
-            "ws_stale": bool(ws_stale),
-            "ws_age_sec": float(ws_age_sec) if ws_age_sec is not None else None,
-            "valid_liq_stream": bool(valid_liq_stream),
-            "hawkes_active": bool(self._hawkes_active),
-            "hawkes_decay_level": float(self._hawkes_decay_level),
-            "crisis_type": str(self._crisis_type or ""),
-        }
-        out.update(self._compute_liq_cluster(float(current_price)))
-        out.update(self._shadow_state or {})
-        return out

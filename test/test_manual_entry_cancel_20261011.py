@@ -17,7 +17,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import scripts.live_manual_peg_execute_20260912 as ex  # noqa: E402
+import live.execution.live_manual_peg_execute_20260912 as ex  # noqa: E402
 
 PLAN = {"symbol": "ETHUSDC", "side": "BUY", "positionSide": "LONG", "price": 2500.0, "quantity": 1.0, "target_leverage": 0}
 

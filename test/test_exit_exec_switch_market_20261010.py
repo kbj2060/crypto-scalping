@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from offline_app import offline_app  # noqa: E402
 
-import scripts.live_manual_peg_execute_20260912 as ex  # noqa: E402
+import live.execution.live_manual_peg_execute_20260912 as ex  # noqa: E402
 from dashboard import server  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 from test_rec_rule_entry_20261009 import account, long_pos  # noqa: E402

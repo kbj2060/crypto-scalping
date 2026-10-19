@@ -96,7 +96,6 @@ def default_db(inst: str, name: str = "okx_trade_tape") -> Path:
 # 보존: hot 은 16일(봉인기 prune_hot -- lake 에 봉인된 날짜만 지운다). 그 전은 data/lake/okx/tape.
 
 WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
-CANDLES_URL = "https://www.okx.com/api/v5/market/candles"
 INSTRUMENTS_URL = "https://www.okx.com/api/v5/public/instruments"
 HISTORY_TRADES_URL = "https://www.okx.com/api/v5/market/history-trades"
 HISTORY_CANDLES_URL = "https://www.okx.com/api/v5/market/history-candles"
