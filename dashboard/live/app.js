@@ -1356,6 +1356,7 @@ const ACCT_SPANS = [["오늘", 0], ["1주", 7], ["1개월", 30], ["전체", -1]]
 const ACCT_DAY = 86400000, ACCT_KST = 9 * 3600000;
 let acctSpanIdx = (() => { try { const raw = localStorage.getItem("acctSpanIdx"), v = Number(raw); return raw !== null && raw !== "" && v >= 0 && v < ACCT_SPANS.length ? v : 2; } catch (e) { return 2; } })();   // 🔴Number(null) = 0 = «오늘» 함정(옛 acctSpanDays 와 같은 것) -- 저장값이 없으면 1개월
 let acctCalBack = 0;   // 달력: 0 = 이번 달, 1 = 지난달 …
+let acctSelDay = null;   // 2026-10-20 사용자 «달력에서 날을 누르면 위 0~24시 차트로 그날 손익»: KST 날짜 키 · null = 오늘
 const acctKey = (ms) => new Date(ms + ACCT_KST).toISOString().slice(0, 10);   // KST 날짜(서버 day_start 와 같은 경계)
 const acctDay0 = (key) => Date.parse(key + "T00:00:00+09:00");
 const acctHm = (ms) => new Date(ms + ACCT_KST).toISOString().slice(11, 16);
@@ -1376,6 +1377,12 @@ function acctTripTip(t) {
 // 기간 칩·달 넘김 -- 카드는 폴링마다 통째로 다시 그려지므로 위임으로 한 번만 붙인다.
 document.addEventListener("click", (e) => {
   const s = e.target.closest("#acctCard [data-acct-span]"), m = e.target.closest("#acctCard [data-acct-month]");
+  const dy = e.target.closest("#acctCard [data-acct-day]"), back = e.target.closest("#acctCard [data-acct-today]");
+  if (dy || back) {   // 같은 날을 다시 누르거나 오늘을 누르면 오늘로
+    const k = dy ? dy.dataset.acctDay : null;
+    acctSelDay = !k || k === acctSelDay || k === acctKey(Date.now()) ? null : k;
+    renderSnapshotAccount();
+  }
   if (s) { acctSpanIdx = Number(s.dataset.acctSpan); try { localStorage.setItem("acctSpanIdx", String(acctSpanIdx)); } catch (err) { /* 기억은 편의 */ } renderSnapshotAccount(); }
   if (m) { acctCalBack = Math.max(0, acctCalBack + Number(m.dataset.acctMonth)); renderSnapshotAccount(); }
 });
@@ -1398,7 +1405,7 @@ function acctTodaySvg(tT, unreal, hasPos, t0, now, w, h) {
 }
 
 // 손익 달력 한 달(월요일 시작 · 맨 오른쪽 = 주 합). 색 진하기 = √(|그날 손익| ÷ 원장 최대)
-function acctCalendar(days, ym, todayKey) {
+function acctCalendar(days, ym, todayKey, selKey) {
   const maxAbs = Math.max(1e-9, ...[...days.values()].map((o) => Math.abs(o.pnl)));
   const first = acctDay0(ym + "-01"), dim = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate(), lead = (new Date(first + ACCT_KST).getUTCDay() + 6) % 7;
   let h = ["월", "화", "수", "목", "금", "토", "일", "주"].map((d) => `<span class="dow">${d}</span>`).join(""), wk = 0, col = 0, mo = 0, wd = 0, ld = 0;
@@ -1409,7 +1416,10 @@ function acctCalendar(days, ym, todayKey) {
     if (o) { wk += o.pnl; mo += o.pnl; if (o.pnl > 0) wd++; else ld++; }
     const a = o ? Math.round((0.1 + 0.6 * Math.sqrt(Math.abs(o.pnl) / maxAbs)) * 100) : 0;
     const tip = o ? `${key} · ${o.n}건 ${acctSu(o.pnl)}\n` + o.trips.map((t) => `${acctHm(t.exit_time)} ${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} ${acctSu(Number(t.net_pnl) || 0)}`).join("\n") : "";
-    h += `<span class="d${key === todayKey ? " today" : ""}"${o ? ` style="background:color-mix(in srgb, var(--${o.pnl >= 0 ? "good" : "bad"}) ${a}%, transparent)" title="${escapeHtml(tip)}"` : ""}><i>${d}</i>${o ? `<b>${acctSuc(o.pnl)}</b>` : ""}</span>`;
+    // 오늘까지의 날 = 누르면 위 띠가 그날 0~24시로(미래 날은 그냥 칸)
+    const tag = key <= todayKey ? "button" : "span", sel = key === selKey;
+    h += `<${tag} class="d${key === todayKey ? " today" : ""}${sel ? " sel" : ""}"${tag === "button" ? ` type="button" data-acct-day="${key}" aria-pressed="${sel}" aria-label="${key} ${o ? `${o.n}건 ${acctSu(o.pnl)}` : "거래 없음"} — 위 차트에 그날 보기"` : ""}`
+      + `${o ? ` style="background:color-mix(in srgb, var(--${o.pnl >= 0 ? "good" : "bad"}) ${a}%, transparent)" title="${escapeHtml(tip)}"` : ""}><i>${d}</i>${o ? `<b>${acctSuc(o.pnl)}</b>` : ""}</${tag}>`;
     col++;
     if (col === 7 || d === dim) { while (col < 7) pad(); h += `<span class="wk ${acctTone(wk)}">${wk ? acctSuc(wk) : ""}</span>`; wk = 0; col = 0; }
   }
@@ -1520,14 +1530,26 @@ function renderSnapshotAccount() {
   const todayW = Math.max(280, Math.round(narrowCard ? posW : (posW - 40) * 1.2 / 3.2));
   const curveW = Math.max(300, Math.round(narrowCard ? perfW : (perfW - 20) / 2));
   const curveH = document.documentElement.classList.contains("fit1") && fitAcctPlotH > 0 ? fitAcctPlotH : 280;
-  // ── 오늘 띠 ──
-  const wins = tT.filter((t) => t.net_pnl > 0).length;
-  const dow = "일월화수목금토"[new Date(now + ACCT_KST).getUTCDay()];
-  const trips = tT.length ? tT.map((t) => `<li title="${escapeHtml(acctTripTip(t))}"><time>${acctHm(t.exit_time)}</time><span>${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} · ${acctDur(t.exit_time - t.entry_time)}${t.adds ? ` · 추가 ${t.adds}회` : ""}${t.peak_x > 6 ? ` · <em class="warn">${t.peak_x}배</em>` : ""}</span><b class="${acctTone(t.net_pnl)}">${acctSu(Number(t.net_pnl) || 0)}</b></li>`).join("")
+  // ── 오늘 띠(달력에서 고른 날이면 그날 0~24시 -- 실현만, 그날 미실현·펀딩은 원장에 없다) ──
+  const selKey = acctSelDay && acctSelDay < todayKey ? acctSelDay : null, s0 = selKey ? acctDay0(selKey) : t0;
+  const vT = selKey ? T.filter((t) => t.exit_time >= s0 && t.exit_time < s0 + ACCT_DAY) : tT, vReal = vT.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
+  const wins = vT.filter((t) => t.net_pnl > 0).length;
+  const dow = "일월화수목금토"[new Date(s0 + ACCT_KST).getUTCDay()];
+  const trips = vT.length ? vT.map((t) => `<li title="${escapeHtml(acctTripTip(t))}"><time>${acctHm(t.exit_time)}</time><span>${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} · ${acctDur(t.exit_time - t.entry_time)}${t.adds ? ` · 추가 ${t.adds}회` : ""}${t.peak_x > 6 ? ` · <em class="warn">${t.peak_x}배</em>` : ""}</span><b class="${acctTone(t.net_pnl)}">${acctSu(Number(t.net_pnl) || 0)}</b></li>`).join("")
     : `<li class="muted">닫힌 거래 없음</li>`;
-  const todayHtml = `<div class="acct-today">
+  const dayLab = `${(selKey || todayKey).slice(5).replace("-", "/")}(${dow})`;
+  const todayHtml = selKey ? `<div class="acct-today acct-today-past">
       <div class="acct-today-hero">
-        <span class="acct-eyebrow">오늘 손익 · ${todayKey.slice(5).replace("-", "/")}(${dow})</span>
+        <span class="acct-day-head"><span class="acct-eyebrow">손익 · ${dayLab}</span><span class="chipset"><button type="button" class="chip" data-acct-today>오늘로</button></span></span>
+        <div class="acct-figure ${acctTone(vReal)}">${acctSu(vReal)}</div>
+        <span class="acct-today-pct"><span class="muted">그날 닫힌 거래의 실현 손익 · 그날 미실현·펀딩은 빠짐</span></span>
+        <dl class="acct-today-kv"><dt>실현 · ${vT.length}건${vT.length ? ` (승 ${wins} 패 ${vT.length - wins})` : ""}</dt><dd class="${acctTone(vReal)}">${acctSu(vReal)}</dd></dl>
+      </div>
+      <div class="acct-today-flow">${acctTodaySvg(vT, 0, false, s0, s0 + ACCT_DAY, todayW, 120)}</div>
+      <div class="acct-today-trips"><span class="acct-eyebrow">그날 닫힌 거래</span><ol>${trips}</ol></div>
+    </div>` : `<div class="acct-today">
+      <div class="acct-today-hero">
+        <span class="acct-eyebrow">오늘 손익 · ${dayLab}</span>
         <div class="acct-figure ${acctTone(net)}" title="${escapeHtml(startTip)}">${acctSu(net)}</div>
         <span class="acct-today-pct ${acctTone(net)}">${pct == null ? "—" : `${pct >= 0 ? "+" : "−"}${Math.abs(pct * 100).toFixed(1)}%`} <span class="muted">· 시작 ${fmtUsd(start)} → 지금 ${fmtUsd(equity)}</span></span>
         <dl class="acct-today-kv"><dt>실현 · ${tT.length}건${tT.length ? ` (승 ${wins} 패 ${tT.length - wins})` : ""}</dt><dd class="${acctTone(real)}">${acctSu(real)}</dd>
@@ -1543,7 +1565,7 @@ function renderSnapshotAccount() {
   T.forEach((t) => { const k = acctKey(t.exit_time), o = days.get(k) || { pnl: 0, n: 0, trips: [] }; o.pnl += Number(t.net_pnl) || 0; o.n++; o.trips.push(t); days.set(k, o); });
   const ym = (() => { const d = new Date(t0 + ACCT_KST); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - acctCalBack); return d.toISOString().slice(0, 7); })();
   const oldest = T.length ? acctKey(T[0].exit_time).slice(0, 7) : ym;
-  const cal = acctCalendar(days, ym, todayKey);
+  const cal = acctCalendar(days, ym, todayKey, selKey);
   const calHtml = `<div class="acct-cal-box">
       <div class="acct-cal-head"><button type="button" class="chip" data-acct-month="1" ${ym <= oldest ? "disabled" : ""} aria-label="지난달">‹</button>
         <b>${ym.slice(0, 4)}년 ${+ym.slice(5)}월</b><button type="button" class="chip" data-acct-month="-1" ${acctCalBack ? "" : "disabled"} aria-label="다음 달">›</button>
