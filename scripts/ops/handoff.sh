@@ -220,7 +220,7 @@ HANDOFF_MAX_PER_MIN="${HANDOFF_MAX_PER_MIN:-30}"
 rate_guard() {
   local stamp="${TMPDIR:-/tmp}/.handoff_calls_$(id -u)"
   local now; now=$(date +%s)
-  local recent=0 line
+  local recent=0
   if [[ -f "$stamp" ]]; then
     # 최근 60초치만 남긴다. 파일이 커지지 않는다.
     awk -v c="$now" '$1 > c - 60' "$stamp" > "$stamp.tmp" 2>/dev/null && mv "$stamp.tmp" "$stamp"
