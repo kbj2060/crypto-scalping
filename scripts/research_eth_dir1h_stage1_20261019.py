@@ -60,6 +60,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from live_eth_dir4h_20261015 import FEATS, HGB  # noqa: E402
+HGB = {**HGB, "early_stopping": "auto"}   # 10-19 이전 라이브(A) 설정 고정 -- 라이브는 B2(early_stopping=False)로 바뀌었다
 from research_eth_dir4h_reverify_20261019 import BD, WT, block_ci, expanding_q, ic_stats, pearson, rates, side, summ  # noqa: E402
 
 OUT = ROOT / "tmp/dir1h_stage1_20261019"

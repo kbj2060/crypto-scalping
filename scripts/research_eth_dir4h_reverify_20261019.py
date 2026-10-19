@@ -47,6 +47,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from live_eth_dir4h_20261015 import FEATS, HGB, H  # noqa: E402
+HGB = {**HGB, "early_stopping": "auto"}   # 10-19 이전 라이브(A) 설정 고정 -- 라이브는 B2(early_stopping=False)로 바뀌었다
 
 WT = Path("/home/kbj20/crypto-scalping/.claude/worktrees")
 BD = WT / "liquidation-price-feature-14eceb/tmp/best_dir_20261010"
