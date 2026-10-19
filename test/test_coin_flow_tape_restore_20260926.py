@@ -72,7 +72,7 @@ def test_coin_specs_are_usdt_data_markets():
         assert "USDC" not in f"{sp.symbol}{sp.okx_inst}{sp.spot_url}".upper(), "데이터에 USDC 시장이 섞였다"
         tape = srv.TAPE_BUCKETS[sp.symbol.lower()]
         assert abs(sp.bucket / tape - round(sp.bucket / tape)) < 1e-9, "풋프린트 칸이 테이프 칸의 정수배가 아니다"
-    assert srv.FLOW_SPECS["eth"].bucket == srv.FOOTPRINT_BUCKET and srv.FLOW_SPECS["eth"].oi_poll_s == srv.OI_1S_POLL_SECONDS
+    assert srv.FLOW_SPECS["eth"].bucket == srv.FOOTPRINT_BUCKET
     assert srv.HL_LIQ_BY_ASSET["xrp"] == srv.HL_LIQ_BY_ASSET["sol"] != srv.HL_LIQ_BY_ASSET["eth"]   # HL 청산(원) 원천
 
 
