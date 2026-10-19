@@ -2,7 +2,7 @@
 """창 토글(1h/2h/4h)이 서버에서 어떻게 잘리는지 자체점검 (2026-09-19).
 
 `?bars=` 는 **신뢰경계 입력**이다. 화면이 보내지만 누구든 보낼 수 있다. 파싱 실패와 범위를
-한 함수에서 닫아 두 엔드포인트(/api/footprint · /api/supply-profile)가 같은 답을 내게 한다 --
+한 함수에서 닫아 두 엔드포인트(/api/footprint · /api/liquidation-5m-history)가 같은 답을 내게 한다 --
 둘이 갈리면 한 카드 안의 위아래 두 그림이 다른 구간을 말하게 되고, 그건 읽는 사람을 속인다.
 
 python test/test_footprint_window_bars_20260919.py

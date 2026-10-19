@@ -7,7 +7,6 @@ from types import SimpleNamespace
 import base64
 import bisect
 import concurrent.futures
-import csv
 import functools
 import hashlib
 import json
@@ -44,13 +43,12 @@ load_dotenv(REPO_ROOT / ".env")
 # 교체 때 실제로 걸렸다). dashboard/ 아래가 바뀌면 deploy_watcher.sh가 알아서 재기동한다.
 # Reuses the exact, already-verified signal formulas from the standalone CLI dashboard rather
 # than re-deriving them here -- see that module's docstring for formula provenance (each formula
-# transcribed verbatim from the 2026-08-14 research scripts). compute_signals/bars_since_last_true
+# transcribed verbatim from the 2026-08-14 research scripts). compute_signals
 # are pure functions (no I/O, no sleep) -- that makes them correctness-safe to call from an async
 # handler, but NOT free: 2026-08-25 perf pass moved the compute_signals() call itself behind
 # asyncio.to_thread (see load_evidence_signals()) so its pandas rolling-window work doesn't block
-# the event loop for its duration, matching the pattern load_liquidation_5m_signal()/
-# load_liquidation_direction_signal() already used.
-# 2026-09-16 증거신호 칩 제거 후 남은 것: klines 창 길이 상수와 «마지막 발동 이후 봉 수» 헬퍼.
+# the event loop for its duration, matching the pattern load_liquidation_5m_signal() already used.
+# 2026-09-16 증거신호 칩 제거 후 남은 것: klines 창 길이 상수.
 # compute_signals/SIGNAL_ORDER/PCTRANK/FUNDING_* 는 8종 계산 전용이라 같이 내렸다.
 # (모듈 자체는 남긴다 -- 극점 탐지기가 compute_signals 를 직접 import 한다.)
 from scripts.live_trade_tape_collector_20260916 import (  # noqa: E402
@@ -66,7 +64,6 @@ from scripts.data_store import read_rows  # noqa: E402
 from scripts.live_binance_ctx_collector_20261001 import HOT_DB as BINANCE_CTX_DB  # noqa: E402
 from scripts.live_evidence_signal_dashboard_20260823 import (  # noqa: E402
     FETCH_LIMIT as EVIDENCE_FETCH_LIMIT,
-    bars_since_last_true,
 )
 # 유동성스윕 반등예측 event-triggered signal (2026-08-29, TabPFN Tier0+rsi model -- see
 # docs/experiments/eth_liquidity_sweep_v_rebound_feature_plan_20260829.md). Own klines fetch +
@@ -105,10 +102,6 @@ from scripts.live_eth_chart_markers_20260909 import compute_chart_markers  # noq
 # why this can't just be 5x the trailing 1-minute value the bot already exposes.
 from scripts.live_liquidation_5m_signal_20260825 import (  # noqa: E402
     compute_liquidation_5m_signal, compute_liquidation_5m_history)
-# Directional-only liquidation tilt reading (liq_net_z_12, contrarian sign convention) -- model-
-# indicator tier like OI 급변, NOT an evidence-signal-tier chip. See that module's docstring for
-# the pre-registered formula it reuses and why it carries no PnL/economic claim.
-from scripts.live_liquidation_direction_signal_20260825 import compute_liquidation_direction_signal  # noqa: E402
 # Snapshot-tab liquidation map (estimated support/resistance, self-hosted Coinglass-heatmap
 # alternative, 2026-08-24) -- discretionary reading aid only, NOT wired to trading_bot.py.
 # 2026-08-25: switched from the event-driven state machine (compute_event_driven_levels(),
@@ -155,34 +148,6 @@ from dashboard import market_ctx as mctx  # noqa: E402
 # 2026-10-08 일봉 풋프린트(사용자 «최대치 · 확대/축소 · 델타·거래대금·OI·청산») -- aggTrades 소급본 + lake/hot 테이프.
 from dashboard import footprint_daily as fpd  # noqa: E402
 from scripts import data_store  # noqa: E402
-# Regime overlay (bull/bear/chop probability per 5-min bar) for the Snapshot tab's liquidation-map
-# chart. 2026-08-26: swapped from the wide24 HMM+linear-calibration model to an independently
-# trained HistGradientBoostingClassifier (OOS balanced_accuracy 0.9189 vs wide24's 0.7691) -- see
-# live_regime_gbm3_signal_20260826.py's docstring and memory
-# eth_regime_hierarchical_whipsaw_circularity_rejected_20260826 for the full history (a whipsaw
-# sub-class was investigated at length and dropped -- every feature set tried left it too
-# imprecise for a dashboard chip). Loaded independently of whatever trading_bot.py's live regime
-# routing currently uses. See that module's docstring for why DAYS_BACK isn't shortened and why
-# this is expensive enough to need its own cache.
-# 2026-08-27: reverted from the 2-class trend/chop GBM2 model (2026-08-27, built for a low-flip
-# discretionary display) back to GBM3 here -- a same-day cost-gated backtest found GBM2's much
-# broader chop definition (55-57% of all bars vs GBM3's narrower slice) dilutes a liquidation-
-# confluence filter's selectivity (see eth_evidence_signal_liquidation_confluence_gbm2gate_rejected_
-# 20260827 memory) and the user asked to match the GBM3-based analysis. GBM2 remains a valid,
-# separately-loadable model for anything that specifically wants a low-flip label; it is simply not
-# what this dashboard endpoint serves right now.
-# BTC-native regime scorer (2026-09-02). Until now the Snapshot tab's BTC ribbon was a hard-coded
-# grey "model not available" band -- app.js gated the ribbon on activeSnapshotAsset === "eth" to stop
-# ETH's classifier being drawn over BTC candles (memory eth-dashboard-btc-regime-classifier-not-
-# trained-todo-20260831). This is the BTC model that guard was waiting for: same GBM config and the
-# same 136 feature_cols as the ETH scorer, trained on BTC's canonical features against a BTC-native
-# label (S=24 scale + K=3 confirm) picked by re-screening the grid on BTC rather than porting ETH's
-# choice -- ETH's S12_K3 scores only 3/10 on BTC. Same return contract, so it caches/serves
-# identically. See scripts/live_regime_btc_signal_20260902.py and
-# docs/experiments/btc_regime_s24k3_label_train_20260902.md.
-# 2026-09-03: XRP 레짐(S96_K9, 같은 날 S48_K6에서 교체 -- 격자 경계 감사).
-# 자산마다 교차자산 슬롯이 다르다 -- XRP는 BTC를 넣는다
-# (BTC 캐노니컬은 ETH가 들어있다). live_regime_xrp_signal_20260903.py docstring 참조.
 # Session-open volatility risk alert for the evidence-signal chip row (2026-08-26) -- pure
 # calendar/clock computation (pandas_market_calendars), no price data, so it needs no cache of its
 # own; computed fresh on every evidence-signal refresh. See that module's docstring for the
@@ -229,13 +194,7 @@ from scripts.push_webpush_20260904 import (  # noqa: E402
 EVIDENCE_SIGNAL_SYMBOL = "ETHUSDT"
 EVIDENCE_SIGNAL_INTERVAL = "5m"
 EVIDENCE_SIGNAL_CACHE_SECONDS = 60
-# Live PREVIEW of the currently-forming bar (2026-08-26), NOT the confirmed signal above -- see
-# load_evidence_signals_provisional() docstring. Short TTL so a ~10s frontend poll gets a fresh
-# read each time; still cached to protect against a multi-tab request burst.
-EVIDENCE_SIGNAL_PROVISIONAL_CACHE_SECONDS = 8
-EVIDENCE_SIGNAL_HISTORY_BARS = 48  # 4h strip for the Snapshot tab's per-bar activity graph
 EVIDENCE_SIGNAL_BTC_SYMBOL = "BTCUSDT"  # smt_divergence's cross-asset non-confirmation leg, 2026-08-24
-EVIDENCE_SIGNAL_FUNDING_URL = "https://fapi.binance.com/fapi/v1/fundingRate"  # orthogonal_combo's bottom-leg funding_z input (2026-08-27; formerly funding_oscillator_combo's own leg)
 LIQUIDATION_MAP_INTERVAL = "1h"  # symbol now comes from COIN_CONFIG[asset]["binance_symbol"] (2026-08-31)
 LIQUIDATION_MAP_LOOKBACK_HOURS = 24  # 2026-08-25: 168h->24h. Both event-driven (floor=ceiling=Nh
                                       # sweep, research_eth_liquidation_map_event_driven_window_
@@ -265,10 +224,6 @@ LIQUIDATION_MAP_FETCH_LIMIT = 48  # 24h window + buffer for occasional dropped/d
 LIQUIDATION_MAP_CACHE_SECONDS = 60
 # 2026-10-10 포지션 프로파일(풋프린트 «포지션» 보기) 1초 -- REST 는 처음 30일 한 번 + 새 5분봉이 닫힐 때만, 형성 봉은 흐름 엔진 메모리.
 POSITION_PROFILE_CACHE_SECONDS = 1.0
-# 2026-08-26: a full recompute (15-day fetch + FeatureEngineer + HMM filter) takes ~10-20s, and the
-# HMM itself is sticky (0.90) so regime rarely flips bar-to-bar -- a 5-min cache doesn't meaningfully
-# stale the reading. See live_regime_wide24_signal_20260826.py's module docstring.
-REGIME_WIDE24_CACHE_SECONDS = 300
 MACRO_CALENDAR_CACHE_SECONDS = 6 * 3600  # calendar dates change at most once/day -- no reason to
                                           # re-hit 3 external APIs every evidence-signal cycle
 # 2026-08-26 (user request): given its own dedicated constant rather than reusing
@@ -390,7 +345,6 @@ def account_day_start(payload: dict, now: float | None = None, path: Path = ACCO
 # 2026-10-05 계좌 카드 «습관 분해»(추가 0회/≥1 · 명목 배수 ≤6/>6 · 추세 쪽/역추세). 10-05 이후 줄은 원장이 직접
 #   adds·peak_notional·equity_at_record 를 싣고, 그 전 줄은 scripts/backfill_account_trip_habits_20261005.py 가 만든 이 파일로.
 ACCOUNT_TRIP_HABITS_PATH = LIVE_DIR / "account_trip_habits.json"
-HABIT_CAP_X = 6.0     # 명목 상한 6배(avgdown_gate_notional_cap_20261004 의 보험 기준) -- 습관 분해의 경계
 
 
 def trip_habit(trip: dict, backfill: dict | None) -> dict[str, Any]:
@@ -599,18 +553,9 @@ LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 # 2026-10-04 청산 급증 배지 = 연구(H2)와 같은 사건: 직전 60초 그 쪽 청산 합 > 학습 7일 상위 0.5%(롱·숏). scripts/rl_1s_agent.py
 #   COINCFG["ETHUSDT"]["liq"] = log1p(USD) 12.732·13.21 의 USD 값. 옛 판(봇 z≥3, σ 바닥 $1)은 하루 11.8번·발동 중앙 $1,711 에 켜져 근거와 다른 사건이었다.
 LIQ_BURST_60S_USD = (round(math.expm1(12.732)), round(math.expm1(13.21)))   # (롱 청산, 숏 청산) ≈ $33.8만 · $54.6만
-BTC_EVIDENCE_SHADOW_STATE_PATH = REPO_ROOT / "data" / "live" / "btc_evidence_signal_shadow_state.json"
-# 2026-09-10 극점 탐지기 -- 채점은 워커가 하고 대시보드는 읽기만 한다
-# (scripts/live_eth_extreme_detector_worker_20260910.py · supervisor_extreme_detector_worker.sh)
-REGIME_WIDE24_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_wide24_state.json"
-REGIME_BTC_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_btc_state.json"
-REGIME_XRP_STATE_PATH = REPO_ROOT / "data" / "live" / "regime_xrp_state.json"
-REGIME_MAX_AGE_MIN = 20.0                  # 레짐 워커 주기 300초 + 사이클 13초 여유
 MACRO_CALENDAR_STATE_PATH = REPO_ROOT / "data" / "live" / "macro_calendar_state.json"
 # 2026-10-04 모의 매매 엔진(scripts/rl_1s_agent.py paper, 실주문 없음)이 1분마다 쓰는 상태 -- 풋프린트 «모의 판»·② 맞대결·④ 벽 신호의 원천
 PAPER_STATE_PATH = REPO_ROOT / "data" / "research" / "rl_1s_agent_20261002" / "paper" / "state.json"
-# 2026-10-04 미리보기 엔진(같은 코드, 별도 폴더) -- 정식 엔진이 신호를 쓰기 전까지만 화면이 읽는다(사용자 «둘 다 기록»)
-PAPER_PREVIEW_STATE_PATH = PAPER_STATE_PATH.parent.parent / "paper_preview" / "state.json"
 PAPER_ARMS = ("w80_z0.5_a24_mh15", "w100_z0.5_w60")   # 적응판 · 고래판 (반반 = 엔진 PORTFOLIOS["p1"])
 # 2026-10-04 «통과 신호 판»(엔진 1d3e5a32, 10-04 00:02 UTC 재시작부터): 1~4주 추세 · 크기 · 가격×OI 1시간 · 추세 필터 · 동일위험
 PAPER_NEW_ARMS = ("trend4", "trend4_vs", "poi1h", "w80_z0.5_a24_mh15_vt", "w100_z0.5_w60_vt", "w80_z0.5_a24_mh15_er", "w100_z0.5_w60_er")
@@ -628,13 +573,6 @@ BREAKOUT_DETECTOR_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_breakout_detec
 BREAKOUT_ASSETS = ("eth", "sol", "xrp")   # 워커가 도는 코인(BO_SYMBOL) -- 2026-10-18 부터 RVOL 전용
 BREAKOUT_DETECTOR_MAX_AGE_MIN = 15.0       # 5분봉 3개 -- 봉 마감 +20초에 도는 워커다
 
-# 2026-09-15 **E|r| 게이트** -- 「지금 큰 움직임이 예상되는가」만 말한다(1일 지평 · 20자산).
-# 워커가 채점한다(scripts/live_evr_gate_worker_20260915.py). 봉의 10%만 발동한다.
-# 🔴🔴**방향은 말하지 않는다.** 같은 아티팩트의 방향 분류기는 **실계좌 72왕복에서 적중 47.2%**
-#   (동전 아래)이고 게이트가 고른 좋은 자리일수록 더 나빴다(−51.18bp) -- 호메로스 §5.36-R.
-#   그래서 워커는 `art["dir"]` 를 **아예 호출하지 않는다**. 이름도 direction_gate 가 아니다.
-# 게이트 자체의 근거: 두 독립 설계에서 짝지은 증분 +8.25 / +7.44bp/일 · **CI 둘 다 0배제** ·
-#   MDD 를 −47.4% -> −8.4% 로 줄인다. **손실 차단기**이지 수익 생성기가 아니다. 표시 전용.
 # 2026-09-19 GEX. 🔴duckdb(`deribit_gex.duckdb`)는 **열지 않는다** -- 단일 writer 라
 #   매시 cron 과 부딪히면 `Could not set lock` 이다. 수집기가 떨구는 JSON 만 읽는다.
 GEX_STATE_PATH = REPO_ROOT / "data" / "live" / "deribit_gex_state.json"
@@ -651,7 +589,6 @@ HEATMAP_SYMBOLS = {"ethusdt", "btcusdt", "solusdt", "xrpusdt"}   # 래스터 수
 HEATMAP_MAX_COLS = 900          # 캔버스 폭 상한 -- 이보다 넓게 그릴 화면이 없다
 HEATMAP_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2,
                                                          thread_name_prefix="heatmap")
-EVR_GATE_MAX_AGE_MIN = 30.0          # 워커 주기 300초 x 6
 
 # 2026-09-11 크기 가늠자 -- 역변동성 사이징의 실시간 눈금
 # (scripts/live_eth_position_sizing_worker_20260911.py). 읽기만 한다.
@@ -660,7 +597,6 @@ EVR_GATE_MAX_AGE_MIN = 30.0          # 워커 주기 300초 x 6
 POSITION_SIZING_STATE_PATH = REPO_ROOT / "data" / "live" / "eth_position_sizing_state.json"
 POSITION_SIZING_MAX_AGE_MIN = 30.0         # 워커 주기 300초 x 6
 
-BTC_EVIDENCE_CTX_REPORT_PATH = REPO_ROOT / "data" / "labels" / "btc_5m_evidence_signal_live_contexts_20260902" / "contexts_report.json"
 MARKET_SYMBOLS = {"eth": "ETHUSDT", "sol": "SOLUSDT", "btc": "BTCUSDT", "xrp": "XRPUSDT", "hype": "HYPEUSDT"}
 # 2026-09-19 수동 진입이 나갈 심볼. **차트·시세·청산맵과 분리한다** -- MARKET_SYMBOLS 는
 # 화면 전체가 공유하므로 그걸 뒤집으면 데이터 출처까지 통째로 바뀐다.
@@ -770,13 +706,6 @@ SUPPLY_1S_SECONDS = 660
 # 🔴바이낸스는 OI 를 매 초 갱신하지 않는다 -- /fapi/v1/openInterest 를 1초 간격 20회 때려보니
 #   서로 다른 스냅샷은 6개, 간격 0.6~6.7초(중앙 ~3.5초)였다(2026-09-19 실측). 그래서 이 링은
 #   **값이 바뀐 초에만** 점을 남긴다. 매초 같은 값을 복붙하면 없는 해상도를 있는 척하게 된다.
-#   1초 폴링은 그 3~7초 갱신을 가장 빨리 잡기 위한 것이다(가중치 1 x 60/분, IP 한도 2400/분).
-OI_1S_URL = "https://fapi.binance.com/fapi/v1/openInterest"
-# 2026-09-19 1.0 -> 0.25. 1초로는 갱신의 약 5%를 놓쳤다: 0.2초로 훑으면 3.66초당 1회인데
-# 1초 폴링으로 쌓인 건 3.86초당 1회였다(실측 간격 최소 0.63초 · 1초 미만이 40건 중 2건).
-# 놓친 갱신은 되살릴 방법이 없다 -- 바이낸스는 1초 OI 이력을 안 준다(openInterestHist 는 5분).
-# weight 1 x 240/분, IP 한도 2400/분이라 여유가 10배다.
-OI_1S_POLL_SECONDS = 0.25
 # 화면 링(6분)은 재기동하면 비고, 5분 누적 패널은 몇 시간을 봐야 한다 -- 그래서 남긴다.
 # 🔴체결 테이프 duckdb(TAPE_DB_PATH)에 끼워 넣지 않는다: 저쪽 writer 는 별도 프로세스가
 #   **연결을 붙들고** 있어 외부에서는 read_only 조차 거부된다(2026-09-19 실측). 여기서는
@@ -1353,77 +1282,9 @@ EVENT_POLL_SECONDS = 1.0
 # past this the payload is treated as cold again and the request blocks for a current reading.
 STALE_GRACE_SECONDS = 600
 SWR_SLOW_LOG_SECONDS = 0.30   # 이 아래는 «파일 읽기» 취급, 로그에 안 남긴다
-MARKET_HISTORY_CACHE_SECONDS = 300
 # 3 + N개의 서명 GET(weight 5씩)이라 폴링 자체는 싸다. 포지션은 실시간성이 필요하고
 # 체결내역은 안 변하지만, 캐시를 둘로 쪼개는 값어치는 없어서 한 페이로드 30초로 묶었다.
 BINANCE_ACCOUNT_CACHE_SECONDS = 10   # 2026-10-02 30 -> 10(사용자 지시). 조회 1회 ≈ 무게 50(계좌·포지션·심볼별 체결) → 분당 ~300 = IP 한도 2,400 의 ~12%
-SCALP_SHADOW_MODEL_ID = "eth_micro_scalp_source_stable_opportunity_moe_v4_20260718"
-SCALP_SHADOW_STATE_SCHEMA = "eth_micro_scalp_v4.shadow_bot_step.v1"
-SCALP_SHADOW_SUMMARY_SCHEMA = "eth_micro_scalp_v4.shadow_bot.v1"
-SCALP_SHADOW_OBSERVER_SCHEMA = "eth_micro_scalp_v3.fresh_forward_observer.v1"
-SCALP_SHADOW_FEES_BP = (2.0, 4.5, 5.5, 9.0)
-SCALP_SHADOW_DISPLAY_FEE_BP = 4.5
-SCALP_SHADOW_ASSETS = {
-    "eth": {
-        "asset": "eth",
-        "model_id": SCALP_SHADOW_MODEL_ID,
-        "state_schema": SCALP_SHADOW_STATE_SCHEMA,
-        "summary_schema": SCALP_SHADOW_SUMMARY_SCHEMA,
-        "observer_schema": SCALP_SHADOW_OBSERVER_SCHEMA,
-        "state_file": "eth_micro_scalp_v4_shadow_state.json",
-        "database_file": "eth_micro_scalp_v4_shadow.duckdb",
-        "symbol": "ETHUSDT",
-        "require_asset_contract": False,
-    },
-    "btc": {
-        "asset": "btc",
-        "model_id": "btc_micro_scalp_eth_v4_transfer_adapter_v1_20260718",
-        "state_schema": "cross_asset_micro_scalp.shadow_bot_step.v1",
-        "summary_schema": "cross_asset_micro_scalp.shadow_bot.v1",
-        "observer_schema": "cross_asset_micro_scalp.shadow_observer.v1",
-        "state_file": "btc_micro_scalp_shadow_state.json",
-        "database_file": "btc_micro_scalp_shadow.duckdb",
-        "symbol": "BTCUSDT",
-        "require_asset_contract": True,
-    },
-    "sol": {
-        "asset": "sol",
-        "model_id": "sol_micro_scalp_eth_v4_transfer_adapter_v1_20260718",
-        "state_schema": "cross_asset_micro_scalp.shadow_bot_step.v1",
-        "summary_schema": "cross_asset_micro_scalp.shadow_bot.v1",
-        "observer_schema": "cross_asset_micro_scalp.shadow_observer.v1",
-        "state_file": "sol_micro_scalp_shadow_state.json",
-        "database_file": "sol_micro_scalp_shadow.duckdb",
-        "symbol": "SOLUSDT",
-        "require_asset_contract": True,
-    },
-}
-SCALP_REUSE_MODES = {
-    "eth_lifecycle": {
-        "asset": "eth",
-        "mode": "eth_lifecycle",
-        "model_id": "eth_micro_scalp_dynamic_lifecycle_shadow_v1_20260718",
-        "state_schema": "micro_scalp_reuse.shadow_bot_step.v1",
-        "summary_schema": "micro_scalp_reuse.shadow_bot.v1",
-        "observer_schema": "micro_scalp_reuse.shadow_observer.v1",
-        "state_file": "eth_micro_scalp_lifecycle_shadow_state.json",
-        "database_file": "eth_micro_scalp_lifecycle_shadow.duckdb",
-        "symbol": "ETHUSDT",
-        "require_asset_contract": True,
-    },
-    "sol_entry": {
-        "asset": "sol",
-        "mode": "sol_entry",
-        "model_id": "sol_micro_scalp_entry_only_shadow_v1_20260718",
-        "state_schema": "micro_scalp_reuse.shadow_bot_step.v1",
-        "summary_schema": "micro_scalp_reuse.shadow_bot.v1",
-        "observer_schema": "micro_scalp_reuse.shadow_observer.v1",
-        "state_file": "sol_micro_scalp_entry_shadow_state.json",
-        "database_file": "sol_micro_scalp_entry_shadow.duckdb",
-        "symbol": "SOLUSDT",
-        "require_asset_contract": True,
-    },
-}
 
 
 NOCACHE = {"Cache-Control": "no-cache"}
@@ -1534,12 +1395,12 @@ async def api_bubble_tape(request: web.Request) -> web.Response:
 
 
 async def api_paper_arms(request: web.Request) -> web.Response:
-    """?asset= 코인별 엔진(2026-10-04 SOL·XRP = RL_SYMBOL 프로세스, paper_<coin>/). ETH 만 미리보기 엔진 폴백이 있다."""
+    """?asset= 코인별 엔진(2026-10-04 SOL·XRP = RL_SYMBOL 프로세스, paper_<coin>/)."""
     now, asset = time.time(), str(request.query.get("asset") or "eth").lower()
     if asset not in PAPER_ASSETS:
         raise web.HTTPNotFound(reason="paper_off")
-    sts = ([load_json(PAPER_STATE_PATH), load_json(PAPER_PREVIEW_STATE_PATH)] if asset == "eth"
-           else [load_json(PAPER_STATE_PATH.parent.parent / f"paper_{asset}" / "state.json")])
+    sts = [load_json(PAPER_STATE_PATH if asset == "eth"
+                     else PAPER_STATE_PATH.parent.parent / f"paper_{asset}" / "state.json")]
     return web.json_response({**paper_arms_payload(pick_paper_state(sts, now), now), "asset": asset}, headers=NOCACHE)
 
 
@@ -1548,377 +1409,6 @@ def load_json(path: Path) -> Any:
         return None
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
-
-
-def parse_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    rows = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return rows
-
-
-def row_ts(row: dict) -> float:
-    raw = row.get("closed_at") or row.get("ts") or row.get("opened_at") or ""
-    try:
-        return datetime.fromisoformat(str(raw)[:19]).timestamp()
-    except ValueError:
-        return 0.0
-
-
-def strategy_tag(row: dict) -> str:
-    basis = f"{row.get('source', '')} {row.get('raw_source', '')}".upper()
-    if "SNIPER" in basis:
-        return "SNIPER"
-    if "TREND" in basis:
-        return "TREND"
-    if "MICRO" in basis or "WNC" in basis:
-        return "MICRO"
-    if "GOVERNOR" in basis or "CASH" in basis:
-        return "GOVERNOR"
-    if "COMPACT" in basis:
-        return "COMPACT"
-    if "CONTROLLER" in basis:
-        return "CONTROLLER"
-    return "GOVERNOR"
-
-
-def pnl_pct(row: dict) -> float:
-    if row.get("pnl_pct") is not None:
-        return float(row.get("pnl_pct") or 0.0)
-    if row.get("pnl_frac") is not None:
-        return float(row.get("pnl_frac") or 0.0) * 100.0
-    return 0.0
-
-
-def equity_series(rows: list[dict], source_filter: str) -> list[dict]:
-    closes = [r for r in rows if str(r.get("kind", "")).upper() == "CLOSE"]
-    if source_filter != "ALL":
-        closes = [r for r in closes if strategy_tag(r) == source_filter]
-    closes.sort(key=row_ts)
-
-    equity = 1.0
-    out = []
-    for idx, row in enumerate(closes, start=1):
-        trade_pnl = pnl_pct(row)
-        equity *= 1.0 + trade_pnl / 100.0
-        out.append(
-            {
-                **row,
-                "chart_index": idx,
-                "pnl_pct": trade_pnl,
-                "equity": equity,
-                "cumulative_return_pct": (equity - 1.0) * 100.0,
-                "ts": row.get("closed_at") or row.get("ts"),
-            }
-        )
-    return out
-
-
-def utc_iso(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        normalized = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
-        return normalized.isoformat(timespec="seconds").replace("+00:00", "Z")
-    text = str(value).strip()
-    if not text:
-        return None
-    text = text.replace(" ", "T")
-    if text.endswith("Z") or "+" in text[10:]:
-        return text
-    return text + "Z"
-
-
-def utc_age_minutes(value: Any, *, offset_seconds: float = 0.0) -> float | None:
-    """`offset_seconds` shifts `value` forward before computing age -- use this to convert an
-    OHLCV bar's OPEN-time label (the raw kline convention, e.g. the last-bar timestamps this repo's
-    shadow scripts store) into its CLOSE time (open + bar duration) for a freshness/staleness
-    reading, since a bar is only actually usable/complete once it closes. Without this, "age" reads
-    a full bar duration older than the data actually is. Default 0.0 preserves every existing
-    caller's behavior exactly."""
-    encoded = utc_iso(value)
-    if encoded is None:
-        return None
-    try:
-        timestamp = datetime.fromisoformat(encoded.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if offset_seconds:
-        timestamp = timestamp + timedelta(seconds=offset_seconds)
-    return max(0.0, (datetime.now(timezone.utc) - timestamp).total_seconds() / 60.0)
-
-
-def _evidence_last_fired_ts(series: pd.Series, latest: pd.Series) -> str | None:
-    """Exact UTC timestamp of the bar where `series` was last True, derived from
-    bars_since_last_true()'s bar-offset via the fixed 5-minute evidence-signal bar spacing --
-    None if it never fired in the loaded lookback."""
-    bars = bars_since_last_true(series)
-    if bars is None:
-        return None
-    return utc_iso(latest["timestamp"] - pd.Timedelta(minutes=5 * bars))
-
-
-def _require_scalp_contract(condition: bool, field: str) -> None:
-    if not condition:
-        raise RuntimeError(f"scalp shadow contract mismatch: {field}")
-
-
-def scalp_shadow_payload(
-    live_dir: Path,
-    asset: str = "eth",
-    configs: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    configs = SCALP_SHADOW_ASSETS if configs is None else configs
-    config = configs.get(asset)
-    _require_scalp_contract(config is not None, "asset")
-    state_path = live_dir / config["state_file"]
-    database_path = live_dir / config["database_file"]
-    state = load_json(state_path)
-    _require_scalp_contract(isinstance(state, dict), "state")
-    summary = state.get("summary") or {}
-    stream = state.get("stream") or {}
-    _require_scalp_contract(state.get("schema_version") == config["state_schema"], "state.schema_version")
-    _require_scalp_contract(state.get("model_id") == config["model_id"], "state.model_id")
-    _require_scalp_contract(state.get("activation_allowed") is False, "state.activation_allowed")
-    _require_scalp_contract(state.get("order_submission_supported") is False, "state.order_submission_supported")
-    _require_scalp_contract(summary.get("schema_version") == config["summary_schema"], "summary.schema_version")
-    _require_scalp_contract(summary.get("model_id") == config["model_id"], "summary.model_id")
-    if config.get("require_asset_contract"):
-        _require_scalp_contract(state.get("asset") == config["asset"], "state.asset")
-        _require_scalp_contract(summary.get("asset") == config["asset"], "summary.asset")
-        _require_scalp_contract(summary.get("symbol") == config["symbol"], "summary.symbol")
-        if config.get("mode"):
-            _require_scalp_contract(state.get("mode") == config["mode"], "state.mode")
-            _require_scalp_contract(summary.get("mode") == config["mode"], "summary.mode")
-    _require_scalp_contract(summary.get("performance_eligible") is False, "summary.performance_eligible")
-    _require_scalp_contract(summary.get("order_submission_supported") is False, "summary.order_submission_supported")
-    _require_scalp_contract(summary.get("fixed_holding_period_used") is False, "summary.fixed_holding_period_used")
-    _require_scalp_contract(float(summary.get("unit_notional", 0.0)) == 1.0, "summary.unit_notional")
-    _require_scalp_contract(
-        summary.get("evidence_class") == "counterfactual completed-close-to-next-completed-close",
-        "summary.evidence_class",
-    )
-    _require_scalp_contract(summary.get("fresh_forward_bar_by_bar") is True, "summary.fresh_forward_bar_by_bar")
-    _require_scalp_contract(summary.get("trade_ledgers_used_as_input") is False, "summary.trade_ledgers_used_as_input")
-    _require_scalp_contract(summary.get("saved_parent_exit_timestamps_used") is False, "summary.saved_parent_exit_timestamps_used")
-    _require_scalp_contract(summary.get("future_rows_used_for_entry") is False, "summary.future_rows_used_for_entry")
-    expected_fee_keys = {f"{fee:.2f}bp_per_notional_change" for fee in SCALP_SHADOW_FEES_BP}
-    _require_scalp_contract(set((summary.get("fee_scenarios") or {}).keys()) == expected_fee_keys, "summary.fee_scenarios")
-    _require_scalp_contract(database_path.exists(), "database")
-
-    connection = duckdb.connect(str(database_path), read_only=True)
-    try:
-        metadata = connection.execute(
-            """
-            SELECT schema_version, model_id, model_sha256, fresh_start_utc,
-                   order_submission_supported
-            FROM observer_metadata WHERE singleton = true
-            """
-        ).fetchone()
-        _require_scalp_contract(metadata is not None, "observer_metadata")
-        _require_scalp_contract(metadata[0] == config["observer_schema"], "observer_metadata.schema_version")
-        _require_scalp_contract(metadata[1] == config["model_id"], "observer_metadata.model_id")
-        _require_scalp_contract(metadata[2] == state.get("model_sha256"), "observer_metadata.model_sha256")
-        _require_scalp_contract(bool(metadata[4]) is False, "observer_metadata.order_submission_supported")
-
-        decision_count = int(connection.execute("SELECT count(*) FROM decisions").fetchone()[0])
-        latest = connection.execute(
-            """
-            SELECT timestamp, close, target_position
-            FROM decisions ORDER BY timestamp DESC LIMIT 1
-            """
-        ).fetchone()
-        pnl_rows = connection.execute(
-            """
-            SELECT fee_bp, decision_timestamp, settlement_timestamp,
-                   previous_position, position, turnover, gross_return,
-                   cost_return, net_return, equity, causal_settlement
-            FROM shadow_pnl
-            ORDER BY fee_bp, decision_timestamp
-            """
-        ).fetchall()
-        recent_rows = connection.execute(
-            """
-            SELECT d.timestamp, d.close, d.available, d.previous_position,
-                   d.target_position, d.position_change, p.settlement_timestamp,
-                   p.net_return, p.equity
-            FROM decisions AS d
-            LEFT JOIN shadow_pnl AS p
-              ON p.decision_timestamp = d.timestamp AND p.fee_bp = ?
-            ORDER BY d.timestamp DESC LIMIT 6
-            """,
-            [SCALP_SHADOW_DISPLAY_FEE_BP],
-        ).fetchall()
-    finally:
-        connection.close()
-
-    by_fee: dict[float, list[tuple[Any, ...]]] = {fee: [] for fee in SCALP_SHADOW_FEES_BP}
-    for row in pnl_rows:
-        fee = float(row[0])
-        _require_scalp_contract(fee in by_fee, "shadow_pnl.fee_bp")
-        _require_scalp_contract(bool(row[9]) and bool(row[9] > 0.0), "shadow_pnl.equity")
-        _require_scalp_contract(row[10] is True, "shadow_pnl.causal_settlement")
-        by_fee[fee].append(row)
-    settled_counts = {len(rows) for rows in by_fee.values()}
-    _require_scalp_contract(len(settled_counts) == 1, "shadow_pnl.partial_fee_set")
-    settled_intervals = next(iter(settled_counts), 0)
-    _require_scalp_contract(decision_count == int(summary.get("decision_count", -1)), "summary.decision_count")
-    _require_scalp_contract(settled_intervals == int(summary.get("settled_intervals", -1)), "summary.settled_intervals")
-
-    scenarios = []
-    for fee in SCALP_SHADOW_FEES_BP:
-        rows = by_fee[fee]
-        equities = [float(row[9]) for row in rows]
-        peak = 1.0
-        max_drawdown = 0.0
-        for equity in equities:
-            peak = max(peak, equity)
-            max_drawdown = max(max_drawdown, 1.0 - equity / peak)
-        scenarios.append(
-            {
-                "fee_bp": fee,
-                "compounded_return_pct": ((equities[-1] - 1.0) * 100.0) if equities else 0.0,
-                "gross_return_pct": sum(float(row[6]) for row in rows) * 100.0,
-                "cost_pct": sum(float(row[7]) for row in rows) * 100.0,
-                "max_drawdown_pct": max_drawdown * 100.0,
-            }
-        )
-
-    display_rows = by_fee[SCALP_SHADOW_DISPLAY_FEE_BP]
-    displayed = next(row for row in scenarios if row["fee_bp"] == SCALP_SHADOW_DISPLAY_FEE_BP)
-    positioned_intervals = sum(1 for row in display_rows if int(row[4]) != 0)
-    position_changes = sum(1 for row in display_rows if float(row[5]) > 0.0)
-    equity_rows = display_rows[-180:]
-    latest_decision_utc = utc_iso(latest[0]) if latest is not None else None
-    latest_feature_completed_utc = utc_iso(stream.get("latest_feature_completed_at_utc"))
-    return {
-        "contract": {
-            "asset": config["asset"],
-            "mode": config.get("mode"),
-            "symbol": config["symbol"],
-            "model_id": config["model_id"],
-            "model_sha256": state.get("model_sha256"),
-            "parent_model_id": summary.get("parent_model_id"),
-            "research_policy_enabled": summary.get("research_policy_enabled", True),
-            "dynamic_exit_enabled": summary.get("dynamic_exit_enabled"),
-            "evidence_class": summary.get("evidence_class"),
-            "actual_execution": False,
-            "performance_eligible": False,
-            "order_submission_supported": False,
-            "fixed_holding_period_used": False,
-            "unit_notional": float(summary.get("unit_notional")),
-            "display_fee_bp": SCALP_SHADOW_DISPLAY_FEE_BP,
-        },
-        "health": {
-            "latest_feature_completed_utc": latest_feature_completed_utc,
-            "stream_age_minutes": utc_age_minutes(latest_feature_completed_utc),
-            "latest_decision_utc": latest_decision_utc,
-        },
-        "summary": {
-            "decision_count": decision_count,
-            "settled_intervals": settled_intervals,
-            "unsettled_decisions": max(0, decision_count - settled_intervals),
-            "positioned_intervals": positioned_intervals,
-            "position_changes": position_changes,
-            "high_risk_bars": int(summary.get("high_risk_bars", 0)),
-            "dynamic_exit_enabled": summary.get("dynamic_exit_enabled"),
-            "pnl_sample_ready": positioned_intervals > 0,
-            "current_position": int(latest[2]) if latest is not None else 0,
-            "latest_close": float(latest[1]) if latest is not None else None,
-            **displayed,
-        },
-        "fee_scenarios": scenarios,
-        "equity": [
-            {
-                "ts": utc_iso(row[1]),
-                "settlement_ts": utc_iso(row[2]),
-                "position": int(row[4]),
-                "net_return_pct": float(row[8]) * 100.0,
-                "equity": float(row[9]),
-                "cumulative_return_pct": (float(row[9]) - 1.0) * 100.0,
-            }
-            for row in equity_rows
-        ],
-        "recent_decisions": [
-            {
-                "ts": utc_iso(row[0]),
-                "close": float(row[1]),
-                "available": bool(row[2]),
-                "previous_position": int(row[3]),
-                "target_position": int(row[4]),
-                "position_change": int(row[5]),
-                "settlement_ts": utc_iso(row[6]),
-                "net_return_pct": float(row[7]) * 100.0 if row[7] is not None else None,
-                "equity": float(row[8]) if row[8] is not None else None,
-            }
-            for row in recent_rows
-        ],
-    }
-
-
-def btc_evidence_shadow_payload() -> dict[str, Any]:
-    """BTC 증거신호 7종의 섀도우(관측) 원장.
-
-    ⚠️ETH 증거신호 칩과 **다른 자산·다른 파라미터**다. 2026-09-01 그리드스크린이 BTC에서
-    HIT정의/H/K/GAP을 독자 재선정했다(ETH 값과 전부 다름).
-    ⚠️주문 없음. BTC는 경제성 게이트를 통과한 모델이 아직 없어, 이 러너는 **가상 매매 성과를
-    주장하지 않고** 라이브 hit률이 학습 hit률을 재현하는지만 관측한다.
-    근거: docs/experiments/btc_evidence_signal_and_shadow_20260902.md
-    """
-    state = load_json(BTC_EVIDENCE_SHADOW_STATE_PATH) or {}
-    ctx = (load_json(BTC_EVIDENCE_CTX_REPORT_PATH) or {}).get("signals", {})
-    ledger = state.get("ledger") if isinstance(state.get("ledger"), list) else []
-    pending = state.get("pending") if isinstance(state.get("pending"), list) else []
-
-    holdout_auc = {"demarker_extreme": 0.7286, "kalman_deviation_meanrev": 0.6709,
-                   "short_term_return_z": 0.6443, "taker_delta_climax": 0.6276,
-                   "orthogonal_combo": 0.5933, "fib_extension_exhaustion": 0.5657,
-                   "liquidity_sweep": 0.5214}
-    per: list[dict[str, Any]] = []
-    for name, info in sorted(ctx.items(), key=lambda kv: -holdout_auc.get(kv[0], 0.0)):
-        if "error" in info:
-            continue
-        rows = [r for r in ledger if r.get("signal") == name and r.get("hit") is not None]
-        hits = [int(r["hit"]) for r in rows]
-        live = (sum(hits) / len(hits)) if hits else None
-        train = info.get("hit_rate")
-        per.append({
-            "signal": name, "n_resolved": len(hits),
-            "live_hit_rate": round(live, 4) if live is not None else None,
-            "train_hit_rate": train,
-            "delta": round(live - train, 4) if (live is not None and train is not None) else None,
-            "holdout_auc": holdout_auc.get(name),
-            "n_pending": sum(1 for q in pending if q.get("signal") == name),
-            "btc_params": info.get("btc_params", {}),
-        })
-    return {
-        "asset": "BTCUSDT", "started_utc": state.get("started_utc"),
-        "cycles": state.get("cycles", 0),
-        "total_resolved": len([r for r in ledger if r.get("hit") is not None]),
-        "total_pending": len(pending),
-        "per_signal": per,
-        "recent": [
-            {"signal": r.get("signal"), "side": r.get("side"), "proba": r.get("proba"),
-             "hit": r.get("hit"), "bar_utc": r.get("bar_utc")}
-            for r in ledger[-8:]
-        ],
-        "note": "관측용 섀도우 -- 주문 없음. BTC는 경제성 통과 모델이 아직 없다.",
-    }
-
-
-# nif_whale은 간헐적이라 최신 1행만 보면 절반이 빈 값이다 -- 이 창 안의 마지막 값을 쓴다.
-MICRO_LOOKBACK_MIN = 15
-# ETH 톤 스트립과 같은 모양(app.js MICRO_HISTORY_MAX=48, 5분 간격 = 4시간)
-MICRO_STRIP_SAMPLES = 48
 
 
 def _age_min(ts: Any) -> float | None:
@@ -1954,7 +1444,7 @@ def worker_payload(path: Path, max_age_min: float, *, ts_field: str = "updated_u
     ⚠️인라인 폴백은 두지 않는다. 폴백을 두면 워커가 죽어도 표는 정상으로 보이고 대신
       대시보드가 5초씩 느려진다(그게 이 구조를 만든 이유다) -- 죽었으면 죽었다고 보여야 한다.
     `available` 은 워커가 아니라 **여기서** 찍는다. 신선도를 판정하는 쪽이 찍어야 워커
-      버전이 달라도 계약이 안 깨진다(api_liq_burst_state 와 같은 방식).
+      버전이 달라도 계약이 안 깨진다.
     `require_ok` 는 워커가 외부 조회에 실패한 사이클(`ok: False`)을 오류로 떨어뜨린다 --
       그때 옛 톤을 그대로 보이면 화면이 «지금 조용하다»고 거짓말을 한다.
     """
@@ -1975,13 +1465,6 @@ def worker_payload(path: Path, max_age_min: float, *, ts_field: str = "updated_u
     if age is not None and age > max_age_min:
         return {**st, **base, "error": "worker_stale", "stale_min": stale}
     return {**st, **({"available": True} if stamp_available else {}), "stale_min": stale}
-
-
-def regime_payload(path: Path) -> dict[str, Any]:
-    """레짐 리본 워커 상태(2026-09-14). 셋 다 **매 사이클 13초**로 일정해서(서버 실측
-    wide24 13.73/12.86/13.30s) 캐시가 만료될 때마다 그대로 다시 낸다 -- 요청 경로에 둘 이유가 없다.
-    셋은 워커 **한 프로세스**가 순서대로 돈다(live_signal_worker.py 의 --compute/--state 반복)."""
-    return worker_payload(path, REGIME_MAX_AGE_MIN, extra_missing={"regime": None, "history": []})
 
 
 def macro_calendar_payload() -> dict[str, Any]:
@@ -2364,19 +1847,17 @@ class FlowSpec:
     price_dp: int
     okx_inst: str            # OKX 무기한(USDT)
     spot_url: str            # 바이낸스 현물(USDT) @aggTrade
-    oi_poll_s: float         # 초. 전 코인 0.25초(REST 가중치 1 -- 같은 IP 를 봇도 쓴다)
     snapshot_path: Path
     okx_tape_db: Path
     okx_ctx_db: Path
 
 
-def _flow_spec(asset: str, bucket: float, price_dp: int, oi_poll_s: float) -> FlowSpec:
+def _flow_spec(asset: str, bucket: float, price_dp: int) -> FlowSpec:
     eth = asset == "eth"
     return FlowSpec(
         asset=asset, symbol=f"{asset.upper()}USDT", bucket=bucket, price_dp=price_dp,
         okx_inst=OKX_INST if eth else f"{asset.upper()}-USDT-SWAP",
         spot_url=f"wss://stream.binance.com:9443/ws/{asset}usdt@aggTrade",
-        oi_poll_s=oi_poll_s,
         snapshot_path=LIVE_DIR / f"footprint_{asset}.json",
         okx_tape_db=OKX_HOT_TAPE_DB,
         # SOL·XRP 의 OKX 맥락(OI·청산)은 Pi 가 수집하고 3분마다 .from_pi 로 복제한다(Pi crontab). 이 파일이 없으면
@@ -2384,10 +1865,9 @@ def _flow_spec(asset: str, bucket: float, price_dp: int, oi_poll_s: float) -> Fl
         okx_ctx_db=OKX_HOT_CTX_DB)      # 4b: SOL·XRP 도 서버 수집(Pi 복제 .from_pi 끝)
 
 
-FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2, OI_1S_POLL_SECONDS),
-              # 2026-09-27 ETH 와 같은 0.25초(사용자 지시) -- 실측 가중치 1,017~1,189/분 + 360 = 약 1,500/2,400. 밴이면 ban_guard 가 멈춘다.
-              "sol": _flow_spec("sol", 0.02, 2, OI_1S_POLL_SECONDS),
-              "xrp": _flow_spec("xrp", 0.0003, 4, OI_1S_POLL_SECONDS)}
+FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2),
+              "sol": _flow_spec("sol", 0.02, 2),
+              "xrp": _flow_spec("xrp", 0.0003, 4)}
 assert FLOW_SPECS["eth"].snapshot_path == FOOTPRINT_SNAPSHOT_PATH and FLOW_SPECS["eth"].spot_url == SPOT_WS_URL
 
 
@@ -2400,7 +1880,6 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
     SPOT_WS_URL = spec.spot_url                     # noqa: N806
     OKX_TAPE_DB_PATH = spec.okx_tape_db             # noqa: N806
     OKX_CTX_DB_PATH = spec.okx_ctx_db               # noqa: N806
-    OI_1S_POLL_SECONDS = spec.oi_poll_s             # noqa: N806
     RETAIL_MAX_USD, WHALE_MIN_USD = size_bands(spec.symbol)   # noqa: N806 -- 2026-09-27 코인별 고래 경계(테이프 수집기와 같은 표)
     TAG = "" if spec.asset == "eth" else f"[{spec.asset}] "   # noqa: N806 -- 로그 표식(ETH 는 전과 같게 비움)
     # 🔴2026-09-26 IP 밴 사고: aggTrades 백필은 요청당 가중치 20 이고 IP 한도(2,400/분)를 봇·대시보드·수집기가 같이
@@ -2747,7 +2226,7 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
                 backfill.cancel()
             await ws_session.close()
 
-    # 초 -> 그 초의 미결제약정(ETH). 값이 **바뀐** 초만 들어간다(OI_1S_URL 주석 참고).
+    # 초 -> 그 초의 미결제약정(ETH). 값이 **바뀐** 초만 들어간다(SUPPLY_1S_SECONDS 아래 OI 주석 참고).
     oi_1s: dict[int, float] = {}
 
     async def collect_oi_1s(app: web.Application) -> None:
@@ -3148,7 +2627,7 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
                 pass
 
     return SimpleNamespace(
-        spec=spec, footprint_state=footprint_state, footprint_bar_start=footprint_bar_start, oi_1s=oi_1s,
+        spec=spec, footprint_state=footprint_state, oi_1s=oi_1s,
         okx_sec=okx_sec, okx_liq_events=okx_liq_events, okx_oi_1s=okx_oi_1s, okx_state=okx_state,
         okx_bars=okx_bars, okx_fp=okx_fp, okx_oi_5m=okx_oi_5m, spot_sec=spot_sec, spot_state=spot_state,
         footprint_tape_restore=footprint_tape_restore, start=start, stop=stop,
@@ -3213,11 +2692,6 @@ def make_app() -> web.Application:
 
     app = web.Application(middlewares=[static_asset_headers, json_compress_etag])
     json_cache: dict[Path, tuple[tuple[int, int] | None, Any]] = {}
-    trade_cache: dict[str, Any] = {
-        "signature": None,
-        "rows": [],
-        "payloads": {},
-    }
     event_clients: set[asyncio.Queue[str]] = set()
     latest_event_state: dict[str, Any] | None = None
     latest_event_tickers: dict[str, dict[str, Any]] = {}
@@ -3386,34 +2860,11 @@ def make_app() -> web.Application:
         json_cache[path] = (signature, payload)
         return payload
 
-    def cached_trade_rows(path: Path, signature: tuple[int, int] | None = None) -> list[dict]:
-        if signature is None:
-            signature = file_signature(path)
-        if trade_cache["signature"] == signature:
-            return trade_cache["rows"]
-
-        rows = []
-        for row in parse_jsonl(path):
-            raw_source = row.get("source", "")
-            tagged = {**row, "raw_source": raw_source}
-            tagged["source"] = strategy_tag(tagged)
-            rows.append(tagged)
-        rows.sort(key=row_ts)
-        trade_cache.update(signature=signature, rows=rows, payloads={})
-        return rows
-
     def dashboard_state_payload() -> tuple[dict[str, Any], str]:
         state_path = LIVE_DIR / "dashboard_state.json"
-        governor_path = LIVE_DIR / "dashboard_state_governor.json"
-        dsac_path = LIVE_DIR / "dashboard_state_dsac_compact.json"
         state_sig = file_signature(state_path)
-        governor_sig = file_signature(governor_path)
-        dsac_sig = file_signature(dsac_path)
-        etag = make_etag("state", state_sig, governor_sig, dsac_sig)
-        return {
-            "state": load_json_cached(state_path, state_sig),
-            "compactState": load_json_cached(governor_path, governor_sig) or load_json_cached(dsac_path, dsac_sig),
-        }, etag
+        etag = make_etag("state", state_sig)
+        return {"state": load_json_cached(state_path, state_sig)}, etag
 
     async def fetch_market_ticker(session: ClientSession, asset: str, symbol: str) -> tuple[str, dict[str, Any] | None]:
         if ban_guard.ban_remaining() > 0:   # 공용 가드(fetch_binance_json 과 같다) -- 1초×3코인이 밴 중에도 나가 해제를 늦췄다(주문·손절과 같은 IP)
@@ -3614,17 +3065,15 @@ def make_app() -> web.Application:
     # ── 미시 참고 (2026-09-20) ──────────────────────────────────────────────
     # 2026-10-04 코인별(사용자 «SOL·XRP 도 ETH 와 똑같이» -- 시장 맥락 카드). 흐름 엔진이 있는 코인마다 이 묶음 하나.
     #   함수들은 asset 을 받아 첫 줄에서 그 코인 것으로 이름을 다시 묶는다(본문은 ETH 때 그대로).
-    #   ETH 전용으로 남는 것: 융합 읽기·장부(fr.read · FUSED_LOG) · 30분 모델 · 봇 청산 파일(liq_prev · burst) · DVOL.
+    #   ETH 전용으로 남는 것: 융합 읽기·장부(fr.read · FUSED_LOG) · 30분 모델 · DVOL.
     def _coin_ctx() -> SimpleNamespace:
         return SimpleNamespace(
             micro_state={"payload": {"available": False}, "baseline": None, "baseline_at": 0.0,
-                         "liq_prev": None, "liq_prev_at": 0.0,
                          # 히스테리시스는 «직전 QI 쪽»을 들고 있어야 이어진다(micro_ref.qi_side_hyst).
                          "qi_prev": "중립",
                          # 마지막 동조 방아쇠. 화면은 «지금 상태»가 아니라 이걸 나이와 함께 그린다 --
                          # 값의 전부가 발동한 그 초에 있어서(나이 0초 +0.55bp · 3초 이후 0) 늦추면 잃는다.
                          "trigger": {"side": None, "ts": None}},
-            agree_ring=deque(maxlen=60),        # 최근 60초 동조 상태(+1/0/-1) -- 표시용 집계
             ofi_hist=deque(maxlen=600),         # |OFI10| 최근 10분 -- 임계는 상수가 아니라 분위(p50)
             imb40_ring=deque(maxlen=6 * 3600),  # 깊은 호가 불균형(±0.4%) 초별 6시간 -- 관계 읽기의 «깊은 벽» 분위 기준
             depth25_ring=deque(maxlen=6 * 3600),  # ±25bp 매수·매도 호가 합 초별 6시간 -- 시장 맥락 «얇은 쪽» 분위 기준
@@ -3635,8 +3084,8 @@ def make_app() -> web.Application:
             fr_bar_net={},  # 완결 봉 -> (델타, 고래순, 리테일순)
             mc_last_good={}, mc_last_payload={})
     cctx = {a: _coin_ctx() for a in flows}
-    _ce = cctx["eth"]   # ETH 전용 소비자(미시 참고 API · 30분 카드 · SSE)는 옛 이름 그대로
-    micro_state, mp_state, situation_state = _ce.micro_state, _ce.mp_state, _ce.situation_state
+    _ce = cctx["eth"]   # ETH 전용 소비자(30분 카드 · SSE)는 옛 이름 그대로
+    mp_state, situation_state = _ce.mp_state, _ce.situation_state
     app["situation_eth"] = situation_state   # 시험 손잡이(자동 규칙이 읽는 권장 배수 vol_mult 를 심는다)
     # (ts_ms, side, qty, price, usd) -- side "long" = 롱 포지션 청산(SELL). 코인별(1초 수급의 청산 레인).
     liq_events_by: dict[str, deque] = {a: deque(maxlen=5000) for a in COIN_CONFIG}
@@ -3768,8 +3217,8 @@ def make_app() -> web.Application:
         from scripts.live_orderflow_raster_collector_20260914 import read_window  # noqa: PLC0415
         C, F = cctx[asset], flows[asset]
         micro_state, mid_ring, ofi_hist, imb40_ring = C.micro_state, C.mid_ring, C.ofi_hist, C.imb40_ring
-        depth25_ring, agree_ring, mp_state, situation_state = C.depth25_ring, C.agree_ring, C.mp_state, C.situation_state
-        footprint_state, oi_1s, liq_events = F.footprint_state, F.oi_1s, liq_events_by[asset]
+        depth25_ring, situation_state = C.depth25_ring, C.situation_state
+        footprint_state, liq_events = F.footprint_state, liq_events_by[asset]
         FOOTPRINT_SYMBOL, sym = F.spec.symbol, F.spec.symbol.lower()   # noqa: N806
         loop = asyncio.get_running_loop()
         while True:
@@ -3807,9 +3256,6 @@ def make_app() -> web.Application:
                         micro_state["flow_scales_all"] = {k: v or (micro_state.get("flow_scales_all") or {}).get(k, {}) for k, v in got_all.items()}
                     except Exception as exc:  # noqa: BLE001
                         print(f"micro-ref flow_scales_all: {exc!r}", flush=True)
-                if asset == "eth" and now - micro_state["liq_prev_at"] >= 10.0:   # 봇 tail_risk = ETH 만
-                    micro_state["liq_prev_at"] = now
-                    micro_state["liq_prev"] = await asyncio.to_thread(mref.liq_prev_minute, LIVE_DIR / "tail_risk.duckdb")
                 book = await fetch_binance_json(MICRO_BOOK_URL, {"symbol": FOOTPRINT_SYMBOL})
                 qi_val = mref.qi(float(book["bidQty"]), float(book["askQty"]))
                 mid = (float(book["bidPrice"]) + float(book["askPrice"])) / 2.0
@@ -3835,7 +3281,6 @@ def make_app() -> web.Application:
                         qi_val, flow["ofi10"], ofi_thr, micro_state["qi_prev"])
                 else:
                     agree = "기준없음"
-                agree_ring.append(1 if agree == "동조매수" else -1 if agree == "동조매도" else 0)
                 if agree in ("동조매수", "동조매도"):
                     micro_state["trigger"] = {"side": agree, "ts": now_sec}
                 trig = dict(micro_state["trigger"])
@@ -3847,14 +3292,11 @@ def make_app() -> web.Application:
                 hour = int((now_sec % 86400) // 3600)
                 base = micro_state["baseline"]
                 vol60_pct = mref.pct_rank(vol60, base["minute_vol_sorted"][hour]) if base else None
-                med = base["minute_vol_sorted"][hour] if base else None
-                vol60_x = (vol60 / med[len(med) // 2]) if med and med[len(med) // 2] > 0 else None
                 levels = await load_liquidation_map(asset)
                 sr = mref.sr_context(levels if levels.get("warmed_up") else None, mid, flow.get("imb40") if flow.get("ok") else None)
                 if levels.get("warmed_up"):   # 상황 읽기의 플러시 목표(청산 군집)용 -- 가까운 순 [{price, weight_pct}]
                     sr["sup_levels"] = [{"price": lv["price"], "weight_pct": lv.get("weight_pct")} for lv in levels.get("support_levels") or []]
                     sr["res_levels"] = [{"price": lv["price"], "weight_pct": lv.get("weight_pct")} for lv in levels.get("resistance_levels") or []]
-                burst = mref.burst_state(vol1s, oi_1s, (base or {}).get("sec_vol_p99", {}).get(hour), now_sec)
                 cut = now * 1000 - 60_000
                 ev60 = [e for e in liq_events if e["ts_ms"] >= cut]
                 liq60 = {"long": sum(e["usd"] for e in ev60 if e["side"] == "long"),
@@ -3862,20 +3304,10 @@ def make_app() -> web.Application:
                 micro_state["tick"] = micro_state.get("tick", 0) + 1
                 micro_state["payload"] = {
                     "available": True, "ts": now_sec, "mid": mid,
-                    "qi": qi_val, "qi_side": mref.side_of(qi_val, mref.QI_SIDE_ABS),
-                    "ofi10": flow.get("ofi10") if flow.get("ok") else None, "ofi_thr": ofi_thr,
-                    "ofi_side": (mref.side_of(flow["ofi10"], ofi_thr) if (flow.get("ok") and ofi_thr) else "기준없음"),
                     "agree": agree, "trigger": trig,
-                    # «최근 60초 중 몇 초가 어느 쪽이었나» -- 안 흔들리는 맥락. 🔴예측을 더 해 주지는 않는다
-                    # (즉시 동조를 이 부호로 걸러도 fwd15 +0.62 vs +0.58 로 SE 안, 실측). 상태 서술이다.
-                    "tally60": {"buy": int(sum(1 for v in agree_ring if v > 0)),
-                                "sell": int(sum(1 for v in agree_ring if v < 0)), "n": len(agree_ring)},
-                    "qi_enter": mref.QI_ENTER, "qi_exit": mref.QI_EXIT,
-                    "imb10": flow.get("imb10") if flow.get("ok") else None, "imb40": flow.get("imb40") if flow.get("ok") else None,
-                    "vol60": vol60, "vol60_pct": vol60_pct, "vol60_x_p50": vol60_x, "act": mref.act_label(vol60_pct),
-                    "baseline_days": (base or {}).get("days"), "hour_utc": hour,
-                    "sr": sr, "burst": burst, "liq60": liq60, "liq_prev": micro_state["liq_prev"],
-                    "fo": dict(fo_state), "mp": dict(mp_state),
+                    "imb40": flow.get("imb40") if flow.get("ok") else None,
+                    "vol60_pct": vol60_pct, "act": mref.act_label(vol60_pct),
+                    "sr": sr, "liq60": liq60,
                     "spread": float(book["askPrice"]) - float(book["bidPrice"]), "sweep": sweep,
                 }
             except asyncio.CancelledError:
@@ -3972,9 +3404,6 @@ def make_app() -> web.Application:
                 await t
             except asyncio.CancelledError:
                 pass
-
-    async def api_micro_ref(request: web.Request) -> web.Response:
-        return web.json_response(micro_state["payload"], headers=NOCACHE)
 
     # ── 30분 카드 입력 (2026-09-21 상황 읽기 → 2026-09-25 옛 시나리오·장부 제거, 융합 3결과의 입력만) ──
     def _situation_inputs(now: float, asset: str = "eth") -> dict[str, Any]:
@@ -4805,18 +4234,6 @@ def make_app() -> web.Application:
             lambda: asyncio.to_thread(compute_liquidation_5m_signal, coin=asset),
         )
 
-    async def load_liquidation_direction_signal(asset: str = "eth") -> dict[str, Any]:
-        """Directional-only liquidation tilt (liq_net_z_12, contrarian sign) -- model-indicator
-        tier, no PnL/economic claim. See scripts/live_liquidation_direction_signal_20260825.py
-        docstring. Same 60s cache reasoning as load_liquidation_5m_signal() above (underlying data
-        updates once per minute).
-
-        asset: 2026-08-31, BTC added -- see coin_config.py for BTC's separate tail-risk file."""
-        return await swr_cached(
-            f"liquidation_direction:{asset}", EVIDENCE_SIGNAL_CACHE_SECONDS,
-            lambda: asyncio.to_thread(compute_liquidation_direction_signal, coin=asset),
-        )
-
     async def liq_klines_df(asset: str, limit: int, keep_forming: bool = False, interval: str = LIQUIDATION_MAP_INTERVAL) -> pd.DataFrame:
         """청산맵 입력 봉(기본 1시간, 10-11 부터 5분봉도). 진행 중인 봉은 버린다 -- keep_forming=True 면 남긴다(7·30일 막대)."""
         raw = await fetch_binance_json(
@@ -4993,44 +4410,6 @@ def make_app() -> web.Application:
 
         return await swr_cached(
             f"liquidation_map:{asset}", LIQUIDATION_MAP_CACHE_SECONDS, produce,
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
-    async def load_regime_wide24() -> dict[str, Any]:
-        """wide24 HMM regime overlay for the Snapshot tab's liquidation-map chart -- see
-        scripts/live_regime_gbm3_signal_20260826.py docstring.
-
-        ⚠️모듈 이름이 화면 이름과 다르다 -- wide24 는 **live_regime_gbm3_signal_20260826** 의
-        compute_regime_gbm3_signal() 이다(별칭으로 import 돼 있었다). 워커 spec 을 쓸 때
-        파일명을 짐작하면 틀린다.
-
-        2026-09-14: **워커 상태 파일을 읽기만 한다.** 매 사이클 13초로 일정했고(서버 실측
-        13.73/12.86/13.30s) 캐시 만료마다 그대로 다시 냈다. BTC/XRP 판과 함께 워커 한 프로세스가
-        순서대로 돈다."""
-        return await swr_cached(
-            "regime_wide24", REGIME_WIDE24_CACHE_SECONDS,
-            lambda: asyncio.to_thread(regime_payload, REGIME_WIDE24_STATE_PATH),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
-    async def load_regime_btc() -> dict[str, Any]:
-        """BTC regime overlay for the Snapshot tab when its coin switcher is on BTC -- the BTC twin
-        of load_regime_wide24() above, same cache TTL, same asyncio.to_thread offload (the scorer
-        fetches from Binance and runs FeatureEngineer, both blocking), and the same never-raises
-        contract (degrades to warmed_up=False so the ribbon shows its waiting state rather than
-        breaking the chart)."""
-        return await swr_cached(
-            "regime_btc", REGIME_WIDE24_CACHE_SECONDS,
-            lambda: asyncio.to_thread(regime_payload, REGIME_BTC_STATE_PATH),
-            max_stale=STALE_GRACE_SECONDS,
-        )
-
-    async def load_regime_xrp() -> dict[str, Any]:
-        """XRP 3-class 레짐(S96_K9, 2026-09-03) -- load_regime_btc()의 XRP판.
-        같은 캐시 TTL / asyncio.to_thread / never-raises 계약."""
-        return await swr_cached(
-            "regime_xrp", REGIME_WIDE24_CACHE_SECONDS,
-            lambda: asyncio.to_thread(regime_payload, REGIME_XRP_STATE_PATH),
             max_stale=STALE_GRACE_SECONDS,
         )
 
@@ -5691,66 +5070,6 @@ def make_app() -> web.Application:
             "bars": bars_out,
         }, headers=NOCACHE)
 
-    async def api_supply_profile(request: web.Request) -> web.Response:
-        """가격축 수급 프로파일 -- 창 전체를 가격빈으로 접은 것. 시간 축이 없다.
-
-        같은 봉 링(최대 24시간)에서 만든다. 별도 수집기를 두지 않는 이유는 원천이 같아서다 --
-        하나를 더 두면 둘이 어긋날 때 어느 쪽이 맞는지 알 방법이 없다."""
-        # 2026-09-19 창을 풋프린트와 **같은 토글**이 정한다(사용자 요청). 그전에는 링에
-        # 쌓인 것을 전부(최대 24시간) 접었는데, 아래 풋프린트는 1시간이라 위아래 두 그림이
-        # 다른 구간을 말하고 있었다 -- 한 카드 안에서 그건 읽는 사람을 속이는 것이다.
-        want = footprint_window_bars(request)
-        f = flow_for(request.query)
-        RETAIL_MAX_USD, WHALE_MIN_USD = f.retail_max, f.whale_min   # noqa: N806 -- 코인별 경계
-        footprint_state, okx_bars, okx_fp = f.footprint_state, f.okx_bars, f.okx_fp
-        FOOTPRINT_SYMBOL, FOOTPRINT_BUCKET, dp = f.spec.symbol, f.spec.bucket, f.spec.price_dp   # noqa: N806
-        # 2026-09-24 OKX 합산(사용자 지시). 풋프린트(api_footprint)와 **같은 봉·같은 합**이어야 한다 --
-        #   한 카드의 두 그림이다. OKX 가 온전히 덮은 봉부터만 쓰는 규칙도 그대로 따른다.
-        okx_from = okx_fp["first_bar"]
-        base = sorted(footprint_state["bars"].items())
-        if okx_from:
-            base = [(b, c) for b, c in base if b > okx_from]
-        recent = base[-want:]
-        merged: dict[int, list[float]] = {}
-        for bar, cells in recent:
-            for src_cells in (cells, okx_bars.get(bar) or {}):
-                for k, v in src_cells.items():
-                    row = merged.setdefault(k, [0.0] * 6)
-                    for i in range(6):
-                        row[i] += v[i]
-        span = len(recent) * FOOTPRINT_BAR_SECONDS
-        return web.json_response({
-            "symbol": FOOTPRINT_SYMBOL,
-            "bucket": FOOTPRINT_BUCKET,
-            "barCount": len(recent),
-            "spanSeconds": span,
-            "spanMaxSeconds": want * FOOTPRINT_BAR_SECONDS,
-            "retailMaxUsd": RETAIL_MAX_USD,
-            "whaleMinUsd": WHALE_MIN_USD,
-            # 창 안의 봉만 센다 -- 링 전체를 세면 1h 를 보는데 24h 치 경고가 뜬다.
-            "aggBars": sum(1 for bar, _ in recent if bar in footprint_state["agg_bars"]),
-            "venues": ["binance-perp", "okx-swap"] if okx_from else ["binance-perp"],
-            "levels": [[round(k * FOOTPRINT_BUCKET, dp)] + [round(x, 3) for x in v]
-                       for k, v in sorted(merged.items())],
-        }, headers=NOCACHE)
-
-    # 🔴이 응답은 **페이지 로드를 막는다** -- app.js 가 seedModelIndicatorHistory() 를 await
-    #   한 뒤에야 SSE 를 연다. 그런데 48샘플의 microstructure/tail_risk 를 통째로 실어 보내
-    #   194KB(gzip 27KB)였다: 이 저장소에서 **가장 큰 응답**이고, 그 중 클라이언트가 읽는 것은
-    #   classifyIndicators() 가 쓰는 **다섯 필드뿐**이다(나머지는 파싱되고 버려진다).
-    #   버퍼/파일은 그대로 두고(나중에 다른 필드를 쓸 수 있게) **나갈 때만** 자른다.
-    MIH_MICRO_KEYS = ("nif_whale", "nif_retail")
-    MIH_TAIL_KEYS = ("hawkes_active", "z_long", "z_short")
-
-    def _mih_slim(sample: dict) -> dict:
-        micro = sample.get("microstructure") or {}
-        tail = sample.get("tail_risk") or {}
-        return {
-            "sampled_at": sample.get("sampled_at"),
-            "microstructure": {k: micro[k] for k in MIH_MICRO_KEYS if k in micro},
-            "tail_risk": {k: tail[k] for k in MIH_TAIL_KEYS if k in tail},
-        }
-
     async def api_liquidation_5m_history(request: web.Request) -> web.Response:
         """봉별 청산 금액 시계열 -- 청산맵 캔들 위에 얹는다(2026-09-11 사용자 요청).
         게이지(/api/liquidation-5m-signal)는 현재 봉 하나만 주므로 지나간 봉은 여기서 온다.
@@ -5758,7 +5077,7 @@ def make_app() -> web.Application:
         asset = _query_coin_asset(request)
         # 🔴2026-09-25: 96 이 하드코딩돼 있었다. 창 토글이 144봉까지 가므로 12시간을 고르면 앞 48봉에
         #   청산 원이 아예 안 그려졌고, 화면에서는 «그 4시간엔 청산이 없었다»로 읽혔다(실제로는 모름).
-        #   풋프린트·수급프로파일과 같은 파서를 쓴다 -- 창 폭 파싱은 한 곳에만 있어야 한다.
+        #   풋프린트와 같은 파서를 쓴다 -- 창 폭 파싱은 한 곳에만 있어야 한다.
         #   🔴캐시 키에 bars 를 넣는다. 안 넣으면 창을 바꿔도 30초 동안 옛 폭이 나온다.
         bars = footprint_window_bars(request)
         if liq_5m_state["from_s"].get(asset) is not None:
@@ -5968,8 +5287,6 @@ def make_app() -> web.Application:
         # 이름이 곧 정의다 -- 「취소」가 아니라 「터치 밖 이탈」이다.
         offtouch_leave_share = (round(1.0 - filled / drop, 3)
                                 if (fill_source and drop > 0) else None)
-        tot_drop = float(np.clip(bid_now[0] - bid_now[-1], 0, None).sum()
-                         + np.clip(ask_now[0] - ask_now[-1], 0, None).sum())
         return {
             "rows": {"bin_lo": int(w["bin_lo"]), "bin_size": float(w["bin_size"]),
                      **{f"{k}_f4": base64.b64encode(
@@ -6142,10 +5459,6 @@ def make_app() -> web.Application:
         payload = await load_liquidation_5m_signal(_query_coin_asset(request))
         return web.json_response(payload, headers=NOCACHE)
 
-    async def api_liquidation_direction_signal(request: web.Request) -> web.Response:
-        payload = await load_liquidation_direction_signal(_query_coin_asset(request))
-        return web.json_response(payload, headers=NOCACHE)
-
     async def api_liquidation_map(request: web.Request) -> web.Response:
         try:
             payload = await load_liquidation_map(_query_coin_asset(request))
@@ -6184,34 +5497,9 @@ def make_app() -> web.Application:
             return web.json_response({"error": "liquidation_map_upstream_error"}, status=web.HTTPBadGateway.status_code, headers=NOCACHE)
         return web.json_response(payload, headers=NOCACHE)
 
-    async def api_regime_wide24(request: web.Request) -> web.Response:
-        payload = await load_regime_wide24()
-        return web.json_response(payload, headers=NOCACHE)
-
-    async def api_regime_btc(request: web.Request) -> web.Response:
-        payload = await load_regime_btc()
-        return web.json_response(payload, headers=NOCACHE)
-
-
-    async def api_regime_xrp(request: web.Request) -> web.Response:
-        payload = await load_regime_xrp()
-        return web.json_response(payload, headers=NOCACHE)
-
     async def api_macro_calendar(request: web.Request) -> web.Response:
         payload = await load_macro_calendar()
         return web.json_response(payload, headers=NOCACHE)
-
-    async def api_liq_burst_state(request: web.Request) -> web.Response:
-        # load_json_cached() keys off (mtime, size), not a timer -- so this serves the freshest
-        # write tail_risk_interceptor.py has made (event-triggered, see its _write_liq_burst_state()
-        # docstring) without needing its own cache TTL/lock here.
-        payload = load_json_cached(LIQ_BURST_STATE_PATH)
-        if not payload:
-            return web.json_response({"available": False}, headers=NOCACHE)
-        # tail_risk_interceptor.py's _write_liq_burst_state() never sets "available" itself (it
-        # always writes on success) -- the frontend's renderLiqBurstAlert() checks payload.available
-        # to distinguish this from the {"available": False} fallback above, so stamp it here.
-        return web.json_response({**payload, "available": True}, headers=NOCACHE)
 
     async def api_session_alerts(request: web.Request) -> web.Response:
         """Split out of /api/evidence-signals (2026-08-27, user report: badges only updated on a
@@ -6292,23 +5580,6 @@ def make_app() -> web.Application:
             ttl=60,
         )
         return web.json_response(result, headers=NOCACHE)
-
-    async def api_trades(request: web.Request) -> web.Response:
-        source_filter = request.query.get("source", "ALL").upper()
-        journal_path = LIVE_DIR / "trade_journal.jsonl"
-        signature = file_signature(journal_path)
-        etag = make_etag("trades", signature, source_filter)
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-
-        rows = cached_trade_rows(journal_path, signature)
-        payloads = trade_cache["payloads"]
-        if source_filter not in payloads:
-            payloads[source_filter] = {
-                "rows": rows,
-                "equity": equity_series(rows, source_filter),
-            }
-        return json_response(request, payloads[source_filter], etag)
 
     async def api_binance_account(request: web.Request) -> web.Response:
         """실계좌 잔고/포지션/왕복거래(진입·청산 시각). 키에 Futures 읽기 권한이 없으면
@@ -7444,82 +6715,6 @@ def make_app() -> web.Application:
         }
         return json_response(request, payload, etag)
 
-    async def api_scalp_shadow(request: web.Request) -> web.Response:
-        asset = request.query.get("asset", "eth").lower()
-        config = SCALP_SHADOW_ASSETS.get(asset)
-        if config is None:
-            return web.json_response(
-                {"error": "unsupported_scalp_shadow_asset"},
-                status=web.HTTPBadRequest.status_code,
-                headers=NOCACHE,
-            )
-        state_path = LIVE_DIR / config["state_file"]
-        database_path = LIVE_DIR / config["database_file"]
-        etag = make_etag(
-            "scalp-shadow",
-            asset,
-            file_signature(state_path),
-            file_signature(database_path),
-        )
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-        try:
-            payload = scalp_shadow_payload(LIVE_DIR, asset)
-        except Exception as exc:
-            print(f"Scalp shadow dashboard contract error: {exc}", flush=True)
-            return web.json_response(
-                {
-                    "error": "scalp_shadow_contract_error",
-                    "detail": "Scalp shadow data contract is unavailable.",
-                },
-                status=web.HTTPServiceUnavailable.status_code,
-                headers=NOCACHE,
-            )
-        return json_response(request, payload, etag)
-
-    async def api_scalp_reuse_shadow(request: web.Request) -> web.Response:
-        mode = request.query.get("mode", "eth_lifecycle").lower()
-        config = SCALP_REUSE_MODES.get(mode)
-        if config is None:
-            return web.json_response(
-                {"error": "unsupported_scalp_reuse_mode"},
-                status=web.HTTPBadRequest.status_code,
-                headers=NOCACHE,
-            )
-        state_path = LIVE_DIR / config["state_file"]
-        database_path = LIVE_DIR / config["database_file"]
-        etag = make_etag(
-            "scalp-reuse-shadow",
-            mode,
-            file_signature(state_path),
-            file_signature(database_path),
-        )
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-        try:
-            payload = scalp_shadow_payload(LIVE_DIR, mode, SCALP_REUSE_MODES)
-        except Exception as exc:
-            print(f"Scalp reuse shadow dashboard contract error: {exc}", flush=True)
-            return web.json_response(
-                {
-                    "error": "scalp_reuse_shadow_contract_error",
-                    "detail": "Scalp reuse shadow data contract is unavailable.",
-                },
-                status=web.HTTPServiceUnavailable.status_code,
-                headers=NOCACHE,
-            )
-        return json_response(request, payload, etag)
-
-    async def api_btc_evidence_shadow(request: web.Request) -> web.Response:
-        etag = make_etag(
-            "btc-evidence-shadow",
-            file_signature(BTC_EVIDENCE_SHADOW_STATE_PATH),
-            file_signature(BTC_EVIDENCE_CTX_REPORT_PATH),
-        )
-        if etag_matches(request, etag):
-            return json_response(request, None, etag)
-        return json_response(request, btc_evidence_shadow_payload(), etag)
-
     app.router.add_get("/", index)
     app.router.add_get("/dashboard/live", dashboard_index)
     app.router.add_get("/dashboard/live/", dashboard_index)
@@ -7537,7 +6732,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/footprint-daily", api_footprint_daily)
     app.router.add_get("/api/footprint-daily/cells", api_footprint_daily_cells)
     app.router.add_get("/api/footprint-daily/heat", api_footprint_daily_heat)
-    app.router.add_get("/api/supply-profile", api_supply_profile)
     app.router.add_get("/api/supply-1s", api_supply_1s)
     app.router.add_get("/api/oi-5m", api_oi_5m)
 
@@ -7549,16 +6743,10 @@ def make_app() -> web.Application:
     app.router.add_get("/api/bubble-tape", api_bubble_tape)   # 2026-10-13 체결 버블(bubble_map.js)
     app.router.add_get("/api/chart-markers", api_chart_markers)
     app.router.add_get("/api/liquidation-5m-signal", api_liquidation_5m_signal)
-    app.router.add_get("/api/liquidation-direction-signal", api_liquidation_direction_signal)
     app.router.add_get("/api/liquidation-map", api_liquidation_map)
     app.router.add_get("/api/liquidation-map/tiers", api_liquidation_tiers)
     app.router.add_get("/api/position-profile", api_position_profile)
-    app.router.add_get("/api/regime-wide24", api_regime_wide24)
-    app.router.add_get("/api/regime-btc", api_regime_btc)
-    app.router.add_get("/api/regime-xrp", api_regime_xrp)
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
-    app.router.add_get("/api/liq-burst-state", api_liq_burst_state)
-    app.router.add_get("/api/micro-ref", api_micro_ref)
     app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/trend", api_trend)
     app.router.add_get("/api/dir-signals", api_dir_signals)
@@ -7581,7 +6769,6 @@ def make_app() -> web.Application:
     app.router.add_post("/api/push/unsubscribe", api_push_unsubscribe)
     app.router.add_get("/api/push/devices", api_push_devices)
     app.router.add_post("/api/push/test", api_push_test)
-    app.router.add_get("/api/trades", api_trades)
     app.router.add_get("/api/binance-account", api_binance_account)
     app.router.add_get("/api/manual-entry/preview", api_manual_entry_preview)
     async def busy_or(handler, request: web.Request) -> web.Response:
@@ -7600,9 +6787,6 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-exit/submit", lambda r: busy_or(api_manual_exit_submit, r))
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)
-    app.router.add_get("/api/scalp-shadow", api_scalp_shadow)
-    app.router.add_get("/api/scalp-reuse-shadow", api_scalp_reuse_shadow)
-    app.router.add_get("/api/btc-evidence-shadow", api_btc_evidence_shadow)
     # show_index=False to match /data/live/ below: this directory is reachable from the
     # public tunnel, and a listing advertised every file sitting in it (e.g. the
     # *.bak_pre_live_tab_removal_20260831 snapshots) rather than just the three the page

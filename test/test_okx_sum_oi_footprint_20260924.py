@@ -11,9 +11,8 @@ from aiohttp import web
 src = (Path(__file__).resolve().parents[1] / "dashboard" / "server.py").read_text(encoding="utf-8")
 def cut(a, b):
     i = src.index(a); return re.sub(r"^    ", "", src[i:src.index(b, i)], flags=re.M)
-chunk = cut("    async def api_oi_5m(", "    async def api_supply_profile(") \
+chunk = cut("    async def api_oi_5m(", "    async def api_liquidation_5m_history(") \
     + cut("    async def api_footprint(", "    def supply_1s_payload(") \
-    + cut("    async def api_supply_profile(", "    # 🔴이 응답은 **페이지 로드를 막는다**") \
     + cut("    async def api_liquidation_5m_history(", "    async def api_breakout_detector(")
 cached = [[600, 10.0, 1000.0, 50, 0], [900, -4.0, 996.0, 50, 0], [1200, 2.0, 998.0, 50, 0]]
 async def swr_cached(key, ttl, produce, **kw): return cached
@@ -80,12 +79,6 @@ async def main():
     fp = json.loads((await ns["api_footprint"](Req({"since": "0"}))).body)
     assert [b["time"] for b in fp["bars"]] == [900, 1200]
     assert fp["okxLive"] == {"time": 1200, "levels": [[2740.0, 1.0, 2.0, 0.0, 0.0, 1.0, 0.0]]}
-    # ── 수급 프로파일 = 풋프린트와 같은 봉·같은 합 (한 카드의 두 그림) ──
-    prof = json.loads((await ns["api_supply_profile"](Req({}))).body)
-    tot = lambda levels: [round(sum(l[i] for l in levels), 6) for i in range(1, 7)]
-    fp_levels = [l for b in fp["bars"] for l in b["levels"]]
-    assert prof["barCount"] == 2 and prof["venues"] == ["binance-perp", "okx-swap"]
-    assert tot(prof["levels"]) == tot(fp_levels), (tot(prof["levels"]), tot(fp_levels))
     # ── 5분봉 청산 원: OKX 가 온전히 본 봉(600 초과)만 더한다 · 캐시 불변 · ETH 만 ──
     lq = json.loads((await ns["api_liquidation_5m_history"](Req({"asset": "eth"}))).body)
     b600, b900, b1200 = lq["bars"]
