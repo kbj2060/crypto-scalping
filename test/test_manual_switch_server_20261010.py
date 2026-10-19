@@ -21,6 +21,7 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from offline_app import offline_app  # noqa: E402
 
 from dashboard import server  # noqa: E402
+from dashboard import orders  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 from test_rec_rule_entry_20261009 import account, long_pos  # noqa: E402
 
@@ -56,15 +57,15 @@ class SwitchServerTest(unittest.TestCase):
 
         async def exercise() -> None:
             rec["release"] = asyncio.Event()
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "produce_account", fake_account, create=True), \
-                 mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
-                 mock.patch.object(server, "MANUAL_RULES_ENABLED", True), \
-                 mock.patch.object(server, "exec_enabled", lambda: True), \
-                 mock.patch.object(server, "run_exit", fake_exit), \
-                 mock.patch.object(server, "run_entry", fake_entry), \
-                 mock.patch.object(server, "place_bracket", fake_place if fill_entry else mock.AsyncMock(side_effect=AssertionError("주문 금지"))), \
-                 mock.patch.object(server, "margin_type", mock.AsyncMock(return_value=mtype)):
+            with mock.patch.object(orders, "fetch_account", fake_account), \
+                 mock.patch.object(orders, "produce_account", fake_account, create=True), \
+                 mock.patch.object(orders, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(orders, "MANUAL_RULES_ENABLED", True), \
+                 mock.patch.object(orders, "exec_enabled", lambda: True), \
+                 mock.patch.object(orders, "run_exit", fake_exit), \
+                 mock.patch.object(orders, "run_entry", fake_entry), \
+                 mock.patch.object(orders, "place_bracket", fake_place if fill_entry else mock.AsyncMock(side_effect=AssertionError("주문 금지"))), \
+                 mock.patch.object(orders, "margin_type", mock.AsyncMock(return_value=mtype)):
                 app = offline_app(server)
                 app["situation_eth"]["vol_mult"] = {"sigma_bp": 100.0, "mult": 1.0, "bar": time.time()}
                 client = TestClient(TestServer(app))

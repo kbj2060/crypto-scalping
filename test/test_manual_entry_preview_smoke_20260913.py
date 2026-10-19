@@ -36,6 +36,7 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from offline_app import offline_app  # noqa: E402 -- 수집기·주문 감시기를 안 띄운다(같은 공인 IP 한도)
 
 from dashboard import server  # noqa: E402
+from dashboard import orders  # noqa: E402
 
 # 핸들러가 중간에 터지면 이런 이름이 본문에 실린다(assemble_*_plan 의 except 가 문자열화한다).
 PY_ERRORS = re.compile(
@@ -134,19 +135,20 @@ def _isolated_dirs():
         #   되돌릴 한시 설정이라, 되돌아올 규칙을 여기서 계속 지킨다. 새 동작은 test_model_only_*.
         # 🔴2026-09-27 위험 모델은 스위치로 꺼졌다(SIZING_RISK_MODEL_ENABLED=False). 되살릴 경로를
         #   여기서 계속 지킨다 -- 꺼진 동작은 test_risk_model_off_eth_uses_simple_rule.
-        with mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", True), \
-             mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", False), \
-             mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 0.0), \
+        with mock.patch.object(orders, "SIZING_RISK_MODEL_ENABLED", True), \
+             mock.patch.object(orders, "SIZING_CAP_MODEL_ONLY", False), \
+             mock.patch.object(orders, "SIZING_MARGIN_CAP_PCT", 0.0), \
              mock.patch.object(server, "LIVE_DIR", live), \
+             mock.patch.object(orders, "LIVE_DIR", live), \
              mock.patch.object(server, "DASHBOARD_DIR", dash), \
-             mock.patch.object(server, "POSITION_SIZING_STATE_PATH",
+             mock.patch.object(orders, "POSITION_SIZING_STATE_PATH",
                                live / "eth_position_sizing_state.json"), \
-             mock.patch.object(server, "POSITION_SIZING_MAX_AGE_MIN", 10 ** 9), \
+             mock.patch.object(orders, "POSITION_SIZING_MAX_AGE_MIN", 10 ** 9), \
              mock.patch.object(server, "fetch_binance_json", _fake_binance, create=True), \
              mock.patch.object(aiohttp.ClientSession, "get", _offline_get), \
-             mock.patch.object(server, "produce_account", fake_account, create=True), \
-             mock.patch.object(server, "fetch_account", fake_account), \
-             mock.patch.object(server, "load_filters", mock.AsyncMock(return_value={
+             mock.patch.object(orders, "produce_account", fake_account, create=True), \
+             mock.patch.object(orders, "fetch_account", fake_account), \
+             mock.patch.object(orders, "load_filters", mock.AsyncMock(return_value={
                  "step": 0.001, "tick": 0.01, "min_qty": 0.001, "min_notional": 20.0})):
             yield
 
@@ -234,9 +236,9 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             return losing
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "exec_enabled", lambda: True), \
-                 mock.patch.object(server, "run_entry", never_run):
+            with mock.patch.object(orders, "fetch_account", fake_account), \
+                 mock.patch.object(orders, "exec_enabled", lambda: True), \
+                 mock.patch.object(orders, "run_entry", never_run):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
@@ -273,7 +275,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             return big
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account):
+            with mock.patch.object(orders, "fetch_account", fake_account):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
@@ -410,7 +412,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             return big
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account):
+            with mock.patch.object(orders, "fetch_account", fake_account):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
@@ -447,7 +449,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             return aged
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account):
+            with mock.patch.object(orders, "fetch_account", fake_account):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
@@ -498,7 +500,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                 await client.close()
 
         with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels", levels), \
-             mock.patch.object(server, "MANUAL_RULES_ENABLED", True):   # 2026-10-09 수동 모드 기본 꺼짐 -- 켠 판을 시험한다
+             mock.patch.object(orders, "MANUAL_RULES_ENABLED", True):   # 2026-10-09 수동 모드 기본 꺼짐 -- 켠 판을 시험한다
             asyncio.run(exercise())
 
         async def no_levels() -> None:
@@ -514,7 +516,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
 
         with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels",
                                                  lambda _d, _p, *_a: {"warmed_up": True}), \
-             mock.patch.object(server, "MANUAL_RULES_ENABLED", True):
+             mock.patch.object(orders, "MANUAL_RULES_ENABLED", True):
             asyncio.run(no_levels())
 
     def test_entry_and_exit_share_one_horizon_and_one_cap(self) -> None:
@@ -538,7 +540,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         async def fake_account(*_a, **_k):
             return aged
 
-        real_payload = server.position_sizing_payload
+        real_payload = orders.position_sizing_payload
 
         def with_ledger_cap():
             # 순자산 상한(1000 x 6 = 6000)보다 **낮은** 원장 상한. 이게 있어야 두 상한이 갈린다.
@@ -548,9 +550,9 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             return pay
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "position_sizing_payload", with_ledger_cap), \
-                 mock.patch.object(server, "recommend_hold", lambda *a, **k: {
+            with mock.patch.object(orders, "fetch_account", fake_account), \
+                 mock.patch.object(orders, "position_sizing_payload", with_ledger_cap), \
+                 mock.patch.object(orders, "recommend_hold", lambda *a, **k: {
                      "available": True, "recommended_min": 1440}):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
@@ -585,7 +587,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         """2026-09-26 SOL·XRP 주문(단순 규칙): 주문 심볼 SOLUSDC · 상한은 증거금 50% 하나 · ETH 위험 모델 없음.
         🔴SOL 탭의 청산은 **ETH 포지션을 못 건드린다**(가짜 계좌엔 ETHUSDT LONG 만 있다 -> no_position)."""
         async def exercise() -> None:
-            with mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0):
+            with mock.patch.object(orders, "SIZING_MARGIN_CAP_PCT", 50.0):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
@@ -613,9 +615,9 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         """2026-09-27 사용자 «변동성 모델 제거». 스위치가 꺼지면 ETH 도 SOL·XRP 와 같은 단순 규칙 --
         워커 상태가 있어도 안 읽고, 상한은 증거금 50% 하나, 권고 수량·청산 권고 하한·지평 처방 없음."""
         async def exercise() -> None:
-            with mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
-                 mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0):
-                self.assertEqual(server.position_sizing_payload()["source"], "simple_rule")
+            with mock.patch.object(orders, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(orders, "SIZING_MARGIN_CAP_PCT", 50.0):
+                self.assertEqual(orders.position_sizing_payload()["source"], "simple_rule")
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
@@ -639,7 +641,7 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         """2026-09-25 사용자 «위험모델 상한만, 나머지 해제». 원장 4.0배·순자산 6배가 모델보다
         낮아도 진입·청산 둘 다 **모델**이 묶고, 거래소 레버리지는 그 크기를 열 만큼 올라간다
         (정책 천장이 6배로 남으면 7배로 걸려 거래소가 주문을 거부한다). 모델이 없으면 옛 상한."""
-        real_payload = server.position_sizing_payload
+        real_payload = orders.position_sizing_payload
 
         def with_ledger_cap(drop_model=False):
             def f():
@@ -651,8 +653,8 @@ class ManualPreviewSmokeTest(unittest.TestCase):
             return f
 
         async def exercise() -> None:
-            with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
-                 mock.patch.object(server, "position_sizing_payload", with_ledger_cap()):
+            with mock.patch.object(orders, "SIZING_CAP_MODEL_ONLY", True), \
+                 mock.patch.object(orders, "position_sizing_payload", with_ledger_cap()):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
@@ -667,8 +669,8 @@ class ManualPreviewSmokeTest(unittest.TestCase):
                     self.assertEqual(x["risk"]["applied_binding"], "model", x["risk"])
                 finally:
                     await client.close()
-            with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
-                 mock.patch.object(server, "position_sizing_payload", with_ledger_cap(True)):
+            with mock.patch.object(orders, "SIZING_CAP_MODEL_ONLY", True), \
+                 mock.patch.object(orders, "position_sizing_payload", with_ledger_cap(True)):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 try:
@@ -688,8 +690,8 @@ class ManualPreviewSmokeTest(unittest.TestCase):
           100% → 명목 6000 → 넘는다 → 🔴09-26 «넘치면 50%까지만»: 막지 않고 **여유 500 까지만** 채운다.
         «자동»(처방 30배)에서 10% → 명목 3000 → 5500 > 모델 4184 → 모델 상한까지만 채운다."""
         async def exercise() -> None:
-            with mock.patch.object(server, "SIZING_CAP_MODEL_ONLY", True), \
-                 mock.patch.object(server, "SIZING_MARGIN_CAP_PCT", 50.0):
+            with mock.patch.object(orders, "SIZING_CAP_MODEL_ONLY", True), \
+                 mock.patch.object(orders, "SIZING_MARGIN_CAP_PCT", 50.0):
                 client = TestClient(TestServer(offline_app(server)))
                 await client.start_server()
                 get = lambda q: client.get("/api/manual-entry/preview?side=LONG" + q)

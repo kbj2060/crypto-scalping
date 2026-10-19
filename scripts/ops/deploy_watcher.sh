@@ -218,7 +218,7 @@ affects '^scripts/ops/prometheus_exporter\.py$' && UNITS_TO_RESTART[prometheus-e
 # 섀도우를 조용히 되살린다. 되살리려면 sudo systemctl enable --now 로 명시적으로 한다.
 dashboard_changed=0
 affects '^dashboard/' && dashboard_changed=1
-# 2026-10-19: 실주문 코드(live/execution/)는 server.py 가 `from live.execution...` 로 import 한다 --
+# 2026-10-19: 실주문 코드(live/execution/)는 dashboard/orders.py(옛 server.py)가 `from live.execution...` 로 import 한다 --
 #   아래 import 감지는 `scripts.` 만 보므로 경로로 직접 건다(안 걸면 대시보드가 옛 주문 코드를 메모리에 든다).
 affects '^live/execution/' && dashboard_changed=1
 # ⭐2026-09-07: 대시보드가 **import하는 scripts/ 모듈**도 재시작 대상이다. 그 전까지 이 조건은
@@ -239,7 +239,7 @@ affects '^live/execution/' && dashboard_changed=1
 #   (trading_bot_modules/odyssey_* 제외와 같은 판단: 안 쓰는/너무 넓은 재시작은 그 자체가 리스크다.)
 dashboard_imports_changed() {
   local mods pat hits
-  # 2026-10-19: server.py 만이 아니라 dashboard/*.py 전부 -- 수집기 공장이 coin_flow.py 로 옮겨 가며 그 import 도 따라갔다.
+  # 2026-10-19: server.py 만이 아니라 dashboard/*.py 전부 -- 수집기 공장(coin_flow.py)·계좌·주문(orders.py)이 옮겨 가며 그 import 도 따라갔다.
   mods="$(grep -hoE '^(from|import) scripts\.[A-Za-z0-9_]+' "$ROOT"/dashboard/*.py 2>/dev/null \
           | sed -E 's/^(from|import) scripts\.//' | sort -u | paste -sd'|' -)"
   [[ -n "$mods" ]] || return 1

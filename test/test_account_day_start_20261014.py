@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from dashboard.server import account_day_start  # noqa: E402
+from dashboard.orders import account_day_start  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
 ok = lambda w, u: {"ok": True, "balance": {"wallet": w, "unrealized": u}}  # noqa: E731

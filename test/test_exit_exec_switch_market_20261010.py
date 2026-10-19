@@ -24,6 +24,7 @@ from offline_app import offline_app  # noqa: E402
 
 import live.execution.live_manual_peg_execute_20260912 as ex  # noqa: E402
 from dashboard import server  # noqa: E402
+from dashboard import orders as order_mod  # noqa: E402 -- 아래 _run 의 지역 변수 orders(낸 주문 목록)와 이름이 겹친다
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 from test_rec_rule_entry_20261009 import account, long_pos  # noqa: E402
 
@@ -58,13 +59,13 @@ class ExitExecTest(unittest.TestCase):
             return {"__error__": f"가짜 거래소: {method} {path}"}
 
         async def exercise() -> None:
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "produce_account", fake_account, create=True), \
-                 mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
-                 mock.patch.object(server, "MANUAL_RULES_ENABLED", True), \
-                 mock.patch.object(server, "exec_enabled", lambda: True), \
-                 mock.patch.object(server, "place_bracket", mock.AsyncMock(return_value={"placed": True})), \
-                 mock.patch.object(server, "margin_type", mock.AsyncMock(return_value="cross")), \
+            with mock.patch.object(order_mod, "fetch_account", fake_account), \
+                 mock.patch.object(order_mod, "produce_account", fake_account, create=True), \
+                 mock.patch.object(order_mod, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(order_mod, "MANUAL_RULES_ENABLED", True), \
+                 mock.patch.object(order_mod, "exec_enabled", lambda: True), \
+                 mock.patch.object(order_mod, "place_bracket", mock.AsyncMock(return_value={"placed": True})), \
+                 mock.patch.object(order_mod, "margin_type", mock.AsyncMock(return_value="cross")), \
                  mock.patch.object(ex, "signed", fake_signed), \
                  mock.patch.object(ex, "_clock_offset", mock.AsyncMock(return_value=0)), \
                  mock.patch.object(ex, "maker_price", mock.AsyncMock(return_value=(2500.0, 2499.9, 2500.0))), \

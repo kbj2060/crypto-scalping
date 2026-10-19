@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = (ROOT / "dashboard/server.py").read_text(encoding="utf-8")
+SRC = (ROOT / "dashboard/orders.py").read_text(encoding="utf-8")   # 2026-10-19 사이징이 server.py 에서 옮겨 갔다
 JS = (ROOT / "dashboard/live/app.js").read_text(encoding="utf-8")
 
 
@@ -23,8 +23,8 @@ def _reload(value=None):
     if value is not None:
         env["DASHBOARD_SIZING_CAP_EQUITY_X"] = value
     with mock.patch.dict(os.environ, env, clear=True):
-        from dashboard import server
-        return importlib.reload(server).SIZING_CAP_OVERRIDE_X
+        from dashboard import orders
+        return importlib.reload(orders).SIZING_CAP_OVERRIDE_X
 
 
 def test_default_is_off():

@@ -49,7 +49,7 @@ def main() -> int:
     checks = 0
 
     # ── 1. 서버: 원장 로더 ────────────────────────────────────────────────────
-    srv = load("dash_srv", ROOT / "dashboard" / "server.py")
+    srv = load("dash_orders", ROOT / "dashboard" / "orders.py")   # 2026-10-19 원장 도우미가 server.py 에서 옮겨 갔다
     with tempfile.TemporaryDirectory() as td:
         srv.ACCOUNT_TRIP_LEDGER_PATH = pathlib.Path(td) / "trips.jsonl"
         assert srv.load_account_trip_rows() == [], "파일이 없으면 빈 목록"

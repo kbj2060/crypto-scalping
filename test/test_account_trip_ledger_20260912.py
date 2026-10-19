@@ -29,7 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 def main() -> int:
     sys.path.insert(0, str(ROOT))
     sys.modules.setdefault("duckdb", types.ModuleType("duckdb"))  # 조회 경로를 안 타므로 스텁으로 족하다
-    spec = importlib.util.spec_from_file_location("dash_srv", ROOT / "dashboard" / "server.py")
+    spec = importlib.util.spec_from_file_location("dash_srv", ROOT / "dashboard" / "orders.py")   # 2026-10-19 원장 도우미가 server.py 에서 옮겨 갔다
     m = importlib.util.module_from_spec(spec)
     sys.modules["dash_srv"] = m   # server.py 의 @dataclass 가 제 모듈을 sys.modules 에서 찾는다(없으면 로드 실패)
     spec.loader.exec_module(m)

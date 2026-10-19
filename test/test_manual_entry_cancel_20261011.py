@@ -117,6 +117,7 @@ class EntryCancelServerTest(unittest.TestCase):
         from aiohttp.test_utils import TestClient, TestServer
         from offline_app import offline_app
         from dashboard import server
+        from dashboard import orders
         from test_manual_entry_preview_smoke_20260913 import _isolated_dirs
         from test_rec_rule_entry_20261009 import account
         acct = account(list(positions))
@@ -131,12 +132,12 @@ class EntryCancelServerTest(unittest.TestCase):
             return state
 
         async def go():
-            with mock.patch.object(server, "fetch_account", fake_account), \
-                 mock.patch.object(server, "produce_account", fake_account, create=True), \
-                 mock.patch.object(server, "SIZING_RISK_MODEL_ENABLED", False), \
-                 mock.patch.object(server, "exec_enabled", lambda: True), \
-                 mock.patch.object(server, "run_exit", fake_exit), \
-                 mock.patch.object(server, "place_bracket", mock.AsyncMock(side_effect=AssertionError("주문 금지"))):
+            with mock.patch.object(orders, "fetch_account", fake_account), \
+                 mock.patch.object(orders, "produce_account", fake_account, create=True), \
+                 mock.patch.object(orders, "SIZING_RISK_MODEL_ENABLED", False), \
+                 mock.patch.object(orders, "exec_enabled", lambda: True), \
+                 mock.patch.object(orders, "run_exit", fake_exit), \
+                 mock.patch.object(orders, "place_bracket", mock.AsyncMock(side_effect=AssertionError("주문 금지"))):
                 c = TestClient(TestServer(offline_app(server)))
                 await c.start_server()
                 try:
