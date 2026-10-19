@@ -33,9 +33,10 @@ GBM 은 같은 일을 ~0.001초에 한다. 재보고 안 쓰기로 한 것이지
 ⚠️**피쳐를 바꾸면 아티팩트를 반드시 다시 학습해야 한다** — `load_model` 이 피쳐 목록을
 대조하므로 옛 아티팩트는 거절되고 워커가 조용히 1/ATR 로 떨어진다(죽지는 않는다).
 
-학습: python scripts/live_eth_sizing_vol_model_20260912.py --train
+학습·매달: python scripts/live_eth_sizing_vol_model_20260912.py --monthly (2026-10-15 서버 cron -- data/live/vol_panel 빠진 날 받기 +
+      지난 판 표본외로 확대 확률 상수 + 전 기간 재학습 + 지난 판과 맞대는 품질 문). 🔴10-19 리뷰: 옛 --train(짧은 KL_CSV 로 배포 판을
+      백업 없이 덮어썼다)은 지웠다 -- 긴 데이터 판(2021-12~, MSLE −19%)이 실수 한 번에 사라질 수 있었다.
 검증: 같은 파일 --verify (배포된 아티팩트를 그 기계의 데이터로 표본외 재검)
-매달: 같은 파일 --monthly (2026-10-15 서버 cron -- data/live/vol_panel 이어 받기 + 지난 판 표본외로 확대 확률 상수 + 전 기간 재학습)
 점검: python scripts/live_eth_sizing_vol_model_20260912.py
 """
 from __future__ import annotations
@@ -50,7 +51,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = ROOT / "data" / "live" / "eth_sizing_vol_model.joblib"
 KL_CSV = ROOT / "binance_data" / "klines" / "ETHUSDT" / "ETHUSDT-5m-api.csv"
 HOLD = 48                       # 4시간 -- 타깃 지평(실계좌 왕복 중앙 간격에 가깝다)
-TRAIN_END = "2026-10-14"   # 2026-10-15 긴 데이터 재학습(2021-12~ 50만 행) -- 2025-09~2026-10 표본외 비교: 짧은 창(2024-10~) MSLE .1435 → 긴 창 .1161(−19%, 분기 5/5) · 스피어만 .744 → .781
+# 2026-10-15 긴 데이터 재학습(2021-12~ 50만 행) -- 2025-09~2026-10 표본외 비교: 짧은 창(2024-10~) MSLE .1435 → 긴 창 .1161(−19%, 분기 5/5) · 스피어만 .744 → .781
 SEEDS = (990143, 220759, 380136, 923411, 331386, 602160, 700199, 982044)  # 랜덤 추출, 리포트에 고정
 # 2026-09-12 확장: 가격기하 12열 추가(10 → 22). 재료 스택 41열 비교에서 **이득의 대부분이
 # 이 12열**이었다(산포 −3.1% vs 41열 전부 −5.0%). 나머지는 compute_signals·BTC·펀딩·극점
@@ -128,42 +129,6 @@ def load_model():
         return None
 
 
-def train() -> int:
-    import joblib
-    from sklearn.ensemble import HistGradientBoostingRegressor
-
-    d = pd.read_csv(KL_CSV, usecols=["timestamp", "close", "high", "low", "quote_volume", "trades"],
-                    parse_dates=["timestamp"]).dropna(subset=["timestamp"])
-    d = d.sort_values("timestamp").reset_index(drop=True)
-    X = build_features(d["timestamp"], d["close"].to_numpy(float),
-                       d["quote_volume"].to_numpy(float), d["trades"].to_numpy(float),
-                       d["high"].to_numpy(float), d["low"].to_numpy(float))
-    lr = np.diff(np.log(np.maximum(d["close"].to_numpy(float), 1e-12)), prepend=0.0)
-    y = pd.Series(lr).rolling(HOLD, min_periods=HOLD).std().shift(-HOLD).to_numpy()
-
-    ok = np.isfinite(y) & (y > 0) & np.isfinite(X.to_numpy(float)).all(1)
-    is_tr = (d["timestamp"] <= TRAIN_END).to_numpy() & ok
-    A = np.nan_to_num(X.to_numpy(float), nan=0.0, posinf=0.0, neginf=0.0)
-    print(f"학습 {is_tr.sum():,}행 · 피쳐 {len(FEATURES)} · 시드 {len(SEEDS)}", flush=True)
-
-    models = []
-    for s in SEEDS:
-        m = HistGradientBoostingRegressor(max_iter=300, learning_rate=0.06, max_depth=6,
-                                          random_state=int(s))
-        m.fit(A[is_tr], np.log(y[is_tr]))
-        models.append(m)
-
-    # 기준값은 **학습구간 예측의 중앙값**이다 -- 현행 `atr_pct_ref`(학습구간 ATR 중앙값)와
-    # 같은 역할이라 수량 눈금이 급변하지 않는다.
-    ref = float(np.median(predict_vol(models, X[is_tr])))
-    ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump({"models": models, "features": FEATURES, "ref_pred": ref,
-                 "seeds": list(SEEDS), "train_end": TRAIN_END, "hold_bars": HOLD,
-                 "n_train": int(is_tr.sum())}, ARTIFACT)
-    print(f"저장 {ARTIFACT} · 기준예측 {ref:.6g} · {ARTIFACT.stat().st_size / 1e6:.1f}MB", flush=True)
-    return 0
-
-
 def verify() -> int:
     """배포된 아티팩트를 **그 기계의 데이터로** 표본외 재검한다(2026-09-12).
 
@@ -182,7 +147,7 @@ def verify() -> int:
     lr = np.diff(np.log(np.maximum(d["close"].to_numpy(float), 1e-12)), prepend=0.0)
     y = pd.Series(lr).rolling(HOLD, min_periods=HOLD).std().shift(-HOLD).to_numpy()
     ts = d["timestamp"].to_numpy()
-    te = (np.isfinite(y) & (y > 0) & (ts > np.datetime64(TRAIN_END + "T23:59:59"))
+    te = (np.isfinite(y) & (y > 0) & (ts > np.datetime64(str(art["train_end"]) + "T23:59:59"))
           & np.isfinite(X.to_numpy(float)).all(1))
     if te.sum() < 1000:
         print(f"표본외 {te.sum()}행 — 너무 적어 판정하지 않는다")
@@ -233,20 +198,35 @@ def fit_expand_logit(pred: np.ndarray, rv48: np.ndarray, y: np.ndarray) -> tuple
     return float(m.intercept_[0]), float(m.coef_[0][0])
 
 
+def vs_prev(models, old_models, X: pd.DataFrame) -> dict:
+    """품질 문: 새 판과 지난 판을 지난 판 표본외 행에서 맞댄다. 이웃 달 판끼리 로그 예측 상관 .98~.998·중앙 비 .995~1.002
+    (10-19 실측) -- 크게 어긋나면 망가진 학습(데이터 구멍·단위 사고)이라 교체하지 않는다. «더 나은가»는 재학습 때 잴 수 없다."""
+    ln, lo = np.log(predict_vol(models, X)), np.log(predict_vol(old_models, X))
+    out = {"corr_log": round(float(np.corrcoef(ln, lo)[0, 1]), 4), "median_ratio": round(float(np.exp(np.median(ln - lo))), 4), "rows": len(X)}
+    if out["corr_log"] < 0.9 or not 0.8 <= out["median_ratio"] <= 1.25:
+        raise SystemExit(f"새 판이 지난 판과 너무 다르다 {out} -- 교체 안 함(지난 판 유지)")
+    return out
+
+
 def monthly() -> int:
     """매달 1일 cron: LONG 을 어제까지 이어 받고 → 지난 판으로 최근 30일 표본외 예측 → 확대 확률 상수 적합
-    → 전 기간 재학습 → 아티팩트 교체(지난 판은 .prev). 학습 설정·피쳐는 train() 과 같다."""
+    → 전 기간 재학습 → 품질 문(지난 판과 맞대기) → 아티팩트 교체(지난 판은 교체 시각 이름으로 남김)."""
     import joblib
     from concurrent.futures import ThreadPoolExecutor
     from sklearn.ensemble import HistGradientBoostingRegressor
     d = pd.read_parquet(LONG)
     y0 = pd.Timestamp.utcnow().tz_localize(None).normalize() - pd.Timedelta("1D")
-    days = [x.strftime("%Y-%m-%d") for x in pd.date_range(d.timestamp.max().normalize() + pd.Timedelta("1D"), y0)]
+    have = set(d.timestamp.dt.normalize())   # 10-19: 빠진 날은 어디든 받는다(옛: 마지막 날 뒤만 -- 서버 LONG 에 2023-12 한 달 구멍이 남아 있었다)
+    days = [x.strftime("%Y-%m-%d") for x in pd.date_range(d.timestamp.min().normalize(), y0) if x not in have]
     with ThreadPoolExecutor(8) as ex:
         add = [x for x in ex.map(_vision_day, days) if x is not None]
     d = pd.concat([d] + add).drop_duplicates("timestamp", keep="last").sort_values("timestamp").reset_index(drop=True)
-    d.to_parquet(LONG)
-    print(f"긴 5분봉 {len(d):,}행 ~{d.timestamp.max()} (+{len(add)}/{len(days)}일)", flush=True)
+    tmp = LONG.with_suffix(".tmp")
+    d.to_parquet(tmp); tmp.replace(LONG)   # 쓰다 죽어도 지난 LONG 이 남게
+    gap = d.timestamp.diff().max()
+    print(f"긴 5분봉 {len(d):,}행 ~{d.timestamp.max()} (+{len(add)}/{len(days)}일) · 최대 간격 {gap}", flush=True)
+    if gap > pd.Timedelta("1h"):   # 롤링 창이 위치 기준이라 구멍 = 5분봉 하나짜리 거대 수익률로 학습된다
+        raise SystemExit(f"5분봉 구멍 {gap} -- 받지 못한 날이 있다, 재학습 안 함(지난 판 유지)")
     X = build_features(d["timestamp"], d["close"].to_numpy(float), d["quote_volume"].to_numpy(float),
                        d["trades"].to_numpy(float), d["high"].to_numpy(float), d["low"].to_numpy(float))
     lr = np.diff(np.log(np.maximum(d["close"].to_numpy(float), 1e-12)), prepend=0.0)
@@ -255,8 +235,8 @@ def monthly() -> int:
     ts = d["timestamp"].to_numpy()
     old = load_model()
     logit = None
-    if old is not None:   # 지난 판의 학습 끝 이후 = 표본외
-        te = ok & (ts > np.datetime64(pd.Timestamp(old["train_end"]) + pd.Timedelta("1D")))
+    te = ok & (ts > np.datetime64(pd.Timestamp(old["train_end"]) + pd.Timedelta("1D"))) if old is not None else np.zeros(len(ts), bool)   # 지난 판 표본외
+    if old is not None:
         if te.sum() >= 5000:
             logit = fit_expand_logit(predict_vol(old["models"], X[te]), np.exp(X["rv48"].to_numpy())[te], y[te])
             print(f"확대 확률 상수 {logit} · 표본외 {int(te.sum()):,}행", flush=True)
@@ -267,10 +247,13 @@ def monthly() -> int:
            "train_end": str(pd.Timestamp(ts[ok].max()).date()), "hold_bars": HOLD, "n_train": int(ok.sum()),
            "train_start": str(pd.Timestamp(ts[ok].min()).date()),
            "expand_logit": logit or (old or {}).get("expand_logit") or [-1.4950, 5.1671]}
+    if te.sum() >= 2000:   # 지난 판 표본외 1주 이상 -- 첫 달(10-14 판 → 11-01)은 16일
+        art["vs_prev"] = vs_prev(models, old["models"], X[te])
+        print("지난 판 대비", art["vs_prev"], flush=True)
     tmp = ARTIFACT.with_suffix(".tmp")
     joblib.dump(art, tmp)   # 다 쓴 뒤 교체 -- 쓰다 죽어도 지난 판이 남게
-    if ARTIFACT.exists():
-        ARTIFACT.replace(ARTIFACT.with_suffix(".joblib.prev"))
+    if ARTIFACT.exists():   # 10-19: 교체 시각 이름으로 전부 남긴다(옛 .prev 하나는 다음 교체에 덮였다)
+        ARTIFACT.replace(ARTIFACT.with_suffix(f".{pd.Timestamp.utcnow():%Y%m%dT%H%M}.joblib"))
     tmp.replace(ARTIFACT)
     print("저장", {k: v for k, v in art.items() if k != "models"}, flush=True)
     return 0
@@ -327,14 +310,23 @@ def _self_check() -> None:
     a_, b_ = fit_expand_logit(pr, rv, yy)
     assert abs(a_ + 1.5) < 0.1 and abs(b_ - 5.0) < 0.3, (a_, b_)
 
-    print("통과 10/10 — 피쳐 계약(22열) · 인과성 · 로그스케일 · 기하평균 · 가격기하 범위 · 확대 확률 적합")
+    # 2026-10-19 품질 문: 같은 모양 예측은 통과, 눈금이 2배 뛴 판은 거절
+    class _Lin:
+        def __init__(self, k, b=0.0): self.k, self.b = k, b
+        def predict(self, A): return self.b + self.k * np.asarray(A, float)[:, 1]   # rv12 따라가는 가짜 판
+    Xg = X.iloc[WARMUP:]
+    assert vs_prev([_Lin(1.0)], [_Lin(1.0, 0.01)], Xg)["corr_log"] > 0.99
+    try:
+        vs_prev([_Lin(1.0, np.log(2.0))], [_Lin(1.0)], Xg); raise AssertionError("눈금 2배 판이 통과했다")
+    except SystemExit:
+        pass
+
+    print("통과 11/11 — 피쳐 계약(22열) · 인과성 · 로그스케일 · 기하평균 · 가격기하 범위 · 확대 확률 적합 · 품질 문")
 
 
 if __name__ == "__main__":
     if "--monthly" in sys.argv:
         raise SystemExit(monthly())
-    if "--train" in sys.argv:
-        raise SystemExit(train())
     if "--verify" in sys.argv:
         raise SystemExit(verify())
     _self_check()

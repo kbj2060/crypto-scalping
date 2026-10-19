@@ -21,7 +21,7 @@ B = joblib.load(Path(__file__).with_name("box_hold_hgb_20261016.joblib"))
 PROF = np.asarray(B["prof"], float)            # 요일×시각(월 0시 = 0) 평균 1분 수익² / 전체 평균, 학습 구간
 WIN = {"30m": 30, "1h": 60, "4h": 240}
 NEED = 1499                                    # 1h 박스 24h 창폭 중앙값 = 1440 + 59 · σ24 = 1441
-MAJOR_IDS = {10, 50, 53, 54, 46, 9}            # FRED release_id: CPI·고용·GDP·PCE·PPI·소매판매 (+ category fomc)
+MAJOR_IDS = {10, 50, 53, 54, 46, 9}            # FRED release_id: CPI·고용·GDP·PCE·PPI·소매판매 (+ FOMC 금리결정)
 CLAIMS_ID = 180                                 # 실업수당(주간)
 
 
@@ -35,7 +35,8 @@ def event_times(events: list | None) -> tuple[np.ndarray, np.ndarray]:
             continue
         m = re.search(r"release_id=(\d+)", str(e.get("detail", "")))
         rid = int(m.group(1)) if m else None
-        if e.get("category") == "fomc" or rid in MAJOR_IDS:
+        # 10-19 리뷰: 일정의 category fomc 에는 기자회견(결정 30분 뒤)·의사록도 있다 -- 학습 major 는 금리결정(14:00 ET)만
+        if (e.get("category") == "fomc" and "금리결정" in str(e.get("title_ko", ""))) or rid in MAJOR_IDS:
             major.append(t)
         elif rid == CLAIMS_ID:
             claims.append(t)
@@ -132,10 +133,12 @@ if __name__ == "__main__":
     spec = importlib.util.spec_from_file_location("imp", root / "scripts/research_eth_box_hold_improve_20261016.py")
     imp = importlib.util.module_from_spec(spec); spec.loader.exec_module(imp)
     maj, cl = event_times([{"time_utc": "2026-10-15T12:30:00+00:00", "category": "econ", "detail": "x (FRED, release_id=10)"},
-                           {"time_utc": "2026-10-15T18:00:00+00:00", "category": "fomc"},
+                           {"time_utc": "2026-10-15T18:00:00+00:00", "category": "fomc", "title_ko": "FOMC 금리결정 발표"},
+                           {"time_utc": "2026-10-15T18:30:00+00:00", "category": "fomc", "title_ko": "FOMC 기자회견"},   # 실제 일정 모양 -- 주요 아님
+                           {"time_utc": "2026-10-21T18:00:00+00:00", "category": "fomc", "title_ko": "FOMC 의사록"},
                            {"time_utc": "2026-10-16T12:30:00+00:00", "category": "econ", "detail": "release_id=180"},
                            {"time_utc": "2026-10-16T13:15:00+00:00", "category": "econ", "detail": "release_id=13"},   # 산업생산 = 주요 아님
-                           {"time_utc": "bad", "category": "fomc"}])
+                           {"time_utc": "bad", "category": "fomc", "title_ko": "FOMC 금리결정 발표"}])
     assert len(maj) == 2 and len(cl) == 1, (maj, cl)
     assert payload(pd.DataFrame({"timestamp": [], "high": [], "low": [], "close": [], "volume": [], "taker_buy_base": []}))["ok"] is False
     if imp.DEC.exists() and (imp.OUT / "features.parquet").exists() and (imp.OUT / "events.json").exists():
@@ -143,7 +146,7 @@ if __name__ == "__main__":
         X = pd.read_parquet(imp.OUT / "features.parquet")
         K = imp.load_1m()
         ev = imp.events()
-        evl = [{"time_utc": pd.Timestamp(int(t), unit="ms", tz="UTC").isoformat(), "category": "fomc"} for t in ev["major"]] + \
+        evl = [{"time_utc": pd.Timestamp(int(t), unit="ms", tz="UTC").isoformat(), "category": "fomc", "title_ko": "FOMC 금리결정 발표"} for t in ev["major"]] + \
               [{"time_utc": pd.Timestamp(int(t), unit="ms", tz="UTC").isoformat(), "category": "econ", "detail": "release_id=180"} for t in ev["claims"]]
         A = pd.concat([D, X], axis=1)
         A = A[A.scale.isin(list(WIN)) & (A.ts >= "2025-01-01")].replace([np.inf, -np.inf], np.nan).dropna(subset=B["scales"]["1h"]["cols"])
