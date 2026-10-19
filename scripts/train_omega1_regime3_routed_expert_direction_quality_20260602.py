@@ -20,20 +20,6 @@ MODEL_ID = "omega1_regime3_routed_expert_direction_quality_20260602"
 OUT_DIR = ROOT / "tmp/causal_regen_20260516/omega1_regime3_routed_expert_direction_quality_20260602"
 
 QUALITY_THRESHOLDS = [0.40, 0.45, 0.50, 0.55, 0.60, 0.65]
-SOFT_FLOORS = [0.00, 0.05, 0.10, 0.20]
-DIR_AUX_COLS = [
-    "direction_p_cash",
-    "direction_p_long",
-    "direction_p_short",
-    "direction_confidence",
-    "direction_side_edge",
-    "direction_trade_prob",
-    "direction_action",
-]
-ROUTE_QUALITY_COLS = [
-    "router_confidence",
-    "router_margin",
-]
 
 
 def _json_default(obj: Any) -> Any:

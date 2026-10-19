@@ -40,7 +40,6 @@ ART = ROOT / "data/live/eth_extreme_detector_artifact"
 COSTW_ART = ROOT / "data/live/eth_extreme_detector_costw_artifact"   # p2 손실가중 헤드
 KLINES = "https://fapi.binance.com/fapi/v1/klines"
 SYMBOL, BTC_SYMBOL = "ETHUSDT", "BTCUSDT"
-FETCH_BARS = 3000          # 2페이지 -- 추세분위(2016봉 롤링)와 atr 분위에 필요
 HISTORY_BARS = 48          # 대시보드 띠 관례
 W = 12                     # 라벨 창(±60분)
 TREND_W, RANK_W = 144, 2016

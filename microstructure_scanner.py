@@ -28,7 +28,6 @@ _OI_URL       = "https://fapi.binance.com/fapi/v1/openInterest?symbol={SYMBOL}"
 _FUND_URL     = "https://fapi.binance.com/fapi/v1/premiumIndex?symbol={SYMBOL}"
 _AGG_TRADES_URL = "https://fapi.binance.com/fapi/v1/aggTrades?symbol={SYMBOL}&limit={LIMIT}"
 
-_DB_PATH = str(_ROOT / "data/live/microstructure.duckdb")
 _TABLE   = "microstructure_1m"
 
 class MicrostructureScanner:
@@ -65,8 +64,6 @@ class MicrostructureScanner:
         self._oi_hist:    deque[float] = deque(maxlen=60)
         self._price_obs: deque[tuple[int, float]] = deque(maxlen=120)
         self._oi_obs: deque[tuple[int, float]] = deque(maxlen=120)
-        self._nif_obs: deque[tuple[int, float]] = deque(maxlen=720)
-        self._oi_delta_obs: deque[tuple[int, float]] = deque(maxlen=720)
         self._nif_hist:   deque[float] = deque(maxlen=60)
         self._oi_delta_hist: deque[float] = deque(maxlen=60)
         self._abs_hist:   deque[float] = deque(maxlen=60)
@@ -115,7 +112,6 @@ class MicrostructureScanner:
         self.whale_intent_window_min = int(float(os.getenv("MS_WHALE_INTENT_WINDOW_MIN", "5")))
         self.whale_pos_long_short_th = float(os.getenv("MS_WHALE_POS_LONG_SHORT_TH", "0.25"))
         self.enabled          = os.getenv("MS_ENABLE", "true").strip().lower() in ("1", "true", "yes", "on")
-        self.dsac_intercept_enabled = os.getenv("MS_DSAC_INTERCEPT_ENABLE", "false").strip().lower() in ("1", "true", "yes", "on")
 
     @serialized_duckdb_access(lambda self: self._db_path)
     def _db_init(self) -> None:
@@ -228,7 +224,6 @@ class MicrostructureScanner:
 
     @serialized_duckdb_access(lambda self, *_args, **_kwargs: self._db_path)
     def _db_insert(self, bucket_ts: datetime, sig: dict) -> None:
-        import duckdb
         try:
             from scripts.live_trade_tape_collector_20260916 import duckdb_connect_retry
             con = duckdb_connect_retry(self._db_path)   # 감시기·대시보드 읽기 잠금에 그 분 행을 버리지 않게(10-15 16회)
@@ -854,7 +849,7 @@ class MicrostructureScanner:
                     self._bias_hist.append(sig["shadow_queue_bias"])
                     self._eai_hist.append(sig["eai"])
 
-                    from datetime import timezone, timedelta
+                    from datetime import timedelta
                     bucket_ts = (dt_now - timedelta(minutes=1)).replace(second=0, microsecond=0)
                     await asyncio.get_running_loop().run_in_executor(None, self._db_insert, bucket_ts, sig)
             except Exception as e:
@@ -873,20 +868,6 @@ class MicrostructureScanner:
         self._running = False
         for t in (self._depth_task, self._trade_task, self._poll_task, self._scan_task):
             if t and not t.done(): t.cancel()
-
-    def get_kelly_multiplier(self) -> float:
-        if not self.dsac_intercept_enabled: return 1.0
-        return float(self._cached.get("kelly_mult", 1.0))
-
-    def get_signal(self) -> dict:
-        out = self._cached.copy() if self._cached else {}
-        if out.get("data_stale", False):
-            out["signal_bias"] = 0
-            out["kelly_mult"] = 1.0
-        if not self.dsac_intercept_enabled and out:
-            out["signal_bias"] = 0
-            out["kelly_mult"] = 1.0
-        return out
 
     def status_line(self) -> str:
         if not self.enabled: return "MS: 비활성화됨"

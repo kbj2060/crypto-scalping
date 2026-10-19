@@ -35,8 +35,6 @@
 """
 from __future__ import annotations
 
-import pathlib
-
 import math
 
 # 68왕복 단위당 수익(2026-09-13 실측). 원장이 갱신되면 다시 재야 한다.
