@@ -29,6 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = [
     ROOT / "dashboard" / "server.py",
+    ROOT / "dashboard" / "coin_flow.py",   # 2026-10-19 footprint_add 등 수집기 공장이 옮겨 갔다
     ROOT / "scripts" / "live_trade_tape_collector_20260916.py",
 ]
 

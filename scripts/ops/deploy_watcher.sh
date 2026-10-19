@@ -239,7 +239,8 @@ affects '^live/execution/' && dashboard_changed=1
 #   (trading_bot_modules/odyssey_* 제외와 같은 판단: 안 쓰는/너무 넓은 재시작은 그 자체가 리스크다.)
 dashboard_imports_changed() {
   local mods pat hits
-  mods="$(grep -oE '^(from|import) scripts\.[A-Za-z0-9_]+' "$ROOT/dashboard/server.py" 2>/dev/null \
+  # 2026-10-19: server.py 만이 아니라 dashboard/*.py 전부 -- 수집기 공장이 coin_flow.py 로 옮겨 가며 그 import 도 따라갔다.
+  mods="$(grep -hoE '^(from|import) scripts\.[A-Za-z0-9_]+' "$ROOT"/dashboard/*.py 2>/dev/null \
           | sed -E 's/^(from|import) scripts\.//' | sort -u | paste -sd'|' -)"
   [[ -n "$mods" ]] || return 1
   pat="^scripts/(${mods})\.py$"

@@ -37,7 +37,8 @@ def test_ls_keeps_last_good_rows_while_writer_holds_lock(tmp_path):
                           "HL_LIQ_BY_ASSET": {"eth": miss, "sol": miss},
                           "cctx": {a: SimpleNamespace(mc_last_good={}) for a in ("eth", "sol")},
                           "flows": {a: SimpleNamespace(spec=SimpleNamespace(okx_inst=f"{a.upper()}-USDT-SWAP")) for a in ("eth", "sol")}}
-    exec(_chunk("def _read_only_rows(", "def hl_whale_liq_events(", False), ns)
+    cf = (Path(__file__).resolve().parents[1] / "dashboard" / "coin_flow.py").read_text(encoding="utf-8")   # 2026-10-19 옮겨 감
+    exec(cf[cf.index("def _read_only_rows("):cf.index("def okx_tape_footprint(")], ns)
     exec(_chunk("    def _mc_collectors(", "    def _mc_history(", True), ns)
     assert ns["_mc_collectors"]("sol")["ls"][0][1:] == (1.1, 1.2, 0.9)   # SOL 은 자기 표 -- ETH 값이 섞이지 않는다
     first = ns["_mc_collectors"]()

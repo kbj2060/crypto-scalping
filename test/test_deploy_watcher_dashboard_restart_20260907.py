@@ -21,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WATCHER = ROOT / "scripts/ops/deploy_watcher.sh"
-SERVER = ROOT / "dashboard/server.py"
+DASHBOARD_PY = sorted((ROOT / "dashboard").glob("*.py"))   # 2026-10-19 server.py + coin_flow.py 등
 
 
 def _extract_function(name: str) -> str:
@@ -62,8 +62,10 @@ class DashboardRestartDecisionTests(unittest.TestCase):
     #   상태로 계속 빨갰다. 아래 시험이 같은 계약을 server.py 의 import 에서 **직접 뽑아** 검사하므로
     #   예시는 없어도 되고, 없어야 안 썩는다 -- 다시 하드코딩하지 말 것.
     def test_every_scripts_import_of_server_py_is_covered(self) -> None:
-        """server.py가 import하는 scripts/ 모듈은 **전부** 재시작을 걸어야 한다 (목록 낡음 방지)."""
-        mods = sorted(set(re.findall(r"^(?:from|import) scripts\.([A-Za-z0-9_]+)", SERVER.read_text(), re.M)))
+        """dashboard/*.py 가 import하는 scripts/ 모듈은 **전부** 재시작을 걸어야 한다 (목록 낡음 방지)."""
+        src = "\n".join(p.read_text() for p in DASHBOARD_PY)
+        mods = sorted(set(re.findall(r"^(?:from|import) scripts\.([A-Za-z0-9_]+)", src, re.M)))
+        self.assertIn("live_okx_trade_tape_collector_20260923", mods, "coin_flow.py 의 import 를 못 봤다")
         self.assertGreater(len(mods), 5, "import 파싱이 깨졌다")
         for mod in mods:
             with self.subTest(mod=mod):
