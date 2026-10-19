@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
-from offline_app import offline_app  # noqa: E402
+from offline_app import offline_app, patch_live_dir  # noqa: E402
 
 from dashboard import server  # noqa: E402
 
@@ -68,7 +68,7 @@ class LiqMap5mTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 live, dash = Path(tmp) / "live", Path(tmp) / "dashboard"
                 live.mkdir(); dash.mkdir()
-                with mock.patch.object(server, "ClientSession", FakeSession), mock.patch.object(server, "LIVE_DIR", live), \
+                with mock.patch.object(server, "ClientSession", FakeSession), patch_live_dir(server, live), \
                      mock.patch.object(server, "DASHBOARD_DIR", dash):
                     async with TestClient(TestServer(offline_app(server))) as c:
                         t0 = time.perf_counter()

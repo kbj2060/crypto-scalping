@@ -27,7 +27,7 @@ from pathlib import Path
 from unittest import mock
 
 from aiohttp.test_utils import TestClient, TestServer
-from offline_app import offline_app  # noqa: E402 -- 수집기·주문 감시기를 안 띄운다(같은 공인 IP 한도)
+from offline_app import offline_app, patch_live_dir  # noqa: E402 -- 수집기·주문 감시기를 안 띄운다(같은 공인 IP 한도)
 
 from dashboard import server
 
@@ -118,7 +118,7 @@ class FootprintPayloadShapeTest(unittest.TestCase):
                 await client.close()
 
         with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch.object(server, "LIVE_DIR", Path(tmp)):
+            with patch_live_dir(server, Path(tmp)):
                 asyncio.run(run())
 
     def test_endpoint_serves_and_carries_full_flag(self) -> None:

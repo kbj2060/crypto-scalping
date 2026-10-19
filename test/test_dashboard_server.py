@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from aiohttp.test_utils import TestClient, TestServer
-from offline_app import offline_app  # noqa: E402 -- 수집기·주문 감시기를 안 띄운다(같은 공인 IP 한도)
+from offline_app import offline_app, patch_live_dir  # noqa: E402 -- 수집기·주문 감시기를 안 띄운다(같은 공인 IP 한도)
 
 from dashboard import server
 
@@ -64,11 +64,19 @@ class DashboardServerTest(unittest.TestCase):
                     await client.close()
 
             with (
-                mock.patch.object(server, "LIVE_DIR", live_dir),
+                patch_live_dir(server, live_dir),
                 mock.patch.object(server, "DASHBOARD_DIR", dashboard_dir),
             ):
                 asyncio.run(exercise_api())
 
+
+
+class LiveDirSingleSourceTest(unittest.TestCase):
+    def test_split_modules_share_one_live_dir(self) -> None:
+        """2026-10-20 server.py 를 나누며 LIVE_DIR 이 세 벌이 됐다 -- 값이 갈라지면 주문 원장·브래킷이 다른 곳에 쓰인다."""
+        from dashboard import coin_flow, orders
+        self.assertEqual(server.LIVE_DIR, orders.LIVE_DIR)
+        self.assertEqual(server.LIVE_DIR, coin_flow.LIVE_DIR)
 
 if __name__ == "__main__":
     unittest.main()
@@ -102,7 +110,7 @@ class StaticAssetCacheHeaderTest(unittest.TestCase):
                 await client.close()
 
         with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch.object(server, "LIVE_DIR", Path(tmp)):
+            with patch_live_dir(server, Path(tmp)):
                 asyncio.run(exercise())
 
     def test_index_buster_points_at_a_file_that_exists(self) -> None:

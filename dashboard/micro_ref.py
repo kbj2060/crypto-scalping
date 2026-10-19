@@ -32,8 +32,6 @@ TRIGGER_LIVE_S = 2               # 나이 이 이하만 «지금». 그 위는 �
 NEAR_BP = 15.0            # 레벨 «근접» 판정폭 (분석과 같은 값)
 BAND_SHALLOW_BP = 10.0    # 얕은 불균형 밴드
 BAND_DEEP_BP = 40.0       # 깊은 불균형 밴드 -- 래스터가 ±$120(≈46bp) 라 50 대신 40
-BURST_WINDOW_S = 8        # 거래량 폭발 뒤 OI 를 보는 창 (CCF 피크 +5초 + OI 갱신 3.7초)
-BURST_DOI_ABS_PCT = 0.9   # 최근 10분 |ΔOI 8s| 의 이 분위를 넘어야 «급감»
 
 
 def qi(bid_qty: float, ask_qty: float) -> float:
@@ -139,48 +137,6 @@ def sr_context(levels: dict[str, Any] | None, mid: float, imb40: float | None) -
             out["near"] = name
             if imb40 is not None:
                 out["deep_wall"] = "레벨쪽" if imb40 * sign > 0 else "반대쪽"
-    return out
-
-
-def burst_state(vol1s: list[tuple[int, float]], oi_ring: dict[int, float], vol1s_p99: float | None,
-                now_sec: int) -> dict[str, Any]:
-    """최근 60초에서 «1초 거래량 ≥ 시간대 p99» 인 초를 찾아, 그 뒤 BURST_WINDOW_S 초의 ΔOI 를 본다.
-    ΔOI 임계 = 링에 있는 8초 ΔOI 절대값의 p90 (자기 보정). 급감이면 «청산 덩어리 통과»."""
-    out: dict[str, Any] = {"at": None, "vol1s": None, "doi": None, "state": "—", "p99": vol1s_p99}
-    if vol1s_p99 is None or not oi_ring:
-        return out
-    secs = sorted(oi_ring)
-    if len(secs) < 30:
-        return out
-    # 8초 ΔOI 분포(자기 보정 임계)
-    arr = np.array([oi_ring[s] for s in secs]); ts = np.array(secs)
-    d8 = []
-    for i in range(len(secs)):
-        j = np.searchsorted(ts, ts[i] + BURST_WINDOW_S, side="right") - 1
-        if j > i:
-            d8.append(arr[j] - arr[i])
-    thr = float(np.quantile(np.abs(d8), BURST_DOI_ABS_PCT)) if len(d8) >= 20 else None
-    hits = [(s, v) for s, v in vol1s if v >= vol1s_p99 and now_sec - 90 <= s <= now_sec - 2]
-    if not hits:
-        return out
-    s, v = hits[-1]
-    before = [k for k in secs if k <= s]
-    after = [k for k in secs if s < k <= s + BURST_WINDOW_S]
-    out.update(at=s, vol1s=v)
-    if not before or not after:
-        out["state"] = "OI 대기"
-        return out
-    doi = oi_ring[after[-1]] - oi_ring[before[-1]]
-    out["doi"] = doi
-    if thr is None:
-        out["state"] = "기준없음"
-    elif doi <= -thr:
-        out["state"] = "청산 덩어리 통과"
-    elif doi >= thr:
-        out["state"] = "신규 포지션 유입"
-    else:
-        out["state"] = "OI 변화 없음"
-    out["thr"] = thr
     return out
 
 
@@ -293,22 +249,6 @@ def flow_hour_scales(db_path: Path, days: int = FLOW_SCALE_DAYS, symbol: str = "
     return flow_hour_scales_from_bars(rows)
 
 
-def liq_prev_minute(db_path: Path) -> dict[str, Any] | None:
-    """tail_risk_1m 의 마지막 완결 분 (봇이 쓰는 표, 읽기 전용)."""
-    try:
-        import duckdb  # noqa: PLC0415
-        con = duckdb.connect(str(db_path), read_only=True)
-        try:
-            row = con.execute("SELECT epoch(ts), long_usd_1m, short_usd_1m FROM tail_risk_1m ORDER BY ts DESC LIMIT 1").fetchone()
-        finally:
-            con.close()
-    except Exception:  # noqa: BLE001
-        return None
-    if not row:
-        return None
-    return {"ts": int(row[0]), "long": float(row[1] or 0.0), "short": float(row[2] or 0.0)}
-
-
 def deriv_from_ring(ring: dict[int, tuple[float, float, float]], horizon_s: int, pct: float,
                     step_s: int = 30, min_samples: int = 60) -> dict[str, Any]:
     """markPrice@1s 링 {sec: (mark, index, funding)} → 펀딩·베이시스(bp)·지평 전 대비 Δ베이시스·그 임계.
@@ -328,7 +268,7 @@ def deriv_from_ring(ring: dict[int, tuple[float, float, float]], horizon_s: int,
     return out
 
 
-if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근접 판정, 버스트 판정
+if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근접 판정, 베이시스 파생
     # flow_hour_scales_from_bars: 8일 × 5분 · 리테일 0 이면 전 시 제외 · 셋 다 흔들리면 24시 전부 · 6일치면 표본 부족
     _rng = np.random.default_rng(0)
     #   2026-10-05 키 = (주말, 시): 15일(화요일 시작) = 평일 11일·주말 4일 → 48칸 · 6일치(평일 4·주말 2) → 표본 부족
@@ -368,11 +308,6 @@ if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근�
     c = sr_context(lv, 2600.0, imb40=0.3)
     assert c["near"] == "지지근접" and c["deep_wall"] == "레벨쪽" and round(c["sup_bp"], 2) == 7.69
     assert sr_context(lv, 2600.0, imb40=-0.3)["deep_wall"] == "반대쪽" and sr_context(lv, 2620.0, 0.0)["near"] == "없음"
-    now = 1_000_000
-    ring = {now - 120 + i: 1_000_000.0 - (300.0 if i >= 100 else 0.0) for i in range(0, 121, 4)}  # 20초 전에 −300
-    b = burst_state([(now - 24, 900.0)], ring, vol1s_p99=500.0, now_sec=now)
-    assert b["state"] == "청산 덩어리 통과" and b["doi"] == -300.0, b
-    assert burst_state([(now - 24, 100.0)], ring, 500.0, now)["state"] == "—"
     # 베이시스 파생 -- 프리미엄이 지평 동안 1bp→3bp 로 벌어지면 Δ=+2, 임계는 링 분위
     ring = {i: (2600.0 * (1 + (1.0 + 2.0 * (i / 7200)) / 1e4), 2600.0, -0.0002) for i in range(0, 7201)}
     dv = deriv_from_ring(ring, horizon_s=1800, pct=0.75)

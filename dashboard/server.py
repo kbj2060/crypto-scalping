@@ -4126,7 +4126,7 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))
     app.router.add_get("/api/liquidation-5m-history", api_liquidation_5m_history)
     app.router.add_get("/api/ops-status", api_ops_status)
-    # show_index=False to match /data/live/ below: this directory is reachable from the
+    # show_index=False (data/live 는 2026-10-19 보안 수정으로 더는 정적 서빙하지 않는다): this directory is reachable from the
     # public tunnel, and a listing advertised every file sitting in it (e.g. the
     # *.bak_pre_live_tab_removal_20260831 snapshots) rather than just the three the page
     # actually loads. The explicit /dashboard/live[/] routes above already serve the page

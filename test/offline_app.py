@@ -16,3 +16,16 @@ def offline_app(server):
         del sig[:]
         sig.extend(keep)
     return app
+
+
+def patch_live_dir(server, path):
+    """server·orders·coin_flow 가 LIVE_DIR 을 각자 든다(2026-10-19 server.py 분리) -- server 것만 바꾸면
+    주문 쪽(manual_bracket_state.json 등)이 실제 data/live 를 본다. 셋 다 바꿔야 격리된다."""
+    from contextlib import ExitStack
+    from unittest import mock
+
+    from dashboard import coin_flow, orders
+    stack = ExitStack()
+    for mod in (server, orders, coin_flow):
+        stack.enter_context(mock.patch.object(mod, "LIVE_DIR", path))
+    return stack
