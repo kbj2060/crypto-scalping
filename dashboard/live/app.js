@@ -6544,6 +6544,12 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
     // 이웃끼리 겹친다 -- 라벨을 버리지 않고 **겹치면 한 줄씩 내린다**(값은 다 보여야 한다).
     const deltaBoxes = [];
     const deltaFont = bw >= 34 ? 11 : 9;
+    // 2026-10-20 사용자 «어느 순간까지는 델타가 보이다가 아예 겹치는 구간부터는 델타를 제거»: 자리는 늘 다 계산하고(아래 사슬),
+    //   그리기는 봉 루프 뒤로 미룬다 -- 제자리(봉 바로 아래)에 못 앉고 밀려난 라벨이 많으면(DELTA_CROWD 초과) 그 창은 델타를 통째로 안 그린다.
+    //   일부만 지우면 «어느 봉은 델타가 없나»로 읽히니 전부 아니면 전무. 값은 봉 호버 툴팁에 그대로 있다.
+    const DELTA_CROWD = 0.3;   // 실측(10-20 1920·1700): 2h .12~.17 · 3h .17 · 4h .23~.27 · 6h .39~.42 · 12h .55~.58 → 4h 까지 보이고 6h 부터 뺀다
+    const deltaDraws = [];
+    let deltaBumped = 0;
     const pocPts = [];    // 2026-09-19 사용자 요청: 봉별 POC 를 선으로 잇는다.
     barRows.forEach((rows, i) => {
       const c = candles[i], x = xAt(i);
@@ -6637,7 +6643,7 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         // 글자 폭 근사(굵은 숫자 ~0.62em) 로 상자를 만들고, 겹치면 아래로 한 줄씩 민다.
         const label = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
         const halfW = label.length * deltaFont * 0.34 + 2;
-        const cxD = x + bw / 2;
+        const cxD = x + bw / 2, dY0 = dY;
         for (let guard = 0; guard < 6; guard++) {
           const hit = deltaBoxes.some((b) =>
             Math.abs(b.y - dY) < deltaFont + 1 && cxD + halfW > b.x1 && cxD - halfW < b.x2);
@@ -6645,15 +6651,16 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
           dY += deltaFont + 2;
         }
         deltaBoxes.push({ x1: cxD - halfW, x2: cxD + halfW, y: dY });
+        if (dY !== dY0) deltaBumped++;
         // 🔴여기까지의 **산수는 늘 돈다** -- dY 는 앞선 봉들의 충돌회피 결과에 달려 있어서
         //   건너뛰면 사슬이 끊긴다. 캐시하는 것은 «만들어진 노드»뿐이다.
         // ⭐그래서 키가 사슬 해시를 들 필요가 없다: dY 가 **이미 그 사슬의 결과**다.
         //   아래 다섯이 이 노드의 입력 전부이므로, 같으면 노드도 같다.
         const dSig = deltaFont + "|" + cxD + "|" + dY + "|" + label + "|" + c.time
                      + "|" + buyTot.toFixed(1) + "|" + sellTot.toFixed(1);
+        deltaDraws.push(() => {
         const dPrev = deltaCache.get(c.time);
-        if (dPrev && dPrev.sig === dSig) { svg.appendChild(dPrev.n); }
-        else {
+        if (dPrev && dPrev.sig === dSig) { svg.appendChild(dPrev.n); return; }
         const dTxt = document.createElementNS(NS, "text");
         dTxt.setAttribute("x", cxD); dTxt.setAttribute("y", dY);
         dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", String(deltaFont));
@@ -6667,9 +6674,11 @@ function renderCandleSvg(svg, candles, journal, entryPrice, currentPrice, riskLe
         if (plotClip) dTxt.setAttribute("clip-path", plotClip);
         svg.appendChild(dTxt);
         deltaCache.set(c.time, { sig: dSig, n: dTxt });
-        }
+        });
       }
     });
+    renderCandleSvg._deltaStats = { n: deltaDraws.length, bumped: deltaBumped, bars: candles.length };   // 시험·진단용
+    if (deltaDraws.length && deltaBumped / deltaDraws.length <= DELTA_CROWD) deltaDraws.forEach((f) => f());
 
     // 창 밖으로 나간 봉의 캐시는 버린다 -- 안 그러면 탭을 켜둔 채로 며칠이면 노드가 쌓인다.
     // 🔴호출부가 하나뿐이라(renderSnapshotChart) 캐시를 함수에 달아도 안전하다. 두 번째
