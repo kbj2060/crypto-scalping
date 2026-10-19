@@ -246,7 +246,7 @@ class ContextStore:
 
 
 async def collect(inst: str, db_path: Path) -> None:
-    from aiohttp import ClientSession, ClientTimeout, WSMsgType
+    from aiohttp import ClientSession, ClientTimeout
 
     ct_val = CT_VALS.get(inst)
     if ct_val is None:

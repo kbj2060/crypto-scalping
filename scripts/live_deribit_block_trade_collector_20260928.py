@@ -289,7 +289,6 @@ async def flush_buf() -> tuple[int, int, int]:
 
 async def chain_loop() -> None:
     while True:
-        t0 = time.time()
         try:
             if _BUF:
                 await flush_buf()

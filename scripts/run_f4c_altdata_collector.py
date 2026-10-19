@@ -10,7 +10,6 @@ WS-D의 D4 수집 건강 감시에 추후 편입 예정.
 """
 from __future__ import annotations
 
-import json
 import sys
 import time
 
