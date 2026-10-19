@@ -205,7 +205,7 @@ from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, bracket_action, bracket_keep_farther_sl, bracket_key, bracket_merge, bracket_rekey, build_bracket_plan, build_entry_plan, build_exit_plan,
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
     COMMIT_CAP_X, HOLD_CAP_X, commit_rule_l, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
-from scripts.live_manual_peg_execute_20260912 import (  # noqa: E402
+from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
     WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_add_order, place_bracket, place_stop, run_entry, run_entry_wait, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
 # 읽는다(요청 경로 계산 금지 -- 2026-09-10 스레드 풀 고갈 실장애).

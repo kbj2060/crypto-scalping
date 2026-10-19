@@ -139,7 +139,7 @@ def facts_apt() -> list[dict]:
 
 async def _algos(symbols: list[str]) -> dict:
     import aiohttp
-    import live_manual_peg_execute_20260912 as M
+    from live.execution import live_manual_peg_execute_20260912 as M
     key, sec = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
     if not (key and sec):
         return {"error": "API 키 없음"}

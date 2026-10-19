@@ -10,7 +10,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-import scripts.live_manual_peg_execute_20260912 as ex  # noqa: E402
+import live.execution.live_manual_peg_execute_20260912 as ex  # noqa: E402
 from scripts.live_eth_trade_plan_20260913 import execution_plan, plan_now  # noqa: E402
 
 RATES = {"ETHUSDC": {"makerCommissionRate": "0.000000", "takerCommissionRate": "0.000400"},
