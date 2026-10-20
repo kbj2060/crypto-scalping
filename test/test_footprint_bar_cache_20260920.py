@@ -67,7 +67,11 @@ class BarCacheKeyTest(unittest.TestCase):
         branch = _footprint_branch(_src())
         self.assertIn("prev.levels === levelsRef", branch, "봉 데이터 신원이 키에 없다")
         self.assertIn("prev.geom === geomSig", branch, "기하가 키에 없다")
-        self.assertIn("prev.i === i", branch, "봉의 x 위치(i)가 키에 없다")
+        # 2026-10-20 x 위치는 키가 아니라 transform 이다(끌기 연속 -- 소수 봉 이동에 x 만 바뀌어도 캐시가 맞게). 그룹 안은 제자리(x=0).
+        self.assertIn('barG.setAttribute("transform", `translate(', branch, "봉 그룹을 x 로 옮기는 transform 이 없다")
+        self.assertLess(branch.index('barG.setAttribute("transform"'), branch.index("if (!reuse) {"),
+                        "transform 이 캐시 블록 안이다 -- 재사용된 봉이 옛 자리에 남는다")
+        self.assertIn("const x = 0;", branch, "그룹 안 그림이 제자리(x=0) 좌표가 아니다 -- transform 과 겹쳐 두 번 옮겨진다")
         for f in ("prev.o === c.open", "prev.h === c.high",
                   "prev.l === c.low", "prev.c === c.close"):
             with self.subTest(f=f):

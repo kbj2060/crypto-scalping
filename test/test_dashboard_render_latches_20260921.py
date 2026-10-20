@@ -64,12 +64,14 @@ def test_density_opacity_is_mode_independent() -> None:
     # 🔴파일 전체에서 첫 fill-opacity 를 집으면 안 된다(다른 rect 가 여럿이다) --
     #   drawDensitySeg 본문으로 범위를 좁힌다. 2026-09-21 이 검사기 자신의 첫 판이
     #   그 실수로 주입한 회귀를 놓쳤다.
-    body = re.search(r"const drawDensitySeg = \(.*?\n  \};", src, re.S)
+    # 2026-10-20 칸은 같은 농도끼리 이어 붙여 path 로 모은다(densRunPut) -- 범위 = drawDensitySeg ~ 스냅샷 정렬 직전.
+    body = re.search(r"const drawDensitySeg = \(.*?const sortedDensityHistory", src, re.S)
     assert body, "drawDensitySeg 를 못 찾았다"
-    m = re.search(r'setAttribute\("fill-opacity", ([^)]+)\)', body.group(0))
+    m = re.search(r'setAttribute\("fill-opacity", ([^)]+)\)|"fill-opacity": ([^,}]+)', body.group(0))
     assert m, "밀도 rect 의 fill-opacity 를 못 찾았다"
-    assert "footprint" not in m.group(1), \
-        f"밀도 알파가 모드에 의존한다 -- 같은 값이 두 색으로 보인다: {m.group(1)}"
+    alpha = m.group(1) or m.group(2)
+    assert "footprint" not in alpha, \
+        f"밀도 알파가 모드에 의존한다 -- 같은 값이 두 색으로 보인다: {alpha}"
 
 
 def test_density_drawing_is_one_path_for_both_modes() -> None:
