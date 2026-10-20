@@ -170,14 +170,18 @@ def verify() -> int:
 
 
 LONG = ROOT / "data" / "live" / "vol_panel" / "ETHUSDT_5m.parquet"   # 2026-10-15 긴 5분봉(2021-12~) -- 매달 vision 으로 이어 받는다
+# 2026-10-21 XRP 판(사용자 «XRP 4h 변동성도 매달 재학습»): ETH+XRP 합쳐 학습(10-20 표본외 1위 -- scripts/research_xrp_vol4h_20261020.py) ·
+#   확대 확률·품질 문은 XRP 행으로만. ETH 패널은 ETH 재학습(같은 날 먼저)이 이어 받은 것을 읽기만 한다.
+PANELS = {"eth": LONG, "xrp": ROOT / "data" / "live" / "vol_panel" / "XRPUSDT_5m.parquet"}
+ARTIFACTS = {"eth": ARTIFACT, "xrp": ROOT / "data" / "live" / "xrp_sizing_vol_model.joblib"}
 EXPAND_LABEL = 1.3                                                  # 확대 = 다음 4h 실현변동 ≥ 직전 4h × 1.3
 
 
-def _vision_day(d: str) -> pd.DataFrame | None:
+def _vision_day(d: str, sym: str = "ETHUSDT") -> pd.DataFrame | None:
     """data.binance.vision 선물 5분봉 하루(정적 아카이브 -- REST 아님). 없으면 None."""
     import io, urllib.request, zipfile
     try:
-        with urllib.request.urlopen(f"https://data.binance.vision/data/futures/um/daily/klines/ETHUSDT/5m/ETHUSDT-5m-{d}.zip", timeout=60) as r:
+        with urllib.request.urlopen(f"https://data.binance.vision/data/futures/um/daily/klines/{sym}/5m/{sym}-5m-{d}.zip", timeout=60) as r:
             z = zipfile.ZipFile(io.BytesIO(r.read())); txt = z.read(z.namelist()[0]).decode()
     except Exception:
         return None
@@ -208,23 +212,27 @@ def vs_prev(models, old_models, X: pd.DataFrame) -> dict:
     return out
 
 
-def monthly() -> int:
-    """매달 1일 cron: LONG 을 어제까지 이어 받고 → 지난 판으로 최근 30일 표본외 예측 → 확대 확률 상수 적합
-    → 전 기간 재학습 → 품질 문(지난 판과 맞대기) → 아티팩트 교체(지난 판은 교체 시각 이름으로 남김)."""
-    import joblib
+def _extend(path: Path, sym: str) -> pd.DataFrame:
+    """긴 5분봉 파일의 빠진 날(처음~어제 UTC)을 vision 에서 받아 합치고 저장. 10-19: 빠진 날은 어디든 받는다
+    (옛: 마지막 날 뒤만 -- 서버 LONG 에 2023-12 한 달 구멍이 남아 있었다)."""
     from concurrent.futures import ThreadPoolExecutor
-    from sklearn.ensemble import HistGradientBoostingRegressor
-    d = pd.read_parquet(LONG)
+    d = pd.read_parquet(path)
     y0 = pd.Timestamp.utcnow().tz_localize(None).normalize() - pd.Timedelta("1D")
-    have = set(d.timestamp.dt.normalize())   # 10-19: 빠진 날은 어디든 받는다(옛: 마지막 날 뒤만 -- 서버 LONG 에 2023-12 한 달 구멍이 남아 있었다)
+    n = d.groupby(d.timestamp.dt.normalize()).size()
+    have = set(n[n >= 288].index)   # 10-21: 덜 찬 날도 다시 받는다(서버 ETH 패널 2023-12-31 이 108봉 -- 15시간 구멍이 재학습을 막았다)
     days = [x.strftime("%Y-%m-%d") for x in pd.date_range(d.timestamp.min().normalize(), y0) if x not in have]
     with ThreadPoolExecutor(8) as ex:
-        add = [x for x in ex.map(_vision_day, days) if x is not None]
+        add = [x for x in ex.map(lambda x: _vision_day(x, sym), days) if x is not None]
     d = pd.concat([d] + add).drop_duplicates("timestamp", keep="last").sort_values("timestamp").reset_index(drop=True)
-    tmp = LONG.with_suffix(".tmp")
-    d.to_parquet(tmp); tmp.replace(LONG)   # 쓰다 죽어도 지난 LONG 이 남게
+    tmp = path.with_suffix(".tmp")
+    d.to_parquet(tmp); tmp.replace(path)   # 쓰다 죽어도 지난 파일이 남게
+    print(f"{sym} 긴 5분봉 {len(d):,}행 ~{d.timestamp.max()} (+{len(add)}/{len(days)}일) · 최대 간격 {d.timestamp.diff().max()}", flush=True)
+    return d
+
+
+def _frame(d: pd.DataFrame):
+    """긴 5분봉 → (피쳐, 다음 4h 실현변동 y, 쓸 행, 시각). 롤링 창이 위치 기준이라 1시간 넘는 구멍이 있으면 막는다."""
     gap = d.timestamp.diff().max()
-    print(f"긴 5분봉 {len(d):,}행 ~{d.timestamp.max()} (+{len(add)}/{len(days)}일) · 최대 간격 {gap}", flush=True)
     if gap > pd.Timedelta("1h"):   # 롤링 창이 위치 기준이라 구멍 = 5분봉 하나짜리 거대 수익률로 학습된다
         raise SystemExit(f"5분봉 구멍 {gap} -- 받지 못한 날이 있다, 재학습 안 함(지난 판 유지)")
     X = build_features(d["timestamp"], d["close"].to_numpy(float), d["quote_volume"].to_numpy(float),
@@ -232,21 +240,39 @@ def monthly() -> int:
     lr = np.diff(np.log(np.maximum(d["close"].to_numpy(float), 1e-12)), prepend=0.0)
     y = pd.Series(lr).rolling(HOLD, min_periods=HOLD).std().shift(-HOLD).to_numpy()
     ok = np.isfinite(y) & (y > 0) & np.isfinite(X.to_numpy(float)).all(1)
-    ts = d["timestamp"].to_numpy()
-    old = load_model()
+    return X, y, ok, d["timestamp"].to_numpy()
+
+
+def monthly(asset: str = "eth") -> int:
+    """매달 1일 cron: LONG 을 어제까지 이어 받고 → 지난 판으로 최근 30일 표본외 예측 → 확대 확률 상수 적합
+    → 전 기간 재학습 → 품질 문(지난 판과 맞대기) → 아티팩트 교체(지난 판은 교체 시각 이름으로 남김).
+    asset="xrp": 같은 순서로 XRP 패널을 이어 받고 ETH 패널(읽기만)과 합쳐 학습 · 상수·품질 문·ref_pred 는 XRP 행."""
+    import joblib
+    from sklearn.ensemble import HistGradientBoostingRegressor
+    LONG, ARTIFACT, sym = PANELS[asset], ARTIFACTS[asset], f"{asset.upper()}USDT"   # noqa: N806 -- 아래 본문이 이 이름들을 그대로 쓴다
+    X, y, ok, ts = _frame(_extend(LONG, sym))
+    old = load_model(ARTIFACT)
     logit = None
     te = ok & (ts > np.datetime64(pd.Timestamp(old["train_end"]) + pd.Timedelta("1D"))) if old is not None else np.zeros(len(ts), bool)   # 지난 판 표본외
     if old is not None:
         if te.sum() >= 5000:
             logit = fit_expand_logit(predict_vol(old["models"], X[te]), np.exp(X["rv48"].to_numpy())[te], y[te])
             print(f"확대 확률 상수 {logit} · 표본외 {int(te.sum()):,}행", flush=True)
-    A = np.nan_to_num(X.to_numpy(float), nan=0.0, posinf=0.0, neginf=0.0)
-    models = [HistGradientBoostingRegressor(max_iter=300, learning_rate=0.06, max_depth=6, random_state=int(s)).fit(A[ok], np.log(y[ok]))
+    A, yt = np.nan_to_num(X.to_numpy(float)[ok], nan=0.0, posinf=0.0, neginf=0.0), y[ok]
+    extra = {}
+    if asset != "eth":   # 합쳐 학습 -- ETH 패널은 ETH 재학습이 이어 받은 그대로(어제까지 아니면 그만큼만)
+        Xe, ye, oke, tse = _frame(_extend(PANELS["eth"], "ETHUSDT"))   # ETH 재학습이 못 메운 날도 여기서 받는다(구멍이면 _frame 이 막는다)
+        A = np.vstack([A, np.nan_to_num(Xe.to_numpy(float)[oke], nan=0.0, posinf=0.0, neginf=0.0)])
+        yt = np.concatenate([yt, ye[oke]])
+        extra = {"symbol": sym, "train_symbols": [sym, "ETHUSDT"], "eth_train_end": str(pd.Timestamp(tse[oke].max()).date())}
+    models = [HistGradientBoostingRegressor(max_iter=300, learning_rate=0.06, max_depth=6, random_state=int(s)).fit(A, np.log(yt))
               for s in SEEDS]
     art = {"models": models, "features": FEATURES, "ref_pred": float(np.median(predict_vol(models, X[ok]))), "seeds": list(SEEDS),
            "train_end": str(pd.Timestamp(ts[ok].max()).date()), "hold_bars": HOLD, "n_train": int(ok.sum()),
            "train_start": str(pd.Timestamp(ts[ok].min()).date()),
-           "expand_logit": logit or (old or {}).get("expand_logit") or [-1.4950, 5.1671]}
+           "expand_logit": logit or (old or {}).get("expand_logit") or [-1.4950, 5.1671], **extra}
+    if asset != "eth":
+        art["n_train"] = int(len(yt))
     if te.sum() >= 2000:   # 지난 판 표본외 1주 이상 -- 첫 달(10-14 판 → 11-01)은 16일
         art["vs_prev"] = vs_prev(models, old["models"], X[te])
         print("지난 판 대비", art["vs_prev"], flush=True)
@@ -325,8 +351,8 @@ def _self_check() -> None:
 
 
 if __name__ == "__main__":
-    if "--monthly" in sys.argv:
-        raise SystemExit(monthly())
+    if "--monthly" in sys.argv:   # --asset xrp = XRP 판(ETH+XRP 합쳐 학습)
+        raise SystemExit(monthly(sys.argv[sys.argv.index("--asset") + 1] if "--asset" in sys.argv else "eth"))
     if "--verify" in sys.argv:
         raise SystemExit(verify())
     _self_check()
