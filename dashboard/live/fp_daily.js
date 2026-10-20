@@ -1,5 +1,6 @@
 // 일봉 풋프린트 (2026-10-08, 사용자 «일봉 풋프린트를 최대치로 · 축소/확대 · 델타·거래대금·OI·청산 · 30일 이상 · 4시간봉 없이»).
 // 서버 /api/footprint-daily(일 요약 전체) + /api/footprint-daily/cells(보이는 날의 가격 칸). ETH 만.
+// 2026-10-20 4시간봉(/api/footprint-4h)도 같은 그림·레인·히트맵으로 그린다(PERIODS -- 위 «4시간봉 없이»는 10-08 당시 요청).
 // 캔버스로 그린다 -- 최대 ~2,500일을 끌고 확대해야 해서 SVG 요소 수만 개를 프레임마다 갈아 끼울 수 없다.
 // 자리 = 5분 차트의 교체 영역(window.fpRegion) 위, 배경 없이(placeOverlay) -- 넓은 화면은 왼쪽 열(풋프린트~모의 판·지지/저항),
 //   오른쪽 1초 수급·시장 맥락 칸은 그대로(사용자 «풋프린트부 차트부터 모의 판+지지·저항까지 대체 · 시간봉과 스타일 통일»).
@@ -21,9 +22,9 @@
   // 2026-10-20 사용자 «4h 버튼 = 1주일을 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로»: 같은 그림·레인·청산 히트맵을 봉 길이만 바꿔 쓴다
   //   (서버 /api/footprint-4h · 지난 7일 + 형성 중 · OI = 칸 마지막 값 · 청산 = 칸 합 · 히트맵 = 칸 마감 시점). 시각 = 칸 시작(UTC 00·04·…시 = KST 09·13·…시).
   var PERIODS = {
-    "1d": { days: "/api/footprint-daily", cells: "/api/footprint-daily/cells", heatUrl: "/api/footprint-daily/heat", heat: true, span: 30, minSpan: 7, lanes: LANES, name: "일봉",
+    "1d": { days: "/api/footprint-daily", cells: "/api/footprint-daily/cells", heatUrl: "/api/footprint-daily/heat", span: 30, minSpan: 7, name: "일봉",
             views: [["30", "30일"], ["180", "6개월"], ["all", "전체"]] },
-    "4h": { days: "/api/footprint-4h", cells: "/api/footprint-4h/cells", heatUrl: "/api/footprint-4h/heat", heat: true, span: 12, minSpan: 3, lanes: LANES, name: "4시간봉",
+    "4h": { days: "/api/footprint-4h", cells: "/api/footprint-4h/cells", heatUrl: "/api/footprint-4h/heat", span: 12, minSpan: 3, name: "4시간봉",
             views: [["12", "2일"], ["42", "1주"], ["all", "전체"]] }
   };
   var P = function () { return PERIODS[S.period]; };
@@ -39,7 +40,7 @@
   //   고점 위(초록) · 봉 안(회색) · 저점 아래(빨강) 세 칸 100% 막대로 + 총액(2 × OI 달러) 가는 선. 🔴세 몫 합 = 늘 2 × OI -- 정보는 비율과 OI 크기.
 
   var S = { on: false, period: "1d", D: null, n: 0, i0: 0, span: DEFAULT_SPAN, cells: new Map(), want: null, loading: false,
-            heat: new Map(), heatWant: null, heatLoading: false, heatT: 0, heatOn: true,
+            heat: new Map(), stale: new Set(), heatWant: null, heatLoading: false, heatT: 0, heatOn: true,
             hover: null, timer: 0, raf: 0, drag: null, pinch: null, fetchT: 0, view: null, yOff: 0 };   // yOff = 세로 끌기(가격 단위, 10-09)
   var $ = function (id) { return document.getElementById(id); };
   var css = function (n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
@@ -62,17 +63,22 @@
 
   // ── 데이터 ─────────────────────────────────────────────────────────────────────────
   async function loadDays(since) {
+    var per = S.period;   // 리뷰 3: 받는 사이 1d ↔ 4h 를 바꾸면 늦게 온 응답은 버린다(다른 봉 길이 상태에 섞이면 4h 갱신이 일봉 키를 since 로 보내 400)
     var r = await fetch(since ? P().days + "?since=" + since : P().days, { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     var p = await r.json(), c = p.cols, oldN = S.n;
+    if (per !== S.period) return;
     var atEnd = oldN > 0 && S.i0 + S.span >= oldN - 0.5;          // 끝에 붙어 보던 중이면 새 날을 따라간다
     if (!since || !S.D) {
       S.D = c;
     } else {                                      // 같은 날은 덮고 새 날은 붙인다
       var at = S.D.d.indexOf(c.d[0]), keep = at < 0 ? S.D.d.length : at;
       Object.keys(c).forEach(function (k) { S.D[k] = S.D[k].slice(0, keep).concat(c[k]); });
-      var today = c.d[c.d.length - 1];
-      Array.from(S.cells.keys()).forEach(function (k) { if (k.slice(k.indexOf("|") + 1) === today) S.cells.delete(k); });
+      // 리뷰 10: since 창(직전 칸 + 형성 중)의 가격 칸·히트맵은 다시 묻는다 -- 형성 중 칸의 히트맵은 시간마다 바뀌고 막 닫힌 칸은 서버가 마감 뒤 다시 센다.
+      //   지우지 않고 «묵음»만 표시(다시 받을 때까지 옛 그림) + want 를 비워 같은 화면이어도 다시 예약된다(전에는 오늘 칸만 지우고 다시 묻지 않아 캔들로 남았다).
+      var fresh = new Set(c.d);
+      [["c", S.cells], ["h", S.heat]].forEach(function (m) { m[1].forEach(function (_, k) { if (fresh.has(k.slice(k.indexOf("|") + 1))) S.stale.add(m[0] + k); }); });
+      S.want = null; S.heatWant = null;
     }
     S.n = S.D.d.length;
     if (atEnd) S.i0 += S.n - oldN;
@@ -92,22 +98,33 @@
     clearTimeout(S.heatT);
     S.heatT = setTimeout(fetchHeat, 160);
   }
+  // 리뷰 11: 4시간봉 히트맵은 한 요청에 60칸(10일)까지(footprint_daily.h4_heat_payload -- 넘으면 400). 창을 며칠 켜 두면 S.D 가 7일 넘게 쌓여
+  //   «전체»·넓은 줌이 늘 400 이었다(같은 want 는 다시 안 묻는다) → 시각 폭 ≤ 60칸씩 나눠 묻는다. 일봉은 한 번에(서버 상한 4000일 > 소급본 ~2,500일).
+  var H4_HEAT_SPAN_MS = 60 * 4 * 3600e3;
+  function heatChunks(keys, h4) {
+    if (!h4) return keys.length ? [keys] : [];
+    var out = [], t = function (k) { return Date.parse(k + ":00:00Z"); };
+    keys.forEach(function (k) { var c = out[out.length - 1]; if (c && t(k) - t(c[0]) <= H4_HEAT_SPAN_MS) c.push(k); else out.push([k]); });
+    return out;
+  }
   async function fetchHeat() {
     var w = S.heatWant;
     if (!w || S.heatLoading) return;
     S.heatLoading = true;
+    var per = S.period, url = P().heatUrl, days = S.D.d.slice(w.a, w.b + 1);   // 키는 await 전에 -- 받는 사이 봉 길이가 바뀌면 버린다(리뷰 3)
     var rows = w.row === HEAT_BOX_ROW ? [w.row] : [w.row, HEAT_BOX_ROW];   // 화면 칸 + 테두리 순위용 고정 칸
     for (var q = 0; q < rows.length; q++) {
-      var row = rows[q], miss = [];
-      for (var i = w.a; i <= w.b; i++) if (!S.heat.has(row + "|" + S.D.d[i])) miss.push(i);
-      if (!miss.length) continue;
-      try {
-        var r = await fetch(P().heatUrl + "?from=" + S.D.d[miss[0]] + "&to=" + S.D.d[miss[miss.length - 1]] + "&row=" + row, { cache: "no-store" });
-        if (r.ok) {
-          var p = await r.json();
-          miss.forEach(function (j) { S.heat.set(row + "|" + S.D.d[j], p.heat[S.D.d[j]] || null); });
-        }
-      } catch (e) { /* 다음 그리기 때 다시 묻는다 */ }
+      var row = rows[q], parts = heatChunks(days.filter(function (k) { return !S.heat.has(row + "|" + k) || S.stale.has("h" + row + "|" + k); }), per === "4h");
+      for (var c = 0; c < parts.length && per === S.period; c++) {
+        var part = parts[c];
+        try {
+          var r = await fetch(url + "?from=" + part[0] + "&to=" + part[part.length - 1] + "&row=" + row, { cache: "no-store" });
+          if (r.ok) {
+            var p = await r.json();
+            if (per === S.period) part.forEach(function (k) { S.heat.set(row + "|" + k, p.heat[k] || null); S.stale.delete("h" + row + "|" + k); });
+          }
+        } catch (e) { /* 다음 그리기 때 다시 묻는다 */ }
+      }
     }
     S.heatLoading = false;
     redraw();
@@ -173,15 +190,14 @@
   async function fetchCells() {
     var w = S.want;
     if (!w || S.loading) return;
-    var miss = [];
-    for (var i = w.a; i <= w.b; i++) if (!S.cells.has(w.row + "|" + S.D.d[i])) miss.push(i);
+    var per = S.period, miss = S.D.d.slice(w.a, w.b + 1).filter(function (k) { return !S.cells.has(w.row + "|" + k) || S.stale.has("c" + w.row + "|" + k); });
     if (!miss.length) return;
     S.loading = true;
     try {
-      var r = await fetch(P().cells + "?from=" + S.D.d[miss[0]] + "&to=" + S.D.d[miss[miss.length - 1]] + "&row=" + w.row, { cache: "no-store" });
+      var r = await fetch(P().cells + "?from=" + miss[0] + "&to=" + miss[miss.length - 1] + "&row=" + w.row, { cache: "no-store" });
       if (r.ok) {
         var p = await r.json();
-        miss.forEach(function (j) { S.cells.set(w.row + "|" + S.D.d[j], p.cells[S.D.d[j]] || null); });
+        if (per === S.period) miss.forEach(function (k) { S.cells.set(w.row + "|" + k, p.cells[k] || null); S.stale.delete("c" + w.row + "|" + k); });   // 리뷰 3
       }
     } catch (e) { /* 다음 그리기 때 다시 묻는다 */ }
     S.loading = false;
@@ -194,9 +210,9 @@
     var W = cv.clientWidth, H = cv.clientHeight, narrow = W < 560;
     var L = 8, R = narrow ? 52 : 66, axisH = 26, gap = 8;
     var laneH = Math.round((H - axisH) * (narrow ? 0.095 : 0.1));
-    var priceH = H - axisH - P().lanes.length * (laneH + gap) - 6;
+    var priceH = H - axisH - LANES.length * (laneH + gap) - 6;
     var lanes = {}, y = 6 + priceH + gap;
-    P().lanes.forEach(function (l) { lanes[l[0]] = { y: y, h: laneH }; y += laneH + gap; });
+    LANES.forEach(function (l) { lanes[l[0]] = { y: y, h: laneH }; y += laneH + gap; });
     return { W: W, H: H, L: L, R: R, plotW: W - L - R, top: 6, priceH: priceH, lanes: lanes, axisY: H - axisH, narrow: narrow };
   }
 
@@ -263,7 +279,7 @@
     var yOf = function (p) { return G.top + (hi - p) / (hi - lo) * G.priceH; };
     var cellMode = bw >= cellMinPx(G), row = rowFor(lo, hi, G.priceH);
     if (cellMode) scheduleCells(row, a, b);
-    if (P().heat) scheduleHeat(row, a, b);   // 히트맵을 꺼도 받는다 -- «추정 청산 위·아래» 레인이 같은 데이터를 쓴다(그리기만 켜기/끄기)
+    scheduleHeat(row, a, b);   // 히트맵을 꺼도 받는다 -- «추정 청산 위·아래» 레인이 같은 데이터를 쓴다(그리기만 켜기/끄기)
     S.view = { G: G, a: a, b: b, lo: lo, hi: hi, bw: bw, row: row, cellMode: cellMode };
 
     g.save();
@@ -273,7 +289,7 @@
     g.strokeStyle = C.line; g.globalAlpha = 0.82; g.lineWidth = 1;      // 5분 차트 .chart-grid 와 같은 격자
     for (p = Math.ceil(lo / step) * step; p <= hi; p += step) { y = Math.round(yOf(p)) + 0.5; g.beginPath(); g.moveTo(G.L, y); g.lineTo(G.L + G.plotW, y); g.stroke(); }
     g.globalAlpha = 1;
-    if (S.heatOn && P().heat) drawHeat(g, G, C, a, b, row, xOf, bw, yOf);            // 봉 아래 배경
+    if (S.heatOn) drawHeat(g, G, C, a, b, row, xOf, bw, yOf);            // 봉 아래 배경
     for (i = a; i <= b; i++) {
       var x = xOf(i), up = D.c[i] >= D.o[i], col = up ? C.good : C.bad;
       var cell = cellMode ? S.cells.get(row + "|" + D.d[i]) : null;
@@ -372,7 +388,7 @@
 
   function laneText(k, i) {
     var v = laneVal(k, i), D = S.D;
-    if (v == null) return k === "liq" ? "모름(수집 전)" : k === "oi" ? (D.oi[i] == null ? "모름(2022-01 전)" : qty(D.oi[i]) + " ETH") : "모름";
+    if (v == null) return k === "liq" ? "모름(수집 전)" : k === "oi" ? (D.oi[i] == null ? (S.period === "4h" ? "모름" : "모름(2022-01 전)") : qty(D.oi[i]) + " ETH") : "모름";
     if (k === "lmap") {
       var sh = (v[0] + v[1] + v[3]) || 1, pu = 100 * v[0] / sh, pd = 100 * v[1] / sh, pm = 100 * v[3] / sh;
       return "고점 위 " + pu.toFixed(0) + "% · 봉 안 " + pm.toFixed(0) + "% · 저점 아래 " + pd.toFixed(0) + "%" + (v[2] ? " · 합 " + usd(v[2]) : " (OI 모름)");
@@ -383,7 +399,7 @@
 
   function drawLanes(g, C, G, a, b, xOf, bw) {
     var D = S.D, w = Math.max(1, Math.min(bw * 0.62, 44)), hi = S.hover ? S.hover.i : S.n - 1;
-    P().lanes.forEach(function (lane) {
+    LANES.forEach(function (lane) {
       var k = lane[0], name = lane[1], y = G.lanes[k].y, h = G.lanes[k].h, i, v;
       g.strokeStyle = C.soft; g.lineWidth = 1;
       g.beginPath(); g.moveTo(G.L, y + 0.5); g.lineTo(G.L + G.plotW, y + 0.5); g.stroke();
@@ -620,13 +636,13 @@
         var hk = Math.floor(p / v.row) - Math.floor(hh[0] / v.row);
         if (hk >= 0 && hk < hh[2].length && hh[2][hk] > 0) {
           var hlo = hh[0] + hk * v.row, oiU = D.oi[i] != null ? D.oi[i] * D.c[i] : null, up = hlo + v.row / 2 >= D.c[i];
-          html = (html ? html + "<br>" : "<b>" + D.d[i] + " · $" + px(hlo) + "–" + px(hlo + v.row) + "</b><br>") +
-                 "추정 " + (up ? "숏" : "롱") + " 청산 " + (oiU ? usd(hh[2][hk] * 2 * oiU) : (hh[2][hk] * 100).toFixed(1) + "% (OI 없음)") + " · 그날 마감 지도";
+          html = (html ? html + "<br>" : "<b>" + lab(D.d[i]) + " · $" + px(hlo) + "–" + px(hlo + v.row) + "</b><br>") +
+                 "추정 " + (up ? "숏" : "롱") + " 청산 " + (oiU ? usd(hh[2][hk] * 2 * oiU) : (hh[2][hk] * 100).toFixed(1) + "% (OI 없음)") + " · " + (S.period === "4h" ? "그 칸" : "그날") + " 마감 지도";
         }
       }
     } else {
       html = "<b>" + lab(D.d[i]) + "</b><br>델타 " + laneText("delta", i) + " · 거래대금 " + laneText("turn", i) +
-             (P().heat ? "<br>OI " + laneText("oi", i) + "<br>청산 " + laneText("liq", i) + "<br>추정 청산(그날 마감 7일 지도) " + laneText("lmap", i) : "");
+             "<br>OI " + laneText("oi", i) + "<br>청산 " + laneText("liq", i) + "<br>추정 청산(" + (S.period === "4h" ? "그 칸" : "그날") + " 마감 7일 지도) " + laneText("lmap", i);
     }
     if (html) tipShow(e.pageX, e.pageY, html); else tipHide();
     redraw();
@@ -637,20 +653,18 @@
   var NOTE_4H = "시각 = 칸 시작(보는 시계 · UTC 00·04·08·12·16·20시 경계 = KST 09·13·17·21·01·05시) · 지난 7일 + 형성 중 칸 · 1d 와 같은 그림을 4시간 칸으로 -- " +
                 "칸 = 공격자 매도(왼쪽) / 매수(오른쪽) · 주황 테두리 = 그 4시간 가장 많이 거래된 가격 · 파란 칸 = 그 칸 마감의 추정 청산 밀도(7일 1시간봉) · " +
                 "OI = 막대 직전 칸 대비 · 선 수준 · 청산 = 그 4시간 강제주문 합 · 추정 청산 = 그 칸 마감 지도의 고점 위/봉 안/저점 아래 비율 · 원천 = 우리 체결 테이프·OI·청산 수집기 · 서술이지 신호가 아님";
-  function syncPeriodUi() {   // 범위 버튼·히트맵 버튼·설명 줄을 지금 봉 길이에 맞춘다
+  function syncPeriodUi() {   // 범위 버튼·설명 줄·aria 를 지금 봉 길이에 맞춘다
     var tools = document.querySelectorAll("#fpDailyTools [data-view]:not([data-view=in]):not([data-view=out])");
     P().views.forEach(function (v, k) { if (tools[k]) { tools[k].dataset.view = v[0]; tools[k].textContent = v[1]; } });
-    var hb = document.querySelector("#fpDailyTools [data-heat]");
-    if (hb) hb.hidden = !P().heat;
     var note = document.querySelector("#fpDaily .fpd-note");
     if (note) { if (NOTE_1D === null) NOTE_1D = note.innerHTML; note.innerHTML = S.period === "4h" ? NOTE_4H : NOTE_1D; }
     var cv = $("fpDailyCanvas");
-    if (cv) cv.setAttribute("aria-label", "ETH " + P().name + " 풋프린트 — 가격 칸별 매수·매도와 델타·거래대금" + (P().heat ? "·OI·청산" : "") + ". 화살표 = 이동 · +/− = 확대/축소 · Home = 전체 · End = 기본 범위");
+    if (cv) cv.setAttribute("aria-label", "ETH " + P().name + " 풋프린트 — 가격 칸별 매수·매도와 델타·거래대금·OI·청산. 화살표 = 이동 · +/− = 확대/축소 · Home = 전체 · End = 기본 범위");
   }
   async function setOn(on, period) {
     on = on && ethOn();
     if (period && period !== S.period) {   // 봉 길이가 바뀌면 받은 것·보던 자리를 비운다
-      S.period = period; S.D = null; S.n = 0; S.cells.clear(); S.heat.clear(); S.want = null; S.heatWant = null; S.view = null; S.hover = null;
+      S.period = period; S.D = null; S.n = 0; S.cells.clear(); S.heat.clear(); S.stale.clear(); S.want = null; S.heatWant = null; S.view = null; S.hover = null;
       syncPeriodUi();
     }
     S.on = on;
@@ -674,6 +688,7 @@
         setView(defSpan());
         if (status) status.textContent = "";
       } catch (e) {
+        if (per !== S.period) return;      // 버린 쪽의 실패가 새 봉 길이 상태를 지우지 않게(리뷰 3)
         if (status) status.textContent = P().name + "을 못 받았습니다(" + e.message + ") · 버튼을 다시 누르면 재시도";
         S.D = null; S.n = 0;
         return;

@@ -38,7 +38,7 @@ class LiveFrameFallbackTest(unittest.TestCase):
         for needle in ("if (y0 !== yMin || y1 !== yMax) return false;",          # 축
                        "!== rowSize) return false;",                              # 행 크기(ATR)
                        "!densitySweep.has(b.price)",                             # 밀도 쓸림
-                       "tfT(last.time) !== c.time"):                             # 새 봉
+                       "if (tfl[tfl.length - 1] !== c) return false;"):          # 새 봉(5분봉 · 30m·1h 묶음 객체가 바뀜)
             with self.subTest(needle=needle):
                 self.assertIn(needle, body, f"{needle} -- 이 축이 바뀌어도 형성 봉만 칠해 낡은 그림이 남는다")
 

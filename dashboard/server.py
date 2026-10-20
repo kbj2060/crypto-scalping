@@ -1455,6 +1455,21 @@ def make_app() -> web.Application:
             out[int(ts.timestamp())] = row
         return out
 
+    def kline_candles(rows: list, now_ms: float, nd: int, veto_tail: int = TREND_VETO_N * 5) -> list[dict[str, float | int]]:
+        """바이낸스 5분 klines 원시 행 → 캔들 행: 추세 밴드(마감봉만으로 센다) · 세션 VWAP(형성 봉 포함 -- 그 봉까지의 VWAP) ·
+        형성 봉은 partial. SOL·XRP 시장 기록과 1주일 풋프린트 캔들이 같이 쓴다(리뷰: 같은 조립이 두 벌이었다)."""
+        closed = [r for r in rows if int(r[6]) < now_ms]
+        veto = trend_veto_rows(pd.DataFrame({"timestamp": pd.to_datetime([int(r[0]) for r in closed], unit="ms", utc=True),
+                                             "high": [float(r[2]) for r in closed], "low": [float(r[3]) for r in closed],
+                                             "close": [float(r[4]) for r in closed]}), veto_tail)
+        tss = [int(r[0]) // 1000 for r in rows]
+        vwap = mctx.vwap_rows(tss, [float(r[2]) for r in rows], [float(r[3]) for r in rows],
+                              [float(r[4]) for r in rows], [float(r[5]) for r in rows], nd=nd)
+        return [{"time": t, "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]),
+                 **veto.get(t, {}), **vwap.get(t, {}),
+                 **({"partial": True} if int(r[6]) >= now_ms else {})}   # 2026-10-11 형성 봉 표시(ETH 와 같은 뜻)
+                for t, r in zip(tss, rows)]
+
     market_rows_memo: dict[str, tuple[Any, list[dict[str, float | int]]]] = {}   # asset -> (프레임, 행)
 
     async def load_market_history_from_evidence_cache(asset: str) -> list[dict[str, float | int]]:
@@ -1521,29 +1536,7 @@ def make_app() -> web.Application:
                 {"symbol": MARKET_SYMBOLS[asset], "interval": "5m", "limit": 1000},
                 timeout=3.0, error_reason="market_history_upstream_error",
             )
-            now_ms = time.time() * 1000
-            closed = [r for r in rows if int(r[6]) < now_ms]
-            df = pd.DataFrame({"timestamp": pd.to_datetime([int(r[0]) for r in closed], unit="ms", utc=True),
-                               "high": [float(r[2]) for r in closed], "low": [float(r[3]) for r in closed],
-                               "close": [float(r[4]) for r in closed]})
-            veto = trend_veto_rows(df)
-            tss = [int(r[0]) // 1000 for r in rows]    # 세션 VWAP -- ETH 와 같은 규약(형성 중 봉 포함: 그 봉까지의 VWAP)
-            vwap = mctx.vwap_rows(tss, [float(r[2]) for r in rows], [float(r[3]) for r in rows],
-                                  [float(r[4]) for r in rows], [float(r[5]) for r in rows], nd=6)
-            candles = [
-                {
-                    "time": int(row[0]) // 1000,
-                    "open": float(row[1]),
-                    "high": float(row[2]),
-                    "low": float(row[3]),
-                    "close": float(row[4]),
-                    **veto.get(int(row[0]) // 1000, {}),
-                    **vwap.get(int(row[0]) // 1000, {}),
-                    **({"partial": True} if int(row[6]) >= now_ms else {}),   # 2026-10-11 형성 봉 표시(ETH 와 같은 뜻)
-                }
-                for row in rows[-200:]                # ETH 와 같은 200봉(16.6시간)
-            ]
-            return candles
+            return kline_candles(rows, time.time() * 1000, 6)[-200:]   # ETH 와 같은 200봉(16.6시간)
 
         return await swr_cached(
             f"market_history:{asset}", EVIDENCE_SIGNAL_CACHE_SECONDS, produce,
@@ -3077,8 +3070,9 @@ def make_app() -> web.Application:
 
     async def dashboard_index(_: web.Request) -> web.Response:
         html = (DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
+        v = _asset_buster()                      # 리뷰: 한 번만 -- 람다 안에서 부르면 ?v= 마다 화면 파일 전부(~1.1MB)를 다시 해시했다
         html = re.sub(r'(' + "|".join(re.escape(n) for n in ASSET_FILES) + r')\?v=[A-Za-z0-9._-]+',
-                      lambda m: f"{m.group(1)}?v={_asset_buster()}", html)
+                      lambda m: f"{m.group(1)}?v={v}", html)
         html = _hide_off_assets(html)
         response = web.Response(text=html, content_type="text/html")
         response.enable_compression()
@@ -3151,12 +3145,9 @@ def make_app() -> web.Application:
             return None
 
     def _fpd_rows(db: Path):
-        def run(sql: str, params: list):
-            try:
-                return read_rows(db, sql, params)
-            except Exception:  # noqa: BLE001 -- hot 파일이 없거나 잠깐 못 열면 빈 결과(그날은 «모름»)
-                return []
-        return run
+        # 🔴리뷰: 파일이 없으면 빈 결과(«없음»)지만 잠깐 못 읽은 건 **올린다** -- 빈 결과로 삼키면 그사이 닫힌 날·4시간 칸이
+        #   OI 없음·청산 $0·테이프 없음으로 굳어 7일 동안 안 고쳐졌다. 올리면 아무것도 안 굳고 swr 가 옛 응답을 낸다.
+        return lambda sql, params: read_rows(db, sql, params) if db.exists() else []
 
     fp_daily = fpd.DailyFootprint(_fpd_lake, _fpd_rows(HOT_TAPE_DB), _fpd_rows(BINANCE_CTX_DB))
 
@@ -3169,15 +3160,32 @@ def make_app() -> web.Application:
         except ValueError:
             raise web.HTTPBadRequest(reason="bad_date") from None
 
+    def _cols_since(full: dict, since: str | None) -> dict:
+        """?since= 면 그 칸(날·4시간 키)부터만 -- 화면의 1분 갱신용."""
+        if not since:
+            return full
+        keep = [i for i, d in enumerate(full["cols"]["d"]) if d >= since]
+        return {**full, "cols": {k: [v[i] for i in keep] for k, v in full["cols"].items()}}
+
+    async def _fp_k1h() -> list | None:
+        """일봉·4시간봉 청산 밀도가 같이 쓰는 ETH 1시간봉 500개(마감봉만, 10분 캐시) -- 못 받으면 None(배경 없이 그린다)."""
+        async def k1h():
+            raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                           {"symbol": fpd.SYMBOL, "interval": "1h", "limit": 500},
+                                           error_reason="fp_daily_heat_klines")
+            now_ms = time.time() * 1000
+            return [r for r in raw if int(r[6]) < now_ms] if isinstance(raw, list) else raw   # 형성 봉은 «받은 시각»에 뺀다 -- 캐시가 1시간 묵으면 그때 형성 중이던 봉이 마감봉으로 셈됐다
+        try:
+            return await swr_cached("fp_daily_k1h", 600.0, k1h, max_stale=3600.0)
+        except Exception:  # noqa: BLE001 -- 1시간봉을 못 받아도 소급본 날은 그린다
+            return None
+
     async def api_footprint_daily(request: web.Request) -> web.Response:
         """일봉 요약 전체(열 묶음). ?since=YYYY-MM-DD 면 그날부터만(화면의 1분 갱신용)."""
         since = _iso_day(request.query.get("since"))
         full = await swr_cached("fp_daily_days", 30.0, lambda: asyncio.to_thread(fp_daily.days_payload, time.time()),
                                 max_stale=600.0)
-        if since:
-            keep = [i for i, d in enumerate(full["cols"]["d"]) if d >= since]
-            full = {**full, "cols": {k: [v[i] for i in keep] for k, v in full["cols"].items()}}
-        return web.json_response(full, headers=NOCACHE)
+        return web.json_response(_cols_since(full, since), headers=NOCACHE)
 
     async def api_footprint_daily_cells(request: web.Request) -> web.Response:
         """보이는 날들의 가격 칸. ?from=&to=(YYYY-MM-DD, 400일 미만) · ?row=행 달러(1~500)."""
@@ -3192,13 +3200,16 @@ def make_app() -> web.Application:
             raise web.HTTPBadRequest(reason="range") from None
         return web.json_response(payload, headers=NOCACHE)
 
-    _H4_KEY = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}")
-
     def _iso_h4(v: str | None) -> str | None:
-        """신뢰경계: 4시간 칸 키 'YYYY-MM-DDTHH'(UTC) 만 통과."""
+        """신뢰경계: 4시간 칸 키 'YYYY-MM-DDTHH'(UTC, HH = 00·04·…·20) 만 통과. 🔴리뷰: 모양만 보면 05시 같은 어긋난 키가
+        h4_heat_payload 에서 다음 칸 첫 시간까지 본 밀도를 내림한 칸 키(04)로 공용 캐시에 굳혔다 -- 되돌려 같은 키가 나와야 통과."""
         if v is None:
             return None
-        if not _H4_KEY.fullmatch(v):
+        try:
+            ok = fpd.h4_key(fpd._h4_sec(v)) == v
+        except (ValueError, OverflowError, OSError):
+            ok = False
+        if not ok:
             raise web.HTTPBadRequest(reason="bad_key")
         return v
 
@@ -3206,10 +3217,7 @@ def make_app() -> web.Application:
         """2026-10-20 4시간봉 풋프린트 요약(지난 7일 + 형성 중) -- 열 모양은 일봉과 같다. ?since=키 면 그 칸부터(1분 갱신용)."""
         since = _iso_h4(request.query.get("since"))
         full = await swr_cached("fp_4h_days", 30.0, lambda: asyncio.to_thread(fp_daily.h4_payload, time.time()), max_stale=600.0)
-        if since:
-            keep = [i for i, d in enumerate(full["cols"]["d"]) if d >= since]
-            full = {**full, "cols": {k: [v[i] for i in keep] for k, v in full["cols"].items()}}
-        return web.json_response(full, headers=NOCACHE)
+        return web.json_response(_cols_since(full, since), headers=NOCACHE)
 
     async def api_footprint_4h_cells(request: web.Request) -> web.Response:
         """보이는 4시간 칸들의 가격 칸. ?from=&to=(키) · ?row=행 달러(1~500)."""
@@ -3227,17 +3235,7 @@ def make_app() -> web.Application:
         if not frm or not to:
             raise web.HTTPBadRequest(reason="from_to")
         row = fpd.parse_row(request.query.get("row"))
-
-        async def k1h():
-            raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
-                                           {"symbol": fpd.SYMBOL, "interval": "1h", "limit": 500},
-                                           error_reason="fp_daily_heat_klines")
-            now_ms = time.time() * 1000
-            return [r for r in raw if int(r[6]) < now_ms] if isinstance(raw, list) else raw
-        try:
-            raw = await swr_cached("fp_daily_k1h", 600.0, k1h, max_stale=3600.0)   # 일봉 히트맵과 같은 캐시 키 = 1시간봉 한 번만 받는다
-        except Exception:  # noqa: BLE001 -- 1시간봉을 못 받으면 배경 없이
-            raw = None
+        raw = await _fp_k1h()
         try:
             payload = await swr_cached(f"fp_4h_heat_{frm}_{to}_{row}", 300.0,
                                        lambda: asyncio.to_thread(fpd.h4_heat_payload, time.time(), frm, to, row, raw), max_stale=1800.0)
@@ -3252,17 +3250,7 @@ def make_app() -> web.Application:
         if not frm or not to:
             raise web.HTTPBadRequest(reason="from_to")
         row = fpd.parse_row(request.query.get("row"))
-
-        async def k1h():
-            raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
-                                           {"symbol": fpd.SYMBOL, "interval": "1h", "limit": 500},
-                                           error_reason="fp_daily_heat_klines")
-            now_ms = time.time() * 1000
-            return [r for r in raw if int(r[6]) < now_ms] if isinstance(raw, list) else raw   # 형성 봉은 «받은 시각»에 뺀다 -- 캐시가 1시간 묵으면 그때 형성 중이던 봉이 마감봉으로 셈됐다
-        try:
-            raw = await swr_cached("fp_daily_k1h", 600.0, k1h, max_stale=3600.0)
-        except Exception:  # noqa: BLE001 -- 1시간봉을 못 받아도 소급본 날은 그린다
-            raw = None
+        raw = await _fp_k1h()
         try:
             payload = await swr_cached(f"fp_daily_heat_{frm}_{to}_{row}", 300.0,
                                        lambda: asyncio.to_thread(fpd.heat_payload, time.time(), frm, to, row, raw), max_stale=1800.0)
@@ -3363,22 +3351,44 @@ def make_app() -> web.Application:
     #   화면은 같은 봉이면 라이브 값을 쓴다. 원천 = 우리 수집기 hot SQLite(테이프 16일·맥락 8일 보관 -- seal_to_lake HOT_KEEP_DAYS):
     #   칸 = 바이낸스 + OKX 테이프(라이브 링과 같은 칸·같은 고래/리테일 경계 -- 체결 주문 단위 분류를 수집기와 같은 상수로) ·
     #   OI = 바이낸스 oi_1s + OKX okx_oi · 청산 = 바이낸스 + OKX + Bybit · 캔들 = 바이낸스 5분봉(차트 캔들 원천 그대로).
-    # 닫힌 UTC 날은 한 번 세고 메모리에 둔다(봉이 다 찼거나 테이프 백필 기간 48시간이 지나면 불변) · 오늘은 swr 5분.
+    # 닫힌 UTC 날은 봉이 다 찼고 읽기가 다 성공했으면 한 번 세고 메모리에 둔다(불변) · 덜 찬 날·오늘은 swr 5분마다 다시.
     # ponytail: HL 고래 청산(추적 300주소)은 뺀다 -- 라이브 12시간에만 있다. hot 보관이 7일 밑으로 줄면 lake(footprint_daily 의 읽기)를 이어 붙인다.
     FP_WEEK_DAYS = 7
     fp_week_days: dict[tuple[str, int], dict] = {}
 
     def fp_week_part(f: SimpleNamespace, d0: int, d1: int) -> dict:
-        """[d0, d1) 초의 5분봉 -- 칸(라이브 /api/footprint 와 같은 7열 모양) · OI 봉 첫/끝(거래소별) · 청산 봉 합(거래소별)."""
+        """[d0, d1) 초의 5분봉 -- 칸(라이브 /api/footprint 와 같은 7열 모양) · OI 봉 첫/끝(거래소별) · 청산 봉 합(거래소별) ·
+        ok = 읽기가 다 성공(🔴리뷰: 못 읽은 걸 빈 값으로 굳히면 그 날은 OI·청산·OKX 없이 7일 남았다)."""
         spec, sym = f.spec, f.spec.symbol.lower()
+        fails: list[str] = []
+
+        def rows(path: Path, sql: str, params: list) -> list[tuple]:      # own_db_rows 처럼 비우고 가되 실패를 적는다
+            if not path.exists():
+                return []
+            try:
+                return read_rows(path, sql, params)
+            except (sqlite3.Error, duckdb.Error) as exc:
+                fails.append(f"{path.name}: {exc!r}")
+                return []
         bn = okx_tape_footprint(HOT_TAPE_DB, LIVE_DIR / "_no_ctx.duckdb", sym, d0, d1 * 1000, FOOTPRINT_BAR_SECONDS,
-                                spec.bucket, TAPE_BUCKETS[sym])
-        ox = okx_tape_footprint(spec.okx_tape_db, spec.okx_ctx_db, spec.okx_inst, d0, d1 * 1000, FOOTPRINT_BAR_SECONDS,
-                                spec.bucket, liq_db=OKX_LIQ_DB_PATH)
+                                spec.bucket, TAPE_BUCKETS[sym])   # 바이낸스 테이프 = 주 원천 -- 못 읽으면 응답 실패(swr 가 옛 응답)
+        # 🔴리뷰: 1·2거래소는 **주 전체에 하나** -- OKX 테이프에 이 종목 기록이 있으면(hot 16일) 모든 날이 OKX 를 요구한다
+        #   (OKX 가 빈 날·못 읽은 날 = 그 봉 «모름» -- 바이낸스만 봉을 섞지 않는다). 기록이 아예 없을 때만 바이낸스만(라이브도 같다).
+        #   전에는 날마다 «OKX 칸이 있으면»으로 갈랐고, OKX 테이프를 못 열면 주 전체가 500 이었다.
+        ox, okx_on = {"bars": {}, "ok_min": set(), "oi": {}, "liq": [], "ctx_ok": True}, spec.okx_tape_db.exists()
+        if okx_on:
+            try:
+                ox = okx_tape_footprint(spec.okx_tape_db, spec.okx_ctx_db, spec.okx_inst, d0, d1 * 1000, FOOTPRINT_BAR_SECONDS,
+                                        spec.bucket, liq_db=OKX_LIQ_DB_PATH)
+                okx_on = ox["tape_max"] > 0
+            except (sqlite3.Error, duckdb.Error) as exc:
+                fails.append(f"okx tape: {exc!r}")
+        if not ox["ctx_ok"]:
+            fails.append("okx oi/liq")
         bar = lambda ms: int(ms) // 1000 // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS   # noqa: E731
-        cells = fpd.week_bars(bn, ox if ox["bars"] else None, d0, d1, FOOTPRINT_BAR_SECONDS)
+        cells = fpd.week_bars(bn, ox if okx_on else None, d0, d1, FOOTPRINT_BAR_SECONDS)
         oi_bn: dict[int, tuple[float, float]] = {}
-        for ts, v in own_db_rows(BINANCE_CTX_DB, "SELECT ts_ms, open_interest FROM oi_1s WHERE symbol = ? AND ts_ms >= ? AND ts_ms < ? "
+        for ts, v in rows(BINANCE_CTX_DB, "SELECT ts_ms, open_interest FROM oi_1s WHERE symbol = ? AND ts_ms >= ? AND ts_ms < ? "
                                                  "ORDER BY ts_ms", [sym, d0 * 1000, d1 * 1000]):
             b = bar(ts)
             oi_bn[b] = (oi_bn[b][0], float(v)) if b in oi_bn else (float(v), float(v))
@@ -3388,18 +3398,20 @@ def make_app() -> web.Application:
             for j in (0, venue):
                 a[j + (0 if is_long else 1)] += usd
                 a[j + 2] += 1
-        for ts, sd, usd in own_db_rows(BINANCE_CTX_DB, "SELECT ts_ms, side, usd FROM liquidations WHERE symbol = ? AND ts_ms >= ? AND ts_ms < ?",
+        for ts, sd, usd in rows(BINANCE_CTX_DB, "SELECT ts_ms, side, usd FROM liquidations WHERE symbol = ? AND ts_ms >= ? AND ts_ms < ?",
                                        [spec.symbol, d0 * 1000, d1 * 1000]):
             put(ts, sd == "long", float(usd or 0.0), 0)
         for e in ox["liq"]:
             put(e["ts_ms"], e["side"] == "long", e["usd"], 3)
-        for ts, sd, q, px in own_db_rows(BYBIT_LIQ_DB, "SELECT ts_ms, side, qty, price FROM bybit_liquidations WHERE symbol = ? "
+        for ts, sd, q, px in rows(BYBIT_LIQ_DB, "SELECT ts_ms, side, qty, price FROM bybit_liquidations WHERE symbol = ? "
                                                        "AND ts_ms >= ? AND ts_ms < ?", [spec.symbol, d0 * 1000, d1 * 1000]):
             put(ts, sd == "Buy", float(q) * float(px), 6)   # Bybit side = 청산된 포지션(Buy = 롱 청산) -- bybit_liq_events 와 같은 규약
         dp = spec.price_dp
+        if fails:
+            print(f"fp week {spec.asset} {datetime.fromtimestamp(d0, timezone.utc):%m-%d} 읽기 실패 -- 이 날은 안 굳힌다: {fails}", flush=True)
         return {"bars": [{"time": b, "levels": [[round(k * spec.bucket, dp)] + [round(x, 3) for x in v] for k, v in sorted(c.items())]}
                          for b, c in sorted(cells.items())],
-                "oi_bn": oi_bn, "oi_ox": dict(ox["oi"]), "liq": liq, "n": len(cells)}
+                "oi_bn": oi_bn, "oi_ox": dict(ox["oi"]), "liq": liq, "n": len(cells), "ok": not fails}
 
     def fp_week_sync(f: SimpleNamespace, now: float) -> dict:
         today = int(now) // 86400 * 86400
@@ -3408,12 +3420,15 @@ def make_app() -> web.Application:
         for d in range(first, today, 86400):
             key = (f.spec.asset, d)
             p = fp_week_days.get(key) or fp_week_part(f, d, d + 86400)
-            if p["n"] == 86400 // FOOTPRINT_BAR_SECONDS or now > d + 3 * 86400:   # 다 찼거나 테이프 백필(바이낸스 47시간)이 끝난 날 = 불변
+            # 🔴리뷰: 다 찬 날만 불변 -- OKX 테이프 수집기는 7일 전까지 메우고 대조한다(BACKFILL_LOOKBACK_S), 1주일 창 안에선 덜 찬 날이
+            #   언제든 채워질 수 있다(전: 3일 뒤 굳혀 4~7일째 복구분이 재시작 전까지 안 보였다).
+            # ponytail: 덜 찬 날은 5분마다 다시 센다(하루 ~0.3초, to_thread · 서버 사본 ETH 실측) -- 비싸지면 바이낸스 47시간 뒤엔 바이낸스 쪽 빈 봉만 남았는지 따져 굳힌다.
+            if p["n"] == 86400 // FOOTPRINT_BAR_SECONDS and p["ok"]:
                 fp_week_days[key] = p
             parts.append(p)
         parts.append(fp_week_part(f, today, int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS))   # 오늘 -- 마감된 봉까지
         for k in [k for k in list(fp_week_days) if k[1] < first]:   # list() = 다른 코인 스레드가 넣는 중에도 안전
-            del fp_week_days[k]
+            fp_week_days.pop(k, None)           # 리뷰: 두 코인 스레드가 같은 날을 함께 지울 수 있다 -- del 이면 둘째가 KeyError
         oi_bn: dict[int, tuple[float, float]] = {}
         oi_ox: dict[int, tuple[float, float]] = {}
         liq: dict[int, list[float]] = {}
@@ -3431,8 +3446,9 @@ def make_app() -> web.Application:
         return {"bars": [b for p in parts for b in p["bars"]], "oi": oi, "liq": liq_out}
 
     async def fp_week_candles(asset: str) -> list[dict]:
-        """지난 7일 5분봉(마감봉) -- /api/market-history 와 같은 행 모양(추세 밴드·세션 VWAP 포함). 밴드 워밍업 144봉을 더 받는다."""
-        start_ms = ((int(time.time()) // 86400 - FP_WEEK_DAYS) * 86400 - TREND_VETO_N * FOOTPRINT_BAR_SECONDS) * 1000
+        """지난 7일 5분봉(마감봉) -- /api/market-history 와 같은 행 모양(추세 밴드·세션 VWAP 포함). 밴드 워밍업 720봉을 더 받는다
+        (리뷰: 144봉이면 ATR ewm(1/144) 씨앗 무게가 37% 남고 히스테리시스도 12시간 전에 새로 시작해 첫 하루가 라이브 720봉 계산과 달랐다)."""
+        start_ms = ((int(time.time()) // 86400 - FP_WEEK_DAYS) * 86400 - TREND_VETO_N * 5 * FOOTPRINT_BAR_SECONDS) * 1000
         rows: list = []
         while len(rows) < 4000:
             got = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
@@ -3446,15 +3462,8 @@ def make_app() -> web.Application:
         rows = [r for r in rows if int(r[6]) < now_ms]
         if not rows:
             return []
-        df = pd.DataFrame({"timestamp": pd.to_datetime([int(r[0]) for r in rows], unit="ms", utc=True),
-                           "high": [float(r[2]) for r in rows], "low": [float(r[3]) for r in rows], "close": [float(r[4]) for r in rows]})
-        veto = trend_veto_rows(df, tail=len(df))
-        tss = [int(r[0]) // 1000 for r in rows]
-        vwap = mctx.vwap_rows(tss, [float(r[2]) for r in rows], [float(r[3]) for r in rows], [float(r[4]) for r in rows],
-                              [float(r[5]) for r in rows], **({} if asset == "eth" else {"nd": 6}))
         week0 = (int(time.time()) // 86400 - FP_WEEK_DAYS) * 86400
-        return [{"time": t, "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]),
-                 **veto.get(t, {}), **vwap.get(t, {})} for t, r in zip(tss, rows) if t >= week0]
+        return [c for c in kline_candles(rows, now_ms, 4 if asset == "eth" else 6, len(rows)) if c["time"] >= week0]
 
     async def api_footprint_week(request: web.Request) -> web.Response:
         """지난 7일 5분봉 풋프린트·캔들·OI·청산(위 주석). 화면이 필요할 때 한 번 받는다(~0.5MB gzip) -- 400ms 폴링에 넣지 않는다."""

@@ -78,8 +78,8 @@ def day_from_tape(sec: np.ndarray, pbin: np.ndarray, buy: np.ndarray, sell: np.n
     return summ, (s.index.to_numpy(np.int64), s.buy.to_numpy(float), s.sell.to_numpy(float))
 
 
-def tape_rows_by_day(read_lake: Callable, read_hot: Callable, start: date, today: date) -> dict[str, pd.DataFrame]:
-    """[start, today] 날짜별 테이프 행. lake 에 있는 날은 lake, 없는 날(봉인 전)은 hot."""
+def tape_rows_by_day(read_lake: Callable, read_hot: Callable, start: date, today: date, since: int = 0) -> dict[str, pd.DataFrame]:
+    """[start, today] 날짜별 테이프 행. lake 에 있는 날은 lake, 없는 날(봉인 전)은 hot(since 초부터 -- 4시간 칸 다시 세기가 그날 0시부터 읽지 않게)."""
     out: dict[str, pd.DataFrame] = {}
     lk = read_lake("tape", start, today + timedelta(days=1), "ts_sec, price_bin, buy_qty, sell_qty")
     if lk is not None and len(lk):
@@ -87,7 +87,7 @@ def tape_rows_by_day(read_lake: Callable, read_hot: Callable, start: date, today
         out.update(dict(tuple(lk.groupby("day"))))
     missing = [_ds(d) for d in pd.date_range(start, today).date if _ds(d) not in out]
     if missing:
-        t0 = int(datetime.fromisoformat(missing[0]).replace(tzinfo=timezone.utc).timestamp())
+        t0 = max(since, int(datetime.fromisoformat(missing[0]).replace(tzinfo=timezone.utc).timestamp()))
         hot = read_hot("SELECT ts_sec, price_bin, buy_qty, sell_qty FROM trade_tape_1s WHERE symbol = ? AND ts_sec >= ?",
                        [HOT_SYM, t0])
         if hot:
@@ -137,6 +137,9 @@ def oi_liq_by_day(read_lake: Callable, read_ctx: Callable, start: date, today: d
     return oi, liq, liq_from
 
 
+COLS = ("d", "o", "h", "l", "c", "bq", "sq", "bv", "sv", "oi", "ll", "ls", "src", "part")
+
+
 def build_days(hist_days: pd.DataFrame | None, recent: dict[str, dict], oi: dict, liq: dict,
                liq_from: int | None, today: str) -> dict[str, list]:
     """일 요약 열 묶음(열 이름 → 배열). 소급본이 있는 날은 소급본(aggTrades)이 이긴다."""
@@ -149,7 +152,7 @@ def build_days(hist_days: pd.DataFrame | None, recent: dict[str, dict], oi: dict
     for d, s in recent.items():
         rows.setdefault(d, {**s, "oi": None, "src": "t"})
     liq_day0 = _ms_day(liq_from) if liq_from else None
-    cols: dict[str, list] = {k: [] for k in ("d", "o", "h", "l", "c", "bq", "sq", "bv", "sv", "oi", "ll", "ls", "src", "part")}
+    cols: dict[str, list] = {k: [] for k in COLS}
     for d in sorted(rows):
         r = rows[d]
         if d in oi and (r["oi"] is None or d == today):
@@ -179,7 +182,8 @@ def rebin(bins: np.ndarray, buy: np.ndarray, sell: np.ndarray, row: int) -> list
 #   열 = 일봉과 같다: 델타·거래대금(테이프) · OI(칸 마지막 값) · 청산 롱/숏 $(청산 수집기) · 청산 밀도 배경 = h4_heat_payload(칸 마감 시점).
 #   닫힌 칸은 경계 뒤 2분이 지나면 캐시(늦게 들어오는 1초 테이프 몫) · 형성 중 칸은 TODAY_TTL 마다 다시 센다.
 H4_SEC, H4_DAYS, H4_SETTLE = 14400, 7, 120
-_h4: dict[str, Any] = {"closed": {}, "live": {}, "at": 0.0}
+H4_BACKFILL, H4_GAP_TTL = 47 * 3600, 600.0   # 테이프 수집기 backfill_loop 소급 한계(BINANCE_BACKFILL_LOOKBACK_S) · «없음» 칸 다시 보기 간격
+_h4: dict[str, Any] = {"closed": {}, "live": {}, "at": 0.0, "gap_at": 0.0}
 _h4_heat: dict[str, tuple] = {}
 _h4_lock = threading.Lock()
 
@@ -243,21 +247,11 @@ def h4_ctx(read_lake: Callable, read_ctx: Callable, t0: int, now: float) -> dict
 
 
 def h4_cols(buckets: dict[str, tuple[dict, tuple]], live_key: str) -> dict[str, list]:
-    """일봉과 같은 열 묶음. 청산 0 = 진짜 0(수집 중) · OI 없음 = None."""
-    cols: dict[str, list] = {k: [] for k in ("d", "o", "h", "l", "c", "bq", "sq", "bv", "sv", "oi", "ll", "ls", "src", "part")}
-    r4 = lambda v: None if v is None else round(float(v), 4)   # noqa: E731
-    for k in sorted(buckets):
-        r = buckets[k][0]
-        cols["d"].append(k)
-        for name, src in (("o", "open"), ("h", "high"), ("l", "low"), ("c", "close"), ("bq", "buy_qty"), ("sq", "sell_qty"),
-                          ("bv", "buy_quote"), ("sv", "sell_quote")):
-            cols[name].append(r4(r[src]))
-        cols["oi"].append(r4(r.get("oi")))
-        cols["ll"].append(r4(r.get("ll", 0.0)))
-        cols["ls"].append(r4(r.get("ls", 0.0)))
-        cols["src"].append("t")
-        cols["part"].append(1 if k == live_key else 0)
-    return cols
+    """일봉과 같은 열 묶음(build_days 그대로 -- 리뷰: 열 조립 두 벌). 청산 0 = 진짜 0 · OI 없음 = None.
+    liq_from=1(1970) = 4h 창(지난 7일)은 전부 청산 수집 시작(09-20) 뒤 -- «모름»·반쪽 칸이 없다."""
+    s = {k: v[0] for k, v in buckets.items()}
+    return build_days(None, s, {k: r["oi"] for k, r in s.items() if r.get("oi") is not None},
+                      {k: [r.get("ll", 0.0), r.get("ls", 0.0)] for k, r in s.items()}, 1, live_key)
 
 
 class DailyFootprint:
@@ -287,7 +281,7 @@ class DailyFootprint:
             days[_today["day"]], cells[_today["day"]] = _today["summ"], _today["cells"]
         return days, cells
 
-    def days_payload(self, now: float, since: str | None = None) -> dict:
+    def days_payload(self, now: float) -> dict:
         hist_days, _ = load_hist(self.hist_dir)
         recent, _ = self._recent(now)
         today = datetime.fromtimestamp(now, timezone.utc).date()
@@ -296,9 +290,6 @@ class DailyFootprint:
             start = min(start, date.fromisoformat(hist_days.day.max()) + timedelta(days=1))
         oi, liq, liq_from = oi_liq_by_day(self.read_lake, self.read_ctx, start, today)
         cols = build_days(hist_days, recent, oi, liq, liq_from, _ds(today))
-        if since:
-            keep = [i for i, d in enumerate(cols["d"]) if d >= since]
-            cols = {k: [v[i] for i in keep] for k, v in cols.items()}
         return {"symbol": SYMBOL, "tz": "UTC", "cols": cols, "liq_from_ms": liq_from,
                 "hist_until": None if hist_days is None else hist_days.day.max(), "at": now}
 
@@ -322,30 +313,40 @@ class DailyFootprint:
         cur = int(now) // H4_SEC * H4_SEC
         first = cur - H4_DAYS * 86400
         want = [h4_key(t) for t in range(first, cur, H4_SEC)]
+        settled = lambda k: now >= _h4_sec(k) + H4_SEC + H4_SETTLE   # noqa: E731 -- 닫히고 2분 지남 = 불변
         with _h4_lock:
             closed = _h4["closed"]
+            if now - _h4["gap_at"] >= H4_GAP_TTL:
+                # 리뷰: «없음»으로 굳힌 칸도 수집기가 아직 메울 수 있는 동안(칸 끝 + 47h)은 10분마다 다시 본다(메워진 칸이 재시작 전까지 안 보였다)
+                # ponytail: 콜드 스타트에 hot DB 가 잠깐 없으면 47h 넘은 hot 전용 칸은 재시작 전까지 «없음» -- 생기면 gap 다시 보기를 7일로
+                for k in [k for k, v in closed.items() if v is None and now < _h4_sec(k) + H4_SEC + H4_BACKFILL]:
+                    del closed[k]
+                _h4["gap_at"] = now
             missing = [k for k in want if k not in closed and k not in _h4["live"]]   # 막 닫힌(아직 2분 전) 칸은 TTL 로 다시 센다
             if missing or now - _h4["at"] >= TODAY_TTL:
-                t0 = _h4_sec(missing[0]) if missing else cur - H4_SEC
-                d0 = datetime.fromtimestamp(t0, timezone.utc).date()
-                got = h4_split(tape_rows_by_day(self.read_lake, self.read_hot, d0, datetime.fromtimestamp(now, timezone.utc).date()))
-                # 🔴테이프는 그날 0시부터 읽힌다 -- OI·청산도 같은 시점부터(10-20: t0 부터만 읽어 같은 날 앞 칸의 OI·청산이 비었다)
-                ctx = h4_ctx(self.read_lake, self.read_ctx, int(datetime.combine(d0, datetime.min.time(), timezone.utc).timestamp()), now)
-                for k, v in got.items():
-                    v[0].update(ctx.get(k, {}))
+                # 리뷰: 안 굳은 가장 앞 칸(빠진 칸 · 지난번 live -- 한가한 틈이 자정을 넘으면 live 의 옛 칸이 missing 에 안 잡혀
+                #   다시 세기에서 빠지고 화면 since 병합이 지웠다)부터만 다시 센다. 그 앞 칸은 전부 closed 라 읽을 필요가 없다
+                #   (전에는 그날 0시부터 -- 형성 칸 하나에 최대 20시간치 1초 테이프).
+                t0 = max(first, min(_h4_sec(k) for k in [*missing, *_h4["live"], h4_key(cur)]))
+                got = h4_split(tape_rows_by_day(self.read_lake, self.read_hot, datetime.fromtimestamp(t0, timezone.utc).date(),
+                                                datetime.fromtimestamp(now, timezone.utc).date(), since=t0))
+                ctx = h4_ctx(self.read_lake, self.read_ctx, t0, now)
                 live = {}
                 for k, v in got.items():
-                    t = _h4_sec(k)
-                    if t < first:
-                        continue
-                    if now >= t + H4_SEC + H4_SETTLE:
-                        closed.setdefault(k, v)         # 닫히고 2분 지남 = 불변 -- 이미 굳힌 칸은 덮어쓰지 않는다
+                    if _h4_sec(k) < t0:
+                        continue                        # lake 날은 하루 통째로 온다 -- t0 앞 칸은 이미 closed
+                    v[0].update(ctx.get(k, {}))
+                    if settled(k):
+                        closed.setdefault(k, v)         # 이미 굳힌 칸은 덮어쓰지 않는다
                     else:
                         live[k] = v                     # 형성 중 · 막 닫힌 칸
+                for k in missing:
+                    if k not in got and settled(k):
+                        closed.setdefault(k, None)      # 리뷰: 테이프에 아예 없는 칸(수집기 정지) = «없음»으로 굳힌다 -- 안 그러면 7일 내내 매 호출 다시 읽었다
                 for k in [k for k in closed if k < h4_key(first)]:
                     del closed[k]
                 _h4.update(live=live, at=now)
-            out = {**{k: closed[k] for k in want if k in closed}, **_h4["live"]}
+            out = {**{k: closed[k] for k in want if closed.get(k) is not None}, **_h4["live"]}
         return out, h4_key(cur)
 
     def h4_payload(self, now: float) -> dict:
@@ -486,8 +487,8 @@ def h4_heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None
                 _h4_heat[key] = c
         if len(c[0]):
             out[key] = rebin_heat(c[0], c[1], row, c[2])
-    for old in [x for x in _h4_heat if x < h4_key(now - (H4_DAYS + 2) * 86400)]:
-        del _h4_heat[old]
+    for old in [x for x in list(_h4_heat) if x < h4_key(now - (H4_DAYS + 2) * 86400)]:
+        _h4_heat.pop(old, None)             # 리뷰: to_thread 요청이 겹쳐 돈다 -- list() 로 떠서 지우고, 이미 지워졌으면 그냥 간다
     return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H}
 
 
@@ -578,12 +579,29 @@ def selftest() -> None:
     oi3 = pd.DataFrame({"ts_ms": [(t00 + 3600 * h) * 1000 for h in (1, 5, 9)], "open_interest": [1.0, 2.0, 3.0]})
     lk2 = lambda stream, a, b, cols: {"tape": tape, "oi_1s": oi3, "liquidations": None}[stream]   # noqa: E731
     f2 = DailyFootprint(lk2, lambda q, p: [], lambda q, p: [])
-    _h4.update(closed={}, live={}, at=0.0)
+    _h4.update(closed={}, live={}, at=0.0, gap_at=0.0)
     n0 = t00 + 10 * 3600                                  # 08시 칸 형성 중
     one = f2.h4_payload(n0)["cols"]
     two = f2.h4_payload(n0 + TODAY_TTL + 1)["cols"]       # TTL 지나 다시 셈
     assert one["oi"] == [1.0, 2.0, 3.0] and two["oi"] == [1.0, 2.0, 3.0], (one["oi"], two["oi"])
-    _h4.update(closed={}, live={}, at=0.0)
+    # 리뷰: 형성 칸(10-19 T20) 뒤 한가한 틈이 자정을 넘어도 그 칸이 굳어 남는다 · 다시 세기는 안 굳은 가장 앞 칸부터(그날 0시·7일 전 아님)
+    #   · 테이프에 아예 없는 칸은 «없음»으로 굳어 다음 호출이 7일을 다시 읽지 않는다
+    rows, since = [(t00 + 86340, 20000, 1.0, 0.0)], []
+    def hot(q, p):
+        since.append(p[1])
+        return [r for r in rows if r[0] >= p[1]]
+    f3 = DailyFootprint(lambda *a: None, hot, lambda q, p: [])
+    _h4.update(closed={}, live={}, at=0.0, gap_at=t00 + 86400 + 4 * 3600 + 180)   # 이 검사 동안은 «없음» 다시 보기 안 함(아래에서 따로)
+    assert f3.h4_payload(t00 + 86370)["cols"]["d"] == ["2026-10-19T20"] and since == [t00 + 86370 // H4_SEC * H4_SEC - H4_DAYS * 86400]
+    rows.append((t00 + 86400 + 4 * 3600 + 60, 20010, 1.0, 0.0))
+    since.clear()
+    hc3 = f3.h4_payload(t00 + 86400 + 4 * 3600 + 180)["cols"]
+    assert hc3["d"] == ["2026-10-19T20", "2026-10-20T04"] and hc3["part"] == [0, 1] and since == [t00 + 20 * 3600], (hc3["d"], since)
+    assert _h4["closed"]["2026-10-20T00"] is None and _h4["closed"]["2026-10-19T20"] is not None
+    rows.append((t00 + 86400 + 60, 20005, 1.0, 0.0))     # 수집기가 나중에 메운 칸 -- 10분 뒤 다시 보면 나타난다
+    assert f3.h4_payload(t00 + 86400 + 4 * 3600 + 180 + TODAY_TTL)["cols"]["d"] == ["2026-10-19T20", "2026-10-20T04"]
+    assert f3.h4_payload(t00 + 86400 + 4 * 3600 + 180 + H4_GAP_TTL)["cols"]["d"] == ["2026-10-19T20", "2026-10-20T00", "2026-10-20T04"]
+    _h4.update(closed={}, live={}, at=0.0, gap_at=0.0)
     assert cx["2026-10-20T00"]["oi"] == 99.0 and cx["2026-10-20T00"]["ls"] == 4.0, cx
     # 5분봉 1주일: 두 테이프 다 온전한 봉만 칸 합 · OKX 테이프가 없으면 바이낸스만 · OI Δ 규칙
     okm = lambda b0, n: set(range(b0, b0 + 60 * n, 60))   # noqa: E731

@@ -129,6 +129,7 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
       ok_min: 온전한 분 집합 -- 1분봉과 맞은 분(자동 복구분 포함) 또는 «아직 검사 전인 최근 15분 중
               기록된 공백과 안 겹치는 분»(검사가 2~5분 늦게 돈다).
       oi:     {봉: (첫 OI, 끝 OI)} -- okx_context 의 WS OI(ETH). ts < t0 만.
+      ctx_ok: OI·청산을 다 읽었나(못 읽으면 비우고 간다 -- 1주일 풋프린트가 그 날을 굳히지 않게, 리뷰 2026-10-20).
     🔴가격칸: 테이프 칸(0.1)을 풋프린트 칸(0.5)으로 올린다. 0.5 가 0.1 의 정수배라 경계가 겹친다
       (정수/5 는 .5 가 안 나와 반올림 동률이 없다)."""
     t0_sec = t0_ms // 1000
@@ -165,6 +166,7 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
                                                          for a, b in gaps):
             ok_min.add(m)
     oi: dict[int, tuple[float, float]] = {}
+    ctx_ok = True
     try:
         # 봉별 첫·끝 OI 는 파이썬에서 -- arg_min/arg_max·`//` 는 SQLite(hot, 4b)에 없다. 12h 창 ~수천 행.
         for ts, v in _read_only_rows(ctx_db, "SELECT ts_ms, oi_base FROM okx_oi WHERE inst = ? AND ts_ms >= ? "
@@ -172,7 +174,7 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
             bar = int(ts) // 1000 // bar_seconds * bar_seconds
             oi[bar] = (oi[bar][0], float(v)) if bar in oi else (float(v), float(v))
     except (duckdb.Error, sqlite3.Error):
-        pass                      # OI 가 없어도 풋프린트는 되살린다(사분면 OI 만 바이낸스로 남는다)
+        ctx_ok = False            # OI 가 없어도 풋프린트는 되살린다(사분면 OI 만 바이낸스로 남는다)
     # 청산도 같은 구간을 되살린다 -- 봉에 «바이낸스+OKX» 가 붙는데 OKX 청산이 0 이면 합산 표시가
     #   거짓이 된다(피어 지적, 2026-09-24). 모양은 라이브 okx_liq_events 원소와 같다.
     liq: list[dict] = []
@@ -185,9 +187,9 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
                         "qty": float(qty), "price": float(px or 0.0),
                         "usd": float(qty) * float(px or 0.0), "symbol": inst})
     except (duckdb.Error, sqlite3.Error):
-        pass
+        ctx_ok = False
     tape_max = _read_only_rows(tape_db, "SELECT max(ts_sec) FROM trade_tape_1s WHERE symbol = ?", [inst])
-    return {"bars": bars, "ok_min": ok_min, "oi": oi, "liq": liq, "tape_max": int(tape_max[0][0] or 0)}
+    return {"bars": bars, "ok_min": ok_min, "oi": oi, "liq": liq, "tape_max": int(tape_max[0][0] or 0), "ctx_ok": ctx_ok}
 def tape_seconds(tape_db: Path, symbol: str, lo_sec: int, hi_sec: int,
                  tape_bucket: float) -> tuple[dict[int, list[float]], int]:
     """체결 테이프 -> 1초 수급 칸 {초: [리테일매수, 리테일매도, 고래매수, 고래매도, 총매수, 총매도, 가격]} (2026-09-27 재시작 복원).

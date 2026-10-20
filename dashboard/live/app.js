@@ -81,11 +81,10 @@ let footprintLastFetchAt = 0;
 // 서버 링은 24시간(288봉)이라 4h 도 이미 쌓여 있는 데이터다. 더 긴 창을 안 주는 건 값이
 // 없어서가 아니라, 48봉이면 풋프린트 셀이 25px 라 숫자가 이미 안 들어가서다.
 // 2026-10-20 사용자 «1h 만 남기고 휠로 축소하면 체결 박스 없이 일반 캔들, 확대하거나 1h 를 누르면 풋프린트»:
-//   버튼은 1h(+1d 일봉) 하나 · 이 배열은 휠 단계(1h → 2h → 3h → 4h → 6h → 8h → 12h). 1h 만 풋프린트, 넓히면 캔들(fpZoomed).
-//   새로 열면 늘 1h(줌은 저장 안 함 -- 열자마자 캔들이면 «풋프린트가 사라졌다»로 읽힌다).
-// 2026-10-20 사용자 «5m, 30m, 1h 모두 데이터를 일주일 치»: 휠 단계를 tf 마다(그 tf 봉 수) 1주일까지 -- 첫 단 12봉 = 풋프린트(5m 1h · 30m 6h · 1h 12h).
-//   12h 넘는 구간은 /api/footprint-week 한 번(아래 maybeFetchFpWeek)으로 채운다.
-// 2026-10-20 사용자 «바이낸스·트레이딩뷰처럼 부드럽게»: 휠 단계를 없앴다 -- 창 = 소수 봉 수(12봉 ~ 1주일), 휠마다 연속으로 커서 자리 기준 줌.
+//   새로 열면 늘 12봉(줌은 저장 안 함 -- 열자마자 캔들이면 «풋프린트가 사라졌다»로 읽힌다).
+// 2026-10-20 사용자 «5m, 30m, 1h 모두 데이터를 일주일 치»: 창은 tf 마다(그 tf 봉 수) 1주일까지 -- 12봉 = 풋프린트(5m 1h · 30m 6h · 1h 12h).
+//   라이브 12시간 밖은 /api/footprint-week 한 번(아래 maybeFetchFpWeek)으로 채운다.
+// 2026-10-20 사용자 «바이낸스·트레이딩뷰처럼 부드럽게»: 휠 단계를 없앴다 -- 창 = 소수 봉 수(12봉 ~ 1주일), 휠마다 연속으로 커서 자리 기준 줌(실시간이면 오른쪽 끝 기준 -- chartZoomAt).
 //   체결 박스는 창이 아니라 **봉 폭**이 정한다(renderCandleSvg 의 fpThin: 칸 숫자가 들어가는 폭이면 박스).
 const CHART_WINDOW_MAX = { 1: 2016, 6: 336, 12: 168 };   // tf 마다 1주일(5m · 30m · 1h 봉 수)
 let chartWindowBars = 12;
@@ -605,7 +604,7 @@ async function setActiveSnapshotAsset(asset) {
   if (!SNAPSHOT_ASSET_KEYS.includes(asset) || asset === activeSnapshotAsset) return;
   activeSnapshotAsset = asset;
   try { renderNews(); } catch (e) { console.error("news render:", e); }   // 2026-10-05 뉴스 카드의 «지금 코인» 강조·필터(예외가 코인 전환을 끊지 않게)
-  chartPanEnd = null; chartPanY = 0;   // 코인을 바꾸면 실시간으로
+  chartPanReset();   // 코인을 바꾸면 실시간으로(관성도 멈춘다 -- 리뷰: 미끄러지던 게 새 코인을 과거로 끌었다)
   renderSnapshotAssetTabs();
   // 🔴2026-09-30 진입 미리보기(plan·cap)는 **코인별**인데 전환 때 안 비워 XRP 탭이 최대 60초(주문 불가 코인이면
   //   계속) ETH 계획(~$2,676)을 «지금 설정으로 넣으면»에 그렸다. 비우고 새 코인 것을 바로 받는다.
@@ -619,7 +618,7 @@ async function setActiveSnapshotAsset(asset) {
   // 2026-09-22 ETH 전용 카드에 «ETH 전용» 배지를 켠다(styles.css 의 body.not-eth 규칙).
   document.body.classList.toggle("not-eth", asset !== "eth");
   // ETH 전용 그림들의 캐시도 비운다 -- 안 비우면 ETH 로 **돌아올 때** 옛 그림이 한 프레임 번쩍인다.
-  footprintBars = new Map(); latestFootprint = null; fpWeek = null;   // 1주일도 코인별(넓히면 새 코인 것을 받는다)
+  footprintBars = new Map(); latestFootprint = null; fpWeek = null; fpWeekTriedAt = 0;   // 1주일도 코인별(넓히면 새 코인 것을 바로 받는다 -- 옛 코인 30초 문턱 무시)
   // 2026-09-26 SOL·XRP 도 흐름이 있다 -- 1초 수급 칸·커서·실시간 셀·히트맵을 코인마다 새로 받는다.
   //   🔴커서를 안 비우면 새 코인에 옛 코인의 초 번호로 «그 뒤만» 달라고 해서 창 앞부분이 빈다.
   resetSupply1sState();
@@ -1380,6 +1379,9 @@ function renderSnapshotAccount() {
       <div class="acct-today-flow">${acctTodaySvg(tT, unreal, positions.length > 0, t0, now, todayW, 120)}</div>
       <div class="acct-today-trips"><span class="acct-eyebrow">오늘 닫힌 거래</span><ol>${trips}</ol></div>
     </div>`;
+  // 리뷰: 카드를 통째로 다시 쓰면(포지션이 있으면 폴링마다 -- 미실현이 바뀐다) 키보드로 고른 날·칩의 포커스가 <body> 로 떨어졌다 -- 같은 칸에 되돌린다
+  const fa = document.activeElement, fAt = fa && fa.closest && fa.closest("#acctCard")
+    ? ["day", "month", "span"].map((k) => (fa.hasAttribute(`data-acct-${k}`) ? `#acctCard [data-acct-${k}="${fa.getAttribute(`data-acct-${k}`)}"]` : "")).find(Boolean) : "";
   setH("snapAcctPosition", posLine + todayHtml);
 
   // ── 아래: 달력 | 자산 곡선 ──
@@ -1406,6 +1408,7 @@ function renderSnapshotAccount() {
       ${a.length ? `<div class="acct-stats">${acctStatsHtml(a)}</div>` : ""}
     </div>`;
   setH("snapAcctPerf", `<div class="acct-hist">${calHtml}${curveHtml}</div>`);
+  if (fAt && !fa.isConnected) document.querySelector(fAt)?.focus();
 }
 
 
@@ -4288,8 +4291,8 @@ async function refreshFootprint() {
         .slice(0, footprintBars.size - CHART_PAN_BARS)
         .forEach((t) => { if (wk) wk.bars.set(t, footprintBars.get(t)); footprintBars.delete(t); });
     }
-    // 아래 소비자(footprintForChart)는 예전과 **같은 모양**을 본다 -- 시각순 전체 배열(1주일 몫 + 라이브, 같은 봉은 라이브).
-    latestFootprint = { ...payload, bars: fpBarsWithWeek() };
+    // bars = 라이브 144봉만(시각순). 1주일 몫은 쓰는 쪽(fpBarsNow)이 필요할 때만 붙인다 -- 리뷰: 폴링(400ms)마다 2천 봉을 복사·정렬했다.
+    latestFootprint = { ...payload, bars: [...footprintBars.values()].sort((a, b) => a.time - b.time) };
   } catch (error) {
     console.error("Footprint fetch error:", error);
     // 🔴2026-09-22 전에는 여기서 latestFootprint = null 이었다 -- **한 번의 실패로 화면이
@@ -4308,44 +4311,54 @@ async function refreshFootprint() {
 //   받는 때 = 라이브 12시간 밖이 필요해질 때(휠로 넓히기 · 옮기기 · 30m/1h). 처음 열면 안 받는다 -- 대부분 최신 1시간만 본다.
 //   같은 봉이면 라이브 값이 이긴다(weekJoin · fpBarsWithWeek). 6시간이 지나면 다시 받는다(라이브 12시간과 이어지게).
 //   서버 원천 = 우리 수집기 테이프·OI·청산(캔들만 바이낸스 5분봉 -- 차트 캔들 원천 그대로).
-let fpWeek = null, fpWeekAt = 0, fpWeekTriedAt = 0, fpWeekInFlight = false;
+let fpWeek = null, fpWeekAt = 0, fpWeekTriedAt = 0, fpWeekInFlight = null;   // fpWeekInFlight = 받는 중인 코인(리뷰: 옛 코인 요청이 새 코인을 막았다)
 const FP_WEEK_REFRESH_MS = 6 * 3600e3;
 const fpWeekFor = () => (fpWeek && fpWeek.asset === activeSnapshotAsset ? fpWeek : null);
+const fpWantWeek = () => chartTfK > 1 || fpZoomed() || chartPanEnd != null;   // 라이브 12시간 밖이 필요한 보기
 async function maybeFetchFpWeek() {
-  if (!flowOn() || fpWeekInFlight || !(chartTfK > 1 || fpZoomed() || chartPanEnd != null)) return;
+  if (!flowOn() || fpWeekInFlight === activeSnapshotAsset || !fpWantWeek()) return;
   const now = Date.now(), asset = activeSnapshotAsset;
   if ((fpWeekFor() && now - fpWeekAt < FP_WEEK_REFRESH_MS) || now - fpWeekTriedAt < 30000) return;   // 실패면 30초 뒤 다시
-  fpWeekInFlight = true; fpWeekTriedAt = now;
+  fpWeekInFlight = asset; fpWeekTriedAt = now;
   try {
     const res = await fetch(`/api/footprint-week?asset=${asset}`, { cache: "no-cache" });
     if (!res.ok) throw new Error(`footprint-week ${res.status}`);
     const j = await res.json();
     if (asset !== activeSnapshotAsset) return;
-    fpWeek = { asset, candles: j.candles || [], bars: new Map((j.bars || []).map((x) => [x.time, x])), oi: j.oi || [], liq: j.liq || [] };
+    // 리뷰: 서버가 바이낸스 캔들을 못 받으면 candles: [] 를 준다 -- 성공으로 적으면 6시간 안 다시 받는다. 실패로 치고 30초 뒤 다시.
+    //   서버가 이 빈 몸을 300초 캐시한다(fp_week_{asset}) -- 30초마다 0.5MB 를 받아 버리지 않게 300초 뒤 다시(리뷰).
+    if (!(j.candles && j.candles.length)) { fpWeekTriedAt = Date.now() + 270e3; throw new Error("footprint-week: 캔들 없음"); }
+    fpWeek = { asset, candles: j.candles, bars: new Map((j.bars || []).map((x) => [x.time, x])), oi: j.oi || [], liq: j.liq || [] };
     fpWeekAt = Date.now();
-    if (latestFootprint) latestFootprint = { ...latestFootprint, bars: fpBarsWithWeek() };
     scheduleSnapshotChartRender();
   } catch (e) {
     console.error("footprint week:", e);
   } finally {
-    fpWeekInFlight = false;
+    if (fpWeekInFlight === asset) fpWeekInFlight = null;
   }
 }
-function fpBarsWithWeek() {
-  const wk = fpWeekFor(), out = [...footprintBars.values()];
-  if (wk) wk.bars.forEach((b, t) => { if (!footprintBars.has(t)) out.push(b); });
-  return out.sort((a, b) => a.time - b.time);
+// 풋프린트 봉(시각순) -- 1주일이 필요한 보기면 앞에 1주일 몫(라이브에 없는 봉)을 붙인다. 폴링·1주일 도착마다 한 번만 만든다.
+let fpBarsMemo = null;
+function fpBarsNow() {
+  const lf = latestFootprint, wk = fpWantWeek() ? fpWeekFor() : null;
+  if (!lf || !Array.isArray(lf.bars) || !wk) return lf && lf.bars;
+  if (fpBarsMemo && fpBarsMemo.lf === lf && fpBarsMemo.wk === wk) return fpBarsMemo.out;
+  const out = lf.bars.slice();
+  wk.bars.forEach((b, t) => { if (!footprintBars.has(t)) out.push(b); });
+  fpBarsMemo = { lf, wk, out: out.sort((a, b) => a.time - b.time) };
+  return fpBarsMemo.out;
 }
-// 라이브 배열 앞에 1주일 몫(라이브 첫 시각보다 앞)만 붙인다. 입력이 그대로면 **같은 배열**을 준다(층 캐시가 objToken 으로 본다).
+// 라이브 배열 앞에 1주일 몫(라이브 첫 시각보다 앞)만 붙인다. 입력이 그대로면 **같은 배열**을 준다(끌기 한 프레임에 여러 번 불린다 -- 2천 개 복사 안 하게).
+//   라이브 배열은 제자리에서 자란다(push → 200 개 넘으면 shift -- 신원·길이가 그대로) -- 그래서 마지막 원소도 본다(리뷰: 새 5분봉이 안 붙었다).
 const weekJoinMemo = {};
 function weekJoin(name, live, tOf) {
   const wk = fpWeekFor(), old = wk && wk[name];
   if (!old || !old.length) return live;
-  const m = weekJoinMemo[name];
-  if (m && m.old === old && m.live === live && m.n === live.length) return m.out;
+  const m = weekJoinMemo[name], z = live[live.length - 1];
+  if (m && m.old === old && m.live === live && m.n === live.length && m.z === z) return m.out;
   const t0 = live.length ? tOf(live[0]) : Infinity;
   const out = old.filter((x) => tOf(x) < t0).concat(live);
-  weekJoinMemo[name] = { old, live, n: live.length, out };
+  weekJoinMemo[name] = { old, live, n: live.length, z, out };
   return out;
 }
 const chartFull = () => weekJoin("candles", candleHistoryByAsset[activeSnapshotAsset] || [], (c) => c.time);   // 차트 캔들(5분봉) -- 창 이동·미니맵·렌더가 같이 쓴다
@@ -4354,9 +4367,9 @@ const chartTfFull = () => tfCandles(chartFull());
 // 풋프린트가 없으면(다른 코인 · 서버 웜업 · fetch 실패) null 을 돌려주고, 차트는 캔들로 그린다.
 function footprintForChart() {
   if (!flowOn()) return null;
-  const payload = latestFootprint;
-  const bars = Array.isArray(payload && payload.bars)
-    ? payload.bars.filter((b) => Array.isArray(b.levels) && b.levels.length) : [];
+  const payload = latestFootprint, all = fpBarsNow();
+  const bars = Array.isArray(all)
+    ? all.filter((b) => Array.isArray(b.levels) && b.levels.length) : [];
   if (!bars.length) return null;
   const bucket = Number(payload.bucket) || 0.5;
   const byTime = new Map(bars.map((b) => [b.time, b.levels]));
@@ -4376,28 +4389,51 @@ function footprintForChart() {
 }
 
 // ── 30m·1h 묶기 (2026-10-20) -- chartTfK === 1 이면 전부 입력을 그대로 돌려준다(5m 은 한 줄도 안 바뀐다) ──
-// 캔들: 시가 = 첫 봉 · 고저 = 합 · 거래량 = 합 · 나머지(종가·sma·vwap 등) = 마지막 봉(그 시각의 값). 형성 tf 봉 = 라이브 5분봉 포함.
+// 캔들: 시가 = 첫 봉 · 고가 = 최대 · 저가 = 최소 · 나머지(종가·sma·vwap 등) = 마지막 봉(그 시각의 값). 형성 tf 봉 = 라이브 5분봉 포함.
+//   맨 앞 tf 봉이 덜 찼으면(1주일·라이브 첫 봉이 시간 중간부터) 뺀다 -- 시가가 거짓이 된다(리뷰).
+//   기억(리뷰: 끌기 한 프레임에 3~4번 2천 봉을 다시 묶었다): 입력 배열·길이·첫/끝 원소가 그대로면 같은 배열을 주고
+//   형성 tf 봉만 **제자리에서** 다시 묶는다(라이브 5분봉이 체결마다 제자리 갱신 -- 렌더러·fpCv.live 가 같은 객체를 쥐고 있다).
+const tfCMemo = {};
 function tfCandles(full) {
   if (chartTfK === 1) return full;
+  const m = tfCMemo, n = full.length;
+  if (m.src === full && m.n === n && m.k === chartTfK && m.a === full[0] && m.z === full[n - 1]) {
+    const a = m.out[m.out.length - 1];
+    if (a) {
+      let j = n, hi = -Infinity, lo = Infinity;
+      while (j > 0 && tfT(full[j - 1].time) === a.time) { j--; hi = Math.max(hi, full[j].high); lo = Math.min(lo, full[j].low); }
+      if (j < n) Object.assign(a, full[n - 1], { time: a.time, open: full[j].open, high: hi, low: lo });
+    }
+    return m.out;
+  }
   const out = [];
+  let n0 = 0;   // 맨 앞 tf 봉에 든 5분봉 수
   full.forEach((c) => {
     const t = tfT(c.time), a = out[out.length - 1];
-    if (a && a.time === t) Object.assign(a, c, { time: t, open: a.open, high: Math.max(a.high, c.high), low: Math.min(a.low, c.low), volume: (+a.volume || 0) + (+c.volume || 0) });
+    if (a && a.time === t) Object.assign(a, c, { time: t, open: a.open, high: Math.max(a.high, c.high), low: Math.min(a.low, c.low) });
     else out.push(Object.assign({}, c, { time: t }));
+    if (out.length === 1) n0++;
   });
+  if (out.length > 1 && n0 < chartTfK) out.shift();
+  Object.assign(m, { src: full, n, k: chartTfK, a: full[0], z: full[n - 1], out });
   return out;
 }
 // 풋프린트 칸: 같은 가격 행의 7열(가격·매수·매도·고래 매수/매도·리테일 매수/매도)을 5분봉끼리 더한다.
-//   닫힌 tf 봉은 같은 배열을 돌려준다 -- 렌더러 봉 캐시가 levels 신원으로 재사용한다(진행 봉만 매번 새로).
+//   5분봉이 모자란 tf 봉(빠진 봉 · 1주일 첫 묶음)은 «모름»으로 뺀다 -- 덜 더한 값을 온전한 봉처럼 보이지 않게(리뷰). 형성 중인 마지막 tf 봉만 예외.
+//   ponytail: «마지막» = byTime 의 마지막 tf 봉. 끝 봉들이 통째로 빠지면 그 앞 덜 찬 봉이 형성 봉 대접을 받는다 -- 드물어서 둔다.
+//   닫힌 tf 봉은 기억해 둔 배열을 돌려준다(폴링마다 같은 5분봉을 다시 더하지 않게 -- 진행 봉만 매번 새로).
 const tfLvMemo = new Map();
 function tfLevels(byTime, bucket) {
   const groups = new Map(), out = new Map();
+  let lastT = -Infinity;
   [...byTime.keys()].sort((a, b) => a - b).forEach((t) => {
     const T = tfT(t);
     if (!groups.has(T)) groups.set(T, []);
     groups.get(T).push(byTime.get(t));
+    lastT = T;
   });
   groups.forEach((refs, T) => {
+    if (refs.length < chartTfK && T !== lastT) return;
     const m = tfLvMemo.get(T);
     if (m && m.k === chartTfK && m.refs.length === refs.length && m.refs.every((r, i) => r === refs[i])) { out.set(T, m.lv); return; }
     const sum = new Map();
@@ -4417,14 +4453,15 @@ function tfLevels(byTime, bucket) {
 function tfFootprint(fp) {
   return fp && chartTfK > 1 ? Object.assign({}, fp, { byTime: tfLevels(fp.byTime, fp.bucket) }) : fp;
 }
-// 레인 입력은 원본 배열 신원으로 기억한다(층 캐시 키가 objToken 이라 렌더마다 새 배열이면 매번 다시 그린다).
+// 레인 입력은 원본 배열 신원으로 기억한다(입력은 폴링 때만 새 배열 -- 렌더마다 2천 봉을 다시 묶지 않게).
 const tfMemo = (fn) => { let src, k, out; return (x) => (chartTfK === 1 ? x : x === src && k === chartTfK ? out : (src = x, k = chartTfK, out = fn(x))); };
 const tfFpBars = tfMemo((bars) => [...tfLevels(new Map(bars.filter((b) => Array.isArray(b.levels)).map((b) => [b.time, b.levels])),
   Number(latestFootprint && latestFootprint.bucket) || 0.5)].map(([time, levels]) => ({ time, levels })));
-const tfOi = tfMemo((bars) => {   // [시각, ΔOI] -- tf 봉 ΔOI = 그 안 5분 Δ 합(= 봉 끝 OI − 직전 봉 끝 OI)
+const tfOi = tfMemo((bars) => {   // [시각, ΔOI] -- tf 봉 ΔOI = 그 안 5분 Δ 합(= 봉 끝 OI − 직전 봉 끝 OI) · 5분 Δ 가 모자란 tf 봉은 뺀다(= OI 모름, tfLevels 와 같은 규칙)
   const m = new Map();
-  bars.forEach((b) => { const T = tfT(Number(b[0])); m.set(T, (m.get(T) || 0) + (Number(b[1]) || 0)); });
-  return [...m];
+  bars.forEach((b) => { const T = tfT(Number(b[0])), a = m.get(T) || [0, 0]; a[0] += Number(b[1]) || 0; a[1]++; m.set(T, a); });
+  const all = [...m];
+  return all.filter(([, a], i) => a[1] >= chartTfK || i === all.length - 1).map(([T, a]) => [T, a[0]]);
 });
 const tfLiq = tfMemo((bars) => {   // 청산: 금액·건수 합(거래소별 몫도) · 진행 중 = 하나라도 진행 중
   const m = new Map();
@@ -4914,23 +4951,25 @@ function chartFlingStart(v) {   // v = 봉/ms(+ = 최신 쪽)
   };
   chartFling = requestAnimationFrame(step);
 }
-// 휠 줌(2026-10-20 사용자 «단계로 뚝뚝 · 오른쪽 끝 기준»): 창 = bars(연속) · 커서 밑 시각이 커서 밑에 남는다(at = 플롯 안 커서 비율).
+// 휠 줌(2026-10-20 사용자 «단계로 뚝뚝 · 오른쪽 끝 기준»): 창 = bars(연속) · 커서 밑 시각이 커서 밑에 남는다(at = 플롯 안 커서 비율 -- 실시간이면 오른쪽 끝).
 //   1주일을 아직 안 받았으면 받아 둔 만큼까지만 넓힌다(헛돈 휠이 쌓였다가 1주일이 오는 순간 튀지 않게).
 function chartZoomAt(bars, at) {
   const full = chartTfFull(), len = full.length;
   if (!len) return;
-  bars = Math.max(12, Math.min(CHART_WINDOW_MAX[chartTfK] || 2016, Math.max(12, len), bars));
-  if (Math.abs(bars - chartWindowBars) < 1e-3) return;
-  const n0 = Math.min(chartWindowBars, len), e0 = chartPanEdge(full), u = e0 - n0 + at * n0;   // 커서 밑 봉 자리(소수)
+  const hiB = Math.min(CHART_WINDOW_MAX[chartTfK] || 2016, Math.max(12, len));
+  bars = Math.max(12, Math.min(hiB, bars));
+  if (bars < 12 + 1e-3) bars = 12; else if (bars > hiB - 1e-3) bars = hiB;   // 리뷰: 끝에 붙이고 정확히 비교 -- «1e-3 안이면 안 바뀜»이면 12.0004 에 갇혀 12봉(풋프린트)로 못 돌아왔다
+  if (bars === chartWindowBars) return;
+  // 실시간(오른쪽 끝)이면 오른쪽 끝 기준 -- 리뷰: 커서 기준이면 넓혔다(끝에 막혀 실시간) 좁힐 때 끝이 len 아래로 내려가 조용히 실시간을 벗어났다
+  const a = chartPanEnd == null ? 1 : at;
+  const n0 = Math.min(chartWindowBars, len), e0 = chartPanEdge(full), u = e0 - n0 + a * n0;   // 커서 밑 봉 자리(소수)
   chartWindowBars = bars;
   const n1 = Math.min(bars, len);
-  chartPanTo(u - at * n1 + n1);
-  scheduleSnapshotChartRender();
+  if (!chartPanTo(u - a * n1 + n1)) { scheduleSnapshotChartRender(); maybeFetchFpWeek(); }   // 옮겼으면 chartPanTo 가 둘 다 했다
   renderChartWindowTabs();
-  maybeFetchFpWeek();
 }
 // 헤더 미니맵: 받아 둔 구간 종가 선 + 지금 창(밝은 띠). 누르거나 끌면 그 자리로 · 방향키 한 칸(Shift 6칸).
-let chartPanKey = "";
+let chartPanKey = "", chartPanGeo = null;
 function renderChartPan() {
   const box = el("chartPan");
   if (!box) return;
@@ -4940,24 +4979,36 @@ function renderChartPan() {
   const hist = full, n = hist.length;
   const eF = chartPanEdge(full), sF = Math.max(0, eF - chartWindowBars), live = chartPanEnd == null && !chartPanY;
   const s = Math.floor(sF + 1e-6), e = Math.ceil(eF - 1e-6);   // 글자·aria 는 걸친 봉까지 · 띠는 소수 그대로(끌기 따라 미끄러진다)
-  const key = `${n}|${(sF / n * 176).toFixed(1)}|${(eF / n * 176).toFixed(1)}|${s}|${e}|${live}|${hist[n - 1].close}|${hist[0].time}|${chartTfK}`;
-  if (key === chartPanKey) return;
+  // 리뷰: 끌기·관성 한 프레임마다 미니맵을 통째로(전 구간 고저 · 350점 선 · innerHTML) 다시 만들었다 -- 선은 데이터가 바뀔 때만, 창이 움직이면 띠·글자만
+  const W = 176, H = 26, X = (i) => (i / n) * W;
+  const t = (c) => (hist[n - 1].time - hist[0].time > 86400 ? `${new Date(c.time * 1000).getMonth() + 1}/${new Date(c.time * 1000).getDate()} ` : "") + fmtHourMinute(c.time * 1000), end = hist[Math.max(0, e - 1)];
+  const when = `${t(hist[s])}–${chartPanEnd == null ? "지금" : new Date(end.time * 1000).toDateString() === new Date(hist[s].time * 1000).toDateString() ? fmtHourMinute(end.time * 1000) : t(end)}`;
+  const vt = `${t(hist[s])}부터 ${t(end)}까지`, vmin = Math.min(n, Math.round(chartWindowBars)), wx = X(sF).toFixed(1), ww = Math.max(3, X(eF) - X(sF)).toFixed(1);
+  //   형성 봉은 체결마다 바뀐다 -- 고저가 그린 범위 안이고 종가가 같은 반 픽셀이면 선은 그대로 둔다(chartPanGeo = 마지막으로 그린 범위)
+  const z = hist[n - 1], g = chartPanGeo, key = `${n}|${live}|${hist[0].time}|${z.time}|${chartTfK}`, map = box.querySelector(".chart-pan-map");
+  if (key === chartPanKey && map && g && z.low >= g.lo && z.high <= g.hi && Math.round(g.Y(z.close) * 2) === g.yz) {
+    const r = map.querySelector(".pan-win"), w2 = box.querySelector(".chart-pan-when");
+    r.setAttribute("x", wx); r.setAttribute("width", ww);
+    map.setAttribute("aria-valuemin", vmin); map.setAttribute("aria-valuenow", e); map.setAttribute("aria-valuetext", vt);
+    if (w2 && w2.textContent !== when) w2.textContent = when;
+    return;
+  }
   chartPanKey = key;
-  const W = 176, H = 26, lo = Math.min(...hist.map((c) => c.low)), hi = Math.max(...hist.map((c) => c.high));
-  const X = (i) => (i / n) * W, Y = (v) => H - 3 - ((v - lo) / (hi - lo || 1)) * (H - 6);
+  const lo = Math.min(...hist.map((c) => c.low)), hi = Math.max(...hist.map((c) => c.high));
+  const Y = (v) => H - 3 - ((v - lo) / (hi - lo || 1)) * (H - 6);
+  chartPanGeo = { lo, hi, Y, yz: Math.round(Y(z.close) * 2) };
   const every = Math.max(1, Math.ceil(n / (2 * W)));   // 1주일 5분봉 2,000여 점 → 선은 픽셀당 두 점
   const pts = [];
   for (let i = 0; i < n; i += every) pts.push(i);
   if (pts[pts.length - 1] !== n - 1) pts.push(n - 1);
   const line = pts.map((i, j) => `${j ? "L" : "M"}${X(i + 0.5).toFixed(1)} ${Y(hist[i].close).toFixed(1)}`).join("");
-  const t = (c) => (hist[n - 1].time - hist[0].time > 86400 ? `${new Date(c.time * 1000).getMonth() + 1}/${new Date(c.time * 1000).getDate()} ` : "") + fmtHourMinute(c.time * 1000), end = hist[Math.max(0, e - 1)];
   const focused = box.contains(document.activeElement) && document.activeElement.classList.contains("chart-pan-map");
   box.innerHTML = `<svg class="chart-pan-map" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" preserveAspectRatio="none" role="slider" tabindex="0"`
-    + ` aria-label="받아 둔 구간 안에서 차트 창 위치 — 방향키로 이동" aria-valuemin="${Math.min(n, Math.round(chartWindowBars))}" aria-valuemax="${n}" aria-valuenow="${e}"`
-    + ` aria-valuetext="${t(hist[s])}부터 ${t(end)}까지">`
-    + `<rect class="pan-win" x="${X(sF).toFixed(1)}" y="0.5" width="${Math.max(3, X(eF) - X(sF)).toFixed(1)}" height="${H - 1}" rx="4"/>`
+    + ` aria-label="받아 둔 구간 안에서 차트 창 위치 — 방향키로 이동" aria-valuemin="${vmin}" aria-valuemax="${n}" aria-valuenow="${e}"`
+    + ` aria-valuetext="${vt}">`
+    + `<rect class="pan-win" x="${wx}" y="0.5" width="${ww}" height="${H - 1}" rx="4"/>`
     + `<path class="pan-line" d="${line}"/></svg>`
-    + `<span class="chart-pan-when">${t(hist[s])}–${chartPanEnd == null ? "지금" : new Date(end.time * 1000).toDateString() === new Date(hist[s].time * 1000).toDateString() ? fmtHourMinute(end.time * 1000) : t(end)}</span>`
+    + `<span class="chart-pan-when">${when}</span>`
     + (live ? `<span class="chart-pan-live" title="최신 봉을 따라간다">실시간</span>`
             : `<button type="button" class="chart-pan-now" title="최신 봉으로 돌아가기 (더블클릭도 같다)">최신으로</button>`);
   if (focused) box.querySelector(".chart-pan-map")?.focus();
@@ -4993,6 +5044,7 @@ function setupChartPan() {
   svg.addEventListener("wheel", (ev) => {
     if (!flowOn() || ev.ctrlKey) return;
     ev.preventDefault();
+    if (fpAltOn()) return;   // 리뷰: 4h·1d·청산맵·버블이 덮은 동안 안 보이는 5분 차트를 줌/이동하고 1주일까지 받았다(페이지 스크롤은 그대로 막는다)
     chartFlingStop();
     const g = chartSlotPx(svg);
     if (!g) return;
@@ -5004,12 +5056,18 @@ function setupChartPan() {
   // 안쪽 패널(1초 수급 등 중첩 svg)은 mousemove 버블을 끊는다 -- 잡는 단계(capture)에서 커서를 받아 둔다(다시 그린 뒤 호버 재생용)
   svg.addEventListener("mousemove", (ev) => { chartHoverPt = ev.target.closest("svg") === svg ? { x: ev.clientX, y: ev.clientY } : null; }, true);
   svg.addEventListener("mouseleave", () => { chartHoverPt = null; });
+  // 리뷰: 화면 좌표라 스크롤하면 다른 봉을 가리킨다(손가락 탭은 mouseleave 가 없어 스크롤 뒤에도 렌더마다 되살아났다). 탭한 툴팁은 그대로 둔다(휴대폰 읽기)
+  //   차트를 담은 것(페이지 · 감싼 칸)이 스크롤될 때만 -- 뉴스 목록 scrollTop 복원(30초 갱신) 같은 남의 스크롤은 커서를 안 지운다(리뷰)
+  window.addEventListener("scroll", (ev) => {
+    const t = ev.target;
+    if (t === document || (t.contains && t.contains(svg))) chartHoverPt = null;
+  }, { passive: true, capture: true });
   let drag = null;
   svg.addEventListener("pointerdown", (ev) => {
     chartFlingStop();
     if (ev.button !== 0 || ev.pointerType === "touch") return;   // 세로 이동은 창 크기와 무관하게 늘 된다(가로만 canPan)
     const g = chartSlotPx(svg);
-    drag = { x: ev.clientX, y: ev.clientY, end: chartPanEdge(full()), py: chartPanY, k: chartYPerPx, slot: g ? g.px : 1, moved: false, id: ev.pointerId, v: [] };
+    drag = { x: ev.clientX, y: ev.clientY, lx: ev.clientX, py: chartPanY, k: chartYPerPx, slot: g ? g.px : 1, moved: false, id: ev.pointerId, v: [] };
   });
   svg.addEventListener("pointermove", (ev) => {
     if (!drag || !(ev.buttons & 1)) { drag = null; return; }
@@ -5017,7 +5075,12 @@ function setupChartPan() {
     if (!drag.moved && Math.hypot(dx, dy) < 5) return;
     if (!drag.moved) { drag.moved = true; svg.setPointerCapture(drag.id); svg.classList.add("panning"); }
     if (drag.k) { chartPanY = drag.py + dy * drag.k; scheduleSnapshotChartRender(); }   // 아래로 끌면 위쪽 가격이 보인다
-    if (canPan()) chartPanTo(drag.end - dx / drag.slot);   // 오른쪽으로 끌면 과거가 보인다(1:1 -- 소수 봉 그대로)
+    // 오른쪽으로 끌면 과거가 보인다(1:1 -- 소수 봉 그대로). 지난 이동만큼 **지금 끝(시각 기준)**에서 뺀다 -- 리뷰: 누를 때 봉 번호를 들고 있으면
+    //   끄는 중 1주일이 앞에 붙거나(첫 이동이 받기를 부른다) 새 봉이 오면 번호가 다른 봉을 가리켜 며칠 과거로 튀었다 · 끄는 중 휠 줌이면 봉 폭도 새로
+    const g = chartSlotPx(svg);
+    if (g) drag.slot = g.px;
+    if (canPan()) chartPanTo(chartPanEdge(full()) - (ev.clientX - drag.lx) / drag.slot);
+    drag.lx = ev.clientX;
     drag.v.push([ev.timeStamp, ev.clientX]); if (drag.v.length > 6) drag.v.shift();
   });
   const stop = (ev) => {
@@ -5033,6 +5096,9 @@ function setupChartPan() {
   svg.addEventListener("dblclick", () => { if (chartPanEnd != null || chartPanY) chartPanReset(); });
   // 2026-10-20 캔버스(fpCv)는 svg(viewBox meet)처럼 상자를 따라 저절로 늘지 않는다 -- 상자가 바뀌면 바로 다시 그린다(다음 폴링까지 어긋나지 않게)
   if (window.ResizeObserver) new ResizeObserver(() => scheduleSnapshotChartRender()).observe(svg);
+  // 리뷰: 1배 → 2배 모니터로 옮기면 CSS 크기가 같아 위 관찰이 안 울린다 -- 장치 픽셀 비가 바뀌면 다시 그린다(새 비율로 다시 건다)
+  const onDpr = () => matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener("change", () => { scheduleSnapshotChartRender(); onDpr(); }, { once: true });
+  onDpr();
 }
 // ── 풋프린트 캔버스 두 장 (2026-10-20 사용자 «4번·5번도 모두 고쳐서» -- 바이낸스·트레이딩뷰처럼 부드럽게) ──────────
 //   무거운 봉별 층을 svg **밑** 캔버스로 옮겼다(그림은 같다 -- 같은 좌표·같은 CSS 변수·같은 칠하기 순서):
@@ -5047,6 +5113,7 @@ function setupChartPan() {
 //   잃은 것: 칸·델타·POC·청산 원의 브라우저 기본 제목(<title>) -- 같은 값을 봉 호버 툴팁이 말한다(칸 줄·청산 줄 추가).
 const fpCv = { bg: null, fg: null, S: 1, ox: 0, oy: 0, cs: null, col: new Map(), fam: "", live: null, seq: 0 };
 const CV_ALL = { x0: -1e9, x1: 1e9, y0: -1e9, y1: 1e9 };
+const fpAltOn = () => { const c = el("fpCard"); return !!(c && c.classList.contains("fp-alt-on")); };   // 일봉·청산맵·버블이 5분 차트를 덮었나(fp_daily.js syncHole)
 function fpCvLayer(svg, key) {
   let L = fpCv[key];
   if (!L || L.cv.parentNode !== svg.parentNode) {
@@ -5181,7 +5248,7 @@ function scheduleFpLiveFrame() {
   fpLiveRafAt = Date.now();
   fpLiveRaf = requestAnimationFrame(() => {
     fpLiveRaf = 0;
-    if (activePageTab !== "snapshot" || isScrolling() || !fpCv.live || snapshotChartRafId || fpCv.seq === fpTradeSeq) return;   // 전체 렌더가 이 프레임에 오거나 방금 다 그렸으면 그쪽
+    if (activePageTab !== "snapshot" || isScrolling() || !fpCv.live || snapshotChartRafId || fpCv.seq === fpTradeSeq || fpAltOn()) return;   // 전체 렌더가 이 프레임에 오거나 방금 다 그렸으면 그쪽 · 일봉 등이 덮었으면(캔버스 숨김) 안 칠한다(리뷰)
     const seq = fpTradeSeq;
     if (fpCv.live() === false) maybeRenderSnapshotChartNow(); else fpCv.seq = seq;
   });
@@ -5457,7 +5524,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 데이터가 없으면 자리를 아예 안 잡는다(OI 레인과 같은 규약).
   const fpBars = (svg.id === "candleSvgSnapshot" && flowOn()
                    && latestFootprint && Array.isArray(latestFootprint.bars))
-                  ? tfFpBars(latestFootprint.bars) : [];
+                  ? tfFpBars(fpBarsNow()) : [];
   // ── 5분봉 레인: 여덟 줄 -> 두 행 (2026-09-22 사용자 선택) ─────────────────────
   // 상관 실측이 근거다(라이브 12봉): 거래대금↔청산 r=+0.958 · 거래대금↔|델타| +0.884 ·
   // |델타|↔청산 +0.882 -- 앞의 셋은 사실상 한 축(«얼마나 시끄러웠나»)이라 세 줄을 쓸 이유가
@@ -5493,9 +5560,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // ── 거래대금 · 델타·CVD -- 풋프린트 바로 아래 (2026-09-21 사용자 지시) ────────────
   // 같은 풋프린트 봉에서 나온다: 거래대금 = Σ가격x(매수+매도) · 델타 = Σ(매수-매도) ·
   // CVD = 그 창 안에서의 델타 누적.
-  // 🔴CVD 의 기준점은 **창 시작**이고, 창은 1h/2h/4h 선택기를 그대로 따른다(사용자 결정).
-  //   `CHART_WINDOW_BARS` 12/24/48/144 가 곧 그 넷이고 서버 상한(FOOTPRINT_MAX_WINDOW_BARS)도
-  //   144 라 넷 다 덮인다. 창을 바꾸면 기준점도 같이 옮겨간다 -- 절대 누적이 아니다.
+  // 🔴CVD 의 기준점은 **창 시작**이고, 창은 휠 줌·이동(12봉 ~ 1주일, chartWindowBars)을 그대로 따른다(사용자 결정).
+  //   창을 바꾸면 기준점도 같이 옮겨간다 -- 절대 누적이 아니다.
   // 🔴«상황 읽기» 카드의 CVD 는 **30분 고정창**이다(dashboard/situation.py 의 WINDOW=6).
   //   이름이 같아도 값이 다르다. 툴팁에 창을 적는다.
   // 2026-09-27 풋프린트 오른쪽 «실시간 호가 띠»(사용자 지시) -- 캔들 폭에서 띠 폭을 뗀다(데스크톱 70 · 모바일 40).
@@ -6355,7 +6421,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       }
       // ③ 볼린저(20, 2σ) -- 창 슬라이스로는 20봉이 안 돼 전체 이력에서 센다
       if (mcLine.bb) {
-        const bbm = mcBollinger(tfCandles(candleHistoryByAsset[activeSnapshotAsset] || []));
+        const bbm = mcBollinger(chartTfFull());   // 리뷰: 라이브 200봉만 세면 1h(≈17봉)는 20봉이 안 돼 밴드가 없었다 -- 1주일까지
         [0, 2].forEach((j) => pl(candles.map((c, i) => (bbm.has(c.time) ? `${cx(i)},${yAt(bbm.get(c.time)[j]).toFixed(1)}` : null)).filter(Boolean),
           { stroke: "var(--muted)", "stroke-opacity": 0.55, "stroke-dasharray": "3 3", "stroke-width": 1 },
           "볼린저 밴드(20봉 · 2σ). 우리 검정: 4시간 볼린저는 평균회귀·이탈 추종 둘 다 비용을 못 넘었다 — 위치 참고."));
@@ -6436,14 +6502,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     for (let i = 0; i < iL; i++) { oMin = Math.min(oMin, candles[i].low); oMax = Math.max(oMax, candles[i].high); }
     if (isSnapshotChart && !panned && !chartPanY && iL >= 0 && live.bar >= 0) fpCv.live = () => {
       if (chartTfK !== live0.tf || activeSnapshotAsset !== live0.asset || chartWindowBars !== live0.win || chartPanEnd != null || chartPanY || !svg.isConnected) return false;
-      // 형성 봉 OHLC: 5m 은 캔들 이력의 그 객체(체결마다 제자리 갱신) · 30m·1h 는 그 tf 봉에 든 5분봉을 다시 묶어 제자리에 쓴다(호버도 새 값)
-      const raw = candleHistoryByAsset[activeSnapshotAsset] || [], last = raw[raw.length - 1], c = candles[iL];
-      if (!last || tfT(last.time) !== c.time || (chartTfK === 1 && last !== c)) return false;
-      if (chartTfK > 1) {
-        let o = last.open, hi = -Infinity, lo = Infinity;
-        for (let j = raw.length - 1; j >= 0 && tfT(raw[j].time) === c.time; j--) { o = raw[j].open; hi = Math.max(hi, raw[j].high); lo = Math.min(lo, raw[j].low); }
-        Object.assign(c, { open: o, high: hi, low: lo, close: last.close });
-      }
+      // 형성 봉 OHLC: 5m 은 캔들 이력의 그 객체(체결마다 제자리 갱신) · 30m·1h 는 chartTfFull 이 그 tf 봉을 제자리에서 다시 묶는다(tfCandles -- 호버도 새 값)
+      //   마지막 봉이 다른 객체 = 새 5분봉이 왔다(또는 이력 교체) → 전체 렌더
+      const tfl = chartTfFull(), c = candles[iL];
+      if (tfl[tfl.length - 1] !== c) return false;
       const cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), withCur = includeCurrentPrice && cur > 0;
       const [y0, y1] = yRangeOf(Math.min(oMin, c.low, withCur ? cur : Infinity), Math.max(oMax, c.high, withCur ? cur : -Infinity));
       if (y0 !== yMin || y1 !== yMax) return false;
@@ -6452,7 +6514,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (lastSnap) for (const b of lastSnap.bins || []) {   // 새로 쓸린 밀도 칸 = bg 가 바뀐다
         if (b.weightPct > 0 && !densitySweep.has(b.price) && c.time >= tfT(Math.floor((lastSnap.tsMs || 0) / 1000)) && c.low <= b.price && b.price <= c.high) return false;
       }
-      const fp = tfFootprint(footprintForChart()), rows = rowsOfLv(fp && fp.byTime.get(c.time)), inf = barInfo(rows);
+      // 형성 봉 칸: 그 tf 봉에 든 5분봉만 떼어 실시간 값을 얹고 묶는다(리뷰: 체결 프레임마다 2천 봉 footprintForChart 를 다 돌았다)
+      const fb = fpBarsNow() || [], one = new Map();
+      for (let j = fb.length - 1; j >= 0 && tfT(fb[j].time) >= c.time; j--) {
+        if (tfT(fb[j].time) === c.time && Array.isArray(fb[j].levels) && fb[j].levels.length) one.set(fb[j].time, fb[j].levels);
+      }
+      footprintMergeLive(one, bucket);
+      const rows = rowsOfLv((chartTfK > 1 ? tfLevels(one, bucket) : one).get(c.time)), inf = barInfo(rows);
       let mb = maxBuy0, ms = maxSell0;
       rows.forEach((cell) => { mb = Math.max(mb, cell[0]); ms = Math.max(ms, cell[1]); });
       const olds = [fgI[live.bar], fgI[live.delta], live.stack >= 0 ? fgI[live.stack] : NOOP, liqLive ? fgI[liqLive.at] : NOOP];
