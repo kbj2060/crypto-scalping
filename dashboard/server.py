@@ -1145,6 +1145,10 @@ def json_response(request: web.Request, payload: Any, etag: str) -> web.Response
     return response
 
 
+# 내용 해시 꼬리표(_asset_buster)·no-cache 를 받는 화면 파일 -- index.html 이 ?v= 로 부르는 것 전부(sw.js 는 /sw.js 고정 주소라 제외)
+ASSET_FILES = ("app.js", "styles.css", "fp_daily.js", "liq_profile.js", "bubble_map.js")
+
+
 def make_app() -> web.Application:
     @web.middleware
     async def static_asset_headers(
@@ -1153,7 +1157,9 @@ def make_app() -> web.Application:
     ) -> web.StreamResponse:
         response = await handler(request)
         asset_name = Path(request.path).name
-        if asset_name in {"app.js", "styles.css"}:
+        # 2026-10-20 사용자 «4h 버튼이 안 눌린다»: fp_daily.js 는 이 목록에 없어 헤더 없이 나갔고 꼬리표도 손으로 적은 날짜라
+        #   Cloudflare·브라우저가 옛 판(4h 처리 없음)을 계속 줬다 -- 대시보드의 JS·CSS 전부 같은 규칙(no-cache + 내용 해시 꼬리표).
+        if asset_name in ASSET_FILES:
             # 🔴immutable 금지. 이 둘은 배포마다 바뀌는데 캐시버스터가 날짜라 같은 날
             # 두 번째 배포는 브라우저/Cloudflare 캐시를 못 뚫는다(2026-09-13 실제 사고).
             # no-cache 는 «캐시하지 마라»가 아니라 «쓰기 전에 물어봐라»다 -- 안 바뀌었으면
@@ -3038,7 +3044,7 @@ def make_app() -> web.Application:
         raise web.HTTPFound("/dashboard/live/")
 
     def _asset_buster() -> str:
-        """app.js / styles.css 의 **내용**에서 뽑은 캐시 버스터.
+        """화면 파일(ASSET_FILES)의 **내용**에서 뽑은 캐시 버스터.
 
         🔴손으로 적는 날짜 슬러그는 두 번 터졌다(2026-09-13, 2026-09-16). 앞단에 cloudflared
         터널이 있어 no-cache 만으로는 부족한데, 같은 날 두 번째 배포는 슬러그가 그대로라
@@ -3046,7 +3052,7 @@ def make_app() -> web.Application:
         버스터가 저절로 바뀐다. mtime 이 아니라 내용 해시라 재배포로 mtime 만 변해도 안 흔들린다.
         """
         h = hashlib.sha256()
-        for name in ("app.js", "styles.css"):
+        for name in ASSET_FILES:
             try:
                 h.update((DASHBOARD_DIR / name).read_bytes())
             except OSError:
@@ -3071,7 +3077,7 @@ def make_app() -> web.Application:
 
     async def dashboard_index(_: web.Request) -> web.Response:
         html = (DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
-        html = re.sub(r'(app\.js|styles\.css)\?v=[A-Za-z0-9._-]+',
+        html = re.sub(r'(' + "|".join(re.escape(n) for n in ASSET_FILES) + r')\?v=[A-Za-z0-9._-]+',
                       lambda m: f"{m.group(1)}?v={_asset_buster()}", html)
         html = _hide_off_assets(html)
         response = web.Response(text=html, content_type="text/html")
