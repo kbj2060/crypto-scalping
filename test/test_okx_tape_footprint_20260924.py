@@ -55,3 +55,18 @@ def test_bars_minutes_and_oi(tmp_path):
     assert got["tape_max"] == b1 + 200
     assert got["liq"] == [{"ts_ms": b0 * 1000 + 9, "side": "long", "qty": 2.0, "price": 2600.0,
                            "usd": 5200.0, "symbol": INST}], ("ETH·t0 앞·라이브와 같은 모양", got["liq"])
+
+
+def test_cell_key_matches_live_rounding_sol(tmp_path):
+    """2026-10-20 칸 키 = 라이브 식 int(round(체결가 / 칸)). SOL(테이프 0.01 · 칸 0.02)은 홀수 센트가 .5 동률이라
+    SQL round 가 라이브와 갈랐다 -- 1주일 풋프린트가 서버 링과 같은 칸이어야 한다."""
+    tape = TapeStore(tmp_path / "s.duckdb", "solusdt", 0.01)
+    b0 = int(time.time()) // 300 * 300 - 600
+    pbs = range(18531, 18560)                         # $185.31 ~ 185.59, 홀수·짝수 센트 섞음
+    tape.write([(b0 + 1, pb, 1.0, 0.0, 1, 0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0, 1, 0) for pb in pbs])
+    got = okx_tape_footprint(tape.db_path, tmp_path / "none.duckdb", "solusdt", b0, (b0 + 300) * 1000, 300, 0.02, 0.01)
+    want: dict[int, float] = {}
+    for pb in pbs:
+        k = int(round(float(f"{pb / 100:.2f}") / 0.02))   # 라이브(coin_flow 체결 처리)와 같은 식
+        want[k] = want.get(k, 0.0) + 1.0
+    assert {k: v[0] for k, v in got["bars"][b0].items()} == want

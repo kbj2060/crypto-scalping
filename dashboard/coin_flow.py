@@ -132,7 +132,7 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
     🔴가격칸: 테이프 칸(0.1)을 풋프린트 칸(0.5)으로 올린다. 0.5 가 0.1 의 정수배라 경계가 겹친다
       (정수/5 는 .5 가 안 나와 반올림 동률이 없다)."""
     t0_sec = t0_ms // 1000
-    q = """SELECT ts_sec - ts_sec % ? AS bar, CAST(round(price_bin * ? / ?) AS INTEGER) AS k,
+    q = """SELECT ts_sec - ts_sec % ? AS bar, price_bin,
                   sum(buy_qty), sum(sell_qty),
                   sum(coalesce(whale_buy_qty, 0)), sum(coalesce(whale_sell_qty, 0)),
                   sum(coalesce(retail_buy_qty, 0)), sum(coalesce(retail_sell_qty, 0))
@@ -140,9 +140,18 @@ def okx_tape_footprint(tape_db: Path, ctx_db: Path, inst: str, lo_sec: int, t0_m
     # 2026-09-26 바이낸스 체결 테이프(trade_tape_<coin>.duckdb)도 같은 표 모양이라 이 함수를 쓴다 -- 칸 폭만 준다.
     tape_bucket = tape_bucket or OKX_TAPE_BUCKETS[inst]
     bars: dict[int, dict[int, list[float]]] = {}
+    # 🔴2026-10-20 칸 키는 라이브와 **같은 식**(int(round(가격 / 칸)), 파이썬 반올림)으로 파이썬에서 -- SQL round(테이프칸×0.01/0.02)는
+    #   SOL 홀수 센트가 .5 동률이라 SQLite(0 에서 먼 쪽)와 라이브 float 가 갈랐다(서버 사본 140봉 대조: SOL 0봉 일치 → 140봉 중 테이프 공백 외 전부).
+    #   round(·, 10) = 테이프 칸 가격의 십진값 그대로(라이브의 float(체결가)와 같은 수) -- ETH·XRP 는 원래도 동률이 없어 결과가 같다.
+    key: dict[int, int] = {}
     # 🔴SQL 은 DuckDB(OKX 테이프)·SQLite(바이낸스 hot) 둘 다에서 같게 -- `//` 는 SQLite 에 없다(data_store.read_rows).
-    for bar, k, *v in _read_only_rows(tape_db, q, [bar_seconds, tape_bucket, bucket, inst, lo_sec, t0_sec]):
-        bars.setdefault(int(bar), {})[int(k)] = [float(x) for x in v]
+    for bar, pb, *v in _read_only_rows(tape_db, q, [bar_seconds, inst, lo_sec, t0_sec]):
+        k = key.get(pb)
+        if k is None:
+            k = key[pb] = int(round(round(int(pb) * tape_bucket, 10) / bucket))
+        t = bars.setdefault(int(bar), {}).setdefault(k, [0.0] * 6)
+        for j in range(6):
+            t[j] += float(v[j] or 0.0)
     ver = _read_only_rows(tape_db, "SELECT ts_min, rel_err FROM verify_1m WHERE symbol = ? AND ts_min >= ?",
                           [inst, lo_sec])
     gaps = _read_only_rows(tape_db, "SELECT from_ms, to_ms FROM gaps WHERE symbol = ? AND to_ms > ?",

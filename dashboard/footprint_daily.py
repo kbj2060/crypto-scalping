@@ -491,6 +491,38 @@ def h4_heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None
     return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H}
 
 
+# ── 5분봉 1주일 (2026-10-20 사용자 «5m, 30m, 1h 모두 데이터를 일주일 치를 가져와서 보여줘») ──────────────────────
+#   라이브 풋프린트 창(서버 링 12시간)의 과거분 -- server.api_footprint_week 가 테이프(coin_flow.okx_tape_footprint)를 읽어 여기서 묶는다.
+def week_bars(bn: dict, ox: dict | None, d0: int, d1: int, bar_s: int = 300) -> dict[int, dict[int, list[float]]]:
+    """바이낸스·OKX 테이프 봉 → 라이브 /api/footprint 처럼 두 거래소 칸(6열) 합. 두 테이프가 다 온전한(1분봉 대조 통과) 봉만 --
+    하나라도 비면 그 봉은 «모름»(라이브의 OKX 합류 규칙처럼 한 창에 1·2거래소 봉을 섞지 않는다). ox=None(OKX 테이프 없음) = 바이낸스만."""
+    full = lambda g, b: all(m in g["ok_min"] for m in range(b, b + bar_s, 60))   # noqa: E731
+    out: dict[int, dict[int, list[float]]] = {}
+    for b in range(d0, d1, bar_s):
+        if b not in bn["bars"] or not full(bn, b) or (ox is not None and not full(ox, b)):
+            continue
+        cells = {k: list(v) for k, v in bn["bars"][b].items()}
+        for k, v in (ox["bars"].get(b, {}) if ox is not None else {}).items():
+            t = cells.setdefault(k, [0.0] * 6)
+            for j in range(6):
+                t[j] += v[j]
+        out[b] = cells
+    return out
+
+
+def oi_deltas(oc: dict[int, tuple[float, float]], bar_s: int = 300) -> dict[int, tuple[float, float, int]]:
+    """{봉: (첫 OI, 끝 OI)} → {봉: (Δ, 끝, 공백)}. Δ = 직전 봉 끝 → 이 봉 끝 · 앞 봉이 비었으면 봉 안에서만(공백 1)
+    -- server.oi_5m_buckets(바이낸스)·api_oi_5m(OKX)와 같은 규칙."""
+    out: dict[int, tuple[float, float, int]] = {}
+    prev: tuple[int, float] | None = None
+    for b in sorted(oc):
+        o, c = oc[b]
+        gap = prev is None or b - prev[0] > bar_s
+        out[b] = ((c - o) if gap else (c - prev[1]), c, int(gap))
+        prev = (b, c)
+    return out
+
+
 def parse_row(v: str | None) -> int:
     """화면이 고르는 행 크기($). 신뢰경계 — 정수 1~500 만."""
     try:
@@ -553,7 +585,18 @@ def selftest() -> None:
     assert one["oi"] == [1.0, 2.0, 3.0] and two["oi"] == [1.0, 2.0, 3.0], (one["oi"], two["oi"])
     _h4.update(closed={}, live={}, at=0.0)
     assert cx["2026-10-20T00"]["oi"] == 99.0 and cx["2026-10-20T00"]["ls"] == 4.0, cx
-    print("selftest OK -- 테이프 일 요약·$1 칸·행 묶기·청산 모름/반쪽/0·OI 병합·행 입력 검증·4시간 칸 경계·OI/청산 4시간 묶기·lake→hot 이음")
+    # 5분봉 1주일: 두 테이프 다 온전한 봉만 칸 합 · OKX 테이프가 없으면 바이낸스만 · OI Δ 규칙
+    okm = lambda b0, n: set(range(b0, b0 + 60 * n, 60))   # noqa: E731
+    bn = {"bars": {0: {10: [1.0, 2, 0, 0, 1, 0]}, 300: {10: [5.0, 0, 0, 0, 0, 0]}, 600: {11: [1.0, 1, 0, 0, 0, 0]}}, "ok_min": okm(0, 15)}
+    ox = {"bars": {0: {10: [1.0, 1, 1, 0, 0, 0], 12: [0, 3.0, 0, 0, 0, 0]}}, "ok_min": okm(0, 10)}   # 600 봉은 OKX 가 다 못 봄
+    wb = week_bars(bn, ox, 0, 900)
+    assert sorted(wb) == [0, 300] and wb[0] == {10: [2.0, 3, 1, 0, 1, 0], 12: [0, 3.0, 0, 0, 0, 0]} and bn["bars"][0][10][0] == 1.0, wb
+    assert sorted(week_bars(bn, None, 0, 900)) == [0, 300, 600]
+    assert sorted(week_bars({**bn, "ok_min": okm(0, 14)}, None, 0, 900)) == [0, 300]          # 바이낸스 마지막 1분 빔 = 그 봉 모름
+    od = oi_deltas({0: (10.0, 12.0), 300: (12.5, 13.0), 900: (20.0, 19.0)})
+    assert od == {0: (2.0, 12.0, 1), 300: (1.0, 13.0, 0), 900: (-1.0, 19.0, 1)}, od
+    print("selftest OK -- 테이프 일 요약·$1 칸·행 묶기·청산 모름/반쪽/0·OI 병합·행 입력 검증·4시간 칸 경계·OI/청산 4시간 묶기·lake→hot 이음"
+          "·5분봉 1주일(두 거래소 온전한 봉만 합·OI Δ)")
 
 
 if __name__ == "__main__":

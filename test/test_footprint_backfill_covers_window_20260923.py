@@ -25,11 +25,13 @@ def const(src: str, name: str) -> int:
 KEEP = const(server, "FOOTPRINT_KEEP_BARS")
 MAXWIN = const(server, "FOOTPRINT_MAX_WINDOW_BARS")
 
-m = re.search(r"const CHART_WINDOW_BARS\s*=\s*\[([^\]]*)\]", appjs)
-assert m, "app.js 의 CHART_WINDOW_BARS 를 못 찾았다"
-windows = [int(x) for x in re.findall(r"\d+", m.group(1))]
-assert windows, "창 목록이 비었다"
-widest = max(windows)
+# 2026-10-20 휠 단계가 1주일(5분봉 2,016)까지 늘었다 -- 12시간 밖은 링이 아니라 /api/footprint-week 가 한 번 준다.
+#   그래서 링(백필·스냅샷)이 덮어야 할 것은 화면의 **라이브 폴링 깊이**(CHART_PAN_BARS)다.
+m = re.search(r"^const CHART_PAN_BARS\s*=\s*(\d+)", appjs, re.M)
+assert m, "app.js 의 CHART_PAN_BARS 를 못 찾았다"
+windows = [int(m.group(1))]
+widest = windows[0]
+assert "/api/footprint-week" in appjs and 'add_get("/api/footprint-week"' in server, "12시간 밖(1주일) 원천이 없다"
 
 # 1. 백필 루프가 실제로 MAX_WINDOW 를 쓴다 (주석이 아니라 코드에서)
 fi = server.index("async def footprint_backfill(")

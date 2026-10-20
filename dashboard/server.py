@@ -1420,10 +1420,10 @@ def make_app() -> web.Application:
     #   무조건부 상승률 0.5056 보다 낮다.
     TREND_VETO_K = 1.0          # 밴드 = K x ATR. 실측 폭 중앙 +-0.223%
 
-    def trend_veto_rows(df: pd.DataFrame) -> dict[int, dict[str, float | int]]:
+    def trend_veto_rows(df: pd.DataFrame, tail: int = TREND_VETO_N * 5) -> dict[int, dict[str, float | int]]:
         """{봉시각(초): {sma, atr, veto}}. veto = +1 롱만 / -1 숏만 / 0 워밍업.
-        인과적: 봉 t 의 값은 봉 t 종가까지만 본다."""
-        w = df.tail(TREND_VETO_N * 5)           # ewm 워밍업 여유(720 봉). 1500 봉 전체는 낭비다
+        인과적: 봉 t 의 값은 봉 t 종가까지만 본다. tail = 볼 봉 수(1주일 캔들은 전부 -- api_footprint_week)."""
+        w = df.tail(tail)                       # ewm 워밍업 여유(720 봉). 1500 봉 전체는 낭비다
         if len(w) < TREND_VETO_N + 1:
             return {}
         c, h, l = w["close"], w["high"], w["low"]
@@ -3358,6 +3358,121 @@ def make_app() -> web.Application:
             ],
         }, headers=NOCACHE)
 
+    # ── 5분봉 1주일 (2026-10-20 사용자 «5m, 30m, 1h 모두 데이터를 일주일 치를 가져와서 보여줘») ─────────────────────
+    # 화면이 넓히거나(휠)·옮기거나·30m/1h 를 누를 때 **한 번** 받는다 -- 400ms 폴링(/api/footprint)은 그대로 12시간 증분이고,
+    #   화면은 같은 봉이면 라이브 값을 쓴다. 원천 = 우리 수집기 hot SQLite(테이프 16일·맥락 8일 보관 -- seal_to_lake HOT_KEEP_DAYS):
+    #   칸 = 바이낸스 + OKX 테이프(라이브 링과 같은 칸·같은 고래/리테일 경계 -- 체결 주문 단위 분류를 수집기와 같은 상수로) ·
+    #   OI = 바이낸스 oi_1s + OKX okx_oi · 청산 = 바이낸스 + OKX + Bybit · 캔들 = 바이낸스 5분봉(차트 캔들 원천 그대로).
+    # 닫힌 UTC 날은 한 번 세고 메모리에 둔다(봉이 다 찼거나 테이프 백필 기간 48시간이 지나면 불변) · 오늘은 swr 5분.
+    # ponytail: HL 고래 청산(추적 300주소)은 뺀다 -- 라이브 12시간에만 있다. hot 보관이 7일 밑으로 줄면 lake(footprint_daily 의 읽기)를 이어 붙인다.
+    FP_WEEK_DAYS = 7
+    fp_week_days: dict[tuple[str, int], dict] = {}
+
+    def fp_week_part(f: SimpleNamespace, d0: int, d1: int) -> dict:
+        """[d0, d1) 초의 5분봉 -- 칸(라이브 /api/footprint 와 같은 7열 모양) · OI 봉 첫/끝(거래소별) · 청산 봉 합(거래소별)."""
+        spec, sym = f.spec, f.spec.symbol.lower()
+        bn = okx_tape_footprint(HOT_TAPE_DB, LIVE_DIR / "_no_ctx.duckdb", sym, d0, d1 * 1000, FOOTPRINT_BAR_SECONDS,
+                                spec.bucket, TAPE_BUCKETS[sym])
+        ox = okx_tape_footprint(spec.okx_tape_db, spec.okx_ctx_db, spec.okx_inst, d0, d1 * 1000, FOOTPRINT_BAR_SECONDS,
+                                spec.bucket, liq_db=OKX_LIQ_DB_PATH)
+        bar = lambda ms: int(ms) // 1000 // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS   # noqa: E731
+        cells = fpd.week_bars(bn, ox if ox["bars"] else None, d0, d1, FOOTPRINT_BAR_SECONDS)
+        oi_bn: dict[int, tuple[float, float]] = {}
+        for ts, v in own_db_rows(BINANCE_CTX_DB, "SELECT ts_ms, open_interest FROM oi_1s WHERE symbol = ? AND ts_ms >= ? AND ts_ms < ? "
+                                                 "ORDER BY ts_ms", [sym, d0 * 1000, d1 * 1000]):
+            b = bar(ts)
+            oi_bn[b] = (oi_bn[b][0], float(v)) if b in oi_bn else (float(v), float(v))
+        liq: dict[int, list[float]] = {}            # 봉 -> [합 롱$, 합 숏$, 합 건수, OKX 롱, OKX 숏, OKX 건수, Bybit 롱, Bybit 숏, Bybit 건수]
+        def put(ms: int, is_long: bool, usd: float, venue: int) -> None:
+            a = liq.setdefault(bar(ms), [0.0] * 9)
+            for j in (0, venue):
+                a[j + (0 if is_long else 1)] += usd
+                a[j + 2] += 1
+        for ts, sd, usd in own_db_rows(BINANCE_CTX_DB, "SELECT ts_ms, side, usd FROM liquidations WHERE symbol = ? AND ts_ms >= ? AND ts_ms < ?",
+                                       [spec.symbol, d0 * 1000, d1 * 1000]):
+            put(ts, sd == "long", float(usd or 0.0), 0)
+        for e in ox["liq"]:
+            put(e["ts_ms"], e["side"] == "long", e["usd"], 3)
+        for ts, sd, q, px in own_db_rows(BYBIT_LIQ_DB, "SELECT ts_ms, side, qty, price FROM bybit_liquidations WHERE symbol = ? "
+                                                       "AND ts_ms >= ? AND ts_ms < ?", [spec.symbol, d0 * 1000, d1 * 1000]):
+            put(ts, sd == "Buy", float(q) * float(px), 6)   # Bybit side = 청산된 포지션(Buy = 롱 청산) -- bybit_liq_events 와 같은 규약
+        dp = spec.price_dp
+        return {"bars": [{"time": b, "levels": [[round(k * spec.bucket, dp)] + [round(x, 3) for x in v] for k, v in sorted(c.items())]}
+                         for b, c in sorted(cells.items())],
+                "oi_bn": oi_bn, "oi_ox": dict(ox["oi"]), "liq": liq, "n": len(cells)}
+
+    def fp_week_sync(f: SimpleNamespace, now: float) -> dict:
+        today = int(now) // 86400 * 86400
+        first = today - FP_WEEK_DAYS * 86400
+        parts = []
+        for d in range(first, today, 86400):
+            key = (f.spec.asset, d)
+            p = fp_week_days.get(key) or fp_week_part(f, d, d + 86400)
+            if p["n"] == 86400 // FOOTPRINT_BAR_SECONDS or now > d + 3 * 86400:   # 다 찼거나 테이프 백필(바이낸스 47시간)이 끝난 날 = 불변
+                fp_week_days[key] = p
+            parts.append(p)
+        parts.append(fp_week_part(f, today, int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS))   # 오늘 -- 마감된 봉까지
+        for k in [k for k in list(fp_week_days) if k[1] < first]:   # list() = 다른 코인 스레드가 넣는 중에도 안전
+            del fp_week_days[k]
+        oi_bn: dict[int, tuple[float, float]] = {}
+        oi_ox: dict[int, tuple[float, float]] = {}
+        liq: dict[int, list[float]] = {}
+        for p in parts:
+            oi_bn.update(p["oi_bn"]); oi_ox.update(p["oi_ox"]); liq.update(p["liq"])
+        # OI: api_oi_5m 과 같은 합류 -- OKX 기록이 있으면 두 거래소가 다 있는 봉만(한 창에 1·2거래소 봉을 섞지 않는다)
+        dbn, dox = fpd.oi_deltas(oi_bn, FOOTPRINT_BAR_SECONDS), fpd.oi_deltas(oi_ox, FOOTPRINT_BAR_SECONDS)
+        oi = [[b, round(d + (dox[b][0] if dox else 0.0), 3), round(c + (dox[b][1] if dox else 0.0), 3), 0, g]
+              for b, (d, c, g) in sorted(dbn.items()) if not dox or b in dox]
+        # 청산: 청산이 난 봉만 싣는다(화면은 0 인 봉에 원을 안 그린다 -- 0 과 모름이 같은 그림이라 실을 이유가 없다) · 거래소 몫은 있을 때만(툴팁)
+        det = lambda a, j: {"long_usd": round(a[j]), "short_usd": round(a[j + 1]), "n": int(a[j + 2])} if a[j + 2] else None   # noqa: E731
+        liq_out = [{"ts": datetime.fromtimestamp(b, timezone.utc).isoformat(), "long_usd": round(a[0], 2), "short_usd": round(a[1], 2),
+                    "events": int(a[2]), **{k: v for k, v in (("okx_detail", det(a, 3)), ("bybit", det(a, 6))) if v}}
+                   for b, a in sorted(liq.items())]
+        return {"bars": [b for p in parts for b in p["bars"]], "oi": oi, "liq": liq_out}
+
+    async def fp_week_candles(asset: str) -> list[dict]:
+        """지난 7일 5분봉(마감봉) -- /api/market-history 와 같은 행 모양(추세 밴드·세션 VWAP 포함). 밴드 워밍업 144봉을 더 받는다."""
+        start_ms = ((int(time.time()) // 86400 - FP_WEEK_DAYS) * 86400 - TREND_VETO_N * FOOTPRINT_BAR_SECONDS) * 1000
+        rows: list = []
+        while len(rows) < 4000:
+            got = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                           {"symbol": MARKET_SYMBOLS[asset], "interval": "5m", "startTime": start_ms, "limit": 1000},
+                                           timeout=5.0, error_reason="fp_week_klines")
+            rows += got or []
+            if not got or len(got) < 1000:
+                break
+            start_ms = int(got[-1][0]) + FOOTPRINT_BAR_SECONDS * 1000
+        now_ms = time.time() * 1000
+        rows = [r for r in rows if int(r[6]) < now_ms]
+        if not rows:
+            return []
+        df = pd.DataFrame({"timestamp": pd.to_datetime([int(r[0]) for r in rows], unit="ms", utc=True),
+                           "high": [float(r[2]) for r in rows], "low": [float(r[3]) for r in rows], "close": [float(r[4]) for r in rows]})
+        veto = trend_veto_rows(df, tail=len(df))
+        tss = [int(r[0]) // 1000 for r in rows]
+        vwap = mctx.vwap_rows(tss, [float(r[2]) for r in rows], [float(r[3]) for r in rows], [float(r[4]) for r in rows],
+                              [float(r[5]) for r in rows], **({} if asset == "eth" else {"nd": 6}))
+        week0 = (int(time.time()) // 86400 - FP_WEEK_DAYS) * 86400
+        return [{"time": t, "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]),
+                 **veto.get(t, {}), **vwap.get(t, {})} for t, r in zip(tss, rows) if t >= week0]
+
+    async def api_footprint_week(request: web.Request) -> web.Response:
+        """지난 7일 5분봉 풋프린트·캔들·OI·청산(위 주석). 화면이 필요할 때 한 번 받는다(~0.5MB gzip) -- 400ms 폴링에 넣지 않는다."""
+        f = flow_for(request.query)
+        asset = f.spec.asset
+
+        async def produce() -> dict:
+            try:
+                candles = await swr_cached(f"fp_week_k5_{asset}", 600.0, lambda: fp_week_candles(asset), max_stale=3600.0)
+            except (web.HTTPException, ClientError, asyncio.TimeoutError):
+                candles = []                     # 캔들을 못 받으면(밴 등) 칸·레인만 -- 화면은 라이브 캔들 구간만 그린다
+            body = await asyncio.to_thread(fp_week_sync, f, time.time())
+            return {"symbol": f.spec.symbol, "bucket": f.spec.bucket, "barSeconds": FOOTPRINT_BAR_SECONDS,
+                    "retailMaxUsd": f.retail_max, "whaleMinUsd": f.whale_min, "days": FP_WEEK_DAYS,
+                    "candles": candles, **body, "at": time.time()}
+        payload = await swr_cached(f"fp_week_{asset}", 300.0, produce, max_stale=1800.0)
+        return web.json_response(payload, headers=NOCACHE)
+
     def supply_1s_payload(q: Any, f: SimpleNamespace | None = None) -> dict[str, Any]:
         """최근 5분을 1초 해상도로. `?since=<초>` 면 그 뒤에 **새로 생긴 초만** 보낸다.
 
@@ -4133,6 +4248,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/stream", api_stream)
     app.router.add_get("/api/market-history", api_market_history)
     app.router.add_get("/api/footprint", api_footprint)
+    app.router.add_get("/api/footprint-week", api_footprint_week)
     app.router.add_get("/api/footprint-daily", api_footprint_daily)
     app.router.add_get("/api/footprint-daily/cells", api_footprint_daily_cells)
     app.router.add_get("/api/footprint-daily/heat", api_footprint_daily_heat)
