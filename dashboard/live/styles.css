@@ -2812,6 +2812,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 #fpCard.fp-alt-on.fp-alt-wide #mcWall, #fpCard.fp-alt-on.fp-alt-wide #fpLineSwitch, #fpCard.fp-alt-on.fp-alt-wide #chartPan { visibility: hidden; }   /* 왼쪽 열에 겹쳐 두던 칸(모의 판·지지/저항 · 차트에 그리기) */
 /* 좁은 화면(10-08 사용자 «넓은 화면처럼»): 모의 판·지지/저항은 1초 수급 아래로 흩어져 있어 덮을 수 없다 -- 일봉·청산맵을 보는 동안 숨긴다 */
 #fpCard.fp-alt-on:not(.fp-alt-wide) #liquidationMapList { display: none; }
+#fpCard.fp-alt-on .fp-cv { visibility: hidden; }   /* 2026-10-20 5분 차트 캔버스(app.js fpCv) -- 그 그림은 전부 교체 영역 안이라 svg 구멍(clip-path)과 같은 일을 통째로 */
 .fpd-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
 .fpd-legend { min-height: 18px; color: var(--text); font: 600 12px/1.5 var(--font-sans); font-variant-numeric: tabular-nums; }
 .fpd-date { font: 700 12px/1.5 var(--font-sans); margin-right: 2px; }

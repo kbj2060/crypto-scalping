@@ -81,7 +81,8 @@ def test_density_drawing_is_one_path_for_both_modes() -> None:
     피하려던 우회), 사용자 요청으로 전체폭으로 되돌렸다. 모드별 분기가 다시 생기면
     «같은 값 다른 색» 이 재발하기 쉬우므로 분기 자체를 막는다.
     """
-    block = re.search(r'cachedLayer\("density".*?\n  \}\);', src, re.S)
+    # 2026-10-20 밀도는 bg 캔버스(fpCv) -- 블록 = 칸 목록 키(densSig) ~ bg 칠하기 등록
+    block = re.search(r'const densSig = .*?if \(densRects\.length\) bgI\.push', src, re.S)
     assert block, "밀도 층 블록을 못 찾았다"
     assert "if (footprint)" not in block.group(0), \
         "밀도 그리기에 모드 분기가 생겼다 -- 두 화면 색이 갈릴 수 있다"

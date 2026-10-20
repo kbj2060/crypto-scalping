@@ -2552,8 +2552,15 @@ function updateLivePriceFast(price) {
   const box = c.svg.querySelector('[data-live="box"]');
   const txt = c.svg.querySelector('[data-live="text"]');
   const lab = c.svg.querySelector('[data-live="label"]');
-  if (!(line || tri)) return;                  // 아직 안 그렸거나 현재가 표시가 없는 판
+  const cl = c.cvLine && fpCv.bg && fpCv.bg.items.includes(c.cvLine) ? c.cvLine : null;   // 2026-10-20 풋프린트 = bg 캔버스의 칸 뒤 선
+  if (!(line || tri || cl)) return;            // 아직 안 그렸거나 현재가 표시가 없는 판
   if (line) { line.setAttribute("y1", y); line.setAttribute("y2", y); }
+  if (cl && cl.y !== y) {   // 옛 띠와 새 띠만 다시 칠한다(밀도·격자·다른 선은 같은 명령으로 되칠해져 이음매가 없다)
+    const a = cl.y;
+    cl.y = y; cl.y0 = y - 2; cl.y1 = y + 2;
+    fpCvPaint(fpCv.bg, { x0: cl.x0, x1: cl.x1, y0: Math.min(a, y) - 2, y1: Math.min(a, y) + 2 });
+    fpCvPaint(fpCv.bg, { x0: cl.x0, x1: cl.x1, y0: Math.max(a, y) - 2, y1: Math.max(a, y) + 2 });
+  }
   if (tri) tri.setAttribute("points", markerPoints(c.markerX, y));
   const labelY = Math.max(c.mt + 9, Math.min(c.mt + c.ch - 9, y));
   const labBg = c.svg.querySelector('[data-live="labelbg"]');   // 2026-09-28 풋프린트 현재가 태그 바탕
@@ -2711,6 +2718,8 @@ function ensurePriceWs() {
           footprintLiveAdd(price, qty, Number(d.T), !!d.m,
                            d.t == null ? null : Number(d.t));
           // 체결이 곧 셀의 변화다. 스로틀은 maybeRenderSnapshotChartNow 안에 있다(모드별).
+          // 2026-10-20 그 사이 프레임은 형성 봉만 캔버스에 다시 칠한다(scheduleFpLiveFrame -- rAF 로 묶어 프레임당 한 번 · 먼저 세야 지금 전체 렌더가 이 체결까지 칠한 걸로 남는다).
+          scheduleFpLiveFrame();
           maybeRenderSnapshotChartNow();
         }
       } catch (e) { /* 한 메시지가 깨져도 스트림은 계속 간다 */ }
@@ -5022,6 +5031,160 @@ function setupChartPan() {
   };
   svg.addEventListener("pointerup", stop); svg.addEventListener("pointercancel", stop);
   svg.addEventListener("dblclick", () => { if (chartPanEnd != null || chartPanY) chartPanReset(); });
+  // 2026-10-20 캔버스(fpCv)는 svg(viewBox meet)처럼 상자를 따라 저절로 늘지 않는다 -- 상자가 바뀌면 바로 다시 그린다(다음 폴링까지 어긋나지 않게)
+  if (window.ResizeObserver) new ResizeObserver(() => scheduleSnapshotChartRender()).observe(svg);
+}
+// ── 풋프린트 캔버스 두 장 (2026-10-20 사용자 «4번·5번도 모두 고쳐서» -- 바이낸스·트레이딩뷰처럼 부드럽게) ──────────
+//   무거운 봉별 층을 svg **밑** 캔버스로 옮겼다(그림은 같다 -- 같은 좌표·같은 CSS 변수·같은 칠하기 순서):
+//     bg = 청산 밀도 지도 · 가로 격자 · 칸 뒤 선(현재가 · max pain · VWAP·볼린저·주간/앵커 VWAP·HL 청산가)
+//     fg = 체결 칸·숫자·POC 테두리 · 옆 5분봉/캔들 · 봉 델타 · POC 선 · 스택 불균형 · 청산 원 · 레인 막대·리본
+//   svg 에는 글자·꼬리표·레벨 선·축·툴팁·십자선·표식만 남는다(끌기 한 프레임에 봉마다 노드를 다시 만들지 않는다).
+//   좌표 = svg viewBox 그대로(변환 S = 장치 픽셀 비 × meet 배율). 색 = svg 의 계산된 CSS 변수(테마를 따른다).
+//   그림 = 칠하기 목록 items: {x0,x1,y0,y1 = 차지하는 자리, c = 자르기 [x,y,w,h], p(ctx, q)}. 다시 칠할 때는 띠 q 와 겹치는 것만:
+//     ① 전체 렌더 = 두 장 다 처음부터 ② 형성 봉 갱신(scheduleFpLiveFrame) = fg 의 그 봉 자리만 ③ 현재가 빠른 갱신 = bg 의 옛·새 선 띠만.
+//   🔴svg 가 위라 svg 배경은 늘 투명이어야 한다(지금 그렇다). 일봉·청산맵·버블이 덮을 때는 CSS(#fpCard.fp-alt-on .fp-cv)가 두 장을 숨긴다
+//     -- svg 는 fp_daily.js 의 구멍(clip-path)으로 숨는데 그 구멍은 캔버스에 안 걸린다.
+//   잃은 것: 칸·델타·POC·청산 원의 브라우저 기본 제목(<title>) -- 같은 값을 봉 호버 툴팁이 말한다(칸 줄·청산 줄 추가).
+const fpCv = { bg: null, fg: null, S: 1, ox: 0, oy: 0, cs: null, col: new Map(), fam: "", live: null, seq: 0 };
+const CV_ALL = { x0: -1e9, x1: 1e9, y0: -1e9, y1: 1e9 };
+function fpCvLayer(svg, key) {
+  let L = fpCv[key];
+  if (!L || L.cv.parentNode !== svg.parentNode) {
+    const cv = document.createElement("canvas");
+    cv.className = "fp-cv"; cv.setAttribute("aria-hidden", "true");
+    cv.style.cssText = "position:absolute;left:0;top:0;pointer-events:none";
+    svg.parentNode.insertBefore(cv, svg);   // bg 를 먼저 만든다 → [bg, fg, svg]
+    L = fpCv[key] = { cv, ctx: cv.getContext("2d"), items: [] };
+  }
+  return L;
+}
+// 렌더 시작: 두 장을 svg 상자 왼쪽 위에 맞추고 목록을 비운다. box = 방금 잰 svg 상자(렌더가 이미 잰 것 -- 강제 레이아웃을 늘리지 않는다).
+//   크기 = 캔버스가 칠하는 자리(viewBox 0~w × 0~h = 왼쪽 열 · 넓은 화면 오른쪽 칸·좁은 화면 아래 1초 수급은 svg 만) -- 칠하고 합성할 픽셀이 넓은 화면에서 ~40% 준다.
+function fpCvBegin(svg, box, wAll, hAll, w, h) {
+  const pr = svg.parentNode.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const k = box.width > 0 && box.height > 0 ? Math.min(box.width / wAll, box.height / hAll) : 0;
+  const ox = ((box.width - wAll * k) / 2) * dpr, oy = ((box.height - hAll * k) / 2) * dpr;
+  const W = Math.min(Math.round(box.width * dpr), Math.ceil(ox + w * k * dpr)), H = Math.min(Math.round(box.height * dpr), Math.ceil(oy + h * k * dpr));
+  const l = Math.round(box.left - pr.left - svg.parentNode.clientLeft) + "px", t = Math.round(box.top - pr.top - svg.parentNode.clientTop) + "px";
+  ["bg", "fg"].forEach((key) => {
+    const L = fpCvLayer(svg, key), c = L.cv, st = c.style;
+    if (c.width !== W) c.width = W;
+    if (c.height !== H) c.height = H;
+    const cw = W / dpr + "px", chh = H / dpr + "px";   // 장치 픽셀에 딱 맞는 css 크기(반 픽셀이라도 늘이면 흐려진다)
+    if (st.left !== l) st.left = l;
+    if (st.top !== t) st.top = t;
+    if (st.width !== cw) st.width = cw;
+    if (st.height !== chh) st.height = chh;
+    L.items = [];
+  });
+  fpCv.S = dpr * k; fpCv.ox = ox; fpCv.oy = oy;
+  fpCv.cs = getComputedStyle(svg); fpCv.col.clear(); fpCv.fam = fpCv.cs.fontFamily; fpCv.live = null; fpCv.seq = fpTradeSeq;
+  // 쓰는 색은 지금(svg 를 비운 직후 -- 스타일 계산이 싸다) 다 읽어 둔다. 렌더 끝에서 처음 읽으면 그때까지 쌓은 svg 의 스타일을 강제로 다시 계산한다(1주일 창 ~2ms).
+  ["good", "bad", "amber", "ink", "line", "accent", "turnover", "muted", "warn", "text"].forEach((n) => cvc(`var(--${n})`));
+}
+const cvc = (v) => {   // "var(--good)" → 계산된 색(렌더마다 한 번) · 그 밖(rgb(…)·#…)은 그대로
+  let c = fpCv.col.get(v);
+  if (c === undefined) { c = typeof v === "string" && v.startsWith("var(") ? fpCv.cs.getPropertyValue(v.slice(4, -1).trim()).trim() || "transparent" : v; fpCv.col.set(v, c); }
+  return c;
+};
+// 칠하기: q = 다시 칠할 띠(viewBox 단위, 없으면 전부). 띠는 장치 픽셀에 맞춰 넓힌다 -- 안쪽 픽셀은 전체 렌더와 같은 명령으로 다시 칠해져 이음매가 없다.
+function fpCvPaint(L, r = null) {
+  const S = fpCv.S;
+  if (!L || !L.cv.width) return;
+  const { cv, ctx } = L;
+  let X0 = 0, Y0 = 0, X1 = cv.width, Y1 = cv.height;
+  if (r) {
+    X0 = Math.max(0, Math.floor(fpCv.ox + r.x0 * S)); X1 = Math.min(cv.width, Math.ceil(fpCv.ox + r.x1 * S));
+    Y0 = Math.max(0, Math.floor(fpCv.oy + r.y0 * S)); Y1 = Math.min(cv.height, Math.ceil(fpCv.oy + r.y1 * S));
+    if (X1 <= X0 || Y1 <= Y0) return;
+  }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(X0, Y0, X1 - X0, Y1 - Y0);
+  if (!(S > 0)) { ctx.restore(); return; }
+  if (r) { ctx.beginPath(); ctx.rect(X0, Y0, X1 - X0, Y1 - Y0); ctx.clip(); }
+  ctx.setTransform(S, 0, 0, S, fpCv.ox, fpCv.oy);
+  const q = r && { x0: (X0 - fpCv.ox) / S, x1: (X1 - fpCv.ox) / S, y0: (Y0 - fpCv.oy) / S, y1: (Y1 - fpCv.oy) / S };
+  let clip = null;
+  ctx._f = "";
+  for (const it of L.items) {
+    if (q && (it.x1 < q.x0 || it.x0 > q.x1 || it.y1 < q.y0 || it.y0 > q.y1)) continue;
+    if (it.c !== clip) {
+      if (clip) ctx.restore();
+      clip = it.c || null; ctx._f = "";
+      if (clip) { ctx.save(); ctx.beginPath(); ctx.rect(clip[0], clip[1], clip[2], clip[3]); ctx.clip(); }
+    }
+    it.p(ctx, q);
+  }
+  if (clip) ctx.restore();
+  ctx.restore();
+}
+// svg 속성과 같은 뜻의 붓 넷(상태를 매번 다 정한다 -- 칠하기끼리 save/restore 없이)
+function cvRect(ctx, x, y, w, h, fill, op = 1, rx = 0) {
+  if (!(w > 0) || !(h > 0)) return;
+  ctx.globalAlpha = op; ctx.fillStyle = cvc(fill);
+  if (rx > 0 && ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, Math.min(rx, w / 2, h / 2)); ctx.fill(); } else ctx.fillRect(x, y, w, h);   // roundRect 없는 옛 사파리(<16)는 모서리만 각지게
+}
+function cvStroke(ctx, pts, stroke, lw = 1, op = 1, dash = null, join = "miter", close = false) {
+  ctx.globalAlpha = op; ctx.strokeStyle = cvc(stroke); ctx.lineWidth = lw; ctx.lineJoin = join;
+  ctx.setLineDash(dash ? String(dash).split(/[\s,]+/).map(Number) : []);
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i][0], pts[i][1]) : ctx.moveTo(pts[i][0], pts[i][1]);
+  if (close) ctx.closePath();
+  ctx.stroke();
+}
+function cvStrokeRect(ctx, x, y, w, h, stroke, lw = 1, op = 1, rx = 0) {
+  ctx.globalAlpha = op; ctx.strokeStyle = cvc(stroke); ctx.lineWidth = lw; ctx.setLineDash([]);
+  ctx.beginPath(); if (rx > 0 && ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(rx, w / 2, h / 2)); else ctx.rect(x, y, w, h); ctx.stroke();
+}
+// 1px 가로·세로 선(심지·격자·0선) = 폭 1 사각형 -- 1px 선(맞대기 끝)과 덮는 픽셀이 같고 소프트웨어 래스터에서 선 긋기보다 싸다
+const cvVLine = (ctx, x, y0, y1, col, op = 1) => cvRect(ctx, x - 0.5, Math.min(y0, y1), 1, Math.abs(y1 - y0), col, op);
+const cvHLine = (ctx, x0, x1, y, col, op = 1) => cvRect(ctx, x0, y - 0.5, x1 - x0, 1, col, op);
+function cvText(ctx, x, y, s, size, weight, fill, op = 1, align = "start") {
+  const f = `${weight} ${size}px ${fpCv.fam}`;
+  if (ctx._f !== f) { ctx.font = f; ctx._f = f; }
+  ctx.globalAlpha = op; ctx.fillStyle = cvc(fill); ctx.textAlign = align === "middle" ? "center" : align;
+  ctx.fillText(s, x, y);
+}
+// 옛 «같은 색끼리 path 하나»(svg denseAdd)와 같은 칠 -- 겹친 곳·맞닿은 가장자리가 두 번 칠해지지 않는다(반투명 이음매·겹친 원이 진해지지 않게).
+function cvUnion() {
+  const m = new Map();
+  return {
+    add(fill, op, draw) { const k = fill + "|" + op; let e = m.get(k); if (!e) m.set(k, (e = { fill, op, p: new Path2D() })); draw(e.p); },
+    flush(push) {
+      const list = [...m.values()]; m.clear();
+      if (list.length) push((ctx) => list.forEach((e) => { ctx.globalAlpha = e.op; ctx.fillStyle = cvc(e.fill); ctx.fill(e.p); }));
+    },
+  };
+}
+// svg 의 <line>/<polyline> 을 같은 속성 그대로 bg 칠하기로 옮기고 svg 쪽은 투명하게 남긴다(<title> 호버는 그대로 산다).
+function cvFromSvgLines(g, items, at, clip) {
+  const add = [];
+  [...g.children].forEach((e) => {
+    if (e.tagName !== "line" && e.tagName !== "polyline") return;
+    const a = (k, d) => { const v = e.getAttribute(k); return v == null ? d : v; };
+    let pts = [[+a("x1", 0), +a("y1", 0)], [+a("x2", 0), +a("y2", 0)]];
+    if (e.tagName === "polyline") { const n = a("points", "").trim().split(/[\s,]+/); pts = []; for (let i = 0; i + 1 < n.length; i += 2) pts.push([+n[i], +n[i + 1]]); }
+    const stroke = a("stroke", "none"), lw = +a("stroke-width", 1), op = +a("stroke-opacity", 1) * +a("opacity", 1), dash = a("stroke-dasharray", null);
+    if (stroke !== "none" && pts.length > 1) add.push({ ...CV_ALL, c: clip, p: (ctx) => cvStroke(ctx, pts, stroke, lw, op, dash) });
+    e.style.opacity = "0";
+  });
+  items.splice(at, 0, ...add);
+}
+// 형성 봉 갱신(2026-10-20 사용자 4번): 체결이 온 프레임마다(rAF 로 묶음) 맨 오른쪽 봉의 캔들·칸·숫자·POC·델타·청산 원만 fg 에 다시 칠한다.
+//   나머지는 전체 렌더(400ms 게이트) 그대로. 축(가격 범위)·행 크기·음영 기준·밀도 쓸림·델타 겹침 판정이 바뀌면 전체 렌더로 넘긴다(fpCv.live 가 false).
+let fpLiveRaf = 0, fpLiveRafAt = 0, fpTradeSeq = 0;   // fpTradeSeq = 체결 수 -- 전체 렌더·형성 봉 갱신이 «어디까지 칠했나»(fpCv.seq)를 남겨 새 체결 없는 프레임은 건너뛴다
+function scheduleFpLiveFrame() {
+  fpTradeSeq++;
+  if (!fpCv.live) return;
+  if (fpLiveRaf) { if (Date.now() - fpLiveRafAt < RAF_STALL_MS) return; cancelAnimationFrame(fpLiveRaf); }   // 묵은 예약(가려진 창) -- 위 RAF_STALL_MS 와 같은 이유
+  fpLiveRafAt = Date.now();
+  fpLiveRaf = requestAnimationFrame(() => {
+    fpLiveRaf = 0;
+    if (activePageTab !== "snapshot" || isScrolling() || !fpCv.live || snapshotChartRafId || fpCv.seq === fpTradeSeq) return;   // 전체 렌더가 이 프레임에 오거나 방금 다 그렸으면 그쪽
+    const seq = fpTradeSeq;
+    if (fpCv.live() === false) maybeRenderSnapshotChartNow(); else fpCv.seq = seq;
+  });
 }
 function renderSnapshotChart() {
   renderChartPan();
@@ -5219,6 +5382,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const S1_PANEL = S1_BELOW ? SUB_1S_H - STATS_ROW_H - 18 : 0;
   const h = S1_BELOW ? hAll - S1_PANEL - SUB_GAP : hAll;
   const SUB_TOTAL = !subOn ? 0 : splitR ? SUB_LEGEND_H + SUB_GAP : SUB_LEGEND_H + STATS_ROW_H + 10 + SUB_GAP;
+  fpCvBegin(svg, box0, wAll, hAll, w, h);   // 2026-10-20 무거운 층은 캔버스 두 장(fpCv 주석) -- bg·fg 칠하기 목록을 아래 블록들이 채우고 끝에서 한 번 칠한다
+  const bgI = fpCv.bg.items, fgI = fpCv.fg.items;
   // 🔴상자 높이(styles.css 의 #candleSvgSnapshot/.candle-container)와 위 SUB_* 상수는 두
   //   파일에 갈라져 있다. 한쪽만 고치면 가격 플롯이 **조용히** 눌린다(ch 에서 SUB_TOTAL 을
   //   빼기 때문). 인라인 height 로 JS 가 상자를 정하는 방법은 쓰지 않는다 -- 2열에서는 상자가
@@ -5348,6 +5513,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const tradeX0 = ml + cw;   // 체결 기둥 왼쪽 끝
   fpProfileSpan = TRADE_W ? [tradeX0, w - mr] : null;   // 아래 옵션 줄 가운데 칸이 이 폭·x 를 따른다(optRowCols)
   let tradeInfo = null;       // 체결 행(호버가 읽는다) -- 풋프린트 블록이 채운다
+  let stackItem = null, liqLive = null, cellTip = () => "";   // 2026-10-20 형성 봉 갱신(fpCv.live)이 다시 부르는 봉별 칠하기 · 칸 호버 줄
   let posInfo = null;         // 2026-10-10 포지션 행(호버가 읽는다) -- 포지션 보기일 때 체결 대신
   let fpRowSize = 0;          // 풋프린트 행 크기($) -- 호가 띠가 같은 행으로 묶는다(2026-09-28)
   let fpRowOff = 0;           // 그 행 격자의 어긋남($) = 버킷/2 (2026-10-11, 아래 off)
@@ -5383,6 +5549,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     txt.setAttribute("text-anchor", "middle"); txt.setAttribute("fill", "var(--muted)");
     txt.textContent = "시장 데이터 대기 중...";
     svg.appendChild(txt);
+    fpCvPaint(fpCv.bg); fpCvPaint(fpCv.fg);   // 옛 그림을 비운다
     return;
   }
 
@@ -5406,27 +5573,33 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //  · 풋프린트 -- 넓히면 행 높이(rowPx)가 줄어 셀 숫자가 먼저 깨진다. 여기는 그대로 둔다.
   //    (rowSize 는 ySpan/ch 로 정해진다 -- 여백을 늘리면 ySpan 이 커져 행이 얇아진다.)
   const padPct = footprint ? CHART_Y_PAD_FOOTPRINT : CHART_Y_PAD_PLAIN;
-  const pad = (maxP - minP) * padPct || 1;
-  let yMin = minP - pad, yMax = maxP + pad;
   // 2026-09-27 풋프린트는 현재가를 세로 **정중앙**에(사용자 지시) -- 먼 쪽 거리로 위아래 대칭.
   //   가운데는 **5분봉마다 한 번** 잡는다(같은 날 사용자 «매 5분봉마다»): 봉이 바뀔 때의 현재가로 정하고 그 봉 동안은
   //   고정한다 -- 틱마다 따라가면 화면 전체가 계속 출렁인다. 봉 안에서 범위를 벗어나면 가운데는 두고 위아래만 넓힌다.
   //   🔴가운데는 풋프린트 칸 단위, 반폭은 두 칸 단위로 반올림한다(yMin/yMax 가 층 캐시 서명 baseGeomSig 에 들어 있다).
+  const fpQ = footprint ? Number(footprint.bucket) || 0 : 0, fc = renderCandleSvg._fpCenter || (renderCandleSvg._fpCenter = { key: "", c: 0 });
   if (footprint && currentPrice > 0 && !panned) {
-    const q = Number(footprint.bucket) || 0;
     const barT = candles.length ? candles[candles.length - 1].time : 0;
-    const fc = renderCandleSvg._fpCenter || (renderCandleSvg._fpCenter = { key: "", c: 0 });
     const fcKey = activeSnapshotAsset + "|" + barT;
     if (fc.key !== fcKey) {
       fc.key = fcKey;
-      fc.c = q > 0 ? Math.round(currentPrice / q) * q : currentPrice;
+      fc.c = fpQ > 0 ? Math.round(currentPrice / fpQ) * fpQ : currentPrice;
     }
-    const c = fc.c;
-    let half = Math.max(yMax - c, c - yMin);
-    if (q > 0) half = Math.ceil(half / (2 * q)) * 2 * q;
-    yMin = c - half; yMax = c + half;
   }
-  if (svg.id === "candleSvgSnapshot" && chartPanY) { yMin += chartPanY; yMax += chartPanY; }   // 2026-10-09 세로 끌기
+  // 2026-10-20 함수로 묶었다 -- 형성 봉 갱신(fpCv.live)이 «새 고저·현재가로 축이 그대로인가»를 같은 식으로 다시 잰다
+  const yRangeOf = (minP, maxP) => {
+    const pad = (maxP - minP) * padPct || 1;
+    let yMin = minP - pad, yMax = maxP + pad;
+    if (footprint && currentPrice > 0 && !panned) {
+      const c = fc.c;
+      let half = Math.max(yMax - c, c - yMin);
+      if (fpQ > 0) half = Math.ceil(half / (2 * fpQ)) * 2 * fpQ;
+      yMin = c - half; yMax = c + half;
+    }
+    if (svg.id === "candleSvgSnapshot" && chartPanY) { yMin += chartPanY; yMax += chartPanY; }   // 2026-10-09 세로 끌기
+    return [yMin, yMax];
+  };
+  const [yMin, yMax] = yRangeOf(minP, maxP);
   const ySpan = Math.max(yMax - yMin, 1e-5); // Prevent division by zero
   if (svg.id === "candleSvgSnapshot") chartYPerPx = ySpan / Math.max(1, ch);
 
@@ -5447,22 +5620,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   3.7만 노드 · 렌더 180ms 였다. 봉 칸이 4px 밑이면 같은 색끼리 <path> 하나로 모으고 봉별 <title> 은 뺀다(호버 툴팁이 그 봉 값을 말한다).
   // 2026-10-20 연속 줌(36~300봉이 «무거운 구간»): 문턱 4 → 8px. 4~8px 봉은 박스 없는 캔들이라 path 로 모아도 같은 그림(아래 DENSE 캔들 폭).
   const DENSE = slot < 8;
-  const denseD = new Map();   // 속성 키 -> { 속성, d 조각들 } -- 끝에서 그 속성으로 path 하나씩
-  const denseAdd = (attrs, d) => {   // 2026-10-20 키 = 쓰는 속성 넷을 이은 글자(JSON 왕복이 1주일 창 렌더의 1할이었다)
-    const k = `${attrs.fill}|${attrs["fill-opacity"]}|${attrs.stroke}|${attrs["stroke-width"]}`, e = denseD.get(k);
-    if (e) e.d.push(d); else denseD.set(k, { attrs, d: [d] });
-  };
-  const denseFlush = (parent, clip) => {
-    denseD.forEach(({ attrs, d }) => {
-      const e = document.createElementNS(NS, "path");
-      Object.entries(attrs).forEach(([a, v]) => e.setAttribute(a, v));
-      e.setAttribute("d", d.join(""));
-      if (clip) e.setAttribute("clip-path", clip);
-      parent.appendChild(e);
-    });
-    denseD.clear();
-  };
-  const denseRect = (x, y, wd, ht) => `M${x.toFixed(1)} ${y.toFixed(1)}h${wd.toFixed(2)}v${ht.toFixed(1)}h${(-wd).toFixed(2)}Z`;
+  // 2026-10-20 캔버스로 옮기며 «같은 색끼리 path 하나로 모으기»(denseAdd)는 뺐다 -- 캔버스는 칠하기가 곧 픽셀이라 모을 노드가 없다.
+  //   DENSE 는 «무엇을 그리나»(박스 없는 캔들 · 1px 밑 열 합치기 · 작은 청산 원)만 정한다.
 
   // ── 계층 캐시 (2026-09-20) ────────────────────────────────────────────────
   // 봉 셀은 이미 봉별로 캐시한다. 남은 것은 **가격 플롯 바깥의 층들**이다 -- 격자·x눈금·
@@ -5478,6 +5637,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   그래서 OHLC 에 의존하는 것(가격 라벨·이벤트 삼각형)은 **캐시하지 않고** 매번 그린다.
   // 🔴테마를 서명에 넣는다 -- 밀도 색표·풋프린트 셰이드·잉크 불투명도가 전부 테마 파생이라,
   //   빠뜨리면 테마를 바꿔도 캐시된 층이 옛 색 그대로 남는다(모드 키와 같은 함정).
+  // 2026-10-20 봉 셀·밀도·레인·청산 원은 캔버스(fpCv)로 갔다 -- svg 층 캐시는 x눈금(grid)·호가 띠(bookStrip)만 남고, 같은 키가 밀도 칸 목록 기억(densSig)에 쓰인다.
   const themeSig = document.documentElement.getAttribute("data-theme") || "dark";
   const baseGeomSig = [themeSig, w, h, mt, ch, ml, mr, cw, bw, X0, yMin, yMax, plotBottom,
                        mobileChart, quadY, cumY, QUAD_H, QUAD_TXT, CUM_H, CUM_DRAW_H,
@@ -5519,6 +5679,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const plotClip = isSnapshotChart ? mkClip("-mcclip", mt, ch) : null;
   // 2026-10-20 끌기 연속: 양 끝에 반쯤 걸친 봉이 레인(사분면·막대)에서 왼쪽 여백·오른쪽 값 칸으로 삐져나오지 않게 가로만 자른다
   const laneClip = isSnapshotChart ? mkClip("-laneclip", plotBottom, hAll - plotBottom) : null;
+  const plotC = plotClip && [ml, mt, cw, ch], laneC = laneClip && [ml, plotBottom, cw, hAll - plotBottom];   // 같은 자르기의 캔버스판
 
   // Liquidation-map density heatmap -- drawn first so candles/grid/lines sit on top of it (paint
   // order unchanged). 2026-08-25: replaced the old right-anchored, length-encoded "volume profile"
@@ -5569,15 +5730,14 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     dm.h = densityHistory;
   }
   const densityClip = dm.clip;
-  const drawDensitySeg = (into, x0, x1, top, bottom, t) => {
+  const drawDensitySeg = (x0, x1, top, bottom, t) => {
     if (x1 <= x0) return;
     // 밀도 0 인 칸은 **그리지 않는다**. 칠하면 패널 위에 띠로 남고(2026-09-12 b5a4790 으로
     // 패널이 밝아진 뒤 «어두운 구멍» 으로 드러났다), 안 그리면 배경이 그대로 비쳐 패널의
     // 세로 그라디언트가 어떻든 정확히 녹는다. 알파를 t 에 비례시키는 건 잘못된 고침이었다 --
     // densityClip 이 양수 밀도의 90분위라 대부분의 칸이 t<0.25 에 몰려 히트맵 전체가 흐려졌다.
     if (!(t > 0)) return;
-    // 2026-10-20 넓은 창(DENSE): 열이 1px 밑이라 칸 1.2만 개 -- 농도를 64단으로 묶어 색마다 path 하나(아래 denseFlush)
-    //   10-20(연속 줌) 모든 창에서 이렇게 -- 144봉이면 칸 3천 개가 svg 노드의 절반이고 끌기 한 프레임 배치(레이아웃)를 거의 다 먹었다. 64단 = 눈에 같은 색.
+    // 2026-10-20 농도는 64단(눈에 같은 색) -- 아래 이어 붙이기가 같은 단끼리만 잇는다.
     // 두 모드가 **같은 알파**를 쓴다 -- 풋프린트는 셀과 겹치지 않는 게이트에 그리므로
     // 낮출 이유가 없고, 낮추면 같은 값이 두 색으로 보인다(위 전체폭 주석의 실측).
     //   같은 줄(가격)에서 바로 이어지는 같은 농도 칸은 한 사각형으로 늘린다(densRun -- 지도는 천천히 변해 144봉 2.2만 칸이 몇 분의 1 로 준다).
@@ -5587,7 +5747,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     densRun.set(k, [x0, x1, q, top, bottom]);
   };
   const densRun = new Map();
-  const densRunPut = ([x0, x1, q, top, bottom]) => denseAdd({ fill: densityColor(q / 64), "fill-opacity": 0.85 }, denseRect(x0, top, x1 - x0, bottom - top));
+  const densRects = [];   // 2026-10-20 bg 캔버스가 칠한다(아래 «density» 칠하기)
+  const densRunPut = ([x0, x1, q, top, bottom]) => densRects.push({ fill: densityColor(q / 64), "fill-opacity": 0.85, x0, x1, top, bottom });
   const sortedDensityHistory = dm.sorted;
   let dbi = 0;   // 스냅샷·봉 둘 다 시각순 -- 한 번 훑기(2026-10-20 1주일 창: 144 × findIndex 2천 봉이 렌더마다 돌았다)
   const densityBoundaryIdx = sortedDensityHistory.map((snap) => {
@@ -5620,10 +5781,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (i >= 0) densitySweep.set(b.price, i);
     });
   }
-  if (sortedDensityHistory.length) cachedLayer("density",
-      objToken(densityHistory) + ":" + densityClip + ":" + [...densitySweep].join(","), (g) => {
-  if (plotClip) g.setAttribute("clip-path", plotClip);   // 2026-10-20 끌기 연속: 걸친 봉 열이 왼쪽 여백으로 나가지 않게
-  g.setAttribute("shape-rendering", "crispEdges");   // 2026-10-11 열이 5분봉마다 -- 붙은 칸 사이 안티앨리어싱 틈이 봉마다 세로 줄무늬로 보였다
+  // 2026-10-20 bg 캔버스(fpCv): 칸 목록은 옛 층 캐시와 같은 키(기하·봉 시각·밀도 신원·쓸림)로 기억하고 칠하기는 매 렌더(싸다).
+  //   자르기 = 가격 플롯(끌기 연속: 걸친 봉 열이 왼쪽 여백으로 나가지 않게) · 가장자리는 장치 픽셀로 반올림 = 옛 shape-rendering crispEdges
+  //   (2026-10-11 열이 5분봉마다 -- 붙은 칸 사이 안티앨리어싱 틈이 봉마다 세로 줄무늬로 보였다).
+  const densSig = baseGeomSig + "|" + timesSig + "|" + objToken(densityHistory) + ":" + densityClip + ":" + [...densitySweep].join(",");
+  const densMemo = renderCandleSvg._densRects;
+  if (sortedDensityHistory.length && densMemo && densMemo.sig === densSig) densRects.push(...densMemo.rects);
+  else if (sortedDensityHistory.length) {
   const densityPriceUnion = dm.union;
   let gx0 = null;   // 2026-10-20 열이 1.5px 밑(넓은 창)이면 다음 스냅샷과 한 열로 합친다 -- 색은 묶음의 마지막(가장 최근) 스냅샷. 1주일 창 2.2만 칸 → 천여 칸, 눈에 같은 그림
   sortedDensityHistory.forEach((snap, si) => {
@@ -5645,22 +5809,33 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const cut = si === sortedDensityHistory.length - 1 ? densitySweep.get(price) : undefined;
       if (cut !== undefined && cut >= xStartIdx) {
         const xc = Math.min(x1, Math.max(x0, xAt(cut) + bw / 2));
-        drawDensitySeg(g, x0, xc, top, bottom, t);
-        drawDensitySeg(g, xc, x1, top, bottom, 0);
+        drawDensitySeg(x0, xc, top, bottom, t);
+        drawDensitySeg(xc, x1, top, bottom, 0);
       } else {
-        drawDensitySeg(g, x0, x1, top, bottom, t);
+        drawDensitySeg(x0, x1, top, bottom, t);
       }
     });
   });
   densRun.forEach(densRunPut); densRun.clear();
-  denseFlush(g);
-  });
+  renderCandleSvg._densRects = { sig: densSig, rects: densRects.slice() };
+  }
+  if (densRects.length) bgI.push({ ...CV_ALL, c: plotC, p: (ctx, q) => {
+    const S = fpCv.S, ox = fpCv.ox, oy = fpCv.oy;
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 0.85;
+    for (const d of densRects) {
+      if (q && (d.x1 < q.x0 || d.x0 > q.x1 || d.bottom < q.y0 || d.top > q.y1)) continue;
+      const X0 = Math.round(ox + d.x0 * S), X1 = Math.round(ox + d.x1 * S), Y0 = Math.round(oy + d.top * S), Y1 = Math.round(oy + d.bottom * S);
+      if (X1 > X0 && Y1 > Y0) { ctx.fillStyle = d.fill; ctx.fillRect(X0, Y0, X1 - X0, Y1 - Y0); }
+    }
+    ctx.restore();
+  } });
 
   // Resistance/support/current/entry price tags -- computed here (before the axis ticks below) so
   // the tick loop can tell when a grid label would land on top of one of these and skip it.
   // Rendering (the actual lines/boxes) still happens later, after candles/markers, so paint order
   // is unchanged.
   const priceLabels = [];
+  let cvLiveLine = null;   // 2026-10-20 칸 뒤 현재가 선(bg 캔버스 칠하기) -- 빠른 갱신이 y 만 바꿔 띠를 다시 칠한다
   // 2026-09-30 겹침 선의 이름(VWAP·주간/앵커 VWAP·HL 청산·max pain·감마 플립·옵션 괄호)도 같은 꼬리표 칸으로 -- 선은 제자리에서 긋고 글자만 모은다.
   const fpNotes = [], gutOn = footprint && !mobileChart;
   // 2026-09-16 풋프린트에서는 현재가를 **가로선이 아니라 삼각형**으로 찍는다(사용자 요청).
@@ -5707,23 +5882,16 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   minGap 은 꼬리표 상자 높이(18px)보다 커야 틈이 보인다. 범위는 그리는 쪽의 clamp(mt+9 ~ plotBottom-9)와 같다.
   declutterTagY(priceLabels, mt + 9, plotBottom - 9, 22);
 
-  // 격자·x눈금은 기하와 봉 시각만 보므로 한 층으로 묶어 캐시한다(cachedLayer 주석).
+  // Grid & Y-Axis Ticks -- 2026-10-20 가로 격자선은 bg 캔버스(밀도 위 · 칸 뒤 선 아래 = 옛 순서). .chart-grid = stroke var(--line) · 1 · opacity .82
+  const gridYs = axisTicks(yMin, yMax, 6).map(yAt).filter((y) => y >= mt && y <= plotBottom);   // 2026-10-06 눈금이 범위 밖으로 나오면 레인·모의 판 칸을 가로지르는 선이 됐다(사용자 신고)
+  bgI.push({ ...CV_ALL, p: (ctx) => gridYs.forEach((y) => cvHLine(ctx, ml - TRADE_L, w - mr, y, "var(--line)", 0.82)) });
+  const bgBehind = bgI.length;   // 칸 뒤 선(현재가·max pain·VWAP 등)은 여기(격자 바로 위)에 끼운다 -- 옛 svg.insertBefore(…, gridG.nextSibling)
+  // x눈금은 기하와 봉 시각만 보므로 한 층으로 묶어 캐시한다(cachedLayer 주석).
+  // 2026-09-09 사용자 요청: **y축 가격 눈금 라벨을 없앤다**(격자선은 유지).
+  //   현재/롱익절/지지선 같은 **라인 태그**는 priceLabels 로 계속 그린다 -- 그쪽이 실제로
+  //   읽는 값이고, 눈금 숫자는 같은 오른쪽 열에서 그 태그와 자리를 다투기만 했다.
+  //   (그래서 있던 collidesWithPriceTag 충돌 회피도 함께 사라진다 -- 눈금이 없으면 충돌도 없다)
   cachedLayer("grid", "", (g) => {
-  // Grid & Y-Axis Ticks
-  axisTicks(yMin, yMax, 6).forEach(t => {
-    const y = yAt(t);
-    if (y < mt || y > plotBottom) return;   // 2026-10-06 눈금이 범위 밖으로 나오면 레인·모의 판 칸을 가로지르는 선이 됐다(사용자 신고)
-    const line = document.createElementNS(NS, "line");
-    line.setAttribute("x1", ml - TRADE_L); line.setAttribute("x2", w - mr);
-    line.setAttribute("y1", y); line.setAttribute("y2", y);
-    line.setAttribute("class", "chart-grid");
-    g.appendChild(line);
-
-    // 2026-09-09 사용자 요청: **y축 가격 눈금 라벨을 없앤다**(격자선은 유지).
-    //   현재/롱익절/지지선 같은 **라인 태그**는 priceLabels 로 계속 그린다 -- 그쪽이 실제로
-    //   읽는 값이고, 눈금 숫자는 같은 오른쪽 열에서 그 태그와 자리를 다투기만 했다.
-    //   (그래서 있던 collidesWithPriceTag 충돌 회피도 함께 사라진다 -- 눈금이 없으면 충돌도 없다)
-  });
 
   const xTickCount = isMobileChartMode() ? 4 : 6;
   const lastIdx = candles.length - 1;
@@ -5937,20 +6105,24 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
 
     // 서버 버킷을 화면 행으로 묶는다. 서버는 0.5달러로만 모아 보내고, 행 크기는 여기서 정한다
     // -- 행을 바꾸려고 테이프를 다시 수집할 일이 없게.
-    const barRows = candles.map((c) => {
+    const rowsOfLv = (lv) => {
       const rows = new Map();
-      (footprint.byTime.get(c.time) || []).forEach((lvl) => {
+      (lv || []).forEach((lvl) => {
         const key = rowOf(lvl[0]);
         const cell = rows.get(key) || [0, 0];
         cell[0] += lvl[1]; cell[1] += lvl[2];
         rows.set(key, cell);
       });
       return rows;
-    });
+    };
+    const barRows = candles.map((c) => rowsOfLv(footprint.byTime.get(c.time)));
     // 배경 4단계는 매수·매도 각각의 최대로 나눈다(TradingView: "매수/매도 측은 별도로 계산").
-    let maxBuy = 0, maxSell = 0;
-    barRows.forEach((rows) => rows.forEach((cell) => {
+    //   형성 봉을 뺀 최대(maxBuy0·maxSell0)도 둔다 -- 형성 봉 갱신(fpCv.live)이 새 최대를 이걸로 다시 잰다.
+    const nB = candles.length, iL = nB - 1;
+    let maxBuy = 0, maxSell = 0, maxBuy0 = 0, maxSell0 = 0;
+    barRows.forEach((rows, i) => rows.forEach((cell) => {
       maxBuy = Math.max(maxBuy, cell[0]); maxSell = Math.max(maxSell, cell[1]);
+      if (i < iL) { maxBuy0 = Math.max(maxBuy0, cell[0]); maxSell0 = Math.max(maxSell0, cell[1]); }
     }));
     const SHADES = footprintShades();
     const shade = (v, max) => SHADES[Math.min(3, Math.floor((max > 0 ? v / max : 0) * 4))];
@@ -5985,66 +6157,60 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const INK_OPACITY =
       document.documentElement.getAttribute("data-theme") === "light" ? "0.95" : "0.82";
 
-    // ── 봉별 캐시 (2026-09-20) ─────────────────────────────────────────────
-    // 풋프린트 모드는 체결이 올 때마다 다시 그리는데(400ms 게이트) **바뀌는 건 맨 오른쪽 봉
-    // 하나**다. 그런데 48봉의 셀을 매번 새로 만들고 있었다.
-    // 🔴«마지막 봉만 그리면 된다»는 **그냥은 틀리다**. 창의 고저가 바뀌면 yMin/yMax 가 움직여
-    //   모든 셀이 자리를 옮겨야 하고, 음영은 maxBuy/maxSell 로 정규화되며, 행 크기는 ATR 로
-    //   정해진다. 그래서 캐시 키에 그 기하 전체를 넣는다 -- 하나라도 바뀌면 전부 무효다(맞다).
-    // ⭐실측(틱 스트림 30초 · 12봉/48봉): 이 geomSig 는 렌더 124회 중 **0회** 바뀌었다.
-    //   가격이 창의 고저 밴드 안에 머무는 동안은 축도 음영 기준도 고정이기 때문이다.
-    //   돌파해서 새 고점을 만들면 그때 한 번 전부 다시 그린다.
-    // ⭐봉 데이터의 신원은 `levels` **배열 객체 자체**다. ?since= 증분(refreshFootprint) 덕에
-    //   안 바뀐 봉은 폴링 사이에 같은 배열을 그대로 들고 있어서 해시를 만들 필요가 없다.
-    //   진행 중인 봉은 footprintMergeLive 가 매번 새 배열로 갈아끼우므로 늘 미스다(맞다).
-    // 🔴델타 라벨과 POC 점은 **캐시하지 않는다**. 델타 y 는 앞선 봉들의 충돌회피 결과에
-    //   의존해서(deltaBoxes) 중간 봉 하나만 바뀌어도 뒤쪽이 전부 틀어진다 -- 그 사슬을
-    //   캐시에 들이면 조용히 어긋난다. 둘 다 노드 하나뿐이라 매번 만들어도 싸다.
-    const geomSig = [w, h, mt, ch, ml, cw, bw, yMin, yMax, candles.length, rowSize, rowPx,
-                     maxBuy, maxSell, half, fontPx, showQty, drawCells, INK_OPACITY, FPC, MOB].join("|");
-    const barCache = renderCandleSvg._barCache || (renderCandleSvg._barCache = new Map());
-    // 델타 라벨은 봉 그룹 **밖**이라 따로 둔다(위 🔴주석: 충돌회피 사슬 때문).
-    const deltaCache = renderCandleSvg._deltaCache || (renderCandleSvg._deltaCache = new Map());
-    const seenBars = new Set();
-    let barG = svg;            // drawCell 이하가 붙을 자리. 봉마다 아래 루프가 갈아끼운다.
-    // 2026-10-20 봉 그룹은 **제자리(x=0)에 그리고 transform 으로 옮긴다** -- 끌기(소수 봉 이동)에 x 만 바뀌면 캐시가 그대로 맞는다.
-    //   클립은 그룹들을 담는 한 겹(barsG)에 -- 그룹 자신에 걸면 transform 과 같이 움직여 엉뚱한 데를 자른다.
-    const barsG = document.createElementNS(NS, "g");
-    if (plotClip) barsG.setAttribute("clip-path", plotClip);
-    svg.appendChild(barsG);
-
+    // ── 봉 그림 = fg 캔버스 칠하기 봉마다 하나 (2026-10-20 -- 옛 봉별 <g> 캐시·델타 노드 캐시 대체) ─────────────
+    //   노드를 안 만드니 캐시도 없다: 전체 렌더는 다 다시 칠하고(48봉 칸 ~1ms), 형성 봉 갱신은 그 봉의 칠하기만 갈아 끼운다.
+    //   옛 캐시 키(기하·행 크기·음영 기준·축)가 지키던 것은 이제 형성 봉 갱신의 «전체 렌더로 넘길 조건»(아래 fpCv.live)이 지킨다.
     // 한 칸: 배경(거래량 비율 4단계) + 숫자 + 불균형 표시(반대편의 300% 초과면 바깥쪽 세로선).
     // 2026-09-19 «막대 길이» 인코딩(A안)을 되돌렸다 -- 사용자 지시. 길이는 비율을 보여주는
     // 대신 짧은 막대의 숫자를 지웠고, 여기서 읽는 건 그 숫자다. 칸을 다시 고정하고 체결량은
-    // 사각형 안에 적는다. 색 농담은 원래대로 «크다/작다»를 말한다.
-    const drawCell = (cx, yTop, v, other, max, color, edgeX, price) => {
-      const rect = document.createElementNS(NS, "rect");
-      rect.setAttribute("x", cx); rect.setAttribute("y", yTop);
-      rect.setAttribute("width", half); rect.setAttribute("height", rowPx);
-      rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", shade(v, max));
-      const title = document.createElementNS(NS, "title");
-      const ratio = other > 0 ? v / other : Infinity;
-      title.textContent = price.toFixed(pxDp()) + " · " + (color === "var(--good)" ? "매수 " : "매도 ")
-        + v.toFixed(1) + " (반대편 " + other.toFixed(1) + ")"
-        + (v > 0 && v > other * FOOTPRINT_IMBALANCE_RATIO
-          ? " · 불균형 " + (Number.isFinite(ratio) ? ratio.toFixed(1) + "배" : "일방") : "");
-      rect.appendChild(title);
-      barG.appendChild(rect);
-      if (v > 0 && rowPx >= 7 && showQty) {
-        const txt = document.createElementNS(NS, "text");
-        txt.setAttribute("x", cx + half / 2); txt.setAttribute("y", yTop + rowPx / 2 + fontPx * 0.36);
-        txt.setAttribute("text-anchor", "middle"); txt.setAttribute("font-size", fontPx);
-        txt.setAttribute("fill", "var(--ink)"); txt.setAttribute("fill-opacity", INK_OPACITY);
-        txt.textContent = fmtFootprintQty(v);
-        barG.appendChild(txt);
-      }
-      if (v > 0 && v > other * FOOTPRINT_IMBALANCE_RATIO) {
-        const mark = document.createElementNS(NS, "rect");
-        mark.setAttribute("x", edgeX); mark.setAttribute("y", yTop + 0.5);
-        mark.setAttribute("width", 2); mark.setAttribute("height", Math.max(1, rowPx - 1));
-        mark.setAttribute("fill", color);
-        barG.appendChild(mark);
-      }
+    // 사각형 안에 적는다. 색 농담은 원래대로 «크다/작다»를 말한다. (칸 값·불균형 배수는 봉 호버 툴팁의 «칸» 줄)
+    const fw0 = fpCv.cs.fontWeight || 400;   // svg <text> 는 굵기를 안 줘 svg 의 굵기를 물려받았다
+    const drawCell = (ctx, cx, yTop, v, other, max, color, edgeX) => {
+      cvRect(ctx, cx, yTop, half, rowPx, color, +shade(v, max));
+      if (v > 0 && rowPx >= 7 && showQty)
+        cvText(ctx, cx + half / 2, yTop + rowPx / 2 + fontPx * 0.36, fmtFootprintQty(v), fontPx, fw0, "var(--ink)", +INK_OPACITY, "middle");
+      if (v > 0 && v > other * FOOTPRINT_IMBALANCE_RATIO) cvRect(ctx, edgeX, yTop + 0.5, 2, Math.max(1, rowPx - 1), color);
+    };
+    const barInfo = (rows) => {
+      let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0, lowKey = Infinity;
+      rows.forEach((cell, key) => {
+        buyTot += cell[0]; sellTot += cell[1];
+        if (key < lowKey) lowKey = key;
+        if (cell[0] + cell[1] > pocVol) { pocVol = cell[0] + cell[1]; pocKey = key; }
+      });
+      return { pocKey, pocVol, buyTot, sellTot, lowKey };
+    };
+    // 1px 밑 봉 합치기(아래 DENSE) · 4px 위는 노드 캔들(MOB fpcW)과 같은 폭
+    const denseCandle = (ctx, x, c, fw = slot >= 4 ? Math.max(3, bw * 0.6) : Math.max(0.6, bw * 0.8)) => {
+      const col = c.close >= c.open ? "var(--good)" : "var(--bad)", cxm = x + bw / 2;
+      const yT = yAt(Math.max(c.open, c.close)), yB = yAt(Math.min(c.open, c.close));
+      cvVLine(ctx, cxm, yAt(c.high), yAt(c.low), col);
+      cvRect(ctx, cxm - fw / 2, yT, fw, Math.max(yB - yT, 1), col);
+    };
+    const barItem = (i, rows, inf) => {
+      const c = candles[i], x = xAt(i);
+      return { x0: x - 6, x1: x + bw + 6, y0: mt, y1: plotBottom, c: plotC, p: DENSE ? (ctx) => denseCandle(ctx, x, c) : (ctx) => {
+        if (drawCells) rows.forEach((cell, key) => {
+          const yTop = yAt(rowLo(key + 1));
+          if (yTop + rowPx < mt || yTop > mt + ch) return;   // 창 밖 행은 건너뛴다
+          const sx = x + (FPC === "L" ? fpcW + fpcGap : 0);                                 // 매도 칸 왼쪽 끝
+          const bx = sx + half + 1 + (FPC === "C" ? fpcW + fpcGap : 0);                     // 매수 칸 왼쪽 끝
+          drawCell(ctx, sx, yTop, cell[1], cell[0], maxSell, "var(--bad)", sx - 2);          // 왼쪽 = 매도
+          drawCell(ctx, bx, yTop, cell[0], cell[1], maxBuy, "var(--good)", bx + half + 2); // 오른쪽 = 매수
+          if (key === inf.pocKey) cvStrokeRect(ctx, sx, yTop, bx + half - sx, rowPx, "var(--amber)", 1, 0.85);   // POC -- 그 봉에서 가장 많이 거래된 가격 행
+        });
+        // 캔들은 테두리로만 남긴다 -- 셀을 덮지 않으면서 시가/종가/꼬리를 잃지 않으려는 것.
+        const color = c.close >= c.open ? "var(--good)" : "var(--bad)";
+        const yT = yAt(Math.max(c.open, c.close)), yB = yAt(Math.min(c.open, c.close));
+        if (FPC) {   // 옆 5분봉: 채운 몸통 + 심지(칸을 덮지 않는 자리)
+          const cx0 = MOB ? x + (bw - fpcW) / 2 : FPC === "L" ? x : FPC === "R" ? x + bw - fpcW : x + half + 1 + fpcGap / 2, cxm = cx0 + fpcW / 2;
+          cvVLine(ctx, cxm, yAt(c.high), yAt(c.low), color);
+          cvRect(ctx, cx0, yT, fpcW, Math.max(yB - yT, 1), color, 1, fpcW >= 5 ? 1 : 0);
+        } else {
+          cvVLine(ctx, x + bw / 2, yAt(c.high), yAt(c.low), color, 0.5);
+          cvStrokeRect(ctx, x, yT, bw, Math.max(yB - yT, 1), color, 1, 0.6);
+        }
+      } };
     };
 
     // 봉 델타 라벨의 충돌 회피용. 모바일(봉 폭 ~25px)에서는 글자(~38px)가 봉보다 넓어
@@ -6052,174 +6218,85 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const deltaBoxes = [];
     const deltaFont = bw >= 34 ? 11 : 9;
     // 2026-10-20 사용자 «어느 순간까지는 델타가 보이다가 아예 겹치는 구간부터는 델타를 제거»: 자리는 늘 다 계산하고(아래 사슬),
-    //   그리기는 봉 루프 뒤로 미룬다 -- 제자리(봉 바로 아래)에 못 앉고 밀려난 라벨이 많으면(DELTA_CROWD 초과) 그 창은 델타를 통째로 안 그린다.
+    //   그리기는 봉 루프 뒤에서 정한다 -- 제자리(봉 바로 아래)에 못 앉고 밀려난 라벨이 많으면(DELTA_CROWD 초과) 그 창은 델타를 통째로 안 그린다.
     //   일부만 지우면 «어느 봉은 델타가 없나»로 읽히니 전부 아니면 전무. 값은 봉 호버 툴팁에 그대로 있다.
     const DELTA_CROWD = 0.3;   // 실측(10-20 1920·1700): 2h .12~.17 · 3h .17 · 4h .23~.27 · 6h .39~.42 · 12h .55~.58 → 4h 까지 보이고 6h 부터 뺀다
-    const deltaDraws = [];
-    let deltaBumped = 0;
-    const pocPts = [];    // 2026-09-19 사용자 요청: 봉별 POC 를 선으로 잇는다.
-    const denseCol = new Map();   // 1px 밑 봉 합치기(아래 DENSE)
-    const denseCandle = (x, c, fw = slot >= 4 ? Math.max(3, bw * 0.6) : Math.max(0.6, bw * 0.8)) => {   // 4px 위는 노드 캔들(MOB fpcW)과 같은 폭
-      const col = c.close >= c.open ? "var(--good)" : "var(--bad)", cxm = x + bw / 2;
-      const yT = yAt(Math.max(c.open, c.close)), yB = yAt(Math.min(c.open, c.close));
-      denseAdd({ stroke: col, "stroke-width": 1, fill: "none" }, `M${cxm.toFixed(1)} ${yAt(c.high).toFixed(1)}V${yAt(c.low).toFixed(1)}`);
-      denseAdd({ fill: col }, denseRect(cxm - fw / 2, yT, fw, Math.max(yB - yT, 1)));
-    };
-    barRows.forEach((rows, i) => {
-      const c = candles[i], x = xAt(i);
-      let pocKey = null, pocVol = 0, buyTot = 0, sellTot = 0, lowKey = Infinity;
-      rows.forEach((cell, key) => {
-        buyTot += cell[0]; sellTot += cell[1];
-        if (key < lowKey) lowKey = key;
-        if (cell[0] + cell[1] > pocVol) { pocVol = cell[0] + cell[1]; pocKey = key; }
-      });
-      // POC «점»은 캐시 밖에서 매번 구한다(아래 폴리라인이 봉을 가로질러 잇기 때문).
-      // 창 밖 행은 아래 그리기 루프가 건너뛰므로 여기서도 **같은 조건**으로 건너뛴다.
-      if (pocKey !== null) {
-        const pocY = yAt(rowLo(pocKey + 1));
-        if (!(pocY + rowPx < mt || pocY > mt + ch)) pocPts.push([x + bw / 2, pocY + rowPx / 2]);
-      }
-      seenBars.add(c.time);
-      if (DENSE) {   // 칸은 어차피 안 그린다(drawCells = bw ≥ 14) -- 가운데 채운 캔들만 색별 path 로(위 DENSE 주석)
-        // 2026-10-20 봉이 1px 밑(1주일 창)이면 같은 픽셀 열의 봉을 한 캔들로 합친다(첫 시가·끝 종가·고저) -- 2.5봉이 한 픽셀에 겹쳐 칠하던 것, path 조각 1/2.5
-        const k = slot < 1 ? Math.round(x + bw / 2) : null, a = k == null ? null : denseCol.get(k);
-        if (a) { a.h = Math.max(a.h, c.high); a.l = Math.min(a.l, c.low); a.c = c.close; }
-        else if (k != null) denseCol.set(k, { o: c.open, h: c.high, l: c.low, c: c.close });
-        else denseCandle(x, c);
-      } else {
-      const levelsRef = footprint.byTime.get(c.time);
-      const prev = barCache.get(c.time);
-      const reuse = !!prev && prev.geom === geomSig && prev.levels === levelsRef
-        && prev.o === c.open && prev.h === c.high && prev.l === c.low && prev.c === c.close;
-      barG = reuse ? prev.g : document.createElementNS(NS, "g");
-      barG.setAttribute("transform", `translate(${x.toFixed(2)},0)`);
-      barsG.appendChild(barG);
-      if (!reuse) {
-        barCache.set(c.time, { geom: geomSig, levels: levelsRef,
-                               o: c.open, h: c.high, l: c.low, c: c.close, g: barG });
-      const x = 0;   // 그룹 안은 제자리 좌표(위 transform)
-      if (drawCells) rows.forEach((cell, key) => {
-        const yTop = yAt(rowLo(key + 1));
-        if (yTop + rowPx < mt || yTop > mt + ch) return;   // 창 밖 행은 건너뛴다
-        const price = rowLo(key) + rowSize / 2;
-        const sx = x + (FPC === "L" ? fpcW + fpcGap : 0);                                 // 매도 칸 왼쪽 끝
-        const bx = sx + half + 1 + (FPC === "C" ? fpcW + fpcGap : 0);                     // 매수 칸 왼쪽 끝
-        drawCell(sx, yTop, cell[1], cell[0], maxSell, "var(--bad)", sx - 2, price);          // 왼쪽 = 매도
-        drawCell(bx, yTop, cell[0], cell[1], maxBuy, "var(--good)", bx + half + 2, price); // 오른쪽 = 매수
-        if (key === pocKey) {   // POC -- 그 봉에서 가장 많이 거래된 가격 행
-          const poc = document.createElementNS(NS, "rect");
-          poc.setAttribute("x", sx); poc.setAttribute("y", yTop);
-          poc.setAttribute("width", bx + half - sx); poc.setAttribute("height", rowPx);
-          poc.setAttribute("fill", "none"); poc.setAttribute("stroke", "var(--amber)");
-          poc.setAttribute("stroke-opacity", "0.85");
-          const pocTitle = document.createElementNS(NS, "title");
-          pocTitle.textContent = "POC " + price.toFixed(pxDp()) + " · 총 " + pocVol.toFixed(1);
-          poc.appendChild(pocTitle);
-          barG.appendChild(poc);
-        }
-      });
-
-      // 캔들은 테두리로만 남긴다 -- 셀을 덮지 않으면서 시가/종가/꼬리를 잃지 않으려는 것.
-    // (POC 선은 이 forEach 가 끝난 뒤 한 번에 긋는다 -- 아래 pocPts 블록)
-      const isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
-      if (FPC) {   // 옆 5분봉: 채운 몸통 + 심지(칸을 덮지 않는 자리)
-        const cx0 = MOB ? x + (bw - fpcW) / 2 : FPC === "L" ? x : FPC === "R" ? x + bw - fpcW : x + half + 1 + fpcGap / 2, cxm = cx0 + fpcW / 2;
-        const wk = document.createElementNS(NS, "line");
-        wk.setAttribute("x1", cxm); wk.setAttribute("x2", cxm);
-        wk.setAttribute("y1", yAt(c.high)); wk.setAttribute("y2", yAt(c.low));
-        wk.setAttribute("stroke", color); wk.setAttribute("stroke-width", "1");
-        barG.appendChild(wk);
-        const yT = yAt(Math.max(c.open, c.close)), yB = yAt(Math.min(c.open, c.close));
-        const bd = document.createElementNS(NS, "rect");
-        bd.setAttribute("x", cx0); bd.setAttribute("y", yT);
-        bd.setAttribute("width", fpcW); bd.setAttribute("height", Math.max(yB - yT, 1));
-        bd.setAttribute("fill", color); bd.setAttribute("rx", fpcW >= 5 ? 1 : 0);
-        barG.appendChild(bd);
-      } else {
-      const wick = document.createElementNS(NS, "line");
-      wick.setAttribute("x1", x + bw / 2); wick.setAttribute("x2", x + bw / 2);
-      wick.setAttribute("y1", yAt(c.high)); wick.setAttribute("y2", yAt(c.low));
-      wick.setAttribute("stroke", color); wick.setAttribute("stroke-opacity", "0.5");
-      barG.appendChild(wick);
-      const body = document.createElementNS(NS, "rect");
-      const yTop = yAt(Math.max(c.open, c.close)), yBot = yAt(Math.min(c.open, c.close));
-      body.setAttribute("x", x); body.setAttribute("y", yTop);
-      body.setAttribute("width", bw); body.setAttribute("height", Math.max(yBot - yTop, 1));
-      body.setAttribute("fill", "none"); body.setAttribute("stroke", color);
-      body.setAttribute("stroke-opacity", "0.6");
-      barG.appendChild(body);
-      }
-      }   // ← if (!reuse)
-      }   // ← if (DENSE) else
-
+    const dState = { on: false };   // 그릴지(전부 아니면 전무) -- 형성 봉 갱신이 다시 정할 수 있게 칠하기가 이 값을 읽는다
+    const deltaOf = (i, inf) => {
       // 봉 델타(매수-매도). 2026-09-16 사용자 요청으로 **플롯 맨 위 -> 그 봉 바로 아래**로
       // 옮기고 굵게 했다. 맨 위에 있을 때는 어느 봉의 숫자인지 눈이 세로로 훑어야 했다 --
       // 봉 밑에 붙으면 그 봉의 것임이 위치로 자명하다. y 는 그 봉의 **저가** 기준이라
       // 봉마다 높이가 다르다(고정 행이 아니다).
-      const delta = buyTot - sellTot;
-      if (buyTot + sellTot > 0 && !DENSE) {   // 2026-10-20 DENSE(봉 8px 밑)면 라벨이 늘 DELTA_CROWD 를 넘어 통째로 빠진다 -- 사슬 계산을 건너뛴다
-        // 기준은 캔들 저가가 아니라 **가장 아래 셀 행의 바닥**이다. 저가로 잡았더니 그 아래로
-        // 더 내려오는 마지막 행과 글씨가 겹쳤다(2026-09-16 첫 판에서 실제로 겹쳤다) --
-        // 행은 rowSize 격자라 저가보다 최대 한 행만큼 더 내려간다.
-        const cellsBottom = Number.isFinite(lowKey) ? yAt(rowLo(lowKey)) : yAt(c.low);
-        let dY = Math.min(plotBottom - 3, Math.max(cellsBottom, yAt(c.low)) + 13);
-        // 글자 폭 근사(굵은 숫자 ~0.62em) 로 상자를 만들고, 겹치면 아래로 한 줄씩 민다.
-        const label = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
-        const halfW = label.length * deltaFont * 0.34 + 2;
-        const cxD = x + bw / 2, dY0 = dY;
-        for (let guard = 0; guard < 6; guard++) {
-          // 상자는 x 순서로 쌓인다 -- 반폭 최대(6글자 ≈ 24px)보다 멀어진 상자 앞은 볼 필요 없다(10-20 1주일 창: some() 전수 = O(n²) 가 렌더의 20%)
-          let hit = false;
-          for (let q = deltaBoxes.length - 1; q >= 0 && !hit; q--) {
-            const b = deltaBoxes[q];
-            if (b.x2 + 26 < cxD - halfW) break;
-            hit = Math.abs(b.y - dY) < deltaFont + 1 && cxD + halfW > b.x1 && cxD - halfW < b.x2;
-          }
-          if (!hit || dY + deltaFont + 2 > plotBottom - 3) break;
-          dY += deltaFont + 2;
+      // 2026-10-20 DENSE(봉 8px 밑)면 라벨이 늘 DELTA_CROWD 를 넘어 통째로 빠진다 -- 사슬 계산을 건너뛴다
+      if (!(inf.buyTot + inf.sellTot > 0) || DENSE) return null;
+      const c = candles[i], delta = inf.buyTot - inf.sellTot;
+      // 기준은 캔들 저가가 아니라 **가장 아래 셀 행의 바닥**이다. 저가로 잡았더니 그 아래로
+      // 더 내려오는 마지막 행과 글씨가 겹쳤다(2026-09-16 첫 판에서 실제로 겹쳤다) --
+      // 행은 rowSize 격자라 저가보다 최대 한 행만큼 더 내려간다.
+      const cellsBottom = Number.isFinite(inf.lowKey) ? yAt(rowLo(inf.lowKey)) : yAt(c.low);
+      let dY = Math.min(plotBottom - 3, Math.max(cellsBottom, yAt(c.low)) + 13);
+      // 글자 폭 근사(굵은 숫자 ~0.62em) 로 상자를 만들고, 겹치면 아래로 한 줄씩 민다.
+      const label = (delta >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(delta));
+      const halfW = label.length * deltaFont * 0.34 + 2;
+      const cxD = xAt(i) + bw / 2, dY0 = dY;
+      for (let guard = 0; guard < 6; guard++) {
+        // 상자는 x 순서로 쌓인다 -- 반폭 최대(6글자 ≈ 24px)보다 멀어진 상자 앞은 볼 필요 없다(10-20 1주일 창: some() 전수 = O(n²) 가 렌더의 20%)
+        let hit = false;
+        for (let q = deltaBoxes.length - 1; q >= 0 && !hit; q--) {
+          const b = deltaBoxes[q];
+          if (b.x2 + 26 < cxD - halfW) break;
+          hit = Math.abs(b.y - dY) < deltaFont + 1 && cxD + halfW > b.x1 && cxD - halfW < b.x2;
         }
-        deltaBoxes.push({ x1: cxD - halfW, x2: cxD + halfW, y: dY });
-        if (dY !== dY0) deltaBumped++;
-        // 🔴여기까지의 **산수는 늘 돈다** -- dY 는 앞선 봉들의 충돌회피 결과에 달려 있어서
-        //   건너뛰면 사슬이 끊긴다. 캐시하는 것은 «만들어진 노드»뿐이다.
-        // ⭐그래서 키가 사슬 해시를 들 필요가 없다: dY 가 **이미 그 사슬의 결과**다.
-        //   아래 다섯이 이 노드의 입력 전부이므로, 같으면 노드도 같다.
-        const dSig = deltaFont + "|" + cxD + "|" + dY + "|" + label + "|" + c.time
-                     + "|" + buyTot.toFixed(1) + "|" + sellTot.toFixed(1);
-        deltaDraws.push(() => {
-        const dPrev = deltaCache.get(c.time);
-        if (dPrev && dPrev.sig === dSig) { svg.appendChild(dPrev.n); return; }
-        const dTxt = document.createElementNS(NS, "text");
-        dTxt.setAttribute("x", cxD); dTxt.setAttribute("y", dY);
-        dTxt.setAttribute("text-anchor", "middle"); dTxt.setAttribute("font-size", String(deltaFont));
-        dTxt.setAttribute("font-weight", "bold");
-        dTxt.setAttribute("fill", delta >= 0 ? "var(--good)" : "var(--bad)");
-        dTxt.textContent = label;
-        const dTitle = document.createElementNS(NS, "title");
-        dTitle.textContent = fmtDateTick(c.time * 1000) + " 델타 " + delta.toFixed(1)
-          + " · 매수 " + buyTot.toFixed(1) + " / 매도 " + sellTot.toFixed(1);
-        dTxt.appendChild(dTitle);
-        if (plotClip) dTxt.setAttribute("clip-path", plotClip);
-        svg.appendChild(dTxt);
-        deltaCache.set(c.time, { sig: dSig, n: dTxt });
-        });
+        if (!hit || dY + deltaFont + 2 > plotBottom - 3) break;
+        dY += deltaFont + 2;
       }
+      deltaBoxes.push({ x1: cxD - halfW, x2: cxD + halfW, y: dY });
+      // 🔴여기까지의 **산수는 늘 돈다** -- dY 는 앞선 봉들의 충돌회피 결과에 달려 있어서 건너뛰면 사슬이 끊긴다.
+      return { bumped: dY !== dY0, it: { x0: cxD - halfW - 8, x1: cxD + halfW + 8, y0: dY - deltaFont - 2, y1: dY + 4, c: plotC,
+        p: (ctx) => { if (dState.on) cvText(ctx, cxD, dY, label, deltaFont, "bold", delta >= 0 ? "var(--good)" : "var(--bad)", 1, "middle"); } } };
+    };
+    const pocPts = [];    // 2026-09-19 사용자 요청: 봉별 POC 를 선으로 잇는다.
+    // POC «점»은 창 밖 행을 건너뛰는 칸 그리기와 **같은 조건**으로 건너뛴다.
+    const pocPt = (i, inf) => {
+      if (inf.pocKey === null) return null;
+      const pocY = yAt(rowLo(inf.pocKey + 1));
+      return pocY + rowPx < mt || pocY > mt + ch ? null : [xAt(i) + bw / 2, pocY + rowPx / 2];
+    };
+    const denseCol = new Map();   // 1px 밑 봉 합치기(아래 DENSE)
+    const deltaIts = [];
+    let deltaBumped = 0;
+    const live = { bar: -1, delta: -1, stack: -1, pocN: 0, dbN: 0, nD: 0, bump: 0 };   // 형성 봉의 칠하기 자리·사슬 상태(fpCv.live)
+    barRows.forEach((rows, i) => {
+      const c = candles[i], x = xAt(i), inf = barInfo(rows);
+      if (i === iL) Object.assign(live, { pocN: pocPts.length, dbN: deltaBoxes.length, nD: deltaIts.length, bump: deltaBumped });
+      const pp = pocPt(i, inf);
+      if (pp) pocPts.push(pp);
+      if (DENSE && slot < 1) {   // 2026-10-20 봉이 1px 밑(1주일 창)이면 같은 픽셀 열의 봉을 한 캔들로 합친다(첫 시가·끝 종가·고저) -- 2.5봉이 한 픽셀에 겹쳐 칠하던 것
+        const k = Math.round(x + bw / 2), a = denseCol.get(k);
+        if (a) { a.h = Math.max(a.h, c.high); a.l = Math.min(a.l, c.low); a.c = c.close; }
+        else denseCol.set(k, { o: c.open, h: c.high, l: c.low, c: c.close });
+      } else {
+        if (i === iL) live.bar = fgI.length;
+        fgI.push(barItem(i, rows, inf));
+      }
+      const d = deltaOf(i, inf);
+      if (d) { deltaIts.push(d.it); if (d.bumped) deltaBumped++; }
     });
-    denseCol.forEach((a, k) => denseCandle(k - bw / 2, { open: a.o, high: a.h, low: a.l, close: a.c }, 1));   // 합친 캔들 = 그 픽셀 열 한 칸
-    denseFlush(svg, plotClip);   // DENSE 캔들(아니면 빈 일)
-    renderCandleSvg._deltaStats = { n: deltaDraws.length, bumped: deltaBumped, bars: candles.length };   // 시험·진단용
-    if (deltaDraws.length && deltaBumped / deltaDraws.length <= DELTA_CROWD) deltaDraws.forEach((f) => f());
-
-    // 창 밖으로 나간 봉의 캐시는 버린다 -- 안 그러면 탭을 켜둔 채로 며칠이면 노드가 쌓인다.
-    // 🔴호출부가 하나뿐이라(renderSnapshotChart) 캐시를 함수에 달아도 안전하다. 두 번째
-    //   차트가 풋프린트를 쓰게 되면 svg 별로 갈라야 한다 -- 같은 <g> 를 두 svg 에 붙이면
-    //   나중에 붙인 쪽으로 **옮겨간다**(appendChild 는 이동이다).
-    if (barCache.size > seenBars.size) {
-      [...barCache.keys()].forEach((t) => { if (!seenBars.has(t)) barCache.delete(t); });
-    }
-    if (deltaCache.size > seenBars.size) {
-      [...deltaCache.keys()].forEach((t) => { if (!seenBars.has(t)) deltaCache.delete(t); });
-    }
+    denseCol.forEach((a, k) => fgI.push({ x0: k - 2, x1: k + 2, y0: mt, y1: plotBottom, c: plotC,
+      p: (ctx) => denseCandle(ctx, k - bw / 2, { open: a.o, high: a.h, low: a.l, close: a.c }, 1) }));   // 합친 캔들 = 그 픽셀 열 한 칸
+    renderCandleSvg._deltaStats = { n: deltaIts.length, bumped: deltaBumped, bars: candles.length };   // 시험·진단용
+    // 커서 밑 칸(옛 칸·POC <title>) -- 봉 호버 툴팁 한 줄. 칸을 그리는 폭에서만.
+    cellTip = (i, price) => {
+      const k = price == null ? null : rowOf(price), cell = k != null && drawCells && barRows[i] ? barRows[i].get(k) : null;
+      if (!cell) return "";
+      const [b, sl] = cell, imb = (v, o) => v > 0 && v > o * FOOTPRINT_IMBALANCE_RATIO ? ` · 불균형 ${o > 0 ? (v / o).toFixed(1) + "배" : "일방"}` : "";
+      return `<br>칸 ${(rowLo(k) + rowSize / 2).toFixed(pxDp())} · 매수 ${b.toFixed(1)}${imb(b, sl)} · 매도 ${sl.toFixed(1)}${imb(sl, b)}`
+        + (k === barInfo(barRows[i]).pocKey ? " · POC(최다 체결)" : "");
+    };
+    dState.on = deltaIts.length > 0 && deltaBumped / deltaIts.length <= DELTA_CROWD;
+    const NOOP = { x0: 1, x1: 0, y0: 1, y1: 0, p: () => {} };   // 아무 띠와도 안 겹친다(형성 봉 델타 자리 비움)
+    deltaIts.forEach((it, j) => { if (j < live.nD) fgI.push(it); });
+    live.delta = fgI.length; fgI.push(deltaIts.length > live.nD ? deltaIts[live.nD] : NOOP);
 
     // ── 봉별 POC 선 (2026-09-19 사용자 요청) ────────────────────────────
     // 봉마다 사각 테두리는 이미 있었지만 **봉끼리 독립**이라 «거래가 몰린 값이 어디로
@@ -6227,29 +6304,16 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 🔴창 밖 행은 위 루프가 건너뛰므로 점이 빠진다 -- 선이 그 구간을 건너뛰고 이어지면
     //   없는 이동을 그리는 셈이다. 그래서 x 가 한 봉(bw) 넘게 벌어지면 **끊는다**.
     // 🔴«지지·저항»이 아니다. Dalton 밸런스엣지(비용게이트 0/6)·Yush LAF(무근거)로 닫혔다.
-    if (pocPts.length > 1) {
+    fgI.push({ ...CV_ALL, c: plotC, p: (ctx) => {
+      if (pocPts.length < 2) return;
       let seg = [pocPts[0]];
-      const flush = () => {
-        if (seg.length > 1) {
-          const ln = document.createElementNS(NS, "polyline");
-          ln.setAttribute("points", seg.map((q) => q[0] + "," + q[1]).join(" "));
-          ln.setAttribute("fill", "none"); ln.setAttribute("stroke", "var(--amber)");
-          ln.setAttribute("stroke-width", "1.5"); ln.setAttribute("stroke-opacity", "0.75");
-          ln.setAttribute("stroke-linejoin", "round");
-          const t = document.createElementNS(NS, "title");
-          t.textContent = "봉별 POC(최대 체결 가격)의 이동. 체결이 몰린 값이지 지지·저항이 아니다.";
-          ln.appendChild(t);
-          if (plotClip) ln.setAttribute("clip-path", plotClip);
-          svg.appendChild(ln);
-        }
-        seg = [];
-      };
+      const flush = () => { if (seg.length > 1) cvStroke(ctx, seg, "var(--amber)", 1.5, 0.75, null, "round"); seg = []; };
       for (let i = 1; i < pocPts.length; i++) {
         if (pocPts[i][0] - pocPts[i - 1][0] > bw * 1.8) { flush(); }
         seg.push(pocPts[i]);
       }
       flush();
-    }
+    } });
 
     // ── 시장 맥락 겹침 (2026-09-29, 사용자 «불합격이어도 쓸모 있으면 넣어줘 -- 우리 검증이 틀렸을 수도 있다») ──────────
     //   ① 스택 불균형(같은 쪽 3줄 연속) (② 패턴 글자 다이버·소진·흡수?는 09-30 제거 -- 4.7년·2025/2026 검정 방향 0) ③ 세션 VWAP ±1·2σ · 볼린저(카드 스위치)
@@ -6332,19 +6396,20 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       }
       const gridG = layerCache.get("grid")?.g;
       if (gridG && gridG.parentNode === svg) svg.insertBefore(lines, gridG.nextSibling); else svg.appendChild(lines);
+      cvFromSvgLines(lines, bgI, bgBehind, plotC);   // 2026-10-20 선은 bg 캔버스(칸 뒤) · svg 쪽은 투명하게 남아 <title> 호버만 한다
       // ⑤ 12시간 실측 청산 눈금은 2026-09-30 뺐다(사용자 지시) -- 12시간 최다 가격은 시장 맥락 카드 한 줄에 남는다.
       if (drawCells) {
         // ① 스택 불균형 -- 같은 봉 안에서 반대편의 3배 넘는 줄이 같은 쪽으로 3줄 이상 이어지면 바깥에 굵은 막대
+        //   (우리 검정: 미검정 — 흡수·소진 가족은 봉·60초·가격행 단위에서 방향 0이었다.) 2026-10-20 fg 캔버스 -- 봉마다 칠하기 하나(형성 봉 갱신이 갈아 끼운다)
         const STACK_MIN = 3;
-        barRows.forEach((rows, i) => {
-          const keys = [...rows.keys()].sort((a, c) => a - c), x = xAt(i);
-          [[0, 1, x + bw + 3, "var(--good)", "매수"], [1, 0, x - 5, "var(--bad)", "매도"]].forEach(([s, o, ex, col, nm]) => {
+        stackItem = (i, rows) => {
+          const keys = [...rows.keys()].sort((a, c) => a - c), x = xAt(i), marks = [];
+          [[0, 1, x + bw + 3, "var(--good)"], [1, 0, x - 5, "var(--bad)"]].forEach(([s, o, ex, col]) => {
             let run = [];
             const flush = () => {
               if (run.length >= STACK_MIN) {
                 const yTop = Math.max(mt, yAt(rowLo(run[run.length - 1] + 1))), yBot = Math.min(plotBottom, yAt(rowLo(run[0])));
-                if (yBot - yTop > 2) mk(svg, "rect", { x: ex, y: yTop.toFixed(1), width: 2, height: (yBot - yTop).toFixed(1), fill: col, rx: 1, "clip-path": plotClip },
-                  `스택 불균형 · ${nm} ${run.length}줄 연속(반대편의 ${FOOTPRINT_IMBALANCE_RATIO}배 넘는 줄이 이어짐). 우리 검정: 미검정 — 흡수·소진 가족은 봉·60초·가격행 단위에서 방향 0이었다.`);
+                if (yBot - yTop > 2) marks.push([ex, yTop, yBot - yTop, col]);
               }
               run = [];
             };
@@ -6355,9 +6420,60 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
             });
             flush();
           });
-        });
+          return { x0: x - 6, x1: x + bw + 6, y0: mt, y1: plotBottom, c: plotC, p: (ctx) => marks.forEach(([ex, y, ht, col]) => cvRect(ctx, ex, y, 2, ht, col, 1, 1)) };
+        };
+        barRows.forEach((rows, i) => { if (i === iL) live.stack = fgI.length; fgI.push(stackItem(i, rows)); });
       }
     }
+
+    // ── 형성 봉 갱신 (2026-10-20 사용자 4번 · scheduleFpLiveFrame) ─────────────────────────
+    //   체결이 온 프레임마다 맨 오른쪽 봉만 다시 계산해 fg 의 그 자리만 칠한다(svg 는 안 건드린다 -- 호버 툴팁이 안 깜빡인다).
+    //   false = 전체 렌더가 필요하다: 봉이 바뀜 · 창/코인/tf 가 바뀜 · 축(고저·현재가)이 움직임 · 행 크기(ATR)가 바뀜 · 밀도 쓸림이 생김.
+    //   음영 기준(창 최대 칸)이나 델타 «전부 아니면 전무» 판정이 바뀌면 fg 만 통째로 다시 칠한다(svg 무관 -- 둘 다 칠하기 안 값).
+    //   1px 밑 봉(1주일 5분봉)은 열을 합쳐 그리므로 전체 렌더 박자 그대로(형성 봉이 반 픽셀이라 차이가 안 보인다).
+    const trSum0 = trs.reduce((a, b) => a + b, 0) - trs[iL], live0 = { tf: chartTfK, asset: activeSnapshotAsset, win: chartWindowBars };
+    let oMin = Infinity, oMax = -Infinity;
+    for (let i = 0; i < iL; i++) { oMin = Math.min(oMin, candles[i].low); oMax = Math.max(oMax, candles[i].high); }
+    if (isSnapshotChart && !panned && !chartPanY && iL >= 0 && live.bar >= 0) fpCv.live = () => {
+      if (chartTfK !== live0.tf || activeSnapshotAsset !== live0.asset || chartWindowBars !== live0.win || chartPanEnd != null || chartPanY || !svg.isConnected) return false;
+      // 형성 봉 OHLC: 5m 은 캔들 이력의 그 객체(체결마다 제자리 갱신) · 30m·1h 는 그 tf 봉에 든 5분봉을 다시 묶어 제자리에 쓴다(호버도 새 값)
+      const raw = candleHistoryByAsset[activeSnapshotAsset] || [], last = raw[raw.length - 1], c = candles[iL];
+      if (!last || tfT(last.time) !== c.time || (chartTfK === 1 && last !== c)) return false;
+      if (chartTfK > 1) {
+        let o = last.open, hi = -Infinity, lo = Infinity;
+        for (let j = raw.length - 1; j >= 0 && tfT(raw[j].time) === c.time; j--) { o = raw[j].open; hi = Math.max(hi, raw[j].high); lo = Math.min(lo, raw[j].low); }
+        Object.assign(c, { open: o, high: hi, low: lo, close: last.close });
+      }
+      const cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), withCur = includeCurrentPrice && cur > 0;
+      const [y0, y1] = yRangeOf(Math.min(oMin, c.low, withCur ? cur : Infinity), Math.max(oMax, c.high, withCur ? cur : -Infinity));
+      if (y0 !== yMin || y1 !== yMax) return false;
+      const pc = candles[iL - 1], tr = pc ? Math.max(c.high - c.low, Math.abs(c.high - pc.close), Math.abs(c.low - pc.close)) : c.high - c.low;
+      if (Math.max(bucket, minRow, Math.round(0.2 * ((trSum0 + tr) / Math.max(nB, 1)) / bucket) * bucket) !== rowSize) return false;
+      if (lastSnap) for (const b of lastSnap.bins || []) {   // 새로 쓸린 밀도 칸 = bg 가 바뀐다
+        if (b.weightPct > 0 && !densitySweep.has(b.price) && c.time >= tfT(Math.floor((lastSnap.tsMs || 0) / 1000)) && c.low <= b.price && b.price <= c.high) return false;
+      }
+      const fp = tfFootprint(footprintForChart()), rows = rowsOfLv(fp && fp.byTime.get(c.time)), inf = barInfo(rows);
+      let mb = maxBuy0, ms = maxSell0;
+      rows.forEach((cell) => { mb = Math.max(mb, cell[0]); ms = Math.max(ms, cell[1]); });
+      const olds = [fgI[live.bar], fgI[live.delta], live.stack >= 0 ? fgI[live.stack] : NOOP, liqLive ? fgI[liqLive.at] : NOOP];
+      barRows[iL] = rows;
+      fgI[live.bar] = barItem(iL, rows, inf);
+      pocPts.length = live.pocN;
+      const pp = pocPt(iL, inf);
+      if (pp) pocPts.push(pp);
+      deltaBoxes.length = live.dbN;
+      const d = deltaOf(iL, inf), nD = live.nD + (d ? 1 : 0), bumped = live.bump + (d && d.bumped ? 1 : 0);
+      const on = nD > 0 && bumped / nD <= DELTA_CROWD, wide = on !== dState.on || mb !== maxBuy || ms !== maxSell;
+      dState.on = on; maxBuy = mb; maxSell = ms;
+      renderCandleSvg._deltaStats = { n: nD, bumped, bars: nB };
+      fgI[live.delta] = d ? d.it : NOOP;
+      if (live.stack >= 0) fgI[live.stack] = stackItem(iL, rows);
+      if (liqLive) fgI[liqLive.at] = liqLive.of(iL);
+      const xs = [...olds, fgI[live.bar], fgI[live.delta], live.stack >= 0 ? fgI[live.stack] : NOOP, liqLive ? fgI[liqLive.at] : NOOP]
+        .filter((it) => it.x1 >= it.x0).map((it) => it.x0);
+      fpCvPaint(fpCv.fg, { x0: wide ? ml : Math.min(xAt(iL) + bw / 2 - 1.8 * bw - 2, ...xs), x1: ml + cw, y0: mt, y1: plotBottom });
+      return true;
+    };
 
     // 백필 중에는 왼쪽 봉들이 아직 비어 있다 -- 그걸 «거래가 없었다»로 읽지 않게 말해 둔다.
     // 판정은 **수집기 상태(ready)** 만 본다. 캔들 개수로 재면, 봉이 바뀌는 순간 캔들 이력이
@@ -6373,19 +6489,15 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 풋프린트 **폴백**(2026-09-21 청산맵 모드 제거 후에도 남는 경로): 풋프린트는 ETH 전용이고
   // 테이프가 웜업 중이면 footprintForChart() 가 null 이라, 그때 그릴 캔들이 필요하다.
   // 청산 밀도·S/R 레벨·마커는 이 경로에서도 그대로 그려진다(모드 무관).
+  // 2026-10-20 fg 캔버스(심지 · 하락은 채운 몸통 · 테두리)
   candles.forEach((c, i) => {
     const x = xAt(i), isUp = c.close >= c.open, color = isUp ? "var(--good)" : "var(--bad)";
-    const wick = document.createElementNS(NS, "line");
-    wick.setAttribute("x1", x + bw/2); wick.setAttribute("x2", x + bw/2);
-    wick.setAttribute("y1", yAt(c.high)); wick.setAttribute("y2", yAt(c.low));
-    wick.setAttribute("stroke", color); svg.appendChild(wick);
-
-    const body = document.createElementNS(NS, "rect");
     const yTop = yAt(Math.max(c.open, c.close)), yBot = yAt(Math.min(c.open, c.close));
-    body.setAttribute("x", x); body.setAttribute("y", yTop);
-    body.setAttribute("width", bw); body.setAttribute("height", Math.max(yBot - yTop, 1));
-    body.setAttribute("fill", isUp ? "transparent" : color);
-    body.setAttribute("stroke", color); svg.appendChild(body);
+    fgI.push({ x0: x - 2, x1: x + bw + 2, y0: -1e9, y1: 1e9, p: (ctx) => {
+      cvVLine(ctx, x + bw / 2, yAt(c.high), yAt(c.low), color);
+      if (!isUp) cvRect(ctx, x, yTop, bw, Math.max(yBot - yTop, 1), color);
+      cvStrokeRect(ctx, x, yTop, bw, Math.max(yBot - yTop, 1), color);
+    } });
   });
   }
 
@@ -6609,6 +6721,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       }
       const gridG = layerCache.get("grid")?.g;
       if (gridG && gridG.parentNode === svg) svg.insertBefore(og, gridG.nextSibling); else svg.appendChild(og);
+      cvFromSvgLines(og, bgI, bgBehind, null);   // 2026-10-20 선은 bg 캔버스(칸 뒤) · 글자는 svg
     }
   }
 
@@ -6796,12 +6909,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       line.setAttribute("stroke-width", String(p.width || 2));
       if (lineDashed) line.setAttribute("stroke-dasharray", "4,4");
       if (p.outOfView) line.setAttribute("opacity", "0.72");
-      svg.appendChild(line);
-      if (p.behindCells) {                       // 셀 숫자를 덮지 않게 격자 바로 위(셀 아래)로
-        line.setAttribute("opacity", "0.85");
-        const gridG = layerCache.get("grid")?.g;
-        if (gridG && gridG.parentNode === svg) svg.insertBefore(line, gridG.nextSibling);
-      }
+      if (p.behindCells) {                       // 셀 숫자를 덮지 않게 격자 바로 위(셀 아래) = 2026-10-20 bg 캔버스(칸이 fg 라). 빠른 갱신은 bg 띠만 다시 칠한다(liveLineCtx.cvLine)
+        const it = { x0: ml - TRADE_L - 1, x1: w - mr + 1, y: p.realY, y0: p.realY - 2, y1: p.realY + 2,
+                     p: (ctx) => cvStroke(ctx, [[ml - TRADE_L, it.y], [w - mr, it.y]], p.color, p.width || 2, 0.85, lineDashed ? "4,4" : null) };
+        bgI.splice(bgBehind, 0, it);
+        cvLiveLine = it;
+      } else svg.appendChild(line);
     }
 
     // Left label (follows label position)
@@ -6973,7 +7086,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 빠른 갱신이 가격 -> y 를 계산하려면 이번 렌더의 축 규약이 필요하다. 다음 전체 렌더가
   // 덮어쓴다 -- 즉 이 값은 항상 «지금 화면에 그려진 것»과 같다.
   if (isSnapshotChart) {
-    liveLineCtx = { svg, yMin, yMax, mt, ch, markerX: ml + cw };
+    liveLineCtx = { svg, yMin, yMax, mt, ch, markerX: ml + cw, cvLine: cvLiveLine };
   }
 
   // 2026-09-09 사용자 요청: 청산 밀도 가이드를 **차트 위(패널 HTML)** 로 옮겼다.
@@ -7158,7 +7271,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       시가: ${fmtNum(c.open, Math.max(2, pxDp()))}<br>
       고가: ${fmtNum(c.high, Math.max(2, pxDp()))}<br>
       저가: ${fmtNum(c.low, Math.max(2, pxDp()))}<br>
-      종가: ${fmtNum(c.close, Math.max(2, pxDp()))}${trigLines}${isSnapshotChart ? laneTip(idx) : ""}
+      종가: ${fmtNum(c.close, Math.max(2, pxDp()))}${trigLines}${my >= mt && my <= plotBottom ? cellTip(idx, yMax - ((my - mt) * ySpan) / ch) : ""}${liqTip(idx)}${isSnapshotChart ? laneTip(idx) : ""}
     `);
   };
   svg.onmouseleave = () => {
@@ -7456,37 +7569,44 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       + (q ? `<br>60분 합: CVD ${sgnQ(q.c)} · <span style="color:var(--warn)">OI ${sgnQ(q.oi)}</span> · 고래 ${sgnQ(q.w)} · 중형 ${sgnQ(q.m)} · 리테일 ${sgnQ(q.r)}`
            : `<br>60분 합: 모름 (앞 ${12 / chartTfK}봉 중 빈 봉)`);
   };
-  cachedLayer("quadLane", objToken(fpBars) + "|" + objToken(oiBars) + "|" + activeSnapshotAsset + "|" + ((latestBreakoutDetector && latestBreakoutDetector.rvol && latestBreakoutDetector.rvol.session) || ""), (g) => {
-    if (!(fpBars.length && candles.length && QUAD_H)) return;
+  // 2026-10-20 리본·막대·0선 = fg 캔버스(칠하기 하나 -- 형성 봉 갱신은 플롯 안만 다시 칠해 여기는 전체 렌더 박자) · 글자(리본 이름·줄 이름·값) = svg.
+  //   옛 층 캐시(quadLane)는 뺐다 -- 남은 svg 노드는 글자 수십 개라 매 렌더 만들어도 싸다.
+  if (fpBars.length && candles.length && QUAD_H) (() => {
     const rows = laneBarsOf(), have = rows.filter(Boolean);
     if (!have.length) return;
+    const g = document.createElementNS(NS, "g");
+    svg.appendChild(g);
+    const ops = [];   // 캔버스 칠하기(순서 = 옛 svg 순서)
+    fgI.push({ x0: -1e9, x1: 1e9, y0: quadY, y1: hAll, c: laneC, p: (ctx) => ops.forEach((f) => f(ctx)) });
     const mk = (tag, at, parent = g) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); parent.appendChild(e); return e; };
     const txt = (x, y, s, at = {}) => { const t = mk("text", Object.assign({ x, y, "font-size": mobileChart ? 10 : 12 }, at)); t.textContent = s; return t; };
     const top = quadY, bot = h - mb - 4, RIB = mobileChart ? 14 : 22, GAP = mobileChart ? 4 : 8;
     const cx = (i) => xAt(i) + bw / 2, slotW = slot;
     const chartTop = top + RIB + GAP;
-    const gb = mk("g", laneClip ? { "clip-path": laneClip } : {});   // 봉 막대(리본·여섯 줄)만 -- 이름·값 글자는 플롯 밖이라 안 자른다
     const ribCol = slot < 1 ? new Map() : null;   // 2026-10-20 1px 밑이면 픽셀 열마다 마지막 봉(겹쳐 칠할 때 맨 위에 오던 것) 하나
-    const ribbon = (x, wd, r) => denseAdd({ fill: r.delta >= 0 ? "var(--good)" : "var(--bad)", "fill-opacity": r.oi == null ? 0.12 : r.oi >= 0 ? 0.85 : 0.4 }, denseRect(x, top, wd, RIB));
+    const un = cvUnion();   // DENSE 리본·막대 = 색·농도별 한 칠(cvUnion)
+    const ribbon = (x, wd, r) => un.add(r.delta >= 0 ? "var(--good)" : "var(--bad)", r.oi == null ? 0.12 : r.oi >= 0 ? 0.85 : 0.4, (pp) => pp.rect(x, top, wd, RIB));
     rows.forEach((r, i) => {
       if (!r) return;
       const col = r.delta >= 0 ? "var(--good)" : "var(--bad)", fresh = r.oi != null && r.oi >= 0;
       const x = xAt(i) + 1, wd = Math.max(1, slotW - 2);
-      // DENSE(1주일 창): 색·농도별 path 하나 -- 1px 칸엔 테두리가 안 보여 «정리»(테두리 칸)는 중간 농도(.4)로
+      // DENSE(1주일 창): 1px 칸엔 테두리가 안 보여 «정리»(테두리 칸)는 중간 농도(.4)로
       if (ribCol) { ribCol.set(Math.round(xAt(i)), i); return; }
       if (DENSE) { ribbon(xAt(i), Math.max(0.6, slotW), r); return; }
-      const rc = mk("rect", { x, y: top, width: wd, height: RIB, rx: 3, fill: col,
-                              "fill-opacity": r.oi == null ? 0.12 : fresh ? 0.85 : 0.14 }, gb);
-      if (r.oi != null && !fresh) { rc.setAttribute("stroke", col); rc.setAttribute("stroke-width", 1.2); rc.setAttribute("stroke-opacity", 0.8); }
+      ops.push((ctx) => {
+        cvRect(ctx, x, top, wd, RIB, col, r.oi == null ? 0.12 : fresh ? 0.85 : 0.14, 3);
+        if (r.oi != null && !fresh) cvStrokeRect(ctx, x, top, wd, RIB, col, 1.2, 0.8, 3);
+      });
       if (slotW >= (mobileChart ? 40 : 52)) txt(x + wd / 2, top + RIB / 2 + (mobileChart ? 3.5 : 4.5), QNAME(r.delta, r.oi),
         { "text-anchor": "middle", "font-weight": 700, "font-size": mobileChart ? 9 : 12, fill: fresh ? "var(--on-fill)" : col, "pointer-events": "none" }).setAttribute("clip-path", laneClip || "none");
     });
     if (ribCol) ribCol.forEach((i, k) => ribbon(k, 1, rows[i]));   // 열 = 1px 칸
-    denseFlush(gb);
+    un.flush((f) => ops.push(f));
     // 2026-10-13 사용자 시안 1 «봉별 막대 레인»(60분 합 선은 12봉 중 11봉이 겹쳐 «이번 봉에 누가 밀었나»가 안 보였다):
     //   사분면 아래 한 줄 = 한 지표, 봉마다 0선 위(초록)·아래(빨강) 막대 -- 거래대금만 파랑 한 방향. 줄마다 자기 크기로 채운다(줄끼리 높이 비교 금지).
     //   이름표 = 왼쪽 여백 · 값 = 오른쪽(60분 합, 거래대금은 이 봉). 넓은 화면은 지지/저항 칸(#mcWall)을 LANE_VAL_W 만큼 밀어 그 사이에 값 칸을 둔다.
     let li = candles.length - 1; while (li >= 0 && !laneRollAt(li)) li--;   // 재기동 직후면 60분 합 없음(값 «—»)
+    const zeroLines = [];
     const LANES = [["델타", "delta", "c"], ["신규계약", "oi", "oi"], ["고래", "whale", "w"], ["중형", "mid", "m"], ["리테일", "retail", "r"], ["거래대금", "turn", null]];
     const LG = mobileChart ? 2 : 4, LH = (bot - chartTop - LG * (LANES.length - 1)) / LANES.length, fs = mobileChart ? 9 : 11;
     const bwid = Math.max(1, Math.min(slotW * 0.62, slotW - 2)), wideVal = !!splitR && TRADE_W > 0, valX = wideVal ? ml + cw + LANE_VAL_W - 12 : ml + 4;   // 좁은 화면 = 칩을 왼쪽(오래된 봉) 위에 -- 오른쪽은 최신 봉이라 가리면 안 된다
@@ -7501,21 +7621,22 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     LANES.forEach(([nm, k, rk], j) => {
       const y0 = chartTop + j * (LH + LG), one = k === "turn", vals = rows.map((r) => (r ? r[k] : null)), ok = vals.filter((v) => v != null);
       const mx = Math.max(...ok.map(Math.abs), 1e-9), mid = one ? y0 + LH : y0 + LH / 2, sc = (one ? LH - 1 : LH / 2 - 1) / mx;
-      if (!one) mk("line", { x1: ml, x2: ml + cw, y1: mid, y2: mid, stroke: "var(--ink)", "stroke-opacity": 0.12 });
-      // 2026-10-20 봉이 1px 밑(1주일 창): 막대가 1px 폭으로 겹쳐 칠해진다 -- 픽셀 열마다 위·아래 가장 긴 막대 하나만(칠해지는 모양 그대로, 조각 1/2.5)
+      if (!one) zeroLines.push(mid);   // 0선 -- 옛 svg 에서 막대 묶음(gb) 뒤 형제라 막대 위에 칠해졌다 → 줄 루프 뒤 한 번에
+      // 2026-10-20 봉이 1px 밑(1주일 창): 막대가 1px 폭으로 겹쳐 칠해진다 -- 픽셀 열마다 위·아래 가장 긴 막대 하나만(칠해지는 모양 그대로)
       const colMax = slot < 1 ? new Map() : null;
-      const bar = (x, v, bh) => denseAdd({ fill: one ? "var(--turnover)" : v >= 0 ? "var(--good)" : "var(--bad)", "fill-opacity": one ? 0.55 : 0.85 }, denseRect(x, v >= 0 || one ? mid - bh : mid, bwid, bh));
+      const bar = (x, v, bh, rx = 0) => {
+        const y = v >= 0 || one ? mid - bh : mid, fill = one ? "var(--turnover)" : v >= 0 ? "var(--good)" : "var(--bad)", op = one ? 0.55 : 0.85;
+        if (DENSE) un.add(fill, op, (pp) => pp.rect(x, y, bwid, bh)); else ops.push((ctx) => cvRect(ctx, x, y, bwid, bh, fill, op, rx));
+      };
       vals.forEach((v, i) => {
         if (v == null) return;                        // 모름(OI 없는 봉)은 칸을 비운다 -- 0 으로 그리지 않는다
         const bh = Math.max(1, Math.abs(v) * sc);
         if (colMax) { const x = cx(i) - bwid / 2, k = Math.round(x) * 2 + (v >= 0 || one ? 1 : 0), o = colMax.get(k); if (!o || o[2] < bh) colMax.set(k, [x, v, bh]); return; }
-        if (DENSE) { bar(cx(i) - bwid / 2, v, bh); return; }
-        mk("rect", { x: (cx(i) - bwid / 2).toFixed(1), y: (v >= 0 || one ? mid - bh : mid).toFixed(1), width: bwid.toFixed(1), height: bh.toFixed(1), rx: 1.5,
-                                fill: one ? "var(--turnover)" : v >= 0 ? "var(--good)" : "var(--bad)", "fill-opacity": one ? 0.55 : 0.85 }, gb);
+        bar(cx(i) - bwid / 2, v, bh, DENSE ? 0 : 1.5);
         // 2026-10-20 막대마다 붙던 <title>(«델타 +12 (이 봉)»)은 뺐다 -- 같은 값을 봉 호버 툴팁(laneTip)이 여섯 줄 다 말하고, 제목 노드가 144봉이면 864개였다
       });
       if (colMax) colMax.forEach(([x, v, bh]) => bar(x, v, bh));
-      denseFlush(gb);
+      un.flush((f) => ops.push(f));
       const short = nm === "신규계약" ? "OI" : nm === "거래대금" ? "대금" : nm;   // 긴 이름은 줄임(전체 이름 = 막대·값 호버)
       if (!mobileChart && !wideVal) txt(ml - 6, y0 + LH / 2 + 3, short, { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });   // 왼쪽 여백 ≈30px -- «사분면»과 같은 9px
       const val = rk ? (li >= 0 ? laneRollAt(li)[rk] : null) : (have.length ? have[have.length - 1].turn : null);
@@ -7538,7 +7659,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         ? ` · 오늘 거래량 ${rv.session_label} ${Number(rv.session_basis === "weekend" ? rv.session_weekend : rv.session).toFixed(2)}배` : "";
       vtt.textContent = rk ? `${nm} 60분 합 ${vs} ${coinUnit()} (최근 ${12 / chartTfK}봉)` : `거래대금 이 봉 ${vs}${rvTxt}`; vt.append(vtt);
     });
-  });
+    ops.push((ctx) => zeroLines.forEach((y) => cvHLine(ctx, ml, ml + cw, y, "var(--ink)", 0.12)));
+  })();
 
   // 2026-09-30 지지·저항 글자 줄은 시장 맥락 ③ 가격 지형으로 옮겼다(사용자 지시) -- mcGfx.terrain 이 srLevelsLive() 를 그린다.
 
@@ -7548,8 +7670,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 두면 어느 봉의 청산인지 눈이 세로로 훑어야 한다.
   // 🔴크기는 √다. 5분봉 청산은 중앙 $211 / 최대 $4.9M 로 23,000배라 선형이면 큰 것 하나만
   //   남는다(옛 레인이 로그를 쓴 이유와 같다). 반지름이라 √면 **면적이 금액에 비례**한다.
-  cachedLayer("liqDots", objToken(liqBars) + "|" + objToken(fpBars) + "|" + timesSig, (g) => {
-  if (plotClip) g.setAttribute("clip-path", plotClip);   // 2026-10-20 양 끝에 걸친 봉의 원이 여백으로 나가지 않게
+  // 2026-10-20 fg 캔버스 -- 봉마다 칠하기 하나(형성 봉은 고가가 움직이면 원도 따라 오른다: liqLive). 자르기 = 가격 플롯(양 끝에 걸친 봉의 원이 여백으로 나가지 않게).
+  //   봉별 <title>(청산 금액·롱/숏·거래소)은 봉 호버 툴팁의 «청산» 줄로 옮겼다(liqTip).
+  let liqTip = () => "";
   if (Array.isArray(liqBars) && liqBars.length && candles.length) {
     // 🔴«봉 위»의 기준은 OHLC 고가가 **아니다**. 풋프린트 셀은 별도 원천이라 고가보다 위
     //   가격대까지 그려지는 봉이 있고, 고가만 보고 앉히면 큰 원이 셀 숫자를 덮는다
@@ -7575,41 +7698,34 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     });
     if (peak > 0) {
       const rMax = mobileChart ? 9 : 13;
-      candles.forEach((c, i) => {
-        const b = byTs.get(c.time);
-        if (!b) return;
+      const liqItemOf = (i) => {
+        const c = candles[i], b = byTs.get(c.time);
+        if (!b) return { x0: 1, x1: 0, y0: 1, y1: 0, p: () => {} };
         const lo = Number(b.long_usd) || 0, sh = Number(b.short_usd) || 0;
         const v = lo + sh;
-        if (v <= 0) return;
+        if (v <= 0) return { x0: 1, x1: 0, y0: 1, y1: 0, p: () => {} };
         const r0 = slot < 4 ? 1.5 : 3, r1 = slot < 4 ? rMax * 0.6 : rMax;   // 2026-10-20 1주일 창은 원 수백 개가 캔들을 덮어 작게(크기는 옛 4px 문턱 그대로)
         const r = r0 + Math.sqrt(v / peak) * (r1 - r0);
         // 그 봉이 그린 것 중 가장 높은 것 바로 위(셀 숫자 한 줄 9px 만큼 더 띄운다).
         const top = Math.max(c.high, topByTs.get(c.time) || -Infinity);
-        const cy = Math.max(mt + r + 1, yAt(top) - r - 14);
-        if (DENSE) {   // 1주일 창: 색별 path 하나(원 = 호 두 개) · 봉별 제목 없음
-          const cxD = xAt(i) + bw / 2;
-          denseAdd({ fill: sh >= lo ? "var(--good)" : "var(--bad)", "fill-opacity": 0.9 },
-                   `M${(cxD - r).toFixed(1)} ${cy.toFixed(1)}a${r.toFixed(1)} ${r.toFixed(1)} 0 1 0 ${(2 * r).toFixed(1)} 0a${r.toFixed(1)} ${r.toFixed(1)} 0 1 0 ${(-2 * r).toFixed(1)} 0Z`);
-          return;
-        }
-        const dot = document.createElementNS(NS, "circle");
-        dot.setAttribute("cx", (xAt(i) + bw / 2).toFixed(1));
-        dot.setAttribute("cy", cy.toFixed(1));
-        dot.setAttribute("r", r.toFixed(1));
-        dot.setAttribute("fill", sh >= lo ? "var(--good)" : "var(--bad)");
-        dot.setAttribute("fill-opacity", "0.9");
-        const tip = document.createElementNS(NS, "title");
-        tip.textContent = fmtDateTick(c.time * 1000) + " 청산 " + fmtUsdCompact(v)
-          + " (롱 " + fmtUsdCompact(lo) + " / 숏 " + fmtUsdCompact(sh) + ")"
-          + (b.partial ? " · 진행 중" : "")
-          + liqVenueText(b);
-        dot.appendChild(tip);
-        g.appendChild(dot);
-      });
-      denseFlush(g);
+        const cy = Math.max(mt + r + 1, yAt(top) - r - 14), cxD = xAt(i) + bw / 2, col = sh >= lo ? "var(--good)" : "var(--bad)";
+        return { x0: cxD - r - 1, x1: cxD + r + 1, y0: cy - r - 1, y1: cy + r + 1, c: plotC, cx: cxD, cy, r, col, p: (ctx) => {
+          ctx.globalAlpha = 0.9; ctx.fillStyle = cvc(col); ctx.beginPath(); ctx.arc(cxD, cy, r, 0, 2 * Math.PI); ctx.fill();
+        } };
+      };
+      if (DENSE) {   // 1주일 창: 색별 한 칠(옛 path 하나 -- 겹친 원이 진해지지 않는다) · 형성 봉 원은 전체 렌더 박자
+        const un = cvUnion();
+        candles.forEach((c, i) => { const it = liqItemOf(i); if (it.r) un.add(it.col, 0.9, (pp) => { pp.moveTo(it.cx + it.r, it.cy); pp.arc(it.cx, it.cy, it.r, 0, 2 * Math.PI); }); });
+        un.flush((f) => fgI.push({ ...CV_ALL, c: plotC, p: f }));
+      } else candles.forEach((c, i) => { if (i === candles.length - 1) liqLive = { at: fgI.length, of: liqItemOf }; fgI.push(liqItemOf(i)); });
+      liqTip = (i) => {
+        const c = candles[i], b = c && byTs.get(c.time);
+        if (!b) return "";
+        const lo = Number(b.long_usd) || 0, sh = Number(b.short_usd) || 0;
+        return lo + sh > 0 ? `<br>청산 ${fmtUsdCompact(lo + sh)} (롱 ${fmtUsdCompact(lo)} / 숏 ${fmtUsdCompact(sh)})${b.partial ? " · 진행 중" : ""}${liqVenueText(b).replace(/\n/g, "<br>")}` : "";
+      };
     }
   }
-  });
 
   // ── SVG 안의 수급 두 패널 -- OI 레인 바로 위 (2026-09-19 사용자 지시) ──────────
   // 중첩 <svg> 를 쓴다 -- 자식 svg 는 제 viewBox 를 갖는 독립 좌표계라 두 렌더러의 좌표
@@ -7740,6 +7856,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   if (boxColG) svg.appendChild(boxColG);       // 2026-10-17 ETH 는 그 자리에 박스 경계선
   { const mn = mobileChart && svg.id === "candleSvgSnapshot" ? svg.querySelector('[data-live="label"][data-with-price="num"]') : null;
     if (mn && !mn.classList.contains("far-lbl")) svg.appendChild(mn); }   // 2026-10-10 휴대폰 현재가 숫자 = 호가 띠(◌ 표식) 위 맨 앞
+  fpCvPaint(fpCv.bg); fpCvPaint(fpCv.fg);   // 2026-10-20 캔버스 두 장(fpCv) -- 칠하기는 레이아웃을 안 건드린다
   post.forEach((f) => f());   // 화면 상자를 재는 HTML 배치(위 ③) -- svg 를 다 쌓은 뒤 한 번만 배치된다
   // 2026-10-01 프로파일 오른쪽 끝 가격 이름과 겹치는 호가 벽 수량 글자(«11.8k»)는 숨긴다(사용자 지시) -- 층 캐시라 매번 되살린 뒤 다시 판정
   //   (2026-10-20 읽기를 먼저 다 하고 쓰기를 나중에 -- 글자마다 되살리고 재면 그때마다 레이아웃이 다시 돈다)
