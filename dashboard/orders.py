@@ -128,6 +128,65 @@ def account_day_start(payload: dict, now: float | None = None, path: Path = ACCO
     return cur
 
 
+# 2026-10-20 계좌 카드 달력·«오늘 손익» = 그날(KST) 지갑에 실제로 들어온 돈(/fapi/v1/income). 원장(왕복)은 «청산한 날»에
+#   왕복 전체를 몰아 넣어(전날 부분 익절·수수료까지) 날이 어긋났고, 펀딩만 있는 날은 비었다.
+#   서명 GET 하나(무게 30) · 60초에 한 번 · 첫 기동은 88일(바이낸스는 최근 3개월만 준다)을 7일 창으로 메운다.
+ACCOUNT_INCOME_PATH = LIVE_DIR / "account_income_daily.json"
+INCOME_REFRESH_SECONDS = 60.0
+INCOME_BACKFILL_DAYS = 88
+INCOME_WINDOW_MS = 7 * 86400_000
+INCOME_LIMIT = 1000
+INCOME_OVERLAP_MS = 600_000      # 바로 앞 10분은 다시 묻는다 -- 늦게 적히는 줄(펀딩 정산 등) 대비, 중복은 키로 거른다
+INCOME_MAX_CALLS = 8             # 한 번 갱신에 최대 호출(밀린 창은 다음 갱신이 이어 받는다)
+INCOME_STABLE = {"USDT", "USDC"}
+INCOME_TRANSFER_TYPES = {"TRANSFER", "INTERNAL_TRANSFER", "CROSS_COLLATERAL_TRANSFER", "COIN_SWAP_DEPOSIT",
+                         "COIN_SWAP_WITHDRAW", "AUTO_EXCHANGE", "STRATEGY_UMFUTURES_TRANSFER"}
+INCOME_FIELDS = {"REALIZED_PNL": "realized", "FUNDING_FEE": "funding", "COMMISSION": "commission"}
+
+
+def income_fold(state: dict, rows: list[dict]) -> None:
+    """income 줄 → state["days"][KST 날짜] 합. 같은 줄(tranId·incomeType·time)은 한 번만(state["recent"]).
+    $ 칸은 USDT·USDC 만 -- 다른 자산(BNB 수수료 등)은 그날 other_assets 에 따로(단위를 섞지 않는다)."""
+    parsed = [(int(r["time"]), f"{r['tranId']}|{r['incomeType']}|{r['time']}", str(r["incomeType"]),
+               str(r.get("asset") or ""), float(r["income"])) for r in rows]     # 먼저 다 읽는다 -- 깨진 줄이면 아무것도 안 바뀐다
+    recent, days = state.setdefault("recent", {}), state.setdefault("days", {})
+    for t, key, typ, asset, amt in parsed:
+        if key in recent:
+            continue
+        recent[key] = t
+        d = days.setdefault(datetime.fromtimestamp(t / 1000, KST_TZ).strftime("%Y-%m-%d"),
+                            {"pnl": 0.0, "realized": 0.0, "funding": 0.0, "commission": 0.0, "other": 0.0, "transfer": 0.0})
+        if asset not in INCOME_STABLE:
+            oa = d.setdefault("other_assets", {})
+            oa[asset] = oa.get(asset, 0.0) + amt
+        elif typ in INCOME_TRANSFER_TYPES:
+            d["transfer"] += amt
+        else:
+            d[INCOME_FIELDS.get(typ, "other")] += amt
+            d["pnl"] += amt
+
+
+async def income_refresh(state: dict, fetch, now_ms: int, max_calls: int = INCOME_MAX_CALLS) -> None:
+    """state 를 제자리에서 앞으로 민다. fetch(start, end) → income 줄 목록(실패면 raise). 매 창 뒤 state 는 일관된다
+    (예외가 나도 거기까지 저장해도 된다). 꽉 찬(1000줄) 창은 반으로 줄여 다시 묻는다 -- 응답 정렬 방향에 기대지 않는다."""
+    if "cursor" not in state:
+        day0 = (datetime.fromtimestamp(now_ms / 1000, KST_TZ) - timedelta(days=INCOME_BACKFILL_DAYS)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        state.update({"from": day0.strftime("%Y-%m-%d"), "cursor": int(day0.timestamp() * 1000), "days": {}, "recent": {}})
+    end = min(state["cursor"] + INCOME_WINDOW_MS, now_ms)
+    for _ in range(max_calls):
+        rows = await fetch(state["cursor"], end)
+        if len(rows) >= INCOME_LIMIT and end > state["cursor"]:
+            end = state["cursor"] + (end - state["cursor"]) // 2
+            continue
+        income_fold(state, rows)    # ponytail: 1ms 안에 1000줄이면 넘친 줄은 잃는다 -- 현실에선 없다
+        if end >= now_ms:
+            state["cursor"], state["synced_at"] = max(state["cursor"], now_ms - INCOME_OVERLAP_MS), now_ms
+            break
+        state["cursor"], end = end + 1, min(end + 1 + INCOME_WINDOW_MS, now_ms)
+    state["recent"] = {k: t for k, t in state["recent"].items() if t >= state["cursor"]}
+
+
 # 2026-10-05 계좌 카드 «습관 분해»(추가 0회/≥1 · 명목 배수 ≤6/>6 · 추세 쪽/역추세). 10-05 이후 줄은 원장이 직접
 #   adds·peak_notional·equity_at_record 를 싣고, 그 전 줄은 scripts/backfill_account_trip_habits_20261005.py 가 만든 이 파일로.
 ACCOUNT_TRIP_HABITS_PATH = LIVE_DIR / "account_trip_habits.json"
@@ -547,7 +606,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         payload = await fetch_account(
             binance_session(),
             list(dict.fromkeys([*MARKET_SYMBOLS.values(), *MANUAL_EXEC_SYMBOLS.values()])),
-            quote_asset=quote)
+            quote_asset=quote, income=account_income)
         # 화면이 «이 코인의 포지션»을 찾을 때 USDT 심볼 하나만 보면 USDC 포지션을 못 본다.
         # 서버가 실제로 쓰는 심볼을 payload 에 실어 보내 화면이 하드코딩하지 않게 한다 --
         # 환경변수(DASHBOARD_MANUAL_EXEC_SYMBOL)로 바뀌는 값이다.
@@ -575,6 +634,41 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             except OSError as exc:   # 기록 실패는 화면 추정으로 돌아갈 뿐 -- 계좌 응답을 막지 않는다
                 print(f"account_day_start: {type(exc).__name__}: {exc}", flush=True)
         return payload
+
+    income_cache: dict[str, Any] = {"ts": 0.0, "state": None}
+
+    async def account_income(get) -> dict[str, Any]:
+        """fetch_account 가 성공 끝에 부른다(get = 서명 GET /fapi/v1/income). {income_days, income_from, income_synced_at} --
+        10분 넘게 못 따라잡았으면 {}(화면은 원장 추정으로 돌아간다). 실패는 로그만 -- 계좌 응답을 막지 않는다."""
+        now = time.time()
+        if now - income_cache["ts"] >= INCOME_REFRESH_SECONDS:
+            income_cache["ts"] = now     # await 전에 -- 겹친 호출이 같은 갱신을 두 번 하지 않게
+            if income_cache["state"] is None:
+                try:
+                    income_cache["state"] = json.loads(ACCOUNT_INCOME_PATH.read_text())
+                except (OSError, ValueError):
+                    income_cache["state"] = {}
+            state = income_cache["state"]
+
+            async def fetch(start: int, end: int) -> list[dict]:
+                rows = await get({"startTime": start, "endTime": end, "limit": INCOME_LIMIT})
+                if not isinstance(rows, list):
+                    raise RuntimeError(rows.get("__error__") if isinstance(rows, dict) else rows)
+                return rows
+            try:
+                await income_refresh(state, fetch, int(now * 1000))
+            except Exception as exc:  # noqa: BLE001 -- 키·밴·네트워크 전부. 거기까지 민 상태는 일관되다(income_refresh)
+                print(f"account_income: {type(exc).__name__}: {exc}", flush=True)
+            try:
+                tmp = ACCOUNT_INCOME_PATH.with_suffix(".tmp")
+                tmp.write_text(json.dumps(state))
+                tmp.replace(ACCOUNT_INCOME_PATH)
+            except OSError as exc:
+                print(f"account_income save: {type(exc).__name__}: {exc}", flush=True)
+        state = income_cache["state"] or {}
+        if now * 1000 - (state.get("synced_at") or 0) > 600_000:
+            return {}
+        return {"income_days": state["days"], "income_from": state["from"], "income_synced_at": state["synced_at"]}
 
     async def load_daily_closes(coin: str) -> tuple[list[float], list[int]]:
         """완결 일봉 종가·종가 시각(ms, 봉 끝+1) 300개 -- 원장 첫 왕복(08월) 진입 전 90일 + 여유. 가중치 2, 1시간 캐시."""

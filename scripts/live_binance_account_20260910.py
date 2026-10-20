@@ -261,7 +261,9 @@ def pick_balance(account: dict[str, Any], quote_asset: str = "USDT") -> tuple[di
 
 
 async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = DEFAULT_TRADE_LIMIT,
-                        quote_asset: str = "USDT") -> dict[str, Any]:
+                        quote_asset: str = "USDT", income=None) -> dict[str, Any]:
+    """income: 있으면 성공 응답 끝에 await income(get) 의 dict 를 싣는다. get(params) = 서명 GET /fapi/v1/income(무게 30).
+    여기 두는 이유: 시험들이 fetch_account 만 갈아끼운다 -- 바깥에서 따로 부르면 시험이 실키로 서명 요청을 보낸다."""
     key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
     if not (key and secret):
         return {"ok": False, "error": "BINANCE_API_KEY/BINANCE_SECRET_KEY가 .env에 없습니다."}
@@ -344,7 +346,9 @@ async def fetch_account(session, symbols: Sequence[str], *, trade_limit: int = D
                            for o in rows if o.get("type") == "LIMIT")
 
     chosen, listed = pick_balance(balance, quote_asset)
+    extra = await income(lambda params: _get(session, "/fapi/v1/income", params, key, secret, offset)) if income else {}
     return {
+        **extra,
         "ok": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         # 🔴`margin` 은 **순자산**(지갑+미실현)이지 사용 증거금이 아니다. 2026-09-11 에

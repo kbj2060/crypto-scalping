@@ -1177,6 +1177,8 @@ svg {
 .acct-today-kv { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; margin: 6px 0 0; font-size: 12.5px; }
 .acct-today-kv dt { color: var(--muted); }
 .acct-today-kv dd { margin: 0; text-align: right; font: 700 12.5px/1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
+.acct-today-kv .acct-kv-sub { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.acct-bar-note { display: block; margin-top: 2px; font-size: 11px; }
 .acct-today-svg, #acctCard .acct-plot svg { display: block; width: 100%; height: auto; }
 .acct-today-trips ol { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; }
 .acct-today-trips li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }

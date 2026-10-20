@@ -1221,9 +1221,14 @@ function acctTodaySvg(tT, unreal, hasPos, t0, now, w, h) {
 }
 
 // 손익 달력 한 달(월요일 시작 · 맨 오른쪽 = 주 합). 색 진하기 = √(|그날 손익| ÷ 원장 최대)
-// 2026-10-20 사용자 «손익 옆에 지갑 대비 % · 달력에도»: walletAt(t) = t 시점 지갑 추정(지금 지갑 − t 뒤 닫힌 거래 실현 합 -- 입출금·펀딩은 원장에 없어 섞인다)
+// 2026-10-20 사용자 «손익 옆에 지갑 대비 % · 달력에도»: walletAt(t) = t 시점 지갑(income 이 덮는 날은 정확 · 그 앞은 닫힌 거래로 추정)
+// 같은 날 저녁: 칸 값 = 그날 지갑에 들어온 실현+펀딩+수수료(서버 income · o.inc). 옛 «청산한 날에 왕복 전체»는 전날 부분 익절까지 몰아 넣었다.
+const acctIncTip = (o) => [["체결 실현", o.realized], ["펀딩", o.funding], ["수수료", o.commission], ["기타", o.other]]
+  .filter(([, v], i) => !i || Math.abs(Number(v) || 0) >= 0.005).map(([k, v]) => `${k} ${acctSu(Number(v) || 0)}`).join(" · ")
+  + `${Math.abs(Number(o.transfer) || 0) >= 0.005 ? `\n입출금 ${acctSu(Number(o.transfer))}(손익에서 뺌)` : ""}`
+  + Object.entries(o.other_assets || {}).map(([k, v]) => `\n${k} ${v >= 0 ? "+" : "−"}${Math.abs(v).toPrecision(3)}(달러 합에서 뺌)`).join("");
 function acctCalendar(days, ym, todayKey, selKey, walletAt) {
-  const pctOf = (pnl, t) => { const w = walletAt(t); return w > 0 ? pnl / w : null; };
+  const pctOf = (pnl, t, t1) => { const w = walletAt(t, t1); return w > 0 ? pnl / w : null; };
   const maxAbs = Math.max(1e-9, ...[...days.values()].map((o) => Math.abs(o.pnl)));
   const first = acctDay0(ym + "-01"), dim = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate(), lead = (new Date(first + ACCT_KST).getUTCDay() + 6) % 7;
   let h = ["월", "화", "수", "목", "금", "토", "일", "주"].map((d) => `<span class="dow">${d}</span>`).join(""), wk = 0, col = 0, mo = 0, wd = 0, ld = 0, wk0 = first;
@@ -1231,19 +1236,22 @@ function acctCalendar(days, ym, todayKey, selKey, walletAt) {
   for (let i = 0; i < lead; i++) pad();
   for (let d = 1; d <= dim; d++) {
     const key = `${ym}-${String(d).padStart(2, "0")}`, o = days.get(key);
-    if (o) { wk += o.pnl; mo += o.pnl; if (o.pnl > 0) wd++; else ld++; }
+    if (o) { wk += o.pnl; mo += o.pnl; if (o.n || (o.inc && o.inc.realized)) { if (o.pnl > 0) wd++; else ld++; } }   // 이익/손실일 = 거래한 날만(펀딩만 있는 날 제외)
     const a = o ? Math.round((0.1 + 0.6 * Math.sqrt(Math.abs(o.pnl) / maxAbs)) * 100) : 0;
-    const dp = o ? pctOf(o.pnl, acctDay0(key)) : null;
+    const dp = o ? pctOf(o.pnl, acctDay0(key), acctDay0(key) + ACCT_DAY) : null;
     if (col === 0) wk0 = acctDay0(key);   // 이 줄(주)의 첫 날 -- 주 합 % 의 분모 시점
-    const tip = o ? `${key} · ${o.n}건 ${acctSu(o.pnl)} (그날 시작 지갑 대비 ${acctPct(dp)})\n` + o.trips.map((t) => `${acctHm(t.exit_time)} ${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} ${acctSu(Number(t.net_pnl) || 0)}`).join("\n") : "";
+    const tl = o ? o.trips.map((t) => `${acctHm(t.exit_time)} ${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} ${acctSu(Number(t.net_pnl) || 0)}`).join("\n") : "";
+    const tip = !o ? "" : o.inc ? `${key} · ${acctSu(o.pnl)} (그날 시작 지갑${(Number(o.inc.transfer) || 0) > 0 ? "+그날 입금" : ""} 대비 ${acctPct(dp)})\n그날 지갑에 들어온 실현+펀딩+수수료 — ${acctIncTip(o.inc)}`
+        + (o.n ? `\n그날 닫힌 거래 ${o.n}건(왕복 전체 손익 · 진입 뒤 다른 날 실현분 포함)\n${tl}` : "")
+      : `${key} · ${o.n}건 ${acctSu(o.pnl)} (그날 시작 지갑 대비 ${acctPct(dp)})\n닫힌 거래 왕복 합(이 날은 지갑 입금 기록 밖 -- 펀딩 빠짐)\n${tl}`;
     // 오늘까지의 날 = 누르면 위 띠가 그날 0~24시로(미래 날은 그냥 칸)
     const tag = key <= todayKey ? "button" : "span", sel = key === selKey;
-    h += `<${tag} class="d${key === todayKey ? " today" : ""}${sel ? " sel" : ""}"${tag === "button" ? ` type="button" data-acct-day="${key}" aria-pressed="${sel}" aria-label="${key} ${o ? `${o.n}건 ${acctSu(o.pnl)} ${acctPct(dp)}` : "거래 없음"} — 위 차트에 그날 보기"` : ""}`
-      + `${o ? ` style="background:color-mix(in srgb, var(--${o.pnl >= 0 ? "good" : "bad"}) ${a}%, transparent)" title="${escapeHtml(tip)}"` : ""}><i>${d}</i>${o ? `<span class="v"><b>${acctSuc(o.pnl)}</b><em>${acctPct(dp)}</em></span>` : ""}</${tag}>`;
+    h += `<${tag} class="d${key === todayKey ? " today" : ""}${sel ? " sel" : ""}"${tag === "button" ? ` type="button" data-acct-day="${key}" aria-pressed="${sel}" aria-label="${key} ${o ? `${o.n ? `${o.n}건 ` : ""}${acctSu(o.pnl)} ${acctPct(dp)}` : "거래 없음"} — 위 차트에 그날 보기"` : ""}`
+      + `${o ? ` style="background:color-mix(in srgb, var(--${o.pnl >= 0 ? "good" : "bad"}) ${a}%, transparent)" title="${escapeHtml(tip)}"` : ""}><i>${d}</i>${o ? `<span class="v"><b>${Math.abs(o.pnl) < 9.95 ? `${o.pnl >= 0 ? "+" : "−"}$${Math.abs(o.pnl).toFixed(1)}` : acctSuc(o.pnl)}</b><em>${acctPct(dp)}</em></span>` : ""}</${tag}>`;
     col++;
-    if (col === 7 || d === dim) { while (col < 7) pad(); h += `<span class="wk ${acctTone(wk)}">${wk ? `<b>${acctSuc(wk)}</b><em>${acctPct(pctOf(wk, wk0))}</em>` : ""}</span>`; wk = 0; col = 0; }
+    if (col === 7 || d === dim) { while (col < 7) pad(); h += `<span class="wk ${acctTone(wk)}">${wk ? `<b>${acctSuc(wk)}</b><em>${acctPct(pctOf(wk, wk0, acctDay0(key) + ACCT_DAY))}</em>` : ""}</span>`; wk = 0; col = 0; }
   }
-  return { html: `<div class="acct-cal">${h}</div>`, mo, wd, ld, moPct: pctOf(mo, first) };
+  return { html: `<div class="acct-cal">${h}</div>`, mo, wd, ld, moPct: pctOf(mo, first, first + dim * ACCT_DAY) };
 }
 
 // 자산 곡선(누적 실현 계단) + 아래 «직전 최고점 대비 낙폭» + 최악 3건 표시
@@ -1320,12 +1328,24 @@ function renderSnapshotAccount() {
   const now = Date.now(), todayKey = acctKey(now), t0 = acctDay0(todayKey);
   const T = (A.ledger || []).filter((t) => Number(t.exit_time) > 0).slice().sort((x, y) => x.exit_time - y.exit_time);
   const tT = T.filter((t) => t.exit_time >= t0), real = tT.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
-  const walletAt = (t) => wallet - T.reduce((x, tr) => x + (tr.exit_time >= t ? Number(tr.net_pnl) || 0 : 0), 0);   // 그때 지갑(추정)
-  // 오늘 시작 순자산: 서버가 0시 뒤 15분 안에 잰 값이 있으면 그것(펀딩·수수료까지 «계좌가 실제로 변한 만큼»), 없으면 «지갑 − 오늘 실현» 추정
-  const ds = A.day_start && A.day_start.date === todayKey && Number(A.day_start.late_s) <= 900 ? Number(A.day_start.equity) : null;
-  const start = ds != null ? ds : wallet - real, net = ds != null ? equity - ds : real + unreal, pct = start > 0 ? net / start : null;
-  const startTip = ds != null ? `0시 ${Math.round(A.day_start.late_s / 60)}분에 잰 순자산 ${fmtUsd(ds)} 기준(입출금이 있으면 섞임)`
-    : "0시 순자산 기록이 없어 «지갑 − 오늘 실현»으로 추정(펀딩·입출금 섞임)";
+  // 2026-10-20 날별 손익 = 서버 income(KST 날마다 지갑에 들어온 실현·펀딩·수수료·입출금). income_from 부터는 다 들어와 있다 -- 그 앞은 원장 추정.
+  const inc = A.income_days && A.income_from ? A.income_days : null;
+  const incOn = (k) => !!inc && k >= A.income_from;
+  const incSum = (k) => Object.entries(inc || {}).reduce((x, [d, o]) => x + (d >= k ? (Number(o.pnl) || 0) + (Number(o.transfer) || 0) : 0), 0);
+  const incCut = inc ? acctDay0(A.income_from) : Infinity;
+  // walletAt(t, t1) = t 시점 지갑 + [t, t1) 사이 입금(있으면) -- 달 중간에 넣은 돈을 분모에 넣지 않으면 «한 달 −157%»(10-07·09 입금 $2.5k)가 나온다
+  const walletAt = (t, t1) => (incOn(acctKey(t)) ? wallet - incSum(acctKey(t))   // 그날 시작 지갑 = 지금 − 그 뒤 들어온 돈(입출금 포함)
+    : wallet - (inc ? incSum(A.income_from) : 0) - T.reduce((x, tr) => x + (tr.exit_time >= t && tr.exit_time < incCut ? Number(tr.net_pnl) || 0 : 0), 0))   // 추정(펀딩·입출금 섞임)
+    + (t1 ? Object.entries(inc || {}).reduce((x, [d, o]) => x + (d >= acctKey(t) && d < acctKey(t1) ? Math.max(0, Number(o.transfer) || 0) : 0), 0) : 0);
+  // 오늘 시작 순자산: 서버가 0시 뒤 15분 안에 잰 값이 있으면 그것, 없으면 «0시 지갑»(미실현 0 가정)
+  const dsOk = A.day_start && A.day_start.date === todayKey && Number(A.day_start.late_s) <= 900;
+  const ds = dsOk ? Number(A.day_start.equity) : null, unreal0 = dsOk ? ds - Number(A.day_start.wallet) : null;
+  const incT = incOn(todayKey) ? inc[todayKey] || {} : null, realT = incT ? Number(incT.pnl) || 0 : real, trfT = incT ? Number(incT.transfer) || 0 : 0;
+  // 큰 숫자 = 실현(지갑 입금) + 미실현 변화 -- 오늘 입출금은 빠진다(옛 «지금 순자산 − 0시»는 입금도 손익으로 셌다)
+  const start = ds != null ? ds : incT ? walletAt(t0) : wallet - real;
+  const net = incT ? realT + unreal - (unreal0 ?? 0) : ds != null ? equity - ds : real + unreal, pct = start > 0 ? net / start : null;
+  const startTip = (ds != null ? `0시 ${Math.round(A.day_start.late_s / 60)}분에 잰 순자산 ${fmtUsd(ds)} 기준` : incT ? `0시 지갑 ${fmtUsd(start)} 기준(0시 미실현 기록 없음 -- 0으로 봄)` : "0시 순자산 기록이 없어 «지갑 − 오늘 실현»으로 추정(펀딩·입출금 섞임)")
+    + (incT ? `\n= 실현 ${acctSu(realT)} + 미실현 변화 ${acctSu(unreal - (unreal0 ?? 0))}${Math.abs(trfT) >= 0.005 ? `\n오늘 입출금 ${acctSu(trfT)} 은 손익에서 뺐다` : ""}` : ds != null ? "(입출금이 있으면 섞임)" : "");
 
   // ── 포지션 한 줄 + 진입 미리보기 한 마디(주문 조작부는 플로팅 버튼) ──
   const pj = (entryProjPreview || (lastEntryPlan && lastEntryPlan.projection) || {}).after;
@@ -1354,6 +1374,9 @@ function renderSnapshotAccount() {
   // ── 오늘 띠(달력에서 고른 날이면 그날 0~24시 -- 실현만, 그날 미실현·펀딩은 원장에 없다) ──
   const selKey = acctSelDay && acctSelDay < todayKey ? acctSelDay : null, s0 = selKey ? acctDay0(selKey) : t0;
   const vT = selKey ? T.filter((t) => t.exit_time >= s0 && t.exit_time < s0 + ACCT_DAY) : tT, vReal = vT.reduce((x, t) => x + (Number(t.net_pnl) || 0), 0);
+  const incV = selKey && incOn(selKey) ? inc[selKey] || {} : null, vFig = incV ? Number(incV.pnl) || 0 : vReal;
+  // 막대 = 그날 닫힌 왕복의 전체 손익 -- 숫자(그날 지갑 입금)와 다르면 한 줄로 밝힌다
+  const barNote = (fig, sum) => (vT.length && Math.abs(fig - sum) >= 0.01 ? `<span class="acct-bar-note muted">막대 = 그날 닫힌 왕복 전체 손익(합 ${acctSu(sum)} · 다른 날 실현분 포함)</span>` : "");
   const wins = vT.filter((t) => t.net_pnl > 0).length;
   const dow = "일월화수목금토"[new Date(s0 + ACCT_KST).getUTCDay()];
   const trips = vT.length ? vT.map((t) => `<li title="${escapeHtml(acctTripTip(t))}"><time>${acctHm(t.exit_time)}</time><span>${acctCoin(t.symbol)} ${t.side === "LONG" ? "롱" : "숏"} · ${acctDur(t.exit_time - t.entry_time)}${t.adds ? ` · 추가 ${t.adds}회` : ""}${t.peak_x > 6 ? ` · <em class="warn">${t.peak_x}배</em>` : ""}</span><b class="${acctTone(t.net_pnl)}">${acctSu(Number(t.net_pnl) || 0)}</b></li>`).join("")
@@ -1362,22 +1385,25 @@ function renderSnapshotAccount() {
   const todayHtml = selKey ? `<div class="acct-today acct-today-past">
       <div class="acct-today-hero">
         <span class="acct-day-head"><span class="acct-eyebrow">손익 · ${dayLab}</span><span class="chipset"><button type="button" class="chip" data-acct-today>오늘로</button></span></span>
-        <div class="acct-figline"><div class="acct-figure ${acctTone(vReal)}">${acctSu(vReal)}</div><span class="acct-figpct ${acctTone(vReal)}" title="그날 시작 지갑(추정 ${fmtUsd(walletAt(s0))}) 대비">${acctPct(walletAt(s0) > 0 ? vReal / walletAt(s0) : null)}</span></div>
-        <span class="acct-today-pct"><span class="muted">그날 닫힌 거래의 실현 손익 · 지갑 ${fmtUsd(walletAt(s0))} 대비(그날 시작, 추정) · 미실현·펀딩 빠짐</span></span>
-        <dl class="acct-today-kv"><dt>실현 · ${vT.length}건${vT.length ? ` (승 ${wins} 패 ${vT.length - wins})` : ""}</dt><dd class="${acctTone(vReal)}">${acctSu(vReal)}</dd></dl>
+        <div class="acct-figline"><div class="acct-figure ${acctTone(vFig)}"${incV ? ` title="${escapeHtml(acctIncTip(incV))}"` : ""}>${acctSu(vFig)}</div><span class="acct-figpct ${acctTone(vFig)}" title="그날 시작 지갑(${incV ? "" : "추정 "}${fmtUsd(walletAt(s0, s0 + ACCT_DAY))}${walletAt(s0, s0 + ACCT_DAY) !== walletAt(s0) ? " · 그날 입금 포함" : ""}) 대비">${acctPct(walletAt(s0, s0 + ACCT_DAY) > 0 ? vFig / walletAt(s0, s0 + ACCT_DAY) : null)}</span></div>
+        <span class="acct-today-pct"><span class="muted">${incV ? `그날 지갑에 들어온 실현+펀딩+수수료 · 지갑 ${fmtUsd(walletAt(s0))} 대비(그날 시작)` : `그날 닫힌 거래의 실현 손익 · 지갑 ${fmtUsd(walletAt(s0))} 대비(그날 시작, 추정) · 미실현·펀딩 빠짐`}</span></span>
+        <dl class="acct-today-kv">${incV ? `<dt>실현 <span class="acct-kv-sub">· 펀딩·수수료 포함</span></dt><dd class="${acctTone(vFig)}" title="${escapeHtml(acctIncTip(incV))}">${acctSu(vFig)}</dd>`
+          : `<dt>실현 · ${vT.length}건${vT.length ? ` (승 ${wins} 패 ${vT.length - wins})` : ""}</dt><dd class="${acctTone(vReal)}">${acctSu(vReal)}</dd>`}</dl>
       </div>
-      <div class="acct-today-flow">${acctTodaySvg(vT, 0, false, s0, s0 + ACCT_DAY, todayW, 120)}</div>
-      <div class="acct-today-trips"><span class="acct-eyebrow">그날 닫힌 거래</span><ol>${trips}</ol></div>
+      <div class="acct-today-flow">${acctTodaySvg(vT, 0, false, s0, s0 + ACCT_DAY, todayW, 120)}${incV ? barNote(vFig, vReal) : ""}</div>
+      <div class="acct-today-trips"><span class="acct-eyebrow">그날 닫힌 거래${vT.length ? ` · ${vT.length}건 (승 ${wins} 패 ${vT.length - wins})` : ""}</span><ol>${trips}</ol></div>
     </div>` : `<div class="acct-today">
       <div class="acct-today-hero">
         <span class="acct-eyebrow">오늘 손익 · ${dayLab}</span>
         <div class="acct-figline"><div class="acct-figure ${acctTone(net)}" title="${escapeHtml(startTip)}">${acctSu(net)}</div><span class="acct-figpct ${acctTone(net)}" title="${escapeHtml(startTip)}">${acctPct(pct)}</span></div>
         <span class="acct-today-pct"><span class="muted">시작 ${fmtUsd(start)} → 지금 ${fmtUsd(equity)} 대비</span></span>
-        <dl class="acct-today-kv"><dt>실현 · ${tT.length}건${tT.length ? ` (승 ${wins} 패 ${tT.length - wins})` : ""}</dt><dd class="${acctTone(real)}">${acctSu(real)}</dd>
-          <dt>미실현${positions.length ? ` · ${positions.map((p) => `${p.side === "LONG" ? "롱" : "숏"} ${Number(p.qty)}`).join(", ")}` : ""}</dt><dd class="${acctTone(unreal)}">${acctSu(unreal)}</dd></dl>
+        <dl class="acct-today-kv">${incT ? `<dt>실현 <span class="acct-kv-sub">· 펀딩·수수료 포함</span></dt><dd class="${acctTone(realT)}" title="${escapeHtml(acctIncTip(incT))}">${acctSu(realT)}</dd>`
+            + `<dt>미실현 변화 <span class="acct-kv-sub">· ${unreal0 != null ? `0시 ${acctSu(unreal0)} → ` : ""}지금 ${acctSu(unreal)}</span></dt><dd class="${acctTone(unreal - (unreal0 ?? 0))}">${acctSu(unreal - (unreal0 ?? 0))}</dd>`
+          : `<dt>실현 · ${tT.length}건${tT.length ? ` (승 ${wins} 패 ${tT.length - wins})` : ""}</dt><dd class="${acctTone(real)}">${acctSu(real)}</dd>
+          <dt>미실현${positions.length ? ` · ${positions.map((p) => `${p.side === "LONG" ? "롱" : "숏"} ${Number(p.qty)}`).join(", ")}` : ""}</dt><dd class="${acctTone(unreal)}">${acctSu(unreal)}</dd>`}</dl>
       </div>
-      <div class="acct-today-flow">${acctTodaySvg(tT, unreal, positions.length > 0, t0, now, todayW, 120)}</div>
-      <div class="acct-today-trips"><span class="acct-eyebrow">오늘 닫힌 거래</span><ol>${trips}</ol></div>
+      <div class="acct-today-flow">${acctTodaySvg(tT, unreal, positions.length > 0, t0, now, todayW, 120)}${incT ? barNote(realT, real) : ""}</div>
+      <div class="acct-today-trips"><span class="acct-eyebrow">오늘 닫힌 거래${incT && tT.length ? ` · ${tT.length}건 (승 ${wins} 패 ${tT.length - wins})` : ""}</span><ol>${trips}</ol></div>
     </div>`;
   // 리뷰: 카드를 통째로 다시 쓰면(포지션이 있으면 폴링마다 -- 미실현이 바뀐다) 키보드로 고른 날·칩의 포커스가 <body> 로 떨어졌다 -- 같은 칸에 되돌린다
   const fa = document.activeElement, fAt = fa && fa.closest && fa.closest("#acctCard")
@@ -1387,15 +1413,19 @@ function renderSnapshotAccount() {
   // ── 아래: 달력 | 자산 곡선 ──
   const days = new Map();
   T.forEach((t) => { const k = acctKey(t.exit_time), o = days.get(k) || { pnl: 0, n: 0, trips: [] }; o.pnl += Number(t.net_pnl) || 0; o.n++; o.trips.push(t); days.set(k, o); });
+  // income 이 덮는 날 = 그날 지갑 입금으로 바꾼다(펀딩만 있는 날·부분 청산만 있는 날도 칸이 생긴다)
+  if (inc) { days.forEach((o, k) => { if (incOn(k)) { o.inc = inc[k] || {}; o.pnl = Number(o.inc.pnl) || 0; } });
+    Object.entries(inc).forEach(([k, o]) => { if (incOn(k) && !days.has(k) && Math.abs(Number(o.pnl) || 0) >= 0.005) days.set(k, { pnl: Number(o.pnl) || 0, n: 0, trips: [], inc: o }); }); }
   const ym = (() => { const d = new Date(t0 + ACCT_KST); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - acctCalBack); return d.toISOString().slice(0, 7); })();
-  const oldest = T.length ? acctKey(T[0].exit_time).slice(0, 7) : ym;
+  const oldest = [T.length ? acctKey(T[0].exit_time).slice(0, 7) : ym, ...(inc ? [A.income_from.slice(0, 7)] : [])].sort()[0];
   const cal = acctCalendar(days, ym, todayKey, selKey, walletAt);
   const calHtml = `<div class="acct-cal-box">
       <div class="acct-cal-head"><button type="button" class="chip" data-acct-month="1" ${ym <= oldest ? "disabled" : ""} aria-label="지난달">‹</button>
         <b>${ym.slice(0, 4)}년 ${+ym.slice(5)}월</b><button type="button" class="chip" data-acct-month="-1" ${acctCalBack ? "" : "disabled"} aria-label="다음 달">›</button>
-        <span class="muted">이익일 ${cal.wd} · 손실일 ${cal.ld} · <b class="${acctTone(cal.mo)}">${acctSu(cal.mo)}</b> <b class="${acctTone(cal.mo)}" title="그달 1일 지갑(추정) 대비">${acctPct(cal.moPct)}</b></span></div>
+        <span class="muted">이익일 ${cal.wd} · 손실일 ${cal.ld} · <b class="${acctTone(cal.mo)}">${acctSu(cal.mo)}</b> <b class="${acctTone(cal.mo)}" title="${inc ? "그달 1일 지갑 + 그달 입금 대비" : "그달 1일 지갑(추정) 대비"}">${acctPct(cal.moPct)}</b></span></div>
       ${cal.html}
-      ${T.length && ym <= oldest ? `<p class="acct-foot muted">원장은 ${acctMd(T[0].exit_time)}부터입니다(서버 꼬리 최근 400왕복).</p>` : ""}
+      ${inc && ym <= A.income_from.slice(0, 7) ? `<p class="acct-foot muted">칸 = 그날 지갑에 들어온 실현+펀딩+수수료 · ${acctMd(incCut)}부터(바이낸스 기록은 최근 3개월)${T.length && T[0].exit_time < incCut ? ` · 그 앞은 닫힌 거래 왕복 합` : ""}</p>`
+        : T.length && ym <= oldest ? `<p class="acct-foot muted">원장은 ${acctMd(T[0].exit_time)}부터입니다(서버 꼬리 최근 400왕복).</p>` : ""}
     </div>`;
   const spanDays = ACCT_SPANS[acctSpanIdx][1];
   const from = spanDays === 0 ? t0 : spanDays > 0 ? now - spanDays * ACCT_DAY : 0;
