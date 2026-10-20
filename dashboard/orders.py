@@ -715,7 +715,10 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if not isinstance(payload, dict):
             return payload
         armed = {k: {f: v.get(f) for f in ("sl_price", "sl_name", "sl_off", "rule")} for k, v in bracket_load().items()}
-        return {**payload, "bracket_armed": armed}
+        # 2026-10-20 두 코인 보유(사용자): 손절 무장이 없는 열린 포지션 -- 화면이 «손절 없음»을 크게 말한다(10-20 XRP 가 조용히 무방비였다)
+        unprotected = [k for k in (bracket_key(p.get("symbol"), str(p.get("side")).upper()) for p in payload.get("positions") or []
+                                   if float(p.get("qty") or 0)) if not (armed.get(k) or {}).get("sl_price")]
+        return {**payload, "bracket_armed": armed, "unprotected": unprotected}
 
     def effective_cap(sizing: dict[str, Any], equity: float,
                       safe_mae_pct: float | None) -> tuple[float | None, str | None, dict]:
@@ -806,13 +809,18 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
 
     SLTP_OFF_BRACKET = {"available": False, "disabled": True, "reason": "SL/TP 끔(사용자) -- 걸지 않고 기존 것도 그대로"}
 
+    def sltp_off_bracket(plan: dict) -> dict:
+        """SL/TP 끔 -- 이 측면에 무장된 손절이 없으면 «unprotected»(화면이 빨갛게: 거래소 스탑·서버 감시 둘 다 없는 포지션이 생긴다)."""
+        armed = (bracket_load().get(bracket_key(plan.get("symbol"), plan.get("positionSide"))) or {}).get("sl_price")
+        return {**SLTP_OFF_BRACKET, "unprotected": not armed}
+
     async def entry_then_bracket(plan: dict, state: dict, wait_sec: float | None = None) -> None:
         """진입 → 체결이 있으면(부분 포함, 모든 종료 경로) TP·비상 스탑을 걸고 감시를 무장한다.
         wait_sec(2026-10-10 «기다리기»)면 첫 체결을 본 순간 한 번 더 건다 -- 60분 동안 든 몫을 무방비로 두지 않는다."""
         if wait_sec:
             async def first_fill() -> None:
                 try:
-                    await arm_bracket(plan, state)
+                    await arm_bracket(plan, state, add=False)   # 2026-10-20 첫 부분 체결로 물타기 크기를 재면 남은 여유 거의 전부가 걸린다
                 except Exception as exc:  # noqa: BLE001 -- 대기는 계속(마감 때 다시 건다)
                     state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
             await settle(run_entry_wait(binance_session(), plan, state, wait_sec, on_fill=first_fill), state)
@@ -829,7 +837,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             state.update(phase="error", error=f"집행 오류 {type(exc).__name__}: {exc} — 거래소에서 직접 확인하세요",
                          done_at=datetime.now(timezone.utc).isoformat())
 
-    async def arm_bracket(plan: dict, state: dict) -> None:
+    async def arm_bracket(plan: dict, state: dict, add: bool = True) -> None:
         b, pside = plan.get("bracket") or {}, plan["positionSide"]
         if b.get("disabled"):
             # 🔴주문도, 감시 파일(manual_bracket_state.json)도 건드리지 않는다 -- 물타기면 기존 SL/TP·감시가 그대로 남는다.
@@ -838,13 +846,13 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if not b.get("available"):
             state["bracket"] = {"placed": False, "reason": b.get("reason") or "청산맵 레벨 없음"}
             return
-        if REC_AUTO_ADD and (plan.get("rule") or {}).get("first"):
+        if add and REC_AUTO_ADD and (plan.get("rule") or {}).get("first"):
             state["add_order"] = {"placed": False, "pending": True}   # 화면 폴링이 물타기 지정가 결과까지 기다리게(손절 먼저 건 뒤 arm_rule_add)
         try:
             state["bracket"] = await place_bracket(binance_session(), b, plan["symbol"], pside)
         except Exception as exc:  # noqa: BLE001 -- 결과 칸은 반드시 채운다(화면 폴링이 이걸 기다린다)
             state["bracket"] = {"placed": False, "reason": f"{type(exc).__name__}: {exc}"}
-        add = await arm_rule_add(plan, state)
+        add = await arm_rule_add(plan, state) if add else None
         st = bracket_load()
         st[bracket_key(plan["symbol"], pside)] = {"symbol": plan["symbol"], "side": pside, "sl_price": b.get("sl_price"),
                      "sl_level": b.get("sl_level"),   # 5분봉 종가 판정은 USDT 레벨로(bracket_sl_hit)
@@ -942,7 +950,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 print(f"bracket {pside}: 5분봉 못 읽음 {type(exc).__name__}: {exc}", flush=True)
             act = bracket_action(b, pside, account.get("positions") or [], bool(account.get("ok")),
                                  acct_ts, last_bar)
-            if act in ("clear", "fire") and wait_pending() and manual_wait_state.get("side") == pside:
+            if (act in ("clear", "fire") and wait_pending() and manual_wait_state.get("side") == pside
+                    and (manual_wait_state.get("plan") or {}).get("symbol") == b["symbol"]):   # 2026-10-20 다른 코인 대기는 두다
                 # 2026-10-10 손절·청산으로 포지션이 닫히는데 같은 쪽 대기 진입이 걸려 있으면 그것도 거둔다(나중에 체결돼 손절 없이 다시 열리지 않게)
                 manual_wait_state.update(action="cancel", action_reason="포지션이 닫힘(손절·청산) — 같은 쪽 대기 진입 취소")
             if act == "clear":
@@ -978,7 +987,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 continue
             manual_entry_state.clear()
             manual_entry_state.update(phase="submitting", kind="exit", trigger="bracket_sl",
-                                      side=pside, plan=plan,
+                                      side=pside, plan=plan, asset=exec_asset_of(b["symbol"]) or "eth",
                                       started_at=datetime.now(timezone.utc).isoformat())
             await settle(run_exit(binance_session(), plan, manual_entry_state), manual_entry_state)
             # 🔴다 닫혔을 때만 비상 스탑을 지운다 -- 청산이 실패했는데 지우면 무방비가 된다.
@@ -1056,6 +1065,11 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             #   동안 상한이 그만큼 헐거워진다. 위 `existing`(이 심볼)은 아래 청산거리 투영에만
             #   쓴다 -- 그 계산은 심볼 안에서만 성립한다(liq_after = liq_before × existing/total).
             exposure = notional_sum(account.get("positions"))
+            # 2026-10-20 두 코인 보유: **다른 심볼**에 걸린 늘리는 지정가(자동 물타기 dbad 등, reduce-only 아님)는 체결되면 같은 증거금을 먹는다 --
+            #   상한 여유에서 미리 뺀다(10-20 감사: ETH 물타기 지정가 ~$7.4k 가 XRP 진입 뒤에도 그 크기로 남았다).
+            #   ponytail: clientOrderId 없이 심볼로만 가른다 -- 같은 심볼의 걸린 지정가는 새 진입의 place_bracket 이 지우는 몫이라 뺀다.
+            exposure += sum(abs(float(o.get("price") or 0) * float(o.get("qty") or 0)) for o in account.get("open_orders") or []
+                            if o.get("symbol") != symbol and not o.get("reduce_only"))
             # 추가 진입 맥락은 **같은 방향**만 본다 -- 헤지 모드에서 반대 다리는 다른 결정이다.
             same = [p for p in positions if p.get("side") == side]
             same_unrealized = sum(float(p.get("unrealized_pnl") or 0.0) for p in same)
@@ -1287,7 +1301,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if sltp_off(request) and not plan.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(보험)
-            plan["bracket"] = dict(SLTP_OFF_BRACKET)
+            plan["bracket"] = sltp_off_bracket(plan)
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
                                   "recommended_qty": plan.get("recommended_qty"),
                                   "recommended_source": plan.get("recommended_source"),
@@ -1348,7 +1362,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
         if sltp_off(request) and not plan.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(보험)
-            plan["bracket"] = dict(SLTP_OFF_BRACKET)
+            plan["bracket"] = sltp_off_bracket(plan)
         if wait_min:
             manual_wait_state.clear()
             manual_wait_state.update(phase="submitting", mode="wait", wait_min=wait_min, side=side, plan=plan,

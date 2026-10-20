@@ -180,7 +180,7 @@ async def cancel_bracket(session, symbol: str, pside: str, key: str, secret: str
     if not isinstance(algos, list):
         errors.append(f"openAlgoOrders: {algos.get('__error__') if isinstance(algos, dict) else algos}")
     for a in algos if isinstance(algos, list) else []:
-        if str(a.get("clientAlgoId") or "").startswith(sl_pre):
+        if str(a.get("clientAlgoId") or "").startswith(sl_pre) and a.get("symbol", symbol) == symbol:   # 2026-10-20 두 코인 보유: 다른 코인 스탑은 절대 안 지운다
             r = await signed(session, "DELETE", "/fapi/v1/algoOrder",
                              {"algoId": a.get("algoId")}, key, secret, offset)
             n, errors = (n + 1, errors) if "__error__" not in r else (n, errors + [r["__error__"]])

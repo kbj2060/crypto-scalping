@@ -1359,6 +1359,7 @@ function renderSnapshotAccount() {
     const oo = (A.open_orders || []).filter((o) => o.symbol === p.symbol);
     return `<div class="acct-posline"><span class="acct-side ${long ? "good" : "bad"}">${long ? "롱" : "숏"} ×${Number(p.leverage) || "?"}</span>
       <span>${escapeHtml(p.symbol)} <b>${Number(p.qty)}</b></span><span>진입 <b>${acctPx(p.entry_price)}</b> → <b>${acctPx(mk)}</b></span>
+      ${(A.unprotected || []).includes(`${p.symbol}:${String(p.side).toUpperCase()}`) ? `<span class="bad" title="거래소 스탑도 서버 5분봉 감시도 없습니다">🔴손절 없음</span>` : ""}
       ${liqD != null ? `<span>청산 <b>${acctPx(liq)}</b> <em class="${liqD < 3 ? "bad" : liqD < 6 ? "warn" : ""}">(${liqD.toFixed(1)}% 남음)</em></span>` : ""}
       <span>노출 <b>${equity > 0 ? (Math.abs(Number(p.notional) || 0) / equity).toFixed(1) : "—"}배</b></span>
       <span>미실현 <b class="${acctTone(Number(p.unrealized_pnl))}">${acctSu(Number(p.unrealized_pnl) || 0)}</b></span>
@@ -8587,7 +8588,9 @@ function manualEntryPlanHtml(data) {
   //   행동을 바꾸는 값이다. 못 거는 경우도 반드시 말한다(옛 손절은 조용히 안 걸려 있었다).
   const br = plan.bracket;
   if (br && br.disabled) {
-    parts.push(entryNote("SL/TP 끔 — 이번 진입에 TP·비상 스탑을 걸지 않고 SL 감시도 하지 않습니다. 이미 걸린 SL/TP 는 그대로 둡니다."));
+    parts.push(br.unprotected   // 2026-10-20 이 측면에 무장된 손절이 없다 -- 넣으면 거래소 스탑도 서버 감시도 없는 포지션(10-20 XRP)
+      ? entryNote("🔴SL/TP 끔 — 이 포지션엔 손절이 하나도 없습니다(거래소 스탑·서버 5분봉 감시 둘 다 없음). 교차 마진이라 크게 빠지면 다른 코인 증거금까지 깎입니다. 손절을 걸려면 SL/TP 를 켜세요.", "bad")
+      : entryNote("SL/TP 끔 — 이번 진입에 TP·비상 스탑을 걸지 않고 SL 감시도 하지 않습니다. 이미 걸린 SL/TP 는 그대로 둡니다."));
   } else if (br && br.available) {
     const f = acctPx;
     const pc = (v) => (v > 0 ? "+" : "") + Number(v).toFixed(1) + "%";
@@ -9247,7 +9250,7 @@ function manualEntryStateText(state) {
     const leg = (name, x) => !x ? "" : x.placed ? `${name} ${x.price} 걸림` : `🔴${name} 실패 (${x.error || "?"})`;
     rows.push([leg("TP", br.tp), leg("비상 스탑", br.backstop)].filter(Boolean).join(" · "));
   } else if (br && br.disabled) {
-    rows.push("SL/TP 끔 — 걸지 않았습니다(기존 SL/TP 는 그대로)");
+    rows.push(br.unprotected ? "🔴SL/TP 끔 — 이 포지션엔 손절이 없습니다(거래소 스탑·서버 감시 없음)" : "SL/TP 끔 — 걸지 않았습니다(기존 SL/TP 는 그대로)");
   } else if (state?.trigger === "bracket_sl") {
     rows.push("SL 이탈 — 메이커 추격 청산");
   } else if (filledQty > 0 && state?.kind !== "exit" && !br && /^filled|failed|error|rejected|cancelled/.test(state?.phase || "")) {
@@ -9287,6 +9290,18 @@ function renderOfabSl(p) {
   if (!chip || !box) return;
   const k = p && Number(p.qty) ? `${p.symbol}:${String(p.side).toUpperCase()}` : null;
   const ba = k ? (latestBinanceAccount?.bracket_armed || {})[k] : null;
+  if (k && !(ba && ba.sl_price)) {   // 2026-10-20 무장 없는 열린 포지션 = «손절 없음»(옛 판은 칩을 숨겨 조용히 무방비였다)
+    chip.hidden = box.hidden = false;
+    chip.className = "ofab-sl off none"; chip.disabled = true; delete chip.dataset.slAct; chip.dataset.slKey = k;
+    chip.title = "손절 없음 — 이 포지션엔 거래소 스탑도 서버 5분봉 감시도 없습니다(SL/TP 를 켜고 진입하거나 바이낸스에서 직접 거세요)";
+    chip.setAttribute("aria-label", chip.title);
+    chip.innerHTML = `${SL_ICO_OFF}<span>손절 없음</span>`;
+    box.className = "ofab-slp off";
+    box.innerHTML = `<div class="ofab-slp-head">${SL_ICO_OFF}<span>손절</span><b>없음</b><em>무장 안 됨</em></div>`
+      + `<div class="ofab-slp-layers"><span><i></i>거래소 스탑 없음</span><span><i></i>서버 5분봉 감시 없음</span></div>`;
+    return;
+  }
+  chip.disabled = false;
   chip.hidden = box.hidden = !ba || !ba.sl_price;
   if (chip.hidden) return;
   // 2026-10-15 사용자 «다시 누르면 다시 손절을 켜도록» -- 꺼진 상태도 같은 두 번 누름으로 켠다(act = 누르면 할 일).
@@ -9826,9 +9841,15 @@ function ofabSetOpen(open) {
 
 // 2026-09-28 사용자 지시: 펼치면 **진입 비율 5% · SL/TP 해제**가 기본. 체크는 저장하지 않는다(카드의 기억된 선택은 그대로 --
 //   다음에 카드에서 새로고침하면 기억값으로 돌아간다). 비율은 input 을 쏴서 칩·글자·크기 재조회가 평소 경로로 따라오게 한다.
+// 2026-10-20 사용자 «2개 자산 동시 소유» 점검: 옛 판은 패널을 열거나 꾹 진입만 해도 SL/TP 를 껐다 -- 손절 없는 XRP 신규 진입이 그렇게 났다.
+//   «SL/TP 해제»는 이 코인 포지션에 이미 손절이 무장돼 있을 때(물타기가 그 손절을 그대로 두게)만. 아니면 켠다(새 포지션·무방비 포지션).
+function slArmedFor(p) {
+  const ba = p && Number(p.qty) ? (latestBinanceAccount?.bracket_armed || {})[`${p.symbol}:${String(p.side).toUpperCase()}`] : null;
+  return !!(ba && ba.sl_price && !ba.sl_off);
+}
 function ofabApplyDefaults() {
   const fr = el("snapEntryFrac"), sl = el("snapSltp");
-  if (sl) sl.checked = false;
+  if (sl) sl.checked = !slArmedFor(snapshotAccountPosition());
   if (fr) { fr.value = "5"; fr.dispatchEvent(new Event("input", { bubbles: true })); }
 }
 // 2026-09-28 사용자 지시: 버튼을 2초 꾹 누르면 **지금 포지션 방향으로 바로 추가 진입**(5% · SL/TP 해제). 마우스만 -- 터치(모바일)는 없다.

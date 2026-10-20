@@ -234,6 +234,35 @@ class RecRuleEntryTest(unittest.TestCase):
         self._run(account([]), fn)
 
 
+    def test_other_symbol_resting_order_reduces_room(self) -> None:
+        """2026-10-20 두 코인 보유: 다른 심볼에 걸린 늘리는 지정가(자동 물타기 dbad)는 상한 여유에서 뺀다 · reduce-only 는 안 뺀다."""
+        acct = account([])
+        acct["open_orders"] = [{"symbol": "XRPUSDC", "side": "BUY", "price": 1.0, "qty": 1000.0, "reduce_only": False},
+                               {"symbol": "XRPUSDC", "side": "SELL", "price": 2.0, "qty": 250.0, "reduce_only": True}]
+        async def fn(c):
+            j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")).json()
+            self.assertTrue(j.get("ok"), j)
+            self.assertAlmostEqual(j["plan"]["rule"]["room"], 1000 * L - 1000.0, delta=0.01)
+        self._run(acct, fn)
+
+    def test_sltp_off_marks_unprotected_and_account_lists_it(self) -> None:
+        """2026-10-20 XRP 무방비 사고: SL/TP 끔 진입이 손절 없는 포지션을 만들면 unprotected · 계좌 payload 에 무장 없는 포지션 키."""
+        async def fn(c):
+            j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=5&sltp=0")).json()
+            self.assertTrue(j.get("ok"), j)
+            self.assertTrue(j["plan"]["bracket"]["disabled"] and j["plan"]["bracket"]["unprotected"], j["plan"]["bracket"])
+            a = await (await c.get("/api/binance-account")).json()
+            self.assertEqual(a.get("unprotected"), [f"{SYM}:LONG"], a.get("unprotected"))
+        self._run(account([long_pos(0.4, 2500.0)]), fn)
+
+        async def fn2(c):
+            j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=5&sltp=0")).json()
+            self.assertFalse(j["plan"]["bracket"]["unprotected"], j["plan"]["bracket"])
+            self.assertEqual((await (await c.get("/api/binance-account")).json()).get("unprotected"), [])
+        self._run(account([long_pos(0.4, 2500.0)]), fn2,
+                  armed={f"{SYM}:LONG": {"symbol": SYM, "side": "LONG", "sl_price": 2300.0, "backstop_price": 2300.0, "armed_at": 1.0}})
+
+
 class ManualModeTest(unittest.TestCase):
     """2026-10-09 «규칙 모두 제거해 수동으로»: 커밋 기본값(MANUAL_RULES_ENABLED False · 증거금 상한 0) 그대로 --
     큰 기존 포지션이 있어도 상한으로 안 막히고, SL/TP 는 안 걸리고, rule=c 는 400."""
