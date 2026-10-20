@@ -23,7 +23,7 @@ ns = {"Any": object, "web": web, "json": json, "asyncio": asyncio, "time": time,
       "SUPPLY_1S_SECONDS": 660, "RETAIL_MAX_USD": 1e4, "WHALE_MIN_USD": 1e5, "FOOTPRINT_SYMBOL": "ETHUSDT",
       "OKX_INST": "ETH-USDT-SWAP", "SITUATION_HORIZON_S": 1800, "fo_state": {}, "mp_state": {},
       "situation_state": {"log": [], "now": {"ok": True}, "computed_at": 1.0},
-      "situation_by": {},
+      "situation_by": {}, "REPO_ROOT": Path("."),
       "sit": type("S", (), {"calibration": staticmethod(lambda log, h: {})})}
 # 2026-09-26 코인별 흐름 엔진: 수급은 `?asset=` 의 엔진을 본다(기본 ETH). 위 값들을 ETH 엔진으로 묶는다.
 from types import SimpleNamespace  # noqa: E402

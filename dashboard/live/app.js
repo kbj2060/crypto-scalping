@@ -3508,14 +3508,15 @@ async function refreshTrend() {
 let latestIceberg = null, icebergLastFetchAt = 0;
 async function refreshIceberg() {
   renderIceChip();
-  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  const asset = activeSnapshotAsset;   // 2026-10-20 XRP 판(ICEBERG_SYMBOL=XRPUSDT) -- 코인이 바뀌면 30초를 기다리지 않고 다시 받는다
+  if (activePageTab !== "snapshot" || document.hidden || (asset !== "eth" && asset !== "xrp")) return;
   const now = Date.now();
-  if (now - icebergLastFetchAt < 30000) return;
+  if (now - icebergLastFetchAt < 30000 && latestIceberg && latestIceberg._asset === asset) return;
   icebergLastFetchAt = now;
   try {
-    const res = await fetch("/api/iceberg", { cache: "no-cache" });
+    const res = await fetch(`/api/iceberg?asset=${asset}`, { cache: "no-cache" });
     latestIceberg = res.ok ? await res.json() : { ok: false, reason: `HTTP ${res.status}` };
-    latestIceberg._at = Date.now();   // 10-17 리뷰: 받아오기가 멈추면(SOL·운영 탭·숨은 창) 마지막 값이 «검증 중»으로 남던 것
+    latestIceberg._at = Date.now(); latestIceberg._asset = asset;   // 10-17 리뷰: 받아오기가 멈추면(SOL·운영 탭·숨은 창) 마지막 값이 «검증 중»으로 남던 것
   } catch (error) {
     latestIceberg = { ok: false, reason: "fetch_failed" };
   }
@@ -3529,7 +3530,10 @@ function renderIceChip() {
   const age = g.ok ? g.age_s + (Date.now() - (g._at || Date.now())) / 1000 : 0;
   const stale = !g.ok || age > 120, n = g.ok ? g.n : 0, target = g.ok ? g.target : 150, pct = Math.min(100, Math.round(n / target * 100));
   c.classList.toggle("stale", stale);
-  const html = `<div class="nc-ice-row"><strong>칸별 아이스버그</strong><span class="nc-ice-st">${stale ? "멈춤" : "검증 중"}</span><b>${n}/${target}</b></div>`
+  const html = g.ok && target == null   // 2026-10-20 XRP = 사전등록 없음(표시 전용) -- 검증 막대 대신 24시간 건수
+    ? `<div class="nc-ice-row"><strong>칸별 아이스버그 · XRP</strong><span class="nc-ice-st">${stale ? "멈춤" : "표시 전용"}</span><b>24h ${g.events.length}건</b></div>`
+      + `<p class="nc-hint">ETH 와 같은 정의를 XRP 0.0001 칸(1틱)에 적용 · 사전등록·판정 없음 · 신호·알림 아님.</p>`
+    : `<div class="nc-ice-row"><strong>칸별 아이스버그</strong><span class="nc-ice-st">${stale ? "멈춤" : "검증 중"}</span><b>${n}/${target}</b></div>`
     + `<span class="nc-ice-bar" aria-hidden="true"><i style="width:${pct}%"></i></span>`
     + `<p class="nc-hint">같은 $0.1 칸에서 30초 동안 보이던 잔량의 2배 넘게 체결됐는데 칸이 버티고 다시 채워진 사건. 연구 28일 23건 · 15분 +7.6bp[2.6, 15.0] — `
     + `2026-10-16부터 ${target}건 모이면 판정합니다. 신호·알림 아님 · 풋프린트 육각형 = 최근 24시간 사건(초록 = 숨은 매수 · 빨강 = 숨은 매도).</p>`
@@ -3538,7 +3542,7 @@ function renderIceChip() {
 }
 // 풋프린트 위 육각형(renderCandleSvg 끝에서) -- 창 가운데 시각 · 그 칸 가격. 이름표는 가장 최근 하나만.
 function iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS) {
-  const ev = latestIceberg?.ok ? latestIceberg.events : [];
+  const ev = latestIceberg?.ok && latestIceberg._asset === activeSnapshotAsset ? latestIceberg.events : [];
   const bar = candles[1].time - candles[0].time, t1 = candles[candles.length - 1].time + bar;
   const hits = ev.filter((e) => e.t_end - 15 >= candles[0].time && e.t_end - 15 < t1 && e.px >= yMin && e.px <= yMax);
   if (!hits.length) return;
@@ -7956,7 +7960,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     supply1sSubBox = null;
     subPanelCache.s1.key = subPanelCache.dens.key = "";
   }
-  if (footprint && svg.id === "candleSvgSnapshot" && activeSnapshotAsset === "eth" && candles.length > 1) iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS);   // 2026-10-16 시안 ①
+  if (footprint && svg.id === "candleSvgSnapshot" && (activeSnapshotAsset === "eth" || activeSnapshotAsset === "xrp") && candles.length > 1) iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS);   // 2026-10-16 시안 ①
   if (wallTagsG) svg.appendChild(wallTagsG);   // 2026-10-06 호가벽 경계 꼬리표(위 G 블록) -- 호가 띠 위에
   if (boxColG) svg.appendChild(boxColG);       // 2026-10-17 ETH 는 그 자리에 박스 경계선
   { const mn = mobileChart && svg.id === "candleSvgSnapshot" ? svg.querySelector('[data-live="label"][data-with-price="num"]') : null;

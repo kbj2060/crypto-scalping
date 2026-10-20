@@ -7,10 +7,14 @@
   ③ 청산(바이낸스 강제주문, long = 롱 포지션 청산) — lake + hot liquidations. 수집 시작(2026-09-20) 전은 «모름»(None),
      시작이 걸친 날은 반쪽(part=2).
 가격 칸 = $1(테이프 0.1 칸을 내림으로 묶음). 화면 행 크기는 ?row= 달러로 서버가 묶는다.
+2026-10-20 XRP: for_asset("xrp") = 같은 코드의 코인별 사본(칸 CELL 0.0005 ≈ 3.5bp @ $1.4 -- ETH $1 ≈ 4bp @ $2.5k 와 같은 상대 폭 ·
+  테이프 칸 0.0001 의 5배라 정수 나눗셈으로 묶음). 저장 bin = floor(가격 / CELL) 정수 번호 · 응답 가격·?row= 는 달러.
 닫힌 날은 한 번 계산해 캐시(봉인일은 안 바뀐다), 오늘만 TODAY_TTL 로 다시 센다.
 """
 from __future__ import annotations
 
+import importlib.util
+import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -22,7 +26,11 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 HIST_DIR = ROOT / "data" / "footprint_daily"
-SYMBOL, COIN, TAPE_BUCKET = "ETHUSDT", "ETH", 0.1
+# 코인 -> (선물 심볼, 테이프 칸 = 수집기 BUCKETS, 일봉 칸 CELL, 응답 가격 자릿수)
+ASSETS = {"eth": ("ETHUSDT", 0.1, 1.0, 4), "xrp": ("XRPUSDT", 0.0001, 0.0005, 6)}
+_ASSET = globals().get("_ASSET", "eth")      # for_asset 가 사본에 미리 심는다
+SYMBOL, TAPE_BUCKET, CELL, PRICE_DP = ASSETS[_ASSET]
+COIN, TAPE_PER_CELL = SYMBOL[:-4], round(CELL / TAPE_BUCKET)
 HOT_SYM = SYMBOL.lower()     # 🔴hot 의 trade_tape_1s·oi_1s 는 소문자(ethusdt), liquidations 만 대문자(10-08 배포 직후 실측 -- 대문자로 물으면 빈 결과)
 MAX_CELL_DAYS = 400          # 한 요청에 칸을 줄 최대 일수(확대 상태에선 화면이 ~100일을 넘지 않는다)
 TODAY_TTL = 30.0
@@ -34,6 +42,18 @@ _recent: dict[str, Any] = {"days": {}, "cells": {}}      # 날짜 문자열 -> �
 _today: dict[str, Any] = {"at": 0.0, "day": None, "summ": None, "cells": None}
 _ctx_lake: dict[str, Any] = {"at": 0.0, "key": None, "val": None}     # lake(봉인일) OI·청산 -- 1시간 캐시
 CTX_LAKE_TTL = 3600.0
+
+
+def for_asset(asset: str):
+    """코인별 모듈. 캐시(_hist·_recent·_today·_h4·_heat …)가 모듈 전역이라 코인마다 따로 싣는다 -- eth = 이 모듈.
+    ponytail: 모듈 사본 = 상태를 DailyFootprint 인스턴스로 옮기는 리팩터 대신. 코인이 3개를 넘거나 상태가 더 늘면 그쪽으로."""
+    if asset == _ASSET:
+        return sys.modules[__name__]
+    spec = importlib.util.spec_from_file_location(f"{__name__}__{asset}", __file__)
+    m = importlib.util.module_from_spec(spec)
+    m._ASSET = asset
+    spec.loader.exec_module(m)
+    return m
 
 
 def _ds(d) -> str:
@@ -63,7 +83,7 @@ def load_hist(hist_dir: Path = HIST_DIR) -> tuple[pd.DataFrame | None, dict]:
 
 
 def day_from_tape(sec: np.ndarray, pbin: np.ndarray, buy: np.ndarray, sell: np.ndarray) -> tuple[dict, tuple]:
-    """한 날의 테이프 행(초, 0.1 칸, 매수, 매도) → (일 요약, $1 칸). 시가·종가 = 첫·끝 초의 VWAP, 고저 = 체결 칸 극값."""
+    """한 날의 테이프 행(초, 테이프 칸, 매수, 매도) → (일 요약, CELL 칸). 시가·종가 = 첫·끝 초의 VWAP, 고저 = 체결 칸 극값."""
     px = pbin.astype(float) * TAPE_BUCKET
     q = buy + sell
     o = np.argsort(sec, kind="stable")
@@ -73,7 +93,7 @@ def day_from_tape(sec: np.ndarray, pbin: np.ndarray, buy: np.ndarray, sell: np.n
     summ = {"open": vw(first), "close": vw(last), "high": float(px[has].max()), "low": float(px[has].min()),
             "buy_qty": float(buy.sum()), "sell_qty": float(sell.sum()),
             "buy_quote": float((buy * px).sum()), "sell_quote": float((sell * px).sum())}
-    b = np.floor(px + 1e-9).astype(np.int64)          # 0.1×k 가 부동소수로 k/10 아래로 새는 것 막음
+    b = np.floor_divide(pbin.astype(np.int64)[o], TAPE_PER_CELL)   # 정수 나눗셈 -- 부동소수 경계 새는 것 없음(ETH = 옛 floor(px+1e-9) 와 같다)
     s = pd.DataFrame({"b": b, "buy": buy, "sell": sell}).groupby("b", sort=True).sum()
     return summ, (s.index.to_numpy(np.int64), s.buy.to_numpy(float), s.sell.to_numpy(float))
 
@@ -167,14 +187,14 @@ def build_days(hist_days: pd.DataFrame | None, recent: dict[str, dict], oi: dict
 
 
 def rebin(bins: np.ndarray, buy: np.ndarray, sell: np.ndarray, row: int) -> list:
-    """$1 칸 → row 달러 칸. [첫 칸 하한, [매수…], [매도…]] (빈 칸 0 채움)."""
+    """CELL 칸 → row 칸(CELL 단위 정수). [첫 칸 하한($), [매수…], [매도…]] (빈 칸 0 채움)."""
     if not len(bins):
         return [0, [], []]
     k = np.floor_divide(bins, row)
     lo, n = int(k.min()), int(k.max() - k.min() + 1)
     bb, ss = np.zeros(n), np.zeros(n)
     np.add.at(bb, k - lo, buy); np.add.at(ss, k - lo, sell)
-    return [lo * row, np.round(bb, 3).tolist(), np.round(ss, 3).tolist()]
+    return [round(lo * row * CELL, PRICE_DP), np.round(bb, 3).tolist(), np.round(ss, 3).tolist()]
 
 
 # ── 4시간봉 풋프린트 (2026-10-20 사용자 «4h 버튼 = 1주일 데이터를 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로») ───────
@@ -306,7 +326,7 @@ class DailyFootprint:
         for k in have:
             c = hist_cells.get(k)
             out[k] = rebin(*(c if c is not None else recent_cells[k]), row)
-        return {"row": row, "cells": out}
+        return {"row": round(row * CELL, PRICE_DP), "cells": out}
 
     def _h4(self, now: float) -> tuple[dict[str, tuple[dict, tuple]], str]:
         """지난 H4_DAYS 일의 4시간 칸 + 형성 중 칸. 반환 (키 → (요약, $1 칸), 형성 중 키)."""
@@ -355,7 +375,7 @@ class DailyFootprint:
 
     def h4_cells_payload(self, now: float, frm: str, to: str, row: int) -> dict:
         b, _ = self._h4(now)
-        return {"row": row, "cells": {k: rebin(*v[1], row) for k, v in b.items() if frm <= k <= to}}
+        return {"row": round(row * CELL, PRICE_DP), "cells": {k: rebin(*v[1], row) for k, v in b.items() if frm <= k <= to}}
 
 
 HEAT_LOOKBACK_H = 168     # 일봉 청산 히트맵 입력 창(7일 1시간봉) -- 라이브 5분 화면은 24h, 일봉 한 칸이 24h 라 7일로
@@ -390,23 +410,24 @@ def heat_at(k1h: pd.DataFrame, end: pd.Timestamp) -> list[tuple[float, float, fl
     for side in sides:
         mx = max(side.values(), default=0.0)
         if mx > 0:
-            out += [(round(b * bw, 4), round(w / mx, 4), w / tot) for b, w in side.items() if w > 0]
+            out += [(round(b * bw, PRICE_DP), round(w / mx, 4), w / tot) for b, w in side.items() if w > 0]
     return sorted(out)
 
 
 def rebin_heat(price: np.ndarray, w: np.ndarray, row: int, s: np.ndarray | None = None) -> list:
-    """히트맵 칸 → row 달러 칸. [첫 칸 하한, [칸 안 최대 w…], [칸 안 몫 합 s…]] (s 가 없으면 둘째 목록까지)."""
+    """히트맵 칸 → row 칸(CELL 단위). [첫 칸 하한($), [칸 안 최대 w…], [칸 안 몫 합 s…]] (s 가 없으면 둘째 목록까지)."""
     if not len(price):
         return [0, []] if s is None else [0, [], []]
-    k = np.floor_divide(price, row).astype(np.int64)
+    k = np.floor(np.asarray(price, float) / (row * CELL) + 1e-9).astype(np.int64)
     lo, n = int(k.min()), int(k.max() - k.min() + 1)
     out = np.zeros(n)
     np.maximum.at(out, k - lo, w)
+    lo_px = round(lo * row * CELL, PRICE_DP)
     if s is None:
-        return [lo * row, np.round(out, 3).tolist()]
+        return [lo_px, np.round(out, 3).tolist()]
     sm = np.zeros(n)
     np.add.at(sm, k - lo, s)
-    return [lo * row, np.round(out, 3).tolist(), [float(f"{v:.4g}") for v in sm]]
+    return [lo_px, np.round(out, 3).tolist(), [float(f"{v:.4g}") for v in sm]]
 
 
 _heat: dict[str, Any] = {"mtime": None, "by": {}, "until": None, "recent": {}}
@@ -462,7 +483,7 @@ def heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None = 
                         _heat["recent"][key] = c
         if c is not None and len(c[0]):
             out[key] = rebin_heat(c[0], c[1], row, c[2])
-    return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H, "until": until}
+    return {"row": round(row * CELL, PRICE_DP), "heat": out, "lookback_h": HEAT_LOOKBACK_H, "until": until}
 
 
 def h4_heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None = None) -> dict:
@@ -474,7 +495,7 @@ def h4_heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None
     k = klines_1h(raw_1h, now)
     out: dict[str, list] = {}
     if k is None or not len(k):
-        return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H}
+        return {"row": round(row * CELL, PRICE_DP), "heat": out, "lookback_h": HEAT_LOOKBACK_H}
     last_end = k.timestamp.iloc[-1] + pd.Timedelta(hours=1)
     for t in range(t0, t1 + 1, H4_SEC):
         key, bend = h4_key(t), pd.Timestamp(t + H4_SEC, unit="s", tz="UTC")
@@ -489,7 +510,7 @@ def h4_heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None
             out[key] = rebin_heat(c[0], c[1], row, c[2])
     for old in [x for x in list(_h4_heat) if x < h4_key(now - (H4_DAYS + 2) * 86400)]:
         _h4_heat.pop(old, None)             # 리뷰: to_thread 요청이 겹쳐 돈다 -- list() 로 떠서 지우고, 이미 지워졌으면 그냥 간다
-    return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H}
+    return {"row": round(row * CELL, PRICE_DP), "heat": out, "lookback_h": HEAT_LOOKBACK_H}
 
 
 # ── 5분봉 1주일 (2026-10-20 사용자 «5m, 30m, 1h 모두 데이터를 일주일 치를 가져와서 보여줘») ──────────────────────
@@ -525,26 +546,29 @@ def oi_deltas(oc: dict[int, tuple[float, float]], bar_s: int = 300) -> dict[int,
 
 
 def parse_row(v: str | None) -> int:
-    """화면이 고르는 행 크기($). 신뢰경계 — 정수 1~500 만."""
+    """화면이 고르는 행 크기($) → CELL 칸 수. 신뢰경계 — 1~500 칸만(ETH $1~500 · XRP 0.0005~0.25)."""
     try:
-        r = int(v or 5)
-    except ValueError:
+        r = round(float(v) / CELL) if v else 5
+    except (ValueError, OverflowError):        # 숫자 아님 · nan · inf
         return 5
     return max(1, min(500, r))
 
 
 def selftest() -> None:
-    # 테이프 한 날: 0.1 칸 → $1 칸 · 첫/끝 초 VWAP · 공격자 합
-    sec = np.array([10, 10, 20, 30]); pb = np.array([20000, 20009, 20015, 19995])   # $2000.0 · 2000.9 · 2001.5 · 1999.5
+    # 테이프 한 날: 테이프 칸 → CELL 칸 · 첫/끝 초 VWAP · 공격자 합 (ETH $2000.0 · 2000.9 · 2001.5 · 1999.5 · XRP 2.0000 · 2.0009 · 2.0015 · 1.9995)
+    u = TAPE_BUCKET
+    sec = np.array([10, 10, 20, 30]); pb = np.array([20000, 20009, 20015, 19995])
     bq = np.array([1.0, 0.0, 2.0, 0.0]); sq = np.array([0.0, 1.0, 0.0, 3.0])
     s, (b, bu, se) = day_from_tape(sec, pb, bq, sq)
-    assert abs(s["open"] - 2000.45) < 1e-9 and abs(s["close"] - 1999.5) < 1e-9 and s["high"] == 2001.5 and s["low"] == 1999.5
-    assert list(b) == [1999, 2000, 2001] and list(bu) == [0, 1, 2] and list(se) == [3, 1, 0]
-    assert abs(s["buy_quote"] - (2000.0 + 2 * 2001.5)) < 1e-6
+    assert abs(s["open"] - 20004.5 * u) < 1e-9 and abs(s["close"] - 19995 * u) < 1e-9 and s["high"] == 20015 * u and s["low"] == 19995 * u
+    want = {"ETH": ([1999, 2000, 2001], [0, 1, 2], [3, 1, 0]), "XRP": ([3999, 4000, 4001, 4003], [0, 1, 0, 2], [3, 0, 1, 0])}[COIN]
+    assert (list(b), list(bu), list(se)) == want, (list(b), list(bu), list(se))
+    assert abs(s["buy_quote"] - (20000 + 2 * 20015) * u) < 1e-6
     _, (b2, _, _) = day_from_tape(np.array([1]), np.array([20010]), np.array([1.0]), np.array([0.0]))
-    assert list(b2) == [2001]                          # 2001.0 은 2001 칸
+    assert list(b2) == [{"ETH": 2001, "XRP": 4002}[COIN]]   # 칸 하한 정확히(ETH 2001.0 · XRP 2.0010) 은 그 칸
     lo, bb, ss = rebin(np.array([1999, 2000, 2004, 2006]), np.array([1, 2, 3, 4.0]), np.array([0, 1, 0, 1.0]), 5)
-    assert lo == 1995 and bb == [1, 5, 4] and ss == [0, 1, 1], (lo, bb, ss)
+    assert lo == round(1995 * CELL, PRICE_DP) and bb == [1, 5, 4] and ss == [0, 1, 1], (lo, bb, ss)
+    assert rebin_heat(np.array([1999.5 * CELL, 2004.9 * CELL]), np.array([0.2, 1.0]), 5)[:2] == [round(1995 * CELL, PRICE_DP), [0.2, 1.0]]
     hist = pd.DataFrame([{"day": "2026-09-19", "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "buy_qty": 1.0,
                           "sell_qty": 1.0, "buy_quote": 1.0, "sell_quote": 1.0, "oi": 10.0}])
     one = {"open": 1.0, "high": 2.0, "low": 1.0, "close": 2.0, "buy_qty": 1.0, "sell_qty": 1.0, "buy_quote": 1.0, "sell_quote": 1.0}
@@ -553,6 +577,7 @@ def selftest() -> None:
     assert c["d"] == ["2026-09-19", "2026-09-20", "2026-09-21"] and c["ll"] == [None, 5.0, 0.0] and c["part"] == [0, 2, 1]
     assert c["oi"] == [10.0, None, 20.0] and c["src"] == ["a", "t", "t"]
     assert parse_row("abc") == 5 and parse_row("0") == 1 and parse_row("9999") == 500
+    assert parse_row(str(25 * CELL)) == 25 and parse_row("nan") == 5 and parse_row("inf") == 5 and parse_row(None) == 5
     # 4시간 칸: UTC 03:59:59 와 04:00:00 은 다른 칸
     t = int(datetime(2026, 10, 19, 3, 59, 59, tzinfo=timezone.utc).timestamp())
     fr = {"2026-10-19": pd.DataFrame({"ts_sec": [t, t + 1, t + 2], "price_bin": [20000, 20010, 20020],
@@ -613,9 +638,10 @@ def selftest() -> None:
     assert sorted(week_bars({**bn, "ok_min": okm(0, 14)}, None, 0, 900)) == [0, 300]          # 바이낸스 마지막 1분 빔 = 그 봉 모름
     od = oi_deltas({0: (10.0, 12.0), 300: (12.5, 13.0), 900: (20.0, 19.0)})
     assert od == {0: (2.0, 12.0, 1), 300: (1.0, 13.0, 0), 900: (-1.0, 19.0, 1)}, od
-    print("selftest OK -- 테이프 일 요약·$1 칸·행 묶기·청산 모름/반쪽/0·OI 병합·행 입력 검증·4시간 칸 경계·OI/청산 4시간 묶기·lake→hot 이음"
+    print(f"{COIN} selftest OK -- 테이프 일 요약·$1 칸·행 묶기·청산 모름/반쪽/0·OI 병합·행 입력 검증·4시간 칸 경계·OI/청산 4시간 묶기·lake→hot 이음"
           "·5분봉 1주일(두 거래소 온전한 봉만 합·OI Δ)")
 
 
 if __name__ == "__main__":
-    selftest()
+    for a in ASSETS:
+        for_asset(a).selftest()

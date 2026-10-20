@@ -2494,17 +2494,21 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)
 
-    async def api_iceberg(request: web.Request) -> web.Response:   # 2026-10-16 시안 ① 풋프린트 칸별 아이스버그(ETH, 표시 전용)
-        """scripts/live_eth_iceberg_20261016 이 쓴 파일만 읽는다 -- 최근 24h 사건 + 전진 건수(«검증 중 n/150»). 신호·알림 아님."""
+    async def api_iceberg(request: web.Request) -> web.Response:   # 2026-10-16 시안 ① 풋프린트 칸별 아이스버그(ETH·XRP, 표시 전용)
+        """scripts/live_eth_iceberg_20261016 이 쓴 파일만 읽는다 -- 최근 24h 사건 + 전진 건수(«검증 중 n/150», XRP 는 target None = 사전등록 없음). 신호·알림 아님."""
+        asset = request.query.get("asset", "eth")
+        if asset not in ("eth", "xrp"):          # 신뢰경계: 파일 이름에 들어간다
+            raise web.HTTPBadRequest(reason="asset")
+
         def produce() -> dict[str, Any]:
             d = LIVE_DIR / "iceberg"
             try:
-                st = json.loads((d / "eth_state.json").read_text())
+                st = json.loads((d / f"{asset}_state.json").read_text())
             except (OSError, ValueError):
                 return {"ok": False, "reason": "no_state"}
             cut, ev = time.time() - 86400, []
             try:
-                for ln in (d / "eth_events.jsonl").read_text().splitlines():
+                for ln in (d / f"{asset}_events.jsonl").read_text().splitlines():
                     e = json.loads(ln)
                     if e["t_end"] >= cut:
                         ev.append(e)
@@ -3154,18 +3158,28 @@ def make_app() -> web.Application:
             candles = [*candles, f]
         return web.json_response({"asset": asset, "candles": candles}, headers=NOCACHE)
 
-    def _fpd_lake(stream: str, start, end, cols: str):
-        try:
-            return data_store.read("binance", stream, fpd.COIN, start and start.isoformat(), end and end.isoformat(), columns=cols)
-        except Exception:  # noqa: BLE001 -- lake 가 아직 없는 날/스트림(duckdb IOException 등)은 «없음»
-            return None
+    def _fpd_lake(coin: str):
+        def read(stream: str, start, end, cols: str):
+            try:
+                return data_store.read("binance", stream, coin, start and start.isoformat(), end and end.isoformat(), columns=cols)
+            except Exception:  # noqa: BLE001 -- lake 가 아직 없는 날/스트림(duckdb IOException 등)은 «없음»
+                return None
+        return read
 
     def _fpd_rows(db: Path):
         # 🔴리뷰: 파일이 없으면 빈 결과(«없음»)지만 잠깐 못 읽은 건 **올린다** -- 빈 결과로 삼키면 그사이 닫힌 날·4시간 칸이
         #   OI 없음·청산 $0·테이프 없음으로 굳어 7일 동안 안 고쳐졌다. 올리면 아무것도 안 굳고 swr 가 옛 응답을 낸다.
         return lambda sql, params: read_rows(db, sql, params) if db.exists() else []
 
-    fp_daily = fpd.DailyFootprint(_fpd_lake, _fpd_rows(HOT_TAPE_DB), _fpd_rows(BINANCE_CTX_DB))
+    FPD = {a: fpd.for_asset(a) for a in fpd.ASSETS}     # 2026-10-20 XRP -- 코인별 모듈(칸 폭·캐시 따로)
+    fp_daily = {a: m.DailyFootprint(_fpd_lake(m.COIN), _fpd_rows(HOT_TAPE_DB), _fpd_rows(BINANCE_CTX_DB)) for a, m in FPD.items()}
+
+    def _fpd_asset(request: web.Request) -> str:
+        """신뢰경계: ?asset= 은 FPD 에 있는 코인만(없으면 eth -- 옛 화면)."""
+        a = request.query.get("asset", "eth")
+        if a not in FPD:
+            raise web.HTTPBadRequest(reason="asset")
+        return a
 
     def _iso_day(v: str | None) -> str | None:
         """신뢰경계: 'YYYY-MM-DD' 만 통과."""
@@ -3183,35 +3197,35 @@ def make_app() -> web.Application:
         keep = [i for i, d in enumerate(full["cols"]["d"]) if d >= since]
         return {**full, "cols": {k: [v[i] for i in keep] for k, v in full["cols"].items()}}
 
-    async def _fp_k1h() -> list | None:
-        """일봉·4시간봉 청산 밀도가 같이 쓰는 ETH 1시간봉 500개(마감봉만, 10분 캐시) -- 못 받으면 None(배경 없이 그린다)."""
+    async def _fp_k1h(a: str) -> list | None:
+        """일봉·4시간봉 청산 밀도가 같이 쓰는 코인 1시간봉 500개(마감봉만, 10분 캐시) -- 못 받으면 None(배경 없이 그린다)."""
         async def k1h():
             raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
-                                           {"symbol": fpd.SYMBOL, "interval": "1h", "limit": 500},
+                                           {"symbol": FPD[a].SYMBOL, "interval": "1h", "limit": 500},
                                            error_reason="fp_daily_heat_klines")
             now_ms = time.time() * 1000
             return [r for r in raw if int(r[6]) < now_ms] if isinstance(raw, list) else raw   # 형성 봉은 «받은 시각»에 뺀다 -- 캐시가 1시간 묵으면 그때 형성 중이던 봉이 마감봉으로 셈됐다
         try:
-            return await swr_cached("fp_daily_k1h", 600.0, k1h, max_stale=3600.0)
+            return await swr_cached(f"fp_daily_k1h_{a}", 600.0, k1h, max_stale=3600.0)
         except Exception:  # noqa: BLE001 -- 1시간봉을 못 받아도 소급본 날은 그린다
             return None
 
     async def api_footprint_daily(request: web.Request) -> web.Response:
         """일봉 요약 전체(열 묶음). ?since=YYYY-MM-DD 면 그날부터만(화면의 1분 갱신용)."""
-        since = _iso_day(request.query.get("since"))
-        full = await swr_cached("fp_daily_days", 30.0, lambda: asyncio.to_thread(fp_daily.days_payload, time.time()),
+        a, since = _fpd_asset(request), _iso_day(request.query.get("since"))
+        full = await swr_cached(f"fp_daily_days_{a}", 30.0, lambda: asyncio.to_thread(fp_daily[a].days_payload, time.time()),
                                 max_stale=600.0)
         return web.json_response(_cols_since(full, since), headers=NOCACHE)
 
     async def api_footprint_daily_cells(request: web.Request) -> web.Response:
         """보이는 날들의 가격 칸. ?from=&to=(YYYY-MM-DD, 400일 미만) · ?row=행 달러(1~500)."""
-        frm, to = _iso_day(request.query.get("from")), _iso_day(request.query.get("to"))
+        a, frm, to = _fpd_asset(request), _iso_day(request.query.get("from")), _iso_day(request.query.get("to"))
         if not frm or not to:
             raise web.HTTPBadRequest(reason="from_to")
-        row = fpd.parse_row(request.query.get("row"))
+        row = FPD[a].parse_row(request.query.get("row"))
         try:
-            payload = await swr_cached(f"fp_daily_cells_{frm}_{to}_{row}", 30.0,
-                                       lambda: asyncio.to_thread(fp_daily.cells_payload, time.time(), frm, to, row), max_stale=600.0)
+            payload = await swr_cached(f"fp_daily_cells_{a}_{frm}_{to}_{row}", 30.0,
+                                       lambda: asyncio.to_thread(fp_daily[a].cells_payload, time.time(), frm, to, row), max_stale=600.0)
         except ValueError:
             raise web.HTTPBadRequest(reason="range") from None
         return web.json_response(payload, headers=NOCACHE)
@@ -3231,30 +3245,30 @@ def make_app() -> web.Application:
 
     async def api_footprint_4h(request: web.Request) -> web.Response:
         """2026-10-20 4시간봉 풋프린트 요약(지난 7일 + 형성 중) -- 열 모양은 일봉과 같다. ?since=키 면 그 칸부터(1분 갱신용)."""
-        since = _iso_h4(request.query.get("since"))
-        full = await swr_cached("fp_4h_days", 30.0, lambda: asyncio.to_thread(fp_daily.h4_payload, time.time()), max_stale=600.0)
+        a, since = _fpd_asset(request), _iso_h4(request.query.get("since"))
+        full = await swr_cached(f"fp_4h_days_{a}", 30.0, lambda: asyncio.to_thread(fp_daily[a].h4_payload, time.time()), max_stale=600.0)
         return web.json_response(_cols_since(full, since), headers=NOCACHE)
 
     async def api_footprint_4h_cells(request: web.Request) -> web.Response:
         """보이는 4시간 칸들의 가격 칸. ?from=&to=(키) · ?row=행 달러(1~500)."""
-        frm, to = _iso_h4(request.query.get("from")), _iso_h4(request.query.get("to"))
+        a, frm, to = _fpd_asset(request), _iso_h4(request.query.get("from")), _iso_h4(request.query.get("to"))
         if not frm or not to:
             raise web.HTTPBadRequest(reason="from_to")
-        row = fpd.parse_row(request.query.get("row"))
-        payload = await swr_cached(f"fp_4h_cells_{frm}_{to}_{row}", 30.0,
-                                   lambda: asyncio.to_thread(fp_daily.h4_cells_payload, time.time(), frm, to, row), max_stale=600.0)
+        row = FPD[a].parse_row(request.query.get("row"))
+        payload = await swr_cached(f"fp_4h_cells_{a}_{frm}_{to}_{row}", 30.0,
+                                   lambda: asyncio.to_thread(fp_daily[a].h4_cells_payload, time.time(), frm, to, row), max_stale=600.0)
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_footprint_4h_heat(request: web.Request) -> web.Response:
         """4시간봉 청산 밀도 배경(칸마다 그 칸 마감 시점의 추정 청산 밀도, 7일 1시간봉) -- 일봉 히트맵과 같은 계산·같은 1시간봉 캐시."""
-        frm, to = _iso_h4(request.query.get("from")), _iso_h4(request.query.get("to"))
+        a, frm, to = _fpd_asset(request), _iso_h4(request.query.get("from")), _iso_h4(request.query.get("to"))
         if not frm or not to:
             raise web.HTTPBadRequest(reason="from_to")
-        row = fpd.parse_row(request.query.get("row"))
-        raw = await _fp_k1h()
+        row = FPD[a].parse_row(request.query.get("row"))
+        raw = await _fp_k1h(a)
         try:
-            payload = await swr_cached(f"fp_4h_heat_{frm}_{to}_{row}", 300.0,
-                                       lambda: asyncio.to_thread(fpd.h4_heat_payload, time.time(), frm, to, row, raw), max_stale=1800.0)
+            payload = await swr_cached(f"fp_4h_heat_{a}_{frm}_{to}_{row}", 300.0,
+                                       lambda: asyncio.to_thread(FPD[a].h4_heat_payload, time.time(), frm, to, row, raw), max_stale=1800.0)
         except ValueError:
             raise web.HTTPBadRequest(reason="range") from None
         return web.json_response(payload, headers=NOCACHE)
@@ -3262,14 +3276,14 @@ def make_app() -> web.Application:
     async def api_footprint_daily_heat(request: web.Request) -> web.Response:
         """일봉 청산 히트맵(하루 한 열 = 그날 마감의 추정 청산 밀도, 7일 창). ?from&to&row 는 cells 와 같다.
         소급본 뒤 날(오늘 포함)은 최근 1시간봉 500개(10분 캐시)로 계산한다."""
-        frm, to = _iso_day(request.query.get("from")), _iso_day(request.query.get("to"))
+        a, frm, to = _fpd_asset(request), _iso_day(request.query.get("from")), _iso_day(request.query.get("to"))
         if not frm or not to:
             raise web.HTTPBadRequest(reason="from_to")
-        row = fpd.parse_row(request.query.get("row"))
-        raw = await _fp_k1h()
+        row = FPD[a].parse_row(request.query.get("row"))
+        raw = await _fp_k1h(a)
         try:
-            payload = await swr_cached(f"fp_daily_heat_{frm}_{to}_{row}", 300.0,
-                                       lambda: asyncio.to_thread(fpd.heat_payload, time.time(), frm, to, row, raw), max_stale=1800.0)
+            payload = await swr_cached(f"fp_daily_heat_{a}_{frm}_{to}_{row}", 300.0,
+                                       lambda: asyncio.to_thread(FPD[a].heat_payload, time.time(), frm, to, row, raw), max_stale=1800.0)
         except ValueError:
             raise web.HTTPBadRequest(reason="range") from None
         return web.json_response(payload, headers=NOCACHE)

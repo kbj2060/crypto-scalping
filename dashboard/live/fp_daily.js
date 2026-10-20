@@ -1,5 +1,5 @@
 // 일봉 풋프린트 (2026-10-08, 사용자 «일봉 풋프린트를 최대치로 · 축소/확대 · 델타·거래대금·OI·청산 · 30일 이상 · 4시간봉 없이»).
-// 서버 /api/footprint-daily(일 요약 전체) + /api/footprint-daily/cells(보이는 날의 가격 칸). ETH 만.
+// 서버 /api/footprint-daily(일 요약 전체) + /api/footprint-daily/cells(보이는 날의 가격 칸). ETH·XRP(2026-10-20, ?asset=).
 // 2026-10-20 4시간봉(/api/footprint-4h)도 같은 그림·레인·히트맵으로 그린다(PERIODS -- 위 «4시간봉 없이»는 10-08 당시 요청).
 // 캔버스로 그린다 -- 최대 ~2,500일을 끌고 확대해야 해서 SVG 요소 수만 개를 프레임마다 갈아 끼울 수 없다.
 // 자리 = 5분 차트의 교체 영역(window.fpRegion) 위, 배경 없이(placeOverlay) -- 넓은 화면은 왼쪽 열(풋프린트~모의 판·지지/저항),
@@ -11,12 +11,16 @@
   "use strict";
 
   var HEAT_CLIP_PCT = 0.98;    // 양수 밀도의 98분위 = 가장 진한 색(진한 곳만 떠오르게)
-  var HEAT_BOX_ROW = 25;      // 2026-10-10 위·아래 2칸 순위는 늘 $25 칸으로 고른다(사용자 A) -- 화면 칸 크기로 고르면 확대/축소마다 이웃 칸이 합쳐져 1·2등이 바뀌었다
+  // 코인별 행 크기 단계($)·테두리 순위 칸·가격 자릿수 -- XRP = ETH 단계 × 서버 칸(footprint_daily.ASSETS CELL 0.0005 / $1)
+  //   box = 2026-10-10 위·아래 2칸 순위는 늘 같은 칸(ETH $25)으로 고른다(사용자 A) -- 화면 칸 크기로 고르면 확대/축소마다 이웃 칸이 합쳐져 1·2등이 바뀌었다
+  var ASSET_CFG = {
+    eth: { coin: "ETH", rows: [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500], box: 25, dp: 2 },
+    xrp: { coin: "XRP", rows: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.0125, 0.025, 0.05, 0.1, 0.125, 0.25], box: 0.0125, dp: 4 }
+  };
   var HEAT_BOX_MIN_PX = 10;    // 봉 폭이 이보다 좁으면 테두리를 그리지 않는다(금액 글자는 칸 안에 들어갈 때만)
   var DEFAULT_SPAN = 30, ROW_PX = 11;
   // 이 폭부터 가격 칸(휴대폰은 7~12일 확대에서) · 2026-10-20 4시간봉은 1주(42봉 ≈ 24px)에서도 칸이 보이게 낮춘다(숫자는 칸에 들어갈 때만 -- drawCells)
   var cellMinPx = function (G) { return S.period === "4h" ? (G.narrow ? 6 : 16) : G.narrow ? 24 : 34; };
-  var ROW_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500];
   var REFRESH_MS = 60000;
   var LANES = [["delta", "델타"], ["turn", "거래대금"], ["oi", "OI"], ["liq", "청산"], ["lmap", "추정 청산"]];
   // 2026-10-20 사용자 «4h 버튼 = 1주일을 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로»: 같은 그림·레인·청산 히트맵을 봉 길이만 바꿔 쓴다
@@ -39,10 +43,12 @@
   // 2026-10-09 «추정 청산» 레인(사용자 «그 봉의 위·아래에 청산이 얼마나 쌓였나» · 시안 B): 그날 마감 7일 지도의 남은 청산 몫을
   //   고점 위(초록) · 봉 안(회색) · 저점 아래(빨강) 세 칸 100% 막대로 + 총액(2 × OI 달러) 가는 선. 🔴세 몫 합 = 늘 2 × OI -- 정보는 비율과 OI 크기.
 
-  var S = { on: false, period: "1d", D: null, n: 0, i0: 0, span: DEFAULT_SPAN, cells: new Map(), want: null, loading: false,
+  var S = { on: false, period: "1d", asset: "eth", D: null, n: 0, i0: 0, span: DEFAULT_SPAN, cells: new Map(), want: null, loading: false,
             heat: new Map(), stale: new Set(), heatWant: null, heatLoading: false, heatT: 0, heatOn: true,
             hover: null, timer: 0, raf: 0, drag: null, pinch: null, fetchT: 0, view: null, yOff: 0 };   // yOff = 세로 끌기(가격 단위, 10-09)
   var $ = function (id) { return document.getElementById(id); };
+  var A = function () { return ASSET_CFG[S.asset]; };
+  var Q = function () { return "asset=" + S.asset; };
   var css = function (n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
   var tipShow = function (x, y, h) { if (typeof showTooltip === "function") showTooltip(x, y, h); };   // app.js 전역
   var tipHide = function () { if (typeof hideTooltip === "function") hideTooltip(); };
@@ -57,17 +63,18 @@
   // 칸 안 숫자는 더 짧게(2026-10-20 4시간봉 «숫자가 보이게»): 1만↑ «46k» · 1천↑ «4.6k» · 100↑ 정수 -- 툴팁·범례는 qty 그대로
   function cqty(v) { return v >= 9.95e5 ? (v / 1e6).toFixed(1) + "M" : v >= 9950 ? Math.round(v / 1e3) + "k" : v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : v >= 99.95 ? v.toFixed(0) : v.toFixed(1); }   // 늘 4글자 이하
   function qty(v) { return v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : v.toFixed(v >= 10 ? 0 : 1); }
-  function px(v) { return v >= 1000 ? v.toFixed(0) : v.toFixed(2); }
+  function px(v) { return v >= 1000 ? v.toFixed(0) : v.toFixed(A().dp); }
   function pct(v) { return (v > 0 ? "+" : "") + (v * 100).toFixed(2) + "%"; }
-  function ethOn() { return typeof activeSnapshotAsset === "undefined" || activeSnapshotAsset === "eth"; }   // app.js 전역
+  function curAsset() { return typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset; }   // app.js 전역
+  function assetOn() { return Object.prototype.hasOwnProperty.call(ASSET_CFG, curAsset()); }
 
   // ── 데이터 ─────────────────────────────────────────────────────────────────────────
   async function loadDays(since) {
-    var per = S.period;   // 리뷰 3: 받는 사이 1d ↔ 4h 를 바꾸면 늦게 온 응답은 버린다(다른 봉 길이 상태에 섞이면 4h 갱신이 일봉 키를 since 로 보내 400)
-    var r = await fetch(since ? P().days + "?since=" + since : P().days, { cache: "no-store" });
+    var per = S.period, asset = S.asset;   // 리뷰 3: 받는 사이 1d ↔ 4h 를 바꾸면 늦게 온 응답은 버린다(다른 봉 길이 상태에 섞이면 4h 갱신이 일봉 키를 since 로 보내 400)
+    var r = await fetch(P().days + "?" + Q() + (since ? "&since=" + since : ""), { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     var p = await r.json(), c = p.cols, oldN = S.n;
-    if (per !== S.period) return;
+    if (per !== S.period || asset !== S.asset) return;
     var atEnd = oldN > 0 && S.i0 + S.span >= oldN - 0.5;          // 끝에 붙어 보던 중이면 새 날을 따라간다
     if (!since || !S.D) {
       S.D = c;
@@ -86,8 +93,9 @@
 
   function rowFor(lo, hi, paneH) {
     var want = (hi - lo) / Math.max(1, paneH / ROW_PX);
-    for (var k = 0; k < ROW_STEPS.length; k++) if (ROW_STEPS[k] >= want) return ROW_STEPS[k];
-    return ROW_STEPS[ROW_STEPS.length - 1];
+    var steps = A().rows;
+    for (var k = 0; k < steps.length; k++) if (steps[k] >= want) return steps[k];
+    return steps[steps.length - 1];
   }
 
   // ── 청산 히트맵(하루 한 열 = 그날 마감의 추정 청산 밀도 · 7일 창 · 라이브 청산맵과 같은 계산) ──────────────
@@ -111,17 +119,17 @@
     var w = S.heatWant;
     if (!w || S.heatLoading) return;
     S.heatLoading = true;
-    var per = S.period, url = P().heatUrl, days = S.D.d.slice(w.a, w.b + 1);   // 키는 await 전에 -- 받는 사이 봉 길이가 바뀌면 버린다(리뷰 3)
-    var rows = w.row === HEAT_BOX_ROW ? [w.row] : [w.row, HEAT_BOX_ROW];   // 화면 칸 + 테두리 순위용 고정 칸
+    var per = S.period, asset = S.asset, url = P().heatUrl, days = S.D.d.slice(w.a, w.b + 1);   // 키는 await 전에 -- 받는 사이 봉 길이가 바뀌면 버린다(리뷰 3)
+    var rows = w.row === A().box ? [w.row] : [w.row, A().box];   // 화면 칸 + 테두리 순위용 고정 칸
     for (var q = 0; q < rows.length; q++) {
       var row = rows[q], parts = heatChunks(days.filter(function (k) { return !S.heat.has(row + "|" + k) || S.stale.has("h" + row + "|" + k); }), per === "4h");
-      for (var c = 0; c < parts.length && per === S.period; c++) {
+      for (var c = 0; c < parts.length && per === S.period && asset === S.asset; c++) {
         var part = parts[c];
         try {
-          var r = await fetch(url + "?from=" + part[0] + "&to=" + part[part.length - 1] + "&row=" + row, { cache: "no-store" });
+          var r = await fetch(url + "?" + Q() + "&from=" + part[0] + "&to=" + part[part.length - 1] + "&row=" + row, { cache: "no-store" });
           if (r.ok) {
             var p = await r.json();
-            if (per === S.period) part.forEach(function (k) { S.heat.set(row + "|" + k, p.heat[k] || null); S.stale.delete("h" + row + "|" + k); });
+            if (per === S.period && asset === S.asset) part.forEach(function (k) { S.heat.set(row + "|" + k, p.heat[k] || null); S.stale.delete("h" + row + "|" + k); });
           }
         } catch (e) { /* 다음 그리기 때 다시 묻는다 */ }
       }
@@ -153,7 +161,7 @@
       }
     }
     g.globalAlpha = 1;
-    row = HEAT_BOX_ROW;                                           // 테두리 = 고정 칸(화면 칸이 $10 이면 2~3칸을 묶은 높이로 그린다)
+    row = A().box;                                                // 테두리 = 고정 칸(화면 칸이 $10 이면 2~3칸을 묶은 높이로 그린다)
     if (bw >= HEAT_BOX_MIN_PX) for (i = a; i <= b; i++) {
       h = S.heat.get(row + "|" + S.D.d[i]);
       if (!h || !h[2]) continue;
@@ -190,14 +198,14 @@
   async function fetchCells() {
     var w = S.want;
     if (!w || S.loading) return;
-    var per = S.period, miss = S.D.d.slice(w.a, w.b + 1).filter(function (k) { return !S.cells.has(w.row + "|" + k) || S.stale.has("c" + w.row + "|" + k); });
+    var per = S.period, asset = S.asset, miss = S.D.d.slice(w.a, w.b + 1).filter(function (k) { return !S.cells.has(w.row + "|" + k) || S.stale.has("c" + w.row + "|" + k); });
     if (!miss.length) return;
     S.loading = true;
     try {
-      var r = await fetch(P().cells + "?from=" + miss[0] + "&to=" + miss[miss.length - 1] + "&row=" + w.row, { cache: "no-store" });
+      var r = await fetch(P().cells + "?" + Q() + "&from=" + miss[0] + "&to=" + miss[miss.length - 1] + "&row=" + w.row, { cache: "no-store" });
       if (r.ok) {
         var p = await r.json();
-        if (per === S.period) miss.forEach(function (k) { S.cells.set(w.row + "|" + k, p.cells[k] || null); S.stale.delete("c" + w.row + "|" + k); });   // 리뷰 3
+        if (per === S.period && asset === S.asset) miss.forEach(function (k) { S.cells.set(w.row + "|" + k, p.cells[k] || null); S.stale.delete("c" + w.row + "|" + k); });   // 리뷰 3
       }
     } catch (e) { /* 다음 그리기 때 다시 묻는다 */ }
     S.loading = false;
@@ -388,12 +396,12 @@
 
   function laneText(k, i) {
     var v = laneVal(k, i), D = S.D;
-    if (v == null) return k === "liq" ? "모름(수집 전)" : k === "oi" ? (D.oi[i] == null ? (S.period === "4h" ? "모름" : "모름(2022-01 전)") : qty(D.oi[i]) + " ETH") : "모름";
+    if (v == null) return k === "liq" ? "모름(수집 전)" : k === "oi" ? (D.oi[i] == null ? (S.period === "4h" ? "모름" : "모름(2022-01 전)") : qty(D.oi[i]) + " " + A().coin) : "모름";
     if (k === "lmap") {
       var sh = (v[0] + v[1] + v[3]) || 1, pu = 100 * v[0] / sh, pd = 100 * v[1] / sh, pm = 100 * v[3] / sh;
       return "고점 위 " + pu.toFixed(0) + "% · 봉 안 " + pm.toFixed(0) + "% · 저점 아래 " + pd.toFixed(0) + "%" + (v[2] ? " · 합 " + usd(v[2]) : " (OI 모름)");
     }
-    return k === "liq" ? "롱 " + usd(v[0]) + " · 숏 " + usd(v[1]) : k === "oi" ? pct(v) + " · " + qty(D.oi[i]) + " ETH"
+    return k === "liq" ? "롱 " + usd(v[0]) + " · 숏 " + usd(v[1]) : k === "oi" ? pct(v) + " · " + qty(D.oi[i]) + " " + A().coin
       : k === "turn" ? usd(v) : sgnUsd(v);
   }
 
@@ -627,8 +635,8 @@
         var k = Math.floor(p / v.row) - Math.floor(cell[0] / v.row);
         if (k >= 0 && k < cell[1].length && cell[1][k] + cell[2][k] > 0) {
           var bq = cell[1][k], sq = cell[2][k], lo = cell[0] + k * v.row;
-          html = "<b>" + lab(D.d[i]) + " · $" + px(lo) + "–" + px(lo + v.row) + "</b><br>매수 " + qty(bq) + " ETH · 매도 " + qty(sq) +
-                 ' ETH<br>차 <span class="' + (bq >= sq ? "fpd-pos" : "fpd-neg") + '">' + (bq >= sq ? "+" : "−") + qty(Math.abs(bq - sq)) + "</span> · 행 $" + v.row;
+          html = "<b>" + lab(D.d[i]) + " · $" + px(lo) + "–" + px(lo + v.row) + "</b><br>매수 " + qty(bq) + " " + A().coin + " · 매도 " + qty(sq) +
+                 " " + A().coin + '<br>차 <span class="' + (bq >= sq ? "fpd-pos" : "fpd-neg") + '">' + (bq >= sq ? "+" : "−") + qty(Math.abs(bq - sq)) + "</span> · 행 $" + v.row;
         }
       }
       var hh = S.heatOn ? S.heat.get(v.row + "|" + D.d[i]) : null;      // 히트맵 칸 = 추정 청산 금액(테두리 칸이 좁아 글자가 안 들어갈 때도 여기서 읽힌다)
@@ -659,12 +667,14 @@
     var note = document.querySelector("#fpDaily .fpd-note");
     if (note) { if (NOTE_1D === null) NOTE_1D = note.innerHTML; note.innerHTML = S.period === "4h" ? NOTE_4H : NOTE_1D; }
     var cv = $("fpDailyCanvas");
-    if (cv) cv.setAttribute("aria-label", "ETH " + P().name + " 풋프린트 — 가격 칸별 매수·매도와 델타·거래대금·OI·청산. 화살표 = 이동 · +/− = 확대/축소 · Home = 전체 · End = 기본 범위");
+    if (cv) cv.setAttribute("aria-label", A().coin + " " + P().name + " 풋프린트 — 가격 칸별 매수·매도와 델타·거래대금·OI·청산. 화살표 = 이동 · +/− = 확대/축소 · Home = 전체 · End = 기본 범위");
   }
   async function setOn(on, period) {
-    on = on && ethOn();
-    if (period && period !== S.period) {   // 봉 길이가 바뀌면 받은 것·보던 자리를 비운다
-      S.period = period; S.D = null; S.n = 0; S.cells.clear(); S.heat.clear(); S.stale.clear(); S.want = null; S.heatWant = null; S.view = null; S.hover = null;
+    on = on && assetOn();
+    if ((period && period !== S.period) || (on && curAsset() !== S.asset)) {   // 봉 길이·코인이 바뀌면 받은 것·보던 자리를 비운다
+      if (period) S.period = period;
+      if (on) S.asset = curAsset();
+      S.D = null; S.n = 0; S.cells.clear(); S.heat.clear(); S.stale.clear(); S.want = null; S.heatWant = null; S.view = null; S.hover = null;
       syncPeriodUi();
     }
     S.on = on;
@@ -681,14 +691,14 @@
     if (!on) return;
     if (!S.D) {
       if (status) status.textContent = P().name + " 불러오는 중…";
-      var per = S.period;
+      var per = S.period, asset = S.asset;
       try {
         await loadDays();
-        if (per !== S.period) return;      // 받는 사이 봉 길이를 또 바꿨다 -- 새 setOn 이 맡는다
+        if (per !== S.period || asset !== S.asset) return;      // 받는 사이 봉 길이를 또 바꿨다 -- 새 setOn 이 맡는다
         setView(defSpan());
         if (status) status.textContent = "";
       } catch (e) {
-        if (per !== S.period) return;      // 버린 쪽의 실패가 새 봉 길이 상태를 지우지 않게(리뷰 3)
+        if (per !== S.period || asset !== S.asset) return;      // 버린 쪽의 실패가 새 봉 길이 상태를 지우지 않게(리뷰 3)
         if (status) status.textContent = P().name + "을 못 받았습니다(" + e.message + ") · 버튼을 다시 누르면 재시도";
         S.D = null; S.n = 0;
         return;
@@ -734,13 +744,13 @@
     bindCanvas(cv);
     new ResizeObserver(redraw).observe(cv);
     setInterval(function () { if (S.on) placeOverlay($("fpDaily")); }, 500);   // 5분 차트 배치가 바뀌면(창 탭·폭) 따라간다
-    // ETH 전용 -- 코인을 바꾸면 끄고 버튼을 잠근다(app.js 의 activeSnapshotAsset 을 1초마다 본다)
+    // ETH·XRP -- 다른 코인이면 끄고 버튼을 잠근다 · ETH ↔ XRP 면 같은 봉 길이로 새 코인을 다시 받는다(app.js 의 activeSnapshotAsset 을 1초마다 본다)
     setInterval(function () {
-      var ok = ethOn();
+      var ok = assetOn();
       btn.disabled = !ok;
-      btn.title = ok ? btn.dataset.title : "일봉 풋프린트는 ETH 만 있습니다";
-      if (b4) { b4.disabled = !ok; b4.title = ok ? b4.dataset.title : "4시간봉 풋프린트는 ETH 만 있습니다"; }
-      if (!ok && S.on) setOn(false);
+      btn.title = ok ? btn.dataset.title : "일봉 풋프린트는 ETH·XRP 만 있습니다";
+      if (b4) { b4.disabled = !ok; b4.title = ok ? b4.dataset.title : "4시간봉 풋프린트는 ETH·XRP 만 있습니다"; }
+      if (S.on && (!ok || curAsset() !== S.asset)) setOn(ok, S.period);
     }, 1000);
     var saved = null;
     try { saved = localStorage.getItem("fpDailyOn"); } catch (e) { /* 없음 */ }

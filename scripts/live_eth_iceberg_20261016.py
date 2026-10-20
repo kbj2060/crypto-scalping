@@ -9,12 +9,16 @@
 출력: data/live/iceberg/eth_events.jsonl(아이스버그만, 한 줄 한 건) · eth_state.json(2초마다 -- ops_watchdog 가 신선도를 본다).
 주문 없음 · 거래소 호출 없음(파일·hot SQLite 만 읽는다).
 사용: python -u scripts/live_eth_iceberg_20261016.py | --parity <시간 파일>(연구 replay_levels 와 창 대조) | --selftest
+2026-10-20 코인: ICEBERG_SYMBOL=XRPUSDT (기본 ETHUSDT) → depthdiff/XRPUSDT · 테이프 xrpusdt · 출력 xrp_events.jsonl·xrp_state.json.
+  칸은 환경변수가 아니다 -- 테이프 수집기 칸(BUCKETS, price_bin)과 같아야 체결이 칸에 붙는다(ETH $0.1 · XRP 0.0001 = 1틱 ≈ 0.7bp).
+  XRP 는 사전등록이 없다(표시 전용 -- state 의 target = None). 판정·parity 는 ETH 연구 스크립트 기준이라 ETH 에서만.
 """
 from __future__ import annotations
 
 import collections
 import gzip
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -25,19 +29,23 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts.data_store import read_rows  # noqa: E402
 
-DD = ROOT / "data/live/orderflow/depthdiff/ETHUSDT"
+SYM = os.environ.get("ICEBERG_SYMBOL") or "ETHUSDT"
+# 코인 -> (눈금 수/$ = 1/거래소 틱, 칸 1/$ = 1/테이프 칸, 칸 가격 자릿수) -- 칸 = live_trade_tape_collector BUCKETS 와 같아야 한다
+TICK, PER, DP = {"ETHUSDT": (100, 10, 2), "XRPUSDT": (10_000, 10_000, 4)}[SYM]
+BIN, TPB, COIN = 1 / PER, TICK // PER, SYM[:-4].lower()   # 칸($) · 칸 하나 = 눈금 수(ETH 10 · XRP 1)
+DD = ROOT / f"data/live/orderflow/depthdiff/{SYM}"
 TAPE = ROOT / "data/hot/binance_tape.sqlite"
 OUT = ROOT / "data/live/iceberg"
-TICK, K, WIN, NQ, NMIN = 100, 30, 30, 2880, 1000
-IDX_MAX = 1_000_000   # ponytail: 연구는 10M($100k) -- 메모리 16MB 로 줄임. ETH 가 $10k 를 넘으면 올린다(넘는 가격 변경은 버려진다)
+K, WIN, NQ, NMIN = 30, 30, 2880, 1000
+IDX_MAX = 1_000_000   # ponytail: 연구는 10M($100k) -- 메모리 16MB 로 줄임. ETH 가 $10k(XRP $100) 를 넘으면 올린다(넘는 가격 변경은 버려진다)
 FWD0 = 1792108800     # 2026-10-16 00:00 UTC = 사전등록 전진 시작
 SETTLE = 5            # 창 끝 뒤 테이프가 다 들어올 때까지 기다리는 초
 
 
 def buckets(arr, base):
-    """반올림 칸 b = round(가격×10) = 눈금 [10b−5, 10b+4] → base−K..base+K 칸 합 (연구 buckets 와 같다)."""
-    lo = (base - K) * 10 - 5
-    return arr[lo:lo + (2 * K + 1) * 10].reshape(2 * K + 1, 10).sum(1)
+    """반올림 칸 b = round(가격/칸) = 눈금 [TPB·b − TPB//2, …] → base−K..base+K 칸 합 (ETH = 연구 buckets [10b−5, 10b+4] 와 같다)."""
+    lo = (base - K) * TPB - TPB // 2
+    return arr[lo:lo + (2 * K + 1) * TPB].reshape(2 * K + 1, TPB).sum(1)
 
 
 class Book:
@@ -63,7 +71,7 @@ class Book:
         if W is not None and W["w"] != w:
             self.done.append(W); W = None
         if W is None:
-            base = int(round((self.bb + self.ba) / 2 / 10))
+            base = int(round((self.bb + self.ba) / 2 / TPB))
             b0, a0 = buckets(self.bid, base), buckets(self.ask, base)
             W = {"w": w, "base": base, "valid": self.valid, "bS": b0, "bMin": b0.copy(), "bMax": b0.copy(), "bE": b0,
                  "aS": a0, "aMin": a0.copy(), "aMax": a0.copy(), "aE": a0, "bbMin": self.bb, "baMax": self.ba, "bb0": self.bb, "ba0": self.ba}
@@ -117,7 +125,7 @@ def window_events(W: dict, SB: np.ndarray, SS: np.ndarray, qs: float, qb: float)
     if W["valid"] != 1:
         return []
     f = lambda k: np.asarray(W[k], np.float32)
-    bbk = int(np.round(W["bb0"] / TICK * 10)) - W["base"] + K; bak = int(np.round(W["ba0"] / TICK * 10)) - W["base"] + K
+    bbk = int(np.round(W["bb0"] / TICK * PER)) - W["base"] + K; bak = int(np.round(W["ba0"] / TICK * PER)) - W["base"] + K
     out = []
     for side in (1, -1):
         k0 = bbk if side == 1 else bak
@@ -128,11 +136,11 @@ def window_events(W: dict, SB: np.ndarray, SS: np.ndarray, qs: float, qb: float)
         k = max(ks, key=lambda c: ex[c]); vol = float(ex[k]); thr = qs if side == 1 else qb
         if not (np.isfinite(thr) and thr > 0 and vol >= thr):
             continue
-        px = (W["base"] + k - K) * 0.1
+        px = (W["base"] + k - K) * BIN
         start = float(f("bS" if side == 1 else "aS")[k]); end = float(f("bE" if side == 1 else "aE")[k]); mx = float(f("bMax" if side == 1 else "aMax")[k])
-        held = W["bbMin"] / TICK >= px - 0.05 if side == 1 else W["baMax"] / TICK <= px + 0.05
+        held = W["bbMin"] / TICK >= px - BIN / 2 if side == 1 else W["baMax"] / TICK <= px + BIN / 2
         if held and start > 0 and vol >= start and end >= 0.5 * start and vol >= 2 * mx:
-            out.append({"t_end": int((W["w"] + 1) * WIN), "side": side, "px": round(px, 2), "vol": round(vol, 3),
+            out.append({"t_end": int((W["w"] + 1) * WIN), "side": side, "px": round(px, DP), "vol": round(vol, 3),
                         "max": round(mx, 3), "start": round(start, 3), "end": round(end, 3)})
     return out
 
@@ -141,7 +149,7 @@ def tape_cells(lo: int, hi: int) -> dict[int, list[tuple[int, float, float]]]:
     """[lo, hi) 초의 창별 (price_bin, 매수, 매도). SQLite 정수 나눗셈 = 연구 ts_sec // WIN."""
     got: dict[int, list] = {}
     for w, b, bq, sq in read_rows(TAPE, "SELECT ts_sec / ?, price_bin, sum(buy_qty), sum(sell_qty) FROM trade_tape_1s "
-                                        "WHERE symbol = 'ethusdt' AND ts_sec >= ? AND ts_sec < ? GROUP BY 1, 2", (WIN, lo, hi)):
+                                        "WHERE symbol = ? AND ts_sec >= ? AND ts_sec < ? GROUP BY 1, 2", (WIN, SYM.lower(), lo, hi)):
         got.setdefault(int(w), []).append((int(b), float(bq or 0), float(sq or 0)))
     return got
 
@@ -157,7 +165,7 @@ def warm(hs: collections.deque, hb: collections.deque, w0: int):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    ev_path, st_path = OUT / "eth_events.jsonl", OUT / "eth_state.json"
+    ev_path, st_path = OUT / f"{COIN}_events.jsonl", OUT / f"{COIN}_state.json"
     seen, n = set(), 0
     if ev_path.exists():
         for ln in ev_path.read_text().splitlines():
@@ -214,7 +222,7 @@ def main():
             pend = pend[len(ready):]
         tmp = st_path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"updated_at": time.time(), "file": path.name if path else None, "valid": int(book.valid) if book else 0,
-                                   "last_window_end": (last_w + 1) * WIN if last_w is not None else None, "n_forward": n, "target": 150, "fwd0": FWD0}))
+                                   "last_window_end": (last_w + 1) * WIN if last_w is not None else None, "n_forward": n, "target": 150 if SYM == "ETHUSDT" else None, "fwd0": FWD0}))
         tmp.replace(st_path)
         time.sleep(2)
 
@@ -241,6 +249,8 @@ def parity(path: str):
 
 def selftest():
     assert time.strftime("%Y-%m-%dT%H", time.gmtime(FWD0)) == "2026-10-16T00"
+    if SYM != "ETHUSDT":
+        return selftest_alt()
     a = np.zeros(10_000); a[995:1005] = 1.0
     assert buckets(a, 100)[K] == 10
     z = np.zeros(2 * K + 1, np.float32)
@@ -253,6 +263,23 @@ def selftest():
     assert window_events({**W, "bbMin": 249990}, z, SS, 10.0, 10.0) == []  # 뚫림(최우선 매수 2499.90 < 2499.95)
     SS[K] = 11; assert window_events(W, z, SS, 10.0, 10.0) == []           # 11 < 6 × 2 = 흡수지만 아이스버그 아님
     print("selftest ok")
+
+
+def selftest_alt():
+    """XRP(칸 = 1틱): 칸 합 = 그 눈금 · 칸 가격 = (base+k−K)·0.0001 · 버팀 경계 = 칸 가격(반 칸 0.00005)."""
+    a = np.zeros(20_000); a[14_067] = 3.0; a[14_068] = 1.0
+    assert TPB == 1 and buckets(a, 14_067)[K] == 3.0 and buckets(a, 14_067)[K + 1] == 1.0
+    z = np.zeros(2 * K + 1, np.float32)
+    W = {"w": 0, "base": 14_067, "valid": 1, "bb0": 14_067, "ba0": 14_068, "bbMin": 14_067, "baMax": 14_068,
+         "bS": z + 5, "bE": z + 4, "bMax": z + 6, "aS": z + 5, "aE": z + 5, "aMax": z + 6}
+    SS = z.copy(); SS[K] = 13
+    e = window_events(W, z, SS, 10.0, 10.0)
+    assert len(e) == 1 and e[0]["side"] == 1 and e[0]["px"] == 1.4067, e
+    assert window_events({**W, "bbMin": 14_066}, z, SS, 10.0, 10.0) == []   # 한 틱 아래로 = 뚫림
+    SB = z.copy(); SB[K + 1] = 13                                              # 매도 쪽 거울(최우선 매도 1.4068 칸)
+    e = window_events(W, SB, z, 10.0, 10.0)
+    assert len(e) == 1 and e[0]["side"] == -1 and e[0]["px"] == 1.4068, e
+    print(f"selftest ok ({SYM})")
 
 
 if __name__ == "__main__":

@@ -230,11 +230,11 @@
               <button type="button" class="asset-tab" data-bars="12" data-tfk="6" title="30분봉 풋프린트(최신 6시간) — 5m 과 같은 구성 · 휠 = 넓히기/좁히기(최대 1주일) · 끌기 = 이동">30m</button>
               <button type="button" class="asset-tab" data-bars="12" data-tfk="12" title="1시간봉 풋프린트(최신 12시간) — 5m 과 같은 구성 · 휠 = 넓히기/좁히기(최대 1주일) · 끌기 = 이동">1h</button>
               <button type="button" id="fpH4Btn" class="asset-tab" data-tf="4h" aria-pressed="false"
-                      title="4시간봉 풋프린트 — 지난 7일 · 휠·두 손가락 = 확대/축소 · 끌기 = 이동 · 더블클릭 = 기본 범위(데스크탑 2일 · 휴대폰 12시간) · ETH 만">4h</button>
+                      title="4시간봉 풋프린트 — 지난 7일 · 휠·두 손가락 = 확대/축소 · 끌기 = 이동 · 더블클릭 = 기본 범위(데스크탑 2일 · 휴대폰 12시간) · ETH·XRP">4h</button>
               <!-- 2026-10-09 일봉 = 같은 세그먼트 다섯째 칸(사용자 «1h/2h/4h/12h/1d 처럼 안으로»). 5분 창이 아니라 일봉 풋프린트로
                    바꾸는 칸이라 data-bars 가 없다 -- app.js 구간 핸들러는 무시하고 fp_daily.js 가 켠다. 선택 칸 = renderChartWindowTabs -->
               <button type="button" id="fpDailyBtn" class="asset-tab" aria-pressed="false"
-                      title="일봉 풋프린트(스윙) — 2020년부터 · 휠·두 손가락 = 확대/축소 · 끌기 = 이동 · 더블클릭 = 최근 30일 · ETH 만">1d</button>
+                      title="일봉 풋프린트(스윙) — 2020년부터 · 휠·두 손가락 = 확대/축소 · 끌기 = 이동 · 더블클릭 = 최근 30일 · ETH·XRP">1d</button>
             </div>
             <span id="fpZoomNote" class="fp-zoom-note" hidden aria-live="polite"></span>
             <div id="liqDaysTabs" class="asset-tabs chart-mode-tabs" aria-label="청산맵 보기 기간" hidden
@@ -332,7 +332,7 @@
               </div>
             </div>
             <canvas id="fpDailyCanvas" class="fpd-canvas" tabindex="0" role="img"
-                    aria-label="ETH 일봉 풋프린트 — 가격 칸별 매수·매도와 델타·거래대금·OI·청산. 화살표 = 이동 · +/− = 확대/축소 · Home = 전체 · End = 최근 30일"></canvas>
+                    aria-label="일봉 풋프린트 — 가격 칸별 매수·매도와 델타·거래대금·OI·청산. 화살표 = 이동 · +/− = 확대/축소 · Home = 전체 · End = 최근 30일"></canvas>
             <p id="fpDailyStatus" class="fpd-status muted" role="status"></p>
             <p class="fpd-note muted">날짜 = UTC 자정(KST 09:00) · 칸 = 공격자 매도(왼쪽) / 매수(오른쪽), 진할수록 한쪽 우세 · 주황 테두리 = 그날 가장 많이 거래된 가격 · 파란 칸 = 그날 마감의 추정 청산 밀도(진할수록 많음 · 7일 창 · 라이브 청산맵과 같은 계산) · 테두리 = 그날 종가 위(초록, 숏)·아래(빨강, 롱) 가장 큰 칸 2개씩, 금액 = 그 칸 몫 × 2 × 그날 OI(OI 없는 날은 %) ·
               청산 = 바이낸스 강제주문(위 숏 · 아래 롱, 2026-09-20 수집 시작) · 추정 청산 = 그날 마감 7일 지도에 남은 청산의 고점 위(초록·숏) / 봉 안(회색) / 저점 아래(빨강) 비율, 선 = 합계(2 × OI) · OI = 막대 전일 대비 · 선 수준(2022-01 부터) · 빗금 = 모름 · 서술이지 신호가 아님</p>

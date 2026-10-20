@@ -735,6 +735,7 @@ def run_once(dry_run: bool) -> list[Check]:
         # 2026-10-16: ETH 칸별 아이스버그 탐지기(scripts/live_eth_iceberg_20261016.py, 2초마다 상태 파일). 죽으면 풋프린트 «아이스버그» 칩이 «멈춤».
         #   탐지기를 은퇴시키면 이 줄도 지운다.
         check_file_dir_freshness("eth_iceberg", LIVE / "iceberg", "eth_state.json", 2, 10),
+        check_file_dir_freshness("xrp_iceberg", LIVE / "iceberg", "xrp_state.json", 2, 10),   # 2026-10-20 XRP 판(ICEBERG_SYMBOL=XRPUSDT)
         *check_multicoin_collectors(),
         *check_pi_collectors(),
     ]
