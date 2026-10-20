@@ -304,7 +304,7 @@
                 <span class="lqp-item"><i class="bbm-sw-heat"></i>호가 잔량 작음 → 큼</span>
                 <span class="lqp-item"><i class="bbm-sw bbm-b"></i>매수</span>
                 <span class="lqp-item"><i class="bbm-sw bbm-s"></i>매도</span>
-                <span class="lqp-item"><i class="bbm-sw bbm-w"></i>큰 체결(3분 화면 $10만+)</span>
+                <span class="lqp-item"><i class="bbm-sw bbm-w"></i><span>큰 체결(3분 화면 <span data-bbm-usd="100000">$10만</span>+)</span></span>
                 <span class="lqp-item muted">체결 = 바이낸스·OKX·Bybit 합산 · 호가 = 바이낸스</span>
               </div>
               <div id="bubbleMapTools" class="fpd-tools" role="group" aria-label="체결 버블 보기 범위">
@@ -316,7 +316,7 @@
             <canvas id="bubbleMapCanvas" class="lqp-canvas" tabindex="0" role="img"
                     aria-label="체결 버블(바이낸스·OKX·Bybit 선물 합산, 배경 호가는 바이낸스) — 1초마다 가격대별 체결 금액(원 넓이), 배경은 호가 잔량, 흰 선은 현재가, 아래 막대는 매수·매도 거래대금. 휠·두 손가락 = 시간 확대/축소 · 끌기·화살표 = 이동(최근 30분) · 더블클릭·Home = 실시간"></canvas>
             <p id="bubbleMapStatus" class="fpd-status muted" role="status"></p>
-            <p class="fpd-note muted">점 = 그 1초·그 가격 체결 $2.5만 미만 · 원 넓이 = 체결 금액(초록 매수 우세 · 빨강 매도 우세) · 흰 고리 = 큰 체결(3분 화면 $10만 이상, 넓게 볼수록 기준을 올리고 원을 줄임 · 금액 표시) · 휠·두 손가락 = 시간 확대/축소 · 끌기 = 최근 30분 안 이동 · 더블클릭 = 실시간 ·
+            <p class="fpd-note muted">점 = 그 1초·그 가격 체결 <span data-bbm-usd="25000">$2.5만</span> 미만 · 원 넓이 = 체결 금액(초록 매수 우세 · 빨강 매도 우세) · 흰 고리 = 큰 체결(3분 화면 <span data-bbm-usd="100000">$10만</span> 이상, 금액 기준은 코인별 고래 경계에 맞춤, 넓게 볼수록 기준을 올리고 원을 줄임 · 금액 표시) · 휠·두 손가락 = 시간 확대/축소 · 끌기 = 최근 30분 안 이동 · 더블클릭 = 실시간 ·
               체결 = 바이낸스 + OKX + Bybit USDT 선물 합산(같은 1초·같은 가격 칸을 더함 · MM 헤지가 다른 거래소에 다시 찍힌 몫도 섞인다) · 배경 호가 잔량 = 바이낸스만(1초 래스터) · 흰 선 = 현재가 · 아래 막대 = 구간별 거래대금(매수 | 매도) · 체결은 수집 주기 탓에 ~5초 늦다</p>
           </div>
           <div id="fpDaily" class="fp-daily fp-overlay" hidden>   <!-- 2026-10-08 일봉 풋프린트 -- fp_daily.js (가격 플롯 위에만 겹친다) -->

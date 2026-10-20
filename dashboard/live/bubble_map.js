@@ -3,6 +3,7 @@
 // 원천(2026-10-13 사용자 «합산으로 진행») = 체결은 바이낸스 + OKX + Bybit USDT 선물 합산(서버 bubble_tape_payload) · 배경 호가는 바이낸스만.
 // 배경 = 호가 래스터(/api/flow/heatmap, 작음 파랑 → 노랑 → 큼 빨강) · 흰 선 = 현재가(래스터 mid) ·
 // 버블 = 1초 체결 테이프(/api/bubble-tape, 수집기가 5초마다 써서 ~5초 늦다): $2.5만 미만 점 · 그 이상 원(넓이 ∝ 금액) · 큰 체결 고리·금액.
+//   2026-10-20 금액 기준은 코인별(× 고래 경계 ÷ ETH $10만 -- XRP 는 체결이 ETH 의 1/14 라 같은 $ 기준이면 원이 8% 뿐이었다).
 // 아래 막대 = 구간별 거래대금(매수 | 매도).
 // 2026-10-13 사용자 «3·5·10분으로 나누지 말고 진짜 차트처럼 확대/축소해서 왔다 갔다»: 시간축 확대(20초~30분)·끌기 이동(최근 30분 안).
 //   테이프 = 30분치 한 번 받고 매초 새 초만 덧붙임(since) · 래스터 = 최근 5분 안이면 1초 해상도(2초마다), 아니면 30분 2초 해상도(10초마다).
@@ -14,12 +15,16 @@
   // 보기 상태 -- 큰 오버레이(VM)와 시장 맥락 미니(VN, 2026-10-13 사용자 «미니에서도 확대 축소 실시간»)가 따로 확대·이동한다. 데이터(S)는 함께 쓴다.
   var VM = { span: DEF_SPAN, back: 0, def: DEF_SPAN, geo: null, drag: null, pinch: null, main: true };
   var VN = { span: MINI_SPAN, back: 0, def: MINI_SPAN, geo: null, drag: null, pinch: null, main: false };
-  var S = { on: false, asset: "", rows: [], bucket: 0, end: 0, none: false, full: false,
+  var S = { on: false, asset: "", rows: [], bucket: 0, end: 0, sc: 1, none: false, full: false,
             fine: null, coarse: null, fineT: 0, coarseT: 0, busyT: false, busyF: false, busyC: false, raf: 0 };
   var STOPS = [0, 0.2, 0.4, 0.55, 0.68, 0.84, 1];                   // --bbm-h0..6 위치
 
   function asset() { return typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset; }
   function buf(s) { var r = atob(s), u = new Uint8Array(r.length); for (var i = 0; i < r.length; i++) u[i] = r.charCodeAt(i); return u.buffer; }
+  function won(v) { return "$" + (v >= 1e4 ? +(v / 1e4).toFixed(1) + "만" : Math.round(v).toLocaleString("en-US")); }
+  function legend() {   // 범례·설명의 금액을 지금 코인 기준으로
+    document.querySelectorAll("[data-bbm-usd]").forEach(function (e) { var t = won(+e.getAttribute("data-bbm-usd") * S.sc); if (e.textContent !== t) e.textContent = t; });
+  }
   function usd(v) { return "$" + (v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : Math.round(v / 1e3) + "k"); }
   function fmtPx(p) { return p.toFixed(p >= 10 ? 2 : 4); }
   function rgb(tok, a) { var c = css(tok).split(/\s+/).join(","); return a == null ? "rgb(" + c + ")" : "rgba(" + c + "," + a + ")"; }
@@ -49,7 +54,7 @@
         var keep = since != null ? S.rows.filter(function (r) { return r[0] <= since; }) : [];
         var lo = j.end - MAX - 5;
         S.rows = keep.concat(j.rows).filter(function (r) { return r[0] >= lo; });
-        S.bucket = j.bucket; S.end = j.end; S.full = true; redraw();
+        S.bucket = j.bucket; S.end = j.end; S.full = true; S.sc = (j.whale_usd || 1e5) / 1e5; legend(); redraw();
       })
       .catch(function () { /* 다음 초에 다시 */ })
       .then(function () { S.busyT = false; });
@@ -158,10 +163,10 @@
     rows.sort(function (p, q) { return p.u - q.u; }).forEach(function (x) {
       var col = x.b >= x.s ? good : bad, cx = X(x.t + 0.5), cy = Y(x.p);
       g.fillStyle = col; g.strokeStyle = col;
-      if (x.u < 25000) { g.globalAlpha = 0.7; g.beginPath(); g.arc(cx, cy, narrow ? 1.6 : 2, 0, Math.PI * 2); g.fill(); return; }
-      var r = Math.min((narrow ? 13 : 28) * zs, 3 + k * Math.sqrt(x.u / 1e5));
+      if (x.u < 25000 * S.sc) { g.globalAlpha = 0.7; g.beginPath(); g.arc(cx, cy, narrow ? 1.6 : 2, 0, Math.PI * 2); g.fill(); return; }
+      var r = Math.min((narrow ? 13 : 28) * zs, 3 + k * Math.sqrt(x.u / 1e5 / S.sc));
       g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.globalAlpha = 0.6; g.fill(); g.globalAlpha = 1; g.lineWidth = 1.2; g.stroke();
-      if (x.u >= (narrow ? 2e5 : 1e5) * WIN / 180) {                    // 고리 기준 = 3분 $10만 · 5분 $17만 · 10분 $33만
+      if (x.u >= (narrow ? 2e5 : 1e5) * S.sc * WIN / 180) {             // 고리 기준 = 3분 $10만 · 5분 $17만 · 10분 $33만(ETH · 다른 코인은 × S.sc)
         g.lineWidth = 1.6; g.strokeStyle = price; g.beginPath(); g.arc(cx, cy, r + 2.5, 0, Math.PI * 2); g.stroke();
         labels.push({ x: cx, y: cy, r: r, u: x.u });
       }

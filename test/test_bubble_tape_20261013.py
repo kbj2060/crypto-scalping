@@ -30,6 +30,8 @@ def test_window_and_whale_sum(tmp_path):
     none = tmp_path / "missing.sqlite"
     p = bubble_tape_payload("ethusdt", 180, db=db, now=1000, okx_db=none, bybit_db=none)
     assert p["bucket"] == 0.1 and p["end"] == 1000 and p["lo"] == 1000 - 185 and p["venues"] == ["binance"]
+    assert p["whale_usd"] == 100_000.0                       # 화면 원·고리 기준(코인별) -- ETH 그대로
+    assert bubble_tape_payload("xrpusdt", 180, db=db, now=1000, okx_db=none, bybit_db=none)["whale_usd"] == 23_000.0
     assert p["rows"] == [[990, 40001, 2.0, 1.0, 1.5]]
     assert bubble_tape_payload("ethusdt", 180, db=db, now=1000, since=990, okx_db=none, bybit_db=none)["rows"] == []
     assert len(bubble_tape_payload("ethusdt", 180, db=db, now=1000, since=989, okx_db=none, bybit_db=none)["rows"]) == 1

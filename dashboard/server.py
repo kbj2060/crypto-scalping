@@ -948,6 +948,7 @@ def bubble_tape_payload(symbol: str, sec: int, db: Path = HOT_TAPE_DB, now: floa
             a = acc.setdefault((int(t), int(b)), [0.0, 0.0, 0.0])
             a[0] += float(x or 0); a[1] += float(y or 0); a[2] += float(w or 0)
     return {"symbol": symbol, "bucket": TAPE_BUCKETS[symbol], "lo": lo, "end": end, "venues": venues,
+            "whale_usd": size_bands(symbol)[1],   # 2026-10-20 화면 원·고리 기준을 코인별로(ETH $10만 · XRP $2.3만)
             "rows": [[t, b, round(v[0], 6), round(v[1], 6), round(v[2], 6)] for (t, b), v in sorted(acc.items())]}
 
 
