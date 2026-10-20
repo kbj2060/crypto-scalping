@@ -130,8 +130,9 @@ def vol4h_from_klines(rows: list, art: dict, now_ms: float) -> dict:
     a0, a1 = art.get("expand_logit") or VOL_P   # 매달 재학습 때 표본외로 다시 맞춘 상수(아티팩트에 있으면 그것)
     pred, ref, rv48 = float(p[-1]), float(np.median(p)), float(np.exp(X["rv48"].iloc[-1]))
     s4 = pred * np.sqrt(svm.HOLD)
+    # sig4h_usd 자릿수: XRP $1.3 -- 2자리면 $0.01 (2026-10-20). 🔴이 dict 줄 중간에 주석을 넣으면 뒤 키가 사라진다(10-21 lvl·x_now 빠짐 사고)
     return {"ok": True, "asof_ms": int(rows[-1][6]) + 1, "px": float(c[-1]), "sig4h_pct": round(100 * s4, 3),
-            "sig4h_usd": round(float(c[-1]) * s4, 2 if c[-1] >= 10 else 4),   # XRP $1.3 -- 2자리면 $0.01 "lvl": round(pred / ref, 3), "x_now": round(pred / rv48, 3),
+            "sig4h_usd": round(float(c[-1]) * s4, 2 if c[-1] >= 10 else 4), "lvl": round(pred / ref, 3), "x_now": round(pred / rv48, 3),
             "p_expand": round(float(1 / (1 + np.exp(-(a0 + a1 * np.log(pred / rv48))))), 3),
             "ref_days": round(len(p) / 288, 1), "model_train_end": art.get("train_end")}
 

@@ -3682,7 +3682,8 @@ function fcTrendCell(t, cell) {
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분 칼시(10-15) → 4h 예측(+변동성) → 7일 → 4~13주. sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
-  const eth = activeSnapshotAsset === "eth", v = latestVol4h && latestVol4h.ok && (latestVol4h.asset || "eth") === activeSnapshotAsset ? latestVol4h : null;
+  const eth = activeSnapshotAsset === "eth", v = latestVol4h && latestVol4h.ok && (latestVol4h.asset || "eth") === activeSnapshotAsset
+    && ["sig4h_pct", "sig4h_usd", "lvl", "x_now", "p_expand"].every((k) => Number.isFinite(latestVol4h[k])) ? latestVol4h : null;   // 10-21: 키가 빠지면 ⑤ 줄 전체가 죽었다
   const cls = (s) => (s > 0 ? "up" : s < 0 ? "dn" : "flat"), word = (s) => (s > 0 ? "▲ 상승" : s < 0 ? "▼ 하락" : "보류");
   const zf = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(2)}`;
   const cell = (hz, c, main, sub, tip, extra = "") => `<div class="fc-c ${c}" title="${escapeHtml(tip)}"><span class="hz">${hz}</span><b>${main}</b><span class="sub">${sub}</span>${extra}</div>`;
