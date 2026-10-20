@@ -3221,6 +3221,30 @@ def make_app() -> web.Application:
                                    lambda: asyncio.to_thread(fp_daily.h4_cells_payload, time.time(), frm, to, row), max_stale=600.0)
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_footprint_4h_heat(request: web.Request) -> web.Response:
+        """4시간봉 청산 밀도 배경(칸마다 그 칸 마감 시점의 추정 청산 밀도, 7일 1시간봉) -- 일봉 히트맵과 같은 계산·같은 1시간봉 캐시."""
+        frm, to = _iso_h4(request.query.get("from")), _iso_h4(request.query.get("to"))
+        if not frm or not to:
+            raise web.HTTPBadRequest(reason="from_to")
+        row = fpd.parse_row(request.query.get("row"))
+
+        async def k1h():
+            raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                           {"symbol": fpd.SYMBOL, "interval": "1h", "limit": 500},
+                                           error_reason="fp_daily_heat_klines")
+            now_ms = time.time() * 1000
+            return [r for r in raw if int(r[6]) < now_ms] if isinstance(raw, list) else raw
+        try:
+            raw = await swr_cached("fp_daily_k1h", 600.0, k1h, max_stale=3600.0)   # 일봉 히트맵과 같은 캐시 키 = 1시간봉 한 번만 받는다
+        except Exception:  # noqa: BLE001 -- 1시간봉을 못 받으면 배경 없이
+            raw = None
+        try:
+            payload = await swr_cached(f"fp_4h_heat_{frm}_{to}_{row}", 300.0,
+                                       lambda: asyncio.to_thread(fpd.h4_heat_payload, time.time(), frm, to, row, raw), max_stale=1800.0)
+        except ValueError:
+            raise web.HTTPBadRequest(reason="range") from None
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_footprint_daily_heat(request: web.Request) -> web.Response:
         """일봉 청산 히트맵(하루 한 열 = 그날 마감의 추정 청산 밀도, 7일 창). ?from&to&row 는 cells 와 같다.
         소급본 뒤 날(오늘 포함)은 최근 1시간봉 500개(10분 캐시)로 계산한다."""
@@ -4114,6 +4138,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/footprint-daily/heat", api_footprint_daily_heat)
     app.router.add_get("/api/footprint-4h", api_footprint_4h)
     app.router.add_get("/api/footprint-4h/cells", api_footprint_4h_cells)
+    app.router.add_get("/api/footprint-4h/heat", api_footprint_4h_heat)
     app.router.add_get("/api/supply-1s", api_supply_1s)
     app.router.add_get("/api/oi-5m", api_oi_5m)
 

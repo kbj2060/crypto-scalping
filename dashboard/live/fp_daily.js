@@ -8,7 +8,7 @@
 // 🔴CI 문법 검사(esprima)가 `?.(`·`?.[`·숫자 구분자를 못 읽는다 -- 쓰지 말 것(09-30 배포 워처 정지 사고).
 (function () {
   "use strict";
-  var HEAT_URL = "/api/footprint-daily/heat";
+
   var HEAT_CLIP_PCT = 0.98;    // 양수 밀도의 98분위 = 가장 진한 색(진한 곳만 떠오르게)
   var HEAT_BOX_ROW = 25;      // 2026-10-10 위·아래 2칸 순위는 늘 $25 칸으로 고른다(사용자 A) -- 화면 칸 크기로 고르면 확대/축소마다 이웃 칸이 합쳐져 1·2등이 바뀌었다
   var HEAT_BOX_MIN_PX = 10;    // 봉 폭이 이보다 좁으면 테두리를 그리지 않는다(금액 글자는 칸 안에 들어갈 때만)
@@ -18,12 +18,12 @@
   var ROW_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500];
   var REFRESH_MS = 60000;
   var LANES = [["delta", "델타"], ["turn", "거래대금"], ["oi", "OI"], ["liq", "청산"], ["lmap", "추정 청산"]];
-  // 2026-10-20 사용자 «4h 버튼 = 1주일을 4시간봉 풋프린트로»: 같은 그림·조작을 봉 길이만 바꿔 쓴다(서버 /api/footprint-4h · 지난 7일 + 형성 중).
-  //   4시간봉은 델타·거래대금 레인만(OI·청산·추정 청산·히트맵은 일봉 전용) · 시각 = 칸 시작(UTC 00·04·…시 = KST 09·13·…시).
+  // 2026-10-20 사용자 «4h 버튼 = 1주일을 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로»: 같은 그림·레인·청산 히트맵을 봉 길이만 바꿔 쓴다
+  //   (서버 /api/footprint-4h · 지난 7일 + 형성 중 · OI = 칸 마지막 값 · 청산 = 칸 합 · 히트맵 = 칸 마감 시점). 시각 = 칸 시작(UTC 00·04·…시 = KST 09·13·…시).
   var PERIODS = {
-    "1d": { days: "/api/footprint-daily", cells: "/api/footprint-daily/cells", heat: true, span: 30, minSpan: 7, lanes: LANES, name: "일봉",
+    "1d": { days: "/api/footprint-daily", cells: "/api/footprint-daily/cells", heatUrl: "/api/footprint-daily/heat", heat: true, span: 30, minSpan: 7, lanes: LANES, name: "일봉",
             views: [["30", "30일"], ["180", "6개월"], ["all", "전체"]] },
-    "4h": { days: "/api/footprint-4h", cells: "/api/footprint-4h/cells", heat: false, span: 12, minSpan: 3, lanes: LANES.slice(0, 2), name: "4시간봉",
+    "4h": { days: "/api/footprint-4h", cells: "/api/footprint-4h/cells", heatUrl: "/api/footprint-4h/heat", heat: true, span: 12, minSpan: 3, lanes: LANES, name: "4시간봉",
             views: [["12", "2일"], ["42", "1주"], ["all", "전체"]] }
   };
   var P = function () { return PERIODS[S.period]; };
@@ -102,7 +102,7 @@
       for (var i = w.a; i <= w.b; i++) if (!S.heat.has(row + "|" + S.D.d[i])) miss.push(i);
       if (!miss.length) continue;
       try {
-        var r = await fetch(HEAT_URL + "?from=" + S.D.d[miss[0]] + "&to=" + S.D.d[miss[miss.length - 1]] + "&row=" + row, { cache: "no-store" });
+        var r = await fetch(P().heatUrl + "?from=" + S.D.d[miss[0]] + "&to=" + S.D.d[miss[miss.length - 1]] + "&row=" + row, { cache: "no-store" });
         if (r.ok) {
           var p = await r.json();
           miss.forEach(function (j) { S.heat.set(row + "|" + S.D.d[j], p.heat[S.D.d[j]] || null); });
@@ -634,8 +634,9 @@
 
   // ── 켜고 끄기 ──────────────────────────────────────────────────────────────────────
   var NOTE_1D = null;
-  var NOTE_4H = "시각 = 칸 시작(보는 시계 · UTC 00·04·08·12·16·20시 경계 = KST 09·13·17·21·01·05시) · 지난 7일 + 형성 중 칸 · 칸 = 공격자 매도(왼쪽) / 매수(오른쪽), 진할수록 한쪽 우세 · " +
-                "주황 테두리 = 그 4시간 가장 많이 거래된 가격 · 아래 = 델타·거래대금(OI·청산·히트맵은 1d 에만) · 원천 = 바이낸스 체결 테이프 · 서술이지 신호가 아님";
+  var NOTE_4H = "시각 = 칸 시작(보는 시계 · UTC 00·04·08·12·16·20시 경계 = KST 09·13·17·21·01·05시) · 지난 7일 + 형성 중 칸 · 1d 와 같은 그림을 4시간 칸으로 -- " +
+                "칸 = 공격자 매도(왼쪽) / 매수(오른쪽) · 주황 테두리 = 그 4시간 가장 많이 거래된 가격 · 파란 칸 = 그 칸 마감의 추정 청산 밀도(7일 1시간봉) · " +
+                "OI = 막대 직전 칸 대비 · 선 수준 · 청산 = 그 4시간 강제주문 합 · 추정 청산 = 그 칸 마감 지도의 고점 위/봉 안/저점 아래 비율 · 원천 = 우리 체결 테이프·OI·청산 수집기 · 서술이지 신호가 아님";
   function syncPeriodUi() {   // 범위 버튼·히트맵 버튼·설명 줄을 지금 봉 길이에 맞춘다
     var tools = document.querySelectorAll("#fpDailyTools [data-view]:not([data-view=in]):not([data-view=out])");
     P().views.forEach(function (v, k) { if (tools[k]) { tools[k].dataset.view = v[0]; tools[k].textContent = v[1]; } });

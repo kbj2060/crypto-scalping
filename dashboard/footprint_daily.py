@@ -174,12 +174,13 @@ def rebin(bins: np.ndarray, buy: np.ndarray, sell: np.ndarray, row: int) -> list
     return [lo * row, np.round(bb, 3).tolist(), np.round(ss, 3).tolist()]
 
 
-# ── 4시간봉 풋프린트 (2026-10-20 사용자 «4h 버튼 = 1주일 데이터를 4시간봉 풋프린트로») ───────────────────────
+# ── 4시간봉 풋프린트 (2026-10-20 사용자 «4h 버튼 = 1주일 데이터를 4시간봉 풋프린트로» → «1d 에서 데이터 양만 4h 로») ───────
 #   같은 테이프(lake 봉인일 → hot)를 UTC 00·04·08·12·16·20시(KST 09·13·17·21·01·05) 경계로 묶는다 · 지난 7일 + 형성 중 1개.
+#   열 = 일봉과 같다: 델타·거래대금(테이프) · OI(칸 마지막 값) · 청산 롱/숏 $(청산 수집기) · 청산 밀도 배경 = h4_heat_payload(칸 마감 시점).
 #   닫힌 칸은 경계 뒤 2분이 지나면 캐시(늦게 들어오는 1초 테이프 몫) · 형성 중 칸은 TODAY_TTL 마다 다시 센다.
-#   OI·청산·추정 청산 레인은 일봉 전용(4h 는 델타·거래대금만) -- 열 모양은 일봉과 같게 두고 None.
 H4_SEC, H4_DAYS, H4_SETTLE = 14400, 7, 120
 _h4: dict[str, Any] = {"closed": {}, "live": {}, "at": 0.0}
+_h4_heat: dict[str, tuple] = {}
 _h4_lock = threading.Lock()
 
 
@@ -191,27 +192,69 @@ def _h4_sec(key: str) -> int:
     return int(datetime.strptime(key, "%Y-%m-%dT%H").replace(tzinfo=timezone.utc).timestamp())
 
 
+def _h4_keys(ts_sec: np.ndarray) -> np.ndarray:
+    return (np.asarray(ts_sec, dtype=np.int64) // H4_SEC) * H4_SEC
+
+
 def h4_split(frames: dict[str, pd.DataFrame]) -> dict[str, tuple[dict, tuple]]:
     """날짜별 테이프 행 → 4시간 칸별 (요약, $1 칸)."""
     if not frames:
         return {}
     df = pd.concat(frames.values(), ignore_index=True)
-    k = (df.ts_sec.to_numpy(np.int64) // H4_SEC) * H4_SEC
-    out = {}
-    for t, g in df.groupby(k, sort=True):
-        out[h4_key(t)] = day_from_tape(g.ts_sec.to_numpy(), g.price_bin.to_numpy(), g.buy_qty.to_numpy(float), g.sell_qty.to_numpy(float))
+    return {h4_key(t): day_from_tape(g.ts_sec.to_numpy(), g.price_bin.to_numpy(), g.buy_qty.to_numpy(float), g.sell_qty.to_numpy(float))
+            for t, g in df.groupby(_h4_keys(df.ts_sec), sort=True)}
+
+
+def _after_lake(df: pd.DataFrame | None, col: str, per_sec: int, floor: int) -> int:
+    """lake 에 있는 마지막 날 다음 날 0시(같은 단위) -- 그 전은 lake, 그 뒤는 hot(겹쳐 두 번 세지 않게). lake 가 비면 floor."""
+    if df is None or not len(df):
+        return floor
+    last = datetime.fromtimestamp(int(df[col].max()) // per_sec, timezone.utc).date() + timedelta(days=1)
+    return max(floor, int(datetime.combine(last, datetime.min.time(), timezone.utc).timestamp()) * per_sec)
+
+
+def h4_ctx(read_lake: Callable, read_ctx: Callable, t0: int, now: float) -> dict[str, dict]:
+    """[t0, now] 4시간 칸별 {oi: 칸 마지막 OI(코인), ll·ls: 롱·숏 청산 $}. lake 봉인일 → 그 다음 날부터 hot."""
+    d0, d1 = datetime.fromtimestamp(t0, timezone.utc).date(), datetime.fromtimestamp(now, timezone.utc).date() + timedelta(days=1)
+    out: dict[str, dict] = {}
+    put = lambda key, name, v: out.setdefault(key, {}).__setitem__(name, v)   # noqa: E731
+    # OI -- 칸 마지막 값
+    lk = read_lake("oi_1s", d0, d1, "ts_ms, open_interest")
+    lk = lk[lk.ts_ms >= t0 * 1000] if lk is not None and len(lk) else None
+    hot = read_ctx("SELECT ts_ms, open_interest FROM oi_1s WHERE symbol = ? AND ts_ms >= ? ORDER BY ts_ms",
+                   [HOT_SYM, _after_lake(lk, "ts_ms", 1000, t0 * 1000)]) or []
+    oi = pd.concat([x for x in (lk, pd.DataFrame(hot, columns=["ts_ms", "open_interest"])) if x is not None and len(x)], ignore_index=True) \
+        if (lk is not None and len(lk)) or hot else None
+    if oi is not None:
+        oi = oi.sort_values("ts_ms")
+        for k, v in oi.groupby(_h4_keys(oi.ts_ms.to_numpy(np.int64) // 1000)).open_interest.last().items():
+            put(h4_key(k), "oi", float(v))
+    # 청산 -- 롱(롱 포지션 청산)·숏 $ 합
+    lq = read_lake("liquidations", d0, d1, "ts_ms, side, usd")
+    lq = lq[lq.ts_ms >= t0 * 1000] if lq is not None and len(lq) else None
+    hq = read_ctx("SELECT ts_ms, side, usd FROM liquidations WHERE symbol = ? AND ts_ms >= ?",
+                  [SYMBOL, _after_lake(lq, "ts_ms", 1000, t0 * 1000)]) or []
+    rows = [x for x in (lq, pd.DataFrame(hq, columns=["ts_ms", "side", "usd"])) if x is not None and len(x)]
+    if rows:
+        q = pd.concat(rows, ignore_index=True)
+        for (k, sd), v in q.groupby([_h4_keys(q.ts_ms.to_numpy(np.int64) // 1000), q.side]).usd.sum().items():
+            put(h4_key(k), "ll" if sd == "long" else "ls", float(v))
     return out
 
 
 def h4_cols(buckets: dict[str, tuple[dict, tuple]], live_key: str) -> dict[str, list]:
+    """일봉과 같은 열 묶음. 청산 0 = 진짜 0(수집 중) · OI 없음 = None."""
     cols: dict[str, list] = {k: [] for k in ("d", "o", "h", "l", "c", "bq", "sq", "bv", "sv", "oi", "ll", "ls", "src", "part")}
+    r4 = lambda v: None if v is None else round(float(v), 4)   # noqa: E731
     for k in sorted(buckets):
         r = buckets[k][0]
-        vals = (k, r["open"], r["high"], r["low"], r["close"], r["buy_qty"], r["sell_qty"], r["buy_quote"], r["sell_quote"])
-        for name, v in zip(cols, vals):
-            cols[name].append(v if name == "d" else round(float(v), 4))
-        for name in ("oi", "ll", "ls"):
-            cols[name].append(None)
+        cols["d"].append(k)
+        for name, src in (("o", "open"), ("h", "high"), ("l", "low"), ("c", "close"), ("bq", "buy_qty"), ("sq", "sell_qty"),
+                          ("bv", "buy_quote"), ("sv", "sell_quote")):
+            cols[name].append(r4(r[src]))
+        cols["oi"].append(r4(r.get("oi")))
+        cols["ll"].append(r4(r.get("ll", 0.0)))
+        cols["ls"].append(r4(r.get("ls", 0.0)))
         cols["src"].append("t")
         cols["part"].append(1 if k == live_key else 0)
     return cols
@@ -281,18 +324,22 @@ class DailyFootprint:
         want = [h4_key(t) for t in range(first, cur, H4_SEC)]
         with _h4_lock:
             closed = _h4["closed"]
-            missing = [k for k in want if k not in closed]
+            missing = [k for k in want if k not in closed and k not in _h4["live"]]   # 막 닫힌(아직 2분 전) 칸은 TTL 로 다시 센다
             if missing or now - _h4["at"] >= TODAY_TTL:
                 t0 = _h4_sec(missing[0]) if missing else cur - H4_SEC
-                got = h4_split(tape_rows_by_day(self.read_lake, self.read_hot,
-                                                datetime.fromtimestamp(t0, timezone.utc).date(), datetime.fromtimestamp(now, timezone.utc).date()))
+                d0 = datetime.fromtimestamp(t0, timezone.utc).date()
+                got = h4_split(tape_rows_by_day(self.read_lake, self.read_hot, d0, datetime.fromtimestamp(now, timezone.utc).date()))
+                # 🔴테이프는 그날 0시부터 읽힌다 -- OI·청산도 같은 시점부터(10-20: t0 부터만 읽어 같은 날 앞 칸의 OI·청산이 비었다)
+                ctx = h4_ctx(self.read_lake, self.read_ctx, int(datetime.combine(d0, datetime.min.time(), timezone.utc).timestamp()), now)
+                for k, v in got.items():
+                    v[0].update(ctx.get(k, {}))
                 live = {}
                 for k, v in got.items():
                     t = _h4_sec(k)
                     if t < first:
                         continue
                     if now >= t + H4_SEC + H4_SETTLE:
-                        closed[k] = v                   # 닫히고 2분 지남 = 불변
+                        closed.setdefault(k, v)         # 닫히고 2분 지남 = 불변 -- 이미 굳힌 칸은 덮어쓰지 않는다
                     else:
                         live[k] = v                     # 형성 중 · 막 닫힌 칸
                 for k in [k for k in closed if k < h4_key(first)]:
@@ -314,12 +361,16 @@ HEAT_LOOKBACK_H = 168     # 일봉 청산 히트맵 입력 창(7일 1시간봉) 
 
 
 def heat_for_day(k1h: pd.DataFrame, d: date) -> list[tuple[float, float, float]]:
+    """그날 UTC 마감(다음 날 0시) 시점 -- heat_at 의 일봉판."""
+    return heat_at(k1h, pd.Timestamp(d, tz="UTC") + pd.Timedelta(days=1))
+
+
+def heat_at(k1h: pd.DataFrame, end: pd.Timestamp) -> list[tuple[float, float, float]]:
     """그날 UTC 마감 시점의 추정 청산 밀도 [(칸 가격, w 0~1, s)] -- 라이브 청산맵과 같은 계산(compute_spliced_levels 의 heatmap_bins:
     현재가 아래 = (고+저)/2 진입 · 위 = 종가 진입, w = 쪽마다 최대값 대비). s = 그 칸이 지도 전체(두 쪽 합)에서 차지하는 몫
     -- 화면이 «s × 2 × 그날 OI 달러»로 금액을 낸다(청산맵 tier_profile 의 2×OI 규모와 같은 뜻).
     k1h: timestamp(봉 시작, UTC)·high·low·close·volume. 마감 뒤 봉은 안 본다(인과). 20봉 미만이면 []."""
     from scripts import live_liquidation_map_20260824 as lm
-    end = pd.Timestamp(d, tz="UTC") + pd.Timedelta(days=1)
     win = k1h[(k1h.timestamp < end) & (k1h.timestamp >= end - pd.Timedelta(hours=HEAT_LOOKBACK_H))].reset_index(drop=True)
     if len(win) < 20 or win.timestamp.iloc[0] > end - pd.Timedelta(hours=HEAT_LOOKBACK_H - 2):   # 500봉 밖으로 밀린 날 = 짧은 창으로 조용히 그리지 않는다
         return []
@@ -413,6 +464,33 @@ def heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None = 
     return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H, "until": until}
 
 
+def h4_heat_payload(now: float, frm: str, to: str, row: int, raw_1h: list | None = None) -> dict:
+    """4시간 칸마다 그 칸 마감(형성 중이면 마지막 닫힌 1시간봉) 시점의 추정 청산 밀도 -- 일봉 히트맵과 같은 계산(7일 1시간봉).
+    닫힌 칸은 캐시. 범위는 60칸(10일)까지."""
+    t0, t1 = _h4_sec(frm), _h4_sec(to)
+    if t1 < t0 or t1 - t0 > 60 * H4_SEC:
+        raise ValueError("range")
+    k = klines_1h(raw_1h, now)
+    out: dict[str, list] = {}
+    if k is None or not len(k):
+        return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H}
+    last_end = k.timestamp.iloc[-1] + pd.Timedelta(hours=1)
+    for t in range(t0, t1 + 1, H4_SEC):
+        key, bend = h4_key(t), pd.Timestamp(t + H4_SEC, unit="s", tz="UTC")
+        closed = bend <= last_end
+        c = _h4_heat.get(key) if closed else None
+        if c is None:
+            pw = heat_at(k, min(bend, last_end))
+            c = (np.array([x[0] for x in pw]), np.array([x[1] for x in pw]), np.array([x[2] for x in pw]))
+            if closed:
+                _h4_heat[key] = c
+        if len(c[0]):
+            out[key] = rebin_heat(c[0], c[1], row, c[2])
+    for old in [x for x in _h4_heat if x < h4_key(now - (H4_DAYS + 2) * 86400)]:
+        del _h4_heat[old]
+    return {"row": row, "heat": out, "lookback_h": HEAT_LOOKBACK_H}
+
+
 def parse_row(v: str | None) -> int:
     """화면이 고르는 행 크기($). 신뢰경계 — 정수 1~500 만."""
     try:
@@ -451,8 +529,31 @@ def selftest() -> None:
     assert sp["2026-10-19T00"][0]["buy_qty"] == 1.0 and sp["2026-10-19T04"][0]["sell_qty"] == 3.0
     assert _h4_sec("2026-10-19T04") == t + 1 and h4_key(t) == "2026-10-19T00"
     hc = h4_cols(sp, "2026-10-19T04")
-    assert hc["d"] == ["2026-10-19T00", "2026-10-19T04"] and hc["part"] == [0, 1] and hc["oi"] == [None, None]
-    print("selftest OK -- 테이프 일 요약·$1 칸·행 묶기·청산 모름/반쪽/0·OI 병합·행 입력 검증·4시간 칸 경계")
+    assert hc["d"] == ["2026-10-19T00", "2026-10-19T04"] and hc["part"] == [0, 1] and hc["oi"] == [None, None] and hc["ll"] == [0.0, 0.0]
+    # 맥락(OI 마지막 값 · 청산 롱/숏) · lake/hot 이음(겹치는 날은 lake 만)
+    ms = lambda h, m=0: int(datetime(2026, 10, 19, h, m, tzinfo=timezone.utc).timestamp() * 1000)   # noqa: E731
+    lake_oi = pd.DataFrame({"ts_ms": [ms(1), ms(3)], "open_interest": [10.0, 11.0]})
+    def lake(stream, a, b, cols):
+        return {"oi_1s": lake_oi, "liquidations": pd.DataFrame({"ts_ms": [ms(5)], "side": ["long"], "usd": [7.0]})}[stream]
+    def ctx(sql, params):
+        assert params[1] == ms(0) + 86400000, params     # lake 마지막 날(10-19) 다음 날부터 hot
+        return [(ms(0) + 86400000 + 1, 99.0)] if "oi_1s" in sql else [(ms(0) + 86400000 + 5, "short", 4.0)]
+    t00 = ms(0) // 1000
+    cx = h4_ctx(lake, ctx, t00, t00 + 86400 + 3600)
+    assert cx["2026-10-19T00"]["oi"] == 11.0 and cx["2026-10-19T04"]["ll"] == 7.0, cx
+    # 다시 세기(TTL)에도 같은 날 앞 칸의 OI 가 남는다(10-20 버그: 두 번째 호출에서 None)
+    tape = pd.DataFrame({"ts_sec": [t00 + 3600 * h for h in (1, 5, 9)], "price_bin": [20000] * 3, "buy_qty": [1.0] * 3, "sell_qty": [0.0] * 3})
+    oi3 = pd.DataFrame({"ts_ms": [(t00 + 3600 * h) * 1000 for h in (1, 5, 9)], "open_interest": [1.0, 2.0, 3.0]})
+    lk2 = lambda stream, a, b, cols: {"tape": tape, "oi_1s": oi3, "liquidations": None}[stream]   # noqa: E731
+    f2 = DailyFootprint(lk2, lambda q, p: [], lambda q, p: [])
+    _h4.update(closed={}, live={}, at=0.0)
+    n0 = t00 + 10 * 3600                                  # 08시 칸 형성 중
+    one = f2.h4_payload(n0)["cols"]
+    two = f2.h4_payload(n0 + TODAY_TTL + 1)["cols"]       # TTL 지나 다시 셈
+    assert one["oi"] == [1.0, 2.0, 3.0] and two["oi"] == [1.0, 2.0, 3.0], (one["oi"], two["oi"])
+    _h4.update(closed={}, live={}, at=0.0)
+    assert cx["2026-10-20T00"]["oi"] == 99.0 and cx["2026-10-20T00"]["ls"] == 4.0, cx
+    print("selftest OK -- 테이프 일 요약·$1 칸·행 묶기·청산 모름/반쪽/0·OI 병합·행 입력 검증·4시간 칸 경계·OI/청산 4시간 묶기·lake→hot 이음")
 
 
 if __name__ == "__main__":
