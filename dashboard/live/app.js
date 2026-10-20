@@ -6248,7 +6248,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   델타·POC 선·밀도 층은 그대로(칸이 아니다). 데스크탑(isMobileChartMode 거짓)은 한 줄도 안 바뀐다.
     // 2026-10-20 넓힌 창(fpThin -- 봉이 얇아 칸 숫자가 안 들어갈 때)도 같은 그림: 체결 박스 없이 가운데 채운 캔들 · 델타·POC 선은 그대로.
     const MOB = isMobileChartMode() || fpThin;
-    const fpcW = FPC ? (MOB ? Math.max(3, bw * 0.6) : fpcWC) : 0, fpcGap = FPC ? 2 : 0;
+    // 2026-10-21 사용자 «축소해서 체결 박스가 안 보이면 일반 캔들 차트처럼 캔들이 붙어 있게»: 박스 끈 넓힌 창(fpThin)은 몸통 = 봉 폭(칸의 80%) · 휴대폰 12봉(시안 B)은 60% 그대로
+    const fpcW = FPC ? (fpThin ? bw : MOB ? Math.max(3, bw * 0.6) : fpcWC) : 0, fpcGap = FPC ? 2 : 0;
     const half = Math.max(2, (bw - fpcW - fpcGap) / 2 - 0.5);
     // 모바일에선 한 칸이 10px 도 안 된다("1.2k" 가 13px) -- 숫자를 포기하고 **색 농담만** 남긴다.
     // 숫자를 욱여넣으면 옆 칸을 침범해서 둘 다 못 읽는다. 값은 눌러서 툴팁으로 본다.
@@ -6289,7 +6290,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       return { pocKey, pocVol, buyTot, sellTot, lowKey };
     };
     // 1px 밑 봉 합치기(아래 DENSE) · 4px 위는 노드 캔들(MOB fpcW)과 같은 폭
-    const denseCandle = (ctx, x, c, fw = slot >= 4 ? Math.max(3, bw * 0.6) : Math.max(0.6, bw * 0.8)) => {
+    const denseCandle = (ctx, x, c, fw = fpThin ? Math.max(0.6, bw) : slot >= 4 ? Math.max(3, bw * 0.6) : Math.max(0.6, bw * 0.8)) => {
       const col = c.close >= c.open ? "var(--good)" : "var(--bad)", cxm = x + bw / 2;
       const yT = yAt(Math.max(c.open, c.close)), yB = yAt(Math.min(c.open, c.close));
       cvVLine(ctx, cxm, yAt(c.high), yAt(c.low), col);
