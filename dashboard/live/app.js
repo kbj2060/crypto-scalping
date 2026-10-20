@@ -87,6 +87,10 @@ const CHART_WINDOW_BARS = [12, 24, 36, 48, 72, 96, 144];   // 5분봉 기준
 //   색 농담만 남는 «시간축 볼륨 프로파일»이 된다. 4h 에서도 이미 그렇다(봉 26px).
 let chartWindowBars = CHART_WINDOW_BARS[0];
 const fpZoomed = () => chartWindowBars > CHART_WINDOW_BARS[0];   // 넓힌 창 = 체결 박스 없이 캔들
+// 2026-10-20 사용자 «5m과 같은 구성으로 30m과 1h 도»: 5분봉 k 개를 UTC 경계로 묶은 봉(12봉 = 6시간·12시간 -- 서버 풋프린트 144봉 안).
+//   렌더러는 그대로 두고 **입력만** 묶는다(캔들·풋프린트 칸·OI·청산 · tfCandles 등). 휠 줌·가로 이동·미니맵은 5m 전용.
+let chartTfK = 1;   // 1 = 5m · 6 = 30m · 12 = 1h
+const tfT = (t) => (chartTfK > 1 ? t - (t % (300 * chartTfK)) : t);   // 5분봉 시각(초) -> 그 봉이 든 tf 봉 시각
 const API_FOOTPRINT_URL = "/api/footprint";
 // 🔴여기 있던 "차트 자체가 5초마다 다시 그려진다"는 **틀린 주석**이었다(실제는 20초였다).
 // 서버는 WS 로 계속 누적하므로 **이 폴링 간격이 곧 셀의 지연**이다.
@@ -403,7 +407,7 @@ const GEX_POLL_MS = 60000;           // 2026-09-28 체인 10분 · 블록 20초(
 //   «한 카드 안의 두 그림이 다른 구간을 말하면 읽는 사람이 속는다».
 const FLOW_HEATMAP_COLS = 300;       // 열 수는 고정 -- 전송량(≈3KB)과 해상도를 함께 묶는다
 const flowHeatmapAgg = () =>         // 창 전체를 300열에 담는 초/열
-  Math.max(1, Math.min(60, Math.round(chartWindowBars * 300 / FLOW_HEATMAP_COLS)));
+  Math.max(1, Math.min(60, Math.round(chartWindowBars * chartTfK * 300 / FLOW_HEATMAP_COLS)));   // 30m·1h 는 상한 60초/열 = 5시간까지
 // 2026-09-20 1초(사용자 요청). 「새 열이 agg 초마다 하나니 그보다 자주 받아야 같은 그림」
 // 이라 3~15초로 묶고 있었는데, **틀렸다** -- 맨 끝 열은 진행 중이라 매초 바뀌고, 창 전체를
 // 접어 내는 행 통계도 같이 움직인다. 실측(1h 탭, 1초 간격 두 번): inst 46/272행 2.52% ·
@@ -717,9 +721,10 @@ function setupChartModeTabs() {
 
 
 // 창 바꾸기(1h 버튼 · 휠 줌 공용). 오른쪽 끝(chartPanEnd)은 그대로 -- 넓히면 왼쪽(과거)으로 늘어난다.
-function setChartWindow(bars) {
-  if (!CHART_WINDOW_BARS.includes(bars) || bars === chartWindowBars) return;
+function setChartWindow(bars, k = chartTfK) {
+  if (!CHART_WINDOW_BARS.includes(bars) || (bars === chartWindowBars && k === chartTfK)) return;
   chartWindowBars = bars;
+  chartTfK = k;
   renderChartWindowTabs();
   chartPanForce = true;
   scheduleSnapshotChartRender();   // 데이터가 오기 전에도 이미 있는 봉으로 바로 넓힌다(누른·굴린 티)
@@ -746,7 +751,7 @@ function setupChartWindowTabs() {
     btn.addEventListener("click", () => {
       if (!btn.dataset.bars) return;   // 4h·1d 는 fp_daily.js 가 켠다(4시간봉·일봉 풋프린트)
       // 2026-10-20 사용자 «5m 을 누르면 최신 1시간을 5분봉으로»: 넓혀 둔 창·과거로 옮긴 창도 처음으로
-      setChartWindow(Number(btn.dataset.bars));
+      setChartWindow(Number(btn.dataset.bars), Number(btn.dataset.tfk) || 1);   // 30m·1h = data-tfk 6·12
       if (chartPanEnd != null || chartPanY) chartPanReset();
     });
   });
@@ -760,7 +765,7 @@ function renderChartWindowTabs() {
   const daily = typeof window.fpDailyActive === "function" && window.fpDailyActive();
   const per = typeof window.fpDailyPeriod === "function" ? window.fpDailyPeriod() : "1d";   // 2026-10-20 같은 그림이 4h(4시간봉)도 그린다
   tabs.forEach((btn, k) => {
-    const on = btn.id === "fpDailyBtn" ? daily && per === "1d" : btn.dataset.tf ? daily && per === btn.dataset.tf : !daily && Number(btn.dataset.bars) === chartWindowBars;
+    const on = btn.id === "fpDailyBtn" ? daily && per === "1d" : btn.dataset.tf ? daily && per === btn.dataset.tf : !daily && Number(btn.dataset.bars) === chartWindowBars && (Number(btn.dataset.tfk) || 1) === chartTfK;
     btn.classList.toggle("active", on);
     if (on) idx = k;
   });
@@ -4313,6 +4318,75 @@ function footprintForChart() {
   };
 }
 
+// ── 30m·1h 묶기 (2026-10-20) -- chartTfK === 1 이면 전부 입력을 그대로 돌려준다(5m 은 한 줄도 안 바뀐다) ──
+// 캔들: 시가 = 첫 봉 · 고저 = 합 · 거래량 = 합 · 나머지(종가·sma·vwap 등) = 마지막 봉(그 시각의 값). 형성 tf 봉 = 라이브 5분봉 포함.
+function tfCandles(full) {
+  if (chartTfK === 1) return full;
+  const out = [];
+  full.forEach((c) => {
+    const t = tfT(c.time), a = out[out.length - 1];
+    if (a && a.time === t) Object.assign(a, c, { time: t, open: a.open, high: Math.max(a.high, c.high), low: Math.min(a.low, c.low), volume: (+a.volume || 0) + (+c.volume || 0) });
+    else out.push(Object.assign({}, c, { time: t }));
+  });
+  return out;
+}
+// 풋프린트 칸: 같은 가격 행의 7열(가격·매수·매도·고래 매수/매도·리테일 매수/매도)을 5분봉끼리 더한다.
+//   닫힌 tf 봉은 같은 배열을 돌려준다 -- 렌더러 봉 캐시가 levels 신원으로 재사용한다(진행 봉만 매번 새로).
+const tfLvMemo = new Map();
+function tfLevels(byTime, bucket) {
+  const groups = new Map(), out = new Map();
+  [...byTime.keys()].sort((a, b) => a - b).forEach((t) => {
+    const T = tfT(t);
+    if (!groups.has(T)) groups.set(T, []);
+    groups.get(T).push(byTime.get(t));
+  });
+  groups.forEach((refs, T) => {
+    const m = tfLvMemo.get(T);
+    if (m && m.k === chartTfK && m.refs.length === refs.length && m.refs.every((r, i) => r === refs[i])) { out.set(T, m.lv); return; }
+    const sum = new Map();
+    refs.forEach((lv) => (lv || []).forEach((l) => {
+      const key = Math.round(l[0] / bucket);
+      if (!sum.has(key)) sum.set(key, [Number(l[0]), 0, 0, 0, 0, 0, 0]);
+      const a = sum.get(key);
+      for (let j = 1; j < 7; j++) a[j] += Number(l[j]) || 0;
+    }));
+    const lv = [...sum.values()].sort((a, b) => a[0] - b[0]);
+    tfLvMemo.set(T, { k: chartTfK, refs, lv });
+    out.set(T, lv);
+  });
+  if (tfLvMemo.size > 400) tfLvMemo.clear();   // ponytail: 통째로 비움(코인·tf 를 오가면 쌓인다) -- 다음 렌더가 다시 채운다
+  return out;
+}
+function tfFootprint(fp) {
+  return fp && chartTfK > 1 ? Object.assign({}, fp, { byTime: tfLevels(fp.byTime, fp.bucket) }) : fp;
+}
+// 레인 입력은 원본 배열 신원으로 기억한다(층 캐시 키가 objToken 이라 렌더마다 새 배열이면 매번 다시 그린다).
+const tfMemo = (fn) => { let src, k, out; return (x) => (chartTfK === 1 ? x : x === src && k === chartTfK ? out : (src = x, k = chartTfK, out = fn(x))); };
+const tfFpBars = tfMemo((bars) => [...tfLevels(new Map(bars.filter((b) => Array.isArray(b.levels)).map((b) => [b.time, b.levels])),
+  Number(latestFootprint && latestFootprint.bucket) || 0.5)].map(([time, levels]) => ({ time, levels })));
+const tfOi = tfMemo((bars) => {   // [시각, ΔOI] -- tf 봉 ΔOI = 그 안 5분 Δ 합(= 봉 끝 OI − 직전 봉 끝 OI)
+  const m = new Map();
+  bars.forEach((b) => { const T = tfT(Number(b[0])); m.set(T, (m.get(T) || 0) + (Number(b[1]) || 0)); });
+  return [...m];
+});
+const tfLiq = tfMemo((bars) => {   // 청산: 금액·건수 합(거래소별 몫도) · 진행 중 = 하나라도 진행 중
+  const m = new Map();
+  bars.forEach((b) => {
+    const T = tfT(Math.floor(Date.parse(b.ts) / 1000));
+    if (!Number.isFinite(T)) return;
+    if (!m.has(T)) m.set(T, { ts: new Date(T * 1000).toISOString(), long_usd: 0, short_usd: 0, events: 0 });
+    const a = m.get(T);
+    a.long_usd += Number(b.long_usd) || 0; a.short_usd += Number(b.short_usd) || 0; a.events += Number(b.events) || 0;
+    a.partial = a.partial || !!b.partial; a.okx = a.okx || !!b.okx;
+    ["okx_detail", "bybit", "hl"].forEach((v) => {
+      if (!b[v]) return;
+      const x = a[v] || (a[v] = { long_usd: 0, short_usd: 0, n: 0 });
+      x.long_usd += Number(b[v].long_usd) || 0; x.short_usd += Number(b[v].short_usd) || 0; x.n += Number(b[v].n) || 0;
+    });
+  });
+  return [...m.values()];
+});
+
 // 체결량 표기 -- 셀 폭이 30px 대라 네 글자를 넘기면 안 된다(ETH 수량 기준).
 function fmtFootprintQty(v) {
   if (!(v > 0)) return "";
@@ -4765,7 +4839,7 @@ function renderChartPan() {
   const box = el("chartPan");
   if (!box) return;
   const full = candleHistoryByAsset[activeSnapshotAsset] || [];
-  if (!full.length || !flowOn()) { box.hidden = true; chartPanKey = ""; return; }
+  if (!full.length || !flowOn() || chartTfK > 1) { box.hidden = true; chartPanKey = ""; return; }   // 30m·1h = 이동 없음
   box.hidden = false;
   const hist = full.slice(-CHART_PAN_BARS), n = hist.length, off = full.length - n;
   const e = chartPanEndIndex(full) - off, s = Math.max(0, e - chartWindowBars), live = chartPanEnd == null && !chartPanY;
@@ -4811,13 +4885,13 @@ function setupChartPan() {
   // 차트 위 휠(2026-10-20 사용자): **세로 = 줌** -- 아래로 = 넓게(체결 박스 없이 캔들) · 위로 = 좁게(1h 에서 풋프린트), 한 단 = 60px.
   //   끝 단(1h·12h)에서 더 굴리면 휠을 페이지에 돌려준다(스크롤이 막히지 않게). **가로 휠(트랙패드 옆으로) = 이동** 40px = 1봉.
   //   끌기 = 봉 폭만큼 · 더블클릭 = 최신으로 · 방향키(미니맵) = 이동은 그대로.
-  const canPan = () => flowOn() && Math.min(full().length, CHART_PAN_BARS) > chartWindowBars;
+  const canPan = () => chartTfK === 1 && flowOn() && Math.min(full().length, CHART_PAN_BARS) > chartWindowBars;
   // 2026-10-20 사용자 «12h 꽉 차면 페이지가 내려간다» → 1번(제스처 잡기): 휠이 0.4초 넘게 멈췄다 다시 시작하면 «새 제스처».
   //   새 제스처가 줌으로 시작했으면 끝날 때까지 차트가 휠을 잡는다(끝 단에 닿아도 페이지로 안 샌다).
   //   이미 끝 단에서 그쪽으로 새로 굴리면 그 제스처는 통째로 페이지 스크롤.
   let acc = 0, zacc = 0, gest = null, gestT = 0;
   svg.addEventListener("wheel", (ev) => {
-    if (!flowOn() || ev.ctrlKey) return;
+    if (!flowOn() || ev.ctrlKey || chartTfK > 1) return;   // 30m·1h = 휠은 페이지 스크롤
     if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) {
       if (!canPan()) return;
       ev.preventDefault();
@@ -4864,7 +4938,7 @@ function renderSnapshotChart() {
   chartPanForce = false;
   const svg = el("candleSvgSnapshot");
   if (!svg) return;
-  const fullCandles = candleHistoryByAsset[activeSnapshotAsset] || [];
+  const fullCandles = tfCandles(candleHistoryByAsset[activeSnapshotAsset] || []);
   if (!fullCandles.length) return;
   // Sliced to SNAPSHOT_CHART_MAX_CANDLES (6h) -- narrower than the shared candleHistoryByAsset
   // cache (still 8h, CHART_MAX_CANDLES) so the density-history overlay always has a real snapshot
@@ -4872,7 +4946,7 @@ function renderSnapshotChart() {
   // 풋프린트 모드면 테이프가 덮는 구간(최대 12봉=1시간)만 그린다 -- 72봉을 1200px 에 넣으면
   // 봉당 16px 라 셀이 물리적으로 안 들어간다. 대신 청산밀도 히트맵은 끈다(셀과 같은 자리를
   // 다투고, 정확한 레벨은 차트 아래 목록에 그대로 있다). 2026-09-15 사용자 결정 "완전 교체".
-  const footprint = footprintForChart();
+  const footprint = tfFootprint(footprintForChart());
   // 🔴2026-09-23 풋프린트 모드에서 캔들을 **풋프린트 범위로 자르고** 있었다. 그래서 12h 를
   //   골라도 서버 풋프린트 링이 덮는 만큼(실측 54봉=4.5시간)만 보였다 -- 캔들은 200개
   //   (16.7시간) 있는데도. 위 주석의 이유(«72봉을 1200px 에 넣으면 셀이 안 들어간다»)는
@@ -4898,7 +4972,7 @@ function renderSnapshotChart() {
   //   (liqBars 기본값 [] -> peak 0 -> 블록 전체 skip, 오류도 안 남). 치환 대상 문자열을
   //   확인 없이 바꾸려다 조용히 실패했던 자리다.
   renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels,
-    densityHistory, latestLiquidation5mHist, footprint);
+    densityHistory, tfLiq(latestLiquidation5mHist), footprint);
 }
 
 function fmtDateTick(ts) {
@@ -5099,7 +5173,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   모양이 된다 -- 자산 전환에서 latestOi5m 을 비우는 것과 이 조건, 둘 다 필요하다.
   // 데이터가 없으면 자리를 아예 안 잡는다(웜업·다른 코인에서 가격 플롯만 40px 손해다).
   const oiBars = (svg.id === "candleSvgSnapshot" && flowOn()
-                  && latestOi5m && Array.isArray(latestOi5m.bars)) ? latestOi5m.bars : [];
+                  && latestOi5m && Array.isArray(latestOi5m.bars)) ? tfOi(latestOi5m.bars) : [];
   // 모바일 26 / 데스크톱 34. h 는 모바일에서도 실제로 400 이다(styles.css 가 #candleSvgSnapshot
   // 높이를 400px 로 고정 -- `Math.max(parentH, 260)` 의 260 은 SVG 가 안 그려질 때의 바닥값이다).
   // 400 기준 가격 플롯은 모바일 233, 데스크톱 205 로 남는다.
@@ -5112,7 +5186,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 데이터가 없으면 자리를 아예 안 잡는다(OI 레인과 같은 규약).
   const fpBars = (svg.id === "candleSvgSnapshot" && flowOn()
                    && latestFootprint && Array.isArray(latestFootprint.bars))
-                  ? latestFootprint.bars : [];
+                  ? tfFpBars(latestFootprint.bars) : [];
   // ── 5분봉 레인: 여덟 줄 -> 두 행 (2026-09-22 사용자 선택) ─────────────────────
   // 상관 실측이 근거다(라이브 12봉): 거래대금↔청산 r=+0.958 · 거래대금↔|델타| +0.884 ·
   // |델타|↔청산 +0.882 -- 앞의 셋은 사실상 한 축(«얼마나 시끄러웠나»)이라 세 줄을 쓸 이유가
@@ -5396,7 +5470,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const densitySweep = new Map();
   const lastSnap = sortedDensityHistory[sortedDensityHistory.length - 1];
   if (lastSnap) {
-    const since = Math.floor((lastSnap.tsMs || 0) / 1000);   // 2026-10-11 스냅샷 ts = 아는 시각(5분 경계) -- 그 뒤 봉 = 형성 5분봉뿐
+    const since = tfT(Math.floor((lastSnap.tsMs || 0) / 1000));   // 30m·1h = 그 시각이 든 tf 봉부터 · 2026-10-11 스냅샷 ts = 아는 시각(5분 경계) -- 그 뒤 봉 = 형성 5분봉뿐
     (lastSnap.bins || []).forEach((b) => {
       if (!(b.weightPct > 0)) return;
       const i = liqSweepIdx(candles, since, b.price);
@@ -6031,7 +6105,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       }
       // ③ 볼린저(20, 2σ) -- 창 슬라이스로는 20봉이 안 돼 전체 이력에서 센다
       if (mcLine.bb) {
-        const bbm = mcBollinger(candleHistoryByAsset[activeSnapshotAsset] || []);
+        const bbm = mcBollinger(tfCandles(candleHistoryByAsset[activeSnapshotAsset] || []));
         [0, 2].forEach((j) => pl(candles.map((c, i) => (bbm.has(c.time) ? `${cx(i)},${yAt(bbm.get(c.time)[j]).toFixed(1)}` : null)).filter(Boolean),
           { stroke: "var(--muted)", "stroke-opacity": 0.55, "stroke-dasharray": "3 3", "stroke-width": 1 },
           "볼린저 밴드(20봉 · 2σ). 우리 검정: 4시간 볼린저는 평균회귀·이탈 추종 둘 다 비용을 못 넘었다 — 위치 참고."));
@@ -6293,7 +6367,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // "진입/청산" 처럼 글자를 넣으면 글자밭이 된다.
     (cm.events || []).forEach(ev => {
       if (mobileChart && ev.grade === "약") return;   // 피치 3.5px -- 모바일은 강/중만
-      const idx = idxByEpoch.get(Date.parse(ev.t) / 1000);
+      const idx = idxByEpoch.get(tfT(Date.parse(ev.t) / 1000));
       if (idx === undefined || !candles[idx]) return;
       const isBottom = ev.side === "bottom";
       const sideKey = isBottom ? "bottom" : "top";
@@ -6888,7 +6962,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     let trigLines = "";
     if (isSnapshotChart && cmNow && cmNow.available) {
       (cmNow.events || []).forEach((ev) => {
-        if (Math.floor(Date.parse(ev.t) / 1000) !== c.time) return;
+        if (tfT(Math.floor(Date.parse(ev.t) / 1000)) !== c.time) return;
         trigLines += `<br>${ev.side === "bottom" ? "▲" : "▼"} ${ev.label}`
           + (ev.grade ? ` ${ev.grade}등급` : "")
           + (ev.p != null ? ` · 확률 ${(Number(ev.p) * 100).toFixed(0)}%` : "")
@@ -7176,8 +7250,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     return candles.map((c, i) => {
       if (!rows[i]) return null;
       let w_ = 0, m = 0, rt = 0, oi = 0, ok = true;
-      for (let k = 0; k < 12; k++) {
-        const t = c.time - k * 300, b = fpByT.get(t);
+      for (let k = 0; k < 12 / chartTfK; k++) {   // 60분 = 30m 2봉 · 1h 1봉
+        const t = c.time - k * 300 * chartTfK, b = fpByT.get(t);
         if (!b) return null;
         const f = supplyFlowOfBar(b.levels); w_ += f.whale; m += f.mid; rt += f.retail;
         if (oiByT.has(t)) oi += oiByT.get(t); else ok = false;
@@ -7192,7 +7266,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     return `<br><br><b style="color:${col(r.delta)}">${QNAME(r.delta, r.oi)}</b> · 델타 ${sgnQ(r.delta)} · 신규계약 ${r.oi == null ? "모름" : sgnQ(r.oi)} ${coinUnit()}`
       + `<br>이 봉: 고래 ${sgnQ(r.whale)} · 중형 ${sgnQ(r.mid)} · 리테일 ${sgnQ(r.retail)} · <span style="color:var(--turnover)">거래대금 ${fmtUsdCompact(r.turn)}</span>`
       + (q ? `<br>60분 합: CVD ${sgnQ(q.c)} · <span style="color:var(--warn)">OI ${sgnQ(q.oi)}</span> · 고래 ${sgnQ(q.w)} · 중형 ${sgnQ(q.m)} · 리테일 ${sgnQ(q.r)}`
-           : "<br>60분 합: 모름 (앞 12봉 중 빈 봉)");
+           : `<br>60분 합: 모름 (앞 ${12 / chartTfK}봉 중 빈 봉)`);
   };
   cachedLayer("quadLane", objToken(fpBars) + "|" + objToken(oiBars) + "|" + activeSnapshotAsset + "|" + ((latestBreakoutDetector && latestBreakoutDetector.rvol && latestBreakoutDetector.rvol.session) || ""), (g) => {
     if (!(fpBars.length && candles.length && QUAD_H)) return;
@@ -7222,7 +7296,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const LG = mobileChart ? 2 : 4, LH = (bot - chartTop - LG * (LANES.length - 1)) / LANES.length, fs = mobileChart ? 9 : 11;
     const bwid = Math.max(1, Math.min(slotW * 0.62, slotW - 2)), wideVal = !!splitR && TRADE_W > 0, valX = wideVal ? ml + cw + LANE_VAL_W - 12 : ml + 4;   // 좁은 화면 = 칩을 왼쪽(오래된 봉) 위에 -- 오른쪽은 최신 봉이라 가리면 안 된다
     // 2026-10-14 사용자 «타임프레임마다 그 창의 단순 합산값도 60분 합 바로 옆에» -- 창 = 지금 보이는 봉 전부(1시간 창이면 60분 합과 같아 생략)
-    const winMin = rows.length * 5, winLab = winMin >= 1440 ? `${+(winMin / 1440).toFixed(1)}일` : `${+(winMin / 60).toFixed(1)}시간`, showWin = winMin > 60;
+    const winMin = rows.length * 5 * chartTfK, winLab = winMin >= 1440 ? `${+(winMin / 1440).toFixed(1)}일` : `${+(winMin / 60).toFixed(1)}시간`, showWin = winMin > 60;
     const wX = valX, hX = showWin ? valX - 50 : valX;   // 넓은 화면: 오른쪽 끝 = 창 합 · 그 왼쪽 50px = 60분 합
     const usd = (v) => (Math.abs(v) >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : Math.abs(v) >= 1e8 ? `$${Math.round(v / 1e6)}M` : Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : fmtUsdCompact(v));   // $673M · $24.3M -- 7자 넘지 않게   // 대금은 짧게($24.3M · $3.37B) -- 두 칸이 겹치지 않게
     if (wideVal) {
@@ -7260,7 +7334,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const vtt = document.createElementNS(NS, "title"); const rv = !rk && latestBreakoutDetector && latestBreakoutDetector.asset === activeSnapshotAsset ? latestBreakoutDetector.rvol : null;   // 오늘 거래량(옛 범례 괄호)
       const rvTxt = rv && rv.session_label && Number.isFinite(Number(rv.session_basis === "weekend" ? rv.session_weekend : rv.session))
         ? ` · 오늘 거래량 ${rv.session_label} ${Number(rv.session_basis === "weekend" ? rv.session_weekend : rv.session).toFixed(2)}배` : "";
-      vtt.textContent = rk ? `${nm} 60분 합 ${vs} ${coinUnit()} (최근 12봉)` : `거래대금 이 봉 ${vs}${rvTxt}`; vt.append(vtt);
+      vtt.textContent = rk ? `${nm} 60분 합 ${vs} ${coinUnit()} (최근 ${12 / chartTfK}봉)` : `거래대금 이 봉 ${vs}${rvTxt}`; vt.append(vtt);
     });
   });
 

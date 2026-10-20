@@ -223,9 +223,12 @@
               <button type="button" class="asset-tab" data-view="bubble" aria-pressed="false">체결 버블</button>   <!-- 2026-10-13 bubble_map.js -->
             </div>
             <div id="chartWindowTabs" class="asset-tabs chart-mode-tabs" aria-label="데이터 창"
-                 title="풋프린트와 수급 프로파일이 보는 구간. 차트 위 휠 = 넓히기(캔들)·좁히기(1h 풋프린트).">
+                 title="풋프린트와 수급 프로파일이 보는 구간. 5m 에서 차트 위 휠 = 넓히기(캔들)·좁히기(5분봉 풋프린트).">
               <!-- 2026-10-20 사용자 «2h·4h·12h 제거 · 휠로 축소하면 캔들, 확대하거나 1h 를 누르면 풋프린트» -- 넓힌 창은 #fpZoomNote 가 말한다 -->
               <button type="button" class="asset-tab active" data-bars="12" title="5분봉 풋프린트(최신 1시간) — 차트 위 휠을 아래로 굴리면 넓어지며 캔들로(2h~12h), 위로 굴리거나 여기를 누르면 다시 풋프린트">5m</button>
+              <!-- 2026-10-20 사용자 «5m과 같은 구성으로 30m과 1h 도» -- 5분봉을 6·12개씩 묶은 봉 12개(app.js chartTfK). 휠 줌·가로 이동 없음 -->
+              <button type="button" class="asset-tab" data-bars="12" data-tfk="6" title="30분봉 풋프린트(최신 6시간) — 5m 과 같은 구성 · 휠 줌·가로 이동 없음">30m</button>
+              <button type="button" class="asset-tab" data-bars="12" data-tfk="12" title="1시간봉 풋프린트(최신 12시간) — 5m 과 같은 구성 · 휠 줌·가로 이동 없음">1h</button>
               <button type="button" id="fpH4Btn" class="asset-tab" data-tf="4h" aria-pressed="false"
                       title="4시간봉 풋프린트 — 지난 7일 · 휠·두 손가락 = 확대/축소 · 끌기 = 이동 · 더블클릭 = 최근 7일 · ETH 만">4h</button>
               <!-- 2026-10-09 일봉 = 같은 세그먼트 다섯째 칸(사용자 «1h/2h/4h/12h/1d 처럼 안으로»). 5분 창이 아니라 일봉 풋프린트로
