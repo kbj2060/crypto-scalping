@@ -9391,6 +9391,9 @@ async function manualEntryPollStatus() {
   try {
     const res = await fetch("/api/manual-entry/status", { cache: "no-cache" });
     const data = await res.json();
+    // 2026-10-20 청산만 코인별: 주 칸을 다른 코인이 쓰는 동안 이 코인 청산은 side_exits[코인] 칸으로 나간다 -- 그 칸을 본다
+    const sx = (data.side_exits || {})[activeSnapshotAsset];
+    if (sx && sx.phase && sx.phase !== "idle" && (data.state?.asset || "eth") !== activeSnapshotAsset) data.state = sx;
     box.innerHTML = entryResultHtml(data.state,
       /^(error|taker_failed|rejected)$/.test(data.state?.phase || "") ? "bad" : "live");
     const phase = data.state?.phase;

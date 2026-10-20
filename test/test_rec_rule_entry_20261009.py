@@ -263,6 +263,39 @@ class RecRuleEntryTest(unittest.TestCase):
                   armed={f"{SYM}:LONG": {"symbol": SYM, "side": "LONG", "sl_price": 2300.0, "backstop_price": 2300.0, "armed_at": 1.0}})
 
 
+    def test_manual_entry_shares_rule_cap_when_rule_armed(self) -> None:
+        """2026-10-20 사용자 «규칙 상한 공유»: 자동 규칙 손절이 무장돼 있으면 수동 진입(규칙 없음)도 계좌 명목 ≤ 순자산 × 3."""
+        armed = {f"{SYM}:LONG": {"symbol": SYM, "side": "LONG", "sl_price": 2375.0, "backstop_price": 2375.0, "rule": True, "armed_at": 1.0}}
+        async def fn(c):
+            p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=100")).json())["plan"]
+            self.assertAlmostEqual(p["cap_notional_usdt"], 1000 * 3.0, delta=0.01)
+            self.assertLessEqual(p["total_notional_usdt"], 1000 * 3.0 + 1e-6)
+        self._run(account([long_pos(0.4, 2500.0)]), fn, armed=armed)
+
+        async def fn2(c):   # 규칙 무장이 없으면 그대로(증거금 50% 상한 = 1000 × 20 × 50%)
+            p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=100")).json())["plan"]
+            self.assertAlmostEqual(p["cap_notional_usdt"], 1000 * 20 * 0.5, delta=0.01)
+        self._run(account([long_pos(0.4, 2500.0)]), fn2)
+
+    def test_exit_slot_per_coin(self) -> None:
+        """2026-10-20 사용자 «청산만 코인별»: 주 칸을 다른 코인이 쓰면 이 코인 청산 칸 · 같은 코인이면 막힘 · 칸이 비면 주 칸."""
+        import re
+        src = (Path(__file__).resolve().parents[1] / "dashboard" / "orders.py").read_text("utf-8")
+        i = src.index("    def _busy("); j = src.index("    # 2026-10-16 접수 검사")
+        ns: dict = {"Any": object}
+        exec(re.sub(r"^    ", "", src[i:j], flags=re.M), ns)
+        ns["manual_entry_state"], ns["side_exit_states"] = {"phase": "idle"}, {}
+        self.assertIs(ns["exit_slot"]("xrp"), ns["manual_entry_state"])
+        ns["manual_entry_state"].update(phase="working", asset="eth")
+        self.assertIsNone(ns["exit_slot"]("eth"))
+        side = ns["exit_slot"]("xrp")
+        self.assertIs(side, ns["side_exit_states"]["xrp"])
+        side["phase"] = "working"
+        self.assertIsNone(ns["exit_slot"]("xrp"))                      # 이 코인 청산이 도는 중이면 또 못 낸다
+        ns["manual_entry_state"]["phase"] = "filled_maker"
+        self.assertIsNone(ns["exit_slot"]("xrp"))                      # 주 칸이 비어도 이 코인 칸이 돌면 막힘
+
+
 class ManualModeTest(unittest.TestCase):
     """2026-10-09 «규칙 모두 제거해 수동으로»: 커밋 기본값(MANUAL_RULES_ENABLED False · 증거금 상한 0) 그대로 --
     큰 기존 포지션이 있어도 상한으로 안 막히고, SL/TP 는 안 걸리고, rule=c 는 400."""

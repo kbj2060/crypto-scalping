@@ -589,6 +589,21 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     binance_account_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     # 진행 중인 수동 주문 하나. 동시에 둘을 두지 않는다 -- 겹치면 단건 상한의 뜻이 흐려진다.
     manual_entry_state: dict[str, Any] = {"phase": "idle"}
+    # 2026-10-20 사용자 «청산만 코인별 허용»: 위 칸을 **다른 코인**이 쓰는 동안(예: ETH 손절 청산 최대 2분) 이 코인 청산은 자기 칸으로 나간다.
+    #   진입·스위칭은 여전히 위 칸 하나(상한이 계좌 전체라 진입끼리는 겹치지 않게).
+    side_exit_states: dict[str, dict[str, Any]] = {}
+
+    def _busy(st: dict | None) -> bool:
+        return bool(st) and st.get("phase") in ("working", "submitting")
+
+    def exit_slot(asset: str) -> dict | None:
+        """청산이 쓸 상태 칸. 위 칸이 비었으면 위 칸 · 다른 코인이 쓰는 중이면 이 코인 청산 칸 · 같은 코인이 쓰는 중이면 None(409)."""
+        side = side_exit_states.setdefault(asset, {"phase": "idle"})
+        if _busy(side):
+            return None
+        if not _busy(manual_entry_state):
+            return manual_entry_state
+        return None if (manual_entry_state.get("asset") or "eth") == asset else side
     # 2026-10-16 접수 검사 ~ 상태 점유 사이 await(계획 조립 0.5~2초) 동안 두 번째 접수(폰+데스크탑)가 검사를 빠져나가 두 번 나갔다
     manual_order_lock = asyncio.Lock()
     # 2026-10-10 진입 «기다리기»(최대 60분)는 **따로** 둔다 -- 위 칸을 60분 잡으면 그동안 청산·SL 감시가 막힌다.
@@ -965,14 +980,15 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     st.pop(key)
                 changed = True
                 continue
-            if (act != "fire" or manual_entry_state.get("phase") in ("working", "submitting")
-                    or time.time() < float(b.get("retry_after") or 0)):
+            b_asset = exec_asset_of(b["symbol"]) or "eth"
+            if act != "fire" or exit_slot(b_asset) is None or time.time() < float(b.get("retry_after") or 0):
                 continue
             plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth")
             # 🔴검사는 조립(await) **뒤**에 -- 그 사이 «손절 해제»나 사용자 청산이 들어오면 쏘지 않는다(남의 상태를 clear 하고 두 번 청산하지 않게)
             if (bracket_load().get(key) or {}).get("sl_off"):
                 continue
-            if manual_order_lock.locked() or manual_entry_state.get("phase") in ("working", "submitting"):
+            slot = exit_slot(b_asset)   # 2026-10-20 다른 코인 주문이 도는 중이면 이 코인 칸으로 청산(옛 판: 그 주문이 끝날 때까지 손절을 미뤘다)
+            if manual_order_lock.locked() or slot is None:
                 continue
             if err and err[0].get("error") == "no_position":     # 이미 닫혔다 -- 정리하고 내린다(못 지웠으면 다음 틱 «clear» 가 다시)
                 if not (await clear_bracket(binance_session(), b["symbol"], pside)).get("errors"):
@@ -985,23 +1001,23 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 b["last_error"] = (err[0] if err else {}).get("detail") or plan.get("blocked")
                 changed = True
                 continue
-            manual_entry_state.clear()
-            manual_entry_state.update(phase="submitting", kind="exit", trigger="bracket_sl",
-                                      side=pside, plan=plan, asset=exec_asset_of(b["symbol"]) or "eth",
-                                      started_at=datetime.now(timezone.utc).isoformat())
-            await settle(run_exit(binance_session(), plan, manual_entry_state), manual_entry_state)
+            slot.clear()
+            slot.update(phase="submitting", kind="exit", trigger="bracket_sl",
+                        side=pside, plan=plan, asset=b_asset,
+                        started_at=datetime.now(timezone.utc).isoformat())
+            await settle(run_exit(binance_session(), plan, slot), slot)
             # 🔴다 닫혔을 때만 비상 스탑을 지운다 -- 청산이 실패했는데 지우면 무방비가 된다.
-            if manual_entry_state.get("phase") in ("filled_maker", "filled_taker"):
-                manual_entry_state["bracket_cleanup"] = await clear_bracket(
+            if slot.get("phase") in ("filled_maker", "filled_taker"):
+                slot["bracket_cleanup"] = await clear_bracket(
                     binance_session(), b["symbol"], pside)
-                if not manual_entry_state["bracket_cleanup"].get("errors"):   # 못 지웠으면 남겨 둔다 -- 다음 틱 «clear» 가 다시 지운다
+                if not slot["bracket_cleanup"].get("errors"):   # 못 지웠으면 남겨 둔다 -- 다음 틱 «clear» 가 다시 지운다
                     st.pop(key)
             else:
                 b["retry_after"] = time.time() + 30
-                b["last_error"] = manual_entry_state.get("error")
+                b["last_error"] = slot.get("error")
             changed = True
             print(f"bracket {pside}: SL {b.get('sl_price')} (레벨 {b.get('sl_level')}) 5분봉 종가 {last_bar} 이탈 -> "
-                  f"{manual_entry_state.get('phase')}",
+                  f"{slot.get('phase')}",
                   flush=True)
         if changed:
             # 🔴다시 읽고 **내가 본 무장(armed_at)** 에만 적용한다 -- 위 await 동안 새 진입이 다른
@@ -1126,6 +1142,11 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 current_notional=exposure).get("setting") if policy_cap_x else None) or leverage
             if SIZING_MARGIN_CAP_PCT > 0 and equity > 0 and margin_lev:
                 binding.append((equity * margin_lev * SIZING_MARGIN_CAP_PCT / 100.0, "margin"))
+            # 2026-10-20 사용자 «규칙 상한 공유»: 자동 규칙 손절이 무장된 포지션이 있으면 수동 진입(어느 코인이든)도 계좌 명목 ≤ 순자산 × 규칙 상한.
+            #   교차 마진이라 규칙의 «손절보다 청산이 멀다» 보장은 계좌 전체 명목에 걸린다 -- 수동으로 다른 코인을 크게 넣으면 그 보장이 깨진다(10-20 감사).
+            #   ponytail: 무장 파일엔 «보유 1.5×» 인지가 안 남아 늘 COMMIT_CAP_X(3) -- 1.5 로 묶으려면 arm_bracket 이 rule_l 을 남기면 된다.
+            if equity > 0 and any(v.get("rule") and v.get("sl_price") for v in bracket_load().values()):
+                binding.append((equity * COMMIT_CAP_X, "rule_shared"))
             cap_notional = min(v for v, _ in binding) if binding else None
             # 🔴상한 무시 스위치. 위 SIZING_CAP_OVERRIDE_X 주석이 계약이다.
             overridden = SIZING_CAP_OVERRIDE_X > 0 and equity > 0
@@ -1217,7 +1238,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 fraction_of_equity=True, order_leverage=margin_lev or 0.0,
                 cap_label={"margin": f"증거금 상한 {SIZING_MARGIN_CAP_PCT:g}%",
                            "model": "위험모델 상한",
-                           "rule": f"자동 규칙 상한(순자산 {cr['l'] if cr else 0:.2f}배)"}.get(who, "상한"))
+                           "rule": f"자동 규칙 상한(순자산 {cr['l'] if cr else 0:.2f}배)",
+                           "rule_shared": f"자동 규칙 포지션이 있어 계좌 상한(순자산 {COMMIT_CAP_X:g}배)"}.get(who, "상한"))
             plan["recommended_source"] = rec_src
             plan["recommended_qty"] = round(rec_qty, 8)
             plan["projection"] = entry_projection(plan, account, positions, existing, equity)
@@ -1340,7 +1362,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
                                      status=403)
-        if manual_entry_state.get("phase") in ("working", "submitting"):
+        if _busy(manual_entry_state) or _busy(side_exit_states.get(query_asset(request))):
             return web.json_response({"ok": False, "error": "already_working",
                                       "state": manual_entry_state}, status=409)
         if wait_pending():   # 대기 몫은 아직 명목에 안 잡힌다 -- 그 위에 또 넣으면 상한이 두 번 쓰인다
@@ -1656,7 +1678,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
                                      status=403)
-        if manual_entry_state.get("phase") in ("working", "submitting"):
+        st = exit_slot(query_asset(request))
+        if st is None or (sw and st is not manual_entry_state):   # 스위칭은 반대 진입이 따라오므로 위 칸만
             return web.json_response({"ok": False, "error": "already_working",
                                       "state": manual_entry_state}, status=409)
         if sw and wait_pending():
@@ -1672,15 +1695,18 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
-        manual_entry_state.clear()
-        manual_entry_state.update(phase="submitting", kind="exit", side=side, plan=plan, asset=query_asset(request),
-                                  started_at=datetime.now(timezone.utc).isoformat())
+        if exit_slot(query_asset(request)) is not st:   # 계획 조립(await) 사이에 칸이 바뀌었으면(손절 청산이 잡음) 두 번 내지 않는다
+            return web.json_response({"ok": False, "error": "already_working",
+                                      "state": manual_entry_state}, status=409)
+        st.clear()
+        st.update(phase="submitting", kind="exit", side=side, plan=plan, asset=query_asset(request),
+                  started_at=datetime.now(timezone.utc).isoformat())
         if sw:
-            manual_entry_state["switch"] = {"from": side, "to": sw["to"], "phase": "exit"}
-        refresh_tasks["manual_entry"] = asyncio.create_task(
-            exit_then_switch(plan, manual_entry_state, sw, query_asset(request)) if sw
-            else settle(run_exit(binance_session(), plan, manual_entry_state), manual_entry_state))
-        return web.json_response({"ok": True, "plan": plan, "state": manual_entry_state},
+            st["switch"] = {"from": side, "to": sw["to"], "phase": "exit"}
+        refresh_tasks["manual_entry" if st is manual_entry_state else f"manual_exit_{query_asset(request)}"] = asyncio.create_task(
+            exit_then_switch(plan, st, sw, query_asset(request)) if sw
+            else settle(run_exit(binance_session(), plan, st), st))
+        return web.json_response({"ok": True, "plan": plan, "state": st},
                                  headers=NOCACHE)
 
     async def api_manual_bracket_disarm(request: web.Request) -> web.Response:
@@ -1753,7 +1779,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     async def api_manual_entry_status(request: web.Request) -> web.Response:
         """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
         보여준다. 주문은 최대 하나만 동시에 둔다."""
-        return web.json_response({"ok": True, "state": manual_entry_state, "wait": manual_wait_state,
+        return web.json_response({"ok": True, "state": manual_entry_state, "wait": manual_wait_state, "side_exits": side_exit_states,
                                   "exec_enabled": exec_enabled(), "bracket_armed": bracket_load()},
                                  headers=NOCACHE)
 
