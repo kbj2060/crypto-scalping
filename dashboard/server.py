@@ -3186,6 +3186,35 @@ def make_app() -> web.Application:
             raise web.HTTPBadRequest(reason="range") from None
         return web.json_response(payload, headers=NOCACHE)
 
+    _H4_KEY = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}")
+
+    def _iso_h4(v: str | None) -> str | None:
+        """신뢰경계: 4시간 칸 키 'YYYY-MM-DDTHH'(UTC) 만 통과."""
+        if v is None:
+            return None
+        if not _H4_KEY.fullmatch(v):
+            raise web.HTTPBadRequest(reason="bad_key")
+        return v
+
+    async def api_footprint_4h(request: web.Request) -> web.Response:
+        """2026-10-20 4시간봉 풋프린트 요약(지난 7일 + 형성 중) -- 열 모양은 일봉과 같다. ?since=키 면 그 칸부터(1분 갱신용)."""
+        since = _iso_h4(request.query.get("since"))
+        full = await swr_cached("fp_4h_days", 30.0, lambda: asyncio.to_thread(fp_daily.h4_payload, time.time()), max_stale=600.0)
+        if since:
+            keep = [i for i, d in enumerate(full["cols"]["d"]) if d >= since]
+            full = {**full, "cols": {k: [v[i] for i in keep] for k, v in full["cols"].items()}}
+        return web.json_response(full, headers=NOCACHE)
+
+    async def api_footprint_4h_cells(request: web.Request) -> web.Response:
+        """보이는 4시간 칸들의 가격 칸. ?from=&to=(키) · ?row=행 달러(1~500)."""
+        frm, to = _iso_h4(request.query.get("from")), _iso_h4(request.query.get("to"))
+        if not frm or not to:
+            raise web.HTTPBadRequest(reason="from_to")
+        row = fpd.parse_row(request.query.get("row"))
+        payload = await swr_cached(f"fp_4h_cells_{frm}_{to}_{row}", 30.0,
+                                   lambda: asyncio.to_thread(fp_daily.h4_cells_payload, time.time(), frm, to, row), max_stale=600.0)
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_footprint_daily_heat(request: web.Request) -> web.Response:
         """일봉 청산 히트맵(하루 한 열 = 그날 마감의 추정 청산 밀도, 7일 창). ?from&to&row 는 cells 와 같다.
         소급본 뒤 날(오늘 포함)은 최근 1시간봉 500개(10분 캐시)로 계산한다."""
@@ -4077,6 +4106,8 @@ def make_app() -> web.Application:
     app.router.add_get("/api/footprint-daily", api_footprint_daily)
     app.router.add_get("/api/footprint-daily/cells", api_footprint_daily_cells)
     app.router.add_get("/api/footprint-daily/heat", api_footprint_daily_heat)
+    app.router.add_get("/api/footprint-4h", api_footprint_4h)
+    app.router.add_get("/api/footprint-4h/cells", api_footprint_4h_cells)
     app.router.add_get("/api/supply-1s", api_supply_1s)
     app.router.add_get("/api/oi-5m", api_oi_5m)
 

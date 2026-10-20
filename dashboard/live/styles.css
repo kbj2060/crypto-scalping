@@ -1920,7 +1920,7 @@ svg {
 }
 /* 폴백값. 실제 칸 수와 선택 위치는 renderChartWindowTabs() 가 인라인으로 넣는다 --
    여기 숫자를 버튼 수와 맞춰 두는 걸 잊으면 선택 칸이 어긋난다(2026-09-23 실제로 그랬다). */
-#chartWindowTabs { --seg-n: 2; }   /* 1h · 1d(일봉) -- 2026-10-20 2h·4h·12h 는 휠 줌으로 */
+#chartWindowTabs { --seg-n: 3; }   /* 5m · 4h(4시간봉 풋프린트 1주) · 1d(일봉) -- 2026-10-20 */
 #chartWindowTabs.zoomed::before { opacity: 0; }   /* 휠로 넓힌 창 = 어느 칸도 아님(옆 #fpZoomNote 가 «6시간 · 캔들») */
 .fp-zoom-note { align-self: center; font: 600 11.5px/1 var(--font-mono, inherit); color: var(--amber); white-space: nowrap; }
 .fp-zoom-note[hidden] { display: none; }

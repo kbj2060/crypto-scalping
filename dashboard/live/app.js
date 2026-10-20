@@ -744,7 +744,10 @@ const chartZoomBy = (n) => {   // n>0 = 넓게(축소) · 끝에 닿으면 false
 function setupChartWindowTabs() {
   document.querySelectorAll("#chartWindowTabs .asset-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (btn.dataset.bars) setChartWindow(Number(btn.dataset.bars));
+      if (!btn.dataset.bars) return;   // 4h·1d 는 fp_daily.js 가 켠다(4시간봉·일봉 풋프린트)
+      // 2026-10-20 사용자 «5m 을 누르면 최신 1시간을 5분봉으로»: 넓혀 둔 창·과거로 옮긴 창도 처음으로
+      setChartWindow(Number(btn.dataset.bars));
+      if (chartPanEnd != null || chartPanY) chartPanReset();
     });
   });
   renderChartWindowTabs();
@@ -755,8 +758,9 @@ function renderChartWindowTabs() {
   let idx = 0;
   // 2026-10-09 다섯째 칸 1d(#fpDailyBtn, data-bars 없음) = 일봉 풋프린트. 켜져 있으면 선택 칸이 거기 가고 시간 칸은 꺼진다(fp_daily.js 가 이 함수를 다시 부른다)
   const daily = typeof window.fpDailyActive === "function" && window.fpDailyActive();
+  const per = typeof window.fpDailyPeriod === "function" ? window.fpDailyPeriod() : "1d";   // 2026-10-20 같은 그림이 4h(4시간봉)도 그린다
   tabs.forEach((btn, k) => {
-    const on = btn.id === "fpDailyBtn" ? daily : !daily && Number(btn.dataset.bars) === chartWindowBars;
+    const on = btn.id === "fpDailyBtn" ? daily && per === "1d" : btn.dataset.tf ? daily && per === btn.dataset.tf : !daily && Number(btn.dataset.bars) === chartWindowBars;
     btn.classList.toggle("active", on);
     if (on) idx = k;
   });
@@ -4808,7 +4812,10 @@ function setupChartPan() {
   //   끝 단(1h·12h)에서 더 굴리면 휠을 페이지에 돌려준다(스크롤이 막히지 않게). **가로 휠(트랙패드 옆으로) = 이동** 40px = 1봉.
   //   끌기 = 봉 폭만큼 · 더블클릭 = 최신으로 · 방향키(미니맵) = 이동은 그대로.
   const canPan = () => flowOn() && Math.min(full().length, CHART_PAN_BARS) > chartWindowBars;
-  let acc = 0, zacc = 0;
+  // 2026-10-20 사용자 «12h 꽉 차면 페이지가 내려간다» → 1번(제스처 잡기): 휠이 0.4초 넘게 멈췄다 다시 시작하면 «새 제스처».
+  //   새 제스처가 줌으로 시작했으면 끝날 때까지 차트가 휠을 잡는다(끝 단에 닿아도 페이지로 안 샌다).
+  //   이미 끝 단에서 그쪽으로 새로 굴리면 그 제스처는 통째로 페이지 스크롤.
+  let acc = 0, zacc = 0, gest = null, gestT = 0;
   svg.addEventListener("wheel", (ev) => {
     if (!flowOn() || ev.ctrlKey) return;
     if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) {
@@ -4819,9 +4826,14 @@ function setupChartPan() {
       if (steps) { acc -= steps * 40; chartPanBy(-steps); }   // 오른쪽으로 = 최신 쪽
       return;
     }
-    const i = CHART_WINDOW_BARS.indexOf(chartWindowBars);
-    if ((ev.deltaY > 0 && i >= CHART_WINDOW_BARS.length - 1) || (ev.deltaY < 0 && i <= 0)) { zacc = 0; return; }   // 끝 단 = 페이지 스크롤
+    const i = CHART_WINDOW_BARS.indexOf(chartWindowBars), now = performance.now();
+    const atEnd = (ev.deltaY > 0 && i >= CHART_WINDOW_BARS.length - 1) || (ev.deltaY < 0 && i <= 0);
+    if (now - gestT > 400) gest = null;
+    gestT = now;
+    if (gest === null) gest = atEnd ? "page" : "zoom";
+    if (gest === "page") { zacc = 0; return; }   // 끝 단에서 새로 시작한 휠 = 페이지 스크롤
     ev.preventDefault();
+    if (atEnd) { zacc = 0; return; }             // 줌 제스처가 끝 단에 닿음 = 휠을 삼킨다(페이지로 안 샌다)
     zacc += ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY;   // 줄 단위(파이어폭스) 휠도 픽셀로
     const steps = Math.trunc(zacc / 60);
     if (steps) { zacc -= steps * 60; chartZoomBy(Math.sign(steps)); }   // 한 번에 한 단씩(빠른 휠에 1h→12h 로 튀지 않게)

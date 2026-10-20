@@ -174,6 +174,49 @@ def rebin(bins: np.ndarray, buy: np.ndarray, sell: np.ndarray, row: int) -> list
     return [lo * row, np.round(bb, 3).tolist(), np.round(ss, 3).tolist()]
 
 
+# ── 4시간봉 풋프린트 (2026-10-20 사용자 «4h 버튼 = 1주일 데이터를 4시간봉 풋프린트로») ───────────────────────
+#   같은 테이프(lake 봉인일 → hot)를 UTC 00·04·08·12·16·20시(KST 09·13·17·21·01·05) 경계로 묶는다 · 지난 7일 + 형성 중 1개.
+#   닫힌 칸은 경계 뒤 2분이 지나면 캐시(늦게 들어오는 1초 테이프 몫) · 형성 중 칸은 TODAY_TTL 마다 다시 센다.
+#   OI·청산·추정 청산 레인은 일봉 전용(4h 는 델타·거래대금만) -- 열 모양은 일봉과 같게 두고 None.
+H4_SEC, H4_DAYS, H4_SETTLE = 14400, 7, 120
+_h4: dict[str, Any] = {"closed": {}, "live": {}, "at": 0.0}
+_h4_lock = threading.Lock()
+
+
+def h4_key(ts_sec: float) -> str:
+    return datetime.fromtimestamp(int(ts_sec) // H4_SEC * H4_SEC, timezone.utc).strftime("%Y-%m-%dT%H")
+
+
+def _h4_sec(key: str) -> int:
+    return int(datetime.strptime(key, "%Y-%m-%dT%H").replace(tzinfo=timezone.utc).timestamp())
+
+
+def h4_split(frames: dict[str, pd.DataFrame]) -> dict[str, tuple[dict, tuple]]:
+    """날짜별 테이프 행 → 4시간 칸별 (요약, $1 칸)."""
+    if not frames:
+        return {}
+    df = pd.concat(frames.values(), ignore_index=True)
+    k = (df.ts_sec.to_numpy(np.int64) // H4_SEC) * H4_SEC
+    out = {}
+    for t, g in df.groupby(k, sort=True):
+        out[h4_key(t)] = day_from_tape(g.ts_sec.to_numpy(), g.price_bin.to_numpy(), g.buy_qty.to_numpy(float), g.sell_qty.to_numpy(float))
+    return out
+
+
+def h4_cols(buckets: dict[str, tuple[dict, tuple]], live_key: str) -> dict[str, list]:
+    cols: dict[str, list] = {k: [] for k in ("d", "o", "h", "l", "c", "bq", "sq", "bv", "sv", "oi", "ll", "ls", "src", "part")}
+    for k in sorted(buckets):
+        r = buckets[k][0]
+        vals = (k, r["open"], r["high"], r["low"], r["close"], r["buy_qty"], r["sell_qty"], r["buy_quote"], r["sell_quote"])
+        for name, v in zip(cols, vals):
+            cols[name].append(v if name == "d" else round(float(v), 4))
+        for name in ("oi", "ll", "ls"):
+            cols[name].append(None)
+        cols["src"].append("t")
+        cols["part"].append(1 if k == live_key else 0)
+    return cols
+
+
 class DailyFootprint:
     """서버가 하나 둔다. read_lake(stream, start, end, cols) · read_hot(sql, params) · read_ctx(sql, params) 를 주입한다."""
 
@@ -230,6 +273,41 @@ class DailyFootprint:
             c = hist_cells.get(k)
             out[k] = rebin(*(c if c is not None else recent_cells[k]), row)
         return {"row": row, "cells": out}
+
+    def _h4(self, now: float) -> tuple[dict[str, tuple[dict, tuple]], str]:
+        """지난 H4_DAYS 일의 4시간 칸 + 형성 중 칸. 반환 (키 → (요약, $1 칸), 형성 중 키)."""
+        cur = int(now) // H4_SEC * H4_SEC
+        first = cur - H4_DAYS * 86400
+        want = [h4_key(t) for t in range(first, cur, H4_SEC)]
+        with _h4_lock:
+            closed = _h4["closed"]
+            missing = [k for k in want if k not in closed]
+            if missing or now - _h4["at"] >= TODAY_TTL:
+                t0 = _h4_sec(missing[0]) if missing else cur - H4_SEC
+                got = h4_split(tape_rows_by_day(self.read_lake, self.read_hot,
+                                                datetime.fromtimestamp(t0, timezone.utc).date(), datetime.fromtimestamp(now, timezone.utc).date()))
+                live = {}
+                for k, v in got.items():
+                    t = _h4_sec(k)
+                    if t < first:
+                        continue
+                    if now >= t + H4_SEC + H4_SETTLE:
+                        closed[k] = v                   # 닫히고 2분 지남 = 불변
+                    else:
+                        live[k] = v                     # 형성 중 · 막 닫힌 칸
+                for k in [k for k in closed if k < h4_key(first)]:
+                    del closed[k]
+                _h4.update(live=live, at=now)
+            out = {**{k: closed[k] for k in want if k in closed}, **_h4["live"]}
+        return out, h4_key(cur)
+
+    def h4_payload(self, now: float) -> dict:
+        b, live_key = self._h4(now)
+        return {"symbol": SYMBOL, "tz": "UTC", "period": "4h", "cols": h4_cols(b, live_key), "at": now}
+
+    def h4_cells_payload(self, now: float, frm: str, to: str, row: int) -> dict:
+        b, _ = self._h4(now)
+        return {"row": row, "cells": {k: rebin(*v[1], row) for k, v in b.items() if frm <= k <= to}}
 
 
 HEAT_LOOKBACK_H = 168     # 일봉 청산 히트맵 입력 창(7일 1시간봉) -- 라이브 5분 화면은 24h, 일봉 한 칸이 24h 라 7일로
@@ -364,7 +442,17 @@ def selftest() -> None:
     assert c["d"] == ["2026-09-19", "2026-09-20", "2026-09-21"] and c["ll"] == [None, 5.0, 0.0] and c["part"] == [0, 2, 1]
     assert c["oi"] == [10.0, None, 20.0] and c["src"] == ["a", "t", "t"]
     assert parse_row("abc") == 5 and parse_row("0") == 1 and parse_row("9999") == 500
-    print("selftest OK -- 테이프 일 요약·$1 칸·행 묶기·청산 모름/반쪽/0·OI 병합·행 입력 검증")
+    # 4시간 칸: UTC 03:59:59 와 04:00:00 은 다른 칸
+    t = int(datetime(2026, 10, 19, 3, 59, 59, tzinfo=timezone.utc).timestamp())
+    fr = {"2026-10-19": pd.DataFrame({"ts_sec": [t, t + 1, t + 2], "price_bin": [20000, 20010, 20020],
+                                      "buy_qty": [1.0, 2.0, 0.0], "sell_qty": [0.0, 0.0, 3.0]})}
+    sp = h4_split(fr)
+    assert list(sp) == ["2026-10-19T00", "2026-10-19T04"], list(sp)
+    assert sp["2026-10-19T00"][0]["buy_qty"] == 1.0 and sp["2026-10-19T04"][0]["sell_qty"] == 3.0
+    assert _h4_sec("2026-10-19T04") == t + 1 and h4_key(t) == "2026-10-19T00"
+    hc = h4_cols(sp, "2026-10-19T04")
+    assert hc["d"] == ["2026-10-19T00", "2026-10-19T04"] and hc["part"] == [0, 1] and hc["oi"] == [None, None]
+    print("selftest OK -- 테이프 일 요약·$1 칸·행 묶기·청산 모름/반쪽/0·OI 병합·행 입력 검증·4시간 칸 경계")
 
 
 if __name__ == "__main__":
