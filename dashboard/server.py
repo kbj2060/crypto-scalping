@@ -137,7 +137,7 @@ from dashboard import situation as sit  # noqa: E402
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
 from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_rev_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
-from dashboard.box_hold import payload as box_hold_payload  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님)
+from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
 from dashboard import market_ctx as mctx  # noqa: E402
@@ -2514,29 +2514,37 @@ def make_app() -> web.Application:
                     "valid": st["valid"], "events": ev}
         return web.json_response(await asyncio.to_thread(produce), headers=NOCACHE)
 
-    vol4h_art: dict = {}
+    vol4h_art: dict = {}   # 코인 -> {mtime, art}
+    # 코인 -> 아티팩트(None = ETH 기본 svm.ARTIFACT). XRP 는 매달 재학습이 아직 없다(ponytail: 10-19 학습분 고정 -- 재학습 cron 은 파라미터화한 복사본이 필요).
+    VOL4H_ARTIFACTS = {"eth": None, "xrp": REPO_ROOT / "data" / "live" / "xrp_sizing_vol_model.joblib"}
 
     async def api_vol_forecast(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, 표시 전용)
         """4시간 변동성 GBM(scripts/live_eth_sizing_vol_model_20260912) -- 5분봉 31일(평소 = 30일 예측 중앙값) · 5분 캐시.
         9-27 에 끈 사이징 워커와 별개: 주문 크기·상한에는 쓰지 않는다."""
+        asset = str(request.query.get("asset") or "eth").lower()
+        if asset not in VOL4H_ARTIFACTS:   # 2026-10-20 XRP(ETH+XRP 합동 학습 · 2025~ R² .680 > HAR .568 · tmp/xrp_parity_20261020/vol4h)
+            return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
+
         async def produce() -> dict[str, Any]:
             from scripts.live_eth_sizing_vol_model_20260912 import ARTIFACT, load_model
-            mt = ARTIFACT.stat().st_mtime if ARTIFACT.exists() else None   # 매달 재학습(cron)으로 바뀌면 다시 읽는다
-            if vol4h_art.get("mtime") != mt:
-                vol4h_art.update(mtime=mt, art=await asyncio.to_thread(load_model))
-            if vol4h_art["art"] is None:
+            path = VOL4H_ARTIFACTS[asset] or ARTIFACT
+            mt = path.stat().st_mtime if path.exists() else None   # 매달 재학습(cron)으로 바뀌면 다시 읽는다
+            va = vol4h_art.setdefault(asset, {})
+            if va.get("mtime") != mt:
+                va.update(mtime=mt, art=await asyncio.to_thread(load_model, path))
+            if va["art"] is None:
                 return {"ok": False, "reason": "artifact_missing"}
             rows, end = [], None
             for _ in range(10):   # 1000봉 × 10 = 34일(30일 기준 + 400봉 예열)
-                q = {"symbol": "ETHUSDT", "interval": "5m", "limit": 1000, **({"endTime": end} if end else {})}
+                q = {"symbol": MARKET_SYMBOLS[asset], "interval": "5m", "limit": 1000, **({"endTime": end} if end else {})}
                 got = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines", q, error_reason="vol_upstream_error")
                 if not got:
                     break
                 rows = got + rows
                 end = int(got[0][0]) - 1
-            return await asyncio.to_thread(vol4h_from_klines, rows, vol4h_art["art"], time.time() * 1000)
+            return {**await asyncio.to_thread(vol4h_from_klines, rows, va["art"], time.time() * 1000), "asset": asset}
         try:
-            payload = await swr_cached("vol4h", 300.0, produce, max_stale=1800.0)
+            payload = await swr_cached(f"vol4h:{asset}", 300.0, produce, max_stale=1800.0)
         except Exception as exc:  # noqa: BLE001
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
@@ -2558,15 +2566,19 @@ def make_app() -> web.Application:
     async def api_box_hold(request: web.Request) -> web.Response:   # 2026-10-16 박스 유지 확률(ETH, 표시 전용 · 방향 아님)
         """지금가 ± 지난 30분·1h·4h 고저폭 절반을 다음 같은 시간 안 안 벗어날 확률(dashboard/box_hold.py) -- 닫힌 1분봉 1500개 · 15초 캐시.
         10-16 리뷰: 60초 캐시 + 60초 폴링이면 박스 중심가가 평균 2~3분 묵었다(30분 박스는 3분 뒤 9%가 이미 깨져 있음) → 15초 · 묵은 값은 1분까지만."""
+        asset = str(request.query.get("asset") or "eth").lower()
+        if asset not in box_hold_bundles:   # 2026-10-20 XRP(30m·1h 통과 · 4h 불통과 = ok False)
+            return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
+
         async def produce() -> dict[str, Any]:
-            k1m = await liq_klines_df("eth", 1500, interval="1m")
+            k1m = await liq_klines_df(asset, 1500, interval="1m")
             try:   # 10-16 HGB: 예정 발표 칸(다음 W분 안 CPI·고용·FOMC 등) = 거시 일정 워커 상태 -- 못 읽으면 «발표 없음»으로
                 events = (await load_macro_calendar()).get("events")
             except Exception:  # noqa: BLE001
                 events = None
-            return await asyncio.to_thread(box_hold_payload, k1m, events)
+            return await asyncio.to_thread(box_hold_payload, k1m, events, asset)
         try:
-            payload = await swr_cached("box_hold", 15.0, produce, max_stale=60.0)
+            payload = await swr_cached(f"box_hold:{asset}", 15.0, produce, max_stale=60.0)
         except Exception as exc:  # noqa: BLE001
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)

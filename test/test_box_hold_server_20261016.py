@@ -94,6 +94,26 @@ class BoxHoldServerTest(unittest.TestCase):
             self.assertTrue(0 < s["p"] < 1 and s["dn"] < p["px"] < s["up"])
             self.assertTrue(0 < s["q20"] < s["base"] < s["q80"] < 1, s)   # 화면 «깨질/머물 쪽» 문턱
 
+    def test_xrp_bundle_and_4h_off(self):
+        """2026-10-20 XRP 전용 모델: ?asset=xrp → XRPUSDT 1m · 30m·1h 값 · 4h = 검정 불통과(ok False) · 지원 안 하는 코인 = ok False."""
+        async def go():
+            with tempfile.TemporaryDirectory() as tmp:
+                live, dash = Path(tmp) / "live", Path(tmp) / "dashboard"
+                live.mkdir(); dash.mkdir()
+                with mock.patch.object(server, "ClientSession", FakeSession), patch_live_dir(server, live), \
+                     mock.patch.object(server, "DASHBOARD_DIR", dash), \
+                     mock.patch.object(server, "MACRO_CALENDAR_STATE_PATH", live / "macro_calendar_state.json"):
+                    async with TestClient(TestServer(offline_app(server))) as c:
+                        return await (await c.get("/api/box-hold?asset=xrp")).json(), await (await c.get("/api/box-hold?asset=sol")).json()
+        FakeSession.calls = []
+        p, sol = asyncio.run(go())
+        self.assertTrue(p["ok"], p)
+        self.assertEqual((p["model"], p["asset"]), ("hgb-xrp-20261020", "xrp"))
+        self.assertEqual(FakeSession.calls[0]["symbol"], "XRPUSDT")
+        self.assertTrue(p["scales"]["30m"]["ok"] and p["scales"]["1h"]["ok"], p["scales"])
+        self.assertFalse(p["scales"]["4h"]["ok"])
+        self.assertFalse(sol["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

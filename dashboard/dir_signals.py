@@ -131,7 +131,7 @@ def vol4h_from_klines(rows: list, art: dict, now_ms: float) -> dict:
     pred, ref, rv48 = float(p[-1]), float(np.median(p)), float(np.exp(X["rv48"].iloc[-1]))
     s4 = pred * np.sqrt(svm.HOLD)
     return {"ok": True, "asof_ms": int(rows[-1][6]) + 1, "px": float(c[-1]), "sig4h_pct": round(100 * s4, 3),
-            "sig4h_usd": round(float(c[-1]) * s4, 2), "lvl": round(pred / ref, 3), "x_now": round(pred / rv48, 3),
+            "sig4h_usd": round(float(c[-1]) * s4, 2 if c[-1] >= 10 else 4),   # XRP $1.3 -- 2자리면 $0.01 "lvl": round(pred / ref, 3), "x_now": round(pred / rv48, 3),
             "p_expand": round(float(1 / (1 + np.exp(-(a0 + a1 * np.log(pred / rv48))))), 3),
             "ref_days": round(len(p) / 288, 1), "model_train_end": art.get("train_end")}
 

@@ -3596,22 +3596,25 @@ async function refreshOpenRev() {
 // 2026-10-16 사용자 «①부터 재검증하고 시안»: 박스 유지 확률(ETH, /api/box-hold = dashboard/box_hold.py · 서버 1분 캐시) -- 방향 아님.
 //   박스 = 지금가 ± 지난 W분 고저폭의 절반 · 값 = 다음 W분 동안 한 번도 안 벗어날 확률(2022~24 학습, 2025·2026 보정 오차 ≤6pp).
 let latestBoxHold = null, boxHoldLastFetchAt = 0;
+// 2026-10-20 XRP 전용 모델(30분·1시간 통과 · 4시간 불통과 = 서버 ok false) -- 박스 줄·차트 1h 박스선이 그 코인 값만 쓴다
+const BOX_ASSETS = new Set(["eth", "xrp"]);
+const boxNow = () => (latestBoxHold && latestBoxHold.ok && (latestBoxHold.asset || "eth") === activeSnapshotAsset ? latestBoxHold : null);
 const BOX_ON_CHART = true;    // 2026-10-16 사용자 «B로 배포» -- 1시간 박스 두 선을 풋프린트 가격판에(데스크톱 꼬리표 칸)
 const BOX_STALE_MS = 180e3;   // 10-16 리뷰: 기준가가 3분 넘게 묵으면 «지연»·차트 선 숨김(30분 박스는 3분 뒤 9%가 이미 깨져 있다)
 async function refreshBoxHold() {
-  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  if (activePageTab !== "snapshot" || document.hidden || !BOX_ASSETS.has(activeSnapshotAsset)) return;
   const now = Date.now();
-  if (now - boxHoldLastFetchAt < 20000) return;   // 서버 15초 캐시와 맞춤(옛 60초 + 60초 캐시 = 박스 중심이 평균 2~3분 묵었다)
+  if (now - boxHoldLastFetchAt < 20000 && (latestBoxHold?.asset || "eth") === activeSnapshotAsset) return;   // 서버 15초 캐시와 맞춤 · 코인을 바꾸면 바로
   boxHoldLastFetchAt = now;
   try {
-    const res = await fetch("/api/box-hold", { cache: "no-cache" });
+    const res = await fetch(`/api/box-hold?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
     if (res.ok) latestBoxHold = await res.json();
   } catch (error) { /* 다음 주기 -- 묵으면 BOX_STALE_MS 가 «지연»으로 드러낸다 */ }
 }
 const BOX_NM = { "30m": "30분", "1h": "1시간", "4h": "4시간" };
 // 상태: 묵음(stale) · 이미 벗어남(out, 실시간 가격이 띠 밖) · 깨질 쪽(brk, 학습 예측 하위 20%) · 머물 쪽(hold, 상위 20%) · 보통
 function boxState(b, s) {
-  const live = Number(latestLivePriceByAsset.eth || 0);
+  const live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
   if (Date.now() - b.asof_ms > BOX_STALE_MS) return ["stale", "지연"];
   if (live > 0 && (live > s.up || live < s.dn)) return ["out", "벗어남"];
   const lo = s.q20 != null ? s.q20 : s.base * 0.75, hi = s.q80 != null ? s.q80 : s.base * 1.33;
@@ -3621,27 +3624,27 @@ function boxState(b, s) {
 const mcTipBtn = (key, name) => `<button type="button" class="mc-q mc-q1" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}" title="${name} — 설명" aria-label="${name} 설명"><span aria-hidden="true">?</span></button>`;
 const mcTipP = (key) => `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(MC_TIPS[key]).replace(/\n/g, "<br>")}</p>`;
 function boxTip(b, k, s) {
-  const p = Math.round(s.p * 100), base = Math.round(s.base * 100), half = (s.up - s.dn) / 2, ageMin = Math.round((Date.now() - b.asof_ms) / 60e3);
-  return `${BOX_NM[k]} 박스 = 기준가 ${b.px.toFixed(2)}(${ageMin}분 전) ± 지난 ${BOX_NM[k]} 고저폭의 절반 $${half.toFixed(1)}(${s.half_pct.toFixed(2)}%)\n`
-    + `${s.dn.toFixed(1)} ~ ${s.up.toFixed(1)} 을 다음 ${BOX_NM[k]} 동안 한 번도 안 벗어날 확률 ${p}% · 평소 ${base}%\n`
+  const p = Math.round(s.p * 100), base = Math.round(s.base * 100), half = (s.up - s.dn) / 2, ageMin = Math.round((Date.now() - b.asof_ms) / 60e3), d = pxDp();
+  return `${BOX_NM[k]} 박스 = 기준가 ${b.px.toFixed(Math.max(2, d))}(${ageMin}분 전) ± 지난 ${BOX_NM[k]} 고저폭의 절반 $${half.toFixed(d)}(${s.half_pct.toFixed(2)}%)\n`
+    + `${s.dn.toFixed(d)} ~ ${s.up.toFixed(d)} 을 다음 ${BOX_NM[k]} 동안 한 번도 안 벗어날 확률 ${p}% · 평소 ${base}%\n`
     + `«깨질 쪽» < ${Math.round((s.q20 || 0) * 100)}% · «머물 쪽» > ${Math.round((s.q80 || 0) * 100)}% (학습 기간 예측의 하위·상위 20%)\n방향 정보 아님 — 어느 쪽으로 깨질지는 모른다`;
 }
 // 2026-10-17 펜 메모 «타이틀 제거 · 박스 유지는 2번 범위 막대»: 칸마다 가격 범위 + 범위 막대(세 칸 같은 가격 눈금 · 세로 눈금 = 지금가) + «다음 N 이 안에 머물 확률».
 function boxRowHtml() {
-  const eth = activeSnapshotAsset === "eth", raw = eth ? latestBoxHold : null, b = raw && raw.ok ? raw : null;
+  const on = BOX_ASSETS.has(activeSnapshotAsset), raw = on && (latestBoxHold?.asset || "eth") === activeSnapshotAsset ? latestBoxHold : null, b = raw && raw.ok ? raw : null;
   const ok = b ? Object.keys(BOX_NM).map((k) => b.scales[k]).filter((s) => s && s.ok) : [];
-  const live = Number(latestLivePriceByAsset.eth || 0) || (b ? b.px : 0), f1 = (x) => x.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const d = pxDp(), live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || (b ? b.px : 0), f1 = (x) => x.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
   const lo0 = ok.length ? Math.min(...ok.map((s) => s.dn), live || Infinity) : 0, hi0 = ok.length ? Math.max(...ok.map((s) => s.up), live || -Infinity) : 1;
   const pad = (hi0 - lo0) * 0.15 || 1, X = (p) => (((p - lo0 + pad) / (hi0 - lo0 + 2 * pad)) * 100).toFixed(1);
   const cells = Object.keys(BOX_NM).map((k) => {
     const s = b && b.scales[k];
     if (!s || !s.ok) {
-      const why = !eth ? "ETH 전용" : raw && !raw.ok ? "계산 불가" : b ? "계산 불가" : "불러오는 중";   // 10-16 리뷰: ok false 를 «불러오는 중»으로 숨기던 것
+      const why = !on ? "ETH·XRP 전용" : s && s.reason ? s.reason : raw && !raw.ok ? "계산 불가" : b ? "계산 불가" : "불러오는 중";   // 10-16 리뷰: ok false 를 «불러오는 중»으로 숨기던 것
       return `<div class="bx-c"${raw && raw.reason ? ` title="${escapeHtml(String(raw.reason))}"` : ""}><div class="bx-h"><b>${BOX_NM[k]}</b><span>-</span></div><div class="bx-p">${why}</div></div>`;
     }
     const p = Math.round(s.p * 100), base = Math.round(s.base * 100), half = (s.up - s.dn) / 2, [tone, word] = boxState(b, s);
     const tip = boxTip(b, k, s);
-    return `<div class="bx-c ${tone}" title="${escapeHtml(tip)}"><div class="bx-h"><b>${BOX_NM[k]}</b><span>${f1(s.dn)} ~ ${f1(s.up)}</span><small>±$${half.toFixed(1)}</small></div>`
+    return `<div class="bx-c ${tone}" title="${escapeHtml(tip)}"><div class="bx-h"><b>${BOX_NM[k]}</b><span>${f1(s.dn)} ~ ${f1(s.up)}</span><small>±$${half.toFixed(d)}</small></div>`
       + `<span class="bx-rng" aria-hidden="true"><i style="left:${X(s.dn)}%;width:${(X(s.up) - X(s.dn)).toFixed(1)}%"></i>${live ? `<u style="left:${X(live)}%"></u>` : ""}</span>`
       + `<div class="bx-p">다음 ${BOX_NM[k]} 이 안에 머물 확률 <b>${p}%</b><span> · 평소 ${base}% · ${word}</span></div></div>`;
   });
@@ -3649,13 +3652,14 @@ function boxRowHtml() {
 }
 // 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, /api/vol-forecast · 서버 5분 캐시) -- 표시 전용
 let latestVol4h = null, vol4hLastFetchAt = 0;
+const VOL4H_ASSETS = new Set(["eth", "xrp"]);   // 2026-10-20 XRP 4h 변동성(ETH+XRP 합동 학습 · 2025~ R² .680 > HAR .568)
 async function refreshVol4h() {
-  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  if (activePageTab !== "snapshot" || document.hidden || !VOL4H_ASSETS.has(activeSnapshotAsset)) return;
   const now = Date.now();
-  if (now - vol4hLastFetchAt < 300000) return;
+  if (now - vol4hLastFetchAt < 300000 && latestVol4h?.asset === activeSnapshotAsset) return;   // 코인을 바꾸면 바로 다시
   vol4hLastFetchAt = now;
   try {
-    const res = await fetch("/api/vol-forecast", { cache: "no-cache" });
+    const res = await fetch(`/api/vol-forecast?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
     if (res.ok) latestVol4h = await res.json();
   } catch (error) { /* 다음 주기 */ }
 }
@@ -3674,14 +3678,14 @@ function fcTrendCell(t, cell) {
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분 칼시(10-15) → 4h 예측(+변동성) → 7일 → 4~13주. sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
-  const eth = activeSnapshotAsset === "eth", v = eth && latestVol4h && latestVol4h.ok ? latestVol4h : null;
+  const eth = activeSnapshotAsset === "eth", v = latestVol4h && latestVol4h.ok && (latestVol4h.asset || "eth") === activeSnapshotAsset ? latestVol4h : null;
   const cls = (s) => (s > 0 ? "up" : s < 0 ? "dn" : "flat"), word = (s) => (s > 0 ? "▲ 상승" : s < 0 ? "▼ 하락" : "보류");
   const zf = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(2)}`;
   const cell = (hz, c, main, sub, tip, extra = "") => `<div class="fc-c ${c}" title="${escapeHtml(tip)}"><span class="hz">${hz}</span><b>${main}</b><span class="sub">${sub}</span>${extra}</div>`;
   const sig = (g, hz, nm) => (!g || !g.ok ? cell(hz, "flat", "-", "데이터 대기", nm)
     : cell(hz, cls(g.state), word(g.state), `${nm.split(" ")[0]} ${zf(g.v)}${g.state ? ` · ${g.run}일째` : ""}`, `${nm} · ${g.date} UTC 종가 · |값| ≥ 1 일 때만 방향`));
-  const vTip = v ? `4시간 1σ ±${v.sig4h_pct.toFixed(2)}% (±$${v.sig4h_usd.toFixed(0)}) · 최근 ${v.ref_days}일 평소의 ${v.lvl.toFixed(2)}배 · 직전 4시간의 ${v.x_now.toFixed(2)}배 · 더 커질 확률 ${Math.round(v.p_expand * 100)}%` : "";
-  const volLine = v ? `<span class="sub fc-vol" title="${escapeHtml(vTip)}">σ ±${v.sig4h_pct.toFixed(2)}% · ×${v.lvl.toFixed(2)}</span>` : `<span class="sub">변동 ${eth ? "불러오는 중" : "ETH 전용"}</span>`;
+  const vTip = v ? `4시간 1σ ±${v.sig4h_pct.toFixed(2)}% (±$${v.sig4h_usd < 10 ? v.sig4h_usd.toFixed(4) : v.sig4h_usd.toFixed(0)}) · 최근 ${v.ref_days}일 평소의 ${v.lvl.toFixed(2)}배 · 직전 4시간의 ${v.x_now.toFixed(2)}배 · 더 커질 확률 ${Math.round(v.p_expand * 100)}%` : "";
+  const volLine = v ? `<span class="sub fc-vol" title="${escapeHtml(vTip)}">σ ±${v.sig4h_pct.toFixed(2)}% · ×${v.lvl.toFixed(2)}</span>` : `<span class="sub">변동 ${VOL4H_ASSETS.has(activeSnapshotAsset) ? "불러오는 중" : "ETH·XRP 전용"}</span>`;
   const g4 = eth && latestDir4h && latestDir4h.ok ? latestDir4h : null, old4 = g4 && Date.now() - g4.decided_at_ms > 15 * 60e3;
   const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(11, 16);
   const d4Tip = g4 ? `4h 방향 예측 — 매달 재학습 HGB(ETH 65피쳐, 최근 365일) · ${g4.model_month} 모델(학습 ${g4.train_window[0].slice(0, 10)}~${g4.train_window[1].slice(0, 10)})\n`
@@ -6829,8 +6833,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-10-16 시안 B: 1시간 박스 두 선(기준가 ± 지난 1시간 고저폭 절반) -- 방향 아님, max pain 처럼 흐린 점선 + 꼬리표 칸.
   //   10-16 리뷰: 묵은 박스(3분↑)는 안 그림 · 화면 밖 경계도 꼬리표(↑↓) · 휴대폰(꼬리표 칸 없음)은 선 오른쪽 끝에 짧은 글자.
   // 2026-10-17 펜 메모 «오른쪽 프로파일의 호가창 데이터(벽 꼬리표) 대신 박스 유지 -- 라인만, 배포본처럼 라인에 가격·확률»: ETH 는 호가벽 꼬리표 대신
-  //   30분·1시간·4시간 박스 경계선 + «가격 · 30분 6%»(아래 boxColG). 호가 띠 막대는 그대로. SOL·XRP 는 박스 모델이 없어 벽 꼬리표 그대로. 벽 수량은 ④ 판에 있다.
-  const bxAll = BOX_ON_CHART && isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestBoxHold && latestBoxHold.ok ? latestBoxHold : null;
+  //   30분·1시간·4시간 박스 경계선 + «가격 · 30분 6%»(아래 boxColG). 호가 띠 막대는 그대로. SOL 은 박스 모델이 없어 벽 꼬리표 그대로(10-20 XRP 전용 모델 붙음). 벽 수량은 ④ 판에 있다.
+  const bxAll = BOX_ON_CHART && isSnapshotChart && footprint ? boxNow() : null;
   const boxCol = !!(BOOK_W && bxAll && Date.now() - bxAll.asof_ms <= BOX_STALE_MS);   // 10-17 리뷰: 박스가 없거나 묵으면 벽 꼬리표를 그대로(빈 띠 방지)
   const bx1 = bxAll && Date.now() - bxAll.asof_ms <= BOX_STALE_MS ? bxAll.scales["1h"] : null;
   if (bx1 && bx1.ok) {
@@ -6838,7 +6842,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const col = tone === "brk" ? "var(--warn)" : "var(--muted)", fs = mobileChart ? 10 : 11;
     g.setAttribute("pointer-events", "none");
     for (const [v, side] of [[bx1.up, "위"], [bx1.dn, "아래"]]) {
-      const y = yAt(v), title = `1시간 박스 ${side} ${v.toFixed(1)} -- 다음 1시간 안 벗어날 확률 ${p}%(평소 ${Math.round(bx1.base * 100)}%) · 방향 아님`;
+      const y = yAt(v), title = `1시간 박스 ${side} ${v.toFixed(pxDp())} -- 다음 1시간 안 벗어날 확률 ${p}%(평소 ${Math.round(bx1.base * 100)}%) · 방향 아님`;
       if (gutOn && (!boxCol || y < mt || y > plotBottom)) fpNotes.push({ val: v, label: `1h 박스 ${p}%`, color: col, title });   // 10-17 호가 띠 위 박스 경계선과 중복 -- 화면 밖이어도 꼬리표 칸이 위·아래 끝에 쌓는다(max pain 과 같다)
       if (y < mt || y > plotBottom) continue;
       const ln = document.createElementNS(NS, "line");
@@ -7464,7 +7468,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         add("line", { x1: bx0, x2: bx1, y1: y, y2: y, stroke: col, "stroke-opacity": 0.85, "stroke-width": 1 + 0.5 * i, "stroke-dasharray": "5 3" });
         const near = labs.find((l) => l.dir === dir && Math.abs(l.y - y) < 12);
         if (near) { near.txt += ` · ${BOX_NM[k]} ${p}%`; if (col === "var(--warn)") near.col = col; }
-        else labs.push({ dir, y, col, txt: `${v.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} · ${BOX_NM[k]} ${p}%` });
+        else labs.push({ dir, y, col, txt: `${v.toLocaleString("en-US", { minimumFractionDigits: Math.max(1, pxDp()), maximumFractionDigits: Math.max(1, pxDp()) })} · ${BOX_NM[k]} ${p}%` });
       });
     });
     if (!mobileChart) labs.forEach((l) => add("text", { x: bx1 - 3, y: l.y + (l.dir > 0 ? -3 : 11), "text-anchor": "end", "font-size": 10.5, "font-family": "var(--font-mono)", "font-weight": 800, fill: l.col, class: "far-lbl", ...halo }, l.txt));

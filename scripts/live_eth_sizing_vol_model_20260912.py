@@ -115,12 +115,12 @@ def predict_vol(models, X: pd.DataFrame) -> np.ndarray:
     return np.exp(np.mean([m.predict(A) for m in models], axis=0))
 
 
-def load_model():
+def load_model(path: Path | None = None):
     """없거나 깨졌으면 None -- 호출부가 현행 1/ATR 공식으로 떨어진다. 여기서 예외를 올리면
-    워커가 죽고 화면이 통째로 빈다."""
+    워커가 죽고 화면이 통째로 빈다. path = 다른 코인 아티팩트(2026-10-20 XRP, 같은 피쳐 계약)."""
     try:
         import joblib
-        art = joblib.load(ARTIFACT)
+        art = joblib.load(path or ARTIFACT)
         assert art["features"] == FEATURES, "아티팩트 피쳐가 코드와 다르다"
         assert art["ref_pred"] > 0
         return art

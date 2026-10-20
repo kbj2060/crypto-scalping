@@ -116,7 +116,8 @@ def card30_features(bars: list[dict[str, float]]) -> dict[str, float] | None:
 #   (사후 발견). 전진 판정 docs/experiments/eth_pingpong_vol_sizing_fwd_prereg_20261007.md — 상수·식은 거기와 **같아야** 한다.
 VOLM_MED, VOLM_REF, VOLM_CLIP = 157.3941696083474, 0.7657638410664205, (0.25, 3.0)
 # 2026-10-20 코인별(사용자 «XRP 도 ETH 처럼 거래») -- 같은 식·같은 정의를 그 코인 5분봉으로 다시 맞춘 (MED, REF). 없는 코인 = 값 없음(자동 규칙도 막힘).
-VOLM_BY = {"eth": (VOLM_MED, VOLM_REF)}
+VOLM_BY = {"eth": (VOLM_MED, VOLM_REF),
+           "xrp": (167.3260352009301, 0.7586429414343359)}   # 2026-10-20 XRP 5분봉 같은 정의(양성 대조 ETH 0.04% 재현) · 1배 = 126.9bp · tmp/xrp_parity_20261020/vol_mult
 
 
 def vol_size_mult(bars: list[dict[str, float]], asset: str = "eth") -> dict[str, float] | None:

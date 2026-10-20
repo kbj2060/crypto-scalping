@@ -19,6 +19,9 @@ import pandas as pd
 
 B = joblib.load(Path(__file__).with_name("box_hold_hgb_20261016.joblib"))
 PROF = np.asarray(B["prof"], float)            # 요일×시각(월 0시 = 0) 평균 1분 수익² / 전체 평균, 학습 구간
+# 2026-10-20 XRP 전용(같은 식 · 2022~24 학습 · 2025/2026 AUC 30m .777/.779 · 1h .776/.776 · 보정 ≤5.7pp 통과 · 4h 2025 보정 6.3pp 불통과 → deployable False)
+#   재현 python scripts/research_xrp_box_hold_20261020.py · 결과 tmp/xrp_parity_20261020/box_hold/report.md
+BUNDLES = {"eth": B, "xrp": joblib.load(Path(__file__).with_name("box_hold_hgb_xrp_20261020.joblib"))}
 WIN = {"30m": 30, "1h": 60, "4h": 240}
 NEED = 1499                                    # 1h 박스 24h 창폭 중앙값 = 1440 + 59 · σ24 = 1441
 MAJOR_IDS = {10, 50, 53, 54, 46, 9}            # FRED release_id: CPI·고용·GDP·PCE·PPI·소매판매 (+ FOMC 금리결정)
@@ -53,8 +56,9 @@ def _prev_min(tc: int, ev: np.ndarray) -> float:
     return (tc - ev[j]) / 60000.0 if j >= 0 else 1e12
 
 
-def features(k1m: pd.DataFrame, events: list | None = None) -> dict[str, dict[str, float]]:
+def features(k1m: pd.DataFrame, events: list | None = None, prof: np.ndarray | None = None) -> dict[str, dict[str, float]]:
     """마지막 닫힌 1분봉 마감 시점의 척도별 특징(연구 features() 와 같은 식 -- __main__ 패리티 점검)."""
+    PROF = globals()["PROF"] if prof is None else prof   # noqa: N806 -- 코인별 요일×시각 표(아래 식은 그대로)
     h, l, c = (k1m[x].to_numpy(float) for x in ("high", "low", "close"))
     v, tb = k1m["volume"].to_numpy(float), k1m["taker_buy_base"].to_numpy(float)
     r = np.diff(np.log(c))
@@ -99,20 +103,25 @@ def features(k1m: pd.DataFrame, events: list | None = None) -> dict[str, dict[st
     return out
 
 
-def payload(k1m: pd.DataFrame, events: list | None = None) -> dict:
+def payload(k1m: pd.DataFrame, events: list | None = None, asset: str = "eth") -> dict:
     """k1m: 닫힌 1분봉(오름차순). 마지막 봉 종가 시점의 확률."""
     if k1m is None or len(k1m) < NEED:
         return {"ok": False, "reason": f"1분봉 {0 if k1m is None else len(k1m)}개 < {NEED}"}
     k1m = k1m.tail(NEED + 60).reset_index(drop=True)
     for x in ("high", "low", "close", "volume", "taker_buy_base"):
         k1m[x] = k1m[x].astype(float)
-    F = features(k1m, events)
+    bb = BUNDLES[asset]
+    F = features(k1m, events, np.asarray(bb["prof"], float))
     px = float(k1m["close"].iloc[-1])
+    dp = 2 if px >= 10 else 6   # XRP $1.3 -- 2자리면 박스 위·아래가 1.30/1.29
     t0 = pd.Timestamp(k1m["timestamp"].iloc[-1])
     asof = int((t0.tz_localize("UTC") if t0.tzinfo is None else t0).value // 10 ** 6) + 60_000
-    out = {"ok": True, "asof_ms": asof, "px": px, "model": "hgb-20261016", "events_n": len(events or []), "scales": {}}
+    out = {"ok": True, "asof_ms": asof, "px": px, "model": bb.get("model", "hgb-20261016"), "asset": asset, "events_n": len(events or []), "scales": {}}
     for name, W in WIN.items():
-        f, cf = F[name], B["scales"][name]
+        f, cf = F[name], bb["scales"][name]
+        if not cf.get("deployable", True):
+            out["scales"][name] = {"ok": False, "reason": "검정 불통과(보정)"}
+            continue
         x = pd.DataFrame([[f[k] for k in cf["cols"]]], columns=cf["cols"])   # 학습 때 열 이름 그대로(이름 없으면 sklearn 경고가 매 호출)
         if not (f["_rng"] > 0 and np.isfinite(x.to_numpy()).all()):
             out["scales"][name] = {"ok": False}
@@ -120,7 +129,7 @@ def payload(k1m: pd.DataFrame, events: list | None = None) -> dict:
         rng = f["_rng"]
         out["scales"][name] = {"ok": True, "p": round(float(cf["model"].predict_proba(x)[0, 1]), 4), "base": round(cf["train_base"], 4),
                                "q20": round(cf["q20"], 4), "q80": round(cf["q80"], 4),   # 화면 «깨질 쪽»(< q20) · «머물 쪽»(> q80) = 학습 예측 분위
-                               "up": round(px + 0.5 * rng, 2), "dn": round(px - 0.5 * rng, 2), "half_pct": round(0.5 * rng / px * 100, 3),
+                               "up": round(px + 0.5 * rng, dp), "dn": round(px - 0.5 * rng, dp), "half_pct": round(0.5 * rng / px * 100, 3),
                                "until_ms": asof + W * 60_000}
     return out
 
