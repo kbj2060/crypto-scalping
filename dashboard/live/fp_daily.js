@@ -12,8 +12,8 @@
   var HEAT_CLIP_PCT = 0.98;    // 양수 밀도의 98분위 = 가장 진한 색(진한 곳만 떠오르게)
   var HEAT_BOX_ROW = 25;      // 2026-10-10 위·아래 2칸 순위는 늘 $25 칸으로 고른다(사용자 A) -- 화면 칸 크기로 고르면 확대/축소마다 이웃 칸이 합쳐져 1·2등이 바뀌었다
   var HEAT_BOX_MIN_PX = 10;    // 봉 폭이 이보다 좁으면 테두리를 그리지 않는다(금액 글자는 칸 안에 들어갈 때만)
-  var DEFAULT_SPAN = 30, TEXT_MIN_PX = 104, ROW_PX = 11;
-  // 이 폭부터 가격 칸(휴대폰은 7~12일 확대에서) · 2026-10-20 4시간봉은 1주(42봉 ≈ 24px)에서도 칸이 보이게 낮춘다(글자는 TEXT_MIN_PX 부터라 그대로)
+  var DEFAULT_SPAN = 30, ROW_PX = 11;
+  // 이 폭부터 가격 칸(휴대폰은 7~12일 확대에서) · 2026-10-20 4시간봉은 1주(42봉 ≈ 24px)에서도 칸이 보이게 낮춘다(숫자는 칸에 들어갈 때만 -- drawCells)
   var cellMinPx = function (G) { return S.period === "4h" ? (G.narrow ? 6 : 16) : G.narrow ? 24 : 34; };
   var ROW_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500];
   var REFRESH_MS = 60000;
@@ -23,12 +23,12 @@
   var PERIODS = {
     "1d": { days: "/api/footprint-daily", cells: "/api/footprint-daily/cells", heat: true, span: 30, minSpan: 7, lanes: LANES, name: "일봉",
             views: [["30", "30일"], ["180", "6개월"], ["all", "전체"]] },
-    "4h": { days: "/api/footprint-4h", cells: "/api/footprint-4h/cells", heat: false, span: 42, minSpan: 6, lanes: LANES.slice(0, 2), name: "4시간봉",
+    "4h": { days: "/api/footprint-4h", cells: "/api/footprint-4h/cells", heat: false, span: 12, minSpan: 3, lanes: LANES.slice(0, 2), name: "4시간봉",
             views: [["12", "2일"], ["42", "1주"], ["all", "전체"]] }
   };
   var P = function () { return PERIODS[S.period]; };
-  // 기본 범위: 4시간봉 휴대폰(좁은 칸)은 2일 -- 1주(42봉)면 봉이 7px 라 칸이 안 읽힌다
-  var defSpan = function () { var cv = $("fpDailyCanvas"); return S.period === "4h" && cv && cv.clientWidth && cv.clientWidth < 560 ? 12 : P().span; };
+  // 기본 범위(2026-10-20 사용자 «숫자가 보이게 · 휴대폰은 봉 수를 줄여»): 4시간봉 데스크탑 2일(12봉 ≈ 80px) · 휴대폰 12시간(3봉 ≈ 90px -- 4봉은 칸 숫자에 1~2px 모자람)
+  var defSpan = function () { var cv = $("fpDailyCanvas"); return S.period === "4h" && cv && cv.clientWidth && cv.clientWidth < 560 ? 3 : P().span; };
   // 칸 키 → 사람 시각: 일봉 = 그대로(UTC 날짜) · 4시간봉 = 보는 사람 시계(KST)로 «10/19 13시»
   function lab(k) {
     if (S.period !== "4h") return k;
@@ -53,6 +53,8 @@
       : a >= 1e3 ? s + "$" + (a / 1e3).toFixed(0) + "k" : s + "$" + a.toFixed(0);
   }
   function sgnUsd(v) { return (v > 0 ? "+" : "") + usd(v); }
+  // 칸 안 숫자는 더 짧게(2026-10-20 4시간봉 «숫자가 보이게»): 1만↑ «46k» · 1천↑ «4.6k» · 100↑ 정수 -- 툴팁·범례는 qty 그대로
+  function cqty(v) { return v >= 9.95e5 ? (v / 1e6).toFixed(1) + "M" : v >= 9950 ? Math.round(v / 1e3) + "k" : v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : v >= 99.95 ? v.toFixed(0) : v.toFixed(1); }   // 늘 4글자 이하
   function qty(v) { return v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : v.toFixed(v >= 10 ? 0 : 1); }
   function px(v) { return v >= 1000 ? v.toFixed(0) : v.toFixed(2); }
   function pct(v) { return (v > 0 ? "+" : "") + (v * 100).toFixed(2) + "%"; }
@@ -318,7 +320,12 @@
       if (t > top) { top = t; poc = k; }
     }
     var half = bw * 0.46, hRow = Math.max(1, yOf(lo) - yOf(lo + row));
-    var txt = bw >= TEXT_MIN_PX && hRow >= 11, bx = x - half + 3, cx = x + 3, room = half - 6;
+    var bx = x - half + 3, cx = x + 3, room = half - 6;
+    // 2026-10-20 숫자 = 칸에 들어갈 때만(옛 고정 기준 봉 폭 104px 를 대신) -- 가장 긴 숫자(cqty 4글자 «888k»)가 반쪽 칸에 들어가는가로
+    //   화면 전체가 같이 켜지고 꺼진다(봉마다 따로 재면 봉끼리 들쭉날쭉). 축소해 겹치기 시작하면 사라지고 확대하면 돌아온다. 글자 9~10px · 행 9px 이상.
+    var fs = bw < 70 ? 9 : 10;
+    g.font = "600 " + fs + "px " + C.sans;
+    var txt = hRow >= 9 && g.measureText("888k").width + 4 <= room;
     g.strokeStyle = D.c[i] >= D.o[i] ? C.good : C.bad; g.lineWidth = 1.5;   // 왼쪽 = OHLC 막대(색 = 양/음봉, 왼 눈금 시가 · 오른 눈금 종가)
     g.beginPath(); g.moveTo(bx, yOf(D.h[i])); g.lineTo(bx, yOf(D.l[i]));
     g.moveTo(bx - 3, yOf(D.o[i])); g.lineTo(bx, yOf(D.o[i])); g.moveTo(bx, yOf(D.c[i])); g.lineTo(bx + 3, yOf(D.c[i])); g.stroke();
@@ -334,9 +341,9 @@
       g.globalAlpha = 1;
       if (k === poc) { g.strokeStyle = C.warn; g.lineWidth = 1; g.strokeRect(cx - room, yTop + 0.5, room * 2, h - 1); }
       if (txt) {
-        g.font = "600 10px " + C.sans; g.textBaseline = "middle"; g.fillStyle = C.text;
-        g.textAlign = "right"; g.fillText(qty(sell[k]), cx - 3, yTop + h / 2);
-        g.textAlign = "left"; g.fillText(qty(buy[k]), cx + 3, yTop + h / 2);
+        g.font = "600 " + fs + "px " + C.sans; g.textBaseline = "middle"; g.fillStyle = C.text;
+        g.textAlign = "right"; g.fillText(cqty(sell[k]), cx - 3, yTop + h / 2);
+        g.textAlign = "left"; g.fillText(cqty(buy[k]), cx + 3, yTop + h / 2);
       }
     }
     g.strokeStyle = C.soft; g.lineWidth = 1;
@@ -523,7 +530,7 @@
   }
   function setView(span) {
     S.span = span === "all" ? S.n + 2 : span;
-    S.i0 = S.n - S.span + 1.5; S.yOff = 0; clampView(); redraw();   // 최신 날 · 자동 축
+    S.i0 = S.n - S.span + Math.min(1.5, S.span * 0.1); S.yOff = 0; clampView(); redraw();   // 최신 날 · 자동 축 · 오른쪽 빈 자리 = 1.5칸(봉이 적으면 10%, 10-20 휴대폰 3봉)
   }
   function panBy(dxPx) { S.i0 -= dxPx / (layout($("fpDailyCanvas")).plotW / S.span); clampView(); redraw(); }
 
