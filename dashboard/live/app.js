@@ -368,16 +368,16 @@ function setFpCol(mode, win) {
   hideTooltip(); scheduleSnapshotChartRender();
 }
 async function refreshPositionProfile() {   // 포지션 보기일 때만 1초(서버도 1초 캐시)
-  if (fpColMode !== "pos" || activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  if (fpColMode !== "pos" || activePageTab !== "snapshot" || document.hidden || !flowOn()) return;   // 2026-10-20 ETH → 흐름 코인 전부(XRP)
   const now = Date.now();
   if (posProfileInflight || now - posProfileFetchAt < 900) return;   // 900: 1초 루프 흔들림에 한 번씩 건너뛰지 않게
   posProfileFetchAt = now; posProfileInflight = true;
   try {
     const win = fpPosWin;   // 고른 창 하나만 받는다(서버가 매초 세 창을 다 계산·전송하던 것, 10-10 검토)
-    const r = await fetch(`${API_POSITION_PROFILE_URL}?asset=eth&days=${win}`, { cache: "no-store" });
+    const asset = activeSnapshotAsset, r = await fetch(`${API_POSITION_PROFILE_URL}?asset=${asset}&days=${win}`, { cache: "no-store" });
     if (r.ok) {
       const j = await r.json();
-      if (j && j.win && j.win[String(fpPosWin)]) {   // 그사이 창을 바꿨으면 버린다
+      if (j && j.win && j.win[String(fpPosWin)] && asset === activeSnapshotAsset) {   // 그사이 창·코인을 바꿨으면 버린다
         latestPositionProfile = j; scheduleSnapshotChartRender();
       }
     }
@@ -641,6 +641,7 @@ async function setActiveSnapshotAsset(asset) {
   lastSnapshotHistoryFetchAt = 0;
   // 🔴2026-09-30 차트 표식도 코인별이다 -- 안 비우면 ETH 사각형이 SOL 차트에 최대 60초 남았다.
   latestChartMarkers = null; chartMarkersLastFetchAt = 0;
+  latestPositionProfile = null; posProfileFetchAt = 0;   // 2026-10-20 포지션 보기도 코인별
   // 2026-10-04 시장 맥락·추세 칩도 코인별(서버 ?asset=) -- 옛 코인 값을 새 코인 이름 아래 두지 않는다.
   latestMarketCtx = null; marketCtxLastFetchAt = 0; latestTrend = null; trendLastFetchAt = 0;
   latestPaper = null; paperLastFetchAt = 0;   // 2026-10-04 모의 엔진도 코인별(paper_<coin>/)
@@ -1182,7 +1183,8 @@ const acctTone = (v) => (v > 0 ? "good" : v < 0 ? "bad" : "neutral");
 const acctPct = (p) => (p == null || !Number.isFinite(p) ? "—" : `${p >= 0 ? "+" : "−"}${Math.abs(p * 100) < 10 ? Math.abs(p * 100).toFixed(1) : Math.round(Math.abs(p * 100))}%`);
 const acctDur = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m}분` : m < 1440 ? `${Math.floor(m / 60)}시간 ${String(m % 60).padStart(2, "0")}분` : `${(m / 1440).toFixed(1)}일`; };
 const acctCoin = (s) => String(s || "").replace(/USD[TC]$/, "");
-const acctPx = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// 2026-10-20 XRP 거래: $10 밑(XRP 1.30)은 4자리 -- 2자리 고정이면 1.3007 이 1.30 으로 보였다(계좌·미리보기·손절 패널·호가 칩 공통).
+const acctPx = (v) => { const d = Math.abs(Number(v)) < 10 ? 4 : 2; return Number(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }); };
 function acctTripTip(t) {
   const dir = t.side === "LONG" ? 1 : -1;
   return `${acctMd(t.exit_time)} ${acctHm(t.entry_time)}→${acctHm(t.exit_time)} (${acctDur(t.exit_time - t.entry_time)})\n`
@@ -6066,8 +6068,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   포지션 = 최근 1·7·30일에 열려 아직 남은 계약(추정 · 롱=숏). 체결 기둥과 같은 자리·같은 행·같은 바닥선에서 왼쪽으로.
     //   풋프린트 가격 폭이 좁아 대부분이 화면 밖이다 -- 위·아래 끝에 «화면 밖 몫», 기둥 왼쪽 10px 에 창 전체 미니맵 + 보이는 범위 괄호.
     //   🔴지도다. 덩어리 저항·재방문·고통 지수는 매매 검정 불통과(= VWAP 평균회귀 재표현, 2026-10-09).
-    const posOn = !!(TRADE_W && fpColMode === "pos" && activeSnapshotAsset === "eth");
-    post.push(() => placeFpColTog(svg, tradeX0 + TRADE_W - 2, mt - 16, !!(TRADE_W && activeSnapshotAsset === "eth"
+    const posOn = !!(TRADE_W && fpColMode === "pos" && flowOn());
+    post.push(() => placeFpColTog(svg, tradeX0 + TRADE_W - 2, mt - 16, !!(TRADE_W && flowOn()
       && !(typeof window.fpLiqActive === "function" && window.fpLiqActive())
       && !(typeof window.fpBubbleActive === "function" && window.fpBubbleActive())
       && !(typeof window.fpDailyActive === "function" && window.fpDailyActive()))));   // 청산맵·일봉이 덮을 땐 숨김 · 화면 상자를 재므로 끝에서(post)
@@ -7508,7 +7510,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       g.appendChild(t);
     };
     if (TRADE_W) {   // 2026-10-10 ETH 는 «← 체결» 자리가 [체결 | 포지션] 토글(풋프린트 블록이 매번 그린다) · SOL·XRP 는 글자 그대로
-      if (activeSnapshotAsset !== "eth") head(x0 - 6, "end", "var(--amber)", "← 체결");
+      if (!flowOn()) head(x0 - 6, "end", "var(--amber)", "← 체결");
       head(x0, "start", "var(--muted)", "호가 →");
     }
     else { head(x0, "start", "var(--muted)", "호가"); if (TRADE_L) head(ml - 2, "end", "var(--amber)", "체결"); }
@@ -8539,7 +8541,7 @@ function execQuoteHtml(plan) {
   const bp = execQuoteBp(px, Number(latestLivePriceByAsset[activeSnapshotAsset] || 0));
   if (bp == null || !/USDC$/.test(sym)) return "";   // USDT 심볼(옛 포지션 청산)이면 차이가 없다
   const book = plan.side === "BUY" ? "매수호가" : "매도호가";
-  return `<div class="entry-quote">${escapeHtml(sym)} 최우선 ${book} <b>${escapeHtml(px.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}</b>`
+  return `<div class="entry-quote">${escapeHtml(sym)} 최우선 ${book} <b>${escapeHtml(acctPx(px))}</b>`
     + ` · 화면(USDT) 대비 <b>${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp</b></div>`;
 }
 // 2026-10-10 주문 심볼의 계정 실수수료율(서버 commissionRate, 1시간 캐시) -- plan.trade_plan.execution.cost.fee.
@@ -8561,11 +8563,11 @@ function manualEntryPlanHtml(data) {
   const dir = plan.positionSide === "LONG" ? "롱" : "숏";
   const rl = plan.rule;   // 2026-10-09 권고 규칙 -- 무엇이 크기·손절을 정했는지 머리 바로 아래에 한 줄
   const ruleNote = rl ? entryNote(`자동 규칙 — 상한 ${won(rl.cap_notional)} USDT(순자산 × ${rl.l}, ${rl.binding}) · 이번 `
-    + `${rl.first ? "첫 진입 = 상한의 1/3" : `물타기 = 남은 여유 ${won(rl.room)} USDT`} · 손절 ${rl.sl_name || ""} ${rl.sl_price ? Number(rl.sl_price).toLocaleString() : "-"}`
-    + (rl.first && rl.add ? ` · 체결되면 물타기 지정가 ${Number(rl.add.price).toLocaleString()} × ${rl.add.qty} 자동(첫 진입가 ${plan.positionSide === "LONG" ? "−" : "+"}0.75%)` : "")
+    + `${rl.first ? "첫 진입 = 상한의 1/3" : `물타기 = 남은 여유 ${won(rl.room)} USDT`} · 손절 ${rl.sl_name || ""} ${rl.sl_price ? acctPx(rl.sl_price) : "-"}`
+    + (rl.first && rl.add ? ` · 체결되면 물타기 지정가 ${acctPx(rl.add.price)} × ${rl.add.qty} 자동(첫 진입가 ${plan.positionSide === "LONG" ? "−" : "+"}0.75%)` : "")
     + ` 거래소 스탑(물타기해도 안 물러남) · 익절 없음 · 교차 마진에서만`) : "";
   const parts = [`<div class="entry-head"><b>${dir} ${escapeHtml(String(plan.quantity))} ${coinUnit()}</b>
-      <span>@ ${escapeHtml(Number(plan.price).toLocaleString())}</span>
+      <span>@ ${escapeHtml(acctPx(plan.price))}</span>
       <span>내 돈 ${escapeHtml(won(plan.margin_usdt || 0))} USDT${
         plan.leverage ? ` = 명목 ${escapeHtml(won(plan.notional_usdt))} ÷ ${plan.leverage}배` : ""}</span>
     </div>` + execQuoteHtml(plan)];
@@ -8587,7 +8589,7 @@ function manualEntryPlanHtml(data) {
   if (br && br.disabled) {
     parts.push(entryNote("SL/TP 끔 — 이번 진입에 TP·비상 스탑을 걸지 않고 SL 감시도 하지 않습니다. 이미 걸린 SL/TP 는 그대로 둡니다."));
   } else if (br && br.available) {
-    const f = (v) => Number(v).toFixed(2);
+    const f = acctPx;
     const pc = (v) => (v > 0 ? "+" : "") + Number(v).toFixed(1) + "%";
     parts.push(entryNote(
       (br.tp_price ? `TP ${br.tp_name} ${f(br.tp_price)} (${pc(br.tp_pct)}) 지정가` : `TP 없음(${br.tp_name} 없음)`)
@@ -8833,9 +8835,12 @@ function syncOrderCoinGate() {
 // ov(2026-10-05 «스위칭»): 화면 게이지 대신 쓸 값 {pct, lev, sltp, fresh} -- 전량 청산(pct 100)과 반대 진입(그 포지션의 증거금 %·배수).
 // 2026-10-09 자동 규칙(index.html #snapRule "1"): 서버가 재생 크기식으로 크기·손절을 정한다(rule=c). ETH 만 -- 다른 코인은 "직접".
 // 2026-10-16 "h" = «보유 1.5×»(rule=h) -- 같은 식에 상한만 1.5(서버 HOLD_CAP_X). 옛 «권고 1.5/2» 저장값과 겹치지 않게 숫자가 아니다.
+// 2026-10-20 사용자 «XRP 도 ETH 처럼 거래» -- 자동 규칙·권장 배수 코인(서버 orders.RULE_ASSETS 와 같게). 권장 배수는 그 코인 것(vol_mult_by).
+const RULE_ASSETS = new Set(["eth", "xrp"]);
+const volMultNow = () => { const by = latestSituation?.vol_mult_by; return by ? by[activeSnapshotAsset] || null : activeSnapshotAsset === "eth" ? latestSituation?.vol_mult : null; };
 function manualRule() {
   const v = el("snapRule")?.value || "0";
-  return MANUAL_RULES && activeSnapshotAsset === "eth" ? ({ 1: "c", h: "h" }[v] || "") : "";
+  return MANUAL_RULES && RULE_ASSETS.has(activeSnapshotAsset) ? ({ 1: "c", h: "h" }[v] || "") : "";
 }
 const ruleCap = () => (el("snapRule")?.value === "h" ? 1.5 : 3);   // = live_manual_peg_entry HOLD_CAP_X / COMMIT_CAP_X
 // 서버 live_manual_peg_entry.commit_rule_l 과 같은 식(화면 표시용 -- 실제 크기·손절은 누를 때 서버 미리보기가 정한다)
@@ -8851,7 +8856,7 @@ function commitRuleL(side, sigmaBp4h, vm, cap = 3) {
 }
 // «손절 시 순자산 −X%» = 지금 L × 3%(두 방향 중 큰 쪽) -- 권장 배수가 없으면 손절 거리만
 function ruleRiskText() {
-  const v = latestSituation?.vol_mult;
+  const v = volMultNow();
   if (!(v?.mult && v?.sigma_bp)) return `손절 첫 진입가 −${100 * RULE_STOP_PCT}%`;
   const lev = Number(manualLevEffective()) || 0;   // 2026-10-13 서버 rec_rule_size 와 같은 상한: 실효 L ≤ 0.9 × 거래소 레버리지
   const l = Math.max(...["LONG", "SHORT"].map((s) => commitRuleL(s, Number(v.sigma_bp), Number(v.mult), ruleCap()).l).map((x) => (lev > 0 ? Math.min(x, 0.9 * lev) : x)));
@@ -8859,7 +8864,10 @@ function ruleRiskText() {
 }
 function renderRuleBox() {
   const box = el("snapRuleBox"), r = manualRule();
-  if (box) box.hidden = !MANUAL_RULES || activeSnapshotAsset !== "eth";
+  if (box) {
+    box.hidden = !MANUAL_RULES || !RULE_ASSETS.has(activeSnapshotAsset);
+    box.title = activeSnapshotAsset === "eth" ? "" : `🔴자동 규칙 상수(상한 3배 · 첫 1/3 · 물타기 ∓0.75% · 손절 ∓5%)는 ETH 원장으로 검정했습니다 — ${coinUnit()} 는 권장 배수만 ${coinUnit()} 기준으로 맞췄고 규칙 자체는 검정 안 함`;
+  }
   const t = ruleRiskText();
   document.querySelectorAll(".rule-risk").forEach((n) => { if (n.textContent !== t) n.textContent = t; });
   el("snapRuleBox")?.closest(".entry-line")?.classList.toggle("rule-on", !!r);
@@ -8954,7 +8962,7 @@ function manualExitPlanHtml(plan) {
     ? ` <span class="entry-was">${plan.position_qty} 중 ${pct}% · 남김 ${plan.remaining_qty}</span>`
     : "";
   const parts = [`<div class="entry-head"><b>${side} ${plan.quantity} ${coinUnit()} 청산</b>${of}`
-    + `<span>${Number(plan.price ?? plan.reference_price).toFixed(2)}`
+    + `<span>${acctPx(plan.price ?? plan.reference_price)}`
     + `${plan.type === "MARKET" ? " 근처" : ""} · ${Number(plan.notional_usdt).toLocaleString()} USDT</span></div>` + execQuoteHtml(plan)];
   // 🔴미리보기 카드의 주인공은 «지금 닫으면 순손익 얼마»다(2026-09-14, 사용자 요청).
   // 여기서는 plan.type 을 알므로 고변동 시장가 전환이면 테이커 요율로 바꿔 계산한다.
@@ -9250,7 +9258,7 @@ function manualEntryStateText(state) {
   // 2026-10-14 자동 물타기 지정가(첫 진입가 ∓0.75%) -- 포지션이 닫히면 서버 감시 루프가 지운다
   const ad = state?.add_order;
   if (ad && state?.kind !== "exit") {
-    rows.push(ad.pending ? "물타기 지정가 거는 중…" : ad.placed ? `물타기 지정가 ${Number(ad.price).toLocaleString()} × ${ad.qty} 걸림(포지션 닫히면 자동 취소)`
+    rows.push(ad.pending ? "물타기 지정가 거는 중…" : ad.placed ? `물타기 지정가 ${acctPx(ad.price)} × ${ad.qty} 걸림(포지션 닫히면 자동 취소)`
       : `🔴물타기 지정가 못 걸었습니다 (${ad.error || ad.reason || "?"}) — 필요하면 손으로`);
   }
   // 2026-09-15 진입도 리페그한다. 쫓아간 횟수는 «의도한 가격보다 높게 들어갔을 수 있다»는
@@ -9917,7 +9925,7 @@ function renderOfab() {
 //   숫자는 서버 규칙(live_manual_peg_entry rec_rule_size·rec_rule_bracket)과 같은 식으로 여기서 3초마다 -- 첫 = REC_FIRST_SHARE(1/3) × 실효 L × 순자산,
 //   손절 = 지금 가격 ∓RULE_STOP_PCT(10-14 권장 B: L = min(12.4 × 권장배수, 청산 안전, 3) · ∓5%). 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
 function renderOfabRule(bal, live) {
-  const r = manualRule(), eth = activeSnapshotAsset === "eth", vmx = latestSituation?.vol_mult;
+  const r = manualRule(), eth = RULE_ASSETS.has(activeSnapshotAsset), vmx = volMultNow();
   const strip = el("ofabRule");
   if (strip) {
     strip.hidden = !MANUAL_RULES || !eth;
@@ -9933,7 +9941,7 @@ function renderOfabRule(bal, live) {
     if (q) {
       const bp = execQuoteBp((q.bid + q.ask) / 2, q.ref), txt = `${q.sym.replace(/^[A-Z]+?(?=USDC$)/, "")} ${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp`;
       if (qn.textContent !== txt) qn.textContent = txt;
-      qn.title = `주문은 ${q.sym} — 최우선 매수 ${q.bid.toFixed(2)} · 매도 ${q.ask.toFixed(2)}, 화면(USDT) ${q.ref.toFixed(2)} 대비 ${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp`
+      qn.title = `주문은 ${q.sym} — 최우선 매수 ${acctPx(q.bid)} · 매도 ${acctPx(q.ask)}, 화면(USDT) ${acctPx(q.ref)} 대비 ${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp`
         + ` (${Math.round((Date.now() - q.at) / 1000)}초 전 미리보기). 숏 진입·롱 청산 지정가가 화면 가격보다 싸 보이는 건 이 차이 때문입니다`;
       qn.setAttribute("aria-label", qn.title);
     }
@@ -9951,7 +9959,7 @@ function renderOfabRule(bal, live) {
       const sl = live * (side === "LONG" ? 1 - cr.sd : 1 + cr.sd);
       // 2026-10-11 두 조각(첫 $ · 손절)을 따로 감싼다 -- 좁은 화면(styles.css ≤480px)은 «·»를 숨기고 두 줄로 쌓아 버튼 줄이 화면 안에 든다
       const lev = Number(manualLevEffective()) || 0, lEff = lev > 0 ? Math.min(cr.l, 0.9 * lev) : cr.l;   // 서버 rec_rule_size 와 같은 실효 L
-      const first = `첫 $${Math.round(REC_FIRST_SHARE * lEff * eq).toLocaleString()}`, stop = `손절 ${Math.round(sl).toLocaleString()}`;
+      const first = `첫 $${Math.round(REC_FIRST_SHARE * lEff * eq).toLocaleString()}`, stop = `손절 ${Math.abs(sl) < 10 ? sl.toFixed(4) : Math.round(sl).toLocaleString()}`;
       if (sm.textContent !== `${first} · ${stop}`) {
         const part = (t, c) => Object.assign(document.createElement("span"), { textContent: t, className: c || "" });
         sm.replaceChildren(part(first), part(" · ", "sep"), part(stop));
@@ -9971,7 +9979,7 @@ function renderOfabRule(bal, live) {
 //   추세 쪽 버튼 = 직전 30초 추세 반대 테이커 순흐름이 최근 1시간 30초 창들의 90분위 이상이면 «지정가 자리»(창 10개 미만이면 대기).
 //   근거: 실원장 79왕복 추세 쪽 +898$ · 역추세 −468$(최악 −549$ 포함) · 반대 흐름 뒤 1~5분 되돌림(IC −.03) -- 수익 신호 아님, 지정가 걸 순간 표시.
 function ofabTrendTags() {
-  const t = latestTrend?.ok && activeSnapshotAsset === "eth" ? latestTrend : null, up = !!t && t.signal > 0;
+  const t = latestTrend?.ok && RULE_ASSETS.has(activeSnapshotAsset) ? latestTrend : null, up = !!t && t.signal > 0;
   let now30 = 0, q90 = Infinity, last = 0;
   if (t) {
     for (const k of supply1s.keys()) if (k > last) last = k;
@@ -10026,13 +10034,14 @@ setInterval(renderOfab, 3000);
 function volMultTip(v) {
   const m = Number(v.mult), s = Number(v.sigma_bp);
   return `<div class="vm-tip"><b>권장 크기 ×${m.toFixed(2)}</b>평소(2025년 이후 보통 날)의 ${m.toFixed(2)}배`
-    + `<br>직전 24시간 변동성 ${s.toFixed(0)}bp(4시간 척도) · 1배 기준 121bp · 범위 ×0.33~×3.9`
+    + `<br>직전 24시간 변동성 ${s.toFixed(0)}bp(4시간 척도) · 1배 기준 ${Math.round(v.ref_bp ?? 121)}bp · 범위 ×${(v.lo ?? 0.33).toFixed(2)}~×${(v.hi ?? 3.9).toFixed(1)}`
+    + (activeSnapshotAsset === "eth" ? "" : `<br>🔴${coinUnit()} 기준(1배)은 ${coinUnit()} 5분봉으로 같은 식으로 맞춘 값 — 아래 검정 숫자는 ETH 에서 잰 것`)
     + `<br>변동성이 클 때 크게, 작을 때 작게: 조용한 장의 44bp 역행은 추세의 시작이라 물타기가 물린다`
     + `<br>(핑퐁 물타기 재현 4.7년: 낮은 3분위 건당 −15bp · 높은 3분위 +14bp · 실원장 최대 낙폭 −$549 → −$204)`
     + `<br>사후 발견 · 전진 검정 중(1차 판정 2027-04) · 크게 들어갈 땐 명목 상한(자동 규칙 순자산 3배)과 함께</div>`;
 }
 function renderVolMult() {
-  const v = activeSnapshotAsset === "eth" ? latestSituation?.vol_mult : null;
+  const v = volMultNow();
   const m = Number(v?.mult), ok = Number.isFinite(m);
   for (const id of ["snapVolMult", "ofabVolMult"]) {
     const n = el(id);

@@ -117,7 +117,7 @@ def payload(book: Book, now_s: int, price: float, forming=None, bw: float = 1.0,
         lo, vals = bins(h[m], l[m], x[m], bw)
         tot = float(vals.sum())
         win[str(d)] = {"lo": lo, "vals": np.round(vals, 1).tolist(), "tot": round(tot, 1),
-                       "avg": round(float(((np.arange(len(vals)) + lo + 0.5) * bw * vals).sum() / tot), 2) if tot > 0 else None,
+                       "avg": round(float(((np.arange(len(vals)) + lo + 0.5) * bw * vals).sum() / tot), 6) if tot > 0 else None,   # XRP $1.3 -- 2자리면 칸 폭보다 거칠다
                        "hours": round(float(m.sum()) / 12, 1)}                     # 실제로 덮은 시간(30일이 덜 찼으면 작다)
     return {"asof": int(now_s), "price": price, "oi": book.oi, "bw": bw, "win": win,
             "basis": "추정(5분 OI·거래량 · 회전+나이 가중 닫기 · 롱=숏) -- 실측 포지션 아님, 지도로만"}

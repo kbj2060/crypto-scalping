@@ -445,6 +445,8 @@ SIZING_CAP_MODEL_ONLY = True
 #   direction_evr_gate_real_ledger_20260915 · vol-risk-upgrade-audit-20260927.
 #   되돌리기 = True + 워커 재기동(scripts/ops/supervisor_position_sizing_worker.sh).
 SIZING_RISK_MODEL_ENABLED = False
+# 2026-10-20 자동 규칙(규칙 B)을 켜는 코인 -- 그 코인의 권장 배수(flow_read.VOLM_BY)가 있어야 실제로 열린다(없으면 rule_vol_unavailable).
+RULE_ASSETS = frozenset({"eth", "xrp"})
 # 위험 모델 없이 주문할 때의 사이징 입력(SOL·XRP 는 원래 이것, ETH 는 위 스위치가 꺼지면 이것).
 SIMPLE_SIZING = {"available": True, "cap": {}, "risk_mae": {}, "vol_equivalent_qty": 0.0,
                  "atr_pct": None, "source": "simple_rule"}
@@ -581,7 +583,7 @@ def sizing_cap() -> dict[str, Any]:
 
 
 def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, fetch_binance_json, swr_cached,
-             _timed_produce, load_liquidation_map, load_market_history, situation_state, NOCACHE, STALE_GRACE_SECONDS):
+             _timed_produce, load_liquidation_map, load_market_history, situation_by, NOCACHE, STALE_GRACE_SECONDS):
     """make_app() 이 부른다. 인자 = 코어·시장 쪽 객체(server.py make_app 지역 · 모듈 상수). 돌려주는 것 = 라우트·기동/정리 훅이 쓸 함수들.
     라우트 등록·on_startup 순서는 server.py 에 그대로 둔다(기동 순서 불변)."""
     binance_account_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
@@ -1158,9 +1160,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             #   첫 진입 1/3(10-14, 옛 75%) · 물타기 = 남은 여유. 상한은 이 규칙 하나 -- 증거금 50% 상한은 자동 모드에서 뺀다(20배면 같은 10배라 겹칠 뿐).
             rule = cr = None
             if rule_l:
-                if asset != "eth":
-                    return None, {}, {}, ({"error": "rule_eth_only", "detail": "자동 규칙은 ETH 원장으로만 검정했습니다"}, 400)
-                vm = situation_state.get("vol_mult") or {}
+                if asset not in RULE_ASSETS:
+                    return None, {}, {}, ({"error": "rule_asset_unsupported", "detail": f"자동 규칙은 {'·'.join(sorted(RULE_ASSETS)).upper()} 만 켭니다"}, 400)
+                vm = (situation_by.get(asset) or {}).get("vol_mult") or {}   # 그 코인의 권장 배수(ETH 값을 쓰지 않는다)
                 if not (vm.get("sigma_bp") and vm.get("mult")) or time.time() - float(vm.get("bar") or 0) > 15 * 60:
                     return None, {}, {}, ({"error": "rule_vol_unavailable",
                                            "detail": "권장 배수(직전 24시간 변동성)가 없거나 15분 넘게 묵었습니다 -- 자동 진입을 막습니다"}, 503)

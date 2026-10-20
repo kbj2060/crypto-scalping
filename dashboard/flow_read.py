@@ -115,20 +115,24 @@ def card30_features(bars: list[dict[str, float]]) -> dict[str, float] | None:
 # 핑퐁 페이드+물타기 기계판에서 크기 ∝ 1/σ 는 해로웠고(사전등록 V1) 그 거울 크기 ∝ σ 가 2022~2026 5/5년·실원장 MDD −549→−204
 #   (사후 발견). 전진 판정 docs/experiments/eth_pingpong_vol_sizing_fwd_prereg_20261007.md — 상수·식은 거기와 **같아야** 한다.
 VOLM_MED, VOLM_REF, VOLM_CLIP = 157.3941696083474, 0.7657638410664205, (0.25, 3.0)
+# 2026-10-20 코인별(사용자 «XRP 도 ETH 처럼 거래») -- 같은 식·같은 정의를 그 코인 5분봉으로 다시 맞춘 (MED, REF). 없는 코인 = 값 없음(자동 규칙도 막힘).
+VOLM_BY = {"eth": (VOLM_MED, VOLM_REF)}
 
 
-def vol_size_mult(bars: list[dict[str, float]]) -> dict[str, float] | None:
+def vol_size_mult(bars: list[dict[str, float]], asset: str = "eth") -> dict[str, float] | None:
     """완결 5분봉(시간순) 마지막 289개 → σ24 = √(Σ 288개 5분 로그수익(bp)² / 6)(4h 척도)와 권장 배수(1배 = 2025~ 보통 날).
     간격이 끊기면 None(연구도 빈 봉이 있으면 값이 없다)."""
-    if len(bars) < 289:
+    if len(bars) < 289 or asset not in VOLM_BY:
         return None
+    med, ref = VOLM_BY[asset]
     b = bars[-289:]
     t = np.array([int(x["time"]) for x in b])
     if np.any(np.diff(t) != 300):
         return None
     r = np.diff(np.log(np.array([float(x["close"]) for x in b]))) * 1e4
     sig = float(np.sqrt(np.sum(r * r) / 6))
-    return {"sigma_bp": sig, "mult": float(np.clip(sig / VOLM_MED, *VOLM_CLIP) / VOLM_REF), "bar": int(t[-1])}
+    return {"sigma_bp": sig, "mult": float(np.clip(sig / med, *VOLM_CLIP) / ref), "bar": int(t[-1]),
+            "ref_bp": med * ref, "lo": VOLM_CLIP[0] / ref, "hi": VOLM_CLIP[1] / ref}   # 화면 설명(1배 기준 bp·범위)
 # 각 결과 열 아래에 거는 «그쪽으로 미는 조건» -- 융합 4표의 각 방향판. (표 이름 접두, 부호, 문구)
 PUSH = {
     +1: (("고래", +1, "고래 매수 · 리테일/중형 매도"), ("가격↔OI", +1, "1시간 하락 + OI 감소(롱 이탈 끝물)"),

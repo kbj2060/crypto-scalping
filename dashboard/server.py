@@ -1591,6 +1591,8 @@ def make_app() -> web.Application:
     _ce = cctx["eth"]   # ETH 전용 소비자(30분 카드 · SSE)는 옛 이름 그대로
     mp_state, situation_state = _ce.mp_state, _ce.situation_state
     app["situation_eth"] = situation_state   # 시험 손잡이(자동 규칙이 읽는 권장 배수 vol_mult 를 심는다)
+    situation_by = {a: c.situation_state for a, c in cctx.items()}   # 2026-10-20 자동 규칙·권장 배수 코인별
+    app["situation_by"] = situation_by
     # (ts_ms, side, qty, price, usd) -- side "long" = 롱 포지션 청산(SELL). 코인별(1초 수급의 청산 레인).
     liq_events_by: dict[str, deque] = {a: deque(maxlen=5000) for a in COIN_CONFIG}
     liq_events = liq_events_by["eth"]           # ETH 전용 소비자(미시 참고)는 옛 이름 그대로
@@ -2159,9 +2161,9 @@ def make_app() -> web.Application:
             situation_state["candles_day"] = await load_5m_day(int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS, asset)
         except Exception as exc:  # noqa: BLE001 -- 없으면 카드 캐시(짧다)로 물러선다
             print(f"flow-read 5m day: {exc!r}", flush=True)
-        if asset == "eth":   # 권장 배수(ETH 에서만 검정) -- 완결 봉 289개가 이어져야 값이 있다(없으면 None = 화면 «—»)
-            situation_state["vol_mult"] = fr.vol_size_mult(
-                [c for c in situation_state.get("candles_day") or [] if int(c["time"]) < int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS])
+        # 권장 배수(코인별 상수 fr.VOLM_BY, 없는 코인은 None) -- 완결 봉 289개가 이어져야 값이 있다(없으면 None = 화면 «—»)
+        situation_state["vol_mult"] = fr.vol_size_mult(
+            [c for c in situation_state.get("candles_day") or [] if int(c["time"]) < int(now) // FOOTPRINT_BAR_SECONDS * FOOTPRINT_BAR_SECONDS], asset)
         situation_state["candles"] = await load_market_history(asset)
         try:
             situation_state["btc_candles"] = await load_market_history("btc")   # 같은 캐시 프레임에서 자른다
@@ -2439,7 +2441,8 @@ def make_app() -> web.Application:
     def situation_payload() -> dict[str, Any]:
         return {"now": situation_state["now"], "computed_at": situation_state["computed_at"],
                 "streams": {"fo": dict(fo_state), "mp": dict(mp_state)},
-                "read": situation_state.get("read"), "vol_mult": situation_state.get("vol_mult")}
+                "read": situation_state.get("read"), "vol_mult": situation_state.get("vol_mult"),
+                "vol_mult_by": {a: s.get("vol_mult") for a, s in situation_by.items()}}
 
     async def api_situation(request: web.Request) -> web.Response:
         return web.json_response(situation_payload(), headers=NOCACHE)
@@ -4107,7 +4110,8 @@ def make_app() -> web.Application:
         async def produce() -> dict[str, Any]:
             st = await pos_ensure(asset)
             forming, px = pos_forming(asset, st)
-            return pprof.payload(st["book"], int(time.time()), px, forming, windows=wins)   # 1~4ms -- 상태와 같은 루프에서(밀기와 엇갈리지 않게)
+            bw = 1.0 if asset == "eth" else flows[asset].spec.bucket   # 2026-10-20 칸 폭: ETH $1(≈2.5bp) · 다른 코인 = 풋프린트 칸(XRP 0.0003 ≈2.3bp)
+            return pprof.payload(st["book"], int(time.time()), px, forming, bw=bw, windows=wins)   # 1~4ms -- 상태와 같은 루프에서(밀기와 엇갈리지 않게)
         try:
             payload = await swr_cached(f"position_profile:{asset}:{','.join(map(str, wins))}", POSITION_PROFILE_CACHE_SECONDS, produce,
                                        max_stale=STALE_GRACE_SECONDS)
@@ -4213,7 +4217,7 @@ def make_app() -> web.Application:
         account_trip_state=account_trip_state, refresh_tasks=refresh_tasks, swr_locks=swr_locks,
         binance_session=binance_session, fetch_binance_json=fetch_binance_json, swr_cached=swr_cached,
         _timed_produce=_timed_produce, load_liquidation_map=load_liquidation_map,
-        load_market_history=load_market_history, situation_state=situation_state,
+        load_market_history=load_market_history, situation_by=situation_by,
         NOCACHE=NOCACHE, STALE_GRACE_SECONDS=STALE_GRACE_SECONDS)
     keep_trip_ledger = order_api.keep_trip_ledger
 
