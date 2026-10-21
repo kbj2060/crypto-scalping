@@ -72,6 +72,10 @@ let latestFootprint = null;
 const CHART_PAN_BARS = 144;
 let chartPanEnd = null;
 let chartPanFrac = 0;   // 2026-10-20 끌기 1:1(사용자 «봉 단위로 뚝뚝»): 오른쪽 끝 = chartPanEnd 봉 다음 + 이 소수 봉(0~1) -- chartPanEdge
+// 2026-10-21 사용자 «맨 마지막 봉을 자세히 보려면 오른쪽 끝에서 막히면 안 돼»: 실시간일 때 최신 봉 오른쪽에 빈 칸(봉 수, 소수).
+//   최신 봉은 계속 따라가고(chartPanEnd = null 그대로) 빈 칸만 남는다 -- 트레이딩뷰처럼. 최대 = 창의 80%(봉이 2~3개는 늘 보이게).
+let chartPanRight = 0;
+const chartPanRightMax = () => chartWindowBars * 0.8;
 // 2026-10-09 세로 이동(사용자 «모든 차트에서 마우스로 위아래로도»): 가격축을 이만큼(가격 단위) 올린다 · 0 = 자동 축. «최신으로»가 함께 0 으로.
 let chartPanY = 0, chartYPerPx = 0;
 let footprintLastFetchAt = 0;
@@ -750,7 +754,7 @@ function setupChartWindowTabs() {
       if (!btn.dataset.bars) return;   // 4h·1d 는 fp_daily.js 가 켠다(4시간봉·일봉 풋프린트)
       // 2026-10-20 사용자 «5m 을 누르면 최신 1시간을 5분봉으로»: 넓혀 둔 창·과거로 옮긴 창도 처음으로
       setChartWindow(Number(btn.dataset.bars), Number(btn.dataset.tfk) || 1);   // 30m·1h = data-tfk 6·12
-      if (chartPanEnd != null || chartPanY) chartPanReset();
+      if (chartPanEnd != null || chartPanY || chartPanRight) chartPanReset();
     });
   });
   renderChartWindowTabs();
@@ -4952,7 +4956,7 @@ const objToken = (() => {
 //   2026-10-20 받아 둔 구간 전체(1주일을 받았으면 1주일)로 갈 수 있다(전에는 12시간 안). 끝을 시각으로 들고 있어 1주일이 앞에 붙어도 안 밀린다.
 function chartPanEdge(full) {
   const len = full.length;
-  if (chartPanEnd == null) return len;
+  if (chartPanEnd == null) return len + chartPanRight;
   const i = full.findIndex((c) => c.time > chartPanEnd);
   return Math.max(Math.min(len, chartWindowBars), Math.min(len, (i < 0 ? len : i) + chartPanFrac));
 }
@@ -4960,15 +4964,15 @@ function chartPanTo(edge) {   // edge = 소수 봉 인덱스(끌기·관성·휠
   const full = chartTfFull();
   if (!full.length) return false;
   const len = full.length;
-  const e = Math.max(Math.min(len, chartWindowBars), Math.min(len, edge)), i = Math.floor(e);
-  const next = e >= len - 1e-3 ? null : full[i - 1].time, frac = next == null ? 0 : e - i;
-  if (next === chartPanEnd && Math.abs(frac - chartPanFrac) < 1e-4) return false;
-  chartPanEnd = next; chartPanFrac = frac;
+  const e = Math.max(Math.min(len, chartWindowBars), Math.min(len + chartPanRightMax(), edge)), i = Math.floor(e);
+  const next = e >= len - 1e-3 ? null : full[i - 1].time, frac = next == null ? 0 : e - i, right = next == null ? Math.max(0, e - len) : 0;
+  if (next === chartPanEnd && Math.abs(frac - chartPanFrac) < 1e-4 && Math.abs(right - chartPanRight) < 1e-4) return false;
+  chartPanEnd = next; chartPanFrac = frac; chartPanRight = right;
   scheduleSnapshotChartRender();
   maybeFetchFpWeek();   // 처음 옮기는 순간 1주일을 받는다
   return true;
 }
-function chartPanReset() { chartFlingStop(); chartPanEnd = null; chartPanFrac = 0; chartPanY = 0; scheduleSnapshotChartRender(); }   // 최신 봉 · 자동 축
+function chartPanReset() { chartFlingStop(); chartPanEnd = null; chartPanFrac = 0; chartPanRight = 0; chartPanY = 0; scheduleSnapshotChartRender(); }   // 최신 봉 · 자동 축
 const chartPanStep = () => Math.max(1, Math.round(chartWindowBars / 12));   // 한 칸 이동 = 창의 1/12(12봉 창 = 1봉 · 1주일 창 = 168봉)
 const chartPanBy = (n) => chartPanTo(chartPanEdge(chartTfFull()) - n * chartPanStep());   // n>0 = 과거로
 // 마지막 렌더의 가격 플롯 자리(viewBox 단위) -- 끌기·휠이 화면 픽셀을 봉으로 바꾼다(renderCandleSvg 가 채운다)
@@ -5019,13 +5023,13 @@ function renderChartPan() {
   if (!full.length || !flowOn()) { box.hidden = true; chartPanKey = ""; return; }
   box.hidden = false;
   const hist = full, n = hist.length;
-  const eF = chartPanEdge(full), sF = Math.max(0, eF - chartWindowBars), live = chartPanEnd == null && !chartPanY;
-  const s = Math.floor(sF + 1e-6), e = Math.ceil(eF - 1e-6);   // 글자·aria 는 걸친 봉까지 · 띠는 소수 그대로(끌기 따라 미끄러진다)
+  const eF = chartPanEdge(full), sF = Math.max(0, eF - chartWindowBars), live = chartPanEnd == null && !chartPanY && !chartPanRight;
+  const s = Math.min(n - 1, Math.floor(sF + 1e-6)), e = Math.min(n, Math.ceil(eF - 1e-6));   // 오른쪽 빈 칸(chartPanRight)이면 eF > n   // 글자·aria 는 걸친 봉까지 · 띠는 소수 그대로(끌기 따라 미끄러진다)
   // 리뷰: 끌기·관성 한 프레임마다 미니맵을 통째로(전 구간 고저 · 350점 선 · innerHTML) 다시 만들었다 -- 선은 데이터가 바뀔 때만, 창이 움직이면 띠·글자만
   const W = 176, H = 26, X = (i) => (i / n) * W;
   const t = (c) => (hist[n - 1].time - hist[0].time > 86400 ? `${new Date(c.time * 1000).getMonth() + 1}/${new Date(c.time * 1000).getDate()} ` : "") + fmtHourMinute(c.time * 1000), end = hist[Math.max(0, e - 1)];
   const when = `${t(hist[s])}–${chartPanEnd == null ? "지금" : new Date(end.time * 1000).toDateString() === new Date(hist[s].time * 1000).toDateString() ? fmtHourMinute(end.time * 1000) : t(end)}`;
-  const vt = `${t(hist[s])}부터 ${t(end)}까지`, vmin = Math.min(n, Math.round(chartWindowBars)), wx = X(sF).toFixed(1), ww = Math.max(3, X(eF) - X(sF)).toFixed(1);
+  const vt = `${t(hist[s])}부터 ${t(end)}까지`, vmin = Math.min(n, Math.round(chartWindowBars)), wx = X(sF).toFixed(1), ww = Math.max(3, X(Math.min(n, eF)) - X(sF)).toFixed(1);
   //   형성 봉은 체결마다 바뀐다 -- 고저가 그린 범위 안이고 종가가 같은 반 픽셀이면 선은 그대로 둔다(chartPanGeo = 마지막으로 그린 범위)
   const z = hist[n - 1], g = chartPanGeo, key = `${n}|${live}|${hist[0].time}|${z.time}|${chartTfK}`, map = box.querySelector(".chart-pan-map");
   if (key === chartPanKey && map && g && z.low >= g.lo && z.high <= g.hi && Math.round(g.Y(z.close) * 2) === g.yz) {
@@ -5080,7 +5084,7 @@ function setupChartPan() {
   // 차트 위 휠(2026-10-20 사용자): **세로 = 줌** -- 아래로 = 넓게(봉이 얇아지면 체결 박스 없이 캔들) · 위로 = 좁게(12봉 = 풋프린트).
   //   10-20 «트레이딩뷰처럼»: 단계 없이 휠 양만큼 연속(px × 0.0025 의 지수 -- 마우스 한 칸 100px ≈ 1.28배), 커서 밑 시각이 커서 밑에 남는다.
   //   **가로 휠(트랙패드 옆으로) = 이동**, 픽셀 그대로(손가락과 1:1). 끌기 = 1:1 + 놓으면 관성 · 더블클릭 = 최신으로 · 방향키(미니맵) = 이동은 그대로.
-  const canPan = () => flowOn() && full().length > chartWindowBars;   // 2026-10-20 30m·1h 도
+  const canPan = () => flowOn() && full().length > 0;   // 2026-10-20 30m·1h 도 · 10-21 창이 받은 구간 전체여도 오른쪽 빈 칸으로는 간다
   // 2026-10-20 사용자 «차트 위에 마우스가 있으면 휠을 아무리 움직여도 페이지는 안 움직이게»: 휠은 늘 차트가 삼킨다
   //   (끝(12봉·1주일), 30m·1h 창, 이동 못 하는 가로 휠도). 페이지 스크롤은 차트 밖에서. ctrl+휠(브라우저 확대)만 통과.
   svg.addEventListener("wheel", (ev) => {
@@ -5135,7 +5139,7 @@ function setupChartPan() {
     if (Math.abs(pxPerMs) > 0.25) chartFlingStart(-pxPerMs / d.slot);
   };
   svg.addEventListener("pointerup", stop); svg.addEventListener("pointercancel", stop);
-  svg.addEventListener("dblclick", () => { if (chartPanEnd != null || chartPanY) chartPanReset(); });
+  svg.addEventListener("dblclick", () => { if (chartPanEnd != null || chartPanY || chartPanRight) chartPanReset(); });
   // 2026-10-20 캔버스(fpCv)는 svg(viewBox meet)처럼 상자를 따라 저절로 늘지 않는다 -- 상자가 바뀌면 바로 다시 그린다(다음 폴링까지 어긋나지 않게)
   if (window.ResizeObserver) new ResizeObserver(() => scheduleSnapshotChartRender()).observe(svg);
   // 리뷰: 1배 → 2배 모니터로 옮기면 CSS 크기가 같아 위 관찰이 안 울린다 -- 장치 픽셀 비가 바뀌면 다시 그린다(새 비율로 다시 건다)
