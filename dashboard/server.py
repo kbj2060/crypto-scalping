@@ -2812,14 +2812,14 @@ def make_app() -> web.Application:
     pos_seed_fail: dict[str, float] = {}     # 첫 30일 적재 실패 시각 -- 60초 안엔 다시 안 부른다(매초 26쪽 REST 반복 방지, 10-10 검토)
     POS_SEED_BACKOFF_S = 60
 
-    def pos_build(bars: list[tuple[int, float, float, float, float]]) -> "pprof.Book":
+    def pos_build(bars: list[tuple[int, float, float, float, float, float]]) -> "pprof.Book":
         book = pprof.Book()
         for b in bars:
             book.push(*b)
         return book
 
-    async def pos_bars_rest(asset: str, start_s: int, end_s: int) -> list[tuple[int, float, float, float, float]]:
-        """닫힌 5분봉 [start_s, end_s) 의 (시각, 고, 저, 거래량, 봉 끝 OI). OI 이력은 바이낸스가 30일만 준다. 파싱은 pprof(자체점검)."""
+    async def pos_bars_rest(asset: str, start_s: int, end_s: int) -> list[tuple[int, float, float, float, float, float]]:
+        """닫힌 5분봉 [start_s, end_s) 의 (시각, 고, 저, 거래량, 봉 끝 OI, 종가 -- 롱·숏 몫 s 용). OI 이력은 바이낸스가 30일만 준다. 파싱은 pprof(자체점검)."""
         sym, step = COIN_CONFIG[asset]["binance_symbol"], 300_000
         oi: dict[int, float] = {}
         t = start_s * 1000
@@ -2828,7 +2828,7 @@ def make_app() -> web.Application:
                 POS_OI_HIST_URL, {"symbol": sym, "period": "5m", "limit": 500, "startTime": t, "endTime": min(t + 499 * step, end_s * 1000)},
                 error_reason="position_profile_upstream_error")))
             t += 500 * step
-        out: list[tuple[int, float, float, float, float]] = []
+        out: list[tuple[int, float, float, float, float, float]] = []
         t = start_s * 1000
         while t < end_s * 1000:
             rows = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
@@ -4126,7 +4126,8 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_position_profile(request: web.Request) -> web.Response:
-        """최근 1·7·30일에 열려 아직 남은 계약의 가격 분포(추정, 롱=숏) -- 풋프린트 체결 기둥의 «포지션» 보기. 1초 캐시."""
+        """최근 1·7·30일에 열려 아직 남은 계약의 가격 분포(추정) -- 풋프린트 체결 기둥의 «포지션» 보기. 1초 캐시.
+        win[d] = 롱=숏 분포 + long·short(2026-10-22, 손바뀜을 직전 1h·24h 수익으로 가른 근사 · dashboard/position_profile.py)."""
         asset = _query_coin_asset(request)
         if asset not in flows:
             raise web.HTTPNotFound(reason="flow_off")

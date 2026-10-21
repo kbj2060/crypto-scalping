@@ -323,7 +323,7 @@ function repaintSupply1sPanel() {
 
 const API_OI_5M_URL = "/api/oi-5m";
 // 2026-10-10 풋프린트 체결 기둥 «포지션» 보기(사용자 «체결 | 포지션 토글 · A + C 미니맵 · 1초») -- /api/position-profile.
-//   최근 1·7·30일에 열려 아직 남은 계약(추정 · 롱=숏 · 회전+나이 가중 닫기, dashboard/position_profile.py). 지도로만, 신호 아님.
+//   최근 1·7·30일에 열려 아직 남은 계약(추정 · 회전+나이 가중 닫기 · 10-22 롱·숏 분리 근사, dashboard/position_profile.py). 지도로만, 신호 아님.
 const API_POSITION_PROFILE_URL = "/api/position-profile";
 let latestPositionProfile = null, posProfileFetchAt = 0, posProfileInflight = false;
 let fpColMode = (() => { try { return localStorage.getItem("fpCol") === "pos" ? "pos" : "trade"; } catch (e) { return "trade"; } })();
@@ -6079,7 +6079,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   막대 = 행 총 체결(매수+매도) · 안쪽부터 고래·중형·리테일 농담 · POC(최다 체결) 행은 테두리.
     //   🔴체결 합산에는 방향이 없다(누가 사면 누가 판다) -- 지지·저항으로 읽지 않는다. 방향은 봉별 델타가 말한다.
     // ── 체결 | 포지션 토글 (2026-10-10 사용자 «체결/호가 프로파일 바로 위에 체결과 포지션 토글» · 시안 A + C 미니맵) ──────────
-    //   포지션 = 최근 1·7·30일에 열려 아직 남은 계약(추정 · 롱=숏). 체결 기둥과 같은 자리·같은 행·같은 바닥선에서 왼쪽으로.
+    //   포지션 = 최근 1·7·30일에 열려 아직 남은 계약(추정 · 2026-10-22 롱·숏 분리 근사, 시안 A). 체결 기둥과 같은 자리·같은 행·같은 바닥선에서 왼쪽으로.
     //   풋프린트 가격 폭이 좁아 대부분이 화면 밖이다 -- 위·아래 끝에 «화면 밖 몫», 기둥 왼쪽 10px 에 창 전체 미니맵 + 보이는 범위 괄호.
     //   🔴지도다. 덩어리 저항·재방문·고통 지수는 매매 검정 불통과(= VWAP 평균회귀 재표현, 2026-10-09).
     const posOn = !!(TRADE_W && fpColMode === "pos" && flowOn());
@@ -6104,29 +6104,64 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (!W || !(W.tot > 0)) {
         label(anchor - 4, mt + 14, P && P.win && P.win[String(fpPosWin)] ? "포지션 데이터 없음" : "포지션 불러오는 중…", "var(--muted)");
       } else {
-        const rows = new Map();
-        W.vals.forEach((q, j) => {   // $bw 칸을 걸치는 행마다 겹친 길이만큼 나눈다(행이 칸보다 잘면 한 줄씩 비던 것, 10-10 배포 후)
-          const p0 = (W.lo + j) * P.bw, p1 = p0 + P.bw;
-          for (let k = rowOf(p0); rowLo(k) < p1; k++) {
-            const ov = Math.min(p1, rowLo(k + 1)) - Math.max(p0, rowLo(k));
-            if (ov > 0) rows.set(k, (rows.get(k) || 0) + q * ov / P.bw);
-          }
-        });
+        const toRows = (V) => {
+          const m = new Map();
+          V.vals.forEach((q, j) => {   // $bw 칸을 걸치는 행마다 겹친 길이만큼 나눈다(행이 칸보다 잘면 한 줄씩 비던 것, 10-10 배포 후)
+            const p0 = (V.lo + j) * P.bw, p1 = p0 + P.bw;
+            for (let k = rowOf(p0); rowLo(k) < p1; k++) {
+              const ov = Math.min(p1, rowLo(k + 1)) - Math.max(p0, rowLo(k));
+              if (ov > 0) m.set(k, (m.get(k) || 0) + q * ov / P.bw);
+            }
+          });
+          return m;
+        };
+        const rows = toRows(W);
         const vis = (k) => rowLo(k + 1) > yMin && rowLo(k) < yMax;
+        // 롱·숏 분리(추정, 2026-10-22 사용자 «포지션을 롱/숏 비율대로» · 시안 A 이어 붙인 막대) -- 손바뀜을 직전 1h·24h 수익으로 가른 근사
+        //   (HL 채점: 롱−숏 평균 진입 차 부호 일치 1일 98% · 7일 51%). 기둥 바닥선부터 롱(초록) → 숏(빨강), 길이 = 롱+숏.
+        //   물린 쪽(롱 = 현재가 위 · 숏 = 현재가 아래)은 진하게, 수익 쪽은 옅게. 서버가 long/short 를 안 주면 옛 롱=숏 막대.
+        const side = W.long && W.short && W.long.tot > 0 && W.short.tot > 0;
+        const rL = side ? toRows(W.long) : null, rS = side ? toRows(W.short) : null;
+        const UNDER = 0.92, OVER = 0.38;
         let mxq = 0; rows.forEach((q, k) => { if (vis(k) && q > mxq) mxq = q; });
+        let mxSide = 0;
+        if (side) rows.forEach((q, k) => { if (vis(k)) mxSide = Math.max(mxSide, (rL.get(k) || 0) + (rS.get(k) || 0)); });
         rows.forEach((q, k) => {
           if (!vis(k) || !(mxq > 0)) return;
           const yTop = Math.max(mt, yAt(rowLo(k + 1))), yBot = Math.min(plotBottom, yAt(rowLo(k)));
           if (yBot - yTop < 1) return;
-          const wd = Lw * q / mxq;
-          rect(anchor - wd, yTop + 0.5, wd, yBot - yTop - 1, "var(--position)", 0.9);
+          const y0 = yTop + 0.5, h = yBot - yTop - 1, mid = (rowLo(k) + rowLo(k + 1)) / 2, up = mid > currentPrice;
+          if (!side) { const wd = Lw * q / mxq; rect(anchor - wd, y0, wd, h, "var(--position)", 0.9); return; }
+          if (!(mxSide > 0)) return;
+          const wa = Lw * (rL.get(k) || 0) / mxSide, wb = Lw * (rS.get(k) || 0) / mxSide;
+          rect(anchor - wa, y0, wa, h, "var(--good)", up ? UNDER : OVER);
+          rect(anchor - wa - wb, y0, wb, h, "var(--bad)", up ? OVER : UNDER);
         });
         let above = 0, below = 0;
         W.vals.forEach((q, j) => { const p = (W.lo + j + 0.5) * P.bw; if (p > yMax) above += q; else if (p < yMin) below += q; });
         const pct = (x) => Math.round(100 * x / W.tot) + "%";
-        if (above / W.tot >= 0.01) label(anchor - 4, mt + 12, "↑ 화면 위 " + pct(above), "var(--muted)");
+        let topY = mt + 12;
+        if (side) {
+          const upShare = (V) => { let u = 0; V.vals.forEach((q, j) => { if ((V.lo + j + 0.5) * P.bw > currentPrice) u += q; }); return u / V.tot; };
+          const uL = upShare(W.long), uS = upShare(W.short);
+          label(anchor - 4, topY, `롱 위 ${Math.round(100 * uL)}% · 아래 ${Math.round(100 * (1 - uL))}%`, "var(--good)"); topY += 12;
+          label(anchor - 4, topY, `숏 위 ${Math.round(100 * uS)}% · 아래 ${Math.round(100 * (1 - uS))}%`, "var(--bad)"); topY += 12;
+        }
+        if (above / W.tot >= 0.01) label(anchor - 4, topY, "↑ 화면 위 " + pct(above), "var(--muted)");
         if (below / W.tot >= 0.01) label(anchor - 4, plotBottom - 4, "↓ 화면 아래 " + pct(below), "var(--muted)");
-        if (W.avg && currentPrice > 0) {
+        if (side && currentPrice > 0) {                                   // 롱·숏 평균 진입 두 줄 -- 가까우면 높은 쪽 글자는 위, 낮은 쪽은 아래
+          const hiAvg = Math.max(W.long.avg, W.short.avg);
+          [[W.long, "롱", "var(--good)"], [W.short, "숏", "var(--bad)"]].forEach(([V, nm, col]) => {
+            if (!V.avg) return;
+            const dv = (V.avg / currentPrice - 1) * 100, txt = `${nm} 평균 ${V.avg.toFixed(pxDp())} (${dv >= 0 ? "+" : ""}${dv.toFixed(1)}%)`;
+            if (V.avg < yMax && V.avg > yMin) {
+              const ya = yAt(V.avg), l = document.createElementNS(NS, "line");
+              l.setAttribute("x1", tradeX0 + 28); l.setAttribute("x2", anchor); l.setAttribute("y1", ya); l.setAttribute("y2", ya);
+              l.setAttribute("stroke", col); l.setAttribute("stroke-dasharray", "4 3"); l.setAttribute("stroke-width", "1.4"); g.appendChild(l);
+              label(anchor - 4, Math.min(Math.max(V.avg === hiAvg ? ya - 4 : ya + 12, topY + 12), plotBottom - 30), txt, col);   // 머리 줄·바닥 줄과 안 겹치게
+            } else label(anchor - 4, V.avg > yMax ? topY + (nm === "롱" ? 0 : 12) : plotBottom - 17 - (nm === "롱" ? 0 : 12), (V.avg > yMax ? "↑ " : "↓ ") + txt, col);
+          });
+        } else if (W.avg && currentPrice > 0) {
           const dv = (W.avg / currentPrice - 1) * 100, avTxt = "평균 진입 " + W.avg.toFixed(pxDp()) + " (" + (dv >= 0 ? "+" : "") + dv.toFixed(1) + "%)";
           if (W.avg < yMax && W.avg > yMin) {
             const ya = yAt(W.avg), l = document.createElementNS(NS, "line");
@@ -6147,7 +6182,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
             l2.setAttribute("x1", mmX - 3); l2.setAttribute("x2", mmX + mmW + 3); l2.setAttribute("y1", yc); l2.setAttribute("y2", yc);
             l2.setAttribute("stroke", "var(--ink)"); l2.setAttribute("stroke-width", "1.5"); g.appendChild(l2);
           }
-          posInfo = { rows, rowSize, off, tot: W.tot, win: fpPosWin, x0: tradeX0 + 28, x1: anchor, mm: { x0: mmX - 3, x1: mmX + mmW + 3, my, lo, hi, W, bw: P.bw }, hours: W.hours };
+          posInfo = { rows, rL, rS, rowSize, off, tot: W.tot, win: fpPosWin, x0: tradeX0 + 28, x1: anchor, mm: { x0: mmX - 3, x1: mmX + mmW + 3, my, lo, hi, W, bw: P.bw }, hours: W.hours };
         }
       }
       const ln = document.createElementNS(NS, "line");
@@ -7321,7 +7356,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))">`
         + `<span style="color:var(--position);font-weight:700">남은 계약 ${fq(q)} ${coinUnit()}</span> · ${lo.toFixed(dp)}–${hi.toFixed(dp)}`
         + ` · 최근 ${posInfo.win}일 중 ${(100 * q / posInfo.tot).toFixed(1)}%`
-        + `<br>한쪽 금액 ≈ $${(q * mid / 1e6).toFixed(1)}M (롱 ${fq(q)} + 숏 ${fq(q)} · 계약 하나 = 롱 1 + 숏 1)`
+        + (posInfo.rL && mx > posInfo.mm.x1
+          ? (() => { const k = Math.floor((yMax - ((my - mt) * ySpan) / ch + posInfo.off) / posInfo.rowSize), l = posInfo.rL.get(k) || 0, sh = posInfo.rS.get(k) || 0;
+              return `<br><span style="color:var(--good);font-weight:700">롱 ${fq(l)}</span> · <span style="color:var(--bad);font-weight:700">숏 ${fq(sh)}</span>`
+                + ` · 롱 몫 ${(100 * l / Math.max(l + sh, 1e-9)).toFixed(0)}% (≈ $${(l * mid / 1e6).toFixed(1)}M / $${(sh * mid / 1e6).toFixed(1)}M)`
+                + `<br><span style="opacity:.7">롱·숏 나눔은 직전 1h·24h 흐름으로 손바뀜을 가른 근사 -- 1일 창은 롱·숏 평균 진입 차의 방향이 실측과 98% 맞지만 7·30일 창은 반반이라 롱·숏 차를 믿기 어렵다</span>`; })()
+          : `<br>한쪽 금액 ≈ $${(q * mid / 1e6).toFixed(1)}M (롱 ${fq(q)} + 숏 ${fq(q)} · 계약 하나 = 롱 1 + 숏 1)`)
         + `<br>지금 상태: <span style="font-weight:700">${up ? "롱 물림 · 숏 수익" : "롱 수익 · 숏 물림"}</span> (현재가 ${up ? "위" : "아래"} ${(Math.abs(mid / currentPrice - 1) * 100).toFixed(1)}%)`
         + (posInfo.hours < posInfo.win * 24 - 1 ? `<br>창 실제 범위 ${posInfo.hours}시간(서버 기록이 아직 덜 참)` : "")
         + `<br><span style="opacity:.7">추정(5분 OI·거래량 · 손바뀜 + 새 포지션 먼저 닫힘) · 실측 아님 · 지도로만, 저항·지지 신호 아님</span></div>`);
