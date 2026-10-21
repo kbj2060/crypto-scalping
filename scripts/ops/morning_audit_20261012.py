@@ -40,12 +40,14 @@ EXPECTED_CRON = {
     "대체데이터(공지·펀딩 스프레드)": "run_f4c_altdata_collector",
     "청산지도 채점": "live_liqmap_scorer_20261008.py",
     "배포 워처": "deploy_watcher.sh",
+    "데이터 품질 감시": "data_quality_monitor_20261022.py",
 }
 # 하루 한 번 이상 써야 하는 산출물(경로, 최대 나이 시간)
 EXPECTED_FILES = {
     "전진 기록기 장부": ("data/live/eth_direction_forward.jsonl", 26),
     "max pain 장부": ("data/live/maxpain_oos_ledger.jsonl", 26),
     "청산지도 채점": ("data/live/liqmap_score.jsonl", 3),
+    "데이터 품질 감시": ("data/live/ops_watchdog/data_quality.json", 3),
 }
 
 
@@ -177,6 +179,12 @@ def facts_files() -> dict:
     return out
 
 
+def facts_data_quality() -> dict:
+    """매시 데이터 품질 감시(scripts/ops/data_quality_monitor_20261022.py)의 마지막 판정 -- 빈 구간·거래소 어긋남·전진 검정 구멍 날."""
+    r = json.loads((W.OUT / "data_quality.json").read_text())
+    return {"at": r.get("generated_at_kst"), "status": r.get("status"), "not_ok": r.get("not_ok", [])[:12]}
+
+
 def facts_paper() -> dict:
     d = get_json("/api/paper-arms")
     return {"available": d.get("available"), "age_s": d.get("age_s"), "stale": d.get("stale")}
@@ -188,7 +196,7 @@ def gather() -> dict:
     return {"generated_at_kst": now.isoformat(timespec="seconds"),
             "watchdog": safe(facts_watchdog), "deploy": safe(facts_deploy), "disk": safe(facts_disk),
             "apt_36h": safe(facts_apt), "account": safe(facts_account), "cron": safe(facts_cron),
-            "outputs": safe(facts_files), "paper_engine": safe(facts_paper),
+            "outputs": safe(facts_files), "paper_engine": safe(facts_paper), "data_quality": safe(facts_data_quality),
             "verdicts": safe(lambda: verdict_flags(cal["items"], now.replace(tzinfo=None)))}
 
 
@@ -197,6 +205,7 @@ PROMPT = """너는 개인 크립토 트레이딩 서버의 아침 운영 감사�
 규칙: 한국어. 12줄 이하. JSON 에 없는 것은 추측하지 마라. 매매 방향·시장 전망은 말하지 마라.
 형식: 첫 줄 = 한 줄 결론(이상 없음/확인 필요/즉시 조치). 그다음 «🔴 즉시» «🟠 확인» «🟢 정상(한 줄 요약)» 순서로, 해당 없는 칸은 생략.
 특히 볼 것: 감시기 not_ok·24h 사고 반복 · origin_main≠head · tracked_dirty · 디스크(D_drive free_gb<30 위험) · apt 의 nvidia 갱신 ·
+data_quality.not_ok(빈 구간·거래소 마크 차·forward:* = 전진 검정 입력에 구멍 난 날) ·
 포지션: stop_count=0(스톱 없음) · stop_beyond_liq · loss_at_stop_pct_equity>20 · notional_x_equity>6 · cron missing · outputs stale · paper stale · 판정 7일 안/지난 판정.
 각 항목에 «무엇을 보면 되는지»를 짧게 붙여라.
 
@@ -225,6 +234,9 @@ def fallback(f: dict) -> str:
     st = [k for k, v in (f["outputs"] if isinstance(f["outputs"], dict) else {}).items() if isinstance(v, dict) and v.get("stale")]
     if st:
         L.append("산출물 멈춤: " + ", ".join(st))
+    dq = f.get("data_quality") if isinstance(f.get("data_quality"), dict) else {}
+    if dq.get("not_ok"):
+        L.append(f"데이터 품질 {dq.get('status')}: " + ", ".join(f"{x['key']}={x['status']}" for x in dq["not_ok"][:6]))
     v = f["verdicts"] if isinstance(f["verdicts"], dict) else {}
     if v.get("due_7d"):
         L.append("7일 안 판정: " + ", ".join(f"{x['id']}({x['date']})" for x in v["due_7d"]))
