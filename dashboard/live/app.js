@@ -3836,11 +3836,14 @@ const mcGfx = {
       + `<circle cx="${X(now)}" cy="8" r="5" fill="var(--text)"/></svg>`;
   },
   seg4(key, w = mcGfx.gw || 130) {   // 2026-09-30 가격×OI 사분면 한 줄: 네 칸 중 지금 칸만 채움(small·없음 = 전부 빈 칸)
-    const cells = [["up_up", "신규 롱"], ["up_dn", "숏커버"], ["dn_up", "신규 숏"], ["dn_dn", "롱정리"]], cw = (w - 6) / 4;
+    // 2026-10-21 사용자 «신규 롱/숏커버는 초록불, 신규 숏/롱정리는 빨간불 -- 표시등으로»: 칸마다 등(●)+이름 · 지금 칸만 불이 켜짐(등·옅은 바탕·글자 밝게) · 오른쪽 «보류» 값 없음(다 꺼짐 = 보류)
+    const cells = [["up_up", "신규 롱"], ["up_dn", "숏커버"], ["dn_up", "신규 숏"], ["dn_dn", "롱정리"]], cw = (w - 6) / 4, txt = cw >= 44;
     return `<svg class="mc-svg" width="${w}" height="16" viewBox="0 0 ${w} 16" aria-hidden="true">` + cells.map(([k, t], i) => {
-      const on = k === key, col = k === "dn_up" ? "var(--bad)" : k === "dn_dn" ? "var(--good)" : "var(--ink)", x = i * (cw + 2);
-      return `<rect x="${x.toFixed(1)}" y="1" width="${cw.toFixed(1)}" height="14" rx="3" fill="${on ? col : "rgb(var(--lift) / .08)"}" fill-opacity="${on ? 0.85 : 1}"/>`
-        + (cw >= 26 ? `<text x="${(x + cw / 2).toFixed(1)}" y="11.5" font-size="9" font-weight="700" text-anchor="middle" fill="${on ? "var(--chart-bg)" : "var(--muted)"}">${t}</text>` : "");
+      const on = k === key, col = k.startsWith("up") ? "var(--good)" : "var(--bad)", x = i * (cw + 2), dx = txt ? x + 9 : x + cw / 2;
+      return `<rect x="${x.toFixed(1)}" y="1" width="${cw.toFixed(1)}" height="14" rx="3" fill="${on ? col : "rgb(var(--lift) / .06)"}" fill-opacity="${on ? 0.16 : 1}"${on ? ` stroke="${col}" stroke-opacity=".55"` : ""}/>`
+        + `<circle cx="${dx.toFixed(1)}" cy="8" r="3.5" fill="${col}" fill-opacity="${on ? 1 : 0.22}"/>`
+        + (on ? `<circle cx="${dx.toFixed(1)}" cy="8" r="6" fill="${col}" fill-opacity=".25"/>` : "")
+        + (txt ? `<text x="${(x + 17).toFixed(1)}" y="11.5" font-size="9.5" font-weight="${on ? 700 : 500}" fill="${on ? "var(--text)" : "var(--muted)"}" fill-opacity="${on ? 1 : 0.7}">${t}</text>` : "");
     }).join("") + `</svg>`;
   },
   quad(move, oiPct, w = mcGfx.qw || 96) {   // 가격(x, 1시간 bp ±60) × OI(y, 1시간 % ±1) -- 가운데 원 = «이동 작음, 판정 보류»
@@ -4117,9 +4120,8 @@ function renderMarketCtx() {
       + ((fl.taker_all ?? (ls && ls.taker)) != null ? (() => { const tk = fl.taker_all ?? ls.taker;
           return gRow("테이커 매수÷매도", G.ratio(tk, null), n(tk, 2), tone(tk - 1, 0.1), fl.taker_all != null ? `${flowVen} · 마지막 5분봉 체결` : "바이낸스 API"); })() : "")
       // 2026-09-30 사분면 그림 → 한 줄 네 칸(사용자 «높이를 쓸데없이 잡아먹는다»): 새 롱 · 숏 커버 · 새 숏 · 롱 정리 중 지금 칸만 채움, 작으면 전부 빈 칸.
-      + gRow("가격×OI 1h", G.seg4(d.quad ? d.quad.key : null), d.quad ? ({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-" : "-",
-             !d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : "",
-             `${d.quad ? d.quad.label : "-"}\n1시간 ${sg(d.move60, 0, "bp")} · OI ${sg(oiA && oiA.d1h != null ? oiA.d1h : d.oi60, 0)} ${U} (${oiA && oiA.d1h != null ? venTxt(oiA.venues) : "바이낸스만"})${d.quad && d.quad.note ? `\n${d.quad.note} — 근거 검정은 바이낸스 OI 기준` : ""}`)
+      + gRow("가격×OI 1h", G.seg4(d.quad ? d.quad.key : null), "", "",
+             `네 칸 = 신규 롱 · 숏커버 · 신규 숏 · 롱정리 (초록 = 가격↑ · 빨강 = 가격↓ · 다 비면 보류)\n${d.quad ? `지금 ${({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-"} · ${d.quad.label}` : "-"}\n1시간 ${sg(d.move60, 0, "bp")} · OI ${sg(oiA && oiA.d1h != null ? oiA.d1h : d.oi60, 0)} ${U} (${oiA && oiA.d1h != null ? venTxt(oiA.venues) : "바이낸스만"})${d.quad && d.quad.note ? `\n${d.quad.note} — 근거 검정은 바이낸스 OI 기준` : ""}`)
       + note(`30분 체결 · 바이낸스 ${sg(fl.bn30, 0)} / OKX ${sg(fl.okx30, 0)} ${U}`)),
     // 2026-09-30 사용자 «범례·청산 상태 글은 툴팁 안으로» -- 그림 위 호버에 두 줄. 청산 급증일 때만 판 위에 경고 한 줄을 남긴다(놓치면 안 되는 상태).
   ];
@@ -4192,9 +4194,7 @@ function renderMarketCtx() {
           gk("고래", G.sig(z.whale, gv), `고래 ${sg(z.whale, 1, "σ")} · ${flowVen}`, sg(z.whale, 1, "σ"), tone(z.whale))
           + gk("중형", G.sig(z.mid, gv), `중형 ${sg(z.mid, 1, "σ")}`, sg(z.mid, 1, "σ"), tone(z.mid))
           + gk("리테일", G.sig(z.retail, gv), `리테일 ${sg(z.retail, 1, "σ")}`, sg(z.retail, 1, "σ"), tone(z.retail))
-          + gk("가격×OI", G.seg4(d.quad ? d.quad.key : null, gv), d.quad ? `${({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-"} · ${d.quad.label} · 1시간 ${sg(d.move60, 0, "bp")}` : "가격×OI 1시간 -",
-               d.quad ? ({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-" : "-",
-               !d.quad ? "" : d.quad.key === "dn_up" ? "mc-bad" : d.quad.key === "dn_dn" ? "mc-good" : ""))
+          + gk("가격×OI", G.seg4(d.quad ? d.quad.key : null, gv), `네 칸 = 신규 롱 · 숏커버 · 신규 숏 · 롱정리 (초록 = 가격↑ · 빨강 = 가격↓ · 다 비면 보류)\n` + (d.quad ? `지금 ${({ up_up: "새 롱", up_dn: "숏 커버", dn_up: "새 숏", dn_dn: "롱 정리", small: "보류" })[d.quad.key] || "-"} · ${d.quad.label} · 1시간 ${sg(d.move60, 0, "bp")}` : "가격×OI 1시간 -"), ""))
       + tile("q_wall", "④ 벽 · 교차 · 위치", wallChip,
           (sw ? G.book(sw, bps, Math.floor(unit * 1.6), Number(d.mid) || 0, (ASSET_CONFIG[A] || {}).dp ?? 2, 30, 11.5, 16) : "")   // 10-13 «벽 내용 상하 간격 넓히고 크게»
           + gk("깊은 벽", ps && PAPER_SIG_OK.wall.has(A) ? G.wall(ps.imb, ps.thr, gwWall) : G.pct(null, gwWall), ps ? `깊은 벽 ${sg(ps.imb, 2)} · 문턱 ±${ps.thr.toFixed(2)}` : ""), " mc-wide-t")
