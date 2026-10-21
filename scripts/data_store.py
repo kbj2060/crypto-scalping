@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import gzip
 import os
+import queue
 import threading
 import time
 from contextlib import contextmanager
@@ -68,18 +69,22 @@ def rw_connect(path: Path):
 #   연결 단위로 직렬화 -- 파이썬 잠금을 따로 걸면 불공정해서 한 스레드가 3.5초 굶었다). 호출마다 열고 닫았더니
 #   대시보드(스레드 여럿이 같은 WAL 파일을 0.5초마다)에서 스레드들이 sqlite3.connect / close 안에서 수 분씩 멈췄다 --
 #   faulthandler 스택이 전부 그 두 줄이었고 시장 맥락 TimeoutError·OI 링·상황 계산이 함께 섰다(10-01 17:00~17:18, 17:25~17:28).
-#   ponytail: 같은 파일 읽기는 프로세스 안에서 한 줄로 선다(쿼리는 ms~0.1초). 느려지면 스레드별 연결로.
-_RO: dict[str, object] = {}
+#   2026-10-22: 한 줄로 서는 게 실제로 터졌다 -- 재부팅·재시작 직후 디스크 캐시가 비면 일봉 풋프린트 28일 재계산 쿼리 하나가
+#   5~10분(fp_daily_days 596s) 연결을 쥐고, 같은 파일을 읽는 상황·시장 맥락·풋프린트·주간 풋프린트가 전부 그 뒤에 서서 시간 초과.
+#   → 파일마다 연결 _RO_POOL 개(호출마다 열고 닫지 않는다 -- 10-01 사고 방지는 그대로). 무거운 쿼리는 한 칸만 막는다.
+_RO_POOL = 4
+_RO: dict[str, queue.Queue] = {}
 _RO_GUARD = threading.Lock()
 
 
-def _ro_connection(path: Path):
-    import sqlite3
+def _ro_pool(path: Path) -> queue.Queue:
     with _RO_GUARD:
-        ent = _RO.get(str(path))
-        if ent is None:
-            ent = _RO[str(path)] = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10, check_same_thread=False)
-        return ent
+        q = _RO.get(str(path))
+        if q is None:
+            q = _RO[str(path)] = queue.Queue()
+            for _ in range(_RO_POOL):
+                q.put(None)                    # 빈 칸 -- 처음 쓰는 스레드가 연다
+        return q
 
 
 def read_rows(path: Path, sql: str, params: list | tuple = ()) -> list[tuple]:
@@ -90,11 +95,22 @@ def read_rows(path: Path, sql: str, params: list | tuple = ()) -> list[tuple]:
     쿼리당 0.8~1.7초 vs SQLite 인덱스로 수 ms~수백 ms, 10-01 서버 실측.)"""
     if path.suffix == ".sqlite":
         import sqlite3
+        pool = _ro_pool(path)
+        con = pool.get()                       # 빈 연결이 없으면 하나가 돌아올 때까지 기다린다
         try:
-            return _ro_connection(path).execute(sql, params).fetchall()
+            if con is None:
+                con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10, check_same_thread=False)
+            return con.execute(sql, params).fetchall()
         except sqlite3.Error:
-            _RO.pop(str(path), None)           # 다음 호출이 새로 연다(파일이 바뀌었거나 깨진 연결)
+            if con is not None:                # 이 연결만 버린다(파일이 바뀌었거나 깨진 연결) -- 다음 사용이 새로 연다
+                try:
+                    con.close()
+                except sqlite3.Error:
+                    pass
+            con = None
             raise
+        finally:
+            pool.put(con)
     import duckdb
     for i in range(25):
         try:
