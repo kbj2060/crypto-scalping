@@ -100,7 +100,7 @@ def build_books(oi, v, h, l, c, s, snap, ring):
 
 def load(sym):
     p = pd.read_parquet(f"{BV}/{sym}.parquet").sort_values("timestamp").reset_index(drop=True)
-    p["oi"] = p.sum_open_interest.shift(1).ffill().bfill()
+    p["oi"] = p.sum_open_interest.where(p.sum_open_interest > 0).shift(1).ffill().bfill()   # 0 = 빠진 값(2022-03-07 등 200여 봉)
     return p
 
 
@@ -171,6 +171,7 @@ def frame(sym):
         S[f"A{w}"] = L[:, 3] - Sh[:, 4]
         S[f"Dsp{w}"] = S[f"D{w}"] - S[f"Dsym{w}"]
         S[f"Lup{w}"] = L[:, 1]; S[f"Sdn{w}"] = Sh[:, 2]                 # 서술용: 물린 롱 / 물린 숏 비율(OI 대비)
+        S[f"Nsym{w}"] = Y[:, 6] - Y[:, 5]; S[f"Msym{w}"] = Y[:, 3] + Y[:, 4]; S[f"avw{w}"] = S[f"vw{w}"].abs()   # 사후 탐색용
     S["per"] = np.where(S.t >= TEST[0], "TEST", np.where(S.t >= DEV[0], "DEV", "warm"))
     S.loc[S.t >= TEST[1], "per"] = "warm"
     S["wk"] = S.t.dt.to_period("W").astype(str)
@@ -253,6 +254,42 @@ def tests(sym):
     return rep
 
 
+def explore(sym):
+    """🔴사후 탐색(주 검정 결과를 본 뒤 추가) — 판정 아님, 재현 여부만. ETH 보조 지평에서 일관된 둘:
+    E1 N→y1h(본전 근처 불균형) 이 대칭 장부 Nsym 위에도 남나 · Nsym 단독은 · 10분위 1h 차(bp)
+    E2 M→|y4h|(총 고통) 이 |VWAP 거리| 통제 위에도 남나 · 대칭 Msym 은."""
+    S = frame(sym); S = S[S.per != "warm"].reset_index(drop=True)
+    vctrl = ["s1h", "s24", "s7d", "ar1h", "ar4h", "vol_ratio", "doi1h", "doi24"]
+    VC = vctrl + [c for c in CTRL if c not in vctrl]; AV = ["avw1", "avw7", "avw30"]
+    R = {}
+    for w in (1, 7, 30):
+        R[f"E1 N{w}→y1h"] = pic(S, f"N{w}", "y1h", CTRL, nb=500)
+        R[f"E1 Nsym{w}→y1h"] = pic(S, f"Nsym{w}", "y1h", CTRL, nb=500)
+        R[f"E1 N{w}→y1h |Nsym"] = pic(S, f"N{w}", "y1h", CTRL + [f"Nsym{w}"], nb=500)
+        R[f"E2 M{w}→|y4h| +|vw|"] = pic(S, f"M{w}", "abs4", VC + AV, nb=500)
+        R[f"E2 Msym{w}→|y4h| +|vw|"] = pic(S, f"Msym{w}", "abs4", VC + AV, nb=500)
+        R[f"E2 M{w}→|y4h| |Msym+|vw|"] = pic(S, f"M{w}", "abs4", VC + AV + [f"Msym{w}"], nb=500)
+    keep = (frame(sym).per != "warm").to_numpy()                        # 위약: s 원형 이동 장부로 같은 «분리 증분»
+    for fn in sorted(f for f in os.listdir(OUT) if f.startswith(f"{sym}_F_placebo")):
+        Fp = np.load(f"{OUT}/{fn}")[keep]
+        for wi, w in enumerate((1, 7, 30)):
+            S["Mpl"] = Fp[:, 0, wi, 3] + Fp[:, 1, wi, 4]
+            r = pic(S, "Mpl", "abs4", VC + AV + [f"Msym{w}"], nb=200)
+            R.setdefault(f"위약 M{w}|Msym", []).append([r["DEV"]["ic"], r["TEST"]["ic"]])
+    dec = {}
+    for w in (1, 7, 30):                                                # 10분위(DEV 문턱) 1h 수익 bp — 상위 − 하위
+        q = S.loc[S.per == "DEV", f"N{w}"].quantile([.1, .9]).to_numpy()
+        for per in ("DEV", "TEST"):
+            P = S[S.per == per]
+            dec[f"N{w} {per}"] = round(float((P.y1h[P[f"N{w}"] >= q[1]].mean() - P.y1h[P[f"N{w}"] <= q[0]].mean()) * 1e4), 2)
+    for k, v in R.items():
+        if isinstance(v, list):
+            print(f"{k:28s} [DEV, TEST] {v}"); continue
+        print(f"{k:28s} DEV {v['DEV']['ic']:+.4f} {v['DEV']['ci']}  TEST {v['TEST']['ic']:+.4f} {v['TEST']['ci']}")
+    print("N 상위10%−하위10% 1h bp", dec)
+    json.dump({"explore": R, "decile_1h_bp": dec}, open(f"{OUT}/{sym}_explore.json", "w"), ensure_ascii=False, indent=1)
+
+
 def selftest():
     # 균등 분포 위·아래·고통 = 수치 적분 · s=.5 면 롱=숏=대칭 · 대시보드 Book 1일 창 양 재현
     h = np.array([110.0]); l = np.array([90.0]); X = np.array([1.0]); out = np.zeros((3, NF))
@@ -281,3 +318,5 @@ if __name__ == "__main__":
         build(a[1], "--placebo" in a)
     elif a[0] == "--test":
         tests(a[1])
+    elif a[0] == "--explore":
+        explore(a[1])
