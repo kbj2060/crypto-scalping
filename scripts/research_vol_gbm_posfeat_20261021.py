@@ -10,7 +10,13 @@
 - 지표: 로그 오차제곱 평균(MSLE, 배포 품질 문과 같은 축) · 스피어만. 차 = C − A, C − B, 일 블록 부트스트랩 2000.
 - 통과(표본외, 주 판정): 두 코인 모두 C−A 와 C−B MSLE 차 95% CI 상한 < 0. 전진은 부호만 보조(🔴이 구간은 앞 단계에서 이미 본 자료 — 완전한 새 자료 아님, 36일).
 - 실용 기준: 통과해도 MSLE 개선이 1% 미만이면 «배포 가치 낮음»으로 적는다(라이브에 롱·숏 분리 장부를 새로 들여야 하므로).
-사용: --feats → --fit → --test
+사용: --feats → --fit [--set 7d] → --test [--set 7d]
+
+🔒2차 사전등록(2026-10-21, 1차 불통과 뒤 사용자 «7일 창 M7·Msym7(+|VWAP 7일 거리|)도 GBM 위에서» — 결과 전 커밋):
+- 근거: 앞 단계 H3a 7일 총 고통 → |4h| 가 BTC·XRP 사전등록 통과 · ETH Holm .12. GBM 가격 위치 피쳐는 최대 144봉(12h)이라 7일 창은 못 본다.
+- C7 = 22열 + M7 + Msym7 + |vw7| · D7 = 22열 + |vw7| (VWAP 거리만 — 포지션 몫 분리용) · A·B 는 1차와 같다. 출력 tmp/vol_gbm_posfeat_7d_20261021.
+- 통과(주): 표본외 두 코인 모두 C7−A·C7−B MSLE CI 상한 < 0. 보조: C7−D7(포지션 몫) · 전진 부호.
+- 🔴표본외 2025~ 는 H3a 를 찾은 TEST 구간이라 완전한 새 자료가 아니다 · 전진 36일도 1차에서 본 구간 → 통과해도 «후보», 배포 전 새 전진 기간 필요.
 """
 import json, os, sys
 import numpy as np, pandas as pd
@@ -24,7 +30,13 @@ OUT = "tmp/vol_gbm_posfeat_20261021"
 SYMS = ("ETHUSDT", "XRPUSDT")
 SPLITS = {"oos": (pd.Timestamp("2024-12-31 19:55"), "2025-01-01", "2026-09-15"),
           "fwd": (pd.Timestamp("2026-09-14 19:55"), "2026-09-15", "2026-10-21")}
-POS = ["M1", "Msym1"]
+POS = ["M1", "Msym1", "M7", "Msym7", "avw7"]                  # 저장 열(1차는 앞 둘만 씀)
+SETS = {"1d": {"C": ["M1", "Msym1"]}, "7d": {"C": ["M7", "Msym7", "avw7"], "D": ["avw7"]}}
+SET = sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == "--set" else "1d"
+if SET == "7d":
+    OUT_RES = "tmp/vol_gbm_posfeat_7d_20261021"
+else:
+    OUT_RES = OUT
 
 
 def feats():
@@ -36,8 +48,11 @@ def feats():
         snap = np.arange(R.M + 1, len(p))
         F = R.build_books(p.oi.to_numpy(float), p.volume.to_numpy(float), p.high.to_numpy(float), p.low.to_numpy(float), c,
                           R.side_share(c), snap, R.M)
+        tp = (p.high + p.low + p.close) / 3
+        avw7 = (p.close / ((tp * p.volume).rolling(2016).sum() / p.volume.rolling(2016).sum()) - 1).abs().to_numpy()
         out = pd.DataFrame({"timestamp": p.timestamp.to_numpy()[snap],
-                            "M1": F[:, 0, 0, 3] + F[:, 1, 0, 4], "Msym1": F[:, 2, 0, 3] + F[:, 2, 0, 4]})
+                            "M1": F[:, 0, 0, 3] + F[:, 1, 0, 4], "Msym1": F[:, 2, 0, 3] + F[:, 2, 0, 4],
+                            "M7": F[:, 0, 1, 3] + F[:, 1, 1, 4], "Msym7": F[:, 2, 1, 3] + F[:, 2, 1, 4], "avw7": avw7[snap]})
         out.to_parquet(f"{OUT}/{sym}_pos.parquet")
         print(sym, len(out), out.timestamp.min(), out.timestamp.max(), out[POS].describe().loc[["50%", "max"]].round(5).to_dict(), flush=True)
 
@@ -62,18 +77,20 @@ def _pred(models, A):
 
 def fit():
     fr = {s: frame(s) for s in SYMS}
-    cols = {"A": V.FEATURES, "B": V.FEATURES, "C": V.FEATURES + POS}
+    os.makedirs(OUT_RES, exist_ok=True)
+    allc = sorted({c for v in SETS[SET].values() for c in v})
+    cols = {"A": V.FEATURES, "B": V.FEATURES, **{k: V.FEATURES + v for k, v in SETS[SET].items()}}
     for split, (cut, e0, e1) in SPLITS.items():
         for sym in SYMS:
             parts = [sym] if sym == "ETHUSDT" else ["XRPUSDT", "ETHUSDT"]
-            X, y, ok, ts = fr[sym]; ev = ok & (ts >= e0) & (ts < e1) & X[POS].notna().all(1).to_numpy()
+            X, y, ok, ts = fr[sym]; ev = ok & (ts >= e0) & (ts < e1) & X[allc].notna().all(1).to_numpy()
             res = pd.DataFrame({"ts": ts[ev], "y": y[ev]})
             for name, cl in cols.items():
-                rows = {s: fr[s][2] & (fr[s][3] <= cut) & (fr[s][0][POS].notna().all(1).to_numpy() if name != "A" else True) for s in parts}
+                rows = {s: fr[s][2] & (fr[s][3] <= cut) & (fr[s][0][allc].notna().all(1).to_numpy() if name != "A" else True) for s in parts}
                 A = np.vstack([fr[s][0][cl].to_numpy(float)[rows[s]] for s in parts]); yt = np.concatenate([fr[s][1][rows[s]] for s in parts])
                 res[name] = _pred(_fit(A, yt), X[cl].to_numpy(float)[ev])
                 print(split, sym, name, "학습", len(yt), "행", flush=True)
-            res.to_parquet(f"{OUT}/{sym}_{split}.parquet")
+            res.to_parquet(f"{OUT_RES}/{sym}_{split}.parquet")
 
 
 def boot_diff(e1, e0, day, nb=2000, seed=20261021):
@@ -87,10 +104,11 @@ def test():
     rep = {}
     for split in SPLITS:
         for sym in SYMS:
-            r = pd.read_parquet(f"{OUT}/{sym}_{split}.parquet"); day = r.ts.dt.floor("D").to_numpy(); ly = np.log(r.y.to_numpy())
-            se = {k: (ly - np.log(r[k].to_numpy())) ** 2 for k in "ABC"}
-            row = {k: {"MSLE": round(float(se[k].mean()), 5), "spearman": round(float(r[k].corr(r.y, method="spearman")), 4)} for k in "ABC"}
-            for a, b in (("C", "A"), ("C", "B"), ("B", "A")):
+            r = pd.read_parquet(f"{OUT_RES}/{sym}_{split}.parquet"); day = r.ts.dt.floor("D").to_numpy(); ly = np.log(r.y.to_numpy())
+            ms = [k for k in "ABCD" if k in r]
+            se = {k: (ly - np.log(r[k].to_numpy())) ** 2 for k in ms}
+            row = {k: {"MSLE": round(float(se[k].mean()), 5), "spearman": round(float(r[k].corr(r.y, method="spearman")), 4)} for k in ms}
+            for a, b in (("C", "A"), ("C", "B"), ("B", "A")) + ((("D", "A"), ("C", "D")) if "D" in ms else ()):
                 ci = boot_diff(se[a], se[b], day)
                 row[f"{a}−{b}"] = {"차": round(float((se[a] - se[b]).mean()), 6), "%": round(100 * float(se[a].mean() / se[b].mean() - 1), 3),
                                    "CI": [round(x, 6) for x in ci]}
@@ -99,7 +117,7 @@ def test():
     rep["통과(표본외 두 코인 C−A·C−B CI<0)"] = all(rep[f"oos {s}"][k]["CI"][1] < 0 for s in SYMS for k in ("C−A", "C−B"))
     rep["전진 부호(C<A 두 코인)"] = all(rep[f"fwd {s}"]["C−A"]["차"] < 0 for s in SYMS)
     rep["실용(표본외 C−A 개선 ≥1%)"] = all(rep[f"oos {s}"]["C−A"]["%"] <= -1 for s in SYMS)
-    json.dump(rep, open(f"{OUT}/report.json", "w"), ensure_ascii=False, indent=1)
+    json.dump(rep, open(f"{OUT_RES}/report.json", "w"), ensure_ascii=False, indent=1)
     print(json.dumps(rep, ensure_ascii=False, indent=1))
 
 
