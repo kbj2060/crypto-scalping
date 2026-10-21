@@ -1415,7 +1415,11 @@ function renderSnapshotAccount() {
   // 리뷰: 카드를 통째로 다시 쓰면(포지션이 있으면 폴링마다 -- 미실현이 바뀐다) 키보드로 고른 날·칩의 포커스가 <body> 로 떨어졌다 -- 같은 칸에 되돌린다
   const fa = document.activeElement, fAt = fa && fa.closest && fa.closest("#acctCard")
     ? ["day", "month", "span"].map((k) => (fa.hasAttribute(`data-acct-${k}`) ? `#acctCard [data-acct-${k}="${fa.getAttribute(`data-acct-${k}`)}"]` : "")).find(Boolean) : "";
-  setH("snapAcctPosition", posLine + todayHtml);
+  // 2026-10-22 사용자 «여러 코인 한꺼번에 청산 -- 지금은 다른 청산을 기다려야 한다»: 포지션이 둘 이상이면 «전체 청산».
+  //   서버가 코인별 청산 칸으로 동시에 보낸다(/api/manual-exit/submit-all). 두 번 눌러야 나간다 · 체결 방식은 플로팅 패널의 청산 방식(지정가/즉시)을 따른다.
+  const closeAllRow = positions.length >= 2 || closeAllMsg ? `<div class="acct-posline acct-closeall">${positions.length >= 2
+    ? `<button type="button" class="acct-closeall-btn${closeAllArmed ? " arm" : ""}" data-close-all="${positions.length}"${closeAllBusy ? " disabled" : ""}>${closeAllLabel(positions.length)}</button>` : ""}${closeAllMsg ? `<span>${escapeHtml(closeAllMsg)}</span>` : ""}</div>` : "";
+  setH("snapAcctPosition", posLine + closeAllRow + todayHtml);
 
   // ── 아래: 달력 | 자산 곡선 ──
   const days = new Map();
@@ -9411,6 +9415,35 @@ document.addEventListener("click", async (e) => {
 //   취소는 남은 수량을 안 사는 쪽이라 위험을 줄이지만, 노리던 진입을 버리는 것이라 «지금 시장가»처럼 두 번(5초 무장).
 //   청산·스위칭은 안 붙인다(서버도 409) -- 청산 취소는 포지션을 그대로 두는 것이다.
 let entryCancelArmT = 0, entryCancelArmed = false, entryCancelLive = false;
+// 2026-10-22 «전체 청산»(계좌 카드) -- 카드가 폴링마다 다시 그려지므로 상태는 여기 둔다
+let closeAllArmed = false, closeAllBusy = false, closeAllMsg = "", closeAllT = 0, closeAllMsgT = 0;
+const closeAllLabel = (n) => (closeAllBusy ? "전체 청산 보내는 중…"
+  : closeAllArmed ? `한 번 더 = ${n}개 전부 ${manualExitMarket() ? "즉시(시장가)" : "지정가"} 청산` : `전체 청산 · ${n}개`);
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-close-all]");
+  if (!b || b.disabled) return;
+  const n = Number(b.dataset.closeAll) || 2;
+  if (!closeAllArmed) {
+    closeAllArmed = true; b.classList.add("arm"); b.textContent = closeAllLabel(n);
+    clearTimeout(closeAllT);
+    closeAllT = setTimeout(() => { closeAllArmed = false; const x = document.querySelector("[data-close-all]");
+      if (x && !x.disabled) { x.classList.remove("arm"); x.textContent = closeAllLabel(n); } }, 5000);
+    return;
+  }
+  clearTimeout(closeAllT); closeAllArmed = false; closeAllBusy = true;
+  b.disabled = true; b.classList.remove("arm"); b.textContent = closeAllLabel(n);
+  try {
+    const r = await (await fetch(`/api/manual-exit/submit-all?confirm=1${exitExecQuery()}`, { method: "POST", cache: "no-cache" })).json();
+    closeAllMsg = (r.results || []).map((x) => `${x.symbol ? acctCoin(x.symbol) : "?"} ${x.side === "LONG" ? "롱" : "숏"} ${x.ok ? "청산 접수" : (x.detail || x.error)}`).join(" · ")
+      || `전체 청산 못 함: ${r.detail || r.error}`;
+  } catch (err) {
+    closeAllMsg = `전체 청산 요청 실패: ${err && err.message ? err.message : err} — 거래소에서 확인하세요`;
+  }
+  closeAllBusy = false;
+  clearTimeout(closeAllMsgT); closeAllMsgT = setTimeout(() => { closeAllMsg = ""; refreshBinanceAccount(true); }, 60000);
+  manualEntryPollStatus();
+  refreshBinanceAccount(true);
+});
 const entryCancelableP = (st) => /^(working|submitting)$/.test(st?.phase || "") && st?.kind !== "exit" && !st?.switch && st?.plan?.type !== "MARKET";
 function entryResultHtml(st, tone) {
   entryCancelLive = entryCancelableP(st);

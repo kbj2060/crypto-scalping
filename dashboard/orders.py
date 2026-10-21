@@ -1709,6 +1709,64 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         return web.json_response({"ok": True, "plan": plan, "state": st},
                                  headers=NOCACHE)
 
+    async def api_manual_exit_all_submit(request: web.Request) -> web.Response:
+        """2026-10-22 사용자 «코인 여러 개를 한꺼번에 청산 -- 지금은 다른 청산을 기다려야 한다».
+        방금 읽은 포지션 전부를 **전량** 청산으로 한 번에 접수한다. 코인마다 청산 칸이 따로라(exit_slot) 앞 코인의
+        지정가 청산(최대 ~2분)이 끝나기를 기다리지 않는다. 방어는 단건과 같다: POST + confirm=1 + 게이트 + busy_or.
+        같은 코인에 롱·숏이 둘 다 있으면 칸이 하나라 두 번째는 already_working 으로 돌려준다(끝난 뒤 다시 누르면 된다).
+        주문 코인 표(MANUAL_EXEC_SYMBOLS)에 없는 심볼은 건드리지 않고 unknown_symbol 로 알린다."""
+        if request.query.get("confirm") != "1":
+            return web.json_response({"ok": False, "error": "confirm=1 required"}, status=400)
+        ex = request.query.get("exec", "limit")
+        if ex not in ("limit", "market"):
+            return web.json_response({"ok": False, "error": "bad_exec", "detail": "exec 는 limit 또는 market"}, status=400)
+        if not exec_enabled():
+            return web.json_response({"ok": False, "error": "exec_disabled",
+                                      "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"}, status=403)
+        account = await produce_account()
+        if not account.get("ok"):   # «못 읽음»은 «없음»이 아니다
+            return web.json_response({"ok": False, "error": "account_unavailable",
+                                      "detail": f"계좌 조회 실패: {account.get('error')}"}, status=503)
+        targets = list(dict.fromkeys(
+            (exec_asset_of(str(p.get("symbol") or "")), str(p.get("side") or "").upper(), str(p.get("symbol") or ""))
+            for p in account.get("positions") or []
+            if float(p.get("qty") or 0.0) > 0 and str(p.get("side") or "").upper() in ("LONG", "SHORT")))
+        if not targets:
+            return web.json_response({"ok": False, "error": "no_position", "detail": "열린 포지션이 없습니다"}, status=400)
+        results, seen = [], set()
+        for asset, side, symbol in targets:
+            r = {"asset": asset, "side": side, "symbol": symbol, "ok": False}
+            results.append(r)
+            if asset is None:
+                r.update(error="unknown_symbol", detail=f"{symbol} 은 대시보드 주문 코인이 아닙니다 — 거래소에서 직접 닫으세요")
+                continue
+            if (asset, side) in seen:   # ETHUSDT·ETHUSDC 가 같은 방향 -- 계획은 한 심볼만 닫는다(other_symbol_open), 칸도 하나
+                r.update(error="already_working", detail="같은 코인·방향의 다른 심볼 — 앞 청산이 끝난 뒤 다시 누르세요")
+                continue
+            seen.add((asset, side))
+            st = exit_slot(asset)
+            if st is None:
+                r.update(error="already_working", detail="이 코인 주문이 진행 중입니다 — 끝난 뒤 다시 누르세요")
+                continue
+            plan, error = await assemble_exit_plan(side, 1.0, fresh=True, asset=asset, market=ex == "market")
+            if error:
+                r.update(**error[0])
+                continue
+            if plan.get("blocked"):
+                r.update(error="blocked", detail=plan["blocked"])
+                continue
+            if exit_slot(asset) is not st:   # 계획 조립(await) 사이에 칸이 바뀌었으면(손절 청산이 잡음) 두 번 내지 않는다
+                r.update(error="already_working", detail="이 코인 주문이 막 시작됐습니다 — 끝난 뒤 다시 누르세요")
+                continue
+            st.clear()
+            st.update(phase="submitting", kind="exit", side=side, plan=plan, asset=asset,
+                      started_at=datetime.now(timezone.utc).isoformat())
+            refresh_tasks["manual_entry" if st is manual_entry_state else f"manual_exit_{asset}"] = asyncio.create_task(
+                settle(run_exit(binance_session(), plan, st), st))
+            r.update(ok=True, quantity=plan.get("quantity"), type=plan.get("type"), symbol=plan.get("symbol"))
+        ok = any(r["ok"] for r in results)
+        return web.json_response({"ok": ok, "results": results}, status=200 if ok else 409, headers=NOCACHE)
+
     async def api_manual_bracket_disarm(request: web.Request) -> web.Response:
         """2026-10-15 사용자 «손절 해제 버튼»(10-14 사고: 바이낸스에서 스탑만 지웠는데 서버 5분봉 종가 감시가 청산했다).
         이 측면의 **우리** 비상 스탑(dbsl algo)을 거래소에서 지우고, 무장에 sl_off 를 남겨 감시가 손절을 쏘지 않게 한다.
@@ -1860,4 +1918,5 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         api_manual_bracket_rearm=api_manual_bracket_rearm,
         api_manual_exit_preview=api_manual_exit_preview,
         api_manual_exit_submit=api_manual_exit_submit,
+        api_manual_exit_all_submit=api_manual_exit_all_submit,
     )
