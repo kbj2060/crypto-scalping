@@ -1320,6 +1320,7 @@ function renderSnapshotAccount() {
     setT("snapAcctBalance", "-");
     setH("snapAcctPosition", '<p class="muted">계좌를 불러오지 못했습니다.</p>');
     setH("snapAcctPerf", "");
+    setH("snapAcctCycle", "");
     return;
   }
   const A = latestBinanceAccount, b = A.balance || {}, wallet = Number(b.wallet) || 0;
@@ -1449,9 +1450,95 @@ function renderSnapshotAccount() {
       ${a.length ? `<div class="acct-stats">${acctStatsHtml(a)}</div>` : ""}
     </div>`;
   setH("snapAcctPerf", `<div class="acct-hist">${calHtml}${curveHtml}</div>`);
+  renderCycleCard(A, positions, equity);
   if (fAt && !fa.isConnected) document.querySelector(fAt)?.focus();
 }
 
+
+// 2026-10-22 «진행 중 순환»(시안 A, 사용자 «청산할 때까지 달력 아래에 · 얼마에 사고 팔았는지 정확한 가격»): 열린 포지션마다
+//   첫 체결부터 지금·미실현·실현·합계·그냥 보유·순환 효과 + 가격선 위 체결가(×수량) + 체결 칩. 체결 = 서버 왕복 legs
+//   [시각ms, 가격, 수량, 늘림, 메이커, 실현, 수수료] · 가격선 = /api/cycle-path(체결 심볼 1m/5m/15m 종가). 청산하면 왕복이 닫혀 사라진다.
+const cyclePaths = {};   // "심볼|쪽|첫 체결ms" -> {at, rows}
+let cycleArgs = null;
+const cycleQ = (v) => (+Number(v).toFixed(4)).toLocaleString("en-US", { maximumFractionDigits: 4 });
+function cycleSvg(t, pos, rows, now, W) {
+  const H = 250, L = 8, R = 104, T = 10, B = 22, legs = t.legs, long = t.side === "LONG";
+  let q = 0, avg = 0;
+  const steps = legs.map(([ms, p, qty, inc]) => { if (inc) { avg = (avg * q + p * qty) / (q + qty); q += qty; } else q -= qty; return [ms, avg]; });
+  const t0 = legs[0][0] - 20 * 60000;
+  const path = rows.filter((r) => r[0] >= t0);
+  if (!path.length) path.push(...legs.map((g) => [g[0], g[1]]));
+  path.push([now, pos.mark_price]);
+  const ps = [...path.map((r) => r[1]), ...legs.map((g) => g[1])];
+  let lo = Math.min(...ps), hi = Math.max(...ps); const pad = Math.max(hi - lo, hi * 1e-4) * 0.22; lo -= pad; hi += pad;
+  const x0 = Math.min(path[0][0], legs[0][0]);
+  const X = (ms) => L + (ms - x0) / Math.max(1, now - x0) * (W - L - R), Y = (p) => T + (hi - p) / (hi - lo) * (H - T - B);
+  let d = "";
+  steps.forEach(([ms, a]) => { d += d ? ` H${X(ms).toFixed(1)} V${Y(a).toFixed(1)}` : `M${X(ms).toFixed(1)},${Y(a).toFixed(1)}`; });
+  const first = legs[0][1];
+  let s = `<svg class="cy-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="진행 중 ${long ? "롱" : "숏"} 가격과 체결">`
+    + `<path d="${d} H${X(now).toFixed(1)}" fill="none" stroke="var(--accent)" stroke-width="1.3" stroke-dasharray="3 3"/>`
+    + `<line x1="${L}" x2="${W - R}" y1="${Y(first).toFixed(1)}" y2="${Y(first).toFixed(1)}" stroke="var(--amber)" stroke-dasharray="5 4"/>`
+    + `<polyline fill="none" stroke="var(--neutral)" stroke-width="1.5" points="${path.map((r) => `${X(r[0]).toFixed(1)},${Y(r[1]).toFixed(1)}`).join(" ")}"/>`;
+  const buy = (inc) => (inc ? long : !long);
+  // ponytail: 체결가 글자는 30체결까지만(그 위는 칩이 가격을 말한다) -- 겹침 회피가 차트 밖으로 밀어낸다
+  if (legs.length <= 30) {
+    const placed = [], narrow = W < 600, gap = narrow ? 62 : 104;   // 매수 = 표시 아래 · 매도 = 위, 가까운 글자와 겹치면 바깥으로 14px 씩 · 좁은 화면은 ×수량을 칩에만
+    legs.forEach(([ms, p, qty, inc]) => {
+      const x = Math.min(Math.max(X(ms), L + 46), W - R - 46), up = !buy(inc); let ty = Y(p) + (up ? -10 : 18);
+      while (placed.some(([px, py]) => Math.abs(ty - py) < 13 && Math.abs(x - px) < gap)) ty += up ? -14 : 14;
+      placed.push([x, ty]);
+      s += `<text x="${x.toFixed(1)}" y="${ty.toFixed(1)}" class="cy-fx" fill="var(--${up ? "bad" : "good"})" text-anchor="middle">${acctPx(p)}${narrow ? "" : `<tspan class="cy-fq"> ×${cycleQ(qty)}</tspan>`}</text>`;
+    });
+  }
+  legs.forEach(([ms, p, qty, inc, mk]) => {
+    const x = X(ms), y = Y(p), b = buy(inc), c = b ? "var(--good)" : "var(--bad)";
+    const tri = b ? `M${x - 5},${y + 4} L${x + 5},${y + 4} L${x},${y - 5} Z` : `M${x - 5},${y - 4} L${x + 5},${y - 4} L${x},${y + 5} Z`;
+    s += `<path d="${tri}" fill="${mk ? "var(--chart-bg)" : c}" stroke="${c}" stroke-width="1.6"><title>${acctHm(ms)} ${b ? "매수" : "매도"} ${cycleQ(qty)} @ ${acctPx(p)}${mk ? "" : " · 테이커"}</title></path>`;
+  });
+  s += `<circle cx="${X(now).toFixed(1)}" cy="${Y(pos.mark_price).toFixed(1)}" r="3.5" fill="var(--ink)"/>`;
+  const labs = [[Y(pos.mark_price), `지금 ${acctPx(pos.mark_price)}`, "ink"], [Y(pos.entry_price), `평단 ${acctPx(pos.entry_price)}`, "accent"], [Y(first), `첫 ${acctPx(first)}`, "amber"]].sort((a, b) => a[0] - b[0]);
+  let prev = -1e9;
+  labs.forEach(([y, txt, col]) => { y = Math.max(y, prev + 12); prev = y; s += `<text x="${W - R + 6}" y="${(y + 4).toFixed(1)}" class="cy-ax" fill="var(--${col})">${txt}</text>`; });
+  return s + `<text x="${L}" y="${H - 6}" class="cy-ax" fill="var(--muted)">${acctHm(x0)}</text><text x="${W - R}" y="${H - 6}" class="cy-ax" fill="var(--muted)" text-anchor="end">${acctHm(now)} KST</text></svg>`;
+}
+function renderCycleCard(A, positions, equity) {
+  cycleArgs = [A, positions, equity];
+  const now = Date.now(), W = Math.max(320, el("snapAcctCycle")?.clientWidth || 760);   // 화면 폭 그대로 -- 고정 viewBox 는 넓은 화면에서 가운데 작게 떴다
+  const open = (A.trades || []).map((t) => [t, positions.find((p) => p.symbol === t.symbol && p.side === t.side)])
+    .filter(([t, p]) => !t.closed && p && (t.legs || []).length);
+  setH("snapAcctCycle", open.map(([t, pos]) => {
+    const key = `${t.symbol}|${t.side}|${t.entry_time}`, c = cyclePaths[key] || (cyclePaths[key] = { at: 0, rows: [] });
+    if (now - c.at > 60000) {
+      c.at = now;
+      fetch(`/api/cycle-path?symbol=${encodeURIComponent(t.symbol)}&start=${t.legs[0][0] - 20 * 60000}`, { cache: "no-store" })
+        .then((r) => r.json()).then((j) => { if (j.ok) { c.rows = j.rows; if (cycleArgs) renderCycleCard(...cycleArgs); } }).catch(() => {});
+    }
+    const legs = t.legs, long = t.side === "LONG", coin = acctCoin(t.symbol), dir = long ? 1 : -1;
+    const real = legs.reduce((a, g) => a + g[5], 0), fee = legs.reduce((a, g) => a + g[6], 0), unreal = Number(pos.unrealized_pnl) || 0;
+    const total = real + unreal - fee, [, fpx, fq] = legs[0], hold = fq * (pos.mark_price - fpx) * dir, cyc = total - hold;
+    const nIn = legs.filter((g) => g[3]).length, mins = (now - legs[0][0]) / 60000, cut = t.truncated_open;
+    const hm = (ms) => (acctKey(ms) === acctKey(now) ? "" : acctMd(ms) + " ") + acctHm(ms);
+    const tile = (lab, val, tone, sub) => `<div><i>${lab}</i><b class="${tone}">${val}</b><s>${sub}</s></div>`;
+    const chips = legs.map(([ms, p, qty, inc, mk, rp]) => { const b = inc ? long : !long;
+      return `<span class="${b ? "b" : "s"}"><i>${hm(ms)}</i>${b ? "매수" : "매도"} <b>${acctPx(p)}</b> ×${cycleQ(qty)}${mk ? "" : " · 테이커"}${rp ? ` <em class="${acctTone(rp)}">${acctSu(rp)}</em>` : ""}</span>`; }).join("");
+    return `<div class="cy-box">
+      <div class="cy-head"><span class="cy-live">진행 중</span><b class="cy-title">${coin} ${long ? "롱" : "숏"} 순환</b>
+        <span class="muted">${hm(legs[0][0])} 시작 · ${acctDur(now - legs[0][0])} · ${long ? "매수" : "매도"} ${nIn} · ${long ? "매도" : "매수"} ${legs.length - nIn}</span></div>
+      <div class="cy-tiles">
+        ${tile("지금", `${cycleQ(pos.qty)} ${coin}`, "", `평단 ${acctPx(pos.entry_price)}`)}
+        ${tile("미실현", acctSu(unreal), acctTone(unreal), `현재가 ${acctPx(pos.mark_price)}`)}
+        ${tile("실현(부분 정리)", acctSu(real), acctTone(real), `수수료 $${fee.toFixed(2)}`)}
+        ${tile("합계", acctSu(total), acctTone(total), equity > 0 ? `순자산의 ${acctPct(total / equity)}` : "")}
+        ${tile("그냥 보유였다면", cut ? "—" : acctSu(hold), cut ? "" : acctTone(hold), cut ? "체결 이력이 잘려 첫 체결 모름" : `첫 ${cycleQ(fq)} ${coin} @${acctPx(fpx)}`)}
+        ${tile("순환 효과", cut ? "—" : acctSu(cyc), cut ? "" : acctTone(cyc), "합계 − 그냥 보유")}
+      </div>
+      ${cycleSvg(t, pos, c.rows, now, W)}
+      <div class="cy-fills">${chips}</div>
+      <p class="cy-note">▲ 매수(초록 = 체결가 ×수량) ▼ 매도(빨강) · 속 빈 표시 = 메이커 · 점선 = 평단 · 주황 = 첫 진입 · 청산하면 이 칸은 사라지고 달력으로 넘어가요</p>
+    </div>`;
+  }).join(""));
+}
 
 // 거래소 실계좌(수동 매매 포함) 패널. 봇 원장(trade_journal)과 달리 여기 숫자는 바이낸스가 준 것.
 function renderBinanceAccount(payload) {

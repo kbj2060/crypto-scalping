@@ -118,6 +118,9 @@ def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH") -> list[dict
                 # 2026-10-05 습관 분해(계좌 카드): 추가 = 첫 진입 이벤트 뒤의 증가 이벤트(180초 안 증가 체결은 한 이벤트 --
                 #   peg 재호가·폴백 묶음, research_eth_avgdown_gate_notional_cap_20261004 와 같은 정의) · 최대 명목 = max |net|×체결가
                 "adds": 0, "peak_notional": 0.0, "_last_inc": None,
+                # 2026-10-22 계좌 카드 «진행 중 순환»(시안 A): 체결마다 [시각ms, 가격, 수량, 늘림 1/0, 메이커 1/0, 실현, 수수료] --
+                #   차트 체결가·체결 칩·평단 계단·«그냥 보유» 기준(첫 체결). 원장에도 같이 실린다.
+                "legs": [],
                 "exit_time": None,
                 "exit_price": None,
                 "closed": False,
@@ -136,6 +139,8 @@ def _fold(fills: list[dict[str, Any]], position_side: str = "BOTH") -> list[dict
             current["_last_inc"] = t_ms
         else:
             current["qty_out"] += qty; current["_out"] += price * qty
+        current["legs"].append([int(fill["time"]), price, qty, int(opening), int(bool(fill.get("maker"))),
+                                round(float(fill["realizedPnl"]), 6), round(float(fill["commission"]), 6)])
         net += signed_qty
         # 🔴헤지 스트림은 부호를 못 벗어난다(LONG 은 net>=0, SHORT 는 net<=0). 벗어났다면 거래소
         # userTrades **7일 롤링 창**이 진입 체결을 잘라먹어 폴딩이 포지션 한가운데서 시작한

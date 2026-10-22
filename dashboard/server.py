@@ -164,7 +164,7 @@ import scripts.binance_ban_guard as ban_guard  # noqa: E402 -- requests 도 전�
 # 🔴주문 기본 함수(place_bracket·run_entry·run_exit·exec_enabled·…)를 여기서 다시 import 하지 말 것 -- 시험의
 #   patch.object(server, …) 가 orders 쪽 이름을 못 막아 실주문 경로가 열린다. 지금은 그 patch 가 AttributeError 로 깨진다.
 from dashboard import orders  # noqa: E402
-from dashboard.orders import MARKET_SYMBOLS, ACCOUNT_TRIP_RECORD_SECONDS  # noqa: E402 -- MARKET_SYMBOLS 는 주문 심볼 기본값도 써서 정의는 orders 한 곳
+from dashboard.orders import MARKET_SYMBOLS, MANUAL_EXEC_SYMBOLS, ACCOUNT_TRIP_RECORD_SECONDS  # noqa: E402 -- MARKET_SYMBOLS 는 주문 심볼 기본값도 써서 정의는 orders 한 곳
 # 2026-09-04: PWA 웹푸시. 사용자가 "다른 작업 중이라 신호를 계속 놓친다"고 해서 추가했다.
 # 이 파일은 구독 등록/해지/테스트발송만 담당하고, 실제로 무엇을 언제 보낼지 판단하는 것은
 # scripts/live_push_notifier_20260904.py(별도 데몬)다 -- 대시보드 서버는 조회가 있을 때만
@@ -4146,6 +4146,33 @@ def make_app() -> web.Application:
             return web.json_response({"error": "position_profile_upstream_error"}, status=web.HTTPBadGateway.status_code, headers=NOCACHE)
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_cycle_path(request: web.Request) -> web.Response:
+        """2026-10-22 계좌 카드 «진행 중 순환» 차트의 가격선 -- 첫 체결부터 지금까지 [열림ms, 종가].
+        체결 심볼(ETHUSDC 등) 그대로 · 1500봉 안에 들게 1m/5m/15m · 20초 캐시."""
+        symbol = str(request.query.get("symbol") or "").upper()
+        if symbol not in {*MARKET_SYMBOLS.values(), *MANUAL_EXEC_SYMBOLS.values()}:
+            raise web.HTTPBadRequest(reason="unsupported_symbol")
+        try:
+            start = int(request.query.get("start") or 0)
+        except ValueError:
+            raise web.HTTPBadRequest(reason="bad_start") from None
+        now_ms = int(time.time() * 1000)
+        if not now_ms - 30 * 86400_000 <= start <= now_ms:
+            raise web.HTTPBadRequest(reason="bad_start")
+        span_min = (now_ms - start) / 60_000
+        interval = "1m" if span_min <= 1490 else "5m" if span_min <= 7450 else "15m"
+
+        async def produce() -> dict[str, Any]:
+            raw = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
+                                           {"symbol": symbol, "interval": interval, "startTime": start, "limit": 1500},
+                                           error_reason="cycle_path_upstream_error")
+            return {"ok": True, "interval": interval, "rows": [[int(r[0]), float(r[4])] for r in raw]}
+        try:
+            payload = await swr_cached(f"cycle_path:{symbol}:{start}", 20.0, produce)
+        except web.HTTPException as exc:
+            payload = {"ok": False, "reason": exc.reason, "rows": []}
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_liquidation_tiers(request: web.Request) -> web.Response:
         days = int(request.query.get("days", "1")) if request.query.get("days", "1") in ("1", "7", "30") else 1
         try:
@@ -4310,6 +4337,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/liquidation-map", api_liquidation_map)
     app.router.add_get("/api/liquidation-map/tiers", api_liquidation_tiers)
     app.router.add_get("/api/position-profile", api_position_profile)
+    app.router.add_get("/api/cycle-path", api_cycle_path)   # 2026-10-22 계좌 카드 진행 중 순환
     app.router.add_get("/api/macro-calendar", api_macro_calendar)
     app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/trend", api_trend)

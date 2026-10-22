@@ -1232,8 +1232,31 @@ svg {
 .acct-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--soft-line); font-size: 12.5px; }
 .acct-stat span { color: var(--muted); }
 .acct-stat b { font: 700 14px/1.1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 2026-10-22 진행 중 순환(시안 A) -- 달력 아래 · 열린 포지션마다 */
+.cy-box { border-top: 1px solid var(--soft-line); margin-top: 14px; padding-top: 14px; min-width: 0; }
+.cy-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.cy-head .muted { font-size: 12px; }
+.cy-live { font-size: 11px; font-weight: 800; color: var(--on-fill); background: var(--good); border-radius: 999px; padding: 2px 8px; }
+.cy-title { font: 800 15px var(--font-sans); }
+.cy-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.cy-tiles div { background: var(--glass); border-radius: 10px; padding: 8px 10px; display: grid; gap: 3px; min-width: 0; }
+.cy-tiles i { font-style: normal; font-size: 11px; color: var(--muted); }
+.cy-tiles b { font: 800 15px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cy-tiles s { text-decoration: none; font-size: 11px; color: var(--muted); }
+.cy-chart { display: block; width: 100%; height: auto; background: var(--chart-bg); border-radius: 10px; }
+.cy-ax { font: 600 10px var(--font-mono); }
+.cy-fx { font: 800 10.5px var(--font-mono); paint-order: stroke; stroke: var(--chart-bg); stroke-width: 3px; }
+.cy-fq { font-weight: 600; fill: var(--muted); }
+.cy-fills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.cy-fills span { font: 600 12px var(--font-mono); font-variant-numeric: tabular-nums; background: var(--glass); border-radius: 7px; padding: 4px 8px; border-left: 2px solid var(--good); }
+.cy-fills span.s { border-left-color: var(--bad); }
+.cy-fills i { font-style: normal; color: var(--muted); margin-right: 6px; }
+.cy-fills b { font-weight: 800; }
+.cy-fills em { font-style: normal; margin-left: 4px; }
+.cy-note { font-size: 12px; color: var(--muted); margin: 8px 2px 0; line-height: 1.5; }
 @media (max-width: 900px) {
   .acct-today, .acct-hist { grid-template-columns: minmax(0, 1fr); }
+  .cy-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .acct-pv { margin-left: 0; border-left: 0; padding-left: 0; }
 }
 
