@@ -1520,6 +1520,13 @@ function renderCycleCard(A, positions, equity) {
     const nIn = legs.filter((g) => g[3]).length, mins = (now - legs[0][0]) / 60000, cut = t.truncated_open;
     const hm = (ms) => (acctKey(ms) === acctKey(now) ? "" : acctMd(ms) + " ") + acctHm(ms);
     const tile = (lab, val, tone, sub) => `<div><i>${lab}</i><b class="${tone}">${val}</b><s>${sub}</s></div>`;
+    // 2026-10-22 사용자 «합계·그냥 보유에 %도 -- 달러는 더 나쁜데 %로는 나아 보인다»: 각자 «넣었던 가장 큰 원금» 대비.
+    //   그냥 보유 = 첫 체결 원금 · 합계 = 순환 중 최대 원가(수량×평단). 같은 달러 손익이라도 더 큰 돈을 굴렸으면 %는 작다.
+    let qq = 0, aa = 0, peak = 0;
+    legs.forEach(([, p, qty, inc]) => { if (inc) { aa = (aa * qq + p * qty) / (qq + qty); qq += qty; } else qq -= qty; peak = Math.max(peak, qq * aa); });
+    const pct2 = (f) => `${f >= 0 ? "+" : "−"}${Math.abs(f * 100).toFixed(2)}%`;
+    const hold0 = fq * fpx, totR = total / peak, holdR = hold / hold0;
+    const withPct = (usd, r) => `${usd} <small>${pct2(r)}</small>`;
     const chips = legs.map(([ms, p, qty, inc, mk, rp]) => { const b = inc ? long : !long;
       return `<span class="${b ? "b" : "s"}"><i>${hm(ms)}</i>${b ? "매수" : "매도"} <b>${acctPx(p)}</b> ×${cycleQ(qty)}${mk ? "" : " · 테이커"}${rp ? ` <em class="${acctTone(rp)}">${acctSu(rp)}</em>` : ""}</span>`; }).join("");
     return `<div class="cy-box">
@@ -1529,9 +1536,9 @@ function renderCycleCard(A, positions, equity) {
         ${tile("지금", `${cycleQ(pos.qty)} ${coin}`, "", `평단 ${acctPx(pos.entry_price)}`)}
         ${tile("미실현", acctSu(unreal), acctTone(unreal), `현재가 ${acctPx(pos.mark_price)}`)}
         ${tile("실현(부분 정리)", acctSu(real), acctTone(real), `수수료 $${fee.toFixed(2)}`)}
-        ${tile("합계", acctSu(total), acctTone(total), equity > 0 ? `순자산의 ${acctPct(total / equity)}` : "")}
-        ${tile("그냥 보유였다면", cut ? "—" : acctSu(hold), cut ? "" : acctTone(hold), cut ? "체결 이력이 잘려 첫 체결 모름" : `첫 ${cycleQ(fq)} ${coin} @${acctPx(fpx)}`)}
-        ${tile("순환 효과", cut ? "—" : acctSu(cyc), cut ? "" : acctTone(cyc), "합계 − 그냥 보유")}
+        ${tile("합계", cut ? acctSu(total) : withPct(acctSu(total), totR), acctTone(total), (cut ? "" : `최대 원금 ${acctSuc(peak).slice(1)} 대비 · `) + (equity > 0 ? `순자산 ${acctPct(total / equity)}` : ""))}
+        ${tile("그냥 보유였다면", cut ? "—" : withPct(acctSu(hold), holdR), cut ? "" : acctTone(hold), cut ? "체결 이력이 잘려 첫 체결 모름" : `첫 ${cycleQ(fq)} ${coin} @${acctPx(fpx)} · ${acctSuc(hold0).slice(1)} 대비`)}
+        ${tile("순환 효과", cut ? "—" : `${acctSu(cyc)} <small>${(totR - holdR) * 100 >= 0 ? "+" : "−"}${Math.abs((totR - holdR) * 100).toFixed(2)}%p</small>`, cut ? "" : acctTone(cyc), "합계 − 그냥 보유 · 수익률 차")}
       </div>
       ${cycleSvg(t, pos, c.rows, now, W)}
       <div class="cy-fills">${chips}</div>

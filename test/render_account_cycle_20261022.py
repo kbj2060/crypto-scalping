@@ -5,7 +5,7 @@
 
 픽스처 = 실체결 10-20 23:10 ETHUSDC 롱 7체결(열린 왕복, round_trips 로 접은 legs) + 그 구간 1분 종가 · 스냅샷 10-21 02:40 KST.
 시각은 «지금»에 맞춰 통째로 민다. 🔴주문 0: 출처 가짜 호스트 · 모든 요청 가로채기 · 바깥 호스트 abort · 주문 API 는 부르지 않는다.
-검사(1920·390): 타일 6칸 값(합계·그냥 보유·순환 효과 = 파이썬 재계산) · 체결가 글자·칩 = 체결 수 · 칩마다 정확한 체결가 ·
+검사(1920·390): 타일 6칸 값(합계·그냥 보유·순환 효과 $·% = 파이썬 재계산) · 체결가 글자·칩 = 체결 수 · 칩마다 정확한 체결가 ·
   /api/cycle-path 가 체결 심볼로 불림 · 포지션 없으면 칸이 빈다 · 페이지 오류 0.
 """
 import json, pathlib, sys, time
@@ -39,6 +39,15 @@ POS = {"symbol": "ETHUSDC", "side": "LONG", "qty": round(q, 3), "entry_price": r
 real = sum(g[5] for g in trip["legs"]); fee = sum(g[6] for g in trip["legs"])
 total = real + POS["unrealized_pnl"] - fee
 hold = trip["legs"][0][2] * (P - trip["legs"][0][1]); cyc = total - hold
+qq = aa = peak = 0.0
+for _, p_, qty, inc, *_ in trip["legs"]:            # 합계 % 분모 = 순환 중 최대 원가(수량×평단) · 그냥 보유 % 분모 = 첫 체결 원금
+    if inc:
+        aa = (aa * qq + p_ * qty) / (qq + qty); qq += qty
+    else:
+        qq -= qty
+    peak = max(peak, qq * aa)
+totR, holdR = total / peak, hold / (trip["legs"][0][2] * trip["legs"][0][1])
+pc = lambda r: f"{'+' if r >= 0 else '−'}{abs(r * 100):.2f}%"   # noqa: E731
 su = lambda v: f"{'+' if v >= 0 else '−'}${abs(v):,.2f}".rstrip("0").rstrip(".")   # noqa: E731 -- app.js acctSu(|v|<100 · 소수 최대 2자리, 끝 0 없음)
 S = {"positions": [POS]}
 log, fails, errors = [], [], []
@@ -92,7 +101,7 @@ with sync_playwright() as p:
         labels = box.locator("text.cy-fx").count()
         pts = pg.evaluate("() => (document.querySelector('#snapAcctCycle polyline')?.getAttribute('points') || '').split(' ').length")
         print(w, tiles, len(chips), labels, pts)
-        for i, v in {3: su(total), 4: su(hold), 5: su(cyc)}.items():
+        for i, v in {3: f"{su(total)} {pc(totR)}", 4: f"{su(hold)} {pc(holdR)}", 5: f"{su(cyc)} {pc(totR - holdR)}p"}.items():
             if i >= len(tiles) or tiles[i] != v: fails.append(f"[{w}] 타일 {i} {tiles[i] if i < len(tiles) else None} != {v}")
         n = len(trip["legs"])
         if len(chips) != n or labels != n: fails.append(f"[{w}] 칩 {len(chips)} · 글자 {labels} != {n}")
