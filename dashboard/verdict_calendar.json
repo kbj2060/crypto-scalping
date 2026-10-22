@@ -166,6 +166,24 @@
    "what": "z ≥ 2.80 (최종 2029-01-13 z ≥ 1.98) · 총 bp(메이커 0)",
    "how": "python scripts/prereg_eth_whale_duel_fwd_20261007.py --look",
    "doc": "docs/experiments/eth_whale_duel_fwd_prereg_20261007.md"
+  },
+  {
+   "id": "soxl_wknd1",
+   "date": "2027-04-20",
+   "kind": "1차 점검",
+   "title": "SOXLUSDT 주말 상승(토 00→월 00 ET 롱) — 26주말",
+   "what": "평균 순수익(왕복 10bp·펀딩 뺌) ≤ 0 이면 기각·종료, 아니면 계속 · 지금 건수 = --status",
+   "how": "python scripts/live_soxl_weekend_forward_recorder_20261022.py --look",
+   "doc": "docs/experiments/soxl_weekend_fwd_prereg_20261022.md"
+  },
+  {
+   "id": "soxl_wknd2",
+   "date": "2027-10-19",
+   "kind": "최종 판정",
+   "title": "SOXLUSDT 주말 상승 — 52주말",
+   "what": "평균 순수익 > 0 이고 단측 t ≥ 1.675 면 통과 · 검정력: 표본 안 효과 절반이면 31%",
+   "how": "python scripts/live_soxl_weekend_forward_recorder_20261022.py --look",
+   "doc": "docs/experiments/soxl_weekend_fwd_prereg_20261022.md"
   }
  ]
 }

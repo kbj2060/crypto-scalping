@@ -59,7 +59,8 @@ FORWARD = [
     {"ids": ["gex_rev", "opt_info", "maxpain_oos"], "start": "2026-10-01", "inputs": ["deribit_chain"]},
     {"ids": ["dir4h_p2", "dir3asset"], "start": "2026-10-12", "inputs": ["dir_rec"]},   # 기록기 첫 줄 10-12(판정 자체는 klines 재계산)
 ]
-EXTERNAL = ["exh1", "pp_volsize1", "oi_adv_exit1", "trend4_1", "whale_duel1"]   # data.binance.vision 만 읽는다
+EXTERNAL = ["exh1", "pp_volsize1", "oi_adv_exit1", "trend4_1", "whale_duel1",   # data.binance.vision 만 읽는다
+            "soxl_wknd1", "soxl_wknd2"]                                       # 기록기가 fapi REST 를 직접 읽는다(수집기 무관)
 
 
 def utc_day(ts: float) -> str:

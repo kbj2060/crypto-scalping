@@ -41,6 +41,7 @@ EXPECTED_CRON = {
     "청산지도 채점": "live_liqmap_scorer_20261008.py",
     "배포 워처": "deploy_watcher.sh",
     "데이터 품질 감시": "data_quality_monitor_20261022.py",
+    "SOXL 주말 전진 기록기": "live_soxl_weekend_forward_recorder_20261022.py --record",
 }
 # 하루 한 번 이상 써야 하는 산출물(경로, 최대 나이 시간)
 EXPECTED_FILES = {
@@ -48,6 +49,7 @@ EXPECTED_FILES = {
     "max pain 장부": ("data/live/maxpain_oos_ledger.jsonl", 26),
     "청산지도 채점": ("data/live/liqmap_score.jsonl", 3),
     "데이터 품질 감시": ("data/live/ops_watchdog/data_quality.json", 3),
+    "SOXL 주말 장부": ("data/live/soxl_weekend_forward.jsonl", 180),   # 주 1줄(월 21:30 UTC) · 첫 줄 2026-10-26
 }
 
 
