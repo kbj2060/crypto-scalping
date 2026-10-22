@@ -1739,15 +1739,16 @@ function renderLiquidationMapPanel() {
 
 // 지지·저항 게이지 행(이름 · 가격 · 강도 막대 · 거리 %, 가운데 현재가 줄) -- 모바일 목록과 2026-10-06 넓은 화면 모의 판 칸 서랍이 같이 쓴다.
 function srRowsHtml(sr) {
+  const dp = Math.max(2, pxDp());   // 2026-10-22 사용자 «XRP 지지/저항 소수 4자리»: 고정 2자리는 XRP 1.3914 를 1.39 로 뭉갰다
   const row = (lv, tag, cls) => {
     const pct = Math.round((lv.weight_pct || 0) * 100), dist = (lv.price - sr.cur) / sr.cur * 100;
     return `<div class="liq-level-row ${cls}"><span class="liq-level-tag">${tag}</span>`
-      + `<span class="liq-level-price">${fmtNum(lv.price, 2)}</span>`
+      + `<span class="liq-level-price">${fmtNum(lv.price, dp)}</span>`
       + `<div class="liq-level-bar-track"><div class="liq-level-bar-fill" style="width:${Math.max(pct, 4)}%;"></div></div>`
       + `<span class="liq-level-dist">${dist > 0 ? "+" : ""}${fmtNum(dist, 2)}%</span></div>`;
   };
   const cur = `<div class="liq-level-row liq-current"><span class="liq-level-tag">현재가</span>`
-    + `<span class="liq-level-price">${fmtNum(sr.cur, 2)}</span><div class="liq-level-bar-track"></div><span class="liq-level-dist">-</span></div>`;
+    + `<span class="liq-level-price">${fmtNum(sr.cur, dp)}</span><div class="liq-level-bar-track"></div><span class="liq-level-dist">-</span></div>`;
   return [...sr.res.map((lv, i) => row(lv, "저항" + (i + 1), "liq-resistance")).reverse(), cur,
           ...sr.sup.map((lv, i) => row(lv, "지지" + (i + 1), "liq-support"))].join("");
 }
