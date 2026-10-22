@@ -7033,7 +7033,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   if (lastSnap && currentPrice > 0) {
     const edges = liqBandEdges(lastSnap.bins, densityClip, densityBinWidth, currentPrice, densitySweep);
     const dU = edges.up === null ? Infinity : edges.up - currentPrice, dD = edges.dn === null ? Infinity : currentPrice - edges.dn;
-    const bx = ml + cw - 6, cy = yAt(currentPrice);
+    // 2026-10-22 아티팩트 펜 메모 «이 선 때문에 풋프린트가 잘 안 보여 · 살짝 오른쪽으로»: 데스크톱은 플롯 안(형성 봉 매수 칸 위)이 아니라 오른쪽 기둥 왼쪽 끝 바로 안 · 휴대폰은 그대로
+    const bx = mobileChart ? ml + cw - 6 : tradeX0 + 3, cy = yAt(currentPrice);
     [[true, edges.up, dU], [false, edges.dn, dD]].forEach(([isUp, edge, d]) => {
       if (edge === null) return;
       const near = isUp ? dU <= dD : dD < dU, col = isUp ? "var(--liq-resistance)" : "var(--liq-support)";
