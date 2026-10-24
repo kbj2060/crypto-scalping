@@ -312,6 +312,96 @@ def pooled_round(rnd, specs, combos, reuse, exclude):
               (" vs M3j %+.4f [%+.4f,%+.4f]" % tuple(r["dq_vs_M3j"])) if "dq_vs_M3j" in r else "")
 
 
+# ---------- 4라운드 (사전 등록 7dac1da6): 학습 24·25 / 검증 26-01~05 / 시험 26-06~10-23 · GRU 시퀀스 ----------
+TR4_START, TR4_END = pd.Timestamp("2024-01-01"), pd.Timestamp("2025-12-31 23:55")
+VA4_START, VA4_END, TE4_START = pd.Timestamp("2025-12-31 23:55"), pd.Timestamp("2026-05-31 23:55"), pd.Timestamp("2026-05-31 23:55")
+L_SEQ = 168
+STAT = ["lrv48", "lrv288", "lrv2016", "mkt_lrv48", "hs", "hc", "wkend"]
+
+
+def seq_inputs(F, ts, idx):
+    """GRU 입력: 결정 봉 위치 idx 마다 직전 168 정시(자기 포함)의 [lnRV1h · 시장 lnRV1h · 시각 sin·cos] 수열 + 정적 7."""
+    hod = (ts + pd.Timedelta("5min")).hour.values
+    F = F.assign(hs=np.sin(2 * np.pi * hod / 24), hc=np.cos(2 * np.pi * hod / 24))
+    dec = np.flatnonzero(ts.minute == 55); pos = np.searchsorted(dec, idx); assert (dec[pos] == idx).all() and (pos >= L_SEQ - 1).all()
+    ch = F[["lrv12", "mkt_lrv12", "hs", "hc"]].to_numpy(np.float32)[dec]
+    S = np.stack([ch[p - L_SEQ + 1:p + 1] for p in pos]); st = F[STAT].to_numpy(np.float32)[idx]
+    return S, st
+
+
+def gru_fit(S, st, y, evals, loss="mse", seeds=SEEDS[:2]):
+    import torch
+    torch.set_num_threads(8)
+    cm, cs = S.reshape(-1, S.shape[2]).mean(0), S.reshape(-1, S.shape[2]).std(0) + 1e-9; sm_, ss_ = st.mean(0), st.std(0) + 1e-9
+    ym, ys = y.mean(), y.std(); nz = lambda a, b: (torch.tensor((a - cm) / cs), torch.tensor((b - sm_) / ss_))
+    Xs, Xt = nz(S, st); yt = torch.tensor(y, dtype=torch.float32); outs = [[] for _ in evals]
+    for sd in seeds:
+        torch.manual_seed(int(sd)); rng = np.random.default_rng(int(sd))
+        gru = torch.nn.GRU(S.shape[2], 32, batch_first=True); head = torch.nn.Sequential(torch.nn.Linear(32 + st.shape[1], 32), torch.nn.ReLU(), torch.nn.Linear(32, 1))
+        f = lambda a, b: head(torch.cat([gru(a)[1][-1], b], 1)).squeeze(1) * ys + ym
+        opt = torch.optim.Adam(list(gru.parameters()) + list(head.parameters()), lr=1e-3)
+        for _ in range(15):
+            for bi in np.array_split(rng.permutation(len(y)), max(1, len(y) // 512)):
+                e = yt[bi] - f(Xs[bi], Xt[bi])
+                l = ((e / ys) ** 2).mean() if loss == "mse" else (torch.exp(e) - e - 1).mean()
+                opt.zero_grad(); l.backward(); opt.step()
+        with torch.no_grad():
+            for k, (Se, ste) in enumerate(evals):
+                a, b = nz(Se, ste); outs[k].append(np.concatenate([f(a[j:j + 4096], b[j:j + 4096]).numpy() for j in range(0, len(a), 4096)]))
+    return [np.mean(o, 0) for o in outs]
+
+
+def round4(check=False):
+    fr, oks = {}, {}
+    for s in COINS:
+        x, F, y, ok, miss = frame(s); fr[s] = (F, y); oks[s] = (x.index, ok, miss)
+    add_mkt(fr); M = {}
+    for s in COINS:
+        (ts, ok, _), F = oks[s], fr[s][0]
+        ok = ok & np.isfinite(F[MKT].to_numpy(float)).all(1); le = ts + pd.Timedelta(minutes=5 * H); dec = ok & (ts.minute == 55)
+        M[s] = dict(tr=ok & (ts >= TR4_START) & (le <= TR4_END), va=dec & (ts >= VA4_START) & (le <= VA4_END), te=dec & (ts >= TE4_START))
+        M[s]["trd"] = M[s]["tr"] & dec
+    if check:   # S4: 봉 i 뒤 행을 망가뜨려도 수열·정적 입력이 같다
+        F, ts = fr["ETH"][0], oks["ETH"][0]; rng = np.random.default_rng(4)
+        for i in rng.choice(np.flatnonzero(M["ETH"]["te"]), 10, replace=False):
+            a = seq_inputs(F, ts, np.array([i])); G = F.copy(); G.iloc[i + 1:] = np.nan; b = seq_inputs(G, ts, np.array([i]))
+            assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1]) and np.isfinite(a[0]).all()
+        print("S4 GRU 수열 인과성 10 표본 통과"); return
+    pv = {s: {} for s in COINS}; pt = {s: {} for s in COINS}
+    for s in COINS:   # 코인별 M0·M3·M6 — 한 번 학습해 검증·시험 함께 예측
+        F, y = fr[s]; nv = M[s]["va"].sum(); E = pd.concat([F[M[s]["va"]], F[M[s]["te"]]])
+        for m in ("M0", "M3", "M6"):
+            t0 = time.time(); p = fit_predict(m, F[M[s]["tr"]], y[M[s]["tr"]], E); pv[s][m], pt[s][m] = p[:nv], p[nv:]; print(f"{s} {m} {time.time() - t0:.0f}s", flush=True)
+    cat = lambda k: (pd.concat([fr[s][0][M[s][k]] for s in COINS]), np.concatenate([fr[s][1][M[s][k]] for s in COINS]))
+    A, ya = cat("tr"); E = pd.concat([pd.concat([fr[s][0][M[s]["va"]], fr[s][0][M[s]["te"]]]) for s in COINS])
+    cuts = np.cumsum([M[s]["va"].sum() + M[s]["te"].sum() for s in COINS])[:-1]
+    for m, base in (("PX3", "M3X"), ("PX6", "M6X")):
+        t0 = time.time(); p = np.split(fit_predict(base, A, ya, E), cuts); print(f"pooled {m} {time.time() - t0:.0f}s", flush=True)
+        for s, q in zip(COINS, p):
+            nv = M[s]["va"].sum(); pv[s][m], pt[s][m] = q[:nv], q[nv:]
+    St, stt = [], []; yt_ = []
+    for s in COINS:
+        F, y = fr[s]; ts = oks[s][0]; a, b = seq_inputs(F, ts, np.flatnonzero(M[s]["trd"])); St.append(a); stt.append(b); yt_.append(y[M[s]["trd"]])
+    St, stt, yt_ = np.concatenate(St), np.concatenate(stt), np.concatenate(yt_)
+    ev = []
+    for s in COINS:
+        F = fr[s][0]; ts = oks[s][0]; ev += [seq_inputs(F, ts, np.flatnonzero(M[s]["va"])), seq_inputs(F, ts, np.flatnonzero(M[s]["te"]))]
+    for m, loss in (("G1", "mse"), ("G2", "qlike")):
+        t0 = time.time(); out = gru_fit(St, stt, yt_, ev, loss); print(f"pooled {m}({loss}) 학습 행 {len(yt_)} {time.time() - t0:.0f}s", flush=True)
+        for k, s in enumerate(COINS):
+            pv[s][m], pt[s][m] = out[2 * k], out[2 * k + 1]
+    reps = {}
+    for s in COINS:
+        for m, parts in (("QX4", ["M3", "M6", "PX3", "PX6"]), ("QG", ["M3", "M6", "PX3", "PX6", "G1"])):
+            pv[s][m], pt[s][m] = np.mean([pv[s][k] for k in parts], 0), np.mean([pt[s][k] for k in parts], 0)
+        F, y = fr[s]; ts = oks[s][0]
+        reps[s] = evaluate(s, 4, pv[s], pt[s], y[M[s]["va"]], y[M[s]["te"]], ts[M[s]["va"]], ts[M[s]["te"]], oks[s][2], exclude=("M0", "M3"))
+    cand = reps["ETH"]["candidate"]; print(f"\n4라운드 후보(ETH 검증) = {cand}")
+    for s in COINS:
+        r = reps[s]["models"][cand]
+        print(s, "vs M3 %+.4f [%+.4f,%+.4f]" % tuple(r["dq_vs_M3"]), " vs M0 %+.4f [%+.4f,%+.4f]" % tuple(r["dq_vs_M0"]))
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if "--selfcheck" in a:
@@ -319,6 +409,8 @@ if __name__ == "__main__":
     if "--round2" in a:
         pooled_round(2, [("P3", "M3"), ("P6", "M6")], {"C36": ["M3", "M6"], "PC": ["P3", "P6"]}, {1: ["M0", "M3", "M6", "M3j"]},
                      ("M0", "M3", "M3j", "M6")); sys.exit(0)
+    if "--round4" in a:
+        round4(check="--check" in a); sys.exit(0)
     if "--round3" in a:
         pooled_round(3, [("PX3", "M3X"), ("PX6", "M6X")], {"Q4": ["M3", "M6", "P3", "P6"], "PXC": ["PX3", "PX6"], "QX4": ["M3", "M6", "PX3", "PX6"]},
                      {1: ["M0", "M3", "M6", "M3j"], 2: ["P3", "P6", "PC"]}, ("M0", "M3", "M3j", "M6", "P3", "P6", "PC")); sys.exit(0)
