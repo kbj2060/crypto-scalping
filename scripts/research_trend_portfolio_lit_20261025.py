@@ -180,9 +180,9 @@ def markov_signs(S, days, seed):
     return pd.DataFrame(out)
 
 
-def null_targets(F, cfg, tau, days, seed):
+def null_targets(F, cfg, tau, days, seed, W=None):
     """신호 크기는 그대로 두고 부호만 무작위(크기 0 인 날은 그 코인 비0 크기 중앙값)."""
-    W = targets(F, cfg, tau).loc[days]; rs = markov_signs(W, days, seed)
+    W = (targets(F, cfg, tau) if W is None else W).loc[days]; rs = markov_signs(W, days, seed)
     mag = W.abs(); med = mag.where(mag > 0).median()
     return (rs * mag.where(mag > 0, med, axis=1)).reindex(W.index)
 
@@ -223,6 +223,65 @@ def pick_tau(F, cfg, days):
         if OE.mdd(run(F, targets(F, cfg, tau), days, band=cfg["band"])) >= -0.20:
             best = tau
     return best
+
+
+# ---------------- 4회차(사용자 분할 변경): 학습 2024~25 · 검증 2026-01~05 · 시험 2026-06~10-23, 기존 후보만 ----------------
+TRAIN4, VAL4, TEST4 = ("2024-01-01", "2025-12-31"), ("2026-01-01", "2026-05-31"), ("2026-06-01", "2026-10-23"); N_TRIALS4 = 108 + 3
+R4 = {"a_best": dict(look="E", sig="sign", vol="rv20", port="pv", crash="dm", short=0.5, band=0.25),
+      "b_current_pv": dict(look="A", sig="sign", vol="cc20", port="pv", crash="none", band=0.0),
+      "c_current": "current"}
+band4 = lambda k: 0.0 if R4[k] == "current" else R4[k]["band"]
+
+
+def r4_weights(F, key, tau):
+    """(c) 현재 규칙은 코인 목표 0.5 → τ 로 비례(τ=0.5 가 원래 규칙)."""
+    return current_rule(F) * (tau / 0.5) if R4[key] == "current" else targets(F, R4[key], tau)
+
+
+def dsr_n(x, srs, n):
+    from scipy.stats import norm
+    sr = x.mean() / x.std(); T = len(x); g3 = float(((x - x.mean()) ** 3).mean() / x.std() ** 3); g4 = float(((x - x.mean()) ** 4).mean() / x.std() ** 4)
+    V = float(np.var(np.array(srs) / math.sqrt(365), ddof=1)); em = 0.5772156649
+    sr0 = math.sqrt(V) * ((1 - em) * norm.ppf(1 - 1 / n) + em * norm.ppf(1 - 1 / (n * math.e)))
+    return float(norm.cdf((sr - sr0) * math.sqrt(T - 1) / math.sqrt(1 - g3 * sr + (g4 - 1) / 4 * sr ** 2)))
+
+
+def round4(F):
+    """학습: τ 하나만 고름(학습 구간 MDD ≥ −20% 인 가장 큰 τ) · 검증: 샤프 최고 후보 선택 · 누적 PBO·DSR 는 학습 구간에서 서술."""
+    tr, va = (pd.date_range(*p, freq="D") for p in (TRAIN4, VAL4)); OUT.mkdir(parents=True, exist_ok=True)
+    cols = {f"r{r}:{name(c)}": run(F, targets(F, c, TAU_RANK), tr, band=c["band"]) for r in (1, 2, 3) for c in grid(r)}
+    cols["r4:current"] = run(F, current_rule(F), tr); M = pd.DataFrame(cols)
+    med, pbo, _ = OE.cpcv(M, emb=10); srs = list(M.apply(sharpe).values)
+    ht, hv = hold_ret(F, tr), hold_ret(F, va)
+    rep = {"prereg": "docs/prereg/trend_portfolio_lit_20261025.md 수정 3", "train": TRAIN4, "val": VAL4, "test": TEST4,
+           "train_pbo_cumulative": pbo, "train_cpcv_oos_median_cumulative": med, "cpcv_cols": M.shape[1], "dsr_trials": N_TRIALS4,
+           "hold": {"train_sharpe": sharpe(ht), "train_mdd": OE.mdd(ht), "val_sharpe": sharpe(hv), "val_ret": float((1 + hv).prod() - 1)}, "configs": {}}
+    for key in R4:
+        tau = None
+        for t in TAUS:
+            if OE.mdd(run(F, r4_weights(F, key, t), tr, band=band4(key))) >= -0.20:
+                tau = t
+        tau = tau or TAUS[0]; W = r4_weights(F, key, tau)
+        x, v = run(F, W, tr, band=band4(key)), run(F, W, va, band=band4(key))
+        rep["configs"][key] = {"tau": tau, "train_sharpe": sharpe(x), "train_mdd": OE.mdd(x), "train_yearly": yearly(x), "train_dsr": dsr_n(x, srs, N_TRIALS4),
+                               "train_ann_vol": float(x.std() * math.sqrt(365)), "val_sharpe": sharpe(v), "val_ret": float((1 + v).prod() - 1), "val_mdd": OE.mdd(v)}
+    rep["chosen"] = max(rep["configs"], key=lambda k: rep["configs"][k]["val_sharpe"])
+    (OUT / "round4_report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False)); print(json.dumps(rep, indent=1, ensure_ascii=False))
+
+
+def holdout4(F):
+    """시험 1회: 검증에서 고른 후보만 관문 판정, 나머지 후보는 서술."""
+    rep = json.loads((OUT / "round4_report.json").read_text()); hf = OUT / "round4_test_report.json"
+    assert not hf.exists(), "시험 구간은 1회만 채점"
+    te = pd.date_range(*TEST4, freq="D"); h = hold_ret(F, te)
+    out = {"chosen": rep["chosen"], "hold_sharpe": sharpe(h), "hold_ret": float((1 + h).prod() - 1), "hold_mdd": OE.mdd(h), "configs": {}}
+    for k in R4:
+        W = r4_weights(F, k, rep["configs"][k]["tau"]); x = run(F, W, te, band=band4(k))
+        nulls = [sharpe(run(F, null_targets(F, None, None, te, sd, W=W), te, band=band4(k))) for sd in range(200)]
+        out["configs"][k] = {"sharpe": sharpe(x), "ret": float((1 + x).prod() - 1), "mdd": OE.mdd(x), "null_p95": float(np.percentile(nulls, 95)), "null_median": float(np.median(nulls))}
+    c = out["configs"][out["chosen"]]
+    out["gates"] = {"T1_gt_hold": c["sharpe"] > out["hold_sharpe"], "T2_mdd": c["mdd"] >= -0.20, "T3_null_p95": c["sharpe"] > c["null_p95"]}
+    out["pass"] = all(out["gates"].values()); hf.write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out, indent=1, ensure_ascii=False))
 
 
 # ---------------- 실행 ----------------
@@ -311,6 +370,8 @@ def main():
         F[s], miss = daily_frame(s); print(s, F[s].index[0].date(), "~", F[s].index[-1].date(), "2022~ 빈 5분봉", miss)
     if a.selfcheck:
         return selfcheck(F)
+    if a.round == 4:
+        return holdout4(F) if a.holdout else round4(F)
     return holdout(F, a.round) if a.holdout else dev_round(F, a.round)
 
 
