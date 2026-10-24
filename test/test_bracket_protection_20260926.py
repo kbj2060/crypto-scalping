@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import scripts.live_binance_account_20260910 as acct  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
-    bracket_action, bracket_keep_farther_sl, bracket_key, bracket_rekey, build_bracket_plan)
+    bracket_action, bracket_key, bracket_rekey)
 
 
 BALANCE = {"assets": [], "multiAssetsMargin": False, "totalWalletBalance": "100", "totalUnrealizedProfit": "0",
@@ -52,31 +52,6 @@ def test_state_key_is_symbol_and_side_and_legacy_keys_migrate():
     assert len(both) == 2, "ETH 롱과 SOL 롱이 한 키로 덮였다"
 
 
-def test_long_tp_resistance2_sl_support1_short_mirrored():
-    sup, res = [2670.45, 2667.76, 2597.77], [2702.76, 2705.45, 2708.14]
-    f = {"tick": 0.01}
-    lg = build_bracket_plan(position_side="LONG", support_levels=sup, resistance_levels=res,
-                            ref_price=2688.0, basis=1.0, filters=f)
-    assert (lg["tp_name"], lg["tp_level"], lg["sl_name"], lg["sl_level"]) == ("저항2", 2705.45, "지지1", 2670.45)
-    assert lg["backstop_price"] < lg["sl_price"] < 2688.0 < lg["tp_price"], lg
-    sh = build_bracket_plan(position_side="SHORT", support_levels=sup, resistance_levels=res,
-                            ref_price=2688.0, basis=1.0, filters=f)
-    assert (sh["tp_name"], sh["tp_level"], sh["sl_name"], sh["sl_level"]) == ("지지2", 2667.76, "저항1", 2702.76)
-    assert sh["tp_price"] < 2688.0 < sh["sl_price"] < sh["backstop_price"], sh
-
-
-def test_step1_moves_both_legs_one_level_further():
-    """step=1(2026-09-27 부터 ETH·SOL·XRP 전부): 롱 = 익절 저항3·손절 지지2, 숏 = 익절 지지3·손절 저항2."""
-    sup, res = [2670.45, 2667.76, 2597.77], [2702.76, 2705.45, 2708.14]
-    kw = dict(support_levels=sup, resistance_levels=res, ref_price=2688.0, basis=1.0, filters={"tick": 0.01}, step=1)
-    lg = build_bracket_plan(position_side="LONG", **kw)
-    assert (lg["tp_name"], lg["tp_level"], lg["sl_name"], lg["sl_level"]) == ("저항3", 2708.14, "지지2", 2667.76)
-    sh = build_bracket_plan(position_side="SHORT", **kw)
-    assert (sh["tp_name"], sh["tp_level"], sh["sl_name"], sh["sl_level"]) == ("지지3", 2597.77, "저항2", 2705.45)
-    short2 = build_bracket_plan(position_side="LONG", **{**kw, "resistance_levels": res[:2]})
-    assert short2["tp_price"] is None and short2["sl_level"] == 2667.76, "레벨이 모자라면 그 다리만 비운다"
-
-
 def test_sl_fires_on_closed_5m_bar_close_not_wick():
     """꼬리만 넘은 봉은 hold, 종가가 넘은 봉만 fire. 무장 전에 마감된 봉은 무시. sl_level(USDT) 우선."""
     armed = {"symbol": "ETHUSDC", "armed_at": 1_000.0, "sl_price": 2701.5, "sl_level": 2702.76}
@@ -93,23 +68,3 @@ def test_sl_fires_on_closed_5m_bar_close_not_wick():
     legacy = {"symbol": "ETHUSDC", "armed_at": 1_000.0, "sl_price": 2701.5}   # sl_level 없는 옛 무장
     assert act((1_300.0, 2701.6), "SHORT", legacy) == "fire" and act((1_300.0, 2701.4), "SHORT", legacy) == "hold"
 
-
-def test_averaging_in_keeps_farther_sl_only():
-    """09-27 XRP 숏: 첫 무장 SL 1.5434(비상 1.5512) -> 1.5212 에 물타기 -> 새 계획 SL 1.5336 이 더 가까움 -> 이전 유지.
-    TP 는 새 값. 새 SL 이 더 멀면 새 값. 이전 무장이 없거나 비상 스탑이 없으면 새 계획 그대로."""
-    prev = {"sl_price": 1.5434, "sl_level": None, "backstop_price": 1.5512}
-    new = {"available": True, "tp_price": 1.4896, "sl_price": 1.5336, "sl_level": 1.5339, "backstop_price": 1.5413,
-           "sl_name": "저항2", "sl_pct": 0.83}
-    got = bracket_keep_farther_sl(new, prev, "SHORT")
-    assert (got["sl_price"], got["backstop_price"], got["tp_price"]) == (1.5434, 1.5512, 1.4896), got
-    assert got["sl_level"] is None, "옛 무장의 레벨(없으면 None -> sl_price 로 판정)을 그대로 쓴다"
-    far = {**new, "sl_price": 1.56, "sl_level": 1.5603, "backstop_price": 1.5678}
-    assert bracket_keep_farther_sl(far, prev, "SHORT") is far
-    lg_prev = {"sl_price": 2600.0, "sl_level": 2601.0, "backstop_price": 2587.0}
-    lg_new = {"available": True, "tp_price": 2700.0, "sl_price": 2640.0, "sl_level": 2641.0, "backstop_price": 2626.8}
-    assert bracket_keep_farther_sl(lg_new, lg_prev, "LONG")["sl_price"] == 2600.0
-    assert bracket_keep_farther_sl({**lg_new, "sl_price": 2550.0}, lg_prev, "LONG")["sl_price"] == 2550.0
-    assert bracket_keep_farther_sl(lg_new, None, "LONG") is lg_new
-    assert bracket_keep_farther_sl(lg_new, {"sl_price": 2600.0}, "LONG") is lg_new, "비상 스탑 없는 옛 무장은 안 합친다"
-    no_sl = {"available": False, "tp_price": None, "sl_price": None, "backstop_price": None}
-    assert bracket_keep_farther_sl(no_sl, lg_prev, "LONG")["sl_price"] == 2600.0, "새 계획에 SL 이 없으면 이전 SL 유지"

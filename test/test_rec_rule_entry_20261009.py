@@ -157,13 +157,13 @@ class RecRuleEntryTest(unittest.TestCase):
                 self.assertEqual(r0.status, 200)
             self._run(account([]), fn, mtype=mt)
 
-    def test_rule_stop_survives_sltp_off(self) -> None:
+    def test_every_entry_gets_minus5_stop(self) -> None:
+        """2026-10-24 사용자 «손절은 −5% 하나로»: 자동·직접 모두 첫 진입가 −5% 스탑 · 익절 없음 · 옛 sltp=0 은 무시."""
         async def fn(c):
-            p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c&sltp=0")).json())["plan"]
-            self.assertFalse(p["bracket"].get("disabled"), p["bracket"])
-            self.assertEqual(p["bracket"]["sl_price"], 2375.0)
-            p0 = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&sltp=0")).json())["plan"]
-            self.assertTrue(p0["bracket"].get("disabled"), "직접 모드의 SL/TP 끔은 그대로여야 한다")
+            for q in ("rule=c&sltp=0", "pct=5&sltp=0", "pct=5"):
+                p = (await (await c.get(f"/api/manual-entry/preview?side=LONG&lev=20&{q}")).json())["plan"]
+                self.assertFalse(p["bracket"].get("disabled"), p["bracket"])
+                self.assertEqual((p["bracket"]["sl_price"], p["bracket"]["tp_price"], p["bracket"]["sl_name"]), (2375.0, None, "첫 진입가 −5%"), q)
         self._run(account([]), fn)
 
     def test_add_uses_remaining_room_and_keeps_armed_stop(self) -> None:
@@ -245,19 +245,19 @@ class RecRuleEntryTest(unittest.TestCase):
             self.assertAlmostEqual(j["plan"]["rule"]["room"], 1000 * L - 1000.0, delta=0.01)
         self._run(acct, fn)
 
-    def test_sltp_off_marks_unprotected_and_account_lists_it(self) -> None:
-        """2026-10-20 XRP 무방비 사고: SL/TP 끔 진입이 손절 없는 포지션을 만들면 unprotected · 계좌 payload 에 무장 없는 포지션 키."""
+    def test_unarmed_position_gets_stop_on_add_and_account_lists_it(self) -> None:
+        """2026-10-20 XRP 무방비 사고: 계좌 payload 에 무장 없는 포지션 키. 10-24 부터 그 포지션에 넣는 진입은 평단 −5% 손절을 건다(옛 SL/TP 끔 없음)."""
         async def fn(c):
             j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=5&sltp=0")).json()
             self.assertTrue(j.get("ok"), j)
-            self.assertTrue(j["plan"]["bracket"]["disabled"] and j["plan"]["bracket"]["unprotected"], j["plan"]["bracket"])
+            self.assertEqual((j["plan"]["bracket"]["sl_price"], j["plan"]["bracket"]["sl_name"]), (2375.0, "평단 −5%"), j["plan"]["bracket"])
             a = await (await c.get("/api/binance-account")).json()
             self.assertEqual(a.get("unprotected"), [f"{SYM}:LONG"], a.get("unprotected"))
         self._run(account([long_pos(0.4, 2500.0)]), fn)
 
-        async def fn2(c):
-            j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=5&sltp=0")).json()
-            self.assertFalse(j["plan"]["bracket"]["unprotected"], j["plan"]["bracket"])
+        async def fn2(c):   # 옛 청산맵 무장(rule 없음)은 이어받지 않는다 -- 새 −5% 손절
+            j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=5")).json()
+            self.assertEqual(j["plan"]["bracket"]["sl_price"], 2375.0, j["plan"]["bracket"])
             self.assertEqual((await (await c.get("/api/binance-account")).json()).get("unprotected"), [])
         self._run(account([long_pos(0.4, 2500.0)]), fn2,
                   armed={f"{SYM}:LONG": {"symbol": SYM, "side": "LONG", "sl_price": 2300.0, "backstop_price": 2300.0, "armed_at": 1.0}})
@@ -319,7 +319,7 @@ class ManualModeTest(unittest.TestCase):
                     self.assertIsNone(p["blocked"], p)
                     self.assertIsNone(p["cap_notional_usdt"])
                     self.assertAlmostEqual(p["notional_usdt"], 300 * 0.25 * 20, delta=3.0)   # 순자산 × 비율 × 레버리지
-                    self.assertTrue(p["bracket"].get("disabled"), p["bracket"])            # sltp 를 안 보내도 끔
+                    self.assertEqual(p["bracket"]["sl_name"], "평단 −5%", p["bracket"])    # 10-24: 수동 모드도 −5% 손절(옛 «늘 끔» 아님)
                     r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c")
                     self.assertEqual(r.status, 400)
                 finally:

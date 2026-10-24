@@ -4270,7 +4270,7 @@ def make_app() -> web.Application:
     order_api = orders.register(
         account_trip_state=account_trip_state, refresh_tasks=refresh_tasks, swr_locks=swr_locks,
         binance_session=binance_session, fetch_binance_json=fetch_binance_json, swr_cached=swr_cached,
-        _timed_produce=_timed_produce, load_liquidation_map=load_liquidation_map,
+        _timed_produce=_timed_produce,
         load_market_history=load_market_history, situation_by=situation_by,
         NOCACHE=NOCACHE, STALE_GRACE_SECONDS=STALE_GRACE_SECONDS)
     keep_trip_ledger = order_api.keep_trip_ledger

@@ -8916,13 +8916,10 @@ function manualLevEffective() {
   if (locked) return locked;
   return manualLevAuto() ? MANUAL_LEV_AUTO : manualLevValue();
 }
-// 2026-09-28 SL/TP 체크(사용자 지시) -- 해제면 진입에 TP·비상 스탑을 안 걸고 SL 감시도 안 무장, 물타기면 기존 SL/TP 를 그대로 둔다.
-//   서버가 sltp=0 을 받으면 계획의 bracket 을 «끔»으로 바꾼다(주문·감시 파일 둘 다 안 건드림). 선택은 브라우저에 기억한다.
-// 2026-10-09 사용자 «주문·물타기·청산 규칙 모두 제거해 수동으로, 규칙 확정되면 다시 적용»: 자동 규칙 칩·SL/TP 토글을 숨기고 보내지 않는다.
+// 2026-10-09 사용자 «주문·물타기·청산 규칙 모두 제거해 수동으로, 규칙 확정되면 다시 적용»: 자동 규칙 칩을 숨기고 보내지 않는다.
 //   되돌리기 = true + server.py MANUAL_RULES_ENABLED = True.
-const MANUAL_RULES = true;   // 2026-10-09 사용자 «1번(재생 크기식)으로 배포» -- 자동 칩·SL/TP 토글 복귀
-const manualSltpOn = () => MANUAL_RULES && el("snapSltp")?.checked !== false;
-if (!MANUAL_RULES) { const t = el("snapSltp")?.closest("label"); if (t) t.style.display = "none"; }
+// 2026-10-24 사용자 «주문 규칙 정리»: SL/TP 끄기 체크를 뺐다 -- 손절은 모든 진입에 첫 진입가 ∓5%(서버가 건다).
+const MANUAL_RULES = true;   // 2026-10-09 사용자 «1번(재생 크기식)으로 배포» -- 자동 칩 복귀
 const manualLevQuery = () => {
   const v = manualLevEffective();
   return v ? `&lev=${v}` : "";
@@ -9079,7 +9076,7 @@ async function manualEntryFetch(side, kind = "entry", ov = null) {
              detail: `${coinUnit()} 탭에서는 주문하지 않습니다` };
   }
   const q = `&pct=${ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct())}`
-    + (kind === "exit" ? "" : (ov?.lev ? `&lev=${ov.lev}` : manualLevQuery()) + ((ov?.sltp ?? manualSltpOn()) ? "" : "&sltp=0"))
+    + (kind === "exit" ? "" : (ov?.lev ? `&lev=${ov.lev}` : manualLevQuery()))
     + (kind === "exit" ? exitExecQuery(ov) : ((ov?.rule ?? manualRule()) ? `&rule=${ov?.rule ?? manualRule()}` : ""))
     + (ov?.fresh ? "&fresh=1" : "");
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
@@ -9338,7 +9335,7 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   if (plan.blocked) { manualFireOnPreview = false; return; }
   const pct = ov?.pct ?? Math.max(1, Math.round(100 * (plan.fraction ?? 1)));   // 규칙 물타기 몫이 0.5% 미만이면 0 → 서버 400(규칙 모드는 pct 를 안 쓴다)
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
-                         lev: ov?.lev ?? manualLevEffective(), sltp: ov?.sltp ?? manualSltpOn(),
+                         lev: ov?.lev ?? manualLevEffective(),
                          rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
                          fresh: !!ov?.fresh, sw: ov?.switch || null,
                          exec: kind === "exit" ? exitExecQuery(ov) : manualExecQuery() };
@@ -9618,7 +9615,7 @@ async function manualEntrySubmit() {
   box.innerHTML = entryNote("주문 전송 중…", "live");
   try {
     const q = `&pct=${pending.pct ?? 100}`
-      + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : "") + (pending.sltp === false ? "&sltp=0" : ""))
+      + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : ""))
       + (pending.kind !== "exit" && pending.rule ? `&rule=${pending.rule}` : "")
       + (pending.fresh ? "&fresh=1" : "") + (pending.exec || "")
       // 2026-10-10 스위칭 = 서버 한 작업(청산 다 닫히면 서버가 반대 진입) -- 화면이 꺼져도 이어진다
@@ -9740,15 +9737,6 @@ document.addEventListener("input", (e) => {
 });
 
 el("snapLevAuto")?.addEventListener("change", () => manualEntryRefreshSize());
-{
-  const box = el("snapSltp");
-  try { if (box && localStorage.getItem("manualSltp") === "0") box.checked = false; } catch (e) { /* 저장소 없음 -- 기본 켜짐 */ }
-  box?.addEventListener("change", () => {
-    try { localStorage.setItem("manualSltp", box.checked ? "1" : "0"); } catch (e) { /* 기억 못 해도 동작은 한다 */ }
-    manualEntryClearConfirm();          // 끄고 켠 뒤의 확인 버튼은 옛 선택을 들고 있다 -- 다시 미리본다
-    manualEntryRefreshSize();
-  });
-}
 el("snapLevGauge")?.addEventListener("input", () => {
   const out = el("snapLevVal");
   if (out) out.textContent = `${manualLevValue()}배`;
@@ -10026,17 +10014,10 @@ function ofabSetOpen(open) {
   ofabPlace(ofab.x, ofab.y, false);   // 열리면 위/아래·최대 높이를 다시 정한다
 }
 
-// 2026-09-28 사용자 지시: 펼치면 **진입 비율 5% · SL/TP 해제**가 기본. 체크는 저장하지 않는다(카드의 기억된 선택은 그대로 --
-//   다음에 카드에서 새로고침하면 기억값으로 돌아간다). 비율은 input 을 쏴서 칩·글자·크기 재조회가 평소 경로로 따라오게 한다.
-// 2026-10-20 사용자 «2개 자산 동시 소유» 점검: 옛 판은 패널을 열거나 꾹 진입만 해도 SL/TP 를 껐다 -- 손절 없는 XRP 신규 진입이 그렇게 났다.
-//   «SL/TP 해제»는 이 코인 포지션에 이미 손절이 무장돼 있을 때(물타기가 그 손절을 그대로 두게)만. 아니면 켠다(새 포지션·무방비 포지션).
-function slArmedFor(p) {
-  const ba = p && Number(p.qty) ? (latestBinanceAccount?.bracket_armed || {})[`${p.symbol}:${String(p.side).toUpperCase()}`] : null;
-  return !!(ba && ba.sl_price && !ba.sl_off);
-}
+// 2026-09-28 사용자 지시: 펼치면 **진입 비율 5%**가 기본(카드의 기억된 선택은 그대로). 비율은 input 을 쏴서 칩·글자·크기 재조회가 평소 경로로 따라오게 한다.
+//   (10-24 SL/TP 끄기 체크 제거 -- 손절은 서버가 모든 진입에 건다.)
 function ofabApplyDefaults() {
-  const fr = el("snapEntryFrac"), sl = el("snapSltp");
-  if (sl) sl.checked = !slArmedFor(snapshotAccountPosition());
+  const fr = el("snapEntryFrac");
   if (fr) { fr.value = "5"; fr.dispatchEvent(new Event("input", { bubbles: true })); }
 }
 // 2026-09-28 사용자 지시: 버튼을 2초 꾹 누르면 **지금 포지션 방향으로 바로 추가 진입**(5% · SL/TP 해제). 마우스만 -- 터치(모바일)는 없다.
@@ -10154,8 +10135,6 @@ function renderOfabRule(bal, live) {
       qn.setAttribute("aria-label", qn.title);
     }
   }
-  const vm = el("ofabVolMult");
-  if (vm && r) vm.hidden = true;            // 자동이면 크기는 규칙이 정한다 -- 권장 배수는 카드 진입 줄에만
   const eq = Number(bal?.margin) || 0;
   for (const [id, side] of [["ofabLong", "LONG"], ["ofabShort", "SHORT"]]) {
     const b = el(id), sm = b?.querySelector("small");
@@ -10178,7 +10157,7 @@ function renderOfabRule(bal, live) {
       b.title = `${dir} 자동 진입 — 권장 배수(직전 24시간 변동성)나 잔고가 아직 없습니다`;
     } else {
       setT(sm.id || id + "Frac", "5%");
-      b.title = `1.5초 꾹 = ${dir} 5% 진입`;
+      b.title = `1.5초 꾹 = ${dir} 5% 진입 — 손절 첫 진입가 ${side === "LONG" ? "−" : "+"}5%(거래소 스탑, 물타기해도 안 물러남) · 익절 없음`;
     }
   }
   ofabTrendTags();
@@ -10237,44 +10216,6 @@ function ofabLivePnl(p, qty, side) {
 }
 setInterval(renderOfab, 3000);
 
-// 2026-10-07 권장 배수(사용자 «사전등록하고 대시보드에 권장 배수») -- 진입 크기 ∝ 직전 24h 변동성. 서버 /api/situation 의 vol_mult
-//   (dashboard/flow_read.vol_size_mult, 사전등록 식과 오차 3e-14). ETH 에서만 검정했으므로 다른 코인에선 숨긴다. 서술이다 -- 비율 칩을 바꾸지 않는다.
-function volMultTip(v) {
-  const m = Number(v.mult), s = Number(v.sigma_bp);
-  return `<div class="vm-tip"><b>권장 크기 ×${m.toFixed(2)}</b>평소(2025년 이후 보통 날)의 ${m.toFixed(2)}배`
-    + `<br>직전 24시간 변동성 ${s.toFixed(0)}bp(4시간 척도) · 1배 기준 ${Math.round(v.ref_bp ?? 121)}bp · 범위 ×${(v.lo ?? 0.33).toFixed(2)}~×${(v.hi ?? 3.9).toFixed(1)}`
-    + (activeSnapshotAsset === "eth" ? "" : `<br>🔴${coinUnit()} 기준(1배)은 ${coinUnit()} 5분봉으로 같은 식으로 맞춘 값 — 아래 검정 숫자는 ETH 에서 잰 것`)
-    + `<br>변동성이 클 때 크게, 작을 때 작게: 조용한 장의 44bp 역행은 추세의 시작이라 물타기가 물린다`
-    + `<br>(핑퐁 물타기 재현 4.7년: 낮은 3분위 건당 −15bp · 높은 3분위 +14bp · 실원장 최대 낙폭 −$549 → −$204)`
-    + `<br>사후 발견 · 전진 검정 중(1차 판정 2027-04) · 크게 들어갈 땐 명목 상한(자동 규칙 순자산 3배)과 함께</div>`;
-}
-function renderVolMult() {
-  const v = volMultNow();
-  const m = Number(v?.mult), ok = Number.isFinite(m);
-  for (const id of ["snapVolMult", "ofabVolMult"]) {
-    const n = el(id);
-    if (!n) continue;
-    n.hidden = !ok || (id === "ofabVolMult" && !!manualRule());   // 2026-10-09 자동(권고 규칙)이면 떠다니는 버튼엔 안 띄운다 -- renderOfabRule 과 같은 규칙(안 맞추면 3초마다 깜빡인다)
-    if (!ok) continue;
-    const t = n.querySelector("b") || n, txt = `×${m.toFixed(1)}`;
-    if (t.textContent !== txt) t.textContent = txt;
-    n.classList.toggle("hi", m >= 1.5);
-    n.dataset.tip = volMultTip(v);
-    n.setAttribute("aria-label", `권장 크기 ${m.toFixed(2)}배 — 직전 24시간 변동성 기준, 사후 발견·전진 검정 중`);
-  }
-}
-["snapVolMult", "ofabVolMult"].forEach((id) => {
-  const n = el(id);
-  if (!n) return;
-  const on = () => {
-    const r = n.getBoundingClientRect(), t = el("chartTooltip");   // 🔴.chart-tooltip 은 position:absolute(문서 좌표) -- 스크롤을 더한다
-    showTooltip(r.left + scrollX, r.bottom - 10 + scrollY, n.dataset.tip || "");
-    if (t && r.bottom + 5 + t.offsetHeight > innerHeight) t.style.top = `${scrollY + Math.max(4, r.top - t.offsetHeight - 6)}px`;   // 떠 있는 버튼은 화면 바닥 -- 아래 자리가 없으면 위로
-  };
-  n.addEventListener("mouseenter", on); n.addEventListener("focus", on);
-  n.addEventListener("mouseleave", hideTooltip); n.addEventListener("blur", hideTooltip);
-});
-setInterval(renderVolMult, 3000);
 
 (() => {
   const grip = el("ofabGrip"), tgl = el("ofabToggle");

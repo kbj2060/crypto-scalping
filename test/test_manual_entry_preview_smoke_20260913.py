@@ -469,55 +469,27 @@ class ManualPreviewSmokeTest(unittest.TestCase):
         with _isolated_dirs():
             asyncio.run(exercise())
 
-    def test_bracket_uses_liquidation_levels_or_says_why(self) -> None:
-        """2026-09-25 청산맵 TP/SL(고정 3% 손절 대체). 롱: TP 저항3 · SL 지지2(2026-09-27 세 코인 모두 한 단계 멀리) · 비상 스탑은 SL 너머.
-        숏은 거울. 레벨이 없으면 **이유를 싣는다** -- 옛 손절은 조용히 안 걸려 있었다(-4120)."""
-        # 🔴이 픽스처의 가짜 호가는 서버 안쪽 함수까지 못 닿아 미리보기가 **실시세**를 쓴다 --
-        #   레벨을 고정값으로 심으면 시세 쪽에 따라 전부 «지나간 레벨»이 된다. 시세 기준 ±3%/±6%/±9%.
-        seen = {}
-
-        def levels(_df, price, *_a):   # 2026-10-16 서버가 df_5m 을 셋째 인자로 넘긴다
-            seen["p"] = price
-            return {"warmed_up": True,
-                    "support_levels": [{"price": price * 0.97}, {"price": price * 0.94}, {"price": price * 0.91}],
-                    "resistance_levels": [{"price": price * 1.03}, {"price": price * 1.06}, {"price": price * 1.09}]}
-
+    def test_bracket_is_minus5_stop_without_liquidation_levels(self) -> None:
+        """2026-10-24 사용자 «손절은 −5% 하나로»: 직접 모드도 첫 진입가(이번 지정가) ∓5% 거래소 스탑 · 익절 없음 · 비상 스탑 = 손절선.
+        옛 청산맵 TP/SL(저항3·지지2)은 지웠다 -- 청산맵 레벨이 없어도 손절은 걸린다."""
         async def exercise() -> None:
             client = TestClient(TestServer(offline_app(server)))
             await client.start_server()
             try:
-                for side, tp_x, sl_x in (("LONG", 1.09, 0.94), ("SHORT", 0.91, 1.06)):
-                    b = (await (await client.get(
-                        f"/api/manual-entry/preview?side={side}&pct=5")).json())["plan"]["bracket"]
-                    self.assertTrue(b["available"], b)
-                    tp, sl = seen["p"] * tp_x * b["basis"], seen["p"] * sl_x * b["basis"]
-                    self.assertIsNotNone(b["tp_price"], b)
-                    self.assertAlmostEqual(b["tp_price"], tp, delta=0.02)
-                    self.assertAlmostEqual(b["sl_price"], sl, delta=0.02)
-                    far = b["backstop_price"] < sl if side == "LONG" else b["backstop_price"] > sl
-                    self.assertTrue(far, f"비상 스탑이 SL 보다 먼저 걸린다: {b}")
+                for side, k in (("LONG", 0.95), ("SHORT", 1.05)):
+                    plan = (await (await client.get(f"/api/manual-entry/preview?side={side}&pct=5")).json())["plan"]
+                    b = plan["bracket"]
+                    self.assertTrue(b["available"] and b["rule"], b)
+                    self.assertIsNone(b["tp_price"], b)
+                    self.assertEqual(b["backstop_price"], b["sl_price"], b)
+                    self.assertAlmostEqual(b["sl_price"] / plan["price"], k, delta=2e-4)   # 이번 주문 지정가(메이커 쪽) 기준 ∓5% · 틱 반올림 여유
+                    self.assertTrue(b["sl_name"].endswith(f"{'−' if side == 'LONG' else '+'}5%"), b)   # 픽스처의 열린 롱이면 «평단», 아니면 «첫 진입가»
             finally:
                 await client.close()
 
-        with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels", levels), \
-             mock.patch.object(orders, "MANUAL_RULES_ENABLED", True):   # 2026-10-09 수동 모드 기본 꺼짐 -- 켠 판을 시험한다
-            asyncio.run(exercise())
-
-        async def no_levels() -> None:
-            client = TestClient(TestServer(offline_app(server)))
-            await client.start_server()
-            try:
-                b = (await (await client.get(
-                    "/api/manual-entry/preview?side=LONG&pct=5")).json())["plan"]["bracket"]
-                self.assertFalse(b["available"], b)
-                self.assertTrue(b.get("reason"), f"못 거는 이유가 없다: {b}")
-            finally:
-                await client.close()
-
-        with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels",
-                                                 lambda _d, _p, *_a: {"warmed_up": True}), \
+        with _isolated_dirs(), mock.patch.object(server, "compute_spliced_levels", lambda _d, _p, *_a: {"warmed_up": True}), \
              mock.patch.object(orders, "MANUAL_RULES_ENABLED", True):
-            asyncio.run(no_levels())
+            asyncio.run(exercise())
 
     def test_entry_and_exit_share_one_horizon_and_one_cap(self) -> None:
         """🔴진입과 청산이 **같은 지평·같은 상한**을 쓴다(2026-09-14 병합 감사).

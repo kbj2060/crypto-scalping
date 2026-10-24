@@ -168,7 +168,7 @@ class EntryCancelServerTest(unittest.TestCase):
 
         async def body(c, server):
             self.assertEqual((await c.post("/api/manual-entry/cancel?confirm=1")).status, 409)   # (d) 진입 없음
-            b = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&pct=5&lev=20&sltp=0")).json()
+            b = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&pct=5&lev=20")).json()
             self.assertTrue(b.get("ok"), b)
             await asyncio.sleep(0.1)
             self.assertEqual((await c.post("/api/manual-entry/cancel")).status, 400)              # confirm 없음
@@ -177,7 +177,7 @@ class EntryCancelServerTest(unittest.TestCase):
             st = await self._wait_done(c)
             self.assertEqual(st["phase"], "cancelled")
             self.assertGreater(float(st["filled"]), 0)
-            self.assertEqual(st["bracket"].get("disabled"), True)    # 든 몫 → 진입 종료 경로가 손절/TP 를 다뤘다(sltp=0 이라 «안 걸기» 기록)
+            self.assertIn("주문 금지", st["bracket"].get("reason") or "")   # 든 몫 → 진입 종료 경로가 손절을 걸러 갔다(시험의 place_bracket 은 막혀 실패 기록)
             self.assertEqual(fx.markets, [])
             self.assertEqual((await c.post("/api/manual-entry/cancel?confirm=1")).status, 409)   # (d) 끝난 뒤 = 무해
         self._exercise(fx, body)
@@ -186,7 +186,7 @@ class EntryCancelServerTest(unittest.TestCase):
         fx = Fake()
 
         async def body(c, server):
-            b = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&pct=5&lev=20&sltp=0")).json()
+            b = await (await c.post("/api/manual-entry/submit?side=LONG&confirm=1&pct=5&lev=20")).json()
             self.assertTrue(b.get("ok"), b)
             await asyncio.sleep(0.1)
             self.assertEqual((await c.post("/api/manual-entry/cancel?confirm=1")).status, 200)

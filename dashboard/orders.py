@@ -34,9 +34,9 @@ from dashboard.worker_state import worker_payload
 # trading_bot.py가 스스로 결정한 것만 담고, 그 봇은 지금 account.enabled=false(페이퍼)다.
 from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
-    EXIT_VOL_WINDOW, bracket_action, bracket_keep_farther_sl, bracket_key, bracket_merge, bracket_rekey, build_bracket_plan, build_entry_plan, build_exit_plan,
+    EXIT_VOL_WINDOW, bracket_action, bracket_key, bracket_merge, bracket_rekey, build_entry_plan, build_exit_plan,
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
-    COMMIT_CAP_X, HOLD_CAP_X, commit_rule_l, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
+    COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, commit_rule_l, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
     WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_add_order, place_bracket, place_stop, run_entry, run_entry_wait, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
@@ -583,7 +583,7 @@ def sizing_cap() -> dict[str, Any]:
 
 
 def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, fetch_binance_json, swr_cached,
-             _timed_produce, load_liquidation_map, load_market_history, situation_by, NOCACHE, STALE_GRACE_SECONDS):
+             _timed_produce, load_market_history, situation_by, NOCACHE, STALE_GRACE_SECONDS):
     """make_app() 이 부른다. 인자 = 코어·시장 쪽 객체(server.py make_app 지역 · 모듈 상수). 돌려주는 것 = 라우트·기동/정리 훅이 쓸 함수들.
     라우트 등록·on_startup 순서는 server.py 에 그대로 둔다(기동 순서 불변)."""
     binance_account_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
@@ -779,26 +779,15 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             pass
         return None
 
-    async def bracket_for(side: str, book: dict, filters: dict, asset: str = "eth") -> dict:
-        """진입 시점 청산맵(ETHUSDT)으로 TP/SL/비상 스탑. 못 읽으면 **이유를 싣고** 빈 계획 --
-        조용히 빼면 화면이 «SL 걸림»으로 읽힌다."""
+    async def basis_for(book: dict, asset: str = "eth") -> float:
+        """주문 심볼(USDC) 중간가 ÷ 화면 심볼(USDT) 중간가 -- 손절가(주문 심볼)를 5분봉 감시용 USDT 레벨로 옮긴다.
+        ponytail: 못 읽으면 1(USDC/USDT 수 bp 오차) -- 거래소 스탑은 주문 심볼 가격이라 영향 없고 5분봉 감시만 수 bp 어긋난다."""
         try:
-            lm = await load_liquidation_map(asset)
             ref = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker",
-                                           {"symbol": MARKET_SYMBOLS[asset]},
-                                           error_reason="book_ticker_failed")
-            ref_mid = (float(ref["bidPrice"]) + float(ref["askPrice"])) / 2
-            mid = (float(book["bidPrice"]) + float(book["askPrice"])) / 2
-            b = build_bracket_plan(
-                position_side=side, ref_price=ref_mid, basis=mid / ref_mid, filters=filters,
-                support_levels=[lv["price"] for lv in lm.get("support_levels") or []],
-                resistance_levels=[lv["price"] for lv in lm.get("resistance_levels") or []],
-                step=1)   # 한 단계 더 멀리(롱 = 익절 저항3·손절 지지2). 2026-09-27 ETH 도(사용자 지시 -- 09-27 숏 SL 이 진입가 13bp)
-            if not b["available"]:
-                b["reason"] = "청산맵 레벨이 모자랍니다" if lm.get("warmed_up") else "청산맵 웜업 중"
-            return b
-        except Exception as exc:  # noqa: BLE001 -- 계획은 계속 만든다, 대신 이유를 싣는다
-            return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+                                           {"symbol": MARKET_SYMBOLS[asset]}, error_reason="book_ticker_failed")
+            return ((float(book["bidPrice"]) + float(book["askPrice"])) / (float(ref["bidPrice"]) + float(ref["askPrice"]))) or 1.0
+        except Exception:  # noqa: BLE001
+            return 1.0
 
     # ── 청산맵 TP/SL 감시 (2026-09-25) ────────────────────────────────────────────
     # 무장 상태는 **파일**에 둔다 -- 옛 3% 손절의 실패가 메모리 state 에만 있어 재시작하면 사라졌다.
@@ -817,17 +806,6 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         tmp = bracket_path().with_suffix(".tmp")
         tmp.write_text(json.dumps(st, ensure_ascii=False), "utf-8")
         tmp.replace(bracket_path())
-
-    def sltp_off(request: web.Request) -> bool:
-        """2026-09-28 화면 «SL/TP» 체크 해제(사용자 지시) -- 이번 진입에 SL/TP 를 걸지도, 기존 것을 갱신하지도 않는다."""
-        return not MANUAL_RULES_ENABLED or request.query.get("sltp") == "0"   # 2026-10-09 수동 모드면 항상 끔
-
-    SLTP_OFF_BRACKET = {"available": False, "disabled": True, "reason": "SL/TP 끔(사용자) -- 걸지 않고 기존 것도 그대로"}
-
-    def sltp_off_bracket(plan: dict) -> dict:
-        """SL/TP 끔 -- 이 측면에 무장된 손절이 없으면 «unprotected»(화면이 빨갛게: 거래소 스탑·서버 감시 둘 다 없는 포지션이 생긴다)."""
-        armed = (bracket_load().get(bracket_key(plan.get("symbol"), plan.get("positionSide"))) or {}).get("sl_price")
-        return {**SLTP_OFF_BRACKET, "unprotected": not armed}
 
     async def entry_then_bracket(plan: dict, state: dict, wait_sec: float | None = None) -> None:
         """진입 → 체결이 있으면(부분 포함, 모든 종료 경로) TP·비상 스탑을 걸고 감시를 무장한다.
@@ -854,10 +832,6 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
 
     async def arm_bracket(plan: dict, state: dict, add: bool = True) -> None:
         b, pside = plan.get("bracket") or {}, plan["positionSide"]
-        if b.get("disabled"):
-            # 🔴주문도, 감시 파일(manual_bracket_state.json)도 건드리지 않는다 -- 물타기면 기존 SL/TP·감시가 그대로 남는다.
-            state["bracket"] = {"placed": False, "disabled": True, "reason": b.get("reason")}
-            return
         if not b.get("available"):
             state["bracket"] = {"placed": False, "reason": b.get("reason") or "청산맵 레벨 없음"}
             return
@@ -873,6 +847,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                      "sl_level": b.get("sl_level"),   # 5분봉 종가 판정은 USDT 레벨로(bracket_sl_hit)
                      "tp_price": b.get("tp_price"), "backstop_price": b.get("backstop_price"),
                      "rule": bool(b.get("rule")), "sl_name": b.get("sl_name"),   # 2026-10-09 권고 규칙 손절 = 물타기해도 유지
+                     # 2026-10-24 직접 진입도 같은 −5% 손절(rule True)이라 «자동 규칙 크기로 연 포지션»은 따로 남긴다 -- 계좌 3배 공유 상한(rule_shared)이 이것만 본다
+                     "auto": bool(plan.get("rule")),
                      "armed_at": time.time(), "placed": state["bracket"], "add_order": add}
         bracket_save(st)
 
@@ -924,8 +900,6 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 state.update(phase="error", error=f"스위칭 반대 진입 막힘 — {why}", done_at=datetime.now(timezone.utc).isoformat())
                 info.update(phase="aborted", error=str(why))
                 return
-            if sw["sltp_off"] and not plan2.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(진입 submit 과 같다)
-                plan2["bracket"] = dict(SLTP_OFF_BRACKET)
             plan2["type"] = "MARKET"   # 2026-10-10 스위칭 = 즉시 체결 -- run_entry 가 지정가 없이 시장가로 낸다
             state["plan"] = plan2
             info["plan"] = {k: plan2.get(k) for k in ("quantity", "notional_usdt", "price", "target_leverage")}
@@ -1145,7 +1119,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             # 2026-10-20 사용자 «규칙 상한 공유»: 자동 규칙 손절이 무장된 포지션이 있으면 수동 진입(어느 코인이든)도 계좌 명목 ≤ 순자산 × 규칙 상한.
             #   교차 마진이라 규칙의 «손절보다 청산이 멀다» 보장은 계좌 전체 명목에 걸린다 -- 수동으로 다른 코인을 크게 넣으면 그 보장이 깨진다(10-20 감사).
             #   ponytail: 무장 파일엔 «보유 1.5×» 인지가 안 남아 늘 COMMIT_CAP_X(3) -- 1.5 로 묶으려면 arm_bracket 이 rule_l 을 남기면 된다.
-            if equity > 0 and any(v.get("rule") and v.get("sl_price") for v in bracket_load().values()):
+            if equity > 0 and any(v.get("auto", v.get("rule")) and v.get("sl_price") for v in bracket_load().values()):   # 10-24 전 무장 기록엔 auto 가 없다 -- 그땐 rule 이 곧 자동
                 binding.append((equity * COMMIT_CAP_X, "rule_shared"))
             cap_notional = min(v for v, _ in binding) if binding else None
             # 🔴상한 무시 스위치. 위 SIZING_CAP_OVERRIDE_X 주석이 계약이다.
@@ -1193,6 +1167,14 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             #   첫 진입 = 그 75% · 물타기 = 남은 여유 -- 기존 상한(증거금 50% 등)과 작은 쪽. 손절은 아래 bracket 에서 ∓5%.
             # 2026-10-09 자동 규칙(사용자 «인용하신 재생(×15.2)으로 넣어줘») → 10-10 L = min(0.075 ÷ 손절폭(동일위험), 청산 안전, 10) · 손절 3σ24 → 10-11 재생 식 복원 L = min(12.4 × 권장배수, 청산 안전, 10) · 손절 ∓3% ·
             #   첫 진입 1/3(10-14, 옛 75%) · 물타기 = 남은 여유. 상한은 이 규칙 하나 -- 증거금 50% 상한은 자동 모드에서 뺀다(20배면 같은 10배라 겹칠 뿐).
+            # 🔴2026-10-24 사용자 «주문 규칙 정리 · 손절은 −5% 하나로»: 모든 진입(자동·보유 1.5×·직접·스위칭)에 같은 손절 = 첫 진입가 ∓5% 거래소 스탑 · 익절 없음.
+            #   옛 직접 모드의 청산맵 지지2 손절·저항3 익절·«SL/TP» 끄기는 지웠다(청산맵 손절은 10-11 검정에서 같은 폭 무작위와 동률).
+            #   물타기면 이미 무장된 규칙 손절을 그대로(물러나지 않는다). 손절 없이 연 포지션(바이낸스 앱 등)에 처음 거는 거면 기준 = 평단.
+            prev = bracket_load().get(bracket_key(symbol, side)) if same else None
+            p_in = float(book["bidPrice"] if side == "LONG" else book["askPrice"])   # 이번 주문 지정가(메이커 쪽)
+            anchor, kind = ((float(same[0].get("entry_price") or 0.0), "평단") if same else (p_in, "첫 진입가"))
+            stop_bracket = rec_rule_bracket({"position_side": side}, position_side=side, anchor_price=anchor or p_in,
+                                            basis=await basis_for(book, asset), stop_pct=RULE_STOP_PCT, filters=filters, prev=prev, anchor_kind=kind)
             rule = cr = None
             if rule_l:
                 if asset not in RULE_ASSETS:
@@ -1208,16 +1190,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                                                       if mt == "isolated" else "마진 방식을 못 읽어 자동 진입을 막습니다(교차 확인 필요)")}, 409)
                 cr = commit_rule_l(position_side=side, sigma24_bp=float(vm["sigma_bp"]) * math.sqrt(6),   # 2026-10-11 재생 ×15.2 식 복원
                                    vol_mult=float(vm["mult"]), cap=HOLD_CAP_X if rule_l == "h" else COMMIT_CAP_X)   # 10-16 «보유 1.5×» = rule=h
-                # 손절 = 첫 진입가 ∓3% · 물타기면 이미 무장된 규칙 손절을 그대로(물러나지 않는다). 규칙 밖에서 연 포지션에
-                #   처음 거는 거면 기준 = 평단(첫 진입가를 모른다 -- 화면에 «평단»으로 적는다). 크기가 손절선을 알아야 해서 여기서 먼저 정한다.
-                b0 = await bracket_for(side, book, filters, asset)
-                basis = float(b0.get("basis") or 0.0) or 1.0   # ponytail: 청산맵을 못 읽어 basis 가 없으면 1(USDC/USDT 수 bp 오차)
-                prev = bracket_load().get(bracket_key(symbol, side)) if same else None
-                p_in = float(book["bidPrice"] if side == "LONG" else book["askPrice"])   # 이번 주문 지정가(메이커 쪽)
-                anchor, kind = ((float(same[0].get("entry_price") or 0.0), "평단") if same else (p_in, "첫 진입가"))
-                rule_bracket = rec_rule_bracket(b0, position_side=side, anchor_price=anchor or p_in,
-                                                basis=basis, stop_pct=cr["stop_pct"], filters=filters, prev=prev, anchor_kind=kind)
-                sl = float(rule_bracket["sl_price"])
+                sl = float(stop_bracket["sl_price"])   # 크기(손절 시 손실 한도)가 손절선을 알아야 한다
                 sgn = 1.0 if side == "LONG" else -1.0
                 q_same = sum(abs(float(p.get("qty") or 0.0)) for p in same)
                 rule = rec_rule_size(rule_l=cr["l"], equity=equity, existing_notional=exposure,
@@ -1257,9 +1230,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             # 집행기는 계획 dict 하나만 받는다. 처방 깊숙이 손을 넣게 하지 않고 여기서 꺼내 준다.
             _rx = (plan["trade_plan"] or {}).get("prescription") or {}
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
-            # 2026-09-25 청산맵 TP/SL(사용자 지시) -- 고정 3% 손절을 대신한다. 진입 시점 레벨로 고정.
-            plan["bracket"] = rule_bracket if rule else await bracket_for(side, book, filters, asset)
-            # 2026-09-27 물타기면 SL 은 멀어질 때만 바꾼다(사용자 지시) -- 미리보기에도 실제로 걸릴 SL 이 보이게 여기서 합친다.
+            plan["bracket"] = stop_bracket
             if rule:
                 plan["rule"] = {"l": round(cr["l"], 3), "binding": cr["binding"], "stop_pct": round(100 * cr["stop_pct"], 2),
                                 "vol_mult": round(float(vm["mult"]), 3), "cap_notional": round(rule["cap_notional"], 2), "first": rule["first"],
@@ -1274,9 +1245,6 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                         position_side=side, sl_price=float(plan["bracket"]["sl_price"]), stop_pct=cr["stop_pct"], l_eff=float(cr["l"]),
                         cap_notional=rule["cap_notional"], room_before=rule["room"], filled_qty=float(plan["quantity"]),
                         order_leverage=float(margin_lev or 0.0), filters=plan["rule"]["filters"])
-            elif same:
-                plan["bracket"] = bracket_keep_farther_sl(
-                    plan["bracket"], bracket_load().get(bracket_key(symbol, side)), side)
             # 게이지가 값을 주면 그걸 쓰고, «자동»이면 모델 추천을 쓴다. 어느 쪽인지 남긴다 --
             # 안 남기면 나중에 «왜 30배로 걸렸지»를 못 푼다.
             plan["target_leverage"] = want_lev or _lv.get("setting")
@@ -1322,8 +1290,6 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                                                              fresh=request.query.get("fresh") == "1", rule_l=rule_l)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
-        if sltp_off(request) and not plan.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(보험)
-            plan["bracket"] = sltp_off_bracket(plan)
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
                                   "recommended_qty": plan.get("recommended_qty"),
                                   "recommended_source": plan.get("recommended_source"),
@@ -1383,8 +1349,6 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]},
                                      status=400)
-        if sltp_off(request) and not plan.get("rule"):   # 권고 규칙의 손절은 SL/TP 체크와 무관하게 건다(보험)
-            plan["bracket"] = sltp_off_bracket(plan)
         if wait_min:
             manual_wait_state.clear()
             manual_wait_state.update(phase="submitting", mode="wait", wait_min=wait_min, side=side, plan=plan,
@@ -1671,9 +1635,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             if to != ("SHORT" if side == "LONG" else "LONG") or frac != 1.0 or sw_frac is None or sw_rule == "bad":
                 return web.json_response({"ok": False, "error": "bad_switch",
                                           "detail": "스위칭은 전량(100%) 청산 + 반대 방향 진입만 됩니다"}, status=400)
-            sw = {"to": to, "frac": sw_frac, "lev": query_leverage(request, "sw_lev"), "rule": sw_rule,
-                  # 2026-10-10 사용자 결정: 스위칭 반대 진입은 SL/TP 체크와 무관하게 손절을 건다(끄는 건 수동 모드뿐) -- sw_sltp 는 받지 않는다
-                  "sltp_off": not MANUAL_RULES_ENABLED}
+            sw = {"to": to, "frac": sw_frac, "lev": query_leverage(request, "sw_lev"), "rule": sw_rule}
         if not exec_enabled():
             return web.json_response({"ok": False, "error": "exec_disabled",
                                       "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"},
