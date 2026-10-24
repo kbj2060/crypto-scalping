@@ -159,20 +159,13 @@ def selfcheck(data, df):
     print("SELFCHECK PASS")
 
 
-def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--selfcheck", action="store_true"); a = ap.parse_args(); OUT.mkdir(parents=True, exist_ok=True)
-    data, df = build()
-    print("행", len(df), {k: len(split(df, v)) for k, v in (("train", TRAIN), ("cal", CAL), ("test", TEST))})
-    if a.selfcheck:
-        return selfcheck(data, df)
-    tr, ca, te = split(df, TRAIN), split(df, CAL), split(df, TEST).copy()
-    m = fit(tr)
-    k = float(np.quantile(ca.mae / np.exp(m.predict(ca[FEATS])), Q))   # 2025 보정: 넘는 비율 10%
+def score(m, k, data, df, te, fixed_stop=None):
+    """fixed_stop=None → 손절 = 모델 예측(77634f9f) · 0.05 → ML 은 크기만, 손절 −5% 고정(37334077)."""
     te["L_ml"], te["stop_ml"] = ml_size_stop(m.predict(te[FEATS]), k)
     c1 = {s: float((g.mae > g.stop_ml).mean()) for s, g in te.groupby("sym")}
     # E2 무작위 진입
     Lm, Lr = te.L_ml.values, te.L_rule.values
-    Rm, hm = trade_R(Lm, te.stop_ml.values, te.mae.values, te.move.values)
+    Rm, hm = trade_R(Lm, te.stop_ml.values if fixed_stop is None else np.full(len(te), fixed_stop), te.mae.values, te.move.values)
     Rr, hr = trade_R(Lr, np.full(len(te), 0.05), te.mae.values, te.move.values)
     day = te.t.dt.floor("D").values; ud = np.unique(day); gi = {d: np.flatnonzero(day == d) for d in ud}
     rng = np.random.default_rng(7); diffs = []
@@ -191,17 +184,46 @@ def main():
     rl, rs = rr[rr.s == 1].reset_index(drop=True), rr[rr.s == -1].reset_index(drop=True)
     X = rl[FEATS].where(pd.Series(L.s.values > 0), rs[FEATS]).astype(float)
     Lml, Sml = ml_size_stop(m.predict(X), k)
+    if fixed_stop is not None:
+        Sml = np.full(len(L), fixed_stop)
     Lrule = np.minimum(2.0, 2.0 / SYS.ledger_lvl(L, K))
     Rml = ledger_replay_stops(L, K, Lml, Sml); Rrule = ledger_replay_stops(L, K, Lrule, np.full(len(L), 0.05))
     (gm, mm), (gr, mr) = SYS.growth_mdd(Rml), SYS.growth_mdd(Rrule)
     e1 = {"ml_growth": gm, "ml_mdd": mm, "rule_growth": gr, "rule_mdd": mr, "ml_L_median": float(np.median(Lml)), "rule_L_median": float(np.median(Lrule)),
           "ml_stop_median": float(np.median(Sml)), "ml_worst": float(Rml.min()), "rule_worst": float(Rrule.min())}
     e3 = {"ml_P_dd30": survival(L, Rml), "rule_P_dd30": survival(L, Rrule)}
-    rep = {"prereg": "docs/prereg/ml_size_stop_20261025.md@77634f9f", "k_cal": k, "rows": len(df), "test_rows": len(te),
+    rep = {"prereg": "docs/prereg/ml_size_stop_20261025.md@77634f9f" if fixed_stop is None else "docs/prereg/ml_size_only_20261025.md@37334077",
+           "k_cal": k, "rows": len(df), "test_rows": len(te),
            "pinball_2026_ml": pinball(te.y, m.predict(te[FEATS])), "C1_hit_by_coin": c1, "E1": e1, "E2": e2, "E3": e3,
            "importance_gain": dict(sorted(zip(FEATS, m.feature_importance("gain").round(0).tolist()), key=lambda z: -z[1]))}
     rep["gates"] = {"C1": all(0.07 <= v <= 0.13 for v in c1.values()), "E1": gm >= gr and mm >= mr, "E2": e2["diff_ci"][0] > 0, "E3": e3["ml_P_dd30"] <= e3["rule_P_dd30"]}
     rep["pass"] = all(rep["gates"].values())
+    return rep
+
+
+def main():
+    ap = argparse.ArgumentParser(); ap.add_argument("--selfcheck", action="store_true"); ap.add_argument("--size-only", action="store_true")
+    a = ap.parse_args(); OUT.mkdir(parents=True, exist_ok=True)
+    data, df = build()
+    print("행", len(df), {k: len(split(df, v)) for k, v in (("train", TRAIN), ("cal", CAL), ("test", TEST))})
+    if a.selfcheck:
+        return selfcheck(data, df)
+    tr, ca, te = split(df, TRAIN), split(df, CAL), split(df, TEST).copy()
+    if a.size_only:   # 동결 모델·k 그대로(37334077) — 먼저 직전 결과를 같은 경로로 재현
+        import hashlib
+        assert hashlib.md5((OUT / "model.txt").read_bytes()).hexdigest() == "ca563af876a1389ffef35d60c2c12fc0"
+        m = lgb.Booster(model_file=str(OUT / "model.txt")); prev = json.loads((OUT / "report.json").read_text()); k = prev["k_cal"]
+        again = score(m, k, data, df, te)
+        for g in ("E1", "E2"):
+            for key, v in prev[g].items():
+                assert np.allclose(again[g][key], v, rtol=1e-9, atol=1e-12), (g, key, again[g][key], v)
+        print("재현: 손절 = 모델 예측 모드가 직전 report.json E1·E2 와 일치")
+        rep = score(m, k, data, df, te, fixed_stop=0.05)
+        (OUT / "report_size_only.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False))
+        print(json.dumps({x: rep[x] for x in ("C1_hit_by_coin", "E1", "E2", "E3", "gates", "pass")}, indent=1, ensure_ascii=False)); return
+    m = fit(tr)
+    k = float(np.quantile(ca.mae / np.exp(m.predict(ca[FEATS])), Q))   # 2025 보정: 넘는 비율 10%
+    rep = score(m, k, data, df, te)
     (OUT / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False)); m.save_model(str(OUT / "model.txt"))
     print(json.dumps(rep, indent=1, ensure_ascii=False))
 
