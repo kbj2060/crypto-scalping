@@ -351,7 +351,8 @@ def gru_fit(S, st, y, evals, loss="mse", seeds=SEEDS[:2]):
     return [np.mean(o, 0) for o in outs]
 
 
-def round4(check=False):
+def round4(check=False, b=None, tag=4, losses=(("G1", "mse"), ("G2", "qlike"))):
+    tr0, tr1, va0, va1, te0, te1 = b or (TR4_START, TR4_END, VA4_START, VA4_END, TE4_START, None)
     fr, oks = {}, {}
     for s in COINS:
         x, F, y, ok, miss = frame(s); fr[s] = (F, y); oks[s] = (x.index, ok, miss)
@@ -359,7 +360,7 @@ def round4(check=False):
     for s in COINS:
         (ts, ok, _), F = oks[s], fr[s][0]
         ok = ok & np.isfinite(F[MKT].to_numpy(float)).all(1); le = ts + pd.Timedelta(minutes=5 * H); dec = ok & (ts.minute == 55)
-        M[s] = dict(tr=ok & (ts >= TR4_START) & (le <= TR4_END), va=dec & (ts >= VA4_START) & (le <= VA4_END), te=dec & (ts >= TE4_START))
+        M[s] = dict(tr=ok & (ts >= tr0) & (le <= tr1), va=dec & (ts >= va0) & (le <= va1), te=dec & (ts >= te0) & ((le <= te1) if te1 is not None else True))
         M[s]["trd"] = M[s]["tr"] & dec
     if check:   # S4: 봉 i 뒤 행을 망가뜨려도 수열·정적 입력이 같다
         F, ts = fr["ETH"][0], oks["ETH"][0]; rng = np.random.default_rng(4)
@@ -386,7 +387,7 @@ def round4(check=False):
     ev = []
     for s in COINS:
         F = fr[s][0]; ts = oks[s][0]; ev += [seq_inputs(F, ts, np.flatnonzero(M[s]["va"])), seq_inputs(F, ts, np.flatnonzero(M[s]["te"]))]
-    for m, loss in (("G1", "mse"), ("G2", "qlike")):
+    for m, loss in losses:
         t0 = time.time(); out = gru_fit(St, stt, yt_, ev, loss); print(f"pooled {m}({loss}) 학습 행 {len(yt_)} {time.time() - t0:.0f}s", flush=True)
         for k, s in enumerate(COINS):
             pv[s][m], pt[s][m] = out[2 * k], out[2 * k + 1]
@@ -395,11 +396,40 @@ def round4(check=False):
         for m, parts in (("QX4", ["M3", "M6", "PX3", "PX6"]), ("QG", ["M3", "M6", "PX3", "PX6", "G1"])):
             pv[s][m], pt[s][m] = np.mean([pv[s][k] for k in parts], 0), np.mean([pt[s][k] for k in parts], 0)
         F, y = fr[s]; ts = oks[s][0]
-        reps[s] = evaluate(s, 4, pv[s], pt[s], y[M[s]["va"]], y[M[s]["te"]], ts[M[s]["va"]], ts[M[s]["te"]], oks[s][2], exclude=("M0", "M3"))
+        reps[s] = evaluate(s, tag, pv[s], pt[s], y[M[s]["va"]], y[M[s]["te"]], ts[M[s]["va"]], ts[M[s]["te"]], oks[s][2], exclude=("M0", "M3"))
     cand = reps["ETH"]["candidate"]; print(f"\n4라운드 후보(ETH 검증) = {cand}")
     for s in COINS:
         r = reps[s]["models"][cand]
         print(s, "vs M3 %+.4f [%+.4f,%+.4f]" % tuple(r["dq_vs_M3"]), " vs M0 %+.4f [%+.4f,%+.4f]" % tuple(r["dq_vs_M0"]))
+
+
+# ---------- 5라운드 (815dffa0): QG 레시피 굴림 원점 재현 ----------
+ROLL = {"5W1": (pd.Timestamp("2022-01-08"), pd.Timestamp("2023-12-31 23:55"), pd.Timestamp("2023-12-31 23:55"), pd.Timestamp("2024-05-31 23:55"),
+                pd.Timestamp("2024-05-31 23:55"), pd.Timestamp("2024-10-23 23:55")),
+        "5W2": (pd.Timestamp("2023-01-01"), pd.Timestamp("2024-12-31 23:55"), pd.Timestamp("2024-12-31 23:55"), pd.Timestamp("2025-05-31 23:55"),
+                pd.Timestamp("2025-05-31 23:55"), pd.Timestamp("2025-10-23 23:55"))}
+
+
+def roll_pool():
+    """3창(5W1·5W2·4) 시험 손실 차를 일 평균으로 이어 붙여 판정."""
+    out = {}
+    for s in COINS:
+        cell = {}
+        for base in ("M3", "M0"):
+            days, per = [], {}
+            for tg in ("5W1", "5W2", "4"):
+                rep = json.loads((OUT / f"report_r{tg}_{s}.json").read_text()); P = pd.read_parquet(OUT / f"pred_test_r{tg}_{s}.parquet")
+                L = lambda m: qlike(P.y.values, P[f"t_{m}"].values + rep["models"][m]["c"])
+                d = pd.Series(L("QG") - L(base), index=P.index).groupby(P.index.normalize()).mean(); days.append(d); per[tg] = float(d.mean())
+            ser = pd.concat(days).values; lo, hi = block_ci(ser, b=5, n=4000)
+            cell[f"vs_{base}"] = {"mean": float(ser.mean()), "ci": [float(lo), float(hi)], "per_window": per, "days": len(ser)}
+        out[s] = cell
+        print(s, "QG−M3 %+.4f [%+.4f,%+.4f]" % (cell["vs_M3"]["mean"], *cell["vs_M3"]["ci"]), "창", {k: round(v, 4) for k, v in cell["vs_M3"]["per_window"].items()},
+              " QG−M0 %+.4f [%+.4f,%+.4f]" % (cell["vs_M0"]["mean"], *cell["vs_M0"]["ci"]))
+    e = out["ETH"]
+    out["verdict"] = {"ETH_win": e["vs_M3"]["ci"][1] < 0 and e["vs_M0"]["ci"][1] < 0 and sum(v < 0 for v in e["vs_M3"]["per_window"].values()) >= 2,
+                      "replication": sum(out[s]["vs_M3"]["ci"][1] < 0 for s in ("XRP", "BTC", "SOL"))}
+    (OUT / "report_r5_pooled.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out["verdict"], ensure_ascii=False))
 
 
 if __name__ == "__main__":
@@ -409,6 +439,10 @@ if __name__ == "__main__":
     if "--round2" in a:
         pooled_round(2, [("P3", "M3"), ("P6", "M6")], {"C36": ["M3", "M6"], "PC": ["P3", "P6"]}, {1: ["M0", "M3", "M6", "M3j"]},
                      ("M0", "M3", "M3j", "M6")); sys.exit(0)
+    if "--roll" in a:
+        for tg, bb in ROLL.items():
+            round4(b=bb, tag=tg, losses=(("G1", "mse"),))
+        roll_pool(); sys.exit(0)
     if "--round4" in a:
         round4(check="--check" in a); sys.exit(0)
     if "--round3" in a:
