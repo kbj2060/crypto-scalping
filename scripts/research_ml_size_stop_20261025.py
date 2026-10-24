@@ -70,8 +70,8 @@ def rule_L(x):
     return np.minimum(2.0, 2.0 / (rv / ref))
 
 
-def build():
-    data = {s: SYS.bars5(s)[0] for s in SYS.COINS}
+def build(data=None):
+    data = data or {s: SYS.bars5(s)[0] for s in SYS.COINS}
     parts = []
     for ci, (s, x) in enumerate(data.items()):
         r = rows_for(s, ci, x, bar_feats(x), labels(x))
@@ -201,9 +201,140 @@ def score(m, k, data, df, te, fixed_stop=None):
     return rep
 
 
+# ---------- 전진 판정 (docs/prereg/ml_size_fwd_2x_20261025.md, ae7b0b51) ----------
+FWD0, VERDICT, B2, CAP2, MIN_TRIPS = "2026-10-24", "2026-12-23", 0.114088, 2.0, 60
+
+
+def _paged_klines(sym, interval, t0, t1, step):
+    rows, t = [], t0
+    while t < t1:
+        part = SYS.rest("/fapi/v1/klines", symbol=f"{sym}USDT", interval=interval, startTime=t, limit=1500)
+        if not part:
+            break
+        rows += part; t = part[-1][0] + step
+    now = pd.Timestamp.now(tz="UTC").value // 10**6
+    return [r for r in rows if r[0] < t1 and r[6] < now]   # 완결봉만
+
+
+def bars_live(sym, until):
+    """panel + 공개 REST 5분봉, until 23:55 까지. 마지막 실제 봉 뒤로는 채우지 않는다(미완결 라벨은 NaN → 제외)."""
+    f = OUT / f"fwd_k5_{sym}_{until}.parquet"
+    p = pd.read_parquet(SYS.D / f"binance_vision/panel/{sym}USDT.parquet", columns=["timestamp", "high", "low", "close"])
+    p = p.set_index("timestamp").rename(columns={"high": "h", "low": "l", "close": "c"})
+    if not f.exists():
+        t0 = int(p.index[-1].value // 10**6) + 300000; t1 = int((pd.Timestamp(until) + pd.Timedelta("1D")).value // 10**6)
+        r = _paged_klines(sym, "5m", t0, t1, 300000)
+        pd.DataFrame([(q[0], float(q[2]), float(q[3]), float(q[4])) for q in r], columns=["t", "h", "l", "c"]).to_parquet(f)
+    r = pd.read_parquet(f); r = r.set_index(pd.to_datetime(r.t, unit="ms"))[["h", "l", "c"]]
+    x = pd.concat([p, r]); x = x[~x.index.duplicated(keep="first")].sort_index()
+    x = x.reindex(pd.date_range("2022-01-01", x.index[-1], freq="5min"))
+    x["c"] = x.c.ffill(); x["h"] = x.h.fillna(x.c); x["l"] = x.l.fillna(x.c)
+    return x
+
+
+def eth1m_live(t0, t1):
+    f = OUT / f"fwd_eth1m_{t0}_{t1}.parquet"
+    if not f.exists():
+        r = _paged_klines("ETH", "1m", int(pd.Timestamp(t0).value // 10**6), int(pd.Timestamp(t1).value // 10**6), 60000)
+        pd.DataFrame([(q[0], float(q[2]), float(q[3]), float(q[4])) for q in r], columns=["t", "h", "l", "c"]).to_parquet(f)
+    return pd.read_parquet(f)
+
+
+def size_cap(qhat_log, k, cap, b):
+    stop = np.clip(k * np.exp(qhat_log), 0.01, 0.15); return np.minimum(cap, b / stop), stop
+
+
+def fwd_eval(m, k, data, df, rows_win, L, K, cap, b):
+    """무작위 진입(C1·E2) + 실원장(E1·E3). 손절은 둘 다 −5% 고정."""
+    te = split(df, rows_win).copy(); te["L_ml"], te["stop_ml"] = size_cap(m.predict(te[FEATS]), k, cap, b)
+    c1 = {s: float((g.mae > g.stop_ml).mean()) for s, g in te.groupby("sym")}
+    Lm, Lr = te.L_ml.values, te.L_rule.values; five = np.full(len(te), 0.05)
+    Rm, _ = trade_R(Lm, five, te.mae.values, te.move.values); Rr, _ = trade_R(Lr, five, te.mae.values, te.move.values)
+    day = te.t.dt.floor("D").values; ud = np.unique(day); gi = {d: np.flatnonzero(day == d) for d in ud}
+    rng = np.random.default_rng(7); diffs = []
+    for _ in range(2000):
+        ix = np.concatenate([gi[d] for d in rng.choice(ud, len(ud))]); diffs.append(eff(Lm[ix], Rm[ix]) - eff(Lr[ix], Rr[ix]))
+    e2 = {"n": len(te), "days": len(ud), "eff_ml": eff(Lm, Rm), "eff_rule": eff(Lr, Rr), "diff_ci": [float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))],
+          "mean_L_ml": float(Lm.mean()), "mean_L_rule": float(Lr.mean()), "L_ratio": float(Lm.mean() / Lr.mean()), "cvar5_ml": cvar(Rm), "cvar5_rule": cvar(Rr)}
+    out = {"C1_hit_by_coin": c1, "E2": e2}
+    if L is not None and len(L):
+        x = data["ETH"]; ends = (x.index + pd.Timedelta("5min")).values
+        at = [int(np.searchsorted(ends, np.datetime64(pd.Timestamp(t, unit="ms")), side="right") - 1) for t in L.entry_time]
+        rr = rows_for("ETH", 0, x, bar_feats(x), labels(x), at=at)
+        rl, rs = rr[rr.s == 1].reset_index(drop=True), rr[rr.s == -1].reset_index(drop=True)
+        X = rl[FEATS].where(pd.Series(L.s.values > 0), rs[FEATS]).astype(float)
+        Lml, _ = size_cap(m.predict(X), k, cap, b); Lrule = np.minimum(2.0, 2.0 / SYS.ledger_lvl(L, K)); five = np.full(len(L), 0.05)
+        Rml = ledger_replay_stops(L, K, Lml, five); Rrule = ledger_replay_stops(L, K, Lrule, five)
+        (gm, mm), (gr, mr) = SYS.growth_mdd(Rml), SYS.growth_mdd(Rrule)
+        out["E1"] = {"trips": len(L), "ml_growth": gm, "ml_mdd": mm, "rule_growth": gr, "rule_mdd": mr}
+        out["E3"] = {"ml_P_dd20": survival_at(L, Rml, -0.2), "rule_P_dd20": survival_at(L, Rrule, -0.2),
+                     "ml_P_dd30": survival_at(L, Rml, -0.3), "rule_P_dd30": survival_at(L, Rrule, -0.3)}
+    return out
+
+
+def survival_at(L, R, thr, nb=2000, seed=0):
+    day = pd.to_datetime(L.entry_time, unit="ms").dt.tz_localize("UTC").dt.tz_convert("Asia/Seoul").dt.date
+    days = pd.date_range(min(day), max(day)).date; idx = {d: np.flatnonzero(day.values == d) for d in days}
+    rng = np.random.default_rng(seed); dd = []
+    for _ in range(nb):
+        seq = np.concatenate([R[idx[days[j]]] for j in rng.integers(0, len(days), 365)])
+        eq = np.cumprod(1 + seq); dd.append(min((eq / np.maximum.accumulate(eq) - 1).min(), eq.min() - 1) if len(eq) else 0)
+    return float(np.mean(np.array(dd) <= thr))
+
+
+def fwd_trips(since):
+    L = SYS.ledger_trips()   # 08-01~ 전체 → 전진 구간만
+    return L[L.entry_time >= int(pd.Timestamp(since).value // 10**6)].reset_index(drop=True)
+
+
+def fwd_status():
+    """판정 전: 건수·날짜만. 성과 계산 함수는 부르지 않는다."""
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None)
+    hours = max(0, int((now - pd.Timestamp(FWD0) - pd.Timedelta("1D")) / pd.Timedelta("1h")))
+    L = fwd_trips(FWD0); last = pd.to_datetime(SYS.ledger_trips().exit_time.max(), unit="ms")
+    print(f"전진 시작 {FWD0} · 지금 {now:%Y-%m-%d %H:%M} UTC · 라벨 끝난 정시 ≈{hours}개 × 4코인 × 롱·숏 = {hours * 8} 표본")
+    print(f"새 ETH 왕복 {len(L)}건 / 판정 최소 {MIN_TRIPS} · 로컬 원장 마지막 청산 {last:%Y-%m-%d %H:%M} (판정 때는 서버 최신본으로 갱신)")
+    print(f"1차 판정일 {VERDICT} — 그 전엔 성과를 보지 않는다")
+
+
+def fwd_main(until, past_check=False):
+    m = lgb.Booster(model_file=str(OUT / "model.txt")); k = json.loads((OUT / "report.json").read_text())["k_cal"]
+    data = {s: bars_live(s, until) for s in SYS.COINS}; _, df = build(data)
+    if past_check:   # 새 데이터 경로 점검: 상한 3·b .10 으로 2026 이미 본 구간을 돌려 report_size_only.json 과 같아야 한다
+        prev = json.loads((OUT / "report_size_only.json").read_text())
+        K = pd.read_parquet(SYS.OUT / "eth1m_ledger.parquet"); L = SYS.ledger_trips()
+        got = fwd_eval(m, k, data, df, TEST, L, K, LCAP, BUDGET)
+        for key in ("eff_ml", "eff_rule", "mean_L_ml", "cvar5_ml"):
+            assert abs(got["E2"][key] - prev["E2"][key]) < 1e-9, (key, got["E2"][key], prev["E2"][key])
+        assert got["C1_hit_by_coin"] == prev["C1_hit_by_coin"]
+        assert abs(got["E1"]["ml_growth"] - prev["E1"]["ml_growth"]) < 1e-9 and abs(got["E1"]["rule_mdd"] - prev["E1"]["rule_mdd"]) < 1e-9
+        Kr = eth1m_live("2026-06-01", "2026-10-22")    # 원장 1분 경로를 공개 REST 로 다시 만들어도 같은가
+        g2 = fwd_eval(m, k, data, df, ("2026-01-01", "2026-01-02"), L, Kr, LCAP, BUDGET)["E1"]
+        print(f"원장 경로 parquet vs REST: ML 성장 {got['E1']['ml_growth']:.6f} vs {g2['ml_growth']:.6f} · 규칙 {got['E1']['rule_growth']:.6f} vs {g2['rule_growth']:.6f}")
+        print("PAST-CHECK PASS: 전진 경로가 이미 본 구간 숫자를 그대로 재현"); return
+    assert pd.Timestamp.now(tz="UTC").tz_localize(None) >= pd.Timestamp(VERDICT), f"판정일 {VERDICT} 전 — --status 만"
+    last_entry = (pd.Timestamp(until) - pd.Timedelta("1D")).strftime("%Y-%m-%d 23:00")
+    L = fwd_trips(FWD0); K = eth1m_live((pd.Timestamp(FWD0) - pd.Timedelta("32D")).strftime("%Y-%m-%d"), until) if len(L) >= MIN_TRIPS else None
+    rep = fwd_eval(m, k, data, df, (FWD0, last_entry), L if len(L) >= MIN_TRIPS else None, K, CAP2, B2)
+    rep["gates"] = {"C1": all(0.07 <= v <= 0.13 for v in rep["C1_hit_by_coin"].values()),
+                    "E2": rep["E2"]["diff_ci"][0] > 0 and 0.9 <= rep["E2"]["L_ratio"] <= 1.1}
+    if "E1" in rep:
+        rep["gates"]["E1"] = rep["E1"]["ml_growth"] >= rep["E1"]["rule_growth"] and rep["E1"]["ml_mdd"] >= rep["E1"]["rule_mdd"]
+        rep["gates"]["E3"] = rep["E3"]["ml_P_dd20"] <= rep["E3"]["rule_P_dd20"]
+    rep.update(prereg="docs/prereg/ml_size_fwd_2x_20261025.md@ae7b0b51", until=until, new_trips=len(L))
+    (OUT / f"fwd_report_{until}.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False)); print(json.dumps(rep, indent=1, ensure_ascii=False))
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--selfcheck", action="store_true"); ap.add_argument("--size-only", action="store_true")
+    ap.add_argument("--status", action="store_true"); ap.add_argument("--forward", metavar="UNTIL"); ap.add_argument("--past-check", action="store_true")
     a = ap.parse_args(); OUT.mkdir(parents=True, exist_ok=True)
+    if a.status:
+        return fwd_status()
+    if a.past_check:
+        return fwd_main("2026-10-23", past_check=True)
+    if a.forward:
+        return fwd_main(a.forward)
     data, df = build()
     print("행", len(df), {k: len(split(df, v)) for k, v in (("train", TRAIN), ("cal", CAL), ("test", TEST))})
     if a.selfcheck:
