@@ -2408,6 +2408,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-09-28 행사가 사다리(1-B) · 옵션 순매수 흐름(2-A) */
 .opt-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 6px; }
+.opt-touch-legend { margin-left: 4px; font-size: 11px; }   /* 2026-10-08 닿음 등고선 범례 -- 좁으면 칩 아래 줄로 */
 .opt-chip-btn { min-height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--soft-line); background: none;
   color: var(--muted); font: 600 11.5px/1 var(--font-sans); cursor: pointer; }
 .opt-chip-btn.on { color: var(--option); border-color: color-mix(in srgb, var(--option) 60%, transparent); background: color-mix(in srgb, var(--option) 12%, transparent); }
@@ -2637,33 +2638,84 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
     grid-template-areas: "head head head head" "cov cov cov cov" "move ladder ladder ladder" "gamma ladder ladder ladder" "mood ladder ladder ladder" "blk blk blk blk" "lane lane flow flow"; }   /* 2026-10-07 ⑤ 줄은 뉴스 카드로 갔다 */
 }
 
-/* 2026-10-05 뉴스 카드(사용자 «뉴스 카드를 하나 만들어서») -- 2026-10-24 «정확한 현재 분석만»: 제목 목록(사실)만 남겼다.
-   LLM 판정(호재/악재 %·영향 막대·기울기·코인별·고영향 상위·영향 산점도·해킹 고정)은 사람 판단과 대조한 적이 없어 뺐다. */
+/* 2026-10-05 뉴스 카드(사용자 «뉴스 카드를 하나 만들어서»). 왼쪽 = 기울기(1·6·12시간)·코인별·사고·출처 · 오른쪽 = 12시간 축 + 목록.
+   방향색은 값에만(호재 --good · 악재 --bad · 사고 --warn), 판정은 검증 전이라 머리에 «신호 아님»을 늘 둔다. 좁으면 한 열.
+   스크롤 없이 전부 보인다(사용자 «스크롤 되어 있는건 스크롤 없이») -- 카드가 내용만큼 늘고, 한 화면 모드에서도 높이를 고정하지 않는다. */
 #newsCard[hidden] { display: none; }
 #newsCard .opt-card-head { display: flex; align-items: baseline; gap: 12px; }
 #newsCard .opt-card-head .muted { font-size: 12px; }
-.news-body { display: grid; padding-top: 4px; }
-.nw-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; }
+.news-body { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); column-gap: 32px; padding-top: 4px; }
+@media (max-width: 720px) { .news-body { grid-template-columns: minmax(0, 1fr); row-gap: 12px; } }
+.nw-tilts { display: grid; gap: 8px; }
+.nw-tilt .nw-tilt-lab .w { font-weight: 800; color: var(--text); }
+.nw-srcs { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.nw-srcs b { color: var(--text); font-weight: 700; }
+.nw-sec-h { font: 800 11px var(--font-sans); letter-spacing: .08em; color: var(--muted); margin-bottom: 2px; }
+.nw-row .src.multi { color: var(--option); }
+.nw-head { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; }
 .nw-head .nw-chips { margin-left: auto; display: flex; gap: 6px; }
+.nw-sum { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+/* 2026-10-05 왼쪽 요약을 카드 높이에 맞게 늘린다(사용자 지시) -- 남는 높이를 기울기·코인 게이지·고영향 상위가 나눠 갖고 줄 사이가 고르게 벌어진다.
+   좁은 화면(한 열)은 높이가 내용만큼이라 그대로다. 출처 줄은 바닥에 붙는다. */
+.nw-sum > div:not(.nw-srcs):not(.nw-assets) { flex: 1 1 auto; display: flex; flex-direction: column; }
+.nw-sum .nw-tilts, .nw-sum .nw-top { flex: 1 1 auto; align-content: space-evenly; }
+.nw-sum > .nw-assets { flex: 1 1 auto; align-content: space-evenly; }
+.nw-tilt { display: grid; gap: 5px; }
+.nw-tilt-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--soft-line); }
+.nw-tilt-bar i { display: block; height: 100%; }
+.nw-tilt-bar .b { background: var(--good); } .nw-tilt-bar .n { background: color-mix(in srgb, var(--muted) 45%, transparent); } .nw-tilt-bar .s { background: var(--bad); }
+.nw-tilt-lab { display: flex; justify-content: space-between; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.nw-tilt-lab b { font-weight: 800; }
+.nw-assets { display: grid; grid-template-columns: auto 1fr auto auto; gap: 3px 10px; align-items: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+.nw-assets .h { font-size: 10.5px; color: var(--muted); letter-spacing: .04em; }
+.nw-assets .a { font-weight: 800; color: var(--text); }
+.nw-assets .on { color: var(--option); }
+.nw-assets .mini { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--soft-line); }
+.nw-assets .mini i { display: block; height: 100%; }
+.nw-assets .mini .b { background: var(--good); } .nw-assets .mini .s { background: var(--bad); }
+.nw-assets .c { color: var(--muted); text-align: right; } .nw-assets .m { text-align: right; font-weight: 700; }
 .nw-note { font-size: 11px; line-height: 1.5; color: var(--muted); }
 .nw-main { min-width: 0; container-type: inline-size; }   /* 2026-10-05 목록 폭으로 줄 모양을 고른다(아래 @container) */
+.nw-lane { display: block; width: 100%; height: auto; }
+.nw-lane text { font: 600 10px var(--font-sans); fill: var(--muted); }
 .nw-list { margin-top: 6px; max-height: 520px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin;   /* 2026-10-05 좌우 스크롤 없음 -- 긴 제목은 … (사용자 지시) */
   scrollbar-color: color-mix(in srgb, var(--option) 35%, transparent) transparent; }   /* 2026-10-05 세부 목록만 스크롤(사용자 «세부 타임라인은 스크롤로 복귀») -- 왼쪽 요약은 스크롤 없음 */
-.nw-row { display: grid; grid-template-columns: 40px 64px 44px minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 5px 0;
+.nw-row { display: grid; grid-template-columns: 40px 64px 62px 44px 34px minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 5px 0;
   border-top: 1px solid var(--soft-line); font-size: 12px; font-variant-numeric: tabular-nums; }
 .nw-row .t, .nw-row .src { color: var(--muted); }
 .nw-row .src { font-size: 11px; font-weight: 700; letter-spacing: .02em; }
+.nw-row .sen { font-weight: 800; white-space: nowrap; }
+.nw-row .sen.b { color: var(--good); } .nw-row .sen.s { color: var(--bad); } .nw-row .sen.n, .nw-row .sen.w { color: var(--muted); font-weight: 600; }
 .nw-row .as { font-weight: 700; color: var(--text); } .nw-row .as.on { color: var(--option); }
+.nw-row .imp { display: inline-flex; gap: 2px; align-self: center; }
+.nw-row .imp i { width: 6px; height: 10px; border-radius: 1.5px; background: var(--soft-line); }
+.nw-row .imp i.f { background: var(--text); }
 .nw-row a { color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nw-row a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .nw-row a:focus-visible { outline: 2px solid var(--option); outline-offset: 2px; border-radius: 3px; }
-.nw-row .src.multi { color: var(--option); }
+.nw-row.dim a { color: var(--muted); }
+.nw-row .tag { margin-right: 6px; font-size: 10.5px; font-weight: 800; color: var(--warn); }
 @media (max-width: 720px) {
-  .nw-row { grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-areas: "t src as" "title title title"; row-gap: 2px; }
-  .nw-row .t { grid-area: t; } .nw-row .src { grid-area: src; } .nw-row .as { grid-area: as; justify-self: end; }
+  .nw-row { grid-template-columns: 40px 54px 40px minmax(0, 1fr); grid-template-areas: "t sen as imp" "src title title title"; row-gap: 2px; }
+  .nw-row .t { grid-area: t; } .nw-row .sen { grid-area: sen; } .nw-row .as { grid-area: as; } .nw-row .imp { grid-area: imp; justify-self: end; }
+  .nw-row .src { grid-area: src; }
   .nw-row a { grid-area: title; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .nw-list { max-height: 62vh; }
 }
+/* 2026-10-05 넓은 화면이라도 목록 칸이 좁으면(721~1100px 의 두 단 배치) 고정 다섯 칸이 제목 자리를 0 까지 먹었다 -- 목록 폭 520 이하면 두 줄 모양 */
+@container (max-width: 520px) {
+  .nw-row { grid-template-columns: 40px 54px 40px minmax(0, 1fr); grid-template-areas: "t sen as imp" "src title title title"; row-gap: 2px; }
+  .nw-row .t { grid-area: t; } .nw-row .sen { grid-area: sen; } .nw-row .as { grid-area: as; } .nw-row .imp { grid-area: imp; justify-self: end; }
+  .nw-row .src { grid-area: src; }
+  .nw-row a { grid-area: title; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+}
+.nw-top { display: grid; gap: 0; }
+.nw-top-row { display: grid; grid-template-columns: 30px 26px minmax(0, 1fr); grid-template-areas: "s i t" ". . a"; gap: 1px 8px; padding: 5px 0;
+  border-top: 1px solid var(--soft-line); font-size: 12px; font-variant-numeric: tabular-nums; }
+.nw-top-row > span:first-child { grid-area: s; font-weight: 800; color: var(--muted); }
+.nw-top-row .i { grid-area: i; font-weight: 800; color: var(--text); }
+.nw-top-row .tt { grid-area: t; color: var(--text); line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.nw-top-row .ag { grid-area: a; font-size: 11px; color: var(--muted); }
 
 /* 2026-10-05 네 카드(Footprint · News · Option · Account) 머리·한 화면 모드 통일(사용자 «제목 영어 · 간격·제목·폰트·전체화면 모두 통일»).
    머리 = 제목(.card-title) + 같은 줄 회색 부제 12px · 안쪽 18px · 아래 1px 선. 한 화면 모드 = 카드 높이 창 높이(넘치는 Option·Account 는 최소 높이). */
@@ -2680,10 +2732,13 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 html.fit1 #newsCard { height: calc(100vh - 20px); display: flex; flex-direction: column; }
 html.fit1 #newsCard[hidden] { display: none; }
 html.fit1 #newsCard > .ops-health-head { flex: none; }
-html.fit1 #newsBody { flex: 1 1 0; min-height: 0; grid-template-rows: minmax(0, 1fr); }   /* 2026-10-24 요약 칸이 빠져 목록 한 칸 */
+html.fit1 #newsBody { flex: 1 1 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
 html.fit1 #newsBody .nw-main { display: flex; flex-direction: column; min-height: 0; }
 html.fit1 #newsBody .nw-list { flex: 1 1 0; max-height: none; }
+html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 /* 해킹·장애 고정 줄 -- 옅은 주황 바탕(굵은 왼쪽 선 대신) */
+.nw-row.pin { background: color-mix(in srgb, var(--warn) 9%, transparent); border-radius: 6px; padding-left: 6px; padding-right: 6px; margin: 0 -6px; }
+.nw-row.pin + .nw-row:not(.pin) { border-top: 1px solid var(--line); }
 
 /* 2026-10-06 넓은 화면 모의 판 칸 = 서랍 둘(모의 판 · 지지/저항), 하나만 열린다 -- 칸 높이는 풋프린트가 정한다(사용자 지시) */
 .wdr-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; padding-top: 6px; }
@@ -2934,43 +2989,3 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .nc-ice-bar { position: relative; display: block; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 20%, transparent); overflow: hidden; }
 .nc-ice-bar i { position: absolute; inset: 0 auto 0 0; background: var(--text); opacity: .7; }
 .nc-ice.stale .nc-ice-st, .nc-ice-bad { color: var(--warn); }
-
-/* 2026-10-24 Now 카드 = 결정 줄(사용자 «진짜 효과 있는 지표만 · 결정이 어렵다»): 검증 통과만 크게 한 줄 · 내 포지션 · 후보(판정 대기)는 접힘.
-   칸 모양은 ⑤ 예측 줄(.fc-c)·박스 줄(.bx-c) 그대로 -- 같은 지표가 다른 모양으로 두 번 그려지지 않게. */
-.dc-card .ops-health-head { align-items: center; }
-.dc-sum { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.dc-sum .fc-sum { margin-left: 0; }
-.dc-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; padding-top: 6px; }
-.dc-now { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.dc-card .fc-c > b, .dc-card .fc-c.now > b { font-size: 19px; line-height: 1.2; }
-.dc-card .fc-c .sub { font-size: 11px; }
-.fc-c.warn { --fc: var(--warn); }
-.dc-card .mc-bx { border-top: none; padding-top: 0; border-left: 1px solid var(--soft-line); }
-.dc-card .bx-p b { font-size: 19px; }
-.dc-pos { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; margin-top: 12px; padding: 10px 8px 0; border-top: 1px solid var(--soft-line);
-  font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.dc-pos + .dc-pos { margin-top: 0; padding-top: 6px; border-top: none; }
-.dc-pos b { color: var(--text); font-weight: 800; }
-.dc-pos b.good { color: var(--good); } .dc-pos b.bad { color: var(--bad); }
-.dc-pos em { font-style: normal; } .dc-pos em.warn { color: var(--warn); } .dc-pos em.bad { color: var(--bad); }
-.dc-cand { margin-top: 12px; border-top: 1px solid var(--soft-line); }
-.dc-cand > summary { display: flex; align-items: baseline; gap: 10px; padding: 9px 8px 1px; cursor: pointer; list-style: none; font-size: 12px; }
-.dc-cand > summary::-webkit-details-marker { display: none; }
-.dc-cand > summary::before { content: ""; align-self: center; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
-  transform: rotate(-45deg); transition: transform .18s cubic-bezier(.2, .8, .2, 1); }
-.dc-cand[open] > summary::before { transform: rotate(45deg); }
-.dc-cand > summary:focus-visible { outline: 2px solid var(--option); outline-offset: 2px; border-radius: 4px; }
-.dc-cand-t { font-weight: 800; color: var(--text); }
-.dc-cand-row { grid-template-columns: repeat(5, minmax(0, 1fr)); padding-top: 10px; }
-.mc-grp { margin-right: 6px; font-size: 10.5px; font-weight: 800; letter-spacing: .02em; color: var(--muted); white-space: nowrap; }
-@media (max-width: 720px) {
-  .dc-grid { grid-template-columns: minmax(0, 1fr); row-gap: 12px; }
-  .dc-card .fc-c > b, .dc-card .fc-c.now > b { font-size: 16px; }
-  .dc-card .mc-bx { border-left: none; border-top: 1px solid var(--soft-line); padding-top: 10px; }
-  .dc-pos { gap: 2px 14px; font-size: 12px; }
-  .dc-card .fc-c .sub { white-space: normal; }   /* 세 칸이 좁아 «…» 로 잘리던 보조 줄을 접는다 */
-  .dc-now .fc-c:nth-child(3) { border-left: 1px dashed var(--soft-line); }   /* .fc-row 2단 규칙의 셋째 칸 선 지우기를 되돌림(결정 줄은 3단) */
-  .dc-cand-row { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
-  .dc-cand-row .fc-c:nth-child(odd) { border-left: none; }
-}
-@media (prefers-reduced-motion: reduce) { .dc-cand > summary::before { transition: none; } }
