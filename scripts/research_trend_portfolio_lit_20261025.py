@@ -25,7 +25,7 @@ OE = _load("oe1025", "research_dir_online_experts_20261025.py")        # cpcv ·
 COINS = SYS.COINS; N = len(COINS); THRU, TAKER, GROSS = 1e-4, 4e-4, 2.0
 DEV = ("2022-01-01", "2025-12-31"); HOLD = ("2026-01-01", "2026-10-23"); PRE = ("2020-04-01", "2021-12-31")
 TAU_RANK = 0.4; TAUS = (0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.8)
-LOOK = {"A": (7, 14, 21, 28), "B": (7, 14, 28, 56, 90), "C": (7, 14, 21, 28, 42, 56, 70, 84)}
+LOOK = {"A": (7, 14, 21, 28), "B": (7, 14, 28, 56, 90), "C": (7, 14, 21, 28, 42, 56, 70, 84), "L": (120, 180, 270, 365)}
 sharpe = OE.sharpe
 
 
@@ -68,6 +68,8 @@ def daily_frame(sym):
 def signal(c, kind, look):
     if look == "E":   # Hurst 식 지평 분산: A·B·C 세 묶음 신호의 평균(묶음 선택 안 함)
         return sum(signal(c, kind, l) for l in "ABC") / 3
+    if look == "F":   # E + Hurst·MOP 4~12개월 묶음 L (3회차)
+        return sum(signal(c, kind, l) for l in "ABCL") / 4
     lr = np.log(c).diff(); out = []
     for k in LOOK[look]:
         if kind == "sign":
@@ -168,6 +170,7 @@ def markov_signs(S, days, seed):
         v = np.sign(S[s].loc[days]).astype(int).values
         for a_, b_ in zip(v[:-1], v[1:]):
             T[a_ + 1, b_ + 1] += 1
+    empty = T.sum(1) == 0; T[empty] = T.sum(0)                 # 한 번도 안 나온 상태(연속 신호의 0)는 전체 상태 비율로 — 1회차 수치 영향 없음
     T = T / T.sum(1, keepdims=True); rng = np.random.default_rng(seed); out = {}
     for s in COINS:
         cur = rng.choice(3); v = []
@@ -192,6 +195,8 @@ def grid(rnd):
     if rnd == 2:
         return [dict(look=l, sig="sign", vol=v, port="pv", crash=cr, short=sh, band=b)
                 for l in "BE" for v in ("pk20", "rv20") for cr in ("none", "dm") for sh in (1.0, 0.5) for b in (0.0, 0.25)]
+    if rnd == 3:
+        return [dict(look=l, sig="sign", vol="rv20", port="pv", crash="dm", short=sh, band=0.25) for l in "EF" for sh in (0.5, 0.0)]
     raise SystemExit(f"회차 {rnd} 격자는 아직 사전 등록되지 않았다")
 
 
@@ -253,6 +258,8 @@ def dev_round(F, rnd):
     trials[f"round{rnd}"] = {k: sharpe(v) for k, v in R.items()}; trials_f.write_text(json.dumps(trials, indent=1))
     all_srs = [v for r_ in trials.values() for v in r_.values()]
     med, pbo, oos = OE.cpcv(R, emb=10)
+    Rall = pd.concat([pd.read_parquet(OUT / f"round{i}_dev_daily.parquet").add_prefix(f"r{i}:") for i in range(1, rnd + 1)], axis=1)
+    med_cum, pbo_cum, _ = OE.cpcv(Rall, emb=10)
     srs = R.apply(sharpe); best = srs.idxmax(); cfg = next(c for c in G if name(c) == best)
     tau = pick_tau(F, cfg, dv) or TAUS[0]; W = targets(F, cfg, tau); x = run(F, W, dv, band=cfg["band"])
     d = OE.dsr(x, all_srs); hold = hold_ret(F, dv); cur = run(F, current_rule(F), dv)
@@ -260,7 +267,7 @@ def dev_round(F, rnd):
     sysd = pd.read_csv(ROOT / "tmp/system_trend_ruleb_20261025/system_daily.csv", index_col=0, parse_dates=True).iloc[:, 0][: DEV[1]]
     yr = yearly(x)
     rep = {"prereg": "docs/prereg/trend_portfolio_lit_20261025.md", "round": rnd, "trials_round": len(G), "trials_total": len(all_srs),
-           "cpcv_oos_median_sharpe": med, "cpcv_oos_quantiles": [float(np.percentile(oos, q)) for q in (10, 25, 50, 75, 90)], "pbo": pbo,
+           "cpcv_oos_median_sharpe": med, "cpcv_oos_quantiles": [float(np.percentile(oos, q)) for q in (10, 25, 50, 75, 90)], "pbo": pbo, "pbo_cumulative": pbo_cum, "cpcv_oos_median_cumulative": med_cum, "trials_cumulative_pbo": Rall.shape[1],
            "chosen": best, "chosen_rank_sharpe": float(srs[best]), "tau": tau, "dev_sharpe": sharpe(x), "dev_mdd": OE.mdd(x),
            "dev_ann_ret": float((1 + x).prod() ** (365 / len(x)) - 1), "dsr": d, "yearly_ret": yr, "turnover_per_day": turnover(W, dv),
            "null_p95": float(np.percentile(nulls, 95)), "null_median": float(np.median(nulls)),
@@ -270,7 +277,7 @@ def dev_round(F, rnd):
            "chosen_minus_current_bp_ci": OE.block_ci(x - cur), "chosen_minus_current_bp": float((x - cur).mean() * 1e4),
            "chosen_minus_current_volmatched_bp_ci": OE.block_ci(x - cur * x.std() / cur.std()),
            "grid_sharpe_median": float(srs.median()), "grid_sharpe": {k: round(v, 3) for k, v in srs.sort_values(ascending=False).items()}}
-    rep["gates"] = {"D1_cpcv_med_gt0": med > 0, "D2_pbo_lt_0.2": pbo < 0.2, "D3_dsr_gt_0.95": d > 0.95,
+    rep["gates"] = {"D1_cpcv_med_gt0": med > 0, "D2_pbo_lt_0.2": (pbo_cum if rnd >= 3 else pbo) < 0.2, "D3_dsr_gt_0.95": d > 0.95,
                     "D4_gt_hold": rep["dev_sharpe"] > rep["hold_sharpe"], "D5_mdd": rep["dev_mdd"] >= -0.20,
                     "D6_null_p95": rep["dev_sharpe"] > rep["null_p95"], "D7_years": sum(v > 0 for v in yr.values()) >= 3}
     rep["dev_pass"] = all(rep["gates"].values())
