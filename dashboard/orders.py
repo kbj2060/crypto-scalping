@@ -1118,7 +1118,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 binding.append((equity * margin_lev * SIZING_MARGIN_CAP_PCT / 100.0, "margin"))
             # 2026-10-20 사용자 «규칙 상한 공유»: 자동 규칙 손절이 무장된 포지션이 있으면 수동 진입(어느 코인이든)도 계좌 명목 ≤ 순자산 × 규칙 상한.
             #   교차 마진이라 규칙의 «손절보다 청산이 멀다» 보장은 계좌 전체 명목에 걸린다 -- 수동으로 다른 코인을 크게 넣으면 그 보장이 깨진다(10-20 감사).
-            #   ponytail: 무장 파일엔 «보유 1.5×» 인지가 안 남아 늘 COMMIT_CAP_X(3) -- 1.5 로 묶으려면 arm_bracket 이 rule_l 을 남기면 된다.
+            #   ponytail: 무장 파일엔 «보유 1.5×» 인지가 안 남아 늘 COMMIT_CAP_X(10-25 부터 2) -- 1.5 로 묶으려면 arm_bracket 이 rule_l 을 남기면 된다.
             if equity > 0 and any(v.get("auto", v.get("rule")) and v.get("sl_price") for v in bracket_load().values()):   # 10-24 전 무장 기록엔 auto 가 없다 -- 그땐 rule 이 곧 자동
                 binding.append((equity * COMMIT_CAP_X, "rule_shared"))
             cap_notional = min(v for v, _ in binding) if binding else None

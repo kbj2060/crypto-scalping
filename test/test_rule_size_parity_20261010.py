@@ -30,7 +30,7 @@ class RuleSizeParityTest(unittest.TestCase):
             self.assertAlmostEqual(c["l"], py["l"], places=9, msg=(side, s4, vm, cap))
             self.assertAlmostEqual(c["sd"], py["stop_pct"], places=12, msg=(side, s4, vm, cap))
         today = commit_rule_l(position_side="LONG", sigma24_bp=55.21 * 6 ** 0.5, vol_mult=0.458)
-        self.assertAlmostEqual(today["l"], 3.0, delta=1e-12)                           # 10-11 값(12.435 × 0.458 = 5.695)이 10-14 상한 3 에 묶인다
+        self.assertAlmostEqual(today["l"], 2.0, delta=1e-12)                           # 10-11 값(12.435 × 0.458 = 5.695)이 10-25 상한 2 에 묶인다(10-14 는 3)
         self.assertEqual(today["stop_pct"], 0.05)
         self.assertIn(f"const RULE_STOP_PCT = {RULE_STOP_PCT};", js)
         html = (ROOT / "dashboard/live/index.html").read_text("utf-8")

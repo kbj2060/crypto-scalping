@@ -248,9 +248,11 @@ STOP_SLIP_P99_BP = 230.0     # 수수료 3 + 초과폭 99분위 227
 # 🔴2026-10-14 사용자 «권장 B로 바꿔서 배포»: 상한 6 → 3배 · 손절 첫 진입가 ∓3% → ∓5%(첫 1/3 · ∓0.75% 물타기 2/3 그대로).
 #   실원장 173왕복 재생(08-01~10-13, tmp/pingpong_survival_20261014/ledger_combo.py · actual_vs_b.py): 74일 ×1.72(현행 ×1.74) · MDD −19%(−36%) ·
 #   손절 3회(10회) · 손절 1회 순자산 −13.7% · 손익분기 손절률 4.2%(실측 1.7%) · 1년 반토막 6~12%(현행 78~89%). 3배면 12.4×권장배수(≥4.05)가 늘 상한에 묶여 사실상 고정 3배.
+# 🔴2026-10-25 사용자 «크기는 2배로»: 상한 3 → 2배(사실상 고정 2배 · 청산 안전은 그대로). 실원장 173왕복 1년 재표본: −20% 낙폭 확률 2배 10~26% · 3배 74~79%,
+#   −30% 2배 1.3~1.7% · 3배 19~26% (docs/prereg/system_trend_ruleb_20261025.md · ml_size_*_20261025.md, 10-25 세션). 손절 시 손실 상한 L×5% = 순자산 10%.
 RULE_STOP_PCT = 0.05
 COMMIT_UNIT_X = 4 * 0.303 * 10.26
-COMMIT_CAP_X = 3.0   # 🔴2026-10-14 사용자 «권장 B»: 6 → 3(위 RULE_STOP_PCT 주석). 옛: «상한 6배로» 10 → 6. 실원장 168왕복 재생(첫 1/3→−0.75% 2/3·손절 −3%) -- 복리 ×1.64→×1.57 · MDD −51→−36% · 손절 1회 −23→−15% · 하위 5% ×0.38→×0.60
+COMMIT_CAP_X = 2.0   # 🔴2026-10-25 사용자 «크기는 2배로»: 3 → 2(위 주석). 10-14 «권장 B»: 6 → 3(위 RULE_STOP_PCT 주석). 옛: «상한 6배로» 10 → 6. 실원장 168왕복 재생(첫 1/3→−0.75% 2/3·손절 −3%) -- 복리 ×1.64→×1.57 · MDD −51→−36% · 손절 1회 −23→−15% · 하위 5% ×0.38→×0.60
 HOLD_CAP_X = 1.5     # 2026-10-16 사용자 «보유 1.5×»(추세 보유형): 4.5년 백테스트 -- 3×는 2022~24 −58%·MDD −87%, 1~1.5×는 같은 샤프(≈1.45)에 MDD −28~−40%(사후 권고)
 COMMIT_MMR, COMMIT_AVG_OFF, COMMIT_LIQ_BUF, COMMIT_STOP_SIG = 0.02, 0.0066, 0.005, 3.0
 REC_FIRST_SHARE = 1 / 3   # 🔴2026-10-14 사용자 «첫 1/3 → −0.75%에 2/3»: 0.75 → 1/3. 실원장 168왕복 재생(상한 9배·손절 −3%) -- 손절 1회 25.1→22.9%·MDD −70→−62%, 기대값 차 CI 0 포함(scratchpad split_entry.py)
@@ -262,7 +264,7 @@ RULE_MARGIN_MAX = 0.9
 
 def commit_rule_l(*, position_side: str, sigma24_bp: float, vol_mult: float, cap: float = COMMIT_CAP_X) -> dict[str, Any]:
     """재생 규칙의 배수 L 과 손절 폭. **순수 함수**. L = min(COMMIT_UNIT_X × 권장배수, 청산 안전(max(3σ24, RULE_STOP_PCT)), cap) · 손절 RULE_STOP_PCT.
-    cap = COMMIT_CAP_X(자동 3×) 또는 HOLD_CAP_X(보유 1.5×) -- 그 밖은 거절."""
+    cap = COMMIT_CAP_X(자동 2×, 10-25 전 3×) 또는 HOLD_CAP_X(보유 1.5×) -- 그 밖은 거절."""
     if cap not in (COMMIT_CAP_X, HOLD_CAP_X):
         raise ValueError(f"bad cap: {cap!r}")
     if not (sigma24_bp > 0 and vol_mult > 0):
@@ -776,15 +778,15 @@ def _self_check_rec_rule() -> None:
     """자동 규칙(2026-10-09) -- _self_check 앞에 돈다(그 함수의 옛 bracket_sl_hit 검사는 main 에서도 이미 깨져 있다)."""
     f = {"tick": 0.01, "step": 0.001, "min_qty": 0.001, "min_notional": 20.0}
     # ── 자동 규칙(2026-10-09, 재생 ×15.2 크기식) ──
-    c = commit_rule_l(position_side="LONG", sigma24_bp=55.21 * 6 ** 0.5, vol_mult=0.458)        # 10-11 값 → 12.435 × 0.458 = 5.695 > 상한 3
-    assert c["binding"] == "상한" and c["l"] == 3.0 and c["stop_pct"] == 0.05, c
-    low = commit_rule_l(position_side="LONG", sigma24_bp=55.21 * 6 ** 0.5, vol_mult=0.2)          # 식 자체는 그대로: 12.435 × 0.2 = 2.487 < 3
-    assert low["binding"] == "노출 맞춤" and abs(low["l"] - 2.487) < 1e-3, low
-    assert commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=1.0)["binding"] == "상한"   # 12.4 > 3
+    c = commit_rule_l(position_side="LONG", sigma24_bp=55.21 * 6 ** 0.5, vol_mult=0.458)        # 10-11 값 → 12.435 × 0.458 = 5.695 > 상한 2
+    assert c["binding"] == "상한" and c["l"] == COMMIT_CAP_X == 2.0 and c["stop_pct"] == 0.05, c
+    low = commit_rule_l(position_side="LONG", sigma24_bp=55.21 * 6 ** 0.5, vol_mult=0.15)         # 식 자체는 그대로: 12.435 × 0.15 = 1.865 < 2
+    assert low["binding"] == "노출 맞춤" and abs(low["l"] - 1.865) < 1e-3, low
+    assert commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=1.0)["binding"] == "상한"   # 12.4 > 2
     h = commit_rule_l(position_side="LONG", sigma24_bp=250.0, vol_mult=1.0, cap=HOLD_CAP_X)          # 보유 1.5×(10-16)
     assert h["l"] == 1.5 and h["binding"] == "상한", h
-    wide = commit_rule_l(position_side="SHORT", sigma24_bp=1200.0, vol_mult=3.0)                       # 아주 넓은 3σ24(36%) → 청산 안전이 묶는다
-    assert wide["binding"] == "청산 안전" and wide["l"] < 3.0 and wide["stop_pct"] == 0.05, wide
+    wide = commit_rule_l(position_side="SHORT", sigma24_bp=1800.0, vol_mult=3.0)                       # 아주 넓은 3σ24(54%) → 청산 안전이 묶는다(1.76 < 상한 2)
+    assert wide["binding"] == "청산 안전" and wide["l"] < COMMIT_CAP_X and wide["stop_pct"] == 0.05, wide
     # ── 청산가가 −3% 손절선보다 0.5% 바깥(조용한 날 3σ24 < 3% 포함) -- 교차 마진 청산가 = E(1 ∓ 1/L)/(1 ∓ MMR), 평단 E = 첫 진입가 ∓0.66% ──
     for sig in (5.0, 20.0, 60.0, 250.0, 600.0, 1500.0):
         for vm in (0.2, 0.458, 1.0, 3.0):
@@ -824,15 +826,15 @@ def _self_check_rec_rule() -> None:
                           filters=f, existing_notional=4000.0, equity=2000.0, fraction=r3["fraction"], fraction_of_equity=True, order_leverage=20)
     assert p3["blocked"], p3                                                                      # 상한이 찼으면 막는다
     # 2026-10-13 레버리지 10배: 실효 L = 0.9 × 10 = 9 -- 다 채워도 증거금 90%(거래소 거부 없음) · 20배면 그대로
-    # 10-14 상한 3(권장 B): 레버리지 3배면 실효 L = 0.9 × 3 = 2.7 이 묶는다(증거금 90%) · 10배면 상한 3 그대로
-    r10 = rec_rule_size(rule_l=3.0, equity=2000.0, existing_notional=0.0, order_leverage=3)
-    assert abs(r10["l_eff"] - 2.7) < 1e-12 and abs(r10["cap_notional"] - 5400.0) < 1e-6 and abs(r10["target_notional"] - REC_FIRST_SHARE * 5400.0) < 1e-6
-    full = rec_rule_size(rule_l=3.0, equity=2000.0, existing_notional=4050.0, order_leverage=3)
-    assert full["target_notional"] + 4050.0 <= 0.9 * 3 * 2000.0 + 1e-6 and full["fraction"] <= 0.9
-    assert rec_rule_size(rule_l=3.0, equity=2000.0, existing_notional=0.0, order_leverage=10)["l_eff"] == 3.0
-    z0 = rec_rule_size(rule_l=3.0, equity=0.0, existing_notional=0.0, order_leverage=10)   # 잔고 조회 실패(순자산 0) -- 조기 반환도 l_eff 를 싣는다
-    assert z0["l_eff"] == 3.0 and z0["cap_notional"] == 0.0
-    for bad in (0.0, -1.0, 3.5, 10.5):
+    # 10-25 상한 2: 레버리지 2배면 실효 L = 0.9 × 2 = 1.8 이 묶는다(증거금 90%) · 10배면 상한 2 그대로
+    r10 = rec_rule_size(rule_l=2.0, equity=2000.0, existing_notional=0.0, order_leverage=2)
+    assert abs(r10["l_eff"] - 1.8) < 1e-12 and abs(r10["cap_notional"] - 3600.0) < 1e-6 and abs(r10["target_notional"] - REC_FIRST_SHARE * 3600.0) < 1e-6
+    full = rec_rule_size(rule_l=2.0, equity=2000.0, existing_notional=2700.0, order_leverage=2)
+    assert full["target_notional"] + 2700.0 <= 0.9 * 2 * 2000.0 + 1e-6 and full["fraction"] <= 0.9
+    assert rec_rule_size(rule_l=2.0, equity=2000.0, existing_notional=0.0, order_leverage=10)["l_eff"] == 2.0
+    z0 = rec_rule_size(rule_l=2.0, equity=0.0, existing_notional=0.0, order_leverage=10)   # 잔고 조회 실패(순자산 0) -- 조기 반환도 l_eff 를 싣는다
+    assert z0["l_eff"] == 2.0 and z0["cap_notional"] == 0.0
+    for bad in (0.0, -1.0, 2.5, 10.5):
         try:
             rec_rule_size(rule_l=bad, equity=2000.0, existing_notional=0.0, order_leverage=20)
         except ValueError:
@@ -850,18 +852,19 @@ def _self_check_rec_rule() -> None:
     fresh = rec_rule_bracket({}, position_side="LONG", anchor_price=2300.0, basis=1.0, stop_pct=RULE_STOP_PCT, filters=f,
                              prev={"sl_price": 2400.0, "backstop_price": 2390.0})                    # 규칙 아닌 이전 SL 은 안 물려받는다
     assert fresh["sl_price"] == 2185.0
-    # 2026-10-14 자동 물타기 지정가(권장 B): 롱 2,500 첫 진입(상한 3배 × 순자산 2000 = 6000 의 1/3) → 2,481.25 에 남은 2/3(손절 2,375 에서 손실 ≤ 3 × 5% × 2000)
+    # 2026-10-14 자동 물타기 지정가(권장 B) · 10-25 상한 2: 롱 2,500 첫 진입(상한 2배 × 순자산 2000 = 4000 의 1/3) → 2,481.25 에 남은 2/3(손절 2,375 에서 손실 ≤ 2 × 5% × 2000)
     f2 = {"tick": 0.01, "step": 0.001, "min_qty": 0.001, "min_notional": 5.0}
-    ad = rec_rule_add_order(position_side="LONG", sl_price=2375.0, stop_pct=0.05, l_eff=3.0, cap_notional=6000.0, room_before=6000.0,
-                            filled_qty=0.8, order_leverage=10, filters=f2)
-    assert ad and ad["price"] == 2481.25 and abs(ad["notional"] - 4000.0) < 3.0, ad
-    loss = 0.8 * (2500 - 2375) + ad["qty"] * (ad["price"] - 2375)
-    assert loss <= 3 * 0.05 * 2000 * (1 + 1e-9), loss
-    sd = rec_rule_add_order(position_side="SHORT", sl_price=2625.0, stop_pct=0.05, l_eff=3.0, cap_notional=6000.0, room_before=6000.0,
-                            filled_qty=0.8, order_leverage=10, filters=f2)
-    assert sd and sd["price"] == 2518.75 and abs(sd["notional"] - 4000.0) < 3.0, sd
-    assert rec_rule_add_order(position_side="LONG", sl_price=2375.0, stop_pct=0.05, l_eff=3.0, cap_notional=6000.0, room_before=2000.0,
-                              filled_qty=0.8, order_leverage=10, filters=f2) is None                  # 다른 포지션이 여유를 다 먹음
+    q1 = 4000.0 / 3 / 2500
+    ad = rec_rule_add_order(position_side="LONG", sl_price=2375.0, stop_pct=0.05, l_eff=2.0, cap_notional=4000.0, room_before=4000.0,
+                            filled_qty=q1, order_leverage=10, filters=f2)
+    assert ad and ad["price"] == 2481.25 and abs(ad["notional"] - 8000.0 / 3) < 3.0, ad
+    loss = q1 * (2500 - 2375) + ad["qty"] * (ad["price"] - 2375)
+    assert loss <= 2 * 0.05 * 2000 * (1 + 1e-9), loss
+    sd = rec_rule_add_order(position_side="SHORT", sl_price=2625.0, stop_pct=0.05, l_eff=2.0, cap_notional=4000.0, room_before=4000.0,
+                            filled_qty=q1, order_leverage=10, filters=f2)
+    assert sd and sd["price"] == 2518.75 and abs(sd["notional"] - 8000.0 / 3) < 3.0, sd
+    assert rec_rule_add_order(position_side="LONG", sl_price=2375.0, stop_pct=0.05, l_eff=2.0, cap_notional=4000.0, room_before=4000.0 / 3,
+                              filled_qty=q1, order_leverage=10, filters=f2) is None                  # 다른 포지션이 여유를 다 먹음
     # 2026-10-15 «손절 해제»: sl_off 면 SL 이탈이어도 hold · 포지션이 사라지면 여전히 clear · 감시 틱 병합이 표시를 안 지운다
     arm = {"symbol": "ETHUSDC", "armed_at": 0.0, "sl_level": 2400.0, "sl_off": {"at": 1.0}}
     pos = [{"symbol": "ETHUSDC", "side": "LONG", "qty": 1.0}]
@@ -872,7 +875,7 @@ def _self_check_rec_rule() -> None:
     assert merged["k"]["sl_off"] == {"at": 9.0} and merged["k"]["retry_after"] == 1, merged
     merged = bracket_merge({"k": {"armed_at": 5.0}}, {"k": {"armed_at": 5.0, "sl_off": {"at": 9.0}, "retry_after": 1}}, {"k": 5.0})
     assert "sl_off" not in merged["k"] and merged["k"]["retry_after"] == 1, merged   # «다시 켜기» 뒤 틱의 옛 사본이 해제를 되살리지 않는다
-    print("자동 규칙 통과 — 권장 B(12.4×권장배수·청산 안전 max(3σ,5%)·상한 3) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×5% · 첫 진입가 −5% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
+    print("자동 규칙 통과 — 권장 B(12.4×권장배수·청산 안전 max(3σ,5%)·상한 2) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×5% · 첫 진입가 −5% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 
 if __name__ == "__main__":

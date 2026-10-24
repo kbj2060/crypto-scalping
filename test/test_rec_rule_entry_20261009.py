@@ -30,7 +30,7 @@ from scripts.live_manual_peg_entry_20260912 import REC_FIRST_SHARE  # noqa: E402
 from test_manual_entry_preview_smoke_20260913 import _isolated_dirs  # noqa: E402
 
 SYM = orders.MANUAL_EXEC_SYMBOLS["eth"]
-L = 3.0                               # 10-14 권장 B: 12.435 × 권장배수 0.45 = 5.596 > 상한 3 → 상한이 묶는다(청산 안전 10.6)
+L = 2.0                               # 10-25 «크기는 2배로»(10-14 권장 B 는 3): 12.435 × 권장배수 0.45 = 5.596 > 상한 2 → 상한이 묶는다(청산 안전 10.6)
 STOP = 0.05                           # 10-14 권장 B 손절 ∓5%
 VM = {"sigma_bp": 250.0 / math.sqrt(6), "mult": 0.45}
 
@@ -111,17 +111,17 @@ class RecRuleEntryTest(unittest.TestCase):
         self._run(account([]), fn)
 
     def test_low_exchange_leverage_binds_rule_l(self) -> None:
-        """2026-10-13 레버리지 20→10: 거래소 레버리지 X 면 실효 L ≤ 0.9X (증거금 90%). 10-14 상한 3 이면 3배에서 2.7 < 3 이라 묶인다."""
+        """2026-10-13 레버리지 20→10: 거래소 레버리지 X 면 실효 L ≤ 0.9X (증거금 90%). 10-25 상한 2 면 2배에서 1.8 < 2 라 묶인다."""
         async def fn(c):
-            j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=3&rule=c")).json()
+            j = await (await c.get("/api/manual-entry/preview?side=LONG&lev=2&rule=c")).json()
             self.assertTrue(j.get("ok"), j)
             p = j["plan"]
-            self.assertAlmostEqual(p["rule"]["l"], 2.7, places=6)
+            self.assertAlmostEqual(p["rule"]["l"], 1.8, places=6)
             self.assertEqual(p["rule"]["binding"], "레버리지 증거금")
-            self.assertAlmostEqual(p["rule"]["loss_at_stop_pct"], 100 * 2.7 * STOP, delta=0.01)
-            self.assertAlmostEqual(p["notional_usdt"], REC_FIRST_SHARE * 1000 * 2.7, delta=2.6)
+            self.assertAlmostEqual(p["rule"]["loss_at_stop_pct"], 100 * 1.8 * STOP, delta=0.01)
+            self.assertAlmostEqual(p["notional_usdt"], REC_FIRST_SHARE * 1000 * 1.8, delta=2.6)
             j10 = await (await c.get("/api/manual-entry/preview?side=LONG&lev=10&rule=c")).json()
-            self.assertAlmostEqual(j10["plan"]["rule"]["l"], L, places=3)              # 상한 3 < 9 -- 10배에선 안 묶인다
+            self.assertAlmostEqual(j10["plan"]["rule"]["l"], L, places=3)              # 상한 2 < 9 -- 10배에선 안 묶인다
         self._run(account([]), fn)
 
     def test_bad_rule_is_rejected_not_ignored(self) -> None:
@@ -264,12 +264,12 @@ class RecRuleEntryTest(unittest.TestCase):
 
 
     def test_manual_entry_shares_rule_cap_when_rule_armed(self) -> None:
-        """2026-10-20 사용자 «규칙 상한 공유»: 자동 규칙 손절이 무장돼 있으면 수동 진입(규칙 없음)도 계좌 명목 ≤ 순자산 × 3."""
+        """2026-10-20 사용자 «규칙 상한 공유»: 자동 규칙 손절이 무장돼 있으면 수동 진입(규칙 없음)도 계좌 명목 ≤ 순자산 × 규칙 상한(10-25 부터 2)."""
         armed = {f"{SYM}:LONG": {"symbol": SYM, "side": "LONG", "sl_price": 2375.0, "backstop_price": 2375.0, "rule": True, "armed_at": 1.0}}
         async def fn(c):
             p = (await (await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=100")).json())["plan"]
-            self.assertAlmostEqual(p["cap_notional_usdt"], 1000 * 3.0, delta=0.01)
-            self.assertLessEqual(p["total_notional_usdt"], 1000 * 3.0 + 1e-6)
+            self.assertAlmostEqual(p["cap_notional_usdt"], 1000 * L, delta=0.01)
+            self.assertLessEqual(p["total_notional_usdt"], 1000 * L + 1e-6)
         self._run(account([long_pos(0.4, 2500.0)]), fn, armed=armed)
 
         async def fn2(c):   # 규칙 무장이 없으면 그대로(증거금 50% 상한 = 1000 × 20 × 50%)

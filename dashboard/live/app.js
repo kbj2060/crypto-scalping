@@ -4109,7 +4109,8 @@ function mcUsSession(nowMs = Date.now()) {
 const MC_EG_H = 160;
 let mcEntryEl = null;   // 판을 다시 그려도 같은 상자를 다시 붙인다
 const mcEntryBox = () => mcEntryEl || (mcEntryEl = Object.assign(document.createElement("div"), { id: "mcEntry", className: "mc-eg" }));
-// 크기 = 권장 2배(10-24 실원장 생존표: 2배+−5% 손절은 1년 −30% 낙폭 1.7% · 3배 26%) · 변동성이 평소보다 크면 2 ÷ 평소 대비 배수로 줄인다.
+// 크기 = 2배 고정(10-25 사용자 «크기는 2배로» · 서버 자동 규칙 COMMIT_CAP_X 와 같다). 10-24 판은 변동성이 평소보다 크면 2 ÷ 배수로 줄였는데,
+//   실원장 재생에서 변동성·ML 로 크기를 바꾸는 장치는 고정 크기보다 나을 게 없었다(같은 평균 1.73배: 고정 ×3.85·MDD −9.1% vs 변동성 ×3.55·−10.5%).
 //   진입 = 규칙 B 그대로(첫 1/3 → 첫 진입가 ∓0.75% 에 2/3 · 손절 첫 진입가 ∓5%). 계좌 전체 명목(교차 마진)으로 여유를 잰다.
 const EG_L = 2, EG_STOP = 0.05, EG_ADD = 0.0075;
 function egData() {
@@ -4119,7 +4120,7 @@ function egData() {
   const N = pos.reduce((s, p) => s + Math.abs(Number(p.notional || 0)), 0);
   const v = latestVol4h && latestVol4h.ok && (latestVol4h.asset || "eth") === a ? latestVol4h : null;
   const b = boxNow(), b1 = b && b.scales["1h"] && b.scales["1h"].ok ? b.scales["1h"] : null;
-  const lvl = v ? v.lvl : 1, L = Math.min(EG_L, EG_L / Math.max(lvl, 1e-9)), cap = L * E;
+  const lvl = v ? v.lvl : 1, L = EG_L, cap = L * E;
   const mine = pos.map((p) => {
     const side = String(p.side).toUpperCase(), ar = armed[`${p.symbol}:${side}`] || {};
     return { coin: String(p.symbol).replace(/USD[CT]$/, ""), side, x: E ? Math.abs(p.notional) / E : 0, slOff: !ar.sl_price || !!ar.sl_off, avg: Number(p.entry_price) };
@@ -4158,7 +4159,6 @@ function renderEntryRuler() {
       + avg.map((r) => `<path d="M${x(r)} ${ay - 3} l-4 -7 h8 z" class="avg"/>`).join("") + `</svg>`
       + `<div class="eg-key">${s ? `<span><i class="k1"></i>4h 1σ ±${(s * 100).toFixed(2)}%</span><span><i class="k3"></i>3σ</span>` : ""}`
       + `${d.b1 ? `<span><i class="kb"></i>1h 칸 머물 ${Math.round(d.b1.p * 100)}%</span>` : ""}${avg.length ? `<span><i class="ka"></i>내 평단</span>` : ""}`
-      + `${d.sig != null ? `<span>변동성 평소 ${d.lvl.toFixed(2)}배</span>` : ""}`
       + `${full ? `<span class="eg-cap">계좌가 비었을 때 · 권장 ${d.L.toFixed(1)}배 = ${usd(d.cap)}</span>` : ""}</div>`;
   }
   if (box._h !== html) { box._h = html; box.innerHTML = html; }
@@ -9055,17 +9055,17 @@ function manualRule() {
   const v = el("snapRule")?.value || "0";
   return MANUAL_RULES && RULE_ASSETS.has(activeSnapshotAsset) ? ({ 1: "c", h: "h" }[v] || "") : "";
 }
-const ruleCap = () => (el("snapRule")?.value === "h" ? 1.5 : 3);   // = live_manual_peg_entry HOLD_CAP_X / COMMIT_CAP_X
+const ruleCap = () => (el("snapRule")?.value === "h" ? 1.5 : 2);   // = live_manual_peg_entry HOLD_CAP_X / COMMIT_CAP_X
 // 서버 live_manual_peg_entry.commit_rule_l 과 같은 식(화면 표시용 -- 실제 크기·손절은 누를 때 서버 미리보기가 정한다)
 // 2026-10-10 동일위험: L = min(손절 시 순자산 손실 b ÷ 손절폭, 청산 안전, 10) -- 옛 «12.4 × 권장배수»는 손절 1회에 순자산 69~82%(원장 재생)
 // 2026-10-11 사용자 최종 «×15.2 + −3% 스톱»: L = min(12.4 × 권장배수, 청산 안전(손절 거리 max(3σ24, 3%)), 10) · 손절 첫 진입가 ∓3% 고정
-// 2026-10-14 사용자 «권장 B»: 상한 6 → 3배 · 손절 ∓3% → ∓5%(첫 1/3 · ∓0.75% 물타기 그대로)
+// 2026-10-14 사용자 «권장 B»: 상한 6 → 3배 · 손절 ∓3% → ∓5%(첫 1/3 · ∓0.75% 물타기 그대로) · 10-25 «크기는 2배로»: 상한 3 → 2배
 const RULE_STOP_PCT = 0.05;       // = live_manual_peg_entry.RULE_STOP_PCT (test_rule_size_parity 가 대조)
 const REC_FIRST_SHARE = 1 / 3;    // = live_manual_peg_entry.REC_FIRST_SHARE -- 첫 진입 = 상한의 1/3(10-14 사용자 «첫 1/3 → −0.75%에 2/3»)
-function commitRuleL(side, sigmaBp4h, vm, cap = 3) {
+function commitRuleL(side, sigmaBp4h, vm, cap = 2) {
   const sd = Math.max(3 * sigmaBp4h * Math.sqrt(6) / 1e4, RULE_STOP_PCT);   // 청산 안전용 거리
   const den = side === "LONG" ? 1 - 0.98 * (1 - sd) * 0.995 / (1 - 0.0066) : 1.02 * (1 + sd) * 1.005 / 1.0066 - 1;
-  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, cap), sd: RULE_STOP_PCT };   // 상한 3 = live_manual_peg_entry.COMMIT_CAP_X(10-14 권장 B, 옛 6 · 10)
+  return { l: Math.min(4 * 0.303 * 10.26 * vm, den > 0 ? 1 / den : Infinity, cap), sd: RULE_STOP_PCT };   // 상한 2 = live_manual_peg_entry.COMMIT_CAP_X(10-25, 옛 3 · 6 · 10)
 }
 // «손절 시 순자산 −X%» = 지금 L × 3%(두 방향 중 큰 쪽) -- 권장 배수가 없으면 손절 거리만
 function ruleRiskText() {
@@ -9079,7 +9079,7 @@ function renderRuleBox() {
   const box = el("snapRuleBox"), r = manualRule();
   if (box) {
     box.hidden = !MANUAL_RULES || !RULE_ASSETS.has(activeSnapshotAsset);
-    box.title = activeSnapshotAsset === "eth" ? "" : `🔴자동 규칙 상수(상한 3배 · 첫 1/3 · 물타기 ∓0.75% · 손절 ∓5%)는 ETH 원장으로 검정했습니다 — ${coinUnit()} 는 권장 배수만 ${coinUnit()} 기준으로 맞췄고 규칙 자체는 검정 안 함`;
+    box.title = activeSnapshotAsset === "eth" ? "" : `🔴자동 규칙 상수(상한 2배 · 첫 1/3 · 물타기 ∓0.75% · 손절 ∓5%)는 ETH 원장으로 검정했습니다 — ${coinUnit()} 는 권장 배수만 ${coinUnit()} 기준으로 맞췄고 규칙 자체는 검정 안 함`;
   }
   const t = ruleRiskText();
   document.querySelectorAll(".rule-risk").forEach((n) => { if (n.textContent !== t) n.textContent = t; });
