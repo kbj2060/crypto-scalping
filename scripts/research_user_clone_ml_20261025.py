@@ -20,6 +20,7 @@ OUT = SYS.ROOT / "tmp" / "user_clone_ml_20261025"
 TRAIN = ("2026-08-01", "2026-10-21 23:55"); TEST = ("2022-01-08", "2026-07-31 23:55"); REF = ("2026-08-01", "2026-10-23 23:55")
 FEAT_A = ["s", "sr1h", "sr4h", "sr24h", "sr7d", "rv24h", "rv_ratio", "dist_adv", "trend_same", "hsin", "hcos"]
 FEAT_B = FEAT_A[1:]
+FEAT_C = FEAT_A + ["rv1h", "rv4h", "rv7d", "park24", "jump24"]   # 10-25 «변동성 피쳐까지» (docs/prereg/user_clone_vol_20261025.md)
 POS_F = ["unr", "mfe", "mae", "loghold", "sr1h", "rv24h"]
 CAP, ADD, STOP, TAKER, THRU, WIN, MAXH = 2.0, 0.0075, 0.05, 4e-4, 1e-4, 12, 168 * 12
 HOLD_MED_H = 1.42
@@ -39,7 +40,8 @@ def side_feats(f, s):
     s = np.asarray(s, float)
     return pd.DataFrame({"s": s, "sr1h": s * f.r1h.values, "sr4h": s * f.r4h.values, "sr24h": s * f.r24h.values, "sr7d": s * f.r7d.values,
                          "rv24h": f.rv24h.values, "rv_ratio": f.rv_ratio.values, "dist_adv": np.where(s > 0, f.lo24.values, f.hi24.values),
-                         "trend_same": s * f.trend.values, "hsin": f.hsin.values, "hcos": f.hcos.values})
+                         "trend_same": s * f.trend.values, "hsin": f.hsin.values, "hcos": f.hcos.values,
+                         "rv1h": f.rv1h.values, "rv4h": f.rv4h.values, "rv7d": f.rv7d.values, "park24": f.park24.values, "jump24": f.jump24.values})
 
 
 def pos_feats(P0, s, c_now, mfe, mae, k, sr1h, rv24h):
@@ -92,14 +94,14 @@ def exit_rows(x, f, L):
     return np.array(X), np.array(y)
 
 
-def replay_hold(x, f, L, ex, tau):
+def replay_hold(x, f, L, ex, tau, d=None):
     """학습 왕복에 청산 모델(+−5% 손절·168h)을 걸었을 때 보유 시간(h) 중앙."""
     a, _ = ledger_bars(x, L); c, h, l = x.c.values, x.h.values, x.l.values; holds = []
     for i in range(len(L)):
-        s, P0 = L.s.values[i], c[a[i]]; mfe = mae = 0.0; j = a[i]
+        s, P0 = L.s.values[i], c[a[i]]; mfe = mae = 0.0; j = a[i]; sd = STOP if d is None else d[a[i]]
         while True:
             j += 1; k = j - a[i]
-            if (s > 0 and l[j] <= P0 * (1 - STOP)) or (s < 0 and h[j] >= P0 * (1 + STOP)) or k >= MAXH or j >= len(c) - 1:
+            if (s > 0 and l[j] <= P0 * (1 - sd)) or (s < 0 and h[j] >= P0 * (1 + sd)) or k >= MAXH or j >= len(c) - 1:
                 break
             u = s * (c[j] / P0 - 1); mfe, mae = max(mfe, u), min(mae, u)
             if ex.p(pos_feats(P0, s, c[j], mfe, mae, k, s * f.r1h.values[j], f.rv24h.values[j])[None])[0] >= tau:
@@ -108,15 +110,15 @@ def replay_hold(x, f, L, ex, tau):
     return float(np.median(holds))
 
 
-def calib_tau(x, f, L, ex):
+def calib_tau(x, f, L, ex, d=None):
     lo, hi = 1e-4, 0.9
     for _ in range(40):
         mid = math.sqrt(lo * hi)
-        lo, hi = (lo, mid) if replay_hold(x, f, L, ex, mid) > HOLD_MED_H else (mid, hi)   # 오래 보유하면 문턱을 낮춘다
+        lo, hi = (lo, mid) if replay_hold(x, f, L, ex, mid, d) > HOLD_MED_H else (mid, hi)   # 오래 보유하면 문턱을 낮춘다
     return math.sqrt(lo * hi)
 
 
-def sim(x, f, fund, side, ex, tau, win, cap_frac=CAP, forced_exit=None):
+def sim(x, f, fund, side, ex, tau, win, cap_frac=CAP, forced_exit=None, stop_arr=None, lev_arr=None):
     """5분 순차 한 코인. side[i] = 봉 i 종가 신호(±1/0). forced_exit = {신호 봉: 청산 봉}(S1). 반환 (일 수익률, 거래 목록)."""
     c, h, l = x.c.values, x.h.values, x.l.values; r1h, rv = f.r1h.values, f.rv24h.values
     i0, i1 = x.index.get_indexer([pd.Timestamp(win[0]), pd.Timestamp(win[1])])
@@ -144,9 +146,10 @@ def sim(x, f, fund, side, ex, tau, win, cap_frac=CAP, forced_exit=None):
         elif pend is not None:
             s_, P0, k0 = pend; hit = (l[i] <= P0 * (1 - THRU)) if s_ > 0 else (h[i] >= P0 * (1 + THRU))
             if hit or i - k0 >= WIN:
-                px = P0 if hit else c[i]; cap = cap_frac * C; q1 = s_ * cap / 3 / px
+                px = P0 if hit else c[i]; cap = (cap_frac if lev_arr is None else lev_arr[k0]) * C; q1 = s_ * cap / 3 / px
+                sd = STOP if stop_arr is None else stop_arr[k0]   # 신호 봉의 손절 폭(10-25 변동성 손절)
                 C0 = C; C -= q1 * px + (0 if hit else TAKER * abs(q1) * px); q, pos = q1, s_
-                st = dict(i=i, sig=k0, P0=px, stp=px * (1 - s_ * STOP), addpx=px * (1 - s_ * ADD), mfe=0.0, mae=0.0, C0=C0)
+                st = dict(i=i, sig=k0, P0=px, stp=px * (1 - s_ * sd), addpx=px * (1 - s_ * ADD), mfe=0.0, mae=0.0, C0=C0)
                 st["addq"] = s_ * (2 * cap / 3) / st["addpx"]; pend = None
         if not pos and pend is None and side[i]:
             pend = (int(side[i]), c[i], i)
@@ -176,11 +179,52 @@ def random_side(side, i0, i1, seed):
 
 
 def _null_job(seed):
-    g = _G; return stats(sim(g["x"], g["f"], g["fund"], random_side(g["side"], g["i0"], g["i1"], seed), g["ex"], g["tau"], TEST)[0])["sharpe"]
+    g = _G; return stats(sim(g["x"], g["f"], g["fund"], random_side(g["side"], g["i0"], g["i1"], seed), g["ex"], g["tau"], TEST,
+                             stop_arr=g.get("d"), lev_arr=g.get("lev"))[0])["sharpe"]
+
+
+def vol_stop_size(f, k):
+    """10-25 변동성 손절 d = clip(k × rv24h, 2%, 12%) · 같은 위험 크기 L = min(2, 0.10 / d)(손절 시 순자산 ≈ 10%)."""
+    d = np.clip(k * f.rv24h.values, 0.02, 0.12); d = np.where(np.isfinite(d), d, STOP)
+    return d, np.minimum(CAP, 0.10 / d)
+
+
+def vol_main(data, F, FU, L, ex):
+    x, f = data["ETH"], F["ETH"]; prev = json.loads((OUT / "report.json").read_text())
+    i0, i1 = x.index.get_indexer([pd.Timestamp(TEST[0]), pd.Timestamp(TEST[1])])
+    # 자체 점검: d = 5% · L = 2 면 직전 변형 A 를 그대로 재현
+    mA, thrA, sideA = fit_entry(x, f, L, FEAT_A); n = len(x)
+    rA, trA = sim(x, f, FU["ETH"], sideA, ex, prev["tau"], TEST, stop_arr=np.full(n, STOP), lev_arr=np.full(n, CAP))
+    assert len(trA) == prev["A"]["trades"] and abs(stats(rA)["sharpe"] - prev["A"]["sharpe"]) < 1e-9, (len(trA), stats(rA)["sharpe"])
+    print(f"재현: d 5%·L 2 → 거래 {len(trA)} · 샤프 {stats(rA)['sharpe']:.4f} = 직전 A", flush=True)
+    m, thr, side = fit_entry(x, f, L, FEAT_C)
+    rep = {"prereg": "docs/prereg/user_clone_vol_20261025.md@95b57760", "entry_coef_C": dict(zip(FEAT_C, m.m.coef_[0].round(3).tolist())), "thr": thr,
+           "signals_test": int((side[i0:i1 + 1] != 0).sum()), "prev_A": {k_: prev["A"][k_] for k_ in ("trades", "win_rate", "sharpe", "ann", "mdd")}}
+    for k in (1.5, 2.0, 3.0):
+        d, lev = vol_stop_size(f, k); tau = calib_tau(x, f, L, ex, d)
+        r, tr = sim(x, f, FU["ETH"], side, ex, tau, TEST, stop_arr=d, lev_arr=lev); st = stats(r)
+        yr = {str(y): float((1 + v).prod() - 1) for y, v in r.groupby(r.index.year)}
+        _G.update(x=x, f=f, fund=FU["ETH"], side=side, ex=ex, tau=tau, i0=i0, i1=i1, d=d, lev=lev)
+        with ProcessPoolExecutor(10) as pool:
+            nulls = list(pool.map(_null_job, range(100)))
+        coins = {}
+        for s_ in ("BTC", "SOL", "XRP"):
+            ds, ls = vol_stop_size(F[s_], k)
+            coins[s_] = stats(sim(data[s_], F[s_], FU[s_], entry_side(m, F[s_], FEAT_C, thr)[0], ex, tau, TEST, stop_arr=ds, lev_arr=ls)[0])["sharpe"]
+        sig = np.flatnonzero(side[i0:i1 + 1]) + i0
+        g = {"tau": tau, "stop_median": float(np.median(d[sig])), "stop_p10_p90": [float(np.percentile(d[sig], 10)), float(np.percentile(d[sig], 90))],
+             "lev_median": float(np.median(lev[sig])), "trades": len(tr), "win_rate": float(np.mean([t[4] > 0 for t in tr])) if tr else None,
+             "exit_why": pd.Series([t[3] for t in tr]).value_counts().to_dict(), "worst_trade": float(min(t[4] for t in tr)) if tr else None,
+             **st, "yearly": yr, "null_p9833": float(np.percentile(nulls, 98.33)), "null_median": float(np.median(nulls)), "coins_sharpe": coins}
+        g["gates"] = {"G1": g["ann"] > 0 and g["ci"][0] > 0, "G2": g["mdd"] >= -0.20, "G3": g["sharpe"] > g["null_p9833"],
+                      "G4": sum(yr.get(str(y), -1) > 0 for y in (2022, 2023, 2024, 2025)) >= 3, "G5": sum(v > 0 for v in coins.values()) >= 2}
+        g["pass"] = all(g["gates"].values()); rep[f"k{k:g}"] = g
+        print(f"k{k:g}", json.dumps({x_: g[x_] for x_ in ("trades", "win_rate", "sharpe", "ann", "mdd", "stop_median", "gates")}, ensure_ascii=False), flush=True)
+    (OUT / "report_vol.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=float)); print(json.dumps(rep, indent=1, ensure_ascii=False, default=float))
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--selfcheck", action="store_true"); a = ap.parse_args(); OUT.mkdir(parents=True, exist_ok=True)
+    ap = argparse.ArgumentParser(); ap.add_argument("--selfcheck", action="store_true"); ap.add_argument("--vol", action="store_true"); a = ap.parse_args(); OUT.mkdir(parents=True, exist_ok=True)
     data = {s: SYS.bars5(s)[0] for s in SYS.COINS}; F = {s: mkt(x) for s, x in data.items()}; FU = {s: fund_idx(x, s) for s, x in data.items()}
     x, f = data["ETH"], F["ETH"]; L = SYS.ledger_trips()
     Xe, ye = exit_rows(x, f, L); ex = Logit(Xe, ye)
@@ -198,6 +242,8 @@ def main():
         c = x.c.values; s0, a0 = L.s.values[0], aa[0]; u = s0 * (c[a0 + 1] / c[a0] - 1)
         assert np.allclose(Xe[0], pos_feats(c[a0], s0, c[a0 + 1], max(0, u), min(0, u), 1, s0 * f.r1h.values[a0 + 1], f.rv24h.values[a0 + 1]), atol=1e-12)
         print(f"S3 청산 학습 첫 행 = pos_feats 재계산 · 학습 행 {len(Xe)} · 청산 행 {int(ye.sum())}"); print("SELFCHECK PASS"); return
+    if a.vol:
+        return vol_main(data, F, FU, L, ex)
     tau = calib_tau(x, f, L, ex); print(f"청산 문턱 τ {tau:.4f} (학습 왕복 보유 중앙 {replay_hold(x, f, L, ex, tau):.2f}h)", flush=True)
     rep = {"prereg": "docs/prereg/user_clone_ml_20261025.md@f1041187", "tau": tau, "exit_coef": dict(zip(POS_F, ex.m.coef_[0].round(3).tolist()))}
     i0, i1 = x.index.get_indexer([pd.Timestamp(TEST[0]), pd.Timestamp(TEST[1])])
