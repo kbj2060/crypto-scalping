@@ -432,6 +432,52 @@ def roll_pool():
     (OUT / "report_r5_pooled.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out["verdict"], ensure_ascii=False))
 
 
+# ---------- 6라운드 (0311d90e): 결합 방식 — 저장된 3창 예측만 ----------
+MEMB = ["M3", "M6", "PX3", "PX6", "G1"]
+
+
+def _c(y, yh):
+    return float(np.log(np.mean(np.exp(y - yh))))
+
+
+def _fit_w(P, y):
+    from scipy.optimize import minimize
+    k = P.shape[1]; f = lambda w: qlike(y, P @ w + _c(y, P @ w)).mean()   # noqa: E731
+    r = minimize(f, np.full(k, 1 / k), method="SLSQP", bounds=[(0, 1)] * k, constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1}])
+    return r.x
+
+
+def round6():
+    tags = ("5W1", "5W2", "4"); out = {}
+    for s in COINS:
+        val, tst, cm3, days = {k: 0.0 for k in ("QX4", "QW", "QM")}, {}, [], {}
+        diffs = {k: [] for k in ("QX4", "QW", "QM")}; dvq = {k: [] for k in ("QW", "QM")}; wts = {}
+        for tg in tags:
+            V, T = pd.read_parquet(OUT / f"pred_val_r{tg}_{s}.parquet"), pd.read_parquet(OUT / f"pred_test_r{tg}_{s}.parquet")
+            Pv, Pt = V[[f"v_{m}" for m in MEMB]].to_numpy(), T[[f"t_{m}" for m in MEMB]].to_numpy(); yv, yt = V.y.values, T.y.values
+            h = len(yv) // 2; w_ab, w_ba = _fit_w(Pv[:h], yv[:h]), _fit_w(Pv[h:], yv[h:])
+            cf = lambda yh_fit, y_fit: _c(y_fit, yh_fit)   # noqa: E731
+            sc_qw = (qlike(yv[h:], Pv[h:] @ w_ab + cf(Pv[:h] @ w_ab, yv[:h])).sum() + qlike(yv[:h], Pv[:h] @ w_ba + cf(Pv[h:] @ w_ba, yv[h:])).sum()) / len(yv)
+            w = _fit_w(Pv, yv); wts[tg] = np.round(w, 3).tolist()
+            comb = {"QX4": (Pv[:, :4].mean(1), Pt[:, :4].mean(1)), "QW": (Pv @ w, Pt @ w), "QM": (np.median(Pv, 1), np.median(Pt, 1))}
+            for k, (pv_, pt_) in comb.items():
+                c = _c(yv, pv_); val[k] += (sc_qw if k == "QW" else qlike(yv, pv_ + c).mean()) / len(tags)
+                Lk = qlike(yt, pt_ + c); L3 = qlike(yt, T.t_M3.values + _c(yv, V.v_M3.values))
+                diffs[k].append(pd.Series(Lk - L3, index=T.index).groupby(T.index.normalize()).mean())
+                if k != "QX4":
+                    Lx = qlike(yt, Pt[:, :4].mean(1) + _c(yv, Pv[:, :4].mean(1)))
+                    dvq[k].append(pd.Series(Lk - Lx, index=T.index).groupby(T.index.normalize()).mean())
+        S = min(val, key=val.get); cell = {"val_score": val, "S": S, "weights_QW": wts}
+        for k in diffs:
+            ser = pd.concat(diffs[k]).values; lo, hi = block_ci(ser, b=5, n=4000); cell[f"{k}_vs_M3"] = [float(ser.mean()), float(lo), float(hi)]
+        for k in dvq:
+            ser = pd.concat(dvq[k]).values; lo, hi = block_ci(ser, b=5, n=4000); cell[f"{k}_vs_QX4"] = [float(ser.mean()), float(lo), float(hi)]
+        out[s] = cell
+        print(s, "S", S, {k: round(v, 4) for k, v in val.items()}, "| vs M3", {k: np.round(cell[f'{k}_vs_M3'], 4).tolist() for k in diffs},
+              "| vs QX4", {k: np.round(cell[f'{k}_vs_QX4'], 4).tolist() for k in dvq}, "| QW 가중", wts, flush=True)
+    (OUT / "report_r6.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if "--selfcheck" in a:
@@ -439,6 +485,8 @@ if __name__ == "__main__":
     if "--round2" in a:
         pooled_round(2, [("P3", "M3"), ("P6", "M6")], {"C36": ["M3", "M6"], "PC": ["P3", "P6"]}, {1: ["M0", "M3", "M6", "M3j"]},
                      ("M0", "M3", "M3j", "M6")); sys.exit(0)
+    if "--round6" in a:
+        round6(); sys.exit(0)
     if "--roll" in a:
         for tg, bb in ROLL.items():
             round4(b=bb, tag=tg, losses=(("G1", "mse"),))
