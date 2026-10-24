@@ -147,10 +147,10 @@ def test_sub_panels_tile_without_overlap():
     assert wide["subLegendY"] == env["mtTop"], "2단에서 밀도 범례가 풋프린트 바로 위(맨 위)가 아니다"
     # 2단(2026-09-28 2차): 오른쪽 칸 = 1초 수급, 지지/저항 = 왼쪽 레인 **아래** SR_BELOW 줄.
     # 2026-09-30 시안 Y: ETH 는 위 절반만 1초 수급, 아래 절반은 시장 맥락(mcPlace) -- 다른 코인은 전체 높이 그대로.
-    # 2026-10-13 시장 맥락 칸 맨 위에 체결 버블(높이 = 1초 수급 × MC_BUBBLE_K) -- 남는 높이(칸 − 내용 − 여백)를 1 + K 로 나눈다
-    assert "const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.3), mcNeedH ? Math.round((s1Avail - mcNeedH - 16 - 8) / (1 + MC_BUBBLE_K))" in JS and "placeLevelList" not in JS
-    assert "Math.round(s1H * MC_BUBBLE_K)" in JS   # 버블 높이가 같은 비율로 정해진다(따로 놀면 칸 바닥을 넘는다)
-    assert "mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1H + 12, w: subW - 16" in JS   # 절반 아래 칸이 시장 맥락 자리
+    # 2026-10-24 시장 맥락 칸 맨 위 = «지금 들어가면» 가격 자(고정 높이 MC_EG_H) -- 1초 수급 = 칸 − 내용 − 여백 − 가격 자
+    assert "const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8 - MC_EG_H)" in JS and "placeLevelList" not in JS
+    assert "const bh = `${MC_EG_H + s1Give}px`" in JS   # 가격 자 높이 = 1초 수급 몫에서 뺀 그 값(따로 놀면 칸 바닥을 넘는다)
+    assert "mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16" in JS   # 절반 아래 칸이 시장 맥락 자리
 
     # 2026-10-01 1단(휴대폰·세로)은 1초 수급이 풋프린트 **아래**(사용자 지시): 위 = 범례 + 호가 요약 줄 · 아래 = 1초 수급.
     #   상자 총높이(CSS 계약)는 그대로여야 한다 -- 위 몫 + 아래 몫 = 예전 1단 SUB_TOTAL.
