@@ -100,7 +100,7 @@ def fit_predict(m, Ftr, ytr, Fte):
     if m in ("M0", "M1", "M2"):
         b = np.linalg.lstsq(design(Ftr, m), ytr, rcond=None)[0]
         return design(Fte, m) @ b
-    if m in ("M3", "M4", "M3X"):
+    if m in ("M3", "M4", "M3X", "M3XF"):
         from sklearn.ensemble import HistGradientBoostingRegressor
         A, B = (np.nan_to_num(F[SETS[m]].to_numpy(float)) for F in (Ftr, Fte))
         return np.mean([HistGradientBoostingRegressor(max_iter=300, learning_rate=0.06, max_depth=6, random_state=int(s))
@@ -111,8 +111,8 @@ def fit_predict(m, Ftr, ytr, Fte):
         return np.mean([lgb.LGBMRegressor(num_leaves=63, learning_rate=0.03, n_estimators=800, min_child_samples=200, subsample=0.8,
                                           subsample_freq=1, colsample_bytree=0.8, reg_lambda=1.0, random_state=int(s), verbose=-1, n_jobs=8)
                         .fit(A, ytr).predict(B) for s in SEEDS], axis=0)
-    if m in ("M6", "M6X"):
-        return mlp(Ftr, ytr, Fte, SETS["M4X" if m == "M6X" else "M4"])
+    if m in ("M6", "M6X", "M6XF"):
+        return mlp(Ftr, ytr, Fte, SETS[{"M6": "M4", "M6X": "M4X", "M6XF": "M4XF"}[m]])
     raise KeyError(m)
 
 
@@ -478,6 +478,67 @@ def round6():
     (OUT / "report_r6.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
 
 
+# ---------- 7라운드 (a7aa193b): 레버리지·포지셔닝 피쳐 ----------
+LEV = ["fund_last", "fund_7d", "oi_ch12", "oi_ch288", "oi_z", "top_ls", "taker_ls12"]
+SETS["M3XF"], SETS["M4XF"] = SETS["M3X"] + LEV, SETS["M4X"] + LEV
+PANEL_END = pd.Timestamp("2026-09-14 23:55")
+
+
+def lev_feats(sym, idx):
+    """봉 i 마감까지 알려진 레버리지 피쳐. OI·롱숏 열은 2봉 늦춤(패널 기록 지연 함정). 펀딩 = 정산 시각 ≤ 봉 마감."""
+    p = pd.read_parquet(SYS.D / f"binance_vision/panel/{sym}USDT.parquet",
+                        columns=["timestamp", "sum_open_interest", "sum_toptrader_long_short_ratio", "sum_taker_long_short_vol_ratio"]).set_index("timestamp").reindex(idx)
+    oi = np.log(p.sum_open_interest.where(p.sum_open_interest > 0)).shift(2)
+    f = pd.DataFrame({"oi_ch12": oi - oi.shift(12), "oi_ch288": oi - oi.shift(288), "oi_z": (oi - oi.rolling(8640).mean()) / oi.rolling(8640).std(),
+                      "top_ls": p.sum_toptrader_long_short_ratio.shift(2), "taker_ls12": p.sum_taker_long_short_vol_ratio.shift(2).rolling(12).mean()}, index=idx)
+    fu = pd.read_parquet(SYS.OUT / f"rest_fund_{sym}.parquet"); fs = pd.Series(fu.rate.values, index=pd.to_datetime(fu.t, unit="ms")).sort_index()
+    end = pd.DataFrame({"t": idx + pd.Timedelta("5min")})
+    m = pd.merge_asof(end, pd.DataFrame({"t": fs.index, "r": fs.values, "r7": fs.rolling("7D").mean().values}), on="t")
+    f["fund_last"], f["fund_7d"] = m.r.values, m.r7.values
+    return f
+
+
+def round7():
+    fr, oks = {}, {}
+    for s in COINS:
+        x, F, y, ok, miss = frame(s); fr[s] = (F, y); oks[s] = (x.index, ok)
+    add_mkt(fr)
+    for s in COINS:
+        F = fr[s][0]; L = lev_feats(s, F.index)
+        for c in LEV:
+            F[c] = L[c].values
+    for tg, (tr0, tr1, va0, va1, te0, te1) in list(ROLL.items()) + [("4", (TR4_START, TR4_END, VA4_START, VA4_END, TE4_START, PANEL_END))]:
+        te1 = min(te1, PANEL_END) if te1 is not None else PANEL_END; M = {}
+        for s in COINS:
+            (ts, ok), F = oks[s], fr[s][0]
+            ok = ok & np.isfinite(F[MKT].to_numpy(float)).all(1); le = ts + pd.Timedelta(minutes=5 * H); dec = ok & (ts.minute == 55)
+            M[s] = dict(tr=ok & (ts >= tr0) & (le <= tr1), va=dec & (ts >= va0) & (le <= va1), te=dec & (ts >= te0) & (ts <= te1 - pd.Timedelta(minutes=5 * H)) & (le <= (te1 if tg != "4" else pd.Timestamp(SYS.END) + pd.Timedelta("23:55:00"))))
+        A = pd.concat([fr[s][0][M[s]["tr"]] for s in COINS]); ya = np.concatenate([fr[s][1][M[s]["tr"]] for s in COINS])
+        E = pd.concat([pd.concat([fr[s][0][M[s]["va"]], fr[s][0][M[s]["te"]]]) for s in COINS]); cuts = np.cumsum([M[s]["va"].sum() + M[s]["te"].sum() for s in COINS])[:-1]
+        new = {m: dict(zip(COINS, np.split(fit_predict(base, A, ya, E), cuts))) for m, base in (("PX3F", "M3XF"), ("PX6F", "M6XF"))}
+        for s in COINS:
+            F, y = fr[s]; ts = oks[s][0]; nv = M[s]["va"].sum(); tsv, tst = ts[M[s]["va"]], ts[M[s]["te"]]
+            V, T = pd.read_parquet(OUT / f"pred_val_r{tg}_{s}.parquet"), pd.read_parquet(OUT / f"pred_test_r{tg}_{s}.parquet")
+            V, T = V.reindex(tsv), T.reindex(tst); assert V.notna().all().all() and T.notna().all().all(), (tg, s)
+            pv = {"QX4": V.v_QX4.values, "QX4F": np.mean([V.v_M3, V.v_M6, new["PX3F"][s][:nv], new["PX6F"][s][:nv]], 0), "M3": V.v_M3.values}
+            pt = {"QX4": T.t_QX4.values, "QX4F": np.mean([T.t_M3, T.t_M6, new["PX3F"][s][nv:], new["PX6F"][s][nv:]], 0), "M3": T.t_M3.values}
+            pd.DataFrame({**{f"v_{k}": v for k, v in pv.items()}, "y": y[M[s]["va"]]}, index=tsv).to_parquet(OUT / f"pred_val_r7{tg}_{s}.parquet")
+            pd.DataFrame({**{f"t_{k}": v for k, v in pt.items()}, "y": y[M[s]["te"]]}, index=tst).to_parquet(OUT / f"pred_test_r7{tg}_{s}.parquet")
+        print(f"7라운드 창 {tg} 완료 · 시험 끝 {te1}", flush=True)
+    out = {}
+    for s in COINS:
+        days, per = [], {}
+        for tg in ("5W1", "5W2", "4"):
+            V, T = pd.read_parquet(OUT / f"pred_val_r7{tg}_{s}.parquet"), pd.read_parquet(OUT / f"pred_test_r7{tg}_{s}.parquet")
+            Lq = lambda m: qlike(T.y.values, T[f"t_{m}"].values + float(np.log(np.mean(np.exp(V.y.values - V[f"v_{m}"].values)))))  # noqa: E731
+            d = pd.Series(Lq("QX4F") - Lq("QX4"), index=T.index).groupby(T.index.normalize()).mean(); days.append(d); per[tg] = float(d.mean())
+        ser = pd.concat(days).values; lo, hi = block_ci(ser, b=5, n=4000); out[s] = {"mean": float(ser.mean()), "ci": [float(lo), float(hi)], "per_window": per}
+        print(s, "QX4F−QX4 %+.4f [%+.4f,%+.4f]" % (ser.mean(), lo, hi), {k: round(v, 4) for k, v in per.items()}, flush=True)
+    e = out["ETH"]; out["verdict"] = {"ETH_win": e["ci"][1] < 0 and sum(v < 0 for v in e["per_window"].values()) >= 2,
+                                      "replication": sum(out[s]["ci"][1] < 0 for s in ("XRP", "BTC", "SOL"))}
+    (OUT / "report_r7.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out["verdict"]))
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if "--selfcheck" in a:
@@ -485,6 +546,8 @@ if __name__ == "__main__":
     if "--round2" in a:
         pooled_round(2, [("P3", "M3"), ("P6", "M6")], {"C36": ["M3", "M6"], "PC": ["P3", "P6"]}, {1: ["M0", "M3", "M6", "M3j"]},
                      ("M0", "M3", "M3j", "M6")); sys.exit(0)
+    if "--round7" in a:
+        round7(); sys.exit(0)
     if "--round6" in a:
         round6(); sys.exit(0)
     if "--roll" in a:
