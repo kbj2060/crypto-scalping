@@ -139,6 +139,7 @@ from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추
 from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_rev_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
 from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
+from scripts.ops_watchdog import send_telegram  # noqa: E402 -- 지지·저항 뚫림 알림(2026-10-25)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
 from dashboard import market_ctx as mctx  # noqa: E402
 # 2026-10-08 일봉 풋프린트(사용자 «최대치 · 확대/축소 · 델타·거래대금·OI·청산») -- aggTrades 소급본 + lake/hot 테이프.
@@ -208,6 +209,20 @@ LIQUIDATION_MAP_FETCH_LIMIT = 48  # 24h window + buffer for occasional dropped/d
 # 5분이었던 것이 1분이 된다. 비용은 실측 0.35초/회(대시보드 최고는 evidence_signal 8.22초)라
 # 분당 0.6% 듀티다. 더 줄이는 건 낭비다 -- 입력이 안 바뀐다.
 LIQUIDATION_MAP_CACHE_SECONDS = 60
+
+
+def sr_breaks(sup: list[float], res: list[float], prev: float, lo: float, hi: float, broken: set, n: int = 3) -> list[tuple]:
+    """지지·저항 뚫림(2026-10-25). sup·res = 청산맵 레벨 가격(가까운 순) · prev = 지난번 가격 · lo/hi = 그 뒤 가격 범위 ·
+    broken = 이미 뚫린 레벨(갱신한다). 화면 srLevelsLive 와 같은 목록(현재가 쪽 · 안 쓸린 · 가까운 순 n개)에서
+    이번에 닿거나 지난 것 → [(이름, 레벨, 다음 같은 쪽 레벨|None)]. 닿음 = 화면 쓸림(liqSweepIdx: low ≤ 가격 ≤ high)과 같다."""
+    out = []
+    for name, levels, below in (("지지", sup, True), ("저항", res, False)):
+        shown = [p for p in levels if p not in broken and (p < prev if below else p > prev)]
+        crossed = [p for p in shown if (lo <= p if below else hi >= p)]
+        broken.update(crossed)                      # n개 밖에서 지난 것도 -- 화면에서도 쓸려 안 보인다
+        nxt = next((p for p in shown if p not in crossed), None)
+        out += [(f"{name}{i + 1}", p, nxt) for i, p in enumerate(shown[:n]) if p in crossed]
+    return out
 # 2026-10-10 포지션 프로파일(풋프린트 «포지션» 보기) 1초 -- REST 는 처음 30일 한 번 + 새 5분봉이 닫힐 때만, 형성 봉은 흐름 엔진 메모리.
 POSITION_PROFILE_CACHE_SECONDS = 1.0
 MACRO_CALENDAR_CACHE_SECONDS = 6 * 3600  # calendar dates change at most once/day -- no reason to
@@ -1865,6 +1880,49 @@ def make_app() -> web.Application:
             except Exception as exc:  # noqa: BLE001 -- 기록기 하나로 서버가 죽으면 안 된다
                 print(f"chip score: {type(exc).__name__}: {exc}", flush=True)
 
+    async def sr_break_loop() -> None:
+        """지지·저항 뚫림 텔레그램(2026-10-25 사용자 «지지와 저항라인들을 뚫었을 때마다 텔레그램»). 화면이 안 열려 있어도 돈다.
+        10초마다 코인별로 지난번 이후 1초 마지막 체결가 범위가 화면의 지지1~3·저항1~3(sr_breaks)에 닿았나 본다.
+        한 레벨은 지도 시각(밀도 이력 마지막 열의 정시 -- 화면 liqMapKnownUntilSec)이 바뀔 때까지 한 번만.
+        ponytail: 상태는 메모리 -- 재기동 직후 첫 틱은 기준만 잡는다(꺼져 있던 사이의 뚫림은 안 보낸다)."""
+        st: dict[str, dict] = {}
+        while True:
+            await asyncio.sleep(10)
+            for asset, f in flows.items():
+                try:
+                    m = await load_liquidation_map(asset)
+                    hh = m.get("heatmap_history") or []
+                    if not m.get("warmed_up") or not hh:
+                        continue
+                    ku = str(hh[-1].get("ts_utc"))[:13]
+                    s = st.get(asset)
+                    pts = [(t, float(c[6])) for t, c in sorted(list(f.footprint_state["sec"].items()))
+                           if c[6] and t > (s["sec"] if s else 0)]
+                    if not pts:
+                        continue
+                    if s is None or s["ku"] != ku:
+                        st[asset] = s = {"ku": ku, "broken": set(), "sec": (s or {}).get("sec", 0), "px": (s or {}).get("px")}
+                    prev = s["px"]
+                    s.update(sec=pts[-1][0], px=pts[-1][1])
+                    if prev is None:
+                        continue
+                    lo, hi = min(p for _, p in pts), max(p for _, p in pts)
+                    hits = sr_breaks([float(lv["price"]) for lv in m.get("support_levels") or []],
+                                     [float(lv["price"]) for lv in m.get("resistance_levels") or []], prev, lo, hi, s["broken"])
+                    if not hits:
+                        continue
+                    dp, px = f.spec.price_dp, s["px"]
+                    lines = [f"{'🔻' if name.startswith('지지') else '🔺'} <b>{asset.upper()} {name} 뚫림</b> {lv:,.{dp}f}"
+                             + (f" · 다음 {name[:2]} {nxt:,.{dp}f} ({(nxt / px - 1) * 100:+.2f}%)" if nxt else "")
+                             for name, lv, nxt in hits]
+                    msg = "\n".join(lines + [f"지금 {px:,.{dp}f}"])
+                    sent = await asyncio.to_thread(send_telegram, msg)
+                    print(f"sr break {asset}: {[h[0] for h in hits]} sent={sent}", flush=True)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- 알림 하나로 서버가 죽으면 안 된다
+                    print(f"sr break {asset}: {type(exc).__name__}: {exc}", flush=True)
+
     async def api_chip_score(request: web.Request) -> web.Response:
         asset = str(request.query.get("asset") or "eth").lower()
         if asset not in cctx:
@@ -1902,6 +1960,7 @@ def make_app() -> web.Application:
         app["micro_ref_tasks"] += [asyncio.create_task(collect_mark_price(app, a)) for a in cctx]
         app["micro_ref_tasks"].append(asyncio.create_task(collect_force_orders(app)))
         app["micro_ref_tasks"].append(asyncio.create_task(chip_score_loop()))
+        app["micro_ref_tasks"].append(asyncio.create_task(sr_break_loop()))
 
     async def stop_micro_ref(app: web.Application) -> None:
         for t in app["micro_ref_tasks"]:
