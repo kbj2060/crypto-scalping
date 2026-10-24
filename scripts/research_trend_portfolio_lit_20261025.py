@@ -284,6 +284,41 @@ def holdout4(F):
     out["pass"] = all(out["gates"].values()); hf.write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out, indent=1, ensure_ascii=False))
 
 
+# ---------------- 5회차(수정 4): 굴림 원점 3창 — 4회차 절차를 W1·W2 에 그대로 ----------------
+WIN5 = {"W1": (("2022-01-01", "2023-12-31"), ("2024-01-01", "2024-05-31"), ("2024-06-01", "2024-10-23")),
+        "W2": (("2023-01-01", "2024-12-31"), ("2025-01-01", "2025-05-31"), ("2025-06-01", "2025-10-23")),
+        "W3": (TRAIN4, VAL4, TEST4)}
+
+
+def round5(F):
+    out, R, H, NUL = {"windows": {}}, [], [], []
+    for w, (trp, vap, tep) in WIN5.items():
+        tr, va, te = (pd.date_range(*p, freq="D") for p in (trp, vap, tep)); cf = {}
+        for key in R4:
+            tau = None
+            for t in TAUS:
+                if OE.mdd(run(F, r4_weights(F, key, t), tr, band=band4(key))) >= -0.20:
+                    tau = t
+            tau = tau or TAUS[0]; W = r4_weights(F, key, tau); x = run(F, W, te, band=band4(key))
+            cf[key] = {"tau": tau, "val_sharpe": sharpe(run(F, W, va, band=band4(key))), "test_sharpe": sharpe(x), "test_ret": float((1 + x).prod() - 1), "test_mdd": OE.mdd(x), "W": W, "x": x}
+        ch = max(cf, key=lambda k: cf[k]["val_sharpe"]); W = cf[ch]["W"]; h = hold_ret(F, te)
+        R.append(cf[ch]["x"]); H.append(h)
+        NUL.append([run(F, null_targets(F, None, None, te, sd, W=W), te, band=band4(ch)) for sd in range(200)])
+        out["windows"][w] = {"chosen": ch, "hold_sharpe": sharpe(h), "hold_ret": float((1 + h).prod() - 1), "hold_mdd": OE.mdd(h),
+                             "configs": {k: {a: v for a, v in c.items() if a not in ("W", "x")} for k, c in cf.items()}}
+        print(w, ch, {k: round(c["test_sharpe"], 2) for k, c in cf.items()}, "보유 %.2f" % sharpe(h), flush=True)
+    if (OUT / "round4_test_report.json").exists():
+        r4 = json.loads((OUT / "round4_test_report.json").read_text())
+        assert abs(r4["configs"][r4["chosen"]]["sharpe"] - out["windows"]["W3"]["configs"][r4["chosen"]]["test_sharpe"]) < 1e-9 and r4["chosen"] == out["windows"]["W3"]["chosen"], "W3 재계산 ≠ 4회차"
+    r, h = pd.concat(R), pd.concat(H); nulls = [sharpe(pd.concat([NUL[i][sd] for i in range(3)])) for sd in range(200)]
+    out["pooled"] = {"sharpe": sharpe(r), "ret": float((1 + r).prod() - 1), "hold_sharpe": sharpe(h), "null_p95": float(np.percentile(nulls, 95)), "null_median": float(np.median(nulls)), "days": len(r)}
+    out["gates"] = {"P1_gt_hold": out["pooled"]["sharpe"] > out["pooled"]["hold_sharpe"],
+                    "P2_mdd_each": all(v["configs"][v["chosen"]]["test_mdd"] >= -0.20 for v in out["windows"].values()),
+                    "P3_null_p95": out["pooled"]["sharpe"] > out["pooled"]["null_p95"]}
+    out["pass"] = all(out["gates"].values())
+    (OUT / "round5_report.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps({k: out[k] for k in ("pooled", "gates", "pass")}, indent=1, ensure_ascii=False))
+
+
 # ---------------- 실행 ----------------
 def selfcheck(F):
     days = pd.date_range("2022-02-01", SYS.END, freq="D")
@@ -370,6 +405,8 @@ def main():
         F[s], miss = daily_frame(s); print(s, F[s].index[0].date(), "~", F[s].index[-1].date(), "2022~ 빈 5분봉", miss)
     if a.selfcheck:
         return selfcheck(F)
+    if a.round == 5:
+        return round5(F)
     if a.round == 4:
         return holdout4(F) if a.holdout else round4(F)
     return holdout(F, a.round) if a.holdout else dev_round(F, a.round)
