@@ -107,7 +107,7 @@ def train(w, seed, Z, max_ep=1000, patience=50):
         with torch.no_grad():
             for s in COINS:
                 ii = torch.tensor(Z[f"{s}_{w}_{k}"], device=dev)
-                out[s] = torch.cat([m(R[s][ii[a:a + 2048, None] + off]) for a in range(0, len(ii), 2048)]).cpu().numpy()
+                out[s] = torch.cat([m(R[s][ii[a:a + 256, None] + off]) for a in range(0, len(ii), 256)]).cpu().numpy()
         m.train(); return out
 
     m = build_model().to(dev)
@@ -119,7 +119,10 @@ def train(w, seed, Z, max_ep=1000, patience=50):
     for ep in range(max_ep):
         sel = tr[rng.choice(len(tr), 25_600, replace=False)]
         for b in np.array_split(rng.permutation(len(sel)), 50):
-            X, y = batch(sel[b]); opt.zero_grad(); loss = qlike_t(y, m(X)); loss.backward(); opt.step()
+            opt.zero_grad()                                                     # 배치 512 = 128 × 4 기울기 누적(평균 손실이라 수학적으로 같음, GPU 2GB 상한)
+            for q in np.array_split(b, 4):
+                X, y = batch(sel[q]); (qlike_t(y, m(X)) * len(q) / len(b)).backward()
+            opt.step()
         pv = predict(m, "va"); vl = float(np.mean([qlike_t(yva[s], torch.tensor(pv[s], device=dev)).item() for s in COINS]))
         if vl < best - 1e-6:
             best, best_ep, state = vl, ep, {k: v.detach().clone() for k, v in m.state_dict().items()}
