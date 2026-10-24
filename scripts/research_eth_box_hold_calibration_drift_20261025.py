@@ -619,6 +619,42 @@ def round4():
     log(f"→ {OUT / 'round4.json'}")
 
 
+BOX_ROLL = {"W1": ("2022-01-01", "2024-01-01", "2024-06-01", "2024-10-24"), "W2": ("2023-01-01", "2025-01-01", "2025-06-01", "2025-10-24"),
+            "W3": ("2024-01-01", "2026-01-01", "2026-06-01", "2026-10-24")}   # (학습 시작, 검증 시작, 시험 시작, 시험 끝(제외))
+
+
+def round5():
+    """5라운드(b22210bd): 고정 레시피 A(배포 레시피 재학습) vs B(굴림층·4h 27칸) 를 3창에서 같은 학습 조건으로."""
+    A0 = pd.read_parquet(OUT / "rows.parquet"); rep = {}
+    for sc, W in WIN.items():
+        cf = BH["scales"][sc]; g = A0[A0.scale == sc]; ca, cb = cf["cols"], (LEAN if sc == "4h" else cf["cols"]); need = list(dict.fromkeys(ca + cb))
+        acc, per = {"A": [], "B": [], "y": [], "d": []}, {}
+        for w, (t0, v0, s0, e0) in BOX_ROLL.items():
+            tr = g[(g.ts >= t0) & (g.ts + pd.Timedelta(minutes=W + 1) <= v0)].dropna(subset=need)
+            ev = g[(g.ts >= v0) & (g.ts + pd.Timedelta(minutes=W + 1) <= e0)].dropna(subset=need).reset_index(drop=True)
+            assert (tr.ts + pd.Timedelta(minutes=W + 1)).max() <= pd.Timestamp(v0) and (ev.ts + pd.Timedelta(minutes=W + 1)).max() <= pd.Timestamp(e0)
+            ts, y = ev.ts.to_numpy(), ev.y.to_numpy().astype(float)
+            fitp = lambda cols: HistGradientBoostingClassifier(**HGB).fit(tr[cols], tr.y).predict_proba(ev[cols])[:, 1]  # noqa: E731
+            pA = fitp(ca); pB0 = fitp(cb) if sc == "4h" else pA
+            pB = rolling("platt" if sc == "4h" else "shift", ts, pB0, y, W, 180, t0=v0)
+            tt = ts >= np.datetime64(s0); d = pd.DatetimeIndex(ts[tt]).normalize().to_numpy()
+            mA, mB = metrics(y[tt], pA[tt], cf["q20"], cf["q80"]), metrics(y[tt], pB[tt], cf["q20"], cf["q80"])
+            per[w] = {"train_rows": len(tr), "test_rows": int(tt.sum()), "dbrier": mB["brier"] - mA["brier"],
+                      "dbrier_ci": day_boot((pB[tt] - y[tt]) ** 2 - (pA[tt] - y[tt]) ** 2, d), "A": mA, "B": mB}
+            for k, v in (("A", pA[tt]), ("B", pB[tt]), ("y", y[tt]), ("d", d)):
+                acc[k].append(v)
+            log(f"[{sc} {w}] 학습 {len(tr):,} 시험 {tt.sum():,} · ΔBrier {per[w]['dbrier']:+.5f}{np.round(per[w]['dbrier_ci'], 5).tolist()} · "
+                f"치우침 A {mA['bias_pp']:+.2f} B {mB['bias_pp']:+.2f}pp · ECE A {mA['ece_pp']:.2f} B {mB['ece_pp']:.2f} · AUC A {mA['auc']:.4f} B {mB['auc']:.4f}")
+        pa, pb, yy, dd = (np.concatenate(acc[k]) for k in ("A", "B", "y", "d"))
+        mA, mB = metrics(yy, pa, cf["q20"], cf["q80"]), metrics(yy, pb, cf["q20"], cf["q80"]); ci = day_boot((pb - yy) ** 2 - (pa - yy) ** 2, dd)
+        v = {"W1": ci[1] < 0, "W2": mB["logloss"] <= mA["logloss"], "W3": mB["ece_pp"] <= mA["ece_pp"], "W4": mB["auc"] >= mA["auc"] - 0.002,
+             "W5": sum(x["dbrier"] < 0 for x in per.values()) >= 2}
+        rep[sc] = {"pooled": {"dbrier": mB["brier"] - mA["brier"], "dbrier_ci": ci, "A": mA, "B": mB}, "windows": per, "verdict": v, "win": all(v.values())}
+        log(f"[{sc} 3창] ΔBrier {mB['brier'] - mA['brier']:+.5f}{np.round(ci, 5).tolist()} · LL A {mA['logloss']:.4f} B {mB['logloss']:.4f} · ECE A {mA['ece_pp']:.2f} B {mB['ece_pp']:.2f} · "
+            f"AUC A {mA['auc']:.4f} B {mB['auc']:.4f} · 치우침 A {mA['bias_pp']:+.2f} B {mB['bias_pp']:+.2f} → {v} {'이김' if all(v.values()) else '못 이김'}")
+    (OUT / "round5.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
+
+
 def selftest():
     rs = np.random.default_rng(0)
     c = 100 + rs.normal(size=500).cumsum(); h = c + rs.random(500); l = c - rs.random(500)
@@ -660,3 +696,5 @@ if __name__ == "__main__":
         round3()
     if "--round" in sys.argv and sys.argv[sys.argv.index("--round") + 1] == "4":
         round4()
+    if "--round" in sys.argv and sys.argv[sys.argv.index("--round") + 1] == "5":
+        round5()
