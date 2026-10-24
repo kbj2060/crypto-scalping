@@ -195,6 +195,17 @@
            /api/market-context(dashboard/market_ctx.py). 전부 서술 -- 칸 제목 «?» 가 정의·읽는 법·우리 검정을 말한다. -->
       <!-- 2026-09-30 시장 맥락 카드 제거 -- 판 넷·24시간은 Footprint 카드 안(넓은 화면 = 1초 수급 아래 칸, 사용자 선택 시안 Y). -->
 
+      <!-- 2026-10-24 사용자 «진짜 효과 있는 지표만 · 지표가 많아 결정이 어렵다» → 4층: 결정 줄(여기) · 현재 상황(아래 카드들) · 후보(접힘) · 3개 제거(칼시·뉴스 LLM 판정·닿음 등고선).
+           결정 줄 = 검증 통과만: 지금 추세 · 4h 방향 · 변동폭 · 박스 유지 30분·1h·4h · 내 포지션. app.js renderDecide -->
+      <section id="dcCard" class="panel ops-health-panel dc-card">
+        <div class="ops-health-head"><div class="opt-card-head"><h3 class="card-title">Now</h3></div><div id="dcSum" class="dc-sum"></div></div>
+        <div id="dcTip"></div>
+        <div id="dcBody" class="dc-body"></div>
+        <details id="dcCand" class="dc-cand">
+          <summary><span class="dc-cand-t">후보 · 판정 대기 5</span><span id="dcCandSum" class="muted"></span></summary>
+          <div id="dcCandBody"></div>
+        </details>
+      </section>
       <section id="fpCard" class="panel ops-health-panel liq-map-panel" data-asset-scope="liqmap">
         <div id="fpLineSwitch" class="mc-switch fp-line-switch"></div>   <!-- 2026-10-16 펜 메모: 차트 바로 위 줄 오른쪽(VWAP·세션·볼린저·주간 앵커) -->
         <!-- 2026-09-19 2열 배치를 되돌렸다(사용자 지시 "지지·저항 게이지를 이전 위치로").
@@ -590,6 +601,7 @@
   </main>
   <!-- 2026-09-30 카드 이동 레일(사용자 지시 «점만 남기고 글자는 제거»). 넓은 화면·스냅샷 탭에서만. app.js setupCardRail -->
   <nav id="cardRail" class="card-rail" aria-label="카드 이동" hidden>
+    <button type="button" data-go="dcCard" aria-label="Now 카드로" title="Now"></button>
     <button type="button" data-go="fpCard" aria-label="Footprint 카드로" title="Footprint"></button>
     <button type="button" data-go="newsCard" aria-label="뉴스 카드로" title="뉴스"></button>
     <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"></button>
