@@ -266,15 +266,85 @@ def collect31():
     print(json.dumps({k: rep[k] for k in ("chosen", "frozen_md5", "test", "gates", "pass_second_look")}, indent=1, ensure_ascii=False, default=float))
 
 
+# ---------- 굴림 원점 재현 (docs/prereg/rl_v31_rolling_origin_20261025.md, 6db45010) ----------
+WINDOWS = {"W1": (("2022-06-01", "2023-12-31"), ("2024-01-01", "2024-05-31"), ("2024-06-01", "2024-10-23"), (656867, 774634, 162784, 920248, 886736)),
+           "W2": (("2023-01-01", "2024-12-31"), ("2025-01-01", "2025-05-31"), ("2025-06-01", "2025-10-23"), (890310, 191352, 885964, 906859, 57282)),
+           "W3": (TRAIN, VAL, TEST, CELLS[11][2])}
+
+
+def set_window(w):
+    global TRAIN, VAL, TEST, OUT
+    TRAIN, VAL, TEST, sd = WINDOWS[w]
+    if w != "W3":
+        OUT = SYS.ROOT / "tmp" / "rl_v3_reward_arch_20261025" / f"win_{w}"; CELLS[12] = ("DD", "tcn", sd)
+    OUT.mkdir(parents=True, exist_ok=True)
+    return 11 if w == "W3" else 12
+
+
+def collect_window(w):
+    """창 하나: 검증 앙상블 샤프로 걸음 고르기 → 시험 1회. W3 = v3.1 동결 모델 재채점(재현 확인)."""
+    from stable_baselines3 import PPO
+    cell = set_window(w); Wd = World(); va, te = Wd.span(VAL), Wd.span(TEST); seeds = CELLS[cell][2]
+    if w == "W3":
+        steps = [250000]
+    else:
+        steps = list(range(0, TOTAL + 1, CKPT))
+        V2.TRAIN = TRAIN; tr = Wd.span(TRAIN); s0 = "ETH"; w0 = Wd.W[s0]; acts = w0["D"][tr[0]:tr[1]]   # P1 재통과(학습 구간·ETH 교사)
+        sl = V2.Sleeve(w0); eq = [sl.day(d, int(acts[i]))[0] for i, d in enumerate(range(*tr))]; days = Wd.days[tr[0]:tr[1]]
+        inp = Wd.inputs[s0].copy(); inp["lvl"] = 2.0 / np.minimum(V2.CAP, V2.TAU_C / pd.Series(w0["sig"], Wd.days))
+        ref = float((1 + SYS.simulate({s0: Wd.data[s0]}, {s0: inp}, Wd.fund, days, 1, Dover={s0: pd.Series(acts, days)}, ladder=False)).prod())
+        assert abs(eq[-1] - ref) < 1e-9, (eq[-1], ref); print(f"{w} P1 ETH 교사 env {eq[-1]:.12f} = SYS {ref:.12f}", flush=True)
+    rows = []
+    for st in steps:
+        ms = [PPO.load(OUT / f"c{cell}_s{sd}" / f"{st}.zip", device="cpu") for sd in seeds]
+        r, _, lg = V2.run(Wd, va, ens_picker(Wd, ms, "tcn")); rows.append((SYS.sharpe(r), st, ms)); print(f"{w} 걸음 {st:>6} 검증 앙상블 샤프 {rows[-1][0]:+.2f}", flush=True)
+    vs, st, ms = max(rows, key=lambda z: z[0]); pk = ens_picker(Wd, ms, "tcn")
+    r_va, _, lg_va = V2.run(Wd, va, pk); r_e, _, lg_e = V2.run(Wd, te, pk); r_t, _, lg_t = V2.run(Wd, te, V2.teacher(Wd)); r_l, _, _ = V2.run(Wd, te, lambda s, d, o: 2)
+    tdays = Wd.days[te[0]:te[1]]; hold = pd.concat([SYS.daily_close(Wd.data[s]).pct_change() for s in V2.COINS], axis=1).mean(1).loc[tdays]
+    nulls = np.array([V2.run(Wd, te, V2.markov(lg_va, sd))[0].values for sd in range(400)])
+    seed_sh = {sd: SYS.sharpe(V2.run(Wd, te, picker(Wd, m, "tcn"))[0]) for sd, m in zip(seeds, ms)}
+    rep = {"window": w, "train": TRAIN, "val": VAL, "test": TEST, "step": st, "val_sharpe": vs, "val_grid": [(z[1], z[0]) for z in rows],
+           "ens": V2.summarize(r_e, lg_e), "teacher": V2.summarize(r_t, lg_t), "always_long": {"sharpe": SYS.sharpe(r_l), "ret": float((1 + r_l).prod() - 1)},
+           "hold_1x": {"sharpe": SYS.sharpe(hold), "ret": float((1 + hold).prod() - 1), "mdd": SYS.mdd(hold)}, "seed_test_sharpe": seed_sh}
+    (OUT / "window_report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=float))
+    pd.DataFrame({"ens": r_e, "teacher": r_t}).to_parquet(OUT / "window_daily.parquet"); np.save(OUT / "window_nulls.npy", nulls)
+    print(json.dumps({k: rep[k] for k in ("window", "step", "val_sharpe", "ens", "teacher", "hold_1x", "seed_test_sharpe")}, indent=1, ensure_ascii=False, default=float))
+    if w == "W3":
+        assert abs(rep["ens"]["sharpe"] - 1.381) < 0.002, rep["ens"]["sharpe"]
+
+
+def pooled_windows():
+    base = SYS.ROOT / "tmp" / "rl_v3_reward_arch_20261025"; dirs = {"W1": base / "win_W1", "W2": base / "win_W2", "W3": base}
+    D = {w: pd.read_parquet(d / "window_daily.parquet") for w, d in dirs.items()}; N = {w: np.load(d / "window_nulls.npy") for w, d in dirs.items()}
+    R = {w: json.loads((d / "window_report.json").read_text()) for w, d in dirs.items()}
+    ens = pd.concat([D[w].ens for w in dirs]); diff = pd.concat([D[w].ens - D[w].teacher for w in dirs])
+    nul = np.concatenate([N[w] for w in dirs], axis=1); nsh = nul.mean(1) / nul.std(1) * math.sqrt(365)
+    out = {"prereg": "docs/prereg/rl_v31_rolling_origin_20261025.md@6db45010", "pooled_sharpe": SYS.sharpe(ens), "pooled_days": len(ens),
+           "per_window": {w: {"ens_sharpe": R[w]["ens"]["sharpe"], "ens_mdd": R[w]["ens"]["mdd"], "ens_ret": R[w]["ens"]["ret"], "teacher_sharpe": R[w]["teacher"]["sharpe"],
+                              "hold_sharpe": R[w]["hold_1x"]["sharpe"], "seeds_pos": sum(v > 0 for v in R[w]["seed_test_sharpe"].values()), "step": R[w]["step"]} for w in dirs},
+           "ens_minus_teacher_ci": SYS.block_ci(diff), "ens_minus_teacher_mean_bp": float(diff.mean() * 1e4), "null_p95": float(np.percentile(nsh, 95)), "null_median": float(np.median(nsh))}
+    pw = out["per_window"]
+    out["gates"] = {"R1": out["pooled_sharpe"] > 0 and all(v["ens_mdd"] >= -0.20 for v in pw.values()), "R2": out["ens_minus_teacher_ci"][0] > 0,
+                    "R3": out["pooled_sharpe"] > out["null_p95"], "R4": sum(v["ens_sharpe"] > 0 for v in pw.values()) >= 2}
+    out["pass"] = all(out["gates"].values()); (base / "rolling_origin_report.json").write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float))
+    print(json.dumps(out, indent=1, ensure_ascii=False, default=float))
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--selfcheck", action="store_true"); ap.add_argument("--cell", type=int); ap.add_argument("--seed", type=int)
-    ap.add_argument("--collect", action="store_true"); ap.add_argument("--collect31", action="store_true"); a = ap.parse_args(); OUT.mkdir(parents=True, exist_ok=True)
+    ap.add_argument("--collect", action="store_true"); ap.add_argument("--collect31", action="store_true"); ap.add_argument("--window"); ap.add_argument("--wcollect", action="store_true"); ap.add_argument("--pooled", action="store_true"); a = ap.parse_args(); OUT.mkdir(parents=True, exist_ok=True)
     if a.selfcheck:
         return selfcheck()
     if a.collect:
         return collect()
     if a.collect31:
         return collect31()
+    if a.pooled:
+        return pooled_windows()
+    if a.window and a.wcollect:
+        return collect_window(a.window)
+    if a.window:
+        cell = set_window(a.window); assert a.seed in CELLS[cell][2]; return train_one(cell, a.seed)
     assert a.seed in CELLS[a.cell][2], "사전 등록된 시드만"
     return train_one(a.cell, a.seed)
 
