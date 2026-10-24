@@ -92,7 +92,9 @@ def features(k1m: pd.DataFrame, events: list | None = None, prof: np.ndarray | N
                   "log_rng": float(np.log(rng / c[-1] * 1e4)),
                   "hs": float(np.sin(2 * np.pi * hr / 24)), "hc": float(np.cos(2 * np.pi * hr / 24)), "wkd": float(t0.dayofweek >= 5),
                   "R_edge": float(min(p, 1 - p)), "R_trend": float(abs(c[-1] - c[-1 - W]) / rng),
-                  "R_compress": float(np.log(rng / prng)), "R_squeeze": float(np.log(rng / np.nanmedian(rngs[-1440:]))),
+                  # 2026-10-24: prng = 0(직전 창이 평평) 이면 파이썬 float 나눗셈이 ZeroDivisionError 로 payload 전체를 죽였다 -- numpy 나눗셈은
+                  #   연구 피쳐(np 배열)와 같은 inf 를 내고, payload 의 isfinite 검사가 그 척도만 ok False 로 뺀다
+                  "R_compress": float(np.log(np.divide(rng, prng))), "R_squeeze": float(np.log(rng / np.nanmedian(rngs[-1440:]))),
                   "Q_vol5_vs_W": float(np.log(v[-5:].mean() / v[-W:].mean())),
                   "Q_imbW": float(abs((2 * tb[-W:] - v[-W:]).sum() / v[-W:].sum())),
                   "S_season_fut": float(np.log(np.mean([PROF[how(t_ms + k * 60_000)] for k in range(1, W + 1)]))),
@@ -150,6 +152,16 @@ if __name__ == "__main__":
                            {"time_utc": "bad", "category": "fomc", "title_ko": "FOMC 금리결정 발표"}])
     assert len(maj) == 2 and len(cl) == 1, (maj, cl)
     assert payload(pd.DataFrame({"timestamp": [], "high": [], "low": [], "close": [], "volume": [], "taker_buy_base": []}))["ok"] is False
+    # ④ 직전 1h 창이 평평(prng = 0)해도 예외 없이 그 척도만 ok False -- R_compress 를 안 쓰는 척도는 그대로 나온다
+    n_ = 1560
+    c_ = 2500 * np.exp(np.cumsum(np.random.default_rng(0).normal(0, 5e-4, n_)))
+    c_[-120:-60] = c_[-121]
+    h_, l_ = c_ * (1 + 1e-4), c_ * (1 - 1e-4)
+    h_[-120:-60] = l_[-120:-60] = c_[-120:-60]
+    flat = payload(pd.DataFrame({"timestamp": pd.date_range("2026-10-01", periods=n_, freq="1min"), "high": h_, "low": l_, "close": c_,
+                                 "volume": np.ones(n_), "taker_buy_base": np.full(n_, 0.5)}))
+    assert flat["ok"] and flat["scales"]["1h"]["ok"] is False, flat["scales"]["1h"]
+    assert all(flat["scales"][s]["ok"] for s in WIN if "R_compress" not in B["scales"][s]["cols"]), flat["scales"]
     if imp.DEC.exists() and (imp.OUT / "features.parquet").exists() and (imp.OUT / "events.json").exists():
         D = pd.read_parquet(imp.DEC)
         X = pd.read_parquet(imp.OUT / "features.parquet")
