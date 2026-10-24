@@ -8,12 +8,12 @@
 
 --train 은 numpy·torch 만 쓴다(서버에 연구 캐시 없이 dv_data.npz 하나로 돈다).
 """
-import json, sys, time
+import json, os, sys, time
 from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "tmp" / "vol4h_deepvol"
+OUT = Path(os.environ.get("DV_OUT", ROOT / "tmp" / "vol4h_deepvol"))   # 서버에선 tmp 복사본으로 돈다(서버 scripts/ 에 미추적 파일을 안 남김)
 COINS = ("ETH", "XRP", "BTC", "SOL")
 WINS = ("W1", "W2", "W3")
 TAG = {"W1": "5W1", "W2": "5W2", "W3": "4"}         # 저장된 QX4 예측 파일 꼬리표
