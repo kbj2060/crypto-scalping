@@ -655,6 +655,34 @@ def round5():
     (OUT / "round5.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
 
 
+def round6():
+    """6라운드: 4h 27칸 HGB + 보정층 B(Platt180)·B2(절편180)·B3(절편90) — 3창 검증 선택 · 5라운드 관문."""
+    A0 = pd.read_parquet(OUT / "rows.parquet"); sc, W = "4h", WIN["4h"]; cf = BH["scales"][sc]; g = A0[A0.scale == sc]
+    ca, cb = cf["cols"], LEAN; need = list(dict.fromkeys(ca + cb)); layers_ = {"B": ("platt", 180), "B2": ("shift", 180), "B3": ("shift", 90)}
+    acc = {k: [] for k in ("A", "y", "d", *layers_)}; vb = {k: 0.0 for k in layers_}; per = {}
+    for w, (t0, v0, s0, e0) in BOX_ROLL.items():
+        tr = g[(g.ts >= t0) & (g.ts + pd.Timedelta(minutes=W + 1) <= v0)].dropna(subset=need)
+        ev = g[(g.ts >= v0) & (g.ts + pd.Timedelta(minutes=W + 1) <= e0)].dropna(subset=need).reset_index(drop=True)
+        ts, y = ev.ts.to_numpy(), ev.y.to_numpy().astype(float)
+        fitp = lambda cols: HistGradientBoostingClassifier(**HGB).fit(tr[cols], tr.y).predict_proba(ev[cols])[:, 1]  # noqa: E731
+        pA, p27 = fitp(ca), fitp(cb); va, tt = ts < np.datetime64(s0), ts >= np.datetime64(s0); d = pd.DatetimeIndex(ts[tt]).normalize().to_numpy()
+        acc["A"].append(pA[tt]); acc["y"].append(y[tt]); acc["d"].append(d); per[w] = {}
+        for k, (kind, N) in layers_.items():
+            pk = rolling(kind, ts, p27, y, W, N, t0=v0); vb[k] += float(np.mean((pk[va] - y[va]) ** 2)); acc[k].append(pk[tt])
+            per[w][k] = float(np.mean((pk[tt] - y[tt]) ** 2) - np.mean((pA[tt] - y[tt]) ** 2))
+    S = min(vb, key=vb.get); pa, yy, dd, pb = (np.concatenate(acc[k]) for k in ("A", "y", "d", S))
+    mA, mB = metrics(yy, pa, cf["q20"], cf["q80"]), metrics(yy, pb, cf["q20"], cf["q80"]); ci = day_boot((pb - yy) ** 2 - (pa - yy) ** 2, dd)
+    v = {"W1": ci[1] < 0, "W2": mB["logloss"] <= mA["logloss"], "W3": mB["ece_pp"] <= mA["ece_pp"], "W4": mB["auc"] >= mA["auc"] - 0.002,
+         "W5": sum(per[w][S] < 0 for w in per) >= 2}
+    rep = {"val_brier_sum": vb, "S": S, "windows_dbrier": per, "pooled": {"dbrier": mB["brier"] - mA["brier"], "dbrier_ci": ci, "A": mA, "B": mB}, "verdict": v, "win": all(v.values())}
+    for k in layers_:   # 서술: 다른 후보의 3창 합친 수치
+        pk = np.concatenate(acc[k]); mk = metrics(yy, pk, cf["q20"], cf["q80"]); rep[f"desc_{k}"] = {"ece_pp": mk["ece_pp"], "bias_pp": mk["bias_pp"], "brier": mk["brier"], "auc": mk["auc"]}
+    log(f"[4h 6R] 검증 Brier 합 {vb} → S = {S} · 3창 ΔBrier {mB['brier'] - mA['brier']:+.5f}{np.round(ci, 5).tolist()} · LL A {mA['logloss']:.4f} S {mB['logloss']:.4f} · "
+        f"ECE A {mA['ece_pp']:.2f} S {mB['ece_pp']:.2f} · AUC A {mA['auc']:.4f} S {mB['auc']:.4f} · 치우침 A {mA['bias_pp']:+.2f} S {mB['bias_pp']:+.2f} · 창별 {per} → {v} {'이김' if all(v.values()) else '못 이김'}")
+    log("  서술 " + " · ".join(f"{k}: ECE {rep[f'desc_{k}']['ece_pp']:.2f} 치우침 {rep[f'desc_{k}']['bias_pp']:+.2f}" for k in layers_))
+    (OUT / "round6.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
+
+
 def selftest():
     rs = np.random.default_rng(0)
     c = 100 + rs.normal(size=500).cumsum(); h = c + rs.random(500); l = c - rs.random(500)
@@ -698,3 +726,5 @@ if __name__ == "__main__":
         round4()
     if "--round" in sys.argv and sys.argv[sys.argv.index("--round") + 1] == "5":
         round5()
+    if "--round" in sys.argv and sys.argv[sys.argv.index("--round") + 1] == "6":
+        round6()
