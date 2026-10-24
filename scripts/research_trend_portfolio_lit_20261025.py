@@ -66,6 +66,8 @@ def daily_frame(sym):
 
 # ---------------- 신호·변동성 (일 d 종가까지 → 다음 날 결정에 shift(1)) ----------------
 def signal(c, kind, look):
+    if look == "E":   # Hurst 식 지평 분산: A·B·C 세 묶음 신호의 평균(묶음 선택 안 함)
+        return sum(signal(c, kind, l) for l in "ABC") / 3
     lr = np.log(c).diff(); out = []
     for k in LOOK[look]:
         if kind == "sign":
@@ -94,6 +96,7 @@ def targets(F, cfg, tau):
     S = pd.DataFrame({s: signal(F[s].c, cfg["sig"], cfg["look"]) for s in COINS})
     V = pd.DataFrame({s: vol(F[s], cfg["vol"]) for s in COINS})
     R = pd.DataFrame({s: F[s].c.pct_change() for s in COINS})
+    S = S.where(S >= 0, S * cfg.get("short", 1.0))  # 숏 쪽 배율(2회차)
     U = S / V / N                                   # τ=1 단위 책
     if cfg["port"] == "cf":                          # Baltas·Kosowski 상관 계수, 부호 상관 90일
         cf = []
@@ -119,9 +122,9 @@ def targets(F, cfg, tau):
 # ---------------- 엔진 ----------------
 def run(F, W, days, band=0.0, fill="maker", fees=True, funding=True):
     """일별 포트폴리오 수익률. band = 상대 재조정 띠(같은 부호이고 |목표−현재| ≤ band·|목표| 면 안 바꿈, band=inf 면 부호 바뀔 때만)."""
-    A = {s: F[s].loc[days] for s in COINS}; Wd = W.loc[days]; Nn = np.zeros(N); out = []
+    A = {s: F[s].reindex(days) for s in COINS}; Wd = W.reindex(days).fillna(0.0); Nn = np.zeros(N); out = []
     cols = {s: {k: A[s][k].values for k in ("c", "lo12", "hi12", "c11", "fpre", "fpost")} for s in COINS}
-    P0s = {s: F[s].c.shift(1).loc[days].values for s in COINS}
+    P0s = {s: F[s].c.shift(1).reindex(days).values for s in COINS}
     for t in range(len(days)):
         pnl = 0.0; newv = np.zeros(N)
         for i, s in enumerate(COINS):
@@ -186,10 +189,13 @@ def grid(rnd):
     if rnd == 1:
         return [dict(look=l, sig=g, vol=v, port=p, crash="none", band=0.0)
                 for l in "ABC" for g in ("sign", "trend") for v in ("cc20", "ewma60", "pk20", "rv20") for p in ("none", "cf", "pv")]
+    if rnd == 2:
+        return [dict(look=l, sig="sign", vol=v, port="pv", crash=cr, short=sh, band=b)
+                for l in "BE" for v in ("pk20", "rv20") for cr in ("none", "dm") for sh in (1.0, 0.5) for b in (0.0, 0.25)]
     raise SystemExit(f"회차 {rnd} 격자는 아직 사전 등록되지 않았다")
 
 
-name = lambda c: f"{c['look']}_{c['sig']}_{c['vol']}_{c['port']}_{c['crash']}_b{c['band']}"
+name = lambda c: f"{c['look']}_{c['sig']}_{c['vol']}_{c['port']}_{c['crash']}_b{c['band']}" + (f"_s{c['short']}" if "short" in c else "")
 CURRENT = dict(look="A", sig="sign", vol="cc20", port="none", crash="none", band=0.0)   # 검증된 규칙: 0.5/σ20 최대 2배 ÷4
 
 
@@ -262,6 +268,7 @@ def dev_round(F, rnd):
            "current_rule_sharpe": sharpe(cur), "current_rule_mdd": OE.mdd(cur), "current_rule_yearly": yearly(cur),
            "sys1025_dev_sharpe": sharpe(sysd[DEV[0]:]), "sys1025_dev_mdd": OE.mdd(sysd[DEV[0]:]),
            "chosen_minus_current_bp_ci": OE.block_ci(x - cur), "chosen_minus_current_bp": float((x - cur).mean() * 1e4),
+           "chosen_minus_current_volmatched_bp_ci": OE.block_ci(x - cur * x.std() / cur.std()),
            "grid_sharpe_median": float(srs.median()), "grid_sharpe": {k: round(v, 3) for k, v in srs.sort_values(ascending=False).items()}}
     rep["gates"] = {"D1_cpcv_med_gt0": med > 0, "D2_pbo_lt_0.2": pbo < 0.2, "D3_dsr_gt_0.95": d > 0.95,
                     "D4_gt_hold": rep["dev_sharpe"] > rep["hold_sharpe"], "D5_mdd": rep["dev_mdd"] >= -0.20,
