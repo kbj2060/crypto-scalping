@@ -1,0 +1,180 @@
+{
+ "prereg": "docs/prereg/rl_v31_tcn_ensemble_20261025.md@a47629ff",
+ "trials": 14,
+ "second_look_test": true,
+ "val_grid": [
+  {
+   "cell": 10,
+   "reward": "DSR",
+   "step": 0,
+   "val_sharpe": 0.37871842187463156,
+   "teacher_agree": 1.0
+  },
+  {
+   "cell": 10,
+   "reward": "DSR",
+   "step": 50000,
+   "val_sharpe": 0.37871842187463156,
+   "teacher_agree": 1.0
+  },
+  {
+   "cell": 10,
+   "reward": "DSR",
+   "step": 100000,
+   "val_sharpe": 0.3922458920215822,
+   "teacher_agree": 0.9933774834437086
+  },
+  {
+   "cell": 10,
+   "reward": "DSR",
+   "step": 150000,
+   "val_sharpe": 0.3167794484804646,
+   "teacher_agree": 0.9486754966887417
+  },
+  {
+   "cell": 10,
+   "reward": "DSR",
+   "step": 200000,
+   "val_sharpe": 0.32923012721281386,
+   "teacher_agree": 0.9552980132450332
+  },
+  {
+   "cell": 10,
+   "reward": "DSR",
+   "step": 250000,
+   "val_sharpe": 0.3297130454008443,
+   "teacher_agree": 0.9420529801324503
+  },
+  {
+   "cell": 10,
+   "reward": "DSR",
+   "step": 300000,
+   "val_sharpe": 0.4156259039628593,
+   "teacher_agree": 0.9370860927152318
+  },
+  {
+   "cell": 11,
+   "reward": "DD",
+   "step": 0,
+   "val_sharpe": 0.37871842187463156,
+   "teacher_agree": 1.0
+  },
+  {
+   "cell": 11,
+   "reward": "DD",
+   "step": 50000,
+   "val_sharpe": 0.37871842187463156,
+   "teacher_agree": 1.0
+  },
+  {
+   "cell": 11,
+   "reward": "DD",
+   "step": 100000,
+   "val_sharpe": 0.3990408710283308,
+   "teacher_agree": 0.9983443708609272
+  },
+  {
+   "cell": 11,
+   "reward": "DD",
+   "step": 150000,
+   "val_sharpe": 0.39969108784932994,
+   "teacher_agree": 0.9867549668874173
+  },
+  {
+   "cell": 11,
+   "reward": "DD",
+   "step": 200000,
+   "val_sharpe": 0.4869226273244167,
+   "teacher_agree": 0.9139072847682119
+  },
+  {
+   "cell": 11,
+   "reward": "DD",
+   "step": 250000,
+   "val_sharpe": 1.2827244441683094,
+   "teacher_agree": 0.7516556291390728
+  },
+  {
+   "cell": 11,
+   "reward": "DD",
+   "step": 300000,
+   "val_sharpe": 1.1536898457248073,
+   "teacher_agree": 0.5198675496688742
+  }
+ ],
+ "chosen": {
+  "cell": 11,
+  "reward": "DD",
+  "step": 250000,
+  "val_sharpe": 1.2827244441683094
+ },
+ "frozen_md5": {
+  "162695": "bd1260640a79efcd52a80df752f92804",
+  "946401": "6b182ff9d5f861843ace40e42e431362",
+  "115181": "4e380d6a77171c9ae0e2d0c9af08a73e",
+  "684220": "d0c81c426afe90d25cb4a086fcecd164",
+  "577681": "c9e0fe5f0458d624535b40f3925ae345"
+ },
+ "test": {
+  "ensemble": {
+   "sharpe": 1.3807507397721754,
+   "ret": 0.08449729142298934,
+   "mdd": -0.07021744802301377,
+   "teacher_agree": 0.6620689655172414,
+   "switches_per_coin_yr": 35.24137931034483,
+   "long_share_in_pos": 0.25165562913907286,
+   "flat_share": 0.4793103448275862,
+   "act_freq": [
+    229,
+    272,
+    79
+   ]
+  },
+  "teacher": {
+   "sharpe": 0.8338685795024602,
+   "ret": 0.0643315074189148,
+   "mdd": -0.10374005691230104,
+   "teacher_agree": 1.0,
+   "switches_per_coin_yr": 42.16379310344828,
+   "long_share_in_pos": 0.5223577235772358,
+   "flat_share": 0.15172413793103448,
+   "act_freq": [
+    239,
+    76,
+    265
+   ]
+  },
+  "hold_1x": {
+   "sharpe": 0.8658290327927981,
+   "ret": 0.1321111207311927,
+   "mdd": -0.18996132441643654
+  },
+  "per_coin": {
+   "ETH": 1.9755357766343324,
+   "BTC": -0.014059680777120073,
+   "SOL": 1.8515998904312077,
+   "XRP": 0.7052894655678104
+  },
+  "seed_test_sharpe": {
+   "162695": 1.1918067276786681,
+   "946401": 1.061854697654876,
+   "115181": 1.1289351005369332,
+   "684220": 1.2867814533472408,
+   "577681": 1.4062257999966035
+  },
+  "ens_minus_teacher_ci": [
+   -0.0015105624631685615,
+   0.0012034173318607652
+  ],
+  "ens_minus_teacher_mean_bp": 1.0012718393388733,
+  "random_p9944": 3.306156383043389,
+  "random_median": -0.452646909860998
+ },
+ "gates": {
+  "G1": true,
+  "G2": false,
+  "G3": false,
+  "G4": true
+ },
+ "pass_second_look": false
+}
