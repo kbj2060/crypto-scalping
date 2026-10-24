@@ -22,7 +22,8 @@ TRAIN, VAL, TEST = ("2024-01-01", "2025-12-31"), ("2026-01-01", "2026-05-31"), (
 W, NF, KAPPA, LAM, ETA = 20, V2.NMKT, 10e-4, 2.0, 1 / 60
 CELLS = {1: ("Z", "mlp", (402917, 771360)), 2: ("Z", "gru", (158244, 639012)), 3: ("Z", "tcn", (907133, 284476)),
          4: ("DSR", "mlp", (533018, 96241)), 5: ("DSR", "gru", (715590, 348827)), 6: ("DSR", "tcn", (261709, 880453)),
-         7: ("DD", "mlp", (47386, 592610)), 8: ("DD", "gru", (823154, 173095)), 9: ("DD", "tcn", (360681, 954228))}
+         7: ("DD", "mlp", (47386, 592610)), 8: ("DD", "gru", (823154, 173095)), 9: ("DD", "tcn", (360681, 954228)),
+         10: ("DSR", "tcn", (238127, 669220, 411484, 257932, 544043)), 11: ("DD", "tcn", (162695, 946401, 115181, 684220, 577681))}   # v3.1(a47629ff)
 PPO_KW = dict(learning_rate=1e-4, n_steps=256, batch_size=256, n_epochs=10, gamma=0.3, gae_lambda=0.95, clip_range=0.2, ent_coef=0.001)
 TOTAL, CKPT, EP_DAYS = 300_000, 50_000, 365
 
@@ -185,7 +186,7 @@ def selfcheck():
 
 def collect():
     from stable_baselines3 import PPO
-    Wd = World(); va, te = Wd.span(VAL), Wd.span(TEST); runs = [json.loads(open(p).read()) for p in sorted(glob.glob(str(OUT / "c*_s*/run.json")))]
+    Wd = World(); va, te = Wd.span(VAL), Wd.span(TEST); runs = [r for r in (json.loads(open(p).read()) for p in sorted(glob.glob(str(OUT / "c*_s*/run.json")))) if r["cell"] <= 9]   # v3 = 칸 1~9
     assert len(runs) == 18 and all(len(r["ckpt"]) == 7 for r in runs), [(r["cell"], r["seed"], len(r["ckpt"])) for r in runs]
     cands = [(c["sharpe"], r["cell"], r["seed"], c["step"]) for r in runs for c in r["ckpt"]]; best = max(cands)
     load = lambda cell, seed, step: PPO.load(OUT / f"c{cell}_s{seed}" / f"{step}.zip", device="cpu")
@@ -195,7 +196,7 @@ def collect():
     tdays = Wd.days[te[0]:te[1]]; hold = pd.concat([SYS.daily_close(Wd.data[s]).pct_change() for s in V2.COINS], axis=1).mean(1).loc[tdays]
     nulls = [SYS.sharpe(V2.run(Wd, te, V2.markov(lg_va, sd))[0]) for sd in range(400)]
     per_cell = {}
-    for c in sorted(CELLS):   # 보고용: 칸마다 자기 검증 최선
+    for c in range(1, 10):   # 보고용: 칸마다 자기 검증 최선
         cc = max(x for x in cands if x[1] == c); rr, _, lg = V2.run(Wd, te, picker(Wd, load(c, cc[2], cc[3]), CELLS[c][1]))
         per_cell[c] = {"reward": CELLS[c][0], "arch": CELLS[c][1], "seed": cc[2], "step": cc[3], "val_sharpe": cc[0], **V2.summarize(rr, lg)}
     eff = {}
@@ -219,13 +220,61 @@ def collect():
     print(json.dumps({k: rep[k] for k in ("chosen", "main_effects_val", "test", "gates", "pass")}, indent=1, ensure_ascii=False, default=float))
 
 
+def vote(acts):
+    """5시드 다수결: 최다 행동, 동률(최다가 둘 이상)이면 1(«없음»)."""
+    c = np.bincount(np.asarray(acts), minlength=3); top = np.flatnonzero(c == c.max())
+    return int(top[0]) if len(top) == 1 else 1
+
+
+def ens_picker(Wd, models, arch):
+    return lambda s, d, o: vote([int(m.predict(o if arch == "mlp" else window(Wd.W[s], d, o), deterministic=True)[0]) for m in models])
+
+
+def collect31():
+    """v3.1: (칸 10·11, 걸음) 14 후보를 검증 앙상블 샤프로 고르고, 시험(두 번째 보기) · G1~G4 · 동결 md5."""
+    import hashlib
+    from stable_baselines3 import PPO
+    assert vote([0, 0, 2]) == 0 and vote([0, 1, 2]) == 1 and vote([2, 2, 1, 0, 0]) == 1 and vote([2, 2, 2, 0, 1]) == 2   # 자체 점검
+    Wd = World(); va, te = Wd.span(VAL), Wd.span(TEST)
+    m6 = PPO.load(OUT / "c6_s261709" / "250000.zip", device="cpu"); r6 = SYS.sharpe(V2.run(Wd, va, picker(Wd, m6, "tcn"))[0])
+    print(f"재현: v3 칸 6 시드 261709 25만 검증 샤프 {r6:.4f}"); assert abs(r6 - 1.17) < 0.01
+    rows, cache = [], {}
+    for cell in (10, 11):
+        for p in [OUT / f"c{cell}_s{sd}" / "run.json" for sd in CELLS[cell][2]]:
+            assert p.exists() and len(json.loads(p.read_text())["ckpt"]) == 7, p
+        for step in range(0, TOTAL + 1, CKPT):
+            ms = [PPO.load(OUT / f"c{cell}_s{sd}" / f"{step}.zip", device="cpu") for sd in CELLS[cell][2]]; cache[(cell, step)] = ms
+            r, _, lg = V2.run(Wd, va, ens_picker(Wd, ms, "tcn")); sm = V2.summarize(r, lg); rows.append((sm["sharpe"], cell, step, sm))
+            print(f"v3.1 칸 {cell} {CELLS[cell][0]}×tcn 걸음 {step:>6} 검증 앙상블 샤프 {sm['sharpe']:+.2f} 교사 일치 {sm['teacher_agree']:.2f}", flush=True)
+    best = max(rows, key=lambda z: z[0]); _, cell, step, _ = best; ms = cache[(cell, step)]; pk = ens_picker(Wd, ms, "tcn")
+    r_va, _, lg_va = V2.run(Wd, va, pk); r_rl, rc_rl, lg_rl = V2.run(Wd, te, pk); r_t, _, lg_t = V2.run(Wd, te, V2.teacher(Wd))
+    tdays = Wd.days[te[0]:te[1]]; hold = pd.concat([SYS.daily_close(Wd.data[s]).pct_change() for s in V2.COINS], axis=1).mean(1).loc[tdays]
+    nulls = [SYS.sharpe(V2.run(Wd, te, V2.markov(lg_va, sd))[0]) for sd in range(400)]
+    seeds = {sd: SYS.sharpe(V2.run(Wd, te, picker(Wd, m, "tcn"))[0]) for sd, m in zip(CELLS[cell][2], ms)}
+    diff = r_rl - r_t
+    rep = {"prereg": "docs/prereg/rl_v31_tcn_ensemble_20261025.md@a47629ff", "trials": len(rows), "second_look_test": True,
+           "val_grid": [{"cell": c, "reward": CELLS[c][0], "step": st, "val_sharpe": sh, "teacher_agree": sm["teacher_agree"]} for sh, c, st, sm in rows],
+           "chosen": {"cell": cell, "reward": CELLS[cell][0], "step": step, "val_sharpe": best[0]},
+           "frozen_md5": {sd: hashlib.md5((OUT / f"c{cell}_s{sd}" / f"{step}.zip").read_bytes()).hexdigest() for sd in CELLS[cell][2]},
+           "test": {"ensemble": V2.summarize(r_rl, lg_rl), "teacher": V2.summarize(r_t, lg_t), "hold_1x": {"sharpe": SYS.sharpe(hold), "ret": float((1 + hold).prod() - 1), "mdd": SYS.mdd(hold)},
+                    "per_coin": {s: SYS.sharpe(v) for s, v in rc_rl.items()}, "seed_test_sharpe": seeds,
+                    "ens_minus_teacher_ci": SYS.block_ci(diff), "ens_minus_teacher_mean_bp": float(diff.mean() * 1e4),
+                    "random_p9944": float(np.percentile(nulls, 100 - 5 / 9)), "random_median": float(np.median(nulls))}}
+    T = rep["test"]; rep["gates"] = {"G1": T["ensemble"]["sharpe"] > 0 and T["ensemble"]["mdd"] >= -0.20, "G2": T["ens_minus_teacher_ci"][0] > 0,
+                                     "G3": T["ensemble"]["sharpe"] > T["random_p9944"], "G4": sum(v > 0 for v in seeds.values()) >= 4}
+    rep["pass_second_look"] = all(rep["gates"].values()); (OUT / "report_v31.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=float))
+    print(json.dumps({k: rep[k] for k in ("chosen", "frozen_md5", "test", "gates", "pass_second_look")}, indent=1, ensure_ascii=False, default=float))
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--selfcheck", action="store_true"); ap.add_argument("--cell", type=int); ap.add_argument("--seed", type=int)
-    ap.add_argument("--collect", action="store_true"); a = ap.parse_args(); OUT.mkdir(parents=True, exist_ok=True)
+    ap.add_argument("--collect", action="store_true"); ap.add_argument("--collect31", action="store_true"); a = ap.parse_args(); OUT.mkdir(parents=True, exist_ok=True)
     if a.selfcheck:
         return selfcheck()
     if a.collect:
         return collect()
+    if a.collect31:
+        return collect31()
     assert a.seed in CELLS[a.cell][2], "사전 등록된 시드만"
     return train_one(a.cell, a.seed)
 
