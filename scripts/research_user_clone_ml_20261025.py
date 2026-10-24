@@ -127,7 +127,7 @@ def sim(x, f, fund, side, ex, tau, win, cap_frac=CAP, forced_exit=None):
             C -= q * o * rate
         if pos:
             if st["addq"] and ((pos > 0 and l[i] <= st["addpx"] * (1 - THRU)) or (pos < 0 and h[i] >= st["addpx"] * (1 + THRU))):
-                q += st["addq"]; C -= st["addq"] * st["addpx"]; st["addq"] = 0.0
+                q += st["addq"]; C -= st["addq"] * st["addpx"]; st["addq"] = 0.0; st["addi"] = i
             k = i - st["i"]; why = None
             if (pos > 0 and l[i] <= st["stp"]) or (pos < 0 and h[i] >= st["stp"]):
                 px, why = (min(o, st["stp"]) if pos > 0 else max(o, st["stp"])), "stop"
@@ -140,7 +140,7 @@ def sim(x, f, fund, side, ex, tau, win, cap_frac=CAP, forced_exit=None):
                 if hit or k >= MAXH:
                     px, why = c[i], ("model" if hit else "time")
             if why:
-                C += q * px - TAKER * abs(q) * px; trades.append((st["sig"], i, pos, why, C / st["C0"] - 1)); q, pos = 0.0, 0
+                C += q * px - TAKER * abs(q) * px; trades.append((st["sig"], i, pos, why, C / st["C0"] - 1, st["i"], st["P0"], st.get("addi"), px)); q, pos = 0.0, 0   # 뒤 4칸 = 그림용(체결 봉·첫 진입가·물타기 봉·청산가)
         elif pend is not None:
             s_, P0, k0 = pend; hit = (l[i] <= P0 * (1 - THRU)) if s_ > 0 else (h[i] >= P0 * (1 + THRU))
             if hit or i - k0 >= WIN:
