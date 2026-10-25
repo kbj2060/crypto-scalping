@@ -1481,7 +1481,7 @@ def make_app() -> web.Application:
         tss = [int(r[0]) // 1000 for r in rows]
         vwap = mctx.vwap_rows(tss, [float(r[2]) for r in rows], [float(r[3]) for r in rows],
                               [float(r[4]) for r in rows], [float(r[5]) for r in rows], nd=nd)
-        return [{"time": t, "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]),
+        return [{"time": t, "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5]),
                  **veto.get(t, {}), **vwap.get(t, {}),
                  **({"partial": True} if int(r[6]) >= now_ms else {})}   # 2026-10-11 형성 봉 표시(ETH 와 같은 뜻)
                 for t, r in zip(tss, rows)]
@@ -1529,6 +1529,7 @@ def make_app() -> web.Application:
                 "high": float(row["high"]),
                 "low": float(row["low"]),
                 "close": float(row["close"]),
+                **({"volume": float(row["volume"])} if "volume" in src.columns else {}),   # 2026-10-26 화면 VWMA 100 의 거래량(바이낸스 5분봉)
                 **veto.get(int(row["timestamp"].timestamp()), {}),
                 **vwap.get(int(row["timestamp"].timestamp()), {}),
             }
@@ -3543,10 +3544,14 @@ def make_app() -> web.Application:
                    for b, a in sorted(liq.items())]
         return {"bars": [b for p in parts for b in p["bars"]], "oi": oi, "liq": liq_out}
 
-    async def fp_week_candles(asset: str) -> list[dict]:
+    FP_WEEK_VWMA_PRE_S = 100 * 3600   # 2026-10-26 화면 VWMA 100 이 1h 봉에서도 1주일 첫 봉부터 그려지게 -- 1주일 앞 100시간 거래량
+
+    async def fp_week_candles(asset: str) -> tuple[list[dict], list[list[float]]]:
         """지난 7일 5분봉(마감봉) -- /api/market-history 와 같은 행 모양(추세 밴드·세션 VWAP 포함). 밴드 워밍업 720봉을 더 받는다
-        (리뷰: 144봉이면 ATR ewm(1/144) 씨앗 무게가 37% 남고 히스테리시스도 12시간 전에 새로 시작해 첫 하루가 라이브 720봉 계산과 달랐다)."""
-        start_ms = ((int(time.time()) // 86400 - FP_WEEK_DAYS) * 86400 - TREND_VETO_N * 5 * FOOTPRINT_BAR_SECONDS) * 1000
+        (리뷰: 144봉이면 ATR ewm(1/144) 씨앗 무게가 37% 남고 히스테리시스도 12시간 전에 새로 시작해 첫 하루가 라이브 720봉 계산과 달랐다).
+        둘째 값 = 1주일 앞 100시간의 [시각, 종가, 거래량] -- 화면 VWMA 워밍업용(캔들로는 안 그린다)."""
+        week0 = (int(time.time()) // 86400 - FP_WEEK_DAYS) * 86400
+        start_ms = (week0 - max(TREND_VETO_N * 5 * FOOTPRINT_BAR_SECONDS, FP_WEEK_VWMA_PRE_S)) * 1000
         rows: list = []
         while len(rows) < 4000:
             got = await fetch_binance_json("https://fapi.binance.com/fapi/v1/klines",
@@ -3559,9 +3564,9 @@ def make_app() -> web.Application:
         now_ms = time.time() * 1000
         rows = [r for r in rows if int(r[6]) < now_ms]
         if not rows:
-            return []
-        week0 = (int(time.time()) // 86400 - FP_WEEK_DAYS) * 86400
-        return [c for c in kline_candles(rows, now_ms, 4 if asset == "eth" else 6, len(rows)) if c["time"] >= week0]
+            return [], []
+        pre = [[int(r[0]) // 1000, float(r[4]), float(r[5])] for r in rows if week0 - FP_WEEK_VWMA_PRE_S <= int(r[0]) // 1000 < week0]
+        return [c for c in kline_candles(rows, now_ms, 4 if asset == "eth" else 6, len(rows)) if c["time"] >= week0], pre
 
     async def api_footprint_week(request: web.Request) -> web.Response:
         """지난 7일 5분봉 풋프린트·캔들·OI·청산(위 주석). 화면이 필요할 때 한 번 받는다(~0.5MB gzip) -- 400ms 폴링에 넣지 않는다."""
@@ -3570,13 +3575,13 @@ def make_app() -> web.Application:
 
         async def produce() -> dict:
             try:
-                candles = await swr_cached(f"fp_week_k5_{asset}", 600.0, lambda: fp_week_candles(asset), max_stale=3600.0)
+                candles, vol_pre = await swr_cached(f"fp_week_k5_{asset}", 600.0, lambda: fp_week_candles(asset), max_stale=3600.0)
             except (web.HTTPException, ClientError, asyncio.TimeoutError):
-                candles = []                     # 캔들을 못 받으면(밴 등) 칸·레인만 -- 화면은 라이브 캔들 구간만 그린다
+                candles, vol_pre = [], []        # 캔들을 못 받으면(밴 등) 칸·레인만 -- 화면은 라이브 캔들 구간만 그린다
             body = await asyncio.to_thread(fp_week_sync, f, time.time())
             return {"symbol": f.spec.symbol, "bucket": f.spec.bucket, "barSeconds": FOOTPRINT_BAR_SECONDS,
                     "retailMaxUsd": f.retail_max, "whaleMinUsd": f.whale_min, "days": FP_WEEK_DAYS,
-                    "candles": candles, **body, "at": time.time()}
+                    "candles": candles, "volPre": vol_pre, **body, "at": time.time()}
         payload = await swr_cached(f"fp_week_{asset}", 300.0, produce, max_stale=1800.0)
         return web.json_response(payload, headers=NOCACHE)
 

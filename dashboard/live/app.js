@@ -4066,17 +4066,25 @@ function mcEma(full, n) {
   });
   return out;
 }
-//   VWMA = Σ(종가 × 수량) ÷ Σ수량, n봉. 캔들 행엔 거래량이 없어(서버 캔들 = OHLC·sma·atr·vwap) 수량 = 그 tf 봉 풋프린트 체결 Σ(매수+매도)(코인 · 거래대금 줄과 같은 원천).
-//   n봉 중 하나라도 풋프린트가 없으면 그 점은 없다(부분 창을 n봉인 척하지 않는다).
-function mcVwma(full, fpBars, n) {
-  const vol = new Map(), out = new Map();
-  fpBars.forEach((b) => { let q = 0; (b.levels || []).forEach((l) => { q += (Number(l[1]) || 0) + (Number(l[2]) || 0); }); if (q > 0) vol.set(Number(b.time), q); });
+//   VWMA = Σ(종가 × 거래량) ÷ Σ거래량, n봉. 거래량 = 바이낸스 5분봉 거래량(캔들 volume -- 종가와 같은 시장 · 트레이딩뷰 VWMA 와 같은 정의).
+//   2026-10-26 사용자 선택: 풋프린트 체결(바이낸스+OKX)에서 바꿨다 -- 1주일 실측 선 차이 중앙 0.8bp·최대 3.7bp 인데 수집기 빈 봉에 선이 안 끊긴다.
+//   1주일 첫 봉 앞은 서버 volPre(100시간 [시각, 종가, 거래량])를 tf 봉으로 묶어 이어 붙인다 -- 1h 에서도 1주일 첫 봉부터 선이 있다.
+//   n봉 중 하나라도 거래량이 없으면(형성 5분봉 등) 그 점은 없다(부분 창을 n봉인 척하지 않는다).
+function mcVwma(full, n) {
+  const wk = fpWeekFor(), t0 = full.length ? full[0].time : 0, pre = [];
+  ((wk && wk.pre) || []).forEach(([t, c, q]) => {
+    const T = tfT(t), a = pre[pre.length - 1];
+    if (T >= t0) return;
+    if (a && a.time === T) { a.close = c; a.volume += q; } else pre.push({ time: T, close: c, volume: q });
+  });
+  const rows = pre.length && pre[pre.length - 1].time + 300 * chartTfK === t0 ? pre.concat(full) : full;   // 이어질 때만(라이브 16시간만 볼 땐 사이가 빈다)
+  const out = new Map();
   let pv = 0, v = 0, have = 0;
-  full.forEach((c, j) => {
-    const q = vol.get(c.time);
-    if (q) { pv += q * c.close; v += q; have++; }
-    const o = j >= n ? full[j - n] : null, qo = o && vol.get(o.time);
-    if (qo) { pv -= qo * o.close; v -= qo; have--; }
+  rows.forEach((c, j) => {
+    const q = +c.volume;
+    if (q > 0) { pv += q * c.close; v += q; have++; }
+    const o = j >= n ? rows[j - n] : null, qo = o ? +o.volume : 0;
+    if (qo > 0) { pv -= qo * o.close; v -= qo; have--; }
     if (have === n) out.set(c.time, pv / v);
   });
   return out;
@@ -4554,7 +4562,7 @@ async function maybeFetchFpWeek() {
     // 리뷰: 서버가 바이낸스 캔들을 못 받으면 candles: [] 를 준다 -- 성공으로 적으면 6시간 안 다시 받는다. 실패로 치고 30초 뒤 다시.
     //   서버가 이 빈 몸을 300초 캐시한다(fp_week_{asset}) -- 30초마다 0.5MB 를 받아 버리지 않게 300초 뒤 다시(리뷰).
     if (!(j.candles && j.candles.length)) { fpWeekTriedAt = Date.now() + 270e3; throw new Error("footprint-week: 캔들 없음"); }
-    fpWeek = { asset, candles: j.candles, bars: new Map((j.bars || []).map((x) => [x.time, x])), oi: j.oi || [], liq: j.liq || [] };
+    fpWeek = { asset, candles: j.candles, pre: j.volPre || [], bars: new Map((j.bars || []).map((x) => [x.time, x])), oi: j.oi || [], liq: j.liq || [] };
     fpWeekAt = Date.now();
     scheduleSnapshotChartRender();
   } catch (e) {
@@ -4615,7 +4623,7 @@ function footprintForChart() {
 }
 
 // ── 30m·1h 묶기 (2026-10-20) -- chartTfK === 1 이면 전부 입력을 그대로 돌려준다(5m 은 한 줄도 안 바뀐다) ──
-// 캔들: 시가 = 첫 봉 · 고가 = 최대 · 저가 = 최소 · 나머지(종가·sma·vwap 등) = 마지막 봉(그 시각의 값). 형성 tf 봉 = 라이브 5분봉 포함.
+// 캔들: 시가 = 첫 봉 · 고가 = 최대 · 저가 = 최소 · 거래량 = 합 · 나머지(종가·sma·vwap 등) = 마지막 봉(그 시각의 값). 형성 tf 봉 = 라이브 5분봉 포함.
 //   맨 앞 tf 봉이 덜 찼으면(1주일·라이브 첫 봉이 시간 중간부터) 뺀다 -- 시가가 거짓이 된다(리뷰).
 //   기억(리뷰: 끌기 한 프레임에 3~4번 2천 봉을 다시 묶었다): 입력 배열·길이·첫/끝 원소가 그대로면 같은 배열을 주고
 //   형성 tf 봉만 **제자리에서** 다시 묶는다(라이브 5분봉이 체결마다 제자리 갱신 -- 렌더러·fpCv.live 가 같은 객체를 쥐고 있다).
@@ -4626,9 +4634,9 @@ function tfCandles(full) {
   if (m.src === full && m.n === n && m.k === chartTfK && m.a === full[0] && m.z === full[n - 1]) {
     const a = m.out[m.out.length - 1];
     if (a) {
-      let j = n, hi = -Infinity, lo = Infinity;
-      while (j > 0 && tfT(full[j - 1].time) === a.time) { j--; hi = Math.max(hi, full[j].high); lo = Math.min(lo, full[j].low); }
-      if (j < n) Object.assign(a, full[n - 1], { time: a.time, open: full[j].open, high: hi, low: lo });
+      let j = n, hi = -Infinity, lo = Infinity, vol = 0;
+      while (j > 0 && tfT(full[j - 1].time) === a.time) { j--; hi = Math.max(hi, full[j].high); lo = Math.min(lo, full[j].low); vol += +full[j].volume || 0; }
+      if (j < n) Object.assign(a, full[n - 1], { time: a.time, open: full[j].open, high: hi, low: lo, volume: vol });
     }
     return m.out;
   }
@@ -4636,8 +4644,8 @@ function tfCandles(full) {
   let n0 = 0;   // 맨 앞 tf 봉에 든 5분봉 수
   full.forEach((c) => {
     const t = tfT(c.time), a = out[out.length - 1];
-    if (a && a.time === t) Object.assign(a, c, { time: t, open: a.open, high: Math.max(a.high, c.high), low: Math.min(a.low, c.low) });
-    else out.push(Object.assign({}, c, { time: t }));
+    if (a && a.time === t) Object.assign(a, c, { time: t, open: a.open, high: Math.max(a.high, c.high), low: Math.min(a.low, c.low), volume: (+a.volume || 0) + (+c.volume || 0) });
+    else out.push(Object.assign({}, c, { time: t, volume: +c.volume || 0 }));
     if (out.length === 1) n0++;
   });
   if (out.length > 1 && n0 < chartTfK) out.shift();
@@ -6687,10 +6695,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           "볼린저 밴드(20봉 · 2σ). 우리 검정: 4시간 볼린저는 평균회귀·이탈 추종 둘 다 비용을 못 넘었다 — 위치 참고."));
       }
       // ③ 이동평균 셋(2026-10-26 펜 메모, 기본 끔) -- 지금 tf 봉(5m·30m·1h)으로 전체 이력(1주일까지)에서 센다. 이름 = VWAP 처럼 선 오른쪽 끝(lblStay).
-      //   ponytail: 라이브 5분 창은 풋프린트가 144봉뿐이라 VWMA 100 은 끝 45봉에만 선이 있다(1시간 창은 충분) -- 넓힌 창·30m·1h 는 1주일 풋프린트가 붙어 채워진다.
       [["ema5", "EMA 5", 1.2, () => mcEma(chartTfFull(), 5), "종가 지수이동평균 5봉"],
        ["ema20", "EMA 20", 1.4, () => mcEma(chartTfFull(), 20), "종가 지수이동평균 20봉"],
-       ["vwma", "VWMA 100", 1.6, () => mcVwma(chartTfFull(), fpBars, 100), "거래량 가중 이동평균 100봉 = Σ(종가×수량) ÷ Σ수량 · 수량 = 풋프린트 체결(매수+매도), 캔들엔 거래량이 없다"]]
+       ["vwma", "VWMA 100", 1.6, () => mcVwma(chartTfFull(), 100), "거래량 가중 이동평균 100봉 = Σ(종가×거래량) ÷ Σ거래량 · 거래량 = 바이낸스 5분봉 거래량(트레이딩뷰와 같은 정의 · 아래 거래대금 줄은 바이낸스+OKX 체결이라 원천이 다르다)"]]
         .filter(([k]) => mcLine[k]).forEach(([k, nm, sw, calc, what]) => {
           const m = calc(), col = `var(--ma-${k})`;
           pl(candles.map((c, i) => (m.has(c.time) ? `${cx(i)},${yAt(m.get(c.time)).toFixed(1)}` : null)).filter(Boolean),
