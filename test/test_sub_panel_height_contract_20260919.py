@@ -36,14 +36,14 @@ def test_heights_match_between_js_and_css():
     # 2026-09-23 RVOL 은 **전용 행을 안 쓴다** -- 누적 CVD 레인 안에 자기 축으로 겹친다.
     #   (한 번 세 행으로 갔다가 사용자 지시로 되돌렸다. 되돌릴 때 여기도 같이 와야 한다.)
     lanes = (_num(r"QUAD_H = fpBars\.length \? \(mobileChart \? \d+ : .*?(\d+)\) : 0;", JS, "QUAD_H")
-             + _num(r"QUAD_TXT = \(fpBars\.length && QUAD_TEXT_OK\) \? \(mobileChart \? \d+ : (\d+)\)", JS, "QUAD_TXT")
              + _num(r"CUM_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "CUM_H")
              + 2 * _num(r"LANE_GAP = fpBars\.length \? (\d+)", JS, "LANE_GAP"))
 
     # 🔴가격 플롯(ch)은 «나머지»다. 이 계약은 그 나머지가 얼마로 남는지를 고정한다 --
     #   상자만 줄이거나 레인만 키우면 캔들이 **조용히** 눌린다(그게 이 검사의 이유다).
     # 2026-10-06 풋프린트 레짐·전환 리본 두 줄 제거 -- 하단 여백 70 -> 28, 빈 42px 는 가격 플롯으로(400 -> 442).
-    mt_top, price_plot = 12, 442
+    # 2026-10-26 펜 메모 «이 박스는 이제 제거»: 리본 아래 다섯 줄(델타·OI·고래·중형·리테일)을 빼 사분면 판 196 -> 88, 108px 는 가격 플롯으로(442 -> 550).
+    mt_top, price_plot = 12, 550
     mb = _num(r'mb = svg\.id === "candleSvgSnapshot" \? (\d+)', JS, "풋프린트 하단 여백")
 
     css_svg = _num(r"#candleSvgSnapshot \{ height: (\d+)px; \}", CSS, "SVG 높이")
@@ -72,13 +72,12 @@ def test_lanes_tile_without_overlap():
     """레인 두 행(사분면 -> 누적 CVD)이 **겹치지 않아야** 한다.
 
     🔴SVG 는 안 잘라준다 -- 겹치면 그냥 포개 그린다. 에러도 경고도 없다.
-    데스크톱 기준(ROW_H=0 · PRICE_ROW_H=0)으로 y 좌표 식을 그대로 평가한다.
+    데스크톱 기준(PRICE_ROW_H=0)으로 y 좌표 식을 그대로 평가한다.
     """
     env = {"QUAD_H": _num(r"QUAD_H = fpBars\.length \? \(mobileChart \? \d+ : .*?(\d+)\) : 0;", JS, "QUAD_H"),
-           "QUAD_TXT": _num(r"QUAD_TXT = \(fpBars\.length && QUAD_TEXT_OK\) \? \(mobileChart \? \d+ : (\d+)\)", JS, "QUAD_TXT"),
            "CUM_H": _num(r"CUM_H = fpBars\.length \? \(mobileChart \? \d+ : (\d+)\)", JS, "CUM_H"),
            "LANE_GAP": _num(r"LANE_GAP = fpBars\.length \? (\d+)", JS, "LANE_GAP"),
-           "ROW_H": 0, "PRICE_ROW_H": 0, "plotBottom": 0}
+           "PRICE_ROW_H": 0, "plotBottom": 0}
     exprs = {}
     for name in ("quadY", "cumY", "cumBottom"):
         m = re.search(rf"  const {name} = ([^;]+?);", JS)
@@ -103,13 +102,13 @@ def test_lanes_tile_without_overlap():
     for name, expr in exprs.items():
         env[name] = ev(expr, env)
 
-    lanes = [("사분면", env["quadY"], env["QUAD_H"] + env["QUAD_TXT"]),
+    lanes = [("사분면", env["quadY"], env["QUAD_H"]),
              ("누적 CVD", env["cumY"], env["CUM_H"])]
     for (n1, y1, h1), (n2, y2, _) in zip(lanes, lanes[1:]):
         assert y1 + h1 <= y2, f"{n1}({y1}+{h1})가 {n2}({y2}) 위로 올라탄다"
     # «두 행 + 간격»의 합이 높이 계약의 lanes 와 같아야 한다(둘이 갈라지면 조용히 눌린다)
     total = lanes[-1][1] + lanes[-1][2] - lanes[0][1] + env["LANE_GAP"]
-    want = env["QUAD_H"] + env["QUAD_TXT"] + env["CUM_H"] + 2 * env["LANE_GAP"]
+    want = env["QUAD_H"] + env["CUM_H"] + 2 * env["LANE_GAP"]
     assert total == want, f"레인 스택 {total} != 높이 예산 {want}"
     # 🔴RVOL 이 전용 행으로 되돌아가면 여기도 같이 와야 한다 -- 한쪽만 고치면 캔들이 눌린다.
     assert "RVOL_H" not in JS, "RVOL_H 가 생겼다 -- 레인 예산과 styles.css 를 같이 고쳤는지 확인"
