@@ -5199,9 +5199,7 @@ function renderChartPan() {
     + ` aria-valuetext="${vt}">`
     + `<rect class="pan-win" x="${wx}" y="0.5" width="${ww}" height="${H - 1}" rx="4"/>`
     + `<path class="pan-line" d="${line}"/></svg>`
-    + `<span class="chart-pan-when">${when}</span>`
-    + (live ? `<span class="chart-pan-live" title="최신 봉을 따라간다">실시간</span>`
-            : `<button type="button" class="chart-pan-now" title="최신 봉으로 돌아가기 (더블클릭도 같다)">최신으로</button>`);
+    + `<span class="chart-pan-when">${when}</span>`;   // 2026-10-26 펜 메모 «차트를 오가다 보면 두 글자가 겹친다 · 실시간/최신으로 제거»: 최신으로 = 차트 더블클릭 · End 키
   if (focused) box.querySelector(".chart-pan-map")?.focus();
 }
 function setupChartPan() {
@@ -5219,7 +5217,6 @@ function setupChartPan() {
     const up = () => { box.removeEventListener("pointermove", go); box.removeEventListener("pointerup", up); box.removeEventListener("pointercancel", up); };
     box.addEventListener("pointermove", go); box.addEventListener("pointerup", up); box.addEventListener("pointercancel", up);
   });
-  box.addEventListener("click", (ev) => { if (ev.target.closest(".chart-pan-now")) chartPanReset(); });
   box.addEventListener("keydown", (ev) => {
     const d = { ArrowLeft: 1, ArrowRight: -1 }[ev.key];
     if (ev.key === "End") { ev.preventDefault(); chartPanReset(); return; }

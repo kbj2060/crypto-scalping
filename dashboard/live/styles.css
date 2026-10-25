@@ -2473,10 +2473,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .chart-pan-map .pan-line { fill: none; stroke: var(--muted); stroke-width: 1.2; opacity: .8; }
 .chart-pan-map .pan-win { fill: rgb(var(--lift) / .16); stroke: var(--text); stroke-opacity: .55; stroke-width: 1; transition: x .12s ease-out, width .12s ease-out; }
 .chart-pan-when { font-variant-numeric: tabular-nums; color: var(--text); min-width: 78px; }
-.chart-pan-live { color: var(--good); }
-.chart-pan-live::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 5px; vertical-align: 1px; }
-.chart-pan-now { white-space: nowrap; font: 700 11px/1 var(--font-sans); color: var(--chart-bg, #111); background: var(--text); border: 0; border-radius: 999px; padding: 6px 10px; cursor: pointer; }
-.chart-pan-now:hover { opacity: .88; }
 #candleSvgSnapshot.panning { cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) { .chart-pan-map .pan-win { transition: none; } }
 /* 2026-10-01 꾹 눌러 추가 진입 결과 말풍선(패널을 열지 않는다) */
@@ -2621,6 +2617,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-line-switch { display: none; }
 .fp-line-switch.on { display: flex; position: absolute; z-index: 2; transform: translateY(-50%); margin: 0; gap: 14px; align-items: center; font-size: 11px; white-space: nowrap; }   /* 2026-10-16 펜 메모: 차트 위 줄 오른쪽 끝(right = JS) */
 .chart-pan.inrow { position: absolute; z-index: 2; transform: translate(-50%, -50%); margin: 0; }   /* 2026-10-16 펜 메모: 차트 위 줄 가운데 */
+.chart-pan.inrow .chart-pan-when { min-width: 152px; }   /* 2026-10-26 펜 메모 «오가다 보면 글자가 겹친다»: 과거로 옮기면 «10/25 23:05–10/26 00:00» 처럼 길어지는데 자리(가운데 맞춤·체크박스 앞 끝)는 짧을 때 폭으로 잡혀 있었다 -- 가장 긴 꼴 폭을 미리 잡는다 */
 /* 2026-10-16 펜 메모(2차): 넓은 화면 맨 위 왼쪽 칸 = [코인 탭 | 스냅샷·운영 관리] (app.js placeTopLeft) · 비면 숨김 */
 .top-left-slot { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .top-left-slot:empty { display: none; }
