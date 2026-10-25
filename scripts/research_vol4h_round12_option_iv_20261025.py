@@ -27,6 +27,26 @@ def hourly(tr, grid):
     return pd.DataFrame(dict(iv=iv, x2=np.log1p(z.abs()), x3=np.log(vol4 / vol4.rolling(720, min_periods=720).mean().shift(1))), index=grid)
 
 
+BETA_I = (-0.04708836659130656, 0.17635794080180575)   # 12라운드 report.json beta_I 동결(전진 판정용)
+
+
+def iv_hourly(end_ms):
+    """전진 판정용: 저장된 체결 전부로 정시 IV(main 과 같은 걸러내기·델타)."""
+    tr = pd.concat([pd.read_parquet(f) for f in sorted((O.OUT / "trades").glob("*.parquet"))], ignore_index=True)
+    tr = tr[tr.instrument_name.str.match(r"^ETH-\d+[A-Z]{3}\d{2}-\d+-[CP]$") & ~tr.block & ~tr.liq & (tr.timestamp < end_ms)].reset_index(drop=True)
+    exp = pd.to_datetime(tr.instrument_name.str.split("-").str[1], format="%d%b%y").astype("int64") // 10**6 + 8 * H1
+    tr["T"] = (exp - tr.timestamp) / 86_400_000; tr["d"] = O.deltas(tr); tr = tr[np.isfinite(tr.d)]
+    tr["dnb"] = np.where(tr.direction == "buy", 1, -1) * tr.d * tr.amount
+    return hourly(tr, np.arange(pd.Timestamp("2025-12-01").value // 10**6, end_ms, H1)).iv
+
+
+def qx4i(ts, yh, iv):
+    """ts = 5분봉 시작(정시 −5분), yh = QX4 로그 RV 예측 → QX4I."""
+    d = (pd.DatetimeIndex(ts) + pd.Timedelta("5min")).astype("int64") // 10**6
+    x1 = np.nan_to_num(np.log((iv.reindex(d).to_numpy() / 100) ** 2 * 4 / 8766) - yh)
+    return yh + BETA_I[0] + BETA_I[1] * x1
+
+
 def selftest():
     g = np.arange(0, 12) * H1
     tr = pd.DataFrame(dict(timestamp=[10 * H1 - 1, 10 * H1], iv=[50.0, 70.0], d=[.5, .5], T=[2.0, 2.0], dnb=[1.0, 2.0], amount=[1.0, 1.0]))

@@ -31,6 +31,7 @@ VERDICTS = {   # 후보: (판정일, 설명, 사전 등록 문서)
     "trend180": ("2027-04-22", "추세 (b) 현재 규칙+pv 최종(180일)", "docs/prereg/trend_portfolio_lit_20261025.md"),
     "rl": ("2027-01-22", "RL v3.1 동결 앙상블(기록용)", "docs/prereg/rl_v31_tcn_ensemble_20261025.md"),
     "mlsize": ("2026-12-23", "ML 크기 2배 — 자체 --forward", "docs/prereg/ml_size_fwd_2x_20261025.md"),
+    "voliv": ("2027-01-22", "4h 변동성 QX4I(QX4+옵션 IV 보정, 12라운드 계수 고정) vs QX4", "docs/prereg/vol4h_round12_iv_forward_20261025.md"),
     "optsell": ("2027-03-24", "옵션 순 델타 매도 꼬리 z<−1 — 자체 research_deribit_option_flow_direction_20261025.py --forward", "docs/prereg/deribit_option_sell_tail_forward_20261025.md"),
 }
 QX4_ART, QX4_MD5 = ROOT / "tmp/vol4h_qx4/qx4_2026-10-23.joblib", "2fce43f5e5ece42048ccdd389bff6109"   # 10-25 동결
@@ -141,7 +142,7 @@ def extend_sys(S, end):
 
 
 # ---------- 1. 4h 변동성 ----------
-def vol_verdict(start, end, rows=None):
+def vol_verdict(start, end, rows=None, extra=None):
     """docs/prereg/vol4h_forecast_horserace_20261025.md «전진 판정»:
     > - 데이터: 2026-10-24 00:00 UTC 이후 정시 결정(라벨 끝 ≤ 판정일 전날) · 1차 판정 2026-12-23(약 60일 · 코인당 ~1,400 결정).
     > - 관문: ETH 에서 QG − M3, QG − M0 QLIKE CI 상한 < 0 · 복제 ≥ 2/3 · lvl 기울기 CI 가 1 을 포함.
@@ -161,6 +162,8 @@ def vol_verdict(start, end, rows=None):
         F, y = fr[s]; tr, ca = M[s]["tr"], M[s]["ca"]; a = art["coins"][s]
         B0[s] = np.linalg.lstsq(R.design(F[tr], "M0"), y[tr], rcond=None)[0]
         p = {"QX4": L.predict_log(art, s, F[ca]), "M3": L._pred(a["M3"], F[ca]), "M0": R.design(F[ca], "M0") @ B0[s]}
+        if extra:                                                   # voliv 같은 추가 모형(기존 관문은 그대로)
+            p.update(extra(s, F[ca].index, p["QX4"]))
         C[s] = {m: float(np.log(np.mean(np.exp(y[ca] - v)))) for m, v in p.items()}
         assert abs(C[s]["QX4"] - a["c"]) < 1e-6, (s, C[s]["QX4"], a["c"])   # 같은 자료·같은 아티팩트 확인
     del fr, oks
@@ -176,12 +179,15 @@ def vol_verdict(start, end, rows=None):
         fw = hr & (ts >= start - pd.Timedelta("5min")) & (ts + pd.Timedelta(minutes=5 * R.H) <= end + pd.Timedelta("23:55:00")) & np.isfinite(y) & (nf < 5)
         Fh, a = F[hr], art["coins"][s]
         p = {"QX4": L.predict_log(art, s, Fh), "M3": L._pred(a["M3"], Fh), "M0": R.design(Fh, "M0") @ B0[s]}
+        if extra:
+            p.update(extra(s, Fh.index, p["QX4"]))
         k = fw[hr]; yf, tf = y[fw], ts[fw]; Lq = {m: R.qlike(yf, v[k] + C[s][m]) for m, v in p.items()}
         sig = pd.Series(np.exp((p["QX4"] + C[s]["QX4"]) / 2), index=ts[hr]); ref = sig.rolling(720, min_periods=600).median().values[k]
         assert np.isfinite(ref).all(), "lvl 기준(직전 720 정시) 부족 — klines 를 더 길게"
         out[s] = {"n": int(k.sum()), "days": int(len(np.unique(tf.normalize()))), "c": C[s], "qlike": {m: float(v.mean()) for m, v in Lq.items()},
                   "dq_QX4_vs_M3": R.day_ci(tf, Lq["QX4"] - Lq["M3"]), "dq_QX4_vs_M0": R.day_ci(tf, Lq["QX4"] - Lq["M0"]),
                   "lvl_mz_QX4": R.mz_slope(tf, np.log(np.exp(yf / 2) / ref), np.log(sig.values[k] / ref))}
+        out[s].update({f"dq_{m}_vs_QX4": R.day_ci(tf, Lq[m] - Lq["QX4"]) for m in p if m not in ("QX4", "M3", "M0")})
         print(s, json.dumps(out[s], ensure_ascii=False), flush=True)
     e, rep["coins"] = out["ETH"], out
     rep["gates"] = {"V1_ETH_QX4_vs_M3_ci_hi_lt0": e["dq_QX4_vs_M3"][2] < 0, "V2_ETH_QX4_vs_M0_ci_hi_lt0": e["dq_QX4_vs_M0"][2] < 0,
@@ -312,7 +318,18 @@ def rl_verdict(start, end):
     return {**rep, **FRESH}
 
 
-FN = {"vol": vol_verdict, "box": box_verdict, "trend90": trend_verdict, "trend180": trend_verdict, "rl": rl_verdict}
+def voliv_verdict(start, end):
+    """docs/prereg/vol4h_round12_iv_forward_20261025.md — 동결 QX4 아티팩트 + 12라운드 계수 고정 IV 보정(ETH) vs QX4."""
+    import research_vol4h_round12_option_iv_20261025 as R12, research_deribit_option_flow_direction_20261025 as O
+    for d in pd.date_range(FWD, end, freq="D"):
+        O.fetch_day(d)                                              # history.deribit.com · 창 끝 날까지만
+    iv = R12.iv_hourly(int((end + DAY).value // 10**6))
+    rep = vol_verdict(start, end, extra=lambda s, ts, q: {"QX4I": R12.qx4i(ts, q, iv)} if s == "ETH" else {})
+    rep["gates"] = {"I1_ETH_QX4I_vs_QX4_ci_hi_lt0": rep["coins"]["ETH"]["dq_QX4I_vs_QX4"][2] < 0}
+    return rep
+
+
+FN = {"vol": vol_verdict, "box": box_verdict, "trend90": trend_verdict, "trend180": trend_verdict, "rl": rl_verdict, "voliv": voliv_verdict}
 
 
 def main(argv=None, today=None):
