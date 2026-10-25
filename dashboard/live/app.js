@@ -4304,8 +4304,8 @@ function renderMarketCtx() {
       + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
       + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label>`
       // 2026-10-26 펜 메모 «여기에 vwma 100, ema5, ema 20 도 추가해줘» -- 넓은 화면은 한 줄에 다 안 들어가(1920 에서도 미니맵과 겹침) 이 셋만 바로 위 줄로(CSS .mc-sw-ma) · 그 밖은 같은 줄에 이어 흐른다
-      + `<span class="mc-sw-ma">${[["ema5", "EMA 5", "종가 지수이동평균 5봉"], ["ema20", "EMA 20", "종가 지수이동평균 20봉"], ["vwma", "VWMA 100", "거래량 가중 이동평균 100봉 · 수량 = 풋프린트 체결"]]
-        .map(([k, nm, t]) => `<label title="${t}"><input type="checkbox" data-line="${k}"${mcLine[k] ? " checked" : ""}> ${nm}</label>`).join("")}</span></div>`;
+      + `<span class="mc-sw-ma">${[["ema5", "EMA 5", "종가 지수이동평균 5봉"], ["ema20", "EMA 20", "종가 지수이동평균 20봉"], ["vwma", "VWMA 100", "거래량 가중 이동평균 100봉 · 거래량 = 바이낸스 5분봉"]]
+        .map(([k, nm, t]) => `<label title="${t}" style="--sw: var(--ma-${k})"><input type="checkbox" data-line="${k}"${mcLine[k] ? " checked" : ""}> ${nm}<i class="mc-sw-key" aria-hidden="true"></i></label>`).join("")}</span></div>`;
   setH("fpLineSwitch", G.cmpW ? lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', "") : "");   // 2026-10-16 펜 메모 «이 텍스트는 제거» -- 넓은 화면 줄만(좁은 화면은 이름 그대로)
   const wallRow = ps && PAPER_SIG_OK.wall.has(A) ? gRow("깊은 벽", G.wall(ps.imb, ps.thr), sg(ps.imb, 2), ps.dir > 0 ? "mc-good" : ps.dir < 0 ? "mc-bad" : "",
     `±50bp 매수·매도 잔량 불균형(5분봉 마감) · 점선 = 지난 24시간 상위 20% 문턱 ±${ps.thr.toFixed(2)}`) : "";
@@ -6694,7 +6694,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           { stroke: "var(--muted)", "stroke-opacity": 0.55, "stroke-dasharray": "3 3", "stroke-width": 1 },
           "볼린저 밴드(20봉 · 2σ). 우리 검정: 4시간 볼린저는 평균회귀·이탈 추종 둘 다 비용을 못 넘었다 — 위치 참고."));
       }
-      // ③ 이동평균 셋(2026-10-26 펜 메모, 기본 끔) -- 지금 tf 봉(5m·30m·1h)으로 전체 이력(1주일까지)에서 센다. 이름 = VWAP 처럼 선 오른쪽 끝(lblStay).
+      // ③ 이동평균 셋(2026-10-26 펜 메모, 기본 끔) -- 지금 tf 봉(5m·30m·1h)으로 전체 이력(1주일까지)에서 센다. 이름 = 가격 칸 오른쪽 끝(점선 지시선) · 색 = 스위치 옆 막대.
       [["ema5", "EMA 5", 1.2, () => mcEma(chartTfFull(), 5), "종가 지수이동평균 5봉"],
        ["ema20", "EMA 20", 1.4, () => mcEma(chartTfFull(), 20), "종가 지수이동평균 20봉"],
        ["vwma", "VWMA 100", 1.6, () => mcVwma(chartTfFull(), 100), "거래량 가중 이동평균 100봉 = Σ(종가×거래량) ÷ Σ거래량 · 거래량 = 바이낸스 5분봉 거래량(트레이딩뷰와 같은 정의 · 아래 거래대금 줄은 바이낸스+OKX 체결이라 원천이 다르다)"]]
@@ -6705,8 +6705,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           const lc = [...candles].reverse().find((c) => m.has(c.time)), v = lc ? m.get(lc.time) : null;
           // 화면 밖이면 이름도 없다(VWAP 과 같은 규약 · 축은 캔들만 본다) -- 위·아래 끝 «↓» 꼬리표는 바닥의 추세 veto 꼬리표와 겹쳤다(실측: VWMA 100 이 2341, 화면 바닥 2350)
           if (v == null || yAt(v) <= mt + 8 || yAt(v) >= plotBottom - 2) return;
-          if (gutOn) fpNotes.push({ val: v, label: nm, color: col });
-          else mk(svg, "text", { x: ml + cw - 4, y: yAt(v) - 3, "text-anchor": "end", "font-size": mobileChart ? 9 : 10, "font-weight": 700, fill: col, "pointer-events": "none" }).textContent = nm;
+          if (gutOn) fpNotes.push({ val: v, label: nm, color: col });   // 휴대폰(칸 없음)은 이름 없이 색만 -- 스위치 옆 색 막대가 범례다(최신 봉을 안 가린다)
         });
       // ③ 주간·앵커 VWAP(2026-09-30 사용자 지시, 기본 끔) -- 체결 테이프(/api/market-context profile). 지금 값 하나라 가로선.
       //   우리 검정: VWAP 되돌림·위/아래 방향 모두 가짜 레벨과 같았다 — 지지·저항 아님, 위치 참고.
@@ -7158,7 +7157,6 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       svg.appendChild(g);
     });
   }
-  const lblStay = (q) => !!q.note && /^(VWAP|EMA|VWMA)/.test(q.label || "");   // 10-26 이동평균 이름도 선 끝(플롯 오른쪽)   // 2026-10-01 플롯 오른쪽 끝에 남는 이름(VWAP — 사용자 지시 · 10-15 옵션 예상 폭 둘 제거)
   // 2026-09-30 꼬리표 칸: 겹침 선 이름(fpNotes)을 가격 꼬리표와 한 줄에 세워 겹침 회피를 **함께** 다시 돈다.
   if (gutOn && fpNotes.length) {
     fpNotes.forEach((n) => {
@@ -7169,13 +7167,11 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       priceLabels.push(n);
     });
     priceLabels.forEach((p) => { delete p.adjustedY; });
-    // 2026-10-01 두 줄로 나눠 겹침을 따로 돈다: VWAP = 플롯 안 오른쪽 끝(그대로) · 나머지 = 호가 프로파일 오른쪽 끝(사용자 지시)
-    declutterTagY(priceLabels.filter((q) => lblStay(q)), mt + 9, plotBottom - 9, 19);
-    declutterTagY(priceLabels.filter((q) => !lblStay(q)), mt + 9, plotBottom - 9, 19);
+    // 2026-10-26 사용자 «라벨이 최신 봉 쪽에 있어 가린다»: VWAP·EMA·VWMA 이름도 플롯 안 오른쪽 끝을 떠나 다른 선 이름처럼 호가 프로파일 오른쪽 끝으로(점선 지시선) -- 한 줄로 겹침을 돈다
+    declutterTagY(priceLabels, mt + 9, plotBottom - 9, 19);
   }
   const tagX = ml + cw + 4, xR = ml + cw - 4, inR = LBL !== "B";
   const xRR = w - mr - 2;   // 호가 프로파일 오른쪽 끝 -- 현재가·지지/저항·감마 플립·지표·max pain 이름이 여기 오른쪽 정렬
-  const xOf = (q) => (lblStay(q) ? xR : xRR);   // B = 체결 기둥 왼쪽 위에 띄움 · A/C = 플롯 안 오른쪽 끝에 오른쪽 정렬
   // 2026-09-30 약어 → 짧은 이름(사용자 «약어가 너무 많아 이해가 힘들다»): 이름은 그대로, 가격만 호버로 뺀다.
   const CODE = (nm) => nm.replace("앵커·전일고", "앵커 전일고").replace("앵커·전일저", "앵커 전일저")
     .replace(/^HL (롱|숏).*/, "HL $1청산");
@@ -7185,14 +7181,14 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       const ly = Math.max(mt + 9, Math.min(plotBottom - 9, labelYRaw));
       const ng = document.createElementNS(NS, "g");
       const lead = document.createElementNS(NS, "path");
-      const far = inR && !lblStay(p);   // 프로파일 끝으로 간 이름 -- 선(플롯 안)에서 떨어지므로 글자 앞까지 옅은 점선을 잇는다(아래에서 폭을 잰 뒤)
+      const far = inR;   // 프로파일 끝으로 간 이름 -- 선(플롯 안)에서 떨어지므로 글자 앞까지 옅은 점선을 잇는다(아래에서 폭을 잰 뒤)
       if (!far && (!inR || Math.abs(ly - p.realY) > 2)) {
         lead.setAttribute("d", inR ? `M${ml + cw} ${p.realY.toFixed(1)} L${xR} ${ly.toFixed(1)}` : `M${ml + cw} ${p.realY.toFixed(1)} L${tagX - 2} ${ly.toFixed(1)}`);
         lead.setAttribute("stroke", p.color); lead.setAttribute("stroke-opacity", "0.45"); lead.setAttribute("fill", "none");
         ng.appendChild(lead);
       }
       const t = document.createElementNS(NS, "text");
-      t.setAttribute("x", inR ? xOf(p) - 2 : tagX + 2); t.setAttribute("y", ly + 3.5); t.setAttribute("font-size", LBL === "C" ? "10.5" : "10"); t.setAttribute("font-weight", "700");
+      t.setAttribute("x", inR ? xRR - 2 : tagX + 2); t.setAttribute("y", ly + 3.5); t.setAttribute("font-size", LBL === "C" ? "10.5" : "10"); t.setAttribute("font-weight", "700");
       if (inR) t.setAttribute("text-anchor", "end");
       t.setAttribute("fill", p.color); t.setAttribute("style", "font-variant-numeric: tabular-nums");
       t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3"); t.setAttribute("paint-order", "stroke");
