@@ -222,9 +222,9 @@ def test():
                RL=stats(rl), teacher=stats(teach), lowvol=stats(E.sig24.to_numpy() <= smed), hgb=dict(q=q, **stats(pt > np.percentile(pv, q) - (q == 0))),
                random_same_rate=dict(rate=took_rate, p50=float(np.median(rnd)), p95=float(np.percentile(rnd, 95))),
                RL_minus_teacher_bp_day=float((dR - dT).mean()), ci95=[lo, hi], G1=bool(g1), G2=bool(g2), G3=bool(g3), per_seed=per_seed,
-               take_by=dict(side=Et.groupby("side").take.mean().round(3).to_dict(),
-                            sig_q=Et.groupby(pd.qcut(Et.sig24, 5, labels=False)).take.mean().round(3).tolist(),
-                            width_q=Et.groupby(pd.qcut(Et.width_bp, 5, labels=False)).take.mean().round(3).tolist()))
+               take_by=dict(side=Et.groupby("side")["take"].mean().round(3).to_dict(),
+                            sig_q=Et.groupby(pd.qcut(Et.sig24, 5, labels=False))["take"].mean().round(3).tolist(),
+                            width_q=Et.groupby(pd.qcut(Et.width_bp, 5, labels=False))["take"].mean().round(3).tolist()))
     rep["G4_RL_total_positive"] = rep["RL"]["total_bp"] > 0
     rep["verdict"] = "후보(전진 판정 필요)" if g1 and g2 and g3 else "불통과"
     rp.write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=float)); print(json.dumps(rep, indent=1, ensure_ascii=False, default=float))
