@@ -19,6 +19,7 @@ DIR = WT / "data" / "live" / "eth_dir4h_oos_seed.parquet"
 PANEL = ROOT / "data" / "binance_vision" / "panel" / "ETHUSDT.parquet"
 TRAIN, VAL, TEST = ("2024-01-01", "2026-01-01"), ("2026-01-01", "2026-06-01"), ("2026-06-01", "2026-09-14 23:00")
 SEEDS = [int(s) for s in np.random.default_rng(2026102614).integers(1, 2**31 - 1, 5)]
+SEEDS19 = [int(x) for x in np.random.default_rng(2026102619).integers(1, 2**31 - 1, 10)]   # v19 새 10시드
 ACTS = np.array([-1.0, -0.5, 0.0, 0.5, 1.0]); COST, CAP, EP, TOTAL, CK = 4e-4, 2.0, 336, 300_000, 30_000
 
 
@@ -199,17 +200,18 @@ WIN17 = {"R1": (("2023-01-01", "2024-01-01"), ("2024-01-01", "2024-06-01"), ("20
          "R3": (TRAIN, VAL, TEST)}                                         # v17 굴림 3창 (학습, 검증=보고만, 시험)
 
 
-def test_v17(prefix="v17", frame="frame_v17.parquet", report="test_report_v17.json"):
+def test_v17(prefix="v17", frame="frame_v17.parquet", report="test_report_v17.json", seeds_=None):
     """v17: 창마다 마지막(30만) 체크포인트 · H1 3창 이어 붙인 샤프 RL > T3 그리고 > max(T1,T2) · H2 창별 RL > T3 ≥ 2/3 · H3 조정 원형이동 > 90분위."""
     from stable_baselines3 import PPO
     rp = OUT / report; assert not rp.exists(), "판정은 한 번만"
-    rep, P = dict(seeds=SEEDS), {k: [] for k in ("RL", "T1_long", "T2_dirmodel", "T3_tsmom")}; parts = []
+    SD = seeds_ or SEEDS
+    rep, P = dict(seeds=SD), {k: [] for k in ("RL", "T1_long", "T2_dirmodel", "T3_tsmom")}; parts = []
     for w, (trp, vap, tep) in WIN17.items():
         F, X, size, _ = load(frame=frame, train=trp); Xn, ret = X.to_numpy(), F.ret.to_numpy(); base = np.sign(F.m30d.to_numpy())
         T = teachers(F, size, span(F, trp)); rep[w] = {}
         for name, p in (("VAL", vap), ("TEST", tep)):
             m = span(F, p); r = ret[m]
-            seeds = {s: rollout(PPO.load(OUT / f"{prefix}_{w}_{s}" / f"{TOTAL}.zip", device="cpu"), Xn, size, m, base) for s in SEEDS}
+            seeds = {s: rollout(PPO.load(OUT / f"{prefix}_{w}_{s}" / f"{TOTAL}.zip", device="cpu"), Xn, size, m, base) for s in SD}
             ens = np.mean(list(seeds.values()), 0); t3 = T["T3_tsmom"][m]
             rep[w][name] = dict(RL=stats(pnl(ens, r)), teachers={k: stats(pnl(v[m], r)) for k, v in T.items()},
                                 per_seed={s: stats(pnl(v, r))["sharpe"] for s, v in seeds.items()}, adj_mean_abs=float(np.abs(ens - t3).mean()))
@@ -277,5 +279,7 @@ if __name__ == "__main__":
     elif a[:1] == ["--build-v18"]: build("2022-11-01", "frame_v18.parquet", extra=True)
     elif a[:1] == ["--plant-v18"]: train(SEEDS[0], rho=0.3, tag="v18_plant", mirror=True, residual=True, win="R3", frame="frame_v18.parquet")
     elif a[:1] == ["--train-v18"]: assert a[1] in WIN17 and int(a[2]) in SEEDS; train(int(a[2]), tag=f"v18_{a[1]}_{a[2]}", mirror=True, residual=True, win=a[1], frame="frame_v18.parquet")
+    elif a[:1] == ["--train-v19"]: assert a[1] in WIN17 and int(a[2]) in SEEDS19; train(int(a[2]), tag=f"v19_{a[1]}_{a[2]}", mirror=True, residual=True, win=a[1], frame="frame_v18.parquet")
+    elif a[:1] == ["--test-v19"]: test_v17("v19", "frame_v18.parquet", "test_report_v19.json", SEEDS19)
     elif a[:1] == ["--test-v18"]: test_v17("v18", "frame_v18.parquet", "test_report_v18.json")
     else: print(__doc__, SEEDS)
