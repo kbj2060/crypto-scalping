@@ -122,3 +122,5 @@ scripts/ops/handoff.hosts.conf*
 # 없어서 graft/.cache 가 커밋 가능한 상태였다. `session/*.json` 은 **프롬프트를 원문 그대로**
 # 담는다(실측). 공개 저장소이므로 로컬 편집이 아니라 커밋된 규칙이어야 한다.
 /graft/
+# 2026-10-26 서버 cron 이 매월 쓰는 박스 1h 보정 -- 추적하면 서버 워킹트리 수정 = deploy_watcher stash 충돌
+dashboard/box_hold_platt90_eth_1h.json

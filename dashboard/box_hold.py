@@ -10,6 +10,7 @@
 입력: 닫힌 1분봉(오름차순) timestamp(봉 시작, UTC)·high·low·close·volume·taker_buy_base 1499개 이상 + 거시 일정 events
   (scripts/live_macro_calendar_20260826 형식 {"time_utc","category","detail"} -- 없으면 발표 칸 = 없음).
 """
+import json
 import re
 from pathlib import Path
 
@@ -26,6 +27,23 @@ WIN = {"30m": 30, "1h": 60, "4h": 240}
 NEED = 1499                                    # 1h 박스 24h 창폭 중앙값 = 1440 + 59 · σ24 = 1441
 MAJOR_IDS = {10, 50, 53, 54, 46, 9}            # FRED release_id: CPI·고용·GDP·PCE·PPI·소매판매 (+ FOMC 금리결정)
 CLAIMS_ID = 180                                 # 실업수당(주간)
+# 2026-10-26 ETH 1h 굴림 Platt90(docs/eth_box_hold_calibration_drift_prereg_20261025.md 8라운드 · 2026 ECE 1.45→0.67pp) --
+#   scripts/fit_box_hold_platt90_20261026.py 가 매월 1일 쓴다. 없거나 40일 넘었거나 다른 모델용이면 보정 없음(원래 p).
+PLATT90 = Path(__file__).with_name("box_hold_platt90_eth_1h.json")
+
+
+def logit(p):
+    p = np.clip(p, 1e-6, 1 - 1e-6)
+    return np.log(p / (1 - p))
+
+
+def platt90() -> dict | None:
+    try:
+        c = json.loads(PLATT90.read_text())
+        fresh = pd.Timestamp.now(tz="UTC") - pd.Timestamp(c["created_utc"]) <= pd.Timedelta(days=40)
+        return c if fresh and c["model_file"] == "box_hold_hgb_20261016.joblib" else None
+    except Exception:  # noqa: BLE001 -- 파일 없음·깨짐 = 보정 없음
+        return None
 
 
 def event_times(events: list | None) -> tuple[np.ndarray, np.ndarray]:
@@ -129,10 +147,16 @@ def payload(k1m: pd.DataFrame, events: list | None = None, asset: str = "eth") -
             out["scales"][name] = {"ok": False}
             continue
         rng = f["_rng"]
-        out["scales"][name] = {"ok": True, "p": round(float(cf["model"].predict_proba(x)[0, 1]), 4), "base": round(cf["train_base"], 4),
+        p = float(cf["model"].predict_proba(x)[0, 1])
+        cal = platt90() if asset == "eth" and name == "1h" else None
+        if cal:
+            p = float(1 / (1 + np.exp(-(cal["a"] * logit(p) + cal["b"]))))
+        out["scales"][name] = {"ok": True, "p": round(p, 4), "base": round(cf["train_base"], 4),
                                "q20": round(cf["q20"], 4), "q80": round(cf["q80"], 4),   # 화면 «깨질 쪽»(< q20) · «머물 쪽»(> q80) = 학습 예측 분위
                                "up": round(px + 0.5 * rng, dp), "dn": round(px - 0.5 * rng, dp), "half_pct": round(0.5 * rng / px * 100, 3),
                                "until_ms": asof + W * 60_000}
+        if cal:   # 화면 q20·q80 은 그대로(연구 채점도 원 분위 · 라벨 바뀜 2.6%)
+            out["scales"][name]["calib"] = f"platt90 {cal['fit_start'][:10]}~{cal['fit_end'][:10]}"
     return out
 
 
