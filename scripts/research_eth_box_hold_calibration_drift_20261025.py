@@ -634,6 +634,34 @@ def round4():
     log(f"→ {OUT / 'round4.json'}")
 
 
+def two_tier_r4():
+    """10-26 사용자 2단 기준(되돌리기 쉬운 예측 개선 = 단측 90%) 사후 적용 — 4라운드 S 의 W1 만 다시 계산(판정 숫자 불변).
+    C0(배포 모델)·굴림/정적 층은 학습이 없어 4라운드와 같은 값. HGB(N1·N3) 후보는 random_state=0 으로 재적합."""
+    A = pd.read_parquet(OUT / "rows.parquet"); r4 = json.loads((OUT / "round4.json").read_text()); rep = {}
+    for sc, W in WIN.items():
+        cf, S = BH["scales"][sc], r4[sc]["S"]
+        g = A[A.scale == sc]; need = LEAN + ["B_rate30"]
+        tr = g[(g.ts >= "2024-01-01") & (g.ts + pd.Timedelta(minutes=W + 1) <= V0)].dropna(subset=need)
+        te = g[g.ts >= V0].dropna(subset=need).reset_index(drop=True); ts, y = te.ts.to_numpy(), te.y.to_numpy().astype(float)
+        mk, lk = S.split("+")
+        cols = {"C0": None, "N1": cf["cols"], "N3": (LEAN if sc == "4h" else cf["cols"]) + ["B_rate30"]}[mk]
+        pm = cf["model"].predict_proba(te[cf["cols"]])[:, 1] if mk == "C0" else \
+            HistGradientBoostingClassifier(**HGB).fit(tr[cols], tr.y).predict_proba(te[cols])[:, 1]
+        p0 = cf["model"].predict_proba(te[cf["cols"]])[:, 1]; pS = layers(ts, pm, y, W)[0][lk]
+        tt = ts >= np.datetime64(T0); y6, d6 = y[tt], pd.DatetimeIndex(ts[tt]).normalize().to_numpy()
+        d = (pS[tt] - y6) ** 2 - (p0[tt] - y6) ** 2
+        ci95, ci80 = day_boot(d, d6), day_boot(d, d6, alpha=0.2)                # 80% 양측 상한 = 단측 90% 상한
+        assert abs(float(d.mean()) - r4[sc]["cands"][S]["dbrier"]) < 1e-9, (sc, float(d.mean()), r4[sc]["cands"][S]["dbrier"])
+        codes, uniq = pd.factorize(d6); s_, n_ = np.bincount(codes, d), np.bincount(codes).astype(float)
+        w = np.random.default_rng(0).multinomial(len(uniq), np.full(len(uniq), 1 / len(uniq)), size=2000)
+        v = r4[sc]["verdict"]
+        rep[sc] = dict(S=S, dbrier=float(d.mean()), ci95=ci95, upper_one_sided90=ci80[1], p_not_better=float((((w @ s_) / (w @ n_)) >= 0).mean()),
+                       W1_two_tier=ci80[1] < 0, W2=v["W2"], W3=v["W3"], W4=v["W4"])
+        rep[sc]["conditional_adopt"] = bool(rep[sc]["W1_two_tier"] and v["W2"] and v["W3"] and v["W4"])
+        log(f"[{sc}] {rep[sc]}")
+    (OUT / "two_tier_r4.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
+
+
 BOX_ROLL = {"W1": ("2022-01-01", "2024-01-01", "2024-06-01", "2024-10-24"), "W2": ("2023-01-01", "2025-01-01", "2025-06-01", "2025-10-24"),
             "W3": ("2024-01-01", "2026-01-01", "2026-06-01", "2026-10-24")}   # (학습 시작, 검증 시작, 시험 시작, 시험 끝(제외))
 
@@ -757,3 +785,5 @@ if __name__ == "__main__":
         round6()
     if "--round" in sys.argv and sys.argv[sys.argv.index("--round") + 1] == "7":
         round6({"VA180": ("va", 180), "VA90": ("va", 90)}, "7")
+    if "--two-tier" in sys.argv:
+        two_tier_r4()
