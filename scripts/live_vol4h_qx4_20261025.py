@@ -129,6 +129,39 @@ def load_qx4(path):
 
 
 # ---------- 라이브: 바이낸스 5분 klines 4코인 → QX4 ----------
+def merge_klines(have: list, got: list, keep: int = NEED_BARS + 2000):
+    """증분 캐시: 최근 1000봉(got)을 기존 행(have) 뒤에 잇는다. 겹침은 got 쪽으로 바꾼다(형성 중이던 봉 갱신).
+    이어지지 않으면(서버 정지 등으로 got 첫 봉 > have 마지막 봉 + 5분) None → 호출부가 처음부터 다시 받는다."""
+    if not have or not got:
+        return None
+    if int(got[0][0]) > int(have[-1][0]) + 300_000:
+        return None
+    first = int(got[0][0])
+    return ([r for r in have if int(r[0]) < first] + list(got))[-keep:]
+
+
+SYMS = {"ETH": "ETHUSDT", "XRP": "XRPUSDT", "BTC": "BTCUSDT", "SOL": "SOLUSDT"}
+
+
+async def refresh_rows(fetch, rows: dict) -> bool:
+    """fetch(params) → klines 행 목록(실패면 None). 코인마다 최근 1000봉을 이어 붙이고, 처음이거나 끊겼으면 NEED_BARS 까지 뒤로 받는다.
+    rows 를 제자리에서 갱신 · 하나라도 실패하면 False(호출부는 배포 HGB 로)."""
+    for coin, sym in SYMS.items():
+        got = await fetch({"symbol": sym, "interval": "5m", "limit": 1000})
+        if not got:
+            return False
+        merged = merge_klines(rows.get(coin) or [], got)
+        if merged is None or len(merged) < NEED_BARS:
+            out, end = list(got), int(got[0][0]) - 1
+            while len(out) < NEED_BARS + 300:
+                part = await fetch({"symbol": sym, "interval": "5m", "limit": 1000, "endTime": end})
+                if not part:
+                    return False
+                out, end = part + out, int(part[0][0]) - 1
+            merged = out
+        rows[coin] = merged
+    return True
+
 def frames_from_klines(rows_by_coin: dict, now_ms: float):
     """완결봉만 · 4코인 공통 5분 격자(가장 늦게 시작 ~ 가장 일찍 끝난 코인) · 빈 봉은 학습(bars5)과 같은 규칙(종가 이어 붙임 · 고저 = 종가 · 거래 0).
     반환 = (코인 → add_mkt 거친 피쳐 프레임, 코인 → 5분 프레임(h/l/c/v/n), 코인 → 최근 60일 빈 봉 수)."""

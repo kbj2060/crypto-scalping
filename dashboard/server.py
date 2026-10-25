@@ -2521,6 +2521,29 @@ def make_app() -> web.Application:
     vol4h_art: dict = {}   # 코인 -> {mtime, art}
     # 코인 -> 아티팩트(None = ETH 기본 svm.ARTIFACT). XRP 는 매달 재학습이 아직 없다(ponytail: 10-19 학습분 고정 -- 재학습 cron 은 파라미터화한 복사본이 필요).
     VOL4H_ARTIFACTS = {"eth": None, "xrp": REPO_ROOT / "data" / "live" / "xrp_sizing_vol_model.joblib"}
+    # 2026-10-25 QX4(4코인 결합 · 굴림 3창 통과 · docs/prereg/vol4h_forecast_horserace_20261025.md). 스위치 = 아티팩트 파일:
+    #   data/live/vol4h_qx4.joblib 이 있고 읽히면 QX4, 없거나 실패면 아래 배포 HGB 그대로(되돌리기 = 파일 삭제).
+    QX4_ARTIFACT = REPO_ROOT / "data" / "live" / "vol4h_qx4.joblib"
+    qx4_state: dict = {"rows": {}}   # mtime · art · 코인별 증분 klines
+
+    async def qx4_payload(asset: str) -> dict | None:
+        """4코인 61일 5분봉(처음 한 번 1000봉 × 18쪽 · 그 뒤 매번 최근 1000봉만 이어 붙임) → qx4_from_klines. 실패하면 None(HGB 로)."""
+        if not QX4_ARTIFACT.exists():
+            return None
+        from scripts.live_vol4h_qx4_20261025 import load_qx4, qx4_from_klines, refresh_rows
+        mt = QX4_ARTIFACT.stat().st_mtime
+        if qx4_state.get("mtime") != mt:
+            qx4_state.update(mtime=mt, art=await asyncio.to_thread(load_qx4, QX4_ARTIFACT))
+        if qx4_state.get("art") is None:
+            return None
+        fetch = lambda q: fetch_binance_json("https://fapi.binance.com/fapi/v1/klines", q, error_reason=None)  # noqa: E731
+        if not await refresh_rows(fetch, qx4_state["rows"]):
+            return None
+        res = await asyncio.to_thread(qx4_from_klines, qx4_state["rows"], qx4_state["art"], time.time() * 1000, asset.upper())
+        if not res.get("ok"):
+            print(f"vol4h qx4 → HGB 대체: {res.get('reason')}", flush=True)
+            return None
+        return res
 
     async def api_vol_forecast(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, 표시 전용)
         """4시간 변동성 GBM(scripts/live_eth_sizing_vol_model_20260912) -- 5분봉 31일(평소 = 30일 예측 중앙값) · 5분 캐시.
@@ -2530,6 +2553,12 @@ def make_app() -> web.Application:
             return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
 
         async def produce() -> dict[str, Any]:
+            try:
+                q4 = await qx4_payload(asset)
+            except Exception as exc:  # noqa: BLE001 — QX4 가 죽어도 HGB 로
+                print(f"vol4h qx4 error → HGB 대체: {type(exc).__name__}: {exc}", flush=True); q4 = None
+            if q4 is not None:
+                return {**q4, "asset": asset}
             from scripts.live_eth_sizing_vol_model_20260912 import ARTIFACT, load_model
             path = VOL4H_ARTIFACTS[asset] or ARTIFACT
             mt = path.stat().st_mtime if path.exists() else None   # 매달 재학습(cron)으로 바뀌면 다시 읽는다

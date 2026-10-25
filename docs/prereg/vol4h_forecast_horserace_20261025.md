@@ -194,3 +194,4 @@ RS⁻_w·RS⁺_w(w = 48·288) · BV_w = π/2·Σ|r_k||r_{k−1}| · J_w = max(RV
 - parity 재실행 전부 통과(`tmp/vol4h_qx4/parity.json`): P1 연구 예측 5e-7 · c 일치 · P2 피쳐 3.0e-8 · **P3 절단 인과성 차 0.0**(뒤 1·7·100·500봉 빼도 동일) · P4 아티팩트 왕복 동일 · P5 한 코인 한 봉 지연 → 한 봉 이전·px 일치 · P6 형성 중 봉 무시 · P7 기준 30일 · P8 코인 빠짐 → ok False.
 - 최신 아티팩트 재학습 `tmp/vol4h_qx4/qx4_2026-10-23.joblib`(numpy MLP · 확대 확률 재적합).
 - 남은 배포 작업(사용자 승인 후): server.py 4코인 61일 klines(증분 캐시) · 실패 시 배포 HGB 대체 · 매달 --train cron · 아티팩트는 handoff push 전 md5 대조. 알려진 성질: 정시(:00) 경계에서 hod 피쳐 때문에 σ 가 계단식으로 바뀜(최대 ~30%, 모델 성질).
+- 서버 배선 준비(브랜치만, main 미병합·미배포): `dashboard/server.py` api_vol_forecast 가 먼저 QX4 를 시도 → 실패·아티팩트 없음이면 기존 HGB 그대로. **스위치 = `data/live/vol4h_qx4.joblib` 파일**(되돌리기 = 삭제). 4코인 klines 증분 캐시(`refresh_rows`: 처음 1000봉 × 18쪽 · 그 뒤 코인마다 1요청). 시험 `test/test_vol4h_qx4_merge_20261025.py` 5건(겹침 교체·끊김 감지·요청 수·실패 · 저장 아티팩트 끝까지) 통과.
