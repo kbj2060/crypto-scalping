@@ -4299,13 +4299,16 @@ function renderMarketCtx() {
     return gRow(STAT_NAME[k], k === "obi" ? G.sig(f == null ? null : f * 3) : G.pct(f), val, k === "vol" && f >= 0.66 ? "mc-warn" : "", tip);
   }).join("") : "";
   // 2026-10-01 «차트에 그리기» = 넓은 화면이면 풋프린트 청산 밀도 범례 오른쪽 한 줄(#fpLineSwitch, 사용자 지시) -- ④ 는 그만큼 짧아지고 1초 수급이 남는 높이를 가져간다
-  const lineSw = `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span><label><input type="checkbox" data-line="vwap"${mcLine.vwap ? " checked" : ""}> VWAP ±σ</label>`
-      + `<label title="끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)"><input type="checkbox" data-line="vsess"${mcLine.vsess ? " checked" : ""}> 세션 시작부터</label>`
-      + `<label><input type="checkbox" data-line="bb"${mcLine.bb ? " checked" : ""}> 볼린저</label>`
-      + `<label><input type="checkbox" data-line="wvwap"${mcLine.wvwap ? " checked" : ""}> 주간·앵커 VWAP</label>`
-      // 2026-10-26 펜 메모 «여기에 vwma 100, ema5, ema 20 도 추가해줘» -- 넓은 화면은 한 줄에 다 안 들어가(1920 에서도 미니맵과 겹침) 이 셋만 바로 위 줄로(CSS .mc-sw-ma) · 그 밖은 같은 줄에 이어 흐른다
-      + `<span class="mc-sw-ma">${[["ema5", "EMA 5", "종가 지수이동평균 5봉"], ["ema20", "EMA 20", "종가 지수이동평균 20봉"], ["vwma", "VWMA 100", "거래량 가중 이동평균 100봉 · 거래량 = 바이낸스 5분봉"]]
-        .map(([k, nm, t]) => `<label title="${t}" style="--sw: var(--ma-${k})"><input type="checkbox" data-line="${k}"${mcLine[k] ? " checked" : ""}> ${nm}<i class="mc-sw-key" aria-hidden="true"></i></label>`).join("")}</span></div>`;
+  // 2026-10-26 사용자 «차트에 그리기 체크리스트도 깔끔하게»: 체크박스 7개 → 칩 두 묶음(이동평균·볼린저 | VWAP 셋). 칩 앞 견본 = 그 선의 색·모양(범례 겸)
+  //   «세션 시작부터»는 VWAP 계산 기준이라 VWAP 칩에 붙인 보조 칩 · VWAP 를 끄면 못 누른다. 입력(data-line)·저장·이벤트는 그대로.
+  const swChip = (k, nm, sw, t = "", sub = false) => `<label class="mc-chip${sub ? " sub" : ""}"${t ? ` title="${t}"` : ""}${sw ? ` style="--sw: ${sw}"` : ""}>`
+    + `<input type="checkbox" class="chip-input" data-line="${k}"${mcLine[k] ? " checked" : ""}${sub && !mcLine.vwap ? " disabled" : ""}>`
+    + `${sw ? `<i class="mc-sw-key${sw.includes("ma-") ? "" : " dash"}" aria-hidden="true"></i>` : ""}${nm}</label>`;
+  const lineSw = `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span>`
+      + `<span class="mc-sw-g mc-sw-ma">${[["ema5", "EMA 5", "종가 지수이동평균 5봉"], ["ema20", "EMA 20", "종가 지수이동평균 20봉"], ["vwma", "VWMA 100", "거래량 가중 이동평균 100봉 · 거래량 = 바이낸스 5분봉"]]
+        .map(([k, nm, t]) => swChip(k, nm, `var(--ma-${k})`, t)).join("")}${swChip("bb", "볼린저", "var(--muted)", "20봉 · 2σ")}</span>`
+      + `<span class="mc-sw-g"><span class="mc-chip-pair">${swChip("vwap", "VWAP ±σ", "var(--muted)")}${swChip("vsess", "세션 시작부터", "", "끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)", true)}</span>`
+      + `${swChip("wvwap", "주간·앵커 VWAP", "var(--ink)")}</span></div>`;
   setH("fpLineSwitch", G.cmpW ? lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', "") : "");   // 2026-10-16 펜 메모 «이 텍스트는 제거» -- 넓은 화면 줄만(좁은 화면은 이름 그대로)
   const wallRow = ps && PAPER_SIG_OK.wall.has(A) ? gRow("깊은 벽", G.wall(ps.imb, ps.thr), sg(ps.imb, 2), ps.dir > 0 ? "mc-good" : ps.dir < 0 ? "mc-bad" : "",
     `±50bp 매수·매도 잔량 불균형(5분봉 마감) · 점선 = 지난 24시간 상위 20% 문턱 ±${ps.thr.toFixed(2)}`) : "";

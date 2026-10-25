@@ -2464,8 +2464,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   .help-body { font-size: 13px; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
 }
 .mc-note { font-size: 11px; color: var(--muted); opacity: .85; margin-top: 3px; line-height: 1.4; }
-.mc-switch { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
-.mc-switch label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.mc-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
 .mc-good { color: var(--good) !important; } .mc-bad { color: var(--bad) !important; } .mc-warn { color: var(--warn) !important; }
 
 /* 2026-10-01 창 이동(12시간 안) -- 헤더 미니맵: 종가 선 + 지금 창 띠. 실시간이면 «실시간», 과거면 «최신으로» */
@@ -2642,12 +2641,25 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-rates .mc-svg { display: block; }
 .fp-line-switch .mc-switch-t { color: var(--muted); font-weight: 600; }
 .fp-line-switch > .mc-switch { display: flex; flex-wrap: nowrap; gap: 14px; align-items: center; margin: 0; font-size: 11px; }
-/* 2026-10-26 펜 메모 «여기에 vwma 100, ema5, ema 20 도 추가»: 이동평균 셋 = 넓은 화면이면 같은 오른쪽 끝에 맞춘 바로 위 줄(한 줄이면 1920 에서도 미니맵과 겹친다 · 아래는 «체결|포지션» 탭).
-   absolute 라 #fpLineSwitch 폭(미니맵 자리 계산 fs.offsetWidth)에 안 들어간다 · 그 밖(좁은 화면·휴대폰)은 display: contents 로 같은 줄에 이어 흐른다. */
-.mc-sw-ma { display: contents; }
-.fp-line-switch .mc-sw-ma { display: flex; gap: 14px; position: absolute; right: 0; bottom: calc(100% + 4px); }
-/* 2026-10-26 이동평균 선 색 범례 -- 차트 위 이름을 가격 칸으로 뺐다(최신 봉을 가렸다), 선 색은 여기서 읽는다 */
-.mc-sw-key { display: inline-block; width: 14px; height: 3px; margin-left: 5px; border-radius: 2px; background: var(--sw); vertical-align: middle; }
+/* 2026-10-26 «차트에 그리기» 칩 -- 두 묶음(이동평균·볼린저 | VWAP 셋). 넓은 화면은 이동평균 묶음이 같은 오른쪽 끝에 맞춘 바로 위 줄
+   (한 줄이면 1920 에서도 미니맵과 겹친다 · absolute 라 #fpLineSwitch 폭 = 미니맵 자리 계산에 안 들어간다). 좁은 화면·휴대폰 = 묶음마다 한 줄씩 흐른다. */
+.mc-sw-g { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.fp-line-switch .mc-sw-g { flex-wrap: nowrap; }
+.fp-line-switch .mc-sw-ma { position: absolute; right: 0; bottom: calc(100% + 3px); }
+.fp-line-switch .mc-chip { min-height: 20px; }   /* 두 줄이 카드 머리 선과 «체결|포지션» 탭 사이 46px 에 들어간다 */
+.mc-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px;
+  background: var(--glass); color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
+.mc-chip:hover { color: var(--text); }
+.mc-chip:has(input:checked) { color: var(--text); border-color: color-mix(in srgb, var(--text) 22%, transparent); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.mc-chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mc-chip:has(input:disabled) { opacity: .4; cursor: default; }
+.mc-chip-pair { display: inline-flex; }
+.mc-chip-pair > .mc-chip:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.mc-chip.sub { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 1px; font-weight: 500; }
+/* 견본 = 그 선의 색·모양(이동평균 실선 · VWAP·앵커·볼린저 점선) -- 차트 위 이름을 가격 칸으로 뺐으니(최신 봉을 가렸다) 색은 여기서 읽는다. 꺼지면 옅게 */
+.mc-sw-key { flex: none; width: 14px; height: 3px; border-radius: 2px; background: var(--sw); opacity: .35; }
+.mc-sw-key.dash { height: 2px; border-radius: 0; background: repeating-linear-gradient(90deg, var(--sw) 0 4px, transparent 4px 7px); }
+.mc-chip:has(input:checked) .mc-sw-key { opacity: 1; }
 
 /* 2026-10-04 풋프린트 «옵션 요약» 자리(#mcWall) = 모의 판 · 좁은 화면은 시장 맥락 끝(사용자 승인 시안) */
 .ppm-empty { flex: 1; display: grid; place-items: center; text-align: center; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; padding: 10px; margin-top: 4px; }
@@ -3033,8 +3045,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
   .chipset .chip { min-height: 40px; min-width: 44px; }
   .page-tab { min-height: 40px; }
   .ofab-panel .notify-btn.hold-fire { min-height: 44px; }   /* 꾹 누르는 진입·청산 버튼 38px → 바 LONG/SHORT(.ofab-dir)와 같은 44px */
-  .mc-switch { row-gap: 0; align-items: center; }
-  .mc-switch label { min-height: 40px; }   /* «차트에 그리기» 체크 줄(19px) -- 줄 사이 틈은 걷어 높이 증가를 줄인다 */
+  .mc-switch { row-gap: 6px; }
+  .mc-chip { min-height: 40px; padding: 0 10px; }   /* «차트에 그리기» 칩 -- 손가락 목표 40px */
   .nw-row { position: relative; }
   .nw-row a[href]::after { content: ""; position: absolute; inset: 0; }   /* 뉴스 줄 전체가 기사 링크(제목 글자만 14~28px 였다) */
 }
