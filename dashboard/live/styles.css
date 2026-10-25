@@ -2949,7 +2949,6 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 #mcBody.mc-cmp .mc-strip h4, #mcBody.mc-cmp .mc-strip .mc-state { margin-bottom: 9px; }
 #mcBody.mc-cmp .mc-fc { padding-top: 14px; padding-bottom: 12px; } #mcBody.mc-cmp .mc-fc > h4 { margin-bottom: 10px; }
 #mcBody.mc-cmp .fc-c { gap: 5px; } #mcBody.mc-cmp .fc-c .hz { margin-bottom: 2px; }
-#mcBody.mc-cmp .mc-bx { padding-top: 14px; padding-bottom: 8px; } #mcBody.mc-cmp .bx-c { gap: 6px; }
 
 /* 2026-10-15 ⑤ 예측 줄(사용자 시안 B): 지금 추세 → 4h(+변동성) → 7일 → 4~13주. 가로 선 = 시간축, 칸 = 지평. 휴대폰은 2×2 */
 .mc-fc { border-top: 1px solid var(--soft-line); padding-top: 8px; }
@@ -2983,20 +2982,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .d4g .z.up { right: 0; border-radius: 0 2px 2px 0; background: color-mix(in srgb, var(--good) 45%, transparent); }
 .d4g u { position: absolute; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: var(--text); transform: translate(-50%, -50%); }
 .d4g u.ago { width: 7px; height: 7px; background: none; border: 1.5px solid var(--muted); box-sizing: border-box; }
-/* 2026-10-16 박스 유지 확률(시안): 30분·1시간·4시간 · 막대 = 확률, 세로 눈금 = 평소 · 주황 = 평소의 3/4 밑(깨질 쪽). 초록·빨강(방향)은 안 쓴다 */
-.bx-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); font-variant-numeric: tabular-nums; }   /* 2026-10-17 펜 메모: 시안 2 범위 막대 */
-.bx-c { --bx: var(--text); display: flex; flex-direction: column; gap: 3px; padding: 0 8px 2px; min-width: 0; cursor: help; }
-.bx-c + .bx-c { border-left: 1px dashed var(--soft-line); }
-.bx-c.brk, .bx-c.out { --bx: var(--warn); } .bx-c.stale { opacity: .6; }
-.bx-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; font-size: 12px; }
-.bx-h b { font-size: 10.5px; color: var(--muted); } .bx-h span { font-weight: 800; color: var(--bx); white-space: nowrap; } .bx-h small { font-size: 10px; color: var(--muted); }
-.bx-rng { position: relative; display: block; height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 12%, transparent); }
-.bx-rng i { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: color-mix(in srgb, var(--bx) 38%, transparent); }
-.bx-rng u { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--text); }
-.bx-p { font-size: 11px; color: var(--muted); } .bx-p b { font-size: 13px; font-weight: 800; color: var(--bx); } .bx-p span { white-space: nowrap; }
-.mc-bx .bx-row { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; } .bx-row > .mc-q1 { align-self: start; }   /* 10-17 «?» = 넷째 칸 */
 .mc-fc > h4 > .mc-q1 { margin-left: auto; flex: none; }
-@media (max-width: 720px) { .mc-bx .bx-row { grid-template-columns: minmax(0, 1fr); row-gap: 8px; } .bx-c + .bx-c { border-left: none; } .bx-row > .mc-q1 { justify-self: end; } }
 /* 2026-10-16 «지금 추세» 시안 A: 기간 이름 붙은 표 */
 .fc-cnt { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 2px; }
 .fc-tl { display: flex; gap: 2px; } .fc-tl i { flex: 1; font: 700 10px/16px var(--font-mono); font-style: normal; text-align: center; border-radius: 3px; color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }

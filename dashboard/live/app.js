@@ -3731,33 +3731,6 @@ function boxState(b, s) {
 // 2026-10-17 사용자 «? 설명 단추 되살려»(제목은 없앤 채): ①②④ 처럼 «?» 만 -- 키보드로도 펼친다(#mcBody 클릭 처리기가 .mc-sec 안 .mc-tip 을 연다)
 const mcTipBtn = (key, name) => `<button type="button" class="mc-q mc-q1" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}" title="${name} — 설명" aria-label="${name} 설명"><span aria-hidden="true">?</span></button>`;
 const mcTipP = (key) => `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(MC_TIPS[key]).replace(/\n/g, "<br>")}</p>`;
-function boxTip(b, k, s) {
-  const p = Math.round(s.p * 100), base = Math.round(s.base * 100), half = (s.up - s.dn) / 2, ageMin = Math.round((Date.now() - b.asof_ms) / 60e3), d = pxDp();
-  return `${BOX_NM[k]} 박스 = 기준가 ${b.px.toFixed(Math.max(2, d))}(${ageMin}분 전) ± 지난 ${BOX_NM[k]} 고저폭의 절반 $${half.toFixed(d)}(${s.half_pct.toFixed(2)}%)\n`
-    + `${s.dn.toFixed(d)} ~ ${s.up.toFixed(d)} 을 다음 ${BOX_NM[k]} 동안 한 번도 안 벗어날 확률 ${p}% · 평소 ${base}%\n`
-    + `«깨질 쪽» < ${Math.round((s.q20 || 0) * 100)}% · «머물 쪽» > ${Math.round((s.q80 || 0) * 100)}% (학습 기간 예측의 하위·상위 20%)\n방향 정보 아님 — 어느 쪽으로 깨질지는 모른다`;
-}
-// 2026-10-17 펜 메모 «타이틀 제거 · 박스 유지는 2번 범위 막대»: 칸마다 가격 범위 + 범위 막대(세 칸 같은 가격 눈금 · 세로 눈금 = 지금가) + «다음 N 이 안에 머물 확률».
-function boxRowHtml() {
-  const on = BOX_ASSETS.has(activeSnapshotAsset), raw = on && (latestBoxHold?.asset || "eth") === activeSnapshotAsset ? latestBoxHold : null, b = raw && raw.ok ? raw : null;
-  const ok = b ? Object.keys(BOX_NM).map((k) => b.scales[k]).filter((s) => s && s.ok) : [];
-  const d = pxDp(), live = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0) || (b ? b.px : 0), f1 = (x) => x.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
-  const lo0 = ok.length ? Math.min(...ok.map((s) => s.dn), live || Infinity) : 0, hi0 = ok.length ? Math.max(...ok.map((s) => s.up), live || -Infinity) : 1;
-  const pad = (hi0 - lo0) * 0.15 || 1, X = (p) => (((p - lo0 + pad) / (hi0 - lo0 + 2 * pad)) * 100).toFixed(1);
-  const cells = Object.keys(BOX_NM).map((k) => {
-    const s = b && b.scales[k];
-    if (!s || !s.ok) {
-      const why = !on ? "ETH·XRP 전용" : s && s.reason ? s.reason : raw && !raw.ok ? "계산 불가" : b ? "계산 불가" : "불러오는 중";   // 10-16 리뷰: ok false 를 «불러오는 중»으로 숨기던 것
-      return `<div class="bx-c"${raw && raw.reason ? ` title="${escapeHtml(String(raw.reason))}"` : ""}><div class="bx-h"><b>${BOX_NM[k]}</b><span>-</span></div><div class="bx-p">${why}</div></div>`;
-    }
-    const p = Math.round(s.p * 100), base = Math.round(s.base * 100), half = (s.up - s.dn) / 2, [tone, word] = boxState(b, s);
-    const tip = boxTip(b, k, s);
-    return `<div class="bx-c ${tone}" title="${escapeHtml(tip)}"><div class="bx-h"><b>${BOX_NM[k]}</b><span>${f1(s.dn)} ~ ${f1(s.up)}</span><small>±$${half.toFixed(d)}</small></div>`
-      + `<span class="bx-rng" aria-hidden="true"><i style="left:${X(s.dn)}%;width:${(X(s.up) - X(s.dn)).toFixed(1)}%"></i>${live ? `<u style="left:${X(live)}%"></u>` : ""}</span>`
-      + `<div class="bx-p">다음 ${BOX_NM[k]} 이 안에 머물 확률 <b>${p}%</b><span> · 평소 ${base}% · ${word}</span></div></div>`;
-  });
-  return `<div class="mc-sec mc-fc mc-bx">${mcTipP("q_box")}<div class="bx-row">${cells.join("")}${mcTipBtn("q_box", "박스 유지 확률")}</div></div>`;
-}
 // 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, /api/vol-forecast · 서버 5분 캐시) -- 표시 전용
 let latestVol4h = null, vol4hLastFetchAt = 0;
 const VOL4H_ASSETS = new Set(["eth", "xrp"]);   // 2026-10-20 XRP 4h 변동성(ETH+XRP 합동 학습 · 2025~ R² .680 > HAR .568)
@@ -3906,7 +3879,6 @@ MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아
   + "4~13주 예측 = 달러·유동성 Z91(|Z|≥1 만) · 2018~26 56일 BTC 70% · ETH 75%(고른 기간 성적).\n"
   + "변동성 = 4시간 실현변동성 GBM(ETH 22피쳐) · 순위상관 .79 · 확대 AUC .82 · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀).\n"
   + "셋 다 참고용 — 전진 판정 전."
-MC_TIPS.q_box = "박스 = 지금가 ± 지난 30분·1시간·4시간 고저폭의 절반. 값 = 다음 같은 시간 동안 그 띠를 한 번도 안 벗어날 확률(1분봉 고가·저가 기준) · 평소 = 2022~24 평균 26~29%. 막대 = 세 박스를 같은 가격 눈금에, 세로 눈금 = 지금가 · 차트 = 현재 봉 오른쪽(끌어서 연 미래 칸)에 예측 끝까지 상자 «30분 유지 9%».\n"
   + "주황 «깨질 쪽» = 학습 기간(2022~24) 예측의 하위 20% 밑 · «머물 쪽» = 상위 20% 위 · 그 사이 «보통» · «벗어남» = 지금가가 이미 띠 밖 · «지연» = 기준가가 3분 넘게 묵음(차트 선도 숨김). 방향 정보는 없다 — 어느 쪽으로 깨질지는 모른다.\n"
   + "우리 검정(ETH 4.7년, 2022~24 학습 · 2025·2026 따로 채점): AUC .75~.78 · 보정 오차 10분위 최대 3~6.4pp · 하위 10% 유지 3~5% ↔ 상위 10% 61~71%. "
   + "대부분은 «변동성 대비 띠 거리»(기하)이고, 최근 1시간/24시간 변동성 비 · 시각 · 주말이 +.02~.04 를 더한다. 24시간 박스는 보정이 나빠 뺐다.";
@@ -4264,16 +4236,17 @@ function renderMarketCtx() {
   let htmlB = [
     qSec("q_lev", "① 레버리지 과열?", gRow("펀딩 분위", G.pct(f.bn_at_base ? null : f.bn_pct180), f.bn_at_base ? "기본값" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`, "", `바이낸스 예상 ${fr(f.bn)}`)
       + gRow("베이시스 분위", G.pct(b.pct7d), `${sg(b.bp, 1, "bp")}`, "", `마크−인덱스 · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위 · 30분 ${sg(b.d30_bp, 1, "bp")}`)
-      + gRow("OI 1시간", G.sig(OI.z1h), `${sg(OI.z1h, 1, "σ")}`, tone(OI.z1h, 1.5), `${oiA ? venTxt(oiA.venues) : "바이낸스만"} · 1시간 ${sg(OI.d1h_pct, 2, "%")} · 24시간 ${sg(OI.d24h_pct, 1, "%")}`
-          + (oiA ? `\n${Object.entries(oiA.by_venue || {}).map(([k, v]) => `${VN[k] || k} ${sg(v, 2, "%")}`).join(" · ")}` : ""))
       + (ls ? gRow("계정 롱숏", G.ratio(ls.global, ls.global_24h), n(ls.global, 2), "", `하루 전 ${n(ls.global_24h, 2)}`)
         + gRow("탑트레이더", G.ratio(ls.top_pos, ls.top_pos_24h), n(ls.top_pos, 2), "", `하루 전 ${n(ls.top_pos_24h, 2)}`) : "")
       + note(`정산까지 ${left(f.next_ms)} · 펀딩 OKX ${fr(f.okx)} / HL ${fr(f.hl_8h)} · OI ${n((oi.oi || 0) / 1e6, 2)}M + OKX ${n((oi.okx || 0) / 1e6, 2)}M + HL ${oi.hl == null ? "-" : n(oi.hl / 1e6, 2) + "M"} ${U}`), levChip),
     qSec("q_flow", "② 누가 밀고 있나 · 60분", duelLine + (z.whale == null ? note("크기별 기준 쌓는 중(6시간)")
         : ["whale", "mid", "retail"].map((k2, i) => gRow(["고래", "중형", "리테일"][i], G.sig(z[k2]), sg(z[k2], 1, "σ"), tone(z[k2]),
             `${flowVen} · 60분 ${sg((fl.z60h_all ? fl.net60_all : fl.net60 || {})[k2], 0)} ${U}`)).join(""))
-      + gRow("30분 CVD", G.sig(fl.cvd30_all_z ?? fl.cvd30_z), sg(fl.cvd30_all_z ?? fl.cvd30_z, 1, "σ"), tone(fl.cvd30_all_z ?? fl.cvd30_z),
+      + gRow("델타 30분", G.sig(fl.cvd30_all_z ?? fl.cvd30_z), sg(fl.cvd30_all_z ?? fl.cvd30_z, 1, "σ"), tone(fl.cvd30_all_z ?? fl.cvd30_z),
              fl.cvd30_all_z != null ? flowVen : "바이낸스만")
+      // 2026-10-26 펜 메모 «② 에 델타·OI · ① 과 중복 없이»: OI 1시간 줄을 ① 에서 여기로(휴대폰 목록도 데스크톱 판과 같은 구성) · «30분 CVD» → «델타 30분»
+      + gRow("OI 1시간", G.sig(OI.z1h), `${sg(OI.z1h, 1, "σ")}`, tone(OI.z1h, 1.5), `${oiA ? venTxt(oiA.venues) : "바이낸스만"} · 1시간 ${sg(OI.d1h_pct, 2, "%")} · 24시간 ${sg(OI.d24h_pct, 1, "%")}`
+          + (oiA ? `\n${Object.entries(oiA.by_venue || {}).map(([k, v]) => `${VN[k] || k} ${sg(v, 2, "%")}`).join(" · ")}` : ""))
       + ((fl.taker_all ?? (ls && ls.taker)) != null ? (() => { const tk = fl.taker_all ?? ls.taker;
           return gRow("테이커 매수÷매도", G.ratio(tk, null), n(tk, 2), tone(tk - 1, 0.1), fl.taker_all != null ? `${flowVen} · 마지막 5분봉 체결` : "바이낸스 API"); })() : "")
       // 2026-09-30 사분면 그림 → 한 줄 네 칸(사용자 «높이를 쓸데없이 잡아먹는다»): 새 롱 · 숏 커버 · 새 숏 · 롱 정리 중 지금 칸만 채움, 작으면 전부 빈 칸.
@@ -4307,7 +4280,7 @@ function renderMarketCtx() {
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
       + (G.cmpW ? "" : lineSw));
   // 2026-10-15 ⑤ 뉴스 판 → ⑤ 예측 줄(사용자 시안 B): 지금 추세 → 4h → 7일 → 4~13주, 4h 칸 아래 변동성. 뉴스는 뉴스 카드에 그대로.
-  const fcHtml = fcRowHtml(sec) + boxRowHtml();
+  const fcHtml = fcRowHtml(sec);   // 2026-10-26 펜 메모 «풋프린트 미래 차트로 옮겼으니 제거»: ⑤ 아래 박스 유지 30분·1시간·4시간 줄 삭제(풋프린트 미래 칸 상자 d38cb502 가 같은 값)
   G.gw = gwKeep;
   // 2026-10-13 시안(아티팩트 댓글 «4개 판을 함축해 가로 1줄 · 나머지 1줄에 체결 버블»): 넓은 화면은 판마다 상태 칩 + 값 셋만 한 줄로,
   //   그 위 줄은 «지금 들어가면» 가격 자(#mcEntry, 2026-10-24 체결 버블 미니 대체). 판 설명(?)은 그대로. 자세한 그림은 좁은 화면·이전 판에.
@@ -4344,11 +4317,12 @@ function renderMarketCtx() {
       + tile("q_lev", "① 레버리지 과열?", levChip.trim(),
           gk("펀딩", G.pct(f.bn_at_base ? null : f.bn_pct180, gv), f.bn_at_base ? "펀딩 기본값(0.01%)" : `펀딩 분위 ${Math.round((f.bn_pct180 ?? 0) * 100)}% · 바이낸스 예상 ${fr(f.bn)}`,
              f.bn_at_base ? "기본" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`)
-          + gk("베이시스", G.pct(b.pct7d, gv), `베이시스 ${sg(b.bp, 1, "bp")} · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`, sg(b.bp, 1, "bp"))
-          + gk("OI", G.sig(OI.z1h, gv), `OI 1시간 ${sg(OI.z1h, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d1h_pct, 2, "%")}`, sg(OI.z1h, 1, "σ"), tone(OI.z1h, 1.5))
-          + gk("CVD", G.sig(cvd, gv), `30분 CVD ${sg(cvd, 1, "σ")}`, sg(cvd, 1, "σ"), tone(cvd)))   // 2026-10-13 사용자 «cvd 를 레버리지 과열로» -- ①② 가 4줄씩
+          + gk("베이시스", G.pct(b.pct7d, gv), `베이시스 ${sg(b.bp, 1, "bp")} · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`, sg(b.bp, 1, "bp")))   // 2026-10-26 펜 메모: OI·CVD 는 ② 로(같은 데이터가 두 칸에 있지 않게)
       + tile("q_flow", "② 누가 밀고 있나", duelChip,
-          gk("고래", G.sig(z.whale, gv), `고래 ${sg(z.whale, 1, "σ")} · ${flowVen}`, sg(z.whale, 1, "σ"), tone(z.whale))
+          // 2026-10-26 펜 메모 «고래·중형·리테일에 델타·OI 까지»: ① 에 있던 CVD(=30분 누적 델타)·OI(1시간 변화) 를 맨 위로 옮김 -- 풋프린트 아래 «델타»·«신규계약» 줄과 같은 데이터(σ 환산)
+          gk("델타", G.sig(cvd, gv), `델타 = 30분 CVD(테이커 매수−매도 누적) ${sg(cvd, 1, "σ")} · 풋프린트 아래 «델타» 줄과 같은 데이터`, sg(cvd, 1, "σ"), tone(cvd))
+          + gk("OI", G.sig(OI.z1h, gv), `OI 1시간 ${sg(OI.z1h, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d1h_pct, 2, "%")} · 풋프린트 아래 «신규계약» 줄 60분 합과 같은 데이터`, sg(OI.z1h, 1, "σ"), tone(OI.z1h, 1.5))
+          + gk("고래", G.sig(z.whale, gv), `고래 ${sg(z.whale, 1, "σ")} · ${flowVen}`, sg(z.whale, 1, "σ"), tone(z.whale))
           + gk("중형", G.sig(z.mid, gv), `중형 ${sg(z.mid, 1, "σ")}`, sg(z.mid, 1, "σ"), tone(z.mid))
           + gk("리테일", G.sig(z.retail, gv), `리테일 ${sg(z.retail, 1, "σ")}`, sg(z.retail, 1, "σ"), tone(z.retail))
           // 2026-10-22 아티팩트 펜 메모 «이 텍스트를 제거해줘»: 줄 이름 «가격×OI» 글자 빼고(표시등 네 칸 이름이 이미 말한다) 이름은 툴팁 첫머리로
