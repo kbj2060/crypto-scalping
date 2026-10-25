@@ -22,7 +22,11 @@ SEEDS = [int(s) for s in np.random.default_rng(2026102614).integers(1, 2**31 - 1
 ACTS = np.array([-1.0, -0.5, 0.0, 0.5, 1.0]); COST, CAP, EP, TOTAL, CK = 4e-4, 2.0, 336, 300_000, 30_000
 
 
-def build(start="2023-12-01", name="frame.parquet"):
+FUND = WT / "tmp" / "system_trend_ruleb_20261025" / "rest_fund_ETH.parquet"
+BTCP = ROOT / "data" / "binance_vision" / "panel" / "BTCUSDT.parquet"
+
+
+def build(start="2023-12-01", name="frame.parquet", extra=False):
     OUT.mkdir(parents=True, exist_ok=True)
     p = pd.read_parquet(PANEL, columns=["timestamp", "close"]).set_index("timestamp").close.astype(float)
     p = p[~p.index.duplicated()].sort_index(); p = p.reindex(pd.date_range(p.index[0], p.index[-1], freq="5min")).ffill()
@@ -40,6 +44,24 @@ def build(start="2023-12-01", name="frame.parquet"):
     for k, h in (("m1d", 24), ("m7d", 168), ("m30d", 720), ("m4h", 4)):
         F[k] = np.log(c / p.reindex(end - pd.Timedelta(hours=h)).to_numpy()) / (s24 * np.sqrt(h))
     F["sig"], F["ret"] = s24, np.log(c_next / c)
+    if extra:                                                             # v18: 파생·흐름·BTC (전부 t 에 끝난 봉까지)
+        q = pd.read_parquet(PANEL, columns=["timestamp", "sum_open_interest", "sum_toptrader_long_short_ratio", "taker_buy_base", "volume"])
+        q = q.drop_duplicates("timestamp").set_index("timestamp").sort_index().reindex(p.index).ffill()
+        oi = q.sum_open_interest
+        F["oi4h"] = np.log(oi / oi.shift(48)).reindex(end).to_numpy(); F["oi24h"] = np.log(oi / oi.shift(288)).reindex(end).to_numpy()
+        F["oiz"] = ((oi - oi.rolling(2016).mean()) / oi.rolling(2016).std()).reindex(end).to_numpy()
+        for k, n in (("tb1h", 12), ("tb4h", 48)):
+            F[k] = (2 * q.taker_buy_base.rolling(n).sum() / q.volume.rolling(n).sum() - 1).reindex(end).to_numpy()
+        ls = np.log(q.sum_toptrader_long_short_ratio)
+        F["lsz"] = ((ls - ls.rolling(2016).mean()) / ls.rolling(2016).std()).reindex(end).to_numpy()
+        fu = pd.read_parquet(FUND); fs = pd.Series(fu.rate.to_numpy(), index=pd.to_datetime(fu.t, unit="ms")).sort_index()
+        F["fund"] = fs.reindex(fs.index.union(t)).ffill().reindex(t).to_numpy()     # t 시점까지 확정된 마지막 펀딩
+        b = pd.read_parquet(BTCP, columns=["timestamp", "close"]).drop_duplicates("timestamp").set_index("timestamp").close.astype(float)
+        b = b.reindex(p.index).ffill(); bs = np.sqrt((np.log(b).diff() ** 2).rolling(288).sum() / 24).reindex(end).to_numpy()
+        bc = b.reindex(end).to_numpy()
+        for k, h in (("b4h", 4), ("b24h", 24)):
+            F[k] = np.log(bc / b.reindex(end - pd.Timedelta(hours=h)).to_numpy()) / (bs * np.sqrt(h))
+        F["bvr"] = np.log(bs / s24)
     F.index.name = "t"; F.reset_index().to_parquet(OUT / name)
     print("행", len(F), "결측", F.isna().mean().round(4).to_dict(), "학습", int(span(F, TRAIN).sum()), flush=True)
 
@@ -58,10 +80,15 @@ def load(rho=None, seed=0, frame="frame.parquet", train=TRAIN):
         X[k] = np.log(F[k] / sstar)
     for k in ("m1d", "m7d", "m30d", "m4h"):
         X[k] = F[k]
+    for k in ("oi4h", "oi24h", "oiz", "tb1h", "tb4h", "lsz", "b4h", "b24h", "bvr"):   # v18 프레임에만 있는 열
+        if k in F:
+            X[k] = F[k]
+    if "fund" in F:
+        X["fund"] = F.fund / F.fund[tr].std()
     if rho is not None:                                                   # 장치 검증: 다음 1시간 수익을 심는다
         z = F.ret / F.sig; z = (z - z[tr].mean()) / z[tr].std()
         X["hint"] = rho * z + np.sqrt(1 - rho ** 2) * np.random.default_rng(seed).standard_normal(len(z))
-    X = X.clip(-5, 5).astype(np.float32)
+    X = X.replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-5, 5).astype(np.float32)   # v18: OI 0 봉의 log 무한 → 중립 0
     size = np.minimum(sstar / F.sig.to_numpy(), CAP)
     return F, X, size, sstar
 
@@ -77,7 +104,7 @@ def stats(x):
                 mdd_bp=float((eq - np.maximum.accumulate(eq)).min() * 1e4), hours=int(len(x)))
 
 
-SIGNED = ["pred_z", "m1d", "m7d", "m30d", "m4h", "hint"]   # v15 거울: 가격 방향을 뒤집으면 부호가 바뀌는 열
+SIGNED = ["pred_z", "m1d", "m7d", "m30d", "m4h", "hint", "tb1h", "tb4h", "lsz", "fund", "b4h", "b24h"]   # v15 거울: 가격 방향을 뒤집으면 부호가 바뀌는 열
 
 
 class Env(gym.Env):
@@ -120,10 +147,10 @@ def teachers(F, size, tr):
             "T3_tsmom": np.sign(F.m30d.to_numpy()) * size}
 
 
-def train(seed, rho=None, tag=None, mirror=False, residual=False, win=None):
+def train(seed, rho=None, tag=None, mirror=False, residual=False, win=None, frame=None):
     from stable_baselines3 import PPO
     trp, vap = (WIN17[win][0], WIN17[win][1]) if win else (TRAIN, VAL)
-    F, X, size, sstar = load(rho, seed, "frame_v17.parquet" if win else "frame.parquet", trp); Xn, ret = X.to_numpy(), F.ret.to_numpy()
+    F, X, size, sstar = load(rho, seed, frame or ("frame_v17.parquet" if win else "frame.parquet"), trp); Xn, ret = X.to_numpy(), F.ret.to_numpy()
     tr, va = span(F, trp), span(F, vap)
     d = OUT / (tag or f"s{seed}"); d.mkdir(parents=True, exist_ok=True)
     flipv = np.array([-1.0 if c in SIGNED else 1.0 for c in X.columns], np.float32) if mirror else None
@@ -172,17 +199,17 @@ WIN17 = {"R1": (("2023-01-01", "2024-01-01"), ("2024-01-01", "2024-06-01"), ("20
          "R3": (TRAIN, VAL, TEST)}                                         # v17 굴림 3창 (학습, 검증=보고만, 시험)
 
 
-def test_v17():
+def test_v17(prefix="v17", frame="frame_v17.parquet", report="test_report_v17.json"):
     """v17: 창마다 마지막(30만) 체크포인트 · H1 3창 이어 붙인 샤프 RL > T3 그리고 > max(T1,T2) · H2 창별 RL > T3 ≥ 2/3 · H3 조정 원형이동 > 90분위."""
     from stable_baselines3 import PPO
-    rp = OUT / "test_report_v17.json"; assert not rp.exists(), "판정은 한 번만"
+    rp = OUT / report; assert not rp.exists(), "판정은 한 번만"
     rep, P = dict(seeds=SEEDS), {k: [] for k in ("RL", "T1_long", "T2_dirmodel", "T3_tsmom")}; parts = []
     for w, (trp, vap, tep) in WIN17.items():
-        F, X, size, _ = load(frame="frame_v17.parquet", train=trp); Xn, ret = X.to_numpy(), F.ret.to_numpy(); base = np.sign(F.m30d.to_numpy())
+        F, X, size, _ = load(frame=frame, train=trp); Xn, ret = X.to_numpy(), F.ret.to_numpy(); base = np.sign(F.m30d.to_numpy())
         T = teachers(F, size, span(F, trp)); rep[w] = {}
         for name, p in (("VAL", vap), ("TEST", tep)):
             m = span(F, p); r = ret[m]
-            seeds = {s: rollout(PPO.load(OUT / f"v17_{w}_{s}" / f"{TOTAL}.zip", device="cpu"), Xn, size, m, base) for s in SEEDS}
+            seeds = {s: rollout(PPO.load(OUT / f"{prefix}_{w}_{s}" / f"{TOTAL}.zip", device="cpu"), Xn, size, m, base) for s in SEEDS}
             ens = np.mean(list(seeds.values()), 0); t3 = T["T3_tsmom"][m]
             rep[w][name] = dict(RL=stats(pnl(ens, r)), teachers={k: stats(pnl(v[m], r)) for k, v in T.items()},
                                 per_seed={s: stats(pnl(v, r))["sharpe"] for s, v in seeds.items()}, adj_mean_abs=float(np.abs(ens - t3).mean()))
@@ -247,4 +274,8 @@ if __name__ == "__main__":
     elif a[:1] == ["--plant-v17"]: train(SEEDS[0], rho=0.3, tag="v17_plant", mirror=True, residual=True, win="R3")
     elif a[:1] == ["--train-v17"]: assert a[1] in WIN17 and int(a[2]) in SEEDS; train(int(a[2]), tag=f"v17_{a[1]}_{a[2]}", mirror=True, residual=True, win=a[1])
     elif a[:1] == ["--test-v17"]: test_v17()
+    elif a[:1] == ["--build-v18"]: build("2022-11-01", "frame_v18.parquet", extra=True)
+    elif a[:1] == ["--plant-v18"]: train(SEEDS[0], rho=0.3, tag="v18_plant", mirror=True, residual=True, win="R3", frame="frame_v18.parquet")
+    elif a[:1] == ["--train-v18"]: assert a[1] in WIN17 and int(a[2]) in SEEDS; train(int(a[2]), tag=f"v18_{a[1]}_{a[2]}", mirror=True, residual=True, win=a[1], frame="frame_v18.parquet")
+    elif a[:1] == ["--test-v18"]: test_v17("v18", "frame_v18.parquet", "test_report_v18.json")
     else: print(__doc__, SEEDS)
