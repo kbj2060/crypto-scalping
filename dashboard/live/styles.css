@@ -2361,7 +2361,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   border: 1px solid color-mix(in srgb, var(--option) 55%, transparent); opacity: .75; }
 .opt-q:hover span, .opt-q[aria-expanded="true"] span { opacity: 1; background: color-mix(in srgb, var(--option) 18%, transparent); }
 .opt-q:focus-visible { outline: 2px solid var(--option); outline-offset: 2px; border-radius: 4px; }
-.opt-tip { margin: 2px 0 8px; font-size: 11.5px; line-height: 1.55; color: var(--muted); }
 .opt-kv { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; font-size: 12.5px; }
 .opt-kv span { color: var(--muted); }
 .opt-kv b { font-family: var(--font-sans); font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); text-align: right; }
@@ -2415,7 +2414,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .opt-chip-btn:focus-visible { outline: 2px solid var(--option); outline-offset: 2px; }
 .opt-ladder { display: block; width: 100%; height: auto; }
 .opt-flow-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin: 10px 0 2px; padding-top: 8px; border-top: 1px solid var(--soft-line); }
-.opt-lane-body .opt-tip { margin: 2px 0 4px; }
 .opt-ladder { max-width: 640px; }   /* 넓은 칸(1440 이하 전폭)에서 세로로 부풀지 않게 */
 
 /* 2026-09-29 «시장 맥락» 카드 -- 옵션 카드와 같은 문법(칸 제목 «?» → 설명 펼침, 키-값 줄)이지만 옵션 색(--option)은 쓰지 않는다:
@@ -2442,7 +2440,26 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   border: 1px solid var(--line); color: var(--muted); }
 .mc-q:hover span, .mc-q[aria-expanded="true"] span { color: var(--text); background: rgb(var(--lift) / .08); }
 .mc-q:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.mc-tip { margin: 2px 0 8px; font-size: 11.5px; line-height: 1.55; color: var(--muted); }
+/* 2026-10-26 «?» 설명 팝업(사용자 «칸이 늘어나는 게 아니라 팝업창», app.js helpOpen) -- 떠 있는 조작부 문법(바닥 배경·흑연 선·작은 모서리·그림자)
+   + 옛 펼침 글자(11.5px 흐린 글자). 데스크톱 = «?» 바로 아래(JS 가 left/top), 휴대폰 = 아래 시트. 안쪽 여백 0 = 바깥(::backdrop) 클릭 판정용. */
+.help-dlg { position: fixed; inset: auto; margin: 0; padding: 0; width: min(380px, calc(100vw - 16px)); max-width: none; max-height: min(70vh, 560px);
+  overflow: auto; overscroll-behavior: contain; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: 0 1px 2px rgb(var(--shadow) / 0.25), 0 12px 32px rgb(var(--shadow) / 0.36); }
+.help-dlg::backdrop { background: transparent; }
+.help-head { position: sticky; top: 0; display: flex; align-items: flex-start; gap: 8px; padding: 10px 6px 2px 14px; background: inherit; }
+.help-head h3 { flex: 1; margin: 0; padding-top: 6px; font: 700 12.5px/1.35 var(--font-sans); letter-spacing: .02em; }
+.help-dlg.opt h3 { color: var(--option); }
+.help-x { flex: none; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+.help-x:hover { color: var(--text); background: rgb(var(--lift) / .08); }
+.help-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.help-x svg { width: 16px; height: 16px; }
+.help-body { margin: 0; padding: 4px 14px 14px; font-size: 11.5px; line-height: 1.6; color: var(--muted); white-space: pre-line; }
+@media (max-width: 720px) {
+  .help-dlg { inset: auto 0 0 0; width: 100%; max-height: 72vh; border-bottom: 0; border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+  .help-dlg::backdrop { background: rgb(var(--shadow) / .35); }   /* 시트는 페이지와 갈라 보이게 옅게 덮는다 */
+  .help-x { width: 44px; height: 44px; }
+  .help-body { font-size: 13px; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+}
 .mc-note { font-size: 11px; color: var(--muted); opacity: .85; margin-top: 3px; line-height: 1.4; }
 .mc-switch { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
 .mc-switch label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }

@@ -3031,6 +3031,9 @@ function ensureLiveStream() {
 // 🔴전부 참고 · 신호 아님. 우리 검정: 방향 예측은 전부 기각(GEX 방향 = 가격수준 사본 · 행사가 자석·핀닝 없음 ·
 //   DVOL 방향 0). 남은 쓸모는 «얼마나 움직일 것 같은가»(크기)와 «언제 큰 이벤트가 있는가»(일정)다.
 //   옛 «신호» 카드의 GEX 한 줄(gexIndicatorItem)은 이 카드의 «딜러 감마» 칸으로 들어왔다.
+let helpKey = null;   // 열린 «?» 설명 팝업(helpOpen)의 data-tip -- 다시 그려도 aria-expanded 가 맞게
+const helpAttrs = (k) => `data-tip="${k}" aria-haspopup="dialog" aria-expanded="${helpKey === k}"`;
+let mcTipOf = (k) => MC_TIPS[k];   // renderMarketCtx 가 코인별 고래·리테일 경계로 바꿔 끼운다
 const OPT_TIPS = {
   move: "옵션 가격에 들어 있는 기대 움직임. 1σ = 가격 × DVOL × √(기간/1년). 정규분포라면 68% 가 이 안이지만 2026년 실측은 종가 기준 5분 83% · 1시간 84% · 24시간 77% 가 안에 들었다(평균 크기는 맞고, 대부분은 띠보다 작게 움직이다 가끔 크게 벗어난다 — 3σ 넘는 움직임이 정규분포의 약 6배). 봉 중 한 번이라도 띠를 건드린 비율은 5분 33% · 1시간 38%. 시간대 차이도 크다: 04~11 UTC 는 띠가 넉넉하고(안 90% 근처) 13~15 UTC 미국장 초반은 빠듯하다(안 68% 근처). 손절이 5분 1σ 보다 훨씬 좁으면 소음에 걸리기 쉽다.\n차트 띠는 봉 시가에 고정된다: 5분 띠 = 이번 5분봉 시가 ± 5분 1σ, 1시간 띠 = 이번 정시 첫 봉 시가 ± 1시간 1σ(폭도 봉이 열릴 때 값으로 고정). 가격이 띠를 벗어나면 옵션시장 예상보다 큰 움직임.\nIV−실현(VRP) = 30일 내재(DVOL) − 지난 7일 실현(1시간봉): 기간이 달라 30일 실현으로 재면 부호가 34% 다르다. 양수면 옵션시장이 최근보다 큰 움직임을 값에 넣는 중(보통 양수). 어느 기간으로 재도 앞으로의 VRP 예측력은 없었다.\n우리 검정(2026년만): DVOL 24시간 1σ 안에 실제로 든 날 77% · 크기 비 1.00(과거 24h 실현변동성 폭은 1.32 로 좁다). 평균 크기는 맞고 꼬리는 두껍다 — 벗어나는 23% 는 크게 벗어난다.\nVoV = 내재 변동성(DVOL)의 시간당 로그 변화 흔들림, 지난 24시간. ✅검증: 크면 다음 24시간 DVOL 이 더 크게 바뀐다(271일) · VoV 상위 20% 날은 24시간 1σ 띠 적중 66%(평소 80%) — 단 «최근 실현 변동성이 IV 보다 크다»와 같은 정보.\n꼬리 확률 = 옵션 가격(스마일)을 행사가로 미분한 위험중립 확률로, 만기에 선도가에서 2·3·5% 넘게 벗어날 확률(위·아래 합, Breeden·Litzenberger 1978). 🟡실제보다 크게 나오는 방향(±2% 예측 20% vs 실제 18% · ±3% 10% vs 7%)이나 46만기로는 확정 못 함. DVOL 로 환산한 확률(±2% 를 +15pp 과대)보다는 확실히 실제에 가깝다.",
   rg: "실현 감마 국면(2026-10-02, 딜러 감마를 대신한다): 직전 12시간 ETH 5분 종가 수익률의 1차 자기상관. 음수 = 움직임이 곧 되돌아가는 장(롱감마형 — 누가 헤지하든 결과가 «누름»), 양수 = 이어지는 장(숏감마형 — «키움»). 딜러가 누구인지 가정하지 않고 효과를 가격에서 직접 잰다.\n왜 바꿨나: Deribit 은 누가 딜러인지 공개하지 않는다. 체결 기반·블록만·RFQ·관행·뒤집은 관행 등 여섯 가정 모두 검증에서 일관된 지지가 없었고(체결 기반은 종목-시점의 7.9% 에서 «딜러 포지션 > 미결제»), 업계(Glassnode·Amberdata)도 같은 가정을 검증 없이 쓴다.\n분위 = 2021~24 ETHUSDT 5분(정시 표본 35,051개) 중 위치. 국면 = 하위 1/3(−0.077 이하) 되돌림 쪽 · 상위 1/3(+0.012 이상) 추세 쪽.\n우리 검정(손대지 않은 2025-01~2026-09): 다음 4시간 실현 변동성 ÷ 평소 예측(HAR) = 되돌림 쪽 0.94배 · 보통 0.99배 · 추세 쪽 1.02배 — 크기 정보로 약하게 맞는다. 🔴국면은 오래 안 간다(지금 값이 다음 4시간 값을 거의 예측 못 함) · 큰 움직임의 1시간 되돌림 차이(56% vs 52%)는 확정 못 함 — «되돌림 장이니 역매매»로 쓰지 말 것. 체결 기반 딜러 감마와 같은 조건으로 맞붙이면 정확도는 구분 불가였지만, 가정이 없고 우연 점검에서 더 강했다(p .002 vs .07). ETH 만 검증.",
@@ -3286,7 +3289,6 @@ function optFlowSvg(flow, W) {
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="옵션 순매수 흐름: 시간별 콜·풋 순매수와 순델타 누적">${s}</svg>`;
 }
 
-const optTipOpen = new Set();
 // 2026-09-29 휴대폰 블록 거래(사용자 선택 C): 시간축 점이 한 칸에 겹쳐 안 보여 «요약 한 줄 + 펼치기 목록». 펼침은 브라우저 기억.
 let optBlkOpen = (() => { try { return localStorage.getItem("optBlkOpen") === "1"; } catch (e) { return false; } })();
 const OPT_MON = { JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06", JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12" };
@@ -3331,14 +3333,7 @@ const optClick = (e) => {
     renderOptions();
     return;
   }
-  const b = e.target.closest(".opt-q");
-  if (!b) return;
-  const k = b.dataset.tip, open = !optTipOpen.has(k);
-  if (open) optTipOpen.add(k); else optTipOpen.delete(k);
-  b.setAttribute("aria-expanded", String(open));
-  const tip = (b.closest(".opt-sec") || b.closest(".opt-lane-body"))?.querySelector(".opt-tip");
-  if (tip) tip.hidden = !open;
-};
+};   // «?»(.opt-q) 는 문서 전체 처리기가 설명 팝업을 연다(helpOpen)
 ["optBody", "optLaneBody", "optBlkBody", "optFlowBody"].forEach((id) => el(id)?.addEventListener("click", optClick));
 
 // 2026-09-29 가운데 «블록 거래» 칸 = 위 풋프린트의 체결+호가 프로파일과 같은 폭·같은 x(사용자 지시). 프로파일이 카드
@@ -3399,9 +3394,8 @@ function renderOptions() {
   const pm = (v) => (v == null ? "-" : `±${optQ(v)}$`);
   const kv = (k, v, cls = "") => `<div class="opt-kv"><span>${k}</span><b class="${cls}">${v}</b></div>`;
   const info = optInfoParts(o, g, kv);   // 2026-10-02 옵션 정보 → 예상 폭·심리에 나눠 넣는다
-  // 칸 제목을 누르면(휴대폰 포함 -- 호버가 없다) 정의·읽는 법·우리 검정 결과가 제목 아래에 펼쳐진다. 펼침은 다시 그려도 유지.
-  const sec = (key, title, inner) => `<div class="opt-sec"><h4><button type="button" class="opt-q" data-tip="${key}" aria-expanded="${optTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
-    + `<p class="opt-tip"${optTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(OPT_TIPS[key]).replace(/\n/g, "<br>")}</p>${inner}</div>`;
+  // 칸 제목을 누르면(휴대폰 포함 -- 호버가 없다) 정의·읽는 법·우리 검정 결과가 설명 팝업으로 뜬다(2026-10-26, 옛 제목 아래 펼침)
+  const sec = (key, title, inner) => `<div class="opt-sec"><h4><button type="button" class="opt-q" ${helpAttrs(key)}>${title}<span aria-hidden="true">?</span></button></h4>${inner}</div>`;
   const rg = cur === "ETH" ? optRealizedGamma(candleHistoryByAsset.eth) : null;   // 2026-10-02 딜러 감마 → 실현 감마 국면
   const covHead = el("optCovHead");
   if (covHead) covHead.innerHTML = optHead(o);
@@ -3426,9 +3420,9 @@ function renderOptions() {
   // 2026-09-29 풋프린트 카드 맨 아래 반반(휴대폰은 위아래) -- 두 칸 폭이 같아 한 번 잰다.
   if (laneBody && flowBody && laneBody.clientWidth > 0) {
     const lw = Math.round(laneBody.clientWidth), fw = Math.round(flowBody.clientWidth) || lw, fl = ((((latestGex || {}).block_trades || {}).flow_by_coin || {})[cur]) || [];
-    // 두 그림 제목은 같은 모양(청록 ? 버튼 + 범례, 2026-09-29 사용자 «제목 포맷 통일») -- 누르면 설명이 펼쳐진다.
-    const head = (k, title, legend) => `<div class="opt-flow-head"><button type="button" class="opt-q" data-tip="${k}" aria-expanded="${optTipOpen.has(k)}">${title}<span aria-hidden="true">?</span></button>`
-      + `<span class="opt-lane-legend">${legend}</span></div><p class="opt-tip"${optTipOpen.has(k) ? "" : " hidden"}>${escapeHtml(OPT_TIPS[k]).replace(/\n/g, "<br>")}</p>`;
+    // 두 그림 제목은 같은 모양(청록 ? 버튼 + 범례, 2026-09-29 사용자 «제목 포맷 통일») -- 누르면 설명 팝업.
+    const head = (k, title, legend) => `<div class="opt-flow-head"><button type="button" class="opt-q" ${helpAttrs(k)}>${title}<span aria-hidden="true">?</span></button>`
+      + `<span class="opt-lane-legend">${legend}</span></div>`;
     laneBody.innerHTML = head("lane", "옵션 만기 · 지금 ~ +120h", `<b class="opt-warn">막대</b> 만기 규모(명목) · pain · P/C(미결제) · <b class="opt-c">선</b> 만기별 ATM IV · KST`)
       + optLaneSvg(o, lw);   // 2026-09-29 블록 점 제거(사용자 지시) -- 블록은 옵션 카드 «블록 거래» 칸만
     flowBody.innerHTML = (fl.length ? head("flow", "옵션 순매수 흐름 · 지난 24시간", `<b class="opt-good">콜</b> · <b class="opt-bad">풋</b> 매수−매도(${escapeHtml(cur)}) · <b class="opt-c">선</b> 체결 순델타(24h) 누적 · 테이커 기준${optNewTxt(fl.slice(0, -1)).replace(" · 미결제", " · 24h 미결제")}${fl.some((b) => b.liq > 0) ? ` · 강제청산 ${fmtNum(fl.reduce((a, b) => a + (b.liq || 0), 0), 0)}` : ""}`) + optFlowSvg(fl, fw) : "");
@@ -3728,9 +3722,8 @@ function boxState(b, s) {
   const lo = s.q20 != null ? s.q20 : s.base * 0.75, hi = s.q80 != null ? s.q80 : s.base * 1.33;
   return s.p < lo ? ["brk", "깨질 쪽"] : s.p > hi ? ["hold", "머물 쪽"] : ["", "보통"];
 }
-// 2026-10-17 사용자 «? 설명 단추 되살려»(제목은 없앤 채): ①②④ 처럼 «?» 만 -- 키보드로도 펼친다(#mcBody 클릭 처리기가 .mc-sec 안 .mc-tip 을 연다)
-const mcTipBtn = (key, name) => `<button type="button" class="mc-q mc-q1" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}" title="${name} — 설명" aria-label="${name} 설명"><span aria-hidden="true">?</span></button>`;
-const mcTipP = (key) => `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(MC_TIPS[key]).replace(/\n/g, "<br>")}</p>`;
+// 2026-10-17 사용자 «? 설명 단추 되살려»(제목은 없앤 채): ①②④ 처럼 «?» 만 -- 키보드로도 연다(설명 팝업, helpOpen)
+const mcTipBtn = (key, name) => `<button type="button" class="mc-q mc-q1" ${helpAttrs(key)} title="${name} — 설명" aria-label="${name} 설명"><span aria-hidden="true">?</span></button>`;
 // 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, /api/vol-forecast · 서버 5분 캐시) -- 표시 전용
 let latestVol4h = null, vol4hLastFetchAt = 0;
 const VOL4H_ASSETS = new Set(["eth", "xrp"]);   // 2026-10-20 XRP 4h 변동성(ETH+XRP 합동 학습 · 2025~ R² .680 > HAR .568)
@@ -3811,7 +3804,7 @@ function fcRowHtml(sec) {
       `${Number(kn.k.strike).toFixed(1)} · ${Math.floor(kLeft / 60)}:${String(kLeft % 60).padStart(2, "0")}`, `${kTip}\n기준가 ${Number(kn.k.strike).toFixed(2)} · 창 마감까지 ${Math.floor(kLeft / 60)}분 ${kLeft % 60}초`)
     : cell("15분 · 칼시", "flat", "-", eth ? "창 대기" : "ETH 전용", kTip);
   // 2026-10-17 펜 메모 «타이틀 제거 · 예측은 지금 유지»: 제목 단추(⑤ 예측 · 지금에서 멀리 ?)를 빼고 종합 칩만 머리에 -- 설명은 머리 툴팁
-  return `<div class="mc-sec mc-fc"><h4>${eth ? fcSum : ""}${mcTipBtn("q_fc", "⑤ 예측 · 지금에서 멀리")}</h4>${mcTipP("q_fc")}<div class="fc-row">`
+  return `<div class="mc-sec mc-fc"><h4>${eth ? fcSum : ""}${mcTipBtn("q_fc", "⑤ 예측 · 지금에서 멀리")}</h4><div class="fc-row">`
     + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
     + kCell
@@ -3846,7 +3839,6 @@ const PAPER_SIG_OK = { wall: new Set(["eth", "sol", "xrp"]), duel: new Set(["eth
 const PAPER_POLL_MS = 10000;   // 2026-10-04 모의 매매 엔진은 1분마다 쓴다 -- 10초면 충분
 let latestPaper = null, paperLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
-const mcTipOpen = new Set();
 const mcLine = { vwap: true, bb: false, wvwap: false, vsess: false };   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
 // 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- vsess 켜면 지금 시장 세션 개장(현지 시각, 서머타임 반영)부터 센 VWAP.
@@ -4180,10 +4172,9 @@ function renderMarketCtx() {
   const tone = (v, thr = 0.5) => (v == null || Math.abs(v) < thr ? "" : v > 0 ? "mc-good" : "mc-bad");
   // 2026-10-04 고래·리테일 경계는 코인별(서버 bands_usd) -- 설명 글의 ETH 값($10만/$1만)을 바꿔 끼운다
   //   🔴키는 «q_flow»(= flow + quad 이어 붙임)다 -- 키 이름으로 고르지 말고 글에서 바꾼다(첫 판은 "flow" 로 걸러 한 번도 안 맞았다)
-  const tipOf = (key) => (!eth && Array.isArray(d.bands_usd)
+  mcTipOf = (key) => (!eth && Array.isArray(d.bands_usd)   // 팝업이 열 때 읽는다(helpOpen)
     ? MC_TIPS[key].replace("고래 ≥ $10만 · 리테일 < $1만", `고래 ≥ ${fmtUsdCompact(d.bands_usd[1])} · 리테일 < ${fmtUsdCompact(d.bands_usd[0])}`) : MC_TIPS[key]);
-  const sec = (key, title, inner) => `<div class="mc-sec"><h4><button type="button" class="mc-q" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}">${title}<span aria-hidden="true">?</span></button></h4>`
-    + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(tipOf(key)).replace(/\n/g, "<br>")}</p>${inner}</div>`;
+  const sec = (key, title, inner) => `<div class="mc-sec"><h4><button type="button" class="mc-q" ${helpAttrs(key)}>${title}<span aria-hidden="true">?</span></button></h4>${inner}</div>`;
   const f = d.funding || {}, b = d.basis || {}, oi = d.oi || {}, ls = d.ls, fl = d.flow || {}, z = fl.z30h_all || fl.z30h || {},   /* 2026-10-26 사용자 «② 다섯 줄 모두 30분»: 30분 합 σ(같은 시간대 14일 기준) -- 60분 값으로 섞어 채우지 않는다(없으면 «기준 쌓는 중») */   // z60h = 같은 UTC 시 14일 기준(2026-10-01) · 10-05 요일유형(평일/주말) 분리, 없으면 옛 12~24h 링
     bk = d.book || {};
   const levWarn = ["long_crowd", "short_crowd", "deleverage"].includes((d.lev || {}).key);
@@ -4304,10 +4295,10 @@ function renderMarketCtx() {
         + `<path d="${bb.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)} ${Y(x[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round"/>`
         + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${col}"/></svg>`;
     };
-    // 2026-10-15 사용자 «①②④ 제목 제거»: 판 이름은 «?» 의 title·aria 로만 -- 설명 펼침은 그대로(핸들러가 .mc-sec 안 .mc-tip 을 찾는다)
+    // 2026-10-15 사용자 «①②④ 제목 제거»: 판 이름은 «?» 의 title·aria 로만 -- 설명은 팝업 제목으로도 쓴다(helpOpen)
     const tile = (key, title, chipHtml, rows, cls = "") => `<div class="mc-sec${cls}" aria-label="${escapeHtml(title)}"><div class="mc-state">${chipHtml || ""}`
-      + `<button type="button" class="mc-q mc-q1" data-tip="${key}" aria-expanded="${mcTipOpen.has(key)}" title="${escapeHtml(title)} — 설명" aria-label="${escapeHtml(title)} 설명"><span aria-hidden="true">?</span></button></div>`
-      + `<p class="mc-tip"${mcTipOpen.has(key) ? "" : " hidden"}>${escapeHtml(tipOf(key)).replace(/\n/g, "<br>")}</p><div class="mc-rows">${rows}</div></div>`;
+      + `<button type="button" class="mc-q mc-q1" ${helpAttrs(key)} title="${escapeHtml(title)} — 설명" aria-label="${escapeHtml(title)} 설명"><span aria-hidden="true">?</span></button></div>`
+      + `<div class="mc-rows">${rows}</div></div>`;
     const duelChip = !PAPER_SIG_OK.duel.has(A) ? chip("", "검정 밖") : !ps ? chip("", "엔진 대기")
       : ps.duel ? chip(ps.duel > 0 ? "good" : "bad", `고래 ${ps.duel > 0 ? "롱" : "숏"} · ${ps.remain}분`, zTip) : chip("", "맞대결 없음", zTip);
     const wallChip = !PAPER_SIG_OK.wall.has(A) ? chip("", "검정 밖") : !ps ? chip("", "엔진 대기") : !ps.dir ? chip("", "벽 신호 없음")
@@ -4354,7 +4345,7 @@ function renderMarketCtx() {
   setH("mcWhen", whenBox ? whenHtml : "");
   nwWhenFit();
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
-  if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(펼친 설명·포커스 유지)
+  if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(포커스 유지)
   body._mcHtml = htmlB;
   keepFocus(body, () => { body.innerHTML = htmlB; if (G.cmpW) { body.insertBefore(mcEntryBox(), body.firstChild); renderEntryRuler(); } });   // 가격 자 = 맨 위(1초 수급 바로 아래)
   if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
@@ -4367,16 +4358,38 @@ function renderMarketCtx() {
   }
 }
 
-["mcBody", "mcWhen", "mcWall"].forEach((id) => el(id)?.addEventListener("click", (e) => {   // ⑤ 는 #mcWhen · 모의 판은 #mcWall 에 있을 수 있다
-  const b = e.target.closest(".mc-q");
-  if (!b) return;
-  const k = b.dataset.tip, open = !mcTipOpen.has(k);
-  if (open) mcTipOpen.add(k); else mcTipOpen.delete(k);
-  b.setAttribute("aria-expanded", String(open));
-  const tip = (b.closest(".wdr") || b.closest(".mc-sec"))?.querySelector(".mc-tip");
-  if (tip) tip.hidden = !open;
-  el("mcBody")._mcHtml = null;         // 다음 그리기에서 펼침 상태를 반영한다
-}));
+// 2026-10-26 사용자 «? 를 누르면 칸이 늘어나는 게 아니라 팝업창 · 대시보드 전체»: «?»(.mc-q 시장 맥락 · .opt-q 옵션) = 공유 설명 팝업 하나.
+//   <dialog> 는 body 끝(매초 다시 그리는 칸 밖)이라 다시 그려도 안 닫히고 포커스도 안 뺏긴다 · 제목 = 단추 title(«— 설명» 뺀) 또는 글자 · 본문 = 같은 설명(줄바꿈 유지)
+//   ✕·Esc·바깥 클릭(= ::backdrop 클릭은 dialog 자신이 받는다 -- 그래서 dialog 안쪽 여백 0)으로 닫고, 포커스는 «?» 로(그새 다시 그려졌으면 같은 data-tip 단추로).
+function helpOpen(b) {
+  let d = el("helpDlg");
+  if (!d) {
+    d = document.createElement("dialog"); d.id = "helpDlg"; d.className = "help-dlg"; d.setAttribute("aria-labelledby", "helpDlgT");
+    d.innerHTML = `<div class="help-head"><h3 id="helpDlgT"></h3><button type="button" class="help-x" aria-label="닫기">`
+      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div><p class="help-body"></p>`;
+    d.addEventListener("click", (e) => { if (e.target === d || e.target.closest(".help-x")) d.close(); });
+    d.addEventListener("close", () => {
+      const btns = [...document.querySelectorAll(`.mc-q[data-tip="${helpKey}"], .opt-q[data-tip="${helpKey}"]`)];
+      helpKey = null;
+      btns.forEach((x) => x.setAttribute("aria-expanded", "false"));
+      btns.find((x) => x.getClientRects().length)?.focus({ preventScroll: true });
+    });
+    document.body.appendChild(d);
+  }
+  const k = b.dataset.tip, opt = b.classList.contains("opt-q");
+  d.classList.toggle("opt", opt);
+  d.querySelector("h3").textContent = (b.title ? b.title.replace(/ — 설명$/, "") : b.textContent.replace(/\?$/, "")).trim();   // 글자 끝 «?» = 단추 원(«① 레버리지 과열?» 의 물음표는 남긴다)
+  d.querySelector(".help-body").textContent = (opt ? OPT_TIPS[k] : mcTipOf(k)) || "";
+  helpKey = k; b.setAttribute("aria-expanded", "true");
+  d.style.left = d.style.top = "";
+  d.showModal();
+  d.scrollTop = 0;
+  if (window.matchMedia("(max-width: 720px)").matches) return;   // 휴대폰 = 아래 시트(CSS)
+  const r = b.getBoundingClientRect(), w = d.offsetWidth, h = d.offsetHeight;   // 데스크톱 = «?» 바로 아래(모자라면 위), 화면 안으로
+  d.style.left = `${Math.round(Math.max(8, Math.min(r.left, innerWidth - w - 8)))}px`;
+  d.style.top = `${Math.round(r.bottom + 6 + h <= innerHeight - 8 ? r.bottom + 6 : Math.max(8, r.top - 6 - h))}px`;
+}
+document.addEventListener("click", (e) => { const b = e.target.closest(".mc-q, .opt-q"); if (b) helpOpen(b); });
 ["mcBody", "fpLineSwitch"].forEach((id) => el(id)?.addEventListener("change", (e) => {   // 체크박스는 넓은 화면이면 #fpLineSwitch
   const k = e.target?.dataset?.line;
   if (!k) return;
