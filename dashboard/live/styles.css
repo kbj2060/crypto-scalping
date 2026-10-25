@@ -1140,12 +1140,6 @@ svg {
 .acct-plot { position: relative; margin: 0; padding: 0; min-height: 0; display: grid;
   grid-template-rows: auto 1fr; gap: 4px; }
 
-/* 2026-09-26 비평(Casey): 손가락은 24px 칩을 자주 놓친다 -- 거친 포인터에서만 칩·탭을 40px 로. */
-@media (pointer: coarse) {
-  .chipset .chip { min-height: 40px; min-width: 44px; padding: 0 12px; }
-  .page-tab { min-height: 40px; }
-}
-
 .acct-empty { padding: 14px; border-radius: var(--radius-sm); background: var(--glass);
   border: 1px dashed var(--soft-line); font-size: 12px; color: var(--muted); }
 .acct-foot { margin: 0; padding: 0 20px 16px; font-size: 11px; color: var(--muted); }
@@ -1190,6 +1184,7 @@ svg {
 .acct-today-svg, #acctCard .acct-plot svg { display: block; width: 100%; height: auto; }
 .acct-today-trips ol { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; }
 .acct-today-trips li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
+.acct-today-trips li.muted { display: block; }   /* 2026-10-26 «닫힌 거래 없음» 한 줄이 44px 시각 칸에 갇혀 «닫힌 거 / 래 없음»으로 꺾였다(데스크톱도) */
 .acct-today-trips time { font: 500 11.5px/1 var(--font-mono); color: var(--muted); }
 .acct-today-trips li > b { font: 700 12.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .acct-today-trips em { font-style: normal; }
@@ -2821,7 +2816,7 @@ html.fit1 #newsBody .nw-sum { min-height: 0; overflow-y: auto; scrollbar-width: 
   #fpViewTabs { flex: 1 1 100%; display: grid; order: -2; }
   #chartPan { flex: 1 1 100%; display: flex; order: -1; }
   #chartPan[hidden] { display: none; }
-  #chartPan .chart-pan-map { flex: 1 1 auto; min-width: 0; width: auto; }
+  #chartPan .chart-pan-map { flex: 1 1 0; min-width: 0; width: 0; height: 40px; }   /* 2026-10-26 끌어 옮기는 미니맵 31px → 40px(손가락) -- 높이는 폭×26/176 비율이 정하던 것 · 폭은 줄이 정한다(viewBox 는 preserveAspectRatio none) */
   #chartWindowTabs, #liqDaysTabs, #snapshotAssetTabs { flex: var(--seg-n, 3) 1 0; min-width: 0; }
   #chartWindowTabs .asset-tab, #liqDaysTabs .asset-tab, #snapshotAssetTabs .asset-tab { padding-left: 0; padding-right: 0; }
   #snapshotAssetTabs { display: grid; order: 0; }
@@ -3016,3 +3011,16 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .nc-ice-bar { position: relative; display: block; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 20%, transparent); overflow: hidden; }
 .nc-ice-bar i { position: absolute; inset: 0 auto 0 0; background: var(--text); opacity: .7; }
 .nc-ice.stale .nc-ice-st, .nc-ice-bad { color: var(--warn); }
+
+/* 2026-10-26 사용자 «모바일 최적화»(impeccable adapt): 거친 포인터 손가락 목표 -- 파일 끝에 둔다.
+   09-26 의 칩·탭 40px 규칙이 파일 앞쪽에 있어 뒤의 기본 규칙(.chipset .chip 24px · .page-tab 32px)에 덮여 한 번도 안 먹었다
+   (주문 패널 칩 지정가/즉시 · 직접/자동/보유 · 따라가기/대기, 자산 곡선 기간 칩, 상단 탭이 24~32px). 같은 무게의 기본 규칙보다 뒤여야 한다. */
+@media (pointer: coarse) {
+  .chipset .chip { min-height: 40px; min-width: 44px; }
+  .page-tab { min-height: 40px; }
+  .ofab-panel .notify-btn.hold-fire { min-height: 44px; }   /* 꾹 누르는 진입·청산 버튼 38px → 바 LONG/SHORT(.ofab-dir)와 같은 44px */
+  .mc-switch { row-gap: 0; align-items: center; }
+  .mc-switch label { min-height: 40px; }   /* «차트에 그리기» 체크 줄(19px) -- 줄 사이 틈은 걷어 높이 증가를 줄인다 */
+  .nw-row { position: relative; }
+  .nw-row a[href]::after { content: ""; position: absolute; inset: 0; }   /* 뉴스 줄 전체가 기사 링크(제목 글자만 14~28px 였다) */
+}

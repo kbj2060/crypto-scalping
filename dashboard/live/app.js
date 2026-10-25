@@ -1485,8 +1485,10 @@ function cycleSvg(t, pos, rows, now, W) {
   if (legs.length <= 30) {
     const placed = [], narrow = W < 600, gap = narrow ? 62 : 104;   // 매수 = 표시 아래 · 매도 = 위, 가까운 글자와 겹치면 바깥으로 14px 씩 · 좁은 화면은 ×수량을 칩에만
     legs.forEach(([ms, p, qty, inc]) => {
-      const x = Math.min(Math.max(X(ms), L + 46), W - R - 46), up = !buy(inc); let ty = Y(p) + (up ? -10 : 18);
-      while (placed.some(([px, py]) => Math.abs(ty - py) < 13 && Math.abs(x - px) < gap)) ty += up ? -14 : 14;
+      const x = Math.min(Math.max(X(ms), L + 46), W - R - 46), up = !buy(inc); let ty = Y(p) + (up ? -10 : 18), moved = false;
+      while (placed.some(([px, py]) => Math.abs(ty - py) < 13 && Math.abs(x - px) < gap)) { ty += up ? -14 : 14; moved = true; }
+      // 2026-10-26 사용자 «모바일 최적화»: 좁은 화면은 밀려난 글자(표시에서 떨어져 기둥으로 쌓이고 서로·삼각형에 겹쳤다)·다른 체결 삼각형을 덮는 글자·차트 밖 글자를 뺀다 -- 가격은 아래 체결 칩에 다 있다
+      if (narrow && (moved || ty < T + 10 || ty > H - B || legs.some(([m2, p2]) => Math.abs(x - X(m2)) < gap / 2 + 6 && Math.abs(ty - 4 - Y(p2)) < 13))) return;
       placed.push([x, ty]);
       s += `<text x="${x.toFixed(1)}" y="${ty.toFixed(1)}" class="cy-fx" fill="var(--${up ? "bad" : "good"})" text-anchor="middle">${acctPx(p)}${narrow ? "" : `<tspan class="cy-fq"> ×${cycleQ(qty)}</tspan>`}</text>`;
     });
@@ -3102,7 +3104,10 @@ function optLaneSvg(o, W) {
     const ly = base - (narrow ? hh : Math.max(hh, 40));   // 규모·pain·P/C 세 줄이 기준선 위에 들어오게 짧은 막대는 글자를 띄운다(반쪽 폭에서 한 줄이면 옆 막대와 겹쳤다)
     s += `<rect x="${(cx - 7).toFixed(1)}" y="${(base - hh).toFixed(1)}" width="14" height="${hh.toFixed(1)}" rx="3" fill="var(--warn)" fill-opacity=".85">`
       + `<title>${optKst(e.exp_ms)} 만기 · ${optUsd(v)} · max pain ${optQ(e.pain)} · P/C ${e.pc == null ? "-" : e.pc.toFixed(2)} · ATM IV ${e.atm_iv.toFixed(1)}%</title></rect>`
-      + `<text x="${(cx + 12).toFixed(1)}" y="${(ly + 11).toFixed(1)}" font-size="${fs + 1}" font-weight="800" fill="var(--warn)">${optUsd(v)}</text>`
+      // 2026-10-26 끝(+120h 가까이) 만기는 규모 글자가 오른쪽 가장자리에서 «$76…»로 잘렸다 -- 넘칠 때만 막대 왼쪽으로(넘치지 않으면 그대로)
+      + (cx + 12 + (fs + 1) * 0.62 * optUsd(v).length > W
+        ? `<text x="${(cx - 10).toFixed(1)}" y="${(ly + 11).toFixed(1)}" font-size="${fs + 1}" font-weight="800" fill="var(--warn)" text-anchor="end">${optUsd(v)}</text>`
+        : `<text x="${(cx + 12).toFixed(1)}" y="${(ly + 11).toFixed(1)}" font-size="${fs + 1}" font-weight="800" fill="var(--warn)">${optUsd(v)}</text>`)
       + (narrow ? "" : `<text x="${(cx + 12).toFixed(1)}" y="${(ly + 25).toFixed(1)}" font-size="10.5" fill="var(--muted)">pain ${optQ(e.pain)}</text>`
         + `<text x="${(cx + 12).toFixed(1)}" y="${(ly + 39).toFixed(1)}" font-size="10.5" fill="var(--muted)">P/C ${e.pc == null ? "-" : e.pc.toFixed(2)}</text>`)
       + `<text x="${cx.toFixed(1)}" y="${base + 14}" font-size="${narrow ? 9.5 : 10.5}" font-weight="600" fill="var(--muted)" text-anchor="middle">${narrow ? optKst(e.exp_ms).slice(0, 5) : optKst(e.exp_ms)}</text>`;
@@ -3282,7 +3287,7 @@ function optFlowSvg(flow, W) {
     });
     const b = flow[i];
     s += `<rect x="${X(i).toFixed(1)}" y="${base - amp}" width="${((x1 - x0) / n).toFixed(1)}" height="${2 * amp}" fill="transparent"><title>${optKst(b.h)}~ · 콜 매수 ${fmtNum(b.cb, 0)} / 매도 ${fmtNum(b.cs, 0)} · 풋 매수 ${fmtNum(b.pb, 0)} / 매도 ${fmtNum(b.ps, 0)} · 순델타 ${b.dlt >= 0 ? "+" : ""}${fmtNum(b.dlt, 0)}${optNewTxt([b])}${b.liq > 0 ? ` · 강제청산 ${fmtNum(b.liq, 0)}` : ""}${i === n - 1 ? " (진행 중)" : ""}</title></rect>`;
-    if (i % (narrow ? 6 : 4) === 0) s += `<text x="${(X(i) + 3).toFixed(1)}" y="${H - 2}" font-size="9.5" fill="var(--muted)">${optKst(b.h, false).slice(0, 2)}시</text>`;
+    if (i % (narrow ? 6 : 4) === 0 && X(i) + 25 <= W) s += `<text x="${(X(i) + 3).toFixed(1)}" y="${H - 2}" font-size="9.5" fill="var(--muted)">${optKst(b.h, false).slice(0, 2)}시</text>`;   // 2026-10-26 오른쪽 끝 눈금(«02시»)이 잘리면 뺀다
   });
   s += `<path d="M${cum.map((v, i) => `${X(i + 1).toFixed(1)} ${(base - (amp * v) / dm).toFixed(1)}`).join(" L")}" fill="none" stroke="var(--option)" stroke-width="2"/>`
     + `<text x="${x1}" y="${(base - (amp * cum[n - 1]) / dm - 6).toFixed(1)}" font-size="${narrow ? 10 : 11}" font-weight="700" fill="var(--option)" text-anchor="end">체결 순델타 ${cum[n - 1] >= 0 ? "+" : ""}${fmtNum(cum[n - 1], 0)} ${escapeHtml(optData().cur || "")}</text>`;

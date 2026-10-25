@@ -104,7 +104,11 @@ with sync_playwright() as p:
         for i, v in {3: f"{su(total)} {pc(totR)}", 4: f"{su(hold)} {pc(holdR)}", 5: f"{su(cyc)} {pc(totR - holdR)}p"}.items():
             if i >= len(tiles) or tiles[i] != v: fails.append(f"[{w}] 타일 {i} {tiles[i] if i < len(tiles) else None} != {v}")
         n = len(trip["legs"])
-        if len(chips) != n or labels != n: fails.append(f"[{w}] 칩 {len(chips)} · 글자 {labels} != {n}")
+        # 2026-10-26 휴대폰(좁은 차트)은 밀려나거나 다른 체결 표시를 덮는 글자를 뺀다 -- 글자 1~n 개 · 남은 글자끼리 안 겹침 · 가격은 칩이 전부 말한다
+        if len(chips) != n or (labels != n if w > 600 else not 0 < labels <= n): fails.append(f"[{w}] 칩 {len(chips)} · 글자 {labels} != {n}")
+        if w <= 600 and pg.evaluate("""() => { const b = [...document.querySelectorAll('#snapAcctCycle text.cy-fx')].map((t) => t.getBBox());
+            return b.some((p, i) => b.some((q, j) => j > i && p.x < q.x + q.width && q.x < p.x + p.width && p.y < q.y + q.height && q.y < p.y + p.height)); }"""):
+            fails.append(f"[{w}] 체결가 글자끼리 겹침")
         for (_, px, qty, *_), c in zip(trip["legs"], chips):
             if f"{px:,.2f}" not in c or f"×{qty:g}" not in c: fails.append(f"[{w}] 칩 {c!r} 에 {px:,.2f} ×{qty:g} 없음")
         if pts < len(PATH): fails.append(f"[{w}] 가격선 점 {pts} < {len(PATH)}(경로 안 받음)")
