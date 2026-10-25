@@ -152,7 +152,7 @@ def qx4_from_klines(rows_by_coin: dict, art: dict, now_ms: float, coin: str = "E
     try:
         if any(len(rows_by_coin.get(s) or []) == 0 for s in COINS):
             return {"ok": False, "reason": "코인 klines 빠짐 " + ",".join(s for s in COINS if not rows_by_coin.get(s))}
-        Fs, xs, filled = frames_from_klines(rows_by_coin, now_ms); F = Fs[coin]
+        Fs, xs, filled = frames_from_klines(rows_by_coin, now_ms); F = Fs[coin].iloc[WARM:]   # 예열 구간 버림: 첫 봉 수익 = 0(features 의 prepend) 이 들어간 창 제거
         good = F[np.isfinite(F[R.SETS["M4"] + R.MKT].to_numpy(float)).all(1)]
         if len(good) < REF_BARS:
             return {"ok": False, "reason": f"봉 부족({len(good)} < {REF_BARS}, 코인마다 {NEED_BARS}봉 필요)"}
@@ -185,7 +185,7 @@ def parity():
         c_ref = json.loads((R.OUT / f"report_r4_{s}.json").read_text())["models"]["QX4"]["c"]
         rep[s] = {"max_abs_diff": d, "c": art["coins"][s]["c"], "c_research": c_ref}; print(s, rep[s], flush=True)
     xs = {s: R.load(s)[0].loc["2026-08-01":] for s in COINS}; rows = {s: _rows(x) for s, x in xs.items()}; now = rows["ETH"][-1][6] + 1
-    full = frames_from_klines(rows, now)[0]; Fk = full["ETH"]; cols = R.SETS["M4"] + R.MKT; t = Fk.index[np.isfinite(Fk[cols].to_numpy(float)).all(1)]
+    full = frames_from_klines(rows, now)[0]; Fk = full["ETH"].iloc[WARM:]; cols = R.SETS["M4"] + R.MKT; t = Fk.index[np.isfinite(Fk[cols].to_numpy(float)).all(1)]
     rep["P2_feature_maxdiff"] = float(np.max(np.abs(Fk.loc[t, cols].to_numpy(float) - fr["ETH"][0].loc[t, cols].to_numpy(float))))   # P2
     worst = 0.0
     for k in (1, 7, 100, 500):   # P3 절단 인과성: 뒤 k봉을 빼도 공통 행 피쳐 동일(ETH·SOL)
