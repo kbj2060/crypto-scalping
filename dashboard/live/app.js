@@ -4236,17 +4236,17 @@ function renderMarketCtx() {
   let htmlB = [
     qSec("q_lev", "① 레버리지 과열?", gRow("펀딩 분위", G.pct(f.bn_at_base ? null : f.bn_pct180), f.bn_at_base ? "기본값" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`, "", `바이낸스 예상 ${fr(f.bn)}`)
       + gRow("베이시스 분위", G.pct(b.pct7d), `${sg(b.bp, 1, "bp")}`, "", `마크−인덱스 · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위 · 30분 ${sg(b.d30_bp, 1, "bp")}`)
+      // 2026-10-26 사용자 «델타와 OI 는 펀딩·베이시스 쪽으로»: 휴대폰 ① 도 델타 30분·OI 1시간(데스크톱과 같은 구성)
+      + gRow("델타 30분", G.sig(fl.cvd30_all_z ?? fl.cvd30_z), sg(fl.cvd30_all_z ?? fl.cvd30_z, 1, "σ"), tone(fl.cvd30_all_z ?? fl.cvd30_z),
+             fl.cvd30_all_z != null ? flowVen : "바이낸스만")
+      + gRow("OI 1시간", G.sig(OI.z1h), `${sg(OI.z1h, 1, "σ")}`, tone(OI.z1h, 1.5), `${oiA ? venTxt(oiA.venues) : "바이낸스만"} · 1시간 ${sg(OI.d1h_pct, 2, "%")} · 24시간 ${sg(OI.d24h_pct, 1, "%")}`
+          + (oiA ? `\n${Object.entries(oiA.by_venue || {}).map(([k, v]) => `${VN[k] || k} ${sg(v, 2, "%")}`).join(" · ")}` : ""))
       + (ls ? gRow("계정 롱숏", G.ratio(ls.global, ls.global_24h), n(ls.global, 2), "", `하루 전 ${n(ls.global_24h, 2)}`)
         + gRow("탑트레이더", G.ratio(ls.top_pos, ls.top_pos_24h), n(ls.top_pos, 2), "", `하루 전 ${n(ls.top_pos_24h, 2)}`) : "")
       + note(`정산까지 ${left(f.next_ms)} · 펀딩 OKX ${fr(f.okx)} / HL ${fr(f.hl_8h)} · OI ${n((oi.oi || 0) / 1e6, 2)}M + OKX ${n((oi.okx || 0) / 1e6, 2)}M + HL ${oi.hl == null ? "-" : n(oi.hl / 1e6, 2) + "M"} ${U}`), levChip),
     qSec("q_flow", "② 누가 밀고 있나 · 60분", duelLine + (z.whale == null ? note("크기별 기준 쌓는 중(6시간)")
         : ["whale", "mid", "retail"].map((k2, i) => gRow(["고래", "중형", "리테일"][i], G.sig(z[k2]), sg(z[k2], 1, "σ"), tone(z[k2]),
             `${flowVen} · 60분 ${sg((fl.z60h_all ? fl.net60_all : fl.net60 || {})[k2], 0)} ${U}`)).join(""))
-      + gRow("델타 30분", G.sig(fl.cvd30_all_z ?? fl.cvd30_z), sg(fl.cvd30_all_z ?? fl.cvd30_z, 1, "σ"), tone(fl.cvd30_all_z ?? fl.cvd30_z),
-             fl.cvd30_all_z != null ? flowVen : "바이낸스만")
-      // 2026-10-26 펜 메모 «② 에 델타·OI · ① 과 중복 없이»: OI 1시간 줄을 ① 에서 여기로(휴대폰 목록도 데스크톱 판과 같은 구성) · «30분 CVD» → «델타 30분»
-      + gRow("OI 1시간", G.sig(OI.z1h), `${sg(OI.z1h, 1, "σ")}`, tone(OI.z1h, 1.5), `${oiA ? venTxt(oiA.venues) : "바이낸스만"} · 1시간 ${sg(OI.d1h_pct, 2, "%")} · 24시간 ${sg(OI.d24h_pct, 1, "%")}`
-          + (oiA ? `\n${Object.entries(oiA.by_venue || {}).map(([k, v]) => `${VN[k] || k} ${sg(v, 2, "%")}`).join(" · ")}` : ""))
       + ((fl.taker_all ?? (ls && ls.taker)) != null ? (() => { const tk = fl.taker_all ?? ls.taker;
           return gRow("테이커 매수÷매도", G.ratio(tk, null), n(tk, 2), tone(tk - 1, 0.1), fl.taker_all != null ? `${flowVen} · 마지막 5분봉 체결` : "바이낸스 API"); })() : "")
       // 2026-09-30 사분면 그림 → 한 줄 네 칸(사용자 «높이를 쓸데없이 잡아먹는다»): 새 롱 · 숏 커버 · 새 숏 · 롱 정리 중 지금 칸만 채움, 작으면 전부 빈 칸.
@@ -4317,12 +4317,12 @@ function renderMarketCtx() {
       + tile("q_lev", "① 레버리지 과열?", levChip.trim(),
           gk("펀딩", G.pct(f.bn_at_base ? null : f.bn_pct180, gv), f.bn_at_base ? "펀딩 기본값(0.01%)" : `펀딩 분위 ${Math.round((f.bn_pct180 ?? 0) * 100)}% · 바이낸스 예상 ${fr(f.bn)}`,
              f.bn_at_base ? "기본" : `${Math.round((f.bn_pct180 ?? 0) * 100)}%`)
-          + gk("베이시스", G.pct(b.pct7d, gv), `베이시스 ${sg(b.bp, 1, "bp")} · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`, sg(b.bp, 1, "bp")))   // 2026-10-26 펜 메모: OI·CVD 는 ② 로(같은 데이터가 두 칸에 있지 않게)
+          + gk("베이시스", G.pct(b.pct7d, gv), `베이시스 ${sg(b.bp, 1, "bp")} · 7일 ${Math.round((b.pct7d ?? 0) * 100)}분위`, sg(b.bp, 1, "bp"))
+          // 2026-10-26 사용자 «델타와 OI 는 펀딩·베이시스 쪽으로 · 밸런스»: ① = 펀딩·베이시스·델타(30분 CVD)·OI(1시간) 4줄 · ② = 고래·중형·리테일+가격×OI
+          + gk("델타", G.sig(cvd, gv), `델타 = 30분 CVD(테이커 매수−매도 누적) ${sg(cvd, 1, "σ")} · 풋프린트 아래 «델타» 줄과 같은 데이터`, sg(cvd, 1, "σ"), tone(cvd))
+          + gk("OI", G.sig(OI.z1h, gv), `OI 1시간 ${sg(OI.z1h, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d1h_pct, 2, "%")} · 풋프린트 아래 «신규계약» 줄 60분 합과 같은 데이터`, sg(OI.z1h, 1, "σ"), tone(OI.z1h, 1.5)))
       + tile("q_flow", "② 누가 밀고 있나", duelChip,
-          // 2026-10-26 펜 메모 «고래·중형·리테일에 델타·OI 까지»: ① 에 있던 CVD(=30분 누적 델타)·OI(1시간 변화) 를 맨 위로 옮김 -- 풋프린트 아래 «델타»·«신규계약» 줄과 같은 데이터(σ 환산)
-          gk("델타", G.sig(cvd, gv), `델타 = 30분 CVD(테이커 매수−매도 누적) ${sg(cvd, 1, "σ")} · 풋프린트 아래 «델타» 줄과 같은 데이터`, sg(cvd, 1, "σ"), tone(cvd))
-          + gk("OI", G.sig(OI.z1h, gv), `OI 1시간 ${sg(OI.z1h, 1, "σ")} · ${oiA ? venTxt(oiA.venues) : "바이낸스만"} · ${sg(OI.d1h_pct, 2, "%")} · 풋프린트 아래 «신규계약» 줄 60분 합과 같은 데이터`, sg(OI.z1h, 1, "σ"), tone(OI.z1h, 1.5))
-          + gk("고래", G.sig(z.whale, gv), `고래 ${sg(z.whale, 1, "σ")} · ${flowVen}`, sg(z.whale, 1, "σ"), tone(z.whale))
+          gk("고래", G.sig(z.whale, gv), `고래 ${sg(z.whale, 1, "σ")} · ${flowVen}`, sg(z.whale, 1, "σ"), tone(z.whale))
           + gk("중형", G.sig(z.mid, gv), `중형 ${sg(z.mid, 1, "σ")}`, sg(z.mid, 1, "σ"), tone(z.mid))
           + gk("리테일", G.sig(z.retail, gv), `리테일 ${sg(z.retail, 1, "σ")}`, sg(z.retail, 1, "σ"), tone(z.retail))
           // 2026-10-22 아티팩트 펜 메모 «이 텍스트를 제거해줘»: 줄 이름 «가격×OI» 글자 빼고(표시등 네 칸 이름이 이미 말한다) 이름은 툴팁 첫머리로
