@@ -93,9 +93,57 @@ def report():
     print(D.drop(columns=["curve"]).round(3).to_string()); print(json.dumps({k: out[k] for k in ("ref", "L1", "L2", "L3_dd_vs_z_final_median")}, ensure_ascii=False))
 
 
+# ---------- 2차 장치 진단(합성만): D1 오라클 BC · D2 BC 없음 · D3 BC 없음+lr3e-4·ent.01 · D4 BC 조기정지 .90+lr3e-4·ent.01 ----------
+VARIANTS = {"D1": dict(bc="oracle", ppo=False), "D2": dict(bc=None), "D3": dict(bc=None, lr=3e-4, ent=0.01), "D4": dict(bc="early", lr=3e-4, ent=0.01)}
+
+
+def bc_labels(model, Wd, span, label, stop=None, epochs=200):
+    """label(w, d) → 행동(0..2). 슬리브는 그 정답대로 굴려 포지션 관측을 만든다. stop = 학습 일치 문턱(첫 도달 에폭에서 멈춤)."""
+    X, Y = [], []
+    for w in Wd.pool:
+        sl = V2.Sleeve(w)
+        for d in range(*span):
+            a = label(w, d); X.append(R3.window(w, d, sl.obs(d))); Y.append(a); sl.day(d, a - 1)
+    X, Y = th.tensor(np.array(X)), th.tensor(np.array(Y)); opt = th.optim.Adam(model.policy.parameters(), lr=1e-3); g = th.Generator().manual_seed(0)
+    for ep in range(epochs):
+        perm = th.randperm(len(X), generator=g)
+        for i in range(0, len(X), 256):
+            b = perm[i:i + 256]; loss = th.nn.functional.cross_entropy(model.policy.get_distribution(X[b]).distribution.logits, Y[b])
+            opt.zero_grad(); loss.backward(); opt.step()
+        with th.no_grad():
+            agree = float((model.policy.get_distribution(X).distribution.logits.argmax(1) == Y).float().mean())
+        if stop is not None and agree >= stop:
+            break
+    return {"rows": len(X), "train_agree": agree, "epochs": ep + 1}
+
+
+def train_variant(var, seed, rho=0.12):
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.vec_env import DummyVecEnv
+    cfg = VARIANTS[var]; th.set_num_threads(2); th.manual_seed(seed)
+    Wd = planted_world(rho); tr = Wd.span(R3.TRAIN, Wd.pool)
+    kw = dict(R3.PPO_KW, learning_rate=cfg.get("lr", R3.PPO_KW["learning_rate"]), ent_coef=cfg.get("ent", R3.PPO_KW["ent_coef"]))
+    venv = DummyVecEnv([lambda i=i: R3.Env(Wd, tr, "Z", "tcn", seed * 10 + i) for i in range(8)])
+    m = PPO("MlpPolicy", venv, policy_kwargs=R3.policy_kwargs("tcn"), seed=seed, verbose=0, device="cpu", **kw)
+    b = None
+    if cfg["bc"] == "oracle":
+        b = bc_labels(m, Wd, tr, lambda w, d: int(w["S"][d]) + 1)
+    elif cfg["bc"] == "early":
+        b = bc_labels(m, Wd, tr, lambda w, d: int(w["D"][d]) + 1, stop=0.90)
+    od = OUT / f"diag_{var}_r{rho}_s{seed}"; od.mkdir(parents=True, exist_ok=True); res = {"variant": var, "cfg": cfg, "rho": rho, "seed": seed, "bc": b, "ckpt": []}
+    for step in range(0, (R3.TOTAL if cfg.get("ppo", True) else 0) + 1, R3.CKPT):
+        if step:
+            m.learn(R3.CKPT, reset_num_timesteps=False)
+        sm, _ = evaluate(Wd, R3.picker(Wd, m, "tcn")); sm["step"] = step; res["ckpt"].append(sm)
+        print(f"{var} ρ{rho} s{seed} 걸음 {step:>6} 평가 샤프 {sm['sharpe']:+.2f} 힌트 일치 {sm['oracle_agree']:.2f} 교사 일치 {sm['teacher_agree']:.2f} 현금 {sm['flat_share']:.2f}", flush=True)
+        (od / "run.json").write_text(json.dumps(res, indent=1, ensure_ascii=False, default=float))
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if "--selfcheck" in a:
+    if "--diag" in a:
+        i = a.index("--diag"); train_variant(a[i + 1], int(a[i + 2]), float(a[i + 3]) if len(a) > i + 3 else 0.12)
+    elif "--selfcheck" in a:
         selfcheck()
     elif "--train" in a:
         i = a.index("--train"); train(float(a[i + 1]), a[i + 2], int(a[i + 3]))
