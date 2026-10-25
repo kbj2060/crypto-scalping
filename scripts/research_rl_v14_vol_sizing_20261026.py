@@ -81,8 +81,9 @@ SIGNED = ["pred_z", "m1d", "m7d", "m30d", "m4h", "hint"]   # v15 거울: 가격 
 
 
 class Env(gym.Env):
-    def __init__(self, X, size, ret, sstar, mask, seed, flipv=None):
+    def __init__(self, X, size, ret, sstar, mask, seed, flipv=None, base=None):
         self.X, self.size, self.ret, self.s = X, size, ret, sstar
+        self.base = np.zeros(len(ret)) if base is None else base          # v16: 교사(TSMOM 부호) 위 조정, None = v14·v15
         self.idx = np.flatnonzero(mask); self.rng = np.random.default_rng(seed)
         self.flipv, self.f = flipv, 1.0                                   # flipv = 열마다 −1(부호 열)·1, None 이면 거울 없음(v14)
         self.observation_space = gym.spaces.Box(-5, 5, (X.shape[1] + 1,), np.float32); self.action_space = gym.spaces.Discrete(len(ACTS))
@@ -97,17 +98,19 @@ class Env(gym.Env):
         return self._obs(), {}
 
     def step(self, a):
-        n = float(ACTS[a] * self.size[self.i]); r = (n * self.f * self.ret[self.i] - COST * abs(n - self.n)) / self.s
+        n = float(np.clip((self.f * self.base[self.i] + ACTS[a]) * self.size[self.i], -CAP, CAP))
+        r = (n * self.f * self.ret[self.i] - COST * abs(n - self.n)) / self.s
         self.n, self.i = n, self.i + 1
         return self._obs(), float(r), self.i >= self.end, False, {}
 
 
-def rollout(model, X, size, mask):
+def rollout(model, X, size, mask, base=None):
     """마스크 구간을 처음부터 순서대로 — 자기 직전 명목을 상태에 넣는다."""
     out, n = [], 0.0
+    b = np.zeros(len(size)) if base is None else base
     for i in np.flatnonzero(mask):
         a, _ = model.predict(np.r_[X[i], n / CAP].astype(np.float32)[None], deterministic=True)
-        n = float(ACTS[int(a[0])] * size[i]); out.append(n)
+        n = float(np.clip((b[i] + ACTS[int(a[0])]) * size[i], -CAP, CAP)); out.append(n)
     return np.array(out)
 
 
@@ -117,19 +120,20 @@ def teachers(F, size, tr):
             "T3_tsmom": np.sign(F.m30d.to_numpy()) * size}
 
 
-def train(seed, rho=None, tag=None, mirror=False):
+def train(seed, rho=None, tag=None, mirror=False, residual=False):
     from stable_baselines3 import PPO
     F, X, size, sstar = load(rho, seed); Xn, ret = X.to_numpy(), F.ret.to_numpy()
     tr, va = span(F, TRAIN), span(F, VAL)
     d = OUT / (tag or f"s{seed}"); d.mkdir(parents=True, exist_ok=True)
     flipv = np.array([-1.0 if c in SIGNED else 1.0 for c in X.columns], np.float32) if mirror else None
-    m = PPO("MlpPolicy", Env(Xn, size, ret, sstar, tr, seed, flipv), seed=seed, verbose=0, n_steps=2048, batch_size=256, gamma=0.99,
+    base = np.sign(F.m30d.to_numpy()) if residual else None
+    m = PPO("MlpPolicy", Env(Xn, size, ret, sstar, tr, seed, flipv, base), seed=seed, verbose=0, n_steps=2048, batch_size=256, gamma=0.99,
             learning_rate=3e-4, ent_coef=0.01, policy_kwargs=dict(net_arch=[64, 64]), device="cpu")
     T = teachers(F, size, tr); best_t = max(stats(pnl(v[va], ret[va]))["sharpe"] for v in T.values())
     ck = []
     for step in range(CK, TOTAL + 1, CK):
         m.learn(CK, reset_num_timesteps=False); m.save(d / f"{step}.zip")
-        s = stats(pnl(rollout(m, Xn, size, va), ret[va])); ck.append(dict(step=step, **s))
+        s = stats(pnl(rollout(m, Xn, size, va, base), ret[va])); ck.append(dict(step=step, **s))
         print(f"[{tag or seed}] {step} 검증 샤프 {s['sharpe']:.2f} 총 {s['total_bp']:.0f}bp · 최고 교사 {best_t:.2f}", flush=True)
     (d / "run.json").write_text(json.dumps(dict(seed=seed, rho=rho, best_teacher_val_sharpe=best_t, ckpt=ck), indent=1))
 
@@ -162,6 +166,30 @@ def test(pre="s", report="test_report.json"):
     rp.write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=float)); print({k: rep[k] for k in ("G1", "G2", "G3", "verdict")})
 
 
+def test_v16():
+    """v16 관문: G1 RL > T3 그리고 > max(T1,T2) · G2 조정(RL − T3) 원형이동 95분위 · G3 시드 ≥4/5 가 검증·시험 모두 T3 보다 높음."""
+    from stable_baselines3 import PPO
+    rp = OUT / "test_report_v16.json"; assert not rp.exists(), "판정은 한 번만"
+    F, X, size, _ = load(); Xn, ret = X.to_numpy(), F.ret.to_numpy(); tr = span(F, TRAIN); base = np.sign(F.m30d.to_numpy())
+    T = teachers(F, size, tr); rep = dict(seeds=SEEDS)
+    picks = {s: max(json.loads((OUT / f"r{s}" / "run.json").read_text())["ckpt"], key=lambda c: c["sharpe"])["step"] for s in SEEDS}
+    models = {s: PPO.load(OUT / f"r{s}" / f"{st}.zip", device="cpu") for s, st in picks.items()}; rep["picks"] = picks
+    for name, p in (("VAL", VAL), ("TEST", TEST)):
+        m = span(F, p); r = ret[m]; t3 = T["T3_tsmom"][m]
+        seeds = {s: rollout(mo, Xn, size, m, base) for s, mo in models.items()}; ens = np.mean(list(seeds.values()), 0)
+        tt = {k: stats(pnl(v[m], r)) for k, v in T.items()}; adj = ens - t3; rng = np.random.default_rng(1); n = len(ens)
+        null = np.array([pnl(t3 + np.roll(adj, int(k)), r).sum() for k in rng.integers(168, n - 168, 1000)])
+        rep[name] = dict(RL=stats(pnl(ens, r)), teachers=tt, adj_mean_abs=float(np.abs(adj).mean()),
+                         shift_pct=float((null < pnl(ens, r).sum()).mean() * 100), per_seed={s: stats(pnl(v, r))["sharpe"] for s, v in seeds.items()})
+        print(name, json.dumps(rep[name], ensure_ascii=False, default=float), flush=True)
+    t, v = rep["TEST"], rep["VAL"]
+    rep["G1"] = bool(t["RL"]["sharpe"] > t["teachers"]["T3_tsmom"]["sharpe"] and t["RL"]["sharpe"] > max(t["teachers"][k]["sharpe"] for k in ("T1_long", "T2_dirmodel")))
+    rep["G2"] = bool(t["shift_pct"] > 95)
+    rep["G3"] = bool(sum(v["per_seed"][s] > v["teachers"]["T3_tsmom"]["sharpe"] and t["per_seed"][s] > t["teachers"]["T3_tsmom"]["sharpe"] for s in SEEDS) >= 4)
+    rep["verdict"] = "후보(상대 기준)" if rep["G1"] and rep["G2"] and rep["G3"] else "불통과"
+    rp.write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=float)); print({k: rep[k] for k in ("G1", "G2", "G3", "verdict")})
+
+
 def selftest():
     n = np.array([0.0, 1.0, 1.0, -1.0]); r = np.array([.01, .01, -.01, .02])
     assert np.allclose(pnl(n, r), [0, .01 - COST, -.01, -.02 - 2 * COST])
@@ -177,4 +205,7 @@ if __name__ == "__main__":
     elif a[:1] == ["--plant-m"]: train(SEEDS[0], rho=0.3, tag="plant_m", mirror=True)        # v15 장치 검증
     elif a[:1] == ["--train-m"]: assert int(a[1]) in SEEDS; train(int(a[1]), tag=f"m{a[1]}", mirror=True)
     elif a[:1] == ["--test-v15"]: test("m", "test_report_v15.json")
+    elif a[:1] == ["--plant-r"]: train(SEEDS[0], rho=0.3, tag="plant_r", mirror=True, residual=True)   # v16
+    elif a[:1] == ["--train-r"]: assert int(a[1]) in SEEDS; train(int(a[1]), tag=f"r{a[1]}", mirror=True, residual=True)
+    elif a[:1] == ["--test-v16"]: test_v16()
     else: print(__doc__, SEEDS)
