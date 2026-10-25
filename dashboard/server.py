@@ -2099,6 +2099,10 @@ def make_app() -> web.Application:
                 sc = (micro_state.get("flow_scales") or {}).get((mref.is_weekend(done[-1]), time.gmtime(done[-1]).tm_hour))
                 if sc:
                     x["z60h"] = {g: float(r60[g][-1] / sc[g]) for g in r60}
+                    # 2026-10-26 사용자 «② 다섯 줄 모두 30분»: 같은 기준선 칸의 30분 MAD(mid30·whale30·retail30, micro_ref)로 30분 합 σ
+                    r30g = {g: roll(v, 6) for g, v in ser.items()}
+                    if all(g + "30" in sc for g in r30g) and all(np.isfinite(r[-1]) for r in r30g.values()):
+                        x["z30h"] = {g: float(r30g[g][-1] / sc[g + "30"]) for g in r30g}
             r30 = roll(a[:, 0], 6)
             p30 = r30[:-1][np.isfinite(r30[:-1])]
             if np.isfinite(r30[-1]) and len(p30) >= 72 and p30.std() > 0:
@@ -2133,6 +2137,10 @@ def make_app() -> web.Application:
                 x["venues"] = list(vs)
                 x["net60_all"] = {g: float(q[-1]) for g, q in s60.items()}
                 x["z60h_all"] = {g: float(s60[g][-1] / sca[g]) for g in s60}
+                s30 = {g: roll(v, 6) for g, v in (("whale", A[:, 1]), ("mid", A[:, 0] - A[:, 1] - A[:, 2]), ("retail", A[:, 2]))}
+                if all(g + "30" in sca for g in s30) and all(np.isfinite(q[-1]) for q in s30.values()):   # 2026-10-26 30분판(같은 조합·같은 칸)
+                    x["net30_all"] = {g: float(q[-1]) for g, q in s30.items()}
+                    x["z30h_all"] = {g: float(s30[g][-1] / sca[g + "30"]) for g in s30}
                 r30a = roll(A[:, 0], 6)
                 p30a = r30a[:-1][np.isfinite(r30a[:-1])]
                 if np.isfinite(r30a[-1]) and len(p30a) >= 72 and p30a.std() > 0:
@@ -2142,7 +2150,7 @@ def make_app() -> web.Application:
                 sell = sum(v[1] for v in fbars[lb].values()) + onet[lb][4] + (bb[lb][1] if "bybit" in vs else 0.0)
                 if sell > 0:
                     x["taker_all"] = buy / sell
-                flow_all_hold[asset] = {k: x[k] for k in ("venues", "net60_all", "z60h_all", "cvd30_all_z", "taker_all") if k in x}
+                flow_all_hold[asset] = {k: x[k] for k in ("venues", "net60_all", "z60h_all", "net30_all", "z30h_all", "cvd30_all_z", "taker_all") if k in x}
                 break
         last6 = done[-6:]
         if okx_fp["first_bar"] and len(last6) == 6 and all(b > okx_fp["first_bar"] and b in okx_bars for b in last6):
@@ -2447,6 +2455,7 @@ def make_app() -> web.Application:
             "move60": x.get("move60"), "oi60": x.get("oi60"),
             "flow": {"z60": x.get("z60"), "z60h": x.get("z60h"), "net60": x.get("net60"), "cvd30_z": x.get("cvd30_z"),
                      "venues": x.get("venues"), "z60h_all": x.get("z60h_all"), "net60_all": x.get("net60_all"),
+                     "z30h": x.get("z30h"), "z30h_all": x.get("z30h_all"), "net30_all": x.get("net30_all"),   # 2026-10-26 화면 ② 30분판
                      "cvd30_all_z": x.get("cvd30_all_z"), "taker_all": x.get("taker_all"),
                      "bn30": ev.get("cvd"), "okx30": x.get("okx30")},
             "btc": {"move_bp": ev.get("btc_move_bp"), "rel": ev.get("btc_rel")},

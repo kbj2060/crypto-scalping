@@ -83,7 +83,7 @@ OI_Z_MAD_SCALE = 1.55
 def oi_stats(series: list[tuple[int, float]], step_s: int = 300) -> dict[str, float | None]:
     """5분 격자 OI [(봉 시각, OI)] → 1시간·24시간 변화율(%)과 1시간 변화의 z(과거 1시간 변화들 대비).
     격자에 구멍이 있으면 그 칸은 NaN 으로 두어 변화가 구멍을 건너뛰지 않게 한다."""
-    out: dict[str, float | None] = {"oi": None, "d1h_pct": None, "d24h_pct": None, "z1h": None}
+    out: dict[str, float | None] = {"oi": None, "d1h_pct": None, "d24h_pct": None, "z1h": None, "d30m_pct": None, "z30m": None}
     if not series:
         return out
     t0, t1 = series[0][0], series[-1][0]
@@ -96,6 +96,16 @@ def oi_stats(series: list[tuple[int, float]], step_s: int = 300) -> dict[str, fl
         out["d1h_pct"] = float((grid[-1] / grid[-1 - k1] - 1) * 100)
     if grid.size > k24 and math.isfinite(grid[-1 - k24]):
         out["d24h_pct"] = float((grid[-1] / grid[-1 - k24] - 1) * 100)
+    # 2026-10-26 사용자 «② 다섯 줄 모두 30분 기준»: 같은 식(요일유형·중앙값·MAD·배율)으로 30분 변화도 -- d30m_pct·z30m
+    for k, dk, zk in ((k1, "d1h_pct", "z1h"), (1800 // step_s, "d30m_pct", "z30m")):
+        if k == 1800 // step_s and grid.size > k and math.isfinite(grid[-1 - k]):
+            out[dk] = float((grid[-1] / grid[-1 - k] - 1) * 100)
+        out[zk] = _oi_change_z(grid, k, t0, step_s)
+    return out
+
+
+def _oi_change_z(grid: np.ndarray, k1: int, t0: int, step_s: int) -> float | None:
+    """k 칸 OI 변화의 z -- 지금과 같은 요일유형의 과거 변화 분포(중앙값·MAD×배율). 아래 주석이 근거(옛 oi_stats 본문)."""
     d = grid[k1:] / grid[:-k1] - 1 if grid.size > k1 else np.array([])
     # 2026-10-05 요일유형 분리(사용자 «주말에 너무 작게»): 7일 중 5일이 평일이라 주말 |z|≥1.5 가 평일의 1/3
     #   (8주 실측 12.6 vs 4.0%) → 지금과 같은 요일유형(UTC 토·일 / 평일)의 과거 변화만 분포로(평일유형 14일판 9.8 vs 8.6%).
@@ -112,8 +122,8 @@ def oi_stats(series: list[tuple[int, float]], step_s: int = 300) -> dict[str, fl
     mad = 1.4826 * float(np.median(np.abs(past - med))) if past.size else 0.0
     mad = max(mad, 0.25 * float(past.std())) if past.size else mad   # 하한: OI 피드가 일부(30~49%) 멈춰 0 변화가 쌓이면 MAD 만 0 근처로 줄어 |z| 가 폭증 -- 정상 분포에선 거의 안 걸린다
     if d.size and math.isfinite(d[-1]) and past.size >= 72 and mad > 0:
-        out["z1h"] = float((d[-1] - med) / (OI_Z_MAD_SCALE * mad))
-    return out
+        return float((d[-1] - med) / (OI_Z_MAD_SCALE * mad))
+    return None
 
 
 def oi_series_live(series: list[tuple[int, float]], sec: int, value: float,
@@ -329,6 +339,7 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     assert st["oi"] == 1000.0 + 299 * 7 % 5 + 20 and st["z1h"] is not None and st["z1h"] > 3 and st["d24h_pct"] is not None, st
     holes = [(t, v) for t, v in ser if t != 299 * 300 - 12 * 300]                          # 1시간 전 칸이 비었다
     assert oi_stats(holes)["d1h_pct"] is None and oi_stats([])["oi"] is None
+    assert st["z30m"] is not None and st["z30m"] > 3 and st["d30m_pct"] is not None, st   # 2026-10-26 30분 변화도 같은 식
     # 2026-10-05 요일유형: 평일엔 1시간 변화가 크고 주말엔 작은 7일 -- 주말 끝의 «주말치고 큰» 변화가 평일 분포에 묻히지 않는다
     _t0, _g = 1_759_536_000 - 5 * 86400, np.random.default_rng(1)       # 월요일 00:00 UTC 부터 7일(토·일로 끝남)
     _lv = 1000.0 + np.cumsum([_g.normal(0, 4.0 if ((_t0 + i * 300) // 86400 + 3) % 7 < 5 else 0.4) for i in range(7 * 288)])

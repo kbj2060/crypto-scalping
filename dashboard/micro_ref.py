@@ -191,18 +191,23 @@ def flow_hour_scales_from_bars(rows: list) -> dict[tuple[int, int], dict[str, fl
     a = np.full((n, 3), np.nan)
     for t, tot, wh, rt in rows:
         a[(int(t) - t0) // 300] = (float(tot) - float(wh) - float(rt), float(wh), float(rt))
-    r = np.array([np.convolve(a[:, j], np.ones(12), "valid") for j in range(3)]).T   # 끝 봉 = 인덱스 k+11
-    end = t0 + (np.arange(len(r)) + 11) * 300
-    hour, wk = (end % 86400) // 3600, ((end // 86400 + 3) % 7 >= 5).astype(int)
     out: dict[tuple[int, int], dict[str, float]] = {}
-    for w in (0, 1):
-        for h in range(24):
-            v = r[(wk == w) & (hour == h) & np.isfinite(r).all(axis=1)]
-            if len(v) < (36 if w else 84):
-                continue
-            mad = 1.4826 * np.median(np.abs(v - np.median(v, axis=0)), axis=0)
-            if (mad > 1e-9).all():
-                out[(w, h)] = dict(zip(("mid", "whale", "retail"), map(float, mad)))
+    # 2026-10-26 사용자 «② 다섯 줄 모두 30분 기준»: 같은 칸에 30분(6봉) 롤링합의 MAD 도 «mid30·whale30·retail30» 으로 싣는다.
+    #   칸을 넣을지는 60분 기준 그대로(옛 소비자 불변) · 30분 키는 그 칸에서 30분도 통과할 때만.
+    for win, suf in ((12, ""), (6, "30")):
+        r = np.array([np.convolve(a[:, j], np.ones(win), "valid") for j in range(3)]).T   # 끝 봉 = 인덱스 k+win-1
+        end = t0 + (np.arange(len(r)) + win - 1) * 300
+        hour, wk = (end % 86400) // 3600, ((end // 86400 + 3) % 7 >= 5).astype(int)
+        for w in (0, 1):
+            for h in range(24):
+                if suf and (w, h) not in out:
+                    continue
+                v = r[(wk == w) & (hour == h) & np.isfinite(r).all(axis=1)]
+                if len(v) < (36 if w else 84):
+                    continue
+                mad = 1.4826 * np.median(np.abs(v - np.median(v, axis=0)), axis=0)
+                if (mad > 1e-9).all():
+                    out.setdefault((w, h), {}).update({k + suf: float(m) for k, m in zip(("mid", "whale", "retail"), mad)})
     return out
 
 
@@ -279,6 +284,8 @@ if __name__ == "__main__":  # 자체점검 -- 부호 규약과 밴드 합, 근�
     _sc = flow_hour_scales_from_bars(_rows)                               # 12봉 합의 표준편차 = √12 × 봉 표준편차
     assert sorted(_sc) == [(w, h) for w in (0, 1) for h in range(24)] and all(15 < v["whale"] < 60 and 1.2 < v["mid"] < 7 and 1.2 < v["retail"] < 7 for v in _sc.values()), _sc   # 주말 칸은 표본 48 이라 더 흔들린다
     assert flow_hour_scales_from_bars(_rows[:6 * 288]) == {}            # 6일치 → 시당 표본 부족
+    _r30 = np.median([v[g + "30"] / v[g] for v in _sc.values() for g in ("whale", "mid", "retail")])
+    assert 0.6 < _r30 < 0.82 and all("whale30" in v for v in _sc.values()), _r30   # 30분(6봉) 합 ≈ 60분의 1/√2 (2026-10-26, 시간대 중앙값)
     # 거래소 합: 공통 봉만, 칸끼리 더한다(한쪽에만 있는 봉 600 은 «모름»)
     assert sum_venue_bars([[(0, 1, 2, 3), (300, 1, 1, 1), (600, 9, 9, 9)], [(0, 10, 20, 30), (300, -1, 0, 0)]]) == [(0, 11, 22, 33), (300, 0, 1, 1)]
     assert sum_venue_bars([]) == []
