@@ -18,8 +18,8 @@ VAL, TEST = ("2026-01-01", "2026-06-01"), ("2026-06-01", "2026-10-24")
 URL = "https://history.deribit.com/api/v2/public/get_last_trades_by_currency_and_time"
 
 
-def fetch_day(day):
-    p = OUT / "trades" / f"{day:%Y-%m-%d}.parquet"
+def fetch_day(day, cur="ETH", root=None):
+    p = (root or OUT) / "trades" / f"{day:%Y-%m-%d}.parquet"
     if p.exists():
         return
     a, b = int(day.value // 10**6), int((day + pd.Timedelta(days=1)).value // 10**6)
@@ -27,7 +27,7 @@ def fetch_day(day):
     while a < b:
         for i in range(6):
             try:
-                r = requests.get(URL, params=dict(currency="ETH", kind="option", start_timestamp=a, end_timestamp=b - 1, count=1000, sorting="asc"), timeout=60)
+                r = requests.get(URL, params=dict(currency=cur, kind="option", start_timestamp=a, end_timestamp=b - 1, count=1000, sorting="asc"), timeout=60)
                 if r.status_code == 200:
                     break
             except requests.RequestException:

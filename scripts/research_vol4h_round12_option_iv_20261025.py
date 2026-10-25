@@ -54,13 +54,17 @@ def selftest():
     assert h.iv[10 * H1] == 50.0 and h.iv[11 * H1] == 70.0            # 09:59:59 체결 → 10:00 결정에 포함, 10:00:00 체결은 11:00 부터
 
 
-def main():
+BTC_OUT = OUT.parent / "vol4h_r12b_btc_20261026"                 # 12b 복제(docs/prereg/vol4h_round12b_btc_iv_20261026.md)
+
+
+def main(sym="ETH", out=OUT):
     selftest()
-    rp = OUT / "report.json"; assert not rp.exists(), "판정은 한 번만"
-    OUT.mkdir(parents=True, exist_ok=True)
-    Pv, Pt = (pd.read_parquet(V.OUT / f"pred_{s}_r4_ETH.parquet") for s in ("val", "test"))
-    tr = pd.concat([pd.read_parquet(f) for f in sorted((O.OUT / "trades").glob("*.parquet"))], ignore_index=True)
-    tr = tr[tr.instrument_name.str.match(r"^ETH-\d+[A-Z]{3}\d{2}-\d+-[CP]$") & ~tr.block & ~tr.liq].reset_index(drop=True)
+    rp = out / "report.json"; assert not rp.exists(), "판정은 한 번만"
+    out.mkdir(parents=True, exist_ok=True)
+    Pv, Pt = (pd.read_parquet(V.OUT / f"pred_{s}_r4_{sym}.parquet") for s in ("val", "test"))
+    tdir = O.OUT / "trades" if sym == "ETH" else out / "trades"
+    tr = pd.concat([pd.read_parquet(f) for f in sorted(tdir.glob("*.parquet"))], ignore_index=True)
+    tr = tr[tr.instrument_name.str.match(rf"^{sym}-\d+[A-Z]{{3}}\d{{2}}-\d+-[CP]$") & ~tr.block & ~tr.liq].reset_index(drop=True)
     exp = pd.to_datetime(tr.instrument_name.str.split("-").str[1], format="%d%b%y").astype("int64") // 10**6 + 8 * H1
     tr["T"] = (exp - tr.timestamp) / 86_400_000; tr["d"] = O.deltas(tr); tr = tr[np.isfinite(tr.d)]
     tr["dnb"] = np.where(tr.direction == "buy", 1, -1) * tr.d * tr.amount
@@ -91,8 +95,20 @@ def main():
     q = rep["models"]["QX4I"]["dq_vs_QX4"]
     rep["G1"] = bool(q[0] < 0 and q[2] < 0); rep["G2"] = bool(bI[1] > 0)
     rep["verdict"] = "QX4I 후보" if rep["G1"] and rep["G2"] else "불통과 — 옵션 IV 축 닫음"
+    if sym != "ETH":                                                # 12b 관문 R1·R2·R3
+        rep["R1"], rep["R2"], rep["R3"] = bool(q[0] < 0), bool(q[2] < 0), bool(bI[1] > 0)
+        rep["verdict"] = "유의 복제" if rep["R1"] and rep["R2"] and rep["R3"] else "방향 복제" if rep["R1"] and rep["R3"] else "복제 실패"
     rp.write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=str)); print(json.dumps(rep, indent=1, ensure_ascii=False, default=str))
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:2] == ["--btc-fetch"]:                            # 12b: BTC 옵션 체결 받기(이어받기)
+        (BTC_OUT / "trades").mkdir(parents=True, exist_ok=True)
+        for d in pd.date_range("2025-12-01", "2026-10-23", freq="D"):
+            O.fetch_day(d, cur="BTC", root=BTC_OUT)
+            if d.day == 1:
+                print(d.date(), flush=True)
+    elif sys.argv[1:2] == ["--btc"]:
+        main("BTC", BTC_OUT)
+    else:
+        main()
