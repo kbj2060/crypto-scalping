@@ -7923,7 +7923,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const tMax = Math.max(5, ...tOk.map(Math.abs)), tSc = (LH / 2 - 1) / tMax;
     const colMax = slot < 1 ? new Map() : null;   // 1px 밑(1주일 창): 픽셀 열마다 가장 긴 막대 하나
     const bar = (x, v, rx = 0) => {
-      const hh = Math.max(1, Math.abs(v) * tSc), y = v >= 0 ? zero - hh : zero, col = v >= 0 ? "var(--good)" : "var(--bad)";
+      const hh = Math.max(1, Math.abs(v) * tSc), y = v >= 0 ? zero - hh : zero, col = v >= 0 ? "var(--ob-bid)" : "var(--ob-ask)";
       if (DENSE) un.add(col, 0.7, (pp) => pp.rect(x, y, bwid, hh)); else ops.push((ctx) => cvRect(ctx, x, y, bwid, hh, col, 0.7, rx));
     };
     ops.push((ctx) => cvHLine(ctx, ml, ml + cw, zero, "var(--muted)", 0.35));
@@ -8028,22 +8028,22 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (tE < t0 || tS > tN) return;
       const i0 = tS <= t0 ? 0 : idx.get(tfT(tS)), i1 = tE >= tN ? candles.length - 1 : idx.get(tfT(tE));
       if (i0 == null || i1 == null) return;
-      segs.push([xAt(i0) + 1, xAt(i1) + bw - 1, yAt(w.px), w.side === "bid" ? "var(--good)" : "var(--bad)"]);
+      segs.push([xAt(i0) + 1, xAt(i1) + bw - 1, yAt(w.px), w.side === "bid" ? "var(--ob-bid)" : "var(--ob-ask)"]);
     });
-    const s = DENSE ? 3 : 4.5, boxes = bw >= 14 && !fpBoxesOff && fpBars.length > 0;   // 체결 칸이 있으면 위 = 칸 위 숫자 한 줄·청산 원 위 · 아래 = 봉 델타 라벨 밑
+    const s = DENSE ? 4 : 5, boxes = bw >= 14 && !fpBoxesOff && fpBars.length > 0;   // 체결 칸이 있으면 위 = 칸 위 숫자 한 줄·청산 원 위 · 아래 = 봉 델타 라벨 밑
     const tri = (ctx, x, y, dir) => { ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.lineTo(x, y + dir * s * 1.6); ctx.closePath(); ctx.fill(); };
     const dia = (ctx, x, y) => { ctx.beginPath(); ctx.moveTo(x, y - s); ctx.lineTo(x + s, y); ctx.lineTo(x, y + s); ctx.lineTo(x - s, y); ctx.closePath(); ctx.fill(); };
     fgI.push({ ...CV_ALL, c: plotC, p: (ctx) => {
-      segs.forEach(([x0, x1, y, col]) => cvStroke(ctx, [[x0, y], [x1, y]], col, 2, 0.6, "2 3"));
+      segs.forEach(([x0, x1, y, col]) => cvStroke(ctx, [[x0, y], [x1, y]], col, 2.5, 0.9, "2 3"));
       candles.forEach((c, i) => {
         const a = agg.get(c.time);
         if (!a || !(a.up || a.dn || a.fu || a.fd)) return;
         const [eh, el] = ext.get(c.time) || [-Infinity, Infinity], x = xAt(i) + bw / 2;
         const yt = Math.min(yAt(Math.max(c.high, eh)) - (boxes ? 12 : 4), (liqTopAt.get(c.time) ?? Infinity) - 3), yb = yAt(Math.min(c.low, el)) + (boxes ? 30 : 4);
-        ctx.globalAlpha = 0.95;
-        if (a.up) { ctx.fillStyle = cvc("var(--good)"); tri(ctx, x, yt, -1); }
-        if (a.dn) { ctx.fillStyle = cvc("var(--bad)"); tri(ctx, x, yb, 1); }
-        ctx.fillStyle = cvc("var(--warn)");
+        ctx.globalAlpha = 1;
+        if (a.up) { ctx.fillStyle = cvc("var(--ob-bid)"); tri(ctx, x, yt, -1); }
+        if (a.dn) { ctx.fillStyle = cvc("var(--ob-ask)"); tri(ctx, x, yb, 1); }
+        ctx.fillStyle = cvc("var(--ob-fake)");
         if (a.fu) dia(ctx, x, yt - (a.up ? s * 1.6 + 2 : 0) - s);
         if (a.fd) dia(ctx, x, yb + (a.dn ? s * 1.6 + 2 : 0) + s);
       });
