@@ -130,9 +130,39 @@ def test():
     rp.write_text(json.dumps(rep, indent=1, ensure_ascii=False)); print(json.dumps(rep, indent=1, ensure_ascii=False))
 
 
+FWD0, FWD_DAY = pd.Timestamp("2026-10-24"), pd.Timestamp("2027-03-24")   # 사후 매도 꼬리 전진 창 [FWD0, FWD_DAY)
+
+
+def forward():
+    """사후(10-25) 매도 꼬리 z<−1 → 다음 4h 하락. 판정일 전 거절. 문서 docs/prereg/deribit_option_sell_tail_forward_20261025.md."""
+    import research_stablecoin_mint_intraday_20261025 as S
+    assert pd.Timestamp.utcnow().tz_localize(None) >= FWD_DAY, f"판정일 {FWD_DAY.date()} 전 — 전진 자료를 보지 않는다"
+    rp = OUT / f"forward_sell_tail_{FWD_DAY.date()}.json"; assert not rp.exists(), "판정은 한 번만"
+    for d in pd.date_range(FWD0, FWD_DAY - pd.Timedelta(days=1), freq="D"):
+        fetch_day(d)
+    tr = pd.concat([pd.read_parquet(f) for f in sorted((OUT / "trades").glob("*.parquet"))], ignore_index=True)
+    tr = tr[tr.instrument_name.str.match(r"^ETH-\d+[A-Z]{3}\d{2}-\d+-[CP]$") & ~tr.block & ~tr.liq]
+    tr["d"] = deltas(tr); tr = tr[np.isfinite(tr.d) & (tr.timestamp < FWD_DAY.value // 10**6)]
+    tr["dnb"] = np.where(tr.direction == "buy", 1, -1) * tr.d * tr.amount; tr["bin"] = (tr.timestamp // H4 + 1) * H4
+    px = pd.concat([pd.read_parquet(PX)] + [S.vision("ETHUSDT", "daily", f"{d:%Y-%m-%d}") for d in pd.date_range(FWD0, FWD_DAY - pd.Timedelta(days=1), freq="D")])
+    pc = pd.Series(np.log(px.drop_duplicates("t").set_index("t").c)).sort_index()
+    grid = np.arange(pd.Timestamp("2025-12-01").value // 10**6, FWD_DAY.value // 10**6 + 1, H4)
+    s = tr.groupby("bin").dnb.sum().reindex(grid, fill_value=0.0); z = (s / s.rolling(180, min_periods=180).std().shift(1)).to_numpy()
+    y = pc.reindex(grid + H4 - M1).to_numpy() - pc.reindex(grid - M1).to_numpy()
+    ok = np.isfinite(z) & np.isfinite(y) & (grid >= FWD0.value // 10**6); ev = ok & (z < -1)
+    rng = np.random.default_rng(2026102522); pool = y[ok]; k = int(ev.sum())
+    null = np.array([pool[rng.choice(len(pool), k, replace=False)].mean() for _ in range(2000)])
+    mu = float(y[ev].mean()); pct = float((null > mu).mean() * 100)                 # 숏 기준: 무작위보다 더 내릴수록 높음
+    rep = dict(window=[str(FWD0.date()), str(FWD_DAY.date())], events=k, mean_bp=mu * 1e4, all_mean_bp=float(pool.mean() * 1e4),
+               short_net_bp=-mu * 1e4 - 10, null_pct=pct, verdict="후보(옵션 매도 꼬리)" if pct > 95 and k >= 30 else "불통과")
+    rp.write_text(json.dumps(rep, indent=1, ensure_ascii=False)); print(rep)
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     if a[:1] == ["--fetch"]: fetch()
     elif a[:1] == ["--test"]: test()
+    elif a[:1] == ["--forward"]: forward()
     elif a[:1] == ["--selftest"]: selftest(); print("ok")
     else: print(__doc__)

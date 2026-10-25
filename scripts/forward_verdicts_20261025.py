@@ -31,6 +31,7 @@ VERDICTS = {   # 후보: (판정일, 설명, 사전 등록 문서)
     "trend180": ("2027-04-22", "추세 (b) 현재 규칙+pv 최종(180일)", "docs/prereg/trend_portfolio_lit_20261025.md"),
     "rl": ("2027-01-22", "RL v3.1 동결 앙상블(기록용)", "docs/prereg/rl_v31_tcn_ensemble_20261025.md"),
     "mlsize": ("2026-12-23", "ML 크기 2배 — 자체 --forward", "docs/prereg/ml_size_fwd_2x_20261025.md"),
+    "optsell": ("2027-03-24", "옵션 순 델타 매도 꼬리 z<−1 — 자체 research_deribit_option_flow_direction_20261025.py --forward", "docs/prereg/deribit_option_sell_tail_forward_20261025.md"),
 }
 QX4_ART, QX4_MD5 = ROOT / "tmp/vol4h_qx4/qx4_2026-10-23.joblib", "2fce43f5e5ece42048ccdd389bff6109"   # 10-25 동결
 RL_MD5 = {"162695": "bd1260640a79efcd52a80df752f92804", "946401": "6b182ff9d5f861843ace40e42e431362", "115181": "4e380d6a77171c9ae0e2d0c9af08a73e",
