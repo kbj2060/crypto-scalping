@@ -73,7 +73,7 @@ def run(shot):
                     pr = pg.evaluate(PROBE)
                     want = [f"{round(body['scales'][k]['p'] * 100)}%" for k in ("30m", "1h", "4h")]
                     ok = pr["found"] and pr["n"] == 3 and pr["val"] == want and not pr["over"] and not pr["hscroll"] \
-                        and (all(pr["brk"]) if case == "brk" else True) and (pr["tags"] >= 2 if variant == "B" and w == 1920 else pr["tags"] == 0 if variant == "A" else True)
+                        and (all(pr["brk"]) if case == "brk" else True) and pr["tags"] == 0
                     print(tag, "OK" if ok else "FAIL", pr)
                     if not ok:
                         fails.append(tag)

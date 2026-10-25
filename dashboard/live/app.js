@@ -3707,7 +3707,7 @@ let latestBoxHold = null, boxHoldLastFetchAt = 0;
 // 2026-10-20 XRP 전용 모델(30분·1시간 통과 · 4시간 불통과 = 서버 ok false) -- 박스 줄·차트 1h 박스선이 그 코인 값만 쓴다
 const BOX_ASSETS = new Set(["eth", "xrp"]);
 const boxNow = () => (latestBoxHold && latestBoxHold.ok && (latestBoxHold.asset || "eth") === activeSnapshotAsset ? latestBoxHold : null);
-const BOX_ON_CHART = true;    // 2026-10-16 사용자 «B로 배포» -- 1시간 박스 두 선을 풋프린트 가격판에(데스크톱 꼬리표 칸)
+const BOX_ON_CHART = true;    // 2026-10-16 사용자 «B로 배포» → 10-26 미래 칸 상자(renderCandleSvg «미래 상자»)
 const BOX_STALE_MS = 180e3;   // 10-16 리뷰: 기준가가 3분 넘게 묵으면 «지연»·차트 선 숨김(30분 박스는 3분 뒤 9%가 이미 깨져 있다)
 async function refreshBoxHold() {
   if (activePageTab !== "snapshot" || document.hidden || !BOX_ASSETS.has(activeSnapshotAsset)) return;
@@ -3906,7 +3906,7 @@ MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아
   + "4~13주 예측 = 달러·유동성 Z91(|Z|≥1 만) · 2018~26 56일 BTC 70% · ETH 75%(고른 기간 성적).\n"
   + "변동성 = 4시간 실현변동성 GBM(ETH 22피쳐) · 순위상관 .79 · 확대 AUC .82 · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀).\n"
   + "셋 다 참고용 — 전진 판정 전."
-MC_TIPS.q_box = "박스 = 지금가 ± 지난 30분·1시간·4시간 고저폭의 절반. 값 = 다음 같은 시간 동안 그 띠를 한 번도 안 벗어날 확률(1분봉 고가·저가 기준) · 평소 = 2022~24 평균 26~29%. 막대 = 세 박스를 같은 가격 눈금에, 세로 눈금 = 지금가 · 차트 오른쪽 호가 띠 위 점선 = 박스 경계(가격 · 확률).\n"
+MC_TIPS.q_box = "박스 = 지금가 ± 지난 30분·1시간·4시간 고저폭의 절반. 값 = 다음 같은 시간 동안 그 띠를 한 번도 안 벗어날 확률(1분봉 고가·저가 기준) · 평소 = 2022~24 평균 26~29%. 막대 = 세 박스를 같은 가격 눈금에, 세로 눈금 = 지금가 · 차트 = 현재 봉 오른쪽(끌어서 연 미래 칸)에 예측 끝까지 상자 «30분 유지 9%».\n"
   + "주황 «깨질 쪽» = 학습 기간(2022~24) 예측의 하위 20% 밑 · «머물 쪽» = 상위 20% 위 · 그 사이 «보통» · «벗어남» = 지금가가 이미 띠 밖 · «지연» = 기준가가 3분 넘게 묵음(차트 선도 숨김). 방향 정보는 없다 — 어느 쪽으로 깨질지는 모른다.\n"
   + "우리 검정(ETH 4.7년, 2022~24 학습 · 2025·2026 따로 채점): AUC .75~.78 · 보정 오차 10분위 최대 3~6.4pp · 하위 10% 유지 3~5% ↔ 상위 10% 61~71%. "
   + "대부분은 «변동성 대비 띠 거리»(기하)이고, 최근 1시간/24시간 변동성 비 · 시각 · 주말이 +.02~.04 를 더한다. 24시간 박스는 보정이 나빠 뺐다.";
@@ -7033,32 +7033,50 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     }
   }
 
-  // 2026-10-16 시안 B: 1시간 박스 두 선(기준가 ± 지난 1시간 고저폭 절반) -- 방향 아님, max pain 처럼 흐린 점선 + 꼬리표 칸.
-  //   10-16 리뷰: 묵은 박스(3분↑)는 안 그림 · 화면 밖 경계도 꼬리표(↑↓) · 휴대폰(꼬리표 칸 없음)은 선 오른쪽 끝에 짧은 글자.
-  // 2026-10-17 펜 메모 «오른쪽 프로파일의 호가창 데이터(벽 꼬리표) 대신 박스 유지 -- 라인만, 배포본처럼 라인에 가격·확률»: ETH 는 호가벽 꼬리표 대신
-  //   30분·1시간·4시간 박스 경계선 + «가격 · 30분 6%»(아래 boxColG). 호가 띠 막대는 그대로. SOL 은 박스 모델이 없어 벽 꼬리표 그대로(10-20 XRP 전용 모델 붙음). 벽 수량은 ④ 판에 있다.
-  const bxAll = BOX_ON_CHART && isSnapshotChart && footprint ? boxNow() : null;
-  const boxCol = !!(BOOK_W && bxAll && Date.now() - bxAll.asof_ms <= BOX_STALE_MS);   // 10-17 리뷰: 박스가 없거나 묵으면 벽 꼬리표를 그대로(빈 띠 방지)
-  const bx1 = bxAll && Date.now() - bxAll.asof_ms <= BOX_STALE_MS ? bxAll.scales["1h"] : null;
-  if (bx1 && bx1.ok) {
-    const g = document.createElementNS(NS, "g"), p = Math.round(bx1.p * 100), [tone] = boxState(bxAll, bx1);
-    const col = tone === "brk" ? "var(--warn)" : "var(--muted)", fs = mobileChart ? 10 : 11;
-    g.setAttribute("pointer-events", "none");
-    for (const [v, side] of [[bx1.up, "위"], [bx1.dn, "아래"]]) {
-      const y = yAt(v), title = `1시간 박스 ${side} ${v.toFixed(pxDp())} -- 다음 1시간 안 벗어날 확률 ${p}%(평소 ${Math.round(bx1.base * 100)}%) · 방향 아님`;
-      if (gutOn && (!boxCol || y < mt || y > plotBottom)) fpNotes.push({ val: v, label: `1h 박스 ${p}%`, color: col, title });   // 10-17 호가 띠 위 박스 경계선과 중복 -- 화면 밖이어도 꼬리표 칸이 위·아래 끝에 쌓는다(max pain 과 같다)
-      if (y < mt || y > plotBottom) continue;
-      const ln = document.createElementNS(NS, "line");
-      Object.entries({ x1: ml, x2: ml + cw, y1: y, y2: y, stroke: "var(--text)", "stroke-opacity": 0.4, "stroke-dasharray": "7 5" }).forEach(([k, x]) => ln.setAttribute(k, x));
-      g.appendChild(ln);
-      if (!gutOn) {
-        const t = document.createElementNS(NS, "text");
-        Object.entries({ x: ml + cw - 4, y: side === "위" ? y - 4 : y + fs + 2, "font-size": fs, "font-weight": 700, fill: col, "text-anchor": "end" }).forEach(([k, x]) => t.setAttribute(k, x));
-        t.textContent = `1h 박스 ${p}%`;
-        g.appendChild(t);
-      }
+  // 2026-10-26 사용자 «박스 유지 확률은 미래 정보 -- 현재 5분봉 이후에 박스권 유지/이탈로 · 프로파일의 박스 선은 제거» (시안 A «미래 상자»):
+  //   옛 1시간 박스 선(10-16, 지나간 봉 위까지 전폭)·호가 띠 위 박스 경계선(10-17 boxColG, 벽 꼬리표 대신)을 없애고 -- 벽 꼬리표는 되돌아온다 --
+  //   현재 봉 오른쪽 끝 ~ 예측 끝(until_ms)에만 30분·1시간·4시간 상자를 겹쳐 그린다. 오른쪽으로 끌어 빈 칸(chartPanRight)을 내면 보인다.
+  //   주황 = «깨질 쪽» 또는 이미 벗어남 · 화면 끝에서 잘리면 꺾쇠 · 묵은 값(3분↑)은 안 그림 · 글자 «30분 유지 9%»(휴대폰 «30분 9%»).
+  const bxF = BOX_ON_CHART && isSnapshotChart && footprint ? boxNow() : null;
+  if (bxF && Date.now() - bxF.asof_ms <= BOX_STALE_MS && candles.length) {
+    const L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw;
+    const xT = (ms) => xAt(L) + ((ms / 1e3 - candles[L].time) / tfS) * slot;
+    const hz = Object.keys(BOX_NM).map((k, i) => ({ k, i, s: bxF.scales[k] })).filter((h) => h.s && h.s.ok && h.s.until_ms && xT(h.s.until_ms) > xs + 2);
+    if (xs < xr - 4 && hz.length) {
+      const g = document.createElementNS(NS, "g"), fs = mobileChart ? 9.5 : 10.5;
+      const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); return e; };
+      const halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke", "font-family": "var(--font-mono)", "font-weight": 800, "font-size": fs };
+      if (plotClip) g.setAttribute("clip-path", plotClip);
+      g.setAttribute("pointer-events", "none");
+      hz.forEach((h) => {
+        const [tone] = boxState(bxF, h.s);
+        h.col = tone === "brk" || tone === "out" ? "var(--warn)" : "var(--text)";
+        h.p = Math.round(h.s.p * 100);
+        h.xe = Math.min(xT(h.s.until_ms), xr); h.cut = xT(h.s.until_ms) > xr + 1;
+        h.yu = yAt(h.s.up); h.yd = yAt(h.s.dn);
+      });
+      const chev = (x, y, col) => add("path", { d: `M${x - 5},${y - 4} L${x - 1},${y} L${x - 5},${y + 4}`, fill: "none", stroke: col, "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round" });
+      add("line", { x1: xs, x2: xs, y1: mt, y2: plotBottom, stroke: "var(--text)", "stroke-opacity": 0.22, "stroke-dasharray": "2 3" });   // 지금(현재 봉 끝)
+      [...hz].reverse().forEach((h) => {   // 4시간 → 30분 순서로 겹침
+        add("rect", { x: xs, y: h.yu, width: Math.max(0, h.xe - xs), height: Math.max(0, h.yd - h.yu), fill: h.col, "fill-opacity": 0.045 });
+        const ln = { stroke: h.col, "stroke-opacity": 0.75, "stroke-width": 1 + 0.4 * h.i, "stroke-dasharray": "5 3" };
+        add("line", { x1: xs, x2: h.xe, y1: h.yu, y2: h.yu, ...ln }); add("line", { x1: xs, x2: h.xe, y1: h.yd, y2: h.yd, ...ln });
+        if (h.cut) { chev(xr - 2, h.yu, h.col); chev(xr - 2, h.yd, h.col); }
+        else add("line", { x1: h.xe, x2: h.xe, y1: h.yu, y2: h.yd, ...ln, "stroke-dasharray": "none", "stroke-opacity": 0.5 });
+      });
+      const labs = [], yTop = mt + fs + 6;   // 화면 끝에서 잘린 상자끼리 위 경계가 12px 안이면 한 줄로
+      hz.forEach((h) => {   // 위 경계가 화면 위로 나가면(급변 뒤 넓은 박스, 휴대폰 실측) 글자를 플롯 맨 위에 붙이고 «↑»
+        const x = h.cut ? xr - 10 : h.xe - 4, y = Math.max(h.yu, yTop), up = h.yu < yTop ? " ↑" : "", near = labs.find((l) => Math.abs(l.x - x) < 40 && Math.abs(l.y - y) < 12);
+        if (near) near.txt += ` · ${BOX_NM[h.k]} ${h.p}%${up}`;
+        else labs.push({ x, y, txt: `${BOX_NM[h.k]} ${mobileChart ? "" : "유지 "}${h.p}%${up}`, col: h.col });
+      });
+      const wOf = (l) => [...l.txt].reduce((a, c) => a + (c > "ᄀ" ? 1.05 : 0.62), 0) * fs;   // 글자 폭 어림(한글 ≈ 1em · 측정은 강제 레이아웃) -- 같은 높이에서 가로로 겹치면 한 줄 아래로
+      labs.forEach((l, j) => {
+        while (labs.slice(0, j).some((o) => Math.abs(o.y - l.y) < fs + 2 && l.x - wOf(l) < o.x && o.x - wOf(o) < l.x)) l.y += fs + 3;
+        add("text", { x: l.x, y: l.y - 4, "text-anchor": "end", fill: l.col, ...halo }, l.txt);
+      });
+      svg.appendChild(g);
     }
-    svg.appendChild(g);
   }
 
   // 2026-10-06 호가벽 ±25·±50·±100bp(사용자 선택 시안 G): 오른쪽 호가 띠 위에만 구간 경계선 + «2,698.7 · 14.7k»(경계 가격 · 현재가에서 그 가격까지 걸린
@@ -7069,7 +7087,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   {
     const mc = latestMarketCtx && latestMarketCtx.available && latestMarketCtx.asset === activeSnapshotAsset ? latestMarketCtx : null;
     const sw = mc && mc.book && mc.book.sweep, mid = Number(currentPrice) || Number(mc && mc.mid);
-    if (isSnapshotChart && footprint && BOOK_W && !boxCol && sw && mid > 0) {   // 2026-10-06 휴대폰도(사용자 지시) -- 띠가 56px 라 선만, 글자는 데스크톱만
+    if (isSnapshotChart && footprint && BOOK_W && sw && mid > 0) {   // 2026-10-06 휴대폰도(사용자 지시) -- 띠가 56px 라 선만, 글자는 데스크톱만
       const g = document.createElementNS(NS, "g");
       g.setAttribute("pointer-events", "none");
       const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); };
@@ -7659,30 +7677,6 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     cells.forEach((c) => { c.hatch = !(c.rw > 0) || rwSorted.length < 4 ? -1 : c.rwPct >= 0.75 ? 0 : c.rwPct >= 0.5 ? 1 : c.rwPct >= 0.25 ? 2 : 3; });
     return { bs, x0, L, mx, cells };
   })();
-  // 2026-10-17 박스 경계선(호가벽 꼬리표 자리, 같은 문법): 호가 띠 위에 위·아래 두 선 + «2,466.3 · 30분 6%» -- 확률 = 다음 그 시간 동안 이 박스 안에 머물 확률.
-  //   주황 = «깨질 쪽»(학습 예측 하위 20%) 또는 이미 벗어남 · 굵기 30분 < 1시간 < 4시간 · 묵은 값(3분↑)은 안 그림 · 화면 밖은 안 적음 · 휴대폰은 선만.
-  let boxColG = null;
-  if (boxCol) {
-    const g = document.createElementNS(NS, "g"), bx0 = w - mr - BOOK_W, bx1 = w - mr, halo = { stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
-    const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); };
-    g.setAttribute("pointer-events", "none");
-    const labs = [];   // 10-17 리뷰: 30분·1시간 경계가 같거나 가까우면(1시간 고저가 최근 30분 안, 실측 24%) 글자가 겹친다 -- 같은 쪽 12px 안은 한 줄로
-    Object.keys(BOX_NM).forEach((k, i) => {
-      const sc = bxAll.scales[k];
-      if (!sc || !sc.ok) return;
-      const [tone] = boxState(bxAll, sc), col = tone === "brk" || tone === "out" ? "var(--warn)" : "var(--text)", p = Math.round(sc.p * 100);
-      [[1, sc.up], [-1, sc.dn]].forEach(([dir, v]) => {
-        const y = yAt(v);
-        if (y < mt || y > plotBottom) return;
-        add("line", { x1: bx0, x2: bx1, y1: y, y2: y, stroke: col, "stroke-opacity": 0.85, "stroke-width": 1 + 0.5 * i, "stroke-dasharray": "5 3" });
-        const near = labs.find((l) => l.dir === dir && Math.abs(l.y - y) < 12);
-        if (near) { near.txt += ` · ${BOX_NM[k]} ${p}%`; if (col === "var(--warn)") near.col = col; }
-        else labs.push({ dir, y, col, txt: `${v.toLocaleString("en-US", { minimumFractionDigits: Math.max(1, pxDp()), maximumFractionDigits: Math.max(1, pxDp()) })} · ${BOX_NM[k]} ${p}%` });
-      });
-    });
-    if (!mobileChart) labs.forEach((l) => add("text", { x: bx1 - 3, y: l.y + (l.dir > 0 ? -3 : 11), "text-anchor": "end", "font-size": 10.5, "font-family": "var(--font-mono)", "font-weight": 800, fill: l.col, class: "far-lbl", ...halo }, l.txt));
-    boxColG = g;
-  }
   // 네 막대 계기 자리(그림과 호버가 같이 쓴다). 데스크톱 = 기둥 머리(체결 기둥 왼쪽 끝 ~ 오른쪽 여백), 모바일 = 풋프린트 위 한 줄.
   const statsGeo = bookInfo && !(TRADE_W && splitR && flowOn()) ? (() => {   // 2026-09-30 넓은 화면은 ④로 옮겼다(2026-10-04 SOL·XRP 도)
     const sx = TRADE_W ? tradeX0 + 6 : ml, room = (TRADE_W ? w - mr : bookInfo.x0 - 8) - sx;
@@ -8167,7 +8161,6 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   }
   if (footprint && svg.id === "candleSvgSnapshot" && (activeSnapshotAsset === "eth" || activeSnapshotAsset === "xrp") && candles.length > 1) iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS);   // 2026-10-16 시안 ①
   if (wallTagsG) svg.appendChild(wallTagsG);   // 2026-10-06 호가벽 경계 꼬리표(위 G 블록) -- 호가 띠 위에
-  if (boxColG) svg.appendChild(boxColG);       // 2026-10-17 ETH 는 그 자리에 박스 경계선
   { const mn = mobileChart && svg.id === "candleSvgSnapshot" ? svg.querySelector('[data-live="label"][data-with-price="num"]') : null;
     if (mn && !mn.classList.contains("far-lbl")) svg.appendChild(mn); }   // 2026-10-10 휴대폰 현재가 숫자 = 호가 띠(◌ 표식) 위 맨 앞
   fpCvPaint(fpCv.bg); fpCvPaint(fpCv.fg);   // 2026-10-20 캔버스 두 장(fpCv) -- 칠하기는 레이아웃을 안 건드린다
