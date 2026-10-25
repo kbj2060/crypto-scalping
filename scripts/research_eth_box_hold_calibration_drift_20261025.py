@@ -698,9 +698,9 @@ def round5():
     (OUT / "round5.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
 
 
-def round8():
-    """8라운드: 1h A(배포 레시피 재학습) vs A+굴림Platt90 — W1·W2 판정(단측 90%), W3 보고."""
-    A0 = pd.read_parquet(OUT / "rows.parquet"); sc, W = "1h", WIN["1h"]; cf = BH["scales"][sc]; g = A0[A0.scale == sc]; ca = cf["cols"]
+def round8(sc="1h", name="8"):
+    """8라운드: 1h A(배포 레시피 재학습) vs A+굴림Platt90 — W1·W2 판정(단측 90%), W3 보고. 9라운드 = 같은 함수 30분·4h."""
+    A0 = pd.read_parquet(OUT / "rows.parquet"); W = WIN[sc]; cf = BH["scales"][sc]; g = A0[A0.scale == sc]; ca = cf["cols"]
     acc, per = {k: [] for k in ("A", "B", "y", "d")}, {}
     for w, (t0, v0, s0, e0) in BOX_ROLL.items():
         tr = g[(g.ts >= t0) & (g.ts + pd.Timedelta(minutes=W + 1) <= v0)].dropna(subset=ca)
@@ -714,7 +714,7 @@ def round8():
         if w != "W3":
             for k, v in (("A", pA[tt]), ("B", pB[tt]), ("y", y[tt]), ("d", d)):
                 acc[k].append(v)
-        log(f"[1h {w}{' 보고' if w == 'W3' else ''}] ΔBrier {per[w]['dbrier']:+.5f}{np.round(per[w]['dbrier_ci95'], 5).tolist()} · ECE A {mA['ece_pp']:.2f} B {mB['ece_pp']:.2f} · "
+        log(f"[{sc} {w}{' 보고' if w == 'W3' else ''}] ΔBrier {per[w]['dbrier']:+.5f}{np.round(per[w]['dbrier_ci95'], 5).tolist()} · ECE A {mA['ece_pp']:.2f} B {mB['ece_pp']:.2f} · "
             f"LL A {mA['logloss']:.4f} B {mB['logloss']:.4f} · AUC A {mA['auc']:.4f} B {mB['auc']:.4f} · 치우침 A {mA['bias_pp']:+.2f} B {mB['bias_pp']:+.2f}")
     pa, pb, yy, dd = (np.concatenate(acc[k]) for k in ("A", "B", "y", "d"))
     mA, mB = metrics(yy, pa, cf["q20"], cf["q80"]), metrics(yy, pb, cf["q20"], cf["q80"]); dv = (pb - yy) ** 2 - (pa - yy) ** 2
@@ -723,8 +723,8 @@ def round8():
          "V5": per["W1"]["dbrier"] < 0 and per["W2"]["dbrier"] < 0}
     rep = {"pooled_W1W2": {"dbrier": mB["brier"] - mA["brier"], "upper_one_sided90": ci80[1], "ci95": day_boot(dv, dd), "A": mA, "B": mB},
            "windows": per, "verdict": v, "win": all(v.values())}
-    log(f"[1h W1+W2] ΔBrier {rep['pooled_W1W2']['dbrier']:+.5f} 단측90% 상한 {ci80[1]:+.5f} · ECE A {mA['ece_pp']:.2f} B {mB['ece_pp']:.2f} · → {v} {'유지' if rep['win'] else '철회'}")
-    (OUT / "round8.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
+    log(f"[{sc} W1+W2] ΔBrier {rep['pooled_W1W2']['dbrier']:+.5f} 단측90% 상한 {ci80[1]:+.5f} · ECE A {mA['ece_pp']:.2f} B {mB['ece_pp']:.2f} · → {v} {'유지' if rep['win'] else '철회'}")
+    (OUT / (f"round{name}.json" if name == "8" else f"round{name}_{sc}.json")).write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
 
 
 def round6(layers_=None, name="6"):
@@ -818,3 +818,5 @@ if __name__ == "__main__":
         two_tier_r4()
     if "--round" in sys.argv and sys.argv[sys.argv.index("--round") + 1] == "8":
         round8()
+    if "--round" in sys.argv and sys.argv[sys.argv.index("--round") + 1] == "9":
+        round8("30m", "9"); round8("4h", "9")
