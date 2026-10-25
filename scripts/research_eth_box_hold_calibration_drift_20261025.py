@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.isotonic import IsotonicRegression
+from sklearn.isotonic import IsotonicRegression, isotonic_regression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import make_pipeline
@@ -224,6 +224,19 @@ def static(kind, p_fit, y_fit, p_app):
     return iso.predict(p_app)
 
 
+def venn_abers(pf, yf, pa):
+    """귀납 벤–에이버스(Vovk·Petej 2014 · IVAP 2015): 보정 집합 ∪ {(z,0)} / ∪ {(z,1)} 등조 회귀의 z 값 → (p0, p1). 같은 점수는 한 칸."""
+    u, inv = np.unique(pf, return_inverse=True); s, n = np.bincount(inv, yf), np.bincount(inv).astype(float)
+    za, ia = np.unique(pa, return_inverse=True); p0, p1 = np.empty(len(za)), np.empty(len(za))
+    for k, z in enumerate(za):
+        i = int(np.searchsorted(u, z)); tie = i < len(u) and u[i] == z
+        for lab, o in ((0.0, p0), (1.0, p1)):
+            s2, n2 = (s.copy(), n.copy()) if tie else (np.insert(s, i, 0.0), np.insert(n, i, 0.0))
+            s2[i] += lab; n2[i] += 1
+            o[k] = isotonic_regression(s2 / n2, sample_weight=n2)[i]
+    return p0[ia], p1[ia]
+
+
 def rolling(kind, ts, p, y, W, N, t0="2025-01-01"):
     """매월 1일 00:00 다시 맞춤 · 직전 N일 · 해결된 행(ts+W+1분 ≤ 맞춤 시각) · t0 이후만 · 28일 미만이면 항등."""
     out = p.copy()
@@ -240,6 +253,8 @@ def rolling(kind, ts, p, y, W, N, t0="2025-01-01"):
             continue
         if kind == "platt":
             a, b = fit_platt(p[fit], y[fit]); out[app] = sig(a * logit(p[app]) + b)
+        elif kind == "va":
+            p0, p1 = venn_abers(p[fit], y[fit], p[app]); out[app] = p1 / (1 - p0 + p1)
         else:
             out[app] = sig(logit(p[app]) + fit_shift(p[fit], y[fit]))
     return out
@@ -655,11 +670,11 @@ def round5():
     (OUT / "round5.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
 
 
-def round6():
-    """6라운드: 4h 27칸 HGB + 보정층 B(Platt180)·B2(절편180)·B3(절편90) — 3창 검증 선택 · 5라운드 관문."""
+def round6(layers_=None, name="6"):
+    """6라운드: 4h 27칸 HGB + 보정층 B(Platt180)·B2(절편180)·B3(절편90) — 3창 검증 선택 · 5라운드 관문. 7라운드 = 같은 틀에 VA180·VA90."""
     A0 = pd.read_parquet(OUT / "rows.parquet"); sc, W = "4h", WIN["4h"]; cf = BH["scales"][sc]; g = A0[A0.scale == sc]
-    ca, cb = cf["cols"], LEAN; need = list(dict.fromkeys(ca + cb)); layers_ = {"B": ("platt", 180), "B2": ("shift", 180), "B3": ("shift", 90)}
-    acc = {k: [] for k in ("A", "y", "d", *layers_)}; vb = {k: 0.0 for k in layers_}; per = {}
+    ca, cb = cf["cols"], LEAN; need = list(dict.fromkeys(ca + cb)); layers_ = layers_ or {"B": ("platt", 180), "B2": ("shift", 180), "B3": ("shift", 90)}
+    acc = {k: [] for k in ("A", "y", "d", *layers_)}; vb = {k: 0.0 for k in layers_}; per = {}; perw = {}
     for w, (t0, v0, s0, e0) in BOX_ROLL.items():
         tr = g[(g.ts >= t0) & (g.ts + pd.Timedelta(minutes=W + 1) <= v0)].dropna(subset=need)
         ev = g[(g.ts >= v0) & (g.ts + pd.Timedelta(minutes=W + 1) <= e0)].dropna(subset=need).reset_index(drop=True)
@@ -667,20 +682,24 @@ def round6():
         fitp = lambda cols: HistGradientBoostingClassifier(**HGB).fit(tr[cols], tr.y).predict_proba(ev[cols])[:, 1]  # noqa: E731
         pA, p27 = fitp(ca), fitp(cb); va, tt = ts < np.datetime64(s0), ts >= np.datetime64(s0); d = pd.DatetimeIndex(ts[tt]).normalize().to_numpy()
         acc["A"].append(pA[tt]); acc["y"].append(y[tt]); acc["d"].append(d); per[w] = {}
+        perw[w] = {"A": {"ece_pp": ece(y[tt], pA[tt])[0] * 100, "bias_pp": float((pA[tt].mean() - y[tt].mean()) * 100)}}
         for k, (kind, N) in layers_.items():
             pk = rolling(kind, ts, p27, y, W, N, t0=v0); vb[k] += float(np.mean((pk[va] - y[va]) ** 2)); acc[k].append(pk[tt])
             per[w][k] = float(np.mean((pk[tt] - y[tt]) ** 2) - np.mean((pA[tt] - y[tt]) ** 2))
+            perw[w][k] = {"dbrier_ci": day_boot((pk[tt] - y[tt]) ** 2 - (pA[tt] - y[tt]) ** 2, d), "ece_pp": ece(y[tt], pk[tt])[0] * 100,
+                          "bias_pp": float((pk[tt].mean() - y[tt].mean()) * 100), "auc": float(roc_auc_score(y[tt], pk[tt]))}
+        log(f"  [{w}] " + " · ".join(f"{k} ECE {x['ece_pp']:.2f} 치우침 {x['bias_pp']:+.2f}" for k, x in perw[w].items()) + f" · ΔBrier {per[w]}")
     S = min(vb, key=vb.get); pa, yy, dd, pb = (np.concatenate(acc[k]) for k in ("A", "y", "d", S))
     mA, mB = metrics(yy, pa, cf["q20"], cf["q80"]), metrics(yy, pb, cf["q20"], cf["q80"]); ci = day_boot((pb - yy) ** 2 - (pa - yy) ** 2, dd)
     v = {"W1": ci[1] < 0, "W2": mB["logloss"] <= mA["logloss"], "W3": mB["ece_pp"] <= mA["ece_pp"], "W4": mB["auc"] >= mA["auc"] - 0.002,
          "W5": sum(per[w][S] < 0 for w in per) >= 2}
-    rep = {"val_brier_sum": vb, "S": S, "windows_dbrier": per, "pooled": {"dbrier": mB["brier"] - mA["brier"], "dbrier_ci": ci, "A": mA, "B": mB}, "verdict": v, "win": all(v.values())}
+    rep = {"val_brier_sum": vb, "S": S, "windows_dbrier": per, "windows": perw, "pooled": {"dbrier": mB["brier"] - mA["brier"], "dbrier_ci": ci, "A": mA, "B": mB}, "verdict": v, "win": all(v.values())}
     for k in layers_:   # 서술: 다른 후보의 3창 합친 수치
         pk = np.concatenate(acc[k]); mk = metrics(yy, pk, cf["q20"], cf["q80"]); rep[f"desc_{k}"] = {"ece_pp": mk["ece_pp"], "bias_pp": mk["bias_pp"], "brier": mk["brier"], "auc": mk["auc"]}
-    log(f"[4h 6R] 검증 Brier 합 {vb} → S = {S} · 3창 ΔBrier {mB['brier'] - mA['brier']:+.5f}{np.round(ci, 5).tolist()} · LL A {mA['logloss']:.4f} S {mB['logloss']:.4f} · "
+    log(f"[4h {name}R] 검증 Brier 합 {vb} → S = {S} · 3창 ΔBrier {mB['brier'] - mA['brier']:+.5f}{np.round(ci, 5).tolist()} · LL A {mA['logloss']:.4f} S {mB['logloss']:.4f} · "
         f"ECE A {mA['ece_pp']:.2f} S {mB['ece_pp']:.2f} · AUC A {mA['auc']:.4f} S {mB['auc']:.4f} · 치우침 A {mA['bias_pp']:+.2f} S {mB['bias_pp']:+.2f} · 창별 {per} → {v} {'이김' if all(v.values()) else '못 이김'}")
     log("  서술 " + " · ".join(f"{k}: ECE {rep[f'desc_{k}']['ece_pp']:.2f} 치우침 {rep[f'desc_{k}']['bias_pp']:+.2f}" for k in layers_))
-    (OUT / "round6.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
+    (OUT / f"round{name}.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=float))
 
 
 def selftest():
@@ -707,6 +726,14 @@ def selftest():
     assert abs(q[-5000:].mean() - y2[-5000:].mean()) < .02, "OPS 가 치우침을 못 따라감"
     r = rolling("shift", ts, np.clip(p - .15, .01, .99), y2, 240, 60)
     assert abs(r[-5000:].mean() - y2[-5000:].mean()) < .02
+    pf, yf = np.r_[.1, .2, .3, .4, .5, .6, .7, .8], np.r_[0, 0, 1, 0, 1, 0, 1, 1.]
+    p0, p1 = venn_abers(pf, yf, np.r_[.05, .3, .35, .65, .95])
+    assert (p0 <= p1).all() and (p0 >= 0).all() and (p1 <= 1).all() and p0[-1] < 1 and p1[0] > 0, (p0, p1)
+    tsv, pv, yv = ts[:6000], np.clip(p[:6000] - .15, .01, .99), y2[:6000].copy()    # 인과: 03-01 맞춤 → 04-01 전 출력은 그 뒤 해결 라벨과 무관
+    T, T2 = np.datetime64("2025-03-01"), np.datetime64("2025-04-01")
+    r1 = rolling("va", tsv, pv, yv, 240, 30); yv[tsv + 241 * MIN > T] = 1 - yv[tsv + 241 * MIN > T]; r2 = rolling("va", tsv, pv, yv, 240, 30)
+    m = (tsv >= T) & (tsv < T2); assert m.any() and np.array_equal(r1[m], r2[m]) and not np.array_equal(r1[tsv >= T2], r2[tsv >= T2])
+    assert abs(r1[tsv >= T].mean() - y2[:6000][tsv >= T].mean()) < .03, "VA 가 치우침을 못 고침"
     lo, hi = day_boot(y2, np.arange(20000) // 50, B=500)
     assert lo < y2.mean() < hi
     log("selftest OK")
@@ -728,3 +755,5 @@ if __name__ == "__main__":
         round5()
     if "--round" in sys.argv and sys.argv[sys.argv.index("--round") + 1] == "6":
         round6()
+    if "--round" in sys.argv and sys.argv[sys.argv.index("--round") + 1] == "7":
+        round6({"VA180": ("va", 180), "VA90": ("va", 90)}, "7")
