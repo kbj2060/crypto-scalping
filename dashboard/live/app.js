@@ -430,12 +430,6 @@ let latestKalshi = null;
 let kalshiLastFetchAt = 0;
 let latestFlowHeatmap = null;
 let flowHeatmapLastFetchAt = 0;
-// 코인별 RVOL 워커(2026-09-11 추세 전환 탐지기 → 2026-10-18 RVOL 전용, 예고·탐지 제거).
-// 5분봉 워커라 60초 폴링(극점 탐지기와 같은 주기).
-let latestBreakoutDetector = null;
-let breakoutDetectorLastFetchAt = 0;
-const API_BREAKOUT_DETECTOR_URL = "/api/breakout-detector";
-const BREAKOUT_DETECTOR_POLL_MS = 60000;
 let latestLiquidation5mHist = [];
 let liquidation5mLastFetchAt = 0;
 // Liquidation map (Snapshot tab, 2026-08-24) -- estimated support/resistance, own fetch/render
@@ -649,7 +643,6 @@ async function setActiveSnapshotAsset(asset) {
   // 2026-10-04 시장 맥락·추세 칩도 코인별(서버 ?asset=) -- 옛 코인 값을 새 코인 이름 아래 두지 않는다.
   latestMarketCtx = null; marketCtxLastFetchAt = 0; latestTrend = null; trendLastFetchAt = 0;
   latestPaper = null; paperLastFetchAt = 0;   // 2026-10-04 모의 엔진도 코인별(paper_<coin>/)
-  latestBreakoutDetector = null; breakoutDetectorLastFetchAt = 0;   // RVOL 배지도 코인별(2026-10-18 경보기 제거)
   renderMarketCtx();   // 옛 코인 카드를 다음 폴링(최대 1초)까지 두지 않는다
   renderPaper();
 
@@ -746,6 +739,7 @@ function setChartWindow(bars, k = chartTfK) {
   refreshLiquidation5mSignal();
   refreshGex();
   maybeFetchFpWeek();
+  refreshOb5m();
 }
 
 function setupChartWindowTabs() {
@@ -1841,23 +1835,6 @@ async function refreshChartMarkers() {
 
 
 
-async function refreshBreakoutDetector() {
-  const now = Date.now();
-  if (now - breakoutDetectorLastFetchAt < BREAKOUT_DETECTOR_POLL_MS) return;
-  breakoutDetectorLastFetchAt = now;
-  const asset = activeSnapshotAsset;   // 2026-10-04 코인별(서버 <coin>_breakout_detector_state.json) -- 흐름 코인만 워커가 돈다
-  if (!flowOn()) { latestBreakoutDetector = null; return; }
-  let got;
-  try {
-    const res = await fetch(`${API_BREAKOUT_DETECTOR_URL}?asset=${asset}`, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`breakout detector ${res.status}`);
-    got = await res.json();
-  } catch (error) {
-    console.error("Breakout detector fetch error:", error);
-    got = { error: "fetch_failed" };
-  }
-  if (asset === activeSnapshotAsset) latestBreakoutDetector = got;
-}
 
 
 // 2026-09-25 청산 원의 **꼬리만** 빠르게. 서버가 ETH 청산 원을 수급 1초 차트와 같은 실시간 원천에서
@@ -2323,7 +2300,6 @@ function setupPageTabs() {
     if (target === "ops") {
       opsLastFetchAt = 0; refreshOpsStatus();
     } else if (target === "snapshot") {
-      breakoutDetectorLastFetchAt = 0; refreshBreakoutDetector();
       chartMarkersLastFetchAt = 0; latestChartMarkers = null; refreshChartMarkers();
       liquidation5mLastFetchAt = 0; refreshLiquidation5mSignal();
       liquidationMapLastFetchAt = 0; refreshLiquidationMap();
@@ -4574,6 +4550,39 @@ async function maybeFetchFpWeek() {
     if (fpWeekInFlight === asset) fpWeekInFlight = null;
   }
 }
+// ── 5분 호가 요약 (2026-10-26 사용자 «호가 5분 지표 연구 세션의 차트처럼 풋프린트 안에 호가 정보 · 거래대금 자리에 기울기 막대») ──
+// /api/ob5m 한 번에 지난 1주일: bars[{t ms, tilt_pct, book_ok, events_known}] · walls[{side, px, t_start, t_end}] · marks[{bar_t, side, kind}].
+//   정의 = scripts/research_orderbook_5m_indicator_20261026.py(호가 5분 지표 연구 세션) 그대로 -- 🔴정의 확정 전(4코인 검증 중), 정보 표시용(예측 아님).
+//   기울기 = ±50bp 매수·매도 잔량 (b−a)/(b+a)×100 의 봉 안 1초 평균 · 벽 = 쪽별 ±50bp 깊이 5%+ 한 칸 중 그 봉에서 가장 오래 선 것 ·
+//   ▲▼ = 30초+ 선 5%+ 벽이 체결 80%+ 로 사라짐(돌파) · ◆ = 체결 20% 밑·현재가 5bp 안에서 사라짐(가짜벽 의심).
+let ob5m = null, ob5mAt = 0, ob5mKey = null;
+async function refreshOb5m() {
+  const asset = activeSnapshotAsset, now = Date.now();
+  if (!flowOn() || (ob5mKey === asset && now - ob5mAt < 60000)) return;   // 봉이 5분마다 닫힌다 -- 코인마다 60초(실패도) · 코인을 바꾸면 곧바로
+  ob5mKey = asset; ob5mAt = now;
+  try {
+    const res = await fetch(`/api/ob5m?asset=${asset}`, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`ob5m ${res.status}`);
+    const j = await res.json();
+    if (asset !== activeSnapshotAsset) return;
+    const marks = new Map();
+    (j.marks || []).forEach((m) => { const k = m.bar_t / 1000; if (!marks.has(k)) marks.set(k, []); marks.get(k).push(m); });
+    ob5m = { asset, bars: new Map((j.bars || []).map((b) => [b.t / 1000, b])), walls: j.walls || [], marks };
+    scheduleSnapshotChartRender();
+  } catch (e) {
+    if (ob5m && ob5m.asset !== asset) ob5m = null;
+  }
+}
+const ob5mFor = () => (ob5m && ob5m.asset === activeSnapshotAsset ? ob5m : null);
+// 지금 tf 봉 시각 -> {tilt(평균, 북 없는 5분봉 뺌), up/dn(돌파), fu/fd(가짜벽 위/아래)} -- 렌더마다 1주일(2천 개)을 한 번 돈다
+function ob5mByTf(OB) {
+  const m = new Map(), at = (T) => m.get(T) || m.set(T, { s: 0, n: 0, up: 0, dn: 0, fu: 0, fd: 0 }).get(T);
+  OB.bars.forEach((b, t) => { if (b.book_ok && b.tilt_pct != null) { const a = at(tfT(t)); a.s += b.tilt_pct; a.n++; } });
+  OB.marks.forEach((ms, t) => ms.forEach((x) => { const a = at(tfT(t)); a[x.kind === "eat" ? (x.side === "ask" ? "up" : "dn") : (x.side === "ask" ? "fu" : "fd")]++; }));
+  m.forEach((a) => { a.tilt = a.n ? a.s / a.n : null; });
+  return m;
+}
+
 // 풋프린트 봉(시각순) -- 1주일이 필요한 보기면 앞에 1주일 몫(라이브에 없는 봉)을 붙인다. 폴링·1주일 도착마다 한 번만 만든다.
 let fpBarsMemo = null;
 function fpBarsNow() {
@@ -5809,7 +5818,6 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-09-30 가격 이름 = 시안 C(사용자 선택): 꼬리표 칸을 없애(폭은 체결·호가 띠로) 플롯 안 오른쪽 끝에 **짧은 약어**(R1·S1·MP·1h·5m·VW·ΓF·HL롱),
   //   이름·가격은 마우스를 올리면. 현재가는 상자 없이 **숫자만** 크게(바탕 외곽선).
   const LBL = "C";
-  const LANE_VAL_W = 144;   // 10-14 «창 합» 칸 추가로 96 → 144 --   // 2026-10-13 풋프린트 아래 레인 값 칸(넓은 화면) -- 지지/저항 칸(#mcWall)을 그만큼 오른쪽으로 밀고 좁힌다(사용자 «지지·저항 살리고 너비 줄여»)
   const cw = w - ml - mr - BOOK_W - TRADE_W;
   const tradeX0 = ml + cw;   // 체결 기둥 왼쪽 끝
   fpProfileSpan = TRADE_W ? [tradeX0, w - mr] : null;   // 아래 옵션 줄 가운데 칸이 이 폭·x 를 따른다(optRowCols)
@@ -7844,6 +7852,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const QNAME = (d, o) => (o == null ? (d >= 0 ? "매수 우위" : "매도 우위")
                                      : d >= 0 ? (o >= 0 ? "신규 롱" : "숏 정리") : (o >= 0 ? "신규 숏" : "롱 정리"));
   const sgnQ = (v) => (v == null ? "—" : (v >= 0 ? "+" : "-") + fmtFootprintQty(Math.abs(v)));
+  const obAgg = isSnapshotChart && ob5mFor() ? ob5mByTf(ob5mFor()) : null;   // 2026-10-26 5분 호가 요약(tf 봉별) -- 레인 막대·툴팁
   let laneBars = null;
   const laneBarsOf = () => laneBars || (laneBars = (() => {
     const byT = new Map();
@@ -7859,12 +7868,19 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
                oi: oiByTs.has(c.time) ? (Number(oiByTs.get(c.time)) || 0) : null };
     });
   })());
+  const obTip = (i) => {
+    const a = obAgg && candles[i] && obAgg.get(candles[i].time);
+    if (!a) return "";
+    const t = a.tilt == null ? "모름" : `${a.tilt >= 0 ? "+" : ""}${a.tilt.toFixed(1)}% (${a.tilt >= 0 ? "아래 매수 잔량이 두껍다" : "위 매도 잔량이 두껍다"})`;
+    const ev = [a.up && `▲ 매도벽 돌파 ${a.up}`, a.dn && `▼ 매수벽 돌파 ${a.dn}`, a.fu && `◆ 위 가짜벽 의심 ${a.fu}`, a.fd && `◆ 아래 가짜벽 의심 ${a.fd}`].filter(Boolean).join(" · ");
+    return `<br>호가 기울기 ${t}${ev ? `<br>${ev}` : ""}`;
+  };
   laneTip = (i) => {
     if (!fpBars.length) return "";
     const r = laneBarsOf()[i], col = (v) => (v >= 0 ? "var(--good)" : "var(--bad)");
     if (!r) return "<br><br>풋프린트 없음";
     return `<br><br><b style="color:${col(r.delta)}">${QNAME(r.delta, r.oi)}</b> · 델타 ${sgnQ(r.delta)} · 신규계약 ${r.oi == null ? "모름" : sgnQ(r.oi)} ${coinUnit()}`
-      + `<br><span style="color:var(--turnover)">거래대금 ${fmtUsdCompact(r.turn)}</span>`;   // 2026-10-26 펜 메모 «이 박스는 이제 제거»: 고래·중형·리테일·60분 합 줄은 다섯 줄과 같이 뺐다
+      + `<br><span style="color:var(--turnover)">거래대금 ${fmtUsdCompact(r.turn)}</span>` + obTip(i);   // 2026-10-26 펜 메모 «이 박스는 이제 제거»: 고래·중형·리테일·60분 합 줄은 다섯 줄과 같이 뺐다
   };
   // 2026-10-20 리본·막대·0선 = fg 캔버스(칠하기 하나 -- 형성 봉 갱신은 플롯 안만 다시 칠해 여기는 전체 렌더 박자) · 글자(리본 이름·줄 이름·값) = svg.
   //   옛 층 캐시(quadLane)는 뺐다 -- 남은 svg 노드는 글자 수십 개라 매 렌더 만들어도 싸다.
@@ -7899,52 +7915,38 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     });
     if (ribCol) ribCol.forEach((i, k) => ribbon(k, 1, rows[i]));   // 열 = 1px 칸
     un.flush((f) => ops.push(f));
-    // 2026-10-13 사용자 시안 1 «봉별 막대 레인» -- 2026-10-26 펜 메모 «이 박스는 이제 제거해줘»로 델타·신규계약·고래·중형·리테일 다섯 줄을 뺐고 거래대금 한 줄만 남는다.
-    //   봉마다 파랑 한 방향 막대(바닥 = 0) · 이름표 = 왼쪽 여백 · 값 = 오른쪽(이 봉). 넓은 화면은 지지/저항 칸(#mcWall)을 LANE_VAL_W 만큼 밀어 그 사이에 값 칸을 둔다.
-    const LH = bot - chartTop, fs = mobileChart ? 9 : 11;
-    const bwid = Math.max(1, Math.min(slotW * 0.62, slotW - 2)), wideVal = !!splitR && TRADE_W > 0, valX = wideVal ? ml + cw + LANE_VAL_W - 12 : ml + 4;   // 좁은 화면 = 칩을 왼쪽(오래된 봉) 위에 -- 오른쪽은 최신 봉이라 가리면 안 된다
-    // 2026-10-14 사용자 «타임프레임마다 그 창의 단순 합산값도 바로 옆에» -- 창 = 지금 보이는 봉 전부(1시간 창이면 생략)
-    const winMin = rows.length * 5 * chartTfK, winLab = winMin >= 1440 ? `${+(winMin / 1440).toFixed(1)}일` : `${+(winMin / 60).toFixed(1)}시간`, showWin = winMin > 60;
-    const wX = valX, hX = showWin ? valX - 50 : valX;   // 넓은 화면: 오른쪽 끝 = 창 합 · 그 왼쪽 50px = 이 봉
-    const usd = (v) => (Math.abs(v) >= 1e10 ? `$${(v / 1e9).toFixed(1)}B` : Math.abs(v) >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : Math.abs(v) >= 1e8 ? `$${Math.round(v / 1e6)}M` : Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : fmtUsdCompact(v));   // $673M · $24.3M -- 7자 넘지 않게
-    if (wideVal) {
-      txt(hX, top + RIB / 2 + 3, "이 봉", { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });   // 10-26 옛 «60분»(다섯 줄의 60분 합) -- 거래대금 값은 늘 이 봉이었다
-      if (showWin) txt(wX, top + RIB / 2 + 3, `${winLab} 합`, { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });
-    }
-    {
-      const y0 = chartTop, vals = rows.map((r) => (r ? r.turn : null)), ok = vals.filter((v) => v != null);
-      const mx = Math.max(...ok, 1e-9), mid = y0 + LH, sc = (LH - 1) / mx;
-      // 2026-10-20 봉이 1px 밑(1주일 창): 막대가 1px 폭으로 겹쳐 칠해진다 -- 픽셀 열마다 가장 긴 막대 하나만(칠해지는 모양 그대로)
-      const colMax = slot < 1 ? new Map() : null;
-      const bar = (x, bh, rx = 0) => {
-        if (DENSE) un.add("var(--turnover)", 0.55, (pp) => pp.rect(x, mid - bh, bwid, bh)); else ops.push((ctx) => cvRect(ctx, x, mid - bh, bwid, bh, "var(--turnover)", 0.55, rx));
-      };
-      vals.forEach((v, i) => {
-        if (v == null) return;                        // 모름은 칸을 비운다 -- 0 으로 그리지 않는다
-        const bh = Math.max(1, v * sc), x = cx(i) - bwid / 2;
-        if (colMax) { const k = Math.round(x), o = colMax.get(k); if (!o || o[1] < bh) colMax.set(k, [x, bh]); return; }
-        bar(x, bh, DENSE ? 0 : 1.5);
-      });
-      if (colMax) colMax.forEach(([x, bh]) => bar(x, bh));
-      un.flush((f) => ops.push(f));
-      if (!mobileChart && !wideVal) txt(ml - 6, y0 + LH / 2 + 3, "대금", { "text-anchor": "end", "font-size": 9, fill: "var(--muted)" });   // 왼쪽 여백 ≈30px -- «사분면»과 같은 9px
-      const val = have.length ? have[have.length - 1].turn : null, vs = val == null ? "—" : usd(val);
-      // 창 합 = 보이는 봉 중 값이 있는 봉의 단순 합. 10% 넘게 비면(수집 공백·재기동) «~» -- 부분 합을 창 합인 척하지 않는다
-      const part = ok.length < rows.length * 0.9;
-      const wsum = ok.length ? ok.reduce((a, b) => a + b, 0) : null, ws = wsum == null ? "—" : (part ? "~" : "") + usd(wsum);
-      if (wideVal) txt(ml + cw + 10, y0 + LH / 2 + 4, "대금", { "font-size": 10, fill: "var(--muted)" });   // 10-14 사용자 «라벨을 값의 왼쪽으로»·«좌우 양끝 정렬» -- 값 칸 왼끝 = 이름, 오른끝 = 값
-      const label = (mobileChart ? `거래대금 ${vs}` : vs) + (!wideVal && showWin ? ` · ${winLab} ${ws}` : "");
-      if (!wideVal) mk("rect", { x: valX - 3, y: y0 + LH / 2 - (fs + 4) / 2, width: measureTextW(label, `700 ${fs + 1}px sans-serif`) + 10, height: fs + 4, rx: (fs + 4) / 2, fill: "var(--chart-bg)", "fill-opacity": 0.85 });
-      const vt = txt(wideVal ? hX : valX + 2, y0 + LH / 2 + 4, label, { "text-anchor": wideVal ? "end" : "start", "font-size": wideVal ? fs : fs + 1, "font-weight": 700, fill: "var(--turnover)", style: "font-variant-numeric: tabular-nums" });
-      if (wideVal && showWin) {
-        const wt = txt(wX, y0 + LH / 2 + 4, ws, { "text-anchor": "end", "font-size": fs, "font-weight": 700, fill: "var(--turnover)", "fill-opacity": 0.85, style: "font-variant-numeric: tabular-nums" });
-        const wtt = document.createElementNS(NS, "title"); wtt.textContent = `거래대금 ${winLab} 합 ${ws} (보이는 ${rows.length}봉 단순 합${part ? ` · 값 있는 봉 ${ok.length}개만` : ""})`; wt.append(wtt);
-      }
-      const vtt = document.createElementNS(NS, "title"); const rv = latestBreakoutDetector && latestBreakoutDetector.asset === activeSnapshotAsset ? latestBreakoutDetector.rvol : null;   // 오늘 거래량(옛 범례 괄호)
-      const rvTxt = rv && rv.session_label && Number.isFinite(Number(rv.session_basis === "weekend" ? rv.session_weekend : rv.session))
-        ? ` · 오늘 거래량 ${rv.session_label} ${Number(rv.session_basis === "weekend" ? rv.session_weekend : rv.session).toFixed(2)}배` : "";
-      vtt.textContent = `거래대금 이 봉 ${vs}${rvTxt}`; vt.append(vtt);
-    }
+    // 2026-10-26 사용자 «거래대금 막대 자리에 기울기 막대, 거래대금은 선»: 0선 위아래 = 5분 호가 기울기(±50bp 매수 − 매도 잔량, 봉 평균) · 파랑 선 = 거래대금(제 축, 바닥 = 0).
+    //   옛 봉별 거래대금 막대·프로파일 아래 값 칸(대금 · 이 봉 · 창 합)은 뺐다 -- 봉 값은 호버 툴팁(laneTip). 이름은 왼쪽 위 한 줄(오래된 봉 쪽 -- 최신 봉을 안 가린다).
+    const LH = bot - chartTop, y0 = chartTop, zero = y0 + LH / 2;
+    const bwid = Math.max(1, Math.min(slotW * 0.62, slotW - 2));
+    const tilts = candles.map((c) => { const a = obAgg && obAgg.get(c.time); return a ? a.tilt : null; }), tOk = tilts.filter((v) => v != null);
+    const tMax = Math.max(5, ...tOk.map(Math.abs)), tSc = (LH / 2 - 1) / tMax;
+    const colMax = slot < 1 ? new Map() : null;   // 1px 밑(1주일 창): 픽셀 열마다 가장 긴 막대 하나
+    const bar = (x, v, rx = 0) => {
+      const hh = Math.max(1, Math.abs(v) * tSc), y = v >= 0 ? zero - hh : zero, col = v >= 0 ? "var(--good)" : "var(--bad)";
+      if (DENSE) un.add(col, 0.7, (pp) => pp.rect(x, y, bwid, hh)); else ops.push((ctx) => cvRect(ctx, x, y, bwid, hh, col, 0.7, rx));
+    };
+    ops.push((ctx) => cvHLine(ctx, ml, ml + cw, zero, "var(--muted)", 0.35));
+    tilts.forEach((v, i) => {
+      if (v == null) return;                        // 북 모름은 칸을 비운다 -- 0 으로 그리지 않는다
+      const x = cx(i) - bwid / 2;
+      if (colMax) { const k = Math.round(x), o = colMax.get(k); if (!o || Math.abs(o[1]) < Math.abs(v)) colMax.set(k, [x, v]); return; }
+      bar(x, v, DENSE ? 0 : 1.5);
+    });
+    if (colMax) colMax.forEach(([x, v]) => bar(x, v));
+    un.flush((f) => ops.push(f));
+    // 거래대금 선 -- 값 없는 봉에서 끊는다(모름을 이어 그리지 않는다)
+    const turns = rows.map((r) => (r ? r.turn : null)), uMax = Math.max(1e-9, ...turns.filter((v) => v != null)), uSc = (LH - 2) / uMax;
+    const runs = [];
+    let cur = null;
+    turns.forEach((v, i) => { if (v == null) { cur = null; return; } if (!cur) runs.push((cur = [])); cur.push([cx(i), y0 + LH - 1 - v * uSc]); });
+    ops.push((ctx) => runs.forEach((pts) => (pts.length > 1 ? cvStroke(ctx, pts, "var(--turnover)", 1.4, 0.9, null, "round") : cvRect(ctx, pts[0][0] - 1, pts[0][1] - 1, 2, 2, "var(--turnover)", 0.9))));
+    const lg = txt(ml + 4, y0 + (mobileChart ? 8 : 9), "", { "font-size": mobileChart ? 9 : 10, fill: "var(--muted)", "pointer-events": "auto" });
+    [[tOk.length ? "■ 호가 기울기 ±50bp" : "■ 호가 기울기 (준비 중)", "var(--muted)"], ["  ─ 거래대금", "var(--turnover)"]].forEach(([t, f]) => { const sp = mk("tspan", { fill: f }, lg); sp.textContent = t; });
+    { const tt = document.createElementNS(NS, "title");
+      tt.textContent = "호가 기울기 = 현재가 ±50bp 안 매수 잔량 − 매도 잔량 비율(봉 안 1초 평균). 위(초록) = 아래쪽 매수 잔량이 두껍다 · 아래(빨강) = 위쪽 매도 잔량이 두껍다.\n"
+        + "가격이 내린 뒤엔 아래 잔량이 두꺼워 보인다(직전 1시간 수익과 순위상관 −0.44) — «오를 것»이 아니다. 다음 봉과 상관 0.03. 정의 검증 중 · 정보 표시용.\n파랑 선 = 봉별 거래대금(바이낸스+OKX 체결, 제 축).";
+      lg.append(tt); }
   })();
 
   // 2026-09-30 지지·저항 글자 줄은 시장 맥락 ③ 가격 지형으로 옮겼다(사용자 지시) -- mcGfx.terrain 이 srLevelsLive() 를 그린다.
@@ -7958,6 +7960,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-10-20 fg 캔버스 -- 봉마다 칠하기 하나(형성 봉은 고가가 움직이면 원도 따라 오른다: liqLive). 자르기 = 가격 플롯(양 끝에 걸친 봉의 원이 여백으로 나가지 않게).
   //   봉별 <title>(청산 금액·롱/숏·거래소)은 봉 호버 툴팁의 «청산» 줄로 옮겼다(liqTip).
   let liqTip = () => "";
+  const liqTopAt = new Map();   // 봉 시각 -> 청산 원 윗끝 y (5분 호가 ▲ 가 원 위로 비킨다)
   if (Array.isArray(liqBars) && liqBars.length && candles.length) {
     // 🔴«봉 위»의 기준은 OHLC 고가가 **아니다**. 풋프린트 셀은 별도 원천이라 고가보다 위
     //   가격대까지 그려지는 봉이 있고, 고가만 보고 앉히면 큰 원이 셀 숫자를 덮는다
@@ -7994,6 +7997,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         // 그 봉이 그린 것 중 가장 높은 것 바로 위(셀 숫자 한 줄 9px 만큼 더 띄운다).
         const top = Math.max(c.high, topByTs.get(c.time) || -Infinity);
         const cy = Math.max(mt + r + 1, yAt(top) - r - 14), cxD = xAt(i) + bw / 2, col = sh >= lo ? "var(--good)" : "var(--bad)";
+        liqTopAt.set(c.time, cy - r);
         return { x0: cxD - r - 1, x1: cxD + r + 1, y0: cy - r - 1, y1: cy + r + 1, c: plotC, cx: cxD, cy, r, col, p: (ctx) => {
           ctx.globalAlpha = 0.9; ctx.fillStyle = cvc(col); ctx.beginPath(); ctx.arc(cxD, cy, r, 0, 2 * Math.PI); ctx.fill();
         } };
@@ -8010,6 +8014,40 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         return lo + sh > 0 ? `<br>청산 ${fmtUsdCompact(lo + sh)} (롱 ${fmtUsdCompact(lo)} / 숏 ${fmtUsdCompact(sh)})${b.partial ? " · 진행 중" : ""}${liqVenueText(b).replace(/\n/g, "<br>")}` : "";
       };
     }
+  }
+
+  // ── 5분 호가 요약 덧그림(2026-10-26) -- 벽 = 쪽별 점선(초록 매수·빨강 매도) · ▲▼ 돌파 · ◆ 가짜벽 의심. 위치 참고, 신호 아님.
+  const OB5 = isSnapshotChart && ob5mFor();
+  if (OB5 && candles.length) {
+    const agg = ob5mByTf(OB5), idx = new Map(candles.map((c, i) => [c.time, i])), t0 = candles[0].time, tN = candles[candles.length - 1].time;
+    const ext = new Map();   // 봉이 실제로 그린 가장 높은/낮은 가격(풋프린트 칸이 고저 밖까지 간다 -- 청산 원과 같은 이유)
+    fpBars.forEach((b) => { let hi = -Infinity, lo = Infinity; (b.levels || []).forEach((l) => { const pz = Number(l[0]); if (pz > hi) hi = pz; if (pz < lo) lo = pz; }); ext.set(Number(b.time), [hi, lo]); });
+    const segs = [];
+    OB5.walls.forEach((w) => {
+      const tS = w.t_start / 1000, tE = w.t_end / 1000 - 300;
+      if (tE < t0 || tS > tN) return;
+      const i0 = tS <= t0 ? 0 : idx.get(tfT(tS)), i1 = tE >= tN ? candles.length - 1 : idx.get(tfT(tE));
+      if (i0 == null || i1 == null) return;
+      segs.push([xAt(i0) + 1, xAt(i1) + bw - 1, yAt(w.px), w.side === "bid" ? "var(--good)" : "var(--bad)"]);
+    });
+    const s = DENSE ? 3 : 4.5, boxes = bw >= 14 && !fpBoxesOff && fpBars.length > 0;   // 체결 칸이 있으면 위 = 칸 위 숫자 한 줄·청산 원 위 · 아래 = 봉 델타 라벨 밑
+    const tri = (ctx, x, y, dir) => { ctx.beginPath(); ctx.moveTo(x - s, y); ctx.lineTo(x + s, y); ctx.lineTo(x, y + dir * s * 1.6); ctx.closePath(); ctx.fill(); };
+    const dia = (ctx, x, y) => { ctx.beginPath(); ctx.moveTo(x, y - s); ctx.lineTo(x + s, y); ctx.lineTo(x, y + s); ctx.lineTo(x - s, y); ctx.closePath(); ctx.fill(); };
+    fgI.push({ ...CV_ALL, c: plotC, p: (ctx) => {
+      segs.forEach(([x0, x1, y, col]) => cvStroke(ctx, [[x0, y], [x1, y]], col, 2, 0.6, "2 3"));
+      candles.forEach((c, i) => {
+        const a = agg.get(c.time);
+        if (!a || !(a.up || a.dn || a.fu || a.fd)) return;
+        const [eh, el] = ext.get(c.time) || [-Infinity, Infinity], x = xAt(i) + bw / 2;
+        const yt = Math.min(yAt(Math.max(c.high, eh)) - (boxes ? 12 : 4), (liqTopAt.get(c.time) ?? Infinity) - 3), yb = yAt(Math.min(c.low, el)) + (boxes ? 30 : 4);
+        ctx.globalAlpha = 0.95;
+        if (a.up) { ctx.fillStyle = cvc("var(--good)"); tri(ctx, x, yt, -1); }
+        if (a.dn) { ctx.fillStyle = cvc("var(--bad)"); tri(ctx, x, yb, 1); }
+        ctx.fillStyle = cvc("var(--warn)");
+        if (a.fu) dia(ctx, x, yt - (a.up ? s * 1.6 + 2 : 0) - s);
+        if (a.fd) dia(ctx, x, yb + (a.dn ? s * 1.6 + 2 : 0) + s);
+      });
+    } });
   }
 
   // ── SVG 안의 수급 두 패널 -- OI 레인 바로 위 (2026-09-19 사용자 지시) ──────────
@@ -8070,7 +8108,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     if (mcSplit && mcEntryEl) { const bh = `${MC_EG_H + s1Give}px`; if (mcEntryEl.style.height !== bh) mcEntryEl.style.height = bh; }   // 2026-10-24 가격 자 = 고정 높이   // 2026-10-13 체결 버블 = 수급 차트 한 개 높이(사용자)
     post.push(() => mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16, h: floorY - (sub1sY + s1Hd + 12) } : null,
             mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
-              return { x: ml + cw + 4 + LANE_VAL_W, y, w: TRADE_W + BOOK_W - 8 - LANE_VAL_W, h: floorY - y }; })() : null));   // 10-13 왼쪽 LANE_VAL_W = 레인 값 칸
+              return { x: ml + cw + 4, y, w: TRADE_W + BOOK_W - 8, h: floorY - y }; })() : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
     supply1sSubBox = {
       svg: subSvg("s1", subX, sub1sY, subW, s1Hd, sub1sKey(subW, s1Hd),
                   (g) => renderSupply1s({ svg: g, w: subW, h: s1Hd })),
@@ -8200,7 +8238,6 @@ async function tick() {
     if (activePageTab === "ops") {
       refreshOpsStatus();
     } else if (activePageTab === "snapshot") {
-      refreshBreakoutDetector();     // 2026-09-11 횡보→추세 전환
       refreshBinanceAccount();       // 2026-09-10 청산맵 위 계좌 요약 + 진입선 (자체 30초 게이트)
       refreshChartMarkers();         // 2026-09-09 청산맵 신호 마커
       refreshLiquidation5mSignal();
@@ -8214,6 +8251,7 @@ async function tick() {
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       maybeFetchFpWeek();            // 2026-10-20 1주일(12시간 밖이 필요할 때 한 번)
+      refreshOb5m();                 // 2026-10-26 5분 호가 요약(자체 60초 게이트)
       refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)
       refreshGex();                  // 2026-09-19 옵션 감마 노출(참고 표시 · 신호 아님)
       refreshKalshi();               // 2026-09-28 칼시 15분 확률 (1초, ETH 만 · 참고 · 신호 아님)
