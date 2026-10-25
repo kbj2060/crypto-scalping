@@ -80,6 +80,12 @@ def signal(c, kind, look):
     return sum(out) / len(out)
 
 
+def turning(c, aC, aR):
+    """6회차 Garg 외(2021) 모멘텀 전환점: 느림 sign(90일)·빠름 sign(7일). 같으면 ±1, 조정(느림+)은 (1−2aC)·느림, 반등(느림−)은 (1−2aR)·느림."""
+    slow, fast = np.sign(c / c.shift(90) - 1), np.sign(c / c.shift(7) - 1)
+    return slow * np.where(slow == fast, 1.0, np.where(slow > 0, 1 - 2 * aC, 1 - 2 * aR))
+
+
 def vol(f, kind):
     lr = np.log(f.c).diff()
     if kind == "cc20":
@@ -95,7 +101,7 @@ def vol(f, kind):
 
 def targets(F, cfg, tau):
     """cfg = dict(look, sig, vol, port, crash). 반환 = 일 × 코인 목표 비중(순자산 대비 명목) — 일 d 행은 d−1 종가까지만."""
-    S = pd.DataFrame({s: signal(F[s].c, cfg["sig"], cfg["look"]) for s in COINS})
+    S = pd.DataFrame({s: turning(F[s].c, cfg["aC"], cfg["aR"]) if cfg["look"] == "MTD" else signal(F[s].c, cfg["sig"], cfg["look"]) for s in COINS})
     V = pd.DataFrame({s: vol(F[s], cfg["vol"]) for s in COINS})
     R = pd.DataFrame({s: F[s].c.pct_change() for s in COINS})
     S = S.where(S >= 0, S * cfg.get("short", 1.0))  # 숏 쪽 배율(2회차)
@@ -290,33 +296,83 @@ WIN5 = {"W1": (("2022-01-01", "2023-12-31"), ("2024-01-01", "2024-05-31"), ("202
         "W3": (TRAIN4, VAL4, TEST4)}
 
 
-def round5(F):
-    out, R, H, NUL = {"windows": {}}, [], [], []
+def rolling(F, cands):
+    """cands = {창: {후보: cfg 또는 "current"}} — 창마다 τ(학습 MDD ≥ −20% 최대) → 검증 샤프 최고 선택 → 시험 · 3창 이어 붙여 P1~P3."""
+    out, R, H, NUL, X = {"windows": {}}, [], [], [], {}
     for w, (trp, vap, tep) in WIN5.items():
         tr, va, te = (pd.date_range(*p, freq="D") for p in (trp, vap, tep)); cf = {}
-        for key in R4:
-            tau = None
+        for key, cfg in cands[w].items():
+            wts = lambda t: current_rule(F) * (t / 0.5) if cfg == "current" else targets(F, cfg, t)
+            bd = 0.0 if cfg == "current" else cfg["band"]; tau = None
             for t in TAUS:
-                if OE.mdd(run(F, r4_weights(F, key, t), tr, band=band4(key))) >= -0.20:
+                if OE.mdd(run(F, wts(t), tr, band=bd)) >= -0.20:
                     tau = t
-            tau = tau or TAUS[0]; W = r4_weights(F, key, tau); x = run(F, W, te, band=band4(key))
-            cf[key] = {"tau": tau, "val_sharpe": sharpe(run(F, W, va, band=band4(key))), "test_sharpe": sharpe(x), "test_ret": float((1 + x).prod() - 1), "test_mdd": OE.mdd(x), "W": W, "x": x}
+            tau = tau or TAUS[0]; W = wts(tau); x = run(F, W, te, band=bd); X.setdefault(key, []).append(x)
+            cf[key] = {"tau": tau, "val_sharpe": sharpe(run(F, W, va, band=bd)), "test_sharpe": sharpe(x), "test_ret": float((1 + x).prod() - 1), "test_mdd": OE.mdd(x), "W": W, "x": x, "band": bd}
         ch = max(cf, key=lambda k: cf[k]["val_sharpe"]); W = cf[ch]["W"]; h = hold_ret(F, te)
         R.append(cf[ch]["x"]); H.append(h)
-        NUL.append([run(F, null_targets(F, None, None, te, sd, W=W), te, band=band4(ch)) for sd in range(200)])
+        NUL.append([run(F, null_targets(F, None, None, te, sd, W=W), te, band=cf[ch]["band"]) for sd in range(200)])
         out["windows"][w] = {"chosen": ch, "hold_sharpe": sharpe(h), "hold_ret": float((1 + h).prod() - 1), "hold_mdd": OE.mdd(h),
                              "configs": {k: {a: v for a, v in c.items() if a not in ("W", "x")} for k, c in cf.items()}}
         print(w, ch, {k: round(c["test_sharpe"], 2) for k, c in cf.items()}, "보유 %.2f" % sharpe(h), flush=True)
-    if (OUT / "round4_test_report.json").exists():
-        r4 = json.loads((OUT / "round4_test_report.json").read_text())
-        assert abs(r4["configs"][r4["chosen"]]["sharpe"] - out["windows"]["W3"]["configs"][r4["chosen"]]["test_sharpe"]) < 1e-9 and r4["chosen"] == out["windows"]["W3"]["chosen"], "W3 재계산 ≠ 4회차"
     r, h = pd.concat(R), pd.concat(H); nulls = [sharpe(pd.concat([NUL[i][sd] for i in range(3)])) for sd in range(200)]
     out["pooled"] = {"sharpe": sharpe(r), "ret": float((1 + r).prod() - 1), "hold_sharpe": sharpe(h), "null_p95": float(np.percentile(nulls, 95)), "null_median": float(np.median(nulls)), "days": len(r)}
+    out["pooled_by_candidate"] = {k: {"sharpe": sharpe(pd.concat(v)), "ret": float((1 + pd.concat(v)).prod() - 1)} for k, v in X.items()}
     out["gates"] = {"P1_gt_hold": out["pooled"]["sharpe"] > out["pooled"]["hold_sharpe"],
                     "P2_mdd_each": all(v["configs"][v["chosen"]]["test_mdd"] >= -0.20 for v in out["windows"].values()),
                     "P3_null_p95": out["pooled"]["sharpe"] > out["pooled"]["null_p95"]}
     out["pass"] = all(out["gates"].values())
+    return out
+
+
+def round5(F):
+    out = rolling(F, {w: R4 for w in WIN5})
+    if (OUT / "round4_test_report.json").exists():
+        r4 = json.loads((OUT / "round4_test_report.json").read_text())
+        assert abs(r4["configs"][r4["chosen"]]["sharpe"] - out["windows"]["W3"]["configs"][r4["chosen"]]["test_sharpe"]) < 1e-9 and r4["chosen"] == out["windows"]["W3"]["chosen"], "W3 재계산 ≠ 4회차"
     (OUT / "round5_report.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps({k: out[k] for k in ("pooled", "gates", "pass")}, indent=1, ensure_ascii=False))
+
+
+# ---------------- 6회차(수정 5): 모멘텀 전환점 T1 고정 50/50 · T2 국면별 섞기(학습 창에서 a 고름) · (b) — 5회차 절차 그대로 ----------------
+MT = dict(look="MTD", sig="sign", vol="cc20", port="pv", crash="none", band=0.0)
+A6 = (0.0, 0.5, 1.0)
+
+
+def causal6(F):
+    """일 d 뒤를 잘라내고 일 d 종가를 흔들어도 일 d 비중이 같아야 한다."""
+    for aC, aR in ((0.5, 0.5), (0.0, 1.0), (1.0, 0.0)):
+        cfg = dict(MT, aC=aC, aR=aR); Wf = targets(F, cfg, 0.2)
+        for d in pd.to_datetime(["2023-03-15", "2024-08-05", "2025-06-30", "2026-10-01"]):
+            Ft = {s: F[s].loc[:d].copy() for s in COINS}
+            for s in COINS:
+                Ft[s].loc[d, ["c", "h", "l"]] *= 1.37
+            gap = float((targets(Ft, cfg, 0.2).loc[d] - Wf.loc[d]).abs().max())
+            assert gap < 1e-12, (aC, aR, d, gap)
+    print("인과 점검 통과(T1·T2 3조합 × 4일)")
+
+
+def round6(F):
+    causal6(F); cands, fit = {}, {}
+    for w, (trp, _, _) in WIN5.items():
+        tr = pd.date_range(*trp, freq="D"); rows = []
+        for aC, aR in itertools.product(A6, A6):
+            cfg = dict(MT, aC=aC, aR=aR); tau = None
+            for t in TAUS:
+                if OE.mdd(run(F, targets(F, cfg, t), tr)) >= -0.20:
+                    tau = t
+            tau = tau or TAUS[0]; rows.append({"aC": aC, "aR": aR, "tau": tau, "train_sharpe": sharpe(run(F, targets(F, cfg, tau), tr))})
+        best = max(rows, key=lambda r_: r_["train_sharpe"]); fit[w] = {"chosen": best, "grid": rows}
+        print(w, "T2 학습 선택 a_조정 %.1f a_반등 %.1f 학습 샤프 %.2f" % (best["aC"], best["aR"], best["train_sharpe"]), flush=True)
+        cands[w] = {"T1": dict(MT, aC=0.5, aR=0.5), "T2": dict(MT, aC=best["aC"], aR=best["aR"]), "b_current_pv": R4["b_current_pv"]}
+    out = rolling(F, cands); out["t2_fit"] = fit
+    ph = {}
+    for s in COINS:   # 국면 비율(시험 3창 날, 일 d 결정에 쓰는 d−1 종가 기준)
+        c = F[s].c; sl, fa = np.sign(c / c.shift(90) - 1).shift(1), np.sign(c / c.shift(7) - 1).shift(1)
+        lab = pd.Series(np.select([(sl > 0) & (fa > 0), (sl < 0) & (fa < 0), sl > 0, sl < 0], ["bull", "bear", "correction", "rebound"], "zero"), c.index)
+        ph[s] = lab.loc[pd.DatetimeIndex(np.concatenate([pd.date_range(*WIN5[w][2], freq="D") for w in WIN5]))].value_counts(normalize=True).round(3).to_dict()
+    out["phase_share_test"] = ph
+    (OUT / "round6_report.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    print(json.dumps({k: out[k] for k in ("pooled", "pooled_by_candidate", "gates", "pass", "phase_share_test")}, indent=1, ensure_ascii=False))
 
 
 # ---------------- 실행 ----------------
@@ -405,6 +461,8 @@ def main():
         F[s], miss = daily_frame(s); print(s, F[s].index[0].date(), "~", F[s].index[-1].date(), "2022~ 빈 5분봉", miss)
     if a.selfcheck:
         return selfcheck(F)
+    if a.round == 6:
+        return round6(F)
     if a.round == 5:
         return round5(F)
     if a.round == 4:
