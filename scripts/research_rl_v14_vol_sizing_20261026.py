@@ -77,21 +77,27 @@ def stats(x):
                 mdd_bp=float((eq - np.maximum.accumulate(eq)).min() * 1e4), hours=int(len(x)))
 
 
+SIGNED = ["pred_z", "m1d", "m7d", "m30d", "m4h", "hint"]   # v15 거울: 가격 방향을 뒤집으면 부호가 바뀌는 열
+
+
 class Env(gym.Env):
-    def __init__(self, X, size, ret, sstar, mask, seed):
+    def __init__(self, X, size, ret, sstar, mask, seed, flipv=None):
         self.X, self.size, self.ret, self.s = X, size, ret, sstar
         self.idx = np.flatnonzero(mask); self.rng = np.random.default_rng(seed)
+        self.flipv, self.f = flipv, 1.0                                   # flipv = 열마다 −1(부호 열)·1, None 이면 거울 없음(v14)
         self.observation_space = gym.spaces.Box(-5, 5, (X.shape[1] + 1,), np.float32); self.action_space = gym.spaces.Discrete(len(ACTS))
 
     def _obs(self):
-        return np.r_[self.X[self.i], self.n / CAP].astype(np.float32)
+        x = self.X[self.i] * self.flipv if self.f < 0 else self.X[self.i]
+        return np.r_[x, self.n / CAP].astype(np.float32)
 
     def reset(self, seed=None, options=None):
         st = self.rng.integers(0, len(self.idx) - EP); self.i, self.end, self.n = self.idx[st], self.idx[st] + EP, 0.0
+        self.f = -1.0 if self.flipv is not None and self.rng.random() < 0.5 else 1.0
         return self._obs(), {}
 
     def step(self, a):
-        n = float(ACTS[a] * self.size[self.i]); r = (n * self.ret[self.i] - COST * abs(n - self.n)) / self.s
+        n = float(ACTS[a] * self.size[self.i]); r = (n * self.f * self.ret[self.i] - COST * abs(n - self.n)) / self.s
         self.n, self.i = n, self.i + 1
         return self._obs(), float(r), self.i >= self.end, False, {}
 
@@ -111,12 +117,13 @@ def teachers(F, size, tr):
             "T3_tsmom": np.sign(F.m30d.to_numpy()) * size}
 
 
-def train(seed, rho=None, tag=None):
+def train(seed, rho=None, tag=None, mirror=False):
     from stable_baselines3 import PPO
     F, X, size, sstar = load(rho, seed); Xn, ret = X.to_numpy(), F.ret.to_numpy()
     tr, va = span(F, TRAIN), span(F, VAL)
     d = OUT / (tag or f"s{seed}"); d.mkdir(parents=True, exist_ok=True)
-    m = PPO("MlpPolicy", Env(Xn, size, ret, sstar, tr, seed), seed=seed, verbose=0, n_steps=2048, batch_size=256, gamma=0.99,
+    flipv = np.array([-1.0 if c in SIGNED else 1.0 for c in X.columns], np.float32) if mirror else None
+    m = PPO("MlpPolicy", Env(Xn, size, ret, sstar, tr, seed, flipv), seed=seed, verbose=0, n_steps=2048, batch_size=256, gamma=0.99,
             learning_rate=3e-4, ent_coef=0.01, policy_kwargs=dict(net_arch=[64, 64]), device="cpu")
     T = teachers(F, size, tr); best_t = max(stats(pnl(v[va], ret[va]))["sharpe"] for v in T.values())
     ck = []
@@ -127,13 +134,13 @@ def train(seed, rho=None, tag=None):
     (d / "run.json").write_text(json.dumps(dict(seed=seed, rho=rho, best_teacher_val_sharpe=best_t, ckpt=ck), indent=1))
 
 
-def test():
+def test(pre="s", report="test_report.json"):
     from stable_baselines3 import PPO
-    rp = OUT / "test_report.json"; assert not rp.exists(), "판정은 한 번만"
+    rp = OUT / report; assert not rp.exists(), "판정은 한 번만"
     F, X, size, _ = load(); Xn, ret = X.to_numpy(), F.ret.to_numpy(); tr = span(F, TRAIN)
     T = teachers(F, size, tr); rep = dict(seeds=SEEDS)
-    picks = {s: max(json.loads((OUT / f"s{s}" / "run.json").read_text())["ckpt"], key=lambda c: c["sharpe"])["step"] for s in SEEDS}
-    models = {s: PPO.load(OUT / f"s{s}" / f"{st}.zip", device="cpu") for s, st in picks.items()}; rep["picks"] = picks
+    picks = {s: max(json.loads((OUT / f"{pre}{s}" / "run.json").read_text())["ckpt"], key=lambda c: c["sharpe"])["step"] for s in SEEDS}
+    models = {s: PPO.load(OUT / f"{pre}{s}" / f"{st}.zip", device="cpu") for s, st in picks.items()}; rep["picks"] = picks
     per_seed = {}
     for name, p in (("VAL", VAL), ("TEST", TEST)):
         m = span(F, p); r = ret[m]
@@ -167,4 +174,7 @@ if __name__ == "__main__":
     elif a[:1] == ["--plant"]: train(SEEDS[0], rho=0.3, tag="plant")
     elif a[:1] == ["--train"]: assert int(a[1]) in SEEDS; train(int(a[1]))
     elif a[:1] == ["--test"]: test()
+    elif a[:1] == ["--plant-m"]: train(SEEDS[0], rho=0.3, tag="plant_m", mirror=True)        # v15 장치 검증
+    elif a[:1] == ["--train-m"]: assert int(a[1]) in SEEDS; train(int(a[1]), tag=f"m{a[1]}", mirror=True)
+    elif a[:1] == ["--test-v15"]: test("m", "test_report_v15.json")
     else: print(__doc__, SEEDS)
