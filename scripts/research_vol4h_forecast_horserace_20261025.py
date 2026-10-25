@@ -100,7 +100,7 @@ def fit_predict(m, Ftr, ytr, Fte):
     if m in ("M0", "M1", "M2"):
         b = np.linalg.lstsq(design(Ftr, m), ytr, rcond=None)[0]
         return design(Fte, m) @ b
-    if m in ("M3", "M4", "M3X", "M3XF", "M3D", "M3XD"):
+    if m in ("M3", "M4", "M3X", "M3XF", "M3D", "M3XD", "M3S", "M3XS"):
         from sklearn.ensemble import HistGradientBoostingRegressor
         A, B = (np.nan_to_num(F[SETS[m]].to_numpy(float)) for F in (Ftr, Fte))
         return np.mean([HistGradientBoostingRegressor(max_iter=300, learning_rate=0.06, max_depth=6, random_state=int(s))
@@ -111,8 +111,8 @@ def fit_predict(m, Ftr, ytr, Fte):
         return np.mean([lgb.LGBMRegressor(num_leaves=63, learning_rate=0.03, n_estimators=800, min_child_samples=200, subsample=0.8,
                                           subsample_freq=1, colsample_bytree=0.8, reg_lambda=1.0, random_state=int(s), verbose=-1, n_jobs=8)
                         .fit(A, ytr).predict(B) for s in SEEDS], axis=0)
-    if m in ("M6", "M6X", "M6XF", "M6D", "M6XD"):
-        return mlp(Ftr, ytr, Fte, SETS[{"M6": "M4", "M6X": "M4X", "M6XF": "M4XF", "M6D": "M4D", "M6XD": "M4XD"}[m]])
+    if m in ("M6", "M6X", "M6XF", "M6D", "M6XD", "M6S", "M6XS"):
+        return mlp(Ftr, ytr, Fte, SETS[{"M6": "M4", "M6X": "M4X", "M6XF": "M4XF", "M6D": "M4D", "M6XD": "M4XD", "M6S": "M4S", "M6XS": "M4XS"}[m]])
     raise KeyError(m)
 
 
@@ -742,6 +742,110 @@ def round10(check=False):
     (OUT / "report_r10.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out["verdict"]), json.dumps(out["season"]))
 
 
+# ---------- 11라운드 (98b7fd67): 매끄러운 달력 — dow 정수 → 주 주기 sin·cos · hod·wkend 뺌(hour_sin/cos 는 이미 있음) ----------
+CALS = ["dow_sin", "dow_cos"]
+SETS["M3S"] = [c for c in SETS["M3"] if c != "dow"] + CALS
+SETS["M4S"] = [c for c in SETS["M4"] if c not in ("dow", "hod", "wkend")] + CALS
+SETS["M3XS"], SETS["M4XS"] = SETS["M3S"] + MKT, SETS["M4S"] + MKT
+
+
+def cal_s(idx):
+    """봉 시작 시각(UTC)만의 함수 — 가격 안 봄. 주 주기 (요일 + 하루 몫)/7 의 sin·cos(build_features hour_sin/cos 와 같은 시각 기준)."""
+    d = (idx.dayofweek + (idx.hour + idx.minute / 60) / 24) / 7
+    return pd.DataFrame({"dow_sin": np.sin(2 * np.pi * d), "dow_cos": np.cos(2 * np.pi * d)}, index=idx)
+
+
+def round11(check=False):
+    T0 = time.time(); xs, fr, oks = {}, {}, {}
+    for s in COINS:
+        x, F, y, ok, _ = frame(s); C = cal_s(x.index); xs[s] = x; fr[s] = (F, y); oks[s] = (x.index, ok)
+        for c in CALS:
+            F[c] = C[c].values
+    if check:   # S11
+        import inspect, math
+        assert list(inspect.signature(cal_s).parameters) == ["idx"], "S11a"
+        x, F = xs["ETH"], fr["ETH"][0]; A = F[SETS["M4S"]].to_numpy(float); C = F[CALS].to_numpy(); rng = np.random.default_rng(11)
+        for i in rng.choice(len(x), 200, replace=False):
+            t = x.index[i].to_pydatetime(); d = 2 * math.pi * (t.weekday() + (t.hour + t.minute / 60) / 24) / 7
+            assert abs(math.sin(d) - C[i, 0]) < 1e-12 and abs(math.cos(d) - C[i, 1]) < 1e-12, ("S11b", t)
+        f4s = lambda xx: features(xx).join(cal_s(xx.index))[SETS["M4S"]].to_numpy(float)   # noqa: E731
+        dec = np.flatnonzero((x.index.minute == 55) & (x.index >= "2022-03-01"))[:-H]
+        for i in rng.choice(dec, 20, replace=False):
+            assert np.allclose(f4s(x.iloc[:i + 1])[-1], A[i], rtol=1e-9, atol=1e-12, equal_nan=True), ("S11c", x.index[i])
+            x2 = x.iloc[:i + 300].copy(); x2.iloc[i + 1:, x2.columns.get_indexer(["c", "h", "l"])] *= np.exp(rng.normal(0, .02, (len(x2) - i - 1, 1)))
+            assert np.allclose(f4s(x2)[i], A[i], rtol=1e-9, atol=1e-12, equal_nan=True), ("S11d", x.index[i])
+        assert (np.diff(x.index.asi8) == 300 * 10**9).all()
+        dm = float(np.abs(np.diff(C, axis=0)).max()); assert dm <= .0032, ("S11e", dm)
+        print(f"S11 통과: (a) 인자 = 시각 색인 · (b) 반복문 200 · (c) 절단 20 · (d) 뒤 흔들기 20 · (e) 이웃 봉 최대 차 {dm:.5f}", flush=True); return
+    add_mkt(fr)
+    wins = list(ROLL.items()) + [("4", (TR4_START, TR4_END, VA4_START, VA4_END, TE4_START, None))]
+    Q0, QS = ("M3", "M6", "PX3", "PX6"), ("M3S", "M6S", "PX3S", "PX6S")
+    out = {"parity_QX4_max_abs": {}, "jump": {}}
+    for tg, (tr0, tr1, va0, va1, te0, te1) in wins:
+        M = {}
+        for s in COINS:
+            (ts, ok), F = oks[s], fr[s][0]
+            ok = ok & np.isfinite(F[MKT].to_numpy(float)).all(1); le = ts + pd.Timedelta(minutes=5 * H); dec = ok & (ts.minute == 55)
+            ta = ok & (ts >= te0) & ((le <= te1) if te1 is not None else True)
+            M[s] = dict(tr=ok & (ts >= tr0) & (le <= tr1), va=dec & (ts >= va0) & (le <= va1), ta=ta, te=ta & dec)
+            M[s]["ev"] = M[s]["va"] | M[s]["ta"]; assert not (M[s]["va"] & M[s]["ta"]).any()
+        pr = {s: {} for s in COINS}
+        for s in COINS:
+            F, y = fr[s]
+            for m in ("M3S", "M6S", "M3", "M6"):
+                t0 = time.time(); pr[s][m] = fit_predict(m, F[M[s]["tr"]], y[M[s]["tr"]], F[M[s]["ev"]]); print(f"11R {tg} {s} {m} {time.time() - t0:.0f}s", flush=True)
+        A = pd.concat([fr[s][0][M[s]["tr"]] for s in COINS]); ya = np.concatenate([fr[s][1][M[s]["tr"]] for s in COINS])
+        E = pd.concat([fr[s][0][M[s]["ev"]] for s in COINS]); cuts = np.cumsum([M[s]["ev"].sum() for s in COINS])[:-1]
+        for m, base in (("PX3S", "M3XS"), ("PX6S", "M6XS"), ("PX3", "M3X"), ("PX6", "M6X")):
+            t0 = time.time()
+            for s, q in zip(COINS, np.split(fit_predict(base, A, ya, E), cuts)):
+                pr[s][m] = q
+            print(f"11R {tg} pooled {m} 학습 행 {len(ya)} {time.time() - t0:.0f}s", flush=True)
+        out["jump"][tg] = {}
+        for s in COINS:
+            F, y = fr[s]; ts = oks[s][0]; ev = np.flatnonzero(M[s]["ev"])
+            iv, it = np.isin(ev, np.flatnonzero(M[s]["va"])), np.isin(ev, np.flatnonzero(M[s]["te"]))
+            pr[s]["QX4S"], pr[s]["QX4"] = np.mean([pr[s][k] for k in QS], 0), np.mean([pr[s][k] for k in Q0], 0)
+            V, T = pd.read_parquet(OUT / f"pred_val_r{tg}_{s}.parquet"), pd.read_parquet(OUT / f"pred_test_r{tg}_{s}.parquet")
+            assert V.index.equals(ts[M[s]["va"]]) and T.index.equals(ts[M[s]["te"]]) and np.allclose(T.y, y[M[s]["te"]]) and np.allclose(V.y, y[M[s]["va"]]), (tg, s)
+            out["parity_QX4_max_abs"][f"{tg}_{s}"] = par = float(np.abs(pr[s]["QX4"][it] - T.t_QX4.values).max())
+            new = QS + ("QX4S",)
+            pv = {**{m: V[f"v_{m}"].values for m in ("QX4",) + Q0}, **{m: pr[s][m][iv] for m in new}}
+            pt = {**{m: T[f"t_{m}"].values for m in ("QX4",) + Q0}, **{m: pr[s][m][it] for m in new}}
+            pd.DataFrame({**{f"v_{k}": v for k, v in pv.items()}, "y": V.y.values}, index=V.index).to_parquet(OUT / f"pred_val_r11{tg}_{s}.parquet")
+            pd.DataFrame({**{f"t_{k}": v for k, v in pt.items()}, "y": T.y.values}, index=T.index).to_parquet(OUT / f"pred_test_r11{tg}_{s}.parquet")
+            tsa = ts[ev][~iv]; ok5 = np.r_[False, np.diff(tsa.asi8) == 300 * 10**9]   # 시험 모든 5분봉 · 연속 봉 차만
+            mid, m00 = ok5 & (tsa.hour == 23) & (tsa.minute == 55), ok5 & (tsa.hour == 0) & (tsa.minute == 0)
+            hr, oth = ok5 & (tsa.minute == 55) & ~mid, ok5 & ~mid & ~m00
+            jm = {}
+            for m in ("QX4", "QX4S") + Q0 + QS:
+                d = np.abs(np.diff(pr[s][m][~iv], prepend=np.nan)) / 2
+                jm[m] = {"midnight": float(d[mid].mean()), "midnight_max": float(d[mid].max()), "bar0000": float(d[m00].mean()), "hour55": float(d[hr].mean()), "other": float(d[oth].mean())}
+            out["jump"][tg][s] = jm
+            print(tg, s, "parity %.2e" % par, "| 계단 QX4", {k: round(v, 4) for k, v in jm["QX4"].items()}, "QX4S", {k: round(v, 4) for k, v in jm["QX4S"].items()}, flush=True)
+        print(f"11라운드 창 {tg} 완료 · {time.time() - T0:.0f}s", flush=True)
+    for s in COINS:
+        out[s] = {}
+        for a, b in (("QX4S", "QX4"), ("M3S", "M3"), ("M6S", "M6"), ("PX3S", "PX3"), ("PX6S", "PX6"), ("QX4S", "M3")):
+            days, per = [], {}
+            for tg in ("5W1", "5W2", "4"):
+                V, T = pd.read_parquet(OUT / f"pred_val_r11{tg}_{s}.parquet"), pd.read_parquet(OUT / f"pred_test_r11{tg}_{s}.parquet")
+                Lq = lambda m: qlike(T.y.values, T[f"t_{m}"].values + _c(V.y.values, V[f"v_{m}"].values))  # noqa: E731
+                d = pd.Series(Lq(a) - Lq(b), index=T.index).groupby(T.index.normalize()).mean(); days.append(d); per[tg] = float(d.mean())
+            ser = pd.concat(days).values; lo, hi = block_ci(ser, b=5, n=4000)
+            out[s][f"{a}-{b}"] = {"mean": float(ser.mean()), "ci": [float(lo), float(hi)], "per_window": per, "days": len(ser)}
+            print(s, f"{a}−{b} %+.4f [%+.4f,%+.4f]" % (ser.mean(), lo, hi), {k: round(v, 4) for k, v in per.items()}, flush=True)
+    j3 = out["jump"]["4"]
+    g2 = {s: bool(j3[s]["QX4S"]["midnight"] < j3[s]["QX4"]["midnight"] and j3[s]["QX4S"]["midnight"] <= 1.3 * j3[s]["QX4S"]["other"]
+                  and j3[s]["QX4S"]["bar0000"] <= 1.3 * j3[s]["QX4S"]["other"]) for s in COINS}
+    g1 = {s: bool(out[s]["QX4S-QX4"]["ci"][1] < 0.003) for s in COINS}
+    oth = ("XRP", "BTC", "SOL")
+    out["verdict"] = {"G1": g1, "G1_ETH": g1["ETH"], "G1_replication": sum(g1[s] for s in oth), "G2": g2,
+                      "G2_pass": g2["ETH"] and sum(g2[s] for s in oth) >= 2, "runtime_s": round(time.time() - T0)}
+    out["verdict"]["PASS"] = out["verdict"]["G1_ETH"] and out["verdict"]["G2_pass"]
+    (OUT / "report_r11.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out["verdict"]))
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if "--selfcheck" in a:
@@ -753,6 +857,8 @@ if __name__ == "__main__":
         round7(); sys.exit(0)
     if "--round10" in a:
         round10(check="--check" in a); sys.exit(0)
+    if "--round11" in a:
+        round11(check="--check" in a); sys.exit(0)
     if "--round9" in a:
         round9(check="--check" in a); sys.exit(0)
     if "--round6" in a:
