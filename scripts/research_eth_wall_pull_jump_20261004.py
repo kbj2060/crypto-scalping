@@ -76,7 +76,7 @@ def _best(arr, cur, low_side):
     return (nz[-1] if low_side else nz[0]) if len(nz) else -1
 
 
-def replay(lines, tick: int, idx_max: int = IDX_MAX, ctrl_every_s: int = 5):
+def replay(lines, tick: int, idx_max: int = IDX_MAX, ctrl_every_s: int = 5, on_sec=None, min_share: float = 0.0):
     """lines: 파일 줄 반복자. 반환 (events, controls, cover). 끊김(pu 불연속·_gap·잘린 줄)이면 그 시점에서 멈춘다
     (스냅샷이 시각 파일 첫 줄에만 있어 그 뒤 북은 복구 불가 -- ponytail: 다음 시각 파일에서 다시 시작)."""
     bid = np.zeros(idx_max); ask = np.zeros(idx_max)
@@ -126,6 +126,8 @@ def replay(lines, tick: int, idx_max: int = IDX_MAX, ctrl_every_s: int = 5):
                 nz = sl[sl > 0]
                 med[side] = md = float(np.median(nz)) if len(nz) else np.nan
                 dep[side] = float(sl.sum())
+                if on_sec is not None and side == 1:   # 매 초 첫 diff 적용 전 북 상태 (scripts/research_orderbook_5m_indicator_20261026.py)
+                    on_sec(t, bid, ask, bb, ba)
                 if np.isfinite(md):   # diff 로 안 건드려진 벽(스냅샷 벽 등)도 잡는다. 탄생 시각은 지금으로(나이 과소 = 보수적)
                     for j in np.flatnonzero(sl >= KS[0] * md):
                         tracked.setdefault((side, base + int(j)), [(t, float(sl[j])) + tuple(t if sl[j] >= k * md else None for k in KS)])
@@ -168,7 +170,8 @@ def replay(lines, tick: int, idx_max: int = IDX_MAX, ctrl_every_s: int = 5):
             ref = next((e for e in reversed(h) if e[0] <= t - CRITERIA["drop_window_ms"]), None)
             if ref is not None and ref[2] is not None and q <= (1 - CRITERIA["drop_frac"]) * ref[1] \
                     and (ref[0] - ref[2]) >= 0 and (t - CRITERIA["drop_window_ms"]) - ref[2] >= 1000:
-                events.append(_row(t, side, i, ref, q, md, pre_bb, pre_ba, bb, ba, tick, t - CRITERIA["drop_window_ms"], dep[side]))
+                if ref[1] >= min_share * dep[side]:   # min_share: 긴 재생에서 작은 사건을 안 쌓는다 (research_orderbook_5m_indicator_20261026.py)
+                    events.append(_row(t, side, i, ref, q, md, pre_bb, pre_ba, bb, ba, tick, t - CRITERIA["drop_window_ms"], dep[side]))
                 del tracked[(side, i)]
                 continue
             h.append((t, q) + s_new)
