@@ -100,7 +100,7 @@ def fit_predict(m, Ftr, ytr, Fte):
     if m in ("M0", "M1", "M2"):
         b = np.linalg.lstsq(design(Ftr, m), ytr, rcond=None)[0]
         return design(Fte, m) @ b
-    if m in ("M3", "M4", "M3X", "M3XF"):
+    if m in ("M3", "M4", "M3X", "M3XF", "M3D", "M3XD"):
         from sklearn.ensemble import HistGradientBoostingRegressor
         A, B = (np.nan_to_num(F[SETS[m]].to_numpy(float)) for F in (Ftr, Fte))
         return np.mean([HistGradientBoostingRegressor(max_iter=300, learning_rate=0.06, max_depth=6, random_state=int(s))
@@ -111,8 +111,8 @@ def fit_predict(m, Ftr, ytr, Fte):
         return np.mean([lgb.LGBMRegressor(num_leaves=63, learning_rate=0.03, n_estimators=800, min_child_samples=200, subsample=0.8,
                                           subsample_freq=1, colsample_bytree=0.8, reg_lambda=1.0, random_state=int(s), verbose=-1, n_jobs=8)
                         .fit(A, ytr).predict(B) for s in SEEDS], axis=0)
-    if m in ("M6", "M6X", "M6XF"):
-        return mlp(Ftr, ytr, Fte, SETS[{"M6": "M4", "M6X": "M4X", "M6XF": "M4XF"}[m]])
+    if m in ("M6", "M6X", "M6XF", "M6D", "M6XD"):
+        return mlp(Ftr, ytr, Fte, SETS[{"M6": "M4", "M6X": "M4X", "M6XF": "M4XF", "M6D": "M4D", "M6XD": "M4XD"}[m]])
     raise KeyError(m)
 
 
@@ -610,6 +610,138 @@ def round9(check=False):
     (OUT / "report_r9.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out["verdict"]))
 
 
+# ---------- 10라운드 (72d45be9): 장중 주기성 s_τ(요일×5분, 4코인 합침·주 정규화) · 달력 피쳐 → dlrv·lfwd_s ----------
+DS = ["dlrv12", "dlrv48", "dlrv288", "dlrv2016", "lfwd_s"]
+CAL = ["hour_sin", "hour_cos", "dow", "hod", "wkend"]
+SETS["M3D"] = [c for c in SETS["M3"] if c not in CAL] + DS
+SETS["M4D"] = [c for c in SETS["M4"] if c not in CAL] + DS
+SETS["M3XD"], SETS["M4XD"] = SETS["M3D"] + MKT, SETS["M4D"] + MKT
+
+
+def slot(ts):
+    return np.asarray(ts.dayofweek * 288 + ts.hour * 12 + ts.minute // 5)
+
+
+def season(xs, tr0, tr1):
+    """s²_τ (길이 2016, 평균 1): 학습 봉 [tr0,tr1] 만 · 코인마다 완전한 UTC 주의 r²/주평균 → 4코인·주 칸 평균."""
+    parts = []
+    for x in xs:
+        r = pd.Series(np.diff(np.log(x.c.values), prepend=np.log(x.c.values[0])), index=x.index)
+        r2 = r[(r.index >= tr0) & (r.index <= tr1)] ** 2
+        g = r2.groupby(r2.index.normalize() - pd.to_timedelta(r2.index.dayofweek, unit="D"))
+        parts.append((r2 / g.transform("mean"))[g.transform("size") == 2016])
+    a = pd.concat(parts); s2 = a.groupby(slot(a.index)).mean().reindex(range(2016)).to_numpy()
+    assert np.isfinite(s2).all()
+    return s2 / s2.mean()
+
+
+def ds_feats(x, s2):
+    """봉 i 까지의 r̃ = r/s 로 만든 dlrv · 라벨 창(봉 i+1~i+48) 칸의 ln mean s²(달력만)."""
+    sl = slot(x.index); r = np.diff(np.log(x.c.values), prepend=np.log(x.c.values[0]))
+    rt2 = pd.Series(r ** 2 / s2[sl]); cs = np.r_[0.0, np.cumsum(np.r_[s2, s2[:H]])]
+    f = {f"dlrv{w}": np.log(np.maximum(rt2.rolling(w).sum().values, 1e-10)) for w in (12, 48, 288, 2016)}
+    f["lfwd_s"] = np.log((cs[sl + 1 + H] - cs[sl + 1]) / H)
+    return pd.DataFrame(f, index=x.index)
+
+
+def round10(check=False):
+    T0 = time.time(); xs, fr, oks = {}, {}, {}
+    for s in COINS:
+        x, F, y, ok, _ = frame(s); xs[s] = x; fr[s] = (F, y); oks[s] = (x.index, ok)
+    add_mkt(fr)
+    wins = list(ROLL.items()) + [("4", (TR4_START, TR4_END, VA4_START, VA4_END, TE4_START, None))]
+    if check:   # S10
+        tr0, tr1 = wins[0][1][:2]; s2 = season([xs[k] for k in COINS], tr0, tr1); rng = np.random.default_rng(10)
+        bad = {k: xs[k].copy() for k in COINS}
+        for k in COINS:
+            m = bad[k].index > tr1; bad[k].loc[m, "c"] *= np.exp(rng.normal(0, .02, m.sum()))
+        assert np.array_equal(season([bad[k] for k in COINS], tr0, tr1), s2), "S10a"
+        x = xs["ETH"]; D = ds_feats(x, s2); dec = np.flatnonzero((x.index.minute == 55) & (x.index >= "2022-03-01"))[:-H]
+        for i in rng.choice(dec, 20, replace=False):
+            a = ds_feats(x.iloc[:i + 1], s2).iloc[-1].to_numpy()
+            assert np.allclose(a, D.iloc[i].to_numpy(), rtol=1e-9, atol=1e-12), ("S10b", x.index[i])
+            x2 = x.copy(); x2.iloc[i + 1:, x2.columns.get_loc("c")] *= np.exp(rng.normal(0, .02, len(x) - i - 1))
+            assert np.allclose(ds_feats(x2, s2).iloc[i].to_numpy(), D.iloc[i].to_numpy(), rtol=1e-9, atol=1e-12), ("S10c", x.index[i])
+        for i in rng.choice(len(x) - H, 200, replace=False):
+            t = x.index[i]; v = 0.0
+            for k in range(1, H + 1):
+                u = t + pd.Timedelta(minutes=5 * k); v += s2[u.dayofweek * 288 + u.hour * 12 + u.minute // 5]
+            assert abs(np.log(v / H) - D.lfwd_s.iloc[i]) < 1e-12, ("S10d", t)
+        print("S10 통과: (a) s 표 학습 봉만 · (b) 절단 20 · (c) 뒤 흔들기 20 · (d) lfwd_s 반복문 200", flush=True); return
+    out = {"season": {}, "jump": {}}; P = {s: {} for s in COINS}
+    for tg, (tr0, tr1, va0, va1, te0, te1) in wins:
+        s2 = season([xs[s] for s in COINS], tr0, tr1); sl = np.arange(2016)
+        out["season"][tg] = {"s2_at_00_over_rest": float(s2[sl % 12 == 0].mean() / s2[sl % 12 != 0].mean()),
+                             "s2_by_dow": np.round([s2[d * 288:(d + 1) * 288].mean() for d in range(7)], 3).tolist(),
+                             "s2_max_slot": int(s2.argmax()), "s2_max": float(s2.max()), "s2_min": float(s2.min())}
+        if tg != "5W1":
+            out["season"][tg]["corr_with_5W1"] = float(np.corrcoef(s2, out["season"]["_s2_5W1"])[0, 1])
+        else:
+            out["season"]["_s2_5W1"] = s2
+        M = {}
+        for s in COINS:
+            (ts, ok), F = oks[s], fr[s][0]; D = ds_feats(xs[s], s2)
+            for c in DS:
+                F[c] = D[c].values
+            ok = ok & np.isfinite(F[MKT + DS].to_numpy(float)).all(1); le = ts + pd.Timedelta(minutes=5 * H); dec = ok & (ts.minute == 55)
+            ta = ok & (ts >= te0) & ((le <= te1) if te1 is not None else True)
+            M[s] = dict(tr=ok & (ts >= tr0) & (le <= tr1), va=dec & (ts >= va0) & (le <= va1), ta=ta, te=ta & dec)
+            M[s]["ev"] = M[s]["va"] | M[s]["ta"]; assert not (M[s]["va"] & M[s]["ta"]).any()
+        per = [("M3D", "M3D"), ("M6D", "M6D")] + ([("M3", "M3"), ("M6", "M6")] if tg == "4" else [])
+        poo = [("PX3D", "M3XD"), ("PX6D", "M6XD")] + ([("PX3", "M3X"), ("PX6", "M6X")] if tg == "4" else [])
+        pr = {s: {} for s in COINS}
+        for s in COINS:
+            F, y = fr[s]
+            for m, base in per:
+                t0 = time.time(); pr[s][m] = fit_predict(base, F[M[s]["tr"]], y[M[s]["tr"]], F[M[s]["ev"]]); print(f"10R {tg} {s} {m} {time.time() - t0:.0f}s", flush=True)
+        A = pd.concat([fr[s][0][M[s]["tr"]] for s in COINS]); ya = np.concatenate([fr[s][1][M[s]["tr"]] for s in COINS])
+        E = pd.concat([fr[s][0][M[s]["ev"]] for s in COINS]); cuts = np.cumsum([M[s]["ev"].sum() for s in COINS])[:-1]
+        for m, base in poo:
+            t0 = time.time()
+            for s, q in zip(COINS, np.split(fit_predict(base, A, ya, E), cuts)):
+                pr[s][m] = q
+            print(f"10R {tg} pooled {m} 학습 행 {len(ya)} {time.time() - t0:.0f}s", flush=True)
+        for s in COINS:
+            F, y = fr[s]; ts = oks[s][0]; ev = np.flatnonzero(M[s]["ev"])
+            iv, it = np.isin(ev, np.flatnonzero(M[s]["va"])), np.isin(ev, np.flatnonzero(M[s]["te"]))
+            pr[s]["QX4D"] = np.mean([pr[s][k] for k in ("M3D", "M6D", "PX3D", "PX6D")], 0)
+            V, T = pd.read_parquet(OUT / f"pred_val_r{tg}_{s}.parquet"), pd.read_parquet(OUT / f"pred_test_r{tg}_{s}.parquet")
+            assert V.index.equals(ts[M[s]["va"]]) and T.index.equals(ts[M[s]["te"]]) and np.allclose(T.y, y[M[s]["te"]]) and np.allclose(V.y, y[M[s]["va"]]), (tg, s)
+            new = ("M3D", "M6D", "PX3D", "PX6D", "QX4D")
+            pv = {**{m: V[f"v_{m}"].values for m in ("QX4", "M3", "M6", "PX3", "PX6")}, **{m: pr[s][m][iv] for m in new}}
+            pt = {**{m: T[f"t_{m}"].values for m in ("QX4", "M3", "M6", "PX3", "PX6")}, **{m: pr[s][m][it] for m in new}}
+            pd.DataFrame({**{f"v_{k}": v for k, v in pv.items()}, "y": V.y.values}, index=V.index).to_parquet(OUT / f"pred_val_r10{tg}_{s}.parquet")
+            pd.DataFrame({**{f"t_{k}": v for k, v in pt.items()}, "y": T.y.values}, index=T.index).to_parquet(OUT / f"pred_test_r10{tg}_{s}.parquet")
+            if tg == "4":   # 정시 계단: W3 시험 모든 5분봉
+                pr[s]["QX4"] = np.mean([pr[s][k] for k in ("M3", "M6", "PX3", "PX6")], 0)
+                par = float(np.abs(pr[s]["QX4"][it] - T.t_QX4.values).max())
+                tsa = ts[ev][~iv]; ok5 = np.r_[False, np.diff(tsa.asi8) == 300 * 10**9]
+                at00, mid = ok5 & (tsa.minute == 55), ok5 & (tsa.hour == 23) & (tsa.minute == 55)
+                jm = {}
+                for m in ("M3", "M6", "PX3", "PX6", "QX4", "M3D", "M6D", "PX3D", "PX6D", "QX4D"):
+                    d = np.abs(np.diff(pr[s][m][~iv], prepend=np.nan)) / 2
+                    jm[m] = {"at00": float(d[at00].mean()), "other": float(d[ok5 & ~at00].mean()), "midnight": float(d[mid].mean()), "midnight_max": float(d[mid].max())}
+                out["jump"][s] = {"parity_QX4_max_abs": par, "n_bars": int(ok5.sum()), **jm}
+                print(s, "parity QX4 재학습 vs 저장", "%.2e" % par, "| 정시 계단 QX4", {k: round(v, 4) for k, v in jm["QX4"].items()}, "QX4D", {k: round(v, 4) for k, v in jm["QX4D"].items()}, flush=True)
+        print(f"10라운드 창 {tg} 완료 · {time.time() - T0:.0f}s", flush=True)
+    out["season"].pop("_s2_5W1")
+    for s in COINS:
+        out[s] = {}
+        for a, b in (("QX4D", "QX4"), ("M3D", "M3"), ("M6D", "M6"), ("PX3D", "PX3"), ("PX6D", "PX6"), ("QX4D", "M3")):
+            days, per = [], {}
+            for tg in ("5W1", "5W2", "4"):
+                V, T = pd.read_parquet(OUT / f"pred_val_r10{tg}_{s}.parquet"), pd.read_parquet(OUT / f"pred_test_r10{tg}_{s}.parquet")
+                Lq = lambda m: qlike(T.y.values, T[f"t_{m}"].values + _c(V.y.values, V[f"v_{m}"].values))  # noqa: E731
+                d = pd.Series(Lq(a) - Lq(b), index=T.index).groupby(T.index.normalize()).mean(); days.append(d); per[tg] = float(d.mean())
+            ser = pd.concat(days).values; lo, hi = block_ci(ser, b=5, n=4000)
+            out[s][f"{a}-{b}"] = {"mean": float(ser.mean()), "ci": [float(lo), float(hi)], "per_window": per, "days": len(ser)}
+            print(s, f"{a}−{b} %+.4f [%+.4f,%+.4f]" % (ser.mean(), lo, hi), {k: round(v, 4) for k, v in per.items()}, flush=True)
+    e = out["ETH"]["QX4D-QX4"]
+    out["verdict"] = {"ETH_win": e["ci"][1] < 0 and sum(v < 0 for v in e["per_window"].values()) >= 2,
+                      "replication": sum(out[s]["QX4D-QX4"]["ci"][1] < 0 for s in ("XRP", "BTC", "SOL")), "runtime_s": round(time.time() - T0)}
+    (OUT / "report_r10.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out["verdict"]), json.dumps(out["season"]))
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if "--selfcheck" in a:
@@ -619,6 +751,8 @@ if __name__ == "__main__":
                      ("M0", "M3", "M3j", "M6")); sys.exit(0)
     if "--round7" in a:
         round7(); sys.exit(0)
+    if "--round10" in a:
+        round10(check="--check" in a); sys.exit(0)
     if "--round9" in a:
         round9(check="--check" in a); sys.exit(0)
     if "--round6" in a:
