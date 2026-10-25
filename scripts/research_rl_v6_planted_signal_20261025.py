@@ -94,7 +94,8 @@ def report():
 
 
 # ---------- 2차 장치 진단(합성만): D1 오라클 BC · D2 BC 없음 · D3 BC 없음+lr3e-4·ent.01 · D4 BC 조기정지 .90+lr3e-4·ent.01 ----------
-VARIANTS = {"D1": dict(bc="oracle", ppo=False), "D2": dict(bc=None), "D3": dict(bc=None, lr=3e-4, ent=0.01), "D4": dict(bc="early", lr=3e-4, ent=0.01)}
+VARIANTS = {"D1": dict(bc="oracle", ppo=False), "D2": dict(bc=None), "D3": dict(bc=None, lr=3e-4, ent=0.01), "D4": dict(bc="early", lr=3e-4, ent=0.01),
+            "D5": dict(bc=None, total=1_000_000), "D6": dict(bc=None, lr=3e-4)}
 
 
 def bc_labels(model, Wd, span, label, stop=None, epochs=200):
@@ -131,7 +132,7 @@ def train_variant(var, seed, rho=0.12):
     elif cfg["bc"] == "early":
         b = bc_labels(m, Wd, tr, lambda w, d: int(w["D"][d]) + 1, stop=0.90)
     od = OUT / f"diag_{var}_r{rho}_s{seed}"; od.mkdir(parents=True, exist_ok=True); res = {"variant": var, "cfg": cfg, "rho": rho, "seed": seed, "bc": b, "ckpt": []}
-    for step in range(0, (R3.TOTAL if cfg.get("ppo", True) else 0) + 1, R3.CKPT):
+    for step in range(0, (cfg.get("total", R3.TOTAL) if cfg.get("ppo", True) else 0) + 1, R3.CKPT):
         if step:
             m.learn(R3.CKPT, reset_num_timesteps=False)
         sm, _ = evaluate(Wd, R3.picker(Wd, m, "tcn")); sm["step"] = step; res["ckpt"].append(sm)
