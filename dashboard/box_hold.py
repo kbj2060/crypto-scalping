@@ -77,6 +77,9 @@ def features(k1m: pd.DataFrame, events: list | None = None, prof: np.ndarray | N
             "V_park24": float(np.log(np.sqrt(np.mean(pk[-1440:])) + 1e-9) - np.log(s24)),
             "V_jump1h": float(np.max(np.abs(r[-60:])) / s24),
             "Q_imb1h": float(abs((2 * tb[-60:] - v[-60:]).sum() / v[-60:].sum())),
+            # 2026-10-26 점검: 연구 학습 피쳐는 긴 1분 이력에 pandas rolling 평균이라 같은 값이 1~2 ulp 흔들리고(학습 안에서도),
+            #   서빙 np.mean 과 70% 행에서 끝자리만 다르다 → HGB 경계에 걸린 행(30분 4.4%·1h 1.2%·4h 0%)만 예측이 갈리지만
+            #   2025~ Brier·AUC 는 같다(서빙이 같거나 미세하게 나음). 서빙은 그대로 두고, 재학습 때 학습 쪽을 이 식으로 맞춘다.
             "S_season_now": float(np.log(np.mean([PROF[how(t_ms - k * 60_000)] for k in range(60)])))}
     major, claims = event_times(events)
     out = {}
