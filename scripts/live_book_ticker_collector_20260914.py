@@ -71,6 +71,9 @@ def _gzip_done(path: Path) -> None:
         log.warning("압축 실패 %s: %s — 원본 유지", path.name, exc)
 
 
+FLUSH_SECONDS = 30.0
+
+
 class HourFile:
     """시각별 파일 하나. 열릴 때 헤더를 쓰고, 시각이 바뀌면 닫고 새로 연다."""
 
@@ -80,6 +83,7 @@ class HourFile:
         self.hour: str | None = None
         self.fh = None
         self.rows = 0
+        self.flushed = time.monotonic()
 
     def _path(self, ts_ms: int) -> tuple[str, Path]:
         dt = datetime.fromtimestamp(ts_ms / 1000, timezone.utc)
@@ -105,8 +109,13 @@ class HourFile:
             log.info("파일 전환 %s", path.name)
         self.fh.write(ROW.pack(ts_ms, bid, bq, ask, aq))
         self.rows += 1
-        if self.rows % 2000 == 0:          # 크래시 때 잃는 양을 2,000행(≈40초)으로 묶는다
+        # 크래시 때 잃는 양을 2,000행(≈40초) 또는 30초로 묶는다. 2026-10-25 시간 조건 추가: Pi 파이썬 3.14 는 기본 버퍼가
+        #   128KiB 라 디스크 쓰기가 2,000행 flush 때만 일어났다 -- 조용한 코인(HL HYPE 2.5~8행/초)은 4~13분 mtime 이 멈춰
+        #   워치독 신선도 5분 WARN 이 하루 200번 울렸다(데이터 공백은 0).
+        now = time.monotonic()
+        if self.rows % 2000 == 0 or now - self.flushed >= FLUSH_SECONDS:
             self.fh.flush()
+            self.flushed = now
 
     def close(self, compress: bool = False) -> None:
         path = self.dir / f"{self.hour}.bt" if self.hour else None
