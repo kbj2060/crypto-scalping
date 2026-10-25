@@ -539,6 +539,77 @@ def round7():
     (OUT / "report_r7.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out["verdict"]))
 
 
+# ---------- 9라운드 (fc1c6ad1): 15코인 합쳐 학습 PX3U·PX6U · MKT 는 4코인 평균 그대로 ----------
+PANEL11 = ("ADA", "ATOM", "AVAX", "BNB", "DOGE", "DOT", "FIL", "LINK", "LTC", "NEAR", "TRX")
+
+
+def panel_x(sym):
+    """패널만으로 x(h,l,c,v,n,filled) — bars5·load() 와 같은 채움 규칙 · REST 보충 없음(학습 전용, 학습 끝 < 패널 끝)."""
+    p = pd.read_parquet(SYS.D / f"binance_vision/panel/{sym}USDT.parquet", columns=["timestamp", "high", "low", "close", "volume", "trades"])
+    x = p.set_index("timestamp").rename(columns={"high": "h", "low": "l", "close": "c", "volume": "v", "trades": "n"})
+    x = x[~x.index.duplicated(keep="first")].sort_index().reindex(pd.date_range("2022-01-01", PANEL_END, freq="5min"))
+    x["c"] = x.c.ffill(); x["h"] = x.h.fillna(x.c); x["l"] = x.l.fillna(x.c); x[["v", "n"]] = x[["v", "n"]].fillna(0.0)
+    x["filled"] = ((x.h == x.l) & (x.h == x.c) & (x.c == x.c.shift()) & (x.n == 0)).astype(float)
+    return x
+
+
+def round9(check=False):
+    if check:   # S9: 패널 코인 피쳐도 봉 i 뒤를 잘라도 같은 행
+        x = panel_x("ADA"); F = features(x); rng = np.random.default_rng(9)
+        dec = np.flatnonzero((x.index.minute == 55) & (x.index >= "2022-03-01"))
+        for i in rng.choice(dec[dec < len(x) - H - 1], 10, replace=False):
+            a = features(x.iloc[:i + 1]).iloc[-1].to_numpy(float)
+            assert np.allclose(a, F.iloc[i].to_numpy(float), rtol=1e-9, atol=1e-12, equal_nan=True), x.index[i]
+        print("S9 패널 ADA 피쳐 절단 인과성 10 표본 통과", flush=True); return
+    T0 = time.time(); fr, oks = {}, {}
+    for s in COINS:
+        x, F, y, ok, _ = frame(s); fr[s] = (F, y); oks[s] = (x.index, ok)
+    add_mkt(fr); mkt = fr[COINS[0]][0][MKT]
+    for s in PANEL11:
+        x = panel_x(s); F = features(x)[SETS["M4"]]; y, nf = target(x)
+        ok = np.isfinite(y) & (nf < 5) & np.isfinite(F.to_numpy(float)).all(1)
+        F = pd.concat([F, mkt.reindex(F.index)], axis=1); fr[s] = (F, y); oks[s] = (x.index, ok)
+        print(f"패널 {s} 행 {int(ok.sum())} · 채움 {int(x.filled.sum())}", flush=True)
+    for tg, (tr0, tr1, va0, va1, te0, te1) in list(ROLL.items()) + [("4", (TR4_START, TR4_END, VA4_START, VA4_END, TE4_START, None))]:
+        M = {}
+        for s in fr:      # round4 마스크 그대로
+            (ts, ok), F = oks[s], fr[s][0]
+            ok = ok & np.isfinite(F[MKT].to_numpy(float)).all(1); le = ts + pd.Timedelta(minutes=5 * H); dec = ok & (ts.minute == 55)
+            M[s] = dict(tr=ok & (ts >= tr0) & (le <= tr1), va=dec & (ts >= va0) & (le <= va1), te=dec & (ts >= te0) & ((le <= te1) if te1 is not None else True))
+        A = pd.concat([fr[s][0].loc[M[s]["tr"], SETS["M4X"]] for s in fr]); ya = np.concatenate([fr[s][1][M[s]["tr"]] for s in fr])
+        E = pd.concat([fr[s][0].loc[M[s]["va"] | M[s]["te"], SETS["M4X"]] for s in COINS]); cuts = np.cumsum([(M[s]["va"] | M[s]["te"]).sum() for s in COINS])[:-1]
+        assert all(M[s]["va"].sum() + M[s]["te"].sum() == (M[s]["va"] | M[s]["te"]).sum() for s in COINS)
+        new = {}
+        for m, base in (("PX3U", "M3X"), ("PX6U", "M6X")):
+            t0 = time.time(); new[m] = dict(zip(COINS, np.split(fit_predict(base, A, ya, E), cuts)))
+            print(f"9라운드 창 {tg} {m} 학습 행 {len(ya)} {time.time() - t0:.0f}s", flush=True)
+        for s in COINS:
+            F, y = fr[s]; ts = oks[s][0]; nv = M[s]["va"].sum(); tsv, tst = ts[M[s]["va"]], ts[M[s]["te"]]
+            V, T = pd.read_parquet(OUT / f"pred_val_r{tg}_{s}.parquet"), pd.read_parquet(OUT / f"pred_test_r{tg}_{s}.parquet")
+            assert V.index.equals(tsv) and T.index.equals(tst) and np.allclose(T.y, y[M[s]["te"]]), (tg, s)
+            u3v, u3t, u6v, u6t = new["PX3U"][s][:nv], new["PX3U"][s][nv:], new["PX6U"][s][:nv], new["PX6U"][s][nv:]
+            pv = {"QX4": V.v_QX4.values, "QX4U": np.mean([V.v_M3, V.v_M6, u3v, u6v], 0), "PX3": V.v_PX3.values, "PX3U": u3v, "PX6": V.v_PX6.values, "PX6U": u6v, "M3": V.v_M3.values}
+            pt = {"QX4": T.t_QX4.values, "QX4U": np.mean([T.t_M3, T.t_M6, u3t, u6t], 0), "PX3": T.t_PX3.values, "PX3U": u3t, "PX6": T.t_PX6.values, "PX6U": u6t, "M3": T.t_M3.values}
+            pd.DataFrame({**{f"v_{k}": v for k, v in pv.items()}, "y": V.y.values}, index=tsv).to_parquet(OUT / f"pred_val_r9{tg}_{s}.parquet")
+            pd.DataFrame({**{f"t_{k}": v for k, v in pt.items()}, "y": T.y.values}, index=tst).to_parquet(OUT / f"pred_test_r9{tg}_{s}.parquet")
+    out = {}
+    for s in COINS:
+        out[s] = {}
+        for a, b in (("QX4U", "QX4"), ("PX3U", "PX3"), ("PX6U", "PX6"), ("QX4U", "M3")):
+            days, per = [], {}
+            for tg in ("5W1", "5W2", "4"):
+                V, T = pd.read_parquet(OUT / f"pred_val_r9{tg}_{s}.parquet"), pd.read_parquet(OUT / f"pred_test_r9{tg}_{s}.parquet")
+                Lq = lambda m: qlike(T.y.values, T[f"t_{m}"].values + _c(V.y.values, V[f"v_{m}"].values))  # noqa: E731
+                d = pd.Series(Lq(a) - Lq(b), index=T.index).groupby(T.index.normalize()).mean(); days.append(d); per[tg] = float(d.mean())
+            ser = pd.concat(days).values; lo, hi = block_ci(ser, b=5, n=4000)
+            out[s][f"{a}-{b}"] = {"mean": float(ser.mean()), "ci": [float(lo), float(hi)], "per_window": per, "days": len(ser)}
+            print(s, f"{a}−{b} %+.4f [%+.4f,%+.4f]" % (ser.mean(), lo, hi), {k: round(v, 4) for k, v in per.items()}, flush=True)
+    e = out["ETH"]["QX4U-QX4"]
+    out["verdict"] = {"ETH_win": e["ci"][1] < 0 and sum(v < 0 for v in e["per_window"].values()) >= 2,
+                      "replication": sum(out[s]["QX4U-QX4"]["ci"][1] < 0 for s in ("XRP", "BTC", "SOL")), "runtime_s": round(time.time() - T0)}
+    (OUT / "report_r9.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out["verdict"]))
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if "--selfcheck" in a:
@@ -548,6 +619,8 @@ if __name__ == "__main__":
                      ("M0", "M3", "M3j", "M6")); sys.exit(0)
     if "--round7" in a:
         round7(); sys.exit(0)
+    if "--round9" in a:
+        round9(check="--check" in a); sys.exit(0)
     if "--round6" in a:
         round6(); sys.exit(0)
     if "--roll" in a:
