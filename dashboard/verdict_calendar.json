@@ -184,6 +184,114 @@
    "what": "평균 순수익 > 0 이고 단측 t ≥ 1.675 면 통과 · 검정력: 표본 안 효과 절반이면 31%",
    "how": "python scripts/live_soxl_weekend_forward_recorder_20261022.py --look",
    "doc": "docs/experiments/soxl_weekend_fwd_prereg_20261022.md"
+  },
+  {
+   "id": "fwd_vol",
+   "date": "2026-12-23",
+   "kind": "최종",
+   "title": "4h 변동성 QX4 — 전진 60일(10-24~12-22) · 지금 화면에 배포된 모형",
+   "what": "QX4 가 옛 배포 HGB(M3)·HAR(M0)보다 QLIKE 가 낮은가(사전등록 «전진 판정» 절). 불통과면 서버 data/live/vol4h_qx4.joblib 를 지워 HGB 로 되돌린다",
+   "how": "python3 scripts/forward_verdicts_20261025.py vol  (로컬 · 연구 브랜치 claude/chart-indicators-tuning-ecfa25)",
+   "doc": "docs/prereg/vol4h_forecast_horserace_20261025.md"
+  },
+  {
+   "id": "fwd_box",
+   "date": "2026-12-23",
+   "kind": "최종",
+   "title": "박스 유지 보정 — 30분·1h R2a · 4h 27칸+Platt180·VA180 vs 배포",
+   "what": "4h 후보(배포 대기 C1)를 배포할지 · 1h 굴림 Platt90(배포됨)도 같은 창에서 확인",
+   "how": "python3 scripts/forward_verdicts_20261025.py box  (로컬 · 연구 브랜치)",
+   "doc": "docs/eth_box_hold_calibration_drift_prereg_20261025.md"
+  },
+  {
+   "id": "fwd_mlsize",
+   "date": "2026-12-23",
+   "kind": "최종",
+   "title": "ML 크기 상한 2배·같은 노출 + −5% 고정 손절 vs 규칙",
+   "what": "관문 C1·E1·E2·E3 넷 다 통과면 «ML 크기를 대시보드 크기로 교체 제안». 판정일 전엔 --status(건수만)",
+   "how": "python3 scripts/research_ml_size_stop_20261025.py --forward 2026-12-22  (로컬)",
+   "doc": "docs/prereg/ml_size_fwd_2x_20261025.md"
+  },
+  {
+   "id": "fwd_voliv",
+   "date": "2027-01-22",
+   "kind": "최종",
+   "title": "4h 변동성 QX4I(QX4 + 옵션 ATM IV 보정) vs QX4 — 90일",
+   "what": "ETH QLIKE(QX4I) − QLIKE(QX4) 일 블록 CI 상한 < 0 이면 IV 보정 서빙(배포 대기 B1) 추가 후보",
+   "how": "python3 scripts/forward_verdicts_20261025.py voliv  (로컬 · 연구 브랜치)",
+   "doc": "docs/prereg/vol4h_round12_iv_forward_20261025.md"
+  },
+  {
+   "id": "fwd_trend90",
+   "date": "2027-01-22",
+   "kind": "1차 점검",
+   "title": "추세 (b) 현재 규칙 + pv — 90일",
+   "what": "사전등록 «전진 판정» 절 1차 점검(최종 2027-04-22)",
+   "how": "python3 scripts/forward_verdicts_20261025.py trend90  (로컬 · 연구 브랜치)",
+   "doc": "docs/prereg/trend_portfolio_lit_20261025.md"
+  },
+  {
+   "id": "fwd_rl31",
+   "date": "2027-01-22",
+   "kind": "기록",
+   "title": "RL v3.1 동결 앙상블 — 90일(기록용)",
+   "what": "관문 G1~G4 그대로 · 무작위 400 시드 95분위",
+   "how": "python3 scripts/forward_verdicts_20261025.py rl  (로컬 · 연구 브랜치)",
+   "doc": "docs/prereg/rl_v31_tcn_ensemble_20261025.md"
+  },
+  {
+   "id": "fwd_optsell",
+   "date": "2027-03-24",
+   "kind": "최종",
+   "title": "옵션 순 델타 매도 꼬리(z<−1) 뒤 4h 하락",
+   "what": "사건 평균 4h 수익이 같은 창 무작위 칸보다 낮은 비율 > 95% 그리고 사건 ≥ 30",
+   "how": "python3 scripts/research_deribit_option_flow_direction_20261025.py --forward  (로컬 · 한 번만)",
+   "doc": "docs/prereg/deribit_option_sell_tail_forward_20261025.md"
+  },
+  {
+   "id": "fwd_trend180",
+   "date": "2027-04-22",
+   "kind": "최종",
+   "title": "추세 (b) 현재 규칙 + pv — 180일",
+   "what": "사전등록 «전진 판정» 절 최종",
+   "how": "python3 scripts/forward_verdicts_20261025.py trend180  (로컬 · 연구 브랜치)",
+   "doc": "docs/prereg/trend_portfolio_lit_20261025.md"
+  },
+  {
+   "id": "fwd_tsmom",
+   "date": "2027-04-24",
+   "kind": "최종",
+   "title": "변동성 크기 30일 TSMOM 규칙 — 180일(10-26~)",
+   "what": "F1 샤프 > 같은 창 항상 롱 1배 · F2 명목 원형이동 귀무 95분위 초과. 🔴서버 5-01 재학습 뒤 실행",
+   "how": "python3 scripts/forward_verdicts_20261025.py tsmom  (로컬 · 브랜치 claude/forward-tsmom-rlv19-20261026)",
+   "doc": "docs/prereg/tsmom_volsized_forward_20261026.md"
+  },
+  {
+   "id": "fwd_rlv19",
+   "date": "2027-04-24",
+   "kind": "최종",
+   "title": "RL v19 매매 에이전트(TSMOM 위 조정, 10시드) — 180일",
+   "what": "W1 RL 샤프 > T3 TSMOM · W2 조정 원형이동 > 90분위. 메이커 비용에선 방향 모델 규칙에 졌던 것(2.39 < 2.82) 함께 볼 것",
+   "how": "python3 scripts/forward_verdicts_20261025.py rlv19  (로컬 · 브랜치 claude/forward-tsmom-rlv19-20261026 · 서버 5-01 재학습 뒤)",
+   "doc": "docs/prereg/rl_v19_forward_20261026.md"
+  },
+  {
+   "id": "fwd_xsec",
+   "date": "2027-04-24",
+   "kind": "최종",
+   "title": "20코인 4h 상대 수익 딥러닝 롱숏 — 180일",
+   "what": "Z1 DL 4bp 순 샤프 > 0 · Z2 DL > 리지 · Z3 횡단면 IC 평균 > 0 셋 다. tmp/xsec_dl_20261026 파일 보존",
+   "how": "python3 scripts/forward_verdicts_20261025.py xsec  (로컬 · 브랜치 claude/forward-xsec-20261026 · 실행 코드는 판정일 전 추가)",
+   "doc": "docs/prereg/xsec_dl_forward_20261026.md"
+  },
+  {
+   "id": "box_events_renew",
+   "date": "2027-01-20",
+   "kind": "운영",
+   "title": "박스 유지 1h Platt90 — 거시 사건 파일(events.json) 갱신",
+   "what": "서버 data/live/box_hold_events_20261016.json 은 2026-12-31 까지. 2027-02-01 월간 적합 전에 2027 일정으로 다시 만들어 교체(안 하면 1월 사건 피쳐가 비어 보정이 어긋남)",
+   "how": "로컬 tmp/box_improve_20261016/events.json 생성 스크립트 재실행 → handoff push → 서버 같은 경로로 복사",
+   "doc": "docs/eth_box_hold_calibration_drift_prereg_20261025.md"
   }
  ]
 }
