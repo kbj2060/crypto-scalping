@@ -52,7 +52,7 @@ def test_atm_iv_and_ffill_match_research():
     cache = {h: Q.atm_iv(by_hour.get(h, []), h) for h in grid}
     n = 0
     for h in grid:
-        got, _ = Q.iv_now({k: v for k, v in cache.items() if k <= h}, h + 1, get=lambda p: pytest.fail("미리 채운 칸만 써야 함"))
+        got, _ = Q.iv_now({k: v for k, v in cache.items() if k <= h}, h + Q.SETTLE_MS, get=lambda p: pytest.fail("미리 채운 칸만 써야 함"))
         if h - 6 * Q.H1 < grid[0] or any(k not in cache for k in range(h - 6 * Q.H1, h + 1, Q.H1)):
             continue                                   # 날짜 경계(이어지지 않은 격자)는 ffill 비교 밖
         w = want.loc[h]

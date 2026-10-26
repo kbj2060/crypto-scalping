@@ -209,7 +209,7 @@ def qx4_from_klines(rows_by_coin: dict, art: dict, now_ms: float, coin: str = "E
 
 # ---------- QX4I(ETH 전용): QX4 + 옵션 ATM IV 보정 — docs/prereg/vol4h_round12_option_iv_20261025.md · 배포 대기 B1(조건부, 전진 voliv 2027-01-22) ----------
 BETA_I = (-0.04708836659130656, 0.17635794080180575)   # 12라운드 report.json beta_I 동결(연구 research_vol4h_round12_option_iv_20261025.BETA_I)
-H1 = 3_600_000
+H1, SETTLE_MS = 3_600_000, 60_000
 DERIBIT_TRADES = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency_and_time"   # 연구 원천 history.deribit.com 과 같은 API
 _INST = re.compile(r"^ETH-(\d+[A-Z]{3}\d{2})-(\d+)-([CP])$")
 
@@ -262,7 +262,7 @@ def fetch_option_trades(a_ms: int, b_ms: int, get=deribit_get):
 def iv_now(iv_by_hour: dict, now_ms: float, get=deribit_get):
     """직전 정시 d 의 IV — 연구 ffill(limit=6) 그대로: d 칸이 비면 6시간 안 가장 최근 칸. 시간 칸은 한 번 받으면 기억(iv_by_hour 제자리 갱신).
     반환 (iv | None, 그 칸 정시 ms | None). ponytail: 5분 봉 사이에도 직전 정시 IV 를 쓴다(연구 표본은 정시만 — 정시 사이 값은 검정 밖)."""
-    d = int(now_ms // H1 * H1)
+    d = int((now_ms - SETTLE_MS) // H1 * H1)   # 10-26 리뷰: 정시 직후 몇 초 안엔 체결 반영이 늦을 수 있다 -- 칸은 한 번 받으면 고정이라 정시 + 60초 뒤에만 연다
     for k in range(7):
         h = d - k * H1
         if h not in iv_by_hour:
