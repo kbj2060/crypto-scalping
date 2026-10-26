@@ -4580,9 +4580,10 @@ async function refreshOb5m() {
 const ob5mFor = () => (ob5m && ob5m.asset === activeSnapshotAsset ? ob5m : null);
 // 지금 tf 봉 시각 -> {tilt(평균, 북 없는 5분봉 뺌), up/dn(돌파), fu/fd(가짜벽 위/아래)} -- 렌더마다 1주일(2천 개)을 한 번 돈다
 function ob5mByTf(OB) {
-  const m = new Map(), at = (T) => m.get(T) || m.set(T, { s: 0, n: 0, up: 0, dn: 0, fu: 0, fd: 0, live: false, prov: false }).get(T);
+  const m = new Map(), at = (T) => m.get(T) || m.set(T, { s: 0, n: 0, up: 0, dn: 0, fu: 0, fd: 0, pup: 0, pdn: 0, pfu: 0, pfd: 0, live: false }).get(T);
   OB.bars.forEach((b, t) => { if (b.book_ok && b.tilt_pct != null) { const a = at(tfT(t)); a.s += b.tilt_pct; a.n++; a.live ||= !!b.live; } });
-  OB.marks.forEach((ms, t) => ms.forEach((x) => { const a = at(tfT(t)); a[x.kind === "eat" ? (x.side === "ask" ? "up" : "dn") : (x.side === "ask" ? "fu" : "fd")]++; a.prov ||= !!x.live; }));
+  // 임시 판정(진행 중·확정 전 봉)은 p 붙은 칸에 따로 센다 -- 15분·1시간 봉에 확정과 임시가 같이 있어도 확정 표식은 진하게(리뷰 10-26)
+  OB.marks.forEach((ms, t) => ms.forEach((x) => { const a = at(tfT(t)); a[(x.live ? "p" : "") + (x.kind === "eat" ? (x.side === "ask" ? "up" : "dn") : (x.side === "ask" ? "fu" : "fd"))]++; }));
   m.forEach((a) => { a.tilt = a.n ? a.s / a.n : null; });
   return m;
 }
@@ -7911,8 +7912,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const a = obAgg && candles[i] && obAgg.get(candles[i].time);
     if (!a) return "";
     const t = a.tilt == null ? "모름" : `${a.tilt >= 0 ? "+" : ""}${a.tilt.toFixed(1)}% (${a.tilt >= 0 ? "아래 매수 잔량이 두껍다" : "위 매도 잔량이 두껍다"})`;
-    const ev = [a.up && `▲ 매도벽 돌파 ${a.up}`, a.dn && `▼ 매수벽 돌파 ${a.dn}`, a.fu && `◆ 위 가짜벽 의심 ${a.fu}`, a.fd && `◆ 아래 가짜벽 의심 ${a.fd}`].filter(Boolean).join(" · ");
-    return `<br>호가 기울기 ${t}${a.live ? " · 진행 중(봉 끝에 확정)" : ""}${ev ? `<br>${ev}${a.prov ? " · 임시 판정(봉 끝 +70초에 확정)" : ""}` : ""}`;
+    const n = (k) => (a[k] || a["p" + k] ? `${a[k] + a["p" + k]}${a["p" + k] ? `(임시 ${a["p" + k]})` : ""}` : "");
+    const ev = [n("up") && `▲ 매도벽 돌파 ${n("up")}`, n("dn") && `▼ 매수벽 돌파 ${n("dn")}`, n("fu") && `◆ 위 가짜벽 의심 ${n("fu")}`, n("fd") && `◆ 아래 가짜벽 의심 ${n("fd")}`].filter(Boolean).join(" · ");
+    const prov = a.pup + a.pdn + a.pfu + a.pfd > 0;
+    return `<br>호가 기울기 ${t}${a.live ? " · 진행 중(봉 끝에 확정)" : ""}${ev ? `<br>${ev}${prov ? " · 임시 = 봉 끝 +70초에 확정" : ""}` : ""}`;
   };
   laneTip = (i) => {
     if (!fpBars.length) return "";
@@ -7970,10 +7973,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     tilts.forEach((v, i) => {
       if (v == null) return;                        // 북 모름은 칸을 비운다 -- 0 으로 그리지 않는다
       const x = cx(i) - bwid / 2;
-      if (colMax) { const k = Math.round(x), o = colMax.get(k); if (!o || Math.abs(o[1]) < Math.abs(v)) colMax.set(k, [x, v]); return; }
+      if (colMax) { const k = Math.round(x), o = colMax.get(k); if (!o || Math.abs(o[1]) < Math.abs(v)) colMax.set(k, [x, v, tLive[i]]); return; }
       bar(x, v, DENSE ? 0 : 1.5, tLive[i] ? 0.32 : 0.7);
     });
-    if (colMax) colMax.forEach(([x, v]) => bar(x, v));
+    if (colMax) colMax.forEach(([x, v, lv]) => bar(x, v, 0, lv ? 0.32 : 0.7));
     un.flush((f) => ops.push(f));
     // 거래대금 선 -- 값 없는 봉에서 끊는다(모름을 이어 그리지 않는다)
     const turns = rows.map((r) => (r ? r.turn : null)), uMax = Math.max(1e-9, ...turns.filter((v) => v != null)), uSc = (LH - 2) / uMax;
@@ -8077,15 +8080,17 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       segs.forEach(([x0, x1, y, col]) => cvStroke(ctx, [[x0, y], [x1, y]], col, 2.5, 0.9, "2 3"));
       candles.forEach((c, i) => {
         const a = agg.get(c.time);
-        if (!a || !(a.up || a.dn || a.fu || a.fd)) return;
-        const [eh, el] = ext.get(c.time) || [-Infinity, Infinity], x = xAt(i) + bw / 2, al = a.prov ? 0.45 : 1;   // 임시 판정 = 흐리게
+        if (!a) return;
+        const up = a.up || a.pup, dn = a.dn || a.pdn, fu = a.fu || a.pfu, fd = a.fd || a.pfd;   // 그릴지 = 확정|임시 · 농도 = 확정이 하나라도 있으면 진하게
+        if (!(up || dn || fu || fd)) return;
+        const al = (k) => (a[k] ? 1 : 0.45);
+        const [eh, el] = ext.get(c.time) || [-Infinity, Infinity], x = xAt(i) + bw / 2;   // 임시 판정 = 흐리게
         const yt = Math.min(yAt(Math.max(c.high, eh)) - (boxes ? 12 : 4), (liqTopAt.get(c.time) ?? Infinity) - 3), yb = yAt(Math.min(c.low, el)) + (boxes ? 30 : 4);
-        ctx.globalAlpha = al;
-        if (a.up) { ctx.fillStyle = cvc("var(--ob-bid)"); tri(ctx, x, yt, -1); }
-        if (a.dn) { ctx.fillStyle = cvc("var(--ob-ask)"); tri(ctx, x, yb, 1); }
+        if (up) { ctx.globalAlpha = al("up"); ctx.fillStyle = cvc("var(--ob-bid)"); tri(ctx, x, yt, -1); }
+        if (dn) { ctx.globalAlpha = al("dn"); ctx.fillStyle = cvc("var(--ob-ask)"); tri(ctx, x, yb, 1); }
         ctx.fillStyle = cvc("var(--ob-fake)");
-        if (a.fu) dia(ctx, x, yt - (a.up ? s * 1.6 + 2 : 0) - s);
-        if (a.fd) dia(ctx, x, yb + (a.dn ? s * 1.6 + 2 : 0) + s);
+        if (fu) { ctx.globalAlpha = al("fu"); dia(ctx, x, yt - (up ? s * 1.6 + 2 : 0) - s); }
+        if (fd) { ctx.globalAlpha = al("fd"); dia(ctx, x, yb + (dn ? s * 1.6 + 2 : 0) + s); }
       });
       ctx.globalAlpha = 1;
     } });

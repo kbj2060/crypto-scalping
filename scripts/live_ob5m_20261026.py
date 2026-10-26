@@ -286,17 +286,19 @@ class Bars:
         for k in sorted({*self.book, b}):
             for e in self.evs.get(k, []):
                 first.setdefault((e["t"], e["side"], e["px"]), dict(e))
-        E = [e for e in first.values() if is_big(e)]
+        warm = {k: v["warm"] for k, v in self.book.items()} | ({b: B["warm"]} if B else {})
+        E = [e for e in first.values() if is_big(e) and not warm.get(e["t"] // BAR, True)]   # 확정 규칙: warm 봉은 표식 없음(리뷰 10-26)
         marks = []
         if E:
-            now_s = t // 1000 + 1
-            self._fills(E, min(e["t"] for e in E) // 1000 - 180, now_s, None)
-            marks = [mark_of(e, e["t"] // BAR, k) for e in E if (k := kind_of(e)) in ("eat", "fake")]
+            last = self._fills(E, min(e["t"] for e in E) // 1000 - 180, t // 1000 + 1, None)
+            # 확정 규칙: 판정 불가 사건이 섞인 봉은 봉 전체가 모름 -- 테이프가 이미 지나간 초의 unk 만(아직 안 온 초는 다음 번에)
+            dead = {e["t"] // BAR for e in E if kind_of(e) == "unk" and last is not None and e["t"] // 1000 <= last}
+            marks = [mark_of(e, e["t"] // BAR, k) for e in E if (k := kind_of(e)) in ("eat", "fake") and e["t"] // BAR not in dead]
         self.live(B, marks)
 
     def _fills(self, E, lo_s, hi_s, end_s):
         """체결 몫: [사건−1초, 사건] 초들의 그 칸 반대쪽 테이커 · 테이프 빈 구간(±60초)·수집기 gaps 근처는 판정 불가(research fill_share·tape_bad).
-        end_s = 창 끝에 테이프가 있다고 볼 초(None = 마지막 테이프 초 뒤는 아직 모름)."""
+        end_s = 창 끝에 테이프가 있다고 볼 초(None = 마지막 테이프 초 뒤는 아직 모름). 돌려줌 = 마지막 테이프 초(없으면 None)."""
         rows, gaps = self.tape(lo_s, hi_s)
         bad = tape_bad(np.r_[lo_s, [r[0] for r in rows], [] if end_s is None else [end_s]], np.array([e["t"] // 1000 for e in E]))
         cell = collections.defaultdict(float)
@@ -308,6 +310,7 @@ class Bars:
             pb = int(round(e["px"] / BUCKET))
             tot = sum(cell.get((s, pb, e["side"]), 0.0) for s in range((e["t"] - 1000) // 1000, e["t"] // 1000 + 1))
             e["fill"] = min(1.0, tot / max(e["qref"] - e["q"], 1e-12))
+        return max((r[0] for r in rows), default=None)
 
     def _book(self, b, R):
         mids = [r["mid"] for r in R]
@@ -386,11 +389,15 @@ def db_open(path=DB):
 def db_write(con, B, marks, mine=None) -> bool:
     """이미 있는 온전한(warm 아님) 봉은 덮지 않는다 -- 재시작 뒤 재생은 짧은 사슬이라 벽 나이가 잘린 더 나쁜 값이다(리뷰 10-26).
     marks None = 봉 끝에 북 값만 먼저(사건 열 NULL) -- 그 봉은 mine 에 들어 SETTLE_MS 뒤 같은 프로세스의 사건 쓰기만 덮을 수 있다.
-    ponytail: 두 쓰기 사이(~70초)에 워커가 죽으면 그 봉 사건 열은 NULL(모름)로 남는다 -- 화면은 표식 없음으로 보일 뿐."""
-    old = con.execute("SELECT warm FROM bars WHERE t = ?", (B["t"],)).fetchone()
+    두 쓰기 사이(~70초)에 워커가 재시작되면 그 봉은 북 값만 있고 사건 열이 NULL -- 재시작 재생(한 시간 앞 파일부터)이 그 봉의 사건을
+    다시 판정하면 사건 열·표식만 채운다(북 값은 옛 긴 사슬 것 유지 · 리뷰 10-26: 전엔 영구 NULL)."""
+    old = con.execute("SELECT warm, eat_n_a FROM bars WHERE t = ?", (B["t"],)).fetchone()
     if old is not None and not old[0] and B["t"] not in (mine or ()):
-        return False
-    con.execute(f"INSERT OR REPLACE INTO bars({', '.join(B)}) VALUES ({', '.join('?' * len(B))})", list(B.values()))
+        if marks is None or old[1] is not None or B["warm"] or B.get("eat_n_a") is None:
+            return False
+        con.execute(f"UPDATE bars SET {', '.join(k + ' = ?' for k in EV_COLS)} WHERE t = ?", [B[k] for k in EV_COLS] + [B["t"]])
+    else:
+        con.execute(f"INSERT OR REPLACE INTO bars({', '.join(B)}) VALUES ({', '.join('?' * len(B))})", list(B.values()))
     if marks is not None:
         con.execute("DELETE FROM marks WHERE bar_t = ?", (B["t"],))
         con.executemany("INSERT OR REPLACE INTO marks VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -641,6 +648,19 @@ def selftest():
             bars.sec(row(k * 1000 + 1))
         if want is None:
             assert L == []; continue
+        if tape is full:                                                # 같은 봉에 테이프가 이미 지나간 판정 불가 사건이 섞이면 봉 전체 표식 없음(확정 규칙)
+            L2 = []
+            bars = Bars(lambda lo, hi: ([(s, 1001, 0.0, 0.0) for s in range(lo, hi) if not 20 <= s < 40], []), lambda B, m: None, lambda B, m: L2.append(m))
+            bars.live_lag = lag; bars.chain(-10**9); bars.event(fake1); bars.event({**fake1, "t": 30_000, "px": 100.12})   # 30초 = 빈 구간 ±60초 안 · 150초는 깨끗
+            for k in range(200):
+                bars.sec(row(k * 1000 + 1))
+            assert L2[-1] == []
+            L3 = []                                                     # warm 봉 = 표식 없음
+            bars = Bars(full, lambda B, m: None, lambda B, m: L3.append((B, m)))
+            bars.live_lag = lag; bars.chain(1); bars.event(fake1)
+            for k in range(200):
+                bars.sec(row(k * 1000 + 1))
+            assert L3[-1][0]["warm"] == 1 and L3[-1][1] == []
         B, m = L[-1]
         assert B["t"] == 0 and B["n_sec"] == 196 and abs(B["imb10"] - 0.5) < 1e-12 and B["wall_px_a"] == 100.10, B
         assert [x["kind"] for x in m] == want and all(x["bar_t"] == 0 for x in m)
@@ -654,6 +674,11 @@ def selftest():
         Bp = {k: v for k, v in B0.items() if k not in EV_COLS} | {"t": t1}
         assert db_write(con, Bp, None, mine) and mine == {t1} and not db_write(con, Bp, None, set())
         assert con.execute("SELECT fake_n_a FROM bars WHERE t = ?", (t1,)).fetchone()[0] is None
+        t2 = t1 + BAR                                                   # 재시작이 70초 창에 걸림: 새 프로세스(빈 mine)가 사건 열·표식만 채운다 · 북 값·이미 찬 사건은 그대로
+        assert db_write(con, {**Bp, "t": t2}, None, set()) and not db_write(con, {**B0, "t": t2, "imb10": 9.0, **dict.fromkeys(EV_COLS)}, [], set())
+        assert db_write(con, {**B0, "t": t2, "imb10": 9.0}, [{**M0[0], "bar_t": t2}], set()) and not db_write(con, {**B0, "t": t2}, [], set())
+        assert con.execute("SELECT imb10, fake_n_a FROM bars WHERE t = ?", (t2,)).fetchone() == (B0["imb10"], 1)
+        assert con.execute("SELECT count(*) FROM marks WHERE bar_t = ?", (t2,)).fetchone()[0] == 1
         assert db_write(con, {**B0, "t": t1}, [], mine) and mine == set() and not db_write(con, Bp, None, mine)
         assert con.execute("SELECT fake_n_a FROM bars WHERE t = ?", (t1,)).fetchone()[0] == 1
         # 따라 읽기(①): 줄을 반쯤 쓰다 멈춰도 완성된 줄만 · 다음 시 파일이 생기면 옛 파일 끝까지 · 옛 파일이 gz 로 바뀌고 지워져도 그대로

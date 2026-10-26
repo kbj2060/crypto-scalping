@@ -2627,7 +2627,8 @@ def make_app() -> web.Application:
             walls += run.values()
             marks = [{"t": t, "bar_t": bt, "side": s, "kind": k, "px": px, "usd": round(u or 0), "dist_bp": round(d, 2)}
                      for t, bt, s, k, px, u, d in read_rows(db, "SELECT t, bar_t, side, kind, px, usd, dist_bp FROM marks WHERE bar_t >= ? ORDER BY t", (cut,))]
-            known = {b["t"] for b in bars if b["events_known"]}   # 확정된 봉의 임시 표식은 버린다(워커가 확정을 먼저 쓰고 5초 안에 live 를 갈아 끼운다)
+            # 확정된 봉의 임시 표식은 버린다(워커가 확정을 먼저 쓰고 5초 안에 live 를 갈아 끼운다) -- 세 읽기 사이에 확정이 커밋돼도 같은 사건이 두 번 안 나오게 표식 자체로도 거른다(리뷰 10-26)
+            known = {b["t"] for b in bars if b["events_known"]} | {m["bar_t"] for m in marks}
             marks += [{"t": m["t"], "bar_t": m["bar_t"], "side": m["side"], "kind": m["kind"], "px": m["px"], "usd": round(m["usd"]),
                        "dist_bp": round(m["dist_bp"], 2), "live": True} for m in lmarks if m["bar_t"] not in known]
             return {"bars": bars, "walls": walls, "marks": marks}
