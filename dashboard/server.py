@@ -2645,6 +2645,12 @@ def make_app() -> web.Application:
         if not res.get("ok"):
             print(f"vol4h qx4 → HGB 대체: {res.get('reason')}", flush=True)
             return None
+        if asset == "eth":   # 2026-10-26 B1 QX4I(옵션 ATM IV 보정 · ETH 계수만 있음 · 조건부 채택, 전진 voliv 2027-01-22) -- 실패면 칸만 빠진다
+            from scripts.live_vol4h_qx4_20261025 import iv_now, qx4i_log
+            iv, hour = await asyncio.to_thread(iv_now, qx4_state.setdefault("iv", {}), time.time() * 1000)
+            if iv is not None:
+                s = math.exp(qx4i_log(res["log_rv"], iv) / 2)
+                res.update(iv_atm=iv, iv_hour_ms=hour, sig4h_iv_pct=round(100 * s, 3), sig4h_iv_usd=round(res["px"] * s, 2))
         return res
 
     async def api_vol_forecast(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, 표시 전용)

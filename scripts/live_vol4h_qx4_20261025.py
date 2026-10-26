@@ -11,7 +11,9 @@ QX4 = 평균(M3 코인별 HGB · M6 코인별 MLP · PX3 4코인 합쳐 HGB(+MKT
 
 배포 안 함(대시보드·서버 연결은 사용자 승인 후). 실주문 없음. 서버에서 torch 불필요(MLP 는 numpy 가중치로 저장).
 """
-import json, sys
+import json, re, sys, urllib.parse, urllib.request
+from datetime import datetime, timezone
+from math import erf
 from pathlib import Path
 import numpy as np, pandas as pd
 
@@ -200,9 +202,85 @@ def qx4_from_klines(rows_by_coin: dict, art: dict, now_ms: float, coin: str = "E
         return {"ok": True, "asof_ms": asof, "px": px, "sig4h_pct": round(100 * s4, 3), "sig4h_usd": round(px * s4, 2 if px >= 10 else 4),
                 "lvl": round(s4 / ref, 3), "x_now": round(s4 / now4, 3), "p_expand": round(float(1 / (1 + np.exp(-(a0 + a1 * np.log(s4 / now4))))), 3),
                 "ref_days": round(len(tail) / 288, 1), "sig4h_mean_pct": round(100 * sm, 3), "filled_bars_60d": filled[coin],
-                "model": "QX4", "model_train_end": art.get("train_end")}
+                "model": "QX4", "model_train_end": art.get("train_end"), "log_rv": float(p[-1])}
     except Exception as exc:  # noqa: BLE001 — 화면이 죽지 않게: 호출부는 ok False 면 배포 HGB 로 떨어진다
         return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:160]}
+
+
+# ---------- QX4I(ETH 전용): QX4 + 옵션 ATM IV 보정 — docs/prereg/vol4h_round12_option_iv_20261025.md · 배포 대기 B1(조건부, 전진 voliv 2027-01-22) ----------
+BETA_I = (-0.04708836659130656, 0.17635794080180575)   # 12라운드 report.json beta_I 동결(연구 research_vol4h_round12_option_iv_20261025.BETA_I)
+H1 = 3_600_000
+DERIBIT_TRADES = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency_and_time"   # 연구 원천 history.deribit.com 과 같은 API
+_INST = re.compile(r"^ETH-(\d+[A-Z]{3}\d{2})-(\d+)-([CP])$")
+
+
+def atm_iv(trades: list, d_ms: int):
+    """연구 hourly() 의 iv 한 칸: [d−1h, d) 체결 · 블록·청산 빼고 · BS 델타(r=0, 만기 08:00 UTC, 연 365.25일) |0.35~0.65| ·
+    만기까지 1시간~10일 → iv 중앙값. 해당 체결이 없으면 None."""
+    ivs = []
+    for t in trades:
+        ts, m, iv = int(t["timestamp"]), _INST.match(t["instrument_name"]), t.get("iv")
+        if not (d_ms - H1 <= ts < d_ms) or t.get("block_trade_id") or t.get("liquidation") or not m or iv is None or not iv > 0:
+            continue
+        exp = int(datetime.strptime(m[1], "%d%b%y").replace(tzinfo=timezone.utc).timestamp() * 1000) + 8 * H1
+        days = (exp - ts) / 86_400_000
+        if not 1 / 24 <= days <= 10:
+            continue
+        T, sig = days / 365.25, iv / 100
+        d = 0.5 * (1 + erf((np.log(t["index_price"] / float(m[2])) + 0.5 * sig**2 * T) / (sig * np.sqrt(T)) / np.sqrt(2))) - (m[3] == "P")
+        if 0.35 <= abs(d) <= 0.65:
+            ivs.append(float(iv))
+    return float(np.median(ivs)) if ivs else None
+
+
+def deribit_get(params: dict):
+    """Deribit 공개 GET → result(실패 None). 키 없음."""
+    try:
+        with urllib.request.urlopen(f"{DERIBIT_TRADES}?{urllib.parse.urlencode(params)}", timeout=15) as r:
+            return json.load(r)["result"]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def fetch_option_trades(a_ms: int, b_ms: int, get=deribit_get):
+    """[a, b) ETH 옵션 체결 전부 — 연구 fetch_day 와 같은 이어받기(1000개씩 · 같은 trade_id 한 번). 실패면 None."""
+    rows, seen, a = [], set(), a_ms
+    while a < b_ms:
+        res = get(dict(currency="ETH", kind="option", start_timestamp=a, end_timestamp=b_ms - 1, count=1000, sorting="asc"))
+        if res is None:
+            return None
+        tr = res.get("trades") or []
+        for x in tr:
+            if x["trade_id"] not in seen:
+                seen.add(x["trade_id"]); rows.append(x)
+        if not res.get("has_more") or not tr:
+            break
+        a = tr[-1]["timestamp"] if tr[-1]["timestamp"] > a else a + 1
+    return rows
+
+
+def iv_now(iv_by_hour: dict, now_ms: float, get=deribit_get):
+    """직전 정시 d 의 IV — 연구 ffill(limit=6) 그대로: d 칸이 비면 6시간 안 가장 최근 칸. 시간 칸은 한 번 받으면 기억(iv_by_hour 제자리 갱신).
+    반환 (iv | None, 그 칸 정시 ms | None). ponytail: 5분 봉 사이에도 직전 정시 IV 를 쓴다(연구 표본은 정시만 — 정시 사이 값은 검정 밖)."""
+    d = int(now_ms // H1 * H1)
+    for k in range(7):
+        h = d - k * H1
+        if h not in iv_by_hour:
+            tr = fetch_option_trades(h - H1, h, get)
+            if tr is None:
+                return None, None
+            iv_by_hour[h] = atm_iv(tr, h)
+        if iv_by_hour[h] is not None:
+            for old in [x for x in iv_by_hour if x < d - 7 * H1]:
+                del iv_by_hour[old]
+            return iv_by_hour[h], h
+    return None, None
+
+
+def qx4i_log(p: float, iv_pct) -> float:
+    """연구 qx4i(): ŷ + a + b·x1, x1 = ln(IV²·4/8766) − ŷ · IV 없으면 x1 = 0."""
+    x1 = 0.0 if iv_pct is None else float(np.log((iv_pct / 100) ** 2 * 4 / 8766) - p)
+    return p + BETA_I[0] + BETA_I[1] * x1
 
 
 # ---------- 점검·학습 ----------

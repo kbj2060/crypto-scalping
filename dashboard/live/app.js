@@ -7131,6 +7131,41 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     }
   }
 
+  // 2026-10-26 사용자 «B1 QX4I 도 풋프린트 차트에 박스 유지처럼»: 4h 변동성 QX4I(QX4 + 옵션 ATM IV 보정 · ETH 전용 · 조건부 채택, 전진 판정 2027-01-22)
+  //   ±1σ 를 같은 미래 칸에 «부채꼴»로 -- 지금(현재 봉 끝) 지금가에서 0 으로 시작해 √(경과/전체)로 벌어져 예측 끝(asof + 4h)에 ±σ4h(중앙값형).
+  //   박스(직사각형 = 유지 확률)와 구별되게 옵션 색 실선 · 묵은 값(15분↑)은 안 그림 · 화면 끝에서 잘리면 꺾쇠.
+  //   ponytail: 부채꼴 시작을 «지금»으로 당겼다(예측 기준 봉 시작과 최대 5분 차) -- 4h 끝 폭은 정확.
+  const vI = isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestVol4h && latestVol4h.ok && latestVol4h.asset === "eth"
+    && Number.isFinite(latestVol4h.sig4h_iv_pct) && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
+  if (vI && currentPrice > 0 && candles.length) {
+    const L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw;
+    const xT = (ms) => xAt(L) + ((ms / 1e3 - candles[L].time) / tfS) * slot;
+    const t0 = (candles[L].time + tfS) * 1e3, t1 = vI.asof_ms + 4 * 3600e3, xEnd = xT(t1);
+    if (xs < xr - 4 && xEnd > xs + 2 && t1 > t0) {
+      const g = document.createElementNS(NS, "g"), fs = mobileChart ? 9.5 : 10.5, col = "var(--option)", s = vI.sig4h_iv_pct / 100;
+      const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); return e; };
+      if (plotClip) g.setAttribute("clip-path", plotClip);
+      g.setAttribute("pointer-events", "none");
+      const up = [], dn = [], xMax = Math.min(xEnd, xr);
+      for (let i = 0; i <= 32; i++) {
+        const x = xs + (xMax - xs) * i / 32, k = s * Math.sqrt(Math.max(0, (x - xs) / (xEnd - xs)));
+        up.push([x, yAt(currentPrice * (1 + k))]); dn.push([x, yAt(currentPrice * (1 - k))]);
+      }
+      const pts = (a) => a.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+      add("polygon", { points: `${pts(up)} ${pts([...dn].reverse())}`, fill: col, "fill-opacity": 0.045 });
+      [up, dn].forEach((a) => add("polyline", { points: pts(a), fill: "none", stroke: col, "stroke-width": 1.5, "stroke-opacity": 0.9, "stroke-linejoin": "round" }));
+      const [xe, yu] = up[up.length - 1], yd = dn[dn.length - 1][1];
+      if (xEnd > xr + 1) [yu, yd].forEach((y) => add("path", { d: `M${xr - 7},${y - 4} L${xr - 3},${y} L${xr - 7},${y + 4}`, fill: "none", stroke: col, "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round" }));
+      else add("line", { x1: xe, x2: xe, y1: yu, y2: yd, stroke: col, "stroke-opacity": 0.55, "stroke-width": 1 });
+      // 글자는 아래 가장자리 밑(박스 글자는 위 경계 위) -- 화면 아래로 나가면 플롯 바닥에 붙인다
+      const ty = Math.min(yd + fs + 3, plotBottom - 4), pct = `±${vI.sig4h_iv_pct.toFixed(2)}%`;
+      add("text", { x: Math.min(xe, xr) - 4, y: ty, "text-anchor": "end", fill: col, stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke",
+        "font-family": "var(--font-mono)", "font-weight": 800, "font-size": fs },
+        mobileChart ? `4h 1σ ${pct}` : `4h 1σ ${pct} · 옵션 IV ${Math.round(vI.iv_atm)}`);
+      svg.appendChild(g);
+    }
+  }
+
   // 2026-10-26 펜 메모 «호가벽 데이터 선 표시들도 제거해줘»: 호가 띠 위 ±25·±50·±100bp 경계선 + «가격 · 수량» 꼬리표(2026-10-06 시안 G)를 뺐다 -- 같은 값은 ④ 벽 판(book.sweep)에 그대로.
 
   // 2026-09-30 30분 도달 선 제거(사용자 지시 -- «±0.5×30분 폭에 닿는가»는 옵션 예상 폭 띠와 같은 크기 정보라 중복).
