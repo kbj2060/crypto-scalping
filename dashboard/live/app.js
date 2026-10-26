@@ -326,8 +326,10 @@ const API_OI_5M_URL = "/api/oi-5m";
 //   최근 1·7·30일에 열려 아직 남은 계약(추정 · 회전+나이 가중 닫기 · 10-22 롱·숏 분리 근사, dashboard/position_profile.py). 지도로만, 신호 아님.
 const API_POSITION_PROFILE_URL = "/api/position-profile";
 let latestPositionProfile = null, posProfileFetchAt = 0, posProfileInflight = false;
-let fpColMode = (() => { try { return localStorage.getItem("fpCol") === "pos" ? "pos" : "trade"; } catch (e) { return "trade"; } })();
+let fpColMode = (() => { try { const v = localStorage.getItem("fpCol"); return v === "pos" || v === "liq" ? v : "trade"; } catch (e) { return "trade"; } })();
 let fpPosWin = (() => { try { const v = Number(localStorage.getItem("fpPosWin")); return v === 1 || v === 30 ? v : 7; } catch (e) { return 7; } })();
+// 2026-10-27 «청산» 기둥 기간 -- 옛 청산맵 보기의 1d·7d·30d 저장값(liqDays)을 그대로 잇는다
+let fpLiqWin = (() => { try { const v = Number(localStorage.getItem("liqDays")); return v === 7 || v === 30 ? v : 1; } catch (e) { return 1; } })();
 // 토글은 SVG 가 아니라 **HTML 버튼**을 차트 위 같은 자리에 띄운다(10-10 검토): 차트는 매초 통째로 다시 그려져서
 //   SVG 버튼이면 포커스가 사라지고 누르는 순간 교체되면 키 입력이 빠졌다. 이 상자는 한 번 만들고 자리·상태만 바꾼다.
 function fpColTogEl(svg) {
@@ -338,7 +340,7 @@ function fpColTogEl(svg) {
   el.innerHTML = '<span class="fp-col-seg fp-col-win" role="group" aria-label="포지션 기간">'
     + '<button type="button" data-win="1">1d</button><button type="button" data-win="7">7d</button><button type="button" data-win="30">30d</button></span>'
     + '<span class="fp-col-seg" role="group" aria-label="체결 또는 포지션">'
-    + '<button type="button" data-col="trade">체결</button><button type="button" data-col="pos">포지션</button></span>';
+    + '<button type="button" data-col="trade">체결</button><button type="button" data-col="pos">포지션</button><button type="button" data-col="liq">청산</button></span>';
   el.addEventListener("pointerdown", (e) => e.stopPropagation());   // 차트 끌기로 번지지 않게
   el.addEventListener("click", (e) => {
     const b = e.target.closest("button");
@@ -354,10 +356,11 @@ function placeFpColTog(svg, xr, yTop, show) {   // xr·yTop = viewBox 좌표(체
   if (!el) return;
   if (el.hidden !== !show) el.hidden = !show;
   if (!show) return;
-  el.classList.toggle("pos", fpColMode === "pos");
+  el.classList.toggle("pos", fpColMode === "pos"); el.classList.toggle("liq", fpColMode === "liq");
+  const win = fpColMode === "liq" ? fpLiqWin : fpPosWin;
   el.querySelectorAll("[data-col]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.col === fpColMode)));
-  el.querySelectorAll("[data-win]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.win) === fpPosWin)));
-  el.querySelector(".fp-col-win").hidden = fpColMode !== "pos";
+  el.querySelectorAll("[data-win]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.win) === win)));
+  el.querySelector(".fp-col-win").hidden = fpColMode === "trade";
   const m = svg.getScreenCTM(), pr = el.parentElement.getBoundingClientRect();
   if (!m) return;
   const L = Math.round(m.a * xr + m.e - pr.left) + "px", T = Math.round(m.d * yTop + m.f - pr.top) + "px";
@@ -366,8 +369,8 @@ function placeFpColTog(svg, xr, yTop, show) {   // xr·yTop = viewBox 좌표(체
 }
 function setFpCol(mode, win) {
   if (mode) fpColMode = mode;
-  if (win) fpPosWin = win;
-  try { localStorage.setItem("fpCol", fpColMode); localStorage.setItem("fpPosWin", String(fpPosWin)); } catch (e) { /* 저장 못 해도 동작 */ }
+  if (win) { if (fpColMode === "liq") fpLiqWin = win; else fpPosWin = win; }
+  try { localStorage.setItem("fpCol", fpColMode); localStorage.setItem("fpPosWin", String(fpPosWin)); localStorage.setItem("liqDays", String(fpLiqWin)); } catch (e) { /* 저장 못 해도 동작 */ }
   if (fpColMode === "pos") { posProfileFetchAt = 0; refreshPositionProfile(); }
   hideTooltip(); scheduleSnapshotChartRender();
 }
@@ -5829,6 +5832,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   let tradeInfo = null;       // 체결 행(호버가 읽는다) -- 풋프린트 블록이 채운다
   let stackItem = null, liqLive = null, cellTip = () => "";   // 2026-10-20 형성 봉 갱신(fpCv.live)이 다시 부르는 봉별 칠하기 · 칸 호버 줄
   let posInfo = null;         // 2026-10-10 포지션 행(호버가 읽는다) -- 포지션 보기일 때 체결 대신
+  let liqInfo = null;         // 2026-10-27 청산 행(호버가 읽는다) -- 청산 보기일 때 체결 대신
   let fpRowSize = 0;          // 풋프린트 행 크기($) -- 호가 띠가 같은 행으로 묶는다(2026-09-28)
   let fpRowOff = 0;           // 그 행 격자의 어긋남($) = 버킷/2 (2026-10-11, 아래 off)
   const ch = h - mt - mb - QUAD_H - (LANE_MERGE ? 0 : CUM_H + LANE_GAP) - LANE_GAP
@@ -6284,7 +6288,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   포지션 = 최근 1·7·30일에 열려 아직 남은 계약(추정 · 2026-10-22 롱·숏 분리 근사, 시안 A). 체결 기둥과 같은 자리·같은 행·같은 바닥선에서 왼쪽으로.
     //   풋프린트 가격 폭이 좁아 대부분이 화면 밖이다 -- 위·아래 끝에 «화면 밖 몫», 기둥 왼쪽 10px 에 창 전체 미니맵 + 보이는 범위 괄호.
     //   🔴지도다. 덩어리 저항·재방문·고통 지수는 매매 검정 불통과(= VWAP 평균회귀 재표현, 2026-10-09).
-    const posOn = !!(TRADE_W && fpColMode === "pos" && flowOn());
+    const posOn = !!(TRADE_W && fpColMode === "pos" && flowOn()), liqOn = !!(TRADE_W && fpColMode === "liq" && flowOn());
     post.push(() => placeFpColTog(svg, tradeX0 + TRADE_W - 2, mt - 16, !!(TRADE_W && flowOn()
       && !(typeof window.fpLiqActive === "function" && window.fpLiqActive())
       && !(typeof window.fpBubbleActive === "function" && window.fpBubbleActive())
@@ -6392,7 +6396,99 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       ln.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ln);
       svg.appendChild(g);
     }
-    if (!posOn) {
+    // ── 청산 기둥 (2026-10-27 사용자 «체결/포지션 칸에 청산을 만들어서 청산맵을 풋프린트에 붙여줘» · «청산맵» 보기 탭은 뺐다) ──────────
+    //   옛 청산맵 보기의 지도(liq_profile.js · 1d = /api/liquidation-map · 7·30d = /tiers)를 풋프린트 행 격자에 얹는다. 지나간 칸은 지운 값(fpLiqColTp).
+    //   막대 = 그 행의 추정 청산(바닥선부터 10·25·50·100배 쌓기) · 선 = 현재가에서 그 가격까지 누적(위 = 숏 청산 초록 · 아래 = 롱 청산 빨강).
+    //   🔴추정이지 실측 청산이 아니다. 벽 «뚫림»은 거리비가 거의 다 설명(2026-10-13) -- 지도로만.
+    if (liqOn) {
+      const tp = typeof window.fpLiqColTp === "function" ? window.fpLiqColTp(fpLiqWin) : null;
+      const anchor = tradeX0 + TRADE_W + 4, Lw = TRADE_W - 10, g = document.createElementNS(NS, "g");
+      const rect = (x, y, wd, ht, fill, op) => {
+        const r = document.createElementNS(NS, "rect");
+        r.setAttribute("x", x); r.setAttribute("y", y); r.setAttribute("width", Math.max(0, wd)); r.setAttribute("height", Math.max(1, ht));
+        r.setAttribute("fill", fill); r.setAttribute("fill-opacity", op); g.appendChild(r); return r;
+      };
+      const label = (x, y, str, fill) => {
+        const t = document.createElementNS(NS, "text");
+        t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("text-anchor", "end"); t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "700");
+        t.setAttribute("fill", fill); t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke", "var(--chart-bg)"); t.setAttribute("stroke-width", "3");
+        t.textContent = str; g.appendChild(t);
+      };
+      if (!tp || !tp.tiers || !tp.tiers.length || !(currentPrice > 0)) label(anchor - 4, mt + 14, "청산맵 불러오는 중…", "var(--muted)");
+      else {
+        const bw = tp.bin_width, nT = tp.tiers.length, TV = ["--lev10", "--lev25", "--lev50", "--lev100"];
+        const fu = (v) => tp.unit === "share" ? (v * 100).toFixed(v >= 0.1 ? 0 : 1) + "%" : v >= 1e9 ? "$" + (v / 1e9).toFixed(2) + "B" : fmtUsdCompact(v);
+        const tot = tp.tiers[0].values.map((_, j) => tp.tiers.reduce((a, t) => a + (t.values[j] > 0 ? t.values[j] : 0), 0));
+        // 누적 = 현재가와 그 가격 사이에 가운데가 든 칸의 합(칸 k 의 가운데 = k×bw, liq_profile.js liveTp)
+        // up = 숏 쪽(현재가 위로)인지 명시 -- 위아래로 끌어 현재가가 화면 밖이면 «가격 > 현재가»로 쪽을 짐작하면 뒤집힌다(리뷰)
+        const cum = (price, up) => tot.reduce((a, v, j) => { const c = (tp.lo + j) * bw; return a + (up ? c > currentPrice && c <= price : c < currentPrice && c >= price) * v; }, 0);
+        const rows = new Map();   // 행 -> 배수 구간별 값
+        tp.tiers.forEach((t, ti) => t.values.forEach((v, j) => {
+          const p0 = (tp.lo + j - 0.5) * bw, p1 = p0 + bw;
+          if (!(v > 0) || p1 <= yMin - rowSize || p0 >= yMax + rowSize) return;   // 줄 하나 여유 -- 화면 끝에 걸친 줄도 화면 밖 칸 몫까지 다 센다(검증에서 잘린 줄이 작게 나옴)
+          for (let k = rowOf(p0); rowLo(k) < p1; k++) {   // 칸을 걸치는 행마다 겹친 길이만큼(포지션 기둥과 같은 나눔)
+            const ov = Math.min(p1, rowLo(k + 1)) - Math.max(p0, rowLo(k));
+            if (ov > 0) { const a = rows.get(k) || new Array(nT).fill(0); a[ti] += v * ov / bw; rows.set(k, a); }
+          }
+        }));
+        rows.forEach((a, k) => { if (rowLo(k + 1) <= yMin || rowLo(k) >= yMax) rows.delete(k); });   // 여유로 생긴 화면 밖 줄은 최대·테두리에서 뺀다
+        const sum = (a) => a.reduce((x, y) => x + y, 0);
+        let mx = 0, topUp = null, topDn = null;
+        rows.forEach((a, k) => {
+          const q = sum(a), up = rowLo(k) + rowSize / 2 > currentPrice;
+          if (q > mx) mx = q;
+          if (up && (!topUp || q > topUp[1])) topUp = [k, q];
+          if (!up && (!topDn || q > topDn[1])) topDn = [k, q];
+        });
+        // 누적 = 옛 청산맵과 같은 모양(면 10% + 2px 선 · 롱 빨강 / 숏 초록 · 두 쪽 같은 자) -- 면은 막대 아래, 선은 막대 위(좁은 기둥이라 가려지지 않게)
+        // 현재가가 화면 밖이면 그 쪽 선은 없고, 반대쪽 선은 화면 끝(c0)에서 그때까지의 누적부터 시작한다
+        const cU = currentPrice < yMax ? cum(yMax, true) : 0, cD = currentPrice > yMin ? cum(yMin, false) : 0, cmax = Math.max(cU, cD);
+        const c0 = Math.min(Math.max(currentPrice, yMin), yMax), xAt = (c, up) => (anchor - Lw * cum(c, up) / cmax).toFixed(1);
+        const curves = !(cmax > 0) ? [] : [[true, cU, "var(--good)"], [false, cD, "var(--bad)"]].filter(([, c]) => c > 0).map(([up, , col]) => {
+          const y0 = yAt(c0).toFixed(1), pts = [`${xAt(c0, up)},${y0}`];
+          for (let k = rowOf(c0); up ? rowLo(k) < yMax : rowLo(k + 1) > yMin; k += up ? 1 : -1) {
+            const b = up ? Math.min(rowLo(k + 1), yMax) : Math.max(rowLo(k), yMin);
+            pts.push(`${xAt(b, up)},${yAt(b).toFixed(1)}`);
+          }
+          const area = document.createElementNS(NS, "polygon");
+          area.setAttribute("points", pts.concat(`${anchor},${pts[pts.length - 1].split(",")[1]}`, `${anchor},${y0}`).join(" "));
+          area.setAttribute("fill", col); area.setAttribute("fill-opacity", "0.1"); g.appendChild(area);
+          return [pts, col];
+        });
+        rows.forEach((a, k) => {
+          const yTop = Math.max(mt, yAt(rowLo(k + 1))), yBot = Math.min(plotBottom, yAt(rowLo(k)));
+          if (yBot - yTop < 1 || !(mx > 0)) return;
+          let cur = 0;
+          a.forEach((v, ti) => { const wd = Lw * v / mx; if (wd > 0) { rect(anchor - cur - wd, yTop + 0.5, wd, yBot - yTop - 1, `var(${TV[Math.min(ti, 3)]})`, 0.9); cur += wd; } });
+          if ((topUp && k === topUp[0]) || (topDn && k === topDn[0])) {   // 위·아래 가장 큰 행 = 테두리(체결 POC 와 같은 표시)
+            const o = rect(anchor - cur, yTop + 0.5, cur, yBot - yTop - 1, "none", 1); o.setAttribute("stroke", "var(--ink)"); o.setAttribute("stroke-width", "1.2");
+          }
+        });
+        curves.forEach(([pts, col]) => {
+          const pl = document.createElementNS(NS, "polyline");
+          pl.setAttribute("points", pts.join(" ")); pl.setAttribute("fill", "none"); pl.setAttribute("stroke", col); pl.setAttribute("stroke-width", "2");
+          pl.setAttribute("stroke-linejoin", "round"); g.appendChild(pl);
+        });
+        // 누적 자 눈금(옛 청산맵 오른쪽 축) -- 기둥 왼쪽 끝 세로 점선 = 누적 자의 끝 값 · 머리·바닥 줄 = 화면 끝까지 누적 / 지도 전체(옛 범례)
+        if (cmax > 0) {
+          const x = anchor - Lw, t = document.createElementNS(NS, "line");
+          t.setAttribute("x1", x); t.setAttribute("x2", x); t.setAttribute("y1", mt); t.setAttribute("y2", plotBottom);
+          t.setAttribute("stroke", "var(--line)"); t.setAttribute("stroke-dasharray", "2 4"); g.insertBefore(t, g.firstChild);
+          label(x, mt + 38, `누적 자 끝 ${fu(cmax)}`, "var(--muted)"); g.lastChild.setAttribute("text-anchor", "start");
+        }
+        const all = (up) => tot.reduce((a, v, j) => a + (up ? (tp.lo + j) * bw > currentPrice : (tp.lo + j) * bw < currentPrice) * v, 0);
+        label(anchor - 4, mt + 12, `누적 숏 청산 ↑ ${fu(cU)}`, "var(--good)");
+        label(anchor - 4, mt + 24, `지도 전체 ${fu(all(true))}`, "var(--muted)");
+        label(anchor - 4, plotBottom - 16, `지도 전체 ${fu(all(false))}`, "var(--muted)");
+        label(anchor - 4, plotBottom - 4, `누적 롱 청산 ↓ ${fu(cD)}`, "var(--bad)");
+        liqInfo = { rows, rowSize, off, x0: tradeX0, x1: anchor, cum, fu, names: tp.tiers.map((t) => t.name), win: fpLiqWin };
+      }
+      const ln = document.createElementNS(NS, "line");
+      ln.setAttribute("x1", anchor + 1); ln.setAttribute("x2", anchor + 1); ln.setAttribute("y1", mt); ln.setAttribute("y2", plotBottom);
+      ln.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ln);
+      svg.appendChild(g);
+    }
+    if (!posOn && !liqOn) {
       const tr = new Map();   // 행 키 -> [총, 고래, 리테일, 매수, 매도]
       candles.forEach((c) => (footprint.byTime.get(c.time) || []).forEach((l) => {
         const k = rowOf(l[0]), a = tr.get(k) || [0, 0, 0, 0, 0];
@@ -7606,6 +7702,22 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         + `<br>지금 상태: <span style="font-weight:700">${up ? "롱 물림 · 숏 수익" : "롱 수익 · 숏 물림"}</span> (현재가 ${up ? "위" : "아래"} ${(Math.abs(mid / currentPrice - 1) * 100).toFixed(1)}%)`
         + (posInfo.hours < posInfo.win * 24 - 1 ? `<br>창 실제 범위 ${posInfo.hours}시간(서버 기록이 아직 덜 참)` : "")
         + `<br><span style="opacity:.7">추정(5분 OI·거래량 · 손바뀜 + 새 포지션 먼저 닫힘) · 실측 아님 · 지도로만, 저항·지지 신호 아님</span></div>`);
+      return;
+    }
+    // 2026-10-27 청산 기둥 위면 그 가격 행의 추정 청산(배수 구간별)과 현재가에서의 누적.
+    if (liqInfo && mx > liqInfo.x0 && mx < liqInfo.x1 + 2) {
+      vLine.style.display = "none";
+      const k = Math.floor((yMax - ((my - mt) * ySpan) / ch + liqInfo.off) / liqInfo.rowSize), a = liqInfo.rows.get(k);
+      const q = a ? a.reduce((x, y) => x + y, 0) : 0;
+      if (!(q > 0)) { hideTooltip(); return; }
+      const lo = k * liqInfo.rowSize - liqInfo.off, hi = lo + liqInfo.rowSize, up = (lo + hi) / 2 > currentPrice;
+      const dp = Math.max(pxDp(), (String(liqInfo.off).split(".")[1] || "").length);   // 체결 툴팁과 같은 이유(경계 .25/.75)
+      showTooltip(evt.pageX, evt.pageY, `<div style="white-space:normal;max-width:min(360px,calc(100vw - 24px))">`
+        + `<span style="color:${up ? "var(--good)" : "var(--bad)"};font-weight:700">${up ? "숏" : "롱"} 청산 ${liqInfo.fu(q)}</span> · ${lo.toFixed(dp)}–${hi.toFixed(dp)}`
+        + ` (현재가 ${up ? "위" : "아래"} ${(Math.abs((lo + hi) / 2 / currentPrice - 1) * 100).toFixed(1)}%)`
+        + `<br>${a.map((v, i) => `${liqInfo.names[i]}배 ${liqInfo.fu(v)}`).join(" · ")}`
+        + `<br>현재가에서 여기까지 누적 <span style="font-weight:700">${liqInfo.fu(liqInfo.cum(up ? hi : lo, up))}</span>`
+        + `<br><span style="opacity:.7">추정 청산맵(최근 ${liqInfo.win}일 · 가격이 지나간 칸은 지움) · 실측 아님 · 지도로만</span></div>`);
       return;
     }
     // 2026-09-28 체결 기둥 위면 그 가격 행의 체결 풀이(데스크톱 기둥 · 모바일 왼쪽 띠).

@@ -27,13 +27,17 @@
     if (S.days > 1) return S.ext[a + "|" + S.days] || null;
     return typeof latestLiquidationMap === "undefined" ? null : latestLiquidationMap;      // app.js 전역
   }
-  function fetchExt() {                       // 7·30일: 켜져 있을 때 60초마다(서버도 60초 캐시) -- 새 진입 반영 1분(10-10 사용자 유지)
-    var a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset, key = a + "|" + S.days, now = Date.now();
-    if (!S.on || S.days === 1 || now - (S.extT[key] || 0) < 60000) return;
+  function fetchExt(days) {                   // 7·30일: 켜져 있을 때 60초마다(서버도 60초 캐시) -- 새 진입 반영 1분(10-10 사용자 유지)
+    var d = days || S.days, a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset, key = a + "|" + d, now = Date.now();
+    if ((!days && !S.on) || d === 1 || now - (S.extT[key] || 0) < 60000) return;   // days = 풋프린트 «청산» 기둥이 부를 때(덮개 꺼져 있어도)
     S.extT[key] = now;
-    fetch("/api/liquidation-map/tiers?asset=" + encodeURIComponent(a) + "&days=" + S.days, { cache: "no-store" })
+    fetch("/api/liquidation-map/tiers?asset=" + encodeURIComponent(a) + "&days=" + d, { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (j) { if (j && j.tier_profile) { S.ext[key] = j; redraw(); } })
+      .then(function (j) {
+        if (!j || !j.tier_profile) return;
+        S.ext[key] = j; redraw();
+        if (days && typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
+      })
       .catch(function () { S.extT[key] = 0; });
   }
   function setDays(d) {
@@ -388,11 +392,17 @@
     var d = 1;
     try { d = Number(localStorage.getItem("liqDays")) || 1; } catch (e) { /* 기본 1일 */ }
     setDays(d === 7 || d === 30 ? d : 1);
-    setView(saved === "liq" || saved === "bubble" ? saved : "fp");
+    setView(saved === "bubble" ? saved : "fp");   // 2026-10-27 «청산맵» 보기 탭 제거 -- 풋프린트 오른쪽 기둥 «청산»으로
   }
 
   window.fpLiqActive = function () { return S.on; };   // 시험 하네스가 켜짐을 읽는다
   window.fpLiqTp = function () { return liveTp(curMap()); };   // 시험 하네스가 화면 막대 값(지나간 칸 지운 뒤)을 읽는다
+  // 2026-10-27 풋프린트 오른쪽 기둥 «청산»(사용자 «체결/포지션 칸에 청산을 만들어 청산맵을 풋프린트에 붙여줘») -- 같은 지도·같은 지나간 칸 지우기.
+  window.fpLiqColTp = function (days) {
+    var a = typeof activeSnapshotAsset === "undefined" ? "eth" : activeSnapshotAsset;
+    fetchExt(days);
+    return liveTp(days > 1 ? S.ext[a + "|" + days] || null : typeof latestLiquidationMap === "undefined" ? null : latestLiquidationMap);
+  };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();

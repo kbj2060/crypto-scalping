@@ -2920,6 +2920,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fp-col-tog button:hover { color: var(--text); }
 .fp-col-tog button[aria-pressed="true"] { background: var(--amber); border-color: transparent; color: var(--on-fill); font-weight: 800; }
 .fp-col-tog.pos [data-col][aria-pressed="true"] { background: var(--position); }
+.fp-col-tog.liq [data-col][aria-pressed="true"] { background: var(--lev25); }   /* 2026-10-27 청산 기둥 */
 .fp-col-tog [data-win][aria-pressed="true"] { background: var(--muted); }
 .fp-col-tog button:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }   /* 2026-10-10 청산맵 기간(1d·7d·30d) -- 청산맵일 때 창 탭 자리 */
 #chartWindowTabs[hidden], #liqDaysTabs[hidden] { display: none !important; }
