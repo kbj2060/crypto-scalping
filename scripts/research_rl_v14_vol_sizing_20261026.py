@@ -20,6 +20,7 @@ PANEL = ROOT / "data" / "binance_vision" / "panel" / "ETHUSDT.parquet"
 TRAIN, VAL, TEST = ("2024-01-01", "2026-01-01"), ("2026-01-01", "2026-06-01"), ("2026-06-01", "2026-09-14 23:00")
 SEEDS = [int(s) for s in np.random.default_rng(2026102614).integers(1, 2**31 - 1, 5)]
 SEEDS19 = [int(x) for x in np.random.default_rng(2026102619).integers(1, 2**31 - 1, 10)]   # v19 새 10시드
+SEEDS20 = [int(x) for x in np.random.default_rng(2026102620).integers(1, 2**31 - 1, 10)]   # v20 메이커 비용 새 10시드
 ACTS = np.array([-1.0, -0.5, 0.0, 0.5, 1.0]); COST, CAP, EP, TOTAL, CK = 4e-4, 2.0, 336, 300_000, 30_000
 
 
@@ -281,5 +282,12 @@ if __name__ == "__main__":
     elif a[:1] == ["--train-v18"]: assert a[1] in WIN17 and int(a[2]) in SEEDS; train(int(a[2]), tag=f"v18_{a[1]}_{a[2]}", mirror=True, residual=True, win=a[1], frame="frame_v18.parquet")
     elif a[:1] == ["--train-v19"]: assert a[1] in WIN17 and int(a[2]) in SEEDS19; train(int(a[2]), tag=f"v19_{a[1]}_{a[2]}", mirror=True, residual=True, win=a[1], frame="frame_v18.parquet")
     elif a[:1] == ["--test-v19"]: test_v17("v19", "frame_v18.parquet", "test_report_v19.json", SEEDS19)
+    elif a[:1] in (["--plant-v20"], ["--train-v20"], ["--test-v20"]):    # v20: 메이커 0.7bp 로 학습·평가 (--test-v20 1.5 = K2 보고만)
+        COST = 0.7e-4
+        if a[0] == "--plant-v20": train(SEEDS20[0], rho=0.3, tag="v20_plant", mirror=True, residual=True, win="R3", frame="frame_v18.parquet")
+        elif a[0] == "--train-v20": assert a[1] in WIN17 and int(a[2]) in SEEDS20; train(int(a[2]), tag=f"v20_{a[1]}_{a[2]}", mirror=True, residual=True, win=a[1], frame="frame_v18.parquet")
+        else:
+            COST = float(a[1]) * 1e-4 if len(a) > 1 else COST
+            test_v17("v20", "frame_v18.parquet", "test_report_v20.json" if len(a) == 1 else f"test_report_v20_k{a[1]}.json", SEEDS20)
     elif a[:1] == ["--test-v18"]: test_v17("v18", "frame_v18.parquet", "test_report_v18.json")
     else: print(__doc__, SEEDS)
