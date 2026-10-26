@@ -7137,11 +7137,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   }
 
   // 2026-10-26 사용자 «B1 QX4I 도 풋프린트 차트에 박스 유지처럼»: 4h 변동성 QX4I(QX4 + 옵션 ATM IV 보정 · ETH 전용 · 조건부 채택, 전진 판정 2027-01-22)
-  //   ±1σ 를 같은 미래 칸에 «부채꼴»로 -- 지금가 중심, 폭 = σ4h·√((t − 지금)/(끝 − 지금))(현재 봉 끝에서 그 시각의 폭으로 시작) · 예측 끝(asof + 4h)에 ±σ4h(중앙값형).
+  //   ±1σ 를 같은 미래 칸에 «부채꼴»로 -- 예측 봉 마감가(px) 중심, 폭 = σ4h·√((t − asof)/4h)(현재 봉 끝에서 그 시각의 폭으로 시작) · 예측 끝(asof + 4h)에 ±σ4h(중앙값형).
+  //   2026-10-26 사용자 «현재가에 붙어 계속 움직이지 말고 5분마다»: 중심·폭 모두 서버 5분 예측값에만 묶임(실시간 시세로 안 흔들림).
   //   박스(직사각형 = 유지 확률)와 구별되게 옵션 색 실선 · 묵은 값(15분↑)은 안 그림 · 화면 끝에서 잘리면 꺾쇠.
   const vI = isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestVol4h && latestVol4h.ok && latestVol4h.asset === "eth"
     && Number.isFinite(latestVol4h.sig4h_iv_pct) && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
-  if (vI && currentPrice > 0 && candles.length) {
+  if (vI && vI.px > 0 && candles.length) {
     const L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw;
     const xT = (ms) => xAt(L) + ((ms / 1e3 - candles[L].time) / tfS) * slot;
     const t0 = (candles[L].time + tfS) * 1e3, t1 = vI.asof_ms + 4 * 3600e3, xEnd = xT(t1);
@@ -7151,10 +7152,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (plotClip) g.setAttribute("clip-path", plotClip);
       g.setAttribute("pointer-events", "none");
       const up = [], dn = [], xMax = Math.min(xEnd, xr);
-      const tNow = Date.now(), xToT = (x) => t0 + (x - xs) / (xEnd - xs) * (t1 - t0);   // 2026-10-26 리뷰: 30분·1시간 봉은 현재 봉 끝이 «지금»보다 최대 1시간 뒤 -- 폭은 지금부터 잰 시간으로
+      const px = vI.px, xToT = (x) => t0 + (x - xs) / (xEnd - xs) * (t1 - t0);   // 30분·1시간 봉은 현재 봉 끝이 asof 보다 최대 1시간 뒤 -- 폭은 asof 부터 잰 시간으로
       for (let i = 0; i <= 32; i++) {
-        const x = xs + (xMax - xs) * i / 32, k = s * Math.sqrt(Math.max(0, (xToT(x) - tNow) / (t1 - tNow)));
-        up.push([x, yAt(currentPrice * (1 + k))]); dn.push([x, yAt(currentPrice * (1 - k))]);
+        const x = xs + (xMax - xs) * i / 32, k = s * Math.sqrt(Math.max(0, (xToT(x) - vI.asof_ms) / (t1 - vI.asof_ms)));
+        up.push([x, yAt(px * (1 + k))]); dn.push([x, yAt(px * (1 - k))]);
       }
       const pts = (a) => a.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
       add("polygon", { points: `${pts(up)} ${pts([...dn].reverse())}`, fill: col, "fill-opacity": 0.045 });
