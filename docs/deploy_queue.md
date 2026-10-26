@@ -4,6 +4,7 @@
 규칙: 사전등록 관문을 통과한 것만 «통과»에 올린다. 전진 판정 대기·조건부는 따로. 배포할 때 이 표의 «배포에 필요한 것»을 그대로 체크리스트로 쓴다(배포 전 `bash scripts/ops/check_deploy_drift.sh` · 서버 파일 md5 대조 · 화면 변경은 /impeccable 시안 먼저).
 
 ## A. 통과 (배포 가능)
+✅ **A1·A2 배포 완료 2026-10-26**(main ee0511d3 · 서버 확인: `/api/box-hold` 1h `calib: platt90 2026-07-03~2026-10-01` · `/api/vol-forecast` ETH·XRP `model: QX4`). 🔴A1 월간 cron 은 권한 검사로 미등록 — 사용자 실행 대기(아래 «남은 일»).
 | # | 항목 | 근거(사전등록 문서) | 코드·브랜치 | 배포에 필요한 것 | 주의 |
 |---|---|---|---|---|---|
 | A1 | **박스 유지 1h 굴림 Platt90**(ETH, 배포 HGB 위 보정층) | `docs/eth_box_hold_calibration_drift_prereg_20261025.md` 8·10라운드: 2023·2024·2025 독립 창 모두 통과(ΔBrier −.0016·−.0003·−.0005, ECE ≈0.5~0.7pp) · 지금 배포 모델에 얹은 2026 점검 ECE 1.45→.67 | 브랜치 `box-hold-platt90-1h-20261026` c413aac8 (dashboard/box_hold.py · scripts/fit_box_hold_platt90_20261026.py · test) | 서버에 `events.json` 복사(2026-12-31 까지 → 1월 전 재생성) · cron `30 9 1 * *`(KST, `--rest --events …`) · 한 번 직접 실행해 JSON 생성 | 30분·4h 엔 적용 안 함(30분은 이미 보정됨) · 화면 숫자 평균 0.84pp·라벨 2.6% 바뀜 |
@@ -26,7 +27,15 @@
 - 박스 30분·1h 굴림 절편180(5라운드 통과) — 화면 변화 0.09~0.56pp 라 가치 작음 · 1h 는 A1 이 대체.
 - 박스 30분 굴림 Platt90(9라운드 통과) — 지금 배포 모델은 이미 보정돼 얹으면 소폭 악화.
 
+## A1·A2 배포 뒤 남은 일 (2026-10-26)
+- 🔴**A1 월간 적합 cron 미등록**(서버 crontab 변경이 자동 권한 검사에 막힘). 첫 적합은 손으로 실행함(created 2026-10-26, 40일 뒤 12-05 에 만료 → 그 전 11-01 cron 필요). 서버에서 `crontab -e` 로 한 줄 추가:
+  `30 9 1 * * cd /home/llewyn/crypto-scalping && flock -n /tmp/box_platt90.lock env OMP_NUM_THREADS=2 nice -n 19 /home/llewyn/miniconda3/envs/quant_ai/bin/python scripts/fit_box_hold_platt90_20261026.py --rest --events data/live/box_hold_events_20261016.json >> logs/box_platt90_monthly.log 2>&1`
+- A1 사건 파일 `data/live/box_hold_events_20261016.json`(md5 fe960e7b) 은 2026-12-31 까지 → 판정 달력 `box_events_renew` 2027-01-20 알림.
+- A2 QX4 는 **매달 재학습 안 함(일부러)**: 12-23 전진 판정 `vol` 이 동결 아티팩트(md5 2fce43f5)를 검사하므로 그 전 교체 금지 · 학습 원천(vision panel 경로)도 로컬 하드코딩. 판정 통과 뒤 재학습 경로를 정한다. 되돌리기 = 서버 `data/live/vol4h_qx4.joblib` 삭제(바로 HGB).
+- 대시보드 알림 센터 «판정 예정일»에 전진 판정 11건 + events 갱신 1건 추가(같은 커밋, 판정일 09:00 KST 푸시).
+
 ## 변경 이력
 - 2026-10-26 작성: A1·A2·B1·C1.
 - 2026-10-26 추가: C4 20코인 상대 딥러닝(전진 대기) · C2 RL v19(굴림 3창 통과, 전진 대기) · C3 TSMOM 규칙(전진 대기).
 - 2026-10-26 세션 종료: RL v20·v21 불통과(추가 없음) · C2 RL v19 는 메이커 비용에선 방향 모델 규칙에 짐(2.39 < 2.82)을 판정 때 함께 볼 것 · 세부 `docs/pipeline_best_models_20261026.md` 끝.
+- 2026-10-26 A1·A2 배포(ee0511d3) · 판정 달력 12건 추가 · A1 cron 사용자 대기.
