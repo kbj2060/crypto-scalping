@@ -54,6 +54,7 @@ KS = (20, 50, 100)     # 사건 추적 하한 = 같은 쪽 ±50bp 비영 레벨 
 DROP_FRAC, DROP_WIN = 0.8, 1000
 MIN_SHARE = 0.01
 SETTLE_MS = 70_000     # 봉 끝 + 60초(테이프 빈 구간 ±60초) + 테이프 지연 10초
+LIVE_S = 5             # 진행 중 봉·임시 표식을 쓰는 간격(초)
 BOOK_COLS = ["imb10", "imb50", "imb50_last", "dep10", "dep50", "dep50_min",
              *[f"{k}_{s}" for s in "ba" for k in ("wall_frac", "wall_age", "sh_max", "wall_px", "wall_dist", "wall_usd")]]
 EV_COLS = [f"{k}_{m}_{s}" for k in ("eat", "fake", "pull") for s in "ba" for m in ("n", "usd", "jump")]
@@ -186,12 +187,31 @@ def tape_bad(sec, x):
     return out | ((j >= 0) & (x <= hi[np.clip(j, 0, None)]))
 
 
+def is_big(e):
+    return e["share"] >= WALL_SHARE and e["age20"] >= BIG_AGE_MS and e["dist_bp"] <= 50   # 사건 벽 = 5%+·30초+·50bp 안
+
+
+def kind_of(e):
+    """사건 벽이 아니면 None · 체결 몫 모름 = unk."""
+    if not is_big(e):
+        return None
+    f = e["fill"]
+    return ("unk" if np.isnan(f) else "eat" if f >= EAT_FILL else "fake" if f < PULL_FILL and e["dist_bp"] <= NEAR_BP
+            else "pull" if f < PULL_FILL else "mixed")
+
+
+def mark_of(e, b, kind):
+    return dict(t=e["t"], bar_t=b * BAR, side="bid" if e["side"] == 0 else "ask", kind=kind, px=e["px"],
+                usd=(e["qref"] - e["q"]) * e["px"], dist_bp=e["dist_bp"])
+
+
 class Bars:
     """1초 줄·사건 -> 5분봉 (research bars_from 을 봉 하나씩, 벽 나이는 계속 든 상태로).
     tape(lo_s, hi_s) -> (rows[(ts_sec, price_bin, buy, sell)], gaps[(from_s, to_s)]) · out(봉 dict, 표식 list)."""
 
-    def __init__(self, tape, out):
-        self.tape, self.out = tape, out
+    def __init__(self, tape, out, live=None):
+        self.tape, self.out, self.live = tape, out, live   # live(진행 중 봉 B | None, 임시 표식) -- LIVE_S 초마다, 따라잡은 뒤에만
+        self.live_lag = 60_000                    # 거래소 T 가 지금보다 1분 넘게 뒤면(시작 재생 중) 진행 중 봉을 안 쓴다
         self.age = [({}, {}), ({}, {})]          # 쪽별 (칸 -> 시작, 칸 -> 마지막 본 시각)
         self.rows: dict[int, list] = collections.defaultdict(list)
         self.evs: dict[int, list] = collections.defaultdict(list)
@@ -233,6 +253,8 @@ class Bars:
             self.close_book(b)
         for b in [b for b in self.book if (b + 1) * BAR + SETTLE_MS <= t]:
             self.close(b)
+        if self.live and t // 1000 % LIVE_S == 0 and t >= time.time() * 1000 - self.live_lag:
+            self.emit_live(t)
         if t // 1000 % 600 == 0:                  # 10분마다 정리: 10초 넘게 안 본 벽 칸은 다음에 보면 새로 센다(지워도 같다) · 줄 없는 봉의 사건
             for start, seen in self.age:
                 for i in [i for i, v in seen.items() if t - v > WALL_BACK_MS]:
@@ -251,7 +273,43 @@ class Bars:
 
     def close_book(self, b):
         """봉 끝: 북 값만 계산해 먼저 내보낸다(out(B, None)) -- 사건 열은 close 가 SETTLE_MS 뒤에 채운다."""
-        R = self.rows.pop(b)
+        B = self._book(b, self.rows.pop(b))
+        self.book[b] = B
+        self.out(B, None)
+
+    def emit_live(self, t):
+        """진행 중 봉(지금까지 초들의 같은 식) + 아직 확정 안 된 봉들의 사건을 지금까지 온 테이프로 임시 판정 -- 표시 전용, bars 에는 안 쓴다.
+        테이프가 아직 그 초까지 안 왔으면(범위 밖 = 판정 불가) 표식을 안 낸다 -- 다음 번에 다시 본다."""
+        b = t // BAR
+        B = self._book(b, self.rows[b]) if self.rows.get(b) else None
+        first: dict = {}
+        for k in sorted({*self.book, b}):
+            for e in self.evs.get(k, []):
+                first.setdefault((e["t"], e["side"], e["px"]), dict(e))
+        E = [e for e in first.values() if is_big(e)]
+        marks = []
+        if E:
+            now_s = t // 1000 + 1
+            self._fills(E, min(e["t"] for e in E) // 1000 - 180, now_s, None)
+            marks = [mark_of(e, e["t"] // BAR, k) for e in E if (k := kind_of(e)) in ("eat", "fake")]
+        self.live(B, marks)
+
+    def _fills(self, E, lo_s, hi_s, end_s):
+        """체결 몫: [사건−1초, 사건] 초들의 그 칸 반대쪽 테이커 · 테이프 빈 구간(±60초)·수집기 gaps 근처는 판정 불가(research fill_share·tape_bad).
+        end_s = 창 끝에 테이프가 있다고 볼 초(None = 마지막 테이프 초 뒤는 아직 모름)."""
+        rows, gaps = self.tape(lo_s, hi_s)
+        bad = tape_bad(np.r_[lo_s, [r[0] for r in rows], [] if end_s is None else [end_s]], np.array([e["t"] // 1000 for e in E]))
+        cell = collections.defaultdict(float)
+        for ts, pb, bq, sq in rows:
+            cell[(ts, pb, 0)] += sq; cell[(ts, pb, 1)] += bq    # 매수벽(0)을 먹는 건 테이커 매도
+        for e, bd in zip(E, bad):
+            if bd or any(g0 - TAPE_PAD_S <= e["t"] // 1000 <= g1 + TAPE_PAD_S for g0, g1 in gaps):
+                e["fill"] = np.nan; continue
+            pb = int(round(e["px"] / BUCKET))
+            tot = sum(cell.get((s, pb, e["side"]), 0.0) for s in range((e["t"] - 1000) // 1000, e["t"] // 1000 + 1))
+            e["fill"] = min(1.0, tot / max(e["qref"] - e["q"], 1e-12))
+
+    def _book(self, b, R):
         mids = [r["mid"] for r in R]
         B = dict(t=b * BAR, n_sec=len(R), warm=int(any(r["warm"] for r in R)), o=mids[0], h=max(mids), l=min(mids), c=mids[-1],
                  imb10=float(np.mean([r["imb10"] for r in R])), imb50=float(np.mean([r["imb50"] for r in R])), imb50_last=R[-1]["imb50"],
@@ -271,8 +329,7 @@ class Bars:
             B.update({k: None for k in BOOK_COLS})
         B["ret"] = float(np.log(B["c"] / B["o"]) * 1e4)
         B["rng"] = float(np.log(B["h"] / B["l"]) * 1e4)
-        self.book[b] = B
-        self.out(B, None)
+        return B
 
     def close(self, b):
         if b in self.rows:
@@ -283,28 +340,15 @@ class Bars:
             first.setdefault((e["t"], e["side"], e["px"]), e)    # 중복은 첫 것(연구 drop_duplicates)
         E = list(first.values())
         lo_s, hi_s = b * BAR // 1000, (b + 1) * BAR // 1000
-        if E:   # 체결 몫: [사건−1초, 사건] 초들의 그 칸 반대쪽 테이커 · 테이프 빈 구간(±60초)·수집기 gaps 근처는 판정 불가(research fill_share·tape_bad)
-            rows, gaps = self.tape(lo_s - 180, hi_s + 80)
-            # 창 양 끝에 테이프가 있다고 본다(연구는 하루 전체 테이프) -- 창 밖에서 이어진 빈 구간의 ±60초도 잡힌다(리뷰 10-26)
-            bad = tape_bad(np.r_[lo_s - 180, [r[0] for r in rows], hi_s + 75], np.array([e["t"] // 1000 for e in E]))
-            cell = collections.defaultdict(float)
-            for ts, pb, bq, sq in rows:
-                cell[(ts, pb, 0)] += sq; cell[(ts, pb, 1)] += bq    # 매수벽(0)을 먹는 건 테이커 매도
-            for e, bd in zip(E, bad):
-                if bd or any(g0 - TAPE_PAD_S <= e["t"] // 1000 <= g1 + TAPE_PAD_S for g0, g1 in gaps):
-                    e["fill"] = np.nan; continue
-                pb = int(round(e["px"] / BUCKET))
-                tot = sum(cell.get((s, pb, e["side"]), 0.0) for s in range((e["t"] - 1000) // 1000, e["t"] // 1000 + 1))
-                e["fill"] = min(1.0, tot / max(e["qref"] - e["q"], 1e-12))
+        if E:   # 창 양 끝에 테이프가 있다고 본다(연구는 하루 전체 테이프) -- 창 밖에서 이어진 빈 구간의 ±60초도 잡힌다(리뷰 10-26)
+            self._fills(E, lo_s - 180, hi_s + 80, hi_s + 75)
         n_usd = {k: 0.0 for k in EV_COLS if "_jump_" not in k}
         jumps = collections.defaultdict(list)
         marks, known = [], not B["warm"]
         for e in E:
-            if not (e["share"] >= WALL_SHARE and e["age20"] >= BIG_AGE_MS and e["dist_bp"] <= 50):
+            kind = kind_of(e)
+            if kind is None:
                 continue
-            f = e["fill"]
-            kind = ("unk" if np.isnan(f) else "eat" if f >= EAT_FILL else "fake" if f < PULL_FILL and e["dist_bp"] <= NEAR_BP
-                    else "pull" if f < PULL_FILL else "mixed")
             known &= kind != "unk"
             if kind in ("unk", "mixed"):
                 continue
@@ -314,8 +358,7 @@ class Bars:
             post = self._mid_at(min(e["t"] + JUMP_WIN, (b + 1) * BAR - 1))      # 봉 끝에서 자른다
             jumps[f"{kind}_jump_{n}"].append(np.log(post / self._mid_at(e["t"] - JUMP_WIN)) * 1e4 * (1 if e["side"] == 1 else -1))
             if kind in ("eat", "fake"):
-                marks.append(dict(t=e["t"], bar_t=b * BAR, side="bid" if e["side"] == 0 else "ask", kind=kind, px=e["px"],
-                                  usd=(e["qref"] - e["q"]) * e["px"], dist_bp=e["dist_bp"]))
+                marks.append(mark_of(e, b, kind))
         if known:   # 판정 못 한 사건이 있는 봉 · 덜 찬 봉 = 0 이 아니라 모름(None)
             B.update(n_usd)
             for k in EV_COLS:
@@ -334,6 +377,7 @@ def db_open(path=DB):
     con.execute("PRAGMA journal_mode=WAL")
     cols = ["n_sec", "warm", "o", "h", "l", "c", *BOOK_COLS, "ret", "rng", *EV_COLS]
     con.execute(f"CREATE TABLE IF NOT EXISTS bars(t INTEGER PRIMARY KEY, {', '.join(c + ' REAL' for c in cols)})")
+    con.execute("CREATE TABLE IF NOT EXISTS live(k INTEGER PRIMARY KEY, upd INTEGER, bar TEXT, marks TEXT)")   # 한 줄 -- 진행 중 봉·임시 표식(JSON)
     con.execute("CREATE TABLE IF NOT EXISTS marks(t INTEGER, bar_t INTEGER, side TEXT, kind TEXT, px REAL, usd REAL, dist_bp REAL, "
                 "PRIMARY KEY (t, side, px))")
     return con
@@ -355,6 +399,12 @@ def db_write(con, B, marks, mine=None) -> bool:
     if mine is not None:
         (mine.add if marks is None else mine.discard)(B["t"])
     return True
+
+
+def db_live(con, B, marks):
+    """진행 중 봉 한 줄을 갈아 끼운다 -- 표시 전용(bars·marks 와 따로 · 피쳐로 쓰지 않는다). upd = 쓴 벽시계 ms(오래되면 화면이 버린다)."""
+    con.execute("INSERT OR REPLACE INTO live VALUES (0, ?, ?, ?)", (int(time.time() * 1000), json.dumps(B), json.dumps(marks)))
+    con.commit()
 
 
 # ── 실시간 ──
@@ -442,7 +492,7 @@ def main():
             if B["t"] // BAR % 12 == 0 or marks:
                 print(f"봉 {time.strftime('%m-%d %H:%M', time.gmtime(B['t'] / 1000))} warm={B['warm']} 기울기={B['imb50']} 표식={len(marks)} (누적 {n[0]})", flush=True)
 
-    bars, src = Bars(hot_tape, out), Source(h0)
+    bars, src = Bars(hot_tape, out, lambda B, marks: db_live(con, B, marks)), Source(h0)
     while True:
         bars.chain()
         st = replay(src.lines(), lambda t, bid, ask, bb, ba: bars.sec(sec_row(t, bid, ask, bb, ba)), bars.event)
@@ -580,6 +630,21 @@ def selftest():
     assert B2["warm"] == 1 and B2["imb50"] is None and B2["fake_n_a"] is None
     P = run([fake], full, n_sec=320, every=True)                       # 봉 0 북 값은 봉 끝(300초) 바로 · 사건 열은 370초 전엔 없다
     assert [m for _, m in P] == [None] and abs(P[0][0]["imb10"] - 0.5) < 1e-12 and "fake_n_a" not in P[0][0]
+    # 진행 중 봉: 5초마다 지금까지 초들의 같은 식 · 사건은 테이프가 그 초까지 왔을 때만 임시 표식 · 시작 재생 중(거래소 T 가 1분+ 뒤)엔 안 쓴다
+    fake1 = {**fake, "t": 150_000}
+    for lag, tape, want in ((10**18, full, ["fake"]), (10**18, lambda lo, hi: full(lo, 140), []), (60_000, full, None)):
+        L = []
+        bars = Bars(tape, lambda B, m: None, lambda B, m: L.append((B, m)))
+        bars.live_lag = lag
+        bars.chain(-10**9); bars.event(fake1)
+        for k in range(200):
+            bars.sec(row(k * 1000 + 1))
+        if want is None:
+            assert L == []; continue
+        B, m = L[-1]
+        assert B["t"] == 0 and B["n_sec"] == 196 and abs(B["imb10"] - 0.5) < 1e-12 and B["wall_px_a"] == 100.10, B
+        assert [x["kind"] for x in m] == want and all(x["bar_t"] == 0 for x in m)
+        json.dumps(L[-1])                                               # db_live 가 JSON 으로 쓴다(numpy 정수 없음)
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         con = db_open(Path(d) / "x.sqlite")

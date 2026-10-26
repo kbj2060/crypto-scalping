@@ -2589,7 +2589,7 @@ def make_app() -> web.Application:
 
     async def api_ob5m(request: web.Request) -> web.Response:   # 2026-10-26 풋프린트 5분 호가 요약(ETH, 표시 전용 · 정의 검증 중)
         """scripts/live_ob5m_20261026 이 쓴 data/live/ob5m/ethusdt.sqlite 만 읽는다 -- 지난 7일.
-        bars[{t ms, tilt_pct, book_ok, events_known}] · walls = 봉마다 «가장 오래 선 5%+ 벽» 가격이 같은 연속 봉을 한 구간으로 · marks = 돌파(eat)·가짜벽(fake).
+        bars[{t ms, tilt_pct, book_ok, events_known, live?}] (live = 진행 중 봉, 봉 끝에 확정값으로 바뀐다) · walls = 봉마다 «가장 오래 선 5%+ 벽» 가격이 같은 연속 봉을 한 구간으로 · marks = 돌파(eat)·가짜벽(fake).
         다른 코인은 빈 목록(정의가 SOL·XRP 로 안 옮겨진다 -- 호가 5분 지표 연구 4코인 비교) -- 화면은 «준비 중»."""
         asset = request.query.get("asset", "eth")
         if asset != "eth":
@@ -2601,10 +2601,20 @@ def make_app() -> web.Application:
                 return {"bars": [], "walls": [], "marks": []}
             cut = int((time.time() - 7 * 86400) * 1000)
             rows = read_rows(db, "SELECT t, warm, imb50, eat_n_a, wall_px_b, wall_usd_b, wall_px_a, wall_usd_a FROM bars WHERE t >= ? ORDER BY t", (cut,))
+            # 10-26 진행 중 봉(워커가 5초마다 갈아 끼우는 live 한 줄) -- 30초 넘게 안 바뀌었으면(워커 멈춤) 버린다 · 옛 워커는 표가 없다
+            try:
+                lv = read_rows(db, "SELECT upd, bar, marks FROM live WHERE k = 0 AND upd >= ?", (int(time.time() * 1000) - 30_000,))
+            except sqlite3.Error:
+                lv = []
+            lb, lmarks = (json.loads(lv[0][1]), json.loads(lv[0][2])) if lv else (None, [])
+            live_t = None
+            if lb and (not rows or lb["t"] > rows[-1][0]):   # 이미 닫힌 봉이면(봉 끝 직후 몇 초) 확정값만
+                rows.append((lb["t"], lb["warm"], lb["imb50"], None, lb["wall_px_b"], lb["wall_usd_b"], lb["wall_px_a"], lb["wall_usd_a"]))
+                live_t = lb["t"]
             bars, walls, run = [], [], {}
             for t, warm, imb, ev, pb, ub, pa, ua in rows:
                 bars.append({"t": t, "tilt_pct": None if imb is None else round(imb * 100, 2), "book_ok": not warm and imb is not None,
-                             "events_known": ev is not None})
+                             "events_known": ev is not None, **({"live": True} if t == live_t else {})})
                 for side, px, usd in (("bid", pb, ub), ("ask", pa, ua)):
                     r = run.get(side)
                     if r and px is not None and r["px"] == px and r["t_end"] == t:
@@ -2617,8 +2627,11 @@ def make_app() -> web.Application:
             walls += run.values()
             marks = [{"t": t, "bar_t": bt, "side": s, "kind": k, "px": px, "usd": round(u or 0), "dist_bp": round(d, 2)}
                      for t, bt, s, k, px, u, d in read_rows(db, "SELECT t, bar_t, side, kind, px, usd, dist_bp FROM marks WHERE bar_t >= ? ORDER BY t", (cut,))]
+            known = {b["t"] for b in bars if b["events_known"]}   # 확정된 봉의 임시 표식은 버린다(워커가 확정을 먼저 쓰고 5초 안에 live 를 갈아 끼운다)
+            marks += [{"t": m["t"], "bar_t": m["bar_t"], "side": m["side"], "kind": m["kind"], "px": m["px"], "usd": round(m["usd"]),
+                       "dist_bp": round(m["dist_bp"], 2), "live": True} for m in lmarks if m["bar_t"] not in known]
             return {"bars": bars, "walls": walls, "marks": marks}
-        return web.json_response(await swr_cached("ob5m_eth", 10.0, lambda: asyncio.to_thread(produce), max_stale=600.0), headers=NOCACHE)
+        return web.json_response(await swr_cached("ob5m_eth", 4.0, lambda: asyncio.to_thread(produce), max_stale=600.0), headers=NOCACHE)
 
     vol4h_art: dict = {}   # 코인 -> {mtime, art}
     # 코인 -> 아티팩트(None = ETH 기본 svm.ARTIFACT). XRP 는 매달 재학습이 아직 없다(ponytail: 10-19 학습분 고정 -- 재학습 cron 은 파라미터화한 복사본이 필요).

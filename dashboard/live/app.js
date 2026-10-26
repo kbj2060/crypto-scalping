@@ -4554,14 +4554,15 @@ async function maybeFetchFpWeek() {
   }
 }
 // ── 5분 호가 요약 (2026-10-26 사용자 «호가 5분 지표 연구 세션의 차트처럼 풋프린트 안에 호가 정보 · 거래대금 자리에 기울기 막대») ──
-// /api/ob5m 한 번에 지난 1주일: bars[{t ms, tilt_pct, book_ok, events_known}] · walls[{side, px, t_start, t_end}] · marks[{bar_t, side, kind}].
+// /api/ob5m 한 번에 지난 1주일: bars[{t ms, tilt_pct, book_ok, events_known, live?}] · walls[{side, px, t_start, t_end}] · marks[{bar_t, side, kind, live?}].
+//   live = 진행 중 봉(지금까지 초들의 평균) · 임시 판정 표식(테이프가 온 데까지) -- 흐리게 그리고 봉 끝(+70초)에 확정값으로 바뀐다.
 //   정의 = scripts/research_orderbook_5m_indicator_20261026.py(호가 5분 지표 연구 세션) 그대로 -- 🔴정의 확정 전(4코인 검증 중), 정보 표시용(예측 아님).
 //   기울기 = ±50bp 매수·매도 잔량 (b−a)/(b+a)×100 의 봉 안 1초 평균 · 벽 = 쪽별 ±50bp 깊이 5%+ 한 칸 중 그 봉에서 가장 오래 선 것 ·
 //   ▲▼ = 30초+ 선 5%+ 벽이 체결 80%+ 로 사라짐(돌파) · ◆ = 체결 20% 밑·현재가 5bp 안에서 사라짐(가짜벽 의심).
 let ob5m = null, ob5mAt = 0, ob5mKey = null;
 async function refreshOb5m() {
   const asset = activeSnapshotAsset, now = Date.now();
-  if (!flowOn() || (ob5mKey === asset && now - ob5mAt < 15000)) return;   // 코인마다 15초(실패도) · 코인을 바꾸면 곧바로 -- 10-26 «기울기 막대가 늦다»: 60초 → 15초(워커가 봉 끝에 북 값을 바로 쓴다)
+  if (!flowOn() || (ob5mKey === asset && now - ob5mAt < 5000)) return;   // 코인마다 5초(실패도) -- 10-26 진행 중 봉(워커 5초마다) · 전 15초 · 코인을 바꾸면 곧바로 -- 10-26 «기울기 막대가 늦다»: 60초 → 15초(워커가 봉 끝에 북 값을 바로 쓴다)
   ob5mKey = asset; ob5mAt = now;
   try {
     const res = await fetch(`/api/ob5m?asset=${asset}`, { cache: "no-cache" });
@@ -4579,9 +4580,9 @@ async function refreshOb5m() {
 const ob5mFor = () => (ob5m && ob5m.asset === activeSnapshotAsset ? ob5m : null);
 // 지금 tf 봉 시각 -> {tilt(평균, 북 없는 5분봉 뺌), up/dn(돌파), fu/fd(가짜벽 위/아래)} -- 렌더마다 1주일(2천 개)을 한 번 돈다
 function ob5mByTf(OB) {
-  const m = new Map(), at = (T) => m.get(T) || m.set(T, { s: 0, n: 0, up: 0, dn: 0, fu: 0, fd: 0 }).get(T);
-  OB.bars.forEach((b, t) => { if (b.book_ok && b.tilt_pct != null) { const a = at(tfT(t)); a.s += b.tilt_pct; a.n++; } });
-  OB.marks.forEach((ms, t) => ms.forEach((x) => { const a = at(tfT(t)); a[x.kind === "eat" ? (x.side === "ask" ? "up" : "dn") : (x.side === "ask" ? "fu" : "fd")]++; }));
+  const m = new Map(), at = (T) => m.get(T) || m.set(T, { s: 0, n: 0, up: 0, dn: 0, fu: 0, fd: 0, live: false, prov: false }).get(T);
+  OB.bars.forEach((b, t) => { if (b.book_ok && b.tilt_pct != null) { const a = at(tfT(t)); a.s += b.tilt_pct; a.n++; a.live ||= !!b.live; } });
+  OB.marks.forEach((ms, t) => ms.forEach((x) => { const a = at(tfT(t)); a[x.kind === "eat" ? (x.side === "ask" ? "up" : "dn") : (x.side === "ask" ? "fu" : "fd")]++; a.prov ||= !!x.live; }));
   m.forEach((a) => { a.tilt = a.n ? a.s / a.n : null; });
   return m;
 }
@@ -7911,7 +7912,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     if (!a) return "";
     const t = a.tilt == null ? "모름" : `${a.tilt >= 0 ? "+" : ""}${a.tilt.toFixed(1)}% (${a.tilt >= 0 ? "아래 매수 잔량이 두껍다" : "위 매도 잔량이 두껍다"})`;
     const ev = [a.up && `▲ 매도벽 돌파 ${a.up}`, a.dn && `▼ 매수벽 돌파 ${a.dn}`, a.fu && `◆ 위 가짜벽 의심 ${a.fu}`, a.fd && `◆ 아래 가짜벽 의심 ${a.fd}`].filter(Boolean).join(" · ");
-    return `<br>호가 기울기 ${t}${ev ? `<br>${ev}` : ""}`;
+    return `<br>호가 기울기 ${t}${a.live ? " · 진행 중(봉 끝에 확정)" : ""}${ev ? `<br>${ev}${a.prov ? " · 임시 판정(봉 끝 +70초에 확정)" : ""}` : ""}`;
   };
   laneTip = (i) => {
     if (!fpBars.length) return "";
@@ -7958,18 +7959,19 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const LH = bot - chartTop, y0 = chartTop, zero = y0 + LH / 2;
     const bwid = Math.max(1, Math.min(slotW * 0.62, slotW - 2));
     const tilts = candles.map((c) => { const a = obAgg && obAgg.get(c.time); return a ? a.tilt : null; }), tOk = tilts.filter((v) => v != null);
+    const tLive = candles.map((c) => { const a = obAgg && obAgg.get(c.time); return !!(a && a.live); });   // 진행 중 봉 = 흐리게(봉 끝에 확정값)
     const tMax = Math.max(5, ...tOk.map(Math.abs)), tSc = (LH / 2 - 1) / tMax;
     const colMax = slot < 1 ? new Map() : null;   // 1px 밑(1주일 창): 픽셀 열마다 가장 긴 막대 하나
-    const bar = (x, v, rx = 0) => {
+    const bar = (x, v, rx = 0, al = 0.7) => {
       const hh = Math.max(1, Math.abs(v) * tSc), y = v >= 0 ? zero - hh : zero, col = v >= 0 ? "var(--ob-bid)" : "var(--ob-ask)";
-      if (DENSE) un.add(col, 0.7, (pp) => pp.rect(x, y, bwid, hh)); else ops.push((ctx) => cvRect(ctx, x, y, bwid, hh, col, 0.7, rx));
+      if (DENSE) un.add(col, al, (pp) => pp.rect(x, y, bwid, hh)); else ops.push((ctx) => cvRect(ctx, x, y, bwid, hh, col, al, rx));
     };
     ops.push((ctx) => cvHLine(ctx, ml, ml + cw, zero, "var(--muted)", 0.35));
     tilts.forEach((v, i) => {
       if (v == null) return;                        // 북 모름은 칸을 비운다 -- 0 으로 그리지 않는다
       const x = cx(i) - bwid / 2;
       if (colMax) { const k = Math.round(x), o = colMax.get(k); if (!o || Math.abs(o[1]) < Math.abs(v)) colMax.set(k, [x, v]); return; }
-      bar(x, v, DENSE ? 0 : 1.5);
+      bar(x, v, DENSE ? 0 : 1.5, tLive[i] ? 0.32 : 0.7);
     });
     if (colMax) colMax.forEach(([x, v]) => bar(x, v));
     un.flush((f) => ops.push(f));
@@ -7983,7 +7985,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     [[tOk.length ? "■ 호가 기울기 ±50bp" : "■ 호가 기울기 (준비 중)", "var(--muted)"], ["  ─ 거래대금", "var(--turnover)"]].forEach(([t, f]) => { const sp = mk("tspan", { fill: f }, lg); sp.textContent = t; });
     { const tt = document.createElementNS(NS, "title");
       tt.textContent = "호가 기울기 = 현재가 ±50bp 안 매수 잔량 − 매도 잔량 비율(봉 안 1초 평균). 위(초록) = 아래쪽 매수 잔량이 두껍다 · 아래(빨강) = 위쪽 매도 잔량이 두껍다.\n"
-        + "가격이 내린 뒤엔 아래 잔량이 두꺼워 보인다(직전 1시간 수익과 순위상관 −0.44) — «오를 것»이 아니다. 다음 봉과 상관 0.03. 정의 검증 중 · 정보 표시용.\n파랑 선 = 봉별 거래대금(바이낸스+OKX 체결, 제 축).";
+        + "가격이 내린 뒤엔 아래 잔량이 두꺼워 보인다(직전 1시간 수익과 순위상관 −0.44) — «오를 것»이 아니다. 다음 봉과 상관 0.03. 정의 검증 중 · 정보 표시용.\n흐린 막대·표식 = 진행 중 봉(5초마다 갱신 · 봉 끝에 확정, 표식은 +70초).\n파랑 선 = 봉별 거래대금(바이낸스+OKX 체결, 제 축).";
       lg.append(tt); }
   })();
 
@@ -8076,15 +8078,16 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       candles.forEach((c, i) => {
         const a = agg.get(c.time);
         if (!a || !(a.up || a.dn || a.fu || a.fd)) return;
-        const [eh, el] = ext.get(c.time) || [-Infinity, Infinity], x = xAt(i) + bw / 2;
+        const [eh, el] = ext.get(c.time) || [-Infinity, Infinity], x = xAt(i) + bw / 2, al = a.prov ? 0.45 : 1;   // 임시 판정 = 흐리게
         const yt = Math.min(yAt(Math.max(c.high, eh)) - (boxes ? 12 : 4), (liqTopAt.get(c.time) ?? Infinity) - 3), yb = yAt(Math.min(c.low, el)) + (boxes ? 30 : 4);
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = al;
         if (a.up) { ctx.fillStyle = cvc("var(--ob-bid)"); tri(ctx, x, yt, -1); }
         if (a.dn) { ctx.fillStyle = cvc("var(--ob-ask)"); tri(ctx, x, yb, 1); }
         ctx.fillStyle = cvc("var(--ob-fake)");
         if (a.fu) dia(ctx, x, yt - (a.up ? s * 1.6 + 2 : 0) - s);
         if (a.fd) dia(ctx, x, yb + (a.dn ? s * 1.6 + 2 : 0) + s);
       });
+      ctx.globalAlpha = 1;
     } });
   }
 
