@@ -4581,7 +4581,7 @@ const ob5mFor = () => (ob5m && ob5m.asset === activeSnapshotAsset ? ob5m : null)
 // 지금 tf 봉 시각 -> {tilt(평균, 북 없는 5분봉 뺌), up/dn(돌파), fu/fd(가짜벽 위/아래)} -- 렌더마다 1주일(2천 개)을 한 번 돈다
 function ob5mByTf(OB) {
   const m = new Map(), at = (T) => m.get(T) || m.set(T, { s: 0, n: 0, up: 0, dn: 0, fu: 0, fd: 0, pup: 0, pdn: 0, pfu: 0, pfd: 0, live: false }).get(T);
-  OB.bars.forEach((b, t) => { if (b.book_ok && b.tilt_pct != null) { const a = at(tfT(t)); a.s += b.tilt_pct; a.n++; a.live ||= !!b.live; } });
+  OB.bars.forEach((b, t) => { if (b.book_ok && b.tilt_pct != null) { const a = at(tfT(t)); a.s += b.tilt_pct; a.n++; if (b.live) a.live = true; } });
   // 임시 판정(진행 중·확정 전 봉)은 p 붙은 칸에 따로 센다 -- 15분·1시간 봉에 확정과 임시가 같이 있어도 확정 표식은 진하게(리뷰 10-26)
   OB.marks.forEach((ms, t) => ms.forEach((x) => { const a = at(tfT(t)); a[(x.live ? "p" : "") + (x.kind === "eat" ? (x.side === "ask" ? "up" : "dn") : (x.side === "ask" ? "fu" : "fd"))]++; }));
   m.forEach((a) => { a.tilt = a.n ? a.s / a.n : null; });
