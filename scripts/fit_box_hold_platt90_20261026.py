@@ -56,14 +56,21 @@ def load_vision(lo: pd.Timestamp, hi: pd.Timestamp) -> pd.DataFrame:
 def load_rest(lo: pd.Timestamp, hi: pd.Timestamp) -> pd.DataFrame:
     out, s, e = [], int(lo.value // 10 ** 6), int(hi.value // 10 ** 6)
     while s <= e:
-        url = f"https://fapi.binance.com/fapi/v1/klines?symbol=ETHUSDT&interval=1m&limit=1500&startTime={s}&endTime={e}"
-        with urllib.request.urlopen(url, timeout=30) as r:
-            x = json.loads(r.read())
+        url = f"https://fapi.binance.com/fapi/v1/klines?symbol=ETHUSDT&interval=1m&limit=1000&startTime={s}&endTime={e}"
+        for i in range(5):   # 10-26 리뷰: 월 1회 cron 이라 한 번 끊기면 그 달 보정이 빠졌다 -- 5번까지(418/429 면 길게 쉼)
+            try:
+                with urllib.request.urlopen(url, timeout=30) as r:
+                    x = json.loads(r.read())
+                break
+            except Exception as exc:  # noqa: BLE001
+                if i == 4:
+                    raise
+                time.sleep(120 if getattr(exc, "code", None) in (418, 429) else 10 * (i + 1))
         if not x:
             break
         out += x
         s = int(x[-1][0]) + 60_000
-        time.sleep(0.5)   # 1500개 = 가중치 10 · 92일 ≈ 90번 -- 서버·로컬 같은 IP 429 회피
+        time.sleep(0.5)   # 1000개 = 가중치 5 · 92일 ≈ 135번(1500개 가중치 10 보다 총량 적음) -- 서버·로컬 같은 IP 429 회피
     return pd.DataFrame({"t": [int(k[0]) for k in out], **{n: [float(k[j]) for k in out] for n, j in (("h", 2), ("l", 3), ("c", 4), ("v", 5), ("tb", 9))}})
 
 

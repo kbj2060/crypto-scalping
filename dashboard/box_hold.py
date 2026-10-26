@@ -41,7 +41,8 @@ def platt90() -> dict | None:
     try:
         c = json.loads(PLATT90.read_text())
         fresh = pd.Timestamp.now(tz="UTC") - pd.Timestamp(c["created_utc"]) <= pd.Timedelta(days=40)
-        return c if fresh and c["model_file"] == "box_hold_hgb_20261016.joblib" else None
+        ok = np.isfinite([float(c["a"]), float(c["b"])]).all() and str(c["fit_start"]) and str(c["fit_end"])   # 10-26 리뷰: 키가 빠지면 payload 전체(30분·4h 도)가 죽었다
+        return c if fresh and ok and c["model_file"] == "box_hold_hgb_20261016.joblib" else None
     except Exception:  # noqa: BLE001 -- 파일 없음·깨짐 = 보정 없음
         return None
 

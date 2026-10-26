@@ -3711,7 +3711,9 @@ const VOL4H_ASSETS = new Set(["eth", "xrp"]);   // 2026-10-20 XRP 4h 변동성(E
 async function refreshVol4h() {
   if (activePageTab !== "snapshot" || document.hidden || !VOL4H_ASSETS.has(activeSnapshotAsset)) return;
   const now = Date.now();
-  if (now - vol4hLastFetchAt < 300000 && latestVol4h?.asset === activeSnapshotAsset) return;   // 코인을 바꾸면 바로 다시
+  // 코인을 바꾸면 바로 다시 · 2026-10-26 리뷰: 서버 swr 이 묵은 값(봉 10분↑)을 먼저 주면 60초 뒤 다시(부채꼴 15분 신선도에 5분 공백이 났다)
+  const gap = latestVol4h && now - latestVol4h.asof_ms > 600e3 ? 60000 : 300000;
+  if (now - vol4hLastFetchAt < gap && latestVol4h?.asset === activeSnapshotAsset) return;
   vol4hLastFetchAt = now;
   try {
     const res = await fetch(`/api/vol-forecast?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
@@ -3850,7 +3852,8 @@ MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아
   + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 과거 표본 밖 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
   + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65%.\n"
   + "4~13주 예측 = 달러·유동성 Z91(|Z|≥1 만) · 2018~26 56일 BTC 70% · ETH 75%(고른 기간 성적).\n"
-  + "변동성 = 4시간 실현변동성 GBM(ETH 22피쳐) · 순위상관 .79 · 확대 AUC .82 · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀).\n"
+  + "변동성 = 4시간 실현변동성 QX4(ETH·XRP·BTC·SOL 4코인 HGB·MLP 결합 · 2026-10-26 배포 · 굴림 3창 옛 GBM 이김) · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀). "
+  + "ETH 차트 미래 칸 옵션 색 부채꼴 = QX4I(QX4 + 직전 정시 옵션 ATM IV 보정 · 조건부 채택, 전진 판정 2027-01-22) ±1σ — 이 줄 σ 와 조금 다를 수 있다.\n"
   + "셋 다 참고용 — 전진 판정 전."
   + "주황 «깨질 쪽» = 학습 기간(2022~24) 예측의 하위 20% 밑 · «머물 쪽» = 상위 20% 위 · 그 사이 «보통» · «벗어남» = 지금가가 이미 띠 밖 · «지연» = 기준가가 3분 넘게 묵음(차트 선도 숨김). 방향 정보는 없다 — 어느 쪽으로 깨질지는 모른다.\n"
   + "우리 검정(ETH 4.7년, 2022~24 학습 · 2025·2026 따로 채점): AUC .75~.78 · 보정 오차 10분위 최대 3~6.4pp · 하위 10% 유지 3~5% ↔ 상위 10% 61~71%. "
@@ -7132,9 +7135,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   }
 
   // 2026-10-26 사용자 «B1 QX4I 도 풋프린트 차트에 박스 유지처럼»: 4h 변동성 QX4I(QX4 + 옵션 ATM IV 보정 · ETH 전용 · 조건부 채택, 전진 판정 2027-01-22)
-  //   ±1σ 를 같은 미래 칸에 «부채꼴»로 -- 지금(현재 봉 끝) 지금가에서 0 으로 시작해 √(경과/전체)로 벌어져 예측 끝(asof + 4h)에 ±σ4h(중앙값형).
+  //   ±1σ 를 같은 미래 칸에 «부채꼴»로 -- 지금가 중심, 폭 = σ4h·√((t − 지금)/(끝 − 지금))(현재 봉 끝에서 그 시각의 폭으로 시작) · 예측 끝(asof + 4h)에 ±σ4h(중앙값형).
   //   박스(직사각형 = 유지 확률)와 구별되게 옵션 색 실선 · 묵은 값(15분↑)은 안 그림 · 화면 끝에서 잘리면 꺾쇠.
-  //   ponytail: 부채꼴 시작을 «지금»으로 당겼다(예측 기준 봉 시작과 최대 5분 차) -- 4h 끝 폭은 정확.
   const vI = isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestVol4h && latestVol4h.ok && latestVol4h.asset === "eth"
     && Number.isFinite(latestVol4h.sig4h_iv_pct) && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
   if (vI && currentPrice > 0 && candles.length) {
@@ -7147,8 +7149,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (plotClip) g.setAttribute("clip-path", plotClip);
       g.setAttribute("pointer-events", "none");
       const up = [], dn = [], xMax = Math.min(xEnd, xr);
+      const tNow = Date.now(), xToT = (x) => t0 + (x - xs) / (xEnd - xs) * (t1 - t0);   // 2026-10-26 리뷰: 30분·1시간 봉은 현재 봉 끝이 «지금»보다 최대 1시간 뒤 -- 폭은 지금부터 잰 시간으로
       for (let i = 0; i <= 32; i++) {
-        const x = xs + (xMax - xs) * i / 32, k = s * Math.sqrt(Math.max(0, (x - xs) / (xEnd - xs)));
+        const x = xs + (xMax - xs) * i / 32, k = s * Math.sqrt(Math.max(0, (xToT(x) - tNow) / (t1 - tNow)));
         up.push([x, yAt(currentPrice * (1 + k))]); dn.push([x, yAt(currentPrice * (1 - k))]);
       }
       const pts = (a) => a.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
