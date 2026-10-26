@@ -21,6 +21,7 @@ TRAIN, VAL, TEST = ("2024-01-01", "2026-01-01"), ("2026-01-01", "2026-06-01"), (
 SEEDS = [int(s) for s in np.random.default_rng(2026102614).integers(1, 2**31 - 1, 5)]
 SEEDS19 = [int(x) for x in np.random.default_rng(2026102619).integers(1, 2**31 - 1, 10)]   # v19 새 10시드
 SEEDS20 = [int(x) for x in np.random.default_rng(2026102620).integers(1, 2**31 - 1, 10)]   # v20 메이커 비용 새 10시드
+SEEDS21 = [int(x) for x in np.random.default_rng(2026102621).integers(1, 2**31 - 1, 10)]   # v21 T2 교사 새 10시드
 ACTS = np.array([-1.0, -0.5, 0.0, 0.5, 1.0]); COST, CAP, EP, TOTAL, CK = 4e-4, 2.0, 336, 300_000, 30_000
 
 
@@ -149,14 +150,14 @@ def teachers(F, size, tr):
             "T3_tsmom": np.sign(F.m30d.to_numpy()) * size}
 
 
-def train(seed, rho=None, tag=None, mirror=False, residual=False, win=None, frame=None):
+def train(seed, rho=None, tag=None, mirror=False, residual=False, win=None, frame=None, teacher="T3_tsmom"):
     from stable_baselines3 import PPO
-    trp, vap = (WIN17[win][0], WIN17[win][1]) if win else (TRAIN, VAL)
+    trp, vap = ((WIN17 | GAP21)[win][0], (WIN17 | GAP21)[win][1]) if win else (TRAIN, VAL)
     F, X, size, sstar = load(rho, seed, frame or ("frame_v17.parquet" if win else "frame.parquet"), trp); Xn, ret = X.to_numpy(), F.ret.to_numpy()
     tr, va = span(F, trp), span(F, vap)
     d = OUT / (tag or f"s{seed}"); d.mkdir(parents=True, exist_ok=True)
     flipv = np.array([-1.0 if c in SIGNED else 1.0 for c in X.columns], np.float32) if mirror else None
-    base = np.sign(F.m30d.to_numpy()) if residual else None
+    base = teacher_dir(F, tr, teacher) if residual else None
     m = PPO("MlpPolicy", Env(Xn, size, ret, sstar, tr, seed, flipv, base), seed=seed, verbose=0, n_steps=2048, batch_size=256, gamma=0.99,
             learning_rate=3e-4, ent_coef=0.01, policy_kwargs=dict(net_arch=[64, 64]), device="cpu")
     T = teachers(F, size, tr); best_t = max(stats(pnl(v[va], ret[va]))["sharpe"] for v in T.values())
@@ -199,21 +200,29 @@ def test(pre="s", report="test_report.json"):
 WIN17 = {"R1": (("2023-01-01", "2024-01-01"), ("2024-01-01", "2024-06-01"), ("2024-06-01", "2024-10-24")),
          "R2": (("2023-01-01", "2025-01-01"), ("2025-01-01", "2025-06-01"), ("2025-06-01", "2025-10-24")),
          "R3": (TRAIN, VAL, TEST)}                                         # v17 굴림 3창 (학습, 검증=보고만, 시험)
+GAP21 = {"G1": (("2023-01-01", "2024-06-01"), ("2024-06-01", "2024-10-24"), ("2024-10-24", "2025-01-01")),
+         "G2": (("2023-01-01", "2025-06-01"), ("2025-06-01", "2025-10-24"), ("2025-10-24", "2026-01-01"))}   # v21 새 틈 창(RL 시험 처음)
 
 
-def test_v17(prefix="v17", frame="frame_v17.parquet", report="test_report_v17.json", seeds_=None):
+def teacher_dir(F, tr, teacher):
+    """조정의 바탕 방향(크기 곱하기 전) — T3 = 30일 모멘텀 부호, T2 = 방향 모델 상·하위 20% (v21)."""
+    return teachers(F, np.ones(len(F)), tr)["T2_dirmodel"] if teacher == "T2_dirmodel" else np.sign(F.m30d.to_numpy())
+
+
+def test_v17(prefix="v17", frame="frame_v17.parquet", report="test_report_v17.json", seeds_=None, teacher="T3_tsmom", wins=None):
     """v17: 창마다 마지막(30만) 체크포인트 · H1 3창 이어 붙인 샤프 RL > T3 그리고 > max(T1,T2) · H2 창별 RL > T3 ≥ 2/3 · H3 조정 원형이동 > 90분위."""
     from stable_baselines3 import PPO
     rp = OUT / report; assert not rp.exists(), "판정은 한 번만"
     SD = seeds_ or SEEDS
     rep, P = dict(seeds=SD), {k: [] for k in ("RL", "T1_long", "T2_dirmodel", "T3_tsmom")}; parts = []
-    for w, (trp, vap, tep) in WIN17.items():
-        F, X, size, _ = load(frame=frame, train=trp); Xn, ret = X.to_numpy(), F.ret.to_numpy(); base = np.sign(F.m30d.to_numpy())
+    W = wins or WIN17
+    for w, (trp, vap, tep) in W.items():
+        F, X, size, _ = load(frame=frame, train=trp); Xn, ret = X.to_numpy(), F.ret.to_numpy(); base = teacher_dir(F, span(F, trp), teacher)
         T = teachers(F, size, span(F, trp)); rep[w] = {}
         for name, p in (("VAL", vap), ("TEST", tep)):
             m = span(F, p); r = ret[m]
             seeds = {s: rollout(PPO.load(OUT / f"{prefix}_{w}_{s}" / f"{TOTAL}.zip", device="cpu"), Xn, size, m, base) for s in SD}
-            ens = np.mean(list(seeds.values()), 0); t3 = T["T3_tsmom"][m]
+            ens = np.mean(list(seeds.values()), 0); t3 = T[teacher][m]
             rep[w][name] = dict(RL=stats(pnl(ens, r)), teachers={k: stats(pnl(v[m], r)) for k, v in T.items()},
                                 per_seed={s: stats(pnl(v, r))["sharpe"] for s, v in seeds.items()}, adj_mean_abs=float(np.abs(ens - t3).mean()))
             if name == "TEST":
@@ -223,8 +232,8 @@ def test_v17(prefix="v17", frame="frame_v17.parquet", report="test_report_v17.js
     rng = np.random.default_rng(1); obs = sum(pnl(t3 + a, r).sum() for a, t3, r in parts)
     null = np.array([sum(pnl(t3 + np.roll(a, int(rng.integers(168, len(a) - 168))), r).sum() for a, t3, r in parts) for _ in range(1000)])
     rep["adj_shift_pct"] = float((null < obs).mean() * 100)
-    rep["H1"] = bool(pooled["RL"]["sharpe"] > pooled["T3_tsmom"]["sharpe"] and pooled["RL"]["sharpe"] > max(pooled["T1_long"]["sharpe"], pooled["T2_dirmodel"]["sharpe"]))
-    rep["H2"] = bool(sum(rep[w]["TEST"]["RL"]["sharpe"] > rep[w]["TEST"]["teachers"]["T3_tsmom"]["sharpe"] for w in WIN17) >= 2)
+    rep["H1"] = bool(pooled["RL"]["sharpe"] > max(pooled[k]["sharpe"] for k in ("T1_long", "T2_dirmodel", "T3_tsmom")))
+    rep["H2"] = bool(sum(rep[w]["TEST"]["RL"]["sharpe"] > rep[w]["TEST"]["teachers"][teacher]["sharpe"] for w in W) >= 2)
     rep["H3"] = bool(rep["adj_shift_pct"] > 90)
     rep["verdict"] = "후보(상대 기준)" if rep["H1"] and rep["H2"] and rep["H3"] else "불통과"
     rp.write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=float))
@@ -289,5 +298,18 @@ if __name__ == "__main__":
         else:
             COST = float(a[1]) * 1e-4 if len(a) > 1 else COST
             test_v17("v20", "frame_v18.parquet", "test_report_v20.json" if len(a) == 1 else f"test_report_v20_k{a[1]}.json", SEEDS20)
+    elif a[:1] in (["--plant-v21"], ["--train-v21"], ["--test-v21"]):    # v21: T2 교사 위 조정 · 0.7bp (--test-v21 1.5 = K2 보고만)
+        COST, kw = 0.7e-4, dict(mirror=True, residual=True, frame="frame_v18.parquet", teacher="T2_dirmodel")
+        if a[0] == "--plant-v21": train(SEEDS21[0], rho=0.3, tag="v21_plant", win="R3", **kw)
+        elif a[0] == "--train-v21": assert a[1] in (WIN17 | GAP21) and int(a[2]) in SEEDS21; train(int(a[2]), tag=f"v21_{a[1]}_{a[2]}", win=a[1], **kw)
+        else:
+            COST = float(a[1]) * 1e-4 if len(a) > 1 else COST; sfx = "" if len(a) == 1 else f"_k{a[1]}"
+            fp = OUT / f"test_report_v21_final{sfx}.json"; assert not fp.exists(), "판정은 한 번만"
+            test_v17("v21", "frame_v18.parquet", f"test_report_v21{sfx}.json", SEEDS21, "T2_dirmodel")
+            test_v17("v21", "frame_v18.parquet", f"test_report_v21_gap{sfx}.json", SEEDS21, "T2_dirmodel", GAP21)
+            r, g = (json.loads((OUT / f"test_report_v21{x}{sfx}.json").read_text()) for x in ("", "_gap"))
+            H4 = bool(g["pooled_test"]["RL"]["sharpe"] > g["pooled_test"]["T2_dirmodel"]["sharpe"])
+            fin = dict(H1=r["H1"], H2=r["H2"], H3=r["H3"], H4=H4, gap_pooled=g["pooled_test"], verdict="후보(상대 기준)" if r["H1"] and r["H2"] and r["H3"] and H4 else "불통과")
+            fp.write_text(json.dumps(fin, indent=1, ensure_ascii=False, default=float)); print(json.dumps(fin, ensure_ascii=False, default=float))
     elif a[:1] == ["--test-v18"]: test_v17("v18", "frame_v18.parquet", "test_report_v18.json")
     else: print(__doc__, SEEDS)
