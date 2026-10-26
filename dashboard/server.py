@@ -392,7 +392,8 @@ def forming_kline(raw: list, now_ms: float, bar_s: int = 300) -> dict[str, Any] 
     t = int(r[0]) // 1000
     if t + bar_s <= now_ms / 1000:
         return None
-    return {"time": t, "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "partial": True}
+    return {"time": t, "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5]),   # 2026-10-26 화면 VWMA 100 이 형성 봉까지 이어지게(SOL·XRP 경로와 같은 뜻)
+            "partial": True}
 # 대시보드가 **보여줄** 코인 (2026-09-16 사용자 요청 "나머지 코인은 리소스 먹지 않게 비활성").
 # 실측으로 본 실제 절약: 엔드포인트별 코인 계산은 요청이 와야 도는 on-demand(swr_cached, 콜드
 # 0.05초)라 안 쓰면 안 돈다. **무조건 도는 건 SSE 루프의 시세 팬아웃 하나뿐**이었다 --
