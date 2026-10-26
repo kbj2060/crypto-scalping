@@ -10,7 +10,8 @@
 연구 세션 검증 회신(10-26)의 «꼭 반영» 다섯:
   ① 완성된 줄('\\n' 끝)만 넘긴다 · 새 시 파일이 생기면 옛 파일을 EOF 까지 마저 읽고 넘어간다(gzip 뒤 지워져도 열린 핸들은 읽힌다).
   ② 끊김(pu 불연속·스냅숏 없음)이면 다음 시 파일 스냅숏에서 다시 -- 재시작 뒤 30분 = warm(북 값 없음).
-  ③ 봉 마감 = 거래소 T 기준 · 사건 판정(테이프 빈 구간 ±60초)까지 봉 끝 + 70초(SETTLE_MS) 뒤에 한 번에 쓴다.
+  ③ 봉 마감 = 거래소 T 기준 · 사건 판정(테이프 빈 구간 ±60초)까지 봉 끝 + 70초(SETTLE_MS) 뒤에 쓴다.
+     북 값(기울기·깊이·벽)은 테이프와 무관해 봉 끝에서 바로 먼저 쓴다(10-26 사용자 «기울기 막대가 늦다» -- 봉 끝 뒤 ~3분 걸렸다).
   ④ 벽 나이·«가장 오래 선 벽»은 워커가 계속 든 상태(칸별 시작·마지막 본 시각)로 -- 봉마다 새로 세면 틀린다 · 같은 초 도장(t−1) 중복은 첫 것만.
   ⑤ replay 는 사건을 콜백(on_event)으로 넘긴다(실시간엔 끝나지 않는다) · min_share 1% 밑은 안 쌓는다.
 ponytail: 체결 몫은 봉 끝 +70초의 hot 테이프로 판정한다 -- 연구의 lake 는 수집기가 몇 분 뒤 REST 로 고친 판이라 드물게 eat↔fake 가 갈릴 수 있다
@@ -194,6 +195,7 @@ class Bars:
         self.age = [({}, {}), ({}, {})]          # 쪽별 (칸 -> 시작, 칸 -> 마지막 본 시각)
         self.rows: dict[int, list] = collections.defaultdict(list)
         self.evs: dict[int, list] = collections.defaultdict(list)
+        self.book: dict[int, dict] = {}           # 북 값만 쓴 봉 -> 사건 판정(SETTLE_MS) 대기
         self.mids: collections.deque = collections.deque()
         self.last_t = self.c0 = None
 
@@ -227,13 +229,15 @@ class Bars:
         self.mids.append((t, mid))
         while self.mids and self.mids[0][0] < t - 1_200_000:
             self.mids.popleft()
-        for b in [b for b in self.rows if (b + 1) * BAR + SETTLE_MS <= t]:
+        for b in [b for b in self.rows if (b + 1) * BAR <= t]:
+            self.close_book(b)
+        for b in [b for b in self.book if (b + 1) * BAR + SETTLE_MS <= t]:
             self.close(b)
         if t // 1000 % 600 == 0:                  # 10분마다 정리: 10초 넘게 안 본 벽 칸은 다음에 보면 새로 센다(지워도 같다) · 줄 없는 봉의 사건
             for start, seen in self.age:
                 for i in [i for i, v in seen.items() if t - v > WALL_BACK_MS]:
                     del start[i], seen[i]
-            for k in [k for k in self.evs if k not in self.rows and (k + 1) * BAR + SETTLE_MS <= t]:
+            for k in [k for k in self.evs if k not in self.rows and k not in self.book and (k + 1) * BAR + SETTLE_MS <= t]:
                 del self.evs[k]
 
     def event(self, e):
@@ -245,13 +249,9 @@ class Bars:
         i = int(np.searchsorted(ts, x, "right")) - 1
         return self.mids[i][1] if i >= 0 and x - ts[i] <= 3000 else np.nan
 
-    def close(self, b):
+    def close_book(self, b):
+        """봉 끝: 북 값만 계산해 먼저 내보낸다(out(B, None)) -- 사건 열은 close 가 SETTLE_MS 뒤에 채운다."""
         R = self.rows.pop(b)
-        first: dict = {}
-        for e in self.evs.pop(b, []):
-            first.setdefault((e["t"], e["side"], e["px"]), e)    # 중복은 첫 것(연구 drop_duplicates)
-        E = list(first.values())
-        lo_s, hi_s = b * BAR // 1000, (b + 1) * BAR // 1000
         mids = [r["mid"] for r in R]
         B = dict(t=b * BAR, n_sec=len(R), warm=int(any(r["warm"] for r in R)), o=mids[0], h=max(mids), l=min(mids), c=mids[-1],
                  imb10=float(np.mean([r["imb10"] for r in R])), imb50=float(np.mean([r["imb50"] for r in R])), imb50_last=R[-1]["imb50"],
@@ -271,6 +271,18 @@ class Bars:
             B.update({k: None for k in BOOK_COLS})
         B["ret"] = float(np.log(B["c"] / B["o"]) * 1e4)
         B["rng"] = float(np.log(B["h"] / B["l"]) * 1e4)
+        self.book[b] = B
+        self.out(B, None)
+
+    def close(self, b):
+        if b in self.rows:
+            self.close_book(b)
+        B = self.book.pop(b)
+        first: dict = {}
+        for e in self.evs.pop(b, []):
+            first.setdefault((e["t"], e["side"], e["px"]), e)    # 중복은 첫 것(연구 drop_duplicates)
+        E = list(first.values())
+        lo_s, hi_s = b * BAR // 1000, (b + 1) * BAR // 1000
         if E:   # 체결 몫: [사건−1초, 사건] 초들의 그 칸 반대쪽 테이커 · 테이프 빈 구간(±60초)·수집기 gaps 근처는 판정 불가(research fill_share·tape_bad)
             rows, gaps = self.tape(lo_s - 180, hi_s + 80)
             # 창 양 끝에 테이프가 있다고 본다(연구는 하루 전체 테이프) -- 창 밖에서 이어진 빈 구간의 ±60초도 잡힌다(리뷰 10-26)
@@ -327,16 +339,21 @@ def db_open(path=DB):
     return con
 
 
-def db_write(con, B, marks) -> bool:
-    """이미 있는 온전한(warm 아님) 봉은 덮지 않는다 -- 재시작 뒤 재생은 짧은 사슬이라 벽 나이가 잘린 더 나쁜 값이다(리뷰 10-26)."""
+def db_write(con, B, marks, mine=None) -> bool:
+    """이미 있는 온전한(warm 아님) 봉은 덮지 않는다 -- 재시작 뒤 재생은 짧은 사슬이라 벽 나이가 잘린 더 나쁜 값이다(리뷰 10-26).
+    marks None = 봉 끝에 북 값만 먼저(사건 열 NULL) -- 그 봉은 mine 에 들어 SETTLE_MS 뒤 같은 프로세스의 사건 쓰기만 덮을 수 있다.
+    ponytail: 두 쓰기 사이(~70초)에 워커가 죽으면 그 봉 사건 열은 NULL(모름)로 남는다 -- 화면은 표식 없음으로 보일 뿐."""
     old = con.execute("SELECT warm FROM bars WHERE t = ?", (B["t"],)).fetchone()
-    if old is not None and not old[0]:
+    if old is not None and not old[0] and B["t"] not in (mine or ()):
         return False
     con.execute(f"INSERT OR REPLACE INTO bars({', '.join(B)}) VALUES ({', '.join('?' * len(B))})", list(B.values()))
-    con.execute("DELETE FROM marks WHERE bar_t = ?", (B["t"],))
-    con.executemany("INSERT OR REPLACE INTO marks VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    [(m["t"], m["bar_t"], m["side"], m["kind"], m["px"], m["usd"], m["dist_bp"]) for m in marks])
+    if marks is not None:
+        con.execute("DELETE FROM marks WHERE bar_t = ?", (B["t"],))
+        con.executemany("INSERT OR REPLACE INTO marks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        [(m["t"], m["bar_t"], m["side"], m["kind"], m["px"], m["usd"], m["dist_bp"]) for m in marks])
     con.commit()
+    if mine is not None:
+        (mine.add if marks is None else mine.discard)(B["t"])
     return True
 
 
@@ -417,10 +434,10 @@ def main():
     # 지난 온전한 봉 1시간 앞 시 파일부터(30분 warm 이 그 앞에서 끝나게) -- 오래 멈췄으면 최근 26시간만
     h0 = max(now_h - 26, (int(last) // 3_600_000 - 1) if last else now_h - 1)
     print(f"시작 · 마지막 온전한 봉 {last} · {time.strftime('%m-%d %H시', time.gmtime(h0 * 3600))} 파일부터", flush=True)
-    n = [0]
+    n, mine = [0], set()
 
     def out(B, marks):
-        if db_write(con, B, marks):
+        if db_write(con, B, marks, mine) and marks is not None:
             n[0] += 1
             if B["t"] // BAR % 12 == 0 or marks:
                 print(f"봉 {time.strftime('%m-%d %H:%M', time.gmtime(B['t'] / 1000))} warm={B['warm']} 기울기={B['imb50']} 표식={len(marks)} (누적 {n[0]})", flush=True)
@@ -489,7 +506,7 @@ def parity(day: str) -> bool:
             if k != cur_chain:
                 bars.chain(chains[k][0][0] + 1); cur_chain = k
             bars.sec(x)
-    for b in sorted(bars.rows):
+    for b in sorted({*bars.rows, *bars.book}):
         bars.close(b)
     R = pd.read_parquet(RESEARCH / "bars_ETH.parquet")
     R = R[(R.index >= d1) & (R.index < d1 + pd.Timedelta(days=1))]
@@ -535,16 +552,17 @@ def seed(bars_pq: str, events_pq: str):
 
 def selftest():
     """봉 경계·벽 나이 이어 세기·가짜벽 판정·판정 불가·warm·덮어쓰기 규칙 (연구 selftest 와 같은 답)."""
-    def run(evs, tape, n_sec=700, c0=-10**9):
+    row = lambda t: (t, 9999, 10021 if t >= 300_000 else 10001, 3.0, 1.0, 100.0, 100.0, 9990, 1.0,   # noqa: E731
+                     10012 if 100_000 <= t < 200_000 else 10010, 5.0)   # 매도 5% 벽 칸 10010 · 100~200초 다른 칸 · 300초부터 mid +10틱
+
+    def run(evs, tape, n_sec=700, c0=-10**9, every=False):
         got = []
-        bars = Bars(tape, lambda B, m: got.append((B, m)))
+        bars = Bars(tape, lambda B, m: (every or m is not None) and got.append((dict(B), m)))
         bars.chain(c0)
         for e in evs:
             bars.event(e)
-        for k in range(n_sec):     # 매도 5% 벽 칸 10010 · 100~200초 다른 칸 · 300초부터 mid +10틱
-            t = k * 1000 + 1
-            bars.sec((t, 9999, 10021 if t >= 300_000 else 10001, 3.0, 1.0, 100.0, 100.0, 9990, 1.0,
-                      10012 if 100_000 <= t < 200_000 else 10010, 5.0))
+        for k in range(n_sec):
+            bars.sec(row(k * 1000 + 1))
         return got
     full = lambda lo, hi: ([(s, 1001, 0.0, 0.0) for s in range(lo, hi)], [])   # noqa: E731  빈 구간 없는 테이프, 그 칸 체결 0
     fake = dict(t=299_999, side=1, px=100.10, qref=5.0, q=0.0, share=0.05, dist_bp=3.0, age20=40_000)
@@ -560,11 +578,19 @@ def selftest():
     assert B1["fake_n_a"] is None and B1["eat_n_b"] is None and M1 == []
     (B2, M2), *_ = run([fake], full, c0=1)                              # 사슬 시작 30분 = warm -> 북·사건 값 None
     assert B2["warm"] == 1 and B2["imb50"] is None and B2["fake_n_a"] is None
+    P = run([fake], full, n_sec=320, every=True)                       # 봉 0 북 값은 봉 끝(300초) 바로 · 사건 열은 370초 전엔 없다
+    assert [m for _, m in P] == [None] and abs(P[0][0]["imb10"] - 0.5) < 1e-12 and "fake_n_a" not in P[0][0]
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         con = db_open(Path(d) / "x.sqlite")
         assert db_write(con, B0, M0) and not db_write(con, B2, [])      # 온전한 봉을 warm 봉이 못 덮는다
         assert con.execute("SELECT count(*) FROM marks").fetchone()[0] == 1
+        mine, t1 = set(), B0["t"] + BAR                                 # 북 먼저 -> 같은 프로세스 사건 쓰기만 덮는다 · 다른 프로세스(빈 mine)는 못 덮는다
+        Bp = {k: v for k, v in B0.items() if k not in EV_COLS} | {"t": t1}
+        assert db_write(con, Bp, None, mine) and mine == {t1} and not db_write(con, Bp, None, set())
+        assert con.execute("SELECT fake_n_a FROM bars WHERE t = ?", (t1,)).fetchone()[0] is None
+        assert db_write(con, {**B0, "t": t1}, [], mine) and mine == set() and not db_write(con, Bp, None, mine)
+        assert con.execute("SELECT fake_n_a FROM bars WHERE t = ?", (t1,)).fetchone()[0] == 1
         # 따라 읽기(①): 줄을 반쯤 쓰다 멈춰도 완성된 줄만 · 다음 시 파일이 생기면 옛 파일 끝까지 · 옛 파일이 gz 로 바뀌고 지워져도 그대로
         import threading
         global DD

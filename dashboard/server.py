@@ -2618,7 +2618,7 @@ def make_app() -> web.Application:
             marks = [{"t": t, "bar_t": bt, "side": s, "kind": k, "px": px, "usd": round(u or 0), "dist_bp": round(d, 2)}
                      for t, bt, s, k, px, u, d in read_rows(db, "SELECT t, bar_t, side, kind, px, usd, dist_bp FROM marks WHERE bar_t >= ? ORDER BY t", (cut,))]
             return {"bars": bars, "walls": walls, "marks": marks}
-        return web.json_response(await swr_cached("ob5m_eth", 30.0, lambda: asyncio.to_thread(produce), max_stale=600.0), headers=NOCACHE)
+        return web.json_response(await swr_cached("ob5m_eth", 10.0, lambda: asyncio.to_thread(produce), max_stale=600.0), headers=NOCACHE)
 
     vol4h_art: dict = {}   # 코인 -> {mtime, art}
     # 코인 -> 아티팩트(None = ETH 기본 svm.ARTIFACT). XRP 는 매달 재학습이 아직 없다(ponytail: 10-19 학습분 고정 -- 재학습 cron 은 파라미터화한 복사본이 필요).

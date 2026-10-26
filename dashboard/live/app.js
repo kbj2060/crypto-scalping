@@ -4558,7 +4558,7 @@ async function maybeFetchFpWeek() {
 let ob5m = null, ob5mAt = 0, ob5mKey = null;
 async function refreshOb5m() {
   const asset = activeSnapshotAsset, now = Date.now();
-  if (!flowOn() || (ob5mKey === asset && now - ob5mAt < 60000)) return;   // 봉이 5분마다 닫힌다 -- 코인마다 60초(실패도) · 코인을 바꾸면 곧바로
+  if (!flowOn() || (ob5mKey === asset && now - ob5mAt < 15000)) return;   // 코인마다 15초(실패도) · 코인을 바꾸면 곧바로 -- 10-26 «기울기 막대가 늦다»: 60초 → 15초(워커가 봉 끝에 북 값을 바로 쓴다)
   ob5mKey = asset; ob5mAt = now;
   try {
     const res = await fetch(`/api/ob5m?asset=${asset}`, { cache: "no-cache" });
@@ -8251,7 +8251,7 @@ async function tick() {
       refreshSessionAlerts();
       refreshFootprint();            // 2026-09-15 볼륨 풋프린트 체결 테이프
       maybeFetchFpWeek();            // 2026-10-20 1주일(12시간 밖이 필요할 때 한 번)
-      refreshOb5m();                 // 2026-10-26 5분 호가 요약(자체 60초 게이트)
+      refreshOb5m();                 // 2026-10-26 5분 호가 요약(자체 15초 게이트)
       refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)
       refreshGex();                  // 2026-09-19 옵션 감마 노출(참고 표시 · 신호 아님)
       refreshKalshi();               // 2026-09-28 칼시 15분 확률 (1초, ETH 만 · 참고 · 신호 아님)
