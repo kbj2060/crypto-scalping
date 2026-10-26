@@ -3820,7 +3820,7 @@ const PAPER_SIG_OK = { wall: new Set(["eth", "sol", "xrp"]), duel: new Set(["eth
 const PAPER_POLL_MS = 10000;   // 2026-10-04 모의 매매 엔진은 1분마다 쓴다 -- 10초면 충분
 let latestPaper = null, paperLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
-const mcLine = { vwap: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { vwap: true, veto: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
 // 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- vsess 켜면 지금 시장 세션 개장(현지 시각, 서머타임 반영)부터 센 VWAP.
 //   서버가 봉마다 두 벌을 싣는다: vwap/vsd = UTC 00시부터 · svwap/svsd/sstart/sname = 세션 개장부터. seg 가 바뀌는 곳에서 선을 끊는다.
@@ -4282,7 +4282,7 @@ function renderMarketCtx() {
     + `${sw ? `<i class="mc-sw-key${sw.includes("ma-") ? "" : " dash"}" aria-hidden="true"></i>` : ""}${nm}</label>`;
   const lineSw = `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span>`
       + `<span class="mc-sw-g mc-sw-ma">${[["ema5", "EMA 5", "종가 지수이동평균 5봉"], ["ema20", "EMA 20", "종가 지수이동평균 20봉"], ["vwma", "VWMA 100", "거래량 가중 이동평균 100봉 · 거래량 = 바이낸스 5분봉"]]
-        .map(([k, nm, t]) => swChip(k, nm, `var(--ma-${k})`, t)).join("")}${swChip("bb", "볼린저", "var(--muted)", "20봉 · 2σ")}</span>`
+        .map(([k, nm, t]) => swChip(k, nm, `var(--ma-${k})`, t)).join("")}${swChip("bb", "볼린저", "var(--muted)", "20봉 · 2σ")}${swChip("veto", "추세 veto", "var(--muted)", "SMA144 ±1×ATR 히스테리시스 밴드 · 롱만/숏만 꼬리표")}</span>`
       + `<span class="mc-sw-g"><span class="mc-chip-pair">${swChip("vwap", "VWAP ±σ", "var(--muted)")}${swChip("vsess", "세션 시작부터", "", "끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)", true)}</span>`
       + `${swChip("wvwap", "주간·앵커 VWAP", "var(--ink)")}</span></div>`;
   setH("fpLineSwitch", G.cmpW ? lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', "") : "");   // 2026-10-16 펜 메모 «이 텍스트는 제거» -- 넓은 화면 줄만(좁은 화면은 이름 그대로)
@@ -6871,7 +6871,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // SMA144 를 스스로 못 만든다. **두 모드 모두에 그린다**(같은 renderCandleSvg 라 분기 없음).
   // 🔴레짐 리본과 다른 물건이다: 리본은 학습된 3분류(강세/약세/횡보), 이건 규칙 하나다.
   {
-    const vp = candles.map((c, i) => ({ i, sma: Number(c.sma), atr: Number(c.atr), v: Number(c.veto) }))
+    const vp = (mcLine.veto ? candles : []).map((c, i) => ({ i, sma: Number(c.sma), atr: Number(c.atr), v: Number(c.veto) }))   // 2026-10-26 «차트에 그리기» 칩으로 끈다(기본 켬)
                       .filter((p) => Number.isFinite(p.sma) && Number.isFinite(p.atr));
     // 밴드 배수는 **서버가 준다**(dashboard/server.py TREND_VETO_K). 여기 숫자를 또 적으면
     // 두 곳을 따로 고쳐야 하고, 실제로 2026-09-23 에 K 가 1.0 -> 2.0 으로 바뀌었다.
