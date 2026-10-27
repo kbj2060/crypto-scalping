@@ -461,8 +461,26 @@ function lineToolEl(box) {
   box.appendChild(h);
   return h;
 }
+function fpMobRowSet(mob, card, fs) {   // 휴대폰 머리 줄에 SLTP·지표 버튼을 옮기거나(mob) 제자리(카드)로 되돌린다 -- 노드째 옮겨 리스너·팝업 상태가 따라간다
+  const row = el("fpMobRow");
+  if (!row || !card || !fs) return;
+  if (row.hidden !== !mob) row.hidden = !mob;
+  card.classList.toggle("fp-mobrow", mob);
+  fs.classList.toggle("mob", mob);
+  if (!fs._home) fs._home = fs.parentElement;
+  if (mob) {
+    const lb = fpLineBtnEl(card);
+    if (lb.parentElement !== row) row.append(lb);
+    if (fs.parentElement !== row) row.append(fs);
+  } else {
+    const lb = el("fpLineBtn");
+    if (lb && lb.parentElement === row) card.append(lb);
+    if (fs.parentElement === row) fs._home.prepend(fs);
+  }
+}
 function fpTopRowOff() {   // 넓은 화면 차트 위 줄(미니맵·SLTP·지표)을 걷는다 -- renderCandleSvg 의 on=false 분기와 같은 일
   const card = el("fpCard"), fs = el("fpLineSwitch"), pan = el("chartPan"), home = el("fpPanHome");
+  fpMobRowSet(false, card, fs);
   card?.classList.remove("fp-toprow"); fs?.classList.remove("on");
   if (pan && pan.classList.contains("inrow")) { if (home && pan.previousElementSibling !== home) home.after(pan); pan.classList.remove("inrow"); pan.style.top = pan.style.left = ""; }
 }
@@ -4449,8 +4467,9 @@ function renderMarketCtx() {
       + `${swChip("wvwap", "주간·앵커 VWAP", "var(--ink)")}</span></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
   const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "vwap", "wvwap"].filter((k) => mcLine[k]).length;
-  if (!G.cmpW) fpIndOpen = false;   // 좁은 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
-  const fsEl = el("fpLineSwitch"), fsHtml = G.cmpW ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
+  const fsRow = G.cmpW || (isMobileChartMode() && flowOn() && !!el("fpMobRow"));   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
+  if (!fsRow) fpIndOpen = false;   // 버튼 줄이 없는 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
+  const fsEl = el("fpLineSwitch"), fsHtml = fsRow ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
     + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12.5l4-4.5 3 2.5 6-6.5"/><path d="M1.5 14.5h13"/></svg>지표<b>${indOn}</b></button>`
     + `<div class="fp-ind-pop" id="fpIndPop" aria-label="차트에 그릴 지표"${fpIndOpen ? "" : ' hidden=""'}>`
     + lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', '<span class="mc-switch-t">이동평균·밴드 · VWAP — 눌러서 켜고 끄기</span>') + `</div>` : "";
@@ -4465,7 +4484,7 @@ function renderMarketCtx() {
   const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", wallLine + (sw ? G.book(sw, bps, wallW || undefined, Number(d.mid) || 0, (ASSET_CONFIG[A] || {}).dp ?? 2) : note("호가 래스터 대기")) + wallRow + statRows
       + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(sdp)}${bk.spread > 1.5 * 10 ** -sdp ? " — 평소(1틱)보다 넓다" : ""}`
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
-      + (G.cmpW ? "" : lineSw));
+      + (fsRow ? "" : lineSw));
   // 2026-10-15 ⑤ 뉴스 판 → ⑤ 예측 줄(사용자 시안 B): 지금 추세 → 4h → 7일 → 4~13주, 4h 칸 아래 변동성. 뉴스는 뉴스 카드에 그대로.
   const fcHtml = fcRowHtml(sec);   // 2026-10-26 펜 메모 «풋프린트 미래 차트로 옮겼으니 제거»: ⑤ 아래 박스 유지 30분·1시간·4시간 줄 삭제(풋프린트 미래 칸 상자 d38cb502 가 같은 값)
   G.gw = gwKeep;
@@ -8539,6 +8558,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           lb.style.top = y; lb.style.left = `${Math.round((colL + colR) / 2)}px`;
         }); else if (pan) { pan.style.top = pan.style.left = ""; }
         card.classList.toggle("fp-toprow", on);   // 이 줄이 있으면 체결 기둥 토글의 작은 «선 주문»은 숨긴다(큰 버튼 하나)
+        fpMobRowSet(!on && mobileChart && flowOn() && !fpAltOn(), card, fs);   // 2026-10-28 휴대폰 = 머리 마지막 줄 [· | SLTP | 지표]
       } }
     // 2026-10-15 아티팩트 댓글 «봉 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 수급 바닥 시각 줄(12px, renderSupply1s mb 16→4)을 버블에 넘긴다
     const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give;
@@ -8558,7 +8578,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 🔴그라디언트는 densityStops() 에서 바로 만든다 -- 사본을 두면 히트맵과 어긋나도
     //   아무도 모른다(2026-09-12 에 실제로 겪었다).
     // 2026-10-28 펜 메모 «왼쪽 청산밀도를 제거하고 미니맵을 그 자리로»: 넓은 화면(splitR)은 범례를 안 그린다 -- 휴대폰·좁은 화면은 그대로
-    if (SUB_LEGEND_H && !splitR && (densityHistory || []).length) {
+    if (SUB_LEGEND_H && !splitR && !(mobileChart && flowOn()) && (densityHistory || []).length) {   // 10-28 휴대폰 흐름 코인도(사용자 «모바일도 데스크탑처럼»)
       const lg = subSvg("dens", 0, subLegendY, w, SUB_LEGEND_H,
                         "dens|" + w + "|" + SUB_LEGEND_H, (g) => {
         const stops = densityStops();

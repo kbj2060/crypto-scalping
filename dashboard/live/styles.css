@@ -2956,9 +2956,28 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fp-col-tog [data-win][aria-pressed="true"] { background: var(--muted); }
 .fp-col-tog button:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }   /* 2026-10-10 청산맵 기간(1d·7d·30d) -- 청산맵일 때 창 탭 자리 */
 @media (max-width: 720px) {   /* 2026-10-28 기둥 둘을 따로 고르며 버튼이 최대 11개 -- 칸 폭에 맞춰 왼쪽 묶음(기간·체결|청산) | 오른쪽 묶음(포지션|호가·기간·SLTP), 넘치면 줄바꿈 */
-  .fp-col-tog { left: 8px !important; right: 8px; width: auto; transform: none; flex-wrap: wrap; row-gap: 4px; }
+  .fp-col-tog { left: 8px !important; right: 8px; width: auto; transform: none; flex-wrap: wrap; row-gap: 4px; gap: 4px; }
   .fp-col-tog > .fp-col-seg:nth-child(3) { margin-left: auto; }
+  .fp-col-tog button { height: 24px; padding: 0 7px; font-size: 11px; border-radius: 6px; }   /* 10-28 최적화: 15px → 24px(손가락) · 아래 칸 머리 36px 안 한 줄 */
+  #fpCard.fp-mobrow #fpColTog [data-lines] { display: none; }   /* 머리 줄에 큰 SLTP 가 있으면 작은 것은 숨김 */
+  #fpCard.fp-mobrow #fpColTog > .fp-col-seg:last-child { display: none; }
 }
+@media (max-width: 400px) {   /* 10-28 검증: 청산+포지션(버튼 10개)이면 390 이하에서 두 줄로 넘쳐 풋프린트 글자를 가렸다 -- 한 줄로 */
+  .fp-col-tog { gap: 2px; }
+  .fp-col-tog button { padding: 0 4px; font-size: 10.5px; }
+}
+@media (max-width: 340px) { .fp-col-tog { gap: 1px; } .fp-col-tog .fp-col-seg { gap: 1px; } .fp-col-tog button { padding: 0 3px; font-size: 9.5px; } }   /* 320 폭(SE 1세대)도 한 줄
+/* 2026-10-28 사용자 «모바일도 데스크탑처럼»: 휴대폰 머리 마지막 줄 = [빈칸 | SLTP(가운데) | 지표 N(오른쪽)] · 손가락 40px · 팝업은 화면 폭 안에서 줄바꿈 */
+.fp-mob-row { flex: 1 1 100%; order: 2; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; position: relative; }
+.fp-mob-row[hidden] { display: none; }
+.fp-mob-row .fp-line-btn { display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 16px 0 13px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--glass); color: var(--text); font: 700 13px/1 var(--font-mono); letter-spacing: .14em; cursor: pointer; touch-action: manipulation; }
+.fp-mob-row .fp-line-btn[aria-pressed="true"] { border-color: color-mix(in srgb, var(--text) 55%, transparent); background: color-mix(in srgb, var(--text) 13%, transparent); color: var(--ink); }
+.fp-mob-row .fp-line-switch.mob { display: flex; justify-self: end; align-self: center; position: static; transform: none; margin: 0; }
+.fp-mob-row .fp-ind-btn { height: 40px; padding: 0 13px; border-radius: 10px; touch-action: manipulation; }
+.fp-mob-row .fp-ind-pop { right: 0; max-width: min(360px, calc(100vw - 40px)); white-space: normal; }
+.fp-mob-row .fp-ind-pop .mc-sw-g { flex-wrap: wrap; gap: 6px; }
+.fp-mob-row .fp-ind-pop .mc-chip { min-height: 36px; padding: 0 11px; }
 /* 2026-10-28 차트 «선 주문»(app.js renderLineTool) -- 시안 A 꼬리표 + B 포지션 상자. 롱 = 위 초록·아래 빨강, 숏이면 뒤집힌다(.short) */
 .lt { position: absolute; inset: 0; pointer-events: none; z-index: 3; font: 600 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
 .lt[hidden] { display: none; }
