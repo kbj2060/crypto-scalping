@@ -4431,7 +4431,9 @@ def make_app() -> web.Application:
         binance_session=binance_session, fetch_binance_json=fetch_binance_json, swr_cached=swr_cached,
         _timed_produce=_timed_produce,
         load_market_history=load_market_history, situation_by=situation_by,
-        NOCACHE=NOCACHE, STALE_GRACE_SECONDS=STALE_GRACE_SECONDS)
+        NOCACHE=NOCACHE, STALE_GRACE_SECONDS=STALE_GRACE_SECONDS,
+        # 2026-10-28 차트 선 손절 = 1초 마지막 체결가(USDT, sr_break_loop 와 같은 원천) 닿음
+        sec_prices=lambda a: None if a not in flows else [(t, float(c[6])) for t, c in list(flows[a].footprint_state["sec"].items()) if c[6]])
     keep_trip_ledger = order_api.keep_trip_ledger
 
     async def api_ops_status(request: web.Request) -> web.Response:

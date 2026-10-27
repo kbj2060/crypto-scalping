@@ -340,12 +340,14 @@ function fpColTogEl(svg) {
   el.innerHTML = '<span class="fp-col-seg fp-col-win" role="group" aria-label="포지션 기간">'
     + '<button type="button" data-win="1">1d</button><button type="button" data-win="7">7d</button><button type="button" data-win="30">30d</button></span>'
     + '<span class="fp-col-seg" role="group" aria-label="체결 또는 포지션">'
-    + '<button type="button" data-col="trade">체결</button><button type="button" data-col="pos">포지션</button><button type="button" data-col="liq">청산</button></span>';
+    + '<button type="button" data-col="trade">체결</button><button type="button" data-col="pos">포지션</button><button type="button" data-col="liq">청산</button></span>'
+    + '<span class="fp-col-seg" role="group" aria-label="선 주문"><button type="button" data-lines="1" title="차트 위 익절·손절 선을 끌어 놓고 peg 메이커로 진입(자동 2×) — 청산도 둘 다 메이커">선 주문</button></span>';
   el.addEventListener("pointerdown", (e) => e.stopPropagation());   // 차트 끌기로 번지지 않게
   el.addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
     e.stopPropagation();
+    if (b.dataset.lines) { lineToolToggle(); b.setAttribute("aria-pressed", String(!!lineTool)); return; }
     if (b.dataset.col) setFpCol(b.dataset.col); else setFpCol(null, Number(b.dataset.win));
   });
   svg.parentElement.appendChild(el);
@@ -360,6 +362,7 @@ function placeFpColTog(svg, xr, yTop, show) {   // xr·yTop = viewBox 좌표(체
   const win = fpColMode === "liq" ? fpLiqWin : fpPosWin;
   el.querySelectorAll("[data-col]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.col === fpColMode)));
   el.querySelectorAll("[data-win]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.win) === win)));
+  el.querySelector("[data-lines]")?.setAttribute("aria-pressed", String(!!lineTool));
   el.querySelector(".fp-col-win").hidden = fpColMode === "trade";
   const m = svg.getScreenCTM(), pr = el.parentElement.getBoundingClientRect();
   if (!m) return;
@@ -373,6 +376,140 @@ function setFpCol(mode, win) {
   try { localStorage.setItem("fpCol", fpColMode); localStorage.setItem("fpPosWin", String(fpPosWin)); localStorage.setItem("liqDays", String(fpLiqWin)); } catch (e) { /* 저장 못 해도 동작 */ }
   if (fpColMode === "pos") { posProfileFetchAt = 0; refreshPositionProfile(); }
   hideTooltip(); scheduleSnapshotChartRender();
+}
+// ── 2026-10-28 차트 «선 주문»(사용자 «차트 위 라인 2개를 끌어 위치를 잡고 진입 → peg 메이커 · 익절/손절도 둘 다 메이커 · 닿으면 닫기 · 자동 2×»)
+//   시안 A 꼬리표 + B 포지션 상자(꼬리표 = 선 가운데). 선 = USDT 차트 가격 → 서버 미리보기·주문에 tp·sl 로(같은 assemble_entry_plan).
+//   익절 = 체결 직후 post-only 지정가 · 손절 = 서버가 1초 체결가 닿음 판정 → peg 청산(마감 뒤 남은 수량 시장가) · 거래소 스탑 없음.
+//   상자·꼬리표는 차트가 매초 다시 그려도 남는 HTML 층(fpColTog 와 같은 이유) -- 자리만 renderLineTool 이 맞춘다.
+let lineTool = null;   // {tp, sl, plan, err, arm(터치 확인 마감 ms)} · null = 꺼짐
+let lineDrag = null, lineHold = 0, linePrevT = 0, linePt = "";
+const lineSide = (t, p) => (t.tp > p && t.sl < p ? "LONG" : t.tp < p && t.sl > p ? "SHORT" : "");
+const lineDig = (v) => (v >= 100 ? 2 : 4);   // XRP(~2.5) 는 소수 넷째 자리 -- 둘째 자리로 자르면 선이 0.2% 옮겨진 채 나간다(10-28 검증)
+const lineFmt = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: lineDig(v), maximumFractionDigits: lineDig(v) });
+const linePx = (v) => v.toFixed(lineDig(v));
+function lineToolToggle() {
+  if (lineTool) { lineTool = null; renderLineTool(); return; }
+  const G = chartGeo, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
+  if (!G || !(G.ymax > G.ymin) || !(p > 0)) return;
+  lineTool = { tp: p + 0.6 * (G.ymax - p), sl: p - 0.6 * (p - G.ymin), plan: null, err: "", asset: activeSnapshotAsset };
+  renderLineTool(); linePreview();
+}
+function linePreview() {   // 크기는 서버 미리보기(자동 2×)가 정한다 -- 끌기를 멈추고 0.5초 뒤 한 번
+  clearTimeout(linePrevT);
+  linePrevT = setTimeout(async () => {
+    const t = lineTool, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), side = t && lineSide(t, p);
+    if (!t) return;
+    if (!side) { t.plan = null; t.err = "익절과 손절이 현재가 양쪽에 있어야 합니다"; renderLineTool(); return; }
+    try {
+      const d = await manualEntryFetch(side, "entry", { rule: "c", tp: linePx(t.tp), sl: linePx(t.sl) });
+      if (lineTool !== t) return;
+      t.plan = d.ok ? d.plan : null; t.err = d.ok ? (d.plan.blocked || "") : (d.detail || d.error || "미리보기 실패");
+    } catch (e) { if (lineTool === t) { t.plan = null; t.err = "미리보기 실패"; } }
+    renderLineTool();
+  }, 500);
+}
+function lineFire() {   // 미리보기 → 오는 즉시 발주(manualFireOnPreview) -- 진입 버튼과 같은 길(상한·게이트·확인 서버 검사 그대로)
+  const t = lineTool, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), side = t && lineSide(t, p);
+  if (!side || manualOrderBusy || manualPreviewInFlight) return;
+  ofabWatchResult(); ofabSay(escapeHtml(`${side === "LONG" ? "롱" : "숏"} 선 주문 — 미리보기 받는 중…`));
+  manualFireOnPreview = true;
+  manualEntryPreview(side, "entry", { rule: "c", tp: linePx(t.tp), sl: linePx(t.sl), fresh: true });
+  lineTool = null; renderLineTool();
+}
+function lineToolEl(box) {
+  let h = document.getElementById("lineTool");
+  if (h || !box) return h;
+  h = document.createElement("div"); h.id = "lineTool"; h.className = "lt";
+  h.innerHTML = '<div class="lt-zone up"></div><div class="lt-zone dn"></div><i class="lt-ln tp"></i><i class="lt-ln sl"></i><i class="lt-ln en"></i>'
+    + '<button type="button" class="lt-tag tp" data-k="tp"></button><button type="button" class="lt-tag sl" data-k="sl"></button><span class="lt-tag en"></span>'
+    + '<div class="lt-tk"><div class="lt-row"><b class="lt-side"></b><span class="lt-qty"></span></div><div class="lt-row lt-rr"></div>'
+    + '<button type="button" class="lt-go"></button><div class="lt-note"></div></div>'
+    + '<button type="button" class="lt-x">선 지우기</button>';
+  h.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();   // 차트 끌기로 번지지 않게
+    linePt = e.pointerType;
+    const tag = e.target.closest(".lt-tag[data-k]"), go = e.target.closest(".lt-go");
+    if (tag && lineTool) { lineDrag = { k: tag.dataset.k, id: e.pointerId }; tag.setPointerCapture(e.pointerId); e.preventDefault(); }
+    if (go && e.pointerType === "mouse" && !go.disabled) {   // 마우스 = 1.5초 꾹(떠 있는 버튼과 같은 규약)
+      go.classList.add("hold"); lineHold = setTimeout(() => { go.classList.remove("hold"); lineFire(); }, 1500);
+    }
+  });
+  h.addEventListener("pointermove", (e) => {
+    if (!lineDrag || e.pointerId !== lineDrag.id || !lineTool) return;
+    const svg = el("candleSvgSnapshot"), G = chartGeo, m = svg && svg.getScreenCTM();
+    if (!m || !G) return;
+    const yv = (e.clientY - m.f) / m.d;   // 화면 → viewBox y(화면 밖으로 끌어도 같은 비율로 이어진다)
+    lineTool[lineDrag.k] = Math.max(0.01, G.ymax - (yv - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt));
+    lineTool.plan = null; lineTool.arm = 0; renderLineTool();
+  });
+  const end = (e) => {
+    if (lineDrag && e.pointerId === lineDrag.id) { lineDrag = null; linePreview(); }
+    clearTimeout(lineHold); h.querySelector(".lt-go")?.classList.remove("hold");
+  };
+  h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end); h.addEventListener("pointerleave", end);
+  h.querySelector(".lt-go").addEventListener("pointerleave", end);   // 꾹 누르다 버튼 밖으로 나가면 취소(표 안에서도)
+  h.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (e.target.closest(".lt-x")) { lineTool = null; renderLineTool(); return; }
+    const go = e.target.closest(".lt-go");
+    if (!go || go.disabled || !lineTool || (linePt === "mouse" && e.detail)) return;   // 마우스는 꾹(위) -- 터치·키보드 = 두 번(확인 30초, 09-25 부터 터치 꾹 발주 없음)
+    if (Date.now() < (lineTool.arm || 0)) { lineFire(); return; }
+    lineTool.arm = Date.now() + CONFIRM_WINDOW_MS; renderLineTool();
+    setTimeout(renderLineTool, CONFIRM_WINDOW_MS + 50);
+  });
+  box.appendChild(h);
+  return h;
+}
+function renderLineTool() {
+  const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement;
+  const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), m = svg && svg.getScreenCTM();
+  if (lineTool && lineTool.asset !== activeSnapshotAsset) lineTool = null;   // 다른 코인 가격의 선을 그대로 두지 않는다
+  const show = !!(lineTool && G && m && G.ymax > G.ymin && p > 0 && !fpAltOn() && orderCoinOk());
+  const h = show ? lineToolEl(box) : el("lineTool");
+  if (!h) return;
+  h.hidden = !show;
+  if (!show) return;
+  const t = lineTool, pr = box.getBoundingClientRect(), mob = isMobileChartMode();
+  const X = (x) => m.a * x + m.e - pr.left, Yv = (v) => G.mt + (G.ymax - v) * (G.pb - G.mt) / (G.ymax - G.ymin);
+  const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, Y = (v) => m.d * Yv(v) + m.f - pr.top;
+  const clampY = (y) => Math.min(bot, Math.max(top, y));
+  const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (mob ? 0.36 : 0.58), w = R - x0, cx = x0 + w / 2;
+  const side = lineSide(t, p), sgn = side === "SHORT" ? -1 : 1;
+  const yP = clampY(Y(p)), yT = clampY(Y(t.tp)), yS = clampY(Y(t.sl));
+  const qty = Number(t.plan?.quantity) || 0, unit = coinUnit();
+  const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
+  set(".lt-zone.up", { left: x0 + "px", width: w + "px", top: Math.min(yT, yP) + "px", height: Math.abs(yP - yT) + "px" });
+  set(".lt-zone.dn", { left: x0 + "px", width: w + "px", top: Math.min(yS, yP) + "px", height: Math.abs(yP - yS) + "px" });
+  [["tp", t.tp], ["sl", t.sl]].forEach(([k, v]) => {
+    const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / p - 1;
+    set(`.lt-ln.${k}`, { left: L + "px", width: R - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
+    const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
+    const pnl = qty ? ` <span class="lt-s">${d * sgn >= 0 ? "+" : "−"}$${Math.abs(d * p * qty).toFixed(1)}</span>` : "";
+    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} <span>${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%</span>${mob ? "" : pnl}`;
+    tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 옮기기`);
+  });
+  set(".lt-ln.en", { left: x0 + "px", width: w + "px", top: yP + "px" });
+  set(".lt-tag.en", { left: x0 + 6 + "px", top: yP + "px" }).textContent = `진입 peg ${lineFmt(p)}`;
+  h.classList.toggle("short", side === "SHORT");
+  // 표는 플롯 왼쪽 -- 두 꼬리표의 높이 띠(±22px)를 피한 빈 구간 중 표가 들어가는 첫 곳(위부터, 대개 두 선 사이). 없으면 가장 넓은 곳.
+  const tk = h.querySelector(".lt-tk"), th = tk.offsetHeight + 8, ys = [yT, yS].sort((a, b) => a - b);
+  const gaps = [[top + 8, ys[0] - 22], [ys[0] + 22, ys[1] - 22], [ys[1] + 22, bot - 8]];
+  const g = gaps.find(([a, b]) => b - a >= th) || gaps.reduce((x, y) => (y[1] - y[0] > x[1] - x[0] ? y : x));
+  Object.assign(tk.style, { left: L + 8 + "px", top: Math.max(top + 8, Math.min(g[0], bot - th)) + "px" });
+  const sd = h.querySelector(".lt-side");
+  sd.textContent = side ? `${side} · 자동 2×` : "방향 없음"; sd.className = `lt-side ${side === "SHORT" ? "bad" : side ? "good" : ""}`;
+  h.querySelector(".lt-qty").textContent = side && !t.err ? (qty ? `${qty} ${unit}` : "크기 계산 중…") : "";
+  const rr = side ? Math.abs((t.tp - p) / (t.sl - p)) : 0, rrEl = h.querySelector(".lt-rr");
+  rrEl.textContent = t.err || (side ? `손익비 ${rr.toFixed(2)} : 1` + (qty ? ` · 손절 시 −$${Math.abs((t.sl - p) * qty).toFixed(1)}` : "") : "");
+  rrEl.classList.toggle("bad", !!t.err);
+  const go = h.querySelector(".lt-go"), armed = Date.now() < (t.arm || 0);
+  go.disabled = !side || !!t.err || !qty;
+  go.classList.toggle("short", side === "SHORT"); go.classList.toggle("armed", armed);   // className 을 덮으면 꾹 채움(hold)이 매초 지워진다
+  go.innerHTML = armed ? `확인: ${side === "LONG" ? "롱" : "숏"} ${qty} ${unit} 주문`
+    : `${side || "진입"} 진입 · peg <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "1.5초 꾹"}</small>`;
+  h.querySelector(".lt-note").textContent = mob ? "익절·손절 모두 메이커로 닫음"
+    : "청산 둘 다 메이커 — 익절 = 체결 즉시 지정가(post-only) · 손절 = 1초 가격이 닿으면 peg(마감 뒤 남은 수량 시장가)";
+  set(".lt-x", { left: R - 6 + "px", top: top + 8 + "px" });
 }
 async function refreshPositionProfile() {   // 포지션 보기일 때만 1초(서버도 1초 캐시)
   if (fpColMode !== "pos" || activePageTab !== "snapshot" || document.hidden || !flowOn()) return;   // 2026-10-20 ETH → 흐름 코인 전부(XRP)
@@ -5999,7 +6136,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
   const pyAt = PROF ? (v) => PROF.top + ((yMax - v) * (PROF.bot - PROF.top)) / ySpan : yAt, pTop = PROF ? PROF.top : mt, pBot = PROF ? PROF.bot : plotBottom;   // 체결·호가 띠 자리(휴대폰 = 아래 칸)
   const bw = slot * 0.8;
-  if (svg.id === "candleSvgSnapshot") chartGeo = { ml, cw, n: N, wAll, hAll, mt, pb: plotBottom, prof: PROF && [PROF.top - 16, PROF.bot] };   // 끌기·휠이 화면 px → 봉(chartSlotPx)
+  if (svg.id === "candleSvgSnapshot") chartGeo = { ml, cw, n: N, wAll, hAll, mt, pb: plotBottom, prof: PROF && [PROF.top - 16, PROF.bot], ymin: yMin, ymax: yMax };   // 끌기·휠이 화면 px → 봉(chartSlotPx)
   // 2026-10-20 1주일 창(5분봉 2,016개 · 봉 칸 ~0.5px): 봉마다 노드(캔들 <g>·선·사각형, 레인 막대 7개, 청산 원, 제목)를 만들면
   //   3.7만 노드 · 렌더 180ms 였다. 봉 칸이 4px 밑이면 같은 색끼리 <path> 하나로 모으고 봉별 <title> 은 뺀다(호버 툴팁이 그 봉 값을 말한다).
   // 2026-10-20 연속 줌(36~300봉이 «무거운 구간»): 문턱 4 → 8px. 4~8px 봉은 박스 없는 캔들이라 path 로 모아도 같은 그림(아래 DENSE 캔들 폭).
@@ -8431,6 +8568,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   { const mn = mobileChart && svg.id === "candleSvgSnapshot" ? svg.querySelector('[data-live="label"][data-with-price="num"]') : null;
     if (mn && !mn.classList.contains("far-lbl")) svg.appendChild(mn); }   // 2026-10-10 휴대폰 현재가 숫자 = 호가 띠(◌ 표식) 위 맨 앞
   fpCvPaint(fpCv.bg); fpCvPaint(fpCv.fg);   // 2026-10-20 캔버스 두 장(fpCv) -- 칠하기는 레이아웃을 안 건드린다
+  if (svg.id === "candleSvgSnapshot") post.push(renderLineTool);   // 2026-10-28 선 주문 상자 자리
   post.forEach((f) => f());   // 화면 상자를 재는 HTML 배치(위 ③) -- svg 를 다 쌓은 뒤 한 번만 배치된다
   // 2026-10-01 프로파일 오른쪽 끝 가격 이름과 겹치는 호가 벽 수량 글자(«11.8k»)는 숨긴다(사용자 지시) -- 층 캐시라 매번 되살린 뒤 다시 판정
   //   (2026-10-20 읽기를 먼저 다 하고 쓰기를 나중에 -- 글자마다 되살리고 재면 그때마다 레이아웃이 다시 돈다)
@@ -9396,7 +9534,7 @@ async function manualEntryFetch(side, kind = "entry", ov = null) {
   const q = `&pct=${ov?.pct ?? (kind === "exit" ? manualExitPct() : manualEntryPct())}`
     + (kind === "exit" ? "" : (ov?.lev ? `&lev=${ov.lev}` : manualLevQuery()))
     + (kind === "exit" ? exitExecQuery(ov) : ((ov?.rule ?? manualRule()) ? `&rule=${ov?.rule ?? manualRule()}` : ""))
-    + (ov?.fresh ? "&fresh=1" : "");
+    + (ov?.fresh ? "&fresh=1" : "") + (kind !== "exit" && ov?.tp ? `&tp=${ov.tp}&sl=${ov.sl}` : "");
   const res = await fetch(`/api/manual-${kind}/preview?side=${side}&asset=${activeSnapshotAsset}${q}`, { cache: "no-cache" });
   return res.json();
 }
@@ -9655,8 +9793,8 @@ function manualEntryArmConfirm(side, plan, kind = "entry", ov = null) {
   manualEntryPending = { side, quantity: plan.quantity, kind, pct, asset: activeSnapshotAsset,
                          lev: ov?.lev ?? manualLevEffective(),
                          rule: kind === "exit" ? "" : (ov?.rule ?? manualRule()),
-                         fresh: !!ov?.fresh, sw: ov?.switch || null,
-                         exec: kind === "exit" ? exitExecQuery(ov) : manualExecQuery() };
+                         fresh: !!ov?.fresh, sw: ov?.switch || null, tp: ov?.tp || "", sl: ov?.sl || "",
+                         exec: kind === "exit" ? exitExecQuery(ov) : (ov?.tp ? "" : manualExecQuery()) };   // 2026-10-28 선 주문 = 따라가기(run_entry)만
   // 🔴2026-09-26 비평 P0 + 사용자 결정 «길게 누르면 바로 발주»: 0.4초를 채운 뒤 미리보기가 **늦게** 오면
   //   예전엔 확인 버튼이 떴다 -- 네트워크 속도에 따라 한 단계/두 단계가 갈렸다. 채움을 끝낸 사람은 이미
   //   확인했다. 미리보기가 오는 즉시 발주한다(막혔으면 위에서 이미 멈췄다).
@@ -9936,6 +10074,7 @@ async function manualEntrySubmit() {
       + (pending.kind === "exit" ? "" : (pending.lev ? `&lev=${pending.lev}` : ""))
       + (pending.kind !== "exit" && pending.rule ? `&rule=${pending.rule}` : "")
       + (pending.fresh ? "&fresh=1" : "") + (pending.exec || "")
+      + (pending.kind !== "exit" && pending.tp ? `&tp=${pending.tp}&sl=${pending.sl}` : "")   // 2026-10-28 차트 선 주문
       // 2026-10-10 스위칭 = 서버 한 작업(청산 다 닫히면 서버가 반대 진입) -- 화면이 꺼져도 이어진다
       + (pending.kind === "exit" && pending.sw ? `&switch_to=${pending.sw.to}&sw_pct=${pending.sw.pct}`
         + (pending.sw.lev ? `&sw_lev=${pending.sw.lev}` : "")

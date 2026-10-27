@@ -36,7 +36,7 @@ from scripts.live_binance_account_20260910 import fetch_account  # noqa: E402
 from scripts.live_manual_peg_entry_20260912 import (  # noqa: E402
     EXIT_VOL_WINDOW, bracket_action, bracket_key, bracket_merge, bracket_rekey, build_entry_plan, build_exit_plan,
     exec_enabled, load_filters, realized_vol_bpm, resolve_exit_position,
-    COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, commit_rule_l, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
+    COMMIT_CAP_X, HOLD_CAP_X, RULE_STOP_PCT, commit_rule_l, line_bracket, rec_rule_add_order, rec_rule_bracket, rec_rule_size)   # 2026-10-09 자동 규칙 진입(재생 ×15.2 크기식) · 10-14 자동 물타기 지정가
 from live.execution.live_manual_peg_execute_20260912 import (  # noqa: E402
     WAIT_CHOICES_MIN, cancel_wait_orphans, clear_bracket, commission_bp, margin_type, place_add_order, place_bracket, place_stop, run_entry, run_entry_wait, run_exit)
 # 2026-09-13 보유시간 조건부 위험 사이징. 계산은 사이징 워커가 하고 여기서는 상태파일만
@@ -583,8 +583,8 @@ def sizing_cap() -> dict[str, Any]:
 
 
 def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, fetch_binance_json, swr_cached,
-             _timed_produce, load_market_history, situation_by, NOCACHE, STALE_GRACE_SECONDS):
-    """make_app() 이 부른다. 인자 = 코어·시장 쪽 객체(server.py make_app 지역 · 모듈 상수). 돌려주는 것 = 라우트·기동/정리 훅이 쓸 함수들.
+             _timed_produce, load_market_history, situation_by, NOCACHE, STALE_GRACE_SECONDS, sec_prices=lambda _a: None):
+    """make_app() 이 부른다. 인자 = 코어·시장 쪽 객체(server.py make_app 지역 · 모듈 상수). sec_prices(asset) = 1초 마지막 체결가 [(초, 가격)] · 없는 코인 None(선 손절 감시). 돌려주는 것 = 라우트·기동/정리 훅이 쓸 함수들.
     라우트 등록·on_startup 순서는 server.py 에 그대로 둔다(기동 순서 불변)."""
     binance_account_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
     # 진행 중인 수동 주문 하나. 동시에 둘을 두지 않는다 -- 겹치면 단건 상한의 뜻이 흐려진다.
@@ -729,7 +729,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         무장 파일의 화면용 몇 칸만 얹는다(캐시된 계좌 payload 는 건드리지 않는다)."""
         if not isinstance(payload, dict):
             return payload
-        armed = {k: {f: v.get(f) for f in ("sl_price", "sl_name", "sl_off", "rule")} for k, v in bracket_load().items()}
+        armed = {k: {f: v.get(f) for f in ("sl_price", "sl_name", "sl_off", "rule", "lines", "tp_level", "sl_level", "tp_resting")} for k, v in bracket_load().items()}
         # 2026-10-20 두 코인 보유(사용자): 손절 무장이 없는 열린 포지션 -- 화면이 «손절 없음»을 크게 말한다(10-20 XRP 가 조용히 무방비였다)
         unprotected = [k for k in (bracket_key(p.get("symbol"), str(p.get("side")).upper()) for p in payload.get("positions") or []
                                    if float(p.get("qty") or 0)) if not (armed.get(k) or {}).get("sl_price")]
@@ -835,6 +835,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if not b.get("available"):
             state["bracket"] = {"placed": False, "reason": b.get("reason") or "청산맵 레벨 없음"}
             return
+        add = add and not b.get("lines")   # 2026-10-28 선 진입 = 물타기 지정가 없음(익절 수량이 포지션 전량이라 크기가 늘면 어긋난다)
         if add and REC_AUTO_ADD and (plan.get("rule") or {}).get("first"):
             state["add_order"] = {"placed": False, "pending": True}   # 화면 폴링이 물타기 지정가 결과까지 기다리게(손절 먼저 건 뒤 arm_rule_add)
         try:
@@ -849,6 +850,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                      "rule": bool(b.get("rule")), "sl_name": b.get("sl_name"),   # 2026-10-09 권고 규칙 손절 = 물타기해도 유지
                      # 2026-10-24 직접 진입도 같은 −5% 손절(rule True)이라 «자동 규칙 크기로 연 포지션»은 따로 남긴다 -- 계좌 3배 공유 상한(rule_shared)이 이것만 본다
                      "auto": bool(plan.get("rule")),
+                     "lines": bool(b.get("lines")), "tp_level": b.get("tp_level"),   # 2026-10-28 선: 1초 체결가 닿음 감시
+                     "tp_resting": bool(((state["bracket"] or {}).get("tp") or {}).get("placed")),   # 익절 지정가가 못 걸렸으면 닿을 때 서버가 peg 로
                      "armed_at": time.time(), "placed": state["bracket"], "add_order": add}
         bracket_save(st)
 
@@ -937,8 +940,13 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             except Exception as exc:  # noqa: BLE001
                 last_bar = None
                 print(f"bracket {pside}: 5분봉 못 읽음 {type(exc).__name__}: {exc}", flush=True)
+            touch = None
+            if b.get("lines"):   # 2026-10-28 무장 뒤 1초 마지막 체결가 범위(USDT) -- 감시 2초 틱 사이도 빠짐없이
+                since = max(float(b["armed_at"]), float(b.get("watch_from") or 0))   # 손절 해제 → 다시 켜기 사이에 지나간 가격은 안 본다
+                pts = [px for t, px in sec_prices(exec_asset_of(b["symbol"]) or "eth") or [] if t > since]
+                touch = (min(pts), max(pts)) if pts else None
             act = bracket_action(b, pside, account.get("positions") or [], bool(account.get("ok")),
-                                 acct_ts, last_bar)
+                                 acct_ts, last_bar, touch)
             if (act in ("clear", "fire") and wait_pending() and manual_wait_state.get("side") == pside
                     and (manual_wait_state.get("plan") or {}).get("symbol") == b["symbol"]):   # 2026-10-20 다른 코인 대기는 두다
                 # 2026-10-10 손절·청산으로 포지션이 닫히는데 같은 쪽 대기 진입이 걸려 있으면 그것도 거둔다(나중에 체결돼 손절 없이 다시 열리지 않게)
@@ -957,6 +965,19 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             b_asset = exec_asset_of(b["symbol"]) or "eth"
             if act != "fire" or exit_slot(b_asset) is None or time.time() < float(b.get("retry_after") or 0):
                 continue
+            if b.get("lines") and not b.get("fired"):
+                # 2026-10-28 검증: 걸린 익절 지정가를 **먼저** 지운다 -- 청산 수량을 그 뒤에 읽어야 겹쳐 넘기지 않고, 못 지우면 계좌 조회(무게 ~50)를
+                #   매 2초 반복하지 않게 10초 쉰다. 지웠으면 fired 로 굳혀 닫힐 때까지 쏜다(익절이 없는데 닿음 창이 지나 조용히 멈추지 않게).
+                if manual_order_lock.locked() or (bracket_load().get(key) or {}).get("sl_off"):
+                    continue
+                r = await clear_bracket(binance_session(), b["symbol"], pside)
+                if r.get("errors"):
+                    b["retry_after"] = time.time() + 10
+                    b["last_error"] = f"익절 지정가 취소 실패: {'; '.join(map(str, r['errors']))}"
+                    changed = True
+                    continue
+                b.update(fired=True, tp_resting=False)
+                changed = True
             plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth")
             # 🔴검사는 조립(await) **뒤**에 -- 그 사이 «손절 해제»나 사용자 청산이 들어오면 쏘지 않는다(남의 상태를 clear 하고 두 번 청산하지 않게)
             if (bracket_load().get(key) or {}).get("sl_off"):
@@ -990,7 +1011,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 b["retry_after"] = time.time() + 30
                 b["last_error"] = slot.get("error")
             changed = True
-            print(f"bracket {pside}: SL {b.get('sl_price')} (레벨 {b.get('sl_level')}) 5분봉 종가 {last_bar} 이탈 -> "
+            print(f"bracket {pside}: SL {b.get('sl_price')} (레벨 {b.get('sl_level')}) 5분봉 종가 {last_bar} · 1초 범위 {touch} 이탈 -> "
                   f"{slot.get('phase')}",
                   flush=True)
         if changed:
@@ -1020,7 +1041,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
 
     async def assemble_entry_plan(side: str, fraction: float = 1.0,
                                   want_lev: int | None = None, asset: str = "eth", fresh: bool = False,
-                                  rule_l: str | None = None):
+                                  rule_l: str | None = None, lines: tuple[float, float] | None = None):
         """계획 조립은 **여기 한 곳뿐**이다 -- 미리보기와 실주문이 같은 입력·같은 함수를 지난다.
         두 곳에 복사해 두면 언젠가 한쪽만 고쳐져 «미리보기와 다른 주문»이 나간다.
 
@@ -1171,6 +1192,9 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             #   옛 직접 모드의 청산맵 지지2 손절·저항3 익절·«SL/TP» 끄기는 지웠다(청산맵 손절은 10-11 검정에서 같은 폭 무작위와 동률).
             #   물타기면 이미 무장된 규칙 손절을 그대로(물러나지 않는다). 손절 없이 연 포지션(바이낸스 앱 등)에 처음 거는 거면 기준 = 평단.
             prev = bracket_load().get(bracket_key(symbol, side)) if same else None
+            if prev and prev.get("lines") and not lines:   # 2026-10-28 검증: 일반 진입이 선 익절을 지우고 −5% 거래소 스탑을 건다(사용자 «비상 스탑 없음»)
+                return None, {}, {}, ({"error": "lines_armed",
+                                       "detail": "선 주문 포지션입니다 — 같은 쪽 추가 진입은 막습니다(선 익절·손절이 지워지고 거래소 스탑이 걸리게 됩니다). 청산 뒤 다시"}, 409)
             p_in = float(book["bidPrice"] if side == "LONG" else book["askPrice"])   # 이번 주문 지정가(메이커 쪽)
             anchor, kind = ((float(same[0].get("entry_price") or 0.0), "평단") if same else (p_in, "첫 진입가"))
             stop_bracket = rec_rule_bracket({"position_side": side}, position_side=side, anchor_price=anchor or p_in,
@@ -1231,6 +1255,18 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             _rx = (plan["trade_plan"] or {}).get("prescription") or {}
             _lv = (_rx.get("exchange_leverage") or {}) if _rx.get("available") else {}
             plan["bracket"] = stop_bracket
+            if lines:   # 2026-10-28 차트 선(익절, 손절 · USDT): 거래소 스탑 없이 익절 = post-only 지정가 · 손절 = 1초 체결가 닿음 → peg 청산
+                if same:
+                    return None, {}, {}, ({"error": "lines_has_position",
+                                           "detail": "같은 쪽 포지션이 이미 있어 선 진입을 막습니다 — 그 포지션의 손절을 바꾸지 않게(닫은 뒤 다시)"}, 409)
+                if sec_prices(asset) is None:
+                    return None, {}, {}, ({"error": "lines_no_feed", "detail": "이 코인은 1초 체결가가 없어 선 손절을 감시할 수 없습니다"}, 400)
+                b_ = await basis_for(book, asset)
+                try:
+                    plan["bracket"] = line_bracket(position_side=side, ref_level=p_in / b_, tp_level=lines[0], sl_level=lines[1],
+                                                   basis=b_, filters=filters)
+                except ValueError as exc:
+                    return None, {}, {}, ({"error": "bad_lines", "detail": str(exc)}, 400)
             if rule:
                 plan["rule"] = {"l": round(cr["l"], 3), "binding": cr["binding"], "stop_pct": round(100 * cr["stop_pct"], 2),
                                 "vol_mult": round(float(vm["mult"]), 3), "cap_notional": round(rule["cap_notional"], 2), "first": rule["first"],
@@ -1240,7 +1276,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                                 # 2026-10-14 자동 물타기 지정가(첫 진입일 때만) -- 체결 뒤 arm_rule_add 가 실제 체결 수량으로 다시 계산해 건다
                                 "lev": float(margin_lev or 0.0),
                                 "filters": {k: float(filters.get(k) or 0.0) for k in ("tick", "step", "min_qty", "min_notional")}}
-                if rule["first"] and REC_AUTO_ADD and plan.get("quantity") and plan["bracket"].get("sl_price"):
+                if rule["first"] and REC_AUTO_ADD and plan.get("quantity") and plan["bracket"].get("sl_price") and not lines:
                     plan["rule"]["add"] = rec_rule_add_order(
                         position_side=side, sl_price=float(plan["bracket"]["sl_price"]), stop_pct=cr["stop_pct"], l_eff=float(cr["l"]),
                         cap_notional=rule["cap_notional"], room_before=rule["room"], filled_qty=float(plan["quantity"]),
@@ -1281,13 +1317,17 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if frac is None:
             return web.json_response({"ok": False, "error": "bad_pct",
                                       "detail": "진입 비율은 0 초과 100 이하여야 합니다"}, status=400)
+        lines = query_lines(request)
+        if lines == "bad":
+            return web.json_response({"ok": False, "error": "bad_lines", "detail": "익절·손절 선(tp·sl)은 둘 다 양수여야 합니다"}, status=400)
         rule_l = query_rule(request)
         if rule_l == "bad":
             return web.json_response({"ok": False, "error": "bad_rule",
                                       "detail": "자동 규칙이 꺼져 있습니다(수동 모드)" if not MANUAL_RULES_ENABLED else "자동 규칙 값은 c 하나뿐입니다"}, status=400)
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
-                                                             fresh=request.query.get("fresh") == "1", rule_l=rule_l)
+                                                             fresh=request.query.get("fresh") == "1", rule_l=rule_l,
+                                                             lines=lines)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         return web.json_response({"ok": True, "plan": plan, "cap": cap,
@@ -1337,13 +1377,17 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                                       "wait": manual_wait_state}, status=409)
         # 비율은 **여기서 다시** 적용한다 -- 기존 포지션도 다시 읽으므로, 앞 칸이 이미
         # 들어가 있으면 상한 여유가 그만큼 줄어든 상태에서 계산된다.
+        lines = query_lines(request)
+        if lines == "bad":
+            return web.json_response({"ok": False, "error": "bad_lines", "detail": "익절·손절 선(tp·sl)은 둘 다 양수여야 합니다"}, status=400)
         rule_l = query_rule(request)
         if rule_l == "bad":
             return web.json_response({"ok": False, "error": "bad_rule",
                                       "detail": "자동 규칙이 꺼져 있습니다(수동 모드)" if not MANUAL_RULES_ENABLED else "자동 규칙 값은 c 하나뿐입니다"}, status=400)
         plan, cap, sizing, error = await assemble_entry_plan(side, frac,
                                                              query_leverage(request), query_asset(request),
-                                                             fresh=request.query.get("fresh") == "1", rule_l=rule_l)
+                                                             fresh=request.query.get("fresh") == "1", rule_l=rule_l,
+                                                             lines=lines)
         if error:
             return web.json_response({"ok": False, **error[0]}, status=error[1])
         if plan.get("blocked"):
@@ -1463,6 +1507,17 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if raw in (None, ""):
             return None
         return raw if raw in ("c", "h") and MANUAL_RULES_ENABLED else "bad"   # 꺼져 있으면 400(직접 모드로 조용히 떨어지지 않는다)
+
+    def query_lines(request: web.Request):
+        """2026-10-28 차트 선 = (익절, 손절) USDT. 둘 다 없으면 None · 하나만이거나 이상하면 "bad"(호출부 400)."""
+        tp, sl = request.query.get("tp"), request.query.get("sl")
+        if tp in (None, "") and sl in (None, ""):
+            return None
+        try:
+            t, s_ = float(tp), float(sl)
+        except (TypeError, ValueError):
+            return "bad"
+        return (t, s_) if t > 0 and s_ > 0 and math.isfinite(t) and math.isfinite(s_) else "bad"
 
     def query_fraction(request: web.Request, key: str = "pct") -> float | None:
         """쿼리의 비율(%)을 0<f<=1 로 바꾼다. 진입 분할과 부분 청산이 **같은 함수**를 쓴다.
@@ -1779,6 +1834,15 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             return web.json_response({"ok": False, "error": "not_armed", "detail": "서버가 무장한 손절이 없습니다"}, status=409)
         if not b.get("sl_off"):
             return web.json_response({"ok": True, "already": True}, headers=NOCACHE)
+        if b.get("lines"):   # 2026-10-28 선 손절 = 거래소 스탑 없음(사용자) -- 감시만 다시 켠다
+            st = bracket_load()
+            if key not in st or st[key].get("armed_at") != b.get("armed_at"):
+                return web.json_response({"ok": False, "error": "rearmed", "detail": "그 사이 새로 무장됐습니다 — 다시 확인하세요"}, status=409)
+            st[key].pop("sl_off", None)
+            st[key].pop("fired", None)
+            st[key]["watch_from"] = time.time()   # 해제 중에 지나간 가격으로 바로 닫지 않게
+            bracket_save(st)
+            return web.json_response({"ok": True, "lines": True}, headers=NOCACHE)
         price = b.get("backstop_price") or b.get("sl_price")
         if not price:
             return web.json_response({"ok": False, "error": "no_price", "detail": "다시 걸 손절가가 기록에 없습니다"}, status=409)
@@ -1867,6 +1931,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
     return SimpleNamespace(
         keep_trip_ledger=keep_trip_ledger,
         start_bracket_watcher=start_bracket_watcher,
+        bracket_tick=bracket_tick,   # 시험이 감시 한 틱을 직접 돌린다(test_chart_lines_entry)
         stop_bracket_watcher=stop_bracket_watcher,
         start_wait_cleanup=start_wait_cleanup,
         api_binance_account=api_binance_account,

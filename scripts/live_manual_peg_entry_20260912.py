@@ -349,6 +349,47 @@ def rec_rule_bracket(b: dict, *, position_side: str, anchor_price: float, basis:
             "sl_name": f"{anchor_kind} {'−' if long_side else '+'}{100 * stop_pct:g}%", "rule": True}
 
 
+# 2026-10-28 사용자 «차트 위 익절·손절 선 2개를 끌어 놓고 진입 → peg · 둘 다 메이커로 청산 · 닿으면 닫기 · 비상 스탑 없음 · 안전장치(peg 마감 뒤 시장가) 유지».
+LINE_MIN_PCT, LINE_MAX_PCT = 0.0005, 0.15   # 선이 현재가에서 0.05% ~ 15% -- 너무 가까우면 진입 직후 스프레드에 닿고, 먼 건 오조작
+
+
+def line_bracket(*, position_side: str, ref_level: float, tp_level: float, sl_level: float, basis: float,
+                 filters: dict[str, float]) -> dict:
+    """선 브래킷. **순수 함수**. 선(레벨) = USDT 차트 가격 · basis = 주문 심볼/USDT.
+    익절 = 체결 직후 주문 심볼 post-only 지정가(place_bracket 의 tp_price) · 손절 = 서버가 1초 체결가로 닿음 판정 → peg 청산(거래소 스탑 없음)."""
+    if not (ref_level > 0 and basis > 0 and tp_level > 0 and sl_level > 0):
+        raise ValueError("선 가격이 없습니다")
+    long_side = position_side == "LONG"
+    if not ((sl_level < ref_level < tp_level) if long_side else (tp_level < ref_level < sl_level)):
+        raise ValueError("롱은 익절선이 현재가 위·손절선이 아래, 숏은 반대여야 합니다")
+    # 🔴손절 상한 = 규칙 손절폭(RULE_STOP_PCT) -- 자동 2× 크기가 그 폭에서 손실 한도를 맞춘다(10-28 검증: 15% 면 한도의 3배)
+    for name, lv, hi in (("익절", tp_level, LINE_MAX_PCT), ("손절", sl_level, RULE_STOP_PCT)):
+        d = abs(lv / ref_level - 1)
+        if not LINE_MIN_PCT <= d <= hi:
+            raise ValueError(f"{name}선이 현재가에서 {100 * d:.2f}% — {100 * LINE_MIN_PCT:g}~{100 * hi:g}% 사이여야 합니다")
+    tick = filters.get("tick") or 0.01
+    tp = tp_level * basis   # 익절 지정가는 선보다 불리하지 않게(롱 올림 · 숏 내림)
+    tp = round((math.ceil(tp / tick - 1e-9) if long_side else math.floor(tp / tick + 1e-9)) * tick, 8)
+    return {"available": True, "lines": True, "rule": False, "tp_price": tp, "tp_level": round(tp_level, 4),
+            "sl_price": round(sl_level * basis, 8), "sl_level": round(sl_level, 4), "backstop_price": None,
+            "sl_pct": round(100 * (sl_level / ref_level - 1), 2), "sl_name": f"선 손절 {sl_level:.2f}"}
+
+
+def line_hit(position_side: str, armed: dict, touch: tuple[float, float] | None) -> str | None:
+    """선 무장의 닿음 판정 → "sl" · "tp" · None. touch = 무장 **뒤** 1초 체결가(USDT) (최저, 최고).
+    손절이 먼저(같은 틱에 둘 다면 손절 -- 보수적). 익절은 거래소에 걸린 지정가가 닫으므로 그게 못 걸렸을 때(tp_resting 아님)만 서버가 닫는다."""
+    if not touch:
+        return None
+    lo, hi = touch
+    long_side = position_side == "LONG"
+    sl, tp = armed.get("sl_level"), armed.get("tp_level")
+    if sl and (lo <= sl if long_side else hi >= sl):
+        return "sl"
+    if tp and not armed.get("tp_resting") and (hi >= tp if long_side else lo <= tp):
+        return "tp"
+    return None
+
+
 def bracket_sl_hit(position_side: str, last_bar: tuple[float, float] | None, armed: dict) -> bool:
     """SL 이탈인가 = **무장 뒤 마감된 5분봉 종가**가 청산맵 레벨(USDT)을 넘었나 (2026-09-27 사용자 지시).
     호가 터치로 판정하던 옛 판은 꼬리 한 번에 나갔다(09-27 숏: 레벨이 진입가 13bp 위 = 5분 고저폭 중앙값).
@@ -362,7 +403,8 @@ def bracket_sl_hit(position_side: str, last_bar: tuple[float, float] | None, arm
 
 
 def bracket_action(armed: dict, position_side: str, positions: list[dict], account_ok: bool,
-                   account_ts: float, last_bar: tuple[float, float] | None) -> str:
+                   account_ts: float, last_bar: tuple[float, float] | None,
+                   touch: tuple[float, float] | None = None) -> str:
     """감시 루프 한 틱의 판단: "clear"(포지션이 사라짐 -- 남은 우리 주문 정리) · "fire"(SL 이탈 --
     메이커 추격 청산) · "hold".
 
@@ -375,6 +417,8 @@ def bracket_action(armed: dict, position_side: str, positions: list[dict], accou
         return "clear"
     if armed.get("sl_off"):   # 2026-10-15 «손절 해제» 버튼: 5분봉 종가 손절도 끈다(닫히면 남은 물타기 정리는 계속)
         return "hold"
+    if armed.get("lines"):   # 2026-10-28 선: 1초 체결가 닿음 · 체결 흐름이 끊겨도 5분봉 종가 이탈이면 닫는다(뒷받침) · 한 번 쏘면(fired) 닫힐 때까지
+        return "fire" if armed.get("fired") or line_hit(position_side, armed, touch) or bracket_sl_hit(position_side, last_bar, armed) else "hold"
     return "fire" if bracket_sl_hit(position_side, last_bar, armed) else "hold"
 
 
@@ -875,6 +919,32 @@ def _self_check_rec_rule() -> None:
     assert merged["k"]["sl_off"] == {"at": 9.0} and merged["k"]["retry_after"] == 1, merged
     merged = bracket_merge({"k": {"armed_at": 5.0}}, {"k": {"armed_at": 5.0, "sl_off": {"at": 9.0}, "retry_after": 1}}, {"k": 5.0})
     assert "sl_off" not in merged["k"] and merged["k"]["retry_after"] == 1, merged   # «다시 켜기» 뒤 틱의 옛 사본이 해제를 되살리지 않는다
+    # 2026-10-28 선 브래킷: 방향·거리 검증 · 익절 지정가 = 선 × basis 를 불리하지 않게 틱 맞춤 · 닿음 판정(손절 먼저 · 걸린 익절은 거래소 몫)
+    f3 = {"tick": 0.01, "step": 0.001}
+    lb = line_bracket(position_side="LONG", ref_level=2500.0, tp_level=2550.0, sl_level=2480.0, basis=0.99951, filters=f3)
+    assert lb["tp_price"] == 2548.76 and lb["sl_level"] == 2480.0 and lb["backstop_price"] is None and lb["lines"], lb
+    ls = line_bracket(position_side="SHORT", ref_level=2500.0, tp_level=2450.0, sl_level=2520.0, basis=0.99951, filters=f3)
+    assert ls["tp_price"] == 2448.79, ls
+    for bad in ({"tp_level": 2480.0, "sl_level": 2550.0}, {"tp_level": 2500.5, "sl_level": 2480.0}, {"tp_level": 3000.0, "sl_level": 2480.0}):
+        try:
+            line_bracket(position_side="LONG", ref_level=2500.0, basis=1.0, filters=f3, **bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    la = {"symbol": "ETHUSDC", "armed_at": 0.0, "lines": True, "sl_level": 2480.0, "tp_level": 2550.0, "tp_resting": True}
+    assert line_hit("LONG", la, (2479.9, 2551.0)) == "sl" and line_hit("LONG", la, (2481.0, 2560.0)) is None
+    assert line_hit("LONG", {**la, "tp_resting": False}, (2481.0, 2550.0)) == "tp" and line_hit("LONG", la, None) is None
+    assert line_hit("SHORT", {**la, "sl_level": 2520.0, "tp_level": 2450.0}, (2460.0, 2520.0)) == "sl"
+    assert bracket_action(la, "LONG", pos, True, 100.0, None, (2479.0, 2500.0)) == "fire"
+    assert bracket_action(la, "LONG", pos, True, 100.0, (100.0, 2479.0), None) == "fire"           # 체결 흐름이 끊겨도 5분봉 종가 이탈
+    assert bracket_action(la, "LONG", pos, True, 100.0, (100.0, 2490.0), (2485.0, 2560.0)) == "hold"
+    assert bracket_action({**la, "sl_off": {"at": 1.0}}, "LONG", pos, True, 100.0, None, (2470.0, 2500.0)) == "hold"
+    assert bracket_action({**la, "fired": True}, "LONG", pos, True, 100.0, None, (2490.0, 2500.0)) == "fire"   # 익절을 지운 뒤 청산이 밀려도 닫힐 때까지
+    try:
+        line_bracket(position_side="LONG", ref_level=2500.0, tp_level=2550.0, sl_level=2370.0, basis=1.0, filters=f3)   # 손절 5.2% > 규칙 5%
+        raise AssertionError("손절 5% 초과가 통과")
+    except ValueError:
+        pass
     print("자동 규칙 통과 — 권장 B(12.4×권장배수·청산 안전 max(3σ,5%)·상한 2) · 청산가 손절선 바깥 · 손절 시 손실 ≤ L×5% · 첫 진입가 −5% 손절 · 첫 1/3 · 물타기 남은 여유 · 상한 막음 · 배수 검증 · 스탑 = 손절선 · 익절 없음 · 손절선 유지")
 
 

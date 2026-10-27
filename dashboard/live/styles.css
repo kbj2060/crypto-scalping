@@ -2926,6 +2926,52 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .fp-col-tog.liq [data-col][aria-pressed="true"] { background: var(--lev25); }   /* 2026-10-27 청산 기둥 */
 .fp-col-tog [data-win][aria-pressed="true"] { background: var(--muted); }
 .fp-col-tog button:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }   /* 2026-10-10 청산맵 기간(1d·7d·30d) -- 청산맵일 때 창 탭 자리 */
+/* 2026-10-28 차트 «선 주문»(app.js renderLineTool) -- 시안 A 꼬리표 + B 포지션 상자. 롱 = 위 초록·아래 빨강, 숏이면 뒤집힌다(.short) */
+.lt { position: absolute; inset: 0; pointer-events: none; z-index: 3; font: 600 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.lt[hidden] { display: none; }
+.lt-zone { position: absolute; }
+.lt-zone.up { background: color-mix(in srgb, var(--good) 14%, transparent); }
+.lt-zone.dn { background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.lt.short .lt-zone.up { background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.lt.short .lt-zone.dn { background: color-mix(in srgb, var(--good) 14%, transparent); }
+.lt-ln { position: absolute; height: 0; border-top: 1.5px dashed var(--good); }
+.lt-ln.sl { border-top-color: var(--bad); }
+.lt-ln.en { border-top: 1px solid var(--accent); opacity: .8; }
+.lt-tag { position: absolute; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 5px 9px 5px 7px; border-radius: 7px; border: 1px solid currentColor; background: color-mix(in srgb, var(--chart-bg) 90%, transparent);
+  font: inherit; color: var(--good); box-shadow: 0 2px 10px rgb(var(--shadow) / .28); pointer-events: auto; cursor: ns-resize; touch-action: none; user-select: none; }
+.lt-tag.sl { color: var(--bad); }
+.lt-tag.en { transform: translateY(-50%); color: var(--accent); border-style: dotted; cursor: default; pointer-events: none; box-shadow: none; }
+.lt-tag > span:not(.lt-grip):not(.lt-s) { font-weight: 600; }
+.lt-tag .lt-s { color: var(--muted); }
+.lt-grip { width: 6px; height: 11px; flex: none; opacity: .75;
+  background: radial-gradient(circle, currentColor 1.1px, transparent 1.3px) 0 0 / 3px 3.7px; }
+.lt-tag:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.lt-tk { position: absolute; display: grid; gap: 6px; width: 252px; padding: 10px 11px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel-strong); color: var(--text); font: 600 12px/1.35 var(--font-sans); box-shadow: 0 8px 24px rgb(var(--shadow) / .35); pointer-events: auto; }
+.lt-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.lt-side { font-weight: 800; } .lt-side.good { color: var(--good); } .lt-side.bad { color: var(--bad); }
+.lt-qty, .lt-rr { font: 700 12px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
+.lt-rr { color: var(--muted); } .lt-rr.bad { color: var(--bad); font-family: var(--font-sans); }
+.lt-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.lt-go { position: relative; overflow: hidden; height: 38px; border-radius: 999px; border: 1.5px solid var(--good); color: var(--good);
+  background: color-mix(in srgb, var(--good) 10%, transparent); font: 800 13px/1 var(--font-sans); cursor: pointer; touch-action: manipulation; }
+.lt-go.short { border-color: var(--bad); color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.lt-go small { font-weight: 600; font-size: 11px; opacity: .8; margin-left: 6px; }
+.lt-go::before { content: ""; position: absolute; inset: 0; background: currentColor; opacity: .22; transform: scaleX(0); transform-origin: left; }
+.lt-go.hold::before { transform: scaleX(1); transition: transform 1.5s linear; }   /* 꾹 1.5초 채움 */
+.lt-go.armed { background: color-mix(in srgb, currentColor 24%, transparent); }
+.lt-go:disabled { opacity: .45; cursor: not-allowed; }
+.lt-go:focus-visible, .lt-x:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.lt-x { position: absolute; transform: translateX(-100%); pointer-events: auto; white-space: nowrap; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line);
+  background: var(--chart-bg); color: var(--muted); font: 600 11px/1 var(--font-sans); cursor: pointer; }
+.lt-x:hover { color: var(--text); }
+@media (max-width: 720px) {
+  .lt-tk { width: 200px; padding: 9px 10px; }
+  .lt-tag { padding: 7px 10px 7px 8px; }   /* 손가락 -- 높이 ~30px */
+  .lt-go { height: 42px; }
+}
+@media (prefers-reduced-motion: reduce) { .lt-go.hold::before { transition: none; } }
 #chartWindowTabs[hidden] { display: none !important; }
 /* 10-09 사용자 «1d 일 때도 풋프린트/청산맵 토글은 항상»: 두 축이 독립 -- 시간(1h…12h·1d) × 보기(풋프린트·청산맵).
    청산맵을 고르면 시간과 상관없이 청산맵(일봉은 그 아래 숨김), 풋프린트면 1d = 일봉 · 1h…12h = 5분 풋프린트 */
