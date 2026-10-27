@@ -200,6 +200,28 @@
    - (b) 13주 달러 레짐을 기존 사이징 사이드카의 margin_fraction 축소 조건으로 넣었을 때 fresh-forward 성과
    - (c) 글로벌 M2와 ETF 흐름은 네트워크를 허용한 뒤 재측정(§1 한계)
 
+## 10b. 후속: 분 단위(5m·1m) 리드-래그 — 서버 실행 대기
+
+`scripts/research_macro_crypto_intraday_leadlag_20261027.py`로 측정한다. 이 클라우드 세션은 Yahoo와 바이낸스에 접속할 수 없어 아직 실데이터로 돌리지 못했고, 합성 데이터 `--selftest`만 통과했다. 셀프테스트에서는 심어 둔 1봉 선행을 z=6.6으로 되찾았고, 선행이 없는 지표는 걸러냈으며, 한 봉 밀린 타임스탬프를 잡아냈다.
+
+- **매크로 선물**(Yahoo): ES, NQ, RTY, ZT/ZN/ZB, GC, SI, HG, CL, 6E, 6J, DX
+- **현물·ETF·지수**: SPY, QQQ, IBIT, HYG, LQD, TLT, TIP, GLD, ^VIX, ^TNX, FX, KOSPI, 닛케이
+- **코인**: 바이낸스 USDⓈ-M 선물과 현물(BTC·ETH), Hyperliquid XYZ100
+- **기간**: 5분봉 59일, 1분봉 약 28일
+- **세션**: 미국 정규장 / CME 장외 / 매크로 휴장으로 나눈다
+- **출력**: 동시 상관, ±리드-래그와 LLR, 표본외 1~3봉 시차 회귀(비용 전 bp), 4σ 급변 이벤트 반응
+- **정렬 트립와이어**: ES↔SPY, NQ↔XYZ100, IBIT↔BTC 현물, BTC 선물↔현물 쌍의 최대 상관이 lag 0이 아니면 종료코드 2로 멈춘다.
+
+```bash
+bash scripts/ops/handoff.sh launch server pip_yf -- pip install -q yfinance
+bash scripts/ops/handoff.sh launch server macro_intraday --sync scripts/research_macro_crypto_intraday_leadlag_20261027.py -- \
+  python scripts/research_macro_crypto_intraday_leadlag_20261027.py
+bash scripts/ops/handoff.sh logs server macro_intraday
+bash scripts/ops/handoff.sh pull server docs/experiments/macro_crypto_intraday_leadlag_20261027
+```
+
+🔴 Yahoo CME 시세는 라이브에서 약 10분 지연된다(`live_xyz100_collector_20261014.py`의 실측 기록). 1~2봉 선행이 나와도 Yahoo 피드로는 쓸 수 없다. 라이브 후보는 XYZ100(무지연, 이미 수집 중)이나 유료 실시간 피드다.
+
 ## 11. 재현
 
 ```bash
