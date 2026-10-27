@@ -158,8 +158,8 @@ def strata_of(ts_hour, rv, q=None):
 
 
 # ───────────────────────────── 판정 ─────────────────────────────
-def evaluate_window(sig, px, day, strata, H, tp_bp=None, sl_bp=None, B_null=300):
-    """한 창·한 코인 채점. px = dict(o,h,l,c) · day = 봉별 일 번호."""
+def evaluate_window(sig, px, day, strata, H, tp_bp=None, sl_bp=None, B_null=300, null_modes=("maker",)):
+    """한 창·한 코인 채점. px = dict(o,h,l,c) · day = 봉별 일 번호 · null_modes = 귀무를 계산할 체결 방식."""
     o, h, l, c = px["o"], px["h"], px["l"], px["c"]
     out = {}
     for mode in ("maker", "taker"):
@@ -174,7 +174,7 @@ def evaluate_window(sig, px, day, strata, H, tp_bp=None, sl_bp=None, B_null=300)
                      ci95=ci95(d), p=p_two_sided(d), mde80=mde80(tr["net"], day[tr["i"]]),
                      hit=float((tr["net"] > 0).mean()),
                      exits={k: int((tr["kind"] == k).sum()) for k in ("time", "tp", "sl")})
-            if mode == "maker":
+            if mode in null_modes:
                 elig = np.ones(len(c), bool); elig[-H - 3:] = False
                 rn = matched_random_null(sig, strata, elig, kw, o, h, l, c, B=B_null)
                 cn = circular_null(sig, kw, o, h, l, c, B=max(100, B_null // 2))

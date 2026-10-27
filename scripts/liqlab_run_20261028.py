@@ -94,7 +94,7 @@ ARM_FN = {"T1": arm_T1, "T2": arm_T2, "T3": arm_T3}
 SELECTABLE = {"T1": lambda v: v["state"] != "none", "T2": lambda v: True, "T3": lambda v: True}   # T1 «none» 은 대조군
 
 
-def score_arm(arm, data, variant, windows=("val", "test"), B_null=300):
+def score_arm(arm, data, variant, windows=("val", "test"), B_null=300, null_modes=("maker",)):
     out = {}
     for sym, (p, f) in data.items():
         tr = win(p.index, "train")
@@ -104,7 +104,7 @@ def score_arm(arm, data, variant, windows=("val", "test"), B_null=300):
             m = win(p.index, w); px = {k: p[k].to_numpy()[m] for k in "ohlc"}
             day = ((p.index[m] - p.index[m][0]).days).to_numpy() + 10_000 * COINS.index(sym)
             st = L.strata_of(f.hour.to_numpy()[m], f.rv24.to_numpy()[m], rvq)
-            out.setdefault(w, {})[sym] = L.evaluate_window(sig[m], px, day, st, H, B_null=B_null)
+            out.setdefault(w, {})[sym] = L.evaluate_window(sig[m], px, day, st, H, B_null=B_null, null_modes=null_modes)
     return out
 
 
@@ -287,8 +287,49 @@ def diag(data):
     return rep
 
 
+def relaxed(data):
+    """10-28 사용자 «수수료 0 · 조금이라도 개선·예측되면 통과 후보» — 사전등록 §10 완화 기준, 전 변형."""
+    L.MAKER_BP = L.MAKER_FALLBACK_BP = L.TAKER_BP = 0.0          # 관통 체결 규칙은 유지
+    rows = []
+    for arm, grid in T_GRID.items():
+        for v in grid:
+            r = score_arm(arm, data, v, windows=("val", "test"), B_null=100, null_modes=("maker", "taker"))
+            for mode in ("maker", "taker"):
+                pv, pt = pooled(r["val"], mode), pooled(r["test"], mode)
+                ok = [x[mode] for x in r["test"].values() if x[mode]["n"] >= 10]
+                npct = float(np.mean([x["null_random_pct"] for x in ok])) if ok else 0.0
+                cpct = float(np.mean([x["null_circular_pct"] for x in ok])) if ok else 0.0
+                pos = sum(x["mean_net"] > 0 for x in ok)
+                cand = (pv.get("mean", -1) > 0 and pt.get("mean", -1) > 0 and pos >= max(1, -(-len(ok) // 2)) and npct >= 50)
+                rows.append({"arm": arm, "variant": v, "mode": mode, "val_mean": pv.get("mean"), "val_n": pv.get("n"),
+                             "test_mean": pt.get("mean"), "test_n": pt.get("n"), "test_ci95": pt.get("ci95"),
+                             "test_p_one_sided": (pt["p"] / 2 if pt.get("mean", -1) > 0 else 1 - pt["p"] / 2) if "p" in pt else None,
+                             "coins_pos": f"{pos}/{len(ok)}", "per_coin": {s: x[mode].get("mean_net") for s, x in r["test"].items()},
+                             "null_random_pct": npct, "null_circular_pct": cpct, "candidate": bool(cand)})
+            print(arm, v, [(x["mode"], round(x["val_mean"] or 0, 2), round(x["test_mean"] or 0, 2), x["coins_pos"], round(x["null_random_pct"]), x["candidate"]) for x in rows[-2:]], flush=True)
+    t4 = []
+    for cond in ("lowvol", "highvol", "none"):
+        net, W, nxt = t4_returns(cond, 0.0)
+        v, t = net[win(net.index, "val")], net[win(net.index, "test")]
+        npct = float((t4_null(W.loc[t.index], nxt.loc[t.index], B=300) < t.mean()).mean() * 100)
+        t4.append({"cond": cond, "val_mean_bp_day": float(v.mean()), "test_mean_bp_day": float(t.mean()), "null_pct": npct,
+                   "candidate": bool(v.mean() > 0 and t.mean() > 0 and npct >= 50)})
+    pred = {}
+    for arm, target in (("P1", "y_P1_1h"), ("P1_4h", "y_P1_4h"), ("P2", "y_P2"), ("P3", "y_P3")):
+        res = score_pred(arm[:2], data, target)
+        tm = sum(v["test"]["d_loss"] < 0 for v in res.values()); vm = sum(v["val"]["d_loss"] < 0 for v in res.values())
+        pred[arm] = {"test_improve": tm, "val_improve": vm, "candidate": tm >= 3 and vm >= 3,
+                     "rel_pct_test": {s: round(v["test"]["rel_pct"], 3) for s, v in res.items()}}
+    return {"trading": rows, "T4": t4, "pred": pred}
+
+
 def main():
     data = {s: panel(s) for s in COINS}
+    if "--relaxed" in sys.argv:
+        rep = relaxed(data)
+        json.dump(rep, open(OUT / "relaxed.json", "w"), ensure_ascii=False, indent=1, default=float)
+        print(json.dumps({"T4": rep["T4"], "pred": rep["pred"], "cands": [(x["arm"], x["variant"], x["mode"]) for x in rep["trading"] if x["candidate"]]},
+                         ensure_ascii=False, default=float)); return
     if "--diag" in sys.argv:
         rep = diag(data)
         json.dump(rep, open(OUT / "diag.json", "w"), ensure_ascii=False, indent=1, default=float)
