@@ -5327,12 +5327,12 @@ function setupChartPan() {
     //   끄는 중 1주일이 앞에 붙거나(첫 이동이 받기를 부른다) 새 봉이 오면 번호가 다른 봉을 가리켜 며칠 과거로 튀었다 · 끄는 중 휠 줌이면 봉 폭도 새로
     const g = chartSlotPx(svg);
     if (g) d.slot = g.px;
-    if (canPan()) chartPanTo(chartPanEdge(full()) - (cx - d.lx) / d.slot);
+    if (canPan() && !d.vOnly) chartPanTo(chartPanEdge(full()) - (cx - d.lx) / d.slot);
     d.lx = cx;
     d.v.push([ts, cx]); if (d.v.length > 6) d.v.shift();
   };
   const flingFrom = (d, ts) => {   // 놓기 직전 ~100ms 속도로 관성(손을 멈췄다 놓으면 0)
-    if (!d || !d.moved || !canPan()) return;
+    if (!d || !d.moved || d.vOnly || !canPan()) return;
     const v = d.v.filter((q) => ts - q[0] < 100);
     if (v.length < 2 || ts - v[v.length - 1][0] > 40) return;
     const pxPerMs = (v[v.length - 1][1] - v[0][1]) / Math.max(8, v[v.length - 1][0] - v[0][0]);
@@ -5353,13 +5353,14 @@ function setupChartPan() {
   svg.addEventListener("dblclick", () => { if (chartPanEnd != null || chartPanY || chartPanRight) chartPanReset(); });
   // 2026-10-27 휴대폰(사용자 «모바일에서도 풋프린트 차트를 자유롭게»): **가격 칸 안에서 시작한** 손가락만 차트가 받는다 --
   //   한 손가락 = 마우스 끌기와 같다(가로 시각 · 세로 가격 1:1 + 관성) · 두 손가락 = 벌리면 좁게(봉이 커짐)·오므리면 넓게 · 두 번 톡 = 최신으로.
-  //   가격 칸 밖(레인·아래 프로파일·1초 수급)에서 시작하면 페이지 스크롤 그대로. 탭은 막지 않는다(툴팁 읽기 그대로).
+  //   10-27(2) 사용자 «프로파일도 위아래로 드래그»: 아래 프로파일 칸(PROF)에서 끌면 **세로(가격)만** -- 같은 가격 범위라 차트도 같이 간다(칸 높이 기준 1:1).
+  //   그 밖(레인·1초 수급)에서 시작하면 페이지 스크롤 그대로. 탭은 막지 않는다(툴팁 읽기 그대로).
   let tch = null, lastTap = 0;
-  const inPlotY = (cy) => {
+  const zoneY = (cy) => {   // "plot" | "prof" | null
     const g = chartGeo, r = svg.getBoundingClientRect();
-    if (!g || !r.height) return false;
+    if (!g || !r.height) return null;
     const k = Math.min(r.width / g.wAll, r.height / g.hAll), y = (cy - r.top - (r.height - g.hAll * k) / 2) / k;
-    return y >= g.mt && y <= g.pb;
+    return y >= g.mt && y <= g.pb ? "plot" : g.prof && y >= g.prof[0] && y <= g.prof[1] ? "prof" : null;
   };
   const span = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
   // 🔴움직임·떼기는 **손가락이 닿은 노드**에서 듣는다 -- 끌기 첫 걸음이 차트를 다시 그려 그 노드가 svg 밖으로 빠지면
@@ -5373,12 +5374,14 @@ function setupChartPan() {
     if (t.length === 1) unbind();
     if (t.length === 1) {
       tch = null;
-      if (!flowOn() || fpAltOn() || !inPlotY(t[0].clientY)) return;
+      const z = flowOn() && !fpAltOn() ? zoneY(t[0].clientY) : null;
+      if (!z) return;
       chartFlingStop();
-      const g = chartSlotPx(svg);
-      tch = { x: t[0].clientX, y: t[0].clientY, lx: t[0].clientX, py: chartPanY, k: chartYPerPx, slot: g ? g.px : 1, moved: false, v: [] };
+      const g = chartSlotPx(svg), G = chartGeo, vOnly = z === "prof";
+      const k = vOnly ? chartYPerPx * (G.pb - G.mt) / (G.prof[1] - G.prof[0] - 16) : chartYPerPx;   // 칸 높이(머리 줄 16 뺀 그림 높이) 1px = 가격
+      tch = { x: t[0].clientX, y: t[0].clientY, lx: t[0].clientX, py: chartPanY, k, slot: g ? g.px : 1, moved: false, v: [], vOnly };
       bind(ev.target);
-    } else if (t.length === 2 && tch) {   // 첫 손가락이 가격 칸 안이었을 때만
+    } else if (t.length === 2 && tch && !tch.vOnly && !tch.pinch) {   // 첫 손가락이 가격 칸 안이었을 때만(프로파일 칸은 세로 끌기만)
       chartFlingStop(); bind(ev.target);
       const g = chartSlotPx(svg);
       tch = { pinch: true, d0: span(t), b0: chartWindowBars, at: g ? g.at((t[0].clientX + t[1].clientX) / 2) : 1 };
@@ -5996,7 +5999,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const yAt = (v) => mt + ((yMax - v) * ch) / ySpan;
   const pyAt = PROF ? (v) => PROF.top + ((yMax - v) * (PROF.bot - PROF.top)) / ySpan : yAt, pTop = PROF ? PROF.top : mt, pBot = PROF ? PROF.bot : plotBottom;   // 체결·호가 띠 자리(휴대폰 = 아래 칸)
   const bw = slot * 0.8;
-  if (svg.id === "candleSvgSnapshot") chartGeo = { ml, cw, n: N, wAll, hAll, mt, pb: plotBottom };   // 끌기·휠이 화면 px → 봉(chartSlotPx)
+  if (svg.id === "candleSvgSnapshot") chartGeo = { ml, cw, n: N, wAll, hAll, mt, pb: plotBottom, prof: PROF && [PROF.top - 16, PROF.bot] };   // 끌기·휠이 화면 px → 봉(chartSlotPx)
   // 2026-10-20 1주일 창(5분봉 2,016개 · 봉 칸 ~0.5px): 봉마다 노드(캔들 <g>·선·사각형, 레인 막대 7개, 청산 원, 제목)를 만들면
   //   3.7만 노드 · 렌더 180ms 였다. 봉 칸이 4px 밑이면 같은 색끼리 <path> 하나로 모으고 봉별 <title> 은 뺀다(호버 툴팁이 그 봉 값을 말한다).
   // 2026-10-20 연속 줌(36~300봉이 «무거운 구간»): 문턱 4 → 8px. 4~8px 봉은 박스 없는 캔들이라 path 로 모아도 같은 그림(아래 DENSE 캔들 폭).
