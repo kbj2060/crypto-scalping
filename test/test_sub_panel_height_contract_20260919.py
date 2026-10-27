@@ -140,7 +140,7 @@ def test_sub_panels_tile_without_overlap():
             return ev(a if eval(cond.strip(), {"__builtins__": {}}, e) else b, e)   # noqa: S307
         return eval(expr.strip(), {"__builtins__": {}}, e)                     # noqa: S307 -- 저장소 제 코드
 
-    wide = dict(env, splitR=1, S1_BELOW=0, h=10_000)   # 2026-10-01 1단만 1초 수급이 아래(S1_BELOW)
+    wide = dict(env, splitR=1, S1_BELOW=0, h=10_000, PROF_PANEL=0)   # 2026-10-01 1단만 1초 수급이 아래(S1_BELOW)
     for name, expr in exprs.items():
         wide[name] = ev(expr, wide)
     assert wide["subLegendY"] == env["mtTop"], "2단에서 밀도 범례가 풋프린트 바로 위(맨 위)가 아니다"
@@ -159,11 +159,14 @@ def test_sub_panels_tile_without_overlap():
     m = re.search(r"const SUB_TOTAL = !subOn \? 0 : splitR \? SUB_LEGEND_H \+ SUB_GAP : SUB_LEGEND_H \+ STATS_ROW_H \+ (\d+) \+ SUB_GAP;", JS)
     assert m, "1단 SUB_TOTAL 식을 못 찾았다"
     top = env["SUB_LEGEND_H"] + env["STATS_ROW_H"] + int(m.group(1)) + env["SUB_GAP"]
-    env.update(splitR=0, S1_BELOW=1, h=10_000)
+    env.update(splitR=0, S1_BELOW=1, h=10_000, PROF_PANEL=0)
     for name, expr in exprs.items():
         env[name] = ev(expr, env)
     assert env["subLegendY"] == env["mtTop"], "1단에서 밀도 범례가 맨 위가 아니다"
     assert env["sub1sY"] == env["h"] + env["SUB_GAP"], "1단에서 1초 수급이 풋프린트(본문 바닥 h) 아래가 아니다"
+    # 2026-10-27 휴대폰 아래 프로파일 칸(PROF_PANEL): h 에서 뺀 만큼 1초 수급이 내려간다 -- 두 곳이 같은 이름을 써야 상자 계약이 그대로다
+    assert "const h = S1_BELOW ? hAll - S1_PANEL - SUB_GAP - PROF_PANEL : hAll;" in JS
+    assert ev(exprs["sub1sY"], dict(env, PROF_PANEL=268)) == env["h"] + env["SUB_GAP"] + 268
     used = top + s1 + env["SUB_GAP"]
     total = env["SUB_1S_H"] + env["SUB_LEGEND_H"] + env["SUB_GAP"]   # = 예전 1단 SUB_TOTAL(CSS 상자 계약)
     assert used == total, (

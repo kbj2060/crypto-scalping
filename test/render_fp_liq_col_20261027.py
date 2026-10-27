@@ -144,6 +144,8 @@ with sync_playwright() as p:
                 Ws = sum(r["w"] for r in rs)
                 for r, e in zip(rs, nz): check(abs(r["w"] / Ws - e / sum(nz)) < 0.01, f"{d}d {lo}–{hi} 배수 폭 비")
             rows.append((sum(r["w"] for r in rs), sum(exp))); nt += 1
+        if not rows:   # 화면 가격 범위 안에 청산 칸이 없을 수 있다(좁은 범위 · 1d) -- 끌어 둔 사례가 막대를 대조한다
+            print(f"{d}d 화면 안 청산 줄 0 -- 막대 대조 건너뜀"); continue
         mxw, mxe = max(rows), max(rows, key=lambda x: x[1])
         check(mxw[1] == mxe[1], f"{d}d 가장 긴 막대 ≠ 가장 큰 값")
         bad = [(w, e) for w, e in rows if abs(w / mxw[0] - e / mxe[1]) > 0.01]
