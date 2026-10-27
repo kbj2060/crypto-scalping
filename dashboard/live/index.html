@@ -215,8 +215,7 @@
                «세그먼트 하나»로 읽히지 않게 한다(09-19 «따로따로 배치해줘»). -->
           <div class="chart-head-left">
             <h3 class="card-title">Footprint</h3>   <!-- 2026-09-30 카드 제목(사용자 지시) -->
-            <!-- 2026-10-08 풋프린트/청산맵 토글(liq_profile.js) -- 2026-10-10 사용자 «1h/2h/4h/12h/1d 왼쪽으로». 보기에 따라 오른쪽 탭이 바뀐다:
-                 풋프린트 = 창(1h…1d) · 청산맵 = 기간(1d·7d·30d, 옛 청산맵 상자 안 «1일·7일·30일» 버튼을 여기로) -->
+            <!-- 2026-10-08 풋프린트 보기 토글(liq_profile.js) -- 2026-10-27 «청산맵» 보기는 풋프린트 오른쪽 기둥 «청산»으로 옮겨 탭·상자를 지웠다 -->
             <div id="fpViewTabs" class="asset-tabs chart-mode-tabs fp-view-tabs" aria-label="차트 보기">
               <button type="button" class="asset-tab active" data-view="fp" aria-pressed="true">풋프린트</button>
               <button type="button" class="asset-tab" data-view="bubble" aria-pressed="false">체결 버블</button>   <!-- 2026-10-13 bubble_map.js -->
@@ -236,12 +235,6 @@
                       title="일봉 풋프린트(스윙) — 2020년부터 · 휠·두 손가락 = 확대/축소 · 끌기 = 이동 · 더블클릭 = 최근 30일 · ETH·XRP">1d</button>
             </div>
             <span id="fpZoomNote" class="fp-zoom-note" hidden aria-live="polite"></span>
-            <div id="liqDaysTabs" class="asset-tabs chart-mode-tabs" aria-label="청산맵 보기 기간" hidden
-                 title="청산맵이 쓰는 1시간봉 기간 — 같은 추정 모델, 창만 다름">
-              <button type="button" class="asset-tab active" data-days="1" aria-pressed="true" title="지난 1일 1시간봉으로 추정">1d</button>
-              <button type="button" class="asset-tab" data-days="7" aria-pressed="false" title="지난 7일 1시간봉으로 추정">7d</button>
-              <button type="button" class="asset-tab" data-days="30" aria-pressed="false" title="지난 30일 1시간봉으로 추정">30d</button>
-            </div>
             <!-- 2026-10-16 펜 메모 «나스닥·금리를 이전처럼 풋프린트 카드 상단으로»: 넓은 화면은 여기(1h…1d 오른쪽) · 좁은 화면은 시장 맥락 ⑥ 그대로 -->
             <div id="fpRates" class="fp-rates" hidden></div>
             <span id="fpPanHome" hidden></span>   <!-- 2026-10-16 넓은 화면은 #chartPan 을 차트 위 줄 가운데로 옮겼다가 좁아지면 여기로 되돌린다 -->
@@ -280,22 +273,6 @@
           <svg id="candleSvgSnapshot" viewBox="0 0 1200 400" preserveAspectRatio="xMidYMid meet" role="img"
             aria-label="ETH 5분봉 차트 — 풋프린트·수급(CVD)·호가 프로파일·청산·사분면"></svg>
           <!-- 2026-10-08 일봉·청산맵 = 5분 차트 교체 영역(window.fpRegion) 위에만 겹치는 상자(사용자 «풋프린트 차트만 바뀌게») -->
-          <div id="liqProfile" class="liq-profile fp-overlay" hidden>   <!-- 2026-10-08 청산맵(레버리지별 · 누적 롱/숏) -- liq_profile.js -->
-            <div class="fpd-head">
-              <div id="liqProfileLegend" class="lqp-legend"></div>
-              <div id="liqProfileTools" class="fpd-tools" role="group" aria-label="청산맵 보기 범위">
-                <button type="button" data-view="out" aria-label="축소" title="축소"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6h7"/></svg></button>
-                <button type="button" data-view="in" aria-label="확대" title="확대"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6h7M6 2.5v7"/></svg></button>
-                <button type="button" data-view="all">전체</button>
-              </div>
-            </div>
-            <canvas id="liqProfileCanvas" class="lqp-canvas" tabindex="0" role="img"
-                    aria-label="추정 청산맵 — 가격대별 레버리지 구간 막대와 현재가 기준 누적 롱·숏 청산 곡선. 휠·두 손가락 = 확대/축소 · 끌기·화살표 = 이동 · 더블클릭·Home = 전체"></canvas>
-            <p id="liqProfileStatus" class="fpd-status muted" role="status"></p>
-            <p class="fpd-note muted">추정 · 고른 기간(1·7·30일)의 1시간봉(1일 = 이번 시간의 닫힌 5분봉까지 · 5분봉마다 새로 계산 · 7·30일 = 형성 중인 봉 포함 · 1분마다 · 그 사이 가격이 지나간 청산가는 매초 지움)을 가상 진입으로 본 모델(최근 봉일수록 무겁게)(레버리지 10·20~25·50·75~100배, 이미 넘은 청산가는 뺌) · 실측 포지션이 아님 ·
-              막대 = 그 가격의 추정 청산 규모(왼쪽 축) · 선 = 현재가에서 그 가격까지 누적(오른쪽 축, 빨강 롱 · 초록 숏) ·
-              규모 = 지금 바이낸스 OI(달러)를 추정 분포 비율로 나눈 값(OI 가 없는 코인은 전체 중 %)</p>
-          </div>
           <!-- 2026-10-13 체결 버블(Bookmap 식) -- bubble_map.js · 청산맵과 같은 자리·크기 -->
           <div id="bubbleMap" class="liq-profile fp-overlay" hidden>
             <div class="fpd-head">

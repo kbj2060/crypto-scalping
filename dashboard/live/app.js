@@ -6358,9 +6358,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const colX0 = PROF ? ml + 2 : tradeX0, colW = PROF ? PROF.cx - PROF_GAP - 4 - colX0 : TRADE_W;
     const posOn = !!((TRADE_W || PROF) && fpColMode === "pos" && flowOn()), liqOn = !!((TRADE_W || PROF) && fpColMode === "liq" && flowOn());
     post.push(() => placeFpColTog(svg, PROF ? w - mr : tradeX0 + TRADE_W - 2, PROF ? h + SUB_GAP + 2 : mt - 16, !!((TRADE_W || PROF) && flowOn()
-      && !(typeof window.fpLiqActive === "function" && window.fpLiqActive())
       && !(typeof window.fpBubbleActive === "function" && window.fpBubbleActive())
-      && !(typeof window.fpDailyActive === "function" && window.fpDailyActive()))));   // 청산맵·일봉이 덮을 땐 숨김 · 화면 상자를 재므로 끝에서(post)
+      && !(typeof window.fpDailyActive === "function" && window.fpDailyActive()))));   // 버블·일봉이 덮을 땐 숨김 · 화면 상자를 재므로 끝에서(post)
     if (posOn) {
       const P = latestPositionProfile, W = P && P.win && P.win[String(fpPosWin)];
       const anchor = colX0 + colW + 4, Lw = colW - 10, g = document.createElementNS(NS, "g");
