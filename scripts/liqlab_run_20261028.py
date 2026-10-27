@@ -255,8 +255,44 @@ def controls(data):
     return rep
 
 
+def diag(data):
+    """사후 진단(판정 불변): ① P2 증분이 시간대·거래량 그림자인가 ② T1 상태 조건의 시험창 리프트."""
+    rep = {}
+    for sym in data:
+        x = pred_frame(sym, data); g = x[x.is_grid].copy()
+        p = data[sym][0]
+        g["lqv_1h"] = np.log(p.qv.rolling(12).sum()).reindex(g.index); g["lqv_24h"] = np.log(p.qv.rolling(288).sum()).reindex(g.index)
+        for h in range(24):
+            g[f"h{h}"] = (g.index.hour == h).astype(float)
+        ctl = BASE_X + ["r12", "lqv_1h", "lqv_24h"] + [f"h{h}" for h in range(1, 24)]
+        g = g.replace([np.inf, -np.inf], np.nan).dropna(subset=ctl + P_ADD["P2"] + ["y_P2"])
+        tr = win(g.index, "train"); out = {}
+        for nm, cols in (("ctl", ctl), ("ctl+imb", ctl + P_ADD["P2"])):
+            mu, sd = g.loc[tr, cols].mean(), g.loc[tr, cols].std() + 1e-12
+            mdl = LogisticRegression(C=1.0, max_iter=3000).fit((g.loc[tr, cols] - mu) / sd, g.loc[tr, "y_P2"])
+            out[nm] = mdl; out[nm + "_cols"] = (cols, mu, sd)
+        res = {"coef_imb(std)": dict(zip(P_ADD["P2"], np.round(out["ctl+imb"].coef_[0][-3:], 4)))}
+        for w in ("val", "test"):
+            m = win(g.index, w); day = g.index[m].normalize(); ls = {}
+            for nm in ("ctl", "ctl+imb"):
+                cols, mu, sd = out[nm + "_cols"]
+                ls[nm] = logloss(g.loc[m, "y_P2"].to_numpy(), out[nm].predict_proba((g.loc[m, cols] - mu) / sd)[:, 1])
+            dl = pd.Series(ls["ctl+imb"] - ls["ctl"], index=day).groupby(level=0).mean()
+            bt = L.cluster_boot_mean(dl.to_numpy(), np.arange(len(dl)) // 5)
+            res[w] = {"d_loss": float(dl.mean()), "upper90": float(np.nanquantile(bt, .9)), "rel_pct": float(dl.mean() / ls["ctl"].mean() * 100)}
+        rep.setdefault("P2_hour_volume_control", {})[sym] = res
+    for v in (dict(state="rv", q=.95, H=12), dict(state="none", q=.95, H=12), dict(state="amihud", q=.95, H=12)):
+        r = score_arm("T1", data, v, windows=("test",), B_null=50)
+        pt = pooled(r["test"]); rep.setdefault("T1_test_by_state", {})[v["state"]] = {k: pt.get(k) for k in ("n", "mean", "ci95", "p")}
+    return rep
+
+
 def main():
     data = {s: panel(s) for s in COINS}
+    if "--diag" in sys.argv:
+        rep = diag(data)
+        json.dump(rep, open(OUT / "diag.json", "w"), ensure_ascii=False, indent=1, default=float)
+        print(json.dumps(rep, ensure_ascii=False, default=float)); return
     if "--controls" in sys.argv:
         rep = controls(data)
         json.dump(rep, open(OUT / "controls.json", "w"), ensure_ascii=False, indent=1, default=float)
@@ -310,7 +346,7 @@ def main():
         report[arm]["verdict"] = L.gates(r["val"], r["test"], EXPECTED_BP[arm], pt["ci95"], hm[arm]["reject"], dv)
     tt = report["T4"]["test_maker_stress"]; dv = L.dsr(t4_daily, trial_srs)
     g4 = {"G1": tt["ci95"][0] > 0, "G2": report["T4"]["test_null_pct"] >= 95,
-          "G3": best4["val_mean_bp_day"] > 0 and tt["mean_bp_day"] > 0, "G5": hm["T4"]["reject"], "G6": dv > .95}
+          "G3": best4["val_mean_bp_day"] > 0 and tt["mean_bp_day"] > 0, "G5": hm["T4"]["reject"] and tt["mean_bp_day"] > 0, "G6": dv > .95}
     report["T4"].update(dsr=dv, verdict={"verdict": "통과" if all(g4.values()) else "불통과", **g4})
     report["holm"] = hm; report["n_trials"] = len(trial_srs)
     for arm, target in (("P1", "y_P1_1h"), ("P1_4h", "y_P1_4h"), ("P2", "y_P2"), ("P3", "y_P3")):

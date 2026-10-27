@@ -198,7 +198,7 @@ def gates(per_coin_val, per_coin_test, expected_bp, pooled_test_ci, holm_reject,
          "G2": all(x["null_random_pct"] >= 95 and x["null_circular_pct"] >= 95 for x in ok_t),
          "G3": all(x.get("mean_net", -1) > 0 for x in vv if x.get("n", 0) >= 10) and all(x["mean_net"] > 0 for x in ok_t),
          "G4": sum(x["mean_net"] > 0 for x in ok_t) >= math.ceil(2 / 3 * len(ok_t)),
-         "G5": bool(holm_reject),
+         "G5": bool(holm_reject) and sum(pooled_test_ci) > 0,   # 양측 p 기각은 «유의하게 음수»도 포함 → 부호 확인(10-28 사후 수정)
          "G6": (dsr_val or 0) > .95}
     mde = float(np.median([x["mde80"] for x in ok_t]))
     g["G7_mde80"], g["expected_bp"] = mde, expected_bp
@@ -278,7 +278,10 @@ def selfcheck():
     assert abs(hm["b"]["p_holm"] - .03) < 1e-12
     v = dsr(np.random.default_rng(1).standard_normal(400) * .01 + .002, list(np.random.default_rng(2).normal(0, .05, 20)))
     assert 0 <= v <= 1
-    print("liqlab selfcheck OK (SC1~SC8)")
+    # SC9 G5 부호 — 유의하게 음수(Holm 기각·CI 전부 < 0)는 G5 통과가 아님
+    cell = {"maker": {"n": 50, "mean_net": -3.0, "mde80": 4.0, "null_random_pct": 10, "null_circular_pct": 10}}
+    assert not gates({"x": cell}, {"x": cell}, 2.0, (-5.0, -1.0), True, .0)["G5"]
+    print("liqlab selfcheck OK (SC1~SC9)")
 
 
 if __name__ == "__main__":
