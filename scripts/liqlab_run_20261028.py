@@ -27,7 +27,10 @@ T4_STRESS_BP = 2.0                                # 일봉 리밸런스 메이�
 
 # ───────────────────────────── 피쳐(행 τ = 봉 τ 끝에 앎) ─────────────────────────────
 def panel(sym):
-    p = pd.read_parquet(D / f"{sym}_5m.parquet")
+    return feats(pd.read_parquet(D / f"{sym}_5m.parquet"))
+
+
+def feats(p):
     lc = np.log(p.c)
     v2 = p.rv ** 2
     f = pd.DataFrame(index=p.index)
@@ -87,10 +90,101 @@ def arm_T3(p, f, tr, cond):
     return (np.sign(at030 - prev) * keep).fillna(0).astype(int).to_numpy(), 6
 
 
+# ───────────── 내부 기검증 팔(I1~I8) — 원 스크립트 버그 고쳐 이식(사전등록 §11) ─────────────
+def _rq(s, q, w=288):
+    """직전 w 봉(현재 제외) 굴림 분위 — 인과 문턱(원본들의 «창 전체 rank» 미래참조 수정)."""
+    return s.shift(1).rolling(w, min_periods=w * 2 // 3).quantile(q)
+
+
+def arm_I1(p, f, tr, H):
+    """깊은 벽 근사(±1% — 원본 ±50bp 1초 상태는 이식 불가): 불균형 직전 1일 80/20분위 밖 → 벽 쪽(따라감)."""
+    x = f.imb_book
+    return np.where(x >= _rq(x, .8), 1, np.where(x <= _rq(x, .2), -1, 0)).astype(int), H
+
+
+def arm_I2(p, f, tr, dirn, H):
+    """5분 테이커 불균형(거래대금 가중) — 인과 중앙값 뺀 뒤 |·| 직전 1일 90분위 이상 → 따라감/거스름. 원본 종가 진입 → o[τ+1]."""
+    tfi = 2 * p.tbqv / p.qv.replace(0, np.nan) - 1
+    d = tfi - tfi.shift(1).rolling(288, min_periods=192).median()
+    s = (np.sign(d) * (d.abs() >= _rq(d.abs(), .9))).fillna(0)
+    return (s if dirn == "follow" else -s).astype(int).to_numpy(), H
+
+
+def arm_I3(p, f, tr, H):
+    """CVD 다이버전스(레포트 S2b): 직전 48봉 신고가인데 CVD 는 신고점 아님 → 숏(거울 롱)."""
+    cvd = (2 * p.tbqv - p.qv).cumsum()
+    sh = (p.h > p.h.shift(1).rolling(48).max()) & (cvd < cvd.shift(1).rolling(48).max())
+    lg = (p.l < p.l.shift(1).rolling(48).min()) & (cvd > cvd.shift(1).rolling(48).min())
+    return (lg.astype(int) - sh.astype(int)).to_numpy(), H
+
+
+def arm_I4(p, f, tr, kind, H):
+    """Campbell·Grossman·Wang: 1h 급변 + 1h 거래대금이 30일 중앙 대비 높으면 거스름 / 낮으면 따라감(문턱 학습창 고정)."""
+    qv1 = p.qv.rolling(12).sum(); ratio = qv1 / qv1.shift(1).rolling(8640, min_periods=2000).median()
+    zq = np.nanquantile(f.z[tr].abs(), .8)
+    if kind == "fade_high":
+        fire = (f.z.abs() >= zq) & (ratio >= np.nanquantile(ratio[tr], .8)); sgn = -1
+    else:
+        fire = (f.z.abs() >= zq) & (ratio <= np.nanquantile(ratio[tr], .2)); sgn = 1
+    return (sgn * np.sign(f.z) * fire).fillna(0).astype(int).to_numpy(), H
+
+
+def arm_I5(p, f, tr, H):
+    """극단 펀딩 거스름: 정산 봉(UTC 0·8·16시 00분 봉 — 그 정산 포함)에서 직전 180일 정산값 중위 순위(동점 ½, 자신 제외) ≥.9 숏 / ≤.1 롱."""
+    ev = np.flatnonzero((p.index.minute == 0) & np.isin(p.index.hour, [0, 8, 16]))
+    v = p.fr.to_numpy()[ev]; s = np.zeros(len(p), int)
+    for k in range(len(ev)):
+        w = v[max(0, k - 540):k]
+        if len(w) >= 180 and np.isfinite(v[k]):
+            rk = ((w < v[k]).sum() + .5 * (w == v[k]).sum()) / len(w)
+            s[ev[k]] = -1 if rk >= .9 else (1 if rk <= .1 else 0)
+    return s, H
+
+
+def arm_I6(p, f, tr, cond):
+    """15분 되돌림(2608.21888): UTC 15분 블록 끝 봉에서 |15분 수익| ≥ 학습 95분위 → 반대, 다음 15분 보유. 원본 전 표본 문턱 → 학습창 고정."""
+    lc = np.log(p.c); end = pd.Series(p.index.minute % 15 == 10, index=p.index)
+    r15 = lc - lc.shift(3)
+    fire = end & (r15.abs() >= np.nanquantile(r15[end & tr].abs(), .95))
+    if cond == "taker":
+        im15 = 2 * p.tbqv.rolling(3).sum() / p.qv.rolling(3).sum() - 1
+        fire &= im15.abs() >= np.nanquantile(im15[end & tr].abs(), .8)
+    return (-np.sign(r15) * fire).fillna(0).astype(int).to_numpy(), 3
+
+
+def arm_I7(p, f, tr, dirn):
+    """소진형 대량 델타(09-30 사전등록 E1~E4 그대로·직전 288봉 인과) → 4h 거스름(fade) / 지속(follow)."""
+    lc = np.log(p.c); dl = 2 * p.tbqv - p.qv; ad = dl.abs(); rng = np.log(p.h / p.l); r1h = (lc - lc.shift(12)).shift(1)
+    e = (ad >= 20 * ad.shift(1).rolling(288, min_periods=192).median()) & (rng >= _rq(rng, .9))
+    up = e & (dl > 0) & (p.h >= p.h.shift(1).rolling(288).max()) & (r1h > 0)
+    dn = e & (dl < 0) & (p.l <= p.l.shift(1).rolling(288).min()) & (r1h < 0)
+    s = up.astype(int) - dn.astype(int)
+    return (s if dirn == "follow" else -s).to_numpy(), 48
+
+
+def arm_I8(p, f, tr, H):
+    """ICT 유동성 스윕: 저가가 직전 48봉 최저를 깨고 종가는 그 위 → 롱(거울 숏)."""
+    lo, hi = p.l.shift(1).rolling(48).min(), p.h.shift(1).rolling(48).max()
+    lg = (p.l < lo) & (p.c > lo); sh = (p.h > hi) & (p.c < hi)
+    return (lg.astype(int) - sh.astype(int)).to_numpy(), H
+
+
+I_GRID = {"I1": [dict(H=H) for H in (1, 3)],
+          "I2": [dict(dirn=d, H=H) for d, H in itertools.product(["follow", "fade"], [1, 3, 12])],
+          "I3": [dict(H=H) for H in (12, 24)],
+          "I4": [dict(kind=k, H=H) for k, H in itertools.product(["fade_high", "follow_low"], [12, 48])],
+          "I5": [dict(H=H) for H in (12, 96, 288)],
+          "I6": [dict(cond=c) for c in ("none", "taker")],
+          "I7": [dict(dirn=d) for d in ("fade", "follow")],
+          "I8": [dict(H=H) for H in (12, 48)]}
+I_EXPECTED_BP = {"I1": 2.0, "I2": 2.0, "I3": 3.0, "I4": 3.0, "I5": 10.0, "I6": 3.0, "I7": 15.0, "I8": 3.0}
+
+
 T_GRID = {"T1": [dict(state=s, q=q, H=H) for s, q, H in itertools.product(["rv", "amihud", "none"], [.90, .95], [12, 48])],
           "T2": [dict(dirn=d, q=q, H=H) for d, q, H in itertools.product(["against", "follow"], [.95, .99], [1, 6])],
           "T3": [dict(cond=c) for c in ["none", "highvol", "highrv"]]}
-ARM_FN = {"T1": arm_T1, "T2": arm_T2, "T3": arm_T3}
+ARM_FN = {"T1": arm_T1, "T2": arm_T2, "T3": arm_T3, "I1": arm_I1, "I2": arm_I2, "I3": arm_I3, "I4": arm_I4,
+          "I5": arm_I5, "I6": arm_I6, "I7": arm_I7, "I8": arm_I8}
 SELECTABLE = {"T1": lambda v: v["state"] != "none", "T2": lambda v: True, "T3": lambda v: True}   # T1 «none» 은 대조군
 
 
@@ -289,24 +383,7 @@ def diag(data):
 
 def relaxed(data):
     """10-28 사용자 «수수료 0 · 조금이라도 개선·예측되면 통과 후보» — 사전등록 §10 완화 기준, 전 변형."""
-    L.MAKER_BP = L.MAKER_FALLBACK_BP = L.TAKER_BP = 0.0          # 관통 체결 규칙은 유지
-    rows = []
-    for arm, grid in T_GRID.items():
-        for v in grid:
-            r = score_arm(arm, data, v, windows=("val", "test"), B_null=100, null_modes=("maker", "taker"))
-            for mode in ("maker", "taker"):
-                pv, pt = pooled(r["val"], mode), pooled(r["test"], mode)
-                ok = [x[mode] for x in r["test"].values() if x[mode]["n"] >= 10]
-                npct = float(np.mean([x["null_random_pct"] for x in ok])) if ok else 0.0
-                cpct = float(np.mean([x["null_circular_pct"] for x in ok])) if ok else 0.0
-                pos = sum(x["mean_net"] > 0 for x in ok)
-                cand = (pv.get("mean", -1) > 0 and pt.get("mean", -1) > 0 and pos >= max(1, -(-len(ok) // 2)) and npct >= 50)
-                rows.append({"arm": arm, "variant": v, "mode": mode, "val_mean": pv.get("mean"), "val_n": pv.get("n"),
-                             "test_mean": pt.get("mean"), "test_n": pt.get("n"), "test_ci95": pt.get("ci95"),
-                             "test_p_one_sided": (pt["p"] / 2 if pt.get("mean", -1) > 0 else 1 - pt["p"] / 2) if "p" in pt else None,
-                             "coins_pos": f"{pos}/{len(ok)}", "per_coin": {s: x[mode].get("mean_net") for s, x in r["test"].items()},
-                             "null_random_pct": npct, "null_circular_pct": cpct, "candidate": bool(cand)})
-            print(arm, v, [(x["mode"], round(x["val_mean"] or 0, 2), round(x["test_mean"] or 0, 2), x["coins_pos"], round(x["null_random_pct"]), x["candidate"]) for x in rows[-2:]], flush=True)
+    rows = relaxed_rows(data, T_GRID)
     t4 = []
     for cond in ("lowvol", "highvol", "none"):
         net, W, nxt = t4_returns(cond, 0.0)
@@ -323,8 +400,84 @@ def relaxed(data):
     return {"trading": rows, "T4": t4, "pred": pred}
 
 
+def relaxed_rows(data, grids):
+    """비용 0 · 전 변형 · 메이커/테이커 — 완화 «통과 후보» 칸(사전등록 §10)."""
+    L.MAKER_BP = L.MAKER_FALLBACK_BP = L.TAKER_BP = 0.0          # 관통 체결 규칙은 유지
+    rows = []
+    for arm, grid in grids.items():
+        for v in grid:
+            r = score_arm(arm, data, v, windows=("val", "test"), B_null=100, null_modes=("maker", "taker"))
+            for mode in ("maker", "taker"):
+                pv, pt = pooled(r["val"], mode), pooled(r["test"], mode)
+                ok = [x[mode] for x in r["test"].values() if x[mode]["n"] >= 10]
+                npct = float(np.mean([x["null_random_pct"] for x in ok])) if ok else 0.0
+                cpct = float(np.mean([x["null_circular_pct"] for x in ok])) if ok else 0.0
+                pos = sum(x["mean_net"] > 0 for x in ok)
+                cand = (pv.get("mean", -1) > 0 and pt.get("mean", -1) > 0 and pos >= max(1, -(-len(ok) // 2)) and npct >= 50)
+                rows.append({"arm": arm, "variant": v, "mode": mode, "val_mean": pv.get("mean"), "val_n": pv.get("n"),
+                             "test_mean": pt.get("mean"), "test_n": pt.get("n"), "test_ci95": pt.get("ci95"),
+                             "test_p_one_sided": (pt["p"] / 2 if pt.get("mean", -1) > 0 else 1 - pt["p"] / 2) if "p" in pt else None,
+                             "coins_pos": f"{pos}/{len(ok)}", "per_coin": {s: x[mode].get("mean_net") for s, x in r["test"].items()},
+                             "null_random_pct": npct, "null_circular_pct": cpct, "candidate": bool(cand)})
+            print(arm, v, [(x["mode"], round(x["val_mean"] or 0, 2), round(x["test_mean"] or 0, 2), x["coins_pos"], round(x["null_random_pct"]), x["candidate"]) for x in rows[-2:]], flush=True)
+    return rows
+
+
+def internal(data):
+    """내부 기검증 팔 I1~I8 — ①엄격(실제 비용·검증 선택·시험 1회·G1~G7·Holm 8팔·DSR 시행 23) ②완화(비용 0·전 변형)."""
+    rep, trial_srs, keep, pvals = {}, [], {}, {}
+    # 미래 불변: ETH 를 시각 cut 까지 자른 데이터로 다시 계산한 신호[cut] == 전체 신호[cut] (전 팔·전 변형, 시험창 안 cut 5개)
+    p_full, f_full = data["ETHUSDT"]; tr_full = win(p_full.index, "train")
+    full = {(a, json.dumps(v)): ARM_FN[a](p_full, f_full, tr_full, **v)[0] for a, g in I_GRID.items() for v in g}
+    rng = np.random.default_rng(28); test_idx = np.flatnonzero(win(p_full.index, "test"))
+    bad = []
+    for cut in np.sort(rng.choice(test_idx[:-300], 5, replace=False)):
+        pc, fc = feats(p_full.iloc[:cut + 1]); trc = win(pc.index, "train")
+        for (a, vs), sf in full.items():
+            sc = ARM_FN[a](pc, fc, trc, **json.loads(vs))[0]
+            win_ = slice(max(0, cut - 300), cut + 1)            # 마지막 300봉 전부 일치해야
+            if not np.array_equal(np.asarray(sc)[win_], np.asarray(sf)[win_]):
+                bad.append((a, vs, int(cut)))
+    rep["future_invariance"] = {"cuts": 5, "bars_checked_per_cut": 301, "violations": bad}
+    assert not bad, f"미래참조: {bad[:5]}"
+    for arm, grid in I_GRID.items():
+        rows = []
+        for v in grid:
+            pv = pooled(score_arm(arm, data, v, windows=("val",), B_null=50)["val"])
+            trial_srs.append(pv.get("daily_sr", 0.0))
+            rows.append({"variant": v, "val_pooled": {k: pv.get(k) for k in ("n", "mean", "ci95", "daily_sr")}})
+        cand = [x for x in rows if (x["val_pooled"]["n"] or 0) >= 30]
+        best = max(cand, key=lambda x: x["val_pooled"]["mean"]) if cand else None
+        rep[arm] = {"val_grid": rows, "chosen": best}
+        if best is None:
+            rep[arm]["verdict"] = {"verdict": "판정 불능", "why": "검증창 거래 < 30"}; continue
+        r = score_arm(arm, data, best["variant"], windows=("val", "test"), B_null=300)
+        pt, ptk = pooled(r["test"]), pooled(r["test"], "taker")
+        rep[arm].update(test_pooled_maker={k: pt.get(k) for k in ("n", "mean", "ci95", "p")},
+                        test_pooled_taker={k: ptk.get(k) for k in ("n", "mean", "ci95", "p")},
+                        test_per_coin={s: {m_: {k: v_[m_].get(k) for k in ("n", "mean_net", "mean_gross", "null_random_pct", "null_circular_pct", "mde80")}
+                                           for m_ in ("maker", "taker")} for s, v_ in r["test"].items()})
+        if pt.get("n", 0) >= 10:
+            pvals[arm] = pt["p"]; keep[arm] = (r, pt)
+        else:
+            rep[arm]["verdict"] = {"verdict": "판정 불능", "why": "시험창 거래 < 10"}
+    hm = L.holm(pvals)
+    for arm, (r, pt) in keep.items():
+        dv = L.dsr(np.asarray(pt["daily"]), trial_srs)
+        rep[arm]["verdict"] = L.gates(r["val"], r["test"], I_EXPECTED_BP[arm], pt["ci95"], hm[arm]["reject"], dv) | {"dsr": dv}
+    rep["holm"] = hm; rep["n_trials"] = len(trial_srs)
+    rep["relaxed"] = relaxed_rows(data, I_GRID)                  # 비용 0 으로 바꾸므로 엄격 뒤에
+    return rep
+
+
 def main():
     data = {s: panel(s) for s in COINS}
+    if "--internal" in sys.argv:
+        rep = internal(data)
+        json.dump(rep, open(OUT / "internal.json", "w"), ensure_ascii=False, indent=1, default=float)
+        for k in I_GRID:
+            print(k, json.dumps(rep[k].get("verdict"), ensure_ascii=False, default=float))
+        print("relaxed cands", [(x["arm"], x["variant"], x["mode"]) for x in rep["relaxed"] if x["candidate"]]); return
     if "--relaxed" in sys.argv:
         rep = relaxed(data)
         json.dump(rep, open(OUT / "relaxed.json", "w"), ensure_ascii=False, indent=1, default=float)
