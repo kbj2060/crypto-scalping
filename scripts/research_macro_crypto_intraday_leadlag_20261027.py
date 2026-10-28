@@ -55,7 +55,12 @@ CRYPTO = {  # 이름 -> (url, symbol)
 }
 HL_INFO, HL_COIN = "https://api.hyperliquid.xyz/info", "xyz:XYZ100"
 TARGETS = ("BTC_PERP", "ETH_PERP")
-ALIGN_CHECKS = (("ES", "SPY"), ("NQ", "XYZ100"), ("IBIT", "BTC_SPOT"), ("BTC_PERP", "BTC_SPOT"))  # IBIT~BTC = Yahoo↔바이낸스 교차
+# 정렬 검사 (검증 대상, 기준). 필수 쌍이 없거나 실패하면 전체 중단(exit 2) -- IBIT~BTC 현물 = Yahoo↔바이낸스 교차 닻.
+# 나머지 쌍은 실패해도 중단하지 않고 검증 대상을 «정렬 의심»으로 표시한다(리포트에서 ⚠, 선행 주장 금지).
+REQUIRED_CHECKS = (("IBIT", "BTC_SPOT"), ("BTC_PERP", "BTC_SPOT"))
+ALIGN_CHECKS = REQUIRED_CHECKS + (("ES", "SPY"), ("NQ", "QQQ"), ("XYZ100", "NQ"), ("GC", "GLD"), ("ZN", "TLT"), ("TNX", "ZN"),
+                                  ("6E", "EURUSD"), ("6J", "USDJPY"), ("DXY", "EURUSD"))
+SIDE_RATIO_MAX = 0.15  # max(|corr(±1)|)/|corr(0)|: 깨끗하면 ~0.02, 1분 어긋남이면 ~0.3 (감사 실측) -- 봉 미만 어긋남 탐지
 STEP = {"5m": 300, "1m": 60}
 LAGS = {"5m": 6, "1m": 15}
 
@@ -83,6 +88,8 @@ def fetch_binance(url: str, sym: str, interval: str, start_ms: int, end_ms: int)
         rows += k
         t = int(k[-1][0]) + STEP[interval] * 1000
         time.sleep(0.15)
+    if not rows:
+        raise RuntimeError(f"binance {sym} {interval}: empty response")
     df = pd.DataFrame(rows).drop_duplicates(0)
     # 마감(close_time)이 지금 이후인 진행 중 봉은 버린다
     df = df[df[6].astype("int64") < int(time.time() * 1000)]
@@ -114,8 +121,8 @@ def fetch_yahoo(sym: str, interval: str) -> pd.Series:
     df = df[~df.index.duplicated(keep="last")].sort_index()
     s = df["Close"].astype(float)
     s.index = s.index.tz_convert("UTC")
-    # 진행 중 마지막 봉 제거
-    return s[s.index + pd.Timedelta(seconds=STEP[interval]) <= pd.Timestamp.now(tz="UTC")]
+    # 진행 중 마지막 봉 제거 -- CME 시세는 ~10분 지연이라 벽시계 기준으론 덜 끝난 봉이 남는다: 15분 여유
+    return s[s.index + pd.Timedelta(seconds=STEP[interval]) <= pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=15)]
 
 
 def fetch_all(interval: str) -> pd.DataFrame:
@@ -129,11 +136,17 @@ def fetch_all(interval: str) -> pd.DataFrame:
             failures[name] = repr(e)[:200]
             print(f"[yahoo {interval}] {name} FAILED {failures[name]}", flush=True)
         time.sleep(0.5)
+    if cols:  # 바이낸스가 막혀도 Yahoo 수집분은 남긴다
+        pd.DataFrame(cols).sort_index().to_parquet(CACHE / f"close_{interval}_yahoo_only.parquet")
     t_min = min(s.index.min() for s in cols.values()) if cols else pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=59)
     start_ms, end_ms = int(t_min.timestamp() * 1000), int(time.time() * 1000)
     for name, (url, sym) in CRYPTO.items():
-        cols[name] = fetch_binance(url, sym, interval, start_ms, end_ms)
-        print(f"[binance {interval}] {name} {len(cols[name])} bars", flush=True)
+        try:
+            cols[name] = fetch_binance(url, sym, interval, start_ms, end_ms)
+            print(f"[binance {interval}] {name} {len(cols[name])} bars", flush=True)
+        except Exception as e:
+            failures[name] = repr(e)[:200]
+            print(f"[binance {interval}] {name} FAILED {failures[name]}", flush=True)
     try:
         cols["XYZ100"] = fetch_hl(interval, start_ms, end_ms)
         print(f"[hl {interval}] XYZ100 {len(cols['XYZ100'])} bars", flush=True)
@@ -152,7 +165,7 @@ def to_returns(px: pd.DataFrame, interval: str) -> pd.DataFrame:
     px = px[~px.index.duplicated(keep="last")]
     grid = pd.date_range(px.index.min().floor(step), px.index.max(), freq=step, tz="UTC")
     g = px.reindex(grid)
-    return 1e4 * np.log(g).diff()  # diff on the grid -> NaN whenever either bar is missing
+    return 1e4 * np.log(g.where(g > 0)).diff()  # 격자 위 diff -> 어느 한 봉이라도 없으면 NaN; 0·음수 가격은 NaN
 
 
 def sessions(idx: pd.DatetimeIndex) -> pd.Series:
@@ -181,7 +194,12 @@ def leadlag(r: pd.DataFrame, sess: pd.Series, interval: str) -> pd.DataFrame:
                     if len(d) < 200:
                         continue
                     c = float(np.corrcoef(d.iloc[:, 0], d.iloc[:, 1])[0, 1])
-                    rows.append(dict(interval=interval, target=tgt, macro=x, session=s, lag=k, corr=c, n=len(d), z=c * np.sqrt(len(d))))
+                    # 이분산 강건(White) z: 공통 변동성·군집이 있으면 r·√n 은 선행을 과대평가한다(감사 실측 sd(z) 1.3~2.4).
+                    a, b = (d.iloc[:, 0] - d.iloc[:, 0].mean()).values, (d.iloc[:, 1] - d.iloc[:, 1].mean()).values
+                    ab = a * b
+                    z = float(ab.sum() / np.sqrt((ab ** 2).sum()))
+                    rows.append(dict(interval=interval, target=tgt, macro=x, session=s, lag=k, corr=c, n=len(d), z=z,
+                                     z_naive=c * np.sqrt(len(d))))
     return pd.DataFrame(rows)
 
 
@@ -201,15 +219,29 @@ def summarize_ll(ll: pd.DataFrame) -> pd.DataFrame:
 
 
 def align_check(r: pd.DataFrame, interval: str) -> list[dict]:
+    """ok = 최대 상관이 lag 0 이고 옆 봉 상관이 lag0 의 SIDE_RATIO_MAX 미만. 데이터 없음 = ok None(n/a).
+    필수 쌍(REQUIRED_CHECKS)이 n/a 거나 실패면 analyze 가 전체를 실패로 본다 -- 조용히 건너뛰고 통과하지 않게."""
     res = []
+    req = {f"{a}~{b}" for a, b in REQUIRED_CHECKS}
     for a, b in ALIGN_CHECKS:
-        if a not in r or b not in r:
+        pair = f"{a}~{b}"
+        cs = {k: (r[a].corr(r[b].shift(k)) if a in r and b in r else np.nan) for k in range(-3, 4)}
+        if not np.isfinite(cs[0]):
+            res.append(dict(interval=interval, pair=pair, validated=a, required=pair in req, best_lag=None, corr_lag0=np.nan,
+                            corr_lagp1=np.nan, corr_lagm1=np.nan, side_ratio=np.nan, ok=None))
             continue
-        cs = {k: r[a].corr(r[b].shift(k)) for k in range(-3, 4)}
         best = max(cs, key=lambda k: abs(cs[k]) if np.isfinite(cs[k]) else -1)
-        res.append(dict(interval=interval, pair=f"{a}~{b}", best_lag=int(best), corr_lag0=cs[0],
-                        corr_lagp1=cs[1], corr_lagm1=cs[-1], ok=bool(best == 0)))
+        side = max(abs(cs[1]) if np.isfinite(cs[1]) else 0, abs(cs[-1]) if np.isfinite(cs[-1]) else 0) / max(abs(cs[0]), 1e-12)
+        res.append(dict(interval=interval, pair=pair, validated=a, required=pair in req, best_lag=int(best), corr_lag0=cs[0],
+                        corr_lagp1=cs[1], corr_lagm1=cs[-1], side_ratio=side, ok=bool(best == 0 and side < SIDE_RATIO_MAX)))
     return res
+
+
+def alignment_verdict(checks: list[dict]) -> tuple[bool, set]:
+    """(필수 쌍 전부 ok, 정렬 의심 시리즈 집합)."""
+    req_ok = all(c["ok"] is True for c in checks if c["required"])
+    suspect = {c["validated"] for c in checks if not c["required"] and c["ok"] is False}
+    return req_ok, suspect
 
 
 def oos(r: pd.DataFrame, sess: pd.Series, interval: str, macros: list[str]) -> pd.DataFrame:
@@ -232,7 +264,7 @@ def oos(r: pd.DataFrame, sess: pd.Series, interval: str, macros: list[str]) -> p
                 pred = np.c_[np.ones(len(te)), te[["l1", "l2", "l3"]].values] @ beta
                 y = te["y"].values
                 r2 = 1 - ((y - pred) ** 2).sum() / ((y - tr["y"].mean()) ** 2).sum()
-                q = np.quantile(np.abs(pred), 0.9)
+                q = np.quantile(np.abs(A @ beta), 0.9)  # 문턱은 학습 구간 예측에서 -- 검증 분포를 미리 보지 않는다
                 top = np.abs(pred) >= q
                 rows.append(dict(interval=interval, target=tgt, macro=x, session=s, n_train=len(tr), n_test=len(te),
                                  beta_l1=beta[1], r2_os_pct=100 * r2,
@@ -247,8 +279,15 @@ def event_study(r: pd.DataFrame, interval: str, macros: list[str], H: int = 12, 
     for x in macros:
         if x not in r:
             continue
-        sd = r[x].rolling(288, min_periods=100).std().shift(1)
-        ev = r.index[(r[x].abs() > sig * sd).fillna(False).values]
+        # 유효 봉끼리 굴린다(정규장 전용 ETF는 격자 288행 안에 유효 봉이 78개뿐이라 격자 기준이면 영영 NaN)
+        sd = r[x].dropna().rolling(288, min_periods=100).std().shift(1).reindex(r.index)
+        pos = np.flatnonzero((r[x].abs() > sig * sd).fillna(False).values)
+        keep, last = [], -10 ** 9
+        for q in pos:  # 겹치는 사건 제거: 앞 사건에서 H 봉 이내면 버린다(t 과대평가 방지)
+            if q - last > H:
+                keep.append(q)
+                last = q
+        ev = r.index[keep]
         for tgt in TARGETS:
             path = []
             for t in ev:
@@ -299,8 +338,16 @@ def analyze(pxs: dict[str, pd.DataFrame], out: Path) -> dict:
     all_ll, checks, oo, ev, cov = [], [], [], [], {}
     key_macros = [m for m in ("ES", "NQ", "RTY", "XYZ100", "ZN", "ZT", "DXY", "6J", "6E", "GC", "CL", "VIX", "IBIT", "HYG", "USDJPY", "TNX")]
     for iv, px in pxs.items():
+        missing = [t for t in TARGETS if t not in px or px[t].notna().sum() == 0]
+        if missing:
+            raise SystemExit(f"{iv}: 코인 대상 시리즈 없음 {missing} -- 바이낸스 수집 실패(fetch_failures_{iv}.json 확인)")
         r = to_returns(px, iv)
         sess = sessions(r.index)
+        if "SPY" in r:  # 미국 휴장일(평일인데 SPY 봉이 하루 종일 없음)은 us_cash 가 아니다
+            et_day = r.index.tz_convert("America/New_York").date
+            spy_days = set(pd.Series(et_day, index=r.index)[r["SPY"].notna().values])
+            holiday = (sess.values == "us_cash") & ~pd.Series(et_day).isin(spy_days).values
+            sess = sess.where(~holiday, "macro_closed")
         cov[iv] = {c: [str(px[c].first_valid_index()), str(px[c].last_valid_index()), int(px[c].notna().sum())]
                    for c in px.columns if px[c].notna().any()}
         checks += align_check(r, iv)
@@ -320,8 +367,13 @@ def analyze(pxs: dict[str, pd.DataFrame], out: Path) -> dict:
     ev.to_csv(out / "event_study.csv", index=False, float_format="%.3f")
     n_tests = int(len(ll[ll.lag != 0]))
     bonf_z = float(-NormalDist().inv_cdf(0.025 / max(n_tests, 1)))
-    meta = dict(coverage=cov, alignment_checks=checks, n_lag_tests=n_tests, bonferroni_z_5pct=bonf_z,
-                notes=["corr_lag0 = 동시 상관; best_macro_lead>0 의 |z| 가 bonferroni_z 를 넘어야 선행 주장 가능",
+    req_ok, suspect = alignment_verdict(checks)
+    meta = dict(coverage=cov, alignment_checks=checks, alignment_required_ok=req_ok, alignment_suspect=sorted(suspect),
+                n_lag_tests=n_tests, bonferroni_z_5pct=bonf_z,
+                notes=["corr_lag0 = 동시 상관; best_macro_lead>0 의 강건 |z| 가 bonferroni_z 를 넘어야 선행 주장 가능",
+                       "z 는 이분산 강건(White). z_naive=r·√n 은 비교용(공통 변동성 군집에서 과대)",
+                       "세션은 코인 봉 t 기준 -- 큰 k 에선 정규장 행이 개장 전 매크로 봉과 짝지어질 수 있다",
+                       "XYZ100 은 HL REST 5000봉 한도: 5m ~17일, 1m ~3.5일만",
                        "Yahoo CME 선물은 라이브 ~10분 지연: 1~2봉 선행은 Yahoo 피드로는 라이브 불가",
                        "top10_mean_signed_bp 는 비용 전 -- 바이낸스 테이커 왕복 수수료보다 작으면 거래 불가"])
     (out / "meta.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False, default=str))
@@ -333,9 +385,12 @@ def write_md(sm, oo, ev, meta, out: Path) -> None:
     L = ["# 매크로 ↔ 코인 분 단위 리드-래그 (자동 생성)", "",
          "연구용 진단이다 -- fresh-forward 승격 근거 아님. 생성: `scripts/research_macro_crypto_intraday_leadlag_20261027.py`.", "",
          "## 타임스탬프 정렬 자가검증 (best_lag 가 0 이어야 함)", "",
-         "| 주기 | 쌍 | best_lag | lag0 | lag+1 | lag−1 | OK |", "|---|---|---|---|---|---|---|"]
+         f"OK = 최대 상관이 lag 0 이고 옆 봉/lag0 < {SIDE_RATIO_MAX}. 필수 쌍 실패·누락 시 실행이 exit 2 로 끝난다.", "",
+         "| 주기 | 쌍 | 필수 | best_lag | lag0 | lag+1 | lag−1 | 옆봉비 | OK |", "|---|---|---|---|---|---|---|---|---|"]
     for c in meta["alignment_checks"]:
-        L.append(f"| {c['interval']} | {c['pair']} | {c['best_lag']} | {c['corr_lag0']:.3f} | {c['corr_lagp1']:.3f} | {c['corr_lagm1']:.3f} | {'✅' if c['ok'] else '❌ 정렬 의심'} |")
+        okc = "n/a(데이터 없음)" if c["ok"] is None else ("✅" if c["ok"] else "❌ 정렬 의심")
+        L.append(f"| {c['interval']} | {c['pair']} | {'●' if c['required'] else ''} | {c['best_lag']} | {c['corr_lag0']:.3f} | "
+                 f"{c['corr_lagp1']:.3f} | {c['corr_lagm1']:.3f} | {c['side_ratio']:.3f} | {okc} |")
     L += ["", f"선행 검정 {meta['n_lag_tests']}개 → Bonferroni 5% 기준 |z| > **{meta['bonferroni_z_5pct']:.2f}**", ""]
     for iv in ("5m", "1m"):
         for s in ("us_cash", "overnight"):
@@ -344,9 +399,10 @@ def write_md(sm, oo, ev, meta, out: Path) -> None:
                 continue
             g = g.reindex(g["corr_lag0"].abs().sort_values(ascending=False).index)
             L += [f"## BTC 선물 vs 매크로 — {iv}, {s}", "",
-                  "| 매크로 | n | 동시 상관 | 최선 선행(봉) | 그 상관 | z | lag+1 | lag−1(코인 선행) | LLR |", "|---|---|---|---|---|---|---|---|---|"]
+                  "| 매크로 | n | 동시 상관 | 최선 선행(봉) | 그 상관 | 강건 z | lag+1 | lag−1(코인 선행) | LLR |", "|---|---|---|---|---|---|---|---|---|"]
             for _, x in g.iterrows():
                 flag = " ⭐" if abs(x["z_best_lead"]) > meta["bonferroni_z_5pct"] else ""
+                flag += " ⚠정렬의심" if x["macro"] in meta["alignment_suspect"] else ""
                 L.append(f"| {x['macro']} | {x['n']} | {x['corr_lag0']:.3f} | {x['best_macro_lead']:.0f} | {x['corr_best_lead']:.3f} | "
                          f"{x['z_best_lead']:.1f}{flag} | {x['corr_lag1']:.3f} | {x['corr_lagm1']:.3f} | {x['lead_lag_ratio']:.2f} |")
             L.append("")
@@ -394,7 +450,7 @@ def selftest() -> None:
     assert es.best_macro_lead == 1 and es.z_best_lead > meta["bonferroni_z_5pct"], es.to_dict()
     assert es.lead_lag_ratio > 2, es.lead_lag_ratio
     assert abs(gc.z_best_lead) < meta["bonferroni_z_5pct"], gc.to_dict()
-    assert all(c["ok"] for c in meta["alignment_checks"]), meta["alignment_checks"]
+    assert meta["alignment_required_ok"] and not meta["alignment_suspect"], meta["alignment_checks"]
     ev = pd.read_csv(out / "event_study.csv")
     e = ev[(ev.macro == "ES") & (ev.target == "BTC_PERP")]
     assert len(e) and e.iloc[0].n_events >= 20 and e.iloc[0].after_bar1_to_1_bp > 0, e.to_dict("records")
@@ -403,6 +459,26 @@ def selftest() -> None:
     px2["SPY"] = px2["SPY"].shift(1)
     bad = align_check(to_returns(px2, "5m"), "5m")
     assert not [c for c in bad if c["pair"] == "ES~SPY"][0]["ok"]
+    # 봉 미만 어긋남(Yahoo 가 ~1분 늦게 찍힘 ≈ 이번 봉 75% + 직전 봉 25%)도 필수 쌍에서 잡아야 한다
+    r3 = to_returns(px, "5m")
+    r3["IBIT"] = 0.75 * r3["IBIT"] + 0.25 * r3["IBIT"].shift(1)
+    ok3, _ = alignment_verdict(align_check(r3, "5m"))
+    assert not ok3, "sub-bar offset not caught"
+    # 필수 쌍 데이터가 없으면(IBIT 다운로드 실패) 조용히 통과하지 않는다
+    ok4, _ = alignment_verdict(align_check(to_returns(px.drop(columns=["IBIT"]), "5m"), "5m"))
+    assert not ok4, "missing required pair passed"
+    # 공통 변동성 군집 + t(4) 꼬리, 선행 없음: 강건 z 의 sd 가 ~1 이어야 한다(r·√n 은 부풀어야 정상)
+    vol = np.exp(np.convolve(rng.normal(0, 0.12, len(idx) + 287), np.ones(288) / np.sqrt(288) * 1.0, "valid"))
+    m_r = vol * rng.standard_t(4, len(idx)) * 6
+    c_r = 0.3 * m_r + vol * rng.standard_t(4, len(idx)) * 20
+    rr = pd.DataFrame({"m": m_r, "c": c_r}, index=idx)
+    zs, zn = [], []
+    for k in range(1, 40):
+        dd = pd.concat([rr["c"], rr["m"].shift(k)], axis=1).dropna()
+        aa, bb = (dd.iloc[:, 0] - dd.iloc[:, 0].mean()).values, (dd.iloc[:, 1] - dd.iloc[:, 1].mean()).values
+        zs.append((aa * bb).sum() / np.sqrt(((aa * bb) ** 2).sum()))
+        zn.append(np.corrcoef(aa, bb)[0, 1] * np.sqrt(len(dd)))
+    assert 0.6 < np.std(zs) < 1.4, np.std(zs)
     print("selftest OK:", {k: round(float(es[k]), 3) for k in ("corr_lag0", "corr_best_lead", "z_best_lead", "lead_lag_ratio")},
           "bonferroni_z", round(meta["bonferroni_z_5pct"], 2))
 
@@ -422,8 +498,10 @@ def main() -> None:
     meta = analyze(pxs, OUT)
     print(json.dumps(meta["alignment_checks"], indent=1, default=str))
     print(f"-> {OUT / 'summary.md'}")
-    if not all(c["ok"] for c in meta["alignment_checks"]):
-        print("⚠️ 타임스탬프 정렬 검사 실패 -- 리드-래그 결과를 믿기 전에 원인부터 본다", file=sys.stderr)
+    if meta["alignment_suspect"]:
+        print(f"⚠️ 정렬 의심 시리즈(선행 주장 금지): {meta['alignment_suspect']}", file=sys.stderr)
+    if not meta["alignment_required_ok"]:
+        print("⚠️ 필수 정렬 검사(IBIT~BTC 현물·선물~현물) 실패 또는 누락 -- 리드-래그 결과를 믿기 전에 원인부터 본다", file=sys.stderr)
         sys.exit(2)
 
 
