@@ -159,15 +159,16 @@ def build_features(frames: dict[str, pd.DataFrame], daily_close: pd.Series | Non
 
 
 # ── 학습 (vision 패널) ─────────────────────────────────────────────────────
-def vision_update(end_day: str, days: int = 480, workers: int = 8) -> dict[str, pd.DataFrame]:
-    """PANEL/{SYM}USDT.parquet 를 end_day 까지 이어 받고 최근 days 일만 남긴다(data.binance.vision 정적 아카이브 -- REST 아님)."""
+def vision_update(end_day: str, days: int = 480, workers: int = 8, panel: Path = PANEL) -> dict[str, pd.DataFrame]:
+    """panel/{SYM}USDT.parquet 를 end_day 까지 이어 받고 최근 days 일만 남긴다(data.binance.vision 정적 아카이브 -- REST 아님).
+    panel = 다른 패널 폴더(15분·1시간 서빙 live_eth_dir_short_20261028 은 2022~ 전부를 따로 둔다)."""
     sys.path.insert(0, str(ROOT / "scripts"))
     from concurrent.futures import ThreadPoolExecutor
     from build_binance_vision_panel_20260915 import day
-    PANEL.mkdir(parents=True, exist_ok=True)
+    panel.mkdir(parents=True, exist_ok=True)
     out = {}
     for sym in ["ETH"] + COINS:
-        f = PANEL / f"{sym}USDT.parquet"
+        f = panel / f"{sym}USDT.parquet"
         old = pd.read_parquet(f) if f.exists() else None
         have = set(old.timestamp.dt.normalize()) if old is not None else set()   # 10-19: 빠진 날은 어디든 다시 받는다(옛: 마지막 날 뒤만 -- 구멍이 영영 남았다)
         dates = [x.strftime("%Y-%m-%d") for x in pd.date_range(pd.Timestamp(end_day) - pd.Timedelta(days=days), end_day, freq="D") if x not in have]
