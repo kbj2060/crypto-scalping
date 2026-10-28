@@ -133,6 +133,40 @@ def run(h, l, c, L, S, lvl, s1h, last, mkt, exit_mode, tp_k, sl_k, sflat, cm, ct
     return pnl, tr[:k]
 
 
+@njit(cache=True)
+def run_dir(h, l, c, tgt, lvlL, lvlS, mkt, fb, cm, ct):
+    """2라운드: tgt[t] = 봉 t 에 들고 싶은 방향(봉 t−1 마감에 알려짐). 바뀌면 c_t 테이커 청산 ·
+    평평하면 지정가(롱 lvlL < c_t, 숏 lvlS > c_t, 한 봉짜리) — mkt 이거나 목표가 선 뒤 fb 봉(>0) 못 채우면 시장가. → (봉 손익, 거래)."""
+    n = len(c)
+    pnl = np.zeros(n); tr = np.zeros((n, 5)); k = 0
+    pos = 0; tsum = 0.0; ob = 0; eb = 0; pend = 0; pm = False; plvl = 0.0; pob = 0; w = 0; cur = 0
+    for t in range(1, n):
+        prev = c[t - 1]
+        if pos != 0:
+            x = pos * (c[t] / prev - 1); pnl[t] += x; tsum += x
+        elif pend != 0:
+            if pm or (pend > 0 and l[t] < plvl) or (pend < 0 and h[t] > plvl):
+                ep = prev if pm else plvl
+                x = pend * (c[t] / ep - 1) - (ct if pm else cm); pnl[t] += x; tsum = x
+                pos = pend; ob = pob; eb = t
+        pend = 0
+        if t == n - 1:
+            break
+        nt = tgt[t + 1]
+        if nt != cur:
+            cur = nt; w = 0
+        if pos != 0 and pos != nt:
+            pnl[t] -= ct; tsum -= ct
+            rec(tr, k, ob, eb, t, pos, tsum); k += 1; pos = 0
+        if pos == 0 and nt != 0:
+            w += 1
+            if mkt or (fb > 0 and w > fb):
+                pend = nt; pm = True; pob = t
+            elif (nt > 0 and lvlL[t] < c[t]) or (nt < 0 and lvlS[t] > c[t]):
+                pend = nt; pm = False; plvl = lvlL[t] if nt > 0 else lvlS[t]; pob = t
+    return pnl, tr[:k]
+
+
 def backtest(I: dict, cfg: tuple, cost, L=None, S=None, allow=None):
     align, entry, ex, tp, sl, sf = cfg
     if L is None:
@@ -353,6 +387,130 @@ def main():
     print(json.dumps(test, ensure_ascii=False, indent=1, default=str))
 
 
+# ── 2라운드 (docs/prereg/ema_vwap_session_rules_r2_20261029.md) ───────────────
+R2A = [("mkt", 0)] + [(e, f) for e in ("vw", "e20", "deep") for f in (0, 48, 144)]
+
+
+def r2a_levels(I, entry):
+    if entry == "deep":
+        return np.fmin(I["vw"], I["e20"]), np.fmax(I["vw"], I["e20"])
+    if entry == "mkt":
+        return I["c"], I["c"]
+    return I[entry], I[entry]
+
+
+def r2b_target(pred: np.ndarray, tsec: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    """4h 격자 결정(봉 시작 hh:55, hh%4==3 → 마감 = 4의 배수 시) 예측 → 봉별 목표 방향. 결정 봉 i 의 신호는 봉 i+1 부터."""
+    i = np.flatnonzero(((tsec % 14400) == 14400 - 300) & np.isfinite(pred)); i = i[i + 1 < len(pred)]
+    out = np.full(len(pred), np.nan)
+    out[i + 1] = np.where(pred[i] > hi, 1.0, np.where(pred[i] < lo, -1.0, 0.0))
+    return np.nan_to_num(pd.Series(out).ffill().to_numpy(), nan=0.0)
+
+
+def round2():
+    import lightgbm as lgb
+    rng = np.random.default_rng(2026102902)
+    D = {s: load(s) for s in COINS}; I = {s: indicators(D[s]) for s in COINS}
+    days = {s: D[s].timestamp.dt.normalize().to_numpy() for s in COINS}
+    print("지표 완료", flush=True)
+
+    def port(tgt, entry, fb, cost):
+        out, trs = [], {}
+        for s in COINS:
+            lL, lS = r2a_levels(I[s], entry)
+            p, tr = run_dir(I[s]["h"], I[s]["l"], I[s]["c"], tgt[s], lL, lS, entry == "mkt", fb, cost[0], cost[1])
+            out.append(daily(days[s], p)); trs[s] = tr
+        P = pd.concat(out, axis=1).fillna(0.0); P.columns = COINS
+        return P.mean(1), P, trs
+
+    rep = {"prereg": "docs/prereg/ema_vwap_session_rules_r2_20261029.md@b70bbc1e", "funding": "무시",
+           "fresh_forward_bar_by_bar": True, "trade_ledgers_used_as_input": False, "saved_parent_exit_timestamps_used": False,
+           "future_rows_used_for_entry": False}
+    T5 = {s: np.nan_to_num(np.sign(I[s]["t5"]), nan=0.0) for s in COINS}
+    rows = []
+    for e, f in R2A:
+        sr, _, tr = port(T5, e, f, COST_CAND)
+        rows.append(dict(entry=e, fb=f, train_sharpe=sharpe(cut(sr, TRAIN)), train_bp=float(cut(sr, TRAIN).mean()),
+                         val_sharpe_info=None, trades=sum(len(tr[c]) for c in COINS)))
+    best = max(range(len(R2A)), key=lambda i: rows[i]["train_sharpe"]); cfgA = R2A[best]
+    rep["R2a"] = dict(grid=rows, best=rows[best])
+    print("R2a", rows[best], flush=True)
+
+    # R2b
+    btc = {f"r{k}": (I["BTC"]["c"] / pd.Series(I["BTC"]["c"]).shift(k).to_numpy() - 1) / I["BTC"]["sig"] for k in (12, 48)}
+    F = {s: meta_feats(D[s], I[s], btc, i) for i, s in enumerate(COINS)}
+    Y = {}
+    for s in COINS:
+        r = np.r_[I[s]["c"][1:] / I[s]["c"][:-1] - 1, np.nan]           # r[t] = 봉 t+1 수익
+        cs = np.r_[0.0, np.nancumsum(r)]; n = len(r); y = np.full(n, np.nan); k = np.arange(n - 48)
+        y[k] = (cs[k + 48] - cs[k]) / I[s]["sig"][k]                      # 봉 t+1..t+48
+        Y[s] = y
+    dec = {s: (I[s]["tsec"] % 14400) == 14400 - 300 for s in COINS}
+    end_ok = lambda s: D[s].timestamp.to_numpy() + np.timedelta64(48 * 5, "m") <= np.datetime64(TRAIN[1] + "T23:55")
+    Xtr, ytr = [], []
+    for s in COINS:
+        m = dec[s] & (D[s].timestamp.to_numpy() >= np.datetime64(TRAIN[0])) & end_ok(s) & np.isfinite(Y[s])
+        Xtr.append(F[s][m]); ytr.append(Y[s][m])
+    X, y = pd.concat(Xtr), np.concatenate(ytr)
+    seeds = [int(x) for x in rng.integers(1, 2**31 - 1, 5)]
+    ms = [lgb.LGBMRegressor(n_estimators=300, learning_rate=.03, num_leaves=31, min_child_samples=200, subsample=.5, subsample_freq=1,
+                            colsample_bytree=.8, reg_lambda=10.0, n_jobs=4, verbose=-1, random_state=sd).fit(X, y) for sd in seeds]
+    ptr = np.mean([m.predict(X) for m in ms], 0); lo, hi = np.quantile(ptr, [.2, .8])
+    pred = {s: np.where(dec[s], np.mean([m.predict(F[s]) for m in ms], 0), np.nan) for s in COINS}
+    from scipy.stats import spearmanr
+    ic = {}
+    for nm, per in (("train", TRAIN), ("val", VAL)):
+        a, b = [], []
+        for s in COINS:
+            tt = D[s].timestamp
+            m = dec[s] & np.isfinite(Y[s]) & (tt >= per[0]).to_numpy() & (tt <= per[1] + " 23:55").to_numpy()
+            a.append(pred[s][m]); b.append(Y[s][m])
+        ic[nm] = float(spearmanr(np.concatenate(a), np.concatenate(b))[0])
+    TB = {s: r2b_target(pred[s], I[s]["tsec"], lo, hi) for s in COINS}
+    rep["R2b"] = dict(n_train=int(len(y)), seeds=seeds, q20=float(lo), q80=float(hi), ic=ic,
+                      importance=dict(sorted(zip(X.columns, np.mean([m.feature_importances_ for m in ms], 0).round(1)), key=lambda kv: -kv[1])[:12]))
+    print("R2b", rep["R2b"], flush=True)
+
+    arms = {"R2a": (T5, cfgA[0], cfgA[1]), "R2b": (TB, "mkt", 0), "T0": (T5, "mkt", 0)}
+    val = {a: summ(cut(port(*v, COST_CAND)[0], VAL)) for a, v in arms.items()}
+    rep["val"] = val
+    pick = max(("R2a", "R2b"), key=lambda a: val[a]["sharpe"]); rep["pick"] = pick
+    print("검증", json.dumps(val, ensure_ascii=False), "→", pick, flush=True)
+
+    leg = pd.concat([daily(days[s], np.r_[0.0, I[s]["c"][1:] / I[s]["c"][:-1] - 1]) for s in COINS], axis=1).fillna(0).mean(1)
+    test, series = {}, {}
+    for a, v in arms.items():
+        sS, PS, trS = port(*v, COST_STRICT); sC, PC, _ = port(*v, COST_CAND); series[a] = sC
+        T = cut(sS, TEST); TL = cut(leg, TEST)
+        test[a] = dict(strict=summ(T, rng), cand=summ(cut(sC, TEST), rng),
+                       cand_coin_mean_bp={c: round(float(cut(PC[c], TEST).mean()), 3) for c in COINS},
+                       minus_long=dict(mean=round(float((T - TL).mean()), 3), ci95=block_boot((T - TL).to_numpy(), rng)),
+                       minus_short=dict(mean=round(float((T + TL).mean()), 3), ci95=block_boot((T + TL).to_numpy(), rng)),
+                       trades_test=int(sum((D[c].timestamp.iloc[trS[c][:, 1].astype(int)] >= TEST[0]).sum() for c in COINS)),
+                       val_strict=summ(cut(sS, VAL)), train_strict=summ(cut(sS, TRAIN)), train_cand=summ(cut(sC, TRAIN)),
+                       years_cand={str(y): round(float(g.mean()), 2) for y, g in sC.loc["2024":].groupby(sC.loc["2024":].index.year)})
+    d = cut(series["R2a"] - series["T0"], VAL), cut(series["R2a"] - series["T0"], TEST)
+    rep["R2a_minus_T0"] = dict(val=dict(mean=float(d[0].mean()), ci95=block_boot(d[0].to_numpy(), rng)),
+                               test=dict(mean=float(d[1].mean()), ci95=block_boot(d[1].to_numpy(), rng)))
+    tg, e, f = arms[pick]; ns, nc = [], []
+    for _ in range(200):
+        k = int(rng.integers(288, 30 * 288 + 1)); sh = {s: np.roll(tg[s], k) for s in COINS}
+        ns.append(sharpe(cut(port(sh, e, f, COST_STRICT)[0], TEST))); nc.append(sharpe(cut(port(sh, e, f, COST_CAND)[0], TEST)))
+    t = test[pick]
+    t["null_pct_strict"] = float((np.array(ns) < t["strict"]["sharpe"]).mean() * 100)
+    t["null_pct_cand"] = float((np.array(nc) < t["cand"]["sharpe"]).mean() * 100); t["null95_strict"] = float(np.quantile(ns, .95))
+    rep["test"] = test
+    v = val[pick]
+    rep["verdict_strict"] = bool(v["sharpe"] > 0 and t["strict"]["ci95"][0] > 0 and t["strict"]["sharpe"] > t["null95_strict"]
+                                 and t["strict"]["mdd"] > -.20 and t["minus_long"]["mean"] > 0 and t["minus_short"]["mean"] > 0)
+    rep["verdict_candidate"] = bool(v["mean_bp"] > 0 and t["cand"]["mean_bp"] > 0 and sum(x > 0 for x in t["cand_coin_mean_bp"].values()) >= 2
+                                    and t["null_pct_cand"] >= 50)
+    pd.DataFrame(series).to_csv(OUT / "r2_daily_cand.csv")
+    (OUT / "report_r2.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=str))
+    print(json.dumps({k: rep[k] for k in ("pick", "verdict_strict", "verdict_candidate", "R2a_minus_T0")}, ensure_ascii=False, default=str))
+    print(json.dumps(test, ensure_ascii=False, indent=1, default=str))
+
+
 def selftest():
     n = 12
     c = np.array([100, 100, 101, 102, 103, 104, 105, 104, 103, 102, 101, 100.0])
@@ -399,8 +557,25 @@ def selftest():
     r = np.random.default_rng(0); M = r.normal(size=(600, 50)); g = np.repeat(np.arange(6), 100)
     assert .2 < cscv_pbo(M, g) < .8
     M[:, 7] += 1.0; assert cscv_pbo(M, g) == 0.0
+    # run_dir: tgt[t] = 봉 t 방향. 봉 2..5 롱 → 봉 1 마감 결정·봉 2 시가(c1) 시장가 진입 · 봉 5 마감에 tgt[6]=0 → c5 청산
+    tg = np.zeros(n); tg[2:6] = 1
+    pd_, trd = run_dir(h, l, c, tg, c, c, True, 0, 0.0, 5e-4)
+    assert len(trd) == 1 and trd[0, 1] == 2 and trd[0, 2] == 5 and abs(trd[0, 4] - (np.sum(c[2:6] / c[1:5] - 1) - 1e-3)) < 1e-12, trd
+    # 방향 뒤집힘: 같은 마감에 청산 + 반대 시장가 진입
+    tg2 = np.zeros(n); tg2[2:6] = 1; tg2[6:9] = -1
+    _, trd2 = run_dir(h, l, c, tg2, c, c, True, 0, 0.0, 5e-4)
+    assert len(trd2) == 2 and trd2[1, 1] == 6 and trd2[1, 3] == -1, trd2
+    # 지정가 미체결 → fb 봉 뒤 시장가: 레벨이 늘 저가 아래면 안 채워지고, fb=2 면 목표 선 뒤 3번째 결정에서 시장가
+    _, trd3 = run_dir(h, l, c, tg, l - 1, h + 1, False, 0, 0.0, 5e-4)
+    assert len(trd3) == 0, trd3
+    _, trd4 = run_dir(h, l, c, tg, l - 1, h + 1, False, 2, 0.0, 5e-4)
+    assert len(trd4) == 1 and trd4[0, 0] == 3 and trd4[0, 1] == 4, trd4
+    # r2b_target: 결정 봉 다음 봉부터 적용
+    tsec = np.arange(0, 6 * 14400, 300); pr = np.full(len(tsec), np.nan); j = 14400 // 300 - 1; pr[j] = 5.0
+    tgb = r2b_target(np.where((tsec % 14400) == 14400 - 300, pr, np.nan), tsec, -1, 1)
+    assert tgb[j] == 0 and tgb[j + 1] == 1 and tgb[j + 48] == 1, tgb[j - 1:j + 3]
     print("selftest OK")
 
 
 if __name__ == "__main__":
-    selftest() if "--selftest" in sys.argv else main()
+    selftest() if "--selftest" in sys.argv else (round2() if "--round2" in sys.argv else main())
