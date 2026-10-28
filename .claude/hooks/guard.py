@@ -83,7 +83,7 @@ def syntax_error(path: Path) -> str | None:
         elif suf in (".yml", ".yaml"):
             import yaml
             yaml.safe_load(path.read_text(encoding="utf-8"))
-        elif suf in (".sh", ".js"):
+        elif suf == ".sh" or (suf == ".js" and (ROOT / "scripts/ci_js_syntax_check.py").exists()):  # 옛 워크트리엔 JS 검사기가 없을 수 있다
             cmd = ["bash", "-n", str(path)] if suf == ".sh" else [sys.executable, str(ROOT / "scripts/ci_js_syntax_check.py"), str(path)]
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode:

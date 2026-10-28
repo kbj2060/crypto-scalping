@@ -42,13 +42,25 @@
     "PreToolUse": [
       {
         "matcher": "Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep",
-        "hooks": [{ "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py\" pre", "timeout": 200 }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py\"; [ -f \"$f\" ] || f=/home/kbj20/crypto-scalping/.claude/hooks/guard.py; exec python3 \"$f\" pre",
+            "timeout": 200
+          }
+        ]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit",
-        "hooks": [{ "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py\" post", "timeout": 30 }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py\"; [ -f \"$f\" ] || f=/home/kbj20/crypto-scalping/.claude/hooks/guard.py; exec python3 \"$f\" post",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }
