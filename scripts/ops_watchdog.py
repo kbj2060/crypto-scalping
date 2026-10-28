@@ -720,6 +720,13 @@ def run_once(dry_run: bool) -> list[Check]:
         #   한 번 건너뛰면 warn, 세 번이면 critical. cron 줄을 지우면 이 줄도 지운다.
         check_duckdb_table_freshness("hot_treasury_futures_poll", ROOT / "data" / "hot" / "treasury_futures.sqlite",
                                      "polls WHERE status = 'ok'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 130, 250),
+        # 2026-10-28: 매크로 5분봉(Yahoo, cron 5분)·일·주 값(FRED 등, cron 매시). 국채선물처럼 봉이 아니라 «성공한 호출»을 본다
+        #   (주말·휴장엔 봉이 안 늘어난다). 5분봉은 8일 넘게 조용히 실패하면 장애 첫날이 반쯤 찬 채 봉인된다(수집기 머리) -- 그 전에 울린다.
+        #   cron 줄을 지우면 이 두 줄도 지운다.
+        check_duckdb_table_freshness("hot_macro_5m_poll", ROOT / "data" / "hot" / "macro_5m.sqlite",
+                                     "polls WHERE status = 'ok'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 20, 60),
+        check_duckdb_table_freshness("hot_macro_daily_run", ROOT / "data" / "hot" / "macro_daily.sqlite",
+                                     "runs WHERE status = 'ok' AND source = 'fred'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 130, 250),
         # 2026-10-14: 나스닥100 무기한(HL xyz:XYZ100, 24시간 거래) 초당 가격. 죽으면 «⑥ 나스닥» 칸이 «끊김». 수집기를 은퇴시키면 이 줄도 지운다.
         #   2026-10-28 같은 파일에 SP500·JPY·EUR 도 들어와 종목을 가린다(안 가리면 다른 종목이 살아 있어 XYZ100 이 죽어도 초록).
         check_duckdb_table_freshness("hot_hl_xyz100_ctx", ROOT / "data" / "hot" / "hl_xyz.sqlite",
