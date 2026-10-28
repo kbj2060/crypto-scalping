@@ -721,8 +721,9 @@ def run_once(dry_run: bool) -> list[Check]:
         check_duckdb_table_freshness("hot_treasury_futures_poll", ROOT / "data" / "hot" / "treasury_futures.sqlite",
                                      "polls WHERE status = 'ok'", "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')", 130, 250),
         # 2026-10-14: 나스닥100 무기한(HL xyz:XYZ100, 24시간 거래) 초당 가격. 죽으면 «⑥ 나스닥» 칸이 «끊김». 수집기를 은퇴시키면 이 줄도 지운다.
+        #   2026-10-28 같은 파일에 SP500·JPY·EUR 도 들어와 종목을 가린다(안 가리면 다른 종목이 살아 있어 XYZ100 이 죽어도 초록).
         check_duckdb_table_freshness("hot_hl_xyz100_ctx", ROOT / "data" / "hot" / "hl_xyz.sqlite",
-                                     "hl_xyz_ctx_1s", "datetime(max(recv_sec), 'unixepoch', 'localtime')", 5, 10),
+                                     "hl_xyz_ctx_1s WHERE coin = 'xyz:XYZ100'", "datetime(max(recv_sec), 'unixepoch', 'localtime')", 5, 10),
         # 2026-10-16: ETH 원본 수집기(소급 불가) -- 다코인 매니페스트는 BTC·SOL·XRP·HYPE 복제본만 봐서 ETH 는 아무도 안 봤다.
         #   멈추지 않고 «살아서 안 쓰는» 수집기는 _supervise.sh 도 못 잡는다. 임계는 매니페스트의 같은 종류 값 그대로.
         #   수집기를 은퇴시키면 이 줄도 지운다.

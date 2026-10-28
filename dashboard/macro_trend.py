@@ -105,16 +105,17 @@ def parse_fred_json(js: dict) -> pd.Series:
     return pd.Series([float(o["value"]) for o in ob], index=pd.to_datetime([o["date"] for o in ob]), dtype="float64").sort_index()
 
 
-def fetch_fred(sid: str) -> pd.Series:
+def fetch_fred(sid: str, start: str | None = "2022-01-01", timeout: float = 15) -> pd.Series:
     """정식 API · 키는 서버 .env(server.py 가 시작 때 load_dotenv). 🔴2026-10-28 fredgraph.csv 는 서버에서 TLS 뒤 응답이 없어
-    19개 계열이 전부 25초 시간 초과였다 -- 카드에 스테이블코인 한 줄만 남았다. 같은 서버에서 API 는 19개 모두 받았다."""
+    19개 계열이 전부 25초 시간 초과였다 -- 카드에 스테이블코인 한 줄만 남았다. 같은 서버에서 API 는 19개 모두 받았다.
+    start=None 이면 전체 이력(매크로 일·주 수집기의 첫 백필)."""
     key = os.getenv("FRED_API_KEY")
     if not key:
         raise RuntimeError("FRED_API_KEY 없음")
     for i in range(3):
         try:
-            r = requests.get(FRED_API, params={"series_id": sid, "api_key": key, "file_type": "json", "observation_start": "2022-01-01"},
-                             timeout=15)
+            r = requests.get(FRED_API, params={"series_id": sid, "api_key": key, "file_type": "json",
+                                               **({"observation_start": start} if start else {})}, timeout=timeout)
             r.raise_for_status()
             return parse_fred_json(r.json())
         except requests.RequestException as e:
@@ -183,18 +184,24 @@ def level(w: pd.Series, how: str) -> pd.Series:
     return 100 * np.log(w.where(w > 0)) if how == "logpct" else (100 * w if how == "bp" else w)
 
 
+def netliq(raw: dict[str, pd.Series]) -> pd.Series | None:
+    """순유동성 = WALCL[백만$] − WTREGEN[백만$] − RRP[십억$]×1000 (연구 패널과 같은 식, 수요일 격자). 매크로 일·주 수집기도 이 식을 쓴다."""
+    if any(raw.get(k) is None for k in ("WALCL", "WTREGEN", "RRPONTSYD")):
+        return None
+    a = raw["WALCL"]
+    nl = a - raw["WTREGEN"].reindex(a.index) - raw["RRPONTSYD"].reindex(
+        pd.date_range(raw["RRPONTSYD"].index.min(), a.index.max(), freq="D")).ffill(limit=5).reindex(a.index).fillna(0.0) * 1000.0
+    return nl.dropna()
+
+
 def indicator_level(g: dict, raw: dict[str, pd.Series], today: pd.Timestamp) -> pd.Series | None:
     src = g["source"]
     if src.startswith("fred:"):
         s = raw.get(src[5:])
         return None if s is None else level(weekly(s, today), g["transform"])
-    if src == "netliq":   # WALCL[백만$] − WTREGEN[백만$] − RRP[십억$]×1000 (연구 패널과 같은 식, 수요일 격자)
-        if any(raw.get(k) is None for k in ("WALCL", "WTREGEN", "RRPONTSYD")):
-            return None
-        a = raw["WALCL"]
-        nl = a - raw["WTREGEN"].reindex(a.index) - raw["RRPONTSYD"].reindex(
-            pd.date_range(raw["RRPONTSYD"].index.min(), a.index.max(), freq="D")).ffill(limit=5).reindex(a.index).fillna(0.0) * 1000.0
-        return level(weekly(nl.dropna(), today), "logpct")
+    if src == "netliq":
+        nl = netliq(raw)
+        return None if nl is None else level(weekly(nl, today), "logpct")
     if src == "stables":
         s = raw.get("stables")
         return None if s is None else level(weekly(s, today), "logpct")

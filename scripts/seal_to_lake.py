@@ -59,6 +59,7 @@ HOT_PRUNE = (
     # 2026-10-14 나스닥100 무기한(live_xyz100_collector_20261014) -- coin «xyz:XYZ100» 의 «:» 는 lake 경로에서 «_» (SPECS 와 같은 변환)
     *[(ROOT / "data/hot/hl_xyz.sqlite", t, ts, "coin", "hl", st, lambda c: c.replace(":", "_"), 8)
       for t, ts, st in (("hl_xyz_1m", "ts_sec", "xyz_1m"), ("hl_xyz_ctx_1s", "recv_sec", "xyz_ctx_1s"))],
+    (ROOT / "data/hot/macro_5m.sqlite", "yahoo_5m", "ts_sec", "symbol", "yahoo", "macro_5m", str, 8),   # 2026-10-28 매크로 5분봉(Yahoo)
     *[(ROOT / BN_CTX_REL, t, "ts_ms / 1000", "symbol", "binance", st, _bn_coin, 8)
       for t, st in (("oi_1s", "oi_1s"), ("mark_price_1s", "mark_1s"), ("liquidations", "liquidations"))],
 )
@@ -104,6 +105,9 @@ SPECS = [
     # 2026-10-14 나스닥100 무기한 1분봉·초당 가격(live_xyz100_collector_20261014). ctx 의 시각은 받은 시각(recv_sec)
     ("hl", "xyz_1m", [("data/hot/hl_xyz.sqlite", "hl_xyz_1m", "replace(coin, ':', '_')")], "ts_sec * 1000"),
     ("hl", "xyz_ctx_1s", [("data/hot/hl_xyz.sqlite", "hl_xyz_ctx_1s", "replace(coin, ':', '_')")], "recv_sec * 1000"),
+    # 2026-10-28 매크로 5분봉(live_macro_5m_collector_20261028, Yahoo FX·선물·ETF · symbol = USDJPY·ES·VIX 꼴). polls 는 딸린 표.
+    #   매크로 일·주 수집기(macro_daily.sqlite)는 개정 이력이라 봉인하지 않는다(그 파일 머리 설명)
+    ("yahoo", "macro_5m", [("data/hot/macro_5m.sqlite", "yahoo_5m", "symbol")], "ts_sec * 1000"),
     ("hl", "positions", [("data/hot/hl_positions.sqlite", "hl_positions", "coin"),
                          ("data/hot/hl_positions_sol_xrp.sqlite", "hl_positions", "coin"),     # 2026-10-06 SOL·XRP 서버 hot
                          (f"{L}/hyperliquid_positions_btc_sol_xrp_hype.from_pi.duckdb", "hl_positions", "coin")], "ts_ms"),

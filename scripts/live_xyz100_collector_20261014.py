@@ -13,6 +13,9 @@
   접속할 때마다 REST candleSnapshot 으로 마지막 저장 봉(없으면 72시간 전)부터 메운다 -- 재기동·끊김 구멍. 메움이 실패(429 등)해도
     웹소켓은 그대로 붙는다(실시간이 REST 에 묶이지 않게, 10-14 검토). 30초 조용하면 ping(HL 호가 수집기와 같은 규약).
   seal_to_lake 가 lake/hl/xyz_1m · xyz_ctx_1s / coin=xyz_XYZ100 으로 봉인, hot 은 8일. 주문·바이낸스 호출 없음(읽기 전용 시장 데이터).
+2026-10-28 종목 추가(사용자 «통과 매크로 지표 수집기»): xyz:SP500(S&P500, 하루 $2.4억) · xyz:JPY(USD/JPY) · xyz:EUR(EUR/USD).
+  같은 접속에 종목마다 구독 2개. 🔴JPY·EUR 은 얇다(하루 $190만) -- 체결 없는 분은 1분봉이 비고(10-28 실측 1시간 52/60봉), 가격은
+  ctx 의 oracle 이 낫다. 주말·FX 휴장 중 값은 FX 가 아니라 코인 쪽 투기다(XYZ100 과 같은 함정). HL_XYZ_COINS 로 바꾼다.
   python scripts/live_xyz100_collector_20261014.py              # 상주(supervisor_xyz100.sh 가 띄운다)
   python scripts/live_xyz100_collector_20261014.py --selftest   # 네트워크 없이
 """
@@ -30,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.data_store import ROOT, rw_connect, sqlite_init  # noqa: E402
 
 DB = Path(os.environ.get("HL_XYZ_DB", ROOT / "data/hot/hl_xyz.sqlite"))
-COIN = os.environ.get("HL_XYZ_COIN", "xyz:XYZ100")
+COINS = os.environ.get("HL_XYZ_COINS", "xyz:XYZ100,xyz:SP500,xyz:JPY,xyz:EUR").split(",")
 WS_URL, INFO_URL = "wss://api.hyperliquid.xyz/ws", "https://api.hyperliquid.xyz/info"
 FLUSH_S, BACKFILL_H = 2.0, 72                   # candleSnapshot 은 5000봉까지 -- 72시간(4,320봉)이면 긴 끊김도 메운다
 DDL = ("CREATE TABLE IF NOT EXISTS hl_xyz_1m(coin TEXT NOT NULL, ts_sec INTEGER NOT NULL, open REAL, high REAL, low REAL, close REAL, "
@@ -41,33 +44,42 @@ UPSERT_1M = "INSERT OR REPLACE INTO hl_xyz_1m VALUES (?,?,?,?,?,?,?,?)"
 UPSERT_CTX = "INSERT OR REPLACE INTO hl_xyz_ctx_1s VALUES (?,?,?,?,?)"
 
 
-def candle_row(c: dict) -> tuple | None:
-    """웹소켓 candle·REST candleSnapshot 공통 원소({t ms, o,h,l,c,v 문자열, n}) → hl_xyz_1m 행."""
+def candle_row(c: dict, coin: str | None = None) -> tuple | None:
+    """웹소켓 candle·REST candleSnapshot 공통 원소({t ms, s, o,h,l,c,v 문자열, n}) → hl_xyz_1m 행. 종목을 모르면 버린다."""
+    if not (c.get("s") or coin):
+        return None
     try:
-        return (c.get("s") or COIN, int(c["t"]) // 1000, float(c["o"]), float(c["h"]), float(c["l"]), float(c["c"]),
+        return (c.get("s") or coin, int(c["t"]) // 1000, float(c["o"]), float(c["h"]), float(c["l"]), float(c["c"]),
                 float(c.get("v") or 0), int(c.get("n") or 0))
     except (KeyError, TypeError, ValueError):
         return None
 
 
 def ctx_row(data: dict, recv_ms: int) -> tuple | None:
-    """activeAssetCtx → (coin, 받은 초, mid, mark, oracle). 셋 다 없으면 버린다."""
+    """activeAssetCtx → (coin, 받은 초, mid, mark, oracle). 셋 다 없거나 종목을 모르면 버린다."""
     ctx = data.get("ctx") or {}
+    if not data.get("coin"):
+        return None
     f = lambda k: float(ctx[k]) if ctx.get(k) not in (None, "") else None   # noqa: E731
     try:
         mid, mark, ora = f("midPx"), f("markPx"), f("oraclePx")
     except (TypeError, ValueError):
         return None
-    return None if mid is None and mark is None and ora is None else (data.get("coin") or COIN, recv_ms // 1000, mid, mark, ora)
+    return None if mid is None and mark is None and ora is None else (data["coin"], recv_ms // 1000, mid, mark, ora)
 
 
-def backfill_rows(last_sec: int | None, now_ms: int) -> list[tuple]:
+def backfill_rows(coin: str, last_sec: int | None, now_ms: int) -> list[tuple]:
     """마지막 저장 봉(포함, 진행 중이었을 수 있다)부터 지금까지 REST 1분봉. 없으면 BACKFILL_H 시간 전부터. 스레드에서 부른다(DB 안 만짐)."""
     start = max(now_ms - BACKFILL_H * 3_600_000, (last_sec or 0) * 1000)
-    body = json.dumps({"type": "candleSnapshot", "req": {"coin": COIN, "interval": "1m", "startTime": start, "endTime": now_ms}}).encode()
+    body = json.dumps({"type": "candleSnapshot", "req": {"coin": coin, "interval": "1m", "startTime": start, "endTime": now_ms}}).encode()
     req = urllib.request.Request(INFO_URL, data=body, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=20) as r:
-        return [x for x in (candle_row(c) for c in json.loads(r.read())) if x]
+        return [x for x in (candle_row(c, coin) for c in json.loads(r.read())) if x]
+
+
+def buffer(store: dict, r: tuple) -> None:
+    """flush 전 버퍼 -- 키 = (종목, 시각). 🔴시각만 키로 쓰면 같은 분·같은 초의 다른 종목이 서로 덮는다(10-28 리뷰, 종목 추가 때)."""
+    store[(r[0], r[1])] = r
 
 
 def write(bars: list[tuple], ctxs: list[tuple]) -> None:
@@ -80,15 +92,16 @@ def write(bars: list[tuple], ctxs: list[tuple]) -> None:
 
 
 async def backfill() -> None:
-    """REST 메움 -- 실패해도 로그만 남기고 돌아간다(다음 재접속 때 다시)."""
-    try:
-        with rw_connect(DB) as con:
-            last = con.execute("SELECT max(ts_sec) FROM hl_xyz_1m WHERE coin = ?", (COIN,)).fetchone()[0]
-        rows = await asyncio.to_thread(backfill_rows, last, int(time.time() * 1000))
-        await asyncio.to_thread(write, rows, [])
-        print(f"[xyz100] {time.strftime('%F %T')} 접속 · REST 메움 {len(rows)}봉", flush=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"[xyz100] {time.strftime('%F %T')} REST 메움 실패 {type(e).__name__}: {e} -- 웹소켓은 그대로 붙는다", flush=True)
+    """REST 메움(종목마다) -- 한 종목이 실패해도 로그만 남기고 다음 종목으로(다음 재접속 때 다시)."""
+    for coin in COINS:
+        try:
+            with rw_connect(DB) as con:
+                last = con.execute("SELECT max(ts_sec) FROM hl_xyz_1m WHERE coin = ?", (coin,)).fetchone()[0]
+            rows = await asyncio.to_thread(backfill_rows, coin, last, int(time.time() * 1000))
+            await asyncio.to_thread(write, rows, [])
+            print(f"[xyz100] {time.strftime('%F %T')} 접속 · {coin} REST 메움 {len(rows)}봉", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[xyz100] {time.strftime('%F %T')} {coin} REST 메움 실패 {type(e).__name__}: {e} -- 웹소켓은 그대로 붙는다", flush=True)
 
 
 async def run() -> None:
@@ -104,10 +117,11 @@ async def run() -> None:
                 await backfill()
                 ws = await asyncio.wait_for(session.ws_connect(WS_URL, heartbeat=25, max_msg_size=0), 30)   # 핸드셰이크가 멈추면 30초에 끊는다
                 async with ws:
-                    for sub in ({"type": "candle", "coin": COIN, "interval": "1m"}, {"type": "activeAssetCtx", "coin": COIN}):
-                        await ws.send_json({"method": "subscribe", "subscription": sub})
-                    bars: dict[int, tuple] = {}
-                    ctxs: dict[int, tuple] = {}
+                    for coin in COINS:
+                        for sub in ({"type": "candle", "coin": coin, "interval": "1m"}, {"type": "activeAssetCtx", "coin": coin}):
+                            await ws.send_json({"method": "subscribe", "subscription": sub})
+                    bars: dict[tuple, tuple] = {}
+                    ctxs: dict[tuple, tuple] = {}
                     last_flush, quiet = time.monotonic(), 0
                     while True:
                         try:
@@ -125,9 +139,9 @@ async def run() -> None:
                         if ch == "error":                                  # 구독 거부 등 -- 조용히 버리면 칸이 영구 «끊김»인데 원인이 안 남는다
                             print(f"[xyz100] {time.strftime('%F %T')} 거래소 오류 {str(data)[:200]}", flush=True)
                         elif ch == "candle" and isinstance(data, dict) and (r := candle_row(data)):
-                            bars[r[1]] = r; quiet = 0
+                            buffer(bars, r); quiet = 0
                         elif ch == "activeAssetCtx" and isinstance(data, dict) and (r := ctx_row(data, int(time.time() * 1000))):
-                            ctxs[r[1]] = r; quiet = 0
+                            buffer(ctxs, r); quiet = 0
                         if time.monotonic() - last_flush >= FLUSH_S and (bars or ctxs):
                             await asyncio.to_thread(write, list(bars.values()), list(ctxs.values()))
                             bars.clear(); ctxs.clear(); last_flush = time.monotonic()
@@ -141,10 +155,19 @@ async def run() -> None:
 def selftest() -> None:
     import sqlite3
     import tempfile
-    r = candle_row({"t": 1791909180000, "T": 1791909239999, "s": "xyz:XYZ100", "i": "1m", "o": "30590.0", "c": "30594.0",
-                    "h": "30594.0", "l": "30590.0", "v": "0.0079", "n": 4})
+    r_src = {"t": 1791909180000, "T": 1791909239999, "s": "xyz:XYZ100", "i": "1m", "o": "30590.0", "c": "30594.0",
+             "h": "30594.0", "l": "30590.0", "v": "0.0079", "n": 4}
+    r = candle_row(r_src)
     assert r == ("xyz:XYZ100", 1791909180, 30590.0, 30594.0, 30590.0, 30594.0, 0.0079, 4), r
     assert candle_row({"t": "x"}) is None
+    assert candle_row({k: v for k, v in r_src.items() if k != "s"}) is None                       # 종목 모르면 버림(옛 기본 종목으로 새지 않게)
+    assert candle_row({k: v for k, v in r_src.items() if k != "s"}, "xyz:JPY")[0] == "xyz:JPY"   # REST 는 요청 종목으로
+    assert ctx_row({"ctx": {"midPx": "1.0"}}, 0) is None
+    buf: dict = {}
+    for coin in COINS:                                                          # 같은 분·같은 초에 4종목 -- 하나도 안 잃는다
+        buffer(buf, (coin, *r[1:]))
+    buffer(buf, ("xyz:XYZ100", r[1], 1.0, 1.0, 1.0, 2.0, 1.0, 1))              # 같은 종목·같은 분은 덮어쓴다
+    assert len(buf) == len(COINS) and buf[("xyz:XYZ100", r[1])][5] == 2.0, buf
     c = ctx_row({"coin": "xyz:XYZ100", "ctx": {"midPx": "30593.5", "markPx": "30592.0", "oraclePx": "30583.0"}}, 1791909190999)
     assert c == ("xyz:XYZ100", 1791909190, 30593.5, 30592.0, 30583.0), c
     assert ctx_row({"coin": "xyz:XYZ100", "ctx": {"midPx": None, "markPx": "", "oraclePx": None}}, 0) is None
