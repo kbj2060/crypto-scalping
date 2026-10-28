@@ -175,7 +175,8 @@ if __name__ == "__main__":
     if a.selftest:
         selftest()
     elif a.parity:
-        z_rows(fetch_panel()).loc["2026-01-01":].to_csv(a.parity, float_format="%.5f")
+        z = z_rows(fetch_panel())
+        z[z.index >= "2026-01-01"].to_csv(a.parity, float_format="%.5f")   # 두 자산을 이어 붙여 인덱스가 정렬돼 있지 않다 -- 구간 자르기 대신 마스크
         print("parity csv", a.parity)
     else:
         sys.exit(main())
