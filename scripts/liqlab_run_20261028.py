@@ -200,7 +200,7 @@ def score_arm(arm, data, variant, windows=("val", "test"), B_null=300, null_mode
         rvq = np.nanquantile(f.rv24[tr], [1 / 3, 2 / 3])
         for w in windows:
             m = win(p.index, w); px = {k: p[k].to_numpy()[m] for k in "ohlc"}
-            day = ((p.index[m] - p.index[m][0]).days).to_numpy() + 10_000 * COINS.index(sym)
+            day = ((p.index[m] - p.index[m][0]).days).to_numpy()   # 달력일 군집(코인 공통 창 시작) -- 10-28 검수: 코인·일 군집은 같은 날 코인 간 상관을 무시해 CI 가 좁았다
             st = L.strata_of(f.hour.to_numpy()[m], f.rv24.to_numpy()[m], rvq)
             out.setdefault(w, {})[sym] = L.evaluate_window(sig[m], px, day, st, H, B_null=B_null, null_modes=null_modes)
     return out
@@ -499,6 +499,14 @@ def forward(data, dry):
                                 "null_random_pct": float(np.mean([x["null_random_pct"] for x in ok])) if ok else None,
                                 "per_coin": {s: x["maker"].get("mean_net") for s, x in r.items()}})
     a = rep["variants"][0]; pt = a["pooled"]
+    r0 = score_arm("T1", data, T1_FWD[0], windows=(w,), B_null=10)[w]                       # 집중도(§14, 보고만)
+    net = np.concatenate([np.asarray(x["maker"]["net"], float) for x in r0.values()])
+    day = np.concatenate([np.asarray(x["maker"]["day"], int) for x in r0.values()])
+    if len(net) >= 10:
+        tot = pd.Series(net).groupby(day).sum().sort_values(ascending=False)
+        srt = np.sort(net)[::-1]
+        rep["concentration"] = {"n_days": int(len(tot)), "top1_share": float(srt[0] / net.sum()), "top5_share": float(srt[:5].sum() / net.sum()),
+                                "mean_drop_top10_trades": float(srt[10:].mean()), "mean_drop_top3_days": float(net[~np.isin(day, tot.index[:3])].mean())}
     rep["F1_candidate_kept"] = bool((pt.get("mean") or -1) > 0 and a["coins_pos"][0] >= -(-a["coins_pos"][1] // 2) and (a["null_random_pct"] or 0) >= 50)
     rep["F2_strict"] = ("통과" if pt.get("ci95") and pt["ci95"][0] > 0 else
                         "판정 불능" if (a["mde80"] or np.inf) > 2 * EXPECTED_BP["T1"] else "불통과")
