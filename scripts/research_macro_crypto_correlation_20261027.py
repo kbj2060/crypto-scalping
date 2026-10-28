@@ -10,7 +10,8 @@ Sections (all written to <out>/):
   G  liquidity-lead claims: NETLIQ / M2 / stablecoin supply vs forward BTC returns
   H  regime-conditional forward returns (expanding terciles, no look-ahead)
   I  out-of-sample predictability (expanding OLS, Campbell-Thompson R2_OS, Clark-West)
-  J  robustness of the strongest regime effects (sub-periods, weekly rule, momentum control, 13w OOS)
+  J  robustness of the strongest regime effects (sub-periods, weekly rule, permutation p, momentum control, 13w OOS)
+  K  one-off numbers quoted in the report (level-vs-diff, random-walk placebo, NFCI AC1, current reading)
 
 Timing convention: Yahoo BTC/ETH daily close = 00:00 UTC of the next day, i.e. 3-4h after the
 US cash close of the same calendar date. Daily "same date" correlations therefore let BTC see
@@ -88,7 +89,8 @@ def sample(panel: pd.DataFrame, freq: str) -> pd.DataFrame:
     """Level frame on a frequency grid. D = US business days (SPX or DGS10 printed)."""
     if freq == "D":
         grid = panel.index[panel["SPX"].notna() | panel["DGS10"].notna()]
-        lv = panel.ffill(limit=3).reindex(grid)
+        # ffill 없음: 휴장일 값을 끌어오면 가짜 0 수익이 생긴다(KOSPI·브렌트 휴장, BTC 결측일). 결측 양옆 수익은 NaN.
+        lv = panel.reindex(grid)
         # weekly/monthly natives must not be smeared onto daily grid
         for k in WEEKLY_NATIVE | MONTHLY_ONLY:
             lv[VARS[k][0]] = np.nan
@@ -98,7 +100,11 @@ def sample(panel: pd.DataFrame, freq: str) -> pd.DataFrame:
     if freq == "W":
         for k in MONTHLY_ONLY:
             lv[VARS[k][0]] = np.nan
-    return lv
+    else:  # 월간 원천 시리즈는 ffill 없이 그 달 값만(미발표 달을 전월 값으로 메우면 가짜 0)
+        for k in MONTHLY_ONLY:
+            lv[VARS[k][0]] = panel[VARS[k][0]].resample(rule).last()
+    # 마지막 미완성 주·월 구간 제거: 데이터 끝(DGS10 마지막 날) 이후에 끝나는 구간은 ffill 된 낡은 값뿐이다
+    return lv[lv.index <= panel["DGS10"].last_valid_index()]
 
 
 def returns(lv: pd.DataFrame) -> pd.DataFrame:
@@ -394,7 +400,11 @@ def section_h(R: dict, lv: dict, out: Path) -> pd.DataFrame:
                 continue
             ones = pd.Series(1.0, index=x.index)
             t = sm.OLS(x, ones).fit(cov_type="HAC", cov_kwds={"maxlags": 4}).tvalues.iloc[0]
-            rows.append(dict(state=sname, bucket=bname, n_weeks=len(x), mean_fwd4w_btc_pct=x.mean(), hac_t=t, hit_rate=(x > 0).mean()))
+            # 대비: 이 구간 vs 나머지(연속 표본, HAC 8). hac_t 는 «평균=0» 검정이라 무조건 평균(+)만큼 부풀어 있다
+            dummy = (d["b"] == bname).astype(float)
+            tv = sm.OLS(d["f4"], sm.add_constant(dummy)).fit(cov_type="HAC", cov_kwds={"maxlags": 8}).tvalues.iloc[1]
+            rows.append(dict(state=sname, bucket=bname, n_weeks=len(x), mean_fwd4w_btc_pct=x.mean(), hac_t=t, t_vs_rest=tv,
+                             mean_rest=d.loc[d["b"] != bname, "f4"].mean(), hit_rate=(x > 0).mean()))
         hiv = d.loc[d["b"] == "high", "f4"]
         lov = d.loc[d["b"] == "low", "f4"]
         if len(hiv) > 20 and len(lov) > 20:
@@ -417,13 +427,13 @@ def section_i(R: dict, out: Path) -> pd.DataFrame:
         X.columns = [c + "_4w" for c in preds]
         base = pd.concat([y, X], axis=1).loc["2015":]
         for p in list(X.columns) + ["KITCHEN_SINK", "COMBINATION_MEAN"]:
-            if p == "KITCHEN_SINK":
-                cols = [c for c in X.columns if c != "STABLES_4w"]
+            if p == "KITCHEN_SINK":  # UST10Y ≡ REAL10Y + BE10Y(오차 1e-15) -- 공선성이라 뺀다
+                cols = [c for c in X.columns if c not in ("STABLES_4w", "UST10Y_4w")]
             elif p == "COMBINATION_MEAN":
                 cols = None
             else:
                 cols = [p]
-            d = base.dropna(subset=["y"] + (cols if cols else [c for c in X.columns if c != "STABLES_4w"]))
+            d = base.dropna(subset=["y"] + (cols if cols else [c for c in X.columns if c not in ("STABLES_4w", "UST10Y_4w")]))
             dates = d.index
             start = dates.searchsorted(pd.Timestamp("2018-01-05"))
             e_model, e_mean, fc_m, fc_b, realised = [], [], [], [], []
@@ -436,7 +446,7 @@ def section_i(R: dict, out: Path) -> pd.DataFrame:
                 mean_fc = tr["y"].mean()
                 if p == "COMBINATION_MEAN":
                     fcs = []
-                    for c in [c for c in X.columns if c != "STABLES_4w"]:
+                    for c in [c for c in X.columns if c not in ("STABLES_4w", "UST10Y_4w")]:
                         bb = np.polyfit(tr[c], tr["y"], 1)
                         fcs.append(bb[0] * te[c] + bb[1])
                     fc = float(np.mean(fcs))
@@ -490,6 +500,14 @@ def section_j(R: dict, lv: dict, out: Path) -> tuple[pd.DataFrame, pd.DataFrame]
             for bk in ("low", "mid", "high"):
                 row[f"fwd4w_mean_{bk}"] = dd.loc[dd["b"] == bk, "f4"].mean()
                 row[f"n_{bk}"] = int((dd["b"] == bk).sum())
+            # 순환이동 순열검정: 레짐 지속성(자기상관)을 보존한 채 구간 라벨을 26주 이상 밀어 «구간−나머지» 차이의 귀무분포
+            inb, y = (dd["b"] == want).values, dd["f4"].values
+            obs = y[inb].mean() - y[~inb].mean()
+            rng = np.random.default_rng(20261028)
+            null = [(lambda m: y[m].mean() - y[~m].mean())(np.roll(inb, k)) for k in rng.integers(26, len(y) - 26, 2000)]
+            row["perm_p_two_sided"] = float(np.mean(np.abs(null) >= abs(obs)))
+            row["bucket_minus_rest_pct"] = obs
+            row["n_episodes"] = int((np.diff(np.r_[0, inb.astype(int)]) == 1).sum())
             rows.append(row)
     rob = pd.DataFrame(rows)
 
@@ -532,6 +550,52 @@ def section_j(R: dict, lv: dict, out: Path) -> tuple[pd.DataFrame, pd.DataFrame]
     return rob, ctl
 
 
+def section_k(R: dict, lv: dict, out: Path) -> dict:
+    """보고서가 인용하는 단발 수치들(감사 2026-10-28: 커밋 코드로 재현 가능하게)."""
+    res = {}
+    m = lv["M"].loc["2015":]
+    lb = np.log(m["BTC"])
+    tab = {}
+    for c in ("M2SL", "NETLIQ", "WALCL", "SPX", "GOLD", "DTWEXBGS"):
+        x = np.log(m[c])
+        tab[c] = dict(level=lb.corr(x), d1m=lb.diff().corr(x.diff()), d12m=lb.diff(12).corr(x.diff(12)),
+                      n_level=int(pd.concat([lb, x], axis=1).dropna().shape[0]))
+    res["monthly_level_vs_diff_2015plus"] = tab
+    x = np.log(m["M2SL"]).dropna()
+    rng = np.random.default_rng(0)
+    cs = np.array([abs(np.corrcoef(np.cumsum(rng.normal(0, 1, len(x))), x.values)[0, 1]) for _ in range(2000)])
+    res["random_walk_vs_logM2"] = dict(share_abs_corr_gt_0p8=float((cs > 0.8).mean()), median_abs_corr=float(np.median(cs)), n_months=len(x))
+    w = R["W"].loc["2015":]
+    res["nfci_weekly_change_ac1"] = float(w["NFCI"].autocorr(1))
+    res["stlfsi_change_vs_prev_week_spx"] = float(w["STLFSI"].corr(w["SPX"].shift(1)))
+    per = {"ALL": ("2015", "2026"), "P1": ("2015", "2019"), "P2": ("2020", "2023"), "P3": ("2024", "2026")}
+    res["baa_next_week"] = {k: dict(spx_t_vs_baa_t1=w.loc[a:b, "SPX"].corr(w.loc[a:b, "BAA_SPREAD"].shift(-1)),
+                                    btc_t_vs_baa_t1=w.loc[a:b, "BTC"].corr(w.loc[a:b, "BAA_SPREAD"].shift(-1))) for k, (a, b) in per.items()}
+    res["stablecoin_leadlag"] = {k: dict(stables_tm1_to_btc_t=w.loc[a:b, "BTC"].corr(w.loc[a:b, "STABLES"].shift(1)),
+                                         btc_t_to_stables_t2_7_mean=float(np.mean([w.loc[a:b, "BTC"].corr(w.loc[a:b, "STABLES"].shift(-q)) for q in range(2, 8)])),
+                                         btc_t_to_stables_t2_7_min=float(np.min([w.loc[a:b, "BTC"].corr(w.loc[a:b, "STABLES"].shift(-q)) for q in range(2, 8)])),
+                                         btc_t_to_stables_t2_7_max=float(np.max([w.loc[a:b, "BTC"].corr(w.loc[a:b, "STABLES"].shift(-q)) for q in range(2, 8)])))
+                                 for k, (a, b) in per.items()}
+    # 현재 판독: 마지막 완결 주. 분위는 H/J 와 같은 확장 3분위, 버킷 평균은 2015~ 전체의 다음 4주 BTC
+    wl = lv["W"]
+    f4 = fwd_sum(R["W"]["BTC"], 4)
+    cur = {}
+    for name, sv in (("USD13", 100 * np.log(wl["DTWEXBGS"]).diff(13)), ("REAL13_bp", 100 * wl["DFII10"].diff(13)),
+                     ("NETLIQ13", 100 * np.log(wl["NETLIQ"]).diff(13))):
+        lo, hi = sv.expanding(104).quantile(1 / 3), sv.expanding(104).quantile(2 / 3)
+        last = sv.last_valid_index()
+        v = sv[last]
+        bk = "low" if v <= lo[last] else ("high" if v >= hi[last] else "mid")
+        s1, lo1, hi1 = sv.shift(1), lo.shift(1), hi.shift(1)
+        b = pd.Series(np.where(s1 <= lo1, "low", np.where(s1 >= hi1, "high", "mid")), index=sv.index).where(lo1.notna())
+        hist = pd.concat([f4, b], axis=1).loc["2015":].dropna()
+        cur[name] = dict(week=str(last.date()), value=float(v), tercile_lo=float(lo[last]), tercile_hi=float(hi[last]), bucket=bk,
+                         hist_mean_fwd4w_btc_pct_in_bucket=float(hist[hist.iloc[:, 1] == bk].iloc[:, 0].mean()))
+    res["current_reading_last_complete_week"] = cur
+    (out / "K_adhoc_checks.json").write_text(json.dumps(res, indent=1, default=float))
+    return res
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="docs/experiments/macro_crypto_correlation_20261027")
@@ -541,10 +605,6 @@ def main() -> None:
 
     lv = {f: sample(panel, f) for f in ("D", "W", "M")}
     R = {f: returns(lv[f]) for f in lv}
-    # never let weekly-native unchanged prints masquerade as daily zeros; mask where level missing
-    for f in R:
-        for k, (col, _, _) in VARS.items():
-            R[f].loc[lv[f][col].isna(), k] = np.nan
 
     # sanity: Yahoo SPX vs FRED SP500
     d = pd.concat([transform(lv["D"]["SPX"], "logret"), transform(lv["D"]["SP500"], "logret")], axis=1).dropna()
@@ -560,6 +620,7 @@ def main() -> None:
     H = section_h(R, lv, out)
     I = section_i(R, out)
     section_j(R, lv, out)
+    section_k(R, lv, out)
     (out / "sanity.json").write_text(json.dumps(sanity, indent=1))
     print(json.dumps(sanity))
     print("done", {k: len(v) if hasattr(v, "__len__") else 0 for k, v in dict(A=A, B=B, C=C, D=D, F=F, G=G, H=H, I=I).items()})

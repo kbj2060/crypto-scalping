@@ -1,0 +1,117 @@
+{
+ "monthly_level_vs_diff_2015plus": {
+  "M2SL": {
+   "level": 0.9249363934787669,
+   "d1m": 0.08829196235543958,
+   "d12m": 0.2508651352195922,
+   "n_level": 140
+  },
+  "NETLIQ": {
+   "level": 0.7554720513347815,
+   "d1m": 0.1256391419509415,
+   "d12m": 0.3855153847777047,
+   "n_level": 141
+  },
+  "WALCL": {
+   "level": 0.7121125367214769,
+   "d1m": -0.00481170431827169,
+   "d12m": 0.10147782303984879,
+   "n_level": 141
+  },
+  "SPX": {
+   "level": 0.9251640260122771,
+   "d1m": 0.3528113075836899,
+   "d12m": 0.591137844510773,
+   "n_level": 141
+  },
+  "GOLD": {
+   "level": 0.7918942388053681,
+   "d1m": 0.07062240246133682,
+   "d12m": -0.07642791805196639,
+   "n_level": 141
+  },
+  "DTWEXBGS": {
+   "level": 0.6599741811112828,
+   "d1m": -0.15009029070623073,
+   "d12m": -0.5265970089516238,
+   "n_level": 141
+  }
+ },
+ "random_walk_vs_logM2": {
+  "share_abs_corr_gt_0p8": 0.2775,
+  "median_abs_corr": 0.6336971156800273,
+  "n_months": 140
+ },
+ "nfci_weekly_change_ac1": 0.9453558756347142,
+ "stlfsi_change_vs_prev_week_spx": -0.24893928489056238,
+ "baa_next_week": {
+  "ALL": {
+   "spx_t_vs_baa_t1": -0.21307937243582675,
+   "btc_t_vs_baa_t1": -0.166608383871337
+  },
+  "P1": {
+   "spx_t_vs_baa_t1": -0.26330249126617183,
+   "btc_t_vs_baa_t1": -0.0479191753308816
+  },
+  "P2": {
+   "spx_t_vs_baa_t1": -0.24935522719506528,
+   "btc_t_vs_baa_t1": -0.26812151325914724
+  },
+  "P3": {
+   "spx_t_vs_baa_t1": 0.03236376223585806,
+   "btc_t_vs_baa_t1": -0.08674843404329978
+  }
+ },
+ "stablecoin_leadlag": {
+  "ALL": {
+   "stables_tm1_to_btc_t": -0.14796102872864092,
+   "btc_t_to_stables_t2_7_mean": 0.12113108468215512,
+   "btc_t_to_stables_t2_7_min": 0.09167390071142725,
+   "btc_t_to_stables_t2_7_max": 0.1412622632789858
+  },
+  "P1": {
+   "stables_tm1_to_btc_t": -0.21420682074136413,
+   "btc_t_to_stables_t2_7_mean": 0.1406932141163955,
+   "btc_t_to_stables_t2_7_min": 0.1083883703335056,
+   "btc_t_to_stables_t2_7_max": 0.1630155607132085
+  },
+  "P2": {
+   "stables_tm1_to_btc_t": 0.03548537946870965,
+   "btc_t_to_stables_t2_7_mean": 0.12530987839568372,
+   "btc_t_to_stables_t2_7_min": 0.04972678782141417,
+   "btc_t_to_stables_t2_7_max": 0.2494718580704365
+  },
+  "P3": {
+   "stables_tm1_to_btc_t": 0.15869097949928396,
+   "btc_t_to_stables_t2_7_mean": 0.1330055563104414,
+   "btc_t_to_stables_t2_7_min": -0.052389294761920675,
+   "btc_t_to_stables_t2_7_max": 0.2640624227682711
+  }
+ },
+ "current_reading_last_complete_week": {
+  "USD13": {
+   "week": "2026-10-23",
+   "value": 0.5038214488476633,
+   "tercile_lo": -0.9927874622497336,
+   "tercile_hi": 1.1716993312889257,
+   "bucket": "mid",
+   "hist_mean_fwd4w_btc_pct_in_bucket": 0.7306437137162347
+  },
+  "REAL13_bp": {
+   "week": "2026-10-23",
+   "value": 23.0,
+   "tercile_lo": -15.000000000000021,
+   "tercile_hi": 11.999999999999991,
+   "bucket": "high",
+   "hist_mean_fwd4w_btc_pct_in_bucket": 0.6248357782477911
+  },
+  "NETLIQ13": {
+   "week": "2026-10-23",
+   "value": -1.9800379681981894,
+   "tercile_lo": -0.4906882112296767,
+   "tercile_hi": 2.240164628760214,
+   "bucket": "low",
+   "hist_mean_fwd4w_btc_pct_in_bucket": 2.2616556355510804
+  }
+ }
+}

@@ -1,5 +1,20 @@
 {
  "rows": 9794,
+ "btc_yahoo_vs_coinmetrics_daily_ret_corr_by_year": {
+  "2014": 0.9838,
+  "2015": 0.9908,
+  "2016": 0.9812,
+  "2017": 0.9759,
+  "2018": 0.9921,
+  "2019": 0.9937,
+  "2020": 0.9952,
+  "2021": 0.9918,
+  "2022": 0.996,
+  "2023": 0.9954,
+  "2024": 0.9964,
+  "2025": 0.9964,
+  "2026": 0.996
+ },
  "coverage": {
   "DGS2": [
    "2000-01-03",
@@ -178,13 +193,13 @@
   ],
   "BTC": [
    "2014-09-17",
-   "2026-10-22",
-   4409
+   "2026-10-21",
+   4398
   ],
   "ETH": [
    "2017-11-09",
-   "2026-10-22",
-   3261
+   "2026-10-21",
+   3251
   ],
   "SPX": [
    "2000-01-03",
@@ -232,8 +247,8 @@
    1245
   ]
  },
- "btc_yahoo_vs_coinmetrics_daily_ret_corr": 0.9860554239033564,
- "btc_yahoo_vs_coinmetrics_median_abs_level_gap_pct": 0.17176156594372882,
+ "btc_yahoo_vs_coinmetrics_daily_ret_corr": 0.989737101697567,
+ "btc_yahoo_vs_coinmetrics_median_abs_level_gap_pct": 0.1577414986205894,
  "sources": {
   "pk-claude/siberforge.xyz": "3331cd16d1cf464ef399d45efcdfb24366ef2c93 2026-10-27T01:41:02+00:00",
   "Mario-SO/ohlcv": "85cf3ecd198acfed0aade3e0169ca25429ff893d 2026-10-22T01:16:56+00:00",

@@ -6,7 +6,7 @@ is written next to the panel so the numbers can be re-derived.
 
 Sources (clone with `git clone --depth 1 https://github.com/<repo>` into --ext-dir):
   pk-claude/siberforge.xyz          data/fred/*.json   FRED series (hist + current year)
-  Mario-SO/ohlcv                    data/*.csv         Yahoo daily OHLCV (BTC-USD, ETH-USD, ^GSPC, GC=F)
+  Mario-SO/ohlcv                    data/*.csv         Yahoo daily OHLCV (BTC-USD, ETH-USD via Open[D+1], ^GSPC, GC=F)
   coinmetrics/data  (raw download)  csv/{btc,eth,usdt,usdc,dai,busd}.csv  Coin Metrics community
   LEEYOUNGJIN-GIT/fred-macro-review data/macro/obs/*.csv KOSPI, STLFSI4, DEXKOUS, BAMLH0A0HYM2
 
@@ -58,6 +58,17 @@ def load_fred(fred_dir: Path, sid: str) -> pd.Series:
     return s.rename(sid)
 
 
+def load_yahoo_crypto(path: Path, name: str) -> pd.Series:
+    """Yahoo 미러 BTC/ETH: 날짜 D 의 값 = Open[D+1](00:00 UTC). 미러의 Close 는 2025~2026 구간이 수집 스냅샷이라
+    Coin Metrics 와 어긋난다(2025 일간 수익 상관 0.86; Open[D+1] 은 0.996 -- 2026-10-28 감사). 다음 날 행이 없으면 NaN
+    (Close 로 메우지 않는다: 마지막 행은 수집 시각까지만 담긴 미완성 일봉이고, 결측 전날의 Close 도 같은 스냅샷이다)."""
+    df = pd.read_csv(path, usecols=["Date", "Open", "Close"], parse_dates=["Date"])
+    df = df.drop_duplicates("Date", keep="last").sort_values("Date").set_index("Date")
+    consecutive = (df.index.to_series().shift(-1) - df.index.to_series()) == pd.Timedelta(days=1)
+    v = df["Open"].shift(-1).where(consecutive)
+    return v.astype(float).dropna().rename(name)
+
+
 def load_csv(path: Path, date_col: str, val_col: str, name: str) -> pd.Series:
     df = pd.read_csv(path, usecols=[date_col, val_col])
     s = pd.Series(pd.to_numeric(df[val_col], errors="coerce").values, index=pd.to_datetime(df[date_col]), name=name)
@@ -78,8 +89,8 @@ def main() -> None:
     leey = ext / "LEEYOUNGJIN-GIT_fred-macro-review/data/macro/obs"
 
     cols = {sid: load_fred(fred_dir, sid) for sid in FRED_SERIES}
-    cols["BTC"] = load_csv(yahoo / "btc.csv", "Date", "Close", "BTC")
-    cols["ETH"] = load_csv(yahoo / "eth.csv", "Date", "Close", "ETH")
+    cols["BTC"] = load_yahoo_crypto(yahoo / "btc.csv", "BTC")
+    cols["ETH"] = load_yahoo_crypto(yahoo / "eth.csv", "ETH")
     cols["SPX"] = load_csv(yahoo / "sp500.csv", "Date", "Close", "SPX")
     cols["GOLD"] = load_csv(yahoo / "gold.csv", "Date", "Close", "GOLD")
     cols["BTC_CM"] = load_csv(cm / "btc.csv", "time", "PriceUSD", "BTC_CM")
@@ -113,8 +124,10 @@ def main() -> None:
     # sanity: Yahoo vs Coin Metrics BTC returns (same UTC-day convention)
     chk = panel[["BTC", "BTC_CM"]].dropna()
     r = np.log(chk).diff().dropna()
+    by_year = {str(y): round(float(g.corr().iloc[0, 1]), 4) for y, g in r.groupby(r.index.year) if len(g) > 30}
     summary = {
         "rows": int(len(panel)),
+        "btc_yahoo_vs_coinmetrics_daily_ret_corr_by_year": by_year,
         "coverage": {c: [str(panel[c].first_valid_index().date()), str(panel[c].last_valid_index().date()), int(panel[c].notna().sum())]
                      for c in panel.columns if panel[c].notna().any()},
         "btc_yahoo_vs_coinmetrics_daily_ret_corr": float(r.corr().iloc[0, 1]),
