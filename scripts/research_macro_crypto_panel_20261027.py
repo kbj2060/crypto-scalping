@@ -9,6 +9,7 @@ Sources (clone with `git clone --depth 1 https://github.com/<repo>` into --ext-d
   Mario-SO/ohlcv                    data/*.csv         Yahoo daily OHLCV (BTC-USD, ETH-USD via Open[D+1], ^GSPC, GC=F)
   coinmetrics/data  (raw download)  csv/{btc,eth,usdt,usdc,dai,busd}.csv  Coin Metrics community
   LEEYOUNGJIN-GIT/fred-macro-review data/macro/obs/*.csv KOSPI, STLFSI4, DEXKOUS, BAMLH0A0HYM2
+  FRED 정식 API(2026-10-28 추가)       NASDAQ100 -- 미러에 없다. 키가 필요하다(서버 .env)
 
 Output: <out>/panel_daily.parquet (calendar-daily index, raw levels, no forward fill)
         <out>/provenance.json
@@ -16,10 +17,13 @@ Output: <out>/panel_daily.parquet (calendar-daily index, raw levels, no forward 
 import argparse
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 FRED_SERIES = [
     # rates / policy
@@ -104,6 +108,11 @@ def main() -> None:
     cols["KOSPI"] = load_csv(leey / "KOSPI.csv", "date", "value", "KOSPI")
     cols["STLFSI4"] = load_csv(leey / "STLFSI4.csv", "date", "value", "STLFSI4")
     cols["DEXKOUS"] = load_csv(leey / "DEXKOUS.csv", "date", "value", "DEXKOUS")
+    # 2026-10-28 나스닥100(Macro Trend 카드 나스닥 줄): 미러에 없어 FRED 정식 API(서버 .env FRED_API_KEY). 지수 종가라 개정이 없다.
+    from dotenv import load_dotenv
+    from dashboard.macro_trend import fetch_fred
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+    cols["NASDAQ100"] = fetch_fred("NASDAQ100", None, timeout=60).rename("NASDAQ100")
     # HY OAS: FRED only exposes the last ~3y; merge both mirrors
     hy2 = load_csv(leey / "BAMLH0A0HYM2.csv", "date", "value", "BAMLH0A0HYM2")
     cols["BAMLH0A0HYM2"] = pd.concat([cols["BAMLH0A0HYM2"], hy2]).groupby(level=0).last()

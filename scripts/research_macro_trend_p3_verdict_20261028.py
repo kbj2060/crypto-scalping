@@ -40,6 +40,9 @@ SERIES = {
     "STLFSI": ("STLFSI4", "raw"), "순유동성": ("NETLIQ", "logpct"), "연준BS": ("WALCL", "logpct"), "지준": ("WRESBAL", "logpct"),
     "TGA": ("WTREGEN", "logpct"), "RRP": ("RRPONTSYD", "raw"), "스테이블코인": ("STABLE_SUPPLY", "logpct"),
 }
+# 2026-10-28 뒤에 더한 지표 -- 위 표의 순열 난수 순서를 바꾸지 않게 따로 돈다(넣으면 기존 줄의 perm_p 가 몬테카를로 잡음만큼
+#   움직여 경계 줄(p≈.04) 판정이 뒤집힐 수 있다). 패널 열은 research_macro_crypto_panel_20261027.py 가 만든다.
+EXTRA = {"나스닥": ("NASDAQ100", "logpct")}
 
 
 def load_sampler():
@@ -76,34 +79,39 @@ def main() -> None:
     w = load_sampler()(pd.read_parquet(a.panel), "W")
     rng = np.random.default_rng(11)
     rows = []
-    for asset in ("BTC", "ETH"):
+
+    def row(asset: str, kind: str, name: str, col: str, how: str) -> dict:
         c = 100 * np.log(w[asset])
-        for kind in ("동행13", "선행13"):
-            for name, (col, how) in SERIES.items():
-                x = level(w, col, how)
-                if kind == "동행13":
-                    d, gap = pd.concat([c.diff(13), x.diff(13)], axis=1), 13
-                else:
-                    d, gap = pd.concat([x.diff(13).shift(1), c.shift(-13) - c], axis=1), 26
-                r3, ra, rb, r2 = corr(d, *P3), corr(d, *P3A), corr(d, *P3B), corr(d, *P2)
-                dx = d.loc[P3[0]:P3[1]]
-                rx = float(dx.drop(dx.loc[EXCL[0]:EXCL[1]].index).dropna().corr().iloc[0, 1])
-                p = perm_p(d, gap, rng)
-                sg = np.sign(r3)
-                dd = d.loc[P3[0]:P3[1]].dropna()
-                rc = dd.iloc[:, 0].rolling(52).corr(dd.iloc[:, 1]).dropna()
-                roll = float((np.sign(rc) == sg).mean()) if len(rc) else float("nan")
-                halves = np.sign(ra) == sg and np.sign(rb) == sg
-                if abs(r3) >= 0.3 and p < 0.05 and halves and min(abs(ra), abs(rb)) >= 0.15 and np.sign(rx) == sg and roll >= 0.75:
-                    verdict = "사용 가능"
-                elif (p < 0.10 or abs(r3) >= 0.3) and halves and np.sign(rx) == sg:
-                    verdict = "관찰"
-                else:
-                    verdict = "불가"
-                rel = "비교 불가" if not np.isfinite(r2) else ("신규" if abs(r2) < 0.15 else ("유지" if np.sign(r2) == sg else "반전"))
-                rows.append(dict(asset=asset, kind=kind, indicator=name, series=col, transform=how, verdict=verdict, vs_2020_23=rel,
-                                 r_p3=r3, perm_p=p, r_first_half=ra, r_second_half=rb, r_excl_2024h2=rx, roll52_same_sign=roll,
-                                 r_2020_23=r2, n_weeks=int(len(dd))))
+        x = level(w, col, how)
+        if kind == "동행13":
+            d, gap = pd.concat([c.diff(13), x.diff(13)], axis=1), 13
+        else:
+            d, gap = pd.concat([x.diff(13).shift(1), c.shift(-13) - c], axis=1), 26
+        r3, ra, rb, r2 = corr(d, *P3), corr(d, *P3A), corr(d, *P3B), corr(d, *P2)
+        dx = d.loc[P3[0]:P3[1]]
+        rx = float(dx.drop(dx.loc[EXCL[0]:EXCL[1]].index).dropna().corr().iloc[0, 1])
+        p = perm_p(d, gap, rng)
+        sg = np.sign(r3)
+        dd = d.loc[P3[0]:P3[1]].dropna()
+        rc = dd.iloc[:, 0].rolling(52).corr(dd.iloc[:, 1]).dropna()
+        roll = float((np.sign(rc) == sg).mean()) if len(rc) else float("nan")
+        halves = np.sign(ra) == sg and np.sign(rb) == sg
+        if abs(r3) >= 0.3 and p < 0.05 and halves and min(abs(ra), abs(rb)) >= 0.15 and np.sign(rx) == sg and roll >= 0.75:
+            verdict = "사용 가능"
+        elif (p < 0.10 or abs(r3) >= 0.3) and halves and np.sign(rx) == sg:
+            verdict = "관찰"
+        else:
+            verdict = "불가"
+        rel = "비교 불가" if not np.isfinite(r2) else ("신규" if abs(r2) < 0.15 else ("유지" if np.sign(r2) == sg else "반전"))
+        return dict(asset=asset, kind=kind, indicator=name, series=col, transform=how, verdict=verdict, vs_2020_23=rel,
+                    r_p3=r3, perm_p=p, r_first_half=ra, r_second_half=rb, r_excl_2024h2=rx, roll52_same_sign=roll,
+                    r_2020_23=r2, n_weeks=int(len(dd)))
+
+    for table in (SERIES, EXTRA):
+        for asset in ("BTC", "ETH"):
+            for kind in ("동행13", "선행13"):
+                for name, (col, how) in table.items():
+                    rows.append(row(asset, kind, name, col, how))
     df = pd.DataFrame(rows)
     df.to_csv(a.out, index=False, float_format="%.4f")
     print(df[df.verdict != "불가"][["asset", "kind", "indicator", "verdict", "vs_2020_23", "r_p3", "perm_p"]].round(2).to_string(index=False))
