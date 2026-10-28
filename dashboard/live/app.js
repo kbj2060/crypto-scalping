@@ -2265,7 +2265,9 @@ function renderMacroTrend() {
     : `<span class="mt-g" role="img" aria-label="ETF 이후 분포에서 ${zv.toFixed(1)}σ"><i style="left:${(50 + Math.max(-3, Math.min(3, zv)) / 3 * 50).toFixed(1)}%"></i></span>`;
   const s = p.summary || {}, tot = ([k, a]) => { const x = s[a] || {}; return `<span class="mt-tot" title="${a} ${k === "co" ? "지금" : "13주 뒤"} 셈 칸의 ↑·↓ 개수 · ${a} 전체(지금+13주 뒤) 중립 ${x.neutral || 0} · 안 셈 ${x.excluded || 0}"><b class="opt-good">↑${x[k + "_up"] || 0}</b> <b class="opt-bad">↓${x[k + "_dn"] || 0}</b></span>`; };
   const q = (k, t) => `<button type="button" class="mt-q" ${helpAttrs(k)} title="${t} — 설명">${t}<span aria-hidden="true">?</span></button>`;
-  const mx = `<div class="mt-mx" aria-label="매크로 지표 × 코인">
+  // 격자 줄 = 머리 3 + 계열마다 [이름 줄 + 지표 줄들] -- 지표 줄만 1fr 라 한 화면 모드(카드 = 창 높이)에서 남는 높이를 나눠 갖는다
+  const rowsT = ["auto auto auto", ...fams.map(([, ns]) => `auto${" minmax(22px, 1fr)".repeat(ns.length)}`)].join(" ");
+  const mx = `<div class="mt-mx" style="grid-template-rows:${rowsT}" aria-label="매크로 지표 × 코인">
       <span class="mt-h l">지표</span><span class="mt-h r">13주 변화</span><span class="mt-h hx">위치(σ)</span>
       <span class="mt-h grp">${q("co", "지금 국면")}</span><span class="mt-h grp">${q("lead", "13주 뒤 편향")}</span><span class="mt-h r hx">수신</span>
       <span class="mt-h"></span><span class="mt-h"></span><span class="mt-h hx"></span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h hx"></span>

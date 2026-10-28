@@ -3222,6 +3222,16 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mt-ch figcaption .mt-v { margin-left: auto; font-size: 11px; color: var(--muted); }
 .mt-ov { display: block; width: 100%; height: 120px; margin-top: 6px; overflow: visible; }
 .mt-foot { margin: 14px 0 0; font-size: 11px; }
+/* 2026-10-28 한 화면 모드(사용자 «다른 카드들처럼 한 화면에 꽉 차게»): 카드 = 창 높이 · 표 지표 줄이 남는 높이를 나눠 갖는다(1fr, 최소 22px) ·
+   상세 칸은 넘치면 제 안에서만 스크롤. html.fit1 은 1700px 이상 가로 화면에서만 켜진다(app.js fitOn). */
+html.fit1 #mtCard { height: calc(100vh - 20px); display: flex; flex-direction: column; }
+html.fit1 #mtCard > .ops-health-head, html.fit1 #mtBody .mt-foot, html.fit1 #mtBody .mt-key { flex: none; }
+html.fit1 #mtBody { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+html.fit1 #mtBody .mt-wrap { flex: 1 1 0; min-height: 0; }
+html.fit1 #mtBody .mt-left { display: flex; flex-direction: column; min-height: 0; }
+html.fit1 #mtBody .mt-mx { flex: 1 1 0; min-height: 0; }
+html.fit1 #mtBody .mt-r > * { height: auto; align-self: stretch; }
+html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 @media (max-width: 1200px) {   /* 표 최소 폭 ≈596px -- 이보다 좁은 두 단은 표가 상세 칸을 덮는다 */
   .mt-wrap { grid-template-columns: 1fr; gap: 16px; }
   .mt-det { border-left: 0; padding-left: 0; border-top: 1px solid var(--soft-line); padding-top: 14px; }
