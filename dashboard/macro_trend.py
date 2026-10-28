@@ -44,11 +44,11 @@ Z_NEUTRAL, WATCH_MIN, STALE_RATIO, OLD_DAYS = 0.5, 0.15, 0.25, 21
 # KOSPI 는 FRED 에 없어(연구는 미러) 카드에서 뺀다.
 SOURCES = {
     "나스닥": ("fred:NASDAQ100", "%", "free", "XYZ100(나스닥100 무기한) 무료 실시간 · NQ 선물과 5분 상관 .98 -- 카드 «오늘» 칸"),
-    "S&P500": ("fred:SP500", "%", "free", "xyz:SP500(S&P500 무기한) 무료 실시간 · ES 선물은 유료"),
+    "S&P500": ("fred:SP500", "%", "free", "xyz:SP500(S&P500 무기한) 무료 실시간 -- 카드 «오늘» 칸 · ES 선물은 무료 시세 약 10분 지연"),
     "10Y금리": ("fred:DGS10", "bp", "paid", "ZN 선물 유료 실시간 · 무료 시세는 약 10분 지연"),
     "기대인플레": ("fred:T10YIE", "bp", "none", "하루 1회(다음 영업일) · 장중은 TIP/IEF 비율로 근사"),
     "기간프리미엄": ("fred:THREEFYTP10", "bp", "none", "하루 1회 모형 추정치(Kim-Wright)"),
-    "VIX": ("fred:VIXCLS", "%", "paid", "CBOE 유료 실시간 · 무료 시세는 약 15분 지연"),
+    "VIX": ("fred:VIXCLS", "%", "paid", "^VIX 5분봉(무료 시세 약 15분 지연) -- 카드 «오늘» 칸 · 실시간은 CBOE 유료 · VIX 선물은 무료 시세 없음"),
     "Baa스프레드": ("fred:BAA10Y", "bp", "none", "하루 1회 · 장중은 LQD/HYG 로 근사"),
     "HY스프레드": ("fred:BAMLH0A0HYM2", "bp", "none", "하루 1회(다음 영업일) · 장중은 HYG ETF 로 근사"),
     "STLFSI": ("fred:STLFSI4", "", "none", "주 1회 공표(주간 평균으로 만든 지수라 반응이 늦다)"),

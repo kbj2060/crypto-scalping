@@ -603,6 +603,38 @@ def xyz100_payload(since: int = 0, db: Path = XYZ_DB, hours: float = 24.0) -> di
             "now_sec": int(time.time())}   # 화면이 «끊김»·1시간 창을 서버 시계로 잰다(브라우저 시계가 틀려도, 10-14 검토)
 
 
+MACRO_5M_DB = REPO_ROOT / "data" / "hot" / "macro_5m.sqlite"   # 2026-10-28 매크로 5분봉 수집기(live_macro_5m_collector_20261028, Yahoo · cron 5분)
+
+
+def macro_today_payload(xyz_db: Path = XYZ_DB, m5_db: Path = MACRO_5M_DB, hours: float = 24.0) -> dict:
+    """Macro Trend 카드 «오늘» 칸 -- S&P500 줄 = HL xyz:SP500(무기한, 지연 없음) 1분봉 + 마지막 초 가격 · VIX 줄 = Yahoo ^VIX 5분봉
+    (CBOE 무료 시세 약 15분 지연 + 수집기가 진행 봉을 버려 마지막 봉이 20~30분 전). 2026-10-28 사용자 «S&P 는 xyz:SP500 실시간 · VIX 는
+    ^VIX 5분봉». bars = [[봉 **끝** 초, 종가]] -- 그 값을 알 수 있는 가장 이른 시각(지연은 더 붙는다). 마지막 저장 봉 기준 hours 시간
+    (휴장·주말에 비지 않게). 원천 하나가 없거나 실패하면 그 종목만 빠진다."""
+    out: dict[str, dict] = {}
+    now = int(time.time())
+    try:   # 🔴진행 중인 1분봉(끝이 아직 미래)은 뺀다 -- 끝에 붙는 «지금 가격» 점보다 뒤에 찍혀 선이 되돌아간다(10-28 실측)
+        b = _read_only_rows(xyz_db, """SELECT ts_sec + 60, close FROM hl_xyz_1m WHERE coin = 'xyz:SP500' AND close IS NOT NULL AND ts_sec + 60 <= ?
+                                       AND ts_sec >= (SELECT max(ts_sec) FROM hl_xyz_1m WHERE coin = 'xyz:SP500') - ? ORDER BY ts_sec""",
+                            [now, int(hours * 3600)])
+        lv = _read_only_rows(xyz_db, "SELECT recv_sec, coalesce(mid, mark) FROM hl_xyz_ctx_1s WHERE coin = 'xyz:SP500' "
+                                     "ORDER BY recv_sec DESC LIMIT 1", [])
+        if b or lv:
+            out["SP"] = {"bars": [[int(t), float(c)] for t, c in b],
+                         "live": {"recv_sec": int(lv[0][0]), "px": float(lv[0][1])} if lv and lv[0][1] is not None else None}
+    except (duckdb.Error, sqlite3.Error, OSError):
+        pass
+    try:
+        b = _read_only_rows(m5_db, """SELECT ts_sec + 300, close FROM yahoo_5m WHERE symbol = 'VIX' AND close IS NOT NULL
+                                      AND ts_sec >= (SELECT max(ts_sec) FROM yahoo_5m WHERE symbol = 'VIX') - ? ORDER BY ts_sec""",
+                           [int(hours * 3600)])
+        if b:
+            out["VIX"] = {"bars": [[int(t), float(c)] for t, c in b], "live": None}
+    except (duckdb.Error, sqlite3.Error, OSError):
+        pass
+    return {"ok": bool(out), "symbols": out, "now_sec": now}
+
+
 SPIKE_Z, SPIKE_BASE, SPIKE_MIN = 4.0, 5400, 288   # 10-13 연구 «금리 발작» 정의: 5분 수익이 직전 활동 봉(최대 5,400개) 표준편차의 4배
 
 
@@ -1954,6 +1986,10 @@ def make_app() -> web.Application:
             payload = await swr_cached("treasury24", 300.0, lambda: asyncio.to_thread(treasury_payload, TREASURY_DB, 24.0, 24.0), max_stale=1800.0)
         else:
             payload = await swr_cached("treasury", 60.0, lambda: asyncio.to_thread(treasury_payload), max_stale=600.0)
+        return web.json_response(payload, headers=NOCACHE)
+
+    async def api_macro_today(request: web.Request) -> web.Response:   # 2026-10-28 Macro Trend «오늘» 칸 S&P(xyz:SP500)·VIX(^VIX 5분) -- 화면이 1분마다
+        payload = await swr_cached("macro_today", 30.0, lambda: asyncio.to_thread(macro_today_payload), max_stale=600.0)
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_xyz100(request: web.Request) -> web.Response:   # 2026-10-14 나스닥100 실시간(Hyperliquid xyz:XYZ100) -- 화면이 1초마다 꼬리(since)만 묻는다
@@ -4531,6 +4567,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/treasury-futures", api_treasury_futures)
     app.router.add_get("/api/macro-trend", api_macro_trend)
     app.router.add_get("/api/xyz100", api_xyz100)
+    app.router.add_get("/api/macro-today", api_macro_today)
     app.router.add_get("/api/macro-spikes", api_macro_spikes)
     app.router.add_get("/api/paper-arms", api_paper_arms)
     app.router.add_get("/api/session-alerts", api_session_alerts)

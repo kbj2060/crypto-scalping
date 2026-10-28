@@ -2223,8 +2223,12 @@ let mtSel = null;
 // 2026-10-28 «오늘» 칸(사용자 «나스닥 줄 + 오늘 칸»): 장중 시세가 있는 줄만 -- 나스닥 ← XYZ100 실시간 · 10Y금리 ← 10년 국채선물(ZN) 가격(CME 약 10분 지연).
 //   13주 판정(FRED 금요일 주간값)과 원천·시점이 달라 «오늘 맥락»만. 색 = 가격 방향(국채 가격↓ = 금리↑) -- 풋프린트 머리에 있던 그래프와 같은 규칙.
 //   장중은 코인과 «같은 시간에 같이» 움직일 뿐 먼저 움직이지 않는다(10-13 5분봉: 같은 봉 상관 .4 · 앞뒤 1~3봉 ≈0).
-const MT_TODAY = { "나스닥": "NQ", "10Y금리": "ZN" };
-let mtTreas = null, mtTodayAt = 0;
+// 2026-10-28 S&P500 ← HL xyz:SP500 실시간 · VIX ← ^VIX 5분봉(CBOE 무료 시세 약 15분 지연 + 진행 봉 버림 → 마지막 봉 20~30분 전) -- /api/macro-today.
+//   색은 «코인에 우호적인 쪽 = 초록»: 나스닥·S&P·국채 가격은 오르면 초록, VIX 는 내리면 초록(ETF 이후 ETH 동행 r −.57).
+const MT_TODAY = { "나스닥": "NQ", "S&P500": "SP", "VIX": "VIX", "10Y금리": "ZN" };
+const MT_LIVE = new Set(["NQ", "SP"]);   // 지연 없는 원천(상세 차트에 «지연 구간» 회색 띠를 안 그린다)
+const MT_TNAME = { NQ: "나스닥100(XYZ100)", SP: "S&P500 무기한(xyz:SP500)", VIX: "VIX 지수(^VIX)", ZN: "10년 국채선물(ZN) 가격" };
+let mtTreas = null, mtIntra = null, mtTodayAt = 0;
 async function refreshMtToday() {   // 1분마다 «오늘» 칸을 다시 그린다 · 국채 24시간은 5분마다 받는다(서버 swr 5분)
   const now = Date.now();
   if (now - mtTodayAt < 60000) return;
@@ -2233,6 +2237,8 @@ async function refreshMtToday() {   // 1분마다 «오늘» 칸을 다시 그�
     try { const res = await fetch("/api/treasury-futures?h=24", { cache: "no-cache" }); if (res.ok) mtTreas = { at: now, p: await res.json() }; }
     catch (error) { console.error("Treasury 24h fetch error:", error); }
   }
+  try { const res = await fetch("/api/macro-today", { cache: "no-cache" }); if (res.ok) mtIntra = { at: Date.now() / 1000, p: await res.json() }; }   // S&P 실시간이라 1분마다(서버 swr 30초)
+  catch (error) { console.error("Macro today fetch error:", error); }
   if (latestMacroTrend) renderMacroTrend();
 }
 function mtDay(k) {   // 최근 24시간 [[초, 가격], …] -- 나스닥은 끝에 지금 가격, 국채는 마지막 봉까지(약 10분 지연)
@@ -2240,18 +2246,36 @@ function mtDay(k) {   // 최근 24시간 [[초, 가격], …] -- 나스닥은 �
     const t = xyzClock(), live = xyzNow();
     return xyzBars.filter((b) => b[0] + 60 >= t - 86400 && b[0] + 60 <= t).map((b) => [b[0] + 60, b[1]]).concat(live ? [[t, live]] : []);
   }
+  if (k === "SP" || k === "VIX") {   // 봉 끝 시각 · S&P 는 끝에 마지막 초 가격(90초 안이면)
+    const v = mtIntra && mtIntra.p && mtIntra.p.ok ? (mtIntra.p.symbols || {})[k] : null, t = Date.now() / 1000;
+    if (!v) return [];
+    const lv = v.live, age = mtIntraAge(k);
+    return v.bars.filter((b) => b[0] >= t - 86400).concat(lv && age != null && age < 90 ? [[t, lv.px]] : []);
+  }
   const v = mtTreas && mtTreas.p && mtTreas.p.ok ? (mtTreas.p.symbols || {})[k] : null;
   return v && v.bars ? v.bars.filter((b) => b[0] >= Date.now() / 1000 - 86400) : [];
 }
+function mtIntraAge(k) {   // 초 -- S&P = 마지막 초 가격 나이 · VIX = 마지막 봉 끝 나이. 서버 시계 기준(브라우저 시계가 틀려도) + 받은 뒤 지난 시간
+  const v = mtIntra && mtIntra.p && mtIntra.p.ok ? (mtIntra.p.symbols || {})[k] : null;
+  if (!v) return null;
+  const t = k === "SP" ? v.live && v.live.recv_sec : v.bars.length && v.bars[v.bars.length - 1][0];
+  return t ? mtIntra.p.now_sec - t + (Date.now() / 1000 - mtIntra.at) : null;
+}
+function vixOpen(d) {   // ^VIX 산출 시간: 미 동부 평일 03:15~16:15(09:25~09:30 쉼은 무시). ponytail: 미국 공휴일은 모른다 -- 공휴일엔 빨간불일 수 있다
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "numeric", hourCycle: "h23" }).formatToParts(d).map((x) => [x.type, x.value]));
+  const m = Number(p.hour) * 60 + Number(p.minute);
+  return p.weekday !== "Sat" && p.weekday !== "Sun" && m >= 195 && m < 975;
+}
 const mtDayChg = (b) => (b.length > 1 ? (b[b.length - 1][1] / b[0][1] - 1) * 100 : null);
 const mtDayCol = (v) => (v == null || Math.abs(v) < 0.02 ? "var(--muted)" : v > 0 ? "var(--good)" : "var(--bad)");
+const mtDayColK = (k, v) => mtDayCol(k === "VIX" && v != null ? -v : v);   // VIX 는 내리는 쪽이 초록(위 MT_LIVE 주석)
 function mtDayChart(k, W, H, fut) {   // 24시간 선 · fut 시간 > 0 이면 앞으로의 주요 발표(점선 + 이름표, 2시간 안에 몰리면 하나로). 글자는 HTML -- svg 늘이기가 글자를 찌그러뜨린다
   const b = mtDay(k);
   if (b.length < 2) return "";
   const now = k === "NQ" ? xyzClock() : Date.now() / 1000, t0 = now - 86400, t1 = now + fut * 3600;
   const lo = Math.min(...b.map((x) => x[1])), hi = Math.max(...b.map((x) => x[1])), rg = hi - lo || 1e-9;
   const X = (t) => ((t - t0) / (t1 - t0)) * W, Y = (v) => 3 + (hi - v) / rg * (H - 6), P = (t) => `${(((t - t0) / (t1 - t0)) * 100).toFixed(2)}%`;
-  const col = mtDayCol(mtDayChg(b)), sw = `vector-effect="non-scaling-stroke"`, nowX = X(now).toFixed(1), last = b[b.length - 1];
+  const col = mtDayColK(k, mtDayChg(b)), sw = `vector-effect="non-scaling-stroke"`, nowX = X(now).toFixed(1), last = b[b.length - 1];
   const ev = fut ? (latestMacroEvents || []).filter((e) => e.importance === "high" || e.category === "fomc").map((e) => ({ t: Date.parse(e.time_utc) / 1000, nm: e.title_ko || e.title || "지표" }))
     .filter((e) => e.t > now && e.t <= t1).sort((p, q) => p.t - q.t) : [];
   const labs = [];
@@ -2261,7 +2285,7 @@ function mtDayChart(k, W, H, fut) {   // 24시간 선 · fut 시간 > 0 이면 �
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${fut ? `<rect x="${nowX}" y="0" width="${(W - nowX).toFixed(1)}" height="${H}" fill="rgb(var(--lift) / .04)"/>` : ""}
     <line x1="0" x2="${fut ? nowX : W}" y1="${Y(b[0][1]).toFixed(1)}" y2="${Y(b[0][1]).toFixed(1)}" stroke="var(--line)" stroke-dasharray="2 3" ${sw}/>
     ${ev.map(({ t }) => `<line x1="${X(t).toFixed(1)}" x2="${X(t).toFixed(1)}" y1="0" y2="${H}" stroke="var(--warn)" stroke-opacity=".75" stroke-dasharray="2 3" ${sw}/>`).join("")}
-    ${fut && k !== "NQ" ? `<rect x="${X(last[0]).toFixed(1)}" y="0" width="${Math.max(0, X(now) - X(last[0])).toFixed(1)}" height="${H}" fill="rgb(var(--lift) / .08)"/>` : ""}
+    ${fut && !MT_LIVE.has(k) ? `<rect x="${X(last[0]).toFixed(1)}" y="0" width="${Math.max(0, X(now) - X(last[0])).toFixed(1)}" height="${H}" fill="rgb(var(--lift) / .08)"/>` : ""}
     <path d="${b.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)},${Y(x[1]).toFixed(1)}`).join("")}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round" ${sw}/></svg>
     ${fut ? `<div class="mt-dt"><span style="left:0">${hm(t0)}</span><span style="right:${(100 - parseFloat(P(now))).toFixed(2)}%">지금 ${hm(now)}</span><span style="right:0">+${fut}시간</span></div>` : ""}</div>`;
 }
@@ -2288,6 +2312,16 @@ function mtFeed(r, n) {   // → [불 ok|bad|wait, 글, 툴팁]
     else if (age == null) { lab = "받는 중"; if (st === "ok") st = "wait"; }
     else { lab = age < 1800 ? `${Math.max(1, Math.round(age / 60))}분 지연` : "늦음"; if (age >= 1800) st = "bad"; }
     tips.push(`장중: 10년 국채선물(ZN) CME 무료 시세 -- ${open ? (age == null ? "받는 중" : `마지막 봉 ${Math.round(age / 60)}분 전(30분 넘으면 빨간불)`) : "CME 휴장(평일 16~17시 CT 정비 · 주말)"}`);
+  } else if (k === "SP") {
+    const age = mtIntraAge("SP"), fresh = age != null && age < 90;
+    if (age == null) { lab = "받는 중"; if (st === "ok") st = "wait"; } else { lab = fresh ? "실시간" : "끊김"; if (!fresh) st = "bad"; }
+    tips.push(`장중: S&P500 무기한 실시간(xyz:SP500)${age != null && !fresh ? " -- 90초 넘게 새 값 없음" : ""} · 주말·미국 휴장 중 값은 코인 쪽 투기`);
+  } else if (k === "VIX") {
+    const age = mtIntraAge("VIX"), open = vixOpen(new Date());
+    if (!open) lab = "휴장";
+    else if (age == null) { lab = "받는 중"; if (st === "ok") st = "wait"; }
+    else { lab = age < 3600 ? `${Math.max(1, Math.round(age / 60))}분 지연` : "늦음"; if (age >= 3600) st = "bad"; }
+    tips.push(`장중: VIX 지수(^VIX) 무료 시세 5분봉 -- ${open ? (age == null ? "받는 중" : `마지막 봉 ${Math.round(age / 60)}분 전(원천 약 15분 지연 + 5분 수집 · 60분 넘으면 빨간불)`) : "산출 안 하는 시간(미 동부 평일 03:15~16:15 · 주말)"}`);
   }
   return [st, lab, `${tips.join("\n")}\n${r.realtime_note || ""}`];
 }
@@ -2296,9 +2330,12 @@ function mtTodayCell(n) {   // 표 «오늘» 칸
   if (!k) return `<span class="mt-td na" title="장중 시세 없음 -- 하루·주 단위 공표">—</span>`;
   const b = mtDay(k), v = mtDayChg(b);
   if (v == null) return `<span class="mt-td na" title="받는 중">…</span>`;
-  const tip = k === "NQ" ? `나스닥100 실시간(XYZ100) 24시간 ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}% · 주말엔 거의 안 움직인다`
-    : `10년 국채선물(ZN) 가격 24시간 ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}% → 금리${v < 0 ? "↑" : "↓"} · CME 약 10분 지연`;
-  return `<span class="mt-td" title="${tip} · 13주 판정과 원천·시점이 달라 오늘 맥락만">${mtDayChart(k, 64, 20, 0)}<b style="color:${mtDayCol(v)}">${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%</b></span>`;
+  const pc = `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%`;
+  const tip = k === "NQ" ? `나스닥100 실시간(XYZ100) 24시간 ${pc} · 주말엔 거의 안 움직인다`
+    : k === "SP" ? `S&P500 무기한 실시간(xyz:SP500) 24시간 ${pc} · 주말엔 거의 안 움직인다`
+    : k === "VIX" ? `VIX 지수(^VIX) 24시간 ${pc} · 오르면 위험 회피(빨강) · 약 15분 지연`
+    : `10년 국채선물(ZN) 가격 24시간 ${pc} → 금리${v < 0 ? "↑" : "↓"} · CME 약 10분 지연`;
+  return `<span class="mt-td" title="${tip} · 13주 판정과 원천·시점이 달라 오늘 맥락만">${mtDayChart(k, 64, 20, 0)}<b style="color:${mtDayColK(k, v)}">${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%</b></span>`;
 }
 // 2026-10-28 사용자 «풋프린트 상단 나스닥·2년물·10년물 차트 자리에 Macro Trend 요약»(시안 H1) -- renderMarketCtx 가 #fpRates 에 넣는다.
 //   개수 = /api/macro-trend summary 그대로(카드 머리 합계와 같다) · 감시 이탈 · 다음 주요 발표 · 누르면 2번째 카드(Macro Trend)로.
@@ -2384,8 +2421,9 @@ function renderMacroTrend() {
   const det = `<h4>${escapeHtml(mtSel)}<span class="mt-v">${mtFmt(L0.chg13, r0.unit)} · ${L0.z == null ? "–" : `${L0.z >= 0 ? "+" : "−"}${Math.abs(L0.z).toFixed(1)}σ`}</span></h4>
     <p class="mt-meta">${L0.week || "–"} 주까지 13주 변화 · 수신 ${escapeHtml(mtFeed(r0, mtSel)[2]).replace(/\n/g, " · ")}${r0.note ? `<br><b class="mt-warn">주의</b> ${escapeHtml(r0.note)}` : ""}</p>
     <ul class="mt-why">${cells.map(([x, a, , c]) => `<li><span class="mt-why-k">${a} ${x.kind === "co" ? "지금" : "13주 뒤"}</span>${tile(x, a)}<span>${escapeHtml(c.why || (x.live ? "표본 부족(ETF 이후 13주 변화 30주 미만)" : "지금 값 없음(원천 실패)"))}</span></li>`).join("")}</ul>
-    ${MT_TODAY[mtSel] ? (() => { const b = mtDay(MT_TODAY[mtSel]), v = mtDayChg(b), zn = MT_TODAY[mtSel] === "ZN";
-      return v == null ? "" : `<figure class="mt-ch"><figcaption><span>${zn ? "10년 국채선물(ZN) 가격" : "나스닥100(XYZ100)"} 24시간 · 앞 12시간 주요 발표</span><span class="mt-v">오늘 ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%${zn ? ` · 금리${v < 0 ? "↑" : "↓"} · 약 10분 지연` : ""}</span></figcaption>${mtDayChart(MT_TODAY[mtSel], 520, 110, 12)}</figure>`; })() : ""}
+    ${MT_TODAY[mtSel] ? (() => { const tk = MT_TODAY[mtSel], b = mtDay(tk), v = mtDayChg(b);
+      const sub = tk === "ZN" ? ` · 금리${v < 0 ? "↑" : "↓"} · 약 10분 지연` : tk === "VIX" ? ` · ${v > 0 ? "위험 회피↑" : "위험 선호↑"} · 약 15분 지연` : "";
+      return v == null ? "" : `<figure class="mt-ch"><figcaption><span>${MT_TNAME[tk]} 24시간 · 앞 12시간 주요 발표</span><span class="mt-v">오늘 ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%${sub}</span></figcaption>${mtDayChart(MT_TODAY[mtSel], 520, 110, 12)}</figure>`; })() : ""}
     <div class="mt-tw"><table class="mt-rtab"><thead><tr><th>관계</th><th>판정</th><th>ETF 이후 r</th><th>순열 p</th><th>전반 / 후반</th><th>2020–23</th><th>최근 52주</th></tr></thead>
       <tbody>${cells.map(([x, a, v, c]) => `<tr><td>${a} ${x.kind === "co" ? "지금" : "13주 뒤"}</td><td>${v.verdict}</td><td>${mtR(v.r_p3)}</td><td>${v.perm_p == null ? "–" : v.perm_p.toFixed(3)}</td><td>${mtR(v.r_first_half)} / ${mtR(v.r_second_half)}</td><td>${mtR(v.r_2020_23)}</td><td>${mtR(c.roll52)}</td></tr>`).join("")}</tbody></table></div>
     ${rs.map((x) => { const a = a0(x), svg = mtOverlay(x, a); return svg ? `<figure class="mt-ch"><figcaption><span>${a} · ${x.kind === "lead" ? "13주 뒤 — 지표를 14주 앞으로" : "지금 — 같은 13주"}</span><span class="mt-v">최근 52주 r ${mtR(((live(x).assets || {})[a] || {}).roll52)}</span></figcaption>${svg}</figure>` : ""; }).join("")}
