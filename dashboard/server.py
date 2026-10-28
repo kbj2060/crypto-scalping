@@ -142,6 +142,8 @@ from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알�
 from scripts.ops_watchdog import send_telegram  # noqa: E402 -- 지지·저항 뚫림 알림(2026-10-25)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
 from dashboard import market_ctx as mctx  # noqa: E402
+# 2026-10-28 «Macro Trend» 카드(사용자 «위 지표들을 대시보드 카드 하나로») -- ETF 이후 기준 13주 매크로 추세 · 표본내 연구, 신호 아님.
+from dashboard import macro_trend  # noqa: E402
 # 2026-10-08 일봉 풋프린트(사용자 «최대치 · 확대/축소 · 델타·거래대금·OI·청산») -- aggTrades 소급본 + lake/hot 테이프.
 from dashboard import footprint_daily as fpd  # noqa: E402
 from scripts import data_store  # noqa: E402
@@ -1935,6 +1937,16 @@ def make_app() -> web.Application:
 
     async def api_news(request: web.Request) -> web.Response:   # 2026-10-05 Option 카드 «뉴스» 줄(jevk5:4b 판정 · 신호 아님)
         payload = await swr_cached("news", 15.0, lambda: asyncio.to_thread(news_payload, time.time()), max_stale=300.0)
+        return web.json_response(payload, headers=NOCACHE)
+
+    def macro_trend_payload() -> dict:
+        try:
+            return macro_trend.payload()
+        except Exception as e:   # 판정표 없음·전 원천 실패 -- 카드는 «불러오지 못함»을 보이고 서버는 계속 돈다
+            return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}", "rows": [], "summary": {}, "errors": {}}
+
+    async def api_macro_trend(request: web.Request) -> web.Response:   # 2026-10-28 «Macro Trend» 카드 -- 원천이 일·주 단위라 1시간 캐시
+        payload = await swr_cached("macro_trend", 3600.0, lambda: asyncio.to_thread(macro_trend_payload), max_stale=6 * 3600.0)
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_treasury_futures(request: web.Request) -> web.Response:   # 2026-10-06 풋프린트 카드 머리 띠(국채선물 4종)
@@ -4514,6 +4526,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/notify-center", api_notify_center)
     app.router.add_get("/api/news", api_news)
     app.router.add_get("/api/treasury-futures", api_treasury_futures)
+    app.router.add_get("/api/macro-trend", api_macro_trend)
     app.router.add_get("/api/xyz100", api_xyz100)
     app.router.add_get("/api/macro-spikes", api_macro_spikes)
     app.router.add_get("/api/paper-arms", api_paper_arms)

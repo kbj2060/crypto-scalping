@@ -28,7 +28,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
-  <link rel="stylesheet" href="styles.css?v=20261016-iceA">
+  <link rel="stylesheet" href="styles.css?v=20261028-mt">
   <script>
     /* 첫 페인트 «전에» 테마를 입힌다. app.js 는 문서 끝에서 로드되므로 거기서 하면
        다크 사용자에게 흰 화면이 한 프레임 번쩍인다. 저장값이 없으면 현행(다크)이다. */
@@ -340,6 +340,12 @@
         <!-- 2026-09-30 옵션 카드를 이 카드 오른쪽 칸으로 흡수(사용자 «하나의 카드가 되게», 시안 승인) -- 넓은 화면은 오른쪽 380px 칸,
              좁으면 맨 아래. 칸 = 커버 경고 · 예상 폭 · 딜러 감마 · 행사가 사다리 · 감마 곡선 · 심리(참고 · 신호 아님). app.js renderOptions. -->
               </section>
+      <!-- 2026-10-28 Macro Trend 카드(사용자 «위 지표들을 대시보드 카드 하나 만들어서 모두 추가») -- ETF 이후 기준 13주 매크로 추세.
+           판정 = docs/experiments/macro_crypto_correlation_20261027/L_p3_trend_verdict.csv(표본내 연구 · 검증 전 · 신호 아님). app.js renderMacroTrend · /api/macro-trend -->
+      <section id="mtCard" class="panel ops-health-panel mt-card">
+        <div class="ops-health-head"><div class="opt-card-head"><h3 class="card-title">Macro Trend</h3><span class="muted">ETF 이후 기준 · 13주 · 표본내 연구, 신호 아님</span></div></div>
+        <div id="mtBody" class="mt-body"><p class="mt-empty muted">불러오는 중…</p></div>
+      </section>
       <!-- 2026-09-11 청산 위험 패널 제거 -- 같은 숫자가 지표 행의 「청산 위험」 칩에도
            있어 중복이었다(사용자 지시). 칩이 등급·게이지·툴팁을 모두 담는다. -->
 
@@ -569,6 +575,7 @@
     <button type="button" data-go="fpCard" aria-label="Footprint 카드로" title="Footprint"></button>
     <button type="button" data-go="newsCard" aria-label="뉴스 카드로" title="뉴스"></button>
     <button type="button" data-go="optCard" aria-label="Option 카드로" title="Option"></button>
+    <button type="button" data-go="mtCard" aria-label="Macro Trend 카드로" title="Macro Trend"></button>
     <button type="button" data-go="acctCard" aria-label="계좌 카드로" title="계좌"></button>
   </nav>
   <!-- 2026-09-25 떠다니는 주문 버튼(사용자 지시). 손잡이(⠿)로만 끈다 -- 주문 버튼이 «길게 누르기»라
@@ -605,7 +612,7 @@
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden><div id="ofabSlPanel" class="ofab-slp" hidden></div></div>
   </div>
-  <script src="./app.js?v=20261016-iceA"></script>
+  <script src="./app.js?v=20261028-mt"></script>
   <script src="./fp_daily.js?v=20261010-fpc"></script>
   <script src="./liq_profile.js?v=20261015-align"></script>
   <script src="./bubble_map.js?v=20261016-minitop"></script>

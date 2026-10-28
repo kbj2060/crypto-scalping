@@ -2144,6 +2144,96 @@ function newsAssetCounts(p, a) {   // 12시간 창(서버 NEWS_WINDOW_H) 안 그
            n: xs.length, mx: Math.max(0, ...xs.map((it) => Number(it.impact) || 0)) };
 }
 
+// ── Macro Trend 카드 (2026-10-28 사용자 «위 지표들을 대시보드 카드 하나 만들어서 모두 추가») ──────────────────────────────
+//   /api/macro-trend = dashboard/macro_trend.py. ETF 이후(2024-01-12~) 기준 연구 판정표(L_p3_trend_verdict.csv)의 «사용 가능»·«관찰» 지표를
+//   지금 데이터(FRED·DefiLlama·바이낸스, 일·주 단위)로 다시 계산한다. 🔴표본내 연구 · 표본외 검증 전 → 머리에 «신호 아님» 고정, 방향색은 값에만.
+//   동행 = «지금 큰 흐름이 코인 강세 쪽인가 약세 쪽인가» · 선행 = «다음 13주 편향». 감시 = 최근 52주 상관이 연구 부호와 같은가(뒤집히면 주황 «이탈»).
+const MT_POLL_MS = 10 * 60 * 1000;
+const MT_RT = { free: ["실시간", "무료 실시간 경로가 있다"], paid: ["유료 실시간", "실시간은 유료(무료는 지연)"], none: ["공표형", "하루·주 단위 공표 -- 장중엔 대체물"] };
+let latestMacroTrend = null, mtLastFetchAt = 0;
+const MT_TIPS = {
+  co: "지금 국면 · 동행 13주: 코인과 같은 13주 동안 같이 움직인 지표다(ETF 이후 2024-01~2026-10 연구). 화살표 = 지난 완결 주의 13주 변화가 «코인 강세 쪽(↑)»인지 «약세 쪽(↓)»인지(변화 부호 × 연구 상관 부호). 13주 변화가 ETF 이후 분포 평균에서 0.5σ 안이면 중립(–).\n앞으로를 말하지 않는다 -- 같은 기간에 같이 간다는 뜻이라 «지금 흐름 확인»용이다. 13주 뒤 수익과의 상관은 유의하지 않았다.",
+  lead: "다음 13주 편향 · 선행: 지표의 직전 13주 변화(공표 1주 시차)와 코인의 다음 13주 수익 사이 상관(ETF 이후 연구). 화살표 = 그 상관 부호대로 읽은 다음 13주 편향.\n🔴표본내 상관이다(ETF 이후 ≈2.8년 · 13주 단위 독립 관측 ≈11 · 큰 엔고 충격 2번). 확장 윈도 표본외 검증 전이고, 달러 13주 → 4주 표본외 R² 는 2024–26 에 −1.2% 였다. 크기·진입이 아니라 방향 편향 배경으로만.",
+  sum: "요약: 판정 «사용 가능» 이고 감시 «유효»이며 변동이 살아 있고 데이터가 21일 안인 줄만 센다(나머지는 «제외»). 동행 ↑·↓ = 지금 국면, 선행 ↑·↓ = 다음 13주 편향. 개수 비교일 뿐 가중합이 아니다.",
+  watch: "감시: 최근 52주 상관이 연구 부호와 같고 |r|≥0.15 면 «유효», 같지만 약하면 «약화», 반대 부호로 |r|≥0.15 면 «이탈»(주황). 선행은 미래 13주가 필요해 13주 전에 끝나는 52주 창이다. 사용자 결정(2026-10-28): 2020–23 대비 뒤집히거나 새로 생긴 관계도 ETF 이후 꾸준하면 쓴다 -- 대신 다시 뒤집히는지 이 칸으로 지켜본다.",
+};
+async function refreshMacroTrend(force) {
+  const now = Date.now();
+  if (!force && now - mtLastFetchAt < MT_POLL_MS) return;
+  mtLastFetchAt = now;
+  try {
+    const res = await fetch("/api/macro-trend", { cache: "no-cache" });
+    if (!res.ok) throw new Error(`macro-trend ${res.status}`);
+    latestMacroTrend = await res.json();
+    renderMacroTrend();
+  } catch (error) {
+    console.error("Macro trend fetch error:", error);
+    mtLastFetchAt = now - MT_POLL_MS + 60 * 1000;   // 실패하면 10분 말고 1분 뒤 다시
+  }
+}
+const mtFmt = (v, unit) => {
+  if (v == null || !Number.isFinite(v)) return "–";
+  const d = unit === "bp" ? 0 : unit === "$bn" ? (Math.abs(v) < 10 ? 1 : 0) : (unit === "%" ? 1 : 2), sign = v > 0 ? "+" : v < 0 ? "−" : "";
+  return `${sign}${Math.abs(v).toFixed(d)}${unit === "$bn" ? "bn" : unit}`;
+};
+const mtR = (v) => (v == null || !Number.isFinite(v) ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)}`);
+function mtTip(r) {   // 줄 이름 «?» 팝업 -- 연구 숫자 · 지금 계산 · 실시간 경로
+  const L = r.live || {}, kind = r.kind === "co" ? "동행 13주(같은 기간)" : "선행 13주(직전 13주 변화 → 다음 13주 수익)";
+  const res = Object.entries(r.assets).map(([a, v]) => {
+    const lv = (L.assets || {})[a] || {};
+    return `${a} · 판정 ${v.verdict} · 2020–23 대비 ${v.vs_2020_23}\n  ETF 이후 상관 ${mtR(v.r_p3)} (순열 p ${v.perm_p == null ? "–" : v.perm_p.toFixed(2)}) · 전반 ${mtR(v.r_first_half)} / 후반 ${mtR(v.r_second_half)} · 2024-06~11 제외 ${mtR(v.r_excl_2024h2)} · 2020–23 ${mtR(v.r_2020_23)}\n  최근 52주 상관 ${mtR(lv.roll52)} → 감시 ${lv.watch || "–"}`;
+  }).join("\n");
+  const now = L.chg13 == null ? "지금 값 없음(원천 실패)" : `지금: ${L.week} 주까지 13주 변화 ${mtFmt(L.chg13, r.unit)} · ETF 이후 분포에서 ${L.z == null ? "–" : (L.z >= 0 ? "+" : "−") + Math.abs(L.z).toFixed(1)}σ${L.stale ? " · 최근 26주 변동이 거의 없음" : ""}${L.old ? " · 데이터가 21일 넘게 지남" : ""}`;
+  return `${kind}\n${res}\n${now}\n실시간: ${r.realtime_note}${r.note ? `\n주의: ${r.note}` : ""}\n계산: 주간 금요일 값의 13주 변화(${r.unit === "%" ? "로그 %" : r.unit === "bp" ? "bp" : r.unit || "지수 차"}). 표본내 연구 · 검증 전 · 신호 아님.`;
+}
+function renderMacroTrend() {
+  const body = el("mtBody"), p = latestMacroTrend;
+  if (!body) return;
+  if (!p || !p.ok) {
+    body.innerHTML = `<p class="mt-empty muted">${p ? `매크로 데이터를 불러오지 못했다${p.error ? ` — ${escapeHtml(p.error)}` : ""}. 1분 뒤 다시 시도한다.` : "불러오는 중…"}</p>`;
+    return;
+  }
+  const arrow = (b) => (b > 0 ? `<b class="opt-good">↑</b>` : b < 0 ? `<b class="opt-bad">↓</b>` : `<b class="mt-neu">–</b>`);
+  const watch = (w) => `<i class="mt-w ${w === "유효" ? "ok" : w === "이탈" ? "off" : ""}">${w}</i>`;
+  const gauge = (z) => {
+    if (z == null || !Number.isFinite(z)) return `<span class="mt-g"></span>`;
+    const x = Math.max(-3, Math.min(3, z)), left = 50 + (x / 3) * 50;
+    return `<span class="mt-g" role="img" aria-label="ETF 이후 분포에서 ${z.toFixed(1)}σ"><i style="left:${left.toFixed(1)}%"></i></span>`;
+  };
+  const sum = p.summary || {};
+  const sumCell = (a) => {
+    const s = sum[a] || {};
+    return `<div class="mt-sum-a"><span class="mt-coin">${a}</span>
+      <span>지금 <b class="opt-good">↑${s.co_up || 0}</b> <b class="opt-bad">↓${s.co_dn || 0}</b></span>
+      <span>다음 13주 <b class="opt-good">↑${s.lead_up || 0}</b> <b class="opt-bad">↓${s.lead_dn || 0}</b></span>
+      <span class="muted">중립 ${s.neutral || 0} · 제외 ${s.excluded || 0}</span></div>`;
+  };
+  const row = (r) => {
+    const L = r.live || {}, k = `mt:${r.key}`;
+    MT_TIPS[k] = mtTip(r);
+    const assets = ["BTC", "ETH"].filter((a) => r.assets[a]).map((a) => {
+      const v = r.assets[a], lv = (L.assets || {})[a] || {};
+      return `<span class="mt-a${v.verdict === "관찰" ? " obs" : ""}" title="${a} · ${v.verdict} · ETF 이후 상관 ${mtR(v.r_p3)}">${a} ${arrow(lv.bias)} ${watch(lv.watch || "모름")}</span>`;
+    }).join("");
+    const rt = MT_RT[r.realtime] || ["", ""];
+    const flags = `${L.stale ? `<i class="mt-flag">변동 없음</i>` : ""}${L.old ? `<i class="mt-flag">지연 ${L.week}</i>` : ""}`;
+    return `<div class="mt-row"><button type="button" class="mt-q mt-name" ${helpAttrs(k)} title="${escapeHtml(r.name)} — 설명">${escapeHtml(r.name)}${r.note ? "<sup>*</sup>" : ""}<span>?</span></button>
+      <span class="mt-v">${mtFmt(L.chg13, r.unit)}</span>${gauge(L.z)}<span class="mt-as">${assets}${flags}</span>
+      <span class="mt-rt ${r.realtime}" title="${escapeHtml(rt[1])} — ${escapeHtml(r.realtime_note)}">${rt[0]}</span></div>`;
+  };
+  const sec = (kind, title, tip) => {
+    const rows = p.rows.filter((r) => r.kind === kind);
+    return `<section class="mt-sec"><h4><button type="button" class="mt-q" ${helpAttrs(tip)} title="${title} — 설명">${title}<span>?</span></button></h4>
+      <div class="mt-head"><span>지표</span><span>13주 변화</span><span>ETF 이후 위치</span><span>편향 · 감시</span><span>수신</span></div>${rows.map(row).join("")}</section>`;
+  };
+  const week = p.rows.map((r) => r.live && r.live.week).filter(Boolean).sort().pop();
+  const errs = Object.keys(p.errors || {});
+  body.innerHTML = `<div class="mt-sum"><button type="button" class="mt-q" ${helpAttrs("sum")} title="요약 — 설명">요약<span>?</span></button>${sumCell("BTC")}${sumCell("ETH")}
+      <span class="mt-asof muted">기준 주 ${week || "–"}${errs.length ? ` · 원천 실패 ${errs.length}(${escapeHtml(errs.join(", "))})` : ""}</span></div>
+    ${sec("co", "지금 국면 · 동행 13주", "co")}${sec("lead", "다음 13주 편향 · 선행", "lead")}
+    <p class="mt-foot muted">흐린 칸 = 관찰(판정 경계) · <button type="button" class="mt-q" ${helpAttrs("watch")} title="감시 — 설명">감시<span>?</span></button> · 값은 FRED·DefiLlama·바이낸스 일·주 단위(1시간마다 갱신) · 표본내 연구, 신호 아님</p>`;
+}
+
 // ── 풋프린트 카드 머리 띠 (2026-10-06 사용자 선택 C) -- 미 국채선물 4종 · 뉴스 기울기 1시간 · ETH/BTC/매크로 게이지(가로) ──
 //   넓은 화면(2단)에서만 보인다(styles.css .fp-strip). 한 화면 모드는 카드가 세로 flex 라 띠 높이만큼 차트 칸이 줄고 카드 높이는 그대로다.
 //   국채선물 값은 가격(금리 아님, 가격↓ = 금리↑) · CME 무료 시세 ~10분 지연 + 매시 수집 -- 실시간 신호가 아니라 «오늘 금리 흐름»의 지도.
@@ -4534,7 +4624,7 @@ function helpOpen(b) {
       + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div><p class="help-body"></p>`;
     d.addEventListener("click", (e) => { if (e.target === d || e.target.closest(".help-x")) d.close(); });
     d.addEventListener("close", () => {
-      const btns = [...document.querySelectorAll(`.mc-q[data-tip="${helpKey}"], .opt-q[data-tip="${helpKey}"]`)];
+      const btns = [...document.querySelectorAll(`.mc-q[data-tip="${helpKey}"], .opt-q[data-tip="${helpKey}"], .mt-q[data-tip="${helpKey}"]`)];
       helpKey = null;
       btns.forEach((x) => x.setAttribute("aria-expanded", "false"));
       btns.find((x) => x.getClientRects().length)?.focus({ preventScroll: true });
@@ -4544,7 +4634,7 @@ function helpOpen(b) {
   const k = b.dataset.tip, opt = b.classList.contains("opt-q");
   d.classList.toggle("opt", opt);
   d.querySelector("h3").textContent = (b.title ? b.title.replace(/ — 설명$/, "") : b.textContent.replace(/\?$/, "")).trim();   // 글자 끝 «?» = 단추 원(«① 레버리지 과열?» 의 물음표는 남긴다)
-  d.querySelector(".help-body").textContent = (opt ? OPT_TIPS[k] : mcTipOf(k)) || "";
+  d.querySelector(".help-body").textContent = (opt ? OPT_TIPS[k] : b.classList.contains("mt-q") ? MT_TIPS[k] : mcTipOf(k)) || "";
   helpKey = k; b.setAttribute("aria-expanded", "true");
   d.style.left = d.style.top = "";
   d.showModal();
@@ -4554,7 +4644,7 @@ function helpOpen(b) {
   d.style.left = `${Math.round(Math.max(8, Math.min(r.left, innerWidth - w - 8)))}px`;
   d.style.top = `${Math.round(r.bottom + 6 + h <= innerHeight - 8 ? r.bottom + 6 : Math.max(8, r.top - 6 - h))}px`;
 }
-document.addEventListener("click", (e) => { const b = e.target.closest(".mc-q, .opt-q"); if (b) helpOpen(b); });
+document.addEventListener("click", (e) => { const b = e.target.closest(".mc-q, .opt-q, .mt-q"); if (b) helpOpen(b); });
 ["mcBody", "fpLineSwitch"].forEach((id) => el(id)?.addEventListener("change", (e) => {   // 체크박스는 넓은 화면이면 #fpLineSwitch
   const k = e.target?.dataset?.line;
   if (!k) return;
@@ -8636,6 +8726,7 @@ async function tick() {
       refreshLiquidationMap();
       refreshMacroCalendar();
       refreshNews();                 // 2026-10-05 뉴스 카드 (자체 30초 게이트)
+      refreshMacroTrend();           // 2026-10-28 Macro Trend 카드 (자체 10분 게이트)
       refreshTreasury();             // 2026-10-06 풋프린트 머리 띠 국채선물 (자체 60초 게이트)
       refreshXyz();                  // 2026-10-14 나스닥100 실시간(XYZ100, 자체 1초 게이트)
       refreshMacroSpikes();          // 2026-10-14 «⑥» 급변 칩(자체 30초 게이트)
