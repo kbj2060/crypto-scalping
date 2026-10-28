@@ -2218,6 +2218,9 @@ const mtR = (v) => (v == null || !Number.isFinite(v) ? "–" : `${v > 0 ? "+" : 
 //   채운 칸 = 셈(↑↓, 중립 –) · 테두리만 = 안 셈(약화·변동 없음·지연 회색 / 이탈 주황 / 관찰 흐림). 이유 문장은 칸 title 과 상세 «왜» 줄.
 const MT_FAM = [["주식·위험", ["나스닥", "S&P500", "VIX", "STLFSI"]], ["신용", ["HY스프레드", "Baa스프레드"]], ["금리", ["10Y금리", "기대인플레", "기간프리미엄", "연방기금"]],
   ["달러·환율", ["달러지수", "USD/JPY", "EUR/USD", "원/달러", "USD/CNY"]], ["유동성", ["순유동성", "연준BS", "지준", "TGA", "RRP", "스테이블코인"]], ["원자재", ["브렌트"]]];
+// 2026-10-28 사용자 «칸의 화살표를 다른 아이콘으로»(시안 A 셰브런): 방향 = 꺾쇠(^ v) · 중립 = 가로줄. 색은 칸 글자색 그대로(초록·빨강·회색)
+const MTI_P = { 1: '<polyline points="3,9.5 7,5 11,9.5"/>', "-1": '<polyline points="3,4.5 7,9 11,4.5"/>', 0: '<line x1="3.5" y1="7" x2="10.5" y2="7"/>' };
+const MTI = (d) => `<svg class="mt-ico" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MTI_P[d]}</svg>`;
 const MT_CELLS = [["co", "BTC"], ["co", "ETH"], ["lead", "BTC"], ["lead", "ETH"]];
 let mtSel = null;
 // 2026-10-28 «오늘» 칸(사용자 «나스닥 줄 + 오늘 칸»): 장중 시세가 있는 줄만 -- 나스닥 ← XYZ100 실시간 · 10Y금리 ← 10년 국채선물(ZN) 가격(CME 약 10분 지연).
@@ -2343,8 +2346,8 @@ function mtHeadHtml() {
   const p = latestMacroTrend;
   if (!p || !p.ok) return `<button type="button" class="fr-mt" data-mt-go><span class="fr-mtt">Macro<small>${p ? "불러오지 못함" : "불러오는 중…"}</small></span><span class="fr-go">Macro Trend ›</span></button>`;
   const s = p.summary || {}, week = p.rows.map((r) => r.live && r.live.week).filter(Boolean).sort().pop() || "–";
-  const row = (a) => { const x = s[a] || {}; return `<span class="fr-c">${a}</span><span>지금 <b class="opt-good">↑${x.co_up || 0}</b> <b class="opt-bad">↓${x.co_dn || 0}</b></span>`
-    + `<span>13주 뒤 <b class="opt-good">↑${x.lead_up || 0}</b> <b class="opt-bad">↓${x.lead_dn || 0}</b> <span class="muted">· 중립 ${x.neutral || 0} · 안 셈 ${x.excluded || 0}</span></span>`; };
+  const row = (a) => { const x = s[a] || {}; return `<span class="fr-c">${a}</span><span>지금 <b class="opt-good">${MTI(1)}${x.co_up || 0}</b> <b class="opt-bad">${MTI(-1)}${x.co_dn || 0}</b></span>`
+    + `<span>13주 뒤 <b class="opt-good">${MTI(1)}${x.lead_up || 0}</b> <b class="opt-bad">${MTI(-1)}${x.lead_dn || 0}</b> <span class="muted">· 중립 ${x.neutral || 0} · 안 셈 ${x.excluded || 0}</span></span>`; };
   const off = [...new Set(p.rows.flatMap((r) => Object.entries((r.live || {}).assets || {}).filter(([, c]) => c.state === "off").map(([a]) => `${r.name}→${a}`)))];
   const nx = (latestMacroEvents || []).filter((e) => e.importance === "high" || e.category === "fomc").map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표" }))
     .filter((e) => e.t > Date.now()).sort((a, b) => a.t - b.t)[0];
@@ -2393,12 +2396,12 @@ function renderMacroTrend() {
   const tile = (r, a) => {
     const c = (live(r).assets || {})[a];
     if (!r || !r.assets[a] || !c) return `<span class="mt-tile na" aria-hidden="true">·</span>`;
-    const ch = c.bias > 0 ? "↑" : c.bias < 0 ? "↓" : "–", base = c.bias > 0 ? "u" : c.bias < 0 ? "d" : "z";
+    const ch = MTI(c.bias > 0 ? 1 : c.bias < 0 ? -1 : 0), base = c.bias > 0 ? "u" : c.bias < 0 ? "d" : "z";
     return `<span class="mt-tile ${base}${OBS[c.state] || ""}" title="${a} ${r.kind === "co" ? "지금" : "13주 뒤"} · ${escapeHtml(c.why || "")}">${ch}</span>`;
   };
   const gauge = (zv) => zv == null || !Number.isFinite(zv) ? `<span class="mt-g"></span>`
     : `<span class="mt-g" role="img" aria-label="ETF 이후 분포에서 ${zv.toFixed(1)}σ"><i style="left:${(50 + Math.max(-3, Math.min(3, zv)) / 3 * 50).toFixed(1)}%"></i></span>`;
-  const s = p.summary || {}, tot = ([k, a]) => { const x = s[a] || {}; return `<span class="mt-tot" title="${a} ${k === "co" ? "지금" : "13주 뒤"} 셈 칸의 ↑·↓ 개수 · ${a} 전체(지금+13주 뒤) 중립 ${x.neutral || 0} · 안 셈 ${x.excluded || 0}"><b class="opt-good">↑${x[k + "_up"] || 0}</b> <b class="opt-bad">↓${x[k + "_dn"] || 0}</b></span>`; };
+  const s = p.summary || {}, tot = ([k, a]) => { const x = s[a] || {}; return `<span class="mt-tot" title="${a} ${k === "co" ? "지금" : "13주 뒤"} 셈 칸의 ↑·↓ 개수 · ${a} 전체(지금+13주 뒤) 중립 ${x.neutral || 0} · 안 셈 ${x.excluded || 0}"><b class="opt-good">${MTI(1)}${x[k + "_up"] || 0}</b> <b class="opt-bad">${MTI(-1)}${x[k + "_dn"] || 0}</b></span>`; };
   const q = (k, t) => `<button type="button" class="mt-q" ${helpAttrs(k)} title="${t} — 설명">${t}<span aria-hidden="true">?</span></button>`;
   // 격자 줄 = 머리 3 + 계열마다 [이름 줄 + 지표 줄들] -- 지표 줄만 1fr 라 한 화면 모드(카드 = 창 높이)에서 남는 높이를 나눠 갖는다
   const rowsT = ["auto auto auto", ...fams.map(([, ns]) => `auto${" minmax(22px, 1fr)".repeat(ns.length)}`)].join(" ");
@@ -2412,8 +2415,8 @@ function renderMacroTrend() {
           <span class="mt-v">${mtFmt(L.chg13, r.unit)}</span>${mtTodayCell(n)}<span class="mt-gw hx">${gauge(L.z)}</span>${MT_CELLS.map(([k, a]) => `<span class="mt-t">${tile(by(n, k), a)}</span>`).join("")}
           <span class="mt-rt hx" title="${escapeHtml(fd[2])}"><i class="mt-dot ${fd[0]}" role="img" aria-label="${fd[0] === "ok" ? "정해진 주기대로 수신" : fd[0] === "bad" ? "늦음" : "받는 중"}"></i>${fd[1]}</span></div>`; }).join("")).join("")}
     </div>
-    <div class="mt-key"><span><i class="mt-tile u">↑</i><i class="mt-tile d">↓</i>셈</span><span><i class="mt-tile z">–</i>중립 ±0.5σ</span>
-      <span><i class="mt-tile u weak">↑</i>약화·변동 없음·지연</span><span><i class="mt-tile d off">↓</i>이탈</span><span><i class="mt-tile u obs">↑</i>관찰</span>
+    <div class="mt-key"><span><i class="mt-tile u">${MTI(1)}</i><i class="mt-tile d">${MTI(-1)}</i>셈</span><span><i class="mt-tile z">${MTI(0)}</i>중립 ±0.5σ</span>
+      <span><i class="mt-tile u weak">${MTI(1)}</i>약화·변동 없음·지연</span><span><i class="mt-tile d off">${MTI(-1)}</i>이탈</span><span><i class="mt-tile u obs">${MTI(1)}</i>관찰</span>
       <span>테두리만 = 안 셈 · 칸에 올리거나 줄을 누르면 이유 · ${q("sum", "세는 규칙")} ${q("watch", "감시")}</span></div>`;
   const rs = [by(mtSel, "co"), by(mtSel, "lead")].filter(Boolean), r0 = rs[rs.length - 1], L0 = live(r0);
   const a0 = (x) => (x.assets.ETH ? "ETH" : "BTC");
@@ -4496,66 +4499,6 @@ function mcUsSession(nowMs = Date.now()) {
 
 // 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
-// 2026-10-24 사용자 «B 시안 그대로»: 1초 수급 아래 칸 = 체결 버블 미니 → «지금 들어가면» 가격 자(renderEntryRuler). 높이 고정 --
-//   남는 높이는 1초 수급·아래 칸이 나눠 갖는다(사용자 «가격 자 높이는 줄이고 아래 칸을 여유롭게»). 물타기 멈춤(veto·F2)은 넣지 않는다(검증 후보뿐, 사용자).
-const MC_EG_H = 160;
-let mcEntryEl = null;   // 판을 다시 그려도 같은 상자를 다시 붙인다
-const mcEntryBox = () => mcEntryEl || (mcEntryEl = Object.assign(document.createElement("div"), { id: "mcEntry", className: "mc-eg" }));
-// 크기 = 2배 고정(10-25 사용자 «크기는 2배로» · 서버 자동 규칙 COMMIT_CAP_X 와 같다). 10-24 판은 변동성이 평소보다 크면 2 ÷ 배수로 줄였는데,
-//   실원장 재생에서 변동성·ML 로 크기를 바꾸는 장치는 고정 크기보다 나을 게 없었다(같은 평균 1.73배: 고정 ×3.85·MDD −9.1% vs 변동성 ×3.55·−10.5%).
-//   진입 = 규칙 B 그대로(첫 1/3 → 첫 진입가 ∓0.75% 에 2/3 · 손절 첫 진입가 ∓5%). 계좌 전체 명목(교차 마진)으로 여유를 잰다.
-const EG_L = 2, EG_STOP = 0.05, EG_ADD = 0.0075;
-function egData() {
-  const a = activeSnapshotAsset, acc = lastGoodAccount || {}, bal = acc.balance || {}, armed = acc.bracket_armed || {};
-  const E = Number(bal.margin || 0), P = Number(latestLivePriceByAsset[a] || 0);
-  const pos = (acc.positions || []).filter((p) => Number(p.qty));
-  const N = pos.reduce((s, p) => s + Math.abs(Number(p.notional || 0)), 0);
-  const v = latestVol4h && latestVol4h.ok && (latestVol4h.asset || "eth") === a ? latestVol4h : null;
-  const b = boxNow(), b1 = b && b.scales["1h"] && b.scales["1h"].ok ? b.scales["1h"] : null;
-  const lvl = v ? v.lvl : 1, L = EG_L, cap = L * E;
-  const mine = pos.map((p) => {
-    const side = String(p.side).toUpperCase(), ar = armed[`${p.symbol}:${side}`] || {};
-    return { coin: String(p.symbol).replace(/USD[CT]$/, ""), side, x: E ? Math.abs(p.notional) / E : 0, slOff: !ar.sl_price || !!ar.sl_off, avg: Number(p.entry_price) };
-  });
-  return { a, E, P, N, x: E ? N / E : 0, L, cap, room: cap - N, lvl, sig: v ? v.sig4h_pct / 100 : null, b1, mine,
-           lossStop: cap * (EG_STOP / 3 + (2 / 3) * ((EG_STOP - EG_ADD) / (1 - EG_ADD))) };   // 물타기까지 다 찬 뒤 손절에서 잃는 몫
-}
-function renderEntryRuler() {
-  const box = mcEntryEl;
-  if (!box || !box.isConnected || document.hidden) return;
-  const d = egData(), W = Math.max(320, box.clientWidth - 8), usd = (x) => `$${Math.round(Math.abs(x)).toLocaleString("en-US")}`;
-  const px = (x) => x.toLocaleString("en-US", { minimumFractionDigits: pxDp(), maximumFractionDigits: pxDp() }), pct = (x) => `${(x * 100).toFixed(1)}%`;
-  let html;
-  if (!d.E || !d.P) html = `<div class="eg-head"><b>계좌·가격 불러오는 중</b></div>`;
-  else {
-    const full = d.room <= d.cap * 0.05;
-    const hold = d.mine.length ? `<span class="eg-hold">${d.mine.map((m) => `<span class="${m.side === "LONG" ? "up" : "dn"}">${m.coin} ${m.side === "LONG" ? "롱" : "숏"} ${m.x.toFixed(1)}배</span>${m.slOff ? `<b class="eg-off">손절 꺼짐</b>` : ""}`).join("<i></i>")}</span>` : "";
-    const head = `<div class="eg-head ${full ? "no" : "ok"}"><b>${full ? "새 진입 여유 없음" : `진입 여유 ${usd(d.room)}`}</b>`
-      + `<span class="sub">${full ? `계좌 ${d.x.toFixed(1)}배 · 권장 ${d.L.toFixed(1)}배보다 ${usd(d.N - d.cap)} 많음` : `계좌 ${d.x.toFixed(1)}배 → 최대 ${d.L.toFixed(1)}배`}</span>${hold}</div>`;
-    // 가로 가격 자 -- 가운데 = 지금, 왼쪽 = 롱(아래로), 오른쪽 = 숏(위로). ±2% 안쪽에 반폭의 62% 를 준다(꺾임 표시 //)
-    const H = Math.max(78, Math.min(104, box.clientHeight - 62)), ay = 22 + Math.round((H - 78) / 2), half = (W - 24) / 2, I = 0.02, R = 0.054;
-    const f = (r) => { const q = Math.min(Math.abs(r), R); return Math.sign(r) * (q <= I ? (q / I) * 0.62 : 0.62 + ((q - I) / (R - I)) * 0.38); };
-    const x = (r) => (W / 2 + f(r) * half).toFixed(1), s = d.sig || 0, fst = d.cap / 3, add = d.cap - fst;
-    const lossT = `−${usd(d.lossStop)} · ${pct(d.lossStop / d.E)}`;
-    const tick = (r, cls, lines, anchor = "middle") => `<line x1="${x(r)}" x2="${x(r)}" y1="${ay - 8}" y2="${ay + 8}" class="${cls}"/>`
-      + `<text x="${x(r)}" y="${ay - 13}" text-anchor="${anchor}" class="px">${px(d.P * (1 + r))}</text>`
-      + lines.map((t, i) => `<text x="${x(r)}" y="${ay + 22 + i * 14}" text-anchor="${anchor}" class="lb ${cls}">${t}</text>`).join("");
-    const brk = (r) => `<path d="M${+x(r) - 4} ${ay + 5} l4 -10 M${+x(r)} ${ay + 5} l4 -10" class="brk"/>`;
-    const avg = d.mine.filter((m) => m.coin.toLowerCase() === d.a).map((m) => m.avg / d.P - 1).filter((r) => Math.abs(r) < R);
-    const bx = d.b1 ? `<rect x="${x(d.b1.dn / d.P - 1)}" y="${ay - 4}" width="${(x(d.b1.up / d.P - 1) - x(d.b1.dn / d.P - 1)).toFixed(1)}" height="8" class="box"/>` : "";
-    const band = (k, cls) => (s ? `<rect x="${x(-k * s)}" y="${ay - 11}" width="${(x(k * s) - x(-k * s)).toFixed(1)}" height="22" class="${cls}"/>` : "");
-    html = `${head}<svg class="eg-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="지금 들어가면 — 왼쪽 롱 계획, 오른쪽 숏 계획">`
-      + `${band(3, "b3")}${band(1, "b1")}<line x1="12" x2="${W - 12}" y1="${ay}" y2="${ay}" class="axis"/>${brk(-I)}${brk(I)}${bx}`
-      + tick(-EG_STOP, "dn", ["롱 손절 −5%", lossT], "start") + tick(-EG_ADD, "dim", ["롱 물타기 2/3", usd(add)]) + tick(0, "now", ["첫 진입 1/3", usd(fst)])
-      + tick(EG_ADD, "dim", ["숏 물타기 2/3", usd(add)]) + tick(EG_STOP, "dn", ["숏 손절 +5%", lossT], "end")
-      + avg.map((r) => `<path d="M${x(r)} ${ay - 3} l-4 -7 h8 z" class="avg"/>`).join("") + `</svg>`
-      + `<div class="eg-key">${s ? `<span><i class="k1"></i>4h 1σ ±${(s * 100).toFixed(2)}%</span><span><i class="k3"></i>3σ</span>` : ""}`
-      + `${d.b1 ? `<span><i class="kb"></i>1h 칸 머물 ${Math.round(d.b1.p * 100)}%</span>` : ""}${avg.length ? `<span><i class="ka"></i>내 평단</span>` : ""}`
-      + `${full ? `<span class="eg-cap">계좌가 비었을 때 · 권장 ${d.L.toFixed(1)}배 = ${usd(d.cap)}</span>` : ""}</div>`;
-  }
-  if (box._h !== html) { box._h = html; box.innerHTML = html; }
-}
-setInterval(renderEntryRuler, 1500);   // ponytail: 가격·계좌·변동성 갱신 주기가 제각각이라 1.5초 폴링(같은 내용이면 DOM 안 건드림) -- 느려지면 각 갱신 끝에서 부르게
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
 function mcPlace(svg, r, wr) {
   const body = el("mcBody"), card = el("fpCard"), wall = el("mcWall");
@@ -4721,7 +4664,7 @@ function renderMarketCtx() {
   const fcHtml = fcRowHtml(sec);   // 2026-10-26 펜 메모 «풋프린트 미래 차트로 옮겼으니 제거»: ⑤ 아래 박스 유지 30분·1시간·4시간 줄 삭제(풋프린트 미래 칸 상자 d38cb502 가 같은 값)
   G.gw = gwKeep;
   // 2026-10-13 시안(아티팩트 댓글 «4개 판을 함축해 가로 1줄 · 나머지 1줄에 체결 버블»): 넓은 화면은 판마다 상태 칩 + 값 셋만 한 줄로,
-  //   그 위 줄은 «지금 들어가면» 가격 자(#mcEntry, 2026-10-24 체결 버블 미니 대체). 판 설명(?)은 그대로. 자세한 그림은 좁은 화면·이전 판에.
+  //   판 설명(?)은 그대로. 자세한 그림은 좁은 화면·이전 판에. («지금 들어가면» 가격 자는 2026-10-28 펜 메모로 지웠다 -- 그 높이는 1초 수급으로)
   if (G.cmpW) {
     // 2026-10-13 사용자 «글자 말고 모두 게이지나 그래프로» -- 줄 = 짧은 이름 + 그림, 숫자는 호버(title). 상태 칩(①②④)만 글자로 남긴다.
     // 2026-10-13 아티팩트 댓글(정리 3차): 오른쪽 칸 = 1초 수급 → 체결 버블(수급 차트 한 개 높이, renderCandleSvg 가 맞춘다) →
@@ -4776,11 +4719,10 @@ function renderMarketCtx() {
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(포커스 유지)
   body._mcHtml = htmlB;
-  keepFocus(body, () => { body.innerHTML = htmlB; if (G.cmpW) { body.insertBefore(mcEntryBox(), body.firstChild); renderEntryRuler(); } });   // 가격 자 = 맨 위(1초 수급 바로 아래)
+  keepFocus(body, () => { body.innerHTML = htmlB; });   // 2026-10-28 펜 메모 «가격 자 제거 · 그 자리에 수급 차트 2개를 키워» -- 맨 위 «지금 들어가면» 가격 자(#mcEntry) 삭제
   if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
-    const cvEl = mcEntryEl && mcEntryEl.parentNode === body ? mcEntryEl : null;   // 가격 자는 높이 계산에서 뺀다(높이 고정 MC_EG_H, renderCandleSvg 가 준다)
-    const top = cvEl ? cvEl.getBoundingClientRect().bottom : body.getBoundingClientRect().top;
-    const need = Math.ceil(Math.max(0, ...[...body.children].filter((k) => k !== cvEl).map((k) => k.getBoundingClientRect().bottom - top)) + 6);
+    const top = body.getBoundingClientRect().top;
+    const need = Math.ceil(Math.max(0, ...[...body.children].map((k) => k.getBoundingClientRect().bottom - top)) + 6);
     if (need > 40 && Math.abs(need - mcNeedH) > 4) {
       mcNeedH = need; if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
     }
@@ -8750,7 +8692,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
     const floorY = hAll - 2;   // 2026-10-06 리본 줄이 빠져 칸 바닥 = 상자 바닥
     const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
-    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8 - MC_EG_H) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
         const on = mcSplit && SUB_LEGEND_H > 0;
@@ -8776,7 +8718,6 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       } }
     // 2026-10-15 아티팩트 댓글 «봉 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 수급 바닥 시각 줄(12px, renderSupply1s mb 16→4)을 버블에 넘긴다
     const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give;
-    if (mcSplit && mcEntryEl) { const bh = `${MC_EG_H + s1Give}px`; if (mcEntryEl.style.height !== bh) mcEntryEl.style.height = bh; }   // 2026-10-24 가격 자 = 고정 높이   // 2026-10-13 체결 버블 = 수급 차트 한 개 높이(사용자)
     post.push(() => mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16, h: floorY - (sub1sY + s1Hd + 12) } : null,
             mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
               return { x: ml + cw + 4, y, w: TRADE_W + BOOK_W - 8, h: floorY - y }; })() : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로

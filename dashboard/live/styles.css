@@ -3068,29 +3068,6 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mc-gk > span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-gk.v { grid-template-columns: 44px minmax(0, 1fr) auto; }   /* 10-13 «라벨 되돌려»: 이름 · 그림 · 값 */
 .mc-gk > b { font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; min-width: 40px; }
-/* 2026-10-24 «지금 들어가면» 가격 자(#mcEntry, app.js renderEntryRuler · 사용자 B 시안) -- 체결 버블 미니 자리. 높이 = MC_EG_H(renderCandleSvg 가 준다) */
-.mc-eg { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-bottom: 6px; padding: 4px 4px 8px; box-sizing: border-box; overflow: hidden;
-  border-bottom: 1px solid var(--soft-line); font-size: 12px; color: var(--text); }
-.mc-eg .up { color: var(--good); } .mc-eg .dn { color: var(--bad); }
-.eg-head { display: flex; align-items: baseline; gap: 6px 10px; flex-wrap: wrap; }
-.eg-head > b { font-size: 14px; font-weight: 700; } .eg-head.no > b { color: var(--warn); } .eg-head.ok > b { color: var(--good); }
-.eg-head .sub { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.eg-hold { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.eg-hold i { width: 1px; height: 11px; background: var(--line); }
-.eg-off { color: var(--bad); font-size: 11px; font-weight: 700; border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent); border-radius: 7px; padding: 1px 6px; }
-.eg-svg { display: block; overflow: visible; }
-.eg-svg .px { fill: var(--muted); font: 600 11px var(--font-mono); }
-.eg-svg .lb { fill: var(--muted); font: 700 11px var(--font-sans); } .eg-svg .lb.dn { fill: var(--bad); } .eg-svg .lb.now { fill: var(--ink); }
-.eg-svg line { stroke-width: 1.4; } .eg-svg line.axis { stroke: var(--line); stroke-width: 1; } .eg-svg line.dim { stroke: var(--hover-line); }
-.eg-svg line.dn { stroke: var(--bad); stroke-width: 2; } .eg-svg line.now { stroke: var(--accent); stroke-width: 2; }
-.eg-svg .b1 { fill: rgb(var(--lift) / .10); } .eg-svg .b3 { fill: rgb(var(--lift) / .045); }
-.eg-svg .box { fill: none; stroke: var(--neutral); stroke-width: 1.2; opacity: .8; } .eg-svg .avg { fill: var(--accent); }
-.eg-svg .brk { fill: none; stroke: var(--muted); stroke-width: 1.2; }
-.eg-key { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.eg-key i { display: inline-block; width: 14px; height: 8px; margin-right: 5px; vertical-align: -1px; border-radius: 2px; }
-.eg-key .k1 { background: rgb(var(--lift) / .16); } .eg-key .k3 { background: rgb(var(--lift) / .07); } .eg-key .kb { border: 1.2px solid var(--neutral); box-sizing: border-box; }
-.eg-key .ka { width: 0; height: 0; border-radius: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 7px solid var(--accent); }
-.eg-key .eg-cap { margin-left: auto; font-weight: 600; }
 /* 가격 자가 줄인 높이만큼 아래 칸에 여유(사용자 «아래 칸들의 높이를 좀 더 키워서 여유롭게») -- 내용 높이(mcNeedH)가 늘어 renderCandleSvg 가 자리를 준다 */
 #mcBody.mc-cmp .mc-strip .mc-sec { padding: 14px 0 12px; }
 #mcBody.mc-cmp .mc-rows { gap: 10px; }
@@ -3214,6 +3191,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mt-tile.off { background: none; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--warn) 65%, transparent); }
 .mt-tile.obs { background: none; box-shadow: inset 0 0 0 1px var(--soft-line); opacity: .5; }
 .mt-tile.na { color: var(--line); font-size: 10px; }
+.mt-ico { display: block; flex: none; }   /* 10-28 칸 아이콘(셰브런) -- 합계·범례·풋프린트 머리 요약에서는 글자 크기 */
+.mt-tot .mt-ico, .fr-mt .mt-ico { display: inline-block; width: 11px; height: 11px; vertical-align: -1px; margin-right: 1px; } .mt-key .mt-ico { width: 11px; height: 11px; }
 .mt-key { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 11px; color: var(--muted); align-items: center; }
 .mt-key > span { display: inline-flex; align-items: center; gap: 4px; }
 .mt-key .mt-tile { width: 26px; height: 16px; font-size: 10px; }
