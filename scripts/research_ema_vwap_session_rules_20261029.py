@@ -514,6 +514,7 @@ def round2():
 # ── 3라운드 (docs/prereg/ema_vwap_session_rules_r3_20261029.md) ───────────────
 DIR4H = ROOT / "tmp/depth_incr_20261028/dir4h_preds.npz"
 TRAIN3 = ("2025-02-01", "2025-12-31")
+TEST3 = ("2026-06-01", "2026-10-17")   # 저장 예측 끝 10-18 23:55 — 마지막 날 4h 보유가 예측 밖으로 나가지 않게 10-17
 R3 = [(e, f, flt) for flt in ("none", "vwap", "ema") for e, f in [("mkt", 0)] + [(e, f) for e in ("vw", "e20", "deep") for f in (6, 24)]]
 
 
@@ -546,7 +547,7 @@ def round3():
     z = np.load(DIR4H)
     pa = pd.Series(z["pa"], index=pd.DatetimeIndex(z["ts"])).reindex(pd.DatetimeIndex(d.timestamp)).to_numpy()
     ts = d.timestamp.to_numpy()
-    assert np.isfinite(pa[(ts >= np.datetime64("2025-01-01")) & (ts < np.datetime64("2026-10-27"))]).mean() > .99
+    assert np.isfinite(pa[(ts >= np.datetime64("2025-01-01")) & (ts <= np.datetime64("2026-10-18T23:55"))]).mean() > .99
     filt = {"none": (np.ones(len(ts), bool),) * 2, "vwap": (I["c"] > I["vw"], I["c"] < I["vw"]), "ema": (I["e5"] > I["e20"], I["e5"] < I["e20"])}
 
     def port(pred, cfg, cost):
@@ -576,18 +577,18 @@ def round3():
     test = {}
     for nm, cfg in (("final", final), ("selected", cfgS), ("base", base)):
         sS, _ = port(pa, cfg, COST_STRICT); sC, ntr = port(pa, cfg, COST_CAND)
-        T, TL = cut(sS, TEST), cut(leg, TEST)
-        test[nm] = dict(cfg=cfg, strict=summ(T, rng), cand=summ(cut(sC, TEST), rng), val_strict=summ(cut(sS, VAL)), train_cand=summ(cut(sC, TRAIN3)),
+        T, TL = cut(sS, TEST3), cut(leg, TEST3)
+        test[nm] = dict(cfg=cfg, strict=summ(T, rng), cand=summ(cut(sC, TEST3), rng), val_strict=summ(cut(sS, VAL)), train_cand=summ(cut(sC, TRAIN3)),
                         minus_long=dict(mean=round(float((T - TL).mean()), 3), ci95=block_boot((T - TL).to_numpy(), rng)),
                         minus_short=dict(mean=round(float((T + TL).mean()), 3), ci95=block_boot((T + TL).to_numpy(), rng)),
                         months_cand={str(k): round(float(g.mean()), 2) for k, g in sC.loc["2025-02":].groupby(sC.loc["2025-02":].index.to_period("M"))})
         test[nm]["_series_cand"] = sC; test[nm]["_series_strict"] = sS
-    dd = {k: cut(test["selected"]["_series_cand"] - test["base"]["_series_cand"], per) for k, per in (("val", VAL), ("test", TEST))}
+    dd = {k: cut(test["selected"]["_series_cand"] - test["base"]["_series_cand"], per) for k, per in (("val", VAL), ("test", TEST3))}
     rep["selected_minus_base_cand"] = {k: dict(mean=float(v.mean()), ci95=block_boot(v.to_numpy(), rng)) for k, v in dd.items()}
     ns, nc = [], []
     for _ in range(200):
         k = int(rng.integers(288, 30 * 288 + 1)); sh = np.roll(pa, k)
-        ns.append(sharpe(cut(port(sh, final, COST_STRICT)[0], TEST))); nc.append(sharpe(cut(port(sh, final, COST_CAND)[0], TEST)))
+        ns.append(sharpe(cut(port(sh, final, COST_STRICT)[0], TEST3))); nc.append(sharpe(cut(port(sh, final, COST_CAND)[0], TEST3)))
     t = test["final"]
     t["null_pct_strict"] = float((np.array(ns) < t["strict"]["sharpe"]).mean() * 100)
     t["null_pct_cand"] = float((np.array(nc) < t["cand"]["sharpe"]).mean() * 100); t["null95_strict"] = float(np.quantile(ns, .95))
