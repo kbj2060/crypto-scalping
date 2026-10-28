@@ -26,9 +26,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
-from scipy import stats
-from statsmodels.tsa.stattools import grangercausalitytests
+try:   # 2026-10-28 서버 전진 기록기(live_macro_bias_forward_20261028)는 sample() 만 쓴다 -- 서버 env 엔 statsmodels 가 없다(새 의존성 안 깖)
+    import statsmodels.api as sm
+    from scipy import stats
+    from statsmodels.tsa.stattools import grangercausalitytests
+except ImportError:   # 통계 함수를 부르면 그때 None 오류가 난다 -- 연구 실행은 statsmodels 가 있는 곳에서
+    sm = stats = grangercausalitytests = None
 
 # name -> (column, transform, label)   logret = 100*dlog, diff = level change (bp for rates)
 VARS = {
