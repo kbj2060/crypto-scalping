@@ -2474,6 +2474,7 @@ async function refreshXyz() {
   // 2026-10-28 나스닥 그래프는 Macro Trend 카드 «오늘» 칸(1분마다 다시 그림)으로 옮겼다 -- 넓은 화면은 지금처럼 1초(급변 칩·시장 맥락), 그 밖은 1분
   if (xyzBusy || now - xyzLastFetchAt < (el("mcBody")?.classList.contains("mc-cmp") ? 1000 : 60000)) return;
   xyzLastFetchAt = now; xyzBusy = true;   // 응답이 1초 넘게 걸려도 겹치지 않게(늦은 옛 응답이 새 봉을 잘라내지 않게)
+  let first = false;
   try {
     const since = xyzBars.length ? xyzBars[xyzBars.length - 1][0] - 60 : 0;   // 마지막 두 봉(진행 중 봉 + 막 닫힌 봉)부터
     const res = await fetch(`/api/xyz100${since ? `?since=${since}` : ""}`, { cache: "no-cache" });
@@ -2481,12 +2482,13 @@ async function refreshXyz() {
     const p = await res.json();
     if (Number.isFinite(p.now_sec)) xyzSkew = p.now_sec - Date.now() / 1000;
     if (!p.ok) { xyzLive = null; return; }
-    if (p.full || !xyzBars.length) { const first = !xyzBars.length; xyzBars = p.bars; if (first && latestMacroTrend) renderMacroTrend(); }   // 첫 24시간이 오면 Macro Trend «오늘» 칸을 바로(1분 기다리지 않게)
+    if (p.full || !xyzBars.length) { first = !xyzBars.length; xyzBars = p.bars; }
     else if (p.bars.length) {
       const t0 = p.bars[0][0], cut = p.bars[p.bars.length - 1][0] - 86400;
       xyzBars = xyzBars.filter((b) => b[0] < t0 && b[0] >= cut).concat(p.bars);
     }
     xyzLive = p.live;
+    if (first && latestMacroTrend) renderMacroTrend();   // 첫 24시간이 오면 Macro Trend «오늘»·수신 칸을 바로(1분 기다리지 않게) -- 🔴xyzLive 를 넣은 뒤에(전엔 그 앞이라 첫 1분 «끊김» 빨간불)
   } catch (error) {
     console.error("XYZ100 fetch error:", error);
   } finally {
