@@ -2704,8 +2704,14 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .mc-chip-pair { display: inline-flex; }
 .mc-chip-pair > .mc-chip:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .mc-chip.sub { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 1px; font-weight: 500; }
-/* 2026-10-29 VWAP 선 굵기·모양·색 고르기(«지표» 팝업) -- 세 묶음은 붙은 칩(mc-chip-pair), 이름은 휴대폰에서도 보인다 */
-.mc-vw-opt { gap: 6px; }
+/* 2026-10-29 선 설정(«지표» 팝업): 칩 옆 설정 버튼 → 아래 설정 줄 하나(굵기·모양·색 = 붙은 칩 세 묶음) */
+.mc-gear { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; margin-left: -3px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.mc-gear svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
+.mc-gear:hover, .mc-gear[aria-expanded="true"] { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.mc-gear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mc-cfg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 10px; border-top: 1px solid var(--soft-line); }
+.mc-cfg[hidden] { display: none; }
+.fp-mob-row .mc-gear { width: 30px; height: 36px; }
 .mc-vw-t { font-size: 11px; color: var(--muted); margin-right: 2px; }
 .mc-chip-pair > .mc-vw:not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 1px; }
 .mc-chip-pair > .mc-vw:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
