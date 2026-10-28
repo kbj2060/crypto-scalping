@@ -511,6 +511,99 @@ def round2():
     print(json.dumps(test, ensure_ascii=False, indent=1, default=str))
 
 
+# ── 3라운드 (docs/prereg/ema_vwap_session_rules_r3_20261029.md) ───────────────
+DIR4H = ROOT / "tmp/depth_incr_20261028/dir4h_preds.npz"
+TRAIN3 = ("2025-02-01", "2025-12-31")
+R3 = [(e, f, flt) for flt in ("none", "vwap", "ema") for e, f in [("mkt", 0)] + [(e, f) for e in ("vw", "e20", "deep") for f in (6, 24)]]
+
+
+def month_q(pred: np.ndarray, ts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """배포 thresholds(): 달 시작 전 모든 유한 예측의 20/80 분위, 달 안 고정, 8,640개 미만이면 NaN."""
+    lo, hi = np.full(len(ts), np.nan), np.full(len(ts), np.nan)
+    mon = ts.astype("datetime64[M]")
+    for m in np.unique(mon):
+        past = pred[(ts < m.astype("datetime64[ns]")) & np.isfinite(pred)]
+        if len(past) >= 8640:
+            lo[mon == m], hi[mon == m] = np.quantile(past, [.2, .8])
+    return lo, hi
+
+
+def phase_targets(pred, lo, hi, tsec, okL, okS) -> list[np.ndarray]:
+    """8위상 목표 방향: 봉 번호 % 48 == off 인 봉 마감에 결정 → 다음 봉부터 48봉. 필터 okL/okS(결정 봉 값)."""
+    s = np.where(pred >= hi, 1.0, np.where(pred <= lo, -1.0, 0.0))     # NaN 문턱·예측 = 0
+    s = np.where((s > 0) & ~okL, 0.0, np.where((s < 0) & ~okS, 0.0, s))
+    out = []
+    for off in range(0, 48, 6):
+        i = np.flatnonzero((tsec // 300) % 48 == off); i = i[i + 1 < len(s)]
+        t = np.full(len(s), np.nan); t[i + 1] = s[i]
+        out.append(np.nan_to_num(pd.Series(t).ffill().to_numpy(), nan=0.0))
+    return out
+
+
+def round3():
+    rng = np.random.default_rng(2026102903)
+    d = load("ETH"); I = indicators(d); days = d.timestamp.dt.normalize().to_numpy()
+    z = np.load(DIR4H)
+    pa = pd.Series(z["pa"], index=pd.DatetimeIndex(z["ts"])).reindex(pd.DatetimeIndex(d.timestamp)).to_numpy()
+    ts = d.timestamp.to_numpy()
+    assert np.isfinite(pa[(ts >= np.datetime64("2025-01-01")) & (ts < np.datetime64("2026-10-27"))]).mean() > .99
+    filt = {"none": (np.ones(len(ts), bool),) * 2, "vwap": (I["c"] > I["vw"], I["c"] < I["vw"]), "ema": (I["e5"] > I["e20"], I["e5"] < I["e20"])}
+
+    def port(pred, cfg, cost):
+        e, f, flt = cfg; lo, hi = month_q(pred, ts); lL, lS = r2a_levels(I, e)
+        P = np.zeros(len(ts)); ntr = 0
+        for tg in phase_targets(pred, lo, hi, I["tsec"], *filt[flt]):
+            p, tr = run_dir(I["h"], I["l"], I["c"], tg, lL, lS, e == "mkt", f, cost[0], cost[1])
+            P += p / 8; ntr += len(tr)
+        return daily(days, P), ntr
+
+    rep = {"prereg": "docs/prereg/ema_vwap_session_rules_r3_20261029.md@e9cdb674", "source": str(DIR4H), "funding": "무시", "coin": "ETH",
+           "fresh_forward_bar_by_bar": True, "trade_ledgers_used_as_input": False, "saved_parent_exit_timestamps_used": False,
+           "future_rows_used_for_entry": False}
+    rows, ser = [], {}
+    for cfg in R3:
+        sr, ntr = port(pa, cfg, COST_CAND); ser[cfg] = sr
+        rows.append(dict(entry=cfg[0], fb=cfg[1], flt=cfg[2], train_sharpe=sharpe(cut(sr, TRAIN3)), train_bp=float(cut(sr, TRAIN3).mean()),
+                         trades=ntr))
+    best = max(range(len(R3)), key=lambda i: rows[i]["train_sharpe"]); cfgS, base = R3[best], ("mkt", 0, "none")
+    rep["grid"] = rows; rep["selected"] = rows[best]
+    vS, vB = summ(cut(ser[cfgS], VAL)), summ(cut(ser[base], VAL))
+    final = cfgS if vS["sharpe"] > vB["sharpe"] else base
+    rep["val"] = {"selected": vS, "base": vB}; rep["final"] = dict(zip(("entry", "fb", "flt"), final))
+    print("R3 선정", rows[best], "검증", vS, "기준", vB, "→ 최종", final, flush=True)
+
+    leg = daily(days, np.r_[0.0, I["c"][1:] / I["c"][:-1] - 1])
+    test = {}
+    for nm, cfg in (("final", final), ("selected", cfgS), ("base", base)):
+        sS, _ = port(pa, cfg, COST_STRICT); sC, ntr = port(pa, cfg, COST_CAND)
+        T, TL = cut(sS, TEST), cut(leg, TEST)
+        test[nm] = dict(cfg=cfg, strict=summ(T, rng), cand=summ(cut(sC, TEST), rng), val_strict=summ(cut(sS, VAL)), train_cand=summ(cut(sC, TRAIN3)),
+                        minus_long=dict(mean=round(float((T - TL).mean()), 3), ci95=block_boot((T - TL).to_numpy(), rng)),
+                        minus_short=dict(mean=round(float((T + TL).mean()), 3), ci95=block_boot((T + TL).to_numpy(), rng)),
+                        months_cand={str(k): round(float(g.mean()), 2) for k, g in sC.loc["2025-02":].groupby(sC.loc["2025-02":].index.to_period("M"))})
+        test[nm]["_series_cand"] = sC; test[nm]["_series_strict"] = sS
+    dd = {k: cut(test["selected"]["_series_cand"] - test["base"]["_series_cand"], per) for k, per in (("val", VAL), ("test", TEST))}
+    rep["selected_minus_base_cand"] = {k: dict(mean=float(v.mean()), ci95=block_boot(v.to_numpy(), rng)) for k, v in dd.items()}
+    ns, nc = [], []
+    for _ in range(200):
+        k = int(rng.integers(288, 30 * 288 + 1)); sh = np.roll(pa, k)
+        ns.append(sharpe(cut(port(sh, final, COST_STRICT)[0], TEST))); nc.append(sharpe(cut(port(sh, final, COST_CAND)[0], TEST)))
+    t = test["final"]
+    t["null_pct_strict"] = float((np.array(ns) < t["strict"]["sharpe"]).mean() * 100)
+    t["null_pct_cand"] = float((np.array(nc) < t["cand"]["sharpe"]).mean() * 100); t["null95_strict"] = float(np.quantile(ns, .95))
+    v = rep["val"]["selected" if final == cfgS else "base"]
+    rep["verdict_strict"] = bool(v["sharpe"] > 0 and t["strict"]["ci95"][0] > 0 and t["strict"]["sharpe"] > t["null95_strict"]
+                                 and t["strict"]["mdd"] > -.20 and t["minus_long"]["mean"] > 0 and t["minus_short"]["mean"] > 0)
+    rep["verdict_candidate"] = bool(v["mean_bp"] > 0 and t["cand"]["mean_bp"] > 0 and t["null_pct_cand"] >= 50)
+    pd.DataFrame({k: test[k]["_series_cand"] for k in test}).to_csv(OUT / "r3_daily_cand.csv")
+    for k in test:
+        test[k].pop("_series_cand"); test[k].pop("_series_strict")
+    rep["test"] = test
+    (OUT / "report_r3.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=str))
+    print(json.dumps({k: rep[k] for k in ("final", "verdict_strict", "verdict_candidate", "selected_minus_base_cand")}, ensure_ascii=False, default=str))
+    print(json.dumps(test, ensure_ascii=False, indent=1, default=str))
+
+
 def selftest():
     n = 12
     c = np.array([100, 100, 101, 102, 103, 104, 105, 104, 103, 102, 101, 100.0])
@@ -574,8 +667,16 @@ def selftest():
     tsec = np.arange(0, 6 * 14400, 300); pr = np.full(len(tsec), np.nan); j = 14400 // 300 - 1; pr[j] = 5.0
     tgb = r2b_target(np.where((tsec % 14400) == 14400 - 300, pr, np.nan), tsec, -1, 1)
     assert tgb[j] == 0 and tgb[j + 1] == 1 and tgb[j + 48] == 1, tgb[j - 1:j + 3]
+    # 3라운드: 달 문턱은 그 달 전 예측만 · 위상 목표는 결정 다음 봉부터 48봉
+    tsx = (np.datetime64("2025-01-01") + np.arange(40 * 288) * np.timedelta64(5, "m")).astype("datetime64[ns]")
+    prx = np.random.default_rng(1).normal(size=len(tsx)); lo_, hi_ = month_q(prx, tsx)
+    feb = tsx >= np.datetime64("2025-02-01"); assert np.isnan(lo_[~feb]).all() and np.allclose(hi_[feb], np.quantile(prx[~feb], .8))
+    prx2 = prx.copy(); prx2[feb] += 100; assert np.allclose(month_q(prx2, tsx)[1][feb], hi_[feb])   # 그 달 값이 문턱에 안 섞임
+    tsec3 = np.arange(0, 2 * 14400, 300); pr3 = np.zeros(len(tsec3)); pr3[0] = 5.0
+    tg3 = phase_targets(pr3, np.full(len(tsec3), -1.0), np.full(len(tsec3), 1.0), tsec3, np.ones(len(tsec3), bool), np.ones(len(tsec3), bool))
+    assert len(tg3) == 8 and tg3[0][0] == 0 and tg3[0][1] == 1 and tg3[0][48] == 1 and tg3[0][49] == 0 and tg3[1].sum() == 0, tg3[0][:3]
     print("selftest OK")
 
 
 if __name__ == "__main__":
-    selftest() if "--selftest" in sys.argv else (round2() if "--round2" in sys.argv else main())
+    selftest() if "--selftest" in sys.argv else (round2() if "--round2" in sys.argv else (round3() if "--round3" in sys.argv else main()))
