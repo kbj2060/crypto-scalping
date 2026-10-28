@@ -4233,7 +4233,7 @@ const PAPER_SIG_OK = { wall: new Set(["eth", "sol", "xrp"]), duel: new Set(["eth
 const PAPER_POLL_MS = 10000;   // 2026-10-04 모의 매매 엔진은 1분마다 쓴다 -- 10초면 충분
 let latestPaper = null, paperLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
-const mcLine = { vwap: true, veto: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { poc: true, vwap: true, veto: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
 // 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- vsess 켜면 지금 시장 세션 개장(현지 시각, 서머타임 반영)부터 센 VWAP.
 //   서버가 봉마다 두 벌을 싣는다: vwap/vsd = UTC 00시부터 · svwap/svsd/sstart/sname = 세션 개장부터. seg 가 바뀌는 곳에서 선을 끊는다.
@@ -4633,20 +4633,22 @@ function renderMarketCtx() {
   //   «세션 시작부터»는 VWAP 계산 기준이라 VWAP 칩에 붙인 보조 칩 · VWAP 를 끄면 못 누른다. 입력(data-line)·저장·이벤트는 그대로.
   const swChip = (k, nm, sw, t = "", sub = false) => `<label class="mc-chip${sub ? " sub" : ""}"${t ? ` title="${t}"` : ""}${sw ? ` style="--sw: ${sw}"` : ""}>`
     + `<input type="checkbox" class="chip-input" data-line="${k}"${mcLine[k] ? " checked" : ""}${sub && !mcLine.vwap ? " disabled" : ""}>`
-    + `${sw ? `<i class="mc-sw-key${sw.includes("ma-") ? "" : " dash"}" aria-hidden="true"></i>` : ""}${nm}</label>`;
+    + `${sw ? `<i class="mc-sw-key${/ma-|amber/.test(sw) ? "" : " dash"}" aria-hidden="true"></i>` : ""}${nm}</label>`;
   const lineSw = `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span>`
       + `<span class="mc-sw-g mc-sw-ma">${[["ema5", "EMA 5", "종가 지수이동평균 5봉"], ["ema20", "EMA 20", "종가 지수이동평균 20봉"], ["vwma", "VWMA 100", "거래량 가중 이동평균 100봉 · 거래량 = 바이낸스 5분봉"]]
         .map(([k, nm, t]) => swChip(k, nm, `var(--ma-${k})`, t)).join("")}${swChip("bb", "볼린저", "var(--muted)", "20봉 · 2σ")}${swChip("veto", "추세 veto", "var(--muted)", "SMA144 ±1×ATR 히스테리시스 밴드 · 롱만/숏만 꼬리표")}</span>`
       + `<span class="mc-sw-g"><span class="mc-chip-pair">${swChip("vwap", "VWAP ±σ", "var(--muted)")}${swChip("vsess", "세션 시작부터", "", "끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)", true)}</span>`
-      + `${swChip("wvwap", "주간·앵커 VWAP", "var(--ink)")}</span></div>`;
+      + `${swChip("wvwap", "주간·앵커 VWAP", "var(--ink)")}</span>`
+      // 2026-10-29 사용자 «5분봉 거래량 제일 많은 부분을 이은 선도 on/off» -- 봉별 POC 선(기본 켬 · 봉마다 POC 테두리는 그대로)
+      + `<span class="mc-sw-g">${swChip("poc", "POC 선", "var(--amber)", "봉마다 가장 많이 거래된 가격(POC)을 이은 선 · 봉 안 POC 테두리는 그대로")}</span></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
-  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "vwap", "wvwap"].filter((k) => mcLine[k]).length;
+  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "vwap", "wvwap", "poc"].filter((k) => mcLine[k]).length;
   const fsRow = G.cmpW || (isMobileChartMode() && flowOn() && !!el("fpMobRow"));   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
   if (!fsRow) fpIndOpen = false;   // 버튼 줄이 없는 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
   const fsEl = el("fpLineSwitch"), fsHtml = fsRow ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
     + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12.5l4-4.5 3 2.5 6-6.5"/><path d="M1.5 14.5h13"/></svg>지표<b>${indOn}</b></button>`
     + `<div class="fp-ind-pop" id="fpIndPop" aria-label="차트에 그릴 지표"${fpIndOpen ? "" : ' hidden=""'}>`
-    + lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', '<span class="mc-switch-t">이동평균·밴드 · VWAP — 눌러서 켜고 끄기</span>') + `</div>` : "";
+    + lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', '<span class="mc-switch-t">이동평균·밴드 · VWAP · POC — 눌러서 켜고 끄기</span>') + `</div>` : "";
   // 🔴setH(직렬화한 innerHTML 과 비교)는 여기서 매번 다시 썼다 -- `checked`→`checked=""`·`<path/>`→`</path>` 라 늘 달라 클릭·포커스가 씹혔다(10-28 검증). 마지막으로 쓴 글과 비교한다.
   if (fsEl && fsEl._h !== fsHtml) {
     const fk = fsEl.contains(document.activeElement) ? document.activeElement.dataset.line || (document.activeElement.classList.contains("fp-ind-btn") ? "btn" : "") : "";
@@ -7195,7 +7197,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 🔴창 밖 행은 위 루프가 건너뛰므로 점이 빠진다 -- 선이 그 구간을 건너뛰고 이어지면
     //   없는 이동을 그리는 셈이다. 그래서 x 가 한 봉(bw) 넘게 벌어지면 **끊는다**.
     // 🔴«지지·저항»이 아니다. Dalton 밸런스엣지(비용게이트 0/6)·Yush LAF(무근거)로 닫혔다.
-    fgI.push({ ...CV_ALL, c: plotC, p: (ctx) => {
+    if (mcLine.poc) fgI.push({ ...CV_ALL, c: plotC, p: (ctx) => {   // «지표» 팝업 «POC 선»(2026-10-29)
       if (pocPts.length < 2) return;
       let seg = [pocPts[0]];
       const flush = () => { if (seg.length > 1) cvStroke(ctx, seg, "var(--amber)", 1.5, 0.75, null, "round"); seg = []; };
