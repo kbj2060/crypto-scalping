@@ -11,7 +11,7 @@
   watch = 최근 52주 상관이 연구 부호와 같은가(«유효» |r|≥0.15 · «약화» · «이탈» 반대 부호 |r|≥0.15) -- 한 번 뒤집힌 관계가 다시
           뒤집히는지 감시하는 장치(사용자 «반전·신규도 꾸준하면 쓸 수 있는 것으로»). 선행은 미래 13주가 필요해 13주 전에 끝나는 창이다.
   stale = 최근 26주 13주 변화의 흔들림이 ETF 이후 전체의 25% 미만이면 «변동 거의 없음»(RRP 잔고 ≈0 같은 경우)
-원천(모두 키 없는 공개 엔드포인트, 1시간 캐시): FRED fredgraph.csv · DefiLlama 스테이블코인 합계 · 바이낸스 USDⓈ-M 일봉(BTC·ETH).
+원천(1시간 캐시): FRED 정식 API(FRED_API_KEY) · DefiLlama 스테이블코인 합계 · 바이낸스 USDⓈ-M 일봉(BTC·ETH).
   🔴 연구는 Coin Metrics 4종(USDT·USDC·DAI·BUSD) 합을 썼고 여기는 DefiLlama USD 스테이블코인 전체다(13주 변화는 거의 같다).
   🔴 연구는 Yahoo BTC/ETH 일봉 Open[D+1](= D 의 00:00 UTC 종가)을 썼고 여기는 바이낸스 선물 일봉 종가(같은 시각)다.
 🔴 판정은 표본내 상관(ETF 이후 ≈2.8년 · 13주 독립 관측 ≈11)이다 -- 표본외 검증 전, 매매 신호 아님(카드 머리에 고정 표시).
@@ -20,8 +20,9 @@
 from __future__ import annotations
 
 import csv
-import io
 import math
+import os
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -34,7 +35,7 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 VERDICT_CSV = ROOT / "docs/experiments/macro_crypto_correlation_20261027/L_p3_trend_verdict.csv"
 P3_START = "2024-01-12"
-FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}&cosd=2022-01-01"
+FRED_API = "https://api.stlouisfed.org/fred/series/observations"
 LLAMA_URL = "https://stablecoins.llama.fi/stablecoincharts/all"
 KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 Z_NEUTRAL, WATCH_MIN, STALE_RATIO, OLD_DAYS = 0.5, 0.15, 0.25, 21
@@ -98,26 +99,29 @@ def load_spec(path: Path = VERDICT_CSV) -> list[dict]:
 
 
 # ── 원천 ────────────────────────────────────────────────────────────────────────────────────────────
-def parse_fred_csv(text: str) -> pd.Series:
-    """fredgraph.csv(옛 «DATE,ID» · 새 «observation_date,ID» 둘 다). 결측 «.» 은 버린다."""
-    rd = csv.reader(io.StringIO(text))
-    next(rd, None)
-    d, v = [], []
-    for row in rd:
-        if len(row) < 2:
-            continue
-        try:
-            v.append(float(row[1]))
-            d.append(row[0])
-        except ValueError:
-            continue
-    return pd.Series(v, index=pd.to_datetime(d), dtype="float64").sort_index()
+def parse_fred_json(js: dict) -> pd.Series:
+    """FRED API series/observations. 결측 «.» 은 버린다."""
+    ob = [o for o in js["observations"] if o["value"] not in (".", "")]
+    return pd.Series([float(o["value"]) for o in ob], index=pd.to_datetime([o["date"] for o in ob]), dtype="float64").sort_index()
 
 
 def fetch_fred(sid: str) -> pd.Series:
-    r = requests.get(FRED_CSV.format(sid=sid), timeout=25, headers={"User-Agent": "crypto-scalping-dashboard"})
-    r.raise_for_status()
-    return parse_fred_csv(r.text)
+    """정식 API · 키는 서버 .env(server.py 가 시작 때 load_dotenv). 🔴2026-10-28 fredgraph.csv 는 서버에서 TLS 뒤 응답이 없어
+    19개 계열이 전부 25초 시간 초과였다 -- 카드에 스테이블코인 한 줄만 남았다. 같은 서버에서 API 는 19개 모두 받았다."""
+    key = os.getenv("FRED_API_KEY")
+    if not key:
+        raise RuntimeError("FRED_API_KEY 없음")
+    for i in range(3):
+        try:
+            r = requests.get(FRED_API, params={"series_id": sid, "api_key": key, "file_type": "json", "observation_start": "2022-01-01"},
+                             timeout=15)
+            r.raise_for_status()
+            return parse_fred_json(r.json())
+        except requests.RequestException as e:
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if i == 2 or (code is not None and 400 <= code < 500 and code != 429):   # 잘못된 키·계열은 다시 해도 같다
+                raise
+            time.sleep(2 * (i + 1))
 
 
 def fetch_stables() -> pd.Series:
@@ -160,7 +164,7 @@ def fetch_all(spec: list[dict]) -> tuple[dict[str, pd.Series], dict[str, str]]:
             try:
                 out[k] = f.result()
             except Exception as e:   # 원천 하나가 실패해도 카드는 나머지로 그린다 -- 실패는 payload.errors 로 보인다
-                errors[k] = f"{type(e).__name__}: {str(e)[:160]}"
+                errors[k] = re.sub(r"api_key=[^&\s]+", "api_key=***", f"{type(e).__name__}: {str(e)}")[:160]   # 오류 문자열(요청 URL)이 화면으로 간다 -- 키는 지운다
     return out, errors
 
 
@@ -211,7 +215,9 @@ def row_live(g: dict, x: pd.Series, coins: dict[str, pd.Series], today: pd.Times
     recent = p3.iloc[-26:]
     out.update(chg13=cur, z=z, p3_mean=mu, p3_sd=sd, stale=bool(sd > 0 and recent.std() < STALE_RATIO * sd),
                old=bool(today is not None and (today - last_week).days > OLD_DAYS),
-               recent_sd_ratio=float(recent.std() / sd) if sd > 0 else None)
+               recent_sd_ratio=float(recent.std() / sd) if sd > 0 else None,
+               spark=[round(float(v), 4) for v in chg.loc[:last_week].iloc[-52:]],   # 화면 겹친 선 -- 지표의 최근 52주(빈 주는 NaN → null 로 자리 유지)
+               coin13={a: [round(float(v), 4) for v in c.diff(13).reindex(chg.loc[:last_week].index).iloc[-52:]] for a, c in coins.items()})   # 같은 주에 맞춘 코인 쪽
     for asset, research in g["assets"].items():
         c = coins.get(asset)
         sign = 1.0 if research["r_p3"] >= 0 else -1.0
@@ -234,7 +240,46 @@ def row_live(g: dict, x: pd.Series, coins: dict[str, pd.Series], today: pd.Times
         else:
             watch = "약화"
         out["assets"][asset] = {"bias": bias, "roll52": rc, "watch": watch}
+        out["assets"][asset].update(zip(("state", "why"), cell_state(research, out, out["assets"][asset], today)))
     return out
+
+
+def _f(x: float, d: int = 2) -> str:
+    return f"{x:+.{d}f}".replace("-", "−")
+
+
+def cell_state(research: dict, live: dict, la: dict, today: pd.Timestamp | None = None) -> tuple[str, str]:
+    """칸 하나(지표 × 관계 × 코인)의 상태와 이유 한 줄. summarize 가 이 상태로만 센다(규칙이 한 곳).
+    count/zero = 셈(↑↓/중립) · obs = 연구 판정 «관찰»(안 셈) · stale/old/weak/off/unknown = «사용 가능»인데 지금은 안 셈."""
+    r = research["r_p3"]
+    if research["verdict"] != "사용 가능":   # 연구 스크립트의 «사용 가능» 다섯 조건 중 못 넘은 것
+        miss = []
+        if abs(r) < 0.3:
+            miss.append(f"ETF 이후 |r| {abs(r):.2f} < 0.30")
+        if research.get("perm_p") is not None and research["perm_p"] >= 0.05:
+            miss.append(f"순열 p {research['perm_p']:.2f} ≥ 0.05")
+        h = min(abs(research.get("r_first_half") or 0), abs(research.get("r_second_half") or 0))
+        if h < 0.15:
+            miss.append(f"전반·후반 중 약한 쪽 |r| {h:.2f} < 0.15")
+        if research.get("roll52_same_sign") is not None and research["roll52_same_sign"] < 0.75:
+            miss.append(f"52주 굴림 상관 같은 부호 {research['roll52_same_sign']:.0%} < 75%")
+        return "obs", "관찰(안 셈) — 연구 «사용 가능» 기준 미달: " + (" · ".join(miss) or "판정표 기준")
+    if live.get("stale"):
+        return "stale", f"변동 없음(안 셈) — 최근 26주 13주 변화의 흔들림이 ETF 이후의 {live.get('recent_sd_ratio') or 0:.0%} (< 25%)"
+    if live.get("old"):
+        days = (today - pd.Timestamp(live["week"])).days if today is not None else None
+        return "old", f"지연(안 셈) — 마지막 완결 주 {live['week']}{f' ({days}일 전)' if days is not None else ''} · 21일 넘음"
+    rc = la.get("roll52")
+    if la["watch"] == "모름":
+        return "unknown", "감시 모름(안 셈) — 최근 52주 상관을 낼 겹치는 주가 26주 미만"
+    if la["watch"] == "이탈":
+        return "off", f"이탈(안 셈) — 최근 52주 r {_f(rc)} 가 연구 r {_f(r)} 와 반대 부호이고 |r| ≥ 0.15"
+    if la["watch"] == "약화":
+        side = "같은 쪽이지만" if np.sign(rc) == np.sign(r) else "반대 쪽이지만 아직"
+        return "weak", f"약화(안 셈) — 최근 52주 r {_f(rc)}: 연구 r {_f(r)} 와 {side} |r| < 0.15"
+    if la["bias"] == 0:
+        return "zero", f"중립(셈) — 13주 변화가 ETF 이후 분포 {_f(live['z'], 1)}σ (|z| < 0.5)"
+    return "count", f"셈 — 연구 r {_f(r)} · 최근 52주 r {_f(rc)} 유효 · {_f(live['z'], 1)}σ"
 
 
 def summarize(rows: list[dict]) -> dict:
@@ -243,16 +288,16 @@ def summarize(rows: list[dict]) -> dict:
     for asset in ("BTC", "ETH"):
         s = {"co_up": 0, "co_dn": 0, "lead_up": 0, "lead_dn": 0, "neutral": 0, "excluded": 0}
         for r in rows:
-            a, live = r["assets"].get(asset), (r.get("live") or {}).get("assets", {}).get(asset)
-            if not a or a["verdict"] != "사용 가능" or not live:
+            live = (r.get("live") or {}).get("assets", {}).get(asset)
+            st = live and live.get("state")
+            if st in (None, "obs"):
                 continue
-            if r["live"].get("stale") or r["live"].get("old") or live["watch"] != "유효":
-                s["excluded"] += 1
-                continue
-            if live["bias"] == 0:
+            if st == "zero":
                 s["neutral"] += 1
-            else:
+            elif st == "count":
                 s[f"{r['kind']}_{'up' if live['bias'] > 0 else 'dn'}"] += 1
+            else:
+                s["excluded"] += 1
         out[asset] = s
     return out
 
@@ -316,8 +361,15 @@ def _selftest() -> None:
     assert lead["week"] == "2026-10-23", lead["week"]                 # 일요일 기준: 금요일(10-23) 주가 마지막 완결 주
     w = weekly(btc, pd.Timestamp("2026-10-22"))
     assert w.index[-1] == pd.Timestamp("2026-10-16"), w.index[-1]    # 목요일 기준: 이번 주(10-23)는 아직 미완결
-    s = parse_fred_csv("observation_date,X\n2024-01-01,1.5\n2024-01-02,.\n2024-01-03,2\n")
+    s = parse_fred_json({"observations": [{"date": "2024-01-01", "value": "1.5"}, {"date": "2024-01-02", "value": "."},
+                                          {"date": "2024-01-03", "value": "2"}]})
     assert list(s.values) == [1.5, 2.0] and len(s) == 2
+    assert lead["assets"]["BTC"]["state"] in ("count", "zero") and co["assets"]["BTC"]["state"] == "stale", (lead, co)
+    obs = cell_state({"verdict": "관찰", "r_p3": -0.31, "perm_p": 0.08, "r_first_half": -0.4, "r_second_half": -0.1, "roll52_same_sign": 0.9},
+                     {}, {})
+    assert obs[0] == "obs" and "순열 p 0.08" in obs[1] and "0.10 < 0.15" in obs[1] and "|r| 0.31" not in obs[1], obs
+    off = cell_state({"verdict": "사용 가능", "r_p3": -0.37}, {"z": 0.6}, {"watch": "이탈", "roll52": 0.21, "bias": 1})
+    assert off[0] == "off" and "+0.21" in off[1] and "−0.37" in off[1], off
     import json
     json.dumps(json_safe(p), allow_nan=False)                         # 응답에 NaN 이 섞이면 여기서 터진다
     spec_real = load_spec()

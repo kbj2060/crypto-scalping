@@ -2191,7 +2191,7 @@ let latestMacroTrend = null, mtLastFetchAt = 0;
 const MT_TIPS = {
   co: "지금 국면 · 동행 13주: 코인과 같은 13주 동안 같이 움직인 지표다(ETF 이후 2024-01~2026-10 연구). 화살표 = 지난 완결 주의 13주 변화가 «코인 강세 쪽(↑)»인지 «약세 쪽(↓)»인지(변화 부호 × 연구 상관 부호). 13주 변화가 ETF 이후 분포 평균에서 0.5σ 안이면 중립(–).\n앞으로를 말하지 않는다 -- 같은 기간에 같이 간다는 뜻이라 «지금 흐름 확인»용이다. 13주 뒤 수익과의 상관은 유의하지 않았다.",
   lead: "다음 13주 편향 · 선행: 지표의 직전 13주 변화(공표 1주 시차)와 코인의 다음 13주 수익 사이 상관(ETF 이후 연구). 화살표 = 그 상관 부호대로 읽은 다음 13주 편향.\n🔴표본내 상관이다(ETF 이후 ≈2.8년 · 13주 단위 독립 관측 ≈11 · 큰 엔고 충격 2번). 확장 윈도 표본외 검증 전이고, 달러 13주 → 4주 표본외 R² 는 2024–26 에 −1.2% 였다. 크기·진입이 아니라 방향 편향 배경으로만.",
-  sum: "요약: 판정 «사용 가능» 이고 감시 «유효»이며 변동이 살아 있고 데이터가 21일 안인 줄만 센다(나머지는 «제외»). 동행 ↑·↓ = 지금 국면, 선행 ↑·↓ = 다음 13주 편향. 개수 비교일 뿐 가중합이 아니다.",
+  sum: "세는 규칙: 판정 «사용 가능» 이고 감시 «유효»이며 변동이 살아 있고 데이터가 21일 안인 칸만 센다(채운 칸). 나머지는 테두리만 -- 칸에 올리거나 줄을 누르면 왜 안 세는지 나온다. 머리 숫자 = 그 열의 ↑·↓ 개수일 뿐 가중합이 아니다.",
   watch: "감시: 최근 52주 상관이 연구 부호와 같고 |r|≥0.15 면 «유효», 같지만 약하면 «약화», 반대 부호로 |r|≥0.15 면 «이탈»(주황). 선행은 미래 13주가 필요해 13주 전에 끝나는 52주 창이다. 사용자 결정(2026-10-28): 2020–23 대비 뒤집히거나 새로 생긴 관계도 ETF 이후 꾸준하면 쓴다 -- 대신 다시 뒤집히는지 이 칸으로 지켜본다.",
 };
 async function refreshMacroTrend(force) {
@@ -2214,14 +2214,29 @@ const mtFmt = (v, unit) => {
   return `${sign}${Math.abs(v).toFixed(d)}${unit === "$bn" ? "bn" : unit}`;
 };
 const mtR = (v) => (v == null || !Number.isFinite(v) ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)}`);
-function mtTip(r) {   // 줄 이름 «?» 팝업 -- 연구 숫자 · 지금 계산 · 실시간 경로
-  const L = r.live || {}, kind = r.kind === "co" ? "동행 13주(같은 기간)" : "선행 13주(직전 13주 변화 → 다음 13주 수익)";
-  const res = Object.entries(r.assets).map(([a, v]) => {
-    const lv = (L.assets || {})[a] || {};
-    return `${a} · 판정 ${v.verdict} · 2020–23 대비 ${v.vs_2020_23}\n  ETF 이후 상관 ${mtR(v.r_p3)} (순열 p ${v.perm_p == null ? "–" : v.perm_p.toFixed(2)}) · 전반 ${mtR(v.r_first_half)} / 후반 ${mtR(v.r_second_half)} · 2024-06~11 제외 ${mtR(v.r_excl_2024h2)} · 2020–23 ${mtR(v.r_2020_23)}\n  최근 52주 상관 ${mtR(lv.roll52)} → 감시 ${lv.watch || "–"}`;
-  }).join("\n");
-  const now = L.chg13 == null ? "지금 값 없음(원천 실패)" : `지금: ${L.week} 주까지 13주 변화 ${mtFmt(L.chg13, r.unit)} · ETF 이후 분포에서 ${L.z == null ? "–" : (L.z >= 0 ? "+" : "−") + Math.abs(L.z).toFixed(1)}σ${L.stale ? " · 최근 26주 변동이 거의 없음" : ""}${L.old ? " · 데이터가 21일 넘게 지남" : ""}`;
-  return `${kind}\n${res}\n${now}\n실시간: ${r.realtime_note}${r.note ? `\n주의: ${r.note}` : ""}\n계산: 주간 금요일 값의 13주 변화(${r.unit === "%" ? "로그 %" : r.unit === "bp" ? "bp" : r.unit || "지수 차"}). 표본내 연구 · 검증 전 · 신호 아님.`;
+// 2026-10-28 시안 C «지표 × 코인 판»(사용자 선택): 고유 지표 한 줄 × [BTC 지금 · ETH 지금 · BTC 13주 뒤 · ETH 13주 뒤] 칸, 줄을 누르면 오른쪽(좁으면 아래)에 근거.
+//   칸 상태·이유는 서버(macro_trend.cell_state)가 낸다 -- 요약 개수도 같은 상태로 세므로 칸과 머리 합계가 어긋나지 않는다.
+//   채운 칸 = 셈(↑↓, 중립 –) · 테두리만 = 안 셈(약화·변동 없음·지연 회색 / 이탈 주황 / 관찰 흐림). 이유 문장은 칸 title 과 상세 «왜» 줄.
+const MT_FAM = [["주식·위험", ["S&P500", "VIX", "STLFSI"]], ["신용", ["HY스프레드", "Baa스프레드"]], ["금리", ["10Y금리", "기대인플레", "기간프리미엄", "연방기금"]],
+  ["달러·환율", ["달러지수", "USD/JPY", "EUR/USD", "원/달러", "USD/CNY"]], ["유동성", ["순유동성", "연준BS", "지준", "TGA", "RRP", "스테이블코인"]], ["원자재", ["브렌트"]]];
+const MT_CELLS = [["co", "BTC"], ["co", "ETH"], ["lead", "BTC"], ["lead", "ETH"]];
+let mtSel = null;
+function mtOverlay(r, a) {   // 최근 52주: 지표 13주 변화(연구 부호로 맞춤, 위 = 코인 강세 쪽) · 같은 주에 맞춘 코인 13주 수익(서버) · 선행은 지표를 14주(공표 1주 + 13주) 앞으로
+  const L = r.live || {}, spark = L.spark || [], c = (L.coin13 || {})[a] || [];
+  if (spark.filter(Number.isFinite).length < 20 || c.filter(Number.isFinite).length < 20) return "";
+  const z = (xs) => { const v = xs.filter(Number.isFinite), m = v.reduce((p, q) => p + q, 0) / v.length, s = Math.sqrt(v.reduce((p, q) => p + (q - m) ** 2, 0) / v.length) || 1;
+    return xs.map((x) => (Number.isFinite(x) ? (x - m) / s : null)); };
+  const W = 520, H = 120, lead = r.kind === "lead", off = lead ? 14 : 0, x1 = lead ? 14 : 0;
+  const ind = z(spark).map((x) => (x == null || r.assets[a].r_p3 >= 0 ? x : -x)), cz = z(c), n = ind.length, m = cz.length;
+  const X = (i) => ((i + 51) / (51 + x1)) * W, Y = (v) => H / 2 - Math.max(-2.6, Math.min(2.6, v)) / 2.6 * (H / 2 - 5);
+  const d = (xs, from, o) => xs.map((v, i) => (v == null ? "" : `${i && xs[i - 1] != null ? "L" : "M"}${X(i + from + o).toFixed(1)},${Y(v).toFixed(1)}`)).join("");   // 빈 주에서 선을 끊는다
+  const nowX = X(0).toFixed(1), sw = `vector-effect="non-scaling-stroke"`;
+  return `<svg class="mt-ov" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(r.name)} 13주 변화와 ${a} 13주 수익, 최근 52주">
+    ${lead ? `<rect x="${nowX}" y="0" width="${(W - nowX).toFixed(1)}" height="${H}" fill="rgb(var(--lift) / .06)"/>` : ""}
+    <line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="var(--soft-line)" ${sw}/><line x1="${nowX}" x2="${nowX}" y1="0" y2="${H}" stroke="var(--line)" stroke-dasharray="2 3" ${sw}/>
+    <path d="${d(cz, 1 - m, 0)}" fill="none" stroke="var(--muted)" stroke-opacity=".6" stroke-width="1.3" ${sw}/>
+    <path d="${d(lead ? ind.slice(0, n - 14) : ind, 1 - n, off)}" fill="none" stroke="var(--text)" stroke-width="2" ${sw}/>
+    ${lead ? `<path d="${d(ind.slice(n - 15), n - 15 + 1 - n, off)}" fill="none" stroke="var(--text)" stroke-width="2" stroke-dasharray="4 3" ${sw}/>` : ""}</svg>`;
 }
 function renderMacroTrend() {
   const body = el("mtBody"), p = latestMacroTrend;
@@ -2230,46 +2245,61 @@ function renderMacroTrend() {
     body.innerHTML = `<p class="mt-empty muted">${p ? `매크로 데이터를 불러오지 못했다${p.error ? ` — ${escapeHtml(p.error)}` : ""}. 1분 뒤 다시 시도한다.` : "불러오는 중…"}</p>`;
     return;
   }
-  const arrow = (b) => (b > 0 ? `<b class="opt-good">↑</b>` : b < 0 ? `<b class="opt-bad">↓</b>` : `<b class="mt-neu">–</b>`);
-  const watch = (w) => `<i class="mt-w ${w === "유효" ? "ok" : w === "이탈" ? "off" : ""}">${w}</i>`;
-  const gauge = (z) => {
-    if (z == null || !Number.isFinite(z)) return `<span class="mt-g"></span>`;
-    const x = Math.max(-3, Math.min(3, z)), left = 50 + (x / 3) * 50;
-    return `<span class="mt-g" role="img" aria-label="ETF 이후 분포에서 ${z.toFixed(1)}σ"><i style="left:${left.toFixed(1)}%"></i></span>`;
+  const by = (n, k) => p.rows.find((r) => r.name === n && r.kind === k);
+  const names = [...new Set(p.rows.map((r) => r.name))], known = new Set(MT_FAM.flatMap(([, ns]) => ns));
+  const fams = [...MT_FAM.map(([f, ns]) => [f, ns.filter((n) => names.includes(n))]), ["기타", names.filter((n) => !known.has(n))]].filter(([, ns]) => ns.length);
+  const prim = (n) => by(n, "lead") || by(n, "co");
+  const live = (r) => (r && r.live) || {};
+  if (!names.includes(mtSel)) {   // 처음엔 «셈» 칸 중 ETF 이후 위치가 가장 먼 지표
+    const cnt = names.filter((n) => MT_CELLS.some(([k, a]) => ((live(by(n, k)).assets || {})[a] || {}).state === "count"));
+    mtSel = (cnt.length ? cnt : names).sort((x, y) => Math.abs(live(prim(y)).z || 0) - Math.abs(live(prim(x)).z || 0))[0];
+  }
+  const OBS = { obs: " obs", off: " off", weak: " weak", stale: " weak", old: " weak", unknown: " weak" };
+  const tile = (r, a) => {
+    const c = (live(r).assets || {})[a];
+    if (!r || !r.assets[a] || !c) return `<span class="mt-tile na" aria-hidden="true">·</span>`;
+    const ch = c.bias > 0 ? "↑" : c.bias < 0 ? "↓" : "–", base = c.bias > 0 ? "u" : c.bias < 0 ? "d" : "z";
+    return `<span class="mt-tile ${base}${OBS[c.state] || ""}" title="${a} ${r.kind === "co" ? "지금" : "13주 뒤"} · ${escapeHtml(c.why || "")}">${ch}</span>`;
   };
-  const sum = p.summary || {};
-  const sumCell = (a) => {
-    const s = sum[a] || {};
-    return `<div class="mt-sum-a"><span class="mt-coin">${a}</span>
-      <span>지금 <b class="opt-good">↑${s.co_up || 0}</b> <b class="opt-bad">↓${s.co_dn || 0}</b></span>
-      <span>다음 13주 <b class="opt-good">↑${s.lead_up || 0}</b> <b class="opt-bad">↓${s.lead_dn || 0}</b></span>
-      <span class="muted">중립 ${s.neutral || 0} · 제외 ${s.excluded || 0}</span></div>`;
-  };
-  const row = (r) => {
-    const L = r.live || {}, k = `mt:${r.key}`;
-    MT_TIPS[k] = mtTip(r);
-    const assets = ["BTC", "ETH"].filter((a) => r.assets[a]).map((a) => {
-      const v = r.assets[a], lv = (L.assets || {})[a] || {};
-      return `<span class="mt-a${v.verdict === "관찰" ? " obs" : ""}" title="${a} · ${v.verdict} · ETF 이후 상관 ${mtR(v.r_p3)}">${a} ${arrow(lv.bias)} ${watch(lv.watch || "모름")}</span>`;
-    }).join("");
-    const rt = MT_RT[r.realtime] || ["", ""];
-    const flags = `${L.stale ? `<i class="mt-flag">변동 없음</i>` : ""}${L.old ? `<i class="mt-flag">지연 ${L.week}</i>` : ""}`;
-    return `<div class="mt-row"><button type="button" class="mt-q mt-name" ${helpAttrs(k)} title="${escapeHtml(r.name)} — 설명">${escapeHtml(r.name)}${r.note ? "<sup>*</sup>" : ""}<span>?</span></button>
-      <span class="mt-v">${mtFmt(L.chg13, r.unit)}</span>${gauge(L.z)}<span class="mt-as">${assets}${flags}</span>
-      <span class="mt-rt ${r.realtime}" title="${escapeHtml(rt[1])} — ${escapeHtml(r.realtime_note)}">${rt[0]}</span></div>`;
-  };
-  const sec = (kind, title, tip) => {
-    const rows = p.rows.filter((r) => r.kind === kind);
-    return `<section class="mt-sec"><h4><button type="button" class="mt-q" ${helpAttrs(tip)} title="${title} — 설명">${title}<span>?</span></button></h4>
-      <div class="mt-head"><span>지표</span><span>13주 변화</span><span>ETF 이후 위치</span><span>편향 · 감시</span><span>수신</span></div>${rows.map(row).join("")}</section>`;
-  };
-  const week = p.rows.map((r) => r.live && r.live.week).filter(Boolean).sort().pop();
-  const errs = Object.keys(p.errors || {});
-  body.innerHTML = `<div class="mt-sum"><button type="button" class="mt-q" ${helpAttrs("sum")} title="요약 — 설명">요약<span>?</span></button>${sumCell("BTC")}${sumCell("ETH")}
-      <span class="mt-asof muted">기준 주 ${week || "–"}${errs.length ? ` · 원천 실패 ${errs.length}(${escapeHtml(errs.join(", "))})` : ""}</span></div>
-    ${sec("co", "지금 국면 · 동행 13주", "co")}${sec("lead", "다음 13주 편향 · 선행", "lead")}
-    <p class="mt-foot muted">흐린 칸 = 관찰(판정 경계) · <button type="button" class="mt-q" ${helpAttrs("watch")} title="감시 — 설명">감시<span>?</span></button> · 값은 FRED·DefiLlama·바이낸스 일·주 단위(1시간마다 갱신) · 표본내 연구, 신호 아님</p>`;
+  const gauge = (zv) => zv == null || !Number.isFinite(zv) ? `<span class="mt-g"></span>`
+    : `<span class="mt-g" role="img" aria-label="ETF 이후 분포에서 ${zv.toFixed(1)}σ"><i style="left:${(50 + Math.max(-3, Math.min(3, zv)) / 3 * 50).toFixed(1)}%"></i></span>`;
+  const s = p.summary || {}, tot = ([k, a]) => { const x = s[a] || {}; return `<span class="mt-tot" title="${a} ${k === "co" ? "지금" : "13주 뒤"} 셈 칸의 ↑·↓ 개수 · ${a} 전체(지금+13주 뒤) 중립 ${x.neutral || 0} · 안 셈 ${x.excluded || 0}"><b class="opt-good">↑${x[k + "_up"] || 0}</b> <b class="opt-bad">↓${x[k + "_dn"] || 0}</b></span>`; };
+  const q = (k, t) => `<button type="button" class="mt-q" ${helpAttrs(k)} title="${t} — 설명">${t}<span aria-hidden="true">?</span></button>`;
+  const mx = `<div class="mt-mx" aria-label="매크로 지표 × 코인">
+      <span class="mt-h l">지표</span><span class="mt-h r">13주 변화</span><span class="mt-h hx">위치(σ)</span>
+      <span class="mt-h grp">${q("co", "지금 국면")}</span><span class="mt-h grp">${q("lead", "13주 뒤 편향")}</span><span class="mt-h r hx">수신</span>
+      <span class="mt-h"></span><span class="mt-h"></span><span class="mt-h hx"></span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h hx"></span>
+      <span class="mt-tot"></span><span class="mt-tot"></span><span class="mt-tot hx"></span>${MT_CELLS.map(tot).join("")}<span class="mt-tot hx"></span>
+      ${fams.map(([f, ns]) => `<span class="mt-fam">${f}</span>` + ns.map((n) => { const r = prim(n), L = live(r), rt = MT_RT[r.realtime] || ["", ""];
+        return `<div class="mt-r${n === mtSel ? " sel" : ""}"><button type="button" class="mt-nm" data-n="${escapeHtml(n)}" aria-pressed="${n === mtSel}">${escapeHtml(n)}${r.note ? "<sup>*</sup>" : ""}</button>
+          <span class="mt-v">${mtFmt(L.chg13, r.unit)}</span><span class="mt-gw hx">${gauge(L.z)}</span>${MT_CELLS.map(([k, a]) => `<span class="mt-t">${tile(by(n, k), a)}</span>`).join("")}
+          <span class="mt-rt hx" title="${escapeHtml(rt[1])} — ${escapeHtml(r.realtime_note)}">${rt[0]}</span></div>`; }).join("")).join("")}
+    </div>
+    <div class="mt-key"><span><i class="mt-tile u">↑</i><i class="mt-tile d">↓</i>셈</span><span><i class="mt-tile z">–</i>중립 ±0.5σ</span>
+      <span><i class="mt-tile u weak">↑</i>약화·변동 없음·지연</span><span><i class="mt-tile d off">↓</i>이탈</span><span><i class="mt-tile u obs">↑</i>관찰</span>
+      <span>테두리만 = 안 셈 · 칸에 올리거나 줄을 누르면 이유 · ${q("sum", "세는 규칙")} ${q("watch", "감시")}</span></div>`;
+  const rs = [by(mtSel, "co"), by(mtSel, "lead")].filter(Boolean), r0 = rs[rs.length - 1], L0 = live(r0);
+  const a0 = (x) => (x.assets.ETH ? "ETH" : "BTC");
+  const cells = rs.flatMap((x) => ["BTC", "ETH"].filter((a) => x.assets[a]).map((a) => [x, a, x.assets[a], (live(x).assets || {})[a] || {}]));
+  const det = `<h4>${escapeHtml(mtSel)}<span class="mt-v">${mtFmt(L0.chg13, r0.unit)} · ${L0.z == null ? "–" : `${L0.z >= 0 ? "+" : "−"}${Math.abs(L0.z).toFixed(1)}σ`}</span></h4>
+    <p class="mt-meta">${L0.week || "–"} 주까지 13주 변화 · 수신 ${(MT_RT[r0.realtime] || [""])[0]} — ${escapeHtml(r0.realtime_note)}${r0.note ? `<br><b class="mt-warn">주의</b> ${escapeHtml(r0.note)}` : ""}</p>
+    <ul class="mt-why">${cells.map(([x, a, , c]) => `<li><span class="mt-why-k">${a} ${x.kind === "co" ? "지금" : "13주 뒤"}</span>${tile(x, a)}<span>${escapeHtml(c.why || (x.live ? "표본 부족(ETF 이후 13주 변화 30주 미만)" : "지금 값 없음(원천 실패)"))}</span></li>`).join("")}</ul>
+    <div class="mt-tw"><table class="mt-rtab"><thead><tr><th>관계</th><th>판정</th><th>ETF 이후 r</th><th>순열 p</th><th>전반 / 후반</th><th>2020–23</th><th>최근 52주</th></tr></thead>
+      <tbody>${cells.map(([x, a, v, c]) => `<tr><td>${a} ${x.kind === "co" ? "지금" : "13주 뒤"}</td><td>${v.verdict}</td><td>${mtR(v.r_p3)}</td><td>${v.perm_p == null ? "–" : v.perm_p.toFixed(3)}</td><td>${mtR(v.r_first_half)} / ${mtR(v.r_second_half)}</td><td>${mtR(v.r_2020_23)}</td><td>${mtR(c.roll52)}</td></tr>`).join("")}</tbody></table></div>
+    ${rs.map((x) => { const a = a0(x), svg = mtOverlay(x, a); return svg ? `<figure class="mt-ch"><figcaption><span>${a} · ${x.kind === "lead" ? "13주 뒤 — 지표를 14주 앞으로" : "지금 — 같은 13주"}</span><span class="mt-v">최근 52주 r ${mtR(((live(x).assets || {})[a] || {}).roll52)}</span></figcaption>${svg}</figure>` : ""; }).join("")}
+    <p class="mt-meta">굵은 선 = 지표 13주 변화(위 = 코인 강세 쪽) · 회색 = 코인 13주 수익 · 52주 안 표준화(모양만) · 표본내 연구(13주 독립 관측 ≈11), 신호 아님</p>`;
+  const week = p.rows.map((r) => r.live && r.live.week).filter(Boolean).sort().pop(), errs = Object.keys(p.errors || {});
+  const focus = document.activeElement?.closest("#mtBody .mt-nm")?.dataset.n;
+  body.innerHTML = `<div class="mt-wrap"><div class="mt-left">${mx}</div><div class="mt-det">${det}</div></div>
+    <p class="mt-foot muted">기준 주 ${week || "–"} · FRED·DefiLlama·바이낸스 일·주 단위(1시간마다 갱신)${errs.length ? ` · <span class="mt-warn">원천 실패 ${errs.length}(${escapeHtml(errs.join(", "))})</span>` : ""}</p>`;
+  if (focus) body.querySelector(`.mt-nm[data-n="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
 }
+el("mtBody")?.addEventListener("click", (e) => {   // 줄 어디를 눌러도(칸 포함) 그 지표 -- 터치엔 title 이 없어서 이유는 상세에서 본다
+  const b = e.target.closest(".mt-r")?.querySelector(".mt-nm");
+  if (!b) return;
+  mtSel = b.dataset.n; renderMacroTrend();
+  if (matchMedia("(max-width: 1200px)").matches) el("mtBody").querySelector(".mt-det")?.scrollIntoView({ block: "nearest", behavior: "smooth" });   // 한 단이면 상세가 표 아래
+});
 
 // ── 풋프린트 카드 머리 띠 (2026-10-06 사용자 선택 C) -- 미 국채선물 4종 · 뉴스 기울기 1시간 · ETH/BTC/매크로 게이지(가로) ──
 //   넓은 화면(2단)에서만 보인다(styles.css .fp-strip). 한 화면 모드는 카드가 세로 flex 라 띠 높이만큼 차트 칸이 줄고 카드 높이는 그대로다.

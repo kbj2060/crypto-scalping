@@ -83,8 +83,9 @@ class ComputeTest(unittest.TestCase):
         w = mt.weekly(synth()["BTC"], pd.Timestamp("2026-10-22"))   # 목요일 -- 10-23 주는 아직 안 끝났다
         self.assertEqual(w.index[-1], pd.Timestamp("2026-10-16"))
 
-    def test_fred_csv_parser(self):
-        s = mt.parse_fred_csv("DATE,X\n2024-01-01,1.5\n2024-01-02,.\n2024-01-03,2\n")
+    def test_fred_json_parser(self):
+        s = mt.parse_fred_json({"observations": [{"date": "2024-01-01", "value": "1.5"}, {"date": "2024-01-02", "value": "."},
+                                                 {"date": "2024-01-03", "value": "2"}]})
         self.assertEqual(list(s.values), [1.5, 2.0])
 
     def test_payload_json_safe_and_partial_failure(self):
@@ -110,10 +111,11 @@ class ComputeTest(unittest.TestCase):
             calls.append(url)
             r = mock.Mock()
             r.raise_for_status = mock.Mock()
-            if "fredgraph" in url:
-                if "DEXJPUS" in url:
-                    raise ConnectionError("down")
-                r.text = "observation_date,X\n" + "\n".join(f"{d.date()},{1 + i * 0.001}" for i, d in enumerate(DAYS))
+            if "stlouisfed" in url:
+                self.assertEqual(params["api_key"], "k-secret")
+                if params["series_id"] == "DEXJPUS":
+                    raise mt.requests.ConnectionError(f"down {url}?series_id=DEXJPUS&api_key=k-secret")
+                r.json = mock.Mock(return_value={"observations": [{"date": str(d.date()), "value": str(1 + i * 0.001)} for i, d in enumerate(DAYS)]})
             elif "llama" in url:
                 r.json = mock.Mock(return_value=[{"date": str(int(d.timestamp())), "totalCirculatingUSD": {"peggedUSD": 1e11 + i}} for i, d in enumerate(DAYS)])
             else:
@@ -121,9 +123,13 @@ class ComputeTest(unittest.TestCase):
                                                  for i, d in enumerate(DAYS)])
             return r
 
-        with mock.patch.object(mt.requests, "get", side_effect=fake_get):
+        with mock.patch.object(mt.requests, "get", side_effect=fake_get), mock.patch.dict(mt.os.environ, {"FRED_API_KEY": "k-secret"}), \
+                mock.patch.object(mt.time, "sleep"):
             raw, errors = mt.fetch_all(spec)
         self.assertIn("DEXJPUS", errors)
+        self.assertNotIn("k-secret", json.dumps(errors))            # 오류 문자열은 화면으로 간다 -- 키가 새면 안 된다
+        with mock.patch.dict(mt.os.environ, {"FRED_API_KEY": ""}):
+            self.assertRaises(RuntimeError, mt.fetch_fred, "DGS10")
         self.assertIn("BTC", raw)
         self.assertIn("stables", raw)
         self.assertTrue(all(("stlouisfed" in u) or ("llama" in u) or ("binance" in u) for u in calls))
