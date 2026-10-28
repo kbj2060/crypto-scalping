@@ -3193,7 +3193,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mt-nm sup, .mt-why sup { color: var(--muted); font-size: 9px; }
 .mt-v { justify-content: flex-end; font: 600 11.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
 .mt-t { justify-content: center; }
-.mt-rt { justify-content: flex-end; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.mt-rt { justify-content: flex-start; font-size: 10.5px; color: var(--muted); white-space: nowrap; }   /* 10-28 사용자 «초록불과 글자 간격 똑같이» -- 왼쪽 정렬이라 불이 한 줄로 선다(글자 길이와 무관) */
 .mt-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-right: 6px; background: var(--muted); }   /* 수신 불(10-28 사용자 «초록불/빨간불») */
 .mt-dot.ok { background: var(--good); } .mt-dot.bad { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); } .mt-dot.wait { opacity: .5; }
 .mt-gw .mt-g { width: 100%; }

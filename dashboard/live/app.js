@@ -2404,7 +2404,7 @@ function renderMacroTrend() {
   const rowsT = ["auto auto auto", ...fams.map(([, ns]) => `auto${" minmax(22px, 1fr)".repeat(ns.length)}`)].join(" ");
   const mx = `<div class="mt-mx" style="grid-template-rows:${rowsT}" aria-label="매크로 지표 × 코인">
       <span class="mt-h l">지표</span><span class="mt-h r">13주 변화</span><span class="mt-h">오늘 24h</span><span class="mt-h hx">위치(σ)</span>
-      <span class="mt-h grp">${q("co", "지금 국면")}</span><span class="mt-h grp">${q("lead", "13주 뒤 편향")}</span><span class="mt-h r hx">수신</span>
+      <span class="mt-h grp">${q("co", "지금 국면")}</span><span class="mt-h grp">${q("lead", "13주 뒤 편향")}</span><span class="mt-h l hx">수신</span>
       <span class="mt-h"></span><span class="mt-h"></span><span class="mt-h"></span><span class="mt-h hx"></span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h hx"></span>
       <span class="mt-tot"></span><span class="mt-tot"></span><span class="mt-tot"></span><span class="mt-tot hx"></span>${MT_CELLS.map(tot).join("")}<span class="mt-tot hx"></span>
       ${fams.map(([f, ns]) => `<span class="mt-fam">${f}</span>` + ns.map((n) => { const r = prim(n), L = live(r), fd = mtFeed(r, n);
