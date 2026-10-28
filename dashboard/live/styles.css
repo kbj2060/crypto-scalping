@@ -3077,8 +3077,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 
 /* 2026-10-15 ⑤ 예측 줄(사용자 시안 B): 지금 추세 → 4h(+변동성) → 7일 → 4~13주. 가로 선 = 시간축, 칸 = 지평. 휴대폰은 2×2 */
 .mc-fc { border-top: 1px solid var(--soft-line); padding-top: 8px; }
-.fc-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }   /* 10-15 칼시 칸 추가 · 10-28 4~13주 칸 뺌(Macro Trend 카드로) · 10-28 시안 A 칼시 칸 → 15분·1시간 예측 */
-.fc-c .sub.fc-k { opacity: .85; }   /* 10-28 15분 예측 칸 아래 칼시 한 줄 */
+.fc-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }   /* 10-28 4~13주 칸 뺌(Macro Trend 카드로) · 10-28 시안 A 15분·1시간 예측 칸 */
 .fc-c { --fc: var(--muted); position: relative; display: flex; flex-direction: column; gap: 2px; padding: 0 8px 2px; min-width: 0; cursor: help; }
 .fc-c + .fc-c { border-left: 1px dashed var(--soft-line); }
 .fc-c.up { --fc: var(--good); } .fc-c.dn { --fc: var(--bad); }

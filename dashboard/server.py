@@ -1068,7 +1068,6 @@ def breakout_detector_payload(asset: str = "eth") -> dict[str, Any]:
                           extra_missing={"history": [], "times": []})
 
 
-KALSHI_ETH15M_URL = "https://api.elections.kalshi.com/trade-api/v2/markets"
 # 2026-10-08 Option 카드 «닿음 등고선»(사용자 시안 3 선택): 가까운 만기 행사가별 IV. 수집기 상태 파일엔 ATM·25Δ 세 점뿐인데,
 #   짧은 만기는 날개 IV 가 가팔라 세 점 근사가 꼬리를 절반으로 낮춘다(10% 등고선 2,521 vs 행사가별 2,506 · 청산가 닿음 8% vs 16%).
 DERIBIT_BOOK_URL = "https://www.deribit.com/api/v2/public/get_book_summary_by_currency"
@@ -1106,25 +1105,6 @@ def front_smile(rows: list[dict], now_ms: float) -> dict[str, Any]:
     if not (grid.min() > 0.03 and grid.max() < 5):
         return {"ok": False, "reason": "bad_fit", "exp_ms": exp}
     return {"ok": True, "exp_ms": exp, "S": S, "coef": [float(c) for c in coef], "xlim": SMILE_XLIM, "n": len(ivk)}
-
-
-def kalshi_pick(markets: list[dict], now: float) -> dict[str, Any]:
-    """칼시 KXETH15M «열린» 시장 목록에서 지금 창 하나를 골라 화면용으로 줄인다. 참고 표시 · 신호 아님.
-
-    확률 = 위(Yes) 호가 가운데. 창 경계에서는 다음 창이 같이 열려 있을 수 있어 open<=now<close 를 먼저,
-    없으면 가장 먼저 닫히는 것. 기준가(floor_strike)는 창이 열린 뒤 60초 평균이 정해져야 채워진다 -- 없으면 None."""
-    def ts(s: str) -> float:
-        return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
-    rows = [(ts(m["open_time"]), ts(m["close_time"]), m) for m in markets if m.get("open_time") and m.get("close_time")]
-    live = [r for r in rows if r[0] <= now < r[1]] or sorted(rows, key=lambda r: r[1])[:1]
-    if not live:
-        return {"ok": False, "reason": "no_open_market"}
-    o, c, m = live[0]
-    bid, ask = float(m.get("yes_bid_dollars") or 0), float(m.get("yes_ask_dollars") or 0)
-    strike = m.get("floor_strike")
-    return {"ok": True, "ticker": m.get("ticker"), "open_ts": int(o), "close_ts": int(c),
-            "strike": float(strike) if strike else None, "bid": bid, "ask": ask,
-            "p": (bid + ask) / 2 if ask > 0 else None, "volume": float(m.get("volume_fp") or 0)}
 
 
 def gex_payload() -> dict[str, Any]:
@@ -4296,20 +4276,6 @@ def make_app() -> web.Application:
             "gex", 60.0, lambda: asyncio.to_thread(gex_payload), max_stale=STALE_GRACE_SECONDS)
         return web.json_response(payload, headers=NOCACHE)
 
-    async def kalshi_payload() -> dict[str, Any]:
-        try:
-            j = await fetch_binance_json(KALSHI_ETH15M_URL, {"series_ticker": "KXETH15M", "status": "open"}, timeout=3.0)
-        except (asyncio.TimeoutError, ClientError, ValueError):   # 칼시가 죽어도 화면은 선만 안 그린다
-            j = None
-        if not j:
-            return {"ok": False, "reason": "kalshi_unavailable"}
-        return {**kalshi_pick(j.get("markets") or [], time.time()), "fetched_ts": time.time()}
-
-    async def api_kalshi(request: web.Request) -> web.Response:
-        # 사용자 지시 «매 1초»(2026-09-28). 캐시 1초라 브라우저가 몇 개든 칼시로는 초당 1회뿐(기본 한도 20/초).
-        payload = await swr_cached("kalshi", 1.0, kalshi_payload, max_stale=5.0)
-        return web.json_response(payload, headers=NOCACHE)
-
     async def opt_smile_payload(cur: str) -> dict[str, Any]:
         try:
             j = await fetch_binance_json(DERIBIT_BOOK_URL, {"currency": cur, "kind": "option"}, timeout=6.0)
@@ -4560,7 +4526,6 @@ def make_app() -> web.Application:
 
     app.router.add_get("/api/breakout-detector", api_breakout_detector)
     app.router.add_get("/api/gex", api_gex)
-    app.router.add_get("/api/kalshi", api_kalshi)
     app.router.add_get("/api/opt-smile", api_opt_smile)
     app.router.add_get("/api/flow/heatmap", api_flow_heatmap)
     app.router.add_get("/api/bubble-tape", api_bubble_tape)   # 2026-10-13 체결 버블(bubble_map.js)

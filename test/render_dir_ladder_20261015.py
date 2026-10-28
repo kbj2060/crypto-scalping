@@ -9,7 +9,7 @@
 검사(1920·1700·390): #optChip 없음 · 1920 은 코인 탭과 같은 줄 · 알약 둘 = «지금 추세»(따로) | «7일 예측 · 4~13주 예측» · 일 단위 칸 판정이 응답과 같음
   · ⑤ 예측 판(10-15 시안 B): ⑤ 뉴스 판 없음 · 칸 «지금 추세 · 4h 예측 · 7일 예측 · 4~13주 예측» · 1920 판 줄 ①②④ 셋 · 4h 칸 변동성 줄
     (/api/vol-forecast 는 가짜 응답 -- 모델 아티팩트가 서버에만 있다) · 1920 이상 시장 맥락 칸 안 스크롤 없음
-    (10-15 1초 수급 하한 30 → 22% 로 1700 도 스크롤 없음) · 4h 칸 = 방향(가짜 /api/dir4h) + 변동성 · ①②④ 제목 없음(«?» 는 상태 줄) · ⑥ 그래프 40px · 10-15(2) 칼시 = 예측 줄 칸(가짜 /api/kalshi) · 가격판 5분·1시간 폭·칼시 눈금 없음
+    (10-15 1초 수급 하한 30 → 22% 로 1700 도 스크롤 없음) · 4h 칸 = 방향(가짜 /api/dir4h) + 변동성 · ①②④ 제목 없음(«?» 는 상태 줄) · ⑥ 그래프 40px · 가격판 5분·1시간 폭 글자 없음
   · 머리 줄 밖으로 안 넘침 · 페이지 가로 스크롤 없음 · 휴대폰 칸 높이 ≥40px · JS 오류 0 · down 이면 일 단위 칸은 «-».
 """
 import argparse, json, pathlib, sys, time
@@ -37,10 +37,9 @@ PROBE = """() => {
                       vol: fc ? [...fc.querySelectorAll('.fc-c')][2].innerText.split('\\n').slice(3).join(' ') : null,
                       clipped: b.classList.contains('mc-cmp') && b.scrollHeight > b.clientHeight + 2,
                       over: fc ? [...fc.querySelectorAll('.fc-c, .fc-c .sub')].some((c) => c.scrollWidth > c.clientWidth + 1) : null,   // 줄임표(…)도 실패
-                      kal: fc ? ((fc.querySelectorAll('.fc-c')[1] || {}).querySelector('b') || {}).textContent : null,
                       d4: fc ? ((fc.querySelectorAll('.fc-c')[2] || {}).querySelector('b') || {}).textContent : null,
                       stripH4: b.querySelectorAll('.mc-strip > .mc-sec h4').length, q1: b.querySelectorAll('.mc-strip .mc-q1').length,
-                      chartMarks: [...document.querySelectorAll('svg text')].map((t) => t.textContent).filter((x) => /^(5분|1시간) [±폭]|^칼시 /.test(x)).length,
+                      chartMarks: [...document.querySelectorAll('svg text')].map((t) => t.textContent).filter((x) => /^(5분|1시간) [±폭]/.test(x)).length,
                       rateH: [...b.querySelectorAll('.mc-rate .mc-svg')].map((g) => Math.round(g.getBoundingClientRect().height)) }; })(),
            minH: segs.length ? Math.round(Math.min(...segs.map((s) => s.getBoundingClientRect().height))) : 0 };
 }"""
@@ -80,12 +79,6 @@ def run(shot):
                 pg.route(URL, lambda r: r.fulfill(body=html, content_type="text/html"))
                 pg.route("**/api/dir-signals*", api_for(json.dumps(body)))
                 pg.route("**/api/vol-forecast*", api_for(json.dumps(VOL if case == "live" else {"ok": False, "reason": "artifact_missing"})))
-                def kal_for(live):   # 🔴핸들러는 인자 하나 -- 둘이면 Playwright 가 두 번째로 Request 를 넘긴다
-                    def kal(r):
-                        now = time.time()
-                        r.fulfill(body=json.dumps({"ok": True, "strike": 2365.5, "p": 0.62, "fetched_ts": now, "close_ts": now + 400} if live else {"ok": False}), content_type="application/json")
-                    return kal
-                pg.route("**/api/kalshi*", kal_for(case == "live"))
                 pg.route("**/api/dir4h*", api_for(json.dumps({**D4, "decided_at_ms": int(time.time() * 1000) - 60_000} if case == "live" else {"ok": False, "reason": "artifact_missing"})))
                 pg.goto(URL, wait_until="load", timeout=60000)
                 pg.wait_for_timeout(12000)
@@ -99,12 +92,11 @@ def run(shot):
                 if w >= 1920 and not got["row1"]: fails.append(f"[{tag}] 1920 에서 사다리가 둘째 줄로 내려감 ({got['wpx']}px)")
                 fc = got["fc"] or {}
                 if fc.get("news"): fails.append(f"[{tag}] ⑤ 뉴스 판이 남아 있음")
-                if fc.get("hz") != ["지금 추세", "15분 · 칼시", "4h 예측", "7일 예측", "4~13주 예측"]: fails.append(f"[{tag}] 예측 칸 {fc.get('hz')}")
+                if fc.get("hz") != ["지금 추세", "15분 예측", "1시간 예측", "4h 예측", "7일 예측"]: fails.append(f"[{tag}] 예측 칸 {fc.get('hz')}")
                 if w > 500 and fc.get("strip") != 3: fails.append(f"[{tag}] 판 줄 {fc.get('strip')}칸")
                 want_vol = "σ ±1.32% · ×1.49" if case == "live" else "변동 불러오는 중"
                 if fc.get("vol") != want_vol: fails.append(f"[{tag}] 변동성 줄 {fc.get('vol')!r}")
-                if fc.get("kal") != ("▲ 위 62%" if case == "live" else "-"): fails.append(f"[{tag}] 칼시 칸 {fc.get('kal')!r}")
-                if fc.get("chartMarks"): fails.append(f"[{tag}] 가격판에 5분·1시간 폭/칼시 글자 {fc.get('chartMarks')}")
+                if fc.get("chartMarks"): fails.append(f"[{tag}] 가격판에 5분·1시간 폭 글자 {fc.get('chartMarks')}")
                 if fc.get("d4") != ("▼ 하락" if case == "live" else "-"): fails.append(f"[{tag}] 4h 판정 {fc.get('d4')!r}")
                 if w > 500 and (fc.get("stripH4") or fc.get("q1") != 3): fails.append(f"[{tag}] ①②④ 제목 {fc.get('stripH4')} · ? {fc.get('q1')}")
                 if w > 500 and fc.get("rateH") and min(fc["rateH"]) < 40: fails.append(f"[{tag}] ⑥ 그래프 {fc.get('rateH')}")

@@ -601,10 +601,6 @@ const flowHeatmapPollMs = () => 1000;
 // 2026-09-19 호가 히트맵. 래스터는 1초/열인데 agg=3 으로 접어 받으므로 3초면 새 열이 하나다.
 let latestGex = null;
 let gexLastFetchAt = 0;
-// 2026-09-28 칼시 15분 ETH 위/아래 확률(사용자 선택 B · «매 1초»). 서버 /api/kalshi 가 1초 캐시.
-const KALSHI_POLL_MS = 1000;
-let latestKalshi = null;
-let kalshiLastFetchAt = 0;
 let latestFlowHeatmap = null;
 let flowHeatmapLastFetchAt = 0;
 let latestLiquidation5mHist = [];
@@ -3855,33 +3851,6 @@ async function refreshGex() {
   }
 }
 
-async function refreshKalshi() {
-  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
-  const now = Date.now();
-  if (now - kalshiLastFetchAt < KALSHI_POLL_MS) return;
-  kalshiLastFetchAt = now;
-  try {
-    const res = await fetch("/api/kalshi", { cache: "no-cache" });
-    if (!res.ok) throw new Error(`kalshi ${res.status}`);
-    latestKalshi = await res.json();
-  } catch (error) {
-    latestKalshi = null;   // 선을 지운다 -- 묵은 확률을 지금 값처럼 두지 않는다
-  }
-}
-
-// 칼시 창이 지금 유효하면 {k, pct, color, word}. 서버가 10초 넘게 못 받았거나 창이 끝났으면 null.
-function kalshiNow() {
-  const k = latestKalshi;
-  if (activeSnapshotAsset !== "eth" || !k || !k.ok || !(k.strike > 0) || k.p == null) return null;
-  const nowS = Date.now() / 1000;
-  if (nowS - k.fetched_ts > 10 || nowS >= k.close_ts) return null;
-  const pct = Math.round(k.p * 100);
-  // 5pp 안쪽은 «비등» -- 방향색을 주지 않는다(DESIGN.md 비등 규칙과 같은 폭).
-  const up = pct >= 55, dn = pct <= 45;
-  return { k, pct, color: up ? "var(--good)" : dn ? "var(--bad)" : "var(--muted)",
-           word: dn ? `아래 ${100 - pct}%` : up ? `위 ${pct}%` : `비등 위 ${pct}%` };
-}
-
 async function refreshFlowHeatmap() {
   if (activePageTab !== "snapshot" || document.hidden) return;
   if (!flowOn()) return;   // 래스터 수집기가 있는 코인만
@@ -4158,7 +4127,7 @@ function fcTrendCell(t, cell) {
     tags + `<span class="sub">일 전 종가보다 위 ${ups} · 아래 ${n - ups}</span><span class="sub">${t.age_days}일째 · 매일 09시 마감</span>`).replace('<span class="sub"></span>', "");
 }
 
-// ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분 칼시(10-15) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
+// ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분·1시간 예측(10-28) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
   const eth = activeSnapshotAsset === "eth", v = latestVol4h && latestVol4h.ok && (latestVol4h.asset || "eth") === activeSnapshotAsset
@@ -4207,12 +4176,10 @@ function fcRowHtml(sec) {
     + "2023~26 결합 샤프 1.56(3자산 1.75) · 과거에서 고른 조합 — 전진 판정 2027-03-14 이후 · 참고용";
   const fcSum = `<span class="fc-sum ${cls(net)}" title="${escapeHtml(sumTip)}">종합 <b>${net > 0 ? "▲ 롱 쪽" : net < 0 ? "▼ 숏 쪽" : "중립"}</b>`
     + `${net ? `<small>${agree}/3</small>` : ""}${parts.map((p) => `<i class="${p[1] ? cls(p[1]) : ""}">${p[0]} ${pw(p[1])}</i>`).join("")}</span>`;
-  const kn = kalshiNow(), kLeft = kn ? Math.max(0, Math.round(kn.k.close_ts - Date.now() / 1000)) : 0;
-  const kTip = "칼시(미국 규제 예측시장) 15분 ETH 위/아래 — 창 마감 때 기준가보다 위일 확률 · 55~45% 사이는 비등\n참고 · 신호 아님(확률은 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침)";
-  // 2026-10-28 시안 A(사용자 선택): 칼시 칸 자리 = «15분 예측»(칼시는 그 칸 아래 한 줄) + «1시간 예측».
+  // 2026-10-28 시안 A(사용자 선택): «15분 예측» + «1시간 예측».
   //   분위 = 표본 밖 예측(2026-06~10, 41,760봉) 중 자리 · 하위/상위 20% 밖만 방향(4h 칸과 같은 규칙) · ○ = 한 지평 전
   const gs = eth && latestDirShort && latestDirShort.ok ? latestDirShort : null, oldS = gs && Date.now() - gs.decided_at_ms > 15 * 60e3;
-  const sCell = (nm, ko, back, col, extra = "") => {
+  const sCell = (nm, ko, back, col) => {
     const p = gs && gs.pred && !oldS ? gs.pred[nm] : null, hist = gs ? gs.hist || [] : [];
     const ago = hist[hist.length - 1 - back], acc = nm === "15m" ? ["56", "51"] : ["55", "52"];
     const fail = latestDirShort && !latestDirShort.ok ? latestDirShort.reason || "?" : "";
@@ -4229,15 +4196,13 @@ function fcRowHtml(sec) {
     const X = (v) => Math.max(0, Math.min(100, v)).toFixed(1);
     const gauge = p ? `<span class="d4g" aria-hidden="true"><i class="z dn" style="width:20%"></i><i class="z up" style="left:80%"></i>`
       + (ago ? `<u class="ago" style="left:${X(ago[col])}%"></u>` : "") + `<u style="left:${X(p.pct)}%"></u></span>` : "";
-    return cell(`${ko} 예측`, p ? cls(p.signal) : "flat", p ? word(p.signal) : "-", sub, tip, gauge + extra);
+    return cell(`${ko} 예측`, p ? cls(p.signal) : "flat", p ? word(p.signal) : "-", sub, tip, gauge);
   };
-  const kLine = `<span class="sub fc-k" title="${escapeHtml(kn ? `${kTip}\n기준가 ${Number(kn.k.strike).toFixed(2)} · 창 마감까지 ${Math.floor(kLeft / 60)}분 ${kLeft % 60}초` : kTip)}">칼시 ${!kn ? (eth ? "창 대기" : "-") : kn.pct >= 55 ? `위 ${kn.pct}%` : kn.pct <= 45 ? `아래 ${100 - kn.pct}%` : `비등 ${kn.pct}%`}`
-    + `${kn ? ` · ${Math.floor(kLeft / 60)}:${String(kLeft % 60).padStart(2, "0")}` : ""}</span>`;
   // 2026-10-17 펜 메모 «타이틀 제거 · 예측은 지금 유지»: 제목 단추(⑤ 예측 · 지금에서 멀리 ?)를 빼고 종합 칩만 머리에 -- 설명은 머리 툴팁
   return `<div class="mc-sec mc-fc"><h4>${eth ? fcSum : ""}${mcTipBtn("q_fc", "⑤ 예측 · 지금에서 멀리")}</h4><div class="fc-row">`
     + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
-    + sCell("15m", "15분", 3, 1, kLine) + sCell("1h", "1시간", 12, 2)
+    + sCell("15m", "15분", 3, 1) + sCell("1h", "1시간", 12, 2)
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge + volLine)
     + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)")
     + `</div></div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
@@ -4295,7 +4260,6 @@ MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위
 MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아니다(지난 7·14·28·56·90일 종가 대비 5표, 미래 적중 48~58%).\n"
   + "15분·1시간 예측 = 매달 재학습 LightGBM(ETH 65피쳐 + 호가 깊이 10열 · 표적 4종 × 시드 5) · 표본 밖 예측(2026-06~10) 하위·상위 20% 밖만 방향 · "
   + "그 밖 적중 15분 56% · 1시간 55%(안쪽 51~52%) · 호가 깊이 예열 중(워커 재시작 뒤 12시간)이면 비움 · 참고용(전진 판정 전).\n"
-  + "칼시 = 15분 칸 아래 줄 · 미국 예측시장 15분 ETH 위/아래 확률(55~45% 비등) — 참고, 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침.\n"
   + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 과거 표본 밖 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
   + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65%.\n"
   + "4~13주 = Macro Trend 카드(달러지수·순유동성 등 지표별 13주 변화 · ETF 이후 기준).\n"
@@ -7753,8 +7717,6 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
 
   // 2026-09-30 30분 도달 선 제거(사용자 지시 -- «±0.5×30분 폭에 닿는가»는 옵션 예상 폭 띠와 같은 크기 정보라 중복).
 
-  // 2026-10-15 칼시 15분 눈금은 가격판에서 빼고 ⑤ 예측 줄 «15분 · 칼시» 칸으로(사용자 지시) -- fcRowHtml.
-
   // 2026-10-12 시안 A «가격축 자»: 플롯 오른쪽 끝에 현재가 → 위·아래 첫 청산 띠 가장자리 괄호 + 거리($·%). 가까운 쪽 진하게.
   //   화면 밖이면 플롯 끝까지만 긋고 끝 눈금을 뺀다(거리 숫자는 그대로).
   if (lastSnap && currentPrice > 0) {
@@ -8903,7 +8865,6 @@ async function tick() {
       refreshOb5m();                 // 2026-10-26 5분 호가 요약(자체 15초 게이트)
       refreshFlowHeatmap();          // 2026-09-19 호가 히트맵(프로파일 왼쪽 절반)
       refreshGex();                  // 2026-09-19 옵션 감마 노출(참고 표시 · 신호 아님)
-      refreshKalshi();               // 2026-09-28 칼시 15분 확률 (1초, ETH 만 · 참고 · 신호 아님)
       refreshSupply1s();             // 2026-09-19 최근 5분 x 1초 수급
       refreshOi5m();                 // 2026-09-19 OI 신규계약 5분 누적 (자체 15초 게이트)
       refreshPositionProfile();      // 2026-10-10 체결 기둥 «포지션» 보기 (켤 때만 1초)
