@@ -2455,7 +2455,7 @@ async function refreshXyz() {
     const p = await res.json();
     if (Number.isFinite(p.now_sec)) xyzSkew = p.now_sec - Date.now() / 1000;
     if (!p.ok) { xyzLive = null; return; }
-    if (p.full || !xyzBars.length) xyzBars = p.bars;
+    if (p.full || !xyzBars.length) { const first = !xyzBars.length; xyzBars = p.bars; if (first && latestMacroTrend) renderMacroTrend(); }   // 첫 24시간이 오면 Macro Trend «오늘» 칸을 바로(1분 기다리지 않게)
     else if (p.bars.length) {
       const t0 = p.bars[0][0], cut = p.bars[p.bars.length - 1][0] - 86400;
       xyzBars = xyzBars.filter((b) => b[0] < t0 && b[0] >= cut).concat(p.bars);
