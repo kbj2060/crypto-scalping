@@ -2704,6 +2704,14 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .mc-chip-pair { display: inline-flex; }
 .mc-chip-pair > .mc-chip:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .mc-chip.sub { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 1px; font-weight: 500; }
+/* 2026-10-29 VWAP 선 굵기·모양·색 고르기(«지표» 팝업) -- 세 묶음은 붙은 칩(mc-chip-pair), 이름은 휴대폰에서도 보인다 */
+.mc-vw-opt { gap: 6px; }
+.mc-vw-t { font-size: 11px; color: var(--muted); margin-right: 2px; }
+.mc-chip-pair > .mc-vw:not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 1px; }
+.mc-chip-pair > .mc-vw:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.mc-vw { font-weight: 500; gap: 5px; }
+.mc-vw-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--sw); opacity: .45; }
+.mc-chip:has(input:checked) .mc-vw-dot { opacity: 1; }
 /* 견본 = 그 선의 색·모양(이동평균 실선 · VWAP·앵커·볼린저 점선) -- 차트 위 이름을 가격 칸으로 뺐으니(최신 봉을 가렸다) 색은 여기서 읽는다. 꺼지면 옅게 */
 .mc-sw-key { flex: none; width: 14px; height: 3px; border-radius: 2px; background: var(--sw); opacity: .35; }
 .mc-sw-key.dash { height: 2px; border-radius: 0; background: repeating-linear-gradient(90deg, var(--sw) 0 4px, transparent 4px 7px); }

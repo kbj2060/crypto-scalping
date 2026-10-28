@@ -1051,6 +1051,7 @@ function mergeFormingCandle(prev, next, nowS, barMin = CHART_CANDLE_MIN) {
     b.high = Math.max(b.high, a.high);
     b.low = Math.min(b.low, a.low);
     if (b.partial) b.close = a.close;
+    if (a.lvol) b.lvol = a.lvol;   // 화면이 센 형성 봉 거래량(formingVwap)
   }
   // 🔴2026-10-11 사용자 «PC에서 진행 중인 봉이 실제 봉과 달라». ETH 서버는 마감봉만, 그것도 닫힌 뒤 ~50초에 준다(서버 실측).
   //   통째로 갈아 끼우면 라이브가 만든 형성 봉(·아직 안 온 직전 봉)이 버려지고 updateSnapshotCandleLive 가 **지금 가격으로**
@@ -3014,13 +3015,32 @@ function nearestLiquidationLevel() {
 // still inside its 5-min bucket, or push a fresh one once the live tick crosses into a new bucket.
 // 체결 하나 = 형성 봉 한 번 갱신(2026-10-11). 렌더 틱(400ms)에서만 반영하면 그 사이 고저를 놓치고, 봉 시각을 SSE 시각(1초 묵음)으로
 //   갈라 경계의 첫 체결이 직전 봉에 들어갔다. 바이낸스 @trade 가 거래소 봉의 원천이라 체결가·체결 시각을 그대로 쓴다.
-function noteLiveTrade(asset, price, tsMs) {
+function noteLiveTrade(asset, price, tsMs, qty = 0) {
   latestLivePriceByAsset[asset] = price;
   latestLivePriceTsByAsset[asset] = new Date(tsMs).toISOString();
-  if (asset === activeSnapshotAsset) updateSnapshotCandleLive();
+  if (asset === activeSnapshotAsset) updateSnapshotCandleLive(qty);
 }
 
-function updateSnapshotCandleLive() {
+// 2026-10-29 사용자 «VWAP 이 현재 5분봉에서도 현재가에 맞게» -- 서버는 마감봉까지만 VWAP 을 준다. 형성 봉은 직전 봉 누적 거래량(vcum·svcum)에
+//   이 봉 대표가((고+저+종)/3)×거래량을 더해 센다(market_ctx.session_vwap 과 같은 식). 거래량 = max(서버 형성 봉 값, 이 화면이 @trade 로 센 lvol).
+//   ponytail: 유럽·미국 개장 봉은 화면이 세션 경계를 몰라 그 5분만 직전 세션에 이어 센다 -- 서버 마감봉이 오면 바로잡힌다.
+function formingVwap(cs) {
+  const c = cs[cs.length - 1], p = cs[cs.length - 2];
+  if (!c || !p || (c.vwap && !c.vlive)) return;
+  const v = Math.max(+c.volume || 0, c.lvol || 0), tp = (c.high + c.low + c.close) / 3;
+  const newDay = Math.floor(c.time / 86400) !== Math.floor(p.time / 86400);   // UTC 00시 = 하루 VWAP·아시아 세션이 같이 다시 시작
+  const step = (m, sd, C) => {
+    if (newDay) m = sd = C = 0;
+    if (m == null || !(C >= 0) || !(C + v > 0)) return null;
+    const n = C + v, m1 = (m * C + tp * v) / n;
+    return [m1, Math.sqrt(Math.max(0, (C * (sd * sd + m * m) + tp * tp * v) / n - m1 * m1)), n];
+  };
+  const d = step(p.vwap, p.vsd || 0, p.vcum), q = step(p.svwap, p.svsd || 0, p.svcum);
+  Object.assign(c, { vlive: true }, d ? { vwap: d[0], vsd: d[1], vcum: d[2] } : { vwap: undefined },
+    q ? { svwap: q[0], svsd: q[1], svcum: q[2], sstart: newDay ? Math.floor(c.time / 86400) * 86400 : p.sstart, sname: newDay ? "아시아" : p.sname } : { svwap: undefined });
+}
+
+function updateSnapshotCandleLive(qty = 0) {
   const candles = candleHistoryByAsset[activeSnapshotAsset];
   if (!Array.isArray(candles) || !candles.length) return;
   const price = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
@@ -3037,13 +3057,15 @@ function updateSnapshotCandleLive() {
     // 다시 받게 한다 -- 아래 push 로 last.time == candleTs 가 되므로 이 조건은 한 번만 참이고
     // (요청 폭주 없음), 재요청이 실패해도 예전과 같은 상태로 남을 뿐이다.
     if (candleTs - last.time > CHART_CANDLE_MIN * 60) lastSnapshotHistoryFetchAt = 0;
-    candles.push({ time: candleTs, open: price, high: price, low: price, close: price });
+    candles.push({ time: candleTs, open: price, high: price, low: price, close: price, lvol: qty });
     if (candles.length > CHART_MAX_CANDLES) candles.shift();
   } else {
     last.high = Math.max(last.high, price);
     last.low = Math.min(last.low, price);
     last.close = price;
+    last.lvol = (last.lvol || 0) + qty;
   }
+  formingVwap(candles);
 }
 
 // ── 현재가 빠른 갱신 (2026-09-16) ──────────────────────────────────────────────
@@ -3239,7 +3261,7 @@ function ensurePriceWs() {
         if (d.e !== "trade") return;
         const price = Number(d.p);
         if (!(price > 0)) return;   // 바이낸스가 p:"0" 을 섞어 보낸다(실측 0.3%)
-        noteLiveTrade(priceWsAsset, price, Number(d.T));
+        noteLiveTrade(priceWsAsset, price, Number(d.T), Number(d.q) || 0);
         updateLivePriceFast(price);
         const qty = Number(d.q);
         if (qty > 0 && FLOW_ASSETS.has(priceWsAsset) && priceWsAsset === activeSnapshotAsset) {
@@ -4233,10 +4255,13 @@ const PAPER_SIG_OK = { wall: new Set(["eth", "sol", "xrp"]), duel: new Set(["eth
 const PAPER_POLL_MS = 10000;   // 2026-10-04 모의 매매 엔진은 1분마다 쓴다 -- 10초면 충분
 let latestPaper = null, paperLastFetchAt = 0;
 let latestMacroEvents = null;        // renderMacroCalendar 가 채운다 -- 카드의 «다음 주요 일정». null = 아직 못 받음(«없음»과 다르다)
-const mcLine = { poc: true, vwap: true, veto: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
+const mcLine = { poc: true, vwW: "2", vwD: "solid", vwC: "ink", vwap: true, veto: true, bb: false, wvwap: false, vsess: false, ema5: false, ema20: false, vwma: false };   // 2026-10-26 펜 메모: 이동평균 셋(기본 끔)   // wvwap = 주간·앵커 VWAP(2026-09-30, 기본 끔)   // 차트 선(카드 «가격 위치»의 스위치). 볼린저는 우리 검정에서 방향 엣지가 없어 기본 끔
 try { Object.assign(mcLine, JSON.parse(localStorage.getItem("mcLine") || "{}")); } catch (err) { /* 기억은 편의 */ }
 // 2026-09-30 사용자 «세션은 미국·유럽·아시아 시장 VWAP 으로» -- vsess 켜면 지금 시장 세션 개장(현지 시각, 서머타임 반영)부터 센 VWAP.
 //   서버가 봉마다 두 벌을 싣는다: vwap/vsd = UTC 00시부터 · svwap/svsd/sstart/sname = 세션 개장부터. seg 가 바뀌는 곳에서 선을 끊는다.
+// 2026-10-29 사용자 «VWAP 선 굵기·모양·색을 내가 고르게» -- «지표» 팝업 VWAP 칩 아래 한 줄(라디오 · mcLine.vwW/vwD/vwC 에 저장). 가운데 선만 · ±σ 는 점선 그대로.
+const VW_DASH = { solid: ["none", "실선"], dash: ["6 3", "파선"], dot: ["2 3", "점선"] };
+const VW_COL = { ink: ["var(--ink)", "흰색"], muted: ["var(--muted)", "회색"], warn: ["var(--warn)", "주황"], option: ["var(--option)", "청록"] };
 function mcVwapOf(c) {
   if (mcLine.vsess) return c && c.svwap ? { vwap: c.svwap, vsd: c.svsd || 0, seg: c.sstart, name: c.sname || "세션" } : null;
   return c && c.vwap ? { vwap: c.vwap, vsd: c.vsd || 0, seg: Math.floor(c.time / 86400), name: "하루" } : null;
@@ -4633,12 +4658,19 @@ function renderMarketCtx() {
   //   «세션 시작부터»는 VWAP 계산 기준이라 VWAP 칩에 붙인 보조 칩 · VWAP 를 끄면 못 누른다. 입력(data-line)·저장·이벤트는 그대로.
   const swChip = (k, nm, sw, t = "", sub = false) => `<label class="mc-chip${sub ? " sub" : ""}"${t ? ` title="${t}"` : ""}${sw ? ` style="--sw: ${sw}"` : ""}>`
     + `<input type="checkbox" class="chip-input" data-line="${k}"${mcLine[k] ? " checked" : ""}${sub && !mcLine.vwap ? " disabled" : ""}>`
-    + `${sw ? `<i class="mc-sw-key${/ma-|amber/.test(sw) ? "" : " dash"}" aria-hidden="true"></i>` : ""}${nm}</label>`;
+    + `${sw ? `<i class="mc-sw-key${/ma-|amber/.test(sw) || k === "vwap" ? "" : " dash"}" aria-hidden="true"></i>` : ""}${nm}</label>`;
   const lineSw = `<div class="mc-switch"><span class="mc-switch-t">차트에 그리기</span>`
       + `<span class="mc-sw-g mc-sw-ma">${[["ema5", "EMA 5", "종가 지수이동평균 5봉"], ["ema20", "EMA 20", "종가 지수이동평균 20봉"], ["vwma", "VWMA 100", "거래량 가중 이동평균 100봉 · 거래량 = 바이낸스 5분봉"]]
         .map(([k, nm, t]) => swChip(k, nm, `var(--ma-${k})`, t)).join("")}${swChip("bb", "볼린저", "var(--muted)", "20봉 · 2σ")}${swChip("veto", "추세 veto", "var(--muted)", "SMA144 ±1×ATR 히스테리시스 밴드 · 롱만/숏만 꼬리표")}</span>`
-      + `<span class="mc-sw-g"><span class="mc-chip-pair">${swChip("vwap", "VWAP ±σ", "var(--muted)")}${swChip("vsess", "세션 시작부터", "", "끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)", true)}</span>`
+      + `<span class="mc-sw-g"><span class="mc-chip-pair">${swChip("vwap", "VWAP ±σ", (VW_COL[mcLine.vwC] || VW_COL.ink)[0])}${swChip("vsess", "세션 시작부터", "", "끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)", true)}</span>`
       + `${swChip("wvwap", "주간·앵커 VWAP", "var(--ink)")}</span>`
+      + `<span class="mc-sw-g mc-vw-opt" role="group" aria-label="VWAP 선 굵기·모양·색"><span class="mc-vw-t">VWAP 선</span>`
+      + [["vwW", [["1", "얇게"], ["2", "보통"], ["3", "굵게"]]], ["vwD", Object.entries(VW_DASH).map(([k, v]) => [k, v[1]])], ["vwC", Object.entries(VW_COL).map(([k, v]) => [k, v[1]])]]
+        .map(([key, opts]) => `<span class="mc-chip-pair">${opts.map(([v, nm]) => `<label class="mc-chip mc-vw" title="VWAP 선 ${nm}">`
+          + `<input type="radio" class="chip-input" name="${key}" data-line="${key}" value="${v}"${String(mcLine[key]) === v ? " checked" : ""}${mcLine.vwap ? "" : " disabled"}>`
+          + (key === "vwC" ? `<i class="mc-vw-dot" style="--sw: ${VW_COL[v][0]}" aria-hidden="true"></i>`
+            : `<i class="mc-sw-key${key === "vwD" && v !== "solid" ? " dash" : ""}" style="--sw: var(--text)${key === "vwW" ? `; height: ${v}px` : ""}" aria-hidden="true"></i>`)
+          + `<span class="mc-vw-nm">${nm}</span></label>`).join("")}</span>`).join("") + `</span>`
       // 2026-10-29 사용자 «5분봉 거래량 제일 많은 부분을 이은 선도 on/off» -- 봉별 POC 선(기본 켬 · 봉마다 POC 테두리는 그대로)
       + `<span class="mc-sw-g">${swChip("poc", "POC 선", "var(--amber)", "봉마다 가장 많이 거래된 가격(POC)을 이은 선 · 봉 안 POC 테두리는 그대로")}</span></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
@@ -4653,7 +4685,7 @@ function renderMarketCtx() {
   if (fsEl && fsEl._h !== fsHtml) {
     const fk = fsEl.contains(document.activeElement) ? document.activeElement.dataset.line || (document.activeElement.classList.contains("fp-ind-btn") ? "btn" : "") : "";
     fsEl._h = fsHtml; fsEl.innerHTML = fsHtml;
-    if (fk) fsEl.querySelector(fk === "btn" ? ".fp-ind-btn" : `[data-line="${fk}"]`)?.focus();   // 키보드로 칩을 바꾸면 다시 써도 그 칩에 포커스
+    if (fk) (fk === "btn" ? fsEl.querySelector(".fp-ind-btn") : fsEl.querySelector(`[data-line="${fk}"]:checked`) || fsEl.querySelector(`[data-line="${fk}"]`))?.focus();   // 라디오(VWAP 선)는 고른 칸에   // 키보드로 칩을 바꾸면 다시 써도 그 칩에 포커스
   }
   const wallRow = ps && PAPER_SIG_OK.wall.has(A) ? gRow("깊은 벽", G.wall(ps.imb, ps.thr), sg(ps.imb, 2), ps.dir > 0 ? "mc-good" : ps.dir < 0 ? "mc-bad" : "",
     `±50bp 매수·매도 잔량 불균형(5분봉 마감) · 점선 = 지난 24시간 상위 20% 문턱 ±${ps.thr.toFixed(2)}`) : "";
@@ -4781,7 +4813,7 @@ document.addEventListener("keydown", (e) => {
 ["mcBody", "fpLineSwitch"].forEach((id) => el(id)?.addEventListener("change", (e) => {   // 체크박스는 넓은 화면이면 #fpLineSwitch
   const k = e.target?.dataset?.line;
   if (!k) return;
-  mcLine[k] = e.target.checked;
+  mcLine[k] = e.target.type === "radio" ? e.target.value : e.target.checked;
   try { localStorage.setItem("mcLine", JSON.stringify(mcLine)); } catch (err) { /* 기억은 편의 */ }
   el("mcBody")._mcHtml = null;
   scheduleSnapshotChartRender();
@@ -5860,7 +5892,7 @@ function cvRect(ctx, x, y, w, h, fill, op = 1, rx = 0) {
 }
 function cvStroke(ctx, pts, stroke, lw = 1, op = 1, dash = null, join = "miter", close = false) {
   ctx.globalAlpha = op; ctx.strokeStyle = cvc(stroke); ctx.lineWidth = lw; ctx.lineJoin = join;
-  ctx.setLineDash(dash ? String(dash).split(/[\s,]+/).map(Number) : []);
+  ctx.setLineDash(dash && dash !== "none" ? String(dash).split(/[\s,]+/).map(Number) : []);   // "none" 을 [NaN] 로 넘기면 무시돼 앞 선의 점선을 물려받았다(2026-10-29)
   ctx.beginPath();
   for (let i = 0; i < pts.length; i++) i ? ctx.lineTo(pts[i][0], pts[i][1]) : ctx.moveTo(pts[i][0], pts[i][1]);
   if (close) ctx.closePath();
@@ -7224,10 +7256,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       lines.setAttribute("clip-path", plotClip);
       const cx = (i) => (xAt(i) + bw / 2).toFixed(1);
       const pl = (pts, attrs, tip) => { if (pts.length > 1) mk(lines, "polyline", { points: pts.join(" "), fill: "none", ...attrs }, tip); };
-      // ③ VWAP ±σ -- 서버가 봉마다 두 벌(하루 · 시장 세션)을 싣고 mcVwapOf 가 스위치대로 고른다. 기준이 다시 시작하는 곳(seg)에서 선을 끊는다.
+      // ③ VWAP ±σ(2026-10-29 가운데 선 = 기본 굵은 실선, 굵기·모양·색은 «지표» 팝업에서 고른다 · ±σ 는 점선) -- 서버가 봉마다 두 벌(하루 · 시장 세션)을 싣고 mcVwapOf 가 스위치대로 고른다. 기준이 다시 시작하는 곳(seg)에서 선을 끊는다.
       if (mcLine.vwap) {
         const vws = candles.map(mcVwapOf);
-        [[0, "var(--ink)", 0.6, "6 3", 1.3], [1, "var(--muted)", 0.45, "1 4", 1], [-1, "var(--muted)", 0.45, "1 4", 1],
+        [[0, (VW_COL[mcLine.vwC] || VW_COL.ink)[0], 0.9, (VW_DASH[mcLine.vwD] || VW_DASH.solid)[0], +mcLine.vwW || 2], [1, "var(--muted)", 0.45, "1 4", 1], [-1, "var(--muted)", 0.45, "1 4", 1],
          [2, "var(--muted)", 0.35, "1 6", 1], [-2, "var(--muted)", 0.35, "1 6", 1]].forEach(([k, col, op, dash, sw]) => {
           let seg = null, pts = [];
           const tip = k === 0 ? `${mcLine.vsess ? "시장 세션 개장부터" : "하루(UTC 00시부터)"} VWAP · 거래량 가중 평균가. 볼린저·VWAP 셋업은 우리 검정에서 방향 엣지가 없었다 — 위치 참고.`

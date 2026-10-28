@@ -305,17 +305,28 @@ def profile_nodes(k: Iterable[int], vol: Iterable[float], bw: float) -> dict[str
 def vwap_rows(ts: list[int], high: list[float], low: list[float], close: list[float], vol: list[float],
               nd: int = 4) -> dict[int, dict]:
     """봉 시각 → 캔들 행에 붙일 VWAP 두 벌: vwap/vsd = UTC 00시부터 · svwap/svsd = 지금 시장 세션 개장부터(sstart 초, sname 이름).
-    화면의 «세션 시작부터» 스위치가 둘 중 하나를 고른다."""
+    화면의 «세션 시작부터» 스위치가 둘 중 하나를 고른다.
+    vcum/svcum = 그 봉까지 누적 거래량 -- 화면이 형성 봉 VWAP 을 직전 봉에 이어 센다(2026-10-29 «현재 5분봉에서도 현재가에 맞게»)."""
     vw, vsd = session_vwap(ts, high, low, close, vol)
     sw, ssd = session_vwap(ts, high, low, close, vol, key=lambda t: market_session(t)[0])
+
+    def cum(key):   # session_vwap 과 같은 경계에서 다시 시작하는 누적 거래량
+        k0, s, out = object(), 0.0, []
+        for t, v in zip(ts, vol):
+            if key(t) != k0:
+                k0, s = key(t), 0.0
+            s += v
+            out.append(s)
+        return out
+    vc, svc = cum(lambda t: t // 86400), cum(lambda t: market_session(t)[0])
     out: dict[int, dict] = {}
-    for t, a, b, c, d in zip(ts, vw, vsd, sw, ssd):
+    for t, a, b, c, d, e, f in zip(ts, vw, vsd, sw, ssd, vc, svc):
         row: dict = {}
         if a is not None:
-            row.update(vwap=round(a, nd), vsd=round(b, nd))
+            row.update(vwap=round(a, nd), vsd=round(b, nd), vcum=round(e, 3))
         if c is not None:
             st, nm = market_session(t)
-            row.update(svwap=round(c, nd), svsd=round(d, nd), sstart=st, sname=nm)
+            row.update(svwap=round(c, nd), svsd=round(d, nd), svcum=round(f, 3), sstart=st, sname=nm)
         if row:
             out[t] = row
     return out
@@ -399,4 +410,5 @@ if __name__ == "__main__":  # 자체점검 -- 부호·경계·보류 조건
     assert vw[:2] == [10, 15] and abs(vw[2] - 52 / 3) < 1e-9, vw                            # 기본(UTC 날짜)은 이어서 센다
     r = vwap_rows(t5, [11, 21, 23], [9, 19, 21], [10, 20, 22], [1, 1, 1])
     assert r[t5[2]]["svwap"] == 21 and r[t5[2]]["sname"] == "유럽" and r[t5[2]]["sstart"] == D("2026-09-30 07:00") and r[t5[0]]["sname"] == "아시아", r
+    assert [r[t]["vcum"] for t in t5] == [1, 2, 3] and [r[t]["svcum"] for t in t5] == [1, 1, 2], r   # 누적은 VWAP 과 같은 경계에서 다시
     print("market_ctx selftest ok")
