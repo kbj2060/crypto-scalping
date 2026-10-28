@@ -4077,7 +4077,7 @@ function fcTrendCell(t, cell) {
     tags + `<span class="sub">일 전 종가보다 위 ${ups} · 아래 ${n - ups}</span><span class="sub">${t.age_days}일째 · 매일 09시 마감</span>`).replace('<span class="sub"></span>', "");
 }
 
-// ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분 칼시(10-15) → 4h 예측(+변동성) → 7일 → 4~13주. sec = renderMarketCtx 의 판 틀(? 설명).
+// ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분 칼시(10-15) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
   const eth = activeSnapshotAsset === "eth", v = latestVol4h && latestVol4h.ok && (latestVol4h.asset || "eth") === activeSnapshotAsset
@@ -4138,8 +4138,7 @@ function fcRowHtml(sec) {
     + kCell
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge + volLine)
     + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)")
-    + sig(ds.z91, "4~13주 예측", "Z 달러·유동성 91일")
-    + `</div></div>`;
+    + `</div></div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
 }
 
 async function refreshDirSig() {
@@ -4195,7 +4194,7 @@ MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아
   + "15분 · 칼시 = 미국 예측시장 15분 ETH 위/아래 확률(55~45% 비등) — 참고, 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침.\n"
   + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 과거 표본 밖 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
   + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65%.\n"
-  + "4~13주 예측 = 달러·유동성 Z91(|Z|≥1 만) · 2018~26 56일 BTC 70% · ETH 75%(고른 기간 성적).\n"
+  + "4~13주 = Macro Trend 카드(달러지수·순유동성 등 지표별 13주 변화 · ETF 이후 기준).\n"
   + "변동성 = 4시간 실현변동성 QX4(ETH·XRP·BTC·SOL 4코인 HGB·MLP 결합 · 2026-10-26 배포 · 굴림 3창 옛 GBM 이김) · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀). "
   + "ETH 차트 미래 칸 옵션 색 부채꼴 = QX4I(QX4 + 직전 정시 옵션 ATM IV 보정 · 조건부 채택, 전진 판정 2027-01-22) ±1σ — 이 줄 σ 와 조금 다를 수 있다.\n"
   + "셋 다 참고용 — 전진 판정 전."
