@@ -16,6 +16,8 @@ if pgrep -f "[-]u .*/${RUNNER}" >/dev/null; then
 fi
 
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+# 명목 계산 내적이 BLAS 다중 스레드로 돌아 재시작 따라잡기 재생 때 코어 ~6개를 썼다(10-28 실측 8분에 CPU 47분 · 스레드 12) — 라이브 서버라 한 코어로 묶는다.
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 exec "$ROOT/scripts/ops/_supervise.sh" \
   "live_bookdepth_feat_20261028.py (ETHUSDT)" \
   "$ROOT/data/live/.supervisor_eth_bookdepth.lock" \
