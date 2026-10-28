@@ -11,11 +11,16 @@ import numpy as np, pandas as pd
 
 ROOT = Path.cwd()
 sys.path.insert(0, str(ROOT / "scripts")); sys.path.insert(0, str(ROOT))
-OUT = ROOT / "tmp/depth_incr_20261028"
-LIQ = ROOT / "data/liqlab"
+OUT = ROOT / os.environ.get("DEPTH_OUT", "tmp/depth_incr_20261028")
+LIQ = ROOT / os.environ.get("DEPTH_LIQ", "data/liqlab")
 DCOLS = ["dimb1", "dimb2", "dimb5", "dimb1_d1h", "dimb2_d1h", "dimb5_d1h", "depth1_z", "bid_near", "ask_near", "d_age"]
 LAGS = (7, 13, 19, 25, 31, 37, 43, 49, 55)
 TR0, VA0, TE0 = pd.Timestamp("2024-01-01"), pd.Timestamp("2026-01-01"), pd.Timestamp("2026-06-01")
+# 박스·card30 채점 창 [TS0, 라벨 끝 ≤ TS1] · 입력 행 — 전진 판정(fwd_0122_c8_c9_20261029.py)이 덮어씀. 기본값 = 원 시험
+TS0, TS1 = pd.Timestamp(os.environ.get("DEPTH_TEST0", "2026-06-01")), pd.Timestamp(os.environ.get("DEPTH_TEST1", "2100-01-01"))
+BOX_ROWS = ROOT / os.environ.get("DEPTH_BOX_ROWS", "tmp/liqlab_20261028/box_rows.parquet")
+CARD_ROWS = ROOT / os.environ.get("DEPTH_CARD_ROWS", "tmp/card30_direction_20260926/dataset.parquet")
+assert TS0 < pd.Timestamp("2026-10-24") or pd.Timestamp.now("UTC").tz_localize(None) >= pd.Timestamp("2027-01-22"), "전진 판정일(2027-01-22) 전"
 BOX_SEEDS = (1716463990, 1783687091, 508351009, 434771877, 1978411480)
 CARD_SEEDS = (1805214274, 1798703776, 2066915355, 1773210922, 1874492600)
 
@@ -159,18 +164,18 @@ def dir4h():
 
 
 # ── T2~T4 박스 ETH ────────────────────────────────────────────────────
-def box():
+def box(*scales):
     import joblib
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.metrics import roc_auc_score
-    R = pd.read_parquet(ROOT / "tmp/liqlab_20261028/box_rows.parquet"); B = joblib.load(ROOT / "dashboard/box_hold_hgb_20261016.joblib")
+    R = pd.read_parquet(BOX_ROWS); B = joblib.load(ROOT / "dashboard/box_hold_hgb_20261016.joblib")
     D = depth("ETH")
     W = {"30m": 30, "1h": 60, "4h": 240}
-    for s in B["scales"]:
+    for s in scales or B["scales"]:
         X = R[R.scale == s].sort_values("ts").reset_index(drop=True); cols = B["scales"][s]["cols"]
         assert (X.ts.dt.minute % 5 == 4).all(), s
         tau = pd.DatetimeIndex(X.ts) - pd.Timedelta("4min"); le = X.ts + pd.Timedelta(minutes=W[s] + 1)
-        tr = ((X.ts >= TR0) & (le < VA0)).to_numpy(); va = ((X.ts >= VA0) & (le < TE0)).to_numpy(); te = (X.ts >= TE0).to_numpy()
+        tr = ((X.ts >= TR0) & (le < VA0)).to_numpy(); va = ((X.ts >= VA0) & (le < TE0)).to_numpy(); te = ((X.ts >= TS0) & (le <= TS1)).to_numpy()
         y = X.y.to_numpy(int)
 
         def fitp(M):
@@ -276,18 +281,18 @@ def qx4():
 
 
 # ── T6·T7 card30 ─────────────────────────────────────────────────────
-def card30():
+def card30(*tasks):
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.metrics import roc_auc_score
     from scipy.optimize import minimize_scalar
     P = ROOT / "tmp/card30_direction_20260926"
-    X0 = pd.read_parquet(P / "dataset.parquet"); K = json.loads((P / "feats.json").read_text())["K"]; D = depth("ETH")
+    X0 = pd.read_parquet(CARD_ROWS); K = json.loads((P / "feats.json").read_text())["K"]; D = depth("ETH")
     lg = lambda p: np.log(p / (1 - p)); sg = lambda z: 1 / (1 + np.exp(-z))  # noqa: E731
-    for task in ("dir", "reach"):
+    for task in tasks or ("dir", "reach"):
         X = X0[X0.res.isin((0, 1))] if task == "dir" else X0[X0.res.isin((0, 1, 2, -1))]
         X = X.reset_index(drop=True); y = ((X.res == 1) if task == "dir" else (X.res != 2)).to_numpy(int)
         le = X.ts + pd.Timedelta("35min")
-        tr = ((X.ts >= TR0) & (le < VA0)).to_numpy(); va = ((X.ts >= VA0) & (le < TE0)).to_numpy(); te = (X.ts >= TE0).to_numpy()
+        tr = ((X.ts >= TR0) & (le < VA0)).to_numpy(); va = ((X.ts >= VA0) & (le < TE0)).to_numpy(); te = ((X.ts >= TS0) & (le <= TS1)).to_numpy()
         base = X[K].to_numpy(float); tau = pd.DatetimeIndex(X.ts); withd = lambda DD: np.column_stack([base, DD.reindex(tau).to_numpy(float)])  # noqa: E731
 
         def fitp(M):
@@ -334,4 +339,4 @@ def report():
 
 
 if __name__ == "__main__":
-    {"selfcheck": selfcheck, "dir4h": dir4h, "box": box, "qx4": qx4, "card30": card30, "report": report}[sys.argv[1]]()
+    {"selfcheck": selfcheck, "dir4h": dir4h, "box": box, "qx4": qx4, "card30": card30, "report": report}[sys.argv[1]](*sys.argv[2:])
