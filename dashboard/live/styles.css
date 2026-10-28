@@ -2643,13 +2643,21 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 }
 /* 2026-10-16 펜 메모 «나스닥·금리를 이전처럼 풋프린트 카드 상단으로»: 머리 한 줄(1h…1d 오른쪽) -- 그림 22px · 값 · 툴팁 · 급변 칩 그대로 */
 .fp-rates { display: flex; flex: 1 1 0; align-items: center; gap: 12px; min-width: 0; font-size: 11px; white-space: nowrap; }
-.fp-rates .fr-i { flex: 1 1 auto; min-width: 0; } .fp-rates .fr-i .mc-svg { flex: 1 1 auto; }
+/* 2026-10-28 사용자 «나스닥/2년물/10년물 차트 자리에 Macro Trend 요약»(시안 H1) -- 한 덩어리 단추(누르면 Macro Trend 카드로) */
+.fp-rates .fr-mt { display: flex; flex: 1 1 auto; align-items: center; gap: 14px; min-width: 0; padding: 4px 10px; border: 0; border-radius: 10px;
+  background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; overflow: hidden; }
+.fp-rates .fr-mt:hover { background: rgb(var(--lift) / .05); }
+.fp-rates .fr-mt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fr-mtt { display: grid; gap: 3px; font-weight: 700; font-size: 12px; } .fr-mtt small { font: 500 10.5px/1 var(--font-sans); color: var(--muted); }
+.fr-mtg { display: grid; grid-template-columns: auto auto auto; gap: 4px 10px; align-items: center; }
+.fr-c { font: 700 10px/1 var(--font-sans); letter-spacing: .12em; color: var(--muted); }
+.fr-sep { width: 1px; align-self: stretch; background: var(--soft-line); flex: none; }
+.fr-mts { display: grid; gap: 4px; min-width: 0; color: var(--muted); } .fr-mts small { font-size: 10.5px; }
+.fr-mts > span, .fr-ev { overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+.fp-rates .fr-ev { color: var(--warn); }
+.fr-go { margin-left: auto; color: var(--muted); font-size: 11.5px; flex: none; }
 #fpCard .ops-health-head > .chart-head-left { flex: 1 1 auto; }   /* 펜 메모(4차): 나스닥·금리가 카드 오른쪽 끝까지 */
-.fp-rates .fr-t { font-weight: 700; color: var(--muted); cursor: help; }
-.fp-rates .fr-i { display: inline-flex; align-items: center; gap: 5px; cursor: help; }
-.fp-rates .fr-k { font-weight: 700; color: var(--muted); }
 .fp-rates b { font: 700 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
-.fp-rates .mc-svg { display: block; }
 .fp-line-switch .mc-switch-t { color: var(--muted); font-weight: 600; }
 .fp-line-switch > .mc-switch { display: flex; flex-wrap: nowrap; gap: 14px; align-items: center; margin: 0; font-size: 11px; }
 /* 2026-10-26 «차트에 그리기» 칩 -- 두 묶음(이동평균·볼린저 | VWAP 셋). 넓은 화면은 이동평균 묶음이 같은 오른쪽 끝에 맞춘 바로 위 줄
@@ -3169,7 +3177,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mt-q:hover span, .mt-q[aria-expanded="true"] span { color: var(--text); background: rgb(var(--lift) / .08); }
 .mt-q:focus-visible, .mt-nm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .mt-wrap { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px; }
-.mt-mx { display: grid; grid-template-columns: minmax(104px, 1fr) 66px 84px repeat(4, 52px) 64px; align-items: center; column-gap: 10px; }
+.mt-mx { display: grid; grid-template-columns: minmax(104px, 1fr) 66px 118px 84px repeat(4, 52px) 64px; align-items: center; column-gap: 10px; }
 .mt-mx > * { min-width: 0; }
 .mt-h { font: 700 10px/1.25 var(--font-sans); letter-spacing: .08em; color: var(--muted); padding-bottom: 4px; text-align: center; }
 .mt-h.l { text-align: left; } .mt-h.r { text-align: right; }
@@ -3187,6 +3195,11 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mt-t { justify-content: center; }
 .mt-rt { justify-content: flex-end; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 .mt-gw .mt-g { width: 100%; }
+.mt-td { gap: 6px; min-width: 0; } .mt-td .mt-dc { width: 64px; flex: none; } .mt-td .mt-dc svg { height: 20px; }
+.mt-td b { font: 700 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; } .mt-td.na { color: var(--muted); font-size: 11px; }
+.mt-dc { position: relative; min-width: 0; } .mt-dc svg { display: block; width: 100%; height: 110px; overflow: visible; }
+.mt-dl { position: absolute; z-index: 1; font-size: 9.5px; color: var(--warn); white-space: nowrap; padding: 0 3px; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }   /* 칸 밖으로 안 나가게(휴대폰) */
+.mt-dt { position: relative; height: 14px; font-size: 9.5px; color: var(--muted); } .mt-dt span { position: absolute; top: 3px; white-space: nowrap; }
 .mt-g { position: relative; height: 6px; border-radius: 3px; background: var(--glass); box-shadow: inset 0 0 0 1px var(--soft-line); }
 .mt-g::before { content: ""; position: absolute; left: 41.67%; width: 16.66%; top: 0; bottom: 0; background: rgb(var(--lift) / .08); }   /* ±0.5σ 중립 */
 .mt-g::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line); }
@@ -3232,16 +3245,17 @@ html.fit1 #mtBody .mt-left { display: flex; flex-direction: column; min-height: 
 html.fit1 #mtBody .mt-mx { flex: 1 1 0; min-height: 0; }
 html.fit1 #mtBody .mt-r > * { height: auto; align-self: stretch; }
 html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-@media (max-width: 1200px) {   /* 표 최소 폭 ≈596px -- 이보다 좁은 두 단은 표가 상세 칸을 덮는다 */
+@media (max-width: 1500px) {   /* 표 최소 폭 ≈726px(«오늘» 칸 포함) -- 이보다 좁은 두 단은 표가 상세 칸을 덮는다 */
   .mt-wrap { grid-template-columns: 1fr; gap: 16px; }
   .mt-det { border-left: 0; padding-left: 0; border-top: 1px solid var(--soft-line); padding-top: 14px; }
 }
 @media (max-width: 720px) {
   #mtCard .opt-card-head { flex-wrap: wrap; row-gap: 4px; }
   #mtCard .opt-card-head h3 { white-space: nowrap; }
-  .mt-mx { grid-template-columns: minmax(0, 1fr) 58px repeat(4, 36px); column-gap: 6px; }
+  .mt-mx { grid-template-columns: minmax(0, 1fr) 52px 56px repeat(4, 30px); column-gap: 5px; }
   .mt-mx .hx { display: none; }
-  .mt-mx .mt-tile { width: 34px; }
+  .mt-mx .mt-tile { width: 28px; }
+  .mt-td .mt-dc { width: 100%; } .mt-td b { display: none; }
   .mt-r > * { height: 34px; }
   .mt-why li { grid-template-columns: 72px 40px minmax(0, 1fr); gap: 8px; }
   .mt-ov { height: 100px; }

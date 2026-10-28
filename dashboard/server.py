@@ -1950,7 +1950,10 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_treasury_futures(request: web.Request) -> web.Response:   # 2026-10-06 풋프린트 카드 머리 띠(국채선물 4종)
-        payload = await swr_cached("treasury", 60.0, lambda: asyncio.to_thread(treasury_payload), max_stale=600.0)
+        if request.query.get("h") == "24":   # 2026-10-28 Macro Trend 카드 «오늘» 칸·상세 차트 -- 24시간 1분봉(5분마다면 충분)
+            payload = await swr_cached("treasury24", 300.0, lambda: asyncio.to_thread(treasury_payload, TREASURY_DB, 24.0, 24.0), max_stale=1800.0)
+        else:
+            payload = await swr_cached("treasury", 60.0, lambda: asyncio.to_thread(treasury_payload), max_stale=600.0)
         return web.json_response(payload, headers=NOCACHE)
 
     async def api_xyz100(request: web.Request) -> web.Response:   # 2026-10-14 나스닥100 실시간(Hyperliquid xyz:XYZ100) -- 화면이 1초마다 꼬리(since)만 묻는다

@@ -43,7 +43,8 @@ Z_NEUTRAL, WATCH_MIN, STALE_RATIO, OLD_DAYS = 0.5, 0.15, 0.25, 21
 # 지표 -> (원천, 단위, 실시간 등급 free|paid|none, 실시간 경로 설명). 원천 «fred:ID» · «netliq» · «stables».
 # KOSPI 는 FRED 에 없어(연구는 미러) 카드에서 뺀다.
 SOURCES = {
-    "S&P500": ("fred:SP500", "%", "free", "XYZ100(나스닥100 무기한) 무료 실시간 · ES 선물은 유료"),
+    "나스닥": ("fred:NASDAQ100", "%", "free", "XYZ100(나스닥100 무기한) 무료 실시간 · NQ 선물과 5분 상관 .98 -- 카드 «오늘» 칸"),
+    "S&P500": ("fred:SP500", "%", "free", "xyz:SP500(S&P500 무기한) 무료 실시간 · ES 선물은 유료"),
     "10Y금리": ("fred:DGS10", "bp", "paid", "ZN 선물 유료 실시간 · 무료 시세는 약 10분 지연"),
     "기대인플레": ("fred:T10YIE", "bp", "none", "하루 1회(다음 영업일) · 장중은 TIP/IEF 비율로 근사"),
     "기간프리미엄": ("fred:THREEFYTP10", "bp", "none", "하루 1회 모형 추정치(Kim-Wright)"),
@@ -74,6 +75,7 @@ NOTES = {
     "스테이블코인": "BTC 를 뒤따르는 변수(BTC 상승 2~7주 뒤 발행) -- 확인용",
     "HY스프레드": "FRED 에 2023-10 이후만 있어 2020–23 과 비교 불가",
     "STLFSI": "주간 평균으로 만든 지수라 한 주 늦게 반응한다",
+    "나스닥": "판정은 2026-10-28 대시보드 세션 임시 계산(같은 규칙 · 코인 = 바이낸스 종가, scripts/research_macro_trend_ndx_verdict_20261028.py) -- 정식 판정표 재생성 전",
 }
 
 

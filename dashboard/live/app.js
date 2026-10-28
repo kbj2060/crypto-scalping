@@ -2217,10 +2217,83 @@ const mtR = (v) => (v == null || !Number.isFinite(v) ? "–" : `${v > 0 ? "+" : 
 // 2026-10-28 시안 C «지표 × 코인 판»(사용자 선택): 고유 지표 한 줄 × [BTC 지금 · ETH 지금 · BTC 13주 뒤 · ETH 13주 뒤] 칸, 줄을 누르면 오른쪽(좁으면 아래)에 근거.
 //   칸 상태·이유는 서버(macro_trend.cell_state)가 낸다 -- 요약 개수도 같은 상태로 세므로 칸과 머리 합계가 어긋나지 않는다.
 //   채운 칸 = 셈(↑↓, 중립 –) · 테두리만 = 안 셈(약화·변동 없음·지연 회색 / 이탈 주황 / 관찰 흐림). 이유 문장은 칸 title 과 상세 «왜» 줄.
-const MT_FAM = [["주식·위험", ["S&P500", "VIX", "STLFSI"]], ["신용", ["HY스프레드", "Baa스프레드"]], ["금리", ["10Y금리", "기대인플레", "기간프리미엄", "연방기금"]],
+const MT_FAM = [["주식·위험", ["나스닥", "S&P500", "VIX", "STLFSI"]], ["신용", ["HY스프레드", "Baa스프레드"]], ["금리", ["10Y금리", "기대인플레", "기간프리미엄", "연방기금"]],
   ["달러·환율", ["달러지수", "USD/JPY", "EUR/USD", "원/달러", "USD/CNY"]], ["유동성", ["순유동성", "연준BS", "지준", "TGA", "RRP", "스테이블코인"]], ["원자재", ["브렌트"]]];
 const MT_CELLS = [["co", "BTC"], ["co", "ETH"], ["lead", "BTC"], ["lead", "ETH"]];
 let mtSel = null;
+// 2026-10-28 «오늘» 칸(사용자 «나스닥 줄 + 오늘 칸»): 장중 시세가 있는 줄만 -- 나스닥 ← XYZ100 실시간 · 10Y금리 ← 10년 국채선물(ZN) 가격(CME 약 10분 지연).
+//   13주 판정(FRED 금요일 주간값)과 원천·시점이 달라 «오늘 맥락»만. 색 = 가격 방향(국채 가격↓ = 금리↑) -- 풋프린트 머리에 있던 그래프와 같은 규칙.
+//   장중은 코인과 «같은 시간에 같이» 움직일 뿐 먼저 움직이지 않는다(10-13 5분봉: 같은 봉 상관 .4 · 앞뒤 1~3봉 ≈0).
+const MT_TODAY = { "나스닥": "NQ", "10Y금리": "ZN" };
+let mtTreas = null, mtTodayAt = 0;
+async function refreshMtToday() {   // 1분마다 «오늘» 칸을 다시 그린다 · 국채 24시간은 5분마다 받는다(서버 swr 5분)
+  const now = Date.now();
+  if (now - mtTodayAt < 60000) return;
+  mtTodayAt = now;
+  if (!mtTreas || now - mtTreas.at > 5 * 60000) {
+    try { const res = await fetch("/api/treasury-futures?h=24", { cache: "no-cache" }); if (res.ok) mtTreas = { at: now, p: await res.json() }; }
+    catch (error) { console.error("Treasury 24h fetch error:", error); }
+  }
+  if (latestMacroTrend) renderMacroTrend();
+}
+function mtDay(k) {   // 최근 24시간 [[초, 가격], …] -- 나스닥은 끝에 지금 가격, 국채는 마지막 봉까지(약 10분 지연)
+  if (k === "NQ") {
+    const t = xyzClock(), live = xyzNow();
+    return xyzBars.filter((b) => b[0] + 60 >= t - 86400 && b[0] + 60 <= t).map((b) => [b[0] + 60, b[1]]).concat(live ? [[t, live]] : []);
+  }
+  const v = mtTreas && mtTreas.p && mtTreas.p.ok ? (mtTreas.p.symbols || {})[k] : null;
+  return v && v.bars ? v.bars.filter((b) => b[0] >= Date.now() / 1000 - 86400) : [];
+}
+const mtDayChg = (b) => (b.length > 1 ? (b[b.length - 1][1] / b[0][1] - 1) * 100 : null);
+const mtDayCol = (v) => (v == null || Math.abs(v) < 0.02 ? "var(--muted)" : v > 0 ? "var(--good)" : "var(--bad)");
+function mtDayChart(k, W, H, fut) {   // 24시간 선 · fut 시간 > 0 이면 앞으로의 주요 발표(점선 + 이름표, 2시간 안에 몰리면 하나로). 글자는 HTML -- svg 늘이기가 글자를 찌그러뜨린다
+  const b = mtDay(k);
+  if (b.length < 2) return "";
+  const now = k === "NQ" ? xyzClock() : Date.now() / 1000, t0 = now - 86400, t1 = now + fut * 3600;
+  const lo = Math.min(...b.map((x) => x[1])), hi = Math.max(...b.map((x) => x[1])), rg = hi - lo || 1e-9;
+  const X = (t) => ((t - t0) / (t1 - t0)) * W, Y = (v) => 3 + (hi - v) / rg * (H - 6), P = (t) => `${(((t - t0) / (t1 - t0)) * 100).toFixed(2)}%`;
+  const col = mtDayCol(mtDayChg(b)), sw = `vector-effect="non-scaling-stroke"`, nowX = X(now).toFixed(1), last = b[b.length - 1];
+  const ev = fut ? (latestMacroEvents || []).filter((e) => e.importance === "high" || e.category === "fomc").map((e) => ({ t: Date.parse(e.time_utc) / 1000, nm: e.title_ko || e.title || "지표" }))
+    .filter((e) => e.t > now && e.t <= t1).sort((p, q) => p.t - q.t) : [];
+  const labs = [];
+  ev.forEach((e) => { const g = labs[labs.length - 1]; if (g && e.t - g.t < 7200) { if (!g.nm.includes(e.nm)) g.nm += ` · ${e.nm}`; } else labs.push({ ...e }); });
+  const hm = (t) => { const d = new Date(t * 1000); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  return `<div class="mt-dc">${labs.map((g, i) => { const pp = (g.t - t0) / (t1 - t0); return `<span class="mt-dl" style="top:${2 + (i % 2) * 13}px;${pp > .85 ? `right:${((1 - pp) * 100).toFixed(2)}%;text-align:right` : `left:${P(g.t)}`};max-width:${(pp > .85 ? pp : 1 - pp) * 100}%" title="${escapeHtml(g.nm)}">${escapeHtml(g.nm)} ${hm(g.t)}</span>`; }).join("")}
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${fut ? `<rect x="${nowX}" y="0" width="${(W - nowX).toFixed(1)}" height="${H}" fill="rgb(var(--lift) / .04)"/>` : ""}
+    <line x1="0" x2="${fut ? nowX : W}" y1="${Y(b[0][1]).toFixed(1)}" y2="${Y(b[0][1]).toFixed(1)}" stroke="var(--line)" stroke-dasharray="2 3" ${sw}/>
+    ${ev.map(({ t }) => `<line x1="${X(t).toFixed(1)}" x2="${X(t).toFixed(1)}" y1="0" y2="${H}" stroke="var(--warn)" stroke-opacity=".75" stroke-dasharray="2 3" ${sw}/>`).join("")}
+    ${fut && k !== "NQ" ? `<rect x="${X(last[0]).toFixed(1)}" y="0" width="${Math.max(0, X(now) - X(last[0])).toFixed(1)}" height="${H}" fill="rgb(var(--lift) / .08)"/>` : ""}
+    <path d="${b.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)},${Y(x[1]).toFixed(1)}`).join("")}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round" ${sw}/></svg>
+    ${fut ? `<div class="mt-dt"><span style="left:0">${hm(t0)}</span><span style="right:${(100 - parseFloat(P(now))).toFixed(2)}%">지금 ${hm(now)}</span><span style="right:0">+${fut}시간</span></div>` : ""}</div>`;
+}
+function mtTodayCell(n) {   // 표 «오늘» 칸
+  const k = MT_TODAY[n];
+  if (!k) return `<span class="mt-td na" title="장중 시세 없음 -- 하루·주 단위 공표">—</span>`;
+  const b = mtDay(k), v = mtDayChg(b);
+  if (v == null) return `<span class="mt-td na" title="받는 중">…</span>`;
+  const tip = k === "NQ" ? `나스닥100 실시간(XYZ100) 24시간 ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}% · 주말엔 거의 안 움직인다`
+    : `10년 국채선물(ZN) 가격 24시간 ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}% → 금리${v < 0 ? "↑" : "↓"} · CME 약 10분 지연`;
+  return `<span class="mt-td" title="${tip} · 13주 판정과 원천·시점이 달라 오늘 맥락만">${mtDayChart(k, 64, 20, 0)}<b style="color:${mtDayCol(v)}">${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%</b></span>`;
+}
+// 2026-10-28 사용자 «풋프린트 상단 나스닥·2년물·10년물 차트 자리에 Macro Trend 요약»(시안 H1) -- renderMarketCtx 가 #fpRates 에 넣는다.
+//   개수 = /api/macro-trend summary 그대로(카드 머리 합계와 같다) · 감시 이탈 · 다음 주요 발표 · 누르면 2번째 카드(Macro Trend)로.
+function mtHeadHtml() {
+  const p = latestMacroTrend;
+  if (!p || !p.ok) return `<button type="button" class="fr-mt" data-mt-go><span class="fr-mtt">Macro<small>${p ? "불러오지 못함" : "불러오는 중…"}</small></span><span class="fr-go">Macro Trend ›</span></button>`;
+  const s = p.summary || {}, week = p.rows.map((r) => r.live && r.live.week).filter(Boolean).sort().pop() || "–";
+  const row = (a) => { const x = s[a] || {}; return `<span class="fr-c">${a}</span><span>지금 <b class="opt-good">↑${x.co_up || 0}</b> <b class="opt-bad">↓${x.co_dn || 0}</b></span>`
+    + `<span>13주 뒤 <b class="opt-good">↑${x.lead_up || 0}</b> <b class="opt-bad">↓${x.lead_dn || 0}</b> <span class="muted">· 중립 ${x.neutral || 0} · 안 셈 ${x.excluded || 0}</span></span>`; };
+  const off = [...new Set(p.rows.flatMap((r) => Object.entries((r.live || {}).assets || {}).filter(([, c]) => c.state === "off").map(([a]) => `${r.name}→${a}`)))];
+  const nx = (latestMacroEvents || []).filter((e) => e.importance === "high" || e.category === "fomc").map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표" }))
+    .filter((e) => e.t > Date.now()).sort((a, b) => a.t - b.t)[0];
+  const left = nx ? nx.t - Date.now() : 0;
+  return `<button type="button" class="fr-mt" data-mt-go title="Macro Trend 카드로 -- ETF 이후 13주 매크로 추세(표본내 연구, 신호 아님)">`
+    + `<span class="fr-mtt">Macro<small>13주 · 기준 주 ${week.slice(5)}</small></span><span class="fr-mtg">${row("BTC")}${row("ETH")}</span>`
+    + `<span class="fr-sep"></span><span class="fr-mts"><small>감시</small><span class="${off.length ? "mt-warn" : ""}">이탈 ${off.length}${off.length ? ` · ${escapeHtml(off.join(", "))}` : ""}</span></span>`
+    + (nx ? `<span class="fr-sep"></span><span class="fr-mts"><small>다음 발표</small><b class="fr-ev">${escapeHtml(nx.nm)} ${Math.floor(left / 3600e3)}:${String(Math.floor((left % 3600e3) / 60e3)).padStart(2, "0")} 뒤</b></span>` : "")
+    + `<span class="fr-go">Macro Trend ›</span></button>`;
+}
+document.addEventListener("click", (e) => { if (e.target.closest("[data-mt-go]")) el("mtCard")?.scrollIntoView({ behavior: "smooth", block: "start" }); });
 function mtOverlay(r, a) {   // 최근 52주: 지표 13주 변화(연구 부호로 맞춤, 위 = 코인 강세 쪽) · 같은 주에 맞춘 코인 13주 수익(서버) · 선행은 지표를 14주(공표 1주 + 13주) 앞으로
   const L = r.live || {}, spark = L.spark || [], c = (L.coin13 || {})[a] || [];
   if (spark.filter(Number.isFinite).length < 20 || c.filter(Number.isFinite).length < 20) return "";
@@ -2268,13 +2341,13 @@ function renderMacroTrend() {
   // 격자 줄 = 머리 3 + 계열마다 [이름 줄 + 지표 줄들] -- 지표 줄만 1fr 라 한 화면 모드(카드 = 창 높이)에서 남는 높이를 나눠 갖는다
   const rowsT = ["auto auto auto", ...fams.map(([, ns]) => `auto${" minmax(22px, 1fr)".repeat(ns.length)}`)].join(" ");
   const mx = `<div class="mt-mx" style="grid-template-rows:${rowsT}" aria-label="매크로 지표 × 코인">
-      <span class="mt-h l">지표</span><span class="mt-h r">13주 변화</span><span class="mt-h hx">위치(σ)</span>
+      <span class="mt-h l">지표</span><span class="mt-h r">13주 변화</span><span class="mt-h">오늘 24h</span><span class="mt-h hx">위치(σ)</span>
       <span class="mt-h grp">${q("co", "지금 국면")}</span><span class="mt-h grp">${q("lead", "13주 뒤 편향")}</span><span class="mt-h r hx">수신</span>
-      <span class="mt-h"></span><span class="mt-h"></span><span class="mt-h hx"></span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h hx"></span>
-      <span class="mt-tot"></span><span class="mt-tot"></span><span class="mt-tot hx"></span>${MT_CELLS.map(tot).join("")}<span class="mt-tot hx"></span>
+      <span class="mt-h"></span><span class="mt-h"></span><span class="mt-h"></span><span class="mt-h hx"></span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h hx"></span>
+      <span class="mt-tot"></span><span class="mt-tot"></span><span class="mt-tot"></span><span class="mt-tot hx"></span>${MT_CELLS.map(tot).join("")}<span class="mt-tot hx"></span>
       ${fams.map(([f, ns]) => `<span class="mt-fam">${f}</span>` + ns.map((n) => { const r = prim(n), L = live(r), rt = MT_RT[r.realtime] || ["", ""];
         return `<div class="mt-r${n === mtSel ? " sel" : ""}"><button type="button" class="mt-nm" data-n="${escapeHtml(n)}" aria-pressed="${n === mtSel}">${escapeHtml(n)}${r.note ? "<sup>*</sup>" : ""}</button>
-          <span class="mt-v">${mtFmt(L.chg13, r.unit)}</span><span class="mt-gw hx">${gauge(L.z)}</span>${MT_CELLS.map(([k, a]) => `<span class="mt-t">${tile(by(n, k), a)}</span>`).join("")}
+          <span class="mt-v">${mtFmt(L.chg13, r.unit)}</span>${mtTodayCell(n)}<span class="mt-gw hx">${gauge(L.z)}</span>${MT_CELLS.map(([k, a]) => `<span class="mt-t">${tile(by(n, k), a)}</span>`).join("")}
           <span class="mt-rt hx" title="${escapeHtml(rt[1])} — ${escapeHtml(r.realtime_note)}">${rt[0]}</span></div>`; }).join("")).join("")}
     </div>
     <div class="mt-key"><span><i class="mt-tile u">↑</i><i class="mt-tile d">↓</i>셈</span><span><i class="mt-tile z">–</i>중립 ±0.5σ</span>
@@ -2286,6 +2359,8 @@ function renderMacroTrend() {
   const det = `<h4>${escapeHtml(mtSel)}<span class="mt-v">${mtFmt(L0.chg13, r0.unit)} · ${L0.z == null ? "–" : `${L0.z >= 0 ? "+" : "−"}${Math.abs(L0.z).toFixed(1)}σ`}</span></h4>
     <p class="mt-meta">${L0.week || "–"} 주까지 13주 변화 · 수신 ${(MT_RT[r0.realtime] || [""])[0]} — ${escapeHtml(r0.realtime_note)}${r0.note ? `<br><b class="mt-warn">주의</b> ${escapeHtml(r0.note)}` : ""}</p>
     <ul class="mt-why">${cells.map(([x, a, , c]) => `<li><span class="mt-why-k">${a} ${x.kind === "co" ? "지금" : "13주 뒤"}</span>${tile(x, a)}<span>${escapeHtml(c.why || (x.live ? "표본 부족(ETF 이후 13주 변화 30주 미만)" : "지금 값 없음(원천 실패)"))}</span></li>`).join("")}</ul>
+    ${MT_TODAY[mtSel] ? (() => { const b = mtDay(MT_TODAY[mtSel]), v = mtDayChg(b), zn = MT_TODAY[mtSel] === "ZN";
+      return v == null ? "" : `<figure class="mt-ch"><figcaption><span>${zn ? "10년 국채선물(ZN) 가격" : "나스닥100(XYZ100)"} 24시간 · 앞 12시간 주요 발표</span><span class="mt-v">오늘 ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%${zn ? ` · 금리${v < 0 ? "↑" : "↓"} · 약 10분 지연` : ""}</span></figcaption>${mtDayChart(MT_TODAY[mtSel], 520, 110, 12)}</figure>`; })() : ""}
     <div class="mt-tw"><table class="mt-rtab"><thead><tr><th>관계</th><th>판정</th><th>ETF 이후 r</th><th>순열 p</th><th>전반 / 후반</th><th>2020–23</th><th>최근 52주</th></tr></thead>
       <tbody>${cells.map(([x, a, v, c]) => `<tr><td>${a} ${x.kind === "co" ? "지금" : "13주 뒤"}</td><td>${v.verdict}</td><td>${mtR(v.r_p3)}</td><td>${v.perm_p == null ? "–" : v.perm_p.toFixed(3)}</td><td>${mtR(v.r_first_half)} / ${mtR(v.r_second_half)}</td><td>${mtR(v.r_2020_23)}</td><td>${mtR(c.roll52)}</td></tr>`).join("")}</tbody></table></div>
     ${rs.map((x) => { const a = a0(x), svg = mtOverlay(x, a); return svg ? `<figure class="mt-ch"><figcaption><span>${a} · ${x.kind === "lead" ? "13주 뒤 — 지표를 14주 앞으로" : "지금 — 같은 13주"}</span><span class="mt-v">최근 52주 r ${mtR(((live(x).assets || {})[a] || {}).roll52)}</span></figcaption>${svg}</figure>` : ""; }).join("")}
@@ -2300,7 +2375,7 @@ el("mtBody")?.addEventListener("click", (e) => {   // 줄 어디를 눌러도(�
   const b = e.target.closest(".mt-r")?.querySelector(".mt-nm");
   if (!b) return;
   mtSel = b.dataset.n; renderMacroTrend();
-  if (matchMedia("(max-width: 1200px)").matches) el("mtBody").querySelector(".mt-det")?.scrollIntoView({ block: "nearest", behavior: "smooth" });   // 한 단이면 상세가 표 아래
+  if (matchMedia("(max-width: 1500px)").matches) el("mtBody").querySelector(".mt-det")?.scrollIntoView({ block: "nearest", behavior: "smooth" });   // 한 단이면 상세가 표 아래
 });
 
 // ── 풋프린트 카드 머리 띠 (2026-10-06 사용자 선택 C) -- 미 국채선물 4종 · 뉴스 기울기 1시간 · ETH/BTC/매크로 게이지(가로) ──
@@ -2321,12 +2396,6 @@ async function refreshTreasury() {
   renderFpStrip();
 }
 const TREASURY_NM = { ZT: "2년", ZF: "5년", ZN: "10년", ZB: "30년" };
-function treasury1h(k) {   // 마지막 가격 · 1시간 변화율(%) -- 머리 띠와 같은 계산. 없으면 null
-  const v = latestTreasury && latestTreasury.ok ? (latestTreasury.symbols || {})[k] : null, b = v ? v.bars : [];
-  if (!b || b.length < 2) return null;
-  const last = b[b.length - 1], h1 = b.find((x) => x[0] >= last[0] - 3600) || b[0];
-  return { last: last[1], chg1: (last[1] / h1[1] - 1) * 100 };
-}
 // 최소 호가 단위(CME: ZT 1/256 · ZF 1/128 · ZN 1/64 · ZB 1/32). 1시간 차트의 세로 폭이 4틱보다 좁아지지 않게 -- 꽉 맞추면 1틱 흔들림도 급락처럼 보인다.
 const TREASURY_TICK = { ZT: 1 / 256, ZF: 1 / 128, ZN: 1 / 64, ZB: 1 / 32 };
 // 2026-10-06(3) 띠 = 금리 4종만, 전폭(사용자 «뉴스는 ⑤ 로 옮기고 그 자리를 국채선물로 가득») · 차트 아래 마지막 봉 시각.
@@ -2376,8 +2445,8 @@ let xyzBars = [], xyzLive = null, xyzLastFetchAt = 0, xyzSkew = 0, xyzBusy = fal
 const xyzClock = () => Date.now() / 1000 + xyzSkew;   // 모든 나이·창 계산은 서버 시계로(브라우저 시계가 틀려도 «끊김»이 맞게)
 async function refreshXyz() {
   const now = Date.now();
-  if (xyzBusy || now - xyzLastFetchAt < 1000) return;
-  if (!el("mcBody")?.classList.contains("mc-cmp")) return;   // 칸은 넓은 화면 시장 맥락 한 줄에만 있다 -- 좁은 화면·휴대폰은 받지 않는다
+  // 2026-10-28 나스닥 그래프는 Macro Trend 카드 «오늘» 칸(1분마다 다시 그림)으로 옮겼다 -- 넓은 화면은 지금처럼 1초(급변 칩·시장 맥락), 그 밖은 1분
+  if (xyzBusy || now - xyzLastFetchAt < (el("mcBody")?.classList.contains("mc-cmp") ? 1000 : 60000)) return;
   xyzLastFetchAt = now; xyzBusy = true;   // 응답이 1초 넘게 걸려도 겹치지 않게(늦은 옛 응답이 새 봉을 잘라내지 않게)
   try {
     const since = xyzBars.length ? xyzBars[xyzBars.length - 1][0] - 60 : 0;   // 마지막 두 봉(진행 중 봉 + 막 닫힌 봉)부터
@@ -2399,29 +2468,8 @@ async function refreshXyz() {
   }
   // 그리기는 시장 맥락 1초 렌더(refreshMarketCtx)가 한다 -- 여기서 또 부르면 1초에 두 번 통째로 다시 그린다
 }
-function xyzPriceAt(t) {   // 시각 t(초)의 가격 = t 전에 끝난 마지막 1분봉 종가(봉 시작 + 60 ≤ t). 없거나 5분 넘게 묵었으면 null(«1시간»이 몇 시간이 되지 않게)
-  let lo = 0, hi = xyzBars.length - 1, at = -1;
-  while (lo <= hi) { const m = (lo + hi) >> 1; if (xyzBars[m][0] + 60 <= t) { at = m; lo = m + 1; } else hi = m - 1; }
-  return at < 0 || t - (xyzBars[at][0] + 60) > 300 ? null : xyzBars[at][1];
-}
 function xyzNow() {   // 지금 가격 -- 초 가격이 30초 넘게 묵었으면(수집기 끊김) null
   return xyzLive && xyzLive.px && xyzClock() - xyzLive.recv_sec < 30 ? xyzLive.px : null;
-}
-function xyzRet(t0, t1) {   // [t0, t1] 수익률(%) -- t1 이 지금 이후면 초 가격을 끝으로 쓴다(진행 중 봉)
-  const a = xyzPriceAt(t0), b = t1 >= xyzClock() - 1 ? xyzNow() : xyzPriceAt(t1);
-  return a && b ? (b / a - 1) * 100 : null;
-}
-const xyzPct = (v, d = 2) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(d)}%`);
-function xyzSpark(w, h, min = 60) {   // 최근 min 분 1분봉 종가 + 지금 점. 색 = 그 창 등락(작으면 흐림) · 점선 = 창 첫 값
-  const t1 = xyzClock(), bb = xyzBars.filter((b) => b[0] + 60 >= t1 - min * 60 && b[0] + 60 <= t1), live = xyzNow();   // 진행 중 봉 제외(끝이 미래 x 로 튀지 않게)
-  const pts = bb.map((b) => [b[0] + 60, b[1]]).concat(live ? [[t1, live]] : []);
-  if (pts.length < 2) return `<svg class="mc-svg" width="${w}" height="${h}" aria-hidden="true"></svg>`;
-  const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])), rg = (hi - lo) || 1e-9, a = pts[0][0];
-  const X = (t) => 3 + (t - a) / Math.max(1, t1 - a) * (w - 8), Y = (v) => 3 + (1 - (v - lo) / rg) * (h - 6), last = pts[pts.length - 1];
-  const chg = (last[1] / pts[0][1] - 1) * 100, col = Math.abs(chg) < 0.02 ? "var(--muted)" : chg > 0 ? "var(--good)" : "var(--bad)";
-  return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="width:${w}px;height:${h}px" aria-hidden="true"><line x1="3" x2="${w - 3}" y1="${Y(pts[0][1]).toFixed(1)}" y2="${Y(pts[0][1]).toFixed(1)}" stroke="var(--line)" stroke-dasharray="2 3"/>`
-    + `<path d="${pts.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round"/>`
-    + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${col}"/></svg>`;
 }
 // 2026-10-14 사용자 «5년·10년·나스닥 급변하면 칩 알림» -- 서버 /api/macro-spikes(10-13 연구 정의: 5분 수익이 직전 활동 봉 표준편차의 4배 이상).
 //   «⑥» 제목 줄 오른쪽 칩. 봉이 끝나고 SPIKE_SHOW_MIN 분 동안 보인다(국채선물은 ~10분 늦게 도착하므로 처음 보일 때 이미 10분 전).
@@ -2458,8 +2506,6 @@ function macroSpikeChips(chip) {   // 종목마다 가장 최근 급변 1개 · 
   });
   return out.length ? `<i>급변</i>${out.sort((x, y) => x[0] - y[0]).map((x) => x[1]).join("")}` : "";   // 최근 것부터 -- 좁으면 오래된 쪽이 잘린다
 }
-const XYZ_TIP = "나스닥100 실시간 — Hyperliquid xyz:XYZ100 무기한(CME 나스닥 선물과 5분 상관 0.98, 지연 없음)\n"
-  + "참고 · 신호 아님: 나스닥은 ETH 보다 먼저 움직이지 않는다 — 같은 5분 안에서 같이 움직인다(요즘 상관 0.4). 주말엔 CME 가 쉬어 거의 안 움직인다.";
 
 function newsAgo(ms, now) {
   const m = Math.max(0, Math.round((now - ms) / 60000));
@@ -4144,7 +4190,6 @@ const MC_TIPS = {
 MC_TIPS.q_lev = MC_TIPS.lev + "\n\n" + MC_TIPS.ls;
 MC_TIPS.q_flow = MC_TIPS.flow + "\n\n" + MC_TIPS.quad;
 MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
-MC_TIPS.q_rate = "나스닥 = 나스닥100 실시간(Hyperliquid xyz:XYZ100 무기한, CME 나스닥 선물과 5분 상관 0.98, 지연 없음) 최근 1시간 · 값 = 1시간 등락. 나스닥은 ETH 보다 먼저 움직이지 않는다 -- 같은 5분 안에서 같이 움직인다(요즘 상관 0.4, 10-13 연구). 요즘 금리 급변 때 ETH 가 반대로 움직이는 것도 나스닥을 거친 것이다. 주말엔 거의 안 움직인다. 수집기가 끊기면 «끊김».\n미 국채선물 5년(ZF)·10년(ZN) 최근 1시간 가격 변화. 가격↓ = 금리↑. CME 무료 시세라 약 10분 늦다(매분 수집).\n«오늘 금리 흐름»을 보는 지도이고 매매 신호로 검정하지 않았다. 2년·30년·1시간 그림은 2026-10-13 판에서 뺐다(사용자 «5년 10년 것만»).";
 MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위치(VWAP·%B·RSI) 줄 제거 -- 설명도 벽만
 MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아니다(지난 7·14·28·56·90일 종가 대비 5표, 미래 적중 48~58%).\n"
   + "15분 · 칼시 = 미국 예측시장 15분 ETH 위/아래 확률(55~45% 비등) — 참고, 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침.\n"
@@ -4621,17 +4666,6 @@ function renderMarketCtx() {
     const unit = (G.cmpW - 2 * 12) / 4.0, gw = Math.max(40, Math.floor(unit * 1.2) - 4), gwWall = Math.max(60, Math.floor(unit * 1.6) - 4);   // 폭 1.2 : 1.2 : 1.6 (값이 붙는 ①② 를 넓게) · 10-15 ⑤ 뉴스 칸 → 아래 ⑤ 예측 줄
     const gk = (k, vis, tip = "", val = null, cls = "") => `<div class="mc-gk${val == null ? "" : " v"}"${tip ? ` title="${escapeHtml(tip)}"` : ""}><span>${k}</span>${vis}${val == null ? "" : `<b class="${cls}">${val}</b>`}</div>`;   // val = 오른쪽 값(2026-10-13 사용자 «라벨 되돌려»)
     const gv = gw;   // 2026-10-13 «값도 게이지 아래로» -- 값이 아래 줄로 가서 그림은 칸 폭 전체
-    const spark = (k, w, h) => {   // 국채선물 1시간 1분봉 -- 가격↓ = 금리↑ 이라 금리 오름이면 빨강
-      const v = latestTreasury && latestTreasury.ok ? (latestTreasury.symbols || {})[k] : null, b0 = v ? v.bars : [], r = treasury1h(k);
-      if (!b0 || b0.length < 2 || !r) return mcGfx.pct(null, w);
-      const t1 = b0[b0.length - 1][0], bb = b0.filter((x) => x[0] >= t1 - 3600), t0 = bb[0][0];
-      const lo0 = Math.min(...bb.map((x) => x[1])), hi0 = Math.max(...bb.map((x) => x[1])), pad = Math.max(0, 4 * (TREASURY_TICK[k] || 0) - (hi0 - lo0)) / 2;
-      const lo = lo0 - pad, rg = (hi0 + pad - lo) || 1e-9, X = (t) => 3 + (t - t0) / Math.max(1, t1 - t0) * (w - 8), Y = (y) => 3 + (1 - (y - lo) / rg) * (h - 6);
-      const col = Math.abs(r.chg1) < 0.005 ? "var(--muted)" : r.chg1 < 0 ? "var(--bad)" : "var(--good)", last = bb[bb.length - 1];
-      return `<svg class="mc-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><line x1="3" x2="${w - 3}" y1="${Y(bb[0][1]).toFixed(1)}" y2="${Y(bb[0][1]).toFixed(1)}" stroke="var(--line)" stroke-dasharray="2 3"/>`
-        + `<path d="${bb.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)} ${Y(x[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round"/>`
-        + `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="2.6" fill="${col}"/></svg>`;
-    };
     // 2026-10-15 사용자 «①②④ 제목 제거»: 판 이름은 «?» 의 title·aria 로만 -- 설명은 팝업 제목으로도 쓴다(helpOpen)
     const tile = (key, title, chipHtml, rows, cls = "") => `<div class="mc-sec${cls}" aria-label="${escapeHtml(title)}"><div class="mc-state">${chipHtml || ""}`
       + `<button type="button" class="mc-q mc-q1" ${helpAttrs(key)} title="${escapeHtml(title)} — 설명" aria-label="${escapeHtml(title)} 설명"><span aria-hidden="true">?</span></button></div>`
@@ -4659,16 +4693,9 @@ function renderMarketCtx() {
           (sw ? G.book(sw, bps, Math.floor(unit * 1.6), Number(d.mid) || 0, (ASSET_CONFIG[A] || {}).dp ?? 2, 30, 11.5, 16) : "")   // 10-13 «벽 내용 상하 간격 넓히고 크게»
           + gk("깊은 벽", ps && PAPER_SIG_OK.wall.has(A) ? G.wall(ps.imb, ps.thr, gwWall) : G.pct(null, gwWall), ps ? `깊은 벽 ${sg(ps.imb, 2)} · 문턱 ±${ps.thr.toFixed(2)}` : ""), " mc-wide-t")
       + `</div>` + fcHtml];
-    // 2026-10-16 펜 메모 «나스닥·금리를 이전처럼 풋프린트 카드 상단(1h…1d 오른쪽)으로»: 같은 그림·값·툴팁·급변 칩을 머리 한 줄 높이로
-    // 펜 메모(4차) «차트를 늘려서 오른쪽 끝까지»: 칸(#fpRates)이 머리 남는 폭을 다 차지(CSS flex 1) -- 그 폭에서 이름·값 자리(약 290px)를 빼고 셋이 나눈다
-    const frBox = el("fpRates"), frW = frBox && !frBox.hidden ? frBox.getBoundingClientRect().width : 0;
-    const RH = 22, rw = frW > 480 ? Math.max(60, Math.floor((frW - 290) / 3)) : 96, rt = (k) => { const r = treasury1h(k); return r ? `${k} ${r.last.toFixed(3)} · 1시간 ${r.chg1 >= 0 ? "+" : "−"}${Math.abs(r.chg1).toFixed(2)}% → 금리 ${r.chg1 <= 0 ? "↑" : "↓"} (CME 약 10분 지연)` : ""; };
-    const nq = (() => { const t = xyzClock(), r1 = xyzRet(t - 3600, t), px = xyzNow();
-      return `<span class="fr-i" title="${escapeHtml(`${XYZ_TIP}\n지금 ${px ? px.toLocaleString("en-US", { maximumFractionDigits: 0 }) : "끊김"} · 1시간 ${xyzPct(r1)}`)}"><span class="fr-k">나스닥</span>${xyzSpark(rw, RH)}`
-        + `<b class="${r1 == null ? "" : r1 >= 0 ? "mc-good" : "mc-bad"}">${px ? xyzPct(r1) : "끊김"}</b></span>`; })();
-    setH("fpRates", `<span class="fr-t" title="${escapeHtml(MC_TIPS.q_rate)}">1시간</span>` + nq
-      + ["ZF", "ZN"].map((k) => `<span class="fr-i" title="${escapeHtml(rt(k))}"><span class="fr-k">${TREASURY_NM[k]}</span>${spark(k, rw, RH)}</span>`).join("")
-      + `<span class="mc-spk">${macroSpikeChips(chip)}</span>`);
+    // 2026-10-28 사용자 «풋프린트 상단 나스닥/2년물/10년물 차트 자리에 Macro Trend 요약»(시안 H1) -- 나스닥·10년은 Macro Trend 카드 «오늘» 칸으로 옮겼다.
+    //   급변 칩(5분 |z|≥4, 10-14)은 그대로 끝에 둔다.
+    setH("fpRates", mtHeadHtml() + `<span class="mc-spk">${macroSpikeChips(chip)}</span>`);
     el("fpRates") && (el("fpRates").hidden = false);
   } else { htmlB.push(wallHtml0 + fcHtml); ratesOff(); }
   // 2026-10-13 좁은 화면 시장 맥락 끝 모의 판도 뺐다(사용자 «모의판은 제거»)
@@ -8825,6 +8852,7 @@ async function tick() {
       refreshMacroCalendar();
       refreshNews();                 // 2026-10-05 뉴스 카드 (자체 30초 게이트)
       refreshMacroTrend();           // 2026-10-28 Macro Trend 카드 (자체 10분 게이트)
+      refreshMtToday();              // 2026-10-28 Macro Trend «오늘» 칸 (자체 1분 게이트 · 국채 24시간 5분)
       refreshTreasury();             // 2026-10-06 풋프린트 머리 띠 국채선물 (자체 60초 게이트)
       refreshXyz();                  // 2026-10-14 나스닥100 실시간(XYZ100, 자체 1초 게이트)
       refreshMacroSpikes();          // 2026-10-14 «⑥» 급변 칩(자체 30초 게이트)
