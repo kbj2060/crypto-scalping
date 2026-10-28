@@ -2,12 +2,15 @@
 
   python liqlab_run_20261028.py --controls   # 실데이터 위 양성·음성 대조(판정 전 장치 검증)
   python liqlab_run_20261028.py --run        # 학습(24·25) 임계 → 검증(26-01~05) 변형 선택 → 시험(26-06~10-23) 1회
+  python liqlab_run_20261028.py --incr       # §13-2 예측 입력 → 배포 QX4·A1 박스 1h 위 증분(검증 적합 · 시험 1회)
+  python liqlab_run_20261028.py --forward [--dry]   # §13-1 T1 전진 판정(2027-04-24~ · LIQLAB_D=data/liqlab_fwd) · --dry = 시험창 재현
 창: TRAIN 2024-01-01~2025-12-31 · VAL 2026-01-01~2026-05-31 · TEST 2026-06-01~2026-10-23.
 """
 from __future__ import annotations
 
 import itertools
 import json
+import os
 import pathlib
 import sys
 
@@ -18,9 +21,10 @@ from sklearn.linear_model import LinearRegression, LogisticRegression
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import liqlab_harness_20261028 as L  # noqa: E402
 
-D = pathlib.Path("data/liqlab"); OUT = pathlib.Path("tmp/liqlab_20261028"); OUT.mkdir(parents=True, exist_ok=True)
+D = pathlib.Path(os.environ.get("LIQLAB_D", "data/liqlab")); OUT = pathlib.Path("tmp/liqlab_20261028"); OUT.mkdir(parents=True, exist_ok=True)
 COINS = ["ETHUSDT", "BTCUSDT", "SOLUSDT", "XRPUSDT"]
-WIN = {"train": ("2024-01-01", "2025-12-31 23:59"), "val": ("2026-01-01", "2026-05-31 23:59"), "test": ("2026-06-01", "2026-10-23 23:59")}
+WIN = {"train": ("2024-01-01", "2025-12-31 23:59"), "val": ("2026-01-01", "2026-05-31 23:59"), "test": ("2026-06-01", "2026-10-23 23:59"),
+       "fwd": ("2026-10-24", "2027-04-23 23:59")}   # §13-1 전진 창
 EXPECTED_BP = {"T1": 5.0, "T2": 2.0, "T3": 3.0}   # 사전등록 기대 효과(MDE 판정 불능 기준)
 T4_STRESS_BP = 2.0                                # 일봉 리밸런스 메이커 + 역선택 스트레스(다리당)
 
@@ -470,8 +474,143 @@ def internal(data):
     return rep
 
 
+# ───────────────────────────── 다음 단계(사전등록 §13) ─────────────────────────────
+FWD_VERDICT = pd.Timestamp("2027-04-24")
+T1_FWD = [dict(state=s, q=q, H=12) for s in ("rv", "amihud") for q in (.95, .90)]   # [0] = 주 판정(엄격 실행의 검증 선택)
+
+
+def forward(data, dry):
+    """§13-1 T1 전진 판정 — 실제 비용(메이커 0.7·대체 4bp) · 문턱 = 학습 분위. dry = 같은 코드로 시험창(엄격 결과 재현)."""
+    w = "test" if dry else "fwd"
+    f_out = OUT / ("forward_T1_dry.json" if dry else "forward_T1.json")
+    if not dry:
+        assert pd.Timestamp.now("UTC").tz_localize(None) >= FWD_VERDICT, "판정일(2027-04-24) 전"
+        assert not f_out.exists(), "판정은 한 번만"
+        assert all(p.index[-1] >= pd.Timestamp(WIN["fwd"][1]) - pd.Timedelta("5min") for p, _ in data.values()), "자료가 창 끝까지 없음"
+    rep = {"window": WIN[w], "cost_bp": {"maker": L.MAKER_BP, "maker_fallback_taker": L.MAKER_FALLBACK_BP}, "variants": []}
+    for v in T1_FWD:
+        r = score_arm("T1", data, v, windows=(w,), B_null=300)[w]
+        pt, ok = pooled(r), [x["maker"] for x in r.values() if x["maker"]["n"] >= 10]
+        net = np.concatenate([np.asarray(x["maker"]["net"], float) for x in r.values()])
+        day = np.concatenate([np.asarray(x["maker"]["day"], int) for x in r.values()])
+        rep["variants"].append({"variant": v, "pooled": {k: pt.get(k) for k in ("n", "mean", "ci95", "p")},
+                                "mde80": L.mde80(net, day) if len(net) >= 10 else None,
+                                "coins_pos": [sum(x["mean_net"] > 0 for x in ok), len(ok)],
+                                "null_random_pct": float(np.mean([x["null_random_pct"] for x in ok])) if ok else None,
+                                "per_coin": {s: x["maker"].get("mean_net") for s, x in r.items()}})
+    a = rep["variants"][0]; pt = a["pooled"]
+    rep["F1_candidate_kept"] = bool((pt.get("mean") or -1) > 0 and a["coins_pos"][0] >= -(-a["coins_pos"][1] // 2) and (a["null_random_pct"] or 0) >= 50)
+    rep["F2_strict"] = ("통과" if pt.get("ci95") and pt["ci95"][0] > 0 else
+                        "판정 불능" if (a["mde80"] or np.inf) > 2 * EXPECTED_BP["T1"] else "불통과")
+    json.dump(rep, open(f_out, "w"), ensure_ascii=False, indent=1, default=float)
+    return rep
+
+
+def _ql(y, yh):
+    e = y - yh
+    return np.exp(e) - e - 1
+
+
+def _c(y, yh):
+    """눈금 상수(12라운드 규칙): ln mean exp(y − ŷ)."""
+    return float(np.log(np.mean(np.exp(y - yh))))
+
+
+def _logit(p):
+    p = np.clip(p, 1e-6, 1 - 1e-6)
+    return np.log(p / (1 - p))
+
+
+def _upper90(d, ts):
+    """차이 → 일 평균 → 5일 블록 부트 → (평균, 단측 90% 상한)."""
+    dl = pd.Series(np.asarray(d, float), index=pd.DatetimeIndex(ts).normalize()).groupby(level=0).mean()
+    return float(dl.mean()), float(np.nanquantile(L.cluster_boot_mean(dl.to_numpy(), np.arange(len(dl)) // 5), .9))
+
+
+def _z(F, cols, fit):
+    """적합 행(검증) 평균·표준편차로 표준화 · 결측·무한 0(= 평균) 대입 · 결측 비율."""
+    X = F[cols].replace([np.inf, -np.inf], np.nan)
+    mu, sd = X[fit].mean(), X[fit].std() + 1e-12
+    return ((X - mu) / sd).fillna(0.0).to_numpy(), float(X.isna().any(axis=1).mean())
+
+
+def rolling_platt90(ts, p, y, W=60, N=90, first="2025-10-01"):
+    """배포 A1 재현(fit_box_hold_platt90 와 같은 규칙): 매월 1일 T 에 직전 N일·T 전에 해결된 행(ts+W+1분 ≤ T)으로 Platt → 그 달에 적용."""
+    out, z, ts = np.full(len(p), np.nan), _logit(p), pd.DatetimeIndex(ts)
+    ab = {}
+    for T in pd.date_range(first, ts.max() + pd.offsets.MonthBegin(1), freq="MS"):
+        fit = (ts >= T - pd.Timedelta(days=N)) & (ts + pd.Timedelta(minutes=W + 1) <= T)
+        m = LogisticRegression(C=1e6, max_iter=1000).fit(z[fit, None], y[fit])
+        app = (ts >= T) & (ts < T + pd.offsets.MonthBegin(1))
+        if app.any():
+            out[app] = m.predict_proba(z[app, None])[:, 1]
+        ab[str(T.date())] = (float(m.coef_[0, 0]), float(m.intercept_[0]))
+    return out, ab
+
+
+def incr(data):
+    """§13-2 예측 입력(P1·P2) → 배포 A2 QX4(4h 변동성, 4코인) · A1 박스 1h(ETH) 위 증분. 계수는 검증 2026-01~05 만 · 시험 1회."""
+    f_out = OUT / "incr.json"
+    assert not f_out.exists(), "판정은 한 번만"
+    rep = {"qx4": {}, "box": {}}
+    for sym in COINS:                                        # ── QX4: ŷ' = ŷ + a + b·z (OLS 잔차) · 기준 = QX4 + c
+        s, x = sym[:-4], pred_frame(sym, data)
+        Pv, Pt = (pd.read_parquet(OUT / "qx4" / f"pred_{w}_r4_{s}.parquet") for w in ("val", "test"))
+        idx = Pv.index.append(Pt.index)
+        assert (idx.minute == 55).all(), "QX4 행 = 정시 결정의 5분봉 시작(liqlab 같은 τ 행이 봉 끝 = 결정 시각)"
+        F, fit = x.reindex(idx), np.r_[np.ones(len(Pv), bool), np.zeros(len(Pt), bool)]
+        h, yy = np.r_[Pv.v_QX4.to_numpy(), Pt.t_QX4.to_numpy()], np.r_[Pv.y.to_numpy(), Pt.y.to_numpy()]
+        for arm in ("P1", "P2"):
+            Z, nanf = _z(F, P_ADD[arm], fit)
+            A = np.c_[np.ones(len(Z)), Z]
+            b = np.linalg.lstsq(A[fit], (yy - h)[fit], rcond=None)[0]
+            h1 = h + A @ b
+            d = _ql(yy[~fit], h1[~fit] + _c(yy[fit], h1[fit])) - _ql(yy[~fit], h[~fit] + _c(yy[fit], h[fit]))
+            m, u = _upper90(d, Pt.index)
+            rep["qx4"].setdefault(arm, {})[s] = {"d_qlike": m, "upper90": u, "rel_pct": m / float(_ql(yy[~fit], h[~fit] + _c(yy[fit], h[fit])).mean()) * 100,
+                                                 "coef": dict(zip(P_ADD[arm], np.round(b[1:], 5))), "nan_frac": nanf, "n_val": int(fit.sum()), "n_test": int((~fit).sum()),
+                                                 "monthly": {str(k): round(float(v), 5) for k, v in pd.Series(d, index=Pt.index).groupby(Pt.index.to_period("M")).mean().items()}}
+    for arm, r in rep["qx4"].items():
+        imp = sum(v["d_qlike"] < 0 for v in r.values())
+        r["gate"] = {"coins_improve": imp, "strict": bool(r["ETH"]["upper90"] < 0 and imp >= 3), "candidate": bool(imp >= 3)}
+    # ── 박스 1h: 기준 = 로지스틱[1, logit p_A1] · 추가 = [1, logit p_A1, z] — 둘 다 검증에서 다시 맞춤(재보정 이득을 증분에서 뺌)
+    sys.path.insert(0, os.getcwd())
+    from dashboard.box_hold import B as BH, PLATT90
+    cf_ = BH["scales"]["1h"]
+    g = pd.read_parquet(OUT / "box_rows.parquet", columns=["scale", "ts", "y"] + list(cf_["cols"]))
+    g = g[(g.scale == "1h") & (g.ts >= "2025-06-01")].dropna(subset=list(cf_["cols"])).reset_index(drop=True)
+    ts, y = pd.DatetimeIndex(g.ts), g.y.to_numpy(float)
+    assert (ts.minute % 5 == 4).all(), "박스 1h 격자 = 분 i 시작(결정 i+1분) · liqlab 봉 τ = ts−4분이 결정에 끝남"
+    pA, ab = rolling_platt90(ts, cf_["model"].predict_proba(g[list(cf_["cols"])])[:, 1], y)
+    served = json.loads(PLATT90.read_text()) if PLATT90.exists() else None
+    rep["box"]["platt_2026-10-01"] = {"replay": ab.get("2026-10-01"), "served": served}
+    va = (ts >= "2026-01-01") & (ts + pd.Timedelta(minutes=61) <= pd.Timestamp("2026-06-01"))
+    te = ts >= "2026-06-01"
+    assert np.isfinite(pA[va | te]).all()
+    F, lz = pred_frame("ETHUSDT", data).reindex(ts - pd.Timedelta("4min")), _logit(pA)[:, None]
+    base = LogisticRegression(C=1e6, max_iter=2000).fit(lz[va], y[va])
+    pb = base.predict_proba(lz[te])[:, 1]
+    for arm in ("P1", "P2"):
+        Z, nanf = _z(F, P_ADD[arm], va)
+        X = np.c_[lz, Z]
+        add = LogisticRegression(C=1e6, max_iter=4000).fit(X[va], y[va])
+        pa = add.predict_proba(X[te])[:, 1]
+        mB, uB = _upper90((pa - y[te]) ** 2 - (pb - y[te]) ** 2, ts[te])
+        mL, uL = _upper90(logloss(y[te], pa) - logloss(y[te], pb), ts[te])
+        rep["box"][arm] = {"d_brier": mB, "upper90_brier": uB, "d_logloss": mL, "upper90_logloss": uL,
+                           "brier_base": float(np.mean((pb - y[te]) ** 2)), "brier_A1_asis": float(np.mean((pA[te] - y[te]) ** 2)),
+                           "coef": dict(zip(P_ADD[arm], np.round(add.coef_[0][1:], 5))), "nan_frac": nanf, "n_val": int(va.sum()), "n_test": int(te.sum()),
+                           "gate": {"strict": bool(uB < 0 and mL < 0), "candidate": bool(mB < 0 and mL < 0)}}
+    json.dump(rep, open(f_out, "w"), ensure_ascii=False, indent=1, default=float)
+    return rep
+
+
 def main():
     data = {s: panel(s) for s in COINS}
+    if "--forward" in sys.argv:
+        print(json.dumps(forward(data, "--dry" in sys.argv), ensure_ascii=False, default=float)); return
+    if "--incr" in sys.argv:
+        print(json.dumps(incr(data), ensure_ascii=False, default=float)); return
     if "--internal" in sys.argv:
         rep = internal(data)
         json.dump(rep, open(OUT / "internal.json", "w"), ensure_ascii=False, indent=1, default=float)

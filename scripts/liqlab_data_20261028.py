@@ -12,6 +12,7 @@
 """
 import concurrent.futures as cf
 import io
+import os
 import pathlib
 import sys
 import urllib.error
@@ -22,12 +23,12 @@ import numpy as np
 import pandas as pd
 
 BASE = "https://data.binance.vision/data/futures/um"
-OUT = pathlib.Path("data/liqlab"); OUT.mkdir(parents=True, exist_ok=True)
-RAW = OUT / "raw"; RAW.mkdir(exist_ok=True)
+OUT = pathlib.Path(os.environ.get("LIQLAB_OUT", "data/liqlab")); OUT.mkdir(parents=True, exist_ok=True)   # 전진(§13-1): 따로 써서 동결본 불변
+RAW = pathlib.Path("data/liqlab/raw"); RAW.mkdir(parents=True, exist_ok=True)
 SYMS = ["ETHUSDT", "BTCUSDT", "SOLUSDT", "XRPUSDT"]
 XS20 = ["ADAUSDT", "APTUSDT", "ARBUSDT", "ATOMUSDT", "AVAXUSDT", "BNBUSDT", "BTCUSDT", "DOGEUSDT", "DOTUSDT", "ETHUSDT",
         "FILUSDT", "INJUSDT", "LINKUSDT", "LTCUSDT", "NEARUSDT", "OPUSDT", "SOLUSDT", "SUIUSDT", "TRXUSDT", "XRPUSDT"]
-START, END = "2024-01-01", "2026-10-23"
+START, END = "2024-01-01", os.environ.get("LIQLAB_END", "2026-10-23")
 MONTHS = pd.period_range(START, "2026-09", freq="M").strftime("%Y-%m")
 OCT_DAYS = pd.date_range("2026-10-01", END).strftime("%Y-%m-%d")
 DAYS = pd.date_range(START, END).strftime("%Y-%m-%d")
