@@ -5,6 +5,8 @@
   --stage fit    적합 구간(2020–23)에서만 지표 선정·부호·계수 → docs/prereg/macro_regime_bias_4w_frozen_20261028.json (채점 전 커밋)
   --stage score  동결 사양으로 2024-01~2026-05 고정 채점(주 판정)
   --stage test   2026-06~ 시험 1회(표식 파일이 있으면 거부, --force 로만)
+  --stage r2test 2라운드(docs/prereg/macro_regime_bias_r2_20261028.md): 1라운드 선정·부호로 절편 없는 «부호 × 13주 변화 ÷ 104주 sd» 평균 Z,
+                 2026-06~ 시험 1회(현재 빈티지 + 달러지수·STLFSI4 최초 공표값) · 2024-01~26-05 는 «사후 참고»로만. FRED_API_KEY 필요
   --selftest     네트워크·패널 없이: CW 식 · 심은 신호 선정 · 인과성(τ 뒤 패널을 바꿔도 τ 예보 불변)
 입력 패널: research_macro_crypto_panel_20261027.py 산출 panel_daily.parquet(CC BY-NC, git 밖) -- --panel 로 준다.
   python scripts/research_macro_regime_bias_20261028.py --panel <panel_daily.parquet> --stage fit
@@ -12,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import importlib.util
 import json
 import sys
@@ -36,6 +39,7 @@ SEED = 20261028
 MIN_N = 30   # 이보다 적으면 위약·블록 부트스트랩을 안 한다(시험 구간 n≈17, 10-28 리뷰)
 
 
+@functools.lru_cache(maxsize=None)
 def _load(name: str, rel: str):
     spec = importlib.util.spec_from_file_location(name, ROOT / rel)
     mod = importlib.util.module_from_spec(spec)
@@ -43,17 +47,57 @@ def _load(name: str, rel: str):
     return mod
 
 
+def _verdict():
+    return _load("verdict", "scripts/research_macro_trend_p3_verdict_20261028.py")
+
+
+def sample_week(panel: pd.DataFrame, end: str | pd.Timestamp | None = None) -> pd.DataFrame:
+    """판정표와 같은 주간 표본(ffill 10일 → W-FRI last, DGS10 끝 뒤 주 제거). 전진 기록기도 이 함수를 부른다(패리티).
+    end = 전진 기록기의 결정 금요일 -- 🔴토 01:30 UTC 엔 FRED DGS10 의 금요일 값이 아직 없어 표본기가 그 주를 잘라낸다(10-28 리뷰).
+    그 날 DGS10 에 직전 값을 넣어 절단만 우회한다(τ 피쳐는 1주 미룬 값이라 τ 의 DGS10 을 안 쓴다 -- 누수 없음)."""
+    if end is not None:
+        end = pd.Timestamp(end)
+        panel = panel.copy()
+        if end not in panel.index:
+            panel.loc[end] = np.nan
+            panel = panel.sort_index()
+        panel.loc[end, "DGS10"] = panel["DGS10"].loc[:end].ffill().iloc[-1]
+    w = _verdict().load_sampler()(panel, "W")
+    for a in ("BTC", "ETH"):   # 🔴표본기의 ffill(10일)이 코인 마지막 날 뒤 주에 묵은 가격을 채운다(수익 0) -- 그 주는 버린다(10-28 리뷰)
+        if a in panel:
+            w.loc[w.index > panel[a].last_valid_index(), a] = np.nan
+    return w
+
+
+def feats_for(w: pd.DataFrame, names) -> dict:
+    """지표 이름 → «판정표 변환의 13주 변화, 1주 미룸»."""
+    v = _verdict()
+    t = {**v.SERIES, **v.EXTRA}
+    return {n: v.level(w, t[n][0], t[n][1]).diff(13).shift(1) for n in names}
+
+
 def weekly(panel: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """판정표와 같은 주간 표본 + 지표 27개(SERIES + EXTRA)의 «13주 변화, 1주 미룸»."""
-    v = _load("verdict", "scripts/research_macro_trend_p3_verdict_20261028.py")
-    w = v.load_sampler()(panel, "W")
-    for a in ("BTC", "ETH"):   # 🔴표본기의 ffill(10일)이 코인 마지막 날 뒤 주에 묵은 가격을 채운다(수익 0) -- 그 주는 버린다(10-28 리뷰)
-        w.loc[w.index > panel[a].last_valid_index(), a] = np.nan
+    v = _verdict()
+    w = sample_week(panel)
     table = {**v.SERIES, **v.EXTRA}
     missing = [c for c, _ in table.values() if c not in w]
     assert len(table) == 27 and not missing, (len(table), missing)   # 지표가 조용히 빠지지 않게
-    feats = {name: v.level(w, col, how).diff(13).shift(1) for name, (col, how) in table.items()}
-    return w, feats
+    return w, feats_for(w, table)
+
+
+SD_WEEKS, SD_MIN = 104, 52
+
+
+def selected(fz: dict, asset: str, model: str) -> dict:
+    return {k: s for k, s in fz["assets"][asset][model]["indicators"].items() if s["selected"]}
+
+
+def z_combo(feats: dict, spec: dict) -> tuple[pd.Series, pd.Series]:
+    """2라운드: 절편 없는 Z = 평균_i sign(r_i)·x_i / sd_i(τ 까지 104주, 최소 52주). 반환 (Z, 시점별 지표 수)."""
+    zs = [np.sign(s["r"]) * feats[k] / feats[k].rolling(SD_WEEKS, min_periods=SD_MIN).std().where(lambda x: x > 0) for k, s in spec.items()]   # sd 0 = 그 지표 빠짐
+    m = pd.concat(zs, axis=1)
+    return m.mean(axis=1), m.notna().sum(axis=1)
 
 
 def labels(w: pd.DataFrame, asset: str) -> dict[str, pd.Series]:
@@ -252,6 +296,78 @@ def verdicts(res: dict) -> dict:
     return {"B_ETH_4w": {**vb, "PASS": all(vb.values())}, "A_ETH": {**va, "PASS": all(va.values())}}
 
 
+# ── 2라운드 ─────────────────────────────────────────────────────────────────────────────────────────
+def initial_release(panel: pd.DataFrame, sids=("DTWEXBGS", "STLFSI4")) -> pd.DataFrame:
+    """개정 계열을 ALFRED 최초 공표값으로 바꾼 패널(2019-06~). FRED_API_KEY 필요."""
+    import os
+    import requests
+    p = panel.copy()
+    for sid in sids:
+        ob = requests.get("https://api.stlouisfed.org/fred/series/observations", timeout=60, params={
+            "series_id": sid, "api_key": os.environ["FRED_API_KEY"], "file_type": "json", "observation_start": "2019-06-01",
+            "output_type": 4, "realtime_start": "1776-07-04", "realtime_end": "9999-12-31"}).json()["observations"]
+        ini = pd.Series({pd.Timestamp(o["date"]): float(o["value"]) for o in ob if o["value"] not in (".", "")})
+        ix = ini.index.intersection(p.index)
+        p.loc[ix, sid] = ini.reindex(ix)
+    return p
+
+
+def r2_window(panel: pd.DataFrame, fz: dict, lo: str, hi: str | None) -> tuple[dict, pd.DataFrame]:
+    w = sample_week(panel)
+    zz = z91(panel, w.index)
+    out, rows = {}, []
+    hit = lambda s, y: float(((s > 0) == (y > 0)).mean())   # noqa: E731
+    for asset in ("ETH", "BTC"):
+        L, ra = labels(w, asset), {}
+        for h in HORIZONS:
+            sp = selected(fz, asset, f"B{h}")
+            Z, cnt = z_combo(feats_for(w, sp), sp)
+            end = hi and str((pd.Timestamp(hi) - pd.Timedelta(weeks=h)).date())
+            d = pd.concat({"y": L[f"y{h}"], "z": Z, "n": cnt, "z91": zz}, axis=1).loc[lo:end].dropna(subset=["y", "z"])
+            k = d.z.abs() >= 0.5
+            ra[f"B{h}"] = {"n": int(len(d)), "n_indep": int(len(d) // h), "hit": hit(d.z, d.y), "always_up": float((d.y > 0).mean()),
+                           "excess": hit(d.z, d.y) - float((d.y > 0).mean()), "pred_up_share": float((d.z > 0).mean()),
+                           "k05_n": int(k.sum()), "k05_hit": hit(d.z[k], d.y[k]) if k.any() else None,
+                           "z91_k0_hit": hit(d.z91.dropna(), d.y[d.z91.notna()]) if d.z91.notna().any() else None,
+                           "n_indicators_min": int(d.n.min()) if len(d) else None, "first": str(d.index[0].date()) if len(d) else None,
+                           "last": str(d.index[-1].date()) if len(d) else None}
+            if h == 4:
+                rows.append(d.assign(asset=asset)[["asset", "y", "z", "n", "z91"]].rename(columns={"y": "y4", "z": "z_b4"}))
+        sp = selected(fz, asset, "A")
+        Z, cnt = z_combo(feats_for(w, sp), sp)
+        d = pd.concat({"c": L["c13"], "z": Z, "n": cnt}, axis=1).loc[lo:hi].dropna()
+        ra["A"] = {"n": int(len(d)), "n_indep": int(len(d) // 13), "n_indicators_min": int(d.n.min()) if len(d) else None,
+                   "hit": hit(d.z, d.c), "always_up": float((d.c > 0).mean()),
+                   "excess": hit(d.z, d.c) - float((d.c > 0).mean()), "regime_up_share": float((d.z > 0).mean()),
+                   "corr": float(d[["c", "z"]].corr().iloc[0, 1]) if len(d) > 2 else None}
+        out[asset] = ra
+    return out, pd.concat(rows) if rows else pd.DataFrame()
+
+
+def stage_r2test(panel: pd.DataFrame, force: bool = False) -> dict:
+    import hashlib
+    mark = OUT / "r2_test_done.txt"
+    if mark.exists() and not force:
+        raise SystemExit(f"2라운드 시험은 한 번만: {mark} 가 있다")
+    fz = json.loads(FROZEN.read_text())
+    res = {"prereg": "docs/prereg/macro_regime_bias_r2_20261028.md", "frozen_sha256": hashlib.sha256(FROZEN.read_bytes()).hexdigest()}
+    res["test_current"], pred = r2_window(panel, fz, TEST_START, None)
+    res["test_initial_release"], _ = r2_window(initial_release(panel), fz, TEST_START, None)
+    res["posthoc_2024_2026_05_NOT_A_VERDICT"], _ = r2_window(panel, fz, SCORE[0], SCORE[1])
+    v = {}
+    for tag in ("test_current", "test_initial_release"):
+        e = res[tag]["ETH"]
+        deg = lambda share: " · 🔴퇴화(예보가 한쪽뿐 = 정보 없음)" if share in (0.0, 1.0) else ""   # noqa: E731 -- 1라운드 실패 모드(10-28 리뷰)
+        v[tag] = {"B4": ("시험 통과(약)" if e["B4"]["excess"] >= 0 else "실패") + deg(e["B4"]["pred_up_share"]),
+                  "A": ("시험 통과(약)" if e["A"]["excess"] >= 0 else "실패") + deg(e["A"]["regime_up_share"])}
+    res["verdict"] = v
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "r2_test_metrics.json").write_text(json.dumps(res, ensure_ascii=False, indent=1))
+    pred.to_csv(OUT / "r2_test_predictions.csv", float_format="%.5f")
+    mark.write_text(pd.Timestamp.now().isoformat())
+    return res
+
+
 # ── 자체점검 ─────────────────────────────────────────────────────────────────────────────────────────
 def selftest() -> None:
     import statsmodels.api as sm
@@ -284,13 +400,21 @@ def selftest() -> None:
     ix = pd.date_range("2026-06-05", periods=17, freq="W-FRI")
     small = score_B(pd.Series(rng.normal(size=17), ix), pd.Series(rng.normal(size=17), ix), pd.Series(np.zeros(17), ix), 4, rng)   # 시험 구간 크기
     assert small["placebo_p90"] is None and not verdicts({"assets": {"ETH": {"B4": small, "A": {}}}})["B_ETH_4w"]["PASS"], small
+    fz_ = {"a": {"r": -0.3}, "b": {"r": 0.2}}
+    ix2 = pd.date_range("2020-01-03", periods=200, freq="W-FRI")
+    xa, xb = pd.Series(rng.normal(size=200), ix2), pd.Series(rng.normal(size=200), ix2)
+    Z, cnt = z_combo({"a": xa, "b": xb}, fz_)
+    assert Z.iloc[:51].isna().all() and cnt.iloc[60] == 2                   # 52주 전엔 값 없음
+    t = 120
+    za = -xa.iloc[t] / xa.iloc[t - 103:t + 1].std(); zb = xb.iloc[t] / xb.iloc[t - 103:t + 1].std()
+    assert abs(Z.iloc[t] - (za + zb) / 2) < 1e-12                          # 절편 없음 · 부호 × 변화 ÷ τ 까지 104주 sd
     print("selftest OK")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--panel")
-    ap.add_argument("--stage", choices=("fit", "score", "test"))
+    ap.add_argument("--stage", choices=("fit", "score", "test", "r2test"))
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -303,6 +427,9 @@ if __name__ == "__main__":
         for asset, fa in fz["assets"].items():
             for k in ("B4", "A"):
                 print(asset, k, {n: (round(s["r"], 3), round(s["r_2020_21"], 3), round(s["r_2022_23"], 3)) for n, s in fa[k]["indicators"].items() if s["selected"]})
+    elif a.stage == "r2test":
+        r = stage_r2test(panel, a.force)
+        print(json.dumps(r["verdict"], ensure_ascii=False))
     elif a.stage == "score":
         r = stage_score(panel, SCORE[0], SCORE[1], "score")
         print(json.dumps(verdicts(r), ensure_ascii=False))
