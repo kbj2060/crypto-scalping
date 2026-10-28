@@ -326,7 +326,9 @@ const API_OI_5M_URL = "/api/oi-5m";
 //   최근 1·7·30일에 열려 아직 남은 계약(추정 · 회전+나이 가중 닫기 · 10-22 롱·숏 분리 근사, dashboard/position_profile.py). 지도로만, 신호 아님.
 const API_POSITION_PROFILE_URL = "/api/position-profile";
 let latestPositionProfile = null, posProfileFetchAt = 0, posProfileInflight = false;
-let fpColMode = (() => { try { const v = localStorage.getItem("fpCol"); return v === "pos" || v === "liq" ? v : "trade"; } catch (e) { return "trade"; } })();
+// 2026-10-28 펜 메모 «체결/청산(왼쪽)과 포지션/호가(오른쪽)를 버튼으로»: 기둥 둘을 따로 고른다 -- 옛 fpCol(trade|pos|liq) 저장값을 이어받는다
+const fpColLoad = (key, old, alt, dflt) => { try { const v = localStorage.getItem(key) || (localStorage.getItem("fpCol") === old ? alt : dflt); return v === alt ? alt : dflt; } catch (e) { return dflt; } };
+let fpColL = fpColLoad("fpColL", "liq", "liq", "trade"), fpColR = fpColLoad("fpColR", "pos", "pos", "book");
 let fpPosWin = (() => { try { const v = Number(localStorage.getItem("fpPosWin")); return v === 1 || v === 30 ? v : 7; } catch (e) { return 7; } })();
 // 2026-10-27 «청산» 기둥 기간 -- 옛 청산맵 보기의 1d·7d·30d 저장값(liqDays)을 그대로 잇는다
 let fpLiqWin = (() => { try { const v = Number(localStorage.getItem("liqDays")); return v === 7 || v === 30 ? v : 1; } catch (e) { return 1; } })();
@@ -337,18 +339,19 @@ function fpColTogEl(svg) {
   if (el || !svg.parentElement) return el;
   el = document.createElement("div");
   el.id = "fpColTog"; el.className = "fp-col-tog"; el.setAttribute("role", "toolbar"); el.setAttribute("aria-label", "체결 기둥 보기");
-  el.innerHTML = '<span class="fp-col-seg fp-col-win" role="group" aria-label="포지션 기간">'
-    + '<button type="button" data-win="1">1d</button><button type="button" data-win="7">7d</button><button type="button" data-win="30">30d</button></span>'
-    + '<span class="fp-col-seg" role="group" aria-label="체결 또는 포지션">'
-    + '<button type="button" data-col="trade">체결</button><button type="button" data-col="pos">포지션</button><button type="button" data-col="liq">청산</button></span>'
-    + '<span class="fp-col-seg" role="group" aria-label="선 주문"><button type="button" data-lines="1" title="차트 위 익절·손절 선을 끌어 놓고 peg 메이커로 진입(자동 2×) — 청산도 둘 다 메이커">선 주문</button></span>';
-  el.addEventListener("pointerdown", (e) => e.stopPropagation());   // 차트 끌기로 번지지 않게
+  const wins = (side) => [1, 7, 30].map((d) => `<button type="button" data-win="${d}" data-side="${side}">${d}d</button>`).join("");
+  el.innerHTML = `<span class="fp-col-seg fp-col-win l" role="group" aria-label="청산 기간">${wins("l")}</span>`
+    + '<span class="fp-col-seg" role="group" aria-label="왼쪽 기둥"><button type="button" data-col="trade">체결</button><button type="button" data-col="liq">청산</button></span>'
+    + '<span class="fp-col-seg" role="group" aria-label="오른쪽 기둥"><button type="button" data-col="pos">포지션</button><button type="button" data-col="book">호가</button></span>'
+    + `<span class="fp-col-seg fp-col-win r" role="group" aria-label="포지션 기간">${wins("r")}</span>`
+    + '<span class="fp-col-seg" role="group" aria-label="SLTP 선 주문"><button type="button" data-lines="1" title="차트 위 익절·손절 선을 끌어 놓고 peg 메이커로 진입(자동 2×) — 청산도 둘 다 메이커">SLTP</button></span>';
+  el.addEventListener("pointerdown", (e) => { e.stopPropagation(); if (fpIndOpen) fpIndSet(false); });   // 차트 끌기로 번지지 않게 · 열린 지표 팝업은 닫는다
   el.addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
     e.stopPropagation();
     if (b.dataset.lines) { lineToolToggle(); b.setAttribute("aria-pressed", String(!!lineTool)); return; }
-    if (b.dataset.col) setFpCol(b.dataset.col); else setFpCol(null, Number(b.dataset.win));
+    if (b.dataset.col) setFpCol(b.dataset.col); else setFpCol(null, Number(b.dataset.win), b.dataset.side);
   });
   svg.parentElement.appendChild(el);
   return el;
@@ -358,23 +361,21 @@ function placeFpColTog(svg, xr, yTop, show) {   // xr·yTop = viewBox 좌표(체
   if (!el) return;
   if (el.hidden !== !show) el.hidden = !show;
   if (!show) return;
-  el.classList.toggle("pos", fpColMode === "pos"); el.classList.toggle("liq", fpColMode === "liq");
-  const win = fpColMode === "liq" ? fpLiqWin : fpPosWin;
-  el.querySelectorAll("[data-col]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.col === fpColMode)));
-  el.querySelectorAll("[data-win]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.win) === win)));
+  el.querySelectorAll("[data-col]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.col === fpColL || b.dataset.col === fpColR)));
+  el.querySelectorAll("[data-win]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.win) === (b.dataset.side === "l" ? fpLiqWin : fpPosWin))));
   el.querySelector("[data-lines]")?.setAttribute("aria-pressed", String(!!lineTool));
-  el.querySelector(".fp-col-win").hidden = fpColMode === "trade";
+  el.querySelector(".fp-col-win.l").hidden = fpColL !== "liq"; el.querySelector(".fp-col-win.r").hidden = fpColR !== "pos";
   const m = svg.getScreenCTM(), pr = el.parentElement.getBoundingClientRect();
   if (!m) return;
   const L = Math.round(m.a * xr + m.e - pr.left) + "px", T = Math.round(m.d * yTop + m.f - pr.top) + "px";
   if (el.style.left !== L) el.style.left = L;
   if (el.style.top !== T) el.style.top = T;
 }
-function setFpCol(mode, win) {
-  if (mode) fpColMode = mode;
-  if (win) { if (fpColMode === "liq") fpLiqWin = win; else fpPosWin = win; }
-  try { localStorage.setItem("fpCol", fpColMode); localStorage.setItem("fpPosWin", String(fpPosWin)); localStorage.setItem("liqDays", String(fpLiqWin)); } catch (e) { /* 저장 못 해도 동작 */ }
-  if (fpColMode === "pos") { posProfileFetchAt = 0; refreshPositionProfile(); }
+function setFpCol(mode, win, side) {
+  if (mode === "trade" || mode === "liq") fpColL = mode; else if (mode === "pos" || mode === "book") fpColR = mode;
+  if (win) { if (side === "l") fpLiqWin = win; else fpPosWin = win; }
+  try { localStorage.setItem("fpColL", fpColL); localStorage.setItem("fpColR", fpColR); localStorage.setItem("fpPosWin", String(fpPosWin)); localStorage.setItem("liqDays", String(fpLiqWin)); } catch (e) { /* 저장 못 해도 동작 */ }
+  if (fpColR === "pos" && (mode === "pos" || (win && side !== "l"))) { posProfileFetchAt = 0; refreshPositionProfile(); }
   hideTooltip(); scheduleSnapshotChartRender();
 }
 // ── 2026-10-28 차트 «선 주문»(사용자 «차트 위 라인 2개를 끌어 위치를 잡고 진입 → peg 메이커 · 익절/손절도 둘 다 메이커 · 닿으면 닫기 · 자동 2×»)
@@ -460,10 +461,46 @@ function lineToolEl(box) {
   box.appendChild(h);
   return h;
 }
+function fpMobRowSet(mob, card, fs) {   // 휴대폰 머리 줄에 SLTP·지표 버튼을 옮기거나(mob) 제자리(카드)로 되돌린다 -- 노드째 옮겨 리스너·팝업 상태가 따라간다
+  const row = el("fpMobRow");
+  if (!row || !card || !fs) return;
+  if (row.hidden !== !mob) row.hidden = !mob;
+  card.classList.toggle("fp-mobrow", mob);
+  fs.classList.toggle("mob", mob);
+  if (!fs._home) fs._home = fs.parentElement;
+  if (mob) {
+    const lb = fpLineBtnEl(card);
+    if (lb.parentElement !== row) row.append(lb);
+    if (fs.parentElement !== row) row.append(fs);
+  } else {
+    const lb = el("fpLineBtn");
+    if (lb && lb.parentElement === row) card.append(lb);
+    if (fs.parentElement === row) fs._home.prepend(fs);
+  }
+}
+function fpTopRowOff() {   // 넓은 화면 차트 위 줄(미니맵·SLTP·지표)을 걷는다 -- renderCandleSvg 의 on=false 분기와 같은 일
+  const card = el("fpCard"), fs = el("fpLineSwitch"), pan = el("chartPan"), home = el("fpPanHome");
+  fpMobRowSet(false, card, fs);
+  card?.classList.remove("fp-toprow"); fs?.classList.remove("on");
+  if (pan && pan.classList.contains("inrow")) { if (home && pan.previousElementSibling !== home) home.after(pan); pan.classList.remove("inrow"); pan.style.top = pan.style.left = ""; }
+}
+function fpLineBtnEl(card) {
+  let b = document.getElementById("fpLineBtn");
+  if (b) return b;
+  b = document.createElement("button");
+  b.type = "button"; b.id = "fpLineBtn"; b.className = "fp-line-btn"; b.setAttribute("aria-pressed", String(!!lineTool));
+  b.title = "차트 위 익절·손절 선을 끌어 놓고 peg 메이커로 진입(자동 2×) — 청산도 둘 다 메이커";
+  b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path class="u" d="M2 4.5h12"/><path class="m" d="M2 8h12"/><path class="d" d="M2 11.5h12"/></svg><span>SLTP</span>';   // 2026-10-28 펜 메모 «텍스트를 SLTP 로»
+  b.addEventListener("pointerdown", (e) => e.stopPropagation());
+  b.addEventListener("click", (e) => { e.stopPropagation(); if (fpIndOpen) fpIndSet(false); lineToolToggle(); });
+  card.appendChild(b);
+  return b;
+}
 function renderLineTool() {
   const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement;
   const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), m = svg && svg.getScreenCTM();
   if (lineTool && lineTool.asset !== activeSnapshotAsset) lineTool = null;   // 다른 코인 가격의 선을 그대로 두지 않는다
+  el("fpLineBtn")?.setAttribute("aria-pressed", String(!!lineTool));
   const show = !!(lineTool && G && m && G.ymax > G.ymin && p > 0 && !fpAltOn() && orderCoinOk());
   const h = show ? lineToolEl(box) : el("lineTool");
   if (!h) return;
@@ -512,7 +549,7 @@ function renderLineTool() {
   set(".lt-x", { left: R - 6 + "px", top: top + 8 + "px" });
 }
 async function refreshPositionProfile() {   // 포지션 보기일 때만 1초(서버도 1초 캐시)
-  if (fpColMode !== "pos" || activePageTab !== "snapshot" || document.hidden || !flowOn()) return;   // 2026-10-20 ETH → 흐름 코인 전부(XRP)
+  if (fpColR !== "pos" || activePageTab !== "snapshot" || document.hidden || !flowOn()) return;   // 2026-10-20 ETH → 흐름 코인 전부(XRP)
   const now = Date.now();
   if (posProfileInflight || now - posProfileFetchAt < 900) return;   // 900: 1초 루프 흔들림에 한 번씩 건너뛰지 않게
   posProfileFetchAt = now; posProfileInflight = true;
@@ -4518,13 +4555,26 @@ function renderMarketCtx() {
         .map(([k, nm, t]) => swChip(k, nm, `var(--ma-${k})`, t)).join("")}${swChip("bb", "볼린저", "var(--muted)", "20봉 · 2σ")}${swChip("veto", "추세 veto", "var(--muted)", "SMA144 ±1×ATR 히스테리시스 밴드 · 롱만/숏만 꼬리표")}</span>`
       + `<span class="mc-sw-g"><span class="mc-chip-pair">${swChip("vwap", "VWAP ±σ", "var(--muted)")}${swChip("vsess", "세션 시작부터", "", "끄면 하루(UTC 00시부터) · 켜면 지금 시장 세션 개장부터(아시아·유럽·미국)", true)}</span>`
       + `${swChip("wvwap", "주간·앵커 VWAP", "var(--ink)")}</span></div>`;
-  setH("fpLineSwitch", G.cmpW ? lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', "") : "");   // 2026-10-16 펜 메모 «이 텍스트는 제거» -- 넓은 화면 줄만(좁은 화면은 이름 그대로)
+  // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
+  const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "vwap", "wvwap"].filter((k) => mcLine[k]).length;
+  const fsRow = G.cmpW || (isMobileChartMode() && flowOn() && !!el("fpMobRow"));   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
+  if (!fsRow) fpIndOpen = false;   // 버튼 줄이 없는 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
+  const fsEl = el("fpLineSwitch"), fsHtml = fsRow ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
+    + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12.5l4-4.5 3 2.5 6-6.5"/><path d="M1.5 14.5h13"/></svg>지표<b>${indOn}</b></button>`
+    + `<div class="fp-ind-pop" id="fpIndPop" aria-label="차트에 그릴 지표"${fpIndOpen ? "" : ' hidden=""'}>`
+    + lineSw.replace('<span class="mc-switch-t">차트에 그리기</span>', '<span class="mc-switch-t">이동평균·밴드 · VWAP — 눌러서 켜고 끄기</span>') + `</div>` : "";
+  // 🔴setH(직렬화한 innerHTML 과 비교)는 여기서 매번 다시 썼다 -- `checked`→`checked=""`·`<path/>`→`</path>` 라 늘 달라 클릭·포커스가 씹혔다(10-28 검증). 마지막으로 쓴 글과 비교한다.
+  if (fsEl && fsEl._h !== fsHtml) {
+    const fk = fsEl.contains(document.activeElement) ? document.activeElement.dataset.line || (document.activeElement.classList.contains("fp-ind-btn") ? "btn" : "") : "";
+    fsEl._h = fsHtml; fsEl.innerHTML = fsHtml;
+    if (fk) fsEl.querySelector(fk === "btn" ? ".fp-ind-btn" : `[data-line="${fk}"]`)?.focus();   // 키보드로 칩을 바꾸면 다시 써도 그 칩에 포커스
+  }
   const wallRow = ps && PAPER_SIG_OK.wall.has(A) ? gRow("깊은 벽", G.wall(ps.imb, ps.thr), sg(ps.imb, 2), ps.dir > 0 ? "mc-good" : ps.dir < 0 ? "mc-bad" : "",
     `±50bp 매수·매도 잔량 불균형(5분봉 마감) · 점선 = 지난 24시간 상위 20% 문턱 ±${ps.thr.toFixed(2)}`) : "";
   const wallHtml0 = qSec("q_wall", "④ 벽 · 교차 · 위치", wallLine + (sw ? G.book(sw, bps, wallW || undefined, Number(d.mid) || 0, (ASSET_CONFIG[A] || {}).dp ?? 2) : note("호가 래스터 대기")) + wallRow + statRows
       + note(`스프레드 ${bk.spread == null ? "-" : "$" + bk.spread.toFixed(sdp)}${bk.spread > 1.5 * 10 ** -sdp ? " — 평소(1틱)보다 넓다" : ""}`
         + (bk.bid25_pct == null ? "" : ` · 얇은 쪽 매수 ${Math.round(bk.bid25_pct * 100)} · 매도 ${Math.round(bk.ask25_pct * 100)}분위${thin ? ` — ${thin}` : ""}`))
-      + (G.cmpW ? "" : lineSw));
+      + (fsRow ? "" : lineSw));
   // 2026-10-15 ⑤ 뉴스 판 → ⑤ 예측 줄(사용자 시안 B): 지금 추세 → 4h → 7일 → 4~13주, 4h 칸 아래 변동성. 뉴스는 뉴스 카드에 그대로.
   const fcHtml = fcRowHtml(sec);   // 2026-10-26 펜 메모 «풋프린트 미래 차트로 옮겼으니 제거»: ⑤ 아래 박스 유지 30분·1시간·4시간 줄 삭제(풋프린트 미래 칸 상자 d38cb502 가 같은 값)
   G.gw = gwKeep;
@@ -4645,6 +4695,22 @@ function helpOpen(b) {
   d.style.top = `${Math.round(r.bottom + 6 + h <= innerHeight - 8 ? r.bottom + 6 : Math.max(8, r.top - 6 - h))}px`;
 }
 document.addEventListener("click", (e) => { const b = e.target.closest(".mc-q, .opt-q, .mt-q"); if (b) helpOpen(b); });
+// 2026-10-28 지표 팝업 열고 닫기(버튼 · 밖을 누르면 · Esc) -- 열림 상태는 fpIndOpen 이 들고 다시 그려도 유지
+let fpIndOpen = false;
+function fpIndSet(open) {
+  fpIndOpen = open;
+  const fs = el("fpLineSwitch"), pop = fs?.querySelector(".fp-ind-pop"), btn = fs?.querySelector(".fp-ind-btn");
+  if (pop) pop.hidden = !open;
+  if (btn) btn.setAttribute("aria-expanded", String(open));
+}
+el("fpLineSwitch")?.addEventListener("click", (e) => { if (e.target.closest(".fp-ind-btn")) fpIndSet(!fpIndOpen); });
+document.addEventListener("pointerdown", (e) => { if (fpIndOpen && !e.target.closest("#fpLineSwitch")) fpIndSet(false); });
+document.addEventListener("keydown", (e) => {
+  if (!fpIndOpen || e.key !== "Escape") return;
+  const inside = !!document.activeElement?.closest("#fpLineSwitch");
+  fpIndSet(false);
+  if (inside) el("fpLineSwitch")?.querySelector(".fp-ind-btn")?.focus();   // 팝업 안에 있던 포커스만 버튼으로 돌린다
+});
 ["mcBody", "fpLineSwitch"].forEach((id) => el(id)?.addEventListener("change", (e) => {   // 체크박스는 넓은 화면이면 #fpLineSwitch
   const k = e.target?.dataset?.line;
   if (!k) return;
@@ -4682,11 +4748,6 @@ function trendFlipLevels(footprint, candles) {
 const FP_TOP_ALIGN = 26;
 // 2026-10-15 아티팩트 댓글 «풋프린트를 크기 그대로 왼쪽 ‹청산 밀도› 글자 위치까지 옮기고 그만큼 오른쪽 정보를 크게»: 넓은 화면 왼쪽 여백 36 → 1, 오른쪽 칸 +35.
 const FP_LEFT_SHIFT = 35;
-const FP_LEG_FONT = `600 11px ${"Pretendard Variable, Pretendard, 'Noto Sans KR', sans-serif"}`;
-function fpLegendGeom(svg, a = svg.getBoundingClientRect(), c = el("fpCard")?.getBoundingClientRect()) {   // {x0: SVG 좌표의 범례 시작, w: 범례 폭} · a·c = 미리 잰 상자(렌더 중 강제 레이아웃 피하기)
-  const x0 = c ? 17 - (a.left - c.left) : 0;
-  return { x0, w: measureTextW("청산 밀도", FP_LEG_FONT) + 10 + measureTextW("낮음", FP_LEG_FONT) + 6 + 160 + 6 + measureTextW("높음", FP_LEG_FONT) };
-}
 
 // ── 풋프린트 증분 (2026-09-20) ──────────────────────────────────────────
 // 400ms 폴링인데 48봉을 통째로 받고 있었다. 서버 실측: 400ms 간격 19번 중 내용이 실제로
@@ -5943,7 +6004,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // 2026-09-18 부모가 아니라 **SVG 자신의** 높이를 본다. 부모는 마진 12px 를 포함하므로
   // (styles.css .chart-container 412px) 그 값으로 viewBox 를 잡으면 모바일에서 meet 축소 +
   // 레터박스가 생긴다. viewBox 높이는 SVG 가 실제로 차지하는 상자와 같아야 한다.
-  const box0 = svg.getBoundingClientRect(), card0 = el("fpCard")?.getBoundingClientRect();   // 비운 뒤라 싸다(위 ①) -- 아래 범례 자리도 이걸 쓴다
+  const box0 = svg.getBoundingClientRect();   // 비운 뒤라 싸다(위 ①)
   const parentH = box0.height
     || (svg.parentElement ? svg.parentElement.clientHeight : 0);
   const mobileChart = isMobileChartMode();
@@ -5964,6 +6025,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   // ⚠️대가: 이 SVG 는 가격 틱마다 통째로 다시 그려진다(초당 ~1.7회). 밖에 있을 때 두 그림은
   //   5초·1초 주기였다 -- 이제 그 주기로 같이 다시 그려진다. 사용자 결정으로 감수한다.
   const subOn = svg.id === "candleSvgSnapshot" && flowOn();
+  if (svg.id === "candleSvgSnapshot" && !subOn) fpTopRowOff();   // 2026-10-28 검증: 아래 SUB 블록을 안 지나는 코인(BTC)은 위 줄이 넓은 화면 상태로 남았다
   // 2026-09-27 넓은 화면 2단(사용자 선택 62:38): CSS 가 --fp-split(오른쪽 칸 비율)을 준다 -- 판정은 CSS 한 곳.
   //   가격 플롯·레인·밀도 범례는 왼쪽 w, 1초 수급은 오른쪽 칸(subX, subW) 전체 높이. viewBox 는 wAll.
   //   아래 본문은 전부 `w` 를 «플롯 폭»으로 쓰므로 한 줄도 안 바뀐다.
@@ -6583,11 +6645,14 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     //   🔴지도다. 덩어리 저항·재방문·고통 지수는 매매 검정 불통과(= VWAP 평균회귀 재표현, 2026-10-09).
     //   2026-10-27 휴대폰(사용자 «모바일도 체결/포지션/청산 프로파일»): 같은 기둥을 아래 칸(PROF) 왼쪽 절반에 -- colX0·colW·pTop·pBot·pyAt 이 그 자리다.
     const colX0 = PROF ? ml + 2 : tradeX0, colW = PROF ? PROF.cx - PROF_GAP - 4 - colX0 : TRADE_W;
-    const posOn = !!((TRADE_W || PROF) && fpColMode === "pos" && flowOn()), liqOn = !!((TRADE_W || PROF) && fpColMode === "liq" && flowOn());
-    post.push(() => placeFpColTog(svg, PROF ? w - mr : tradeX0 + TRADE_W - 2, PROF ? h + SUB_GAP + 2 : mt - 16, !!((TRADE_W || PROF) && flowOn()
+    //   2026-10-28 펜 메모: 왼쪽 기둥(colX0·colW) = 체결|청산 · 오른쪽(호가 띠 자리 bkX0·bkW) = 포지션|호가 -- 포지션 그림은 자리만 바꿔 같은 코드
+    const bkX0 = PROF ? PROF.cx + PROF_GAP : tradeX0 + TRADE_W + 6, bkW = PROF ? w - mr - bkX0 - 8 : BOOK_W - 10;   // = 아래 bookInfo 의 x0·L
+    const posOn = !!((TRADE_W || PROF) && (BOOK_W || PROF) && fpColR === "pos" && flowOn()), liqOn = !!((TRADE_W || PROF) && fpColL === "liq" && flowOn());
+    post.push(() => placeFpColTog(svg, w - mr, PROF ? h + SUB_GAP + 2 : mt - 16, !!((TRADE_W || PROF) && flowOn()
       && !(typeof window.fpBubbleActive === "function" && window.fpBubbleActive())
       && !(typeof window.fpDailyActive === "function" && window.fpDailyActive()))));   // 버블·일봉이 덮을 땐 숨김 · 화면 상자를 재므로 끝에서(post)
     if (posOn) {
+      const colX0 = bkX0, colW = bkW;   // 오른쪽 기둥(호가 자리)에 -- 바닥선 = 기둥 오른쪽 끝, 왼쪽으로 자란다
       const P = latestPositionProfile, W = P && P.win && P.win[String(fpPosWin)];
       const anchor = colX0 + colW + 4, Lw = colW - 10, g = document.createElementNS(NS, "g");
       const rect = (x, y, wd, ht, fill, op) => {
@@ -6602,7 +6667,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         t.textContent = str; g.appendChild(t);
       };
       if (!W || !(W.tot > 0)) {
-        label(anchor - 4, pTop + 14, P && P.win && P.win[String(fpPosWin)] ? "포지션 데이터 없음" : "포지션 불러오는 중…", "var(--muted)");
+        label(anchor - 4, pTop + (PROF ? 14 : 62), P && P.win && P.win[String(fpPosWin)] ? "포지션 데이터 없음" : "포지션 불러오는 중…", "var(--muted)");
       } else {
         const toRows = (V) => {
           const m = new Map();
@@ -6640,7 +6705,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         let above = 0, below = 0;
         W.vals.forEach((q, j) => { const p = (W.lo + j + 0.5) * P.bw; if (p > yMax) above += q; else if (p < yMin) below += q; });
         const pct = (x) => Math.round(100 * x / W.tot) + "%";
-        let topY = pTop + 12;
+        let topY = pTop + (PROF ? 12 : 60);   // 2026-10-28 데스크톱 오른쪽 기둥 위 = 지지·저항 꼬리표 자리(두 개 쌓여 40 으로는 겹쳤다)
         if (side) {
           const upShare = (V) => { let u = 0; V.vals.forEach((q, j) => { if ((V.lo + j + 0.5) * P.bw > currentPrice) u += q; }); return u / V.tot; };
           const uL = upShare(W.long), uS = upShare(W.short);
@@ -6782,7 +6847,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       ln.setAttribute("stroke", "var(--soft-line)"); g.appendChild(ln);
       svg.appendChild(g);
     }
-    if (!posOn && !liqOn) {
+    if (!liqOn) {
       const tr = new Map();   // 행 키 -> [총, 고래, 리테일, 매수, 매도]
       candles.forEach((c) => (footprint.byTime.get(c.time) || []).forEach((l) => {
         const k = rowOf(l[0]), a = tr.get(k) || [0, 0, 0, 0, 0];
@@ -8060,7 +8125,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       return;
     }
     // 2026-09-27 호가 띠 위면 봉 툴팁 대신 **호가 해석** -- 커서 가격의 칸(없으면 가장 가까운 칸).
-    if (bookInfo && (inProf ? mx >= PROF.cx : mx > tradeX0 && mx <= w - mr)) {
+    if (bookInfo && !bookHidden && (inProf ? mx >= PROF.cx : mx > tradeX0 && mx <= w - mr)) {
       vLine.style.display = "none";
       const priceAt = priceAtY;
       let best = null;
@@ -8068,7 +8133,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (best && Math.abs(best.p - priceAt) <= bookInfo.bs) { showTooltip(evt.pageX, evt.pageY, bookTipHtml(best)); return; }
       hideTooltip(); return;
     }
-    if (inProf || mx < ml || mx > w - mr) { vLine.style.display = "none"; hideTooltip(); return; }
+    if (inProf || mx < ml || mx > w - mr || (!PROF && TRADE_W && mx > tradeX0)) { vLine.style.display = "none"; hideTooltip(); return; }   // 10-28 기둥 칸 빈 곳 = 봉 툴팁 아님
 
     const idx = Math.min(candles.length - 1, Math.max(0, Math.floor((mx - ml) / slot - X0)));
     const c = candles[idx];
@@ -8125,6 +8190,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   **겉 = 지금 양, 그 위 빗금 농도 = 재깔림(refill/peak) 4단** -- 촘촘할수록 계속 다시 채워지는 자리, 빗금 없거나 성기면 한 번 깔리고 만 호가.
   //   🔴둘 다 «성격»의 서술이다 -- 지속률은 반등을 못 가렸다(상위−하위 +0.001, 09-20). 창 = 위 1h/2h/4h/12h 토글.
   const book = (BOOK_W || PROF) && latestFlowHeatmap && latestFlowHeatmap.book;
+  const bookHidden = fpColR === "pos" && flowOn();   // 2026-10-28 오른쪽 기둥 = 포지션이면 호가 띠·호버만 숨김(위 막대 계기 4개는 그대로 -- 2차 검증)
   const acc = latestFlowHeatmap && latestFlowHeatmap.rows;
   // 칸별 값은 층 캐시 **밖에서** 매 렌더 계산한다(≈250칸) -- 캐시가 재사용돼도 호버 해석(bookInfo)이 같은 값을 본다.
   const bookInfo = (() => {
@@ -8203,7 +8269,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       + (c.rw > 0 ? ` (이 칸 ${c.rw.toFixed(1)}배 · 보이는 범위 상위 ${Math.round(100 * (1 - c.rwPct))}%)` : "")
       + `. 성격의 서술 · 예측력 안 잼 · 지지·저항 아님</div></div>`;
   };
-  cachedLayer("bookStrip", book ? objToken(book) + "|" + objToken(acc) + "|" + activeSnapshotAsset + "|" + fpRowSize + "|" + fpRowOff : "none", (g) => {   // 2026-09-30 신원 = 객체(히트맵 행이 bin_lo 그대로 바뀌어도 다시 그린다)
+  cachedLayer("bookStrip", book ? objToken(book) + "|" + objToken(acc) + "|" + activeSnapshotAsset + "|" + fpRowSize + "|" + fpRowOff + "|" + bookHidden : "none", (g) => {   // 2026-09-30 신원 = 객체(히트맵 행이 bin_lo 그대로 바뀌어도 다시 그린다)
     if (!bookInfo) return;
     const { bs, x0, L, mx, cells } = bookInfo;
     const fmtQ = (q) => (q >= 1000 ? (q / 1000).toFixed(1) + "k" : q >= 10 ? q.toFixed(0) : q.toFixed(1));
@@ -8214,10 +8280,9 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       g.appendChild(t);
     };
     if (TRADE_W) {   // 2026-10-10 ETH 는 «← 체결» 자리가 [체결 | 포지션] 토글(풋프린트 블록이 매번 그린다) · SOL·XRP 는 글자 그대로
-      if (!flowOn()) head(x0 - 6, "end", "var(--amber)", "← 체결");
-      head(x0, "start", "var(--muted)", "호가 →");
+      if (!flowOn()) { head(x0 - 6, "end", "var(--amber)", "← 체결"); head(x0, "start", "var(--muted)", "호가 →"); }   // 2026-10-28 흐름 코인은 머리 토글이 두 기둥 이름(이 글자와 겹친다)
     }
-    else if (PROF) { if (!flowOn()) head(PROF.cx - PROF_GAP, "end", "var(--amber)", "← 체결"); head(x0, "start", "var(--muted)", "호가 →"); }   // 흐름 코인은 머리 줄 토글이 왼쪽 이름
+    else if (PROF) { if (!flowOn()) { head(PROF.cx - PROF_GAP, "end", "var(--amber)", "← 체결"); head(x0, "start", "var(--muted)", "호가 →"); } }   // 흐름 코인은 머리 줄 토글이 왼쪽 이름
     else { head(x0, "start", "var(--muted)", "호가"); if (TRADE_L) head(ml - 2, "end", "var(--amber)", "체결"); }
     // 2026-09-28 호가 요약 네 숫자 = **막대 계기 넷**(사용자 선택 시안 A) -- 데스크톱은 체결·호가 기둥 머리, 모바일은 풋프린트 위 한 줄.
     //   변동 0→100 채움(높으면 주황) · 불균형 가운데 0 에서 초록(매수 호가 두꺼움)/빨강 · 지속·이탈 0→100 채움.
@@ -8258,6 +8323,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     base.setAttribute("stroke", "var(--soft-line)");
     g.appendChild(base);
     // 빗금 무늬 4단(촘촘 → 성김). 45° 선 -- 심(단색)·겉(연한 단색)과 겹쳐도 질감으로 갈린다.
+    if (bookHidden) return;   // 여기부터 호가 띠(오른쪽 기둥이 포지션이면 그 자리)
     const hid = (k) => "bkh" + k + "-" + svg.id;
     const defs = document.createElementNS(NS, "defs");
     [2.6, 4, 6.5, 11].forEach((sp, k) => {
@@ -8577,11 +8643,12 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           const a = svg.getBoundingClientRect(), c = card.getBoundingClientRect(), y = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`;
           const colL = 17, colR = a.left - c.left + subX - 20;
           fs.style.top = y; fs.style.right = `${Math.round(c.width - colR)}px`;
-          if (pan) {   // 가운데가 원칙 -- 좁으면(1700) 범례 끝과 체크박스 시작 사이로 민다
-            const lo = colL + fpLegendGeom(svg).w + 12 + pan.offsetWidth / 2, hi = colR - fs.offsetWidth - 12 - pan.offsetWidth / 2;
-            pan.style.top = y; pan.style.left = `${Math.round(Math.max(lo, Math.min(hi, (colL + colR) / 2)))}px`;
-          }
+          if (pan) { pan.style.top = y; pan.style.left = `${Math.round(colL + pan.offsetWidth / 2)}px`; }   // 2026-10-28 펜 메모: 미니맵 = 옛 청산 밀도 자리(왼쪽 끝)
+          const lb = fpLineBtnEl(card);   // 2026-10-28 펜 메모 «주문은 풋프린트 바로 위 가운데에 버튼으로 크게»
+          lb.style.top = y; lb.style.left = `${Math.round((colL + colR) / 2)}px`;
         }); else if (pan) { pan.style.top = pan.style.left = ""; }
+        card.classList.toggle("fp-toprow", on);   // 이 줄이 있으면 체결 기둥 토글의 작은 «선 주문»은 숨긴다(큰 버튼 하나)
+        fpMobRowSet(!on && mobileChart && flowOn() && !fpAltOn(), card, fs);   // 2026-10-28 휴대폰 = 머리 마지막 줄 [· | SLTP | 지표]
       } }
     // 2026-10-15 아티팩트 댓글 «봉 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 수급 바닥 시각 줄(12px, renderSupply1s mb 16→4)을 버블에 넘긴다
     const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give;
@@ -8600,10 +8667,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 글자 9 = 바닥글과 같은 크기(사용자 지시).
     // 🔴그라디언트는 densityStops() 에서 바로 만든다 -- 사본을 두면 히트맵과 어긋나도
     //   아무도 모른다(2026-09-12 에 실제로 겪었다).
-    if (SUB_LEGEND_H && (densityHistory || []).length) {
-      const lgG = splitR ? fpLegendGeom(svg, box0, card0) : null;   // 넓은 화면 = 청산맵·체결 버블 범례와 같은 자리·글씨
+    // 2026-10-28 펜 메모 «왼쪽 청산밀도를 제거하고 미니맵을 그 자리로»: 넓은 화면(splitR)은 범례를 안 그린다 -- 휴대폰·좁은 화면은 그대로
+    if (SUB_LEGEND_H && !splitR && !(mobileChart && flowOn()) && (densityHistory || []).length) {   // 10-28 휴대폰 흐름 코인도(사용자 «모바일도 데스크탑처럼»)
       const lg = subSvg("dens", 0, subLegendY, w, SUB_LEGEND_H,
-                        "dens|" + w + "|" + SUB_LEGEND_H + "|" + (lgG ? Math.round(lgG.x0) : ""), (g) => {
+                        "dens|" + w + "|" + SUB_LEGEND_H, (g) => {
         const stops = densityStops();
         const defs = document.createElementNS(NS, "defs");
         const grad = document.createElementNS(NS, "linearGradient");
@@ -8616,24 +8683,23 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         });
         defs.appendChild(grad); g.appendChild(defs);
         const yMid = SUB_LEGEND_H / 2;
-        let x = lgG ? lgG.x0 : ml;   // 2026-10-16 펜 메모: 청산 밀도 = 차트 위 줄 왼쪽(같은 줄 가운데 = 창 미니맵, 오른쪽 = 차트에 그리기)
+        let x = ml;
         const txt = (tx, str) => {
           const t = document.createElementNS(NS, "text");
-          t.setAttribute("x", tx); t.setAttribute("y", yMid + (lgG ? 4 : 3));
-          if (lgG) { t.setAttribute("font-size", "11"); t.setAttribute("font-weight", "600"); t.setAttribute("fill", "var(--text)"); }
-          else { t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)"); }
+          t.setAttribute("x", tx); t.setAttribute("y", yMid + 3);
+          t.setAttribute("font-size", "9"); t.setAttribute("fill", "var(--muted)");
           t.textContent = str; g.appendChild(t);
-          return lgG ? measureTextW(str, FP_LEG_FONT) : str.length * 6.2;
+          return str.length * 6.2;
         };
         x += txt(x, "청산 밀도") + 10;
-        x += txt(x, "낮음") + (lgG ? 6 : 4);
+        x += txt(x, "낮음") + 4;
         const bar = document.createElementNS(NS, "rect");
         bar.setAttribute("x", x); bar.setAttribute("y", yMid - 3);
         bar.setAttribute("width", 160); bar.setAttribute("height", 6);
         bar.setAttribute("rx", "1");
         bar.setAttribute("fill", "url(#liqDensLegendGrad)");
         g.appendChild(bar);
-        x += lgG ? 166 : 164;
+        x += 164;
         txt(x, "높음");
         const tip = document.createElementNS(NS, "title");
         tip.textContent = "아래 풋프린트 차트의 **배경 띠** 색입니다 -- 그 가격대에 쌓인"
