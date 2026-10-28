@@ -1,6 +1,42 @@
 {
   "enabledPlugins": {
-    "ponytail@ponytail": true
+    "ponytail@ponytail": true,
+    "ecc@ecc": false
+  },
+  "permissions": {
+    "ask": [
+      "Bash(rm *-r*)",
+      "Bash(rm *-R*)",
+      "Bash(git *reset --hard*)",
+      "Bash(git *checkout -- *)",
+      "Bash(git *checkout .*)",
+      "Bash(git *checkout -f*)",
+      "Bash(git *checkout --force*)",
+      "Bash(git *restore *)",
+      "Bash(git *clean -*f*)",
+      "Bash(git *push*--force*)",
+      "Bash(git *push -f*)",
+      "Bash(git *push * -f*)",
+      "Bash(git *push * +*)",
+      "Bash(git *commit*--amend*)",
+      "Bash(git *branch*-D*)",
+      "Bash(git *branch*--delete*)",
+      "Bash(git *stash drop*)",
+      "Bash(git *stash clear*)",
+      "Bash(git *stash pop*)",
+      "Bash(git *reflog expire*)",
+      "Bash(git *reflog delete*)",
+      "Bash(git *update-ref -d*)",
+      "Bash(git *rm -r*)",
+      "Bash(git *rm -f*)",
+      "Bash(*drop table*)",
+      "Bash(*DROP TABLE*)",
+      "Bash(*delete from*)",
+      "Bash(*DELETE FROM*)",
+      "Bash(*truncate*)",
+      "Bash(*TRUNCATE*)",
+      "Bash(*dd if=*)"
+    ]
   },
   "hooks": {
     "PreToolUse": [
