@@ -2794,10 +2794,10 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-10-05 네 카드(Footprint · News · Option · Account) 머리·한 화면 모드 통일(사용자 «제목 영어 · 간격·제목·폰트·전체화면 모두 통일»).
    머리 = 제목(.card-title) + 같은 줄 회색 부제 12px · 안쪽 18px · 아래 1px 선. 한 화면 모드 = 카드 높이 창 높이(넘치는 Option·Account 는 최소 높이). */
-#fpCard > .ops-health-head, #newsCard > .ops-health-head, #optCard > .ops-health-head, #acctCard > .ops-health-head {
+#fpCard > .ops-health-head, #newsCard > .ops-health-head, #optCard > .ops-health-head, #mtCard > .ops-health-head, #acctCard > .ops-health-head {
   padding: 18px; border-bottom: 1px solid var(--soft-line); min-height: 72px; box-sizing: border-box; align-items: center; }
 @media (max-width: 720px) {   /* 좁으면 탭·버튼이 줄바꿈된다 -- 제목을 위에 붙여 네 카드가 같은 높이에서 시작 */
-  #fpCard > .ops-health-head, #newsCard > .ops-health-head, #optCard > .ops-health-head, #acctCard > .ops-health-head { align-items: flex-start; min-height: 0; }
+  #fpCard > .ops-health-head, #newsCard > .ops-health-head, #optCard > .ops-health-head, #mtCard > .ops-health-head, #acctCard > .ops-health-head { align-items: flex-start; min-height: 0; }
   #fpCard .chart-head-left { align-items: flex-start; }
   .ops-health-head h3.card-title { align-self: flex-start; }
 }
@@ -3155,3 +3155,54 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
   .nw-row { position: relative; }
   .nw-row a[href]::after { content: ""; position: absolute; inset: 0; }   /* 뉴스 줄 전체가 기사 링크(제목 글자만 14~28px 였다) */
 }
+
+/* 2026-10-28 Macro Trend 카드(사용자 «위 지표들을 대시보드 카드 하나로», app.js renderMacroTrend). 색은 방향(초록 ↑ · 빨강 ↓)과
+   경보(주황 = 감시 «이탈»)뿐 -- 실시간 등급·관찰·위치 막대는 무채색 밝기로만 가른다(Three Signals Rule). */
+#mtCard .opt-card-head { display: flex; align-items: baseline; gap: 12px; }
+#mtCard .opt-card-head .muted { font-size: 12px; }
+.mt-body { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
+.mt-empty { margin: 8px 0; font-size: 12.5px; }
+.mt-q { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-weight: 700; font-size: 12px; line-height: 1.2; color: var(--text); letter-spacing: .02em; text-align: left; }
+.mt-q span { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; font-size: 10px; flex: none;
+  border: 1px solid var(--line); color: var(--muted); }
+.mt-q:hover span, .mt-q[aria-expanded="true"] span { color: var(--text); background: rgb(var(--lift) / .08); }
+.mt-q:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.mt-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; padding: 6px 0 10px; font-size: 12.5px; }
+.mt-sum-a { display: inline-flex; align-items: baseline; gap: 10px; font-variant-numeric: tabular-nums; }
+.mt-sum-a b { font-family: var(--font-mono); font-size: 12px; }
+.mt-coin { font: 700 11px/1 var(--font-sans); letter-spacing: .12em; color: var(--muted); }
+.mt-asof { margin-left: auto; font-size: 11px; }
+.mt-sec { border-top: 1px solid var(--soft-line); padding: 10px 0 6px; min-width: 0; }
+.mt-sec h4 { margin: 0 0 6px; }
+.mt-head, .mt-row { display: grid; grid-template-columns: minmax(110px, 1.1fr) 74px 76px minmax(0, 1.9fr) 74px; align-items: center; column-gap: 12px; }
+.mt-head { font: 700 10px/1 var(--font-sans); letter-spacing: .1em; color: var(--muted); padding: 2px 0 6px; }
+.mt-row { padding: 5px 0; border-top: 1px solid var(--soft-line); font-size: 12.5px; }
+.mt-name { font-weight: 600; font-size: 12.5px; letter-spacing: 0; }
+.mt-name sup { color: var(--muted); font-size: 9px; margin-left: -4px; }
+.mt-v { font: 600 11.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); text-align: right; }
+.mt-g { position: relative; height: 6px; border-radius: 3px; background: var(--glass); box-shadow: inset 0 0 0 1px var(--soft-line); }
+.mt-g::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line); }
+.mt-g i { position: absolute; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--text); }
+.mt-as { display: flex; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
+.mt-a { display: inline-flex; align-items: center; gap: 5px; font: 600 11.5px/1.3 var(--font-mono); color: var(--text); white-space: nowrap; }
+.mt-a.obs { opacity: .55; }
+.mt-a b { font-size: 13px; } .mt-neu { color: var(--muted); }
+.mt-w { font: 600 10.5px/1 var(--font-sans); font-style: normal; color: var(--muted); padding: 2px 6px; border-radius: 7px;
+  border: 1px solid var(--soft-line); }
+.mt-w.ok { color: var(--text); }
+.mt-w.off { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.mt-flag { font: 600 10.5px/1 var(--font-sans); font-style: normal; color: var(--warn); }
+.mt-rt { font: 600 10.5px/1.2 var(--font-sans); color: var(--muted); text-align: right; white-space: nowrap; }
+.mt-rt.free { color: var(--text); }
+.mt-rt.none { opacity: .75; }
+.mt-foot { margin: 6px 0 0; font-size: 11px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.mt-foot .mt-q { font-size: 11px; font-weight: 600; color: var(--muted); }
+@media (max-width: 720px) {
+  .mt-head { display: none; }
+  .mt-row { grid-template-columns: minmax(0, 1fr) 70px 64px; row-gap: 6px; }
+  .mt-as { grid-column: 1 / 3; }
+  .mt-rt { grid-column: 3; }
+  .mt-asof { margin-left: 0; width: 100%; }
+}
+
