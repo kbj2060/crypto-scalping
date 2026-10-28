@@ -2615,6 +2615,26 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)
 
+    dirshort_art: dict = {"mtime": None, "art": None}
+
+    async def api_dir_short(request: web.Request) -> web.Response:   # 2026-10-28 ⑤ 예측 판 «15분·1시간 예측»(ETH, scripts/live_eth_dir_short_20261028)
+        """매달 재학습 LightGBM(65피쳐 + 호가 깊이 10열) -- 4h 와 같은 REST 경로 + 호가 깊이 워커 sqlite · 5분 캐시.
+        ponytail: rest_frames 를 4h 와 따로 부른다(5분에 REST 한 벌 더) -- 늘리면 두 판을 한 produce 로 묶는다."""
+        def produce_sync() -> dict[str, Any]:
+            from scripts import live_eth_dir_short_20261028 as ds
+            if not ds.ARTIFACT.exists():
+                return {"ok": False, "reason": "artifact_missing"}
+            mt = ds.ARTIFACT.stat().st_mtime
+            if dirshort_art["mtime"] != mt:
+                import joblib
+                dirshort_art.update(mtime=mt, art=joblib.load(ds.ARTIFACT))
+            return ds.live_payload(dirshort_art["art"])
+        try:
+            payload = await swr_cached("dir_short", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+        return web.json_response(payload, headers=NOCACHE)
+
     async def api_iceberg(request: web.Request) -> web.Response:   # 2026-10-16 시안 ① 풋프린트 칸별 아이스버그(ETH·XRP, 표시 전용)
         """scripts/live_eth_iceberg_20261016 이 쓴 파일만 읽는다 -- 최근 24h 사건 + 전진 건수(«검증 중 n/150», XRP 는 target None = 사전등록 없음). 신호·알림 아님."""
         asset = request.query.get("asset", "eth")
@@ -4556,6 +4576,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/dir-signals", api_dir_signals)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)
+    app.router.add_get("/api/dir-short", api_dir_short)
     app.router.add_get("/api/box-hold", api_box_hold)
     app.router.add_get("/api/open-rev", api_open_rev)
     app.router.add_get("/api/iceberg", api_iceberg)

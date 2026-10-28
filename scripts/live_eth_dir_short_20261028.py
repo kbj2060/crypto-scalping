@@ -37,6 +37,9 @@ PANEL = ROOT / "data/live/dirshort_panel"             # 처음엔 연구 panel_f
 BOOK = ROOT / "data/live/dirshort_book.parquet"
 LIQ = ROOT / "data/liqlab/ETHUSDT_5m.parquet"         # BOOK 첫 씨앗 = 연구 학습 원천(2024-01-01~2026-10-23)
 BOOK_DB = ROOT / "data/live/bookdepth/ethusdt.sqlite"
+# 표본 밖 예측 = 연구 같은 구성 5시드 평균(시험 2026-06-01~09-14 + 전진 09-15~10-23, 41,760봉, ts = 결정 시각) — 문턱·분위의 잣대.
+#   그 창에서 위·아래 20% 밖 적중 15분 56.1%(시험)·56.1%(전진) vs 가운데 51% · 1시간 54.6%·55.1% vs 51~52% → 4h 칸과 같은 20/80 규칙.
+OOS_SEED = ROOT / "data/live/eth_dirshort_oos_seed.parquet"
 PANEL_START, START, DAY = pd.Timestamp("2022-01-01"), pd.Timestamp("2024-01-01"), 86_400_000_000_000
 BCOLS = ["d-1", "d-2", "d-5", "d1", "d2", "d5", "d_age"]
 BOOKF = ["dimb1", "dimb2", "dimb5", "dimb1_d1h", "dimb2_d1h", "dimb5_d1h", "depth1_z", "bid_near", "ask_near", "d_age"]   # = live_bookdepth_feat FEAT
@@ -174,22 +177,40 @@ def book_row(con, bar_ms: int) -> tuple[np.ndarray | None, str]:
     return np.array(r[1:], np.float32), "ok"
 
 
-def live_payload(art: dict | None = None) -> dict:
+_OOS: dict = {}
+
+
+def oos_sorted() -> dict:
+    """{"15m": 정렬된 표본 밖 예측, …}. ponytail: 씨앗 고정(4h 처럼 매달 지난 판 예측을 이어 붙이지 않음) — 달마다 예측 폭이 바뀌면 분위가 어긋난다, 그때 이어 붙이기."""
+    if not _OOS:
+        S = pd.read_parquet(OOS_SEED); _OOS.update({nm: np.sort(S[f"p{nm}"].to_numpy(float)) for nm in NAMES.values()})
+    return _OOS
+
+
+def live_payload(art: dict | None = None, n_hist: int = 13) -> dict:
+    """지금 봉 예측 + 표본 밖 분위(pct 0~100)·문턱(20/80 분위 밖 = signal ±1, 안 = 0) + 최근 n_hist 봉 이력(호가 깊이 온전한 봉만)."""
     import joblib
     art = art or joblib.load(ARTIFACT)
     now_ms = int(time.time() * 1000)
-    F = d4.build_features(d4.rest_frames(now_ms), d4.daily_closes(now_ms)); last = F.iloc[-1]
-    bar_ms = int(pd.Timestamp(last.ts).value // 10**6)
+    F = d4.build_features(d4.rest_frames(now_ms), d4.daily_closes(now_ms)).tail(n_hist)
+    bars = [int(pd.Timestamp(x).value // 10**6) for x in F.ts]
     con = sqlite3.connect(f"file:{BOOK_DB}?mode=ro", uri=True)
     try:
-        bk, state = book_row(con, bar_ms)
+        rows = [book_row(con, b) for b in bars]
     finally:
         con.close()
-    out = {"ok": True, "decided_at_ms": bar_ms + 300_000, "model_month": art["month"], "book": state,
-           "nan_feats": [c for c in d4.FEATS if not np.isfinite(last[c])], "pred": None}
-    if bk is not None:
-        p = predict(art, np.r_[last[d4.FEATS].to_numpy(np.float32), bk][None])
-        out["pred"] = {NAMES[h]: round(float(v[0]), 4) for h, v in p.items()}
+    ok = [i for i, (bk, _) in enumerate(rows) if bk is not None]
+    P = predict(art, np.hstack([F.iloc[ok][d4.FEATS].to_numpy(np.float32), np.vstack([rows[i][0] for i in ok])])) if ok else {}
+    Q = oos_sorted(); pct = lambda nm, x: round(100 * float(np.searchsorted(Q[nm], x)) / len(Q[nm]), 1)
+    thr = {nm: [round(float(np.quantile(q, .2)), 4), round(float(np.quantile(q, .8)), 4)] for nm, q in Q.items()}
+    out = {"ok": True, "decided_at_ms": bars[-1] + 300_000, "model_month": art["month"], "book": rows[-1][1],
+           "nan_feats": [c for c in d4.FEATS if not np.isfinite(F.iloc[-1][c])], "thr": thr, "pred": None,
+           "hist": [[bars[i] + 300_000] + [pct(NAMES[h], float(P[h][j])) for h in HZ] for j, i in enumerate(ok)]}   # [결정 ms, 15분 분위, 1시간 분위]
+    if ok and ok[-1] == len(bars) - 1:   # 지금 봉의 호가 깊이가 온전할 때만(warm·결측 = 비움)
+        out["pred"] = {}
+        for h, nm in NAMES.items():
+            x = float(P[h][-1]); lo, hi = thr[nm]
+            out["pred"][nm] = {"score": round(x, 4), "pct": pct(nm, x), "signal": 1 if x >= hi else -1 if x <= lo else 0}
     return out
 
 

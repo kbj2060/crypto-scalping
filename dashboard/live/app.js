@@ -4078,6 +4078,18 @@ async function refreshDir4h() {
     if (res.ok) latestDir4h = await res.json();
   } catch (error) { /* 다음 주기 */ }
 }
+// 2026-10-28 ⑤ 예측 줄 «15분·1시간 예측»(ETH, /api/dir-short = scripts/live_eth_dir_short_20261028 · 서버 5분 캐시) -- 참고용
+let latestDirShort = null, dirShortLastFetchAt = 0;
+async function refreshDirShort() {
+  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  const now = Date.now();
+  if (now - dirShortLastFetchAt < 60000) return;
+  dirShortLastFetchAt = now;
+  try {
+    const res = await fetch("/api/dir-short", { cache: "no-cache" });
+    if (res.ok) latestDirShort = await res.json();
+  } catch (error) { /* 다음 주기 */ }
+}
 // 2026-10-16 시안 ②③ 09시 개장 되돌림(ETH, /api/open-rev = scripts/live_eth_direction_forward_recorder_20261010.decide · 서버 5분 캐시)
 let latestOpenRev = null, openRevLastFetchAt = 0;
 async function refreshOpenRev() {
@@ -4197,14 +4209,35 @@ function fcRowHtml(sec) {
     + `${net ? `<small>${agree}/3</small>` : ""}${parts.map((p) => `<i class="${p[1] ? cls(p[1]) : ""}">${p[0]} ${pw(p[1])}</i>`).join("")}</span>`;
   const kn = kalshiNow(), kLeft = kn ? Math.max(0, Math.round(kn.k.close_ts - Date.now() / 1000)) : 0;
   const kTip = "칼시(미국 규제 예측시장) 15분 ETH 위/아래 — 창 마감 때 기준가보다 위일 확률 · 55~45% 사이는 비등\n참고 · 신호 아님(확률은 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침)";
-  const kCell = kn ? cell("15분 · 칼시", kn.pct >= 55 ? "up" : kn.pct <= 45 ? "dn" : "flat", kn.pct >= 55 ? `▲ 위 ${kn.pct}%` : kn.pct <= 45 ? `▼ 아래 ${100 - kn.pct}%` : `비등 ${kn.pct}%`,
-      `${Number(kn.k.strike).toFixed(1)} · ${Math.floor(kLeft / 60)}:${String(kLeft % 60).padStart(2, "0")}`, `${kTip}\n기준가 ${Number(kn.k.strike).toFixed(2)} · 창 마감까지 ${Math.floor(kLeft / 60)}분 ${kLeft % 60}초`)
-    : cell("15분 · 칼시", "flat", "-", eth ? "창 대기" : "ETH 전용", kTip);
+  // 2026-10-28 시안 A(사용자 선택): 칼시 칸 자리 = «15분 예측»(칼시는 그 칸 아래 한 줄) + «1시간 예측».
+  //   분위 = 표본 밖 예측(2026-06~10, 41,760봉) 중 자리 · 하위/상위 20% 밖만 방향(4h 칸과 같은 규칙) · ○ = 한 지평 전
+  const gs = eth && latestDirShort && latestDirShort.ok ? latestDirShort : null, oldS = gs && Date.now() - gs.decided_at_ms > 15 * 60e3;
+  const sCell = (nm, ko, back, col, extra = "") => {
+    const p = gs && gs.pred && !oldS ? gs.pred[nm] : null, hist = gs ? gs.hist || [] : [];
+    const ago = hist[hist.length - 1 - back], acc = nm === "15m" ? ["56", "51"] : ["55", "52"];
+    const fail = latestDirShort && !latestDirShort.ok ? latestDirShort.reason || "?" : "";
+    const why = !gs ? (!eth ? "ETH 전용" : fail ? "준비 안 됨" : "불러오는 중") : oldS ? "지연" : gs.book === "warm" ? "호가 깊이 예열 중" : "호가 깊이 없음";
+    const sub = !p ? why : (p.pct < 50 ? `하위 ${Math.round(p.pct)}%` : `상위 ${Math.round(100 - p.pct)}%`)
+      + (p.signal ? "" : p.pct >= 50 ? ` · 롱까지 ${Math.round(80 - p.pct)}` : ` · 숏까지 ${Math.round(p.pct - 20)}`);
+    const sg = hist.map((h) => (h[col] >= 80 ? 1 : h[col] <= 20 ? -1 : 0));
+    const tip = p ? `${ko} 방향 예측 — 매달 재학습 LightGBM(65피쳐 + 호가 깊이 10열 · 표적 4종 × 시드 5) · ${gs.model_month} 모델\n`
+        + `점수 ${p.score >= 0 ? "+" : ""}${p.score.toFixed(2)} · 표본 밖 분위 ${p.pct.toFixed(1)} (하위 20% ≤ ${gs.thr[nm][0].toFixed(2)} · 상위 20% ≥ +${gs.thr[nm][1].toFixed(2)}) · ${kst(gs.decided_at_ms)} KST 마감 5분봉\n`
+        + `문턱 밖 적중 ${acc[0]}% · 안쪽 ${acc[1]}% · 전체 53% (2026-06~10 표본 밖, 문턱도 같은 표본의 분위) — 약한 신호 · 참고용(전진 판정 전)\n`
+        + `● 지금 · ○ ${ko} 전 · 최근 1시간 ▲${sg.filter((x) => x > 0).length} ▼${sg.filter((x) => x < 0).length} 보류 ${sg.filter((x) => !x).length}`
+        + (gs.nan_feats.length ? `\n🔴빈 피쳐 ${gs.nan_feats.length}: ${gs.nan_feats.join(", ")}` : "")
+      : `${ko} 방향 예측(ETH 전용) — ${fail ? `불러오기 실패: ${fail}` : why}`;
+    const X = (v) => Math.max(0, Math.min(100, v)).toFixed(1);
+    const gauge = p ? `<span class="d4g" aria-hidden="true"><i class="z dn" style="width:20%"></i><i class="z up" style="left:80%"></i>`
+      + (ago ? `<u class="ago" style="left:${X(ago[col])}%"></u>` : "") + `<u style="left:${X(p.pct)}%"></u></span>` : "";
+    return cell(`${ko} 예측`, p ? cls(p.signal) : "flat", p ? word(p.signal) : "-", sub, tip, gauge + extra);
+  };
+  const kLine = `<span class="sub fc-k" title="${escapeHtml(kn ? `${kTip}\n기준가 ${Number(kn.k.strike).toFixed(2)} · 창 마감까지 ${Math.floor(kLeft / 60)}분 ${kLeft % 60}초` : kTip)}">칼시 ${!kn ? (eth ? "창 대기" : "-") : kn.pct >= 55 ? `위 ${kn.pct}%` : kn.pct <= 45 ? `아래 ${100 - kn.pct}%` : `비등 ${kn.pct}%`}`
+    + `${kn ? ` · ${Math.floor(kLeft / 60)}:${String(kLeft % 60).padStart(2, "0")}` : ""}</span>`;
   // 2026-10-17 펜 메모 «타이틀 제거 · 예측은 지금 유지»: 제목 단추(⑤ 예측 · 지금에서 멀리 ?)를 빼고 종합 칩만 머리에 -- 설명은 머리 툴팁
   return `<div class="mc-sec mc-fc"><h4>${eth ? fcSum : ""}${mcTipBtn("q_fc", "⑤ 예측 · 지금에서 멀리")}</h4><div class="fc-row">`
     + (t ? fcTrendCell(t, cell)
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
-    + kCell
+    + sCell("15m", "15분", 3, 1, kLine) + sCell("1h", "1시간", 12, 2)
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge + volLine)
     + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)")
     + `</div></div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
@@ -4260,7 +4293,9 @@ MC_TIPS.q_flow = MC_TIPS.flow + "\n\n" + MC_TIPS.quad;
 MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
 MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위치(VWAP·%B·RSI) 줄 제거 -- 설명도 벽만
 MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아니다(지난 7·14·28·56·90일 종가 대비 5표, 미래 적중 48~58%).\n"
-  + "15분 · 칼시 = 미국 예측시장 15분 ETH 위/아래 확률(55~45% 비등) — 참고, 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침.\n"
+  + "15분·1시간 예측 = 매달 재학습 LightGBM(ETH 65피쳐 + 호가 깊이 10열 · 표적 4종 × 시드 5) · 표본 밖 예측(2026-06~10) 하위·상위 20% 밖만 방향 · "
+  + "그 밖 적중 15분 56% · 1시간 55%(안쪽 51~52%) · 호가 깊이 예열 중(워커 재시작 뒤 12시간)이면 비움 · 참고용(전진 판정 전).\n"
+  + "칼시 = 15분 칸 아래 줄 · 미국 예측시장 15분 ETH 위/아래 확률(55~45% 비등) — 참고, 대부분 «지금가 vs 기준가 + 남은 시간»의 되비침.\n"
   + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 과거 표본 밖 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
   + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65%.\n"
   + "4~13주 = Macro Trend 카드(달러지수·순유동성 등 지표별 13주 변화 · ETF 이후 기준).\n"
@@ -8878,6 +8913,7 @@ async function tick() {
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
       refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH · 서버 5분 캐시)
+      refreshDirShort();             // 2026-10-28 ⑤ 예측 판 15분·1시간 방향 (1분, ETH · 서버 5분 캐시)
       refreshBoxHold();              // 2026-10-16 박스 유지 확률 (1분, ETH · 방향 아님)
       refreshOpenRev();              // 2026-10-16 ⑤ 종합의 09시 개장 되돌림 (2분, ETH)
       refreshMarketCtx();            // 2026-09-29 시장 맥락 카드 (1초 -- 10-03, ETH 만 · 서술)
