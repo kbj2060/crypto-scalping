@@ -71,6 +71,10 @@ b_k = `d-k`(매수 누적 명목 ±k%), a_k = `dk`(매도), k ∈ {1,2,5}:
 플래그: fresh_forward_bar_by_bar=true(월별·고정 창 표본 밖 예측) · trade_ledgers_used_as_input=false · saved_parent_exit_timestamps_used=false · future_rows_used_for_entry=false.
 실행: 서버 `tmp/depth_incr_20261028/`(저장소 사본 `scripts/depth_incr_20261028.py`), nice 19 · OMP 2.
 
-## 8. 결과
+## 8. 사후 변경 (기록)
+
+- (10-28, QX4 결과 보기 전) S3: 4라운드 동결 예측 재현이 HGB 멤버 PX3 는 상관 1.0(4코인), MLP 멤버 PX6 는 .9959~.9970 — torch 스레드 2·8 둘 다 같은 수준이라 기계 간 수치 차(동결 예측은 로컬 PC). 자료·피쳐 동일성은 PX3 로 확인됨 → **관문은 PX3 ≥ .999 만**, PX6 상관은 기록. A·B 는 같은 실행에서 같은 코드·시드로 학습하므로 공정 비교는 유지되고, MLP 자체 잡음은 위약(같은 MLP 재학습)이 함께 담는다.
+
+## 9. 결과
 
 (결과 전 — 비움)
