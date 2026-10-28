@@ -3177,7 +3177,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mt-q:hover span, .mt-q[aria-expanded="true"] span { color: var(--text); background: rgb(var(--lift) / .08); }
 .mt-q:focus-visible, .mt-nm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .mt-wrap { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px; }
-.mt-mx { display: grid; grid-template-columns: minmax(104px, 1fr) 66px 118px 84px repeat(4, 52px) 64px; align-items: center; column-gap: 10px; }
+.mt-mx { display: grid; grid-template-columns: minmax(104px, 1fr) 66px 118px 84px repeat(4, 52px) 96px; align-items: center; column-gap: 10px; }
 .mt-mx > * { min-width: 0; }
 .mt-h { font: 700 10px/1.25 var(--font-sans); letter-spacing: .08em; color: var(--muted); padding-bottom: 4px; text-align: center; }
 .mt-h.l { text-align: left; } .mt-h.r { text-align: right; }
@@ -3194,6 +3194,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mt-v { justify-content: flex-end; font: 600 11.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
 .mt-t { justify-content: center; }
 .mt-rt { justify-content: flex-end; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.mt-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-right: 6px; background: var(--muted); }   /* 수신 불(10-28 사용자 «초록불/빨간불») */
+.mt-dot.ok { background: var(--good); } .mt-dot.bad { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); } .mt-dot.wait { opacity: .5; }
 .mt-gw .mt-g { width: 100%; }
 .mt-td { gap: 6px; min-width: 0; } .mt-td .mt-dc { width: 64px; flex: none; } .mt-td .mt-dc svg { height: 20px; }
 .mt-td b { font: 700 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; } .mt-td.na { color: var(--muted); font-size: 11px; }
@@ -3245,7 +3247,7 @@ html.fit1 #mtBody .mt-left { display: flex; flex-direction: column; min-height: 
 html.fit1 #mtBody .mt-mx { flex: 1 1 0; min-height: 0; }
 html.fit1 #mtBody .mt-r > * { height: auto; align-self: stretch; }
 html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-@media (max-width: 1500px) {   /* 표 최소 폭 ≈726px(«오늘» 칸 포함) -- 이보다 좁은 두 단은 표가 상세 칸을 덮는다 */
+@media (max-width: 1500px) {   /* 표 최소 폭 ≈758px(«오늘»·수신 칸 포함) -- 이보다 좁은 두 단은 표가 상세 칸을 덮는다 */
   .mt-wrap { grid-template-columns: 1fr; gap: 16px; }
   .mt-det { border-left: 0; padding-left: 0; border-top: 1px solid var(--soft-line); padding-top: 14px; }
 }

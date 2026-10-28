@@ -2186,7 +2186,6 @@ function newsAssetCounts(p, a) {   // 12시간 창(서버 NEWS_WINDOW_H) 안 그
 //   지금 데이터(FRED·DefiLlama·바이낸스, 일·주 단위)로 다시 계산한다. 🔴표본내 연구 · 표본외 검증 전 → 머리에 «신호 아님» 고정, 방향색은 값에만.
 //   동행 = «지금 큰 흐름이 코인 강세 쪽인가 약세 쪽인가» · 선행 = «다음 13주 편향». 감시 = 최근 52주 상관이 연구 부호와 같은가(뒤집히면 주황 «이탈»).
 const MT_POLL_MS = 10 * 60 * 1000;
-const MT_RT = { free: ["실시간", "무료 실시간 경로가 있다"], paid: ["유료 실시간", "실시간은 유료(무료는 지연)"], none: ["공표형", "하루·주 단위 공표 -- 장중엔 대체물"] };
 let latestMacroTrend = null, mtLastFetchAt = 0;
 const MT_TIPS = {
   co: "지금 국면 · 동행 13주: 코인과 같은 13주 동안 같이 움직인 지표다(ETF 이후 2024-01~2026-10 연구). 화살표 = 지난 완결 주의 13주 변화가 «코인 강세 쪽(↑)»인지 «약세 쪽(↓)»인지(변화 부호 × 연구 상관 부호). 13주 변화가 ETF 이후 분포 평균에서 0.5σ 안이면 중립(–).\n앞으로를 말하지 않는다 -- 같은 기간에 같이 간다는 뜻이라 «지금 흐름 확인»용이다. 13주 뒤 수익과의 상관은 유의하지 않았다.",
@@ -2265,6 +2264,32 @@ function mtDayChart(k, W, H, fut) {   // 24시간 선 · fut 시간 > 0 이면 �
     ${fut && k !== "NQ" ? `<rect x="${X(last[0]).toFixed(1)}" y="0" width="${Math.max(0, X(now) - X(last[0])).toFixed(1)}" height="${H}" fill="rgb(var(--lift) / .08)"/>` : ""}
     <path d="${b.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)},${Y(x[1]).toFixed(1)}`).join("")}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round" ${sw}/></svg>
     ${fut ? `<div class="mt-dt"><span style="left:0">${hm(t0)}</span><span style="right:${(100 - parseFloat(P(now))).toFixed(2)}%">지금 ${hm(now)}</span><span style="right:0">+${fut}시간</span></div>` : ""}</div>`;
+}
+// 2026-10-28 사용자 «수신 칸에 정해진 주기마다 데이터가 들어오는지 초록불/빨간불 + 공표/실시간/n분 지연»:
+//   불 = 서버 feed_status(원천 계열의 마지막 관측일이 공표 주기 한도 안인가 · 받기 실패 없나) + «오늘» 칸이 있는 줄은 장중 시세도.
+//   글 = 공표 주기(매일 공표 · 주 1회 공표) · 나스닥 «실시간» · 10Y금리 «n분 지연»(CME 무료 시세 마지막 봉 나이) · 휴장.
+function cmeOpen(d) {   // CME Globex(미 국채선물): 일 17:00 ~ 금 16:00 CT, 매일 16~17시 정비. ponytail: 미국 공휴일은 모른다 -- 공휴일엔 30분 넘게 묵어 빨간불일 수 있다
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short", hour: "numeric", hourCycle: "h23" }).formatToParts(d).map((x) => [x.type, x.value]));
+  const h = Number(p.hour), w = p.weekday;
+  return w === "Sat" ? false : w === "Sun" ? h >= 17 : w === "Fri" ? h < 16 : h !== 16;
+}
+function mtFeed(r, n) {   // → [불 ok|bad|wait, 글, 툴팁]
+  const f = r.feed || {}, k = MT_TODAY[n];
+  const tips = [`${f.cadence || "공표 주기 모름"} · 마지막 값 ${f.last || "–"}${f.age_d == null ? "" : ` (${f.age_d}일 전 · 한도 ${f.max_d}일)`}`];
+  let st = f.ok === false ? "bad" : f.ok ? "ok" : "wait", lab = f.short || "공표";
+  if (f.why) tips.push(`늦음: ${f.why}`);
+  if (k === "NQ") {
+    const fresh = xyzLive && xyzClock() - xyzLive.recv_sec < 90;
+    if (!xyzBars.length) { lab = "받는 중"; if (st === "ok") st = "wait"; } else { lab = fresh ? "실시간" : "끊김"; if (!fresh) st = "bad"; }
+    tips.push(`장중: 나스닥100 실시간(XYZ100)${xyzBars.length && !fresh ? " -- 90초 넘게 새 값 없음" : ""}`);
+  } else if (k === "ZN") {
+    const b = mtDay("ZN"), age = b.length ? Date.now() / 1000 - b[b.length - 1][0] : null, open = cmeOpen(new Date());
+    if (!open) lab = "휴장";
+    else if (age == null) { lab = "받는 중"; if (st === "ok") st = "wait"; }
+    else { lab = age < 1800 ? `${Math.max(1, Math.round(age / 60))}분 지연` : "늦음"; if (age >= 1800) st = "bad"; }
+    tips.push(`장중: 10년 국채선물(ZN) CME 무료 시세 -- ${open ? (age == null ? "받는 중" : `마지막 봉 ${Math.round(age / 60)}분 전(30분 넘으면 빨간불)`) : "CME 휴장(평일 16~17시 CT 정비 · 주말)"}`);
+  }
+  return [st, lab, `${tips.join("\n")}\n${r.realtime_note || ""}`];
 }
 function mtTodayCell(n) {   // 표 «오늘» 칸
   const k = MT_TODAY[n];
@@ -2345,10 +2370,10 @@ function renderMacroTrend() {
       <span class="mt-h grp">${q("co", "지금 국면")}</span><span class="mt-h grp">${q("lead", "13주 뒤 편향")}</span><span class="mt-h r hx">수신</span>
       <span class="mt-h"></span><span class="mt-h"></span><span class="mt-h"></span><span class="mt-h hx"></span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h c">BTC</span><span class="mt-h c">ETH</span><span class="mt-h hx"></span>
       <span class="mt-tot"></span><span class="mt-tot"></span><span class="mt-tot"></span><span class="mt-tot hx"></span>${MT_CELLS.map(tot).join("")}<span class="mt-tot hx"></span>
-      ${fams.map(([f, ns]) => `<span class="mt-fam">${f}</span>` + ns.map((n) => { const r = prim(n), L = live(r), rt = MT_RT[r.realtime] || ["", ""];
+      ${fams.map(([f, ns]) => `<span class="mt-fam">${f}</span>` + ns.map((n) => { const r = prim(n), L = live(r), fd = mtFeed(r, n);
         return `<div class="mt-r${n === mtSel ? " sel" : ""}"><button type="button" class="mt-nm" data-n="${escapeHtml(n)}" aria-pressed="${n === mtSel}">${escapeHtml(n)}${r.note ? "<sup>*</sup>" : ""}</button>
           <span class="mt-v">${mtFmt(L.chg13, r.unit)}</span>${mtTodayCell(n)}<span class="mt-gw hx">${gauge(L.z)}</span>${MT_CELLS.map(([k, a]) => `<span class="mt-t">${tile(by(n, k), a)}</span>`).join("")}
-          <span class="mt-rt hx" title="${escapeHtml(rt[1])} — ${escapeHtml(r.realtime_note)}">${rt[0]}</span></div>`; }).join("")).join("")}
+          <span class="mt-rt hx" title="${escapeHtml(fd[2])}"><i class="mt-dot ${fd[0]}" role="img" aria-label="${fd[0] === "ok" ? "정해진 주기대로 수신" : fd[0] === "bad" ? "늦음" : "받는 중"}"></i>${fd[1]}</span></div>`; }).join("")).join("")}
     </div>
     <div class="mt-key"><span><i class="mt-tile u">↑</i><i class="mt-tile d">↓</i>셈</span><span><i class="mt-tile z">–</i>중립 ±0.5σ</span>
       <span><i class="mt-tile u weak">↑</i>약화·변동 없음·지연</span><span><i class="mt-tile d off">↓</i>이탈</span><span><i class="mt-tile u obs">↑</i>관찰</span>
@@ -2357,7 +2382,7 @@ function renderMacroTrend() {
   const a0 = (x) => (x.assets.ETH ? "ETH" : "BTC");
   const cells = rs.flatMap((x) => ["BTC", "ETH"].filter((a) => x.assets[a]).map((a) => [x, a, x.assets[a], (live(x).assets || {})[a] || {}]));
   const det = `<h4>${escapeHtml(mtSel)}<span class="mt-v">${mtFmt(L0.chg13, r0.unit)} · ${L0.z == null ? "–" : `${L0.z >= 0 ? "+" : "−"}${Math.abs(L0.z).toFixed(1)}σ`}</span></h4>
-    <p class="mt-meta">${L0.week || "–"} 주까지 13주 변화 · 수신 ${(MT_RT[r0.realtime] || [""])[0]} — ${escapeHtml(r0.realtime_note)}${r0.note ? `<br><b class="mt-warn">주의</b> ${escapeHtml(r0.note)}` : ""}</p>
+    <p class="mt-meta">${L0.week || "–"} 주까지 13주 변화 · 수신 ${escapeHtml(mtFeed(r0, mtSel)[2]).replace(/\n/g, " · ")}${r0.note ? `<br><b class="mt-warn">주의</b> ${escapeHtml(r0.note)}` : ""}</p>
     <ul class="mt-why">${cells.map(([x, a, , c]) => `<li><span class="mt-why-k">${a} ${x.kind === "co" ? "지금" : "13주 뒤"}</span>${tile(x, a)}<span>${escapeHtml(c.why || (x.live ? "표본 부족(ETF 이후 13주 변화 30주 미만)" : "지금 값 없음(원천 실패)"))}</span></li>`).join("")}</ul>
     ${MT_TODAY[mtSel] ? (() => { const b = mtDay(MT_TODAY[mtSel]), v = mtDayChg(b), zn = MT_TODAY[mtSel] === "ZN";
       return v == null ? "" : `<figure class="mt-ch"><figcaption><span>${zn ? "10년 국채선물(ZN) 가격" : "나스닥100(XYZ100)"} 24시간 · 앞 12시간 주요 발표</span><span class="mt-v">오늘 ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%${zn ? ` · 금리${v < 0 ? "↑" : "↓"} · 약 10분 지연` : ""}</span></figcaption>${mtDayChart(MT_TODAY[mtSel], 520, 110, 12)}</figure>`; })() : ""}
@@ -2366,9 +2391,10 @@ function renderMacroTrend() {
     ${rs.map((x) => { const a = a0(x), svg = mtOverlay(x, a); return svg ? `<figure class="mt-ch"><figcaption><span>${a} · ${x.kind === "lead" ? "13주 뒤 — 지표를 14주 앞으로" : "지금 — 같은 13주"}</span><span class="mt-v">최근 52주 r ${mtR(((live(x).assets || {})[a] || {}).roll52)}</span></figcaption>${svg}</figure>` : ""; }).join("")}
     <p class="mt-meta">굵은 선 = 지표 13주 변화(위 = 코인 강세 쪽) · 회색 = 코인 13주 수익 · 52주 안 표준화(모양만) · 표본내 연구(13주 독립 관측 ≈11), 신호 아님</p>`;
   const week = p.rows.map((r) => r.live && r.live.week).filter(Boolean).sort().pop(), errs = Object.keys(p.errors || {});
+  const late = names.filter((n) => mtFeed(prim(n), n)[0] === "bad");
   const focus = document.activeElement?.closest("#mtBody .mt-nm")?.dataset.n;
   body.innerHTML = `<div class="mt-wrap"><div class="mt-left">${mx}</div><div class="mt-det">${det}</div></div>
-    <p class="mt-foot muted">기준 주 ${week || "–"} · FRED·DefiLlama·바이낸스 일·주 단위(1시간마다 갱신)${errs.length ? ` · <span class="mt-warn">원천 실패 ${errs.length}(${escapeHtml(errs.join(", "))})</span>` : ""}</p>`;
+    <p class="mt-foot muted">기준 주 ${week || "–"} · FRED·DefiLlama·바이낸스 일·주 단위(1시간마다 갱신)${errs.length ? ` · <span class="mt-warn">원천 실패 ${errs.length}(${escapeHtml(errs.join(", "))})</span>` : ""}${late.length ? ` · <span class="mt-warn">수신 늦음 ${late.length}(${escapeHtml(late.join(", "))})</span>` : ""}</p>`;
   if (focus) body.querySelector(`.mt-nm[data-n="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
 }
 el("mtBody")?.addEventListener("click", (e) => {   // 줄 어디를 눌러도(칸 포함) 그 지표 -- 터치엔 title 이 없어서 이유는 상세에서 본다

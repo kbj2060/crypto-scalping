@@ -196,6 +196,35 @@ def netliq(raw: dict[str, pd.Series]) -> pd.Series | None:
     return nl.dropna()
 
 
+# 수신 점검(2026-10-28 사용자 «정해진 주기마다 데이터가 들어오는지 초록불/빨간불»): 원천 계열마다 공표 주기와 «마지막 관측일이 이보다 오래면 늦음» 한도(달력 일).
+#   한도 = 그 공표 일정에서 정상일 때 생기는 가장 긴 공백 + 휴일 1일. 2026-10-28 서버 실측 나이: 매일 1~2일 · H.10 환율·TP 5일 · 브렌트 8일 · H.4.1 7일 · STLFSI 12일.
+_DAILY, _H10 = ("매일 공표", "영업일 매일 · 다음 영업일 공표", 5), ("주 1회 공표", "주 1회 · 월요일에 지난주 일별 값(연준 H.10)", 11)
+_H41 = ("주 1회 공표", "주 1회 · 목요일(수요일 기준, 연준 H.4.1)", 10)
+FEED = {**{k: _DAILY for k in ("SP500", "NASDAQ100", "DGS10", "T10YIE", "VIXCLS", "BAA10Y", "BAMLH0A0HYM2", "DFF", "RRPONTSYD")},
+        **{k: _H10 for k in ("DEXJPUS", "DEXCHUS", "DEXUSEU", "DEXKOUS", "DTWEXBGS")},
+        "THREEFYTP10": ("주 1회 공표", "주 1회 · 지난주 일별 값(Kim-Wright 모형)", 11), "DCOILBRENTEU": ("주 1회 공표", "주 1회 · EIA 일별 값(약 1주 늦음)", 13),
+        **{k: _H41 for k in ("WALCL", "WRESBAL", "WTREGEN")}, "STLFSI4": ("주 1회 공표", "주 1회 · 목요일(지난주 금요일 기준)", 15),
+        "stables": ("매일", "매일 · DefiLlama 합계", 2)}
+
+
+def feed_status(g: dict, raw: dict[str, pd.Series], errors: dict[str, str], today: pd.Timestamp) -> dict:
+    """줄 하나의 수신 상태: 원천 계열 전부의 마지막 관측일이 한도 안이고 받기 실패가 없으면 ok. 순유동성은 세 계열 중 가장 늦은 것."""
+    src = g["source"]
+    ids = [src[5:]] if src.startswith("fred:") else (["WALCL", "WTREGEN", "RRPONTSYD"] if src == "netliq" else ["stables"])
+    worst = None
+    for sid in ids:
+        short, cad, lim = FEED.get(sid, ("공표", "주기 모름", 15))
+        s = raw.get(sid)
+        if sid in errors or s is None or s.dropna().empty:
+            return {"short": short, "cadence": cad, "ok": False, "last": None, "age_d": None, "max_d": lim, "why": f"{sid} 받기 실패"}
+        last = s.dropna().index.max().normalize()
+        age = int((today - last).days)
+        if worst is None or age - lim > worst["age_d"] - worst["max_d"]:
+            worst = {"short": short, "cadence": cad, "ok": age <= lim, "last": str(last.date()), "age_d": age, "max_d": lim,
+                     "why": "" if age <= lim else f"{sid} 마지막 값 {last.date()} ({age}일 전) -- 한도 {lim}일"}
+    return worst
+
+
 def indicator_level(g: dict, raw: dict[str, pd.Series], today: pd.Timestamp) -> pd.Series | None:
     src = g["source"]
     if src.startswith("fred:"):
@@ -318,7 +347,8 @@ def build_payload(spec: list[dict], raw: dict[str, pd.Series], errors: dict[str,
     for g in spec:
         x = indicator_level(g, raw, today)
         live = None if x is None or x.dropna().empty else row_live(g, x, coins, today)
-        rows.append({**{k: g[k] for k in ("key", "name", "kind", "unit", "realtime", "realtime_note", "note", "assets")}, "live": live})
+        rows.append({**{k: g[k] for k in ("key", "name", "kind", "unit", "realtime", "realtime_note", "note", "assets")}, "live": live,
+                     "feed": feed_status(g, raw, errors, today)})
     return {"ok": bool(coins) and any(r["live"] and r["live"]["chg13"] is not None for r in rows), "asof": int(now),
             "rows": rows, "summary": summarize(rows), "errors": errors,
             "method": "주간 금요일 값의 13주 변화 · z = ETF 이후(2024-01-12~) 분포 위치 · 편향 = 변화 부호 × 연구 상관 부호(|z|<0.5 중립) · "
@@ -383,6 +413,15 @@ def _selftest() -> None:
     json.dumps(json_safe(p), allow_nan=False)                         # 응답에 NaN 이 섞이면 여기서 터진다
     spec_real = load_spec()
     assert spec_real and all(g["source"] for g in spec_real) and {g["kind"] for g in spec_real} == {"co", "lead"}
+    T = pd.Timestamp("2026-10-28")   # 수신 점검: 한도 안 · 넘음 · 받기 실패 · 순유동성은 가장 늦은 계열
+    ser = lambda d: pd.Series([1.0], index=[pd.Timestamp(d)])
+    assert feed_status({"source": "fred:DGS10"}, {"DGS10": ser("2026-10-26")}, {}, T)["ok"] is True
+    late = feed_status({"source": "fred:DGS10"}, {"DGS10": ser("2026-10-20")}, {}, T)
+    assert late["ok"] is False and late["age_d"] == 8 and "한도 5일" in late["why"], late
+    assert feed_status({"source": "fred:DGS10"}, {}, {"DGS10": "ReadTimeout"}, T)["ok"] is False
+    nl = feed_status({"source": "netliq"}, {"WALCL": ser("2026-10-21"), "WTREGEN": ser("2026-10-21"), "RRPONTSYD": ser("2026-10-10")}, {}, T)
+    assert nl["ok"] is False and "RRPONTSYD" in nl["why"], nl
+    assert feed_status({"source": "fred:STLFSI4"}, {"STLFSI4": ser("2026-10-16")}, {}, T)["ok"] is True   # 12일 = 정상(목요일에 지난주 금요일 값)
     print("selftest OK:", {"rows": len(spec_real), "lead_watch": lead["assets"]["BTC"]["watch"],
                            "lead_roll52": round(lead["assets"]["BTC"]["roll52"], 2), "co_stale": co["stale"]})
 
