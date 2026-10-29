@@ -80,6 +80,18 @@ class ChartLinesTest(unittest.TestCase):
             self.assertEqual((await get("&tp=2500.5&sl=2480"))[0], 400)      # 0.05% 안쪽
         self._run(fn)
 
+    def test_direct_pct_lines(self) -> None:   # 2026-10-30 SLTP = 직접(증거금 %) -- rule 없이 선만, 계좌 2× 규칙 상한 없음
+        async def fn(c):
+            r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&pct=10&tp=2550&sl=2480")
+            b = await r.json()
+            self.assertEqual(r.status, 200, b)
+            pl = b["plan"]; br = pl["bracket"]
+            self.assertTrue(br["lines"] and br["backstop_price"] is None and br["sl_level"] == 2480.0, br)
+            self.assertNotIn("rule", pl, "직접 모드 = 자동 규칙 없음")
+            eq = pl["projection"]["equity_usdt"]
+            self.assertAlmostEqual(pl["margin_usdt"] / eq, 0.10, delta=0.01, msg=(pl["margin_usdt"], eq))
+        self._run(fn)
+
     def test_same_side_position_blocks_lines(self) -> None:
         async def fn(c):
             r = await c.get("/api/manual-entry/preview?side=LONG&lev=20&rule=c&tp=2550&sl=2480")
