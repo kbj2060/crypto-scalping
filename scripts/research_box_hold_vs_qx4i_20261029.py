@@ -43,7 +43,7 @@ def qx(name, col, c=0.0):
 
 def selftest():
     assert p_stay([0.0])[0] == 1.0 and p_stay([5.0])[0] < 1e-6
-    ps = p_stay(np.linspace(0.05, 3, 60)); assert (np.diff(ps) < 0).all()
+    ps = p_stay(np.linspace(0.05, 3, 60)); assert (np.diff(ps) <= 1e-12).all() and abs(ps[0] - 1) < 1e-9, ps[:5]   # 작은 s 는 1 에 붙는다
     rng = np.random.default_rng(0); n, m = 4000, 4000                     # 몬테카를로(이산 감시 → 약간 높게 나옴)
     for s in (0.5, 1.0, 1.5):
         x = np.cumsum(rng.normal(0, s / np.sqrt(m), (n, m)), 1)
