@@ -30,6 +30,11 @@ CLAIMS_ID = 180                                 # 실업수당(주간)
 # 2026-10-26 ETH 1h 굴림 Platt90(docs/eth_box_hold_calibration_drift_prereg_20261025.md 8라운드 · 2026 ECE 1.45→0.67pp) --
 #   scripts/fit_box_hold_platt90_20261026.py 가 매월 1일 쓴다. 없거나 40일 넘었거나 다른 모델용이면 보정 없음(원래 p).
 PLATT90 = Path(__file__).with_name("box_hold_platt90_eth_1h.json")
+# 2026-10-29 ETH 4h = QX4I σ(옵션 IV 보정 4h 변동성) → 두 벽 무접촉 확률(반사 원리) → 2024·25 등조 지도. 박스 HGB 보다 시험 26-06~10 Brier .1597→.1524
+#   (ΔBrier −.00732 단측 90% 통과 · 사전등록 docs/prereg/box_hold_vs_qx4i_20261029.md · 결과 docs/experiments/box_hold_vs_qx4i_20261029.md · 사용자 «둘 다 진행»).
+#   지도 = scripts/export_box_hold_qx4i_iso_20261029.py. IV 가 없으면 QX4 눈금 · 변동성 예측이 15분 넘게 묵었으면 HGB 그대로.
+QX4I_ISO = json.loads(Path(__file__).with_name("box_hold_qx4i_iso_20261029.json").read_text())
+VOL_STALE_MS = 15 * 60_000
 
 
 def logit(p):
@@ -154,14 +159,44 @@ def payload(k1m: pd.DataFrame, events: list | None = None, asset: str = "eth") -
             p = float(1 / (1 + np.exp(-(cal["a"] * logit(p) + cal["b"]))))
         out["scales"][name] = {"ok": True, "p": round(p, 4), "base": round(cf["train_base"], 4),
                                "q20": round(cf["q20"], 4), "q80": round(cf["q80"], 4),   # 화면 «깨질 쪽»(< q20) · «머물 쪽»(> q80) = 학습 예측 분위
-                               "up": round(px + 0.5 * rng, dp), "dn": round(px - 0.5 * rng, dp), "half_pct": round(0.5 * rng / px * 100, 3),
+                               "up": round(px + 0.5 * rng, dp), "dn": round(px - 0.5 * rng, dp), "half_pct": round(0.5 * rng / px * 100, 3), "half_frac": 0.5 * rng / px,   # half_frac = 반올림 전(QX4I 등조가 쓴다 -- 반올림하면 등조 계단에서 최대 5pp 튐)
                                "until_ms": asof + W * 60_000}
         if cal:   # 화면 q20·q80 은 그대로(연구 채점도 원 분위 · 라벨 바뀜 2.6%)
             out["scales"][name]["calib"] = f"platt90 {cal['fit_start'][:10]}~{cal['fit_end'][:10]}"
     return out
 
 
+def p_stay(s: float) -> float:
+    """구간 [−a, a] 가운데 출발 · 표류 0 브라운 운동이 시간 T 동안 두 벽에 안 닿을 확률, s = σ√T / a (연구 p_stay 와 같은 급수)."""
+    if s < 0.02:
+        return 1.0
+    k = np.arange(400)
+    return float(np.clip(4 / np.pi * np.sum((-1.0) ** k / (2 * k + 1) * np.exp(-(2 * k + 1) ** 2 * np.pi ** 2 * s * s / 8)), 0, 1))
+
+
+def with_qx4i(out: dict, vol: dict | None) -> dict:
+    """박스 payload 의 4h 유지 확률을 QX4I 등조로 바꾼 사본(원 HGB 값 = p_hgb). vol = 서버 QX4 결과(log_rv · log_rv_iv · asof_ms) -- 없거나 묵으면 그대로."""
+    s4 = (out.get("scales") or {}).get("4h") or {}
+    if not (out.get("ok") and s4.get("ok") and vol and vol.get("ok") and abs(out["asof_ms"] - vol.get("asof_ms", 0)) <= VOL_STALE_MS):
+        return out
+    iv = vol.get("log_rv_iv") is not None
+    lq = (vol["log_rv_iv"] + QX4I_ISO["c_qx4i"]) if iv else (vol["log_rv"] + QX4I_ISO["c_qx4"])   # 연구 = 평균 RV 눈금(서빙 표시 σ 는 중앙값형이라 c 를 더한다)
+    p = float(np.interp(p_stay(np.sqrt(np.exp(lq)) / s4.get("half_frac", s4["half_pct"] / 100)), QX4I_ISO["x"], QX4I_ISO["y"]))
+    return {**out, "scales": {**out["scales"], "4h": {**s4, "p": round(p, 4), "p_hgb": s4["p"], "src": "qx4i" if iv else "qx4"}}}
+
+
 if __name__ == "__main__":
+    # ⑤ QX4I 4h: 급수 경계·단조 · 지도 = 등조 표(내보낼 때 적은 값) · 묵은 변동성·IV 없음
+    assert p_stay(0.0) == 1.0 and p_stay(5.0) < 1e-6 and p_stay(0.5) > p_stay(1.0) > p_stay(1.5)
+    assert all(abs(np.interp(g, QX4I_ISO["x"], QX4I_ISO["y"]) - v) < 1e-12 for g, v in QX4I_ISO["parity"])
+    bx = {"ok": True, "asof_ms": 10**12, "scales": {"4h": {"ok": True, "p": 0.3, "half_pct": 0.9}}}
+    v_ = {"ok": True, "asof_ms": 10**12 - 60_000, "log_rv": np.log(0.006 ** 2), "log_rv_iv": np.log(0.007 ** 2)}
+    q = with_qx4i(bx, v_)["scales"]["4h"]
+    assert q["src"] == "qx4i" and q["p_hgb"] == 0.3 and 0 < q["p"] < 1 and bx["scales"]["4h"]["p"] == 0.3   # 원본은 안 바뀐다
+    assert with_qx4i(bx, {**v_, "log_rv_iv": np.log(0.02 ** 2)})["scales"]["4h"]["p"] < q["p"]                # σ 클수록 유지 확률 낮다
+    assert with_qx4i(bx, {**v_, "log_rv_iv": None})["scales"]["4h"]["src"] == "qx4"
+    assert with_qx4i(bx, {**v_, "asof_ms": 10**12 - 20 * 60_000}) is bx and with_qx4i(bx, None) is bx
+
     # 자체점검 ① 패리티: 연구 산출(decisions.parquet·features.parquet)의 실제 행 40개 = 이 모듈이 같은 1분봉 1499개로 낸 특징·확률.
     #   (개발 PC 전용 -- 연구 산출이 없으면 건너뛴다) ② 짧은 입력 거부 ③ 발표 일정 해석.
     import importlib.util
