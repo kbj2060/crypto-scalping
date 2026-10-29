@@ -7861,6 +7861,17 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         else { const x = X(b.T), y = Y(pathAt(b.T)); if (x > xr + 1) { lab(xr - 6, Y(pathAt(vis[vis.length - 1])) + fs + 8, `${BOX_NM[b.k]} ${pathAt(b.T) >= 0 ? "+" : "−"}$${Math.abs(cp * pathAt(b.T) / 100).toFixed(1)} · 박스 안 ›`, c); return; }
           add("circle", { cx: x, cy: y, r: 3.6, fill: c }); lab(x + 8, y + fs + 6, `${BOX_NM[b.k]} ${pathAt(b.T) >= 0 ? "+" : "−"}$${Math.abs(cp * pathAt(b.T) / 100).toFixed(1)} · 박스 안 (예측 쪽 이탈 ${Math.round(b.pe * 100)}%)`, c, "start"); }
       });
+      // 2026-10-29 사용자 «15분 예측은 하락인데 왜 안 보이지»: 선 높이는 IC 기준이라 15분·1시간 신호가 몇 십 센트뿐 -- 그 지평 끝 시각, 경로 위에 방향 꺾쇠 + 글자
+      //   꺾쇠 수 = 꼬리 깊이(분위 ≤5·≤12·≤20 → 3·2·1, ⑤ 예측 줄과 같은 20/80 문턱) · 보류 = 빈 원 · 신호면 방향 색, 보류면 회색
+      [["15m", "15분", 15 * 60e3], ["1h", "1시간", 3600e3]].forEach(([k, nm, tau]) => {
+        const p = ds.pred[k], x = X(tau);
+        if (!p || x > xr - 4) return;
+        const y = Y(pathAt(tau)), tail = p.pct < 50 ? p.pct : 100 - p.pct, n = p.signal ? (tail <= 5 ? 3 : tail <= 12 ? 2 : 1) : 0;
+        const d = p.pct < 50 ? 1 : -1, cq = p.signal ? (p.signal < 0 ? "var(--bad)" : "var(--good)") : "var(--muted)";   // d = 화면 방향(아래 +1)
+        if (n) for (let j = 0; j < n; j++) { const yy = y + d * (10 + j * 7); add("path", { d: `M${x - 6},${yy - d * 3.5} L${x},${yy + d * 3.5} L${x + 6},${yy - d * 3.5}`, fill: "none", stroke: cq, "stroke-width": 2.2, "stroke-linecap": "round", "stroke-linejoin": "round" }); }
+        else add("circle", { cx: x, cy: y, r: 3.5, fill: "var(--chart-bg)", stroke: cq, "stroke-width": 1.5 });
+        lab(x + 8, y + d * (12 + n * 7) + (d > 0 ? fs : 0), `${nm} ${p.signal ? (p.signal < 0 ? "▼" : "▲") + " " : ""}${p.pct < 50 ? `하위 ${Math.round(p.pct)}%` : `상위 ${Math.round(100 - p.pct)}%`}${p.signal ? "" : " 보류"}`, cq, "start");
+      });
       if (!mobileChart) add("text", { x: xs + 6, y: mt + fs + 4, fill: "var(--muted)", ...txt, "font-weight": 700 }, "가격 경로(합성 · 검증 전) · × = 50% 확률로 박스 경계를 지나는 시각 · 띠 = ±1σ");
       labs.forEach((l, j) => {
         const lx = (o) => (o.an === "end" ? [o.x - wOf(o.s), o.x] : [o.x, o.x + wOf(o.s)]);
