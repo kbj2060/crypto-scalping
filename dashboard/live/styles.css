@@ -2521,24 +2521,29 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   .ofab-dir.two small { display: flex; flex-direction: column; gap: 1px; }
   .ofab-dir.two small .sep { display: none; }
 }
-.ofab-rule { position: absolute; left: 0; bottom: calc(100% + 6px); display: flex; gap: 2px; padding: 2px; border-radius: 999px;
-  background: color-mix(in srgb, var(--chart-bg, #171b23) 96%, transparent); border: 1px solid var(--line); box-shadow: 0 6px 18px rgb(var(--shadow) / .3); }   /* 뒤 글자가 비치지 않게 */
-.ofab-rule[hidden] { display: none; }
-.ofab.rightside .ofab-rule { left: auto; right: 0; }   /* 2026-10-10 띠가 길어졌다(7.5%·USDC) -- 오른쪽에 붙은 버튼이면 오른쪽 끝을 맞춰 화면 밖으로 안 나가게 */
-.ofab-rule .rule-risk { align-self: center; padding: 0 10px 0 4px; font-size: 10.5px; }
-/* 2026-10-10 주문 심볼 호가 -- 화면은 USDT, 주문은 USDC. 미리보기 머리 바로 아래 한 줄 · 떠 있는 띠 끝 작은 글자(무채색: 방향이 아니라 «어디서 체결되나») */
-.ofab-quote { align-self: center; padding: 0 10px 0 4px; font: 600 10.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted);
-  white-space: nowrap; cursor: help; border-left: 1px solid var(--soft-line); }
-.ofab-quote[hidden] { display: none; }
-.ofab-quote:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.entry-quote { margin-top: -4px; font: 600 11px/1.3 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; }
-.entry-quote b { font: 600 11px/1 var(--font-mono); color: var(--text); }
-.ofab-rule button { min-height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: none; color: var(--muted);
-  font: 700 11px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
-.ofab-rule button:hover { color: var(--text); }
-.ofab-rule button[aria-pressed="true"] { background: rgb(var(--lift) / .14); color: var(--text); }
-.ofab-rule button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-@media (pointer: coarse) { .ofab-rule button { min-height: 36px; } }
+/* 2026-10-30 시안 A: 바 끝 «›» = 숨기기 · 숨기면 가장 가까운 화면 가장자리의 손잡이(방향 색 띠·점 + «주문») */
+.ofab-hide { position: relative; display: grid; place-items: center; width: 30px; height: 30px; margin-left: 4px; padding: 0; border: 0; border-radius: 999px;
+  background: transparent; color: var(--muted); cursor: pointer; }
+.ofab-hide::before { content: ""; position: absolute; left: -3px; top: 7px; bottom: 7px; width: 1px; background: var(--line); }
+.ofab-hide:hover { color: var(--text); background: rgb(var(--lift) / .08); }
+.ofab-hide svg { width: 16px; height: 16px; }
+.ofab-hide:focus-visible, .ofab-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (pointer: coarse) { .ofab-hide { width: 40px; height: 40px; } }
+.ofab-tab { position: fixed; right: 0; top: 0; z-index: 900; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 10px 8px;
+  border: 1px solid var(--line); border-right: 0; border-radius: 12px 0 0 12px; background: var(--bg); color: var(--text); cursor: pointer;
+  box-shadow: 0 8px 24px rgb(var(--shadow) / .32); font: 700 12px/1 var(--font-sans); touch-action: manipulation; }
+.ofab-tab[hidden] { display: none; }
+.ofab-tab.left { right: auto; left: 0; border-right: 1px solid var(--line); border-left: 0; border-radius: 0 12px 12px 0; padding: 10px 8px 10px 6px; }
+.ofab-tab.left svg { transform: scaleX(-1); }
+.ofab-tab svg { width: 14px; height: 14px; color: var(--muted); }
+.ofab-tab b { writing-mode: vertical-rl; letter-spacing: .12em; }
+.ofab-tab i { display: none; width: 7px; height: 7px; border-radius: 50%; }
+.ofab-tab.long i, .ofab-tab.short i { display: block; }
+.ofab-tab.long i { background: var(--good); } .ofab-tab.short i { background: var(--bad); }
+.ofab-tab.long::before, .ofab-tab.short::before { content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; }
+.ofab-tab.left::before { left: auto; right: -1px; }
+.ofab-tab.long::before { background: var(--good); } .ofab-tab.short::before { background: var(--bad); }
+.ofab-tab:hover svg { color: var(--text); }
 .ofab-dir.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 /* 2026-10-16 시안 ③(app.js ofabTrendTags): 일봉 추세 반대 버튼 = 주황 점선 + «역추세» · 추세 쪽 = «지정가 자리/대기» 꼬리표(알약 윗변에 걸침) */
 .ofab-dir { position: relative; }
@@ -2553,11 +2558,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-tag.mk.on::before { opacity: 1; animation: ofab-mk 1.6s ease-out infinite; }
 @keyframes ofab-mk { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 45%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
 @media (prefers-reduced-motion: reduce) { .ofab-tag.mk.on::before { animation: none; } }
-/* 보유 1.5× 로 띠가 길어졌다(자동이면 «손절 시 순자산 −X%»까지 390 화면에서 374px) -- 휴대폰은 300px 안에서 둘째 줄로 접는다 */
-@media (max-width: 480px) {
-  .ofab-rule { flex-wrap: wrap; max-width: min(calc(100vw - 24px), 300px); border-radius: 14px; }
-  .ofab-rule .rule-risk, .ofab-rule .ofab-quote { padding: 4px 10px; }
-}
 .ofab-dir.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .ofab-dir.long:hover { border-color: var(--good); }
 .ofab-dir.short:hover { border-color: var(--bad); }

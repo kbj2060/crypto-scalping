@@ -597,23 +597,20 @@
       <button type="button" id="ofabSl" class="ofab-sl" hidden></button>
       <!-- 2026-10-05 포지션이 없으면 «주문» 대신 LONG·SHORT 두 개. 1.5초 꾹 = 바로 진입(마우스) · 짧게 = 펼치기. -->
       <span id="ofabFlat" class="ofab-flat" hidden>
-        <!-- 2026-10-09 B안(사용자 선택): 위 띠 = 진입 크기 규칙(계좌 카드 «크기» 칩 #snapRule 과 같은 값) · 자동이면 버튼 안에 첫 진입 금액·손절가 -->
-        <span id="ofabRule" class="ofab-rule" role="group" aria-label="진입 크기" hidden>
-          <button type="button" data-v="0" aria-pressed="false">직접</button>
-          <button type="button" data-v="1" aria-pressed="false" title="자동 규칙(권장 B) — 왕복 최대 명목 = 순자산 × 2배 · 첫 진입 = 그 1/3 · 손절 첫 진입가 ∓5% → 손절에 닿으면 순자산 약 −9%(최대 L×5% = 10%) · 익절 없음 · 교차 마진에서만&#10;메이커(지정가) 진입 권장 — 시장가로는 기대 손익 음수">자동 2×</button>
-          <button type="button" data-v="h" aria-pressed="false" title="보유 1.5× — 자동과 같은 규칙에 상한만 1.5배(첫 진입 1/3 · 물타기 권장 첫 진입가 ∓0.75% · 손절 첫 진입가 ∓5% → 손절에 닿으면 순자산 약 −7.5%) · 익절 없음 · 🔴교차 마진에서만&#10;일봉 추세 방향으로 들고 가는 크기 — 4.5년 백테스트: 3×는 2022~24 −58%·낙폭 −87%, 1~1.5×는 같은 샤프(≈1.45)에 낙폭 −28~−40%(사후 권고)">보유 1.5×</button>
-          <span class="rule-risk">손절 첫 진입가 −5%</span>
-          <span id="ofabQuote" class="ofab-quote" tabindex="0" hidden></span>   <!-- 2026-10-10 주문 심볼(USDC) vs 화면(USDT) 차 -->
-        </span>
         <!-- 2026-10-06 상세 펼치기(사용자 지시): LONG 앞 아이콘 = 예전 «주문»을 누르면 나오던 패널(레버·비율·진입 버튼). 주문 경로 없음. -->
         <button type="button" id="ofabMore" class="ofab-more" aria-controls="ofabPanel" aria-expanded="false" aria-label="주문 상세 펼치기"><svg
           viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
         <button type="button" id="ofabLong" class="ofab-dir long" title="1.5초 꾹 = 롱 5% 진입"><span>LONG</span><small id="ofabLongFrac">5%</small><i class="ofab-tag" hidden></i></button>
         <button type="button" id="ofabShort" class="ofab-dir short" title="1.5초 꾹 = 숏 5% 진입"><span>SHORT</span><small id="ofabShortFrac">5%</small><i class="ofab-tag" hidden></i></button>
       </span>
+      <!-- 2026-10-30 사용자 «떠 있는 주문 버튼도 숨겼다 꺼냈다» 시안 A: 숨기면 화면 가장자리 손잡이(#ofabTab)만 남는다 -->
+      <button type="button" id="ofabHide" class="ofab-hide" aria-label="주문 버튼 숨기기 — 화면 가장자리 손잡이로" title="숨기기"><svg viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
     </div>
     <div id="ofabPanel" class="ofab-panel" role="region" aria-label="빠른 주문" hidden><div id="ofabSlPanel" class="ofab-slp" hidden></div></div>
   </div>
+  <button type="button" id="ofabTab" class="ofab-tab" hidden aria-label="주문 버튼 꺼내기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><i aria-hidden="true"></i><b>주문</b></button>
   <script src="./app.js?v=20261029-nokalshi1"></script>
   <script src="./fp_daily.js?v=20261010-fpc"></script>
   <script src="./liq_profile.js?v=20261015-align"></script>

@@ -10204,7 +10204,6 @@ function setEntryProjPreview(plan) {
   renderSnapshotAccount();   // 2026-10-14 카드 포지션 줄의 «넣으면 →» 한 마디만 바뀐다(타일·제자리 패처는 카드 개편으로 없어짐)
 }
 
-let execQuote = null;   // 2026-10-10 떠 있는 버튼용 주문 심볼 호가(크기 미리보기 LONG = 매수호가 · SHORT = 매도호가)
 async function manualEntryRefreshSize() {
   const line = el("snapEntrySize");
   if (!line) return;
@@ -10258,9 +10257,6 @@ async function manualEntryRefreshSize() {
     line.className = "entry-note" + (ovX && !blockText ? " bad" : "");
     line.textContent = blockText
       || (ovX ? `🔴사이징 상한 꺼짐 — 크기 기준이 «순자산 × ${ovX}» 하나뿐입니다` : "") || capNote;
-    const refNow = Number(latestLivePriceByAsset[asset] || 0);   // 미리보기가 온 그 순간의 USDT -- 차이(bp)는 그때 잰다(값이 60초 묵어도 차이는 거의 안 변한다)
-    execQuote = /USDC$/.test(String(plan.symbol || "")) && plan.price > 0 && planShort.price > 0 && refNow > 0
-      ? { asset, sym: plan.symbol, bid: Number(plan.price), ask: Number(planShort.price), ref: refNow, at: Date.now() } : null;
     lastEntryPlan = plan && !plan.blocked ? plan : null;
     setEntryProjPreview(plan);
     // 2026-09-25 «보유 N시간 · 역행 · 최대 N배» 줄은 뺐다(사용자 지시). 레버 게이지는 그대로 맞춘다.
@@ -10938,12 +10934,29 @@ document.querySelectorAll(".chipset").forEach((box) => {
 //   게이지를 밀면 되돌아간 카드의 칩도 이미 맞춰져 있다.
 // 🔴끄는 건 손잡이(⠿)로만 -- 주문 버튼이 «길게 누르기»라 끌기와 한 표면을 쓰면 옮기다 멈춘 순간 발주된다.
 const OFAB_POS_KEY = "ofabPos";
-const ofab = { open: false, home: null, next: null, x: null, y: null };
+const ofab = { open: false, home: null, next: null, x: null, y: null, w: 0, h: 0 };
+// 2026-10-30 사용자 «떠 있는 주문 버튼도 숨겼다 꺼냈다» 시안 A: 숨기면 버튼이 있던 높이의 가까운 화면 가장자리에 손잡이(#ofabTab)만.
+let ofabHid = false;
+try { ofabHid = localStorage.getItem("ofabHid") === "1"; } catch (e) { /* 기억은 편의일 뿐 */ }
+function ofabHide(hid) {
+  ofabHid = hid;
+  try { localStorage.setItem("ofabHid", hid ? "1" : "0"); } catch (e) { /* 기억은 편의일 뿐 */ }
+  ofabSync(); renderOfab();
+  el(hid ? "ofabTab" : "ofabGrip")?.focus();
+}
+function ofabTabPlace() {
+  const t = el("ofabTab");
+  if (!t || t.hidden) return;
+  const w = ofab.w || 220, h = ofab.h || 46, left = (ofab.x ?? innerWidth) + w / 2 < innerWidth / 2;
+  t.classList.toggle("left", left);
+  t.style.top = `${Math.max(8, Math.min((ofab.y ?? innerHeight) + h / 2 - t.offsetHeight / 2, innerHeight - t.offsetHeight - 8))}px`;
+}
 
 function ofabPlace(x, y, save) {
   const box = el("ofab"), bar = box?.querySelector(".ofab-bar");
   if (!box || !bar) return;
   const w = bar.offsetWidth || 120, h = bar.offsetHeight || 44;
+  if (bar.offsetWidth) [ofab.w, ofab.h] = [w, h];   // 숨긴 동안(크기 0) 손잡이 자리를 잡을 때 쓴다
   ofab.x = Math.max(8, Math.min(x, innerWidth - w - 8));
   ofab.y = Math.max(8, Math.min(y, innerHeight - h - 8));
   box.style.left = `${ofab.x}px`;
@@ -11009,6 +11022,7 @@ let ofabSayObs = null, ofabSayTimer = 0;
 function ofabSay(html, tone = "") {
   const b = el("ofabSay");
   if (!b) return;
+  if (ofabHid) ofabHide(false);
   b.className = `ofab-say${tone ? " " + tone : ""}`;
   b.innerHTML = html; b.hidden = false;
   ofabClampX(b);
@@ -11047,10 +11061,12 @@ function ofabQuickAdd() {
 function ofabSync() {
   const box = el("ofab");
   if (!box) return;
-  const on = activePageTab === "snapshot";
-  if (!on) ofabSetOpen(false);
-  box.hidden = !on;
-  if (on) ofabPlace(ofab.x ?? ofabDefaultX(), ofab.y ?? innerHeight, false);
+  const on = activePageTab === "snapshot", tab = el("ofabTab");
+  if (!on || ofabHid) ofabSetOpen(false);
+  box.hidden = !on || ofabHid;
+  if (tab) tab.hidden = !on || !ofabHid;
+  if (!box.hidden) ofabPlace(ofab.x ?? ofabDefaultX(), ofab.y ?? innerHeight, false);
+  ofabTabPlace();
 }
 // 2026-09-26 비평: 모바일 기본 자리는 **하단 가운데**(엄지 영역) -- 오른쪽 아래는 «지금 닫으면»·미실현 타일을 덮었다.
 function ofabDefaultX() {
@@ -11061,7 +11077,7 @@ function ofabDefaultX() {
 // 버튼 글자 = 지금 포지션. 펼치지 않아도 «들고 있나·얼마 벌었나»가 보여야 누를지 정한다.
 function renderOfab() {
   const box = el("ofab");
-  if (!box || box.hidden) return;
+  if (!box || (box.hidden && !ofabHid)) return;   // 숨겨도 손잡이 색(방향)·이름표(손익)는 따라간다
   const p = snapshotAccountPosition();
   const qty = Number(p?.qty) || 0;
   const side = qty ? String(p.side || "").toUpperCase() : "";
@@ -11088,34 +11104,20 @@ function renderOfab() {
   if (flat && tg) { flat.hidden = !!qty; tg.hidden = !qty; }
   box.classList.toggle("long", side === "LONG");
   box.classList.toggle("short", side === "SHORT");
+  const tb = el("ofabTab");
+  if (tb) {
+    tb.classList.toggle("long", side === "LONG"); tb.classList.toggle("short", side === "SHORT");
+    tb.setAttribute("aria-label", `주문 버튼 꺼내기${qty ? ` — ${side} ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}` : ""}`);
+    tb.title = tb.getAttribute("aria-label");
+  }
   renderOfabSl(p);
   renderOfabRule(bal, live);
 }
-// 2026-10-09 B안(사용자 선택): 위 띠 = #snapRule 과 같은 값 · 자동이면 버튼 안에 «첫 $ · 손절 가격».
+// 2026-10-09 B안(사용자 선택) · 2026-10-30 위 띠(#snapRule 과 같은 값 · 펼친 패널에 있다)는 걷었다 · 자동이면 버튼 안에 «첫 $ · 손절 가격».
 //   숫자는 서버 규칙(live_manual_peg_entry rec_rule_size·rec_rule_bracket)과 같은 식으로 여기서 3초마다 -- 첫 = REC_FIRST_SHARE(1/3) × 실효 L × 순자산,
 //   손절 = 지금 가격 ∓RULE_STOP_PCT(10-14 권장 B: L = min(12.4 × 권장배수, 청산 안전, 3) · ∓5%). 실제 크기는 누를 때 서버 미리보기가 다시 정한다(다른 코인 포지션이 있으면 그만큼 줄어든다).
 function renderOfabRule(bal, live) {
-  const r = manualRule(), eth = RULE_ASSETS.has(activeSnapshotAsset), vmx = volMultNow();
-  const strip = el("ofabRule");
-  if (strip) {
-    strip.hidden = !MANUAL_RULES || !eth;
-    const v = el("snapRule")?.value || "0";
-    strip.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
-    const rr = strip.querySelector(".rule-risk");
-    if (rr) rr.hidden = v === "0";
-    if (v !== "0") renderRuleBox();            // «−X%»는 권장 배수가 바뀌면 같이 바뀐다(3초)
-  }
-  const qn = el("ofabQuote"), q = execQuote && execQuote.asset === activeSnapshotAsset && Date.now() - execQuote.at < 3 * 60e3 ? execQuote : null;
-  if (qn) {
-    qn.hidden = !q;
-    if (q) {
-      const bp = execQuoteBp((q.bid + q.ask) / 2, q.ref), txt = `${q.sym.replace(/^[A-Z]+?(?=USDC$)/, "")} ${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp`;
-      if (qn.textContent !== txt) qn.textContent = txt;
-      qn.title = `주문은 ${q.sym} — 최우선 매수 ${acctPx(q.bid)} · 매도 ${acctPx(q.ask)}, 화면(USDT) ${acctPx(q.ref)} 대비 ${bp > 0 ? "+" : "−"}${Math.abs(bp).toFixed(1)}bp`
-        + ` (${Math.round((Date.now() - q.at) / 1000)}초 전 미리보기). 숏 진입·롱 청산 지정가가 화면 가격보다 싸 보이는 건 이 차이 때문입니다`;
-      qn.setAttribute("aria-label", qn.title);
-    }
-  }
+  const r = manualRule(), vmx = volMultNow();
   const eq = Number(bal?.margin) || 0;
   for (const [id, side] of [["ofabLong", "LONG"], ["ofabShort", "SHORT"]]) {
     const b = el(id), sm = b?.querySelector("small");
@@ -11243,13 +11245,8 @@ setInterval(renderOfab, 3000);
   ofabHold(el("ofabLong"), () => ofabQuickEntry("LONG", false), dirTap("LONG"));
   ofabHold(el("ofabShort"), () => ofabQuickEntry("SHORT", false), dirTap("SHORT"));
   el("ofabMore")?.addEventListener("click", () => ofabSetOpen(!ofab.open));   // 2026-10-06 상세 펼치기(누르기만 -- 주문 없음)
-  el("ofabRule")?.addEventListener("click", (e) => {   // 2026-10-09 B안 띠 -- 카드 «크기» 칩과 같은 입력을 바꾼다(주문 없음)
-    const b = e.target.closest("button[data-v]"), inp = el("snapRule");
-    if (!b || !inp || inp.value === b.dataset.v) return;
-    inp.value = b.dataset.v;
-    inp.dispatchEvent(new Event("input", { bubbles: true }));
-    renderOfab();
-  });
+  el("ofabHide")?.addEventListener("click", () => ofabHide(true));
+  el("ofabTab")?.addEventListener("click", () => ofabHide(false));
   el("ofabBack")?.addEventListener("click", () => ofabSetOpen(false));
   grip.addEventListener("pointerdown", (e) => {
     e.preventDefault();
@@ -11281,7 +11278,7 @@ setInterval(renderOfab, 3000);
       tgl.focus();
     }
   });
-  addEventListener("resize", () => { if (!el("ofab").hidden) ofabPlace(ofab.x, ofab.y, false); });
+  addEventListener("resize", () => { if (!el("ofab").hidden) ofabPlace(ofab.x, ofab.y, false); ofabTabPlace(); });
   ofabSync();
 })();
 
