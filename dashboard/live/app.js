@@ -7703,7 +7703,13 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   옛 1시간 박스 선(10-16, 지나간 봉 위까지 전폭)·호가 띠 위 박스 경계선(10-17 boxColG, 벽 꼬리표 대신)을 없애고 -- 벽 꼬리표는 되돌아온다 --
   //   현재 봉 오른쪽 끝 ~ 예측 끝(until_ms)에만 30분·1시간·4시간 상자를 겹쳐 그린다. 오른쪽으로 끌어 빈 칸(chartPanRight)을 내면 보인다.
   //   주황 = «깨질 쪽» 또는 이미 벗어남 · 화면 끝에서 잘리면 꺾쇠 · 묵은 값(3분↑)은 안 그림 · 글자 «30분 유지 9%»(휴대폰 «30분 9%»).
-  const bxF = BOX_ON_CHART && isSnapshotChart && footprint ? boxNow() : null;
+  // 2026-10-29 시안 E2 «가격 경로»(아래 «호가벽» 앞 블록) -- 재료가 다 신선하면 그 선이 미래 칸을 맡고 박스 상자·옵션 부채꼴은 안 그린다
+  const fcFresh = (o, k) => !!(o && o.ok && Date.now() - o[k] <= 15 * 60e3), fcBox = boxNow();
+  const fcPath = isSnapshotChart && footprint && activeSnapshotAsset === "eth" && candles.length > 0 && currentPrice > 0
+    && fcFresh(latestDirShort, "decided_at_ms") && !!(latestDirShort.pred && latestDirShort.pred["15m"] && latestDirShort.pred["1h"])
+    && fcFresh(latestDir4h, "decided_at_ms") && fcFresh(latestVol4h, "asof_ms") && latestVol4h.asset === "eth" && Number.isFinite(latestVol4h.sig4h_iv_pct)
+    && !!fcBox && Date.now() - fcBox.asof_ms <= BOX_STALE_MS && Object.values(fcBox.scales || {}).some((x) => x && x.ok);
+  const bxF = BOX_ON_CHART && isSnapshotChart && footprint && !fcPath ? boxNow() : null;
   if (bxF && Date.now() - bxF.asof_ms <= BOX_STALE_MS && candles.length) {
     const L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw;
     const xT = (ms) => xAt(L) + ((ms / 1e3 - candles[L].time) / tfS) * slot;
@@ -7749,7 +7755,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   ±1σ 를 같은 미래 칸에 «부채꼴»로 -- 예측 봉 마감가(px) 중심, 폭 = σ4h·√((t − asof)/4h)(현재 봉 끝에서 그 시각의 폭으로 시작) · 예측 끝(asof + 4h)에 ±σ4h(중앙값형).
   //   2026-10-26 사용자 «현재가에 붙어 계속 움직이지 말고 5분마다»: 중심·폭 모두 서버 5분 예측값에만 묶임(실시간 시세로 안 흔들림).
   //   박스(직사각형 = 유지 확률)와 구별되게 옵션 색 실선 · 묵은 값(15분↑)은 안 그림 · 화면 끝에서 잘리면 꺾쇠.
-  const vI = isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestVol4h && latestVol4h.ok && latestVol4h.asset === "eth"
+  const vI = !fcPath && isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestVol4h && latestVol4h.ok && latestVol4h.asset === "eth"
     && Number.isFinite(latestVol4h.sig4h_iv_pct) && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
   if (vI && vI.px > 0 && candles.length) {
     const L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw;
@@ -7779,6 +7785,94 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         mobileChart ? `4h 1σ ${pct}` : `4h 1σ ${pct} · 옵션 IV ${Math.round(vI.iv_atm)}`);
       svg.appendChild(g);
     }
+  }
+
+  // 2026-10-29 사용자 시안 E2(«가격이 이렇게 움직일 것이다» 선 · 4h 옵션 IV 부채꼴을 대신한다): 현재가 출발 · ETH 전용 · 미래 칸(오른쪽으로 끌면).
+  //   ① 예측 쪽 이탈 확률 pe = (1 − 박스 유지) × w(= 0.5 + 0.5 × |방향 분위 − 50|/50, 30분 박스 방향 = 15분 예측) 가 50% 넘는 박스만 «이탈» -- 확률은 벗어나느냐만 정한다
+  //   ② 이탈하는 박스: 그 지평 끝 경계 도달 확률이 pe 가 되게 맞춘 σ 로 «50% 확률로 경계에 닿는 시각» t* = T·(Φ⁻¹(1 − pe/2)/0.6745)² 에 선(×)이 경계를 지난다
+  //   ③ 지난 뒤 = 반사 원리상 그 시각 가격 중앙값 = 경계 → 경계 근처에 머물다 방향 모델 경로(15분·1시간 = IC×σ×z · 4h = 모델 bp)로 · 이탈 방향이 엇갈리면 pe 가 큰 쪽
+  //   ④ 폭(띠) = ±1σ(옵션 IV 보정 4h σ ⊕ 박스 유지 확률 역산 σ, 분산 평균) · 4h 박스 유지 = QX4I 등조(서버 box_hold.with_qx4i)
+  //   🔴합성 규칙 -- 검증 전 · 참고용(사전등록·전진 채점 전). 이 선을 그리면 박스 상자·옵션 부채꼴은 안 그린다(같은 미래 칸).
+  if (fcPath) {
+    const L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw, cp = currentPrice;
+    const t0 = (candles[L].time + tfS) * 1e3, xT = (ms) => xAt(L) + ((ms / 1e3 - candles[L].time) / tfS) * slot;
+    const ds = latestDirShort, d4 = latestDir4h, bx = boxNow(), vI = latestVol4h;
+    const g = document.createElementNS(NS, "g"), fs = mobileChart ? 9.5 : 10.5, H4 = 4 * 3600e3;
+    const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); return e; };
+    const txt = { "font-family": "var(--font-mono)", "font-weight": 800, "font-size": fs, stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
+    const wOf = (s) => [...s].reduce((a, c) => a + (c > "ᄀ" ? 1.02 : 0.62), 0) * fs;
+    const pts = (a) => a.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+    // 정규 분위 역함수(Acklam) · 두 벽 무접촉 확률(반사 원리 급수) → σ 역산
+    const ninv = (p) => { const a = [-39.6968302866538, 220.946098424521, -275.928510446969, 138.357751867269, -30.6647980661472, 2.50662827745924], b = [-54.4760987982241, 161.585836858041, -155.698979859887, 66.8013118877197, -13.2806815528857],
+      c = [-0.00778489400243029, -0.322396458041136, -2.40075827716184, -2.54973253934373, 4.37466414146497, 2.93816398269878], d = [0.00778469570904146, 0.32246712907004, 2.445134137143, 3.75440866190742], pl = 0.02425;
+      if (p < pl) { const q = Math.sqrt(-2 * Math.log(p)); return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+      if (p > 1 - pl) return -ninv(1 - p);
+      const q = p - 0.5, r = q * q; return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1); };
+    const stay = (s) => { let v = 0; for (let k = 0; k < 8; k++) v += ((k % 2 ? -1 : 1) / (2 * k + 1)) * Math.exp(-((2 * k + 1) ** 2) * Math.PI ** 2 * s * s / 8); return Math.min(1, 4 / Math.PI * v); };
+    const sigOfHold = (p, halfPct) => { let lo = 0.02, hi = 6; for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (stay(m) > p) lo = m; else hi = m; } return halfPct / ((lo + hi) / 2); };   // σ√T(%) = 반폭 ÷ (σ√T/반폭)
+    if (plotClip) g.setAttribute("clip-path", plotClip);
+    g.setAttribute("pointer-events", "none");
+    if (xs < xr - 4) {
+      // 규칙(시안 E2 개선): ① 예측 쪽 이탈 확률 pe = (1 − 유지) × w 가 50% 를 넘는 박스만 «이탈» -- 확률은 벗어나느냐만 정하고 거리는 안 정한다
+      //   ② 이탈하는 박스: 경계 도달 확률이 시간에 따라 pe(T 에서)로 맞춰진 σ 로 «50% 확률로 경계에 닿는 시각» t* = T·(Φ⁻¹(1 − pe/2) / 0.6745)² 에 선이 경계를 지난다
+      //   ③ 지난 뒤 = 반사 원리상 그 시각 가격의 중앙값은 경계 자체 -- 선은 경계에 머물다 다음 마디(방향 모델 경로)로 간다. 거리는 변동성 띠(±1σ)가 말한다
+      //   ④ 이탈 안 하는 박스(pe ≤ 50%): 그 지평 끝에 방향 모델 경로값(15분·1시간 = IC×σ×z · 4h = 모델 bp)을 박스 안으로 잘라 둔다
+      const s4 = vI.sig4h_iv_pct, sF = (tau) => s4 * Math.sqrt(Math.max(0, tau) / H4);
+      const q4 = (bp) => Math.max(0, Math.min(100, bp <= 0 ? 50 - 30 * bp / d4.lo : 50 + 30 * bp / d4.hi));
+      const IC = { "15m": 0.062, "1h": 0.059 };
+      const mOf = (k, tau) => IC[k] * sF(tau) * ninv(Math.min(0.999, Math.max(0.001, ds.pred[k].pct / 100)));
+      const MP = [[0, 0], [15 * 60e3, mOf("15m", 15 * 60e3)], [3600e3, mOf("1h", 3600e3)], [H4, d4.pred_bp / 100]];   // 방향 모델 경로(%)
+      const lin = (P, tau) => { if (tau <= P[0][0]) return P[0][1]; for (let i = 0; i + 1 < P.length; i++) if (tau <= P[i + 1][0]) return P[i][1] + (P[i + 1][1] - P[i][1]) * (tau - P[i][0]) / (P[i + 1][0] - P[i][0]); return P[P.length - 1][1]; };
+      const B = [["30m", ds.pred["15m"].pct], ["1h", ds.pred["1h"].pct], ["4h", q4(d4.pred_bp)]].map(([k, q]) => ({ k, q, s: bx.scales[k] })).filter((n) => n.s && n.s.ok).map((n) => {
+        const T = n.s.until_ms - t0, dir = n.q < 50 ? -1 : 1, st = Math.min(1, Math.abs(n.q - 50) / 50), pe = (1 - n.s.p) * (0.5 + 0.5 * st), half = n.s.half_pct;
+        const sb = sigOfHold(n.s.p, half), sbl = Math.sqrt((sb * sb + sF(T) * sF(T)) / 2), out = pe > 0.5;
+        const tStar = out ? T * (ninv(1 - pe / 2) / 0.6745) ** 2 : null;
+        return { ...n, T, dir, pe, half, sbl, out, tStar };
+      });
+      // 이탈 방향이 엇갈리면(예: 30분 = 15분 예측 약한 ▼ · 1시간 ▲) 예측 쪽 이탈 확률이 가장 높은 지평의 방향을 따른다 -- 유지 확률이 낮은 박스는 어차피 깨지고, 어느 쪽인지는 더 확실한 예측이 정한다
+      const lead = B.filter((b) => b.out).sort((a, c) => c.pe - a.pe)[0];
+      if (lead) B.forEach((b) => { if (b.out && b.dir !== lead.dir) { b.dir = lead.dir; b.follow = lead; b.tStar = Math.min(b.tStar, lead.tStar); } });
+      // 마디: 이탈 박스 = (t*, 경계) · 안 박스 = (T, 모델값을 박스 안으로) -- 시간 순, 같은 방향에서 더 깊은 요구가 먼저 오면 그 뒤 얕은 요구는 이미 만족
+      let nodes = [[0, 0, null]];
+      B.forEach((b) => nodes.push(b.out ? [b.tStar, b.dir * b.half, b] : [b.T, Math.max(-0.92 * b.half, Math.min(0.92 * b.half, lin(MP, b.T))), b]));
+      nodes.sort((a, c) => a[0] - c[0]);
+      const keep = [nodes[0]];
+      nodes.slice(1).forEach((nd) => { const prev = keep[keep.length - 1]; if (nd[2] && nd[2].out && Math.sign(nd[1]) === Math.sign(prev[1]) && Math.abs(prev[1]) >= Math.abs(nd[1])) { nd[2].met = prev; return; } keep.push(nd); });
+      const pathAt = (tau) => { for (let i = 0; i + 1 < keep.length; i++) if (tau <= keep[i + 1][0]) { const u = (tau - keep[i][0]) / (keep[i + 1][0] - keep[i][0]), uu = u * u * (3 - 2 * u); return keep[i][1] + (keep[i + 1][1] - keep[i][1]) * uu; }
+        const L1 = keep[keep.length - 1]; return L1[0] >= H4 ? L1[1] : L1[1] + (lin(MP, H4) - L1[1]) * (tau - L1[0]) / (H4 - L1[0]); };
+      const sigAt = (tau) => { const P = [[0, 0], ...B.map((b) => [b.T, b.sbl])]; return tau <= P[1][0] ? P[1][1] * Math.sqrt(tau / P[1][0]) : lin(P, tau); };
+      const X = (tau) => xT(t0 + tau), Y = (pct) => yAt(cp * (1 + pct / 100)), n = 96;
+      const vis = [...Array(n + 1)].map((_, i) => (H4 * i) / n).filter((tau) => X(tau) <= xr + 2);
+      const poly = (f) => vis.map((tau) => [Math.min(X(tau), xr), Y(f(tau))]);
+      add("polygon", { points: pts([...poly((t) => pathAt(t) + sigAt(t)), ...poly((t) => pathAt(t) - sigAt(t)).reverse()]), fill: "var(--option)", "fill-opacity": 0.07 });
+      [1, -1].forEach((z) => add("polyline", { points: pts(poly((t) => pathAt(t) + z * sigAt(t))), fill: "none", stroke: "var(--option)", "stroke-width": 1.2, "stroke-opacity": 0.7 }));
+      const labs = [], lab = (x, y, s, c, an = "end") => labs.push({ x, y, s, c, an });
+      B.forEach((b) => { const x = X(b.T); if (x > xr + 1) return;   // 박스 = 지평 끝 경계(주황) + 그 지평까지 옅은 가로선
+        [b.half, -b.half].forEach((h) => { add("line", { x1: xs, x2: x, y1: Y(h), y2: Y(h), stroke: "var(--warn)", "stroke-opacity": 0.22, "stroke-dasharray": "2 4" });
+          add("line", { x1: x - 8, x2: x + 8, y1: Y(h), y2: Y(h), stroke: "var(--warn)", "stroke-width": 2, "stroke-opacity": 0.9, "stroke-linecap": "round" }); });
+        lab(x - 10, Y(b.dir < 0 ? b.half : -b.half) + (b.dir < 0 ? -6 : fs + 6), `${BOX_NM[b.k]} 유지 ${Math.round(b.s.p * 100)}%${b.s.src ? " · 옵션 변동성" : ""}`, "var(--warn)"); });
+      const c = B.length && B[B.length - 1].dir < 0 ? "var(--bad)" : "var(--good)";
+      add("polyline", { points: pts(poly(pathAt)), fill: "none", stroke: c, "stroke-width": 2.8, "stroke-linejoin": "round", "stroke-linecap": "round" });
+      const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(11, 16);
+      B.forEach((b) => {
+        if (b.out) { const tt = b.met ? b.met[0] : b.tStar, x = X(tt), y = Y(b.dir * b.half); if (x > xr + 1) return;
+          add("path", { d: `M${x - 5},${y - 5} L${x + 5},${y + 5} M${x + 5},${y - 5} L${x - 5},${y + 5}`, stroke: c, "stroke-width": 2.4, "stroke-linecap": "round" });
+          lab(x + 8, y + (b.dir < 0 ? fs + 6 : -6), b.met ? `${BOX_NM[b.k]} 박스도 이미 밖 (${b.follow ? `방향 = ${BOX_NM[b.follow.k]} 예측` : `예측 쪽 이탈 ${Math.round(b.pe * 100)}%`})` : `${BOX_NM[b.k]} 박스 ${b.dir < 0 ? "아래" : "위"} 경계 이탈 ≈ ${kst(t0 + tt)} (${b.follow ? `유지 ${Math.round(b.s.p * 100)}% · 방향 = ${BOX_NM[b.follow.k]} 예측` : `예측 쪽 이탈 ${Math.round(b.pe * 100)}%`})`, c, "start"); }
+        else { const x = X(b.T), y = Y(pathAt(b.T)); if (x > xr + 1) { lab(xr - 6, Y(pathAt(vis[vis.length - 1])) + fs + 8, `${BOX_NM[b.k]} ${pathAt(b.T) >= 0 ? "+" : "−"}$${Math.abs(cp * pathAt(b.T) / 100).toFixed(1)} · 박스 안 ›`, c); return; }
+          add("circle", { cx: x, cy: y, r: 3.6, fill: c }); lab(x + 8, y + fs + 6, `${BOX_NM[b.k]} ${pathAt(b.T) >= 0 ? "+" : "−"}$${Math.abs(cp * pathAt(b.T) / 100).toFixed(1)} · 박스 안 (예측 쪽 이탈 ${Math.round(b.pe * 100)}%)`, c, "start"); }
+      });
+      if (!mobileChart) add("text", { x: xs + 6, y: mt + fs + 4, fill: "var(--muted)", ...txt, "font-weight": 700 }, "가격 경로(합성 · 검증 전) · × = 50% 확률로 박스 경계를 지나는 시각 · 띠 = ±1σ");
+      labs.forEach((l, j) => {
+        const lx = (o) => (o.an === "end" ? [o.x - wOf(o.s), o.x] : [o.x, o.x + wOf(o.s)]);
+        if (l.an === "start" && l.x + wOf(l.s) > xr - 4) { l.x = xr - 4; l.an = "end"; }
+        l.y = Math.max(mt + fs + 16, Math.min(plotBottom - 4, l.y));
+        const step = l.y > plotBottom - 3 * fs ? -(fs + 3) : fs + 3;   // 방향은 한 번만 정한다(왕복하면 무한 반복)
+        for (let k = 0; k < 12 && labs.slice(0, j).some((o) => Math.abs(o.y - l.y) < fs + 2 && lx(l)[0] < lx(o)[1] && lx(o)[0] < lx(l)[1]); k++) l.y += step;
+        add("text", { x: l.x, y: l.y, "text-anchor": l.an, fill: l.c, ...txt }, l.s);
+      });
+      add("line", { x1: xs, x2: xs, y1: mt, y2: plotBottom, stroke: "var(--text)", "stroke-opacity": 0.22, "stroke-dasharray": "2 3" });
+    }
+    svg.appendChild(g);
   }
 
   // 2026-10-26 펜 메모 «호가벽 데이터 선 표시들도 제거해줘»: 호가 띠 위 ±25·±50·±100bp 경계선 + «가격 · 수량» 꼬리표(2026-10-06 시안 G)를 뺐다 -- 같은 값은 ④ 벽 판(book.sweep)에 그대로.
