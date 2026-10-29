@@ -574,8 +574,8 @@ async function armedSubmit() {
     const d = await r.json().catch(() => ({}));
     if (r.ok && d.ok) {
       const b = (latestBinanceAccount?.bracket_armed || {})[e.key];   // 다음 계좌 조회 전까지 새 선을 그린다
-      if (b) Object.assign(b, { tp_level: d.tp_level, sl_level: d.sl_level, tp_resting: d.tp_resting });
-      armedEdit = { key: e.key, okAt: Date.now(), tpOk: d.tp ? !!d.tp.placed : null };
+      if (b) Object.assign(b, { tp_level: d.tp_level, sl_level: d.sl_level, sl_price: d.sl_price, tp_resting: d.tp_resting });   // sl_price 도(진입가 환산 basis = sl_price/sl_level, 검토 S3)
+      armedEdit = { key: e.key, okAt: Date.now(), tpOk: d.tp ? !!d.tp.placed : null, warn: d.warn || "" };
     } else armedEdit = { key: e.key, err: d.detail || d.error || `HTTP ${r.status}` };   // 선은 서버 값으로 돌아간다
   } catch (err) {
     armedEdit = { key: e.key, err: "네트워크 오류 — 바뀌었는지 모릅니다(계좌 카드·거래소 확인)" };
@@ -593,7 +593,7 @@ function armedEl(box) {
   h.addEventListener("pointerdown", (e) => {
     e.stopPropagation();
     const tag = e.target.closest(".lt-tag[data-k]"), a = armedLinesNow();
-    if (!tag || !a || (armedEdit && armedEdit.busy)) return;
+    if (!tag || !a || (armedEdit && armedEdit.busy) || lineTool) return;   // 진입 전 선 도구가 켜져 있으면 들어간 선은 못 끈다(꼬리표가 겹쳐 실주문을 잘못 고치지 않게, 검토 S4)
     armedEdit = { key: a.k, tp: a.b.tp_level, sl: a.b.sl_level, y0: e.clientY };
     armedDrag = { k: tag.dataset.k, id: e.pointerId }; tag.setPointerCapture(e.pointerId); e.preventDefault();
   });
@@ -609,7 +609,7 @@ function armedEl(box) {
   const end = (e) => {
     if (!armedDrag || e.pointerId !== armedDrag.id) return;
     armedDrag = null;
-    if (armedEdit && armedEdit.moved) armedSubmit(); else { armedEdit = null; renderArmedLines(); }
+    if (e.type === "pointerup" && armedEdit && armedEdit.moved) armedSubmit(); else { armedEdit = null; renderArmedLines(); }   // 끌기 취소(시스템 제스처)는 되돌린다(검토 S5)
   };
   h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end);
   box.appendChild(h);
@@ -632,7 +632,7 @@ function renderArmedLines() {
   const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (mob ? 0.36 : 0.58), w = R - x0, cx = x0 + w / 2;
   const yE = clampY(Y(en)), yT = clampY(Y(tp)), yS = clampY(Y(sl));
   const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
-  h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy));
+  h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy)); h.classList.toggle("locked", !!lineTool);
   set(".lt-zone.up", { left: x0 + "px", width: w + "px", top: Math.min(yT, yE) + "px", height: Math.abs(yE - yT) + "px" });
   set(".lt-zone.dn", { left: x0 + "px", width: w + "px", top: Math.min(yS, yE) + "px", height: Math.abs(yE - yS) + "px" });
   [["tp", tp], ["sl", sl]].forEach(([k, v]) => {
@@ -649,8 +649,9 @@ function renderArmedLines() {
   set(".lt-tag.en", { left: x0 + 6 + "px", top: yE + "px" }).textContent = `${a.side === "SHORT" ? "숏" : "롱"} ${qty} ${unit} · 진입 ${lineFmt(en)}`;
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
   note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}`
-    : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨") : "";
-  note.className = `lt-am-note${e && e.err ? " bad" : ""}`;
+    : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")
+    : lineTool ? "선 주문 도구를 닫으면 들어간 선을 옮길 수 있습니다" : "";
+  note.className = `lt-am-note${e && (e.err || e.warn) ? " bad" : ""}`;
   Object.assign(note.style, { left: x0 + 6 + "px", top: Math.min(bot - 14, yE + 16) + "px" });
   if (e && e.err && !e.errShownAt) e.errShownAt = Date.now();
   if (e && e.err && Date.now() - e.errShownAt > 8000) armedEdit = null;

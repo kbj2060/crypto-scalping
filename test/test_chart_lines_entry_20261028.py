@@ -143,7 +143,7 @@ class LinesArmedGuardTest(ChartLinesTest):
 class LineTickTest(unittest.TestCase):
     """감시 한 틱 -- register 를 가짜 의존성으로 직접 만든다(앱의 수집기·네트워크 없이)."""
 
-    def _tick(self, prices, armed_at, acct=POS, side="LONG", armed=None, clear_err=None, exit_phase="filled_maker"):
+    def _tick(self, prices, armed_at, acct=POS, side="LONG", armed=None, clear_err=None, exit_phase="filled_maker", on_exit=None):
         calls = []
         if side == "SHORT":
             acct = {**acct, "positions": [{**acct["positions"][0], "side": "SHORT"}]}   # 계좌 qty 는 절댓값(live_binance_account abs(positionAmt))
@@ -160,6 +160,8 @@ class LineTickTest(unittest.TestCase):
 
         async def exit_(_s, plan, state):
             calls.append(("exit", plan.get("position_side") or plan.get("positionSide")))
+            if on_exit:
+                on_exit()
             state.update(phase=exit_phase, filled=1.0 if exit_phase.startswith("filled") else 0.0, quantity=1.0)
             return state
 
@@ -245,12 +247,12 @@ class LineModifyTest(ChartLinesTest):
     def test_move_tp_replaces_resting_order_and_watches_from_now(self) -> None:
         calls = []
 
-        async def place(_s, b, symbol, pside):
-            calls.append((dict(b), symbol, pside))
+        async def place(_s, b, symbol, pside, **k):
+            calls.append((dict(b), symbol, pside, k.get("strict")))
             return {"qty": 0.5, "cleared": {"cancelled": 1, "errors": []}, "tp": {"placed": True, "price": b["tp_price"]}, "placed": True}
         o = self._mod("&tp=2560&sl=2490", place=place)
         self.assertEqual(o["status"], 200, o["body"])
-        self.assertEqual(calls, [({"tp_price": 2560.0}, SYM, "LONG")], "익절 지정가만 다시(비상 스탑·물타기 없음)")
+        self.assertEqual(calls, [({"tp_price": 2560.0}, SYM, "LONG", True)], "익절 지정가만 다시(비상 스탑·물타기 없음) · strict")
         b = o["state"]
         self.assertEqual((b["tp_level"], b["sl_level"], b["tp_price"], b["tp_resting"]), (2560.0, 2490.0, 2560.0, True), b)
         self.assertGreaterEqual(b["watch_from"], o["t0"], "옮기기 전 가격으로 바로 닫지 않게")
@@ -261,12 +263,26 @@ class LineModifyTest(ChartLinesTest):
         self.assertEqual(o["status"], 200, o["body"])
         self.assertEqual((o["state"]["sl_level"], o["state"]["tp_level"], o["state"]["tp_resting"]), (2470.0, 2550.0, True))
 
-    def test_tp_cancel_failure_changes_nothing(self) -> None:
+    def test_tp_cancel_failure_hands_tp_to_server_watch(self) -> None:
+        async def place(*_a, **_k):   # strict: 옛 주문을 다 못 지웠으면 새로 안 건다(place_bracket 실제 동작)
+            return {"qty": 0.5, "cleared": {"cancelled": 0, "errors": ["openAlgoOrders: -1003"]}, "placed": False, "reason": "옛 주문 정리 실패"}
+        o = self._mod("&tp=2560&sl=2470", place=place)
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertIn("정리 실패", o["body"]["warn"])
+        b = o["state"]
+        self.assertEqual((b["tp_level"], b["sl_level"], b["tp_resting"]), (2560.0, 2470.0, False), "새 익절선은 서버 1초 닿음 감시")
+
+    def test_early_place_failure_changes_nothing(self) -> None:
         async def place(*_a, **_k):
-            return {"qty": 0.5, "cleared": {"cancelled": 0, "errors": ["-1003"]}, "tp": {"placed": False}}
+            return {"placed": False, "reason": "포지션 조회 실패"}
         o = self._mod("&tp=2560&sl=2470", place=place)
         self.assertEqual(o["status"], 502, o["body"])
-        self.assertEqual((o["state"]["tp_level"], o["state"]["sl_level"]), (2550.0, 2480.0), "실패하면 선도 그대로")
+        self.assertEqual((o["state"]["tp_level"], o["state"]["sl_level"], o["state"]["tp_resting"]), (2550.0, 2480.0, True))
+
+    def test_sl_only_with_basis_drift_keeps_resting_tp(self) -> None:
+        o = self._mod("&tp=2550&sl=2470", armed={"tp_price": 2549.49})   # 무장 때 basis 0.9998 -- 레벨이 같으면 지정가를 안 건드린다(place = _boom)
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual((o["state"]["tp_price"], o["state"]["sl_level"]), (2549.49, 2470.0))
 
     def test_tp_place_failure_falls_back_to_server_watch(self) -> None:
         async def place(*_a, **_k):
@@ -291,6 +307,22 @@ class LineModifyTest(ChartLinesTest):
             r = await c.post(f"/api/manual-bracket/modify?side=LONG&symbol={SYM}&tp=2560&sl=2490")
             self.assertEqual(r.status, 400)
         self._run(fn, acct=POS)
+
+
+class FiredPersistAndBarTest(LineTickTest):
+    def test_fired_is_saved_before_exit_runs(self) -> None:
+        seen = []   # 청산이 도는 동안 파일에 이미 fired 가 있어야 수정이 거절한다(검토 B1)
+        calls, _ = self._tick([(2001, 2479.0)], armed_at=1999.0, exit_phase="error",
+                              on_exit=lambda: seen.append(json.loads((orders.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"].get("fired")))
+        self.assertEqual([c[0] for c in calls], ["clear", "exit"], calls)
+        self.assertEqual(seen, [True], "run_exit 전에 fired 저장")
+
+    def test_bar_close_backstop_respects_watch_from(self) -> None:
+        from scripts.live_manual_peg_entry_20260912 import bracket_sl_hit
+        armed = {"armed_at": 1000.0, "sl_level": 2498.0}
+        self.assertTrue(bracket_sl_hit("LONG", (2000.0, 2495.0), armed))
+        self.assertFalse(bracket_sl_hit("LONG", (2000.0, 2495.0), {**armed, "watch_from": 2100.0}), "수정 전에 마감된 봉으로 바로 닫지 않는다(검토 F1)")
+        self.assertTrue(bracket_sl_hit("LONG", (2400.0, 2495.0), {**armed, "watch_from": 2100.0}))
 
 
 class BracketMergeOwnershipTest(unittest.TestCase):

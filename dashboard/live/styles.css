@@ -3044,6 +3044,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-armed .lt-ln { border-top-style: solid; }
 .lt-armed .lt-zone.up, .lt-armed .lt-zone.dn { opacity: .6; }
 .lt-armed.busy .lt-tag[data-k] { opacity: .55; cursor: progress; }
+.lt-armed.locked .lt-tag[data-k] { opacity: .5; pointer-events: none; }   /* 진입 전 선 도구가 켜진 동안 */
 .lt-am-note { position: absolute; transform: translateY(-50%); font: 600 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; pointer-events: none; }
 .lt-am-note.bad { color: var(--bad); white-space: normal; max-width: 60%; }
 @media (max-width: 720px) {

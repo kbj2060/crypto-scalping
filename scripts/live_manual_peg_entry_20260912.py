@@ -396,7 +396,8 @@ def bracket_sl_hit(position_side: str, last_bar: tuple[float, float] | None, arm
     last_bar = (봉 마감 시각 초, 종가) -- 레벨과 같은 USDT 심볼의 마감봉. 꼬리가 넘어도 종가가 돌아오면 hold.
     ponytail: 09-27 이전 무장 상태엔 sl_level 이 없어 주문 심볼 가격 sl_price 로 비교한다(USDT/USDC 베이시스 수 bp 오차)."""
     level = armed.get("sl_level") or armed.get("sl_price")
-    if not level or not last_bar or last_bar[0] <= float(armed["armed_at"]):
+    since = max(float(armed["armed_at"]), float(armed.get("watch_from") or 0))   # 2026-10-29 선 수정·다시 켜기 뒤 마감된 봉만(그 전 종가로 바로 닫지 않게, 검토 F1)
+    if not level or not last_bar or last_bar[0] <= since:
         return False
     close = last_bar[1]
     return close <= level if position_side == "LONG" else close >= level
