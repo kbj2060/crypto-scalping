@@ -2509,7 +2509,7 @@ function mtTodayCell(n) {   // 표 «오늘» 칸
 //   개수 = /api/macro-trend summary 그대로(카드 머리 합계와 같다) · 감시 이탈 · 다음 주요 발표 · 누르면 2번째 카드(Macro Trend)로.
 function mtHeadHtml() {
   const p = latestMacroTrend;
-  if (!p || !p.ok) return `<button type="button" class="fr-mt" data-mt-go><span class="fr-mtt">Macro<small>${p ? "불러오지 못함" : "불러오는 중…"}</small></span><span class="fr-go">Macro Trend ›</span></button>`;
+  if (!p || !p.ok) return `<button type="button" class="fr-mt" data-mt-go><span class="fr-mtt">Macro<small>${p ? "불러오지 못함" : "불러오는 중…"}</small></span></button>`;
   const s = p.summary || {}, week = p.rows.map((r) => r.live && r.live.week).filter(Boolean).sort().pop() || "–";
   const row = (a) => { const x = s[a] || {}; return `<span class="fr-c">${a}</span><span>지금 <b class="opt-good">${MTI(1)}${x.co_up || 0}</b> <b class="opt-bad">${MTI(-1)}${x.co_dn || 0}</b></span>`
     + `<span>13주 뒤 <b class="opt-good">${MTI(1)}${x.lead_up || 0}</b> <b class="opt-bad">${MTI(-1)}${x.lead_dn || 0}</b> <span class="muted">· 중립 ${x.neutral || 0} · 안 셈 ${x.excluded || 0}</span></span>`; };
@@ -2521,7 +2521,7 @@ function mtHeadHtml() {
     + `<span class="fr-mtt">Macro<small>13주 · 기준 주 ${week.slice(5)}</small></span><span class="fr-mtg">${row("BTC")}${row("ETH")}</span>`
     + `<span class="fr-sep"></span><span class="fr-mts"><small>감시</small><span class="${off.length ? "mt-warn" : ""}">이탈 ${off.length}${off.length ? ` · ${escapeHtml(off.join(", "))}` : ""}</span></span>`
     + (nx ? `<span class="fr-sep"></span><span class="fr-mts"><small>다음 발표</small><b class="fr-ev">${escapeHtml(nx.nm)} ${Math.floor(left / 3600e3)}:${String(Math.floor((left % 3600e3) / 60e3)).padStart(2, "0")} 뒤</b></span>` : "")
-    + `<span class="fr-go">Macro Trend ›</span></button>`;
+    + `</button>`;   // 2026-10-30 펜 메모 «박스 부분은 제거»: 오른쪽 끝 «Macro Trend ›» 글자 삭제(누르면 카드로 가는 건 그대로 · title)
 }
 document.addEventListener("click", (e) => { if (e.target.closest("[data-mt-go]")) el("mtCard")?.scrollIntoView({ behavior: "smooth", block: "start" }); });
 function mtOverlay(r, a) {   // 최근 52주: 지표 13주 변화(연구 부호로 맞춤, 위 = 코인 강세 쪽) · 같은 주에 맞춘 코인 13주 수익(서버) · 선행은 지표를 14주(공표 1주 + 13주) 앞으로

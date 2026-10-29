@@ -2655,7 +2655,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fr-mts { display: grid; gap: 4px; min-width: 0; color: var(--muted); } .fr-mts small { font-size: 10.5px; }
 .fr-mts > span, .fr-ev { overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
 .fp-rates .fr-ev { color: var(--warn); }
-.fr-go { margin-left: auto; color: var(--muted); font-size: 11.5px; flex: none; }
 #fpCard .ops-health-head > .chart-head-left { flex: 1 1 auto; }   /* 펜 메모(4차): 나스닥·금리가 카드 오른쪽 끝까지 */
 .fp-rates b { font: 700 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .fp-line-switch .mc-switch-t { color: var(--muted); font-weight: 600; }
