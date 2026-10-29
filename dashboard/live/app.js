@@ -7787,14 +7787,15 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     }
   }
 
-  // 2026-10-29 사용자 시안 E2(«가격이 이렇게 움직일 것이다» 선 · 4h 옵션 IV 부채꼴을 대신한다): 현재가 출발 · ETH 전용 · 미래 칸(오른쪽으로 끌면).
+  // 2026-10-29 사용자 시안 E2(«가격이 이렇게 움직일 것이다» 선 · 4h 옵션 IV 부채꼴을 대신한다): 형성 중 5분봉 시가 출발 · ETH 전용 · 미래 칸(오른쪽으로 끌면).
   //   ① 예측 쪽 이탈 확률 pe = (1 − 박스 유지) × w(= 0.5 + 0.5 × |방향 분위 − 50|/50, 30분 박스 방향 = 15분 예측) 가 50% 넘는 박스만 «이탈» -- 확률은 벗어나느냐만 정한다
   //   ② 이탈하는 박스: 그 지평 끝 경계 도달 확률이 pe 가 되게 맞춘 σ 로 «50% 확률로 경계에 닿는 시각» t* = T·(Φ⁻¹(1 − pe/2)/0.6745)² 에 선(×)이 경계를 지난다
   //   ③ 지난 뒤 = 반사 원리상 그 시각 가격 중앙값 = 경계 → 경계 근처에 머물다 방향 모델 경로(15분·1시간 = IC×σ×z · 4h = 모델 bp)로 · 이탈 방향이 엇갈리면 pe 가 큰 쪽
   //   ④ 폭(띠) = ±1σ(옵션 IV 보정 4h σ ⊕ 박스 유지 확률 역산 σ, 분산 평균) · 4h 박스 유지 = QX4I 등조(서버 box_hold.with_qx4i)
   //   🔴합성 규칙 -- 검증 전 · 참고용(사전등록·전진 채점 전). 이 선을 그리면 박스 상자·옵션 부채꼴은 안 그린다(같은 미래 칸).
   if (fcPath) {
-    const L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw, cp = currentPrice;
+    // 2026-10-29 사용자 «현재가에 맞게 움직이지 말고 시가에 고정»: 출발점 = 지금 형성 중인 5분봉 시가(= 직전 5분봉 종가, 5분 예측이 나온 가격) -- 5분마다만 움직인다
+    const f5 = chartFull(), L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw, cp = Number((f5[f5.length - 1] || {}).open) || currentPrice;
     const t0 = (candles[L].time + tfS) * 1e3, xT = (ms) => xAt(L) + ((ms / 1e3 - candles[L].time) / tfS) * slot;
     const ds = latestDirShort, d4 = latestDir4h, bx = boxNow(), vI = latestVol4h;
     const g = document.createElementNS(NS, "g"), fs = mobileChart ? 9.5 : 10.5, H4 = 4 * 3600e3;
