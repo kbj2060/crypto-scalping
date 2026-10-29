@@ -2396,6 +2396,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 /* 2026-09-30 옵션을 풋프린트 카드 안으로(사용자 «하나의 카드») -- 좁은 화면은 한 열로 맨 아래, 넓은 화면은 오른쪽 칸(위 ≥1700 규칙). */
 .liq-map-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
 .liq-map-panel > * { grid-column: 1; min-width: 0; }
+.liq-map-panel > .chart-pan.inrow, .liq-map-panel > .fp-line-btn, .liq-map-panel > .fp-line-switch { grid-column: auto; }   /* 10-30 차트 위 한 줄(절대 위치)은 카드 기준 -- 그리드 칸(안쪽 16px)을 기준으로 잡혀 1단 폭에서 16px 밀렸다 */
 /* 2026-10-01 제목 옆 한 줄(2026-10-02 커버 % 제거 -- 수집 시각만) */
 .opt-cov-h { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: keep-all; }
 /* 2026-09-29 휴대폰 블록 거래 요약 한 줄 + 펼치기 목록(사용자 선택 C) */
@@ -2432,9 +2433,9 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-09-29 «시장 맥락» 카드 -- 옵션 카드와 같은 문법(칸 제목 «?» → 설명 펼침, 키-값 줄)이지만 옵션 색(--option)은 쓰지 않는다:
    이 카드는 서술이라 «?» 는 무채색이고, 방향색은 값에만 입힌다(DESIGN.md Three Signals). 넓으면 두 열, 좁으면 한 열. */
-.mc-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); column-gap: 22px; }   /* 2026-09-30 전폭 -- 칸 수는 폭 따라 */
+.mc-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); column-gap: 22px; }   /* 2026-09-30 전폭 -- 칸 수는 폭 따라 */   /* 2026-09-30 전폭 -- 칸 수는 폭 따라 */
 /* 2026-09-30 시안 B(사용자 선택): 판 네 개 + 다음 24시간 줄. 줄 = 이름 | 그림(분위·σ·비율) | 값, 판마다 흐린 부값 한 줄 */
-.mc-body .mc-wide { grid-column: 1 / -1; }
+.mc-body .mc-wide, .mc-body > .mc-fc { grid-column: 1 / -1; }   /* 10-30 ⑤ 예측 줄은 1단 데스크톱에서 넷째 칸에 끼어 글자가 잘렸다 → 한 줄 전체 */
 .mc-svg { display: block; flex: none; max-width: 100%; height: auto; }
 .mc-g { display: grid; grid-template-columns: 96px auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }   /* 2026-09-30 그림 폭은 판 폭에서(mcGfx.gw) */
 .mc-g > span { color: var(--muted); } .mc-g > b { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }

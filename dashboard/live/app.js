@@ -4787,7 +4787,8 @@ function renderMarketCtx() {
   //   그림 없는 부값(OKX/HL 펀딩·OI 합계·거래소별 30분 체결·스프레드·12시간 청산 최다·청산 급증)은 판마다 흐린 한 줄로 남긴다.
   // 2026-09-30 사용자 «카드 너비 100% 안을 내용 크기를 키워 채워» -- 판 폭(격자 auto-fit 300px 칸)에서 그림 폭을 정한다.
   { const cmp = body.classList.contains("mc-cmp"), gap = cmp ? 14 : 22;   // 2026-09-30 시안 Y: 풋프린트 1초 수급 아래 칸(~420px)에 2열 압축
-    const BW = body.clientWidth || 1200, cols = cmp ? 1 : Math.max(1, Math.min(4, Math.floor((BW + 22) / 322)))   /* 판은 넷 -- auto-fit 이 빈 칸을 접어 넷이 폭을 나눠 가진다 */, colW = Math.floor((BW - (cols - 1) * gap) / cols);
+    const nSec = [...body.children].filter((c) => c.classList.contains("mc-sec") && !c.classList.contains("mc-fc") && !c.classList.contains("mc-wide")).length || 4;   // 10-30 판 수(⑤ 전폭 줄 빼고) -- 셋인데 넷 칸이라 오른쪽 한 칸이 비었다
+    const BW = body.clientWidth || 1200, cols = cmp ? 1 : Math.max(1, Math.min(nSec, Math.floor((BW + 22) / 322)))   /* 판은 넷 -- auto-fit 이 빈 칸을 접어 넷이 폭을 나눠 가진다 */, colW = Math.floor((BW - (cols - 1) * gap) / cols);
     body.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;   // 🔴auto-fit 은 전폭 줄(⑤)이 있으면 빈 칸을 못 접어 5칸이 됐다 -- 계산과 같은 칸 수로 못 박는다
     mcGfx.pw = Math.min(colW, 560); mcGfx.gw = cmp ? Math.max(48, colW - 64 - 46 - 12) : Math.max(110, Math.min(300, colW - 96 - 90 - 16));
     mcGfx.qw = cmp ? Math.max(70, Math.min(100, Math.round(colW * 0.42))) : Math.max(96, Math.min(150, Math.round(colW * 0.3)));
@@ -4861,7 +4862,7 @@ function renderMarketCtx() {
       + `<div class="mc-cfg"${lineCfg ? "" : " hidden"}>${lineCfg ? lineCfgHtml(lineCfg) : ""}</div></div>`;
   // 2026-10-28 펜 메모 «지표 아이콘 버튼을 누르면 이 지표 버튼들이 팝업으로 나와 추가/제거» -- 넓은 화면 줄 = 버튼 하나(켠 개수) · 칩·입력·저장은 그대로 팝업 안
   const indOn = ["ema5", "ema20", "vwma", "bb", "veto", "vwap", "wvwap", "poc"].filter((k) => mcLine[k]).length;
-  const fsRow = G.cmpW || (isMobileChartMode() && flowOn() && !!el("fpMobRow"));   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
+  const fsRow = G.cmpW || (flowOn() && !!el("fpMobRow"));   // 10-30 1단 데스크톱도(위 한 줄) -- 휴대폰은 머리 줄 · 넓은 화면은 위 한 줄   // 옛 index.html(줄 없음)이면 칩을 시장 맥락에 그대로   // 2026-10-28 사용자 «모바일도 데스크탑처럼» -- 휴대폰 흐름 코인도 버튼 + 팝업(#fpMobRow)
   if (!fsRow) fpIndOpen = false;   // 버튼 줄이 없는 화면으로 가면 닫힌 채로(돌아왔을 때 저절로 열려 있지 않게)
   const fsEl = el("fpLineSwitch"), fsHtml = fsRow ? `<button type="button" class="fp-ind-btn" aria-haspopup="true" aria-expanded="${fpIndOpen}" aria-controls="fpIndPop">`
     + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12.5l4-4.5 3 2.5 6-6.5"/><path d="M1.5 14.5h13"/></svg>지표<b>${indOn}</b></button>`
@@ -7857,7 +7858,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         } else if (gutOn) {
           fpNotes.push({ val: f.pain, label: "max pain", color: "var(--warn)", title: lab });
         } else {
-          add("text", { x: ml + 4, y: y < mt ? mt + 2 * fs + 8 : plotBottom - fs - 8, "font-size": fs, "font-weight": 700, fill: "var(--warn)" },
+          add("text", { x: ml + cw - 10, y: y < mt ? mt + 2 * fs + 8 : plotBottom - fs - 8, "font-size": fs, "font-weight": 700, fill: "var(--warn)", "text-anchor": "end" },   // 10-30 왼쪽 위 VWAP 이름과 겹쳐 오른쪽 끝으로
               `${mobileChart ? `max pain ${optQ(f.pain)}` : lab} ${y < mt ? "↑" : "↓"} (${f.pain >= px ? "+" : "−"}${optQ(Math.abs(f.pain - px))}$)`);
         }
       }
@@ -8635,6 +8636,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   })();
   // 네 막대 계기 자리(그림과 호버가 같이 쓴다). 데스크톱 = 기둥 머리(체결 기둥 왼쪽 끝 ~ 오른쪽 여백), 모바일 = 풋프린트 위 한 줄.
   const statsGeo = bookInfo && !(TRADE_W && splitR && flowOn()) ? (() => {   // 2026-09-30 넓은 화면은 ④로 옮겼다(2026-10-04 SOL·XRP 도)
+    if (TRADE_W && !splitR) {   // 2026-10-30 1단 데스크톱: 기둥 머리(체결·청산|포지션·호가 토글)와 같은 자리에 겹쳤다 → 캔들 칸 오른쪽 위
+      const rm = Math.round(Math.min(280, (tradeX0 - ml) * 0.3)), sx1 = tradeX0 - 12 - rm;
+      return { sx: sx1, slotW: rm / 4, labY: mt - 14, barY: mt - 11, y0: mt - 24, y1: mt - 2 };
+    }
     const sx = TRADE_W ? tradeX0 + 6 : ml, room = (TRADE_W ? w - mr : PROF ? w - mr - 60 : bookInfo.x0 - 8) - sx;   // 휴대폰 아래 칸이면 오른쪽 끝 60 = 맨 위 레벨 꼬리표(max pain 등) 자리
     return TRADE_W ? { sx, slotW: room / 4, labY: mt - 24, barY: mt - 20, y0: mt - 34, y1: mt - 11 }
                    : { sx, slotW: room / 4, labY: mt - 14, barY: mt - 11, y0: mt - 24, y1: mt - 2 };
@@ -8853,7 +8858,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     un.flush((f) => ops.push(f));
     // 2026-10-26 사용자 «거래대금 막대 자리에 기울기 막대, 거래대금은 선»: 0선 위아래 = 5분 호가 기울기(±50bp 매수 − 매도 잔량, 봉 평균) · 파랑 선 = 거래대금(제 축, 바닥 = 0).
     //   옛 봉별 거래대금 막대·프로파일 아래 값 칸(대금 · 이 봉 · 창 합)은 뺐다 -- 봉 값은 호버 툴팁(laneTip). 이름은 왼쪽 위 한 줄(오래된 봉 쪽 -- 최신 봉을 안 가린다).
-    const LH = bot - chartTop, y0 = chartTop, zero = y0 + LH / 2;
+    const LG = mobileChart ? 11 : 12, LH = bot - chartTop - LG, y0 = chartTop + LG, zero = y0 + LH / 2;   // 10-30 위 LG = 범례 줄(막대·선이 범례 글자를 덮었다 -- 캔버스가 SVG 글자 위)
     const bwid = Math.max(1, Math.min(slotW * 0.62, slotW - 2));
     const tilts = candles.map((c) => { const a = obAgg && obAgg.get(c.time); return a ? a.tilt : null; }), tOk = tilts.filter((v) => v != null);
     const tLive = candles.map((c) => { const a = obAgg && obAgg.get(c.time); return !!(a && a.live); });   // 진행 중 봉 = 흐리게(봉 끝에 확정값)
@@ -8878,7 +8883,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     let cur = null;
     turns.forEach((v, i) => { if (v == null) { cur = null; return; } if (!cur) runs.push((cur = [])); cur.push([cx(i), y0 + LH - 1 - v * uSc]); });
     ops.push((ctx) => runs.forEach((pts) => (pts.length > 1 ? cvStroke(ctx, pts, "var(--turnover)", 1.4, 0.9, null, "round") : cvRect(ctx, pts[0][0] - 1, pts[0][1] - 1, 2, 2, "var(--turnover)", 0.9))));
-    const lg = txt(ml + 4, y0 + (mobileChart ? 8 : 9), "", { "font-size": mobileChart ? 9 : 10, fill: "var(--muted)", "pointer-events": "auto" });
+    const lg = txt(ml + 4, chartTop + (mobileChart ? 8 : 9), "", { "font-size": mobileChart ? 9 : 10, fill: "var(--muted)", "pointer-events": "auto" });
     [[tOk.length ? "■ 호가 기울기 ±50bp" : "■ 호가 기울기 (준비 중)", "var(--muted)"], ["  ─ 거래대금", "var(--turnover)"]].forEach(([t, f]) => { const sp = mk("tspan", { fill: f }, lg); sp.textContent = t; });
     { const tt = document.createElementNS(NS, "title");
       tt.textContent = "호가 기울기 = 현재가 ±50bp 안 매수 잔량 − 매도 잔량 비율(봉 안 1초 평균). 위(초록) = 아래쪽 매수 잔량이 두껍다 · 아래(빨강) = 위쪽 매도 잔량이 두껍다.\n"
@@ -9023,7 +9028,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
-        const on = mcSplit && SUB_LEGEND_H > 0;
+        // 2026-10-30 레이아웃 정리: 1단 데스크톱(≈1440, 1초 수급이 아래)도 같은 한 줄 -- 전엔 이 폭에서만 «지표» 버튼이 없고 LONG·SHORT 가 체결 기둥 머리에 끼어 호가 계기와 겹쳤다
+        const on = SUB_LEGEND_H > 0 && (mcSplit || (S1_BELOW && !mobileChart && flowOn()));
         fs.classList.toggle("on", on);
         // 2026-10-16 펜 메모: 차트 바로 위 한 줄 = 청산 밀도(왼쪽) | 창 미니맵·실시간(가운데) | VWAP·세션·볼린저·주간 앵커(오른쪽 = 가격판 오른쪽 끝)
         const pan = el("chartPan"), home = el("fpPanHome");
@@ -9035,7 +9041,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
         if (on) post.push(() => {   // 화면 상자를 재므로 끝에서(post)
           // 기준 = 왼쪽 칸 전체(풋프린트 + 호가 막대): 왼쪽 끝 = 범례 시작(카드 왼쪽 17) · 오른쪽 끝 = 오른쪽 칸(subX) 앞 20px
           const a = svg.getBoundingClientRect(), c = card.getBoundingClientRect(), y = `${Math.round(a.top - c.top + subLegendY + SUB_LEGEND_H / 2)}px`;
-          const colL = 17, colR = a.left - c.left + subX - 20;
+          const colL = 17, colR = a.left - c.left + w - mr;   // 10-30 오른쪽 끝 = 체결·호가 기둥 오른쪽 끝(머리 토글과 같은 선 · 2단은 전에 7px 어긋났다)
           fs.style.top = y; fs.style.right = `${Math.round(c.width - colR)}px`;
           if (pan) { pan.style.top = y; pan.style.left = `${Math.round(colL + pan.offsetWidth / 2)}px`; }   // 2026-10-28 펜 메모: 미니맵 = 옛 청산 밀도 자리(왼쪽 끝)
           const lb = fpLineBtnEl(card);   // 2026-10-28 펜 메모 «주문은 풋프린트 바로 위 가운데에 버튼으로 크게»
@@ -9061,7 +9067,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 🔴그라디언트는 densityStops() 에서 바로 만든다 -- 사본을 두면 히트맵과 어긋나도
     //   아무도 모른다(2026-09-12 에 실제로 겪었다).
     // 2026-10-28 펜 메모 «왼쪽 청산밀도를 제거하고 미니맵을 그 자리로»: 넓은 화면(splitR)은 범례를 안 그린다 -- 휴대폰·좁은 화면은 그대로
-    if (SUB_LEGEND_H && !splitR && !(mobileChart && flowOn()) && (densityHistory || []).length) {   // 10-28 휴대폰 흐름 코인도(사용자 «모바일도 데스크탑처럼»)
+    if (SUB_LEGEND_H && !splitR && !(mobileChart && flowOn()) && !el("fpCard")?.classList.contains("fp-toprow") && (densityHistory || []).length) {   // 10-30 위 한 줄이 그 자리를 쓰면 범례 없음(넓은 화면과 같게)   // 10-28 휴대폰 흐름 코인도(사용자 «모바일도 데스크탑처럼»)
       const lg = subSvg("dens", 0, subLegendY, w, SUB_LEGEND_H,
                         "dens|" + w + "|" + SUB_LEGEND_H, (g) => {
         const stops = densityStops();
