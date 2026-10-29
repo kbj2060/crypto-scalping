@@ -384,7 +384,7 @@ function setFpCol(mode, win, side) {
 //   상자·꼬리표는 차트가 매초 다시 그려도 남는 HTML 층(fpColTog 와 같은 이유) -- 자리만 renderLineTool 이 맞춘다.
 let lineTool = null;   // {tp, sl, plan, err, arm(터치 확인 마감 ms)} · null = 꺼짐
 const LINE_RR = [1, 1.5, 2, 3];   // 2026-10-29 손익비 버튼(익절 거리 ÷ 손절 거리)
-let lineDrag = null, lineHold = 0, linePrevT = 0, linePt = "";
+let lineDrag = null, lineHold = 0, linePrevT = 0, linePt = "", linePrevSeq = 0;   // linePrevSeq = 선이 바뀔 때마다 +1 -- 늦게 온 옛 미리보기 응답은 버린다(10-30 검토 S1)
 const lineSide = (t, p) => (t.tp > p && t.sl < p ? "LONG" : t.tp < p && t.sl > p ? "SHORT" : "");
 const lineDig = (v) => (v >= 100 ? 2 : 4);   // XRP(~2.5) 는 소수 넷째 자리 -- 둘째 자리로 자르면 선이 0.2% 옮겨진 채 나간다(10-28 검증)
 const lineFmt = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: lineDig(v), maximumFractionDigits: lineDig(v) });
@@ -402,15 +402,16 @@ function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏
 }
 function linePreview() {   // 크기는 서버 미리보기(자동 2×)가 정한다 -- 끌기를 멈추고 0.5초 뒤 한 번
   clearTimeout(linePrevT);
+  const seq = ++linePrevSeq;
   linePrevT = setTimeout(async () => {
     const t = lineTool, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), side = t && lineSide(t, p);
     if (!t) return;
     if (!side) { t.plan = null; t.err = "익절과 손절이 현재가 양쪽에 있어야 합니다"; renderLineTool(); return; }
     try {
       const d = await manualEntryFetch(side, "entry", { rule: "c", tp: linePx(t.tp), sl: linePx(t.sl) });
-      if (lineTool !== t) return;
+      if (lineTool !== t || seq !== linePrevSeq) return;
       t.plan = d.ok ? d.plan : null; t.err = d.ok ? (d.plan.blocked || "") : (d.detail || d.error || "미리보기 실패");
-    } catch (e) { if (lineTool === t) { t.plan = null; t.err = "미리보기 실패"; } }
+    } catch (e) { if (lineTool === t && seq === linePrevSeq) { t.plan = null; t.err = "미리보기 실패"; } }
     renderLineTool();
   }, 500);
 }
@@ -447,7 +448,7 @@ function lineToolEl(box) {
     if (!m || !G) return;
     const yv = (e.clientY - m.f) / m.d;   // 화면 → viewBox y(화면 밖으로 끌어도 같은 비율로 이어진다)
     lineTool[lineDrag.k] = Math.max(0.01, G.ymax - (yv - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt));
-    lineTool.plan = null; lineTool.arm = 0; renderLineTool();
+    lineTool.plan = null; lineTool.arm = 0; linePrevSeq++; renderLineTool();
   });
   const end = (e) => {
     if (lineDrag && e.pointerId === lineDrag.id) { lineDrag = null; linePreview(); }
@@ -462,7 +463,7 @@ function lineToolEl(box) {
     if (rb && lineTool) {   // 2026-10-29 사용자 «SLTP 비율 1:1·1:2 버튼 → 칸 자동» -- 손절선은 그대로, 익절선만 비율만큼(방향 = 손절선의 반대쪽)
       const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), risk = Math.abs(p - lineTool.sl);
       if (p > 0 && risk > 0) {
-        lineTool.tp = p + (lineTool.sl < p ? 1 : -1) * Number(rb.dataset.rr) * risk;
+        lineTool.tp = Math.max(0.01, p + (lineTool.sl < p ? 1 : -1) * Number(rb.dataset.rr) * risk);   // 숏 + 먼 손절 + 1:3 이면 0 아래로 갈 수 있다(검토 S2)
         lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview();
       }
       return;
