@@ -4573,6 +4573,7 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-entry/cancel", order_api.api_manual_entry_cancel)
     app.router.add_post("/api/manual-bracket/disarm", order_api.api_manual_bracket_disarm)
     app.router.add_post("/api/manual-bracket/rearm", order_api.api_manual_bracket_rearm)
+    app.router.add_post("/api/manual-bracket/modify", lambda r: order_api.busy_or(order_api.api_manual_bracket_modify, r))   # 2026-10-29 선 끌어 주문 수정(주문 잠금 안에서)
     app.router.add_get("/api/manual-exit/preview", order_api.api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))
     app.router.add_post("/api/manual-exit/submit-all", lambda r: order_api.busy_or(order_api.api_manual_exit_all_submit, r))   # 2026-10-22 여러 코인 한꺼번에

@@ -438,6 +438,9 @@ def bracket_rekey(state: dict) -> dict:
     return out
 
 
+OWNED_BY_SAVED = ("sl_off", "tp_level", "tp_price", "sl_level", "sl_price", "sl_name", "watch_from", "mod", "placed")   # bracket_merge: 저장본이 주인인 칸
+
+
 def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
     """감시 틱 결과(`mine`)를 저장본(`current`)에 합친다. 내가 읽을 때 본 무장(`seen_at` 의 armed_at)과
     같은 측면에만 적용한다 -- 그 사이 새로 무장된 측면(물타기 포함)을 지우지 않는다."""
@@ -447,9 +450,15 @@ def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
             continue
         if side in mine:
             # 2026-10-15 sl_off(«손절 해제»·«다시 켜기»)는 저장본이 주인이다 -- 틱은 버튼 전 사본을 들고 있어 그대로 쓰면 해제나 다시 켜기를 되돌린다
-            off = out.get(side, {}).get("sl_off")
-            m = {k: v for k, v in mine[side].items() if k != "sl_off"}
-            out[side] = {**m, "sl_off": off} if off else m
+            # 2026-10-29 «선 끌어 수정»(api_manual_bracket_modify)이 바꾸는 칸도 저장본이 주인 -- 틱이 옛 선을 되써 옮긴 손절·익절이 원래대로 돌아가지 않게.
+            #   단 틱이 이번에 쏘았으면(fired) 그 틱의 tp_resting(익절 지정가를 지웠다 = False)을 쓴다.
+            cur, m = out.get(side, {}), dict(mine[side])
+            own = OWNED_BY_SAVED + (() if m.get("fired") and not cur.get("fired") else ("tp_resting",))
+            for k in own:
+                m.pop(k, None)
+                if k in cur:
+                    m[k] = cur[k]
+            out[side] = m
         else:
             out.pop(side)
     return out

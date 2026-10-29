@@ -548,6 +548,113 @@ function renderLineTool() {
     : "청산 둘 다 메이커 — 익절 = 체결 즉시 지정가(post-only) · 손절 = 1초 가격이 닿으면 peg(마감 뒤 남은 수량 시장가)";
   set(".lt-x", { left: R - 6 + "px", top: top + 8 + "px" });
 }
+// ── 2026-10-29 사용자 «SLTP 선주문에서 이미 들어간 주문은 풋프린트에 선과 띠를 계속 · 선을 움직이면 움직인 대로 주문 수정»
+//   계좌 응답의 bracket_armed(서버 with_bracket)에서 이 코인 주문 심볼의 선 무장(lines) + 열린 포지션 → 익절·손절 선 + 진입가~선 띠(선 주문 상자와 같은 모양 · 실선).
+//   꼬리표를 끌어 **놓는 순간** POST /api/manual-bracket/modify(익절·손절 둘 다, USDT 차트 가격) -- 서버가 지금가 기준 방향·거리(진입과 같은 line_bracket)와
+//   진입가 기준 손절 한도(규칙 손절폭)를 검사하고 익절 지정가를 다시 건다. 실패하면 선을 서버 값으로 되돌리고 사유를 띄운다. 요청 중엔 못 끈다.
+//   진입가(USDC 주문 심볼) → 차트(USDT) = 진입가 ÷ basis, basis = 무장 손절 주문가 ÷ 손절 레벨(서버가 같은 basis 로 만든 값).
+let armedEdit = null, armedDrag = null;   // armedEdit = {key, tp, sl, busy, err, okAt} -- 끄는 중·보내는 중·결과
+function armedLinesNow() {
+  const sym = execSymbolFor(activeSnapshotAsset) || (activeSnapshotAsset === "eth" ? "ETHUSDC" : ""), acct = latestBinanceAccount, ba = acct?.bracket_armed || {};
+  if (!sym) return null;
+  for (const p of acct?.positions || []) {
+    const side = String(p.side).toUpperCase(), k = `${p.symbol}:${side}`, b = ba[k];
+    if (p.symbol === sym && Number(p.qty) && b && b.lines && b.tp_level > 0 && b.sl_level > 0) return { k, p, b, side };
+  }
+  return null;
+}
+async function armedSubmit() {
+  const e = armedEdit;
+  if (!e || e.busy || !(e.tp > 0 && e.sl > 0)) return;
+  e.busy = true; e.err = ""; renderArmedLines();
+  const [sym, side] = e.key.split(":");
+  try {
+    const r = await fetch(`/api/manual-bracket/modify?side=${encodeURIComponent(side)}&symbol=${encodeURIComponent(sym)}&tp=${linePx(e.tp)}&sl=${linePx(e.sl)}&confirm=1`,
+      { method: "POST", cache: "no-store" });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.ok) {
+      const b = (latestBinanceAccount?.bracket_armed || {})[e.key];   // 다음 계좌 조회 전까지 새 선을 그린다
+      if (b) Object.assign(b, { tp_level: d.tp_level, sl_level: d.sl_level, tp_resting: d.tp_resting });
+      armedEdit = { key: e.key, okAt: Date.now(), tpOk: d.tp ? !!d.tp.placed : null };
+    } else armedEdit = { key: e.key, err: d.detail || d.error || `HTTP ${r.status}` };   // 선은 서버 값으로 돌아간다
+  } catch (err) {
+    armedEdit = { key: e.key, err: "네트워크 오류 — 바뀌었는지 모릅니다(계좌 카드·거래소 확인)" };
+  }
+  renderArmedLines();
+  setTimeout(renderArmedLines, 6000);   // 결과 글자 지우기
+}
+function armedEl(box) {
+  let h = document.getElementById("lineArmed");
+  if (h || !box) return h;
+  h = document.createElement("div"); h.id = "lineArmed"; h.className = "lt lt-armed";
+  h.innerHTML = '<div class="lt-zone up"></div><div class="lt-zone dn"></div><i class="lt-ln tp"></i><i class="lt-ln sl"></i><i class="lt-ln en"></i>'
+    + '<button type="button" class="lt-tag tp" data-k="tp"></button><button type="button" class="lt-tag sl" data-k="sl"></button><span class="lt-tag en"></span>'
+    + '<span class="lt-am-note" role="status" aria-live="polite"></span>';
+  h.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    const tag = e.target.closest(".lt-tag[data-k]"), a = armedLinesNow();
+    if (!tag || !a || (armedEdit && armedEdit.busy)) return;
+    armedEdit = { key: a.k, tp: a.b.tp_level, sl: a.b.sl_level, y0: e.clientY };
+    armedDrag = { k: tag.dataset.k, id: e.pointerId }; tag.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  h.addEventListener("pointermove", (e) => {
+    if (!armedDrag || e.pointerId !== armedDrag.id || !armedEdit) return;
+    const svg = el("candleSvgSnapshot"), G = chartGeo, m = svg && svg.getScreenCTM();
+    if (!m || !G) return;
+    const yv = (e.clientY - m.f) / m.d;
+    armedEdit[armedDrag.k] = Math.max(0.01, G.ymax - (yv - G.mt) * (G.ymax - G.ymin) / (G.pb - G.mt));
+    armedEdit.moved = armedEdit.moved || Math.abs(e.clientY - armedEdit.y0) > 3;   // 3px 안쪽 = 누르기만(수정 안 함)
+    renderArmedLines();
+  });
+  const end = (e) => {
+    if (!armedDrag || e.pointerId !== armedDrag.id) return;
+    armedDrag = null;
+    if (armedEdit && armedEdit.moved) armedSubmit(); else { armedEdit = null; renderArmedLines(); }
+  };
+  h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end);
+  box.appendChild(h);
+  return h;
+}
+function renderArmedLines() {
+  const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement, m = svg && svg.getScreenCTM();
+  const a = armedLinesNow(), show = !!(a && G && m && G.ymax > G.ymin && !fpAltOn() && orderCoinOk());
+  const h = show ? armedEl(box) : el("lineArmed");
+  if (!h) return;
+  h.hidden = !show;
+  if (!show) { if (!armedDrag) armedEdit = null; return; }
+  if (armedEdit && armedEdit.key !== a.k) armedEdit = null;   // 다른 포지션으로 바뀌었으면 버린다
+  const ed = armedEdit && (armedDrag || armedEdit.busy) ? armedEdit : null;
+  const tp = ed ? ed.tp : a.b.tp_level, sl = ed ? ed.sl : a.b.sl_level, basis = a.b.sl_price > 0 ? a.b.sl_price / a.b.sl_level : 1;
+  const en = Number(a.p.entry_price) / basis, qty = Math.abs(Number(a.p.qty)) || 0, sgn = a.side === "SHORT" ? -1 : 1, unit = coinUnit();
+  const pr = box.getBoundingClientRect(), mob = isMobileChartMode();
+  const X = (x) => m.a * x + m.e - pr.left, Yv = (v) => G.mt + (G.ymax - v) * (G.pb - G.mt) / (G.ymax - G.ymin);
+  const top = m.d * G.mt + m.f - pr.top, bot = m.d * G.pb + m.f - pr.top, Y = (v) => m.d * Yv(v) + m.f - pr.top, clampY = (y) => Math.min(bot, Math.max(top, y));
+  const L = X(G.ml), R = X(G.ml + G.cw), x0 = L + (R - L) * (mob ? 0.36 : 0.58), w = R - x0, cx = x0 + w / 2;
+  const yE = clampY(Y(en)), yT = clampY(Y(tp)), yS = clampY(Y(sl));
+  const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
+  h.classList.toggle("short", a.side === "SHORT"); h.classList.toggle("busy", !!(armedEdit && armedEdit.busy));
+  set(".lt-zone.up", { left: x0 + "px", width: w + "px", top: Math.min(yT, yE) + "px", height: Math.abs(yE - yT) + "px" });
+  set(".lt-zone.dn", { left: x0 + "px", width: w + "px", top: Math.min(yS, yE) + "px", height: Math.abs(yE - yS) + "px" });
+  [["tp", tp], ["sl", sl]].forEach(([k, v]) => {
+    const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / en - 1;
+    set(`.lt-ln.${k}`, { left: L + "px", width: R - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
+    const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
+    const pnl = qty ? ` <span class="lt-s">${d * sgn >= 0 ? "+" : "−"}$${Math.abs((v - en) * qty).toFixed(1)}</span>` : "";
+    const st = k === "tp" ? (a.b.tp_resting ? "" : " · 서버 감시") : (a.b.sl_off ? " · 꺼짐" : "");
+    tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} <span>${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%</span>${mob ? "" : pnl}${st}`;
+    tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 놓으면 주문이 그 가격으로 바뀝니다`);
+    tag.disabled = !!(armedEdit && armedEdit.busy);
+  });
+  set(".lt-ln.en", { left: x0 + "px", width: w + "px", top: yE + "px" });
+  set(".lt-tag.en", { left: x0 + 6 + "px", top: yE + "px" }).textContent = `${a.side === "SHORT" ? "숏" : "롱"} ${qty} ${unit} · 진입 ${lineFmt(en)}`;
+  const note = h.querySelector(".lt-am-note"), e = armedEdit;
+  note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}`
+    : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨") : "";
+  note.className = `lt-am-note${e && e.err ? " bad" : ""}`;
+  Object.assign(note.style, { left: x0 + 6 + "px", top: Math.min(bot - 14, yE + 16) + "px" });
+  if (e && e.err && !e.errShownAt) e.errShownAt = Date.now();
+  if (e && e.err && Date.now() - e.errShownAt > 8000) armedEdit = null;
+}
 async function refreshPositionProfile() {   // 포지션 보기일 때만 1초(서버도 1초 캐시)
   if (fpColR !== "pos" || activePageTab !== "snapshot" || document.hidden || !flowOn()) return;   // 2026-10-20 ETH → 흐름 코인 전부(XRP)
   const now = Date.now();
@@ -8950,6 +9057,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     if (mn && !mn.classList.contains("far-lbl")) svg.appendChild(mn); }   // 2026-10-10 휴대폰 현재가 숫자 = 호가 띠(◌ 표식) 위 맨 앞
   fpCvPaint(fpCv.bg); fpCvPaint(fpCv.fg);   // 2026-10-20 캔버스 두 장(fpCv) -- 칠하기는 레이아웃을 안 건드린다
   if (svg.id === "candleSvgSnapshot") post.push(renderLineTool);   // 2026-10-28 선 주문 상자 자리
+  if (svg.id === "candleSvgSnapshot") post.push(renderArmedLines);   // 2026-10-29 들어간 선 주문(익절·손절) 자리
   post.forEach((f) => f());   // 화면 상자를 재는 HTML 배치(위 ③) -- svg 를 다 쌓은 뒤 한 번만 배치된다
   // 2026-10-01 프로파일 오른쪽 끝 가격 이름과 겹치는 호가 벽 수량 글자(«11.8k»)는 숨긴다(사용자 지시) -- 층 캐시라 매번 되살린 뒤 다시 판정
   //   (2026-10-20 읽기를 먼저 다 하고 쓰기를 나중에 -- 글자마다 되살리고 재면 그때마다 레이아웃이 다시 돈다)

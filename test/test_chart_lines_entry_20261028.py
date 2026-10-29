@@ -226,5 +226,86 @@ class LineTickTest(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
+class LineModifyTest(ChartLinesTest):
+    """2026-10-29 «이미 들어간 선을 끌면 주문 수정»(POST /api/manual-bracket/modify). 시세 = 가짜 bookTicker 2500 · basis 1 · 계좌 POS 진입 2500."""
+    _armed = LinesArmedGuardTest._armed
+
+    def _mod(self, q, acct=POS, armed=None, place=None):
+        out = {}
+
+        async def fn(c):
+            self._armed({"tp_price": 2550.0, "sl_price": 2480.0, **(armed or {})})
+            out["t0"] = time.time()
+            r = await c.post(f"/api/manual-bracket/modify?side=LONG&symbol={SYM}&confirm=1{q}")
+            out["status"], out["body"] = r.status, await r.json()
+            out["state"] = json.loads((server.LIVE_DIR / "manual_bracket_state.json").read_text("utf-8"))[f"{SYM}:LONG"]
+        self._run(fn, acct=acct, **({"place_bracket": place} if place else {}))
+        return out
+
+    def test_move_tp_replaces_resting_order_and_watches_from_now(self) -> None:
+        calls = []
+
+        async def place(_s, b, symbol, pside):
+            calls.append((dict(b), symbol, pside))
+            return {"qty": 0.5, "cleared": {"cancelled": 1, "errors": []}, "tp": {"placed": True, "price": b["tp_price"]}, "placed": True}
+        o = self._mod("&tp=2560&sl=2490", place=place)
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual(calls, [({"tp_price": 2560.0}, SYM, "LONG")], "익절 지정가만 다시(비상 스탑·물타기 없음)")
+        b = o["state"]
+        self.assertEqual((b["tp_level"], b["sl_level"], b["tp_price"], b["tp_resting"]), (2560.0, 2490.0, 2560.0, True), b)
+        self.assertGreaterEqual(b["watch_from"], o["t0"], "옮기기 전 가격으로 바로 닫지 않게")
+        self.assertEqual(b["armed_at"], 1000.0, "무장 시각은 그대로(감시 틱 병합 기준)")
+
+    def test_move_sl_only_touches_no_exchange_order(self) -> None:
+        o = self._mod("&tp=2550&sl=2470")   # place_bracket = _boom
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertEqual((o["state"]["sl_level"], o["state"]["tp_level"], o["state"]["tp_resting"]), (2470.0, 2550.0, True))
+
+    def test_tp_cancel_failure_changes_nothing(self) -> None:
+        async def place(*_a, **_k):
+            return {"qty": 0.5, "cleared": {"cancelled": 0, "errors": ["-1003"]}, "tp": {"placed": False}}
+        o = self._mod("&tp=2560&sl=2470", place=place)
+        self.assertEqual(o["status"], 502, o["body"])
+        self.assertEqual((o["state"]["tp_level"], o["state"]["sl_level"]), (2550.0, 2480.0), "실패하면 선도 그대로")
+
+    def test_tp_place_failure_falls_back_to_server_watch(self) -> None:
+        async def place(*_a, **_k):
+            return {"qty": 0.5, "cleared": {"cancelled": 1, "errors": []}, "tp": {"placed": False, "error": "-5022"}, "placed": False}
+        o = self._mod("&tp=2560&sl=2480", place=place)
+        self.assertEqual(o["status"], 200, o["body"])
+        self.assertFalse(o["state"]["tp_resting"], "지정가가 없으면 서버가 1초 닿음으로 익절")
+
+    def test_rejects(self) -> None:
+        self.assertEqual(self._mod("&tp=2450&sl=2480")["status"], 400)                       # 롱인데 익절이 지금가 아래
+        self.assertEqual(self._mod("&tp=2550")["status"], 400)                                # 하나만
+        far = {**POS, "positions": [{**POS["positions"][0], "entry_price": 2600.0}]}
+        o = self._mod("&tp=2550&sl=2440", acct=far)                                          # 지금가에서 2.4% · 진입가에서 6.2% > 5%
+        self.assertEqual((o["status"], o["body"]["error"]), (400, "sl_too_far"), o["body"])
+        self.assertEqual(self._mod("&tp=2560&sl=2490", armed={"fired": True})["status"], 409)
+        self.assertEqual(self._mod("&tp=2560&sl=2490", armed={"lines": False})["status"], 409)
+        self.assertEqual(self._mod("&tp=2560&sl=2490", acct=FLAT)["status"], 409)             # 포지션 없음
+
+    def test_confirm_required(self) -> None:
+        async def fn(c):
+            self._armed()
+            r = await c.post(f"/api/manual-bracket/modify?side=LONG&symbol={SYM}&tp=2560&sl=2490")
+            self.assertEqual(r.status, 400)
+        self._run(fn, acct=POS)
+
+
+class BracketMergeOwnershipTest(unittest.TestCase):
+    def test_tick_does_not_revert_modified_lines(self) -> None:
+        from scripts.live_manual_peg_entry_20260912 import bracket_merge
+        k = f"{SYM}:LONG"
+        cur = {k: {"armed_at": 1.0, "tp_level": 2560.0, "sl_level": 2490.0, "tp_price": 2560.0, "watch_from": 9.0, "tp_resting": False}}
+        mine = {k: {"armed_at": 1.0, "tp_level": 2550.0, "sl_level": 2480.0, "tp_price": 2550.0, "tp_resting": True, "retry_after": 5.0}}
+        m = bracket_merge(cur, mine, {k: 1.0})[k]
+        self.assertEqual((m["tp_level"], m["sl_level"], m["tp_price"], m["watch_from"], m["tp_resting"], m["retry_after"]),
+                         (2560.0, 2490.0, 2560.0, 9.0, False, 5.0), m)
+        fired = {k: {**mine[k], "fired": True, "tp_resting": False}}
+        m = bracket_merge({k: {**cur[k], "tp_resting": True}}, fired, {k: 1.0})[k]
+        self.assertTrue(m["fired"] and m["tp_resting"] is False, "틱이 쏘았으면 그 틱의 tp_resting")
+
+
 if __name__ == "__main__":
     unittest.main()

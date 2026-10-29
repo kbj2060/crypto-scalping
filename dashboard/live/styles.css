@@ -3040,6 +3040,12 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-x { position: absolute; transform: translateX(-100%); pointer-events: auto; white-space: nowrap; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line);
   background: var(--chart-bg); color: var(--muted); font: 600 11px/1 var(--font-sans); cursor: pointer; }
 .lt-x:hover { color: var(--text); }
+/* 2026-10-29 들어간 선 주문(#lineArmed): 실선 = 거래소·서버에 걸린 주문 · 띠는 선 주문 상자보다 옅게 · 보내는 중엔 흐리게 */
+.lt-armed .lt-ln { border-top-style: solid; }
+.lt-armed .lt-zone.up, .lt-armed .lt-zone.dn { opacity: .6; }
+.lt-armed.busy .lt-tag[data-k] { opacity: .55; cursor: progress; }
+.lt-am-note { position: absolute; transform: translateY(-50%); font: 600 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; pointer-events: none; }
+.lt-am-note.bad { color: var(--bad); white-space: normal; max-width: 60%; }
 @media (max-width: 720px) {
   .lt-tk { width: 200px; padding: 9px 10px; }
   .lt-tag { padding: 7px 10px 7px 8px; }   /* 손가락 -- 높이 ~30px */
