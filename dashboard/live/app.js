@@ -383,6 +383,7 @@ function setFpCol(mode, win, side) {
 //   익절 = 체결 직후 post-only 지정가 · 손절 = 서버가 1초 체결가 닿음 판정 → peg 청산(마감 뒤 남은 수량 시장가) · 거래소 스탑 없음.
 //   상자·꼬리표는 차트가 매초 다시 그려도 남는 HTML 층(fpColTog 와 같은 이유) -- 자리만 renderLineTool 이 맞춘다.
 let lineTool = null;   // {tp, sl, plan, err, arm(터치 확인 마감 ms)} · null = 꺼짐
+const LINE_RR = [1, 1.5, 2, 3];   // 2026-10-29 손익비 버튼(익절 거리 ÷ 손절 거리)
 let lineDrag = null, lineHold = 0, linePrevT = 0, linePt = "";
 const lineSide = (t, p) => (t.tp > p && t.sl < p ? "LONG" : t.tp < p && t.sl > p ? "SHORT" : "");
 const lineDig = (v) => (v >= 100 ? 2 : 4);   // XRP(~2.5) 는 소수 넷째 자리 -- 둘째 자리로 자르면 선이 0.2% 옮겨진 채 나간다(10-28 검증)
@@ -423,7 +424,8 @@ function lineToolEl(box) {
   h = document.createElement("div"); h.id = "lineTool"; h.className = "lt";
   h.innerHTML = '<div class="lt-zone up"></div><div class="lt-zone dn"></div><i class="lt-ln tp"></i><i class="lt-ln sl"></i><i class="lt-ln en"></i>'
     + '<button type="button" class="lt-tag tp" data-k="tp"></button><button type="button" class="lt-tag sl" data-k="sl"></button><span class="lt-tag en"></span>'
-    + '<div class="lt-tk"><div class="lt-row"><b class="lt-side"></b><span class="lt-qty"></span></div><div class="lt-row lt-rr"></div>'
+    + '<div class="lt-tk"><div class="lt-row"><b class="lt-side"></b><span class="lt-qty"></span></div><div class="lt-sz"></div><div class="lt-row lt-rr"></div>'
+    + `<div class="lt-rrb" role="group" aria-label="손익비로 익절선 맞추기 (손절선은 그대로)">${LINE_RR.map((r) => `<button type="button" data-rr="${r}">1:${r}</button>`).join("")}</div>`
     + '<button type="button" class="lt-go"></button><div class="lt-note"></div></div>'
     + '<button type="button" class="lt-x">선 지우기</button>';
   h.addEventListener("pointerdown", (e) => {
@@ -452,6 +454,15 @@ function lineToolEl(box) {
   h.addEventListener("click", (e) => {
     e.stopPropagation();
     if (e.target.closest(".lt-x")) { lineTool = null; renderLineTool(); return; }
+    const rb = e.target.closest("[data-rr]");
+    if (rb && lineTool) {   // 2026-10-29 사용자 «SLTP 비율 1:1·1:2 버튼 → 칸 자동» -- 손절선은 그대로, 익절선만 비율만큼(방향 = 손절선의 반대쪽)
+      const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), risk = Math.abs(p - lineTool.sl);
+      if (p > 0 && risk > 0) {
+        lineTool.tp = p + (lineTool.sl < p ? 1 : -1) * Number(rb.dataset.rr) * risk;
+        lineTool.plan = null; lineTool.arm = 0; renderLineTool(); linePreview();
+      }
+      return;
+    }
     const go = e.target.closest(".lt-go");
     if (!go || go.disabled || !lineTool || (linePt === "mouse" && e.detail)) return;   // 마우스는 꾹(위) -- 터치·키보드 = 두 번(확인 30초, 09-25 부터 터치 꾹 발주 없음)
     if (Date.now() < (lineTool.arm || 0)) { lineFire(); return; }
@@ -537,6 +548,13 @@ function renderLineTool() {
   sd.textContent = side ? `${side} · 자동 2×` : "방향 없음"; sd.className = `lt-side ${side === "SHORT" ? "bad" : side ? "good" : ""}`;
   h.querySelector(".lt-qty").textContent = side && !t.err ? (qty ? `${qty} ${unit}` : "크기 계산 중…") : "";
   const rr = side ? Math.abs((t.tp - p) / (t.sl - p)) : 0, rrEl = h.querySelector(".lt-rr");
+  h.querySelectorAll("[data-rr]").forEach((b) => b.setAttribute("aria-pressed", String(!!side && Math.abs(rr - Number(b.dataset.rr)) < 0.05)));   // 지금가가 움직이면 비율도 조금씩 변한다(peg 진입가 = 그때 지금가)
+  // 2026-10-29 사용자 «자동 2× 인데 레버리지랑 진입 비율도 적어줘» -- 서버 미리보기 값 그대로: 거래소 레버리지(plan.target_leverage) ·
+  //   증거금 = 순자산의 몇 %(plan.margin_usdt ÷ projection.equity_usdt -- 실제로 잠기는 현금) · 명목 = 순자산의 몇 배(규칙 상한 2×)
+  const pl = t.plan, eq = Number(pl?.projection?.equity_usdt) || 0, mg = Number(pl?.margin_usdt) || 0, nt = Number(pl?.notional_usdt) || 0, lev = Number(pl?.target_leverage) || 0;
+  const szParts = !side || t.err || !pl ? [] : [`레버리지 ${lev ? lev + "×" : "-"}`,   // 항목 단위로만 줄바꿈(숫자뿐이라 이스케이프 불필요)
+    eq > 0 ? `증거금 ${(100 * mg / eq).toFixed(1)}%${mob ? "" : ` ($${mg.toFixed(0)})`}` : `증거금 $${mg.toFixed(0)}`, ...(eq > 0 ? [`명목 ${(nt / eq).toFixed(2)}× / 상한 2×`] : [])];
+  h.querySelector(".lt-sz").innerHTML = szParts.map((x) => `<span>${x}</span>`).join("");
   rrEl.textContent = t.err || (side ? `손익비 ${rr.toFixed(2)} : 1` + (qty ? ` · 손절 시 −$${Math.abs((t.sl - p) * qty).toFixed(1)}` : "") : "");
   rrEl.classList.toggle("bad", !!t.err);
   const go = h.querySelector(".lt-go"), armed = Date.now() < (t.arm || 0);
