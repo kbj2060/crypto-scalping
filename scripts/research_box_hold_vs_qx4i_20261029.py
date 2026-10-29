@@ -52,10 +52,8 @@ def selftest():
     print("selftest OK — p_stay 경계·단조·몬테카를로 일치")
 
 
-def run():
-    selftest()
-    rp = OUT / "report.json"; assert not rp.exists(), "판정은 한 번만"
-    OUT.mkdir(parents=True, exist_ok=True)
+def fit_iso():
+    """박스 4h 행(HGB p 포함) · 학습 창 행 · 등조 지도."""
     A = pd.read_parquet(IN / "rows.parquet", filters=[("scale", "==", "4h")])
     assert (A.ts.dt.minute == 59).all()
     A["tau"] = A.ts + pd.Timedelta("1min")
@@ -72,7 +70,14 @@ def run():
     T = T[(T.index >= "2024-01-01") & (T.index < TR_END)]
     assert (T.index + pd.Timedelta("4h")).max() <= TR_END
     T["p_raw"] = p_stay(np.sqrt(np.exp(T.lrv)) / T.a)
-    iso = IsotonicRegression(y_min=.001, y_max=.999, out_of_bounds="clip").fit(T.p_raw, T.y)
+    return A, T, IsotonicRegression(y_min=.001, y_max=.999, out_of_bounds="clip").fit(T.p_raw, T.y)
+
+
+def run():
+    selftest()
+    rp = OUT / "report.json"; assert not rp.exists(), "판정은 한 번만"
+    OUT.mkdir(parents=True, exist_ok=True)
+    A, T, iso = fit_iso()
     # 검증·시험: QX4I = 12라운드 동결 식
     R12.O.OUT = IN / "deribit"
     iv = R12.iv_hourly(int(pd.Timestamp("2026-10-25").value // 10**6))
@@ -124,5 +129,24 @@ def run():
     print(json.dumps(rep, indent=1, ensure_ascii=False, default=float))
 
 
+def aux():
+    """채점 뒤 보조(판정에 안 씀): 옵션 IV 몫(QX4 등조 = 같은 지도에 IV 없는 σ) · 5일 블록 95%(V.day_ci) · 월별 ΔBrier."""
+    D = pd.read_parquet(OUT / "scored.parquet"); D = D[D.win == "test"]
+    c4 = json.loads((IN / "report_r12.json").read_text())["models"]["QX4"]["c"]          # 12라운드 QX4 c(같은 검증 창)
+    q, _ = qx("pred_test_r4_ETH.parquet", "t_QX4", c4)
+    iso = fit_iso()[2]
+    D["p_q4"] = iso.predict(p_stay(np.sqrt(np.exp(q.reindex(D.index).to_numpy())) / D.a))
+    assert np.allclose(iso.predict(D.p_raw), D.p_iso)                                     # 지도 재적합 = 본 채점과 같음
+    y, days = D.y.to_numpy(float), D.index.normalize().to_numpy()
+    L = lambda p: (D[p].to_numpy() - y) ** 2  # noqa: E731
+    out = {}
+    for name, a, b in (("QX4등조−HGB", "p_q4", "p_hgb"), ("QX4I등조−QX4등조", "p_iso", "p_q4"), ("QX4I등조−HGB", "p_iso", "p_hgb"), ("섞은것−HGB", "p_mix", "p_hgb")):
+        d = L(a) - L(b)
+        out[name] = {"mean": float(d.mean()), "one_sided90_1d": C.day_boot(d, days, alpha=0.2), "ci95_5d": list(V.day_ci(D.index, d))[1:],
+                     "monthly": {str(k): round(float(v), 5) for k, v in pd.Series(d, index=D.index).groupby(D.index.to_period("M")).mean().items()}}
+    out["QX4등조_brier"] = float(L("p_q4").mean())
+    (OUT / "aux.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out, indent=1, ensure_ascii=False))
+
+
 if __name__ == "__main__":
-    run() if "--run" in sys.argv else selftest() if "--selftest" in sys.argv else print(__doc__)
+    run() if "--run" in sys.argv else aux() if "--aux" in sys.argv else selftest() if "--selftest" in sys.argv else print(__doc__)
