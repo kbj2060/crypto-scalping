@@ -2683,17 +2683,20 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-line-btn { display: none; }
 /* 2026-10-28 펜 메모(2차) «SLTP · 전혀 트렌디하지 않다 -- 다른 방향으로 깔끔하게»: 주황 채움·빛 번짐을 버리고 무채색 얇은 선 + 등폭 글자.
    켜면 바탕이 한 단 밝아지고 아이콘의 초록·빨강 선이 실선이 된다(색은 선 두 줄에만). 일봉·버블이 덮으면 숨김(fp-alt-on). */
-#fpCard.fp-toprow:not(.fp-alt-on) .fp-line-btn { position: absolute; z-index: 2; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 9px;
-  height: 30px; padding: 0 14px 0 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--glass); color: var(--text);
-  font: 700 12px/1 var(--font-mono); letter-spacing: .14em; cursor: pointer; transition: background .16s, border-color .16s; }
-#fpCard.fp-toprow .fp-line-btn:hover { border-color: color-mix(in srgb, var(--text) 38%, transparent); background: color-mix(in srgb, var(--text) 7%, transparent); }
-#fpCard.fp-toprow .fp-line-btn[aria-pressed="true"] { border-color: color-mix(in srgb, var(--text) 55%, transparent); background: color-mix(in srgb, var(--text) 13%, transparent); color: var(--ink); }
+/* 2026-10-30 [롱 | 숏] 한 덩어리: 테두리는 바깥 하나 · 가운데 칸막이 · 눌린 쪽만 바탕이 한 단 밝다 */
+#fpCard.fp-toprow:not(.fp-alt-on) .fp-line-btn { position: absolute; z-index: 2; transform: translate(-50%, -50%); display: inline-flex;
+  height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--glass); overflow: hidden; }
+.fp-line-btn button { display: inline-flex; align-items: center; gap: 8px; height: 100%; padding: 0 13px 0 10px; border: 0; background: transparent; color: var(--text);
+  font: 700 12px/1 var(--font-mono); letter-spacing: .14em; cursor: pointer; transition: background .16s; }
+.fp-line-btn button + button { border-left: 1px solid var(--line); }
+.fp-line-btn button:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.fp-line-btn button[aria-pressed="true"] { background: color-mix(in srgb, var(--text) 13%, transparent); color: var(--ink); }
 .fp-line-btn svg { width: 15px; height: 15px; fill: none; stroke-width: 1.7; stroke-linecap: round; }
 .fp-line-btn .u { stroke: var(--good); stroke-dasharray: 2.4 2.2; } .fp-line-btn .m { stroke: var(--muted); } .fp-line-btn .d { stroke: var(--bad); stroke-dasharray: 2.4 2.2; }
-.fp-line-btn[aria-pressed="true"] .u, .fp-line-btn[aria-pressed="true"] .d { stroke-dasharray: none; }
-.fp-line-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.fp-line-btn [aria-pressed="true"] .u, .fp-line-btn [aria-pressed="true"] .d { stroke-dasharray: none; }
+.fp-line-btn button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 #fpCard.fp-toprow #fpColTog [data-lines] { display: none; }   /* 큰 버튼이 있으면 기둥 토글의 작은 «선 주문»은 숨김(휴대폰·좁은 화면은 그것) */
-@media (prefers-reduced-motion: reduce) { #fpCard.fp-toprow .fp-line-btn { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .fp-line-btn button { transition: none; } }
 .fp-line-switch .mc-chip { min-height: 20px; }   /* 두 줄이 카드 머리 선과 «체결|포지션» 탭 사이 46px 에 들어간다 */
 .mc-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px;
   background: var(--glass); color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
@@ -2992,22 +2995,20 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 /* 2026-10-28 사용자 «모바일도 데스크탑처럼»: 휴대폰 머리 마지막 줄 = [빈칸 | SLTP(가운데) | 지표 N(오른쪽)] · 손가락 40px · 팝업은 화면 폭 안에서 줄바꿈 */
 .fp-mob-row { flex: 1 1 100%; order: 2; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; position: relative; }
 .fp-mob-row[hidden] { display: none; }
-.fp-mob-row .fp-line-btn { display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 16px 0 13px; border-radius: 10px; border: 1px solid var(--line);
-  background: var(--glass); color: var(--text); font: 700 13px/1 var(--font-mono); letter-spacing: .14em; cursor: pointer; touch-action: manipulation; }
-.fp-mob-row .fp-line-btn[aria-pressed="true"] { border-color: color-mix(in srgb, var(--text) 55%, transparent); background: color-mix(in srgb, var(--text) 13%, transparent); color: var(--ink); }
+.fp-mob-row .fp-line-btn { display: inline-flex; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--glass); overflow: hidden; }
+.fp-mob-row .fp-line-btn button { padding: 0 15px 0 12px; font-size: 13px; touch-action: manipulation; }
 .fp-mob-row .fp-line-switch.mob { display: flex; justify-self: end; align-self: center; position: static; transform: none; margin: 0; }
 .fp-mob-row .fp-ind-btn { height: 40px; padding: 0 13px; border-radius: 10px; touch-action: manipulation; }
 .fp-mob-row .fp-ind-pop { right: 0; max-width: min(360px, calc(100vw - 40px)); white-space: normal; }
 .fp-mob-row .fp-ind-pop .mc-sw-g { flex-wrap: wrap; gap: 6px; }
 .fp-mob-row .fp-ind-pop .mc-chip { min-height: 36px; padding: 0 11px; }
-/* 2026-10-28 차트 «선 주문»(app.js renderLineTool) -- 시안 A 꼬리표 + B 포지션 상자. 롱 = 위 초록·아래 빨강, 숏이면 뒤집힌다(.short) */
+/* 2026-10-28 차트 «선 주문»(app.js renderLineTool) -- 시안 A 꼬리표 + B 포지션 상자. 익절 띠 초록·손절 띠 빨강(롱·숏 같음 -- 숏은 익절이 아래) */
 .lt { position: absolute; inset: 0; pointer-events: none; z-index: 3; font: 600 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
 .lt[hidden] { display: none; }
 .lt-zone { position: absolute; }
 .lt-zone.up { background: color-mix(in srgb, var(--good) 14%, transparent); }
 .lt-zone.dn { background: color-mix(in srgb, var(--bad) 14%, transparent); }
-.lt.short .lt-zone.up { background: color-mix(in srgb, var(--bad) 14%, transparent); }
-.lt.short .lt-zone.dn { background: color-mix(in srgb, var(--good) 14%, transparent); }
+/* .up = 익절~진입 · .dn = 손절~진입 띠(위아래가 아니라 선 기준) -- 숏도 색을 바꾸지 않는다(2026-10-30 숏에서 익절 띠가 빨갛던 것) */
 .lt-ln { position: absolute; height: 0; border-top: 1.5px dashed var(--good); }
 .lt-ln.sl { border-top-color: var(--bad); }
 .lt-ln.en { border-top: 1px solid var(--accent); opacity: .8; }

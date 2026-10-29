@@ -344,13 +344,14 @@ function fpColTogEl(svg) {
     + '<span class="fp-col-seg" role="group" aria-label="왼쪽 기둥"><button type="button" data-col="trade">체결</button><button type="button" data-col="liq">청산</button></span>'
     + '<span class="fp-col-seg" role="group" aria-label="오른쪽 기둥"><button type="button" data-col="pos">포지션</button><button type="button" data-col="book">호가</button></span>'
     + `<span class="fp-col-seg fp-col-win r" role="group" aria-label="포지션 기간">${wins("r")}</span>`
-    + '<span class="fp-col-seg" role="group" aria-label="SLTP 선 주문"><button type="button" data-lines="1" title="차트 위 익절·손절 선을 끌어 놓고 peg 메이커로 진입(자동 2×) — 청산도 둘 다 메이커">SLTP</button></span>';
+    + '<span class="fp-col-seg" role="group" aria-label="SLTP 선 주문"><button type="button" data-lines="LONG" title="롱 SLTP — 익절선 위·손절선 아래로 놓고 peg 메이커로 진입(자동 2×)">롱</button>'
+    + '<button type="button" data-lines="SHORT" title="숏 SLTP — 익절선 아래·손절선 위로 놓고 peg 메이커로 진입(자동 2×)">숏</button></span>';
   el.addEventListener("pointerdown", (e) => { e.stopPropagation(); if (fpIndOpen) fpIndSet(false); });   // 차트 끌기로 번지지 않게 · 열린 지표 팝업은 닫는다
   el.addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
     e.stopPropagation();
-    if (b.dataset.lines) { lineToolToggle(); b.setAttribute("aria-pressed", String(!!lineTool)); return; }
+    if (b.dataset.lines) { lineToolToggle(b.dataset.lines); return; }
     if (b.dataset.col) setFpCol(b.dataset.col); else setFpCol(null, Number(b.dataset.win), b.dataset.side);
   });
   svg.parentElement.appendChild(el);
@@ -363,7 +364,6 @@ function placeFpColTog(svg, xr, yTop, show) {   // xr·yTop = viewBox 좌표(체
   if (!show) return;
   el.querySelectorAll("[data-col]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.col === fpColL || b.dataset.col === fpColR)));
   el.querySelectorAll("[data-win]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.win) === (b.dataset.side === "l" ? fpLiqWin : fpPosWin))));
-  el.querySelector("[data-lines]")?.setAttribute("aria-pressed", String(!!lineTool));
   el.querySelector(".fp-col-win.l").hidden = fpColL !== "liq"; el.querySelector(".fp-col-win.r").hidden = fpColR !== "pos";
   const m = svg.getScreenCTM(), pr = el.parentElement.getBoundingClientRect();
   if (!m) return;
@@ -389,11 +389,15 @@ const lineSide = (t, p) => (t.tp > p && t.sl < p ? "LONG" : t.tp < p && t.sl > p
 const lineDig = (v) => (v >= 100 ? 2 : 4);   // XRP(~2.5) 는 소수 넷째 자리 -- 둘째 자리로 자르면 선이 0.2% 옮겨진 채 나간다(10-28 검증)
 const lineFmt = (v) => Number(v).toLocaleString("en-US", { minimumFractionDigits: lineDig(v), maximumFractionDigits: lineDig(v) });
 const linePx = (v) => v.toFixed(lineDig(v));
-function lineToolToggle() {
-  if (lineTool) { lineTool = null; renderLineTool(); return; }
-  const G = chartGeo, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
+function lineToolToggle(want) {   // 2026-10-30 사용자 «롱만 나오고 숏 진입 방법이 없다 → SLTP 버튼을 롱/숏으로»
+  const G = chartGeo, p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), cur = lineTool && p > 0 ? lineSide(lineTool, p) : "";
+  if (lineTool && cur === want) { lineTool = null; renderLineTool(); return; }   // 같은 쪽을 다시 누르면 끈다
   if (!G || !(G.ymax > G.ymin) || !(p > 0)) return;
-  lineTool = { tp: p + 0.6 * (G.ymax - p), sl: p - 0.6 * (p - G.ymin), plan: null, err: "", asset: activeSnapshotAsset };
+  if (cur) Object.assign(lineTool, { tp: Math.max(0.01, 2 * p - lineTool.tp), sl: Math.max(0.01, 2 * p - lineTool.sl), plan: null, err: "", arm: 0 });   // 반대쪽 = 지금가 기준 거울(거리 그대로)
+  else {
+    const up = p + 0.6 * (G.ymax - p), dn = p - 0.6 * (p - G.ymin), sh = want === "SHORT";
+    lineTool = { tp: sh ? dn : up, sl: sh ? up : dn, plan: null, err: "", asset: activeSnapshotAsset };
+  }
   renderLineTool(); linePreview();
 }
 function linePreview() {   // 크기는 서버 미리보기(자동 2×)가 정한다 -- 끌기를 멈추고 0.5초 뒤 한 번
@@ -498,12 +502,20 @@ function fpTopRowOff() {   // 넓은 화면 차트 위 줄(미니맵·SLTP·지�
 function fpLineBtnEl(card) {
   let b = document.getElementById("fpLineBtn");
   if (b) return b;
-  b = document.createElement("button");
-  b.type = "button"; b.id = "fpLineBtn"; b.className = "fp-line-btn"; b.setAttribute("aria-pressed", String(!!lineTool));
-  b.title = "차트 위 익절·손절 선을 끌어 놓고 peg 메이커로 진입(자동 2×) — 청산도 둘 다 메이커";
-  b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path class="u" d="M2 4.5h12"/><path class="m" d="M2 8h12"/><path class="d" d="M2 11.5h12"/></svg><span>SLTP</span>';   // 2026-10-28 펜 메모 «텍스트를 SLTP 로»
+  b = document.createElement("div");   // 2026-10-30 «SLTP» 한 개 → [롱 | 숏] 두 개(아이콘 초록 = 익절선 자리)
+  b.id = "fpLineBtn"; b.className = "fp-line-btn"; b.setAttribute("role", "group"); b.setAttribute("aria-label", "SLTP 선 주문");
+  b.innerHTML = '<button type="button" data-lines="LONG" aria-pressed="false" title="롱 SLTP — 익절선 위·손절선 아래로 놓고 peg 메이커로 진입(자동 2×)">'
+    + '<svg viewBox="0 0 16 16" aria-hidden="true"><path class="u" d="M2 4.5h12"/><path class="m" d="M2 8h12"/><path class="d" d="M2 11.5h12"/></svg><span>롱</span></button>'
+    + '<button type="button" data-lines="SHORT" aria-pressed="false" title="숏 SLTP — 익절선 아래·손절선 위로 놓고 peg 메이커로 진입(자동 2×)">'
+    + '<svg viewBox="0 0 16 16" aria-hidden="true"><path class="d" d="M2 4.5h12"/><path class="m" d="M2 8h12"/><path class="u" d="M2 11.5h12"/></svg><span>숏</span></button>';
   b.addEventListener("pointerdown", (e) => e.stopPropagation());
-  b.addEventListener("click", (e) => { e.stopPropagation(); if (fpIndOpen) fpIndSet(false); lineToolToggle(); });
+  b.addEventListener("click", (e) => {
+    const k = e.target.closest("[data-lines]");
+    e.stopPropagation();
+    if (!k) return;
+    if (fpIndOpen) fpIndSet(false);
+    lineToolToggle(k.dataset.lines);
+  });
   card.appendChild(b);
   return b;
 }
@@ -511,7 +523,8 @@ function renderLineTool() {
   const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement;
   const p = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), m = svg && svg.getScreenCTM();
   if (lineTool && lineTool.asset !== activeSnapshotAsset) lineTool = null;   // 다른 코인 가격의 선을 그대로 두지 않는다
-  el("fpLineBtn")?.setAttribute("aria-pressed", String(!!lineTool));
+  const cur = lineTool && p > 0 ? lineSide(lineTool, p) : "";   // 끌다가 선이 지금가를 넘으면 눌린 쪽도 바뀐다
+  document.querySelectorAll("#fpLineBtn [data-lines], #fpColTog [data-lines]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lines === cur)));
   const show = !!(lineTool && G && m && G.ymax > G.ymin && p > 0 && !fpAltOn() && orderCoinOk());
   const h = show ? lineToolEl(box) : el("lineTool");
   if (!h) return;
@@ -545,7 +558,7 @@ function renderLineTool() {
   const g = gaps.find(([a, b]) => b - a >= th) || gaps.reduce((x, y) => (y[1] - y[0] > x[1] - x[0] ? y : x));
   Object.assign(tk.style, { left: L + 8 + "px", top: Math.max(top + 8, Math.min(g[0], bot - th)) + "px" });
   const sd = h.querySelector(".lt-side");
-  sd.textContent = side ? `${side} · 자동 2×` : "방향 없음"; sd.className = `lt-side ${side === "SHORT" ? "bad" : side ? "good" : ""}`;
+  sd.textContent = side ? `${side === "SHORT" ? "숏" : "롱"} · 자동 2×` : "방향 없음"; sd.className = `lt-side ${side === "SHORT" ? "bad" : side ? "good" : ""}`;
   h.querySelector(".lt-qty").textContent = side && !t.err ? (qty ? `${qty} ${unit}` : "크기 계산 중…") : "";
   const rr = side ? Math.abs((t.tp - p) / (t.sl - p)) : 0, rrEl = h.querySelector(".lt-rr");
   h.querySelectorAll("[data-rr]").forEach((b) => b.setAttribute("aria-pressed", String(!!side && Math.abs(rr - Number(b.dataset.rr)) < 0.05)));   // 지금가가 움직이면 비율도 조금씩 변한다(peg 진입가 = 그때 지금가)
