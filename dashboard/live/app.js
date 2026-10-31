@@ -4313,10 +4313,13 @@ function fcTrendCell(t, cell) {
   const px = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
   const tags = `<span class="fc-tl">${t.votes.map((x) => `<i class="${x.up ? "u" : ""}" title="${x.L}일 전 종가 ${px(x.ref_now)}보다 ${x.up ? "높게" : "낮게"} 마감">${x.L}</i>`).join("")}</span>`;
   return cell("지금 추세", `${up ? "up" : "dn"} now`, `${up ? "▲ 상승" : "▼ 하락"} <small class="fc-cnt">${ups}:${n - ups}</small>`, "",
-    `지금 추세 — 예측 아님. 매일 09시(KST) 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 중 다수 · ${t.age_days}일째 같은 방향`,
+    `지금 추세 — 예측 아님. 매일 09시(KST) 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 중 다수 · ${t.age_days}일째 같은 방향`
+      + (activeSnapshotAsset === "xrp" ? " · XRP 실측(2018~): 다음 7일 적중 45% · 5표 모두 위일 때 40%만 오름 -- XRP 에선 추세가 이어진다는 뜻이 아니다" : ""),
     tags + `<span class="sub">일 전 종가보다 위 ${ups} · 아래 ${n - ups}</span><span class="sub">${t.age_days}일째 · 매일 09시 마감</span>`).replace('<span class="sub"></span>', "");
 }
 
+// 2026-10-31 «7일 예측» 코인별 보류 적중(2024-01~2026-10-23, |z|≥1 날만) -- docs/experiments/xrp_trend_cb7d_20261031.md
+const CB7_HIT = { eth: " · 보류 2024~26 ETH 적중 65%(188/288)", xrp: " · 보류 2024~26 XRP 적중 60%(172/288 · 2025 44%) · 통과 후보" };
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분·1시간 예측(10-28) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
   const t = latestTrend && latestTrend.ok ? latestTrend : null, ds = latestDirSig && latestDirSig.ok ? latestDirSig : {};
@@ -4394,7 +4397,7 @@ function fcRowHtml(sec) {
          : cell("지금 추세", "flat now", "-", "불러오는 중", "지금 추세"))
     + sCell("15m", "15분", 3, 1) + sCell("1h", "1시간", 12, 2)
     + cell("4h 예측", g4 && !old4 ? cls(g4.signal) : "flat", g4 ? word(g4.signal) : "-", d4Sub, d4Tip, d4Gauge + volLine)
-    + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)")
+    + sig(ds.cb, "7일 예측", "z 코인베이스 프리미엄 7일 변화(BTC 기준)" + (CB7_HIT[activeSnapshotAsset] || ""))
     + `</div></div>`;   // 2026-10-28 사용자 «4~13주 예측은 Macro Trend 카드로 대체» -- z91 칸 뺌(서버 계산·전진 판정 2027-06 은 그대로)
 }
 
@@ -4472,14 +4475,14 @@ MC_TIPS.q_lev = MC_TIPS.lev + "\n\n" + MC_TIPS.ls;
 MC_TIPS.q_flow = MC_TIPS.flow + "\n\n" + MC_TIPS.quad;
 MC_TIPS.q_map = MC_TIPS.liq + "\n\n" + MC_TIPS.px;
 MC_TIPS.q_wall = MC_TIPS.book;   // 2026-10-06 교차(BTC 30분·가격차)·위치(VWAP·%B·RSI) 줄 제거 -- 설명도 벽만
-MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아니다(지난 7·14·28·56·90일 종가 대비 5표, 미래 적중 48~58%).\n"
+MC_TIPS.q_fc = "지평 = 지금에서 멀리. «지금 추세»만 예측이 아니다(지난 7·14·28·56·90일 종가 대비 5표, 미래 적중 ETH 48~58% · XRP 45%).\n"
   + "15분·1시간 예측 = 매달 재학습 LightGBM(ETH 65피쳐 + 호가 깊이 10열 · 표적 4종 × 시드 5) · 표본 밖 예측(2026-06~10) 하위·상위 20% 밖만 방향 · "
   + "그 밖 적중 15분 56% · 1시간 55%(안쪽 51~52%) · 호가 깊이 예열 중(워커 재시작 뒤 12시간)이면 비움 · 참고용(전진 판정 전).\n"
   + "4h 예측 = 매달 재학습 HGB(ETH 65피쳐 · 최근 365일, 과거 표본 밖 예측 상·하위 20% 만) · 2025~26 IC .06 · 2023~24 검증 불통과.\n"
-  + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65%.\n"
+  + "7일 예측 = 코인베이스 프리미엄 7일 변화 z(BTC 기준, |z|≥1 만) · 2024~26 보류 BTC 59% · ETH 65% · XRP 60%(엄격 기준 60% 에 못 미친 통과 후보).\n"
   + "4~13주 = Macro Trend 카드(달러지수·순유동성 등 지표별 13주 변화 · ETF 이후 기준).\n"
   + "변동성 = 4시간 실현변동성 QX4(ETH·XRP·BTC·SOL 4코인 HGB·MLP 결합 · 2026-10-26 배포 · 굴림 3창 옛 GBM 이김) · 방향 정보 없음 · 표시 전용(주문 크기에 안 씀). "
-  + "ETH 차트 미래 칸 옵션 색 부채꼴 = QX4I(QX4 + 직전 정시 옵션 ATM IV 보정 · 조건부 채택, 전진 판정 2027-01-22) ±1σ — 이 줄 σ 와 조금 다를 수 있다.\n"
+  + "ETH 차트 미래 칸 옵션 색 부채꼴 = QX4I(QX4 + 직전 정시 옵션 ATM IV 보정 · 조건부 채택, 전진 판정 2027-01-22) ±1σ — 이 줄 σ 와 조금 다를 수 있다. XRP 부채꼴 = IV 보정 없는 QX4 ±1σ(이 줄 σ 와 같다).\n"
   + "셋 다 참고용 — 전진 판정 전."
   + "주황 «깨질 쪽» = 학습 기간(2022~24) 예측의 하위 20% 밑 · «머물 쪽» = 상위 20% 위 · 그 사이 «보통» · «벗어남» = 지금가가 이미 띠 밖 · «지연» = 기준가가 3분 넘게 묵음(차트 선도 숨김). 방향 정보는 없다 — 어느 쪽으로 깨질지는 모른다.\n"
   + "우리 검정(ETH 4.7년, 2022~24 학습 · 2025·2026 따로 채점): AUC .75~.78 · 보정 오차 10분위 최대 3~6.4pp · 하위 10% 유지 3~5% ↔ 상위 10% 61~71%. "
@@ -7930,14 +7933,17 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   ±1σ 를 같은 미래 칸에 «부채꼴»로 -- 예측 봉 마감가(px) 중심, 폭 = σ4h·√((t − asof)/4h)(현재 봉 끝에서 그 시각의 폭으로 시작) · 예측 끝(asof + 4h)에 ±σ4h(중앙값형).
   //   2026-10-26 사용자 «현재가에 붙어 계속 움직이지 말고 5분마다»: 중심·폭 모두 서버 5분 예측값에만 묶임(실시간 시세로 안 흔들림).
   //   박스(직사각형 = 유지 확률)와 구별되게 옵션 색 실선 · 묵은 값(15분↑)은 안 그림 · 화면 끝에서 잘리면 꺾쇠.
-  const vI = !fcPath && isSnapshotChart && footprint && activeSnapshotAsset === "eth" && latestVol4h && latestVol4h.ok && latestVol4h.asset === "eth"
-    && Number.isFinite(latestVol4h.sig4h_iv_pct) && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
+  // 2026-10-31 XRP 도(감사표 A-1 #2): XRP 는 옵션 IV 보정이 없어 QX4 σ(sig4h_pct) 그대로 -- 모양·색 같고 글자에서 «옵션 IV»만 뺀다.
+  const vI = !fcPath && isSnapshotChart && footprint && latestVol4h && latestVol4h.ok && latestVol4h.asset === activeSnapshotAsset
+    && (activeSnapshotAsset === "eth" ? Number.isFinite(latestVol4h.sig4h_iv_pct) : activeSnapshotAsset === "xrp" && Number.isFinite(latestVol4h.sig4h_pct))
+    && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
+  const vIv = vI && Number.isFinite(vI.sig4h_iv_pct), vSig = vI ? (vIv ? vI.sig4h_iv_pct : vI.sig4h_pct) : 0;
   if (vI && vI.px > 0 && candles.length) {
     const L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw;
     const xT = (ms) => xAt(L) + ((ms / 1e3 - candles[L].time) / tfS) * slot;
     const t0 = (candles[L].time + tfS) * 1e3, t1 = vI.asof_ms + 4 * 3600e3, xEnd = xT(t1);
     if (xs < xr - 4 && xEnd > xs + 2 && t1 > t0) {
-      const g = document.createElementNS(NS, "g"), fs = mobileChart ? 9.5 : 10.5, col = "var(--option)", s = vI.sig4h_iv_pct / 100;
+      const g = document.createElementNS(NS, "g"), fs = mobileChart ? 9.5 : 10.5, col = "var(--option)", s = vSig / 100;
       const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); return e; };
       if (plotClip) g.setAttribute("clip-path", plotClip);
       g.setAttribute("pointer-events", "none");
@@ -7954,10 +7960,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       if (xEnd > xr + 1) [yu, yd].forEach((y) => add("path", { d: `M${xr - 7},${y - 4} L${xr - 3},${y} L${xr - 7},${y + 4}`, fill: "none", stroke: col, "stroke-width": 1.6, "stroke-linecap": "round", "stroke-linejoin": "round" }));
       else add("line", { x1: xe, x2: xe, y1: yu, y2: yd, stroke: col, "stroke-opacity": 0.55, "stroke-width": 1 });
       // 글자는 아래 가장자리 밑(박스 글자는 위 경계 위) -- 화면 아래로 나가면 플롯 바닥에 붙인다
-      const ty = Math.min(yd + fs + 3, plotBottom - 4), pct = `±${vI.sig4h_iv_pct.toFixed(2)}%`;
+      const ty = Math.min(yd + fs + 3, plotBottom - 4), pct = `±${vSig.toFixed(2)}%`;
       add("text", { x: Math.min(xe, xr) - 4, y: ty, "text-anchor": "end", fill: col, stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke",
         "font-family": "var(--font-mono)", "font-weight": 800, "font-size": fs },
-        mobileChart ? `4h 1σ ${pct}` : `4h 1σ ${pct} · 옵션 IV ${Math.round(vI.iv_atm)}`);
+        mobileChart || !vIv ? `4h 1σ ${pct}` : `4h 1σ ${pct} · 옵션 IV ${Math.round(vI.iv_atm)}`);
       svg.appendChild(g);
     }
   }
