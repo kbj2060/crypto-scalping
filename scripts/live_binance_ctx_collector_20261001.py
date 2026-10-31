@@ -32,11 +32,13 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 HOT_DB = ROOT / "data" / "hot" / "binance_ctx.sqlite"
 OI_URL = "https://fapi.binance.com/fapi/v1/openInterest"
 OI_POLL_S = 0.25
+OI_SLOW_POLL_S = 5.0     # 2026-11-01 ZEC·SNDK -- 0.25초면 분당 240 가중치씩 더해 IP 한도(2,400)를 먹는다. 거래소 OI 는 5~10초마다 갱신된다
 OI_SYMBOLS = [s.strip().upper() for s in os.getenv("BN_CTX_OI_SYMBOLS", "ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT").split(",") if s.strip()]
+OI_SLOW_SYMBOLS = [s.strip().upper() for s in os.getenv("BN_CTX_OI_SLOW_SYMBOLS", "ZECUSDT,SNDKUSDT").split(",") if s.strip()]
 # 2026-10-31 BTC 도(사용자 «BTC 도 ETH 와 같은 대시보드») -- OI 1초 레인·마크
-MARK_SYMBOLS = [s.strip().lower() for s in os.getenv("BN_CTX_MARK_SYMBOLS", "ethusdt,btcusdt,solusdt,xrpusdt").split(",") if s.strip()]
+MARK_SYMBOLS = [s.strip().lower() for s in os.getenv("BN_CTX_MARK_SYMBOLS", "ethusdt,btcusdt,solusdt,xrpusdt,zecusdt,sndkusdt").split(",") if s.strip()]
 WS_BASE = "wss://fstream.binance.com/market/ws/"
-LIQ_SYMBOLS = {c["binance_symbol"] for c in COIN_CONFIG.values()}
+LIQ_SYMBOLS = {c["binance_symbol"] for c in COIN_CONFIG.values()} | set(OI_SLOW_SYMBOLS)   # TradFi 청산이 오는지 평일에 확인
 FLUSH_S = 10.0
 PENDING_CAP = 200_000
 
@@ -116,7 +118,7 @@ class Pending:
                 log(f"쓰기 보류 {n}행, 다음에 재시도: {type(exc).__name__}")
 
 
-async def poll_oi(session, symbol: str, pend: Pending) -> None:
+async def poll_oi(session, symbol: str, pend: Pending, period: float = OI_POLL_S) -> None:
     seen: set[int] = set()
     while True:
         try:
@@ -144,7 +146,7 @@ async def poll_oi(session, symbol: str, pend: Pending) -> None:
         except Exception as exc:  # noqa: BLE001 -- 한 번의 실패로 멈추지 않는다
             log(f"oi {symbol} poll failed (will retry): {exc!r}")
             await asyncio.sleep(1.0)
-        await asyncio.sleep(OI_POLL_S)
+        await asyncio.sleep(period)
 
 
 async def ws_loop(session, url: str, table: str, parse, pend: Pending) -> None:
@@ -170,10 +172,11 @@ async def run(path: Path = HOT_DB) -> None:
     from aiohttp import ClientSession, ClientTimeout
     init_db(path)
     pend = Pending(path)
-    log(f"시작 -- OI {OI_SYMBOLS} 0.25초 · 마크 {MARK_SYMBOLS} · 청산 {sorted(LIQ_SYMBOLS)} -> {path}")
+    log(f"시작 -- OI {OI_SYMBOLS} 0.25초 · {OI_SLOW_SYMBOLS} {OI_SLOW_POLL_S}초 · 마크 {MARK_SYMBOLS} · 청산 {sorted(LIQ_SYMBOLS)} -> {path}")
     async with ClientSession(timeout=ClientTimeout(total=10)) as rest, \
             ClientSession(timeout=ClientTimeout(total=None)) as wss:
         tasks = [asyncio.create_task(poll_oi(rest, s, pend)) for s in OI_SYMBOLS]
+        tasks += [asyncio.create_task(poll_oi(rest, s, pend, OI_SLOW_POLL_S)) for s in OI_SLOW_SYMBOLS]
         tasks += [asyncio.create_task(ws_loop(wss, f"{WS_BASE}{s}@markPrice@1s", "mark_price_1s", parse_mark, pend))
                   for s in MARK_SYMBOLS]
         tasks.append(asyncio.create_task(ws_loop(wss, f"{WS_BASE}!forceOrder@arr", "liquidations", parse_force, pend)))

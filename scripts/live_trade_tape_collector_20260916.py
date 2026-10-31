@@ -60,7 +60,8 @@ HOT_TAPE_DB = ROOT / "data" / "hot" / "binance_tape.sqlite"
 
 
 # 가격빈. 자산마다 틱과 가격대가 달라 한 값을 못 쓴다 -- 대략 «가격의 0.4bp» 로 맞췄다.
-BUCKETS = {"ethusdt": 0.1, "btcusdt": 1.0, "solusdt": 0.01, "xrpusdt": 0.0001, "hypeusdt": 0.001}
+BUCKETS = {"ethusdt": 0.1, "btcusdt": 1.0, "solusdt": 0.01, "xrpusdt": 0.0001, "hypeusdt": 0.001,
+           "zecusdt": 0.05, "sndkusdt": 0.05}   # 2026-11-01 ZEC·SNDK(TradFi 주식) -- 가격의 0.4bp 쯤
 WS_URL = "wss://fstream.binance.com/ws/{symbol}@trade"
 KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
 AGG_TRADES_URL = "https://fapi.binance.com/fapi/v1/aggTrades"
@@ -128,7 +129,10 @@ WHALE_MIN_USD = 100_000.0     # 이상 = 고래 (그 사이는 중형)
 # 2026-10-31 BTC(사용자 «BTC 도 ETH 와 같은 대시보드»): 같은 정의 · aggTrades 아카이브 09-22~25 실측 4일 합 $12,869/$158,036
 #   (날짜별 $11.9k~14.6k / $141k~176k · 양성 대조 ETH 같은 4일 = 10.07%·43.19%·46.74% → $10,000/$100,000 그대로 재현) →
 #   $13k/$160k = 리테일 10.15% · 고래 46.47%. ETH 경계 그대로면 BTC 고래가 거래량의 58%(리테일 8%)였다.
-SIZE_BANDS_USD = {"solusdt": (7_500.0, 55_000.0), "xrpusdt": (3_400.0, 23_000.0), "btcusdt": (13_000.0, 160_000.0)}
+SIZE_BANDS_USD = {"solusdt": (7_500.0, 55_000.0), "xrpusdt": (3_400.0, 23_000.0), "btcusdt": (13_000.0, 160_000.0),
+                  # 2026-11-01 ZEC·SNDK 잠정: 같은 정의(리테일 10.07%·고래 46.74%)를 aggTrades 표본(ZEC 0.5h·SNDK 주말 6.9h)으로 맞췄다.
+                  #   ETH 대조군(1.3h)이 아카이브 값에서 ~5%p 벗어나 표본이 짧다 -- 평일 며칠 쌓이면 다시 잰다(바꾸면 size_bands_changed 가 시각을 남긴다).
+                  "zecusdt": (1_000.0, 6_000.0), "sndkusdt": (1_000.0, 6_700.0)}
 
 
 def size_bands(symbol: str) -> tuple[float, float]:

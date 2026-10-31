@@ -54,10 +54,11 @@ if str(ROOT) not in sys.path:
 LIVE = ROOT / "data" / "live"
 MANIFEST = LIVE / "multicoin_collectors.json"
 OPS = "scripts/ops"
-COINS = ("BTC", "SOL", "XRP", "HYPE")
+COINS = ("BTC", "SOL", "XRP", "HYPE", "ZEC", "SNDK")
 # 2026-10-31 디스크 정책: 깊은 호가(depthdiff 하루 ~0.2~0.5GB/코인)·래스터·HL 체결/호가는 여기 있는 코인만 쌓는다.
 # 새 코인은 COINS 에만 넣으면 가벼운 단계(체결 테이프·OKX 컨텍스트·HL 맥락·경보기)만 켜진다 -- 깊은 쪽이 필요하면 DEEP 에도 넣는다.
 DEEP = ("BTC", "SOL", "XRP", "HYPE")
+TRADFI = ("SNDK",)        # 2026-11-01 바이낸스 TradFi 주식 선물 -- HL 맥락 없음 · 깊은 호가는 diff 만(저유동 파일 크기 실측용) · 야간 거래가 얇아 신선도 기준을 넓힌다
 BO_OK = ("SOL", "XRP")      # 추세 전환 경보기 검정을 통과한 코인(ETH 는 늘 포함)
 # 수집기별 RSS(MB) 추정 -- 2026-09-26 이 세션 실측(x86_64, 네트워크 없이 기동 후 15초). duckdb 를 import
 # 하는 수집기는 그것만으로 ~150MB 다. 래스터는 북이 차면 도크스트링 실측 67MB 까지 는다.
@@ -93,7 +94,7 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
         sym, lc, inst = f"{c}USDT", c.lower(), f"{c}-USDT-SWAP"
         of = "data/live/orderflow"
         deep = c in DEEP
-        deep and add("bn_depthdiff", lc, 1, "supervisor_depth_diff.sh", "live_depth_diff_collector_20260915.py",
+        (deep or c in TRADFI) and add("bn_depthdiff", lc, 1, "supervisor_depth_diff.sh", "live_depth_diff_collector_20260915.py",
             {"DD_SYMBOL": sym.lower()}, [_dir(f"bn_depthdiff_{lc}", f"{of}/depthdiff/{sym}")],
             eth=f"{of}/depthdiff/ETHUSDT")
         deep and add("hl_trades", lc, 1, "supervisor_hyperliquid_trades.sh", "live_hyperliquid_trade_collector_20260916.py",
@@ -106,7 +107,7 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
                  "to_timestamp(recv_ms / 1000)")],
             eth=f"{of}/hyperliquid_bookticker/ETH")
         # 2026-10-04 서버 hot(hl_ctx.sqlite)에 SOL·XRP 맥락 -- 대시보드 시장 맥락의 HL 펀딩·OI·프리미엄·가격차
-        add("hl_ctx", lc, 3, "supervisor_hyperliquid_book_ticker.sh",
+        c not in TRADFI and add("hl_ctx", lc, 3, "supervisor_hyperliquid_book_ticker.sh",
             "live_hyperliquid_book_ticker_collector_20260923.py", {"HL_BT_COIN": c, "HL_BT_CTX_ONLY": "1"},
             [_db(f"hl_ctx_{lc}", "data/hot/hl_ctx.sqlite", f"hl_asset_ctx WHERE coin = '{c}'",
                  "datetime(max(recv_ms) / 1000, 'unixepoch', 'localtime')")])
@@ -118,7 +119,7 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
     add("bn_tape", "all", 2, "supervisor_trade_tape.sh", "live_trade_tape_collector_20260916.py", {"TAPE_SYMBOL": ",".join(syms)},
         # hot 사본(SQLite WAL, 한 파일)을 본다 -- 코인별 DuckDB 를 열면 수집기 쓰기와 락이 부딪힌다.
         [_db(f"bn_tape_{x}", "data/hot/binance_tape.sqlite", f"trade_tape_1s WHERE symbol = '{x}'",
-             "datetime(max(ts_sec), 'unixepoch', 'localtime')") for x in syms])
+             "datetime(max(ts_sec), 'unixepoch', 'localtime')", *((15, 30) if x[:-4].upper() in TRADFI else ())) for x in syms])
     # 2026-10-04 추세 전환 경보기(ETH 모델을 그 코인 5분봉에 -- 검정 통과: SOL·XRP 만, eth_only_signals_solxrp_20261004) · 5분마다 klines 3회
     #   2026-10-31 한 프로세스가 ETH + 검정 통과 코인을 차례로(BO_OK 밖 코인은 검정이 없어 켜지 않는다)
     bos = ["ETHUSDT"] + [f"{c}USDT" for c in coins if c in BO_OK]
@@ -129,7 +130,7 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
              "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')") for x in insts])
     add("okx_tape", "all", 2, "supervisor_okx_trade_tape.sh", "live_okx_trade_tape_collector_20260923.py", {"OKX_TAPE_INST": ",".join(insts)},
         [_db(f"okx_tape_{x}", "data/hot/okx_tape.sqlite", f"trade_tape_1s WHERE symbol = '{x}'",
-             "datetime(max(ts_sec), 'unixepoch', 'localtime')", 10, 30) for x in insts])
+             "datetime(max(ts_sec), 'unixepoch', 'localtime')", *((20, 40) if x.split("-")[0] in TRADFI else (10, 30))) for x in insts])
     # HL 포지션은 코인마다가 아니라 **하나**다(한 번의 조회가 전 코인 -- 수집기 도크스트링).
     # 대상 주소를 HL 체결 DB 에서 뽑으므로 체결이 쌓인 뒤 첫 바퀴(최대 ~8분)가 돈다 -> 유예 30분.
     tag = "_".join(c.lower() for c in coins)

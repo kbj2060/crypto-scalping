@@ -42,3 +42,17 @@ def test_group_survives_one_bad_ctval_and_partial_start_is_blocked(monkeypatch, 
     assert "그룹 종목 목록이" not in capsys.readouterr().out
     m.cmd_plan_or_start(ns("BTC,SOL"), True)
     assert "그룹 종목 목록이" in capsys.readouterr().out
+
+
+def test_tradfi_stock_gets_tape_and_depth_only():
+    """SNDK(TradFi 주식): 체결 테이프·OKX·호가 diff 만. HL·래스터는 없고 야간 신선도 기준이 넓다."""
+    m.DEEP = ()
+    specs = m.specs(["ZEC", "SNDK"], {1, 2, 3})
+    keys = {s["key"] for s in specs}
+    assert "bn_depthdiff_sndk" in keys and not {"bn_depthdiff_zec", "bn_raster_sndk", "hl_trades_sndk", "hl_ctx_sndk"} & keys
+    assert "hl_ctx_zec" in keys
+    tape = next(s for s in specs if s["key"] == "bn_tape_all")
+    assert tape["env"]["TAPE_SYMBOL"] == "ethusdt,zecusdt,sndkusdt"
+    assert [f["warn"] for f in tape["fresh"]] == [5, 5, 15]
+    okx = next(s for s in specs if s["key"] == "okx_tape_all")
+    assert [f["warn"] for f in okx["fresh"]] == [10, 10, 20]
