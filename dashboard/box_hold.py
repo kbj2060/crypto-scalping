@@ -30,6 +30,9 @@ CLAIMS_ID = 180                                 # 실업수당(주간)
 # 2026-10-26 ETH 1h 굴림 Platt90(docs/eth_box_hold_calibration_drift_prereg_20261025.md 8라운드 · 2026 ECE 1.45→0.67pp) --
 #   scripts/fit_box_hold_platt90_20261026.py 가 매월 1일 쓴다. 없거나 40일 넘었거나 다른 모델용이면 보정 없음(원래 p).
 PLATT90 = Path(__file__).with_name("box_hold_platt90_eth_1h.json")
+# 2026-10-31 XRP 1h 도(사전등록 docs/prereg/xrp_box_hold_platt90_qx4_20261031.md · ΔBrier −.00079 단측 90% 통과 · ECE 2.31→0.40pp) -- 같은 적합 스크립트 --asset xrp
+PLATT90_XRP = Path(__file__).with_name("box_hold_platt90_xrp_1h.json")
+PLATT90_MODEL = {"eth": "box_hold_hgb_20261016.joblib", "xrp": "box_hold_hgb_xrp_20261020.joblib"}
 # 2026-10-29 ETH 4h = QX4I σ(옵션 IV 보정 4h 변동성) → 두 벽 무접촉 확률(반사 원리) → 2024·25 등조 지도. 박스 HGB 보다 시험 26-06~10 Brier .1597→.1524
 #   (ΔBrier −.00732 단측 90% 통과 · 사전등록 docs/prereg/box_hold_vs_qx4i_20261029.md · 결과 docs/experiments/box_hold_vs_qx4i_20261029.md · 사용자 «둘 다 진행»).
 #   지도 = scripts/export_box_hold_qx4i_iso_20261029.py. IV 가 없으면 QX4 눈금 · 변동성 예측이 15분 넘게 묵었으면 HGB 그대로.
@@ -42,12 +45,12 @@ def logit(p):
     return np.log(p / (1 - p))
 
 
-def platt90() -> dict | None:
+def platt90(asset: str = "eth") -> dict | None:
     try:
-        c = json.loads(PLATT90.read_text())
+        c = json.loads((PLATT90 if asset == "eth" else PLATT90_XRP).read_text())
         fresh = pd.Timestamp.now(tz="UTC") - pd.Timestamp(c["created_utc"]) <= pd.Timedelta(days=40)
         ok = np.isfinite([float(c["a"]), float(c["b"])]).all() and str(c["fit_start"]) and str(c["fit_end"])   # 10-26 리뷰: 키가 빠지면 payload 전체(30분·4h 도)가 죽었다
-        return c if fresh and ok and c["model_file"] == "box_hold_hgb_20261016.joblib" else None
+        return c if fresh and ok and c["model_file"] == PLATT90_MODEL[asset] else None
     except Exception:  # noqa: BLE001 -- 파일 없음·깨짐 = 보정 없음
         return None
 
@@ -154,7 +157,7 @@ def payload(k1m: pd.DataFrame, events: list | None = None, asset: str = "eth") -
             continue
         rng = f["_rng"]
         p = float(cf["model"].predict_proba(x)[0, 1])
-        cal = platt90() if asset == "eth" and name == "1h" else None
+        cal = platt90(asset) if asset in PLATT90_MODEL and name == "1h" else None
         if cal:
             p = float(1 / (1 + np.exp(-(cal["a"] * logit(p) + cal["b"]))))
         out["scales"][name] = {"ok": True, "p": round(p, 4), "base": round(cf["train_base"], 4),
