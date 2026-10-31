@@ -57,3 +57,10 @@ def test_tradfi_stock_gets_tape_and_depth_only():
     okx = next(s for s in specs if s["key"] == "okx_tape_all")
     assert [f["warn"] for f in okx["fresh"]] == [10, 10, 20]
     assert {s["key"] for s in m.specs(["SNDK"], {1})} == {"bn_depthdiff_sndk"}
+
+
+def test_hl_positions_only_for_deep_coins():
+    """HL 포지션 대상은 HL 체결 DB 를 쌓는 DEEP 코인뿐 -- 가벼운 코인(ZEC)이 끼면 프로세스 env·파일 이름이 바뀌어 중복 수집이 된다."""
+    m.DEEP = ("BTC",)
+    pos = [s for s in m.specs(["BTC", "ZEC", "SNDK"], {1}) if s["key"].startswith("hl_positions")]
+    assert [s["env"]["HL_POS_COINS"] for s in pos] == ["BTC"]

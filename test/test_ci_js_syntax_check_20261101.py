@@ -21,3 +21,10 @@ def test_optional_chaining_forms(tmp_path):
 
 def test_real_syntax_error_still_fails(tmp_path):
     assert not _ok(tmp_path, "function f( { return 1; }\n")
+
+
+def test_ternary_decimals_and_split_chains_and_nullish_assign(tmp_path):
+    """리뷰 11-01: `a ? .5 : 1`·`a ?.5 : b` 는 삼항(옵셔널 체이닝 아님) · `?.` 뒤 공백/개행 · `??=` 도 정상 JS."""
+    assert _ok(tmp_path, "var x = a ? .5 : 1; var y = a ?.5 : b;\n")
+    assert _ok(tmp_path, "var z = a?. [0]; var w = a?.\n[1]; q ??= 1;\n")
+    assert not _ok(tmp_path, "var z = a?.[0 ;\n")

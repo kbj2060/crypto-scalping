@@ -86,7 +86,7 @@ Binance 옵션은 BNB·BTC·DOGE·ETH·SOL·XRP·XAU·XAG 뿐이고 Deribit 은 
 | 체인 스냅샷(호가·IV·그릭스·OI·거래량·마지막 체결) | CBOE 지연 시세 JSON `https://cdn-api.cboe.com/api/global/delayed_quotes/options/<SYM>.json` (키 없음, `cdn.cboe.com` 은 307) | **켬(11-01)** `scripts/live_cboe_option_chain_collector_20261101.py` SNDK · cron 10분 · 원본 gz 저장 ~0.7MB/회 |
 | 옵션 체결 전체·블록 | OPRA 유료 공급자 | **필요(사용자 11-01)** · 공급자·약관 미정 — 아래 |
 
-- **저장**: `data/live/options_equity/cboe/<SYM>/<UTC날짜>/<HHMM>.json.gz`. 응답의 `seqno` 가 직전과 같으면 저장하지 않는다(주말·휴장·장외, 달력 불필요). 종목 추가 = cron 줄 인자에 심볼.
+- **저장**: `data/live/options_equity/cboe/<SYM>/<UTC날짜>/<HHMMSS>.json.gz`. 응답의 `seqno` 가 직전과 같으면 저장하지 않는다(주말·휴장·장외, 달력 불필요). 종목 추가 = cron 줄 인자에 심볼.
 - **용량**: SNDK 11,816계약·23만기·5.2MB → gz 0.7MB. 장중 6.5h × 6회 ≈ 27MB/일 ≈ 10GB/년/종목. 종목 N개면 N배.
 - **🔴한계**: 공식 개발자 API 가 아니라 사이트 주소다. **자동 수집 약관 허용 여부 미확인**, 막히거나 바뀌면 조용히 멈춘다(cron 로그의 `실패` 줄만 남는다 -- 감시기 항목 없음). 시세는 지연이고 체결 한 건 한 건은 없다.
 - **유료 공급자(2026-11-01 공식 페이지 조사, 가격은 가입 화면에서 확인 필요)**

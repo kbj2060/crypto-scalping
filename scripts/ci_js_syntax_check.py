@@ -16,8 +16,9 @@ import esprima
 
 def check(path: str) -> bool:
     src = open(path, encoding="utf-8").read()
-    lowered = re.sub(r"\?\.(?=[\[(])", "", src)               # a?.[x] -> a[x] · a?.(x) -> a(x) (아래 규칙만 쓰면 a.[x] 가 돼 구문 오류가 난다)
-    lowered = re.sub(r"\?\s*\.", ".", lowered).replace("??", "||")
+    lowered = re.sub(r"\?\.\s*(?=[\[(])", "", src)             # a?.[x] -> a[x] · a?.(x) -> a(x) (공백·개행이 끼어도) -- 아래 규칙만 쓰면 a.[x] 가 돼 구문 오류가 난다
+    lowered = re.sub(r"\?\.(?!\d)", ".", lowered)               # a?.b -> a.b. ?. 바로 뒤가 숫자면 삼항(a ?.5 : b)이라 건드리지 않는다
+    lowered = lowered.replace("??=", "=").replace("??", "||")     # ??= (ES2021) 도 esprima 가 모른다
     try:
         esprima.parseScript(lowered, {"tolerant": False})
     except Exception as exc:                      # noqa: BLE001 -- 파서가 무엇을 던지든 실패다
