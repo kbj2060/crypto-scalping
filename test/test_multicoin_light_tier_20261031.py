@@ -56,3 +56,4 @@ def test_tradfi_stock_gets_tape_and_depth_only():
     assert [f["warn"] for f in tape["fresh"]] == [5, 5, 15]
     okx = next(s for s in specs if s["key"] == "okx_tape_all")
     assert [f["warn"] for f in okx["fresh"]] == [10, 10, 20]
+    assert {s["key"] for s in m.specs(["SNDK"], {1})} == {"bn_depthdiff_sndk"}
