@@ -9,15 +9,17 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PY="${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}"
 SYM="${1:-ETHUSDT}"
+case "$SYM" in ETHUSDT|XRPUSDT) ;; *) echo "모르는 코인 $SYM (워커 COINS 에 없음)" >&2; exit 2 ;; esac   # 없으면 import KeyError 를 15초마다 재기동한다
+TAG="$(echo "${SYM%USDT}" | tr '[:upper:]' '[:lower:]')"
 cd "$ROOT"
 
 RUNNER="scripts/live_ob5m_20261026.py"
 # 실제 실행 형태(-u …/RUNNER)만 센다 -- 이름만 쓰면 파일명을 담은 ssh·grep 셸에도 걸려 켜지지 않았다(10-14).
 # 코인별: ETH 는 인자 없는 줄(끝 $), 그 밖은 --symbol <심볼> 줄 -- 다른 코인 워커를 «이미 실행 중»으로 오인하지 않게(10-31).
 if [ "$SYM" = "ETHUSDT" ]; then
-  PAT="[-]u .*/${RUNNER}\$"; ARGS=(); TAG="eth"
+  PAT="[-]u .*/${RUNNER}\$"; ARGS=()
 else
-  PAT="[-]u .*/${RUNNER} --symbol ${SYM}"; ARGS=(--symbol "$SYM"); TAG="$(echo "${SYM%USDT}" | tr 'A-Z' 'a-z')"
+  PAT="[-]u .*/${RUNNER} --symbol ${SYM}"; ARGS=(--symbol "$SYM")
 fi
 if pgrep -f "$PAT" >/dev/null; then
   echo "[$(date -Iseconds)] ${SYM} ob5m 워커가 이미 실행 중 -- 켜지 않는다." >&2

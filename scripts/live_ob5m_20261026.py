@@ -34,21 +34,24 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from scripts.live_trade_tape_collector_20260916 import BUCKETS  # noqa: E402 -- 테이프 칸(수집기와 같아야 체결 몫이 맞다)
 
 # 2026-10-31 XRP 도(사용자 «xrp 에 호가벽·가짜 호가벽이 안 보인다 -- 수집기가 필요하면 만들어줘»): 코인 = --symbol(기본 ETH, 인자 없는 ETH 실행 형태 그대로).
 #   상수가 모듈 위에서 정해져 argparse 전에 읽는다 · 프로세스 줄에 코인이 보여야 supervisor_ob5m.sh 가 코인별로 중복을 막는다.
-#   코인마다 다른 것 = 거래소 틱 · 테이프 칸 · 벽 몫 · 추적 문턱(연구 COIN_CFG: XRP 는 칸이 굵어 5% 가 늘 참 -> 9.7% · 중앙값 8배).
+#   코인마다 다른 것 = 거래소 틱 · 벽 몫 · 추적 문턱(연구 COIN_CFG: XRP 는 칸이 굵어 5% 가 늘 참 -> 9.7% · 중앙값 8배) · 테이프 칸(수집기 BUCKETS 그대로).
 #   XRP 대조 = --symbol XRPUSDT --parity <날> (연구 bars_XRP 1e-9 · 10-02·10-15·10-24 849봉 불일치 0).
-COINS = {"ETHUSDT": (100, 0.1, 0.05, (20, 50, 100)), "XRPUSDT": (10_000, 0.0001, 0.097, (8, 20, 40))}   # 틱 1/$ · 테이프 칸(BUCKETS) · 벽 몫 · KS
+COINS = {"ETHUSDT": (100, 0.05, (20, 50, 100)), "XRPUSDT": (10_000, 0.097, (8, 20, 40))}
 SYM = (sys.argv[sys.argv.index("--symbol") + 1] if "--symbol" in sys.argv[:-1] else "ETHUSDT").upper()
-TICK, BUCKET, _WALL_SHARE, _KS = COINS[SYM]
+COIN = SYM[:-4]
+# TICK = 거래소 틱 1/$ · WALL_SHARE = 벽 = 같은 쪽 ±50bp 깊이의 이 몫 이상 한 칸 · KS = 사건 추적 하한 = 같은 쪽 ±50bp 비영 레벨 중앙의 KS[0]배
+TICK, WALL_SHARE, KS = COINS[SYM]
+BUCKET = BUCKETS[SYM.lower()]
 DD = ROOT / f"data/live/orderflow/depthdiff/{SYM}"
 TAPE = ROOT / "data/hot/binance_tape.sqlite"
 DB = ROOT / f"data/live/ob5m/{SYM.lower()}.sqlite"
 IDX_MAX = 1_000_000   # ponytail: 연구는 10M($100k) -- 16MB 로 줄임. ETH 가 $10k 를 넘으면 올린다(넘는 가격 변경은 버려진다)
 BAR = 300_000
-# ── 정의 문턱(연구 그대로 -- 바뀌면 여기만) ──
-WALL_SHARE = _WALL_SHARE   # 벽 = 같은 쪽 ±50bp 깊이의 이 몫 이상 한 칸(ETH 5%)
+# ── 정의 문턱(연구 그대로 -- 바뀌면 여기만 · 코인별 WALL_SHARE·KS 는 위 COINS) ──
 BIG_AGE_MS = 30_000    # 사건 벽은 30초 이상 서 있던 것만
 NEAR_BP = 5.0          # 현재가 5bp 안에서 체결 없이 사라짐 = 가짜벽 의심
 EAT_FILL, PULL_FILL = 0.8, 0.2
@@ -56,7 +59,6 @@ JUMP_WIN = 5_000
 WARM_MS = 1_800_000    # 사슬 (재)시작 뒤 30분 = 깊은 칸이 덜 찼다 -> 북 값 없음
 TAPE_GAP_S, TAPE_PAD_S = 15, 60
 WALL_BACK_MS = 10_000  # 다른 칸이 10초 이하 잠깐 최대였다 돌아오면 같은 벽으로 이어 센다
-KS = _KS               # 사건 추적 하한 = 같은 쪽 ±50bp 비영 레벨 중앙의 KS[0]배
 DROP_FRAC, DROP_WIN = 0.8, 1000
 MIN_SHARE = 0.01
 SETTLE_MS = 70_000     # 봉 끝 + 60초(테이프 빈 구간 ±60초) + 테이프 지연 10초
@@ -523,7 +525,7 @@ def lake_tape(lo: int, hi: int):
     import pandas as pd
     days = sorted({time.strftime("%Y-%m-%d", time.gmtime(s)) for s in (lo, hi)})
     T = pd.concat([pd.read_parquet(p, columns=["ts_sec", "price_bin", "buy_qty", "sell_qty"])
-                   for d in days for p in (MIRROR / f"lake/binance/tape/coin={SYM[:-4]}/date={d}").glob("*.parquet")])
+                   for d in days for p in (MIRROR / f"lake/binance/tape/coin={COIN}/date={d}").glob("*.parquet")])
     T = T[(T.ts_sec >= lo) & (T.ts_sec < hi)]
     return list(T.itertuples(index=False, name=None)), []
 
@@ -572,7 +574,7 @@ def parity(day: str) -> bool:
             bars.sec(x)
     for b in sorted({*bars.rows, *bars.book}):
         bars.close(b)
-    R = pd.read_parquet(RESEARCH / f"bars_{SYM[:-4]}.parquet")
+    R = pd.read_parquet(RESEARCH / f"bars_{COIN}.parquet")
     R = R[(R.index >= d1) & (R.index < d1 + pd.Timedelta(days=1))]
     cols = ["imb10", "imb50", "dep10", "dep50", "wall_px_b", "wall_px_a", "wall_age_b", "wall_age_a",
             *[f"{k}_n_{s}" for k in ("eat", "fake", "pull") for s in "ba"]]
@@ -726,7 +728,7 @@ if __name__ == "__main__":
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--parity")
     ap.add_argument("--seed", nargs=2)
-    ap.add_argument("--symbol", choices=sorted(COINS), default="ETHUSDT")   # 값은 위(SYM)에서 이미 읽었다
+    ap.add_argument("--symbol", choices=sorted(COINS), default="ETHUSDT")   # 검사·--help 용 -- 값은 위 SYM 이 이미 읽었다
     a = ap.parse_args()
     if a.selftest:
         selftest()

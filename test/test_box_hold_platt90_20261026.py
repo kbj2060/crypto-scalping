@@ -46,7 +46,7 @@ evl = [{"time_utc": iso(v), "category": "fomc", "title_ko": "FOMC 금리결정 �
 K = F.load_vision(pd.Timestamp("2026-06-25"), None).drop_duplicates("t").sort_values("t").reset_index(drop=True)
 pos = pd.Series(np.arange(len(K)), index=K.t)
 tmp = Path(tempfile.mkdtemp()) / "platt90.json"
-bh.PLATT90 = tmp
+bh.PLATT90["eth"] = tmp
 
 worst = {"a": 0.0, "b": 0.0, "ab_same_rows": 0.0, "serve_formula": 0.0, "serve_vs_research": 0.0}
 for T in ("2026-07-01", "2026-08-01", "2026-09-01"):

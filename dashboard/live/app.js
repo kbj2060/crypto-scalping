@@ -3632,8 +3632,8 @@ const RG_REF = [[1, -0.2952], [5, -0.2068], [10, -0.1671], [20, -0.1185], [30, -
 // 2026-10-31 XRP(사전등록 docs/prereg/xrp_realized_gamma_regime_20261031.md 통과): XRP 2021~24 정시 표본 34,907개 분위 · 국면 경계 · 보류 배수.
 const RG_REF_XRP = [[1, -0.2948], [5, -0.2159], [10, -0.1785], [20, -0.1309], [30, -0.0977], [40, -0.0703], [50, -0.0445],
                     [60, -0.0189], [70, 0.0100], [80, 0.0437], [90, 0.0925], [95, 0.1359], [99, 0.2321]];
-const RG_BY = { ETH: { ref: RG_REF, cut: [-0.0769, 0.0124], x: ["0.94", "0.99", "1.02"] },
-                XRP: { ref: RG_REF_XRP, cut: [-0.0881, 0.0000], x: ["0.91", "0.98", "1.02"] } };
+const RG_BY = { ETH: { ref: RG_REF, cut: [-0.0769, 0.0124], x: ["0.94", "0.99", "1.02"], tip: "rg" },
+                XRP: { ref: RG_REF_XRP, cut: [-0.0881, 0.0000], x: ["0.91", "0.98", "1.02"], tip: "rg_xrp" } };
 function optRealizedGamma(candles, nowS = Date.now() / 1000, ref = RG_REF, cut = [-0.0769, 0.0124]) {
   const cl = (candles || []).filter((c) => c.time + 300 <= nowS && c.close > 0).map((c) => Math.log(c.close)).slice(-145);
   if (cl.length < 145) return null;
@@ -3766,7 +3766,7 @@ function optTouchBack(m, Y, W, lo, hi) {
   const inR = (p) => p >= lo && p <= hi;
   let s = `<rect x="30" y="${Y(Math.min(ln[0].a, hi)).toFixed(1)}" width="${W - 34}" height="${(Y(Math.max(ln[0].b, lo)) - Y(Math.min(ln[0].a, hi))).toFixed(1)}" fill="var(--option)" fill-opacity=".07"/>`;
   ln.forEach(({ t, op, dash, a, b }) => [a, b].filter(inR).forEach((p) => {
-    const txt = `${Math.round(t * 100)}% ${p < 10 ? optPx1(p) : optQ(p)}`, w = txt.length * 6.2 + 12, y = Y(p);
+    const txt = `${Math.round(t * 100)}% ${p < 10 ? p.toFixed(3) : optQ(p)}`, w = txt.length * 6.2 + 12, y = Y(p);
     s += `<line x1="30" x2="${W - 4}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--option)" stroke-opacity="${op}" stroke-width="1.1"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`
       + `<rect x="${(W - 4 - w).toFixed(1)}" y="${(y - 8).toFixed(1)}" width="${w.toFixed(1)}" height="15" rx="7.5" fill="var(--chart-bg)" fill-opacity=".9"/>`
       + `<text x="${W - 9}" y="${(y + 3.5).toFixed(1)}" font-size="10" font-weight="800" font-family="var(--font-mono)" fill="var(--option)" fill-opacity="${Math.max(op, 0.7)}" text-anchor="end">${txt}</text>`;
@@ -3992,7 +3992,7 @@ function renderOptions() {
     sec("move", "예상 폭", kv("24시간 1σ", s1d == null ? "-" : `${pm(s1d)} (${(optIv(o) / Math.sqrt(365)).toFixed(1)}%)`)
       + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 — 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
       + kv("IV(30일) − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`) + info.move),
-    sec(cur === "XRP" ? "rg_xrp" : "rg", "실현 감마", !rg ? `<div class="opt-note">${rgc ? "5분봉 12시간치 대기" : "ETH·XRP 만 검증 — 이 코인은 표시 안 함"}</div>`
+    sec(rgc ? rgc.tip : "rg", "실현 감마", !rg ? `<div class="opt-note">${rgc ? "5분봉 12시간치 대기" : `${Object.keys(RG_BY).join("·")} 만 검증 — 이 코인은 표시 안 함`}</div>`
       : kv("12시간 자기상관", `${rg.v >= 0 ? "+" : "−"}${Math.abs(rg.v).toFixed(3)} · 2021~24 중 ${rg.pct < 50 ? `하위 ${Math.max(1, Math.round(rg.pct))}` : `상위 ${Math.max(1, Math.round(100 - rg.pct))}`}%`)
       + kv("국면", rg.side === "rev" ? "되돌림 쪽 · 롱감마형" : rg.side === "trend" ? "추세 쪽 · 숏감마형" : "보통", rg.side === "rev" ? "opt-good" : rg.side === "trend" ? "opt-warn" : "")
       + kv("다음 4시간 변동성", rg.side === "rev" ? `예상보다 약간 작은 쪽 · ${rgc.x[0]}배` : rg.side === "trend" ? `예상보다 약간 큰 쪽 · ${rgc.x[2]}배` : `예상과 비슷 · ${rgc.x[1]}배`)),
@@ -4321,11 +4321,12 @@ function fcTrendCell(t, cell) {
   const tags = `<span class="fc-tl">${t.votes.map((x) => `<i class="${x.up ? "u" : ""}" title="${x.L}일 전 종가 ${px(x.ref_now)}보다 ${x.up ? "높게" : "낮게"} 마감">${x.L}</i>`).join("")}</span>`;
   return cell("지금 추세", `${up ? "up" : "dn"} now`, `${up ? "▲ 상승" : "▼ 하락"} <small class="fc-cnt">${ups}:${n - ups}</small>`, "",
     `지금 추세 — 예측 아님. 매일 09시(KST) 일봉 종가를 7·14·28·56·90일 전 종가와 비교한 5표 중 다수 · ${t.age_days}일째 같은 방향`
-      + (activeSnapshotAsset === "xrp" ? " · XRP 실측(2018~): 다음 7일 적중 45% · 5표 모두 위일 때 40%만 오름 -- XRP 에선 추세가 이어진다는 뜻이 아니다" : ""),
+      + (TREND_NOTE[activeSnapshotAsset] || ""),
     tags + `<span class="sub">일 전 종가보다 위 ${ups} · 아래 ${n - ups}</span><span class="sub">${t.age_days}일째 · 매일 09시 마감</span>`).replace('<span class="sub"></span>', "");
 }
 
-// 2026-10-31 «7일 예측» 코인별 보류 적중(2024-01~2026-10-23, |z|≥1 날만) -- docs/experiments/xrp_trend_cb7d_20261031.md
+// 2026-10-31 ⑤ 툴팁 코인별 실측 -- docs/experiments/xrp_trend_cb7d_20261031.md · «지금 추세» 다음 7일 적중 · «7일 예측» 보류 적중(2024-01~2026-10-23, |z|≥1 날만)
+const TREND_NOTE = { xrp: " · XRP 실측(2018~): 다음 7일 적중 45% · 5표 모두 위일 때 40%만 오름 -- XRP 에선 추세가 이어진다는 뜻이 아니다" };
 const CB7_HIT = { eth: " · 보류 2024~26 ETH 적중 65%(188/288)", xrp: " · 보류 2024~26 XRP 적중 60%(172/288 · 2025 44%) · 통과 후보" };
 // ⑤ 예측 줄(시장 맥락 판 아래, 사용자 시안 B): 지금 추세 → 15분·1시간 예측(10-28) → 4h 예측(+변동성) → 7일(4~13주는 10-28 Macro Trend 카드로). sec = renderMarketCtx 의 판 틀(? 설명).
 function fcRowHtml(sec) {
@@ -7941,10 +7942,10 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   2026-10-26 사용자 «현재가에 붙어 계속 움직이지 말고 5분마다»: 중심·폭 모두 서버 5분 예측값에만 묶임(실시간 시세로 안 흔들림).
   //   박스(직사각형 = 유지 확률)와 구별되게 옵션 색 실선 · 묵은 값(15분↑)은 안 그림 · 화면 끝에서 잘리면 꺾쇠.
   // 2026-10-31 XRP 도(감사표 A-1 #2): XRP 는 옵션 IV 보정이 없어 QX4 σ(sig4h_pct) 그대로 -- 모양·색 같고 글자에서 «옵션 IV»만 뺀다.
-  const vI = !fcPath && isSnapshotChart && footprint && latestVol4h && latestVol4h.ok && latestVol4h.asset === activeSnapshotAsset
-    && (activeSnapshotAsset === "eth" ? Number.isFinite(latestVol4h.sig4h_iv_pct) : activeSnapshotAsset === "xrp" && Number.isFinite(latestVol4h.sig4h_pct))
-    && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
-  const vIv = vI && Number.isFinite(vI.sig4h_iv_pct), vSig = vI ? (vIv ? vI.sig4h_iv_pct : vI.sig4h_pct) : 0;
+  const vKey = { eth: "sig4h_iv_pct", xrp: "sig4h_pct" }[activeSnapshotAsset];   // 코인 -> 부채꼴 σ 칸
+  const vI = !fcPath && isSnapshotChart && footprint && vKey && latestVol4h && latestVol4h.ok && latestVol4h.asset === activeSnapshotAsset
+    && Number.isFinite(latestVol4h[vKey]) && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
+  const vIv = vKey === "sig4h_iv_pct", vSig = vI ? vI[vKey] : 0;
   if (vI && vI.px > 0 && candles.length) {
     const L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw;
     const xT = (ms) => xAt(L) + ((ms / 1e3 - candles[L].time) / tfS) * slot;

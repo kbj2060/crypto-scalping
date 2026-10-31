@@ -35,13 +35,13 @@ K = F.load_vision(T - pd.Timedelta(days=2), None).drop_duplicates("t").sort_valu
 K = K[K.t < T.value // 10 ** 6].tail(F.NEED + 60)
 k1m = pd.DataFrame({"timestamp": pd.to_datetime(K.t, unit="ms", utc=True), "high": K.h, "low": K.l, "close": K.c,
                     "volume": K.v, "taker_buy_base": K.tb}).reset_index(drop=True)
-bh.PLATT90_XRP = Path(tempfile.mkdtemp()) / "x.json"
+bh.PLATT90["xrp"] = Path(tempfile.mkdtemp()) / "x.json"
 raw = bh.payload(k1m, [], asset="xrp")["scales"]                       # 파일 없음 = 원래 p
 assert "calib" not in raw["1h"]
 meta = {"a": a, "b": b, "fit_start": str(T - pd.Timedelta(days=90)), "fit_end": str(T), "created_utc": pd.Timestamp.now(tz="UTC").isoformat()}
-bh.PLATT90_XRP.write_text(json.dumps({**meta, "model_file": "box_hold_hgb_20261016.joblib"}))   # ETH 모델용 파일 = 안 씀
+bh.PLATT90["xrp"].write_text(json.dumps({**meta, "model_file": bh.HGB["eth"]}))   # ETH 모델용 파일 = 안 씀
 assert bh.payload(k1m, [], asset="xrp")["scales"]["1h"]["p"] == raw["1h"]["p"]
-bh.PLATT90_XRP.write_text(json.dumps({**meta, "model_file": "box_hold_hgb_xrp_20261020.joblib"}))
+bh.PLATT90["xrp"].write_text(json.dumps({**meta, "model_file": bh.HGB["xrp"]}))
 s = bh.payload(k1m, [], asset="xrp")["scales"]
 want = 1 / (1 + np.exp(-(a * bh.logit(raw["1h"]["p"]) + b)))
 assert abs(s["1h"]["p"] - want) < 1e-4 and s["1h"]["calib"].startswith("platt90 2026-07-03"), (s["1h"], want)   # raw p 는 4자리 반올림

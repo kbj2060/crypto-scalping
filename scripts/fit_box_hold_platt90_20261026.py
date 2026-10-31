@@ -28,7 +28,7 @@ from sklearn.linear_model import LogisticRegression
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from dashboard.box_hold import BUNDLES, NEED, PLATT90, PLATT90_MODEL, PLATT90_XRP, features, logit  # noqa: E402
+from dashboard.box_hold import BUNDLES, HGB, NEED, PLATT90, features, logit  # noqa: E402
 
 MAIN = Path("/home/kbj20/crypto-scalping")
 BV = MAIN / "data/binance_vision"
@@ -36,15 +36,14 @@ BV = MAIN / "data/binance_vision"
 EVENTS = MAIN / ".claude/worktrees/chart-indicators-tuning-ecfa25/tmp/box_improve_20261016/events.json"
 # 연구 build() 의 VIS(data.binance.vision 일 zip 09-14~10-23 · parquet 빈칸 09-15~10-04 를 메움) -- 연구를 돌린 워크트리
 VIS = MAIN / ".claude/worktrees/agent-a231de71bb7c16d79/tmp/box_calib_20261025/vision_1m"
-SYM = {"eth": "ETHUSDT", "xrp": "XRPUSDT"}   # 2026-10-31 --asset xrp(XRP 번들·요일×시각 표·출력 파일)
-ASSET = "eth"
+ASSET = "eth"   # 2026-10-31 --asset xrp(XRP 번들·요일×시각 표·출력 파일)
 W, N = 60, 90
 MIN = pd.Timedelta(minutes=1)
 
 
 def load_vision(lo: pd.Timestamp, hi: pd.Timestamp) -> pd.DataFrame:
     """연구 load_1m() 과 같은 원천·순서(parquet 먼저, 겹치면 parquet)."""
-    sym = SYM[ASSET]
+    sym = ASSET.upper() + "USDT"
     fs = sorted(glob.glob(f"{BV}/klines1m/{sym}-1m-*.parquet")) + sorted(glob.glob(f"{BV}/klines1m_daily/{sym}-1m-*.parquet"))
     fs = [f for f in fs if Path(f).stem[len(sym) + 4:len(sym) + 11] >= lo.strftime("%Y-%m")]          # 파일명 날짜(YYYY-MM[-DD]) ≥ 시작 달
     parts = [pd.read_parquet(f)[["t", "h", "l", "c", "v", "tb"]] for f in fs]
@@ -58,7 +57,7 @@ def load_vision(lo: pd.Timestamp, hi: pd.Timestamp) -> pd.DataFrame:
 def load_rest(lo: pd.Timestamp, hi: pd.Timestamp) -> pd.DataFrame:
     out, s, e = [], int(lo.value // 10 ** 6), int(hi.value // 10 ** 6)
     while s <= e:
-        url = f"https://fapi.binance.com/fapi/v1/klines?symbol={SYM[ASSET]}&interval=1m&limit=1000&startTime={s}&endTime={e}"
+        url = f"https://fapi.binance.com/fapi/v1/klines?symbol={ASSET.upper()}USDT&interval=1m&limit=1000&startTime={s}&endTime={e}"
         for i in range(5):   # 10-26 리뷰: 월 1회 cron 이라 한 번 끊기면 그 달 보정이 빠졌다 -- 5번까지(418/429 면 길게 쉼)
             try:
                 with urllib.request.urlopen(url, timeout=30) as r:
@@ -124,7 +123,7 @@ def fit(T: pd.Timestamp, rest: bool = False, events_path: Path = EVENTS) -> dict
     ts, p, y = fit_rows(T, rest, events_path)
     a, b = fit_platt(p, y)
     return {"a": a, "b": b, "fit_start": str(T - pd.Timedelta(days=N)), "fit_end": str(T), "n_rows": int(len(y)),
-            "created_utc": pd.Timestamp.now(tz="UTC").isoformat(), "model_file": PLATT90_MODEL[ASSET], "asset": ASSET,
+            "created_utc": pd.Timestamp.now(tz="UTC").isoformat(), "model_file": HGB[ASSET], "asset": ASSET,
             "source": "rest" if rest else "vision", "train_hold": float(y.mean()), "mean_p": float(p.mean())}
 
 
@@ -134,10 +133,10 @@ if __name__ == "__main__":
     ap.add_argument("--rest", action="store_true", help="1분봉을 바이낸스 공개 REST 로(서버)")
     ap.add_argument("--events", type=Path, default=EVENTS)
     ap.add_argument("--out", type=Path)
-    ap.add_argument("--asset", choices=sorted(SYM), default="eth")
+    ap.add_argument("--asset", choices=sorted(HGB), default="eth")
     a = ap.parse_args()
     ASSET = a.asset
-    a.out = a.out or (PLATT90 if ASSET == "eth" else PLATT90_XRP)
+    a.out = a.out or PLATT90[ASSET]
     T = pd.Timestamp(a.month) if a.month else pd.Timestamp.now(tz="UTC").tz_localize(None).normalize().replace(day=1)
     assert T == T.normalize().replace(day=1), "T 는 달 1일 00:00"
     r = fit(T, a.rest, a.events)

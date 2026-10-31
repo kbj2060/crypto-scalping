@@ -161,6 +161,7 @@ from scripts.live_macro_calendar_20260826 import compute_macro_event_alert  # no
 # specialized-detector (EVIDENCE_SIGNAL_SYMBOL etc. below) are untouched -- those are trained ML
 # models with no BTC-trained artifact yet, not something a symbol swap alone can serve.
 from scripts.coin_config import COIN_CONFIG  # noqa: E402
+from scripts.collect_deribit_option_gex_20260815 import SPECS as DERIBIT_SPECS  # noqa: E402 -- 코인 -> (Deribit 목록, 종목 접두어, …)
 import scripts.binance_ban_guard as ban_guard  # noqa: E402 -- requests 도 전역으로 감싼다(주문·계좌 경로)
 # 2026-10-19 계좌·주문(거래소 계정 조회 · 수동 진입/청산 실행 · 브래킷 감시 · 사이징)은 dashboard/orders.py 로 옮겼다 --
 #   그 import(fetch_account · live_manual_peg_entry · live.execution · risk_sizing · trade_plan)도 거기 있다. ban_guard(위 줄) 다음에 import 한다.
@@ -2651,7 +2652,7 @@ def make_app() -> web.Application:
         2026-10-31 XRP 도(사용자 «xrp 에 호가벽·가짜 호가벽이 안 보인다»): 같은 워커 --symbol XRPUSDT → xrpusdt.sqlite(연구 bars_XRP 1e-9 대조).
         그 밖 코인은 빈 목록 -- 화면은 «준비 중»."""
         asset = request.query.get("asset", "eth")
-        if asset not in ("eth", "xrp"):
+        if asset not in COIN_CONFIG:          # 신뢰경계: 파일 이름에 들어간다 · 워커가 없는 코인은 파일이 없어 빈 목록
             return web.json_response({"bars": [], "walls": [], "marks": []}, headers=NOCACHE)
 
         def produce() -> dict[str, Any]:
@@ -4287,14 +4288,14 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers=NOCACHE)
 
     async def opt_smile_payload(cur: str) -> dict[str, Any]:
-        lin = cur == "XRP"   # 2026-10-31 XRP = USDC 선형옵션(목록 USDC, 이름 XRP_USDC-…)
+        lst, pre = DERIBIT_SPECS[cur][:2]   # 2026-10-31 XRP = USDC 선형옵션(목록 USDC 에 섞여 온다, 이름 XRP_USDC-…)
         try:
-            j = await fetch_binance_json(DERIBIT_BOOK_URL, {"currency": "USDC" if lin else cur, "kind": "option"}, timeout=6.0)
+            j = await fetch_binance_json(DERIBIT_BOOK_URL, {"currency": lst, "kind": "option"}, timeout=6.0)
         except (asyncio.TimeoutError, ClientError, ValueError):
             j = None
         if not j or not isinstance(j.get("result"), list):
             return {"ok": False, "reason": "deribit_unavailable"}
-        return {**front_smile(j["result"], time.time() * 1000, f"{cur}_USDC-" if lin else ""), "fetched_ts": time.time()}
+        return {**front_smile(j["result"], time.time() * 1000, pre), "fetched_ts": time.time()}
 
     async def api_opt_smile(request: web.Request) -> web.Response:
         # 2026-10-08 닿음 등고선. 캐시 60초 = 브라우저 몇 개든 Deribit 공개 API 는 분당 1회(키 없음 · 바이낸스 IP 한도와 무관).
