@@ -216,6 +216,21 @@ class LimitEntry(unittest.TestCase):
         self.assertEqual([c for c in calls if c[0] == "GET"].__len__(), 3)          # 세 번 찾아 본다
         self.assertIn(("DELETE", "cid"), calls)                                      # 끝내 모르면 표식으로 지운다
 
+    def test_5xx_unknown_status_is_treated_as_possibly_live_order(self):   # 검증 #1
+        calls = []
+
+        async def signed(_s, method, path, params, *a):
+            calls.append(method)
+            return {"__error__": "503 [-1007] Timeout waiting for response from backend server. Send status unknown; execution status unknown."} if method == "POST" \
+                else {"__error__": "-2013 Order does not exist"}
+        with mock.patch.object(ex, "signed", signed), mock.patch.object(ex, "POLL_SEC", 0.02), mock.patch.object(asyncio, "sleep", mock.AsyncMock()), \
+             mock.patch.object(ex, "_clock_offset", mock.AsyncMock(return_value=0)), \
+             mock.patch.object(ex, "ensure_leverage", mock.AsyncMock(return_value={"ok": True})), \
+             mock.patch.dict(os.environ, {"BINANCE_API_KEY": "k", "BINANCE_SECRET_KEY": "s"}):
+            st: dict = {}
+            asyncio.run(ex.run_entry_limit(None, dict(PLAN), st, 1))
+        self.assertEqual((st["phase"], calls.count("GET"), "DELETE" in calls), ("error", 3, True))   # rejected 가 아니라 조회·표식 삭제 뒤 error
+
     def test_post_only_reject_does_not_repeg(self):
         fx = Fake(reject=True)
         st = run(fx)

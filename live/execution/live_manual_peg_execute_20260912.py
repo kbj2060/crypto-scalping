@@ -603,7 +603,8 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
         order = await signed(session, "POST", "/fapi/v1/order",
                              {**common, "type": "LIMIT", "timeInForce": "GTX", "price": round(price, 8),
                               "quantity": remaining, "newClientOrderId": cid}, key, secret, offset)
-        if "__error__" in order and not order["__error__"][:1].isdigit():
+        e0 = order.get("__error__", "")
+        if e0 and (not e0[:1].isdigit() or e0[:1] == "5" or "-1007" in e0 or "-1006" in e0):   # 5xx·-1007·-1006 = «체결 상태 불명»(검증 #1) -- 4xx 확정 거부와 다르다
             # 🔴네트워크·시간초과 = 나갔는지 모른다 -- 거부로 치면 살아 있는 GTX 가 손절 없이 체결된다. 표식으로 찾아 본다
             for _ in range(3):   # 한 번 못 찾았다고 «없다»가 아니다(처리 전일 수 있다) -- 세 번 본다
                 found = await signed(session, "GET", "/fapi/v1/order", {"symbol": common["symbol"], "origClientOrderId": cid}, key, secret, offset)
@@ -634,6 +635,7 @@ async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIM
                          error=("지정가가 호가를 넘어 지금 걸면 체결됩니다(메이커 불가) — 가격을 호가 안쪽으로 옮기세요" if is_post_only_reject(err) else err))
             return state
         oid = order.get("orderId")
+        rej = 0   # 접수 성공 -- -5022 재시도 횟수는 «연속» 기준(다음 수정에서 다시 3번)
         state.update(order_id=oid, client_order_id=cid, limit_price=price)
         this_filled, status, last_chk = 0.0, "", time.monotonic()
         while time.monotonic() < deadline and not state.get("action") and not state.get("amend"):

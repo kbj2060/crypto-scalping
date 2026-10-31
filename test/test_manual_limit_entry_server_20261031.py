@@ -61,7 +61,7 @@ class LimitServerTest(ChartLinesTest):
             while not state.get("action"):
                 await asyncio.sleep(0.01)
                 if flags.get("consume") and state.get("amend"):   # 집행 루프가 수정을 받아 간 것을 흉내
-                    state.pop("amend")
+                    state["limit_price"] = state.pop("amend")["price"]   # 실제 루프처럼 걸린 주문가를 갱신
                     flags["consume"] = False
                 if flags.get("fill"):
                     state["filled"] = 0.2
@@ -129,7 +129,7 @@ class LimitServerTest(ChartLinesTest):
         self.assertEqual(got, [None, None])   # 양의 경로(목표가 계산)는 집행 루프 시험이 가짜 reprice 로 덮는다
 
     # ── 재시작 복구(검증 D2): 대기 중 서버가 죽은 사이 체결된 몫에 익절·손절을 건다 ─────────────────────────
-    def _restart(self, *, saved=True, positions=None, armed=False, account_ok=True):
+    def _restart(self, *, saved=True, positions=None, armed=False, account_ok=True, errors=None, age=0.0):
         import json
         from aiohttp.test_utils import TestClient, TestServer
         from dashboard import server
@@ -138,7 +138,7 @@ class LimitServerTest(ChartLinesTest):
         placed, out = [], {}
 
         async def fake_orphans(_s, symbols):
-            return {"cancelled": [], "errors": []}
+            return {"cancelled": [], "errors": errors or []}
 
         async def fake_account(*_a, **_k):
             return {**FLAT, "ok": account_ok, "positions": positions or []}
@@ -149,7 +149,7 @@ class LimitServerTest(ChartLinesTest):
 
         async def exercise():
             if saved:
-                (server.LIVE_DIR / "manual_limit_wait.json").write_text(json.dumps({"saved_at": 1.0, "plan": {
+                (server.LIVE_DIR / "manual_limit_wait.json").write_text(json.dumps({"saved_at": __import__("time").time() - age, "plan": {
                     "symbol": sym, "positionSide": "LONG", "price": 2480.0, "quantity": 0.5,
                     "bracket": {"available": True, "lines": True, "tp_price": 2550.0, "tp_level": 2550.0, "sl_price": 2450.0, "sl_level": 2450.0,
                                 "backstop_price": None, "rule": False, "sl_name": "선 손절 2450.00"}}}), "utf-8")
@@ -193,6 +193,51 @@ class LimitServerTest(ChartLinesTest):
         self.assertEqual((placed, out["file"], out["wait"]["recovered"]["armed"]), ([], False, False))
         placed, out, _ = self._restart(positions=self._pos(sym), armed=True)   # 이미 무장돼 있으면(첫 체결에서 건 것) 다시 안 건다
         self.assertEqual((placed, out["file"]), ([], False))
+
+    def test_restart_keeps_file_when_orphan_cancel_failed(self) -> None:   # 검증 #1: 못 지운 GTX 가 나중에 체결될 수 있다
+        placed, out, _ = self._restart(positions=[], errors=["openOrders 실패"])
+        self.assertEqual((placed, out["file"]), ([], True))
+        self.assertIn("직접 확인", out["wait"]["recovered"]["reason"])
+
+    def test_restart_ignores_stale_file(self) -> None:   # 검증 #3: 며칠 묵은 계획으로 지금 포지션에 선을 걸지 않는다
+        sym = orders.MANUAL_EXEC_SYMBOLS["eth"]
+        placed, out, _ = self._restart(positions=self._pos(sym), age=7 * 3600)
+        self.assertEqual((placed, out["file"], out["wait"]["recovered"]["armed"]), ([], False, False))
+        self.assertIn("너무 오래", out["wait"]["recovered"]["reason"])
+
+    def test_error_phase_keeps_recovery_file_and_final_arm_respects_modified_lines(self) -> None:
+        import json
+        from dashboard import server
+        sym = orders.MANUAL_EXEC_SYMBOLS["eth"]
+        mode = {"m": "error"}
+        arms = []
+
+        async def fake_limit(_s, plan, state, max_sec=0, on_fill=None, reprice=None):
+            if mode["m"] == "error":   # 취소 확인 실패 등 -- 거래소에 주문이 살아 있을 수 있다
+                state.update(phase="error", filled=0.0, error="x")
+            else:                       # 부분 체결 뒤 사용자가 포지션 선을 옮긴 상태(mod)로 끝남
+                (server.LIVE_DIR / "manual_bracket_state.json").write_text(json.dumps({f"{sym}:LONG": {
+                    "symbol": sym, "side": "LONG", "lines": True, "sl_level": 2440.0, "tp_level": 2560.0, "armed_at": 1.0, "mod": {"at": 2.0}}}), "utf-8")
+                state.update(phase="cancelled", filled=0.2)
+            return state
+
+        async def fake_bracket(_s, b, symbol, pside, **_k):
+            arms.append(b)
+            return {"placed": True, "tp": {"placed": True}}
+
+        async def fn(c):
+            await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&tp=2550&sl=2450&limit=2480&mode=limit&confirm=1")
+            await asyncio.sleep(0.2)
+            self.assertTrue((server.LIVE_DIR / "manual_limit_wait.json").exists())   # error = 지우지 않는다
+            mode["m"] = "mod"
+            for _ in range(20):   # 앞 주문(error)이 끝나 칸이 비면 다음 접수
+                r = await c.post(f"/api/manual-entry/submit?side=LONG&{Q}&tp=2550&sl=2450&limit=2480&mode=limit&confirm=1")
+                if r.status == 200:
+                    break
+                await asyncio.sleep(0.05)
+            await asyncio.sleep(0.3)
+            self.assertEqual(arms, [])   # 사용자가 옮긴 선(mod)을 옛 계획으로 덮어 다시 걸지 않는다
+        self._run(fn, run_entry_limit=fake_limit, place_bracket=fake_bracket)
 
     def test_restart_with_unreadable_account_keeps_file_and_says_so(self) -> None:
         placed, out, _ = self._restart(positions=[], account_ok=False)

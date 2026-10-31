@@ -823,14 +823,20 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         except OSError as exc:   # 못 남기면 복구만 못 한다 -- 접수는 막지 않는다
             print(f"limit wait save: {type(exc).__name__}: {exc}", flush=True)
 
-    async def limit_recover() -> dict | None:
-        """재시작 직후(주문 정리 뒤): 저장된 지정가 대기가 있으면 그 사이 체결된 포지션에 익절·손절을 건다. 계좌를 못 읽으면 파일을 남겨 다음 기동에 다시."""
+    LIMIT_REC_MAX_AGE = 6 * 3600.0   # 대기 최대 4시간 + 여유 -- 이보다 오래된 파일은 지금 포지션의 것이 아니다(검증 #3)
+
+    async def limit_recover(orphan_errors: list | None = None) -> dict | None:
+        """재시작 직후(주문 정리 뒤): 저장된 지정가 대기가 있으면 그 사이 체결된 포지션에 익절·손절을 건다. 계좌를 못 읽거나 남은 주문을 못 지웠으면 파일을 남겨 다음 기동에 다시."""
         try:
-            plan = json.loads(limit_path().read_text("utf-8")).get("plan") or {}
+            rec = json.loads(limit_path().read_text("utf-8"))
+            plan = rec.get("plan") or {}
         except (OSError, ValueError):
             return None
         sym, pside = plan.get("symbol"), plan.get("positionSide")
         out: dict[str, Any] = {"symbol": sym, "side": pside, "armed": False}
+        if time.time() - float(rec.get("saved_at") or 0.0) > LIMIT_REC_MAX_AGE:
+            limit_path().unlink(missing_ok=True)
+            return {**out, "reason": "저장된 지정가 대기가 너무 오래돼 복구하지 않았습니다 — 포지션의 익절·손절을 직접 확인하세요"}
         try:
             acct = await produce_account()
             if not acct.get("ok"):
@@ -839,10 +845,16 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             if has and bracket_key(sym, pside) not in bracket_load():
                 st: dict[str, Any] = {}
                 await arm_bracket(plan, st, add=False)
-                out.update(armed=True, bracket=st.get("bracket"))
+                ok = bool((st.get("bracket") or {}).get("placed"))   # arm_bracket 은 예외를 삼킨다 -- 실제로 걸렸는지 본다(검증 #3)
+                out.update(armed=ok, bracket=st.get("bracket"))
+                if not ok:
+                    out["reason"] = f"익절·손절을 다 걸지 못했습니다({(st.get('bracket') or {}).get('reason') or '일부 실패'}) — 거래소에서 직접 확인하세요"
         except Exception as exc:  # noqa: BLE001 -- 기동은 막지 않는다 · 파일은 남긴다
             return {**out, "reason": f"복구 실패 {type(exc).__name__}: {exc} — 포지션의 익절·손절을 직접 확인하세요"}
-        limit_path().unlink(missing_ok=True)
+        if orphan_errors:   # 남은 주문을 못 지웠다 = 살아 있는 GTX 가 나중에 체결될 수 있다 -- 파일을 남겨 다음 기동에 다시(검증 #1)
+            return {**out, "reason": out.get("reason") or "대기 주문 취소에 실패했습니다 — 거래소에서 직접 확인하세요(다음 기동에 다시 시도)"}
+        if not out.get("reason"):
+            limit_path().unlink(missing_ok=True)
         return out
 
     async def entry_then_bracket(plan: dict, state: dict, wait_sec: float | None = None, limit: bool = False) -> None:
@@ -861,8 +873,12 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         else:
             await settle(run_entry(binance_session(), plan, state), state)
         if float(state.get("filled") or 0.0) > 0:
-            await arm_bracket(plan, state)
-        if limit:   # 정상 종료에서만 지운다 -- 서버 종료로 태스크가 취소되면(CancelledError) 여기까지 안 와서 파일이 남는다(재시작 복구용)
+            cur = bracket_load().get(bracket_key(plan["symbol"], plan["positionSide"])) or {}
+            if limit and (cur.get("mod") or cur.get("sl_off") or cur.get("fired")):
+                pass   # 검증 #2: 부분 체결 뒤 사용자가 옮긴 선·손절 해제·청산 진행(fired)을 옛 계획으로 덮어 되살리지 않는다
+            else:
+                await arm_bracket(plan, state)
+        if limit and state.get("phase") != "error":   # 정상 종료에서만 지운다 -- 서버 종료로 태스크가 취소되면(CancelledError) 여기까지 안 와서 파일이 남는다(재시작 복구용) · error = 거래소에 주문이 살아 있을 수 있다(검증 #1)
             limit_path().unlink(missing_ok=True)
 
     async def limit_reprice(plan: dict) -> float | None:
@@ -2059,7 +2075,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         if plan.get("blocked"):
             return web.json_response({"ok": False, "error": "blocked", "detail": plan["blocked"]}, status=400)
         # 수량·레버리지는 걸린 주문 그대로(부분 체결 0 이라 같은 수량으로 다시 걸면 된다) -- 새 계획에서는 가격·선만 가져온다
-        moved = abs(float(plan["price"]) - float(old["price"])) > 1e-9
+        moved = abs(float(plan["price"]) - float(st.get("limit_price") or old["price"])) > 1e-9   # 걸려 있는 실제 주문가 기준(자동 재조정이 바꿨을 수 있다)
         if (st.get("phase") != "working" or st.get("action") or float(st.get("filled") or 0.0) > 0 or st.get("amend")
                 or st.get("order_id") is None):   # 계획 조립(await) 사이에 상태가 바뀌었다
             return web.json_response({"ok": False, "error": "state_changed", "detail": "그 사이 주문 상태가 바뀌었습니다 — 다시 확인하세요"}, status=409)
@@ -2130,7 +2146,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
             manual_wait_state.clear()
             manual_wait_state.update(phase="restart_cancelled", mode="wait", cancelled=r["cancelled"], errors=r["errors"],
                                      done_at=datetime.now(timezone.utc).isoformat())
-        rec = await limit_recover()   # 2026-10-31 지정가 대기 중 재시작: 그 사이 체결된 몫에 익절·손절을 건다(검증 D2)
+        rec = await limit_recover(r.get("errors"))   # 2026-10-31 지정가 대기 중 재시작: 그 사이 체결된 몫에 익절·손절을 건다(검증 D2)
         if rec:
             if manual_wait_state.get("phase") != "restart_cancelled":
                 manual_wait_state.clear()
