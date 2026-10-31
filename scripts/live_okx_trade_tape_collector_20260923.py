@@ -440,7 +440,7 @@ def main() -> None:
         selftest()
         return
     try:
-        asyncio.run(collect(args.inst, args.db or default_db(args.inst)))
+        asyncio.run(_bn.run_all([collect(x, args.db or default_db(x)) for x in args.inst.split(",") if x]))   # --inst a,b,c = 한 프로세스
     except KeyboardInterrupt:
         log("종료")
 

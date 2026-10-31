@@ -776,6 +776,18 @@ def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str 
     return fetch
 
 
+async def run_all(coros) -> None:
+    """심볼 여럿을 한 프로세스에서(2026-10-31 통합 -- 프로세스당 ~45MB 인터프리터·aiohttp 를 심볼 수만큼 내지 않는다).
+    하나라도 끝나면(=죽으면) 나머지를 걷고 그 예외를 올려 supervisor 가 전부 재기동한다. 빈 구간은 backfill_loop 가 메운다."""
+    tasks = [asyncio.ensure_future(c) for c in coros]
+    done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    for t in done:
+        t.result()
+
+
 async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
     from aiohttp import ClientSession, ClientTimeout, WSMsgType
 
@@ -1009,6 +1021,19 @@ def selftest() -> None:
         TapeStore(db, "ethusdt", 0.1)                       # 기동 초기화 -- 예전엔 여기서 죽었다
         assert time.monotonic() - t0 >= 0.5, "기다린 흔적이 없다 -- 재현이 안 됐다"
         hold.wait(timeout=10)
+    async def _ok():
+        await asyncio.sleep(60)
+
+    async def _boom():
+        raise RuntimeError("boom")
+
+    async def _both():
+        t0 = time.monotonic()
+        try:
+            await run_all([_ok(), _boom()])
+        except RuntimeError:
+            return time.monotonic() - t0
+    assert asyncio.run(_both()) < 5, "run_all 이 하나 죽어도 나머지를 안 걷었다"
     print("selftest OK")
 
 
@@ -1024,7 +1049,8 @@ def main() -> None:
         selftest()
         return
     try:
-        asyncio.run(collect(args.symbol, args.db or MARKETS[args.market][3], args.market))
+        db = args.db or MARKETS[args.market][3]
+        asyncio.run(run_all([collect(x, db, args.market) for x in args.symbol.split(",") if x]))   # --symbol a,b,c = 한 프로세스
     except KeyboardInterrupt:
         log("종료")
 

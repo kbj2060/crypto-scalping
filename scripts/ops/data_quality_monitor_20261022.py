@@ -28,7 +28,6 @@ sys.path[:0] = [str(ROOT / "scripts")]
 import ops_watchdog as W  # noqa: E402  (.env · send_telegram)
 
 HOT, LAKE = ROOT / "data" / "hot", ROOT / "data" / "lake"
-BT = ROOT / "data" / "live" / "orderflow" / "bookticker"
 OUT = ROOT / "data" / "live" / "ops_watchdog"
 REPORT, DAILY, STATE = OUT / "data_quality.json", OUT / "data_quality_daily.jsonl", OUT / "data_quality_state.json"
 COINS = ("ETH", "BTC", "SOL", "XRP")
@@ -53,8 +52,6 @@ LAKE_OF = {"tape:binance:ETH": ("binance/tape", "ETH"), "liq:binance": ("binance
            "liq:bybit": ("bybit/liquidations", None), "mark:binance:ETH": ("binance/mark_1s", None), "deribit_chain": ("deribit/chain", None)}
 # 판정 달력 항목 → 시작일·입력. 바이낸스 vision(공개 아카이브)만 읽는 항목은 수집기와 무관해서 뺀다(EXTERNAL).
 FORWARD = [
-    {"ids": ["ob_mid", "f0b", "h4"], "start": "2026-10-04", "inputs": ["tape:binance:ETH", "bt:ETH"]},
-    {"ids": ["h3"], "start": "2026-10-04", "inputs": ["bt:ETH", "bt:BTC", "bt:SOL", "bt:XRP", "bt:HYPE"]},
     {"ids": ["liqmap_fwd"], "start": "2026-10-08", "inputs": ["liqmap_score", "liq:binance", "liq:okx", "liq:bybit", "mark:binance:ETH"]},
     {"ids": ["gex_rev", "opt_info", "maxpain_oos"], "start": "2026-10-01", "inputs": ["deribit_chain"]},
     {"ids": ["dir4h_p2", "dir3asset"], "start": "2026-10-12", "inputs": ["dir_rec"]},   # 기록기 첫 줄 10-12(판정 자체는 klines 재계산)
@@ -176,9 +173,6 @@ def day_entry(day: str) -> dict:
             else:
                 ok = bool(n) and (not lake_med.get(k) or n >= 0.5 * lake_med[k])
             e[k] = {"src": "lake", "rows": n, "ok": ok}
-    for c in ("ETH", "BTC", "SOL", "XRP", "HYPE"):
-        n = len(glob.glob(str(BT / f"{c}USDT" / f"{day}T*.bt*")))
-        e[f"bt:{c}"] = {"src": "file", "hours": n, "ok": n >= 23}
     p = ROOT / "data" / "live" / "liqmap_score.jsonl"
     n = sum(1 for ln in p.open() if f'"origin": "{day}T' in ln) if p.exists() else 0
     e["liqmap_score"] = {"src": "file", "hours": n, "ok": n >= 22}
@@ -370,9 +364,9 @@ def selftest() -> int:
     assert grade_share(0.30, [0.31, 0.29, 0.33]) == "OK" and grade_share(0.05, [0.31, 0.29, 0.33]) == "CRIT"
     assert transitions({"a": "OK", "b": "WARN"}, [{"key": "a", "status": "CRIT", "summary": "x"}, {"key": "b", "status": "OK", "summary": ""},
                                                  {"key": "c", "status": "OK", "summary": ""}]) == ["🔴 a: x", "🟢 회복 b (WARN → OK)"]
-    led = {"2026-10-04": {"bt:ETH": {"ok": True}, "tape:binance:ETH": {"ok": False}}, "2026-10-05": {"bt:ETH": {"ok": True}, "tape:binance:ETH": {"ok": True}}}
-    fc = forward_coverage(led, "2026-10-06")[0]
-    assert fc["status"] == "WARN" and fc["hole_days"] == {"2026-10-04": ["tape:binance:ETH"]}, fc
+    inp = FORWARD[0]["inputs"]; led = {d: {k: {"ok": True} for k in inp} for d in ("2026-10-08", "2026-10-09")}; led["2026-10-08"][inp[1]] = {"ok": False}
+    fc = forward_coverage(led, "2026-10-10")[0]
+    assert fc["status"] == "WARN" and fc["hole_days"] == {"2026-10-08": [inp[1]]}, fc
     with tempfile.TemporaryDirectory() as d:                           # 합성 hot DB: 하루 중 10분 빔 + 1분봉 불일치 3분 → WARN
         HOT = Path(d)
         day0 = int(datetime(2026, 10, 20, tzinfo=timezone.utc).timestamp())

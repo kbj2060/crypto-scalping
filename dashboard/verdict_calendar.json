@@ -38,7 +38,8 @@
    "title": "호가 아이디어 중간 점검 — F0b·H4 보고 · H3 조기 판정 1차",
    "what": "F0b·H4 는 숫자만 보고(판정 아님) · H3 는 점추정 ≥ +0.2 이고 t ≥ 2.58 이면 조기 통과",
    "how": "python scripts/research_orderbook_strategy_ideas_20261004.py --since 2026-10-04T00:00Z --end 2026-11-03T00:00Z",
-   "doc": "docs/experiments/orderbook_strategy_ideas_fwd_prereg_20261004.md"
+   "doc": "docs/experiments/orderbook_strategy_ideas_fwd_prereg_20261004.md",
+   "done": "10-31 포기 -- 사용자 결정. 호가 전진 검정(ob_mid·f0b·h4·h3) 중단 · bookticker 수집기 정지(원천 파일은 보존) · 전진 구멍 점검에서도 뺌"
   },
   {
    "id": "gex_rev",
@@ -74,7 +75,8 @@
    "title": "깊은 벽 F0b — 한쪽 5분 수익이 비용(1.41bp)보다 작은가",
    "what": "ETH 인과 풀링 5분 수익 평균 > 0 · t ≥ 2.33 · 95% CI 상단 < 1.41bp — 진단 확인용, 매매 신호 아님",
    "how": "python scripts/research_orderbook_strategy_ideas_20261004.py --blockcheck --since 2026-10-04T00:00Z --end 2026-11-29T00:00Z",
-   "doc": "docs/experiments/orderbook_strategy_ideas_fwd_prereg_20261004.md"
+   "doc": "docs/experiments/orderbook_strategy_ideas_fwd_prereg_20261004.md",
+   "done": "10-31 포기 -- 사용자 결정. 호가 전진 검정(ob_mid·f0b·h4·h3) 중단 · bookticker 수집기 정지(원천 파일은 보존) · 전진 구멍 점검에서도 뺌"
   },
   {
    "id": "h4",
@@ -83,7 +85,8 @@
    "title": "H4 — 벽 반대 진입이 60분 뒤 더 나쁜가 (+ H3 조기 판정 2차)",
    "what": "내 진입·추가 중 «벽 반대» − «일치» < 0 · t ≥ 2.33 · 두 군 ≥ 40주문. 판정 전엔 «벽 반대 경고»를 화면에 올리지 않는다(표본 오염)",
    "how": "python scripts/research_orderbook_strategy_ideas_20261004.py --fills  (서버에서) → --since 2026-10-04T00:00Z --end 2026-12-03T00:00Z",
-   "doc": "docs/experiments/orderbook_strategy_ideas_fwd_prereg_20261004.md"
+   "doc": "docs/experiments/orderbook_strategy_ideas_fwd_prereg_20261004.md",
+   "done": "10-31 포기 -- 사용자 결정. 호가 전진 검정(ob_mid·f0b·h4·h3) 중단 · bookticker 수집기 정지(원천 파일은 보존) · 전진 구멍 점검에서도 뺌"
   },
   {
    "id": "exh1",
@@ -102,7 +105,8 @@
    "title": "H3 — QI 게이트가 진입 10초 역선택을 줄이나",
    "what": "5코인 같은 날 짝 차이 > 0 · t ≥ 2.33 · 게이트 순손익이 «없음»보다 나쁘지 않음",
    "how": "python scripts/research_orderbook_strategy_ideas_20261004.py --since 2026-10-04T00:00Z --end 2027-05-30T00:00Z",
-   "doc": "docs/experiments/orderbook_strategy_ideas_fwd_prereg_20261004.md"
+   "doc": "docs/experiments/orderbook_strategy_ideas_fwd_prereg_20261004.md",
+   "done": "10-31 포기 -- 사용자 결정. 호가 전진 검정(ob_mid·f0b·h4·h3) 중단 · bookticker 수집기 정지(원천 파일은 보존) · 전진 구멍 점검에서도 뺌"
   },
   {
    "id": "maxpain_oos",

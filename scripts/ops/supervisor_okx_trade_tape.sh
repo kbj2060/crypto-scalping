@@ -15,9 +15,12 @@ cd "$ROOT"
 
 RUNNER="scripts/live_okx_trade_tape_collector_20260923.py"
 TARGET="${OKX_TAPE_INST:-ETH-USDT-SWAP}"
+# 2026-10-31: OKX_TAPE_INST 은 쉼표 목록 가능(한 프로세스가 여러 종목). 겹치는 종목이 이미 돌면 켜지 않는다.
+overlap() { local a=",$1,"; for x in ${2//,/ }; do case "$a" in *",$x,"*) return 0;; esac; done; return 1; }
+KEY="${TARGET//,/_}"
 for pid in $(pgrep -f "[l]${RUNNER#scripts/l}"); do
   cur=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep '^OKX_TAPE_INST=' | cut -d= -f2)
-  if [ "${cur:-ETH-USDT-SWAP}" = "$TARGET" ]; then
+  if overlap "${cur:-ETH-USDT-SWAP}" "$TARGET"; then
     echo "[$(date -Iseconds)] OKX 체결 테이프 수집기($TARGET)가 이미 실행 중(pid $pid) -- 켜지 않는다." >&2
     exit 1
   fi
@@ -28,6 +31,6 @@ export OKX_TAPE_INST="$TARGET"
 
 exec "$ROOT/scripts/ops/_supervise.sh" \
   "live_okx_trade_tape_collector_20260923.py($TARGET)" \
-  "$ROOT/data/live/.supervisor_okx_trade_tape_$TARGET.lock" \
-  "$ROOT/logs/supervisor/okx_trade_tape_$TARGET" \
+  "$ROOT/data/live/.supervisor_okx_trade_tape_$KEY.lock" \
+  "$ROOT/logs/supervisor/okx_trade_tape_$KEY" \
   "$PY" -u "$ROOT/$RUNNER"
