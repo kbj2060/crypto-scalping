@@ -207,19 +207,19 @@ def qx4_from_klines(rows_by_coin: dict, art: dict, now_ms: float, coin: str = "E
         return {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:160]}
 
 
-# ---------- QX4I(ETH 전용): QX4 + 옵션 ATM IV 보정 — docs/prereg/vol4h_round12_option_iv_20261025.md · 배포 대기 B1(조건부, 전진 voliv 2027-01-22) ----------
-BETA_I = (-0.04708836659130656, 0.17635794080180575)   # 12라운드 report.json beta_I 동결(연구 research_vol4h_round12_option_iv_20261025.BETA_I)
+# ---------- QX4I: QX4 + 옵션 ATM IV 보정 — docs/prereg/vol4h_round12_option_iv_20261025.md · 배포 대기 B1(조건부, 전진 voliv 2027-01-22) ----------
+BETA_I = {"ETH": (-0.04708836659130656, 0.17635794080180575),    # 12라운드 report.json beta_I 동결(연구 research_vol4h_round12_option_iv_20261025.BETA_I)
+          "BTC": (-0.025686466054476508, 0.11858982566109531)}  # 12b(tmp/vol4h_r12b_btc_20261026/report.json) · 재현 docs/experiments/btc_sol_vol4h_qx4_20261031.md
 H1, SETTLE_MS = 3_600_000, 60_000
 DERIBIT_TRADES = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency_and_time"   # 연구 원천 history.deribit.com 과 같은 API
-_INST = re.compile(r"^ETH-(\d+[A-Z]{3}\d{2})-(\d+)-([CP])$")
 
 
-def atm_iv(trades: list, d_ms: int):
+def atm_iv(trades: list, d_ms: int, coin: str = "ETH"):
     """연구 hourly() 의 iv 한 칸: [d−1h, d) 체결 · 블록·청산 빼고 · BS 델타(r=0, 만기 08:00 UTC, 연 365.25일) |0.35~0.65| ·
     만기까지 1시간~10일 → iv 중앙값. 해당 체결이 없으면 None."""
-    ivs = []
+    ivs, inst = [], re.compile(rf"^{coin}-(\d+[A-Z]{{3}}\d{{2}})-(\d+)-([CP])$")   # 연구 필터 ^{sym}-…
     for t in trades:
-        ts, m, iv = int(t["timestamp"]), _INST.match(t["instrument_name"]), t.get("iv")
+        ts, m, iv = int(t["timestamp"]), inst.match(t["instrument_name"]), t.get("iv")
         if not (d_ms - H1 <= ts < d_ms) or t.get("block_trade_id") or t.get("liquidation") or not m or iv is None or not iv > 0:
             continue
         exp = int(datetime.strptime(m[1], "%d%b%y").replace(tzinfo=timezone.utc).timestamp() * 1000) + 8 * H1
@@ -242,11 +242,11 @@ def deribit_get(params: dict):
         return None
 
 
-def fetch_option_trades(a_ms: int, b_ms: int, get=deribit_get):
-    """[a, b) ETH 옵션 체결 전부 — 연구 fetch_day 와 같은 이어받기(1000개씩 · 같은 trade_id 한 번). 실패면 None."""
+def fetch_option_trades(a_ms: int, b_ms: int, get=deribit_get, coin: str = "ETH"):
+    """[a, b) coin 옵션 체결 전부 — 연구 fetch_day 와 같은 이어받기(1000개씩 · 같은 trade_id 한 번). 실패면 None."""
     rows, seen, a = [], set(), a_ms
     while a < b_ms:
-        res = get(dict(currency="ETH", kind="option", start_timestamp=a, end_timestamp=b_ms - 1, count=1000, sorting="asc"))
+        res = get(dict(currency=coin, kind="option", start_timestamp=a, end_timestamp=b_ms - 1, count=1000, sorting="asc"))
         if res is None:
             return None
         tr = res.get("trades") or []
@@ -259,17 +259,17 @@ def fetch_option_trades(a_ms: int, b_ms: int, get=deribit_get):
     return rows
 
 
-def iv_now(iv_by_hour: dict, now_ms: float, get=deribit_get):
+def iv_now(iv_by_hour: dict, now_ms: float, get=deribit_get, coin: str = "ETH"):
     """직전 정시 d 의 IV — 연구 ffill(limit=6) 그대로: d 칸이 비면 6시간 안 가장 최근 칸. 시간 칸은 한 번 받으면 기억(iv_by_hour 제자리 갱신).
     반환 (iv | None, 그 칸 정시 ms | None). ponytail: 5분 봉 사이에도 직전 정시 IV 를 쓴다(연구 표본은 정시만 — 정시 사이 값은 검정 밖)."""
     d = int((now_ms - SETTLE_MS) // H1 * H1)   # 10-26 리뷰: 정시 직후 몇 초 안엔 체결 반영이 늦을 수 있다 -- 칸은 한 번 받으면 고정이라 정시 + 60초 뒤에만 연다
     for k in range(7):
         h = d - k * H1
         if h not in iv_by_hour:
-            tr = fetch_option_trades(h - H1, h, get)
+            tr = fetch_option_trades(h - H1, h, get, coin)
             if tr is None:
                 return None, None
-            iv_by_hour[h] = atm_iv(tr, h)
+            iv_by_hour[h] = atm_iv(tr, h, coin)
         if iv_by_hour[h] is not None:
             for old in [x for x in iv_by_hour if x < d - 7 * H1]:
                 del iv_by_hour[old]
@@ -277,10 +277,11 @@ def iv_now(iv_by_hour: dict, now_ms: float, get=deribit_get):
     return None, None
 
 
-def qx4i_log(p: float, iv_pct) -> float:
+def qx4i_log(p: float, iv_pct, coin: str = "ETH") -> float:
     """연구 qx4i(): ŷ + a + b·x1, x1 = ln(IV²·4/8766) − ŷ · IV 없으면 x1 = 0."""
     x1 = 0.0 if iv_pct is None else float(np.log((iv_pct / 100) ** 2 * 4 / 8766) - p)
-    return p + BETA_I[0] + BETA_I[1] * x1
+    a, b = BETA_I[coin]
+    return p + a + b * x1
 
 
 # ---------- 점검·학습 ----------
