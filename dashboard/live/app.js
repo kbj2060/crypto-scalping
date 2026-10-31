@@ -796,6 +796,54 @@ function renderArmedLines() {
   if (e && e.err && !e.errShownAt) e.errShownAt = Date.now();
   if (e && e.err && Date.now() - e.errShownAt > 8000) armedEdit = null;
 }
+// 2026-11-01 사용자 «이미 진입한 경우 진입가 라벨을 누르면 팝업 -- 청산 내용»: 차트 오른쪽 주황 «진입» 배지(또는 들어간 선의 진입 꼬리표)를 누르면
+//   평단·미실현 손익·청산가(강제청산) 거리 + 25/50/100% 청산 버튼. 버튼은 **새 경로가 아니라** 기존 청산 미리보기(manualExitPreview)를 열어 주문 패널의
+//   «확인» 두 번을 그대로 거친다(여기서 바로 주문이 나가지 않는다). 가격은 전부 USDT 환산(entryUsdt 의 basis).
+function entryPopClose() { el("entryPop")?.remove(); }
+function entryPopOpen(x, y) {
+  entryPopClose();
+  const pos = snapshotAccountPosition(), cur = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0);
+  if (!pos || !Number(pos.qty) || !orderCoinOk()) return;
+  const en = entryUsdt(pos, cur), k = en > 0 ? Number(pos.entry_price) / en : 1;   // k = 환산 basis(USDC ÷ USDT)
+  const sgn = String(pos.side).toUpperCase() === "SHORT" ? -1 : 1, qty = Math.abs(Number(pos.qty)), mk = Number(pos.mark_price) || 0;
+  const up = mk > 0 ? (mk - Number(pos.entry_price)) * qty * sgn : 0, liq = Number(pos.liquidation_price) > 0 ? Number(pos.liquidation_price) / k : 0;
+  const dist = liq > 0 && cur > 0 ? Math.abs(cur - liq) / cur * 100 : null, sg = (v) => (v >= 0 ? "+" : "−");
+  const d = document.createElement("div");
+  d.id = "entryPop"; d.className = "entry-pop"; d.setAttribute("role", "dialog");
+  d.innerHTML = `<b>${sgn < 0 ? "SHORT" : "LONG"} ${escapeHtml(String(pos.symbol))}</b>`
+    + `<dl><dt>평단</dt><dd>${lineFmt(en)}</dd><dt>수량</dt><dd>${qty}</dd>`
+    + `<dt>미실현</dt><dd class="${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</dd>`
+    + `<dt>청산가</dt><dd>${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` · ${dist.toFixed(1)}% 남음` : ""}` : "없음"}</dd></dl>`
+    + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}">${v}% 청산</button>`).join("")}</div>`
+    + `<small>누르면 청산 미리보기가 열리고, 확인을 한 번 더 눌러야 나갑니다</small>`;
+  document.body.appendChild(d);
+  const r = d.getBoundingClientRect();
+  d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width - 12)) + "px";
+  d.style.top = Math.max(8, Math.min(innerHeight - r.height - 8, y - r.height / 2)) + "px";
+  d.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-pct]");
+    if (!b) return;
+    const side = String(pos.side).toUpperCase();
+    entryPopClose();
+    ofabSetOpen(true);
+    manualExitPreview(side, { pct: Number(b.dataset.pct) });
+  });
+}
+(() => {
+  let dn = null;
+  document.addEventListener("pointerdown", (e) => { dn = [e.clientX, e.clientY]; }, true);
+  const hitSvg = (e) => {   // 차트 오른쪽 가격 배지 칸에서 진입선 위 ±11px
+    const svg = e.target.closest?.("#candleSvgSnapshot"), G = chartGeo, m = svg && svg.getScreenCTM(), pos = snapshotAccountPosition();
+    if (!G || !m || !pos || !Number(pos.qty) || G.ymax <= G.ymin || (dn && Math.hypot(e.clientX - dn[0], e.clientY - dn[1]) > 4)) return false;
+    const en = entryUsdt(pos, Number(latestLivePriceByAsset[activeSnapshotAsset] || 0)), x = (e.clientX - m.e) / m.a, y = (e.clientY - m.f) / m.d;
+    return en > 0 && x >= G.ml + G.cw && Math.abs(y - (G.mt + (G.ymax - en) * (G.pb - G.mt) / (G.ymax - G.ymin))) <= 11;
+  };
+  document.addEventListener("click", (e) => {   // 차트 svg 는 다시 만들어질 수 있어 문서에서 받는다
+    if (e.target.closest?.("#entryPop")) return;
+    if (e.target.closest?.(".lt-armed .lt-tag.en") || hitSvg(e)) entryPopOpen(e.clientX, e.clientY); else entryPopClose();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") entryPopClose(); });
+})();
 async function refreshPositionProfile() {   // 포지션 보기일 때만 1초(서버도 1초 캐시)
   if (fpColR !== "pos" || activePageTab !== "snapshot" || document.hidden || !flowOn()) return;   // 2026-10-20 ETH → 흐름 코인 전부(XRP)
   const now = Date.now();
