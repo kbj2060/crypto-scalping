@@ -2627,22 +2627,26 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)
 
-    dirshort_art: dict = {"mtime": None, "art": None}
+    dirshort_art: dict = {}   # 코인 -> {mtime, art}
 
-    async def api_dir_short(request: web.Request) -> web.Response:   # 2026-10-28 ⑤ 예측 판 «15분·1시간 예측»(ETH, scripts/live_eth_dir_short_20261028)
-        """매달 재학습 LightGBM(65피쳐 + 호가 깊이 10열) -- 4h 와 같은 REST 경로 + 호가 깊이 워커 sqlite · 5분 캐시.
+    async def api_dir_short(request: web.Request) -> web.Response:   # 2026-10-28 ⑤ 예측 판 «15분·1시간 예측»(ETH, scripts/live_eth_dir_short_20261028) · 10-31 BTC·SOL·XRP
+        """매달 재학습 LightGBM(ETH = 65피쳐 + 호가 깊이 10열 · BTC·SOL·XRP = 65피쳐판) -- 4h 와 같은 REST 경로(+ ETH 는 호가 깊이 워커 sqlite) · 5분 캐시.
         ponytail: rest_frames 를 4h 와 따로 부른다(5분에 REST 한 벌 더) -- 늘리면 두 판을 한 produce 로 묶는다."""
+        from scripts import live_eth_dir_short_20261028 as ds
+        coin = str(request.query.get("asset") or "eth").upper()
+        if coin != "ETH" and coin not in ds.TABLE:   # 신뢰경계: 지원 코인 표 -- 파일 이름·REST 심볼에 들어간다
+            return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
+
         def produce_sync() -> dict[str, Any]:
-            from scripts import live_eth_dir_short_20261028 as ds
-            if not ds.ARTIFACT.exists():
+            paths = ds.art_paths(coin)
+            if not all(p.exists() for p in paths):
                 return {"ok": False, "reason": "artifact_missing"}
-            mt = ds.ARTIFACT.stat().st_mtime
-            if dirshort_art["mtime"] != mt:
-                import joblib
-                dirshort_art.update(mtime=mt, art=joblib.load(ds.ARTIFACT))
-            return ds.live_payload(dirshort_art["art"])
+            mt, da = tuple(p.stat().st_mtime for p in paths), dirshort_art.setdefault(coin, {})
+            if da.get("mtime") != mt:
+                da.update(mtime=mt, art=ds.load_art(coin))
+            return ds.live_payload(da["art"])
         try:
-            payload = await swr_cached("dir_short", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+            payload = await swr_cached(f"dir_short:{coin.lower()}", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
         except Exception as exc:  # noqa: BLE001
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)
