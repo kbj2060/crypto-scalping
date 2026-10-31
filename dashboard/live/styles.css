@@ -2658,7 +2658,8 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 #fpCard .ops-health-head > .chart-head-left { flex: 1 1 auto; }   /* 펜 메모(4차): 나스닥·금리가 카드 오른쪽 끝까지 */
 /* 2026-10-31 사용자 «매크로 버튼 오른쪽 정렬 · 가운데에 코인 이름 크게» -- 매크로 = 머리 오른쪽 끝, 코인 이름 = 머리 정중앙(겹치지 않게 넓은 화면만) */
 #fpCard .fp-rates { flex: 0 1 auto; margin-left: auto; }
-#fpCard .fp-rates .fr-mt { flex: 0 1 auto; }
+#fpCard .fp-rates .fr-mt { flex: 0 1 auto; justify-content: flex-end; text-align: right; }   /* 2026-11-01 펜 메모: Macro 제목 글자 삭제 · 데이터 오른쪽 정렬 */
+#fpCard .fr-mts { justify-items: end; }
 .fp-coin-name { display: none; }
 @media (min-width: 1700px) {
   #fpCard > .ops-health-head { position: relative; }
