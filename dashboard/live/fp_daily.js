@@ -15,7 +15,8 @@
   //   box = 2026-10-10 위·아래 2칸 순위는 늘 같은 칸(ETH $25)으로 고른다(사용자 A) -- 화면 칸 크기로 고르면 확대/축소마다 이웃 칸이 합쳐져 1·2등이 바뀌었다
   var ASSET_CFG = {
     eth: { coin: "ETH", rows: [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500], box: 25, dp: 2 },
-    xrp: { coin: "XRP", rows: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.0125, 0.025, 0.05, 0.1, 0.125, 0.25], box: 0.0125, dp: 4 }
+    xrp: { coin: "XRP", rows: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.0125, 0.025, 0.05, 0.1, 0.125, 0.25], box: 0.0125, dp: 4 },
+    btc: { coin: "BTC", rows: [30, 60, 150, 300, 600, 750, 1500, 3000, 6000, 7500, 15000], box: 750, dp: 0 }   // 2026-10-31 ETH 단계 × 서버 칸 $30
   };
   var HEAT_BOX_MIN_PX = 10;    // 봉 폭이 이보다 좁으면 테두리를 그리지 않는다(금액 글자는 칸 안에 들어갈 때만)
   var DEFAULT_SPAN = 30, ROW_PX = 11;
@@ -748,8 +749,8 @@
     setInterval(function () {
       var ok = assetOn();
       btn.disabled = !ok;
-      btn.title = ok ? btn.dataset.title : "일봉 풋프린트는 ETH·XRP 만 있습니다";
-      if (b4) { b4.disabled = !ok; b4.title = ok ? b4.dataset.title : "4시간봉 풋프린트는 ETH·XRP 만 있습니다"; }
+      btn.title = ok ? btn.dataset.title : "일봉 풋프린트는 ETH·BTC·XRP 만 있습니다";
+      if (b4) { b4.disabled = !ok; b4.title = ok ? b4.dataset.title : "4시간봉 풋프린트는 ETH·BTC·XRP 만 있습니다"; }
       if (S.on && (!ok || curAsset() !== S.asset)) setOn(ok, S.period);
     }, 1000);
     var saved = null;

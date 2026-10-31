@@ -19,6 +19,7 @@ OI: 로컬 패널(5분, 2022-01-01~2026-09-14) + 일별 metrics 아카이브(그
 2026-10-20 코인 인자: FP_SYM=XRPUSDT FP_OUT=… FP_WORK=… nice python -I <이 파일>
   칸 = floor(price / CELL) 정수 번호(ETH CELL $1 = 전과 같은 bin) · 가격은 거래소 틱 격자라 round(price/TICK) 정수로 나눠 부동소수 경계 새는 것 없음.
   대조 = 바이낸스 일봉(vision 1d klines, 거래량·테이커 매수) -- XRP 는 로컬 1분봉이 없다.
+2026-10-31 BTC: FP_SYM=BTCUSDT FP_MEM=3GB FP_THREADS=3(로컬 자원 한도) -- 월 zip 0.1~1.3GB.
 """
 from __future__ import annotations
 
@@ -38,14 +39,15 @@ import pandas as pd
 MAIN = Path("/home/kbj20/crypto-scalping")
 SYM = os.environ.get("FP_SYM", "ETHUSDT")
 # 칸(가격 폭)·틱: ETH $1 ≈ 4bp(2026 $2.5k) · XRP 0.0005 ≈ 3.5bp($1.4) -- 라이브 테이프 칸(ETH 0.1 · XRP 0.0001)의 정수배(10 · 5)
-TICK, CELL_TICKS = {"ETHUSDT": (0.01, 100), "XRPUSDT": (0.0001, 5)}[SYM]
+#   2026-10-31 BTC $30 ≈ 3.9bp($77.5k) -- 테이프 칸 1.0 의 30배 · 틱 0.1
+TICK, CELL_TICKS = {"ETHUSDT": (0.01, 100), "XRPUSDT": (0.0001, 5), "BTCUSDT": (0.1, 300)}[SYM]
 OUT = Path(os.environ.get("FP_OUT", str(MAIN / "data/footprint_daily")))
 WORK = Path(os.environ.get("FP_WORK", str(MAIN / "tmp/fp_daily_build")))
 BASE = "https://data.binance.vision/data/futures/um"
 FIRST_MONTH = "2020-01"
 
 AGG_SQL = """
-WITH r AS (SELECT * FROM read_csv('{f}', header={h}, columns={cols})
+WITH r AS (SELECT * FROM {src}
            QUALIFY row_number() OVER (PARTITION BY agg_trade_id ORDER BY transact_time) = 1),   -- 아카이브 중복 행(2022-09-11~13 실측 2~4배)
      t AS (SELECT CAST(epoch_ms(transact_time) AS DATE) AS day, price, quantity AS q, transact_time AS ts,
                   NOT is_buyer_maker AS buy FROM r)
@@ -74,11 +76,20 @@ def aggregate(csv_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """aggTrades CSV 하나 → (cells, days). 헤더 유무는 첫 줄로 판단(2022 전 파일은 헤더 없음)."""
     with open(csv_path) as fh:
         h = "true" if not fh.readline()[:1].isdigit() else "false"
-    con = duckdb.connect()
-    con.execute(f"SET memory_limit='6GB'; SET threads=6; SET temp_directory='{WORK / 'duck_tmp'}'")
-    out = [con.execute(AGG_SQL.format(f=csv_path, h=h, cols=DUCK_COLS, sel=sel, grp=grp)).df()
-           for sel, grp in (CELL_SEL, DAY_SEL)]
+    # 2026-10-31 BTC: 한 달 CSV(최대 6.3GB) 통째 QUALIFY 는 3GB 에서 메모리 초과 -- 디스크 표로 한 번 싣고 날마다 중복 제거·집계
+    #   (같은 agg_trade_id 는 같은 transact_time = 같은 날이라 날마다 나눠도 결과 같다)
+    db = WORK / "agg.duckdb"
+    db.unlink(missing_ok=True)
+    con = duckdb.connect(str(db))
+    con.execute(f"SET memory_limit='{os.environ.get('FP_MEM', '6GB')}'; SET threads={int(os.environ.get('FP_THREADS', '6'))}; "
+                f"SET temp_directory='{WORK / 'duck_tmp'}'; SET preserve_insertion_order=false")
+    con.execute(f"CREATE TABLE raw AS SELECT *, CAST(epoch_ms(transact_time) AS DATE) AS d "
+                f"FROM read_csv('{csv_path}', header={h}, columns={DUCK_COLS})")
+    days = [r[0] for r in con.execute("SELECT DISTINCT d FROM raw ORDER BY d").fetchall()]
+    out = [pd.concat([con.execute(AGG_SQL.format(src=f"(SELECT * EXCLUDE d FROM raw WHERE d = DATE '{d}')", sel=sel, grp=grp)).df()
+                      for d in days]) for sel, grp in (CELL_SEL, DAY_SEL)]
     con.close()
+    db.unlink()
     for df in out:
         df["day"] = pd.to_datetime(df.day).dt.date            # duckdb DATE → datetime64 로 온다
     return out[0], out[1]
