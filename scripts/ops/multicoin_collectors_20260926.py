@@ -133,9 +133,10 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
              "datetime(max(ts_sec), 'unixepoch', 'localtime')", *((20, 40) if x.split("-")[0] in TRADFI else (10, 30))) for x in insts])
     # HL 포지션은 코인마다가 아니라 **하나**다(한 번의 조회가 전 코인 -- 수집기 도크스트링).
     # 대상 주소를 HL 체결 DB 에서 뽑으므로 체결이 쌓인 뒤 첫 바퀴(최대 ~8분)가 돈다 -> 유예 30분.
-    tag = "_".join(c.lower() for c in coins)
-    add("hl_positions", tag, 1, "supervisor_hyperliquid_positions.sh",
-        "live_hyperliquid_positions_collector_20260924.py", {"HL_POS_COINS": ",".join(coins)},
+    hl = [c for c in coins if c not in TRADFI]      # TradFi 주식은 HL 메인 시장에 없다
+    tag = "_".join(c.lower() for c in hl)
+    hl and add("hl_positions", tag, 1, "supervisor_hyperliquid_positions.sh",
+        "live_hyperliquid_positions_collector_20260924.py", {"HL_POS_COINS": ",".join(hl)},
         [_db(f"hl_positions_{tag}", f"data/live/hyperliquid_positions_{tag}.duckdb", "hl_cycles",
              "to_timestamp(ts_ms / 1000)", 30, 60)], grace=30)
     return out
