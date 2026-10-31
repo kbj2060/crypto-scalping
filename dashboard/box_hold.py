@@ -20,7 +20,10 @@ import pandas as pd
 
 # 코인 -> HGB 번들 파일. 2026-10-20 XRP 전용(같은 식 · 2022~24 학습 · 2025/2026 AUC 30m .777/.779 · 1h .776/.776 · 보정 ≤5.7pp 통과 · 4h 2025 보정 6.3pp 불통과 → deployable False)
 #   재현 python scripts/research_xrp_box_hold_20261020.py · 결과 tmp/xrp_parity_20261020/box_hold/report.md
-HGB = {"eth": "box_hold_hgb_20261016.joblib", "xrp": "box_hold_hgb_xrp_20261020.joblib"}
+#   2026-10-31 BTC·SOL 전용(같은 식·같은 관문 · 30분·1h 통과 · 4h 2026 보정 8.4/9.8pp 불통과 → deployable False)
+#   재현 python scripts/research_btc_sol_box_hold_20261031.py --run · 결과 docs/experiments/btc_sol_box_hold_20261031.md
+HGB = {"eth": "box_hold_hgb_20261016.joblib", "xrp": "box_hold_hgb_xrp_20261020.joblib",
+       "btc": "box_hold_hgb_btc_20261031.joblib", "sol": "box_hold_hgb_sol_20261031.joblib"}
 BUNDLES = {a: joblib.load(Path(__file__).with_name(f)) for a, f in HGB.items()}
 B = BUNDLES["eth"]
 PROF = np.asarray(B["prof"], float)            # 요일×시각(월 0시 = 0) 평균 1분 수익² / 전체 평균, 학습 구간
@@ -31,7 +34,8 @@ CLAIMS_ID = 180                                 # 실업수당(주간)
 # 2026-10-26 ETH 1h 굴림 Platt90(docs/eth_box_hold_calibration_drift_prereg_20261025.md 8라운드 · 2026 ECE 1.45→0.67pp) --
 #   scripts/fit_box_hold_platt90_20261026.py 가 매월 1일 쓴다. 없거나 40일 넘었거나 다른 모델용이면 보정 없음(원래 p).
 #   2026-10-31 XRP 1h 도(사전등록 docs/prereg/xrp_box_hold_platt90_qx4_20261031.md · ΔBrier −.00079 단측 90% 통과 · ECE 2.31→0.40pp) -- 같은 적합 스크립트 --asset xrp
-PLATT90 = {a: Path(__file__).with_name(f"box_hold_platt90_{a}_1h.json") for a in HGB}
+#   2026-10-31 BTC 1h 도(docs/prereg/btc_sol_box_hold_20261031.md · ΔBrier −.00022 단측 90% 통과) · SOL 은 2025 창 ΔBrier +.000003(V5 ✗) 불통과 → 표에 없음 = 보정 없음
+PLATT90 = {a: Path(__file__).with_name(f"box_hold_platt90_{a}_1h.json") for a in ("eth", "xrp", "btc")}
 # 2026-10-29 ETH 4h = QX4I σ(옵션 IV 보정 4h 변동성) → 두 벽 무접촉 확률(반사 원리) → 2024·25 등조 지도. 박스 HGB 보다 시험 26-06~10 Brier .1597→.1524
 #   (ΔBrier −.00732 단측 90% 통과 · 사전등록 docs/prereg/box_hold_vs_qx4i_20261029.md · 결과 docs/experiments/box_hold_vs_qx4i_20261029.md · 사용자 «둘 다 진행»).
 #   지도 = scripts/export_box_hold_qx4i_iso_20261029.py. IV 가 없으면 QX4 눈금 · 변동성 예측이 15분 넘게 묵었으면 HGB 그대로.

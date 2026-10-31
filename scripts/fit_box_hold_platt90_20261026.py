@@ -36,7 +36,7 @@ BV = MAIN / "data/binance_vision"
 EVENTS = MAIN / ".claude/worktrees/chart-indicators-tuning-ecfa25/tmp/box_improve_20261016/events.json"
 # 연구 build() 의 VIS(data.binance.vision 일 zip 09-14~10-23 · parquet 빈칸 09-15~10-04 를 메움) -- 연구를 돌린 워크트리
 VIS = MAIN / ".claude/worktrees/agent-a231de71bb7c16d79/tmp/box_calib_20261025/vision_1m"
-ASSET = "eth"   # 2026-10-31 --asset xrp(XRP 번들·요일×시각 표·출력 파일)
+ASSET = "eth"   # 2026-10-31 --asset xrp·btc(코인 번들·요일×시각 표·출력 파일)
 W, N = 60, 90
 MIN = pd.Timedelta(minutes=1)
 
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     ap.add_argument("--rest", action="store_true", help="1분봉을 바이낸스 공개 REST 로(서버)")
     ap.add_argument("--events", type=Path, default=EVENTS)
     ap.add_argument("--out", type=Path)
-    ap.add_argument("--asset", choices=sorted(HGB), default="eth")
+    ap.add_argument("--asset", choices=sorted(PLATT90), default="eth")   # 보정 통과 코인만(10-31 SOL 불통과)
     a = ap.parse_args()
     ASSET = a.asset
     a.out = a.out or PLATT90[ASSET]

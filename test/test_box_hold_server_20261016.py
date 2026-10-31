@@ -104,15 +104,15 @@ class BoxHoldServerTest(unittest.TestCase):
                      mock.patch.object(server, "DASHBOARD_DIR", dash), \
                      mock.patch.object(server, "MACRO_CALENDAR_STATE_PATH", live / "macro_calendar_state.json"):
                     async with TestClient(TestServer(offline_app(server))) as c:
-                        return await (await c.get("/api/box-hold?asset=xrp")).json(), await (await c.get("/api/box-hold?asset=sol")).json()
+                        return await (await c.get("/api/box-hold?asset=xrp")).json(), await (await c.get("/api/box-hold?asset=hype")).json()
         FakeSession.calls = []
-        p, sol = asyncio.run(go())
+        p, hype = asyncio.run(go())
         self.assertTrue(p["ok"], p)
         self.assertEqual((p["model"], p["asset"]), ("hgb-xrp-20261020", "xrp"))
         self.assertEqual(FakeSession.calls[0]["symbol"], "XRPUSDT")
         self.assertTrue(p["scales"]["30m"]["ok"] and p["scales"]["1h"]["ok"], p["scales"])
         self.assertFalse(p["scales"]["4h"]["ok"])
-        self.assertFalse(sol["ok"])
+        self.assertFalse(hype["ok"])   # 10-31 BTC·SOL 추가 → 표에 없는 코인 = hype
 
 
 if __name__ == "__main__":
