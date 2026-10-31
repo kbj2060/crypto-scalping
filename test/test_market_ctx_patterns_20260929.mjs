@@ -45,6 +45,13 @@ assert.equal(optNewTxt([{ cb: 1, cs: 1, pb: 0, ps: 0, doi: 2 }, { cb: 9, cs: 9, 
   assert.equal(optRealizedGamma(mk(alt), 1e9 + 144 * 300 + 10), null);                // 마지막 봉이 형성 중 → 마감봉 144개 → 계산 안 함
   const mid = optRealizedGamma(mk(alt).map((c, i) => ({ ...c, close: 2000 * Math.exp(Math.sin(i * 1.3) * 0.001 + i * 0.00001) })), 1e9 + 145 * 300);
   assert.ok(mid && mid.pct > 0 && mid.pct < 100, JSON.stringify(mid));
+  // 2026-10-31 XRP: 코인별 분위표·경계(RG_BY) -- 같은 값이면 XRP 표로 다른 분위, 경계 −0.0881/0.0000 으로 국면
+  const xi = src.indexOf("const RG_REF_XRP ="), RG_REF_XRP = eval(src.slice(xi + 18, src.indexOf(";", xi)));
+  assert.ok(RG_REF_XRP.length === 13 && RG_REF_XRP[6][1] === -0.0445);
+  const midC = mk(alt).map((c, i) => ({ ...c, close: 2000 * Math.exp(Math.sin(i * 1.3) * 0.001 + i * 0.00001) }));
+  const mx = optRealizedGamma(midC, 1e9 + 145 * 300, [[1, 0.2], [99, 0.4]], [0.2, 0.3]);   // 표·경계가 실제로 인자로 들어가나
+  assert.ok(mx.v === mid.v && mx.pct > 1 && mx.pct < 99 && mx.side === "mid", JSON.stringify([mx, mid]));
+  assert.equal(optRealizedGamma(mk(alt), 1e9 + 145 * 300, RG_REF_XRP, [-0.0881, 0]).side, "rev");
 }
 
 // ── 미국장: 서머타임 13:30 UTC · 주말 건너뜀 · 표준시 14:30 UTC · 장중 판정 ──

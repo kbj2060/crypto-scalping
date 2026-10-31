@@ -2285,7 +2285,7 @@ body.order-coin-off .acct-lanes::before {
   #optCard .opt-sec:is(:has([data-tip="move"]), :has([data-tip="rg"]), :has([data-tip="mood"])) .opt-kv { flex: 1 1 0; max-height: 46px; align-items: center; font-size: 13.5px; }
 }
 .card-title { margin: 0 14px 0 0; font: 800 17px/1 var(--font-sans); letter-spacing: -.01em; color: var(--text); align-self: center; }
-body.not-eth #mcWhen { display: none; }   /* ⑤ = 옵션 만기 축 -- SOL·XRP 는 옵션 빼고(2026-10-04) */
+body.not-eth:not([data-coin="xrp"]) #mcWhen { display: none; }   /* ⑤ = 옵션 만기 축 -- SOL·XRP 는 옵션 빼고(2026-10-04) · 10-31 XRP 켬(그 코인 만기·펀딩) */
 #mcWhen:empty { display: none; }
 #mcWall { display: none; }
 #mcWall.on { display: flex; flex-direction: column; position: absolute; z-index: 1; overflow: hidden; }   /* 2026-09-30 가격 지형은 칸 높이에 맞춰 그린다 -- 스크롤 없음 */
