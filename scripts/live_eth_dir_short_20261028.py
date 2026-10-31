@@ -13,8 +13,12 @@
 
     python scripts/live_eth_dir_short_20261028.py --train [--month 2026-11-01]          # 이어 받기 + 학습 → ARTIFACT
     python scripts/live_eth_dir_short_20261028.py --parity PANEL_DIR LIQ_PARQUET DIAG_DIR  # (서버) 연구 전진 예측과 같은 달 모형 대조
+    python scripts/live_eth_dir_short_20261028.py --train65 [--month 2026-11-01]        # BTC·SOL·XRP 용 65열판(학습 코인 ETH·BTC·XRP) → ART65
     python scripts/live_eth_dir_short_20261028.py --selftest
-    python scripts/live_eth_dir_short_20261028.py                                       # (서버) 지금 예측 한 줄
+    python scripts/live_eth_dir_short_20261028.py [--coin btc|sol|xrp]                  # (서버) 지금 예측 한 줄
+
+2026-10-31 BTC·SOL·XRP(docs/experiments/coin_dir_short_btc_sol_20261031.md · xrp_dir_short_20261031.md, 시험 26-06~10 엄격 통과):
+  호가 깊이 없는 65열판 · 지평마다 연구가 고른 학습 코인의 모형을 대상 코인 피쳐에 적용(TABLE) · 대상 바꾸기 = d4.frames_for.
 """
 from __future__ import annotations
 
@@ -49,6 +53,11 @@ SEEDS = [613866575, 836385207, 1170305695, 2083046697, 504567861]
 ENS = ("rg", "clip2", "huber", "sign")
 BASE = dict(n_estimators=300, learning_rate=0.03, num_leaves=31, min_child_samples=500, subsample=0.5, subsample_freq=1, colsample_bytree=0.8, reg_lambda=10.0)
 NJ = 4                                                # 연구와 같은 스레드 수 — 히스토그램 합 순서까지 같게
+# 코인 → {지평: 학습 코인}(연구 검증 IC 로 고른 팔). ETH 는 75열판 ARTIFACT 그대로.
+TABLE = {"BTC": {3: "BTC", 12: "ETH"}, "SOL": {3: "ETH", 12: "ETH"}, "XRP": {3: "XRP", 12: "ETH"}}
+ART65 = {s: ROOT / f"data/live/{s.lower()}_dirshort65_model.joblib" for s in ("ETH", "BTC", "XRP")}
+NJ65 = {"ETH": 1, "BTC": 1, "XRP": 4}                # 그 팔을 낸 연구 실행의 스레드 수(코인 연구 1 · XRP 연구 4) — 예측이 비트 단위로 같게
+OOS_SEEDS = {"ETH": OOS_SEED} | {c: ROOT / f"data/live/{c.lower()}_dirshort_oos_seed.parquet" for c in TABLE}   # 연구 시험 창 고른 팔 5시드 평균
 
 
 # ── 피쳐·표적 (연구와 같은 식) ──────────────────────────────────────────────
@@ -61,8 +70,8 @@ def book_feats(E: pd.DataFrame) -> pd.DataFrame:
         depth1_z=ld1 - ld1.rolling(288, min_periods=144).mean(), bid_near=b[1] / b[5], ask_near=a[1] / a[5], d_age=E.d_age)).astype(np.float32)
 
 
-def dataset(frames: dict, book: pd.DataFrame, dc: pd.Series | None = None):
-    """→ t(결정 시각 = 봉 마감, 2024-01-01~ 끊김 없는 5분) · X(N×75 float32) · ret(봉 t 수익) · sig24. 연구 프레임(v17 build)과 같은 정의."""
+def dataset(frames: dict, book: pd.DataFrame | None, dc: pd.Series | None = None):
+    """→ t(결정 시각 = 봉 마감, 2024-01-01~ 끊김 없는 5분) · X(N×75 float32, book=None 이면 65열) · ret(봉 t 수익) · sig24. 연구 프레임(v17 build)과 같은 정의."""
     e = frames["ETH"].drop_duplicates("timestamp").set_index("timestamp").close.astype(float).sort_index()
     g = pd.date_range(e.index[0], e.index[-1], freq="5min")
     P = pd.Series(e.reindex(g).ffill().to_numpy(), index=g + pd.Timedelta("5min"))
@@ -72,6 +81,8 @@ def dataset(frames: dict, book: pd.DataFrame, dc: pd.Series | None = None):
     if dc is None:   # 연구 diag_rl_dir_feat65 와 같은 일봉(그날 마지막 5분봉 종가)
         dc = frames["ETH"].set_index("timestamp").close.ffill().groupby(lambda x: x.normalize()).last()
     F = d4.build_features(frames, dc).set_index("ts").reindex(t - pd.Timedelta("5min"))[d4.FEATS]
+    if book is None:   # 65열판 = 연구 research_xrp_dir_short_20261031.dataset65
+        return t, F.to_numpy(np.float32), ret, sig
     B = book_feats(book).reindex(t - pd.Timedelta("5min"))
     return t, np.hstack([F.to_numpy(np.float32), B.to_numpy(np.float32)]), ret, sig
 
@@ -128,35 +139,55 @@ def book_update(end_day: str) -> pd.DataFrame:
     return B
 
 
-def train(frames: dict, book: pd.DataFrame, month: pd.Timestamp, dc: pd.Series | None = None) -> dict:
+def train(frames: dict, book: pd.DataFrame | None, month: pd.Timestamp, dc: pd.Series | None = None, hz=tuple(HZ), nj: int = NJ) -> dict:
     import lightgbm as lgb
     cut = month - pd.Timedelta("5min")
     for sym, f in frames.items():   # 빠진 날을 앞채움 종가로 조용히 학습하지 않게(4h train 과 같은 문)
         g = pd.concat([pd.Series([START]), f.timestamp[(f.timestamp >= START) & (f.timestamp <= cut)], pd.Series([cut])]).diff().max()
         if g > pd.Timedelta("1h"):
             raise ValueError(f"{sym} 학습 창 구멍 {g} -- vision_update 를 다시 돌린다")
-    if book.index.max() < cut - pd.Timedelta("1h"):
+    if book is not None and book.index.max() < cut - pd.Timedelta("1h"):
         raise ValueError(f"bookDepth 가 {book.index.max()} 까지뿐 -- {cut} 까지 있어야 한다(아카이브 하루 늦게 공개)")
     t, X, ret, sig = dataset(frames, book, dc); t_ns = t.asi8
     m0 = int(np.searchsorted(t_ns, month.value))
     if m0 >= len(t) or t_ns[m0] != month.value:
         raise ValueError(f"패널이 {month} 결정 시각(봉 {cut})까지 없다")
     valid = np.isfinite(ret) & (sig > 0); models, info = {}, {}
-    for h, hl in HZ.items():
-        y = fwd(ret, sig, h); tr = train_rows(t_ns, valid & np.isfinite(y), m0, h)
+    for h in hz:
+        hl = HZ[h]; y = fwd(ret, sig, h); tr = train_rows(t_ns, valid & np.isfinite(y), m0, h)
         w = None if hl is None else 0.5 ** ((t_ns[m0] - t_ns[tr]) / DAY / hl)
         models[h] = []
         for seed in SEEDS:
             ms = []
             for k in ENS:
-                m = lgb.LGBMRegressor(**BASE, **({"objective": "huber", "alpha": 1.0} if k == "huber" else {}), n_jobs=NJ, verbose=-1,
+                m = lgb.LGBMRegressor(**BASE, **({"objective": "huber", "alpha": 1.0} if k == "huber" else {}), n_jobs=nj, verbose=-1,
                                       random_state=seed).fit(X[tr], target(y[tr], k), sample_weight=w)
                 ms.append((m, float(m.predict(X[tr[::50]]).std() + 1e-12)))   # 학습 행 예측 척도(검증 통계 안 씀)
             models[h].append(ms)
         info[NAMES[h]] = dict(n_train=int(len(tr)), first=str(t[tr[0]]), last=str(t[tr[-1]]), half_life_days=hl)
         print(f"  h{h} 학습 {len(tr):,}행 ~{t[tr[-1]]}", flush=True)
-    return {"models": models, "month": str(month.date()), "train": info, "seeds": SEEDS, "base": BASE, "feats": d4.FEATS + BOOKF,
-            "book_end": str(book.index.max()), "panel_end": str(frames["ETH"].timestamp.max())}
+    return {"models": models, "month": str(month.date()), "train": info, "seeds": SEEDS, "base": BASE, "feats": d4.FEATS + (BOOKF if book is not None else []),
+            "book_end": str(book.index.max()) if book is not None else None, "panel_end": str(frames["ETH"].timestamp.max())}
+
+
+def train65(frames: dict, month: pd.Timestamp, src: str) -> dict:
+    """BTC·SOL·XRP 용 65열판: 학습 코인 src 를 ETH 자리에 두고 TABLE 이 그 코인에 맡긴 지평만 학습."""
+    hz = tuple(h for h in HZ if any(t[h] == src for t in TABLE.values()))
+    return train(d4.frames_for(frames, src), None, month, hz=hz, nj=NJ65[src]) | {"src": src}
+
+
+def art_paths(coin: str) -> list[Path]:
+    return [ARTIFACT] if coin == "ETH" else [ART65[s] for s in dict.fromkeys(TABLE[coin].values())]
+
+
+def load_art(coin: str) -> dict:
+    """코인 → 서빙 모형. BTC·SOL·XRP = 지평마다 TABLE 의 학습 코인 65열판 모형을 모은 것."""
+    import joblib
+    if coin == "ETH":
+        return joblib.load(ARTIFACT)
+    A = {s: joblib.load(ART65[s]) for s in dict.fromkeys(TABLE[coin].values())}
+    return {"coin": coin, "models": {h: A[s]["models"][h] for h, s in TABLE[coin].items()},
+            "month": min(a["month"] for a in A.values()), "src": {NAMES[h]: s for h, s in TABLE[coin].items()}}
 
 
 def predict(art: dict, X: np.ndarray) -> dict:
@@ -180,30 +211,40 @@ def book_row(con, bar_ms: int) -> tuple[np.ndarray | None, str]:
 _OOS: dict = {}
 
 
-def oos_sorted() -> dict:
+def oos_sorted(coin: str = "ETH") -> dict:
     """{"15m": 정렬된 표본 밖 예측, …}. ponytail: 씨앗 고정(4h 처럼 매달 지난 판 예측을 이어 붙이지 않음) — 달마다 예측 폭이 바뀌면 분위가 어긋난다, 그때 이어 붙이기."""
-    if not _OOS:
-        S = pd.read_parquet(OOS_SEED); _OOS.update({nm: np.sort(S[f"p{nm}"].to_numpy(float)) for nm in NAMES.values()})
-    return _OOS
+    if coin not in _OOS:
+        S = pd.read_parquet(OOS_SEEDS[coin]); _OOS[coin] = {nm: np.sort(S[f"p{nm}"].to_numpy(float)) for nm in NAMES.values()}
+    return _OOS[coin]
 
 
 def live_payload(art: dict | None = None, n_hist: int = 13) -> dict:
     """지금 봉 예측 + 표본 밖 분위(pct 0~100)·문턱(20/80 분위 밖 = signal ±1, 안 = 0) + 최근 n_hist 봉 이력(호가 깊이 온전한 봉만)."""
     import joblib
     art = art or joblib.load(ARTIFACT)
+    coin = art.get("coin", "ETH")
     now_ms = int(time.time() * 1000)
-    F = d4.build_features(d4.rest_frames(now_ms), d4.daily_closes(now_ms)).tail(n_hist)
+    F = d4.build_features(d4.frames_for(d4.rest_frames(now_ms, coin=coin), coin), d4.daily_closes(now_ms, coin)).tail(n_hist)
+    return payload_from_features(art, F)
+
+
+def payload_from_features(art: dict, F: pd.DataFrame) -> dict:
+    """피쳐 프레임(최근 n_hist 봉) → 화면 응답. 서빙·파리티·렌더 시험이 같은 함수."""
+    coin = art.get("coin", "ETH")
     bars = [int(pd.Timestamp(x).value // 10**6) for x in F.ts]
-    con = sqlite3.connect(f"file:{BOOK_DB}?mode=ro", uri=True)
-    try:
-        rows = [book_row(con, b) for b in bars]
-    finally:
-        con.close()
+    if coin == "ETH":
+        con = sqlite3.connect(f"file:{BOOK_DB}?mode=ro", uri=True)
+        try:
+            rows = [book_row(con, b) for b in bars]
+        finally:
+            con.close()
+    else:   # 65열판 — 호가 깊이 안 씀
+        rows = [(np.zeros(0, np.float32), "n/a")] * len(bars)
     ok = [i for i, (bk, _) in enumerate(rows) if bk is not None]
     P = predict(art, np.hstack([F.iloc[ok][d4.FEATS].to_numpy(np.float32), np.vstack([rows[i][0] for i in ok])])) if ok else {}
-    Q = oos_sorted(); pct = lambda nm, x: round(100 * float(np.searchsorted(Q[nm], x)) / len(Q[nm]), 1)
+    Q = oos_sorted(coin); pct = lambda nm, x: round(100 * float(np.searchsorted(Q[nm], x)) / len(Q[nm]), 1)
     thr = {nm: [round(float(np.quantile(q, .2)), 4), round(float(np.quantile(q, .8)), 4)] for nm, q in Q.items()}
-    out = {"ok": True, "decided_at_ms": bars[-1] + 300_000, "model_month": art["month"], "book": rows[-1][1],
+    out = {"ok": True, "asset": coin.lower(), "src": art.get("src"), "decided_at_ms": bars[-1] + 300_000, "model_month": art["month"], "book": rows[-1][1],
            "nan_feats": [c for c in d4.FEATS if not np.isfinite(F.iloc[-1][c])], "thr": thr, "pred": None,
            "hist": [[bars[i] + 300_000] + [pct(NAMES[h], float(P[h][j])) for h in HZ] for j, i in enumerate(ok)]}   # [결정 ms, 15분 분위, 1시간 분위]
     if ok and ok[-1] == len(bars) - 1:   # 지금 봉의 호가 깊이가 온전할 때만(warm·결측 = 비움)
@@ -259,6 +300,7 @@ def selftest() -> None:
 
 if __name__ == "__main__":
     a = sys.argv[1:]
+    coin = a[a.index("--coin") + 1].upper() if "--coin" in a else "ETH"
     if "--selftest" in a:
         selftest()
     elif "--train" in a:
@@ -274,7 +316,19 @@ if __name__ == "__main__":
             ARTIFACT.replace(ARTIFACT.with_suffix(f".{pd.Timestamp.utcnow():%Y%m%dT%H%M}.joblib"))
         tmp.replace(ARTIFACT)
         print("학습", {k: v for k, v in art.items() if k != "models"})
+    elif "--train65" in a:
+        import joblib
+        month = pd.Timestamp(a[a.index("--month") + 1]) if "--month" in a else pd.Timestamp.utcnow().tz_localize(None).normalize().replace(day=1)
+        end = str((pd.Timestamp.utcnow().tz_localize(None).normalize() - pd.Timedelta("1D")).date())
+        frames = d4.vision_update(end, days=(pd.Timestamp(end) - PANEL_START).days, panel=PANEL)   # ETH --train 이 먼저 돌면 이어 받기 없음
+        for src, path in ART65.items():
+            art = train65(frames, month, src)
+            tmp = path.with_suffix(".tmp"); joblib.dump(art, tmp)
+            if path.exists():
+                path.replace(path.with_suffix(f".{pd.Timestamp.utcnow():%Y%m%dT%H%M}.joblib"))
+            tmp.replace(path)
+            print("학습65", src, {k: v for k, v in art.items() if k != "models"})
     elif "--parity" in a:
         parity(*a[a.index("--parity") + 1:][:3])
     else:
-        print(json.dumps(live_payload(), ensure_ascii=False))
+        print(json.dumps(live_payload(load_art(coin)), ensure_ascii=False))

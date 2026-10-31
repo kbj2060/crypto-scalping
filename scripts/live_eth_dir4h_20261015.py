@@ -337,8 +337,8 @@ def rest_frames(now_ms: int | None = None, others_n: int = 340, coin: str = "ETH
     # ponytail: 교차 코인 짧은 klines 는 코인마다 따로 받는다(5분에 코인당 ~20회) -- 코인이 늘면 한 벌을 공유
     for sym in [s for s in ["ETH"] + COINS if s != coin]:   # 교차 = 1일 수익(288봉)·BTC 4h·OI 1h 면 충분
         k = _klines(sym, others_n, now_ms)
-        if sym == "BTC":
-            k = k.merge(_metric("BTC", "openInterestHist", others_n / 288 + 0.1), on="timestamp", how="left")
+        if sym == ("ETH" if coin == "BTC" else "BTC"):   # OI 1h = frames_for 뒤 "BTC" 자리(BTC 대상이면 ETH 가 그 자리 -- X_btc_doi1h)
+            k = k.merge(_metric(sym, "openInterestHist", others_n / 288 + 0.1), on="timestamp", how="left")
         frames[sym] = k
     for f in frames.values():
         for c in MCOLS:

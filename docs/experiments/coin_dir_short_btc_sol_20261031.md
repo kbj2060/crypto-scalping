@@ -52,3 +52,10 @@
 5. `/api/dir-short?asset=btc|sol` 인자 + app.js `refreshDirShort` 의 ETH 전용 분기 해제 → **화면 변경 = /impeccable 시안 먼저**(대시보드 규칙). XRP 와 한 번에 «코인 표»로.
 6. 파리티: 서버에서 코인별 `live_payload` 65열을 vision 패널 같은 봉과 셀 단위 대조(ETH `--parity` 문턱).
 7. 표시 문구: «BTC 1시간·SOL 15분·1시간 = ETH 로 학습한 모형» 툴팁(투명성).
+
+## 서빙(2026-10-31, 체크리스트 1~7 · XRP 함께 — 사용자 «남은 거 모두 진행»)
+- 코드: `scripts/live_eth_dir_short_20261028.py` 코인 표 `TABLE = {BTC: {15분 BTC, 1h ETH}, SOL: {ETH, ETH}, XRP: {XRP, ETH}}` · 65열판 `train65(frames, month, src)`(= `train(..., book=None)`, 대상 바꾸기 `d4.frames_for`) · `ART65 = data/live/{eth,btc,xrp}_dirshort65_model.joblib`(ETH = 두 지평, BTC·XRP = 15분만) · `load_art(coin)` · `payload_from_features`(응답 `asset`·`src`·`book="n/a"`) · 씨앗 `OOS_SEEDS`. 스레드 수 `NJ65 = {ETH 1, BTC 1, XRP 4}` = 그 팔을 낸 연구 실행과 같게. ETH 75열판은 그대로.
+- `live_eth_dir4h_20261015.rest_frames(coin=BTC)`: 교차 OI 1h 를 frames_for 뒤 «BTC» 자리(= ETH)에 붙이도록 고침(전엔 X_btc_doi1h 가 비었을 것). ETH·SOL·XRP 대상은 그대로.
+- `/api/dir-short?asset=eth|btc|sol|xrp`(그 밖 `unsupported_asset`) · 캐시 `dir_short:{coin}` · 아티팩트 mtime 묶음. app.js `DIRSHORT_ASSETS`·`dirShortNow()`·`DIRSHORT_NOTE`(코인별 모델 줄·적중) — ETH 아닌 코인은 툴팁에 점수·문턱 숫자 없이 분위만(ETH 학습 팔 상승 편향). 배치·색은 그대로. E2 가격 경로는 ETH 전용 그대로(`dirShortNow()` 로 코인 섞임만 막음).
+- 파리티(`test/test_dir_short_coins_parity_20261031.py`, 로컬 vision 패널 · 10월 모형 7,777행): BTC 15분·1h · SOL 15분·1h · XRP 1h **최대 차 0** · XRP 15분 1.2e-6(스레드 4 — 문턱 1e-4, ETH `--parity` 와 같음). 씨앗 = 연구 preds 시험 창 고른 팔 5시드 평균 42,912행.
+- 화면(`test/render_dir_short_coins_20261031.py`, 서버 페이지 + 로컬 app.js · /api/dir-short 모킹): 1920·390 × BTC·SOL·XRP·ETH PASS · 다른 코인 응답 안 섞임 · JS 오류 0.
