@@ -125,3 +125,4 @@ scripts/ops/handoff.hosts.conf*
 # 2026-10-26 서버 cron 이 매월 쓰는 박스 1h 보정 -- 추적하면 서버 워킹트리 수정 = deploy_watcher stash 충돌
 dashboard/box_hold_platt90_eth_1h.json
 dashboard/box_hold_platt90_xrp_1h.json
+dashboard/box_hold_platt90_btc_1h.json
