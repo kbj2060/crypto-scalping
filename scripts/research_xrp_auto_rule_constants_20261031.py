@@ -15,11 +15,11 @@ ROOT = Path("/home/kbj20/crypto-scalping/data/binance_vision")
 WT = Path(__file__).resolve().parents[1]
 CACHE = WT / "data/klines1m_daily_cache"
 OUT = WT / "tmp/xrp_auto_rule_20261031"
-END = pd.Timestamp("2026-10-30 23:59")
+END = pd.Timestamp("2026-10-27 23:59")   # 수정 1: vision 10-28 없음
 MK, TK = 2e-4, 5e-4
 C_E = (2.0, 0.0075, 0.05)
 SPLITS = {"stress": ("2022-01-01", "2023-12-31"), "train": ("2024-01-01", "2025-12-31"),
-          "val": ("2026-01-01", "2026-05-31"), "test": ("2026-06-01", "2026-10-30")}
+          "val": ("2026-01-01", "2026-05-31"), "test": ("2026-06-01", "2026-10-27")}
 N_E1, TRIPS_DAY, NPATH, NBOOT, BLOCK = 20_000, 2.37, 4_000, 2_000, 5
 
 
@@ -219,7 +219,10 @@ def main():
     idx, D = aligned()
     led = pd.DataFrame([json.loads(x) for x in open(WT / "data/live/account_round_trips.jsonl")])
     led = led[led.symbol.str.startswith("ETH") & (led.closed == True)]
+    hold_min_all = np.maximum(1, np.round((led.exit_time - led.entry_time) / 6e4)).astype(int).values
+    led = led[pd.to_datetime(led.exit_time, unit="ms") <= END]   # 수정 1: 데이터 끝 밖 왕복은 E2 에서 제외
     hold_min = np.maximum(1, np.round((led.exit_time - led.entry_time) / 6e4)).astype(int).values
+    hold_min, hold_e2 = hold_min_all, hold_min
     r, nr = sigma_ratio(idx, D, *SPLITS["train"])
     C_X = (2.0 / r, 0.0075 * r, 0.05 * r)
     rep = {"r": r, "r_days": nr, "C_E": C_E, "C_X": C_X, "n_ledger": len(led), "splits": {}}
@@ -250,7 +253,7 @@ def main():
     # E2 원장 이식(보조)
     ts = pd.to_datetime(led.entry_time, unit="ms").dt.floor("1min")
     t2 = idx.get_indexer(ts).astype(np.int64)
-    h2 = hold_min.astype(np.int64)
+    h2 = hold_e2.astype(np.int64)
     s2 = np.where(led.side.values == "LONG", 1.0, -1.0)
     e2 = {}
     for nm, (k, C) in {"eth_CE": ("eth", C_E), "xrp_CE": ("xrp", C_E), "xrp_CX": ("xrp", C_X)}.items():
