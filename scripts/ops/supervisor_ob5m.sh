@@ -9,7 +9,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PY="${PYTHON_BIN:-$HOME/miniconda3/envs/quant_ai/bin/python}"
 SYM="${1:-ETHUSDT}"
-case "$SYM" in ETHUSDT|XRPUSDT) ;; *) echo "모르는 코인 $SYM (워커 COINS 에 없음)" >&2; exit 2 ;; esac   # 없으면 import KeyError 를 15초마다 재기동한다
+case "$SYM" in ETHUSDT|XRPUSDT|SOLUSDT|BTCUSDT) ;; *) echo "모르는 코인 $SYM (워커 COINS 에 없음)" >&2; exit 2 ;; esac   # 없으면 import KeyError 를 15초마다 재기동한다
 TAG="$(echo "${SYM%USDT}" | tr '[:upper:]' '[:lower:]')"
 cd "$ROOT"
 

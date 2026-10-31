@@ -40,16 +40,18 @@ from scripts.live_trade_tape_collector_20260916 import BUCKETS  # noqa: E402 -- 
 #   상수가 모듈 위에서 정해져 argparse 전에 읽는다 · 프로세스 줄에 코인이 보여야 supervisor_ob5m.sh 가 코인별로 중복을 막는다.
 #   코인마다 다른 것 = 거래소 틱 · 벽 몫 · 추적 문턱(연구 COIN_CFG: XRP 는 칸이 굵어 5% 가 늘 참 -> 9.7% · 중앙값 8배) · 테이프 칸(수집기 BUCKETS 그대로).
 #   XRP 대조 = --symbol XRPUSDT --parity <날> (연구 bars_XRP 1e-9 · 10-02·10-15·10-24 849봉 불일치 0).
-COINS = {"ETHUSDT": (100, 0.05, (20, 50, 100)), "XRPUSDT": (10_000, 0.097, (8, 20, 40))}
+#   2026-10-31 SOL·BTC 도(사용자 «표에 모두 on»): 연구 COIN_CFG SOL (0.098, 5/12/25) · BTC 는 연구 기본값(ETH 와 같음) · 틱 = 연구 TICKS.
+#   idx 상한 = 가격 × 틱 이 넘으면 그 가격 변경은 버려진다 -- BTC 만 $300k(48MB), 나머지 1M 칸(16MB).
+COINS = {"ETHUSDT": (100, 0.05, (20, 50, 100), 1_000_000), "XRPUSDT": (10_000, 0.097, (8, 20, 40), 1_000_000),
+         "SOLUSDT": (100, 0.098, (5, 12, 25), 1_000_000), "BTCUSDT": (10, 0.05, (20, 50, 100), 3_000_000)}
 SYM = (sys.argv[sys.argv.index("--symbol") + 1] if "--symbol" in sys.argv[:-1] else "ETHUSDT").upper()
 COIN = SYM[:-4]
 # TICK = 거래소 틱 1/$ · WALL_SHARE = 벽 = 같은 쪽 ±50bp 깊이의 이 몫 이상 한 칸 · KS = 사건 추적 하한 = 같은 쪽 ±50bp 비영 레벨 중앙의 KS[0]배
-TICK, WALL_SHARE, KS = COINS[SYM]
+TICK, WALL_SHARE, KS, IDX_MAX = COINS[SYM]
 BUCKET = BUCKETS[SYM.lower()]
 DD = ROOT / f"data/live/orderflow/depthdiff/{SYM}"
 TAPE = ROOT / "data/hot/binance_tape.sqlite"
 DB = ROOT / f"data/live/ob5m/{SYM.lower()}.sqlite"
-IDX_MAX = 1_000_000   # ponytail: 연구는 10M($100k) -- 16MB 로 줄임. ETH 가 $10k 를 넘으면 올린다(넘는 가격 변경은 버려진다)
 BAR = 300_000
 # ── 정의 문턱(연구 그대로 -- 바뀌면 여기만 · 코인별 WALL_SHARE·KS 는 위 COINS) ──
 BIG_AGE_MS = 30_000    # 사건 벽은 30초 이상 서 있던 것만
