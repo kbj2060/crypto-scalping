@@ -2697,7 +2697,11 @@ def make_app() -> web.Application:
 
     vol4h_art: dict = {}   # 코인 -> {mtime, art}
     # 코인 -> 아티팩트(None = ETH 기본 svm.ARTIFACT). XRP 는 매달 재학습이 아직 없다(ponytail: 10-19 학습분 고정 -- 재학습 cron 은 파라미터화한 복사본이 필요).
-    VOL4H_ARTIFACTS = {"eth": None, "xrp": REPO_ROOT / "data" / "live" / "xrp_sizing_vol_model.joblib"}
+    VOL4H_ARTIFACTS = {"eth": None, "xrp": REPO_ROOT / "data" / "live" / "xrp_sizing_vol_model.joblib",
+                       # 2026-10-31 BTC·SOL = QX4 만(4코인 아티팩트에 이미 있음 · HAR 대비 엄격 통과 docs/experiments/btc_sol_vol4h_qx4_20261031.md).
+                       # ponytail: HGB 대체 아티팩트는 아직 없음 → QX4 실패 시 artifact_missing. 학습하면 이 경로에 두면 된다.
+                       "btc": REPO_ROOT / "data" / "live" / "btc_sizing_vol_model.joblib",
+                       "sol": REPO_ROOT / "data" / "live" / "sol_sizing_vol_model.joblib"}
     # 2026-10-25 QX4(4코인 결합 · 굴림 3창 통과 · docs/prereg/vol4h_forecast_horserace_20261025.md). 스위치 = 아티팩트 파일:
     #   data/live/vol4h_qx4.joblib 이 있고 읽히면 QX4, 없거나 실패면 아래 배포 HGB 그대로(되돌리기 = 파일 삭제).
     QX4_ARTIFACT = REPO_ROOT / "data" / "live" / "vol4h_qx4.joblib"
@@ -2720,17 +2724,19 @@ def make_app() -> web.Application:
         if not res.get("ok"):
             print(f"vol4h qx4 → HGB 대체: {res.get('reason')}", flush=True)
             return None
-        if asset == "eth":   # 2026-10-26 B1 QX4I(옵션 ATM IV 보정 · ETH 계수만 있음 · 조건부 채택, 전진 voliv 2027-01-22) -- 실패면 칸만 빠진다
+        from scripts.live_vol4h_qx4_20261025 import BETA_I, iv_now, qx4i_log
+        coin = asset.upper()
+        if coin in BETA_I:   # 2026-10-26 B1 QX4I(옵션 ATM IV 보정 · 조건부 채택, 전진 voliv 2027-01-22) · 10-31 BTC(12b 재현) -- 실패면 칸만 빠진다
             try:   # 10-26 리뷰: 여기 예외가 이미 계산한 QX4 까지 버리고 HGB 로 떨어뜨렸다
-                from scripts.live_vol4h_qx4_20261025 import iv_now, qx4i_log
-                iv, hour = await asyncio.to_thread(iv_now, qx4_state.setdefault("iv", {}), time.time() * 1000)
+                iv, hour = await asyncio.to_thread(iv_now, qx4_state.setdefault("iv", {}).setdefault(coin, {}), time.time() * 1000, coin=coin)
                 if iv is not None:
-                    lq = qx4i_log(res["log_rv"], iv)
+                    lq = qx4i_log(res["log_rv"], iv, coin)
                     s = math.exp(lq / 2)
                     res.update(iv_atm=iv, iv_hour_ms=hour, sig4h_iv_pct=round(100 * s, 3), sig4h_iv_usd=round(res["px"] * s, 2), log_rv_iv=lq)
             except Exception as exc:  # noqa: BLE001
-                print(f"vol4h qx4i 칸 생략: {type(exc).__name__}: {exc}", flush=True)
-            qx4_state["last"] = res   # 2026-10-29 4h 박스 유지(box_hold.with_qx4i)가 읽는다
+                print(f"vol4h qx4i 칸 생략({coin}): {type(exc).__name__}: {exc}", flush=True)
+        if asset == "eth":
+            qx4_state["last"] = res   # 2026-10-29 4h 박스 유지(box_hold.with_qx4i, ETH 만)가 읽는다
         return res
 
     async def api_vol_forecast(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, 표시 전용)
@@ -2753,7 +2759,7 @@ def make_app() -> web.Application:
             va = vol4h_art.setdefault(asset, {})
             if va.get("mtime") != mt:
                 va.update(mtime=mt, art=await asyncio.to_thread(load_model, path))
-            if va["art"] is None:
+            if va.get("art") is None:   # 파일 없음(mtime None 이 처음부터 같아 art 키가 안 생김) 포함
                 return {"ok": False, "reason": "artifact_missing"}
             rows, end = [], None
             for _ in range(10):   # 1000봉 × 10 = 34일(30일 기준 + 400봉 예열)
