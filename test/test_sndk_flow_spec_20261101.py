@@ -15,3 +15,12 @@ def test_sndk_flow_spec():
 
 def test_sndk_coin_config_has_every_key():
     assert set(COIN_CONFIG["sndk"]) == set(COIN_CONFIG["xrp"]) and COIN_CONFIG["sndk"]["binance_symbol"] == "SNDKUSDT"
+
+
+def test_every_flow_asset_has_a_tab_button():
+    """탭은 정적 HTML 이다 -- 서버 목록에 있어도 버튼이 없으면 화면에 안 뜬다(11-01 SNDK 가 이렇게 안 보였다)."""
+    import re
+    from pathlib import Path
+    html = Path("dashboard/live/index.html").read_text(encoding="utf-8")
+    buttons = set(re.findall(r'<button[^>]*\bdata-asset="([a-z]+)"', html))
+    assert set(FLOW_SPECS) <= buttons, set(FLOW_SPECS) - buttons
