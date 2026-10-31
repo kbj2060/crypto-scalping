@@ -574,6 +574,119 @@ async def run_entry_wait(session, plan: dict, state: dict, wait_sec: float, on_f
     return state
 
 
+LIMIT_MAX_SEC = 4 * 3600.0   # 지정가 대기 최대(재시작·다운 중 체결은 손절이 없다 -- 노출 창을 줄인다, 검증 D2) -- 넘으면 «만료 취소»(시장가 없음)
+REPRICE_SEC, REPRICE_MIN_REL, REPRICE_MAX = 20.0, 1e-4, 50   # 자동 재조정: 20초마다 확인 · 주문가가 목표에서 1bp 이상 벗어나면 다시 걸기 · 최대 50회(큐 자리를 잃는 비용 상한)
+
+
+async def run_entry_limit(session, plan: dict, state: dict, max_sec: float = LIMIT_MAX_SEC, on_fill=None, reprice=None) -> dict:
+    """2026-10-31 사용자 «현재가 peg 말고 가격선을 정해 limit 으로 기다리기 · 선을 끌면 주문 수정».
+    GTX(post-only)를 **사용자가 정한 가격**에 걸고 기다린다. 따라가지도(리페그) 시장가로 넘기지도 않는다 -- 안 닿으면 안 들어가는 게 지정가의 뜻이다.
+    -5022(지금 걸면 체결)는 새 호가로 다시 걸지 않고 거부로 끝낸다(가격이 호가를 넘은 것 = 사용자가 정한 가격이 아니다).
+    밖에서 state["action"]="cancel" → 다음 조회(≤3초)에 취소 확인 뒤 멈춤 · state["amend"]={"price": p} → 걸린 주문을 취소 **확인** 뒤 남은 수량으로 새 가격에 다시 건다.
+    reprice = async () -> 새 주문가|None: 차트선(USDT)은 그대로인데 USDC/USDT 차이(basis)가 움직여 주문가가 선에서 벗어나면 같은 «수정» 경로(취소 확인 → 다시 걸기)로 따라간다. 체결이 시작되면 멈춘다.
+    on_fill = 첫 체결을 본 순간 한 번(서버가 익절·손절을 바로 건다). 표식은 WAIT_TAG -- 서버 재시작 때 고아 정리(cancel_wait_orphans)가 같이 지운다."""
+    key, secret = os.getenv("BINANCE_API_KEY", ""), os.getenv("BINANCE_SECRET_KEY", "")
+    if not (key and secret):
+        state.update(phase="error", error="API 키가 없습니다", done_at=now_iso())
+        return state
+    offset = await _clock_offset(session)
+    pside = plan["positionSide"]
+    common = {"symbol": plan["symbol"], "side": plan["side"], "positionSide": pside}
+    state["leverage"] = await ensure_leverage(session, plan["symbol"], int(plan.get("target_leverage") or 0), key, secret, offset)
+    total, price = float(plan["quantity"]), float(plan["price"])
+    state.update(phase="working", mode="limit", filled=0.0, limit_price=price, quantity=total, repegs=0, amends=0,
+                 deadline_sec=max_sec, wait_until=datetime.fromtimestamp(time.time() + max_sec, timezone.utc).isoformat())
+    deadline, done, outside, rej = time.monotonic() + max_sec, 0.0, False, 0
+    while round(total - done, 8) > 0 and time.monotonic() < deadline and not state.get("action"):
+        remaining = round(total - done, 8)
+        cid = f"{WAIT_TAG}{pside[:1]}{int(time.time() * 1000)}"
+        order = await signed(session, "POST", "/fapi/v1/order",
+                             {**common, "type": "LIMIT", "timeInForce": "GTX", "price": round(price, 8),
+                              "quantity": remaining, "newClientOrderId": cid}, key, secret, offset)
+        if "__error__" in order and not order["__error__"][:1].isdigit():
+            # 🔴네트워크·시간초과 = 나갔는지 모른다 -- 거부로 치면 살아 있는 GTX 가 손절 없이 체결된다. 표식으로 찾아 본다
+            for _ in range(3):   # 한 번 못 찾았다고 «없다»가 아니다(처리 전일 수 있다) -- 세 번 본다
+                found = await signed(session, "GET", "/fapi/v1/order", {"symbol": common["symbol"], "origClientOrderId": cid}, key, secret, offset)
+                if "__error__" not in found and found.get("orderId"):
+                    order = found
+                    break
+                await asyncio.sleep(1.0)
+            if "__error__" in order:   # 끝내 모르면 늦게 도착할 수 있는 그 주문을 표식으로 지운 뒤 멈춘다(고아 방지, 검증 D3)
+                await signed(session, "DELETE", "/fapi/v1/order", {"symbol": common["symbol"], "origClientOrderId": cid}, key, secret, offset)
+                state.update(phase="error", filled=done, done_at=now_iso(),
+                             error=f"주문 접수 여부를 확인하지 못했습니다({order['__error__']}) — 거래소에서 직접 확인하세요")
+                return state
+        if "__error__" in order:
+            err = order["__error__"]
+            if is_post_only_reject(err) and (state.get("amends", 0) + state.get("reprices", 0)) > 0 and rej < 3 and not state.get("action"):
+                rej += 1   # 수정·재조정 직후 호가가 넘어갔다(검증 D6) -- 주문을 죽이지 말고 새 목표가로 다시(최대 3번)
+                if reprice is not None:
+                    try:
+                        px = await reprice()
+                    except Exception:  # noqa: BLE001
+                        px = None
+                    if px:
+                        price = float(px)
+                        state["limit_price"] = price
+                await asyncio.sleep(1.0)
+                continue
+            state.update(phase="rejected", filled=done, done_at=now_iso(),
+                         error=("지정가가 호가를 넘어 지금 걸면 체결됩니다(메이커 불가) — 가격을 호가 안쪽으로 옮기세요" if is_post_only_reject(err) else err))
+            return state
+        oid = order.get("orderId")
+        state.update(order_id=oid, client_order_id=cid, limit_price=price)
+        this_filled, status, last_chk = 0.0, "", time.monotonic()
+        while time.monotonic() < deadline and not state.get("action") and not state.get("amend"):
+            await asyncio.sleep(POLL_SEC)
+            cur = await signed(session, "GET", "/fapi/v1/order", {**common, "orderId": oid}, key, secret, offset)
+            if "__error__" in cur:
+                continue        # 조회 실패는 재시도 -- 주문은 거래소에 살아 있다
+            this_filled, status = executed_qty(cur), str(cur.get("status") or "")
+            state["filled"] = round(done + this_filled, 8)
+            if this_filled > 0 and on_fill is not None:
+                await on_fill()
+                on_fill = None
+            if status in TERMINAL:
+                break
+            if (reprice is not None and done + this_filled == 0 and state.get("reprices", 0) < REPRICE_MAX
+                    and time.monotonic() - last_chk >= REPRICE_SEC):   # 체결 시작 뒤엔 안 건드린다(큐 자리 · 부분 체결 수량 어긋남)
+                last_chk = time.monotonic()
+                try:
+                    px = await reprice()
+                except Exception:  # noqa: BLE001 -- 재조정은 덤 -- 실패하면 지금 주문 그대로
+                    px = None
+                if px and abs(px / price - 1) >= REPRICE_MIN_REL and not state.get("amend") and not state.get("action"):
+                    state["amend"] = {"price": float(px), "auto": True}
+        outside = status in TERMINAL and status != "FILLED"   # 우리가 취소하기 전에 끝났다 = 거래소(앱)에서 취소됨
+        if status not in TERMINAL:
+            confirmed = await ensure_closed(session, common, oid, key, secret, offset)
+            if confirmed is None:   # 살아 있는지 모르는 채로 또 걸지 않는다
+                state.update(phase="error", filled=round(done + this_filled, 8), done_at=now_iso(),
+                             error=f"주문 {oid} 취소를 확인하지 못했습니다 — 거래소에서 직접 확인하세요")
+                return state
+            this_filled = confirmed
+        done = round(done + this_filled, 8)
+        state["filled"] = done
+        if outside:
+            break
+        if this_filled > 0 and on_fill is not None:   # 취소 확인 중에 체결된 몫도 손절을 건다
+            await on_fill()
+            on_fill = None
+        am = state.pop("amend", None)
+        if am and not state.get("action") and done == 0:   # 🔴한 주라도 체결됐으면 가격 수정은 버린다(한 포지션이 두 가격에 체결 · 선 기준 어긋남, 검증 D4) -- 남은 수량은 옛 가격에 다시
+            price, total = float(am["price"]), float(am.get("qty") or total)   # 새 가격에 맞춰 다시 잰 수량(명목 유지)
+            state["quantity"] = total
+            k = "reprices" if am.get("auto") else "amends"
+            state.update(limit_price=price, **{k: state.get(k, 0) + 1})
+    remaining = round(total - done, 8)
+    if remaining <= 0:
+        state.update(phase="filled_maker", taker_qty=0.0, done_at=now_iso())
+    else:
+        state.update(phase="cancelled", taker_qty=0.0, done_at=now_iso(),
+                     cancel_reason=(state.get("action_reason") or "사용자 취소") if state.get("action") else ("거래소에서 취소됨" if outside else "대기 시간 만료"))
+    return state
+
+
 async def cancel_wait_orphans(session, symbols: list[str]) -> dict:
     """서버 재시작 때: 기다리기 표식(WAIT_TAG) 주문이 거래소에 남아 있으면 지운다 -- 그 주문을 지켜보던 작업은 죽었다(고아).
     목록을 못 읽으면 그 사실을 돌려준다(못 지웠는데 «없다»로 넘어가면 안 된다)."""
