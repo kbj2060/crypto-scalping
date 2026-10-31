@@ -34,8 +34,8 @@ NB, NP = 2000, 200
 
 def frames_for(target: str) -> dict:
     f = {s: pd.read_parquet(PANEL / f"{s}USDT.parquet") for s in ["ETH"] + d4.COINS}
-    if target == "XRP":
-        f["ETH"], f["XRP"] = f["XRP"], f["ETH"]
+    if target != "ETH":   # 대상 코인을 ETH 자리로, ETH 는 대상 코인의 교차 자리로(BTC 면 X_btc_*·U_btc_* = ETH)
+        f["ETH"], f[target] = f[target], f["ETH"]
     return f
 
 
@@ -107,14 +107,14 @@ def boot_ic(p, y, day, rng, nb=NB, blk=5):
     return out
 
 
-def score():
-    z = np.load(OUT / "preds.npz"); t = pd.DatetimeIndex(z["t"]); ret, sig = z["ret"], z["sig"]
+def score(coin="XRP", out=OUT):
+    z = np.load(out / "preds.npz"); t = pd.DatetimeIndex(z["t"]); ret, sig = z["ret"], z["sig"]
     rng = np.random.default_rng(20261031); rep = {}
     for h, nm in ds.NAMES.items():
         y = ds.fwd(ret, sig, h)
         mval = (t >= VAL[0]) & (t < VAL[1]) & np.isfinite(y)
         mtest = (t >= TEST[0]) & (t < TEST[1]) & np.isfinite(y)
-        arms = {a: z[f"{a}_{h}"].mean(0) for a in ("XRP", "ETH")}
+        arms = {a: z[f"{a}_{h}"].mean(0) for a in (coin, "ETH")}
         val_ic = {a: spear(p[mval], y[mval]) for a, p in arms.items()}
         pick = max(val_ic, key=val_ic.get)
         r = {"val_ic": val_ic, "pick": pick, "n_val": int(mval.sum()), "n_test": int(mtest.sum()),
@@ -129,8 +129,8 @@ def score():
                     "month_ic": {str(m.date()): spear(p[mm], y[mm]) for m in MONTHS
                                  for mm in [(t >= m) & (t < m + pd.offsets.MonthBegin(1)) & np.isfinite(y)] if mm.sum() > 1000}}
         # ΔIC X−E 같은 블록
-        bd = boot_ic(arms["XRP"][mtest], yt, day, np.random.default_rng(7)) - boot_ic(arms["ETH"][mtest], yt, day, np.random.default_rng(7))
-        r["d_ic_X_minus_E"] = {"est": r["XRP"]["test_ic"] - r["ETH"]["test_ic"], "p05": float(np.quantile(bd, .05)), "p95": float(np.quantile(bd, .95))}
+        bd = boot_ic(arms[coin][mtest], yt, day, np.random.default_rng(7)) - boot_ic(arms["ETH"][mtest], yt, day, np.random.default_rng(7))
+        r["d_ic_X_minus_E"] = {"est": r[coin]["test_ic"] - r["ETH"]["test_ic"], "p05": float(np.quantile(bd, .05)), "p95": float(np.quantile(bd, .95))}
         # 위약(고른 팔)
         p_full = arms[pick]; idx = np.flatnonzero((t >= TEST[0]) & (t < TEST[1]))
         nday = len(idx) // 288; ks = rng.choice(np.arange(1, nday), size=min(NP, nday - 1), replace=False)
@@ -151,25 +151,25 @@ def score():
                         "base_up": float(up.mean()), "long_tail_rate": float(up[pp >= hi].mean()), "short_tail_rate": float((~up)[pp <= lo].mean())}
         rep[nm] = r
         print(nm, json.dumps({k: r[k] for k in ("val_ic", "pick", "verdict")}, ensure_ascii=False), "test", round(ic, 4), "p10", round(r[pick]["p10"], 4))
-    (OUT / "report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1))
+    (out / "report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1))
 
 
-def selftest():
-    f = frames_for("XRP")
-    raw = pd.read_parquet(PANEL / "XRPUSDT.parquet").set_index("timestamp").close
-    assert f["ETH"].close.iloc[-1] == raw.iloc[-1] and "XRP" in f and f["XRP"].close.iloc[-1] != raw.iloc[-1]
+def selftest(coin="XRP"):
+    f = frames_for(coin)
+    raw = pd.read_parquet(PANEL / f"{coin}USDT.parquet").set_index("timestamp").close
+    assert f["ETH"].close.iloc[-1] == raw.iloc[-1] and coin in f and f[coin].close.iloc[-1] != raw.iloc[-1]
     sub = {k: v[v.timestamp >= "2025-10-01"] for k, v in f.items()}
     old, ds.START = ds.START, pd.Timestamp("2025-11-01")
     t, X, ret, sig = dataset65(sub); ds.START = old
     j = d4.FEATS.index("P_r5m"); i = 5000
-    lc = np.log(raw)   # 결정 시각 t 의 P_r5m = 봉 t−5분(마감 t) 의 로그수익 — XRP 자신
+    lc = np.log(raw)   # 결정 시각 t 의 P_r5m = 봉 t−5분(마감 t) 의 로그수익 — 대상 코인 자신
     want = (lc[t[i] - pd.Timedelta("5min")] - lc[t[i] - pd.Timedelta("10min")]) * 1e4
     assert abs(X[i, j] - want) < 1e-3, (X[i, j], want)
     assert abs(ret[i] - (raw[t[i]] / raw[t[i] - pd.Timedelta("5min")] - 1)) < 1e-12   # 표적 첫 봉 = 결정 뒤 봉
     rng = np.random.default_rng(0); y = rng.standard_normal(3000); day = np.repeat(np.arange(30), 100)
     assert abs(np.median(boot_ic(y, y, day, rng, nb=50)) - 1) < 1e-9
     assert abs(np.median(boot_ic(rng.standard_normal(3000), y, day, rng, nb=200))) < .03
-    print("selftest ok")
+    print("selftest ok", coin)
 
 
 if __name__ == "__main__":
