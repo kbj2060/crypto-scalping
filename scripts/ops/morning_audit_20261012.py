@@ -187,18 +187,13 @@ def facts_data_quality() -> dict:
     return {"at": r.get("generated_at_kst"), "status": r.get("status"), "not_ok": r.get("not_ok", [])[:12]}
 
 
-def facts_paper() -> dict:
-    d = get_json("/api/paper-arms")
-    return {"available": d.get("available"), "age_s": d.get("age_s"), "stale": d.get("stale")}
-
-
 def gather() -> dict:
     now = W.now_kst()
     cal = json.loads((ROOT / "dashboard" / "verdict_calendar.json").read_text())
     return {"generated_at_kst": now.isoformat(timespec="seconds"),
             "watchdog": safe(facts_watchdog), "deploy": safe(facts_deploy), "disk": safe(facts_disk),
             "apt_36h": safe(facts_apt), "account": safe(facts_account), "cron": safe(facts_cron),
-            "outputs": safe(facts_files), "paper_engine": safe(facts_paper), "data_quality": safe(facts_data_quality),
+            "outputs": safe(facts_files), "data_quality": safe(facts_data_quality),
             "verdicts": safe(lambda: verdict_flags(cal["items"], now.replace(tzinfo=None)))}
 
 

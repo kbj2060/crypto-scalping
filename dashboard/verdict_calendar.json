@@ -27,8 +27,9 @@
    "kind": "심사 여부",
    "title": "모의 판 — 표본이 쌓였나(화면에서는 10-13 뺐다)",
    "what": "판별 왕복 수·누적 bp·엔진 멈춤 여부를 보고 사전등록 심사를 열지 정한다. 10-05 검증 결함(재시작 손익 누락·낙폭 리셋·배수 미반영)이 고쳐졌는지도 같이",
-   "how": "curl -s localhost:8787/api/paper-arms?asset=eth | python -m json.tool (엔진은 계속 기록 중)",
-   "doc": ""
+   "how": "",
+   "doc": "",
+   "done": "10-31 닫음 — 모의 매매 엔진(rl_1s_agent paper ETH·SOL·XRP) 중단 · /api/paper-arms·벽 신호·맞대결 칸 제거. 심사 불필요(RL 축 종결)"
   },
   {
    "id": "ob_mid",

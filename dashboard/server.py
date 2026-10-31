@@ -349,13 +349,6 @@ LIQ_BURST_STATE_PATH = LIVE_DIR / "liq_burst_state.json"
 #   COINCFG["ETHUSDT"]["liq"] = log1p(USD) 12.732·13.21 의 USD 값. 옛 판(봇 z≥3, σ 바닥 $1)은 하루 11.8번·발동 중앙 $1,711 에 켜져 근거와 다른 사건이었다.
 LIQ_BURST_60S_USD = (round(math.expm1(12.732)), round(math.expm1(13.21)))   # (롱 청산, 숏 청산) ≈ $33.8만 · $54.6만
 MACRO_CALENDAR_STATE_PATH = REPO_ROOT / "data" / "live" / "macro_calendar_state.json"
-# 2026-10-04 모의 매매 엔진(scripts/rl_1s_agent.py paper, 실주문 없음)이 1분마다 쓰는 상태 -- 풋프린트 «모의 판»·② 맞대결·④ 벽 신호의 원천
-PAPER_STATE_PATH = REPO_ROOT / "data" / "research" / "rl_1s_agent_20261002" / "paper" / "state.json"
-PAPER_ARMS = ("w80_z0.5_a24_mh15", "w100_z0.5_w60")   # 적응판 · 고래판 (반반 = 엔진 PORTFOLIOS["p1"])
-# 2026-10-04 «통과 신호 판»(엔진 1d3e5a32, 10-04 00:02 UTC 재시작부터): 1~4주 추세 · 크기 · 가격×OI 1시간 · 추세 필터 · 동일위험
-PAPER_NEW_ARMS = ("trend4", "trend4_vs", "poi1h", "w80_z0.5_a24_mh15_vt", "w100_z0.5_w60_vt", "w80_z0.5_a24_mh15_er", "w100_z0.5_w60_er")
-PAPER_ASSETS = ("eth", "sol", "xrp")                  # 모의 엔진이 도는 코인(scripts/rl_1s_agent.py COINCFG)
-PAPER_STALE_S = 300                                    # 엔진은 1분마다 쓴다 -- 5분 넘게 안 바뀌면 멈춘 것
 MACRO_CALENDAR_MAX_AGE_MIN = 90.0          # 달력이라 분 단위 신선도가 의미 없다
 
 # 2026-09-10 24시간 변동성 전망 -- 새 정보원(Deribit DVOL)을 쓰는 첫 지표. 워커가 채점한다
@@ -962,25 +955,6 @@ def etag_matches(request: web.Request, etag: str) -> bool:
     return any(candidate.strip() in {"*", etag} for candidate in candidates.split(","))
 
 
-def paper_arms_payload(st: Any, now: float) -> dict[str, Any]:
-    """모의 매매 엔진 상태 -> 화면이 쓰는 몫만(두 판·반반·신호). 파일이 없거나 깨졌으면 available False(조용히 0 을 보이지 않는다)."""
-    if not isinstance(st, dict) or "arms" not in st:
-        return {"available": False, "error": "paper_state_missing"}
-    age = now - float(st.get("ts") or 0)
-    arms = st.get("arms") or {}
-    return {"available": True, "ts": st.get("ts"), "age_s": round(age, 1), "stale": age > PAPER_STALE_S,
-            "arms": {a: arms.get(a) for a in PAPER_ARMS + PAPER_NEW_ARMS}, "port": (st.get("port") or {}).get("p1"),
-            "signals": st.get("signals") or {}}
-
-
-def pick_paper_state(sts: list[Any], now: float) -> Any:
-    """앞(정식 엔진)부터 «신호를 쓰고 살아 있는» 상태를 고른다. 둘 다 아니면 정식 것(없음·멈춤을 그대로 보인다)."""
-    for st in sts:
-        if isinstance(st, dict) and st.get("signals") and now - float(st.get("ts") or 0) <= PAPER_STALE_S:
-            return st
-    return sts[0]
-
-
 # 2026-10-13 «체결 버블»(사용자 «Bookmap 같은 1초 체결 버블 · 청산맵 크기로 배포») -- 1초 × 가격 칸 체결(매수·매도·고래 몫).
 #   원천 = 체결 테이프 hot SQLite(수집기가 5초마다 완결된 초를 쓴다 → 화면 지연 ≈5초). 배경 호가는 기존 /api/flow/heatmap.
 BUBBLE_MAX_SEC = 1800                                    # 화면이 확대·이동으로 오갈 수 있는 최대 과거(30분)
@@ -1047,16 +1021,6 @@ async def api_bubble_tape(request: web.Request) -> web.Response:
             return web.json_response({"error": type(exc).__name__, "rows": []}, status=503, headers=NOCACHE)
         _bubble_cache[key] = hit
     return web.json_response(hit[1], headers=NOCACHE)
-
-
-async def api_paper_arms(request: web.Request) -> web.Response:
-    """?asset= 코인별 엔진(2026-10-04 SOL·XRP = RL_SYMBOL 프로세스, paper_<coin>/)."""
-    now, asset = time.time(), str(request.query.get("asset") or "eth").lower()
-    if asset not in PAPER_ASSETS:
-        raise web.HTTPNotFound(reason="paper_off")
-    sts = [load_json(PAPER_STATE_PATH if asset == "eth"
-                     else PAPER_STATE_PATH.parent.parent / f"paper_{asset}" / "state.json")]
-    return web.json_response({**paper_arms_payload(pick_paper_state(sts, now), now), "asset": asset}, headers=NOCACHE)
 
 
 from dashboard.worker_state import load_json, worker_payload  # noqa: E402 -- 2026-10-19 orders.py(크기 가늠자)도 써서 옮겼다
@@ -4602,7 +4566,6 @@ def make_app() -> web.Application:
     app.router.add_get("/api/xyz100", api_xyz100)
     app.router.add_get("/api/macro-today", api_macro_today)
     app.router.add_get("/api/macro-spikes", api_macro_spikes)
-    app.router.add_get("/api/paper-arms", api_paper_arms)
     app.router.add_get("/api/session-alerts", api_session_alerts)
     app.router.add_get("/api/push/config", api_push_config)
     app.router.add_post("/api/push/subscribe", api_push_subscribe)
