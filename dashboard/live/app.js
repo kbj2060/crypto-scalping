@@ -1585,6 +1585,17 @@ function snapshotAccountPosition() {
   return null;
 }
 
+// 2026-11-01 사용자 «주황 진입 표시도 USDT 로 환산»: 주문 심볼(XXXUSDC) 진입가를 차트(USDT) 가격으로 -- 선 주문과 같은 basis(무장 손절 주문가 ÷ 손절 레벨),
+//   무장 전이면 포지션 표시가(USDC) ÷ 차트 현재가(USDT). 둘 다 못 구하면 환산 안 함(1).
+function entryUsdt(pos, chartPx) {
+  const en = Number(pos?.entry_price || 0);
+  if (!(en > 0) || !/USDC$/.test(pos.symbol)) return en;
+  const b = latestBinanceAccount?.bracket_armed?.[`${pos.symbol}:${String(pos.side).toUpperCase()}`];
+  const mk = Number(pos.mark_price);
+  const basis = b && b.sl_price > 0 && b.sl_level > 0 ? b.sl_price / b.sl_level : mk > 0 && chartPx > 0 ? mk / chartPx : 1;
+  return en / basis;
+}
+
 // ── Account 카드 = 오늘 성과 + 과거 기록 (2026-10-14 사용자 시안 C · «주문은 플로팅 버튼이라 카드에서 주문은 최소화») ──
 //   위 = 포지션 한 줄(+ 진입 미리보기 한 마디) · 오늘 띠(손익 · 0~24시 흐름 · 오늘 닫힌 거래)
 //   아래 = 손익 달력(한 달씩) | 자산 곡선 + 낙폭 + 기간 성적. 주문 조작부(.acct-lanes)는 DOM 에 남아 #ofab 가 옮겨 쓴다(카드 안에서는 CSS 로 숨김).
@@ -6255,7 +6266,7 @@ function renderSnapshotChart() {
   const densityHistory = liquidationDensityHistory();
   // 2026-09-10: 이 차트는 줄곧 entryPrice=0 을 넘겨 「진입」 선을 안 그렸다. renderCandleSvg 에
   // 그리는 코드는 이미 있으므로(priceLabels 의 amber "진입"), 거래소 실계좌 진입가만 넘긴다.
-  const entryPrice = Number(snapshotAccountPosition()?.entry_price || 0);
+  const entryPrice = entryUsdt(snapshotAccountPosition(), currentPrice);
   // 2026-09-11 8번째 인자 = 봉별 청산 레인. **이 줄이 빠져 있어 레인이 통째로 안 그려졌다**
   //   (liqBars 기본값 [] -> peak 0 -> 블록 전체 skip, 오류도 안 남). 치환 대상 문자열을
   //   확인 없이 바꾸려다 조용히 실패했던 자리다.
