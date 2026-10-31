@@ -3115,12 +3115,15 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mc-gk > span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-gk.v { grid-template-columns: 44px minmax(0, 1fr) auto; }   /* 10-13 «라벨 되돌려»: 이름 · 그림 · 값 */
 .mc-gk > b { font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; min-width: 40px; }
-/* 가격 자가 줄인 높이만큼 아래 칸에 여유(사용자 «아래 칸들의 높이를 좀 더 키워서 여유롭게») -- 내용 높이(mcNeedH)가 늘어 renderCandleSvg 가 자리를 준다 */
-#mcBody.mc-cmp .mc-strip .mc-sec { padding: 14px 0 12px; }
-#mcBody.mc-cmp .mc-rows { gap: 10px; }
-#mcBody.mc-cmp .mc-strip h4, #mcBody.mc-cmp .mc-strip .mc-state { margin-bottom: 9px; }
-#mcBody.mc-cmp .mc-fc { padding-top: 14px; padding-bottom: 12px; } #mcBody.mc-cmp .mc-fc > h4 { margin-bottom: 10px; }
-#mcBody.mc-cmp .fc-c { gap: 5px; } #mcBody.mc-cmp .fc-c .hz { margin-bottom: 2px; }
+/* 2026-10-30 펜 메모 «미니 체결 버블을 다시 · 수급 차트 말고 아래 것들 높이를 줄여»: 10-28 에 넓혔던 여백(가격 자 지운 자리)을 다시 좁힌다 -- 그 높이는 버블이 가져간다 */
+#mcBody.mc-cmp .mc-strip .mc-sec { padding: 6px 0 4px; }
+#mcBody.mc-cmp .mc-rows { gap: 3px; }
+#mcBody.mc-cmp .mc-strip h4, #mcBody.mc-cmp .mc-strip .mc-state { margin-bottom: 4px; }
+#mcBody.mc-cmp .mc-fc { padding-top: 6px; padding-bottom: 0; } #mcBody.mc-cmp .mc-fc > h4 { margin-bottom: 4px; }
+#mcBody.mc-cmp .fc-c { gap: 2px; }
+.mc-bubble { display: block; width: 100%; height: 160px; margin-bottom: 6px; cursor: crosshair; touch-action: pan-y; }   /* 미니도 확대·이동(bubble_map.js VN) · 높이 = renderCandleSvg 가 준다 */
+.mc-bubble.panning { cursor: grabbing; }
+.mc-bubble:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* 2026-10-15 ⑤ 예측 줄(사용자 시안 B): 지금 추세 → 4h(+변동성) → 7일 → 4~13주. 가로 선 = 시간축, 칸 = 지평. 휴대폰은 2×2 */
 .mc-fc { border-top: 1px solid var(--soft-line); padding-top: 8px; }

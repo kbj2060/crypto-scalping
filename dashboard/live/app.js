@@ -4714,6 +4714,12 @@ function mcUsSession(nowMs = Date.now()) {
 // 2026-09-30 시장 맥락 자리(시안 Y): 넓은 화면 2단이면 풋프린트 SVG 의 오른쪽 아래 칸(viewBox 좌표 = 화면 px)에 절대 위치로 겹치고 2열 압축,
 //   그 밖(1단·휴대폰)이면 풋프린트 카드 안 차트 아래 일반 흐름. 칸이 바뀔 때만 다시 그린다.
 let mcNeedH = FIT0.mc || 0;   // 시장 맥락(좁은 칸) 내용 높이 -- renderMarketCtx 가 재고 renderCandleSvg 가 1초 수급 몫을 정할 때 쓴다
+// 2026-10-30 펜 메모 «이전 미니 체결 버블 실시간 차트를 같은 자리(1초 수급 아래)에 · 수급 차트 말고 아래 것들 높이를 줄이고 바닥을 왼쪽 지지·저항 바닥에 맞춰» --
+//   bubble_map.js 가 #mcBubble 에 최근 90초를 그린다(10-24 «지금 들어가면» 가격 자로 바꿨다가 10-28 가격 자를 지운 자리). 높이 = 칸 − 아래 두 줄(시장 맥락·⑤) 내용 → 바닥이 지지·저항 칸 바닥과 같은 선.
+const MC_BUBBLE_H = 160;   // 1초 수급 몫에서 빼는 버블 자리 = 아래 두 줄을 줄여 생긴 높이(그래서 수급 차트 높이는 그대로)
+let mcBubbleEl = null;
+const mcBubbleCanvas = () => mcBubbleEl || (mcBubbleEl = Object.assign(document.createElement("canvas"), { id: "mcBubble", className: "mc-bubble", tabIndex: 0,
+  title: "체결 버블(최근 90초 · 실시간) · 휠 = 확대·축소 · 끌기 = 이동 · 더블클릭 = 실시간" }));
 function mcPlace(svg, r, wr) {
   const body = el("mcBody"), card = el("fpCard"), wall = el("mcWall");
   if (!body || !card) return;
@@ -4941,10 +4947,10 @@ function renderMarketCtx() {
   if (!whenBox) htmlB += `<div class="mc-wide">${whenHtml}</div>`;
   if (body._mcHtml === htmlB) return;     // 같은 내용이면 다시 안 그린다(포커스 유지)
   body._mcHtml = htmlB;
-  keepFocus(body, () => { body.innerHTML = htmlB; });   // 2026-10-28 펜 메모 «가격 자 제거 · 그 자리에 수급 차트 2개를 키워» -- 맨 위 «지금 들어가면» 가격 자(#mcEntry) 삭제
+  keepFocus(body, () => { body.innerHTML = htmlB; if (G.cmpW) body.insertBefore(mcBubbleCanvas(), body.firstChild); });   // 10-30 버블 = 맨 위(1초 수급 바로 아래) · 2026-10-28 펜 메모 «가격 자 제거 · 그 자리에 수급 차트 2개를 키워» -- 맨 위 «지금 들어가면» 가격 자(#mcEntry) 삭제
   if (body.classList.contains("mc-cmp")) {   // 내용 높이(칸 높이가 아니라 자식들의 아래 끝) -- 바뀌면 차트를 다시 그려 1초 수급 몫을 조정
-    const top = body.getBoundingClientRect().top;
-    const need = Math.ceil(Math.max(0, ...[...body.children].map((k) => k.getBoundingClientRect().bottom - top)) + 6);
+    const bb = mcBubbleEl && mcBubbleEl.parentNode === body ? mcBubbleEl.getBoundingClientRect() : null, top = bb ? bb.bottom + 6 : body.getBoundingClientRect().top;   // 버블은 높이 계산에서 뺀다(renderCandleSvg 가 남는 높이를 준다)
+    const need = Math.ceil(Math.max(0, ...[...body.children].filter((k) => k !== mcBubbleEl).map((k) => k.getBoundingClientRect().bottom - top)) + 6);
     if (need > 40 && Math.abs(need - mcNeedH) > 4) {
       mcNeedH = need; if (typeof scheduleSnapshotChartRender === "function") scheduleSnapshotChartRender();
     }
@@ -8017,8 +8023,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
           [b.half, -b.half].forEach((h) => add("path", { d: `M${x - 4},${Y(h) - 4} L${x + 4},${Y(h) + 4} M${x + 4},${Y(h) - 4} L${x - 4},${Y(h) + 4}`, stroke: "var(--warn)", "stroke-width": 1.8, "stroke-linecap": "round" }));
           lab(x + 6, Y(-b.half) + fs + 4, `${BOX_NM[b.k]} 박스 50% 이탈 ≈ ${kst(t0 + b.t50)}`, "var(--warn)", "start"); } }
         const x = X(b.T), y = Y(pathAt(b.T)), usd = cp * pathAt(b.T) / 100, tag = b.k === "4h" ? (m4 ? ` (4h ${m4 < 0 ? "하위" : "상위"} 20% 칸 평균)` : " (4h 문턱 안)") : "";
-        if (x > xr + 1) { lab(xr - 6, Y(pathAt(vis[vis.length - 1])) + fs + 8, `${BOX_NM[b.k]} ${usd >= 0 ? "+" : "−"}$${Math.abs(usd).toFixed(1)}${tag} ›`, c); return; }
-        add("circle", { cx: x, cy: y, r: 3.6, fill: c }); lab(x + 8, y + fs + 6, `${BOX_NM[b.k]} ${usd >= 0 ? "+" : "−"}$${Math.abs(usd).toFixed(1)}${tag}`, c, "start");
+        if (x > xr + 1) { lab(xr - 6, Y(pathAt(vis[vis.length - 1])) + fs + 8, `${BOX_NM[b.k]} ${usd > -0.05 ? "+" : "−"}$${Math.abs(usd).toFixed(1)}${tag} ›`, c); return; }
+        add("circle", { cx: x, cy: y, r: 3.6, fill: c }); lab(x + 8, y + fs + 6, `${BOX_NM[b.k]} ${usd > -0.05 ? "+" : "−"}$${Math.abs(usd).toFixed(1)}${tag}`, c, "start");
       });
       // 2026-10-29 사용자 «15분 예측은 하락인데 왜 안 보이지»: 선 높이는 IC 기준이라 15분·1시간 신호가 몇 십 센트뿐 -- 그 지평 끝 시각, 경로 위에 방향 꺾쇠 + 글자
       //   꺾쇠 수 = 꼬리 깊이(분위 ≤5·≤12·≤20 → 3·2·1, ⑤ 예측 줄과 같은 20/80 문턱) · 보류 = 빈 원 · 신호면 방향 색, 보류면 회색
@@ -9025,7 +9031,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-10-01 바닥 = 전환 리본 바닥(사용자 «전환 리본까지 나머지 바닥을 맞춰») -- 시장 맥락·모의 판(옛 옵션 요약) 칸이 같은 선에서 끝난다
     const floorY = hAll - 2;   // 2026-10-06 리본 줄이 빠져 칸 바닥 = 상자 바닥
     const s1Avail = floorY + 12 - mtTop - 4;   // +10 = 시장 맥락 내용 높이의 여유(+6)·칸 아래 여백 -- 마지막 줄 글자가 리본 바닥에 닿게
-    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
+    const s1H = splitR ? (mcSplit ? Math.max(Math.round(s1Avail * 0.22), mcNeedH ? Math.round(s1Avail - mcNeedH - 16 - 8 - MC_BUBBLE_H) : Math.round(s1Avail * 0.47)) : s1Avail) : S1_BELOW ? S1_PANEL : SUB_1S_H - STATS_ROW_H;   // 2단: 오른쪽 칸(다섯 줄이 고르게 나눈다)
     { const fs = el("fpLineSwitch"), card = el("fpCard");   // 청산 밀도 범례(왼쪽 위, ~256px) 오른쪽
       if (fs && card) {
         // 2026-10-30 레이아웃 정리: 1단 데스크톱(≈1440, 1초 수급이 아래)도 같은 한 줄 -- 전엔 이 폭에서만 «지표» 버튼이 없고 LONG·SHORT 가 체결 기둥 머리에 끼어 호가 계기와 겹쳤다
@@ -9052,6 +9058,8 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
       } }
     // 2026-10-15 아티팩트 댓글 «봉 시간은 수급 차트 위로, 남는 공간은 미니 체결 버블»: 수급 바닥 시각 줄(12px, renderSupply1s mb 16→4)을 버블에 넘긴다
     const s1Give = mcSplit ? 12 : 0, s1Hd = s1H - s1Give;
+    if (mcSplit && mcBubbleEl) { const bh = floorY - (sub1sY + s1Hd + 12) - mcNeedH - 6;   // 10-30 버블 = 칸 − 아래 두 줄 내용 → 아래 두 줄 바닥 = 칸 바닥(지지·저항 칸 바닥)
+      const v = bh >= 60 ? `${bh}px` : "0px"; if (mcBubbleEl.style.height !== v) mcBubbleEl.style.height = v; mcBubbleEl.hidden = bh < 60; }
     post.push(() => mcPlace(svg, mcSplit ? { x: subX, y: sub1sY + s1Hd + 12, w: subW - 16, h: floorY - (sub1sY + s1Hd + 12) } : null,
             mcSplit && TRADE_W ? (() => { const y = plotBottom + 12;   // 2026-10-01(4) 프로파일 아래 = 2026-10-04 모의 판(renderPaper 가 채운다)
               return { x: ml + cw + 4, y, w: TRADE_W + BOOK_W - 8, h: floorY - y }; })() : null));   // 10-26 레인 값 칸(옛 LANE_VAL_W 144)을 빼 지지/저항 칸이 제자리로
