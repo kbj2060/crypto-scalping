@@ -21,7 +21,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 KLINES = "https://fapi.binance.com/fapi/v1/klines"
-SYMBOL = __import__("os").getenv("BO_SYMBOL", "ETHUSDT").upper()   # 코인별 워커(ETH·SOL·XRP)
+SYMBOL = __import__("os").getenv("BO_SYMBOL", "ETHUSDT").upper().split(",")[0]   # 기본 심볼. 워커는 쉼표 목록을 받아 심볼마다 symbol= 로 부른다
 FETCH_BARS = 4200            # RVOL 기준선 14일(4032봉) + 여유
 
 # ── RVOL (2026-09-23, 사용자 「거래대금 대신 rvol 은 어때?」) ─────────────────────────
@@ -71,10 +71,10 @@ def session_view(sv: float, weekend: bool) -> dict[str, Any]:
             "session_weekend": round(float(sv) / RVOL_WEEKEND_MED, 3) if ok and weekend else None}
 
 
-def _fetch(limit: int = FETCH_BARS) -> pd.DataFrame:
+def _fetch(limit: int = FETCH_BARS, symbol: str | None = None) -> pd.DataFrame:
     out, end = [], None
     while len(out) < limit:
-        p = {"symbol": SYMBOL, "interval": "5m", "limit": 1500}
+        p = {"symbol": symbol or SYMBOL, "interval": "5m", "limit": 1500}
         if end is not None:
             p["endTime"] = end
         r = requests.get(KLINES, params=p, timeout=15)
@@ -144,16 +144,17 @@ def compute_signals(d: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def get_signals(ttl: int = 60) -> dict[str, Any]:
+def get_signals(ttl: int = 60, symbol: str | None = None) -> dict[str, Any]:
     now = time.time()
-    if _CACHE.get("t", 0) + ttl > now and "v" in _CACHE:
+    if symbol is None and _CACHE.get("t", 0) + ttl > now and "v" in _CACHE:   # 캐시는 기본 심볼만(워커는 ttl=0 + symbol)
         return _CACHE["v"]
     try:
-        v = compute_signals(_fetch())
+        v = compute_signals(_fetch(symbol=symbol))
         v["ok"] = True
     except Exception as e:                                   # 신뢰경계: 외부 API
         v = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-    _CACHE.update(t=now, v=v)
+    if symbol is None:
+        _CACHE.update(t=now, v=v)
     return v
 
 

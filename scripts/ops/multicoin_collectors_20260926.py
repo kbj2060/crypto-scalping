@@ -58,6 +58,7 @@ COINS = ("BTC", "SOL", "XRP", "HYPE")
 # 2026-10-31 디스크 정책: 깊은 호가(depthdiff 하루 ~0.2~0.5GB/코인)·래스터·HL 체결/호가는 여기 있는 코인만 쌓는다.
 # 새 코인은 COINS 에만 넣으면 가벼운 단계(체결 테이프·OKX 컨텍스트·HL 맥락·경보기)만 켜진다 -- 깊은 쪽이 필요하면 DEEP 에도 넣는다.
 DEEP = ("BTC", "SOL", "XRP", "HYPE")
+BO_OK = ("SOL", "XRP")      # 추세 전환 경보기 검정을 통과한 코인(ETH 는 늘 포함)
 # 수집기별 RSS(MB) 추정 -- 2026-09-26 이 세션 실측(x86_64, 네트워크 없이 기동 후 15초). duckdb 를 import
 # 하는 수집기는 그것만으로 ~150MB 다. 래스터는 북이 차면 도크스트링 실측 67MB 까지 는다.
 RSS_MB = {"bn_depthdiff": 26, "bn_raster": 67, "bn_tape": 155, "hl_trades": 64,
@@ -109,9 +110,6 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
             "live_hyperliquid_book_ticker_collector_20260923.py", {"HL_BT_COIN": c, "HL_BT_CTX_ONLY": "1"},
             [_db(f"hl_ctx_{lc}", "data/hot/hl_ctx.sqlite", f"hl_asset_ctx WHERE coin = '{c}'",
                  "datetime(max(recv_ms) / 1000, 'unixepoch', 'localtime')")])
-        # 2026-10-04 추세 전환 경보기(ETH 모델을 그 코인 5분봉에 -- 검정 통과, eth_only_signals_solxrp_20261004) · 5분마다 klines 3회
-        add("bo", lc, 3, "supervisor_breakout_detector.sh", "live_eth_breakout_detector_worker_20260911.py", {"BO_SYMBOL": sym},
-            [_dir(f"bo_{lc}", "data/live", 15, 30, glob=f"{lc}_breakout_detector_state.json")])
         deep and add("bn_raster", lc, 2, "supervisor_orderflow_raster.sh", "live_orderflow_raster_collector_20260914.py",
             {"OF_SYMBOL": sym.lower()}, [_dir(f"bn_raster_{lc}", f"{of}/raster/{sym}", glob="*.f32")],
             eth=f"{of}/raster/ETHUSDT")
@@ -121,6 +119,11 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
         # hot 사본(SQLite WAL, 한 파일)을 본다 -- 코인별 DuckDB 를 열면 수집기 쓰기와 락이 부딪힌다.
         [_db(f"bn_tape_{x}", "data/hot/binance_tape.sqlite", f"trade_tape_1s WHERE symbol = '{x}'",
              "datetime(max(ts_sec), 'unixepoch', 'localtime')") for x in syms])
+    # 2026-10-04 추세 전환 경보기(ETH 모델을 그 코인 5분봉에 -- 검정 통과: SOL·XRP 만, eth_only_signals_solxrp_20261004) · 5분마다 klines 3회
+    #   2026-10-31 한 프로세스가 ETH + 검정 통과 코인을 차례로(BO_OK 밖 코인은 검정이 없어 켜지 않는다)
+    bos = ["ETHUSDT"] + [f"{c}USDT" for c in coins if c in BO_OK]
+    add("bo", "all", 3, "supervisor_breakout_detector.sh", "live_eth_breakout_detector_worker_20260911.py", {"BO_SYMBOL": ",".join(bos)},
+        [_dir(f"bo_{x[:-4].lower()}", "data/live", 15, 30, glob=f"{x[:-4].lower()}_breakout_detector_state.json") for x in bos])
     add("okx_ctx", "all", 2, "supervisor_okx_context.sh", "live_okx_context_collector_20260923.py", {"OKX_CTX_INST": ",".join(insts)},
         [_db(f"okx_ctx_{x}", "data/hot/okx_ctx.sqlite", f"okx_mark WHERE inst = '{x}'",
              "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')") for x in insts])
