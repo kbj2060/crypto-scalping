@@ -3618,6 +3618,7 @@ const OPT_TIPS = {
   rg: "실현 감마 국면(2026-10-02, 딜러 감마를 대신한다): 직전 12시간 ETH 5분 종가 수익률의 1차 자기상관. 음수 = 움직임이 곧 되돌아가는 장(롱감마형 — 누가 헤지하든 결과가 «누름»), 양수 = 이어지는 장(숏감마형 — «키움»). 딜러가 누구인지 가정하지 않고 효과를 가격에서 직접 잰다.\n왜 바꿨나: Deribit 은 누가 딜러인지 공개하지 않는다. 체결 기반·블록만·RFQ·관행·뒤집은 관행 등 여섯 가정 모두 검증에서 일관된 지지가 없었고(체결 기반은 종목-시점의 7.9% 에서 «딜러 포지션 > 미결제»), 업계(Glassnode·Amberdata)도 같은 가정을 검증 없이 쓴다.\n분위 = 2021~24 ETHUSDT 5분(정시 표본 35,051개) 중 위치. 국면 = 하위 1/3(−0.077 이하) 되돌림 쪽 · 상위 1/3(+0.012 이상) 추세 쪽.\n우리 검정(손대지 않은 2025-01~2026-09): 다음 4시간 실현 변동성 ÷ 평소 예측(HAR) = 되돌림 쪽 0.94배 · 보통 0.99배 · 추세 쪽 1.02배 — 크기 정보로 약하게 맞는다. 🔴국면은 오래 안 간다(지금 값이 다음 4시간 값을 거의 예측 못 함) · 큰 움직임의 1시간 되돌림 차이(56% vs 52%)는 확정 못 함 — «되돌림 장이니 역매매»로 쓰지 말 것. 체결 기반 딜러 감마와 같은 조건으로 맞붙이면 정확도는 구분 불가였지만, 가정이 없고 우연 점검에서 더 강했다(p .002 vs .07). ETH 만 검증.",
   rg_xrp: "실현 감마 국면(XRP, 2026-10-31 검정 통과): 직전 12시간 XRP 5분 종가 수익률의 1차 자기상관. 음수 = 움직임이 곧 되돌아가는 장(롱감마형 — «누름»), 양수 = 이어지는 장(숏감마형 — «키움»). 딜러가 누구인지 가정하지 않고 효과를 가격에서 직접 잰다.\n분위 = 2021~24 XRPUSDT 5분(정시 표본 34,907개) 중 위치. 국면 = 하위 1/3(−0.088 이하) 되돌림 쪽 · 상위 1/3(0.000 이상) 추세 쪽 — ETH 와 경계가 다르다(XRP 는 평소 되돌림이 더 잦다).\n우리 검정(사전등록 docs/prereg/xrp_realized_gamma_regime_20261031.md · 손대지 않은 2025-01~2026-09, 638일): 다음 4시간 실현 변동성의 HAR 잔차에 분위 계수 +0.153(일 블록 95% CI +0.079~+0.227 · 행 섞기 위약 +0.014) — 크기 정보로 맞는다. 다음 4시간 실현 ÷ 평소 예측(HAR) = 되돌림 쪽 0.91배 · 보통 0.98배 · 추세 쪽 1.02배. 같은 코드로 ETH 를 돌려 ETH 숫자(0.94·0.99·1.02)를 그대로 재현했다.\n🔴방향 신호가 아니다 — «되돌림 장이니 역매매»로 쓰지 말 것(ETH 에서 큰 움직임 되돌림 차이는 확정 못 했고 XRP 는 재지 않았다).",
   rg_btc: "실현 감마 국면(BTC, 2026-10-31 검정 통과): 직전 12시간 BTC 5분 종가 수익률의 1차 자기상관. 음수 = 움직임이 곧 되돌아가는 장(롱감마형 — «누름»), 양수 = 이어지는 장(숏감마형 — «키움»). 딜러가 누구인지 가정하지 않고 효과를 가격에서 직접 잰다.\n분위 = 2021~24 BTCUSDT 5분(정시 표본 35,051개) 중 위치. 국면 = 하위 1/3(−0.087 이하) 되돌림 쪽 · 상위 1/3(−0.001 이상) 추세 쪽 — ETH 와 경계가 다르다(BTC 는 평소 되돌림이 더 잦다).\n우리 검정(사전등록 docs/prereg/btcsol_feature_retest_20261031.md · 손대지 않은 2025-01~2026-09, 638일): 다음 4시간 실현 변동성의 HAR 잔차에 분위 계수 +0.144(일 블록 95% CI +0.065~+0.220 · 행 섞기 위약 −0.018) — 크기 정보로 맞는다. 다음 4시간 실현 ÷ 평소 예측(HAR) = 되돌림 쪽 0.90배 · 보통 1.01배 · 추세 쪽 1.01배(차이는 거의 되돌림 쪽에 있다). 같은 코드로 ETH 숫자(0.94·0.99·1.02)·XRP 계수를 그대로 재현했다.\n🔴방향 신호가 아니다 — «되돌림 장이니 역매매»로 쓰지 말 것.",
+  rg_sol: "실현 감마 국면(SOL, 2026-10-31 검정 통과): 직전 12시간 SOL 5분 종가 수익률의 1차 자기상관. 음수 = 움직임이 곧 되돌아가는 장(롱감마형 — «누름»), 양수 = 이어지는 장(숏감마형 — «키움»). 딜러가 누구인지 가정하지 않고 효과를 가격에서 직접 잰다.\n분위 = 2021~24 SOLUSDT 5분(정시 표본 35,051개) 중 위치. 국면 = 하위 1/3(−0.069 이하) 되돌림 쪽 · 상위 1/3(+0.012 이상) 추세 쪽.\n우리 검정(사전등록 docs/prereg/btcsol_feature_retest_20261031.md · 손대지 않은 2025-01~2026-09, 638일): 다음 4시간 실현 변동성의 HAR 잔차에 분위 계수 +0.107(일 블록 95% CI +0.036~+0.185 · 행 섞기 위약 −0.004) — 크기 정보로 맞는다. 다음 4시간 실현 ÷ 평소 예측(HAR) = 되돌림 쪽 0.89배 · 보통 0.93배 · 추세 쪽 0.96배 — 순서는 맞지만 세 국면 모두 1 미만(이 기간 평소 예측이 SOL 변동성을 크게 잡았다). 그래서 이 칸의 «작은 쪽»은 국면 차이보다 평소 예측의 과대에서 온 몫이 크다 — 국면끼리 비교해서 읽을 것.\n🔴방향 신호가 아니다 — «되돌림 장이니 역매매»로 쓰지 말 것.",
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 시각은 모두 KST. 규모 = 콜+풋 미결제 × 지수 = 명목 달러(실제 옵션 값어치인 프리미엄은 그 0.2% 안팎). max pain = 만기에 보유자에게 줄 내재가치 합이 가장 작은 결제가(프리미엄 무시 · 누가 보유했는지 모른 채 미결제만으로 계산). 차트·사다리의 max pain 선은 늘 «가까운 만기» 하나이고, 그 만기 미결제는 보통 전체의 2% 안팎이다(라벨에 비중). P/C = 풋÷콜 미결제 수량 — 심리 지표가 아니다: 풋 매도는 강세·풋 매수는 헤지일 수 있고, 정의마다 값이 크게 다르다(가까운 만기 1.5 · 7일 1.0 · 전 만기 0.6 · 프리미엄 0.2).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기».",
   mood: "리버설·버터플라이는 «7일 고정만기»로 잰다: 만기마다 외가격 옵션의 델타로 보간해 정확히 델타 ±0.25 의 IV 를 구하고, 7일 양옆 두 만기를 시간으로 보간한다(30일 값은 괄호). 2026-10-01 까지는 가까운 만기(늘 24시간 미만) 최근접 행사가로 쟀는데 실제 델타가 0.15~0.31 이고 1시간에 평균 3.6pt 흔들려 잡음이었다(7일 고정만기는 0.58pt). 단위 pt = IV %포인트(가격 % 아님), IV 는 Deribit 평가값(mark_iv).\n25Δ 리스크 리버설 = 델타 +0.25 콜 IV − 델타 −0.25 풋 IV(지금가에서 위아래 비슷한 거리). 음수로 깊으면(−5pt 쯤 아래) 하락 방어 풋 수요 = 공포 · 양수면 상승 콜에 웃돈 · ±1pt 안은 중립.\n버터플라이 = (25Δ 콜 IV + 25Δ 풋 IV)/2 − ATM IV = 스마일이 휜 정도. 클수록 «방향은 몰라도 크게 튈» 꼬리에 값이 붙음. 작은 양수가 평상시.\n기간 구조 = 7·30·60일 고정만기 ATM IV(연율 %, 양옆 만기의 총분산 보간). 가까운 일간 만기는 남은 시간에 미국장이 드느냐에 따라 7일 대비 0.71~0.92배로 출렁여 뺐다(만기별 값은 «옵션 만기» 시간축 선). 뒤로 갈수록 높으면 정상(콘탱고) · 앞이 더 높으면(역전) «지금 당장» 큰 움직임을 값에 넣는 스트레스(급락·이벤트 직전). IV 41 ≈ 하루 1σ ±2.1%(41/√365).\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중. 예측력 모름 → 매매 신호 말고 «분위기가 바뀌었나»(리버설 급락·기간 구조 역전) 확인용.\n기간 구조 기울기 = 고정만기 ATM IV 의 1일−7일 · 7일−30일. 1일이 7일보다 높으면 «역전»(주황). ✅검증: 역전이면 다음 24시간 실현 변동성이 DVOL 예상의 약 1.38배(45일, DVOL·최근 실현 통제 후에도 남음 · 겹치지 않는 하루 1표본 33일로는 경계선). 7일−30일도 같은 방향.\nATM 호가 폭 = 7일 근처 만기 ATM 옵션 매도−매수 호가를 IV 포인트로 — 넓으면 마켓메이커가 위험을 피한다. ⏳검정 불가(과거 호가 없음) — 10-01부터 쌓는 중, 나중에 검증.\n옵션 선도 − 지수 = 같은 스냅샷의 Deribit 가까운 만기 선도가와 Deribit 지수 차(bp). 대개 ±3bp 안이고 10분 변화 SD 1.9bp — 그 정도는 잡음. ⏳검정 불가(과거 Deribit 지수 없음, 09-28부터 쌓는 중) — «콜 수요면 +» 같은 해석은 아직 근거가 없다, 나중에 검증.\n(2026-10-02 의미 검증 뒤 남긴 옵션 정보 — 크기·국면만 말하고 방향은 말하지 않는다. 뺀 줄(검증 결과): 옵션 내재 폭(DVOL 과 동률) · 위험중립 왜도·첨도(왜도는 반대 방향, 늘 음수·늘 3 초과) · 변동성 순매수(이후 24h 예측력 없음) · 블록 요청자(순베가 = 블록 몫과 중복 · 순델타 방향 정보 없음) · O/S(높을수록 오히려 조용) · 정산 창(07~08 UTC 는 평소의 0.8배로 조용 · 미결제 크기와 무관) · 이벤트 예상 폭(공식이 0 으로 잘림).)",
   ladder: "행사가 사다리: 세로 = 행사가(지수 ±6%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.\n청록 선 = 가까운 만기 전에 한 번이라도 닿을 확률 50%(실선)·25%·10%(점선), 옅은 띠 = 50% 안쪽. Deribit 행사가별 IV 로 역산한 위험중립 확률이고 «닿음 ≈ 2×그 가격을 넘어 끝날 확률» 근사다(ETH·BTC·XRP — XRP 는 USDC 선형옵션). 주황 실선 = 내 청산가, 초록·빨강 점선 = 내 지정가 매수·매도. 참고 표시 — 방향 신호가 아니다.",
@@ -3636,9 +3637,15 @@ const RG_REF_XRP = [[1, -0.2948], [5, -0.2159], [10, -0.1785], [20, -0.1309], [3
 // 2026-10-31 BTC(사전등록 docs/prereg/btcsol_feature_retest_20261031.md §3 통과): BTC 2021~24 정시 표본 35,051개 분위 · 경계 · 보류 배수.
 const RG_REF_BTC = [[1, -0.2927], [5, -0.2152], [10, -0.1742], [20, -0.1287], [30, -0.0960], [40, -0.0698], [50, -0.0455],
                     [60, -0.0198], [70, 0.0091], [80, 0.0441], [90, 0.0906], [95, 0.1313], [99, 0.2096]];
+// 2026-10-31 SOL(같은 사전등록 §3 통과): SOL 2021~24 정시 표본 35,051개 분위 · 경계 · 보류 배수(셋 다 1 미만 -- 문구는 배수로 고른다, rgWord).
+const RG_REF_SOL = [[1, -0.2643], [5, -0.1876], [10, -0.1519], [20, -0.1083], [30, -0.0774], [40, -0.0520], [50, -0.0283],
+                    [60, -0.0046], [70, 0.0210], [80, 0.0502], [90, 0.0940], [95, 0.1356], [99, 0.2168]];
 const RG_BY = { ETH: { ref: RG_REF, cut: [-0.0769, 0.0124], x: ["0.94", "0.99", "1.02"], tip: "rg" },
                 XRP: { ref: RG_REF_XRP, cut: [-0.0881, 0.0000], x: ["0.91", "0.98", "1.02"], tip: "rg_xrp" },
-                BTC: { ref: RG_REF_BTC, cut: [-0.0870, -0.0010], x: ["0.90", "1.01", "1.01"], tip: "rg_btc" } };
+                BTC: { ref: RG_REF_BTC, cut: [-0.0870, -0.0010], x: ["0.90", "1.01", "1.01"], tip: "rg_btc" },
+                SOL: { ref: RG_REF_SOL, cut: [-0.0687, 0.0121], x: ["0.89", "0.93", "0.96"], tip: "rg_sol" } };
+// 배수 → 문구(2026-10-31 SOL 배수가 셋 다 1 미만이라 국면별 고정 문구가 숫자와 어긋났다). ETH·XRP 문구는 그대로 나온다.
+const rgWord = (x) => (Number(x) <= 0.97 ? "예상보다 약간 작은 쪽" : Number(x) >= 1.02 ? "예상보다 약간 큰 쪽" : "예상과 비슷");
 function optRealizedGamma(candles, nowS = Date.now() / 1000, ref = RG_REF, cut = [-0.0769, 0.0124]) {
   const cl = (candles || []).filter((c) => c.time + 300 <= nowS && c.close > 0).map((c) => Math.log(c.close)).slice(-145);
   if (cl.length < 145) return null;
@@ -4000,7 +4007,7 @@ function renderOptions() {
     sec(rgc ? rgc.tip : "rg", "실현 감마", !rg ? `<div class="opt-note">${rgc ? "5분봉 12시간치 대기" : `${Object.keys(RG_BY).join("·")} 만 검증 — 이 코인은 표시 안 함`}</div>`
       : kv("12시간 자기상관", `${rg.v >= 0 ? "+" : "−"}${Math.abs(rg.v).toFixed(3)} · 2021~24 중 ${rg.pct < 50 ? `하위 ${Math.max(1, Math.round(rg.pct))}` : `상위 ${Math.max(1, Math.round(100 - rg.pct))}`}%`)
       + kv("국면", rg.side === "rev" ? "되돌림 쪽 · 롱감마형" : rg.side === "trend" ? "추세 쪽 · 숏감마형" : "보통", rg.side === "rev" ? "opt-good" : rg.side === "trend" ? "opt-warn" : "")
-      + kv("다음 4시간 변동성", rg.side === "rev" ? `예상보다 약간 작은 쪽 · ${rgc.x[0]}배` : rg.side === "trend" ? `예상보다 약간 큰 쪽 · ${rgc.x[2]}배` : `예상과 비슷 · ${rgc.x[1]}배`)),
+      + kv("다음 4시간 변동성", ((x) => `${rgWord(x)} · ${x}배`)(rgc.x[rg.side === "rev" ? 0 : rg.side === "trend" ? 2 : 1]))),
     sec("ladder", "행사가 사다리", optLadderSvg(o, optColW(), fitOptLadderH)),
     // 2026-10-01 연구: 가까운 만기 최근접 RR/BF 는 잡음(1시간 SD 3.6pt) → 7일 고정만기 델타 보간(수집기 o.cm). 30일은 괄호.
     sec("mood", "심리", kv("25Δ 리스크 리버설 · 7일", optCm(o, "rr"))
@@ -4278,7 +4285,7 @@ async function refreshOpenRev() {
 //   박스 = 지금가 ± 지난 W분 고저폭의 절반 · 값 = 다음 W분 동안 한 번도 안 벗어날 확률(2022~24 학습, 2025·2026 보정 오차 ≤6pp).
 let latestBoxHold = null, boxHoldLastFetchAt = 0;
 // 2026-10-20 XRP 전용 모델(30분·1시간 통과 · 4시간 불통과 = 서버 ok false) -- 박스 줄·차트 1h 박스선이 그 코인 값만 쓴다
-const BOX_ASSETS = new Set(["eth", "xrp"]);
+const BOX_ASSETS = new Set(["eth", "xrp", "btc", "sol"]);   // 10-31 BTC·SOL 30분·1h 통과(4h 는 불통과 → 서버가 칸을 끈다)
 const boxNow = () => (latestBoxHold && latestBoxHold.ok && (latestBoxHold.asset || "eth") === activeSnapshotAsset ? latestBoxHold : null);
 const BOX_ON_CHART = true;    // 2026-10-16 사용자 «B로 배포» → 10-26 미래 칸 상자(renderCandleSvg «미래 상자»)
 const BOX_STALE_MS = 180e3;   // 10-16 리뷰: 기준가가 3분 넘게 묵으면 «지연»·차트 선 숨김(30분 박스는 3분 뒤 9%가 이미 깨져 있다)
@@ -4305,7 +4312,7 @@ function boxState(b, s) {
 const mcTipBtn = (key, name) => `<button type="button" class="mc-q mc-q1" ${helpAttrs(key)} title="${name} — 설명" aria-label="${name} 설명"><span aria-hidden="true">?</span></button>`;
 // 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, /api/vol-forecast · 서버 5분 캐시) -- 표시 전용
 let latestVol4h = null, vol4hLastFetchAt = 0;
-const VOL4H_ASSETS = new Set(["eth", "xrp"]);   // 2026-10-20 XRP 4h 변동성(ETH+XRP 합동 학습 · 2025~ R² .680 > HAR .568)
+const VOL4H_ASSETS = new Set(["eth", "xrp", "btc", "sol"]);   // 2026-10-20 XRP 4h 변동성(ETH+XRP 합동 학습 · 2025~ R² .680 > HAR .568)
 async function refreshVol4h() {
   if (activePageTab !== "snapshot" || document.hidden || !VOL4H_ASSETS.has(activeSnapshotAsset)) return;
   const now = Date.now();
@@ -4345,7 +4352,7 @@ function fcRowHtml(sec) {
   const sig = (g, hz, nm) => (!g || !g.ok ? cell(hz, "flat", "-", "데이터 대기", nm)
     : cell(hz, cls(g.state), word(g.state), `${nm.split(" ")[0]} ${zf(g.v)}${g.state ? ` · ${g.run}일째` : ""}`, `${nm} · ${g.date} UTC 종가 · |값| ≥ 1 일 때만 방향`));
   const vTip = v ? `4시간 1σ ±${v.sig4h_pct.toFixed(2)}% (±$${v.sig4h_usd < 10 ? v.sig4h_usd.toFixed(4) : v.sig4h_usd.toFixed(0)}) · 최근 ${v.ref_days}일 평소의 ${v.lvl.toFixed(2)}배 · 직전 4시간의 ${v.x_now.toFixed(2)}배 · 더 커질 확률 ${Math.round(v.p_expand * 100)}%` : "";
-  const volLine = v ? `<span class="sub fc-vol" title="${escapeHtml(vTip)}">σ ±${v.sig4h_pct.toFixed(2)}% · ×${v.lvl.toFixed(2)}</span>` : `<span class="sub">변동 ${VOL4H_ASSETS.has(activeSnapshotAsset) ? "불러오는 중" : "ETH·XRP 전용"}</span>`;
+  const volLine = v ? `<span class="sub fc-vol" title="${escapeHtml(vTip)}">σ ±${v.sig4h_pct.toFixed(2)}% · ×${v.lvl.toFixed(2)}</span>` : `<span class="sub">변동 ${VOL4H_ASSETS.has(activeSnapshotAsset) ? "불러오는 중" : `${[...VOL4H_ASSETS].join("·").toUpperCase()} 전용`}</span>`;
   const g4 = eth && latestDir4h && latestDir4h.ok ? latestDir4h : null, old4 = g4 && Date.now() - g4.decided_at_ms > 15 * 60e3;
   const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(11, 16);
   const d4Tip = g4 ? `4h 방향 예측 — 매달 재학습 HGB(ETH 65피쳐, 최근 365일) · ${g4.model_month} 모델(학습 ${g4.train_window[0].slice(0, 10)}~${g4.train_window[1].slice(0, 10)})\n`
@@ -7948,7 +7955,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   //   2026-10-26 사용자 «현재가에 붙어 계속 움직이지 말고 5분마다»: 중심·폭 모두 서버 5분 예측값에만 묶임(실시간 시세로 안 흔들림).
   //   박스(직사각형 = 유지 확률)와 구별되게 옵션 색 실선 · 묵은 값(15분↑)은 안 그림 · 화면 끝에서 잘리면 꺾쇠.
   // 2026-10-31 XRP 도(감사표 A-1 #2): XRP 는 옵션 IV 보정이 없어 QX4 σ(sig4h_pct) 그대로 -- 모양·색 같고 글자에서 «옵션 IV»만 뺀다.
-  const vKey = { eth: "sig4h_iv_pct", xrp: "sig4h_pct" }[activeSnapshotAsset];   // 코인 -> 부채꼴 σ 칸
+  const vKey = { eth: "sig4h_iv_pct", btc: "sig4h_iv_pct", xrp: "sig4h_pct", sol: "sig4h_pct" }[activeSnapshotAsset];   // 코인 -> 부채꼴 σ 칸(10-31 BTC QX4I 통과 · SOL IV 없음)
   const vI = !fcPath && isSnapshotChart && footprint && vKey && latestVol4h && latestVol4h.ok && latestVol4h.asset === activeSnapshotAsset
     && Number.isFinite(latestVol4h[vKey]) && Date.now() - latestVol4h.asof_ms <= 900e3 ? latestVol4h : null;
   const vIv = vKey === "sig4h_iv_pct", vSig = vI ? vI[vKey] : 0;
