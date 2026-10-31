@@ -23,7 +23,7 @@ PROBE = """() => {
 def run(shot):
     from playwright.sync_api import sync_playwright
     js, css, html = ((DASH / f).read_text("utf-8") for f in ("app.js", "styles.css", "index.html"))
-    sig = json.load(urllib.request.urlopen("http://127.0.0.1:18787/api/vol-forecast?asset=xrp", timeout=30))["sig4h_pct"]
+    sig_now = lambda: json.load(urllib.request.urlopen("http://127.0.0.1:18787/api/vol-forecast?asset=xrp", timeout=30))["sig4h_pct"]   # 5분마다 바뀐다 -- 화면 확인 직후에 읽는다
     fails, blocked, errs = [], [], []
     shot = pathlib.Path(shot); shot.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -46,6 +46,7 @@ def run(shot):
                 pg.wait_for_timeout(5000)
                 pr = pg.evaluate(PROBE)
                 if asset == "xrp":
+                    sig = sig_now()
                     ok = (len(pr["fan"]) == 1 and "옵션 IV" not in pr["fan"][0] and f"±{sig:.2f}%" in pr["fan"][0]
                           and bool(pr["trend"]) and "XRP 실측" in pr["trend"] and bool(pr["cb"]) and "XRP 적중 60%" in pr["cb"])
                 else:
