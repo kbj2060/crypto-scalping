@@ -27,7 +27,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 HIST_DIR = ROOT / "data" / "footprint_daily"
 # 코인 -> (선물 심볼, 테이프 칸 = 수집기 BUCKETS, 일봉 칸 CELL, 응답 가격 자릿수)
-ASSETS = {"eth": ("ETHUSDT", 0.1, 1.0, 4), "xrp": ("XRPUSDT", 0.0001, 0.0005, 6)}
+ASSETS = {"eth": ("ETHUSDT", 0.1, 1.0, 4), "xrp": ("XRPUSDT", 0.0001, 0.0005, 6),
+          "btc": ("BTCUSDT", 1.0, 30.0, 2)}   # 2026-10-31 BTC $30 ≈ 3.9bp @ $77.5k(ETH $1 ≈ 4bp 와 같은 상대 폭) · 테이프 칸 1.0 의 30배
 _ASSET = globals().get("_ASSET", "eth")      # for_asset 가 사본에 미리 심는다
 SYMBOL, TAPE_BUCKET, CELL, PRICE_DP = ASSETS[_ASSET]
 COIN, TAPE_PER_CELL = SYMBOL[:-4], round(CELL / TAPE_BUCKET)
@@ -546,7 +547,7 @@ def oi_deltas(oc: dict[int, tuple[float, float]], bar_s: int = 300) -> dict[int,
 
 
 def parse_row(v: str | None) -> int:
-    """화면이 고르는 행 크기($) → CELL 칸 수. 신뢰경계 — 1~500 칸만(ETH $1~500 · XRP 0.0005~0.25)."""
+    """화면이 고르는 행 크기($) → CELL 칸 수. 신뢰경계 — 1~500 칸만(ETH $1~500 · XRP 0.0005~0.25 · BTC $30~15,000)."""
     try:
         r = round(float(v) / CELL) if v else 5
     except (ValueError, OverflowError):        # 숫자 아님 · nan · inf
@@ -561,11 +562,12 @@ def selftest() -> None:
     bq = np.array([1.0, 0.0, 2.0, 0.0]); sq = np.array([0.0, 1.0, 0.0, 3.0])
     s, (b, bu, se) = day_from_tape(sec, pb, bq, sq)
     assert abs(s["open"] - 20004.5 * u) < 1e-9 and abs(s["close"] - 19995 * u) < 1e-9 and s["high"] == 20015 * u and s["low"] == 19995 * u
-    want = {"ETH": ([1999, 2000, 2001], [0, 1, 2], [3, 1, 0]), "XRP": ([3999, 4000, 4001, 4003], [0, 1, 0, 2], [3, 0, 1, 0])}[COIN]
+    want = {"ETH": ([1999, 2000, 2001], [0, 1, 2], [3, 1, 0]), "XRP": ([3999, 4000, 4001, 4003], [0, 1, 0, 2], [3, 0, 1, 0]),
+            "BTC": ([666, 667], [1, 2], [4, 0])}[COIN]
     assert (list(b), list(bu), list(se)) == want, (list(b), list(bu), list(se))
     assert abs(s["buy_quote"] - (20000 + 2 * 20015) * u) < 1e-6
     _, (b2, _, _) = day_from_tape(np.array([1]), np.array([20010]), np.array([1.0]), np.array([0.0]))
-    assert list(b2) == [{"ETH": 2001, "XRP": 4002}[COIN]]   # 칸 하한 정확히(ETH 2001.0 · XRP 2.0010) 은 그 칸
+    assert list(b2) == [{"ETH": 2001, "XRP": 4002, "BTC": 667}[COIN]]   # 칸 하한 정확히(ETH 2001.0 · XRP 2.0010) 은 그 칸
     lo, bb, ss = rebin(np.array([1999, 2000, 2004, 2006]), np.array([1, 2, 3, 4.0]), np.array([0, 1, 0, 1.0]), 5)
     assert lo == round(1995 * CELL, PRICE_DP) and bb == [1, 5, 4] and ss == [0, 1, 1], (lo, bb, ss)
     assert rebin_heat(np.array([1999.5 * CELL, 2004.9 * CELL]), np.array([0.2, 1.0]), 5)[:2] == [round(1995 * CELL, PRICE_DP), [0.2, 1.0]]
@@ -576,7 +578,7 @@ def selftest() -> None:
     c = build_days(hist, {"2026-09-20": one, "2026-09-21": one}, {"2026-09-21": 20.0}, {"2026-09-20": [5.0, 1.0]}, lf, "2026-09-21")
     assert c["d"] == ["2026-09-19", "2026-09-20", "2026-09-21"] and c["ll"] == [None, 5.0, 0.0] and c["part"] == [0, 2, 1]
     assert c["oi"] == [10.0, None, 20.0] and c["src"] == ["a", "t", "t"]
-    assert parse_row("abc") == 5 and parse_row("0") == 1 and parse_row("9999") == 500
+    assert parse_row("abc") == 5 and parse_row("0") == 1 and parse_row(str(9999 * CELL)) == 500
     assert parse_row(str(25 * CELL)) == 25 and parse_row("nan") == 5 and parse_row("inf") == 5 and parse_row(None) == 5
     # 4시간 칸: UTC 03:59:59 와 04:00:00 은 다른 칸
     t = int(datetime(2026, 10, 19, 3, 59, 59, tzinfo=timezone.utc).timestamp())
