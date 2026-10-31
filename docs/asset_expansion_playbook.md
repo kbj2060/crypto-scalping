@@ -25,7 +25,7 @@
 
 | 무엇 | 자리 | 값 정하는 법 |
 |---|---|---|
-| 대시보드에 보일 코인 | `dashboard/server.py` `DASHBOARD_ASSETS` 기본값 · `dashboard/live/app.js` `SNAPSHOT_ASSET_KEYS`·`ASSET_CONFIG` | — |
+| 대시보드에 보일 코인 | `dashboard/server.py` `DASHBOARD_ASSETS` 기본값 · `dashboard/live/app.js` `SNAPSHOT_ASSET_KEYS`·`ASSET_CONFIG` · 🔴`dashboard/live/index.html` 탭 버튼(`data-asset`, 정적 HTML) | — |
 | 풋프린트·1초 수급 | `dashboard/coin_flow.py` `FLOW_SPECS`(칸·자릿수) · app.js `FLOW_ASSETS` | 칸 = ETH와 같은 상대 폭(약 2bp)이면서 테이프 칸(`BUCKETS`)과 OKX 칸의 정수배. BTC $15·SOL 0.02·XRP 0.0003 |
 | 고래·리테일 경계 | `scripts/live_trade_tape_collector_20260916.py` `SIZE_BANDS_USD` | 거래량 중 리테일·고래 비중이 ETH($1만/$10만)와 같아지는 금액. vision aggTrades 4일로 잰다(ETH로 양성 대조 → $10k/$100k 재현). BTC $13k/$160k. 바꾼 뒤 그 코인 테이프 수집기 재시작 |
 | OI 1초·마크 | `scripts/live_binance_ctx_collector_20261001.py` `BN_CTX_OI_SYMBOLS`·`MARK_SYMBOLS` 기본값 | 코인당 바이낸스 가중치 +240/분(한도 2400). 넘치면 폴링 간격을 늘린다(ZEC·SNDK는 5초) |
@@ -71,6 +71,11 @@
 
 - 바이낸스 TradFi 무기한(예: SNDK)은 코인과 같은 경로로 수집된다. 다른 점: 장 마감 시간대 체결이 끊겨 신선도 기준을 넓혀야 하고, HL 포지션 대상이 아니며, 크기 구간 표본이 짧다(평일에 다시 잰다). 10-31 ZEC·SNDK 커밋 58e7399a·6f31751b 참고.
 - 학습 데이터 기간이 짧으면 «학습 2024~25» 분할을 그대로 못 쓴다 — 사전등록 «구간» 절에 바꾼 분할과 이유를 적는다. 연속 거래가 아니므로 4h 변동성·박스처럼 시간 창을 쓰는 기능은 장중 봉만으로 다시 정의해야 할 수 있다.
+
+- **대시보드 연결(11-01 SNDK, 사용자 «SNDK 선물 풋프린트만 있어도 돼»)**: §2-A 표에서 건드린 곳 = `scripts/coin_config.py` `COIN_CONFIG`(워커 없는 키는 «파일 없음 = 빈 응답») · `dashboard/live/index.html` **탭 버튼 `data-asset`**(🔴탭은 정적 HTML — 빠뜨리면 서버 목록에 있어도 안 보인다. 11-01 SNDK 가 실제로 이렇게 안 보였다) · `dashboard/server.py` `DASHBOARD_ASSETS` 기본값·`HL_LIQ_BY_ASSET`(없는 파일) · `dashboard/coin_flow.py` `FLOW_SPECS`(칸 $0.2 = 테이프 칸 0.05의 4배 · `spot=False`) · `app.js` `ASSET_CONFIG`·`FLOW_ASSETS`·`SNAPSHOT_ASSET_KEYS`. 예측 기능 Set(DIR4H·BOX·VOL4H 등)과 주문 표는 넣지 않았다 → 칸이 꺼지고 주문은 막힌다.
+  - 🔴`MARKET_SYMBOLS`(orders.py)는 **건드리지 않는다** — 계좌 조회가 심볼마다 `userTrades`·`openOrders` 를 더 부른다(실계좌 경로). `server.py` 가 import 한 사본에만 `"sndk"` 를 더했다.
+  - 현물이 없는 종목은 `FlowSpec.spot_url=None` — `collect_spot_flow` 를 아예 띄우지 않는다(없으면 존재하지 않는 스트림에 재접속을 반복).
+  - 미연결: 일봉·4h 풋프린트(`footprint_daily.py` `ASSETS`, 소급 빌드 필요) · HL · 옵션 칸.
 
 ### 5-1. 주식·ETF 옵션 (11-01 조사, 사용자 «주식 옵션 데이터를 다른 소스로»)
 

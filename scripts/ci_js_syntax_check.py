@@ -16,7 +16,8 @@ import esprima
 
 def check(path: str) -> bool:
     src = open(path, encoding="utf-8").read()
-    lowered = re.sub(r"\?\s*\.", ".", src).replace("??", "||")
+    lowered = re.sub(r"\?\.(?=[\[(])", "", src)               # a?.[x] -> a[x] · a?.(x) -> a(x) (아래 규칙만 쓰면 a.[x] 가 돼 구문 오류가 난다)
+    lowered = re.sub(r"\?\s*\.", ".", lowered).replace("??", "||")
     try:
         esprima.parseScript(lowered, {"tolerant": False})
     except Exception as exc:                      # noqa: BLE001 -- 파서가 무엇을 던지든 실패다

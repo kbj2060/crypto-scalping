@@ -26,9 +26,10 @@ const ASSET_CONFIG = {
   sol: { label: "SOL", symbol: "SOLUSDT", dp: 2 },
   btc: { label: "BTC", symbol: "BTCUSDT", dp: 0 },
   xrp: { label: "XRP", symbol: "XRPUSDT", dp: 4 },
+  sndk: { label: "SNDK", symbol: "SNDKUSDT", dp: 2 },   // 2026-11-01 Binance TradFi 주식 선물(주문 불가)
 };
 // 풋프린트·1초 수급·OI·호가 히트맵을 서버가 실시간으로 만드는 코인(server.py FLOW_SPECS 와 같은 목록).
-const FLOW_ASSETS = new Set(["eth", "btc", "sol", "xrp"]);   // 2026-10-31 BTC 추가(주문은 그대로 막힘 -- 서버 주문 심볼 없음)
+const FLOW_ASSETS = new Set(["eth", "btc", "sol", "xrp", "sndk"]);   // 2026-10-31 BTC 추가(주문은 그대로 막힘 -- 서버 주문 심볼 없음)
 const flowOn = () => FLOW_ASSETS.has(activeSnapshotAsset);
 const coinUnit = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).label || String(activeSnapshotAsset).toUpperCase();
 const pxDp = () => { const d = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp; return Number.isFinite(d) ? d : 1; };
@@ -915,7 +916,7 @@ let liquidationMapLastFetchAt = 0;
 // stay ETH-only regardless of this (see docs/eth_dashboard_multicoin_expansion_design_20260831.md
 // section 6.4 for why: those are trained-model or trading_bot.py-sourced, not a symbol swap away).
 let activeSnapshotAsset = "eth";
-const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype"];
+const SNAPSHOT_ASSET_KEYS = ["eth", "btc", "sol", "xrp", "hype", "sndk"];
 let macroCalendarLastFetchAt = 0;
 // 2026-09-10 거래소 실계좌. ops 탭 패널과 스냅샷 탭 요약이 같은 payload 를 쓰므로 한 곳에 담는다.
 // 서버가 10초 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)라 클라 주기도 같게 맞춘다.
