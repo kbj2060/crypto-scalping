@@ -406,8 +406,9 @@ def forming_kline(raw: list, now_ms: float, bar_s: int = 300) -> dict[str, Any] 
 # ⚠️계좌 패널(fetch_account)은 이 목록을 **쓰지 않는다** -- 다른 코인에 포지션이 있으면 그건
 #   보여야 한다. 화면에서 코인을 지우는 것과 «내 돈이 어디 있는지»는 다른 문제다.
 # 2026-09-26 사용자 지시: SOL·XRP 도 ETH 와 같은 구성(풋프린트·1초 수급·OI·호가) -- 기본값을 eth,sol,xrp 로.
+# 2026-10-31 사용자 «비트코인도 대시보드에 추가 · 이더리움과 똑같은 로직» -- eth,btc,sol,xrp. 주문은 그대로 막힘(MANUAL_EXEC_SYMBOLS 에 btc 없음).
 #   켜진 코인마다 흐름 엔진(make_coin_flow)이 WS 3개(바이낸스 체결·현물, OKX)와 OI 1초 폴링(가중치 1)을 쓴다.
-DASHBOARD_ASSETS = [a.strip().lower() for a in os.getenv("DASHBOARD_ASSETS", "eth,sol,xrp").split(",")
+DASHBOARD_ASSETS = [a.strip().lower() for a in os.getenv("DASHBOARD_ASSETS", "eth,btc,sol,xrp").split(",")
                     if a.strip().lower() in MARKET_SYMBOLS] or ["eth"]
 DASHBOARD_TICKER_SYMBOLS = {a: MARKET_SYMBOLS[a] for a in DASHBOARD_ASSETS}
 # 코인별 흐름 엔진(make_coin_flow)과 그것이 쓰는 상수·읽기 함수는 dashboard/coin_flow.py 로 옮겼다(2026-10-19, 내용 그대로).
@@ -460,10 +461,28 @@ MARK_PRICE_RING_S = 7200          # 메모리 링(초). 베이시스 임계 분�
 HL_POS_DB_PATH = REPO_ROOT / "data" / "hot" / "hl_positions.sqlite"   # 2026-10-01 4c hot(ETH 프로세스 파일)
 # 2026-09-27 05:35:35 UTC 고래·리테일 경계 전환(trade_tape_<coin>.duckdb meta size_bands_changed) -- 그 전 행은 ETH 경계($10k/$100k)
 SIZE_BANDS_SINCE = {"sol": 1790487335, "xrp": 1790487335}
+
+
+def size_bands_since(asset: str) -> int:
+    """고래·리테일 경계가 바뀐 시각(초). 표에 없는 코인(2026-10-31 BTC)은 수집기가 경계 전환 때 hot 테이프 meta 에 남긴
+    `size_bands_changed:<심볼>` 의 마지막 시각 -- 수집기를 재시작하기 전엔 0(옛 경계 행도 섞인다).
+    ponytail: 바이낸스 테이프 meta 만 본다 -- OKX·Bybit 테이프 수집기를 같은 때 재시작한다는 가정."""
+    if asset in SIZE_BANDS_SINCE:
+        return SIZE_BANDS_SINCE[asset]
+    try:
+        rows = _read_only_rows(MICRO_TAPE_DB_PATH, "SELECT value FROM meta WHERE key = ?",
+                               [f"size_bands_changed:{MARKET_SYMBOLS[asset].lower()}"])
+    except (sqlite3.Error, duckdb.Error, OSError, KeyError):
+        return 0
+    return max((int(str(v).split()[0]) for (v,) in rows), default=0)
+
+
 # 2026-10-06 SOL·XRP HL 체결·호가·포지션을 Pi -> 서버(ETH 와 같은 설계, 사용자 «SOL·XRP 모두 이더리움과 동일한 설계»).
 #   포지션 = 서버 hot(HL_POS_COINS=SOL,XRP 프로세스 파일). Pi 복제본(…btc_sol_xrp_hype.from_pi.duckdb)은 BTC·HYPE 만 계속 쓰고 봉인기 원천으로만 남는다.
 HL_POS_SOLXRP_DB_PATH = REPO_ROOT / "data" / "hot" / "hl_positions_sol_xrp.sqlite"
-HL_LIQ_BY_ASSET = {"eth": HL_POS_DB_PATH, "sol": HL_POS_SOLXRP_DB_PATH, "xrp": HL_POS_SOLXRP_DB_PATH}
+# 2026-10-31 BTC: 서버에 BTC 포지션 수집기가 아직 없다(Pi 복제본만) -- `HL_POS_COINS=BTC` 로 띄우면 쓸 파일 이름. 없으면 HL 칸만 빈다.
+HL_LIQ_BY_ASSET = {"eth": HL_POS_DB_PATH, "sol": HL_POS_SOLXRP_DB_PATH, "xrp": HL_POS_SOLXRP_DB_PATH,
+                   "btc": REPO_ROOT / "data" / "hot" / "hl_positions_btc.sqlite"}
 
 
 def hl_whale_liq_events(since_ms: int, db: Path = HL_POS_DB_PATH, coin: str = "ETH") -> list[tuple[int, float, bool, str]]:
@@ -1790,14 +1809,14 @@ def make_app() -> web.Application:
                               + (", 기존 기준선 유지)" if micro_state["baseline"] else ")"), flush=True)
                     try:   # 2026-10-01 «누가 밀고 있나» z 의 분모(UTC 시별). 실패면 있던 값 유지 → 없으면 옛 식
                         micro_state["flow_scales"] = await asyncio.to_thread(mref.flow_hour_scales, MICRO_TAPE_DB_PATH, symbol=sym,
-                                                                             since_ts=SIZE_BANDS_SINCE.get(asset, 0)) or micro_state.get("flow_scales")
+                                                                             since_ts=size_bands_since(asset)) or micro_state.get("flow_scales")
                     except Exception as exc:  # noqa: BLE001
                         print(f"micro-ref flow_scales: {exc!r}", flush=True)
                     try:   # 2026-10-06 거래소 합산판 분모(사용자 «바로 합산») -- 조합마다. Bybit 칸은 표본이 쌓이는 대로(10-06~) 채워진다
                         srcs = {"binance": (MICRO_TAPE_DB_PATH, sym), "okx": (F.spec.okx_tape_db, F.spec.okx_inst),
                                 "bybit": (BYBIT_TAPE_DB, F.spec.symbol)}
                         got_all = await asyncio.to_thread(mref.flow_hour_scales_combos, srcs, list(VENUE_SETS),
-                                                          since_ts=SIZE_BANDS_SINCE.get(asset, 0))
+                                                          since_ts=size_bands_since(asset))
                         micro_state["flow_scales_all"] = {k: v or (micro_state.get("flow_scales_all") or {}).get(k, {}) for k, v in got_all.items()}
                     except Exception as exc:  # noqa: BLE001
                         print(f"micro-ref flow_scales_all: {exc!r}", flush=True)

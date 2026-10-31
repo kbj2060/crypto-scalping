@@ -257,7 +257,9 @@ def _flow_spec(asset: str, bucket: float, price_dp: int) -> FlowSpec:
 
 FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2),
               "sol": _flow_spec("sol", 0.02, 2),
-              "xrp": _flow_spec("xrp", 0.0003, 4)}
+              "xrp": _flow_spec("xrp", 0.0003, 4),
+              # 2026-10-31 BTC: $15 = ETH 0.5 칸과 같은 상대 폭(10-31 BTC $77.5k ≈ 1.9bp vs ETH $2,244 ≈ 2.2bp) · 테이프 칸 1.0(바이낸스·OKX·Bybit)의 15배
+              "btc": _flow_spec("btc", 15.0, 0)}
 assert FLOW_SPECS["eth"].snapshot_path == FOOTPRINT_SNAPSHOT_PATH and FLOW_SPECS["eth"].spot_url == SPOT_WS_URL
 
 
