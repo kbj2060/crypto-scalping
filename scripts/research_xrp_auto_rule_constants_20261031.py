@@ -1,8 +1,9 @@
 """XRP 자동 규칙 상수 검정 -- 사전등록 docs/prereg/xrp_auto_rule_constants_20261031.md (aacb814b).
+BTC·SOL 일반화(--coin) + 실력 보정 M3′ -- docs/prereg/btc_sol_auto_rule_constants_20261031.md (5a77693f).
 
 ETH 상수 C_E(L 2·첫 1/3·∓0.75% 물타기·∓5% 손절)의 위험(손절률·갭 손실·1년 −20% 낙폭)이 XRP 에서 같은가,
 변동성 비 r 로 환산한 C_X(d·s ×r, L ÷r)가 ETH 수준으로 돌려놓는가. 1분봉 경로, 실력 0(E1)·ETH 원장 이식(E2).
-실행: python scripts/research_xrp_auto_rule_constants_20261031.py [--selftest]
+실행: python scripts/research_xrp_auto_rule_constants_20261031.py [--coin BTCUSDT] [--selftest]   (기본 XRPUSDT = 양성 대조)
 """
 import io, json, sys, urllib.request, zipfile
 from pathlib import Path
@@ -13,8 +14,9 @@ import pandas as pd
 
 ROOT = Path("/home/kbj20/crypto-scalping/data/binance_vision")
 WT = Path(__file__).resolve().parents[1]
-CACHE = WT / "data/klines1m_daily_cache"
-OUT = WT / "tmp/xrp_auto_rule_20261031"
+CACHE = ROOT / "klines1m_daily"   # vision 일 덤프와 값 동일(ETH 10-05 h·l·c·t 완전 일치)
+COIN = sys.argv[sys.argv.index("--coin") + 1] if "--coin" in sys.argv else "XRPUSDT"
+OUT = WT / ("tmp/xrp_auto_rule_20261031" if COIN == "XRPUSDT" else f"tmp/auto_rule_{COIN[:-4].lower()}_20261031")
 END = pd.Timestamp("2026-10-27 23:59")   # 수정 1: vision 10-28 없음
 MK, TK = 2e-4, 5e-4
 C_E = (2.0, 0.0075, 0.05)
@@ -48,10 +50,10 @@ def load(sym):
 
 
 def aligned():
-    e, x = load("ETHUSDT"), load("XRPUSDT")
+    e, x = load("ETHUSDT"), load(COIN)
     idx = pd.date_range(max(e.index[0], x.index[0]), END, freq="1min")
     out = {}
-    for k, d in (("eth", e), ("xrp", x)):
+    for k, d in (("eth", e), ("coin", x)):
         d = d.reindex(idx)
         c = d.c.ffill()
         out[k] = (d.h.fillna(c).values, d.l.fillna(c).values, c.values)
@@ -105,7 +107,7 @@ def sigma_ratio(idx, D, lo, hi):
     for k, (_, _, c) in D.items():
         lr = pd.Series(np.diff(np.log(c), prepend=np.nan), index=idx)
         r[k] = lr.rolling(1440).std()[lr.index.hour.isin([0]) & (lr.index.minute == 0)]
-    q = (r["xrp"] / r["eth"]).loc[lo:hi].dropna()
+    q = (r["coin"] / r["eth"]).loc[lo:hi].dropna()
     return float(q.median()), len(q)
 
 
@@ -118,7 +120,7 @@ def e1_trips(idx, lo, hi, hold_min, rng):
 
 
 def block_ci(day, vals_x, vals_e, rng):
-    """5일 블록 부트스트랩, (XRP − ETH) 평균 차의 점추정·양측 95%."""
+    """5일 블록 부트스트랩, (코인 − ETH) 평균 차의 점추정·양측 95%."""
     days = np.unique(day)
     pos = {dd: i for i, dd in enumerate(days)}
     di = np.array([pos[dd] for dd in day])
@@ -161,16 +163,16 @@ def metrics(day, rx, re_, rng, tag):
     for name, col, f in (("M1_stop_rate", 2, lambda o: o[:, 2]),
                          ("M2_stress_loss_gt10pct_all", 4, lambda o: (o[:, 4] > 0.10).astype(float))):
         pt, lo, hi = block_ci(day, f(rx), f(re_), rng)
-        m[name] = {"xrp": float(f(rx).mean()), "eth": float(f(re_).mean()), "diff": pt, "ci95": [lo, hi]}
+        m[name] = {"coin": float(f(rx).mean()), "eth": float(f(re_).mean()), "diff": pt, "ci95": [lo, hi]}
     sx, se_ = rx[:, 2] == 1, re_[:, 2] == 1
-    m["M2_given_stop"] = {"xrp": f"{int((rx[sx, 4] > .1).sum())}/{int(sx.sum())}", "eth": f"{int((re_[se_, 4] > .1).sum())}/{int(se_.sum())}"}
+    m["M2_given_stop"] = {"coin": f"{int((rx[sx, 4] > .1).sum())}/{int(sx.sum())}", "eth": f"{int((re_[se_, 4] > .1).sum())}/{int(se_.sum())}"}
     px, pe, (d0, lo, hi) = dd_prob(day, rx[:, 0], re_[:, 0], rng)
-    m["M3_dd20_1y_base"] = {"xrp": px, "eth": pe, "diff": d0, "ci95": [lo, hi]}
+    m["M3_dd20_1y_base"] = {"coin": px, "eth": pe, "diff": d0, "ci95": [lo, hi]}
     px, pe, (d0, lo, hi) = dd_prob(day, rx[:, 1], re_[:, 1], rng)
-    m["M3_dd20_1y_stress"] = {"xrp": px, "eth": pe, "diff": d0, "ci95": [lo, hi]}
-    m["M4_worst_stress"] = {"xrp": float(rx[:, 1].min()), "eth": float(re_[:, 1].min())}
-    m["add_fill"] = {"xrp": float(rx[:, 3].mean()), "eth": float(re_[:, 3].mean())}
-    m["mean_trip_bp"] = {"xrp": float(rx[:, 0].mean() * 1e4), "eth": float(re_[:, 0].mean() * 1e4)}
+    m["M3_dd20_1y_stress"] = {"coin": px, "eth": pe, "diff": d0, "ci95": [lo, hi]}
+    m["M4_worst_stress"] = {"coin": float(rx[:, 1].min()), "eth": float(re_[:, 1].min())}
+    m["add_fill"] = {"coin": float(rx[:, 3].mean()), "eth": float(re_[:, 3].mean())}
+    m["mean_trip_bp"] = {"coin": float(rx[:, 0].mean() * 1e4), "eth": float(re_[:, 0].mean() * 1e4)}
     return m
 
 
@@ -182,6 +184,32 @@ def strict_ok(m):
 def cand_ok(m):
     return (m["M1_stop_rate"]["diff"] <= 0.01 and m["M2_stress_loss_gt10pct_all"]["diff"] <= 0.005
             and m["M3_dd20_1y_base"]["diff"] <= 0.05)
+
+
+def notional(o, L):
+    """순자산 단위 보유 명목: 첫 1/3 + 물타기 체결 시 2/3."""
+    return L / 3.0 * (1 + 2 * o[:, 3])
+
+
+def m3s_verdict(rep):
+    """btc_sol 사전등록 판정: M3′(실력 보정, 포화 구간 제외) · 질문1 방향 · 질문2 엄격/후보 · 변경 권고."""
+    def used(sp, q):
+        ks = ["M1_stop_rate", "M2_stress_loss_gt10pct_all"]
+        if 0.05 <= rep["splits"][sp][q]["M3s_dd20_1y_base"]["eth"] <= 0.95:
+            ks.append("M3s_dd20_1y_base")
+        return [rep["splits"][sp][q][k] for k in ks]
+    lim = (0.01, 0.005, 0.05)
+    q1 = {}
+    for sp in ("val", "test"):
+        ms = used(sp, "Q1_coinCE_vs_ethCE")
+        q1[sp] = "riskier" if any(m["ci95"][0] > 0 for m in ms) else "safer" if any(m["ci95"][1] < 0 for m in ms) else "same"
+    strict = all(m["ci95"][1] <= c for sp in ("val", "test") for m, c in zip(used(sp, "Q2_coinCX_vs_ethCE"), lim))
+    cand = all(m["diff"] <= c for sp in ("val", "test") for m, c in zip(used(sp, "Q2_coinCX_vs_ethCE"), lim))
+    confirmed = q1["val"] == q1["test"] != "same"
+    tail = rep["splits"]["stress"]["Q2_coinCX_vs_ethCE"]["M2_stress_loss_gt10pct_all"]["diff"] <= 0.005
+    m3used = {sp: 0.05 <= rep["splits"][sp]["Q1_coinCE_vs_ethCE"]["M3s_dd20_1y_base"]["eth"] <= 0.95 for sp in ("val", "test")}
+    return {"Q1_direction": q1, "Q1_confirmed": confirmed, "Q2_strict": strict, "Q2_candidate": cand,
+            "stress_tail_ok": tail, "M3s_used": m3used, "recommend_change": confirmed and strict and tail}
 
 
 def selftest():
@@ -227,36 +255,50 @@ def main():
     C_X = (2.0 / r, 0.0075 * r, 0.05 * r)
     rep = {"r": r, "r_days": nr, "C_E": C_E, "C_X": C_X, "n_ledger": len(led), "splits": {}}
     print(f"r={r:.4f} ({nr}일) C_X={C_X}")
+    # M3′ 실력 보정용 μ_led = ETH 원장 이식(C_E, 기본 체결) 왕복 평균 (sim 만, rng 미사용 → XRP 판 난수열 불변)
+    ts = pd.to_datetime(led.entry_time, unit="ms").dt.floor("1min")
+    t2 = idx.get_indexer(ts).astype(np.int64)
+    h2 = hold_e2.astype(np.int64)
+    s2 = np.where(led.side.values == "LONG", 1.0, -1.0)
+    mu_led = float(np.nanmean(sim(*D["eth"], t2, s2, h2, *C_E)[:, 0]))
+    rep["mu_led"] = mu_led
+    rng2 = np.random.default_rng(20261032)   # M3′ 전용 난수열
     for sp, (lo, hi) in SPLITS.items():
         if sp == "train":
             continue
         t, sides, holds = e1_trips(idx, lo, hi, hold_min, rng)
         day = idx[t].normalize().values
         ee = sim(*D["eth"], t, sides, holds, *C_E)
-        xe = sim(*D["xrp"], t, sides, holds, *C_E)
-        xx = sim(*D["xrp"], t, sides, holds, *C_X)
+        xe = sim(*D["coin"], t, sides, holds, *C_E)
+        xx = sim(*D["coin"], t, sides, holds, *C_X)
         res = {"n": int(len(t)),
-               "Q1_xrpCE_vs_ethCE": metrics(day, xe, ee, rng, "q1"),
-               "Q2_xrpCX_vs_ethCE": metrics(day, xx, ee, rng, "q2")}
+               "Q1_coinCE_vs_ethCE": metrics(day, xe, ee, rng, "q1"),
+               "Q2_coinCX_vs_ethCE": metrics(day, xx, ee, rng, "q2")}
         # 위약: ETH 끼리, 시각 7일 원형 이동
         sh = (t - pd.Timedelta("7D").total_seconds() // 60).astype(np.int64)
         ok = sh > 1
         es = sim(*D["eth"], sh[ok], sides[ok], holds[ok], *C_E)
         res["placebo_eth_shift7d"] = {k: metrics(day[ok], es, ee[ok], rng, "pl")[k] for k in ("M1_stop_rate", "M2_stress_loss_gt10pct_all")}
         nost = (C_E[0], C_E[1], 0.99)
-        res["control_nostop"] = {"xrp_worst": float(sim(*D["xrp"], t, sides, holds, *nost)[:, 1].min()),
+        res["control_nostop"] = {"coin_worst": float(sim(*D["coin"], t, sides, holds, *nost)[:, 1].min()),
                                  "eth_worst": float(sim(*D["eth"], t, sides, holds, *nost)[:, 1].min())}
+        kap = (mu_led - ee[:, 0].mean()) / notional(ee, C_E[0]).mean()
+        ae = ee[:, :2] + kap * notional(ee, C_E[0])[:, None]
+        assert abs(ae[:, 0].mean() - mu_led) < 1e-12   # S4
+        res["kappa_bp_price"] = float(kap * 1e4)
+        for q, o, L in (("Q1_coinCE_vs_ethCE", xe, C_E[0]), ("Q2_coinCX_vs_ethCE", xx, C_X[0])):
+            ao = o[:, :2] + kap * notional(o, L)[:, None]
+            res[q]["mean_trip_bp_skill"] = {"coin": float(ao[:, 0].mean() * 1e4), "eth": mu_led * 1e4}
+            for col, nm in ((0, "M3s_dd20_1y_base"), (1, "M3s_dd20_1y_stress")):
+                px, pe, (d0, lo_, hi_) = dd_prob(day, ao[:, col], ae[:, col], rng2)
+                res[q][nm] = {"coin": px, "eth": pe, "diff": d0, "ci95": [lo_, hi_]}
         rep["splits"][sp] = res
-        q1, q2 = res["Q1_xrpCE_vs_ethCE"], res["Q2_xrpCX_vs_ethCE"]
+        q1, q2 = res["Q1_coinCE_vs_ethCE"], res["Q2_coinCX_vs_ethCE"]
         print(sp, "Q1", {k: (round(v["diff"], 4), [round(z, 4) for z in v["ci95"]]) for k, v in q1.items() if "ci95" in v},
               "| Q2", {k: (round(v["diff"], 4), [round(z, 4) for z in v["ci95"]]) for k, v in q2.items() if "ci95" in v})
     # E2 원장 이식(보조)
-    ts = pd.to_datetime(led.entry_time, unit="ms").dt.floor("1min")
-    t2 = idx.get_indexer(ts).astype(np.int64)
-    h2 = hold_e2.astype(np.int64)
-    s2 = np.where(led.side.values == "LONG", 1.0, -1.0)
     e2 = {}
-    for nm, (k, C) in {"eth_CE": ("eth", C_E), "xrp_CE": ("xrp", C_E), "xrp_CX": ("xrp", C_X)}.items():
+    for nm, (k, C) in {"eth_CE": ("eth", C_E), "coin_CE": ("coin", C_E), "coin_CX": ("coin", C_X)}.items():
         o = sim(*D[k], t2, s2, h2, *C)
         e2[nm] = {"n": int(np.isfinite(o[:, 0]).sum()), "stops": int(np.nansum(o[:, 2])), "worst_stress": float(np.nanmin(o[:, 1])),
                   "sum_base": float(np.nansum(o[:, 0])), "compound_base": float(np.prod(1 + np.nan_to_num(o[:, 0])))}
@@ -265,18 +307,20 @@ def main():
     # 2025-10-10 사건(롱이 21:00 UTC 열려 있었다면)
     k0 = idx.get_indexer([pd.Timestamp("2025-10-10 20:00")])[0]
     ev = {}
-    for nm, (k, C) in {"eth_CE": ("eth", C_E), "xrp_CE": ("xrp", C_E), "xrp_CX": ("xrp", C_X)}.items():
+    for nm, (k, C) in {"eth_CE": ("eth", C_E), "coin_CE": ("coin", C_E), "coin_CX": ("coin", C_X)}.items():
         o = sim(*D[k], np.array([k0], np.int64), np.array([1.0]), np.array([180], np.int64), *C)
         ev[nm] = {"base": float(o[0, 0]), "stress": float(o[0, 1]), "stopped": bool(o[0, 2])}
     rep["event_20251010_long_20utc"] = ev
     print("20251010", ev)
     v, te = rep["splits"]["val"], rep["splits"]["test"]
-    q1_worse = {sp: any(rep["splits"][sp]["Q1_xrpCE_vs_ethCE"][k]["ci95"][0] > 0 for k in ("M1_stop_rate", "M2_stress_loss_gt10pct_all", "M3_dd20_1y_base")) for sp in ("val", "test")}
-    rep["verdict"] = {"Q1_xrp_riskier_with_CE": q1_worse,
-                      "Q2_strict": strict_ok(v["Q2_xrpCX_vs_ethCE"]) and strict_ok(te["Q2_xrpCX_vs_ethCE"]),
-                      "Q2_candidate": cand_ok(v["Q2_xrpCX_vs_ethCE"]) and cand_ok(te["Q2_xrpCX_vs_ethCE"]),
-                      "Q1_CE_strict_equiv": strict_ok(v["Q1_xrpCE_vs_ethCE"]) and strict_ok(te["Q1_xrpCE_vs_ethCE"])}
+    q1_worse = {sp: any(rep["splits"][sp]["Q1_coinCE_vs_ethCE"][k]["ci95"][0] > 0 for k in ("M1_stop_rate", "M2_stress_loss_gt10pct_all", "M3_dd20_1y_base")) for sp in ("val", "test")}
+    rep["verdict"] = {"Q1_coin_riskier_with_CE": q1_worse,
+                      "Q2_strict": strict_ok(v["Q2_coinCX_vs_ethCE"]) and strict_ok(te["Q2_coinCX_vs_ethCE"]),
+                      "Q2_candidate": cand_ok(v["Q2_coinCX_vs_ethCE"]) and cand_ok(te["Q2_coinCX_vs_ethCE"]),
+                      "Q1_CE_strict_equiv": strict_ok(v["Q1_coinCE_vs_ethCE"]) and strict_ok(te["Q1_coinCE_vs_ethCE"])}
+    rep["verdict_m3s"] = m3s_verdict(rep)
     print("verdict", rep["verdict"])
+    print("verdict_m3s", rep["verdict_m3s"])
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1, default=str))
 
