@@ -91,8 +91,12 @@ let footprintLastFetchAt = 0;
 // 2026-10-20 사용자 «바이낸스·트레이딩뷰처럼 부드럽게»: 휠 단계를 없앴다 -- 창 = 소수 봉 수(12봉 ~ 1주일), 휠마다 연속으로 커서 자리 기준 줌(실시간이면 오른쪽 끝 기준 -- chartZoomAt).
 //   체결 박스는 창이 아니라 **봉 폭**이 정한다(renderCandleSvg 의 fpThin: 칸 숫자가 들어가는 폭이면 박스).
 const CHART_WINDOW_MAX = { 1: 2016, 6: 336, 12: 168 };   // tf 마다 1주일(5m · 30m · 1h 봉 수)
-let chartWindowBars = 12;
-const fpZoomed = () => chartWindowBars > 12;   // 넓힌 창(1주일 받기 · 창 칸 불 끄기) -- 박스 유무는 fpBoxesOff
+// 2026-11-01 사용자 «데스크탑 5분봉에서 풋프린트가 2시간은 보이게 · 너무 빨리 사라진다»: 기본 창 = 데스크탑 24봉(2시간) · 모바일 12봉.
+//   24봉이면 봉 폭이 48봉(≈26px)의 두 배라 칸 숫자가 그대로 들어간다. 버튼(5m·30m·1h)의 data-bars 도 같은 값으로 맞춘다.
+const FP_BARS = window.matchMedia("(max-width: 720px)").matches ? 12 : 24;
+document.querySelectorAll("button[data-bars]").forEach((b) => { b.dataset.bars = String(FP_BARS); });
+let chartWindowBars = FP_BARS;
+const fpZoomed = () => chartWindowBars > FP_BARS;   // 넓힌 창(1주일 받기 · 창 칸 불 끄기) -- 박스 유무는 fpBoxesOff
 let fpBoxesOff = false;   // 마지막 렌더가 박스 없이 캔들로 그렸나(머리 «· 캔들»)
 // 2026-10-20 사용자 «5m과 같은 구성으로 30m과 1h 도»: 5분봉 k 개를 UTC 경계로 묶은 봉(12봉 = 6시간·12시간 -- 서버 풋프린트 144봉 안).
 //   렌더러는 그대로 두고 **입력만** 묶는다(캔들·풋프린트 칸·OI·청산 · tfCandles 등). 휠 줌·가로 이동·미니맵도 5m 과 같다(10-20 1주일).
@@ -2594,8 +2598,8 @@ function mtHeadHtml() {
   const nx = (latestMacroEvents || []).filter((e) => e.importance === "high" || e.category === "fomc").map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표" }))
     .filter((e) => e.t > Date.now()).sort((a, b) => a.t - b.t)[0];
   const left = nx ? nx.t - Date.now() : 0;
-  return `<button type="button" class="fr-mt" data-mt-go title="Macro Trend 카드로 -- ETF 이후 13주 매크로 추세(표본내 연구, 신호 아님)">`
-    + `<span class="fr-mtt">Macro<small>13주 · 기준 주 ${week.slice(5)}</small></span><span class="fr-mtg">${row("BTC")}${row("ETH")}</span>`
+  return `<button type="button" class="fr-mt" data-mt-go title="Macro Trend 카드로 -- ETF 이후 13주 매크로 추세(기준 주 ${week.slice(5)} · 표본내 연구, 신호 아님)">`
+    + `<span class="fr-mtg">${row("BTC")}${row("ETH")}</span>`
     + `<span class="fr-sep"></span><span class="fr-mts"><small>감시</small><span class="${off.length ? "mt-warn" : ""}">이탈 ${off.length}${off.length ? ` · ${escapeHtml(off.join(", "))}` : ""}</span></span>`
     + (nx ? `<span class="fr-sep"></span><span class="fr-mts"><small>다음 발표</small><b class="fr-ev">${escapeHtml(nx.nm)} ${Math.floor(left / 3600e3)}:${String(Math.floor((left % 3600e3) / 60e3)).padStart(2, "0")} 뒤</b></span>` : "")
     + `</button>`;   // 2026-10-30 펜 메모 «박스 부분은 제거»: 오른쪽 끝 «Macro Trend ›» 글자 삭제(누르면 카드로 가는 건 그대로 · title)
