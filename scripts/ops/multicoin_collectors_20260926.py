@@ -133,7 +133,7 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
              "datetime(max(ts_sec), 'unixepoch', 'localtime')", *((20, 40) if x.split("-")[0] in TRADFI else (10, 30))) for x in insts])
     # HL 포지션은 코인마다가 아니라 **하나**다(한 번의 조회가 전 코인 -- 수집기 도크스트링).
     # 대상 주소를 HL 체결 DB 에서 뽑으므로 체결이 쌓인 뒤 첫 바퀴(최대 ~8분)가 돈다 -> 유예 30분.
-    hl = [c for c in coins if c not in TRADFI]      # TradFi 주식은 HL 메인 시장에 없다
+    hl = [c for c in coins if c in DEEP]            # HL 포지션은 HL 체결 DB(DEEP 코인만 쌓음)에서 대상을 뽑는다 · TradFi 는 HL 에 없다
     tag = "_".join(c.lower() for c in hl)
     hl and add("hl_positions", tag, 1, "supervisor_hyperliquid_positions.sh",
         "live_hyperliquid_positions_collector_20260924.py", {"HL_POS_COINS": ",".join(hl)},
@@ -294,7 +294,7 @@ def cmd_plan_or_start(a, start: bool) -> int:
     coins = [c.strip().upper() for c in a.coins.split(",") if c.strip()]
     bad = [c for c in coins if c not in COINS]
     if bad:
-        print(f"🔴 모르는 코인 {bad} -- 이 스크립트는 {COINS} 만 안다(OKX 계약 단위·빈 폭 표가 그 넷뿐이다)")
+        print(f"🔴 모르는 코인 {bad} -- 이 스크립트는 {COINS} 만 안다(OKX 계약 단위·빈 폭 표에 그 코인들뿐이다)")
         return 2
     phases = {1, 2} if a.phase == "all" else {int(a.phase)}
     todo = specs(coins, phases)
