@@ -396,7 +396,8 @@ def bracket_sl_hit(position_side: str, last_bar: tuple[float, float] | None, arm
     last_bar = (봉 마감 시각 초, 종가) -- 레벨과 같은 USDT 심볼의 마감봉. 꼬리가 넘어도 종가가 돌아오면 hold.
     ponytail: 09-27 이전 무장 상태엔 sl_level 이 없어 주문 심볼 가격 sl_price 로 비교한다(USDT/USDC 베이시스 수 bp 오차)."""
     level = armed.get("sl_level") or armed.get("sl_price")
-    if not level or not last_bar or last_bar[0] <= float(armed["armed_at"]):
+    since = max(float(armed["armed_at"]), float(armed.get("watch_from") or 0))   # 2026-10-29 선 수정·다시 켜기 뒤 마감된 봉만(그 전 종가로 바로 닫지 않게, 검토 F1)
+    if not level or not last_bar or last_bar[0] <= since:
         return False
     close = last_bar[1]
     return close <= level if position_side == "LONG" else close >= level
@@ -438,6 +439,9 @@ def bracket_rekey(state: dict) -> dict:
     return out
 
 
+OWNED_BY_SAVED = ("sl_off", "tp_level", "tp_price", "sl_level", "sl_price", "sl_name", "watch_from", "mod", "placed")   # bracket_merge: 저장본이 주인인 칸
+
+
 def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
     """감시 틱 결과(`mine`)를 저장본(`current`)에 합친다. 내가 읽을 때 본 무장(`seen_at` 의 armed_at)과
     같은 측면에만 적용한다 -- 그 사이 새로 무장된 측면(물타기 포함)을 지우지 않는다."""
@@ -447,9 +451,15 @@ def bracket_merge(current: dict, mine: dict, seen_at: dict) -> dict:
             continue
         if side in mine:
             # 2026-10-15 sl_off(«손절 해제»·«다시 켜기»)는 저장본이 주인이다 -- 틱은 버튼 전 사본을 들고 있어 그대로 쓰면 해제나 다시 켜기를 되돌린다
-            off = out.get(side, {}).get("sl_off")
-            m = {k: v for k, v in mine[side].items() if k != "sl_off"}
-            out[side] = {**m, "sl_off": off} if off else m
+            # 2026-10-29 «선 끌어 수정»(api_manual_bracket_modify)이 바꾸는 칸도 저장본이 주인 -- 틱이 옛 선을 되써 옮긴 손절·익절이 원래대로 돌아가지 않게.
+            #   단 틱이 이번에 쏘았으면(fired) 그 틱의 tp_resting(익절 지정가를 지웠다 = False)을 쓴다.
+            cur, m = out.get(side, {}), dict(mine[side])
+            own = OWNED_BY_SAVED + (() if m.get("fired") and not cur.get("fired") else ("tp_resting",))
+            for k in own:
+                m.pop(k, None)
+                if k in cur:
+                    m[k] = cur[k]
+            out[side] = m
         else:
             out.pop(side)
     return out

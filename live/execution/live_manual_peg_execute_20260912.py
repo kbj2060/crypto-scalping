@@ -239,7 +239,7 @@ async def place_stop(session, symbol: str, pside: str, price: float) -> dict:
     return await _post_stop(session, symbol, pside, price, key, secret, offset, int(time.time() * 1000))
 
 
-async def place_bracket(session, bracket: dict, symbol: str, pside: str) -> dict:
+async def place_bracket(session, bracket: dict, symbol: str, pside: str, *, strict: bool = False) -> dict:
     """체결 뒤 TP 지정가(GTX, 포지션 **전량**)와 비상 스탑(Algo STOP_MARKET, closePosition)을 건다.
     물타기면 우리 옛 주문을 지우고 새 레벨·새 수량으로 다시 건다.
 
@@ -260,6 +260,9 @@ async def place_bracket(session, bracket: dict, symbol: str, pside: str) -> dict
         return {"placed": False, "reason": "포지션 없음"}
     out: dict[str, Any] = {"qty": qty, "cleared": await cancel_bracket(
         session, symbol, pside, key, secret, offset)}
+    if strict and out["cleared"].get("errors"):   # 2026-10-29 선 수정: 옛 주문을 다 못 지웠으면 새로 걸지 않는다(같은 쪽 전량 익절 둘 방지)
+        out.update(placed=False, reason="옛 주문 정리 실패")
+        return out
     close_side = "SELL" if pside == "LONG" else "BUY"
     stamp = int(time.time() * 1000)
     if bracket.get("tp_price"):

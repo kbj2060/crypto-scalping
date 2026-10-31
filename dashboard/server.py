@@ -137,7 +137,7 @@ from dashboard import situation as sit  # noqa: E402
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
 from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_rev_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
-from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
+from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload, with_qx4i as box_hold_with_qx4i  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 from scripts.ops_watchdog import send_telegram  # noqa: E402 -- 지지·저항 뚫림 알림(2026-10-25)
 # 2026-09-29 «시장 맥락» 카드(레버리지·교차 시장·호가 유동성·일정) -- 순수 함수 + 자체점검. 값은 전부 서술.
@@ -2716,10 +2716,12 @@ def make_app() -> web.Application:
                 from scripts.live_vol4h_qx4_20261025 import iv_now, qx4i_log
                 iv, hour = await asyncio.to_thread(iv_now, qx4_state.setdefault("iv", {}), time.time() * 1000)
                 if iv is not None:
-                    s = math.exp(qx4i_log(res["log_rv"], iv) / 2)
-                    res.update(iv_atm=iv, iv_hour_ms=hour, sig4h_iv_pct=round(100 * s, 3), sig4h_iv_usd=round(res["px"] * s, 2))
+                    lq = qx4i_log(res["log_rv"], iv)
+                    s = math.exp(lq / 2)
+                    res.update(iv_atm=iv, iv_hour_ms=hour, sig4h_iv_pct=round(100 * s, 3), sig4h_iv_usd=round(res["px"] * s, 2), log_rv_iv=lq)
             except Exception as exc:  # noqa: BLE001
                 print(f"vol4h qx4i 칸 생략: {type(exc).__name__}: {exc}", flush=True)
+            qx4_state["last"] = res   # 2026-10-29 4h 박스 유지(box_hold.with_qx4i)가 읽는다
         return res
 
     async def api_vol_forecast(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 변동성»(ETH, 표시 전용)
@@ -2786,7 +2788,8 @@ def make_app() -> web.Application:
                 events = (await load_macro_calendar()).get("events")
             except Exception:  # noqa: BLE001
                 events = None
-            return await asyncio.to_thread(box_hold_payload, k1m, events, asset)
+            out = await asyncio.to_thread(box_hold_payload, k1m, events, asset)
+            return box_hold_with_qx4i(out, qx4_state.get("last")) if asset == "eth" else out   # 2026-10-29 4h = QX4I 등조(묵으면 HGB)
         try:
             payload = await swr_cached(f"box_hold:{asset}", 15.0, produce, max_stale=60.0)
         except Exception as exc:  # noqa: BLE001
@@ -4570,6 +4573,7 @@ def make_app() -> web.Application:
     app.router.add_post("/api/manual-entry/cancel", order_api.api_manual_entry_cancel)
     app.router.add_post("/api/manual-bracket/disarm", order_api.api_manual_bracket_disarm)
     app.router.add_post("/api/manual-bracket/rearm", order_api.api_manual_bracket_rearm)
+    app.router.add_post("/api/manual-bracket/modify", lambda r: order_api.busy_or(order_api.api_manual_bracket_modify, r))   # 2026-10-29 선 끌어 주문 수정(주문 잠금 안에서)
     app.router.add_get("/api/manual-exit/preview", order_api.api_manual_exit_preview)
     app.router.add_post("/api/manual-exit/submit", lambda r: order_api.busy_or(order_api.api_manual_exit_submit, r))
     app.router.add_post("/api/manual-exit/submit-all", lambda r: order_api.busy_or(order_api.api_manual_exit_all_submit, r))   # 2026-10-22 여러 코인 한꺼번에

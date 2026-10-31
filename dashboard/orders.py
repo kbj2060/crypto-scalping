@@ -606,6 +606,8 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         return None if (manual_entry_state.get("asset") or "eth") == asset else side
     # 2026-10-16 접수 검사 ~ 상태 점유 사이 await(계획 조립 0.5~2초) 동안 두 번째 접수(폰+데스크탑)가 검사를 빠져나가 두 번 나갔다
     manual_order_lock = asyncio.Lock()
+    # 2026-10-29 선 무장을 감시 틱이 쏘기 시작한 키(익절 지정가 취소 await ~ fired 저장 사이) -- «선 끌어 수정»이 이걸 보고 거절한다(검토 B1)
+    bracket_exiting: set[str] = set()
     # 2026-10-10 진입 «기다리기»(최대 60분)는 **따로** 둔다 -- 위 칸을 60분 잡으면 그동안 청산·SL 감시가 막힌다.
     manual_wait_state: dict[str, Any] = {"phase": "idle"}
 
@@ -970,13 +972,23 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                 #   매 2초 반복하지 않게 10초 쉰다. 지웠으면 fired 로 굳혀 닫힐 때까지 쏜다(익절이 없는데 닿음 창이 지나 조용히 멈추지 않게).
                 if manual_order_lock.locked() or (bracket_load().get(key) or {}).get("sl_off"):
                     continue
+                fresh = bracket_load().get(key) or {}
+                if fresh.get("armed_at") != b.get("armed_at") or (fresh.get("mod") or {}).get("at") != (b.get("mod") or {}).get("at"):
+                    continue   # 2026-10-29 그 사이 선이 수정됐다 -- 옛 사본(옛 레벨·watch_from)으로 쏘지 않는다, 다음 틱이 새 선으로 다시 판단(검토 S1)
+                bracket_exiting.add(key)   # 🔴첫 await 전에 -- 수정 요청이 잠금 검사 뒤 이 틈에 끼어들어 익절을 다시 걸지 못하게(검토 B1)
                 r = await clear_bracket(binance_session(), b["symbol"], pside)
                 if r.get("errors"):
+                    bracket_exiting.discard(key)
                     b["retry_after"] = time.time() + 10
                     b["last_error"] = f"익절 지정가 취소 실패: {'; '.join(map(str, r['errors']))}"
                     changed = True
                     continue
                 b.update(fired=True, tp_resting=False)
+                st2 = bracket_load()   # 2026-10-29 fired 를 곧바로 파일에 -- run_exit(최대 2분) 동안 수정이 «안 쏜 무장»으로 보지 않게(검토 B1)
+                if key in st2 and st2[key].get("armed_at") == b.get("armed_at"):
+                    st2[key].update(fired=True, tp_resting=False)
+                    bracket_save(st2)
+                bracket_exiting.discard(key)
                 changed = True
             plan, err = await assemble_exit_plan(pside, 1.0, fresh=True, asset=exec_asset_of(b["symbol"]) or "eth")
             # 🔴검사는 조립(await) **뒤**에 -- 그 사이 «손절 해제»나 사용자 청산이 들어오면 쏘지 않는다(남의 상태를 clear 하고 두 번 청산하지 않게)
@@ -990,10 +1002,10 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
                     st.pop(key)
                 changed = True
                 continue
-            if err or plan.get("blocked"):
+            if err or (plan or {}).get("blocked"):
                 # 🔴조회 실패는 «닫혔다»가 아니다 -- 비상 스탑을 두고 30초 뒤 다시 본다.
                 b["retry_after"] = time.time() + 30
-                b["last_error"] = (err[0] if err else {}).get("detail") or plan.get("blocked")
+                b["last_error"] = (err[0] if err else {}).get("detail") or (err[0] if err else {}).get("error") or (plan or {}).get("blocked")   # 2026-10-29 조립 예외는 plan None·detail 없음(검토 P1)
                 changed = True
                 continue
             slot.clear()
@@ -1860,6 +1872,80 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         print(f"bracket {side}: 손절 다시 켬(사용자) 거래소 스탑 {price} · 5분봉 감시 켬", flush=True)
         return web.json_response({"ok": True, "backstop": r}, headers=NOCACHE)
 
+    async def api_manual_bracket_modify(request: web.Request) -> web.Response:
+        """2026-10-29 사용자 «이미 들어간 SLTP 선은 풋프린트에 계속 · 선을 끌면 그대로 주문 수정». 선 무장(lines)만 -- 일반 진입의 −5% 거래소 스탑은 안 건드린다.
+        익절 = 우리 post-only 지정가를 지우고 새 가격·포지션 전량으로 다시(place_bracket, 비상 스탑 없음) · 손절 = 서버 감시 레벨만(거래소 주문 없음).
+        검사 = 진입 때와 같은 line_bracket(지금가 기준 방향·거리) + 손절은 **진입가**에서 규칙 손절폭(RULE_STOP_PCT)보다 멀게 못 옮긴다(자동 2× 크기의 손실 한도).
+        🔴익절 지우기가 실패하면 아무것도 안 바꾼다 · 지운 뒤 새 지정가를 못 걸면 tp_resting False(서버가 1초 닿음으로 닫는다 -- 무방비 아님) ·
+        이미 쏜(fired) 무장은 거절 · watch_from = 지금(옮기기 전 지나간 가격으로 바로 닫지 않게). 방어 = 진입과 같다(POST + confirm=1 + 게이트 + 주문 잠금 busy_or)."""
+        if request.query.get("confirm") != "1":
+            return web.json_response({"ok": False, "error": "confirm_required", "detail": "confirm=1 이 필요합니다"}, status=400)
+        if not exec_enabled():
+            return web.json_response({"ok": False, "error": "exec_disabled",
+                                      "detail": "DASHBOARD_MANUAL_EXEC_ENABLED 가 꺼져 있습니다"}, status=403)
+        side, symbol = request.query.get("side"), request.query.get("symbol")
+        if side not in ("LONG", "SHORT") or symbol not in set(MANUAL_EXEC_SYMBOLS.values()):
+            return web.json_response({"ok": False, "error": "bad_side", "detail": "side=LONG|SHORT · symbol 이 필요합니다"}, status=400)
+        lines = query_lines(request)
+        if not isinstance(lines, tuple):
+            return web.json_response({"ok": False, "error": "bad_lines", "detail": "익절·손절 선(tp·sl)은 둘 다 양수여야 합니다"}, status=400)
+        key, asset = bracket_key(symbol, side), exec_asset_of(symbol) or "eth"
+        b = bracket_load().get(key)
+        if not b or not b.get("lines"):
+            return web.json_response({"ok": False, "error": "not_armed_lines", "detail": "선으로 들어간 무장이 없습니다"}, status=409)
+        if b.get("fired") or key in bracket_exiting or exit_slot(asset) is None:   # 청산(손절 발동·수동 청산)이 도는 중엔 익절을 다시 걸지 않는다(검토 B1)
+            return web.json_response({"ok": False, "error": "fired", "detail": "청산이 진행 중입니다 — 끝난 뒤 다시"}, status=409)
+        account = await swr_cached("binance_account", BINANCE_ACCOUNT_CACHE_SECONDS, produce_account,
+                                   max_stale=STALE_GRACE_SECONDS, cache=binance_account_cache)
+        pos = next((p for p in account.get("positions") or [] if p.get("symbol") == symbol and p.get("side") == side
+                    and abs(float(p.get("qty") or 0.0)) > 0), None)
+        if not (account.get("ok") and pos and float(pos.get("entry_price") or 0) > 0):
+            return web.json_response({"ok": False, "error": "no_position", "detail": "그 포지션을 계좌에서 못 찾았습니다"}, status=409)
+        try:
+            book = await fetch_binance_json("https://fapi.binance.com/fapi/v1/ticker/bookTicker", {"symbol": symbol}, error_reason="book_ticker_failed")
+            basis, filters = await basis_for(book, asset), await load_filters(binance_session(), symbol)
+            pts = sec_prices(asset) or []   # 5초 넘게 묵은 1초 체결가는 안 쓴다(검토 S6)
+            ref = float(pts[-1][1]) if pts and time.time() - float(pts[-1][0]) <= 5 else (float(book["bidPrice"]) + float(book["askPrice"])) / 2 / basis   # 지금가(USDT) = 1초 마지막 체결 · 없으면 주문 심볼 중간가 ÷ basis
+            nb = line_bracket(position_side=side, ref_level=ref, tp_level=lines[0], sl_level=lines[1], basis=basis, filters=filters)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": "bad_lines", "detail": str(exc)}, status=400)
+        except Exception as exc:  # noqa: BLE001 -- 시세·필터를 못 읽으면 아무것도 안 바꾼다
+            return web.json_response({"ok": False, "error": "quote_failed", "detail": f"{type(exc).__name__}: {exc}"}, status=502)
+        entry_lv = float(pos["entry_price"]) / basis
+        far = (1 - lines[1] / entry_lv) if side == "LONG" else (lines[1] / entry_lv - 1)
+        if far > RULE_STOP_PCT + 1e-9:
+            return web.json_response({"ok": False, "error": "sl_too_far",
+                                      "detail": f"손절선이 진입가에서 {100 * far:.2f}% — 규칙 손절폭 {100 * RULE_STOP_PCT:g}% 보다 멀게 못 옮깁니다(손실 한도)"}, status=400)
+        # 익절 레벨(USDT)이 그대로면 지정가를 안 건드린다 -- 주문가(USDC)끼리 비교하면 basis 가 1틱만 움직여도 손절만 옮긴 게 익절 재발주가 됐다(검토 F3)
+        tp_moved, tp_res, warn = abs(nb["tp_level"] - float(b.get("tp_level") or 0)) > 1e-9, None, None
+        if not tp_moved:
+            nb["tp_price"] = b.get("tp_price") or nb["tp_price"]
+        if tp_moved:
+            # strict = 옛 주문을 다 못 지웠으면 새로 안 건다(같은 쪽 전량 익절이 둘 되지 않게, 검토 F2)
+            tp_res = await place_bracket(binance_session(), {"tp_price": nb["tp_price"]}, symbol, side, strict=True)
+            if "cleared" not in tp_res:   # 키·포지션 조회 실패 = 아무것도 안 건드렸다
+                return web.json_response({"ok": False, "error": "tp_replace_failed",
+                                          "detail": f"익절 지정가를 못 바꿨습니다(아무것도 안 바뀜): {tp_res.get('reason') or '?'}"}, status=502)
+            if (tp_res.get("cleared") or {}).get("errors"):   # 옛 지정가가 지워졌는지 모른다 -- 새 선은 서버가 1초 닿음으로 감시(tp_resting False · 닿으면 남은 우리 지정가를 지우고 닫는다)
+                warn = ("익절 지정가 정리 실패 — 새 익절선은 서버가 감시합니다. 거래소에 옛 익절 지정가가 남았을 수 있으니 확인하세요: "
+                        + "; ".join(map(str, tp_res["cleared"]["errors"])))
+        st = bracket_load()
+        if key not in st or st[key].get("armed_at") != b.get("armed_at") or st[key].get("fired") or key in bracket_exiting:
+            if tp_moved and (tp_res.get("tp") or {}).get("placed"):   # 방금 건 지정가가 고아로 남지 않게(검토 S2)
+                await clear_bracket(binance_session(), symbol, side)
+            return web.json_response({"ok": False, "error": "rearmed", "detail": "그 사이 무장이 바뀌었거나 청산이 시작됐습니다 — 다시 확인하세요"}, status=409)
+        cur = st[key]
+        cur.update(tp_level=nb["tp_level"], tp_price=nb["tp_price"], sl_level=nb["sl_level"], sl_price=nb["sl_price"], sl_name=nb["sl_name"],
+                   watch_from=time.time(), mod={"at": time.time(), "tp": nb["tp_level"], "sl": nb["sl_level"]})
+        if tp_moved:
+            cur["tp_resting"] = bool((tp_res.get("tp") or {}).get("placed"))
+            cur["placed"] = {**(cur.get("placed") or {}), "tp": tp_res.get("tp")}
+        bracket_save(st)
+        print(f"bracket {side}: 선 수정(사용자) 익절 {b.get('tp_level')}→{nb['tp_level']} 손절 {b.get('sl_level')}→{nb['sl_level']} · "
+              f"익절 지정가 {'다시 걸음' if tp_moved else '그대로'} {tp_res and tp_res.get('tp')}", flush=True)
+        return web.json_response({"ok": True, "tp_level": nb["tp_level"], "sl_level": nb["sl_level"], "sl_price": nb["sl_price"], "tp_resting": cur.get("tp_resting"),
+                                  "tp": tp_res and tp_res.get("tp"), "warn": warn}, headers=NOCACHE)
+
     async def api_manual_entry_status(request: web.Request) -> web.Response:
         """진행 중인 수동 주문 상태. 프런트가 폴링해 «메이커로 채워졌나 / 테이커로 넘어갔나»를
         보여준다. 주문은 최대 하나만 동시에 둔다."""
@@ -1943,6 +2029,7 @@ def register(*, account_trip_state, refresh_tasks, swr_locks, binance_session, f
         api_manual_entry_cancel=api_manual_entry_cancel,
         api_manual_bracket_disarm=api_manual_bracket_disarm,
         api_manual_bracket_rearm=api_manual_bracket_rearm,
+        api_manual_bracket_modify=api_manual_bracket_modify,
         api_manual_exit_preview=api_manual_exit_preview,
         api_manual_exit_submit=api_manual_exit_submit,
         api_manual_exit_all_submit=api_manual_exit_all_submit,

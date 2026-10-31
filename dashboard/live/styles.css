@@ -2396,6 +2396,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 /* 2026-09-30 옵션을 풋프린트 카드 안으로(사용자 «하나의 카드») -- 좁은 화면은 한 열로 맨 아래, 넓은 화면은 오른쪽 칸(위 ≥1700 규칙). */
 .liq-map-panel { display: grid; grid-template-columns: minmax(0, 1fr); }
 .liq-map-panel > * { grid-column: 1; min-width: 0; }
+.liq-map-panel > .chart-pan.inrow, .liq-map-panel > .fp-line-btn, .liq-map-panel > .fp-line-switch { grid-column: auto; }   /* 10-30 차트 위 한 줄(절대 위치)은 카드 기준 -- 그리드 칸(안쪽 16px)을 기준으로 잡혀 1단 폭에서 16px 밀렸다 */
 /* 2026-10-01 제목 옆 한 줄(2026-10-02 커버 % 제거 -- 수집 시각만) */
 .opt-cov-h { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: keep-all; }
 /* 2026-09-29 휴대폰 블록 거래 요약 한 줄 + 펼치기 목록(사용자 선택 C) */
@@ -2432,9 +2433,9 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 
 /* 2026-09-29 «시장 맥락» 카드 -- 옵션 카드와 같은 문법(칸 제목 «?» → 설명 펼침, 키-값 줄)이지만 옵션 색(--option)은 쓰지 않는다:
    이 카드는 서술이라 «?» 는 무채색이고, 방향색은 값에만 입힌다(DESIGN.md Three Signals). 넓으면 두 열, 좁으면 한 열. */
-.mc-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); column-gap: 22px; }   /* 2026-09-30 전폭 -- 칸 수는 폭 따라 */
+.mc-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); column-gap: 22px; }   /* 2026-09-30 전폭 -- 칸 수는 폭 따라 */   /* 2026-09-30 전폭 -- 칸 수는 폭 따라 */
 /* 2026-09-30 시안 B(사용자 선택): 판 네 개 + 다음 24시간 줄. 줄 = 이름 | 그림(분위·σ·비율) | 값, 판마다 흐린 부값 한 줄 */
-.mc-body .mc-wide { grid-column: 1 / -1; }
+.mc-body .mc-wide, .mc-body > .mc-fc { grid-column: 1 / -1; }   /* 10-30 ⑤ 예측 줄은 1단 데스크톱에서 넷째 칸에 끼어 글자가 잘렸다 → 한 줄 전체 */
 .mc-svg { display: block; flex: none; max-width: 100%; height: auto; }
 .mc-g { display: grid; grid-template-columns: 96px auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }   /* 2026-09-30 그림 폭은 판 폭에서(mcGfx.gw) */
 .mc-g > span { color: var(--muted); } .mc-g > b { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
@@ -2521,24 +2522,29 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   .ofab-dir.two small { display: flex; flex-direction: column; gap: 1px; }
   .ofab-dir.two small .sep { display: none; }
 }
-.ofab-rule { position: absolute; left: 0; bottom: calc(100% + 6px); display: flex; gap: 2px; padding: 2px; border-radius: 999px;
-  background: color-mix(in srgb, var(--chart-bg, #171b23) 96%, transparent); border: 1px solid var(--line); box-shadow: 0 6px 18px rgb(var(--shadow) / .3); }   /* 뒤 글자가 비치지 않게 */
-.ofab-rule[hidden] { display: none; }
-.ofab.rightside .ofab-rule { left: auto; right: 0; }   /* 2026-10-10 띠가 길어졌다(7.5%·USDC) -- 오른쪽에 붙은 버튼이면 오른쪽 끝을 맞춰 화면 밖으로 안 나가게 */
-.ofab-rule .rule-risk { align-self: center; padding: 0 10px 0 4px; font-size: 10.5px; }
-/* 2026-10-10 주문 심볼 호가 -- 화면은 USDT, 주문은 USDC. 미리보기 머리 바로 아래 한 줄 · 떠 있는 띠 끝 작은 글자(무채색: 방향이 아니라 «어디서 체결되나») */
-.ofab-quote { align-self: center; padding: 0 10px 0 4px; font: 600 10.5px/1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted);
-  white-space: nowrap; cursor: help; border-left: 1px solid var(--soft-line); }
-.ofab-quote[hidden] { display: none; }
-.ofab-quote:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.entry-quote { margin-top: -4px; font: 600 11px/1.3 var(--font-sans); color: var(--muted); font-variant-numeric: tabular-nums; }
-.entry-quote b { font: 600 11px/1 var(--font-mono); color: var(--text); }
-.ofab-rule button { min-height: 28px; padding: 0 11px; border: 0; border-radius: 999px; background: none; color: var(--muted);
-  font: 700 11px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
-.ofab-rule button:hover { color: var(--text); }
-.ofab-rule button[aria-pressed="true"] { background: rgb(var(--lift) / .14); color: var(--text); }
-.ofab-rule button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-@media (pointer: coarse) { .ofab-rule button { min-height: 36px; } }
+/* 2026-10-30 시안 A: 바 끝 «›» = 숨기기 · 숨기면 가장 가까운 화면 가장자리의 손잡이(방향 색 띠·점 + «주문») */
+.ofab-hide { position: relative; display: grid; place-items: center; width: 30px; height: 30px; margin-left: 4px; padding: 0; border: 0; border-radius: 999px;
+  background: transparent; color: var(--muted); cursor: pointer; }
+.ofab-hide::before { content: ""; position: absolute; left: -3px; top: 7px; bottom: 7px; width: 1px; background: var(--line); }
+.ofab-hide:hover { color: var(--text); background: rgb(var(--lift) / .08); }
+.ofab-hide svg { width: 16px; height: 16px; }
+.ofab-hide:focus-visible, .ofab-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (pointer: coarse) { .ofab-hide { width: 40px; height: 40px; } }
+.ofab-tab { position: fixed; right: 0; top: 0; z-index: 900; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 10px 8px;
+  border: 1px solid var(--line); border-right: 0; border-radius: 12px 0 0 12px; background: var(--bg); color: var(--text); cursor: pointer;
+  box-shadow: 0 8px 24px rgb(var(--shadow) / .32); font: 700 12px/1 var(--font-sans); touch-action: manipulation; }
+.ofab-tab[hidden] { display: none; }
+.ofab-tab.left { right: auto; left: 0; border-right: 1px solid var(--line); border-left: 0; border-radius: 0 12px 12px 0; padding: 10px 8px 10px 6px; }
+.ofab-tab.left svg { transform: scaleX(-1); }
+.ofab-tab svg { width: 14px; height: 14px; color: var(--muted); }
+.ofab-tab b { writing-mode: vertical-rl; letter-spacing: .12em; }
+.ofab-tab i { display: none; width: 7px; height: 7px; border-radius: 50%; }
+.ofab-tab.long i, .ofab-tab.short i { display: block; }
+.ofab-tab.long i { background: var(--good); } .ofab-tab.short i { background: var(--bad); }
+.ofab-tab.long::before, .ofab-tab.short::before { content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; }
+.ofab-tab.left::before { left: auto; right: -1px; }
+.ofab-tab.long::before { background: var(--good); } .ofab-tab.short::before { background: var(--bad); }
+.ofab-tab:hover svg { color: var(--text); }
 .ofab-dir.long { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 /* 2026-10-16 시안 ③(app.js ofabTrendTags): 일봉 추세 반대 버튼 = 주황 점선 + «역추세» · 추세 쪽 = «지정가 자리/대기» 꼬리표(알약 윗변에 걸침) */
 .ofab-dir { position: relative; }
@@ -2553,11 +2559,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-tag.mk.on::before { opacity: 1; animation: ofab-mk 1.6s ease-out infinite; }
 @keyframes ofab-mk { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 45%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
 @media (prefers-reduced-motion: reduce) { .ofab-tag.mk.on::before { animation: none; } }
-/* 보유 1.5× 로 띠가 길어졌다(자동이면 «손절 시 순자산 −X%»까지 390 화면에서 374px) -- 휴대폰은 300px 안에서 둘째 줄로 접는다 */
-@media (max-width: 480px) {
-  .ofab-rule { flex-wrap: wrap; max-width: min(calc(100vw - 24px), 300px); border-radius: 14px; }
-  .ofab-rule .rule-risk, .ofab-rule .ofab-quote { padding: 4px 10px; }
-}
 .ofab-dir.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .ofab-dir.long:hover { border-color: var(--good); }
 .ofab-dir.short:hover { border-color: var(--bad); }
@@ -2655,7 +2656,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fr-mts { display: grid; gap: 4px; min-width: 0; color: var(--muted); } .fr-mts small { font-size: 10.5px; }
 .fr-mts > span, .fr-ev { overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
 .fp-rates .fr-ev { color: var(--warn); }
-.fr-go { margin-left: auto; color: var(--muted); font-size: 11.5px; flex: none; }
 #fpCard .ops-health-head > .chart-head-left { flex: 1 1 auto; }   /* 펜 메모(4차): 나스닥·금리가 카드 오른쪽 끝까지 */
 .fp-rates b { font: 700 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .fp-line-switch .mc-switch-t { color: var(--muted); font-weight: 600; }
@@ -2683,17 +2683,23 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .fp-line-btn { display: none; }
 /* 2026-10-28 펜 메모(2차) «SLTP · 전혀 트렌디하지 않다 -- 다른 방향으로 깔끔하게»: 주황 채움·빛 번짐을 버리고 무채색 얇은 선 + 등폭 글자.
    켜면 바탕이 한 단 밝아지고 아이콘의 초록·빨강 선이 실선이 된다(색은 선 두 줄에만). 일봉·버블이 덮으면 숨김(fp-alt-on). */
-#fpCard.fp-toprow:not(.fp-alt-on) .fp-line-btn { position: absolute; z-index: 2; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 9px;
-  height: 30px; padding: 0 14px 0 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--glass); color: var(--text);
-  font: 700 12px/1 var(--font-mono); letter-spacing: .14em; cursor: pointer; transition: background .16s, border-color .16s; }
-#fpCard.fp-toprow .fp-line-btn:hover { border-color: color-mix(in srgb, var(--text) 38%, transparent); background: color-mix(in srgb, var(--text) 7%, transparent); }
-#fpCard.fp-toprow .fp-line-btn[aria-pressed="true"] { border-color: color-mix(in srgb, var(--text) 55%, transparent); background: color-mix(in srgb, var(--text) 13%, transparent); color: var(--ink); }
-.fp-line-btn svg { width: 15px; height: 15px; fill: none; stroke-width: 1.7; stroke-linecap: round; }
-.fp-line-btn .u { stroke: var(--good); stroke-dasharray: 2.4 2.2; } .fp-line-btn .m { stroke: var(--muted); } .fp-line-btn .d { stroke: var(--bad); stroke-dasharray: 2.4 2.2; }
-.fp-line-btn[aria-pressed="true"] .u, .fp-line-btn[aria-pressed="true"] .d { stroke-dasharray: none; }
-.fp-line-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* 2026-10-30 [LONG | SHORT] 시안 B(사용자 선택) -- 터미널 탭: 테두리 없이 색 점 + 등폭 글자 · 바닥 실선 하나 · 눌린 쪽(지금 선 배치의 방향) 아래로
+   그 색 막대가 미끄러져 온다(app.js renderLineTool 이 자리를 잡는다). 글자도 그 색. */
+#fpCard.fp-toprow:not(.fp-alt-on) .fp-line-btn { position: absolute; z-index: 2; transform: translate(-50%, -50%); display: inline-flex; }
+.fp-line-btn { gap: 2px; height: 32px; padding: 0 2px; border-bottom: 1px solid var(--line); }
+.fp-line-btn button { display: inline-flex; align-items: center; height: 100%; padding: 0 14px; border: 0; background: none; color: var(--muted);
+  font: 700 12px/1 var(--font-mono); letter-spacing: .2em; cursor: pointer; transition: color .16s; }
+.fp-line-btn button::before { content: ""; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; }
+.fp-line-btn [data-lines="LONG"]::before { background: var(--good); } .fp-line-btn [data-lines="SHORT"]::before { background: var(--bad); }
+.fp-line-btn button:hover { color: var(--text); }
+.fp-line-btn [data-lines="LONG"][aria-pressed="true"] { color: var(--good); } .fp-line-btn [data-lines="SHORT"][aria-pressed="true"] { color: var(--bad); }
+.fp-line-btn .ind { position: absolute; bottom: -1px; height: 2px; border-radius: 2px; pointer-events: none; transition: left .22s cubic-bezier(.2, .8, .2, 1), width .22s; }
+.fp-line-btn .ind[hidden] { display: none; }
+.fp-line-btn .ind.l { background: var(--good); box-shadow: 0 0 10px color-mix(in srgb, var(--good) 60%, transparent); }
+.fp-line-btn .ind.s { background: var(--bad); box-shadow: 0 0 10px color-mix(in srgb, var(--bad) 60%, transparent); }
+.fp-line-btn button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; border-radius: 6px; }
 #fpCard.fp-toprow #fpColTog [data-lines] { display: none; }   /* 큰 버튼이 있으면 기둥 토글의 작은 «선 주문»은 숨김(휴대폰·좁은 화면은 그것) */
-@media (prefers-reduced-motion: reduce) { #fpCard.fp-toprow .fp-line-btn { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .fp-line-btn button, .fp-line-btn .ind { transition: none; } }
 .fp-line-switch .mc-chip { min-height: 20px; }   /* 두 줄이 카드 머리 선과 «체결|포지션» 탭 사이 46px 에 들어간다 */
 .mc-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px;
   background: var(--glass); color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
@@ -2992,22 +2998,20 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 /* 2026-10-28 사용자 «모바일도 데스크탑처럼»: 휴대폰 머리 마지막 줄 = [빈칸 | SLTP(가운데) | 지표 N(오른쪽)] · 손가락 40px · 팝업은 화면 폭 안에서 줄바꿈 */
 .fp-mob-row { flex: 1 1 100%; order: 2; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; position: relative; }
 .fp-mob-row[hidden] { display: none; }
-.fp-mob-row .fp-line-btn { display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 16px 0 13px; border-radius: 10px; border: 1px solid var(--line);
-  background: var(--glass); color: var(--text); font: 700 13px/1 var(--font-mono); letter-spacing: .14em; cursor: pointer; touch-action: manipulation; }
-.fp-mob-row .fp-line-btn[aria-pressed="true"] { border-color: color-mix(in srgb, var(--text) 55%, transparent); background: color-mix(in srgb, var(--text) 13%, transparent); color: var(--ink); }
+.fp-mob-row .fp-line-btn { display: inline-flex; position: relative; height: 40px; }
+.fp-mob-row .fp-line-btn button { padding: 0 10px; letter-spacing: .08em; font-size: 13px; touch-action: manipulation; }
 .fp-mob-row .fp-line-switch.mob { display: flex; justify-self: end; align-self: center; position: static; transform: none; margin: 0; }
-.fp-mob-row .fp-ind-btn { height: 40px; padding: 0 13px; border-radius: 10px; touch-action: manipulation; }
+.fp-mob-row .fp-ind-btn { height: 40px; padding: 0 13px; border-radius: 10px; touch-action: manipulation; white-space: nowrap; }   /* 10-30 LONG|SHORT 가 넓어져 «지표»가 두 줄로 꺾였다 */
 .fp-mob-row .fp-ind-pop { right: 0; max-width: min(360px, calc(100vw - 40px)); white-space: normal; }
 .fp-mob-row .fp-ind-pop .mc-sw-g { flex-wrap: wrap; gap: 6px; }
 .fp-mob-row .fp-ind-pop .mc-chip { min-height: 36px; padding: 0 11px; }
-/* 2026-10-28 차트 «선 주문»(app.js renderLineTool) -- 시안 A 꼬리표 + B 포지션 상자. 롱 = 위 초록·아래 빨강, 숏이면 뒤집힌다(.short) */
+/* 2026-10-28 차트 «선 주문»(app.js renderLineTool) -- 시안 A 꼬리표 + B 포지션 상자. 익절 띠 초록·손절 띠 빨강(롱·숏 같음 -- 숏은 익절이 아래) */
 .lt { position: absolute; inset: 0; pointer-events: none; z-index: 3; font: 600 11.5px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
 .lt[hidden] { display: none; }
 .lt-zone { position: absolute; }
 .lt-zone.up { background: color-mix(in srgb, var(--good) 14%, transparent); }
 .lt-zone.dn { background: color-mix(in srgb, var(--bad) 14%, transparent); }
-.lt.short .lt-zone.up { background: color-mix(in srgb, var(--bad) 14%, transparent); }
-.lt.short .lt-zone.dn { background: color-mix(in srgb, var(--good) 14%, transparent); }
+/* .up = 익절~진입 · .dn = 손절~진입 띠(위아래가 아니라 선 기준) -- 숏도 색을 바꾸지 않는다(2026-10-30 숏에서 익절 띠가 빨갛던 것) */
 .lt-ln { position: absolute; height: 0; border-top: 1.5px dashed var(--good); }
 .lt-ln.sl { border-top-color: var(--bad); }
 .lt-ln.en { border-top: 1px solid var(--accent); opacity: .8; }
@@ -3040,6 +3044,35 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-x { position: absolute; transform: translateX(-100%); pointer-events: auto; white-space: nowrap; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line);
   background: var(--chart-bg); color: var(--muted); font: 600 11px/1 var(--font-sans); cursor: pointer; }
 .lt-x:hover { color: var(--text); }
+/* 2026-10-29 SLTP 상자: 크기 줄(레버리지·증거금·명목) + 손익비 버튼 */
+.lt-sz { display: flex; flex-wrap: wrap; gap: 2px 10px; font: 600 11.5px/1.35 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
+.lt-sz span { white-space: nowrap; }
+.lt-sz:empty { display: none; }
+/* 2026-10-30 SLTP 증거금 슬라이더(시안 C) + 손절 시 손실 줄 · 들어간 선 진입가 라벨 손익(시안 B) */
+.lt-mg { display: grid; gap: 5px; }
+.lt-mg-hd { display: flex; justify-content: space-between; align-items: baseline; font: 600 11px/1.2 var(--font-sans); color: var(--muted); }
+.lt-mg-v { font: 700 13px/1 var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums; }
+.lt-mg-v small { margin-left: 4px; font: 600 11px/1 var(--font-mono); color: var(--muted); }
+.lt-mg-r { width: 100%; height: 18px; margin: 0; accent-color: var(--text); pointer-events: auto; cursor: pointer; touch-action: pan-y; }
+@media (pointer: coarse) { .lt-mg-r { height: 28px; } }
+.lt-mg-risk { font: 600 11px/1.3 var(--font-mono); color: var(--bad); font-variant-numeric: tabular-nums; }
+.lt-mg-risk span { color: var(--muted); font-family: var(--font-sans); }
+.lt-mg-risk[hidden] { display: none; }
+.lt-en-p { font-weight: 700; font-variant-numeric: tabular-nums; }
+.lt-en-p.good { color: var(--good); } .lt-en-p.bad { color: var(--bad); }
+.lt-rrb { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.lt-rrb button { height: 26px; border-radius: 7px; border: 1px solid var(--line); background: transparent; color: var(--muted);
+  font: 700 11.5px/1 var(--font-mono); cursor: pointer; pointer-events: auto; }
+.lt-rrb button:hover { color: var(--text); }
+.lt-rrb button[aria-pressed="true"] { color: var(--text); border-color: color-mix(in srgb, var(--text) 45%, transparent); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.lt-rrb button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* 2026-10-29 들어간 선 주문(#lineArmed): 실선 = 거래소·서버에 걸린 주문 · 띠는 선 주문 상자보다 옅게 · 보내는 중엔 흐리게 */
+.lt-armed .lt-ln { border-top-style: solid; }
+.lt-armed .lt-zone.up, .lt-armed .lt-zone.dn { opacity: .6; }
+.lt-armed.busy .lt-tag[data-k] { opacity: .55; cursor: progress; }
+.lt-armed.locked .lt-tag[data-k] { opacity: .5; pointer-events: none; }   /* 진입 전 선 도구가 켜진 동안 */
+.lt-am-note { position: absolute; transform: translateY(-50%); font: 600 11px/1.2 var(--font-sans); color: var(--muted); white-space: nowrap; pointer-events: none; }
+.lt-am-note.bad { color: var(--bad); white-space: normal; max-width: 60%; }
 @media (max-width: 720px) {
   .lt-tk { width: 200px; padding: 9px 10px; }
   .lt-tag { padding: 7px 10px 7px 8px; }   /* 손가락 -- 높이 ~30px */
@@ -3082,12 +3115,15 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .mc-gk > span { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mc-gk.v { grid-template-columns: 44px minmax(0, 1fr) auto; }   /* 10-13 «라벨 되돌려»: 이름 · 그림 · 값 */
 .mc-gk > b { font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; min-width: 40px; }
-/* 가격 자가 줄인 높이만큼 아래 칸에 여유(사용자 «아래 칸들의 높이를 좀 더 키워서 여유롭게») -- 내용 높이(mcNeedH)가 늘어 renderCandleSvg 가 자리를 준다 */
-#mcBody.mc-cmp .mc-strip .mc-sec { padding: 14px 0 12px; }
-#mcBody.mc-cmp .mc-rows { gap: 10px; }
-#mcBody.mc-cmp .mc-strip h4, #mcBody.mc-cmp .mc-strip .mc-state { margin-bottom: 9px; }
-#mcBody.mc-cmp .mc-fc { padding-top: 14px; padding-bottom: 12px; } #mcBody.mc-cmp .mc-fc > h4 { margin-bottom: 10px; }
-#mcBody.mc-cmp .fc-c { gap: 5px; } #mcBody.mc-cmp .fc-c .hz { margin-bottom: 2px; }
+/* 2026-10-30 펜 메모 «미니 체결 버블을 다시 · 수급 차트 말고 아래 것들 높이를 줄여»: 10-28 에 넓혔던 여백(가격 자 지운 자리)을 다시 좁힌다 -- 그 높이는 버블이 가져간다 */
+#mcBody.mc-cmp .mc-strip .mc-sec { padding: 6px 0 4px; }
+#mcBody.mc-cmp .mc-rows { gap: 3px; }
+#mcBody.mc-cmp .mc-strip h4, #mcBody.mc-cmp .mc-strip .mc-state { margin-bottom: 4px; }
+#mcBody.mc-cmp .mc-fc { padding-top: 6px; padding-bottom: 0; } #mcBody.mc-cmp .mc-fc > h4 { margin-bottom: 4px; }
+#mcBody.mc-cmp .fc-c { gap: 2px; }
+.mc-bubble { display: block; width: 100%; height: 160px; margin-bottom: 6px; cursor: crosshair; touch-action: pan-y; }   /* 미니도 확대·이동(bubble_map.js VN) · 높이 = renderCandleSvg 가 준다 */
+.mc-bubble.panning { cursor: grabbing; }
+.mc-bubble:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* 2026-10-15 ⑤ 예측 줄(사용자 시안 B): 지금 추세 → 4h(+변동성) → 7일 → 4~13주. 가로 선 = 시간축, 칸 = 지평. 휴대폰은 2×2 */
 .mc-fc { border-top: 1px solid var(--soft-line); padding-top: 8px; }
