@@ -184,6 +184,7 @@ from scripts.push_webpush_20260904 import (  # noqa: E402
 EVIDENCE_SIGNAL_SYMBOL = "ETHUSDT"
 EVIDENCE_SIGNAL_INTERVAL = "5m"
 EVIDENCE_SIGNAL_CACHE_SECONDS = 60
+EVIDENCE_ASSETS = ("eth", "btc")   # 증거신호 캐시가 5분봉(마감·형성 봉)을 갖고 있는 코인 -- 나머지는 따로 받는다
 EVIDENCE_SIGNAL_BTC_SYMBOL = "BTCUSDT"  # smt_divergence's cross-asset non-confirmation leg, 2026-08-24
 LIQUIDATION_MAP_INTERVAL = "1h"  # symbol now comes from COIN_CONFIG[asset]["binance_symbol"] (2026-08-31)
 LIQUIDATION_MAP_LOOKBACK_HOURS = 24  # 2026-08-25: 168h->24h. Both event-driven (floor=ceiling=Nh
@@ -1564,7 +1565,7 @@ def make_app() -> web.Application:
         return rows
 
     async def load_market_history(asset: str) -> list[dict[str, float | int]]:
-        if asset in ("eth", "btc"):
+        if asset in EVIDENCE_ASSETS:
             return await load_market_history_from_evidence_cache(asset)
         # sol/xrp: 증거신호 캐시(ETH+BTC)가 없어 따로 받는다. 2026-09-27 ETH 와 같은 추세 밴드(SMA144±ATR, 사용자 지시) --
         #   SMA144 + ewm 워밍업이라 1000봉(가중치 5)을 받고 veto 는 **마감봉**에만 붙인다(ETH closed_df 와 같은 규약:
@@ -3370,7 +3371,7 @@ def make_app() -> web.Application:
         # 2026-10-11 ETH·BTC 는 마감봉만 오므로 형성 봉(partial, 프레임과 같은 60초 캐시)을 덧붙인다 -- 새로 연 화면이 그 봉의 시가·고저를
         #   씨앗으로 쓰고 라이브 체결로 잇는다(app.js mergeFormingCandle). 캐시가 묵어 그새 닫힌 봉이어도 그 봉이 아직 마감봉에 없으면
         #   붙인다(빈칸보다 낫다) -- partial = «닫히기 전에 찍은 값»이라 마감봉으로 쓰면 안 된다는 뜻. 내부 소비자(상황·30분 카드)는 그대로 마감봉만.
-        f = (evidence_signal_cache.get("forming") or {}).get(asset) if asset in ("eth", "btc") else None
+        f = (evidence_signal_cache.get("forming") or {}).get(asset) if asset in EVIDENCE_ASSETS else None
         if f and candles and f["time"] > candles[-1]["time"]:
             candles = [*candles, f]
         return web.json_response({"asset": asset, "candles": candles}, headers=NOCACHE)

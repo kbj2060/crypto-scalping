@@ -4034,7 +4034,7 @@ async function refreshGex() {
     if (!res.ok) throw new Error(`gex ${res.status}`);
     latestGex = await res.json();
     const cur = optData().cur;   // 2026-10-08 닿음 등고선용 스마일(ETH·BTC · 10-31 XRP USDC 선형) -- 실패하면 등고선만 빠진다
-    if (cur === "ETH" || cur === "BTC" || cur === "XRP") {
+    if (["ETH", "BTC", "XRP"].includes(cur)) {   // 서버 api_opt_smile 이 받는 코인
       try {
         const sm = await fetch(`/api/opt-smile?asset=${cur.toLowerCase()}`, { cache: "no-cache" });
         if (sm.ok) latestSmile[cur] = await sm.json();
@@ -4164,11 +4164,12 @@ async function refreshTrend() {
 
 // 2026-10-16 사용자 «같이 해서 시안» → «배포»(시안 ①): 칸별 아이스버그(/api/iceberg = scripts/live_eth_iceberg_20261016, 30초 · ETH 만).
 //   표시 전용 -- 신호·알림 아님. 연구 28일 23건 15분 +7.6bp[2.6,15.0] → 전진 150건이면 판정(research_eth_dom_levels_absorption_20261016 --judge).
+const ICE_ASSETS = new Set(["eth", "xrp"]);   // 아이스버그 워커가 도는 코인(서버 api_iceberg 와 같다 · 10-20 XRP)
 let latestIceberg = null, icebergLastFetchAt = 0;
 async function refreshIceberg() {
   renderIceChip();
   const asset = activeSnapshotAsset;   // 2026-10-20 XRP 판(ICEBERG_SYMBOL=XRPUSDT) -- 코인이 바뀌면 30초를 기다리지 않고 다시 받는다
-  if (activePageTab !== "snapshot" || document.hidden || (asset !== "eth" && asset !== "xrp")) return;
+  if (activePageTab !== "snapshot" || document.hidden || !ICE_ASSETS.has(asset)) return;
   const now = Date.now();
   if (now - icebergLastFetchAt < 30000 && latestIceberg && latestIceberg._asset === asset) return;
   icebergLastFetchAt = now;
@@ -9141,7 +9142,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     supply1sSubBox = null;
     subPanelCache.s1.key = subPanelCache.dens.key = "";
   }
-  if (footprint && svg.id === "candleSvgSnapshot" && (activeSnapshotAsset === "eth" || activeSnapshotAsset === "xrp") && candles.length > 1) iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS);   // 2026-10-16 시안 ①
+  if (footprint && svg.id === "candleSvgSnapshot" && ICE_ASSETS.has(activeSnapshotAsset) && candles.length > 1) iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS);   // 2026-10-16 시안 ①
   { const mn = mobileChart && svg.id === "candleSvgSnapshot" ? svg.querySelector('[data-live="label"][data-with-price="num"]') : null;
     if (mn && !mn.classList.contains("far-lbl")) svg.appendChild(mn); }   // 2026-10-10 휴대폰 현재가 숫자 = 호가 띠(◌ 표식) 위 맨 앞
   fpCvPaint(fpCv.bg); fpCvPaint(fpCv.fg);   // 2026-10-20 캔버스 두 장(fpCv) -- 칠하기는 레이아웃을 안 건드린다
