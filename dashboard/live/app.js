@@ -1244,7 +1244,7 @@ function renderChartWindowTabs() {
   const daily = typeof window.fpDailyActive === "function" && window.fpDailyActive();
   const per = typeof window.fpDailyPeriod === "function" ? window.fpDailyPeriod() : "1d";   // 2026-10-20 같은 그림이 4h(4시간봉)도 그린다
   tabs.forEach((btn, k) => {
-    const on = btn.id === "fpDailyBtn" ? daily && per === "1d" : btn.dataset.tf ? daily && per === btn.dataset.tf : !daily && Number(btn.dataset.bars) === chartWindowBars && (Number(btn.dataset.tfk) || 1) === chartTfK;
+    const on = btn.id === "fpDailyBtn" ? daily && per === "1d" : btn.dataset.tf ? daily && per === btn.dataset.tf : !daily && !fpZoomed() && (Number(btn.dataset.tfk) || 1) === chartTfK;   // 2026-11-01 막대 수는 안 본다: 기본 창(24봉)보다 줄여 12~24봉이면 어느 칸도 안 맞아 하이라이트가 5m 로 돌아갔다
     btn.classList.toggle("active", on);
     if (on) idx = k;
   });
