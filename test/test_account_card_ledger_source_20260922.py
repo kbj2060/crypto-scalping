@@ -120,6 +120,20 @@ def main() -> int:
     assert abs(clean[0]["pnl_check_bp"]) < 1e-6, clean
     checks += 2
 
+    # 2026-11-01 XRP 롱 손절 누락: 창 앞에 10 이 열려 있었다 -> 10 청산(진짜 평탄) -> 새 왕복 + 지금 열린 2.
+    #   지금 열린 수량(end_qty)을 주면 평탄 뒤 왕복은 표식이 없고, 안 주면(또는 모순이면) 전부 표식(이전 동작).
+    mid = [fill(1, 1000, "SELL", 2100, 4, 40, "LONG"), fill(2, 1100, "SELL", 2100, 6, 60, "LONG"),
+           fill(3, 2000, "BUY", 2000, 5, 0, "LONG"), fill(4, 3000, "SELL", 1900, 5, -500, "LONG"),
+           fill(5, 4000, "BUY", 2000, 2, 0, "LONG")]
+    rs = acc.round_trips(mid, {("ETHUSDT", "LONG"): 2.0})
+    new = [t for t in rs if t["entry_time"] >= 2000]
+    assert len(new) == 2 and not any(t.get("truncated_open") for t in new), new
+    assert new[0]["closed"] and abs(new[0]["net_pnl"] + 500) < 1e-9 and abs(new[0]["pnl_check_bp"]) < 1e-6, new[0]
+    assert all(t.get("truncated_open") for t in rs if t["entry_time"] < 2000), rs
+    assert all(t.get("truncated_open") for t in acc.round_trips(mid)), "열린 수량을 모르면 이전처럼 전부 표식"
+    assert all(t.get("truncated_open") for t in acc.round_trips(mid, {("ETHUSDT", "LONG"): 99.0})), "모순이면 표식 유지"
+    checks += 5
+
     # 잘린 LONG 과 같은 시각의 정상 SHORT 가 «겹침» 으로 오인되면 안 된다 -- 원장이 그 SHORT 를
     # 영구히 거부하던 실제 버그다. 측면이 제대로 붙으면 겹침 판정이 서로를 안 본다.
     both = cut + [fill(3, 1200, "SELL", 2100, 1, 0, "SHORT"),
