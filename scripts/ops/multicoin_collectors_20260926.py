@@ -112,10 +112,6 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
         # 2026-10-04 추세 전환 경보기(ETH 모델을 그 코인 5분봉에 -- 검정 통과, eth_only_signals_solxrp_20261004) · 5분마다 klines 3회
         add("bo", lc, 3, "supervisor_breakout_detector.sh", "live_eth_breakout_detector_worker_20260911.py", {"BO_SYMBOL": sym},
             [_dir(f"bo_{lc}", "data/live", 15, 30, glob=f"{lc}_breakout_detector_state.json")])
-        add("okx_ctx", lc, 2, "supervisor_okx_context.sh", "live_okx_context_collector_20260923.py",
-            {"OKX_CTX_INST": inst},
-            [_db(f"okx_ctx_{lc}", "data/hot/okx_ctx.sqlite", f"okx_mark WHERE inst = '{inst}'",
-                 "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')")])
         deep and add("bn_raster", lc, 2, "supervisor_orderflow_raster.sh", "live_orderflow_raster_collector_20260914.py",
             {"OF_SYMBOL": sym.lower()}, [_dir(f"bn_raster_{lc}", f"{of}/raster/{sym}", glob="*.f32")],
             eth=f"{of}/raster/ETHUSDT")
@@ -125,6 +121,9 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
         # hot 사본(SQLite WAL, 한 파일)을 본다 -- 코인별 DuckDB 를 열면 수집기 쓰기와 락이 부딪힌다.
         [_db(f"bn_tape_{x}", "data/hot/binance_tape.sqlite", f"trade_tape_1s WHERE symbol = '{x}'",
              "datetime(max(ts_sec), 'unixepoch', 'localtime')") for x in syms])
+    add("okx_ctx", "all", 2, "supervisor_okx_context.sh", "live_okx_context_collector_20260923.py", {"OKX_CTX_INST": ",".join(insts)},
+        [_db(f"okx_ctx_{x}", "data/hot/okx_ctx.sqlite", f"okx_mark WHERE inst = '{x}'",
+             "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')") for x in insts])
     add("okx_tape", "all", 2, "supervisor_okx_trade_tape.sh", "live_okx_trade_tape_collector_20260923.py", {"OKX_TAPE_INST": ",".join(insts)},
         [_db(f"okx_tape_{x}", "data/hot/okx_tape.sqlite", f"trade_tape_1s WHERE symbol = '{x}'",
              "datetime(max(ts_sec), 'unixepoch', 'localtime')", 10, 30) for x in insts])

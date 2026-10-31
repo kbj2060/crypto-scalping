@@ -403,7 +403,7 @@ def main() -> None:
         selftest()
         return
     try:
-        asyncio.run(collect(a.inst, a.db or _tape.default_db(a.inst, "okx_context")))
+        asyncio.run(_tape._bn.run_all([collect(x, a.db or _tape.default_db(x, "okx_context")) for x in a.inst.split(",") if x]))   # --inst a,b,c = 한 프로세스
     except KeyboardInterrupt:
         log("종료")
 
