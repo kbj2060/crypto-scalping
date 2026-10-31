@@ -2648,13 +2648,14 @@ def make_app() -> web.Application:
     async def api_ob5m(request: web.Request) -> web.Response:   # 2026-10-26 풋프린트 5분 호가 요약(ETH, 표시 전용 · 정의 검증 중)
         """scripts/live_ob5m_20261026 이 쓴 data/live/ob5m/ethusdt.sqlite 만 읽는다 -- 지난 7일.
         bars[{t ms, tilt_pct, book_ok, events_known, live?}] (live = 진행 중 봉, 봉 끝에 확정값으로 바뀐다) · walls = 봉마다 «가장 오래 선 5%+ 벽» 가격이 같은 연속 봉을 한 구간으로 · marks = 돌파(eat)·가짜벽(fake).
-        다른 코인은 빈 목록(정의가 SOL·XRP 로 안 옮겨진다 -- 호가 5분 지표 연구 4코인 비교) -- 화면은 «준비 중»."""
+        2026-10-31 XRP 도(사용자 «xrp 에 호가벽·가짜 호가벽이 안 보인다»): 같은 워커 --symbol XRPUSDT → xrpusdt.sqlite(연구 bars_XRP 1e-9 대조).
+        그 밖 코인은 빈 목록 -- 화면은 «준비 중»."""
         asset = request.query.get("asset", "eth")
-        if asset != "eth":
+        if asset not in ("eth", "xrp"):
             return web.json_response({"bars": [], "walls": [], "marks": []}, headers=NOCACHE)
 
         def produce() -> dict[str, Any]:
-            db = LIVE_DIR / "ob5m" / "ethusdt.sqlite"
+            db = LIVE_DIR / "ob5m" / f"{asset}usdt.sqlite"
             if not db.exists():
                 return {"bars": [], "walls": [], "marks": []}
             cut = int((time.time() - 7 * 86400) * 1000)
@@ -2690,7 +2691,7 @@ def make_app() -> web.Application:
             marks += [{"t": m["t"], "bar_t": m["bar_t"], "side": m["side"], "kind": m["kind"], "px": m["px"], "usd": round(m["usd"]),
                        "dist_bp": round(m["dist_bp"], 2), "live": True} for m in lmarks if m["bar_t"] not in known]
             return {"bars": bars, "walls": walls, "marks": marks}
-        return web.json_response(await swr_cached("ob5m_eth", 4.0, lambda: asyncio.to_thread(produce), max_stale=600.0), headers=NOCACHE)
+        return web.json_response(await swr_cached(f"ob5m_{asset}", 4.0, lambda: asyncio.to_thread(produce), max_stale=600.0), headers=NOCACHE)
 
     vol4h_art: dict = {}   # 코인 -> {mtime, art}
     # 코인 -> 아티팩트(None = ETH 기본 svm.ARTIFACT). XRP 는 매달 재학습이 아직 없다(ponytail: 10-19 학습분 고정 -- 재학습 cron 은 파라미터화한 복사본이 필요).
