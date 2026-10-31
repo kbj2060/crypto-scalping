@@ -72,6 +72,17 @@ MARKETS = {
     "spot": ("wss://stream.binance.com:9443/ws/{symbol}@aggTrade", "https://api.binance.com/api/v3/klines",
              "https://api.binance.com/api/v3/aggTrades", ROOT / "data" / "hot" / "binance_spot_tape.sqlite"),
 }
+# 🔴세션은 WS 때문에 ClientTimeout(total=None) = 시한 없음이다. REST 하나가 반쯤 열린 연결에 걸리면 verify_recent 를 기다리는
+#   WS 수신 루프가 영원히 멈춘다 -- 2026-10-31 23:01 한 프로세스의 선물 5심볼이 같은 5분 검사 틱에서 함께 멈춰 14분 비었다
+#   (OKX 수집기는 같은 이유로 이미 REST 마다 시한을 달고 있었다). REST 호출마다 시한을 단다.
+REST_TIMEOUT_S = 20.0
+
+
+def _rest_timeout():
+    from aiohttp import ClientTimeout
+    return ClientTimeout(total=REST_TIMEOUT_S)
+
+
 BACKFILL_SECONDS = 60.0   # 복구 주기. 한 주기에 몇 분을 받을지는 거래소별 per_cycle
 BACKFILL_MAX_ATTEMPTS = 3
 BACKFILL_LOOKBACK_S = 7 * 86400        # 기본(OKX history-trades 는 수개월 가능)
@@ -670,7 +681,7 @@ async def verify_recent(store: TapeStore, session, klines_url: str = KLINES_URL)
     params = {"symbol": store.symbol.upper(), "interval": "1m",
               "startTime": min(minutes) * 1000,
               "limit": min(1500, (max(minutes) - min(minutes)) // 60 + 2)}   # 흩어진 밀린 분까지 덮게
-    async with session.get(klines_url, params=params) as response:
+    async with session.get(klines_url, params=params, timeout=_rest_timeout()) as response:
         if response.status != 200:
             return
         klines = await response.json()
@@ -758,7 +769,8 @@ def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str 
     async def fetch(m: int):
         start, end = m * 1000, m * 1000 + 59_999
         async with session.get(klines_url, params={"symbol": symbol.upper(), "interval": "1m",
-                                                   "startTime": start, "limit": 1}) as r:
+                                                   "startTime": start, "limit": 1},
+                               timeout=_rest_timeout()) as r:
             r.raise_for_status()
             k = await r.json()
         if not k or int(k[0][0]) != start or int(k[0][6]) >= time.time() * 1000:
@@ -766,7 +778,7 @@ def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str 
         buf = TapeBuffer(bucket, symbol)
         params = {"symbol": symbol.upper(), "startTime": start, "endTime": end, "limit": 1000}
         while True:
-            async with session.get(agg_url, params=params) as r:
+            async with session.get(agg_url, params=params, timeout=_rest_timeout()) as r:
                 r.raise_for_status()
                 batch = await r.json()
             for a in batch:
