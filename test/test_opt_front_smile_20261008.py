@@ -29,3 +29,19 @@ def test_front_smile():
     assert front_smile(_rows("8OCT26", (2560, 2580, 2600)), NOW) == {"ok": False, "reason": "few_strikes", "exp_ms": r["exp_ms"]}
     assert front_smile([{"instrument_name": "garbage"}], NOW)["ok"] is False
     assert front_smile([], NOW) == {"ok": False, "reason": "no_expiry"}
+
+
+def test_front_smile_xrp_usdc_linear():
+    """2026-10-31 XRP: USDC 목록에 다른 코인(SOL…)이 섞이고 행사가 소수점이 «d»(1d25 = 1.25)."""
+    s, ks = 1.25, [round(1.15 + 0.01 * i, 2) for i in range(21)]
+    rows = []
+    for k in ks:
+        x = math.log(k / s)
+        iv = (C[0] * x * x + C[1] * x + C[2]) * 100
+        nm = f"XRP_USDC-8OCT26-{str(k).replace('.', 'd')}"
+        rows += [{"instrument_name": nm + "-C", "mark_iv": iv, "underlying_price": s},
+                 {"instrument_name": nm + "-P", "mark_iv": iv, "underlying_price": s}]
+    junk = [{"instrument_name": f"SOL_USDC-8OCT26-{k}-C", "mark_iv": 300.0, "underlying_price": 150.0} for k in range(140, 160)]
+    r = front_smile(rows + junk, NOW, "XRP_USDC-")
+    assert r["ok"] and r["S"] == s and r["n"] == sum(1 for k in ks if abs(math.log(k / s)) <= 0.08) and all(abs(a - b) < 1e-9 for a, b in zip(r["coef"], C)), r
+    assert front_smile(junk, NOW, "XRP_USDC-") == {"ok": False, "reason": "no_expiry"}   # 다른 코인만 있으면 XRP 스마일 없음

@@ -1075,13 +1075,19 @@ SMILE_XLIM = 0.08   # ln(K/S) ±8% 안 행사가로 2차 스마일을 맞춘다(
 _MON = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), 1)}
 
 
-def front_smile(rows: list[dict], now_ms: float) -> dict[str, Any]:
+def front_smile(rows: list[dict], now_ms: float, prefix: str = "") -> dict[str, Any]:
     """Deribit 옵션 요약 → 가까운 만기(5분 넘게 남은 첫 만기)의 IV 스마일 σ(x) = c0·x² + c1·x + c2, x = ln(K/S). 순수 함수.
-    같은 행사가 콜·풋 mark_iv 는 평균. 행사가 5개 미만이거나 맞춘 곡선이 범위 안에서 0.03~5 밖이면 ok=False."""
+    같은 행사가 콜·풋 mark_iv 는 평균. 행사가 5개 미만이거나 맞춘 곡선이 범위 안에서 0.03~5 밖이면 ok=False.
+    2026-10-31 XRP: USDC 선형옵션은 한 목록(currency=USDC)에 SOL·XRP·HYPE… 가 섞여 온다 -- prefix("XRP_USDC-")로 거르고,
+      행사가 소수점은 «d»로 쓴다(XRP_USDC-31OCT26-1d25-C = 1.25)."""
     by_exp: dict[int, list[tuple[float, float, float]]] = {}
     for r in rows:
         try:
-            _, d, k, _cp = str(r["instrument_name"]).split("-")
+            nm = str(r["instrument_name"])
+            if not nm.startswith(prefix):
+                continue
+            _, d, k, _cp = nm.split("-")
+            k = k.replace("d", ".")
             exp = int(datetime(2000 + int(d[-2:]), _MON[d[-5:-2]], int(d[:-5]), 8, tzinfo=timezone.utc).timestamp() * 1000)
             iv, s = float(r.get("mark_iv") or 0) / 100, float(r.get("underlying_price") or 0)
         except (KeyError, ValueError, TypeError):
@@ -4280,19 +4286,20 @@ def make_app() -> web.Application:
         return web.json_response(payload, headers=NOCACHE)
 
     async def opt_smile_payload(cur: str) -> dict[str, Any]:
+        lin = cur == "XRP"   # 2026-10-31 XRP = USDC 선형옵션(목록 USDC, 이름 XRP_USDC-…)
         try:
-            j = await fetch_binance_json(DERIBIT_BOOK_URL, {"currency": cur, "kind": "option"}, timeout=6.0)
+            j = await fetch_binance_json(DERIBIT_BOOK_URL, {"currency": "USDC" if lin else cur, "kind": "option"}, timeout=6.0)
         except (asyncio.TimeoutError, ClientError, ValueError):
             j = None
         if not j or not isinstance(j.get("result"), list):
             return {"ok": False, "reason": "deribit_unavailable"}
-        return {**front_smile(j["result"], time.time() * 1000), "fetched_ts": time.time()}
+        return {**front_smile(j["result"], time.time() * 1000, f"{cur}_USDC-" if lin else ""), "fetched_ts": time.time()}
 
     async def api_opt_smile(request: web.Request) -> web.Response:
         # 2026-10-08 닿음 등고선. 캐시 60초 = 브라우저 몇 개든 Deribit 공개 API 는 분당 1회(키 없음 · 바이낸스 IP 한도와 무관).
-        cur = {"eth": "ETH", "btc": "BTC"}.get(request.query.get("asset", "eth").lower())
+        cur = {"eth": "ETH", "btc": "BTC", "xrp": "XRP"}.get(request.query.get("asset", "eth").lower())
         if not cur:
-            return web.json_response({"ok": False, "reason": "eth_btc_only"}, headers=NOCACHE)   # SOL·XRP 는 USDC 선형옵션(만기 표기 다름)
+            return web.json_response({"ok": False, "reason": "eth_btc_xrp_only"}, headers=NOCACHE)   # SOL 은 아직 안 붙임(USDC 선형 -- XRP 와 같은 경로로 붙일 수 있다)
         payload = await swr_cached(f"opt_smile_{cur}", 60.0, lambda: opt_smile_payload(cur), max_stale=STALE_GRACE_SECONDS)
         return web.json_response(payload, headers=NOCACHE)
 
