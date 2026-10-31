@@ -52,6 +52,10 @@ assert.equal(optNewTxt([{ cb: 1, cs: 1, pb: 0, ps: 0, doi: 2 }, { cb: 9, cs: 9, 
   const mx = optRealizedGamma(midC, 1e9 + 145 * 300, [[1, 0.2], [99, 0.4]], [0.2, 0.3]);   // 표·경계가 실제로 인자로 들어가나
   assert.ok(mx.v === mid.v && mx.pct > 1 && mx.pct < 99 && mx.side === "mid", JSON.stringify([mx, mid]));
   assert.equal(optRealizedGamma(mk(alt), 1e9 + 145 * 300, RG_REF_XRP, [-0.0881, 0]).side, "rev");
+  // 2026-10-31 BTC: 표 13점 · 50분위 −0.0455 · RG_BY 에 키와 설명 키
+  const bi = src.indexOf("const RG_REF_BTC ="), RG_REF_BTC = eval(src.slice(bi + 18, src.indexOf(";", bi)));
+  assert.ok(RG_REF_BTC.length === 13 && RG_REF_BTC[6][1] === -0.0455);
+  assert.ok(/BTC: \{ ref: RG_REF_BTC, cut: \[-0\.0870, -0\.0010\][^}]*tip: "rg_btc" \}/.test(src) && src.includes('  rg_btc: "'));
 }
 
 // ── 미국장: 서머타임 13:30 UTC · 주말 건너뜀 · 표준시 14:30 UTC · 장중 판정 ──
