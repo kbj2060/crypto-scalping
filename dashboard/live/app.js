@@ -956,6 +956,7 @@ async function setActiveSnapshotAsset(asset) {
   // until each signal's own poll interval next elapses (up to 5min for the slowest).
   // 2026-09-22 ETH 전용 카드에 «ETH 전용» 배지를 켠다(styles.css 의 body.not-eth 규칙).
   document.body.classList.toggle("not-eth", asset !== "eth");
+  document.body.dataset.coin = asset;   // 2026-10-31 ETH 외에 켜는 칸(⑤ 다음 24시간 = XRP)을 CSS 가 고른다
   // ETH 전용 그림들의 캐시도 비운다 -- 안 비우면 ETH 로 **돌아올 때** 옛 그림이 한 프레임 번쩍인다.
   footprintBars = new Map(); latestFootprint = null; fpWeek = null; fpWeekTriedAt = 0;   // 1주일도 코인별(넓히면 새 코인 것을 바로 받는다 -- 옛 코인 30초 문턱 무시)
   // 2026-09-26 SOL·XRP 도 흐름이 있다 -- 1초 수급 칸·커서·실시간 셀·히트맵을 코인마다 새로 받는다.
@@ -3615,9 +3616,10 @@ let mcTipOf = (k) => MC_TIPS[k];   // renderMarketCtx 가 코인별 고래·리�
 const OPT_TIPS = {
   move: "옵션 가격에 들어 있는 기대 움직임. 1σ = 가격 × DVOL × √(기간/1년). 정규분포라면 68% 가 이 안이지만 2026년 실측은 종가 기준 5분 83% · 1시간 84% · 24시간 77% 가 안에 들었다(평균 크기는 맞고, 대부분은 띠보다 작게 움직이다 가끔 크게 벗어난다 — 3σ 넘는 움직임이 정규분포의 약 6배). 봉 중 한 번이라도 띠를 건드린 비율은 5분 33% · 1시간 38%. 시간대 차이도 크다: 04~11 UTC 는 띠가 넉넉하고(안 90% 근처) 13~15 UTC 미국장 초반은 빠듯하다(안 68% 근처). 손절이 5분 1σ 보다 훨씬 좁으면 소음에 걸리기 쉽다.\n차트 띠는 봉 시가에 고정된다: 5분 띠 = 이번 5분봉 시가 ± 5분 1σ, 1시간 띠 = 이번 정시 첫 봉 시가 ± 1시간 1σ(폭도 봉이 열릴 때 값으로 고정). 가격이 띠를 벗어나면 옵션시장 예상보다 큰 움직임.\nIV−실현(VRP) = 30일 내재(DVOL) − 지난 7일 실현(1시간봉): 기간이 달라 30일 실현으로 재면 부호가 34% 다르다. 양수면 옵션시장이 최근보다 큰 움직임을 값에 넣는 중(보통 양수). 어느 기간으로 재도 앞으로의 VRP 예측력은 없었다.\n우리 검정(2026년만): DVOL 24시간 1σ 안에 실제로 든 날 77% · 크기 비 1.00(과거 24h 실현변동성 폭은 1.32 로 좁다). 평균 크기는 맞고 꼬리는 두껍다 — 벗어나는 23% 는 크게 벗어난다.\nVoV = 내재 변동성(DVOL)의 시간당 로그 변화 흔들림, 지난 24시간. ✅검증: 크면 다음 24시간 DVOL 이 더 크게 바뀐다(271일) · VoV 상위 20% 날은 24시간 1σ 띠 적중 66%(평소 80%) — 단 «최근 실현 변동성이 IV 보다 크다»와 같은 정보.\n꼬리 확률 = 옵션 가격(스마일)을 행사가로 미분한 위험중립 확률로, 만기에 선도가에서 2·3·5% 넘게 벗어날 확률(위·아래 합, Breeden·Litzenberger 1978). 🟡실제보다 크게 나오는 방향(±2% 예측 20% vs 실제 18% · ±3% 10% vs 7%)이나 46만기로는 확정 못 함. DVOL 로 환산한 확률(±2% 를 +15pp 과대)보다는 확실히 실제에 가깝다.",
   rg: "실현 감마 국면(2026-10-02, 딜러 감마를 대신한다): 직전 12시간 ETH 5분 종가 수익률의 1차 자기상관. 음수 = 움직임이 곧 되돌아가는 장(롱감마형 — 누가 헤지하든 결과가 «누름»), 양수 = 이어지는 장(숏감마형 — «키움»). 딜러가 누구인지 가정하지 않고 효과를 가격에서 직접 잰다.\n왜 바꿨나: Deribit 은 누가 딜러인지 공개하지 않는다. 체결 기반·블록만·RFQ·관행·뒤집은 관행 등 여섯 가정 모두 검증에서 일관된 지지가 없었고(체결 기반은 종목-시점의 7.9% 에서 «딜러 포지션 > 미결제»), 업계(Glassnode·Amberdata)도 같은 가정을 검증 없이 쓴다.\n분위 = 2021~24 ETHUSDT 5분(정시 표본 35,051개) 중 위치. 국면 = 하위 1/3(−0.077 이하) 되돌림 쪽 · 상위 1/3(+0.012 이상) 추세 쪽.\n우리 검정(손대지 않은 2025-01~2026-09): 다음 4시간 실현 변동성 ÷ 평소 예측(HAR) = 되돌림 쪽 0.94배 · 보통 0.99배 · 추세 쪽 1.02배 — 크기 정보로 약하게 맞는다. 🔴국면은 오래 안 간다(지금 값이 다음 4시간 값을 거의 예측 못 함) · 큰 움직임의 1시간 되돌림 차이(56% vs 52%)는 확정 못 함 — «되돌림 장이니 역매매»로 쓰지 말 것. 체결 기반 딜러 감마와 같은 조건으로 맞붙이면 정확도는 구분 불가였지만, 가정이 없고 우연 점검에서 더 강했다(p .002 vs .07). ETH 만 검증.",
+  rg_xrp: "실현 감마 국면(XRP, 2026-10-31 검정 통과): 직전 12시간 XRP 5분 종가 수익률의 1차 자기상관. 음수 = 움직임이 곧 되돌아가는 장(롱감마형 — «누름»), 양수 = 이어지는 장(숏감마형 — «키움»). 딜러가 누구인지 가정하지 않고 효과를 가격에서 직접 잰다.\n분위 = 2021~24 XRPUSDT 5분(정시 표본 34,907개) 중 위치. 국면 = 하위 1/3(−0.088 이하) 되돌림 쪽 · 상위 1/3(0.000 이상) 추세 쪽 — ETH 와 경계가 다르다(XRP 는 평소 되돌림이 더 잦다).\n우리 검정(사전등록 docs/prereg/xrp_realized_gamma_regime_20261031.md · 손대지 않은 2025-01~2026-09, 638일): 다음 4시간 실현 변동성의 HAR 잔차에 분위 계수 +0.153(일 블록 95% CI +0.079~+0.227 · 행 섞기 위약 +0.014) — 크기 정보로 맞는다. 다음 4시간 실현 ÷ 평소 예측(HAR) = 되돌림 쪽 0.91배 · 보통 0.98배 · 추세 쪽 1.02배. 같은 코드로 ETH 를 돌려 ETH 숫자(0.94·0.99·1.02)를 그대로 재현했다.\n🔴방향 신호가 아니다 — «되돌림 장이니 역매매»로 쓰지 말 것(ETH 에서 큰 움직임 되돌림 차이는 확정 못 했고 XRP 는 재지 않았다).",
   exp: "Deribit 만기(매일·매주 금·월말·분기말 08:00 UTC = 17:00 KST). 시각은 모두 KST. 규모 = 콜+풋 미결제 × 지수 = 명목 달러(실제 옵션 값어치인 프리미엄은 그 0.2% 안팎). max pain = 만기에 보유자에게 줄 내재가치 합이 가장 작은 결제가(프리미엄 무시 · 누가 보유했는지 모른 채 미결제만으로 계산). 차트·사다리의 max pain 선은 늘 «가까운 만기» 하나이고, 그 만기 미결제는 보통 전체의 2% 안팎이다(라벨에 비중). P/C = 풋÷콜 미결제 수량 — 심리 지표가 아니다: 풋 매도는 강세·풋 매수는 헤지일 수 있고, 정의마다 값이 크게 다르다(가까운 만기 1.5 · 7일 1.0 · 전 만기 0.6 · 프리미엄 0.2).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52, 표본 밖 1년 동전). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.\n시간축 그림은 풋프린트 카드 맨 아래 왼쪽 «옵션 만기».",
   mood: "리버설·버터플라이는 «7일 고정만기»로 잰다: 만기마다 외가격 옵션의 델타로 보간해 정확히 델타 ±0.25 의 IV 를 구하고, 7일 양옆 두 만기를 시간으로 보간한다(30일 값은 괄호). 2026-10-01 까지는 가까운 만기(늘 24시간 미만) 최근접 행사가로 쟀는데 실제 델타가 0.15~0.31 이고 1시간에 평균 3.6pt 흔들려 잡음이었다(7일 고정만기는 0.58pt). 단위 pt = IV %포인트(가격 % 아님), IV 는 Deribit 평가값(mark_iv).\n25Δ 리스크 리버설 = 델타 +0.25 콜 IV − 델타 −0.25 풋 IV(지금가에서 위아래 비슷한 거리). 음수로 깊으면(−5pt 쯤 아래) 하락 방어 풋 수요 = 공포 · 양수면 상승 콜에 웃돈 · ±1pt 안은 중립.\n버터플라이 = (25Δ 콜 IV + 25Δ 풋 IV)/2 − ATM IV = 스마일이 휜 정도. 클수록 «방향은 몰라도 크게 튈» 꼬리에 값이 붙음. 작은 양수가 평상시.\n기간 구조 = 7·30·60일 고정만기 ATM IV(연율 %, 양옆 만기의 총분산 보간). 가까운 일간 만기는 남은 시간에 미국장이 드느냐에 따라 7일 대비 0.71~0.92배로 출렁여 뺐다(만기별 값은 «옵션 만기» 시간축 선). 뒤로 갈수록 높으면 정상(콘탱고) · 앞이 더 높으면(역전) «지금 당장» 큰 움직임을 값에 넣는 스트레스(급락·이벤트 직전). IV 41 ≈ 하루 1σ ±2.1%(41/√365).\n블록 거래 = 장외에서 합의해 거래소에 올린 큰 거래(원자료 다리 그대로, 전략 이름 추정 안 함).\n우리 검정: 아직 없음 — 스큐는 과거분을 살 수 없어 2026-09-28 부터 쌓는 중. 예측력 모름 → 매매 신호 말고 «분위기가 바뀌었나»(리버설 급락·기간 구조 역전) 확인용.\n기간 구조 기울기 = 고정만기 ATM IV 의 1일−7일 · 7일−30일. 1일이 7일보다 높으면 «역전»(주황). ✅검증: 역전이면 다음 24시간 실현 변동성이 DVOL 예상의 약 1.38배(45일, DVOL·최근 실현 통제 후에도 남음 · 겹치지 않는 하루 1표본 33일로는 경계선). 7일−30일도 같은 방향.\nATM 호가 폭 = 7일 근처 만기 ATM 옵션 매도−매수 호가를 IV 포인트로 — 넓으면 마켓메이커가 위험을 피한다. ⏳검정 불가(과거 호가 없음) — 10-01부터 쌓는 중, 나중에 검증.\n옵션 선도 − 지수 = 같은 스냅샷의 Deribit 가까운 만기 선도가와 Deribit 지수 차(bp). 대개 ±3bp 안이고 10분 변화 SD 1.9bp — 그 정도는 잡음. ⏳검정 불가(과거 Deribit 지수 없음, 09-28부터 쌓는 중) — «콜 수요면 +» 같은 해석은 아직 근거가 없다, 나중에 검증.\n(2026-10-02 의미 검증 뒤 남긴 옵션 정보 — 크기·국면만 말하고 방향은 말하지 않는다. 뺀 줄(검증 결과): 옵션 내재 폭(DVOL 과 동률) · 위험중립 왜도·첨도(왜도는 반대 방향, 늘 음수·늘 3 초과) · 변동성 순매수(이후 24h 예측력 없음) · 블록 요청자(순베가 = 블록 몫과 중복 · 순델타 방향 정보 없음) · O/S(높을수록 오히려 조용) · 정산 창(07~08 UTC 는 평소의 0.8배로 조용 · 미결제 크기와 무관) · 이벤트 예상 폭(공식이 0 으로 잘림).)",
-  ladder: "행사가 사다리: 세로 = 행사가(지수 ±6%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.\n청록 선 = 가까운 만기 전에 한 번이라도 닿을 확률 50%(실선)·25%·10%(점선), 옅은 띠 = 50% 안쪽. Deribit 행사가별 IV 로 역산한 위험중립 확률이고 «닿음 ≈ 2×그 가격을 넘어 끝날 확률» 근사다(ETH·BTC). 주황 실선 = 내 청산가, 초록·빨강 점선 = 내 지정가 매수·매도. 참고 표시 — 방향 신호가 아니다.",
+  ladder: "행사가 사다리: 세로 = 행사가(지수 ±6%, 위 = 비쌈 · 풋프린트와 같은 방향). 왼쪽 빨강 = 풋 미결제, 오른쪽 초록 = 콜 미결제(달러). 흰 점선 = 지금 가격, 주황 점선 = 가까운 만기 max pain. 칩으로 범위(내일 만기 · 7일 안 만기 합 · 전 만기)를 바꾼다.\n우리 검정: «미결제가 큰 행사가로 가격이 끌린다(자석)»는 1년 표본 밖에서 동전 — 벽·지지저항으로 읽지 말고 «계약이 어디에 쌓였나»로만.\n청록 선 = 가까운 만기 전에 한 번이라도 닿을 확률 50%(실선)·25%·10%(점선), 옅은 띠 = 50% 안쪽. Deribit 행사가별 IV 로 역산한 위험중립 확률이고 «닿음 ≈ 2×그 가격을 넘어 끝날 확률» 근사다(ETH·BTC·XRP — XRP 는 USDC 선형옵션). 주황 실선 = 내 청산가, 초록·빨강 점선 = 내 지정가 매수·매도. 참고 표시 — 방향 신호가 아니다.",
   blocks: "Deribit 블록 거래(장외에서 맞춘 큰 옵션 거래, 지난 24시간): 한 줄 = 시각 · 명목 금액 · 다리별 매수/매도 만기 행사가 ×수량. 방향은 테이커 기준(RFQ 는 요청자 · 직접 거래는 수락자). 줄 머리 = 다리 구조로 분류한 전략 이름(Deribit 자체 구조 코드와 313/313 일치) · «+ 선물 헤지» = 같은 블록에 선물 다리가 붙음(보통 델타 중립 패키지) · 델타/베가 롱·숏 = 요청자 쪽 순델타·순베가 부호(체결 IV 로 계산, 총량의 10% 미만이면 중립). 단일 다리 블록은 다른 곳 헤지의 일부일 수 있어 의도를 모른다. 신규/청산·신원은 모른다. 금액 = 다리별 명목 합(스프레드면 두 다리가 다 더해진다).\n우리 검정 없음 — 참고로만.",
   lane: "옵션 만기(지금 ~ +120시간, 블록 거래는 가운데 «블록 거래» 칸): 시각 KST. 막대 = 다가올 만기 규모(콜+풋 미결제 × 지수 = 명목 달러) · pain = max pain(그 만기 미결제만으로 계산) · P/C = 풋÷콜 미결제 수량(심리 지표 아님) · 청록 선 = 만기별 ATM IV(가까운 만기는 남은 시간이 짧아 시간대에 따라 출렁인다).\n우리 검정: 만기 날 행사가로 끌려가는 핀닝·자석은 없었다(f 0.49~0.52). 큰 만기 전후는 «이벤트 회피»(레버리지 낮추기) 용도.",
   flow: "옵션 순매수 흐름(지난 24시간, 정시 버킷): 초록 = 콜 매수−매도, 빨강 = 풋 매수−매도(위 = 순매수 · 아래 = 순매도, 기초자산 수량). 청록 선 = 테이커 체결 순델타 누적(콜 매수·풋 매도 +, 콜 매도·풋 매수 −) — «옵션 시장을 통해 테이커가 롱으로 얼마나 기울었나».\n방향은 Deribit 공개 체결의 테이커 방향(블록 포함). «신규 약 N%» = 그 시간 새로 열린 계약의 비율(체결량 V · 미결제 변화 ΔOI 로 (V+ΔOI)/2V, 매수·매도 양쪽 몫 기준) — 이 비율은 정확하지만 테이커와 메이커 중 누가 열었는지는 모른다(테이커 몫은 약 70% 만 확정). 예: 순매수가 0 근처여도 미결제가 크게 늘면 롱과 숏이 양쪽으로 새로 쌓인 것. «강제청산» = 테이커가 강제청산된 체결(Deribit 표시, 매시 history 로 대조). 만기로 사라지는 계약은 미결제 변화에서 뺀다. 검정 전 — 참고.",
@@ -3627,16 +3629,21 @@ const OPT_TIPS = {
 //   마감봉만 쓴다(형성 중 봉은 값이 계속 변한다). 순수 함수 -- test/test_market_ctx_patterns_20260929.mjs 가 본문을 떼어 돌린다.
 const RG_REF = [[1, -0.2952], [5, -0.2068], [10, -0.1671], [20, -0.1185], [30, -0.0866], [40, -0.0587], [50, -0.0321],
                 [60, -0.0061], [70, 0.022], [80, 0.0558], [90, 0.1017], [95, 0.1419], [99, 0.2252]];
-function optRealizedGamma(candles, nowS = Date.now() / 1000) {
+// 2026-10-31 XRP(사전등록 docs/prereg/xrp_realized_gamma_regime_20261031.md 통과): XRP 2021~24 정시 표본 34,907개 분위 · 국면 경계 · 보류 배수.
+const RG_REF_XRP = [[1, -0.2948], [5, -0.2159], [10, -0.1785], [20, -0.1309], [30, -0.0977], [40, -0.0703], [50, -0.0445],
+                    [60, -0.0189], [70, 0.0100], [80, 0.0437], [90, 0.0925], [95, 0.1359], [99, 0.2321]];
+const RG_BY = { ETH: { ref: RG_REF, cut: [-0.0769, 0.0124], x: ["0.94", "0.99", "1.02"] },
+                XRP: { ref: RG_REF_XRP, cut: [-0.0881, 0.0000], x: ["0.91", "0.98", "1.02"] } };
+function optRealizedGamma(candles, nowS = Date.now() / 1000, ref = RG_REF, cut = [-0.0769, 0.0124]) {
   const cl = (candles || []).filter((c) => c.time + 300 <= nowS && c.close > 0).map((c) => Math.log(c.close)).slice(-145);
   if (cl.length < 145) return null;
   const r = cl.slice(1).map((v, i) => v - cl[i]), m = r.reduce((a, b) => a + b, 0) / r.length, x = r.map((v) => v - m);
   let num = 0, den = 0;
   x.forEach((v, i) => { den += v * v; if (i) num += v * x[i - 1]; });
   if (!(den > 0)) return null;
-  const v = num / den, hi = RG_REF.findIndex(([, q]) => q >= v);
-  const pct = hi < 0 ? 99.5 : hi === 0 ? 0.5 : RG_REF[hi - 1][0] + (RG_REF[hi][0] - RG_REF[hi - 1][0]) * (v - RG_REF[hi - 1][1]) / (RG_REF[hi][1] - RG_REF[hi - 1][1]);
-  return { v, pct, side: v <= -0.0769 ? "rev" : v >= 0.0124 ? "trend" : "mid" };   // 1/3·2/3 분위 경계
+  const v = num / den, hi = ref.findIndex(([, q]) => q >= v);
+  const pct = hi < 0 ? 99.5 : hi === 0 ? 0.5 : ref[hi - 1][0] + (ref[hi][0] - ref[hi - 1][0]) * (v - ref[hi - 1][1]) / (ref[hi][1] - ref[hi - 1][1]);
+  return { v, pct, side: v <= cut[0] ? "rev" : v >= cut[1] ? "trend" : "mid" };   // 1/3·2/3 분위 경계
 }
 // 2026-09-28 네 코인(ETH·BTC 역옵션 · SOL·XRP USDC 선형옵션). DVOL 지수는 ETH·BTC 뿐 -- 나머지는 30일 ATM IV(iv30)로 폭을 잰다.
 function optData() {
@@ -3751,7 +3758,7 @@ function optMyLevels(cur, lo, hi) {
   return out.filter((r) => r.p >= lo && r.p <= hi);
 }
 const optPct = (v) => (v < 0.01 ? "<1%" : v > 0.99 ? ">99%" : `${Math.round(v * 100)}%`);
-const optPx1 = (v) => (v >= 100 ? v.toLocaleString("en-US", { maximumFractionDigits: 1 }) : optQ(v));
+const optPx1 = (v) => (v >= 100 ? v.toLocaleString("en-US", { maximumFractionDigits: 1 }) : v < 10 ? v.toFixed(3) : optQ(v));   // 10-31 XRP: 2자리면 50%·25% 등고선이 둘 다 «1.26»
 // 막대 뒤: 닿음 50%(실선)·25%·10%(점선) 위아래 + 50% 안쪽 옅은 띠 + 오른쪽 끝 값 표식
 function optTouchBack(m, Y, W, lo, hi) {
   if (!m) return "";
@@ -3759,7 +3766,7 @@ function optTouchBack(m, Y, W, lo, hi) {
   const inR = (p) => p >= lo && p <= hi;
   let s = `<rect x="30" y="${Y(Math.min(ln[0].a, hi)).toFixed(1)}" width="${W - 34}" height="${(Y(Math.max(ln[0].b, lo)) - Y(Math.min(ln[0].a, hi))).toFixed(1)}" fill="var(--option)" fill-opacity=".07"/>`;
   ln.forEach(({ t, op, dash, a, b }) => [a, b].filter(inR).forEach((p) => {
-    const txt = `${Math.round(t * 100)}% ${optQ(p)}`, w = txt.length * 6.2 + 12, y = Y(p);
+    const txt = `${Math.round(t * 100)}% ${p < 10 ? optPx1(p) : optQ(p)}`, w = txt.length * 6.2 + 12, y = Y(p);
     s += `<line x1="30" x2="${W - 4}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--option)" stroke-opacity="${op}" stroke-width="1.1"${dash ? ` stroke-dasharray="${dash}"` : ""}/>`
       + `<rect x="${(W - 4 - w).toFixed(1)}" y="${(y - 8).toFixed(1)}" width="${w.toFixed(1)}" height="15" rx="7.5" fill="var(--chart-bg)" fill-opacity=".9"/>`
       + `<text x="${W - 9}" y="${(y + 3.5).toFixed(1)}" font-size="10" font-weight="800" font-family="var(--font-mono)" fill="var(--option)" fill-opacity="${Math.max(op, 0.7)}" text-anchor="end">${txt}</text>`;
@@ -3977,7 +3984,7 @@ function renderOptions() {
   const info = optInfoParts(o, g, kv);   // 2026-10-02 옵션 정보 → 예상 폭·심리에 나눠 넣는다
   // 칸 제목을 누르면(휴대폰 포함 -- 호버가 없다) 정의·읽는 법·우리 검정 결과가 설명 팝업으로 뜬다(2026-10-26, 옛 제목 아래 펼침)
   const sec = (key, title, inner) => `<div class="opt-sec"><h4><button type="button" class="opt-q" ${helpAttrs(key)}>${title}<span aria-hidden="true">?</span></button></h4>${inner}</div>`;
-  const rg = cur === "ETH" ? optRealizedGamma(candleHistoryByAsset.eth) : null;   // 2026-10-02 딜러 감마 → 실현 감마 국면
+  const rgc = RG_BY[cur], rg = rgc ? optRealizedGamma(candleHistoryByAsset[activeSnapshotAsset], Date.now() / 1000, rgc.ref, rgc.cut) : null;   // 2026-10-02 딜러 감마 → 실현 감마 국면 · 10-31 XRP
   const covHead = el("optCovHead");
   if (covHead) covHead.innerHTML = optHead(o);
   // 2026-09-30 검증: 갱신 실패·서버 상태 지연이면 마지막 값을 그대로 두되 «지연»을 먼저 말한다
@@ -3985,10 +3992,10 @@ function renderOptions() {
     sec("move", "예상 폭", kv("24시간 1σ", s1d == null ? "-" : `${pm(s1d)} (${(optIv(o) / Math.sqrt(365)).toFixed(1)}%)`)
       + kv("이번 5분 1σ", pm(s5)) + (o.dvol == null && o.iv30 != null ? `<div class="opt-note">DVOL 지수가 없는 코인 — 30일 ATM IV ${o.iv30.toFixed(0)}% 로 계산</div>` : "") + kv(f ? `다음 만기까지(${hrs.toFixed(0)}h)` : "다음 만기까지", pm(sExp))
       + kv("IV(30일) − 실현(7일)", vrp == null ? "-" : `${vrp >= 0 ? "+" : ""}${vrp.toFixed(1)}pt`) + info.move),
-    sec("rg", "실현 감마", !rg ? `<div class="opt-note">${cur === "ETH" ? "5분봉 12시간치 대기" : "ETH 만 검증 — 이 코인은 표시 안 함"}</div>`
+    sec(cur === "XRP" ? "rg_xrp" : "rg", "실현 감마", !rg ? `<div class="opt-note">${rgc ? "5분봉 12시간치 대기" : "ETH·XRP 만 검증 — 이 코인은 표시 안 함"}</div>`
       : kv("12시간 자기상관", `${rg.v >= 0 ? "+" : "−"}${Math.abs(rg.v).toFixed(3)} · 2021~24 중 ${rg.pct < 50 ? `하위 ${Math.max(1, Math.round(rg.pct))}` : `상위 ${Math.max(1, Math.round(100 - rg.pct))}`}%`)
       + kv("국면", rg.side === "rev" ? "되돌림 쪽 · 롱감마형" : rg.side === "trend" ? "추세 쪽 · 숏감마형" : "보통", rg.side === "rev" ? "opt-good" : rg.side === "trend" ? "opt-warn" : "")
-      + kv("다음 4시간 변동성", rg.side === "rev" ? "예상보다 약간 작은 쪽 · 0.94배" : rg.side === "trend" ? "예상보다 약간 큰 쪽 · 1.02배" : "예상과 비슷 · 0.99배")),
+      + kv("다음 4시간 변동성", rg.side === "rev" ? `예상보다 약간 작은 쪽 · ${rgc.x[0]}배` : rg.side === "trend" ? `예상보다 약간 큰 쪽 · ${rgc.x[2]}배` : `예상과 비슷 · ${rgc.x[1]}배`)),
     sec("ladder", "행사가 사다리", optLadderSvg(o, optColW(), fitOptLadderH)),
     // 2026-10-01 연구: 가까운 만기 최근접 RR/BF 는 잡음(1시간 SD 3.6pt) → 7일 고정만기 델타 보간(수집기 o.cm). 30일은 괄호.
     sec("mood", "심리", kv("25Δ 리스크 리버설 · 7일", optCm(o, "rr"))
@@ -4026,8 +4033,8 @@ async function refreshGex() {
     const res = await fetch("/api/gex", { cache: "no-cache" });
     if (!res.ok) throw new Error(`gex ${res.status}`);
     latestGex = await res.json();
-    const cur = optData().cur;   // 2026-10-08 닿음 등고선용 스마일(ETH·BTC) -- 실패하면 등고선만 빠진다
-    if (cur === "ETH" || cur === "BTC") {
+    const cur = optData().cur;   // 2026-10-08 닿음 등고선용 스마일(ETH·BTC · 10-31 XRP USDC 선형) -- 실패하면 등고선만 빠진다
+    if (cur === "ETH" || cur === "BTC" || cur === "XRP") {
       try {
         const sm = await fetch(`/api/opt-smile?asset=${cur.toLowerCase()}`, { cache: "no-cache" });
         if (sm.ok) latestSmile[cur] = await sm.json();
@@ -4772,9 +4779,9 @@ function renderMarketCtx() {
   const f = d.funding || {}, b = d.basis || {}, oi = d.oi || {}, ls = d.ls, fl = d.flow || {}, z = fl.z30h_all || fl.z30h || {},   /* 2026-10-26 사용자 «② 다섯 줄 모두 30분»: 30분 합 σ(같은 시간대 14일 기준) -- 60분 값으로 섞어 채우지 않는다(없으면 «기준 쌓는 중») */   // z60h = 같은 UTC 시 14일 기준(2026-10-01) · 10-05 요일유형(평일/주말) 분리, 없으면 옛 12~24h 링
     bk = d.book || {};
   const levWarn = ["long_crowd", "short_crowd", "deleverage"].includes((d.lev || {}).key);
-  // 일정 -- 옵션 만기는 옵션 카드와 같은 원천(latestGex). 🔴optData() 는 «지금 보는 코인»이라 SOL 탭에서 SOL max pain 을 ETH 가격과
-  //   견줬다(09-29 재검증) -- 이 카드는 ETH 전용이므로 ETH 를 직접 읽는다.
-  const gEth = latestGex && latestGex.available ? (latestGex.currencies || {}).ETH : null, o = gEth && gEth.options;
+  // 일정 -- 옵션 만기는 옵션 카드와 같은 원천(latestGex). 🔴09-29 재검증: SOL 탭에서 SOL max pain 을 ETH 가격과 견줬다 -- 그땐 이 카드가
+  //   ETH 전용이라 ETH 를 직접 읽었다. 10-04 부터 카드가 코인별(d = 지금 코인)이고 ⑤ 는 10-31 XRP 에도 켰다 → 지금 코인의 만기를 읽는다.
+  const gCur = latestGex && latestGex.available ? (latestGex.currencies || {})[A.toUpperCase()] : null, o = gCur && gCur.options;
   const ef = o ? optFront(o) : null, us = mcUsSession();
   // 2026-09-30 사용자 «주요 경제 일정이 왜 24시간 축에 없나» -- 전에는 «다음 high 하나»만 실었다. 경제 일정 카드와 같은 원천의 24시간 안 전부.
   const macro24 = (latestMacroEvents || []).map((e) => ({ t: Date.parse(e.time_utc), nm: e.title_ko || e.title || "지표", hi: e.importance === "high" }))
@@ -4811,7 +4818,7 @@ function renderMarketCtx() {
   const levChip = ` <span class="mc-chip${levWarn ? " warn" : ""}">${escapeHtml(((d.lev || {}).label || "-").split(" —")[0])}</span>`;
   const events = [
     f.next_ms ? { t: f.next_ms, nm: "펀딩 정산" } : null,
-    ef ? { t: ef.exp_ms, nm: `옵션 만기 · pain ${n(ef.pain)}` } : null,
+    ef ? { t: ef.exp_ms, nm: `옵션 만기 · pain ${eth ? n(ef.pain) : optQ(ef.pain)}` } : null,   // XRP pain 1.3 이 n() 이면 «1»
     us ? { t: us.live ? us.close : us.open, nm: us.live ? "미국장 마감" : "미국장 개장" } : null,
     ...macro24,
   ].filter(Boolean).reduce((acc, e) => {   // 2026-09-30 같은 분(分)의 일정은 이름표 하나로 합친다 -- 겹침 회피가 둘째를 숨겨 ISM PMI(high)가 호버로만 보였다
