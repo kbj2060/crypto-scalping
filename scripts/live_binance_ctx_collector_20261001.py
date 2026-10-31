@@ -32,8 +32,9 @@ from scripts.coin_config import COIN_CONFIG  # noqa: E402
 HOT_DB = ROOT / "data" / "hot" / "binance_ctx.sqlite"
 OI_URL = "https://fapi.binance.com/fapi/v1/openInterest"
 OI_POLL_S = 0.25
-OI_SYMBOLS = [s.strip().upper() for s in os.getenv("BN_CTX_OI_SYMBOLS", "ETHUSDT,SOLUSDT,XRPUSDT").split(",") if s.strip()]
-MARK_SYMBOLS = [s.strip().lower() for s in os.getenv("BN_CTX_MARK_SYMBOLS", "ethusdt,solusdt,xrpusdt").split(",") if s.strip()]
+OI_SYMBOLS = [s.strip().upper() for s in os.getenv("BN_CTX_OI_SYMBOLS", "ETHUSDT,BTCUSDT,SOLUSDT,XRPUSDT").split(",") if s.strip()]
+# 2026-10-31 BTC 도(사용자 «BTC 도 ETH 와 같은 대시보드») -- OI 1초 레인·마크
+MARK_SYMBOLS = [s.strip().lower() for s in os.getenv("BN_CTX_MARK_SYMBOLS", "ethusdt,btcusdt,solusdt,xrpusdt").split(",") if s.strip()]
 WS_BASE = "wss://fstream.binance.com/market/ws/"
 LIQ_SYMBOLS = {c["binance_symbol"] for c in COIN_CONFIG.values()}
 FLUSH_S = 10.0
