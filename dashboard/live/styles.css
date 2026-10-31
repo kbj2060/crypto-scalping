@@ -2443,7 +2443,6 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .mc-chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
 .mc-chip.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 50%, transparent); }
 .mc-chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
-.mc-k { color: var(--text); font-weight: 700; }   /* 2026-10-04 상태 줄 이름(맞대결·벽 신호) */
 .mc-tlrow { font-size: 12px; padding: 2px 0; } .mc-tlrow i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 6px; } .mc-tlrow span { color: var(--muted); }
 .mc-state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin: -2px 0 6px; }
 @media (max-width: 720px) { .mc-body { grid-template-columns: minmax(0, 1fr); } }

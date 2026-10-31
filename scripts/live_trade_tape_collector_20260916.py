@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextvars
 import json
 import os
 import sqlite3
@@ -71,6 +72,17 @@ MARKETS = {
     "spot": ("wss://stream.binance.com:9443/ws/{symbol}@aggTrade", "https://api.binance.com/api/v3/klines",
              "https://api.binance.com/api/v3/aggTrades", ROOT / "data" / "hot" / "binance_spot_tape.sqlite"),
 }
+# 🔴세션은 WS 때문에 ClientTimeout(total=None) = 시한 없음이다. REST 하나가 반쯤 열린 연결에 걸리면 verify_recent 를 기다리는
+#   WS 수신 루프가 영원히 멈춘다 -- 2026-10-31 23:01 한 프로세스의 선물 5심볼이 같은 5분 검사 틱에서 함께 멈춰 14분 비었다
+#   (OKX 수집기는 같은 이유로 이미 REST 마다 시한을 달고 있었다). REST 호출마다 시한을 단다.
+REST_TIMEOUT_S = 20.0
+
+
+def _rest_timeout():
+    from aiohttp import ClientTimeout
+    return ClientTimeout(total=REST_TIMEOUT_S)
+
+
 BACKFILL_SECONDS = 60.0   # 복구 주기. 한 주기에 몇 분을 받을지는 거래소별 per_cycle
 BACKFILL_MAX_ATTEMPTS = 3
 BACKFILL_LOOKBACK_S = 7 * 86400        # 기본(OKX history-trades 는 수개월 가능)
@@ -232,8 +244,12 @@ def warn_if_whale_threshold_diverged() -> None:
             "두 화면의 「고래」가 다른 것을 뜻하게 된다 -- 한쪽을 맞추거나 이름을 갈라야 한다.")
 
 
+_TAG = contextvars.ContextVar("tape_tag", default="")   # 2026-10-31 한 프로세스 다중 심볼: collect() 가 자기 심볼을 달아 로그가 구분된다(태스크마다 컨텍스트가 따로다)
+
+
 def log(msg: str) -> None:
-    print(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {msg}", flush=True)
+    tag = _TAG.get()
+    print(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {tag + ' ' if tag else ''}{msg}", flush=True)
 
 
 def duckdb_connect_retry(path, attempts: int = 25, delay: float = 0.2):
@@ -665,7 +681,7 @@ async def verify_recent(store: TapeStore, session, klines_url: str = KLINES_URL)
     params = {"symbol": store.symbol.upper(), "interval": "1m",
               "startTime": min(minutes) * 1000,
               "limit": min(1500, (max(minutes) - min(minutes)) // 60 + 2)}   # 흩어진 밀린 분까지 덮게
-    async with session.get(klines_url, params=params) as response:
+    async with session.get(klines_url, params=params, timeout=_rest_timeout()) as response:
         if response.status != 200:
             return
         klines = await response.json()
@@ -753,7 +769,8 @@ def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str 
     async def fetch(m: int):
         start, end = m * 1000, m * 1000 + 59_999
         async with session.get(klines_url, params={"symbol": symbol.upper(), "interval": "1m",
-                                                   "startTime": start, "limit": 1}) as r:
+                                                   "startTime": start, "limit": 1},
+                               timeout=_rest_timeout()) as r:
             r.raise_for_status()
             k = await r.json()
         if not k or int(k[0][0]) != start or int(k[0][6]) >= time.time() * 1000:
@@ -761,7 +778,7 @@ def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str 
         buf = TapeBuffer(bucket, symbol)
         params = {"symbol": symbol.upper(), "startTime": start, "endTime": end, "limit": 1000}
         while True:
-            async with session.get(agg_url, params=params) as r:
+            async with session.get(agg_url, params=params, timeout=_rest_timeout()) as r:
                 r.raise_for_status()
                 batch = await r.json()
             for a in batch:
@@ -776,9 +793,22 @@ def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str 
     return fetch
 
 
+async def run_all(coros) -> None:
+    """심볼 여럿을 한 프로세스에서(2026-10-31 통합 -- 프로세스당 ~45MB 인터프리터·aiohttp 를 심볼 수만큼 내지 않는다).
+    하나라도 끝나면(=죽으면) 나머지를 걷고 그 예외를 올려 supervisor 가 전부 재기동한다. 빈 구간은 backfill_loop 가 메운다."""
+    tasks = [asyncio.ensure_future(c) for c in coros]
+    done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    for t in done:
+        t.result()
+
+
 async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
     from aiohttp import ClientSession, ClientTimeout, WSMsgType
 
+    _TAG.set(symbol)
     ws_url, klines_url, agg_url, _ = MARKETS[market]
     spot = market == "spot"
 
@@ -1009,6 +1039,19 @@ def selftest() -> None:
         TapeStore(db, "ethusdt", 0.1)                       # 기동 초기화 -- 예전엔 여기서 죽었다
         assert time.monotonic() - t0 >= 0.5, "기다린 흔적이 없다 -- 재현이 안 됐다"
         hold.wait(timeout=10)
+    async def _ok():
+        await asyncio.sleep(60)
+
+    async def _boom():
+        raise RuntimeError("boom")
+
+    async def _both():
+        t0 = time.monotonic()
+        try:
+            await run_all([_ok(), _boom()])
+        except RuntimeError:
+            return time.monotonic() - t0
+    assert asyncio.run(_both()) < 5, "run_all 이 하나 죽어도 나머지를 안 걷었다"
     print("selftest OK")
 
 
@@ -1024,7 +1067,8 @@ def main() -> None:
         selftest()
         return
     try:
-        asyncio.run(collect(args.symbol, args.db or MARKETS[args.market][3], args.market))
+        db = args.db or MARKETS[args.market][3]
+        asyncio.run(run_all([collect(x, db, args.market) for x in args.symbol.split(",") if x]))   # --symbol a,b,c = 한 프로세스
     except KeyboardInterrupt:
         log("종료")
 

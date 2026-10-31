@@ -27,10 +27,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 import binance_ban_guard  # noqa: E402,F401 -- 2026-09-26 IP 밴 중엔 바이낸스 REST 를 안 내보낸다(공용 가드)
-from live_eth_breakout_detector_20260911 import SYMBOL, get_signals  # noqa: E402
+from live_eth_breakout_detector_20260911 import get_signals  # noqa: E402
 
-_C = SYMBOL[:-4].lower()                         # 2026-10-04 코인별(BO_SYMBOL) -- ETH 는 옛 파일 이름 그대로
-STATE = ROOT / "data" / "live" / f"{_C}_breakout_detector_state.json"
+# 2026-10-31 BO_SYMBOL 은 쉼표 목록(한 프로세스가 심볼을 차례로) -- 상태 파일은 코인별 옛 이름 그대로
+SYMBOLS = [s for s in os.getenv("BO_SYMBOL", "ETHUSDT").upper().split(",") if s]
+
+
+def state_path(sym: str) -> Path:
+    return ROOT / "data" / "live" / f"{sym[:-4].lower()}_breakout_detector_state.json"
 DEFAULT_INTERVAL = 300
 BAR_OFFSET = 20          # 5분봉 마감 후 몇 초 뒤에 조회할지(마감 직후 REST 반영 지연 여유)
 
@@ -39,7 +43,8 @@ def log(m: str) -> None:
     print(f"[{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}] {m}", flush=True)
 
 
-def write_state(p: dict) -> None:
+def write_state(sym: str, p: dict) -> None:
+    STATE = state_path(sym)
     STATE.parent.mkdir(parents=True, exist_ok=True)
     out = {**p, "updated_utc": datetime.now(timezone.utc).isoformat()}
     tmp = STATE.with_suffix(".json.tmp")
@@ -47,16 +52,16 @@ def write_state(p: dict) -> None:
     os.replace(tmp, STATE)                      # 반쪽 파일을 읽히지 않게
 
 
-def cycle() -> dict:
+def cycle(sym: str) -> dict:
     t0 = time.time()
-    p = get_signals(ttl=0)                      # 워커가 유일한 호출자라 캐시 무의미
+    p = get_signals(ttl=0, symbol=sym)          # 워커가 유일한 호출자라 캐시 무의미
     if not p.get("ok"):
-        log(f"⚠️조회 실패: {p.get('error')}")
-        write_state(p)
+        log(f"⚠️{sym} 조회 실패: {p.get('error')}")
+        write_state(sym, p)
         return p
-    write_state(p)
+    write_state(sym, p)
     rv = p.get("rvol") or {}
-    log(f"{p['timestamp'][11:16]} · {p['close']:.2f} · 세션 RVOL {rv.get('session')} {rv.get('session_label')} · {time.time()-t0:.1f}s")
+    log(f"{sym} {p['timestamp'][11:16]} · {p['close']:.2f} · 세션 RVOL {rv.get('session')} {rv.get('session_label')} · {time.time()-t0:.1f}s")
     return p
 
 
@@ -76,14 +81,16 @@ def main() -> int:
     ap.add_argument("--interval", type=int, default=DEFAULT_INTERVAL)
     a = ap.parse_args()
     if not a.loop:
-        cycle()
+        for sym in SYMBOLS:
+            cycle(sym)
         return 0
     log(f"RVOL 워커 시작 (주기 {a.interval}초 · 봉 마감 +{BAR_OFFSET}초 정렬)")
     while True:
-        try:
-            cycle()
-        except Exception as e:                  # noqa: BLE001 — 루프를 절대 죽이지 않는다
-            log(f"⚠️사이클 실패: {type(e).__name__}: {e}")
+        for sym in SYMBOLS:
+            try:
+                cycle(sym)
+            except Exception as e:              # noqa: BLE001 — 루프를 절대 죽이지 않는다(한 심볼 실패가 다른 심볼을 막지 않는다)
+                log(f"⚠️{sym} 사이클 실패: {type(e).__name__}: {e}")
         _sleep_to_bar(a.interval)
 
 

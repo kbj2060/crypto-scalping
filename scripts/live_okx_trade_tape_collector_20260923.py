@@ -292,6 +292,7 @@ def okx_minute_fetcher(session, inst: str, bucket: float, ct_val: float):
 
 async def collect(inst: str, db_path: Path) -> None:
     from aiohttp import ClientSession, ClientTimeout, WSMsgType
+    _bn._TAG.set(inst)
 
     ct_val = CT_VALS.get(inst)
     if ct_val is None:
@@ -440,7 +441,7 @@ def main() -> None:
         selftest()
         return
     try:
-        asyncio.run(collect(args.inst, args.db or default_db(args.inst)))
+        asyncio.run(_bn.run_all([collect(x, args.db or default_db(x)) for x in args.inst.split(",") if x]))   # --inst a,b,c = 한 프로세스
     except KeyboardInterrupt:
         log("종료")
 

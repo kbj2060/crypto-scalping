@@ -735,11 +735,9 @@ def run_once(dry_run: bool) -> list[Check]:
         #   멈추지 않고 «살아서 안 쓰는» 수집기는 _supervise.sh 도 못 잡는다. 임계는 매니페스트의 같은 종류 값 그대로.
         #   수집기를 은퇴시키면 이 줄도 지운다.
         check_file_dir_freshness("eth_raster", LIVE / "orderflow" / "raster" / "ETHUSDT", "*.f32", 5, 15),
-        check_file_dir_freshness("eth_bookticker", LIVE / "orderflow" / "bookticker" / "ETHUSDT", "*", 5, 15),
         check_file_dir_freshness("eth_depthdiff", LIVE / "orderflow" / "depthdiff" / "ETHUSDT", "*", 5, 15),
         check_file_dir_freshness("eth_hl_trades", LIVE / "orderflow" / "hyperliquid" / "ETH", "*", 15, 60),
         check_file_dir_freshness("eth_hl_bbo", LIVE / "orderflow" / "hyperliquid_bookticker" / "ETH", "*", 5, 15),
-        check_file_dir_freshness("eth_okx_bbo", LIVE / "orderflow" / "okx_bookticker" / "ETH-USDT-SWAP", "*", 5, 15),
         # 2026-10-16: ETH 칸별 아이스버그 탐지기(scripts/live_eth_iceberg_20261016.py, 2초마다 상태 파일). 죽으면 풋프린트 «아이스버그» 칩이 «멈춤».
         #   탐지기를 은퇴시키면 이 줄도 지운다.
         check_file_dir_freshness("eth_iceberg", LIVE / "iceberg", "eth_state.json", 2, 10),

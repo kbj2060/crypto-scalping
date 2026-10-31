@@ -55,10 +55,14 @@ LIVE = ROOT / "data" / "live"
 MANIFEST = LIVE / "multicoin_collectors.json"
 OPS = "scripts/ops"
 COINS = ("BTC", "SOL", "XRP", "HYPE")
+# 2026-10-31 디스크 정책: 깊은 호가(depthdiff 하루 ~0.2~0.5GB/코인)·래스터·HL 체결/호가는 여기 있는 코인만 쌓는다.
+# 새 코인은 COINS 에만 넣으면 가벼운 단계(체결 테이프·OKX 컨텍스트·HL 맥락·경보기)만 켜진다 -- 깊은 쪽이 필요하면 DEEP 에도 넣는다.
+DEEP = ("BTC", "SOL", "XRP", "HYPE")
+BO_OK = ("SOL", "XRP")      # 추세 전환 경보기 검정을 통과한 코인(ETH 는 늘 포함)
 # 수집기별 RSS(MB) 추정 -- 2026-09-26 이 세션 실측(x86_64, 네트워크 없이 기동 후 15초). duckdb 를 import
 # 하는 수집기는 그것만으로 ~150MB 다. 래스터는 북이 차면 도크스트링 실측 67MB 까지 는다.
-RSS_MB = {"bn_bookticker": 26, "bn_depthdiff": 26, "bn_raster": 67, "bn_tape": 155, "hl_trades": 64,
-          "hl_bbo": 151, "hl_ctx": 151, "bo": 250, "hl_positions": 151, "okx_bbo": 37, "okx_ctx": 155, "okx_tape": 156}
+RSS_MB = {"bn_depthdiff": 26, "bn_raster": 67, "bn_tape": 155, "hl_trades": 64,
+          "hl_bbo": 151, "hl_ctx": 151, "bo": 250, "hl_positions": 151, "okx_ctx": 155, "okx_tape": 156}
 MEM_FLOOR_MB = 512
 DISK_FLOOR_GB = 100       # 09-16 인벤토리의 재검토선
 ETH_RASTER_BIN = 0.5      # ETH 래스터의 현재 빈 폭(OF_BIN_SIZE 기본값). 다른 코인은 같은 상대 폭으로 맞춘다
@@ -88,16 +92,14 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
     for c in coins:
         sym, lc, inst = f"{c}USDT", c.lower(), f"{c}-USDT-SWAP"
         of = "data/live/orderflow"
-        add("bn_bookticker", lc, 1, "supervisor_book_ticker.sh", "live_book_ticker_collector_20260914.py",
-            {"BT_SYMBOL": sym.lower()}, [_dir(f"bn_bookticker_{lc}", f"{of}/bookticker/{sym}")],
-            eth=f"{of}/bookticker/ETHUSDT")
-        add("bn_depthdiff", lc, 1, "supervisor_depth_diff.sh", "live_depth_diff_collector_20260915.py",
+        deep = c in DEEP
+        deep and add("bn_depthdiff", lc, 1, "supervisor_depth_diff.sh", "live_depth_diff_collector_20260915.py",
             {"DD_SYMBOL": sym.lower()}, [_dir(f"bn_depthdiff_{lc}", f"{of}/depthdiff/{sym}")],
             eth=f"{of}/depthdiff/ETHUSDT")
-        add("hl_trades", lc, 1, "supervisor_hyperliquid_trades.sh", "live_hyperliquid_trade_collector_20260916.py",
+        deep and add("hl_trades", lc, 1, "supervisor_hyperliquid_trades.sh", "live_hyperliquid_trade_collector_20260916.py",
             {"HL_COINS": c}, [_dir(f"hl_trades_{lc}", f"{of}/hyperliquid/{c}", 15, 60)],
             eth=f"{of}/hyperliquid/ETH")
-        add("hl_bbo", lc, 1, "supervisor_hyperliquid_book_ticker.sh",
+        deep and add("hl_bbo", lc, 1, "supervisor_hyperliquid_book_ticker.sh",
             "live_hyperliquid_book_ticker_collector_20260923.py", {"HL_BT_COIN": c},
             [_dir(f"hl_bbo_{lc}", f"{of}/hyperliquid_bookticker/{c}"),
              _db(f"hl_ctx_{lc}", f"data/live/hyperliquid_context_{lc}.duckdb", "hl_asset_ctx",
@@ -108,28 +110,26 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
             "live_hyperliquid_book_ticker_collector_20260923.py", {"HL_BT_COIN": c, "HL_BT_CTX_ONLY": "1"},
             [_db(f"hl_ctx_{lc}", "data/hot/hl_ctx.sqlite", f"hl_asset_ctx WHERE coin = '{c}'",
                  "datetime(max(recv_ms) / 1000, 'unixepoch', 'localtime')")])
-        # 2026-10-04 추세 전환 경보기(ETH 모델을 그 코인 5분봉에 -- 검정 통과, eth_only_signals_solxrp_20261004) · 5분마다 klines 3회
-        add("bo", lc, 3, "supervisor_breakout_detector.sh", "live_eth_breakout_detector_worker_20260911.py", {"BO_SYMBOL": sym},
-            [_dir(f"bo_{lc}", "data/live", 15, 30, glob=f"{lc}_breakout_detector_state.json")])
-        add("okx_bbo", lc, 1, "supervisor_okx_book_ticker.sh", "live_okx_book_ticker_collector_20260923.py",
-            {"OKX_BT_INST": inst}, [_dir(f"okx_bbo_{lc}", f"{of}/okx_bookticker/{inst}")],
-            eth=f"{of}/okx_bookticker/ETH-USDT-SWAP")
-        add("okx_ctx", lc, 2, "supervisor_okx_context.sh", "live_okx_context_collector_20260923.py",
-            {"OKX_CTX_INST": inst},
-            [_db(f"okx_ctx_{lc}", "data/hot/okx_ctx.sqlite", f"okx_mark WHERE inst = '{inst}'",
-                 "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')")])
-        add("bn_raster", lc, 2, "supervisor_orderflow_raster.sh", "live_orderflow_raster_collector_20260914.py",
+        deep and add("bn_raster", lc, 2, "supervisor_orderflow_raster.sh", "live_orderflow_raster_collector_20260914.py",
             {"OF_SYMBOL": sym.lower()}, [_dir(f"bn_raster_{lc}", f"{of}/raster/{sym}", glob="*.f32")],
             eth=f"{of}/raster/ETHUSDT")
-        add("bn_tape", lc, 2, "supervisor_trade_tape.sh", "live_trade_tape_collector_20260916.py",
-            {"TAPE_SYMBOL": sym.lower()},
-            # 2026-10-01 hot 사본(SQLite WAL, 5코인 한 파일)을 본다 -- 코인별 DuckDB 를 열면 수집기 쓰기와 락이 부딪힌다.
-            [_db(f"bn_tape_{lc}", "data/hot/binance_tape.sqlite", f"trade_tape_1s WHERE symbol = '{sym.lower()}'",
-                 "datetime(max(ts_sec), 'unixepoch', 'localtime')")])
-        add("okx_tape", lc, 2, "supervisor_okx_trade_tape.sh", "live_okx_trade_tape_collector_20260923.py",
-            {"OKX_TAPE_INST": inst},
-            [_db(f"okx_tape_{lc}", "data/hot/okx_tape.sqlite", f"trade_tape_1s WHERE symbol = '{inst}'",
-                 "datetime(max(ts_sec), 'unixepoch', 'localtime')", 10, 30)])     # 4a hot(SQLite)
+    # 2026-10-31 체결 테이프는 코인마다 프로세스를 띄우지 않고 한 프로세스에 심볼 목록을 준다(ETH 포함 -- ETH 도 같은 프로세스)
+    syms, insts = ["ethusdt"] + [f"{c.lower()}usdt" for c in coins], ["ETH-USDT-SWAP"] + [f"{c}-USDT-SWAP" for c in coins]
+    add("bn_tape", "all", 2, "supervisor_trade_tape.sh", "live_trade_tape_collector_20260916.py", {"TAPE_SYMBOL": ",".join(syms)},
+        # hot 사본(SQLite WAL, 한 파일)을 본다 -- 코인별 DuckDB 를 열면 수집기 쓰기와 락이 부딪힌다.
+        [_db(f"bn_tape_{x}", "data/hot/binance_tape.sqlite", f"trade_tape_1s WHERE symbol = '{x}'",
+             "datetime(max(ts_sec), 'unixepoch', 'localtime')") for x in syms])
+    # 2026-10-04 추세 전환 경보기(ETH 모델을 그 코인 5분봉에 -- 검정 통과: SOL·XRP 만, eth_only_signals_solxrp_20261004) · 5분마다 klines 3회
+    #   2026-10-31 한 프로세스가 ETH + 검정 통과 코인을 차례로(BO_OK 밖 코인은 검정이 없어 켜지 않는다)
+    bos = ["ETHUSDT"] + [f"{c}USDT" for c in coins if c in BO_OK]
+    add("bo", "all", 3, "supervisor_breakout_detector.sh", "live_eth_breakout_detector_worker_20260911.py", {"BO_SYMBOL": ",".join(bos)},
+        [_dir(f"bo_{x[:-4].lower()}", "data/live", 15, 30, glob=f"{x[:-4].lower()}_breakout_detector_state.json") for x in bos])
+    add("okx_ctx", "all", 2, "supervisor_okx_context.sh", "live_okx_context_collector_20260923.py", {"OKX_CTX_INST": ",".join(insts)},
+        [_db(f"okx_ctx_{x}", "data/hot/okx_ctx.sqlite", f"okx_mark WHERE inst = '{x}'",
+             "datetime(max(ts_ms) / 1000, 'unixepoch', 'localtime')") for x in insts])
+    add("okx_tape", "all", 2, "supervisor_okx_trade_tape.sh", "live_okx_trade_tape_collector_20260923.py", {"OKX_TAPE_INST": ",".join(insts)},
+        [_db(f"okx_tape_{x}", "data/hot/okx_tape.sqlite", f"trade_tape_1s WHERE symbol = '{x}'",
+             "datetime(max(ts_sec), 'unixepoch', 'localtime')", 10, 30) for x in insts])
     # HL 포지션은 코인마다가 아니라 **하나**다(한 번의 조회가 전 코인 -- 수집기 도크스트링).
     # 대상 주소를 HL 체결 DB 에서 뽑으므로 체결이 쌓인 뒤 첫 바퀴(최대 ~8분)가 돈다 -> 유예 30분.
     tag = "_".join(c.lower() for c in coins)
@@ -300,13 +300,20 @@ def cmd_plan_or_start(a, start: bool) -> int:
     print(f"호스트 {socket.gethostname()} · 파이썬 {py} · 코인 {coins} · 단계 {sorted(phases)}")
 
     blocked: dict[str, str] = {}
-    okx = sorted({s["env"][k] for s in todo for k in ("OKX_BT_INST", "OKX_CTX_INST", "OKX_TAPE_INST") if k in s["env"]})
+    okx = sorted({i for s in todo for k in ("OKX_CTX_INST", "OKX_TAPE_INST") if k in s["env"] for i in s["env"][k].split(",")})
     if okx:
         for inst, why in check_okx_ct_vals(okx).items():
             print(f"  OKX ctVal {inst}: {'OK' if why is None else '🔴 ' + why}")
             if why:
                 for s in todo:
-                    if inst in s["env"].values():
+                    if not any(inst in str(v).split(",") for v in s["env"].values()):
+                        continue
+                    if s["key"].endswith("_all"):    # 그룹은 점검 실패한 종목만 뺀다 -- 하나 때문에 나머지 OKX 수집이 통째로 안 뜨지 않게
+                        k = next(k for k, v in s["env"].items() if inst in str(v).split(","))
+                        s["env"][k] = ",".join(i for i in s["env"][k].split(",") if i != inst)
+                        s["match"][k] = s["env"][k]
+                        s["fresh"] = [f for f in s["fresh"] if not f["name"].endswith(inst)]
+                    else:
                         blocked[s["key"]] = f"OKX ctVal {why}"
     if any(s["key"].startswith("bn_raster_") for s in todo):
         bins = raster_bins(coins)
@@ -320,6 +327,10 @@ def cmd_plan_or_start(a, start: bool) -> int:
                     blocked[s["key"]] = f"래스터 빈 {bins[c]}"
                     print(f"  래스터 빈 {c}: 🔴 {bins[c]}")
 
+    prev = load_manifest()["collectors"]
+    for s in todo:      # 그룹(*_all)은 코인 일부만 start 하면 매니페스트 항목이 줄어 감시·재개가 그 코인들을 놓친다 -- 목록이 다르면 보류
+        if s["key"].endswith("_all") and s["key"] in prev and prev[s["key"]]["env"] != s["env"]:
+            blocked[s["key"]] = "그룹 종목 목록이 매니페스트와 다르다 -- 전체 코인으로 다시 하거나, 그룹을 내리고 매니페스트 항목을 지운 뒤 start"
     running = {s["key"]: pids_of(s["runner"], s["match"]) for s in todo}
     new = [s for s in todo if not running[s["key"]] and s["key"] not in blocked]
     avail = mem_available_mb()

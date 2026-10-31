@@ -19,15 +19,17 @@ cd "$ROOT"
 
 RUNNER="scripts/live_eth_breakout_detector_worker_20260911.py"
 TARGET="${BO_SYMBOL:-ETHUSDT}"                  # 2026-10-04 코인별(같은 코인 둘만 막는다 -- HL 호가 수집기와 같은 방식)
+# 2026-10-31: BO_SYMBOL 은 쉼표 목록 가능(한 프로세스가 심볼을 차례로). 겹치는 심볼이 이미 돌면 켜지 않는다.
+overlap() { local a=",$1,"; for x in ${2//,/ }; do case "$a" in *",$x,"*) return 0;; esac; done; return 1; }
 for pid in $(pgrep -f "[${RUNNER:0:1}]${RUNNER:1} --loop"); do
   cur=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep '^BO_SYMBOL=' | cut -d= -f2)
-  if [ "${cur:-ETHUSDT}" = "$TARGET" ]; then
+  if overlap "${cur:-ETHUSDT}" "$TARGET"; then
     echo "[$(date -Iseconds)] 전환 탐지 워커($TARGET): 이미 실행 중(pid $pid) -- supervisor를 켜지 않는다(중복 방지)." >&2
     exit 1
   fi
 done
 export BO_SYMBOL="$TARGET"
-SFX=""; [ "$TARGET" != "ETHUSDT" ] && SFX="_${TARGET%USDT}"
+SFX=""; [ "$TARGET" != "ETHUSDT" ] && SFX="_$(echo "${TARGET//USDT/}" | tr , _)"
 
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 

@@ -16,12 +16,14 @@ cd "$ROOT"
 RUNNER="scripts/live_trade_tape_collector_20260916.py"
 SYM="${TAPE_SYMBOL:-ethusdt}"
 MKT="${TAPE_MARKET:-futures}"                      # 2026-10-01: spot = 현물 테이프(대시보드에서 옮김). 같은 심볼이라도 시장이 다르면 다른 수집기
-KEY="$SYM"; [ "$MKT" = futures ] || KEY="${SYM}_$MKT"   # 선물은 옛 이름(락·로그 경로) 그대로
+# 2026-10-31: TAPE_SYMBOL 은 쉼표 목록 가능(한 프로세스가 여러 심볼). 겹치는 심볼이 이미 돌면 켜지 않는다.
+overlap() { local a=",$1,"; for x in ${2//,/ }; do case "$a" in *",$x,"*) return 0;; esac; done; return 1; }
+KEY="${SYM//,/_}"; [ "$MKT" = futures ] || KEY="${KEY}_$MKT"   # 선물은 옛 이름(락·로그 경로) 그대로
 for pid in $(pgrep -f "[l]ive_trade_tape_collector_20260916.py"); do
   env_of=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null)
   sym=$(echo "$env_of" | grep '^TAPE_SYMBOL=' | cut -d= -f2)
   mkt=$(echo "$env_of" | grep '^TAPE_MARKET=' | cut -d= -f2)
-  if [ "${sym:-ethusdt}" = "$SYM" ] && [ "${mkt:-futures}" = "$MKT" ]; then
+  if overlap "${sym:-ethusdt}" "$SYM" && [ "${mkt:-futures}" = "$MKT" ]; then
     echo "[$(date -Iseconds)] 체결 테이프 수집기($KEY)가 이미 실행 중(pid $pid) -- 켜지 않는다." >&2
     exit 1
   fi
