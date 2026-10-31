@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextvars
 import json
 import os
 import sqlite3
@@ -232,8 +233,12 @@ def warn_if_whale_threshold_diverged() -> None:
             "두 화면의 「고래」가 다른 것을 뜻하게 된다 -- 한쪽을 맞추거나 이름을 갈라야 한다.")
 
 
+_TAG = contextvars.ContextVar("tape_tag", default="")   # 2026-10-31 한 프로세스 다중 심볼: collect() 가 자기 심볼을 달아 로그가 구분된다(태스크마다 컨텍스트가 따로다)
+
+
 def log(msg: str) -> None:
-    print(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {msg}", flush=True)
+    tag = _TAG.get()
+    print(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {tag + ' ' if tag else ''}{msg}", flush=True)
 
 
 def duckdb_connect_retry(path, attempts: int = 25, delay: float = 0.2):
@@ -791,6 +796,7 @@ async def run_all(coros) -> None:
 async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
     from aiohttp import ClientSession, ClientTimeout, WSMsgType
 
+    _TAG.set(symbol)
     ws_url, klines_url, agg_url, _ = MARKETS[market]
     spot = market == "spot"
 

@@ -306,7 +306,14 @@ def cmd_plan_or_start(a, start: bool) -> int:
             print(f"  OKX ctVal {inst}: {'OK' if why is None else '🔴 ' + why}")
             if why:
                 for s in todo:
-                    if any(inst in str(v).split(",") for v in s["env"].values()):
+                    if not any(inst in str(v).split(",") for v in s["env"].values()):
+                        continue
+                    if s["key"].endswith("_all"):    # 그룹은 점검 실패한 종목만 뺀다 -- 하나 때문에 나머지 OKX 수집이 통째로 안 뜨지 않게
+                        k = next(k for k, v in s["env"].items() if inst in str(v).split(","))
+                        s["env"][k] = ",".join(i for i in s["env"][k].split(",") if i != inst)
+                        s["match"][k] = s["env"][k]
+                        s["fresh"] = [f for f in s["fresh"] if not f["name"].endswith(inst)]
+                    else:
                         blocked[s["key"]] = f"OKX ctVal {why}"
     if any(s["key"].startswith("bn_raster_") for s in todo):
         bins = raster_bins(coins)
@@ -320,6 +327,10 @@ def cmd_plan_or_start(a, start: bool) -> int:
                     blocked[s["key"]] = f"래스터 빈 {bins[c]}"
                     print(f"  래스터 빈 {c}: 🔴 {bins[c]}")
 
+    prev = load_manifest()["collectors"]
+    for s in todo:      # 그룹(*_all)은 코인 일부만 start 하면 매니페스트 항목이 줄어 감시·재개가 그 코인들을 놓친다 -- 목록이 다르면 보류
+        if s["key"].endswith("_all") and s["key"] in prev and prev[s["key"]]["env"] != s["env"]:
+            blocked[s["key"]] = "그룹 종목 목록이 매니페스트와 다르다 -- 전체 코인으로 다시 하거나, 그룹을 내리고 매니페스트 항목을 지운 뒤 start"
     running = {s["key"]: pids_of(s["runner"], s["match"]) for s in todo}
     new = [s for s in todo if not running[s["key"]] and s["key"] not in blocked]
     avail = mem_available_mb()

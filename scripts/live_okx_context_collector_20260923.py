@@ -247,6 +247,7 @@ class ContextStore:
 
 async def collect(inst: str, db_path: Path) -> None:
     from aiohttp import ClientSession, ClientTimeout
+    _tape._bn._TAG.set(inst)
 
     ct_val = CT_VALS.get(inst)
     if ct_val is None:
