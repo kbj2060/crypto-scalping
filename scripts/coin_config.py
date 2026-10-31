@@ -89,4 +89,13 @@ COIN_CONFIG: dict[str, dict] = {
         "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk_hype.duckdb",
         "tail_risk_table": "tail_risk_1m_hype",
     },
+    "sndk": {
+        "binance_symbol": "SNDKUSDT",
+        # 2026-11-01 Binance TradFi 주식 선물. 전용 워커가 없어 아래 파일은 없다(모듈이 «파일 없음 = 빈 응답»으로 처리) --
+        # 풋프린트·1초 수급·OI 는 테이프/ctx 수집기 데이터로 나오고, 신호 모듈들은 비어 있다. 현물도 없다(NO_SPOT_MARKET_SYMBOLS 와 같은 사정).
+        "microstructure_db_path": ROOT / "data" / "live" / "microstructure_sndk.duckdb",
+        "microstructure_table": "microstructure_1m_sndk",
+        "tail_risk_db_path": ROOT / "data" / "live" / "tail_risk_sndk.duckdb",
+        "tail_risk_table": "tail_risk_1m_sndk",
+    },
 }

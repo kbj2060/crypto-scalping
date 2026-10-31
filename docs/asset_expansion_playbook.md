@@ -72,6 +72,11 @@
 - 바이낸스 TradFi 무기한(예: SNDK)은 코인과 같은 경로로 수집된다. 다른 점: 장 마감 시간대 체결이 끊겨 신선도 기준을 넓혀야 하고, HL 포지션 대상이 아니며, 크기 구간 표본이 짧다(평일에 다시 잰다). 10-31 ZEC·SNDK 커밋 58e7399a·6f31751b 참고.
 - 학습 데이터 기간이 짧으면 «학습 2024~25» 분할을 그대로 못 쓴다 — 사전등록 «구간» 절에 바꾼 분할과 이유를 적는다. 연속 거래가 아니므로 4h 변동성·박스처럼 시간 창을 쓰는 기능은 장중 봉만으로 다시 정의해야 할 수 있다.
 
+- **대시보드 연결(11-01 SNDK, 사용자 «SNDK 선물 풋프린트만 있어도 돼»)**: §2-A 표에서 건드린 곳 = `scripts/coin_config.py` `COIN_CONFIG`(워커 없는 키는 «파일 없음 = 빈 응답») · `dashboard/server.py` `DASHBOARD_ASSETS` 기본값·`HL_LIQ_BY_ASSET`(없는 파일) · `dashboard/coin_flow.py` `FLOW_SPECS`(칸 $0.2 = 테이프 칸 0.05의 4배 · `spot=False`) · `app.js` `ASSET_CONFIG`·`FLOW_ASSETS`·`SNAPSHOT_ASSET_KEYS`. 예측 기능 Set(DIR4H·BOX·VOL4H 등)과 주문 표는 넣지 않았다 → 칸이 꺼지고 주문은 막힌다.
+  - 🔴`MARKET_SYMBOLS`(orders.py)는 **건드리지 않는다** — 계좌 조회가 심볼마다 `userTrades`·`openOrders` 를 더 부른다(실계좌 경로). `server.py` 가 import 한 사본에만 `"sndk"` 를 더했다.
+  - 현물이 없는 종목은 `FlowSpec.spot_url=None` — `collect_spot_flow` 를 아예 띄우지 않는다(없으면 존재하지 않는 스트림에 재접속을 반복).
+  - 미연결: 일봉·4h 풋프린트(`footprint_daily.py` `ASSETS`, 소급 빌드 필요) · HL · 옵션 칸.
+
 ### 5-1. 주식·ETF 옵션 (11-01 조사, 사용자 «주식 옵션 데이터를 다른 소스로»)
 
 Binance 옵션은 BNB·BTC·DOGE·ETH·SOL·XRP·XAU·XAG 뿐이고 Deribit 은 ETH·BTC 뿐이라 **주식·ETF 옵션은 미국 거래소(OPRA)** 에서 받는다. ETH 의 Deribit 수집(체결 전체 + 체인 10분 + 요약)과 비교한 현황:

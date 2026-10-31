@@ -236,18 +236,18 @@ class FlowSpec:
     bucket: float
     price_dp: int
     okx_inst: str            # OKX 무기한(USDT)
-    spot_url: str            # 바이낸스 현물(USDT) @aggTrade
+    spot_url: str | None     # 바이낸스 현물(USDT) @aggTrade -- 현물이 없는 종목(TradFi 선물)은 None
     snapshot_path: Path
     okx_tape_db: Path
     okx_ctx_db: Path
 
 
-def _flow_spec(asset: str, bucket: float, price_dp: int) -> FlowSpec:
+def _flow_spec(asset: str, bucket: float, price_dp: int, spot: bool = True) -> FlowSpec:
     eth = asset == "eth"
     return FlowSpec(
         asset=asset, symbol=f"{asset.upper()}USDT", bucket=bucket, price_dp=price_dp,
         okx_inst=OKX_INST if eth else f"{asset.upper()}-USDT-SWAP",
-        spot_url=f"wss://stream.binance.com:9443/ws/{asset}usdt@aggTrade",
+        spot_url=f"wss://stream.binance.com:9443/ws/{asset}usdt@aggTrade" if spot else None,
         snapshot_path=LIVE_DIR / f"footprint_{asset}.json",
         okx_tape_db=OKX_HOT_TAPE_DB,
         # SOL·XRP 의 OKX 맥락(OI·청산)은 Pi 가 수집하고 3분마다 .from_pi 로 복제한다(Pi crontab). 이 파일이 없으면
@@ -259,7 +259,9 @@ FLOW_SPECS = {"eth": _flow_spec("eth", FOOTPRINT_BUCKET, 2),
               "sol": _flow_spec("sol", 0.02, 2),
               "xrp": _flow_spec("xrp", 0.0003, 4),
               # 2026-10-31 BTC: $15 = ETH 0.5 칸과 같은 상대 폭(10-31 BTC $77.5k ≈ 1.9bp vs ETH $2,244 ≈ 2.2bp) · 테이프 칸 1.0(바이낸스·OKX·Bybit)의 15배
-              "btc": _flow_spec("btc", 15.0, 0)}
+              "btc": _flow_spec("btc", 15.0, 0),
+              # 2026-11-01 SNDK(TradFi 주식 선물): 칸 $0.2 = ETH 와 같은 상대 폭(~1.7bp, 11-01 $1,152) · 테이프 칸 0.05(바이낸스·OKX)의 4배 · 현물 없음
+              "sndk": _flow_spec("sndk", 0.2, 2, spot=False)}
 assert FLOW_SPECS["eth"].snapshot_path == FOOTPRINT_SNAPSHOT_PATH and FLOW_SPECS["eth"].spot_url == SPOT_WS_URL
 
 
@@ -1004,6 +1006,8 @@ def make_coin_flow(spec: FlowSpec, fetch_binance_json: Any, http_session: dict) 
 
     async def start(app: web.Application) -> None:
         for fn in (collect_footprint, collect_oi_1s, collect_okx_flow, okx_footprint_restore, collect_spot_flow, supply_1s_restore):
+            if fn is collect_spot_flow and not SPOT_WS_URL:
+                continue          # 현물이 없는 종목은 존재하지 않는 스트림에 재접속을 반복하지 않는다
             tasks.append(asyncio.create_task(fn(app)))
 
     async def stop(app: web.Application) -> None:
