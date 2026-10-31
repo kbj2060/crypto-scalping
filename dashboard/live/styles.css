@@ -3312,5 +3312,7 @@ html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: th
   box-shadow: 0 8px 28px rgb(var(--shadow) / .4); font-size: 12px; display: grid; gap: 8px; }
 .entry-pop dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; } .entry-pop dt { color: var(--muted); } .entry-pop dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .entry-pop .good { color: var(--good); } .entry-pop .bad { color: var(--bad); }
-.entry-pop .ep-btns { display: flex; gap: 6px; } .entry-pop .ep-btns button { flex: 1; padding: 6px 0; border-radius: 7px; border: 1px solid var(--bad); background: none; color: var(--bad); font: 700 12px var(--font-sans); cursor: pointer; }
+.entry-pop .ep-btns { display: flex; gap: 6px; } .entry-pop .ep-btns button { position: relative; overflow: hidden; user-select: none; touch-action: none; flex: 1; padding: 6px 0; border-radius: 7px; border: 1px solid var(--bad); background: none; color: var(--bad); font: 700 12px var(--font-sans); cursor: pointer; }
 .entry-pop .ep-btns button:hover { background: rgb(var(--lift) / .08); } .entry-pop small { color: var(--muted); font-size: 10.5px; }
+.entry-pop .hold-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: currentColor; opacity: .30; pointer-events: none; }
+.entry-pop .ep-btns span { position: relative; z-index: 1; }

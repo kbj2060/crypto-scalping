@@ -815,19 +815,30 @@ function entryPopOpen(x, y) {
     + `<dl><dt>평단</dt><dd>${lineFmt(en)}</dd><dt>수량</dt><dd>${qty}</dd>`
     + `<dt>미실현</dt><dd class="${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</dd>`
     + `<dt>청산가</dt><dd>${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` · ${dist.toFixed(1)}% 남음` : ""}` : "없음"}</dd></dl>`
-    + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}">${v}% 청산</button>`).join("")}</div>`
-    + `<small>누르면 청산 미리보기가 열리고, 확인을 한 번 더 눌러야 나갑니다</small>`;
+    + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}"><i class="hold-fill" aria-hidden="true"></i><span>${v}% 청산</span></button>`).join("")}</div>`
+    + `<small>꾹 누르면 게이지가 차고 다 차면 청산 주문이 나갑니다 · 터치는 탭 → 확인</small>`;
   document.body.appendChild(d);
   const r = d.getBoundingClientRect();
   d.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width - 12)) + "px";
   d.style.top = Math.max(8, Math.min(innerHeight - r.height - 8, y - r.height / 2)) + "px";
+  // 플로팅 청산 버튼과 같은 규약: 마우스 = 꾹(왼쪽→오른쪽 게이지, HOLD_FIRE_MS) · 터치·키보드 = 탭 → 미리보기 → 패널에서 확인
+  const side = String(pos.side).toUpperCase(), ovOf = (b) => ({ pct: Number(b.dataset.pct) });
+  let touched = false, released = false;
+  d.addEventListener("pointerdown", (e) => {
+    const b = e.target.closest("button[data-pct]");
+    touched = e.pointerType === "touch";
+    if (!b || touched || manualOrderBusy) return;
+    released = false; e.preventDefault(); ofabSetOpen(true); manualHoldStart(b, side, "exit", ovOf(b));
+    setTimeout(() => { if (!released) entryPopClose(); }, HOLD_FIRE_MS + 60);   // 끝까지 눌렀으면(발주) 팝업을 닫는다
+  });
+  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => d.addEventListener(ev, (e) => {
+    const b = e.target.closest?.("button[data-pct]");
+    if (b) { released = true; manualHoldCancel(b); }
+  }, true));
   d.addEventListener("click", (e) => {
     const b = e.target.closest("button[data-pct]");
-    if (!b) return;
-    const side = String(pos.side).toUpperCase();
-    entryPopClose();
-    ofabSetOpen(true);
-    manualExitPreview(side, { pct: Number(b.dataset.pct) });
+    if (!b || !(touched || e.detail === 0) || manualOrderBusy) return;
+    touched = false; entryPopClose(); ofabSetOpen(true); manualExitPreview(side, ovOf(b));
   });
 }
 (() => {
@@ -841,7 +852,8 @@ function entryPopOpen(x, y) {
   };
   document.addEventListener("click", (e) => {   // 차트 svg 는 다시 만들어질 수 있어 문서에서 받는다
     if (e.target.closest?.("#entryPop")) return;
-    if (e.target.closest?.(".lt-armed .lt-tag.en") || hitSvg(e)) entryPopOpen(e.clientX, e.clientY); else entryPopClose();
+    if (e.target.closest?.(".lt-armed .lt-tag.en") || hitSvg(e)) { if (el("entryPop")) entryPopClose(); else entryPopOpen(e.clientX, e.clientY); }   // 라벨을 다시 누르면 닫힌다
+    else entryPopClose();
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") entryPopClose(); });
 })();
