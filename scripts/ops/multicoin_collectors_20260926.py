@@ -58,7 +58,7 @@ COINS = ("BTC", "SOL", "XRP", "HYPE")
 # 수집기별 RSS(MB) 추정 -- 2026-09-26 이 세션 실측(x86_64, 네트워크 없이 기동 후 15초). duckdb 를 import
 # 하는 수집기는 그것만으로 ~150MB 다. 래스터는 북이 차면 도크스트링 실측 67MB 까지 는다.
 RSS_MB = {"bn_bookticker": 26, "bn_depthdiff": 26, "bn_raster": 67, "bn_tape": 155, "hl_trades": 64,
-          "hl_bbo": 151, "hl_ctx": 151, "bo": 250, "hl_positions": 151, "okx_bbo": 37, "okx_ctx": 155, "okx_tape": 156}
+          "hl_bbo": 151, "hl_ctx": 151, "bo": 250, "hl_positions": 151, "okx_ctx": 155, "okx_tape": 156}
 MEM_FLOOR_MB = 512
 DISK_FLOOR_GB = 100       # 09-16 인벤토리의 재검토선
 ETH_RASTER_BIN = 0.5      # ETH 래스터의 현재 빈 폭(OF_BIN_SIZE 기본값). 다른 코인은 같은 상대 폭으로 맞춘다
@@ -111,9 +111,6 @@ def specs(coins: list[str], phases: set[int]) -> list[dict]:
         # 2026-10-04 추세 전환 경보기(ETH 모델을 그 코인 5분봉에 -- 검정 통과, eth_only_signals_solxrp_20261004) · 5분마다 klines 3회
         add("bo", lc, 3, "supervisor_breakout_detector.sh", "live_eth_breakout_detector_worker_20260911.py", {"BO_SYMBOL": sym},
             [_dir(f"bo_{lc}", "data/live", 15, 30, glob=f"{lc}_breakout_detector_state.json")])
-        add("okx_bbo", lc, 1, "supervisor_okx_book_ticker.sh", "live_okx_book_ticker_collector_20260923.py",
-            {"OKX_BT_INST": inst}, [_dir(f"okx_bbo_{lc}", f"{of}/okx_bookticker/{inst}")],
-            eth=f"{of}/okx_bookticker/ETH-USDT-SWAP")
         add("okx_ctx", lc, 2, "supervisor_okx_context.sh", "live_okx_context_collector_20260923.py",
             {"OKX_CTX_INST": inst},
             [_db(f"okx_ctx_{lc}", "data/hot/okx_ctx.sqlite", f"okx_mark WHERE inst = '{inst}'",
@@ -300,7 +297,7 @@ def cmd_plan_or_start(a, start: bool) -> int:
     print(f"호스트 {socket.gethostname()} · 파이썬 {py} · 코인 {coins} · 단계 {sorted(phases)}")
 
     blocked: dict[str, str] = {}
-    okx = sorted({s["env"][k] for s in todo for k in ("OKX_BT_INST", "OKX_CTX_INST", "OKX_TAPE_INST") if k in s["env"]})
+    okx = sorted({s["env"][k] for s in todo for k in ("OKX_CTX_INST", "OKX_TAPE_INST") if k in s["env"]})
     if okx:
         for inst, why in check_okx_ct_vals(okx).items():
             print(f"  OKX ctVal {inst}: {'OK' if why is None else '🔴 ' + why}")

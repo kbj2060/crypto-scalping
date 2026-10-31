@@ -739,7 +739,6 @@ def run_once(dry_run: bool) -> list[Check]:
         check_file_dir_freshness("eth_depthdiff", LIVE / "orderflow" / "depthdiff" / "ETHUSDT", "*", 5, 15),
         check_file_dir_freshness("eth_hl_trades", LIVE / "orderflow" / "hyperliquid" / "ETH", "*", 15, 60),
         check_file_dir_freshness("eth_hl_bbo", LIVE / "orderflow" / "hyperliquid_bookticker" / "ETH", "*", 5, 15),
-        check_file_dir_freshness("eth_okx_bbo", LIVE / "orderflow" / "okx_bookticker" / "ETH-USDT-SWAP", "*", 5, 15),
         # 2026-10-16: ETH 칸별 아이스버그 탐지기(scripts/live_eth_iceberg_20261016.py, 2초마다 상태 파일). 죽으면 풋프린트 «아이스버그» 칩이 «멈춤».
         #   탐지기를 은퇴시키면 이 줄도 지운다.
         check_file_dir_freshness("eth_iceberg", LIVE / "iceberg", "eth_state.json", 2, 10),
