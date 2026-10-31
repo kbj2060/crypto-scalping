@@ -113,6 +113,7 @@ def test_size_bands_per_coin_tape_and_dashboard_agree():
     from scripts.live_trade_tape_collector_20260916 import TapeBuffer, size_bands
     assert size_bands("ethusdt") == (10_000.0, 100_000.0), "ETH 경계는 바뀌면 안 된다(연구·기존 행)"
     assert size_bands("XRP-USDT-SWAP") == size_bands("xrpusdt") == (3_400.0, 23_000.0)
+    assert size_bands("BTC-USDT-SWAP") == size_bands("BTCUSDT") == (13_000.0, 160_000.0)   # 2026-10-31
 
     eth, xrp = TapeBuffer(0.1, "ethusdt"), TapeBuffer(0.0001, "xrpusdt")
     for b in (eth, xrp):
@@ -126,3 +127,19 @@ def test_size_bands_per_coin_tape_and_dashboard_agree():
     f = srv.make_coin_flow(dataclasses.replace(srv.FLOW_SPECS["xrp"], snapshot_path=Path("/nonexistent/fp.json")),
                            None, {"session": None})
     assert (f.retail_max, f.whale_min) == size_bands("xrpusdt")
+
+
+def test_size_bands_since_btc_reads_tape_meta(tmp_path, monkeypatch):
+    """2026-10-31 BTC: 경계 전환 시각을 상수 대신 수집기가 남긴 hot meta 에서 읽는다(SOL·XRP 는 상수 그대로)."""
+    import sqlite3
+    db = tmp_path / "tape.sqlite"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE meta(key TEXT, value TEXT)")
+    con.commit()
+    monkeypatch.setattr(srv, "MICRO_TAPE_DB_PATH", db)
+    assert srv.size_bands_since("btc") == 0, "수집기 재시작 전(meta 없음)"
+    con.execute("INSERT INTO meta VALUES ('size_bands_changed:btcusdt', '1793500000 whale 100000.0 -> 160000.0')")
+    con.execute("INSERT INTO meta VALUES ('size_bands_changed:ethusdt', '1799999999 whale x -> y')")   # 대조: 다른 심볼
+    con.commit()
+    assert srv.size_bands_since("btc") == 1793500000
+    assert srv.size_bands_since("xrp") == 1790487335

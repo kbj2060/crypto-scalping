@@ -19,7 +19,7 @@ const api = new Function("env", "EventSource", "Date", `
   let supply1sSince = 5, oi1sSince = 0, liq1sSince = 0, okxSupply1sSince = 0, okxOi1sSince = 0,
       okxLiq1sSince = 0, spotSupply1sSince = 0, bybitLiq1sSince = 0, latestSituation = null;
   const document = { get hidden() { return env.hidden; } };
-  const flowOn = () => ["eth", "sol", "xrp"].includes(env.activeSnapshotAsset);   // app.js FLOW_ASSETS
+  const flowOn = () => ["eth", "btc", "sol", "xrp"].includes(env.activeSnapshotAsset);   // app.js FLOW_ASSETS
   const applySupply1s = () => { env.applied++; }, repaintSupply1sPanel = () => {};
   Object.defineProperty(globalThis, "activePageTab", { get: () => env.activePageTab, configurable: true });
   Object.defineProperty(globalThis, "activeSnapshotAsset", { get: () => env.activeSnapshotAsset, configurable: true });
@@ -38,7 +38,7 @@ now += 7000; api.ensureLiveStream();                        // 10.5초 침묵 ->
 assert.ok(opened[0].closed); assert.equal(opened.length, 2);
 env.activeSnapshotAsset = "sol"; api.ensureLiveStream();     // 2026-09-26 SOL 도 수급이 있다 -> 그 코인으로 다시
 assert.match(opened[2].url, /^\/api\/stream\?supply=1&asset=sol&/); opened.splice(2, 1);
-env.activeSnapshotAsset = "btc"; api.ensureLiveStream();     // 코인 변경 -> 수급 없이 다시
+env.activeSnapshotAsset = "hype"; api.ensureLiveStream();    // 코인 변경 -> 수급 없이 다시(2026-10-31 BTC 는 흐름 코인이 됐다 -> HYPE)
 assert.ok(opened[1].closed); assert.equal(opened[2].url, "/api/stream");
 opened[2].onerror(); api.ensureLiveStream();
 assert.equal(opened.length, 3, "에러 직후엔 다시 안 연다");

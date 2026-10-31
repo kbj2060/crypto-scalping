@@ -28,7 +28,7 @@ const ASSET_CONFIG = {
   xrp: { label: "XRP", symbol: "XRPUSDT", dp: 4 },
 };
 // 풋프린트·1초 수급·OI·호가 히트맵을 서버가 실시간으로 만드는 코인(server.py FLOW_SPECS 와 같은 목록).
-const FLOW_ASSETS = new Set(["eth", "sol", "xrp"]);
+const FLOW_ASSETS = new Set(["eth", "btc", "sol", "xrp"]);   // 2026-10-31 BTC 추가(주문은 그대로 막힘 -- 서버 주문 심볼 없음)
 const flowOn = () => FLOW_ASSETS.has(activeSnapshotAsset);
 const coinUnit = () => (ASSET_CONFIG[activeSnapshotAsset] || {}).label || String(activeSnapshotAsset).toUpperCase();
 const pxDp = () => { const d = (ASSET_CONFIG[activeSnapshotAsset] || {}).dp; return Number.isFinite(d) ? d : 1; };
