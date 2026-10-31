@@ -57,9 +57,15 @@ def fit_month(job):
     return (src, h), m0, {g: np.array(v) for g, v in out.items()}
 
 
+def build(s):
+    return xr.dataset65(xr.frames_for(s))
+
+
 def run():
-    for s in ("ETH", "XRP") + COINS:
-        D[s] = xr.dataset65(xr.frames_for(s)); print("dataset", s, D[s][1].shape, flush=True)
+    names = ("ETH", "XRP") + COINS   # 패널 20개(≈2GB)는 버리는 자식에서 읽는다 → 학습 일꾼이 작은 부모를 fork(메모리 3GB 예산)
+    with get_context("fork").Pool(1, maxtasksperchild=1) as pool:
+        for s, d in zip(names, pool.imap(build, names)):
+            D[s] = d; print("dataset", s, d[1].shape, flush=True)
     t = D["ETH"][0]; n = len(t)
     assert all((D[s][0] == t).all() for s in D), "코인별 결정 시각 격자가 다르다"
     jobs = [("ETH", h, m, ("BTC", "SOL", "XRP")) for h in ds.HZ for m in xr.MONTHS]
