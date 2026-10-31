@@ -4247,13 +4247,21 @@ function iceMarks(svg, candles, xAt, yAt, bw, yMin, yMax, NS) {
 
 // 2026-10-15 ⑤ 예측 판 «4h 방향»(ETH, /api/dir4h = scripts/live_eth_dir4h_20261015 · 서버 5분 캐시) -- 참고용
 let latestDir4h = null, dir4hLastFetchAt = 0;
+// 2026-10-31 SOL·XRP 4h 방향(docs/experiments/btc_sol_xrp_dir4h_20261031.md · 시험 26-06~10 엄격 통과 · BTC 불통과라 없음)
+const DIR4H_ASSETS = new Set(["eth", "sol", "xrp"]);
+const DIR4H_NOTE = {   // [모델 줄, 맺음 줄]
+  eth: ["매달 재학습 HGB(ETH 65피쳐, 최근 365일)", "2025~26 IC .06 · 2023~24 검증 불통과 · 참고용(전진 판정 전)"],
+  sol: ["매달 재학습 HGB(ETH 학습 모형을 SOL 65피쳐에 적용, 최근 365일)", "시험 26-06~10 IC .069 엄격 통과 · bp = 학습 창 표준편차로 SOL 단위 환산 · 참고용(전진 판정 전)"],
+  xrp: ["매달 재학습 HGB(ETH·BTC·SOL·XRP 합동 학습 · XRP 65피쳐, 최근 365일)",
+    "시험 26-06~10 IC .045 경계선 통과 · 검증 26-01~05 IC ≈ 0 · 피어슨 ≈ 0(크기 정보 없음) — 약한 부호 정보 · bp = 학습 창 표준편차로 환산 · 전진 확인 중"] };
+const dir4hNow = () => (latestDir4h && latestDir4h.ok && (latestDir4h.asset || "eth") === activeSnapshotAsset ? latestDir4h : null);
 async function refreshDir4h() {
-  if (activePageTab !== "snapshot" || document.hidden || activeSnapshotAsset !== "eth") return;
+  if (activePageTab !== "snapshot" || document.hidden || !DIR4H_ASSETS.has(activeSnapshotAsset)) return;
   const now = Date.now();
-  if (now - dir4hLastFetchAt < 120000) return;
+  if (now - dir4hLastFetchAt < 120000 && (latestDir4h?.asset || "eth") === activeSnapshotAsset) return;   // 코인을 바꾸면 바로
   dir4hLastFetchAt = now;
   try {
-    const res = await fetch("/api/dir4h", { cache: "no-cache" });
+    const res = await fetch(`/api/dir4h?asset=${activeSnapshotAsset}`, { cache: "no-cache" });
     if (res.ok) latestDir4h = await res.json();
   } catch (error) { /* 다음 주기 */ }
 }
@@ -4353,18 +4361,18 @@ function fcRowHtml(sec) {
     : cell(hz, cls(g.state), word(g.state), `${nm.split(" ")[0]} ${zf(g.v)}${g.state ? ` · ${g.run}일째` : ""}`, `${nm} · ${g.date} UTC 종가 · |값| ≥ 1 일 때만 방향`));
   const vTip = v ? `4시간 1σ ±${v.sig4h_pct.toFixed(2)}% (±$${v.sig4h_usd < 10 ? v.sig4h_usd.toFixed(4) : v.sig4h_usd.toFixed(0)}) · 최근 ${v.ref_days}일 평소의 ${v.lvl.toFixed(2)}배 · 직전 4시간의 ${v.x_now.toFixed(2)}배 · 더 커질 확률 ${Math.round(v.p_expand * 100)}%` : "";
   const volLine = v ? `<span class="sub fc-vol" title="${escapeHtml(vTip)}">σ ±${v.sig4h_pct.toFixed(2)}% · ×${v.lvl.toFixed(2)}</span>` : `<span class="sub">변동 ${VOL4H_ASSETS.has(activeSnapshotAsset) ? "불러오는 중" : `${[...VOL4H_ASSETS].join("·").toUpperCase()} 전용`}</span>`;
-  const g4 = eth && latestDir4h && latestDir4h.ok ? latestDir4h : null, old4 = g4 && Date.now() - g4.decided_at_ms > 15 * 60e3;
+  const on4 = DIR4H_ASSETS.has(activeSnapshotAsset), g4 = dir4hNow(), old4 = g4 && Date.now() - g4.decided_at_ms > 15 * 60e3;
   const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(11, 16);
-  const d4Tip = g4 ? `4h 방향 예측 — 매달 재학습 HGB(ETH 65피쳐, 최근 365일) · ${g4.model_month} 모델(학습 ${g4.train_window[0].slice(0, 10)}~${g4.train_window[1].slice(0, 10)})\n`
+  const d4Tip = g4 ? `4h 방향 예측 — ${DIR4H_NOTE[activeSnapshotAsset][0]} · ${g4.model_month} 모델(학습 ${g4.train_window[0].slice(0, 10)}~${g4.train_window[1].slice(0, 10)})\n`
       + `예측 ${g4.pred_bp >= 0 ? "+" : ""}${g4.pred_bp.toFixed(1)}bp · 상승 문턱 ≥ +${g4.hi.toFixed(1)} · 하락 문턱 ≤ ${g4.lo.toFixed(1)} (과거 표본 밖 예측 상·하위 20%) · ${kst(g4.decided_at_ms)} KST 마감 5분봉\n`
-      + `2025~26 IC .06 · 2023~24 검증 불통과 · 참고용(전진 판정 전)${g4.nan_feats.length ? `\n🔴빈 피쳐 ${g4.nan_feats.length}: ${g4.nan_feats.join(", ")}` : ""}\n${vTip}`
-    : `4h 방향 예측(ETH 전용) — ${eth ? (latestDir4h && latestDir4h.reason ? `불러오기 실패: ${latestDir4h.reason}` : "불러오는 중") : "ETH 에서만 계산"}\n${vTip}`;
+      + `${DIR4H_NOTE[activeSnapshotAsset][1]}${g4.nan_feats.length ? `\n🔴빈 피쳐 ${g4.nan_feats.length}: ${g4.nan_feats.join(", ")}` : ""}\n${vTip}`
+    : `4h 방향 예측(ETH·SOL·XRP) — ${on4 ? (latestDir4h && latestDir4h.reason ? `불러오기 실패: ${latestDir4h.reason}` : "불러오는 중") : "ETH·SOL·XRP 에서만 계산"}\n${vTip}`;
   // 2026-10-16 시안 ④: 다음 문턱까지 거리 + 문턱 눈금(왼쪽 색 = 숏 문턱 밖 · 오른쪽 색 = 롱 문턱 밖 · ● 지금 · ○ 1시간 전)
   const sgn = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(0)}`;
   // 칸 이름이 «4h 예측»이라 «예측» 글자는 뺀다(1700 폭에서 넘쳤다) · 신호 중이면 거리 대신 «신호»
   const d4Next = !g4 ? "" : g4.pred_bp >= g4.hi || g4.pred_bp <= g4.lo ? " · 신호"
     : g4.pred_bp >= 0 ? ` · 롱까지 ${(g4.hi - g4.pred_bp).toFixed(0)}` : ` · 숏까지 ${(g4.pred_bp - g4.lo).toFixed(0)}`;
-  const d4Sub = g4 ? (old4 ? `${sgn(g4.pred_bp)}bp · 지연` : `${sgn(g4.pred_bp)}bp${d4Next}`) : (eth ? "불러오는 중" : "ETH 전용");
+  const d4Sub = g4 ? (old4 ? `${sgn(g4.pred_bp)}bp · 지연` : `${sgn(g4.pred_bp)}bp${d4Next}`) : (on4 ? "불러오는 중" : "ETH·SOL·XRP 전용");
   const d4Gauge = (() => {
     if (!g4) return "";
     const R = Math.max(Math.abs(g4.lo), Math.abs(g4.hi)) * 1.6, X = (bp) => Math.max(0, Math.min(100, 50 + bp / R * 50)).toFixed(1);
@@ -7906,7 +7914,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
   const fcFresh = (o, k) => !!(o && o.ok && Date.now() - o[k] <= 15 * 60e3), fcBox = boxNow();
   const fcPath = isSnapshotChart && footprint && activeSnapshotAsset === "eth" && candles.length > 0 && currentPrice > 0
     && fcFresh(latestDirShort, "decided_at_ms") && !!(latestDirShort.pred && latestDirShort.pred["15m"] && latestDirShort.pred["1h"])
-    && fcFresh(latestDir4h, "decided_at_ms") && fcFresh(latestVol4h, "asof_ms") && latestVol4h.asset === "eth" && Number.isFinite(latestVol4h.sig4h_iv_pct)
+    && fcFresh(dir4hNow(), "decided_at_ms") && fcFresh(latestVol4h, "asof_ms") && latestVol4h.asset === "eth" && Number.isFinite(latestVol4h.sig4h_iv_pct)
     && !!fcBox && Date.now() - fcBox.asof_ms <= BOX_STALE_MS && Object.values(fcBox.scales || {}).some((x) => x && x.ok);
   const bxF = BOX_ON_CHART && isSnapshotChart && footprint && !fcPath ? boxNow() : null;
   if (bxF && Date.now() - bxF.asof_ms <= BOX_STALE_MS && candles.length) {
@@ -8000,7 +8008,7 @@ function renderCandleSvg(svg, candles, entryPrice, currentPrice, riskLevels = []
     // 2026-10-29 사용자 «현재가에 맞게 움직이지 말고 시가에 고정»: 출발점 = 지금 형성 중인 5분봉 시가(= 직전 5분봉 종가, 5분 예측이 나온 가격) -- 5분마다만 움직인다
     const f5 = chartFull(), L = candles.length - 1, tfS = 300 * chartTfK, xs = xAt(L + 1), xr = ml + cw, cp = Number((f5[f5.length - 1] || {}).open) || currentPrice;
     const t0 = (candles[L].time + tfS) * 1e3, xT = (ms) => xAt(L) + ((ms / 1e3 - candles[L].time) / tfS) * slot;
-    const ds = latestDirShort, d4 = latestDir4h, bx = boxNow(), vI = latestVol4h;
+    const ds = latestDirShort, d4 = dir4hNow(), bx = boxNow(), vI = latestVol4h;
     const g = document.createElementNS(NS, "g"), fs = mobileChart ? 9.5 : 10.5, H4 = 4 * 3600e3;
     const add = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); if (text != null) e.textContent = text; g.appendChild(e); return e; };
     const txt = { "font-family": "var(--font-mono)", "font-weight": 800, "font-size": fs, stroke: "var(--chart-bg)", "stroke-width": 3, "paint-order": "stroke" };
@@ -9246,7 +9254,7 @@ async function tick() {
       refreshIceberg();              // 2026-10-16 풋프린트 칸별 아이스버그 (30초, ETH · 검증 중 · 신호 아님)
       refreshDirSig();               // 2026-10-15 지평 사다리 7일·4~13주 (10분, 서버 1시간 캐시)
       refreshVol4h();                // 2026-10-15 ⑤ 예측 판 4h 변동성 (5분, ETH)
-      refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH · 서버 5분 캐시)
+      refreshDir4h();                // 2026-10-15 ⑤ 예측 판 4h 방향 (2분, ETH·SOL·XRP · 서버 5분 캐시)
       refreshDirShort();             // 2026-10-28 ⑤ 예측 판 15분·1시간 방향 (1분, ETH · 서버 5분 캐시)
       refreshBoxHold();              // 2026-10-16 박스 유지 확률 (1분, ETH · 방향 아님)
       refreshOpenRev();              // 2026-10-16 ⑤ 종합의 09시 개장 되돌림 (2분, ETH)

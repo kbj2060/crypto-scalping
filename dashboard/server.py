@@ -2602,22 +2602,27 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
-    dir4h_art: dict = {"mtime": None, "art": None}
+    dir4h_art: dict = {}   # 코인 -> {mtime, art}
 
-    async def api_dir4h(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 방향»(ETH, scripts/live_eth_dir4h_20261015)
-        """매달 재학습 HGB(65피쳐) -- 바이낸스 REST 를 vision 형식으로(첫 호출 ETH 31일, 다음부터 꼬리만) · 5분 캐시.
-        아티팩트(data/live/eth_dir4h_model.joblib)는 매달 cron 이 바꾼다 -- 바뀌면 다시 읽는다."""
+    async def api_dir4h(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 방향»(scripts/live_eth_dir4h_20261015) · 10-31 SOL·XRP
+        """매달 재학습 HGB(65피쳐) -- 바이낸스 REST 를 vision 형식으로(첫 호출 그 코인 31일, 다음부터 꼬리만) · 5분 캐시.
+        아티팩트(data/live/{coin}_dir4h_model.joblib)는 매달 cron 이 바꾼다 -- 바뀌면 다시 읽는다."""
+        from scripts import live_eth_dir4h_20261015 as d4
+        coin = str(request.query.get("asset") or "eth").upper()
+        if coin not in d4.ARTIFACTS:   # 신뢰경계: 지원 코인 표(d4.ARM) -- 파일 이름·REST 심볼에 들어간다
+            return web.json_response({"ok": False, "reason": "unsupported_asset"}, headers=NOCACHE)
+        path = d4.ARTIFACTS[coin]
+
         def produce_sync() -> dict[str, Any]:
-            from scripts import live_eth_dir4h_20261015 as d4
-            if not d4.ARTIFACT.exists():
+            if not path.exists():
                 return {"ok": False, "reason": "artifact_missing"}
-            mt = d4.ARTIFACT.stat().st_mtime
-            if dir4h_art["mtime"] != mt:
+            mt, da = path.stat().st_mtime, dir4h_art.setdefault(coin, {})
+            if da.get("mtime") != mt:
                 import joblib
-                dir4h_art.update(mtime=mt, art=joblib.load(d4.ARTIFACT))
-            return d4.live_payload(dir4h_art["art"])
+                da.update(mtime=mt, art=joblib.load(path))
+            return d4.live_payload(da["art"])
         try:
-            payload = await swr_cached("dir4h", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
+            payload = await swr_cached(f"dir4h:{coin.lower()}", 300.0, lambda: asyncio.to_thread(produce_sync), max_stale=1800.0)
         except Exception as exc:  # noqa: BLE001
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
         return web.json_response(payload, headers=NOCACHE)

@@ -67,3 +67,15 @@ SOL E −38.4/+48.0bp(ETH 단위 예측 — 화면은 분위만 쓸 것) · XRP 
 7. **API**: `/api/dir4h?asset=sol|xrp`(신뢰경계 = 허용 코인 집합) + 코인별 아티팩트 mtime 캐시.
 8. **화면**: app.js 4h 칸이 ETH 고정 → 코인 따라 바꾸기 = 화면 변경이므로 `/impeccable` 절차 대상. XRP 툴팁에 «합동 학습 · 크기 정보 없음(피어슨 ≈ 0) · 전진 확인 중», SOL 툴팁에 «ETH 학습 모형 적용» 한 줄.
 9. **전진 기록**: XRP 는 경계선 통과라 서빙 시 전진 창(예: 90일) IC·적중 초과 기록을 같이 둔다.
+
+## 서빙(2026-10-31, 위 체크리스트 1·2·3·5·7·8 구현)
+- 코드: `scripts/live_eth_dir4h_20261015.py` 코인 표 `ARM = {ETH: S, SOL: E, XRP: J}` · `train(..., coin=)`(E = ETH 행 적합, J = 4코인 [::4]·y÷학습 창 표준편차 — 연구 `fit_month` 그대로) · `rest_frames(coin=)`(대상 코인 klines 9천 + metrics 5종, 코인별 `_CACHE`) · `daily_closes(coin)` · `frames_for` · `payload_from_features`(응답에 `asset`·`arm`, bp 는 `bp_scale` 로 표시만 환산 — 신호는 모형 단위). `dashboard/server.py` `/api/dir4h?asset=eth|sol|xrp`(그 밖 `unsupported_asset`) · 캐시 `dir4h:{coin}` · 코인별 아티팩트 mtime. `app.js` `DIR4H_ASSETS`·`dir4hNow()`(응답 코인 = 보는 코인일 때만) · 툴팁 코인별(XRP = 경계선·검증 IC≈0·피어슨≈0). «종합» 칩·15분·1시간·E2 가격 경로는 ETH 전용 입력(09시 개장·15분/1h·옵션 IV)이 있어 ETH 만 그대로.
+- 파리티(`test/test_dir4h_coins_parity_20261031.py`, 로컬 vision 패널을 서버 10월 모양 480일로 잘라): 서빙 `train()`+`predict` 10월 7,776행 vs 연구 preds.npz — **SOL_E·XRP_J 최대 차 0.0** · 문턱 = 연구 `month_fixed_q`(SOL −37.58/+46.84 · XRP −0.155/+0.150 표준화 단위) · spread 문 SOL 0.83·XRP 1.31 통과 · bp_scale SOL 1.107·XRP 143.9.
+- 화면(`test/render_dir4h_coins_20261031.py`, 서버 페이지 + 로컬 app.js · /api/dir4h 모킹): 1920·390 × SOL·XRP·ETH PASS · 다른 코인 응답 안 섞임 · JS 오류 0.
+- 아티팩트: `data/live/{sol,xrp}_dir4h_model.joblib`(10월 모형, 미추적 — ETH 와 같음) · 씨앗 `data/live/{sol,xrp}_dir4h_oos_seed.parquet`(preds.npz SOL_E·XRP_J 2023-01~2026-10-27, 추적 — ETH 씨앗과 같음).
+- 서버에서 할 일: 두 joblib 을 `data/live/` 로 복사(또는 서버에서 `--train --month 2026-10-01 --coin sol|xrp`) → 대시보드 재시작 → `python scripts/live_eth_dir4h_20261015.py --parity --coin sol`(그리고 xrp, 상관 ≥ .999) · REST 추가 = 코인당 첫 호출 ~110회, 이후 5분마다 ~26회.
+- 매달 재학습 cron(ETH `20 18 1 * *` KST 줄과 같은 flock·로그 형식, 뒤에 이어서):
+  `25 18 1 * *  … python scripts/live_eth_dir4h_20261015.py --train --coin sol`
+  `30 18 1 * *  … python scripts/live_eth_dir4h_20261015.py --train --coin xrp`
+  (SOL 은 ETH 모형을 다시 적합 — B2 결정적이라 ETH 아티팩트와 같은 모형. vision 패널은 ETH 줄이 이미 갱신해 이어 받기만.)
+- 남은 것: XRP 전진 창 기록(체크리스트 9) — 아직 없음.

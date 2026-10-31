@@ -15,9 +15,9 @@
   (OI·상위 포지션·계정·전체 롱숏), 테이커 비 = 같은 스탬프. `rest_frames` 가 REST 를 이 규약으로 옮긴다.
 
     python scripts/live_eth_dir4h_20261015.py --selftest            # 연구 패널과 피쳐 일치(로컬 vision 패널)
-    python scripts/live_eth_dir4h_20261015.py --train [--month 2026-10-01]   # vision 갱신 + 학습 → data/live/eth_dir4h_model.joblib
-    python scripts/live_eth_dir4h_20261015.py --parity              # (서버) REST 피쳐 ↔ vision 피쳐 어제 하루 대조
-    python scripts/live_eth_dir4h_20261015.py                       # (서버) 지금 예측 한 줄
+    python scripts/live_eth_dir4h_20261015.py --train [--month 2026-10-01] [--coin sol|xrp]   # vision 갱신 + 학습 → data/live/{coin}_dir4h_model.joblib
+    python scripts/live_eth_dir4h_20261015.py --parity [--coin sol]  # (서버) REST 피쳐 ↔ vision 피쳐 어제 하루 대조
+    python scripts/live_eth_dir4h_20261015.py [--coin sol]           # (서버) 지금 예측 한 줄
 """
 from __future__ import annotations
 
@@ -30,10 +30,16 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-ARTIFACT = ROOT / "data" / "live" / "eth_dir4h_model.joblib"
+# 2026-10-31 코인 표(docs/experiments/btc_sol_xrp_dir4h_20261031.md, 시험 26-06~10 엄격 통과 · BTC 불통과라 없음):
+#   S = 그 코인 단독 학습 · E = ETH 학습 모형을 그 코인 피쳐에 · J = ETH·BTC·SOL·XRP 합동(코인별 행 [::4], y ÷ 그 코인 학습 창 표준편차)
+ARM = {"ETH": "S", "SOL": "E", "XRP": "J"}
+POOL = ["ETH", "BTC", "SOL", "XRP"]
+ARTIFACTS = {c: ROOT / "data" / "live" / f"{c.lower()}_dir4h_model.joblib" for c in ARM}
+OOS_SEEDS = {c: ROOT / "data" / "live" / f"{c.lower()}_dir4h_oos_seed.parquet" for c in ARM}   # SOL·XRP = 연구 preds.npz 의 SOL_E·XRP_J(2023-01~2026-10-27)
+ARTIFACT = ARTIFACTS["ETH"]
 # 표본 밖 예측 기록 시작 = research_eth_dir4h_early_stop_20261019 의 B2(지금 HGB 설정) 월별 표본 밖 예측(2023-01~2026-09-14, 같은 65피쳐·365일)
 #   -- 10-19 첫 판(옛 early_stopping auto·시드 0, replicate_combo nomd)을 B2 로 교체. 이후 달은 매달 지난 판 예측이 이어 붙는다(art["oos"]).
-OOS_SEED = ROOT / "data" / "live" / "eth_dir4h_oos_seed.parquet"
+OOS_SEED = OOS_SEEDS["ETH"]
 PANEL = ROOT / "data" / "live" / "dir4h_panel"          # 코인별 vision 패널(최근 480일 = 학습 365 + 추세 5표 90 + 여유, 매달 이어 받기)
 COINS = ["ADA", "APT", "ARB", "ATOM", "AVAX", "BNB", "BTC", "DOGE", "DOT", "FIL", "INJ", "LINK", "LTC", "NEAR", "OP", "SOL", "SUI", "TRX", "XRP"]
 MCOLS = ["sum_open_interest", "count_toptrader_long_short_ratio", "sum_toptrader_long_short_ratio",
@@ -158,6 +164,14 @@ def build_features(frames: dict[str, pd.DataFrame], daily_close: pd.Series | Non
     return F[["ts", "y_4h"] + FEATS]
 
 
+def frames_for(frames: dict[str, pd.DataFrame], coin: str) -> dict[str, pd.DataFrame]:
+    """대상 코인을 "ETH" 자리에, ETH 를 그 코인 자리에(연구 research_btc_sol_xrp_dir4h_20261031.frames_for 와 같다)."""
+    f = dict(frames)
+    if coin != "ETH":
+        f["ETH"], f[coin] = frames[coin], frames["ETH"]
+    return f
+
+
 # ── 학습 (vision 패널) ─────────────────────────────────────────────────────
 def vision_update(end_day: str, days: int = 480, workers: int = 8, panel: Path = PANEL) -> dict[str, pd.DataFrame]:
     """panel/{SYM}USDT.parquet 를 end_day 까지 이어 받고 최근 days 일만 남긴다(data.binance.vision 정적 아카이브 -- REST 아님).
@@ -191,7 +205,7 @@ def thresholds(oos: pd.DataFrame) -> tuple[float, float]:
     return float(lo), float(hi)
 
 
-def train(frames: dict[str, pd.DataFrame], month: pd.Timestamp, seeds=(0,), prev: dict | None = None) -> dict:
+def train(frames: dict[str, pd.DataFrame], month: pd.Timestamp, seeds=(0,), prev: dict | None = None, coin: str = "ETH") -> dict:
     """prev = 지금 배포 판 -- 같은 HGB 설정이면 그 판이 자기 달(학습에 안 쓴 행)에 낸 예측을 표본 밖 기록에 이어 붙인다.
     설정이 다르면(옛 판) 그 기록·예측은 다른 모델 것이라 버리고 OOS_SEED 부터 다시 시작한다."""
     from sklearn.ensemble import HistGradientBoostingRegressor
@@ -201,21 +215,33 @@ def train(frames: dict[str, pd.DataFrame], month: pd.Timestamp, seeds=(0,), prev
         g = pd.concat([pd.Series([w0]), f.timestamp[(f.timestamp >= w0) & (f.timestamp < w1)], pd.Series([w1])]).diff().max()
         if g > pd.Timedelta("1h"):
             raise ValueError(f"{sym} 학습 창 구멍 {g} -- vision_update 를 다시 돌린다")
-    F = build_features(frames)
+    arm = ARM[coin]
+    fit_coins = {"S": [coin], "E": ["ETH"], "J": POOL}[arm]
+    Fs = {c: build_features(frames_for(frames, c)) for c in dict.fromkeys([coin] + fit_coins)}
+    win = lambda t, yy: (t < cut) & (t >= cut - np.timedelta64(365, "D")) & np.isfinite(yy)   # noqa: E731
+    Xf, yf, sd = [], [], {}
+    for c in fit_coins:
+        tc, yc = Fs[c].ts.to_numpy(), Fs[c].y_4h.to_numpy()
+        trc = win(tc, yc)
+        if trc.sum() < 100_000:   # 365일 = 105,120행 -- 짧은 패널로 조용히 학습하지 않게
+            raise ValueError(f"{c} 학습 행 부족 {int(trc.sum())}")
+        sd[c] = float(np.std(yc[trc]))
+        step, k = (4, sd[c]) if arm == "J" else (2, 1.0)   # J = 연구 fit_month 의 합동(코인별 [::4] · y ÷ 학습 창 표준편차)
+        Xf.append(Fs[c][FEATS].to_numpy(dtype=np.float32)[trc][::step]); yf.append(yc[trc][::step] / k)
+    Xf, yf = np.vstack(Xf), np.concatenate(yf)
+    F = Fs[coin]
     ts, y = F.ts.to_numpy(), F.y_4h.to_numpy()
-    tr = (ts < cut) & (ts >= cut - np.timedelta64(365, "D")) & np.isfinite(y)
+    tr = win(ts, y)
     X = F[FEATS].to_numpy(dtype=np.float32)
-    if tr.sum() < 100_000:   # 365일 = 105,120행 -- 짧은 패널로 조용히 학습하지 않게
-        raise ValueError(f"학습 행 부족 {int(tr.sum())}")
     # 결정성 문: 시드만 다른 두 판의 예측이 같아야 한다(sklearn 이 바뀌어 무작위가 다시 생기면 여기서 멈춘다 -- 1만 행 넘게 써서 'auto' 조건을 재현)
-    Xs, ys = X[tr][::2][:12_000], y[tr][::2][:12_000]
+    Xs, ys = Xf[:12_000], yf[:12_000]
     if not np.array_equal(*[HistGradientBoostingRegressor(random_state=s, **HGB).fit(Xs, ys).predict(Xs[:2000]) for s in (0, 1)]):
         raise ValueError("HGB 가 시드에 따라 다른 예측을 낸다 -- early_stopping·max_features 등 무작위 설정 확인")
-    models = [HistGradientBoostingRegressor(random_state=s, **HGB).fit(X[tr][::2], y[tr][::2]) for s in seeds]
+    models = [HistGradientBoostingRegressor(random_state=s, **HGB).fit(Xf, yf) for s in seeds]
     if prev is not None and prev.get("hgb") != HGB:
         prev = None   # 다른 설정의 판(10-19 이전 = early_stopping auto) -- 그 표본 밖 기록은 이 모델 분포가 아니다
     oos = prev.get("oos") if prev is not None else None
-    oos = pd.read_parquet(OOS_SEED) if oos is None else oos
+    oos = pd.read_parquet(OOS_SEEDS[coin]) if oos is None else oos
     new = (ts >= np.datetime64(pd.Timestamp(prev["month"]))) & (ts < np.datetime64(month)) if prev is not None else np.zeros(len(ts), bool)
     if new.any():   # 같은 달 재실행이면 이어 붙일 행 없음
         oos = pd.concat([oos, pd.DataFrame({"ts": ts[new], "pred": predict(prev, F[new]).astype(np.float32)})])
@@ -226,7 +252,10 @@ def train(frames: dict[str, pd.DataFrame], month: pd.Timestamp, seeds=(0,), prev
     k = float(np.mean([m.predict(X[tr][::7]) for m in models], 0).std() / oos.pred.std())
     if not 0.5 <= k <= 3.0:
         raise ValueError(f"새 모델 예측 폭 = 표본 밖 기록의 {k:.2f}배 -- 교체 안 함")
+    # 화면 bp 환산(표시 전용 -- 신호는 모형 단위로 판정): 모형 출력 단위 → 대상 코인 학습 창 y 단위. ETH(S) = 1.
+    bp_scale = {"S": 1.0, "E": float(np.std(y[tr])) / sd["ETH"], "J": float(np.std(y[tr]))}[arm]
     return {"models": models, "features": FEATS, "hgb": dict(HGB), "lo": lo, "hi": hi, "month": str(month.date()), "oos": oos, "spread_ratio": round(k, 3),
+            "coin": coin, "arm": arm, "bp_scale": bp_scale,
             "train_window": [str(pd.Timestamp(ts[tr].min())), str(pd.Timestamp(ts[tr].max()))], "n_train": int(tr.sum()), "seeds": list(seeds)}
 
 
@@ -290,20 +319,23 @@ def _merge(old: pd.DataFrame | None, new: pd.DataFrame, keep_days: float) -> pd.
     return df[df.timestamp >= df.timestamp.max() - pd.Timedelta(days=keep_days)].reset_index(drop=True)
 
 
-def rest_frames(now_ms: int | None = None, others_n: int = 340) -> dict[str, pd.DataFrame]:
-    """REST → vision 형식 frames. 첫 호출 = ETH 31일(klines 9천·metrics 5종) 받기, 다음부터 꼬리만 이어 붙인다(_CACHE)."""
+def rest_frames(now_ms: int | None = None, others_n: int = 340, coin: str = "ETH") -> dict[str, pd.DataFrame]:
+    """REST → vision 형식 frames(코인 이름 그대로 -- 대상 바꾸기는 frames_for). 첫 호출 = 대상 코인 31일(klines 9천·metrics 5종) 받기,
+    다음부터 꼬리만 이어 붙인다(_CACHE, 코인별). 나머지 코인은 짧은 klines 만."""
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
-    first = "ETH_k" not in _CACHE or pd.Timestamp(now_ms, unit="ms") - _CACHE["ETH_k"].timestamp.max() > pd.Timedelta(hours=20)   # 꼬리 300봉=25h -- 그보다 오래 안 불리면 구멍 대신 처음부터
-    _CACHE["ETH_k"] = _merge(_CACHE.get("ETH_k"), _klines("ETH", 9000 if first else 300, now_ms), 32)
+    kk = f"{coin}_k"
+    first = kk not in _CACHE or pd.Timestamp(now_ms, unit="ms") - _CACHE[kk].timestamp.max() > pd.Timedelta(hours=20)   # 꼬리 300봉=25h -- 그보다 오래 안 불리면 구멍 대신 처음부터
+    _CACHE[kk] = _merge(_CACHE.get(kk), _klines(coin, 9000 if first else 300, now_ms), 32)
     met = {}
     for ep, (col, _, _) in METRIC_EP.items():
-        _CACHE[f"ETH_{ep}"] = _merge(_CACHE.get(f"ETH_{ep}"), _metric("ETH", ep, 30.5 if first else 0.5), 32)
-        met[col] = _CACHE[f"ETH_{ep}"]
-    eth = _CACHE["ETH_k"]
+        _CACHE[f"{coin}_{ep}"] = _merge(_CACHE.get(f"{coin}_{ep}"), _metric(coin, ep, 30.5 if first else 0.5), 32)
+        met[col] = _CACHE[f"{coin}_{ep}"]
+    tgt = _CACHE[kk]
     for col, m in met.items():
-        eth = eth.merge(m, on="timestamp", how="left")
-    frames = {"ETH": eth}
-    for sym in COINS:   # 교차 = 1일 수익(288봉)·BTC 4h·OI 1h 면 충분
+        tgt = tgt.merge(m, on="timestamp", how="left")
+    frames = {coin: tgt}
+    # ponytail: 교차 코인 짧은 klines 는 코인마다 따로 받는다(5분에 코인당 ~20회) -- 코인이 늘면 한 벌을 공유
+    for sym in [s for s in ["ETH"] + COINS if s != coin]:   # 교차 = 1일 수익(288봉)·BTC 4h·OI 1h 면 충분
         k = _klines(sym, others_n, now_ms)
         if sym == "BTC":
             k = k.merge(_metric("BTC", "openInterestHist", others_n / 288 + 0.1), on="timestamp", how="left")
@@ -315,8 +347,8 @@ def rest_frames(now_ms: int | None = None, others_n: int = 340) -> dict[str, pd.
     return frames
 
 
-def daily_closes(now_ms: int) -> pd.Series:
-    got = _get("/fapi/v1/klines", {"symbol": "ETHUSDT", "interval": "1d", "limit": 120})
+def daily_closes(now_ms: int, coin: str = "ETH") -> pd.Series:
+    got = _get("/fapi/v1/klines", {"symbol": f"{coin}USDT", "interval": "1d", "limit": 120})
     got = [r for r in got if int(r[6]) < now_ms]
     return pd.Series([float(r[4]) for r in got], index=pd.to_datetime([int(r[0]) for r in got], unit="ms"))
 
@@ -324,18 +356,25 @@ def daily_closes(now_ms: int) -> pd.Series:
 def live_payload(art: dict | None = None) -> dict:
     import joblib
     art = art or joblib.load(ARTIFACT)
+    coin = art.get("coin", "ETH")   # 10-31 이전 ETH 아티팩트엔 coin·bp_scale 키가 없다
     now_ms = int(time.time() * 1000)
-    F = build_features(rest_frames(now_ms), daily_closes(now_ms))
+    F = build_features(frames_for(rest_frames(now_ms, coin=coin), coin), daily_closes(now_ms, coin))
+    return payload_from_features(art, F)
+
+
+def payload_from_features(art: dict, F: pd.DataFrame) -> dict:
+    """피쳐 프레임 → 화면 응답(서빙·파리티 시험이 같은 함수). 신호는 모형 단위로 판정 -- bp 환산(bp_scale)은 표시만."""
+    coin, k = art.get("coin", "ETH"), art.get("bp_scale", 1.0)
     last = F.iloc[-1:]
     p = float(predict(art, last)[0])
     nan = [c for c in FEATS if not np.isfinite(last[c].iloc[0])]
     tail = F.tail(48)
     hist = predict(art, tail)
     sig = 1 if p >= art["hi"] else -1 if p <= art["lo"] else 0
-    return {"ok": True, "decided_at_ms": int(pd.Timestamp(last.ts.iloc[0]).value // 10**6) + 300_000, "pred_bp": round(p, 2),
-            "lo": round(art["lo"], 2), "hi": round(art["hi"], 2), "signal": sig, "model_month": art["month"],
+    return {"ok": True, "asset": coin.lower(), "arm": ARM[coin], "decided_at_ms": int(pd.Timestamp(last.ts.iloc[0]).value // 10**6) + 300_000,
+            "pred_bp": round(p * k, 2), "lo": round(art["lo"] * k, 2), "hi": round(art["hi"] * k, 2), "signal": sig, "model_month": art["month"],
             "train_window": art["train_window"], "nan_feats": nan,
-            "hist": [[int(pd.Timestamp(t).value // 10**6) + 300_000, round(float(x), 2)] for t, x in zip(tail.ts, hist)]}
+            "hist": [[int(pd.Timestamp(t).value // 10**6) + 300_000, round(float(x) * k, 2)] for t, x in zip(tail.ts, hist)]}
 
 
 # ── 점검 ──────────────────────────────────────────────────────────────────
@@ -368,13 +407,13 @@ def selftest() -> None:
     print(f"selftest ok — 65피쳐 연구 패널 일치({len(a):,}행) · 인과성")
 
 
-def parity() -> None:
+def parity(coin: str = "ETH") -> None:
     """(서버) 같은 봉을 REST 경로와 vision 경로로 만들어 피쳐 대조 -- 어제 UTC 하루."""
     now_ms = int(time.time() * 1000)
-    dc = daily_closes(now_ms)
-    R = build_features(rest_frames(now_ms, others_n=900), dc).set_index("ts")   # 다른 코인 3일 -- 어제 하루 전부의 1일 수익이 차도록
+    dc = daily_closes(now_ms, coin)
+    R = build_features(frames_for(rest_frames(now_ms, others_n=900, coin=coin), coin), dc).set_index("ts")   # 다른 코인 3일 -- 어제 하루 전부의 1일 수익이 차도록
     y0 = (pd.Timestamp(now_ms, unit="ms").normalize() - pd.Timedelta("1D"))
-    V = build_features(vision_update(str(y0.date())), dc).set_index("ts")
+    V = build_features(frames_for(vision_update(str(y0.date())), coin), dc).set_index("ts")
     idx = R.index.intersection(V.index)
     idx = idx[(idx >= y0) & (idx < y0 + pd.Timedelta("1D"))]
     rep = {}
@@ -389,13 +428,15 @@ def parity() -> None:
 
 if __name__ == "__main__":
     a = sys.argv[1:]
+    coin = a[a.index("--coin") + 1].upper() if "--coin" in a else "ETH"
+    ARTIFACT = ARTIFACTS[coin]
     if "--selftest" in a:
         selftest()
     elif "--train" in a:
         import joblib
         month = pd.Timestamp(a[a.index("--month") + 1]) if "--month" in a else pd.Timestamp.utcnow().tz_localize(None).normalize().replace(day=1)
         frames = vision_update(str((pd.Timestamp.utcnow().tz_localize(None).normalize() - pd.Timedelta("1D")).date()))
-        art = train(frames, month, prev=joblib.load(ARTIFACT) if ARTIFACT.exists() else None)
+        art = train(frames, month, prev=joblib.load(ARTIFACT) if ARTIFACT.exists() else None, coin=coin)
         ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
         tmp = ARTIFACT.with_suffix(".tmp")
         joblib.dump(art, tmp)   # 다 쓴 뒤 교체 -- 쓰다 죽어도 지난 판이 남게
@@ -404,6 +445,6 @@ if __name__ == "__main__":
         tmp.replace(ARTIFACT)
         print("학습", {k: v for k, v in art.items() if k not in ("models", "oos")}, "표본 밖 기록", len(art["oos"]))
     elif "--parity" in a:
-        parity()
+        parity(coin)
     else:
         print(json.dumps(live_payload(), ensure_ascii=False)[:600])
