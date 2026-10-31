@@ -42,6 +42,9 @@ SYMBOLS = [s.strip().upper() for s in os.environ.get("BYBIT_TAPE_SYMBOLS", "ETHU
 WS = "wss://stream.bybit.com/v5/public/linear"
 KLINE_URL = "https://api.bybit.com/v5/market/kline"
 FLUSH_S, PING_S, IDLE_S, VERIFY_S = 5.0, 20.0, 60.0, 300.0
+# 2026-10-31 멈춤 자가 종료: 10-28~31 프로세스가 살아 있는 채 72시간 멈췄다(감독 프로세스는 «죽으면» 만 다시 띄우고 감시기는 알림만).
+#   네 코인 체결이 STALL_S 동안 하나도 안 들어오면(쓰기가 막혀 루프가 멈춘 경우 포함) 스스로 끝낸다 -> 감독 프로세스가 15초 뒤 다시 띄운다.
+STALL_S = 600.0
 MARK_EVERY_MS = 1000           # ponytail: 마크는 종목당 1초 1점(tickers 는 100ms) -- 1초 해상도면 베이시스·가격차에 충분
 
 
@@ -151,8 +154,27 @@ async def verify_recent(session, stores: dict[str, TapeStore]) -> None:
             log(f"⚠️{s} 완전성 {time.strftime('%H:%M', time.localtime(m))} rel_err {rel:+.4%} -- 체결 유실")
 
 
+def stalled(now: float, beat: float) -> bool:
+    return now - beat > STALL_S
+
+
+def start_stall_guard(beat: list[float]) -> None:
+    """별도 스레드 -- 이벤트 루프가 쓰기에 묶여 멈춰도 돈다."""
+    import threading
+
+    def loop() -> None:
+        while True:
+            time.sleep(30)
+            if stalled(time.monotonic(), beat[0]):
+                log(f"체결 {STALL_S:.0f}초 없음 -- 멈춤으로 보고 종료(감독 프로세스가 다시 띄운다)")
+                os._exit(3)
+    threading.Thread(target=loop, daemon=True, name="stall-guard").start()
+
+
 async def run() -> None:
     import aiohttp
+    beat = [time.monotonic()]
+    start_stall_guard(beat)
     stores = {s: TapeStore(TAPE_DB, s, _bn.BUCKETS.get(s.lower(), 0.01)) for s in SYMBOLS}
     bufs = {s: TapeBuffer(_bn.BUCKETS.get(s.lower(), 0.01), s) for s in SYMBOLS}
     groups = {s: OrderGrouper() for s in SYMBOLS}
@@ -216,6 +238,7 @@ async def run() -> None:
                                         stores[s].record_gap(last_ms[s] or ts // 60_000 * 60_000, ts, "ws_reconnect" if last_ms[s] else "startup")
                                     add_order(s, groups[s].add(sell, px, qty, ts))
                                     last_ms[s] = ts
+                                    beat[0] = now
                             elif topic.startswith("tickers."):
                                 for t, rows in tick.rows(msg).items():
                                     ctx_buf.setdefault(t, []).extend(rows)
@@ -278,6 +301,7 @@ def selftest() -> None:
     assert t.rows({"ts": 1500, "data": {"symbol": "ETHUSDT", "markPrice": "2502"}}) == {}, "1초 안 마크·안 바뀐 OI 는 안 쓴다"
     assert t.rows({"ts": 2100, "data": {"symbol": "ETHUSDT", "openInterest": "11", "markPrice": "2503"}}) == {
         "bybit_oi": [("ETHUSDT", 2100, 11.0, 25000.0)], "bybit_mark": [("ETHUSDT", 2100, 2503.0, 2501.0)]}
+    assert not stalled(1000.0, 1000.0 - STALL_S) and stalled(1000.0, 1000.0 - STALL_S - 1), "멈춤 판정 경계"
     print("selftest OK")
 
 
