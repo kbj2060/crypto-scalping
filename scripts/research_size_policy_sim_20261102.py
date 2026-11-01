@@ -27,8 +27,8 @@ def trade_returns(coin="XRP"):
     """매 시 정각 롱·숏 진입의 거래 수익률(명목 대비, 비용 포함) 배열 R[day,hour,side]."""
     df = rf.load(coin)
     df = df.rename(columns={})
-    i = np.arange(12, len(df) - rf.H - 3, 12)
-    i = i[df.index[i].minute == 55]
+    i = np.arange(11, len(df) - rf.H - 3, 12)          # 매 시 정각 마감 봉(시가 분 = 55)
+    assert (df.index[i].minute == 55).all()
     e = df.o.to_numpy()[i + 1]
     R = []
     for side in (1, -1):
