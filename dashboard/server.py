@@ -137,6 +137,7 @@ from dashboard import situation as sit  # noqa: E402
 from dashboard import flow_read as fr  # noqa: E402
 from dashboard.trend_rule import trend_payload  # noqa: E402 -- 30분 카드 추세 칸(2026-09-28)
 from dashboard.dir_signals import dir_signals_payload, vol4h_from_klines, open_rev_from_klines  # noqa: E402 -- 풋프린트 머리 지평 사다리·⑤ 예측 판(2026-10-15)
+from dashboard.regime_band import regime_band_payload  # noqa: E402 -- ⑤ 예측 줄 «횡보·추세» 칸(2026-11-02, 전진 기록 크론이 쌓은 마지막 행)
 from dashboard.box_hold import BUNDLES as box_hold_bundles, payload as box_hold_payload, with_qx4i as box_hold_with_qx4i  # noqa: E402 -- 박스 유지 확률(2026-10-16, 방향 아님 · 10-20 XRP)
 from scripts.live_push_notifier_20260904 import PUSH_KINDS  # noqa: E402 -- 알림 센터 «무엇을 보내나»(2026-10-05)
 from scripts.ops_watchdog import send_telegram  # noqa: E402 -- 지지·저항 뚫림 알림(2026-10-25)
@@ -2575,6 +2576,13 @@ def make_app() -> web.Application:
             payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         return web.json_response(payload, headers=NOCACHE)
 
+    async def api_regime_band(request: web.Request) -> web.Response:   # 2026-11-02 ⑤ 예측 줄 «횡보·추세» (크론이 매 시 쌓는 jsonl 의 코인별 마지막 행 -- 계산 없음)
+        try:
+            payload = await swr_cached("regime_band", 60.0, lambda: asyncio.to_thread(regime_band_payload), max_stale=7200.0)
+        except Exception as exc:  # noqa: BLE001
+            payload = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return web.json_response(payload, headers=NOCACHE)
+
     dir4h_art: dict = {}   # 코인 -> {mtime, art}
 
     async def api_dir4h(request: web.Request) -> web.Response:   # 2026-10-15 ⑤ 예측 판 «4h 방향»(scripts/live_eth_dir4h_20261015) · 10-31 SOL·XRP
@@ -4493,6 +4501,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/situation", api_situation)
     app.router.add_get("/api/trend", api_trend)
     app.router.add_get("/api/dir-signals", api_dir_signals)
+    app.router.add_get("/api/regime-band", api_regime_band)
     app.router.add_get("/api/vol-forecast", api_vol_forecast)
     app.router.add_get("/api/dir4h", api_dir4h)
     app.router.add_get("/api/dir-short", api_dir_short)
