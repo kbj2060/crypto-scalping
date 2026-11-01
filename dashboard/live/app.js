@@ -601,6 +601,30 @@ function renderPegTag() {
   if (h._h !== html) { h._h = html; h.innerHTML = html; }
   h.setAttribute("aria-label", o.action ? "취소 요청됨" : "peg 진입 주문 취소"); h.title = o.action ? "취소 요청됨 — 3초 안에 처리" : "걸려 있는 peg 진입 주문을 바로 취소(든 몫은 그대로 · 남은 수량 시장가 없음)";
 }
+// 2026-11-02 사용자 «진입 라벨만 오른쪽 전용 레인으로(D안)»: 진입 라벨(지정가·peg·들어간 포지션)을 플롯 오른쪽 끝 **바깥 띠**로 옮긴다 -- 풋프린트 셀 위에서 묻히던 것을
+//   불투명 칩(두~세 줄 · 정보는 그대로)으로 읽히게. 띠가 좁거나(휴대폰·기둥 없음) 없으면 예전 자리. 띠 안의 차트 글자(청산 띠 거리 «+18.3 · 0.78%» 등)와 겹치면 위·아래로 비켜 앉는다.
+function ltLanePlace(en, y, R, X, top, bot, mob, svg, box) {
+  // 띠 = 플롯 오른쪽 끝(R) 바로 뒤의 체결 기둥 칸(TRADE_W≈104px) -- 기둥은 그 위로 겹쳐 보여도(칩이 불투명) 값이 읽힌다. 기둥이 없는(fpProfileSpan 없음)·휴대폰은 예전 자리.
+  const sp = typeof fpProfileSpan !== "undefined" ? fpProfileSpan : null, on = !!sp && !mob;
+  en.classList.toggle("lane", on);
+  if (!on) { en.style.width = ""; return; }
+  const w = 112, left = R + 5;
+  Object.assign(en.style, { left: left + "px", width: w + "px" });
+  const h = en.offsetHeight || 40, pr = box.getBoundingClientRect(), taken = [];
+  svg.querySelectorAll("text").forEach((t) => {
+    const r = t.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const l = r.left - pr.left, rt = r.right - pr.left;
+    if (rt > left - 2 && l < left + w + 2) taken.push([r.top - pr.top - 2, r.bottom - pr.top + 2]);
+  });
+  const step = h + 4, free = (yy) => !taken.some(([a, b]) => yy - h / 2 < b && yy + h / 2 > a);
+  let best = y;
+  for (const off of [0, step, -step, 2 * step, -2 * step]) {
+    const yy = Math.min(bot - h / 2, Math.max(top + h / 2, y + off));
+    if (free(yy)) { best = yy; break; }
+  }
+  en.style.top = best + "px";
+}
 function renderLineTool() {
   renderPegTag();
   const svg = el("candleSvgSnapshot"), G = chartGeo, box = svg && svg.parentElement;
@@ -627,6 +651,9 @@ function renderLineTool() {
   const side = lineSide(t, p), sgn = side === "SHORT" ? -1 : 1, ref = lineRef(t, p), lim = t.entry > 0;   // ref = 진입선 가격(지정가면 그 선 · 아니면 지금가)
   const yP = clampY(Y(ref)), yNow = clampY(Y(p)), yT = clampY(Y(t.tp)), yS = clampY(Y(t.sl));
   const qty = Number(t.plan?.quantity) || 0, unit = coinUnit();
+  // 🔴2026-11-02 사용자 «익절·손절을 끌 때마다 가격·%·금액이 맞게 변하게»: 끄는 동안 plan=null 이라 qty=0 이 되어 **금액이 사라졌다**. 서버 수량이 없으면 어림 수량으로 계속 보인다(«≈»).
+  const eq0 = Number(t.plan?.projection?.equity_usdt) || Number(latestBinanceAccount?.balance?.margin) || 0, lev0 = Number(t.plan?.target_leverage) || Number(manualLevEffective()) || 0;
+  const qShow = qty || (eq0 > 0 && lev0 > 0 && ref > 0 ? eq0 * linePct / 100 * lev0 / ref : 0);
   const set = (sel, css) => { const n = h.querySelector(sel); if (n) Object.assign(n.style, css); return n; };
   set(".lt-zone.up", { left: x0 + "px", width: w + "px", top: Math.min(yT, yP) + "px", height: Math.abs(yP - yT) + "px" });
   set(".lt-zone.dn", { left: x0 + "px", width: w + "px", top: Math.min(yS, yP) + "px", height: Math.abs(yP - yS) + "px" });
@@ -634,7 +661,7 @@ function renderLineTool() {
     const y = Y(v), off = y < top ? "↑ " : y > bot ? "↓ " : "", d = v / ref - 1;
     set(`.lt-ln.${k}`, { left: L + "px", width: R - L + "px", top: clampY(y) + "px", opacity: off ? "0" : "" });
     const tag = set(`.lt-tag.${k}`, { left: cx + "px", top: clampY(y) + "px" });
-    const pnl = qty ? ` <span class="lt-s">${d * sgn >= 0 ? "+" : "−"}$${Math.abs(d * ref * qty).toFixed(1)}</span>` : "";
+    const pnl = qShow ? ` <span class="lt-s">${qty ? "" : "≈"}${d * sgn >= 0 ? "+" : "−"}$${Math.abs(d * ref * qShow).toFixed(1)}</span>` : "";
     tag.innerHTML = `<span class="lt-grip" aria-hidden="true"></span>${off}${k === "tp" ? "익절" : "손절"} ${lineFmt(v)} <span>${d >= 0 ? "+" : "−"}${Math.abs(100 * d).toFixed(2)}%</span>${mob ? "" : pnl}`;
     tag.setAttribute("aria-label", `${k === "tp" ? "익절" : "손절"}선 ${lineFmt(v)} — 위아래로 끌어 옮기기`);
   });
@@ -647,6 +674,7 @@ function renderLineTool() {
       + (t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "")
     : `<span class="lt-grip" aria-hidden="true"></span>진입 peg ${lineFmt(p)} <span class="lt-s">끌면 지정가</span>`;
   en.setAttribute("aria-label", lim ? `지정가 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
+  ltLanePlace(en, yP, R, X, top, bot, mob, svg, box);
   h.classList.toggle("short", side === "SHORT");
   // 표는 플롯 왼쪽 -- 두 꼬리표의 높이 띠(±22px)를 피한 빈 구간 중 표가 들어가는 첫 곳(위부터, 대개 두 선 사이). 없으면 가장 넓은 곳.
   const tk = h.querySelector(".lt-tk"), th = tk.offsetHeight + 8, ys = [yT, yS].sort((a, b) => a - b);
@@ -788,8 +816,12 @@ function renderArmedLines() {
   set(".lt-ln.en", { left: x0 + "px", width: w + "px", top: yE + "px" });
   const pNow = Number(latestLivePriceByAsset[activeSnapshotAsset] || 0), upnl = pNow > 0 ? (pNow - en) * qty * sgn : 0, lv = Number(a.p.leverage) || 0;
   const im = lv > 0 ? qty * en / lv : 0, sg = (v) => (v >= 0 ? "+" : "−");   // 증거금 = 명목 ÷ 레버(거래소 ROE 분모)
-  set(".lt-tag.en", { left: x0 + 6 + "px", top: yE + "px" }).innerHTML = `${a.side === "SHORT" ? "SHORT" : "LONG"} · 진입 ${lineFmt(en)}`   // 숫자·고정 글자뿐
-    + (pNow > 0 && qty ? ` <span class="lt-en-p ${upnl >= 0 ? "good" : "bad"}">${sg(upnl)}$${Math.abs(upnl).toFixed(2)}${im > 0 && !mob ? ` · 증거금 ${sg(upnl)}${Math.abs(100 * upnl / im).toFixed(1)}%` : ""}</span>` : "");
+  const enTag = set(".lt-tag.en", { left: x0 + 6 + "px", top: yE + "px" });
+  // 2026-11-02 레인 칩은 줄을 의도대로 나눈다(방향·진입 / 가격 / 손익 / 증거금 %) -- 글자 흐름대로 접히면 «증거/금»처럼 단어 중간에서 끊겼다. 레인이 아니면 예전과 같은 한 줄.
+  const pc = upnl >= 0 ? "good" : "bad";
+  enTag.innerHTML = `${a.side === "SHORT" ? "SHORT" : "LONG"} · 진입 <b class="lt-en-px">${lineFmt(en)}</b>`   // 숫자·고정 글자뿐
+    + (pNow > 0 && qty ? ` <span class="lt-en-p ${pc}">${sg(upnl)}$${Math.abs(upnl).toFixed(2)}</span>${im > 0 && !mob ? `<span class="lt-en-p lt-en-r ${pc}">증거금 ${sg(upnl)}${Math.abs(100 * upnl / im).toFixed(1)}%</span>` : ""}` : "");
+  ltLanePlace(enTag, yE, R, X, top, bot, mob, svg, box);
   const note = h.querySelector(".lt-am-note"), e = armedEdit;
   note.textContent = e && e.busy ? "주문 수정 중…" : e && e.err ? `수정 실패 — ${e.err}`
     : e && e.okAt && Date.now() - e.okAt < 6000 ? (e.warn ? `수정됨 — ${e.warn}` : e.tpOk === false ? "수정됨 — 익절 지정가를 못 걸어 서버가 닿으면 닫습니다" : "수정됨")

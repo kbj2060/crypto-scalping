@@ -3396,3 +3396,11 @@ html.lg-on .ofab-bar { background: rgba(255, 255, 255, 0.4); }
   #snapAcctCycle .cy-tiles div { padding: 7px 8px; }
 }
 @media (min-width: 1100px) and (max-width: 1599px) { #snapAcctCycle .cy-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }   /* 중간 폭: 한 칸이 좁아 타일을 2줄(3열)로 */
+
+/* 2026-11-02 진입 라벨 = 오른쪽 전용 레인(D안 · app.js ltLanePlace): 플롯 오른쪽 바깥 띠에 불투명 칩, 정보는 그대로(두~세 줄로 접힘). 끌기·✕ 는 그대로 동작한다. */
+.lt-tag.en.lane { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 6px; white-space: normal; padding: 4px 7px 4px 6px; font-size: 11.5px; line-height: 1.3; background: var(--pop-bg); }
+.lt-tag.en.lane .lt-grip { display: none; }   /* 폭이 좁아 손잡이 점이 한 줄을 차지한다 -- 칩 어디든 끌 수 있다(ns-resize 커서) */
+.lt-tag.en.lane .lt-en-p, .lt-tag.en.lane > span { font-size: 11px; font-weight: 700; }
+.lt-tag.en.lane > b, .lt-tag.en.lane > span { flex: 0 0 100%; white-space: nowrap; }   /* 줄마다 한 항목 */
+.lt-en-r::before { content: " · "; font-weight: 700; }   /* 레인이 아니면 예전처럼 한 줄 «· 증거금 …» */
+.lt-tag.en.lane .lt-en-r::before { content: none; }
