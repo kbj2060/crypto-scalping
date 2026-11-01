@@ -45,9 +45,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextvars
+import faulthandler
 import json
 import os
 import sqlite3
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -613,6 +615,7 @@ class TapeStore:
                 con.executemany(self._insert, [(self.symbol, *r) for r in self.pending])
                 con.execute("COMMIT")
             self.pending.clear()
+            _WD["write"] = time.monotonic()
         except Exception as exc:  # noqa: BLE001 -- 락 충돌(읽는 쪽이 잡고 있음)이 대부분이다
             if len(self.pending) > self.PENDING_CAP:
                 dropped = len(self.pending) - self.PENDING_CAP // 2
@@ -797,10 +800,38 @@ def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str 
     return fetch
 
 
+# 2026-11-01 정지 감시: 심볼을 한 프로세스에 묶은 뒤(10-31) 프로세스는 살아 있는데 7심볼이 통째로 15~18시간 기록이 끊겼다
+#   (OKX 04:04 · Binance 06:54, 오류 로그 없음). 이벤트 루프 박동이나 쓰기 성공이 끊기면 스레드 스택을 로그에 남기고 종료 -> supervisor 가 재기동하고 backfill 이 메운다.
+#   (스택 덤프 = 다음에 멈출 때 원인 지점이 로그에 남는다.)
+_WD = {"loop": time.monotonic(), "write": time.monotonic()}
+WD_LOOP_STALL_S, WD_WRITE_STALL_S = 120.0, 600.0
+
+
+def _watchdog() -> None:
+    while True:
+        time.sleep(10.0)
+        now = time.monotonic()
+        why = (f"이벤트 루프 {now - _WD['loop']:.0f}초 정지" if now - _WD["loop"] > WD_LOOP_STALL_S
+               else f"쓰기 성공이 {now - _WD['write']:.0f}초 없음" if now - _WD["write"] > WD_WRITE_STALL_S else "")
+        if why:
+            log(f"⚠️정지 감지({why}) -- 스택을 남기고 종료, supervisor 가 재기동한다")
+            faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+            sys.stderr.flush()
+            os._exit(70)
+
+
+async def _beat() -> None:
+    while True:
+        _WD["loop"] = time.monotonic()
+        await asyncio.sleep(5.0)
+
+
 async def run_all(coros) -> None:
     """심볼 여럿을 한 프로세스에서(2026-10-31 통합 -- 프로세스당 ~45MB 인터프리터·aiohttp 를 심볼 수만큼 내지 않는다).
     하나라도 끝나면(=죽으면) 나머지를 걷고 그 예외를 올려 supervisor 가 전부 재기동한다. 빈 구간은 backfill_loop 가 메운다."""
-    tasks = [asyncio.ensure_future(c) for c in coros]
+    _WD["loop"] = _WD["write"] = time.monotonic()
+    threading.Thread(target=_watchdog, daemon=True, name="stall-watchdog").start()
+    tasks = [asyncio.ensure_future(c) for c in coros] + [asyncio.ensure_future(_beat())]
     done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     for t in tasks:
         t.cancel()
