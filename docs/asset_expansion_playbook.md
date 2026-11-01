@@ -110,3 +110,5 @@ Binance 옵션은 BNB·BTC·DOGE·ETH·SOL·XRP·XAU·XAG 뿐이고 Deribit 은 
 | 개장 되돌림 / 맞대결 | 후보 / ❌ | ❌ / ❌ | ❌ / ❌ | btcsol_feature_retest_20261031.md |
 
 대략 «짧은 지평 방향·변동성·박스 30분/1h·실현 감마»는 코인이 바뀌어도 통과했고, «4h 방향·박스 4h·매매 신호»는 코인마다 갈렸다.
+
+> **주식 옵션 카드(2026-11-01)**: Deribit 에 없는 종목은 CBOE 체인 요약(`scripts/cboe_option_summary_20261101.py`)을 `data/live/cboe_option_state.json` 으로 쓰고 `gex_payload` 가 `currencies.<SYM>` 으로 합친다. app.js `optData` 코인 표에 한 줄 추가. rv7·블록 거래는 없다.
