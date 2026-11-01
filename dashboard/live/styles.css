@@ -2130,9 +2130,9 @@ body.not-eth [data-eth-only]::after {
 }
 .ofab-toggle { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 /* 2026-09-28 2초 꾹 = 추가 진입 -- 누르는 동안 바닥에서 채움이 차오른다(진입 버튼 .hold-fill 과 같은 뜻). */
-.ofab-toggle { background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat;
-  background-position: 0 100%; background-size: 0% 3px; }
-.ofab-toggle.holding { background-size: 100% 3px; transition: background-size 1.5s linear; }   /* = OFAB_HOLD_MS */
+.ofab-toggle { background-image: linear-gradient(color-mix(in srgb, currentColor 30%, transparent), color-mix(in srgb, currentColor 30%, transparent)); background-repeat: no-repeat;
+  background-position: 0 0; background-size: 0% 100%; }   /* 2026-11-02 아래 3px 막대 -> 버튼 전체(다른 꾹 누르기 버튼과 같은 게이지) */
+.ofab-toggle.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 1500ms) linear; }
 .ofab.long .ofab-toggle { color: var(--good); }
 .ofab.short .ofab-toggle { color: var(--bad); }
 .ofab-toggle[aria-expanded="true"] { background-color: rgb(var(--lift) / 0.08); }
@@ -2496,7 +2496,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
   font-family: var(--font-mono); font-size: 13px; font-weight: 800; letter-spacing: .02em; white-space: nowrap;
   -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
   /* 2026-10-06 누르는 동안 알약 전체가 방향색으로 왼쪽→오른쪽 차오른다(사용자 «버튼 전체가 차오름») -- 다 차면 발주. 떼면 바로 비운다(전이 없음). */
-  background-image: linear-gradient(color-mix(in srgb, currentColor 26%, transparent), color-mix(in srgb, currentColor 26%, transparent));
+  background-image: linear-gradient(color-mix(in srgb, currentColor 30%, transparent), color-mix(in srgb, currentColor 30%, transparent));
   background-repeat: no-repeat; background-position: 0 0; background-size: 0% 100%;
 }
 .ofab-dir small { font-size: 11px; font-weight: 600; color: var(--muted); }
@@ -2547,7 +2547,7 @@ body:has(#snapshotTabPanel.hidden) .topbar > .snap-head { display: none; }
 .ofab-dir.short { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .ofab-dir.long:hover { border-color: var(--good); }
 .ofab-dir.short:hover { border-color: var(--bad); }
-.ofab-dir.holding { background-size: 100% 100%; transition: background-size 1.5s linear; }   /* = OFAB_HOLD_MS */
+.ofab-dir.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 1500ms) linear; }
 .ofab-dir:focus-visible, .ofab-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 2026-10-06 상세 펼치기 아이콘 -- 손잡이와 같은 무채색·같은 크기(색은 방향이 아니므로). 펼친 동안 밝아지고 옅은 바닥. */
 .ofab-more {
@@ -3036,8 +3036,8 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
   background: color-mix(in srgb, var(--good) 10%, transparent); font: 800 13px/1 var(--font-sans); cursor: pointer; touch-action: manipulation; }
 .lt-go.short { border-color: var(--bad); color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
 .lt-go small { font-weight: 600; font-size: 11px; opacity: .8; margin-left: 6px; }
-.lt-go::before { content: ""; position: absolute; inset: 0; background: currentColor; opacity: .22; transform: scaleX(0); transform-origin: left; }
-.lt-go.hold::before { transform: scaleX(1); transition: transform 1.5s linear; }   /* 꾹 1.5초 채움 */
+.lt-go::before { content: ""; position: absolute; inset: 0; background: currentColor; opacity: .30; transform: scaleX(0); transform-origin: left; }
+.lt-go.hold::before { transform: scaleX(1); transition: transform var(--hold-ms, 1500ms) linear; }   /* 꾹 누르기 채움(다른 버튼과 같은 시간·농도) */
 .lt-go.armed { background: color-mix(in srgb, currentColor 24%, transparent); }
 .lt-go:disabled { opacity: .45; cursor: not-allowed; }
 .lt-go:focus-visible, .lt-x:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

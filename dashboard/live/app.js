@@ -457,7 +457,7 @@ function lineToolEl(box) {
     const tag = e.target.closest(".lt-tx") ? null : e.target.closest(".lt-tag[data-k]"), go = e.target.closest(".lt-go");
     if (tag && lineTool) { lineDrag = { k: tag.dataset.k, id: e.pointerId }; tag.setPointerCapture(e.pointerId); e.preventDefault(); }
     if (go && e.pointerType === "mouse" && !go.disabled) {   // 마우스 = 1.5초 꾹(떠 있는 버튼과 같은 규약)
-      go.classList.add("hold"); lineHold = setTimeout(() => { go.classList.remove("hold"); lineFire(); }, 1500);
+      go.classList.add("hold"); lineHold = setTimeout(() => { go.classList.remove("hold"); lineFire(); }, HOLD_FIRE_MS);
     }
   });
   h.addEventListener("pointermove", (e) => {
@@ -849,7 +849,7 @@ function entryPopOpen(x, y) {
     + `<dl><dt>평단</dt><dd>${lineFmt(en)}</dd><dt>수량</dt><dd>${qty}</dd>`
     + `<dt>미실현</dt><dd class="${up >= 0 ? "good" : "bad"}">${sg(up)}$${Math.abs(up).toFixed(2)}</dd>`
     + `<dt>청산가</dt><dd>${liq > 0 ? `${lineFmt(liq)}${dist != null ? ` · ${dist.toFixed(1)}% 남음` : ""}` : "없음"}</dd></dl>`
-    + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}"><i class="hold-fill" aria-hidden="true"></i><span>${v}% 청산</span></button>`).join("")}</div>`
+    + `<div class="ep-btns">${[25, 50, 100].map((v) => `<button type="button" data-pct="${v}" aria-label="${v}% 청산"><i class="hold-fill" aria-hidden="true"></i><span>${v}%</span></button>`).join("")}</div>`
     + `<small>꾹 누르면 게이지가 차고 다 차면 청산 주문이 나갑니다 · 터치는 탭 → 확인</small>`;
   document.body.appendChild(d);
   const r = d.getBoundingClientRect();
@@ -867,7 +867,7 @@ function entryPopOpen(x, y) {
   });
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => d.addEventListener(ev, (e) => {
     const b = e.target.closest?.("button[data-pct]");
-    if (b) { released = true; manualHoldCancel(b); }
+    if (b) { if (e.type === "pointerleave") { if (manualHoldLeave(b, e)) released = true; } else { released = true; manualHoldCancel(b); } }
   }, true));
   d.addEventListener("click", (e) => {
     const b = e.target.closest("button[data-pct]");
@@ -10958,12 +10958,31 @@ function syncAllRangeFills(root) {
 // 🔴확인 클릭을 없앤 대신 «의도적 지속»을 받는다. 오클릭 한 번으로는 아무 일도 없다.
 // pointer 이벤트라 마우스·터치가 한 경로다. touch-action: none 은 styles.css 에서 준다
 // (없으면 모바일에서 누른 채 스크롤하다 발주된다).
-const HOLD_FIRE_MS = 400;
+// 2026-11-02 사용자 «꾹 누르면 주문 들어가는 버튼을 모두 플로팅 버튼 방식으로 통일»: **한 곳**에서 정한다 -- 계좌 카드 진입·청산·스위칭(manualHoldStart) · 청산 팝업 25/50/100% ·
+//   떠 있는 LONG·SHORT·«주문» · 선 주문의 진입 버튼 전부 같은 시간(1.5초)·같은 게이지(왼쪽→오른쪽 · 버튼 전체 · 방향색 30% · linear). 시간은 CSS 변수 --hold-ms 로도 내려간다.
+const HOLD_FIRE_MS = 1500;
+document.documentElement.style.setProperty("--hold-ms", `${HOLD_FIRE_MS}ms`);
 let manualPreviewInFlight = false;
 let manualFireOnPreview = false;
 let manualHoldFire = false;
 let manualHoldTimer = null;
 let manualHoldRaf = null;
+let manualHoldBtn = null;
+// 🔴2026-11-02 꾹 누르기 안전 -- 플로팅 버튼과 같은 규칙(누른 자리에서 8px 넘게 움직이면 취소 · 떼면 취소)으로 맞춘다. 이유: 미리보기가 시작되면 ① 이 버튼들이 disabled 가 되고(manualButtonsDisabled)
+//   비활성 버튼은 pointerup 을 못 받으며(실측: 이벤트 없음) ② 결과 상자가 생겨 레이아웃이 밀리면 버튼이 포인터 밑을 벗어나 pointerleave 가 나 게이지가 곧바로 지워졌다.
+//   그래서 손 뗌·취소·움직임은 **창 전체**에서 보고(비활성이어도 취소가 걸린다 -- 0.4초일 땐 묻혔지만 1.5초에서는 «떼도 나간다»가 된다), 포인터가 8px 안이면 pointerleave 는 취소로 안 친다.
+const HOLD_MOVE_PX = 8;
+let manualHoldPt = null;
+window.addEventListener("pointerdown", (e) => { manualHoldPt = { x: e.clientX, y: e.clientY }; }, true);
+function manualHoldLeave(btn, e) {
+  if (e && manualHoldPt && Math.hypot(e.clientX - manualHoldPt.x, e.clientY - manualHoldPt.y) <= HOLD_MOVE_PX) return false;   // 레이아웃·비활성이 일으킨 가짜 leave
+  manualHoldCancel(btn);
+  return true;   // 실제로 취소했는가(청산 팝업이 «떼었다»를 판단하는 데 쓴다)
+}
+window.addEventListener("pointermove", (e) => {
+  if (manualHoldBtn && (manualHoldTimer || manualHoldRaf) && manualHoldPt && Math.hypot(e.clientX - manualHoldPt.x, e.clientY - manualHoldPt.y) > HOLD_MOVE_PX) manualHoldCancel(manualHoldBtn);
+}, true);
+["pointerup", "pointercancel"].forEach((ev) => window.addEventListener(ev, () => { if (manualHoldBtn && (manualHoldTimer || manualHoldRaf)) manualHoldCancel(manualHoldBtn); }, true));
 
 function manualHoldPaint(btn, ratio) {
   const fill = btn?.querySelector(".hold-fill");
@@ -10982,6 +11001,7 @@ function manualHoldCancel(btn) {
 function manualHoldStart(btn, side, kind, ov = null) {
   if (manualOrderBusy || btn.disabled) return;
   manualHoldCancel(btn);
+  manualHoldBtn = btn;
   manualHoldFire = true;
   // 청산은 **계좌부터 새로 읽는다**(manualExitPreview) -- 닫으려는 수량이 낡으면 안 된다.
   if (kind === "exit") manualExitPreview(side, ov); else manualEntryPreview(side, "entry");
@@ -10994,6 +11014,7 @@ function manualHoldStart(btn, side, kind, ov = null) {
   manualHoldRaf = requestAnimationFrame(step);
   manualHoldTimer = setTimeout(() => {
     manualHoldTimer = null;
+    if (manualHoldRaf) { cancelAnimationFrame(manualHoldRaf); manualHoldRaf = null; }   // 마지막 프레임이 비운 게이지를 다시 100% 로 칠하던 것
     manualHoldPaint(btn, 0);
     manualHoldFire = false;
     // 미리보기가 막혔거나(blocked) 아직 안 왔으면 pending 이 없다 -- 그때는 안 나간다.
@@ -11029,7 +11050,7 @@ function manualHoldStart(btn, side, kind, ov = null) {
     if (kind === "exit") manualExitPreview(side); else manualEntryPreview(side, "entry");
   });
   ["pointerup", "pointerleave", "pointercancel"].forEach((ev) =>
-    btn.addEventListener(ev, () => manualHoldCancel(btn)));
+    btn.addEventListener(ev, (e) => (ev === "pointerleave" ? manualHoldLeave(btn, e) : manualHoldCancel(btn))));
 });
 // 🔴2026-10-10 사용자 결정 «스위칭은 즉시 체결 기본»: 아래 peg 설명은 옛 판 -- 이제 청산·반대 진입 둘 다 시장가(서버 exec=market 강제).
 // 2026-10-05 «스위칭»(사용자 지시, 떠 있는 패널에서만): 게이지와 상관없이 지금 쪽 **100% peg 메이커 청산** → 전량 체결되면
@@ -11069,7 +11090,7 @@ function switchPlan(side) {
     const s = held(), ov = plan(s);
     if (ov) manualExitPreview(s, ov);
   });
-  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn?.addEventListener(ev, () => manualHoldCancel(btn)));
+  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => btn?.addEventListener(ev, (e) => (ev === "pointerleave" ? manualHoldLeave(btn, e) : manualHoldCancel(btn))));
 }
 // 2026-09-14 사용자 요청: **청산은 강제 조회부터**. 화면 숫자가 30초(조회가 끊겼으면 그
 // 이상) 묵어 있을 수 있어서, 미리보기를 그리기 전에 계좌를 다시 받아 카드·아래 줄을 맞춘다.
@@ -11441,7 +11462,7 @@ setInterval(renderOfab, 3000);
   // 기본 자리 = 오른쪽 아래(엄지가 닿는 곳). ofabPlace 가 화면 안으로 끌어넣는다.
   [ofab.x, ofab.y] = Array.isArray(saved) ? saved : [innerWidth, innerHeight - 24];
   // 짧게 = 펼치기/접기 · 1.5초 꾹 = 추가 진입(ofabQuickAdd). 8px 넘게 움직이면(스크롤·끌기) 취소 -- 터치 스크롤은 pointercancel 로도 끊긴다.
-  const OFAB_HOLD_MS = 1500;   // 2026-09-28 사용자 지시 0.5 -> 2초 · 2026-09-30 «너무 느리다» -> 1.5초 (styles.css .holding 채움 시간과 같이)
+  const OFAB_HOLD_MS = HOLD_FIRE_MS;   // 2026-09-28 0.5 -> 2초 · 2026-09-30 «너무 느리다» -> 1.5초 · 2026-11-02 모든 꾹 누르기 버튼이 이 시간을 쓴다(HOLD_FIRE_MS)
   // 같은 손짓을 세 버튼이 쓴다: «주문»(포지션 있음 = 추가 진입) · 2026-10-05 LONG·SHORT(포지션 없음 = 그 방향 진입).
   // onTap = 짧게 눌렀을 때(기본 = 펼치기/접기). 인자 = 그 누름의 pointerType(터치는 꾹 발주가 없으니 호출 측이 갈라 쓴다).
   const ofabHold = (btn, fire, onTap = () => ofabSetOpen(!ofab.open)) => {
