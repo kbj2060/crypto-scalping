@@ -940,6 +940,9 @@ let latestBinanceAccount = null;
 // 버튼이 사라진다(2026-09-13 사용자 신고). 버튼은 이 값으로 판단하고, 낡았으면 표시만 한다.
 let lastGoodAccount = null;
 let lastGoodAccountAt = 0;
+let staleAccount = null;       // 2026-11-02 조회 실패 중 카드에만 쓰는 낡은 값 {payload, at} -- latestBinanceAccount 는 null 그대로(주문·청산 경로는 «모름»으로 다룬다)
+let lastAccountError = "";     // 실패 사유(서버 error/hint) -- 낡은 값조차 없을 때 카드에 말해 준다
+let accountReqSeq = 0, accountAppliedSeq = 0;   // 응답 순서 가드 -- 먼저 보낸 느린 응답이 새 값을 덮지 않게
 let binanceAccountLastFetchAt = 0;
 const BINANCE_ACCOUNT_POLL_MS = 10000;   // 2026-10-02 30 -> 10초(사용자 지시) -- 서버 캐시(BINANCE_ACCOUNT_CACHE_SECONDS)와 같게
 let sessionAlertsLastFetchAt = 0;
@@ -1788,17 +1791,41 @@ let entryProjPreview = null;
 let entryProjKey = "";
 let lastEntryPlan = null;
 
+// 2026-11-02 사용자 «가끔 불러오지 않는 데이터»: 조회가 한 번 실패하면 달력·성과·순환 카드가 통째로 비었다 다음 폴링에 돌아왔다. 낡은 값이 있으면(서버 last_good ·
+//   없으면 이 화면의 마지막 정상값, 30분까지) 카드만 그것으로 그리고 «낡은 값» 배지를 단다. latestBinanceAccount 는 건드리지 않는다 -- 그걸 읽는 주문·청산·진입선은 «모름».
 function renderSnapshotAccount() {
+  if (!latestBinanceAccount && staleAccount) {
+    const keep = latestBinanceAccount;
+    latestBinanceAccount = staleAccount.payload;
+    try {
+      renderSnapshotAccountCore();
+      const sm = el("snapAcctSummary"), min = Math.max(1, Math.round((Date.now() - staleAccount.at) / 60000));
+      if (sm) { sm.textContent = `낡은 값 · ${min}분 전 · 갱신 실패`; sm.className = "ops-health-summary warn"; }
+    } finally { latestBinanceAccount = keep; }
+    return;
+  }
+  renderSnapshotAccountCore();
+}
+function renderSnapshotAccountCore() {
   syncOrderCoinGate();
   const summary = el("snapAcctSummary");
   if (!el("snapAcctPosition")) return;
+  const warn = el("snapAcctWarn");
   if (!latestBinanceAccount) {
     if (summary) { summary.textContent = "데이터 없음"; summary.className = "ops-health-summary neutral"; }
     setT("snapAcctBalance", "-");
-    setH("snapAcctPosition", '<p class="muted">계좌를 불러오지 못했습니다.</p>');
+    setH("snapAcctPosition", `<p class="muted">계좌를 불러오지 못했습니다.${lastAccountError ? ` (${escapeHtml(lastAccountError)})` : ""}</p>`);
     setH("snapAcctPerf", "");
     setH("snapAcctCycle", "");
+    if (warn) warn.hidden = true;
     return;
+  }
+  // 2026-11-02 «누락처럼 보임» -- 서버가 알려 주는 체결 조회 실패·잘림 심볼을 화면이 말한다(전엔 trades_truncated 를 아무도 안 읽었다)
+  if (warn) {
+    const failed = latestBinanceAccount.trades_failed || [], cutSyms = latestBinanceAccount.trades_truncated || [];
+    const msg = [failed.length ? `체결 조회 실패: ${failed.join(", ")} — 이 심볼의 진행 중 순환·원장이 잠시 빠졌습니다(다음 조회에 복구)` : "",
+                 cutSyms.length ? `체결 이력 잘림: ${cutSyms.join(", ")} — 오래된 왕복·진행 중 합계가 창 안 몫만일 수 있습니다` : ""].filter(Boolean).join(" · ");
+    warn.hidden = !msg; warn.textContent = msg;
   }
   const A = latestBinanceAccount, b = A.balance || {}, wallet = Number(b.wallet) || 0;
   const positions = (A.positions || []).filter((p) => Math.abs(Number(p.qty) || 0) > 0);
@@ -1984,8 +2011,15 @@ function cycleSvg(t, pos, rows, now, W) {
 function renderCycleCard(A, positions, equity) {
   cycleArgs = [A, positions, equity];
   const now = Date.now(), W = Math.max(320, el("snapAcctCycle")?.clientWidth || 760);   // 화면 폭 그대로 -- 고정 viewBox 는 넓은 화면에서 가운데 작게 떴다
-  const open = (A.trades || []).map((t) => [t, positions.find((p) => p.symbol === t.symbol && p.side === t.side)])
-    .filter(([t, p]) => !t.closed && p && (t.legs || []).length);
+  // 🔴2026-11-02 사용자 «ETH 롱 순환 2개»: 같은 (심볼, 방향)의 열린 왕복이 둘 오면(서버 재동기화 파편 + 진짜) 카드가 그대로 둘이었다 -- 잘리지 않은 것 중
+  //   진입이 가장 늦은 하나만, 없으면 잘린 것 중 하나(서버도 같은 규칙으로 파편을 거른다).
+  const pick = new Map();
+  for (const t of A.trades || []) {
+    if (t.closed || !(t.legs || []).length) continue;
+    const k = `${t.symbol}|${t.side}`, cur = pick.get(k);
+    if (!cur || (!!cur.truncated_open && !t.truncated_open) || (!!cur.truncated_open === !!t.truncated_open && t.entry_time > cur.entry_time)) pick.set(k, t);
+  }
+  const open = [...pick.values()].map((t) => [t, positions.find((p) => p.symbol === t.symbol && p.side === t.side)]).filter(([, p]) => p);
   setH("snapAcctCycle", open.map(([t, pos]) => {
     const key = `${t.symbol}|${t.side}|${t.entry_time}`, c = cyclePaths[key] || (cyclePaths[key] = { at: 0, rows: [] });
     if (now - c.at > 60000) {
@@ -2016,7 +2050,7 @@ function renderCycleCard(A, positions, equity) {
         ${tile("지금", `${cycleQ(pos.qty)} ${coin}`, "", `평단 ${acctPx(pos.entry_price)}`)}
         ${tile("미실현", acctSu(unreal), acctTone(unreal), `현재가 ${acctPx(pos.mark_price)}`)}
         ${tile("실현(부분 정리)", acctSu(real), acctTone(real), `수수료 $${fee.toFixed(2)}`)}
-        ${tile("합계", cut ? acctSu(total) : withPct(acctSu(total), totR), acctTone(total), (cut ? "" : `최대 원금 ${acctSuc(peak).slice(1)} 대비 · `) + (equity > 0 ? `순자산 ${acctPct(total / equity)}` : ""))}
+        ${tile("합계", cut ? acctSu(total) : withPct(acctSu(total), totR), acctTone(total), (cut ? "체결 이력이 잘려 창 안 몫만 · " : `최대 원금 ${acctSuc(peak).slice(1)} 대비 · `) + (equity > 0 ? `순자산 ${acctPct(total / equity)}` : ""))}
         ${tile("그냥 보유였다면", cut ? "—" : withPct(acctSu(hold), holdR), cut ? "" : acctTone(hold), cut ? "체결 이력이 잘려 첫 체결 모름" : `최대 원금 ${acctSuc(hold0).slice(1)} · 첫 진입가 @${acctPx(fpx)}`)}
         ${tile("순환 효과", cut ? "—" : `${acctSu(cyc)} <small>${(totR - holdR) * 100 >= 0 ? "+" : "−"}${Math.abs((totR - holdR) * 100).toFixed(2)}%p</small>`, cut ? "" : acctTone(cyc), "합계 − 그냥 보유 · 수익률 차")}
       </div>
@@ -2031,8 +2065,15 @@ function renderCycleCard(A, positions, equity) {
 function renderBinanceAccount(payload) {
   // 스냅샷 탭 요약과 청산맵 진입선이 같은 값을 쓴다 -- 두 번 받지 않도록 여기서 보관한다.
   latestBinanceAccount = payload?.ok ? payload : null;
-  if (payload?.ok) { lastGoodAccount = payload; lastGoodAccountAt = Date.now(); }
-  renderSnapshotAccount();
+  if (payload?.ok) { lastGoodAccount = payload; lastGoodAccountAt = Date.now(); staleAccount = null; lastAccountError = ""; }
+  else {
+    cycleArgs = null;   // 🔴실패 뒤 늦게 온 /api/cycle-path 응답이 옛 계좌로 순환 카드를 되살리지 않게
+    lastAccountError = String(payload?.hint || payload?.error || "");
+    const lg = payload?.last_good, ago = Number(lg?.age_s) || 0;
+    staleAccount = lg && lg.ok ? { payload: lg, at: Date.now() - ago * 1000 }
+      : lastGoodAccount && Date.now() - lastGoodAccountAt < 1800000 ? { payload: lastGoodAccount, at: lastGoodAccountAt } : null;
+  }
+  try { renderSnapshotAccount(); } catch (err) { console.error("계좌 카드 렌더 예외:", err); }   // 한 칸의 예외가 차트·청산 버튼 동기화를 막지 않게
   renderSnapshotChart();
   // 🔴계좌가 **도착하는 즉시** 청산 버튼을 맞춘다. 예전에는 60초 주기(MANUAL_ENTRY_REFRESH_MS)
   // 에만 맞춰서, 화면을 열고 **63초 뒤에야** 청산 버튼이 나타났다(2026-09-13 실측).
@@ -2052,12 +2093,18 @@ async function refreshBinanceAccount(force = false) {
   const now = Date.now();
   if (!force && now - binanceAccountLastFetchAt < BINANCE_ACCOUNT_POLL_MS) return;
   binanceAccountLastFetchAt = now;
+  const seq = ++accountReqSeq;
   try {
     const res = await fetch(API_BINANCE_ACCOUNT_URL + (force ? "?fresh=1" : ""), { cache: "no-cache" });
-    renderBinanceAccount(await res.json());
+    const j = await res.json();
+    if (seq < accountAppliedSeq) return;   // 더 나중에 보낸 요청의 응답이 이미 반영됐다 -- 늦게 온 옛 응답은 버린다
+    accountAppliedSeq = seq;
+    renderBinanceAccount(j);
     if (force) renderOfab();
   } catch (error) {
     console.error("Binance account fetch error:", error);
+    if (seq < accountAppliedSeq) return;
+    accountAppliedSeq = seq;
     renderBinanceAccount({ ok: false, error: "대시보드 서버에 연결하지 못했습니다." });
   }
 }

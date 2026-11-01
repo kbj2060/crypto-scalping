@@ -3328,3 +3328,6 @@ html.fit1 #mtBody .mt-det { min-height: 0; overflow-y: auto; scrollbar-width: th
 /* 2026-11-02 사용자 펜 메모 «왼쪽 내비로 옮길 때도 앱바는 항상 위에»: 넓은 화면(내비가 보일 때)은 앱바를 위에 고정한다. 아래 여백은 앱바 안(padding)으로 넣어 비치지 않게. */
 body:has(.card-rail:not([hidden])) .app { padding-top: 0; }
 body:has(.card-rail:not([hidden])) header.top { position: sticky; top: 0; z-index: 40; margin-bottom: 0; padding: 10px 0 8px; background: var(--page-bg); background-attachment: fixed; }   /* 위 여백 10 도 앱바 안에 -- 고정돼도 높이가 같다 */
+
+.acct-warn { margin: 6px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--amber); }
+.acct-warn[hidden] { display: none; }   /* 2026-11-02 계좌 카드 체결 조회 실패·잘림 경고 */
