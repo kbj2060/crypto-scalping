@@ -9338,6 +9338,66 @@ placeTopLeft();
 setupScrollRendering();
 setupCardRail();
 
+// ── 굴절 유리 (2026-11-02 사용자 «진주빛 + 굴절 유리») ──────────────────────────────────────────────────────────────────────
+// 애플 Liquid Glass 에 가장 가까운 웹 구현: 요소 크기마다 «가장자리 굴절 지도»(볼록 베젤 -- 가장자리일수록 크게 꺾임)와 «림 반사광»(빛 -60°, 좌상)을
+// 캔버스로 만들어 SVG 필터(feDisplacementMap)에 넣고 backdrop-filter 로 건다. 🔴SVG 필터를 backdrop-filter 로 쓰는 건 **Chromium 전용**이라
+// 그 밖의 브라우저·다크 테마·«투명도 줄이기» 설정에서는 아무것도 안 건다(CSS 글래스 그대로). 작은 컨트롤에만 쓴다 -- 큰 카드는 지도 비용이 크고 글자를 해친다.
+const LG_TARGETS = [["#cardRail", { radius: 0, bezel: 14, scale: 22 }], ["#snapshotAssetTabs", { radius: 22, bezel: 16, scale: 30 }],
+  ["#assetMore", { radius: 15, bezel: 11, scale: 22 }], [".push-toggle", { radius: 16, bezel: 12, scale: 24 }], [".ofab-bar", { radius: 24, bezel: 14, scale: 26 }]];
+const lgState = new Map();   // 요소 -> { svg, ro }
+function lgSupported() {
+  try { return /Chrome\/\d+/.test(navigator.userAgent) && !matchMedia("(prefers-reduced-transparency: reduce)").matches; } catch (e) { return false; }
+}
+function lgRelease(node) {
+  const st = lgState.get(node); if (!st) return;
+  st.ro.disconnect(); st.svg?.remove(); node.style.backdropFilter = ""; node.style.webkitBackdropFilter = ""; lgState.delete(node);
+}
+function lgBuild(node, o) {
+  const r = node.getBoundingClientRect(), W = Math.round(r.width), H = Math.round(r.height), st = lgState.get(node);
+  if (!st || W < 8 || H < 8) return;
+  if (st.W === W && st.H === H) return;
+  st.W = W; st.H = H; st.svg?.remove();
+  const mk = () => { const c = document.createElement("canvas"); c.width = W; c.height = H; return c; };
+  const cm = mk(), cs = mk(), im = cm.getContext("2d").createImageData(W, H), sp = cs.getContext("2d").createImageData(W, H);
+  const R = Math.min(o.radius, W / 2, H / 2), bx = W / 2, by = H / 2, lx = Math.cos(-Math.PI / 3), ly = Math.sin(-Math.PI / 3);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const px = x + 0.5 - bx, py = y + 0.5 - by, qx = Math.abs(px) - (bx - R), qy = Math.abs(py) - (by - R);
+    const ox = Math.max(qx, 0), oy = Math.max(qy, 0), len = Math.hypot(ox, oy), depth = -(len + Math.min(Math.max(qx, qy), 0) - R);   // 안쪽 깊이(px)
+    let nx, ny;   // 가장자리 바깥 방향 법선
+    if (qx > 0 && qy > 0) { nx = Math.sign(px) * ox / (len || 1); ny = Math.sign(py) * oy / (len || 1); }
+    else if (qx > qy) { nx = Math.sign(px); ny = 0; } else { nx = 0; ny = Math.sign(py); }
+    const t = Math.min(Math.max(depth / o.bezel, 0), 1), m = Math.pow(1 - t, 2.2), i = (y * W + x) * 4;   // 베젤 안쪽 t=1 에서 0
+    im.data[i] = 128 - 127 * nx * m; im.data[i + 1] = 128 - 127 * ny * m; im.data[i + 2] = 128; im.data[i + 3] = 255;
+    const k = nx * lx + ny * ly, rim = Math.pow(1 - t, 3) * (Math.max(0, k) + 0.35 * Math.max(0, -k));   // 광원 쪽 가장자리 밝음 · 반대편 옅은 반사
+    sp.data[i] = sp.data[i + 1] = sp.data[i + 2] = 255; sp.data[i + 3] = Math.round(255 * Math.min(1, rim * 0.9));
+  }
+  cm.getContext("2d").putImageData(im, 0, 0); cs.getContext("2d").putImageData(sp, 0, 0);
+  const id = "lg" + Math.random().toString(36).slice(2, 8), NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("width", "0"); svg.setAttribute("height", "0"); svg.style.position = "absolute"; svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = `<filter id="${id}" x="0" y="0" width="${W}" height="${H}" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">`
+    + `<feImage href="${cm.toDataURL()}" x="0" y="0" width="${W}" height="${H}" result="map"/>`
+    + `<feDisplacementMap in="SourceGraphic" in2="map" scale="${o.scale}" xChannelSelector="R" yChannelSelector="G" result="refr"/>`
+    + `<feImage href="${cs.toDataURL()}" x="0" y="0" width="${W}" height="${H}" result="spec"/><feBlend in="spec" in2="refr" mode="screen"/></filter>`;
+  document.body.appendChild(svg); st.svg = svg;
+  node.style.backdropFilter = `url(#${id}) blur(1.5px) saturate(1.6) brightness(1.04)`; node.style.webkitBackdropFilter = node.style.backdropFilter;
+}
+function lgApply() {
+  const on = lgSupported() && document.documentElement.dataset.theme === "light";
+  document.documentElement.classList.toggle("lg-on", on);
+  LG_TARGETS.forEach(([sel, o]) => document.querySelectorAll(sel).forEach((node) => {
+    if (!on) { lgRelease(node); return; }
+    if (lgState.has(node)) return;
+    let timer = 0;
+    const ro = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(() => lgBuild(node, o), 120); });   // 글자 길이가 바뀌어도 120ms 묶어 한 번만 다시 만든다
+    lgState.set(node, { ro, svg: null, W: 0, H: 0 }); ro.observe(node);
+  }));
+}
+function setupLiquidGlass() {
+  lgApply();
+  new MutationObserver(lgApply).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+setupLiquidGlass();   // 🔴위 const(LG_TARGETS·lgState)가 만들어진 **뒤**에 부른다 -- 앞에서 부르면 TDZ 로 app.js 전체가 죽는다(node --check 는 못 잡는다)
+
 function showTooltip(x, y, html) {
   const t = el("chartTooltip");
   if (!t) return;

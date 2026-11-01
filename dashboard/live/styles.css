@@ -3344,25 +3344,21 @@ body:has(.card-rail:not([hidden])) header.top { position: sticky; top: 0; z-inde
    ⑥ 폴백: 투명도 줄이기 설정 · backdrop-filter 미지원이면 거의 불투명 */
 [data-theme="light"] body {
   --page-bg:
-    radial-gradient(ellipse 1100px 760px at 6% -8%, color-mix(in srgb, #8fbcff 52%, transparent), transparent 64%),
-    radial-gradient(ellipse 900px 700px at 96% 2%, color-mix(in srgb, #c4b2ff 44%, transparent), transparent 66%),
-    radial-gradient(circle 560px at 90% 72%, color-mix(in srgb, #ffcfae 38%, transparent), transparent 66%),
-    radial-gradient(ellipse 960px 660px at 10% 100%, color-mix(in srgb, #9fe6d3 42%, transparent), transparent 66%),
-    linear-gradient(180deg, #e9eef9 0%, #dfe6f3 46%, #d2dbec 100%);
-  --glass-blur: blur(26px) saturate(175%) brightness(1.05);
+    radial-gradient(ellipse 1000px 700px at 8% -10%, color-mix(in srgb, #a9c8ff 34%, transparent), transparent 64%),
+    radial-gradient(ellipse 900px 640px at 96% 0%, color-mix(in srgb, #cfc2ff 28%, transparent), transparent 66%),
+    linear-gradient(180deg, #f2f5fb 0%, #e7ecf5 50%, #dde4f0 100%);
+  --glass-blur: blur(20px) saturate(140%) brightness(1.04);   /* 시안 P «진주빛»(사용자 선택): 은백색 바탕 · 흐림 20px · 채도 140% */
   --glass-edge: transparent;   /* 림은 아래 ::before 가 그린다 */
 }
 [data-theme="light"] .panel {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0, rgba(255, 255, 255, 0) 140px),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.24) 0%, rgba(255, 255, 255, 0.04) 40%, rgba(255, 255, 255, 0.04) 64%, rgba(255, 255, 255, 0.16) 100%),
-    rgba(255, 255, 255, 0.36);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0, rgba(255, 255, 255, 0) 120px),
+    rgba(255, 255, 255, 0.5);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 0 0 1px rgb(var(--shadow) / 0.06),
-    0 1px 2px rgb(var(--shadow) / 0.06),
-    0 6px 14px -2px rgb(var(--shadow) / 0.08),
-    0 24px 48px -14px rgb(var(--shadow) / 0.16);
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 0 1px rgb(var(--shadow) / 0.05),
+    0 1px 2px rgb(var(--shadow) / 0.05),
+    0 10px 28px -10px rgb(var(--shadow) / 0.12);
 }
 [data-theme="light"] .panel::before {   /* 그라데이션 림: 좌상 밝음 → 중간 옅음 → 우하 반사. 1px 링만 남기는 마스크 */
   content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
@@ -3386,3 +3382,8 @@ body:has(.card-rail:not([hidden])) header.top { position: sticky; top: 0; z-inde
 .asset-pop { background: var(--pop-bg); backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: 0 2px 6px rgb(var(--shadow) / 0.12), 0 22px 54px -10px rgb(var(--shadow) / 0.34); }
 .asset-cell { background: color-mix(in srgb, var(--text) 7%, var(--pop-bg)); }
 .asset-cell:hover:not(.on) { background: color-mix(in srgb, var(--text) 12%, var(--pop-bg)); }
+
+/* 굴절 유리(app.js setupLiquidGlass)가 켜진 때만(Chromium · 글래스 테마): 컨트롤은 뒤가 비쳐야 굴절이 보인다 -- 얇은 흰 막만 남긴다. 글자는 막이 아니라 그 위에 있다. */
+html.lg-on #cardRail { background: rgba(255, 255, 255, 0.14); }
+html.lg-on #snapshotAssetTabs, html.lg-on .asset-more, html.lg-on .push-toggle { background: rgba(255, 255, 255, 0.22); }
+html.lg-on .ofab-bar { background: rgba(255, 255, 255, 0.4); }
