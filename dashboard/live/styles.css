@@ -3040,7 +3040,7 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-go.armed { background: color-mix(in srgb, currentColor 24%, transparent); }
 .lt-go:disabled { opacity: .45; cursor: not-allowed; }
 .lt-go:focus-visible, .lt-x:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-.lt-x { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); width: 28px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
+.lt-x { order: -1; justify-self: center; margin: -4px 0 -2px; width: 28px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
   background: none; color: var(--muted); font: 600 13px/1 var(--font-sans); cursor: pointer; }
 .lt-x:hover { color: var(--text); background: rgb(var(--lift) / .1); }
 /* 2026-10-29 SLTP 상자: 크기 줄(레버리지·증거금·명목) + 손익비 버튼 */
