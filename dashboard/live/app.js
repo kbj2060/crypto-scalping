@@ -670,7 +670,7 @@ function renderLineTool() {
   const en = set(".lt-tag.en", { left: x0 + 6 + "px", top: yP + "px" });
   en.classList.toggle("lim", lim);
   en.title = lim && t.px ? `차트(USDT) 선 ${lineFmt(ref)} — 실제 주문가(USDC) ${lineFmt(t.px)} · 접수 때 USDC/USDT 차이(basis)를 곱해 걸었습니다` : "";
-  en.innerHTML = lim ? `<span class="lt-grip" aria-hidden="true"></span>${t.placed ? "대기" : "지정가"} ${lineFmt(ref)} <span>${ref < p ? "−" : "+"}${Math.abs(100 * (ref / p - 1)).toFixed(2)}%</span>`
+  en.innerHTML = lim ? `<span class="lt-grip" aria-hidden="true"></span>${t.placed ? "대기" : "지정가"} ${lineFmt(ref)}`
       + (t.placed ? `<span class="lt-tx" role="button" tabindex="0" aria-label="지정가 주문 취소" title="주문 취소">✕</span>` : "")
     : `<span class="lt-grip" aria-hidden="true"></span>진입 peg ${lineFmt(p)} <span class="lt-s">끌면 지정가</span>`;
   en.setAttribute("aria-label", lim ? `지정가 진입선 ${lineFmt(ref)} — 위아래로 끌어 옮기기` : "지금가 peg 진입선 — 끌어서 지정가로 바꾸기");
