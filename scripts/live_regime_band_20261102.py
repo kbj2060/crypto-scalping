@@ -14,7 +14,8 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = ROOT / "tmp" / "regime_acc_20261102" / "regime_band_h48_model.joblib"
+MODEL = next((q for q in (ROOT / "data" / "live" / "regime_band_h48_model.joblib", ROOT / "tmp" / "regime_acc_20261102" / "regime_band_h48_model.joblib") if q.exists()),
+             ROOT / "data" / "live" / "regime_band_h48_model.joblib")      # 서버=data/live(handoff 전송) · 개발=tmp
 LOOKBACK_H = 24                                    # 대시보드 청산맵과 같은 창
 
 

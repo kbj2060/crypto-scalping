@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import live_regime_band_20261102 as S  # noqa: E402
 
 LOG = S.ROOT / "data" / "live" / "regime_band_forward.jsonl"
+SCORED = S.ROOT / "data" / "live" / "regime_band_forward_scored.jsonl"
 COINS = ("BTC", "ETH", "SOL", "XRP")
 BINS = (0, 0.2, 0.4, 0.6, 0.8, 1.01)
 
@@ -55,6 +56,30 @@ def score(panels: dict, log: Path = LOG) -> tuple[pd.DataFrame, dict]:
                 by_conf={str(k): dict(n=int(len(g)), acc=float(g.correct.mean())) for k, g in d.groupby("bin", observed=True)},
                 by_coin={c: float(g.correct.mean()) for c, g in d.groupby("coin")})
     return d, summ
+
+
+def score_new(panels: dict, log: Path = LOG, scored: Path = SCORED) -> int:
+    """4시간이 막 지난 행을 채점해 scored 에 누적(중복 무시). 패널 창(~9일)보다 오래된 행은 이미 이전 실행에서 채점돼 있다."""
+    d, _ = score(panels, log)
+    if d.empty:
+        return 0
+    done = {(r["ts"], r["coin"]) for r in map(json.loads, scored.open())} if scored.exists() else set()
+    new = d[[(r.ts, r.coin) not in done for r in d.itertuples()]]
+    with scored.open("a") as f:
+        for r in new.itertuples():
+            f.write(json.dumps(dict(ts=r.ts, coin=r.coin, p_trend=r.p_trend, confidence=r.confidence, y=int(r.y), correct=int(r.correct)), ensure_ascii=False) + "\n")
+    return len(new)
+
+
+def summarize(scored: Path = SCORED) -> dict:
+    rows = [json.loads(l) for l in scored.open()] if scored.exists() else []
+    if not rows:
+        return {"n_scored": 0}
+    d = pd.DataFrame(rows)
+    d["bin"] = pd.cut(d.confidence, BINS, right=False)
+    return dict(n_scored=len(d), first=d.ts.min(), last=d.ts.max(), acc=float(d.correct.mean()), trend_rate=float(d.y.mean()),
+                by_conf={str(k): dict(n=int(len(g)), acc=float(g.correct.mean())) for k, g in d.groupby("bin", observed=True)},
+                by_coin={c: dict(n=int(len(g)), acc=float(g.correct.mean())) for c, g in d.groupby("coin")})
 
 
 if __name__ == "__main__":
