@@ -1,6 +1,6 @@
 {
-  "name": "인공지능 트레이딩 대시보드",
-  "short_name": "트레이딩",
+  "name": "trading room",
+  "short_name": "trading room",
   "description": "ETH/BTC/XRP 신호·레짐·섀도우 원장 실시간 모니터",
   "start_url": "/dashboard/live/",
   "scope": "/dashboard/live/",
