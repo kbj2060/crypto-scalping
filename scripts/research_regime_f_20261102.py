@@ -185,5 +185,51 @@ def s0v2():
         print(k, {a: (round(b, 2) if isinstance(b, float) else b) for a, b in v.items()} if isinstance(v, dict) else v)
 
 
+def s0v3():
+    """v3: 학습에서 ER 3분위별 최선 정책(R2/T2/쉼)을 적합 → 검증·시험에서 오라클 라벨로 평가 (사전등록 regime_f_v3_20261102.md)."""
+    rng = np.random.default_rng(SEED)
+    rows = []
+    for coin in COINS:
+        df = load(coin)
+        i = decisions(df)
+        (rn, rg), (tn, tg) = strategies2(df, i)
+        rows.append(pd.DataFrame({"coin": coin, "ts": df.index[i + 1], "er": er_fwd(df.c.to_numpy(), i), "r": rn, "t": tn, "rg": rg, "tg": tg}))
+    d = pd.concat(rows, ignore_index=True)
+    d["day"] = d.ts.dt.date
+    tr = d[window(d.ts, *SPLITS["학습"])]
+    q1, q2 = tr.er.quantile([1 / 3, 2 / 3])
+    d["cls"] = np.where(d.er <= q1, 0, np.where(d.er <= q2, 1, 2))
+    out = {"er_terciles": [q1, q2]}
+    for tag, rc, tc in (("net", "r", "t"), ("gross", "rg", "tg")):
+        pol = {}
+        for k in range(3):
+            g = d[(d.cls == k) & window(d.ts, *SPLITS["학습"])]
+            cand = {"R": g[rc].mean(), "T": g[tc].mean(), "flat": 0.0}
+            pol[k] = max(cand, key=cand.get)
+        out[f"policy_{tag}"] = pol
+        val = lambda x, p: np.select([x.cls.map(p) == "R", x.cls.map(p) == "T"], [x[rc], x[tc]], 0.0)   # noqa: E731
+        for w in ("학습", "검증", "시험"):
+            x = d[window(d.ts, *SPLITS[w])].reset_index(drop=True)
+            g = val(x, pol)
+            fixed = {"R": x[rc].mean(), "T": x[tc].mean(), "flat": 0.0}
+            best = max(fixed, key=fixed.get)
+            base = {"R": x[rc].to_numpy(), "T": x[tc].to_numpy(), "flat": np.zeros(len(x))}[best]
+            res = dict(n=len(x), policy=float(g.mean()), best=best, best_val=fixed[best], gain=float((g - base).mean()),
+                       by_class={k: dict(R=float(x[x.cls == k][rc].mean()), T=float(x[x.cls == k][tc].mean()), n=int((x.cls == k).sum())) for k in range(3)})
+            if tag == "net" and w != "학습":
+                res["gain_ci983"] = day_ci(x.day, g - base, rng, 0.85, 99.15).tolist()
+                null = np.empty(NPLA)
+                for k in range(NPLA):
+                    c2 = np.concatenate([np.roll(gg.cls.to_numpy(), int(rng.integers(168, len(gg) - 168))) for _, gg in x.groupby("coin", sort=False)])
+                    xx = x.assign(cls=c2)
+                    null[k] = (val(xx, pol) - base).mean()
+                res["placebo_pct"] = float((null < (g - base).mean()).mean() * 100)
+            out[f"{w}|{tag}"] = res
+    OUT.mkdir(parents=True, exist_ok=True)
+    json.dump(out, open(OUT / "s0v3.json", "w"), indent=1, default=float)
+    for k, v in out.items():
+        print(k, {a: (round(b, 2) if isinstance(b, float) else b) for a, b in v.items()} if isinstance(v, dict) else v)
+
+
 if __name__ == "__main__":
-    {"s0": s0, "s0v2": s0v2}[sys.argv[1]]()
+    {"s0": s0, "s0v2": s0v2, "s0v3": s0v3}[sys.argv[1]]()
