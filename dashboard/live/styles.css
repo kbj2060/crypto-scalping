@@ -3031,7 +3031,6 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-side { font-weight: 800; } .lt-side.good { color: var(--good); } .lt-side.bad { color: var(--bad); }
 .lt-qty, .lt-rr { font: 700 12px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
 .lt-rr { color: var(--muted); } .lt-rr.bad { color: var(--bad); font-family: var(--font-sans); }
-.lt-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .lt-go { position: relative; overflow: hidden; height: 38px; border-radius: 999px; border: 1.5px solid var(--good); color: var(--good);
   background: color-mix(in srgb, var(--good) 10%, transparent); font: 800 13px/1 var(--font-sans); cursor: pointer; touch-action: manipulation; }
 .lt-go.short { border-color: var(--bad); color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
@@ -3041,9 +3040,10 @@ html.fit1 #newsBody .nw-main:has(> #mcWhen) .nw-list { max-height: none; }
 .lt-go.armed { background: color-mix(in srgb, currentColor 24%, transparent); }
 .lt-go:disabled { opacity: .45; cursor: not-allowed; }
 .lt-go:focus-visible, .lt-x:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-.lt-x { position: absolute; transform: translateX(-100%); pointer-events: auto; white-space: nowrap; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line);
-  background: var(--chart-bg); color: var(--muted); font: 600 11px/1 var(--font-sans); cursor: pointer; }
-.lt-x:hover { color: var(--text); }
+.lt-x { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
+  background: none; color: var(--muted); font: 600 13px/1 var(--font-sans); cursor: pointer; }
+.lt-tk > .lt-row:first-child { padding-right: 26px; }
+.lt-x:hover { color: var(--text); background: rgb(var(--lift) / .1); }
 /* 2026-10-29 SLTP 상자: 크기 줄(레버리지·증거금·명목) + 손익비 버튼 */
 .lt-sz { display: flex; flex-wrap: wrap; gap: 2px 10px; font: 600 11.5px/1.35 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
 .lt-sz span { white-space: nowrap; }

@@ -449,8 +449,8 @@ function lineToolEl(box) {
     + '<input type="range" class="lt-mg-r" min="1" max="50" step="1" aria-label="진입 증거금 (순자산 대비 %)"><div class="lt-mg-risk"></div></div>'
     + '<div class="lt-sz"></div><div class="lt-row lt-rr"></div>'
     + `<div class="lt-rrb" role="group" aria-label="손익비로 익절선 맞추기 (손절선은 그대로)">${LINE_RR.map((r) => `<button type="button" data-rr="${r}">1:${r}</button>`).join("")}</div>`
-    + '<button type="button" class="lt-go"></button><div class="lt-note"></div></div>'
-    + '<button type="button" class="lt-x">선 지우기</button>';
+    + '<button type="button" class="lt-go"></button>'
+    + '<button type="button" class="lt-x" aria-label="닫기">✕</button></div>';
   h.addEventListener("pointerdown", (e) => {
     e.stopPropagation();   // 차트 끌기로 번지지 않게
     linePt = e.pointerType;
@@ -709,12 +709,7 @@ function renderLineTool() {
   go.innerHTML = t.placed ? `✓ ${side === "LONG" ? "롱" : "숏"} 지정가 대기 중`
     : armed ? `확인: ${side === "LONG" ? "롱" : "숏"} ${qty} ${unit} ${lim ? "지정가 " + lineFmt(ref) : "주문"}`
     : `${side || "진입"} ${lim ? "지정가 대기" : "진입 · peg"} <small>${matchMedia("(pointer: coarse)").matches ? (mob ? "두 번" : "두 번 눌러 확인") : "1.5초 꾹"}</small>`;
-  h.querySelector(".lt-note").textContent = t.placed ? (t.err ? `수정 실패 — ${t.err}(서버 값으로 되돌렸습니다)` : `대기 주문 — 선(진입·익절·손절)을 끌어 놓으면 서버가 주문을 수정합니다${t.amended ? ` · 수정 ${t.amended}회` : ""}`)
-    : lim ? "지정가 = 메이커(post-only)로 걸어 두고 체결되면 익절·손절 선이 자동으로 걸림 · 진입선을 지금가 쪽으로 끌면 peg 로 돌아감"
-    : mob ? "익절·손절 모두 메이커로 닫음"
-    : "청산 둘 다 메이커 — 익절 = 체결 즉시 지정가(post-only) · 손절 = 1초 가격이 닿으면 peg(마감 뒤 남은 수량 시장가)";
-  const lx = h.querySelector(".lt-x"); lx.textContent = t.placed ? (t.busy ? "취소 중…" : "주문 취소") : "선 지우기";
-  set(".lt-x", { left: R - 6 + "px", top: top + 8 + "px" });
+  const lx = h.querySelector(".lt-x"); lx.setAttribute("aria-label", t.placed ? (t.busy ? "취소 중…" : "주문 취소") : "닫기 (선 지우기)"); lx.disabled = !!t.busy;
 }
 // ── 2026-10-29 사용자 «SLTP 선주문에서 이미 들어간 주문은 풋프린트에 선과 띠를 계속 · 선을 움직이면 움직인 대로 주문 수정»
 //   계좌 응답의 bracket_armed(서버 with_bracket)에서 이 코인 주문 심볼의 선 무장(lines) + 열린 포지션 → 익절·손절 선 + 진입가~선 띠(선 주문 상자와 같은 모양 · 실선).
