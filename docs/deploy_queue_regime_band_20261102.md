@@ -1,6 +1,6 @@
 # 배포 항목 (deploy_queue.md 의 «A. 통과» 표에 병합할 행) — 횡보/추세 분별 (2026-11-02)
 
-> **상태(2026-11-02): 배포됨** — 코드 PR #43·#45 머지(서버 HEAD 7afdd9f2) · 모델 data/live 전송(md5 f62774c6…) · 서버 크론 `2 * * * *` 등록(백업 data/hot/crontab_backup_20261102_regime.txt) · 대시보드 ⑤ 예측 줄 «7일 예측» → «횡보·추세» 칸. 아래 «서버에 올릴 때 남은 일» 은 완료됨. 정리: docs/session_wrapup_xrp_regime_20261102.md
+> **상태(2026-11-02): 배포됨** — 코드 PR #43·#45 머지(서버 HEAD 7afdd9f2) · 모델 data/live 전송(md5 f62774c6…) · 서버 크론 `2 * * * *` 등록(백업 data/hot/crontab_backup_20261102_regime.txt) · 대시보드 ⑤ 예측 줄 «7일 예측» → «띠 안·이탈» 칸(처음 «횡보·추세», 의미 정정으로 개명). 아래 «서버에 올릴 때 남은 일» 은 완료됨. 정리: docs/session_wrapup_xrp_regime_20261102.md
 
 `docs/deploy_queue.md` 는 이 브랜치에 없고 브랜치 `claude/chart-indicators-tuning-ecfa25` 에 있다. 병합 시 아래 행을 거기 «A. 통과» 표에 넣는다(사용자 10-26: 통과 항목은 누적, 개별 배포 질문 안 함).
 
