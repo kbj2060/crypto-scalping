@@ -6,6 +6,7 @@ import argparse
 import html
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -170,6 +171,48 @@ def check_dashboard() -> Check:
     return Check("dashboard_state", stale_status(age, 2, 5), "dashboard shadow refresh freshness", {
         "timestamp": stamp, "age_minutes": age, "warn_minutes": 2, "critical_minutes": 5,
     })
+
+
+# 2026-11-01 풋프린트 과거 봉 감시: 수집기 정지·검증 공백·복원 실패 어느 쪽이든 사용자에게 보이는 증상은 «/api/footprint 의 봉이 몇 개 안 온다»다
+#   (11-01 체결 테이프가 15~18시간 멎었을 때 ETH 가 3봉만 나왔다). 신선도 알림은 원인 쪽을 보고 이 검사는 결과 쪽을 본다.
+FOOTPRINT_ASSETS = ("eth", "btc", "sol", "xrp")       # SNDK 는 장외에 5분봉이 비는 게 정상이라 뺀다
+FOOTPRINT_GRACE_S = 40 * 60                           # 대시보드 재기동 뒤 OKX 복원이 5분 간격으로 최대 8번 돈다
+DASHBOARD_LOG = LIVE / "dashboard_external.log"
+
+
+def dashboard_started_at(log_path: Path = DASHBOARD_LOG) -> float | None:
+    try:
+        with log_path.open("rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 4_000_000))
+            tail = f.read().decode("utf-8", "ignore")
+    except OSError:
+        return None
+    hits = re.findall(r"\[(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d)\] dashboard server starting", tail)
+    return datetime.fromisoformat(hits[-1]).timestamp() if hits else None
+
+
+def check_footprint_history(fetch=None, started_at: float | None = None) -> list[Check]:
+    def _get(asset: str) -> int:
+        url = f"http://127.0.0.1:8787/api/footprint?asset={asset}&bars=12"
+        with urllib.request.urlopen(url, timeout=8) as r:
+            return len(json.load(r)["bars"])
+    fetch = fetch or _get
+    started = started_at if started_at is not None else dashboard_started_at()
+    in_grace = started is not None and time.time() - started < FOOTPRINT_GRACE_S
+    out = []
+    for asset in FOOTPRINT_ASSETS:
+        name = f"footprint_history_{asset}"
+        try:
+            n = fetch(asset)
+        except (OSError, ValueError, KeyError) as exc:
+            out.append(Check(name, "BLOCKED", "footprint endpoint unreadable", {"error": f"{type(exc).__name__}: {exc}"[:160]}))
+            continue
+        status = "OK" if n >= 8 else "WARN" if n >= 4 else "CRITICAL"
+        if in_grace and status != "OK":
+            status = "OK"
+        out.append(Check(name, status, "past footprint bars served (of 12)", {"bars": n, "warn_below": 8, "critical_below": 4, "restore_grace": in_grace}))
+    return out
 
 
 def check_gex_state() -> Check:
@@ -743,6 +786,7 @@ def run_once(dry_run: bool) -> list[Check]:
         check_file_dir_freshness("eth_iceberg", LIVE / "iceberg", "eth_state.json", 2, 10),
         check_file_dir_freshness("xrp_iceberg", LIVE / "iceberg", "xrp_state.json", 2, 10),   # 2026-10-20 XRP 판(ICEBERG_SYMBOL=XRPUSDT)
         *check_multicoin_collectors(),
+        *check_footprint_history(),
         *check_pi_collectors(),
     ]
     state = load_state(state_path)

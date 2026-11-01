@@ -767,6 +767,31 @@ async def backfill_loop(store: TapeStore, fetch_minute, per_cycle: int, source: 
             log(f"복구 {len(fixed)}분 교체 ({fixed[-1]} ~ {fixed[0]}, 1분봉과 일치)")
 
 
+# 2026-11-01 복구 속도: 심볼별 per_cycle 로만 묶으면 합이 IP 가중치(봇·대시보드·수집기가 한 한도 2,400/분을 나눈다)를 모른다.
+#   그래서 복구 aggTrades(가중치 20)는 프로세스 전체가 최소 간격으로(분당 ≤ 600) 나가고, 응답 헤더의 IP 1분 사용량이
+#   BN_WEIGHT_YIELD 이상이면 다음 분까지 양보한다 -- 복구가 느려질 뿐 봇을 막는 418 차단을 부르지 않는다.
+BN_AGG_GAP_S = 2.0
+BN_WEIGHT_YIELD = 1700
+_BN_PACE = {"next": 0.0}
+
+
+async def _bn_pace() -> None:
+    now = time.monotonic()
+    wait = _BN_PACE["next"] - now                 # 슬롯을 먼저 예약하고 기다린다 -- 동시에 깬 태스크가 같은 슬롯을 안 잡는다
+    _BN_PACE["next"] = max(_BN_PACE["next"], now) + BN_AGG_GAP_S
+    if wait > 0:
+        await asyncio.sleep(wait)
+
+
+def _bn_note_weight(headers) -> None:
+    try:
+        used = int(headers.get("x-mbx-used-weight-1m", 0))
+    except (TypeError, ValueError):
+        return
+    if used >= BN_WEIGHT_YIELD:
+        _BN_PACE["next"] = max(_BN_PACE["next"], time.monotonic() + 61.0 - time.time() % 60.0)
+
+
 def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str = KLINES_URL,
                            agg_url: str = AGG_TRADES_URL):
     """바이낸스 REST aggTrades 로 한 분을 다시 만든다. aggTrade = 테이커 주문 조각(라이브 되묶기의
@@ -778,6 +803,7 @@ def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str 
         async with session.get(klines_url, params={"symbol": symbol.upper(), "interval": "1m",
                                                    "startTime": start, "limit": 1},
                                timeout=_rest_timeout()) as r:
+            _bn_note_weight(r.headers)
             r.raise_for_status()
             k = await r.json()
         if not k or int(k[0][0]) != start or int(k[0][6]) >= time.time() * 1000:
@@ -785,7 +811,9 @@ def binance_minute_fetcher(session, symbol: str, bucket: float, klines_url: str 
         buf = TapeBuffer(bucket, symbol)
         params = {"symbol": symbol.upper(), "startTime": start, "endTime": end, "limit": 1000}
         while True:
+            await _bn_pace()
             async with session.get(agg_url, params=params, timeout=_rest_timeout()) as r:
+                _bn_note_weight(r.headers)
                 r.raise_for_status()
                 batch = await r.json()
             for a in batch:
@@ -860,7 +888,7 @@ async def collect(symbol: str, db_path: Path, market: str = "futures") -> None:
             # 🔴ETH 외는 한 주기 1분만. 망이 끊겼다 붙으면 모든 심볼(과 두 호스트)이 동시에 복구를
             #   시작하는데 BTC 한 분은 aggTrades 여러 쪽(쪽당 20)이다 -- 봇과 같은 IP 한도 2,400/분이다.
             store, binance_minute_fetcher(session, symbol, bucket, klines_url, agg_url),
-            per_cycle=3 if symbol == "ethusdt" else 1,
+            per_cycle=10 if symbol == "ethusdt" else 4,   # 속도는 _bn_pace·가중치 양보가 묶는다
             source="binance rest aggTrades",
             note="buy_max/sell_max NULL(REST 에 개별 체결 최대가 없다) · 주문=aggTrade",
             lookback_s=BINANCE_BACKFILL_LOOKBACK_S))
@@ -1087,6 +1115,19 @@ def selftest() -> None:
         except RuntimeError:
             return time.monotonic() - t0
     assert asyncio.run(_both()) < 5, "run_all 이 하나 죽어도 나머지를 안 걷었다"
+
+    async def _burst() -> float:
+        _BN_PACE["next"] = 0.0
+        t0 = time.monotonic()
+        await asyncio.gather(*[_bn_pace() for _ in range(5)])
+        return time.monotonic() - t0
+    assert asyncio.run(_burst()) >= 4 * BN_AGG_GAP_S - 0.05, "동시 복구 요청이 한 슬롯을 같이 잡았다"
+    _BN_PACE["next"] = 0.0
+    _bn_note_weight({"x-mbx-used-weight-1m": str(BN_WEIGHT_YIELD - 1)})
+    assert _BN_PACE["next"] == 0.0, "한도 밑에서는 양보하지 않는다"
+    _bn_note_weight({"x-mbx-used-weight-1m": str(BN_WEIGHT_YIELD)})
+    assert 0 < _BN_PACE["next"] - time.monotonic() <= 62.0, "IP 사용량이 높으면 다음 분까지 양보해야 한다"
+    _BN_PACE["next"] = 0.0
     print("selftest OK")
 
 
