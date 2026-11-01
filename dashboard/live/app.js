@@ -6049,7 +6049,7 @@ function setupChartPan() {
   svg.addEventListener("pointerdown", (ev) => {
     chartFlingStop();
     if (ev.button !== 0 || ev.pointerType === "touch") return;   // 세로 이동은 창 크기와 무관하게 늘 된다(가로만 canPan)
-    if (flowOn() && !fpAltOn() && zoneY(ev.clientY) !== "plot") return;   // 2026-11-01 사용자 «아래 수급 차트 2개를 끌면 풋프린트가 움직인다» -- 가격 칸 밖(프로파일·1초 수급·레인)에서 시작한 끌기는 차트를 안 옮긴다(휴대폰 규약과 같다)
+    if (flowOn() && !fpAltOn() && (zoneY(ev.clientY) !== "plot" || zoneX(ev.clientX) === "side")) return;   // 2026-11-01 사용자 «아래 수급 차트 2개를 끌면 풋프린트가 움직인다» -- 가격 칸 밖(프로파일·1초 수급·레인)에서 시작한 끌기는 차트를 안 옮긴다(휴대폰 규약과 같다)
     const g = chartSlotPx(svg);
     drag = { x: ev.clientX, y: ev.clientY, lx: ev.clientX, py: chartPanY, k: chartYPerPx, slot: g ? g.px : 1, moved: false, id: ev.pointerId, v: [] };
   });
@@ -6095,6 +6095,12 @@ function setupChartPan() {
     const k = Math.min(r.width / g.wAll, r.height / g.hAll), y = (cy - r.top - (r.height - g.hAll * k) / 2) / k;
     return y >= g.mt && y <= g.pb ? "plot" : g.prof && y >= g.prof[0] && y <= g.prof[1] ? "prof" : null;
   };
+  const zoneX = (cx) => {   // "side" = 오른쪽 수급 칸(CVD·OI · 고래·증형·리테일) -- 풋프린트·호가 띠(fpProfileSpan 오른쪽 끝) 뒤
+    const g = chartGeo, r = svg.getBoundingClientRect();
+    if (!g || !r.width || !fpProfileSpan) return null;
+    const k = Math.min(r.width / g.wAll, r.height / g.hAll);
+    return (cx - r.left - (r.width - g.wAll * k) / 2) / k > fpProfileSpan[1] ? "side" : null;
+  };
   const span = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
   // 🔴움직임·떼기는 **손가락이 닿은 노드**에서 듣는다 -- 끌기 첫 걸음이 차트를 다시 그려 그 노드가 svg 밖으로 빠지면
   //   뒤따르는 touchmove 는 빠진 노드로만 가고 svg 까지 안 올라온다(실측: 한 걸음 뒤 페이지가 스크롤됐다).
@@ -6107,7 +6113,7 @@ function setupChartPan() {
     if (t.length === 1) unbind();
     if (t.length === 1) {
       tch = null;
-      const z = flowOn() && !fpAltOn() ? zoneY(t[0].clientY) : null;
+      const z = flowOn() && !fpAltOn() && zoneX(t[0].clientX) !== "side" ? zoneY(t[0].clientY) : null;
       if (!z) return;
       chartFlingStop();
       const g = chartSlotPx(svg), G = chartGeo, vOnly = z === "prof";
